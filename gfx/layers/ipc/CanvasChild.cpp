@@ -17,9 +17,65 @@
 namespace mozilla {
 namespace layers {
 
-static const TimeDuration kLockWaitTimeout =
-    TimeDuration::FromMilliseconds(100);
-static const TimeDuration kGetDataTimeout = TimeDuration::FromMilliseconds(500);
+class RingBufferWriterServices final
+    : public CanvasEventRingBuffer::WriterServices {
+ public:
+  explicit RingBufferWriterServices(RefPtr<CanvasChild> aCanvasChild)
+      : mCanvasChild(std::move(aCanvasChild)) {}
+
+  ~RingBufferWriterServices() final = default;
+
+  bool ReaderClosed() final {
+    return mCanvasChild->GetIPCChannel()->Unsound_IsClosed();
+  }
+
+  void ResumeReader() final { mCanvasChild->ResumeTranslation(); }
+
+ private:
+  RefPtr<CanvasChild> mCanvasChild;
+};
+
+class SourceSurfaceCanvasRecording final : public gfx::SourceSurface {
+ public:
+  MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(SourceSurfaceCanvasRecording, final)
+
+  SourceSurfaceCanvasRecording(
+      const RefPtr<gfx::SourceSurface>& aRecordedSuface,
+      CanvasChild* aCanvasChild,
+      const RefPtr<CanvasDrawEventRecorder>& aRecorder)
+      : mRecordedSurface(aRecordedSuface),
+        mCanvasChild(aCanvasChild),
+        mRecorder(aRecorder) {
+    mRecorder->RecordEvent(RecordedAddSurfaceAlias(this, aRecordedSuface));
+    mRecorder->AddStoredObject(this);
+  }
+
+  ~SourceSurfaceCanvasRecording() {
+    mRecorder->RemoveStoredObject(this);
+    mRecorder->RecordEvent(RecordedRemoveSurfaceAlias(this));
+  }
+
+  gfx::SurfaceType GetType() const final { return mRecordedSurface->GetType(); }
+
+  gfx::IntSize GetSize() const final { return mRecordedSurface->GetSize(); }
+
+  gfx::SurfaceFormat GetFormat() const final {
+    return mRecordedSurface->GetFormat();
+  }
+
+  already_AddRefed<gfx::DataSourceSurface> GetDataSurface() final {
+    if (!mDataSourceSurface) {
+      mDataSourceSurface = mCanvasChild->GetDataSurface(mRecordedSurface);
+    }
+
+    return do_AddRef(mDataSourceSurface);
+  }
+
+  RefPtr<gfx::SourceSurface> mRecordedSurface;
+  RefPtr<CanvasChild> mCanvasChild;
+  RefPtr<CanvasDrawEventRecorder> mRecorder;
+  RefPtr<gfx::DataSourceSurface> mDataSourceSurface;
+};
 
 CanvasChild::CanvasChild(Endpoint<PCanvasChild>&& aEndpoint) {
   aEndpoint.Bind(this);
@@ -36,9 +92,8 @@ void CanvasChild::EnsureRecorder(TextureType aTextureType) {
     SharedMemoryBasic::Handle handle;
     CrossProcessSemaphoreHandle readerSem;
     CrossProcessSemaphoreHandle writerSem;
-    RefPtr<CanvasChild> thisRef = this;
     mRecorder->Init(OtherPid(), &handle, &readerSem, &writerSem,
-                    [cc = std::move(thisRef)] { cc->ResumeTranslation(); });
+                    MakeUnique<RingBufferWriterServices>(this));
 
     if (mCanSend) {
       Unused << SendCreateTranslator(mTextureType, handle, readerSem,
@@ -74,8 +129,7 @@ void CanvasChild::OnTextureWriteLock() {
 void CanvasChild::OnTextureForwarded() {
   if (mHasOutstandingWriteLock) {
     mRecorder->RecordEvent(RecordedCanvasFlush());
-    if (!mRecorder->WaitForCheckpoint(mLastWriteLockCheckpoint,
-                                      kLockWaitTimeout)) {
+    if (!mRecorder->WaitForCheckpoint(mLastWriteLockCheckpoint)) {
       gfxWarning() << "Timed out waiting for last write lock to be processed.";
     }
 
@@ -137,7 +191,7 @@ already_AddRefed<gfx::DataSourceSurface> CanvasChild::GetDataSurface(
   gfx::DataSourceSurface::ScopedMap map(dataSurface,
                                         gfx::DataSourceSurface::READ_WRITE);
   char* dest = reinterpret_cast<char*>(map.GetData());
-  if (!mRecorder->WaitForCheckpoint(checkpoint, kGetDataTimeout)) {
+  if (!mRecorder->WaitForCheckpoint(checkpoint)) {
     gfxWarning() << "Timed out preparing data for DataSourceSurface.";
     return dataSurface.forget();
   }
@@ -146,6 +200,12 @@ already_AddRefed<gfx::DataSourceSurface> CanvasChild::GetDataSurface(
   mRecorder->ReturnRead(dest, ssSize.height * dataFormatWidth);
 
   return dataSurface.forget();
+}
+
+already_AddRefed<gfx::SourceSurface> CanvasChild::WrapSurface(
+    const RefPtr<gfx::SourceSurface>& aSurface) {
+  MOZ_ASSERT(aSurface);
+  return MakeAndAddRef<SourceSurfaceCanvasRecording>(aSurface, this, mRecorder);
 }
 
 }  // namespace layers

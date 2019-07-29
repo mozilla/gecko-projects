@@ -25,6 +25,7 @@
 #  include "unicode/ucal.h"
 #  include "unicode/ucol.h"
 #  include "unicode/udat.h"
+#  include "unicode/udata.h"
 #  include "unicode/udatpg.h"
 #  include "unicode/udisplaycontext.h"
 #  include "unicode/uenum.h"
@@ -35,7 +36,9 @@
 #  include "unicode/unumsys.h"
 #  include "unicode/upluralrules.h"
 #  include "unicode/ureldatefmt.h"
+#  include "unicode/ures.h"
 #  include "unicode/ustring.h"
+#  include "unicode/utypes.h"
 #endif
 
 /*
@@ -223,9 +226,27 @@ inline void unumf_closeResult(UFormattedNumber* uresult) {
   MOZ_CRASH("unumf_closeResult: Intl API disabled");
 }
 
+inline void unumf_formatInt(const UNumberFormatter* uformatter, int64_t value,
+                            UFormattedNumber* uresult, UErrorCode* status) {
+  MOZ_CRASH("unumf_formatInt: Intl API disabled");
+}
+
 inline void unumf_formatDouble(const UNumberFormatter* uformatter, double value,
                                UFormattedNumber* uresult, UErrorCode* status) {
   MOZ_CRASH("unumf_formatDouble: Intl API disabled");
+}
+
+inline void unumf_formatDecimal(const UNumberFormatter* uformatter,
+                                const char* value, int32_t valueLen,
+                                UFormattedNumber* uresult, UErrorCode* status) {
+  MOZ_CRASH("unumf_formatDecimal: Intl API disabled");
+}
+
+struct UFormattedValue;
+
+inline const UFormattedValue* unumf_resultAsValue(
+    const UFormattedNumber* uresult, UErrorCode* status) {
+  MOZ_CRASH("unumf_resultAsValue: Intl API disabled");
 }
 
 inline void unumf_resultGetAllFieldPositions(const UFormattedNumber* uresult,
@@ -722,6 +743,40 @@ inline void ucfpos_getIndexes(const UConstrainedFieldPosition* ucfpos,
                               int32_t* pStart, int32_t* pLimit,
                               UErrorCode* status) {
   MOZ_CRASH("ucfpos_getIndexes: Intl API disabled");
+}
+
+#  define U_ICUDATA_NAME ""
+#  define U_TREE_SEPARATOR_STRING ""
+
+struct UResourceBundle;
+
+inline UResourceBundle* ures_open(const char* packageName, const char* locale,
+                                  UErrorCode* status) {
+  MOZ_CRASH("ures_open: Intl API disabled");
+}
+
+inline void ures_close(UResourceBundle* resourceBundle) {
+  MOZ_CRASH("ures_close: Intl API disabled");
+}
+
+inline UResourceBundle* ures_getByKey(const UResourceBundle* resourceBundle,
+                                      const char* key, UResourceBundle* fillIn,
+                                      UErrorCode* status) {
+  MOZ_CRASH("ures_getByKey: Intl API disabled");
+}
+
+inline UResourceBundle* ures_getByIndex(const UResourceBundle* resourceBundle,
+                                        int32_t indexR, UResourceBundle* fillIn,
+                                        UErrorCode* status) {
+  MOZ_CRASH("ures_getByIndex: Intl API disabled");
+}
+
+inline int32_t ures_getSize(const UResourceBundle* resourceBundle) {
+  MOZ_CRASH("ures_getSize: Intl API disabled");
+}
+
+inline const char* ures_getKey(const UResourceBundle* resourceBundle) {
+  MOZ_CRASH("ures_getKey: Intl API disabled");
 }
 
 #endif  // !ENABLE_INTL_API

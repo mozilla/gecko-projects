@@ -50,14 +50,9 @@ loader.lazyRequireGetter(
   true
 );
 
-const l10n = require("devtools/client/webconsole/webconsole-l10n");
+const l10n = require("devtools/client/webconsole/utils/l10n");
 
 const HELP_URL = "https://developer.mozilla.org/docs/Tools/Web_Console/Helpers";
-
-function gSequenceId() {
-  return gSequenceId.n++;
-}
-gSequenceId.n = 0;
 
 // React & Redux
 const { Component } = require("devtools/client/shared/vendor/react");
@@ -114,6 +109,7 @@ class JSTerm extends Component {
       autocompleteData: PropTypes.object.isRequired,
       // Is the input in editor mode.
       editorMode: PropTypes.bool,
+      editorWidth: PropTypes.number,
       autocomplete: PropTypes.bool,
     };
   }
@@ -128,7 +124,6 @@ class JSTerm extends Component {
 
     this._keyPress = this._keyPress.bind(this);
     this._inputEventHandler = this._inputEventHandler.bind(this);
-    this._blurEventHandler = this._blurEventHandler.bind(this);
     this.onContextMenu = this.onContextMenu.bind(this);
     this.imperativeUpdate = this.imperativeUpdate.bind(this);
 
@@ -154,6 +149,10 @@ class JSTerm extends Component {
   }
 
   componentDidMount() {
+    if (this.props.editorMode) {
+      this.setEditorWidth(this.props.editorWidth);
+    }
+
     const autocompleteOptions = {
       onSelect: this.onAutocompleteSelect.bind(this),
       onClick: this.acceptProposedCompletion.bind(this),
@@ -183,14 +182,11 @@ class JSTerm extends Component {
             return null;
           }
 
-          if (this.canCaretGoPrevious()) {
+          if (this.props.editorMode === false && this.canCaretGoPrevious()) {
             inputUpdated = this.historyPeruse(HISTORY_BACK);
           }
 
-          if (!inputUpdated) {
-            return "CodeMirror.Pass";
-          }
-          return null;
+          return inputUpdated ? null : "CodeMirror.Pass";
         };
 
         const onArrowDown = () => {
@@ -200,14 +196,11 @@ class JSTerm extends Component {
             return null;
           }
 
-          if (this.canCaretGoNext()) {
+          if (this.props.editorMode === false && this.canCaretGoNext()) {
             inputUpdated = this.historyPeruse(HISTORY_FORWARD);
           }
 
-          if (!inputUpdated) {
-            return "CodeMirror.Pass";
-          }
-          return null;
+          return inputUpdated ? null : "CodeMirror.Pass";
         };
 
         const onArrowLeft = () => {
@@ -349,6 +342,7 @@ class JSTerm extends Component {
               // multiline text.
               if (
                 Services.appinfo.OS === "Darwin" &&
+                this.props.editorMode === false &&
                 this.canCaretGoNext() &&
                 this.historyPeruse(HISTORY_FORWARD)
               ) {
@@ -365,6 +359,7 @@ class JSTerm extends Component {
               // multiline text.
               if (
                 Services.appinfo.OS === "Darwin" &&
+                this.props.editorMode === false &&
                 this.canCaretGoPrevious() &&
                 this.historyPeruse(HISTORY_BACK)
               ) {
@@ -507,7 +502,6 @@ class JSTerm extends Component {
       ? null
       : this._getInputPaddingInlineStart();
 
-    this.webConsoleUI.window.addEventListener("blur", this._blurEventHandler);
     this.lastInputValue && this._setValue(this.lastInputValue);
   }
 
@@ -539,25 +533,34 @@ class JSTerm extends Component {
       this.updateAutocompletionPopup(nextProps.autocompleteData);
     }
 
-    if (this.editor && nextProps.editorMode !== this.props.editorMode) {
-      this.editor.setOption("lineNumbers", nextProps.editorMode);
+    if (nextProps.editorMode !== this.props.editorMode) {
+      if (this.editor) {
+        this.editor.setOption("lineNumbers", nextProps.editorMode);
+      }
+
+      if (nextProps.editorMode && nextProps.editorWidth) {
+        this.setEditorWidth(nextProps.editorWidth);
+      } else {
+        this.setEditorWidth(null);
+      }
     }
   }
 
   /**
-   * Getter for the element that holds the messages we display.
-   * @type Element
+   *
+   * @param {Number|null} editorWidth: The width to set the node to. If null, removes any
+   *                                   `width` property on node style.
    */
-  get outputNode() {
-    return this.webConsoleUI.outputNode;
-  }
+  setEditorWidth(editorWidth) {
+    if (!this.node) {
+      return;
+    }
 
-  /**
-   * Getter for the debugger WebConsoleClient.
-   * @type object
-   */
-  get webConsoleClient() {
-    return this.webConsoleUI.webConsoleClient;
+    if (editorWidth) {
+      this.node.style.width = `${editorWidth}px`;
+    } else {
+      this.node.style.removeProperty("width");
+    }
   }
 
   focus() {
@@ -769,10 +772,6 @@ class JSTerm extends Component {
    *        String to execute.
    * @param object [options]
    *        Options for evaluation:
-   *        - bindObjectActor: tells the ObjectActor ID for which you want to do
-   *        the evaluation. The Debugger.Object of the OA will be bound to
-   *        |_self| during evaluation, such that it's usable in the string you
-   *        execute.
    *        - selectedNodeActor: tells the NodeActor ID of the current selection
    *        in the Inspector, if such a selection exists. This is used by
    *        helper functions that can evaluate on the current selection.
@@ -789,31 +788,12 @@ class JSTerm extends Component {
       lines: str.split(/\n/).length,
     });
 
-    const { frameActor, client } = this.props.serviceContainer.getFrameActor(
-      options.frame
-    );
+    const { frameActor, client } = this.props.serviceContainer.getFrameActor();
 
     return client.evaluateJSAsync(str, {
       frameActor,
       ...options,
     });
-  }
-
-  /**
-   * Copy the object/variable by invoking the server
-   * which invokes the `copy(variable)` command and makes it
-   * available in the clipboard
-   * @param evalString - string which has the evaluation string to be copied
-   * @param options - object - Options for evaluation
-   * @return object
-   *         A promise object that is resolved when the server response is
-   *         received.
-   */
-  copyObject(evalString, evalOptions) {
-    return this.webConsoleClient.evaluateJSAsync(
-      `copy(${evalString})`,
-      evalOptions
-    );
   }
 
   /**
@@ -957,16 +937,6 @@ class JSTerm extends Component {
     }
   }
 
-  /**
-   * The window "blur" event handler.
-   * @private
-   */
-  _blurEventHandler() {
-    if (this.autocompletePopup) {
-      this.clearCompletion();
-    }
-  }
-
   /* eslint-disable complexity */
   /**
    * The inputNode "keypress" event handler.
@@ -1001,6 +971,7 @@ class JSTerm extends Component {
           // multiline text.
           if (
             Services.appinfo.OS == "Darwin" &&
+            this.props.editorMode === false &&
             this.canCaretGoNext() &&
             this.historyPeruse(HISTORY_FORWARD)
           ) {
@@ -1019,6 +990,7 @@ class JSTerm extends Component {
           // multiline text.
           if (
             Services.appinfo.OS == "Darwin" &&
+            this.props.editorMode === false &&
             this.canCaretGoPrevious() &&
             this.historyPeruse(HISTORY_BACK)
           ) {
@@ -1122,7 +1094,10 @@ class JSTerm extends Component {
         if (this.autocompletePopup.isOpen) {
           this.autocompletePopup.selectPreviousItem();
           event.preventDefault();
-        } else if (this.canCaretGoPrevious()) {
+        } else if (
+          this.props.editorMode === false &&
+          this.canCaretGoPrevious()
+        ) {
           inputUpdated = this.historyPeruse(HISTORY_BACK);
         }
         if (inputUpdated) {
@@ -1134,7 +1109,7 @@ class JSTerm extends Component {
         if (this.autocompletePopup.isOpen) {
           this.autocompletePopup.selectNextItem();
           event.preventDefault();
-        } else if (this.canCaretGoNext()) {
+        } else if (this.props.editorMode === false && this.canCaretGoNext()) {
           inputUpdated = this.historyPeruse(HISTORY_FORWARD);
         }
         if (inputUpdated) {
@@ -1736,13 +1711,6 @@ class JSTerm extends Component {
   }
 
   destroy() {
-    this.webConsoleClient.clearNetworkRequests();
-    if (this.webConsoleUI.outputNode) {
-      // We do this because it's much faster than letting React handle the ConsoleOutput
-      // unmounting.
-      this.webConsoleUI.outputNode.innerHTML = "";
-    }
-
     if (this.autocompletePopup) {
       this.autocompletePopup.destroy();
       this.autocompletePopup = null;
@@ -1752,10 +1720,6 @@ class JSTerm extends Component {
       this.inputNode.removeEventListener("keypress", this._keyPress);
       this.inputNode.removeEventListener("input", this._inputEventHandler);
       this.inputNode.removeEventListener("keyup", this._inputEventHandler);
-      this.webConsoleUI.window.removeEventListener(
-        "blur",
-        this._blurEventHandler
-      );
     }
 
     if (this.editor) {
@@ -1795,6 +1759,9 @@ class JSTerm extends Component {
         key: "jsterm-container",
         style: { direction: "ltr" },
         "aria-live": "off",
+        ref: node => {
+          this.node = node;
+        },
       },
       dom.textarea({
         className: "jsterm-complete-node devtools-monospace",

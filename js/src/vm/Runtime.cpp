@@ -26,7 +26,6 @@
 #include "jsmath.h"
 
 #include "builtin/Promise.h"
-#include "dbg/Debugger.h"
 #include "gc/FreeOp.h"
 #include "gc/GCInternals.h"
 #include "gc/PublicIterators.h"
@@ -53,6 +52,7 @@
 #include "vm/TraceLoggingGraph.h"
 #include "wasm/WasmSignalHandlers.h"
 
+#include "debugger/DebugAPI-inl.h"
 #include "gc/GC-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/Realm-inl.h"
@@ -109,6 +109,7 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
       destroyPrincipals(nullptr),
       readPrincipals(nullptr),
       warningReporter(nullptr),
+      selfHostedLazyScript(),
       geckoProfiler_(thisFromCtor()),
       trustedPrincipals_(nullptr),
       wrapObjectCallbacks(&DefaultWrapObjectCallbacks),
@@ -433,9 +434,9 @@ static bool HandleInterrupt(JSContext* cx, bool invokeCallback) {
     if (cx->realm()->isDebuggee()) {
       ScriptFrameIter iter(cx);
       if (!iter.done() && cx->compartment() == iter.compartment() &&
-          iter.script()->stepModeEnabled()) {
+          DebugAPI::stepModeEnabled(iter.script())) {
         RootedValue rval(cx);
-        switch (Debugger::onSingleStep(cx, &rval)) {
+        switch (DebugAPI::onSingleStep(cx, &rval)) {
           case ResumeMode::Terminate:
             mozilla::recordreplay::InvalidateRecording(
                 "Debugger single-step produced an error");
@@ -443,8 +444,8 @@ static bool HandleInterrupt(JSContext* cx, bool invokeCallback) {
           case ResumeMode::Continue:
             return true;
           case ResumeMode::Return:
-            // See note in Debugger::propagateForcedReturn.
-            Debugger::propagateForcedReturn(cx, iter.abstractFramePtr(), rval);
+            // See note in DebugAPI::propagateForcedReturn.
+            DebugAPI::propagateForcedReturn(cx, iter.abstractFramePtr(), rval);
             mozilla::recordreplay::InvalidateRecording(
                 "Debugger single-step forced return");
             return false;
@@ -885,7 +886,7 @@ void JSRuntime::stopRecordingAllocations() {
   for (RealmsIter realm(this); !realm.done(); realm.next()) {
     js::GlobalObject* global = realm->maybeGlobal();
     if (!realm->isDebuggee() || !global ||
-        !Debugger::isObservedByDebuggerTrackingAllocations(*global)) {
+        !DebugAPI::isObservedByDebuggerTrackingAllocations(*global)) {
       // Only remove the allocation metadata builder if no Debuggers are
       // tracking allocations.
       realm->forgetAllocationMetadataBuilder();

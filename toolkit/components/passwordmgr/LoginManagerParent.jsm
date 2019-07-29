@@ -9,6 +9,12 @@ const { XPCOMUtils } = ChromeUtils.import(
 );
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
+const LoginInfo = new Components.Constructor(
+  "@mozilla.org/login-manager/loginInfo;1",
+  Ci.nsILoginInfo,
+  "init"
+);
+
 XPCOMUtils.defineLazyGlobalGetters(this, ["URL"]);
 
 ChromeUtils.defineModuleGetter(
@@ -163,8 +169,8 @@ this.LoginManagerParent = {
         break;
       }
 
-      case "PasswordManager:onGeneratedPasswordFilled": {
-        this._onGeneratedPasswordFilled(data);
+      case "PasswordManager:onGeneratedPasswordFilledOrEdited": {
+        this._onGeneratedPasswordFilledOrEdited(data);
         break;
       }
 
@@ -410,7 +416,8 @@ this.LoginManagerParent = {
     if (
       isPasswordField &&
       autocompleteInfo.fieldName == "new-password" &&
-      Services.logins.getLoginSavingEnabled(formOrigin)
+      Services.logins.getLoginSavingEnabled(formOrigin) &&
+      !PrivateBrowsingUtils.isWindowPrivate(target.ownerGlobal)
     ) {
       generatedPassword = this.getGeneratedPassword(browsingContextId);
     }
@@ -460,8 +467,9 @@ this.LoginManagerParent = {
     }
 
     generatedPW = {
-      value: PasswordGenerator.generatePassword(),
+      edited: false,
       filled: false,
+      value: PasswordGenerator.generatePassword(),
     };
     this._generatedPasswordsByPrincipalOrigin.set(
       framePrincipalOrigin,
@@ -523,10 +531,7 @@ this.LoginManagerParent = {
       return;
     }
 
-    let formLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].createInstance(
-      Ci.nsILoginInfo
-    );
-    formLogin.init(
+    let formLogin = new LoginInfo(
       origin,
       formActionOrigin,
       null,
@@ -666,12 +671,14 @@ this.LoginManagerParent = {
     prompter.promptToSavePassword(formLogin, dismissedPrompt);
   },
 
-  _onGeneratedPasswordFilled({
+  _onGeneratedPasswordFilledOrEdited({
     browsingContextId,
     formActionOrigin,
-    username = "",
     openerTopWindowID,
+    password: passwordInField,
+    username = "",
   }) {
+    log("_onGeneratedPasswordFilledOrEdited");
     let browsingContext = BrowsingContext.get(browsingContextId);
     let {
       originNoSuffix,
@@ -679,7 +686,7 @@ this.LoginManagerParent = {
     let formOrigin = LoginHelper.getLoginOrigin(originNoSuffix);
     if (!formOrigin) {
       log(
-        "_onGeneratedPasswordFilled: Invalid form origin:",
+        "_onGeneratedPasswordFilledOrEdited: Invalid form origin:",
         browsingContext.currentWindowGlobal.documentPrincipal
       );
       return;
@@ -690,11 +697,45 @@ this.LoginManagerParent = {
       framePrincipalOrigin
     );
     let password = generatedPW.value;
-    let formLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].createInstance(
-      Ci.nsILoginInfo
+    if (!passwordInField) {
+      log("_onGeneratedPasswordFilledOrEdited: The password field is empty");
+      return;
+    }
+    if (passwordInField != password) {
+      // The user edited the field after generation to a non-empty value.
+      log("The field containing the generated password has changed");
+
+      // Record telemetry for the first edit
+      if (!generatedPW.edited) {
+        Services.telemetry.recordEvent(
+          "pwmgr",
+          "filled_field_edited",
+          "generatedpassword"
+        );
+        log("filled_field_edited telemetry event recorded");
+        generatedPW.edited = true;
+      }
+      return;
+    }
+
+    let formLogin = new LoginInfo(
+      formOrigin,
+      formActionOrigin,
+      null,
+      username,
+      password
     );
-    formLogin.init(formOrigin, formActionOrigin, null, username, password);
-    let shouldSaveLogin = true;
+
+    let formLoginWithoutUsername = new LoginInfo(
+      formOrigin,
+      formActionOrigin,
+      null,
+      "",
+      password
+    );
+
+    let autoSaveLogin = true;
+    let loginToChange = null;
 
     // This will throw if we can't look up the entry in the password/origin map
     if (!generatedPW.filled) {
@@ -709,8 +750,11 @@ this.LoginManagerParent = {
     }
 
     if (!Services.logins.getLoginSavingEnabled(formOrigin)) {
-      log("_onGeneratedPasswordFilled: saving is disabled for:", formOrigin);
-      shouldSaveLogin = false;
+      log(
+        "_onGeneratedPasswordFilledOrEdited: saving is disabled for:",
+        formOrigin
+      );
+      autoSaveLogin = false;
     }
 
     // Check if we already have a login saved for this site since we don't want to overwrite it in
@@ -722,42 +766,50 @@ this.LoginManagerParent = {
       ignoreActionAndRealm: false,
     });
 
-    if (logins.length > 0) {
-      log("_onGeneratedPasswordFilled: Login already saved for this site");
-      shouldSaveLogin = false;
-      for (let login of logins) {
-        if (formLogin.matches(login, false)) {
-          // This login is already saved so show no new UI.
-          log("_onGeneratedPasswordFilled: Matching login already saved");
-          return;
-        }
+    let matchedLogin = logins.find(login =>
+      formLoginWithoutUsername.matches(login, true)
+    );
+    if (matchedLogin) {
+      autoSaveLogin = false;
+      if (matchedLogin.password == formLoginWithoutUsername.password) {
+        // This login is already saved so show no new UI.
+        log("_onGeneratedPasswordFilledOrEdited: Matching login already saved");
+        return;
       }
+      // We're updating a previously-saved login
+      loginToChange = matchedLogin;
+      log(
+        "_onGeneratedPasswordFilledOrEdited: Login with empty username already saved for this site"
+      );
     }
 
-    if (shouldSaveLogin) {
-      Services.logins.addLogin(formLogin);
+    if (autoSaveLogin) {
+      log(
+        "_onGeneratedPasswordFilledOrEdited: auto-saving new login with empty username"
+      );
+      loginToChange = Services.logins.addLogin(formLoginWithoutUsername);
+    } else {
+      log("_onGeneratedPasswordFilledOrEdited: not auto-saving this login");
     }
-    log(
-      "_onGeneratedPasswordFilled: show dismissed save-password notification"
-    );
     let browser = browsingContext.top.embedderElement;
     let prompter = this._getPrompter(browser, openerTopWindowID);
 
-    if (shouldSaveLogin) {
-      // If we auto-saved the login then show a change doorhanger to allow
-      // modifying it e.g. adding a username.
+    if (loginToChange) {
+      // Show a change doorhanger to allow modifying an already-saved login
+      // e.g. to add a username or update the password.
       prompter.promptToChangePassword(
-        formLogin,
+        loginToChange,
         formLogin,
         true, // dimissed prompt
-        shouldSaveLogin // notifySaved
+        autoSaveLogin // notifySaved
       );
       return;
     }
+    log("_onGeneratedPasswordFilledOrEdited: no matching login to save/update");
     prompter.promptToSavePassword(
       formLogin,
       true, // dimissed prompt
-      shouldSaveLogin // notifySaved
+      autoSaveLogin // notifySaved
     );
   },
 

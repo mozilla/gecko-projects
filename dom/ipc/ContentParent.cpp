@@ -115,7 +115,7 @@
 #include "mozilla/ScriptPreloader.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TelemetryIPC.h"
 #include "mozilla/WebBrowserPersistDocumentParent.h"
@@ -2163,7 +2163,7 @@ void ContentParent::LaunchSubprocessInternal(
 
     mLifecycleState = LifecycleState::ALIVE;
     if (!InitInternal(aInitialPriority)) {
-      NS_ERROR("failed to initialize child in the parent");
+      NS_WARNING("failed to initialize child in the parent");
       // We've already called Open() by this point, so we need to close the
       // channel to avoid leaking the process.
       ShutDownProcess(SEND_SHUTDOWN_MESSAGE);
@@ -4969,10 +4969,10 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindow(
 
   nsCOMPtr<nsIWidget> widget = newTab->GetWidget();
   if (widget) {
-    cwi.maxTouchPoints() = widget->GetMaxTouchPoints();
     cwi.dimensions() = newTab->GetDimensionInfo();
   }
 
+  cwi.maxTouchPoints() = newTab->GetMaxTouchPoints();
   cwi.hasSiblings() = (openLocation == nsIBrowserDOMWindow::OPEN_NEWTAB);
 
   return IPC_OK();
@@ -5853,7 +5853,7 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
   // NOTE: It's OK if we don't have this context anymore. It was just already
   // detached, return.
   RefPtr<BrowsingContext> context = BrowsingContext::Get(aContextId);
-  if (!context) {
+  if (!context || context->IsDiscarded()) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
             ("ParentIPC: Trying to detach already detached"));
     return IPC_OK();
@@ -5887,7 +5887,7 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
 
 mozilla::ipc::IPCResult ContentParent::RecvCacheBrowsingContextChildren(
     BrowsingContext* aContext) {
-  if (!aContext) {
+  if (!aContext || aContext->IsDiscarded()) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
             ("ParentIPC: Trying to cache already detached"));
     return IPC_OK();
@@ -5917,7 +5917,7 @@ mozilla::ipc::IPCResult ContentParent::RecvCacheBrowsingContextChildren(
 
 mozilla::ipc::IPCResult ContentParent::RecvRestoreBrowsingContextChildren(
     BrowsingContext* aContext, BrowsingContext::Children&& aChildren) {
-  if (!aContext) {
+  if (!aContext || aContext->IsDiscarded()) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
             ("ParentIPC: Trying to restore already detached"));
     return IPC_OK();
@@ -5967,7 +5967,7 @@ void ContentParent::UnregisterRemoveWorkerActor() {
 
 mozilla::ipc::IPCResult ContentParent::RecvWindowClose(
     BrowsingContext* aContext, bool aTrustedCaller) {
-  if (!aContext) {
+  if (!aContext || aContext->IsDiscarded()) {
     MOZ_LOG(
         BrowsingContext::GetLog(), LogLevel::Debug,
         ("ParentIPC: Trying to send a message to dead or detached context"));
@@ -5987,7 +5987,7 @@ mozilla::ipc::IPCResult ContentParent::RecvWindowClose(
 
 mozilla::ipc::IPCResult ContentParent::RecvWindowFocus(
     BrowsingContext* aContext) {
-  if (!aContext) {
+  if (!aContext || aContext->IsDiscarded()) {
     MOZ_LOG(
         BrowsingContext::GetLog(), LogLevel::Debug,
         ("ParentIPC: Trying to send a message to dead or detached context"));
@@ -6003,7 +6003,7 @@ mozilla::ipc::IPCResult ContentParent::RecvWindowFocus(
 
 mozilla::ipc::IPCResult ContentParent::RecvWindowBlur(
     BrowsingContext* aContext) {
-  if (!aContext) {
+  if (!aContext || aContext->IsDiscarded()) {
     MOZ_LOG(
         BrowsingContext::GetLog(), LogLevel::Debug,
         ("ParentIPC: Trying to send a message to dead or detached context"));
@@ -6020,7 +6020,7 @@ mozilla::ipc::IPCResult ContentParent::RecvWindowBlur(
 mozilla::ipc::IPCResult ContentParent::RecvWindowPostMessage(
     BrowsingContext* aContext, const ClonedMessageData& aMessage,
     const PostMessageData& aData) {
-  if (!aContext) {
+  if (!aContext || aContext->IsDiscarded()) {
     MOZ_LOG(
         BrowsingContext::GetLog(), LogLevel::Debug,
         ("ParentIPC: Trying to send a message to dead or detached context"));
@@ -6062,7 +6062,7 @@ void ContentParent::OnBrowsingContextGroupUnsubscribe(
 mozilla::ipc::IPCResult ContentParent::RecvCommitBrowsingContextTransaction(
     BrowsingContext* aContext, BrowsingContext::Transaction&& aTransaction,
     BrowsingContext::FieldEpochs&& aEpochs) {
-  if (!aContext) {
+  if (!aContext || aContext->IsDiscarded()) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
             ("ParentIPC: Trying to run transaction on missing context."));
     return IPC_OK();

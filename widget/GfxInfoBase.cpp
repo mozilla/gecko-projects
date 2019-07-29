@@ -23,7 +23,7 @@
 #include "nsXULAppAPI.h"
 #include "nsIXULAppInfo.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/gfx/Logging.h"
@@ -605,7 +605,7 @@ GfxInfoBase::GetFeatureStatus(int32_t aFeature, nsACString& aFailureId,
 #if defined(RELEASE_OR_BETA)
   int32_t blocklistAll = 0;
 #else
-  int32_t blocklistAll = StaticPrefs::gfx_blocklist_all();
+  int32_t blocklistAll = StaticPrefs::gfx_blocklist_all_AtStartup();
 #endif
   if (blocklistAll > 0) {
     gfxCriticalErrorOnce(gfxCriticalError::DefaultOptions(false))

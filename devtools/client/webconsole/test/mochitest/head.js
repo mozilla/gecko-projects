@@ -37,7 +37,7 @@ Services.scriptloader.loadSubScript(
 );
 
 var { HUDService } = require("devtools/client/webconsole/hudservice");
-var WCUL10n = require("devtools/client/webconsole/webconsole-l10n");
+var WCUL10n = require("devtools/client/webconsole/utils/l10n");
 const DOCS_GA_PARAMS = `?${new URLSearchParams({
   utm_source: "mozilla",
   utm_medium: "firefox-console-errors",
@@ -674,7 +674,7 @@ function getInputCompletionValue(hud) {
  */
 function isInputFocused(hud) {
   const { jsterm } = hud;
-  const document = jsterm.outputNode.ownerDocument;
+  const document = hud.ui.outputNode.ownerDocument;
   const documentIsFocused = document.hasFocus();
 
   if (jsterm.inputNode) {
@@ -1139,7 +1139,7 @@ function isReverseSearchInputFocused(hud) {
  */
 async function selectNodeWithPicker(toolbox, testActor, selector) {
   const inspector = toolbox.getPanel("inspector");
-  const inspectorFront = inspector.inspector;
+  const inspectorFront = inspector.inspectorFront;
 
   const onPickerStarted = inspectorFront.nodePicker.once("picker-started");
   inspectorFront.nodePicker.start();

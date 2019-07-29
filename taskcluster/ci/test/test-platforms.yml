@@ -199,7 +199,7 @@ windows10-64/opt:
         - marionette-media-tests
 
 windows10-aarch64/opt:
-    build-platform: win64-aarch64/opt
+    build-platform: win64-aarch64-shippable/opt
     test-sets:
         - awsy
         - marionette-gpu-tests
@@ -308,26 +308,10 @@ macosx1014-64-ccov/debug:
     test-sets:
         - macosx1014-64-tests
 
-macosx1010-64/debug:
-    build-platform: macosx64/debug
-    test-sets:
-        - macosx64-tests
-
 macosx1010-64-shippable/opt:
     build-platform: macosx64-shippable/opt
     test-sets:
-        - macosx64-tests
         - desktop-screenshot-capture
-
-macosx1010-64-devedition/opt:
-    build-platform: macosx64-devedition-nightly/opt
-    test-sets:
-        - macosx64-tests
-
-macosx1010-64-ccov/debug:
-    build-platform: macosx64-ccov/debug
-    test-sets:
-        - macosx64-tests
 
 ##
 # Android platforms (matching /android-em.*/)

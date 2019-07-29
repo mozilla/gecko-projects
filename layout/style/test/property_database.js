@@ -1,4 +1,5 @@
 /* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
+/* eslint-disable dot-notation */
 /* vim: set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7375,8 +7376,8 @@ var gCSSProperties = {
     other_values: ["0", "-14px", "25px", "100em", "-45em"],
     invalid_values: ["13", "-25", "rubbish", ",./!@#$", "43%", "-10%"],
   },
-  "text-decoration-width": {
-    domProp: "textDecorationWidth",
+  "text-decoration-thickness": {
+    domProp: "textDecorationThickness",
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: ["auto"],
@@ -8152,7 +8153,7 @@ var gCSSProperties = {
   },
   "dominant-baseline": {
     domProp: "dominantBaseline",
-    inherited: false,
+    inherited: true,
     type: CSS_TYPE_LONGHAND,
     initial_values: ["auto"],
     other_values: [
@@ -8580,7 +8581,7 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     applies_to_first_letter: true,
-    initial_values: ["0", "0.0000", "-3"],
+    initial_values: ["0", "0.0000", "-3", "0%", "-100%"],
     other_values: [
       "0.4",
       "1",
@@ -8592,8 +8593,10 @@ var gCSSProperties = {
       "3e0",
       "3e+0",
       "3e-0",
+      "50%",
+      "300%",
     ],
-    invalid_values: ["0px", "1px", "20%", "default", "auto"],
+    invalid_values: ["0px", "1px", "default", "auto"],
   },
   "shape-margin": {
     domProp: "shapeMargin",

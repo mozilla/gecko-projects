@@ -57,6 +57,13 @@ let RPMAccessManager = {
       getFormatURLPref: ["app.support.baseURL"],
       isWindowPrivate: ["yes"],
     },
+    "about:protections": {
+      getBoolPref: [
+        "browser.contentblocking.report.lockwise.enabled",
+        "browser.contentblocking.report.monitor.enabled",
+      ],
+      getStringPref: ["browser.contentblocking.category"],
+    },
     "about:newinstall": {
       getUpdateChannel: ["yes"],
       getFxAccountsEndpoint: ["yes"],
@@ -376,20 +383,40 @@ class MessagePort {
     return Services.appinfo.appBuildID;
   }
 
-  getIntPref(aPref) {
+  getIntPref(aPref, defaultValue) {
     let principal = this.window.document.nodePrincipal;
     if (!RPMAccessManager.checkAllowAccess(principal, "getIntPref", aPref)) {
       throw new Error("RPMAccessManager does not allow access to getIntPref");
     }
+    // Only call with a default value if it's defined, to be able to throw
+    // errors for non-existent prefs.
+    if (defaultValue !== undefined) {
+      return Services.prefs.getIntPref(aPref, defaultValue);
+    }
     return Services.prefs.getIntPref(aPref);
   }
 
-  getBoolPref(aPref, defaultValue = false) {
+  getStringPref(aPref) {
+    let principal = this.window.document.nodePrincipal;
+    if (!RPMAccessManager.checkAllowAccess(principal, "getStringPref", aPref)) {
+      throw new Error(
+        "RPMAccessManager does not allow access to getStringPref"
+      );
+    }
+    return Services.prefs.getStringPref(aPref);
+  }
+
+  getBoolPref(aPref, defaultValue) {
     let principal = this.window.document.nodePrincipal;
     if (!RPMAccessManager.checkAllowAccess(principal, "getBoolPref", aPref)) {
       throw new Error("RPMAccessManager does not allow access to getBoolPref");
     }
-    return Services.prefs.getBoolPref(aPref, defaultValue);
+    // Only call with a default value if it's defined, to be able to throw
+    // errors for non-existent prefs.
+    if (defaultValue !== undefined) {
+      return Services.prefs.getBoolPref(aPref, defaultValue);
+    }
+    return Services.prefs.getBoolPref(aPref);
   }
 
   setBoolPref(aPref, aVal) {

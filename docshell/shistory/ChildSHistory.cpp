@@ -10,7 +10,7 @@
 #include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/SHEntryChild.h"
 #include "mozilla/dom/SHistoryChild.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_fission.h"
 #include "nsIMessageManager.h"
 #include "nsComponentManagerUtils.h"
 #include "nsSHEntry.h"

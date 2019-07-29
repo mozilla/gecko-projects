@@ -121,6 +121,7 @@ Preferences.addAll([
   // Passwords
   { id: "signon.rememberSignons", type: "bool" },
   { id: "signon.generation.enabled", type: "bool" },
+  { id: "signon.autofillForms", type: "bool" },
 
   // Buttons
   { id: "pref.privacy.disable_button.view_passwords", type: "bool" },
@@ -1665,7 +1666,7 @@ var gPrivacyPane = {
   updateButtons(aButtonID, aPreferenceID) {
     var button = document.getElementById(aButtonID);
     var preference = Preferences.get(aPreferenceID);
-    button.disabled = !preference.value;
+    button.disabled = !preference.value || preference.locked;
     return undefined;
   },
 
@@ -1824,15 +1825,18 @@ var gPrivacyPane = {
     var pref = Preferences.get("signon.rememberSignons");
     var excepts = document.getElementById("passwordExceptions");
     var generatePasswords = document.getElementById("generatePasswords");
+    var autofillCheckbox = document.getElementById("passwordAutofillCheckbox");
 
     if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
       document.getElementById("savePasswords").disabled = true;
       excepts.disabled = true;
       generatePasswords.disabled = true;
+      autofillCheckbox.disabled = true;
       return false;
     }
     excepts.disabled = !pref.value;
     generatePasswords.disabled = !pref.value;
+    autofillCheckbox.disabled = !pref.value;
 
     // don't override pref value in UI
     return undefined;

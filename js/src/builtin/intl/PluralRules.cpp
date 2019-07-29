@@ -234,12 +234,6 @@ static UNumberFormatter* NewUNumberFormatterForPluralRules(
       return nullptr;
     }
   } else {
-    if (!GetProperty(cx, internals, internals, cx->names().minimumIntegerDigits,
-                     &value)) {
-      return nullptr;
-    }
-    uint32_t minimumIntegerDigits = AssertedCast<uint32_t>(value.toInt32());
-
     if (!GetProperty(cx, internals, internals,
                      cx->names().minimumFractionDigits, &value)) {
       return nullptr;
@@ -256,9 +250,20 @@ static UNumberFormatter* NewUNumberFormatterForPluralRules(
                                  maximumFractionDigits)) {
       return nullptr;
     }
-    if (!skeleton.integerWidth(minimumIntegerDigits)) {
-      return nullptr;
-    }
+  }
+
+  if (!GetProperty(cx, internals, internals, cx->names().minimumIntegerDigits,
+                   &value)) {
+    return nullptr;
+  }
+  uint32_t minimumIntegerDigits = AssertedCast<uint32_t>(value.toInt32());
+
+  if (!skeleton.integerWidth(minimumIntegerDigits)) {
+    return nullptr;
+  }
+
+  if (!skeleton.roundingModeHalfUp()) {
+    return nullptr;
   }
 
   return skeleton.toFormatter(cx, locale.get());

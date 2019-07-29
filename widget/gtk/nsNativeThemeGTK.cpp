@@ -42,7 +42,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/layers/StackingContextHelper.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_layout.h"
 #include "nsWindow.h"
 
 #ifdef MOZ_X11
@@ -867,8 +867,9 @@ static void DrawThemeWithCairo(gfxContext* aContext, DrawTarget* aDrawTarget,
   static auto sCairoSurfaceSetDeviceScalePtr =
       (void (*)(cairo_surface_t*, double, double))dlsym(
           RTLD_DEFAULT, "cairo_surface_set_device_scale");
-  bool useHiDPIWidgets =
-      (aScaleFactor != 1) && (sCairoSurfaceSetDeviceScalePtr != nullptr);
+  bool useHiDPIWidgets = (aScaleFactor != 1) &&
+                         (gtk_check_version(3, 22, 0) != nullptr) &&
+                         (sCairoSurfaceSetDeviceScalePtr != nullptr);
 
   Point drawOffsetScaled;
   Point drawOffsetOriginal;

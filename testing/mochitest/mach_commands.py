@@ -356,6 +356,11 @@ class MachCommands(MachCommandBase):
         test_paths = kwargs['test_paths']
         kwargs['test_paths'] = []
 
+        if kwargs.get('debugger', None):
+            import mozdebug
+            if not mozdebug.get_debugger_info(kwargs.get('debugger')):
+                sys.exit(1)
+
         mochitest = self._spawn(MochitestRunner)
         tests = []
         if resolve_tests:
@@ -454,11 +459,13 @@ class MachCommands(MachCommandBase):
             if not app:
                 app = "org.mozilla.geckoview.test"
             device_serial = kwargs.get('deviceSerial')
+            install = not kwargs.get('no_install')
 
             # verify installation
-            verify_android_device(self, install=True, xre=False, network=True,
+            verify_android_device(self, install=install, xre=False, network=True,
                                   app=app, device_serial=device_serial)
-            grant_runtime_permissions(self, app, device_serial=device_serial)
+            if install:
+                grant_runtime_permissions(self, app, device_serial=device_serial)
             run_mochitest = mochitest.run_android_test
         else:
             run_mochitest = mochitest.run_desktop_test

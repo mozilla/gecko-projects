@@ -453,13 +453,6 @@ skip script test262/intl402/Intl/getCanonicalLocales/non-iana-canon.js
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1508684
 skip script test262/language/expressions/import.meta/syntax/invalid-assignment-target-update-expr.js
 
-# https://bugzilla.mozilla.org/show_bug.cgi?id=1543677
-skip script test262/intl402/BigInt/prototype/toLocaleString/de-DE.js
-skip script test262/intl402/BigInt/prototype/toLocaleString/returns-same-results-as-NumberFormat.js
-skip script test262/intl402/BigInt/prototype/toLocaleString/en-US.js
-skip script test262/intl402/BigInt/prototype/toLocaleString/default-options-object-prototype.js
-skip script test262/intl402/BigInt/prototype/toLocaleString/throws-same-exceptions-as-NumberFormat.js
-
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1545038
 # All of these tests pass except with --more-compartments.
 skip script test262/built-ins/String/prototype/valueOf/non-generic-realm.js
@@ -525,9 +518,24 @@ skip script test262/intl402/Intl/getCanonicalLocales/weird-cases.js
 # https://github.com/tc39/test262/issues/2205
 skip script test262/intl402/RelativeTimeFormat/prototype/format/en-us-numeric-auto.js
 
-# Test requires minimumFractionDigits and maximumFractionDigits options not to exist.
-skip script test262/intl402/NumberFormat/prototype/resolvedOptions/order.js
+# Test requires minimumFractionDigits and maximumFractionDigits options to exist.
+skip script test262/intl402/PluralRules/prototype/resolvedOptions/order.js
 
 # https://github.com/tc39/test262/pull/2210
 skip script test262/built-ins/Promise/all/invoke-resolve-get-error-close.js
 skip script test262/built-ins/Promise/race/invoke-resolve-get-error-close.js
+
+# Regular grandfathered tags canonicalized differently in CLDR.
+skip script test262/intl402/Intl/getCanonicalLocales/grandfathered.js
+
+# Deprecated variant subtag mappings are no longer supported.
+skip script test262/intl402/Intl/getCanonicalLocales/preferred-variant.js
+
+# Test requires signDisplay option to not exist.
+skip script test262/intl402/NumberFormat/prototype/resolvedOptions/order.js
+
+# https://github.com/tc39/test262/pull/2240
+skip script test262/intl402/NumberFormat/currencyDisplay-unit.js
+
+# "fractionalSecondDigits" should only be present in the resolved options when part of the pattern
+skip script test262/intl402/DateTimeFormat/constructor-options-fractionalSecondDigits-valid.js

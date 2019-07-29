@@ -206,14 +206,75 @@ async function checkDoorhangerUsernamePassword(username, password) {
 
 // End popup notification (doorhanger) functions //
 
-async function waitForPasswordManagerDialog() {
+async function waitForPasswordManagerDialog(openingFunc) {
   let win;
+  await openingFunc();
   await TestUtils.waitForCondition(() => {
     win = Services.wm.getMostRecentWindow("Toolkit:PasswordManager");
     return win && win.document.getElementById("filter");
   }, "Waiting for the password manager dialog to open");
 
-  return win;
+  return {
+    filterValue: win.document.getElementById("filter").value,
+    async close() {
+      await BrowserTestUtils.closeWindow(win);
+    },
+  };
+}
+
+async function waitForPasswordManagerTab(openingFunc, waitForFilter) {
+  info("waiting for new tab to open");
+  let tabPromise = BrowserTestUtils.waitForNewTab(gBrowser, null);
+  await openingFunc();
+  let tab = await tabPromise;
+  ok(tab, "got password management tab");
+  let filterValue;
+  if (waitForFilter) {
+    filterValue = await ContentTask.spawn(tab.linkedBrowser, null, async () => {
+      let loginFilter = Cu.waiveXrays(
+        content.document.querySelector("login-filter")
+      );
+      await ContentTaskUtils.waitForCondition(
+        () => !!loginFilter.value,
+        "wait for login-filter to have a value"
+      );
+      return loginFilter.value;
+    });
+  }
+  return {
+    filterValue,
+    close() {
+      BrowserTestUtils.removeTab(tab);
+    },
+  };
+}
+
+function openPasswordManager(openingFunc, waitForFilter) {
+  return Services.prefs.getCharPref("signon.management.overrideURI")
+    ? waitForPasswordManagerTab(openingFunc, waitForFilter)
+    : waitForPasswordManagerDialog(openingFunc);
+}
+
+// Autocomplete popup related functions //
+
+function openACPopup(popup, browser, inputSelector) {
+  return new Promise(async resolve => {
+    let promiseShown = BrowserTestUtils.waitForEvent(popup, "popupshown");
+
+    await SimpleTest.promiseFocus(browser);
+    info("content window focused");
+
+    // Focus the username field to open the popup.
+    await ContentTask.spawn(browser, [inputSelector], function openAutocomplete(
+      sel
+    ) {
+      content.document.querySelector(sel).focus();
+    });
+
+    let shown = await promiseShown;
+    ok(shown, "autocomplete popup shown");
+    resolve(shown);
+  });
 }
 
 // Contextmenu functions //
@@ -229,9 +290,10 @@ async function openPasswordContextMenu(
   passwordInput,
   assertCallback = null
 ) {
-  const CONTEXT_MENU = document.getElementById("contentAreaContextMenu");
-  const POPUP_HEADER = document.getElementById("fill-login");
-  const LOGIN_POPUP = document.getElementById("fill-login-popup");
+  const doc = browser.ownerDocument;
+  const CONTEXT_MENU = doc.getElementById("contentAreaContextMenu");
+  const POPUP_HEADER = doc.getElementById("fill-login");
+  const LOGIN_POPUP = doc.getElementById("fill-login-popup");
 
   let contextMenuShownPromise = BrowserTestUtils.waitForEvent(
     CONTEXT_MENU,
@@ -268,7 +330,7 @@ async function openPasswordContextMenu(
   let popupShownPromise = BrowserTestUtils.waitForCondition(
     () => POPUP_HEADER.open && BrowserTestUtils.is_visible(LOGIN_POPUP)
   );
-  EventUtils.synthesizeMouseAtCenter(POPUP_HEADER, {});
+  EventUtils.synthesizeMouseAtCenter(POPUP_HEADER, {}, browser.ownerGlobal);
   await popupShownPromise;
 }
 

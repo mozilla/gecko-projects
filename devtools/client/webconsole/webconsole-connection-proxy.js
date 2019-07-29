@@ -7,7 +7,7 @@
 const defer = require("devtools/shared/defer");
 const Services = require("Services");
 
-const l10n = require("devtools/client/webconsole/webconsole-l10n");
+const l10n = require("devtools/client/webconsole/utils/l10n");
 
 const PREF_CONNECTION_TIMEOUT = "devtools.debugger.remote-timeout";
 // Web Console connection proxy
@@ -81,12 +81,6 @@ WebConsoleConnectionProxy.prototype = {
   connected: false,
 
   /**
-   * Tells if the console is attached.
-   * @type boolean
-   */
-  isAttached: null,
-
-  /**
    * Timer used for the connection.
    * @private
    * @type object
@@ -132,7 +126,7 @@ WebConsoleConnectionProxy.prototype = {
     if (this.target.isBrowsingContext) {
       this.webConsoleUI.onLocationChange(this.target.url, this.target.title);
     }
-    this.isAttached = this._attachConsole();
+    this._attachConsole();
 
     return connPromise;
   },
@@ -431,20 +425,9 @@ WebConsoleConnectionProxy.prototype = {
    * @return object
    *         A promise object that is resolved when disconnect completes.
    */
-  disconnect: async function() {
-    if (this._disconnecter) {
-      return this._disconnecter.promise;
-    }
-
-    this._disconnecter = defer();
-
-    // allow the console to finish attaching if it started.
-    if (this.isAttached) {
-      await this.isAttached;
-    }
+  disconnect: function() {
     if (!this.client) {
-      this._disconnecter.resolve(null);
-      return this._disconnecter.promise;
+      return;
     }
 
     this.webConsoleClient.off("logMessage", this._onLogMessage);
@@ -468,9 +451,6 @@ WebConsoleConnectionProxy.prototype = {
     this.target = null;
     this.connected = false;
     this.webConsoleUI = null;
-    this._disconnecter.resolve(null);
-
-    return this._disconnecter.promise;
   },
 };
 

@@ -4,10 +4,9 @@
 
 // @flow
 
-import { PrefsHelper } from "devtools-modules";
+import { PrefsHelper, asyncStoreHelper } from "devtools-modules";
 import { isDevelopment } from "devtools-environment";
 import Services from "devtools-services";
-import { asyncStoreHelper } from "./asyncStoreHelper";
 
 // Schema version to bump when the async store format has changed incompatibly
 // and old stores should be cleared.
@@ -68,6 +67,7 @@ if (isDevelopment()) {
   pref("devtools.debugger.features.event-listeners-breakpoints", true);
   pref("devtools.debugger.features.log-points", true);
   pref("devtools.debugger.log-actions", true);
+  pref("devtools.debugger.features.overlay-step-buttons", false);
 }
 
 export const prefs = new PrefsHelper("devtools", {
@@ -127,6 +127,7 @@ export const features = new PrefsHelper("devtools.debugger.features", {
   originalBlackbox: ["Bool", "original-blackbox"],
   eventListenersBreakpoints: ["Bool", "event-listeners-breakpoints"],
   logPoints: ["Bool", "log-points"],
+  showOverlayStepButtons: ["Bool", "debugger.features.overlay-step-buttons"],
 });
 
 export const asyncStore = asyncStoreHelper("debugger", {

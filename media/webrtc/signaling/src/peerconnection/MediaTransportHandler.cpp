@@ -79,6 +79,9 @@ class MediaTransportHandlerSTS : public MediaTransportHandler,
                                   const std::string& aPwd,
                                   size_t aComponentCount) override;
 
+  void SetTargetForDefaultLocalAddressLookup(const std::string& aTargetIp,
+                                             uint16_t aTargetPort) override;
+
   // We set default-route-only as late as possible because it depends on what
   // capture permissions have been granted on the window, which could easily
   // change between Init (ie; when the PC is created) and StartIceGathering
@@ -636,6 +639,16 @@ void MediaTransportHandlerSTS::ActivateTransport(
         }
 
         mTransports[aTransportId] = transport;
+      },
+      [](const std::string& aError) {});
+}
+
+void MediaTransportHandlerSTS::SetTargetForDefaultLocalAddressLookup(
+    const std::string& aTargetIp, uint16_t aTargetPort) {
+  mInitPromise->Then(
+      mStsThread, __func__,
+      [=, self = RefPtr<MediaTransportHandlerSTS>(this)]() {
+        mIceCtx->SetTargetForDefaultLocalAddressLookup(aTargetIp, aTargetPort);
       },
       [](const std::string& aError) {});
 }

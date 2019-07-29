@@ -23,6 +23,7 @@
 #include "jit/MIRGraph.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/Instrumentation.h"
 #include "vm/Opcodes.h"
 #include "vm/RegExpStatics.h"
 #include "vm/SelfHosting.h"
@@ -174,14 +175,17 @@ IonBuilder::IonBuilder(JSContext* analysisContext, CompileRealm* realm,
   scriptHasIonScript_ = script_->hasIonScript();
   pc = info->startPC();
 
-  MOZ_ASSERT(script()->hasBaselineScript() ==
-             (info->analysisMode() != Analysis_ArgumentsUsage));
+  // The script must have a JitScript. Compilation requires a BaselineScript
+  // too.
+  MOZ_ASSERT(script_->hasJitScript());
+  MOZ_ASSERT_IF(!info->isAnalysis(), script_->hasBaselineScript());
+
   MOZ_ASSERT(!!analysisContext ==
              (info->analysisMode() == Analysis_DefiniteProperties));
   MOZ_ASSERT(script_->numBytecodeTypeSets() < JSScript::MaxBytecodeTypeSets);
 
   if (!info->isAnalysis()) {
-    script()->baselineScript()->setIonCompiledOrInlined();
+    script()->jitScript()->setIonCompiledOrInlined();
   }
 }
 
@@ -445,14 +449,10 @@ IonBuilder::InliningDecision IonBuilder::canInlineTarget(JSFunction* target,
       return InliningDecision_Error;
     }
 
-    if (!script->hasBaselineScript() && script->canBaselineCompile()) {
-      MethodStatus status = BaselineCompile(analysisContext, script);
-      if (status == Method_Error) {
+    if (CanBaselineInterpretScript(script)) {
+      AutoKeepJitScripts keepJitScript(analysisContext);
+      if (!script->ensureHasJitScript(analysisContext, keepJitScript)) {
         return InliningDecision_Error;
-      }
-      if (status != Method_Compiled) {
-        trackOptimizationOutcome(TrackedOutcome::CantInlineNoBaseline);
-        return InliningDecision_DontInline;
       }
     }
   }
@@ -478,10 +478,18 @@ IonBuilder::InliningDecision IonBuilder::canInlineTarget(JSFunction* target,
     return DontInline(inlineScript, "Disabled Ion compilation");
   }
 
-  // Don't inline functions which don't have baseline scripts.
-  if (!inlineScript->hasBaselineScript()) {
-    trackOptimizationOutcome(TrackedOutcome::CantInlineNoBaseline);
-    return DontInline(inlineScript, "No baseline jitcode");
+  if (info().isAnalysis()) {
+    // Analysis requires only a JitScript.
+    if (!inlineScript->hasJitScript()) {
+      trackOptimizationOutcome(TrackedOutcome::CantInlineNoJitScript);
+      return DontInline(inlineScript, "No JitScript");
+    }
+  } else {
+    // Compilation requires a BaselineScript.
+    if (!inlineScript->hasBaselineScript()) {
+      trackOptimizationOutcome(TrackedOutcome::CantInlineNoBaseline);
+      return DontInline(inlineScript, "No baseline jitcode");
+    }
   }
 
   // Don't inline functions with a higher optimization level.
@@ -765,6 +773,14 @@ AbortReasonOr<Ok> IonBuilder::init() {
     return abort(AbortReason::Alloc);
   }
 
+  {
+    JSContext* cx = TlsContext.get();
+    RootedScript rootedScript(cx, script());
+    if (!rootedScript->jitScript()->ensureHasCachedIonData(cx, rootedScript)) {
+      return abort(AbortReason::Error);
+    }
+  }
+
   if (inlineCallInfo_) {
     // If we're inlining, the actual this/argument types are not necessarily
     // a subset of the script's observed types. |argTypes| is never accessed
@@ -789,11 +805,11 @@ AbortReasonOr<Ok> IonBuilder::build() {
 
   MOZ_TRY(init());
 
-  // The BaselineScript-based inlining heuristics only affect the highest
+  // The JitScript-based inlining heuristics only affect the highest
   // optimization level. Other levels do almost no inlining and we don't want to
   // overwrite data from the highest optimization tier.
-  if (script()->hasBaselineScript() && isHighestOptimizationLevel()) {
-    script()->baselineScript()->resetMaxInliningDepth();
+  if (isHighestOptimizationLevel()) {
+    script()->jitScript()->resetMaxInliningDepth();
   }
 
   MBasicBlock* entry;
@@ -925,10 +941,9 @@ AbortReasonOr<Ok> IonBuilder::build() {
 
   MOZ_TRY(traverseBytecode());
 
-  if (isHighestOptimizationLevel() && script_->hasBaselineScript() &&
-      inlinedBytecodeLength_ >
-          script_->baselineScript()->inlinedBytecodeLength()) {
-    script_->baselineScript()->setInlinedBytecodeLength(inlinedBytecodeLength_);
+  if (isHighestOptimizationLevel() &&
+      inlinedBytecodeLength_ > script_->jitScript()->inlinedBytecodeLength()) {
+    script_->jitScript()->setInlinedBytecodeLength(inlinedBytecodeLength_);
   }
 
   MOZ_TRY(maybeAddOsrTypeBarriers());
@@ -1209,7 +1224,7 @@ AbortReasonOr<Ok> IonBuilder::initParameters() {
   for (uint32_t i = 0; i < info().nargs(); i++) {
     TemporaryTypeSet* types = &argTypes[i];
     if (types->empty() && baselineFrame_ &&
-        !script_->baselineScript()->modifiesArguments()) {
+        !script_->jitScript()->modifiesArguments()) {
       TypeSet::Type type = baselineFrame_->argTypes[i];
       if (type.isSingletonUnchecked()) {
         checkNurseryObject(type.singleton());
@@ -1245,12 +1260,7 @@ void IonBuilder::initLocals() {
 }
 
 bool IonBuilder::usesEnvironmentChain() {
-  // We don't have a BaselineScript if we're running the arguments analysis,
-  // but it's fine to assume we always use the environment chain in this case.
-  if (info().analysisMode() == Analysis_ArgumentsUsage) {
-    return true;
-  }
-  return script()->baselineScript()->usesEnvironmentChain();
+  return script()->jitScript()->usesEnvironmentChain();
 }
 
 AbortReasonOr<Ok> IonBuilder::initEnvironmentChain(MDefinition* callee) {
@@ -1505,9 +1515,8 @@ enum class CFGState : uint32_t { Alloc = 0, Abort = 1, Success = 2 };
 static CFGState GetOrCreateControlFlowGraph(TempAllocator& tempAlloc,
                                             JSScript* script,
                                             const ControlFlowGraph** cfgOut) {
-  if (script->hasBaselineScript() &&
-      script->baselineScript()->controlFlowGraph()) {
-    *cfgOut = script->baselineScript()->controlFlowGraph();
+  if (script->jitScript()->controlFlowGraph()) {
+    *cfgOut = script->jitScript()->controlFlowGraph();
     return CFGState::Success;
   }
 
@@ -1519,17 +1528,12 @@ static CFGState GetOrCreateControlFlowGraph(TempAllocator& tempAlloc,
     return CFGState::Alloc;
   }
 
-  // If possible cache the control flow graph on the baseline script.
-  TempAllocator* graphAlloc = nullptr;
-  if (script->hasBaselineScript()) {
-    LifoAlloc& lifoAlloc = script->zone()->jitZone()->cfgSpace()->lifoAlloc();
-    LifoAlloc::AutoFallibleScope fallibleAllocator(&lifoAlloc);
-    graphAlloc = lifoAlloc.new_<TempAllocator>(&lifoAlloc);
-    if (!graphAlloc) {
-      return CFGState::Alloc;
-    }
-  } else {
-    graphAlloc = &tempAlloc;
+  // Cache the control flow graph on the JitScript.
+  LifoAlloc& lifoAlloc = script->zone()->jitZone()->cfgSpace()->lifoAlloc();
+  LifoAlloc::AutoFallibleScope fallibleAllocator(&lifoAlloc);
+  TempAllocator* graphAlloc = lifoAlloc.new_<TempAllocator>(&lifoAlloc);
+  if (!graphAlloc) {
+    return CFGState::Alloc;
   }
 
   ControlFlowGraph* cfg = cfgenerator.getGraph(*graphAlloc);
@@ -1537,10 +1541,8 @@ static CFGState GetOrCreateControlFlowGraph(TempAllocator& tempAlloc,
     return CFGState::Alloc;
   }
 
-  if (script->hasBaselineScript()) {
-    MOZ_ASSERT(!script->baselineScript()->controlFlowGraph());
-    script->baselineScript()->setControlFlowGraph(cfg);
-  }
+  MOZ_ASSERT(!script->jitScript()->controlFlowGraph());
+  script->jitScript()->setControlFlowGraph(cfg);
 
   if (JitSpewEnabled(JitSpew_CFG)) {
     JitSpew(JitSpew_CFG, "Generating graph for %s:%u:%u", script->filename(),
@@ -1572,8 +1574,7 @@ static CFGState GetOrCreateControlFlowGraph(TempAllocator& tempAlloc,
 // CFGBlock.
 AbortReasonOr<Ok> IonBuilder::traverseBytecode() {
   CFGState state = GetOrCreateControlFlowGraph(alloc(), info().script(), &cfg);
-  MOZ_ASSERT_IF(cfg && info().script()->hasBaselineScript(),
-                info().script()->baselineScript()->controlFlowGraph() == cfg);
+  MOZ_ASSERT_IF(cfg, info().script()->jitScript()->controlFlowGraph() == cfg);
   if (state == CFGState::Alloc) {
     return abort(AbortReason::Alloc);
   }
@@ -2485,6 +2486,15 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op) {
     case JSOP_LOOPENTRY:
       return jsop_loopentry();
 
+    case JSOP_INSTRUMENTATION_ACTIVE:
+      return jsop_instrumentation_active();
+
+    case JSOP_INSTRUMENTATION_CALLBACK:
+      return jsop_instrumentation_callback();
+
+    case JSOP_INSTRUMENTATION_SCRIPT_ID:
+      return jsop_instrumentation_scriptid();
+
     // ===== NOT Yet Implemented =====
     // Read below!
 
@@ -3202,7 +3212,9 @@ AbortReasonOr<Ok> IonBuilder::visitTry(CFGTry* try_) {
   // aborted compilation in this case.
 
   // Try-catch within inline frames is not yet supported.
-  MOZ_ASSERT(!isInlineBuilder());
+  if (isInlineBuilder()) {
+    return abort(AbortReason::Disable, "Try-catch during inlining");
+  }
 
   // Try-catch during analyses is not yet supported. Code within the 'catch'
   // block is not accounted for.
@@ -4340,7 +4352,7 @@ IonBuilder::InliningDecision IonBuilder::makeInliningDecision(
   // as the caller has not run yet.
   if (targetScript->getWarmUpCount() <
           optimizationInfo().inliningWarmUpThreshold() &&
-      !targetScript->baselineScript()->ionCompiledOrInlined() &&
+      !targetScript->jitScript()->ionCompiledOrInlined() &&
       info().analysisMode() != Analysis_DefiniteProperties) {
     trackOptimizationOutcome(TrackedOutcome::CantInlineNotHot);
     JitSpew(JitSpew_Inlining,
@@ -4353,7 +4365,7 @@ IonBuilder::InliningDecision IonBuilder::makeInliningDecision(
   // Don't inline if the callee is known to inline a lot of code, to avoid
   // huge MIR graphs.
   uint32_t inlinedBytecodeLength =
-      targetScript->baselineScript()->inlinedBytecodeLength();
+      targetScript->jitScript()->inlinedBytecodeLength();
   if (inlinedBytecodeLength >
       optimizationInfo().inlineMaxCalleeInlinedBytecodeLength()) {
     trackOptimizationOutcome(
@@ -4391,8 +4403,7 @@ IonBuilder::InliningDecision IonBuilder::makeInliningDecision(
     }
   }
 
-  BaselineScript* outerBaseline =
-      outermostBuilder()->script()->baselineScript();
+  JitScript* outerJitScript = outermostBuilder()->script()->jitScript();
   if (inliningDepth_ >= maxInlineDepth) {
     // We hit the depth limit and won't inline this function. Give the
     // outermost script a max inlining depth of 0, so that it won't be
@@ -4400,7 +4411,7 @@ IonBuilder::InliningDecision IonBuilder::makeInliningDecision(
     // when we're inlining scripts with loops, see the comment below.
     // These heuristics only apply to the highest optimization level.
     if (isHighestOptimizationLevel()) {
-      outerBaseline->setMaxInliningDepth(0);
+      outerJitScript->setMaxInliningDepth(0);
     }
 
     trackOptimizationOutcome(TrackedOutcome::CantInlineExceededDepth);
@@ -4428,7 +4439,7 @@ IonBuilder::InliningDecision IonBuilder::makeInliningDecision(
   // These heuristics only apply to the highest optimization level: other tiers
   // do very little inlining and performance is not as much of a concern there.
   if (isHighestOptimizationLevel() && targetScript->hasLoops() &&
-      inliningDepth_ >= targetScript->baselineScript()->maxInliningDepth()) {
+      inliningDepth_ >= targetScript->jitScript()->maxInliningDepth()) {
     trackOptimizationOutcome(TrackedOutcome::CantInlineExceededDepth);
     return DontInline(targetScript,
                       "Vetoed: exceeding allowed script inline depth");
@@ -4437,9 +4448,9 @@ IonBuilder::InliningDecision IonBuilder::makeInliningDecision(
   // Update the max depth at which we can inline the outer script.
   MOZ_ASSERT(maxInlineDepth > inliningDepth_);
   uint32_t scriptInlineDepth = maxInlineDepth - inliningDepth_ - 1;
-  if (scriptInlineDepth < outerBaseline->maxInliningDepth() &&
+  if (scriptInlineDepth < outerJitScript->maxInliningDepth() &&
       isHighestOptimizationLevel()) {
-    outerBaseline->setMaxInliningDepth(scriptInlineDepth);
+    outerJitScript->setMaxInliningDepth(scriptInlineDepth);
   }
 
   // End of heuristics, we will inline this function.
@@ -8385,8 +8396,8 @@ AbortReasonOr<Ok> IonBuilder::jsop_intrinsic(PropertyName* name) {
   TemporaryTypeSet* types = bytecodeTypes(pc);
 
   Value vp = UndefinedValue();
-  // If the intrinsic value doesn't yet exist, we haven't executed this
-  // opcode yet, so we need to get it and monitor the result.
+  // If the intrinsic value doesn't yet exist, we generate code to get
+  // it and monitor the result.
   if (!script()->global().maybeExistingIntrinsicValue(name, &vp)) {
     MCallGetIntrinsicValue* ins = MCallGetIntrinsicValue::New(alloc(), name);
 
@@ -8398,16 +8409,14 @@ AbortReasonOr<Ok> IonBuilder::jsop_intrinsic(PropertyName* name) {
     return pushTypeBarrier(ins, types, BarrierKind::TypeSet);
   }
 
-  if (types->empty()) {
+  // Otherwise, we can bake in the intrinsic.
+  pushConstant(vp);
+
+  // Make sure that TI agrees with us on the type.
+  if (!types->hasType(TypeSet::GetValueType(vp))) {
     types->addType(TypeSet::GetValueType(vp), alloc().lifoAlloc());
   }
 
-  // Bake in the intrinsic, guaranteed to exist because a non-empty typeset
-  // means the intrinsic was successfully gotten in the VM call above.
-  // Assert that TI agrees with us on the type.
-  MOZ_ASSERT(types->hasType(TypeSet::GetValueType(vp)));
-
-  pushConstant(vp);
   return Ok();
 }
 
@@ -9143,7 +9152,7 @@ AbortReasonOr<Ok> IonBuilder::getElemTryArguments(bool* emitted,
   index = addBoundsCheck(index, length);
 
   // Load the argument from the actual arguments.
-  bool modifiesArgs = script()->baselineScript()->modifiesArguments();
+  bool modifiesArgs = script()->jitScript()->modifiesArguments();
   MGetFrameArgument* load =
       MGetFrameArgument::New(alloc(), index, modifiesArgs);
   current->add(load);
@@ -12691,8 +12700,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_setarg(uint32_t arg) {
   // to wrap the spilling action, we don't want the spilling to be
   // captured by the GETARG and by the resume point, only by
   // MGetFrameArgument.
-  MOZ_ASSERT_IF(script()->hasBaselineScript(),
-                script()->baselineScript()->modifiesArguments());
+  MOZ_ASSERT(script()->jitScript()->modifiesArguments());
   MDefinition* val = current->peek(-1);
 
   // If an arguments object is in use, and it aliases formals, then all SETARGs
@@ -12725,7 +12733,9 @@ AbortReasonOr<Ok> IonBuilder::jsop_setarg(uint32_t arg) {
   if (info().argumentsAliasesFormals()) {
     // JSOP_SETARG with magic arguments within inline frames is not yet
     // supported.
-    MOZ_ASSERT(script()->uninlineable() && !isInlineBuilder());
+    if (isInlineBuilder()) {
+      return abort(AbortReason::Disable, "setarg with magic args and inlining");
+    }
 
     MSetFrameArgument* store = MSetFrameArgument::New(alloc(), arg, val);
     modifiesFrameArguments_ = true;
@@ -13479,6 +13489,35 @@ AbortReasonOr<Ok> IonBuilder::jsop_dynamic_import() {
   current->add(ins);
   current->push(ins);
   return resumeAfter(ins);
+}
+
+AbortReasonOr<Ok> IonBuilder::jsop_instrumentation_active() {
+  // All IonScripts in the realm are discarded when instrumentation activity
+  // changes, so we can treat the value we get as a constant.
+  bool active = RealmInstrumentation::isActive(&script()->global());
+  pushConstant(BooleanValue(active));
+  return Ok();
+}
+
+AbortReasonOr<Ok> IonBuilder::jsop_instrumentation_callback() {
+  JSObject* obj = RealmInstrumentation::getCallback(&script()->global());
+  MOZ_ASSERT(obj);
+  pushConstant(ObjectValue(*obj));
+  return Ok();
+}
+
+AbortReasonOr<Ok> IonBuilder::jsop_instrumentation_scriptid() {
+  // Getting the script ID requires interacting with the Debugger used for
+  // instrumentation, but cannot run script.
+  JSContext* cx = TlsContext.get();
+
+  int32_t scriptId;
+  RootedScript script(cx, this->script());
+  if (!RealmInstrumentation::getScriptId(cx, cx->global(), script, &scriptId)) {
+    return abort(AbortReason::Error);
+  }
+  pushConstant(Int32Value(scriptId));
+  return Ok();
 }
 
 MInstruction* IonBuilder::addConvertElementsToDoubles(MDefinition* elements) {

@@ -125,9 +125,6 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
         )
       : null;
 
-    // Call then parent class' show function
-    await super.show();
-
     // Then set spectrum's color and listen to color changes to preview them
     if (this.activeSwatch) {
       this.currentSwatchColor = this.activeSwatch.nextSibling;
@@ -139,6 +136,9 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
       this.spectrum.on("changed", this._onSpectrumColorChange);
       this.spectrum.updateUI();
     }
+
+    // Call then parent class' show function
+    await super.show();
 
     const eyeButton = this.tooltip.container.querySelector(
       "#eyedropper-button"
@@ -160,11 +160,6 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
       learnMoreButton.addEventListener("click", this._openDocLink);
       learnMoreButton.addEventListener("keydown", e => e.stopPropagation());
     }
-
-    // After spectrum properties are set, update the tooltip content size.
-    // If contrast is enabled, the tooltip will have additional contrast content
-    // and tooltip size needs to be updated to account for it.
-    this.tooltip.updateContainerBounds(super.tooltipAnchor);
 
     // Add focus to the first focusable element in the tooltip and attach keydown
     // event listener to tooltip
@@ -236,34 +231,34 @@ class SwatchColorPickerTooltip extends SwatchBasedEditorTooltip {
   }
 
   _openEyeDropper() {
-    const { inspector, toolbox, telemetry } = this.inspector;
+    const { inspectorFront, toolbox, telemetry } = this.inspector;
 
     telemetry
       .getHistogramById(TELEMETRY_PICKER_EYEDROPPER_OPEN_COUNT)
       .add(true);
 
     // cancelling picker(if it is already selected) on opening eye-dropper
-    inspector.nodePicker.cancel();
+    inspectorFront.nodePicker.cancel();
 
     // pickColorFromPage will focus the content document. If the devtools are in a
     // separate window, the colorpicker tooltip will be closed before pickColorFromPage
     // resolves. Flip the flag early to avoid issues with onTooltipHidden().
     this.eyedropperOpen = true;
 
-    inspector.pickColorFromPage({ copyOnSelect: false }).then(() => {
+    inspectorFront.pickColorFromPage({ copyOnSelect: false }).then(() => {
       // close the colorpicker tooltip so that only the eyedropper is open.
       this.hide();
 
       this.tooltip.emit("eyedropper-opened");
     }, console.error);
 
-    inspector.once("color-picked", color => {
+    inspectorFront.once("color-picked", color => {
       toolbox.win.focus();
       this._selectColor(color);
       this._onEyeDropperDone();
     });
 
-    inspector.once("color-pick-canceled", () => {
+    inspectorFront.once("color-pick-canceled", () => {
       this._onEyeDropperDone();
     });
   }

@@ -298,13 +298,8 @@ async function ensureFocusedUrlbar() {
     () => !gURLBar.hasAttribute("switchingtabs")
   );
 
-  let dropmarker = document.getAnonymousElementByAttribute(
-    gURLBar.textbox,
-    "anonid",
-    "historydropmarker"
-  );
   let opacityPromise = BrowserTestUtils.waitForEvent(
-    dropmarker,
+    gURLBar.dropmarker,
     "transitionend",
     false,
     e => e.propertyName === "opacity"
@@ -821,16 +816,16 @@ async function runUrlbarTest(
     await UrlbarTestUtils.promisePopupClose(win);
   };
 
-  let dropmarkerRect = win.document
-    .getAnonymousElementByAttribute(
-      URLBar.textbox,
-      "anonid",
-      "historydropmarker"
-    )
-    .getBoundingClientRect();
-  let textBoxRect = win.document
-    .getAnonymousElementByAttribute(URLBar.textbox, "anonid", "moz-input-box")
-    .getBoundingClientRect();
+  let dropmarkerRect = URLBar.dropmarker.getBoundingClientRect();
+  let textBoxRect = URLBar.querySelector(
+    "moz-input-box"
+  ).getBoundingClientRect();
+  let resultsRect = {
+    top: URLBar.textbox.closest("toolbar").getBoundingClientRect().bottom,
+    right: win.innerWidth,
+    bottom: win.innerHeight,
+    left: 0,
+  };
   let expectedRects = {
     filter: rects =>
       rects.filter(
@@ -846,10 +841,13 @@ async function runUrlbarTest(
             (r.x1 >= dropmarkerRect.left - 1 &&
               r.x2 <= dropmarkerRect.right + 1 &&
               r.y1 >= dropmarkerRect.top &&
-              r.y2 <= dropmarkerRect.bottom)
+              r.y2 <= dropmarkerRect.bottom) ||
+            // We expect many changes in the results view.
+            (r.x1 >= resultsRect.left &&
+              r.x2 <= resultsRect.right &&
+              r.y1 >= resultsRect.top &&
+              r.y2 <= resultsRect.bottom)
           )
-        // XXX For some reason the awesomebar panel isn't in our screenshots,
-        // but that's where we actually expect many changes.
       ),
   };
 

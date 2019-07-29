@@ -403,6 +403,8 @@ pref("permissions.desktop-notification.postPrompt.enabled", true);
 pref("permissions.desktop-notification.postPrompt.enabled", false);
 #endif
 
+pref("permissions.fullscreen.allowed", false);
+
 pref("permissions.postPrompt.animate", true);
 
 // This is primarily meant to be enabled for studies.
@@ -1009,11 +1011,7 @@ pref("browser.flash-protected-mode-flip.enable", false);
 pref("browser.flash-protected-mode-flip.done", false);
 
 // Dark in-content pages
-#ifdef NIGHTLY_BUILD
 pref("browser.in-content.dark-mode", true);
-#else
-pref("browser.in-content.dark-mode", false);
-#endif
 
 pref("dom.ipc.shims.enabledWarnings", false);
 
@@ -1042,7 +1040,7 @@ pref("dom.ipc.plugins.sandbox-level.flash", 0);
 // On windows these levels are:
 // See - security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
 // SetSecurityLevelForContentProcess() for what the different settings mean.
-pref("security.sandbox.content.level", 6);
+pref("security.sandbox.content.level", 5);
 
 // This controls the depth of stack trace that is logged when Windows sandbox
 // logging is turned on.  This is only currently available for the content
@@ -1228,6 +1226,7 @@ pref("services.sync.prefs.sync.dom.disable_window_flip", true);
 pref("services.sync.prefs.sync.dom.disable_window_move_resize", true);
 pref("services.sync.prefs.sync.dom.event.contextmenu.enabled", true);
 pref("services.sync.prefs.sync.extensions.update.enabled", true);
+pref("services.sync.prefs.sync.extensions.activeThemeID", true);
 pref("services.sync.prefs.sync.intl.accept_languages", true);
 pref("services.sync.prefs.sync.layout.spellcheckDefault", true);
 pref("services.sync.prefs.sync.media.autoplay.default", true);
@@ -1362,14 +1361,10 @@ pref("security.insecure_password.ui.enabled", true);
 // Show in-content login form warning UI for insecure login fields
 pref("security.insecure_field_warning.contextual.enabled", true);
 
-// Show degraded UI for http pages; disabled for now
-pref("security.insecure_connection_icon.enabled", false);
-// Show degraded UI for http pages in private mode only for Nightly: Bug 1434626
-#if defined(NIGHTLY_BUILD)
+// Show degraded UI for http pages.
+pref("security.insecure_connection_icon.enabled", true);
+// Show degraded UI for http pages in private mode.
 pref("security.insecure_connection_icon.pbmode.enabled", true);
-#else
-pref("security.insecure_connection_icon.pbmode.enabled", false);
-#endif
 
 // Show "Not Secure" text for http pages; disabled for now
 pref("security.insecure_connection_text.enabled", false);
@@ -1603,19 +1598,13 @@ pref("browser.contentblocking.fingerprinting.preferences.ui.enabled", true);
 // One value from each section must be included in the browser.contentblocking.features.strict pref.
 pref("browser.contentblocking.features.strict", "tp,tpPrivate,cookieBehavior4,cm,fp");
 
-// Enable the Report Breakage UI on Nightly and Beta but not on Release yet.
-#ifdef EARLY_BETA_OR_EARLIER
-pref("browser.contentblocking.reportBreakage.enabled", true);
-#else
-pref("browser.contentblocking.reportBreakage.enabled", false);
-#endif
-// Show report breakage for tracking cookies in all channels.
-pref("browser.contentblocking.rejecttrackers.reportBreakage.enabled", true);
-
 pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-issues.herokuapp.com/new");
 
 // Enable Protections report's Lockwise card by default.
 pref("browser.contentblocking.report.lockwise.enabled", true);
+
+// Enable Protections report's Monitor card by default.
+pref("browser.contentblocking.report.monitor.enabled", true);
 
 // Enables the new Protections Panel.
 #ifdef NIGHTLY_BUILD
@@ -1751,7 +1740,13 @@ pref("signon.generation.enabled", true);
 pref("signon.schemeUpgrades", true);
 pref("signon.privateBrowsingCapture.enabled", true);
 pref("signon.showAutoCompleteFooter", true);
+#ifdef NIGHTLY_BUILD
+pref("signon.management.page.enabled", true);
+pref("signon.management.overrideURI", "about:logins?filter=%DOMAIN%");
+#else
 pref("signon.management.page.enabled", false);
+#endif
+pref("signon.management.page.breach-alerts.enabled", false);
 #ifdef NIGHTLY_BUILD
 // Bug 1563330 tracks shipping this by default.
 pref("signon.showAutoCompleteOrigins", true);
@@ -1760,7 +1755,8 @@ pref("signon.includeOtherSubdomainsInLookup", true);
 pref("signon.management.page.faqURL", "https://lockwise.firefox.com/faq.html");
 pref("signon.management.page.feedbackURL",
      "https://www.surveygizmo.com/s3/5036102/Lockwise-feedback?ver=%VERSION%");
-
+pref("signon.management.page.mobileAndroidURL", "https://app.adjust.com/6tteyjo?redirect=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dmozilla.lockbox&utm_campaign=Desktop&utm_adgroup=InProduct&utm_creative=Elipsis_Menu");
+pref("signon.management.page.mobileAppleURL", "https://app.adjust.com/6tteyjo?redirect=https%3A%2F%2Fitunes.apple.com%2Fapp%2Fid1314000270%3Fmt%3D8&utm_campaign=Desktop&utm_adgroup=InProduct&utm_creative=Elipsis_Menu");
 // Enable the "Simplify Page" feature in Print Preview. This feature
 // is disabled by default in toolkit.
 pref("print.use_simplify_page", true);

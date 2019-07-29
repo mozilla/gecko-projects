@@ -26,11 +26,6 @@ ChromeUtils.defineModuleGetter(
 );
 ChromeUtils.defineModuleGetter(
   this,
-  "RemoteSettings",
-  "resource://services-settings/remote-settings.js"
-);
-ChromeUtils.defineModuleGetter(
-  this,
   "Services",
   "resource://gre/modules/Services.jsm"
 );
@@ -38,37 +33,24 @@ ChromeUtils.defineModuleGetter(
 XPCOMUtils.defineLazyGetter(this, "log", () => {
   return LoginHelper.createLogger("AboutLoginsParent");
 });
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "BREACH_ALERTS_ENABLED",
+  "signon.management.page.breach-alerts.enabled",
+  false
+);
 
 const ABOUT_LOGINS_ORIGIN = "about:logins";
 const MASTER_PASSWORD_NOTIFICATION_ID = "master-password-login-required";
 
-const PRIVILEGEDABOUT_PROCESS_PREF =
-  "browser.tabs.remote.separatePrivilegedContentProcess";
-const PRIVILEGEDABOUT_PROCESS_ENABLED = Services.prefs.getBoolPref(
-  PRIVILEGEDABOUT_PROCESS_PREF,
-  false
-);
-
-const FEEDBACK_URL_PREF = "signon.management.page.feedbackURL";
-const FEEDBACK_URL = Services.urlFormatter.formatURLPref(FEEDBACK_URL_PREF);
-
-const FAQ_URL_PREF = "signon.management.page.faqURL";
-const FAQ_URL = Services.prefs.getStringPref(FAQ_URL_PREF);
-
-// When the privileged content process is enabled, we expect about:logins
-// to load in it. Otherwise, it's in a normal web content process.
-const EXPECTED_ABOUTLOGINS_REMOTE_TYPE = PRIVILEGEDABOUT_PROCESS_ENABLED
-  ? E10SUtils.PRIVILEGEDABOUT_REMOTE_TYPE
-  : E10SUtils.DEFAULT_REMOTE_TYPE;
-
-const isValidLogin = login => {
-  return !(login.origin || "").startsWith("chrome://");
-};
+// about:logins will always use the privileged content process,
+// even if it is disabled for other consumers such as about:newtab.
+const EXPECTED_ABOUTLOGINS_REMOTE_TYPE = E10SUtils.PRIVILEGEDABOUT_REMOTE_TYPE;
 
 const convertSubjectToLogin = subject => {
   subject.QueryInterface(Ci.nsILoginMetaInfo).QueryInterface(Ci.nsILoginInfo);
   const login = LoginHelper.loginToVanillaObject(subject);
-  if (!isValidLogin(login)) {
+  if (!LoginHelper.isUserFacingLogin(login)) {
     return null;
   }
   return augmentVanillaLoginObject(login);
@@ -139,13 +121,40 @@ var AboutLoginsParent = {
         break;
       }
       case "AboutLogins:OpenFeedback": {
+        const FEEDBACK_URL_PREF = "signon.management.page.feedbackURL";
+        const FEEDBACK_URL = Services.urlFormatter.formatURLPref(
+          FEEDBACK_URL_PREF
+        );
         message.target.ownerGlobal.openWebLinkIn(FEEDBACK_URL, "tab", {
           relatedToCurrent: true,
         });
         break;
       }
       case "AboutLogins:OpenFAQ": {
+        const FAQ_URL_PREF = "signon.management.page.faqURL";
+        const FAQ_URL = Services.prefs.getStringPref(FAQ_URL_PREF);
         message.target.ownerGlobal.openWebLinkIn(FAQ_URL, "tab", {
+          relatedToCurrent: true,
+        });
+        break;
+      }
+      case "AboutLogins:OpenMobileAndroid": {
+        const MOBILE_ANDROID_URL_PREF =
+          "signon.management.page.mobileAndroidURL";
+        const MOBILE_ANDROID_URL = Services.prefs.getStringPref(
+          MOBILE_ANDROID_URL_PREF
+        );
+        message.target.ownerGlobal.openWebLinkIn(MOBILE_ANDROID_URL, "tab", {
+          relatedToCurrent: true,
+        });
+        break;
+      }
+      case "AboutLogins:OpenMobileIos": {
+        const MOBILE_IOS_URL_PREF = "signon.management.page.mobileAppleURL";
+        const MOBILE_IOS_URL = Services.prefs.getStringPref(
+          MOBILE_IOS_URL_PREF
+        );
+        message.target.ownerGlobal.openWebLinkIn(MOBILE_IOS_URL, "tab", {
           relatedToCurrent: true,
         });
         break;
@@ -182,13 +191,34 @@ var AboutLoginsParent = {
         this._subscribers.add(message.target);
 
         let messageManager = message.target.messageManager;
+
         const logins = await this.getAllLogins();
-        messageManager.sendAsyncMessage("AboutLogins:AllLogins", logins);
-        const breachesByLoginGUID = await this.getBreachesForLogins(logins);
-        messageManager.sendAsyncMessage(
-          "AboutLogins:UpdateBreaches",
-          breachesByLoginGUID
-        );
+        try {
+          messageManager.sendAsyncMessage("AboutLogins:AllLogins", logins);
+
+          if (!BREACH_ALERTS_ENABLED) {
+            return;
+          }
+
+          const breachesByLoginGUID = await LoginHelper.getBreachesForLogins(
+            logins
+          );
+          messageManager.sendAsyncMessage(
+            "AboutLogins:UpdateBreaches",
+            breachesByLoginGUID
+          );
+        } catch (ex) {
+          if (ex.result != Cr.NS_ERROR_NOT_INITIALIZED) {
+            throw ex;
+          }
+
+          // The message manager may be destroyed before the replies can be sent.
+          log.debug(
+            "AboutLogins:Subscribe: exception when replying with logins",
+            ex
+          );
+        }
+
         break;
       }
       case "AboutLogins:UpdateLogin": {
@@ -354,15 +384,24 @@ var AboutLoginsParent = {
     for (let subscriber of this._subscriberIterator()) {
       try {
         subscriber.messageManager.sendAsyncMessage(name, details);
-      } catch (ex) {}
+      } catch (ex) {
+        if (ex.result != Cr.NS_ERROR_NOT_INITIALIZED) {
+          throw ex;
+        }
+
+        // The message manager may be destroyed before the message is sent.
+        log.debug(
+          "messageSubscribers: exception when calling sendAsyncMessage",
+          ex
+        );
+      }
     }
   },
 
   async getAllLogins() {
     try {
-      let logins = await Services.logins.getAllLoginsAsync();
+      let logins = await LoginHelper.getAllUserFacingLogins();
       return logins
-        .filter(isValidLogin)
         .map(LoginHelper.loginToVanillaObject)
         .map(augmentVanillaLoginObject);
     } catch (e) {
@@ -372,25 +411,5 @@ var AboutLoginsParent = {
       }
       throw e;
     }
-  },
-
-  async getBreachesForLogins(logins) {
-    const breaches = await RemoteSettings("fxmonitor-breaches").get();
-    const breachHostMap = new Map();
-    for (const breach of breaches) {
-      breachHostMap.set(breach.Domain, breach);
-    }
-    const breachesByLoginGUID = new Map();
-    for (const login of logins) {
-      const loginURI = Services.io.newURI(login.origin);
-      const breach = breachHostMap.get(loginURI.host) || false;
-      if (
-        breach &&
-        login.timePasswordChanged < new Date(breach.BreachDate).getTime()
-      ) {
-        breachesByLoginGUID.set(login.guid, breach);
-      }
-    }
-    return breachesByLoginGUID;
   },
 };

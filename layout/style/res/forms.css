@@ -134,7 +134,7 @@ textarea {
   user-select: text;
   white-space: pre-wrap;
   word-wrap: break-word;
-  overflow-clip-box: content-box;
+  overflow-clip-box: padding-box content-box;
   /* A few properties that we don't want to inherit by default: */
   text-align: initial;
   text-indent: initial;
@@ -171,6 +171,17 @@ input > .anonymous-div,
 input::placeholder,
 input > .preview-div {
   white-space: pre;
+}
+
+input[type=password] > .anonymous-div,
+input[type=password] > .preview-div {
+  /*
+   * In password fields, any character should be put same direction.  Otherwise,
+   * caret position at typing tells everybody whether the character is an RTL
+   * or an LTR character.  Unfortunately, this makes odd rendering when bidi
+   * text is unmasked.
+   */
+  unicode-bidi: bidi-override;
 }
 
 textarea > .anonymous-div {
@@ -334,8 +345,10 @@ select > button[orientation="right"]:active {
   text-align: unset;
   user-select: none;
   /* Make sure to size correctly if the combobox has a non-auto block-size. */
-  block-size: 100% ! important;
-  box-sizing: border-box ! important;
+  block-size: 100%;
+  /* Try to always display our own text */
+  min-inline-size: max-content;
+  box-sizing: border-box;
   line-height: -moz-block-height;
 }
 
@@ -727,7 +740,7 @@ input[type="color"]:-moz-focusring::-moz-focus-inner,
 input[type="reset"]:-moz-focusring::-moz-focus-inner,
 input[type="button"]:-moz-focusring::-moz-focus-inner,
 input[type="submit"]:-moz-focusring::-moz-focus-inner {
-  border-color: ButtonText;
+  border-color: currentColor;
 }
 
 button:disabled:active, button:disabled,

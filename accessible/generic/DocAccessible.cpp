@@ -193,7 +193,7 @@ role DocAccessible::NativeRole() const {
   nsCOMPtr<nsIDocShell> docShell = nsCoreUtils::GetDocShellFor(mDocumentNode);
   if (docShell) {
     nsCOMPtr<nsIDocShellTreeItem> sameTypeRoot;
-    docShell->GetSameTypeRootTreeItem(getter_AddRefs(sameTypeRoot));
+    docShell->GetInProcessSameTypeRootTreeItem(getter_AddRefs(sameTypeRoot));
     int32_t itemType = docShell->ItemType();
     if (sameTypeRoot == docShell) {
       // Root of content or chrome tree
@@ -498,7 +498,7 @@ nsRect DocAccessible::RelativeBounds(nsIFrame** aRelativeFrame) const {
       bounds = scrollPort;
     }
 
-    document = parentDoc = document->GetParentDocument();
+    document = parentDoc = document->GetInProcessParentDocument();
   }
 
   return bounds;
@@ -997,7 +997,7 @@ void DocAccessible::ARIAActiveDescendantChanged(Accessible* aAccessible) {
     nsAutoString id;
     if (elm->AsElement()->GetAttr(kNameSpaceID_None,
                                   nsGkAtoms::aria_activedescendant, id)) {
-      dom::Element* activeDescendantElm = elm->OwnerDoc()->GetElementById(id);
+      dom::Element* activeDescendantElm = IDRefsIterator::GetElem(elm, id);
       if (activeDescendantElm) {
         Accessible* activeDescendant = GetAccessible(activeDescendantElm);
         if (activeDescendant) {
@@ -2276,7 +2276,7 @@ bool DocAccessible::IsLoadEventTarget() const {
   NS_ASSERTION(treeItem, "No document shell for document!");
 
   nsCOMPtr<nsIDocShellTreeItem> parentTreeItem;
-  treeItem->GetParent(getter_AddRefs(parentTreeItem));
+  treeItem->GetInProcessParent(getter_AddRefs(parentTreeItem));
 
   // Not a root document.
   if (parentTreeItem) {

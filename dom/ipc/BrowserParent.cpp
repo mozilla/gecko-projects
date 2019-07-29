@@ -43,7 +43,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ProcessHangMonitor.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/UniquePtr.h"
@@ -401,6 +401,19 @@ nsIXULBrowserWindow* BrowserParent::GetXULBrowserWindow() {
   nsCOMPtr<nsIXULBrowserWindow> xulBrowserWindow;
   window->GetXULBrowserWindow(getter_AddRefs(xulBrowserWindow));
   return xulBrowserWindow;
+}
+
+uint32_t BrowserParent::GetMaxTouchPoints(Element* aElement) {
+  if (!aElement) {
+    return 0;
+  }
+
+  if (StaticPrefs::dom_maxtouchpoints_testing_value() >= 0) {
+    return StaticPrefs::dom_maxtouchpoints_testing_value();
+  }
+
+  nsIWidget* widget = nsContentUtils::WidgetForDocument(aElement->OwnerDoc());
+  return widget ? widget->GetMaxTouchPoints() : 0;
 }
 
 a11y::DocAccessibleParent* BrowserParent::GetTopLevelDocAccessible() const {
@@ -2567,8 +2580,23 @@ bool BrowserParent::GetWebProgressListener(
   MOZ_ASSERT(aOutManager);
   MOZ_ASSERT(aOutListener);
 
-  nsCOMPtr<nsIBrowser> browser =
-      mFrameElement ? mFrameElement->AsBrowser() : nullptr;
+  nsCOMPtr<nsIBrowser> browser;
+  RefPtr<Element> currentElement = mFrameElement;
+
+  // In Responsive Design Mode, mFrameElement will be the <iframe mozbrowser>,
+  // but we want the <xul:browser> that it is embedded in.
+  while (currentElement) {
+    browser = currentElement->AsBrowser();
+    if (browser) {
+      break;
+    }
+
+    BrowsingContext* browsingContext =
+        currentElement->OwnerDoc()->GetBrowsingContext();
+    currentElement =
+        browsingContext ? browsingContext->GetEmbedderElement() : nullptr;
+  }
+
   if (!browser) {
     return false;
   }
@@ -2641,7 +2669,7 @@ mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
 
   nsCOMPtr<nsISessionStoreFunctions> funcs =
       do_ImportModule("resource://gre/modules/SessionStoreFunctions.jsm");
-  MOZ_ALWAYS_TRUE(funcs);
+  NS_ENSURE_TRUE(funcs, IPC_OK());
   nsCOMPtr<nsIXPConnectWrappedJS> wrapped = do_QueryInterface(funcs);
   AutoJSAPI jsapi;
   MOZ_ALWAYS_TRUE(jsapi.Init(wrapped->GetJSObjectGlobal()));
@@ -3073,9 +3101,10 @@ mozilla::ipc::IPCResult BrowserParent::RecvBrowserFrameOpenWindow(
                                           aURL, aName, aForceNoReferrer,
                                           aFeatures);
   cwi.windowOpened() = (opened == BrowserElementParent::OPEN_WINDOW_ADDED);
+  cwi.maxTouchPoints() = GetMaxTouchPoints();
+
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (widget) {
-    cwi.maxTouchPoints() = widget->GetMaxTouchPoints();
     cwi.dimensions() = GetDimensionInfo();
   }
 

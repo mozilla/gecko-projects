@@ -18,11 +18,7 @@ loader.lazyRequireGetter(
   "devtools/shared/client/debugger-client",
   true
 );
-loader.lazyRequireGetter(
-  this,
-  "l10n",
-  "devtools/client/webconsole/webconsole-l10n"
-);
+loader.lazyRequireGetter(this, "l10n", "devtools/client/webconsole/utils/l10n");
 loader.lazyRequireGetter(
   this,
   "WebConsole",
@@ -39,7 +35,6 @@ const BC_WINDOW_FEATURES =
 
 function HUDService() {
   this.consoles = new Map();
-  this.lastFinishedRequest = { callback: null };
 }
 
 HUDService.prototype = {
@@ -61,17 +56,6 @@ HUDService.prototype = {
   getBrowserConsoleSessionState() {
     return this._browerConsoleSessionState;
   },
-
-  /**
-   * Assign a function to this property to listen for every request that
-   * completes. Used by unit tests. The callback takes one argument: the HTTP
-   * activity object as received from the remote Web Console.
-   *
-   * @type object
-   *       Includes a property named |callback|. Assign the function to the
-   *       |callback| property of this object.
-   */
-  lastFinishedRequest: null,
 
   /**
    * Get the current context, which is the main application window.
@@ -158,8 +142,9 @@ HUDService.prototype = {
       const { DevToolsLoader } = ChromeUtils.import(
         "resource://devtools/shared/Loader.jsm"
       );
-      const loader = new DevToolsLoader();
-      loader.freshCompartment = true;
+      const loader = new DevToolsLoader({
+        freshCompartment: true,
+      });
       const { DebuggerServer } = loader.require("devtools/server/main");
 
       DebuggerServer.init();

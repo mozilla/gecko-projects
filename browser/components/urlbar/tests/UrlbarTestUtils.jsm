@@ -21,9 +21,9 @@ var UrlbarTestUtils = {
    * @returns {Promise} Resolved when done.
    */
   async promiseSearchComplete(win) {
-    return BrowserTestUtils.waitForPopupEvent(win.gURLBar.panel, "shown").then(
-      () => win.gURLBar.lastQueryContextPromise
-    );
+    return BrowserTestUtils.waitForCondition(
+      () => win.gURLBar.view.isOpen
+    ).then(() => win.gURLBar.lastQueryContextPromise);
   },
 
   /**
@@ -204,23 +204,8 @@ var UrlbarTestUtils = {
     return win.gURLBar.view._rows.children.length;
   },
 
-  /**
-   * Returns the results panel object associated with the window.
-   * @note generally tests should use getDetailsOfResultAt rather than
-   * accessing panel elements directly.
-   * @param {object} win The window containing the urlbar
-   * @returns {object} the results panel object.
-   */
-  getPanel(win) {
-    return win.gURLBar.panel;
-  },
-
   getDropMarker(win) {
-    return win.document.getAnonymousElementByAttribute(
-      win.gURLBar.textbox,
-      "anonid",
-      "historydropmarker"
-    );
+    return win.gURLBar.dropmarker;
   },
 
   /**
@@ -271,7 +256,7 @@ var UrlbarTestUtils = {
       throw new Error("openFn should be supplied to promisePopupOpen");
     }
     await openFn();
-    return BrowserTestUtils.waitForPopupEvent(this.getPanel(win), "shown");
+    return BrowserTestUtils.waitForCondition(() => win.gURLBar.view.isOpen);
   },
 
   /**
@@ -287,7 +272,7 @@ var UrlbarTestUtils = {
     } else {
       win.gURLBar.view.close();
     }
-    return BrowserTestUtils.waitForPopupEvent(this.getPanel(win), "hidden");
+    return BrowserTestUtils.waitForCondition(() => !win.gURLBar.view.isOpen);
   },
 
   /**
@@ -295,8 +280,7 @@ var UrlbarTestUtils = {
    * @returns {boolean} Whether the popup is open
    */
   isPopupOpen(win) {
-    let panel = this.getPanel(win);
-    return panel.state == "open" || panel.state == "showing";
+    return win.gURLBar.view.isOpen;
   },
 
   /**

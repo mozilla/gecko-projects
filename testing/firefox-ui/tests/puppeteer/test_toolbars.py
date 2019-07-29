@@ -85,26 +85,18 @@ class TestLocationBar(PuppeteerMixin, MarionetteTestCase):
         self.locationbar = self.browser.navbar.locationbar
 
     def test_elements(self):
-        self.assertEqual(self.locationbar.urlbar.get_property('localName'), 'textbox')
-        self.assertIn('urlbar-input', self.locationbar.urlbar_input.get_property('className'))
+        self.assertEqual(self.locationbar.urlbar_input.get_property('id'), 'urlbar-input')
 
-        self.assertEqual(self.locationbar.connection_icon.get_property('localName'), 'image')
         self.assertEqual(self.locationbar.identity_box.get_property('localName'), 'box')
         self.assertEqual(self.locationbar.identity_country_label.get_property('localName'),
                          'label')
         self.assertEqual(self.locationbar.identity_organization_label.get_property('localName'),
                          'label')
         self.assertEqual(self.locationbar.identity_icon.get_property('localName'), 'image')
-        self.assertEqual(self.locationbar.history_drop_marker.get_property('localName'),
-                         'dropmarker')
         self.assertEqual(self.locationbar.reload_button.get_property('localName'),
                          'toolbarbutton')
         self.assertEqual(self.locationbar.stop_button.get_property('localName'),
                          'toolbarbutton')
-
-        self.assertEqual(self.locationbar.contextmenu.get_property('localName'), 'menupopup')
-        self.assertEqual(self.locationbar.get_contextmenu_entry('paste').get_attribute('cmd'),
-                         'cmd_paste')
 
     def test_reload(self):
         event_types = ["shortcut", "shortcut2", "button"]
@@ -159,7 +151,6 @@ class TestIdentityPopup(PuppeteerMixin, MarionetteTestCase):
         self.assertEqual(main.element.get_property('localName'), 'panelview')
 
         self.assertEqual(main.expander.get_property('localName'), 'button')
-        self.assertEqual(main.host.get_property('localName'), 'label')
         self.assertEqual(main.insecure_connection_label.get_property('localName'),
                          'description')
         self.assertEqual(main.internal_connection_label.get_property('localName'),

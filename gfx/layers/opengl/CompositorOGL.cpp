@@ -20,7 +20,8 @@
 #include "gfxUtils.h"               // for gfxUtils, etc
 #include "mozilla/ArrayUtils.h"     // for ArrayLength
 #include "mozilla/Preferences.h"    // for Preferences
-#include "mozilla/StaticPrefs.h"    // for StaticPrefs
+#include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/gfx/BasePoint.h"  // for BasePoint
 #include "mozilla/gfx/Matrix.h"     // for Matrix4x4, Matrix
 #include "mozilla/gfx/Triangle.h"   // for Triangle
@@ -192,6 +193,8 @@ CompositorOGL::CompositorOGL(CompositorBridgeParent* aParent,
       mWindowRenderTarget(nullptr),
       mQuadVBO(0),
       mTriangleVBO(0),
+      mPreviousFrameDoneSync(nullptr),
+      mThisFrameDoneSync(nullptr),
       mHasBGRA(0),
       mUseExternalSurfaceSize(aUseExternalSurfaceSize),
       mFrameInProgress(false),
@@ -288,6 +291,8 @@ void CompositorOGL::CleanupResources() {
     // Leak resources!
     mQuadVBO = 0;
     mTriangleVBO = 0;
+    mPreviousFrameDoneSync = nullptr;
+    mThisFrameDoneSync = nullptr;
     mGLContext = nullptr;
     mPrograms.clear();
     return;
@@ -323,6 +328,16 @@ void CompositorOGL::CleanupResources() {
   }
 
   mGLContext->MakeCurrent();
+
+  if (mPreviousFrameDoneSync) {
+    mGLContext->fDeleteSync(mPreviousFrameDoneSync);
+    mPreviousFrameDoneSync = nullptr;
+  }
+
+  if (mThisFrameDoneSync) {
+    mGLContext->fDeleteSync(mThisFrameDoneSync);
+    mThisFrameDoneSync = nullptr;
+  }
 
   mBlitTextureImageHelper = nullptr;
 
@@ -1746,6 +1761,8 @@ void CompositorOGL::EndFrame() {
     mTexturePool->EndFrame();
   }
 
+  InsertFrameDoneSync();
+
   mGLContext->SwapBuffers();
   mGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, 0);
 
@@ -1759,6 +1776,32 @@ void CompositorOGL::EndFrame() {
   }
 
   Compositor::EndFrame();
+}
+
+void CompositorOGL::InsertFrameDoneSync() {
+#ifdef XP_MACOSX
+  // Only do this on macOS.
+  // On other platforms, SwapBuffers automatically applies back-pressure.
+  if (StaticPrefs::gfx_core_animation_enabled_AtStartup()) {
+    if (mThisFrameDoneSync) {
+      mGLContext->fDeleteSync(mThisFrameDoneSync);
+    }
+    mThisFrameDoneSync =
+        mGLContext->fFenceSync(LOCAL_GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  }
+#endif
+}
+
+void CompositorOGL::WaitForGPU() {
+  if (mPreviousFrameDoneSync) {
+    AUTO_PROFILER_LABEL("Waiting for GPU to finish previous frame", GRAPHICS);
+    mGLContext->fClientWaitSync(mPreviousFrameDoneSync,
+                                LOCAL_GL_SYNC_FLUSH_COMMANDS_BIT,
+                                LOCAL_GL_TIMEOUT_IGNORED);
+    mGLContext->fDeleteSync(mPreviousFrameDoneSync);
+  }
+  mPreviousFrameDoneSync = mThisFrameDoneSync;
+  mThisFrameDoneSync = nullptr;
 }
 
 void CompositorOGL::SetDestinationSurfaceSize(const IntSize& aSize) {
@@ -1974,7 +2017,7 @@ GLuint CompositorOGL::GetTemporaryTexture(GLenum aTarget, GLenum aUnit) {
 }
 
 bool CompositorOGL::SupportsTextureDirectMapping() {
-  if (!StaticPrefs::gfx_allow_texture_direct_mapping()) {
+  if (!StaticPrefs::gfx_allow_texture_direct_mapping_AtStartup()) {
     return false;
   }
 

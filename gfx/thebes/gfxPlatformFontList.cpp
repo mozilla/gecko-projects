@@ -25,7 +25,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/BlobImpl.h"
@@ -425,7 +425,8 @@ nsresult gfxPlatformFontList::InitFontList() {
 
   // Try to initialize the cross-process shared font list if enabled by prefs,
   // but not if we're running in Safe Mode.
-  if (StaticPrefs::gfx_e10s_font_list_shared() && !gfxPlatform::InSafeMode()) {
+  if (StaticPrefs::gfx_e10s_font_list_shared_AtStartup() &&
+      !gfxPlatform::InSafeMode()) {
     for (auto i = mFontEntries.Iter(); !i.Done(); i.Next()) {
       i.Data()->mShmemCharacterMap = nullptr;
       i.Data()->mShmemFace = nullptr;
@@ -1039,14 +1040,43 @@ fontlist::Family* gfxPlatformFontList::FindSharedFamily(
   return family;
 }
 
+class InitializeFamilyRunnable : public mozilla::Runnable {
+ public:
+  explicit InitializeFamilyRunnable(uint32_t aFamilyIndex)
+      : Runnable("gfxPlatformFontList::InitializeFamilyRunnable"),
+        mIndex(aFamilyIndex) {}
+
+  NS_IMETHOD Run() override {
+    auto list = gfxPlatformFontList::PlatformFontList()->SharedFontList();
+    if (!list) {
+      return NS_OK;
+    }
+    if (mIndex >= list->NumFamilies()) {
+      // Out of range? Maybe the list got reinitialized since this request
+      // was posted - just ignore it.
+      return NS_OK;
+    }
+    dom::ContentChild::GetSingleton()->SendInitializeFamily(
+        list->GetGeneration(), mIndex);
+    return NS_OK;
+  }
+
+ private:
+  uint32_t mIndex;
+};
+
 bool gfxPlatformFontList::InitializeFamily(fontlist::Family* aFamily) {
   MOZ_ASSERT(SharedFontList());
   auto list = SharedFontList();
   if (!XRE_IsParentProcess()) {
     uint32_t index = aFamily - list->Families();
     MOZ_ASSERT(index < list->NumFamilies());
-    dom::ContentChild::GetSingleton()->SendInitializeFamily(
-        list->GetGeneration(), index);
+    if (NS_IsMainThread()) {
+      dom::ContentChild::GetSingleton()->SendInitializeFamily(
+          list->GetGeneration(), index);
+    } else {
+      NS_DispatchToMainThread(new InitializeFamilyRunnable(index));
+    }
     return aFamily->IsInitialized();
   }
   AutoTArray<fontlist::Face::InitData, 16> faceList;

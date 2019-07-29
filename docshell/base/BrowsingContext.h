@@ -173,6 +173,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // CacheChildren.
   bool IsCached();
 
+  // Check that this browsing context is targetable for navigations (i.e. that
+  // it is neither closed, cached, nor discarded).
+  bool IsTargetable();
+
   const nsString& Name() const { return mName; }
   void GetName(nsAString& aName) { aName = mName; }
   bool NameEquals(const nsAString& aName) { return mName.Equals(aName); }
@@ -398,8 +402,6 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // Performs access control to check that 'this' can access 'aContext'.
   bool CanAccess(BrowsingContext* aContext);
 
-  bool IsActive() const;
-
   // Removes the context from its group and sets mIsDetached to true.
   void Unregister();
 
@@ -498,8 +500,13 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
  * lives in this process, and a same-process WindowProxy should be used (see
  * nsGlobalWindowOuter). This should only be called by bindings code, ToJSValue
  * is the right API to get a WindowProxy for a BrowsingContext.
+ *
+ * If aTransplantTo is non-null, then the WindowProxy object will eventually be
+ * transplanted onto it. Therefore it should be used as the value in the remote
+ * proxy map.
  */
 extern bool GetRemoteOuterWindowProxy(JSContext* aCx, BrowsingContext* aContext,
+                                      JS::Handle<JSObject*> aTransplantTo,
                                       JS::MutableHandle<JSObject*> aRetVal);
 
 typedef BrowsingContext::Transaction BrowsingContextTransaction;

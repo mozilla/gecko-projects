@@ -279,7 +279,7 @@ raptor-tp6-binast-1-firefox:
             - --test=raptor-tp6-binast-1
 
 raptor-tp6m-1-geckoview:
-    description: "Raptor tp6m-1 on Geckoview"
+    description: "Raptor tp6m-1 on GeckoView"
     try-name: raptor-tp6m-1-geckoview
     treeherder-symbol: Rap(tp6m-1)
     run-on-projects: ['mozilla-central']
@@ -357,7 +357,7 @@ raptor-tp6m-2-fenix:
             - --activity=org.mozilla.fenix.IntentReceiverActivity
 
 raptor-tp6m-2-geckoview:
-    description: "Raptor tp6m-2 on Geckoview"
+    description: "Raptor tp6m-2 on GeckoView"
     try-name: raptor-tp6m-2-geckoview
     treeherder-symbol: Rap(tp6m-2)
     target: geckoview_example.apk
@@ -391,7 +391,7 @@ raptor-tp6m-2-refbrow:
             - --activity=org.mozilla.reference.browser.BrowserTestActivity
 
 raptor-tp6m-3-geckoview:
-    description: "Raptor tp6m-3 on Geckoview"
+    description: "Raptor tp6m-3 on GeckoView"
     try-name: raptor-tp6m-3-geckoview
     treeherder-symbol: Rap(tp6m-3)
     target: geckoview_example.apk
@@ -446,7 +446,7 @@ raptor-tp6m-3-fenix:
             - --activity=org.mozilla.fenix.IntentReceiverActivity
 
 raptor-tp6m-4-geckoview:
-    description: "Raptor tp6m-4 on Geckoview"
+    description: "Raptor tp6m-4 on GeckoView"
     try-name: raptor-tp6m-4-geckoview
     treeherder-symbol: Rap(tp6m-4)
     target: geckoview_example.apk
@@ -501,7 +501,7 @@ raptor-tp6m-4-fenix:
             - --activity=org.mozilla.fenix.IntentReceiverActivity
 
 raptor-tp6m-5-geckoview:
-    description: "Raptor tp6m-5 on Geckoview"
+    description: "Raptor tp6m-5 on GeckoView"
     try-name: raptor-tp6m-5-geckoview
     treeherder-symbol: Rap(tp6m-5)
     run-on-projects: ['mozilla-central']
@@ -557,7 +557,7 @@ raptor-tp6m-5-fenix:
             - --activity=org.mozilla.fenix.IntentReceiverActivity
 
 raptor-tp6m-6-geckoview:
-    description: "Raptor tp6m-6 on Geckoview"
+    description: "Raptor tp6m-6 on GeckoView"
     try-name: raptor-tp6m-6-geckoview
     treeherder-symbol: Rap(tp6m-6)
     run-on-projects: ['mozilla-central']
@@ -612,7 +612,7 @@ raptor-tp6m-6-fenix:
             - --activity=org.mozilla.fenix.IntentReceiverActivity
 
 raptor-tp6m-7-geckoview:
-    description: "Raptor tp6m-7 on Geckoview"
+    description: "Raptor tp6m-7 on GeckoView"
     try-name: raptor-tp6m-7-geckoview
     treeherder-symbol: Rap(tp6m-7)
     run-on-projects: ['mozilla-central']
@@ -668,7 +668,7 @@ raptor-tp6m-7-fenix:
             - --activity=org.mozilla.fenix.IntentReceiverActivity
 
 raptor-tp6m-8-geckoview:
-    description: "Raptor tp6m-8 on Geckoview"
+    description: "Raptor tp6m-8 on GeckoView"
     try-name: raptor-tp6m-8-geckoview
     treeherder-symbol: Rap(tp6m-8)
     run-on-projects: ['mozilla-central']
@@ -723,7 +723,7 @@ raptor-tp6m-8-fenix:
             - --activity=org.mozilla.fenix.IntentReceiverActivity
 
 raptor-tp6m-9-geckoview:
-    description: "Raptor tp6m-9 on Geckoview"
+    description: "Raptor tp6m-9 on GeckoView"
     try-name: raptor-tp6m-9-geckoview
     treeherder-symbol: Rap(tp6m-9)
     target: geckoview_example.apk
@@ -779,7 +779,7 @@ raptor-tp6m-9-fenix:
             - --activity=org.mozilla.fenix.IntentReceiverActivity
 
 raptor-tp6m-10-geckoview:
-    description: "Raptor tp6m-10 on Geckoview"
+    description: "Raptor tp6m-10 on GeckoView"
     try-name: raptor-tp6m-10-geckoview
     treeherder-symbol: Rap(tp6m-10)
     target: geckoview_example.apk
@@ -1536,6 +1536,28 @@ raptor-tp6m-26-fenix-cold:
             - --binary-path=org.mozilla.fenix.performancetest
             - --activity=org.mozilla.fenix.IntentReceiverActivity
 
+raptor-tp6m-27-fenix-cold:
+    description: "Raptor tp6m-27 cold page-load on Fenix"
+    try-name: raptor-tp6m-27-fenix-cold
+    treeherder-symbol: Rap-fenix(tp6m-c-27)
+    run-on-projects: []
+    e10s: true
+    target:
+        by-test-platform:
+            android-hw.*-aarch64.*/.*:
+                index: project.mobile.fenix.v2.performance-test.latest.aarch64
+                name: target.apk
+            default:
+                index: project.mobile.fenix.v2.performance-test.latest.arm
+                name: target.apk
+    tier: 2
+    mozharness:
+        extra-options:
+            - --test=raptor-tp6m-cold-27
+            - --app=fenix
+            - --binary-path=org.mozilla.fenix.performancetest
+            - --activity=org.mozilla.fenix.IntentReceiverActivity
+
 raptor-speedometer-firefox:
     description: "Raptor Speedometer on Firefox"
     variants: ["fission"]
@@ -1558,7 +1580,7 @@ raptor-speedometer-firefox-profiling:
             - --gecko-profile
 
 raptor-speedometer-geckoview:
-    description: "Raptor Speedometer on Geckoview"
+    description: "Raptor Speedometer on GeckoView"
     try-name: raptor-speedometer-geckoview
     treeherder-symbol: Rap(sp)
     target: geckoview_example.apk
@@ -1566,7 +1588,9 @@ raptor-speedometer-geckoview:
         by-test-platform:
             android-hw-.*-api-16/opt: []
             android-hw-.*-aarch64/opt: ['mozilla-central', 'comm-central']
-            android-hw-.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-p2-.*-api-16/pgo: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['mozilla-central', 'comm-central', 'mozilla-beta']
     max-run-time: 900
     mozharness:
@@ -1577,7 +1601,7 @@ raptor-speedometer-geckoview:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-speedometer-geckoview-power:
-    description: "Raptor Speedometer Power on Geckoview"
+    description: "Raptor Speedometer Power on GeckoView"
     try-name: raptor-speedometer-geckoview-power
     treeherder-symbol: Rap(sp-p)
     target: geckoview_example.apk
@@ -1927,7 +1951,7 @@ raptor-unity-webgl-firefox-profiling:
             - unity-webgl
 
 raptor-unity-webgl-geckoview:
-    description: "Raptor Unity WebGL on Geckoview"
+    description: "Raptor Unity WebGL on GeckoView"
     try-name: raptor-unity-webgl-geckoview
     treeherder-symbol: Rap(ugl)
     target: geckoview_example.apk
@@ -2297,13 +2321,16 @@ raptor-tp6-4-firefox-cold:
             - --test=raptor-tp6-cold-4
 
 raptor-tp6m-1-geckoview-cold:
-    description: "Raptor tp6m-1 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-1 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-1-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-1)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2319,13 +2346,16 @@ raptor-tp6m-1-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-2-geckoview-cold:
-    description: "Raptor tp6m-2 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-2 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-2-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-2)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2341,13 +2371,16 @@ raptor-tp6m-2-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-3-geckoview-cold:
-    description: "Raptor tp6m-3 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-3 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-3-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-3)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2363,13 +2396,16 @@ raptor-tp6m-3-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-4-geckoview-cold:
-    description: "Raptor tp6m-4 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-4 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-4-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-4)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2385,13 +2421,16 @@ raptor-tp6m-4-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-5-geckoview-cold:
-    description: "Raptor tp6m-5 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-5 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-5-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-5)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2407,13 +2446,16 @@ raptor-tp6m-5-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-6-geckoview-cold:
-    description: "Raptor tp6m-6 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-6 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-6-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-6)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2429,13 +2471,16 @@ raptor-tp6m-6-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-7-geckoview-cold:
-    description: "Raptor tp6m-7 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-7 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-7-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-7)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2448,13 +2493,16 @@ raptor-tp6m-7-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-8-geckoview-cold:
-    description: "Raptor tp6m-8 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-8 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-8-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-8)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2467,13 +2515,16 @@ raptor-tp6m-8-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-9-geckoview-cold:
-    description: "Raptor tp6m-9 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-9 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-9-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-9)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2486,13 +2537,16 @@ raptor-tp6m-9-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-10-geckoview-cold:
-    description: "Raptor tp6m-10 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-10 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-10-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-10)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2505,13 +2559,16 @@ raptor-tp6m-10-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-11-geckoview-cold:
-    description: "Raptor tp6m-11 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-11 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-11-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-11)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2524,13 +2581,16 @@ raptor-tp6m-11-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-12-geckoview-cold:
-    description: "Raptor tp6m-12 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-12 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-12-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-12)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2543,13 +2603,16 @@ raptor-tp6m-12-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-13-geckoview-cold:
-    description: "Raptor tp6m-13 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-13 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-13-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-13)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2562,13 +2625,16 @@ raptor-tp6m-13-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-14-geckoview-cold:
-    description: "Raptor tp6m-14 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-14 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-14-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-14)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2581,13 +2647,16 @@ raptor-tp6m-14-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-15-geckoview-cold:
-    description: "Raptor tp6m-15 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-15 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-15-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-15)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2600,13 +2669,16 @@ raptor-tp6m-15-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-16-geckoview-cold:
-    description: "Raptor tp6m-16 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-16 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-16-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-16)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2619,13 +2691,16 @@ raptor-tp6m-16-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-17-geckoview-cold:
-    description: "Raptor tp6m-17 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-17 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-17-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-17)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2638,13 +2713,16 @@ raptor-tp6m-17-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-18-geckoview-cold:
-    description: "Raptor tp6m-18 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-18 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-18-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-18)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2657,13 +2735,16 @@ raptor-tp6m-18-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-19-geckoview-cold:
-    description: "Raptor tp6m-19 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-19 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-19-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-19)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2676,13 +2757,16 @@ raptor-tp6m-19-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-20-geckoview-cold:
-    description: "Raptor tp6m-20 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-20 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-20-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-20)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2695,13 +2779,16 @@ raptor-tp6m-20-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-21-geckoview-cold:
-    description: "Raptor tp6m-21 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-21 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-21-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-21)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2714,13 +2801,16 @@ raptor-tp6m-21-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-22-geckoview-cold:
-    description: "Raptor tp6m-22 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-22 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-22-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-22)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2733,13 +2823,16 @@ raptor-tp6m-22-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-23-geckoview-cold:
-    description: "Raptor tp6m-23 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-23 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-23-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-23)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2752,13 +2845,16 @@ raptor-tp6m-23-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-24-geckoview-cold:
-    description: "Raptor tp6m-24 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-24 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-24-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-24)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2771,13 +2867,16 @@ raptor-tp6m-24-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-25-geckoview-cold:
-    description: "Raptor tp6m-25 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-25 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-25-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-25)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2790,13 +2889,16 @@ raptor-tp6m-25-geckoview-cold:
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
 
 raptor-tp6m-26-geckoview-cold:
-    description: "Raptor tp6m-26 cold page-load on Geckoview Example"
+    description: "Raptor tp6m-26 cold page-load on GeckoView Example"
     max-run-time: 2700
     try-name: raptor-tp6m-26-geckoview-cold
     treeherder-symbol: Rap(tp6m-c-26)
     run-on-projects:
         by-test-platform:
             android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
             default: ['trunk', 'mozilla-beta']
     e10s: true
     target: geckoview_example.apk
@@ -2804,6 +2906,28 @@ raptor-tp6m-26-geckoview-cold:
     mozharness:
         extra-options:
             - --test=raptor-tp6m-cold-26
+            - --app=geckoview
+            - --binary=org.mozilla.geckoview_example
+            - --activity=org.mozilla.geckoview_example.GeckoViewActivity
+
+raptor-tp6m-27-geckoview-cold:
+    description: "Raptor tp6m-27 cold page-load on GeckoView Example"
+    max-run-time: 2700
+    try-name: raptor-tp6m-27-geckoview-cold
+    treeherder-symbol: Rap(tp6m-c-27)
+    run-on-projects:
+        by-test-platform:
+            android-hw-.*/opt: ['mozilla-central', 'comm-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['trunk', 'mozilla-beta']
+            default: ['trunk', 'mozilla-beta']
+    e10s: true
+    target: geckoview_example.apk
+    tier: 2
+    mozharness:
+        extra-options:
+            - --test=raptor-tp6m-cold-27
             - --app=geckoview
             - --binary=org.mozilla.geckoview_example
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity
@@ -3169,6 +3293,20 @@ raptor-tp6m-26-fennec-cold:
     mozharness:
         extra-options:
             - --test=raptor-tp6m-cold-26
+            - --app=fennec
+            - --binary=org.mozilla.fennec_aurora
+
+raptor-tp6m-27-fennec-cold:
+    description: "Raptor tp6m-27 cold page-load on Fennec"
+    max-run-time: 2700
+    try-name: raptor-tp6m-27-fennec-cold
+    treeherder-symbol: Rap(tp6m-c-27)
+    target: target.apk
+    run-on-projects: []
+    tier: 2
+    mozharness:
+        extra-options:
+            - --test=raptor-tp6m-cold-27
             - --app=fennec
             - --binary=org.mozilla.fennec_aurora
 
@@ -4249,3 +4387,48 @@ raptor-tp6m-26-refbrow-cold:
             - --app=refbrow
             - --binary-path=org.mozilla.reference.browser.raptor
             - --activity=org.mozilla.reference.browser.BrowserTestActivity
+
+raptor-tp6m-27-refbrow-cold:
+    description: "Raptor tp6m-27 cold page-load on the reference browser"
+    try-name: raptor-tp6m-27-refbrow-cold
+    treeherder-symbol: Rap-refbrow(tp6m-c-27)
+    run-on-projects: []
+    e10s: true
+    target:
+        by-test-platform:
+            android-hw.*-aarch64.*/.*:
+                index: project.mobile.reference-browser.v2.raptor.latest.aarch64
+                name: target.apk
+            default:
+                index: project.mobile.reference-browser.v2.raptor.latest.arm
+                name: target.apk
+    tier: 2
+    mozharness:
+        extra-options:
+            - --test=raptor-tp6m-cold-27
+            - --app=refbrow
+            - --binary-path=org.mozilla.reference.browser.raptor
+            - --activity=org.mozilla.reference.browser.BrowserTestActivity
+
+raptor-ares6-firefox:
+    description: "Raptor Ares6 on Firefox"
+    variants: ["fission"]
+    try-name: raptor-ares6-firefox
+    treeherder-symbol: Rap(ares6)
+    max-run-time: 2500
+    tier: 3
+    mozharness:
+        extra-options:
+            - --test=raptor-ares6
+
+raptor-ares6-firefox-profiling:
+    description: "Raptor Ares6 on Firefox with Gecko Profiling"
+    try-name: raptor-ares6-firefox-profiling
+    treeherder-symbol: Rap-Prof(ares6)
+    run-on-projects: ['mozilla-central', 'try']
+    max-run-time: 2500
+    tier: 3
+    mozharness:
+        extra-options:
+            - --test=raptor-ares6
+            - --gecko-profile

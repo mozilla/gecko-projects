@@ -10,9 +10,9 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/MemoryReporting.h"
 
-#include "dbg/Debugger.h"
+#include "debugger/DebugAPI.h"
 #include "gc/FreeOp.h"
-#include "jit/BaselineCompiler.h"
+#include "jit/BaselineCodeGen.h"
 #include "jit/BaselineIC.h"
 #include "jit/CompileInfo.h"
 #include "jit/IonControlFlow.h"
@@ -22,6 +22,7 @@
 #include "vm/Interpreter.h"
 #include "vm/TraceLogging.h"
 
+#include "debugger/DebugAPI-inl.h"
 #include "gc/PrivateIterators-inl.h"
 #include "jit/JitFrames-inl.h"
 #include "jit/MacroAssembler-inl.h"
@@ -85,7 +86,7 @@ static JitExecStatus EnterBaseline(JSContext* cx, EnterJitData& data) {
   nogc.emplace(cx);
 #endif
 
-  MOZ_ASSERT(IsBaselineInterpreterOrJitEnabled());
+  MOZ_ASSERT(IsBaselineInterpreterEnabled());
   MOZ_ASSERT(CheckFrame(data.osrFrame));
 
   EnterJitCode enter = cx->runtime()->jitRuntime()->enterJit();
@@ -131,30 +132,18 @@ static JitExecStatus EnterBaseline(JSContext* cx, EnterJitData& data) {
   return data.result.isMagic() ? JitExec_Error : JitExec_Ok;
 }
 
-JitExecStatus jit::EnterBaselineAtBranch(JSContext* cx, InterpreterFrame* fp,
-                                         jsbytecode* pc) {
+JitExecStatus jit::EnterBaselineInterpreterAtBranch(JSContext* cx,
+                                                    InterpreterFrame* fp,
+                                                    jsbytecode* pc) {
   MOZ_ASSERT(JSOp(*pc) == JSOP_LOOPENTRY);
 
   EnterJitData data(cx);
 
-  if (fp->script()->hasBaselineScript()) {
-    BaselineScript* baseline = fp->script()->baselineScript();
-    PCMappingSlotInfo slotInfo;
-    data.jitcode = baseline->nativeCodeForPC(fp->script(), pc, &slotInfo);
-    MOZ_ASSERT(slotInfo.isStackSynced());
-
-    // Skip debug breakpoint/trap handler, the interpreter already handled it
-    // for the current op.
-    if (fp->isDebuggee()) {
-      MOZ_RELEASE_ASSERT(baseline->hasDebugInstrumentation());
-      data.jitcode += MacroAssembler::ToggledCallSize(data.jitcode);
-    }
-  } else {
-    // As above, use the entry point that skips the debug trap.
-    const BaselineInterpreter& interp =
-        cx->runtime()->jitRuntime()->baselineInterpreter();
-    data.jitcode = interp.interpretOpNoDebugTrapAddr().value;
-  }
+  // Use the entry point that skips the debug trap because the C++ interpreter
+  // already handled this for the current op.
+  const BaselineInterpreter& interp =
+      cx->runtime()->jitRuntime()->baselineInterpreter();
+  data.jitcode = interp.interpretOpNoDebugTrapAddr().value;
 
   // Note: keep this in sync with SetEnterJitData.
 
@@ -271,7 +260,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   // code. This is incorrect as h's baseline script does not have debug
   // instrumentation.
   if (osrSourceFrame && osrSourceFrame.isDebuggee() &&
-      !Debugger::ensureExecutionObservabilityOfOsrFrame(cx, osrSourceFrame)) {
+      !DebugAPI::ensureExecutionObservabilityOfOsrFrame(cx, osrSourceFrame)) {
     return Method_Error;
   }
 
@@ -290,7 +279,7 @@ static MethodStatus CanEnterBaselineJIT(JSContext* cx, HandleScript script,
   }
 
   // Check script warm-up counter.
-  if (script->getWarmUpCount() <= JitOptions.baselineWarmUpThreshold) {
+  if (script->getWarmUpCount() <= JitOptions.baselineJitWarmUpThreshold) {
     return Method_Skipped;
   }
 
@@ -335,7 +324,7 @@ bool jit::CanBaselineInterpretScript(JSScript* script) {
 }
 
 static MethodStatus CanEnterBaselineInterpreter(JSContext* cx,
-                                                HandleScript script) {
+                                                JSScript* script) {
   MOZ_ASSERT(IsBaselineInterpreterEnabled());
 
   if (script->jitScript()) {
@@ -364,29 +353,14 @@ static MethodStatus CanEnterBaselineInterpreter(JSContext* cx,
   return Method_Compiled;
 }
 
-template <BaselineTier Tier>
-MethodStatus jit::CanEnterBaselineAtBranch(JSContext* cx,
-                                           InterpreterFrame* fp) {
+MethodStatus jit::CanEnterBaselineInterpreterAtBranch(JSContext* cx,
+                                                      InterpreterFrame* fp) {
   if (!CheckFrame(fp)) {
     return Method_CantCompile;
   }
 
-  RootedScript script(cx, fp->script());
-  switch (Tier) {
-    case BaselineTier::Interpreter:
-      return CanEnterBaselineInterpreter(cx, script);
-
-    case BaselineTier::Compiler:
-      return CanEnterBaselineJIT(cx, script, fp);
-  }
-
-  MOZ_CRASH("Unexpected tier");
+  return CanEnterBaselineInterpreter(cx, fp->script());
 }
-
-template MethodStatus jit::CanEnterBaselineAtBranch<BaselineTier::Interpreter>(
-    JSContext* cx, InterpreterFrame* fp);
-template MethodStatus jit::CanEnterBaselineAtBranch<BaselineTier::Compiler>(
-    JSContext* cx, InterpreterFrame* fp);
 
 template <BaselineTier Tier>
 MethodStatus jit::CanEnterBaselineMethod(JSContext* cx, RunState& state) {
@@ -450,8 +424,7 @@ bool jit::BaselineCompileFromBaselineInterpreter(JSContext* cx,
         MOZ_ASSERT(slotInfo.isStackSynced());
         if (frame->isDebuggee()) {
           // Skip the debug trap emitted by emitInterpreterLoop because the
-          // Baseline Interpreter already handled it for the current op. This
-          // matches EnterBaseline.
+          // Baseline Interpreter already handled it for the current op.
           MOZ_RELEASE_ASSERT(baselineScript->hasDebugInstrumentation());
           *res += MacroAssembler::ToggledCallSize(*res);
         }
@@ -468,8 +441,7 @@ bool jit::BaselineCompileFromBaselineInterpreter(JSContext* cx,
 
 BaselineScript* BaselineScript::New(
     JSScript* jsscript, uint32_t bailoutPrologueOffset,
-    uint32_t warmUpCheckPrologueOffset, uint32_t debugOsrPrologueOffset,
-    uint32_t debugOsrEpilogueOffset, uint32_t profilerEnterToggleOffset,
+    uint32_t warmUpCheckPrologueOffset, uint32_t profilerEnterToggleOffset,
     uint32_t profilerExitToggleOffset, size_t retAddrEntries,
     size_t pcMappingIndexEntries, size_t pcMappingSize, size_t resumeEntries,
     size_t traceLoggerToggleOffsetEntries) {
@@ -501,7 +473,6 @@ BaselineScript* BaselineScript::New(
   }
   new (script)
       BaselineScript(bailoutPrologueOffset, warmUpCheckPrologueOffset,
-                     debugOsrPrologueOffset, debugOsrEpilogueOffset,
                      profilerEnterToggleOffset, profilerExitToggleOffset);
 
   size_t offsetCursor = sizeof(BaselineScript);
@@ -534,7 +505,6 @@ BaselineScript* BaselineScript::New(
 
 void BaselineScript::trace(JSTracer* trc) {
   TraceEdge(trc, &method_, "baseline-method");
-  TraceNullableEdge(trc, &templateEnv_, "baseline-template-environment");
 }
 
 /* static */
@@ -650,22 +620,40 @@ RetAddrEntry& BaselineScript::retAddrEntryFromPCOffset(
   MOZ_ALWAYS_TRUE(ComputeBinarySearchMid(RetAddrEntries(this), pcOffset, &mid));
   MOZ_ASSERT(mid < numRetAddrEntries());
 
-  for (size_t i = mid; retAddrEntry(i).pcOffset() == pcOffset; i--) {
-    if (retAddrEntry(i).kind() == kind) {
-      return retAddrEntry(i);
-    }
-    if (i == 0) {
-      break;
-    }
+  // Search for the first entry for this pc.
+  size_t first = mid;
+  while (first > 0 && retAddrEntry(first - 1).pcOffset() == pcOffset) {
+    first--;
   }
-  for (size_t i = mid + 1; i < numRetAddrEntries(); i++) {
-    if (retAddrEntry(i).pcOffset() != pcOffset) {
-      break;
-    }
-    if (retAddrEntry(i).kind() == kind) {
-      return retAddrEntry(i);
-    }
+
+  // Search for the last entry for this pc.
+  size_t last = mid;
+  while (last + 1 < numRetAddrEntries() &&
+         retAddrEntry(last + 1).pcOffset() == pcOffset) {
+    last++;
   }
+
+  MOZ_ASSERT(first <= last);
+  MOZ_ASSERT(retAddrEntry(first).pcOffset() == pcOffset);
+  MOZ_ASSERT(retAddrEntry(last).pcOffset() == pcOffset);
+
+  for (size_t i = first; i <= last; i++) {
+    RetAddrEntry& entry = retAddrEntry(i);
+    if (entry.kind() != kind) {
+      continue;
+    }
+
+#ifdef DEBUG
+    // There must be a unique entry for this pcOffset and Kind to ensure our
+    // return value is well-defined.
+    for (size_t j = i + 1; j <= last; j++) {
+      MOZ_ASSERT(retAddrEntry(j).kind() != kind);
+    }
+#endif
+
+    return entry;
+  }
+
   MOZ_CRASH("Didn't find RetAddrEntry.");
 }
 
@@ -867,7 +855,8 @@ void BaselineScript::toggleDebugTraps(JSScript* script, jsbytecode* pc) {
 
       if (!pc || pc == curPC) {
         bool enabled =
-            script->stepModeEnabled() || script->hasBreakpointsAt(curPC);
+            DebugAPI::stepModeEnabled(script) ||
+            DebugAPI::hasBreakpointsAt(script, curPC);
 
         // Patch the trap.
         CodeLocationLabel label(method(), CodeOffset(nativeOffset));
@@ -1130,7 +1119,8 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
                                uint32_t profilerExitToggleOffset,
                                CodeOffsetVector&& debugInstrumentationOffsets,
                                CodeOffsetVector&& debugTrapOffsets,
-                               CodeOffsetVector&& codeCoverageOffsets) {
+                               CodeOffsetVector&& codeCoverageOffsets,
+                               const CallVMOffsets& callVMOffsets) {
   code_ = code;
   interpretOpOffset_ = interpretOpOffset;
   interpretOpNoDebugTrapOffset_ = interpretOpNoDebugTrapOffset;
@@ -1139,6 +1129,7 @@ void BaselineInterpreter::init(JitCode* code, uint32_t interpretOpOffset,
   debugInstrumentationOffsets_ = std::move(debugInstrumentationOffsets);
   debugTrapOffsets_ = std::move(debugTrapOffsets);
   codeCoverageOffsets_ = std::move(codeCoverageOffsets);
+  callVMOffsets_ = callVMOffsets;
 }
 
 bool jit::GenerateBaselineInterpreter(JSContext* cx,

@@ -9,7 +9,9 @@
 #include "mozilla/dom/HTMLMetaElement.h"
 #include "mozilla/dom/HTMLMetaElementBinding.h"
 #include "mozilla/dom/nsCSPService.h"
+#include "mozilla/dom/ViewportMetaData.h"
 #include "mozilla/Logging.h"
+#include "mozilla/StaticPrefs_security.h"
 #include "nsContentUtils.h"
 #include "nsStyleConsts.h"
 #include "nsIContentSecurityPolicy.h"
@@ -57,9 +59,15 @@ nsresult HTMLMetaElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
     if (aName == nsGkAtoms::content) {
       if (document && AttrValueIs(kNameSpaceID_None, nsGkAtoms::name,
                                   nsGkAtoms::viewport, eIgnoreCase)) {
-        nsAutoString content;
-        GetContent(content);
-        nsContentUtils::ProcessViewportInfo(document, content);
+        ProcessViewportContent(document);
+      }
+      CreateAndDispatchEvent(document, NS_LITERAL_STRING("DOMMetaChanged"));
+    } else if (document && aName == nsGkAtoms::name) {
+      if (aValue && aValue->Equals(nsGkAtoms::viewport, eIgnoreCase)) {
+        ProcessViewportContent(document);
+      } else if (aOldValue &&
+                 aOldValue->Equals(nsGkAtoms::viewport, eIgnoreCase)) {
+        DiscardViewportContent(document);
       }
       CreateAndDispatchEvent(document, NS_LITERAL_STRING("DOMMetaChanged"));
     }
@@ -80,9 +88,7 @@ nsresult HTMLMetaElement::BindToTree(BindContext& aContext, nsINode& aParent) {
   Document& doc = aContext.OwnerDoc();
   if (AttrValueIs(kNameSpaceID_None, nsGkAtoms::name, nsGkAtoms::viewport,
                   eIgnoreCase)) {
-    nsAutoString content;
-    GetContent(content);
-    nsContentUtils::ProcessViewportInfo(&doc, content);
+    ProcessViewportContent(&doc);
   }
 
   if (StaticPrefs::security_csp_enable() && !doc.IsLoadedAsData() &&
@@ -137,6 +143,10 @@ nsresult HTMLMetaElement::BindToTree(BindContext& aContext, nsINode& aParent) {
 
 void HTMLMetaElement::UnbindFromTree(bool aNullParent) {
   nsCOMPtr<Document> oldDoc = GetUncomposedDoc();
+  if (oldDoc && AttrValueIs(kNameSpaceID_None, nsGkAtoms::name,
+                            nsGkAtoms::viewport, eIgnoreCase)) {
+    DiscardViewportContent(oldDoc);
+  }
   CreateAndDispatchEvent(oldDoc, NS_LITERAL_STRING("DOMMetaRemoved"));
   nsGenericHTMLElement::UnbindFromTree(aNullParent);
 }
@@ -153,6 +163,20 @@ void HTMLMetaElement::CreateAndDispatchEvent(Document* aDoc,
 JSObject* HTMLMetaElement::WrapNode(JSContext* aCx,
                                     JS::Handle<JSObject*> aGivenProto) {
   return HTMLMetaElement_Binding::Wrap(aCx, this, aGivenProto);
+}
+
+void HTMLMetaElement::ProcessViewportContent(Document* aDocument) {
+  nsAutoString content;
+  GetContent(content);
+
+  aDocument->SetHeaderData(nsGkAtoms::viewport, content);
+
+  ViewportMetaData data(content);
+  aDocument->AddMetaViewportElement(this, std::move(data));
+}
+
+void HTMLMetaElement::DiscardViewportContent(Document* aDocument) {
+  aDocument->RemoveMetaViewportElement(this);
 }
 
 }  // namespace dom

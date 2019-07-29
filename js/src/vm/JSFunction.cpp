@@ -27,7 +27,6 @@
 #include "builtin/Object.h"
 #include "builtin/SelfHostingDefines.h"
 #include "builtin/String.h"
-#include "dbg/Debugger.h"
 #include "frontend/BytecodeCompilation.h"
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/TokenStream.h"
@@ -58,6 +57,7 @@
 #include "vm/Xdr.h"
 #include "wasm/AsmJS.h"
 
+#include "debugger/DebugAPI-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/Stack-inl.h"
@@ -774,9 +774,10 @@ inline void JSFunction::trace(JSTracer* trc) {
     // for self-hosted code.
     if (hasScript() && !hasUncompletedScript()) {
       TraceManuallyBarrieredEdge(trc, &u.scripted.s.script_, "script");
-    } else if (isInterpretedLazy() && u.scripted.s.lazy_) {
+    } else if (hasLazyScript() && u.scripted.s.lazy_) {
       TraceManuallyBarrieredEdge(trc, &u.scripted.s.lazy_, "lazyScript");
     }
+    // NOTE: The u.scripted.s.selfHostedLazy_ does not point to GC things.
 
     if (u.scripted.env_) {
       TraceManuallyBarrieredEdge(trc, &u.scripted.env_, "fun_environment");
@@ -1548,8 +1549,8 @@ bool JSFunction::createScriptForLazilyInterpretedFunction(JSContext* cx,
   // the script is created in the function's realm.
   AutoRealm ar(cx, fun);
 
-  Rooted<LazyScript*> lazy(cx, fun->lazyScriptOrNull());
-  if (lazy) {
+  if (fun->hasLazyScript()) {
+    Rooted<LazyScript*> lazy(cx, fun->lazyScript());
     RootedScript script(cx, lazy->maybeScript());
 
     // Only functions without inner functions or direct eval are
@@ -1674,7 +1675,7 @@ bool JSFunction::createScriptForLazilyInterpretedFunction(JSContext* cx,
 
     // XDR the newly delazified function.
     if (script->scriptSource()->hasEncoder()) {
-      RootedScriptSourceObject sourceObject(cx, &lazy->sourceObject());
+      RootedScriptSourceObject sourceObject(cx, lazy->sourceObject());
       if (!script->scriptSource()->xdrEncodeFunction(cx, fun, sourceObject)) {
         return false;
       }
@@ -1743,10 +1744,13 @@ void JSFunction::maybeRelazify(JSRuntime* rt) {
   flags_ &= ~INTERPRETED;
   flags_ |= INTERPRETED_LAZY;
   LazyScript* lazy = script->maybeLazyScript();
-  u.scripted.s.lazy_ = lazy;
   if (lazy) {
+    u.scripted.s.lazy_ = lazy;
     MOZ_ASSERT(!isSelfHostedBuiltin());
   } else {
+    // Lazy self-hosted builtins point to a SelfHostedLazyScript that may be
+    // called from JIT scripted calls.
+    u.scripted.s.selfHostedLazy_ = &rt->selfHostedLazyScript.ref();
     MOZ_ASSERT(isSelfHostedBuiltin());
     MOZ_ASSERT(isExtended());
     MOZ_ASSERT(GetClonedSelfHostedFunctionName(this));
@@ -2246,11 +2250,16 @@ JSFunction* js::CloneFunctionReuseScript(
   if (fun->hasScript()) {
     clone->initScript(fun->nonLazyScript());
     clone->initEnvironment(enclosingEnv);
-  } else {
-    MOZ_ASSERT(fun->isInterpretedLazy());
+  } else if (fun->hasLazyScript()) {
     MOZ_ASSERT(fun->compartment() == clone->compartment());
-    LazyScript* lazy = fun->lazyScriptOrNull();
+    LazyScript* lazy = fun->lazyScript();
     clone->initLazyScript(lazy);
+    clone->initEnvironment(enclosingEnv);
+  } else {
+    MOZ_ASSERT(fun->hasSelfHostedLazyScript());
+    MOZ_ASSERT(fun->compartment() == clone->compartment());
+    SelfHostedLazyScript* lazy = fun->selfHostedLazyScript();
+    clone->initSelfHostLazyScript(lazy);
     clone->initEnvironment(enclosingEnv);
   }
 
@@ -2314,7 +2323,7 @@ JSFunction* js::CloneFunctionAndScript(JSContext* cx, HandleFunction fun,
   if (!clonedScript) {
     return nullptr;
   }
-  Debugger::onNewScript(cx, clonedScript);
+  DebugAPI::onNewScript(cx, clonedScript);
 
   return clone;
 }
@@ -2489,12 +2498,10 @@ JSFunction* js::DefineFunction(
     return nullptr;
   }
 
+  MOZ_ASSERT(native);
+
   RootedFunction fun(cx);
-  if (!native) {
-    fun = NewScriptedFunction(cx, nargs, JSFunction::INTERPRETED_LAZY, atom,
-                              /* proto = */ nullptr, allocKind, GenericObject,
-                              obj);
-  } else if (flags & JSFUN_CONSTRUCTOR) {
+  if (flags & JSFUN_CONSTRUCTOR) {
     fun = NewNativeConstructor(cx, native, nargs, atom, allocKind);
   } else {
     fun = NewNativeFunction(cx, native, nargs, atom, allocKind);

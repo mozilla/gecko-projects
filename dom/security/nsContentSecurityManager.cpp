@@ -34,6 +34,18 @@ NS_IMPL_ISUPPORTS(nsContentSecurityManager, nsIContentSecurityManager,
 
 static mozilla::LazyLogModule sCSMLog("CSMLog");
 
+// This whitelist contains files that are permanently allowed to use eval()-like
+// functions. It is supposed to be restricted to files that are exclusively used
+// in testing contexts.
+static nsLiteralCString evalWhitelist[] = {
+    // Test-only third-party library
+    NS_LITERAL_CSTRING("resource://testing-common/sinon-7.2.7.js"),
+    // Test-only third-party library
+    NS_LITERAL_CSTRING("resource://testing-common/ajv-4.1.1.js"),
+    // Test-only utility
+    NS_LITERAL_CSTRING("resource://testing-common/content-task.js"),
+};
+
 /* static */
 bool nsContentSecurityManager::AllowTopLevelNavigationToDataURI(
     nsIChannel* aChannel) {
@@ -167,42 +179,35 @@ void nsContentSecurityManager::AssertEvalNotUsingSystemPrincipal(
     return;
   }
 
-  if (Preferences::GetBool("security.allow_eval_with_system_principal")) {
+  // Use static pref for performance reasons.
+  if (StaticPrefs::security_allow_eval_with_system_principal()) {
     return;
   }
 
-  static StaticAutoPtr<nsTArray<nsCString>> sUrisAllowEval;
+  nsAutoCString fileName;
   JS::AutoFilename scriptFilename;
   if (JS::DescribeScriptedCaller(cx, &scriptFilename)) {
-    if (!sUrisAllowEval) {
-      sUrisAllowEval = new nsTArray<nsCString>();
-      nsAutoCString urisAllowEval;
-      Preferences::GetCString("security.uris_using_eval_with_system_principal",
-                              urisAllowEval);
-      for (const nsACString& filenameString : urisAllowEval.Split(',')) {
-        sUrisAllowEval->AppendElement(filenameString);
-      }
-      ClearOnShutdown(&sUrisAllowEval);
-    }
-
-    nsAutoCString fileName;
-    fileName = nsAutoCString(scriptFilename.get());
+    nsDependentCSubstring fileName_(scriptFilename.get(),
+                                    strlen(scriptFilename.get()));
+    ToLowerCase(fileName_);
     // Extract file name alone if scriptFilename contains line number
     // separated by multiple space delimiters in few cases.
-    int32_t fileNameIndex = fileName.FindChar(' ');
+    int32_t fileNameIndex = fileName_.FindChar(' ');
     if (fileNameIndex != -1) {
-      fileName = Substring(fileName, 0, fileNameIndex);
+      fileName_.SetLength(fileNameIndex);
     }
-    ToLowerCase(fileName);
 
-    for (auto& uriEntry : *sUrisAllowEval) {
-      if (StringEndsWith(fileName, uriEntry)) {
+    for (const nsLiteralCString& whitelistEntry : evalWhitelist) {
+      if (fileName_.Equals(whitelistEntry)) {
         return;
       }
     }
+
+    fileName = fileName_;
   }
 
-  MOZ_ASSERT(false, "do not use eval with system privileges");
+  MOZ_CRASH_UNSAFE_PRINTF("do not use eval with system privileges: %s",
+                          fileName.get());
 }
 
 /* static */

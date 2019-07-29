@@ -115,6 +115,7 @@ class nsBlockFrame : public nsContainerFrame {
                            nsFrameList& aChildList) override;
   void AppendFrames(ChildListID aListID, nsFrameList& aFrameList) override;
   void InsertFrames(ChildListID aListID, nsIFrame* aPrevFrame,
+                    const nsLineList::iterator* aPrevFrameLine,
                     nsFrameList& aFrameList) override;
   void RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame) override;
   const nsFrameList& GetChildList(ChildListID aListID) const override;
@@ -484,8 +485,12 @@ class nsBlockFrame : public nsContainerFrame {
    * contains aPrevSibling and add aFrameList after aPrevSibling on that line.
    * New lines are created as necessary to handle block data in aFrameList.
    * This function will clear aFrameList.
+   *
+   * aPrevSiblingLine, if present, must be the line containing aPrevSibling.
+   * Providing it will make this function faster.
    */
-  void AddFrames(nsFrameList& aFrameList, nsIFrame* aPrevSibling);
+  void AddFrames(nsFrameList& aFrameList, nsIFrame* aPrevSibling,
+                 const nsLineList::iterator* aPrevSiblingLine);
 
   /**
    * Perform Bidi resolution on this frame
@@ -993,6 +998,9 @@ class nsBlockInFlowLineIterator {
   nsBlockInFlowLineIterator(nsBlockFrame* aFrame, nsIFrame* aFindFrame,
                             bool* aFoundValidLine);
 
+  // Allow to be uninitialized (and then assigned from another object).
+  nsBlockInFlowLineIterator() : mFrame(nullptr) {}
+
   LineIterator GetLine() { return mLine; }
   bool IsLastLineInList();
   nsBlockFrame* GetContainer() { return mFrame; }
@@ -1020,14 +1028,12 @@ class nsBlockInFlowLineIterator {
    */
   bool Prev();
 
- private:
-  friend class nsBlockFrame;
-  friend class nsBidiPresUtils;
   // XXX nsBlockFrame uses this internally in one place.  Try to remove it.
   // XXX uhm, and nsBidiPresUtils::Resolve too.
   nsBlockInFlowLineIterator(nsBlockFrame* aFrame, LineIterator aLine,
                             bool aInOverflow);
 
+ private:
   nsBlockFrame* mFrame;
   LineIterator mLine;
   nsLineList* mLineList;  // the line list mLine is in

@@ -15,6 +15,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ServoStyleSet.h"
+#include "mozilla/StaticPrefs_editor.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
 
@@ -998,12 +999,19 @@ char16_t LookAndFeel::GetPasswordCharacter() {
 
 // static
 bool LookAndFeel::GetEchoPassword() {
+  if (StaticPrefs::editor_password_mask_delay() >= 0) {
+    return StaticPrefs::editor_password_mask_delay() > 0;
+  }
   return nsLookAndFeel::GetInstance()->GetEchoPasswordImpl();
 }
 
 // static
 uint32_t LookAndFeel::GetPasswordMaskDelay() {
-  return nsLookAndFeel::GetInstance()->GetPasswordMaskDelayImpl();
+  int32_t delay = StaticPrefs::editor_password_mask_delay();
+  if (delay < 0) {
+    return nsLookAndFeel::GetInstance()->GetPasswordMaskDelayImpl();
+  }
+  return delay;
 }
 
 // static

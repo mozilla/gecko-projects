@@ -69,7 +69,7 @@ void ChildProcessInfo::OnIncomingMessage(const Message& aMsg) {
       return;
     }
     case MessageType::Paint:
-      UpdateGraphicsInUIProcess(&static_cast<const PaintMessage&>(aMsg));
+      UpdateGraphicsAfterPaint(static_cast<const PaintMessage&>(aMsg));
       break;
     case MessageType::ManifestFinished:
       mPaused = true;
@@ -264,13 +264,17 @@ void ChildProcessInfo::WaitUntilPaused() {
 
   bool sentTerminateMessage = false;
   while (true) {
-    MonitorAutoLock lock(*gMonitor);
+    Maybe<MonitorAutoLock> lock;
+    lock.emplace(*gMonitor);
+
+    MaybeHandlePendingSyncMessage();
 
     // Search for the first message received from this process.
     ChildProcessInfo* process = this;
     Message::UniquePtr msg = ExtractChildMessage(&process);
 
     if (msg) {
+      lock.reset();
       OnIncomingMessage(*msg);
       if (IsPaused()) {
         return;

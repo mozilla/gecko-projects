@@ -80,7 +80,7 @@ struct DefaultJitOptions {
   bool enableWasmFuncCallSpew;
 #endif
   uint32_t baselineInterpreterWarmUpThreshold;
-  uint32_t baselineWarmUpThreshold;
+  uint32_t baselineJitWarmUpThreshold;
   uint32_t normalIonWarmUpThreshold;
   uint32_t fullIonWarmUpThreshold;
   uint32_t exceptionBailoutThreshold;
@@ -117,6 +117,7 @@ struct DefaultJitOptions {
 
   DefaultJitOptions();
   bool isSmallFunction(JSScript* script) const;
+  void setEagerBaselineCompilation();
   void setEagerIonCompilation();
   void setNormalIonWarmUpThreshold(uint32_t warmUpThreshold);
   void setFullIonWarmUpThreshold(uint32_t warmUpThreshold);
@@ -128,6 +129,20 @@ struct DefaultJitOptions {
 };
 
 extern DefaultJitOptions JitOptions;
+
+inline bool IsBaselineInterpreterEnabled() {
+#ifdef JS_CODEGEN_NONE
+  return false;
+#else
+  return JitOptions.baselineInterpreter && JitOptions.supportsFloatingPoint;
+#endif
+}
+
+inline bool IsBaselineJitEnabled() {
+  return IsBaselineInterpreterEnabled() && JitOptions.baselineJit;
+}
+
+inline bool IsIonEnabled() { return IsBaselineJitEnabled() && JitOptions.ion; }
 
 }  // namespace jit
 }  // namespace js

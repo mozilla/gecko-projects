@@ -174,7 +174,10 @@ bool WindowGlobalParent::IsProcessRoot() {
   }
 
   auto* embedder = BrowsingContext()->GetEmbedderWindowGlobal();
-  MOZ_ASSERT(embedder, "This should be set before we were created");
+  if (NS_WARN_IF(!embedder)) {
+    return false;
+  }
+
   return ContentParentId() != embedder->ContentParentId();
 }
 
@@ -333,6 +336,7 @@ already_AddRefed<Promise> WindowGlobalParent::ChangeFrameRemoteness(
         // in-process frame. For remote frames, the BrowserBridgeParent::Init
         // method should've already set up the OwnerProcessId.
         uint64_t childId = browserParent->Manager()->ChildID();
+        MOZ_ASSERT_IF(bridge, browsingContext == browserParent->GetBrowsingContext());
         MOZ_ASSERT_IF(bridge, browsingContext->IsOwnedByProcess(childId));
         browsingContext->SetOwnerProcessId(childId);
 

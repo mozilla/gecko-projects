@@ -54,6 +54,9 @@ parent:
                                    string localPwd,
                                    int componentCount);
 
+  async SetTargetForDefaultLocalAddressLookup(string targetIp,
+                                              uint16_t targetPort);
+
   async StartIceGathering(bool defaultRouteOnly,
                           NrIceStunAddrArray stunAddrs);
 

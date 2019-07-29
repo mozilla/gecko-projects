@@ -28,7 +28,7 @@
 #include "GeckoProfiler.h"
 #include "VideoFrameContainer.h"
 #include "mozilla/AbstractThread.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/Unused.h"
 #include "mtransport/runnable_utils.h"
 #include "VideoUtils.h"
@@ -941,7 +941,8 @@ void MediaStreamGraphImpl::DeviceChanged() {
   // and acted upon on the graph thread.
   if (!NS_IsMainThread()) {
     RefPtr<nsIRunnable> runnable =
-        WrapRunnable(this, &MediaStreamGraphImpl::DeviceChanged);
+        WrapRunnable(RefPtr<MediaStreamGraphImpl>(this),
+                     &MediaStreamGraphImpl::DeviceChanged);
     mAbstractMainThread->Dispatch(runnable.forget());
     return;
   }
@@ -1347,6 +1348,12 @@ void MediaStreamGraphImpl::Process() {
 
 bool MediaStreamGraphImpl::UpdateMainThreadState() {
   MOZ_ASSERT(OnGraphThread());
+  if (mForceShutDown) {
+    for (MediaStream* stream : AllStreams()) {
+      stream->NotifyForcedShutdown();
+    }
+  }
+
   MonitorAutoLock lock(mMonitor);
   bool finalUpdate =
       mForceShutDown || (IsEmpty() && mBackMessageQueue.IsEmpty());

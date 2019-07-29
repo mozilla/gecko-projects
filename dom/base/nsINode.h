@@ -571,9 +571,12 @@ class nsINode : public mozilla::dom::EventTarget {
   nsIContent* GetChildAt_Deprecated(uint32_t aIndex) const;
 
   /**
-   * Get the index of a child within this content
+   * Get the index of a child within this content.
+   *
    * @param aPossibleChild the child to get the index of.
-   * @return the index of the child, or -1 if not a child
+   * @return the index of the child, or -1 if not a child. Be aware that
+   *         anonymous children (e.g. a <div> child of an <input> element) will
+   *         result in -1.
    *
    * If the return value is not -1, then calling GetChildAt_Deprecated() with
    * that value will return aPossibleChild.
@@ -1471,6 +1474,9 @@ class nsINode : public mozilla::dom::EventTarget {
     ElementMayHaveAnonymousChildren,
     // Set if element has CustomElementData.
     ElementHasCustomElementData,
+    // Set if the element was created from prototype cache and
+    // its l10n attributes haven't been changed.
+    ElementCreatedFromPrototypeAndHasUnmodifiedL10n,
     // Guard value
     BooleanFlagCount
   };
@@ -1606,6 +1612,16 @@ class nsINode : public mozilla::dom::EventTarget {
   void SetHasCustomElementData() { SetBoolFlag(ElementHasCustomElementData); }
   bool HasCustomElementData() const {
     return GetBoolFlag(ElementHasCustomElementData);
+  }
+
+  void SetElementCreatedFromPrototypeAndHasUnmodifiedL10n() {
+    SetBoolFlag(ElementCreatedFromPrototypeAndHasUnmodifiedL10n);
+  }
+  bool HasElementCreatedFromPrototypeAndHasUnmodifiedL10n() {
+    return GetBoolFlag(ElementCreatedFromPrototypeAndHasUnmodifiedL10n);
+  }
+  void ClearElementCreatedFromPrototypeAndHasUnmodifiedL10n() {
+    ClearBoolFlag(ElementCreatedFromPrototypeAndHasUnmodifiedL10n);
   }
 
  protected:

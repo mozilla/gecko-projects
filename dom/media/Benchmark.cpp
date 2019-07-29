@@ -15,7 +15,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/StaticMutex.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_media.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/Telemetry.h"
@@ -215,7 +215,7 @@ void BenchmarkPlayback::DemuxNextSample() {
   promise->Then(
       Thread(), __func__,
       [this, ref](RefPtr<MediaTrackDemuxer::SamplesHolder> aHolder) {
-        mSamples.AppendElements(std::move(aHolder->mSamples));
+        mSamples.AppendElements(std::move(aHolder->GetMovableSamples()));
         if (ref->mParameters.mStopAtFrame &&
             mSamples.Length() == ref->mParameters.mStopAtFrame.ref()) {
           InitDecoder(mTrackDemuxer->GetInfo());
@@ -240,6 +240,11 @@ void BenchmarkPlayback::DemuxNextSample() {
 void BenchmarkPlayback::InitDecoder(UniquePtr<TrackInfo>&& aInfo) {
   MOZ_ASSERT(OnThread());
 
+  if (!aInfo) {
+    Error(MediaResult(NS_ERROR_FAILURE, "Invalid TrackInfo"));
+    return;
+  }
+
   RefPtr<PDMFactory> platform = new PDMFactory();
   mInfo = std::move(aInfo);
   mDecoder = platform->CreateDecoder({*mInfo, mDecoderTaskQueue});
@@ -257,16 +262,11 @@ void BenchmarkPlayback::InitDecoder(UniquePtr<TrackInfo>&& aInfo) {
 void BenchmarkPlayback::FinalizeShutdown() {
   MOZ_ASSERT(OnThread());
 
+  MOZ_ASSERT(mFinished, "GlobalShutdown must have been run");
   MOZ_ASSERT(!mDecoder, "mDecoder must have been shutdown already");
+  MOZ_ASSERT(!mDemuxer, "mDemuxer must have been shutdown already");
   MOZ_DIAGNOSTIC_ASSERT(mDecoderTaskQueue->IsEmpty());
   mDecoderTaskQueue = nullptr;
-
-  if (mTrackDemuxer) {
-    mTrackDemuxer->Reset();
-    mTrackDemuxer->BreakCycles();
-    mTrackDemuxer = nullptr;
-  }
-  mDemuxer = nullptr;
 
   RefPtr<Benchmark> ref(mGlobalState);
   ref->Thread()->Dispatch(NS_NewRunnableFunction(
@@ -295,6 +295,13 @@ void BenchmarkPlayback::GlobalShutdown() {
   } else {
     FinalizeShutdown();
   }
+
+  if (mTrackDemuxer) {
+    mTrackDemuxer->Reset();
+    mTrackDemuxer->BreakCycles();
+    mTrackDemuxer = nullptr;
+  }
+  mDemuxer = nullptr;
 }
 
 void BenchmarkPlayback::Output(MediaDataDecoder::DecodedData&& aResults) {

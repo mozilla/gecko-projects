@@ -260,6 +260,18 @@ class ContextMenuChild extends JSWindowActorChild {
           imageName: null,
         });
       }
+
+      case "ContextMenu:PluginCommand": {
+        let target = ContentDOMReference.resolve(message.data.targetIdentifier);
+        let actor = this.manager.getActor("Plugin");
+        let { command } = message.data;
+        if (command == "play") {
+          actor.showClickToPlayNotification(target, true);
+        } else if (command == "hide") {
+          actor.hideClickToPlayOverlay(target);
+        }
+        break;
+      }
     }
 
     return undefined;
@@ -450,6 +462,17 @@ class ContextMenuChild extends JSWindowActorChild {
     return node instanceof this.contentWindow.HTMLTextAreaElement;
   }
 
+  /**
+   * Check if we are in the parent process and the current iframe is the RDM iframe.
+   */
+  _isTargetRDMFrame(node) {
+    return (
+      Services.appinfo.processType === Services.appinfo.PROCESS_TYPE_DEFAULT &&
+      node.tagName === "iframe" &&
+      node.hasAttribute("mozbrowser")
+    );
+  }
+
   _isSpellCheckEnabled(aNode) {
     // We can always force-enable spellchecking on textboxes
     if (this._isTargetATextBox(aNode)) {
@@ -521,6 +544,12 @@ class ContextMenuChild extends JSWindowActorChild {
     }
 
     if (defaultPrevented) {
+      return;
+    }
+
+    if (this._isTargetRDMFrame(aEvent.composedTarget)) {
+      // The target is in the DevTools RDM iframe, a proper context menu event
+      // will be created from the RDM browser.
       return;
     }
 
@@ -647,7 +676,22 @@ class ContextMenuChild extends JSWindowActorChild {
     };
 
     if (context.inFrame && !context.inSrcdocFrame) {
-      data.frameReferrerInfo = doc.referrerInfo;
+      data.frameReferrerInfo = E10SUtils.serializeReferrerInfo(
+        doc.referrerInfo
+      );
+    }
+
+    // In the case "onLink" we may have to send target referrerInfo. This object
+    // may be used to in saveMedia function.
+    if (context.onLink) {
+      let targetReferrerInfo = Cc[
+        "@mozilla.org/referrer-info;1"
+      ].createInstance(Ci.nsIReferrerInfo);
+
+      targetReferrerInfo.initWithNode(aEvent.composedTarget);
+      data.targetReferrerInfo = E10SUtils.serializeReferrerInfo(
+        targetReferrerInfo
+      );
     }
 
     if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {

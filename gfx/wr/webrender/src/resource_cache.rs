@@ -20,7 +20,6 @@ use crate::capture::CaptureConfig;
 use crate::device::TextureFilter;
 use euclid::{point2, size2};
 use crate::glyph_cache::GlyphCache;
-#[cfg(not(feature = "pathfinder"))]
 use crate::glyph_cache::GlyphCacheEntry;
 use crate::glyph_rasterizer::{BaseFontInstance, FontInstance, GlyphFormat, GlyphKey, GlyphRasterizer};
 use crate::gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
@@ -33,7 +32,7 @@ use crate::render_task::{RenderTaskCache, RenderTaskCacheKey, RenderTaskId};
 use crate::render_task::{RenderTaskCacheEntry, RenderTaskCacheEntryHandle, RenderTaskGraph};
 use smallvec::SmallVec;
 use std::collections::hash_map::Entry::{self, Occupied, Vacant};
-use std::collections::hash_map::IterMut;
+use std::collections::hash_map::{Iter, IterMut};
 use std::collections::VecDeque;
 use std::{cmp, mem};
 use std::fmt::Debug;
@@ -273,8 +272,16 @@ where
         self.resources.entry(key)
     }
 
+    pub fn iter(&self) -> Iter<K, V> {
+        self.resources.iter()
+    }
+
     pub fn iter_mut(&mut self) -> IterMut<K, V> {
         self.resources.iter_mut()
+    }
+
+    pub fn is_empty(&mut self) -> bool {
+        self.resources.is_empty()
     }
 
     pub fn clear(&mut self) {
@@ -491,10 +498,11 @@ impl ResourceCache {
     pub fn new(
         texture_cache: TextureCache,
         glyph_rasterizer: GlyphRasterizer,
+        cached_glyphs: GlyphCache,
         blob_image_handler: Option<Box<dyn BlobImageHandler>>,
     ) -> Self {
         ResourceCache {
-            cached_glyphs: GlyphCache::new(),
+            cached_glyphs,
             cached_images: ResourceClassCache::new(),
             cached_render_tasks: RenderTaskCache::new(),
             resources: Resources::default(),
@@ -710,16 +718,16 @@ impl ResourceCache {
             };
 
             tiles.retain(|tile, _| {
-                !req.original_tile_range.contains(tile) ||
-                req.actual_tile_range.contains(tile)
+                !req.original_tile_range.contains(*tile) ||
+                req.actual_tile_range.contains(*tile)
             });
 
             let texture_cache = &mut self.texture_cache;
             match self.cached_images.try_get_mut(&req.key.as_image()) {
                 Some(&mut ImageResult::Multi(ref mut entries)) => {
                     entries.retain(|key, entry| {
-                        if !req.original_tile_range.contains(&key.tile.unwrap()) ||
-                           req.actual_tile_range.contains(&key.tile.unwrap()) {
+                        if !req.original_tile_range.contains(key.tile.unwrap()) ||
+                           req.actual_tile_range.contains(key.tile.unwrap()) {
                             return true;
                         }
                         entry.mark_unused(texture_cache);
@@ -781,7 +789,7 @@ impl ResourceCache {
         self.glyph_rasterizer.delete_font(font_key);
         self.resources.font_templates.remove(&font_key);
         self.cached_glyphs
-            .clear_fonts(|font| font.font_key == font_key);
+            .clear_fonts(&mut self.texture_cache, |font| font.font_key == font_key);
         if let Some(ref mut r) = self.blob_image_handler {
             r.delete_font(font_key);
         }
@@ -1236,8 +1244,9 @@ impl ResourceCache {
                     && (tiles.size.width > MAX_TILES_PER_REQUEST
                         || tiles.size.height > MAX_TILES_PER_REQUEST
                         || tiles.size.width * tiles.size.height > MAX_TILES_PER_REQUEST) {
-                    let w = tiles.size.width;
-                    let h = tiles.size.height;
+                    let limit = 46340; // sqrt(i32::MAX) rounded down to avoid overflow.
+                    let w = tiles.size.width.min(limit);
+                    let h = tiles.size.height.min(limit);
                     let diff = w * h - MAX_TILES_PER_REQUEST;
                     // Remove tiles in the largest dimension.
                     if tiles.size.width > tiles.size.height {
@@ -1377,13 +1386,13 @@ impl ResourceCache {
             tile_size,
         );
 
-        tiles.retain(|tile, _| { tile_range.contains(tile) });
+        tiles.retain(|tile, _| { tile_range.contains(*tile) });
 
         let texture_cache = &mut self.texture_cache;
         match self.cached_images.try_get_mut(&key.as_image()) {
             Some(&mut ImageResult::Multi(ref mut entries)) => {
                 entries.retain(|key, entry| {
-                    if key.tile.is_none() || tile_range.contains(&key.tile.unwrap()) {
+                    if key.tile.is_none() || tile_range.contains(key.tile.unwrap()) {
                         return true;
                     }
                     entry.mark_unused(texture_cache);
@@ -1419,57 +1428,6 @@ impl ResourceCache {
         self.texture_cache.pending_updates()
     }
 
-    #[cfg(feature = "pathfinder")]
-    pub fn fetch_glyphs<F>(
-        &self,
-        mut font: FontInstance,
-        glyph_keys: &[GlyphKey],
-        fetch_buffer: &mut Vec<GlyphFetchResult>,
-        gpu_cache: &mut GpuCache,
-        mut f: F,
-    ) where
-        F: FnMut(TextureSource, GlyphFormat, &[GlyphFetchResult]),
-    {
-        debug_assert_eq!(self.state, State::QueryResources);
-
-        self.glyph_rasterizer.prepare_font(&mut font);
-
-        let mut current_texture_id = TextureSource::Invalid;
-        let mut current_glyph_format = GlyphFormat::Subpixel;
-        debug_assert!(fetch_buffer.is_empty());
-
-        for (loop_index, key) in glyph_keys.iter().enumerate() {
-           let (cache_item, glyph_format) =
-                match self.glyph_rasterizer.get_cache_item_for_glyph(key,
-                                                                     &font,
-                                                                     &self.cached_glyphs,
-                                                                     &self.texture_cache,
-                                                                     &self.cached_render_tasks) {
-                    None => continue,
-                    Some(result) => result,
-                };
-            if current_texture_id != cache_item.texture_id ||
-                current_glyph_format != glyph_format {
-                if !fetch_buffer.is_empty() {
-                    f(current_texture_id, current_glyph_format, fetch_buffer);
-                    fetch_buffer.clear();
-                }
-                current_texture_id = cache_item.texture_id;
-                current_glyph_format = glyph_format;
-            }
-            fetch_buffer.push(GlyphFetchResult {
-                index_in_text_run: loop_index as i32,
-                uv_rect_address: gpu_cache.get_address(&cache_item.uv_rect_handle),
-            });
-        }
-
-        if !fetch_buffer.is_empty() {
-            f(current_texture_id, current_glyph_format, fetch_buffer);
-            fetch_buffer.clear();
-        }
-    }
-
-    #[cfg(not(feature = "pathfinder"))]
     pub fn fetch_glyphs<F>(
         &self,
         mut font: FontInstance,
@@ -1603,7 +1561,12 @@ impl ResourceCache {
         debug_assert_eq!(self.state, State::Idle);
         self.state = State::AddResources;
         self.texture_cache.begin_frame(stamp);
-        self.cached_glyphs.begin_frame(&self.texture_cache, &self.cached_render_tasks, &mut self.glyph_rasterizer);
+        self.cached_glyphs.begin_frame(
+            stamp,
+            &mut self.texture_cache,
+            &self.cached_render_tasks,
+            &mut self.glyph_rasterizer,
+        );
         self.cached_render_tasks.begin_frame(&mut self.texture_cache);
         self.current_frame_id = stamp.frame_id();
         self.active_image_keys.clear();
@@ -1841,7 +1804,7 @@ impl ResourceCache {
             .font_templates
             .retain(|key, _| key.0 != namespace);
         self.cached_glyphs
-            .clear_fonts(|font| font.font_key.0 == namespace);
+            .clear_fonts(&mut self.texture_cache, |font| font.font_key.0 == namespace);
 
         if let Some(ref mut r) = self.blob_image_handler {
             r.clear_namespace(namespace);

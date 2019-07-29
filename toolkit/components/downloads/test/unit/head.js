@@ -402,13 +402,21 @@ function promiseStartLegacyDownload(aSourceUrl, aOptions) {
         );
         persist.progressListener = transfer;
 
+        let referrerInfo = Cc["@mozilla.org/referrer-info;1"].createInstance(
+          Ci.nsIReferrerInfo
+        );
+        referrerInfo.init(
+          Ci.nsIHttpChannel.REFERRER_POLICY_UNSAFE_URL,
+          true,
+          referrer
+        );
+
         // Start the actual download process.
         persist.savePrivacyAwareURI(
           sourceURI,
           Services.scriptSecurityManager.getSystemPrincipal(),
           0,
-          referrer,
-          Ci.nsIHttpChannel.REFERRER_POLICY_UNSAFE_URL,
+          referrerInfo,
           null,
           null,
           targetFile,
@@ -862,17 +870,11 @@ add_task(function test_common_initialize() {
       );
 
       let bos = new BinaryOutputStream(aResponse.bodyOutputStream);
-      bos.writeByteArray(
-        TEST_DATA_SHORT_GZIP_ENCODED_FIRST,
-        TEST_DATA_SHORT_GZIP_ENCODED_FIRST.length
-      );
+      bos.writeByteArray(TEST_DATA_SHORT_GZIP_ENCODED_FIRST);
     },
     function secondPart(aRequest, aResponse) {
       let bos = new BinaryOutputStream(aResponse.bodyOutputStream);
-      bos.writeByteArray(
-        TEST_DATA_SHORT_GZIP_ENCODED_SECOND,
-        TEST_DATA_SHORT_GZIP_ENCODED_SECOND.length
-      );
+      bos.writeByteArray(TEST_DATA_SHORT_GZIP_ENCODED_SECOND);
     }
   );
 

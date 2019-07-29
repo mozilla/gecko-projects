@@ -18,11 +18,6 @@ const QUERYTYPE_AUTOFILL_ORIGIN = 1;
 const QUERYTYPE_AUTOFILL_URL = 2;
 const QUERYTYPE_ADAPTIVE = 3;
 
-// This separator is used as an RTL-friendly way to split the title and tags.
-// It can also be used by an nsIAutoCompleteResult consumer to re-split the
-// "comment" back into the title and the tag.
-const TITLE_TAGS_SEPARATOR = " \u2013 ";
-
 // Telemetry probes.
 const TELEMETRY_1ST_RESULT = "PLACES_AUTOCOMPLETE_1ST_RESULT_TIME_MS";
 const TELEMETRY_6_FIRST_RESULTS = "PLACES_AUTOCOMPLETE_6_FIRST_RESULTS_TIME_MS";
@@ -164,9 +159,9 @@ const SQL_AUTOFILL_WITH = `
   WITH
   frecency_stats(count, sum, squares) AS (
     SELECT
-      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = "origin_frecency_count") AS REAL),
-      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = "origin_frecency_sum") AS REAL),
-      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = "origin_frecency_sum_of_squares") AS REAL)
+      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = 'origin_frecency_count') AS REAL),
+      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = 'origin_frecency_sum') AS REAL),
+      CAST((SELECT IFNULL(value, 0.0) FROM moz_meta WHERE key = 'origin_frecency_sum_of_squares') AS REAL)
   ),
   autofill_frecency_threshold(value) AS (
     SELECT
@@ -183,7 +178,7 @@ const SQL_AUTOFILL_FRECENCY_THRESHOLD = `(
   SELECT value FROM autofill_frecency_threshold
 )`;
 
-function originQuery(conditions = "", bookmarkedFragment = "NULL") {
+function originQuery(conditions = "") {
   return `${SQL_AUTOFILL_WITH}
           SELECT :query_type,
                  fixed_up_host || '/',
@@ -231,6 +226,13 @@ const SQL_ORIGIN_QUERY = originQuery();
 
 const SQL_ORIGIN_PREFIX_QUERY = originQuery(
   `AND prefix BETWEEN :prefix AND :prefix || X'FFFF'`
+);
+
+const SQL_ORIGIN_NOT_BOOKMARKED_QUERY = originQuery(`AND NOT bookmarked`);
+
+const SQL_ORIGIN_PREFIX_NOT_BOOKMARKED_QUERY = originQuery(
+  `AND NOT bookmarked
+   AND prefix BETWEEN :prefix AND :prefix || X'FFFF'`
 );
 
 const SQL_ORIGIN_BOOKMARKED_QUERY = originQuery(`AND bookmarked`);
@@ -284,6 +286,20 @@ const SQL_URL_QUERY = urlQuery(
 const SQL_URL_PREFIX_QUERY = urlQuery(
   `AND url BETWEEN :prefix || :strippedURL AND :prefix || :strippedURL || X'FFFF'`,
   `AND url BETWEEN :prefix || 'www.' || :strippedURL AND :prefix || 'www.' || :strippedURL || X'FFFF'`
+);
+
+const SQL_URL_NOT_BOOKMARKED_QUERY = urlQuery(
+  `AND NOT bookmarked
+   AND strip_prefix_and_userinfo(url) BETWEEN :strippedURL AND :strippedURL || X'FFFF'`,
+  `AND NOT bookmarked
+   AND strip_prefix_and_userinfo(url) BETWEEN 'www.' || :strippedURL AND 'www.' || :strippedURL || X'FFFF'`
+);
+
+const SQL_URL_PREFIX_NOT_BOOKMARKED_QUERY = urlQuery(
+  `AND NOT bookmarked
+   AND url BETWEEN :prefix || :strippedURL AND :prefix || :strippedURL || X'FFFF'`,
+  `AND NOT bookmarked
+   AND url BETWEEN :prefix || 'www.' || :strippedURL AND :prefix || 'www.' || :strippedURL || X'FFFF'`
 );
 
 const SQL_URL_BOOKMARKED_QUERY = urlQuery(
@@ -631,7 +647,6 @@ function Search(
 
   // This allows to handle leading or trailing restriction characters specially.
   this._leadingRestrictionToken = null;
-  this._trailingRestrictionToken = null;
   if (tokens.length > 0) {
     if (
       UrlbarTokenizer.isRestrictionToken(tokens[0]) &&
@@ -639,13 +654,6 @@ function Search(
         tokens[0].type == UrlbarTokenizer.TYPE.RESTRICT_SEARCH)
     ) {
       this._leadingRestrictionToken = tokens[0].value;
-    }
-    if (
-      UrlbarTokenizer.isRestrictionToken(tokens[tokens.length - 1]) &&
-      (tokens.length > 1 ||
-        tokens[tokens.length - 1].type == UrlbarTokenizer.TYPE.RESTRICT_SEARCH)
-    ) {
-      this._trailingRestrictionToken = tokens[tokens.length - 1].value;
     }
 
     // Check if the first token has a strippable prefix and remove it, but don't
@@ -1723,16 +1731,13 @@ Search.prototype = {
     if (!engine || !this.pending) {
       return false;
     }
-    // Strip a leading or trailing restriction char.
+    // Strip a leading search restriction char, because we prepend it to text
+    // when the search shortcut is used and it's not user typed. Don't strip
+    // other restriction chars, so that it's possible to search for things
+    // including one of those (e.g. "c#").
     let query = this._trimmedOriginalSearchString;
-    if (this._leadingRestrictionToken) {
+    if (this._leadingRestrictionToken === UrlbarTokenizer.RESTRICT.SEARCH) {
       query = substringAfter(query, this._leadingRestrictionToken).trim();
-    }
-    if (this._trailingRestrictionToken) {
-      query = query.substring(
-        0,
-        query.lastIndexOf(this._trailingRestrictionToken)
-      );
     }
     this._addSearchEngineMatch({ engine, query });
     return true;
@@ -2425,7 +2430,7 @@ Search.prototype = {
 
     // If we have tags and should show them, we need to add them to the title.
     if (showTags) {
-      title += TITLE_TAGS_SEPARATOR + tags;
+      title += UrlbarUtils.TITLE_TAGS_SEPARATOR + tags;
     }
 
     // We have to determine the right style to display.  Tags show the tag icon,
@@ -2635,20 +2640,33 @@ Search.prototype = {
       searchString: searchStr.toLowerCase(),
       stddevMultiplier: UrlbarPrefs.get("autoFill.stddevMultiplier"),
     };
-
-    let bookmarked =
-      this.hasBehavior("bookmark") && !this.hasBehavior("history");
     if (this._strippedPrefix) {
       opts.prefix = this._strippedPrefix;
-      if (bookmarked) {
-        return [SQL_ORIGIN_PREFIX_BOOKMARKED_QUERY, opts];
-      }
-      return [SQL_ORIGIN_PREFIX_QUERY, opts];
     }
-    if (bookmarked) {
-      return [SQL_ORIGIN_BOOKMARKED_QUERY, opts];
+
+    if (this.hasBehavior("history") && this.hasBehavior("bookmark")) {
+      return [
+        this._strippedPrefix ? SQL_ORIGIN_PREFIX_QUERY : SQL_ORIGIN_QUERY,
+        opts,
+      ];
     }
-    return [SQL_ORIGIN_QUERY, opts];
+    if (this.hasBehavior("history")) {
+      return [
+        this._strippedPrefix
+          ? SQL_ORIGIN_PREFIX_NOT_BOOKMARKED_QUERY
+          : SQL_ORIGIN_NOT_BOOKMARKED_QUERY,
+        opts,
+      ];
+    }
+    if (this.hasBehavior("bookmark")) {
+      return [
+        this._strippedPrefix
+          ? SQL_ORIGIN_PREFIX_BOOKMARKED_QUERY
+          : SQL_ORIGIN_BOOKMARKED_QUERY,
+        opts,
+      ];
+    }
+    throw new Error("Either history or bookmark behavior expected");
   },
 
   /**
@@ -2692,21 +2710,33 @@ Search.prototype = {
       revHost,
       strippedURL,
     };
-
-    let bookmarked =
-      this.hasBehavior("bookmark") && !this.hasBehavior("history");
-
     if (this._strippedPrefix) {
       opts.prefix = this._strippedPrefix;
-      if (bookmarked) {
-        return [SQL_URL_PREFIX_BOOKMARKED_QUERY, opts];
-      }
-      return [SQL_URL_PREFIX_QUERY, opts];
     }
-    if (bookmarked) {
-      return [SQL_URL_BOOKMARKED_QUERY, opts];
+
+    if (this.hasBehavior("history") && this.hasBehavior("bookmark")) {
+      return [
+        this._strippedPrefix ? SQL_URL_PREFIX_QUERY : SQL_URL_QUERY,
+        opts,
+      ];
     }
-    return [SQL_URL_QUERY, opts];
+    if (this.hasBehavior("history")) {
+      return [
+        this._strippedPrefix
+          ? SQL_URL_PREFIX_NOT_BOOKMARKED_QUERY
+          : SQL_URL_NOT_BOOKMARKED_QUERY,
+        opts,
+      ];
+    }
+    if (this.hasBehavior("bookmark")) {
+      return [
+        this._strippedPrefix
+          ? SQL_URL_PREFIX_BOOKMARKED_QUERY
+          : SQL_URL_BOOKMARKED_QUERY,
+        opts,
+      ];
+    }
+    throw new Error("Either history or bookmark behavior expected");
   },
 
   // The result is notified to the search listener on a timer, to chunk multiple

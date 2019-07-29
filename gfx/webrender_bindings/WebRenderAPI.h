@@ -476,21 +476,19 @@ class DisplayListBuilder final {
       bool aIsBackfaceVisible, wr::ImageKey aImageChannel0,
       wr::ImageKey aImageChannel1, wr::ImageKey aImageChannel2,
       wr::WrColorDepth aColorDepth, wr::WrYuvColorSpace aColorSpace,
-      wr::ImageRendering aFilter);
+      wr::WrColorRange aColorRange, wr::ImageRendering aFilter);
 
   void PushNV12Image(const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
                      bool aIsBackfaceVisible, wr::ImageKey aImageChannel0,
                      wr::ImageKey aImageChannel1, wr::WrColorDepth aColorDepth,
                      wr::WrYuvColorSpace aColorSpace,
-                     wr::ImageRendering aFilter);
+                     wr::WrColorRange aColorRange, wr::ImageRendering aFilter);
 
-  void PushYCbCrInterleavedImage(const wr::LayoutRect& aBounds,
-                                 const wr::LayoutRect& aClip,
-                                 bool aIsBackfaceVisible,
-                                 wr::ImageKey aImageChannel0,
-                                 wr::WrColorDepth aColorDepth,
-                                 wr::WrYuvColorSpace aColorSpace,
-                                 wr::ImageRendering aFilter);
+  void PushYCbCrInterleavedImage(
+      const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
+      bool aIsBackfaceVisible, wr::ImageKey aImageChannel0,
+      wr::WrColorDepth aColorDepth, wr::WrYuvColorSpace aColorSpace,
+      wr::WrColorRange aColorRange, wr::ImageRendering aFilter);
 
   void PushIFrame(const wr::LayoutRect& aBounds, bool aIsBackfaceVisible,
                   wr::PipelineId aPipeline, bool aIgnoreMissingPipeline);
@@ -511,19 +509,19 @@ class DisplayListBuilder final {
                           const wr::LayoutRect& aClip, bool aIsBackfaceVisible,
                           const wr::LayoutSideOffsets& aWidths,
                           const int32_t aWidth, const int32_t aHeight,
-                          bool aFill, const wr::SideOffsets2D<int32_t>& aSlice,
+                          bool aFill, const wr::DeviceIntSideOffsets& aSlice,
                           const wr::LayoutPoint& aStartPoint,
                           const wr::LayoutPoint& aEndPoint,
                           const nsTArray<wr::GradientStop>& aStops,
                           wr::ExtendMode aExtendMode,
-                          const wr::SideOffsets2D<float>& aOutset);
+                          const wr::LayoutSideOffsets& aOutset);
 
   void PushBorderRadialGradient(
       const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
       bool aIsBackfaceVisible, const wr::LayoutSideOffsets& aWidths, bool aFill,
       const wr::LayoutPoint& aCenter, const wr::LayoutSize& aRadius,
       const nsTArray<wr::GradientStop>& aStops, wr::ExtendMode aExtendMode,
-      const wr::SideOffsets2D<float>& aOutset);
+      const wr::LayoutSideOffsets& aOutset);
 
   void PushText(const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
                 bool aIsBackfaceVisible, const wr::ColorF& aColor,
@@ -638,6 +636,7 @@ class DisplayListBuilder final {
   wr::PipelineId mPipelineId;
   wr::LayoutSize mContentSize;
 
+  nsTArray<wr::PipelineId> mRemotePipelineIds;
   RenderRoot mRenderRoot;
   bool mSendSubBuilderDisplayList;
 

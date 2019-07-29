@@ -17,7 +17,7 @@ const {
   connect,
 } = require("devtools/client/shared/redux/visibility-handler-connect");
 const Actions = require("../../actions/index");
-
+const { findDOMNode } = require("devtools/client/shared/vendor/react-dom");
 const {
   getSelectedFrame,
   isSelectedFrameVisible,
@@ -29,6 +29,7 @@ const SplitBox = createFactory(
 );
 const FrameListContent = createFactory(require("./FrameListContent"));
 const Toolbar = createFactory(require("./Toolbar"));
+const StatusBar = createFactory(require("./StatusBar"));
 
 loader.lazyGetter(this, "FramePayload", function() {
   return createFactory(require("./FramePayload"));
@@ -70,6 +71,17 @@ class WebSocketsPanel extends Component {
     }
   }
 
+  componentWillUnmount() {
+    const { clientHeight } = findDOMNode(this.refs.endPanel) || {};
+
+    if (clientHeight) {
+      Services.prefs.setIntPref(
+        "devtools.netmonitor.ws.payload-preview-height",
+        clientHeight
+      );
+    }
+  }
+
   // Reset the filter text
   clearFilterText() {
     if (this.searchboxRef) {
@@ -80,9 +92,6 @@ class WebSocketsPanel extends Component {
   render() {
     const { frameDetailsOpen, connector, selectedFrame } = this.props;
 
-    const initialWidth = Services.prefs.getIntPref(
-      "devtools.netmonitor.ws.payload-preview-width"
-    );
     const initialHeight = Services.prefs.getIntPref(
       "devtools.netmonitor.ws.payload-preview-height"
     );
@@ -94,22 +103,23 @@ class WebSocketsPanel extends Component {
       }),
       SplitBox({
         className: "devtools-responsive-container",
-        initialWidth: initialWidth,
         initialHeight: initialHeight,
         minSize: "50px",
-        maxSize: "50%",
+        maxSize: "80%",
         splitterSize: frameDetailsOpen ? 1 : 0,
         startPanel: FrameListContent({ connector }),
         endPanel:
           frameDetailsOpen &&
           FramePayload({
+            ref: "endPanel",
             connector,
             selectedFrame,
           }),
         endPanelCollapsed: !frameDetailsOpen,
         endPanelControl: true,
         vert: false,
-      })
+      }),
+      StatusBar()
     );
   }
 }

@@ -694,6 +694,7 @@ class ContentChild final : public PContentChild,
                                             bool aMuted);
 
   void HoldBrowsingContextGroup(BrowsingContextGroup* aBCG);
+  void ReleaseBrowsingContextGroup(BrowsingContextGroup* aBCG);
 
   mozilla::ipc::IPCResult RecvDestroySHEntrySharedState(const uint64_t& aID);
 

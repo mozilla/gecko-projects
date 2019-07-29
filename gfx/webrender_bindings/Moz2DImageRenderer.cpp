@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_gfx.h"
 #include "gfxUtils.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Range.h"
@@ -388,8 +388,8 @@ static bool Moz2DRenderCallback(const Range<const uint8_t> aBlob,
   auto bounds = gfx::IntRect(origin, aSize);
 
   if (aDirtyRect) {
-    Rect dirty(aDirtyRect->origin.x, aDirtyRect->origin.y,
-               aDirtyRect->size.width, aDirtyRect->size.height);
+    gfx::Rect dirty(aDirtyRect->origin.x, aDirtyRect->origin.y,
+                    aDirtyRect->size.width, aDirtyRect->size.height);
     dt->PushClipRect(dirty);
     bounds = bounds.Intersect(
         IntRect(aDirtyRect->origin.x, aDirtyRect->origin.y,

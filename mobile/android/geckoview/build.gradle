@@ -165,6 +165,10 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile) {
     // Translate Kotlin messages like "w: ..." and "e: ..." into
     // "...: warning: ..." and "...: error: ...", to make Treeherder understand.
     def listener = {
+        if (it.startsWith("e: warnings found")) {
+            return
+        }
+
         if (it.startsWith('w: ') || it.startsWith('e: ')) {
             def matches = (it =~ /([ew]): (.+): \((\d+), (\d+)\): (.*)/)
             if (!matches) {
@@ -225,7 +229,7 @@ dependencies {
 
     testImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
     testImplementation 'junit:junit:4.12'
-    testImplementation 'org.robolectric:robolectric:3.8'
+    testImplementation 'org.robolectric:robolectric:4.3'
     testImplementation 'org.mockito:mockito-core:1.10.19'
 
     androidTestImplementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
@@ -259,11 +263,11 @@ android.libraryVariants.all { variant ->
             classpath = files(variant.javaCompile.classpath.files)
         }
 
-        source = files(variant.javaCompile.source)
+        source = variant.sourceSets.collect({ it.java.srcDirs })
         exclude '**/R.java', '**/BuildConfig.java'
-        include 'org/mozilla/geckoview/**'
+        include 'org/mozilla/geckoview/**.java'
         options.addPathOption('sourcepath', ':').setValue(
-            variant.sourceSets.collect({ it.javaDirectories }).flatten() +
+            variant.sourceSets.collect({ it.java.srcDirs }).flatten() +
             variant.generateBuildConfig.sourceOutputDir +
             variant.aidlCompile.sourceOutputDir)
 
@@ -320,6 +324,18 @@ android.libraryVariants.all { variant ->
     if (variant.name == mozconfig.substs.GRADLE_ANDROID_GECKOVIEW_VARIANT_NAME) {
         configureLibraryVariantWithJNIWrappers(variant, "Generated")
     }
+}
+
+android.libraryVariants.all { variant ->
+    // At this point, the Android-Gradle plugin has created all the Android tasks and
+    // configurations.  This is the time for us to declare additional Glean files to package into
+    // AAR files.  This packs `metrics.yaml` in the root of the AAR, sibling to
+    // `AndroidManifest.xml` and `classes.jar`.  By default, consumers of the AAR will ignore this
+    // file, but consumers that look for it can find it (provided GeckoView is a `module()`
+    // dependency and not a `project()` dependency.)  Under the hood this uses that the
+    // `packageLibrary` task is a Maven `Zip` task, and we can simply extend its inputs.  See
+    // https://android.googlesource.com/platform/tools/base/+/0cbe8846f7d02c0bb6f07156b9f4fde16d96d329/build-system/gradle-core/src/main/java/com/android/build/gradle/tasks/BundleAar.kt#94.
+    variant.packageLibrary.from("${topsrcdir}/toolkit/components/telemetry/geckoview/streaming/metrics.yaml")
 }
 
 apply plugin: 'maven-publish'
@@ -384,7 +400,7 @@ publishing {
                     }
                 }
 
-                artifact tasks["bundle${variant.name.capitalize()}"]
+                artifact tasks["bundle${variant.name.capitalize()}Aar"]
 
                 // Javadoc and sources for developer ergononomics.
                 artifact tasks["javadocJar${variant.name.capitalize()}"]
@@ -405,7 +421,7 @@ afterEvaluate {
     // The bundle tasks are only present when the particular configuration is
     // being built, so this task might not exist.  (This is due to the way the
     // Android Gradle plugin defines things during configuration.)
-    def bundleWithGeckoBinaries = tasks.findByName('bundleWithGeckoBinariesRelease')
+    def bundleWithGeckoBinaries = tasks.findByName('bundleWithGeckoBinariesReleaseAar')
     if (!bundleWithGeckoBinaries) {
         return
     }
@@ -451,7 +467,7 @@ task("generateSDKBindings", type: JavaExec) {
     main = 'org.mozilla.gecko.annotationProcessors.SDKProcessor'
     // We only want to generate bindings for the main framework JAR,
     // but not any of the additional android.test libraries.
-    args android.bootClasspath.findAll { !it.getName().startsWith('android.test.') }
+    args android.bootClasspath.findAll { it.getName().startsWith('android.jar') }
     args 16
     args "${topobjdir}/widget/android/bindings"
 

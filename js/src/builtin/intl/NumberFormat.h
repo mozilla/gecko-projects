@@ -14,11 +14,11 @@
 #include "builtin/SelfHostingDefines.h"
 #include "gc/Barrier.h"
 #include "js/Class.h"
-#include "js/Vector.h"
 #include "vm/NativeObject.h"
 #include "vm/Runtime.h"
 
 struct UFormattedNumber;
+struct UFormattedValue;
 struct UNumberFormatter;
 
 namespace js {
@@ -116,6 +116,17 @@ extern MOZ_MUST_USE bool intl_numberingSystem(JSContext* cx, unsigned argc,
 extern MOZ_MUST_USE bool intl_FormatNumber(JSContext* cx, unsigned argc,
                                            Value* vp);
 
+#if DEBUG || MOZ_SYSTEM_ICU
+/**
+ * Returns an object with all available measurement units.
+ *
+ * Usage: units = intl_availableMeasurementUnits()
+ */
+extern MOZ_MUST_USE bool intl_availableMeasurementUnits(JSContext* cx,
+                                                        unsigned argc,
+                                                        Value* vp);
+#endif
+
 namespace intl {
 
 /**
@@ -150,6 +161,10 @@ class MOZ_STACK_CLASS NumberFormatterSkeleton final {
     return append(token) && append(' ');
   }
 
+  bool append(const char* chars, size_t length) {
+    return vector_.append(chars, length);
+  }
+
  public:
   explicit NumberFormatterSkeleton(JSContext* cx) : vector_(cx) {}
 
@@ -158,15 +173,40 @@ class MOZ_STACK_CLASS NumberFormatterSkeleton final {
    */
   UNumberFormatter* toFormatter(JSContext* cx, const char* locale);
 
-  enum class CurrencyDisplay { Code, Name, Symbol };
-
   /**
    * Set this skeleton to display a currency amount. |currency| must be a
    * three-letter currency code.
    *
    * https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#unit
    */
-  MOZ_MUST_USE bool currency(CurrencyDisplay display, JSLinearString* currency);
+  MOZ_MUST_USE bool currency(JSLinearString* currency);
+
+  enum class CurrencyDisplay { Code, Name, Symbol, NarrowSymbol };
+
+  /**
+   * Set the currency display style for this skeleton.
+   *
+   * https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#unit-width
+   */
+  MOZ_MUST_USE bool currencyDisplay(CurrencyDisplay display);
+
+  /**
+   * Set this skeleton to display a unit amount. |unit| must be a well-formed
+   * unit identifier.
+   *
+   * https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#unit
+   * https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#per-unit
+   */
+  MOZ_MUST_USE bool unit(JSLinearString* unit);
+
+  enum class UnitDisplay { Short, Narrow, Long };
+
+  /**
+   * Set the unit display style for this skeleton.
+   *
+   * https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#unit-width
+   */
+  MOZ_MUST_USE bool unitDisplay(UnitDisplay display);
 
   /**
    * Set this skeleton to display a percent number.
@@ -207,6 +247,38 @@ class MOZ_STACK_CLASS NumberFormatterSkeleton final {
    */
   MOZ_MUST_USE bool useGrouping(bool on);
 
+  enum class Notation {
+    Standard,
+    Scientific,
+    Engineering,
+    CompactShort,
+    CompactLong
+  };
+
+  /**
+   * Set the notation style for this skeleton.
+   *
+   * https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#notation
+   */
+  MOZ_MUST_USE bool notation(Notation style);
+
+  enum class SignDisplay {
+    Auto,
+    Never,
+    Always,
+    ExceptZero,
+    Accounting,
+    AccountingAlways,
+    AccountingExceptZero
+  };
+
+  /**
+   * Set the sign-display for this skeleton.
+   *
+   * https://github.com/unicode-org/icu/blob/master/docs/userguide/format_parse/numbers/skeletons.md#sign-display
+   */
+  MOZ_MUST_USE bool signDisplay(SignDisplay display);
+
   /**
    * Set the rounding mode to 'half-up' for this skeleton.
    *
@@ -217,34 +289,12 @@ class MOZ_STACK_CLASS NumberFormatterSkeleton final {
 
 using FieldType = js::ImmutablePropertyNamePtr JSAtomState::*;
 
-struct Field {
-  uint32_t begin;
-  uint32_t end;
-  FieldType type;
-
-  // Needed for vector-resizing scratch space.
-  Field() = default;
-
-  Field(uint32_t begin, uint32_t end, FieldType type)
-      : begin(begin), end(end), type(type) {}
-};
-
-class NumberFormatFields {
-  using FieldsVector = Vector<Field, 16>;
-
-  FieldsVector fields_;
-  double number_;
-
- public:
-  NumberFormatFields(JSContext* cx, double number)
-      : fields_(cx), number_(number) {}
-
-  MOZ_MUST_USE bool append(int32_t field, int32_t begin, int32_t end);
-
-  MOZ_MUST_USE ArrayObject* toArray(JSContext* cx,
-                                    JS::HandleString overallResult,
-                                    FieldType unitType);
-};
+#ifndef U_HIDE_DRAFT_API
+MOZ_MUST_USE bool FormattedNumberToParts(JSContext* cx,
+                                         const UFormattedValue* formattedValue,
+                                         HandleValue number, FieldType unitType,
+                                         MutableHandleValue result);
+#endif
 
 }  // namespace intl
 }  // namespace js

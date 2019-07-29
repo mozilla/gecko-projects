@@ -193,8 +193,9 @@ nsCString ImageCacheKey::GetTopLevelBaseDomain(Document* aDocument,
   // unique image cache per the top-level document eTLD+1.
   if (!AntiTrackingCommon::MaybeIsFirstPartyStorageAccessGrantedFor(
           aDocument->GetInnerWindow(), aURI)) {
-    nsPIDOMWindowOuter* top = aDocument->GetInnerWindow()->GetScriptableTop();
-    nsPIDOMWindowInner* topInner = top->GetCurrentInnerWindow();
+    nsPIDOMWindowOuter* top =
+        aDocument->GetInnerWindow()->GetInProcessScriptableTop();
+    nsPIDOMWindowInner* topInner = top ? top->GetCurrentInnerWindow() : nullptr;
     if (!topInner) {
       return aDocument
           ->GetBaseDomain();  // because we don't have anything better!

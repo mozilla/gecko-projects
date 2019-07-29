@@ -29,7 +29,9 @@
 #include "mozilla/dom/UIEvent.h"
 #include "mozilla/dom/UIEventBinding.h"
 #include "mozilla/dom/WheelEventBinding.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_ui.h"
 
 #include "ContentEventHandler.h"
 #include "IMEContentObserver.h"
@@ -458,8 +460,9 @@ nsresult EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
       Document* doc = node->OwnerDoc();
       while (doc) {
         doc->SetUserHasInteracted();
-        doc = nsContentUtils::IsChildOfSameType(doc) ? doc->GetParentDocument()
-                                                     : nullptr;
+        doc = nsContentUtils::IsChildOfSameType(doc)
+                  ? doc->GetInProcessParentDocument()
+                  : nullptr;
       }
     }
   }
@@ -1138,11 +1141,11 @@ bool EventStateManager::WalkESMTreeToHandleAccessKey(
   }
 
   int32_t childCount;
-  docShell->GetChildCount(&childCount);
+  docShell->GetInProcessChildCount(&childCount);
   for (int32_t counter = 0; counter < childCount; counter++) {
     // Not processing the child which bubbles up the handling
     nsCOMPtr<nsIDocShellTreeItem> subShellItem;
-    docShell->GetChildAt(counter, getter_AddRefs(subShellItem));
+    docShell->GetInProcessChildAt(counter, getter_AddRefs(subShellItem));
     if (aAccessKeyState == eAccessKeyProcessingUp &&
         subShellItem == aBubbledFrom) {
       continue;
@@ -1178,7 +1181,7 @@ bool EventStateManager::WalkESMTreeToHandleAccessKey(
   // bubble up the process to the parent docshell if necessary
   if (eAccessKeyProcessingDown != aAccessKeyState) {
     nsCOMPtr<nsIDocShellTreeItem> parentShellItem;
-    docShell->GetParent(getter_AddRefs(parentShellItem));
+    docShell->GetInProcessParent(getter_AddRefs(parentShellItem));
     nsCOMPtr<nsIDocShell> parentDS = do_QueryInterface(parentShellItem);
     if (parentDS) {
       // Guarantee parentPresShell lifetime while we're handling access key
@@ -1792,11 +1795,30 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       nsCOMPtr<nsIContent> eventContent, targetContent;
       nsCOMPtr<nsIPrincipal> principal;
       mCurrentTarget->GetContentForEvent(aEvent, getter_AddRefs(eventContent));
-      if (eventContent)
+      if (eventContent) {
+        // If the content is a text node in a password field, we shouldn't
+        // allow to drag its raw text.  Note that we've supported drag from
+        // password fields but dragging data was masked text.  So, it doesn't
+        // make sense anyway.
+        if (eventContent->IsText() && eventContent->HasFlag(NS_MAYBE_MASKED)) {
+          // However, it makes sense to allow to drag selected password text
+          // when copying selected password is allowed because users may want
+          // to use drag and drop rather than copy and paste when web apps
+          // request to input password twice for conforming new password but
+          // they used password generator.
+          TextEditor* textEditor =
+              nsContentUtils::GetTextEditorFromAnonymousNodeWithoutCreation(
+                  eventContent);
+          if (!textEditor || !textEditor->IsCopyToClipboardAllowed()) {
+            StopTrackingDragGesture();
+            return;
+          }
+        }
         DetermineDragTargetAndDefaultData(
             window, eventContent, dataTransfer, getter_AddRefs(selection),
             getter_AddRefs(remoteDragStartData), getter_AddRefs(targetContent),
             getter_AddRefs(principal));
+      }
 
       // Stop tracking the drag gesture now. This should stop us from
       // reentering GenerateDragGesture inside DOM event processing.
@@ -3242,8 +3264,8 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
               !nsContentUtils::IsChromeDoc(mDocument)) {
             nsCOMPtr<nsPIDOMWindowOuter> currentTop;
             nsCOMPtr<nsPIDOMWindowOuter> newTop;
-            currentTop = currentWindow->GetTop();
-            newTop = mDocument->GetWindow()->GetTop();
+            currentTop = currentWindow->GetInProcessTop();
+            newTop = mDocument->GetWindow()->GetInProcessTop();
             nsCOMPtr<Document> currentDoc = currentWindow->GetExtantDoc();
             if (nsContentUtils::IsChromeDoc(currentDoc) ||
                 (currentTop && newTop && currentTop != newTop)) {
@@ -4378,7 +4400,7 @@ void EventStateManager::NotifyMouseOver(WidgetMouseEvent* aMouseEvent,
   // document's ESM state to indicate that the mouse is over the
   // content associated with our subdocument.
   EnsureDocument(mPresContext);
-  if (Document* parentDoc = mDocument->GetParentDocument()) {
+  if (Document* parentDoc = mDocument->GetInProcessParentDocument()) {
     if (nsCOMPtr<nsIContent> docContent =
             parentDoc->FindContentForSubDocument(mDocument)) {
       if (PresShell* parentPresShell = parentDoc->GetPresShell()) {
@@ -5470,9 +5492,14 @@ void EventStateManager::RemoveNodeFromChainIfNeeded(EventStates aState,
   MOZ_ASSERT(leaf);
   // XBL Likes to unbind content without notifying, thus the
   // NODE_IS_ANONYMOUS_ROOT check...
-  MOZ_ASSERT(nsContentUtils::ContentIsFlattenedTreeDescendantOf(
-                 leaf, aContentRemoved) ||
-             leaf->SubtreeRoot()->HasFlag(NODE_IS_ANONYMOUS_ROOT));
+  //
+  // This can also happen for Shadow DOM sometimes, and it's not clear how to
+  // best handle it, see https://github.com/whatwg/html/issues/4795 and
+  // bug 1551621.
+  NS_ASSERTION(nsContentUtils::ContentIsFlattenedTreeDescendantOf(
+                   leaf, aContentRemoved) ||
+                   leaf->SubtreeRoot()->HasFlag(NODE_IS_ANONYMOUS_ROOT),
+               "Flat tree and active / hover chain got out of sync");
 
   nsIContent* newLeaf = aContentRemoved->GetFlattenedTreeParent();
   MOZ_ASSERT_IF(newLeaf, newLeaf->IsElement() &&

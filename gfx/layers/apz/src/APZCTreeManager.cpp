@@ -37,8 +37,9 @@
 #include "mozilla/MouseEvents.h"
 #include "mozilla/mozalloc.h"     // for operator new
 #include "mozilla/Preferences.h"  // for Preferences
-#include "mozilla/StaticPrefs.h"  // for StaticPrefs
 #include "mozilla/StaticPrefs_accessibility.h"
+#include "mozilla/StaticPrefs_apz.h"
+#include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/EventStateManager.h"  // for WheelPrefs
 #include "mozilla/webrender/WebRenderAPI.h"
@@ -611,7 +612,7 @@ void APZCTreeManager::UpdateFocusState(LayersId aRootLayerTreeId,
                                        const FocusTarget& aFocusTarget) {
   AssertOnUpdaterThread();
 
-  if (!StaticPrefs::apz_keyboard_enabled()) {
+  if (!StaticPrefs::apz_keyboard_enabled_AtStartup()) {
     return;
   }
 
@@ -1548,7 +1549,7 @@ nsEventStatus APZCTreeManager::ReceiveInputEvent(
     case KEYBOARD_INPUT: {
       // Disable async keyboard scrolling when accessibility.browsewithcaret is
       // enabled
-      if (!StaticPrefs::apz_keyboard_enabled() ||
+      if (!StaticPrefs::apz_keyboard_enabled_AtStartup() ||
           StaticPrefs::accessibility_browsewithcaret()) {
         APZ_KEY_LOG("Skipping key input from invalid prefs\n");
         return result;
@@ -1746,7 +1747,7 @@ nsEventStatus APZCTreeManager::ProcessTouchInput(
     // a scrollbar mouse-drag.
     mInScrollbarTouchDrag =
         StaticPrefs::apz_drag_enabled() &&
-        StaticPrefs::apz_touch_drag_enabled() && hitScrollbarNode &&
+        StaticPrefs::apz_drag_touch_enabled() && hitScrollbarNode &&
         hitScrollbarNode->IsScrollThumbNode() &&
         hitScrollbarNode->GetScrollbarData().mThumbIsAsyncDraggable;
 
@@ -2597,7 +2598,18 @@ already_AddRefed<AsyncPanZoomController> APZCTreeManager::GetAPZCAtPointWR(
   if (aOutLayersId) {
     *aOutLayersId = layersId;
   }
-  result = GetTargetAPZC(layersId, scrollId);
+  ScrollableLayerGuid guid{layersId, 0, scrollId};
+  if (RefPtr<HitTestingTreeNode> node =
+          GetTargetNode(guid, &GuidComparatorIgnoringPresShell)) {
+    MOZ_ASSERT(node->GetApzc()); // any node returned must have an APZC
+    result = node->GetApzc();
+    EventRegionsOverride flags = node->GetEventRegionsOverride();
+    if (flags & EventRegionsOverride::ForceDispatchToContent) {
+      hitInfo += CompositorHitTestFlags::eApzAwareListeners;
+    }
+  }
+  APZCTM_LOG("Successfully matched APZC %p (hit result 0x%x)\n",
+             result.get(), hitInfo.serialize());
   if (!result) {
     // It falls back to the root
     MOZ_ASSERT(scrollId == ScrollableLayerGuid::NULL_SCROLL_ID);

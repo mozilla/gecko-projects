@@ -348,6 +348,19 @@ xul|button.primary:not([disabled="true"]):hover:active {
   background-color: var(--in-content-primary-button-background-active);
 }
 
+html|button.danger-button {
+  background-color: var(--red-60);
+  color: white !important;
+}
+
+html|button.danger-button:enabled:hover {
+  background-color: var(--red-70);
+}
+
+html|button.danger-button:enabled:hover:active {
+  background-color: var(--red-80);
+}
+
 html|button.ghost-button {
   background-color: transparent;
 }
@@ -957,7 +970,7 @@ xul|treechildren::-moz-tree-image(selected) {
   transition: box-shadow 150ms;
 }
 
-.card:hover {
+.card:not(.card-no-hover):hover {
   box-shadow: var(--card-shadow-hover);
 }
 

@@ -29,7 +29,6 @@
 #include "jstypes.h"
 #include "jsutil.h"
 
-#include "dbg/Debugger.h"
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/BytecodeEmitter.h"
 #include "frontend/SharedContext.h"
@@ -65,6 +64,7 @@
 #include "vm/Xdr.h"
 #include "vtune/VTuneWrapper.h"
 
+#include "debugger/DebugAPI-inl.h"
 #include "gc/Marking-inl.h"
 #include "vm/BytecodeIterator-inl.h"
 #include "vm/BytecodeLocation-inl.h"
@@ -619,6 +619,16 @@ static XDRResult XDRScriptGCThing(XDRState<mode>* xdr, PrivateScriptData* data,
   return Ok();
 }
 
+js::ScriptSource* js::BaseScript::maybeForwardedScriptSource() const {
+  JSObject* source = MaybeForwarded(sourceObject());
+
+  // This may be called during GC. It's OK not to expose the source object
+  // here as it doesn't escape.
+  return UncheckedUnwrapWithoutExpose(source)
+      ->as<ScriptSourceObject>()
+      .source();
+}
+
 template <XDRMode mode>
 /* static */
 XDRResult js::PrivateScriptData::XDR(XDRState<mode>* xdr, HandleScript script,
@@ -1004,6 +1014,16 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
   JSContext* cx = xdr->cx();
   RootedScript script(cx);
 
+  // Instrumented scripts cannot be encoded, as they have extra instructions
+  // which are not normally present. Globals with instrumentation enabled must
+  // compile scripts via the bytecode emitter, which will insert these
+  // instructions.
+  if (xdr->hasOptions()
+      ? !!xdr->options().instrumentationKinds
+      : !!cx->global()->getInstrumentationHolder()) {
+    return xdr->fail(JS::TranscodeResult_Failure);
+  }
+
   if (mode == XDR_ENCODE) {
     script = scriptp.get();
     MOZ_ASSERT(script->functionNonDelazifying() == fun);
@@ -1044,7 +1064,7 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
     toStringStart = script->toStringStart();
     toStringEnd = script->toStringEnd();
 
-    immutableFlags = script->immutableFlags_;
+    immutableFlags = script->immutableFlags();
   }
 
   MOZ_TRY(xdr->codeUint32(&lineno));
@@ -1181,7 +1201,7 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
   if (mode == XDR_DECODE) {
     /* see BytecodeEmitter::tellDebuggerAboutCompiledScript */
     if (!fun && !cx->isHelperThreadContext()) {
-      Debugger::onNewScript(cx, script);
+      DebugAPI::onNewScript(cx, script);
     }
   }
 
@@ -1305,16 +1325,12 @@ template XDRResult js::XDRLazyScript(XDRState<XDR_DECODE>*, HandleScope,
                                      HandleScriptSourceObject, HandleFunction,
                                      MutableHandle<LazyScript*>);
 
-void JSScript::setSourceObject(js::ScriptSourceObject* object) {
-  MOZ_ASSERT(compartment() == object->compartment());
-  sourceObject_ = object;
-}
-
 void JSScript::setDefaultClassConstructorSpan(
     js::ScriptSourceObject* sourceObject, uint32_t start, uint32_t end,
     unsigned line, unsigned column) {
+  MOZ_ASSERT(compartment() == sourceObject->compartment());
   MOZ_ASSERT(isDefaultClassConstructor());
-  setSourceObject(sourceObject);
+  sourceObject_ = sourceObject;
   toStringStart_ = start;
   toStringEnd_ = end;
   sourceStart_ = start;
@@ -1324,19 +1340,6 @@ void JSScript::setDefaultClassConstructorSpan(
   // Since this script has been changed to point into the user's source, we
   // can clear its self-hosted flag, allowing Debugger to see it.
   clearFlag(ImmutableFlags::SelfHosted);
-}
-
-js::ScriptSource* JSScript::scriptSource() const {
-  return sourceObject()->source();
-}
-
-js::ScriptSource* JSScript::maybeForwardedScriptSource() const {
-  JSObject* source = MaybeForwarded(sourceObject());
-  // This may be called during GC. It's OK not to expose the source object
-  // here as it doesn't escape.
-  return UncheckedUnwrapWithoutExpose(source)
-      ->as<ScriptSourceObject>()
-      .source();
 }
 
 bool JSScript::initScriptCounts(JSContext* cx) {
@@ -3786,7 +3789,11 @@ void PrivateScriptData::trace(JSTracer* trc) {
   for (JS::GCCellPtr& elem : gcthings()) {
     gc::Cell* thing = elem.asCell();
     TraceManuallyBarrieredGenericPointerEdge(trc, &thing, "script-gcthing");
-    if (thing != elem.asCell()) {
+    if (MOZ_UNLIKELY(!thing)) {
+      // NOTE: If we are clearing edges, also erase the type. This can happen
+      // due to OOM triggering the ClearEdgesTracer.
+      elem = JS::GCCellPtr();
+    } else if (thing != elem.asCell()) {
       elem = JS::GCCellPtr(thing, elem.kind());
     }
   }
@@ -3796,21 +3803,10 @@ JSScript::JSScript(JS::Realm* realm, uint8_t* stubEntry,
                    HandleScriptSourceObject sourceObject, uint32_t sourceStart,
                    uint32_t sourceEnd, uint32_t toStringStart,
                    uint32_t toStringEnd)
-    :
-#ifndef JS_CODEGEN_NONE
-      jitCodeRaw_(stubEntry),
-#endif
-      realm_(realm),
-      sourceStart_(sourceStart),
-      sourceEnd_(sourceEnd),
-      toStringStart_(toStringStart),
-      toStringEnd_(toStringEnd) {
-  // See JSScript.h for further details.
-  MOZ_ASSERT(toStringStart <= sourceStart);
-  MOZ_ASSERT(sourceStart <= sourceEnd);
-  MOZ_ASSERT(sourceEnd <= toStringEnd);
-
-  setSourceObject(sourceObject);
+    : js::BaseScript(stubEntry, sourceObject, sourceStart, sourceEnd,
+                     toStringStart, toStringEnd),
+      realm_(realm) {
+  MOZ_ASSERT(JS::GetCompartmentForRealm(realm) == sourceObject->compartment());
 }
 
 /* static */
@@ -3876,7 +3872,7 @@ JSScript* JSScript::Create(JSContext* cx, const ReadOnlyCompileOptions& options,
 
 /* static */ JSScript* JSScript::CreateFromLazy(JSContext* cx,
                                                 Handle<LazyScript*> lazy) {
-  RootedScriptSourceObject sourceObject(cx, &lazy->sourceObject());
+  RootedScriptSourceObject sourceObject(cx, lazy->sourceObject());
   RootedScript script(
       cx,
       JSScript::New(cx, sourceObject, lazy->sourceStart(), lazy->sourceEnd(),
@@ -4065,6 +4061,8 @@ void JSScript::initFromFunctionBox(frontend::FunctionBox* funbox) {
   setFlag(ImmutableFlags::IsAsync, funbox->isAsync());
   setFlag(ImmutableFlags::HasRest, funbox->hasRest());
   setFlag(ImmutableFlags::HasInnerFunctions, funbox->hasInnerFunctions());
+  setFlag(ImmutableFlags::HasDirectEval, funbox->hasDirectEval());
+  setFlag(ImmutableFlags::ShouldDeclareArguments, funbox->declaredArguments);
 
   if (funbox->argumentsHasLocalBinding()) {
     setArgumentsHasVarBinding();
@@ -4107,7 +4105,6 @@ bool JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script,
   script->setFlag(ImmutableFlags::BindingsAccessedDynamically,
                   bce->sc->bindingsAccessedDynamically());
   script->setFlag(ImmutableFlags::HasCallSiteObj, bce->hasCallSiteObj);
-  script->setFlag(ImmutableFlags::HasSingletons, bce->hasSingletons);
   script->setFlag(ImmutableFlags::IsForEval, bce->sc->isEvalContext());
   script->setFlag(ImmutableFlags::IsModule, bce->sc->isModuleContext());
   script->setFlag(ImmutableFlags::HasNonSyntacticScope,
@@ -4246,7 +4243,7 @@ void JSScript::finalize(FreeOp* fop) {
   // NOTE: this JSScript may be partially initialized at this point.  E.g. we
   // may have created it and partially initialized it with
   // JSScript::Create(), but not yet finished initializing it with
-  // fullyInitFromEmitter() or fullyInitTrivial().
+  // fullyInitFromEmitter().
 
   // Collect code coverage information for this script and all its inner
   // scripts, and store the aggregated information on the realm.
@@ -4261,7 +4258,7 @@ void JSScript::finalize(FreeOp* fop) {
   jit::DestroyJitScripts(fop, this);
 
   destroyScriptCounts();
-  destroyDebugScript(fop);
+  DebugAPI::destroyDebugScript(fop, this);
 
 #ifdef MOZ_VTUNE
   if (realm()->scriptVTuneIdMap) {
@@ -4708,7 +4705,7 @@ JSScript* js::detail::CopyScript(JSContext* cx, HandleScript src,
   // Copy POD fields
   dst->lineno_ = src->lineno();
   dst->column_ = src->column();
-  dst->immutableFlags_ = src->immutableFlags_;
+  dst->immutableFlags_ = src->immutableFlags();
 
   dst->setFlag(JSScript::ImmutableFlags::HasNonSyntacticScope,
                scopes[0]->hasOnChain(ScopeKind::NonSyntactic));
@@ -4807,234 +4804,6 @@ JSScript* js::CloneScriptIntoFunction(
   return dst;
 }
 
-DebugScript* JSScript::debugScript() {
-  MOZ_ASSERT(hasDebugScript());
-  DebugScriptMap* map = realm()->debugScriptMap.get();
-  MOZ_ASSERT(map);
-  DebugScriptMap::Ptr p = map->lookup(this);
-  MOZ_ASSERT(p);
-  return p->value().get();
-}
-
-DebugScript* JSScript::releaseDebugScript() {
-  MOZ_ASSERT(hasDebugScript());
-  DebugScriptMap* map = realm()->debugScriptMap.get();
-  MOZ_ASSERT(map);
-  DebugScriptMap::Ptr p = map->lookup(this);
-  MOZ_ASSERT(p);
-  DebugScript* debug = p->value().release();
-  map->remove(p);
-  clearFlag(MutableFlags::HasDebugScript);
-  return debug;
-}
-
-void JSScript::destroyDebugScript(FreeOp* fop) {
-  if (hasDebugScript()) {
-#ifdef DEBUG
-    for (jsbytecode* pc = code(); pc < codeEnd(); pc++) {
-      MOZ_ASSERT(!getBreakpointSite(pc));
-    }
-#endif
-    freeDebugScript(fop);
-  }
-}
-
-void JSScript::freeDebugScript(FreeOp* fop) {
-  MOZ_ASSERT(hasDebugScript());
-  fop->free_(this, releaseDebugScript(), DebugScript::allocSize(length()),
-             MemoryUse::ScriptDebugScript);
-}
-
-DebugScript* JSScript::getOrCreateDebugScript(JSContext* cx) {
-  if (hasDebugScript()) {
-    return debugScript();
-  }
-
-  size_t nbytes = DebugScript::allocSize(length());
-  UniqueDebugScript debug(
-      reinterpret_cast<DebugScript*>(cx->pod_calloc<uint8_t>(nbytes)));
-  if (!debug) {
-    return nullptr;
-  }
-
-  /* Create realm's debugScriptMap if necessary. */
-  if (!realm()->debugScriptMap) {
-    auto map = cx->make_unique<DebugScriptMap>();
-    if (!map) {
-      return nullptr;
-    }
-
-    realm()->debugScriptMap = std::move(map);
-  }
-
-  DebugScript* borrowed = debug.get();
-  if (!realm()->debugScriptMap->putNew(this, std::move(debug))) {
-    ReportOutOfMemory(cx);
-    return nullptr;
-  }
-
-  setFlag(MutableFlags::HasDebugScript);  // safe to set this;  we can't fail
-                                          // after this point
-  AddCellMemory(this, nbytes, MemoryUse::ScriptDebugScript);
-
-  /*
-   * Ensure that any Interpret() instances running on this script have
-   * interrupts enabled. The interrupts must stay enabled until the
-   * debug state is destroyed.
-   */
-  for (ActivationIterator iter(cx); !iter.done(); ++iter) {
-    if (iter->isInterpreter()) {
-      iter->asInterpreter()->enableInterruptsIfRunning(this);
-    }
-  }
-
-  return borrowed;
-}
-
-bool JSScript::incrementGeneratorObserverCount(JSContext* cx) {
-  cx->check(this);
-  MOZ_ASSERT(cx->realm()->isDebuggee());
-
-  AutoRealm ar(cx, this);
-
-  DebugScript* debug = getOrCreateDebugScript(cx);
-  if (!debug) {
-    return false;
-  }
-
-  debug->generatorObserverCount++;
-
-  // It is our caller's responsibility, before bumping the generator observer
-  // count, to make sure that the baseline code includes the necessary
-  // JS_AFTERYIELD instrumentation by calling
-  // {ensure,update}ExecutionObservabilityOfScript.
-  MOZ_ASSERT_IF(hasBaselineScript(), baseline->hasDebugInstrumentation());
-
-  return true;
-}
-
-void JSScript::decrementGeneratorObserverCount(js::FreeOp* fop) {
-  DebugScript* debug = debugScript();
-  MOZ_ASSERT(debug);
-  MOZ_ASSERT(debug->generatorObserverCount > 0);
-
-  debug->generatorObserverCount--;
-
-  if (!debug->needed()) {
-    destroyDebugScript(fop);
-  }
-}
-
-bool JSScript::incrementStepperCount(JSContext* cx) {
-  cx->check(this);
-  MOZ_ASSERT(cx->realm()->isDebuggee());
-
-  AutoRealm ar(cx, this);
-
-  DebugScript* debug = getOrCreateDebugScript(cx);
-  if (!debug) {
-    return false;
-  }
-
-  debug->stepperCount++;
-
-  if (debug->stepperCount == 1) {
-    if (hasBaselineScript()) {
-      baseline->toggleDebugTraps(this, nullptr);
-    }
-  }
-
-  return true;
-}
-
-void JSScript::decrementStepperCount(FreeOp* fop) {
-  DebugScript* debug = debugScript();
-  MOZ_ASSERT(debug);
-  MOZ_ASSERT(debug->stepperCount > 0);
-
-  debug->stepperCount--;
-
-  if (debug->stepperCount == 0) {
-    if (hasBaselineScript()) {
-      baseline->toggleDebugTraps(this, nullptr);
-    }
-
-    if (!debug->needed()) {
-      freeDebugScript(fop);
-    }
-  }
-}
-
-BreakpointSite* JSScript::getOrCreateBreakpointSite(JSContext* cx,
-                                                    jsbytecode* pc) {
-  AutoRealm ar(cx, this);
-
-  DebugScript* debug = getOrCreateDebugScript(cx);
-  if (!debug) {
-    return nullptr;
-  }
-
-  BreakpointSite*& site = debug->breakpoints[pcToOffset(pc)];
-
-  if (!site) {
-    site = cx->new_<JSBreakpointSite>(this, pc);
-    if (!site) {
-      return nullptr;
-    }
-    debug->numSites++;
-    AddCellMemory(this, sizeof(JSBreakpointSite), MemoryUse::BreakpointSite);
-  }
-
-  return site;
-}
-
-void JSScript::destroyBreakpointSite(FreeOp* fop, jsbytecode* pc) {
-  DebugScript* debug = debugScript();
-  BreakpointSite*& site = debug->breakpoints[pcToOffset(pc)];
-  MOZ_ASSERT(site);
-
-  size_t size = site->type() == BreakpointSite::Type::JS
-                    ? sizeof(JSBreakpointSite)
-                    : sizeof(WasmBreakpointSite);
-  fop->delete_(this, site, size, MemoryUse::BreakpointSite);
-  site = nullptr;
-
-  debug->numSites--;
-  if (!debug->needed()) {
-    freeDebugScript(fop);
-  }
-}
-
-void JSScript::clearBreakpointsIn(FreeOp* fop, js::Debugger* dbg,
-                                  JSObject* handler) {
-  if (!hasAnyBreakpointsOrStepMode()) {
-    return;
-  }
-
-  for (jsbytecode* pc = code(); pc < codeEnd(); pc++) {
-    BreakpointSite* site = getBreakpointSite(pc);
-    if (site) {
-      Breakpoint* nextbp;
-      for (Breakpoint* bp = site->firstBreakpoint(); bp; bp = nextbp) {
-        nextbp = bp->nextInSite();
-        if ((!dbg || bp->debugger == dbg) &&
-            (!handler || bp->getHandler() == handler)) {
-          bp->destroy(fop);
-        }
-      }
-    }
-  }
-}
-
-bool JSScript::hasBreakpointsAt(jsbytecode* pc) {
-  BreakpointSite* site = getBreakpointSite(pc);
-  if (!site) {
-    return false;
-  }
-
-  return site->enabledCount > 0;
-}
-
 /* static */ bool ImmutableScriptData::InitFromEmitter(
     JSContext* cx, js::HandleScript script, frontend::BytecodeEmitter* bce,
     uint32_t nslots) {
@@ -5125,7 +4894,10 @@ void JSScript::traceChildren(JSTracer* trc) {
   // NOTE: this JSScript may be partially initialized at this point.  E.g. we
   // may have created it and partially initialized it with
   // JSScript::Create(), but not yet finished initializing it with
-  // fullyInitFromEmitter() or fullyInitTrivial().
+  // fullyInitFromEmitter().
+
+  // Trace base class fields.
+  BaseScript::traceChildren(trc);
 
   MOZ_ASSERT_IF(trc->isMarkingTracer() &&
                     GCMarker::fromTracer(trc)->shouldCheckCompartments(),
@@ -5138,10 +4910,6 @@ void JSScript::traceChildren(JSTracer* trc) {
   if (scriptData()) {
     scriptData()->traceChildren(trc);
   }
-
-  MOZ_ASSERT_IF(sourceObject(),
-                MaybeForwarded(sourceObject())->compartment() == compartment());
-  TraceNullableEdge(trc, &sourceObject_, "sourceObject");
 
   if (maybeLazyScript()) {
     TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");
@@ -5471,27 +5239,24 @@ void LazyScriptData::trace(JSTracer* trc) {
   }
 }
 
-LazyScript::LazyScript(JSFunction* fun, ScriptSourceObject& sourceObject,
-                       LazyScriptData* data, uint32_t immutableFlags,
-                       uint32_t sourceStart, uint32_t sourceEnd,
-                       uint32_t toStringStart, uint32_t lineno, uint32_t column)
-    : script_(nullptr),
+LazyScript::LazyScript(JSFunction* fun, uint8_t* stubEntry,
+                       ScriptSourceObject& sourceObject, LazyScriptData* data,
+                       uint32_t immutableFlags, uint32_t sourceStart,
+                       uint32_t sourceEnd, uint32_t toStringStart,
+                       uint32_t lineno, uint32_t column)
+    : BaseScript(stubEntry, &sourceObject, sourceStart, sourceEnd,
+                 toStringStart, sourceEnd),
+      script_(nullptr),
       function_(fun),
-      sourceObject_(&sourceObject),
-      lazyData_(data),
-      immutableFlags_(immutableFlags),
-      mutableFlags_(0),
-      sourceStart_(sourceStart),
-      sourceEnd_(sourceEnd),
-      toStringStart_(toStringStart),
-      toStringEnd_(sourceEnd),
-      lineno_(lineno),
-      column_(column) {
+      lazyData_(data) {
   MOZ_ASSERT(function_);
   MOZ_ASSERT(sourceObject_);
   MOZ_ASSERT(function_->compartment() == sourceObject_->compartment());
-  MOZ_ASSERT(sourceStart <= sourceEnd);
-  MOZ_ASSERT(toStringStart <= sourceStart);
+
+  lineno_ = lineno;
+  column_ = column;
+
+  immutableFlags_ = immutableFlags;
 
   if (data) {
     AddCellMemory(this, data->allocationSize(), MemoryUse::LazyScriptData);
@@ -5529,17 +5294,6 @@ void LazyScript::setEnclosingScope(Scope* enclosingScope) {
   enclosingLazyScriptOrScope_ = enclosingScope;
 }
 
-ScriptSourceObject& LazyScript::sourceObject() const {
-  return sourceObject_->as<ScriptSourceObject>();
-}
-
-ScriptSource* LazyScript::maybeForwardedScriptSource() const {
-  JSObject* source = MaybeForwarded(&sourceObject());
-  return UncheckedUnwrapWithoutExpose(source)
-      ->as<ScriptSourceObject>()
-      .source();
-}
-
 /* static */
 LazyScript* LazyScript::CreateRaw(JSContext* cx, uint32_t numClosedOverBindings,
                                   uint32_t numInnerFunctions,
@@ -5570,8 +5324,14 @@ LazyScript* LazyScript::CreateRaw(JSContext* cx, uint32_t numClosedOverBindings,
 
   cx->realm()->scheduleDelazificationForDebugger();
 
+#ifndef JS_CODEGEN_NONE
+  uint8_t* stubEntry = cx->runtime()->jitRuntime()->interpreterStub().value;
+#else
+  uint8_t* stubEntry = nullptr;
+#endif
+
   return new (res)
-      LazyScript(fun, *sourceObject, data.release(), immutableFlags,
+      LazyScript(fun, stubEntry, *sourceObject, data.release(), immutableFlags,
                  sourceStart, sourceEnd, toStringStart, lineno, column);
 }
 
@@ -5704,9 +5464,9 @@ void JSScript::resetWarmUpCounterToDelayIonCompilation() {
   // because we don't want scripts to get stuck in the (Baseline) interpreter in
   // pathological cases.
 
-  if (warmUpCount > jit::JitOptions.baselineWarmUpThreshold) {
+  if (warmUpCount > jit::JitOptions.baselineJitWarmUpThreshold) {
     incWarmUpResetCounter();
-    warmUpCount = jit::JitOptions.baselineWarmUpThreshold;
+    warmUpCount = jit::JitOptions.baselineJitWarmUpThreshold;
   }
 }
 
@@ -5772,7 +5532,7 @@ JS::ubi::Node::Size JS::ubi::Concrete<js::LazyScript>::size(
 }
 
 const char* JS::ubi::Concrete<js::LazyScript>::scriptFilename() const {
-  auto source = get().sourceObject().source();
+  auto source = get().scriptSource();
   if (!source) {
     return nullptr;
   }

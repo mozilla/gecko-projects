@@ -206,12 +206,18 @@ describe("ASRouter", () => {
           handleMessageRequest: Router.handleMessageRequest,
           addImpression: Router.addImpression,
           blockMessageById: Router.blockMessageById,
+          dispatch: Router.dispatch,
         }
       );
 
-      assert.calledWithExactly(FakeToolbarPanelHub.init, {
-        getMessages: Router.handleMessageRequest,
-      });
+      assert.calledWithExactly(
+        FakeToolbarPanelHub.init,
+        Router.waitForInitialized,
+        {
+          getMessages: Router.handleMessageRequest,
+          dispatch: Router.dispatch,
+        }
+      );
 
       assert.calledWithExactly(
         FakeBookmarkPanelHub.init,
@@ -1292,23 +1298,6 @@ describe("ASRouter", () => {
           channel.sendAsyncMessage,
           PARENT_TO_CHILD_MESSAGE_NAME,
           { type: "CLEAR_PROVIDER", data: { id: "bar" } }
-        );
-      });
-    });
-
-    describe("#onMessage: DISMISS_BUNDLE", () => {
-      it("should add all the ids in the bundle to the messageBlockList and send a CLEAR_BUNDLE message", async () => {
-        await Router.setState({ lastMessageId: "foo" });
-        const msg = fakeAsyncMessage({
-          type: "DISMISS_BUNDLE",
-          data: { bundle: FAKE_BUNDLE },
-        });
-        await Router.onMessage(msg);
-
-        assert.calledWith(
-          channel.sendAsyncMessage,
-          PARENT_TO_CHILD_MESSAGE_NAME,
-          { type: "CLEAR_BUNDLE" }
         );
       });
     });

@@ -159,9 +159,9 @@ public final class GeckoRuntime implements Parcelable {
     private GeckoRuntimeSettings mSettings;
     private Delegate mDelegate;
     private RuntimeTelemetry mTelemetry;
-    private WebExtensionEventDispatcher mWebExtensionDispatcher;
+    private final WebExtensionEventDispatcher mWebExtensionDispatcher;
     private StorageController mStorageController;
-    private WebExtensionController mWebExtensionController;
+    private final WebExtensionController mWebExtensionController;
 
     public GeckoRuntime() {
         mWebExtensionDispatcher = new WebExtensionEventDispatcher();
@@ -194,7 +194,7 @@ public final class GeckoRuntime implements Parcelable {
             if ("Gecko:Exited".equals(event) && mDelegate != null) {
                 mDelegate.onShutdown();
                 EventDispatcher.getInstance().unregisterUiThreadListener(mEventListener, "Gecko:Exited");
-            } else if ("GeckoView:ContentCrash".equals(event) && crashHandler != null) {
+            } else if ("GeckoView:ContentCrashReport".equals(event) && crashHandler != null) {
                 final Context context = GeckoAppShell.getApplicationContext();
                 Intent i = new Intent(ACTION_CRASHED, null,
                         context, crashHandler);
@@ -244,7 +244,7 @@ public final class GeckoRuntime implements Parcelable {
                     throw new IllegalArgumentException("Crash handler service must run in a separate process");
                 }
 
-                EventDispatcher.getInstance().registerUiThreadListener(mEventListener, "GeckoView:ContentCrash");
+                EventDispatcher.getInstance().registerUiThreadListener(mEventListener, "GeckoView:ContentCrashReport");
 
                 flags |= GeckoThread.FLAG_ENABLE_NATIVE_CRASHREPORTER;
             } catch (PackageManager.NameNotFoundException e) {
@@ -427,7 +427,7 @@ public final class GeckoRuntime implements Parcelable {
         return result;
     }
 
-    /* protected */ WebExtensionEventDispatcher getWebExtensionDispatcher() {
+    /* protected */ @NonNull WebExtensionEventDispatcher getWebExtensionDispatcher() {
         return mWebExtensionDispatcher;
     }
 

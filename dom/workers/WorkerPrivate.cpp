@@ -15,7 +15,7 @@
 #include "js/SourceText.h"
 #include "MessageEventRunnable.h"
 #include "mozilla/ScopeExit.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/CallbackDebuggerNotification.h"
 #include "mozilla/dom/ClientManager.h"
@@ -2508,7 +2508,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
         if (document->GetSandboxFlags() & SANDBOXED_ORIGIN) {
           nsCOMPtr<Document> tmpDoc = document;
           do {
-            tmpDoc = tmpDoc->GetParentDocument();
+            tmpDoc = tmpDoc->GetInProcessParentDocument();
           } while (tmpDoc && tmpDoc->GetSandboxFlags() & SANDBOXED_ORIGIN);
 
           if (tmpDoc) {

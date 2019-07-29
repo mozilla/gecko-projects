@@ -3194,6 +3194,7 @@ exports.CSS_PROPERTIES = {
       "-moz-user-focus",
       "caret-color",
       "scrollbar-color",
+      "dominant-baseline",
       "text-anchor",
       "color-interpolation",
       "color-interpolation-filters",
@@ -3288,13 +3289,12 @@ exports.CSS_PROPERTIES = {
       "text-decoration-style",
       "text-decoration-color",
       "initial-letter",
-      "text-decoration-width",
+      "text-decoration-thickness",
       "ime-mode",
       "scrollbar-width",
       "user-select",
       "-moz-window-dragging",
       "-moz-force-broken-image-icon",
-      "dominant-baseline",
       "vector-effect",
       "stop-color",
       "stop-opacity",
@@ -5932,7 +5932,7 @@ exports.CSS_PROPERTIES = {
     ]
   },
   "dominant-baseline": {
-    "isInherited": false,
+    "isInherited": true,
     "subproperties": [
       "dominant-baseline"
     ],
@@ -10793,8 +10793,8 @@ exports.PREFERENCES = [
     "layout.css.individual-transform.enabled"
   ],
   [
-    "text-decoration-width",
-    "layout.css.text-decoration-width.enabled"
+    "text-decoration-thickness",
+    "layout.css.text-decoration-thickness.enabled"
   ],
   [
     "text-underline-offset",

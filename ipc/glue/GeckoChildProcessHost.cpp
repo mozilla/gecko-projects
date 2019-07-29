@@ -265,10 +265,9 @@ class AndroidProcessLauncher : public PosixProcessLauncher {
 
  protected:
   virtual RefPtr<ProcessHandlePromise> DoLaunch() override;
-  void LaunchAndroidService(
+  RefPtr<ProcessHandlePromise> LaunchAndroidService(
       const char* type, const std::vector<std::string>& argv,
-      const base::file_handle_mapping_vector& fds_to_remap,
-      base::ProcessHandle* process_handle);
+      const base::file_handle_mapping_vector& fds_to_remap);
 };
 typedef AndroidProcessLauncher ProcessLauncher;
 // NB: Technically Android is linux (i.e. XP_LINUX is defined), but we want
@@ -773,9 +772,11 @@ void BaseProcessLauncher::GetChildLogName(const char* origLogName,
 
 // Windows needs a single dedicated thread for process launching,
 // because of thread-safety restrictions/assertions in the sandbox
-// code.  (This implementation isn't itself Windows-specific, so
-// the ifdef can be changed to test on other platforms.)
-#ifdef XP_WIN
+// code.
+//
+// Android also needs a single dedicated thread to simplify thread
+// safety in java.
+#if defined(XP_WIN) || defined(MOZ_WIDGET_ANDROID)
 
 static mozilla::StaticMutex gIPCLaunchThreadMutex;
 static mozilla::StaticRefPtr<nsIThread> gIPCLaunchThread;
@@ -828,9 +829,9 @@ nsCOMPtr<nsIEventTarget> BaseProcessLauncher::GetIPCLauncher() {
   return thread;
 }
 
-#else  // XP_WIN
+#else  // defined(XP_WIN) || defined(MOZ_WIDGET_ANDROID)
 
-// Non-Windows platforms can use an on-demand thread pool.
+// Other platforms use an on-demand thread pool.
 
 nsCOMPtr<nsIEventTarget> BaseProcessLauncher::GetIPCLauncher() {
   nsCOMPtr<nsIEventTarget> pool =
@@ -1134,12 +1135,8 @@ bool PosixProcessLauncher::DoSetup() {
 
 #if defined(MOZ_WIDGET_ANDROID)
 RefPtr<ProcessHandlePromise> AndroidProcessLauncher::DoLaunch() {
-  ProcessHandle handle = 0;
-  LaunchAndroidService(ChildProcessType(), mChildArgv,
-                       mLaunchOptions->fds_to_remap, &handle);
-  return handle != 0
-             ? ProcessHandlePromise::CreateAndResolve(handle, __func__)
-             : ProcessHandlePromise::CreateAndReject(LaunchError{}, __func__);
+  return LaunchAndroidService(ChildProcessType(), mChildArgv,
+                              mLaunchOptions->fds_to_remap);
 }
 #endif  // MOZ_WIDGET_ANDROID
 
@@ -1551,10 +1548,9 @@ void GeckoChildProcessHost::GetQueuedMessages(std::queue<IPC::Message>& queue) {
 }
 
 #ifdef MOZ_WIDGET_ANDROID
-void AndroidProcessLauncher::LaunchAndroidService(
+RefPtr<ProcessHandlePromise> AndroidProcessLauncher::LaunchAndroidService(
     const char* type, const std::vector<std::string>& argv,
-    const base::file_handle_mapping_vector& fds_to_remap,
-    base::ProcessHandle* process_handle) {
+    const base::file_handle_mapping_vector& fds_to_remap) {
   MOZ_RELEASE_ASSERT((2 <= fds_to_remap.size()) && (fds_to_remap.size() <= 5));
   JNIEnv* const env = mozilla::jni::GetEnvForThread();
   MOZ_ASSERT(env);
@@ -1584,12 +1580,10 @@ void AndroidProcessLauncher::LaunchAndroidService(
     crashAnnotationFd = fds_to_remap[4].first;
   }
 
-  int32_t handle = java::GeckoProcessManager::Start(
+  auto genericResult = java::GeckoProcessManager::Start(
       type, jargs, prefsFd, prefMapFd, ipcFd, crashFd, crashAnnotationFd);
-
-  if (process_handle) {
-    *process_handle = handle;
-  }
+  auto typedResult = java::GeckoResult::LocalRef(std::move(genericResult));
+  return ProcessHandlePromise::FromGeckoResult(typedResult);
 }
 #endif
 

@@ -48,6 +48,7 @@
 #include "mozilla/MouseEvents.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticPrefs_xul.h"
 #include "mozilla/widget/nsAutoRollup.h"
 
 using namespace mozilla;
@@ -1179,7 +1180,7 @@ bool nsXULPopupManager::IsChildOfDocShell(Document* aDoc,
     if (docShellItem == aExpected) return true;
 
     nsCOMPtr<nsIDocShellTreeItem> parent;
-    docShellItem->GetParent(getter_AddRefs(parent));
+    docShellItem->GetInProcessParent(getter_AddRefs(parent));
     docShellItem = parent;
   }
 

@@ -126,9 +126,11 @@ class MachCommands(MachCommandBase):
 
             print('SUITE-START | android-api-lint')
             for r in result['compat_failures'] + result['failures']:
-                print ('TEST-UNEXPECTED-FAIL | {} | {}'.format(r['detail'], r['msg']))
+                print ('TEST-UNEXPECTED-FAIL | {}:{}:{} | {}'.format(
+                    r['file'], r['line'], r['column'], r['msg']))
             for r in result['api_changes']:
-                print ('TEST-UNEXPECTED-FAIL | {} | Unexpected api change'.format(r))
+                print ('TEST-UNEXPECTED-FAIL | {}:{}:{} | Unexpected api change'.format(
+                    r['file'], r['line'], r['column']))
             print('SUITE-END | android-api-lint')
 
         return ret
@@ -182,20 +184,14 @@ class MachCommands(MachCommandBase):
                 tree = ET.parse(f)
                 root = tree.getroot()
 
-                # Log reports for Tree Herder "Job Details".
-                print('TinderboxPrint: report<br/><a href="{}/{}/index.html">HTML {} report</a>, visit "Inspect Task" link for details'.format(root_url, report, report))  # NOQA: E501
-
                 # And make the report display as soon as possible.
                 failed = root.findall('testcase/error') or root.findall('testcase/failure')
                 if failed:
                     print(
                         'TEST-UNEXPECTED-FAIL | android-test | There were failing tests. See the reports at: {}/{}/index.html'.format(root_url, report))  # NOQA: E501
 
-                print('SUITE-START | android-test | {} {}'.format(report, root.get('name')))
-
                 for testcase in root.findall('testcase'):
                     name = testcase.get('name')
-                    print('TEST-START | {}'.format(name))
 
                     # Schema cribbed from
                     # http://llg.cubic.org/docs/junit/.  There's no
@@ -205,22 +201,11 @@ class MachCommands(MachCommandBase):
                     error_count = 0
                     for unexpected in itertools.chain(testcase.findall('error'),
                                                       testcase.findall('failure')):
+                        print('TEST-START | {}'.format(name))
                         for line in ET.tostring(unexpected).strip().splitlines():
                             print('TEST-UNEXPECTED-FAIL | {} | {}'.format(name, line))
                         error_count += 1
                         ret |= 1
-
-                    # Skipped tests aren't unexpected at this time; we
-                    # disable some tests that require live remote
-                    # endpoints.
-                    for skipped in testcase.findall('skipped'):
-                        for line in ET.tostring(skipped).strip().splitlines():
-                            print('TEST-INFO | {} | {}'.format(name, line))
-
-                    if not error_count:
-                        print('TEST-PASS | {}'.format(name))
-
-                print('SUITE-END | android-test | {} {}'.format(report, root.get('name')))
 
         if not found_reports:
             print('TEST-UNEXPECTED-FAIL | android-test | No reports found under {}'.format(gradledir))  # NOQA: E501
@@ -249,7 +234,7 @@ class MachCommands(MachCommandBase):
         for report in reports:
             f = open(os.path.join(
                 self.topobjdir,
-                'gradle/build/mobile/android/app/reports/lint-results-{}.xml'.format(report)),
+                'gradle/build/mobile/android/geckoview/reports/lint-results-{}.xml'.format(report)),  # NOQA: E501
                      'rt')
             tree = ET.parse(f)
             root = tree.getroot()

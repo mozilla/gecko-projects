@@ -446,6 +446,7 @@ class RTCPeerConnection {
     // canTrickle == null means unknown; when a remote description is received it
     // is set to true or false based on the presence of the "trickle" ice-option
     this._canTrickle = null;
+    this._localUfragsToReplace = new Set();
 
     // So we can record telemetry on state transitions
     this._iceConnectionState = "new";
@@ -936,12 +937,13 @@ class RTCPeerConnection {
     } else {
       options = optionsOrOnSucc;
     }
-
+    if (this._localUfragsToReplace.size > 0) {
+      options.iceRestart = true;
+    }
     // This entry-point handles both new and legacy call sig. Decipher which one
     if (onSuccess) {
       return this._legacy(onSuccess, onErr, () => this._createOffer(options));
     }
-
     return this._async(() => this._createOffer(options));
   }
 
@@ -1136,6 +1138,12 @@ class RTCPeerConnection {
       if (type == "answer") {
         this._currentRole = "answerer";
         this._pendingRole = null;
+        if (this._localUfragsToReplace.size > 0) {
+          const ufrags = new Set(this._getUfragsWithPwds(sdp));
+          if (![...this._localUfragsToReplace].some(uf => ufrags.has(uf))) {
+            this._localUfragsToReplace.clear();
+          }
+        }
       } else {
         this._pendingRole = "offerer";
       }
@@ -1216,8 +1224,18 @@ class RTCPeerConnection {
     let origin = Cu.getWebIDLCallerPrincipal().origin;
 
     return this._chain(async () => {
-      let haveSetRemote = (async () => {
+      const haveSetRemote = (async () => {
         await this._getPermission();
+        if (type == "offer" && this.signalingState == "have-local-offer") {
+          await new Promise((resolve, reject) => {
+            this._onSetLocalDescriptionSuccess = resolve;
+            this._onSetLocalDescriptionFailure = reject;
+            this._impl.setLocalDescription(
+              Ci.IPeerConnection.kActionRollback,
+              ""
+            );
+          });
+        }
         await new Promise((resolve, reject) => {
           this._onSetRemoteDescriptionSuccess = resolve;
           this._onSetRemoteDescriptionFailure = reject;
@@ -1235,6 +1253,14 @@ class RTCPeerConnection {
       if (type == "answer") {
         this._currentRole = "offerer";
         this._pendingRole = null;
+        if (this._localUfragsToReplace.size > 0) {
+          const ufrags = new Set(
+            this._getUfragsWithPwds(this._impl.currentLocalDescription)
+          );
+          if (![...this._localUfragsToReplace].some(uf => ufrags.has(uf))) {
+            this._localUfragsToReplace.clear();
+          }
+        }
       } else {
         this._pendingRole = "answerer";
       }
@@ -1332,6 +1358,32 @@ class RTCPeerConnection {
         );
       });
     });
+  }
+
+  restartIce() {
+    this._localUfragsToReplace = new Set([
+      ...this._getUfragsWithPwds(this._impl.currentLocalDescription),
+      ...this._getUfragsWithPwds(this._impl.pendingLocalDescription),
+    ]);
+    this.updateNegotiationNeeded();
+  }
+
+  _getUfragsWithPwds(sdp) {
+    return (
+      sdp
+        .split("\r\nm=")
+        .map(block => block.split("\r\n"))
+        .map(lines => [
+          lines.find(l => l.startsWith("a=ice-ufrag:")),
+          lines.find(l => l.startsWith("a=ice-pwd:")),
+        ])
+        // Even though our own SDP doesn't currently do this: JSEP says properties
+        // found in the session (array[0]) apply to all m-lines that don't specify
+        // them, like default values.
+        .map(([a, b], i, array) => [a || array[0][0], b || array[0][1]])
+        .filter(([a, b]) => a && b)
+        .map(array => array.join())
+    );
   }
 
   addStream(stream) {
@@ -1500,7 +1552,9 @@ class RTCPeerConnection {
       return;
     }
 
-    let negotiationNeeded = this._impl.checkNegotiationNeeded();
+    let negotiationNeeded =
+      this._impl.checkNegotiationNeeded() ||
+      this._localUfragsToReplace.size > 0;
     if (!negotiationNeeded) {
       this._negotiationNeeded = false;
       return;

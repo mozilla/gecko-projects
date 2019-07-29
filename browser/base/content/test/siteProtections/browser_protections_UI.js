@@ -15,6 +15,11 @@ add_task(async function setup() {
       ["browser.protections_panel.enabled", true],
       // Set the auto hide timing to 100ms for blocking the test less.
       ["browser.protections_panel.toast.timeout", 100],
+      // Hide protections cards so as not to trigger more async messaging
+      // when landing on the page.
+      ["browser.contentblocking.report.monitor.enabled", false],
+      ["browser.contentblocking.report.lockwise.enabled", false],
+      ["browser.contentblocking.report.proxy.enabled", false],
     ],
   });
 });
@@ -25,6 +30,15 @@ add_task(async function testToggleSwitch() {
     "https://example.com"
   );
   await openProtectionsPanel();
+
+  // Check the visibility of the "Site not working?" link.
+  ok(
+    BrowserTestUtils.is_visible(
+      gProtectionsHandler._protectionsPopupTPSwitchBreakageLink
+    ),
+    "The 'Site not working?' link should be visible."
+  );
+
   ok(
     gProtectionsHandler._protectionsPopupTPSwitch.hasAttribute("enabled"),
     "TP Switch should be enabled"
@@ -35,6 +49,15 @@ add_task(async function testToggleSwitch() {
   );
   let browserLoadedPromise = BrowserTestUtils.browserLoaded(tab.linkedBrowser);
   gProtectionsHandler._protectionsPopupTPSwitch.click();
+
+  // The 'Site not working?' link should be hidden after clicking the TP switch.
+  ok(
+    BrowserTestUtils.is_hidden(
+      gProtectionsHandler._protectionsPopupTPSwitchBreakageLink
+    ),
+    "The 'Site not working?' link should be hidden after TP switch turns to off."
+  );
+
   await popuphiddenPromise;
 
   // We need to wait toast's popup shown and popup hidden events. It won't fire
@@ -60,6 +83,30 @@ add_task(async function testToggleSwitch() {
     !gProtectionsHandler._protectionsPopupTPSwitch.hasAttribute("enabled"),
     "TP Switch should be disabled"
   );
+
+  // The 'Site not working?' link should be hidden if the TP is off.
+  ok(
+    BrowserTestUtils.is_hidden(
+      gProtectionsHandler._protectionsPopupTPSwitchBreakageLink
+    ),
+    "The 'Site not working?' link should be hidden if TP is off."
+  );
+
+  // Click the TP switch again and check the visibility of the 'Site not
+  // Working?'. It should be hidden after toggling the TP switch.
+  browserLoadedPromise = BrowserTestUtils.browserLoaded(tab.linkedBrowser);
+  gProtectionsHandler._protectionsPopupTPSwitch.click();
+
+  ok(
+    BrowserTestUtils.is_hidden(
+      gProtectionsHandler._protectionsPopupTPSwitchBreakageLink
+    ),
+    `The 'Site not working?' link should be still hidden after toggling TP
+     switch to on from off.`
+  );
+
+  await browserLoadedPromise;
+
   ContentBlockingAllowList.remove(tab.linkedBrowser);
   BrowserTestUtils.removeTab(tab);
 });
@@ -127,6 +174,15 @@ add_task(async function testShowFullReportLink() {
   let newTab = await newTabPromise;
 
   ok(true, "about:protections has been opened successfully");
+
+  // When the graph is built it means the messaging has finished,
+  // we can close the tab.
+  await ContentTask.spawn(newTab.linkedBrowser, {}, async function() {
+    await ContentTaskUtils.waitForCondition(() => {
+      let bars = content.document.querySelectorAll(".graph-bar");
+      return bars.length;
+    }, "The graph has been built");
+  });
 
   BrowserTestUtils.removeTab(newTab);
   BrowserTestUtils.removeTab(tab);
@@ -252,6 +308,51 @@ add_task(async function testToggleSwitchFlow() {
 
   // Wait until the auto hide is happening.
   await popuphiddenPromise;
+
+  // Clean up the TP state.
+  ContentBlockingAllowList.remove(tab.linkedBrowser);
+  BrowserTestUtils.removeTab(tab);
+});
+
+/**
+ * A test for ensuring the tracking protection icon will show a correct
+ * icon according to the TP enabling state.
+ */
+add_task(async function testTrackingProtectionIcon() {
+  // Open a tab and its protection panel.
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "https://example.com"
+  );
+
+  let TPIcon = document.getElementById("tracking-protection-icon");
+  // Check the icon url. It will show a shield icon if TP is enabled.
+  is(
+    gBrowser.ownerGlobal
+      .getComputedStyle(TPIcon)
+      .getPropertyValue("list-style-image"),
+    `url("chrome://browser/skin/tracking-protection.svg")`,
+    "The tracking protection icon shows a shield icon."
+  );
+
+  // Disable the tracking protection.
+  let browserLoadedPromise = BrowserTestUtils.browserLoaded(
+    tab.linkedBrowser,
+    false,
+    "https://example.com/"
+  );
+  gProtectionsHandler.disableForCurrentPage();
+  await browserLoadedPromise;
+
+  // Check that the tracking protection icon should show a strike-through shield
+  // icon after page is reloaded.
+  is(
+    gBrowser.ownerGlobal
+      .getComputedStyle(TPIcon)
+      .getPropertyValue("list-style-image"),
+    `url("chrome://browser/skin/tracking-protection-disabled.svg")`,
+    "The tracking protection icon shows a strike through shield icon."
+  );
 
   // Clean up the TP state.
   ContentBlockingAllowList.remove(tab.linkedBrowser);

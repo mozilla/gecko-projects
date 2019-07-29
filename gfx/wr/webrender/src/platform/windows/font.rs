@@ -8,23 +8,15 @@ use dwrote;
 use crate::gamma_lut::ColorLut;
 use crate::glyph_rasterizer::{FontInstance, FontTransform, GlyphKey};
 use crate::internal_types::{FastHashMap, FastHashSet, ResourceCacheError};
+use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterError, GlyphRasterResult, RasterizedGlyph};
+use crate::gamma_lut::GammaLut;
 use std::borrow::Borrow;
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-
-cfg_if! {
-    if #[cfg(feature = "pathfinder")] {
-        use pathfinder_font_renderer::{PathfinderComPtr, IDWriteFontFace};
-        use crate::glyph_rasterizer::NativeFontHandleWrapper;
-    } else if #[cfg(not(feature = "pathfinder"))] {
-        use api::FontInstancePlatformOptions;
-        use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterError, GlyphRasterResult, RasterizedGlyph};
-        use crate::gamma_lut::GammaLut;
-        use std::mem;
-    }
-}
+use api::FontInstancePlatformOptions;
+use std::mem;
 
 lazy_static! {
     static ref DEFAULT_FONT_DESCRIPTOR: dwrote::FontDescriptor = dwrote::FontDescriptor {
@@ -80,7 +72,6 @@ struct FontFace {
 pub struct FontContext {
     fonts: FastHashMap<FontKey, FontFace>,
     variations: FastHashMap<(FontKey, dwrote::DWRITE_FONT_SIMULATIONS, Vec<FontVariation>), dwrote::FontFace>,
-    #[cfg(not(feature = "pathfinder"))]
     gamma_luts: FastHashMap<(u16, u16), GammaLut>,
 }
 
@@ -122,6 +113,10 @@ fn dwrite_render_mode(
         FontRenderMode::Alpha | FontRenderMode::Subpixel => {
             if bitmaps || font.flags.contains(FontInstanceFlags::FORCE_GDI) {
                 dwrote::DWRITE_RENDERING_MODE_GDI_CLASSIC
+            } else if font.flags.contains(FontInstanceFlags::FORCE_SYMMETRIC) {
+                dwrote::DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC
+            } else if font.flags.contains(FontInstanceFlags::NO_SYMMETRIC) {
+                dwrote::DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL
             } else {
                 font_face.get_recommended_rendering_mode_default_params(em_size, 1.0, measure_mode)
             }
@@ -148,7 +143,6 @@ impl FontContext {
         Ok(FontContext {
             fonts: FastHashMap::default(),
             variations: FastHashMap::default(),
-            #[cfg(not(feature = "pathfinder"))]
             gamma_luts: FastHashMap::default(),
         })
     }
@@ -442,7 +436,6 @@ impl FontContext {
     }
 
     // DWrite ClearType gives us values in RGB, but WR expects BGRA.
-    #[cfg(not(feature = "pathfinder"))]
     fn convert_to_bgra(
         &self,
         pixels: &[u8],
@@ -511,7 +504,6 @@ impl FontContext {
         }
     }
 
-    #[cfg(not(feature = "pathfinder"))]
     pub fn rasterize_glyph(&mut self, font: &FontInstance, key: &GlyphKey) -> GlyphRasterResult {
         let (x_scale, y_scale) = font.transform.compute_scale().unwrap_or((1.0, 1.0));
         let scale = font.oversized_scale_factor(x_scale, y_scale);
@@ -561,28 +553,14 @@ impl FontContext {
         let mut bgra_pixels = self.convert_to_bgra(&pixels, texture_type, font.render_mode, bitmaps,
                                                    font.flags.contains(FontInstanceFlags::SUBPIXEL_BGR));
 
-        // These are the default values we use in Gecko.
-        // We use a gamma value of 2.3 for gdi fonts
-        const GDI_GAMMA: u16 = 230;
-
         let FontInstancePlatformOptions { gamma, contrast, .. } = font.platform_options.unwrap_or_default();
-        let gdi_gamma = match font.render_mode {
-            FontRenderMode::Mono => GDI_GAMMA,
-            FontRenderMode::Alpha | FontRenderMode::Subpixel => {
-                if bitmaps || font.flags.contains(FontInstanceFlags::FORCE_GDI) {
-                    GDI_GAMMA
-                } else {
-                    gamma
-                }
-            }
-        };
         let gamma_lut = self.gamma_luts
-            .entry((gdi_gamma, contrast))
+            .entry((gamma, contrast))
             .or_insert_with(||
                 GammaLut::new(
                     contrast as f32 / 100.0,
-                    gdi_gamma as f32 / 100.0,
-                    gdi_gamma as f32 / 100.0,
+                    gamma as f32 / 100.0,
+                    gamma as f32 / 100.0,
                 ));
         gamma_lut.preblend(&mut bgra_pixels, font.color);
 
@@ -603,18 +581,5 @@ impl FontContext {
             format,
             bytes: bgra_pixels,
         })
-    }
-}
-
-#[cfg(feature = "pathfinder")]
-impl<'a> From<NativeFontHandleWrapper<'a>> for PathfinderComPtr<IDWriteFontFace> {
-    fn from(font_handle: NativeFontHandleWrapper<'a>) -> Self {
-        if let Some(file) = dwrote::FontFile::new_from_path(&font_handle.0.path) {
-            let index = font_handle.0.index;
-            if let Ok(face) = file.create_face(index, dwrote::DWRITE_FONT_SIMULATIONS_NONE) {
-                return unsafe { PathfinderComPtr::new(face.as_ptr()) };
-            }
-        }
-        panic!("missing font {:?}", font_handle.0)
     }
 }

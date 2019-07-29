@@ -178,7 +178,8 @@ const observer = {
           );
           LoginManagerContent.onFieldAutoComplete(focusedInput, details.guid);
         } else if (style == "generatedPassword") {
-          LoginManagerContent._generatedPasswordFilled(focusedInput);
+          LoginManagerContent._highlightFilledField(focusedInput);
+          LoginManagerContent._generatedPasswordFilledOrEdited(focusedInput);
         }
         break;
       }
@@ -196,6 +197,19 @@ const observer = {
     }
 
     switch (aEvent.type) {
+      // Used to mask fields with filled generated passwords when blurred.
+      case "blur": {
+        let unmask = false;
+        LoginManagerContent._togglePasswordFieldMasking(aEvent.target, unmask);
+        break;
+      }
+
+      // Used to watch for changes to fields filled with generated passwords.
+      case "change": {
+        LoginManagerContent._generatedPasswordFilledOrEdited(aEvent.target);
+        break;
+      }
+
       case "keydown": {
         if (
           aEvent.keyCode == aEvent.DOM_VK_TAB ||
@@ -206,8 +220,18 @@ const observer = {
         break;
       }
 
-      // Only used for username fields.
       case "focus": {
+        if (aEvent.target.type == "password") {
+          // Used to unmask fields with filled generated passwords when focused.
+          let unmask = true;
+          LoginManagerContent._togglePasswordFieldMasking(
+            aEvent.target,
+            unmask
+          );
+          break;
+        }
+
+        // Only used for username fields.
         LoginManagerContent._onUsernameFocus(aEvent);
         break;
       }
@@ -419,7 +443,7 @@ this.LoginManagerContent = {
           msg.data.inputElementIdentifier
         );
         if (inputElement) {
-          this._generatedPasswordFilled(inputElement);
+          this._generatedPasswordFilledOrEdited(inputElement);
         } else {
           log("Could not resolve inputElementIdentifier to a living element.");
         }
@@ -976,6 +1000,9 @@ this.LoginManagerContent = {
     if (LoginHelper.isUsernameFieldType(acInputField)) {
       this.onUsernameAutocompleted(acInputField, loginGUID);
     } else if (acInputField.hasBeenTypePassword) {
+      // Ensure the field gets re-masked in case a generated password was
+      // filled into it previously.
+      this._disableAutomaticPasswordFieldUnmasking(acInputField);
       this._highlightFilledField(acInputField);
     }
   },
@@ -1496,27 +1523,46 @@ this.LoginManagerContent = {
   },
 
   /**
-   * Notify the parent that a generated password was filled into a field so that it can potentially
-   * be saved.
+   * Notify the parent that a generated password was filled into a field or
+   * edited so that it can potentially be saved.
    * @param {HTMLInputElement} passwordField
    */
-  _generatedPasswordFilled(passwordField) {
-    log("_generatedPasswordFilled", passwordField);
-    let win = passwordField.ownerGlobal;
-
-    this._highlightFilledField(passwordField);
-
-    if (PrivateBrowsingUtils.isContentWindowPrivate(win)) {
-      log(
-        "_generatedPasswordFilled: not automatically saving the password in private browsing mode"
-      );
-      return;
-    }
+  _generatedPasswordFilledOrEdited(passwordField) {
+    log("_generatedPasswordFilledOrEdited", passwordField);
 
     if (!LoginHelper.enabled) {
       throw new Error(
         "A generated password was filled while the password manager was disabled."
       );
+    }
+
+    let win = passwordField.ownerGlobal;
+
+    this._highlightFilledField(passwordField);
+
+    passwordField.addEventListener("blur", observer, {
+      capture: true,
+      mozSystemGroup: true,
+    });
+    passwordField.addEventListener("focus", observer, {
+      capture: true,
+      mozSystemGroup: true,
+    });
+
+    // Unmask the password field
+    this._togglePasswordFieldMasking(passwordField, true);
+
+    // Listen for changes to the field filled with the generated password so we can preserve edits.
+    passwordField.addEventListener("change", observer, {
+      capture: true,
+      mozSystemGroup: true,
+    });
+
+    if (PrivateBrowsingUtils.isContentWindowPrivate(win)) {
+      log(
+        "_generatedPasswordFilledOrEdited: not automatically saving the password in private browsing mode"
+      );
+      return;
     }
 
     let loginForm = LoginFormFactory.createFromField(passwordField);
@@ -1532,14 +1578,52 @@ this.LoginManagerContent = {
     }
     let messageManager = win.docShell.messageManager;
     messageManager.sendAsyncMessage(
-      "PasswordManager:onGeneratedPasswordFilled",
+      "PasswordManager:onGeneratedPasswordFilledOrEdited",
       {
         browsingContextId: win.docShell.browsingContext.id,
         formActionOrigin,
-        username: (usernameField && usernameField.value) || "",
         openerTopWindowID,
+        password: passwordField.value,
+        username: (usernameField && usernameField.value) || "",
       }
     );
+  },
+
+  _togglePasswordFieldMasking(passwordField, unmask) {
+    let { editor } = passwordField;
+
+    if (passwordField.type != "password") {
+      // The type may have been changed by the website.
+      log("_togglePasswordFieldMasking: Field isn't type=password");
+      return;
+    }
+
+    if (!unmask && !editor) {
+      // It hasn't been created yet but the default is to be masked anyways.
+      return;
+    }
+
+    if (unmask) {
+      editor.unmask(0);
+      return;
+    }
+
+    if (editor.autoMaskingEnabled) {
+      return;
+    }
+    editor.mask();
+  },
+
+  _disableAutomaticPasswordFieldUnmasking(passwordField) {
+    passwordField.removeEventListener("blur", observer, {
+      capture: true,
+      mozSystemGroup: true,
+    });
+    passwordField.removeEventListener("focus", observer, {
+      capture: true,
+      mozSystemGroup: true,
+    });
+    this._togglePasswordFieldMasking(passwordField, false);
   },
 
   /** Remove login field highlight when its value is cleared or overwritten.
@@ -1907,6 +1991,9 @@ this.LoginManagerContent = {
 
       let doc = form.ownerDocument;
       if (passwordField.value != selectedLogin.password) {
+        // Ensure the field gets re-masked in case a generated password was
+        // filled into it previously.
+        this._disableAutomaticPasswordFieldUnmasking(passwordField);
         passwordField.setUserInput(selectedLogin.password);
         let autoFilledLogin = {
           guid: selectedLogin.QueryInterface(Ci.nsILoginMetaInfo).guid,
@@ -1937,6 +2024,9 @@ this.LoginManagerContent = {
       let win = doc.defaultView;
       let messageManager = win.docShell.messageManager;
       messageManager.sendAsyncMessage("LoginStats:LoginFillSuccessful");
+    } catch (ex) {
+      Cu.reportError(ex);
+      throw ex;
     } finally {
       if (autofillResult == -1) {
         // eslint-disable-next-line no-unsafe-finally

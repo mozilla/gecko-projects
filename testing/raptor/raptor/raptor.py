@@ -6,6 +6,7 @@
 
 from __future__ import absolute_import
 
+from abc import ABCMeta, abstractmethod
 import json
 import os
 import posixpath
@@ -55,6 +56,7 @@ from gen_test_config import gen_test_config
 from outputhandler import OutputHandler
 from manifest import get_raptor_test_list
 from memory import generate_android_memory_profile
+from performance_tuning import tune_performance
 from power import init_android_power_test, finish_android_power_test
 from results import RaptorResultsHandler
 from utils import view_gecko_profile, write_yml_file
@@ -77,10 +79,14 @@ class SignalHandlerException(Exception):
     pass
 
 
-class Raptor(object):
-    """Container class for Raptor"""
+class Perftest(object):
+    """Abstract base class for perftests that execute via a subharness,
+either Raptor or browsertime."""
 
-    def __init__(self, app, binary, run_local=False, obj_path=None, profile_class=None,
+    __metaclass__ = ABCMeta
+
+    def __init__(self, app, binary, run_local=False, noinstall=False,
+                 obj_path=None, profile_class=None,
                  gecko_profile=False, gecko_profile_interval=None, gecko_profile_entries=None,
                  symbols_path=None, host=None, power_test=False, cpu_test=False, memory_test=False,
                  is_release_build=False, debug_mode=False, post_startup_delay=None,
@@ -110,10 +116,11 @@ class Raptor(object):
             'e10s': e10s,
             'enable_webrender': enable_webrender,
         }
+        # We can never use e10s on fennec
+        if self.config['app'] == 'fennec':
+            self.config['e10s'] = False
 
         self.raptor_venv = os.path.join(os.getcwd(), 'raptor-venv')
-        self.raptor_webext = None
-        self.control_server = None
         self.playback = None
         self.benchmark = None
         self.benchmark_port = 0
@@ -137,9 +144,23 @@ class Raptor(object):
 
         # setup the control server
         self.results_handler = RaptorResultsHandler(self.config)
-        self.start_control_server()
 
         self.build_browser_profile()
+
+    def build_browser_profile(self):
+        self.profile = create_profile(self.profile_class)
+
+        # Merge extra profile data from testing/profiles
+        with open(os.path.join(self.profile_data_dir, 'profiles.json'), 'r') as fh:
+            base_profiles = json.load(fh)['raptor']
+
+        for profile in base_profiles:
+            path = os.path.join(self.profile_data_dir, profile)
+            LOG.info("Merging profile: {}".format(path))
+            self.profile.merge(path)
+
+        # share the profile dir with the config and the control server
+        self.config['local_profile_dir'] = self.profile.profile
 
     @property
     def profile_data_dir(self):
@@ -149,10 +170,80 @@ class Raptor(object):
             return os.path.join(build.topsrcdir, 'testing', 'profiles')
         return os.path.join(here, 'profile_data')
 
+    @abstractmethod
     def check_for_crashes(self):
-        raise NotImplementedError
+        pass
+
+    @abstractmethod
+    def run_test_setup(self, test):
+        LOG.info("starting test: %s" % test['name'])
+
+    def run_tests(self, tests, test_names):
+        try:
+            for test in tests:
+                try:
+                    self.run_test(test, timeout=int(test.get('page_timeout')))
+                except RuntimeError as e:
+                    LOG.critical("Tests failed to finish! Application timed out.")
+                    LOG.error(e)
+                finally:
+                    self.run_test_teardown(test)
+            return self.process_results(test_names)
+        finally:
+            self.clean_up()
+
+    @abstractmethod
+    def run_test(self, test, timeout):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def run_test_teardown(self, test):
+        self.check_for_crashes()
+
+        # gecko profiling symbolication
+        if self.config['gecko_profile'] is True:
+            self.gecko_profiler.symbolicate()
+            # clean up the temp gecko profiling folders
+            LOG.info("cleaning up after gecko profiling")
+            self.gecko_profiler.clean()
+
+    def process_results(self, test_names):
+        # when running locally output results in build/raptor.json; when running
+        # in production output to a local.json to be turned into tc job artifact
+        if self.config.get('run_local', False):
+            if 'MOZ_DEVELOPER_REPO_DIR' in os.environ:
+                raptor_json_path = os.path.join(os.environ['MOZ_DEVELOPER_REPO_DIR'],
+                                                'testing', 'mozharness', 'build', 'raptor.json')
+            else:
+                raptor_json_path = os.path.join(here, 'raptor.json')
+        else:
+            raptor_json_path = os.path.join(os.getcwd(), 'local.json')
+
+        self.config['raptor_json_path'] = raptor_json_path
+        return self.results_handler.summarize_and_output(self.config, test_names)
+
+    @abstractmethod
+    def clean_up(self):
+        pass
+
+    def get_page_timeout_list(self):
+        return self.results_handler.page_timeout_list
+
+
+class Raptor(Perftest):
+    """Container class for Raptor"""
+
+    def __init__(self, *args, **kwargs):
+        self.raptor_webext = None
+        self.control_server = None
+
+        super(Raptor, self).__init__(*args, **kwargs)
+
+        self.start_control_server()
 
     def run_test_setup(self, test):
+        super(Raptor, self).run_test_setup(test)
+
         LOG.info("starting raptor test: %s" % test['name'])
         LOG.info("test settings: %s" % str(test))
         LOG.info("raptor config: %s" % str(self.config))
@@ -178,18 +269,6 @@ class Raptor(object):
 
         # if 'alert_on' was provided in the test INI, add to our config for results/output
         self.config['subtest_alert_on'] = test.get('alert_on')
-
-    def run_tests(self, tests, test_names):
-        try:
-            for test in tests:
-                self.run_test(test, timeout=int(test.get('page_timeout')))
-
-            return self.process_results(test_names)
-        finally:
-            self.clean_up()
-
-    def run_test(self, test, timeout):
-        raise NotImplementedError()
 
     def wait_for_test_finish(self, test, timeout):
         # this is a 'back-stop' i.e. if for some reason Raptor doesn't finish for some
@@ -230,24 +309,17 @@ class Raptor(object):
             if not self.debug_mode:
                 elapsed_time += 1
                 if elapsed_time > (timeout) - 5:  # stop 5 seconds early
-                    LOG.info("application timed out after {} seconds".format(timeout))
                     self.control_server.wait_for_quit()
-                    break
+                    raise RuntimeError("Test failed to finish. "
+                                       "Application timed out after {} seconds".format(timeout))
 
-    def run_test_teardown(self):
-        self.check_for_crashes()
+    def run_test_teardown(self, test):
+        super(Raptor, self).run_test_teardown(test)
 
         if self.playback is not None:
             self.playback.stop()
 
         self.remove_raptor_webext()
-
-        # gecko profiling symbolication
-        if self.config['gecko_profile'] is True:
-            self.gecko_profiler.symbolicate()
-            # clean up the temp gecko profiling folders
-            LOG.info("cleaning up after gecko profiling")
-            self.gecko_profiler.clean()
 
     def set_browser_test_prefs(self, raw_prefs):
         # add test specific preferences
@@ -255,23 +327,16 @@ class Raptor(object):
         self.profile.set_preferences(json.loads(raw_prefs))
 
     def build_browser_profile(self):
-        self.profile = create_profile(self.profile_class)
+        super(Raptor, self).build_browser_profile()
 
-        # Merge extra profile data from testing/profiles
-        with open(os.path.join(self.profile_data_dir, 'profiles.json'), 'r') as fh:
-            base_profiles = json.load(fh)['raptor']
-
-        for profile in base_profiles:
-            path = os.path.join(self.profile_data_dir, profile)
-            LOG.info("Merging profile: {}".format(path))
-            self.profile.merge(path)
-
-        # share the profile dir with the config and the control server
-        self.config['local_profile_dir'] = self.profile.profile
-        self.control_server.user_profile = self.profile
+        if self.control_server:
+            # The control server and the browser profile are not well factored
+            # at this time, so the start-up process overlaps.  Accommodate.
+            self.control_server.user_profile = self.profile
 
     def start_control_server(self):
         self.control_server = RaptorControlServer(self.results_handler, self.debug_mode)
+        self.control_server.user_profile = self.profile
         self.control_server.start()
 
         if self.config['enable_control_server_wait']:
@@ -440,25 +505,9 @@ class Raptor(object):
                                                self.config,
                                                test)
 
-    def process_results(self, test_names):
-        # when running locally output results in build/raptor.json; when running
-        # in production output to a local.json to be turned into tc job artifact
-        if self.config.get('run_local', False):
-            if 'MOZ_DEVELOPER_REPO_DIR' in os.environ:
-                raptor_json_path = os.path.join(os.environ['MOZ_DEVELOPER_REPO_DIR'],
-                                                'testing', 'mozharness', 'build', 'raptor.json')
-            else:
-                raptor_json_path = os.path.join(here, 'raptor.json')
-        else:
-            raptor_json_path = os.path.join(os.getcwd(), 'local.json')
-
-        self.config['raptor_json_path'] = raptor_json_path
-        return self.results_handler.summarize_and_output(self.config, test_names)
-
-    def get_page_timeout_list(self):
-        return self.results_handler.page_timeout_list
-
     def clean_up(self):
+        super(Raptor, self).clean_up()
+
         if self.config['enable_control_server_wait']:
             self.control_server_wait_clear('all')
 
@@ -587,30 +636,24 @@ class RaptorDesktop(Raptor):
 
             self.wait_for_test_finish(test, timeout)
 
-        self.run_test_teardown()
-
     def __run_test_warm(self, test, timeout):
         self.run_test_setup(test)
 
-        try:
-            if test.get('playback') is not None:
-                self.start_playback(test)
+        if test.get('playback') is not None:
+            self.start_playback(test)
 
-            if self.config['host'] not in ('localhost', '127.0.0.1'):
-                self.delete_proxy_settings_from_profile()
+        if self.config['host'] not in ('localhost', '127.0.0.1'):
+            self.delete_proxy_settings_from_profile()
 
-            # start the browser/app under test
-            self.launch_desktop_browser(test)
+        # start the browser/app under test
+        self.launch_desktop_browser(test)
 
-            # set our control server flag to indicate we are running the browser/app
-            self.control_server._finished = False
+        # set our control server flag to indicate we are running the browser/app
+        self.control_server._finished = False
 
-            self.wait_for_test_finish(test, timeout)
+        self.wait_for_test_finish(test, timeout)
 
-        finally:
-            self.run_test_teardown()
-
-    def run_test_teardown(self):
+    def run_test_teardown(self, test):
         # browser should be closed by now but this is a backup-shutdown (if not in debug-mode)
         if not self.debug_mode:
             if self.runner.is_running():
@@ -621,9 +664,11 @@ class RaptorDesktop(Raptor):
                 LOG.info("* debug-mode enabled - please shutdown the browser manually...")
                 self.runner.wait(timeout=None)
 
-        super(RaptorDesktop, self).run_test_teardown()
+        super(RaptorDesktop, self).run_test_teardown(test)
 
     def check_for_crashes(self):
+        super(RaptorDesktop, self).check_for_crashes()
+
         try:
             self.runner.check_for_crashes()
         except NotImplementedError:  # not implemented for Chrome
@@ -722,6 +767,7 @@ class RaptorAndroid(Raptor):
         self.remote_test_root = os.path.abspath(os.path.join(os.sep, 'sdcard', 'raptor'))
         self.remote_profile = os.path.join(self.remote_test_root, "profile")
         self.os_baseline_data = None
+        self.power_test_time = None
         self.screen_off_timeout = 0
         self.screen_brightness = 127
         self.app_launched = False
@@ -747,7 +793,7 @@ class RaptorAndroid(Raptor):
     def setup_adb_device(self):
         if self.device is None:
             self.device = ADBDevice(verbose=True)
-            self.tune_performance()
+            tune_performance(self.device, log=LOG)
 
         LOG.info("creating remote root folder for raptor: %s" % self.remote_test_root)
         self.device.rm(self.remote_test_root, force=True, recursive=True)
@@ -757,177 +803,6 @@ class RaptorAndroid(Raptor):
         self.clear_app_data()
         self.set_debug_app_flag()
 
-    def tune_performance(self):
-        """Set various performance-oriented parameters, to reduce jitter.
-
-        For more information, see https://bugzilla.mozilla.org/show_bug.cgi?id=1547135.
-        """
-        LOG.info("tuning android device performance")
-        self.set_svc_power_stayon()
-        if (self.device._have_su or self.device._have_android_su):
-            LOG.info("executing additional tuning commands requiring root")
-            device_name = self.device.shell_output('getprop ro.product.model')
-            # all commands require root shell from here on
-            self.set_scheduler()
-            self.set_virtual_memory_parameters()
-            self.turn_off_services()
-            self.set_cpu_performance_parameters(device_name)
-            self.set_gpu_performance_parameters(device_name)
-            self.set_kernel_performance_parameters()
-        self.device.clear_logcat()
-        LOG.info("android device performance tuning complete")
-
-    def _set_value_and_check_exitcode(self, file_name, value, root=False):
-        LOG.info('setting {} to {}'.format(file_name, value))
-        process = self.device.shell(' '.join(['echo', str(value), '>', str(file_name)]), root=root)
-        if process.exitcode == 0:
-            LOG.info('successfully set {} to {}'.format(file_name, value))
-        else:
-            LOG.warning('command failed with exitcode {}'.format(str(process.exitcode)))
-
-    def set_svc_power_stayon(self):
-        LOG.info('set device to stay awake on usb')
-        self.device.shell('svc power stayon usb')
-
-    def set_scheduler(self):
-        LOG.info('setting scheduler to noop')
-        scheduler_location = '/sys/block/sda/queue/scheduler'
-
-        self._set_value_and_check_exitcode(scheduler_location, 'noop')
-
-    def turn_off_services(self):
-        services = [
-            'mpdecision',
-            'thermal-engine',
-            'thermald',
-        ]
-        for service in services:
-            LOG.info(' '.join(['turning off service:', service]))
-            self.device.shell(' '.join(['stop', service]), root=True)
-
-        services_list_output = self.device.shell_output('service list')
-        for service in services:
-            if service not in services_list_output:
-                LOG.info(' '.join(['successfully terminated:', service]))
-            else:
-                LOG.warning(' '.join(['failed to terminate:', service]))
-
-    def disable_animations(self):
-        LOG.info('disabling animations')
-        commands = {
-            'animator_duration_scale': 0.0,
-            'transition_animation_scale': 0.0,
-            'window_animation_scale': 0.0
-        }
-
-        for key, value in commands.items():
-            command = ' '.join(['settings', 'put', 'global', key, str(value)])
-            LOG.info('setting {} to {}'.format(key, value))
-            self.device.shell(command)
-
-    def restore_animations(self):
-        # animation settings are not restored to default by reboot
-        LOG.info('restoring animations')
-        commands = {
-            'animator_duration_scale': 1.0,
-            'transition_animation_scale': 1.0,
-            'window_animation_scale': 1.0
-        }
-
-        for key, value in commands.items():
-            command = ' '.join(['settings', 'put', 'global', key, str(value)])
-            self.device.shell(command)
-
-    def set_virtual_memory_parameters(self):
-        LOG.info('setting virtual memory parameters')
-        commands = {
-            '/proc/sys/vm/swappiness': 0,
-            '/proc/sys/vm/dirty_ratio': 85,
-            '/proc/sys/vm/dirty_background_ratio': 70
-        }
-
-        for key, value in commands.items():
-            self._set_value_and_check_exitcode(key, value, root=True)
-
-    def set_cpu_performance_parameters(self, device_name):
-        LOG.info('setting cpu performance parameters')
-        commands = {}
-
-        if device_name == 'Pixel 2':
-            # MSM8998 (4x 2.35GHz, 4x 1.9GHz)
-            # values obtained from:
-            #   /sys/devices/system/cpu/cpufreq/policy0/scaling_available_frequencies
-            #   /sys/devices/system/cpu/cpufreq/policy4/scaling_available_frequencies
-            commands.update({
-                '/sys/devices/system/cpu/cpufreq/policy0/scaling_governor': 'performance',
-                '/sys/devices/system/cpu/cpufreq/policy4/scaling_governor': 'performance',
-                '/sys/devices/system/cpu/cpufreq/policy0/scaling_min_freq': '1900800',
-                '/sys/devices/system/cpu/cpufreq/policy4/scaling_min_freq': '2457600',
-            })
-        elif device_name == 'Moto G (5)':
-            # MSM8937(8x 1.4GHz)
-            # values obtained from:
-            #   /sys/devices/system/cpu/cpufreq/policy0/scaling_available_frequencies
-            for x in xrange(0, 8):
-                commands.update({
-                    '/sys/devices/system/cpu/cpu{}/'
-                    'cpufreq/scaling_governor'.format(x): 'performance',
-                    '/sys/devices/system/cpu/cpu{}/'
-                    'cpufreq/scaling_min_freq'.format(x): '1401000'
-                })
-        else:
-            pass
-
-        for key, value in commands.items():
-            self._set_value_and_check_exitcode(key, value, root=True)
-
-    def set_gpu_performance_parameters(self, device_name):
-        LOG.info('setting gpu performance parameters')
-        commands = {
-            '/sys/class/kgsl/kgsl-3d0/bus_split': '0',
-            '/sys/class/kgsl/kgsl-3d0/force_bus_on': '1',
-            '/sys/class/kgsl/kgsl-3d0/force_rail_on': '1',
-            '/sys/class/kgsl/kgsl-3d0/force_clk_on': '1',
-            '/sys/class/kgsl/kgsl-3d0/force_no_nap': '1',
-            '/sys/class/kgsl/kgsl-3d0/idle_timer': '1000000',
-        }
-
-        if device_name == 'Pixel 2':
-            # Adreno 540 (710MHz)
-            # values obtained from:
-            #   /sys/devices/soc/5000000.qcom,kgsl-3d0/kgsl/kgsl-3d0/max_clk_mhz
-            commands.update({
-                '/sys/devices/soc/5000000.qcom,kgsl-3d0/devfreq/'
-                '5000000.qcom,kgsl-3d0/governor': 'performance',
-                '/sys/devices/soc/soc:qcom,kgsl-busmon/devfreq/'
-                'soc:qcom,kgsl-busmon/governor': 'performance',
-                '/sys/devices/soc/5000000.qcom,kgsl-3d0/kgsl/kgsl-3d0/min_clock_mhz': '710',
-            })
-        elif device_name == 'Moto G (5)':
-            # Adreno 505 (450MHz)
-            # values obtained from:
-            #   /sys/devices/soc/1c00000.qcom,kgsl-3d0/kgsl/kgsl-3d0/max_clock_mhz
-            commands.update({
-                '/sys/devices/soc/1c00000.qcom,kgsl-3d0/devfreq/'
-                '1c00000.qcom,kgsl-3d0/governor': 'performance',
-                '/sys/devices/soc/1c00000.qcom,kgsl-3d0/kgsl/kgsl-3d0/min_clock_mhz': '450',
-            })
-        else:
-            pass
-        for key, value in commands.items():
-            self._set_value_and_check_exitcode(key, value, root=True)
-
-    def set_kernel_performance_parameters(self):
-        LOG.info('setting kernel performance parameters')
-        commands = {
-            '/sys/kernel/debug/msm-bus-dbg/shell-client/update_request': '1',
-            '/sys/kernel/debug/msm-bus-dbg/shell-client/mas': '1',
-            '/sys/kernel/debug/msm-bus-dbg/shell-client/ab': '0',
-            '/sys/kernel/debug/msm-bus-dbg/shell-client/slv': '512',
-        }
-        for key, value in commands.items():
-            self._set_value_and_check_exitcode(key, value, root=True)
-
     def build_browser_profile(self):
         super(RaptorAndroid, self).build_browser_profile()
 
@@ -935,6 +810,7 @@ class RaptorAndroid(Raptor):
         path = os.path.join(self.profile_data_dir, 'raptor-android')
         LOG.info("Merging profile: {}".format(path))
         self.profile.merge(path)
+        self.profile.set_preferences({'browser.tabs.remote.autostart': self.config['e10s']})
 
     def clear_app_data(self):
         LOG.info("clearing %s app data" % self.config['binary'])
@@ -976,11 +852,16 @@ class RaptorAndroid(Raptor):
         self.profile.set_preferences(proxy_prefs)
 
     def log_android_device_temperature(self):
-        # retrieve and log the android device temperature
-        thermal_zone0 = float(self.device.shell_output('cat sys/class/thermal/thermal_zone0/temp'))
-        zone_type = self.device.shell_output('cat sys/class/thermal/thermal_zone0/type')
-        LOG.info("(thermal_zone0) device temperature: %.3f zone type: %s"
-                 % (thermal_zone0 / 1000, zone_type))
+        try:
+            # retrieve and log the android device temperature
+            thermal_zone0 = self.device.shell_output('cat sys/class/thermal/thermal_zone0/temp')
+            thermal_zone0 = float(thermal_zone0)
+            zone_type = self.device.shell_output('cat sys/class/thermal/thermal_zone0/type')
+            LOG.info("(thermal_zone0) device temperature: %.3f zone type: %s"
+                     % (thermal_zone0 / 1000, zone_type))
+        except Exception as exc:
+            LOG.warning("Unexpected error: {} - {}"
+                        .format(exc.__class__.__name__, exc))
 
     def write_android_app_config(self):
         # geckoview supports having a local on-device config file; use this file
@@ -1085,11 +966,11 @@ class RaptorAndroid(Raptor):
         is_benchmark = test.get('type') == "benchmark"
         self.set_reverse_ports(is_benchmark=is_benchmark)
 
-    def run_test_teardown(self):
+    def run_test_teardown(self, test):
         LOG.info('removing reverse socket connections')
         self.device.remove_socket_connections('reverse')
 
-        super(RaptorAndroid, self).run_test_teardown()
+        super(RaptorAndroid, self).run_test_teardown(test)
 
     def run_test(self, test, timeout):
         # tests will be run warm (i.e. NO browser restart between page-cycles)
@@ -1117,7 +998,6 @@ class RaptorAndroid(Raptor):
         finally:
             if self.config['power_test']:
                 finish_android_power_test(self, test['name'])
-            self.run_test_teardown()
 
     def __run_test_cold(self, test, timeout):
         '''
@@ -1256,10 +1136,13 @@ class RaptorAndroid(Raptor):
             self.runner.wait(timeout=None)
 
     def check_for_crashes(self):
+        super(RaptorAndroid, self).check_for_crashes()
+
         if not self.app_launched:
             LOG.info("skipping check_for_crashes: application has not been launched")
             return
         self.app_launched = False
+
         # Turn off verbose to prevent logcat from being inserted into the main log.
         verbose = self.device._verbose
         self.device._verbose = False
@@ -1324,6 +1207,7 @@ def main(args=sys.argv[1:]):
     raptor = raptor_class(args.app,
                           args.binary,
                           run_local=args.run_local,
+                          noinstall=args.noinstall,
                           obj_path=args.obj_path,
                           gecko_profile=args.gecko_profile,
                           gecko_profile_interval=args.gecko_profile_interval,

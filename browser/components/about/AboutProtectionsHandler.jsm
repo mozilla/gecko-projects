@@ -4,6 +4,8 @@
 
 "use strict";
 
+Cu.importGlobalProperties(["fetch"]);
+
 var EXPORTED_SYMBOLS = ["AboutProtectionsHandler"];
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
@@ -12,10 +14,16 @@ const { RemotePages } = ChromeUtils.import(
   "resource://gre/modules/remotepagemanager/RemotePageManagerParent.jsm"
 );
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+
 ChromeUtils.defineModuleGetter(
   this,
   "fxAccounts",
   "resource://gre/modules/FxAccounts.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "LoginHelper",
+  "resource://gre/modules/LoginHelper.jsm"
 );
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -32,6 +40,25 @@ let idToTextMap = new Map([
   [Ci.nsITrackingDBService.FINGERPRINTERS_ID, "fingerprinter"],
 ]);
 
+const MONITOR_API_ENDPOINT = "https://monitor.firefox.com/user/breach-stats";
+
+// TODO: there will be a monitor-specific scope for FxA access tokens, which we should be
+// using once it's implemented. See: https://github.com/mozilla/blurts-server/issues/1128
+const SCOPE_MONITOR = [
+  "profile:uid",
+  "https://identity.mozilla.com/apps/monitor",
+];
+
+// Error messages
+const INVALID_OAUTH_TOKEN = "Invalid OAuth token";
+const USER_UNSUBSCRIBED_TO_MONITOR = "User is not subscribed to Monitor";
+const SERVICE_UNAVAILABLE = "Service unavailable";
+const UNEXPECTED_RESPONSE = "Unexpected response";
+const UNKNOWN_ERROR = "Unknown error";
+
+// Valid response info for successful Monitor data
+const MONITOR_RESPONSE_PROPS = ["monitoredEmails", "numBreaches", "passwords"];
+
 var AboutProtectionsHandler = {
   _inited: false,
   _topics: [
@@ -41,12 +68,9 @@ var AboutProtectionsHandler = {
     "OpenSyncPreferences",
     // Fetching data
     "FetchContentBlockingEvents",
+    "FetchMonitorData",
     "FetchUserLoginsData",
-    // Getting prefs
-    "GetEnabledLockwiseCard",
   ],
-
-  PREF_LOCKWISE_CARD_ENABLED: "browser.contentblocking.report.lockwise.enabled",
 
   init() {
     this.receiveMessage = this.receiveMessage.bind(this);
@@ -68,27 +92,175 @@ var AboutProtectionsHandler = {
   },
 
   /**
+   * Fetches and validates data from the Monitor endpoint. If successful, then return
+   * expected data. Otherwise, throw the appropriate error depending on the status code.
+   *
+   * @return valid data from endpoint.
+   */
+  async fetchUserBreachStats(token) {
+    let monitorResponse = null;
+
+    // Make the request
+    const headers = new Headers();
+    headers.append("Authorization", `Bearer ${token}`);
+    const request = new Request(MONITOR_API_ENDPOINT, { headers });
+    const response = await fetch(request);
+
+    if (response.ok) {
+      // Validate the shape of the response is what we're expecting.
+      const json = await response.json();
+
+      // Make sure that we're getting the expected data.
+      let isValid = null;
+      for (let prop in json) {
+        isValid = MONITOR_RESPONSE_PROPS.includes(prop);
+
+        if (!isValid) {
+          break;
+        }
+      }
+
+      monitorResponse = isValid ? json : new Error(UNEXPECTED_RESPONSE);
+    } else {
+      // Check the reason for the error
+      switch (response.status) {
+        case 400:
+        case 401:
+          monitorResponse = new Error(INVALID_OAUTH_TOKEN);
+          break;
+        case 404:
+          monitorResponse = new Error(USER_UNSUBSCRIBED_TO_MONITOR);
+          break;
+        case 503:
+          monitorResponse = new Error(SERVICE_UNAVAILABLE);
+          break;
+        default:
+          monitorResponse = new Error(UNKNOWN_ERROR);
+          break;
+      }
+    }
+
+    if (monitorResponse instanceof Error) {
+      throw monitorResponse;
+    }
+
+    return monitorResponse;
+  },
+
+  /**
    * Retrieves login data for the user.
    *
-   * @return {{ isLoggedIn: Boolean,
-   *            numberOfLogins: Number,
-   *            numberOfSyncedDevices: Number }}
+   * @return {{ hasFxa: Boolean,
+   *            numLogins: Number,
+   *            numSyncedDevices: Number }}
    *         The login data.
    */
   async getLoginData() {
-    const loginCount = Services.logins.countLogins("", "", "");
     let syncedDevices = [];
-    const isLoggedWithFxa = await fxAccounts.accountStatus();
+    const hasFxa = await fxAccounts.accountStatus();
 
-    if (isLoggedWithFxa) {
+    if (hasFxa) {
       syncedDevices = await fxAccounts.getDeviceList();
     }
 
     return {
-      isLoggedIn: loginCount > 0 || syncedDevices.length > 0,
-      numberOfLogins: loginCount,
-      numberOfSyncedDevices: syncedDevices.length,
+      hasFxa,
+      numLogins: Services.logins.countLogins("", "", ""),
+      numSyncedDevices: syncedDevices.length,
     };
+  },
+
+  /**
+   * Retrieves monitor data for the user.
+   *
+   * @return {{ monitoredEmails: Number,
+   *            numBreaches: Number,
+   *            passwords: Number,
+   *            userEmail: String|null,
+   *            potentiallyBreachedLogins: Number,
+   *            error: Boolean }}
+   *         Monitor data.
+   */
+  async getMonitorData() {
+    let monitorData = {};
+    let potentiallyBreachedLogins = null;
+    let userEmail = null;
+    const hasFxa = await fxAccounts.accountStatus();
+
+    if (hasFxa) {
+      let token = await this.getMonitorScopedOAuthToken();
+
+      if (!token) {
+        return { error: true };
+      }
+
+      try {
+        monitorData = await this.fetchUserBreachStats(token);
+      } catch (e) {
+        Cu.reportError(e.message);
+        // If the user's OAuth token is invalid, we clear the cached token and refetch
+        // again. If OAuth token is invalid after the second fetch, then the monitor UI
+        // will simply show the "no logins" UI version.
+        if (e.message === INVALID_OAUTH_TOKEN) {
+          await fxAccounts.removeCachedOAuthToken({ token });
+          token = await await this.getMonitorScopedOAuthToken();
+
+          try {
+            monitorData = await this.fetchUserBreachStats(token);
+          } catch (_) {
+            Cu.reportError(e.message);
+            monitorData.errorMessage = INVALID_OAUTH_TOKEN;
+          }
+        } else {
+          monitorData.errorMessage = e.message;
+        }
+      }
+
+      // Get the stats for number of potentially breached Lockwise passwords if no master
+      // password is set.
+      if (!LoginHelper.isMasterPasswordSet()) {
+        const logins = await LoginHelper.getAllUserFacingLogins();
+        potentiallyBreachedLogins = await LoginHelper.getBreachesForLogins(
+          logins
+        );
+
+        // If the user isn't subscribed to Monitor, then send back their email so the
+        // protections report can direct them to the proper OAuth flow on Monitor.
+        if (monitorData.errorMessage) {
+          const { email } = await fxAccounts.getSignedInUser();
+          userEmail = email;
+        }
+      }
+    } else {
+      // If no account exists, then the user is not logged in with an fxAccount.
+      monitorData = {
+        errorMessage: "No account",
+      };
+    }
+
+    return {
+      ...monitorData,
+      userEmail,
+      potentiallyBreachedLogins: potentiallyBreachedLogins
+        ? potentiallyBreachedLogins.size
+        : 0,
+      error: !!monitorData.errorMessage,
+    };
+  },
+
+  async getMonitorScopedOAuthToken() {
+    let token = null;
+
+    try {
+      token = await fxAccounts.getOAuthToken({ scope: SCOPE_MONITOR });
+    } catch (e) {
+      Cu.reportError(
+        "There was an error fetching the user's token: ",
+        e.message
+      );
+    }
+
+    return token;
   },
 
   /**
@@ -123,32 +295,43 @@ var AboutProtectionsHandler = {
         win.openTrustedLinkIn("about:preferences#sync", "tab");
         break;
       case "FetchContentBlockingEvents":
-        TrackingDBService.getEventsByDateRange(
+        let sumEvents = await TrackingDBService.sumAllEvents();
+        let earliestDate = await TrackingDBService.getEarliestRecordedDate();
+        let eventsByDate = await TrackingDBService.getEventsByDateRange(
           aMessage.data.from,
           aMessage.data.to
-        ).then(results => {
-          let dataToSend = {};
-          let largest = 0;
-          for (let result of results) {
-            let count = result.getResultByName("count");
-            let type = result.getResultByName("type");
-            let timestamp = result.getResultByName("timestamp");
-            dataToSend[timestamp] = dataToSend[timestamp] || { total: 0 };
-            dataToSend[timestamp][idToTextMap.get(type)] = count;
-            dataToSend[timestamp].total += count;
-            // Record the largest amount of tracking events found per day,
-            // to create the tallest column on the graph and compare other days to.
-            if (largest < dataToSend[timestamp].total) {
-              largest = dataToSend[timestamp].total;
-            }
+        );
+        let dataToSend = {};
+        let largest = 0;
+
+        for (let result of eventsByDate) {
+          let count = result.getResultByName("count");
+          let type = result.getResultByName("type");
+          let timestamp = result.getResultByName("timestamp");
+          dataToSend[timestamp] = dataToSend[timestamp] || { total: 0 };
+          dataToSend[timestamp][idToTextMap.get(type)] = count;
+          dataToSend[timestamp].total += count;
+          // Record the largest amount of tracking events found per day,
+          // to create the tallest column on the graph and compare other days to.
+          if (largest < dataToSend[timestamp].total) {
+            largest = dataToSend[timestamp].total;
           }
           dataToSend.largest = largest;
-          this.sendMessage(
-            aMessage.target,
-            "SendContentBlockingRecords",
-            dataToSend
-          );
-        });
+        }
+        dataToSend.earliestDate = earliestDate;
+        dataToSend.sumEvents = sumEvents;
+        this.sendMessage(
+          aMessage.target,
+          "SendContentBlockingRecords",
+          dataToSend
+        );
+        break;
+      case "FetchMonitorData":
+        this.sendMessage(
+          aMessage.target,
+          "SendMonitorData",
+          await this.getMonitorData()
+        );
         break;
       case "FetchUserLoginsData":
         this.sendMessage(
@@ -156,14 +339,6 @@ var AboutProtectionsHandler = {
           "SendUserLoginsData",
           await this.getLoginData()
         );
-        break;
-      case "GetEnabledLockwiseCard":
-        const enabled = Services.prefs.getBoolPref(
-          this.PREF_LOCKWISE_CARD_ENABLED
-        );
-        this.sendMessage(aMessage.target, "SendEnabledLockWiseCardPref", {
-          isEnabled: enabled,
-        });
         break;
     }
   },

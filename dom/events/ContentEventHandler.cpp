@@ -7,6 +7,7 @@
 #include "ContentEventHandler.h"
 
 #include "mozilla/ContentIterator.h"
+#include "mozilla/EditorUtils.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/RangeUtils.h"
@@ -15,6 +16,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLUnknownElement.h"
 #include "mozilla/dom/Selection.h"
+#include "mozilla/dom/Text.h"
 #include "nsCaret.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
@@ -504,14 +506,22 @@ static void ConvertToNativeNewlines(nsString& aString) {
 #endif
 }
 
-static void AppendString(nsAString& aString, Text* aText) {
+static void AppendString(nsString& aString, Text* aText) {
+  uint32_t oldXPLength = aString.Length();
   aText->TextFragment().AppendTo(aString);
+  if (aText->HasFlag(NS_MAYBE_MASKED)) {
+    EditorUtils::MaskString(aString, aText, oldXPLength, 0);
+  }
 }
 
-static void AppendSubString(nsAString& aString, Text* aText, uint32_t aXPOffset,
+static void AppendSubString(nsString& aString, Text* aText, uint32_t aXPOffset,
                             uint32_t aXPLength) {
-  aText->TextFragment().AppendTo(aString, int32_t(aXPOffset),
-                                 int32_t(aXPLength));
+  uint32_t oldXPLength = aString.Length();
+  aText->TextFragment().AppendTo(aString, static_cast<int32_t>(aXPOffset),
+                                 static_cast<int32_t>(aXPLength));
+  if (aText->HasFlag(NS_MAYBE_MASKED)) {
+    EditorUtils::MaskString(aString, aText, oldXPLength, aXPOffset);
+  }
 }
 
 #if defined(XP_WIN)

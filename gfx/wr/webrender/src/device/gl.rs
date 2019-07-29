@@ -6,7 +6,7 @@ use super::super::shader_source::SHADERS;
 use api::{ColorF, ImageDescriptor, ImageFormat, MemoryReport};
 use api::{MixBlendMode, TextureTarget, VoidPtrToSizeFn};
 use api::units::*;
-use euclid::Transform3D;
+use euclid::default::Transform3D;
 use gleam::gl;
 use crate::internal_types::{FastHashMap, LayerIndex, RenderTargetInfo};
 use log::Level;
@@ -30,6 +30,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
+use crate::util::round_up_to_multiple;
 use webrender_build::shader::ProgramSourceDigest;
 use webrender_build::shader::{parse_shader_source, shader_source_from_file};
 
@@ -1045,7 +1046,7 @@ pub enum DrawTarget {
 
 impl DrawTarget {
     pub fn new_default(size: DeviceIntSize) -> Self {
-        let total_size = FramebufferIntSize::from_untyped(&size.to_untyped());
+        let total_size = FramebufferIntSize::from_untyped(size.to_untyped());
         DrawTarget::Default {
             rect: total_size.into(),
             total_size,
@@ -1085,9 +1086,9 @@ impl DrawTarget {
     /// Returns the dimensions of this draw-target.
     pub fn dimensions(&self) -> DeviceIntSize {
         match *self {
-            DrawTarget::Default { total_size, .. } => DeviceIntSize::from_untyped(&total_size.to_untyped()),
+            DrawTarget::Default { total_size, .. } => DeviceIntSize::from_untyped(total_size.to_untyped()),
             DrawTarget::Texture { dimensions, .. } => dimensions,
-            DrawTarget::External { size, .. } => DeviceIntSize::from_untyped(&size.to_untyped()),
+            DrawTarget::External { size, .. } => DeviceIntSize::from_untyped(size.to_untyped()),
         }
     }
 
@@ -1117,7 +1118,7 @@ impl DrawTarget {
         match scissor_rect {
             Some(scissor_rect) => match *self {
                 DrawTarget::Default { ref rect, .. } => {
-                    self.to_framebuffer_rect(scissor_rect.translate(&-content_origin.to_vector()))
+                    self.to_framebuffer_rect(scissor_rect.translate(-content_origin.to_vector()))
                         .intersection(rect)
                         .unwrap_or_else(FramebufferIntRect::zero)
                 }
@@ -1128,7 +1129,7 @@ impl DrawTarget {
             None => {
                 FramebufferIntRect::new(
                     FramebufferIntPoint::zero(),
-                    FramebufferIntSize::from_untyped(&dimensions.to_untyped()),
+                    FramebufferIntSize::from_untyped(dimensions.to_untyped()),
                 )
             }
         }
@@ -1409,6 +1410,10 @@ impl Device {
         &self.capabilities
     }
 
+    pub fn get_optimal_pbo_stride(&self) -> NonZeroUsize {
+        self.optimal_pbo_stride
+    }
+
     pub fn reset_state(&mut self) {
         self.bound_textures = [0; 16];
         self.bound_vao = 0;
@@ -1599,7 +1604,7 @@ impl Device {
             DrawTarget::Texture { dimensions, fbo_id, with_depth, .. } => {
                 let rect = FramebufferIntRect::new(
                     FramebufferIntPoint::zero(),
-                    FramebufferIntSize::from_untyped(&dimensions.to_untyped()),
+                    FramebufferIntSize::from_untyped(dimensions.to_untyped()),
                 );
                 (fbo_id, rect, with_depth)
             },
@@ -2004,7 +2009,7 @@ impl Device {
         } else {
             let rect = FramebufferIntRect::new(
                 FramebufferIntPoint::zero(),
-                FramebufferIntSize::from_untyped(&src.get_dimensions().to_untyped()),
+                FramebufferIntSize::from_untyped(src.get_dimensions().to_untyped()),
             );
             for layer in 0..src.layer_count.min(dst.layer_count) as LayerIndex {
                 self.blit_render_target(
@@ -3333,13 +3338,6 @@ impl<'a, T> Drop for TextureUploader<'a, T> {
             }
             self.target.gl.bind_buffer(gl::PIXEL_UNPACK_BUFFER, 0);
         }
-    }
-}
-
-fn round_up_to_multiple(val: usize, mul: NonZeroUsize) -> usize {
-    match val % mul.get() {
-        rem if rem > 0 => val - rem + mul.get(),
-        _ => val,
     }
 }
 

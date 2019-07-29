@@ -2294,9 +2294,10 @@ static void ReduceConstraint(
     mediaSource =
         Some(aConstraint.GetAsMediaTrackConstraints().mMediaSource.Value());
   }
+  aConstraint.Uninit();
   if (mediaSource) {
-    aConstraint.SetAsMediaTrackConstraints().mMediaSource.Value() =
-        *mediaSource;
+    aConstraint.SetAsMediaTrackConstraints().mMediaSource.Construct(
+        *mediaSource);
   } else {
     aConstraint.SetAsMediaTrackConstraints();
   }
@@ -3928,10 +3929,10 @@ void MediaManager::IterateWindowListeners(nsPIDOMWindowInner* aWindow,
     nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
     if (docShell) {
       int32_t i, count;
-      docShell->GetChildCount(&count);
+      docShell->GetInProcessChildCount(&count);
       for (i = 0; i < count; ++i) {
         nsCOMPtr<nsIDocShellTreeItem> item;
-        docShell->GetChildAt(i, getter_AddRefs(item));
+        docShell->GetInProcessChildAt(i, getter_AddRefs(item));
         nsCOMPtr<nsPIDOMWindowOuter> winOuter =
             item ? item->GetWindow() : nullptr;
 

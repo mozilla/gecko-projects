@@ -30,7 +30,6 @@
 #include "nsContentUtils.h"
 #include "nsIconLoaderService.h"
 #include "nsIContent.h"
-#include "nsIContentPolicy.h"
 #include "nsNameSpaceManager.h"
 #include "nsNetUtil.h"
 #include "nsObjCExceptions.h"
@@ -43,17 +42,19 @@ using mozilla::gfx::SourceSurface;
 
 NS_IMPL_ISUPPORTS(nsIconLoaderService, imgINotificationObserver)
 
-nsIconLoaderService::nsIconLoaderService(nsIContent* aContent, nsIntRect* aImageRegionRect,
+nsIconLoaderService::nsIconLoaderService(nsINode* aContent, nsIntRect* aImageRegionRect,
                                          RefPtr<nsIconLoaderObserver> aObserver,
                                          uint32_t aIconHeight, uint32_t aIconWidth)
     : mContent(aContent),
       mContentType(nsIContentPolicy::TYPE_INTERNAL_IMAGE),
       mImageRegionRect(aImageRegionRect),
       mLoadedIcon(false),
-      mNativeIconImage(nil),
       mIconHeight(aIconHeight),
       mIconWidth(aIconWidth),
-      mCompletionHandler(aObserver) {}
+      mCompletionHandler(aObserver) {
+  // Placeholder icon, which will later be replaced.
+  mNativeIconImage = [[NSImage alloc] initWithSize:NSMakeSize(mIconHeight, mIconWidth)];
+}
 
 nsIconLoaderService::~nsIconLoaderService() { Destroy(); }
 
@@ -65,8 +66,8 @@ void nsIconLoaderService::Destroy() {
     mIconRequest->CancelAndForgetObserver(NS_BINDING_ABORTED);
     mIconRequest = nullptr;
   }
-  mImageRegionRect = nullptr;
   mNativeIconImage = nil;
+  mImageRegionRect = nullptr;
   mCompletionHandler = nil;
 }
 
@@ -98,8 +99,8 @@ nsresult nsIconLoaderService::LoadIcon(nsIURI* aIconURI) {
   }
 
   nsresult rv = loader->LoadImage(
-      aIconURI, nullptr, nullptr, mozilla::net::RP_Unset, mContent->NodePrincipal(), 0, loadGroup,
-      this, mContent, document, nsIRequest::LOAD_NORMAL, nullptr, mContentType, EmptyString(),
+      aIconURI, nullptr, nullptr, mContent->NodePrincipal(), 0, loadGroup, this, mContent, document,
+      nsIRequest::LOAD_NORMAL, nullptr, mContentType, EmptyString(),
       /* aUseUrgentStartForChannel */ false, getter_AddRefs(mIconRequest));
   if (NS_FAILED(rv)) {
     return rv;
@@ -109,6 +110,8 @@ nsresult nsIconLoaderService::LoadIcon(nsIURI* aIconURI) {
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
+
+NSImage* nsIconLoaderService::GetNativeIconImage() { return mNativeIconImage; }
 
 //
 // imgINotificationObserver
@@ -242,7 +245,11 @@ nsresult nsIconLoaderService::OnFrameComplete(imgIRequest* aRequest) {
   [newImage setTemplate:isEntirelyBlack];
 
   [newImage setSize:NSMakeSize(mIconWidth, mIconHeight)];
+
+  NSImage* placeholderImage = mNativeIconImage;
   mNativeIconImage = newImage;
+  [placeholderImage release];
+  placeholderImage = nil;
 
   ::CGImageRelease(finalImage);
 

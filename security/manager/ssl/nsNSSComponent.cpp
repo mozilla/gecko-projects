@@ -1004,6 +1004,7 @@ static const bool ALPN_ENABLED_DEFAULT = false;
 static const bool ENABLED_0RTT_DATA_DEFAULT = false;
 static const bool HELLO_DOWNGRADE_CHECK_DEFAULT = false;
 static const bool ENABLED_POST_HANDSHAKE_AUTH_DEFAULT = false;
+static const bool DELEGATED_CREDENTIALS_ENABLED_DEFAULT = false;
 
 static void ConfigureTLSSessionIdentifiers() {
   bool disableSessionIdentifiers =
@@ -1760,6 +1761,11 @@ nsresult nsNSSComponent::InitializeNSS() {
       Preferences::GetBool("security.tls.enable_post_handshake_auth",
                            ENABLED_POST_HANDSHAKE_AUTH_DEFAULT));
 
+  SSL_OptionSetDefault(
+      SSL_ENABLE_DELEGATED_CREDENTIALS,
+      Preferences::GetBool("security.tls.enable_delegated_credentials",
+                           DELEGATED_CREDENTIALS_ENABLED_DEFAULT));
+
   rv = InitializeCipherSuite();
   MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(rv));
   if (NS_FAILED(rv)) {
@@ -1769,10 +1775,6 @@ nsresult nsNSSComponent::InitializeNSS() {
   }
 
   mozilla::pkix::RegisterErrorTable();
-
-  if (PK11_IsFIPS()) {
-    Telemetry::Accumulate(Telemetry::FIPS_ENABLED, true);
-  }
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS Initialization done\n"));
 
@@ -1936,6 +1938,12 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
           SSL_ENABLE_POST_HANDSHAKE_AUTH,
           Preferences::GetBool("security.tls.enable_post_handshake_auth",
                                ENABLED_POST_HANDSHAKE_AUTH_DEFAULT));
+    } else if (prefName.EqualsLiteral(
+                   "security.tls.enable_delegated_credentials")) {
+      SSL_OptionSetDefault(
+          SSL_ENABLE_DELEGATED_CREDENTIALS,
+          Preferences::GetBool("security.tls.enable_delegated_credentials",
+                               DELEGATED_CREDENTIALS_ENABLED_DEFAULT));
     } else if (prefName.EqualsLiteral(
                    "security.ssl.disable_session_identifiers")) {
       ConfigureTLSSessionIdentifiers();

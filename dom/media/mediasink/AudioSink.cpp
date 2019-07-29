@@ -11,8 +11,7 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerPrintfMacros.h"
-#include "mozilla/StaticPrefs.h"
-#include "mozilla/StaticPrefs_accessibility.h"
+#include "mozilla/StaticPrefs_media.h"
 #include "nsPrintfCString.h"
 
 namespace mozilla {

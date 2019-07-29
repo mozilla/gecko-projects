@@ -11,7 +11,6 @@
 #include "mozilla/ThreadLocal.h"
 #include "mozilla/Unused.h"
 
-#include "dbg/Debugger.h"
 #include "gc/FreeOp.h"
 #include "gc/Marking.h"
 #include "jit/AliasAnalysis.h"
@@ -53,7 +52,7 @@
 #include "vm/TraceLogging.h"
 #include "vtune/VTuneWrapper.h"
 
-#include "dbg/Debugger-inl.h"
+#include "debugger/DebugAPI-inl.h"
 #include "gc/PrivateIterators-inl.h"
 #include "jit/JitFrames-inl.h"
 #include "jit/MacroAssembler-inl.h"
@@ -171,7 +170,6 @@ JitRuntime::JitRuntime()
       interpreterStubOffset_(0),
       doubleToInt32ValueStubOffset_(0),
       debugTrapHandlers_(),
-      baselineDebugModeOSRHandler_(nullptr),
       baselineInterpreter_(),
       trampolineCode_(nullptr),
       jitcodeGlobalTable_(nullptr),
@@ -223,6 +221,11 @@ bool JitRuntime::initialize(JSContext* cx) {
   if (!GenerateBaselineInterpreter(cx, baselineInterpreter_)) {
     return false;
   }
+
+  // Initialize the jitCodeRaw of the Runtime's canonical SelfHostedLazyScript
+  // to point to the interpreter trampoline.
+  cx->runtime()->selfHostedLazyScript.ref().jitCodeRaw_ =
+      interpreterStub().value;
 
   return true;
 }

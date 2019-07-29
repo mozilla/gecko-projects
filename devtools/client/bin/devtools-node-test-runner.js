@@ -33,12 +33,16 @@ const SUITES = {
     path: "../accessibility/test/jest",
     type: TEST_TYPES.JEST,
   },
+  application: {
+    path: "../application/test/components",
+    type: TEST_TYPES.JEST,
+  },
   framework: {
     path: "../framework/test/jest",
     type: TEST_TYPES.JEST,
   },
   netmonitor: {
-    path: "../netmonitor",
+    path: "../netmonitor/test/node",
     type: TEST_TYPES.JEST,
   },
   webconsole: {

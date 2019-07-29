@@ -16,8 +16,8 @@
 #include "mozilla/Base64.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/SharedThreadPool.h"
-#include "mozilla/StaticPrefs.h"
 #include "mozilla/StaticPrefs_accessibility.h"
+#include "mozilla/StaticPrefs_media.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/TaskCategory.h"
 #include "mozilla/TaskQueue.h"
@@ -56,6 +56,9 @@ CheckedInt64 FramesToUsecs(int64_t aFrames, uint32_t aRate) {
 }
 
 TimeUnit FramesToTimeUnit(int64_t aFrames, uint32_t aRate) {
+  if (MOZ_UNLIKELY(!aRate)) {
+    return TimeUnit::Invalid();
+  }
   int64_t major = aFrames / aRate;
   int64_t remainder = aFrames % aRate;
   return TimeUnit::FromMicroseconds(major) * USECS_PER_S +

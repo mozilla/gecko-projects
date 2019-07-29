@@ -7,6 +7,7 @@
 #include "SHEntryChild.h"
 #include "SHistoryChild.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/StaticPrefs_docshell.h"
 #include "nsDocShellEditorData.h"
 #include "nsDocShellLoadState.h"
 #include "nsIContentViewer.h"

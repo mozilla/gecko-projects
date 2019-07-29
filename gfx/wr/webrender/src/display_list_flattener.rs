@@ -10,7 +10,7 @@ use api::{IframeDisplayItem, ImageKey, ImageRendering, ItemRange, ColorDepth};
 use api::{LineOrientation, LineStyle, NinePatchBorderSource, PipelineId};
 use api::{PropertyBinding, ReferenceFrame, ReferenceFrameKind, ScrollFrameDisplayItem, ScrollSensitivity};
 use api::{Shadow, SpaceAndClipInfo, SpatialId, StackingContext, StickyFrameDisplayItem};
-use api::{ClipMode, PrimitiveKeyKind, TransformStyle, YuvColorSpace, YuvData, TempFilterData};
+use api::{ClipMode, PrimitiveKeyKind, TransformStyle, YuvColorSpace, ColorRange, YuvData, TempFilterData};
 use api::units::*;
 use crate::clip::{ClipChainId, ClipRegion, ClipItemKey, ClipStore};
 use crate::clip_scroll_tree::{ROOT_SPATIAL_NODE_INDEX, ClipScrollTree, SpatialNodeIndex};
@@ -704,7 +704,7 @@ impl<'a> DisplayListFlattener<'a> {
         parent_node_index: SpatialNodeIndex,
     ) {
         let current_offset = self.current_offset(parent_node_index);
-        let frame_rect = info.bounds.translate(&current_offset);
+        let frame_rect = info.bounds.translate(current_offset);
         let sticky_frame_info = StickyFrameInfo::new(
             frame_rect,
             info.margins,
@@ -966,8 +966,8 @@ impl<'a> DisplayListFlattener<'a> {
 
         let current_offset = self.current_offset(clip_and_scroll.spatial_node_index);
 
-        let clip_rect = common.clip_rect.translate(&current_offset);
-        let rect = bounds.translate(&current_offset);
+        let clip_rect = common.clip_rect.translate(current_offset);
+        let rect = bounds.translate(current_offset);
         let layout = LayoutPrimitiveInfo {
             rect,
             clip_rect,
@@ -1017,6 +1017,7 @@ impl<'a> DisplayListFlattener<'a> {
                     info.yuv_data,
                     info.color_depth,
                     info.color_space,
+                    info.color_range,
                     info.image_rendering,
                 );
             }
@@ -2530,9 +2531,9 @@ impl<'a> DisplayListFlattener<'a> {
     {
         // Offset the local rect and clip rect by the shadow offset.
         let mut info = pending_primitive.info.clone();
-        info.rect = info.rect.translate(&pending_shadow.shadow.offset);
+        info.rect = info.rect.translate(pending_shadow.shadow.offset);
         info.clip_rect = info.clip_rect.translate(
-            &pending_shadow.shadow.offset
+            pending_shadow.shadow.offset
         );
 
         // Construct and add a primitive for the given shadow.
@@ -3019,6 +3020,7 @@ impl<'a> DisplayListFlattener<'a> {
         yuv_data: YuvData,
         color_depth: ColorDepth,
         color_space: YuvColorSpace,
+        color_range: ColorRange,
         image_rendering: ImageRendering,
     ) {
         let format = yuv_data.get_format();
@@ -3037,6 +3039,7 @@ impl<'a> DisplayListFlattener<'a> {
                 yuv_key,
                 format,
                 color_space,
+                color_range,
                 image_rendering,
             },
         );

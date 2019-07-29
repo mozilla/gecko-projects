@@ -17,6 +17,11 @@ const {
 const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
 const { l10n } = require("devtools/client/webconsole/utils/messages");
 
+var ChromeUtils = require("ChromeUtils");
+const { BrowserLoader } = ChromeUtils.import(
+  "resource://devtools/client/shared/browser-loader.js"
+);
+
 loader.lazyRequireGetter(
   this,
   "AppConstants",
@@ -79,11 +84,18 @@ class WebConsoleUI {
   }
 
   destroy() {
-    if (this._destroyer) {
-      return this._destroyer.promise;
+    if (!this.hud) {
+      return;
     }
-    this._destroyer = defer();
+
     this.React = this.ReactDOM = this.FrameView = null;
+
+    if (this.outputNode) {
+      // We do this because it's much faster than letting React handle the ConsoleOutput
+      // unmounting.
+      this.outputNode.innerHTML = "";
+    }
+
     if (this.jsterm) {
       this.jsterm.destroy();
       this.jsterm = null;
@@ -102,17 +114,10 @@ class WebConsoleUI {
 
     this.window = this.hud = this.wrapper = null;
 
-    const onDestroy = () => {
-      this._destroyer.resolve(null);
-    };
     if (this.proxy) {
-      this.proxy.disconnect().then(onDestroy);
+      this.proxy.disconnect();
       this.proxy = null;
-    } else {
-      onDestroy();
     }
-
-    return this._destroyer.promise;
   }
 
   /**
@@ -232,7 +237,14 @@ class WebConsoleUI {
 
     const toolbox = gDevTools.getToolbox(this.hud.target);
 
-    this.wrapper = new this.window.WebConsoleWrapper(
+    // Initialize module loader and load all the WebConsoleWrapper. The entire code-base
+    // doesn't need any extra privileges and runs entirely in content scope.
+    const WebConsoleWrapper = BrowserLoader({
+      baseURI: "resource://devtools/client/webconsole/",
+      window: this.window,
+    }).require("./webconsole-wrapper");
+
+    this.wrapper = new WebConsoleWrapper(
       this.outputNode,
       this,
       toolbox,

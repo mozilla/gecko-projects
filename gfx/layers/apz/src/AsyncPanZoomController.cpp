@@ -33,7 +33,6 @@
 #include "UnitTransforms.h"             // for TransformTo
 #include "base/message_loop.h"          // for MessageLoop
 #include "base/task.h"                  // for NewRunnableMethod, etc
-#include "mozilla/StaticPrefs.h"        // for StaticPrefs
 #include "gfxTypes.h"                   // for gfxFloat
 #include "LayersLogging.h"              // for print_stderr
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
@@ -46,8 +45,15 @@
 #include "mozilla/Preferences.h"             // for Preferences
 #include "mozilla/RecursiveMutex.h"          // for RecursiveMutexAutoLock, etc
 #include "mozilla/RefPtr.h"                  // for RefPtr
-#include "mozilla/StaticPrefs.h"             // for StaticPrefs
-#include "mozilla/StaticPtr.h"               // for StaticAutoPtr
+#include "mozilla/StaticPrefs_apz.h"
+#include "mozilla/StaticPrefs_general.h"
+#include "mozilla/StaticPrefs_gfx.h"
+#include "mozilla/StaticPrefs_mousewheel.h"
+#include "mozilla/StaticPrefs_layers.h"
+#include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_slider.h"
+#include "mozilla/StaticPrefs_test.h"
+#include "mozilla/StaticPrefs_toolkit.h"
 #include "mozilla/Telemetry.h"               // for Telemetry
 #include "mozilla/TimeStamp.h"               // for TimeDuration, TimeStamp
 #include "mozilla/dom/CheckerboardReportService.h"  // for CheckerboardEventStorage
@@ -132,7 +138,7 @@ typedef PlatformSpecificStateBase
  * \page APZCPrefs APZ preferences
  *
  * The following prefs are used to control the behaviour of the APZC.
- * The default values are provided in StaticPrefs.h.
+ * The default values are provided in StaticPrefs.yaml.
  *
  * \li\b apz.allow_double_tap_zooming
  * Pref that allows or disallows double tap to zoom
@@ -816,10 +822,10 @@ void AsyncPanZoomController::InitializeGlobalState() {
       new ComputedTimingFunction(nsTimingFunction(StyleTimingKeyword::Ease));
   ClearOnShutdown(&gZoomAnimationFunction);
   gVelocityCurveFunction = new ComputedTimingFunction(
-      nsTimingFunction(StaticPrefs::apz_fling_curve_function_x1(),
-                       StaticPrefs::apz_fling_curve_function_y1(),
-                       StaticPrefs::apz_fling_curve_function_x2(),
-                       StaticPrefs::apz_fling_curve_function_y2()));
+      nsTimingFunction(StaticPrefs::apz_fling_curve_function_x1_AtStartup(),
+                       StaticPrefs::apz_fling_curve_function_y1_AtStartup(),
+                       StaticPrefs::apz_fling_curve_function_x2_AtStartup(),
+                       StaticPrefs::apz_fling_curve_function_y2_AtStartup()));
   ClearOnShutdown(&gVelocityCurveFunction);
 
   uint64_t sysmem = PR_GetPhysicalMemorySize();
@@ -847,7 +853,7 @@ AsyncPanZoomController::AsyncPanZoomController(
       mPanDirRestricted(false),
       mPinchLocked(false),
       mPinchEventBuffer(TimeDuration::FromMilliseconds(
-          StaticPrefs::apz_pinch_lock_buffer_max_age())),
+          StaticPrefs::apz_pinch_lock_buffer_max_age_AtStartup())),
       mZoomConstraints(false, false,
                        mScrollMetadata.GetMetrics().GetDevPixelsPerCSSPixel() *
                            kViewportMinScale / ParentLayerToScreenScale(1),
@@ -1054,7 +1060,7 @@ nsEventStatus AsyncPanZoomController::HandleDragEvent(
   ScrollDirection direction = *scrollbarData.mDirection;
 
   bool isMouseAwayFromThumb = false;
-  if (int snapMultiplier = StaticPrefs::slider_snapMultiplier()) {
+  if (int snapMultiplier = StaticPrefs::slider_snapMultiplier_AtStartup()) {
     // It's fine to ignore the async component of the thumb's transform,
     // because any async transform of the thumb will be in the direction of
     // scrolling, but here we're interested in the other direction.
@@ -5091,7 +5097,7 @@ void AsyncPanZoomController::DispatchStateChangeNotification(
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
       // Let the compositor know about scroll state changes so it can manage
       // windowed plugins.
-      if (StaticPrefs::gfx_e10s_hide_plugins_for_scroll() &&
+      if (StaticPrefs::gfx_e10s_hide_plugins_for_scroll_AtStartup() &&
           mCompositorController) {
         mCompositorController->ScheduleHideAllPluginWindows();
       }
@@ -5114,7 +5120,7 @@ void AsyncPanZoomController::DispatchStateChangeNotification(
       controller->NotifyAPZStateChange(GetGuid(),
                                        APZStateChange::eTransformEnd);
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
-      if (StaticPrefs::gfx_e10s_hide_plugins_for_scroll() &&
+      if (StaticPrefs::gfx_e10s_hide_plugins_for_scroll_AtStartup() &&
           mCompositorController) {
         mCompositorController->ScheduleShowAllPluginWindows();
       }

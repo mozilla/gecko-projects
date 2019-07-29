@@ -103,8 +103,7 @@ ReplayDebugger.prototype = {
   canRewind: RecordReplayControl.canRewind,
 
   replayCurrentExecutionPoint() {
-    this._ensurePaused();
-    return this._control.pausePoint();
+    return this._control.lastPausePoint();
   },
 
   replayRecordingEndpoint() {
@@ -115,6 +114,14 @@ ReplayDebugger.prototype = {
     return this._control.childIsRecording();
   },
 
+  replayUnscannedRegions() {
+    return this._control.unscannedRegions();
+  },
+
+  replayCachedPoints() {
+    return this._control.cachedPoints();
+  },
+
   addDebuggee() {},
   removeAllDebuggees() {},
 
@@ -123,9 +130,7 @@ ReplayDebugger.prototype = {
   },
 
   _processResponse(request, response, divergeResponse) {
-    dumpv(
-      `SendRequest: ${JSON.stringify(request)} -> ${JSON.stringify(response)}`
-    );
+    dumpv(`SendRequest: ${stringify(request)} -> ${stringify(response)}`);
     if (response.exception) {
       ThrowError(response.exception);
     }
@@ -158,18 +163,6 @@ ReplayDebugger.prototype = {
   _sendRequestMainChild(request) {
     const response = this._control.sendRequestMainChild(request);
     return this._processResponse(request, response);
-  },
-
-  // Update graphics according to the current state of the child process. This
-  // should be done anytime we pause and allow the user to interact with the
-  // debugger.
-  _repaint() {
-    const rv = this._sendRequestAllowDiverge({ type: "repaint" }, {});
-    if ("width" in rv && "height" in rv) {
-      RecordReplayControl.hadRepaint(rv.width, rv.height);
-    } else {
-      RecordReplayControl.hadRepaintFailure();
-    }
   },
 
   getDebuggees() {
@@ -312,10 +305,10 @@ ReplayDebugger.prototype = {
     }
   },
 
-  // This hook is called whenever we switch between recording and replaying
-  // child processes.
-  _onSwitchChild() {
-    // The position change handler listens to changes to the current child.
+  // This hook is called whenever control state changes which affects something
+  // the position change handler listens to (more than just position changes,
+  // alas).
+  _callOnPositionChange() {
     if (this.replayingOnPositionChange) {
       this.replayingOnPositionChange();
     }
@@ -324,14 +317,14 @@ ReplayDebugger.prototype = {
   replayPushThreadPause() {
     // The thread has paused so that the user can interact with it. The child
     // will stay paused until this thread-wide pause has been popped.
-    assert(this._paused);
+    this._ensurePaused();
     assert(!this._resumeCallback);
     if (++this._threadPauseCount == 1) {
       // There is no preferred direction of travel after an explicit pause.
       this._direction = Direction.NONE;
 
       // Update graphics according to the current state of the child.
-      this._repaint();
+      this._control.repaint();
 
       // If breakpoint handlers for the pause haven't been called yet, don't
       // call them at all.
@@ -363,7 +356,7 @@ ReplayDebugger.prototype = {
   },
 
   _performResume() {
-    assert(this._paused && !this._threadPauseCount);
+    this._ensurePaused();
     if (this._resumeCallback && !this._threadPauseCount) {
       const callback = this._resumeCallback;
       this._invalidateAfterUnpause();
@@ -388,7 +381,7 @@ ReplayDebugger.prototype = {
       return;
     }
 
-    const pauseData = this._sendRequestAllowDiverge({ type: "pauseData" });
+    const pauseData = this._control.getPauseData();
     if (!pauseData.frames) {
       return;
     }
@@ -424,6 +417,7 @@ ReplayDebugger.prototype = {
   },
 
   _virtualConsoleLog(position, text, condition, callback) {
+    dumpv(`AddLogpoint ${JSON.stringify(position)} ${text} ${condition}`);
     this._control.addLogpoint({ position, text, condition, callback });
   },
 
@@ -432,7 +426,7 @@ ReplayDebugger.prototype = {
   /////////////////////////////////////////////////////////
 
   _setBreakpoint(handler, position, data) {
-    dumpv("AddBreakpoint " + JSON.stringify(position));
+    dumpv(`AddBreakpoint ${JSON.stringify(position)}`);
     this._control.addBreakpoint(position);
     this._breakpoints.push({ handler, position, data });
   },
@@ -528,11 +522,11 @@ ReplayDebugger.prototype = {
     return data.map(script => this._addScript(script));
   },
 
-  findAllConsoleMessages() {
-    const messages = this._sendRequestMainChild({
-      type: "findConsoleMessages",
-    });
-    return messages.map(this._convertConsoleMessage.bind(this));
+  _onNewScript(data) {
+    if (this.onNewScript) {
+      const script = this._addScript(data);
+      this.onNewScript(script);
+    }
   },
 
   /////////////////////////////////////////////////////////
@@ -544,7 +538,9 @@ ReplayDebugger.prototype = {
     if (source) {
       return source;
     }
-    return this._addSource(this._sendRequest({ type: "getSource", id }));
+    return this._addSource(
+      this._sendRequestMainChild({ type: "getSource", id })
+    );
   },
 
   _addSource(data) {
@@ -692,6 +688,13 @@ ReplayDebugger.prototype = {
     return message;
   },
 
+  findAllConsoleMessages() {
+    const messages = this._sendRequestMainChild({
+      type: "findConsoleMessages",
+    });
+    return messages.map(this._convertConsoleMessage.bind(this));
+  },
+
   /////////////////////////////////////////////////////////
   // Handlers
   /////////////////////////////////////////////////////////
@@ -701,6 +704,7 @@ ReplayDebugger.prototype = {
   },
   set onEnterFrame(handler) {
     this._breakpointKindSetter("EnterFrame", handler, () => {
+      this._capturePauseData();
       handler.call(this, this.getNewestFrame());
     });
   },
@@ -872,9 +876,7 @@ function ReplayDebuggerFrame(dbg, data) {
   this._dbg = dbg;
   this._data = data;
   if (this._data.arguments) {
-    this._data.arguments = this._data.arguments.map(a =>
-      this._dbg._convertValue(a)
-    );
+    this._arguments = this._data.arguments.map(a => this._dbg._convertValue(a));
   }
 }
 
@@ -908,7 +910,8 @@ ReplayDebuggerFrame.prototype = {
     return this._data.offset;
   },
   get arguments() {
-    return this._data.arguments;
+    assert(this._data);
+    return this._arguments;
   },
   get live() {
     return true;
@@ -1360,6 +1363,14 @@ function assert(v) {
 
 function isNonNullObject(obj) {
   return obj && (typeof obj == "object" || typeof obj == "function");
+}
+
+function stringify(object) {
+  const str = JSON.stringify(object);
+  if (str.length >= 4096) {
+    return `${str.substr(0, 4096)} TRIMMED ${str.length}`;
+  }
+  return str;
 }
 
 module.exports = ReplayDebugger;

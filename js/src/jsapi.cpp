@@ -42,7 +42,6 @@
 #ifdef ENABLE_TYPED_OBJECTS
 #  include "builtin/TypedObject.h"
 #endif
-#include "dbg/Debugger.h"
 #include "frontend/BytecodeCompiler.h"
 #include "gc/FreeOp.h"
 #include "gc/Marking.h"
@@ -79,6 +78,7 @@
 #include "vm/EnvironmentObject.h"
 #include "vm/ErrorObject.h"
 #include "vm/HelperThreads.h"
+#include "vm/Instrumentation.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
 #include "vm/JSAtom.h"
@@ -96,6 +96,7 @@
 #include "vm/Xdr.h"
 #include "wasm/WasmModule.h"
 
+#include "debugger/DebugAPI-inl.h"
 #include "vm/Compartment-inl.h"
 #include "vm/Interpreter-inl.h"
 #include "vm/JSAtom-inl.h"
@@ -667,7 +668,6 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
   MOZ_ASSERT(origobj != target);
   MOZ_ASSERT(!origobj->is<CrossCompartmentWrapperObject>());
   MOZ_ASSERT(!target->is<CrossCompartmentWrapperObject>());
-  MOZ_ASSERT(origobj->getClass() == target->getClass());
   ReleaseAssertObjectHasNoWrappers(cx, target);
   JS::AssertCellIsNotGray(origobj);
   JS::AssertCellIsNotGray(target);
@@ -726,9 +726,11 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
     }
     MOZ_ASSERT(Wrapper::wrappedObject(newIdentityWrapper) == newIdentity);
     JSObject::swap(cx, origobj, newIdentityWrapper);
-    if (!origobj->compartment()->putWrapper(
-            cx, CrossCompartmentKey(newIdentity), origv)) {
-      MOZ_CRASH();
+    if (origobj->compartment()->lookupWrapper(newIdentity)) {
+      MOZ_ASSERT(origobj->is<CrossCompartmentWrapperObject>());
+      if (!origobj->compartment()->putWrapper(cx, CrossCompartmentKey(newIdentity), origv)) {
+        MOZ_CRASH();
+      }
     }
   }
 
@@ -1703,7 +1705,7 @@ JS_PUBLIC_API void JS_FireOnNewGlobalObject(JSContext* cx,
   // we'll likely run up into them again soon in a fallible context.
   cx->check(global);
   Rooted<js::GlobalObject*> globalObject(cx, &global->as<GlobalObject>());
-  Debugger::onNewGlobalObject(cx, globalObject);
+  DebugAPI::onNewGlobalObject(cx, globalObject);
   cx->runtime()->ensureRealmIsRecordingAllocations(globalObject);
 }
 
@@ -3246,11 +3248,10 @@ JS_PUBLIC_API JSFunction* JS::NewFunctionFromSpec(JSContext* cx,
     return nullptr;
   }
 
+  MOZ_ASSERT(fs->call.op);
+
   JSFunction* fun;
-  if (!fs->call.op) {
-    fun =
-        NewScriptedFunction(cx, fs->nargs, JSFunction::INTERPRETED_LAZY, atom);
-  } else if (fs->flags & JSFUN_CONSTRUCTOR) {
+  if (fs->flags & JSFUN_CONSTRUCTOR) {
     fun = NewNativeConstructor(cx, fs->call.op, fs->nargs, atom);
   } else {
     fun = NewNativeFunction(cx, fs->call.op, fs->nargs, atom);
@@ -3579,12 +3580,14 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
   bigIntEnabledOption = cx->realm()->creationOptions().getBigIntEnabled();
   fieldsEnabledOption = cx->realm()->creationOptions().getFieldsEnabled();
 
-  // Certain modes of operation disallow syntax parsing in general. The replay
-  // debugger requires scripts to be constructed in a consistent order, which
-  // might not happen with lazy parsing.
+  // Certain modes of operation disallow syntax parsing in general.
   forceFullParse_ = cx->realm()->behaviors().disableLazyParsing() ||
-                    coverage::IsLCovEnabled() ||
-                    mozilla::recordreplay::IsRecordingOrReplaying();
+                    coverage::IsLCovEnabled();
+
+  // If instrumentation is enabled in the realm, the compiler should insert the
+  // requested kinds of instrumentation into all scripts.
+  instrumentationKinds =
+      RealmInstrumentation::getInstrumentationKinds(cx->global());
 }
 
 CompileOptions& CompileOptions::setIntroductionInfoToCaller(
@@ -5240,9 +5243,9 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
     case JSJITCOMPILER_BASELINE_WARMUP_TRIGGER:
       if (value == uint32_t(-1)) {
         jit::DefaultJitOptions defaultValues;
-        value = defaultValues.baselineWarmUpThreshold;
+        value = defaultValues.baselineJitWarmUpThreshold;
       }
-      jit::JitOptions.baselineWarmUpThreshold = value;
+      jit::JitOptions.baselineJitWarmUpThreshold = value;
       break;
     case JSJITCOMPILER_ION_NORMAL_WARMUP_TRIGGER:
       if (value == uint32_t(-1)) {
@@ -5391,7 +5394,7 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
       *valueOut = jit::JitOptions.baselineInterpreterWarmUpThreshold;
       break;
     case JSJITCOMPILER_BASELINE_WARMUP_TRIGGER:
-      *valueOut = jit::JitOptions.baselineWarmUpThreshold;
+      *valueOut = jit::JitOptions.baselineJitWarmUpThreshold;
       break;
     case JSJITCOMPILER_ION_NORMAL_WARMUP_TRIGGER:
       *valueOut = jit::JitOptions.normalIonWarmUpThreshold;

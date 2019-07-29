@@ -839,7 +839,7 @@ static const uint32_t JSCLASS_FOREGROUND_FINALIZE =
 // application.
 static const uint32_t JSCLASS_GLOBAL_APPLICATION_SLOTS = 5;
 static const uint32_t JSCLASS_GLOBAL_SLOT_COUNT =
-    JSCLASS_GLOBAL_APPLICATION_SLOTS + JSProto_LIMIT * 2 + 37;
+    JSCLASS_GLOBAL_APPLICATION_SLOTS + JSProto_LIMIT * 2 + 38;
 
 #define JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(n) \
   (JSCLASS_IS_GLOBAL |                     \
@@ -895,6 +895,8 @@ struct MOZ_STATIC_CLASS Class {
     MOZ_ASSERT(!isProxy());
     return isJSFunction() || getCall();
   }
+
+  bool isGlobal() const { return flags & JSCLASS_IS_GLOBAL; }
 
   bool isProxy() const { return flags & JSCLASS_IS_PROXY; }
 

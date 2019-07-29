@@ -8,7 +8,7 @@ const { openTrustedLink } = require("devtools/client/shared/link");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const {
   createFactory,
-  Component,
+  PureComponent,
 } = require("devtools/client/shared/vendor/react");
 const {
   a,
@@ -27,7 +27,7 @@ const Localized = createFactory(FluentReact.Localized);
  * and also displays a suggestion to use about debugging for debugging other service
  * workers.
  */
-class WorkerList extends Component {
+class WorkerList extends PureComponent {
   static get propTypes() {
     return {
       canDebugWorkers: PropTypes.bool.isRequired,
@@ -41,7 +41,7 @@ class WorkerList extends Component {
 
     return [
       article(
-        { className: "workers-container" },
+        { className: "workers-container", key: "workers-container" },
         Localized(
           { id: "serviceworker-list-header" },
           h1({
@@ -52,6 +52,7 @@ class WorkerList extends Component {
           {},
           workers.map(worker =>
             Worker({
+              key: worker.id,
               client,
               isDebugEnabled: canDebugWorkers,
               worker,
@@ -62,6 +63,7 @@ class WorkerList extends Component {
       Localized(
         {
           id: "serviceworker-list-aboutdebugging",
+          key: "serviceworkerlist-footer",
           a: a({
             className: "aboutdebugging-plug__link",
             onClick: () => openTrustedLink("about:debugging#workers"),

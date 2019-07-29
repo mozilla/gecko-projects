@@ -206,7 +206,7 @@ pub struct StickyFrameDisplayItem {
     /// The margins that should be maintained between the edge of the parent viewport and this
     /// sticky frame. A margin of None indicates that the sticky frame should not stick at all
     /// to that particular edge of the viewport.
-    pub margins: SideOffsets2D<Option<f32>>,
+    pub margins: SideOffsets2D<Option<f32>, LayoutPixel>,
 
     /// The minimum and maximum vertical offsets for this sticky frame. Ignoring these constraints,
     /// the sticky frame will continue to stick to the edge of the viewport as its original
@@ -424,7 +424,7 @@ pub struct NinePatchBorder {
     /// stretching.
     /// Slices can be overlapping. In that case, the same pixels from the
     /// 9-part image will show up in multiple parts of the resulting border.
-    pub slice: SideOffsets2D<i32>,
+    pub slice: DeviceIntSideOffsets,
 
     /// Controls whether the center of the 9 patch image is rendered or
     /// ignored. The center is never rendered if the slices are overlapping.
@@ -440,7 +440,7 @@ pub struct NinePatchBorder {
 
     /// The outset for the border.
     /// TODO(mrobinson): This should be removed and handled by the client.
-    pub outset: SideOffsets2D<f32>,
+    pub outset: LayoutSideOffsets, // TODO: what unit is this in?
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, PeekPoke)]
@@ -1053,6 +1053,7 @@ pub struct YuvImageDisplayItem {
     pub yuv_data: YuvData,
     pub color_depth: ColorDepth,
     pub color_space: YuvColorSpace,
+    pub color_range: ColorRange,
     pub image_rendering: ImageRendering,
 }
 
@@ -1062,6 +1063,13 @@ pub enum YuvColorSpace {
     Rec601 = 0,
     Rec709 = 1,
     Rec2020 = 2,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize, PeekPoke)]
+pub enum ColorRange {
+    Limited = 0,
+    Full = 1,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, PeekPoke)]
@@ -1395,6 +1403,7 @@ impl_default_for_enums! {
     ImageRendering => Auto,
     AlphaType => Alpha,
     YuvColorSpace => Rec601,
+    ColorRange => Limited,
     YuvData => NV12(ImageKey::default(), ImageKey::default()),
     YuvFormat => NV12,
     FilterPrimitiveInput => Original,

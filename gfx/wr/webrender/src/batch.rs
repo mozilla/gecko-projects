@@ -3,7 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{AlphaType, ClipMode, ExternalImageType, ImageRendering};
-use api::{YuvColorSpace, YuvFormat, ColorDepth, PremultipliedColorF, RasterSpace};
+use api::{YuvColorSpace, YuvFormat, ColorDepth, ColorRange, PremultipliedColorF, RasterSpace};
 use api::units::*;
 use crate::clip::{ClipDataStore, ClipNodeFlags, ClipNodeRange, ClipItem, ClipStore, ClipNodeInstance};
 use crate::clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex, CoordinateSystemId};
@@ -55,7 +55,7 @@ pub enum BrushBatchKind {
         source_id: RenderTaskId,
         backdrop_id: RenderTaskId,
     },
-    YuvImage(ImageBufferKind, YuvFormat, ColorDepth, YuvColorSpace),
+    YuvImage(ImageBufferKind, YuvFormat, ColorDepth, YuvColorSpace, ColorRange),
     RadialGradient,
     LinearGradient,
 }
@@ -1137,6 +1137,10 @@ impl BatchBuilder {
                                 gpu_cache,
                             );
 
+                            // Need a new z-id for each child preserve-3d context added
+                            // by this inner loop.
+                            let z_id = z_generator.next();
+
                             let prim_header_index = prim_headers.push(&prim_header, z_id, [
                                 uv_rect_address.as_int(),
                                 if raster_config.establishes_raster_root { 1 } else { 0 },
@@ -1152,11 +1156,11 @@ impl BatchBuilder {
 
                             self.add_split_composite_instance_to_batches(
                                 key,
-                                &prim_info.clip_chain.pic_clip_rect,
+                                &child_prim_info.clip_chain.pic_clip_rect,
                                 z_id,
                                 prim_header_index,
                                 child.gpu_address,
-                                prim_info.visibility_mask,
+                                child_prim_info.visibility_mask,
                             );
                         }
                     }
@@ -1226,7 +1230,7 @@ impl BatchBuilder {
                                         textures,
                                         [
                                             ShaderColorMode::Image as i32 | ((AlphaType::PremultipliedAlpha as i32) << 16),
-                                            RasterizationSpace::Screen as i32,
+                                            RasterizationSpace::Local as i32,
                                             get_shader_opacity(1.0),
                                             0,
                                         ],
@@ -1336,7 +1340,7 @@ impl BatchBuilder {
                                             // Get the GPU cache address of the extra data handle.
                                             let shadow_prim_address = gpu_cache.get_address(shadow_gpu_data);
 
-                                            let shadow_rect = prim_header.local_rect.translate(&shadow.offset);
+                                            let shadow_rect = prim_header.local_rect.translate(shadow.offset);
 
                                             let shadow_prim_header = PrimitiveHeader {
                                                 local_rect: shadow_rect,
@@ -1893,6 +1897,7 @@ impl BatchBuilder {
                     yuv_image_data.format,
                     yuv_image_data.color_depth,
                     yuv_image_data.color_space,
+                    yuv_image_data.color_range,
                 );
 
                 let batch_params = BrushBatchParameters::shared(
@@ -2081,7 +2086,7 @@ impl BatchBuilder {
                         gpu_blocks.push([-1.0, 0.0, 0.0, 0.0].into()); //stretch size
                         // negative first value makes the shader code ignore it and use the local size instead
                         for tile in chunk {
-                            let tile_rect = tile.local_rect.translate(&-prim_rect.origin.to_vector());
+                            let tile_rect = tile.local_rect.translate(-prim_rect.origin.to_vector());
                             gpu_blocks.push(tile_rect.into());
                             gpu_blocks.push(GpuBlockData::EMPTY);
                         }
@@ -2909,7 +2914,7 @@ impl ClipBatcher {
                         p1.y - p0.y,
                     ),
                 ).to_f32();
-                let world_sub_rect = normalized_sub_rect.translate(&mask_origin);
+                let world_sub_rect = normalized_sub_rect.translate(mask_origin);
 
                 // If the clip rect completely contains this tile rect, then drawing
                 // these pixels would be redundant - since this clip can't possibly

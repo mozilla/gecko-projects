@@ -702,6 +702,7 @@ class PanelList extends HTMLElement {
   }
 
   onHide() {
+    requestAnimationFrame(() => this.sendEvent("hidden"));
     this.removeHideListeners();
   }
 
@@ -813,13 +814,21 @@ class AddonOptions extends HTMLElement {
   }
 
   update(card, addon, updateInstall) {
-    for (let el of this.querySelectorAll("panel-item")) {
+    for (let el of this.items) {
       this.setElementState(el, card, addon, updateInstall);
     }
 
     // Update the separators visibility based on the updated visibility
     // of the actions in the panel-list.
     this.updateSeparatorsVisibility();
+  }
+
+  get items() {
+    return this.querySelectorAll("panel-item");
+  }
+
+  get visibleItems() {
+    return Array.from(this.items).filter(item => !item.hidden);
   }
 }
 customElements.define("addon-options", AddonOptions);
@@ -1740,6 +1749,10 @@ class AddonCard extends HTMLElement {
       if (action == "more-options") {
         this.panel.toggle(e);
       }
+    } else if (e.type === "shown" || e.type === "hidden") {
+      // The card will be dimmed if it's disabled, but when the panel is open
+      // that should be reverted so the menu items can be easily read.
+      this.toggleAttribute("panelopen", e.type === "shown");
     }
   }
 
@@ -1751,12 +1764,16 @@ class AddonCard extends HTMLElement {
     this.addEventListener("change", this);
     this.addEventListener("click", this);
     this.addEventListener("mousedown", this);
+    this.panel.addEventListener("shown", this);
+    this.panel.addEventListener("hidden", this);
   }
 
   removeListeners() {
     this.removeEventListener("change", this);
     this.removeEventListener("click", this);
     this.removeEventListener("mousedown", this);
+    this.panel.removeEventListener("shown", this);
+    this.panel.removeEventListener("hidden", this);
   }
 
   onNewInstall(install) {
@@ -1811,6 +1828,8 @@ class AddonCard extends HTMLElement {
   update() {
     let { addon, card } = this;
 
+    card.setAttribute("active", addon.isActive);
+
     // Update the icon.
     let icon;
     if (addon.type == "plugin") {
@@ -1848,10 +1867,15 @@ class AddonCard extends HTMLElement {
     // Set the items in the more options menu.
     this.options.update(this, addon, this.updateInstall);
 
-    // Badge the more options menu if there's an update.
-    card
-      .querySelector(".more-options-button")
-      .classList.toggle("more-options-button-badged", !!this.updateInstall);
+    // Badge the more options button if there's an update.
+    let moreOptionsButton = card.querySelector(".more-options-button");
+    moreOptionsButton.classList.toggle(
+      "more-options-button-badged",
+      !!this.updateInstall
+    );
+
+    // Hide the more options button if it's empty.
+    moreOptionsButton.hidden = this.options.visibleItems.length === 0;
 
     // Set the private browsing badge visibility.
     if (

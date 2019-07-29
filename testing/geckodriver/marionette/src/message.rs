@@ -6,11 +6,12 @@ use std::fmt;
 
 use crate::error::MarionetteError;
 use crate::marionette;
+use crate::result::MarionetteResult;
 use crate::webdriver;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
-enum Command {
+pub enum Command {
     WebDriver(webdriver::Command),
     Marionette(marionette::Command),
 }
@@ -46,11 +47,10 @@ enum MessageDirection {
     Outgoing = 1,
 }
 
-type MessageId = u32;
-type Payload = Map<String, Value>;
+pub type MessageId = u32;
 
 #[derive(Debug, Clone, PartialEq)]
-struct Request(MessageId, Command);
+pub struct Request(pub MessageId, pub Command);
 
 impl Request {
     pub fn id(&self) -> MessageId {
@@ -82,10 +82,10 @@ impl Serialize for Request {
 }
 
 #[derive(Debug, PartialEq)]
-enum Response {
+pub enum Response {
     Result {
         id: MessageId,
-        result: Payload,
+        result: MarionetteResult,
     },
     Error {
         id: MessageId,
@@ -111,7 +111,7 @@ impl Serialize for Response {
 
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(untagged)]
-enum Message {
+pub enum Message {
     Incoming(Request),
     Outgoing(Response),
 }
@@ -172,7 +172,7 @@ impl<'de> Visitor<'de> for MessageVisitor {
                         .ok_or_else(|| de::Error::invalid_type(Unexpected::Unit, &self))?;
                     Response::Error { id, error }
                 } else {
-                    let result: Payload = seq
+                    let result: MarionetteResult = seq
                         .next_element()?
                         .ok_or_else(|| de::Error::invalid_length(3, &self))?;
                     Response::Result { id, result }
@@ -269,9 +269,7 @@ mod tests {
     #[test]
     fn test_outgoing_result() {
         let json = json!([1, 42, null, { "value": null }]);
-        // TODO: payload is currently untyped
-        let mut result = Map::new();
-        result.insert("value".into(), Value::Null);
+        let result = MarionetteResult::Null;
         let msg = Message::Outgoing(Response::Result { id: 42, result });
 
         assert_ser_de(&msg, json);

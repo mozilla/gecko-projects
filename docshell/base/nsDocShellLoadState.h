@@ -103,6 +103,10 @@ class nsDocShellLoadState final {
 
   void SetOriginalFrameSrc(bool aOriginalFrameSrc);
 
+  bool IsFormSubmission() const;
+
+  void SetIsFormSubmission(bool aIsFormSubmission);
+
   uint32_t LoadType() const;
 
   void SetLoadType(uint32_t aLoadType);
@@ -283,6 +287,11 @@ class nsDocShellLoadState final {
   // If this attribute is true, this load corresponds to a frame
   // element loading its original src (or srcdoc) attribute.
   bool mOriginalFrameSrc;
+
+  // If this attribute is true, then the load was initiated by a
+  // form submission. This is important to know for the CSP directive
+  // navigate-to.
+  bool mIsFormSubmission;
 
   // Contains a load type as specified by the nsDocShellLoadTypes::load*
   // constants

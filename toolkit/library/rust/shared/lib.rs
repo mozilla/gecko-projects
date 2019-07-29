@@ -4,7 +4,6 @@
 
 #![cfg_attr(feature = "oom_with_hook", feature(alloc_error_hook))]
 
-#[cfg(feature="servo")]
 extern crate geckoservo;
 
 extern crate kvstore;
@@ -19,6 +18,8 @@ extern crate profiler_helper;
 extern crate mozurl;
 #[cfg(feature = "quantum_render")]
 extern crate webrender_bindings;
+#[cfg(feature = "cubeb_coreaudio_rust")]
+extern crate cubeb_coreaudio;
 #[cfg(feature = "cubeb_pulse_rust")]
 extern crate cubeb_pulse;
 extern crate encoding_c;

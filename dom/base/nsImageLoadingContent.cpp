@@ -43,6 +43,7 @@
 #include "mozAutoDocUpdate.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/dom/Element.h"
@@ -51,6 +52,7 @@
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/StaticPrefs_image.h"
 
 #ifdef LoadImage
 // Undefine LoadImage to prevent naming conflict with Windows.
@@ -352,18 +354,22 @@ already_AddRefed<Promise> nsImageLoadingContent::QueueDecodeAsync(
     return nullptr;
   }
 
-  class QueueDecodeTask final : public Runnable {
+  class QueueDecodeTask final : public MicroTaskRunnable {
    public:
     QueueDecodeTask(nsImageLoadingContent* aOwner, Promise* aPromise,
                     uint32_t aRequestGeneration)
-        : Runnable("nsImageLoadingContent::QueueDecodeTask"),
+        : MicroTaskRunnable(),
           mOwner(aOwner),
           mPromise(aPromise),
           mRequestGeneration(aRequestGeneration) {}
 
-    NS_IMETHOD Run() override {
+    virtual void Run(AutoSlowOperation& aAso) override {
       mOwner->DecodeAsync(std::move(mPromise), mRequestGeneration);
-      return NS_OK;
+    }
+
+    virtual bool Suppressed() override {
+      nsIGlobalObject* global = mOwner->GetOurOwnerDoc()->GetScopeObject();
+      return global && global->IsInSyncOperation();
     }
 
    private:
@@ -378,13 +384,12 @@ already_AddRefed<Promise> nsImageLoadingContent::QueueDecodeAsync(
   }
 
   auto task = MakeRefPtr<QueueDecodeTask>(this, promise, mRequestGeneration);
-  nsContentUtils::RunInStableState(task.forget());
+  CycleCollectedJSContext::Get()->DispatchToMicroTask(task.forget());
   return promise.forget();
 }
 
 void nsImageLoadingContent::DecodeAsync(RefPtr<Promise>&& aPromise,
                                         uint32_t aRequestGeneration) {
-  MOZ_ASSERT(nsContentUtils::IsInStableOrMetaStableState());
   MOZ_ASSERT(aPromise);
   MOZ_ASSERT(mOutstandingDecodePromises > mDecodePromises.Length());
 
@@ -1167,10 +1172,8 @@ nsresult nsImageLoadingContent::LoadImage(nsIURI* aNewURI, bool aForce,
   referrerInfo->InitWithNode(thisNode);
   nsCOMPtr<nsIURI> referrer = referrerInfo->GetOriginalReferrer();
   nsresult rv = nsContentUtils::LoadImage(
-      aNewURI, thisNode, aDocument, triggeringPrincipal, 0, referrer,
-      static_cast<mozilla::net::ReferrerPolicy>(
-          referrerInfo->GetReferrerPolicy()),
-      this, loadFlags, content->LocalName(), getter_AddRefs(req), policyType,
+      aNewURI, thisNode, aDocument, triggeringPrincipal, 0, referrerInfo, this,
+      loadFlags, content->LocalName(), getter_AddRefs(req), policyType,
       mUseUrgentStartForChannel);
 
   // Reset the flag to avoid loading from XPCOM or somewhere again else without

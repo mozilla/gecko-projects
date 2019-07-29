@@ -8,7 +8,7 @@
 #include "RetainedDisplayListBuilder.h"
 
 #include "DisplayListChecker.h"
-#include "mozilla/StaticPrefs.h"
+#include "mozilla/StaticPrefs_layout.h"
 #include "nsPlaceholderFrame.h"
 #include "nsSubDocumentFrame.h"
 #include "nsViewManager.h"
@@ -474,7 +474,9 @@ class MergeState {
         }  // aNewItem can't be the glass item on the builder yet.
 
         if (destItem->IsGlassItem()) {
-          mBuilder->Builder()->SetGlassDisplayItem(destItem);
+          if (destItem != oldItem || destItem != mBuilder->Builder()->GetGlassDisplayItem()) {
+            mBuilder->Builder()->SetGlassDisplayItem(destItem);
+          }
         }
 
         MergeChildLists(aNewItem, oldItem, destItem);
@@ -1423,7 +1425,6 @@ void RetainedDisplayListBuilder::ClearFramesWithProps() {
 PartialUpdateResult RetainedDisplayListBuilder::AttemptPartialUpdate(
     nscolor aBackstop, mozilla::DisplayListChecker* aChecker) {
   mBuilder.RemoveModifiedWindowRegions();
-  mBuilder.ClearWindowOpaqueRegion();
 
   if (mBuilder.ShouldSyncDecodeImages()) {
     MarkFramesWithItemsAndImagesModified(&mList);

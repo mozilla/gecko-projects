@@ -183,11 +183,11 @@ function MarkupView(inspector, frame, controllerWindow) {
   this.walker.on("mutations", this._mutationObserver);
   this.win.addEventListener("copy", this._onCopy);
   this.win.addEventListener("mouseup", this._onMouseUp);
-  this.inspector.inspector.nodePicker.on(
+  this.inspector.inspectorFront.nodePicker.on(
     "picker-node-canceled",
     this._onToolboxPickerCanceled
   );
-  this.inspector.inspector.nodePicker.on(
+  this.inspector.inspectorFront.nodePicker.on(
     "picker-node-hovered",
     this._onToolboxPickerHover
   );
@@ -271,7 +271,7 @@ MarkupView.prototype = {
    * destroyed while still initializing (and making protocol requests).
    */
   _handleRejectionIfNotDestroyed: function(e) {
-    if (!this._destroyer) {
+    if (!this._destroyed) {
       console.error(e);
     }
   },
@@ -798,7 +798,7 @@ MarkupView.prototype = {
     const onShow = this.showNode(selection.nodeFront, { slotted, smoothScroll })
       .then(() => {
         // We could be destroyed by now.
-        if (this._destroyer) {
+        if (this._destroyed) {
           return promise.reject("markupview destroyed");
         }
 
@@ -932,7 +932,7 @@ MarkupView.prototype = {
 
     if (type === "uri" || type === "cssresource" || type === "jsresource") {
       // Open link in a new tab.
-      this.inspector.inspector
+      this.inspector.inspectorFront
         .resolveRelativeURL(link, this.inspector.selection.nodeFront)
         .then(url => {
           if (type === "uri") {
@@ -1408,7 +1408,7 @@ MarkupView.prototype = {
     }
 
     this._waitForChildren().then(() => {
-      if (this._destroyer) {
+      if (this._destroyed) {
         // Could not fully update after markup mutations, the markup-view was destroyed
         // while waiting for children. Bail out silently.
         return;
@@ -1508,7 +1508,7 @@ MarkupView.prototype = {
 
     return this._waitForChildren()
       .then(() => {
-        if (this._destroyer) {
+        if (this._destroyed) {
           return promise.reject("markupview destroyed");
         }
         return this._ensureVisible(node);
@@ -1535,7 +1535,7 @@ MarkupView.prototype = {
    */
   _expandContainer: function(container) {
     return this._updateChildren(container, { expand: true }).then(() => {
-      if (this._destroyer) {
+      if (this._destroyed) {
         // Could not expand the node, the markup-view was destroyed in the meantime. Just
         // silently give up.
         return;
@@ -2200,11 +2200,11 @@ MarkupView.prototype = {
    * Tear down the markup panel.
    */
   destroy: function() {
-    if (this._destroyer) {
-      return this._destroyer;
+    if (this._destroyed) {
+      return;
     }
 
-    this._destroyer = promise.resolve();
+    this._destroyed = true;
 
     this._clearBriefBoxModelTimer();
 
@@ -2245,7 +2245,7 @@ MarkupView.prototype = {
     this._elt.removeEventListener("mouseout", this._onMouseOut);
     this._frame.removeEventListener("focus", this._onFocus);
     this.inspector.selection.off("new-node-front", this._onNewSelection);
-    this.inspector.inspector.nodePicker.off(
+    this.inspector.inspectorFront.nodePicker.off(
       "picker-node-hovered",
       this._onToolboxPickerHover
     );
@@ -2280,8 +2280,6 @@ MarkupView.prototype = {
 
     this._lastDropTarget = null;
     this._lastDragTarget = null;
-
-    return this._destroyer;
   },
 
   /**
