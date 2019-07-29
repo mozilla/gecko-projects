@@ -11,7 +11,11 @@ const EXPORTED_SYMBOLS = ["LoginTestUtils"];
 
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
-const { Assert } = ChromeUtils.import("resource://testing-common/Assert.jsm");
+let { Assert: AssertCls } = ChromeUtils.import(
+  "resource://testing-common/Assert.jsm"
+);
+let Assert = AssertCls;
+
 const { TestUtils } = ChromeUtils.import(
   "resource://testing-common/TestUtils.jsm"
 );
@@ -23,6 +27,10 @@ const LoginInfo = Components.Constructor(
 );
 
 this.LoginTestUtils = {
+  setAssertReporter(reporterFunc) {
+    Assert = new AssertCls(Cu.waiveXrays(reporterFunc));
+  },
+
   /**
    * Forces the storage module to save all data, and the Login Manager service
    * to replace the storage module with a newly initialized instance.
@@ -45,10 +53,15 @@ this.LoginTestUtils = {
   /**
    * Add a new login to the store
    */
-  async addLogin({ username, password, origin = "https://example.com" }) {
+  async addLogin({
+    username,
+    password,
+    origin = "https://example.com",
+    formActionOrigin,
+  }) {
     const login = LoginTestUtils.testData.formLogin({
       origin,
-      formActionOrigin: origin,
+      formActionOrigin: formActionOrigin || origin,
       username,
       password,
     });
@@ -442,4 +455,34 @@ this.LoginTestUtils.masterPassword = {
   disable() {
     this._set(false);
   },
+};
+
+/**
+ * Utilities related to interacting with login fields in content.
+ */
+this.LoginTestUtils.loginField = {
+  checkPasswordMasked(field, expected, msg) {
+    let { editor } = field;
+    let valueLength = field.value.length;
+    Assert.equal(
+      editor.autoMaskingEnabled,
+      expected,
+      `Check autoMaskingEnabled: ${msg}`
+    );
+    Assert.equal(editor.unmaskedStart, 0, `unmaskedStart is 0: ${msg}`);
+    if (expected) {
+      Assert.equal(editor.unmaskedEnd, 0, `Password is masked: ${msg}`);
+    } else {
+      Assert.equal(
+        editor.unmaskedEnd,
+        valueLength,
+        `Unmasked to the end: ${msg}`
+      );
+    }
+  },
+};
+
+this.LoginTestUtils.generation = {
+  LENGTH: 15,
+  REGEX: /^[a-km-np-zA-HJ-NP-Z2-9]{15}$/,
 };

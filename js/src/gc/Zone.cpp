@@ -321,26 +321,15 @@ void Zone::discardJitCode(FreeOp* fop,
     jit::FinishInvalidation(fop, script);
 
     // Discard baseline script if it's not marked as active.
-    if (discardBaselineCode && script->hasBaselineScript()) {
-      if (script->jitScript()->active()) {
-        // ICs will be purged so the script will need to warm back up before it
-        // can be inlined during Ion compilation.
-        script->baselineScript()->clearIonCompiledOrInlined();
-      } else {
-        jit::FinishDiscardBaselineScript(fop, script);
-      }
+    if (discardBaselineCode && script->hasBaselineScript() &&
+        !script->jitScript()->active()) {
+      jit::FinishDiscardBaselineScript(fop, script);
     }
 
     // Warm-up counter for scripts are reset on GC. After discarding code we
     // need to let it warm back up to get information such as which
     // opcodes are setting array holes or accessing getter properties.
     script->resetWarmUpCounterForGC();
-
-    // Clear the BaselineScript's control flow graph. The LifoAlloc is purged
-    // below.
-    if (script->hasBaselineScript()) {
-      script->baselineScript()->setControlFlowGraph(nullptr);
-    }
 
     // Try to release the script's JitScript. This should happen after
     // releasing JIT code because we can't do this when the script still has
@@ -354,7 +343,15 @@ void Zone::discardJitCode(FreeOp* fop,
       // stubs because the optimizedStubSpace will be purged below.
       if (discardBaselineCode) {
         jitScript->purgeOptimizedStubs(script);
+
+        // ICs were purged so the script will need to warm back up before it can
+        // be inlined during Ion compilation.
+        jitScript->clearIonCompiledOrInlined();
       }
+
+      // Clear the JitScript's control flow graph. The LifoAlloc is purged
+      // below.
+      jitScript->clearControlFlowGraph();
 
       // Finally, reset the active flag.
       jitScript->resetActive();

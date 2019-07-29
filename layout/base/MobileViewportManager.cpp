@@ -92,7 +92,9 @@ mozilla::CSSToScreenScale MobileViewportManager::ComputeIntrinsicScale(
     const mozilla::ScreenIntSize& aDisplaySize,
     const mozilla::CSSSize& aViewportOrContentSize) const {
   CSSToScreenScale intrinsicScale =
-      MaxScaleRatio(ScreenSize(aDisplaySize), aViewportOrContentSize);
+      aViewportOrContentSize.IsEmpty()
+          ? CSSToScreenScale(1.0)
+          : MaxScaleRatio(ScreenSize(aDisplaySize), aViewportOrContentSize);
   MVM_LOG("%p: Intrinsic computed zoom is %f\n", this, intrinsicScale.scale);
   return ClampZoom(intrinsicScale, aViewportInfo);
 }
@@ -178,6 +180,15 @@ CSSToScreenScale MobileViewportManager::ClampZoom(
     zoom = aViewportInfo.GetMaxZoom();
     MVM_LOG("%p: Clamped to %f\n", this, zoom.scale);
   }
+
+  // Non-positive zoom factors can produce NaN or negative viewport sizes,
+  // so we better be sure we've got a positive zoom factor. Just for good
+  // measure, we check our min/max as well as the final clamped value.
+  MOZ_ASSERT(aViewportInfo.GetMinZoom() > CSSToScreenScale(0.0f),
+             "zoom factor must be positive");
+  MOZ_ASSERT(aViewportInfo.GetMaxZoom() > CSSToScreenScale(0.0f),
+             "zoom factor must be positive");
+  MOZ_ASSERT(zoom > CSSToScreenScale(0.0f), "zoom factor must be positive");
   return zoom;
 }
 

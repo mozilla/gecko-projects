@@ -403,9 +403,9 @@ void js::gc::AssertRootMarkingPhase(JSTracer* trc) {
 /*** Tracing Interface ******************************************************/
 
 template <typename T>
-T* DoCallback(JS::CallbackTracer* trc, T** thingp, const char* name);
+bool DoCallback(JS::CallbackTracer* trc, T** thingp, const char* name);
 template <typename T>
-T DoCallback(JS::CallbackTracer* trc, T* thingp, const char* name);
+bool DoCallback(JS::CallbackTracer* trc, T* thingp, const char* name);
 template <typename T>
 void DoMarking(GCMarker* gcmarker, T* thing);
 template <typename T>
@@ -455,7 +455,7 @@ namespace js {
 namespace gc {
 
 #define INSTANTIATE_INTERNAL_TRACE_FUNCTIONS(type)                      \
-  template void TraceEdgeInternal<type>(JSTracer*, type*, const char*); \
+  template bool TraceEdgeInternal<type>(JSTracer*, type*, const char*); \
   template void TraceRangeInternal<type>(JSTracer*, size_t len, type*,  \
                                          const char*);
 
@@ -572,7 +572,7 @@ void StackGCCellPtr::trace(JSTracer* trc) {
 // implementation. Consider replacing this choke point with virtual dispatch:
 // a sufficiently smart C++ compiler may be able to devirtualize some paths.
 template <typename T>
-void js::gc::TraceEdgeInternal(JSTracer* trc, T* thingp, const char* name) {
+bool js::gc::TraceEdgeInternal(JSTracer* trc, T* thingp, const char* name) {
 #define IS_SAME_TYPE_OR(name, type, _, _1) mozilla::IsSame<type*, T>::value ||
   static_assert(JS_FOR_EACH_TRACEKIND(IS_SAME_TYPE_OR)
                         mozilla::IsSame<T, JS::Value>::value ||
@@ -582,13 +582,15 @@ void js::gc::TraceEdgeInternal(JSTracer* trc, T* thingp, const char* name) {
                 "marking/tracing internals");
 #undef IS_SAME_TYPE_OR
   if (trc->isMarkingTracer()) {
-    return DoMarking(GCMarker::fromTracer(trc), *thingp);
+    DoMarking(GCMarker::fromTracer(trc), *thingp);
+    return true;
   }
   if (trc->isTenuringTracer()) {
-    return static_cast<TenuringTracer*>(trc)->traverse(thingp);
+    static_cast<TenuringTracer*>(trc)->traverse(thingp);
+    return true;
   }
   MOZ_ASSERT(trc->isCallbackTracer());
-  DoCallback(trc->asCallbackTracer(), thingp, name);
+  return DoCallback(trc->asCallbackTracer(), thingp, name);
 }
 
 template <typename T>
@@ -3526,8 +3528,9 @@ FOR_EACH_PUBLIC_TAGGED_GC_POINTER_TYPE(INSTANTIATE_INTERNAL_MARKING_FUNCTIONS)
 #ifdef DEBUG
 struct AssertNonGrayTracer final : public JS::CallbackTracer {
   explicit AssertNonGrayTracer(JSRuntime* rt) : JS::CallbackTracer(rt) {}
-  void onChild(const JS::GCCellPtr& thing) override {
+  bool onChild(const JS::GCCellPtr& thing) override {
     MOZ_ASSERT(!thing.asCell()->isMarkedGray());
+    return true;
   }
   // This is used by the UnmarkGray tracer only, and needs to report itself
   // as the non-gray tracer to not trigger assertions.  Do not use it in another
@@ -3558,14 +3561,14 @@ class UnmarkGrayTracer final : public JS::CallbackTracer {
   // Stack of cells to traverse.
   Vector<JS::GCCellPtr, 0, SystemAllocPolicy>& stack;
 
-  void onChild(const JS::GCCellPtr& thing) override;
+  bool onChild(const JS::GCCellPtr& thing) override;
 
 #ifdef DEBUG
   TracerKind getTracerKind() const override { return TracerKind::UnmarkGray; }
 #endif
 };
 
-void UnmarkGrayTracer::onChild(const JS::GCCellPtr& thing) {
+bool UnmarkGrayTracer::onChild(const JS::GCCellPtr& thing) {
   Cell* cell = thing.asCell();
 
   // Cells in the nursery cannot be gray, and nor can certain kinds of tenured
@@ -3577,7 +3580,7 @@ void UnmarkGrayTracer::onChild(const JS::GCCellPtr& thing) {
     AssertNonGrayTracer nongray(runtime());
     TraceChildren(&nongray, cell, thing.kind());
 #endif
-    return;
+    return true;
   }
 
   TenuredCell& tenured = cell->asTenured();
@@ -3595,11 +3598,11 @@ void UnmarkGrayTracer::onChild(const JS::GCCellPtr& thing) {
       MOZ_ASSERT(tmp == cell);
       unmarkedAny = true;
     }
-    return;
+    return true;
   }
 
   if (!tenured.isMarkedGray()) {
-    return;
+    return true;
   }
 
   tenured.markBlack();
@@ -3608,6 +3611,7 @@ void UnmarkGrayTracer::onChild(const JS::GCCellPtr& thing) {
   if (!stack.append(thing)) {
     oom = true;
   }
+  return true;
 }
 
 void UnmarkGrayTracer::unmark(JS::GCCellPtr cell) {

@@ -124,7 +124,6 @@ class JSTerm extends Component {
 
     this._keyPress = this._keyPress.bind(this);
     this._inputEventHandler = this._inputEventHandler.bind(this);
-    this._blurEventHandler = this._blurEventHandler.bind(this);
     this.onContextMenu = this.onContextMenu.bind(this);
     this.imperativeUpdate = this.imperativeUpdate.bind(this);
 
@@ -183,14 +182,11 @@ class JSTerm extends Component {
             return null;
           }
 
-          if (this.canCaretGoPrevious()) {
+          if (this.props.editorMode === false && this.canCaretGoPrevious()) {
             inputUpdated = this.historyPeruse(HISTORY_BACK);
           }
 
-          if (!inputUpdated) {
-            return "CodeMirror.Pass";
-          }
-          return null;
+          return inputUpdated ? null : "CodeMirror.Pass";
         };
 
         const onArrowDown = () => {
@@ -200,14 +196,11 @@ class JSTerm extends Component {
             return null;
           }
 
-          if (this.canCaretGoNext()) {
+          if (this.props.editorMode === false && this.canCaretGoNext()) {
             inputUpdated = this.historyPeruse(HISTORY_FORWARD);
           }
 
-          if (!inputUpdated) {
-            return "CodeMirror.Pass";
-          }
-          return null;
+          return inputUpdated ? null : "CodeMirror.Pass";
         };
 
         const onArrowLeft = () => {
@@ -349,6 +342,7 @@ class JSTerm extends Component {
               // multiline text.
               if (
                 Services.appinfo.OS === "Darwin" &&
+                this.props.editorMode === false &&
                 this.canCaretGoNext() &&
                 this.historyPeruse(HISTORY_FORWARD)
               ) {
@@ -365,6 +359,7 @@ class JSTerm extends Component {
               // multiline text.
               if (
                 Services.appinfo.OS === "Darwin" &&
+                this.props.editorMode === false &&
                 this.canCaretGoPrevious() &&
                 this.historyPeruse(HISTORY_BACK)
               ) {
@@ -507,7 +502,6 @@ class JSTerm extends Component {
       ? null
       : this._getInputPaddingInlineStart();
 
-    this.webConsoleUI.window.addEventListener("blur", this._blurEventHandler);
     this.lastInputValue && this._setValue(this.lastInputValue);
   }
 
@@ -567,14 +561,6 @@ class JSTerm extends Component {
     } else {
       this.node.style.removeProperty("width");
     }
-  }
-
-  /**
-   * Getter for the element that holds the messages we display.
-   * @type Element
-   */
-  get outputNode() {
-    return this.webConsoleUI.outputNode;
   }
 
   focus() {
@@ -951,16 +937,6 @@ class JSTerm extends Component {
     }
   }
 
-  /**
-   * The window "blur" event handler.
-   * @private
-   */
-  _blurEventHandler() {
-    if (this.autocompletePopup) {
-      this.clearCompletion();
-    }
-  }
-
   /* eslint-disable complexity */
   /**
    * The inputNode "keypress" event handler.
@@ -995,6 +971,7 @@ class JSTerm extends Component {
           // multiline text.
           if (
             Services.appinfo.OS == "Darwin" &&
+            this.props.editorMode === false &&
             this.canCaretGoNext() &&
             this.historyPeruse(HISTORY_FORWARD)
           ) {
@@ -1013,6 +990,7 @@ class JSTerm extends Component {
           // multiline text.
           if (
             Services.appinfo.OS == "Darwin" &&
+            this.props.editorMode === false &&
             this.canCaretGoPrevious() &&
             this.historyPeruse(HISTORY_BACK)
           ) {
@@ -1116,7 +1094,10 @@ class JSTerm extends Component {
         if (this.autocompletePopup.isOpen) {
           this.autocompletePopup.selectPreviousItem();
           event.preventDefault();
-        } else if (this.canCaretGoPrevious()) {
+        } else if (
+          this.props.editorMode === false &&
+          this.canCaretGoPrevious()
+        ) {
           inputUpdated = this.historyPeruse(HISTORY_BACK);
         }
         if (inputUpdated) {
@@ -1128,7 +1109,7 @@ class JSTerm extends Component {
         if (this.autocompletePopup.isOpen) {
           this.autocompletePopup.selectNextItem();
           event.preventDefault();
-        } else if (this.canCaretGoNext()) {
+        } else if (this.props.editorMode === false && this.canCaretGoNext()) {
           inputUpdated = this.historyPeruse(HISTORY_FORWARD);
         }
         if (inputUpdated) {
@@ -1730,12 +1711,6 @@ class JSTerm extends Component {
   }
 
   destroy() {
-    if (this.webConsoleUI.outputNode) {
-      // We do this because it's much faster than letting React handle the ConsoleOutput
-      // unmounting.
-      this.webConsoleUI.outputNode.innerHTML = "";
-    }
-
     if (this.autocompletePopup) {
       this.autocompletePopup.destroy();
       this.autocompletePopup = null;
@@ -1745,10 +1720,6 @@ class JSTerm extends Component {
       this.inputNode.removeEventListener("keypress", this._keyPress);
       this.inputNode.removeEventListener("input", this._inputEventHandler);
       this.inputNode.removeEventListener("keyup", this._inputEventHandler);
-      this.webConsoleUI.window.removeEventListener(
-        "blur",
-        this._blurEventHandler
-      );
     }
 
     if (this.editor) {

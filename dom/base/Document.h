@@ -132,6 +132,7 @@ class nsViewportInfo;
 class nsIGlobalObject;
 class nsIXULWindow;
 class nsXULPrototypeDocument;
+class nsXULPrototypeElement;
 struct nsFont;
 
 namespace mozilla {
@@ -1447,7 +1448,7 @@ class Document : public nsINode,
    * unless this document is within a compound document and has a
    * parent. Note that this parent chain may cross chrome boundaries.
    */
-  Document* GetParentDocument() const { return mParentDocument; }
+  Document* GetInProcessParentDocument() const { return mParentDocument; }
 
   /**
    * Set the parent document of this document.
@@ -2407,6 +2408,11 @@ class Document : public nsINode,
    * Returns true if this document was created from a nsXULPrototypeDocument.
    */
   bool LoadedFromPrototype() const { return mPrototypeDocument; }
+  /**
+   * Returns the prototype the document was created from, or null if it was not
+   * created from a prototype.
+   */
+  nsXULPrototypeDocument* GetPrototype() const { return mPrototypeDocument; }
 
   bool IsTopLevelContentDocument() const { return mIsTopLevelContentDocument; }
   void SetIsTopLevelContentDocument(bool aIsTopLevelContentDocument) {
@@ -3864,8 +3870,8 @@ class Document : public nsINode,
    * up-to-date layout information.
    */
   bool StyleOrLayoutObservablyDependsOnParentDocumentLayout() const {
-    return GetParentDocument() &&
-           GetDocGroup() == GetParentDocument()->GetDocGroup();
+    return GetInProcessParentDocument() &&
+           GetDocGroup() == GetInProcessParentDocument()->GetDocGroup();
   }
 
   void AddIntersectionObserver(DOMIntersectionObserver* aObserver) {
@@ -5288,6 +5294,9 @@ class Document : public nsINode,
   js::ExpandoAndGeneration mExpandoAndGeneration;
 
   bool HasPendingInitialTranslation() { return mPendingInitialTranslation; }
+
+  nsRefPtrHashtable<nsRefPtrHashKey<Element>, nsXULPrototypeElement>
+      mL10nProtoElements;
 
   void TraceProtos(JSTracer* aTrc);
 };

@@ -1133,7 +1133,7 @@ EditorBase::CanCut(bool* aCanCut) {
   if (NS_WARN_IF(!aCanCut)) {
     return NS_ERROR_INVALID_ARG;
   }
-  *aCanCut = AsTextEditor()->CanCut();
+  *aCanCut = AsTextEditor()->IsCutCommandEnabled();
   return NS_OK;
 }
 
@@ -1145,16 +1145,7 @@ EditorBase::CanCopy(bool* aCanCopy) {
   if (NS_WARN_IF(!aCanCopy)) {
     return NS_ERROR_INVALID_ARG;
   }
-  *aCanCopy = AsTextEditor()->CanCopy();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-EditorBase::CanDelete(bool* aCanDelete) {
-  if (NS_WARN_IF(!aCanDelete)) {
-    return NS_ERROR_INVALID_ARG;
-  }
-  *aCanDelete = AsTextEditor()->CanDelete();
+  *aCanCopy = AsTextEditor()->IsCopyCommandEnabled();
   return NS_OK;
 }
 

@@ -1,19 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WebElement {
-    #[serde(rename = "element-6066-11e4-a52e-4f735466cecf")]
-    element: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Timeouts {
-    implicit: u64,
-    #[serde(rename = "pageLoad", alias = "page load")]
-    page_load: u64,
-    script: Option<u64>,
-}
+use crate::common::{Timeouts, WebElement};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -23,6 +11,7 @@ pub enum MarionetteResult {
     Timeouts(Timeouts),
     #[serde(deserialize_with = "from_value", serialize_with = "to_value")]
     WebElement(WebElement),
+    WebElements(Vec<WebElement>),
     #[serde(deserialize_with = "from_value", serialize_with = "to_empty_value")]
     Null,
 }
@@ -70,33 +59,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::{assert_de, assert_ser_de, ELEMENT_KEY};
+    use crate::test::{assert_ser_de, ELEMENT_KEY};
     use serde_json::json;
-
-    #[test]
-    fn test_web_element() {
-        let data = WebElement {
-            element: "foo".into(),
-        };
-        assert_ser_de(&data, json!({"element-6066-11e4-a52e-4f735466cecf": "foo"}));
-    }
-
-    #[test]
-    fn test_timeouts() {
-        let data = Timeouts {
-            implicit: 1000,
-            page_load: 200000,
-            script: Some(60000),
-        };
-        assert_ser_de(
-            &data,
-            json!({"implicit":1000,"pageLoad":200000,"script":60000}),
-        );
-        assert_de(
-            &data,
-            json!({"implicit":1000,"page load":200000,"script":60000}),
-        );
-    }
 
     #[test]
     fn test_web_element_response() {
@@ -106,6 +70,21 @@ mod tests {
         assert_ser_de(
             &MarionetteResult::WebElement(data),
             json!({"value": {ELEMENT_KEY: "foo"}}),
+        );
+    }
+
+    #[test]
+    fn test_web_elements_response() {
+        let mut data = Vec::new();
+        data.push(WebElement {
+            element: "foo".into(),
+        });
+        data.push(WebElement {
+            element: "bar".into(),
+        });
+        assert_ser_de(
+            &MarionetteResult::WebElements(data),
+            json!([{ELEMENT_KEY: "foo"}, {ELEMENT_KEY: "bar"}]),
         );
     }
 

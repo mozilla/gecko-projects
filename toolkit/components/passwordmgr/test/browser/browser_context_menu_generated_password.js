@@ -105,10 +105,13 @@ add_task(async function fill_generated_password_empty_field() {
         browser,
         [passwordInputSelector],
         function checkFinalFieldValue(inputSelector) {
+          let { LoginTestUtils: LTU } = ChromeUtils.import(
+            "resource://testing-common/LoginTestUtils.jsm"
+          );
           const input = content.document.querySelector(inputSelector);
           is(
             input.value.length,
-            15,
+            LTU.generation.LENGTH,
             "Password field was filled with generated password"
           );
           isnot(
@@ -116,6 +119,7 @@ add_task(async function fill_generated_password_empty_field() {
             "none",
             "Password field should be highlighted"
           );
+          LTU.loginField.checkPasswordMasked(input, false, "after fill");
         }
       );
     }
@@ -153,10 +157,13 @@ add_task(async function fill_generated_password_nonempty_field() {
         browser,
         [passwordInputSelector],
         function checkFinalFieldValue(inputSelector) {
+          let { LoginTestUtils: LTU } = ChromeUtils.import(
+            "resource://testing-common/LoginTestUtils.jsm"
+          );
           const input = content.document.querySelector(inputSelector);
           is(
             input.value.length,
-            15,
+            LTU.generation.LENGTH,
             "Password field was filled with generated password"
           );
           isnot(
@@ -164,6 +171,7 @@ add_task(async function fill_generated_password_nonempty_field() {
             "none",
             "Password field should be highlighted"
           );
+          LTU.loginField.checkPasswordMasked(input, false, "after fill");
         }
       );
     }
@@ -212,11 +220,21 @@ add_task(async function fill_generated_password_with_matching_logins() {
         browser,
         [passwordInputSelector],
         function checkFinalFieldValue(inputSelector) {
+          let { LoginTestUtils: LTU } = ChromeUtils.import(
+            "resource://testing-common/LoginTestUtils.jsm"
+          );
+          const input = content.document.querySelector(inputSelector);
           is(
-            content.document.querySelector(inputSelector).value.length,
-            15,
+            input.value.length,
+            LTU.generation.LENGTH,
             "Password field was filled with generated password"
           );
+          isnot(
+            content.getComputedStyle(input).filter,
+            "none",
+            "Password field should be highlighted"
+          );
+          LTU.loginField.checkPasswordMasked(input, false, "after fill");
         }
       );
     }

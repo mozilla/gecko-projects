@@ -1732,15 +1732,33 @@ nsresult TextEditor::RedoAsAction(uint32_t aCount, nsIPrincipal* aPrincipal) {
   return NS_OK;
 }
 
-bool TextEditor::CanCutOrCopy(
-    PasswordFieldAllowed aPasswordFieldAllowed) const {
+bool TextEditor::IsCopyToClipboardAllowedInternal() const {
   MOZ_ASSERT(IsEditActionDataAvailable());
-
-  if (aPasswordFieldAllowed == ePasswordFieldNotAllowed && IsPasswordEditor()) {
+  if (SelectionRefPtr()->IsCollapsed()) {
     return false;
   }
 
-  return !SelectionRefPtr()->IsCollapsed();
+  if (!IsSingleLineEditor() || !IsPasswordEditor()) {
+    return true;
+  }
+
+  // If we're a password editor, we should allow selected text to be copied
+  // to the clipboard only when selection range is in unmasked range.
+  if (IsAllMasked() || IsMaskingPassword() || mUnmaskedLength == 0) {
+    return false;
+  }
+
+  // If there are 2 or more ranges, we don't allow to copy/cut for now since
+  // we need to check whether all ranges are in unmasked range or not.
+  // Anyway, such operation in password field does not make sense.
+  if (SelectionRefPtr()->RangeCount() > 1) {
+    return false;
+  }
+
+  uint32_t selectionStart = 0, selectionEnd = 0;
+  nsContentUtils::GetSelectionInTextControl(SelectionRefPtr(), mRootElement,
+                                            selectionStart, selectionEnd);
+  return mUnmaskedStart <= selectionStart && UnmaskedEnd() >= selectionEnd;
 }
 
 bool TextEditor::FireClipboardEvent(EventMessage aEventMessage,
@@ -1786,7 +1804,7 @@ nsresult TextEditor::CutAsAction(nsIPrincipal* aPrincipal) {
       actionTaken ? NS_OK : NS_ERROR_EDITOR_ACTION_CANCELED);
 }
 
-bool TextEditor::CanCut() const {
+bool TextEditor::IsCutCommandEnabled() const {
   AutoEditActionDataSetter editActionData(*this, EditAction::eNotEditing);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return false;
@@ -1800,7 +1818,7 @@ bool TextEditor::CanCut() const {
     return true;
   }
 
-  return IsModifiable() && CanCutOrCopy(ePasswordFieldNotAllowed);
+  return IsModifiable() && IsCopyToClipboardAllowedInternal();
 }
 
 NS_IMETHODIMP
@@ -1817,7 +1835,7 @@ TextEditor::Copy() {
       actionTaken ? NS_OK : NS_ERROR_EDITOR_ACTION_CANCELED);
 }
 
-bool TextEditor::CanCopy() const {
+bool TextEditor::IsCopyCommandEnabled() const {
   AutoEditActionDataSetter editActionData(*this, EditAction::eNotEditing);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return false;
@@ -1831,16 +1849,16 @@ bool TextEditor::CanCopy() const {
     return true;
   }
 
-  return CanCutOrCopy(ePasswordFieldNotAllowed);
+  return IsCopyToClipboardAllowedInternal();
 }
 
-bool TextEditor::CanDelete() const {
+bool TextEditor::CanDeleteSelection() const {
   AutoEditActionDataSetter editActionData(*this, EditAction::eNotEditing);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
     return false;
   }
 
-  return IsModifiable() && CanCutOrCopy(ePasswordFieldAllowed);
+  return IsModifiable() && !SelectionRefPtr()->IsCollapsed();
 }
 
 already_AddRefed<nsIDocumentEncoder> TextEditor::GetAndInitDocEncoder(
