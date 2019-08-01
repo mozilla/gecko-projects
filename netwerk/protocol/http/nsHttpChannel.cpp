@@ -64,6 +64,7 @@
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StaticPrefs_privacy.h"
+#include "mozilla/StaticPrefs_security.h"
 #include "nsISSLSocketControl.h"
 #include "sslt.h"
 #include "nsContentUtils.h"
@@ -1572,19 +1573,8 @@ nsresult EnsureMIMEOfScript(nsHttpChannel* aChannel, nsIURI* aURI,
   }
 
   if (block) {
-    // Instead of consulting Preferences::GetBool() all the time we
-    // can cache the result to speed things up.
-    static bool sCachedBlockScriptWithWrongMime = false;
-    static bool sIsInited = false;
-    if (!sIsInited) {
-      sIsInited = true;
-      Preferences::AddBoolVarCache(&sCachedBlockScriptWithWrongMime,
-                                   "security.block_script_with_wrong_mime",
-                                   true);
-    }
-
     // Do not block the load if the feature is not enabled.
-    if (!sCachedBlockScriptWithWrongMime) {
+    if (!StaticPrefs::security_block_script_with_wrong_mime()) {
       return NS_OK;
     }
 
@@ -1637,19 +1627,8 @@ nsresult EnsureMIMEOfScript(nsHttpChannel* aChannel, nsIURI* aURI,
   // We restrict importScripts() in worker code to JavaScript MIME types.
   nsContentPolicyType internalType = aLoadInfo->InternalContentPolicyType();
   if (internalType == nsIContentPolicy::TYPE_INTERNAL_WORKER_IMPORT_SCRIPTS) {
-    // Instead of consulting Preferences::GetBool() all the time we
-    // can cache the result to speed things up.
-    static bool sCachedBlockImportScriptsWithWrongMime = false;
-    static bool sIsInited = false;
-    if (!sIsInited) {
-      sIsInited = true;
-      Preferences::AddBoolVarCache(
-          &sCachedBlockImportScriptsWithWrongMime,
-          "security.block_importScripts_with_wrong_mime", true);
-    }
-
     // Do not block the load if the feature is not enabled.
-    if (!sCachedBlockImportScriptsWithWrongMime) {
+    if (!StaticPrefs::security_block_importScripts_with_wrong_mime()) {
       return NS_OK;
     }
 
@@ -1660,19 +1639,8 @@ nsresult EnsureMIMEOfScript(nsHttpChannel* aChannel, nsIURI* aURI,
 
   if (internalType == nsIContentPolicy::TYPE_INTERNAL_WORKER ||
       internalType == nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER) {
-    // Instead of consulting Preferences::GetBool() all the time we
-    // can cache the result to speed things up.
-    static bool sCachedBlockWorkerWithWrongMime = false;
-    static bool sIsInited = false;
-    if (!sIsInited) {
-      sIsInited = true;
-      Preferences::AddBoolVarCache(&sCachedBlockWorkerWithWrongMime,
-                                   "security.block_Worker_with_wrong_mime",
-                                   true);
-    }
-
     // Do not block the load if the feature is not enabled.
-    if (!sCachedBlockWorkerWithWrongMime) {
+    if (!StaticPrefs::security_block_Worker_with_wrong_mime()) {
       return NS_OK;
     }
 
@@ -9777,10 +9745,12 @@ void nsHttpChannel::SetOriginHeader() {
   nsCOMPtr<nsIURI> referrer;
   mLoadInfo->TriggeringPrincipal()->GetURI(getter_AddRefs(referrer));
 
-  nsAutoCString origin("null");
-  if (referrer && dom::ReferrerInfo::IsReferrerSchemeAllowed(referrer)) {
-    nsContentUtils::GetASCIIOrigin(referrer, origin);
+  if (!referrer || !dom::ReferrerInfo::IsReferrerSchemeAllowed(referrer)) {
+    return;
   }
+
+  nsAutoCString origin("null");
+  nsContentUtils::GetASCIIOrigin(referrer, origin);
 
   // Restrict Origin to same-origin loads if requested by user or leaving from
   // .onion
@@ -9804,7 +9774,7 @@ void nsHttpChannel::SetOriginHeader() {
     }
   }
 
-  if (referrer && ReferrerInfo::ShouldSetNullOriginHeader(this, referrer)) {
+  if (ReferrerInfo::ShouldSetNullOriginHeader(this, referrer)) {
     origin.AssignLiteral("null");
   }
 

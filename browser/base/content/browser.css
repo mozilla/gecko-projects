@@ -558,9 +558,6 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   background-color: rgba(255,170,68,.8);
   color: black;
 }
-:root[remotecontrol] #urlbar #identity-box {
-  background: white;
-}
 
 /* Show the url scheme in a static box when overflowing to the left */
 .urlbar-input-box {
@@ -623,8 +620,15 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   background-color: hsla(0,0%,80%,.5); /* match arrowpanel-dimmed-further */
 }
 
-#PopupAutoComplete[firstresultstyle="insecureWarning"] {
-  min-width: 200px;
+/* Define the minimum width based on the style of result rows.
+   The order of the min-width rules below must be in increasing order. */
+#PopupAutoComplete[resultstyles~="loginsFooter"],
+#PopupAutoComplete[resultstyles~="insecureWarning"] {
+  min-width: 17em;
+}
+
+#PopupAutoComplete[resultstyles~="generatedPassword"] {
+  min-width: 21em;
 }
 
 #PopupAutoComplete > richlistbox > richlistitem[originaltype="insecureWarning"] {
@@ -655,7 +659,8 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   display: none;
 }
 
-#nav-bar:not([keyNav=true]) #identity-box {
+#nav-bar:not([keyNav=true]) #identity-box,
+#nav-bar:not([keyNav=true]) #tracking-protection-icon-container {
   -moz-user-focus: normal;
 }
 

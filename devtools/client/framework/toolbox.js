@@ -763,6 +763,15 @@ Toolbox.prototype = {
 
       await promise.all([splitConsolePromise, framesPromise]);
 
+      // Request the actor to restore the focus to the content page once the
+      // target is detached. This typically happens when the console closes.
+      // We restore the focus as it may have been stolen by the console input.
+      await this.target.reconfigure({
+        options: {
+          restoreFocus: true,
+        },
+      });
+
       // Lazily connect to the profiler here and don't wait for it to complete,
       // used to intercept console.profile calls before the performance tools are open.
       const performanceFrontConnection = this.initPerformance();
@@ -3397,29 +3406,18 @@ Toolbox.prototype = {
    * TODO: move to the inspector front once we can have listener hooks into fronts
    */
   destroyInspector: function() {
-    if (this._destroyingInspector) {
-      return this._destroyingInspector;
+    if (!this._inspector) {
+      return;
     }
 
-    this._destroyingInspector = async function() {
-      if (!this._inspector && !this._initInspector) {
-        return;
-      }
+    // Temporary fix for bug #1493131 - inspector has a different life cycle
+    // than most other fronts because it is closely related to the toolbox.
+    this._inspector.destroy();
 
-      // Ensure that the inspector isn't still being initiated, otherwise race conditions
-      // in the initialization process can throw errors.
-      await this._initInspector;
-
-      // Temporary fix for bug #1493131 - inspector has a different life cycle
-      // than most other fronts because it is closely related to the toolbox.
-      await this._inspector.destroy();
-
-      this._inspector = null;
-      this._highlighter = null;
-      this._selection = null;
-      this._walker = null;
-    }.bind(this)();
-    return this._destroyingInspector;
+    this._inspector = null;
+    this._highlighter = null;
+    this._selection = null;
+    this._walker = null;
   },
 
   /**
@@ -3541,9 +3539,6 @@ Toolbox.prototype = {
     this.browserRequire = null;
     this._toolNames = null;
 
-    // Destroying the walker and inspector fronts
-    outstanding.push(this.destroyInspector());
-
     // Reset preferences set by the toolbox
     outstanding.push(this.resetPreference());
 
@@ -3587,7 +3582,10 @@ Toolbox.prototype = {
       resolve(
         settleAll(outstanding)
           .catch(console.error)
-          .then(() => {
+          .then(async () => {
+            // Destroying the walker and inspector fronts
+            await this.destroyInspector();
+
             if (this._netMonitorAPI) {
               this._netMonitorAPI.destroy();
               this._netMonitorAPI = null;

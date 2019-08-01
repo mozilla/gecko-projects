@@ -24,6 +24,7 @@
 #include "jit/JitAllocPolicy.h"
 #include "jit/MacroAssembler.h"
 #include "jit/MOpcodes.h"
+#include "jit/TIOracle.h"
 #include "jit/TypedObjectPrediction.h"
 #include "jit/TypePolicy.h"
 #include "js/HeapAPI.h"
@@ -11434,6 +11435,19 @@ class MAsmJSStoreHeap
   AliasSet getAliasSet() const override {
     return AliasSet::Store(AliasSet::WasmHeap);
   }
+};
+
+class MWasmFence : public MNullaryInstruction {
+ protected:
+  MWasmFence() : MNullaryInstruction(classOpcode) { setGuard(); }
+
+ public:
+  INSTRUCTION_HEADER(WasmFence)
+  TRIVIAL_NEW_WRAPPERS
+
+  AliasSet getAliasSet() const override { return AliasSet::None(); }
+
+  ALLOW_CLONE(MWasmFence)
 };
 
 class MWasmCompareExchangeHeap : public MVariadicInstruction,

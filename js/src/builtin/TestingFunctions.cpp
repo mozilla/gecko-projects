@@ -498,6 +498,7 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
   _("minNurseryBytes", JSGC_MIN_NURSERY_BYTES, true)                         \
   _("maxNurseryBytes", JSGC_MAX_NURSERY_BYTES, true)                         \
   _("gcBytes", JSGC_BYTES, false)                                            \
+  _("nurseryBytes", JSGC_NURSERY_BYTES, false)                               \
   _("gcNumber", JSGC_NUMBER, false)                                          \
   _("mode", JSGC_MODE, true)                                                 \
   _("unusedChunks", JSGC_UNUSED_CHUNKS, false)                               \
@@ -526,7 +527,9 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
     JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION_PERCENT, true)           \
   _("pretenureThreshold", JSGC_PRETENURE_THRESHOLD, true)                    \
   _("pretenureGroupThreshold", JSGC_PRETENURE_GROUP_THRESHOLD, true)         \
-  _("zoneAllocDelayKB", JSGC_ZONE_ALLOC_DELAY_KB, true)
+  _("zoneAllocDelayKB", JSGC_ZONE_ALLOC_DELAY_KB, true)                      \
+  _("mallocThresholdBase", JSGC_MALLOC_THRESHOLD_BASE, true)                 \
+  _("mallocGrowthFactor", JSGC_MALLOC_GROWTH_FACTOR, true)
 
 static const struct ParamInfo {
   const char* name;

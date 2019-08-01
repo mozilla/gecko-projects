@@ -4419,11 +4419,6 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     }
   }
 
-  // Test if the error should be displayed
-  if (!error) {
-    return NS_OK;
-  }
-
   if (mLoadURIDelegate) {
     nsCOMPtr<nsIURI> errorPageURI;
     rv = mLoadURIDelegate->HandleLoadError(aURI, aError,
@@ -4439,6 +4434,11 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
           NS_SUCCEEDED(LoadErrorPage(errorPageURI, aURI, aFailedChannel));
       return NS_OK;
     }
+  }
+
+  // Test if the error should be displayed
+  if (!error) {
+    return NS_OK;
   }
 
   if (!errorDescriptionID) {
@@ -8075,6 +8075,11 @@ nsresult nsDocShell::RestoreFromHistory() {
   // restart the timers for the window and all of the child frames.
   privWinInner->Resume();
 
+  // Now that we have found the inner window of the page restored
+  // from the history, we have to  make sure that
+  // performance.navigation.type is 2.
+  privWinInner->GetPerformance()->GetDOMTiming()->NotifyRestoreStart();
+
   // Restore the refresh URI list.  The refresh timers will be restarted
   // when EndPageLoad() is called.
   mRefreshURIList = refreshURIList;
@@ -9538,14 +9543,10 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
   nsCOMPtr<nsIWebBrowserChrome3> browserChrome3 = do_GetInterface(mTreeOwner);
   if (browserChrome3) {
     bool shouldLoad;
-    nsCOMPtr<nsIURI> referrer;
-    nsIReferrerInfo* referrerInfo = aLoadState->GetReferrerInfo();
-    if (referrerInfo) {
-      referrerInfo->GetOriginalReferrer(getter_AddRefs(referrer));
-    }
     rv = browserChrome3->ShouldLoadURI(
-        this, aLoadState->URI(), referrer, !!aLoadState->PostDataStream(),
-        aLoadState->TriggeringPrincipal(), aLoadState->Csp(), &shouldLoad);
+        this, aLoadState->URI(), aLoadState->GetReferrerInfo(),
+        !!aLoadState->PostDataStream(), aLoadState->TriggeringPrincipal(),
+        aLoadState->Csp(), &shouldLoad);
     if (NS_SUCCEEDED(rv) && !shouldLoad) {
       return NS_OK;
     }

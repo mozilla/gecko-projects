@@ -291,14 +291,6 @@ Inspector.prototype = {
     }
   },
 
-  get notificationBox() {
-    if (!this._notificationBox) {
-      this._notificationBox = this.toolbox.getNotificationBox();
-    }
-
-    return this._notificationBox;
-  },
-
   get search() {
     if (!this._search) {
       this._search = new InspectorSearch(
@@ -328,6 +320,7 @@ Inspector.prototype = {
   },
 
   _deferredOpen: async function() {
+    const onMarkupLoaded = this.once("markuploaded");
     this._initMarkup();
     this.isReady = false;
 
@@ -349,9 +342,9 @@ Inspector.prototype = {
       "visible";
 
     // Setup the sidebar panels.
-    this.setupSidebar();
+    await this.setupSidebar();
 
-    await this.once("markuploaded");
+    await onMarkupLoaded;
     this.isReady = true;
 
     // All the components are initialized. Take care of the remaining initialization
@@ -404,7 +397,7 @@ Inspector.prototype = {
     // the ChangesActor. We want the ChangesActor to be guaranteed available before
     // the user makes any changes.
     this.changesFront = await this.toolbox.target.getFront("changes");
-    this.changesFront.start();
+    await this.changesFront.start();
     return this.changesFront;
   },
 
@@ -1629,7 +1622,6 @@ Inspector.prototype = {
     this._is3PaneModeEnabled = null;
     this._markupBox = null;
     this._markupFrame = null;
-    this._notificationBox = null;
     this._target = null;
     this._toolbox = null;
     this.breadcrumbs = null;

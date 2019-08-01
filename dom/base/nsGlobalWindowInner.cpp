@@ -907,16 +907,6 @@ nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow)
     }
   }
 
-  // We could have failed the first time through trying
-  // to create the entropy collector, so we should
-  // try to get one until we succeed.
-
-  static bool sFirstTime = true;
-  if (sFirstTime) {
-    sFirstTime = false;
-    TimeoutManager::Initialize();
-  }
-
   if (gDumpFile == nullptr) {
     nsAutoCString fname;
     Preferences::GetCString("browser.dom.window.dump.file", fname);
@@ -1663,18 +1653,13 @@ nsresult nsGlobalWindowInner::EnsureClientSource() {
 
     // Note, this is mostly copied from NS_IsAboutBlank().  Its duplicated
     // here so we can efficiently check about:srcdoc as well.
-    bool isAbout = false;
-    if (NS_SUCCEEDED(uri->SchemeIs("about", &isAbout)) && isAbout) {
+    if (uri->SchemeIs("about")) {
       nsCString spec = uri->GetSpecOrDefault();
       ignoreLoadInfo = spec.EqualsLiteral("about:blank") ||
                        spec.EqualsLiteral("about:srcdoc");
     } else {
       // Its not an about: URL, so now check for our other URL types.
-      bool isData = false;
-      bool isBlob = false;
-      ignoreLoadInfo =
-          (NS_SUCCEEDED(uri->SchemeIs("data", &isData)) && isData) ||
-          (NS_SUCCEEDED(uri->SchemeIs("blob", &isBlob)) && isBlob);
+      ignoreLoadInfo = uri->SchemeIs("data") || uri->SchemeIs("blob");
     }
 
     if (!ignoreLoadInfo) {
@@ -5883,7 +5868,7 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
   timeout->mRunning = true;
 
   // Push this timeout's popup control state, which should only be
-  // eabled the first time a timeout fires that was created while
+  // enabled the first time a timeout fires that was created while
   // popups were enabled and with a delay less than
   // "dom.disable_open_click_delay".
   AutoPopupStatePusher popupStatePusher(timeout->mPopupState);

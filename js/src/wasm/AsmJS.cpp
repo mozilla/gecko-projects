@@ -2636,9 +2636,12 @@ class MOZ_STACK_CLASS FunctionValidator : public FunctionValidatorShared {
  private:
   MOZ_MUST_USE bool appendCallSiteLineNumber(ParseNode* node) {
     const TokenStreamAnyChars& anyChars = m().tokenStream().anyCharsAccess();
-
     auto lineToken = anyChars.lineToken(node->pn_pos.begin);
-    return callSiteLineNums_.append(anyChars.lineNumber(lineToken));
+    uint32_t lineNumber = anyChars.lineNumber(lineToken);
+    if (lineNumber > CallSiteDesc::MAX_LINE_OR_BYTECODE_VALUE) {
+      return fail(node, "line number exceeding implementation limits");
+    }
+    return callSiteLineNums_.append(lineNumber);
   }
 };
 
@@ -6473,7 +6476,7 @@ static bool GetDataProperty(JSContext* cx, HandleValue objVal,
 }
 
 static bool GetDataProperty(JSContext* cx, HandleValue objVal,
-                            ImmutablePropertyNamePtr field,
+                            const ImmutablePropertyNamePtr& field,
                             MutableHandleValue v) {
   // Help the conversion along for all the cx->names().* users.
   HandlePropertyName fieldHandle = field;
@@ -7031,10 +7034,15 @@ static bool TypeFailureWarning(frontend::ParserBase& parser, const char* str) {
   return false;
 }
 
+// asm.js requires Ion to be available on the current hardware/OS and to be
+// enabled for wasm, since asm.js compilation goes via wasm.
+static bool IsAsmJSCompilerAvailable(JSContext* cx) {
+  return HasCompilerSupport(cx) && IonCanCompile() && cx->options().wasmIon();
+}
+
 static bool EstablishPreconditions(JSContext* cx,
                                    frontend::ParserBase& parser) {
-  // asm.js requires Ion.
-  if (!HasCompilerSupport(cx) || !IonCanCompile()) {
+  if (!IsAsmJSCompilerAvailable(cx)) {
     return TypeFailureWarning(parser, "Disabled by lack of compiler support");
   }
 
@@ -7157,9 +7165,7 @@ bool js::IsAsmJSStrictModeModuleOrFunction(JSFunction* fun) {
 bool js::IsAsmJSCompilationAvailable(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  // See EstablishPreconditions.
-  bool available =
-      HasCompilerSupport(cx) && IonCanCompile() && cx->options().asmJS();
+  bool available = cx->options().asmJS() && IsAsmJSCompilerAvailable(cx);
 
   args.rval().set(BooleanValue(available));
   return true;

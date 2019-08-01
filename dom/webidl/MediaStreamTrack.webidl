@@ -50,6 +50,7 @@ dictionary MediaTrackConstraintSet {
     long long browserWindow;
     boolean scrollWithPage;
     ConstrainDOMString deviceId;
+    ConstrainDOMString groupId;
     ConstrainLong viewportOffsetX;
     ConstrainLong viewportOffsetY;
     ConstrainLong viewportWidth;
@@ -91,7 +92,4 @@ interface MediaStreamTrack : EventTarget {
     [Throws, NeedsCallerType]
     Promise<void>          applyConstraints (optional MediaTrackConstraints constraints = {});
 //              attribute EventHandler          onoverconstrained;
-
-    [ChromeOnly]
-    void mutedChanged(boolean muted);
 };

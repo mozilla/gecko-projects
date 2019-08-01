@@ -22,6 +22,12 @@ exclude: true
   manage opening/closing of the `GeckoSession` and instead leave that up to the app. It's also now allowed
   to call `setSession` with a closed `GeckoSession`.
 
+- Added an overload of `GeckoSession.loadUri()` that accepts a referring `GeckoSession`. This should be used
+  when the URI we're loading originates from another page. A common example of this would be long pressing
+  a link and then opening that in a new `GeckoSession`.
+
+- Added capture parameter to `onFilePrompt` and corresponding `CAPTURE_TYPE_*` constants.
+
 ## v69
 - Modified behavior of ['setAutomaticFontSizeAdjustment'][69.1] so that it no 
   longer has any effect on ['setFontInflationEnabled'][69.2]
@@ -368,4 +374,4 @@ exclude: true
 [65.24]: ../CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: ../GeckoResult.html
 
-[api-version]: b51a187d4c36d7d0f4091d9d1227a553a4e08edb
+[api-version]: ce03a46188d89b6d2ed5ebc58bdcd640eda216c9

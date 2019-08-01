@@ -1,19 +1,38 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 
-use crate::common::{Timeouts, WebElement};
+use crate::common::{Cookie, Timeouts, WebElement};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct NewWindow {
+    handle: String,
+    #[serde(rename = "type")]
+    type_hint: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WindowRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MarionetteResult {
+    #[serde(deserialize_with = "from_value", serialize_with = "to_empty_value")]
+    Null,
+    NewWindow(NewWindow),
+    WindowRect(WindowRect),
+    Strings(Vec<String>),
     #[serde(deserialize_with = "from_value", serialize_with = "to_value")]
     String(String),
-    Timeouts(Timeouts),
     #[serde(deserialize_with = "from_value", serialize_with = "to_value")]
     WebElement(WebElement),
     WebElements(Vec<WebElement>),
-    #[serde(deserialize_with = "from_value", serialize_with = "to_empty_value")]
-    Null,
+    Cookies(Vec<Cookie>),
+    Timeouts(Timeouts),
 }
 
 fn to_value<T, S>(data: T, serializer: S) -> Result<S::Ok, S::Error>
@@ -63,6 +82,34 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn test_cookies_response() {
+        let mut data = Vec::new();
+        data.push(Cookie {
+            name: "foo".into(),
+            value: "bar".into(),
+            path: Some("/common".into()),
+            domain: Some("web-platform.test".into()),
+            secure: false,
+            http_only: false,
+            expiry: None,
+        });
+        assert_ser_de(
+            &MarionetteResult::Cookies(data),
+            json!([{"name":"foo","value":"bar","path":"/common","domain":"web-platform.test","secure":false,"httpOnly":false}]),
+        );
+    }
+
+    #[test]
+    fn test_new_window_response() {
+        let data = NewWindow {
+            handle: "6442450945".into(),
+            type_hint: "tab".into(),
+        };
+        let json = json!({"handle": "6442450945", "type": "tab"});
+        assert_ser_de(&MarionetteResult::NewWindow(data), json);
+    }
+
+    #[test]
     fn test_web_element_response() {
         let data = WebElement {
             element: "foo".into(),
@@ -91,9 +138,9 @@ mod tests {
     #[test]
     fn test_timeouts_response() {
         let data = Timeouts {
-            implicit: 1000,
-            page_load: 200000,
-            script: Some(60000),
+            implicit: Some(1000),
+            page_load: Some(200000),
+            script: Some(Some(60000)),
         };
         assert_ser_de(
             &MarionetteResult::Timeouts(data),
@@ -110,7 +157,27 @@ mod tests {
     }
 
     #[test]
+    fn test_strings_response() {
+        assert_ser_de(
+            &MarionetteResult::Strings(vec!["2147483649".to_string()]),
+            json!(["2147483649"]),
+        );
+    }
+
+    #[test]
     fn test_null_response() {
         assert_ser_de(&MarionetteResult::Null, json!({ "value": null }));
+    }
+
+    #[test]
+    fn test_window_rect_response() {
+        let data = WindowRect {
+            x: 100,
+            y: 100,
+            width: 800,
+            height: 600,
+        };
+        let json = json!({"x": 100, "y": 100, "width": 800, "height": 600});
+        assert_ser_de(&MarionetteResult::WindowRect(data), json);
     }
 }

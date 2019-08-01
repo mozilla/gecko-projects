@@ -176,12 +176,33 @@ struct JSContext : public JS::RootingContext,
 
   js::ContextData<js::FreeOp> defaultFreeOp_;
 
+  // Thread that the JSContext is currently running on, if in use.
+  js::Thread::Id currentThread_;
+
   js::ParseTask* parseTask_;
+
+  // When a helper thread is using a context, it may need to periodically
+  // free unused memory.
+  mozilla::Atomic<bool, mozilla::ReleaseAcquire> freeUnusedMemory;
 
  public:
   // This is used by helper threads to change the runtime their context is
   // currently operating on.
   void setRuntime(JSRuntime* rt);
+
+  void setHelperThread(js::AutoLockHelperThreadState& locked);
+  void clearHelperThread(js::AutoLockHelperThreadState& locked);
+
+  bool contextAvailable(js::AutoLockHelperThreadState& locked) {
+    MOZ_ASSERT(kind_ == js::ContextKind::HelperThread);
+    return currentThread_ == js::Thread::Id();
+  }
+
+  void setFreeUnusedMemory(bool shouldFree) { freeUnusedMemory = shouldFree; }
+
+  bool shouldFreeUnusedMemory() const {
+    return kind_ == js::ContextKind::HelperThread && freeUnusedMemory;
+  }
 
   bool isMainThreadContext() const {
     return kind_ == js::ContextKind::MainThread;
@@ -470,7 +491,7 @@ struct JSContext : public JS::RootingContext,
   }
 
   /* Base address of the native stack for the current thread. */
-  const uintptr_t nativeStackBase;
+  uintptr_t nativeStackBase;
 
  public:
   /* If non-null, report JavaScript entry points to this monitor. */
@@ -524,6 +545,12 @@ struct JSContext : public JS::RootingContext,
    */
   js::ContextData<int32_t> suppressGC;
 
+  // Whether this thread is currently sweeping GC things.  This thread could
+  // be the main thread or a helper thread while the main thread is running
+  // the mutator.  This is used to assert that destruction of GCPtr only
+  // happens when we are sweeping.
+  js::ContextData<bool> gcSweeping;
+
 #ifdef DEBUG
   // Whether this thread is actively Ion compiling.
   js::ContextData<bool> ionCompiling;
@@ -532,17 +559,6 @@ struct JSContext : public JS::RootingContext,
   // GC could happen simultaneously. If this is true, this thread cannot use
   // any pointers into the nursery.
   js::ContextData<bool> ionCompilingSafeForMinorGC;
-
-  // Whether this thread is currently performing GC.  This thread could be the
-  // main thread or a helper thread while the main thread is running the
-  // collector.
-  js::ContextData<bool> performingGC;
-
-  // Whether this thread is currently sweeping GC things.  This thread could
-  // be the main thread or a helper thread while the main thread is running
-  // the mutator.  This is used to assert that destruction of GCPtr only
-  // happens when we are sweeping.
-  js::ContextData<bool> gcSweeping;
 
   // Whether this thread is currently manipulating possibly-gray GC things.
   js::ContextData<size_t> isTouchingGrayThings;
@@ -1308,29 +1324,26 @@ class MOZ_RAII AutoUnsafeCallWithABI {
 
 namespace gc {
 
-// In debug builds, set/unset the performing GC flag for the current thread.
-struct MOZ_RAII AutoSetThreadIsPerformingGC {
-#ifdef DEBUG
+// Set/unset the performing GC flag for the current thread.
+class MOZ_RAII AutoSetThreadIsPerformingGC {
+  JSContext* cx;
+
+ public:
   AutoSetThreadIsPerformingGC() : cx(TlsContext.get()) {
-    MOZ_ASSERT(!cx->performingGC);
-    cx->performingGC = true;
+    FreeOp* fop = cx->defaultFreeOp();
+    MOZ_ASSERT(!fop->isCollecting());
+    fop->isCollecting_ = true;
   }
 
   ~AutoSetThreadIsPerformingGC() {
-    MOZ_ASSERT(cx->performingGC);
-    cx->performingGC = false;
+    FreeOp* fop = cx->defaultFreeOp();
+    MOZ_ASSERT(fop->isCollecting());
+    fop->isCollecting_ = false;
   }
-
- private:
-  JSContext* cx;
-#else
-  AutoSetThreadIsPerformingGC() {}
-#endif
 };
 
 // In debug builds, set/reset the GC sweeping flag for the current thread.
 struct MOZ_RAII AutoSetThreadIsSweeping {
-#ifdef DEBUG
   AutoSetThreadIsSweeping() : cx(TlsContext.get()), prevState(cx->gcSweeping) {
     cx->gcSweeping = true;
   }
@@ -1340,9 +1353,6 @@ struct MOZ_RAII AutoSetThreadIsSweeping {
  private:
   JSContext* cx;
   bool prevState;
-#else
-  AutoSetThreadIsSweeping() {}
-#endif
 };
 
 }  // namespace gc

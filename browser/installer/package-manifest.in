@@ -331,10 +331,12 @@
 @RESPATH@/res/grabber.gif
 #ifdef XP_MACOSX
 @RESPATH@/res/cursors/*
+@RESPATH@/res/touchbar/*
 #endif
 @RESPATH@/res/fonts/*
 @RESPATH@/res/dtd/*
 @RESPATH@/res/language.properties
+@RESPATH@/res/locale/layout/HtmlForm.properties
 #ifdef XP_MACOSX
 @RESPATH@/res/MainMenu.nib/
 #endif

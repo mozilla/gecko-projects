@@ -149,6 +149,10 @@ struct SerialNumberRecord {
       return;
     }
 
+    if (!nsContentUtils::IsInitialized()) {
+      return;
+    }
+
     JSContext* cx = nsContentUtils::GetCurrentJSContext();
     if (!cx) {
       return;
@@ -489,7 +493,7 @@ static intptr_t GetSerialNumber(void* aPtr, bool aCreate) {
         "it.");
   }
 
-  auto record = entry.OrInsert([]() { return new SerialNumberRecord(); });
+  auto& record = entry.OrInsert([]() { return new SerialNumberRecord(); });
   WalkTheStackSavingLocations(record->allocationStack);
   if (gLogJSStacks) {
     record->SaveJSStack();

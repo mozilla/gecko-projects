@@ -672,6 +672,12 @@ static nsIFrame* GetFrameForChildrenOnlyTransformHint(nsIFrame* aFrame) {
 // It returns true when that succeeds, otherwise it posts a reflow request
 // and returns false.
 static bool RecomputePosition(nsIFrame* aFrame) {
+  // It's pointless to move around frames that have never been reflowed or
+  // are dirty (i.e. they will be reflowed).
+  if (aFrame->HasAnyStateBits(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY)) {
+    return true;
+  }
+
   // Don't process position changes on table frames, since we already handle
   // the dynamic position change on the table wrapper frame, and the
   // reflow-based fallback code path also ignores positions on inner table
@@ -690,9 +696,7 @@ static bool RecomputePosition(nsIFrame* aFrame) {
   // have a view somewhere in their descendants, because the corresponding view
   // needs to be repositioned properly as well.
   if (aFrame->HasView() ||
-      (aFrame->GetStateBits() & NS_FRAME_HAS_CHILD_WITH_VIEW)) {
-    StyleChangeReflow(aFrame, nsChangeHint_NeedReflow |
-                                  nsChangeHint_ReflowChangesSizeOrPosition);
+      aFrame->HasAnyStateBits(NS_FRAME_HAS_CHILD_WITH_VIEW)) {
     return false;
   }
 
@@ -701,16 +705,17 @@ static bool RecomputePosition(nsIFrame* aFrame) {
   if (aFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW)) {
     nsIFrame* ph = aFrame->GetPlaceholderFrame();
     if (ph && ph->HasAnyStateBits(PLACEHOLDER_STATICPOS_NEEDS_CSSALIGN)) {
-      StyleChangeReflow(aFrame, nsChangeHint_NeedReflow |
-                                    nsChangeHint_ReflowChangesSizeOrPosition);
       return false;
     }
   }
 
-  // It's pointless to move around frames that have never been reflowed or
-  // are dirty (i.e. they will be reflowed).
-  if (aFrame->HasAnyStateBits(NS_FRAME_FIRST_REFLOW | NS_FRAME_IS_DIRTY)) {
-    return true;
+  // If we need to reposition any descendant that depends on our static
+  // position, then we also can't take the optimized path.
+  //
+  // TODO(emilio): It may be worth trying to find them and try to call
+  // RecomputePosition on them too instead of disabling the optimization...
+  if (aFrame->DescendantMayDependOnItsStaticPosition()) {
+    return false;
   }
 
   aFrame->SchedulePaint();
@@ -887,8 +892,6 @@ static bool RecomputePosition(nsIFrame* aFrame) {
   }
 
   // Fall back to a reflow
-  StyleChangeReflow(aFrame, nsChangeHint_NeedReflow |
-                                nsChangeHint_ReflowChangesSizeOrPosition);
   return false;
 }
 
@@ -1689,6 +1692,9 @@ void RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList) {
         ActiveLayerTracker::NotifyOffsetRestyle(frame);
         // It is possible for this to fall back to a reflow
         if (!RecomputePosition(frame)) {
+          StyleChangeReflow(frame,
+                            nsChangeHint_NeedReflow |
+                                nsChangeHint_ReflowChangesSizeOrPosition);
           didReflowThisFrame = true;
         }
       }
@@ -2483,7 +2489,7 @@ static void UpdateBackdropIfNeeded(nsIFrame* aFrame, ServoStyleSet& aStyleSet,
   MOZ_ASSERT(backdropFrame->GetParent()->IsViewportFrame() ||
              backdropFrame->GetParent()->IsCanvasFrame());
   nsTArray<nsIFrame*> wrappersToRestyle;
-  nsTArray<nsIFrame*> anchorsToSuppress;
+  nsTArray<RefPtr<Element>> anchorsToSuppress;
   ServoRestyleState state(aStyleSet, aChangeList, wrappersToRestyle,
                           anchorsToSuppress);
   nsIFrame::UpdateStyleOfOwnedChildFrame(backdropFrame, newStyle, state);
@@ -2740,23 +2746,25 @@ bool RestyleManager::ProcessPostTraversal(Element* aElement,
   // XXXbholley: We should teach the frame constructor how to clear the dirty
   // descendants bit to avoid the traversal here.
   if (changeHint & nsChangeHint_ReconstructFrame) {
-    if (wasRestyled && styleFrame) {
-      auto* oldDisp = styleFrame->StyleDisplay();
+    if (wasRestyled) {
+      const bool wasAbsPos =
+        styleFrame && styleFrame->StyleDisplay()->IsAbsolutelyPositionedStyle();
       auto* newDisp = upToDateStyleIfRestyled->StyleDisplay();
       // https://drafts.csswg.org/css-scroll-anchoring/#suppression-triggers
       //
       // We need to do the position check here rather than in
       // DidSetComputedStyle because changing position reframes.
       //
-      // Don't suppress adjustments when going back to display: none, regardless
-      // of whether we're abspos changes.
+      // We suppress adjustments whenever we change from being display: none to
+      // be an abspos.
+      //
+      // Similarly, for other changes from abspos to non-abspos styles.
       //
       // TODO(emilio): I _think_ chrome won't suppress adjustments whenever
-      // `display` changes. But ICBW.
-      if (newDisp->mDisplay != StyleDisplay::None &&
-          oldDisp->IsAbsolutelyPositionedStyle() !=
-              newDisp->IsAbsolutelyPositionedStyle()) {
-        aRestyleState.AddPendingScrollAnchorSuppression(styleFrame);
+      // `display` changes. But that causes some infinite loops in cases like
+      // bug 1568778.
+      if (wasAbsPos != newDisp->IsAbsolutelyPositionedStyle()) {
+        aRestyleState.AddPendingScrollAnchorSuppression(aElement);
       }
     }
     ClearRestyleStateFromSubtree(aElement);
@@ -3057,14 +3065,13 @@ void RestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags) {
     nsStyleChangeList currentChanges;
     bool anyStyleChanged = false;
 
-    nsTArray<RefPtr<nsIContent>> anchorContentToSuppress;
-
     // Recreate styles , and queue up change hints (which also handle lazy frame
     // construction).
+    nsTArray<RefPtr<Element>> anchorsToSuppress;
+
     {
       AutoRestyleTimelineMarker marker(presContext->GetDocShell(), false);
       DocumentStyleRootIterator iter(doc->GetServoRestyleRoot());
-      nsTArray<nsIFrame*> anchorsToSuppress;
       while (Element* root = iter.GetNextStyleRoot()) {
         nsTArray<nsIFrame*> wrappersToRestyle;
         ServoRestyleState state(*styleSet, currentChanges, wrappersToRestyle,
@@ -3076,13 +3083,12 @@ void RestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags) {
       // We want to suppress adjustments the current (before-change) scroll
       // anchor container now, and save a reference to the content node so that
       // we can suppress them in the after-change scroll anchor .
-      anchorContentToSuppress.SetCapacity(anchorsToSuppress.Length());
-      for (nsIFrame* frame : anchorsToSuppress) {
-        MOZ_ASSERT(frame->GetContent());
-        if (auto* container = ScrollAnchorContainer::FindFor(frame)) {
-          container->SuppressAdjustments();
+      for (Element* element : anchorsToSuppress) {
+        if (nsIFrame* frame = element->GetPrimaryFrame()) {
+          if (auto* container = ScrollAnchorContainer::FindFor(frame)) {
+            container->SuppressAdjustments();
+          }
         }
-        anchorContentToSuppress.AppendElement(frame->GetContent());
       }
     }
 
@@ -3120,8 +3126,8 @@ void RestyleManager::DoProcessPendingRestyles(ServoTraversalFlags aFlags) {
 
     // Suppress adjustments in the after-change scroll anchors if needed, now
     // that we're done reframing everything.
-    for (nsIContent* content : anchorContentToSuppress) {
-      if (nsIFrame* frame = content->GetPrimaryFrame()) {
+    for (Element* element : anchorsToSuppress) {
+      if (nsIFrame* frame = element->GetPrimaryFrame()) {
         if (auto* container = ScrollAnchorContainer::FindFor(frame)) {
           container->SuppressAdjustments();
         }

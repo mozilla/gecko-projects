@@ -1066,7 +1066,6 @@ pref("dom.require_user_interaction_for_beforeunload", true);
 pref("dom.popup_maximum",                           20);
 pref("dom.popup_allowed_events", "change click dblclick auxclick mouseup pointerup notificationclick reset submit touchend contextmenu");
 
-pref("dom.disable_open_click_delay", 1000);
 pref("dom.serviceWorkers.disable_open_click_delay", 1000);
 
 pref("dom.storage.enabled", true);
@@ -1083,34 +1082,6 @@ pref("dom.storage.snapshot_reusing", true);
 pref("dom.storage.client_validation", true);
 
 pref("dom.send_after_paint_to_content", false);
-
-// Timeout clamp in ms for timeouts we clamp
-pref("dom.min_timeout_value", 4);
-// And for background windows
-pref("dom.min_background_timeout_value", 1000);
-// Timeout clamp in ms for tracking timeouts we clamp
-// Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
-pref("dom.min_tracking_timeout_value", 4);
-// And for background windows
-// Note that this requires the privacy.trackingprotection.annotate_channels pref to be on in order to have any effect.
-pref("dom.min_tracking_background_timeout_value", 4);
-// Delay in ms from document load until we start throttling background timeouts.
-pref("dom.timeout.throttling_delay", 30000);
-
-// Time (in ms) that it takes to regenerate 1ms.
-pref("dom.timeout.background_budget_regeneration_rate", 100);
-// Maximum value (in ms) for the background budget. Only valid for
-// values greater than 0.
-pref("dom.timeout.background_throttling_max_budget", 50);
-// Time (in ms) that it takes to regenerate 1ms.
-pref("dom.timeout.foreground_budget_regeneration_rate", 1);
-// Maximum value (in ms) for the background budget. Only valid for
-// values greater than 0.
-pref("dom.timeout.foreground_throttling_max_budget", -1);
-// The maximum amount a timeout can be delayed by budget throttling
-pref("dom.timeout.budget_throttling_max_delay", 15000);
-// Turn on budget throttling by default
-pref("dom.timeout.enable_budget_timer_throttling", true);
 
 // Don't use new input types
 pref("dom.experimental_forms", false);
@@ -1519,12 +1490,8 @@ pref("network.http.referer.defaultPolicy", 3);
 // default cookie policy is set to reject third-party trackers;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
-#ifdef NIGHTLY_BUILD
-// On Nightly, trim referrers from trackers to origins.
+// Trim referrers from trackers to origins by default.
 pref("network.http.referer.defaultPolicy.trackers", 2);
-#else
-pref("network.http.referer.defaultPolicy.trackers", 3);
-#endif
 // Set the Private Browsing Default Referrer Policy;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
@@ -1534,8 +1501,8 @@ pref("network.http.referer.defaultPolicy.pbmode", 2);
 // trackers;
 // to be used unless overriden by the site;
 // values are identical to defaultPolicy above
-// No need to change this pref for Nightly only since in private windows we
-// already trim all referrers to origin only.
+// No need to change this pref for trimming referrers from trackers since in
+// private windows we already trim all referrers to origin only.
 pref("network.http.referer.defaultPolicy.trackers.pbmode", 2);
 // false=real referer, true=spoof referer (use target URI as referer)
 pref("network.http.referer.spoofSource", false);
@@ -2115,7 +2082,6 @@ pref("network.http.tailing.total-max", 45000);
 // Enable or disable the whole fix from bug 1563538
 pref("network.http.spdy.bug1563538", true);
 pref("network.http.spdy.bug1563695", true);
-pref("network.http.spdy.bug1562315", true);
 pref("network.http.spdy.bug1556491", true);
 
 pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
@@ -2449,7 +2415,7 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,devtools-toolbox,addons,config,downloads,preferences,sync-log");
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,config,downloads,preferences,sync-log");
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
@@ -2472,15 +2438,6 @@ pref("security.mixed_content.block_object_subrequest", false);
 
 // Sub-resource integrity
 pref("security.sri.enable", true);
-
-// Block scripts with wrong MIME type such as image/ or video/.
-pref("security.block_script_with_wrong_mime", true);
-
-// Block scripts with wrong MIME type when loading via importScripts() in workers.
-pref("security.block_importScripts_with_wrong_mime", true);
-
-// Block Worker scripts with wrong MIME type.
-pref("security.block_Worker_with_wrong_mime", true);
 
 // OCSP must-staple
 pref("security.ssl.enable_ocsp_must_staple", true);
@@ -2834,10 +2791,6 @@ pref("layout.css.scroll-snap.prediction-max-velocity", 2000);
 // best suited for this position is selected, enabling the user to perform fling
 // gestures.
 pref("layout.css.scroll-snap.prediction-sensitivity", "0.750");
-
-// Is the paint-order property supported for HTML text?
-// (It is always supported for SVG.)
-pref("layout.css.paint-order.enabled", true);
 
 // Is layout of CSS outline-style:auto enabled?
 pref("layout.css.outline-style-auto.enabled", false);
@@ -5478,10 +5431,6 @@ pref("browser.sanitizer.loglevel", "Warn");
 // To disable blocking of auth prompts, set the limit to -1.
 pref("prompts.authentication_dialog_abuse_limit", 2);
 
-// Maximum amount of time in milliseconds consecutive setTimeout()/setInterval()
-// callback are allowed to run before yielding the event loop.
-pref("dom.timeout.max_consecutive_callbacks_ms", 4);
-
 // Payment Request API preferences
 pref("dom.payments.loglevel", "Warn");
 pref("dom.payments.defaults.saveCreditCard", false);
@@ -5499,9 +5448,6 @@ pref("toolkit.telemetry.overrideUpdateChannel", "nightly-asan");
 // on Windows 7.
 pref("layers.mlgpu.enable-on-windows7", true);
 #endif
-
-// Enable lowercased response header name
-pref("dom.xhr.lowercase_header.enabled", true);
 
 // Control whether clients.openWindow() opens windows in the same process
 // that called the API vs following our normal multi-process selection

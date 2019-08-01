@@ -29,6 +29,11 @@ ChromeUtils.defineModuleGetter(
   "Services",
   "resource://gre/modules/Services.jsm"
 );
+ChromeUtils.defineModuleGetter(
+  this,
+  "UIState",
+  "resource://services-sync/UIState.jsm"
+);
 
 XPCOMUtils.defineLazyGetter(this, "log", () => {
   return LoginHelper.createLogger("AboutLoginsParent");
@@ -42,6 +47,7 @@ XPCOMUtils.defineLazyPreferenceGetter(
 
 const ABOUT_LOGINS_ORIGIN = "about:logins";
 const MASTER_PASSWORD_NOTIFICATION_ID = "master-password-login-required";
+const PASSWORD_SYNC_NOTIFICATION_ID = "enable-password-sync";
 
 // about:logins will always use the privileged content process,
 // even if it is disabled for other consumers such as about:newtab.
@@ -108,6 +114,16 @@ var AboutLoginsParent = {
       case "AboutLogins:DeleteLogin": {
         let login = LoginHelper.vanillaObjectToLogin(message.data.login);
         Services.logins.removeLogin(login);
+        break;
+      }
+      case "AboutLogins:SyncEnable": {
+        message.target.ownerGlobal.gSync.openFxAEmailFirstPage(
+          "password-manager"
+        );
+        break;
+      }
+      case "AboutLogins:SyncOptions": {
+        message.target.ownerGlobal.gSync.openFxAManagePage("password-manager");
         break;
       }
       case "AboutLogins:Import": {
@@ -180,6 +196,50 @@ var AboutLoginsParent = {
         });
         break;
       }
+      case "AboutLogins:MasterPasswordRequest": {
+        // This doesn't harm if passwords are not encrypted
+        let tokendb = Cc["@mozilla.org/security/pk11tokendb;1"].createInstance(
+          Ci.nsIPK11TokenDB
+        );
+        let token = tokendb.getInternalKeyToken();
+
+        let messageManager = message.target.messageManager;
+
+        // If there is no master password, return as-if authentication succeeded.
+        if (token.checkPassword("")) {
+          messageManager.sendAsyncMessage(
+            "AboutLogins:MasterPasswordResponse",
+            true
+          );
+          return;
+        }
+
+        // If a master password prompt is already open, just exit early and return false.
+        // The user can re-trigger it after responding to the already open dialog.
+        if (Services.logins.uiBusy) {
+          messageManager.sendAsyncMessage(
+            "AboutLogins:MasterPasswordResponse",
+            false
+          );
+          return;
+        }
+
+        // So there's a master password. But since checkPassword didn't succeed, we're logged out (per nsIPK11Token.idl).
+        try {
+          // Relogin and ask for the master password.
+          token.login(true); // 'true' means always prompt for token password. User will be prompted until
+          // clicking 'Cancel' or entering the correct password.
+        } catch (e) {
+          // An exception will be thrown if the user cancels the login prompt dialog.
+          // User is also logged out of Software Security Device.
+        }
+
+        messageManager.sendAsyncMessage(
+          "AboutLogins:MasterPasswordResponse",
+          token.isLoggedIn()
+        );
+        break;
+      }
       case "AboutLogins:Subscribe": {
         if (
           !ChromeUtils.nondeterministicGetWeakSetKeys(this._subscribers).length
@@ -187,6 +247,7 @@ var AboutLoginsParent = {
           Services.obs.addObserver(this, "passwordmgr-crypto-login");
           Services.obs.addObserver(this, "passwordmgr-crypto-loginCanceled");
           Services.obs.addObserver(this, "passwordmgr-storage-changed");
+          Services.obs.addObserver(this, UIState.ON_UPDATE);
         }
         this._subscribers.add(message.target);
 
@@ -195,6 +256,10 @@ var AboutLoginsParent = {
         const logins = await this.getAllLogins();
         try {
           messageManager.sendAsyncMessage("AboutLogins:AllLogins", logins);
+
+          let syncState = this.getSyncState();
+          messageManager.sendAsyncMessage("AboutLogins:SyncState", syncState);
+          this.updatePasswordSyncNotificationState();
 
           if (!BREACH_ALERTS_ENABLED) {
             return;
@@ -254,11 +319,12 @@ var AboutLoginsParent = {
       Services.obs.removeObserver(this, "passwordmgr-crypto-login");
       Services.obs.removeObserver(this, "passwordmgr-crypto-loginCanceled");
       Services.obs.removeObserver(this, "passwordmgr-storage-changed");
+      Services.obs.removeObserver(this, UIState.ON_UPDATE);
       return;
     }
 
     if (topic == "passwordmgr-crypto-login") {
-      this.removeMasterPasswordLoginNotifications();
+      this.removeNotifications(MASTER_PASSWORD_NOTIFICATION_ID);
       this.messageSubscribers(
         "AboutLogins:AllLogins",
         await this.getAllLogins()
@@ -268,6 +334,11 @@ var AboutLoginsParent = {
 
     if (topic == "passwordmgr-crypto-loginCanceled") {
       this.showMasterPasswordLoginNotifications();
+      return;
+    }
+
+    if (topic == UIState.ON_UPDATE) {
+      this.messageSubscribers("AboutLogins:SyncState", this.getSyncState());
       return;
     }
 
@@ -302,59 +373,92 @@ var AboutLoginsParent = {
     }
   },
 
-  async showMasterPasswordLoginNotifications() {
+  showMasterPasswordLoginNotifications() {
+    this.showNotifications({
+      id: MASTER_PASSWORD_NOTIFICATION_ID,
+      priority: "PRIORITY_WARNING_MEDIUM",
+      iconURL: "chrome://browser/skin/login.svg",
+      messageId: "master-password-notification-message",
+      buttonId: "master-password-reload-button",
+      onClick(browser) {
+        browser.reload();
+      },
+    });
+  },
+
+  showPasswordSyncNotifications() {
+    this.showNotifications({
+      id: PASSWORD_SYNC_NOTIFICATION_ID,
+      priority: "PRIORITY_INFO_MEDIUM",
+      iconURL: "chrome://browser/skin/login.svg",
+      messageId: "enable-password-sync-notification-message",
+      buttonId: "enable-password-sync-preferences-button",
+      onClick(browser) {
+        browser.ownerGlobal.gSync.openFxAManagePage("password-manager");
+      },
+      extraFtl: ["branding/brand.ftl", "browser/branding/sync-brand.ftl"],
+    });
+  },
+
+  showNotifications({
+    id,
+    priority,
+    iconURL,
+    messageId,
+    buttonId,
+    onClick,
+    extraFtl = [],
+  } = {}) {
     for (let subscriber of this._subscriberIterator()) {
       let MozXULElement = subscriber.ownerGlobal.MozXULElement;
       MozXULElement.insertFTLIfNeeded("browser/aboutLogins.ftl");
+      for (let ftl of extraFtl) {
+        MozXULElement.insertFTLIfNeeded(ftl);
+      }
 
       // If there's already an existing notification bar, don't do anything.
       let { gBrowser } = subscriber.ownerGlobal;
       let browser = subscriber;
       let notificationBox = gBrowser.getNotificationBox(browser);
-      let notification = notificationBox.getNotificationWithValue(
-        MASTER_PASSWORD_NOTIFICATION_ID
-      );
+      let notification = notificationBox.getNotificationWithValue(id);
       if (notification) {
         continue;
       }
 
       // Configure the notification bar
-      let priority = notificationBox.PRIORITY_WARNING_MEDIUM;
-      let iconURL = "chrome://browser/skin/login.svg";
-
       let doc = subscriber.ownerDocument;
       let messageFragment = doc.createDocumentFragment();
       let message = doc.createElement("span");
-      doc.l10n.setAttributes(message, "master-password-notification-message");
+      doc.l10n.setAttributes(message, messageId);
       messageFragment.appendChild(message);
 
       let buttons = [
         {
-          "l10n-id": "master-password-reload-button",
+          "l10n-id": buttonId,
           popup: null,
-          callback() {
-            browser.reload();
+          callback: () => {
+            onClick(browser);
           },
         },
       ];
 
       notification = notificationBox.appendNotification(
         messageFragment,
-        MASTER_PASSWORD_NOTIFICATION_ID,
+        id,
         iconURL,
-        priority,
+        notificationBox[priority],
         buttons
       );
     }
   },
 
-  removeMasterPasswordLoginNotifications() {
+  removeNotifications(notificationId) {
     for (let subscriber of this._subscriberIterator()) {
       let { gBrowser } = subscriber.ownerGlobal;
       let browser = subscriber;
       let notificationBox = gBrowser.getNotificationBox(browser);
       let notification = notificationBox.getNotificationWithValue(
-        MASTER_PASSWORD_NOTIFICATION_ID
+        notificationId
       );
       if (!notification) {
         continue;
@@ -412,4 +516,37 @@ var AboutLoginsParent = {
       throw e;
     }
   },
+
+  getSyncState() {
+    const state = UIState.get();
+    // As long as Sync is configured, about:logins will treat it as
+    // authenticated. More diagnostics and error states can be handled
+    // by other more Sync-specific pages.
+    const loggedIn = state.status != UIState.STATUS_NOT_CONFIGURED;
+    return {
+      loggedIn,
+      email: state.email,
+      avatarURL: state.avatarURL,
+    };
+  },
+
+  updatePasswordSyncNotificationState() {
+    const state = this.getSyncState();
+    // Need to explicitly call the getter on lazy preference getters
+    // to activate their observer.
+    let passwordSyncEnabled = PASSWORD_SYNC_ENABLED;
+    if (state.loggedIn && !passwordSyncEnabled) {
+      this.showPasswordSyncNotifications();
+      return;
+    }
+    this.removeNotifications(PASSWORD_SYNC_NOTIFICATION_ID);
+  },
 };
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "PASSWORD_SYNC_ENABLED",
+  "services.sync.engine.passwords",
+  false,
+  AboutLoginsParent.updatePasswordSyncNotificationState.bind(AboutLoginsParent)
+);

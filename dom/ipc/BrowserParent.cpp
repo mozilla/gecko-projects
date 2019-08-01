@@ -1266,18 +1266,11 @@ IPCResult BrowserParent::RecvPBrowserBridgeConstructor(
   return IPC_OK();
 }
 
-PBrowserBridgeParent* BrowserParent::AllocPBrowserBridgeParent(
+already_AddRefed<PBrowserBridgeParent> BrowserParent::AllocPBrowserBridgeParent(
     const nsString& aName, const nsString& aRemoteType,
     BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags,
     const TabId& aTabId) {
-  // Reference freed in DeallocPBrowserBridgeParent.
-  return do_AddRef(new BrowserBridgeParent()).take();
-}
-
-bool BrowserParent::DeallocPBrowserBridgeParent(PBrowserBridgeParent* aActor) {
-  // Free reference from AllocPBrowserBridgeParent.
-  static_cast<BrowserBridgeParent*>(aActor)->Release();
-  return true;
+  return do_AddRef(new BrowserBridgeParent());
 }
 
 void BrowserParent::SendMouseEvent(const nsAString& aType, float aX, float aY,
@@ -2494,6 +2487,8 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnLocationChange(
         PrincipalInfoToPrincipal(aLocationChangeData->contentPrincipal());
     nsCOMPtr<nsIPrincipal> contentStoragePrincipal = PrincipalInfoToPrincipal(
         aLocationChangeData->contentStoragePrincipal());
+    nsCOMPtr<nsIReferrerInfo> referrerInfo =
+        aLocationChangeData->referrerInfo();
 
     Unused << browser->SetIsNavigating(aLocationChangeData->isNavigating());
     Unused << browser->UpdateForLocationChange(
@@ -2501,7 +2496,7 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnLocationChange(
         aLocationChangeData->mayEnableCharacterEncodingMenu(),
         aLocationChangeData->charsetAutodetected(),
         aLocationChangeData->documentURI(), aLocationChangeData->title(),
-        contentPrincipal, contentStoragePrincipal, csp,
+        contentPrincipal, contentStoragePrincipal, csp, referrerInfo,
         aLocationChangeData->isSyntheticDocument(),
         aWebProgressData->innerDOMWindowID(),
         aLocationChangeData->requestContextID().isSome(),

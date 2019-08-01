@@ -1109,6 +1109,12 @@
   value: false
   mirror: always
 
+# Disable capture attribute for input elements; only supported on GeckoView.
+- name: dom.capture.enabled
+  type: bool
+  value: false
+  mirror: always
+
 # Whether Mozilla specific "text" event should be dispatched only in the
 # system group or not in content.
 - name: dom.compositionevent.text.dispatch_only_system_group_in_content
@@ -1127,6 +1133,13 @@
 - name: dom.dialog_element.enabled
   type: bool
   value: false
+  mirror: always
+
+# Only propagate the open window click permission if the setTimeout() is equal
+# to or less than this value.
+- name: dom.disable_open_click_delay
+  type: int32_t
+  value: 1000
   mirror: always
 
 - name: dom.disable_open_during_load
@@ -1421,6 +1434,18 @@
 - name: dom.metaElement.setCookie.allowed
   type: bool
   value: false
+  mirror: always
+
+# Timeout clamp in ms for timeouts we clamp.
+- name: dom.min_timeout_value
+  type: int32_t
+  value: 4
+  mirror: always
+
+# Timeout clamp in ms for background windows.
+- name: dom.min_background_timeout_value
+  type: int32_t
+  value: 1000
   mirror: always
 
 # Is support for module scripts (<script type="module">) enabled for content?
@@ -1800,6 +1825,44 @@
   value: false
   mirror: always
 
+# Time (in ms) that it takes to regenerate 1ms.
+- name: dom.timeout.background_budget_regeneration_rate
+  type: int32_t
+  value: 100
+  mirror: always
+
+# Time (in ms) that it takes to regenerate 1ms.
+- name: dom.timeout.foreground_budget_regeneration_rate
+  type: int32_t
+  value: 1
+  mirror: always
+
+# Maximum value (in ms) for the background budget. Only valid for
+# values greater than 0.
+- name: dom.timeout.background_throttling_max_budget
+  type: int32_t
+  value: 50
+  mirror: always
+
+# Maximum value (in ms) for the foreground budget. Only valid for
+# values greater than 0.
+- name: dom.timeout.foreground_throttling_max_budget
+  type: int32_t
+  value: -1
+  mirror: always
+
+# The maximum amount a timeout can be delayed by budget throttling.
+- name: dom.timeout.budget_throttling_max_delay
+  type: int32_t
+  value: 15000
+  mirror: always
+
+# Turn on budget throttling by default.
+- name: dom.timeout.enable_budget_timer_throttling
+  type: bool
+  value: true
+  mirror: always
+
 # Should we defer timeouts and intervals while loading a page.  Released
 # on Idle or when the page is loaded.
 - name: dom.timeout.defer_during_load
@@ -1807,10 +1870,23 @@
   value: true
   mirror: always
 
+# Maximum amount of time in milliseconds consecutive setTimeout()/setInterval()
+# callback are allowed to run before yielding the event loop.
+- name: dom.timeout.max_consecutive_callbacks_ms
+  type: uint32_t
+  value: 4
+  mirror: always
+
 # Maximum deferral time for setTimeout/Interval in milliseconds
 - name: dom.timeout.max_idle_defer_ms
   type: uint32_t
   value: 10*1000
+  mirror: always
+
+# Delay in ms from document load until we start throttling background timeouts.
+- name: dom.timeout.throttling_delay
+  type: int32_t
+  value: 30000
   mirror: always
 
 # UDPSocket API
@@ -1974,6 +2050,13 @@
 - name: dom.maxtouchpoints.testing.value
   type: int32_t
   value: -1
+  mirror: always
+
+# If the pref is set to true, pointer events are enabled on GeckoView, but only
+# in the case it is using separate child processes.
+- name: dom.w3c_pointer_events.multiprocess.android.enabled
+  type: bool
+  value: true
   mirror: always
 
 # Is support for Navigator.webdriver enabled?
@@ -3898,11 +3981,6 @@
   value: true
   mirror: always
 
-- name: layout.css.paint-order.enabled
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-
 # Is parallel CSS parsing enabled?
 - name: layout.css.parsing.parallel
   type: bool
@@ -5449,6 +5527,13 @@
   value: false
   mirror: always
 
+# Consider socialtracking annotation as trackers (see ETP)
+- name: privacy.socialtracking.block_cookies.enabled
+  type: bool
+  value: false
+  mirror: always
+
+
 # Whether origin telemetry should be enabled
 # NOTE: if telemetry.origin_telemetry_test_mode.enabled is enabled, this pref
 #       won't have any effect.
@@ -5477,11 +5562,6 @@
   type: bool
   value: @IS_NIGHTLY_BUILD@
   mirror: always
-
-- name: privacy.resistFingerprinting
-  type: bool
-  value: false
-  mirror: never
 
 # Anti-tracking permission expiration
 - name: privacy.restrict3rdpartystorage.expiration
@@ -5592,6 +5672,24 @@
 #else
   value: true
 #endif
+  mirror: always
+
+# Block scripts with _some_ wrong MIME types such as image/, video/ or text/csv
+- name: security.block_script_with_wrong_mime
+  type: bool
+  value: true
+  mirror: always
+
+# Block scripts with wrong MIME type when loading via importScripts().
+- name: security.block_importScripts_with_wrong_mime
+  type: bool
+  value: true
+  mirror: always
+
+# Block Worker/SharedWorker scripts with wrong MIME type.
+- name: security.block_Worker_with_wrong_mime
+  type: bool
+  value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: always
 
 #---------------------------------------------------------------------------

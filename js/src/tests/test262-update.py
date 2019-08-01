@@ -30,8 +30,6 @@ UNSUPPORTED_FEATURES = set([
     "regexp-lookbehind",
     "regexp-named-groups",
     "regexp-unicode-property-escapes",
-    "Intl.Locale",
-    "global",
     "export-star-as-namespace-from-module",
     "Intl.DateTimeFormat-quarter",
     "Intl.DateTimeFormat-datetimestyle",
@@ -39,20 +37,18 @@ UNSUPPORTED_FEATURES = set([
     "Intl.DateTimeFormat-formatRange",
     "Intl.ListFormat",
     "Intl.Segmenter",
-    "Promise.allSettled",
+    "WeakRef",
+    "FinalizationGroup",
 ])
 FEATURE_CHECK_NEEDED = {
     "Atomics": "!this.hasOwnProperty('Atomics')",
-    "BigInt": "!this.hasOwnProperty('BigInt')",
     "SharedArrayBuffer": "!this.hasOwnProperty('SharedArrayBuffer')",
-    # Syntax is a bit weird, because this string cannot have spaces in it
-    "class-fields-public":
-        "(function(){try{eval('c=class{x;}');return(false);}catch{return(true);}})()",
     "dynamic-import": "!xulRuntime.shell",
 }
 RELEASE_OR_BETA = set([
     "Intl.NumberFormat-unified",
     "Intl.DateTimeFormat-fractionalSecondDigits",
+    "Promise.allSettled",
 ])
 
 
@@ -410,6 +406,9 @@ def process_test262(test262Dir, test262OutDir, strictTests, externManifests):
     explicitIncludes[os.path.join("built-ins", "TypedArray")] = ["byteConversionValues.js",
                                                                  "detachArrayBuffer.js", "nans.js"]
     explicitIncludes[os.path.join("built-ins", "TypedArrays")] = ["detachArrayBuffer.js"]
+
+    # Intl.Locale isn't yet enabled by default.
+    localIncludesMap[os.path.join("intl402")] = ["test262-intl-locale.js"]
 
     # Process all test directories recursively.
     for (dirPath, dirNames, fileNames) in os.walk(testDir):

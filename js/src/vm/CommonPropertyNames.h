@@ -171,8 +171,7 @@
   MACRO(forEach, forEach, "forEach")                                           \
   MACRO(format, format, "format")                                              \
   MACRO(fraction, fraction, "fraction")                                        \
-  MACRO(fractionalSecondDigits, fractionalSecondDigits,                        \
-        "fractionalSecondDigits")                                              \
+  MACRO(fractionalSecond, fractionalSecond, "fractionalSecond")                \
   MACRO(frame, frame, "frame")                                                 \
   MACRO(from, from, "from")                                                    \
   MACRO(fulfilled, fulfilled, "fulfilled")                                     \
@@ -222,6 +221,7 @@
   MACRO(InitializeCollator, InitializeCollator, "InitializeCollator")          \
   MACRO(InitializeDateTimeFormat, InitializeDateTimeFormat,                    \
         "InitializeDateTimeFormat")                                            \
+  MACRO(InitializeLocale, InitializeLocale, "InitializeLocale")                \
   MACRO(InitializeNumberFormat, InitializeNumberFormat,                        \
         "InitializeNumberFormat")                                              \
   MACRO(InitializePluralRules, InitializePluralRules, "InitializePluralRules") \
@@ -262,6 +262,7 @@
   MACRO(lineNumber, lineNumber, "lineNumber")                                  \
   MACRO(literal, literal, "literal")                                           \
   MACRO(loc, loc, "loc")                                                       \
+  MACRO(Locale, Locale, "Locale")                                              \
   MACRO(locale, locale, "locale")                                              \
   MACRO(lookupGetter, lookupGetter, "__lookupGetter__")                        \
   MACRO(lookupSetter, lookupSetter, "__lookupSetter__")                        \

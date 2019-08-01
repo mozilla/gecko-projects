@@ -139,6 +139,7 @@ IonBuilder::IonBuilder(JSContext* analysisContext, CompileRealm* realm,
       analysisContext(analysisContext),
       baselineFrame_(baselineFrame),
       constraints_(constraints),
+      tiOracle_(this, constraints),
       thisTypes(nullptr),
       argTypes(nullptr),
       typeArray(nullptr),
@@ -1142,6 +1143,7 @@ AbortReasonOr<Ok> IonBuilder::buildInline(IonBuilder* callerBuilder,
 void IonBuilder::runTask() {
   // This is the entry point when ion compiles are run offthread.
   JSRuntime* rt = script()->runtimeFromAnyThread();
+  AutoSetHelperThreadContext usesContext;
 
   TraceLoggerThread* logger = TraceLoggerForCurrentThread();
   TraceLoggerEvent event(TraceLogger_AnnotateScripts, script());
@@ -4024,7 +4026,7 @@ class AutoAccumulateReturns {
 IonBuilder::InliningResult IonBuilder::inlineScriptedCall(CallInfo& callInfo,
                                                           JSFunction* target) {
   MOZ_ASSERT(target->hasScript());
-  MOZ_ASSERT(IsIonInlinablePC(pc));
+  MOZ_ASSERT(IsIonInlinableOp(JSOp(*pc)));
 
   MBasicBlock::BackupPoint backup(current);
   if (!backup.init(alloc())) {
@@ -4895,7 +4897,7 @@ AbortReasonOr<Ok> IonBuilder::inlineCalls(CallInfo& callInfo,
                                           BoolVector& choiceSet,
                                           MGetPropertyCache* maybeCache) {
   // Only handle polymorphic inlining.
-  MOZ_ASSERT(IsIonInlinablePC(pc));
+  MOZ_ASSERT(IsIonInlinableOp(JSOp(*pc)));
   MOZ_ASSERT(choiceSet.length() == targets.length());
   MOZ_ASSERT_IF(!maybeCache, targets.length() >= 2);
   MOZ_ASSERT_IF(maybeCache, targets.length() >= 1);

@@ -14,6 +14,14 @@
   --popup-width: 33rem;
 }
 
+#identity-popup,
+#protections-popup {
+  /* Set default fill for icons in the identity popup.
+     Individual icons can override this. */
+  fill: currentColor;
+  fill-opacity: .6;
+}
+
 /* This is used by screenshots tests to hide intermittently different
  * identity popup shadows (see bug 1425253). */
 #identity-popup.no-shadow {
@@ -63,15 +71,6 @@
    above selectors (see Bug 1194258) */
 #identity-popup [hidden] {
   display: none !important;
-}
-
-#identity-popup > .panel-arrowcontainer > .panel-arrowcontent,
-#protections-popup > .panel-arrowcontainer > .panel-arrowcontent {
-  padding: 0;
-  /* Set default fill for icons in the identity popup.
-     Individual icons can override this. */
-  fill: currentColor;
-  fill-opacity: .6;
 }
 
 #identity-popup-mainView {
@@ -412,11 +411,17 @@ description#identity-popup-content-verifier,
 #identity-popup-breakageReportView-collection-url,
 #protections-popup-sendReportView-collection-url {
   font: inherit;
+  -moz-appearance: none;
+  border: none;
 }
 
 #identity-popup-breakageReportView-collection-comments,
 #protections-popup-sendReportView-collection-comments {
   height: 120px;
+}
+
+#protections-popup-sendReportView label {
+  margin-inline-start: 0;
 }
 
 .protections-popup-category {
@@ -451,6 +456,7 @@ description#identity-popup-content-verifier,
 
 /* This subview could get filled with a lot of trackers, set a maximum size
  * and allow it to scroll vertically.*/
+#protections-popup-socialblockView,
 #protections-popup-cookiesView,
 #protections-popup-trackersView {
   max-height: 600px;
@@ -516,6 +522,7 @@ description#identity-popup-content-verifier,
   margin-inline-end: 2px;
 }
 
+.protections-popup-socialblockView-icon,
 .protections-popup-fingerprintersView-icon,
 .protections-popup-cryptominersView-icon,
 .protections-popup-trackersView-icon,
@@ -530,6 +537,14 @@ description#identity-popup-content-verifier,
 
 .protections-popup-trackersView-icon.allowed {
   list-style-image: url(chrome://browser/skin/controlcenter/trackers.svg);
+}
+
+.protections-popup-socialblockView-icon {
+  list-style-image: url(chrome://browser/skin/controlcenter/socialblock-disabled.svg);
+}
+
+.protections-popup-socialblockView-icon.allowed {
+  list-style-image: url(chrome://browser/skin/controlcenter/socialblock.svg);
 }
 
 .protections-popup-cookiesView-icon {
@@ -591,6 +606,10 @@ description#identity-popup-content-verifier,
 
 .tracking-protection-icon {
   list-style-image: url(chrome://browser/skin/controlcenter/trackers.svg);
+}
+
+.socialblock-icon {
+  list-style-image: url(chrome://browser/skin/controlcenter/socialblock.svg);
 }
 
 .thirdpartycookies-icon {
@@ -922,4 +941,12 @@ description#identity-popup-content-verifier,
 #protections-popup-tp-switch[showdotindicator]:-moz-locale-dir(rtl)::after {
   left: unset;
   right: calc(1em + 20px);
+}
+
+#protections-popup-socialblockView-heading {
+  border-bottom: 1px solid var(--panel-separator-color);
+}
+
+#protections-popup-socialblockView-heading > description {
+  margin: 10px 24px;
 }

@@ -6,8 +6,6 @@
 
 #include "gc/Zone-inl.h"
 
-#include "jsutil.h"
-
 #include "gc/FreeOp.h"
 #include "gc/Policy.h"
 #include "gc/PublicIterators.h"
@@ -36,7 +34,7 @@ ZoneAllocator::ZoneAllocator(JSRuntime* rt)
       zoneSize(&rt->gc.heapSize),
       gcMallocBytes(nullptr) {
   AutoLockGC lock(rt);
-  updateAllGCThresholds(rt->gc, GC_NORMAL, lock);
+  updateGCThresholds(rt->gc, GC_NORMAL, lock);
   setGCMaxMallocBytes(rt->gc.tunables.maxMallocBytes(), lock);
   jitCodeCounter.setMax(jit::MaxCodeBytesPerProcess * 0.8, lock);
 }
@@ -57,31 +55,44 @@ void ZoneAllocator::fixupAfterMovingGC() {
 #endif
 }
 
-void js::ZoneAllocator::updateAllGCMallocCountersOnGCStart() {
+void js::ZoneAllocator::updateMemoryCountersOnGCStart() {
+  zoneSize.updateOnGCStart();
+  gcMallocBytes.updateOnGCStart();
   gcMallocCounter.updateOnGCStart();
   jitCodeCounter.updateOnGCStart();
 }
 
-void js::ZoneAllocator::updateAllGCMallocCountersOnGCEnd(
+void js::ZoneAllocator::updateMemoryCountersOnGCEnd(
     const js::AutoLockGC& lock) {
   auto& gc = runtimeFromAnyThread()->gc;
   gcMallocCounter.updateOnGCEnd(gc.tunables, lock);
   jitCodeCounter.updateOnGCEnd(gc.tunables, lock);
 }
 
-void js::ZoneAllocator::updateAllGCThresholds(GCRuntime& gc,
-                                              JSGCInvocationKind invocationKind,
-                                              const js::AutoLockGC& lock) {
-  threshold.updateAfterGC(zoneSize.gcBytes(), invocationKind, gc.tunables,
+void js::ZoneAllocator::updateGCThresholds(GCRuntime& gc,
+                                           JSGCInvocationKind invocationKind,
+                                           const js::AutoLockGC& lock) {
+  // This is called repeatedly during a GC to update thresholds as memory is
+  // freed.
+  threshold.updateAfterGC(zoneSize.retainedBytes(), invocationKind, gc.tunables,
                           gc.schedulingState, lock);
-  gcMallocThreshold.updateAfterGC(gcMallocBytes.gcBytes(),
-                                  gc.tunables.maxMallocBytes(), lock);
+  gcMallocThreshold.updateAfterGC(gcMallocBytes.retainedBytes(),
+                                  gc.tunables.mallocThresholdBase(),
+                                  gc.tunables.mallocGrowthFactor(), lock);
 }
 
 js::gc::TriggerKind js::ZoneAllocator::shouldTriggerGCForTooMuchMalloc() {
   auto& gc = runtimeFromAnyThread()->gc;
   return std::max(gcMallocCounter.shouldTriggerGC(gc.tunables),
                   jitCodeCounter.shouldTriggerGC(gc.tunables));
+}
+
+void ZoneAllocPolicy::decMemory(size_t nbytes) {
+  // Unfortunately we don't have enough context here to know whether we're being
+  // called on behalf of the collector so we have to do a TLS lookup to find
+  // out.
+  JSContext* cx = TlsContext.get();
+  zone_->decPolicyMemory(this, nbytes, cx->defaultFreeOp()->isCollecting());
 }
 
 JS::Zone::Zone(JSRuntime* rt)
@@ -126,6 +137,7 @@ JS::Zone::Zone(JSRuntime* rt)
       gcScheduledSaved_(false),
       gcPreserveCode_(false),
       keepShapeCaches_(this, false),
+      wasCollected_(false),
       listNext_(NotOnList) {
   /* Ensure that there are no vtables to mess us up here. */
   MOZ_ASSERT(reinterpret_cast<JS::shadow::Zone*>(this) ==
@@ -335,7 +347,7 @@ void Zone::discardJitCode(FreeOp* fop,
     // releasing JIT code because we can't do this when the script still has
     // JIT code.
     if (discardJitScripts) {
-      script->maybeReleaseJitScript();
+      script->maybeReleaseJitScript(fop);
     }
 
     if (jit::JitScript* jitScript = script->jitScript()) {

@@ -3,16 +3,12 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += [
+    'layout',
+    'service-workers',
     'ui',
 ]
 
 DevToolsModules(
     'App.css',
     'App.js',
-    'Worker.css',
-    'Worker.js',
-    'WorkerList.css',
-    'WorkerList.js',
-    'WorkerListEmpty.css',
-    'WorkerListEmpty.js',
 )

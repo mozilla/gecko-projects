@@ -5,8 +5,8 @@
 %endif
 
 #identity-box {
-  padding-inline-start: 4px;
-  padding-inline-end: 4px;
+  padding-inline-start: 6px;
+  padding-inline-end: 6px;
   margin-inline-end: 4px;
   /* Set default fill for icons in the identity block.
      Individual icons can override this. */
@@ -29,6 +29,8 @@
 
 #urlbar[pageproxystate="invalid"] > #identity-box {
   pointer-events: none;
+  /* This would make the spaces around the glass icon balanced. */
+  margin-inline-end: 2px;
   -moz-user-focus: ignore;
 }
 
@@ -40,12 +42,14 @@
 
 #identity-box:hover:active:not(.no-hover),
 #identity-box[open=true],
+#tracking-protection-icon-container:hover:active,
 #tracking-protection-icon-container[open=true] {
   background-color: hsla(0,0%,70%,.3);
   fill-opacity: .8;
 }
 
-#identity-box:not(:active):-moz-focusring {
+#identity-box:not(:active):-moz-focusring,
+#tracking-protection-icon-container:not(:active):-moz-focusring {
   outline: var(--toolbarbutton-focus-outline);
   outline-offset: -2px;
   -moz-outline-radius: var(--toolbarbutton-border-radius);
@@ -105,7 +109,7 @@
   border-image-slice: 1;
 }
 
-#sharing-icon,
+.sharing-icon,
 #identity-icon,
 #tracking-protection-icon,
 .notification-anchor-icon,
@@ -114,6 +118,10 @@
   height: 16px;
   margin-inline-start: 4px;
   -moz-context-properties: fill, fill-opacity;
+}
+
+#tracking-protection-icon {
+  margin-inline-start: 0;
 }
 
 /* MAIN IDENTITY ICON */
@@ -128,9 +136,6 @@
 
 #urlbar[pageproxystate="invalid"] > #identity-box > #identity-icon {
   list-style-image: url(chrome://browser/skin/search-glass.svg);
-  /* This is needed in order to position the search glass icon correctly since
-     the tracking protection icon won't be shown in such case. */
-  margin-inline-start: 4px;
   fill-opacity: .4;
 }
 
@@ -167,23 +172,27 @@
 
 /* SHARING ICON */
 
-#identity-box[sharing="camera"] > #sharing-icon {
+#webrtc-sharing-icon[sharing="camera"] {
   list-style-image: url("chrome://browser/skin/notification-icons/camera.svg");
 }
 
-#identity-box[sharing="microphone"] > #sharing-icon {
+#webrtc-sharing-icon[sharing="microphone"] {
   list-style-image: url("chrome://browser/skin/notification-icons/microphone.svg");
 }
 
-#identity-box[sharing="screen"] > #sharing-icon {
+#webrtc-sharing-icon[sharing="screen"] {
   list-style-image: url("chrome://browser/skin/notification-icons/screen.svg");
 }
 
-#identity-box:not([sharing]) > #sharing-icon {
+#geo-sharing-icon[sharing] {
+  list-style-image: url("chrome://browser/skin/notification-icons/geo.svg");
+}
+
+.sharing-icon:not([sharing]) {
   display: none;
 }
 
-#identity-box[sharing]:not([paused]) > #sharing-icon {
+#webrtc-sharing-icon[sharing]:not([paused]) {
   animation: 1.5s ease in-use-blink infinite;
   -moz-context-properties: fill;
   fill: rgb(224, 41, 29);
@@ -196,10 +205,27 @@
 /* TRACKING PROTECTION ICON */
 
 #tracking-protection-icon-container {
-  margin-inline-start: 3px;
-  padding-inline-end: 4px;
+  padding-inline-start: 6px;
+  padding-inline-end: 6px;
   fill-opacity: .3;
   fill: currentColor;
+  position: relative;
+}
+
+/* Separator */
+#tracking-protection-icon-container::after {
+  content: "";
+  border-right: 1px solid var(--lwt-background-tab-separator-color, currentColor);
+  position: absolute;
+  right: 0;
+  top: 4px;
+  height: 21px;
+  opacity: .3;
+}
+
+#tracking-protection-icon-container:-moz-locale-dir(rtl)::after {
+  right: unset;
+  left: 0;
 }
 
 #urlbar[pageproxystate="valid"] > #tracking-protection-icon-container.chromeUI {
@@ -208,10 +234,9 @@
 
 #tracking-protection-icon-box {
   overflow: hidden;
-  width: 20px;
+  width: 16px;
   height: 16px;
 }
-
 #tracking-protection-icon-box:not([hasException])[active][animationsenabled] > #tracking-protection-icon,
 #tracking-protection-icon-box:not([animationsenabled])[active] > #tracking-protection-icon,
 #tracking-protection-icon-box:not([animationsenabled]):not([active]) > #tracking-protection-icon-animatable-box,
@@ -222,7 +247,6 @@
 #tracking-protection-icon-box > #tracking-protection-icon-animatable-box {
   position: absolute;
   overflow: hidden;
-  margin-inline-start: 4px;
   width: 16px;
   height: 16px;
 }

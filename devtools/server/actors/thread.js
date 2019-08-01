@@ -138,6 +138,13 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     this._onOpeningRequest = this._onOpeningRequest.bind(this);
     this._onNewDebuggee = this._onNewDebuggee.bind(this);
     this._eventBreakpointListener = this._eventBreakpointListener.bind(this);
+    this._onWindowReady = this._onWindowReady.bind(this);
+    this._onWillNavigate = this._onWillNavigate.bind(this);
+    this._onNavigate = this._onNavigate.bind(this);
+
+    this._parent.on("window-ready", this._onWindowReady);
+    this._parent.on("will-navigate", this._onWillNavigate);
+    this._parent.on("navigate", this._onNavigate);
 
     this._debuggerNotificationObserver = new DebuggerNotificationObserver();
 
@@ -281,6 +288,10 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
         this._debuggerNotificationObserver.disconnect(global);
       } catch (e) {}
     }
+
+    this._parent.off("window-ready", this._onWindowReady);
+    this._parent.off("will-navigate", this._onWillNavigate);
+    this._parent.off("navigate", this._onNavigate);
 
     this.sources.off("newSource", this.onNewSourceEvent);
     this.clearDebuggees();
@@ -950,15 +961,10 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     const thread = this;
     return function() {
       // onStep is called with 'this' set to the current frame.
-
       const location = thread.sources.getFrameLocation(this);
 
-      // Always continue execution if either:
-      //
-      // 1. We are in a source mapped region, but inside a null mapping
-      //    (doesn't correlate to any region of source)
-      // 2. The source we are in is black boxed.
-      if (location.url == null || thread.sources.isBlackBoxed(location.url)) {
+      // Continue if the source is black boxed.
+      if (thread.sources.isBlackBoxed(location.url)) {
         return undefined;
       }
 
@@ -1755,6 +1761,43 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       }
     }
     return {};
+  },
+
+  _onWindowReady: function({ isTopLevel, window }) {
+    if (isTopLevel && this.state != "detached") {
+      this.sources.reset();
+      this.clearDebuggees();
+      this.dbg.enabled = true;
+      this.maybePauseOnExceptions();
+      // Update the global no matter if the debugger is on or off,
+      // otherwise the global will be wrong when enabled later.
+      this.global = window;
+    }
+
+    // Refresh the debuggee list when a new window object appears (top window or
+    // iframe).
+    if (this.attached) {
+      this.dbg.addDebuggees();
+    }
+  },
+
+  _onWillNavigate: function({ isTopLevel }) {
+    if (!isTopLevel) {
+      return;
+    }
+
+    // Proceed normally only if the debuggee is not paused.
+    if (this.state == "paused") {
+      this.unsafeSynchronize(Promise.resolve(this.doResume()));
+      this.dbg.enabled = false;
+    }
+    this.disableAllBreakpoints();
+  },
+
+  _onNavigate: function() {
+    if (this.state == "running") {
+      this.dbg.enabled = true;
+    }
   },
 
   // JS Debugger API hooks.

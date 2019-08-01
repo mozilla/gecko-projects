@@ -267,7 +267,8 @@
 
 %include ../shared/identity-block/identity-block.inc.css
 
-#identity-box:not(:active):-moz-focusring {
+#identity-box:not(:active):-moz-focusring,
+#tracking-protection-icon-container:not(:active):-moz-focusring {
   border-inline-end-style: none;
 }
 
@@ -844,11 +845,6 @@ menulist.translate-infobar-element > .menulist-dropmarker {
 #context-navigation > .menuitem-iconic {
   padding-left: 0;
   padding-right: 0;
-}
-
-.browser-extension-panel > .panel-arrowcontainer > .panel-arrowcontent {
-  padding: 0;
-  overflow: hidden;
 }
 
 .cui-widget-panelview[id^=PanelUI-webext-] {

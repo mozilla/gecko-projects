@@ -1863,7 +1863,6 @@ MediaStream::MediaStream()
       mMainThreadFinished(false),
       mFinishedNotificationSent(false),
       mMainThreadDestroyed(false),
-      mNrOfMainThreadUsers(0),
       mGraph(nullptr) {
   MOZ_COUNT_CTOR(MediaStream);
 }
@@ -2015,8 +2014,6 @@ void MediaStream::DestroyImpl() {
 }
 
 void MediaStream::Destroy() {
-  NS_ASSERTION(mNrOfMainThreadUsers == 0,
-               "Do not mix Destroy() and RegisterUser()/UnregisterUser()");
   // Keep this stream alive until we leave this method
   RefPtr<MediaStream> kungFuDeathGrip = this;
 
@@ -2036,23 +2033,6 @@ void MediaStream::Destroy() {
   // but our kungFuDeathGrip above will have kept this stream alive if
   // necessary.
   mMainThreadDestroyed = true;
-}
-
-void MediaStream::RegisterUser() {
-  MOZ_ASSERT(NS_IsMainThread());
-  ++mNrOfMainThreadUsers;
-}
-
-void MediaStream::UnregisterUser() {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  --mNrOfMainThreadUsers;
-  NS_ASSERTION(mNrOfMainThreadUsers >= 0, "Double-removal of main thread user");
-  NS_ASSERTION(!IsDestroyed(),
-               "Do not mix Destroy() and RegisterUser()/UnregisterUser()");
-  if (mNrOfMainThreadUsers == 0) {
-    Destroy();
-  }
 }
 
 void MediaStream::AddAudioOutput(void* aKey) {
@@ -2454,6 +2434,7 @@ void SourceMediaStream::DestroyImpl() {
   // Hold mMutex while mGraph is reset so that other threads holding mMutex
   // can null-check know that the graph will not destroyed.
   MutexAutoLock lock(mMutex);
+  mUpdateTracks.Clear();
   MediaStream::DestroyImpl();
 }
 
@@ -3523,7 +3504,7 @@ ProcessedMediaStream* MediaStreamGraph::CreateTrackUnionStream() {
   return stream;
 }
 
-ProcessedMediaStream* MediaStreamGraph::CreateAudioCaptureStream(
+AudioCaptureStream* MediaStreamGraph::CreateAudioCaptureStream(
     TrackID aTrackId) {
   AudioCaptureStream* stream = new AudioCaptureStream(aTrackId);
   AddStream(stream);
@@ -3731,9 +3712,7 @@ void MediaStreamGraphImpl::ApplyAudioContextOperationImpl(
                                                 aOperation, aFlags);
 
       SystemClockDriver* driver;
-      if (nextDriver) {
-        MOZ_ASSERT(!nextDriver->AsAudioCallbackDriver());
-      } else {
+      if (!nextDriver) {
         driver = new SystemClockDriver(this);
         MonitorAutoLock lock(mMonitor);
         CurrentDriver()->SwitchAtNextIteration(driver);

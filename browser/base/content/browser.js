@@ -242,6 +242,10 @@ XPCOMUtils.defineLazyScriptGetter(
 // lazy service getters
 
 XPCOMUtils.defineLazyServiceGetters(this, {
+  ContentPrefService2: [
+    "@mozilla.org/content-pref/service;1",
+    "nsIContentPrefService2",
+  ],
   classifierService: [
     "@mozilla.org/url-classifier/dbservice;1",
     "nsIURIClassifier",
@@ -5410,12 +5414,23 @@ var XULBrowserWindow = {
     elt.label = tooltip;
     elt.style.direction = direction;
 
-    elt.openPopupAtScreen(
-      browser.screenX + x,
-      browser.screenY + y,
-      false,
-      null
-    );
+    let screenX;
+    let screenY;
+
+    if (browser instanceof XULElement) {
+      // XUL element such as <browser> has the `screenX` and `screenY` fields.
+      // https://searchfox.org/mozilla-central/source/dom/webidl/XULElement.webidl
+      screenX = browser.screenX;
+      screenY = browser.screenY;
+    } else {
+      // In case of HTML element such as <iframe> which RDM uses,
+      // calculate the coordinate manually since it does not have the fields.
+      const componentBounds = browser.getBoundingClientRect();
+      screenX = window.screenX + componentBounds.x;
+      screenY = window.screenY + componentBounds.y;
+    }
+
+    elt.openPopupAtScreen(screenX + x, screenY + y, false, null);
   },
 
   hideTooltip() {
@@ -5441,7 +5456,7 @@ var XULBrowserWindow = {
   shouldLoadURI(
     aDocShell,
     aURI,
-    aReferrer,
+    aReferrerInfo,
     aHasPostData,
     aTriggeringPrincipal,
     aCsp
@@ -5463,14 +5478,14 @@ var XULBrowserWindow = {
       return true;
     }
 
-    if (!E10SUtils.shouldLoadURI(aDocShell, aURI, aReferrer, aHasPostData)) {
+    if (!E10SUtils.shouldLoadURI(aDocShell, aURI, aHasPostData)) {
       // XXX: Do we want to complain if we have post data but are still
       // redirecting the load? Perhaps a telemetry probe? Theoretically we
       // shouldn't do this, as it throws out data. See bug 1348018.
       E10SUtils.redirectLoad(
         aDocShell,
         aURI,
-        aReferrer,
+        aReferrerInfo,
         aTriggeringPrincipal,
         false,
         null,
@@ -6289,7 +6304,7 @@ var TabsProgressListener = {
 
     let tab = gBrowser.getTabForBrowser(aBrowser);
     if (tab && tab._sharingState) {
-      gBrowser.setBrowserSharing(aBrowser, {});
+      gBrowser.resetBrowserSharing(aBrowser);
     }
     webrtcUI.forgetStreamsFromBrowser(aBrowser);
 

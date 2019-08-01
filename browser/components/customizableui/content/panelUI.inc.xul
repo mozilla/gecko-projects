@@ -3,11 +3,11 @@
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
 <panel id="widget-overflow"
+       class="panel-no-padding"
        role="group"
        type="arrow"
        noautofocus="true"
        position="bottomcenter topright"
-       photon="true"
        hidden="true">
   <panelmultiview mainViewId="widget-overflow-mainView">
     <panelview id="widget-overflow-mainView"
@@ -90,7 +90,7 @@
 </panel>
 
 <panel id="appMenu-notification-popup"
-       class="popup-notification-panel"
+       class="popup-notification-panel panel-no-padding"
        type="arrow"
        position="after_start"
        hidden="true"
@@ -215,7 +215,7 @@
 </menupopup>
 
 <panel id="appMenu-popup"
-       class="cui-widget-panel"
+       class="cui-widget-panel panel-no-padding"
        role="group"
        type="arrow"
        hidden="true"
@@ -255,12 +255,11 @@
         </toolbaritem>
         <toolbarseparator class="sync-ui-item"/>
         <toolbaritem>
-          <toolbarbutton id="appMenu-tp-button"
+          <toolbarbutton id="appMenu-protection-report-button"
                class="subviewbutton subviewbutton-iconic"
-               oncommand="gProtectionsHandler.openPreferences('appMenu-trackingprotection');">
-            <image id="appMenu-tp-icon" class="toolbarbutton-icon"/>
-            <label id="appMenu-tp-label" class="toolbarbutton-text"/>
-            <label id="appMenu-tp-category"/>
+               oncommand="gProtectionsHandler.openProtections();">
+            <image id="appMenu-protection-report-icon" class="toolbarbutton-icon"/>
+            <label id="appMenu-protection-report-text" class="toolbarbutton-text">Privacy Protections</label>
           </toolbarbutton>
         </toolbaritem>
         <toolbarseparator id="appMenu-tp-separator"/>
@@ -817,7 +816,7 @@
                      smoothscroll="false"
                      flatList="true"
                      tooltip="bhTooltip">
-          <html:div id="PanelUI-whatsNew-message-container">
+          <html:div id="PanelUI-whatsNew-message-container" role="document">
             <!-- What's New messages will be rendered here -->
           </html:div>
         </toolbaritem>
@@ -841,6 +840,7 @@
 </panel>
 
 <panel id="extension-notification-panel"
+       class="panel-no-padding"
        role="group"
        type="arrow"
        hidden="true"

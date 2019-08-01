@@ -1135,6 +1135,9 @@ const browsingContextTargetPrototype = {
         options.serviceWorkersTestingEnabled
       );
     }
+    if (typeof options.restoreFocus == "boolean") {
+      this._restoreFocus = options.restoreFocus;
+    }
 
     // Reload if:
     //  - there's an explicit `performReload` flag and it's true
@@ -1157,6 +1160,9 @@ const browsingContextTargetPrototype = {
     this._setCacheDisabled(false);
     this._setServiceWorkersTestingEnabled(false);
     this._setPaintFlashingEnabled(false);
+    if (this._restoreFocus) {
+      this.window.focus();
+    }
   },
 
   /**
@@ -1346,25 +1352,6 @@ const browsingContextTargetPrototype = {
       isTopLevel: isTopLevel,
       id: getWindowID(window),
     });
-
-    // TODO bug 997119: move that code to ThreadActor by listening to
-    // window-ready
-    const threadActor = this.threadActor;
-    if (isTopLevel && threadActor.state != "detached") {
-      this.sources.reset();
-      threadActor.clearDebuggees();
-      threadActor.dbg.enable();
-      threadActor.maybePauseOnExceptions();
-      // Update the global no matter if the debugger is on or off,
-      // otherwise the global will be wrong when enabled later.
-      threadActor.global = window;
-    }
-
-    // Refresh the debuggee list when a new window object appears (top window or
-    // iframe).
-    if (threadActor.attached) {
-      threadActor.dbg.addDebuggees();
-    }
   },
 
   _windowDestroyed(window, id = null, isFrozen = false) {
@@ -1417,16 +1404,6 @@ const browsingContextTargetPrototype = {
       return;
     }
 
-    // Proceed normally only if the debuggee is not paused.
-    // TODO bug 997119: move that code to ThreadActor by listening to
-    // will-navigate
-    const threadActor = this.threadActor;
-    if (threadActor.state == "paused") {
-      threadActor.unsafeSynchronize(Promise.resolve(threadActor.doResume()));
-      threadActor.dbg.disable();
-    }
-    threadActor.disableAllBreakpoints();
-
     this.emit("tabNavigated", {
       url: newURI,
       nativeConsoleAPI: true,
@@ -1459,12 +1436,6 @@ const browsingContextTargetPrototype = {
     // (we will only update thread actor on window-ready)
     if (!isTopLevel) {
       return;
-    }
-
-    // TODO bug 997119: move that code to ThreadActor by listening to navigate
-    const threadActor = this.threadActor;
-    if (threadActor.state == "running") {
-      threadActor.dbg.enable();
     }
 
     this.emit("tabNavigated", {

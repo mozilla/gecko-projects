@@ -1537,7 +1537,7 @@ public class GeckoSession implements Parcelable {
      */
     @AnyThread
     public void loadUri(final @NonNull String uri) {
-        loadUri(uri, null, LOAD_FLAGS_NONE);
+        loadUri(uri, (GeckoSession)null, LOAD_FLAGS_NONE);
     }
 
     /**
@@ -1548,7 +1548,7 @@ public class GeckoSession implements Parcelable {
      */
     @AnyThread
     public void loadUri(final @NonNull String uri, final @LoadFlags int flags) {
-        loadUri(uri, null, flags);
+        loadUri(uri, (GeckoSession)null, flags);
     }
 
     /**
@@ -1566,7 +1566,29 @@ public class GeckoSession implements Parcelable {
         msg.putInt("flags", flags);
 
         if (referrer != null) {
-            msg.putString("referrer", referrer);
+            msg.putString("referrerUri", referrer);
+        }
+        mEventDispatcher.dispatch("GeckoView:LoadUri", msg);
+    }
+
+    /**
+     * Load the given URI with the specified referrer and load type. This method will also do any
+     * applicable checks to ensure that the specified URI is both safe and allowable
+     * according to the referring GeckoSession.
+     *
+     * @param uri the URI to load
+     * @param referrer the referring GeckoSession, may be null
+     * @param flags the load flags to use, an OR-ed value of {@link #LOAD_FLAGS_NONE LOAD_FLAGS_*}
+     */
+    @AnyThread
+    public void loadUri(final @NonNull String uri, final @Nullable GeckoSession referrer,
+                        final @LoadFlags int flags) {
+        final GeckoBundle msg = new GeckoBundle();
+        msg.putString("uri", uri);
+        msg.putInt("flags", flags);
+
+        if (referrer != null) {
+            msg.putString("referrerSessionId", referrer.mId);
         }
         mEventDispatcher.dispatch("GeckoView:LoadUri", msg);
     }
@@ -1587,7 +1609,7 @@ public class GeckoSession implements Parcelable {
      */
     @AnyThread
     public void loadUri(final @NonNull Uri uri, final @LoadFlags int flags) {
-        loadUri(uri.toString(), null, flags);
+        loadUri(uri.toString(), (GeckoSession)null, flags);
     }
 
     /**
@@ -1616,7 +1638,7 @@ public class GeckoSession implements Parcelable {
             throw new IllegalArgumentException("data cannot be null");
         }
 
-        loadUri(createDataUri(data, mimeType), null, LOAD_FLAGS_NONE);
+        loadUri(createDataUri(data, mimeType), (GeckoSession)null, LOAD_FLAGS_NONE);
     }
 
     /**
@@ -1632,7 +1654,7 @@ public class GeckoSession implements Parcelable {
             throw new IllegalArgumentException("data cannot be null");
         }
 
-        loadUri(createDataUri(bytes, mimeType), null, LOAD_FLAGS_FORCE_ALLOW_DATA_URI);
+        loadUri(createDataUri(bytes, mimeType), (GeckoSession)null, LOAD_FLAGS_FORCE_ALLOW_DATA_URI);
     }
 
     /**
@@ -2738,7 +2760,8 @@ public class GeckoSession implements Parcelable {
                     return;
                 }
                 String[] mimeTypes = message.getStringArray("mimeTypes");
-                delegate.onFilePrompt(session, title, intMode, mimeTypes, cb);
+                int capture = message.getInt("capture");
+                delegate.onFilePrompt(session, title, intMode, mimeTypes, capture, cb);
                 break;
             }
             case "popup": {
@@ -4039,6 +4062,27 @@ public class GeckoSession implements Parcelable {
         static final int FILE_TYPE_SINGLE = 1;
         static final int FILE_TYPE_MULTIPLE = 2;
 
+        // These values should match the corresponding values in nsIFilePicker.idl
+        /**
+         * No capture attribute has been supplied by content.
+         */
+        static final int CAPTURE_TYPE_NONE = 0;
+
+        /**
+         * The capture attribute was supplied with a missing or invalid value.
+         */
+        static final int CAPTURE_TYPE_ANY = 1;
+
+        /**
+         * The "user" capture attribute has been supplied by content.
+         */
+        static final int CAPTURE_TYPE_USER = 2;
+
+        /**
+         * The "environment" capture attribute has been supplied by content.
+         */
+        static final int CAPTURE_TYPE_ENVIRONMENT = 3;
+
         /**
          * Display a file prompt.
          *
@@ -4049,12 +4093,15 @@ public class GeckoSession implements Parcelable {
          *                  files. MIME types are of the form "type/subtype", where "type"
          *                  and/or "subtype" can be "*" to indicate any value. Extensions
          *                  are of the form ".ext".
+         * @param capture One of {@link #CAPTURE_TYPE_NONE CAPTURE_TYPE_*} indicating if the
+         *                file is expected to be captured by a device camera and, if so, which
+         *                type of camera.
          * @param callback Callback interface.
          */
         @UiThread
         default void onFilePrompt(@NonNull GeckoSession session, @Nullable String title,
                                   @FileType int type, @Nullable String[] mimeTypes,
-                                  @NonNull FileCallback callback) {
+                                  @CaptureType int capture, @NonNull FileCallback callback) {
             callback.dismiss();
         }
 
@@ -4078,6 +4125,11 @@ public class GeckoSession implements Parcelable {
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({PromptDelegate.FILE_TYPE_SINGLE, PromptDelegate.FILE_TYPE_MULTIPLE})
             /* package */ @interface FileType {}
+
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({PromptDelegate.CAPTURE_TYPE_NONE, PromptDelegate.CAPTURE_TYPE_ANY,
+            PromptDelegate.CAPTURE_TYPE_USER, PromptDelegate.CAPTURE_TYPE_ENVIRONMENT})
+    /* package */ @interface CaptureType {}
 
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({PromptDelegate.DATETIME_TYPE_DATE, PromptDelegate.DATETIME_TYPE_MONTH,

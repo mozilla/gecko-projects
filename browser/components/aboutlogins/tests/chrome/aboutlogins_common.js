@@ -36,12 +36,28 @@ Object.defineProperty(document, "l10n", {
     getAttributes(element) {
       return {
         id: element.getAttribute("data-l10n-id"),
-        args: JSON.parse(element.getAttribute("data-l10n-args")),
+        args: element.getAttribute("data-l10n-args")
+          ? JSON.parse(element.getAttribute("data-l10n-args"))
+          : {},
       };
     },
     setAttributes(element, id, args) {
       element.setAttribute("data-l10n-id", id);
-      element.setAttribute("data-l10n-args", JSON.stringify(args));
+      if (args) {
+        element.setAttribute("data-l10n-args", JSON.stringify(args));
+      } else {
+        element.removeAttribute("data-l10n-args");
+      }
+    },
+  },
+});
+
+Object.defineProperty(window, "AboutLoginsUtils", {
+  configurable: true,
+  writable: true,
+  value: {
+    promptForMasterPassword(resolve) {
+      resolve(true);
     },
   },
 });

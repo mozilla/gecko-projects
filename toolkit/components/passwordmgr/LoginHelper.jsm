@@ -13,6 +13,7 @@
 "use strict";
 
 const EXPORTED_SYMBOLS = ["LoginHelper"];
+const REMOTE_SETTINGS_BREACHES_COLLECTION = "fxmonitor-breaches";
 
 // Globals
 
@@ -25,6 +26,12 @@ ChromeUtils.defineModuleGetter(
   this,
   "RemoteSettings",
   "resource://services-settings/remote-settings.js"
+);
+
+ChromeUtils.defineModuleGetter(
+  this,
+  "RemoteSettingsClient",
+  "resource://services-settings/RemoteSettingsClient.jsm"
 );
 
 /**
@@ -1107,14 +1114,32 @@ this.LoginHelper = {
   },
 
   async getBreachesForLogins(logins, breaches = null) {
+    const breachesByLoginGUID = new Map();
     if (!breaches) {
-      breaches = await RemoteSettings("fxmonitor-breaches").get();
+      try {
+        breaches = await RemoteSettings(
+          REMOTE_SETTINGS_BREACHES_COLLECTION
+        ).get();
+      } catch (ex) {
+        if (ex instanceof RemoteSettingsClient.UnknownCollectionError) {
+          log.warn(
+            "Could not get Remote Settings collection.",
+            REMOTE_SETTINGS_BREACHES_COLLECTION,
+            ex
+          );
+          return breachesByLoginGUID;
+        }
+        throw ex;
+      }
     }
+    const BREACH_ALERT_URL = Services.prefs.getStringPref(
+      "signon.management.page.breachAlertUrl"
+    );
+    const baseBreachAlertURL = new URL(BREACH_ALERT_URL);
 
     // Determine potentially breached logins by checking their origin and the last time
     // they were changed. It's important to note here that we are NOT considering the
     // username and password of that login.
-    const breachesByLoginGUID = new Map();
     for (const login of logins) {
       const loginURI = Services.io.newURI(login.origin);
       for (const breach of breaches) {
@@ -1125,6 +1150,8 @@ this.LoginHelper = {
           Services.eTLD.hasRootDomain(loginURI.host, breach.Domain) &&
           login.timePasswordChanged < new Date(breach.BreachDate).getTime()
         ) {
+          let breachAlertURL = new URL(breach.Name, baseBreachAlertURL);
+          breach.breachAlertURL = breachAlertURL.href;
           breachesByLoginGUID.set(login.guid, breach);
         }
       }

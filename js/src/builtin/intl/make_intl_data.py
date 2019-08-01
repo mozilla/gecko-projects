@@ -9,6 +9,7 @@
     make_intl_data.py langtags [ldmlSupplemental.dtd supplementalMetadata.xml likelySubtags.xml]
     make_intl_data.py tzdata
     make_intl_data.py currency
+    make_intl_data.py unicode-ext
 
 
     Target "langtags":
@@ -26,6 +27,10 @@
 
     Target "currency":
     Generates the mapping from currency codes to decimal digits used for them.
+
+    Target "unicode-ext":
+    Generates the mapping from deprecated BCP 47 Unicode extension values to
+    their preferred values.
 """
 
 from __future__ import print_function
@@ -42,6 +47,7 @@ from contextlib import closing
 from functools import partial, total_ordering
 from itertools import chain, groupby, tee
 from operator import attrgetter, itemgetter
+from zipfile import ZipFile
 
 if sys.version_info.major == 2:
     from itertools import ifilter as filter, ifilterfalse as filterfalse, imap as map
@@ -396,7 +402,8 @@ def readSupplementalData(supplemental_dtd_file, supplemental_metadata_file, like
         - complexLanguageMappings: mappings from language subtags with complex rules
         - regionMappings: mappings from region subtags to preferred subtags
         - complexRegionMappings: mappings from region subtags with complex rules
-        Returns these five mappings as dictionaries.
+        - likelySubtags: likely subtags used for generating test data only
+        Returns these mappings as dictionaries.
     """
     import xml.etree.ElementTree as ET
 
@@ -631,6 +638,7 @@ def readSupplementalData(supplemental_dtd_file, supplemental_metadata_file, like
             "complexLanguageMappings": complex_language_mappings,
             "regionMappings": region_mappings,
             "complexRegionMappings": complex_region_mappings_final,
+            "likelySubtags": likely_subtags,
             }
 
 
@@ -664,6 +672,131 @@ def writeCLDRLanguageTagData(println, data, url):
     writeGrandfatheredMappingsFunction(println, grandfathered_mappings,
                                        "Canonicalize grandfathered locale identifiers.",
                                        source, url)
+
+
+def writeCLDRLanguageTagLikelySubtagsTest(println, data, url):
+    """ Writes the likely-subtags test file. """
+
+    source = u"CLDR Supplemental Data, version {}".format(data["version"])
+    language_mappings = data["languageMappings"]
+    complex_language_mappings = data["complexLanguageMappings"]
+    region_mappings = data["regionMappings"]
+    complex_region_mappings = data["complexRegionMappings"]
+    likely_subtags = data["likelySubtags"]
+
+    def bcp47(tag):
+        (language, script, region) = tag
+        return "{}{}{}".format(language,
+                               "-" + script if script else "",
+                               "-" + region if region else "")
+
+    def canonical(tag):
+        (language, script, region) = tag
+
+        # Map deprecated language subtags.
+        if language in language_mappings:
+            language = language_mappings[language]
+        elif language in complex_language_mappings:
+            (language2, script2, region2) = complex_language_mappings[language]
+            (language, script, region) = (language2,
+                                          script if script else script2,
+                                          region if region else region2)
+
+        # Map deprecated region subtags.
+        if region in region_mappings:
+            region = region_mappings[region]
+        else:
+            # Assume no complex region mappings are needed for now.
+            assert region not in complex_region_mappings,\
+                   "unexpected region with complex mappings: {}".format(region)
+
+        return (language, script, region)
+
+    # https://unicode.org/reports/tr35/#Likely_Subtags
+
+    def addLikelySubtags(tag):
+        # Step 1: Canonicalize.
+        (language, script, region) = canonical(tag)
+        if script == "Zzzz":
+            script = None
+        if region == "ZZ":
+            region = None
+
+        # Step 2: Lookup.
+        searches = ((language, script, region),
+                    (language, None, region),
+                    (language, script, None),
+                    (language, None, None),
+                    ("und", script, None))
+        search = next(search for search in searches if search in likely_subtags)
+
+        (language_s, script_s, region_s) = search
+        (language_m, script_m, region_m) = likely_subtags[search]
+
+        # Step 3: Return.
+        return (language if language != language_s else language_m,
+                script if script != script_s else script_m,
+                region if region != region_s else region_m)
+
+    # https://unicode.org/reports/tr35/#Likely_Subtags
+    def removeLikelySubtags(tag):
+        # Step 1: Add likely subtags.
+        max = addLikelySubtags(tag)
+
+        # Step 2: Remove variants (doesn't apply here).
+
+        # Step 3: Find a match.
+        (language, script, region) = max
+        for trial in ((language, None, None), (language, None, region), (language, script, None)):
+            if addLikelySubtags(trial) == max:
+                return trial
+
+        # Step 4: Return maximized if no match found.
+        return max
+
+    def likely_canonical(from_tag, to_tag):
+        # Canonicalize the input tag.
+        from_tag = canonical(from_tag)
+
+        # Update the expected result if necessary.
+        if from_tag in likely_subtags:
+            to_tag = likely_subtags[from_tag]
+
+        # Canonicalize the expected output.
+        to_canonical = canonical(to_tag)
+
+        # Sanity check: This should match the result of |addLikelySubtags|.
+        assert to_canonical == addLikelySubtags(from_tag)
+
+        return to_canonical
+
+    # |likely_subtags| contains non-canonicalized tags, so canonicalize it first.
+    likely_subtags_canonical = {k: likely_canonical(k, v) for (k, v) in likely_subtags.items()}
+
+    # Add test data for |Intl.Locale.prototype.maximize()|.
+    writeMappingsVar(println, {bcp47(k): bcp47(v) for (k, v) in likely_subtags_canonical.items()},
+                     "maxLikelySubtags", "Extracted from likelySubtags.xml.", source, url)
+
+    # Use the maximalized tags as the input for the remove likely-subtags test.
+    minimized = {tag: removeLikelySubtags(tag) for tag in likely_subtags_canonical.values()}
+
+    # Add test data for |Intl.Locale.prototype.minimize()|.
+    writeMappingsVar(println, {bcp47(k): bcp47(v) for (k, v) in minimized.items()},
+                     "minLikelySubtags", "Extracted from likelySubtags.xml.", source, url)
+
+    println(u"""
+for (let [tag, maximal] of Object.entries(maxLikelySubtags)) {
+    assertEq(new Intl.Locale(tag).maximize().toString(), maximal);
+}""")
+
+    println(u"""
+for (let [tag, minimal] of Object.entries(minLikelySubtags)) {
+    assertEq(new Intl.Locale(tag).minimize().toString(), minimal);
+}""")
+
+    println(u"""
+if (typeof reportCompare === "function")
+    reportCompare(0, 0);""")
 
 
 def updateCLDRLangTags(args):
@@ -752,6 +885,17 @@ def updateCLDRLangTags(args):
 
         println(u"// Generated by make_intl_data.py. DO NOT EDIT.")
         writeCLDRLanguageTagData(println, data, url)
+
+    print("Writing Intl test data...")
+    test_file = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "../../tests/non262/Intl/Locale/likely-subtags-generated.js")
+    with io.open(test_file, mode="w", encoding="utf-8", newline="") as f:
+        println = partial(print, file=f)
+
+        println(u"// |reftest| skip-if(!this.hasOwnProperty('Intl')||"
+                u"(!this.Intl.Locale&&!this.hasOwnProperty('addIntlExtras')))")
+        println(u"// Generated by make_intl_data.py. DO NOT EDIT.")
+        writeCLDRLanguageTagLikelySubtagsTest(println, data, url)
 
 
 def flines(filepath, encoding="utf-8"):
@@ -1603,6 +1747,224 @@ def updateCurrency(topsrcdir, args):
                 updateFrom(currencyTmpFile.name)
 
 
+def writeUnicodeExtensionsFile(version, url, mapping, out):
+    with io.open(out, mode="w", encoding="utf-8", newline="") as f:
+        println = partial(print, file=f)
+
+        println(generatedFileWarning)
+        println(u"// Version: CLDR-{}".format(version))
+        println(u"// URL: {}".format(url))
+
+        println(u"""
+/**
+ * Mapping from deprecated BCP 47 Unicode extension types to their preferred
+ * values.
+ *
+ * Spec: https://www.unicode.org/reports/tr35/#Unicode_Locale_Extension_Data_Files
+ */""")
+        println(u"var deprecatedUnicodeExtensionTypes = {")
+        for ext_name in sorted(mapping):
+            println(u"    {}: {{".format(ext_name))
+            is_first = True
+            for type in sorted(mapping[ext_name]):
+                mapped = mapping[ext_name][type]
+                has_description = mapped["description"] is not None
+
+                if not is_first and has_description:
+                    println(u"")
+                is_first = False
+
+                if has_description:
+                    println(u"        // {}".format(mapped["description"]))
+                println(u"        \"{}\": \"{}\",".format(type, mapped["preferred"]))
+            println(u"    },")
+        println(u"};")
+
+
+def updateUnicodeExtensions(args):
+    """ Update the UnicodeExtensionsGenerated.js file. """
+
+    import xml.etree.ElementTree as ET
+
+    version = args.version
+    url = args.url
+    out = args.out
+    filename = args.file
+
+    url = url.replace("<VERSION>", version)
+
+    print("Arguments:")
+    print("\tCLDR version: %s" % version)
+    print("\tDownload url: %s" % url)
+    if filename is not None:
+        print("\tLocal CLDR core.zip file: %s" % filename)
+    print("\tOutput file: %s" % out)
+    print("")
+
+    def updateFrom(data):
+        # Match all xml-files in the BCP 47 directory.
+        bcpFileRE = re.compile(r"^common/bcp47/.+\.xml$")
+
+        # https://www.unicode.org/reports/tr35/#Unicode_locale_identifier
+        #
+        # type = alphanum{3,8} (sep alphanum{3,8})* ;
+        typeRE = re.compile(r"^[a-z0-9]{3,8}(-[a-z0-9]{3,8})*$")
+
+        # Mapping from Unicode extension types to dict of deprecated to
+        # preferred values.
+        mapping = {}
+
+        with ZipFile(data) as zip_file:
+            for name in zip_file.namelist():
+                if not bcpFileRE.match(name):
+                    continue
+
+                tree = ET.parse(zip_file.open(name))
+                for keyword in tree.iterfind(".//keyword/key"):
+                    # Skip over keywords whose extension is not "u".
+                    if keyword.get("extension", "u") != "u":
+                        continue
+
+                    extension_name = keyword.get("name")
+
+                    for type in keyword.iterfind("type"):
+                        # <https://unicode.org/reports/tr35/#Unicode_Locale_Extension_Data_Files>:
+                        #
+                        # The key or type name used by Unicode locale extension with 'u' extension
+                        # syntax or the 't' extensions syntax. When alias below is absent, this
+                        # name can be also used with the old style "@key=type" syntax.
+                        name = type.get("name")
+
+                        # Ignore the special name:
+                        # - <https://unicode.org/reports/tr35/#CODEPOINTS>
+                        # - <https://unicode.org/reports/tr35/#REORDER_CODE>
+                        # - <https://unicode.org/reports/tr35/#RG_KEY_VALUE>
+                        # - <https://unicode.org/reports/tr35/#SUBDIVISION_CODE>
+                        # - <https://unicode.org/reports/tr35/#PRIVATE_USE>
+                        if name in ("CODEPOINTS", "REORDER_CODE", "RG_KEY_VALUE",
+                                    "SUBDIVISION_CODE", "PRIVATE_USE"):
+                            continue
+
+                        # All other names should match the 'type' production.
+                        assert typeRE.match(name) is not None, (
+                               "{} matches the 'type' production".format(name))
+
+                        # <https://unicode.org/reports/tr35/#Unicode_Locale_Extension_Data_Files>:
+                        #
+                        # The preferred value of the deprecated key, type or attribute element.
+                        # When a key, type or attribute element is deprecated, this attribute is
+                        # used for specifying a new canonical form if available.
+                        preferred = type.get("preferred")
+
+                        # <https://unicode.org/reports/tr35/#Unicode_Locale_Extension_Data_Files>:
+                        #
+                        # The BCP 47 form is the canonical form, and recommended. Other aliases are
+                        # included only for backwards compatibility.
+                        alias = type.get("alias")
+
+                        # <https://unicode.org/reports/tr35/#Unicode_Locale_Extension_Data_Files>:
+                        #
+                        # The description of the key, type or attribute element.
+                        description = type.get("description")
+
+                        # <https://unicode.org/reports/tr35/#Canonical_Unicode_Locale_Identifiers>
+                        #
+                        # Use the bcp47 data to replace keys, types, tfields, and tvalues by their
+                        # canonical forms. See Section 3.6.4 U Extension Data Files) and Section
+                        # 3.7.1 T Extension Data Files. The aliases are in the alias attribute
+                        # value, while the canonical is in the name attribute value.
+
+                        # 'preferred' contains the new preferred name, 'alias' the compatibility
+                        # name, but then there's this entry where 'preferred' and 'alias' are the
+                        # same. So which one to choose? Assume 'preferred' is the actual canonical
+                        # name.
+                        #
+                        # <type name="islamicc"
+                        #       description="Civil (algorithmic) Arabic calendar"
+                        #       deprecated="true"
+                        #       preferred="islamic-civil"
+                        #       alias="islamic-civil"/>
+
+                        if preferred is not None:
+                            assert typeRE.match(preferred), preferred
+                            mapping.setdefault(extension_name, {})[name] = {
+                                "preferred": preferred,
+                                "description": description,
+                            }
+
+                        if alias is not None:
+                            for alias_name in alias.lower().split(" "):
+                                # Ignore alias entries which don't match the 'type' production.
+                                if typeRE.match(alias_name) is None:
+                                    continue
+
+                                # See comment above when 'alias' and 'preferred' are both present.
+                                if (preferred is not None and
+                                    name in mapping[extension_name]):
+                                    continue
+
+                                # Skip over entries where 'name' and 'alias' are equal.
+                                #
+                                # <type name="pst8pdt"
+                                #       description="POSIX style time zone for US Pacific Time"
+                                #       alias="PST8PDT"
+                                #       since="1.8"/>
+                                if name == alias_name:
+                                    continue
+
+                                mapping.setdefault(extension_name, {})[alias_name] = {
+                                    "preferred": name,
+                                    "description": description,
+                                }
+
+            # Find subdivision and region replacements.
+            #
+            # <https://www.unicode.org/reports/tr35/#Canonical_Unicode_Locale_Identifiers>
+            #
+            # Replace aliases in special key values:
+            #   - If there is an 'sd' or 'rg' key, replace any subdivision alias
+            #     in its value in the same way, using subdivisionAlias data.
+            tree = ET.parse(zip_file.open("common/supplemental/supplementalMetadata.xml"))
+            for alias in tree.iterfind(".//subdivisionAlias"):
+                type = alias.get("type")
+                assert typeRE.match(type) is not None, (
+                       "{} matches the 'type' production".format(type))
+
+                # Take the first replacement when multiple ones are present.
+                replacement = alias.get("replacement").split(" ")[0].lower()
+
+                # Skip over invalid replacements.
+                #
+                # <subdivisionAlias type="fi01" replacement="AX" reason="overlong"/>
+                #
+                # It's not entirely clear to me if CLDR actually wants to use
+                # "axzzzz" as the replacement for this case.
+                if typeRE.match(replacement) is None:
+                    continue
+
+                # 'subdivisionAlias' applies to 'rg' and 'sd' keys.
+                mapping.setdefault("rg", {})[type] = {
+                    "preferred": replacement,
+                    "description": None,
+                }
+                mapping.setdefault("sd", {})[type] = {
+                    "preferred": replacement,
+                    "description": None,
+                }
+
+        writeUnicodeExtensionsFile(version, url, mapping, out)
+
+    if filename is not None:
+        print("Always make sure you have the newest CLDR core.zip!")
+        with open(filename, "rb") as cldr_file:
+            updateFrom(cldr_file)
+    else:
+        print("Downloading CLDR core.zip...")
+        with closing(urlopen(url)) as cldr_file:
+            cldr_data = io.BytesIO(cldr_file.read())
+            updateFrom(cldr_data)
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -1672,6 +2034,24 @@ if __name__ == "__main__":
                                  nargs="?",
                                  help="Local currency code list file, if omitted uses <URL>")
     parser_currency.set_defaults(func=partial(updateCurrency, topsrcdir))
+
+    parser_unicode_ext = subparsers.add_parser("unicode-ext", help="Update Unicode extensions")
+    parser_unicode_ext.add_argument("--version",
+                                    metavar="VERSION",
+                                    required=True,
+                                    help="CLDR version number")
+    parser_unicode_ext.add_argument("--url",
+                                    metavar="URL",
+                                    default="https://unicode.org/Public/cldr/<VERSION>/core.zip",
+                                    type=EnsureHttps,
+                                    help="Download url CLDR data (default: %(default)s)")
+    parser_unicode_ext.add_argument("--out",
+                                    default="UnicodeExtensionsGenerated.js",
+                                    help="Output file (default: %(default)s)")
+    parser_unicode_ext.add_argument("file",
+                                    nargs="?",
+                                    help="Local cldr-core.zip file, if omitted uses <URL>")
+    parser_unicode_ext.set_defaults(func=updateUnicodeExtensions)
 
     args = parser.parse_args()
     args.func(args)

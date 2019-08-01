@@ -330,7 +330,7 @@ typedef enum JSGCParamKey {
    */
   JSGC_MIN_NURSERY_BYTES = 31,
 
-  /*
+  /**
    * The minimum time to allow between triggering last ditch GCs in seconds.
    *
    * Default: 60 seconds
@@ -338,13 +338,33 @@ typedef enum JSGCParamKey {
    */
   JSGC_MIN_LAST_DITCH_GC_PERIOD = 32,
 
-  /*
+  /**
    * The delay (in heapsize kilobytes) between slices of an incremental GC.
    *
    * Default: ZoneAllocDelayBytes
    */
   JSGC_ZONE_ALLOC_DELAY_KB = 33,
 
+  /*
+   * The current size of the nursery.
+   *
+   * read-only.
+   */
+  JSGC_NURSERY_BYTES = 34,
+
+  /**
+   * Retained size base value for calculating malloc heap threshold.
+   *
+   * Default: MallocThresholdBase
+   */
+  JSGC_MALLOC_THRESHOLD_BASE = 35,
+
+  /**
+   * Growth factor for calculating malloc heap threshold.
+   *
+   * Default: MallocGrowthFactor
+   */
+  JSGC_MALLOC_GROWTH_FACTOR = 36,
 } JSGCParamKey;
 
 /*

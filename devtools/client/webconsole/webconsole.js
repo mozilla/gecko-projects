@@ -65,7 +65,8 @@ class WebConsole {
     iframeWindow,
     chromeWindow,
     hudService,
-    isBrowserConsole = false
+    isBrowserConsole = false,
+    fissionSupport = false
   ) {
     this.iframeWindow = iframeWindow;
     this.chromeWindow = chromeWindow;
@@ -73,7 +74,8 @@ class WebConsole {
     this.target = target;
     this.browserWindow = this.chromeWindow.top;
     this.hudService = hudService;
-    this._browserConsole = isBrowserConsole;
+    this.isBrowserConsole = isBrowserConsole;
+    this.fissionSupport = fissionSupport;
 
     const element = this.browserWindow.document.documentElement;
     if (element.getAttribute("windowtype") != gDevTools.chromeWindowType) {
@@ -372,36 +374,24 @@ class WebConsole {
    * @return object
    *         A promise object that is resolved once the Web Console is closed.
    */
-  async destroy() {
-    if (this._destroyer) {
-      return this._destroyer;
+  destroy() {
+    if (!this.hudId) {
+      return;
+    }
+    this.hudService.consoles.delete(this.hudId);
+
+    if (this.ui) {
+      this.ui.destroy();
     }
 
-    this._destroyer = (async () => {
-      this.hudService.consoles.delete(this.hudId);
+    if (this._parserService) {
+      this._parserService.stop();
+      this._parserService = null;
+    }
 
-      if (this.ui) {
-        this.ui.destroy();
-      }
-
-      if (!this._browserConsole) {
-        try {
-          await this.target.focus();
-        } catch (ex) {
-          // Tab focus can fail if the tab or target is closed.
-        }
-      }
-
-      if (this._parserService) {
-        this._parserService.stop();
-        this._parserService = null;
-      }
-
-      const id = Utils.supportsString(this.hudId);
-      Services.obs.notifyObservers(id, "web-console-destroyed");
-    })();
-
-    return this._destroyer;
+    const id = Utils.supportsString(this.hudId);
+    Services.obs.notifyObservers(id, "web-console-destroyed");
+    this.hudId = null;
   }
 }
 

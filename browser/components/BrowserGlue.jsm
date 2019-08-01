@@ -95,6 +95,14 @@ let ACTORS = {
     allFrames: true,
   },
 
+  Prompt: {
+    parent: {
+      moduleURI: "resource:///actors/PromptParent.jsm",
+    },
+
+    allFrames: true,
+  },
+
   SwitchDocumentDirection: {
     child: {
       moduleURI: "resource:///actors/SwitchDocumentDirectionChild.jsm",
@@ -124,6 +132,7 @@ let LEGACY_ACTORS = {
       matches: ["about:logins", "about:logins?*"],
       module: "resource:///actors/AboutLoginsChild.jsm",
       events: {
+        AboutLoginsCopyLoginDetail: { wantUntrusted: true },
         AboutLoginsCreateLogin: { wantUntrusted: true },
         AboutLoginsDeleteLogin: { wantUntrusted: true },
         AboutLoginsImport: { wantUntrusted: true },
@@ -135,14 +144,18 @@ let LEGACY_ACTORS = {
         AboutLoginsOpenPreferences: { wantUntrusted: true },
         AboutLoginsOpenSite: { wantUntrusted: true },
         AboutLoginsRecordTelemetryEvent: { wantUntrusted: true },
+        AboutLoginsSyncEnable: { wantUntrusted: true },
+        AboutLoginsSyncOptions: { wantUntrusted: true },
         AboutLoginsUpdateLogin: { wantUntrusted: true },
       },
       messages: [
         "AboutLogins:AllLogins",
-        "AboutLogins:UpdateBreaches",
         "AboutLogins:LoginAdded",
         "AboutLogins:LoginModified",
         "AboutLogins:LoginRemoved",
+        "AboutLogins:MasterPasswordResponse",
+        "AboutLogins:SyncState",
+        "AboutLogins:UpdateBreaches",
       ],
     },
   },
@@ -535,7 +548,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PluginManager: "resource:///actors/PluginParent.jsm",
   PictureInPicture: "resource://gre/modules/PictureInPicture.jsm",
   ReaderParent: "resource:///modules/ReaderParent.jsm",
-  RemotePrompt: "resource:///modules/RemotePrompt.jsm",
 });
 
 /* global ContentPrefServiceParent:false, ContentSearch:false,
@@ -621,6 +633,7 @@ const listeners = {
     "AboutLogins:CreateLogin": ["AboutLoginsParent"],
     "AboutLogins:DeleteLogin": ["AboutLoginsParent"],
     "AboutLogins:Import": ["AboutLoginsParent"],
+    "AboutLogins:MasterPasswordRequest": ["AboutLoginsParent"],
     "AboutLogins:OpenFAQ": ["AboutLoginsParent"],
     "AboutLogins:OpenFeedback": ["AboutLoginsParent"],
     "AboutLogins:OpenPreferences": ["AboutLoginsParent"],
@@ -628,6 +641,8 @@ const listeners = {
     "AboutLogins:OpenMobileIos": ["AboutLoginsParent"],
     "AboutLogins:OpenSite": ["AboutLoginsParent"],
     "AboutLogins:Subscribe": ["AboutLoginsParent"],
+    "AboutLogins:SyncEnable": ["AboutLoginsParent"],
+    "AboutLogins:SyncOptions": ["AboutLoginsParent"],
     "AboutLogins:UpdateLogin": ["AboutLoginsParent"],
     "Content:Click": ["ContentClick"],
     ContentSearch: ["ContentSearch"],
@@ -637,7 +652,6 @@ const listeners = {
     "PictureInPicture:Close": ["PictureInPicture"],
     "PictureInPicture:Playing": ["PictureInPicture"],
     "PictureInPicture:Paused": ["PictureInPicture"],
-    "Prompt:Open": ["RemotePrompt"],
     "Reader:FaviconRequest": ["ReaderParent"],
     "Reader:UpdateReaderButton": ["ReaderParent"],
     // PLEASE KEEP THIS LIST IN SYNC WITH THE MOBILE LISTENERS IN BrowserCLH.js
@@ -648,7 +662,6 @@ const listeners = {
     "PasswordManager:autoCompleteLogins": ["LoginManagerParent"],
     "PasswordManager:removeLogin": ["LoginManagerParent"],
     "PasswordManager:insecureLoginFormPresent": ["LoginManagerParent"],
-    "PasswordManager:OpenFeedback": ["AboutLoginsParent"],
     "PasswordManager:OpenPreferences": ["LoginManagerParent"],
     // PLEASE KEEP THIS LIST IN SYNC WITH THE MOBILE LISTENERS IN BrowserCLH.js
     "rtcpeer:CancelRequest": ["webrtcUI"],
