@@ -9,6 +9,9 @@
  * Maintenance Service installer, and TestAUSHelper.
  */
 
+#include <ctime>
+#include <process.h>
+
 #include <cinttypes>
 #include <cwchar>
 #include <string>
@@ -345,6 +348,91 @@ class SimpleAutoString {
   }
 };
 
+// FIXME: This should be merged to oak only, not central.
+static HANDLE LOG_HANDLE = INVALID_HANDLE_VALUE;
+
+// FIXME: This function should be merged to oak only, not central.
+void LOG(const wchar_t* format, ...) {
+  if (LOG_HANDLE == INVALID_HANDLE_VALUE) {
+    return;
+  }
+
+  SimpleAutoString message;
+  va_list ap;
+  va_start(ap, format);
+  size_t len = message.AllocFromVscprintf(format, ap);
+  va_end(ap);
+  if (len == 0) {
+    return;
+  }
+
+  va_start(ap, format);
+  size_t charsWritten = message.AssignVsprintf(len + 1, format, ap);
+  va_end(ap);
+  if (len != charsWritten) {
+    return;
+  }
+
+  DWORD written;
+  WriteFile(LOG_HANDLE,
+            message.String(),
+            static_cast<DWORD>(len) * sizeof(wchar_t),
+            &written,
+            nullptr);
+}
+
+// FIXME: This function should be merged to oak only, not central.
+void INIT_LOG() {
+  PWSTR ProgramData;
+  HRESULT hrv = SHGetKnownFolderPath(FOLDERID_ProgramData, KF_FLAG_CREATE, nullptr,
+                                     &ProgramData);
+  if (hrv != S_OK) {
+    CoTaskMemFree(ProgramData);
+  }
+
+  SimpleAutoString logDir;
+  logDir.AutoAllocAndAssignSprintf(L"%s\\MozLog", ProgramData);
+  CoTaskMemFree(ProgramData);
+  if (logDir.Length() == 0) {
+    return;
+  }
+  CreateDirectoryW(logDir.String(), nullptr);
+
+  SimpleAutoString logPath;
+  logPath.AutoAllocAndAssignSprintf(L"%s\\firefox_pid_%d.log", logDir.String(), _getpid());
+  if (logPath.Length() == 0) {
+    return;
+  }
+
+  LOG_HANDLE = CreateFileW(logPath.String(),
+                           FILE_APPEND_DATA,
+                           FILE_SHARE_READ,
+                           nullptr,
+                           OPEN_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL,
+                           nullptr);
+
+  std::time_t t = std::time(0);
+  std::tm* now = std::localtime(&t);
+  LOG(L"Log Opened: %04d-%02d-%02d %02d:%02d:%02d\n",
+      now->tm_year + 1900,
+      now->tm_mon + 1,
+      now->tm_mday,
+      now->tm_hour,
+      now->tm_min,
+      now->tm_sec);
+}
+
+// FIXME: This function should be merged to oak only, not central.
+void RELEASE_LOG() {
+  if (LOG_HANDLE == INVALID_HANDLE_VALUE) {
+    return;
+  }
+  LOG(L"End of Log\n");
+  CloseHandle(LOG_HANDLE);
+  LOG_HANDLE = INVALID_HANDLE_VALUE;
+}
+
 // Deleter for use with UniquePtr
 struct CoTaskMemFreeDeleter {
   void operator()(void* aPtr) { ::CoTaskMemFree(aPtr); }
@@ -372,6 +460,23 @@ struct AutoPerms {
 static HRESULT GetFilename(SimpleAutoString& path, SimpleAutoString& filename);
 
 enum class Tristate { False, True, Unknown };
+
+const wchar_t TristateFalseName[] = L"False";
+const wchar_t TristateTrueName[] = L"True";
+const wchar_t TristateUnknownName[] = L"Unknown";
+const wchar_t TristateInvalidName[] = L"Invalid";
+static const wchar_t* TristateString(Tristate t) {
+  if (t == Tristate::True) {
+    return TristateTrueName;
+  }
+  if (t == Tristate::False) {
+    return TristateFalseName;
+  }
+  if (t == Tristate::Unknown) {
+    return TristateUnknownName;
+  }
+  return TristateInvalidName;
+}
 
 enum class Lockstate { Locked, Unlocked };
 
@@ -650,6 +755,7 @@ class FileOrDirectory {
     mozilla::UniquePtr<SECURITY_DESCRIPTOR, LocalFreeDeleter>
         autoSecurityDescriptor(securityDescriptor);
     if (drv != ERROR_SUCCESS || dacl == nullptr) {
+      LOG(L"FileOrDirectory::PermsOk - Unable to get perms for \"%s\". Error: %#X\n", path.String(), drv);
       return Tristate::Unknown;
     }
 
@@ -660,15 +766,20 @@ class FileOrDirectory {
       ACCESS_MASK actualMask;
       drv = GetEffectiveRightsFromAclW(dacl, trustee, &actualMask);
       if (drv != ERROR_SUCCESS) {
+        LOG(L"FileOrDirectory::PermsOk - [eaIndex = %u] Unable to get effective rights for \"%s\". Error: %#X\n", eaIndex, path.String(), drv);
         return Tristate::Unknown;
       }
+      LOG(L"FileOrDirectory::PermsOk - [eaIndex = %u] Pre-normalization masks: expected: %#X, actual: %#X\n", eaIndex, expectedMask, actualMask);
       NormalizeAccessMask(expectedMask);
       NormalizeAccessMask(actualMask);
+      LOG(L"FileOrDirectory::PermsOk - [eaIndex = %u] Post-normalization masks: expected: %#X, actual: %#X\n", eaIndex, expectedMask, actualMask);
       if ((actualMask & expectedMask) != expectedMask) {
+        LOG(L"FileOrDirectory::PermsOk - [eaIndex = %u] Returning False\n", eaIndex);
         return Tristate::False;
       }
     }
 
+    LOG(L"FileOrDirectory::PermsOk - Returning True\n");
     return Tristate::True;
   }
 
@@ -861,8 +972,11 @@ HRESULT
 GetCommonUpdateDirectory(const wchar_t* installPath,
                          SetPermissionsOf permsToSet,
                          mozilla::UniquePtr<wchar_t[]>& result) {
-  return GetUpdateDirectory(installPath, nullptr, nullptr,
+  INIT_LOG();
+  HRESULT hrv = GetUpdateDirectory(installPath, nullptr, nullptr,
                             WhichUpdateDir::CommonAppData, permsToSet, result);
+  RELEASE_LOG();
+  return hrv;
 }
 
 /**
@@ -878,10 +992,13 @@ HRESULT
 GetUserUpdateDirectory(const wchar_t* installPath, const char* vendor,
                        const char* appName,
                        mozilla::UniquePtr<wchar_t[]>& result) {
-  return GetUpdateDirectory(
+  INIT_LOG();
+  HRESULT hrv = GetUpdateDirectory(
       installPath, vendor, appName, WhichUpdateDir::UserAppData,
       SetPermissionsOf::BaseDirIfNotExists,  // Arbitrary value
       result);
+  RELEASE_LOG();
+  return hrv;
 }
 
 /**
@@ -974,15 +1091,19 @@ static HRESULT GetUpdateDirectory(const wchar_t* installPath,
 
   if (whichDir == WhichUpdateDir::CommonAppData) {
     if (updatePath.Length() > 0) {
+      LOG(L"Update path: \"%s\"\n", updatePath.String());
       hrv = EnsureUpdateDirectoryPermissions(basePath, updatePath, true,
                                              permsToSet);
     } else {
+      LOG(L"Unable to get update path. Base path is: \"%s\"\n", basePath.String());
       hrv = EnsureUpdateDirectoryPermissions(basePath, basePath, false,
                                              permsToSet);
     }
     if (FAILED(hrv)) {
       return hrv;
     }
+  } else {
+    LOG(L"Getting user update directory, not the common one.\n");
   }
 
   if (!installPath) {
@@ -1030,6 +1151,12 @@ static HRESULT GetUpdateDirectory(const wchar_t* installPath,
 static HRESULT EnsureUpdateDirectoryPermissions(
     const SimpleAutoString& basePath, const SimpleAutoString& updatePath,
     bool fullUpdatePath, SetPermissionsOf permsToSet) {
+  LOG(L"EnsureUpdateDirectoryPermissions(basePath = \"%s\", updatePath = \"%s\", fullUpdatePath = %s, permsToSet = %s)\n",
+      basePath.String(),
+      updatePath.String(),
+      fullUpdatePath ? L"true" : L"false",
+      (permsToSet == SetPermissionsOf::AllFilesAndDirs) ? L"AllFilesAndDirs" : L"BaseDirIfNotExists");
+
   HRESULT returnValue = S_OK;  // Stores the value that will eventually be
                                // returned. If errors occur, this is set to the
                                // first error encountered.
@@ -1042,6 +1169,9 @@ static HRESULT EnsureUpdateDirectoryPermissions(
   // directory.
   bool validBaseDir = baseDir.IsDirectory() == Tristate::True &&
                       baseDir.IsLink() == Tristate::False;
+  LOG(L"EnsureUpdateDirectoryPermissions - baseDir is directory: %s\n", TristateString(baseDir.IsDirectory()));
+  LOG(L"EnsureUpdateDirectoryPermissions - baseDir is link: %s\n", TristateString(baseDir.IsLink()));
+  LOG(L"EnsureUpdateDirectoryPermissions - validBaseDir: %s\n", validBaseDir ? L"true" : L"false");
 
   // The most common case when calling this function is when the caller of
   // GetCommonUpdateDirectory just wants the update directory path, and passes
@@ -1049,17 +1179,21 @@ static HRESULT EnsureUpdateDirectoryPermissions(
   // The most common environment is that the update directory already exists.
   // Optimize for this case.
   if (permsToSet == SetPermissionsOf::BaseDirIfNotExists && validBaseDir) {
+    LOG(L"EnsureUpdateDirectoryPermissions end - not setting permissions and base dir looks ok.\n");
     return S_OK;
   }
 
   AutoPerms perms;
   HRESULT hrv = GeneratePermissions(perms);
   if (FAILED(hrv)) {
+    LOG(L"EnsureUpdateDirectoryPermissions end - unable to generate permissions (Error: %#X)\n", hrv);
     // Fatal error. There is no real way to recover from this.
     return hrv;
   }
 
   if (permsToSet == SetPermissionsOf::BaseDirIfNotExists) {
+    LOG(L"EnsureUpdateDirectoryPermissions - Base dir is invalid, but we aren't doing a full perm check. "
+        L"Moving conflicting file and recreating directory.\n");
     // We know that the base directory is invalid, because otherwise we would
     // have exited already.
     // Ignore errors here. It could be that the directory doesn't exist at all.
@@ -1069,6 +1203,8 @@ static HRESULT EnsureUpdateDirectoryPermissions(
 
     hrv = MakeDir(basePath, perms);
     returnValue = FAILED(returnValue) ? returnValue : hrv;
+    LOG(L"EnsureUpdateDirectoryPermissions end - (conflicting dir recreated) "
+        L"dir creation code: %#X exit code: %#X\n", hrv, returnValue);
     return returnValue;
   }
 
@@ -1077,6 +1213,8 @@ static HRESULT EnsureUpdateDirectoryPermissions(
   hrv = mutBasePath.CopyFrom(basePath);
   if (FAILED(hrv) || mutBasePath.Length() == 0) {
     returnValue = FAILED(returnValue) ? returnValue : hrv;
+    LOG(L"EnsureUpdateDirectoryPermissions end - Unable to make mutable copy of basePath"
+        L" Error Code: %#X\n", hrv);
     return returnValue;
   }
 
@@ -1094,16 +1232,20 @@ static HRESULT EnsureUpdateDirectoryPermissions(
         leafDirLen, L"%s\\%s\\%s", updatePath.String(), updateSubdirectoryName,
         patchDirectoryName);
     if (leafDirPath.Length() == leafDirLen) {
+      LOG(L"EnsureUpdateDirectoryPermissions - Calling EnsureCorrectPermissions with leafDirPath = \"%s\"\n", leafDirPath.String());
       hrv = EnsureCorrectPermissions(mutBasePath, baseDir, leafDirPath, perms);
     } else {
+      LOG(L"EnsureUpdateDirectoryPermissions - Calling EnsureCorrectPermissions with updatePath (despite fullUpdatePath)\n");
       // If we cannot generate the leaf path, just do the best we can by using
       // the updatePath.
       returnValue = FAILED(returnValue) ? returnValue : E_FAIL;
       hrv = EnsureCorrectPermissions(mutBasePath, baseDir, updatePath, perms);
     }
   } else {
+    LOG(L"EnsureUpdateDirectoryPermissions - Calling EnsureCorrectPermissions with leafDirPath (no fullUpdatePath)\n");
     hrv = EnsureCorrectPermissions(mutBasePath, baseDir, updatePath, perms);
   }
+  LOG(L"EnsureUpdateDirectoryPermissions - EnsureCorrectPermissions returned %#X\n", hrv);
   returnValue = FAILED(returnValue) ? returnValue : hrv;
 
   // EnsureCorrectPermissions does its best to remove links and conflicting
@@ -1117,6 +1259,7 @@ static HRESULT EnsureUpdateDirectoryPermissions(
       basePath.String(),
       const_cast<LPSECURITY_ATTRIBUTES>(&perms.securityAttributes));
   if (success) {
+    LOG(L"EnsureUpdateDirectoryPermissions - Created update directory!\n");
     return S_OK;
   }
   if (SUCCEEDED(returnValue)) {
@@ -1124,6 +1267,11 @@ static HRESULT EnsureUpdateDirectoryPermissions(
     if (baseDir.IsDirectory() != Tristate::True ||
         baseDir.IsLink() != Tristate::False ||
         baseDir.PermsOk(basePath, perms) != Tristate::True) {
+      LOG(L"EnsureUpdateDirectoryPermissions - Succeeded, but update directory doesn't look right!"
+          L"IsDirectory = %s, IsLink = %s, PermsOk = %s\n",
+          TristateString(baseDir.IsDirectory()),
+          TristateString(baseDir.IsLink()),
+          TristateString(baseDir.PermsOk(basePath, perms)));
       return E_FAIL;
     }
   }
@@ -1231,20 +1379,26 @@ static HRESULT GeneratePermissions(AutoPerms& result) {
  * directory.
  */
 static HRESULT MakeDir(const SimpleAutoString& path, const AutoPerms& perms) {
+  LOG(L"MakeDir(path = %s)\n", path.String());
   BOOL success = CreateDirectoryW(
       path.String(),
       const_cast<LPSECURITY_ATTRIBUTES>(&perms.securityAttributes));
   if (success) {
+    LOG(L"Successfully created path\n");
     return S_OK;
   }
   DWORD error = GetLastError();
   if (error != ERROR_ALREADY_EXISTS) {
+    LOG(L"Got Error %#X\n", error);
     return HRESULT_FROM_WIN32(error);
   }
+  LOG(L"Got Error ERROR_ALREADY_EXISTS\n");
   FileOrDirectory dir(path, Lockstate::Unlocked);
   if (dir.IsDirectory() == Tristate::True && dir.IsLink() == Tristate::False) {
+    LOG(L"Directory looks ok\n");
     return S_OK;
   }
+  LOG(L"Directory does not look ok\n");
   return HRESULT_FROM_WIN32(error);
 }
 
@@ -1262,12 +1416,15 @@ static HRESULT MakeDir(const SimpleAutoString& path, const AutoPerms& perms) {
  */
 static HRESULT RemoveRecursive(const SimpleAutoString& path,
                                FileOrDirectory& file) {
+  LOG(L"RemoveRecursive(path = \"%s\")\n", path.String());
   file.Unlock();
   if (file.IsReadonly() != Tristate::False) {
+    LOG(L"RemoveRecursive - Removing readonly attribute\n");
     // Ignore errors setting attributes. We only care if it was successfully
     // deleted.
     DWORD attributes = file.Attributes();
     if (attributes == INVALID_FILE_ATTRIBUTES) {
+      LOG(L"RemoveRecursive - Unable to read attributes. Setting normal ones\n");
       SetFileAttributesW(path.String(), FILE_ATTRIBUTE_NORMAL);
     } else {
       SetFileAttributesW(path.String(), attributes & ~FILE_ATTRIBUTE_READONLY);
@@ -1290,12 +1447,19 @@ static HRESULT RemoveRecursive(const SimpleAutoString& path,
 
   int rv = SHFileOperationW(&fileOperation);
   if (rv == 0 || rv == ERROR_FILE_NOT_FOUND) {
+    LOG(L"RemoveRecursive - Successfully moved file to the recycle bin\n");
     return S_OK;
   }
+  LOG(L"RemoveRecursive - Failed to move file to the recycle bin\n");
 
   // Some files such as hard links can't be deleted properly with
   // SHFileOperation, so additionally try DeleteFile.
   BOOL success = DeleteFileW(path.String());
+  if (success) {
+    LOG(L"RemoveRecursive - Successfully removed with DeleteFileW\n");
+  } else {
+    LOG(L"RemoveRecursive - Unable to remove with DeleteFileW. Error: %#X\n", GetLastError());
+  }
   return success ? S_OK : HRESULT_FROM_WIN32(GetLastError());
 }
 
@@ -1322,6 +1486,7 @@ static HRESULT RemoveRecursive(const SimpleAutoString& path,
 static HRESULT MoveConflicting(const SimpleAutoString& path,
                                FileOrDirectory& file,
                                SimpleAutoString* outPath) {
+  LOG(L"MoveConflicting(path = \"%s\")\n", path.String());
   file.Unlock();
   // Try to move the file to a backup location
   SimpleAutoString newPath;
@@ -1350,6 +1515,7 @@ static HRESULT MoveConflicting(const SimpleAutoString& path,
                               MOVEFILE_REPLACE_EXISTING);
       }
       if (success) {
+        LOG(L"MoveConflicting - successfully moved \"%s\" to \"%s\"\n", path.String(), newPath.String());
         if (outPath) {
           outPath->Swap(newPath);
         }
@@ -1360,8 +1526,10 @@ static HRESULT MoveConflicting(const SimpleAutoString& path,
         if (outPath) {
           outPath->Truncate();
         }
+        LOG(L"MoveConflicting - File is mysteriously gone. Success?\n");
         return S_OK;
       }
+      LOG(L"MoveConflicting - Failed to move \"%s\" to \"%s\"\n", path.String(), newPath.String());
       // If the move failed because newPath already exists, loop to try a new
       // suffix. If the move failed for any other reason, a new suffix will
       // probably not help.
@@ -1369,17 +1537,22 @@ static HRESULT MoveConflicting(const SimpleAutoString& path,
       // permissions, we may get an "Access Denied" error. So retry in that case
       // too.
       if (drv != ERROR_ALREADY_EXISTS && drv != ERROR_ACCESS_DENIED) {
+        LOG(L"MoveConflicting - Error was not ERROR_ALREADY_EXISTS or ERROR_ACCESS_DENIED. Giving up.\n");
         break;
       }
     }
   }
 
+  LOG(L"MoveConflicting - Unable to move. Attempting to remove.\n");
   // Moving failed. Try to delete.
   HRESULT hrv = RemoveRecursive(path, file);
   if (SUCCEEDED(hrv)) {
+    LOG(L"MoveConflicting - Remove successful\n");
     if (outPath) {
       outPath->Truncate();
     }
+  } else {
+    LOG(L"MoveConflicting - Remove failed\n");
   }
   return hrv;
 }
@@ -1414,6 +1587,9 @@ static HRESULT EnsureCorrectPermissions(SimpleAutoString& path,
                                         FileOrDirectory& file,
                                         const SimpleAutoString& leafUpdateDir,
                                         const AutoPerms& perms) {
+  LOG(L"EnsureCorrectPermissions(path = \"%s\") [IsDirectory: %s, IsLink: %s, IsHardLink: %s, IsSymLink: %s]\n",
+      path.String(), TristateString(file.IsDirectory()), TristateString(file.IsLink()),
+      TristateString(file.IsHardLink()), TristateString(file.IsSymLink()));
   HRESULT returnValue = S_OK;  // Stores the value that will eventually be
                                // returned. If errors occur, this is set to the
                                // first error encountered.
@@ -1433,22 +1609,31 @@ static HRESULT EnsureCorrectPermissions(SimpleAutoString& path,
       hrv = RemoveRecursive(path, file);
       returnValue = FAILED(returnValue) ? returnValue : hrv;
       if (SUCCEEDED(hrv)) {
+        LOG(L"EnsureCorrectPermissions(%s) - Removed file\n", path.String());
         removed = true;
       }
     }
 
     if (FAILED(permSetResult) && !removed) {
+      LOG(L"EnsureCorrectPermissions(%s) - Failed to set permissions (Error: %#X)\n", path.String(), permSetResult);
       returnValue = FAILED(returnValue) ? returnValue : permSetResult;
     }
 
     if (conflictsWithLeaf && !removed) {
       hrv = MoveConflicting(path, file, nullptr);
       returnValue = FAILED(returnValue) ? returnValue : hrv;
+      if (SUCCEEDED(hrv)) {
+        LOG(L"EnsureCorrectPermissions(%s) - Moved conflicting file\n", path.String());
+      } else {
+        LOG(L"EnsureCorrectPermissions(%s) - Unable to move conflicting file (error: %#X)\n", path.String(), hrv);
+      }
     }
+    LOG(L"EnsureCorrectPermissions(%s) - Returning %#X (done with non-directory)\n", path.String(), returnValue);
     return returnValue;
   }
 
   if (file.PermsOk(path, perms) != Tristate::True) {
+    LOG(L"EnsureCorrectPermissions(%s) - Bad permissions detected\n", path.String());
     bool permissionsFixed;
     hrv = FixDirectoryPermissions(path, file, perms, permissionsFixed);
     returnValue = FAILED(returnValue) ? returnValue : hrv;
@@ -1456,12 +1641,15 @@ static HRESULT EnsureCorrectPermissions(SimpleAutoString& path,
     // that we are unable to fix. If its permissions are correct, it isn't
     // conflicting with the leaf path, it is a component of the leaf path.
     if (!permissionsFixed && conflictsWithLeaf) {
+      LOG(L"EnsureCorrectPermissions(%s) - Unable to fix permissions on conflicting directory\n", path.String());
       // No need to check for error here. returnValue is already a failure code
       // because FixDirectoryPermissions failed. MoveConflicting will ensure
       // that path is correct (or empty, on deletion) whether it succeeds or
       // fails.
       MoveConflicting(path, file, &path);
+      LOG(L"EnsureCorrectPermissions(%s) - Path move attempted\n", path.String());
       if (path.Length() == 0) {
+        LOG(L"EnsureCorrectPermissions(%s) - Path has been deleted. Returning %#X\n", path.String(), returnValue);
         // Path has been deleted.
         return returnValue;
       }
@@ -1477,11 +1665,13 @@ static HRESULT EnsureCorrectPermissions(SimpleAutoString& path,
   if (!file.IsLocked() || file.IsLink() != Tristate::False ||
       file.IsDirectory() != Tristate::True) {
     returnValue = FAILED(returnValue) ? returnValue : E_FAIL;
+    LOG(L"EnsureCorrectPermissions(%s) - Want to recurse into unsafe path. Returning %#X instead\n", path.String(), returnValue);
     return returnValue;
   }
 
   SimpleAutoString childBuffer;
   if (!childBuffer.AllocEmpty(MAX_PATH)) {
+    LOG(L"EnsureCorrectPermissions(%s) - Failed to allocate childBuffer\n", path.String());
     // Fatal error. We need a buffer to put the path in.
     return FAILED(returnValue) ? returnValue : E_OUTOFMEMORY;
   }
@@ -1502,10 +1692,12 @@ static HRESULT EnsureCorrectPermissions(SimpleAutoString& path,
       returnValue = FAILED(returnValue)
                         ? returnValue
                         : HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+      LOG(L"EnsureCorrectPermissions(%s) - Skipping due to assignment failure: %s\n", path.String(), entry->d_name);
       continue;
     }
 
     FileOrDirectory child(childBuffer, Lockstate::Locked);
+    LOG(L"EnsureCorrectPermissions(%s) - Recursing into child: %s\n", path.String(), childBuffer.String());
     hrv = EnsureCorrectPermissions(childBuffer, child, leafUpdateDir, perms);
     returnValue = FAILED(returnValue) ? returnValue : hrv;
 
@@ -1514,9 +1706,11 @@ static HRESULT EnsureCorrectPermissions(SimpleAutoString& path,
     errno = 0;
   }
   if (errno != 0) {
+    LOG(L"EnsureCorrectPermissions(%s) - Directory listing failure\n", path.String());
     returnValue = FAILED(returnValue) ? returnValue : E_FAIL;
   }
 
+  LOG(L"EnsureCorrectPermissions(%s) - Done with recursion. Returning %#X\n", path.String(), returnValue);
   return returnValue;
 }
 
@@ -1546,34 +1740,40 @@ static HRESULT FixDirectoryPermissions(const SimpleAutoString& path,
                                        FileOrDirectory& directory,
                                        const AutoPerms& perms,
                                        bool& permissionsFixed) {
+  LOG(L"FixDirectoryPermissions(path = \"%s\")\n", path.String());
   permissionsFixed = false;
 
   SimpleAutoString parent;
   SimpleAutoString dirName;
   HRESULT hrv = SplitPath(path, parent, dirName);
   if (FAILED(hrv)) {
+    LOG(L"FixDirectoryPermissions - Failed to split path (error = %#X)\n", hrv);
     return E_FAIL;
   }
 
   SimpleAutoString tempPath;
   if (!tempPath.AllocEmpty(MAX_PATH)) {
+    LOG(L"FixDirectoryPermissions - Failed to allocate tempPath\n");
     return E_FAIL;
   }
   BOOL success = GetUUIDTempFilePath(parent.String(), dirName.String(),
                                      tempPath.MutableString());
   if (!success || !tempPath.Check() || tempPath.Length() == 0) {
+    LOG(L"FixDirectoryPermissions - Failed to get UUID temp path\n");
     return E_FAIL;
   }
 
   directory.Unlock();
   success = MoveFileW(path.String(), tempPath.String());
   if (!success) {
+    LOG(L"FixDirectoryPermissions - Failed to move directory (error = %#X)\n", GetLastError());
     return HRESULT_FROM_WIN32(GetLastError());
   }
 
   success = CreateDirectoryW(path.String(), const_cast<LPSECURITY_ATTRIBUTES>(
                                                 &perms.securityAttributes));
   if (!success) {
+    LOG(L"FixDirectoryPermissions - Failed to create replacement directory (error = %#X)\n", GetLastError());
     return E_FAIL;
   }
   directory.Reset(path, Lockstate::Locked);
@@ -1582,6 +1782,10 @@ static HRESULT FixDirectoryPermissions(const SimpleAutoString& path,
       directory.PermsOk(path, perms) != Tristate::True) {
     // Don't leave an invalid file locked when we return.
     directory.Unlock();
+    LOG(L"FixDirectoryPermissions - The directory that we created does not appear to be the one we wanted: "
+        L"IsLocked: %s, IsLink: %s, IsDirectory: %s, PermsOk: %s\n", directory.IsLocked() ? L"true" : L"false",
+        TristateString(directory.IsLink()), TristateString(directory.IsDirectory()),
+        TristateString(directory.PermsOk(path, perms)));
     return E_FAIL;
   }
   permissionsFixed = true;
@@ -1589,12 +1793,14 @@ static HRESULT FixDirectoryPermissions(const SimpleAutoString& path,
   FileOrDirectory tempDir(tempPath, Lockstate::Locked);
   if (!tempDir.IsLocked() || tempDir.IsLink() != Tristate::False ||
       tempDir.IsDirectory() != Tristate::True) {
+    LOG(L"FixDirectoryPermissions - Unable to lock temp directory\n");
     return E_FAIL;
   }
 
   SimpleAutoString moveFrom;
   SimpleAutoString moveTo;
   if (!moveFrom.AllocEmpty(MAX_PATH) || !moveTo.AllocEmpty(MAX_PATH)) {
+    LOG(L"FixDirectoryPermissions - Unable to allocate moveTo/moveFrom\n");
     return E_OUTOFMEMORY;
   }
 
@@ -1618,6 +1824,7 @@ static HRESULT FixDirectoryPermissions(const SimpleAutoString& path,
       returnValue = FAILED(returnValue)
                         ? returnValue
                         : HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+      LOG(L"FixDirectoryPermissions - Unable assign to moveFrom: \"%s\"\n", entry->d_name);
       continue;
     }
 
@@ -1626,13 +1833,17 @@ static HRESULT FixDirectoryPermissions(const SimpleAutoString& path,
       returnValue = FAILED(returnValue)
                         ? returnValue
                         : HRESULT_FROM_WIN32(ERROR_BUFFER_OVERFLOW);
+      LOG(L"FixDirectoryPermissions - Unable assign to moveTo: \"%s\"\n", entry->d_name);
       continue;
     }
 
     success = MoveFileW(moveFrom.String(), moveTo.String());
     if (!success) {
+      LOG(L"FixDirectoryPermissions - Unable move \"%s\" to \"%s\"\n", moveFrom.String(), moveTo.String());
       returnValue = FAILED(returnValue) ? returnValue
                                         : HRESULT_FROM_WIN32(GetLastError());
+    } else {
+      LOG(L"FixDirectoryPermissions - Moved \"%s\" to \"%s\"\n", moveFrom.String(), moveTo.String());
     }
 
     // Before looping, clear any errors that might have been encountered so we
@@ -1640,12 +1851,19 @@ static HRESULT FixDirectoryPermissions(const SimpleAutoString& path,
     errno = 0;
   }
   if (errno != 0) {
+    LOG(L"FixDirectoryPermissions - Directory listing failure\n");
     returnValue = FAILED(returnValue) ? returnValue : E_FAIL;
   }
 
   hrv = RemoveRecursive(tempPath, tempDir);
   returnValue = FAILED(returnValue) ? returnValue : hrv;
+  if (SUCCEEDED(hrv)) {
+    LOG(L"FixDirectoryPermissions - Successfully removed temp dir\n");
+  } else {
+    LOG(L"FixDirectoryPermissions - Failed to remove temp dir (error = %#X)\n", tempPath.String());
+  }
 
+  LOG(L"FixDirectoryPermissions - Returning %#X\n", returnValue);
   return returnValue;
 }
 
@@ -1659,23 +1877,28 @@ static HRESULT SplitPath(const SimpleAutoString& path,
                          SimpleAutoString& filename) {
   HRESULT hrv = parentPath.CopyFrom(path);
   if (FAILED(hrv) || parentPath.Length() == 0) {
+    LOG(L"SplitPath failed to copy parent path (error = %#X)\n", hrv);
     return hrv;
   }
 
   hrv = GetFilename(parentPath, filename);
   if (FAILED(hrv)) {
+    LOG(L"SplitPath - GetFilename failed (error = %#X)\n", hrv);
     return hrv;
   }
 
   size_t parentPathLen = parentPath.Length();
   if (parentPathLen < filename.Length() + 1) {
+    LOG(L"SplitPath - parentPathLen is too short to truncate off the filename\n");
     return E_FAIL;
   }
   parentPathLen -= filename.Length() + 1;
   parentPath.Truncate(parentPathLen);
   if (parentPath.Length() == 0) {
+    LOG(L"SplitPath - Failed to truncate the parent path\n");
     return E_FAIL;
   }
+  LOG(L"SplitPath - \"%s\" split into \"%s\" and \"%s\"\n", path.String(), parentPath.String(), filename.String());
 
   return S_OK;
 }
@@ -1689,6 +1912,7 @@ static HRESULT GetFilename(SimpleAutoString& path, SimpleAutoString& filename) {
   // Remove trailing path separators.
   size_t pathLen = path.Length();
   if (pathLen == 0) {
+    LOG(L"GetFilename called on empty path\n");
     return E_FAIL;
   }
   wchar_t lastChar = path.String()[pathLen - 1];
@@ -1696,6 +1920,7 @@ static HRESULT GetFilename(SimpleAutoString& path, SimpleAutoString& filename) {
     --pathLen;
     path.Truncate(pathLen);
     if (pathLen == 0) {
+      LOG(L"GetFilename called on path containing only directory separators\n");
       return E_FAIL;
     }
     lastChar = path.String()[pathLen - 1];
@@ -1706,13 +1931,16 @@ static HRESULT GetFilename(SimpleAutoString& path, SimpleAutoString& filename) {
   const wchar_t* separator =
       (separator1 > separator2) ? separator1 : separator2;
   if (separator == nullptr) {
+    LOG(L"GetFilename unable to find directory separator\n");
     return E_FAIL;
   }
 
   HRESULT hrv = filename.CopyFrom(separator + 1);
   if (FAILED(hrv) || filename.Length() == 0) {
+    LOG(L"GetFilename CopyFrom failed %#X\n", hrv);
     return E_FAIL;
   }
+  LOG(L"GetFilename(%s) = \"%s\"\n", path.String(), filename.String());
   return S_OK;
 }
 
