@@ -70,7 +70,13 @@
         sizemode="normal"
         retargetdocumentfocus="urlbar-input"
         persist="screenX screenY width height sizemode"
-        >
+        data-l10n-sync="true">
+
+<linkset>
+  <html:link rel="localization" href="branding/brand.ftl"/>
+  <html:link rel="localization" href="browser/branding/sync-brand.ftl"/>
+  <html:link rel="localization" href="browser/menubar.ftl"/>
+</linkset>
 
 # All JS files which are needed by browser.xhtml and other top level windows to
 # support MacOS specific features *must* go into the global-scripts.inc file so
@@ -849,13 +855,19 @@
               <box id="tracking-protection-icon-container" align="center"
                    role="button"
                    onclick="gProtectionsHandler.handleProtectionsButtonEvent(event);"
-                   onkeypress="gProtectionsHandler.handleProtectionsButtonEvent(event);">
-                <box id="tracking-protection-icon-box" animationsenabled="true">
+                   onkeypress="gProtectionsHandler.handleProtectionsButtonEvent(event);"
+                   onmouseover="gProtectionsHandler.onTrackingProtectionIconHoveredOrFocused();"
+                   onfocus="gProtectionsHandler.onTrackingProtectionIconHoveredOrFocused();">
+                <box id="tracking-protection-icon-box" animationsenabled="true"
+                     tooltip="tracking-protection-icon-tooltip">
                   <image id="tracking-protection-icon"/>
                   <box id="tracking-protection-icon-animatable-box" flex="1">
                     <image id="tracking-protection-icon-animatable-image" flex="1"/>
                   </box>
                 </box>
+                <tooltip id="tracking-protection-icon-tooltip">
+                  <description id="tracking-protection-icon-tooltip-label" class="tooltip-label"/>
+                </tooltip>
               </box>
               <box id="identity-box" role="button"
                    align="center"
@@ -1080,8 +1092,8 @@
 
         <toolbarbutton id="fxa-toolbar-menu-button" class="toolbarbutton-1 chromeclass-toolbar-additional subviewbutton-nav"
                        badged="true"
-                       onmousedown="gSync.toggleAccountPanel('PanelUI-fxa', event)"
-                       onkeypress="gSync.toggleAccountPanel('PanelUI-fxa', event)"
+                       onmousedown="gSync.toggleAccountPanel('PanelUI-fxa', this, event)"
+                       onkeypress="gSync.toggleAccountPanel('PanelUI-fxa', this, event)"
                        consumeanchor="fxa-toolbar-menu-button"
                        closemenu="none"
                        label="&fxa.menu.firefoxAccount;"

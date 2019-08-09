@@ -228,6 +228,10 @@ html|*#webRTC-previewVideo {
   height: 16px;
 }
 
+.popup-subitem:-moz-locale-dir(rtl) {
+  transform: scaleX(-1);
+}
+
 .identity-popup-popup-menulist {
   min-width: 6.5em;
 }
@@ -389,4 +393,12 @@ html|*#webRTC-previewVideo {
 .popup-notification-icon[popupid="update-unsupported"] {
   background: #FFE900 url(chrome://browser/skin/notification-icons/update.svg) no-repeat center;
   border-radius: 50%;
+}
+
+/* Social Tracking */
+:root[lwt-toolbar-field-brighttext] .popup-notification-icon[popupid="socialblock"] {
+  list-style-image: url(chrome://browser/skin/notification-icons/block-social-dark.svg);
+}
+.popup-notification-icon[popupid="socialblock"] {
+  list-style-image: url(chrome://browser/skin/notification-icons/block-social.svg);
 }

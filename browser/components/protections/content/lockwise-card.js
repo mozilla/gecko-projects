@@ -30,9 +30,8 @@ export default class LockwiseCard {
       // Once data for the user is retrieved, display the lockwise card.
       this.buildContent(data);
 
-      // Show the Lockwise card.
-      const lockwiseCard = this.doc.querySelector(".lockwise-card.hidden");
-      lockwiseCard.classList.remove("hidden");
+      const lockwiseUI = document.querySelector(".card.lockwise-card.loading");
+      lockwiseUI.classList.remove("loading");
     });
   }
 
@@ -53,14 +52,15 @@ export default class LockwiseCard {
     container.classList.remove("hidden");
 
     if (isLoggedIn) {
-      title.textContent = "Firefox Lockwise";
-      headerContent.textContent =
-        "Securely store and sync your passwords to all your devices.";
+      title.setAttribute("data-l10n-id", "lockwise-title-logged-in");
+      headerContent.setAttribute(
+        "data-l10n-id",
+        "lockwise-header-content-logged-in"
+      );
       this.renderContentForLoggedInUser(container, numLogins, numSyncedDevices);
     } else {
-      title.textContent = "Never forget a password again";
-      headerContent.textContent =
-        "Firefox Lockwise securely stores your passwords in your browser.";
+      title.setAttribute("data-l10n-id", "lockwise-title");
+      headerContent.setAttribute("data-l10n-id", "lockwise-header-content");
     }
   }
 
@@ -75,11 +75,28 @@ export default class LockwiseCard {
    *        The number of synced devices.
    */
   renderContentForLoggedInUser(container, storedLogins, syncedDevices) {
+    const lockwiseCardBody = this.doc.querySelector(
+      ".card.lockwise-card .card-body"
+    );
+    lockwiseCardBody.classList.remove("hidden");
+
     // Set the text for number of stored logins.
     const numberOfLoginsBlock = container.querySelector(
       ".number-of-logins.block"
     );
     numberOfLoginsBlock.textContent = storedLogins;
+
+    const lockwisePasswordsStored = this.doc.getElementById(
+      "lockwise-passwords-stored"
+    );
+    lockwisePasswordsStored.setAttribute(
+      "data-l10n-args",
+      JSON.stringify({ count: storedLogins })
+    );
+    lockwisePasswordsStored.setAttribute(
+      "data-l10n-id",
+      "lockwise-passwords-stored"
+    );
 
     // Set the text for the number of synced devices.
     const syncedDevicesBlock = container.querySelector(
@@ -89,11 +106,15 @@ export default class LockwiseCard {
 
     const syncedDevicesText = container.querySelector(".synced-devices-text");
     const textEl = syncedDevicesText.querySelector("span");
-    textEl.textContent =
-      syncedDevices > 0
-        ? `Syncing to ${syncedDevices} other devices.`
-        : "Not syncing to other devices.";
-
+    if (syncedDevices) {
+      textEl.setAttribute(
+        "data-l10n-args",
+        JSON.stringify({ count: syncedDevices })
+      );
+      textEl.setAttribute("data-l10n-id", "lockwise-sync-status");
+    } else {
+      textEl.setAttribute("data-l10n-id", "lockwise-sync-not-syncing");
+    }
     // Display the link for enabling sync if no synced devices are detected.
     if (syncedDevices === 0) {
       const syncLink = syncedDevicesText.querySelector("a");

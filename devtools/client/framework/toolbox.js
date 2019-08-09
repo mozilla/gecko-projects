@@ -76,8 +76,8 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "HUDService",
-  "devtools/client/webconsole/hudservice",
+  "BrowserConsoleManager",
+  "devtools/client/webconsole/browser-console-manager",
   true
 );
 loader.lazyRequireGetter(
@@ -763,14 +763,18 @@ Toolbox.prototype = {
 
       await promise.all([splitConsolePromise, framesPromise]);
 
-      // Request the actor to restore the focus to the content page once the
-      // target is detached. This typically happens when the console closes.
-      // We restore the focus as it may have been stolen by the console input.
-      await this.target.reconfigure({
-        options: {
-          restoreFocus: true,
-        },
-      });
+      // We do not expect the focus to be restored when using about:debugging toolboxes
+      // Otherwise, when reloading the toolbox, the debugged tab will be focused.
+      if (this.hostType !== Toolbox.HostType.PAGE) {
+        // Request the actor to restore the focus to the content page once the
+        // target is detached. This typically happens when the console closes.
+        // We restore the focus as it may have been stolen by the console input.
+        await this.target.reconfigure({
+          options: {
+            restoreFocus: true,
+          },
+        });
+      }
 
       // Lazily connect to the profiler here and don't wait for it to complete,
       // used to intercept console.profile calls before the performance tools are open.
@@ -957,7 +961,7 @@ Toolbox.prototype = {
       if (id == "browserConsole") {
         // Add key for toggling the browser console from the detached window
         shortcuts.on(electronKey, () => {
-          HUDService.toggleBrowserConsole();
+          BrowserConsoleManager.toggleBrowserConsole();
         });
       } else if (toolId) {
         // KeyShortcuts contain tool-specific and global key shortcuts,
@@ -1798,7 +1802,9 @@ Toolbox.prototype = {
    * gets the focus.
    */
   _onPickerCanceled: function() {
-    this.win.focus();
+    if (this.hostType !== Toolbox.HostType.WINDOW) {
+      this.win.focus();
+    }
   },
 
   /**
@@ -2262,7 +2268,7 @@ Toolbox.prototype = {
           // can happen in unit tests where the tests are rapidly opening and closing the
           // toolbox and we encounter the scenario where the toolbox is closing as
           // the inspector is still loading.
-          if (this._destroyingInspector) {
+          if (!this._inspector || !iframe.contentWindow) {
             return;
           }
         }
@@ -3275,7 +3281,7 @@ Toolbox.prototype = {
         // than most other fronts because it is closely related to the toolbox.
         // TODO: replace with getFront once inspector is separated from the toolbox
         // TODO: remove these bindings
-        this._inspector = await this.target.getInspector();
+        this._inspector = await this.target.getFront("inspector");
         this._walker = this.inspectorFront.walker;
         this._highlighter = this.inspectorFront.highlighter;
         this._selection = this.inspectorFront.selection;

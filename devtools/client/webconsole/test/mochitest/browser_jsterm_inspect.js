@@ -10,23 +10,12 @@
 const TEST_URI = "data:text/html;charset=utf8,<p>test inspect() command";
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
-
-  const jsterm = hud.jsterm;
 
   info("Test `inspect(window)`");
   // Add a global value so we can check it later.
-  await jsterm.execute("testProp = 'testValue'");
-  await jsterm.execute("inspect(window)");
+  execute(hud, "testProp = 'testValue'");
+  execute(hud, "inspect(window)");
 
   const inspectWindowNode = await waitFor(() =>
     findInspectResultMessage(hud.ui.outputNode, 1)
@@ -71,7 +60,7 @@ async function performTests() {
 
   /* Check that a primitive value can be inspected, too */
   info("Test `inspect(1)`");
-  await jsterm.execute("inspect(1)");
+  execute(hud, "inspect(1)");
 
   const inspectPrimitiveNode = await waitFor(() =>
     findInspectResultMessage(hud.ui.outputNode, 2)
@@ -81,7 +70,7 @@ async function performTests() {
     1,
     "The primitive is displayed as expected"
   );
-}
+});
 
 function findInspectResultMessage(node, index) {
   return node.querySelectorAll(".message.result")[index];

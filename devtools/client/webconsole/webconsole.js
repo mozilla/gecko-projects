@@ -34,6 +34,7 @@ loader.lazyRequireGetter(
   "devtools/client/shared/link",
   true
 );
+const EventEmitter = require("devtools/shared/event-emitter");
 
 var gHudId = 0;
 const isMacOS = Services.appinfo.OS === "Darwin";
@@ -56,15 +57,12 @@ class WebConsole {
    *        The window where the web console UI is already loaded.
    * @param nsIDOMWindow chromeWindow
    *        The window of the web console owner.
-   * @param object hudService
-   *        The parent HUD Service
    * @param bool isBrowserConsole
    */
   constructor(
     target,
     iframeWindow,
     chromeWindow,
-    hudService,
     isBrowserConsole = false,
     fissionSupport = false
   ) {
@@ -73,16 +71,19 @@ class WebConsole {
     this.hudId = "hud_" + ++gHudId;
     this.target = target;
     this.browserWindow = this.chromeWindow.top;
-    this.hudService = hudService;
     this.isBrowserConsole = isBrowserConsole;
     this.fissionSupport = fissionSupport;
 
     const element = this.browserWindow.document.documentElement;
     if (element.getAttribute("windowtype") != gDevTools.chromeWindowType) {
-      this.browserWindow = this.hudService.currentContext();
+      this.browserWindow = Services.wm.getMostRecentWindow(
+        gDevTools.chromeWindowType
+      );
     }
     this.ui = new WebConsoleUI(this);
     this._destroyer = null;
+
+    EventEmitter.decorate(this);
   }
 
   /**
@@ -111,7 +112,7 @@ class WebConsole {
    *         A promise for the initialization.
    */
   init() {
-    return this.ui.init().then(() => this);
+    return this.ui.init();
   }
 
   /**
@@ -274,18 +275,6 @@ class WebConsole {
   }
 
   /**
-   * Return the console client to use when interacting with a thread.
-   *
-   * @param {String} thread: The ID of the target thread.
-   * @returns {Object} The console client associated with the thread.
-   */
-  lookupConsoleClient(thread) {
-    const toolbox = gDevTools.getToolbox(this.target);
-    const panel = toolbox.getPanel("jsdebugger");
-    return panel.lookupConsoleClient(thread);
-  }
-
-  /**
    * Given an expression, returns an object containing a new expression, mapped by the
    * parser worker to provide additional feature for the user (top-level await,
    * original languages mapping, …).
@@ -378,7 +367,6 @@ class WebConsole {
     if (!this.hudId) {
       return;
     }
-    this.hudService.consoles.delete(this.hudId);
 
     if (this.ui) {
       this.ui.destroy();
@@ -392,6 +380,8 @@ class WebConsole {
     const id = Utils.supportsString(this.hudId);
     Services.obs.notifyObservers(id, "web-console-destroyed");
     this.hudId = null;
+
+    this.emit("destroyed");
   }
 }
 

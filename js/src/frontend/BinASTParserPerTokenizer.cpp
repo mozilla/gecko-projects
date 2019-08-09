@@ -91,7 +91,8 @@ BinASTParserPerTokenizer<Tok>::BinASTParserPerTokenizer(
       options_(options),
       lazyScript_(cx, lazyScript),
       handler_(cx, alloc, nullptr, SourceKind::Binary),
-      variableDeclarationKind_(VariableDeclarationKind::Var) {
+      variableDeclarationKind_(VariableDeclarationKind::Var),
+      treeHolder_(cx, FunctionTreeHolder::Mode::Eager) {
   MOZ_ASSERT_IF(lazyScript_, lazyScript_->isBinAST());
 }
 
@@ -166,7 +167,7 @@ JS::Result<FunctionNode*> BinASTParserPerTokenizer<Tok>::parseLazyFunction(
   // For now, only function declarations and function expression are supported.
   RootedFunction func(cx_, lazyScript_->functionNonDelazifying());
   bool isExpr = func->isLambda();
-  MOZ_ASSERT(func->kind() == JSFunction::FunctionKind::NormalFunction);
+  MOZ_ASSERT(func->kind() == FunctionFlags::FunctionKind::NormalFunction);
 
   // Poison the tokenizer when we leave to ensure that it's not used again by
   // accident.
@@ -261,10 +262,15 @@ JS::Result<FunctionBox*> BinASTParserPerTokenizer<Tok>::buildFunctionBox(
 
   // Allocate the function before walking down the tree.
   RootedFunction fun(cx_);
-  BINJS_TRY_VAR(fun, !pc_ ? lazyScript_->functionNonDelazifying()
-                          : AllocNewFunction(cx_, atom, syntax, generatorKind,
-                                             functionAsyncKind, nullptr));
-  MOZ_ASSERT_IF(pc_, fun->explicitName() == atom);
+  if (pc_) {
+    Rooted<FunctionCreationData> fcd(
+        cx_, GenerateFunctionCreationData(atom, syntax, generatorKind,
+                                          functionAsyncKind));
+    BINJS_TRY_VAR(fun, AllocNewFunction(cx_, fcd));
+    MOZ_ASSERT(fun->explicitName() == atom);
+  } else {
+    BINJS_TRY_VAR(fun, lazyScript_->functionNonDelazifying());
+  }
 
   mozilla::Maybe<Directives> directives;
   if (pc_) {
@@ -389,11 +395,12 @@ JS::Result<Ok> BinASTParserPerTokenizer<Tok>::finishLazyFunction(
   funbox->setArgCount(nargs);
   funbox->synchronizeArgCount();
 
-  BINJS_TRY_DECL(
-      lazy, LazyScript::Create(cx_, fun, sourceObject_,
-                               pc_->closedOverBindingsForLazy(),
-                               pc_->innerFunctionsForLazy, start, end, start, 0,
-                               start, ParseGoal::Script));
+  BINJS_TRY_DECL(lazy, LazyScript::Create(cx_, fun, sourceObject_,
+                                          pc_->closedOverBindingsForLazy(),
+                                          pc_->innerFunctionBoxesForLazy,
+                                          start, end, start, end,
+                                          /* lineno = */ 0, start,
+                                          ParseGoal::Script));
 
   if (funbox->strict()) {
     lazy->setStrict();

@@ -866,14 +866,7 @@ bool NS_LoadGroupMatchesPrincipal(nsILoadGroup* aLoadGroup,
                                 getter_AddRefs(loadContext));
   NS_ENSURE_TRUE(loadContext, false);
 
-  // Verify load context browser flag match the principal
-  bool contextInIsolatedBrowser;
-  nsresult rv =
-      loadContext->GetIsInIsolatedMozBrowserElement(&contextInIsolatedBrowser);
-  NS_ENSURE_SUCCESS(rv, false);
-
-  return contextInIsolatedBrowser ==
-         aPrincipal->GetIsInIsolatedMozBrowserElement();
+  return true;
 }
 
 nsresult NS_NewDownloader(nsIStreamListener** result,
@@ -1848,7 +1841,13 @@ nsresult NS_NewURI(nsIURI** aURI, const nsACString& aSpec,
         .Finalize(aURI);
   }
 
-  if (scheme.EqualsLiteral("dweb") || scheme.EqualsLiteral("dat")) {
+  // web-extensions can add custom protocol implementations with standard URLs
+  // that have notion of hostname, authority and relative URLs. Below we
+  // manually check agains set of known protocols schemes until more general
+  // solution is in place (See Bug 1569733)
+  if (scheme.EqualsLiteral("dweb") || scheme.EqualsLiteral("dat") ||
+      scheme.EqualsLiteral("ipfs") || scheme.EqualsLiteral("ipns") ||
+      scheme.EqualsLiteral("ssb") || scheme.EqualsLiteral("wtp")) {
     return NewStandardURI(aSpec, aCharset, aBaseURI, -1, aURI);
   }
 
@@ -2697,6 +2696,15 @@ nsresult NS_GenerateHostPort(const nsCString& host, int32_t port,
 void NS_SniffContent(const char* aSnifferType, nsIRequest* aRequest,
                      const uint8_t* aData, uint32_t aLength,
                      nsACString& aSniffedType) {
+  // In case XCTO nosniff was present, we could just skip sniffing here
+  nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
+  if (channel) {
+    nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+    if (loadInfo->GetSkipContentSniffing()) {
+      aSniffedType.Truncate();
+      return;
+    }
+  }
   typedef nsCategoryCache<nsIContentSniffer> ContentSnifferCache;
   extern ContentSnifferCache* gNetSniffers;
   extern ContentSnifferCache* gDataSniffers;
@@ -2986,29 +2994,17 @@ nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel* aChannel) {
     return NS_OK;
   }
 
-  bool loadContextIsInBE = false;
-  nsresult rv =
-      loadContext->GetIsInIsolatedMozBrowserElement(&loadContextIsInBE);
-  if (NS_FAILED(rv)) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
   OriginAttributes originAttrsLoadInfo = loadInfo->GetOriginAttributes();
   OriginAttributes originAttrsLoadContext;
   loadContext->GetOriginAttributes(originAttrsLoadContext);
 
   LOG(
-      ("NS_CompareLoadInfoAndLoadContext - loadInfo: %d, %d, %d; "
-       "loadContext: %d %d, %d. [channel=%p]",
-       originAttrsLoadInfo.mInIsolatedMozBrowser,
+      ("NS_CompareLoadInfoAndLoadContext - loadInfo: %d, %d; "
+       "loadContext: %d, %d. [channel=%p]",
        originAttrsLoadInfo.mUserContextId,
-       originAttrsLoadInfo.mPrivateBrowsingId, loadContextIsInBE,
+       originAttrsLoadInfo.mPrivateBrowsingId,
        originAttrsLoadContext.mUserContextId,
        originAttrsLoadContext.mPrivateBrowsingId, aChannel));
-
-  MOZ_ASSERT(originAttrsLoadInfo.mInIsolatedMozBrowser == loadContextIsInBE,
-             "The value of InIsolatedMozBrowser in the loadContext and in "
-             "the loadInfo are not the same!");
 
   MOZ_ASSERT(originAttrsLoadInfo.mUserContextId ==
                  originAttrsLoadContext.mUserContextId,

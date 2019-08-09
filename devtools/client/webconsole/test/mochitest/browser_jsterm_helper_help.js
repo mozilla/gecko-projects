@@ -7,17 +7,7 @@ const TEST_URI = "data:text/html,Test <code>help()</code> jsterm helper";
 const HELP_URL = "https://developer.mozilla.org/docs/Tools/Web_Console/Helpers";
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
-  const jsterm = hud.jsterm;
 
   let openedLinks = 0;
   const oldOpenLink = hud.openLink;
@@ -28,15 +18,22 @@ async function performTests() {
   };
 
   hud.ui.clearOutput();
-  await jsterm.execute("help()");
-  await jsterm.execute("help");
-  await jsterm.execute("?");
+  execute(hud, "help()");
+  execute(hud, "help");
+  execute(hud, "?");
+  // Wait for a simple message to be displayed so we know the different help commands
+  // were processed.
+  await executeAndWaitForMessage(hud, "smoke", "", ".result");
 
-  const messages = Array.from(hud.ui.outputNode.querySelectorAll(".message"));
-  ok(
-    messages.every(msg => msg.classList.contains("command")),
+  const messages = hud.ui.outputNode.querySelectorAll(".message");
+  is(messages.length, 5, "There is the expected number of messages");
+  const resultMessages = hud.ui.outputNode.querySelectorAll(".result");
+  is(
+    resultMessages.length,
+    1,
     "There is no results shown for the help commands"
   );
+
   is(openedLinks, 3, "correct number of pages opened by the help calls");
   hud.openLink = oldOpenLink;
-}
+});

@@ -84,14 +84,6 @@ public final class GeckoRuntime implements Parcelable {
 
     /**
      * This is a key for extra data sent with {@link #ACTION_CRASHED}. The value is
-     * a boolean indicating whether or not the crash dump was succcessfully
-     * retrieved. If this is false, the dump file referred to in
-     * {@link #EXTRA_MINIDUMP_PATH} may be corrupted or incomplete.
-     */
-    public static final String EXTRA_MINIDUMP_SUCCESS = "minidumpSuccess";
-
-    /**
-     * This is a key for extra data sent with {@link #ACTION_CRASHED}. The value is
      * a boolean indicating whether or not the crash was fatal or not. If true, the
      * main application process was affected by the crash. If false, only an internal
      * process used by Gecko has crashed and the application may be able to recover.
@@ -100,6 +92,7 @@ public final class GeckoRuntime implements Parcelable {
     public static final String EXTRA_CRASH_FATAL = "fatal";
 
     private final class LifecycleListener implements LifecycleObserver {
+        private boolean mPaused = false;
         public LifecycleListener() {
         }
 
@@ -116,6 +109,11 @@ public final class GeckoRuntime implements Parcelable {
         @OnLifecycleEvent(Lifecycle.Event.ON_RESUME)
         void onResume() {
             Log.d(LOGTAG, "Lifecycle: onResume");
+            if (mPaused) {
+                // Do not trigger the first onResume event because it breaks nsAppShell::sPauseCount counter thresholds.
+                GeckoThread.onResume();
+            }
+            mPaused = false;
             // Monitor network status and send change notifications to Gecko
             // while active.
             GeckoNetworkManager.getInstance().start(GeckoAppShell.getApplicationContext());
@@ -124,8 +122,10 @@ public final class GeckoRuntime implements Parcelable {
         @OnLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         void onPause() {
             Log.d(LOGTAG, "Lifecycle: onPause");
+            mPaused = true;
             // Stop monitoring network status while inactive.
             GeckoNetworkManager.getInstance().stop();
+            GeckoThread.onPause();
         }
     }
 
@@ -200,7 +200,6 @@ public final class GeckoRuntime implements Parcelable {
                         context, crashHandler);
                 i.putExtra(EXTRA_MINIDUMP_PATH, message.getString(EXTRA_MINIDUMP_PATH));
                 i.putExtra(EXTRA_EXTRAS_PATH, message.getString(EXTRA_EXTRAS_PATH));
-                i.putExtra(EXTRA_MINIDUMP_SUCCESS, true);
                 i.putExtra(EXTRA_CRASH_FATAL, message.getBoolean(EXTRA_CRASH_FATAL, true));
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

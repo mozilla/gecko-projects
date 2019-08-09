@@ -311,8 +311,6 @@ extern LazyLogModule gPageCacheLog;
 
 static int32_t gOpenPopupSpamCount = 0;
 
-static bool gSyncContentBlockingNotifications = false;
-
 nsGlobalWindowOuter::OuterWindowByIdTable*
     nsGlobalWindowOuter::sOuterWindowsById = nullptr;
 
@@ -2324,7 +2322,7 @@ void nsGlobalWindowOuter::PrepareForProcessChange(JSObject* aProxy) {
     MOZ_CRASH("PrepareForProcessChange GetRemoteOuterWindowProxy");
   }
 
-  if (!xpc::TransplantObject(cx, localProxy, remoteProxy)) {
+  if (!xpc::TransplantObjectNukingXrayWaiver(cx, localProxy, remoteProxy)) {
     MOZ_CRASH("PrepareForProcessChange TransplantObject");
   }
 }
@@ -3736,7 +3734,18 @@ double nsGlobalWindowOuter::GetDevicePixelRatioOuter(CallerType aCallerType) {
   }
 
   if (nsContentUtils::ResistFingerprinting(aCallerType)) {
-    return 1.0;
+    // Spoofing the DevicePixelRatio causes blurriness in some situations
+    // on HiDPI displays. pdf.js is a non-system caller; but it can't
+    // expose the fingerprintable information, so we can safely disable
+    // spoofing in this situation. It doesn't address the issue for
+    // web-rendered content (including pdf.js instances on the web.)
+    // In the future we hope to have a better solution to fix all HiDPI
+    // blurriness...
+    nsAutoCString origin;
+    nsresult rv = this->GetPrincipal()->GetOrigin(origin);
+    if (NS_FAILED(rv) || origin != NS_LITERAL_CSTRING("resource://pdf.js")) {
+      return 1.0;
+    }
   }
 
   float overrideDPPX = presContext->GetOverrideDPPX();
@@ -5417,14 +5426,6 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
   nsCOMPtr<nsIClassifiedChannel> trackingChannel =
       do_QueryInterface(aTrackingChannel);
 
-  static bool prefInitialized = false;
-  if (!prefInitialized) {
-    Preferences::AddBoolVarCache(
-        &gSyncContentBlockingNotifications,
-        "dom.testing.sync-content-blocking-notifications", false);
-    prefInitialized = true;
-  }
-
   nsCOMPtr<nsIRunnable> func = NS_NewRunnableFunction(
       "NotifyContentBlockingEventDelayed",
       [doc, docShell, uri, channel, aEvent, aBlocked, aReason,
@@ -5571,7 +5572,7 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
                                                                         event);
       });
   nsresult rv;
-  if (gSyncContentBlockingNotifications) {
+  if (StaticPrefs::dom_testing_sync_content_blocking_notifications()) {
     rv = func->Run();
   } else {
     rv = NS_DispatchToCurrentThreadQueue(func.forget(), 100,
@@ -5723,10 +5724,9 @@ void nsGlobalWindowOuter::FireAbuseEvents(
 Nullable<WindowProxyHolder> nsGlobalWindowOuter::OpenOuter(
     const nsAString& aUrl, const nsAString& aName, const nsAString& aOptions,
     ErrorResult& aError) {
-  nsCOMPtr<nsPIDOMWindowOuter> window;
-  aError = OpenJS(aUrl, aName, aOptions, getter_AddRefs(window));
   RefPtr<BrowsingContext> bc;
-  if (!window || !(bc = window->GetBrowsingContext())) {
+  aError = OpenJS(aUrl, aName, aOptions, getter_AddRefs(bc));
+  if (!bc) {
     return nullptr;
   }
   return WindowProxyHolder(bc.forget());
@@ -5737,7 +5737,7 @@ nsresult nsGlobalWindowOuter::Open(const nsAString& aUrl,
                                    const nsAString& aOptions,
                                    nsDocShellLoadState* aLoadState,
                                    bool aForceNoOpener,
-                                   nsPIDOMWindowOuter** _retval) {
+                                   BrowsingContext** _retval) {
   return OpenInternal(aUrl, aName, aOptions,
                       false,             // aDialog
                       false,             // aContentModal
@@ -5751,7 +5751,7 @@ nsresult nsGlobalWindowOuter::Open(const nsAString& aUrl,
 nsresult nsGlobalWindowOuter::OpenJS(const nsAString& aUrl,
                                      const nsAString& aName,
                                      const nsAString& aOptions,
-                                     nsPIDOMWindowOuter** _retval) {
+                                     BrowsingContext** _retval) {
   return OpenInternal(aUrl, aName, aOptions,
                       false,             // aDialog
                       false,             // aContentModal
@@ -5770,7 +5770,7 @@ nsresult nsGlobalWindowOuter::OpenDialog(const nsAString& aUrl,
                                          const nsAString& aName,
                                          const nsAString& aOptions,
                                          nsISupports* aExtraArgument,
-                                         nsPIDOMWindowOuter** _retval) {
+                                         BrowsingContext** _retval) {
   return OpenInternal(aUrl, aName, aOptions,
                       true,                     // aDialog
                       false,                    // aContentModal
@@ -5788,7 +5788,7 @@ nsresult nsGlobalWindowOuter::OpenDialog(const nsAString& aUrl,
 nsresult nsGlobalWindowOuter::OpenNoNavigate(const nsAString& aUrl,
                                              const nsAString& aName,
                                              const nsAString& aOptions,
-                                             nsPIDOMWindowOuter** _retval) {
+                                             BrowsingContext** _retval) {
   return OpenInternal(aUrl, aName, aOptions,
                       false,             // aDialog
                       false,             // aContentModal
@@ -5813,7 +5813,7 @@ Nullable<WindowProxyHolder> nsGlobalWindowOuter::OpenDialogOuter(
     return nullptr;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> dialog;
+  RefPtr<BrowsingContext> dialog;
   aError = OpenInternal(aUrl, aName, aOptions,
                         true,                // aDialog
                         false,               // aContentModal
@@ -5824,11 +5824,10 @@ Nullable<WindowProxyHolder> nsGlobalWindowOuter::OpenDialogOuter(
                         nullptr,             // aLoadState
                         false,               // aForceNoOpener
                         getter_AddRefs(dialog));
-  RefPtr<BrowsingContext> bc;
-  if (!dialog || !(bc = dialog->GetBrowsingContext())) {
+  if (!dialog) {
     return nullptr;
   }
-  return WindowProxyHolder(bc.forget());
+  return WindowProxyHolder(dialog.forget());
 }
 
 BrowsingContext* nsGlobalWindowOuter::GetFramesOuter() {
@@ -7120,7 +7119,7 @@ nsresult nsGlobalWindowOuter::OpenInternal(
     bool aDialog, bool aContentModal, bool aCalledNoScript, bool aDoJSFixups,
     bool aNavigate, nsIArray* argv, nsISupports* aExtraArgument,
     nsDocShellLoadState* aLoadState, bool aForceNoOpener,
-    nsPIDOMWindowOuter** aReturn) {
+    BrowsingContext** aReturn) {
 #ifdef DEBUG
   uint32_t argc = 0;
   if (argv) argv->GetLength(&argc);
@@ -7237,7 +7236,7 @@ nsresult nsGlobalWindowOuter::OpenInternal(
     }
   }
 
-  nsCOMPtr<mozIDOMWindowProxy> domReturn;
+  RefPtr<BrowsingContext> domReturn;
 
   nsCOMPtr<nsIWindowWatcher> wwatch =
       do_GetService(NS_WINDOWWATCHER_CONTRACTID, &rv);
@@ -7306,7 +7305,8 @@ nsresult nsGlobalWindowOuter::OpenInternal(
   }
 
   if (domReturn && aDoJSFixups) {
-    nsCOMPtr<nsIDOMChromeWindow> chrome_win(do_QueryInterface(domReturn));
+    nsCOMPtr<nsIDOMChromeWindow> chrome_win(
+        do_QueryInterface(domReturn->GetDOMWindow()));
     if (!chrome_win) {
       // A new non-chrome window was created from a call to
       // window.open() from JavaScript, make sure there's a document in
@@ -7316,12 +7316,14 @@ nsresult nsGlobalWindowOuter::OpenInternal(
       // XXXbz should this just use EnsureInnerWindow()?
 
       // Force document creation.
-      nsCOMPtr<Document> doc = nsPIDOMWindowOuter::From(domReturn)->GetDoc();
-      Unused << doc;
+      if (nsPIDOMWindowOuter* win = domReturn->GetDOMWindow()) {
+        nsCOMPtr<Document> doc = win->GetDoc();
+        Unused << doc;
+      }
     }
   }
 
-  *aReturn = do_AddRef(nsPIDOMWindowOuter::From(domReturn)).take();
+  domReturn.forget(aReturn);
   return NS_OK;
 }
 

@@ -13,7 +13,7 @@
 .meta {
   display: flex;
   align-items: center;
-  padding: 5px 18px;
+  padding: 5px 16px;
   border-bottom: 1px solid var(--in-content-box-border-color);
   background-color: var(--in-content-box-background);
   color: var(--in-content-deemphasized-text);
@@ -39,6 +39,27 @@
   margin-inline-start: 18px;
 }
 
+.container {
+  display: contents;
+}
+
+:host(.no-logins) ol,
+:host(:not(.no-logins)) .intro {
+  display: none;
+}
+
+.intro {
+  text-align: center;
+  padding: 1em;
+  max-width: 50ch; /* This should be kept in sync with login-list-item username and title max-width */
+  flex-grow: 1;
+  border-bottom: 1px solid var(--in-content-box-border-color);
+}
+
+.intro span {
+  font-size: 0.85em;
+}
+
 ol {
   margin-top: 0;
   margin-bottom: 0;
@@ -53,10 +74,11 @@ ol {
 }
 
 .login-list-item {
-  display: block;
+  display: flex;
+  align-items: center;
   padding: 10px;
   padding-inline-end: 18px;
-  padding-inline-start: 14px;
+  padding-inline-start: 12px;
   border-inline-start: 4px solid transparent;
   border-bottom: 1px solid var(--in-content-box-border-color);
 }
@@ -91,6 +113,23 @@ ol {
   overflow: hidden;
 }
 
+.favicon-wrapper {
+  height: 16px;
+  width: 16px;
+  background-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
+  background-repeat: no-repeat;
+  margin-inline-end: 12px;
+  -moz-context-properties: fill;
+}
+
+.favicon-wrapper.hide-default-favicon {
+  background-image: none;
+}
+
+.favicon {
+  width: 16px;
+}
+
 .username {
   font-size: 0.85em;
   color: var(--in-content-deemphasized-text);
@@ -113,6 +152,10 @@ ol {
   @media (prefers-color-scheme: dark) {
     .login-list-item.breached {
       fill: var(--red-60);
+    }
+
+    .favicon-wrapper {
+      fill: var(--in-content-border-hover);
     }
   }
 }

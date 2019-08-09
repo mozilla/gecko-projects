@@ -13,17 +13,8 @@ add_task(async function() {
   // Enable await mapping.
   await pushPref("devtools.debugger.features.map-await-expression", true);
 
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   await addTab(TEST_URI);
-  const hud = await HUDService.toggleBrowserConsole();
+  const hud = await BrowserConsoleManager.toggleBrowserConsole();
 
   const executeAndWaitForResultMessage = (input, expectedOutput) =>
     executeAndWaitForMessage(hud, input, expectedOutput, ".result");
@@ -49,5 +40,5 @@ async function performTests() {
   );
 
   info("Close the Browser console");
-  await HUDService.toggleBrowserConsole();
-}
+  await BrowserConsoleManager.toggleBrowserConsole();
+});

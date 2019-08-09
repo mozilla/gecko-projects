@@ -32,11 +32,11 @@ Zone* const Zone::NotOnList = reinterpret_cast<Zone*>(1);
 ZoneAllocator::ZoneAllocator(JSRuntime* rt)
     : JS::shadow::Zone(rt, &rt->gc.marker),
       zoneSize(&rt->gc.heapSize),
-      gcMallocBytes(nullptr) {
+      gcMallocBytes(nullptr),
+      gcJitBytes(nullptr),
+      gcJitThreshold(jit::MaxCodeBytesPerProcess * 0.8) {
   AutoLockGC lock(rt);
   updateGCThresholds(rt->gc, GC_NORMAL, lock);
-  setGCMaxMallocBytes(rt->gc.tunables.maxMallocBytes(), lock);
-  jitCodeCounter.setMax(jit::MaxCodeBytesPerProcess * 0.8, lock);
 }
 
 ZoneAllocator::~ZoneAllocator() {
@@ -45,6 +45,7 @@ ZoneAllocator::~ZoneAllocator() {
     gcMallocTracker.checkEmptyOnDestroy();
     MOZ_ASSERT(zoneSize.gcBytes() == 0);
     MOZ_ASSERT(gcMallocBytes.gcBytes() == 0);
+    MOZ_ASSERT(gcJitBytes.gcBytes() == 0);
   }
 #endif
 }
@@ -58,15 +59,6 @@ void ZoneAllocator::fixupAfterMovingGC() {
 void js::ZoneAllocator::updateMemoryCountersOnGCStart() {
   zoneSize.updateOnGCStart();
   gcMallocBytes.updateOnGCStart();
-  gcMallocCounter.updateOnGCStart();
-  jitCodeCounter.updateOnGCStart();
-}
-
-void js::ZoneAllocator::updateMemoryCountersOnGCEnd(
-    const js::AutoLockGC& lock) {
-  auto& gc = runtimeFromAnyThread()->gc;
-  gcMallocCounter.updateOnGCEnd(gc.tunables, lock);
-  jitCodeCounter.updateOnGCEnd(gc.tunables, lock);
 }
 
 void js::ZoneAllocator::updateGCThresholds(GCRuntime& gc,
@@ -79,12 +71,6 @@ void js::ZoneAllocator::updateGCThresholds(GCRuntime& gc,
   gcMallocThreshold.updateAfterGC(gcMallocBytes.retainedBytes(),
                                   gc.tunables.mallocThresholdBase(),
                                   gc.tunables.mallocGrowthFactor(), lock);
-}
-
-js::gc::TriggerKind js::ZoneAllocator::shouldTriggerGCForTooMuchMalloc() {
-  auto& gc = runtimeFromAnyThread()->gc;
-  return std::max(gcMallocCounter.shouldTriggerGC(gc.tunables),
-                  jitCodeCounter.shouldTriggerGC(gc.tunables));
 }
 
 void ZoneAllocPolicy::decMemory(size_t nbytes) {
@@ -569,29 +555,6 @@ void* ZoneAllocator::onOutOfMemory(js::AllocFunction allocFunc,
 
 void ZoneAllocator::reportAllocationOverflow() const {
   js::ReportAllocationOverflow(nullptr);
-}
-
-void ZoneAllocator::maybeTriggerGCForTooMuchMalloc(
-    js::gc::MemoryCounter& counter, TriggerKind trigger) {
-  JSRuntime* rt = runtimeFromAnyThread();
-
-  if (!js::CurrentThreadCanAccessRuntime(rt)) {
-    return;
-  }
-
-  auto zone = JS::Zone::from(this);
-  bool wouldInterruptGC =
-      rt->gc.isIncrementalGCInProgress() && !zone->isCollecting();
-  if (wouldInterruptGC && !counter.shouldResetIncrementalGC(rt->gc.tunables)) {
-    return;
-  }
-
-  if (!rt->gc.triggerZoneGC(zone, JS::GCReason::TOO_MUCH_MALLOC,
-                            counter.bytes(), counter.maxBytes())) {
-    return;
-  }
-
-  counter.recordTrigger(trigger);
 }
 
 #ifdef DEBUG

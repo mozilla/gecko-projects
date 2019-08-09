@@ -13,6 +13,20 @@ add_task(async function setup() {
 });
 
 add_task(async function test_create_login() {
+  let browser = gBrowser.selectedBrowser;
+  await ContentTask.spawn(browser, null, async () => {
+    let loginList = Cu.waiveXrays(content.document.querySelector("login-list"));
+    ok(!loginList._selectedGuid, "should not be a selected guid by default");
+    ok(
+      content.document.documentElement.classList.contains("no-logins"),
+      "Should initially be in no logins view"
+    );
+    ok(
+      loginList.classList.contains("no-logins"),
+      "login-list should initially be in no logins view"
+    );
+  });
+
   let testCases = [
     ["ftp://ftp.example.com/", "ftp://ftp.example.com"],
     ["https://example.com/foo", "https://example.com"],
@@ -32,7 +46,6 @@ add_task(async function test_create_login() {
       (_, data) => data == "addLogin"
     );
 
-    let browser = gBrowser.selectedBrowser;
     await ContentTask.spawn(browser, originTuple, async aOriginTuple => {
       let createButton = content.document
         .querySelector("login-list")
@@ -77,43 +90,51 @@ add_task(async function test_create_login() {
       browser,
       { expectedCount, originTuple },
       async ({ expectedCount: aExpectedCount, originTuple: aOriginTuple }) => {
+        ok(
+          !content.document.documentElement.classList.contains("no-logins"),
+          "Should no longer be in no logins view"
+        );
         let loginList = Cu.waiveXrays(
           content.document.querySelector("login-list")
         );
-        let loginFound = await ContentTaskUtils.waitForCondition(() => {
-          return loginList._logins.length == aExpectedCount;
-        }, "Waiting for login to be displayed");
-        ok(loginFound, "Expected number of logins found in login-list");
-
-        let loginListItem = [
-          ...loginList.shadowRoot.querySelectorAll(".login-list-item"),
-        ].find(l => l._login.origin == aOriginTuple[1]);
         ok(
-          !!loginListItem,
+          !loginList.classList.contains("no-logins"),
+          "login-list should no longer be in no logins view"
+        );
+        let loginGuid = await ContentTaskUtils.waitForCondition(() => {
+          return loginList._loginGuidsSortedOrder.find(
+            guid => loginList._logins[guid].login.origin == aOriginTuple[1]
+          );
+        }, "Waiting for login to be displayed");
+        ok(loginGuid, "Expected login found in login-list");
+
+        let loginItem = Cu.waiveXrays(
+          content.document.querySelector("login-item")
+        );
+        is(loginItem._login.guid, loginGuid, "login-item should match");
+
+        let { login, listItem } = loginList._logins[loginGuid];
+        ok(
+          listItem.classList.contains("selected"),
+          "list item should be selected"
+        );
+        ok(
+          !!listItem,
           `Stored login should only include the origin of the URL provided during creation (${
             aOriginTuple[1]
           })`
         );
         is(
-          loginListItem._login.username,
+          login.username,
           "testuser1",
           "Stored login should have username provided during creation"
         );
         is(
-          loginListItem._login.password,
+          login.password,
           "testpass1",
           "Stored login should have password provided during creation"
         );
-        loginListItem.click();
 
-        let loginItem = Cu.waiveXrays(
-          content.document.querySelector("login-item")
-        );
-        is(
-          loginItem._login.guid,
-          loginListItem._login.guid,
-          "Login should be selected"
-        );
         let editButton = loginItem.shadowRoot.querySelector(".edit-button");
         editButton.click();
 
@@ -141,7 +162,9 @@ add_task(async function test_create_login() {
       let loginList = Cu.waiveXrays(
         content.document.querySelector("login-list")
       );
-      let login = loginList._logins.find(l => l.origin == aOriginTuple[1]);
+      let login = Object.values(loginList._logins).find(
+        obj => obj.login.origin == aOriginTuple[1]
+      ).login;
       ok(
         !!login,
         "Stored login should only include the origin of the URL provided during creation"
@@ -158,4 +181,46 @@ add_task(async function test_create_login() {
       );
     });
   }
+});
+
+add_task(async function test_cancel_create_login() {
+  let browser = gBrowser.selectedBrowser;
+  await ContentTask.spawn(browser, null, async () => {
+    let loginList = Cu.waiveXrays(content.document.querySelector("login-list"));
+    ok(
+      loginList._selectedGuid,
+      "there should be a selected guid before create mode"
+    );
+    ok(
+      loginList._blankLoginListItem.hidden,
+      "the blank login list item should be hidden before create mode"
+    );
+
+    let createButton = content.document
+      .querySelector("login-list")
+      .shadowRoot.querySelector(".create-login-button");
+    createButton.click();
+
+    ok(
+      !loginList._selectedGuid,
+      "there should be no selected guid when in create mode"
+    );
+    ok(
+      !loginList._blankLoginListItem.hidden,
+      "the blank login list item should be visible in create mode"
+    );
+
+    let loginItem = Cu.waiveXrays(content.document.querySelector("login-item"));
+    let cancelButton = loginItem.shadowRoot.querySelector(".cancel-button");
+    cancelButton.click();
+
+    ok(
+      loginList._selectedGuid,
+      "there should be a selected guid after canceling create mode"
+    );
+    ok(
+      loginList._blankLoginListItem.hidden,
+      "the blank login list item should be hidden after canceling create mode"
+    );
+  });
 });

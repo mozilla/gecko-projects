@@ -305,6 +305,21 @@ var gPrivacyPane = {
   },
 
   /**
+   * Hide the "Change Block List" link for trackers/tracking content in the
+   * custom Content Blocking/ETP panel. By default, it will not be visible.
+   */
+  _showCustomBlockList() {
+    let prefValue = Services.prefs.getBoolPref(
+      "browser.contentblocking.customBlockList.preferences.ui.enabled"
+    );
+    if (!prefValue) {
+      document.getElementById("changeBlockListLink").style.display = "none";
+    } else {
+      setEventListener("changeBlockListLink", "click", this.showBlockLists);
+    }
+  },
+
+  /**
    * Set up handlers for showing and hiding controlling extension info
    * for tracking protection.
    */
@@ -358,6 +373,7 @@ var gPrivacyPane = {
     /* Initialize Content Blocking */
     this.initContentBlocking();
 
+    this._showCustomBlockList();
     this.trackingProtectionReadPrefs();
     this.networkCookieBehaviorReadPrefs();
     this._initTrackingProtectionExtensionControl();
@@ -588,7 +604,9 @@ var gPrivacyPane = {
         "command",
         gPrivacyPane.updateSubmitHealthReport
       );
-      this.initOptOutStudyCheckbox();
+      if (AppConstants.MOZ_NORMANDY) {
+        this.initOptOutStudyCheckbox();
+      }
       this.initAddonRecommendationsCheckbox();
     }
     this._initA11yState();
@@ -2124,14 +2142,11 @@ var gPrivacyPane = {
    * handles events coming from the UI for it.
    */
   initOptOutStudyCheckbox(doc) {
-    const allowedByPolicy = Services.policies.isAllowed("Shield");
-
     // The checkbox should be disabled if any of the below are true. This
     // prevents the user from changing the value in the box.
     //
     // * the policy forbids shield
-    // * the Shield Study preference is locked
-    // * the FHR pref is false
+    // * Normandy is disabled
     //
     // The checkbox should match the value of the preference only if all of
     // these are true. Otherwise, the checkbox should remain unchecked. This
@@ -2139,16 +2154,27 @@ var gPrivacyPane = {
     // so showing a checkbox would be confusing.
     //
     // * the policy allows Shield
-    // * the FHR pref is true
     // * Normandy is enabled
-    dataCollectionCheckboxHandler({
-      checkbox: document.getElementById("optOutStudiesEnabled"),
-      matchPref: () =>
-        allowedByPolicy &&
-        Services.prefs.getBoolPref(PREF_NORMANDY_ENABLED, false),
-      isDisabled: () => !allowedByPolicy,
-      pref: PREF_OPT_OUT_STUDIES_ENABLED,
-    });
+
+    const allowedByPolicy = Services.policies.isAllowed("Shield");
+    const checkbox = document.getElementById("optOutStudiesEnabled");
+
+    if (
+      allowedByPolicy &&
+      Services.prefs.getBoolPref(PREF_NORMANDY_ENABLED, false)
+    ) {
+      if (Services.prefs.getBoolPref(PREF_OPT_OUT_STUDIES_ENABLED, false)) {
+        checkbox.setAttribute("checked", "true");
+      } else {
+        checkbox.removeAttribute("checked");
+      }
+      checkbox.setAttribute("preference", PREF_OPT_OUT_STUDIES_ENABLED);
+      checkbox.removeAttribute("disabled");
+    } else {
+      checkbox.removeAttribute("preference");
+      checkbox.removeAttribute("checked");
+      checkbox.setAttribute("disabled", "true");
+    }
   },
 
   initAddonRecommendationsCheckbox() {

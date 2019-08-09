@@ -277,6 +277,12 @@ XPCOMUtils.defineLazyGetter(this, "RTL_UI", () => {
   return Services.locale.isAppLocaleRTL;
 });
 
+XPCOMUtils.defineLazyGetter(this, "gBrandBundle", () => {
+  return Services.strings.createBundle(
+    "chrome://branding/locale/brand.properties"
+  );
+});
+
 XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", () => {
   return Services.strings.createBundle(
     "chrome://browser/locale/browser.properties"
@@ -491,6 +497,36 @@ XPCOMUtils.defineLazyPreferenceGetter(
 
 XPCOMUtils.defineLazyPreferenceGetter(
   this,
+  "gFxaSendLoginUrl",
+  "identity.fxaccounts.service.sendLoginUrl",
+  false,
+  (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(gFxaToolbarEnabled);
+  }
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "gFxaMonitorLoginUrl",
+  "identity.fxaccounts.service.monitorLoginUrl",
+  false,
+  (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(gFxaToolbarEnabled);
+  }
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "gMsgingSystemFxABadge",
+  "browser.messaging-system.fxatoolbarbadge.enabled",
+  true,
+  (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(gFxaToolbarEnabled);
+  }
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
   "gHtmlAboutAddonsEnabled",
   "extensions.htmlaboutaddons.enabled",
   false
@@ -631,11 +667,25 @@ function showFxaToolbarMenu(enable) {
 
     // We set an attribute here so that we can toggle the custom
     // badge depending on whether the FxA menu was ever accessed.
-    if (!gFxaToolbarAccessed) {
+    // If badging is handled by Messaging System we shouldn't set
+    // the attribute.
+    if (!gFxaToolbarAccessed && !gMsgingSystemFxABadge) {
       mainWindowEl.setAttribute("fxa_avatar_badged", "badged");
     } else {
       mainWindowEl.removeAttribute("fxa_avatar_badged");
     }
+
+    // When the pref for a FxA service is removed, we remove it from
+    // the FxA toolbar menu as well. This is useful when the service
+    // might not be available that browser.
+    document.getElementById(
+      "PanelUI-fxa-menu-send-button"
+    ).hidden = !gFxaSendLoginUrl;
+    document.getElementById(
+      "PanelUI-fxa-menu-monitor-button"
+    ).hidden = !gFxaMonitorLoginUrl;
+    document.getElementById("fxa-menu-service-separator").hidden =
+      !gFxaSendLoginUrl && !gFxaMonitorLoginUrl;
   } else {
     mainWindowEl.removeAttribute("fxatoolbarmenu");
   }
@@ -1991,11 +2041,11 @@ var gBrowserInit = {
     BrowserSearch.delayedStartupInit();
     AutoShowBookmarksToolbar.init();
     gProtectionsHandler.init();
+    HomePage.init().catch(Cu.reportError);
 
     let safeMode = document.getElementById("helpSafeMode");
     if (Services.appinfo.inSafeMode) {
-      safeMode.label = safeMode.getAttribute("stoplabel");
-      safeMode.accessKey = safeMode.getAttribute("stopaccesskey");
+      document.l10n.setAttributes(safeMode, "menu-help-safe-mode-with-addons");
     }
 
     // BiDi UI
@@ -4160,11 +4210,7 @@ function openHomeDialog(aURL) {
   );
 
   if (pressedVal == 0) {
-    try {
-      HomePage.set(aURL);
-    } catch (ex) {
-      dump("Failed to set the home page.\n" + ex + "\n");
-    }
+    HomePage.set(aURL).catch(Cu.reportError);
   }
 }
 
@@ -6442,7 +6488,7 @@ nsBrowserAccess.prototype = {
       throw Cr.NS_ERROR_FAILURE;
     }
 
-    var newWindow = null;
+    var browsingContext = null;
     var isExternal = !!(aFlags & Ci.nsIBrowserDOMWindow.OPEN_EXTERNAL);
 
     if (aOpener && isExternal) {
@@ -6506,7 +6552,7 @@ nsBrowserAccess.prototype = {
         // Pass all params to openDialog to ensure that "url" isn't passed through
         // loadOneOrMoreURIs, which splits based on "|"
         try {
-          newWindow = openDialog(
+          openDialog(
             AppConstants.BROWSER_CHROME_URL,
             "_blank",
             features,
@@ -6523,6 +6569,17 @@ nsBrowserAccess.prototype = {
             null,
             aCsp
           );
+          // At this point, the new browser window is just starting to load, and
+          // hasn't created the content <browser> that we should return. So we
+          // can't actually return a valid BrowsingContext for this load without
+          // spinning the event loop.
+          //
+          // Fortunately, no current callers of this API who pass OPEN_NEWWINDOW
+          // actually use the return value, so we're safe returning null for
+          // now.
+          //
+          // Ideally this should be fixed.
+          browsingContext = null;
         } catch (ex) {
           Cu.reportError(ex);
         }
@@ -6556,12 +6613,13 @@ nsBrowserAccess.prototype = {
           aCsp
         );
         if (browser) {
-          newWindow = browser.contentWindow;
+          browsingContext = browser.browsingContext;
         }
         break;
       default:
         // OPEN_CURRENTWINDOW or an illegal value
-        newWindow = window.content;
+        browsingContext =
+          window.content && BrowsingContext.getFromWindow(window.content);
         if (aURI) {
           let loadflags = isExternal
             ? Ci.nsIWebNavigation.LOAD_FLAGS_FROM_EXTERNAL
@@ -6579,7 +6637,7 @@ nsBrowserAccess.prototype = {
           window.focus();
         }
     }
-    return newWindow;
+    return browsingContext;
   },
 
   createContentWindowInFrame: function browser_createContentWindowInFrame(

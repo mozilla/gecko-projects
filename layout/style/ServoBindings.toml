@@ -444,6 +444,8 @@ cbindgen-types = [
     { gecko = "StyleMaxSize", servo = "values::computed::MaxSize" },
     { gecko = "StyleFlexBasis", servo = "values::computed::FlexBasis" },
     { gecko = "StylePosition", servo = "values::computed::Position" },
+    { gecko = "StylePositionOrAuto", servo = "values::computed::PositionOrAuto" },
+    { gecko = "StyleGenericPositionOrAuto", servo = "values::generics::position::PositionOrAuto" },
     { gecko = "StyleBackgroundSize", servo = "values::computed::BackgroundSize" },
     { gecko = "StyleGenericBackgroundSize", servo = "values::generics::background::BackgroundSize" },
     { gecko = "StyleBorderImageSlice", servo = "values::computed::BorderImageSlice" },
@@ -512,8 +514,14 @@ cbindgen-types = [
     { gecko = "StyleGenericGridLine", servo = "values::generics::grid::GridLine" },
     { gecko = "StyleGenericTrackSize", servo = "values::generics::grid::TrackSize" },
     { gecko = "StyleGenericTrackBreadth", servo = "values::generics::grid::TrackBreadth" },
+    { gecko = "StyleGenericImplicitGridTracks", servo = "values::generics::grid::ImplicitGridTracks" },
+    { gecko = "StyleImplicitGridTracks", servo = "values::computed::ImplicitGridTracks" },
     { gecko = "StyleNumberOrPercentage", servo = "values::computed::NumberOrPercentage" },
     { gecko = "StyleGenericSVGPaint", servo = "values::generics::svg::SVGPaint" },
+    { gecko = "StyleGenericTrackRepeat", servo = "values::generics::grid::TrackRepeat" },
+    { gecko = "StyleGenericTrackListValue", servo = "values::generics::grid::TrackListValue" },
+    { gecko = "StyleGenericTrackList", servo = "values::generics::grid::TrackList" },
+    { gecko = "StyleGenericGridTemplateComponent", servo = "values::generics::grid::GridTemplateComponent" },
 ]
 
 mapped-generic-types = [

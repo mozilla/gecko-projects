@@ -9,7 +9,6 @@ kind-dependencies:
 
 transforms:
     - taskgraph.transforms.webrender:transforms
-    - taskgraph.transforms.use_toolchains:transforms
     - taskgraph.transforms.job:transforms
     - taskgraph.transforms.task:transforms
 
@@ -34,8 +33,8 @@ jobs:
             docker-image: {in-tree: webrender}
         run:
             using: run-task
+            cwd: '{checkout}/gfx/wr'
             command: >-
-                cd $HOME/checkouts/gecko/gfx/wr &&
                 servo-tidy
         treeherder:
             platform: linux64-qr/opt
@@ -49,17 +48,16 @@ jobs:
         worker-type: b-linux
         worker:
             docker-image: {in-tree: webrender}
-        toolchains:
-            - linux64-rust
-            - wrench-deps
+        fetches:
+            toolchain:
+                - linux64-rust
+                - wrench-deps
         run:
             using: run-task
             command: >-
-                cd $HOME/workspace &&
-                $HOME/checkouts/gecko/mach artifact toolchain -v $MOZ_TOOLCHAINS &&
-                export PATH=$PATH:$PWD/rustc/bin &&
+                export PATH=$PATH:$MOZ_FETCHES_DIR/rustc/bin &&
                 cd $HOME/checkouts/gecko/gfx/wr &&
-                mv $HOME/workspace/wrench-deps/{vendor,.cargo} ./ &&
+                mv $MOZ_FETCHES_DIR/wrench-deps/{vendor,.cargo} ./ &&
                 CARGOFLAGS="--verbose --frozen" ci-scripts/linux-release-tests.sh
         treeherder:
             platform: linux64-qr/opt
@@ -74,17 +72,16 @@ jobs:
         worker-type: b-linux
         worker:
             docker-image: {in-tree: webrender}
-        toolchains:
-            - linux64-rust
-            - wrench-deps
+        fetches:
+            toolchain:
+                - linux64-rust
+                - wrench-deps
         run:
             using: run-task
             command: >-
-                cd $HOME/workspace &&
-                $HOME/checkouts/gecko/mach artifact toolchain -v $MOZ_TOOLCHAINS &&
-                export PATH=$PATH:$PWD/rustc/bin &&
+                export PATH=$PATH:$MOZ_FETCHES_DIR/rustc/bin &&
                 cd $HOME/checkouts/gecko/gfx/wr &&
-                mv $HOME/workspace/wrench-deps/{vendor,.cargo} ./ &&
+                mv $MOZ_FETCHES_DIR/wrench-deps/{vendor,.cargo} ./ &&
                 CARGOFLAGS="--verbose --frozen" ci-scripts/linux-debug-tests.sh
         treeherder:
             platform: linux64-qr/debug
@@ -100,7 +97,7 @@ jobs:
         worker:
             docker-image: {in-tree: webrender}
             env:
-                TOOLTOOL_MANIFEST: "/builds/worker/checkouts/gecko/browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
+                TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
             chain-of-trust: true
             artifacts:
                 - type: file
@@ -109,12 +106,13 @@ jobs:
                 - type: file
                   name: public/build/wrench-macos-headless.tar.bz2
                   path: /builds/worker/artifacts/wrench-macos-headless.tar.bz2
-        toolchains:
-            - linux64-rust-macos
-            - linux64-cctools-port
-            - linux64-clang
-            - linux64-llvm-dsymutil
-            - wrench-deps
+        fetches:
+            toolchain:
+                - linux64-rust-macos
+                - linux64-cctools-port
+                - linux64-clang
+                - linux64-llvm-dsymutil
+                - wrench-deps
         run:
             using: run-task
             tooltool-downloads: internal
@@ -144,8 +142,8 @@ jobs:
                 - 'wrench-macos-headless.tar.bz2'
         run:
             using: run-task
+            cwd: '{checkout}/gfx/wr'
             command: >-
-                cd $GECKO_PATH/gfx/wr &&
                 export WRENCH_HEADLESS_TARGET=$PWD/wrench-macos-headless/ &&
                 export WRENCH_BINARY=$PWD/wrench-macos/bin/wrench &&
                 ci-scripts/macos-release-tests.sh
@@ -162,18 +160,19 @@ jobs:
         worker:
             docker-image: {in-tree: webrender}
             env:
-                TOOLTOOL_MANIFEST: "/builds/worker/checkouts/gecko/browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
+                TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/macosx64/cross-releng.manifest"
             chain-of-trust: true
             artifacts:
                 - type: file
                   name: public/build/cargo-test-binaries.tar.bz2
                   path: /builds/worker/artifacts/cargo-test-binaries.tar.bz2
-        toolchains:
-            - linux64-rust-macos
-            - linux64-cctools-port
-            - linux64-clang
-            - linux64-llvm-dsymutil
-            - wrench-deps
+        fetches:
+            toolchain:
+                - linux64-rust-macos
+                - linux64-cctools-port
+                - linux64-clang
+                - linux64-llvm-dsymutil
+                - wrench-deps
         run:
             using: run-task
             tooltool-downloads: internal
@@ -202,8 +201,8 @@ jobs:
                 - 'cargo-test-binaries.tar.bz2'
         run:
             using: run-task
+            cwd: '{checkout}/gfx/wr'
             command: >-
-                cd $GECKO_PATH/gfx/wr &&
                 mv cargo-test-binaries target &&
                 cd target &&
                 for i in debug/*; do $i; done
@@ -221,9 +220,10 @@ jobs:
             max-run-time: 5400
             env:
                 TOOLTOOL_MANIFEST: 'browser/config/tooltool-manifests/win64/webrender.manifest'
-        toolchains:
-            - win64-rust
-            - wrench-deps
+        fetches:
+            toolchain:
+                - win64-rust
+                - wrench-deps
         run:
             using: run-task
             use-caches: false
@@ -254,15 +254,17 @@ jobs:
                   path: /builds/worker/checkouts/gecko/gfx/wr/wrench/reftests.tar.gz
         run:
             using: run-task
+            cwd: '{checkout}/gfx/wr/wrench'
             command: >-
                 $GECKO_PATH/taskcluster/scripts/misc/wrench-android-build.sh debug &&
-                cd $GECKO_PATH/gfx/wr/wrench && tar czf reftests.tar.gz reftests/
-        toolchains:
-            - android-gradle-dependencies
-            - android-ndk-linux
-            - android-sdk-linux
-            - linux64-rust-android
-            - wrench-deps
+                tar czf reftests.tar.gz reftests/
+        fetches:
+            toolchain:
+                - android-gradle-dependencies
+                - android-ndk-linux
+                - android-sdk-linux
+                - linux64-rust-android
+                - wrench-deps
         treeherder:
             platform: android-em-7-0-x86/debug
             symbol: WR(B)
@@ -287,15 +289,17 @@ jobs:
                   path: /builds/worker/checkouts/gecko/gfx/wr/wrench/reftests.tar.gz
         run:
             using: run-task
+            cwd: '{checkout}/gfx/wr/wrench'
             command: >-
                 $GECKO_PATH/taskcluster/scripts/misc/wrench-android-build.sh release &&
-                cd $GECKO_PATH/gfx/wr/wrench && tar czf reftests.tar.gz reftests/
-        toolchains:
-            - android-gradle-dependencies
-            - android-ndk-linux
-            - android-sdk-linux
-            - linux64-rust-android
-            - wrench-deps
+                tar czf reftests.tar.gz reftests/
+        fetches:
+            toolchain:
+                - android-gradle-dependencies
+                - android-ndk-linux
+                - android-sdk-linux
+                - linux64-rust-android
+                - wrench-deps
         treeherder:
             platform: android-em-7-0-x86/opt
             symbol: WR(B)

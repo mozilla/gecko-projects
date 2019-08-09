@@ -377,6 +377,7 @@ pref("media.peerconnection.ice.stun_client_maximum_transmits", 7);
 pref("media.peerconnection.ice.trickle_grace_period", 5000);
 pref("media.peerconnection.ice.no_host", false);
 pref("media.peerconnection.ice.default_address_only", false);
+pref("media.peerconnection.ice.proxy_only_if_behind_proxy", false);
 pref("media.peerconnection.ice.proxy_only", false);
 pref("media.peerconnection.turn.disable", false);
 
@@ -454,9 +455,6 @@ pref("media.video-queue.default-size", 10);
 // The maximum number of queued frames to send to the compositor.
 // By default, send all of them.
 pref("media.video-queue.send-to-compositor-size", 9999);
-
-// Whether to disable the video stats to prevent fingerprinting
-pref("media.video_stats.enabled", true);
 
 // Log level for cubeb, the audio input/output system. Valid values are
 // "verbose", "normal" and "" (log disabled).
@@ -801,8 +799,6 @@ pref("ui.scrollToClick", 0);
 // further checks.
 pref("accessibility.force_disabled", 0);
 
-pref("accessibility.AOM.enabled", false);
-
 #ifdef XP_WIN
 // Some accessibility tools poke at windows in the plugin process during setup
 // which can cause hangs.  To hack around this set accessibility.delay_plugins
@@ -1019,16 +1015,6 @@ pref("print.font-variations-as-paths", true);
 // in a document.
 pref("extensions.spellcheck.inline.max-misspellings", 500);
 
-// General prefs for editor.
-// Whether Gecko specific editing UI is enabled by default.
-// Those UIs are not impelemnted by any other browsers.  So, only Firefox users
-// can change some styles with them.  This means that only Firefox users may
-// get unexpected result of some web apps if they assume that users cannot
-// change such styles.
-pref("editor.resizing.enabled_by_default", false);
-pref("editor.inline_table_editing.enabled_by_default", false);
-pref("editor.positioning.enabled_by_default", false);
-
 // Whether inserting <div> when typing Enter in a block element which can
 // contain <div>.  If false, inserts <br> instead.
 pref("editor.use_div_for_default_newlines",  true);
@@ -1117,11 +1103,6 @@ pref("dom.use_components_shim", false);
 pref("dom.use_components_shim", true);
 #endif // NIGHTLY_BUILD
 
-// Parsing perf prefs. For now just mimic what the old code did.
-#ifndef XP_WIN
-pref("content.sink.pending_event_mode", 0);
-#endif
-
 // Disable popups from plugins by default
 //   0 = openAllowed
 //   1 = openControlled
@@ -1137,6 +1118,10 @@ pref("privacy.restrict3rdpartystorage.partitionedHosts", "accounts.google.com/o/
 // before granting the storage access permission.
 pref("privacy.restrict3rdpartystorage.userInteractionRequiredForHosts", "");
 
+// The url decoration tokens used to for stripping document referrers based on.
+// A list separated by spaces.  This pref isn't meant to be changed by users.
+pref("privacy.restrict3rdpartystorage.url_decorations", "");
+
 // Excessive reporting of blocked popups can be a DOS vector,
 // by overloading the main process as popups get blocked and when
 // users try to restore all popups, which is the most visible
@@ -1149,29 +1134,6 @@ pref("privacy.popups.maxReported", 100);
 #ifdef NIGHTLY_BUILD
 pref("privacy.trackingprotection.origin_telemetry.enabled", true);
 #endif
-// First Party Isolation (double keying), disabled by default
-pref("privacy.firstparty.isolate",                        false);
-// If false, two windows in the same domain with different first party domains
-// (top level URLs) can access resources through window.opener.
-// This pref is effective only when "privacy.firstparty.isolate" is true.
-pref("privacy.firstparty.isolate.restrict_opener_access", true);
-// We automatically decline canvas permission requests if they are not initiated
-// from user input. Just in case that breaks something, we allow the user to revert
-// this behavior with this obscure pref. We do not intend to support this long term.
-// If you do set it, to work around some broken website, please file a bug with
-// information so we can understand why it is needed.
-pref("privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts", true);
-// The log level for browser console messages logged in RFPHelper.jsm
-// Change to 'All' and restart to see the messages
-pref("privacy.resistFingerprinting.jsmloglevel", "Warn");
-// A subset of Resist Fingerprinting protections focused specifically on timers for testing
-// This affects the Animation API, the performance APIs, Date.getTime, Event.timestamp,
-//   File.lastModified, audioContext.currentTime, canvas.captureStream.currentTime
-pref("privacy.reduceTimerPrecision", true);
-// Dynamically tune the resolution of the timer reduction for both of the two above prefs
-pref("privacy.resistFingerprinting.reduceTimerPrecision.microseconds", 1000);
-// Enable jittering the clock one precision value forward
-pref("privacy.resistFingerprinting.reduceTimerPrecision.jitter", true);
 
 pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.coalesce_mouse_move",       true);
@@ -1225,10 +1187,6 @@ pref("javascript.options.discardSystemSource", false);
 // Many of the the following preferences tune the SpiderMonkey GC, if you
 // change the defaults here please also consider changing them in
 // js/src/jsgc.cpp.  They're documented in js/src/jsapi.h.
-
-// JSGC_MAX_MALLOC_BYTES
-// How much malloc memory can be allocated before triggering a GC, in MB.
-pref("javascript.options.mem.high_water_mark", 128);
 
 // JSGC_MAX_BYTES
 // SpiderMonkey defaults to 2^32-1 bytes, but this is measured in MB so that
@@ -2857,9 +2815,6 @@ pref("layout.display-list.rebuild-frame-limit", 500);
 
 // pref to control whether layout warnings that are hit quite often are enabled
 pref("layout.spammy_warnings.enabled", false);
-
-// Should we fragment floats inside CSS column layout?
-pref("layout.float-fragments-inside-column.enabled", true);
 
 // The number of frames times the frame rate is the time required to
 // pass without painting used to guess that we'll not paint again soon

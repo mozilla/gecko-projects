@@ -62,6 +62,10 @@ class PictureInPictureToggleChild extends ActorChild {
     this.toggleTesting = Services.prefs.getBoolPref(TOGGLE_TESTING_PREF, false);
   }
 
+  cleanup() {
+    this.removeMouseButtonListeners();
+  }
+
   /**
    * Returns the state for the current document referred to via
    * this.content.document. If no such state exists, creates it, stores it
@@ -134,12 +138,6 @@ class PictureInPictureToggleChild extends ActorChild {
       }
       case "mousemove": {
         this.onMouseMove(event);
-        break;
-      }
-      case "pagehide": {
-        if (event.target.top == event.target) {
-          this.removeMouseButtonListeners();
-        }
         break;
       }
     }
@@ -846,7 +844,12 @@ class PictureInPictureChild extends ActorChild {
     }
 
     let doc = this.content.document;
+    // Clone the original video to get its MediaInfo (specifically, it's dimensions)
+    // set right away, but also pause the video since we don't need two copies of it
+    // playing at the same time. The originating video will be "projected" onto the
+    // cloned Picture-in-Picture player video via cloneElementVisually.
     let playerVideo = originatingVideo.cloneNode();
+    playerVideo.pause();
     playerVideo.removeAttribute("controls");
 
     // Mute the video and rely on the originating video's audio playback.

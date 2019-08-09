@@ -9,6 +9,7 @@ Test the login-item component
   <script src="chrome://mochikit/content/tests/SimpleTest/SimpleTest.js"></script>
   <script src="chrome://mochikit/content/tests/SimpleTest/EventUtils.js"></script>
   <script type="module" src="chrome://browser/content/aboutlogins/components/login-item.js"></script>
+  <script type="module" src="chrome://browser/content/aboutlogins/components/confirmation-dialog.js"></script>
   <script src="aboutlogins_common.js"></script>
 
   <link rel="stylesheet" href="/tests/SimpleTest/test.css"/>
@@ -25,7 +26,7 @@ Test the login-item component
 <script>
 /** Test the login-item component **/
 
-let gLoginItem;
+let gLoginItem, gConfirmationDialog;
 const TEST_LOGIN_1 = {
   guid: "123456789",
   origin: "https://example.com",
@@ -61,6 +62,10 @@ add_task(async function setup() {
 
   gLoginItem = document.createElement("login-item");
   displayEl.appendChild(gLoginItem);
+
+  gConfirmationDialog = document.createElement("confirmation-dialog");
+  gConfirmationDialog.hidden = true;
+  displayEl.appendChild(gConfirmationDialog);
 });
 
 add_task(async function test_empty_item() {
@@ -126,7 +131,7 @@ add_task(async function test_edit_login() {
   is(document.l10n.getAttributes(gLoginItem.shadowRoot.querySelector(".time-changed")).args.timeChanged, TEST_LOGIN_1.timePasswordChanged, "time-changed should be populated");
   is(document.l10n.getAttributes(gLoginItem.shadowRoot.querySelector(".time-used")).args.timeUsed, TEST_LOGIN_1.timeLastUsed, "time-used should be populated");
   let copyButtons = [...gLoginItem.shadowRoot.querySelectorAll(".copy-button")];
-  ok(copyButtons.every(button => isHidden(button)), "The copy buttons should be visible when editing a login");
+  ok(copyButtons.every(button => isHidden(button)), "The copy buttons should be hidden when editing a login");
 
   gLoginItem.shadowRoot.querySelector("input[name='username']").value = "newUsername";
   gLoginItem.shadowRoot.querySelector("input[name='password']").value = "newPassword";
@@ -152,6 +157,13 @@ add_task(async function test_edit_login_cancel() {
      "loginItem should not be in 'isNewLogin' mode");
 
   gLoginItem.shadowRoot.querySelector(".cancel-button").click();
+  gConfirmationDialog.shadowRoot.querySelector(".confirm-button").click();
+
+  await SimpleTest.promiseWaitForCondition(
+    () => gConfirmationDialog.hidden,
+    "waiting for confirmation dialog to hide"
+  );
+
   ok(!gLoginItem.dataset.editing, "loginItem should not be in 'edit' mode");
   ok(!gLoginItem.dataset.isNewLogin, "loginItem should not be in 'isNewLogin' mode");
 });

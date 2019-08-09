@@ -307,7 +307,6 @@ uint32_t nsContentUtils::sRunnersCountAtFirstBlocker = 0;
 nsIInterfaceRequestor* nsContentUtils::sSameOriginChecker = nullptr;
 
 bool nsContentUtils::sIsHandlingKeyBoardEvent = false;
-bool nsContentUtils::sAllowXULXBL_for_file = false;
 
 nsString* nsContentUtils::sShiftText = nullptr;
 nsString* nsContentUtils::sControlText = nullptr;
@@ -620,9 +619,6 @@ nsresult nsContentUtils::Init() {
   }
 
   sBlockedScriptRunners = new AutoTArray<nsCOMPtr<nsIRunnable>, 8>;
-
-  Preferences::AddBoolVarCache(&sAllowXULXBL_for_file,
-                               "dom.allow_XUL_XBL_for_file");
 
 #ifndef RELEASE_OR_BETA
   sBypassCSSOMOriginCheck = getenv("MOZ_BYPASS_CSSOM_ORIGIN_CHECK");
@@ -1472,22 +1468,6 @@ bool nsContentUtils::IsFirstLetterPunctuation(uint32_t aChar) {
     default:
       return false;
   }
-}
-
-// static
-bool nsContentUtils::IsFirstLetterPunctuationAt(const nsTextFragment* aFrag,
-                                                uint32_t aOffset) {
-  char16_t h = aFrag->CharAt(aOffset);
-  if (!IS_SURROGATE(h)) {
-    return IsFirstLetterPunctuation(h);
-  }
-  if (NS_IS_HIGH_SURROGATE(h) && aOffset + 1 < aFrag->GetLength()) {
-    char16_t l = aFrag->CharAt(aOffset + 1);
-    if (NS_IS_LOW_SURROGATE(l)) {
-      return IsFirstLetterPunctuation(SURROGATE_TO_UCS4(h, l));
-    }
-  }
-  return false;
 }
 
 // static
@@ -6235,7 +6215,8 @@ bool nsContentUtils::AllowXULXBLForPrincipal(nsIPrincipal* aPrincipal) {
   aPrincipal->GetURI(getter_AddRefs(princURI));
 
   return princURI &&
-         ((sAllowXULXBL_for_file && SchemeIs(princURI, "file")) ||
+         ((StaticPrefs::dom_allow_XUL_XBL_for_file() &&
+           SchemeIs(princURI, "file")) ||
           IsSitePermAllow(aPrincipal, NS_LITERAL_CSTRING("allowXULXBL")));
 }
 
@@ -7995,7 +7976,7 @@ bool nsContentUtils::IsThirdPartyWindowOrChannel(nsPIDOMWindowInner* aWindow,
     // want to check the channel URI against the loading principal as well.
     nsresult rv =
         thirdPartyUtil->IsThirdPartyChannel(aChannel, nullptr, &thirdParty);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
+    if (NS_FAILED(rv)) {
       // Assume third-party in case of failure
       thirdParty = true;
     }

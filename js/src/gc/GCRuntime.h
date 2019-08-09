@@ -266,6 +266,9 @@ class GCRuntime {
   void maybeAllocTriggerZoneGC(Zone* zone, size_t nbytes = 0);
   // Check whether to trigger a zone GC after malloc memory.
   void maybeMallocTriggerZoneGC(Zone* zone);
+  bool maybeMallocTriggerZoneGC(Zone* zone, const HeapSize& heap,
+                                const ZoneThreshold& threshold,
+                                JS::GCReason reason);
   // The return value indicates if we were able to do the GC.
   bool triggerZoneGC(Zone* zone, JS::GCReason reason, size_t usedBytes,
                      size_t thresholdBytes);
@@ -368,31 +371,6 @@ class GCRuntime {
   void setGrayRootsTracer(JSTraceDataOp traceOp, void* data);
   MOZ_MUST_USE bool addBlackRootsTracer(JSTraceDataOp traceOp, void* data);
   void removeBlackRootsTracer(JSTraceDataOp traceOp, void* data);
-
-  int32_t getMallocBytes() const { return mallocCounter.bytes(); }
-  size_t maxMallocBytesAllocated() const { return mallocCounter.maxBytes(); }
-  void setMaxMallocBytes(size_t value, const AutoLockGC& lock);
-
-  bool updateMallocCounter(size_t nbytes) {
-    mallocCounter.update(nbytes);
-    TriggerKind trigger = mallocCounter.shouldTriggerGC(tunables);
-    if (MOZ_LIKELY(trigger == NoTrigger) ||
-        trigger <= mallocCounter.triggered()) {
-      return false;
-    }
-
-    if (!triggerGC(JS::GCReason::TOO_MUCH_MALLOC)) {
-      return false;
-    }
-
-    // Even though this method may be called off the main thread it is safe
-    // to access mallocCounter here since triggerGC() will return false in
-    // that case.
-    stats().recordTrigger(mallocCounter.bytes(), mallocCounter.maxBytes());
-
-    mallocCounter.recordTrigger(trigger);
-    return true;
-  }
 
   void updateMemoryCountersOnGCStart();
 
@@ -1013,8 +991,6 @@ class GCRuntime {
   CallbackVector<JSWeakPointerZonesCallback> updateWeakPointerZonesCallbacks;
   CallbackVector<JSWeakPointerCompartmentCallback>
       updateWeakPointerCompartmentCallbacks;
-
-  MemoryCounter mallocCounter;
 
   /*
    * The trace operations to trace embedding-specific GC roots. One is for

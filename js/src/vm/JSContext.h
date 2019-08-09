@@ -183,7 +183,9 @@ struct JSContext : public JS::RootingContext,
 
   // When a helper thread is using a context, it may need to periodically
   // free unused memory.
-  mozilla::Atomic<bool, mozilla::ReleaseAcquire> freeUnusedMemory;
+  mozilla::Atomic<bool, mozilla::ReleaseAcquire,
+                  mozilla::recordreplay::Behavior::DontPreserve>
+      freeUnusedMemory;
 
  public:
   // This is used by helper threads to change the runtime their context is
@@ -264,11 +266,8 @@ struct JSContext : public JS::RootingContext,
     if (!p) {
       return nullptr;
     }
-    updateMallocCounter(bytes);
     return p;
   }
-
-  void updateMallocCounter(size_t nbytes);
 
   void reportAllocationOverflow() { js::ReportAllocationOverflow(this); }
 
@@ -1361,6 +1360,6 @@ struct MOZ_RAII AutoSetThreadIsSweeping {
 
 #define CHECK_THREAD(cx)                            \
   MOZ_ASSERT_IF(cx && !cx->isHelperThreadContext(), \
-                CurrentThreadCanAccessRuntime(cx->runtime()))
+                js::CurrentThreadCanAccessRuntime(cx->runtime()))
 
 #endif /* vm_JSContext_h */

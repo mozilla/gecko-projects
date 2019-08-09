@@ -19,15 +19,6 @@ const {
 } = require("devtools/client/webconsole/selectors/history");
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await testHistory();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await testHistory();
-});
-
-async function testHistory() {
   info("Setting custom input history pref to " + INPUT_HISTORY_COUNT);
   Services.prefs.setIntPref(
     "devtools.webconsole.inputHistoryCount",
@@ -89,7 +80,12 @@ async function testHistory() {
   // Set input value separately from execute so UP arrow accurately navigates
   // history.
   setInputValue(hud3, '"hello from third tab"');
-  await hud3.jsterm.execute();
+  await executeAndWaitForMessage(
+    hud3,
+    '"hello from third tab"',
+    '"hello from third tab"',
+    ".result"
+  );
 
   state1 = hud1.ui.wrapper.getStore().getState();
   is(
@@ -128,7 +124,7 @@ async function testHistory() {
     "Fourth tab has most recent history"
   );
 
-  await hud4.jsterm.props.clearHistory();
+  await hud4.ui.wrapper.dispatchClearHistory();
   state4 = hud4.ui.wrapper.getStore().getState();
   is(
     JSON.stringify(getHistoryEntries(state4)),
@@ -146,19 +142,16 @@ async function testHistory() {
 
   info("Clearing custom input history pref");
   Services.prefs.clearUserPref("devtools.webconsole.inputHistoryCount");
-}
+});
 
 /**
  * Populate the history by running the following commands:
  *  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
  */
 async function populateInputHistory(hud) {
-  const jsterm = hud.jsterm;
-
   for (let i = 0; i < INPUT_HISTORY_COUNT; i++) {
-    // Set input value separately from execute so UP arrow accurately navigates history.
-    setInputValue(hud, i.toString());
-    await jsterm.execute();
+    const input = i.toString();
+    await executeAndWaitForMessage(hud, input, input, ".result");
   }
 }
 

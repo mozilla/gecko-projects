@@ -19,8 +19,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionParent: "resource://gre/modules/ExtensionParent.jsm",
   getVerificationHash: "resource://gre/modules/SearchEngine.jsm",
   OS: "resource://gre/modules/osfile.jsm",
-  RemoteSettings: "resource://services-settings/remote-settings.js",
-  RemoteSettingsClient: "resource://services-settings/RemoteSettingsClient.jsm",
+  IgnoreLists: "resource://gre/modules/IgnoreLists.jsm",
   SearchEngine: "resource://gre/modules/SearchEngine.jsm",
   SearchStaticData: "resource://gre/modules/SearchStaticData.jsm",
   SearchUtils: "resource://gre/modules/SearchUtils.jsm",
@@ -191,7 +190,7 @@ var ensureKnownRegion = async function(ss) {
 
 // Store the result of the geoip request as well as any other values and
 // telemetry which depend on it.
-function storeRegion(region) {
+async function storeRegion(region) {
   let isTimezoneUS = isUSTimezone();
   // If it's a US region, but not a US timezone, we don't store the value.
   // This works because no region defaults to ZZ (unknown) in nsURLFormatter
@@ -214,7 +213,7 @@ function storeRegion(region) {
   }
   // telemetry to compare our geoip response with platform-specific country data.
   // On Mac and Windows, we can get a country code via sysinfo
-  let platformCC = Services.sysinfo.get("countryCode");
+  let platformCC = await Services.sysinfo.countryCode;
   if (platformCC) {
     let probeUSMismatched, probeNonUSMismatched;
     switch (Services.appinfo.OS) {
@@ -300,7 +299,7 @@ function fetchRegion(ss) {
       // Even if we timed out, we want to save the region and everything
       // related so next startup sees the value and doesn't retry this dance.
       if (result) {
-        storeRegion(result);
+        storeRegion(result).catch(Cu.reportError);
       }
       Services.telemetry
         .getHistogramById("SEARCH_SERVICE_COUNTRY_FETCH_RESULT")
@@ -741,46 +740,6 @@ SearchService.prototype = {
   },
 
   /**
-   * Obtains the current ignore list from remote settings. This includes
-   * verifying the signature of the ignore list within the database.
-   *
-   * If the signature in the database is invalid, the database will be wiped
-   * and the stored dump will be used, until the settings next update.
-   *
-   * Note that this may cause a network check of the certificate, but that
-   * should generally be quick.
-   *
-   * @param {RemoteSettings} ignoreListSettings
-   *   The remote settings object associated with the ignore list.
-   * @param {boolean} [firstTime]
-   *   Internal boolean to indicate if this is the first time check or not.
-   * @returns {array}
-   *   An array of objects in the database, or an empty array if none
-   *   could be obtained.
-   */
-  async _getRemoteSettings(ignoreListSettings, firstTime = true) {
-    try {
-      return ignoreListSettings.get({ verifySignature: true });
-    } catch (ex) {
-      if (
-        ex instanceof RemoteSettingsClient.InvalidSignatureError &&
-        firstTime
-      ) {
-        // The local database is invalid, try and reset it.
-        const collection = await ignoreListSettings.openCollection();
-        await collection.clear();
-        await collection.db.close();
-        // Now call this again.
-        return this._getRemoteSettings(ignoreListSettings, false);
-      }
-      // Don't throw an error just log it, just continue with no data, and hopefully
-      // a sync will fix things later on.
-      Cu.reportError(ex);
-      return [];
-    }
-  },
-
-  /**
    * Obtains the remote settings for the search service. This should only be
    * called from init(). Any subsequent updates to the remote settings are
    * handled via a sync listener.
@@ -790,15 +749,10 @@ SearchService.prototype = {
    * hence the `get` may take a while to return.
    */
   async _setupRemoteSettings() {
-    const ignoreListSettings = RemoteSettings(
-      SearchUtils.SETTINGS_IGNORELIST_KEY
-    );
-    // Trigger a get of the initial value.
-    const current = await this._getRemoteSettings(ignoreListSettings);
-
     // Now we have the values, listen for future updates.
     this._ignoreListListener = this._handleIgnoreListUpdated.bind(this);
-    ignoreListSettings.on("sync", this._ignoreListListener);
+
+    const current = await IgnoreLists.getAndSubscribe(this._ignoreListListener);
 
     await this._handleIgnoreListUpdated({ data: { current } });
     Services.obs.notifyObservers(
@@ -3096,10 +3050,7 @@ SearchService.prototype = {
 
   _removeObservers() {
     if (this._ignoreListListener) {
-      RemoteSettings(SearchUtils.SETTINGS_IGNORELIST_KEY).off(
-        "sync",
-        this._ignoreListListener
-      );
+      IgnoreLists.unsubscribe(this._ignoreListListener);
       delete this._ignoreListListener;
     }
 

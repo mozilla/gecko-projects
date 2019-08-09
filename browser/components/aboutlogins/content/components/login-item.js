@@ -16,6 +16,8 @@ export default class LoginItem extends HTMLElement {
   constructor() {
     super();
     this._login = {};
+    this._copyUsernameTimeoutId = 0;
+    this._copyPasswordTimeoutId = 0;
   }
 
   connectedCallback() {
@@ -54,6 +56,10 @@ export default class LoginItem extends HTMLElement {
     this._saveChangesButton = this.shadowRoot.querySelector(
       ".save-changes-button"
     );
+    this._favicon = this.shadowRoot.querySelector(".login-item-favicon");
+    this._faviconWrapper = this.shadowRoot.querySelector(
+      ".login-item-favicon-wrapper"
+    );
     this._title = this.shadowRoot.querySelector(".login-item-title");
     this._timeCreated = this.shadowRoot.querySelector(".time-created");
     this._timeChanged = this.shadowRoot.querySelector(".time-changed");
@@ -72,9 +78,10 @@ export default class LoginItem extends HTMLElement {
     this._openSiteButton.addEventListener("click", this);
     this._originInput.addEventListener("click", this);
     this._revealCheckbox.addEventListener("click", this);
-    window.addEventListener("AboutLoginsCreateLogin", this);
     window.addEventListener("AboutLoginsInitialLoginSelected", this);
+    window.addEventListener("AboutLoginsLoadInitialFavicon", this);
     window.addEventListener("AboutLoginsLoginSelected", this);
+    window.addEventListener("AboutLoginsShowBlankLogin", this);
   }
 
   async render() {
@@ -97,6 +104,19 @@ export default class LoginItem extends HTMLElement {
       timeUsed: this._login.timeLastUsed || "",
     });
 
+    if (this._login.faviconDataURI) {
+      this._faviconWrapper.classList.add("hide-default-favicon");
+      this._favicon.src = this._login.faviconDataURI;
+      document.l10n.setAttributes(this._favicon, "login-favicon", {
+        title: this._login.title,
+      });
+      this._favicon.hidden = false;
+    } else {
+      // reset the src and alt attributes if the currently selected favicon doesn't have a favicon
+      this._favicon.hidden = true;
+      this._faviconWrapper.classList.remove("hide-default-favicon");
+    }
+
     this._title.textContent = this._login.title;
     this._originInput.defaultValue = this._login.origin || "";
     this._usernameInput.defaultValue = this._login.username || "";
@@ -117,16 +137,36 @@ export default class LoginItem extends HTMLElement {
 
   async handleEvent(event) {
     switch (event.type) {
-      case "AboutLoginsCreateLogin": {
-        this.setLogin({});
-        break;
-      }
       case "AboutLoginsInitialLoginSelected": {
         this.setLogin(event.detail, { skipFocusChange: true });
         break;
       }
+      case "AboutLoginsLoadInitialFavicon": {
+        this.render();
+        break;
+      }
       case "AboutLoginsLoginSelected": {
-        this.setLogin(event.detail);
+        let login = event.detail;
+        if (this.hasPendingChanges()) {
+          event.preventDefault();
+          this.showConfirmationDialog("discard-changes", () => {
+            // Clear any pending changes
+            this.setLogin(login);
+
+            window.dispatchEvent(
+              new CustomEvent("AboutLoginsLoginSelected", {
+                detail: login,
+                cancelable: true,
+              })
+            );
+          });
+        } else {
+          this.setLogin(login);
+        }
+        break;
+      }
+      case "AboutLoginsShowBlankLogin": {
+        this.setLogin({});
         break;
       }
       case "blur": {
@@ -153,15 +193,26 @@ export default class LoginItem extends HTMLElement {
         if (classList.contains("cancel-button")) {
           let wasExistingLogin = !!this._login.guid;
           if (wasExistingLogin) {
-            this.setLogin(this._login);
-          } else {
+            if (this.hasPendingChanges()) {
+              this.showConfirmationDialog("discard-changes", () => {
+                this.setLogin(this._login);
+              });
+            } else {
+              this.setLogin(this._login);
+            }
+          } else if (!this.hasPendingChanges()) {
             window.dispatchEvent(new CustomEvent("AboutLoginsClearSelection"));
+            recordTelemetryEvent({
+              object: "new_login",
+              method: "cancel",
+            });
+          } else {
+            this.showConfirmationDialog("discard-changes", () => {
+              window.dispatchEvent(
+                new CustomEvent("AboutLoginsClearSelection")
+              );
+            });
           }
-
-          recordTelemetryEvent({
-            object: wasExistingLogin ? "existing_login" : "new_login",
-            method: "cancel",
-          });
           return;
         }
         if (
@@ -189,10 +240,15 @@ export default class LoginItem extends HTMLElement {
               detail: propertyToCopy,
             })
           );
-          setTimeout(() => {
+          let timeoutId = setTimeout(() => {
             copyButton.disabled = false;
             delete copyButton.dataset.copied;
           }, LoginItem.COPY_BUTTON_RESET_TIMEOUT);
+          if (copyButton.dataset.copyLoginProperty == "password") {
+            this._copyPasswordTimeoutId = timeoutId;
+          } else {
+            this._copyUsernameTimeoutId = timeoutId;
+          }
 
           recordTelemetryEvent({
             object: copyButton.dataset.telemetryObject,
@@ -201,7 +257,14 @@ export default class LoginItem extends HTMLElement {
           return;
         }
         if (classList.contains("delete-button")) {
-          this.confirmDelete();
+          this.showConfirmationDialog("delete", () => {
+            document.dispatchEvent(
+              new CustomEvent("AboutLoginsDeleteLogin", {
+                bubbles: true,
+                detail: this._login,
+              })
+            );
+          });
           return;
         }
         if (classList.contains("edit-button")) {
@@ -274,27 +337,44 @@ export default class LoginItem extends HTMLElement {
           message: "confirm-delete-dialog-message",
           confirmButtonLabel: "confirm-delete-dialog-confirm-button",
         };
+        break;
+      }
+      case "discard-changes": {
+        options = {
+          title: "confirm-discard-changes-dialog-title",
+          message: "confirm-discard-changes-dialog-message",
+          confirmButtonLabel: "confirm-discard-changes-dialog-confirm-button",
+        };
+        break;
       }
     }
+    let wasExistingLogin = !!this._login.guid;
+    let method = type == "delete" ? "delete" : "cancel";
     let dialogPromise = dialog.show(options);
-    dialogPromise.then(onConfirm, () => {});
+    dialogPromise.then(
+      () => {
+        try {
+          onConfirm();
+        } catch (ex) {}
+        recordTelemetryEvent({
+          object: wasExistingLogin ? "existing_login" : "new_login",
+          method,
+        });
+      },
+      () => {}
+    );
     return dialogPromise;
   }
 
-  /**
-   * Toggles the confirm delete dialog, completing the deletion if the user
-   * agrees.
-   */
-  confirmDelete() {
-    this.showConfirmationDialog("delete", () => {
-      document.dispatchEvent(
-        new CustomEvent("AboutLoginsDeleteLogin", {
-          bubbles: true,
-          detail: this._login,
-        })
-      );
-      recordTelemetryEvent({ object: "existing_login", method: "delete" });
-    });
+  hasPendingChanges() {
+    let { origin = "", username = "", password = "" } = this._login || {};
+
+    let valuesChanged = !window.AboutLoginsUtils.doLoginsMatch(
+      { origin, username, password },
+      this._loginFromForm()
+    );
+
+    return this.dataset.editing && valuesChanged;
   }
 
   /**
@@ -318,6 +398,16 @@ export default class LoginItem extends HTMLElement {
 
     this._revealCheckbox.checked = false;
 
+    clearTimeout(this._copyUsernameTimeoutId);
+    clearTimeout(this._copyPasswordTimeoutId);
+    for (let copyButton of [
+      this._copyUsernameButton,
+      this._copyPasswordButton,
+    ]) {
+      copyButton.disabled = false;
+      delete copyButton.dataset.copied;
+    }
+
     if (!skipFocusChange) {
       this._editButton.focus();
     }
@@ -339,9 +429,14 @@ export default class LoginItem extends HTMLElement {
       return;
     }
 
-    this._toggleEditing(false);
     this._login = login;
-    this.render();
+    this.dispatchEvent(
+      new CustomEvent("AboutLoginsLoginSelected", {
+        bubbles: true,
+        composed: true,
+        detail: login,
+      })
+    );
   }
 
   /**
@@ -407,7 +502,8 @@ export default class LoginItem extends HTMLElement {
     return {
       username: this._usernameInput.value.trim(),
       password: this._passwordInput.value.trim(),
-      origin: this._originInput.value.trim(),
+      origin:
+        window.AboutLoginsUtils.getLoginOrigin(this._originInput.value) || "",
     };
   }
 

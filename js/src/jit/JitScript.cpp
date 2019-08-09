@@ -13,6 +13,7 @@
 
 #include "jit/BaselineIC.h"
 #include "jit/BytecodeAnalysis.h"
+#include "vm/BytecodeUtil.h"
 #include "vm/JSScript.h"
 #include "vm/Stack.h"
 #include "vm/TypeInference.h"
@@ -204,9 +205,10 @@ void JitScript::ensureProfileString(JSContext* cx, JSScript* script) {
     return;
   }
 
+  AutoEnterOOMUnsafeRegion oomUnsafe;
   profileString_ = cx->runtime()->geckoProfiler().profileString(cx, script);
   if (!profileString_) {
-    MOZ_CRASH("Failed to allocate profile string");
+    oomUnsafe.crash("Failed to allocate profile string");
   }
 }
 
@@ -257,7 +259,7 @@ void JitScript::printTypes(JSContext* cx, HandleScript script) {
       fprintf(stderr, "%s", sprinter.string());
     }
 
-    if (CodeSpec[*pc].format & JOF_TYPESET) {
+    if (BytecodeOpHasTypeSet(JSOp(*pc))) {
       StackTypeSet* types = bytecodeTypes(sweep, script, pc);
       fprintf(stderr, "  typeset %u:", unsigned(types - typeArray(sweep)));
       types->print();

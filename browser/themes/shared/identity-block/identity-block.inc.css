@@ -23,7 +23,8 @@
 
 #urlbar[pageproxystate="invalid"] > #identity-box > #blocked-permissions-container,
 #urlbar[pageproxystate="invalid"] > #identity-box > #notification-popup-box,
-#urlbar[pageproxystate="invalid"] > #identity-box > #identity-icon-labels {
+#urlbar[pageproxystate="invalid"] > #identity-box > #identity-icon-labels,
+#urlbar[pageproxystate="invalid"] > #identity-box > #remote-control-icon {
   display: none;
 }
 
@@ -155,6 +156,14 @@
   fill: #12BC00;
 }
 
+#urlbar[pageproxystate="valid"] > #identity-box.verifiedDomain > #identity-icon[lock-icon-gray],
+#urlbar[pageproxystate="valid"] > #identity-box.verifiedIdentity > #identity-icon[lock-icon-gray],
+#urlbar[pageproxystate="valid"] > #identity-box.mixedActiveBlocked > #identity-icon[lock-icon-gray] {
+  fill-opacity: 0.6;
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+}
+
 #urlbar[pageproxystate="valid"] > #identity-box.weakCipher > #identity-icon,
 #urlbar[pageproxystate="valid"] > #identity-box.mixedDisplayContent > #identity-icon,
 #urlbar[pageproxystate="valid"] > #identity-box.mixedDisplayContentLoadedActiveBlocked > #identity-icon,
@@ -215,12 +224,11 @@
 /* Separator */
 #tracking-protection-icon-container::after {
   content: "";
-  border-right: 1px solid var(--lwt-background-tab-separator-color, currentColor);
+  border-right: 1px solid var(--urlbar-separator-color);
   position: absolute;
   right: 0;
   top: 4px;
   height: 21px;
-  opacity: .3;
 }
 
 #tracking-protection-icon-container:-moz-locale-dir(rtl)::after {
@@ -261,6 +269,24 @@
   -moz-context-properties: fill, fill-opacity;
 }
 
+#tracking-protection-icon-box[hasException]::before {
+  background: url(chrome://browser/skin/badge-blue.svg);
+  content: "";
+  position: absolute;
+  bottom: 15px;
+  right: 0;
+  height: 14px;
+  width: 14px;
+}
+
+#tracking-protection-icon-box[hasException]:-moz-locale-dir(rtl)::before {
+  left: 0;
+  right: unset;
+  /* This is needed in order to put the dot in front of the shield icon in rtl
+     mode */
+  z-index: 1;
+}
+
 :root[lwt-toolbar-field-brighttext] #tracking-protection-icon-box:not([hasException])[active] #tracking-protection-icon-animatable-image {
   background-image: url(chrome://browser/skin/tracking-protection-animation-brighttext.svg);
 }
@@ -278,6 +304,10 @@
 
 #tracking-protection-icon-box[animationsenabled][active][animate] #tracking-protection-icon-animatable-image:-moz-locale-dir(rtl) {
   animation-name: tp-icon-animation-rtl;
+}
+
+#tracking-protection-icon-tooltip {
+  max-width: 500px;
 }
 
 #urlbar[pageproxystate="valid"] > #tracking-protection-icon-container > #tracking-protection-icon-box > #tracking-protection-icon {

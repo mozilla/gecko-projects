@@ -1295,7 +1295,6 @@ JS_PUBLIC_API void JS_SetGCParametersBasedOnAvailableMemory(JSContext* cx,
   };
 
   static const JSGCConfig minimal[] = {
-      {JSGC_MAX_MALLOC_BYTES, 6 * 1024 * 1024},
       {JSGC_SLICE_TIME_BUDGET_MS, 30},
       {JSGC_HIGH_FREQUENCY_TIME_LIMIT, 1500},
       {JSGC_HIGH_FREQUENCY_HIGH_LIMIT, 40},
@@ -1310,7 +1309,6 @@ JS_PUBLIC_API void JS_SetGCParametersBasedOnAvailableMemory(JSContext* cx,
       {JSGC_MODE, JSGC_MODE_ZONE_INCREMENTAL}};
 
   static const JSGCConfig nominal[] = {
-      {JSGC_MAX_MALLOC_BYTES, 6 * 1024 * 1024},
       {JSGC_SLICE_TIME_BUDGET_MS, 30},
       {JSGC_HIGH_FREQUENCY_TIME_LIMIT, 1000},
       {JSGC_HIGH_FREQUENCY_HIGH_LIMIT, 500},
@@ -3313,7 +3311,7 @@ static JSObject* CloneFunctionObject(JSContext* cx, HandleObject funobj,
   // Only allow cloning normal, interpreted functions.
   RootedFunction fun(cx, &funobj->as<JSFunction>());
   if (fun->isNative() || fun->isBoundFunction() ||
-      fun->kind() != JSFunction::NormalFunction || fun->isExtended() ||
+      fun->kind() != FunctionFlags::NormalFunction || fun->isExtended() ||
       fun->isSelfHostedBuiltin()) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_CANT_CLONE_OBJECT);

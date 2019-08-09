@@ -14,15 +14,6 @@ const TEST_URI =
 const dpr = "--dpr 1";
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
   ok(hud, "web console opened");
 
@@ -33,13 +24,11 @@ async function performTests() {
   // overflow
   await createScrollbarOverflow();
   await testFullpageClipboardScrollbar(hud);
-}
+});
 
 async function testClipboard(hud) {
   const command = `:screenshot --clipboard ${dpr}`;
-  const onMessage = waitForMessage(hud, "Screenshot copied to clipboard.");
-  hud.jsterm.execute(command);
-  await onMessage;
+  await executeScreenshotClipboardCommand(hud, command);
   const contentSize = await getContentSize();
   const imgSize = await getImageSizeFromClipboard();
 
@@ -57,9 +46,7 @@ async function testClipboard(hud) {
 
 async function testFullpageClipboard(hud) {
   const command = `:screenshot --fullpage --clipboard ${dpr}`;
-  const onMessage = waitForMessage(hud, "Screenshot copied to clipboard.");
-  hud.jsterm.execute(command);
-  await onMessage;
+  await executeScreenshotClipboardCommand(hud, command);
   const contentSize = await getContentSize();
   const imgSize = await getImageSizeFromClipboard();
 
@@ -77,12 +64,8 @@ async function testFullpageClipboard(hud) {
 
 async function testSelectorClipboard(hud) {
   const command = `:screenshot --selector "img#testImage" --clipboard ${dpr}`;
-  const messageReceived = waitForMessage(
-    hud,
-    "Screenshot copied to clipboard."
-  );
-  hud.jsterm.execute(command);
-  await messageReceived;
+  await executeScreenshotClipboardCommand(hud, command);
+
   const imgSize1 = await getImageSizeFromClipboard();
   await ContentTask.spawn(gBrowser.selectedBrowser, imgSize1, function(
     imgSize
@@ -103,9 +86,7 @@ async function testSelectorClipboard(hud) {
 
 async function testFullpageClipboardScrollbar(hud) {
   const command = `:screenshot --fullpage --clipboard ${dpr}`;
-  const onMessage = waitForMessage(hud, "Screenshot copied to clipboard.");
-  hud.jsterm.execute(command);
-  await onMessage;
+  await executeScreenshotClipboardCommand(hud, command);
   const contentSize = await getContentSize();
   const scrollbarSize = await getScrollbarSize();
   const imgSize = await getImageSizeFromClipboard();
@@ -125,6 +106,21 @@ async function testFullpageClipboardScrollbar(hud) {
       contentSize.scrollMinY -
       scrollbarSize.height,
     "Scroll Fullpage Clipboard: Image height matches page size minus scrollbar size"
+  );
+}
+
+/**
+ * Executes the command string and returns a Promise that resolves when the message
+ * saying that the screenshot was copied to clipboard is rendered in the console.
+ *
+ * @param {WebConsole} hud
+ * @param {String} command
+ */
+function executeScreenshotClipboardCommand(hud, command) {
+  return executeAndWaitForMessage(
+    hud,
+    command,
+    "Screenshot copied to clipboard."
   );
 }
 

@@ -1130,11 +1130,12 @@ class CGHeaders(CGWrapper):
         bindingHeaders = set()
         declareIncludes = set(declareIncludes)
 
-        def addHeadersForType((t, dictionary)):
+        def addHeadersForType(typeAndPossibleDictionary):
             """
             Add the relevant headers for this type.  We use dictionary, if
             passed, to decide what to do with interface types.
             """
+            t, dictionary = typeAndPossibleDictionary
             # Dictionaries have members that need to be actually
             # declared, not just forward-declared.
             if dictionary:
@@ -8099,7 +8100,7 @@ class CGPerSignatureCall(CGThing):
         }
         try:
             wrapCode += wrapForType(self.returnType, self.descriptor, resultTemplateValues)
-        except MethodNotNewObjectError, err:
+        except MethodNotNewObjectError as err:
             assert not returnsNewObject
             raise TypeError("%s being returned from non-NewObject method or property %s.%s" %
                             (err.typename,
@@ -15907,7 +15908,7 @@ class CGJSImplMethod(CGJSImplMember):
             initCall = fill(
                 """
                 // Wrap the object before calling __Init so that __DOM_IMPL__ is available.
-                JS::Rooted<JSObject*> scopeObj(cx, globalHolder->GetGlobalJSObject());
+                JS::Rooted<JSObject*> scopeObj(cx, global.Get());
                 MOZ_ASSERT(js::IsObjectInContextCompartment(scopeObj, cx));
                 JS::Rooted<JS::Value> wrappedVal(cx);
                 if (!GetOrCreateDOMReflector(cx, impl, &wrappedVal, aGivenProto)) {
@@ -15930,17 +15931,11 @@ class CGJSImplMethod(CGJSImplMember):
 def genConstructorBody(descriptor, initCall=""):
     return fill(
         """
-        JS::Rooted<JSObject*> jsImplObj(cx);
-        nsCOMPtr<nsIGlobalObject> globalHolder =
-          ConstructJSImplementation("${contractId}", global, &jsImplObj, aRv);
+        RefPtr<${implClass}> impl =
+          ConstructJSImplementation<${implClass}>("${contractId}", global, aRv);
         if (aRv.Failed()) {
           return nullptr;
         }
-        // We should be getting the implementation object for the relevant
-        // contract here, which should never be a cross-compartment wrapper.
-        JS::Rooted<JSObject*> jsImplGlobal(cx, JS::GetNonCCWObjectGlobal(jsImplObj));
-        // Build the C++ implementation.
-        RefPtr<${implClass}> impl = new ${implClass}(jsImplObj, jsImplGlobal, globalHolder);
         $*{initCall}
         return impl.forget();
         """,

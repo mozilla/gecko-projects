@@ -1317,7 +1317,11 @@ class UrlbarInput {
     let isMouseEvent = event instanceof MouseEvent;
     let reuseEmpty = !isMouseEvent;
     let where = undefined;
-    if (!isMouseEvent && event && event.altKey) {
+    if (
+      !isMouseEvent &&
+      event &&
+      (event.altKey || event.getModifierState("AltGraph"))
+    ) {
       // We support using 'alt' to open in a tab, because ctrl/shift
       // might be used for canonizing URLs:
       where = event.shiftKey ? "tabshifted" : "tab";
@@ -1413,11 +1417,13 @@ class UrlbarInput {
   /**
    * Determines if we should select all the text in the Urlbar based on the
    * clickSelectsAll pref, Urlbar state, and whether the selection is empty.
+   * @param {boolean} [ignoreClickSelectsAllPref]
+   *        If true, the browser.urlbar.clickSelectsAll pref will be ignored.
    */
-  _maybeSelectAll() {
+  _maybeSelectAll(ignoreClickSelectsAllPref = false) {
     if (
       !this._preventClickSelectsAll &&
-      UrlbarPrefs.get("clickSelectsAll") &&
+      (ignoreClickSelectsAllPref || UrlbarPrefs.get("clickSelectsAll")) &&
       this._compositionState != UrlbarUtils.COMPOSITION.COMPOSING &&
       this.document.activeElement == this.inputField &&
       this.inputField.selectionStart == this.inputField.selectionEnd
@@ -1449,6 +1455,11 @@ class UrlbarInput {
     this.formatValue();
     this._resetSearchState();
 
+    // Clear selection unless we are switching application windows.
+    if (this.document.activeElement != this.inputField) {
+      this.selectionStart = this.selectionEnd = 0;
+    }
+
     // In certain cases, like holding an override key and confirming an entry,
     // we don't key a keyup event for the override key, thus we make this
     // additional cleanup on blur.
@@ -1477,19 +1488,14 @@ class UrlbarInput {
   }
 
   _on_contextmenu(event) {
-    // On Windows, the context menu appears on mouseup. macOS and Linux require
-    // special handling to selectAll when the contextmenu is displayed.
-    // See bug 576135 comment 4 for details.
-    if (AppConstants.platform == "win") {
-      return;
-    }
-
     // Context menu opened via keyboard shortcut.
     if (!event.button) {
       return;
     }
 
-    this._maybeSelectAll();
+    // If the user right clicks, we select all regardless of the value of
+    // the browser.urlbar.clickSelectsAll pref.
+    this._maybeSelectAll(/* ignoreClickSelectsAllPref */ event.button == 2);
   }
 
   _on_focus(event) {
@@ -1703,7 +1709,6 @@ class UrlbarInput {
 
   _on_TabSelect(event) {
     this._resetSearchState();
-    this.controller.viewContextChanged();
   }
 
   _on_keydown(event) {

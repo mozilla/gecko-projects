@@ -221,27 +221,41 @@ extern void CheckDebuggeeThing(JSObject* obj, bool invisibleOk);
 #endif
 
 /*
+ * [SMDOC] Cross-compartment weakmap entries for Debugger API objects
+ *
+ * The Debugger API creates objects like Debugger.Object, Debugger.Script,
+ * Debugger.Environment, etc. to refer to things in the debuggee. Each Debugger
+ * gets at most one Debugger.Mumble for each referent: Debugger.Mumbles are
+ * unique per referent per Debugger. This is accomplished by storing the
+ * debugger objects in a DebuggerWeakMap, using the debuggee thing as the key.
+ *
+ * Since a Debugger and its debuggee must be in different compartments, a
+ * Debugger.Mumble's pointer to its referent is a cross-compartment edge, from
+ * the debugger's compartment into the debuggee compartment. Like any other sort
+ * of cross-compartment edge, the GC needs to be able to find all of these edges
+ * readily. The GC therefore consults the debugger's weakmap tables as
+ * necessary.  This allows the garbage collector to easily find edges between
+ * debuggee object compartments and debugger compartments when calculating the
+ * zone sweep groups.
+ *
+ * The current implementation results in all debuggee object compartments being
+ * swept in the same group as the debugger. This is a conservative approach, and
+ * compartments may be unnecessarily grouped. However this results in a simpler
+ * and faster implementation.
+ */
+
+/*
  * A weakmap from GC thing keys to JSObject values that supports the keys being
  * in different compartments to the values. All values must be in the same
  * compartment.
- *
- * The purpose of this is to allow the garbage collector to easily find edges
- * from debuggee object compartments to debugger compartments when calculating
- * the compartment groups.  Note that these edges are the inverse of the edges
- * stored in the cross compartment map.
- *
- * The current implementation results in all debuggee object compartments being
- * swept in the same group as the debugger.  This is a conservative approach,
- * and compartments may be unnecessarily grouped, however it results in a
- * simpler and faster implementation.
  *
  * If InvisibleKeysOk is true, then the map can have keys in invisible-to-
  * debugger compartments. If it is false, we assert that such entries are never
  * created.
  *
- * Also note that keys in these weakmaps can be in any compartment, debuggee or
- * not, because they are not deleted when a compartment is no longer a
- * debuggee: the values need to maintain object identity across add/remove/add
+ * Note that keys in these weakmaps can be in any compartment, debuggee or not,
+ * because they are not deleted when a compartment is no longer a debuggee: the
+ * values need to maintain object identity across add/remove/add
  * transitions. (Frames are an exception to the rule. Existing Debugger.Frame
  * objects are killed when debugging is disabled for their compartment, and if
  * it's re-enabled later, new Frame objects are created.)
@@ -283,6 +297,9 @@ class DebuggerWeakMap
   using Base::lookupForAdd;
   using Base::remove;
   using Base::trace;
+#ifdef DEBUG
+  using Base::hasEntry;
+#endif
 
   class Enum : public Base::Enum {
    public:
@@ -313,6 +330,8 @@ class DebuggerWeakMap
       key.unsafeSet(nullptr);
     }
   }
+
+  bool findSweepGroupEdges(JS::Zone* debuggerZone);
 
  private:
 #ifdef JS_GC_ZEAL
@@ -927,7 +946,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
   template <typename Wrapper, typename ReferentVariant, typename Referent,
             typename Map>
   Wrapper* wrapVariantReferent(JSContext* cx, Map& map,
-                               Handle<CrossCompartmentKey> key,
                                Handle<ReferentVariant> referent);
   DebuggerScript* wrapVariantReferent(JSContext* cx,
                                       Handle<DebuggerScriptReferent> referent);
@@ -976,6 +994,10 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
   inline const js::GCPtrNativeObject& toJSObject() const;
   inline js::GCPtrNativeObject& toJSObjectRef();
   static inline Debugger* fromJSObject(const JSObject* obj);
+
+#ifdef DEBUG
+  static bool isChildJSObject(JSObject* obj);
+#endif
   static Debugger* fromChildJSObject(JSObject* obj);
 
   Zone* zone() const { return toJSObject()->zone(); }

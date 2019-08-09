@@ -21,7 +21,10 @@ class Zone;
 namespace js {
 
 namespace gc {
-void MaybeMallocTriggerZoneGC(JSRuntime* rt, ZoneAllocator* zoneAlloc);
+void MaybeMallocTriggerZoneGC(JSRuntime* rt, ZoneAllocator* zoneAlloc,
+                              const HeapSize& heap,
+                              const ZoneThreshold& threshold,
+                              JS::GCReason reason);
 }
 
 // Base class of JS::Zone that provides malloc memory allocation and accounting.
@@ -43,31 +46,17 @@ class ZoneAllocator : public JS::shadow::Zone,
                                    void* reallocPtr = nullptr);
   void reportAllocationOverflow() const;
 
-  void setGCMaxMallocBytes(size_t value, const js::AutoLockGC& lock) {
-    gcMallocCounter.setMax(value, lock);
-  }
-  void updateMallocCounter(size_t nbytes) {
-    updateMemoryCounter(gcMallocCounter, nbytes);
-  }
   void adoptMallocBytes(ZoneAllocator* other) {
-    gcMallocCounter.adopt(other->gcMallocCounter);
     gcMallocBytes.adopt(other->gcMallocBytes);
+    gcJitBytes.adopt(other->gcJitBytes);
 #ifdef DEBUG
     gcMallocTracker.adopt(other->gcMallocTracker);
 #endif
   }
-  size_t GCMaxMallocBytes() const { return gcMallocCounter.maxBytes(); }
-  size_t GCMallocBytes() const { return gcMallocCounter.bytes(); }
-
-  void updateJitCodeMallocBytes(size_t nbytes) {
-    updateMemoryCounter(jitCodeCounter, nbytes);
-  }
 
   void updateMemoryCountersOnGCStart();
-  void updateMemoryCountersOnGCEnd(const js::AutoLockGC& lock);
   void updateGCThresholds(gc::GCRuntime& gc, JSGCInvocationKind invocationKind,
                           const js::AutoLockGC& lock);
-  js::gc::TriggerKind shouldTriggerGCForTooMuchMalloc();
 
   // Memory accounting APIs for malloc memory owned by GC cells.
 
@@ -136,33 +125,35 @@ class ZoneAllocator : public JS::shadow::Zone,
 #endif
   }
 
+  void incJitMemory(size_t nbytes) {
+    MOZ_ASSERT(nbytes);
+    gcJitBytes.addBytes(nbytes);
+    maybeTriggerZoneGC(gcJitBytes, gcJitThreshold,
+                       JS::GCReason::TOO_MUCH_JIT_CODE);
+  }
+  void decJitMemory(size_t nbytes) {
+    MOZ_ASSERT(nbytes);
+    gcJitBytes.removeBytes(nbytes, true);
+  }
+
   // Check malloc allocation threshold and trigger a zone GC if necessary.
   void maybeMallocTriggerZoneGC() {
-    JSRuntime* rt = runtimeFromAnyThread();
-    float factor = rt->gc.tunables.allocThresholdFactor();
-    size_t threshold = gcMallocThreshold.gcTriggerBytes() * factor;
-    if (gcMallocBytes.gcBytes() >= threshold &&
-        rt->heapState() == JS::HeapState::Idle) {
-      gc::MaybeMallocTriggerZoneGC(rt, this);
-    }
+    maybeTriggerZoneGC(gcMallocBytes, gcMallocThreshold,
+                       JS::GCReason::TOO_MUCH_MALLOC);
   }
 
  private:
-  void updateMemoryCounter(js::gc::MemoryCounter& counter, size_t nbytes) {
+  void maybeTriggerZoneGC(const js::gc::HeapSize& heap,
+                          const js::gc::ZoneThreshold& threshold,
+                          JS::GCReason reason) {
     JSRuntime* rt = runtimeFromAnyThread();
-
-    counter.update(nbytes);
-    auto trigger = counter.shouldTriggerGC(rt->gc.tunables);
-    if (MOZ_LIKELY(trigger == js::gc::NoTrigger) ||
-        trigger <= counter.triggered()) {
-      return;
+    float factor = rt->gc.tunables.allocThresholdFactor();
+    size_t thresholdBytes = threshold.gcTriggerBytes() * factor;
+    if (heap.gcBytes() >= thresholdBytes &&
+        rt->heapState() == JS::HeapState::Idle) {
+      gc::MaybeMallocTriggerZoneGC(rt, this, heap, threshold, reason);
     }
-
-    maybeTriggerGCForTooMuchMalloc(counter, trigger);
   }
-
-  void maybeTriggerGCForTooMuchMalloc(js::gc::MemoryCounter& counter,
-                                      js::gc::TriggerKind trigger);
 
  public:
   // Track GC heap size under this Zone.
@@ -175,13 +166,6 @@ class ZoneAllocator : public JS::shadow::Zone,
   // the current GC.
   js::MainThreadData<size_t> gcDelayBytes;
 
- private:
-  // Malloc counter to measure memory pressure for GC scheduling. This counter
-  // is used for allocations where the size of the allocation is not known on
-  // free. Currently this is used for all internal malloc allocations.
-  js::gc::MemoryCounter gcMallocCounter;
-
- public:
   // Malloc counter used for allocations where size information is
   // available. Used for some internal and all tracked external allocations.
   js::gc::HeapSize gcMallocBytes;
@@ -189,16 +173,18 @@ class ZoneAllocator : public JS::shadow::Zone,
   // Thresholds used to trigger GC based on malloc allocations.
   js::gc::ZoneMallocThreshold gcMallocThreshold;
 
+  // Malloc counter used for JIT code allocation.
+  js::gc::HeapSize gcJitBytes;
+
+  // Thresholds used to trigger GC based on JIT allocations.
+  js::gc::ZoneFixedThreshold gcJitThreshold;
+
  private:
 #ifdef DEBUG
   // In debug builds, malloc allocations can be tracked to make debugging easier
   // (possible?) if allocation and free sizes don't balance.
   js::gc::MemoryTracker gcMallocTracker;
 #endif
-
-  // Counter of JIT code executable memory for GC scheduling. Also imprecise,
-  // since wasm can generate code that outlives a zone.
-  js::gc::MemoryCounter jitCodeCounter;
 
   friend class js::gc::GCRuntime;
 };

@@ -11,15 +11,10 @@ const TEST_URI =
   "data:text/html,<meta charset=utf8>Testing jsterm with no input";
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests(true);
-});
+  // For now, let's disable editor as we don't know what the final placement of the
+  // open editor button (which may impact this test).
+  await pushPref("devtools.webconsole.features.editor", false);
 
-async function performTests(codeMirror) {
   const hud = await openNewTabAndConsole(TEST_URI);
   const jsterm = hud.jsterm;
 
@@ -59,17 +54,14 @@ async function performTests(codeMirror) {
   );
   ok(isInputFocused(hud), "input is still focused");
 
-  // We only check the 'unindent' feature for CodeMirror JsTerm.
-  if (codeMirror) {
-    info(
-      "Check that hitting Shift+Tab when input is not empty removed leading tabs"
-    );
-    EventUtils.synthesizeKey("KEY_Tab", { shiftKey: true });
-    checkInputValueAndCursorPosition(
-      hud,
-      `|${testString}`,
-      "The tab char at the the start of the input was removed after hitting Shift+Tab"
-    );
-    ok(isInputFocused(hud), "input is still focused");
-  }
-}
+  info(
+    "Check that hitting Shift+Tab when input is not empty removed leading tabs"
+  );
+  EventUtils.synthesizeKey("KEY_Tab", { shiftKey: true });
+  checkInputValueAndCursorPosition(
+    hud,
+    `|${testString}`,
+    "The tab char at the the start of the input was removed after hitting Shift+Tab"
+  );
+  ok(isInputFocused(hud), "input is still focused");
+});

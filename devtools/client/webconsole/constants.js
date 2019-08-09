@@ -15,6 +15,7 @@ const actionTypes = {
   BATCH_ACTIONS: "BATCH_ACTIONS",
   CLEAR_HISTORY: "CLEAR_HISTORY",
   EDITOR_TOGGLE: "EDITOR_TOGGLE",
+  EVALUATE_EXPRESSION: "EVALUATE_EXPRESSION",
   FILTER_TEXT_SET: "FILTER_TEXT_SET",
   FILTER_TOGGLE: "FILTER_TOGGLE",
   FILTERS_CLEAR: "FILTERS_CLEAR",
@@ -81,7 +82,6 @@ const prefs = {
     FEATURES: {
       // We use the same pref to enable the sidebar on webconsole and browser console.
       SIDEBAR_TOGGLE: "devtools.webconsole.sidebarToggle",
-      JSTERM_CODE_MIRROR: "devtools.webconsole.jsterm.codeMirror",
       AUTOCOMPLETE: "devtools.webconsole.input.autocomplete",
       GROUP_WARNINGS: "devtools.webconsole.groupWarningMessages",
       EDITOR: "devtools.webconsole.features.editor",

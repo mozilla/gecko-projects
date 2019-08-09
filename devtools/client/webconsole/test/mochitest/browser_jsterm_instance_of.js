@@ -7,30 +7,29 @@
 const TEST_URI = "data:text/html,Test <code>instanceof</code> evaluation";
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
-  const { jsterm } = hud;
 
-  let onMessage = waitForMessage(hud, "true");
-  jsterm.execute("[] instanceof Array");
-  let message = await onMessage;
+  let message = await executeAndWaitForMessage(
+    hud,
+    "[] instanceof Array",
+    "true",
+    ".result"
+  );
   ok(message, "`instanceof Array` is correct");
 
-  onMessage = waitForMessage(hud, "true");
-  jsterm.execute("({}) instanceof Object");
-  message = await onMessage;
+  message = await executeAndWaitForMessage(
+    hud,
+    "({}) instanceof Object",
+    "true",
+    ".result"
+  );
   ok(message, "`instanceof Object` is correct");
 
-  onMessage = waitForMessage(hud, "false");
-  jsterm.execute("({}) instanceof Array");
-  message = await onMessage;
+  message = await executeAndWaitForMessage(
+    hud,
+    "({}) instanceof Array",
+    "false",
+    ".result"
+  );
   ok(message, "`instanceof Array` has expected result");
-}
+});

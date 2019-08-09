@@ -15,6 +15,7 @@ nsstring = { path = "../../../../xpcom/rust/nsstring" }
 netwerk_helper = { path = "../../../../netwerk/base/rust-helper" }
 xpcom = { path = "../../../../xpcom/rust/xpcom" }
 prefs_parser = { path = "../../../../modules/libpref/parser" }
+static_prefs = { path = "../../../../modules/libpref/init/static_prefs" }
 profiler_helper = { path = "../../../../tools/profiler/rust-helper", optional = true }
 mozurl = { path = "../../../../netwerk/base/mozurl" }
 webrender_bindings = { path = "../../../../gfx/webrender_bindings", optional = true }
@@ -40,7 +41,7 @@ bitsdownload = { path = "../../../components/bitsdownload", optional = true }
 storage = { path = "../../../../storage/rust" }
 bookmark_sync = { path = "../../../components/places/bookmark_sync", optional = true }
 shift_or_euc_c = "0.1.0"
-audio_thread_priority = "0.15.0"
+audio_thread_priority = "0.17.0"
 
 [build-dependencies]
 rustc_version = "0.2"

@@ -94,17 +94,19 @@ static bool ParseNodeRequiresSpecialLineNumberNotes(ParseNode* pn) {
 
 BytecodeEmitter::BytecodeEmitter(
     BytecodeEmitter* parent, SharedContext* sc, HandleScript script,
-    Handle<LazyScript*> lazyScript, uint32_t lineNum, EmitterMode emitterMode,
+    Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
+    EmitterMode emitterMode,
     FieldInitializers fieldInitializers /* = FieldInitializers::Invalid() */)
     : sc(sc),
       cx(sc->cx_),
       parent(parent),
       script(cx, script),
       lazyScript(cx, lazyScript),
-      bytecodeSection_(cx, lineNum),
+      bytecodeSection_(cx, line),
       perScriptData_(cx),
       fieldInitializers_(fieldInitializers),
-      firstLine(lineNum),
+      firstLine(line),
+      firstColumn(column),
       emitterMode(emitterMode) {
   MOZ_ASSERT_IF(emitterMode == LazyFunction, lazyScript);
 
@@ -117,10 +119,10 @@ BytecodeEmitter::BytecodeEmitter(
 BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
                                  BCEParserHandle* handle, SharedContext* sc,
                                  HandleScript script,
-                                 Handle<LazyScript*> lazyScript,
-                                 uint32_t lineNum, EmitterMode emitterMode,
+                                 Handle<LazyScript*> lazyScript, uint32_t line,
+                                 uint32_t column, EmitterMode emitterMode,
                                  FieldInitializers fieldInitializers)
-    : BytecodeEmitter(parent, sc, script, lazyScript, lineNum, emitterMode,
+    : BytecodeEmitter(parent, sc, script, lazyScript, line, column, emitterMode,
                       fieldInitializers) {
   parser = handle;
   instrumentationKinds = parser->options().instrumentationKinds;
@@ -129,10 +131,10 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
 BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
                                  const EitherParser& parser, SharedContext* sc,
                                  HandleScript script,
-                                 Handle<LazyScript*> lazyScript,
-                                 uint32_t lineNum, EmitterMode emitterMode,
+                                 Handle<LazyScript*> lazyScript, uint32_t line,
+                                 uint32_t column, EmitterMode emitterMode,
                                  FieldInitializers fieldInitializers)
-    : BytecodeEmitter(parent, sc, script, lazyScript, lineNum, emitterMode,
+    : BytecodeEmitter(parent, sc, script, lazyScript, line, column, emitterMode,
                       fieldInitializers) {
   ep_.emplace(parser);
   this->parser = ep_.ptr();
@@ -145,6 +147,11 @@ void BytecodeEmitter::initFromBodyPosition(TokenPos bodyPosition) {
 }
 
 bool BytecodeEmitter::init() { return perScriptData_.init(cx); }
+
+bool BytecodeEmitter::init(TokenPos bodyPosition) {
+  initFromBodyPosition(bodyPosition);
+  return init();
+}
 
 template <typename T>
 T* BytecodeEmitter::findInnermostNestableControl() const {
@@ -235,10 +242,8 @@ bool BytecodeEmitter::emitCheck(JSOp op, ptrdiff_t delta,
   if (!bytecodeSection().code().growByUninitialized(delta)) {
     return false;
   }
-
-  // If op is JOF_TYPESET (see the type barriers comment in TypeInference.h),
-  // reserve a type set to store its result.
-  if (CodeSpec[op].format & JOF_TYPESET) {
+  
+  if (BytecodeOpHasTypeSet(op)) {
     bytecodeSection().incrementNumTypeSets();
   }
 
@@ -541,7 +546,7 @@ bool BytecodeEmitter::updateLineNumberNotes(uint32_t offset) {
      * unsigned delta_ wrap to a very large number, which triggers a
      * SRC_SETLINE.
      */
-    bytecodeSection().setCurrentLine(line);
+    bytecodeSection().setCurrentLine(line, offset);
     if (delta >= LengthOfSetLine(line)) {
       if (!newSrcNote2(SRC_SETLINE, ptrdiff_t(line))) {
         return false;
@@ -585,7 +590,7 @@ bool BytecodeEmitter::updateSourceCoordNotes(uint32_t offset) {
     if (!newSrcNote2(SRC_COLSPAN, SN_COLSPAN_TO_OFFSET(colspan))) {
       return false;
     }
-    bytecodeSection().setLastColumn(columnIndex);
+    bytecodeSection().setLastColumn(columnIndex, offset);
     bytecodeSection().updateSeparatorPositionIfPresent();
   }
   return true;
@@ -2530,7 +2535,7 @@ bool BytecodeEmitter::emitFunctionScript(FunctionNode* funNode,
                                 parser->errorReporter(), funbox);
 
   MOZ_ASSERT((fieldInitializers_.valid) ==
-             (funbox->kind() == JSFunction::FunctionKind::ClassConstructor));
+             (funbox->kind() == FunctionFlags::FunctionKind::ClassConstructor));
 
   setScriptStartOffsetIfUnset(paramsBody->pn_pos.begin);
 
@@ -5696,7 +5701,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
   RootedFunction fun(cx, funbox->function());
 
   MOZ_ASSERT((classContentsIfConstructor != nullptr) ==
-             (funbox->kind() == JSFunction::FunctionKind::ClassConstructor));
+             (funbox->kind() == FunctionFlags::FunctionKind::ClassConstructor));
 
   //                [stack]
 
@@ -5764,10 +5769,14 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
       fieldInitializers = setupFieldInitializers(classContentsIfConstructor);
     }
 
+    uint32_t innerScriptLine, innerScriptColumn;
+    parser->errorReporter().lineAndColumnAt(funNode->pn_pos.begin,
+                                            &innerScriptLine,
+                                            &innerScriptColumn);
     BytecodeEmitter bce2(this, parser, funbox, innerScript,
-                         /* lazyScript = */ nullptr, funNode->pn_pos,
-                         nestedMode, fieldInitializers);
-    if (!bce2.init()) {
+                         /* lazyScript = */ nullptr, innerScriptLine,
+                         innerScriptColumn, nestedMode, fieldInitializers);
+    if (!bce2.init(funNode->pn_pos)) {
       return false;
     }
 
@@ -7486,10 +7495,19 @@ bool BytecodeEmitter::emitCallOrNew(
         //       ^          // column coord
         coordNode = &calleeNode->as<PropertyAccess>().key();
         break;
-      case ParseNodeKind::Name:
-        // Use the start of callee names.
-        coordNode = calleeNode;
+      case ParseNodeKind::Name: {
+        // Use the start of callee name unless it is at a separator
+        //
+        // 2 + obj()   // expression
+        //     ^       // column coord
+        //
+        if (!bytecodeSection().atSeparator(calleeNode->pn_pos.begin)) {
+          // Use the start of callee names.
+          coordNode = calleeNode;
+        }
         break;
+      }
+
       default:
         break;
     }
@@ -8130,7 +8148,7 @@ const FieldInitializers& BytecodeEmitter::findFieldInitializersForCall() {
   for (BytecodeEmitter* current = this; current; current = current->parent) {
     if (current->sc->isFunctionBox()) {
       FunctionBox* box = current->sc->asFunctionBox();
-      if (box->kind() == JSFunction::FunctionKind::ClassConstructor) {
+      if (box->kind() == FunctionFlags::FunctionKind::ClassConstructor) {
         const FieldInitializers& fieldInitializers =
             current->getFieldInitializers();
         MOZ_ASSERT(fieldInitializers.valid);
@@ -8142,7 +8160,7 @@ const FieldInitializers& BytecodeEmitter::findFieldInitializersForCall() {
   for (ScopeIter si(innermostScope()); si; si++) {
     if (si.scope()->is<FunctionScope>()) {
       JSFunction* fun = si.scope()->as<FunctionScope>().canonicalFunction();
-      if (fun->kind() == JSFunction::FunctionKind::ClassConstructor) {
+      if (fun->kind() == FunctionFlags::FunctionKind::ClassConstructor) {
         const FieldInitializers& fieldInitializers =
             fun->isInterpretedLazy()
                 ? fun->lazyScript()->getFieldInitializers()

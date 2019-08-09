@@ -11,34 +11,32 @@ const TEST_URI =
 add_task(async function() {
   // Enable await mapping.
   await pushPref("devtools.debugger.features.map-await-expression", true);
-
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
 
   info("Check that declaring a let variable does not create a global property");
-  await hud.jsterm.execute(
-    `let bazA = await new Promise(r => setTimeout(() => r("local-bazA"), 10))`
+  await executeAndWaitForMessage(
+    hud,
+    `let bazA = await new Promise(r => setTimeout(() => r("local-bazA"), 10))`,
+    "local-bazA",
+    ".result"
   );
   await checkVariable(hud, "bazA");
 
   info(
     "Check that declaring a const variable does not create a global property"
   );
-  await hud.jsterm.execute(
-    `const bazB = await new Promise(r => setTimeout(() => r("local-bazB"), 10))`
+  await executeAndWaitForMessage(
+    hud,
+    `const bazB = await new Promise(r => setTimeout(() => r("local-bazB"), 10))`,
+    "local-bazB",
+    ".result"
   );
   await checkVariable(hud, "bazB");
 
   info("Check that complex variable declarations work as expected");
-  await hud.jsterm.execute(`
+  await executeAndWaitForMessage(
+    hud,
+    `
     let bazC = "local-bazC", bazD, bazE = "local-bazE";
     bazD = await new Promise(r => setTimeout(() => r("local-bazD"), 10));
     let {
@@ -59,7 +57,10 @@ async function performTests() {
           e: ["local-bazI"]
         }
       }
-    });`);
+    });`,
+    "",
+    ".result"
+  );
   await checkVariable(hud, "bazC");
   await checkVariable(hud, "bazD");
   await checkVariable(hud, "bazE");
@@ -69,11 +70,16 @@ async function performTests() {
   await checkVariable(hud, "bazI");
   await checkVariable(hud, "bazJ");
   await checkVariable(hud, "bazK");
-}
+});
 
 async function checkVariable(hud, varName) {
-  await executeAndWaitForMessage(hud, `window.${varName}`, `undefined`);
+  await executeAndWaitForMessage(
+    hud,
+    `window.${varName}`,
+    `undefined`,
+    ".result"
+  );
   ok(true, `The ${varName} assignment did not create a global variable`);
-  await executeAndWaitForMessage(hud, varName, `"local-${varName}"`);
+  await executeAndWaitForMessage(hud, varName, `"local-${varName}"`, ".result");
   ok(true, `"${varName}" has the expected value`);
 }

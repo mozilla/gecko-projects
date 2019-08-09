@@ -7,22 +7,12 @@
 
 // Test that properties starting with underscores or dollars can be
 // autocompleted (bug 967468).
-const TEST_URI = "data:text/html;charset=utf8,test autocompletion with $ or _";
+const TEST_URI = `data:text/html;charset=utf8,test autocompletion with $ or _`;
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
-  const { jsterm } = hud;
 
-  await jsterm.execute("var testObject = {$$aaab: '', $$aaac: ''}");
+  execute(hud, "var testObject = {$$aaab: '', $$aaac: ''}");
 
   // Should work with bug 967468.
   await testAutocomplete(hud, "Object.__d");
@@ -33,12 +23,12 @@ async function performTests() {
   await testAutocomplete(hud, "testObject.$$aa");
 
   // Should work with bug 1207868.
-  await jsterm.execute("let foobar = {a: ''}; const blargh = {a: 1};");
+  execute(hud, "let foobar = {a: ''}; const blargh = {a: 1};");
   await testAutocomplete(hud, "foobar");
   await testAutocomplete(hud, "blargh");
   await testAutocomplete(hud, "foobar.a");
   await testAutocomplete(hud, "blargh.a");
-}
+});
 
 async function testAutocomplete(hud, inputString) {
   await setInputValueForAutocompletion(hud, inputString);

@@ -294,6 +294,30 @@ extensions.data:
       These events are sent when an extension is migrating its data to the new IndexedDB backend,
       the value of this event is the addon id.
 
+homepage:
+  preference:
+    objects: ["ignore"]
+    release_channel_collection: opt-out
+    products:
+      - "firefox"
+      - "fennec"
+    record_in_processes: ["main"]
+    description: >
+      This is recorded whenever the homepage preference is either reset due to
+      being on the ignore list, or setting is blocked due to being on the same
+      list.
+      The value field records the reason for the ignore. "saved_reset" for
+      when a saved preference value is reset. "set_blocked" for when the setting
+      was blocked and "set_blocked_extension" for when we know a WebExtension
+      attempting to set it was blocked.
+    bug_numbers: [1535049]
+    notification_emails:
+      - "mdeboer@mozilla.com"
+      - "rharter@mozilla.com"
+    expiry_version: never
+    extra_keys:
+      webExtensionId: The identifier of the webextension, if known.
+
 navigation:
   search:
     objects: ["about_home", "about_newtab", "contextmenu", "oneoff",
@@ -511,7 +535,7 @@ normandy:
 
 pwmgr:
   open_management:
-    objects: ["autocomplete", "capturedoorhanger", "contextmenu", "pageinfo", "preferences", "mainmenu"]
+    objects: ["autocomplete", "capturedoorhanger", "contextmenu", "pageinfo", "preferences", "mainmenu", "fxamenu"]
     methods: ["open_management"]
     description: >
       Sent when opening the password management UI.
@@ -598,8 +622,10 @@ fxa_avatar_menu:
       "sync_tabs",
       "sync_tabs_sidebar",
       "toolbar_icon",
-      "unver_sync_settings"
-    ]
+      "unver_sync_settings",
+      "open_monitor",
+      "open_send"
+      ]
     methods: ["click"]
     release_channel_collection: opt-out
     products:
@@ -622,13 +648,17 @@ fxa_app_menu:
     objects: [
       "account_settings",
       "cad",
+      "login",
       "send_tab",
       "sync_now",
       "sync_settings",
       "sync_tabs",
       "sync_tabs_sidebar",
-      "toolbar_icon"
-    ]
+      "toolbar_icon",
+      "unver_sync_settings",
+      "open_monitor",
+      "open_send"
+      ]
     methods: ["click"]
     release_channel_collection: opt-out
     products:
@@ -1560,6 +1590,44 @@ intl.ui.browserLanguage:
     release_channel_collection: opt-out
     record_in_processes: ["main"]
     bug_numbers: [1486507, 1553311]
+
+security:
+  evalUsage:
+    objects: ["systemContext", "parentProcess"]
+    bug_numbers:
+      - 1567623
+    description: >
+      eval() (or an eval()-like method) was called while running in the System Principal
+      context or the Parent Process.
+      Expected values are:
+        chromeuri - chrome:// file
+        resourceuri - resource:// file
+        singlestring - A single file or string with no slashes
+        mozillaextension - An extension claiming to be from *mozilla.org
+        otherextension - Another extension not from Mozilla
+        suspectedUserChromeJS - A filepath ending in .uc.js
+        other - Unknown
+        regexfailure - Our Regex Matching code threw an error
+      The fileinfo key may contain additional information about the file that caused the eval()
+      depending on the above value. Resource, Chrome, and SingleString will contain the full value.
+      Extensions will contain the full value; however .xpi! will be shortened to !,
+      shield.mozilla.org! to s! and mozilla.org! to m!.  UserChromeJS, Other, and Regexfailure should
+      have no value.
+    expiry_version: "never"
+    notification_emails:
+      - tom@mozilla.com
+      - ckerschb@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - firefox
+      - fennec
+      - geckoview
+    expiry_version: "75"
+    record_in_processes:
+      - all
+    extra_keys:
+      fileinfo: Information about the file that triggered eval
+
 
 # This data collection is intended for study-only collection
 # and is not meant to be enabled permanently on opt-in or opt-out.

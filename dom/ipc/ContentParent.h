@@ -77,6 +77,7 @@ class SandboxBrokerPolicyFactory;
 #endif
 
 class PreallocatedProcessManagerImpl;
+class BenchmarkStorageParent;
 
 using mozilla::loader::PScriptCacheParent;
 
@@ -302,6 +303,8 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvOpenRecordReplayChannel(
       const uint32_t& channelId, FileDescriptor* connection);
   mozilla::ipc::IPCResult RecvCreateReplayingProcess(
+      const uint32_t& aChannelId);
+  mozilla::ipc::IPCResult RecvGenerateReplayCrashReport(
       const uint32_t& aChannelId);
 
   mozilla::ipc::IPCResult RecvCreateGMPService();
@@ -914,6 +917,10 @@ class ContentParent final : public PContentParent,
   PMediaParent* AllocPMediaParent();
 
   bool DeallocPMediaParent(PMediaParent* aActor);
+
+  PBenchmarkStorageParent* AllocPBenchmarkStorageParent();
+
+  bool DeallocPBenchmarkStorageParent(PBenchmarkStorageParent* aActor);
 
   PPresentationParent* AllocPPresentationParent();
 

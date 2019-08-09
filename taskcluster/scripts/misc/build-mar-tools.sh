@@ -3,13 +3,9 @@ set -x -e -v
 
 # This script is for building mar and mbsdiff
 
-WORKSPACE=$HOME/workspace
-UPLOAD_DIR=$HOME/artifacts
 COMPRESS_EXT=xz
 
-cd $WORKSPACE/build/src
-
-. taskcluster/scripts/misc/tooltool-download.sh
+cd $GECKO_PATH
 
 export MOZ_OBJDIR=obj-mar
 
@@ -18,7 +14,7 @@ echo ac_add_options --enable-project=tools/update-packaging > .mozconfig
 TOOLCHAINS="binutils clang"
 
 for t in $TOOLCHAINS; do
-    PATH="$WORKSPACE/build/src/$t/bin:$PATH"
+    PATH="$MOZ_FETCHES_DIR/$t/bin:$PATH"
 done
 
 ./mach build -v

@@ -2368,7 +2368,7 @@ toolbar#nav-bar {
 
         if marionette_exception is not None:
             exc, value, tb = marionette_exception
-            raise exc, value, tb
+            raise exc(value).with_traceback(tb)
 
         return status, self.lastTestSeen
 
@@ -2596,6 +2596,7 @@ toolbar#nav-bar {
                 'dom.serviceWorkers.parent_intercept', False),
             "socketprocess_e10s": self.extraPrefs.get(
                 'network.process.enabled', False),
+            "verify": options.verify,
             "webrender": options.enable_webrender,
         })
 

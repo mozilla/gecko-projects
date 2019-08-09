@@ -18,6 +18,11 @@ pref("devtools.toolbox.splitconsoleEnabled", false);
 pref("devtools.toolbox.splitconsoleHeight", 100);
 pref("devtools.toolbox.tabsOrder", "");
 
+// The fission pref is enabling the "Omniscient Browser Toolbox", which will make it
+// possible to debug anything in Firefox (See Bug 1570639 for more information).
+// ⚠ This is a work in progress. Expect weirdness when the pref is flipped on ⚠
+pref("devtools.browsertoolbox.fission", false);
+
 // Toolbox Button preferences
 pref("devtools.command-button-pick.enabled", true);
 pref("devtools.command-button-frames.enabled", true);
@@ -171,6 +176,9 @@ pref("devtools.netmonitor.visibleColumns",
 pref("devtools.netmonitor.columnsData",
   '[{"name":"status","minWidth":30,"width":5}, {"name":"method","minWidth":30,"width":5}, {"name":"domain","minWidth":30,"width":10}, {"name":"file","minWidth":30,"width":25}, {"name":"url","minWidth":30,"width":25}, {"name":"cause","minWidth":30,"width":10},{"name":"type","minWidth":30,"width":5},{"name":"transferred","minWidth":30,"width":10},{"name":"contentSize","minWidth":30,"width":5},{"name":"waterfall","minWidth":150,"width":25}]');
 pref("devtools.netmonitor.ws.payload-preview-height", 128);
+pref("devtools.netmonitor.ws.visibleColumns",
+  '["data", "time"]'
+);
 
 pref("devtools.netmonitor.response.ui.limit", 10240);
 
@@ -249,9 +257,6 @@ pref("devtools.webconsole.filter.netxhr", false);
 // Webconsole autocomplete preference
 pref("devtools.webconsole.input.autocomplete",true);
 
-// Browser console fission support
-pref("devtools.browserconsole.fission", false);
-
 // Browser console filters
 pref("devtools.browserconsole.filter.error", true);
 pref("devtools.browserconsole.filter.warn", true);
@@ -282,9 +287,6 @@ pref("devtools.webconsole.sidebarToggle", true);
 #else
 pref("devtools.webconsole.sidebarToggle", false);
 #endif
-
-// Enable CodeMirror in the JsTerm
-pref("devtools.webconsole.jsterm.codeMirror", true);
 
 // Enable editor mode in the console in Nightly builds.
 #if defined(NIGHTLY_BUILD)

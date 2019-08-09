@@ -6,17 +6,7 @@
 const TEST_URI = "data:text/html,Test error documentation";
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
-  const { jsterm } = hud;
 
   // Check that errors with entries in errordocs.js display links next to their messages.
   const ErrorDocs = require("devtools/server/actors/errordocs");
@@ -35,9 +25,11 @@ async function performTests() {
     const title = errorUrl.split("?")[0];
 
     hud.ui.clearOutput();
-    const onMessage = waitForMessage(hud, "RangeError:");
-    jsterm.execute(expression);
-    const { node } = await onMessage;
+    const { node } = await executeAndWaitForMessage(
+      hud,
+      expression,
+      "RangeError:"
+    );
     const learnMoreLink = node.querySelector(".learn-more-link");
     ok(
       learnMoreLink,
@@ -54,4 +46,4 @@ async function performTests() {
       `The link has the expected "${errorUrl}" href value`
     );
   }
-}
+});

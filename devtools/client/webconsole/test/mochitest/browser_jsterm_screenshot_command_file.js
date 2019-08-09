@@ -17,30 +17,19 @@ const { FileUtils } = ChromeUtils.import(
 const dpr = "--dpr 1";
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   await addTab(TEST_URI);
 
   const hud = await openConsole();
   ok(hud, "web console opened");
 
   await testFile(hud);
-}
+});
 
 async function testFile(hud) {
   // Test capture to file
   const file = FileUtils.getFile("TmpD", ["TestScreenshotFile.png"]);
   const command = `:screenshot ${file.path} ${dpr}`;
-  const onMessage = waitForMessage(hud, `Saved to ${file.path}`);
-  hud.jsterm.execute(command);
-  await onMessage;
+  await executeAndWaitForMessage(hud, command, `Saved to ${file.path}`);
 
   ok(file.exists(), "Screenshot file exists");
 

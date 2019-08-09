@@ -182,15 +182,12 @@ const ContentProcessTargetActor = ActorClassWithSpec(contentProcessTargetSpec, {
     if (this._workerList) {
       this._workerList.onListChanged = null;
     }
-  },
 
-  preNest: function() {
-    // TODO: freeze windows
-    // window mediator doesn't work in child.
-    // it doesn't throw, but doesn't return any window
+    if (this._sources) {
+      this._sources.destroy();
+      this._sources = null;
+    }
   },
-
-  postNest: function() {},
 });
 
 exports.ContentProcessTargetActor = ContentProcessTargetActor;

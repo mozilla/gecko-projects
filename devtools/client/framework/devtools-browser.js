@@ -293,7 +293,9 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
         toolDefinition.preventClosingOnKey ||
         toolbox.hostType == Toolbox.HostType.WINDOW
       ) {
-        toolbox.raise();
+        if (!toolDefinition.preventRaisingOnKey) {
+          toolbox.raise();
+        }
       } else {
         toolbox.destroy();
       }
@@ -352,8 +354,10 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
         BrowserToolboxProcess.init();
         break;
       case "browserConsole":
-        const { HUDService } = require("devtools/client/webconsole/hudservice");
-        HUDService.openBrowserConsoleOrFocus();
+        const {
+          BrowserConsoleManager,
+        } = require("devtools/client/webconsole/browser-console-manager");
+        BrowserConsoleManager.openBrowserConsoleOrFocus();
         break;
       case "responsiveDesignMode":
         ResponsiveUIManager.toggle(window, window.gBrowser.selectedTab, {
@@ -362,13 +366,6 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
         break;
       case "scratchpad":
         ScratchpadManager.openScratchpad();
-        break;
-      case "inspectorMac":
-        await gDevToolsBrowser.selectToolCommand(
-          window,
-          "inspector",
-          startTime
-        );
         break;
     }
   },

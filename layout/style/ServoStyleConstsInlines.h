@@ -642,6 +642,52 @@ inline bool StyleTrackBreadth::HasPercent() const {
   return IsBreadth() && AsBreadth().HasPercent();
 }
 
+// Implemented in nsStyleStructs.cpp
+template <>
+bool StyleTransform::HasPercent() const;
+
+template <>
+inline bool StyleTransformOrigin::HasPercent() const {
+  // NOTE(emilio): `depth` is just a `<length>` so doesn't have a percentage at
+  // all.
+  return horizontal.HasPercent() || vertical.HasPercent();
+}
+
+template <>
+inline Maybe<size_t> StyleGridTemplateComponent::RepeatAutoIndex() const {
+  if (!IsTrackList()) {
+    return Nothing();
+  }
+  auto& list = *AsTrackList();
+  return list.auto_repeat_index < list.values.Length()
+             ? Some(list.auto_repeat_index)
+             : Nothing();
+}
+
+template <>
+inline bool StyleGridTemplateComponent::HasRepeatAuto() const {
+  return RepeatAutoIndex().isSome();
+}
+
+template <>
+inline Span<const StyleGenericTrackListValue<LengthPercentage, StyleInteger>>
+StyleGridTemplateComponent::TrackListValues() const {
+  if (IsTrackList()) {
+    return AsTrackList()->values.AsSpan();
+  }
+  return {};
+}
+
+template <>
+inline const StyleGenericTrackRepeat<LengthPercentage, StyleInteger>*
+StyleGridTemplateComponent::GetRepeatAutoValue() const {
+  auto index = RepeatAutoIndex();
+  if (!index) {
+    return nullptr;
+  }
+  return &TrackListValues()[*index].AsTrackRepeat();
+}
+
 }  // namespace mozilla
 
 #endif

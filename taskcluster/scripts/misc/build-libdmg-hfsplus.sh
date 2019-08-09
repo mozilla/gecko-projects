@@ -6,14 +6,13 @@ set -x -e -v
 
 WORKSPACE=$HOME/workspace
 STAGE=$WORKSPACE/dmg
-UPLOAD_DIR=$HOME/artifacts
 
 mkdir -p $UPLOAD_DIR $STAGE
 
 cd $MOZ_FETCHES_DIR/libdmg-hfsplus
 
 cmake -DOPENSSL_USE_STATIC_LIBS=1 .
-make -j$(getconf _NPROCESSORS_ONLN)
+make -j$(nproc)
 
 # We only need the dmg and hfsplus tools.
 strip dmg/dmg hfs/hfsplus

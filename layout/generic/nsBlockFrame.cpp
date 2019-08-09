@@ -1279,8 +1279,6 @@ void nsBlockFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
 
   LazyMarkLinesDirty();
 
-  RemoveStateBits(NS_FRAME_FIRST_REFLOW);
-
   // Now reflow...
   ReflowDirtyLines(state);
 
@@ -2449,12 +2447,21 @@ void nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState) {
     // to reflow any line that might have floats in it, both because the
     // breakpoints within those floats may have changed and because we
     // might have to push/pull the floats in their entirety.
+    //
+    // We must also always reflow a line with floats on it, even within nested
+    // blocks within the same BFC, if it moves to a different block fragment.
+    // This is because the decision about whether the float fits may be
+    // different in a different fragment.
+    //
     // FIXME: What about a deltaBCoord or block-size change that forces us to
     // push lines?  Why does that work?
     if (!line->IsDirty() &&
-        aState.mReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE &&
+        (aState.mReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE ||
+         // last column can be reflowed unconstrained during column balancing
+         GetPrevInFlow() || GetNextInFlow() || HasPushedFloats()) &&
         (deltaBCoord != 0 || aState.mReflowInput.IsBResize() ||
-         aState.mReflowInput.mFlags.mMustReflowPlaceholders) &&
+         aState.mReflowInput.mFlags.mMustReflowPlaceholders ||
+         aState.mReflowInput.mFlags.mMovedBlockFragments) &&
         (line->IsBlock() || line->HasFloats() || line->HadFloatPushed())) {
       line->MarkDirty();
     }
@@ -2787,6 +2794,7 @@ void nsBlockFrame::ReflowDirtyLines(BlockReflowInput& aState) {
         nextInFlow->ClearLineCursor();
       }
       ReparentFrames(pulledFrames, nextInFlow, this);
+      pulledLine->SetMovedFragments();
 
       NS_ASSERTION(pulledFrames.LastChild() == pulledLine->LastChild(),
                    "Unexpected last frame");
@@ -3013,6 +3021,8 @@ void nsBlockFrame::ReflowLine(BlockReflowInput& aState, LineIterator aLine,
       }
     }
   }
+
+  aLine->ClearMovedFragments();
 }
 
 nsIFrame* nsBlockFrame::PullFrame(BlockReflowInput& aState,
@@ -3573,6 +3583,8 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
           availSize.BSize(wm) -= aState.BorderPadding().BEnd(wm);
         }
 
+        // Bug 1569701: We need to use GetEffectiveComputedBSize() to get
+        // correct block-size if ColumnSetWrapper is fragmented.
         nscoord contentBSize = aState.mReflowInput.ComputedBSize();
         if (aState.mReflowInput.ComputedMaxBSize() != NS_UNCONSTRAINEDSIZE) {
           contentBSize =
@@ -3594,6 +3606,13 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
     blockReflowInput.emplace(aState.mPresContext, aState.mReflowInput, frame,
                              availSize.ConvertTo(frame->GetWritingMode(), wm),
                              cbSize);
+
+    if (aLine->MovedFragments()) {
+      // We only need to set this the first reflow, since if we reflow
+      // again (and replace blockReflowInput) we'll be reflowing it
+      // again in the same fragment as the previous time.
+      blockReflowInput->mFlags.mMovedBlockFragments = true;
+    }
 
     nsFloatManager::SavedState floatManagerState;
     nsReflowStatus frameReflowStatus;
@@ -3914,6 +3933,13 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowInput& aState,
                aState.mPrevBEndMargin.get());
 #endif
       } else {
+        if (!frameReflowStatus.IsFullyComplete()) {
+          // The frame reported an incomplete status, but then it also didn't
+          // fit.  This means we need to reflow it again so that it can
+          // (again) report the incomplete status.
+          frame->AddStateBits(NS_FRAME_HAS_DIRTY_CHILDREN);
+        }
+
         if ((aLine == mLines.front() && !GetPrevInFlow()) ||
             ShouldAvoidBreakInside(aState.mReflowInput)) {
           // If it's our very first line *or* we're not at the top of the page
@@ -4916,6 +4942,7 @@ void nsBlockFrame::PushLines(BlockReflowInput& aState,
            line != line_end; ++line) {
         line->MarkDirty();
         line->MarkPreviousMarginDirty();
+        line->SetMovedFragments();
         line->SetBoundsEmpty();
         if (line->HasFloats()) {
           line->FreeFloats(aState.mFloatCacheFreeList);
@@ -6310,16 +6337,6 @@ LogicalRect nsBlockFrame::AdjustFloatAvailableSpace(
   nscoord availBSize = NS_UNCONSTRAINEDSIZE == aState.ContentBSize()
                            ? NS_UNCONSTRAINEDSIZE
                            : std::max(0, aState.ContentBEnd() - aState.mBCoord);
-
-  if (availBSize != NS_UNCONSTRAINEDSIZE &&
-      !aState.mFlags.mFloatFragmentsInsideColumnEnabled &&
-      nsLayoutUtils::GetClosestFrameOfType(this, LayoutFrameType::ColumnSet)) {
-    // Tell the float it has unrestricted block-size, so it won't break.
-    // If the float doesn't actually fit in the column it will fail to be
-    // placed, and either move to the block-start of the next column or just
-    // overflow.
-    availBSize = NS_UNCONSTRAINEDSIZE;
-  }
 
   return LogicalRect(wm, aState.ContentIStart(), aState.ContentBStart(),
                      availISize, availBSize);

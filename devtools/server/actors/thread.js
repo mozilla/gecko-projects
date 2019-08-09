@@ -104,7 +104,6 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     this._activeEventBreakpoints = new Set();
     this._activeEventPause = null;
     this._pauseOverlay = null;
-
     this._priorPause = null;
 
     this._options = {
@@ -347,8 +346,6 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // Initialize an event loop stack. This can't be done in the constructor,
     // because this.conn is not yet initialized by the actor pool at that time.
     this._nestedEventLoops = new EventLoopStack({
-      hooks: this._parent,
-      connection: this.conn,
       thread: this,
     });
 
@@ -466,7 +463,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     );
   },
 
-  setBreakpoint(location, options) {
+  setBreakpoint: async function(location, options) {
     const actor = this.breakpointActorMap.getOrCreateBreakpointActor(location);
     actor.setOptions(options);
 
@@ -476,11 +473,13 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       const sourceActors = this.sources.getSourceActorsByURL(
         location.sourceUrl
       );
-      sourceActors.map(sourceActor => sourceActor.applyBreakpoint(actor));
+      for (const sourceActor of sourceActors) {
+        await sourceActor.applyBreakpoint(actor);
+      }
     } else {
       const sourceActor = this.sources.getSourceActorById(location.sourceId);
       if (sourceActor) {
-        sourceActor.applyBreakpoint(actor);
+        await sourceActor.applyBreakpoint(actor);
       }
     }
   },
@@ -744,11 +743,17 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       if (!packet) {
         return undefined;
       }
-      packet.why = reason;
 
       const { sourceActor, line, column } = this.sources.getFrameLocation(
         frame
       );
+
+      packet.why = reason;
+
+      if (this.suspendedFrame) {
+        this.suspendedFrame.waitingOnStep = false;
+        this.suspendedFrame = undefined;
+      }
 
       if (!sourceActor) {
         // If the frame location is in a source that not pass the 'allowSource'
@@ -835,6 +840,13 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       const url = sourceActor.url;
 
       if (thread.sources.isBlackBoxed(url)) {
+        return undefined;
+      }
+
+      // onPop is called when we temporarily leave an async/generator
+      if (completion.await || completion.yield) {
+        thread.suspendedFrame = this;
+        this.waitingOnStep = true;
         return undefined;
       }
 
@@ -961,6 +973,14 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     const thread = this;
     return function() {
       // onStep is called with 'this' set to the current frame.
+      // NOTE: we need to clear the stepping hooks when we are
+      // no longer waiting for an async step to occur.
+      if (this.hasOwnProperty("waitingOnStep") && !this.waitingOnStep) {
+        delete this.waitingOnStep;
+        this.onStep = undefined;
+        this.onPop = undefined;
+        return undefined;
+      }
       const location = thread.sources.getFrameLocation(this);
 
       // Continue if the source is black boxed.
@@ -1140,7 +1160,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
               );
               stepFrame.setReplayingOnStep(onStep, offsets);
             } else {
+              stepFrame.waitingOnStep = true;
               stepFrame.onStep = onStep;
+              stepFrame.onPop = onPop;
             }
           }
         // Fall through.
@@ -1209,14 +1231,12 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // only allow resumption in a LIFO order.
     if (
       this._nestedEventLoops.size &&
-      this._nestedEventLoops.lastPausedUrl &&
-      (this._nestedEventLoops.lastPausedUrl !== this._parent.url ||
-        this._nestedEventLoops.lastConnection !== this.conn)
+      this._nestedEventLoops.lastPausedThreadActor &&
+      this._nestedEventLoops.lastPausedThreadActor !== this
     ) {
       return {
         error: "wrongOrder",
         message: "trying to resume in the wrong order.",
-        lastPausedUrl: this._nestedEventLoops.lastPausedUrl,
       };
     }
 
@@ -1394,10 +1414,14 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     return { frames: frames.filter(x => !!x) };
   },
 
-  onSources: function(request) {
+  addAllSources() {
     for (const source of this.dbg.findSources()) {
       this._addSource(source);
     }
+  },
+
+  onSources: function(request) {
+    this.addAllSources();
 
     // No need to flush the new source packets here, as we are sending the
     // list of sources out immediately and we don't need to invoke the
@@ -1763,7 +1787,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     return {};
   },
 
-  _onWindowReady: function({ isTopLevel, window }) {
+  _onWindowReady: function({ isTopLevel, isBFCache, window }) {
     if (isTopLevel && this.state != "detached") {
       this.sources.reset();
       this.clearDebuggees();
@@ -1778,6 +1802,12 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // iframe).
     if (this.attached) {
       this.dbg.addDebuggees();
+    }
+
+    // BFCache navigations reuse old sources, so send existing sources to the
+    // client instead of waiting for onNewScript debugger notifications.
+    if (isBFCache) {
+      this.addAllSources();
     }
   },
 
@@ -2158,8 +2188,8 @@ exports.ChromeDebuggerActor = ChromeDebuggerActor;
  */
 var oldReportError = reportError;
 this.reportError = function(error, prefix = "") {
-  assert(error instanceof Error, "Must pass Error objects to reportError");
-  const msg = prefix + error.message + ":\n" + error.stack;
+  const message = error.message ? error.message : String(error);
+  const msg = prefix + message + ":\n" + error.stack;
   oldReportError(msg);
   dumpn(msg);
 };

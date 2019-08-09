@@ -460,7 +460,8 @@ bool BytecodeCompiler::emplaceEmitter(Maybe<BytecodeEmitter>& emitter,
                                                  ? BytecodeEmitter::SelfHosting
                                                  : BytecodeEmitter::Normal;
   emitter.emplace(/* parent = */ nullptr, parser, sharedContext, script,
-                  /* lazyScript = */ nullptr, options.lineno, emitterMode);
+                  /* lazyScript = */ nullptr, options.lineno, options.column,
+                  emitterMode);
   return emitter->init();
 }
 
@@ -493,11 +494,6 @@ JSScript* frontend::ScriptCompiler<Unit>::compileScript(
 
   TokenStreamPosition startPosition(info.keepAtoms, parser->tokenStream);
 
-  Maybe<BytecodeEmitter> emitter;
-  if (!emplaceEmitter(info, emitter, sc)) {
-    return nullptr;
-  }
-
   JSContext* cx = info.cx;
 
   for (;;) {
@@ -516,6 +512,16 @@ JSScript* frontend::ScriptCompiler<Unit>::compileScript(
     AutoGeckoProfilerEntry pseudoFrame(cx, "script emit",
                                        JS::ProfilingCategoryPair::JS_Parsing);
     if (pn) {
+      // Publish deferred items
+      if (!parser->publishDeferredItems()) {
+        return nullptr;
+      }
+
+      Maybe<BytecodeEmitter> emitter;
+      if (!emplaceEmitter(info, emitter, sc)) {
+        return nullptr;
+      }
+
       if (!emitter->emitScript(pn)) {
         return nullptr;
       }
@@ -527,8 +533,9 @@ JSScript* frontend::ScriptCompiler<Unit>::compileScript(
       return nullptr;
     }
 
-    // Reset UsedNameTracker state before trying again.
+    // Reset preserved state before trying again.
     info.usedNames->reset();
+    parser->getTreeHolder().resetFunctionTree();
   }
 
   // We have just finished parsing the source. Inform the source so that we
@@ -570,10 +577,15 @@ ModuleObject* frontend::ModuleCompiler<Unit>::compile(ModuleInfo& info) {
     return nullptr;
   }
 
+  if (!parser->publishDeferredItems()) {
+    return nullptr;
+  }
+
   Maybe<BytecodeEmitter> emitter;
   if (!emplaceEmitter(info, emitter, &modulesc)) {
     return nullptr;
   }
+
   if (!emitter->emitScript(pn->as<ModuleNode>().body())) {
     return nullptr;
   }
@@ -647,6 +659,9 @@ bool frontend::StandaloneFunctionCompiler<Unit>::compile(
       return false;
     }
 
+    if (!parser->publishDeferredItems()) {
+      return false;
+    }
     Maybe<BytecodeEmitter> emitter;
     if (!emplaceEmitter(info, emitter, funbox)) {
       return false;
@@ -746,7 +761,7 @@ JSScript* frontend::CompileGlobalBinASTScript(
 
   sourceObj->source()->setBinASTSourceMetadata(metadata);
 
-  BytecodeEmitter bce(nullptr, &parser, &globalsc, script, nullptr, 0);
+  BytecodeEmitter bce(nullptr, &parser, &globalsc, script, nullptr, 0, 0);
 
   if (!bce.init()) {
     return nullptr;
@@ -963,14 +978,14 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
   }
 
   FieldInitializers fieldInitializers = FieldInitializers::Invalid();
-  if (fun->kind() == JSFunction::FunctionKind::ClassConstructor) {
+  if (fun->kind() == FunctionFlags::FunctionKind::ClassConstructor) {
     fieldInitializers = lazy->getFieldInitializers();
   }
 
   BytecodeEmitter bce(/* parent = */ nullptr, &parser, pn->funbox(), script,
-                      lazy, pn->pn_pos, BytecodeEmitter::LazyFunction,
-                      fieldInitializers);
-  if (!bce.init()) {
+                      lazy, lazy->lineno(), lazy->column(),
+                      BytecodeEmitter::LazyFunction, fieldInitializers);
+  if (!bce.init(pn->pn_pos)) {
     return false;
   }
 
@@ -1051,10 +1066,11 @@ bool frontend::CompileLazyBinASTFunction(JSContext* cx,
 
   FunctionNode* pn = parsed.unwrap();
 
-  BytecodeEmitter bce(nullptr, &parser, pn->funbox(), script, lazy, pn->pn_pos,
+  BytecodeEmitter bce(nullptr, &parser, pn->funbox(), script, lazy,
+                      lazy->lineno(), lazy->column(),
                       BytecodeEmitter::LazyFunction);
 
-  if (!bce.init()) {
+  if (!bce.init(pn->pn_pos)) {
     return false;
   }
 

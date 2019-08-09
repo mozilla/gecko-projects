@@ -110,6 +110,7 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_page_load.h"
 #include "PaintWorkletImpl.h"
 
 // Interfaces Needed
@@ -2278,23 +2279,18 @@ bool nsGlobalWindowInner::ShouldReportForServiceWorkerScope(
   return result;
 }
 
-already_AddRefed<InstallTriggerImpl> nsGlobalWindowInner::GetInstallTrigger() {
+InstallTriggerImpl* nsGlobalWindowInner::GetInstallTrigger() {
   if (!mInstallTrigger) {
-    JS::Rooted<JSObject*> jsImplObj(RootingCx());
     ErrorResult rv;
-    ConstructJSImplementation("@mozilla.org/addons/installtrigger;1", this,
-                              &jsImplObj, rv);
+    mInstallTrigger = ConstructJSImplementation<InstallTriggerImpl>(
+        "@mozilla.org/addons/installtrigger;1", this, rv);
     if (rv.Failed()) {
       rv.SuppressException();
       return nullptr;
     }
-    MOZ_RELEASE_ASSERT(!js::IsWrapper(jsImplObj));
-    JS::Rooted<JSObject*> jsImplGlobal(RootingCx(),
-                                       JS::GetNonCCWObjectGlobal(jsImplObj));
-    mInstallTrigger = new InstallTriggerImpl(jsImplObj, jsImplGlobal, this);
   }
 
-  return do_AddRef(mInstallTrigger);
+  return mInstallTrigger;
 }
 
 nsIDOMWindowUtils* nsGlobalWindowInner::GetWindowUtils(ErrorResult& aRv) {
@@ -2580,8 +2576,9 @@ void nsGlobalWindowInner::AddDeprioritizedLoadRunner(nsIRunnable* aRunner) {
   MOZ_ASSERT(GetWindowForDeprioritizedLoadRunner() == this);
   RefPtr<DeprioritizedLoadRunner> runner = new DeprioritizedLoadRunner(aRunner);
   mDeprioritizedLoadRunner.insertBack(runner);
-  NS_DispatchToCurrentThreadQueue(runner.forget(), 5000,
-                                  EventQueuePriority::Idle);
+  NS_DispatchToCurrentThreadQueue(
+      runner.forget(), StaticPrefs::page_load_deprioritization_period(),
+      EventQueuePriority::Idle);
 }
 
 // nsISpeechSynthesisGetter
@@ -3505,17 +3502,6 @@ void nsGlobalWindowInner::Blur(ErrorResult& aError) {
 
 void nsGlobalWindowInner::Stop(ErrorResult& aError) {
   FORWARD_TO_OUTER_OR_THROW(StopOuter, (aError), aError, );
-}
-
-/* static */
-bool nsGlobalWindowInner::IsWindowPrintEnabled(JSContext*, JSObject*) {
-  static bool called = false;
-  static bool printDisabled = false;
-  if (!called) {
-    called = true;
-    Preferences::AddBoolVarCache(&printDisabled, "dom.disable_window_print");
-  }
-  return !printDisabled;
 }
 
 void nsGlobalWindowInner::Print(ErrorResult& aError) {
@@ -5621,8 +5607,7 @@ nsIPrincipal* nsGlobalWindowInner::GetTopLevelPrincipal() {
 }
 
 nsIPrincipal* nsGlobalWindowInner::GetTopLevelStorageAreaPrincipal() {
-  if (mDoc && (mDoc->StorageAccessSandboxed() ||
-               nsContentUtils::IsInPrivateBrowsing(mDoc))) {
+  if (mDoc && (mDoc->StorageAccessSandboxed())) {
     // Storage access is disabled
     return nullptr;
   }
@@ -6760,22 +6745,17 @@ bool nsGlobalWindowInner::IsSecureContext() const {
   return JS::GetIsSecureContext(realm);
 }
 
-already_AddRefed<External> nsGlobalWindowInner::GetExternal(ErrorResult& aRv) {
+External* nsGlobalWindowInner::GetExternal(ErrorResult& aRv) {
 #ifdef HAVE_SIDEBAR
   if (!mExternal) {
-    JS::Rooted<JSObject*> jsImplObj(RootingCx());
-    ConstructJSImplementation("@mozilla.org/sidebar;1", this, &jsImplObj, aRv);
+    mExternal = ConstructJSImplementation<External>("@mozilla.org/sidebar;1",
+                                                    this, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }
-    MOZ_RELEASE_ASSERT(!js::IsWrapper(jsImplObj));
-    JS::Rooted<JSObject*> jsImplGlobal(RootingCx(),
-                                       JS::GetNonCCWObjectGlobal(jsImplObj));
-    mExternal = new External(jsImplObj, jsImplGlobal, this);
   }
 
-  RefPtr<External> external = static_cast<External*>(mExternal.get());
-  return external.forget();
+  return static_cast<External*>(mExternal.get());
 #else
   aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
   return nullptr;

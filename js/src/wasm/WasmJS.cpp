@@ -687,6 +687,7 @@ const JSFunctionSpec WasmModuleObject::static_methods[] = {
 /* static */
 void WasmModuleObject::finalize(FreeOp* fop, JSObject* obj) {
   const Module& module = obj->as<WasmModuleObject>().module();
+  obj->zone()->decJitMemory(module.codeLength(module.code().stableTier()));
   fop->release(obj, &module, module.gcMallocBytesExcludingCode(),
                MemoryUse::WasmModule);
 }
@@ -1043,10 +1044,9 @@ WasmModuleObject* WasmModuleObject::create(JSContext* cx, const Module& module,
                    module.gcMallocBytesExcludingCode(), MemoryUse::WasmModule);
   module.AddRef();
 
-  // We account for the first tier here; the second tier, if different, will be
-  // accounted for separately when it's been compiled.
-  cx->zone()->updateJitCodeMallocBytes(
-      module.codeLength(module.code().stableTier()));
+  // Bug 1569888: We account for the first tier here; the second tier, if
+  // different, also needs to be accounted for.
+  cx->zone()->incJitMemory(module.codeLength(module.code().stableTier()));
   return obj;
 }
 
@@ -1456,7 +1456,7 @@ bool WasmInstanceObject::getExportedFunction(
     }
     fun.set(NewNativeConstructor(cx, WasmCall, numArgs, name,
                                  gc::AllocKind::FUNCTION_EXTENDED,
-                                 SingletonObject, JSFunction::ASMJS_CTOR));
+                                 SingletonObject, FunctionFlags::ASMJS_CTOR));
     if (!fun) {
       return false;
     }
@@ -1471,7 +1471,7 @@ bool WasmInstanceObject::getExportedFunction(
 
     fun.set(NewNativeFunction(cx, WasmCall, numArgs, name,
                               gc::AllocKind::FUNCTION_EXTENDED, SingletonObject,
-                              JSFunction::WASM));
+                              FunctionFlags::WASM));
     if (!fun) {
       return false;
     }
@@ -1558,7 +1558,7 @@ WasmFunctionScope* WasmInstanceObject::getFunctionScope(
 }
 
 bool wasm::IsWasmExportedFunction(JSFunction* fun) {
-  return fun->kind() == JSFunction::Wasm;
+  return fun->kind() == FunctionFlags::Wasm;
 }
 
 bool wasm::CheckFuncRefValue(JSContext* cx, HandleValue v,
@@ -1589,8 +1589,8 @@ Instance& wasm::ExportedFunctionToInstance(JSFunction* fun) {
 }
 
 WasmInstanceObject* wasm::ExportedFunctionToInstanceObject(JSFunction* fun) {
-  MOZ_ASSERT(fun->kind() == JSFunction::Wasm ||
-             fun->kind() == JSFunction::AsmJS);
+  MOZ_ASSERT(fun->kind() == FunctionFlags::Wasm ||
+             fun->kind() == FunctionFlags::AsmJS);
   const Value& v = fun->getExtendedSlot(FunctionExtended::WASM_INSTANCE_SLOT);
   return &v.toObject().as<WasmInstanceObject>();
 }

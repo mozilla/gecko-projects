@@ -3,7 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 # This file defines static prefs, i.e. those that are defined at startup and
-# used entirely or mostly from C++ code.
+# used entirely or mostly from C++ and/or Rust code.
 #
 # The file is separated into sections, where each section contains a group of
 # prefs that all share the same first segment of their name -- all the "gfx.*"
@@ -23,7 +23,7 @@
 # Please follow the existing prefs naming convention when considering adding a
 # new pref, and don't create a new pref group unless it's appropriate and there
 # are likely to be multiple prefs within that group. (If you do, you'll need to
-# update the `groups` variable in modules/libpref/moz.build.)
+# update the `pref_groups` variable in modules/libpref/moz.build.)
 #
 # Definitions
 # -----------
@@ -33,8 +33,9 @@
 #     type: <cpp-type>                     # mandatory
 #     value: <default-value>               # mandatory
 #     mirror: <never | once | always>      # mandatory
-#     do_not_use_directly: <True | False>  # optional
+#     do_not_use_directly: <true | false>  # optional
 #     include: <header-file>               # optional
+#     rust: <true | false>                 # optional
 #
 # - `name` is the name of the pref, without double-quotes, as it appears
 #   in about:config. It is used in most libpref API functions (from both C++
@@ -81,12 +82,20 @@
 #   Note that Rust code must access the mirror variable directly, rather than
 #   via the getter function.
 #
-# - `do_not_use_directly` dictates if `_DoNotUseDirectly` should be appended to
+# - `do_not_use_directly` indicates if `_DoNotUseDirectly` should be appended to
 #   the name of the getter function. This is simply a naming convention
 #   indicating that there is some other wrapper getter function that should be
 #   used in preference to the normal static pref getter. Defaults to `false` if
 #   not present. Cannot be used with a `never` mirror value, because there is
 #   no getter function in that case.
+#
+# - `include` names a header file that must be included for the pref value to
+#   compile correctly, e.g. because it refers to a code constant. System
+#   headers should be surrounded with angle brackets, e.g. `<cmath>`.
+#
+# - `rust` indicates if the mirror variable is used by Rust code. If so, it
+#   will be usable via the `static_prefs::pref!` macro, e.g.
+#   `static_prefs::pref!("layout.css.font-display.enabled")`.
 #
 # The getter function's base name is the same as the pref's name, but with
 # '.' or '-' chars converted to '_', to make a valid identifier. For example,
@@ -99,10 +108,6 @@
 #
 # - If the `do_not_use_directly` value is true, `_DoNotUseDirectly` is
 #   appended.
-#
-# - `include` names a header file that must be included for the pref value to
-#   compile correctly, e.g. because it refers to a code constant. System
-#   headers should be surrounded with angle brackets, e.g. `<cmath>`.
 #
 # Preprocessor
 # ------------
@@ -160,6 +165,11 @@
 
 - name: accessibility.browsewithcaret
   type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+- name: accessibility.AOM.enabled
+  type: bool
   value: false
   mirror: always
 
@@ -695,12 +705,13 @@
   value: 2
   mirror: always
 
-# Whether Content Blocking Third-Party Cookies UI has been enabled.
+# Whether Content Blocking allow list is respected for ETP interventions.
 - name: browser.contentblocking.allowlist.storage.enabled
   type: bool
-  value: false
+  value: true
   mirror: always
 
+# Whether Content Blocking allow list is respected for tracking annotations.
 - name: browser.contentblocking.allowlist.annotations.enabled
   type: bool
   value: true
@@ -735,6 +746,7 @@
   type: uint32_t
   value: 0
   mirror: always
+  rust: true
 
 - name: browser.display.focus_ring_on_anything
   type: bool
@@ -850,6 +862,11 @@
 - name: browser.sessionstore.dom_storage_limit
   type: uint32_t
   value: 2048
+  mirror: always
+
+- name: browser.tabs.remote.force-paint
+  type: bool
+  value: true
   mirror: always
 
 # When this pref is enabled document loads with a mismatched
@@ -974,6 +991,99 @@
 #endif
 
 #---------------------------------------------------------------------------
+# Prefs starting with "content."
+#---------------------------------------------------------------------------
+
+# Back off timer notification after count.
+# -1 means never.
+- name: content.notify.backoffcount
+  type: int32_t
+  value: -1
+  mirror: always
+
+# Notification interval in microseconds.
+# The notification interval has a dramatic effect on how long it takes to
+# initially display content for slow connections. The current value
+# provides good incremental display of content without causing an increase
+# in page load time. If this value is set below 1/10 of a second it starts
+# to impact page load performance.
+# See bugzilla bug 72138 for more info.
+- name: content.notify.interval
+  type: int32_t
+  value: 120000
+  mirror: always
+
+# Do we notify based on time?
+- name: content.notify.ontimer
+  type: bool
+  value: true
+  mirror: always
+
+# How many times to deflect in interactive mode.
+- name: content.sink.interactive_deflect_count
+  type: int32_t
+  value: 0
+  mirror: always
+
+# How many times to deflect in perf mode.
+- name: content.sink.perf_deflect_count
+  type: int32_t
+  value: 200
+  mirror: always
+
+# Parse mode for handling pending events.
+# 0 = don't check for pending events
+# 1 = don't deflect if there are pending events
+# 2 = bail if there are pending events
+- name: content.sink.pending_event_mode
+  type: int32_t
+# ifdef XP_WIN
+  value: 1
+# else
+  value: 0
+# endif
+  mirror: always
+
+# How often to probe for pending events. 1 = every token.
+- name: content.sink.event_probe_rate
+  type: int32_t
+  value: 1
+  mirror: always
+
+# How long to stay off the event loop in interactive mode.
+- name: content.sink.interactive_parse_time
+  type: int32_t
+  value: 3000
+  mirror: always
+
+# How long to stay off the event loop in perf mode.
+- name: content.sink.perf_parse_time
+  type: int32_t
+  value: 360000
+  mirror: always
+
+#  How long to be in interactive mode after an event.
+- name: content.sink.interactive_time
+  type: uint32_t
+  value: 750000
+  mirror: always
+
+# How long to stay in perf mode after initial loading.
+- name: content.sink.initial_perf_time
+  type: uint32_t
+  value: 2000000
+  mirror: always
+
+# Should we switch between perf-mode and interactive-mode?
+# 0 = Switch
+# 1 = Interactive mode
+# 2 = Perf mode
+- name: content.sink.enable_perf_mode
+  type: int32_t
+  value: 0
+  mirror: always
+
+#---------------------------------------------------------------------------
 # Prefs starting with "device."
 #---------------------------------------------------------------------------
 
@@ -999,6 +1109,11 @@
   mirror: always
 
 - name: device.sensors.proximity.enabled
+  type: bool
+  value: false
+  mirror: always
+
+- name: device.sensors.test.events
   type: bool
   value: false
   mirror: always
@@ -1030,6 +1145,11 @@
 - name: dom.allow_cut_copy
   type: bool
   value: true
+  mirror: always
+
+- name: dom.allow_XUL_XBL_for_file
+  type: bool
+  value: false
   mirror: always
 
 # Is support for automatically removing replaced filling animations enabled?
@@ -1098,6 +1218,25 @@
   value: true
   mirror: always
 
+# Whether window.location.reload() and window.history.go(0) should be blocked
+# if called directly from a window resize event handler.
+#
+# This used to be necessary long ago to prevent terrible UX when using stuff
+# like TypeAheadFind (bug 258917), but it also causes compat issues on mobile
+# (bug 1570566).
+#
+# So for now disable it on Android and Desktop Nightly, to see if we have any
+# desktop regression before removing it completely. Note that this means that
+# non-nightly RDM behaves different than Android in this case.
+- name: dom.block_reload_from_resize_event_handler
+  type: bool
+#if defined(MOZ_WIDGET_ANDROID) || defined(NIGHTLY_BUILD)
+  value: false
+#else
+  value: true
+#endif
+  mirror: always
+
 # SW Cache API
 - name: dom.caches.enabled
   type: RelaxedAtomicBool
@@ -1145,6 +1284,15 @@
 - name: dom.disable_open_during_load
   type: bool
   value: false
+  mirror: always
+
+- name: dom.enable_window_print
+  type: bool
+#ifdef ANDROID
+  value: false
+#else
+  value: true
+#endif
   mirror: always
 
 - name: dom.element.transform-getters.enabled
@@ -1206,6 +1354,15 @@
 
 # Disable clipboard read() and write() by default
 - name: dom.events.asyncClipboard.dataTransfer
+  type: bool
+  value: false
+  mirror: always
+
+# This pref controls whether or not the `protected` dataTransfer state is
+# enabled. If the `protected` dataTransfer stae is disabled, then the
+# DataTransfer will be read-only whenever it should be protected, and will not
+# be disconnected after a drag event is completed.
+- name: dom.events.dataTransfer.protected.enabled
   type: bool
   value: false
   mirror: always
@@ -1313,6 +1470,21 @@
 
 - name: dom.ipc.plugins.asyncdrawing.enabled
   type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+- name: dom.ipc.tabs.disabled
+  type: bool
+  value: false
+  mirror: always
+
+- name: dom.ipc.processPriorityManager.enabled
+  type: bool
+  value: false
+  mirror: always
+
+- name: dom.ipc.processPriorityManager.testMode
+  type: bool
   value: false
   mirror: always
 
@@ -1618,6 +1790,26 @@
   value: false
   mirror: always
 
+# Preference that users can set to override temporary storage smart limit
+# calculation.
+- name: dom.quotaManager.temporaryStorage.fixedLimit
+  type: RelaxedAtomicInt32
+  value: -1
+  mirror: always
+
+# Preference that users can set to override temporary storage smart limit
+# calculation.
+- name: dom.quotaManager.temporaryStorage.chunkSize
+  type: RelaxedAtomicUint32
+  value: 10 * 1024
+  mirror: always
+
+# A pref that is used to enable testing features.
+- name: dom.quotaManager.testing
+  type: SequentiallyConsistentAtomicBool
+  value: false
+  mirror: always
+
 # Is support for Navigator.registerContentHandler enabled?
 - name: dom.registerContentHandler.enabled
   type: bool
@@ -1724,6 +1916,11 @@
   value: true
   mirror: always
 
+- name: dom.securecontext.whitelist_onions
+  type: bool
+  value: false
+  mirror: always
+
 # This pref enables FeaturePolicy logic and the parsing of 'allow' attribute in
 # HTMLIFrameElement objects.
 - name: dom.security.featurePolicy.enabled
@@ -1822,6 +2019,11 @@
 
 - name: dom.testing.structuredclonetester.enabled
   type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+- name: dom.testing.sync-content-blocking-notifications
+  type: bool
   value: false
   mirror: always
 
@@ -2233,6 +2435,24 @@
   value: false
   mirror: always
 
+# General prefs for editor, indicating whether Gecko-specific editing UI is
+# enabled by default. Those UIs are not implemented by any other browsers.  So,
+# only Firefox users can change some styles with them. This means that Firefox
+# users may get unexpected result of some web apps if they assume that users
+# cannot change such styles.
+- name: editor.resizing.enabled_by_default
+  type: bool
+  value: false
+  mirror: always
+- name: editor.inline_table_editing.enabled_by_default
+  type: bool
+  value: false
+  mirror: always
+- name: editor.positioning.enabled_by_default
+  type: bool
+  value: false
+  mirror: always
+
 #---------------------------------------------------------------------------
 # Prefs starting with "extensions."
 #---------------------------------------------------------------------------
@@ -2438,6 +2658,12 @@
 - name: geo.enabled
   type: bool
   value: true
+  mirror: always
+
+# Time, in milliseconds, to wait for the location provider to spin up.
+- name: geo.timeout
+  type: int32_t
+  value: 6000
   mirror: always
 
 #---------------------------------------------------------------------------
@@ -4235,6 +4461,11 @@
   value: true
   mirror: once
 
+- name: layout.reflow.synthMouseMove
+  type: bool
+  value: true
+  mirror: always
+
 # This and code dependent on it should be removed once containerless scrolling looks stable.
 - name: layout.scroll.root-frame-containers
   type: RelaxedAtomicBool
@@ -4315,11 +4546,6 @@
 # keyword rather than a pixel value based on the first available font.
 #
 # Only enabled on Nightly and early beta, at least for now.
-#
-# NOTE(emilio): If / when removing this pref, the GETCS_NEEDS_LAYOUT_FLUSH flag
-# should be removed from line-height (and we should let -moz-block-height
-# compute to the keyword as well, which shouldn't be observable anyway since
-# it's an internal value).
 #
 # It'd be nice to make numbers compute also to themselves, but it looks like
 # everybody agrees on turning them into pixels, see the discussion starting
@@ -4408,6 +4634,17 @@
   value: 30
   mirror: always
 
+# MediaCapabilities
+- name: media.mediacapabilities.drop-threshold
+  type: RelaxedAtomicInt32
+  value: 95
+  mirror: always
+
+- name: media.mediacapabilities.from-database
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 # AudioSink
 - name: media.resampling.enabled
   type: RelaxedAtomicBool
@@ -4494,6 +4731,11 @@
   mirror: always
 
 - name: media.clearkey.persistent-license.enabled
+  type: bool
+  value: false
+  mirror: always
+
+- name: media.cloneElementVisually.testing
   type: bool
   value: false
   mirror: always
@@ -4770,6 +5012,12 @@
   value: false
   mirror: always
 
+# This pref disables the reception of RTCP. It is used for testing.
+- name: media.webrtc.net.force_disable_rtcp_reception
+  type: ReleaseAcquireAtomicBool
+  value: false
+  mirror: always
+
 # TextTrack WebVTT Region extension support.
 - name: media.webvtt.regions.enabled
   type: bool
@@ -4848,6 +5096,12 @@
 # Zero tolerance in pre-release builds to detect any decoder regression.
   value: 0
 #endif
+  mirror: always
+
+# Are video stats enabled? (Disabling can help prevent fingerprinting.)
+- name: media.video_stats.enabled
+  type: bool
+  value: true
   mirror: always
 
 # Opus
@@ -5397,6 +5651,18 @@
   value: false
   mirror: always
 
+
+#---------------------------------------------------------------------------
+# Prefs starting with "page_load."
+#---------------------------------------------------------------------------
+
+# Time in milliseconds during which certain tasks are deprioritized during
+# page load.
+- name: page_load.deprioritization_period
+  type: uint32_t
+  value: 5000
+  mirror: always
+
 #---------------------------------------------------------------------------
 # Prefs starting with "plain_text."
 #---------------------------------------------------------------------------
@@ -5473,6 +5739,25 @@
   value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: always
 
+# First Party Isolation (double keying), disabled by default.
+- name: privacy.firstparty.isolate
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# If false, two windows in the same domain with different first party domains
+# (top level URLs) can access resources through window.opener. This pref is
+# effective only when "privacy.firstparty.isolate" is true.
+- name: privacy.firstparty.isolate.restrict_opener_access
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+- name: privacy.firstparty.isolate.block_post_message
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # Enforce tracking protection in all modes.
 - name: privacy.trackingprotection.enabled
   type: bool
@@ -5497,32 +5782,14 @@
   value: false
   mirror: always
 
-# Annotate fingerprinting resources.
-- name: privacy.trackingprotection.fingerprinting.annotate.enabled
-  type: bool
-  value: true
-  mirror: always
-
 # Block 3rd party cryptomining resources.
 - name: privacy.trackingprotection.cryptomining.enabled
   type: bool
   value: false
   mirror: always
 
-# Annotate cryptomining resources.
-- name: privacy.trackingprotection.cryptomining.annotate.enabled
-  type: bool
-  value: true
-  mirror: always
-
 # Block 3rd party socialtracking resources.
 - name: privacy.trackingprotection.socialtracking.enabled
-  type: bool
-  value: false
-  mirror: always
-
-# Annotate socialtracking resources.
-- name: privacy.trackingprotection.socialtracking.annotate.enabled
   type: bool
   value: false
   mirror: always
@@ -5542,7 +5809,7 @@
   value: false
   mirror: always
 
-# Spoof user locale to English
+# Whether to spoof user locale to English (used as part of Resist Fingerprinting)
 - name: privacy.spoof_english
   type: RelaxedAtomicUint32
   value: 0
@@ -5561,6 +5828,66 @@
 - name: privacy.trackingprotection.lower_network_priority
   type: bool
   value: @IS_NIGHTLY_BUILD@
+  mirror: always
+
+# The resistFingerprinting variables are marked with 'Relaxed' memory ordering.
+# We don't particurally care that threads have a percently consistent view of
+# the values of these prefs. They are not expected to change often, and having
+# an outdated view is not particurally harmful. They will eventually become
+# consistent.
+#
+# The variables will, however, be read often (specifically .microseconds on
+# each timer rounding) so performance is important.
+
+- name: privacy.resistFingerprinting
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# We automatically decline canvas permission requests if they are not initiated
+# from user input. Just in case that breaks something, we allow the user to revert
+# this behavior with this obscure pref. We do not intend to support this long term.
+# If you do set it, to work around some broken website, please file a bug with
+# information so we can understand why it is needed.
+- name: privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts
+  type: bool
+  value: true
+  mirror: always
+
+# The log level for browser console messages logged in RFPHelper.jsm
+# Change to 'All' and restart to see the messages
+- name: privacy.resistFingerprinting.jsmloglevel
+  type: String
+  value: "Warn"
+  mirror: never
+
+# A subset of Resist Fingerprinting protections focused specifically on timers for testing
+# This affects the Animation API, the performance APIs, Date.getTime, Event.timestamp,
+#   File.lastModified, audioContext.currentTime, canvas.captureStream.currentTime
+- name: privacy.reduceTimerPrecision
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+# If privacy.reduceTimerPrecision is false, this pref controls whether or not to
+# clamp all timers at a fixed 20 microsconds. It should always be enabled, and is
+# only specified as a pref to enable an emergency disabling in the event of catastrophic
+# failure
+- name: privacy.reduceTimerPrecision.unconditional
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+# Dynamically tune the resolution of the timer reduction for both of the two above prefs
+- name: privacy.resistFingerprinting.reduceTimerPrecision.microseconds
+  type: RelaxedAtomicUint32
+  value: 1000
+  mirror: always
+
+# Enable jittering the clock one precision value forward
+- name : privacy.resistFingerprinting.reduceTimerPrecision.jitter
+  type: RelaxedAtomicBool
+  value: true
   mirror: always
 
 # Anti-tracking permission expiration
@@ -5592,17 +5919,6 @@
 #endif
   mirror: always
 
-# Anti-fingerprinting, disabled by default
-- name: privacy.resistFingerprinting
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-
-- name: privacy.resistFingerprinting.autoDeclineNoUserInputCanvasPrompts
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-
 - name: privacy.storagePrincipal.enabledForTrackers
   type: RelaxedAtomicBool
   value: false
@@ -5632,6 +5948,13 @@
 # Prefs starting with "security."
 #---------------------------------------------------------------------------
 
+# Mochitests that need to load resource:// URIs not declared content-accessible
+# in manifests should set this pref.
+- name: security.all_resource_uri_content_accessible
+  type: bool
+  value: false
+  mirror: always
+
 - name: security.csp.enable
   type: bool
   value: true
@@ -5647,7 +5970,16 @@
   value: 40
   mirror: always
 
+# Disabled by default so it doesn't affect Thunderbird/SeaMonkey, but
+# enabled in firefox.js
 - name: security.allow_eval_with_system_principal
+  type: bool
+  value: true
+  mirror: always
+
+# Disabled by default so it doesn't affect Thunderbird/SeaMonkey, but
+# enabled in firefox.js
+- name: security.allow_eval_in_parent_process
   type: bool
   value: true
   mirror: always
@@ -5657,6 +5989,15 @@
   type: RelaxedAtomicBool
   value: true
   mirror: always
+
+#if defined(XP_WIN) && defined(MOZ_SANDBOX)
+# Whether win32k is disabled for content processes.
+# true means win32k system calls are not permitted.
+- name: security.sandbox.content.win32k-disable
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+#endif
 
 # Hardware Origin-bound Second Factor Support
 - name: security.webauth.webauthn
@@ -5765,6 +6106,30 @@
 - name: toolkit.scrollbox.verticalScrollDistance
   type: RelaxedAtomicInt32
   value: 3
+  mirror: always
+
+# Sending each remote accumulation immediately places undue strain on the IPC
+# subsystem. Batch the remote accumulations for a period of time before sending
+# them all at once. This value was chosen as a balance between data timeliness
+# and performance (see bug 1218576).
+- name: toolkit.telemetry.ipcBatchTimeout
+  type: uint32_t
+  value: 2000
+  mirror: always
+
+- name: toolkit.telemetry.isGeckoViewMode
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+- name: toolkit.telemetry.geckoview.batchDurationMS
+  type: uint32_t
+  value: 5000
+  mirror: always
+
+- name: toolkit.telemetry.geckoview.streaming
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 #---------------------------------------------------------------------------

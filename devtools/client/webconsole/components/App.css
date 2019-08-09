@@ -103,17 +103,29 @@ body {
 
 .webconsole-app .jsterm-input-container {
   min-height: 28px;
+  padding-block-start: 2px;
   overflow-y: auto;
   overflow-x: hidden;
   flex-grow: 1;
-}
-
-.jsterm-cm .jsterm-input-container {
-  padding-block-start: 2px;
+  /* We display the open editor button at the end of the input */
+  display: grid;
+  grid-template-columns: 1fr auto;
+  /* This allows us to not define a column for the CodeMirror container */
+  grid-auto-flow: column;
 }
 
 .webconsole-app .webconsole-output:empty ~ .jsterm-input-container {
   border-top: none;
+}
+
+.webconsole-input-openEditorButton {
+  grid-column: -1 / -2;
+  height: 24px;
+  margin: 0;
+}
+
+.webconsole-input-openEditorButton::before {
+  background-image: url("chrome://devtools/skin/images/webconsole/editor.svg");
 }
 
 .reverse-search {
@@ -249,7 +261,11 @@ body {
 }
 
 .jsterm-editor .webconsole-editor-toolbar .webconsole-editor-toolbar-closeButton::before {
-  background-image: url(chrome://devtools/skin/images/webconsole/editor.svg);
+  background-image: url("chrome://devtools/skin/images/close.svg");
+}
+
+.jsterm-editor .webconsole-input-openEditorButton {
+  display: none;
 }
 
 .jsterm-editor .webconsole-output {
@@ -263,6 +279,7 @@ body {
   width: 30vw;
   min-width: 150px;
   border-top: none;
+  display: block;
 }
 
 .jsterm-editor #webconsole-notificationbox {
@@ -270,7 +287,7 @@ body {
   grid-column: -1 / 1;
 }
 
-.jsterm-cm.jsterm-editor .jsterm-input-container > .CodeMirror {
+.jsterm-editor .jsterm-input-container > .CodeMirror {
   padding-inline-start: 0;
   background-image: none;
 }

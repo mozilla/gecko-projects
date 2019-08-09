@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::common::{from_cookie, from_name, to_cookie, to_name, Cookie, Timeouts};
 
@@ -29,7 +30,34 @@ pub struct NewWindow {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WindowRect {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Keys {
+    pub text: String,
+    pub value: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Script {
+    pub script: String,
+    pub args: Option<Vec<Value>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
+    // Needs to be updated to "WebDriver:AcceptAlert" for Firefox 63
+    #[serde(rename = "WebDriver:AcceptDialog")]
+    AcceptAlert,
     #[serde(
         rename = "WebDriver:AddCookie",
         serialize_with = "to_cookie",
@@ -46,24 +74,42 @@ pub enum Command {
     DeleteCookie(String),
     #[serde(rename = "WebDriver:DeleteAllCookies")]
     DeleteCookies,
+    #[serde(rename = "WebDriver:DismissAlert")]
+    DismissAlert,
+    #[serde(rename = "WebDriver:ExecuteAsyncScript")]
+    ExecuteAsyncScript(Script),
+    #[serde(rename = "WebDriver:ExecuteScript")]
+    ExecuteScript(Script),
     #[serde(rename = "WebDriver:FindElement")]
     FindElement(Locator),
     #[serde(rename = "WebDriver:FindElements")]
     FindElements(Locator),
     #[serde(rename = "WebDriver:FullscreenWindow")]
     FullscreenWindow,
+    #[serde(rename = "WebDriver:GetAlertText")]
+    GetAlertText,
     #[serde(rename = "WebDriver:GetCookies")]
     GetCookies,
     #[serde(rename = "WebDriver:GetTimeouts")]
     GetTimeouts,
+    #[serde(rename = "WebDriver:GetWindowHandle")]
+    GetWindowHandle,
+    #[serde(rename = "WebDriver:GetWindowHandles")]
+    GetWindowHandles,
+    #[serde(rename = "WebDriver:GetWindowRect")]
+    GetWindowRect,
     #[serde(rename = "WebDriver:MaximizeWindow")]
     MaximizeWindow,
     #[serde(rename = "WebDriver:MinimizeWindow")]
     MinimizeWindow,
     #[serde(rename = "WebDriver:NewWindow")]
     NewWindow(NewWindow),
+    #[serde(rename = "WebDriver:SendAlertText")]
+    SendAlertText(Keys),
     #[serde(rename = "WebDriver:SetTimeouts")]
     SetTimeouts(Timeouts),
+    #[serde(rename = "WebDriver:SetWindowRect")]
+    SetWindowRect(WindowRect),
 }
 
 #[cfg(test)]
@@ -118,11 +164,32 @@ mod tests {
     }
 
     #[test]
+    fn test_json_keys() {
+        let data = Keys {
+            text: "Foo".into(),
+            value: vec!["F".into(), "o".into(), "o".into()],
+        };
+        let json = json!({"text": "Foo", "value": ["F", "o", "o"]});
+        assert_ser_de(&data, json);
+    }
+
+    #[test]
     fn test_json_new_window() {
         let data = NewWindow {
             type_hint: Some("foo".into()),
         };
         assert_ser_de(&data, json!({ "type": "foo" }));
+    }
+
+    #[test]
+    fn test_json_window_rect() {
+        let data = WindowRect {
+            x: Some(123),
+            y: None,
+            width: None,
+            height: None,
+        };
+        assert_ser_de(&data, json!({"x": 123}));
     }
 
     #[test]

@@ -18,18 +18,9 @@ const stringToCopy = "EvilCommand";
 
 add_task(async function() {
   await pushPref("devtools.chrome.enabled", false);
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTest();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTest();
-});
-
-async function performTest() {
   await pushPref("devtools.selfxss.count", 0);
   const hud = await openNewTabAndConsole(TEST_URI);
-  const { jsterm, ui } = hud;
+  const { ui } = hud;
   const { document } = ui;
 
   info("Self-xss paste tests");
@@ -38,9 +29,9 @@ async function performTest() {
 
   // Input some commands to check if usage counting is working
   for (let i = 0; i <= 3; i++) {
-    setInputValue(hud, i.toString());
-    jsterm.execute();
+    await executeAndWaitForMessage(hud, i.toString(), i, ".result");
   }
+
   is(WebConsoleUtils.usageCount, 4, "Usage count incremented");
   WebConsoleUtils.usageCount = 0;
 
@@ -69,4 +60,4 @@ async function performTest() {
   setInputValue(hud, "");
   goDoCommand("cmd_paste");
   is(getInputValue(hud), stringToCopy, "Paste works");
-}
+});

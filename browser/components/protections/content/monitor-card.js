@@ -32,34 +32,32 @@ export default class MonitorClass {
       this.buildContent(loginData, monitorData);
 
       // Show the Monitor card.
-      const monitorCard = this.doc.querySelector(".card.monitor-card.hidden");
-      monitorCard.classList.remove("hidden");
+      const monitorUI = this.doc.querySelector(".card.monitor-card.loading");
+      monitorUI.classList.remove("loading");
     });
   }
 
   buildContent(loginData, monitorData) {
-    const { hasFxa, numLogins } = loginData;
-    const isLoggedIn = numLogins > 0 || hasFxa;
+    const { numLogins } = loginData;
     const headerContent = this.doc.querySelector(
       "#monitor-header-content span"
     );
     const monitorCard = this.doc.querySelector(".card.monitor-card");
-    if (isLoggedIn && !monitorData.error) {
+    if (numLogins > 0 && !monitorData.error) {
       monitorCard.classList.add("has-logins");
-      headerContent.textContent =
-        "Firefox Monitor warns you if your info has appeared in a known data breach";
+      headerContent.setAttribute(
+        "data-l10n-id",
+        "monitor-header-content-logged-in"
+      );
       this.renderContentForUserWithLogins(monitorData);
     } else {
       monitorCard.classList.add("no-logins");
       const signUpForMonitorLink = this.doc.getElementById(
         "sign-up-for-monitor-link"
       );
-      signUpForMonitorLink.textContent = hasFxa
-        ? "Turn on Monitor"
-        : "Sign up for Monitor";
       signUpForMonitorLink.href = this.buildMonitorUrl(monitorData.userEmail);
-      headerContent.textContent =
-        "Check Firefox Monitor to see if you've been part of a data breach and get alerts about new breaches.";
+      signUpForMonitorLink.setAttribute("data-l10n-id", "monitor-sign-up");
+      headerContent.setAttribute("data-l10n-id", "monitor-header-content");
     }
   }
 
@@ -87,6 +85,11 @@ export default class MonitorClass {
   }
 
   renderContentForUserWithLogins(monitorData) {
+    const monitorCardBody = this.doc.querySelector(
+      ".card.monitor-card .card-body"
+    );
+    monitorCardBody.classList.remove("hidden");
+
     const storedEmail = this.doc.querySelector(
       "span[data-type='stored-emails']"
     );
@@ -101,6 +104,34 @@ export default class MonitorClass {
     knownBreaches.textContent = monitorData.numBreaches;
     exposedPasswords.textContent = monitorData.passwords;
 
+    const infoMonitoredAddresses = this.doc.getElementById(
+      "info-monitored-addresses"
+    );
+    infoMonitoredAddresses.setAttribute(
+      "data-l10n-args",
+      JSON.stringify({ count: monitorData.monitoredEmails })
+    );
+    infoMonitoredAddresses.setAttribute(
+      "data-l10n-id",
+      "info-monitored-addresses"
+    );
+
+    const infoKnownBreaches = this.doc.getElementById("info-known-breaches");
+    infoKnownBreaches.setAttribute(
+      "data-l10n-args",
+      JSON.stringify({ count: monitorData.numBreaches })
+    );
+    infoKnownBreaches.setAttribute("data-l10n-id", "info-known-breaches");
+
+    const infoExposedPasswords = this.doc.getElementById(
+      "info-exposed-passwords"
+    );
+    infoExposedPasswords.setAttribute(
+      "data-l10n-args",
+      JSON.stringify({ count: monitorData.passwords })
+    );
+    infoExposedPasswords.setAttribute("data-l10n-id", "info-exposed-passwords");
+
     // Display Lockwise section if there are any potential breached logins to report.
     if (monitorData.potentiallyBreachedLogins > 0) {
       const lockwiseSection = this.doc.querySelector(
@@ -112,6 +143,14 @@ export default class MonitorClass {
 
       exposedLockwisePasswords.textContent =
         monitorData.potentiallyBreachedLogins;
+
+      let breachedPasswordWarning = this.doc.getElementById("password-warning");
+
+      breachedPasswordWarning.setAttribute(
+        "data-l10n-args",
+        JSON.stringify({ count: monitorData.potentiallyBreachedLogins })
+      );
+      breachedPasswordWarning.setAttribute("data-l10n-id", "password-warning");
 
       lockwiseSection.classList.remove("hidden");
     }

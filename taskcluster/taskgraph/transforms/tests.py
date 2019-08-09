@@ -145,7 +145,6 @@ WINDOWS_WORKER_TYPES = {
 
 # os x worker types keyed by test-platform
 MACOSX_WORKER_TYPES = {
-    'macosx1010-64': 't-osx-1010',
     'macosx1014-64': 'releng-hardware/gecko-t-osx-1014',
 }
 
@@ -664,6 +663,43 @@ def setup_raptor(config, tests):
         if test['require-signed-extensions']:
             extra_options.append('--is-release-build')
 
+        # add urlparams based on platform, test names and projects
+        testurlparams_by_platform_and_project = {
+            "android-hw-g5": [
+                {
+                    "branches": [],  # For all branches
+                    "testnames": ["youtube-playback"],
+                    "urlparams": [
+                        # param used for excluding youtube-playback tests from executing
+                        # it excludes the tests with videos >1080p
+                        "exclude=1,2,9,10,17,18,21,22,26,28,30,32,39,40,47,"
+                        "48,55,56,63,64,71,72,79,80,83,84,89,90,95,96",
+                    ]
+                },
+            ]
+        }
+
+        for platform, testurlparams_by_project_definitions \
+                in testurlparams_by_platform_and_project.items():
+
+            if test['test-platform'].startswith(platform):
+                # For every platform it may have several definitions
+                for testurlparams_by_project in testurlparams_by_project_definitions:
+                    # The test should contain at least one defined testname
+                    if any(
+                        testname in test['test-name']
+                        for testname in testurlparams_by_project['testnames']
+                    ):
+                        branches = testurlparams_by_project['branches']
+                        if (
+                            branches == [] or
+                            config.params.get('project') in branches or
+                            config.params.is_try() and 'try' in branches
+                        ):
+                            params_query = '&'.join(testurlparams_by_project['urlparams'])
+                            add_extra_params_option = "--test-url-params={}".format(params_query)
+                            extra_options.append(add_extra_params_option)
+
         yield test
 
 
@@ -715,9 +751,6 @@ def set_treeherder_machine_platform(config, tests):
         # treeherder.
         'linux64-asan/opt': 'linux64/asan',
         'linux64-pgo/opt': 'linux64/pgo',
-        'macosx1010-64/debug': 'osx-10-10/debug',
-        'macosx1010-64/opt': 'osx-10-10/opt',
-        'macosx1010-64-shippable/opt': 'osx-10-10-shippable/opt',
         'macosx1014-64/debug': 'osx-10-14/debug',
         'macosx1014-64/opt': 'osx-10-14/opt',
         'macosx1014-64-shippable/opt': 'osx-10-14-shippable/opt',
@@ -732,7 +765,6 @@ def set_treeherder_machine_platform(config, tests):
         'android-api-16/opt': 'android-em-4-3-armv7-api16/opt',
         'android-api-16-pgo/opt': 'android-em-4-3-armv7-api16/pgo',
         'android-x86/opt': 'android-em-4-2-x86/opt',
-        'android-api-16-gradle/opt': 'android-api-16-gradle/opt',
     }
     for test in tests:
         # For most desktop platforms, the above table is not used for "regular"
@@ -805,14 +837,6 @@ def set_tier(config, tests):
                                          'windows10-64-qr/debug',
                                          'windows10-64-pgo-qr/opt',
                                          'windows10-64-shippable-qr/opt',
-                                         'macosx1010-64/opt',
-                                         'macosx1010-64/debug',
-                                         'macosx1010-64-nightly/opt',
-                                         'macosx1010-64-shippable/opt',
-                                         'macosx1010-64-devedition/opt',
-                                         'macosx1010-64-qr/opt',
-                                         'macosx1010-64-shippable-qr/opt',
-                                         'macosx1010-64-qr/debug',
                                          'macosx1014-64/opt',
                                          'macosx1014-64/debug',
                                          'macosx1014-64-nightly/opt',
@@ -1038,6 +1062,33 @@ def split_variants(config, tests):
 
 
 @transforms.add
+def enable_fission_on_central(config, tests):
+    """Enable select fission tasks on mozilla-central."""
+    for test in tests:
+        if test['attributes'].get('unittest_variant') != 'fission':
+            yield test
+            continue
+
+        # Mochitest only (with exceptions)
+        exceptions = ('gpu', 'remote', 'screenshots')
+        if (test['attributes']['unittest_category'] != 'mochitest' or
+                any(s in test['attributes']['unittest_suite'] for s in exceptions)):
+            yield test
+            continue
+
+        # Linux and Windows (except debug) 64 bit only.
+        platform = test['build-attributes']['build_platform']
+        btype = test['build-attributes']['build_type']
+        if not (platform == 'linux64' or (platform == 'win64' and btype != 'debug')):
+            yield test
+            continue
+
+        if not runs_on_central(test):
+            test['run-on-projects'].append('mozilla-central')
+        yield test
+
+
+@transforms.add
 def ensure_spi_disabled_on_all_but_spi(config, tests):
     for test in tests:
         variant = test['attributes'].get('unittest_variant', '')
@@ -1228,8 +1279,6 @@ def set_worker_type(config, tests):
         if test.get('worker-type'):
             # This test already has its worker type defined, so just use that (yields below)
             pass
-        elif test_platform.startswith('macosx1010-64'):
-            test['worker-type'] = MACOSX_WORKER_TYPES['macosx1010-64']
         elif test_platform.startswith('macosx1014-64'):
             test['worker-type'] = MACOSX_WORKER_TYPES['macosx1014-64']
         elif test_platform.startswith('win'):

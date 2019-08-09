@@ -105,6 +105,13 @@ const STATE_SUCCEEDED = "succeeded";
 const STATE_DOWNLOAD_FAILED = "download-failed";
 const STATE_FAILED = "failed";
 
+// BITS will keep retrying a download after transient errors, unless this much
+// time has passed since there has been download progress.
+// Similarly to ...POLL_RATE_MS below, we are much more aggressive when the user
+// is watching the download progress.
+const BITS_IDLE_NO_PROGRESS_TIMEOUT_SECS = 3600; // 1 hour
+const BITS_ACTIVE_NO_PROGRESS_TIMEOUT_SECS = 5;
+
 // These value control how frequently we get updates from the BITS client on
 // the progress made downloading. The difference between the two is that the
 // active interval is the one used when the user is watching. The idle interval
@@ -355,8 +362,9 @@ function createMutex(aName, aAllowExisting = true) {
  * Windows only function that determines a unique mutex name for the
  * installation.
  *
- * @param aGlobal true if the function should return a global mutex. A global
- *                mutex is valid across different sessions
+ * @param aGlobal
+ *        true if the function should return a global mutex. A global mutex is
+ *        valid across different sessions.
  * @return Global mutex path
  */
 function getPerInstallationMutexName(aGlobal = true) {
@@ -467,12 +475,34 @@ function getElevationRequired() {
 
 /**
  * Determines whether or not an update can be applied. This is always true on
- * Windows when the service is used. Also, this is always true on OSX because we
- * offer users the option to perform an elevated update when necessary.
+ * Windows when the service is used. On Mac OS X and Linux, if the user has
+ * write access to the update directory this will return true because on OSX we
+ * offer users the option to perform an elevated update when necessary and on
+ * Linux the update directory is located in the application directory.
  *
  * @return true if an update can be applied, false otherwise
  */
 function getCanApplyUpdates() {
+  try {
+    // Check if it is possible to write to the update directory so clients won't
+    // repeatedly try to apply an update without the ability to complete the
+    // update process which requires write access to the update directory.
+    let updateTestFile = getUpdateFile([FILE_UPDATE_TEST]);
+    LOG("getCanApplyUpdates - testing write access " + updateTestFile.path);
+    testWriteAccess(updateTestFile, false);
+  } catch (e) {
+    LOG(
+      "getCanApplyUpdates - unable to apply updates without write " +
+        "access to the update directory. Exception: " +
+        e
+    );
+    // Attempt to fix the update directory permissions. If successful the next
+    // time this function is called the write access check to the update
+    // directory will succeed.
+    fixUpdateDirectoryPermissions();
+    return false;
+  }
+
   if (AppConstants.platform == "macosx") {
     LOG(
       "getCanApplyUpdates - bypass the write since elevation can be used " +
@@ -490,15 +520,6 @@ function getCanApplyUpdates() {
   }
 
   try {
-    // Test write access to the updates directory. On Linux the updates
-    // directory is located in the installation directory so this is the only
-    // write access check that is necessary to tell whether the user can apply
-    // updates. On Windows the updates directory is in the user's local
-    // application data directory so this should always succeed and additional
-    // checks are performed below.
-    let updateTestFile = getUpdateFile([FILE_UPDATE_TEST]);
-    LOG("getCanApplyUpdates - testing write access " + updateTestFile.path);
-    testWriteAccess(updateTestFile, false);
     if (AppConstants.platform == "win") {
       // On Windows when the maintenance service isn't used updates can still be
       // performed in a location requiring admin privileges by the client
@@ -1352,6 +1373,42 @@ function pingStateAndStatusCodes(aUpdate, aStartup, aStatus) {
 }
 
 /**
+ * Asynchronously fixes the update directory permissions. This is currently only
+ * available on Windows.
+ *
+ * @return true if the permission-fixing process was started, and false if the
+ *         permission-fixing process was not started or the platform is not
+ *         supported.
+ */
+function fixUpdateDirectoryPermissions() {
+  if (AppConstants.platform != "win") {
+    LOG(
+      "There is currently no implementation for fixing update directory " +
+        "permissions on this platform"
+    );
+    return false;
+  }
+
+  if (!gUpdateDirPermissionFixAttempted) {
+    // Never try to fix permissions more than one time during a session.
+    gUpdateDirPermissionFixAttempted = true;
+    LOG("Attempting to fix update directory permissions");
+    try {
+      Cc["@mozilla.org/updates/update-processor;1"]
+        .createInstance(Ci.nsIUpdateProcessor)
+        .fixUpdateDirectoryPerms(shouldUseService());
+    } catch (e) {
+      LOG(
+        "Attempt to fix update directory permissions failed. Exception: " + e
+      );
+      return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
  * This function should be called whenever we fail to write to a file required
  * for update to function. This function will, if possible, attempt to fix the
  * file permissions. If the file permissions cannot be fixed, the user will be
@@ -1412,31 +1469,7 @@ function handleCriticalWriteFailure(path) {
     }
   }
 
-  if (!gUpdateDirPermissionFixAttempted) {
-    // Currently, we only have a mechanism for fixing update directory permissions
-    // on Windows.
-    if (AppConstants.platform != "win") {
-      LOG(
-        "There is currently no implementation for fixing update directory " +
-          "permissions on this platform"
-      );
-      return false;
-    }
-    LOG("Attempting to fix update directory permissions");
-    try {
-      Cc["@mozilla.org/updates/update-processor;1"]
-        .createInstance(Ci.nsIUpdateProcessor)
-        .fixUpdateDirectoryPerms(shouldUseService());
-    } catch (e) {
-      LOG(
-        "Attempt to fix update directory permissions failed. Exception: " + e
-      );
-      return false;
-    }
-    gUpdateDirPermissionFixAttempted = true;
-    return true;
-  }
-  return false;
+  return fixUpdateDirectoryPermissions();
 }
 
 /**
@@ -3396,17 +3429,27 @@ UpdateManager.prototype = {
       return updates;
     }
 
+    // Open the active-update.xml file with both read and write access so
+    // opening it will fail if it isn't possible to also write to the file. When
+    // opening it fails it means that it isn't possible to update and the code
+    // below will return early without loading the active-update.xml. This will
+    // also make it so notifications to update manually will still be shown.
+    let mode =
+      fileName == FILE_ACTIVE_UPDATE_XML
+        ? FileUtils.MODE_RDWR
+        : FileUtils.MODE_RDONLY;
     let fileStream = Cc[
       "@mozilla.org/network/file-input-stream;1"
     ].createInstance(Ci.nsIFileInputStream);
     try {
-      fileStream.init(file, FileUtils.MODE_RDONLY, FileUtils.PERMS_FILE, 0);
+      fileStream.init(file, mode, FileUtils.PERMS_FILE, 0);
     } catch (e) {
       LOG(
         "UpdateManager:_loadXMLFileIntoArray - error initializing file " +
           "stream. Exception: " +
           e
       );
+      fixUpdateDirectoryPermissions();
       return updates;
     }
     try {
@@ -4535,6 +4578,7 @@ Downloader.prototype = {
       this._request.init(uri, patchFile, DOWNLOAD_CHUNK_SIZE, interval);
       this._request.start(this, null);
     } else {
+      let noProgressTimeout = BITS_IDLE_NO_PROGRESS_TIMEOUT_SECS;
       let monitorInterval = BITS_IDLE_POLL_RATE_MS;
       this._bitsActiveNotifications = false;
       // The monitor's timeout should be much greater than the longest monitor
@@ -4543,6 +4587,7 @@ Downloader.prototype = {
       // unnecessary fallback to nsIIncrementalDownload.
       let monitorTimeout = Math.max(10 * monitorInterval, 10 * 60 * 1000);
       if (this.hasDownloadListeners) {
+        noProgressTimeout = BITS_ACTIVE_NO_PROGRESS_TIMEOUT_SECS;
         monitorInterval = BITS_ACTIVE_POLL_RATE_MS;
         this._bitsActiveNotifications = true;
       }
@@ -4584,6 +4629,7 @@ Downloader.prototype = {
           this._patch.URL,
           FILE_UPDATE_MAR,
           Ci.nsIBits.PROXY_PRECONFIG,
+          noProgressTimeout,
           monitorInterval,
           this,
           null
@@ -4743,15 +4789,26 @@ Downloader.prototype = {
           "notifications"
       );
       this._bitsActiveNotifications = true;
-      await this._request
-        .changeMonitorInterval(BITS_ACTIVE_POLL_RATE_MS)
-        .catch(error => {
-          LOG(
-            "Downloader:_maybeStartActiveNotifications - Failed to increase " +
-              "status update frequency. Error: " +
-              error
-          );
-        });
+      await Promise.all([
+        this._request
+          .setNoProgressTimeout(BITS_ACTIVE_NO_PROGRESS_TIMEOUT_SECS)
+          .catch(error => {
+            LOG(
+              "Downloader:_maybeStartActiveNotifications - Failed to set " +
+                "no progress timeout. Error: " +
+                error
+            );
+          }),
+        this._request
+          .changeMonitorInterval(BITS_ACTIVE_POLL_RATE_MS)
+          .catch(error => {
+            LOG(
+              "Downloader:_maybeStartActiveNotifications - Failed to increase " +
+                "status update frequency. Error: " +
+                error
+            );
+          }),
+      ]);
     }
   },
 
@@ -4771,15 +4828,26 @@ Downloader.prototype = {
           "notifications"
       );
       this._bitsActiveNotifications = false;
-      await this._request
-        .changeMonitorInterval(BITS_IDLE_POLL_RATE_MS)
-        .catch(error => {
-          LOG(
-            "Downloader:_maybeStopActiveNotifications - Failed to decrease " +
-              "status update frequency: " +
-              error
-          );
-        });
+      await Promise.all([
+        this._request
+          .setNoProgressTimeout(BITS_IDLE_NO_PROGRESS_TIMEOUT_SECS)
+          .catch(error => {
+            LOG(
+              "Downloader:_maybeStopActiveNotifications - Failed to set " +
+                "no progress timeout: " +
+                error
+            );
+          }),
+        this._request
+          .changeMonitorInterval(BITS_IDLE_POLL_RATE_MS)
+          .catch(error => {
+            LOG(
+              "Downloader:_maybeStopActiveNotifications - Failed to decrease " +
+                "status update frequency: " +
+                error
+            );
+          }),
+      ]);
     }
   },
 

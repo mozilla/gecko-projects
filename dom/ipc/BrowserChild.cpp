@@ -55,6 +55,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ProcessHangMonitor.h"
+#include "mozilla/ResultExtensions.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
@@ -903,7 +904,7 @@ BrowserChild::ProvideWindow(mozIDOMWindowProxy* aParent, uint32_t aChromeFlags,
                             const nsAString& aName, const nsACString& aFeatures,
                             bool aForceNoOpener, bool aForceNoReferrer,
                             nsDocShellLoadState* aLoadState, bool* aWindowIsNew,
-                            mozIDOMWindowProxy** aReturn) {
+                            BrowsingContext** aReturn) {
   *aReturn = nullptr;
 
   // If aParent is inside an <iframe mozbrowser> and this isn't a request to
@@ -926,7 +927,14 @@ BrowserChild::ProvideWindow(mozIDOMWindowProxy* aParent, uint32_t aChromeFlags,
     if (openLocation == nsIBrowserDOMWindow::OPEN_CURRENTWINDOW) {
       nsCOMPtr<nsIWebBrowser> browser = do_GetInterface(WebNavigation());
       *aWindowIsNew = false;
-      return browser->GetContentDOMWindow(aReturn);
+
+      nsCOMPtr<mozIDOMWindowProxy> win;
+      MOZ_TRY(browser->GetContentDOMWindow(getter_AddRefs(win)));
+
+      RefPtr<BrowsingContext> bc(
+          nsPIDOMWindowOuter::From(win)->GetBrowsingContext());
+      bc.forget(aReturn);
+      return NS_OK;
     }
   }
 
@@ -941,9 +949,14 @@ BrowserChild::ProvideWindow(mozIDOMWindowProxy* aParent, uint32_t aChromeFlags,
 }
 
 void BrowserChild::DestroyWindow() {
-  if (mBrowsingContext) {
-    mBrowsingContext = nullptr;
-  }
+  mBrowsingContext = nullptr;
+
+  // TabGroups contain circular references to their event queues that they break
+  // when the last window leaves. If we never attached a window to our TabGroup,
+  // though, it will never see a window leave, and will therefore never break
+  // its circular references. If it hasn't had a window attached by now, it
+  // never will, so have it destroy itself now if it's empty.
+  mTabGroup->MaybeDestroy();
 
   if (mStatusFilter) {
     if (nsCOMPtr<nsIWebProgress> webProgress =
@@ -3787,9 +3800,15 @@ bool BrowserChild::UpdateSessionStore(uint32_t aFlushId, bool aIsFinal) {
     store->GetScrollPositions(positions, positionDescendants);
   }
 
-  Unused << SendSessionStoreUpdate(docShellCaps, privatedMode, positions,
-                                   positionDescendants, aFlushId, aIsFinal,
-                                   mSessionStoreListener->GetEpoch());
+  nsTArray<InputFormData> inputs;
+  nsTArray<CollectedInputDataValue> idVals, xPathVals;
+  if (store->IsFormDataChanged()) {
+    inputs = store->GetInputs(idVals, xPathVals);
+  }
+
+  Unused << SendSessionStoreUpdate(
+      docShellCaps, privatedMode, positions, positionDescendants, inputs,
+      idVals, xPathVals, aFlushId, aIsFinal, mSessionStoreListener->GetEpoch());
   return true;
 }
 

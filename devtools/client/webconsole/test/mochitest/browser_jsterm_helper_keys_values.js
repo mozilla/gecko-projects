@@ -7,30 +7,29 @@ const TEST_URI =
   "data:text/html,Test <code>keys()</code> & <code>values()</code> jsterm helper";
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
-  const jsterm = hud.jsterm;
 
-  let onMessage = waitForMessage(hud, `Array [ "a", "b" ]`);
-  jsterm.execute("keys({a: 2, b:1})");
-  let message = await onMessage;
+  let message = await executeAndWaitForMessage(
+    hud,
+    "keys({a: 2, b:1})",
+    `Array [ "a", "b" ]`,
+    ".result"
+  );
   ok(message, "`keys()` worked");
 
-  onMessage = waitForMessage(hud, "Array [ 2, 1 ]");
-  jsterm.execute("values({a: 2, b:1})");
-  message = await onMessage;
+  message = await executeAndWaitForMessage(
+    hud,
+    "values({a: 2, b:1})",
+    "Array [ 2, 1 ]",
+    ".result"
+  );
   ok(message, "`values()` worked");
 
-  onMessage = waitForMessage(hud, "Array");
-  jsterm.execute("keys(window)");
-  message = await onMessage;
+  message = await executeAndWaitForMessage(
+    hud,
+    "keys(window)",
+    "Array",
+    ".result"
+  );
   ok(message, "`keys(window)` worked");
-}
+});

@@ -103,7 +103,7 @@ class MediaTransportHandlerSTS : public MediaTransportHandler,
   void RemoveTransportsExcept(
       const std::set<std::string>& aTransportIds) override;
 
-  void StartIceChecks(bool aIsControlling, bool aIsOfferer,
+  void StartIceChecks(bool aIsControlling,
                       const std::vector<std::string>& aIceOptions) override;
 
   void AddIceCandidate(const std::string& aTransportId,
@@ -162,6 +162,7 @@ class MediaTransportHandlerSTS : public MediaTransportHandler,
   RefPtr<NrIceCtx> mIceCtx;
   RefPtr<NrIceResolver> mDNSResolver;
   std::map<std::string, Transport> mTransports;
+  bool mProxyOnlyIfBehindProxy = false;
   bool mProxyOnly = false;
 
   // mDNS Support
@@ -425,6 +426,8 @@ nsresult MediaTransportHandlerSTS::CreateIceCtx(
                                               __func__);
         }
 
+        mProxyOnlyIfBehindProxy = Preferences::GetBool(
+            "media.peerconnection.ice.proxy_only_if_behind_proxy", false);
         mProxyOnly =
             Preferences::GetBool("media.peerconnection.ice.proxy_only", false);
 
@@ -658,6 +661,10 @@ void MediaTransportHandlerSTS::StartIceGathering(
   mInitPromise->Then(
       mStsThread, __func__,
       [=, self = RefPtr<MediaTransportHandlerSTS>(this)]() {
+        if (mIceCtx->GetProxyConfig() && mProxyOnlyIfBehindProxy) {
+          mProxyOnly = true;
+        }
+
         // Belt and suspenders - in e10s mode, the call below to SetStunAddrs
         // needs to have the proper flags set on ice ctx.  For non-e10s,
         // setting those flags happens in StartGathering.  We could probably
@@ -689,8 +696,7 @@ void MediaTransportHandlerSTS::StartIceGathering(
 }
 
 void MediaTransportHandlerSTS::StartIceChecks(
-    bool aIsControlling, bool aIsOfferer,
-    const std::vector<std::string>& aIceOptions) {
+    bool aIsControlling, const std::vector<std::string>& aIceOptions) {
   mInitPromise->Then(
       mStsThread, __func__,
       [=, self = RefPtr<MediaTransportHandlerSTS>(this)]() {
@@ -709,7 +715,7 @@ void MediaTransportHandlerSTS::StartIceChecks(
           return;
         }
 
-        rv = mIceCtx->StartChecks(aIsOfferer);
+        rv = mIceCtx->StartChecks();
         if (NS_FAILED(rv)) {
           CSFLogError(LOGTAG, "%s: couldn't start checks", __FUNCTION__);
           return;

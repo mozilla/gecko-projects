@@ -7635,9 +7635,11 @@ bool nsCSSFrameConstructor::ContentRemoved(nsIContent* aChild,
     }
 
 #ifdef ACCESSIBILITY
-    if (nsAccessibilityService* accService =
-            PresShell::GetAccessibilityService()) {
-      accService->ContentRemoved(mPresShell, aChild);
+    if (aFlags != REMOVE_FOR_RECONSTRUCTION) {
+      if (nsAccessibilityService* accService =
+              PresShell::GetAccessibilityService()) {
+        accService->ContentRemoved(mPresShell, aChild);
+      }
     }
 #endif
 
@@ -8212,27 +8214,9 @@ nsIFrame* nsCSSFrameConstructor::CreateContinuingFrame(
     newFrame->SetPrevContinuation(aFrame);
   }
 
-  // A continuation of generated content is also generated content
-  if (aFrame->GetStateBits() & NS_FRAME_GENERATED_CONTENT) {
-    newFrame->AddStateBits(NS_FRAME_GENERATED_CONTENT);
-  }
-
-  // A continuation of nsIAnonymousContentCreator content is also
-  // nsIAnonymousContentCreator created content
-  if (aFrame->GetStateBits() & NS_FRAME_ANONYMOUSCONTENTCREATOR_CONTENT) {
-    newFrame->AddStateBits(NS_FRAME_ANONYMOUSCONTENTCREATOR_CONTENT);
-  }
-
-  // A continuation of an out-of-flow is also an out-of-flow
-  if (aFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW) {
-    newFrame->AddStateBits(NS_FRAME_OUT_OF_FLOW);
-  }
-
-  // A continuation of a frame which has a multi-column ancestor also has
-  // multi-column ancestor.
-  if (aFrame->HasAnyStateBits(NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR)) {
-    newFrame->AddStateBits(NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR);
-  }
+  // If a continuing frame needs to carry frame state bits from its previous
+  // continuation or parent, set them in nsFrame::Init(), or in any derived
+  // frame class's Init() if the bits are belong to specific group.
 
   if (nextInFlow) {
     nextInFlow->SetPrevInFlow(newFrame);
@@ -10803,6 +10787,9 @@ void nsCSSFrameConstructor::FinishBuildingColumns(
 
   nsFrameList finalList;
   while (aColumnContentSiblings.NotEmpty()) {
+    // Tag every ColumnSet except the last one.
+    prevColumnSet->SetProperty(nsIFrame::HasColumnSpanSiblings(), true);
+
     nsIFrame* f = aColumnContentSiblings.RemoveFirstChild();
     if (f->IsColumnSpan()) {
       // Do nothing for column-span wrappers. Just move it to the final

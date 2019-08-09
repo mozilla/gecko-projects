@@ -285,9 +285,6 @@ namespace TuningDefaults {
 /* JSGC_ALLOCATION_THRESHOLD */
 static const size_t GCZoneAllocThresholdBase = 30 * 1024 * 1024;
 
-/* JSGC_MAX_MALLOC_BYTES */
-static const size_t MaxMallocBytes = 128 * 1024 * 1024;
-
 /*
  * JSGC_MIN_NURSERY_BYTES
  *
@@ -302,15 +299,6 @@ static const float AllocThresholdFactor = 0.9f;
 
 /* JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT */
 static const float AllocThresholdFactorAvoidInterrupt = 0.9f;
-
-/* no parameter */
-static const float MallocThresholdGrowFactor = 1.5f;
-
-/* no parameter */
-static const float MallocThresholdShrinkFactor = 0.9f;
-
-/* no parameter */
-static const size_t MallocThresholdLimit = 1024 * 1024 * 1024;
 
 /* JSGC_ZONE_ALLOC_DELAY_KB */
 static const size_t ZoneAllocDelayBytes = 1024 * 1024;
@@ -1345,7 +1333,6 @@ bool GCRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes) {
     MOZ_ALWAYS_TRUE(tunables.setParameter(JSGC_MAX_BYTES, maxbytes, lock));
     MOZ_ALWAYS_TRUE(
         tunables.setParameter(JSGC_MAX_NURSERY_BYTES, maxNurseryBytes, lock));
-    setMaxMallocBytes(TuningDefaults::MaxMallocBytes, lock);
 
     const char* size = getenv("JSGC_MARK_STACK_LIMIT");
     if (size) {
@@ -1442,9 +1429,6 @@ bool GCRuntime::setParameter(JSGCParamKey key, uint32_t value,
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
 
   switch (key) {
-    case JSGC_MAX_MALLOC_BYTES:
-      setMaxMallocBytes(value, lock);
-      break;
     case JSGC_SLICE_TIME_BUDGET_MS:
       defaultTimeBudgetMS_ = value ? value : SliceBudget::UnlimitedTimeBudget;
       break;
@@ -1487,18 +1471,14 @@ bool GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value,
       gcMaxBytes_ = value;
       break;
     case JSGC_MIN_NURSERY_BYTES:
-      if ((value > gcMaxNurseryBytes_ && gcMaxNurseryBytes_ != 0) ||
-          value < ArenaSize || value >= MaxNurseryBytes) {
-        // We make an exception for gcMaxNurseryBytes_ == 0 since that special
-        // value is used to disable generational GC.
+      if (value > gcMaxNurseryBytes_ || value < ArenaSize ||
+          value >= MaxNurseryBytes) {
         return false;
       }
       gcMinNurseryBytes_ = value;
       break;
     case JSGC_MAX_NURSERY_BYTES:
-      if (((value < gcMinNurseryBytes_) && (value != 0)) ||
-          value >= MaxNurseryBytes) {
-        // Note that we make an exception for value == 0 as above.
+      if (value < gcMinNurseryBytes_ || value >= MaxNurseryBytes) {
         return false;
       }
       gcMaxNurseryBytes_ = value;
@@ -1627,10 +1607,6 @@ bool GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value,
   return true;
 }
 
-void GCSchedulingTunables::setMaxMallocBytes(size_t value) {
-  maxMallocBytes_ = std::min(value, TuningDefaults::MallocThresholdLimit);
-}
-
 void GCSchedulingTunables::setHighFrequencyLowLimit(size_t newLimit) {
   highFrequencyLowLimitBytes_ = newLimit;
   if (highFrequencyLowLimitBytes_ >= highFrequencyHighLimitBytes_) {
@@ -1688,7 +1664,6 @@ void GCSchedulingTunables::setMaxEmptyChunkCount(uint32_t value) {
 
 GCSchedulingTunables::GCSchedulingTunables()
     : gcMaxBytes_(0),
-      maxMallocBytes_(TuningDefaults::MaxMallocBytes),
       gcMinNurseryBytes_(TuningDefaults::GCMinNurseryBytes),
       gcMaxNurseryBytes_(0),
       gcZoneAllocThresholdBase_(TuningDefaults::GCZoneAllocThresholdBase),
@@ -1722,9 +1697,6 @@ void GCRuntime::resetParameter(JSGCParamKey key, AutoLockGC& lock) {
   MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
 
   switch (key) {
-    case JSGC_MAX_MALLOC_BYTES:
-      setMaxMallocBytes(TuningDefaults::MaxMallocBytes, lock);
-      break;
     case JSGC_SLICE_TIME_BUDGET_MS:
       defaultTimeBudgetMS_ = TuningDefaults::DefaultTimeBudgetMS;
       break;
@@ -1831,8 +1803,6 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
   switch (key) {
     case JSGC_MAX_BYTES:
       return uint32_t(tunables.gcMaxBytes());
-    case JSGC_MAX_MALLOC_BYTES:
-      return mallocCounter.maxBytes();
     case JSGC_MIN_NURSERY_BYTES:
       MOZ_ASSERT(tunables.gcMinNurseryBytes() < UINT32_MAX);
       return uint32_t(tunables.gcMinNurseryBytes());
@@ -2091,14 +2061,6 @@ extern JS_FRIEND_API void js::RemoveRawValueRoot(JSContext* cx, Value* vp) {
   cx->runtime()->gc.removeRoot(vp);
 }
 
-void GCRuntime::setMaxMallocBytes(size_t value, const AutoLockGC& lock) {
-  tunables.setMaxMallocBytes(value);
-  mallocCounter.setMax(value, lock);
-  for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
-    zone->setGCMaxMallocBytes(value, lock);
-  }
-}
-
 float ZoneThreshold::eagerAllocTrigger(bool highFrequencyGC) const {
   float eagerTriggerFactor = highFrequencyGC
                                  ? HighFrequencyEagerAllocTriggerFactor
@@ -2194,47 +2156,6 @@ void ZoneMallocThreshold::updateAfterGC(size_t lastBytes, size_t baseBytes,
                                         const AutoLockGC& lock) {
   gcTriggerBytes_ =
       computeZoneTriggerBytes(growthFactor, lastBytes, baseBytes, lock);
-}
-
-MemoryCounter::MemoryCounter()
-    : bytes_(0), maxBytes_(0), triggered_(NoTrigger) {}
-
-void MemoryCounter::updateOnGCStart() {
-  // Record the current byte count at the start of GC.
-  bytesAtStartOfGC_ = bytes_;
-}
-
-void MemoryCounter::updateOnGCEnd(const GCSchedulingTunables& tunables,
-                                  const AutoLockGC& lock) {
-  // Update the trigger threshold at the end of GC and adjust the current
-  // byte count to reflect bytes allocated since the start of GC.
-  MOZ_ASSERT(bytes_ >= bytesAtStartOfGC_);
-  if (shouldTriggerGC(tunables)) {
-    maxBytes_ =
-        std::min(TuningDefaults::MallocThresholdLimit,
-                 size_t(maxBytes_ * TuningDefaults::MallocThresholdGrowFactor));
-  } else {
-    maxBytes_ = std::max(
-        tunables.maxMallocBytes(),
-        size_t(maxBytes_ * TuningDefaults::MallocThresholdShrinkFactor));
-  }
-  bytes_ -= bytesAtStartOfGC_;
-  triggered_ = NoTrigger;
-}
-
-void MemoryCounter::setMax(size_t newMax, const AutoLockGC& lock) {
-  maxBytes_ = newMax;
-}
-
-void MemoryCounter::adopt(MemoryCounter& other) {
-  update(other.bytes());
-  other.bytes_ = 0;
-  other.triggered_ = NoTrigger;
-}
-
-void MemoryCounter::recordTrigger(TriggerKind trigger) {
-  MOZ_ASSERT(trigger > triggered_);
-  triggered_ = trigger;
 }
 
 /* Compacting GC */
@@ -3448,6 +3369,7 @@ static bool RecordReplayCheckCanGC(JS::GCReason reason) {
     case JS::GCReason::ALLOC_TRIGGER:
     case JS::GCReason::DELAYED_ATOMS_GC:
     case JS::GCReason::TOO_MUCH_WASM_MEMORY:
+    case JS::GCReason::TOO_MUCH_JIT_CODE:
       return false;
 
     default:
@@ -3537,37 +3459,54 @@ void GCRuntime::maybeAllocTriggerZoneGC(Zone* zone, size_t nbytes) {
   }
 }
 
-void js::gc::MaybeMallocTriggerZoneGC(JSRuntime* rt, ZoneAllocator* zoneAlloc) {
-  rt->gc.maybeMallocTriggerZoneGC(Zone::from(zoneAlloc));
+void js::gc::MaybeMallocTriggerZoneGC(JSRuntime* rt, ZoneAllocator* zoneAlloc,
+                                      const HeapSize& heap,
+                                      const ZoneThreshold& threshold,
+                                      JS::GCReason reason) {
+  rt->gc.maybeMallocTriggerZoneGC(Zone::from(zoneAlloc), heap, threshold,
+                                  reason);
 }
 
 void GCRuntime::maybeMallocTriggerZoneGC(Zone* zone) {
+  if (maybeMallocTriggerZoneGC(zone, zone->gcMallocBytes,
+                               zone->gcMallocThreshold,
+                               JS::GCReason::TOO_MUCH_MALLOC)) {
+    return;
+  }
+
+  maybeMallocTriggerZoneGC(zone, zone->gcJitBytes, zone->gcJitThreshold,
+                           JS::GCReason::TOO_MUCH_JIT_CODE);
+}
+
+bool GCRuntime::maybeMallocTriggerZoneGC(Zone* zone, const HeapSize& heap,
+                                         const ZoneThreshold& threshold,
+                                         JS::GCReason reason) {
   if (!CurrentThreadCanAccessRuntime(rt)) {
     // Zones in use by a helper thread can't be collected.
     MOZ_ASSERT(zone->usedByHelperThread() || zone->isAtomsZone());
-    return;
+    return false;
   }
 
   MOZ_ASSERT(!JS::RuntimeHeapIsCollecting());
 
-  size_t usedBytes = zone->gcMallocBytes.gcBytes();
-  size_t thresholdBytes = zone->gcMallocThreshold.gcTriggerBytes();
+  size_t usedBytes = heap.gcBytes();
+  size_t thresholdBytes = threshold.gcTriggerBytes();
   if (usedBytes >= thresholdBytes) {
     // The threshold has been surpassed, immediately trigger a GC, which
     // will be done non-incrementally.
-    triggerZoneGC(zone, JS::GCReason::TOO_MUCH_MALLOC, usedBytes,
-                  thresholdBytes);
-    return;
+    triggerZoneGC(zone, reason, usedBytes, thresholdBytes);
+    return true;
   }
 
   float zoneGCThresholdFactor = tunables.allocThresholdFactor();
   size_t igcThresholdBytes = thresholdBytes * zoneGCThresholdFactor;
   if (usedBytes >= igcThresholdBytes) {
     // Start or continue an in progress incremental GC.
-    triggerZoneGC(zone, JS::GCReason::INCREMENTAL_MALLOC_TRIGGER, usedBytes,
-                  igcThresholdBytes);
-    return;
+    triggerZoneGC(zone, reason, usedBytes, igcThresholdBytes);
+    return true;
   }
+
+  return false;
 }
 
 bool GCRuntime::triggerZoneGC(Zone* zone, JS::GCReason reason, size_t used,
@@ -4276,7 +4215,11 @@ class CompartmentCheckTracer final : public JS::CallbackTracer {
   Compartment* compartment;
 };
 
-static bool InCrossCompartmentMap(JSObject* src, JS::GCCellPtr dst) {
+static bool InCrossCompartmentMap(JSRuntime* rt, JSObject* src,
+                                  JS::GCCellPtr dst) {
+  // Cross compartment edges are either in the cross compartment map or in a
+  // debugger weakmap.
+
   Compartment* srccomp = src->compartment();
 
   if (dst.is<JSObject>()) {
@@ -4288,17 +4231,8 @@ static bool InCrossCompartmentMap(JSObject* src, JS::GCCellPtr dst) {
     }
   }
 
-  /*
-   * If the cross-compartment edge is caused by the debugger, then we don't
-   * know the right hashtable key, so we have to iterate.
-   */
-  for (Compartment::WrapperEnum e(srccomp); !e.empty(); e.popFront()) {
-    auto& key = e.front().mutableKey();
-    const auto& value = e.front().value();
-    if (key.applyToWrapped([dst](auto tp) { return *tp == dst.asCell(); }) &&
-        ToMarkable(value.unbarrieredGet()) == src) {
-      return true;
-    }
+  if (DebugAPI::edgeIsInDebuggerWeakmap(rt, src, dst)) {
+    return true;
   }
 
   return false;
@@ -4308,9 +4242,10 @@ bool CompartmentCheckTracer::onChild(const JS::GCCellPtr& thing) {
   Compartment* comp =
       MapGCThingTyped(thing, [](auto t) { return t->maybeCompartment(); });
   if (comp && compartment) {
-    MOZ_ASSERT(comp == compartment ||
-               (srcKind == JS::TraceKind::Object &&
-                InCrossCompartmentMap(static_cast<JSObject*>(src), thing)));
+    MOZ_ASSERT(
+        comp == compartment ||
+        (srcKind == JS::TraceKind::Object &&
+         InCrossCompartmentMap(runtime(), static_cast<JSObject*>(src), thing)));
   } else {
     TenuredCell* tenured = TenuredCell::fromPointer(thing.asCell());
     Zone* thingZone = tenured->zoneFromAnyThread();
@@ -4706,11 +4641,6 @@ void GCRuntime::updateMemoryCountersOnGCStart() {
   // Update memory counters for the zones we are collecting.
   for (GCZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
     zone->updateMemoryCountersOnGCStart();
-  }
-
-  // Update the runtime malloc counter only if we are doing a full GC.
-  if (isFull) {
-    mallocCounter.updateOnGCStart();
   }
 }
 
@@ -5120,23 +5050,10 @@ bool Compartment::findSweepGroupEdges() {
       continue;
     }
 
-    // Ensure that debuggers and their debuggees are finalized in the same group
-    // by adding edges in both directions if we find a debugger wrapper.
-    // (Additional edges are added by DebugAPI::findSweepGroupEdges.)
-    if (key.isDebuggerKey()) {
-      if (!source->addSweepGroupEdgeTo(target) ||
-          !target->addSweepGroupEdgeTo(source)) {
-        return false;
-      }
-      continue;
-    }
-
-    // Otherwise add an edge to the wrapped object's zone to ensure that the
-    // wrapper zone is not still being marked when we start sweeping the wrapped
-    // zone.
-
-    // As an optimization, if the wrapped object is already marked black there
-    // is no danger of later marking and we can skip this.
+    // Add an edge to the wrapped object's zone to ensure that the wrapper zone
+    // is not still being marked when we start sweeping the wrapped zone. As an
+    // optimization, if the wrapped object is already marked black there is no
+    // danger of later marking and we can skip this.
     if (key.is<JSObject*>() &&
         key.as<JSObject*>()->asTenured().isMarkedBlack()) {
       continue;
@@ -6065,7 +5982,6 @@ IncrementalProgress GCRuntime::endSweepingSweepGroup(FreeOp* fop,
     AutoLockGC lock(rt);
     zone->changeGCState(Zone::Sweep, Zone::Finished);
     zone->updateGCThresholds(*this, invocationKind, lock);
-    zone->updateMemoryCountersOnGCEnd(lock);
     zone->arenas.unmarkPreMarkedFreeCells();
   }
 
@@ -6824,12 +6740,6 @@ void GCRuntime::endSweepPhase(bool destroyingRuntime) {
 
   MOZ_ASSERT_IF(destroyingRuntime, !sweepOnBackgroundThread);
 
-  // Update the runtime malloc counter only if we were doing a full GC.
-  if (isFull) {
-    AutoLockGC lock(rt);
-    mallocCounter.updateOnGCEnd(tunables, lock);
-  }
-
   {
     gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::DESTROY);
 
@@ -7500,14 +7410,6 @@ GCRuntime::IncrementalResult GCRuntime::budgetIncrementalGC(
     return resetIncrementalGC(unsafeReason);
   }
 
-  if (mallocCounter.shouldTriggerGC(tunables) == NonIncrementalTrigger) {
-    budget.makeUnlimited();
-    stats().nonincremental(AbortReason::MallocBytesTrigger);
-    if (isIncrementalGCInProgress() && state() > State::Sweep) {
-      return resetIncrementalGC(AbortReason::MallocBytesTrigger);
-    }
-  }
-
   AbortReason resetReason = AbortReason::None;
   for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
     if (!zone->canCollect()) {
@@ -7533,12 +7435,12 @@ GCRuntime::IncrementalResult GCRuntime::budgetIncrementalGC(
       }
     }
 
-    if (zone->shouldTriggerGCForTooMuchMalloc() == NonIncrementalTrigger) {
-      CheckZoneIsScheduled(zone, reason, "malloc bytes");
+    if (zone->gcJitBytes.gcBytes() >= zone->gcJitThreshold.gcTriggerBytes()) {
+      CheckZoneIsScheduled(zone, reason, "JIT code bytes");
       budget.makeUnlimited();
-      stats().nonincremental(AbortReason::MallocBytesTrigger);
+      stats().nonincremental(AbortReason::JitCodeBytesTrigger);
       if (zone->wasGCStarted() && zone->gcState() > Zone::Sweep) {
-        resetReason = AbortReason::MallocBytesTrigger;
+        resetReason = AbortReason::JitCodeBytesTrigger;
       }
     }
 
@@ -7578,16 +7480,10 @@ static void ScheduleZones(GCRuntime* gc) {
     // This is a heuristic to reduce the total number of collections.
     bool inHighFrequencyMode = gc->schedulingState.inHighFrequencyGCMode();
     if (zone->zoneSize.gcBytes() >=
-        zone->threshold.eagerAllocTrigger(inHighFrequencyMode)) {
-      zone->scheduleGC();
-    }
-    if (zone->gcMallocBytes.gcBytes() >=
-        zone->gcMallocThreshold.eagerAllocTrigger(inHighFrequencyMode)) {
-      zone->scheduleGC();
-    }
-
-    // This ensures we collect zones that have reached the malloc limit.
-    if (zone->shouldTriggerGCForTooMuchMalloc()) {
+            zone->threshold.eagerAllocTrigger(inHighFrequencyMode) ||
+        zone->gcMallocBytes.gcBytes() >=
+            zone->gcMallocThreshold.eagerAllocTrigger(inHighFrequencyMode) ||
+        zone->gcJitBytes.gcBytes() >= zone->gcJitThreshold.gcTriggerBytes()) {
       zone->scheduleGC();
     }
   }
@@ -7752,6 +7648,7 @@ static bool IsDeterministicGCReason(JS::GCReason reason) {
     case JS::GCReason::LAST_DITCH:
     case JS::GCReason::TOO_MUCH_MALLOC:
     case JS::GCReason::TOO_MUCH_WASM_MEMORY:
+    case JS::GCReason::TOO_MUCH_JIT_CODE:
     case JS::GCReason::ALLOC_TRIGGER:
     case JS::GCReason::DEBUG_GC:
     case JS::GCReason::CC_FORCED:
@@ -7921,15 +7818,6 @@ void GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget,
       gckind = Some(invocationKind);
     }
   } while (repeat);
-
-#ifdef DEBUG
-  if (!isIncrementalGCInProgress()) {
-    for (ZonesIter zone(rt, WithAtoms); zone.done(); zone.next()) {
-      MOZ_ASSERT(!zone->gcMallocCounter.triggered());
-      MOZ_ASSERT(!zone->jitCodeCounter.triggered());
-    }
-  }
-#endif
 
   if (reason == JS::GCReason::COMPARTMENT_REVIVED) {
     maybeDoCycleCollection();
@@ -8227,8 +8115,9 @@ Realm* js::NewRealm(JSContext* cx, JSPrincipals* principals,
   }
 
   if (!zone) {
-    zoneHolder = cx->make_unique<Zone>(cx->runtime());
+    zoneHolder = MakeUnique<Zone>(cx->runtime());
     if (!zoneHolder) {
+      ReportOutOfMemory(cx);
       return nullptr;
     }
 
@@ -9012,18 +8901,6 @@ static bool GCMaxBytesGetter(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-static bool MallocBytesGetter(JSContext* cx, unsigned argc, Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-  args.rval().setNumber(double(cx->runtime()->gc.getMallocBytes()));
-  return true;
-}
-
-static bool MaxMallocGetter(JSContext* cx, unsigned argc, Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-  args.rval().setNumber(double(cx->runtime()->gc.maxMallocBytesAllocated()));
-  return true;
-}
-
 static bool GCHighFreqGetter(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   args.rval().setBoolean(
@@ -9072,13 +8949,13 @@ static bool ZoneGCAllocTriggerGetter(JSContext* cx, unsigned argc, Value* vp) {
 
 static bool ZoneMallocBytesGetter(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  args.rval().setNumber(double(cx->zone()->GCMallocBytes()));
+  args.rval().setNumber(double(cx->zone()->gcMallocBytes.gcBytes()));
   return true;
 }
 
 static bool ZoneMaxMallocGetter(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
-  args.rval().setNumber(double(cx->zone()->GCMaxMallocBytes()));
+  args.rval().setNumber(double(cx->zone()->gcMallocThreshold.gcTriggerBytes()));
   return true;
 }
 
@@ -9116,8 +8993,6 @@ JSObject* NewMemoryInfoObject(JSContext* cx) {
     JSNative getter;
   } getters[] = {{"gcBytes", GCBytesGetter},
                  {"gcMaxBytes", GCMaxBytesGetter},
-                 {"mallocBytesRemaining", MallocBytesGetter},
-                 {"maxMalloc", MaxMallocGetter},
                  {"gcIsHighFrequencyMode", GCHighFreqGetter},
                  {"gcNumber", GCNumberGetter},
                  {"majorGCCount", MajorGCCountGetter},

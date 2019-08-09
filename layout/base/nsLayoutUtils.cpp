@@ -9676,18 +9676,50 @@ CSSPoint nsLayoutUtils::GetCumulativeApzCallbackTransform(nsIFrame* aFrame) {
     return delta;
   }
   nsIFrame* frame = aFrame;
-  nsCOMPtr<nsIContent> content = frame->GetContent();
   nsCOMPtr<nsIContent> lastContent;
+  bool seenRcdRsf = false;
+
+  // Helper lambda to apply the callback transform for a single frame.
+  auto applyCallbackTransformForFrame = [&](nsIFrame* frame) {
+    if (frame) {
+      nsCOMPtr<nsIContent> content = frame->GetContent();
+      if (content && (content != lastContent)) {
+        void* property = content->GetProperty(nsGkAtoms::apzCallbackTransform);
+        if (property) {
+          delta += *static_cast<CSSPoint*>(property);
+        }
+      }
+      lastContent = content;
+    }
+  };
+
   while (frame) {
-    if (content && (content != lastContent)) {
-      void* property = content->GetProperty(nsGkAtoms::apzCallbackTransform);
-      if (property) {
-        delta += *static_cast<CSSPoint*>(property);
+    // Apply the callback transform for the current frame.
+    applyCallbackTransformForFrame(frame);
+
+    // Keep track of whether we've encountered the RCD-RSF.
+    nsPresContext* pc = frame->PresContext();
+    if (nsIScrollableFrame* scrollFrame = do_QueryFrame(frame)) {
+      if (scrollFrame->IsRootScrollFrameOfDocument() &&
+          pc->IsRootContentDocument()) {
+        seenRcdRsf = true;
       }
     }
+
+    // If we reach the RCD's viewport frame, but have not encountered
+    // the RCD-RSF, we were inside fixed content in the RCD.
+    // We still want to apply the RCD-RSF's callback transform because
+    // it contains the offset between the visual and layout viewports
+    // which applies to fixed content as well.
+    ViewportFrame* viewportFrame = do_QueryFrame(frame);
+    if (viewportFrame) {
+      if (pc->IsRootContentDocument() && !seenRcdRsf) {
+        applyCallbackTransformForFrame(pc->PresShell()->GetRootScrollFrame());
+      }
+    }
+
+    // Proceed to the parent frame.
     frame = GetCrossDocParentFrame(frame);
-    lastContent = content;
-    content = frame ? frame->GetContent() : nullptr;
   }
   return delta;
 }
@@ -10154,12 +10186,29 @@ Maybe<MotionPathData> nsLayoutUtils::ResolveMotionPath(const nsIFrame* aFrame) {
       (rotate.auto_ ? directionAngle : 0.0) + rotate.angle.ToRadians());
 
   // Compute the offset for motion path translate.
-  // Per the spec, the default offset-anchor is `auto`, and in this case,
-  // we should use transform-origin as the anchor point.
+  // Bug 1559232: the translate parameters will be adjusted more after we
+  // support offset-position.
+  // FIXME: It's possible to refactor the calculation of transform-origin, so we
+  // could calculate from the caller, and reuse the value in nsDisplayList.cpp.
   TransformReferenceBox refBox(aFrame);
-  auto& transformOrigin = display->mTransformOrigin;
-  CSSPoint anchorPoint = nsStyleTransformMatrix::Convert2DPosition(
+  const auto& transformOrigin = display->mTransformOrigin;
+  const CSSPoint origin = nsStyleTransformMatrix::Convert2DPosition(
       transformOrigin.horizontal, transformOrigin.vertical, refBox);
+
+  // Per the spec, the default offset-anchor is `auto`, so initialize the anchor
+  // point to transform-origin.
+  CSSPoint anchorPoint(origin);
+  Point shift;
+  if (!display->mOffsetAnchor.IsAuto()) {
+    const auto& pos = display->mOffsetAnchor.AsPosition();
+    anchorPoint = nsStyleTransformMatrix::Convert2DPosition(
+        pos.horizontal, pos.vertical, refBox);
+    // We need this value to shift the origin from transform-origin to
+    // offset-anchor (and vice versa).
+    // See nsStyleTransformMatrix::ReadTransform for more details.
+    shift = (anchorPoint - origin).ToUnknownPoint();
+  }
+
   // SVG frames (unlike other frames) have a reference box that can be (and
   // typically is) offset from the TopLeft() of the frame.
   // In motion path, we have to make sure the object is aligned with offset-path
@@ -10172,7 +10221,6 @@ Maybe<MotionPathData> nsLayoutUtils::ResolveMotionPath(const nsIFrame* aFrame) {
     anchorPoint.y += CSSPixel::FromAppUnits(aFrame->GetPosition().y);
   }
 
-  // Bug 1186329: the translate parameters will be adjusted more after we
-  // implement offset-position and offset-anchor.
-  return Some(MotionPathData{point - anchorPoint.ToUnknownPoint(), angle});
+  return Some(
+      MotionPathData{point - anchorPoint.ToUnknownPoint(), angle, shift});
 }

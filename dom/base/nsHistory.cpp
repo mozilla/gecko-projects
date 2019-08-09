@@ -11,11 +11,9 @@
 #include "nsPIDOMWindow.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
-#include "nsPresContext.h"
 #include "nsIDocShell.h"
 #include "nsIWebNavigation.h"
 #include "nsIURI.h"
-#include "nsIInterfaceRequestorUtils.h"
 #include "nsReadableUtils.h"
 #include "nsContentUtils.h"
 #include "nsISHistory.h"
@@ -142,57 +140,20 @@ void nsHistory::GetState(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
 void nsHistory::Go(int32_t aDelta, ErrorResult& aRv) {
   nsCOMPtr<nsPIDOMWindowInner> win(do_QueryReferent(mInnerWindow));
   if (!win || !win->HasActiveDocument()) {
-    aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
-
-    return;
+    return aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
   }
 
   if (!aDelta) {
-    nsCOMPtr<nsPIDOMWindowOuter> window;
-    if (nsIDocShell* docShell = GetDocShell()) {
-      window = docShell->GetWindow();
-    }
-
-    if (window && window->IsHandlingResizeEvent()) {
-      // history.go(0) (aka location.reload()) was called on a window
-      // that is handling a resize event. Sites do this since Netscape
-      // 4.x needed it, but we don't, and it's a horrible experience
-      // for nothing.  In stead of reloading the page, just clear
-      // style data and reflow the page since some sites may use this
-      // trick to work around gecko reflow bugs, and this should have
-      // the same effect.
-
-      nsCOMPtr<Document> doc = window->GetExtantDoc();
-
-      nsPresContext* pcx;
-      if (doc && (pcx = doc->GetPresContext())) {
-        pcx->RebuildAllStyleData(NS_STYLE_HINT_REFLOW,
-                                 RestyleHint::RestyleSubtree());
-      }
-
-      return;
-    }
-
     // https://html.spec.whatwg.org/multipage/history.html#the-history-interface
     // "When the go(delta) method is invoked, if delta is zero, the user agent
     // must act as if the location.reload() method was called instead."
-    RefPtr<Location> location = window ? window->GetLocation() : nullptr;
-
-    if (location) {
-      nsresult rv = location->Reload(false);
-
-      if (NS_FAILED(rv)) {
-        aRv.Throw(NS_ERROR_FAILURE);
-      }
-
-      return;
-    }
+    RefPtr<Location> location = win->Location();
+    return location->Reload(false, aRv);
   }
 
   RefPtr<ChildSHistory> session_history = GetSessionHistory();
   if (!session_history) {
     aRv.Throw(NS_ERROR_FAILURE);
-
     return;
   }
 

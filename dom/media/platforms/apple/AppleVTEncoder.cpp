@@ -266,6 +266,7 @@ bool AppleVTEncoder::WriteExtraData(MediaRawData* aDst, CMSampleBufferRef aSrc,
     return true;
   }
 
+  aDst->mKeyframe = true;
   CMFormatDescriptionRef desc = CMSampleBufferGetFormatDescription(aSrc);
   if (!desc) {
     VTENC_LOGE("fail to get format description from sample");
@@ -467,7 +468,7 @@ CVPixelBufferRef AppleVTEncoder::CreateCVPixelBuffer(const Image* aSource) {
       strides[2] = yuv->mCbCrStride;
       MOZ_FALLTHROUGH;
     case 2:
-      addresses[1] = yuv->mCrChannel;
+      addresses[1] = yuv->mCbChannel;
       widths[1] = yuv->mCbCrSize.width;
       heights[1] = yuv->mCbCrSize.height;
       strides[1] = yuv->mCbCrStride;

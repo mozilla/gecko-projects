@@ -79,7 +79,6 @@ class App extends Component {
       onFirstMeaningfulPaint: PropTypes.func.isRequired,
       serviceContainer: PropTypes.object.isRequired,
       closeSplitConsole: PropTypes.func.isRequired,
-      jstermCodeMirror: PropTypes.bool,
       autocomplete: PropTypes.bool,
       currentReverseSearchEntry: PropTypes.string,
       reverseSearchInputVisible: PropTypes.bool,
@@ -275,10 +274,10 @@ class App extends Component {
     const {
       webConsoleUI,
       serviceContainer,
-      jstermCodeMirror,
       autocomplete,
       editorMode,
       editorWidth,
+      editorFeatureEnabled,
     } = this.props;
 
     return JSTerm({
@@ -286,10 +285,10 @@ class App extends Component {
       webConsoleUI,
       serviceContainer,
       onPaste: this.onPaste,
-      codeMirrorEnabled: jstermCodeMirror,
       autocomplete,
-      editorMode,
+      editorMode: editorMode && editorFeatureEnabled,
       editorWidth,
+      editorFeatureEnabled,
     });
   }
 
@@ -300,7 +299,6 @@ class App extends Component {
       key: "reverse-search-input",
       setInputValue: serviceContainer.setInputValue,
       focusInput: serviceContainer.focusInput,
-      evaluateInput: serviceContainer.evaluateInput,
       initialValue: reverseSearchInitialValue,
     });
   }
@@ -315,38 +313,34 @@ class App extends Component {
   }
 
   renderNotificationBox() {
-    const { notifications, editorMode } = this.props;
+    const { notifications, editorMode, editorFeatureEnabled } = this.props;
 
     return NotificationBox({
       id: "webconsole-notificationbox",
       key: "notification-box",
-      displayBorderTop: !editorMode,
-      displayBorderBottom: editorMode,
+      displayBorderTop: !(editorMode && editorFeatureEnabled),
+      displayBorderBottom: editorMode && editorFeatureEnabled,
       wrapping: true,
       notifications,
     });
   }
 
   renderConfirmDialog() {
-    const { webConsoleUI, serviceContainer, jstermCodeMirror } = this.props;
+    const { webConsoleUI, serviceContainer } = this.props;
 
     return ConfirmDialog({
       webConsoleUI,
       serviceContainer,
-      codeMirrorEnabled: jstermCodeMirror,
       key: "confirm-dialog",
     });
   }
 
   renderRootElement(children) {
-    const { jstermCodeMirror, editorMode } = this.props;
+    const { editorMode, editorFeatureEnabled } = this.props;
 
     const classNames = ["webconsole-app"];
-    if (editorMode) {
+    if (editorMode && editorFeatureEnabled) {
       classNames.push("jsterm-editor");
-    }
-    if (jstermCodeMirror) {
-      classNames.push("jsterm-cm");
     }
 
     return div(
@@ -363,7 +357,12 @@ class App extends Component {
   }
 
   render() {
-    const { webConsoleUI, editorMode, dispatch } = this.props;
+    const {
+      webConsoleUI,
+      editorMode,
+      editorFeatureEnabled,
+      dispatch,
+    } = this.props;
 
     const filterBar = this.renderFilterBar();
     const consoleOutput = this.renderConsoleOutput();
@@ -375,7 +374,7 @@ class App extends Component {
 
     return this.renderRootElement([
       filterBar,
-      editorMode
+      editorFeatureEnabled && editorMode
         ? EditorToolbar({
             dispatch,
             editorMode,
@@ -389,7 +388,7 @@ class App extends Component {
         jsterm
       ),
       GridElementWidthResizer({
-        enabled: editorMode,
+        enabled: editorFeatureEnabled && editorMode,
         position: "end",
         className: "editor-resizer",
         getControlledElementNode: () => webConsoleUI.jsterm.node,

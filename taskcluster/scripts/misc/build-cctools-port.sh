@@ -9,7 +9,6 @@ set -x -e -v
 # This script is for building cctools (Apple's binutils) for Linux using
 # cctools-port (https://github.com/tpoechtrager/cctools-port).
 WORKSPACE=$HOME/workspace
-UPLOAD_DIR=$HOME/artifacts
 
 # Set some crosstools-port and libtapi directories
 CROSSTOOLS_SOURCE_DIR=$MOZ_FETCHES_DIR/cctools-port
@@ -17,16 +16,14 @@ CROSSTOOLS_CCTOOLS_DIR=$CROSSTOOLS_SOURCE_DIR/cctools
 CROSSTOOLS_BUILD_DIR=$WORKSPACE/cctools
 LIBTAPI_SOURCE_DIR=$MOZ_FETCHES_DIR/apple-libtapi
 LIBTAPI_BUILD_DIR=$WORKSPACE/libtapi-build
-CLANG_DIR=$WORKSPACE/build/src/clang
+CLANG_DIR=$MOZ_FETCHES_DIR/clang
 
 # Create our directories
 mkdir -p $CROSSTOOLS_BUILD_DIR $LIBTAPI_BUILD_DIR
 
-# Fetch clang from tooltool
-cd $WORKSPACE/build/src
-. taskcluster/scripts/misc/tooltool-download.sh
+cd $GECKO_PATH
 
-export PATH="$WORKSPACE/build/src/binutils/bin:$PATH"
+export PATH="$MOZ_FETCHES_DIR/binutils/bin:$PATH"
 
 # Common setup for libtapi and cctools
 export CC=$CLANG_DIR/bin/clang

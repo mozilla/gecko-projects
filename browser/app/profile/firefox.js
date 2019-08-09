@@ -500,6 +500,10 @@ pref("browser.tabs.remote.enforceRemoteTypeRestrictions", true);
 #endif
 
 #ifdef NIGHTLY_BUILD
+// allow_eval_* is enabled on Firefox Desktop only at this
+// point in time
+pref("security.allow_eval_with_system_principal", false);
+pref("security.allow_eval_in_parent_process", false);
 pref("browser.tabs.remote.useHTTPResponseProcessSelection", true);
 #else
 // Disabled outside of nightly due to bug 1554217
@@ -984,7 +988,6 @@ pref("app.productInfo.baseURL", "https://www.mozilla.org/firefox/features/");
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
 pref("security.alternate_certificate_error_page", "certerror");
 
-pref("browser.security.newcerterrorpage.mitm.enabled", true);
 pref("security.certerrors.recordEventTelemetry", true);
 pref("security.certerrors.permanentOverride", true);
 pref("security.certerrors.mitm.priming.enabled", true);
@@ -1251,9 +1254,7 @@ pref("services.sync.prefs.sync.privacy.fuzzyfox.clockgrainus", false);
 pref("services.sync.prefs.sync.privacy.sanitize.sanitizeOnShutdown", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.cryptomining.enabled", true);
-pref("services.sync.prefs.sync.privacy.trackingprotection.cryptomining.annotate.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.fingerprinting.enabled", true);
-pref("services.sync.prefs.sync.privacy.trackingprotection.fingerprinting.annotate.enabled", true);
 pref("services.sync.prefs.sync.privacy.trackingprotection.pbmode.enabled", true);
 pref("services.sync.prefs.sync.privacy.resistFingerprinting", true);
 pref("services.sync.prefs.sync.privacy.reduceTimerPrecision", true);
@@ -1320,6 +1321,8 @@ pref("trailhead.firstrun.branches", "join-privacy");
 
 // The pref that controls if the What's New panel is enabled.
 pref("browser.messaging-system.whatsNewPanel.enabled", false);
+// Whether to use Messaging System to add a badge to the FxA toolbar button
+pref("browser.messaging-system.fxatoolbarbadge.enabled", true);
 
 // Enable the DOM fullscreen API.
 pref("full-screen-api.enabled", true);
@@ -1365,6 +1368,9 @@ pref("security.insecure_field_warning.contextual.enabled", true);
 pref("security.insecure_connection_icon.enabled", true);
 // Show degraded UI for http pages in private mode.
 pref("security.insecure_connection_icon.pbmode.enabled", true);
+
+// For secure connections, show gray instead of green lock icon
+pref("security.secure_connection_icon_color_gray", false);
 
 // Show "Not Secure" text for http pages; disabled for now
 pref("security.insecure_connection_text.enabled", false);
@@ -1545,18 +1551,15 @@ pref("browser.ping-centre.production.endpoint", "https://tiles.services.mozilla.
 // Enable GMP support in the addon manager.
 pref("media.gmp-provider.enabled", true);
 
-#ifdef EARLY_BETA_OR_EARLIER
-// Enable blocking access to storage from tracking resources only in nightly
-// and early beta. By default the value is 0: BEHAVIOR_ACCEPT
+// Enable blocking access to storage from tracking resources by default.
 pref("network.cookie.cookieBehavior", 4 /* BEHAVIOR_REJECT_TRACKER */);
+#ifdef EARLY_BETA_OR_EARLIER
 // Enable fingerprinting blocking by default only in nightly and early beta.
 pref("privacy.trackingprotection.fingerprinting.enabled", true);
 #endif
 
 // Enable cryptomining blocking by default for all channels, only on desktop.
 pref("privacy.trackingprotection.cryptomining.enabled", true);
-
-pref("browser.contentblocking.allowlist.storage.enabled", true);
 
 pref("browser.contentblocking.database.enabled", true);
 
@@ -1597,6 +1600,12 @@ pref("browser.contentblocking.fingerprinting.preferences.ui.enabled", true);
 //     "cookieBehavior5": cookie behaviour BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN
 // One value from each section must be included in the browser.contentblocking.features.strict pref.
 pref("browser.contentblocking.features.strict", "tp,tpPrivate,cookieBehavior4,cm,fp");
+
+// Hide the "Change Block List" link for trackers/tracking content in the custom
+// Content Blocking/ETP panel. By default, it will not be visible. There is also
+// an UI migration in place to set this pref to true if a user has a custom block
+// lists enabled.
+pref("browser.contentblocking.customBlockList.preferences.ui.enabled", false);
 
 pref("browser.contentblocking.reportBreakage.url", "https://tracking-protection-issues.herokuapp.com/new");
 
@@ -1740,12 +1749,8 @@ pref("signon.generation.enabled", true);
 pref("signon.schemeUpgrades", true);
 pref("signon.privateBrowsingCapture.enabled", true);
 pref("signon.showAutoCompleteFooter", true);
-#ifdef NIGHTLY_BUILD
 pref("signon.management.page.enabled", true);
 pref("signon.management.overrideURI", "about:logins?filter=%DOMAIN%");
-#else
-pref("signon.management.page.enabled", false);
-#endif
 pref("signon.management.page.breach-alerts.enabled", false);
 #ifdef NIGHTLY_BUILD
 // Bug 1563330 tracks shipping this by default.
@@ -1891,9 +1896,26 @@ pref("browser.toolbars.keyboard_navigation", true);
 pref("identity.fxaccounts.toolbar.enabled", true);
 pref("identity.fxaccounts.toolbar.accessed", false);
 
+// Prefs for different services supported by Firefox Account
+pref("identity.fxaccounts.service.sendLoginUrl", "https://send.firefox.com/login/");
+pref("identity.fxaccounts.service.monitorLoginUrl", "https://monitor.firefox.com/");
+
 // Check bundled JAR and XPI files for corruption.
 #ifdef RELEASE_OR_BETA
 pref("corroborator.enabled", false);
 #else
 pref("corroborator.enabled", true);
 #endif
+
+// Show notification popup for social tracking protection.
+pref("privacy.socialtracking.notification.enabled", true);
+// minimum number of page loads until showing popup.
+pref("privacy.socialtracking.notification.session.pageload.min", 4);
+// timestamp of last popup was shown.
+pref("privacy.socialtracking.notification.lastSeen", 0);
+// don't show popup again within 2 days (2 * 86400 * 1000 milliseconds)
+pref("privacy.socialtracking.notification.period.min", 172800000);
+// current number of popup shown in the profile.
+pref("privacy.socialtracking.notification.counter", 0);
+// maximum number of popup shown in the profile.
+pref("privacy.socialtracking.notification.max", 2);

@@ -210,6 +210,7 @@ XPCOMUtils.defineLazyGetter(this, "KeyShortcuts", function() {
     // like on Chrome DevTools.
     shortcuts.push({
       id: "inspectorMac",
+      toolId: "inspector",
       shortcut: KeyShortcutsBundle.GetStringFromName("inspector.commandkey"),
       modifiers: "accel,shift",
     });
@@ -882,8 +883,10 @@ DevToolsStartup.prototype = {
     const window = Services.wm.getMostRecentWindow("devtools:webconsole");
     if (!window) {
       const require = this.initDevTools("CommandLine");
-      const { HUDService } = require("devtools/client/webconsole/hudservice");
-      HUDService.toggleBrowserConsole().catch(console.error);
+      const {
+        BrowserConsoleManager,
+      } = require("devtools/client/webconsole/browser-console-manager");
+      BrowserConsoleManager.toggleBrowserConsole().catch(console.error);
     } else {
       // the Browser Console was already open
       window.focus();

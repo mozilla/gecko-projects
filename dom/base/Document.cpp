@@ -34,11 +34,13 @@
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_full_screen_api.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_page_load.h"
 #include "mozilla/StaticPrefs_plugins.h"
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StaticPrefs_security.h"
 #include "mozilla/StorageAccess.h"
 #include "mozilla/TextEditor.h"
+#include "mozilla/URLDecorationStripper.h"
 #include "mozilla/URLExtraData.h"
 #include "mozilla/Base64.h"
 #include <algorithm>
@@ -1736,9 +1738,6 @@ Document::~Document() {
       ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_COUNT, 1);
       if (mDocTreeHadAudibleMedia) {
         ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_HAD_MEDIA_COUNT, 1);
-      }
-      if (mDocTreeHadPlayRevoked) {
-        ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_HAD_PLAY_REVOKED_COUNT, 1);
       }
 
       if (IsHTMLDocument()) {
@@ -5411,7 +5410,7 @@ void Document::GetReferrer(nsAString& aReferrer) const {
   }
 
   nsAutoCString uri;
-  nsresult rv = referrer->GetSpec(uri);
+  nsresult rv = URLDecorationStripper::StripTrackingIdentifiers(referrer, uri);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
@@ -5942,6 +5941,12 @@ already_AddRefed<PresShell> Document::CreatePresShell(
     // Gaining a shell causes changes in how media queries are evaluated, so
     // invalidate that.
     aContext->MediaFeatureValuesChanged({MediaFeatureChange::kAllChanges});
+  } else {
+    // Otherwise, we need to at least recompute the initial style now that our
+    // resolution and such may have changed. This is done by
+    // MediaFeatureValuesChanged above otherwise, see
+    // kMediaFeaturesAffectingDefaultStyle.
+    mStyleSet->ClearCachedStyleData();
   }
 
   // Make sure to never paint if we belong to an invisible DocShell.
@@ -8704,12 +8709,12 @@ mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> Document::Open(
     return nullptr;
   }
   RefPtr<nsGlobalWindowOuter> win = nsGlobalWindowOuter::Cast(outer);
-  nsCOMPtr<nsPIDOMWindowOuter> newWindow;
-  rv = win->OpenJS(aURL, aName, aFeatures, getter_AddRefs(newWindow));
-  if (!newWindow) {
+  RefPtr<BrowsingContext> newBC;
+  rv = win->OpenJS(aURL, aName, aFeatures, getter_AddRefs(newBC));
+  if (!newBC) {
     return nullptr;
   }
-  return WindowProxyHolder(newWindow->GetBrowsingContext());
+  return WindowProxyHolder(newBC.forget());
 }
 
 Document* Document::Open(const Optional<nsAString>& /* unused */,
@@ -15850,7 +15855,8 @@ bool Document::HasRecentlyStartedForegroundLoads() {
       nsPIDOMWindowInner* win = doc->GetInnerWindow();
       if (win) {
         Performance* perf = win->GetPerformance();
-        if (perf && perf->Now() < 5000) {
+        if (perf &&
+            perf->Now() < StaticPrefs::page_load_deprioritization_period()) {
           return true;
         }
       }

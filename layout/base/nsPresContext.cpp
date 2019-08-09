@@ -144,13 +144,11 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       mPresShell(nullptr),
       mDocument(aDocument),
       mMedium(aType == eContext_Galley ? nsGkAtoms::screen : nsGkAtoms::print),
-      mMediaEmulated(mMedium),
       mInflationDisabledForShrinkWrap(false),
       mSystemFontScale(1.0),
       mTextZoom(1.0),
       mEffectiveTextZoom(1.0),
       mFullZoom(1.0),
-      mOverrideDPPX(0.0),
       mLastFontInflationScreenSize(gfxSize(-1.0, -1.0)),
       mCurAppUnitsPerDevPixel(0),
       mAutoQualityMinFontSizePixelsPref(0),
@@ -186,7 +184,6 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       mPendingUIResolutionChanged(false),
       mPrefChangePendingNeedsReflow(false),
       mPostedPrefChangedRunnable(false),
-      mIsEmulatingMedia(false),
       mIsGlyph(false),
       mUsesRootEMUnits(false),
       mUsesExChUnits(false),
@@ -982,12 +979,23 @@ void nsPresContext::SetOverrideDPPX(float aDPPX) {
   // SetOverrideDPPX is called during navigations, including history
   // traversals.  In that case, it's typically called with our current value,
   // and we don't need to actually do anything.
-  if (aDPPX == mOverrideDPPX) {
+  if (aDPPX == GetOverrideDPPX()) {
     return;
   }
 
-  mOverrideDPPX = aDPPX;
+  mMediaEmulationData.mDPPX = aDPPX;
   MediaFeatureValuesChanged({MediaFeatureChangeReason::ResolutionChange});
+}
+
+void nsPresContext::SetOverridePrefersColorScheme(
+    const Maybe<StylePrefersColorScheme>& aOverride) {
+  if (GetOverridePrefersColorScheme() == aOverride) {
+    return;
+  }
+  mMediaEmulationData.mPrefersColorScheme = aOverride;
+  // This is a bit of a lie, but it's the code-path that gets taken for regular
+  // system metrics changes via ThemeChanged().
+  MediaFeatureValuesChanged({MediaFeatureChangeReason::SystemMetricsChange});
 }
 
 gfxSize nsPresContext::ScreenSizeInchesForFontInflation(bool* aChanged) {
@@ -1423,23 +1431,12 @@ void nsPresContext::UIResolutionChangedInternalScale(double aScale) {
                                    &aScale);
 }
 
-void nsPresContext::EmulateMedium(const nsAString& aMediaType) {
-  nsAtom* previousMedium = Medium();
-  mIsEmulatingMedia = true;
+void nsPresContext::EmulateMedium(nsAtom* aMediaType) {
+  MOZ_ASSERT(!aMediaType || aMediaType->IsAsciiLowercase());
+  RefPtr<const nsAtom> oldMedium = Medium();
+  mMediaEmulationData.mMedium = aMediaType;
 
-  nsAutoString mediaType;
-  nsContentUtils::ASCIIToLower(aMediaType, mediaType);
-
-  mMediaEmulated = NS_Atomize(mediaType);
-  if (mMediaEmulated != previousMedium && mPresShell) {
-    MediaFeatureValuesChanged({MediaFeatureChangeReason::MediumChange});
-  }
-}
-
-void nsPresContext::StopEmulatingMedium() {
-  nsAtom* previousMedium = Medium();
-  mIsEmulatingMedia = false;
-  if (Medium() != previousMedium) {
+  if (Medium() != oldMedium) {
     MediaFeatureValuesChanged({MediaFeatureChangeReason::MediumChange});
   }
 }

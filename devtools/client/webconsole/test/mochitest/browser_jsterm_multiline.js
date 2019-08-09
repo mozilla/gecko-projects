@@ -77,15 +77,6 @@ const DATA = [
 ];
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   // Let's reset the counts.
   Services.telemetry.clearEvents();
 
@@ -94,7 +85,6 @@ async function performTests() {
   ok(!snapshot.parent, "No events have been logged for the main process");
 
   const hud = await openNewTabAndConsole(TEST_URI);
-  const { jsterm } = hud;
 
   for (const { input, shiftKey } of SHOULD_ENTER_MULTILINE) {
     setInputValue(hud, input);
@@ -114,10 +104,15 @@ async function performTests() {
     is(getInputValue(hud), "", "Input is cleared");
   }
 
-  await jsterm.execute("document.\nlocation.\nhref");
+  await executeAndWaitForMessage(
+    hud,
+    "document.\nlocation.\nhref",
+    TEST_URI,
+    ".result"
+  );
 
   checkEventTelemetry();
-}
+});
 
 function checkEventTelemetry() {
   const snapshot = Services.telemetry.snapshotEvents(ALL_CHANNELS, true);

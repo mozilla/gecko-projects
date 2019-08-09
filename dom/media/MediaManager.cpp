@@ -2352,46 +2352,9 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
       isChrome ||
       Preferences::GetBool("media.navigator.permission.disabled", false);
   bool isSecure = aWindow->IsSecureContext();
-  // Note: isHTTPS is for legacy telemetry only! Use isSecure for security, as
-  // it handles things like https iframes in http pages correctly.
-  bool isHTTPS = false;
   bool isHandlingUserInput = EventStateManager::IsHandlingUserInput();
-  docURI->SchemeIs("https", &isHTTPS);
   nsCString host;
   nsresult rv = docURI->GetHost(host);
-  // Test for some other schemes that ServiceWorker recognizes
-  bool isFile;
-  docURI->SchemeIs("file", &isFile);
-  bool isApp;
-  docURI->SchemeIs("app", &isApp);
-  // Same localhost check as ServiceWorkers uses
-  // (see IsOriginPotentiallyTrustworthy())
-  bool isLocalhost =
-      NS_SUCCEEDED(rv) && (host.LowerCaseEqualsLiteral("localhost") ||
-                           host.LowerCaseEqualsLiteral("127.0.0.1") ||
-                           host.LowerCaseEqualsLiteral("::1"));
-
-  // Record telemetry about whether the source of the call was secure, i.e.,
-  // privileged or HTTPS.  We may handle other cases
-  if (privileged) {
-    Telemetry::Accumulate(Telemetry::WEBRTC_GET_USER_MEDIA_SECURE_ORIGIN,
-                          (uint32_t)GetUserMediaSecurityState::Privileged);
-  } else if (isHTTPS) {
-    Telemetry::Accumulate(Telemetry::WEBRTC_GET_USER_MEDIA_SECURE_ORIGIN,
-                          (uint32_t)GetUserMediaSecurityState::HTTPS);
-  } else if (isFile) {
-    Telemetry::Accumulate(Telemetry::WEBRTC_GET_USER_MEDIA_SECURE_ORIGIN,
-                          (uint32_t)GetUserMediaSecurityState::File);
-  } else if (isApp) {
-    Telemetry::Accumulate(Telemetry::WEBRTC_GET_USER_MEDIA_SECURE_ORIGIN,
-                          (uint32_t)GetUserMediaSecurityState::App);
-  } else if (isLocalhost) {
-    Telemetry::Accumulate(Telemetry::WEBRTC_GET_USER_MEDIA_SECURE_ORIGIN,
-                          (uint32_t)GetUserMediaSecurityState::Localhost);
-  } else {
-    Telemetry::Accumulate(Telemetry::WEBRTC_GET_USER_MEDIA_SECURE_ORIGIN,
-                          (uint32_t)GetUserMediaSecurityState::Other);
-  }
 
   nsCOMPtr<nsIPrincipal> principal =
       nsGlobalWindowInner::Cast(aWindow)->GetPrincipal();

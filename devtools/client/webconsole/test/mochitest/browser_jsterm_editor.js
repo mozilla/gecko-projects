@@ -9,16 +9,6 @@ const TEST_URI = "data:text/html;charset=utf8,<p>Test editor";
 
 add_task(async function() {
   await pushPref("devtools.webconsole.features.editor", true);
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   await pushPref("devtools.webconsole.input.editor", false);
 
   const tab = await addTab(TEST_URI);
@@ -30,6 +20,10 @@ async function performTests() {
     false,
     "Editor is disabled when pref is set to false"
   );
+  let openEditorButton = getInlineOpenEditorButton(hud);
+  ok(openEditorButton, "button is rendered in the inline input");
+  let rect = openEditorButton.getBoundingClientRect();
+  ok(rect.width > 0 && rect.height > 0, "Button is visible");
 
   await closeConsole();
 
@@ -43,4 +37,16 @@ async function performTests() {
     true,
     "Editor is enabled when pref is set to true"
   );
+  openEditorButton = getInlineOpenEditorButton(hud);
+  rect = openEditorButton.getBoundingClientRect();
+  ok(rect.width === 0 && rect.height === 0, "Button is hidden in editor mode");
+
+  await toggleLayout(hud);
+  getInlineOpenEditorButton(hud).click();
+  await waitFor(() => isEditorModeEnabled(hud));
+  ok("Editor is open when clicking on the button");
+});
+
+function getInlineOpenEditorButton(hud) {
+  return hud.ui.outputNode.querySelector(".webconsole-input-openEditorButton");
 }

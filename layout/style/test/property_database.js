@@ -11344,6 +11344,8 @@ gCSSProperties["grid-auto-columns"] = {
     "fit-content(1px)",
     "fit-content(calc(1px - 99%))",
     "fit-content(10%)",
+    "40px 12%",
+    "2.5fr min-content fit-content(1px)",
   ],
   invalid_values: [
     "",
@@ -11362,6 +11364,7 @@ gCSSProperties["grid-auto-columns"] = {
     "fit-content(-1px)",
     "fit-content(auto)",
     "fit-content(min-content)",
+    "1px [a] 1px",
   ],
 };
 gCSSProperties["grid-auto-rows"] = {
@@ -11628,6 +11631,7 @@ gCSSProperties["grid"] = {
   initial_values: ["none", "none / none"],
   other_values: [
     "auto-flow 40px / none",
+    "auto-flow 40px 100px / 0",
     "auto-flow / 40px",
     "auto-flow dense auto / auto",
     "dense auto-flow minmax(min-content, 2fr) / auto",
@@ -11647,7 +11651,7 @@ gCSSProperties["grid"] = {
     "0 / auto-flow [a] 0",
     "auto-flow -20px / 0",
     "auto-flow 200ms / 0",
-    "auto-flow 40px 100px / 0",
+    "auto-flow 1px [a] 1px / 0",
   ].concat(
     gCSSProperties["grid-template"].invalid_values,
     gCSSProperties["grid-auto-flow"].other_values,
@@ -12790,6 +12794,23 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
     initial_values: ["auto"],
     other_values: ["reverse", "0deg", "0rad reverse", "-45deg", "5turn auto"],
     invalid_values: ["none", "10px", "reverse 0deg reverse", "reverse auto"],
+  };
+
+  gCSSProperties["offset-anchor"] = {
+    domProp: "offsetAnchor",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: ["auto"],
+    other_values: [
+      "left bottom",
+      "center center",
+      "calc(20% + 10px) center",
+      "right 30em",
+      "10px 20%",
+      "left -10px top -20%",
+      "right 10% bottom 20em",
+    ],
+    invalid_values: ["none", "10deg", "left 10% top"],
   };
 }
 

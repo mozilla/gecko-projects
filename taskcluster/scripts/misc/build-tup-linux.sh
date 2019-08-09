@@ -3,14 +3,8 @@ set -e -v
 
 # This script is for building tup on Linux.
 
-WORKSPACE=$HOME/workspace
-UPLOAD_DIR=$HOME/artifacts
 COMPRESS_EXT=xz
-export PATH=$WORKSPACE/build/src/gcc/bin:$PATH
-
-cd $WORKSPACE/build/src
-
-. taskcluster/scripts/misc/tooltool-download.sh
+export PATH=$MOZ_FETCHES_DIR/gcc/bin:$PATH
 
 cd $MOZ_FETCHES_DIR/tup
 

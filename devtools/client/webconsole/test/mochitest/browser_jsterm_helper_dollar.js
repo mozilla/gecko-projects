@@ -16,35 +16,32 @@ const TEST_URI = `data:text/html,
 `;
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
-  const jsterm = hud.jsterm;
 
-  let onMessage = waitForMessage(hud, "<main>");
-  jsterm.execute("$('main')");
-  let message = await onMessage;
+  let message = await executeAndWaitForMessage(
+    hud,
+    "$('main')",
+    "<main>",
+    ".result"
+  );
   ok(message, "`$('main')` worked");
 
-  onMessage = waitForMessage(hud, "<li>");
-  jsterm.execute("$('main > ul > li')");
-  message = await onMessage;
+  message = await executeAndWaitForMessage(
+    hud,
+    "$('main > ul > li')",
+    "<li>",
+    ".result"
+  );
   ok(message, "`$('main > ul > li')` worked");
 
-  onMessage = waitForMessage(hud, "LI");
-  jsterm.execute("$('main > ul > li').tagName");
-  message = await onMessage;
+  message = await executeAndWaitForMessage(
+    hud,
+    "$('main > ul > li').tagName",
+    "LI",
+    ".result"
+  );
   ok(message, "`$` result can be used right away");
 
-  onMessage = waitForMessage(hud, "null");
-  jsterm.execute("$('div')");
-  message = await onMessage;
+  message = await executeAndWaitForMessage(hud, "$('div')", "null", ".result");
   ok(message, "`$('div')` does return null");
-}
+});

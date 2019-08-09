@@ -9,26 +9,19 @@
 const TEST_URI = "data:text/html,Test error documentation";
 
 add_task(async function() {
-  // Run test with legacy JsTerm
-  await pushPref("devtools.webconsole.jsterm.codeMirror", false);
-  await performTests();
-  // And then run it with the CodeMirror-powered one.
-  await pushPref("devtools.webconsole.jsterm.codeMirror", true);
-  await performTests();
-});
-
-async function performTests() {
   const hud = await openNewTabAndConsole(TEST_URI);
-  const { jsterm } = hud;
 
   const text =
     "TypeError: 'redirect' member of RequestInit 'foo' is not a valid value " +
     "for enumeration RequestRedirect";
-  const onErrorMessage = waitForMessage(hud, text, ".message.error");
-  jsterm.execute("new Request('',{redirect:'foo'})");
-  await onErrorMessage;
+  await executeAndWaitForMessage(
+    hud,
+    "new Request('',{redirect:'foo'})",
+    text,
+    ".message.error"
+  );
   ok(
     true,
     "Error message displayed as expected, without crashing the console."
   );
-}
+});

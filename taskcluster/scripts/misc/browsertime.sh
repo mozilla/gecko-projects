@@ -4,17 +4,11 @@ set -x -e
 
 echo "running as" $(id)
 
-: WORKSPACE ${WORKSPACE:=/builds/worker/workspace}
-
 set -v
 
-cd $WORKSPACE/build/src
+cd $GECKO_PATH
 
-# Download toolchain artifacts.
-. taskcluster/scripts/misc/tooltool-download.sh
-
-# We can't set the path to npm directly, but it's sibling to NODEJS.
-export PATH=$PATH:`dirname $NODEJS`
+export PATH=$PATH:$MOZ_FETCHES_DIR/node/bin
 
 # We don't install ImageMagick, so this will fail.  Continue.
 ./mach browsertime --setup || true
