@@ -176,5 +176,3 @@ else:
 CONFIGURE_SUBST_FILES += ['.cargo/config']
 
 include('build/templates.mozbuild')
-
-DEFINES['DISABLE_USER_IMPERSONATION'] = True
