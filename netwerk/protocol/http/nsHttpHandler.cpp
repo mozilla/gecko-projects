@@ -1999,18 +1999,10 @@ nsHttpHandler::NewChannel(nsIURI* uri, nsILoadInfo* aLoadInfo,
   NS_ENSURE_ARG_POINTER(uri);
   NS_ENSURE_ARG_POINTER(result);
 
-  bool isHttp = false, isHttps = false;
-
   // Verify that we have been given a valid scheme
-  nsresult rv = uri->SchemeIs("http", &isHttp);
-  if (NS_FAILED(rv)) return rv;
-  if (!isHttp) {
-    rv = uri->SchemeIs("https", &isHttps);
-    if (NS_FAILED(rv)) return rv;
-    if (!isHttps) {
-      NS_WARNING("Invalid URI scheme");
-      return NS_ERROR_UNEXPECTED;
-    }
+  if (!uri->SchemeIs("http") && !uri->SchemeIs("https")) {
+    NS_WARNING("Invalid URI scheme");
+    return NS_ERROR_UNEXPECTED;
   }
 
   return NewProxiedChannel(uri, nullptr, 0, nullptr, aLoadInfo, result);
@@ -2049,10 +2041,6 @@ nsHttpHandler::NewProxiedChannel(nsIURI* uri, nsIProxyInfo* givenProxyInfo,
     NS_ENSURE_ARG(proxyInfo);
   }
 
-  bool https;
-  nsresult rv = uri->SchemeIs("https", &https);
-  if (NS_FAILED(rv)) return rv;
-
   if (IsNeckoChild()) {
     httpChannel = new HttpChannelChild();
   } else {
@@ -2072,7 +2060,7 @@ nsHttpHandler::NewProxiedChannel(nsIURI* uri, nsIProxyInfo* givenProxyInfo,
   }
 
   uint64_t channelId;
-  rv = NewChannelId(channelId);
+  nsresult rv = NewChannelId(channelId);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsContentPolicyType contentPolicyType =
@@ -2131,6 +2119,11 @@ NS_IMETHODIMP
 nsHttpHandler::GetMisc(nsACString& value) {
   value = mMisc;
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHttpHandler::GetAltSvcCacheKeys(nsTArray<nsCString>& value) {
+  return mConnMgr->GetAltSvcCacheKeys(value);
 }
 
 //-----------------------------------------------------------------------------
@@ -2429,11 +2422,7 @@ nsresult nsHttpHandler::SpeculativeConnectInternal(
     return NS_ERROR_UNEXPECTED;
 
   // Construct connection info object
-  bool usingSSL = false;
-  rv = aURI->SchemeIs("https", &usingSSL);
-  if (NS_FAILED(rv)) return rv;
-
-  if (usingSSL && !mSpeculativeConnectEnabled) {
+  if (aURI->SchemeIs("https") && !mSpeculativeConnectEnabled) {
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -2454,7 +2443,7 @@ nsresult nsHttpHandler::SpeculativeConnectInternal(
   // and all of its consumers.
   RefPtr<nsHttpConnectionInfo> ci = new nsHttpConnectionInfo(
       host, port, EmptyCString(), username, EmptyCString(), nullptr,
-      originAttributes, usingSSL);
+      originAttributes, aURI->SchemeIs("https"));
   ci->SetAnonymous(anonymous);
 
   return SpeculativeConnect(ci, aCallbacks);
@@ -2546,8 +2535,9 @@ nsHttpsHandler::AllowPort(int32_t aPort, const char* aScheme, bool* _retval) {
   return NS_OK;
 }
 
-nsresult nsHttpHandler::EnsureHSTSDataReadyNative(
-    already_AddRefed<mozilla::net::HSTSDataCallbackWrapper> aCallback) {
+NS_IMETHODIMP
+nsHttpHandler::EnsureHSTSDataReadyNative(
+    RefPtr<mozilla::net::HSTSDataCallbackWrapper> aCallback) {
   MOZ_ASSERT(NS_IsMainThread());
 
   nsCOMPtr<nsIURI> uri;
@@ -2557,15 +2547,14 @@ nsresult nsHttpHandler::EnsureHSTSDataReadyNative(
   bool shouldUpgrade = false;
   bool willCallback = false;
   OriginAttributes originAttributes;
-  RefPtr<HSTSDataCallbackWrapper> callback = aCallback;
-  auto func = [callback](bool aResult, nsresult aStatus) {
+  auto func = [callback(aCallback)](bool aResult, nsresult aStatus) {
     callback->DoCallback(aResult);
   };
   rv = NS_ShouldSecureUpgrade(uri, nullptr, nullptr, false, false,
                               originAttributes, shouldUpgrade, std::move(func),
                               willCallback);
   if (NS_FAILED(rv) || !willCallback) {
-    callback->DoCallback(false);
+    aCallback->DoCallback(false);
     return rv;
   }
 
@@ -2611,7 +2600,7 @@ nsHttpHandler::EnsureHSTSDataReady(JSContext* aCx, Promise** aPromise) {
   RefPtr<HSTSDataCallbackWrapper> wrapper =
       new HSTSDataCallbackWrapper(std::move(callback));
   promise.forget(aPromise);
-  return EnsureHSTSDataReadyNative(wrapper.forget());
+  return EnsureHSTSDataReadyNative(wrapper);
 }
 
 void nsHttpHandler::ShutdownConnectionManager() {

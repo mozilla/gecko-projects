@@ -371,7 +371,7 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#ifdef EXPOSE_INTL_API
+#ifdef ENABLE_INTL_API
   value = BooleanValue(true);
 #else
   value = BooleanValue(false);
@@ -513,9 +513,8 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
   _("dynamicHeapGrowth", JSGC_DYNAMIC_HEAP_GROWTH, true)                     \
   _("dynamicMarkSlice", JSGC_DYNAMIC_MARK_SLICE, true)                       \
   _("allocationThreshold", JSGC_ALLOCATION_THRESHOLD, true)                  \
-  _("allocationThresholdFactor", JSGC_ALLOCATION_THRESHOLD_FACTOR, true)     \
-  _("allocationThresholdFactorAvoidInterrupt",                               \
-    JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT, true)                  \
+  _("nonIncrementalFactor", JSGC_NON_INCREMENTAL_FACTOR, true)               \
+  _("avoidInterruptFactor", JSGC_AVOID_INTERRUPT_FACTOR, true)               \
   _("minEmptyChunkCount", JSGC_MIN_EMPTY_CHUNK_COUNT, true)                  \
   _("maxEmptyChunkCount", JSGC_MAX_EMPTY_CHUNK_COUNT, true)                  \
   _("compactingEnabled", JSGC_COMPACTING_ENABLED, true)                      \
@@ -3148,7 +3147,7 @@ class CloneBufferObject : public NativeObject {
     return CallNonGenericMethod<is, getCloneBufferAsArrayBuffer_impl>(cx, args);
   }
 
-  static void Finalize(FreeOp* fop, JSObject* obj) {
+  static void Finalize(JSFreeOp* fop, JSObject* obj) {
     obj->as<CloneBufferObject>().discard();
   }
 };

@@ -15,6 +15,190 @@
  * modules/libpref/parser/src/lib.rs.
  */
 
+pref("security.tls.version.min", 1);
+pref("security.tls.version.max", 4);
+pref("security.tls.version.fallback-limit", 4);
+pref("security.tls.insecure_fallback_hosts", "");
+// Turn off post-handshake authentication for TLS 1.3 by default,
+// until the incompatibility with HTTP/2 is resolved:
+// https://tools.ietf.org/html/draft-davidben-http2-tls13-00
+pref("security.tls.enable_post_handshake_auth", false);
+#ifdef RELEASE_OR_BETA
+pref("security.tls.hello_downgrade_check", false);
+#else
+pref("security.tls.hello_downgrade_check", true);
+#endif
+pref("security.tls.enable_delegated_credentials", false);
+
+pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
+pref("security.ssl.require_safe_negotiation",  false);
+pref("security.ssl.enable_ocsp_stapling", true);
+pref("security.ssl.enable_false_start", true);
+pref("security.ssl.enable_alpn", true);
+
+pref("security.ssl3.ecdhe_rsa_aes_128_gcm_sha256", true);
+pref("security.ssl3.ecdhe_ecdsa_aes_128_gcm_sha256", true);
+pref("security.ssl3.ecdhe_ecdsa_chacha20_poly1305_sha256", true);
+pref("security.ssl3.ecdhe_rsa_chacha20_poly1305_sha256", true);
+pref("security.ssl3.ecdhe_ecdsa_aes_256_gcm_sha384", true);
+pref("security.ssl3.ecdhe_rsa_aes_256_gcm_sha384", true);
+pref("security.ssl3.ecdhe_rsa_aes_128_sha", true);
+pref("security.ssl3.ecdhe_ecdsa_aes_128_sha", true);
+pref("security.ssl3.ecdhe_rsa_aes_256_sha", true);
+pref("security.ssl3.ecdhe_ecdsa_aes_256_sha", true);
+pref("security.ssl3.dhe_rsa_aes_128_sha", true);
+pref("security.ssl3.dhe_rsa_aes_256_sha", true);
+pref("security.ssl3.rsa_aes_128_sha", true);
+pref("security.ssl3.rsa_aes_256_sha", true);
+pref("security.ssl3.rsa_des_ede3_sha", true);
+
+pref("security.content.signature.root_hash",
+     "97:E8:BA:9C:F1:2F:B3:DE:53:CC:42:A4:E6:57:7E:D6:4D:F4:93:C2:47:B4:14:FE:A0:36:81:8D:38:23:56:0E");
+
+pref("security.default_personal_cert",   "Ask Every Time");
+pref("security.remember_cert_checkbox_default_setting", true);
+pref("security.ask_for_password",        0);
+pref("security.password_lifetime",       30);
+
+// On Windows 8.1, if the following preference is 2, we will attempt to detect
+// if the Family Safety TLS interception feature has been enabled. If so, we
+// will behave as if the enterprise roots feature has been enabled (i.e. import
+// and trust third party root certificates from the OS).
+// With any other value of the pref or on any other platform, this does nothing.
+// This preference takes precedence over "security.enterprise_roots.enabled".
+pref("security.family_safety.mode", 2);
+
+pref("security.enterprise_roots.enabled", false);
+
+// The supported values of this pref are:
+// 0: do not fetch OCSP
+// 1: fetch OCSP for DV and EV certificates
+// 2: fetch OCSP only for EV certificates
+pref("security.OCSP.enabled", 1);
+pref("security.OCSP.require", false);
+#ifdef RELEASE_OR_BETA
+pref("security.OCSP.timeoutMilliseconds.soft", 2000);
+#else
+pref("security.OCSP.timeoutMilliseconds.soft", 1000);
+#endif
+pref("security.OCSP.timeoutMilliseconds.hard", 10000);
+
+pref("security.pki.cert_short_lifetime_in_days", 10);
+// NB: Changes to this pref affect CERT_CHAIN_SHA1_POLICY_STATUS telemetry.
+// See the comment in CertVerifier.cpp.
+// 3 = only allow SHA-1 for certificates issued by an imported root.
+pref("security.pki.sha1_enforcement_level", 3);
+
+// This preference controls what signature algorithms are accepted for signed
+// apps (i.e. add-ons). The number is interpreted as a bit mask with the
+// following semantic:
+// The lowest order bit determines which PKCS#7 algorithms are accepted.
+// xxx_0_: SHA-1 and/or SHA-256 PKCS#7 allowed
+// xxx_1_: SHA-256 PKCS#7 allowed
+// The next two bits determine whether COSE is required and PKCS#7 is allowed
+// x_00_x: COSE disabled, ignore files, PKCS#7 must verify
+// x_01_x: COSE is verified if present, PKCS#7 must verify
+// x_10_x: COSE is required, PKCS#7 must verify if present
+// x_11_x: COSE is required, PKCS#7 disabled (fail when present)
+pref("security.signed_app_signatures.policy", 2);
+
+// security.pki.name_matching_mode controls how the platform matches hostnames
+// to name information in TLS certificates. The possible values are:
+// 0: always fall back to the subject common name if necessary (as in, if the
+//    subject alternative name extension is either not present or does not
+//    contain any DNS names or IP addresses)
+// 1: fall back to the subject common name for certificates valid before 23
+//    August 2016 if necessary
+// 2: fall back to the subject common name for certificates valid before 23
+//    August 2015 if necessary
+// 3: only use name information from the subject alternative name extension
+pref("security.pki.name_matching_mode", 3);
+
+// security.pki.netscape_step_up_policy controls how the platform handles the
+// id-Netscape-stepUp OID in extended key usage extensions of CA certificates.
+// 0: id-Netscape-stepUp is always considered equivalent to id-kp-serverAuth
+// 1: it is considered equivalent when the notBefore is before 23 August 2016
+// 2: similarly, but for 23 August 2015
+// 3: it is never considered equivalent
+#ifdef RELEASE_OR_BETA
+pref("security.pki.netscape_step_up_policy", 1);
+#else
+pref("security.pki.netscape_step_up_policy", 2);
+#endif
+
+// Configures Certificate Transparency support mode:
+// 0: Fully disabled.
+// 1: Only collect telemetry. CT qualification checks are not performed.
+pref("security.pki.certificate_transparency.mode", 0);
+
+// Only one of ["enable_softtoken", "enable_usbtoken",
+// "webauthn_enable_android_fido2"] should be true at a time, as the
+// softtoken will override the other two. Note android's pref is set in
+// mobile.js / geckoview-prefs.js
+pref("security.webauth.webauthn_enable_softtoken", false);
+
+#ifdef MOZ_WIDGET_ANDROID
+// the Rust usbtoken support does not function on Android
+pref("security.webauth.webauthn_enable_usbtoken", false);
+#else
+pref("security.webauth.webauthn_enable_usbtoken", true);
+#endif
+
+pref("security.ssl.errorReporting.enabled", true);
+pref("security.ssl.errorReporting.url", "https://incoming.telemetry.mozilla.org/submit/sslreports/");
+pref("security.ssl.errorReporting.automatic", false);
+
+// Impose a maximum age on HPKP headers, to avoid sites getting permanently
+// blacking themselves out by setting a bad pin.  (60 days by default)
+// https://tools.ietf.org/html/rfc7469#section-4.1
+pref("security.cert_pinning.max_max_age_seconds", 5184000);
+
+// security.pki.distrust_ca_policy controls what root program distrust policies
+// are enforced at this time:
+// 0: No distrust policies enforced
+// 1: Symantec roots distrusted for certificates issued after cutoff
+// 2: Symantec roots distrusted regardless of date
+// See https://wiki.mozilla.org/CA/Upcoming_Distrust_Actions for more details.
+pref("security.pki.distrust_ca_policy", 2);
+
+// Issuer we use to detect MitM proxies. Set to the issuer of the cert of the
+// Firefox update service. The string format is whatever NSS uses to print a DN.
+// This value is set and cleared automatically.
+pref("security.pki.mitm_canary_issuer", "");
+// Pref to disable the MitM proxy checks.
+pref("security.pki.mitm_canary_issuer.enabled", true);
+
+// It is set to true when a non-built-in root certificate is detected on a
+// Firefox update service's connection.
+// This value is set automatically.
+// The difference between security.pki.mitm_canary_issuer and this pref is that
+// here the root is trusted but not a built-in, whereas for
+// security.pki.mitm_canary_issuer.enabled, the root is not trusted.
+pref("security.pki.mitm_detected", false);
+
+// Intermediate CA Preloading settings
+#if defined(RELEASE_OR_BETA) || defined(MOZ_WIDGET_ANDROID)
+pref("security.remote_settings.intermediates.enabled", false);
+#else
+pref("security.remote_settings.intermediates.enabled", true);
+#endif
+pref("security.remote_settings.intermediates.bucket", "security-state");
+pref("security.remote_settings.intermediates.collection", "intermediates");
+pref("security.remote_settings.intermediates.checked", 0);
+pref("security.remote_settings.intermediates.downloads_per_poll", 100);
+pref("security.remote_settings.intermediates.parallel_downloads", 8);
+pref("security.remote_settings.intermediates.signer", "onecrl.content-signature.mozilla.org");
+
+#if defined(RELEASE_OR_BETA) || defined(MOZ_WIDGET_ANDROID)
+pref("security.remote_settings.crlite_filters.enabled", false);
+#else
+pref("security.remote_settings.crlite_filters.enabled", true);
+#endif
+pref("security.remote_settings.crlite_filters.bucket", "security-state");
+pref("security.remote_settings.crlite_filters.collection", "cert-revocations");
+pref("security.remote_settings.crlite_filters.checked", 0);
+pref("security.remote_settings.crlite_filters.signer", "onecrl.content-signature.mozilla.org");
+
 pref("general.useragent.compatMode.firefox", false);
 
 // This pref exists only for testing purposes. In order to disable all
@@ -501,7 +685,7 @@ pref("layers.geometry.d3d11.enabled", true);
 // APZ preferences. For documentation/details on what these prefs do, check
 // gfx/layers/apz/src/AsyncPanZoomController.cpp.
 pref("apz.allow_double_tap_zooming", true);
-pref("apz.allow_immediate_handoff", true);
+pref("apz.allow_immediate_handoff", false);
 pref("apz.allow_zooming", false);
 pref("apz.android.chrome_fling_physics.enabled", true);
 pref("apz.android.chrome_fling_physics.friction", "0.015");
@@ -688,7 +872,7 @@ pref("gfx.font_rendering.directwrite.use_gdi_table_loading", true);
 #endif
 
 // Disable antialiasing of Ahem, for use in tests
-pref("gfx.font_ahem_antialias_none", false);
+pref("gfx.font_rendering.ahem_antialias_none", false);
 
 #ifdef XP_WIN
 // comma separated list of backends to use in order of preference
@@ -1240,13 +1424,13 @@ pref("javascript.options.mem.gc_dynamic_heap_growth", true);
 pref("javascript.options.mem.gc_dynamic_mark_slice", true);
 
 // JSGC_ALLOCATION_THRESHOLD
-pref("javascript.options.mem.gc_allocation_threshold_mb", 30);
+pref("javascript.options.mem.gc_allocation_threshold_mb", 27);
 
-// JSGC_ALLOCATION_THRESHOLD_FACTOR
-pref("javascript.options.mem.gc_allocation_threshold_factor", 90);
+// JSGC_NON_INCREMENTAL_FACTOR
+pref("javascript.options.mem.gc_non_incremental_factor", 112);
 
-// JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT
-pref("javascript.options.mem.gc_allocation_threshold_factor_avoid_interrupt", 90);
+// JSGC_AVOID_INTERRUPT_FACTOR
+pref("javascript.options.mem.gc_avoid_interrupt_factor", 100);
 
 // JSGC_MIN_EMPTY_CHUNK_COUNT
 pref("javascript.options.mem.gc_min_empty_chunk_count", 1);
@@ -2373,7 +2557,7 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 #if defined(DEBUG) && !defined(ANDROID)
-pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,addons,config,downloads,preferences,sync-log");
+pref("csp.about_uris_without_csp", "blank,printpreview,srcdoc,config,downloads,preferences,sync-log");
 // the following prefs are for testing purposes only.
 pref("csp.overrule_about_uris_without_csp_whitelist", false);
 pref("csp.skip_about_page_has_csp_assert", false);
@@ -3031,22 +3215,6 @@ pref("browser.tabs.remote.separatePrivilegedMozillaWebContentProcess", false);
 // The domains we will isolate into the Mozilla Content Process. Comma-separated
 // full domains: any subdomains of the domains listed will also be allowed.
 pref("browser.tabs.remote.separatedMozillaDomains", "addons.mozilla.org,accounts.firefox.com");
-
-// Enable the use of display-lists for SVG hit-testing and painting.
-pref("svg.display-lists.hit-testing.enabled", true);
-pref("svg.display-lists.painting.enabled", true);
-
-// Is support for the new getBBox method from SVG 2 enabled?
-// See https://svgwg.org/svg2-draft/single-page.html#types-SVGBoundingBoxOptions
-pref("svg.new-getBBox.enabled", false);
-
-# This pref controls whether the 'context-fill' and 'context-stroke' keywords
-# can be used in SVG-as-an-image in the content processes to use the fill/
-# stroke specified on the element that embeds the image.  (These keywords are
-# always enabled in the chrome process, regardless of this pref.)
-# Also, these keywords are currently not part of any spec, which is partly why
-# we disable them for web content.
-pref("svg.context-properties.content.enabled", false);
 
 // Default font types and sizes by locale
 pref("font.default.ar", "sans-serif");
@@ -5075,13 +5243,13 @@ pref("urlclassifier.features.cryptomining.blacklistTables", "base-cryptomining-t
 pref("urlclassifier.features.cryptomining.whitelistTables", "mozstd-trackwhite-digest256");
 pref("urlclassifier.features.cryptomining.annotate.blacklistTables", "base-cryptomining-track-digest256");
 pref("urlclassifier.features.cryptomining.annotate.whitelistTables", "mozstd-trackwhite-digest256");
-pref("urlclassifier.features.socialtracking.blacklistTables", "social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256,social-tracking-protection-youtube-digest256");
+pref("urlclassifier.features.socialtracking.blacklistTables", "social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256");
 pref("urlclassifier.features.socialtracking.whitelistTables", "mozstd-trackwhite-digest256");
-pref("urlclassifier.features.socialtracking.annotation.blacklistTables", "social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256,social-tracking-protection-youtube-digest256");
-pref("urlclassifier.features.socialtracking.annotation.whitelistTables", "mozstd-trackwhite-digest256");
+pref("urlclassifier.features.socialtracking.annotate.blacklistTables", "social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256");
+pref("urlclassifier.features.socialtracking.annotate.whitelistTables", "mozstd-trackwhite-digest256");
 
 // These tables will never trigger a gethash call.
-pref("urlclassifier.disallow_completions", "goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,goog-passwordwhite-proto,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboyannoyance-ads-digest256,fanboysocial-ads-digest256,easylist-ads-digest256,easyprivacy-ads-digest256,adguard-ads-digest256,social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256,social-tracking-protection-youtube-digest256");
+pref("urlclassifier.disallow_completions", "goog-downloadwhite-digest256,base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,goog-passwordwhite-proto,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboyannoyance-ads-digest256,fanboysocial-ads-digest256,easylist-ads-digest256,easyprivacy-ads-digest256,adguard-ads-digest256,social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256");
 
 // Workaround for Google Recaptcha
 pref("urlclassifier.trackingAnnotationSkipURLs", "google.com/recaptcha/,*.google.com/recaptcha/");
@@ -5151,7 +5319,7 @@ pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozil
 
 // Mozilla Safe Browsing provider (for tracking protection and plugin blocking)
 pref("browser.safebrowsing.provider.mozilla.pver", "2.2");
-pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboyannoyance-ads-digest256,fanboysocial-ads-digest256,easylist-ads-digest256,easyprivacy-ads-digest256,adguard-ads-digest256,social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256,social-tracking-protection-youtube-digest256");
+pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,block-flash-digest256,except-flash-digest256,allow-flashallow-digest256,except-flashallow-digest256,block-flashsubdoc-digest256,except-flashsubdoc-digest256,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboyannoyance-ads-digest256,fanboysocial-ads-digest256,easylist-ads-digest256,easyprivacy-ads-digest256,adguard-ads-digest256,social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256");
 pref("browser.safebrowsing.provider.mozilla.updateURL", "https://shavar.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://shavar.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 // Set to a date in the past to force immediate download in new profiles.
@@ -5211,6 +5379,7 @@ pref("browser.search.suggest.enabled", true);
 pref("browser.search.geoSpecificDefaults", false);
 pref("browser.search.geoip.url", "https://location.services.mozilla.com/v1/country?key=%MOZILLA_API_KEY%");
 pref("browser.search.geoip.timeout", 3000);
+pref("browser.search.separatePrivateDefault", false);
 
 #ifdef MOZ_OFFICIAL_BRANDING
 // {moz:official} expands to "official"
@@ -5468,3 +5637,134 @@ pref("fission.preserve_browsing_contexts", false);
 //  * userContent.css
 //  * userChrome.css
 pref("toolkit.legacyUserProfileCustomizations.stylesheets", false);
+
+#ifdef MOZ_DATA_REPORTING
+pref("datareporting.policy.dataSubmissionEnabled", true);
+pref("datareporting.policy.dataSubmissionPolicyNotifiedTime", "0");
+pref("datareporting.policy.dataSubmissionPolicyAcceptedVersion", 0);
+pref("datareporting.policy.dataSubmissionPolicyBypassNotification", false);
+pref("datareporting.policy.currentPolicyVersion", 2);
+pref("datareporting.policy.minimumPolicyVersion", 1);
+pref("datareporting.policy.minimumPolicyVersion.channel-beta", 2);
+pref("datareporting.policy.firstRunURL", "https://www.mozilla.org/privacy/firefox/");
+#endif
+
+#ifdef MOZ_SERVICES_HEALTHREPORT
+#if !defined(ANDROID)
+pref("datareporting.healthreport.infoURL", "https://www.mozilla.org/legal/privacy/firefox.html#health-report");
+
+// Health Report is enabled by default on all channels.
+pref("datareporting.healthreport.uploadEnabled", true);
+#endif
+#endif
+
+pref("services.common.log.logger.rest.request", "Debug");
+pref("services.common.log.logger.rest.response", "Debug");
+pref("services.common.log.logger.tokenserverclient", "Debug");
+
+#ifdef MOZ_SERVICES_SYNC
+pref("services.sync.lastversion", "firstrun");
+pref("services.sync.sendVersionInfo", true);
+
+pref("services.sync.scheduler.idleInterval", 3600);  // 1 hour
+pref("services.sync.scheduler.activeInterval", 600);   // 10 minutes
+pref("services.sync.scheduler.immediateInterval", 90);    // 1.5 minutes
+pref("services.sync.scheduler.idleTime", 300);   // 5 minutes
+
+pref("services.sync.scheduler.fxa.singleDeviceInterval", 3600); // 1 hour
+
+// Note that new engines are typically added with a default of disabled, so
+// when an existing sync user gets the Firefox upgrade that supports the engine
+// it starts as disabled until the user has explicitly opted in.
+// The sync "create account" process typically *will* offer these engines, so
+// they may be flipped to enabled at that time.
+pref("services.sync.engine.addons", true);
+pref("services.sync.engine.addresses", false);
+pref("services.sync.engine.bookmarks", true);
+#ifdef EARLY_BETA_OR_EARLIER
+// Enable the new bookmark sync engine through early Beta, but not release
+// candidates or Release.
+pref("services.sync.engine.bookmarks.buffer", true);
+#else
+pref("services.sync.engine.bookmarks.buffer", false);
+#endif
+pref("services.sync.engine.creditcards", false);
+pref("services.sync.engine.history", true);
+pref("services.sync.engine.passwords", true);
+pref("services.sync.engine.prefs", true);
+pref("services.sync.engine.tabs", true);
+pref("services.sync.engine.tabs.filteredUrls", "^(about:.*|resource:.*|chrome:.*|wyciwyg:.*|file:.*|blob:.*|moz-extension:.*)$");
+
+// The addresses and CC engines might not actually be available at all.
+pref("services.sync.engine.addresses.available", false);
+pref("services.sync.engine.creditcards.available", false);
+
+// If true, add-on sync ignores changes to the user-enabled flag. This
+// allows people to have the same set of add-ons installed across all
+// profiles while maintaining different enabled states.
+pref("services.sync.addons.ignoreUserEnabledChanges", false);
+
+// Comma-delimited list of hostnames to trust for add-on install.
+pref("services.sync.addons.trustedSourceHostnames", "addons.mozilla.org");
+
+pref("services.sync.log.appender.console", "Fatal");
+pref("services.sync.log.appender.dump", "Error");
+pref("services.sync.log.appender.file.level", "Trace");
+pref("services.sync.log.appender.file.logOnError", true);
+#if defined(NIGHTLY_BUILD)
+pref("services.sync.log.appender.file.logOnSuccess", true);
+#else
+pref("services.sync.log.appender.file.logOnSuccess", false);
+#endif
+pref("services.sync.log.appender.file.maxErrorAge", 864000); // 10 days
+
+// The default log level for all "Sync.*" logs. Adjusting this pref will
+// adjust the level for *all* Sync logs (except engines, and that's only
+// because we supply a default for the engines below.)
+pref("services.sync.log.logger", "Debug");
+
+// Prefs for Sync engines can be controlled globally or per-engine.
+// We only define the global level here, but manually creating prefs
+// like "services.sync.log.logger.engine.bookmarks" will control just
+// that engine.
+pref("services.sync.log.logger.engine", "Debug");
+pref("services.sync.log.cryptoDebug", false);
+
+pref("services.sync.fxa.termsURL", "https://accounts.firefox.com/legal/terms");
+pref("services.sync.fxa.privacyURL", "https://accounts.firefox.com/legal/privacy");
+
+pref("services.sync.telemetry.submissionInterval", 43200); // 12 hours in seconds
+pref("services.sync.telemetry.maxPayloadCount", 500);
+
+#ifdef EARLY_BETA_OR_EARLIER
+// Enable the (fairly costly) client/server validation through early Beta, but
+// not release candidates or Release.
+pref("services.sync.engine.bookmarks.validation.enabled", true);
+pref("services.sync.engine.passwords.validation.enabled", true);
+#endif
+
+#if defined(NIGHTLY_BUILD)
+// Enable repair of bookmarks on Nightly only - requires validation also be
+// enabled.
+pref("services.sync.engine.bookmarks.repair.enabled", true);
+#endif
+
+// We consider validation this frequently. After considering validation, even
+// if we don't end up validating, we won't try again unless this much time has passed.
+pref("services.sync.engine.bookmarks.validation.interval", 86400); // 24 hours in seconds
+pref("services.sync.engine.passwords.validation.interval", 86400); // 24 hours in seconds
+
+// We only run validation `services.sync.validation.percentageChance` percent of
+// the time, even if it's been the right amount of time since the last validation,
+// and you meet the maxRecord checks.
+pref("services.sync.engine.bookmarks.validation.percentageChance", 10);
+pref("services.sync.engine.passwords.validation.percentageChance", 10);
+
+// We won't validate an engine if it has more than this many records on the server.
+pref("services.sync.engine.bookmarks.validation.maxRecords", 1000);
+pref("services.sync.engine.passwords.validation.maxRecords", 1000);
+
+// The maximum number of immediate resyncs to trigger for changes made during
+// a sync.
+pref("services.sync.maxResyncs", 5);
+#endif // MOZ_SERVICES_SYNC

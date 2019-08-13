@@ -30,7 +30,12 @@ loader.lazyRequireGetter(
   "devtools/client/framework/toolbox",
   true
 );
-loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
+loader.lazyRequireGetter(
+  this,
+  "DebuggerServer",
+  "devtools/server/debugger-server",
+  true
+);
 loader.lazyRequireGetter(
   this,
   "DebuggerClient",
@@ -51,7 +56,7 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(
   this,
   "ResponsiveUIManager",
-  "devtools/client/responsive.html/manager",
+  "devtools/client/responsive/manager",
   true
 );
 loader.lazyRequireGetter(
@@ -510,7 +515,7 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
   /**
    * Add this DevTools's presence to a browser window's document
    *
-   * @param {XULDocument} doc
+   * @param {HTMLDocument} doc
    *        The document to which devtools should be hooked to.
    */
   _registerBrowserWindow(win) {

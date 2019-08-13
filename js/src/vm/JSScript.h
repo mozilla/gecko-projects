@@ -1279,7 +1279,7 @@ class ScriptSourceObject : public NativeObject {
   static const Class class_;
 
   static void trace(JSTracer* trc, JSObject* obj);
-  static void finalize(FreeOp* fop, JSObject* obj);
+  static void finalize(JSFreeOp* fop, JSObject* obj);
 
   static ScriptSourceObject* create(JSContext* cx, ScriptSource* source);
   static ScriptSourceObject* clone(JSContext* cx, HandleScriptSourceObject sso);
@@ -1724,9 +1724,7 @@ class alignas(uintptr_t) PrivateScriptData final {
   const FieldInitializers& getFieldInitializers() { return fieldInitializers_; }
 
   // Allocate a new PrivateScriptData. Headers and GCPtrs are initialized.
-  // The size of allocation is returned as an out parameter.
-  static PrivateScriptData* new_(JSContext* cx, uint32_t ngcthings,
-                                 uint32_t* dataSize);
+  static PrivateScriptData* new_(JSContext* cx, uint32_t ngcthings);
 
   template <XDRMode mode>
   static MOZ_MUST_USE XDRResult XDR(js::XDRState<mode>* xdr,
@@ -1743,6 +1741,8 @@ class alignas(uintptr_t) PrivateScriptData final {
                               js::frontend::BytecodeEmitter* bce);
 
   void trace(JSTracer* trc);
+
+  size_t allocationSize() const;
 
   // PrivateScriptData has trailing data so isn't copyable or movable.
   PrivateScriptData(const PrivateScriptData&) = delete;
@@ -2168,9 +2168,6 @@ class JSScript : public js::BaseScript {
 
   // 32-bit fields.
 
-  /* Size of the used part of the data array. */
-  uint32_t dataSize_ = 0;
-
   // Number of times the script has been called or has had backedges taken.
   // When running in ion, also increased for any inlined scripts. Reset if
   // the script's JIT code is forcibly discarded.
@@ -2257,10 +2254,6 @@ class JSScript : public js::BaseScript {
  public:
   static bool fullyInitFromEmitter(JSContext* cx, js::HandleScript script,
                                    js::frontend::BytecodeEmitter* bce);
-
-  // Initialize the Function.prototype script.
-  static bool initFunctionPrototype(JSContext* cx, js::HandleScript script,
-                                    JS::HandleFunction functionProto);
 
 #ifdef DEBUG
  private:
@@ -2623,8 +2616,8 @@ class JSScript : public js::BaseScript {
   js::jit::IonScript* maybeIonScript() const { return ion; }
   js::jit::IonScript* const* addressOfIonScript() const { return &ion; }
   void setIonScript(JSRuntime* rt, js::jit::IonScript* ionScript);
-  void setIonScript(js::FreeOp* fop, js::jit::IonScript* ionScript);
-  inline void clearIonScript(js::FreeOp* fop);
+  void setIonScript(JSFreeOp* fop, js::jit::IonScript* ionScript);
+  inline void clearIonScript(JSFreeOp* fop);
 
   bool hasBaselineScript() const {
     bool res = baseline && baseline != BASELINE_DISABLED_SCRIPT;
@@ -2640,9 +2633,9 @@ class JSScript : public js::BaseScript {
   }
   inline void setBaselineScript(JSRuntime* rt,
                                 js::jit::BaselineScript* baselineScript);
-  inline void setBaselineScript(js::FreeOp* fop,
+  inline void setBaselineScript(JSFreeOp* fop,
                                 js::jit::BaselineScript* baselineScript);
-  inline void clearBaselineScript(js::FreeOp* fop);
+  inline void clearBaselineScript(JSFreeOp* fop);
 
   void updateJitCodeRaw(JSRuntime* rt);
 
@@ -2758,8 +2751,8 @@ class JSScript : public js::BaseScript {
   bool hasJitScript() const { return jitScript_ != nullptr; }
   js::jit::JitScript* jitScript() { return jitScript_; }
 
-  void maybeReleaseJitScript(js::FreeOp* fop);
-  void releaseJitScript(js::FreeOp* fop);
+  void maybeReleaseJitScript(JSFreeOp* fop);
+  void releaseJitScript(JSFreeOp* fop);
 
   inline js::GlobalObject& global() const;
   inline bool hasGlobal(const js::GlobalObject* global) const;
@@ -2903,8 +2896,6 @@ class JSScript : public js::BaseScript {
   void addSizeOfJitScript(mozilla::MallocSizeOf mallocSizeOf,
                           size_t* sizeOfJitScript,
                           size_t* sizeOfBaselineFallbackStubs) const;
-
-  size_t dataSize() const { return dataSize_; }
 
   mozilla::Span<const JS::GCCellPtr> gcthings() const {
     return data_->gcthings();
@@ -3055,7 +3046,7 @@ class JSScript : public js::BaseScript {
   bool hasDebugScript() const { return hasFlag(MutableFlags::HasDebugScript); }
   void setHasDebugScript(bool b) { setFlag(MutableFlags::HasDebugScript, b); }
 
-  void finalize(js::FreeOp* fop);
+  void finalize(JSFreeOp* fop);
 
   static const JS::TraceKind TraceKind = JS::TraceKind::Script;
 
@@ -3469,7 +3460,7 @@ class LazyScript : public BaseScript {
 
   friend class GCMarker;
   void traceChildren(JSTracer* trc);
-  void finalize(js::FreeOp* fop);
+  void finalize(JSFreeOp* fop);
 
   static const JS::TraceKind TraceKind = JS::TraceKind::LazyScript;
 

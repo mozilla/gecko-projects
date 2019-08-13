@@ -687,12 +687,7 @@ void nsPresContext::AttachPresShell(mozilla::PresShell* aPresShell) {
   nsIURI* docURI = doc->GetDocumentURI();
 
   if (IsDynamic() && docURI) {
-    bool isChrome = false;
-    bool isRes = false;
-    docURI->SchemeIs("chrome", &isChrome);
-    docURI->SchemeIs("resource", &isRes);
-
-    if (!isChrome && !isRes)
+    if (!docURI->SchemeIs("chrome") && !docURI->SchemeIs("resource"))
       mImageAnimationMode = mImageAnimationModePref;
     else
       mImageAnimationMode = imgIContainer::kNormalAnimMode;
@@ -1168,10 +1163,6 @@ void nsPresContext::SetBidi(uint32_t aSource) {
 }
 
 uint32_t nsPresContext::GetBidi() const { return Document()->GetBidiOptions(); }
-
-bool nsPresContext::IsTopLevelWindowInactive() {
-  return Document()->IsTopLevelWindowInactive();
-}
 
 void nsPresContext::RecordInteractionTime(InteractionType aType,
                                           const TimeStamp& aTimeStamp) {

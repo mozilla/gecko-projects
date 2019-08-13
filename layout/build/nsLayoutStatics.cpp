@@ -251,12 +251,9 @@ nsresult nsLayoutStatics::Initialize() {
   PointerEventHandler::InitializeStatics();
   TouchManager::InitializeStatics();
 
-  nsCORSListenerProxy::Startup();
-
   nsWindowMemoryReporter::Init();
 
   SVGElementFactory::Init();
-  nsSVGUtils::Init();
 
   ProcessPriorityManager::Init();
 

@@ -96,10 +96,6 @@ DocAccessible::DocAccessible(dom::Document* aDocument,
 
   MOZ_ASSERT(mPresShell, "should have been given a pres shell");
   mPresShell->SetDocAccessible(this);
-
-  // If this is a XUL Document, it should not implement nsHyperText
-  if (mDocumentNode && mDocumentNode->IsXULDocument())
-    mGenericTypes &= ~eHyperText;
 }
 
 DocAccessible::~DocAccessible() {
@@ -201,10 +197,6 @@ role DocAccessible::NativeRole() const {
         return roles::CHROME_WINDOW;
 
       if (itemType == nsIDocShellTreeItem::typeContent) {
-#ifdef MOZ_XUL
-        if (mDocumentNode && mDocumentNode->IsXULDocument())
-          return roles::APPLICATION;
-#endif
         return roles::DOCUMENT;
       }
     } else if (itemType == nsIDocShellTreeItem::typeContent) {
@@ -346,13 +338,6 @@ void DocAccessible::URL(nsAString& aURL) const {
 }
 
 void DocAccessible::DocType(nsAString& aType) const {
-#ifdef MOZ_XUL
-  if (mDocumentNode->IsXULDocument()) {
-    aType.AssignLiteral("window");  // doctype not implemented for XUL at time
-                                    // of writing - causes assertion
-    return;
-  }
-#endif
   dom::DocumentType* docType = mDocumentNode->GetDoctype();
   if (docType) docType->GetPublicId(aType);
 }
@@ -1308,6 +1293,7 @@ void DocAccessible::ContentInserted(nsIContent* aStartChildNode,
 }
 
 bool DocAccessible::PruneOrInsertSubtree(nsIContent* aRoot) {
+  bool insert = false;
   // If we already have an accessible, check if we need to remove it, recreate
   // it, or keep it in place.
   Accessible* acc = GetAccessible(aRoot);
@@ -1325,9 +1311,12 @@ bool DocAccessible::PruneOrInsertSubtree(nsIContent* aRoot) {
 
     nsIFrame* frame = acc->GetFrame();
 
-    // Accessible has no frame and its not display:contents. Remove it.
+    // Accessible has no frame and it's not display:contents. Remove it.
+    // As well as removing the a11y subtree, we must also remove Accessibles
+    // for DOM descendants, since some of these might be relocated Accessibles
+    // and their DOM nodes are now hidden as well.
     if (!frame && !nsCoreUtils::IsDisplayContents(aRoot)) {
-      ContentRemoved(acc);
+      ContentRemoved(aRoot);
       return false;
     }
 
@@ -1349,7 +1338,19 @@ bool DocAccessible::PruneOrInsertSubtree(nsIContent* aRoot) {
     // If there is no current accessible, and the node has a frame, or is
     // display:contents, schedule it for insertion.
     if (aRoot->GetPrimaryFrame() || nsCoreUtils::IsDisplayContents(aRoot)) {
-      return true;
+      // This may be a new subtree, the insertion process will recurse through
+      // its descendants.
+      if (!GetAccessibleOrDescendant(aRoot)) {
+        return true;
+      }
+
+      // Content is not an accessible, but has accessible descendants.
+      // We schedule this container for insertion strictly for the case where it
+      // itself now needs an accessible. We will still need to recurse into the
+      // descendant content to prune accessibles, and in all likelyness to
+      // insert accessibles since accessible insertions will likeley get missed
+      // in an existing subtree.
+      insert = true;
     }
   }
 
@@ -1368,11 +1369,7 @@ bool DocAccessible::PruneOrInsertSubtree(nsIContent* aRoot) {
     }
   }
 
-  // If we get here we either already have an accessible we don't want to touch,
-  // or the content does not have a frame and is not display:contents.
-  MOZ_ASSERT(acc || (!aRoot->GetPrimaryFrame() &&
-                     !nsCoreUtils::IsDisplayContents(aRoot)));
-  return false;
+  return insert;
 }
 
 void DocAccessible::RecreateAccessible(nsIContent* aContent) {
@@ -2390,7 +2387,7 @@ bool DocAccessible::IsLoadEventTarget() const {
     // Return true if it's either:
     // a) tab document;
     nsCOMPtr<nsIDocShellTreeItem> rootTreeItem;
-    treeItem->GetRootTreeItem(getter_AddRefs(rootTreeItem));
+    treeItem->GetInProcessRootTreeItem(getter_AddRefs(rootTreeItem));
     if (parentTreeItem == rootTreeItem) return true;
 
     // b) frame/iframe document and its parent document is not in loading state

@@ -37,6 +37,7 @@ include protocol PJavaScript;
 include protocol PRemoteSpellcheckEngine;
 include protocol PWebBrowserPersistDocument;
 include protocol PWebrtcGlobal;
+include protocol PWindowGlobal;
 include protocol PPresentation;
 include protocol PURLClassifier;
 include protocol PURLClassifierLocal;
@@ -99,12 +100,12 @@ using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
 using refcounted class nsIInputStream from "mozilla/ipc/IPCStreamUtils.h";
 using refcounted class mozilla::dom::BrowsingContext from "mozilla/dom/BrowsingContext.h";
 using mozilla::dom::BrowsingContextTransaction from "mozilla/dom/BrowsingContext.h";
-using mozilla::dom::BrowsingContextFieldEpochs from "mozilla/dom/BrowsingContext.h";
 using mozilla::dom::BrowsingContextInitializer from "mozilla/dom/BrowsingContext.h";
 using base::SharedMemoryHandle from "base/shared_memory.h";
 using mozilla::ipc::SharedMemoryBasic::Handle from "mozilla/ipc/SharedMemoryBasic.h";
 using mozilla::fontlist::Pointer from "SharedFontList.h";
 using gfxSparseBitSet from "gfxFontUtils.h";
+using mozilla::dom::MediaControlActions from "ipc/MediaControlIPC.h";
 
 union ChromeRegistryItem
 {
@@ -384,15 +385,17 @@ nested(upto inside_cpow) sync protocol PContent
     // Keep the last 3 attributes in sync with GetProcessAttributes!
 parent:
     async ConstructPopupBrowser(ManagedEndpoint<PBrowserParent> browserEp,
+                                ManagedEndpoint<PWindowGlobalParent> windowEp,
                                 TabId tabId, IPCTabContext context,
-                                BrowsingContext browsingContext,
+                                WindowGlobalInit windowInit,
                                 uint32_t chromeFlags);
 
 child:
     async ConstructBrowser(ManagedEndpoint<PBrowserChild> browserEp,
+                           ManagedEndpoint<PWindowGlobalChild> windowEp,
                            TabId tabId, TabId sameTabGroupAs,
                            IPCTabContext context,
-                           BrowsingContext browsingContext,
+                           WindowGlobalInit windowInit,
                            uint32_t chromeFlags, ContentParentId cpId,
                            bool isForBrowser, bool isTopLevel);
 
@@ -809,6 +812,12 @@ child:
     */
     async SetMediaMuted(BrowsingContext aContext, bool aMuted);
 
+    /**
+     * This method is used to apply the media action to outer window in the
+     * content process, such as play, pause, stop ..e.t.c.
+     */
+    async UpdateMediaAction(BrowsingContext aContext, MediaControlActions aAction);
+
     // Begin subscribing to a new BrowsingContextGroup, sending down the current
     // value for every individual BrowsingContext.
     async RegisterBrowsingContextGroup(BrowsingContextInitializer[] aInits);
@@ -1051,11 +1060,6 @@ parent:
     async BackUpXResources(FileDescriptor aXSocketFd);
 
     async RequestAnonymousTemporaryFile(uint64_t aID);
-
-    /** Clear RemoteFrameInfo of the given tab id. */
-    async UnregisterRemoteFrame(TabId tabId,
-                                ContentParentId cpId,
-                                bool aMarkedDestroying);
 
     /**
      * Tell the chrome process there is a destruction of PBrowser(Tab)
@@ -1387,10 +1391,22 @@ parent:
 
     async StoreUserInteractionAsPermission(Principal aPrincipal);
 
+   /**
+    * When media started or stopped in content process, we have to notify the
+    * chrome process in order to know which tab is playing media.
+    */
+    async NotifyMediaActiveChanged(BrowsingContext aContext, bool aActive);
+
+   /**
+    * When media became audible or inaudible in content process, we have to
+    * notify chrome process in order to which tab is audible.
+    */
+    async NotifyMediaAudibleChanged(BrowsingContext aContext, bool aAudible);
+
 both:
     async CommitBrowsingContextTransaction(BrowsingContext aContext,
                                            BrowsingContextTransaction aTransaction,
-                                           BrowsingContextFieldEpochs aEpochs);
+                                           uint64_t aEpoch);
 
     async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
                        Principal aPrincipal, ClonedMessageData aData);

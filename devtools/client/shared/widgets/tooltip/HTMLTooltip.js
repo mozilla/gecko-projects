@@ -754,16 +754,16 @@ HTMLTooltip.prototype = {
    */
   async hide({ fromMouseup = false } = {}) {
     // Exit if the disable autohide setting is in effect.
-    if (Services.prefs.getBoolPref("ui.popup.disable_autohide", false)) {
+    if (Services.prefs.getBoolPref("devtools.popup.disable_autohide", false)) {
       return;
     }
 
-    this.doc.defaultView.clearTimeout(this.attachEventsTimer);
     if (!this.isVisible()) {
       this.emit("hidden");
       return;
     }
 
+    this.doc.defaultView.clearTimeout(this.attachEventsTimer);
     // If the tooltip is hidden from a mouseup event, wait for a potential click event
     // to be consumed before removing event listeners.
     if (fromMouseup) {

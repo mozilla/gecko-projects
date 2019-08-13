@@ -59,8 +59,6 @@ class UrlbarInput {
     // In the future this may be moved to the view, so it can customize
     // the container element.
     let MozXULElement = this.window.MozXULElement;
-    // TODO Bug 1567377: urlbarView-body-inner possibly doesn't need the
-    // role="combobox" once bug 1551598 is fixed.
     this.textbox.after(
       MozXULElement.parseXULToFragment(`
         <vbox id="urlbar-results"
@@ -68,8 +66,7 @@ class UrlbarInput {
               tooltip="aHTMLTooltip"
               hidden="true">
           <html:div class="urlbarView-body-outer">
-            <html:div class="urlbarView-body-inner"
-                      role="combobox">
+            <html:div class="urlbarView-body-inner">
               <html:div id="urlbarView-results"
                         role="listbox"/>
             </html:div>
@@ -487,7 +484,7 @@ class UrlbarInput {
     };
 
     let selIndex = this.view.selectedIndex;
-    if (!result.payload.isKeywordOffer) {
+    if (!result.payload.keywordOffer) {
       this.view.close();
     }
 
@@ -544,7 +541,7 @@ class UrlbarInput {
         return;
       }
       case UrlbarUtils.RESULT_TYPE.SEARCH: {
-        if (result.payload.isKeywordOffer) {
+        if (result.payload.keywordOffer) {
           // The user confirmed a token alias, so just move the caret
           // to the end of it. Because there's a trailing space in the value,
           // the user can directly start typing a query string at that point.

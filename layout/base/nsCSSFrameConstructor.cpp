@@ -6142,9 +6142,9 @@ nsIFrame* nsCSSFrameConstructor::FindSiblingInternal(
 
   auto getInsideMarkerFrame = [](const nsIContent* aContent) -> nsIFrame* {
     auto* marker = nsLayoutUtils::GetMarkerFrame(aContent);
-    const bool isInsideMarker = marker &&
-        marker->GetInFlowParent()->StyleList()->mListStylePosition ==
-            NS_STYLE_LIST_STYLE_POSITION_INSIDE;
+    const bool isInsideMarker =
+        marker && marker->GetInFlowParent()->StyleList()->mListStylePosition ==
+                      NS_STYLE_LIST_STYLE_POSITION_INSIDE;
     return isInsideMarker ? marker : nullptr;
   };
 
@@ -8119,7 +8119,7 @@ nsIFrame* nsCSSFrameConstructor::CreateContinuingFrame(
     nsIFrame* cellFrame = aFrame->PrincipalChildList().FirstChild();
     while (cellFrame) {
       // See if it's a table cell frame
-      if (IsTableCell(cellFrame->Type())) {
+      if (cellFrame->IsTableCellFrame()) {
         nsIFrame* continuingCellFrame =
             CreateContinuingFrame(aPresContext, cellFrame, rowFrame);
         newChildList.AppendFrame(nullptr, continuingCellFrame);
@@ -8130,7 +8130,7 @@ nsIFrame* nsCSSFrameConstructor::CreateContinuingFrame(
     rowFrame->SetInitialChildList(kPrincipalList, newChildList);
     newFrame = rowFrame;
 
-  } else if (IsTableCell(frameType)) {
+  } else if (LayoutFrameType::TableCell == frameType) {
     // Warning: If you change this and add a wrapper frame around table cell
     // frames, make sure Bug 368554 doesn't regress!
     // See IsInAutoWidthTableCellForQuirk() in nsImageFrame.cpp.
@@ -8392,7 +8392,7 @@ bool nsCSSFrameConstructor::MaybeRecreateContainerForFrameRemoval(
         // lead to an empty ::-moz-column-span-wrapper subtree. The
         // column-span siblings were the frame's children, but later become
         // the frame's siblings after CreateColumnSpanSiblings().
-        inFlowFrame->GetProperty(nsIFrame::HasColumnSpanSiblings()) ||
+        inFlowFrame->HasColumnSpanSiblings() ||
         // 3. Removing the only child of a ::-moz-column-content, whose
         // ColumnSet grandparent has a previous column-span sibling, requires
         // reframing since we might connect the ColumnSet's next column-span
@@ -10785,11 +10785,13 @@ void nsCSSFrameConstructor::FinishBuildingColumns(
                  prevColumnSet->GetParent() == aColumnSetWrapper,
              "Should have established column hierarchy!");
 
+  // Tag the first ColumnSet to have column-span siblings so that the bit can
+  // propagate to all the continuations. We don't want the last ColumnSet to
+  // have this bit, so we will unset the bit for it at the end of this function.
+  prevColumnSet->SetHasColumnSpanSiblings(true);
+
   nsFrameList finalList;
   while (aColumnContentSiblings.NotEmpty()) {
-    // Tag every ColumnSet except the last one.
-    prevColumnSet->SetProperty(nsIFrame::HasColumnSpanSiblings(), true);
-
     nsIFrame* f = aColumnContentSiblings.RemoveFirstChild();
     if (f->IsColumnSpan()) {
       // Do nothing for column-span wrappers. Just move it to the final
@@ -10799,12 +10801,18 @@ void nsCSSFrameConstructor::FinishBuildingColumns(
       auto* continuingColumnSet = static_cast<nsContainerFrame*>(
           CreateContinuingFrame(mPresShell->GetPresContext(), prevColumnSet,
                                 aColumnSetWrapper, false));
+      MOZ_ASSERT(continuingColumnSet->HasColumnSpanSiblings(),
+                 "The bit should propagate to the next continuation!");
+
       f->SetParent(continuingColumnSet);
       SetInitialSingleChild(continuingColumnSet, f);
       finalList.AppendFrame(aColumnSetWrapper, continuingColumnSet);
       prevColumnSet = continuingColumnSet;
     }
   }
+
+  // Unset the bit because the last ColumnSet has no column-span siblings.
+  prevColumnSet->SetHasColumnSpanSiblings(false);
 
   aColumnSetWrapper->AppendFrames(kPrincipalList, finalList);
 }
@@ -10843,14 +10851,16 @@ nsFrameList nsCSSFrameConstructor::CreateColumnSpanSiblings(
 
   nsFrameList siblings;
   nsContainerFrame* lastNonColumnSpanWrapper = aInitialBlock;
+
+  // Tag the first non-column-span wrapper to have column-span siblings so that
+  // the bit can propagate to all the continuations. We don't want the last
+  // wrapper to have this bit, so we will unset the bit for it at the end of
+  // this function.
+  lastNonColumnSpanWrapper->SetHasColumnSpanSiblings(true);
   do {
     MOZ_ASSERT(aChildList.NotEmpty(), "Why call this if child list is empty?");
     MOZ_ASSERT(aChildList.FirstChild()->IsColumnSpan(),
                "Must have the child starting with column-span!");
-
-    // Tag every non-column-span wrapper except the last one.
-    lastNonColumnSpanWrapper->SetProperty(nsIFrame::HasColumnSpanSiblings(),
-                                          true);
 
     // Grab the consecutive column-span kids, and reparent them into a
     // block frame.
@@ -10880,6 +10890,8 @@ nsFrameList nsCSSFrameConstructor::CreateColumnSpanSiblings(
                               lastNonColumnSpanWrapper, parentFrame, false));
     nonColumnSpanWrapper->AddStateBits(NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR |
                                        NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN);
+    MOZ_ASSERT(nonColumnSpanWrapper->HasColumnSpanSiblings(),
+               "The bit should propagate to the next continuation!");
 
     if (aChildList.NotEmpty()) {
       nsFrameList nonColumnSpanKids =
@@ -10897,6 +10909,10 @@ nsFrameList nsCSSFrameConstructor::CreateColumnSpanSiblings(
 
     lastNonColumnSpanWrapper = nonColumnSpanWrapper;
   } while (aChildList.NotEmpty());
+
+  // Unset the bit because the last non-column-span wrapper has no column-span
+  // siblings.
+  lastNonColumnSpanWrapper->SetHasColumnSpanSiblings(false);
 
   return siblings;
 }

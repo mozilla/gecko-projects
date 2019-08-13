@@ -639,6 +639,10 @@ function prompt(aBrowser, aRequest) {
         if (videoDevices.length && sharingScreen) {
           camAllowed = false;
         }
+        if (aRequest.isThirdPartyOrigin) {
+          camAllowed = false;
+          micAllowed = false;
+        }
 
         let activeCamera;
         let activeMic;
@@ -1082,8 +1086,11 @@ function prompt(aBrowser, aRequest) {
     },
   };
 
-  // Don't offer "always remember" action in PB mode.
-  if (!PrivateBrowsingUtils.isBrowserPrivate(aBrowser)) {
+  // Don't offer "always remember" action in PB mode or from third party
+  if (
+    !PrivateBrowsingUtils.isBrowserPrivate(aBrowser) &&
+    !aRequest.isThirdPartyOrigin
+  ) {
     // Disable the permanent 'Allow' action if the connection isn't secure, or for
     // screen/audio sharing (because we can't guess which window the user wants to
     // share without prompting).
@@ -1145,9 +1152,6 @@ function prompt(aBrowser, aRequest) {
   let schemeHistogram = Services.telemetry.getKeyedHistogramById(
     "PERMISSION_REQUEST_ORIGIN_SCHEME"
   );
-  let thirdPartyHistogram = Services.telemetry.getKeyedHistogramById(
-    "PERMISSION_REQUEST_THIRD_PARTY_ORIGIN"
-  );
   let userInputHistogram = Services.telemetry.getKeyedHistogramById(
     "PERMISSION_REQUEST_HANDLING_USER_INPUT"
   );
@@ -1167,7 +1171,6 @@ function prompt(aBrowser, aRequest) {
     requestType = requestType.toLowerCase();
 
     schemeHistogram.add(requestType, scheme);
-    thirdPartyHistogram.add(requestType, aRequest.isThirdPartyOrigin);
     userInputHistogram.add(requestType, aRequest.isHandlingUserInput);
   }
 }

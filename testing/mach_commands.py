@@ -1158,6 +1158,10 @@ class TestInfoCommand(MachCommandBase):
     @CommandArgument('--components', default=None,
                      help='Comma-separated list of Bugzilla components.'
                           ' eg. Testing::General,Core::WebVR')
+    @CommandArgument('--flavor',
+                     help='Limit results to tests of the specified flavor (eg. "xpcshell").')
+    @CommandArgument('--subsuite',
+                     help='Limit results to tests of the specified subsuite (eg. "devtools").')
     @CommandArgument('paths', nargs=argparse.REMAINDER,
                      help='File system paths of interest.')
     @CommandArgument('--show-manifests', action='store_true',
@@ -1171,10 +1175,14 @@ class TestInfoCommand(MachCommandBase):
                      help='Comma-separated list of test keys to filter on, '
                           'like "skip-if"; only these fields will be searched '
                           'for filter-values.')
+    @CommandArgument('--no-component-report', action='store_false',
+                     dest="show_components", default=True,
+                     help='Do not categorize by bugzilla component.')
     @CommandArgument('--output-file',
                      help='Path to report file.')
-    def test_report(self, components, paths, show_manifests, show_tests,
-                    filter_values, filter_keys, output_file):
+    def test_report(self, components, flavor, subsuite, paths,
+                    show_manifests, show_tests,
+                    filter_values, filter_keys, show_components, output_file):
         import mozpack.path as mozpath
         from moztest.resolve import TestResolver
 
@@ -1208,7 +1216,8 @@ class TestInfoCommand(MachCommandBase):
 
         print("Finding tests...")
         resolver = self._spawn(TestResolver)
-        tests = list(resolver.resolve_tests(paths=paths))
+        tests = list(resolver.resolve_tests(paths=paths, flavor=flavor,
+                                            subsuite=subsuite))
         if show_manifests:
             by_component['manifests'] = {}
             manifest_paths = set()
@@ -1233,10 +1242,11 @@ class TestInfoCommand(MachCommandBase):
                             'tests': 0,
                             'skipped': 0
                         }
-                        if key in by_component['manifests']:
-                            by_component['manifests'][key].append(manifest_info)
+                        rkey = key if show_components else 'all'
+                        if rkey in by_component['manifests']:
+                            by_component['manifests'][rkey].append(manifest_info)
                         else:
-                            by_component['manifests'][key] = [manifest_info]
+                            by_component['manifests'][rkey] = [manifest_info]
                         break
                 if manifest_info:
                     for t in tests:
@@ -1263,10 +1273,11 @@ class TestInfoCommand(MachCommandBase):
                             value = t.get(test_key)
                             if value:
                                 test_info[test_key] = value
-                        if key in by_component['tests']:
-                            by_component['tests'][key].append(test_info)
+                        rkey = key if show_components else 'all'
+                        if rkey in by_component['tests']:
+                            by_component['tests'][rkey].append(test_info)
                         else:
-                            by_component['tests'][key] = [test_info]
+                            by_component['tests'][rkey] = [test_info]
                         break
             for key in by_component['tests']:
                 by_component['tests'][key].sort()
@@ -1289,3 +1300,42 @@ class RustTests(MachCommandBase):
                                                     what=['pre-export',
                                                           'export',
                                                           'recurse_rusttests'])
+
+
+@CommandProvider
+class TestFluentMigration(MachCommandBase):
+    @Command('fluent-migration-test', category='testing',
+             description="Test Fluent migration recipes.")
+    @CommandArgument('test_paths', nargs='*', metavar='N',
+                     help="Recipe paths to test.")
+    def run_migration_tests(self, test_paths=None, **kwargs):
+        if not test_paths:
+            test_paths = []
+        self._activate_virtualenv()
+        from test_fluent_migrations import fmt
+        rv = 0
+        with_context = []
+        for to_test in test_paths:
+            try:
+                context = fmt.inspect_migration(to_test)
+                for issue in context['issues']:
+                    self.log(logging.ERROR, 'fluent-migration-test', {
+                        'error': issue['msg'],
+                        'file': to_test,
+                    }, 'ERROR in {file}: {error}')
+                if context['issues']:
+                    continue
+                with_context.append({
+                    'to_test': to_test,
+                    'references': context['references'],
+                })
+            except Exception as e:
+                self.log(logging.ERROR, 'fluent-migration-test', {
+                    'error': str(e),
+                    'file': to_test
+                }, 'ERROR in {file}: {error}')
+                rv |= 1
+        obj_dir = fmt.prepare_object_dir(self)
+        for context in with_context:
+            rv |= fmt.test_migration(self, obj_dir, **context)
+        return rv

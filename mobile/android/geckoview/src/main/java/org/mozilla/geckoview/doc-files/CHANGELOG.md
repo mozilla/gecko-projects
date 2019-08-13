@@ -11,10 +11,6 @@ exclude: true
 # GeckoView API Changelog.
 
 ## v70
-
-- Removed the obsolete `success` parameter from
-  [`CrashReporter#sendCrashReport(Context, File, File, String)`][70.3] and
-  [`CrashReporter#sendCrashReport(Context, File, Map, String)`][70.4].
 - Added API for session context assignment
   [`GeckoSessionSettings.Builder.contextId`][70.1] and deletion of data
   related to a session context
@@ -26,6 +22,14 @@ exclude: true
   when the URI we're loading originates from another page. A common example of this would be long pressing
   a link and then opening that in a new `GeckoSession`.
 - Added capture parameter to [`onFilePrompt`][70.9] and corresponding [`CAPTURE_TYPE_*`][70.7] constants.
+- Removed the obsolete `success` parameter from
+  [`CrashReporter#sendCrashReport(Context, File, File, String)`][70.3] and
+  [`CrashReporter#sendCrashReport(Context, File, Map, String)`][70.4].
+- Add GeckoSession.LOAD_FLAGS_REPLACE_HISTORY
+- Complete rewrite of [`PromptDelegate`][70.11].
+- Added [`RuntimeTelemetry.Delegate`][70.12] that receives streaming telemetry
+  data from GeckoView.
+- Updated [`ContentBlocking`][70.13] to better report blocked and allowed ETP events.
 
 [70.1]: {{javadoc_uri}}/GeckoSessionSettings.Builder.html#contextId-java.lang.String-
 [70.2]: {{javadoc_uri}}/StorageController.html#clearDataForSessionContext-java.lang.String-
@@ -37,6 +41,9 @@ exclude: true
 [70.8]: {{javadoc_uri}}/GeckoSession.html#loadUri-java.lang.String-org.mozilla.geckoview.GeckoSession-int-
 [70.9]: {{javadoc_uri}}/GeckoSession.PromptDelegate.html#onFilePrompt-org.mozilla.geckoview.GeckoSession-java.lang.String-int-java.lang.String:A-int-org.mozilla.geckoview.GeckoSession.PromptDelegate.FileCallback-
 [70.10]: {{javadoc_uri}}/GeckoView.html#setSession-org.mozilla.geckoview.GeckoSession-
+[70.11]: {{javadoc_uri}}/GeckoSession.PromptDelegate.html
+[70.12]: {{javadoc_uri}}/RuntimeTelemetry.Delegate.html
+[70.13]: {{javadoc_uri}}/ContentBlocking.html
 
 ## v69
 - Modified behavior of ['setAutomaticFontSizeAdjustment'][69.1] so that it no 
@@ -289,4 +296,4 @@ exclude: true
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: b101f0344e941cb50eaaf75326e126ce3efc52b4
+[api-version]: 1929f5739623cec70ce9bad19837a4f21604488e

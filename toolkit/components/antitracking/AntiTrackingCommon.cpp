@@ -14,7 +14,6 @@
 #include "mozilla/Logging.h"
 #include "mozilla/MruCache.h"
 #include "mozilla/Pair.h"
-#include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_extensions.h"
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozIThirdPartyUtil.h"
@@ -314,8 +313,7 @@ bool CheckContentBlockingAllowList(nsIURI* aTopWinURI,
                                    bool aIsPrivateBrowsing) {
   bool isAllowed = false;
   nsresult rv = AntiTrackingCommon::IsOnContentBlockingAllowList(
-      aTopWinURI, aIsPrivateBrowsing, AntiTrackingCommon::eStorageChecks,
-      isAllowed);
+      aTopWinURI, aIsPrivateBrowsing, isAllowed);
   if (NS_SUCCEEDED(rv) && isAllowed) {
     LOG_SPEC(
         ("The top-level window (%s) is on the content blocking allow list, "
@@ -611,6 +609,41 @@ already_AddRefed<nsPIDOMWindowOuter> GetTopWindow(nsPIDOMWindowInner* aWindow) {
   return pwin.forget();
 }
 
+class TemporaryAccessGrantCacheKey : public PLDHashEntryHdr {
+ public:
+  typedef Pair<nsCOMPtr<nsIPrincipal>, nsCString> KeyType;
+  typedef const KeyType* KeyTypePointer;
+
+  explicit TemporaryAccessGrantCacheKey(KeyTypePointer aKey)
+      : mPrincipal(aKey->first()), mType(aKey->second()) {}
+  TemporaryAccessGrantCacheKey(TemporaryAccessGrantCacheKey&& aOther) = default;
+
+  ~TemporaryAccessGrantCacheKey() = default;
+
+  KeyType GetKey() const { return MakePair(mPrincipal, mType); }
+  bool KeyEquals(KeyTypePointer aKey) const {
+    return !!mPrincipal == !!aKey->first() && mType == aKey->second() &&
+           (mPrincipal ? (mPrincipal->Equals(aKey->first())) : true);
+  }
+
+  static KeyTypePointer KeyToPointer(KeyType& aKey) { return &aKey; }
+  static PLDHashNumber HashKey(KeyTypePointer aKey) {
+    if (!aKey) {
+      return 0;
+    }
+
+    BasePrincipal* bp = BasePrincipal::Cast(aKey->first());
+    return HashGeneric(bp->GetOriginNoSuffixHash(), bp->GetOriginSuffixHash(),
+                       HashString(aKey->second()));
+  }
+
+  enum { ALLOW_MEMMOVE = true };
+
+ private:
+  nsCOMPtr<nsIPrincipal> mPrincipal;
+  nsCString mType;
+};
+
 class TemporaryAccessGrantObserver final : public nsIObserver {
  public:
   NS_DECL_ISUPPORTS
@@ -618,18 +651,33 @@ class TemporaryAccessGrantObserver final : public nsIObserver {
 
   static void Create(nsPermissionManager* aPM, nsIPrincipal* aPrincipal,
                      const nsACString& aType) {
-    nsCOMPtr<nsITimer> timer;
-    RefPtr<TemporaryAccessGrantObserver> observer =
-        new TemporaryAccessGrantObserver(aPM, aPrincipal, aType);
-    nsresult rv = NS_NewTimerWithObserver(getter_AddRefs(timer), observer,
-                                          24 * 60 * 60 * 1000,  // 24 hours
-                                          nsITimer::TYPE_ONE_SHOT);
+    MOZ_ASSERT(XRE_IsParentProcess());
 
-    if (NS_SUCCEEDED(rv)) {
-      observer->SetTimer(timer);
-    } else {
-      timer->Cancel();
+    if (!sObservers) {
+      sObservers = MakeUnique<ObserversTable>();
     }
+    Unused << sObservers
+                  ->LookupForAdd(MakePair(nsCOMPtr<nsIPrincipal>(aPrincipal),
+                                          nsCString(aType)))
+                  .OrInsert([&]() -> nsITimer* {
+                    // Only create a new observer if we don't have a matching
+                    // entry in our hashtable.
+                    nsCOMPtr<nsITimer> timer;
+                    RefPtr<TemporaryAccessGrantObserver> observer =
+                        new TemporaryAccessGrantObserver(aPM, aPrincipal,
+                                                         aType);
+                    nsresult rv = NS_NewTimerWithObserver(
+                        getter_AddRefs(timer), observer,
+                        24 * 60 * 60 * 1000,  // 24 hours
+                        nsITimer::TYPE_ONE_SHOT);
+
+                    if (NS_SUCCEEDED(rv)) {
+                      observer->SetTimer(timer);
+                      return timer;
+                    }
+                    timer->Cancel();
+                    return nullptr;
+                  });
   }
 
   void SetTimer(nsITimer* aTimer) {
@@ -654,11 +702,17 @@ class TemporaryAccessGrantObserver final : public nsIObserver {
   ~TemporaryAccessGrantObserver() = default;
 
  private:
+  typedef nsDataHashtable<TemporaryAccessGrantCacheKey, nsCOMPtr<nsITimer>>
+      ObserversTable;
+  static UniquePtr<ObserversTable> sObservers;
   nsCOMPtr<nsITimer> mTimer;
   RefPtr<nsPermissionManager> mPM;
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsCString mType;
 };
+
+UniquePtr<TemporaryAccessGrantObserver::ObserversTable>
+    TemporaryAccessGrantObserver::sObservers;
 
 NS_IMPL_ISUPPORTS(TemporaryAccessGrantObserver, nsIObserver)
 
@@ -667,6 +721,9 @@ TemporaryAccessGrantObserver::Observe(nsISupports* aSubject, const char* aTopic,
                                       const char16_t* aData) {
   if (strcmp(aTopic, NS_TIMER_CALLBACK_TOPIC) == 0) {
     Unused << mPM->RemoveFromPrincipal(mPrincipal, mType);
+
+    MOZ_ASSERT(sObservers);
+    sObservers->Remove(MakePair(mPrincipal, mType));
   } else if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
@@ -677,6 +734,7 @@ TemporaryAccessGrantObserver::Observe(nsISupports* aSubject, const char* aTopic,
       mTimer->Cancel();
       mTimer = nullptr;
     }
+    sObservers.reset();
   }
 
   return NS_OK;
@@ -1770,29 +1828,8 @@ bool AntiTrackingCommon::MaybeIsFirstPartyStorageAccessGrantedFor(
 }
 
 nsresult AntiTrackingCommon::IsOnContentBlockingAllowList(
-    nsIURI* aTopWinURI, bool aIsPrivateBrowsing,
-    AntiTrackingCommon::ContentBlockingAllowListPurpose aPurpose,
-    bool& aIsAllowListed) {
+    nsIURI* aTopWinURI, bool aIsPrivateBrowsing, bool& aIsAllowListed) {
   aIsAllowListed = false;
-
-  // For storage checks, check the storage pref, and for annotations checks,
-  // check the corresponding pref as well.  This allows each set of checks to
-  // be disabled individually if needed.
-  if ((aPurpose == eStorageChecks &&
-       !StaticPrefs::browser_contentblocking_allowlist_storage_enabled()) ||
-      (aPurpose == eTrackingAnnotations &&
-       !StaticPrefs::browser_contentblocking_allowlist_annotations_enabled()) ||
-      (aPurpose == eFingerprinting &&
-       !StaticPrefs::privacy_trackingprotection_fingerprinting_enabled()) ||
-      (aPurpose == eCryptomining &&
-       !StaticPrefs::privacy_trackingprotection_cryptomining_enabled()) ||
-      (aPurpose == eSocialTracking &&
-       !StaticPrefs::privacy_trackingprotection_socialtracking_enabled())) {
-    LOG(
-        ("Attempting to check the content blocking allow list aborted because "
-         "the third-party cookies UI has been disabled."));
-    return NS_OK;
-  }
 
   LOG_SPEC(("Deciding whether the user has overridden content blocking for %s",
             _spec),

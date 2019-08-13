@@ -44,7 +44,7 @@ pref("extensions.getAddons.search.browseURL", "https://addons.mozilla.org/%LOCAL
 pref("extensions.webservice.discoverURL", "https://discovery.addons.mozilla.org/%LOCALE%/firefox/discovery/pane/%VERSION%/%OS%/%COMPATIBILITY_MODE%");
 pref("extensions.getAddons.link.url", "https://addons.mozilla.org/%LOCALE%/firefox/");
 pref("extensions.getAddons.langpacks.url", "https://services.addons.mozilla.org/api/v3/addons/language-tools/?app=firefox&type=language&appversion=%VERSION%");
-pref("extensions.getAddons.discovery.api_url", "https://services.addons.mozilla.org/api/v4/discovery/?lang=%LOCALE%");
+pref("extensions.getAddons.discovery.api_url", "https://services.addons.mozilla.org/api/v4/discovery/?lang=%LOCALE%&edition=%DISTRIBUTION%");
 
 // Enable the HTML-based discovery panel at about:addons.
 pref("extensions.htmlaboutaddons.discover.enabled", true);
@@ -1317,7 +1317,7 @@ pref("browser.newtabpage.activity-stream.improvesearch.handoffToAwesomebar", tru
 pref("browser.newtabpage.activity-stream.improvesearch.handoffToAwesomebar", false);
 #endif
 
-pref("trailhead.firstrun.branches", "join-privacy");
+pref("trailhead.firstrun.branches", "join-supercharge");
 
 // The pref that controls if the What's New panel is enabled.
 pref("browser.messaging-system.whatsNewPanel.enabled", false);
@@ -1370,7 +1370,10 @@ pref("security.insecure_connection_icon.enabled", true);
 pref("security.insecure_connection_icon.pbmode.enabled", true);
 
 // For secure connections, show gray instead of green lock icon
-pref("security.secure_connection_icon_color_gray", false);
+pref("security.secure_connection_icon_color_gray", true);
+
+// Ignore EV certificate and treat as normal secure connection instead
+pref("security.identityblock.show_extended_validation", false);
 
 // Show "Not Secure" text for http pages; disabled for now
 pref("security.insecure_connection_text.enabled", false);
@@ -1568,10 +1571,6 @@ pref("dom.storage_access.enabled", true);
 pref("dom.storage_access.auto_grants", true);
 pref("dom.storage_access.max_concurrent_auto_grants", 5);
 
-// Define a set of default features for the Content Blocking UI.
-pref("browser.contentblocking.trackingprotection.control-center.ui.enabled", true);
-pref("browser.contentblocking.rejecttrackers.control-center.ui.enabled", true);
-
 pref("browser.contentblocking.control-center.ui.showBlockedLabels", true);
 pref("browser.contentblocking.control-center.ui.showAllowedLabels", false);
 
@@ -1591,6 +1590,9 @@ pref("browser.contentblocking.fingerprinting.preferences.ui.enabled", true);
 //   Cryptomining:
 //     "cm": cryptomining blocking enabled
 //     "-cm": cryptomining blocking disabled
+//   Social Tracking Protection:
+//     "stp": social tracking protection enabled
+//     "-stp": social tracking protection disabled
 //   Cookie behavior:
 //     "cookieBehavior0": cookie behaviour BEHAVIOR_ACCEPT
 //     "cookieBehavior1": cookie behaviour BEHAVIOR_REJECT_FOREIGN
@@ -1599,7 +1601,7 @@ pref("browser.contentblocking.fingerprinting.preferences.ui.enabled", true);
 //     "cookieBehavior4": cookie behaviour BEHAVIOR_REJECT_TRACKER
 //     "cookieBehavior5": cookie behaviour BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN
 // One value from each section must be included in the browser.contentblocking.features.strict pref.
-pref("browser.contentblocking.features.strict", "tp,tpPrivate,cookieBehavior4,cm,fp");
+pref("browser.contentblocking.features.strict", "tp,tpPrivate,cookieBehavior4,cm,fp,stp");
 
 // Hide the "Change Block List" link for trackers/tracking content in the custom
 // Content Blocking/ETP panel. By default, it will not be visible. There is also
@@ -1614,10 +1616,22 @@ pref("browser.contentblocking.report.lockwise.enabled", true);
 
 // Enable Protections report's Monitor card by default.
 pref("browser.contentblocking.report.monitor.enabled", true);
+pref("browser.contentblocking.report.monitor.url", "https://monitor.firefox.com");
+pref("browser.contentblocking.report.lockwise.url", "https://lockwise.firefox.com/");
+
+// Protection Report's SUMO urls
+pref("browser.contentblocking.report.monitor.how_it_works.url", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/monitor-faq");
+pref("browser.contentblocking.report.lockwise.how_it_works.url", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/password-manager-report");
+pref("browser.contentblocking.report.social.url", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/social-media-tracking-report");
+pref("browser.contentblocking.report.cookie.url", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/cross-site-tracking-report");
+pref("browser.contentblocking.report.tracker.url", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/tracking-content-report");
+pref("browser.contentblocking.report.fingerprinter.url", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/fingerprinters-report");
+pref("browser.contentblocking.report.cryptominer.url", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/cryptominers-report");
 
 // Enables the new Protections Panel.
 #ifdef NIGHTLY_BUILD
 pref("browser.protections_panel.enabled", true);
+pref("browser.protections_panel.infoMessage.seen", false);
 #endif
 
 // Always enable newtab segregation using containers
@@ -1750,6 +1764,7 @@ pref("signon.schemeUpgrades", true);
 pref("signon.privateBrowsingCapture.enabled", true);
 pref("signon.showAutoCompleteFooter", true);
 pref("signon.management.page.enabled", true);
+pref("signon.management.page.breach-alerts.enabled", true);
 pref("signon.management.overrideURI", "about:logins?filter=%DOMAIN%");
 pref("signon.management.page.breach-alerts.enabled", false);
 #ifdef NIGHTLY_BUILD
@@ -1912,7 +1927,7 @@ pref("privacy.socialtracking.notification.enabled", true);
 // minimum number of page loads until showing popup.
 pref("privacy.socialtracking.notification.session.pageload.min", 4);
 // timestamp of last popup was shown.
-pref("privacy.socialtracking.notification.lastSeen", 0);
+pref("privacy.socialtracking.notification.lastShown", "0");
 // don't show popup again within 2 days (2 * 86400 * 1000 milliseconds)
 pref("privacy.socialtracking.notification.period.min", 172800000);
 // current number of popup shown in the profile.

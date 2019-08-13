@@ -1691,8 +1691,14 @@ BrowserGlue.prototype = {
   },
 
   _updateAutoplayPref() {
-    let blocked = Services.prefs.getIntPref("media.autoplay.default", 1);
-    Services.telemetry.scalarSet("media.autoplay_default_blocked", blocked);
+    const blocked = Services.prefs.getIntPref("media.autoplay.default", 1);
+    const telemetry = Services.telemetry.getHistogramById(
+      "AUTOPLAY_DEFAULT_SETTING_CHANGE"
+    );
+    const labels = { 0: "allow", 1: "blockAudible", 5: "blockAll" };
+    if (blocked in labels) {
+      telemetry.add(labels[blocked]);
+    }
   },
 
   _setPrefExpectations() {
@@ -2689,7 +2695,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 85;
+    const UI_VERSION = 86;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -3080,6 +3086,25 @@ BrowserGlue.prototype = {
         Services.prefs.setBoolPref(CUSTOM_BLOCKING_PREF, true);
       }
     }
+
+    if (currentUIVersion < 86) {
+      // If the user has set "media.autoplay.allow-muted" to false
+      // migrate that to media.autoplay.default=BLOCKED_ALL.
+      if (
+        Services.prefs.prefHasUserValue("media.autoplay.allow-muted") &&
+        !Services.prefs.getBoolPref("media.autoplay.allow-muted") &&
+        !Services.prefs.prefHasUserValue("media.autoplay.default") &&
+        Services.prefs.getIntPref("media.autoplay.default") ==
+          Ci.nsIAutoplay.BLOCKED
+      ) {
+        Services.prefs.setIntPref(
+          "media.autoplay.default",
+          Ci.nsIAutoplay.BLOCKED_ALL
+        );
+      }
+      Services.prefs.clearUserPref("media.autoplay.allow-muted");
+    }
+
     // Update the migration version.
     Services.prefs.setIntPref("browser.migration.version", UI_VERSION);
   },
@@ -3600,6 +3625,7 @@ var ContentBlockingCategoriesPrefs = {
         "network.cookie.cookieBehavior": null,
         "privacy.trackingprotection.pbmode.enabled": null,
         "privacy.trackingprotection.enabled": null,
+        "privacy.trackingprotection.socialtracking.enabled": null,
         "privacy.trackingprotection.fingerprinting.enabled": null,
         "privacy.trackingprotection.cryptomining.enabled": null,
       },
@@ -3607,6 +3633,7 @@ var ContentBlockingCategoriesPrefs = {
         "network.cookie.cookieBehavior": null,
         "privacy.trackingprotection.pbmode.enabled": null,
         "privacy.trackingprotection.enabled": null,
+        "privacy.trackingprotection.socialtracking.enabled": null,
         "privacy.trackingprotection.fingerprinting.enabled": null,
         "privacy.trackingprotection.cryptomining.enabled": null,
       },
@@ -3655,6 +3682,16 @@ var ContentBlockingCategoriesPrefs = {
         case "-cm":
           this.CATEGORY_PREFS[type][
             "privacy.trackingprotection.cryptomining.enabled"
+          ] = false;
+          break;
+        case "stp":
+          this.CATEGORY_PREFS[type][
+            "privacy.trackingprotection.socialtracking.enabled"
+          ] = true;
+          break;
+        case "-stp":
+          this.CATEGORY_PREFS[type][
+            "privacy.trackingprotection.socialtracking.enabled"
           ] = false;
           break;
         case "cookieBehavior0":
@@ -3927,16 +3964,6 @@ ContentPermissionPrompt.prototype = {
       return;
     }
     schemeHistogram.add(type, scheme);
-
-    // request.element should be the browser element in e10s.
-    if (request.element && request.element.contentPrincipal) {
-      let thirdPartyHistogram = Services.telemetry.getKeyedHistogramById(
-        "PERMISSION_REQUEST_THIRD_PARTY_ORIGIN"
-      );
-      let isThirdParty =
-        request.principal.origin != request.element.contentPrincipal.origin;
-      thirdPartyHistogram.add(type, isThirdParty);
-    }
 
     let userInputHistogram = Services.telemetry.getKeyedHistogramById(
       "PERMISSION_REQUEST_HANDLING_USER_INPUT"

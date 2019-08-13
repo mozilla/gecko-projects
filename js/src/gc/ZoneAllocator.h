@@ -147,9 +147,7 @@ class ZoneAllocator : public JS::shadow::Zone,
                           const js::gc::ZoneThreshold& threshold,
                           JS::GCReason reason) {
     JSRuntime* rt = runtimeFromAnyThread();
-    float factor = rt->gc.tunables.allocThresholdFactor();
-    size_t thresholdBytes = threshold.gcTriggerBytes() * factor;
-    if (heap.gcBytes() >= thresholdBytes &&
+    if (heap.gcBytes() >= threshold.gcTriggerBytes() &&
         rt->heapState() == JS::HeapState::Idle) {
       gc::MaybeMallocTriggerZoneGC(rt, this, heap, threshold, reason);
     }
@@ -324,7 +322,7 @@ inline void RemoveCellMemory(gc::Cell* cell, size_t nbytes, MemoryUse use,
 // Initialize an object's reserved slot with a private value pointing to
 // malloc-allocated memory and associate the memory with the object.
 //
-// This call should be matched with a call to FreeOp::free_/delete_ in the
+// This call should be matched with a call to JSFreeOp::free_/delete_ in the
 // object's finalizer to free the memory and update the memory accounting.
 
 inline void InitReservedSlot(NativeObject* obj, uint32_t slot, void* ptr,
@@ -341,7 +339,7 @@ inline void InitReservedSlot(NativeObject* obj, uint32_t slot, T* ptr,
 // Initialize an object's private slot with a pointer to malloc-allocated memory
 // and associate the memory with the object.
 //
-// This call should be matched with a call to FreeOp::free_/delete_ in the
+// This call should be matched with a call to JSFreeOp::free_/delete_ in the
 // object's finalizer to free the memory and update the memory accounting.
 
 inline void InitObjectPrivate(NativeObject* obj, void* ptr, size_t nbytes,

@@ -30,6 +30,8 @@
 #include "mozilla/dom/LSObject.h"
 #include "mozilla/dom/Storage.h"
 #include "mozilla/dom/MaybeCrossOriginObject.h"
+#include "mozilla/dom/MediaController.h"
+#include "mozilla/dom/MediaControlUtils.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
@@ -173,7 +175,6 @@
 #include "nsNetCID.h"
 #include "nsIArray.h"
 
-#include "XULDocument.h"
 #include "nsIDOMXULCommandDispatcher.h"
 
 #include "nsBindingManager.h"
@@ -269,6 +270,12 @@ using namespace mozilla::dom::ipc;
 using mozilla::BasePrincipal;
 using mozilla::OriginAttributes;
 using mozilla::TimeStamp;
+
+extern mozilla::LazyLogModule gMediaControlLog;
+
+#define MC_LOG(msg, ...)                     \
+  MOZ_LOG(gMediaControlLog, LogLevel::Debug, \
+          ("WindowOuter=%p, " msg, this, ##__VA_ARGS__))
 
 #define FORWARD_TO_INNER(method, args, err_rval)       \
   PR_BEGIN_MACRO                                       \
@@ -1873,7 +1880,8 @@ static nsresult CreateNativeGlobalForInner(JSContext* aCx,
 
 nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
                                              nsISupports* aState,
-                                             bool aForceReuseInnerWindow) {
+                                             bool aForceReuseInnerWindow,
+                                             WindowGlobalChild* aActor) {
   MOZ_ASSERT(mDocumentPrincipal == nullptr,
              "mDocumentPrincipal prematurely set!");
   MOZ_ASSERT(mDocumentStoragePrincipal == nullptr,
@@ -2006,7 +2014,7 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
       newInnerWindow = wsh->GetInnerWindow();
       newInnerGlobal = newInnerWindow->GetWrapper();
     } else {
-      newInnerWindow = nsGlobalWindowInner::Create(this, thisChrome);
+      newInnerWindow = nsGlobalWindowInner::Create(this, thisChrome, aActor);
       if (StaticPrefs::dom_timeout_defer_during_load()) {
         // ensure the initial loading state is known
         newInnerWindow->SetActiveLoadingState(
@@ -2213,9 +2221,9 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
 
   // Tell the WindowGlobalParent that it should become the current window global
   // for our BrowsingContext if it isn't already.
-  mInnerWindow->GetWindowGlobalChild()->SendUpdateDocumentURI(
-      aDocument->GetDocumentURI());
-  mInnerWindow->GetWindowGlobalChild()->SendBecomeCurrentWindowGlobal();
+  WindowGlobalChild* wgc = mInnerWindow->GetWindowGlobalChild();
+  wgc->SetDocumentURI(aDocument->GetDocumentURI());
+  wgc->SendBecomeCurrentWindowGlobal();
 
   // We no longer need the old inner window.  Start its destruction if
   // its not being reused and clear our reference.
@@ -2876,6 +2884,26 @@ SuspendTypes nsPIDOMWindowOuter::GetMediaSuspend() const {
   return mMediaSuspend;
 }
 
+void nsPIDOMWindowOuter::UpdateMediaAction(const MediaControlActions aAction) {
+  // TODO : we now temporarily map MediaControlActions to nsISuspendedTypes in
+  // order to control media, but for long term goal in which we should not rely
+  // on nsISuspendedTypes and completely decouple them. See bug1571493.
+  MC_LOG("UpdateMediaAction %s", ToMediaControlActionsStr(aAction));
+  switch (aAction) {
+    case MediaControlActions::ePlay:
+      SetMediaSuspend(nsISuspendedTypes::NONE_SUSPENDED);
+      break;
+    case MediaControlActions::ePause:
+      SetMediaSuspend(nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE);
+      break;
+    case MediaControlActions::eStop:
+      SetMediaSuspend(nsISuspendedTypes::SUSPENDED_STOP_DISPOSABLE);
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Invalid action.");
+  };
+}
+
 void nsPIDOMWindowOuter::SetMediaSuspend(SuspendTypes aSuspend) {
   if (!IsDisposableSuspend(aSuspend)) {
     MaybeNotifyMediaResumedFromBlock(aSuspend);
@@ -3281,7 +3309,7 @@ nsPIDOMWindowOuter* nsGlobalWindowOuter::GetSanitizedOpener(
 
   if (openerDocShell) {
     nsCOMPtr<nsIDocShellTreeItem> openerRootItem;
-    openerDocShell->GetRootTreeItem(getter_AddRefs(openerRootItem));
+    openerDocShell->GetInProcessRootTreeItem(getter_AddRefs(openerRootItem));
     nsCOMPtr<nsIDocShell> openerRootDocShell(do_QueryInterface(openerRootItem));
     if (openerRootDocShell) {
       nsIDocShell::AppType appType = openerRootDocShell->GetAppType();
@@ -4403,7 +4431,7 @@ nsresult nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
   // via the DocShell tree, and if we are not already the root,
   // call SetFullscreen on that window instead.
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  mDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
+  mDocShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   nsCOMPtr<nsPIDOMWindowOuter> window =
       rootItem ? rootItem->GetWindow() : nullptr;
   if (!window) return NS_ERROR_FAILURE;
@@ -4578,7 +4606,7 @@ bool nsGlobalWindowOuter::Fullscreen() const {
   // Get the fullscreen value of the root window, to always have the value
   // accurate, even when called from content.
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  mDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
+  mDocShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   if (rootItem == mDocShell) {
     if (!XRE_IsContentProcess()) {
       // We are the root window. Return our internal value.
@@ -4931,7 +4959,7 @@ void nsGlobalWindowOuter::FocusOuter() {
   fm->GetActiveWindow(getter_AddRefs(activeDOMWindow));
 
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  mDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
+  mDocShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   nsCOMPtr<nsPIDOMWindowOuter> rootWin =
       rootItem ? rootItem->GetWindow() : nullptr;
   auto* activeWindow = nsPIDOMWindowOuter::From(activeDOMWindow);
@@ -6344,7 +6372,7 @@ void nsGlobalWindowOuter::ReallyCloseWindow() {
     if (mDocShell) {
       nsCOMPtr<nsIBrowserDOMWindow> bwin;
       nsCOMPtr<nsIDocShellTreeItem> rootItem;
-      mDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
+      mDocShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
       nsCOMPtr<nsPIDOMWindowOuter> rootWin =
           rootItem ? rootItem->GetWindow() : nullptr;
       nsCOMPtr<nsIDOMChromeWindow> chromeWin(do_QueryInterface(rootWin));
@@ -6824,7 +6852,7 @@ bool nsGlobalWindowOuter::IsTopLevelWindowActive() {
   }
 
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  treeItem->GetRootTreeItem(getter_AddRefs(rootItem));
+  treeItem->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   if (!rootItem) {
     return false;
   }

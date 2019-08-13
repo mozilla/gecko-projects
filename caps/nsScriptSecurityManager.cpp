@@ -362,7 +362,7 @@ nsScriptSecurityManager::GetChannelURIPrincipal(nsIChannel* aChannel,
   MOZ_ASSERT(aChannel, "Must have channel!");
 
   // Get the principal from the URI.  Make sure this does the same thing
-  // as Document::Reset and XULDocument::StartDocumentLoad.
+  // as Document::Reset and PrototypeDocumentContentSink::Init.
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -688,8 +688,6 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
         "security.view-source.reachable-from-inner-protocol");
   }
 
-  bool targetIsViewSource = false;
-
   if (sourceScheme.LowerCaseEqualsLiteral(NS_NULLPRINCIPAL_SCHEME)) {
     // A null principal can target its own URI.
     if (sourceURI == aTargetURI) {
@@ -697,9 +695,7 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
     }
   } else if (sViewSourceReachableFromInner &&
              sourceScheme.EqualsIgnoreCase(targetScheme.get()) &&
-             NS_SUCCEEDED(
-                 aTargetURI->SchemeIs("view-source", &targetIsViewSource)) &&
-             targetIsViewSource) {
+             aTargetURI->SchemeIs("view-source")) {
     // exception for foo: linking to view-source:foo for reftests...
     return NS_OK;
   } else if (sourceScheme.EqualsIgnoreCase("file") &&
@@ -948,9 +944,7 @@ nsresult nsScriptSecurityManager::CheckLoadURIFlags(
     }
 
     // Allow chrome://
-    bool isChrome = false;
-    if (NS_SUCCEEDED(aSourceBaseURI->SchemeIs("chrome", &isChrome)) &&
-        isChrome) {
+    if (aSourceBaseURI->SchemeIs("chrome")) {
       return NS_OK;
     }
 

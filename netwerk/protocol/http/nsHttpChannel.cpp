@@ -537,11 +537,8 @@ nsresult nsHttpChannel::OnBeforeConnect() {
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  bool isHttps = false;
-  rv = mURI->SchemeIs("https", &isHttps);
-  NS_ENSURE_SUCCESS(rv, rv);
   nsCOMPtr<nsIPrincipal> resultPrincipal;
-  if (!isHttps && mLoadInfo) {
+  if (!mURI->SchemeIs("https") && mLoadInfo) {
     nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
         this, getter_AddRefs(resultPrincipal));
   }
@@ -549,15 +546,12 @@ nsresult nsHttpChannel::OnBeforeConnect() {
   if (!NS_GetOriginAttributes(this, originAttributes)) {
     return NS_ERROR_FAILURE;
   }
-  bool isHttp = false;
-  rv = mURI->SchemeIs("http", &isHttp);
-  NS_ENSURE_SUCCESS(rv, rv);
 
   // At this point it is no longer possible to call
   // HttpBaseChannel::UpgradeToSecure.
   mUpgradableToSecure = false;
   bool shouldUpgrade = mUpgradeToSecure;
-  if (isHttp) {
+  if (mURI->SchemeIs("http")) {
     if (!shouldUpgrade) {
       // Make sure http channel is released on main thread.
       // See bug 1539148 for details.
@@ -729,10 +723,7 @@ nsresult nsHttpChannel::ConnectOnTailUnblock() {
   SpeculativeConnect();
 
   // open a cache entry for this channel...
-  bool isHttps = false;
-  rv = mURI->SchemeIs("https", &isHttps);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = OpenCacheEntry(isHttps);
+  rv = OpenCacheEntry(mURI->SchemeIs("https"));
 
   // do not continue if asyncOpenCacheEntry is in progress
   if (AwaitingCacheCallbacks()) {
@@ -2174,18 +2165,15 @@ nsresult nsHttpChannel::ProcessSingleSecurityHeader(
  *             it's an HTTPS connection.
  */
 nsresult nsHttpChannel::ProcessSecurityHeaders() {
-  nsresult rv;
-  bool isHttps = false;
-  rv = mURI->SchemeIs("https", &isHttps);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   // If this channel is not loading securely, STS or PKP doesn't do anything.
   // In the case of HSTS, the upgrade to HTTPS takes place earlier in the
   // channel load process.
-  if (!isHttps) return NS_OK;
+  if (!mURI->SchemeIs("https")) {
+    return NS_OK;
+  }
 
   nsAutoCString asciiHost;
-  rv = mURI->GetAsciiHost(asciiHost);
+  nsresult rv = mURI->GetAsciiHost(asciiHost);
   NS_ENSURE_SUCCESS(rv, NS_OK);
 
   // If the channel is not a hostname, but rather an IP, do not process STS
@@ -2266,11 +2254,7 @@ void nsHttpChannel::ProcessSecurityReport(nsresult status) {
   }
 }
 
-bool nsHttpChannel::IsHTTPS() {
-  bool isHttps;
-  if (NS_FAILED(mURI->SchemeIs("https", &isHttps)) || !isHttps) return false;
-  return true;
-}
+bool nsHttpChannel::IsHTTPS() { return mURI->SchemeIs("https"); }
 
 void nsHttpChannel::ProcessSSLInformation() {
   // If this is HTTPS, record any use of RSA so that Key Exchange Algorithm
@@ -2382,10 +2366,10 @@ void nsHttpChannel::ProcessAltService() {
   OriginAttributes originAttributes;
   NS_GetOriginAttributes(this, originAttributes);
 
-  AltSvcMapping::ProcessHeader(altSvc, scheme, originHost, originPort,
-                               mUsername, GetTopWindowOrigin(),
-                               mPrivateBrowsing, callbacks, proxyInfo,
-                               mCaps & NS_HTTP_DISALLOW_SPDY, originAttributes);
+  AltSvcMapping::ProcessHeader(
+      altSvc, scheme, originHost, originPort, mUsername, GetTopWindowOrigin(),
+      mPrivateBrowsing, IsIsolated(), callbacks, proxyInfo,
+      mCaps & NS_HTTP_DISALLOW_SPDY, originAttributes);
 }
 
 nsresult nsHttpChannel::ProcessResponse() {
@@ -2570,7 +2554,7 @@ nsresult nsHttpChannel::ContinueProcessResponse1() {
     LOG(("  continuation state has been reset"));
   }
 
-  rv = ProcessCrossOriginHeader();
+  rv = ProcessCrossOriginEmbedderPolicyHeader();
   if (NS_FAILED(rv)) {
     mStatus = NS_ERROR_BLOCKED_BY_POLICY;
     HandleAsyncAbort();
@@ -2909,11 +2893,8 @@ nsresult nsHttpChannel::ContinueProcessResponse4(nsresult rv) {
   bool doNotRender = DoNotRender3xxBody(rv);
 
   if (rv == NS_ERROR_DOM_BAD_URI && mRedirectURI) {
-    bool isHTTP = false;
-    if (NS_FAILED(mRedirectURI->SchemeIs("http", &isHTTP))) isHTTP = false;
-    if (!isHTTP && NS_FAILED(mRedirectURI->SchemeIs("https", &isHTTP)))
-      isHTTP = false;
-
+    bool isHTTP =
+        mRedirectURI->SchemeIs("http") || mRedirectURI->SchemeIs("https");
     if (!isHTTP) {
       // This was a blocked attempt to redirect and subvert the system by
       // redirecting to another protocol (perhaps javascript:)
@@ -4385,9 +4366,7 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry,
     }
   }
 
-  bool isHttps = false;
-  rv = mURI->SchemeIs("https", &isHttps);
-  NS_ENSURE_SUCCESS(rv, rv);
+  bool isHttps = mURI->SchemeIs("https");
 
   bool doValidation = false;
   bool doBackgroundValidation = false;
@@ -4812,10 +4791,7 @@ nsresult nsHttpChannel::OnOfflineCacheEntryAvailable(
            " looking for a regular cache entry",
            this));
 
-      bool isHttps = false;
-      rv = mURI->SchemeIs("https", &isHttps);
-      NS_ENSURE_SUCCESS(rv, rv);
-
+      bool isHttps = mURI->SchemeIs("https");
       rv = OpenCacheEntryInternal(isHttps, nullptr,
                                   false /* don't allow appcache lookups */);
       if (NS_FAILED(rv)) {
@@ -4994,11 +4970,7 @@ nsresult nsHttpChannel::OpenCacheInputStream(nsICacheEntry* cacheEntry,
                                              bool checkingAppCacheEntry) {
   nsresult rv;
 
-  bool isHttps = false;
-  rv = mURI->SchemeIs("https", &isHttps);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (isHttps) {
+  if (mURI->SchemeIs("https")) {
     rv = cacheEntry->GetSecurityInfo(getter_AddRefs(mCachedSecurityInfo));
     if (NS_FAILED(rv)) {
       LOG(("failed to parse security-info [channel=%p, entry=%p]", this,
@@ -5467,9 +5439,8 @@ void nsHttpChannel::UpdateInhibitPersistentCachingFlag() {
   if (mResponseHead->NoStore()) mLoadFlags |= INHIBIT_PERSISTENT_CACHING;
 
   // Only cache SSL content on disk if the pref is set
-  bool isHttps;
   if (!gHttpHandler->IsPersistentHttpsCachingEnabled() &&
-      NS_SUCCEEDED(mURI->SchemeIs("https", &isHttps)) && isHttps) {
+      mURI->SchemeIs("https")) {
     mLoadFlags |= INHIBIT_PERSISTENT_CACHING;
   }
 }
@@ -6562,10 +6533,9 @@ nsresult nsHttpChannel::BeginConnect() {
   nsAutoCString host;
   nsAutoCString scheme;
   int32_t port = -1;
-  bool isHttps = false;
+  bool isHttps = mURI->SchemeIs("https");
 
   rv = mURI->GetScheme(scheme);
-  if (NS_SUCCEEDED(rv)) rv = mURI->SchemeIs("https", &isHttps);
   if (NS_SUCCEEDED(rv)) rv = mURI->GetAsciiHost(host);
   if (NS_SUCCEEDED(rv)) rv = mURI->GetPort(&port);
   if (NS_SUCCEEDED(rv)) mURI->GetUsername(mUsername);
@@ -6617,7 +6587,8 @@ nsresult nsHttpChannel::BeginConnect() {
       AltSvcMapping::AcceptableProxy(proxyInfo) &&
       (scheme.EqualsLiteral("http") || scheme.EqualsLiteral("https")) &&
       (mapping = gHttpHandler->GetAltServiceMapping(
-           scheme, host, port, mPrivateBrowsing, originAttributes))) {
+           scheme, host, port, mPrivateBrowsing, IsIsolated(),
+           GetTopWindowOrigin(), originAttributes))) {
     LOG(("nsHttpChannel %p Alt Service Mapping Found %s://%s:%d [%s]\n", this,
          scheme.get(), mapping->AlternateHost().get(), mapping->AlternatePort(),
          mapping->HashKey().get()));
@@ -7448,7 +7419,7 @@ nsresult nsHttpChannel::ComputeCrossOriginOpenerPolicyMismatch() {
   nsILoadInfo::CrossOriginOpenerPolicy documentPolicy = ctx->GetOpenerPolicy();
   nsILoadInfo::CrossOriginOpenerPolicy resultPolicy =
       nsILoadInfo::OPENER_POLICY_NULL;
-  GetCrossOriginOpenerPolicy(&resultPolicy);
+  Unused << GetCrossOriginOpenerPolicy(documentPolicy, &resultPolicy);
 
   if (!ctx->Canonical()->GetCurrentWindowGlobal()) {
     return NS_ERROR_NOT_AVAILABLE;
@@ -7508,36 +7479,14 @@ nsresult nsHttpChannel::ComputeCrossOriginOpenerPolicyMismatch() {
   return NS_OK;
 }
 
-nsresult nsHttpChannel::GetResponseCrossOriginPolicy(
-    nsILoadInfo::CrossOriginPolicy* aResponseCrossOriginPolicy) {
-  if (!mResponseHead) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  nsILoadInfo::CrossOriginPolicy policy = nsILoadInfo::CROSS_ORIGIN_POLICY_NULL;
-
-  nsAutoCString content;
-  Unused << mResponseHead->GetHeader(nsHttp::Cross_Origin, content);
-
-  // Cross-Origin = %s"anonymous" / %s"use-credentials" ; case-sensitive
-
-  if (content.EqualsLiteral("anonymous")) {
-    policy = nsILoadInfo::CROSS_ORIGIN_POLICY_ANONYMOUS;
-  } else if (content.EqualsLiteral("use-credentials")) {
-    policy = nsILoadInfo::CROSS_ORIGIN_POLICY_USE_CREDENTIALS;
-  }
-
-  *aResponseCrossOriginPolicy = policy;
-  return NS_OK;
-}
-
-nsresult nsHttpChannel::ProcessCrossOriginHeader() {
+// https://mikewest.github.io/corpp/#process-navigation-response
+nsresult nsHttpChannel::ProcessCrossOriginEmbedderPolicyHeader() {
   nsresult rv;
-  if (!StaticPrefs::browser_tabs_remote_useCrossOriginPolicy()) {
+  if (!StaticPrefs::browser_tabs_remote_useCrossOriginEmbedderPolicy()) {
     return NS_OK;
   }
 
-  // Only consider Cross-Origin for document loads.
+  // Only consider Cross-Origin-Embedder-Policy for document loads.
   if (mLoadInfo->GetExternalContentPolicyType() !=
           nsIContentPolicy::TYPE_DOCUMENT &&
       mLoadInfo->GetExternalContentPolicyType() !=
@@ -7557,31 +7506,35 @@ nsresult nsHttpChannel::ProcessCrossOriginHeader() {
     return NS_OK;
   }
 
-  nsILoadInfo::CrossOriginPolicy documentPolicy =
-      ctx->GetInheritedCrossOriginPolicy();
-  nsILoadInfo::CrossOriginPolicy resultPolicy =
-      nsILoadInfo::CROSS_ORIGIN_POLICY_NULL;
-  rv = GetResponseCrossOriginPolicy(&resultPolicy);
+  nsILoadInfo::CrossOriginEmbedderPolicy documentPolicy =
+      ctx->GetEmbedderPolicy();
+  nsILoadInfo::CrossOriginEmbedderPolicy resultPolicy =
+      nsILoadInfo::EMBEDDER_POLICY_NULL;
+  rv = GetResponseEmbedderPolicy(&resultPolicy);
   if (NS_FAILED(rv)) {
     return NS_OK;
   }
 
-  ctx->SetCrossOriginPolicy(resultPolicy);
-
-  if (documentPolicy != nsILoadInfo::CROSS_ORIGIN_POLICY_NULL &&
-      resultPolicy == nsILoadInfo::CROSS_ORIGIN_POLICY_NULL) {
+  // https://mikewest.github.io/corpp/#abstract-opdef-process-navigation-response
+  if (mLoadInfo->GetExternalContentPolicyType() ==
+          nsIContentPolicy::TYPE_SUBDOCUMENT &&
+      documentPolicy != nsILoadInfo::EMBEDDER_POLICY_NULL &&
+      resultPolicy != nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP) {
     return NS_ERROR_BLOCKED_BY_POLICY;
   }
+
+  ctx->SetEmbedderPolicy(resultPolicy);
 
   return NS_OK;
 }
 
-// https://fetch.spec.whatwg.org/#cross-origin-resource-policy-header
+// https://mikewest.github.io/corpp/#corp-check
 nsresult nsHttpChannel::ProcessCrossOriginResourcePolicyHeader() {
   if (!StaticPrefs::browser_tabs_remote_useCORP()) {
     return NS_OK;
   }
 
+  // Fetch 4.5.9
   uint32_t corsMode;
   MOZ_ALWAYS_SUCCEEDS(GetCorsMode(&corsMode));
   if (corsMode != nsIHttpChannelInternal::CORS_MODE_NO_CORS) {
@@ -7604,6 +7557,21 @@ nsresult nsHttpChannel::ProcessCrossOriginResourcePolicyHeader() {
   Unused << mResponseHead->GetHeader(nsHttp::Cross_Origin_Resource_Policy,
                                      content);
 
+  // 3.2.1.6 If policy is null, and embedder policy is "require-corp", set
+  // policy to "same-origin".
+  if (StaticPrefs::browser_tabs_remote_useCrossOriginEmbedderPolicy()) {
+    RefPtr<mozilla::dom::BrowsingContext> ctx;
+    mLoadInfo->GetBrowsingContext(getter_AddRefs(ctx));
+
+    // Note that we treat invalid value as "cross-origin", which spec indicates.
+    // We might want to make that stricter.
+    if ((content.IsEmpty() && ctx &&
+         ctx->GetEmbedderPolicy() ==
+             nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP)) {
+      content = NS_LITERAL_CSTRING("same-origin");
+    }
+  }
+
   if (content.IsEmpty()) {
     return NS_OK;
   }
@@ -7612,7 +7580,8 @@ nsresult nsHttpChannel::ProcessCrossOriginResourcePolicyHeader() {
   nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
       this, getter_AddRefs(channelOrigin));
 
-  // Cross-Origin-Resource-Policy = %s"same-origin" / %s"same-site"
+  // Cross-Origin-Resource-Policy = %s"same-origin" / %s"same-site" /
+  // %s"cross-origin"
   if (content.EqualsLiteral("same-origin")) {
     if (!channelOrigin->Equals(mLoadInfo->LoadingPrincipal())) {
       return NS_ERROR_DOM_CORP_FAILED;
@@ -7756,7 +7725,7 @@ nsHttpChannel::OnStartRequest(nsIRequest* request) {
     return NS_OK;
   }
 
-  rv = ProcessCrossOriginHeader();
+  rv = ProcessCrossOriginEmbedderPolicyHeader();
   if (NS_FAILED(rv)) {
     mStatus = NS_ERROR_BLOCKED_BY_POLICY;
     HandleAsyncAbort();
@@ -9665,12 +9634,6 @@ void nsHttpChannel::MaybeWarnAboutAppCache() {
   GetCallback(warner);
   if (warner) {
     warner->IssueWarning(Document::eAppCache, false);
-    // When the page is insecure and the API is still enabled
-    // provide an additional warning for developers of removal
-    if (!IsHTTPS() &&
-        Preferences::GetBool("browser.cache.offline.insecure.enable")) {
-      warner->IssueWarning(Document::eAppCacheInsecure, true);
-    }
   }
 }
 

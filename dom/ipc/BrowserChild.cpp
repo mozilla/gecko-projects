@@ -492,8 +492,11 @@ bool BrowserChild::DoUpdateZoomConstraints(
   return true;
 }
 
-nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent) {
+nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent,
+                            WindowGlobalChild* aInitialWindowChild) {
   MOZ_DIAGNOSTIC_ASSERT(mTabGroup);
+  MOZ_ASSERT_IF(aInitialWindowChild,
+                aInitialWindowChild->BrowsingContext() == mBrowsingContext);
 
   nsCOMPtr<nsIWidget> widget = nsIWidget::CreatePuppetWidget(this);
   mPuppetWidget = static_cast<PuppetWidget*>(widget.get());
@@ -504,11 +507,10 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent) {
   mPuppetWidget->InfallibleCreate(nullptr,
                                   nullptr,  // no parents
                                   LayoutDeviceIntRect(0, 0, 0, 0),
-                                  nullptr  // HandleWidgetEvent
-  );
+                                  nullptr);  // HandleWidgetEvent
 
   mWebBrowser = nsWebBrowser::Create(this, mPuppetWidget, OriginAttributesRef(),
-                                     mBrowsingContext);
+                                     mBrowsingContext, aInitialWindowChild);
   nsIWebBrowser* webBrowser = mWebBrowser;
 
   mWebNav = do_QueryInterface(webBrowser);
@@ -3288,18 +3290,6 @@ bool BrowserChild::DeallocPPaymentRequestChild(PPaymentRequestChild* actor) {
   return true;
 }
 
-PWindowGlobalChild* BrowserChild::AllocPWindowGlobalChild(
-    const WindowGlobalInit&) {
-  MOZ_CRASH("We should never be manually allocating PWindowGlobalChild actors");
-  return nullptr;
-}
-
-bool BrowserChild::DeallocPWindowGlobalChild(PWindowGlobalChild* aActor) {
-  // This reference was added in WindowGlobalChild::Create.
-  static_cast<WindowGlobalChild*>(aActor)->Release();
-  return true;
-}
-
 ScreenIntSize BrowserChild::GetInnerSize() {
   LayoutDeviceIntSize innerSize =
       RoundedToInt(mUnscaledInnerSize * mPuppetWidget->GetDefaultScale());
@@ -3864,7 +3854,7 @@ Nullable<WindowProxyHolder> BrowserChildMessageManager::GetContent(
   if (!docShell) {
     return nullptr;
   }
-  return WindowProxyHolder(nsDocShell::Cast(docShell)->GetBrowsingContext());
+  return WindowProxyHolder(docShell->GetBrowsingContext());
 }
 
 already_AddRefed<nsIDocShell> BrowserChildMessageManager::GetDocShell(

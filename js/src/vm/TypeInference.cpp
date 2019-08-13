@@ -17,7 +17,6 @@
 #include <new>
 
 #include "jsapi.h"
-#include "builtin/String.h"
 
 #include "gc/HashUtil.h"
 #include "jit/BaselineIC.h"
@@ -2652,7 +2651,7 @@ bool js::ClassCanHaveExtraProperties(const Class* clasp) {
          clasp->getOpsGetProperty() || IsTypedArrayClass(clasp);
 }
 
-void TypeZone::processPendingRecompiles(FreeOp* fop,
+void TypeZone::processPendingRecompiles(JSFreeOp* fop,
                                         RecompileInfoVector& recompiles) {
   MOZ_ASSERT(!recompiles.empty());
 
@@ -4018,9 +4017,6 @@ bool TypeNewScript::rollbackPartiallyInitializedObjects(JSContext* cx,
     // Found a matching frame.
     RootedPlainObject obj(cx, &thisv.toObject().as<PlainObject>());
 
-    // Whether all identified 'new' properties have been initialized.
-    bool finished = false;
-
     // If not finished, number of properties that have been added.
     uint32_t numProperties = 0;
 
@@ -4034,7 +4030,8 @@ bool TypeNewScript::rollbackPartiallyInitializedObjects(JSContext* cx,
     // Index in pcOffsets of the frame currently being checked for a SETPROP.
     int setpropDepth = callDepth;
 
-    for (size_t i = 0; i < initializerList->length; i++) {
+    size_t i;
+    for (i = 0; i < initializerList->length; i++) {
       const TypeNewScriptInitializer init = initializerList->entries[i];
       if (init.kind == TypeNewScriptInitializer::SETPROP) {
         if (!pastProperty && pcOffsets[setpropDepth] < init.offset) {
@@ -4045,7 +4042,8 @@ bool TypeNewScript::rollbackPartiallyInitializedObjects(JSContext* cx,
         numProperties++;
         pastProperty = false;
         setpropDepth = callDepth;
-      } else if (init.kind == TypeNewScriptInitializer::SETPROP_FRAME) {
+      } else {
+        MOZ_ASSERT(init.kind == TypeNewScriptInitializer::SETPROP_FRAME);
         if (!pastProperty) {
           if (pcOffsets[setpropDepth] < init.offset) {
             // Have not yet reached this inner call.
@@ -4061,12 +4059,11 @@ bool TypeNewScript::rollbackPartiallyInitializedObjects(JSContext* cx,
             setpropDepth--;
           }
         }
-      } else {
-        MOZ_ASSERT(init.kind == TypeNewScriptInitializer::DONE);
-        finished = true;
-        break;
       }
     }
+
+    // Whether all identified 'new' properties have been initialized.
+    bool finished = i == initializerList->length;
 
     if (!finished) {
       (void)NativeObject::rollbackProperties(cx, obj, numProperties);
@@ -4441,30 +4438,6 @@ void JitScript::sweepTypes(const js::AutoSweepJitScript& sweep, Zone* zone) {
   }
 }
 
-void Zone::addSizeOfIncludingThis(
-    mozilla::MallocSizeOf mallocSizeOf, size_t* typePool, size_t* regexpZone,
-    size_t* jitZone, size_t* baselineStubsOptimized, size_t* cachedCFG,
-    size_t* uniqueIdMap, size_t* shapeCaches, size_t* atomsMarkBitmaps,
-    size_t* compartmentObjects, size_t* crossCompartmentWrappersTables,
-    size_t* compartmentsPrivateData) {
-  *typePool += types.typeLifoAlloc().sizeOfExcludingThis(mallocSizeOf);
-  *regexpZone += regExps().sizeOfExcludingThis(mallocSizeOf);
-  if (jitZone_) {
-    jitZone_->addSizeOfIncludingThis(mallocSizeOf, jitZone,
-                                     baselineStubsOptimized, cachedCFG);
-  }
-  *uniqueIdMap += uniqueIds().shallowSizeOfExcludingThis(mallocSizeOf);
-  *shapeCaches += baseShapes().sizeOfExcludingThis(mallocSizeOf) +
-                  initialShapes().sizeOfExcludingThis(mallocSizeOf);
-  *atomsMarkBitmaps += markedAtoms().sizeOfExcludingThis(mallocSizeOf);
-
-  for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next()) {
-    comp->addSizeOfIncludingThis(mallocSizeOf, compartmentObjects,
-                                 crossCompartmentWrappersTables,
-                                 compartmentsPrivateData);
-  }
-}
-
 TypeZone::TypeZone(Zone* zone)
     : zone_(zone),
       typeLifoAlloc_(zone, (size_t)TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
@@ -4513,7 +4486,7 @@ AutoClearTypeInferenceStateOnOOM::~AutoClearTypeInferenceStateOnOOM() {
   if (zone->types.hadOOMSweepingTypes()) {
     gc::AutoSetThreadIsSweeping threadIsSweeping;
     JSRuntime* rt = zone->runtimeFromMainThread();
-    FreeOp fop(rt);
+    JSFreeOp fop(rt);
     js::CancelOffThreadIonCompile(rt);
     zone->setPreservingCode(false);
     zone->discardJitCode(&fop, Zone::KeepBaselineCode);

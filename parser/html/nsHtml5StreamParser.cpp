@@ -364,17 +364,13 @@ void nsHtml5StreamParser::SetViewSourceTitle(nsIURI* aURL) {
 
   if (aURL) {
     nsCOMPtr<nsIURI> temp;
-    bool isViewSource;
-    aURL->SchemeIs("view-source", &isViewSource);
-    if (isViewSource) {
+    if (aURL->SchemeIs("view-source")) {
       nsCOMPtr<nsINestedURI> nested = do_QueryInterface(aURL);
       nested->GetInnerURI(getter_AddRefs(temp));
     } else {
       temp = aURL;
     }
-    bool isData;
-    temp->SchemeIs("data", &isData);
-    if (isData) {
+    if (temp->SchemeIs("data")) {
       // Avoid showing potentially huge data: URLs. The three last bytes are
       // UTF-8 for an ellipsis.
       mViewSourceTitle.AssignLiteral("data:\xE2\x80\xA6");
@@ -877,18 +873,16 @@ class AddContentRunnable : public Runnable {
 inline void nsHtml5StreamParser::OnNewContent(Span<const char16_t> aData) {
   if (mURIToSendToDevtools) {
     NS_DispatchToMainThread(new AddContentRunnable(mUUIDForDevtools,
-                                                   mURIToSendToDevtools,
-                                                   aData,
+                                                   mURIToSendToDevtools, aData,
                                                    /* aComplete */ false));
   }
 }
 
 inline void nsHtml5StreamParser::OnContentComplete() {
   if (mURIToSendToDevtools) {
-    NS_DispatchToMainThread(new AddContentRunnable(mUUIDForDevtools,
-                                                   mURIToSendToDevtools,
-                                                   Span<const char16_t>(),
-                                                   /* aComplete */ true));
+    NS_DispatchToMainThread(new AddContentRunnable(
+        mUUIDForDevtools, mURIToSendToDevtools, Span<const char16_t>(),
+        /* aComplete */ true));
     mURIToSendToDevtools = nullptr;
   }
 }
@@ -1045,9 +1039,7 @@ nsresult nsHtml5StreamParser::OnStartRequest(nsIRequest* aRequest) {
       nsCOMPtr<nsIURI> originalURI;
       rv = channel->GetOriginalURI(getter_AddRefs(originalURI));
       if (NS_SUCCEEDED(rv)) {
-        bool originalIsResource;
-        originalURI->SchemeIs("resource", &originalIsResource);
-        if (originalIsResource) {
+        if (originalURI->SchemeIs("resource")) {
           mCharsetSource = kCharsetFromBuiltIn;
           mEncoding = UTF_8_ENCODING;
         } else {
@@ -1055,9 +1047,7 @@ nsresult nsHtml5StreamParser::OnStartRequest(nsIRequest* aRequest) {
           rv = channel->GetURI(getter_AddRefs(currentURI));
           if (NS_SUCCEEDED(rv)) {
             nsCOMPtr<nsIURI> innermost = NS_GetInnermostURI(currentURI);
-            bool innermostIsFile;
-            innermost->SchemeIs("file", &innermostIsFile);
-            mDecodingLocalFileAsUTF8 = innermostIsFile;
+            mDecodingLocalFileAsUTF8 = innermost->SchemeIs("file");
           }
         }
       }
@@ -1201,9 +1191,7 @@ void nsHtml5StreamParser::DoStopRequest() {
                      "Stream ended without being open.");
   mTokenizerMutex.AssertCurrentThreadOwns();
 
-  auto guard = MakeScopeExit([&] {
-      OnContentComplete();
-    });
+  auto guard = MakeScopeExit([&] { OnContentComplete(); });
 
   if (IsTerminated()) {
     return;

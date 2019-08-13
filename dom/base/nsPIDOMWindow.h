@@ -70,6 +70,7 @@ class TimeoutManager;
 class WindowGlobalChild;
 class CustomElementRegistry;
 enum class CallerType : uint32_t;
+enum class MediaControlActions : uint32_t;
 }  // namespace dom
 }  // namespace mozilla
 
@@ -140,7 +141,8 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   friend nsGlobalWindowInner;
   friend nsGlobalWindowOuter;
 
-  explicit nsPIDOMWindowInner(nsPIDOMWindowOuter* aOuterWindow);
+  nsPIDOMWindowInner(nsPIDOMWindowOuter* aOuterWindow,
+                     mozilla::dom::WindowGlobalChild* aActor);
 
   ~nsPIDOMWindowInner();
 
@@ -756,6 +758,8 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
 
   void MaybeActiveMediaComponents();
 
+  void UpdateMediaAction(const mozilla::dom::MediaControlActions aAction);
+
   void SetServiceWorkersTestingEnabled(bool aEnabled);
   bool GetServiceWorkersTestingEnabled();
 
@@ -876,8 +880,9 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
    *
    * aDocument must not be null.
    */
-  virtual nsresult SetNewDocument(Document* aDocument, nsISupports* aState,
-                                  bool aForceReuseInnerWindow) = 0;
+  virtual nsresult SetNewDocument(
+      Document* aDocument, nsISupports* aState, bool aForceReuseInnerWindow,
+      mozilla::dom::WindowGlobalChild* aActor = nullptr) = 0;
 
   /**
    * Set the opener window.  aOriginalOpener is true if and only if this is the

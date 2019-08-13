@@ -8,7 +8,6 @@
 
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/WindowGlobalParent.h"
-#include "mozilla/ipc/InProcessChild.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/MozFrameLoaderOwnerBinding.h"
@@ -18,6 +17,7 @@
 #include "mozilla/dom/WindowGlobalActorsBinding.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/ipc/InProcessChild.h"
+#include "mozilla/ipc/InProcessParent.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
 #include "nsFrameLoaderOwner.h"
@@ -40,14 +40,22 @@ namespace dom {
 typedef nsRefPtrHashtable<nsUint64HashKey, WindowGlobalChild> WGCByIdMap;
 static StaticAutoPtr<WGCByIdMap> gWindowGlobalChildById;
 
-WindowGlobalChild::WindowGlobalChild(nsGlobalWindowInner* aWindow,
-                                     dom::BrowsingContext* aBrowsingContext)
+WindowGlobalChild::WindowGlobalChild(const WindowGlobalInit& aInit,
+                                     nsGlobalWindowInner* aWindow)
     : mWindowGlobal(aWindow),
-      mBrowsingContext(aBrowsingContext),
-      mInnerWindowId(aWindow->WindowID()),
-      mOuterWindowId(aWindow->GetOuterWindow()->WindowID()),
-      mBeforeUnloadListeners(0),
-      mIPCClosed(true) {}
+      mBrowsingContext(aInit.browsingContext()),
+      mDocumentPrincipal(aInit.principal()),
+      mDocumentURI(aInit.documentURI()),
+      mInnerWindowId(aInit.innerWindowId()),
+      mOuterWindowId(aInit.outerWindowId()),
+      mBeforeUnloadListeners(0) {
+  MOZ_DIAGNOSTIC_ASSERT(mBrowsingContext);
+  MOZ_DIAGNOSTIC_ASSERT(mDocumentPrincipal);
+
+  MOZ_ASSERT_IF(aWindow, mInnerWindowId == aWindow->WindowID());
+  MOZ_ASSERT_IF(aWindow,
+                mOuterWindowId == aWindow->GetOuterWindow()->WindowID());
+}
 
 already_AddRefed<WindowGlobalChild> WindowGlobalChild::Create(
     nsGlobalWindowInner* aWindow) {
@@ -66,11 +74,16 @@ already_AddRefed<WindowGlobalChild> WindowGlobalChild::Create(
   nsCOMPtr<nsIHttpChannelInternal> chan =
       do_QueryInterface(aWindow->GetDocument()->GetChannel());
   nsILoadInfo::CrossOriginOpenerPolicy policy;
-  if (chan && NS_SUCCEEDED(chan->GetCrossOriginOpenerPolicy(&policy))) {
+  if (chan && NS_SUCCEEDED(chan->GetCrossOriginOpenerPolicy(
+                  nsILoadInfo::OPENER_POLICY_NULL, &policy))) {
     bc->SetOpenerPolicy(policy);
   }
 
-  RefPtr<WindowGlobalChild> wgc = new WindowGlobalChild(aWindow, bc);
+  WindowGlobalInit init(principal, aWindow->GetDocumentURI(), bc,
+                        aWindow->WindowID(),
+                        aWindow->GetOuterWindow()->WindowID());
+
+  auto wgc = MakeRefPtr<WindowGlobalChild>(init, aWindow);
 
   // If we have already closed our browsing context, return a pre-destroyed
   // WindowGlobalChild actor.
@@ -79,38 +92,55 @@ already_AddRefed<WindowGlobalChild> WindowGlobalChild::Create(
     return wgc.forget();
   }
 
-  WindowGlobalInit init(principal, aWindow->GetDocumentURI(), bc,
-                        wgc->mInnerWindowId, wgc->mOuterWindowId);
-
-  // Send the link constructor over PInProcessChild or PBrowser.
+  // Send the link constructor over PBrowser, or link over PInProcess.
   if (XRE_IsParentProcess()) {
-    InProcessChild* ipc = InProcessChild::Singleton();
-    if (!ipc) {
+    InProcessChild* ipChild = InProcessChild::Singleton();
+    InProcessParent* ipParent = InProcessParent::Singleton();
+    if (!ipChild || !ipParent) {
       return nullptr;
     }
 
     // Note: ref is released in DeallocPWindowGlobalChild
-    ipc->SendPWindowGlobalConstructor(do_AddRef(wgc).take(), init);
+    ManagedEndpoint<PWindowGlobalParent> endpoint =
+        ipChild->OpenPWindowGlobalEndpoint(wgc);
+
+    auto wgp = MakeRefPtr<WindowGlobalParent>(init, /* aInProcess */ true);
+
+    // Note: ref is released in DeallocPWindowGlobalParent
+    ipParent->BindPWindowGlobalEndpoint(std::move(endpoint), wgp);
+    wgp->Init(init);
   } else {
     RefPtr<BrowserChild> browserChild =
         BrowserChild::GetFrom(static_cast<mozIDOMWindow*>(aWindow));
     MOZ_ASSERT(browserChild);
 
-    // Note: ref is released in DeallocPWindowGlobalChild
-    browserChild->SendPWindowGlobalConstructor(do_AddRef(wgc).take(), init);
+    ManagedEndpoint<PWindowGlobalParent> endpoint =
+        browserChild->OpenPWindowGlobalEndpoint(wgc);
+
+    browserChild->SendNewWindowGlobal(std::move(endpoint), init);
   }
-  wgc->mIPCClosed = false;
+
+  wgc->Init();
+  return wgc.forget();
+}
+
+void WindowGlobalChild::Init() {
+  if (!mDocumentURI) {
+    NS_NewURI(getter_AddRefs(mDocumentURI), "about:blank");
+  }
 
   // Register this WindowGlobal in the gWindowGlobalParentsById map.
   if (!gWindowGlobalChildById) {
     gWindowGlobalChildById = new WGCByIdMap();
     ClearOnShutdown(&gWindowGlobalChildById);
   }
-  auto entry = gWindowGlobalChildById->LookupForAdd(wgc->mInnerWindowId);
+  auto entry = gWindowGlobalChildById->LookupForAdd(mInnerWindowId);
   MOZ_RELEASE_ASSERT(!entry, "Duplicate WindowGlobalChild entry for ID!");
-  entry.OrInsert([&] { return wgc; });
+  entry.OrInsert([&] { return this; });
+}
 
-  return wgc.forget();
+void WindowGlobalChild::InitWindowGlobal(nsGlobalWindowInner* aWindow) {
+  mWindowGlobal = aWindow;
 }
 
 /* static */
@@ -123,11 +153,11 @@ already_AddRefed<WindowGlobalChild> WindowGlobalChild::GetByInnerWindowId(
 }
 
 bool WindowGlobalChild::IsCurrentGlobal() {
-  return !mIPCClosed && mWindowGlobal->IsCurrentInnerWindow();
+  return CanSend() && mWindowGlobal->IsCurrentInnerWindow();
 }
 
 already_AddRefed<WindowGlobalParent> WindowGlobalChild::GetParentActor() {
-  if (mIPCClosed) {
+  if (!CanSend()) {
     return nullptr;
   }
   IProtocol* otherSide = InProcessChild::ParentActorFor(this);
@@ -135,7 +165,7 @@ already_AddRefed<WindowGlobalParent> WindowGlobalChild::GetParentActor() {
 }
 
 already_AddRefed<BrowserChild> WindowGlobalChild::GetBrowserChild() {
-  if (IsInProcess() || mIPCClosed) {
+  if (IsInProcess() || !CanSend()) {
     return nullptr;
   }
   return do_AddRef(static_cast<BrowserChild*>(Manager()));
@@ -160,7 +190,7 @@ bool WindowGlobalChild::IsProcessRoot() {
 
 void WindowGlobalChild::BeforeUnloadAdded() {
   // Don't bother notifying the parent if we don't have an IPC link open.
-  if (mBeforeUnloadListeners == 0 && !mIPCClosed) {
+  if (mBeforeUnloadListeners == 0 && CanSend()) {
     SendSetHasBeforeUnload(true);
   }
 
@@ -173,7 +203,7 @@ void WindowGlobalChild::BeforeUnloadRemoved() {
   MOZ_ASSERT(mBeforeUnloadListeners >= 0);
 
   // Don't bother notifying the parent if we don't have an IPC link open.
-  if (mBeforeUnloadListeners == 0 && !mIPCClosed) {
+  if (mBeforeUnloadListeners == 0 && CanSend()) {
     SendSetHasBeforeUnload(false);
   }
 }
@@ -196,8 +226,6 @@ void WindowGlobalChild::Destroy() {
     }
     SendDestroy();
   }
-
-  mIPCClosed = true;
 }
 
 static nsresult ChangeFrameRemoteness(WindowGlobalChild* aWgc,
@@ -341,8 +369,9 @@ void WindowGlobalChild::ReceiveRawMessage(const JSWindowActorMessageMeta& aMeta,
   }
 }
 
-nsIURI* WindowGlobalChild::GetDocumentURI() {
-  return mWindowGlobal->GetDocumentURI();
+void WindowGlobalChild::SetDocumentURI(nsIURI* aDocumentURI) {
+  mDocumentURI = aDocumentURI;
+  SendUpdateDocumentURI(aDocumentURI);
 }
 
 const nsAString& WindowGlobalChild::GetRemoteType() {
@@ -355,7 +384,7 @@ const nsAString& WindowGlobalChild::GetRemoteType() {
 
 already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetActor(
     const nsAString& aName, ErrorResult& aRv) {
-  if (mIPCClosed) {
+  if (!CanSend()) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return nullptr;
   }
@@ -386,7 +415,6 @@ already_AddRefed<JSWindowActorChild> WindowGlobalChild::GetActor(
 }
 
 void WindowGlobalChild::ActorDestroy(ActorDestroyReason aWhy) {
-  mIPCClosed = true;
   gWindowGlobalChildById->Remove(mInnerWindowId);
 
   // Destroy our JSWindowActors, and reject any pending queries.

@@ -8,6 +8,7 @@
 #define mozilla_dom_CanonicalBrowsingContext_h
 
 #include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/MediaController.h"
 #include "mozilla/RefPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
@@ -78,14 +79,9 @@ class CanonicalBrowsingContext final : public BrowsingContext {
   // other top level windows in other processes.
   void NotifyMediaMutedChanged(bool aMuted);
 
-  // Validate that the given process is allowed to perform the given
-  // transaction. aSource is |nullptr| if set in the parent process.
-  bool ValidateTransaction(const Transaction& aTransaction,
-                           ContentParent* aSource);
-
-  void SetFieldEpochsForChild(ContentParent* aChild,
-                              const FieldEpochs& aEpochs);
-  const FieldEpochs& GetFieldEpochsForChild(ContentParent* aChild);
+  // This function would update the media action for the current outer window
+  // and propogate the action to other browsing contexts in content processes.
+  void UpdateMediaAction(MediaControlActions aAction);
 
  protected:
   void Traverse(nsCycleCollectionTraversalCallback& cb);
@@ -108,10 +104,6 @@ class CanonicalBrowsingContext final : public BrowsingContext {
   nsTHashtable<nsRefPtrHashKey<WindowGlobalParent>> mWindowGlobals;
   RefPtr<WindowGlobalParent> mCurrentWindowGlobal;
   RefPtr<WindowGlobalParent> mEmbedderWindowGlobal;
-
-  // Generation information for each content process which has interacted with
-  // this CanonicalBrowsingContext, by ChildID.
-  nsDataHashtable<nsUint64HashKey, FieldEpochs> mChildFieldEpochs;
 };
 
 }  // namespace dom

@@ -55,7 +55,7 @@ struct SweepAction {
   // The arguments passed to each action.
   struct Args {
     GCRuntime* gc;
-    FreeOp* fop;
+    JSFreeOp* fop;
     SliceBudget& budget;
   };
 
@@ -272,7 +272,7 @@ class GCRuntime {
   // The return value indicates if we were able to do the GC.
   bool triggerZoneGC(Zone* zone, JS::GCReason reason, size_t usedBytes,
                      size_t thresholdBytes);
-  void maybeGC(Zone* zone);
+  void maybeGC();
   bool checkEagerAllocTrigger(const HeapSize& size,
                               const ZoneThreshold& threshold);
   // The return value indicates whether a major GC was performed.
@@ -371,6 +371,7 @@ class GCRuntime {
   void setGrayRootsTracer(JSTraceDataOp traceOp, void* data);
   MOZ_MUST_USE bool addBlackRootsTracer(JSTraceDataOp traceOp, void* data);
   void removeBlackRootsTracer(JSTraceDataOp traceOp, void* data);
+  void clearBlackAndGrayRootTracers();
 
   void updateMemoryCountersOnGCStart();
 
@@ -612,6 +613,9 @@ class GCRuntime {
   void traceRuntimeAtoms(JSTracer* trc, const AutoAccessAtomsZone& atomsAccess);
   void traceKeptAtoms(JSTracer* trc);
   void traceRuntimeCommon(JSTracer* trc, TraceOrMarkRuntime traceOrMark);
+  void traceEmbeddingBlackRoots(JSTracer* trc);
+  void traceEmbeddingGrayRoots(JSTracer* trc);
+  void checkNoRuntimeRoots(AutoGCSession& session);
   void maybeDoCycleCollection();
   void markCompartments();
   IncrementalProgress markUntilBudgetExhausted(SliceBudget& sliceBudget,
@@ -630,25 +634,27 @@ class GCRuntime {
   void groupZonesForSweeping(JS::GCReason reason);
   MOZ_MUST_USE bool findSweepGroupEdges();
   void getNextSweepGroup();
-  IncrementalProgress markGrayReferencesInCurrentGroup(FreeOp* fop,
+  IncrementalProgress markGrayReferencesInCurrentGroup(JSFreeOp* fop,
                                                        SliceBudget& budget);
-  IncrementalProgress endMarkingSweepGroup(FreeOp* fop, SliceBudget& budget);
+  IncrementalProgress endMarkingSweepGroup(JSFreeOp* fop, SliceBudget& budget);
   void markIncomingCrossCompartmentPointers(MarkColor color);
-  IncrementalProgress beginSweepingSweepGroup(FreeOp* fop, SliceBudget& budget);
-  void sweepDebuggerOnMainThread(FreeOp* fop);
-  void sweepJitDataOnMainThread(FreeOp* fop);
-  IncrementalProgress endSweepingSweepGroup(FreeOp* fop, SliceBudget& budget);
+  IncrementalProgress beginSweepingSweepGroup(JSFreeOp* fop,
+                                              SliceBudget& budget);
+  void sweepDebuggerOnMainThread(JSFreeOp* fop);
+  void sweepJitDataOnMainThread(JSFreeOp* fop);
+  IncrementalProgress endSweepingSweepGroup(JSFreeOp* fop, SliceBudget& budget);
   IncrementalProgress performSweepActions(SliceBudget& sliceBudget);
-  IncrementalProgress sweepTypeInformation(FreeOp* fop, SliceBudget& budget);
-  IncrementalProgress releaseSweptEmptyArenas(FreeOp* fop, SliceBudget& budget);
+  IncrementalProgress sweepTypeInformation(JSFreeOp* fop, SliceBudget& budget);
+  IncrementalProgress releaseSweptEmptyArenas(JSFreeOp* fop,
+                                              SliceBudget& budget);
   void startSweepingAtomsTable();
-  IncrementalProgress sweepAtomsTable(FreeOp* fop, SliceBudget& budget);
-  IncrementalProgress sweepWeakCaches(FreeOp* fop, SliceBudget& budget);
-  IncrementalProgress finalizeAllocKind(FreeOp* fop, SliceBudget& budget);
-  IncrementalProgress sweepShapeTree(FreeOp* fop, SliceBudget& budget);
+  IncrementalProgress sweepAtomsTable(JSFreeOp* fop, SliceBudget& budget);
+  IncrementalProgress sweepWeakCaches(JSFreeOp* fop, SliceBudget& budget);
+  IncrementalProgress finalizeAllocKind(JSFreeOp* fop, SliceBudget& budget);
+  IncrementalProgress sweepShapeTree(JSFreeOp* fop, SliceBudget& budget);
   void endSweepPhase(bool lastGC);
   bool allCCVisibleZonesWereCollected() const;
-  void sweepZones(FreeOp* fop, bool destroyingRuntime);
+  void sweepZones(JSFreeOp* fop, bool destroyingRuntime);
   void decommitFreeArenasWithoutUnlocking(const AutoLockGC& lock);
   void startDecommit();
   void queueZonesAndStartBackgroundSweep(ZoneList& zones);
@@ -692,7 +698,7 @@ class GCRuntime {
   void checkForCompartmentMismatches();
 #endif
 
-  void callFinalizeCallbacks(FreeOp* fop, JSFinalizeStatus status) const;
+  void callFinalizeCallbacks(JSFreeOp* fop, JSFinalizeStatus status) const;
   void callWeakPointerZonesCallbacks() const;
   void callWeakPointerCompartmentCallbacks(JS::Compartment* comp) const;
   void callDoCycleCollectionCallback(JSContext* cx);

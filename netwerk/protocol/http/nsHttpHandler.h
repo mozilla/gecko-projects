@@ -331,9 +331,10 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   already_AddRefed<AltSvcMapping> GetAltServiceMapping(
       const nsACString& scheme, const nsACString& host, int32_t port, bool pb,
+      bool isolated, const nsACString& topWindowOrigin,
       const OriginAttributes& originAttributes) {
-    return mConnMgr->GetAltServiceMapping(scheme, host, port, pb,
-                                          originAttributes);
+    return mConnMgr->GetAltServiceMapping(scheme, host, port, pb, isolated,
+                                          topWindowOrigin, originAttributes);
   }
 
   //
@@ -766,10 +767,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   void BlacklistSpdy(const nsHttpConnectionInfo* ci);
   MOZ_MUST_USE bool IsSpdyBlacklisted(const nsHttpConnectionInfo* ci);
 
-  virtual nsresult EnsureHSTSDataReadyNative(
-      already_AddRefed<mozilla::net::HSTSDataCallbackWrapper> aCallback)
-      override;
-
  private:
   nsTHashtable<nsCStringHashKey> mBlacklistedSpdyOrigins;
 
@@ -801,11 +798,6 @@ class nsHttpsHandler : public nsIHttpProtocolHandler,
   nsHttpsHandler() = default;
 
   MOZ_MUST_USE nsresult Init();
-  virtual nsresult EnsureHSTSDataReadyNative(
-      already_AddRefed<mozilla::net::HSTSDataCallbackWrapper> aCallback)
-      override {
-    return gHttpHandler->EnsureHSTSDataReadyNative(std::move(aCallback));
-  }
 };
 
 //-----------------------------------------------------------------------------

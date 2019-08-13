@@ -189,6 +189,8 @@
 
 @RESPATH@/components/Push.manifest
 
+@RESPATH@/components/antitracking.manifest
+
 @RESPATH@/components/l10n-registry.manifest
 @RESPATH@/browser/components/l10n-registry.manifest
 
@@ -301,9 +303,6 @@
 ; Technically this is an app pref file, but we are keeping it in the original
 ; gre location for now.
 @RESPATH@/defaults/pref/channel-prefs.js
-
-; Services (gre) prefs
-@RESPATH@/defaults/pref/services-sync.js
 
 ; [Layout Engine Resources]
 ; Style Sheets, Graphics and other Resources used by the layout engine.

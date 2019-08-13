@@ -345,6 +345,17 @@ var gIdentityHandler = {
     return this._useGrayLockIcon;
   },
 
+  get _showExtendedValidation() {
+    delete this._showExtendedValidation;
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "_showExtendedValidation",
+      "security.identityblock.show_extended_validation",
+      false
+    );
+    return this._showExtendedValidation;
+  },
+
   /**
    * Handles clicks on the "Clear Cookies and Site Data" button.
    */
@@ -615,6 +626,14 @@ var gIdentityHandler = {
       // Some URIs might have no hosts.
     }
 
+    if (this._uri.schemeIs("about")) {
+      // For example in about:certificate the original URL is
+      // about:certificate?cert=<large base64 encoded data>&cert=<large base64 encoded data>&cert=...
+      // So, instead of showing that large string in the identity panel header, we are just showing
+      // about:certificate now. For the other about pages we are just showing about:<page>
+      host = "about:" + this._uri.filePath;
+    }
+
     let readerStrippedURI = ReaderMode.getOriginalUrlObjectForDisplay(
       this._uri.displaySpec
     );
@@ -641,7 +660,7 @@ var gIdentityHandler = {
    */
   get pointerlockFsWarningClassName() {
     // Note that the fullscreen warning does not handle _isSecureInternalUI.
-    if (this._uriHasHost && this._isEV) {
+    if (this._uriHasHost && this._isEV && this._showExtendedValidation) {
       return "verifiedIdentity";
     }
     if (this._uriHasHost && this._isSecureConnection) {
@@ -665,10 +684,34 @@ var gIdentityHandler = {
   },
 
   /**
+   * Returns whether the current URI results in an "invalid"
+   * URL bar state, which effectively means hidden security
+   * indicators.
+   */
+  _hasInvalidPageProxyState() {
+    return (
+      !this._uriHasHost &&
+      this._uri &&
+      isBlankPageURL(this._uri.spec) &&
+      !this._uri.schemeIs("moz-extension")
+    );
+  },
+
+  /**
    * Updates the identity block user interface with the data from this object.
    */
   refreshIdentityBlock() {
     if (!this._identityBox) {
+      return;
+    }
+
+    // If this condition is true, the URL bar will have an "invalid"
+    // pageproxystate, which will hide the security indicators. Thus, we can
+    // safely avoid updating the security UI.
+    //
+    // This will also filter out intermediate about:blank loads to avoid
+    // flickering the identity block and doing unnecessary work.
+    if (this._hasInvalidPageProxyState()) {
       return;
     }
 
@@ -682,7 +725,7 @@ var gIdentityHandler = {
       this._identityBox.className = "chromeUI";
       let brandBundle = document.getElementById("bundle_brand");
       icon_label = brandBundle.getString("brandShorterName");
-    } else if (this._uriHasHost && this._isEV) {
+    } else if (this._uriHasHost && this._isEV && this._showExtendedValidation) {
       // This is a secure connection with EV.
       this._identityBox.className = "verifiedIdentity";
       if (this._isMixedActiveContentBlocked) {
@@ -765,6 +808,9 @@ var gIdentityHandler = {
           PrivateBrowsingUtils.isWindowPrivate(window));
       let className = warnOnInsecure ? "notSecure" : "unknownIdentity";
       this._identityBox.className = className;
+      tooltip = warnOnInsecure
+        ? gNavigatorBundle.getString("identity.notSecure.tooltip")
+        : "";
 
       let warnTextOnInsecure =
         this._insecureConnectionTextEnabled ||
@@ -1372,7 +1418,10 @@ var gIdentityHandler = {
       "identity-popup-permission-icon",
       aPermission.id + "-icon"
     );
-    if (aPermission.state == SitePermissions.BLOCK) {
+    if (
+      aPermission.state == SitePermissions.BLOCK ||
+      aPermission.state == SitePermissions.AUTOPLAY_BLOCKED_ALL
+    ) {
       img.classList.add("blocked-permission-icon");
     }
 

@@ -605,7 +605,7 @@ bool BackgroundParentImpl::DeallocPTemporaryIPCBlobParent(
   return true;
 }
 
-dom::PIPCBlobInputStreamParent*
+already_AddRefed<dom::PIPCBlobInputStreamParent>
 BackgroundParentImpl::AllocPIPCBlobInputStreamParent(const nsID& aID,
                                                      const uint64_t& aSize) {
   AssertIsInMainOrSocketProcess();
@@ -613,7 +613,7 @@ BackgroundParentImpl::AllocPIPCBlobInputStreamParent(const nsID& aID,
 
   RefPtr<dom::IPCBlobInputStreamParent> actor =
       dom::IPCBlobInputStreamParent::Create(aID, aSize, this);
-  return actor.forget().take();
+  return actor.forget();
 }
 
 mozilla::ipc::IPCResult
@@ -625,17 +625,6 @@ BackgroundParentImpl::RecvPIPCBlobInputStreamConstructor(
   }
 
   return IPC_OK();
-}
-
-bool BackgroundParentImpl::DeallocPIPCBlobInputStreamParent(
-    dom::PIPCBlobInputStreamParent* aActor) {
-  AssertIsInMainOrSocketProcess();
-  AssertIsOnBackgroundThread();
-  MOZ_ASSERT(aActor);
-
-  RefPtr<dom::IPCBlobInputStreamParent> actor =
-      dont_AddRef(static_cast<dom::IPCBlobInputStreamParent*>(aActor));
-  return true;
 }
 
 PFileDescriptorSetParent* BackgroundParentImpl::AllocPFileDescriptorSetParent(
@@ -1027,7 +1016,7 @@ mozilla::ipc::IPCResult BackgroundParentImpl::RecvShutdownQuotaManager() {
   return IPC_OK();
 }
 
-dom::PFileSystemRequestParent*
+already_AddRefed<dom::PFileSystemRequestParent>
 BackgroundParentImpl::AllocPFileSystemRequestParent(
     const FileSystemParams& aParams) {
   AssertIsInMainOrSocketProcess();
@@ -1039,23 +1028,13 @@ BackgroundParentImpl::AllocPFileSystemRequestParent(
     return nullptr;
   }
 
-  return result.forget().take();
+  return result.forget();
 }
 
 mozilla::ipc::IPCResult BackgroundParentImpl::RecvPFileSystemRequestConstructor(
     PFileSystemRequestParent* aActor, const FileSystemParams& params) {
   static_cast<FileSystemRequestParent*>(aActor)->Start();
   return IPC_OK();
-}
-
-bool BackgroundParentImpl::DeallocPFileSystemRequestParent(
-    PFileSystemRequestParent* aDoomed) {
-  AssertIsInMainOrSocketProcess();
-  AssertIsOnBackgroundThread();
-
-  RefPtr<FileSystemRequestParent> parent =
-      dont_AddRef(static_cast<FileSystemRequestParent*>(aDoomed));
-  return true;
 }
 
 // Gamepad API Background IPC

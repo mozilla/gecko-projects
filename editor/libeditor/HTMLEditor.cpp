@@ -763,7 +763,7 @@ HTMLEditor::NodeIsBlock(nsINode* aNode, bool* aIsBlock) {
   return NS_OK;
 }
 
-bool HTMLEditor::IsBlockNode(nsINode* aNode) {
+bool HTMLEditor::IsBlockNode(nsINode* aNode) const {
   return aNode && NodeIsBlockStatic(aNode);
 }
 
@@ -3744,7 +3744,7 @@ bool HTMLEditor::TagCanContainTag(nsAtom& aParentTag, nsAtom& aChildTag) const {
   return HTMLEditUtils::CanContain(parentTagEnum, childTagEnum);
 }
 
-bool HTMLEditor::IsContainer(nsINode* aNode) {
+bool HTMLEditor::IsContainer(nsINode* aNode) const {
   MOZ_ASSERT(aNode);
 
   int32_t tagEnum;
@@ -4147,8 +4147,8 @@ nsIContent* HTMLEditor::GetNextHTMLElementOrTextInternal(
                           : GetNextElementOrText(aPoint);
 }
 
-nsIContent* HTMLEditor::GetNextEditableHTMLNodeInternal(nsINode& aNode,
-                                                        bool aNoBlockCrossing) {
+nsIContent* HTMLEditor::GetNextEditableHTMLNodeInternal(
+    nsINode& aNode, bool aNoBlockCrossing) const {
   if (!GetActiveEditingHost()) {
     return nullptr;
   }
@@ -4158,7 +4158,7 @@ nsIContent* HTMLEditor::GetNextEditableHTMLNodeInternal(nsINode& aNode,
 
 template <typename PT, typename CT>
 nsIContent* HTMLEditor::GetNextEditableHTMLNodeInternal(
-    const EditorDOMPointBase<PT, CT>& aPoint, bool aNoBlockCrossing) {
+    const EditorDOMPointBase<PT, CT>& aPoint, bool aNoBlockCrossing) const {
   if (!GetActiveEditingHost()) {
     return nullptr;
   }
@@ -4234,7 +4234,7 @@ nsIContent* HTMLEditor::GetLastEditableLeaf(nsINode& aNode) {
   return child;
 }
 
-bool HTMLEditor::IsInVisibleTextFrames(Text& aText) {
+bool HTMLEditor::IsInVisibleTextFrames(Text& aText) const {
   nsISelectionController* selectionController = GetSelectionController();
   if (NS_WARN_IF(!selectionController)) {
     return false;
@@ -4259,7 +4259,7 @@ bool HTMLEditor::IsInVisibleTextFrames(Text& aText) {
   return isVisible;
 }
 
-bool HTMLEditor::IsVisibleTextNode(Text& aText) {
+bool HTMLEditor::IsVisibleTextNode(Text& aText) const {
   if (!aText.TextDataLength()) {
     return false;
   }
@@ -4268,12 +4268,12 @@ bool HTMLEditor::IsVisibleTextNode(Text& aText) {
     return true;
   }
 
-  WSRunObject wsRunObj(this, &aText, 0);
+  WSRunScanner wsRunScanner(this, &aText, 0);
   nsCOMPtr<nsINode> nextVisibleNode;
   WSType visibleNodeType;
-  wsRunObj.NextVisibleNode(EditorRawDOMPoint(&aText, 0),
-                           address_of(nextVisibleNode), nullptr,
-                           &visibleNodeType);
+  wsRunScanner.NextVisibleNode(EditorRawDOMPoint(&aText, 0),
+                               address_of(nextVisibleNode), nullptr,
+                               &visibleNodeType);
   return (visibleNodeType == WSType::normalWS ||
           visibleNodeType == WSType::text) &&
          &aText == nextVisibleNode;
@@ -4287,7 +4287,7 @@ bool HTMLEditor::IsVisibleTextNode(Text& aText) {
 nsresult HTMLEditor::IsEmptyNode(nsINode* aNode, bool* outIsEmptyNode,
                                  bool aSingleBRDoesntCount,
                                  bool aListOrCellNotEmpty,
-                                 bool aSafeToAskFrames) {
+                                 bool aSafeToAskFrames) const {
   NS_ENSURE_TRUE(aNode && outIsEmptyNode, NS_ERROR_NULL_POINTER);
   *outIsEmptyNode = true;
   bool seenBR = false;
@@ -4301,7 +4301,8 @@ nsresult HTMLEditor::IsEmptyNode(nsINode* aNode, bool* outIsEmptyNode,
 nsresult HTMLEditor::IsEmptyNodeImpl(nsINode* aNode, bool* outIsEmptyNode,
                                      bool aSingleBRDoesntCount,
                                      bool aListOrCellNotEmpty,
-                                     bool aSafeToAskFrames, bool* aSeenBR) {
+                                     bool aSafeToAskFrames,
+                                     bool* aSeenBR) const {
   NS_ENSURE_TRUE(aNode && outIsEmptyNode && aSeenBR, NS_ERROR_NULL_POINTER);
 
   if (Text* text = aNode->GetAsText()) {
@@ -5266,22 +5267,42 @@ nsHTMLDocument* HTMLEditor::GetHTMLDocument() const {
   return doc->AsHTMLDocument();
 }
 
-void HTMLEditor::OnModifyDocument() {
-  MOZ_ASSERT(mRules);
-
-  RefPtr<HTMLEditRules> htmlRules = mRules->AsHTMLEditRules();
+nsresult HTMLEditor::OnModifyDocument() {
   if (IsEditActionDataAvailable()) {
-    htmlRules->OnModifyDocument();
-    return;
+    return OnModifyDocumentInternal();
   }
 
   AutoEditActionDataSetter editActionData(
       *this, EditAction::eCreatePaddingBRElementForEmptyEditor);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
-    return;
+    return NS_ERROR_NOT_AVAILABLE;
   }
 
-  htmlRules->OnModifyDocument();
+  return OnModifyDocumentInternal();
+}
+
+nsresult HTMLEditor::OnModifyDocumentInternal() {
+  MOZ_ASSERT(IsEditActionDataAvailable());
+
+  // EnsureNoPaddingBRElementForEmptyEditor() below may cause a flush, which
+  // could destroy the editor
+  nsAutoScriptBlockerSuppressNodeRemoved scriptBlocker;
+
+  // Delete our padding <br> element for empty editor, if we have one, since
+  // the document might not be empty any more.
+  nsresult rv = EnsureNoPaddingBRElementForEmptyEditor();
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                       "Failed to remove the padding <br> element");
+  if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED)) {
+    return rv;
+  }
+
+  // Try to recreate the padding <br> element for empty editor if needed.
+  rv = MaybeCreatePaddingBRElementForEmptyEditor();
+  NS_WARNING_ASSERTION(
+      rv != NS_ERROR_EDITOR_DESTROYED,
+      "The editor has been destroyed during creating a padding <br> element");
+  return rv;
 }
 
 }  // namespace mozilla

@@ -7,7 +7,7 @@ AntiTracking.runTest(
     /* import-globals-from storageAccessAPIHelpers.js */
     let [threw, rejected] = await callRequestStorageAccess();
     ok(!threw, "requestStorageAccess should not throw");
-    ok(rejected, "requestStorageAccess shouldn't be available");
+    ok(!rejected, "requestStorageAccess shouldn't be available");
   },
 
   null, // non-blocking callback

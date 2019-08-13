@@ -3152,7 +3152,7 @@ bool nsContentUtils::CanLoadImage(nsIURI* aURI, nsINode* aNode,
         aLoadingDocument->GetDocShell();
     if (docShellTreeItem) {
       nsCOMPtr<nsIDocShellTreeItem> root;
-      docShellTreeItem->GetRootTreeItem(getter_AddRefs(root));
+      docShellTreeItem->GetInProcessRootTreeItem(getter_AddRefs(root));
 
       nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(root));
 
@@ -8751,7 +8751,7 @@ void nsContentUtils::GetPresentationURL(nsIDocShell* aDocShell,
     nsCOMPtr<nsIDocShellTreeItem> sameTypeRoot;
     aDocShell->GetInProcessSameTypeRootTreeItem(getter_AddRefs(sameTypeRoot));
     nsCOMPtr<nsIDocShellTreeItem> root;
-    aDocShell->GetRootTreeItem(getter_AddRefs(root));
+    aDocShell->GetInProcessRootTreeItem(getter_AddRefs(root));
     if (sameTypeRoot.get() == root.get()) {
       // presentation URL is stored in BrowserChild for the top most
       // <iframe mozbrowser> in content process.
@@ -9746,8 +9746,12 @@ bool nsContentUtils::IsLocalRefURL(const nsString& aString) {
   return !aString.IsEmpty() && aString[0] == '#';
 }
 
-static const uint64_t kIdProcessBits = 32;
-static const uint64_t kIdBits = 64 - kIdProcessBits;
+// We use only 53 bits for the ID so that it can be converted to and from a JS
+// value without loss of precision. The upper bits of the ID hold the process
+// ID. The lower bits identify the object itself.
+static constexpr uint64_t kIdTotalBits = 53;
+static constexpr uint64_t kIdProcessBits = 22;
+static constexpr uint64_t kIdBits = kIdTotalBits - kIdProcessBits;
 
 /* static */ uint64_t GenerateProcessSpecificId(uint64_t aId) {
   uint64_t processId = 0;
@@ -9772,7 +9776,7 @@ static const uint64_t kIdBits = 64 - kIdProcessBits;
   return (processBits << kIdBits) | bits;
 }
 
-// Tab ID is composed in a similar manner of Window ID.
+// Next process-local Tab ID.
 static uint64_t gNextTabId = 0;
 
 /* static */
@@ -9780,12 +9784,20 @@ uint64_t nsContentUtils::GenerateTabId() {
   return GenerateProcessSpecificId(++gNextTabId);
 }
 
-// Browsing context ID is composed in a similar manner of Window ID.
+// Next process-local Browsing Context ID.
 static uint64_t gNextBrowsingContextId = 0;
 
 /* static */
 uint64_t nsContentUtils::GenerateBrowsingContextId() {
   return GenerateProcessSpecificId(++gNextBrowsingContextId);
+}
+
+// Next process-local Window ID.
+static uint64_t gNextWindowId = 0;
+
+/* static */
+uint64_t nsContentUtils::GenerateWindowId() {
+  return GenerateProcessSpecificId(++gNextWindowId);
 }
 
 /* static */

@@ -3638,8 +3638,13 @@ var BrowserOnClick = {
         securityInfo = getSecurityInfo(securityInfoAsString);
         cert = securityInfo.serverCert;
         if (Services.prefs.getBoolPref("security.aboutcertificate.enabled")) {
-          let derb64 = encodeURIComponent(btoa(getDERString(cert)));
-          let url = `about:certificate?cert=${derb64}`;
+          let certChain = getCertificateChain(securityInfo.failedCertChain);
+          let certs = certChain.map(elem =>
+            encodeURIComponent(elem.getBase64DERString())
+          );
+          let certsStringURL = certs.map(elem => `cert=${elem}`);
+          certsStringURL = certsStringURL.join("&");
+          let url = `about:certificate?${certsStringURL}`;
           openTrustedLinkIn(url, "tab", {
             triggeringPrincipal: browser.contentPrincipal,
           });
@@ -3973,19 +3978,10 @@ function getSecurityInfo(securityInfoAsString) {
   return securityInfo;
 }
 
-// TODO: can we pull getDERString and getPEMString in from pippki.js instead of
+// TODO: can we pull getPEMString in from pippki.js instead of
 // duplicating them here?
-function getDERString(cert) {
-  var derArray = cert.getRawDER();
-  var derString = "";
-  for (var i = 0; i < derArray.length; i++) {
-    derString += String.fromCharCode(derArray[i]);
-  }
-  return derString;
-}
-
 function getPEMString(cert) {
-  var derb64 = btoa(getDERString(cert));
+  var derb64 = cert.getBase64DERString();
   // Wrap the Base64 string into lines of 64 characters,
   // with CRLF line breaks (as specified in RFC 1421).
   var wrapped = derb64.replace(/(\S{64}(?!$))/g, "$1\r\n");
@@ -3994,6 +3990,14 @@ function getPEMString(cert) {
     wrapped +
     "\r\n-----END CERTIFICATE-----\r\n"
   );
+}
+
+function getCertificateChain(certChain) {
+  let certificates = [];
+  for (let cert of certChain.getEnumerator()) {
+    certificates.push(cert);
+  }
+  return certificates;
 }
 
 var PrintPreviewListener = {
@@ -6054,6 +6058,7 @@ var CombinedStopReload = {
         if (event.button == 0 && !this.stop.disabled) {
           this._stopClicked = true;
         }
+        break;
       case "animationend": {
         if (
           event.target.classList.contains("toolbarbutton-animatable-image") &&

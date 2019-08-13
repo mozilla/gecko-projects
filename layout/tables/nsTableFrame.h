@@ -36,11 +36,6 @@ class StackingContextHelper;
 
 struct BCPropertyData;
 
-static inline bool IsTableCell(mozilla::LayoutFrameType frameType) {
-  return frameType == mozilla::LayoutFrameType::TableCell ||
-         frameType == mozilla::LayoutFrameType::BCTableCell;
-}
-
 class nsDisplayTableItem : public nsPaintedDisplayItem {
  public:
   nsDisplayTableItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
@@ -666,7 +661,9 @@ class nsTableFrame : public nsContainerFrame {
   void DistributeBSizeToRows(const ReflowInput& aReflowInput, nscoord aAmount);
 
   void PlaceChild(TableReflowInput& aReflowInput, nsIFrame* aKidFrame,
-                  nsPoint aKidPosition, ReflowOutput& aKidDesiredSize,
+                  const ReflowInput& aKidReflowInput,
+                  const mozilla::LogicalPoint& aKidPosition,
+                  const nsSize& aContainerSize, ReflowOutput& aKidDesiredSize,
                   const nsRect& aOriginalKidRect,
                   const nsRect& aOriginalKidVisualOverflow);
   void PlaceRepeatedFooter(TableReflowInput& aReflowInput,

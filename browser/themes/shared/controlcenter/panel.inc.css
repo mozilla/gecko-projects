@@ -69,12 +69,10 @@
   display: none !important;
 }
 
-#identity-popup-mainView {
-  min-width: var(--popup-width);
-  max-width: var(--popup-width);
-}
-
-#protections-popup-mainView {
+#identity-popup-mainView,
+#protections-popup-mainView,
+#identity-popup-mainView-panel-header,
+#protections-popup-mainView-panel-header {
   min-width: var(--popup-width);
   max-width: var(--popup-width);
 }
@@ -205,8 +203,7 @@
 }
 
 #identity-popup-mainView-panel-header,
-#protections-popup-mainView-panel-header,
-#protections-popup-siteNotWorkingView-footer {
+#protections-popup-mainView-panel-header {
   padding: 4px 1em;
   min-height: 40px;
   -moz-box-pack: center;
@@ -214,28 +211,34 @@
 }
 
 #protections-popup > .panel-arrowcontainer > .panel-arrowbox > .panel-arrow {
-  fill: #8758FB;
+  transition-property: fill;
+  transition-timing-function: var(--animation-easing-function);
+  transition-duration: var(--panelui-subview-transition-duration);
 }
 
-:root[lwt-popup-brighttext] #protections-popup > .panel-arrowcontainer > .panel-arrowbox > .panel-arrow {
-  fill: #B98CFE;
+#protections-popup[mainviewshowing] > .panel-arrowcontainer > .panel-arrowbox > .panel-arrow {
+  fill: #0A51BF;
+}
+
+:root[lwt-popup-brighttext] #protections-popup[mainviewshowing] > .panel-arrowcontainer > .panel-arrowbox > .panel-arrow {
+  fill: #0CB0F5;
 }
 
 #protections-popup-mainView-panel-header {
   color: white;
-  background: radial-gradient(circle at top left, #9059FF, #0250BB);
-}
-
-#protections-popup-mainView-panel-header:-moz-locale-dir(rtl) {
   background: radial-gradient(circle at top right, #9059FF, #0250BB);
 }
 
+#protections-popup-mainView-panel-header:-moz-locale-dir(rtl) {
+  background: radial-gradient(circle at top left, #9059FF, #0250BB);
+}
+
 :root[lwt-popup-brighttext] #protections-popup-mainView-panel-header {
-  background: radial-gradient(circle at top left, #C689FF, #00B3F4);
+  background: radial-gradient(circle at top right, #C689FF, #00B3F4);
 }
 
 :root[lwt-popup-brighttext] #protections-popup-mainView-panel-header:-moz-locale-dir(rtl) {
-  background: radial-gradient(circle at top right, #C689FF, #00B3F4);
+  background: radial-gradient(circle at top left, #C689FF, #00B3F4);
 }
 
 #identity-popup-mainView-panel-header-span,
@@ -255,6 +258,10 @@
 #protections-popup-toast-panel-tp-on-desc,
 #protections-popup-toast-panel-tp-off-desc {
   max-width: calc(var(--popup-width) - 2em);
+}
+
+#protections-popup[toast] #protections-popup-info-button {
+  display: none;
 }
 
 #identity-popup-permissions-content > description,
@@ -480,8 +487,12 @@ description#identity-popup-content-verifier,
 }
 
 .protections-popup-cookiesView-list-header {
-  color: var(--panel-disabled-color);
+  color: #737373;
   margin: 5px 0;
+}
+
+:root[lwt-popup-brighttext] .protections-popup-cookiesView-list-header {
+  color: #f9f9fa;
 }
 
 .protections-popup-list {
@@ -494,10 +505,6 @@ description#identity-popup-content-verifier,
   margin: 5px 0;
   overflow: hidden;
   -moz-box-align: center;
-}
-
-.protections-popup-list-item:not(.allowed) {
-  color: var(--panel-disabled-color);
 }
 
 .protections-popup-list-host-label {
@@ -526,11 +533,13 @@ description#identity-popup-content-verifier,
 }
 
 .protections-popup-trackersView-icon {
-  list-style-image: url(chrome://browser/skin/controlcenter/trackers-disabled.svg);
+  list-style-image: url(chrome://browser/skin/controlcenter/tracker-image-disabled.svg);
+  width: 16px;
+  height: 16px;
 }
 
 .protections-popup-trackersView-icon.allowed {
-  list-style-image: url(chrome://browser/skin/controlcenter/trackers.svg);
+  list-style-image: url(chrome://browser/skin/controlcenter/tracker-image.svg);
 }
 
 .protections-popup-socialblockView-icon {
@@ -594,12 +603,126 @@ description#identity-popup-content-verifier,
 
 /* Content Blocking categories */
 
+#protections-popup-no-trackers-found-description {
+  margin: 4.85em 7.25em;
+  font-size: 1.1em;
+  text-align: center;
+  color: #737373;
+}
+
+#protections-popup-content {
+  padding: 0;
+  margin: 0 0 10px 0;
+}
+
+#protections-popup-blocking-section-header,
+#protections-popup-not-blocking-section-header {
+  font-weight: 500;
+  margin: 0;
+  padding: 10px calc(10px + 1em);
+  color: #737373;
+  display: none;
+}
+
+:root[lwt-popup-brighttext] #protections-popup-no-trackers-found-description,
+:root[lwt-popup-brighttext] #protections-popup-blocking-section-header,
+:root[lwt-popup-brighttext] #protections-popup-not-blocking-section-header {
+  color: #f9f9fa;
+}
+
+#tracking-protection-container > tooltip {
+  max-width: var(--popup-width);
+}
+/*
+ * The category list is split into two sections: "Blocking" and "Not Blocking",
+ * with five different category items distributed between them at runtime.
+ * To achieve this, we use a grid layout with 12 rows: one row for each header
+ * label and five rows in each section for the items.
+ * Items with the "blocked" class are assigned rows 2-6, and those without
+ * are assigned rows 8-12, with the headers taking rows 1 and 7.
+ */
+
 #protections-popup-category-list {
+  display: grid;
+  padding: 0;
+  margin: 0;
+}
+
+#protections-popup-blocking-section-header {
+  grid-row: 1;
+}
+
+.protections-popup-category.blocked:not([hidden]) ~ #protections-popup-blocking-section-header,
+.protections-popup-category:not(.blocked):not([hidden]) ~ #protections-popup-not-blocking-section-header {
+  display: flex;
+}
+
+#protections-popup:not([hasException]) #protections-popup-category-tracking-protection.blocked {
+  grid-row: 2;
+}
+
+#protections-popup:not([hasException]) #protections-popup-category-socialblock.blocked {
+  grid-row: 3;
+}
+
+#protections-popup:not([hasException]) #protections-popup-category-cookies.blocked {
+  grid-row: 4;
+}
+
+#protections-popup:not([hasException]) #protections-popup-category-cryptominers.blocked {
+  grid-row: 5;
+}
+
+#protections-popup:not([hasException]) #protections-popup-category-fingerprinters.blocked {
+  grid-row: 6;
+}
+
+#protections-popup-not-blocking-section-header {
+  grid-row: 7;
+}
+
+#protections-popup-not-blocking-section-description {
+  flex: -moz-available;
+  margin: 0;
+}
+
+#protections-popup-not-blocking-section-why {
+  margin: 0;
+}
+
+#protections-popup-not-blocking-section-why:hover {
+  background-color: var(--arrowpanel-dimmed);
+  outline: 4px solid var(--arrowpanel-dimmed);
+  text-decoration: none;
+}
+
+#protections-popup:not([hasException]) #protections-popup-blocking-section-header:not([hidden]) + #protections-popup-not-blocking-section-header {
+  border-top: 1px solid var(--panel-separator-color);
   margin-top: 10px;
 }
 
+#protections-popup-category-tracking-protection {
+  grid-row: 8;
+}
+
+#protections-popup-category-socialblock {
+  grid-row: 9;
+}
+
+#protections-popup-category-cookies {
+  grid-row: 10;
+}
+
+#protections-popup-category-cryptominers {
+  grid-row: 11;
+}
+
+#protections-popup-category-fingerprinters {
+  grid-row: 12;
+}
+
 .tracking-protection-icon {
-  list-style-image: url(chrome://browser/skin/controlcenter/trackers.svg);
+  list-style-image: url(chrome://browser/skin/controlcenter/tracker-image.svg);
 }
 
 .socialblock-icon {
@@ -660,16 +783,13 @@ description#identity-popup-content-verifier,
 }
 
 #identity-popup-permissions-headline {
-  color: var(--panel-disabled-color);
-  font-weight: 600;
+  color: #737373;
+  font-weight: 500;
   margin-inline-start: 0;
 }
 
-#protections-popup-category-list {
-  /* Offset the padding set on #identity-popup-permissions-content so that it
-     shows up just below the section. The permission icons are 16px wide and
-     should be right aligned with the section icon. */
-  margin-inline-start: calc(-1em - 24px);
+:root[lwt-popup-brighttext] #identity-popup-permissions-headline {
+  color: #f9f9fa;
 }
 
 .protections-popup-category,
@@ -678,7 +798,7 @@ description#identity-popup-content-verifier,
 }
 
 .protections-popup-category {
-  padding-inline-end: 12px;
+  padding: 0 calc(10px + 1em);
 }
 
 .identity-popup-permission-item {
@@ -702,10 +822,6 @@ description#identity-popup-content-verifier,
   height: 16px;
 }
 
-.protections-popup-category-icon {
-  margin-inline-start: 12px;
-}
-
 .identity-popup-permission-icon.in-use {
   -moz-context-properties: fill;
   fill: rgb(224, 41, 29);
@@ -714,10 +830,6 @@ description#identity-popup-content-verifier,
 
 @keyframes in-use-blink {
   50% { opacity: 0; }
-}
-
-.protections-popup-category-label {
-  max-width: 200px;
 }
 
 .protections-popup-category-label,
@@ -816,6 +928,10 @@ description#identity-popup-content-verifier,
   );
 }
 
+#protections-popup-siteNotWorkingView-header {
+  border-bottom: 1px solid var(--panel-separator-color);
+}
+
 #protections-popup-siteNotWorkingView-body,
 .protections-popup-tp-switch-label-box,
 .protections-popup-tp-switch-box {
@@ -836,7 +952,7 @@ description#identity-popup-content-verifier,
 
 .protections-popup-tp-switch-on-header,
 .protections-popup-tp-switch-off-header {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .protections-popup-tp-switch {
@@ -883,10 +999,6 @@ description#identity-popup-content-verifier,
 
 #protections-popup-siteNotWorkingView-body-issue-list {
   padding-inline-start: 1em;
-}
-
-#protections-popup-siteNotWorkingView-footer {
-  border-top: 1px solid var(--panel-separator-color);
 }
 
 /* Protection popup footer categories */
@@ -954,10 +1066,10 @@ description#identity-popup-content-verifier,
   right: calc(1em + 20px);
 }
 
-#protections-popup-socialblockView-heading {
+.protections-popup-description {
   border-bottom: 1px solid var(--panel-separator-color);
 }
 
-#protections-popup-socialblockView-heading > description {
+.protections-popup-description > description {
   margin: 10px 24px;
 }

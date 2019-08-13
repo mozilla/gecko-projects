@@ -1018,9 +1018,8 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
   // which are not normally present. Globals with instrumentation enabled must
   // compile scripts via the bytecode emitter, which will insert these
   // instructions.
-  if (xdr->hasOptions()
-      ? !!xdr->options().instrumentationKinds
-      : !!cx->global()->getInstrumentationHolder()) {
+  if (xdr->hasOptions() ? !!xdr->options().instrumentationKinds
+                        : !!cx->global()->getInstrumentationHolder()) {
     return xdr->fail(JS::TranscodeResult_Failure);
   }
 
@@ -1516,7 +1515,7 @@ void JSScript::setIonScript(JSRuntime* rt, js::jit::IonScript* ionScript) {
   setIonScript(rt->defaultFreeOp(), ionScript);
 }
 
-void JSScript::setIonScript(FreeOp* fop, js::jit::IonScript* ionScript) {
+void JSScript::setIonScript(JSFreeOp* fop, js::jit::IonScript* ionScript) {
   MOZ_ASSERT_IF(ionScript != ION_DISABLED_SCRIPT,
                 !baselineScript()->hasPendingIonBuilder());
   if (hasIonScript()) {
@@ -1652,7 +1651,7 @@ bool JSScript::hasScriptName() {
   return p.found();
 }
 
-void ScriptSourceObject::finalize(FreeOp* fop, JSObject* obj) {
+void ScriptSourceObject::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
   ScriptSourceObject* sso = &obj->as<ScriptSourceObject>();
   sso->source()->decref();
@@ -3717,6 +3716,10 @@ size_t PrivateScriptData::AllocationSize(uint32_t ngcthings) {
   return size;
 }
 
+inline size_t PrivateScriptData::allocationSize() const {
+  return AllocationSize(ngcthings);
+}
+
 // Placement-new elements of an array. This should optimize away for types with
 // trivial default initiation.
 template <typename T>
@@ -3749,20 +3752,12 @@ PrivateScriptData::PrivateScriptData(uint32_t ngcthings)
 }
 
 /* static */
-PrivateScriptData* PrivateScriptData::new_(JSContext* cx, uint32_t ngcthings,
-                                           uint32_t* dataSize) {
-  // Compute size including trailing arrays
-  size_t size = AllocationSize(ngcthings);
-
-  // Allocate contiguous raw buffer
-  void* raw = cx->pod_malloc<uint8_t>(size);
+PrivateScriptData* PrivateScriptData::new_(JSContext* cx, uint32_t ngcthings) {
+  // Allocate contiguous raw buffer for the trailing arrays.
+  void* raw = cx->pod_malloc<uint8_t>(AllocationSize(ngcthings));
   MOZ_ASSERT(uintptr_t(raw) % alignof(PrivateScriptData) == 0);
   if (!raw) {
     return nullptr;
-  }
-
-  if (dataSize) {
-    *dataSize = size;
   }
 
   // Constuct the PrivateScriptData. Trailing arrays are uninitialized but
@@ -3958,63 +3953,15 @@ bool JSScript::createPrivateScriptData(JSContext* cx, HandleScript script,
   cx->check(script);
   MOZ_ASSERT(!script->data_);
 
-  uint32_t dataSize;
-
-  PrivateScriptData* data = PrivateScriptData::new_(cx, ngcthings, &dataSize);
+  PrivateScriptData* data = PrivateScriptData::new_(cx, ngcthings);
   if (!data) {
     return false;
   }
 
   script->data_ = data;
-  script->dataSize_ = dataSize;
-  AddCellMemory(script, dataSize, MemoryUse::ScriptPrivateData);
+  AddCellMemory(script, data->allocationSize(), MemoryUse::ScriptPrivateData);
 
   return true;
-}
-
-/* static */
-bool JSScript::initFunctionPrototype(JSContext* cx, HandleScript script,
-                                     HandleFunction functionProto) {
-  uint32_t numGCThings = 1;
-  if (!createPrivateScriptData(cx, script, numGCThings)) {
-    return false;
-  }
-
-  RootedScope enclosing(cx, &cx->global()->emptyGlobalScope());
-  Scope* functionProtoScope = FunctionScope::create(cx, nullptr, false, false,
-                                                    functionProto, enclosing);
-  if (!functionProtoScope) {
-    return false;
-  }
-
-  mozilla::Span<JS::GCCellPtr> gcthings = script->data_->gcthings();
-  gcthings[0] = JS::GCCellPtr(functionProtoScope);
-
-  uint32_t codeLength = 1;
-  uint32_t noteLength = 3;
-  uint32_t numResumeOffsets = 0;
-  uint32_t numScopeNotes = 0;
-  uint32_t numTryNotes = 0;
-  if (!script->createImmutableScriptData(cx, codeLength, noteLength,
-                                         numResumeOffsets, numScopeNotes,
-                                         numTryNotes)) {
-    return false;
-  }
-
-  jsbytecode* code = script->immutableScriptData()->code();
-  code[0] = JSOP_RETRVAL;
-
-  jssrcnote* notes = script->immutableScriptData()->notes();
-  notes[0] = SRC_NULL;
-  notes[1] = SRC_NULL;
-  notes[2] = SRC_NULL;
-
-  uint32_t numAtoms = 0;
-  if (!script->createScriptData(cx, numAtoms)) {
-    return false;
-  }
-
-  return script->shareScriptData(cx);
 }
 
 static void InitAtomMap(frontend::AtomIndexMap& indices, GCPtrAtom* atoms) {
@@ -4223,7 +4170,7 @@ void JSScript::assertValidJumpTargets() const {
 }
 #endif
 
-size_t JSScript::computedSizeOfData() const { return dataSize(); }
+size_t JSScript::computedSizeOfData() const { return data_->allocationSize(); }
 
 size_t JSScript::sizeOfData(mozilla::MallocSizeOf mallocSizeOf) const {
   return mallocSizeOf(data_);
@@ -4242,7 +4189,7 @@ void JSScript::addSizeOfJitScript(mozilla::MallocSizeOf mallocSizeOf,
 
 js::GlobalObject& JSScript::uninlinedGlobal() const { return global(); }
 
-void JSScript::finalize(FreeOp* fop) {
+void JSScript::finalize(JSFreeOp* fop) {
   // NOTE: this JSScript may be partially initialized at this point.  E.g. we
   // may have created it and partially initialized it with
   // JSScript::Create(), but not yet finished initializing it with
@@ -4541,9 +4488,8 @@ static JSObject* CloneInnerInterpretedFunction(
     cx->markAtom(atom);
   }
   RootedFunction clone(
-      cx, NewFunctionWithProto(cx, nullptr, srcFun->nargs(),
-                               flags, nullptr, atom, cloneProto,
-                               allocKind, TenuredObject));
+      cx, NewFunctionWithProto(cx, nullptr, srcFun->nargs(), flags, nullptr,
+                               atom, cloneProto, allocKind, TenuredObject));
   if (!clone) {
     return nullptr;
   }
@@ -4929,7 +4875,7 @@ void JSScript::traceChildren(JSTracer* trc) {
   }
 }
 
-void LazyScript::finalize(FreeOp* fop) {
+void LazyScript::finalize(JSFreeOp* fop) {
   if (lazyData_) {
     fop->free_(this, lazyData_, lazyData_->allocationSize(),
                MemoryUse::LazyScriptData);
@@ -5384,8 +5330,8 @@ LazyScript* LazyScript::CreateForXDR(
     uint32_t toStringEnd, uint32_t lineno, uint32_t column) {
   LazyScript* res = LazyScript::CreateRaw(
       cx, numClosedOverBindings, numInnerFunctions, fun, sourceObject,
-      immutableFlags, sourceStart, sourceEnd, toStringStart, toStringEnd, lineno,
-      column);
+      immutableFlags, sourceStart, sourceEnd, toStringStart, toStringEnd,
+      lineno, column);
   if (!res) {
     return nullptr;
   }

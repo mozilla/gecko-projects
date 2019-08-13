@@ -32,7 +32,6 @@
 #include "jspubtd.h"
 #include "jstypes.h"
 
-#include "builtin/String.h"
 #include "gc/FreeOp.h"
 #include "gc/Marking.h"
 #include "jit/Ion.h"
@@ -1250,8 +1249,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       suppressGC(this, 0),
       gcSweeping(this, false),
 #ifdef DEBUG
-      ionCompiling(this, false),
-      ionCompilingSafeForMinorGC(this, false),
       isTouchingGrayThings(this, false),
       noNurseryAllocationCheck(this, 0),
       disableStrictProxyCheckingCount(this, 0),
@@ -1275,7 +1272,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       unwrappedExceptionStack_(this),
       overRecursed_(this, false),
       propagatingForcedReturn_(this, false),
-      liveVolatileJitFrameIter_(this, nullptr),
       reportGranularity(this, JS_DEFAULT_JITREPORT_GRANULARITY),
       resolvingList(this, nullptr),
 #ifdef DEBUG
@@ -1494,7 +1490,13 @@ void AutoEnterOOMUnsafeRegion::crash(size_t size, const char* reason) {
 
 #ifdef DEBUG
 AutoUnsafeCallWithABI::AutoUnsafeCallWithABI(UnsafeABIStrictness strictness)
-    : cx_(TlsContext.get()), nested_(cx_->hasAutoUnsafeCallWithABI), nogc(cx_) {
+    : cx_(TlsContext.get()),
+      nested_(cx_ ? cx_->hasAutoUnsafeCallWithABI : false),
+      nogc(cx_) {
+  if (!cx_) {
+    // This is a helper thread doing Ion or Wasm compilation - nothing to do.
+    return;
+  }
   switch (strictness) {
     case UnsafeABIStrictness::NoExceptions:
       MOZ_ASSERT(!JS_IsExceptionPending(cx_));
@@ -1512,6 +1514,9 @@ AutoUnsafeCallWithABI::AutoUnsafeCallWithABI(UnsafeABIStrictness strictness)
 }
 
 AutoUnsafeCallWithABI::~AutoUnsafeCallWithABI() {
+  if (!cx_) {
+    return;
+  }
   MOZ_ASSERT(cx_->hasAutoUnsafeCallWithABI);
   if (!nested_) {
     cx_->hasAutoUnsafeCallWithABI = false;
@@ -1520,4 +1525,3 @@ AutoUnsafeCallWithABI::~AutoUnsafeCallWithABI() {
   MOZ_ASSERT_IF(checkForPendingException_, !JS_IsExceptionPending(cx_));
 }
 #endif
-

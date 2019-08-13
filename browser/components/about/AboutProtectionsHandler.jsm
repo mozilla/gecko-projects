@@ -38,6 +38,7 @@ let idToTextMap = new Map([
   [Ci.nsITrackingDBService.TRACKING_COOKIES_ID, "cookie"],
   [Ci.nsITrackingDBService.CRYPTOMINERS_ID, "cryptominer"],
   [Ci.nsITrackingDBService.FINGERPRINTERS_ID, "fingerprinter"],
+  [Ci.nsITrackingDBService.SOCIAL_ID, "social"],
 ]);
 
 const MONITOR_API_ENDPOINT = "https://monitor.firefox.com/user/breach-stats";
@@ -78,6 +79,10 @@ var AboutProtectionsHandler = {
     for (let topic of this._topics) {
       this.pageListener.addMessageListener(topic, this.receiveMessage);
     }
+    Services.telemetry.setEventRecordingEnabled(
+      "security.ui.protections",
+      true
+    );
     this._inited = true;
   },
 
@@ -167,9 +172,17 @@ var AboutProtectionsHandler = {
       Cu.reportError("There was an error fetching login data: ", e.message);
     }
 
+    const userFacingLogins =
+      Services.logins.countLogins("", "", "") -
+      Services.logins.countLogins(
+        "chrome://FirefoxAccounts",
+        null,
+        "Firefox Accounts credentials"
+      );
+
     return {
       hasFxa,
-      numLogins: Services.logins.countLogins("", "", ""),
+      numLogins: userFacingLogins,
       numSyncedDevices: syncedDevices.length,
     };
   },
@@ -202,13 +215,6 @@ var AboutProtectionsHandler = {
           potentiallyBreachedLogins = await LoginHelper.getBreachesForLogins(
             logins
           );
-
-          // If the user isn't subscribed to Monitor, then send back their email so the
-          // protections report can direct them to the proper OAuth flow on Monitor.
-          if (monitorData.errorMessage) {
-            const { email } = await fxAccounts.getSignedInUser();
-            userEmail = email;
-          }
         }
       } else {
         // If no account exists, then the user is not logged in with an fxAccount.
@@ -218,6 +224,8 @@ var AboutProtectionsHandler = {
       }
     } catch (e) {
       Cu.reportError(e.message);
+      monitorData.errorMessage = e.message;
+
       // If the user's OAuth token is invalid, we clear the cached token and refetch
       // again. If OAuth token is invalid after the second fetch, then the monitor UI
       // will simply show the "no logins" UI version.
@@ -229,8 +237,12 @@ var AboutProtectionsHandler = {
           monitorData = await this.fetchUserBreachStats(token);
         } catch (_) {
           Cu.reportError(e.message);
-          monitorData.errorMessage = INVALID_OAUTH_TOKEN;
         }
+      } else if (e.message === USER_UNSUBSCRIBED_TO_MONITOR) {
+        // Send back user's email so the protections report can direct them to the proper
+        // OAuth flow on Monitor.
+        const { email } = await fxAccounts.getSignedInUser();
+        userEmail = email;
       } else {
         monitorData.errorMessage = e.message || "An error ocurred.";
       }

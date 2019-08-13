@@ -94,37 +94,31 @@ JitContext* jit::MaybeGetJitContext() { return CurrentJitContext(); }
 
 JitContext::JitContext(CompileRuntime* rt, CompileRealm* realm,
                        TempAllocator* temp)
-    : cx(nullptr),
-      temp(temp),
-      runtime(rt),
-      prev_(CurrentJitContext()),
-      realm_(realm),
-#ifdef DEBUG
-      isCompilingWasm_(!realm),
-      oom_(false),
-#endif
-      assemblerCount_(0) {
+    : prev_(CurrentJitContext()), realm_(realm), temp(temp), runtime(rt) {
+  MOZ_ASSERT(rt);
+  MOZ_ASSERT(realm);
+  MOZ_ASSERT(temp);
   SetJitContext(this);
 }
 
 JitContext::JitContext(JSContext* cx, TempAllocator* temp)
-    : cx(cx),
-      temp(temp),
-      runtime(CompileRuntime::get(cx->runtime())),
-      prev_(CurrentJitContext()),
+    : prev_(CurrentJitContext()),
       realm_(CompileRealm::get(cx->realm())),
-#ifdef DEBUG
-      isCompilingWasm_(false),
-      oom_(false),
-#endif
-      assemblerCount_(0) {
+      cx(cx),
+      temp(temp),
+      runtime(CompileRuntime::get(cx->runtime())) {
   SetJitContext(this);
 }
 
 JitContext::JitContext(TempAllocator* temp)
-    : JitContext(nullptr, nullptr, temp) {}
+    : prev_(CurrentJitContext()), temp(temp) {
+#ifdef DEBUG
+  isCompilingWasm_ = true;
+#endif
+  SetJitContext(this);
+}
 
-JitContext::JitContext() : JitContext(nullptr, nullptr, nullptr) {}
+JitContext::JitContext() : JitContext(nullptr) {}
 
 JitContext::~JitContext() { SetJitContext(prev_); }
 
@@ -714,7 +708,7 @@ void JitCode::traceChildren(JSTracer* trc) {
   }
 }
 
-void JitCode::finalize(FreeOp* fop) {
+void JitCode::finalize(JSFreeOp* fop) {
   // If this jitcode had a bytecode map, it must have already been removed.
 #ifdef DEBUG
   JSRuntime* rt = fop->runtime();
@@ -1043,7 +1037,7 @@ void IonScript::Trace(JSTracer* trc, IonScript* script) {
   }
 }
 
-void IonScript::Destroy(FreeOp* fop, IonScript* script) {
+void IonScript::Destroy(JSFreeOp* fop, IonScript* script) {
   // This allocation is tracked by JSScript::setIonScript / clearIonScript.
   fop->deleteUntracked(script);
 }
@@ -1634,7 +1628,7 @@ CodeGenerator* GenerateCode(MIRGenerator* mir, LIRGraph* lir) {
 
 CodeGenerator* CompileBackEnd(MIRGenerator* mir) {
   // Everything in CompileBackEnd can potentially run on a helper thread.
-  AutoEnterIonCompilation enter(mir->safeForMinorGC());
+  AutoEnterIonBackend enter(mir->safeForMinorGC());
   AutoSpewEndFunction spewEndFunction(mir);
 
   if (!OptimizeMIR(mir)) {
@@ -2499,7 +2493,7 @@ MethodStatus jit::Recompile(JSContext* cx, HandleScript script,
   return Method_Compiled;
 }
 
-static void InvalidateActivation(FreeOp* fop,
+static void InvalidateActivation(JSFreeOp* fop,
                                  const JitActivationIterator& activations,
                                  bool invalidateAll) {
   JitSpew(JitSpew_IonInvalidate, "BEGIN invalidating activation");
@@ -2666,7 +2660,7 @@ static void InvalidateActivation(FreeOp* fop,
   JitSpew(JitSpew_IonInvalidate, "END invalidating activation");
 }
 
-void jit::InvalidateAll(FreeOp* fop, Zone* zone) {
+void jit::InvalidateAll(JSFreeOp* fop, Zone* zone) {
   // The caller should previously have cancelled off thread compilation.
 #ifdef DEBUG
   for (RealmsInZoneIter realm(zone); !realm.done(); realm.next()) {
@@ -2697,7 +2691,7 @@ static void ClearIonScriptAfterInvalidation(JSContext* cx, JSScript* script,
   }
 }
 
-void jit::Invalidate(TypeZone& types, FreeOp* fop,
+void jit::Invalidate(TypeZone& types, JSFreeOp* fop,
                      const RecompileInfoVector& invalid, bool resetUses,
                      bool cancelOffThread) {
   JitSpew(JitSpew_IonInvalidate, "Start invalidation.");
@@ -2826,7 +2820,7 @@ void jit::Invalidate(JSContext* cx, JSScript* script, bool resetUses,
   Invalidate(cx, scripts, resetUses, cancelOffThread);
 }
 
-void jit::FinishInvalidation(FreeOp* fop, JSScript* script) {
+void jit::FinishInvalidation(JSFreeOp* fop, JSScript* script) {
   if (!script->hasIonScript()) {
     return;
   }
@@ -3020,7 +3014,7 @@ size_t jit::SizeOfIonData(JSScript* script,
   return result;
 }
 
-void jit::DestroyJitScripts(FreeOp* fop, JSScript* script) {
+void jit::DestroyJitScripts(JSFreeOp* fop, JSScript* script) {
   if (script->hasIonScript()) {
     IonScript* ion = script->ionScript();
     script->clearIonScript(fop);

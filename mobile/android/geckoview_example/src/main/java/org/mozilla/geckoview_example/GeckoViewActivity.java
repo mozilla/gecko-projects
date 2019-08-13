@@ -19,6 +19,7 @@ import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.WebExtension;
 import org.mozilla.geckoview.WebExtensionController;
 import org.mozilla.geckoview.WebRequestError;
+import org.mozilla.geckoview.RuntimeTelemetry;
 
 import android.Manifest;
 import android.app.Activity;
@@ -150,9 +151,12 @@ public class GeckoViewActivity extends AppCompatActivity {
                     .remoteDebuggingEnabled(mEnableRemoteDebugging)
                     .consoleOutput(true)
                     .contentBlocking(new ContentBlocking.Settings.Builder()
-                        .categories(ContentBlocking.AT_DEFAULT)
+                        .antiTracking(ContentBlocking.AntiTracking.DEFAULT)
+                        .safeBrowsing(ContentBlocking.SafeBrowsing.DEFAULT)
+                        .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_NON_TRACKERS)
                         .build())
-                    .crashHandler(ExampleCrashHandler.class);
+                    .crashHandler(ExampleCrashHandler.class)
+                    .telemetryDelegate(new ExampleTelemetryDelegate());
 
             sGeckoRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
 
@@ -1061,23 +1065,41 @@ public class GeckoViewActivity extends AppCompatActivity {
         @Override
         public void onContentBlocked(final GeckoSession session,
                                      final ContentBlocking.BlockEvent event) {
-            Log.d(LOGTAG, "onContentBlocked " + event.categories +
-                  " (" + event.uri + ")");
-            if ((event.categories & ContentBlocking.AT_TEST) != 0) {
+            Log.d(LOGTAG, "onContentBlocked" +
+                  " AT: " + event.getAntiTrackingCategory() +
+                  " SB: " + event.getSafeBrowsingCategory() +
+                  " CB: " + event.getCookieBehaviorCategory() +
+                  " URI: " + event.uri);
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.TEST) != 0) {
                 mBlockedTest++;
             }
-            if ((event.categories & ContentBlocking.AT_AD) != 0) {
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.AD) != 0) {
                 mBlockedAds++;
             }
-            if ((event.categories & ContentBlocking.AT_ANALYTIC) != 0) {
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.ANALYTIC) != 0) {
                 mBlockedAnalytics++;
             }
-            if ((event.categories & ContentBlocking.AT_SOCIAL) != 0) {
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.SOCIAL) != 0) {
                 mBlockedSocial++;
             }
-            if ((event.categories & ContentBlocking.AT_CONTENT) != 0) {
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.CONTENT) != 0) {
                 mBlockedContent++;
             }
+        }
+
+        @Override
+        public void onContentLoaded(final GeckoSession session,
+                                    final ContentBlocking.BlockEvent event) {
+            Log.d(LOGTAG, "onContentLoaded" +
+                  " AT: " + event.getAntiTrackingCategory() +
+                  " SB: " + event.getSafeBrowsingCategory() +
+                  " CB: " + event.getCookieBehaviorCategory() +
+                  " URI: " + event.uri);
         }
     }
 
@@ -1143,6 +1165,14 @@ public class GeckoViewActivity extends AppCompatActivity {
                     .setCategory(NotificationCompat.CATEGORY_SERVICE);
 
             notificationManager.notify(mNotificationId, builder.build());
+        }
+    }
+
+    private final class ExampleTelemetryDelegate
+            implements RuntimeTelemetry.Delegate {
+        @Override
+        public void onTelemetryReceived(final @NonNull RuntimeTelemetry.Metric metric) {
+            Log.d(LOGTAG, "onTelemetryReceived " + metric);
         }
     }
 }

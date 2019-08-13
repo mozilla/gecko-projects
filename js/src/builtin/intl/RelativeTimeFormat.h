@@ -17,8 +17,6 @@
 
 namespace js {
 
-class FreeOp;
-
 class RelativeTimeFormatObject : public NativeObject {
  public:
   static const Class class_;
@@ -34,7 +32,7 @@ class RelativeTimeFormatObject : public NativeObject {
  private:
   static const ClassOps classOps_;
 
-  static void finalize(FreeOp* fop, JSObject* obj);
+  static void finalize(JSFreeOp* fop, JSObject* obj);
 };
 
 extern JSObject* CreateRelativeTimeFormatPrototype(

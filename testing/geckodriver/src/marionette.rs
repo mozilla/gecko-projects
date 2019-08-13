@@ -5,11 +5,12 @@ use crate::command::{
 use marionette_rs::common::{
     Cookie as MarionetteCookie, Date as MarionetteDate, Timeouts as MarionetteTimeouts,
 };
+use marionette_rs::marionette::AppStatus;
 use marionette_rs::message::{Command, Message, MessageId, Request};
 use marionette_rs::webdriver::{
-    Command as MarionetteWebDriverCommand, Keys as MarionetteKeys, Locator as MarionetteLocator,
-    NewWindow as MarionetteNewWindow, Script as MarionetteScript, Selector as MarionetteSelector,
-    WindowRect as MarionetteWindowRect,
+    Command as MarionetteWebDriverCommand, Keys as MarionetteKeys, LegacyWebElement,
+    Locator as MarionetteLocator, NewWindow as MarionetteNewWindow, Script as MarionetteScript,
+    Selector as MarionetteSelector, WindowRect as MarionetteWindowRect,
 };
 use mozprofile::preferences::Pref;
 use mozprofile::profile::Profile;
@@ -810,7 +811,18 @@ fn try_convert_to_marionette_message(
         DeleteCookies => Some(Command::WebDriver(
             MarionetteWebDriverCommand::DeleteCookies,
         )),
+        DeleteSession => Some(Command::Marionette(
+            marionette_rs::marionette::Command::DeleteSession {
+                flags: vec![AppStatus::eForceQuit],
+            },
+        )),
         DismissAlert => Some(Command::WebDriver(MarionetteWebDriverCommand::DismissAlert)),
+        ElementClear(ref e) => Some(Command::WebDriver(
+            MarionetteWebDriverCommand::ElementClear(e.to_marionette()?),
+        )),
+        ElementClick(ref e) => Some(Command::WebDriver(
+            MarionetteWebDriverCommand::ElementClick(e.to_marionette()?),
+        )),
         ExecuteAsyncScript(ref x) => Some(Command::WebDriver(
             MarionetteWebDriverCommand::ExecuteAsyncScript(x.to_marionette()?),
         )),
@@ -823,13 +835,57 @@ fn try_convert_to_marionette_message(
         FindElements(ref x) => Some(Command::WebDriver(
             MarionetteWebDriverCommand::FindElements(x.to_marionette()?),
         )),
+        FindElementElement(ref e, ref x) => {
+            let locator = x.to_marionette()?;
+            Some(Command::WebDriver(
+                MarionetteWebDriverCommand::FindElementElement {
+                    element: e.clone().to_string(),
+                    using: locator.using.clone(),
+                    value: locator.value.clone(),
+                },
+            ))
+        }
+        FindElementElements(ref e, ref x) => {
+            let locator = x.to_marionette()?;
+            Some(Command::WebDriver(
+                MarionetteWebDriverCommand::FindElementElements {
+                    element: e.clone().to_string(),
+                    using: locator.using.clone(),
+                    value: locator.value.clone(),
+                },
+            ))
+        }
         FullscreenWindow => Some(Command::WebDriver(
             MarionetteWebDriverCommand::FullscreenWindow,
+        )),
+        GetActiveElement => Some(Command::WebDriver(
+            MarionetteWebDriverCommand::GetActiveElement,
         )),
         GetAlertText => Some(Command::WebDriver(MarionetteWebDriverCommand::GetAlertText)),
         GetCookies | GetNamedCookie(_) => {
             Some(Command::WebDriver(MarionetteWebDriverCommand::GetCookies))
         }
+        GetElementAttribute(ref e, ref x) => Some(Command::WebDriver(
+            MarionetteWebDriverCommand::GetElementAttribute {
+                id: e.clone().to_string(),
+                name: x.clone(),
+            },
+        )),
+        GetElementProperty(ref e, ref x) => Some(Command::WebDriver(
+            MarionetteWebDriverCommand::GetElementProperty {
+                id: e.clone().to_string(),
+                name: x.clone(),
+            },
+        )),
+        GetElementRect(ref x) => Some(Command::WebDriver(
+            MarionetteWebDriverCommand::GetElementRect(x.to_marionette()?),
+        )),
+        GetElementTagName(ref x) => Some(Command::WebDriver(
+            MarionetteWebDriverCommand::GetElementTagName(x.to_marionette()?),
+        )),
+        GetElementText(ref x) => Some(Command::WebDriver(
+            MarionetteWebDriverCommand::GetElementText(x.to_marionette()?),
+        )),
         GetWindowHandle => Some(Command::WebDriver(
             MarionetteWebDriverCommand::GetWindowHandle,
         )),
@@ -840,6 +896,17 @@ fn try_convert_to_marionette_message(
             MarionetteWebDriverCommand::GetWindowRect,
         )),
         GetTimeouts => Some(Command::WebDriver(MarionetteWebDriverCommand::GetTimeouts)),
+        GoBack => Some(Command::WebDriver(MarionetteWebDriverCommand::GoBack)),
+        GoForward => Some(Command::WebDriver(MarionetteWebDriverCommand::GoForward)),
+        IsDisplayed(ref x) => Some(Command::WebDriver(MarionetteWebDriverCommand::IsDisplayed(
+            x.to_marionette()?,
+        ))),
+        IsEnabled(ref x) => Some(Command::WebDriver(MarionetteWebDriverCommand::IsEnabled(
+            x.to_marionette()?,
+        ))),
+        IsSelected(ref x) => Some(Command::WebDriver(MarionetteWebDriverCommand::IsSelected(
+            x.to_marionette()?,
+        ))),
         MaximizeWindow => Some(Command::WebDriver(
             MarionetteWebDriverCommand::MaximizeWindow,
         )),
@@ -910,16 +977,6 @@ impl MarionetteCommand {
         } else {
             let (opt_name, opt_parameters) = match msg.command {
                 Status => panic!("Got status command that should already have been handled"),
-                DeleteSession => {
-                    let mut body = Map::new();
-                    body.insert(
-                        "flags".to_owned(),
-                        serde_json::to_value(vec!["eForceQuit".to_string()])?,
-                    );
-                    (Some("Marionette:Quit"), Some(Ok(body)))
-                }
-                ElementClear(ref x) => (Some("WebDriver:ElementClear"), Some(x.to_marionette())),
-                ElementClick(ref x) => (Some("WebDriver:ElementClick"), Some(x.to_marionette())),
                 ElementSendKeys(ref e, ref x) => {
                     let mut data = Map::new();
                     data.insert("id".to_string(), Value::String(e.to_string()));
@@ -935,28 +992,7 @@ impl MarionetteCommand {
                     );
                     (Some("WebDriver:ElementSendKeys"), Some(Ok(data)))
                 }
-                FindElementElement(ref e, ref x) => {
-                    let mut data = try_opt!(
-                        serde_json::to_value(x)?.as_object(),
-                        ErrorStatus::UnknownError,
-                        "Expected an object"
-                    )
-                    .clone();
-                    data.insert("element".to_string(), Value::String(e.to_string()));
-                    (Some("WebDriver:FindElement"), Some(Ok(data)))
-                }
-                FindElementElements(ref e, ref x) => {
-                    let mut data = try_opt!(
-                        serde_json::to_value(x)?.as_object(),
-                        ErrorStatus::UnknownError,
-                        "Expected an object"
-                    )
-                    .clone();
-                    data.insert("element".to_string(), Value::String(e.to_string()));
-                    (Some("WebDriver:FindElements"), Some(Ok(data)))
-                }
                 Get(ref x) => (Some("WebDriver:Navigate"), Some(x.to_marionette())),
-                GetActiveElement => (Some("WebDriver:GetActiveElement"), None),
                 GetCurrentUrl => (Some("WebDriver:GetCurrentURL"), None),
                 GetCSSValue(ref e, ref x) => {
                     let mut data = Map::new();
@@ -964,37 +1000,8 @@ impl MarionetteCommand {
                     data.insert("propertyName".to_string(), Value::String(x.clone()));
                     (Some("WebDriver:GetElementCSSValue"), Some(Ok(data)))
                 }
-                GetElementAttribute(ref e, ref x) => {
-                    let mut data = Map::new();
-                    data.insert("id".to_string(), Value::String(e.to_string()));
-                    data.insert("name".to_string(), Value::String(x.clone()));
-                    (Some("WebDriver:GetElementAttribute"), Some(Ok(data)))
-                }
-                GetElementProperty(ref e, ref x) => {
-                    let mut data = Map::new();
-                    data.insert("id".to_string(), Value::String(e.to_string()));
-                    data.insert("name".to_string(), Value::String(x.clone()));
-                    (Some("WebDriver:GetElementProperty"), Some(Ok(data)))
-                }
-                GetElementRect(ref x) => {
-                    (Some("WebDriver:GetElementRect"), Some(x.to_marionette()))
-                }
-                GetElementTagName(ref x) => {
-                    (Some("WebDriver:GetElementTagName"), Some(x.to_marionette()))
-                }
-                GetElementText(ref x) => {
-                    (Some("WebDriver:GetElementText"), Some(x.to_marionette()))
-                }
                 GetPageSource => (Some("WebDriver:GetPageSource"), None),
                 GetTitle => (Some("WebDriver:GetTitle"), None),
-                GoBack => (Some("WebDriver:Back"), None),
-                GoForward => (Some("WebDriver:Forward"), None),
-                IsDisplayed(ref x) => (
-                    Some("WebDriver:IsElementDisplayed"),
-                    Some(x.to_marionette()),
-                ),
-                IsEnabled(ref x) => (Some("WebDriver:IsElementEnabled"), Some(x.to_marionette())),
-                IsSelected(ref x) => (Some("WebDriver:IsElementSelected"), Some(x.to_marionette())),
                 NewSession(_) => {
                     let caps = capabilities
                         .expect("Tried to create new session without processing capabilities");
@@ -1587,6 +1594,14 @@ impl ToMarionette<MarionetteTimeouts> for TimeoutsParameters {
             implicit: self.implicit.clone(),
             page_load: self.page_load.clone(),
             script: self.script.clone(),
+        })
+    }
+}
+
+impl ToMarionette<LegacyWebElement> for WebElement {
+    fn to_marionette(&self) -> WebDriverResult<LegacyWebElement> {
+        Ok(LegacyWebElement {
+            id: self.to_string(),
         })
     }
 }

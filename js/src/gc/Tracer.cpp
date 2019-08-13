@@ -51,10 +51,13 @@ JS_FOR_EACH_TRACEKIND(INSTANTIATE_ALL_VALID_TRACE_FUNCTIONS);
 
 template <typename T>
 bool DoCallback(JS::CallbackTracer* trc, T* thingp, const char* name) {
-  // return true as default. For some types the lambda below won't be called.
+  // Return true by default. For some types the lambda below won't be called.
   bool ret = true;
   auto thing = MapGCThingTyped(*thingp, [trc, name, &ret](auto t) {
-    ret = DoCallback(trc, &t, name);
+    if (!DoCallback(trc, &t, name)) {
+      ret = false;
+      return TaggedPtr<T>::empty();
+    }
     return TaggedPtr<T>::wrap(t);
   });
   // Only update *thingp if the value changed, to avoid TSan false positives for
@@ -107,16 +110,14 @@ JS_PUBLIC_API void JS::TraceIncomingCCWs(
     if (compartments.has(comp)) {
       continue;
     }
-
-    for (Compartment::WrapperEnum e(comp); !e.empty(); e.popFront()) {
-      mozilla::DebugOnly<const CrossCompartmentKey> prior = e.front().key();
-      e.front().mutableKey().applyToWrapped([trc, &compartments](auto tp) {
-        Compartment* comp = (*tp)->maybeCompartment();
-        if (comp && compartments.has(comp)) {
-          TraceManuallyBarrieredEdge(trc, tp, "cross-compartment wrapper");
-        }
-      });
-      MOZ_ASSERT(e.front().key() == prior);
+    for (Compartment::ObjectWrapperEnum e(comp); !e.empty(); e.popFront()) {
+      JSObject* obj = e.front().key();
+      Compartment* comp = obj->compartment();
+      if (compartments.has(comp)) {
+        mozilla::DebugOnly<JSObject*> prior = obj;
+        TraceManuallyBarrieredEdge(trc, &obj, "cross-compartment wrapper");
+        MOZ_ASSERT(obj == prior);
+      }
     }
   }
 }

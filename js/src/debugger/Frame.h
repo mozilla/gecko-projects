@@ -7,23 +7,28 @@
 #ifndef debugger_Frame_h
 #define debugger_Frame_h
 
-#include "mozilla/Attributes.h"
-#include "mozilla/Maybe.h"
-#include "mozilla/Range.h"
+#include "mozilla/Attributes.h"  // for MOZ_MUST_USE
+#include "mozilla/Maybe.h"       // for Maybe
+#include "mozilla/Range.h"       // for Range
+#include "mozilla/Result.h"      // for Result
 
-#include "jsapi.h"
+#include <stddef.h>  // for size_t
 
-#include "debugger/Debugger.h"
-#include "gc/Rooting.h"
-#include "js/Class.h"
-#include "js/PropertySpec.h"
-#include "js/Result.h"
-#include "js/RootingAPI.h"
-#include "js/TypeDecls.h"
-#include "vm/GlobalObject.h"
-#include "vm/NativeObject.h"
+#include "jsapi.h"  // for JSContext, CallArgs
+
+#include "NamespaceImports.h"   // for Value, MutableHandleValue, HandleObject
+#include "debugger/DebugAPI.h"  // for ResumeMode
+#include "debugger/Debugger.h"  // for ResumeMode, Handler, Debugger
+#include "gc/Barrier.h"         // for HeapPtr
+#include "gc/Rooting.h"         // for HandleDebuggerFrame, HandleNativeObject
+#include "vm/JSObject.h"        // for JSObject
+#include "vm/NativeObject.h"    // for NativeObject
+#include "vm/Stack.h"           // for FrameIter, AbstractFramePtr
 
 namespace js {
+
+class AbstractGeneratorObject;
+class GlobalObject;
 
 /*
  * An OnStepHandler represents a handler function that is called when a small
@@ -45,7 +50,7 @@ class ScriptedOnStepHandler final : public OnStepHandler {
   explicit ScriptedOnStepHandler(JSObject* object);
   virtual JSObject* object() const override;
   virtual void hold(JSObject* owner) override;
-  virtual void drop(js::FreeOp* fop, JSObject* owner) override;
+  virtual void drop(JSFreeOp* fop, JSObject* owner) override;
   virtual void trace(JSTracer* tracer) override;
   virtual size_t allocSize() const override;
   virtual bool onStep(JSContext* cx, HandleDebuggerFrame frame,
@@ -78,7 +83,7 @@ class ScriptedOnPopHandler final : public OnPopHandler {
   explicit ScriptedOnPopHandler(JSObject* object);
   virtual JSObject* object() const override;
   virtual void hold(JSObject* owner) override;
-  virtual void drop(js::FreeOp* fop, JSObject* owner) override;
+  virtual void drop(JSFreeOp* fop, JSObject* owner) override;
   virtual void trace(JSTracer* tracer) override;
   virtual size_t allocSize() const override;
   virtual bool onPop(JSContext* cx, HandleDebuggerFrame frame,
@@ -231,9 +236,9 @@ class DebuggerFrame : public NativeObject {
    * function will not otherwise disturb generatorFrames. Passing the enum
    * allows this function to be used while iterating over generatorFrames.
    */
-  void clearGenerator(FreeOp* fop);
+  void clearGenerator(JSFreeOp* fop);
   void clearGenerator(
-      FreeOp* fop, Debugger* owner,
+      JSFreeOp* fop, Debugger* owner,
       Debugger::GeneratorWeakMap::Enum* maybeGeneratorFramesEnum = nullptr);
 
   /*
@@ -250,7 +255,7 @@ class DebuggerFrame : public NativeObject {
   static const JSPropertySpec properties_[];
   static const JSFunctionSpec methods_[];
 
-  static void finalize(FreeOp* fop, JSObject* obj);
+  static void finalize(JSFreeOp* fop, JSObject* obj);
 
   static AbstractFramePtr getReferent(HandleDebuggerFrame frame);
   static MOZ_MUST_USE bool getFrameIter(JSContext* cx,
@@ -295,8 +300,8 @@ class DebuggerFrame : public NativeObject {
  public:
   FrameIter::Data* frameIterData() const;
   void setFrameIterData(FrameIter::Data*);
-  void freeFrameIterData(FreeOp* fop);
-  void maybeDecrementFrameScriptStepperCount(FreeOp* fop,
+  void freeFrameIterData(JSFreeOp* fop);
+  void maybeDecrementFrameScriptStepperCount(JSFreeOp* fop,
                                              AbstractFramePtr frame);
 
   class GeneratorInfo;

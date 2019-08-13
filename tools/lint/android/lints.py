@@ -106,9 +106,37 @@ def api_lint(config, **lintargs):
                 'path': mozpath.relpath(r['file'], topsrcdir),
                 'lineno': int(r['line']),
                 'column': int(r.get('column') or 0),
-                'message': 'Unexpected api change',
+                'message': 'Unexpected api change. Please run ./gradlew {} for more '
+                           'information'.format(
+                    ' '.join(lintargs['substs']['GRADLE_ANDROID_API_LINT_TASKS'])),
             }
             results.append(result.from_config(config, **err))
+
+    return results
+
+
+def javadoc(config, **lintargs):
+    topsrcdir = lintargs['root']
+    topobjdir = lintargs['topobjdir']
+
+    gradle(topsrcdir=topsrcdir, topobjdir=topobjdir,
+           tasks=lintargs['substs']['GRADLE_ANDROID_GECKOVIEW_DOCS_TASKS'],
+           extra_args=lintargs.get('extra_args') or [])
+
+    output_files = lintargs['substs']['GRADLE_ANDROID_GECKOVIEW_DOCS_OUTPUT_FILES']
+
+    results = []
+
+    for output_file in output_files:
+        with open(os.path.join(topobjdir, output_file)) as f:
+            # Like: '[{"path":"/absolute/path/to/topsrcdir/mobile/android/geckoview/src/main/java/org/mozilla/geckoview/ContentBlocking.java","lineno":"462","level":"warning","message":"no @return"}]'.  # NOQA: E501
+            issues = json.load(f)
+
+            for issue in issues:
+                issue['path'] = issue['path'].replace(lintargs['root'], '')
+                # We want warnings to be errors for linting purposes.
+                issue['level'] = 'error'
+                results.append(result.from_config(config, **issue))
 
     return results
 

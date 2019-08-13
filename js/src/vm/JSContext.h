@@ -174,7 +174,7 @@ struct JSContext : public JS::RootingContext,
   // Free lists for parallel allocation in the atoms zone on helper threads.
   js::ContextData<js::gc::FreeLists*> atomsZoneFreeLists_;
 
-  js::ContextData<js::FreeOp> defaultFreeOp_;
+  js::ContextData<JSFreeOp> defaultFreeOp_;
 
   // Thread that the JSContext is currently running on, if in use.
   js::Thread::Id currentThread_;
@@ -297,7 +297,7 @@ struct JSContext : public JS::RootingContext,
     return *runtime_->wellKnownSymbols;
   }
   js::PropertyName* emptyString() { return runtime_->emptyString; }
-  js::FreeOp* defaultFreeOp() { return &defaultFreeOp_.ref(); }
+  JSFreeOp* defaultFreeOp() { return &defaultFreeOp_.ref(); }
   void* stackLimitAddress(JS::StackKind kind) {
     return &nativeStackLimit[kind];
   }
@@ -551,14 +551,6 @@ struct JSContext : public JS::RootingContext,
   js::ContextData<bool> gcSweeping;
 
 #ifdef DEBUG
-  // Whether this thread is actively Ion compiling.
-  js::ContextData<bool> ionCompiling;
-
-  // Whether this thread is actively Ion compiling in a context where a minor
-  // GC could happen simultaneously. If this is true, this thread cannot use
-  // any pointers into the nursery.
-  js::ContextData<bool> ionCompilingSafeForMinorGC;
-
   // Whether this thread is currently manipulating possibly-gray GC things.
   js::ContextData<size_t> isTouchingGrayThings;
 
@@ -661,6 +653,7 @@ struct JSContext : public JS::RootingContext,
  public:
   js::LifoAlloc& tempLifoAlloc() { return tempLifoAlloc_.ref(); }
   const js::LifoAlloc& tempLifoAlloc() const { return tempLifoAlloc_.ref(); }
+  js::LifoAlloc& tempLifoAllocNoCheck() { return tempLifoAlloc_.refNoCheck(); }
 
   js::ContextData<uint32_t> debuggerMutations;
 
@@ -696,11 +689,6 @@ struct JSContext : public JS::RootingContext,
   // True if propagating a forced return from an interrupt handler during
   // debug mode.
   js::ContextData<bool> propagatingForcedReturn_;
-
-  // A stack of live iterators that need to be updated in case of debug mode
-  // OSR.
-  js::ContextData<js::jit::DebugModeOSRVolatileJitFrameIter*>
-      liveVolatileJitFrameIter_;
 
  public:
   js::ContextData<int32_t> reportGranularity; /* see vm/Probes.h */
@@ -1255,35 +1243,6 @@ class MOZ_RAII AutoKeepAtoms {
   inline ~AutoKeepAtoms();
 };
 
-// Debugging RAII class which marks the current thread as performing an Ion
-// compilation, for use by CurrentThreadCan{Read,Write}CompilationData
-class MOZ_RAII AutoEnterIonCompilation {
- public:
-  explicit AutoEnterIonCompilation(
-      bool safeForMinorGC MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-
-#ifdef DEBUG
-    JSContext* cx = TlsContext.get();
-    MOZ_ASSERT(!cx->ionCompiling);
-    MOZ_ASSERT(!cx->ionCompilingSafeForMinorGC);
-    cx->ionCompiling = true;
-    cx->ionCompilingSafeForMinorGC = safeForMinorGC;
-#endif
-  }
-
-  ~AutoEnterIonCompilation() {
-#ifdef DEBUG
-    JSContext* cx = TlsContext.get();
-    MOZ_ASSERT(cx->ionCompiling);
-    cx->ionCompiling = false;
-    cx->ionCompilingSafeForMinorGC = false;
-#endif
-  }
-
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-};
-
 enum UnsafeABIStrictness {
   NoExceptions,
   AllowPendingExceptions,
@@ -1329,13 +1288,13 @@ class MOZ_RAII AutoSetThreadIsPerformingGC {
 
  public:
   AutoSetThreadIsPerformingGC() : cx(TlsContext.get()) {
-    FreeOp* fop = cx->defaultFreeOp();
+    JSFreeOp* fop = cx->defaultFreeOp();
     MOZ_ASSERT(!fop->isCollecting());
     fop->isCollecting_ = true;
   }
 
   ~AutoSetThreadIsPerformingGC() {
-    FreeOp* fop = cx->defaultFreeOp();
+    JSFreeOp* fop = cx->defaultFreeOp();
     MOZ_ASSERT(fop->isCollecting());
     fop->isCollecting_ = false;
   }

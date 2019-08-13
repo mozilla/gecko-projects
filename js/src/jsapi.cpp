@@ -37,7 +37,6 @@
 #include "builtin/MapObject.h"
 #include "builtin/Promise.h"
 #include "builtin/Stream.h"
-#include "builtin/String.h"
 #include "builtin/Symbol.h"
 #ifdef ENABLE_TYPED_OBJECTS
 #  include "builtin/TypedObject.h"
@@ -590,10 +589,8 @@ JS_PUBLIC_API bool JS_WrapValue(JSContext* cx, MutableHandleValue vp) {
 
 static void ReleaseAssertObjectHasNoWrappers(JSContext* cx,
                                              HandleObject target) {
-  RootedValue origv(cx, ObjectValue(*target));
-
   for (CompartmentsIter c(cx->runtime()); !c.done(); c.next()) {
-    if (c->lookupWrapper(origv)) {
+    if (c->lookupWrapper(target)) {
       MOZ_CRASH("wrapper found for target object");
     }
   }
@@ -672,7 +669,6 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
   JS::AssertCellIsNotGray(origobj);
   JS::AssertCellIsNotGray(target);
 
-  RootedValue origv(cx, ObjectValue(*origobj));
   RootedObject newIdentity(cx);
 
   // Don't allow a compacting GC to observe any intermediate state.
@@ -690,11 +686,11 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
     AutoRealm ar(cx, origobj);
     JSObject::swap(cx, origobj, target);
     newIdentity = origobj;
-  } else if (WrapperMap::Ptr p = destination->lookupWrapper(origv)) {
+  } else if (ObjectWrapperMap::Ptr p = destination->lookupWrapper(origobj)) {
     // There might already be a wrapper for the original object in
     // the new compartment. If there is, we use its identity and swap
     // in the contents of |target|.
-    newIdentity = &p->value().get().toObject();
+    newIdentity = p->value().get();
 
     // When we remove origv from the wrapper map, its wrapper, newIdentity,
     // must immediately cease to be a cross-compartment wrapper. Nuke it.
@@ -728,7 +724,7 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
     JSObject::swap(cx, origobj, newIdentityWrapper);
     if (origobj->compartment()->lookupWrapper(newIdentity)) {
       MOZ_ASSERT(origobj->is<CrossCompartmentWrapperObject>());
-      if (!origobj->compartment()->putWrapper(cx, CrossCompartmentKey(newIdentity), origv)) {
+      if (!origobj->compartment()->putWrapper(cx, newIdentity, origobj)) {
         MOZ_CRASH();
       }
     }
@@ -1150,7 +1146,7 @@ JS_PUBLIC_API void* JS_string_realloc(JSContext* cx, void* p, size_t oldBytes,
 JS_PUBLIC_API void JS_string_free(JSContext* cx, void* p) { return js_free(p); }
 
 JS_PUBLIC_API void JS_freeop(JSFreeOp* fop, void* p) {
-  return FreeOp::get(fop)->freeUntracked(p);
+  return fop->freeUntracked(p);
 }
 
 JS_PUBLIC_API void JS::AddAssociatedMemory(JSObject* obj, size_t nbytes,
@@ -1208,8 +1204,8 @@ JS_PUBLIC_API void JS_GC(JSContext* cx, JS::GCReason reason) {
 }
 
 JS_PUBLIC_API void JS_MaybeGC(JSContext* cx) {
-  gc::GCRuntime& gc = cx->runtime()->gc;
-  gc.maybeGC(cx->zone());
+  AssertHeapIsIdle();
+  cx->runtime()->gc.maybeGC();
 }
 
 JS_PUBLIC_API void JS_SetGCCallback(JSContext* cx, JSGCCallback cb,
@@ -3479,7 +3475,6 @@ void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
   introductionOffset = rhs.introductionOffset;
   hasIntroductionInfo = rhs.hasIntroductionInfo;
   hideScriptFromDebugger = rhs.hideScriptFromDebugger;
-  bigIntEnabledOption = rhs.bigIntEnabledOption;
   fieldsEnabledOption = rhs.fieldsEnabledOption;
 };
 
@@ -3576,7 +3571,6 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
   }
   throwOnAsmJSValidationFailureOption =
       cx->options().throwOnAsmJSValidationFailure();
-  bigIntEnabledOption = cx->realm()->creationOptions().getBigIntEnabled();
   fieldsEnabledOption = cx->realm()->creationOptions().getFieldsEnabled();
 
   // Certain modes of operation disallow syntax parsing in general.

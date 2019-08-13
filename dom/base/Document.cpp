@@ -834,19 +834,14 @@ nsresult ExternalResourceMap::AddExternalResource(nsIURI* aURI,
     doc = aViewer->GetDocument();
     NS_ASSERTION(doc, "Must have a document");
 
-    if (doc->IsXULDocument()) {
-      // We don't handle XUL stuff here yet.
-      rv = NS_ERROR_NOT_AVAILABLE;
-    } else {
-      doc->SetDisplayDocument(aDisplayDocument);
+    doc->SetDisplayDocument(aDisplayDocument);
 
-      // Make sure that hiding our viewer will tear down its presentation.
-      aViewer->SetSticky(false);
+    // Make sure that hiding our viewer will tear down its presentation.
+    aViewer->SetSticky(false);
 
-      rv = aViewer->Init(nullptr, nsIntRect(0, 0, 0, 0));
-      if (NS_SUCCEEDED(rv)) {
-        rv = aViewer->Open(nullptr, nullptr);
-      }
+    rv = aViewer->Init(nullptr, nsIntRect(0, 0, 0, 0), nullptr);
+    if (NS_SUCCEEDED(rv)) {
+      rv = aViewer->Open(nullptr, nullptr);
     }
 
     if (NS_FAILED(rv)) {
@@ -2260,7 +2255,7 @@ void Document::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup) {
   nsCOMPtr<nsIPrincipal> principal;
   nsCOMPtr<nsIPrincipal> storagePrincipal;
   if (aChannel) {
-    // Note: this code is duplicated in XULDocument::StartDocumentLoad and
+    // Note: this code is duplicated in PrototypeDocumentContentSink::Init and
     // nsScriptSecurityManager::GetChannelResultPrincipals.
     // Note: this should match nsDocShell::OnLoadingSite
     NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
@@ -3389,9 +3384,8 @@ void Document::SetDocumentURI(nsIURI* aURI) {
 
   // Tell our WindowGlobalParent that the document's URI has been changed.
   nsPIDOMWindowInner* inner = GetInnerWindow();
-  WindowGlobalChild* wgc = inner ? inner->GetWindowGlobalChild() : nullptr;
-  if (wgc) {
-    Unused << wgc->SendUpdateDocumentURI(mDocumentURI);
+  if (inner && inner->GetWindowGlobalChild()) {
+    inner->GetWindowGlobalChild()->SetDocumentURI(mDocumentURI);
   }
 }
 
@@ -6072,6 +6066,10 @@ void Document::DeletePresShell() {
     mResizeObserverController->ShellDetachedFromDocument();
   }
 
+  if (IsEditingOn()) {
+    TurnEditingOff();
+  }
+
   PresShell* oldPresShell = mPresShell;
   mPresShell = nullptr;
   UpdateFrameRequestCallbackSchedulingState(oldPresShell);
@@ -6634,7 +6632,7 @@ bool Document::IsTopLevelWindowInactive() const {
   }
 
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  treeItem->GetRootTreeItem(getter_AddRefs(rootItem));
+  treeItem->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   if (!rootItem) {
     return false;
   }
@@ -7547,16 +7545,6 @@ already_AddRefed<Element> Document::CreateElement(
     ErrorResult& rv) {
   rv = nsContentUtils::CheckQName(aTagName, false);
   if (rv.Failed()) {
-    return nullptr;
-  }
-
-  // Temporary check until XULDocument has been removed.
-  if (IsXULDocument()) {
-#if DEBUG
-    xpc_DumpJSStack(true, true, false);
-#endif
-    MOZ_ASSERT_UNREACHABLE("CreateElement() not allowed in XUL document.");
-    rv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
@@ -11527,14 +11515,14 @@ RefPtr<StyleSheet> Document::LoadChromeSheetSync(nsIURI* uri) {
 }
 
 void Document::ResetDocumentDirection() {
-  if (!(nsContentUtils::IsChromeDoc(this) || IsXULDocument())) {
+  if (!nsContentUtils::IsChromeDoc(this)) {
     return;
   }
   UpdateDocumentStates(NS_DOCUMENT_STATE_RTL_LOCALE, true);
 }
 
 bool Document::IsDocumentRightToLeft() {
-  if (!(nsContentUtils::IsChromeDoc(this) || IsXULDocument())) {
+  if (!nsContentUtils::IsChromeDoc(this)) {
     return false;
   }
   // setting the localedir attribute on the root element forces a
@@ -12890,7 +12878,8 @@ class PendingFullscreenChangeList {
           // Use a temporary to avoid undefined behavior from passing
           // mRootShellForIteration.
           nsCOMPtr<nsIDocShellTreeItem> root;
-          mRootShellForIteration->GetRootTreeItem(getter_AddRefs(root));
+          mRootShellForIteration->GetInProcessRootTreeItem(
+              getter_AddRefs(root));
           mRootShellForIteration = root.forget();
         }
         SkipToNextMatch();
@@ -13396,7 +13385,7 @@ static bool IsInActiveTab(Document* aDoc) {
   }
 
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  docshell->GetRootTreeItem(getter_AddRefs(rootItem));
+  docshell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   if (!rootItem) {
     return false;
   }
@@ -13543,7 +13532,7 @@ static nsCOMPtr<nsPIDOMWindowOuter> GetRootWindow(Document* aDoc) {
     return nullptr;
   }
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  docShell->GetRootTreeItem(getter_AddRefs(rootItem));
+  docShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   return rootItem ? rootItem->GetWindow() : nullptr;
 }
 
@@ -15511,27 +15500,15 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
   //         user settings, anti-clickjacking heuristics, or prompting the
   //         user for explicit permission. Reject if some rule is not fulfilled.
 
-  if (nsContentUtils::IsInPrivateBrowsing(this)) {
-    // If the document is in PB mode, it doesn't have access to its persistent
-    // cookie jar, so reject the promise here.
-    promise->MaybeRejectWithUndefined();
-    return promise.forget();
-  }
-
   if (CookieSettings()->GetRejectThirdPartyTrackers() && inner) {
     // Only do something special for third-party tracking content.
     if (StorageDisabledByAntiTracking(this, nullptr)) {
       // Note: If this has returned true, the top-level document is guaranteed
       // to not be on the Content Blocking allow list.
       DebugOnly<bool> isOnAllowList = false;
-      // If we have a parent document, it has to be non-private since we
-      // verified earlier that our own document is non-private and a private
-      // document can never have a non-private document as its child.
-      MOZ_ASSERT_IF(parent, !nsContentUtils::IsInPrivateBrowsing(parent));
       MOZ_ASSERT_IF(
           NS_SUCCEEDED(AntiTrackingCommon::IsOnContentBlockingAllowList(
-              parent->GetDocumentURI(), false,
-              AntiTrackingCommon::eStorageChecks, isOnAllowList)),
+              parent->GetDocumentURI(), false, isOnAllowList)),
           !isOnAllowList);
 
       auto performFinalChecks = [inner]()

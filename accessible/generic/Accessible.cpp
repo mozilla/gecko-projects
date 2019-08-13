@@ -29,7 +29,6 @@
 #include "TableAccessible.h"
 #include "TableCellAccessible.h"
 #include "TreeWalker.h"
-#include "XULDocument.h"
 
 #include "nsIDOMXULButtonElement.h"
 #include "nsIDOMXULSelectCntrlEl.h"
@@ -2079,7 +2078,7 @@ RootAccessible* Accessible::RootAccessible() const {
   }
 
   nsCOMPtr<nsIDocShellTreeItem> root;
-  docShell->GetRootTreeItem(getter_AddRefs(root));
+  docShell->GetInProcessRootTreeItem(getter_AddRefs(root));
   NS_ASSERTION(root, "No root content tree item");
   if (!root) {
     return nullptr;

@@ -2161,7 +2161,7 @@ already_AddRefed<gfxTextRun> BuildTextRunsScanner::BuildTextRunForFrames(
         lastComputedStyle->IsTextCombined()) {
       anyTextTransformStyle = true;
     }
-    if (textStyle->HasTextEmphasis()) {
+    if (textStyle->HasEffectiveTextEmphasis()) {
       anyTextEmphasis = true;
     }
     flags |= GetSpacingFlags(f);
@@ -4478,14 +4478,16 @@ void nsContinuingTextFrame::Init(nsIContent* aContent,
                                  nsContainerFrame* aParent,
                                  nsIFrame* aPrevInFlow) {
   NS_ASSERTION(aPrevInFlow, "Must be a continuation!");
+
+  // Hook the frame into the flow
+  nsTextFrame* prev = static_cast<nsTextFrame*>(aPrevInFlow);
+  nsTextFrame* nextContinuation = prev->GetNextContinuation();
+  SetPrevInFlow(aPrevInFlow);
+  aPrevInFlow->SetNextInFlow(this);
+
   // NOTE: bypassing nsTextFrame::Init!!!
   nsFrame::Init(aContent, aParent, aPrevInFlow);
 
-  nsTextFrame* prev = static_cast<nsTextFrame*>(aPrevInFlow);
-  nsTextFrame* nextContinuation = prev->GetNextContinuation();
-  // Hook the frame into the flow
-  SetPrevInFlow(aPrevInFlow);
-  aPrevInFlow->SetNextInFlow(this);
   mContentOffset = prev->GetContentOffset() + prev->GetContentLengthHint();
   NS_ASSERTION(mContentOffset < int32_t(aContent->GetText()->GetLength()),
                "Creating ContinuingTextFrame, but there is no more content");
@@ -5231,10 +5233,38 @@ struct EmphasisMarkInfo {
 
 NS_DECLARE_FRAME_PROPERTY_DELETABLE(EmphasisMarkProperty, EmphasisMarkInfo)
 
+static void ComputeTextEmphasisStyleString(const StyleTextEmphasisStyle& aStyle,
+                                           nsAString& aOut) {
+  MOZ_ASSERT(!aStyle.IsNone());
+  if (aStyle.IsString()) {
+    nsDependentCSubstring string = aStyle.AsString().AsString();
+    AppendUTF8toUTF16(string, aOut);
+    return;
+  }
+  const auto& keyword = aStyle.AsKeyword();
+  const bool fill = keyword.fill == StyleTextEmphasisFillMode::Filled;
+  switch (keyword.shape) {
+    case StyleTextEmphasisShapeKeyword::Dot:
+      return aOut.AppendLiteral(fill ? u"\u2022" : u"\u25e6");
+    case StyleTextEmphasisShapeKeyword::Circle:
+      return aOut.AppendLiteral(fill ? u"\u25cf" : u"\u25cb");
+    case StyleTextEmphasisShapeKeyword::DoubleCircle:
+      return aOut.AppendLiteral(fill ? u"\u25c9" : u"\u25ce");
+    case StyleTextEmphasisShapeKeyword::Triangle:
+      return aOut.AppendLiteral(fill ? u"\u25b2" : u"\u25b3");
+    case StyleTextEmphasisShapeKeyword::Sesame:
+      return aOut.AppendLiteral(fill ? u"\ufe45" : u"\ufe46");
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unknown emphasis style shape");
+  }
+}
+
 static already_AddRefed<gfxTextRun> GenerateTextRunForEmphasisMarks(
     nsTextFrame* aFrame, gfxFontGroup* aFontGroup,
     ComputedStyle* aComputedStyle, const nsStyleText* aStyleText) {
-  const nsString& emphasisString = aStyleText->mTextEmphasisStyleString;
+  nsAutoString string;
+  ComputeTextEmphasisStyleString(aStyleText->mTextEmphasisStyle, string);
+
   RefPtr<DrawTarget> dt = CreateReferenceDrawTarget(aFrame);
   auto appUnitsPerDevUnit = aFrame->PresContext()->AppUnitsPerDevPixel();
   gfx::ShapedTextFlags flags =
@@ -5243,9 +5273,9 @@ static already_AddRefed<gfxTextRun> GenerateTextRunForEmphasisMarks(
     // The emphasis marks should always be rendered upright per spec.
     flags = gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_UPRIGHT;
   }
-  return aFontGroup->MakeTextRun<char16_t>(
-      emphasisString.get(), emphasisString.Length(), dt, appUnitsPerDevUnit,
-      flags, nsTextFrameUtils::Flags(), nullptr);
+  return aFontGroup->MakeTextRun<char16_t>(string.get(), string.Length(), dt,
+                                           appUnitsPerDevUnit, flags,
+                                           nsTextFrameUtils::Flags(), nullptr);
 }
 
 static nsRubyFrame* FindFurthestInlineRubyAncestor(nsTextFrame* aFrame) {
@@ -5263,7 +5293,7 @@ static nsRubyFrame* FindFurthestInlineRubyAncestor(nsTextFrame* aFrame) {
 nsRect nsTextFrame::UpdateTextEmphasis(WritingMode aWM,
                                        PropertyProvider& aProvider) {
   const nsStyleText* styleText = StyleText();
-  if (!styleText->HasTextEmphasis()) {
+  if (!styleText->HasEffectiveTextEmphasis()) {
     DeleteProperty(EmphasisMarkProperty());
     return nsRect();
   }
@@ -6225,6 +6255,7 @@ bool nsTextFrame::PaintTextWithSelectionColors(
   params.clipEdges = &aClipEdges;
   params.advanceWidth = &advance;
   params.callbacks = aParams.callbacks;
+  params.glyphRange = aParams.glyphRange;
 
   PaintShadowParams shadowParams(aParams);
   shadowParams.provider = aParams.provider;
@@ -6689,6 +6720,11 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
 
   // Trim trailing whitespace, unless we're painting a selection highlight,
   // which should include trailing spaces if present (bug 1146754).
+  Range glyphRange;
+  if (aIsSelected) {
+    provider.InitializeForDisplay(true);
+    glyphRange = ComputeTransformedRange(provider);
+  }
   provider.InitializeForDisplay(!aIsSelected);
 
   const bool reversed = mTextRun->IsInlineReversed();
@@ -6745,6 +6781,7 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
     params.provider = &provider;
     params.contentRange = contentRange;
     params.textPaintStyle = &textPaintStyle;
+    params.glyphRange = glyphRange;
     if (PaintTextWithSelection(params, clipEdges)) {
       return;
     }
@@ -6795,6 +6832,7 @@ void nsTextFrame::PaintText(const PaintTextParams& aParams,
   params.drawSoftHyphen = (GetStateBits() & TEXT_HYPHEN_BREAK) != 0;
   params.contextPaint = aParams.contextPaint;
   params.callbacks = aParams.callbacks;
+  params.glyphRange = range;
   DrawText(range, textBaselinePt, params);
 }
 
@@ -6944,6 +6982,8 @@ void nsTextFrame::DrawTextRunAndDecorations(
   params.dirtyRect = aParams.dirtyRect;
   params.overrideColor = aParams.decorationOverrideColor;
   params.callbacks = aParams.callbacks;
+  params.glyphRange = aParams.glyphRange;
+  params.provider = aParams.provider;
   // pt is the physical point where the decoration is to be drawn,
   // relative to the frame; one of its coordinates will be updated below.
   params.pt = Point(x / app, y / app);
@@ -7105,7 +7145,8 @@ void nsTextFrame::DrawText(Range aRange, const gfx::Point& aTextBaselinePt,
   // Hide text decorations if we're currently hiding @font-face fallback text
   const bool drawDecorations =
       !aParams.provider->GetFontGroup()->ShouldSkipDrawing() &&
-      (decorations.HasDecorationLines() || StyleText()->HasTextEmphasis());
+      (decorations.HasDecorationLines() ||
+       StyleText()->HasEffectiveTextEmphasis());
   if (drawDecorations) {
     DrawTextRunAndDecorations(aRange, aTextBaselinePt, aParams, decorations);
   } else {

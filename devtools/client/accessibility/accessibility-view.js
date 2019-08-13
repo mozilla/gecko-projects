@@ -14,7 +14,6 @@ const {
 } = require("devtools/client/shared/vendor/react");
 const ReactDOM = require("devtools/client/shared/vendor/react-dom");
 const { Provider } = require("devtools/client/shared/vendor/react-redux");
-const { combineReducers } = require("devtools/client/shared/vendor/redux");
 
 // Accessibility Panel
 const MainFrame = createFactory(require("./components/MainFrame"));
@@ -23,15 +22,24 @@ const OldVersionDescription = createFactory(
 );
 
 // Store
-const createStore = require("devtools/client/shared/redux/create-store")();
+const createStore = require("devtools/client/shared/redux/create-store");
 
 // Reducers
 const { reducers } = require("./reducers/index");
-const store = createStore(combineReducers(reducers));
+const store = createStore(reducers);
 
 // Actions
 const { reset } = require("./actions/ui");
 const { select, highlight } = require("./actions/accessibles");
+
+/**
+ * A helper function that wraps access to the dom walker that should be updated
+ * when fission-ready API is in place. Right now walker is accessed from the
+ * toolbox which will no longer be the case.
+ */
+async function getDOMWalker() {
+  return (await gToolbox.target.getFront("inspector")).walker;
+}
 
 /**
  * This object represents view of the Accessibility panel and is responsible
@@ -68,7 +76,12 @@ AccessibilityView.prototype = {
       return;
     }
 
-    const mainFrame = MainFrame({ accessibility, walker, fluentBundles });
+    const mainFrame = MainFrame({
+      accessibility,
+      accessibilityWalker: walker,
+      fluentBundles,
+      getDOMWalker,
+    });
     // Render top level component
     const provider = createElement(Provider, { store: this.store }, mainFrame);
     this.mainFrame = ReactDOM.render(provider, container);
@@ -95,7 +108,8 @@ AccessibilityView.prototype = {
     // effort approach until there's accessibility API to retrieve accessible object at
     // point.
     if (!accessible || accessible.indexInParent < 0) {
-      const { nodes: children } = await gToolbox.walker.children(node);
+      const domWalker = await getDOMWalker();
+      const { nodes: children } = await domWalker.children(node);
       for (const child of children) {
         if (child.nodeType === nodeConstants.TEXT_NODE) {
           accessible = await walker.getAccessibleFor(child);

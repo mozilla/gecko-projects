@@ -61,8 +61,23 @@ let RPMAccessManager = {
       getBoolPref: [
         "browser.contentblocking.report.lockwise.enabled",
         "browser.contentblocking.report.monitor.enabled",
+        "privacy.socialtracking.block_cookies.enabled",
       ],
-      getStringPref: ["browser.contentblocking.category"],
+      getStringPref: [
+        "browser.contentblocking.category",
+        "browser.contentblocking.report.lockwise.url",
+        "browser.contentblocking.report.monitor.url",
+      ],
+      getFormatURLPref: [
+        "browser.contentblocking.report.monitor.how_it_works.url",
+        "browser.contentblocking.report.lockwise.how_it_works.url",
+        "browser.contentblocking.report.social.url",
+        "browser.contentblocking.report.cookie.url",
+        "browser.contentblocking.report.tracker.url",
+        "browser.contentblocking.report.fingerprinter.url",
+        "browser.contentblocking.report.cryptominer.url",
+      ],
+      recordTelemetryEvent: ["yes"],
     },
     "about:newinstall": {
       getUpdateChannel: ["yes"],
@@ -478,5 +493,27 @@ class MessagePort {
     }
 
     return this.sendRequest("FxAccountsEndpoint", aEntrypoint);
+  }
+
+  recordTelemetryEvent(category, event, object, value, extra) {
+    let principal = this.window.document.nodePrincipal;
+    if (
+      !RPMAccessManager.checkAllowAccess(
+        principal,
+        "recordTelemetryEvent",
+        "yes"
+      )
+    ) {
+      throw new Error(
+        "RPMAccessManager does not allow access to recordTelemetryEvent"
+      );
+    }
+    return Services.telemetry.recordEvent(
+      category,
+      event,
+      object,
+      value,
+      extra
+    );
   }
 }

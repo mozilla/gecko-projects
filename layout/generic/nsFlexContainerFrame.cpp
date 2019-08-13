@@ -1802,7 +1802,7 @@ nsFlexContainerFrame::MeasureAscentAndBSizeForFlexItem(
   ReflowOutput childDesiredSize(aChildReflowInput);
   nsReflowStatus childReflowStatus;
 
-  const uint32_t flags = NS_FRAME_NO_MOVE_FRAME;
+  const ReflowChildFlags flags = ReflowChildFlags::NoMoveFrame;
   ReflowChild(aItem.Frame(), aPresContext, childDesiredSize, aChildReflowInput,
               0, 0, flags, childReflowStatus);
   aItem.SetHadMeasuringReflow();
@@ -5199,7 +5199,8 @@ void nsFlexContainerFrame::ReflowFlexItem(
   ReflowOutput childDesiredSize(childReflowInput);
   nsReflowStatus childReflowStatus;
   ReflowChild(aItem.Frame(), aPresContext, childDesiredSize, childReflowInput,
-              outerWM, aFramePos, aContainerSize, 0, childReflowStatus);
+              outerWM, aFramePos, aContainerSize, ReflowChildFlags::Default,
+              childReflowStatus);
 
   // XXXdholbert Once we do pagination / splitting, we'll need to actually
   // handle incomplete childReflowStatuses. But for now, we give our kids
@@ -5209,13 +5210,29 @@ void nsFlexContainerFrame::ReflowFlexItem(
              "We gave flex item unconstrained available height, so it "
              "should be complete");
 
+  // ApplyRelativePositioning in right-to-left writing modes needs to know the
+  // updated frame width to set the normal position correctly.
+  //
+  // It may look like we could handle this instead by passing the
+  // ApplyRelativePositioning flag to FinishReflowChild.  However, we're
+  // unlike other callers of FinishReflowChild in that we're keeping its aPos
+  // (our aFramePos) in the parent's writing mode rather than the child's, and
+  // thus passing its aWM (our outerWM) as the parent's writing mode as well.
+  //
+  // Thus this could be converted, but requires a little bit of care to do so
+  // (and would probably require a point conversion like the one in
+  // nsBlockReflowContext::PlaceBlock).  Alternatively, maybe things should be
+  // restructured a bit so that sort of conversion isn't needed.
+  aItem.Frame()->SetSize(outerWM,
+                         childDesiredSize.Size(wm).ConvertTo(outerWM, wm));
   LogicalMargin offsets =
       childReflowInput.ComputedLogicalOffsets().ConvertTo(outerWM, wm);
   ReflowInput::ApplyRelativePositioning(aItem.Frame(), outerWM, offsets,
                                         &aFramePos, aContainerSize);
 
   FinishReflowChild(aItem.Frame(), aPresContext, childDesiredSize,
-                    &childReflowInput, outerWM, aFramePos, aContainerSize, 0);
+                    &childReflowInput, outerWM, aFramePos, aContainerSize,
+                    ReflowChildFlags::Default);
 
   aItem.SetAscent(childDesiredSize.BlockStartAscent());
 }
@@ -5240,12 +5257,12 @@ void nsFlexContainerFrame::ReflowPlaceholders(
     ReflowOutput childDesiredSize(childReflowInput);
     nsReflowStatus childReflowStatus;
     ReflowChild(placeholder, aPresContext, childDesiredSize, childReflowInput,
-                outerWM, aContentBoxOrigin, aContainerSize, 0,
-                childReflowStatus);
+                outerWM, aContentBoxOrigin, aContainerSize,
+                ReflowChildFlags::Default, childReflowStatus);
 
     FinishReflowChild(placeholder, aPresContext, childDesiredSize,
                       &childReflowInput, outerWM, aContentBoxOrigin,
-                      aContainerSize, 0);
+                      aContainerSize, ReflowChildFlags::Default);
 
     // Mark the placeholder frame to indicate that it's not actually at the
     // element's static position, because we need to apply CSS Alignment after

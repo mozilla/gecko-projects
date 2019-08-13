@@ -929,6 +929,30 @@ describe("ASRouter", () => {
 
       assert.deepEqual(result, [message2, message1]);
     });
+    it("should forward trigger param info", async () => {
+      const trigger = { triggerId: "foo", triggerParam: "bar" };
+      const message1 = {
+        id: "1",
+        campaign: "foocampaign",
+        trigger: { id: "foo" },
+      };
+      const message2 = {
+        id: "2",
+        campaign: "foocampaign",
+        trigger: { id: "bar" },
+      };
+      await Router.setState({ messages: [message2, message1] });
+      // Just return the first message provided as arg
+      const stub = sandbox.stub(Router, "_findMessage");
+
+      Router.handleMessageRequest(trigger);
+
+      assert.calledOnce(stub);
+      assert.calledWithExactly(stub, sinon.match.array, {
+        id: trigger.triggerId,
+        param: trigger.triggerParam,
+      });
+    });
   });
 
   describe("#uninit", () => {
@@ -1197,6 +1221,81 @@ describe("ASRouter", () => {
         await Router.onMessage(msg);
 
         assert.lengthOf(Router.state.providers.filter(p => p.url === url), 0);
+      });
+      it("should handle onboarding message provider", async () => {
+        const handleMessageRequestStub = sandbox.stub(
+          Router,
+          "handleMessageRequest"
+        );
+        handleMessageRequestStub
+          .withArgs({
+            provider: "onboarding",
+            template: "extended_triplets",
+          })
+          .resolves({ id: "foo" });
+        const spy = sandbox.spy(Router, "setupExtendedTriplets");
+        const msg = fakeAsyncMessage({
+          type: "NEWTAB_MESSAGE_REQUEST",
+          data: {},
+        });
+        await Router.onMessage(msg);
+
+        assert.calledOnce(spy);
+      });
+      it("should fallback to snippets if one was assigned to the holdback experiment", async () => {
+        sandbox.stub(global.Sampling, "ratioSample").resolves(1); // 1 = holdback branch
+        const handleMessageRequestStub = sandbox.stub(
+          Router,
+          "handleMessageRequest"
+        );
+        handleMessageRequestStub
+          .withArgs({
+            provider: "onboarding",
+            template: "extended_triplets",
+          })
+          .resolves({ id: "foo" });
+        const msg = fakeAsyncMessage({
+          type: "NEWTAB_MESSAGE_REQUEST",
+          data: {},
+        });
+        await Router.onMessage(msg);
+
+        assert.calledTwice(handleMessageRequestStub);
+        assert.calledWithExactly(handleMessageRequestStub, {
+          provider: "onboarding",
+          template: "extended_triplets",
+        });
+        assert.calledWithExactly(handleMessageRequestStub, {
+          provider: "snippets",
+        });
+      });
+      it("should fallback to snippets if onboarding message provider returned none", async () => {
+        const handleMessageRequestStub = sandbox.stub(
+          Router,
+          "handleMessageRequest"
+        );
+        handleMessageRequestStub
+          .withArgs({
+            provider: "onboarding",
+            template: "extended_triplets",
+          })
+          .resolves(null);
+        const spy = sandbox.spy(Router, "setupExtendedTriplets");
+        const msg = fakeAsyncMessage({
+          type: "NEWTAB_MESSAGE_REQUEST",
+          data: {},
+        });
+        await Router.onMessage(msg);
+
+        assert.notCalled(spy);
+        assert.calledTwice(handleMessageRequestStub);
+        assert.calledWithExactly(handleMessageRequestStub, {
+          provider: "onboarding",
+          template: "extended_triplets",
+        });
+        assert.calledWithExactly(handleMessageRequestStub, {
+          provider: "snippets",
+        });
       });
     });
 
@@ -1524,6 +1623,7 @@ describe("ASRouter", () => {
         assert.calledOnce(Router._findMessage);
         assert.deepEqual(Router._findMessage.firstCall.args[1], {
           id: "firstRun",
+          param: undefined,
         });
       });
       it("consider the trigger when picking a message", async () => {
@@ -1825,7 +1925,6 @@ describe("ASRouter", () => {
       it("should add/remove observers for `webextension-install-notify`", async () => {
         sandbox.spy(global.Services.obs, "addObserver");
         sandbox.spy(global.Services.obs, "removeObserver");
-        sandbox.spy(Router, "blockMessageById");
 
         sandbox.stub(MessageLoaderUtils, "installAddonFromURL").resolves(null);
         const msg = fakeExecuteUserAction({
@@ -1843,8 +1942,6 @@ describe("ASRouter", () => {
 
         assert.calledOnce(global.Services.obs.removeObserver);
         assert.calledOnce(channel.sendAsyncMessage);
-        assert.calledOnce(Router.blockMessageById);
-        assert.calledWithExactly(Router.blockMessageById, "RETURN_TO_AMO_1");
       });
     });
 
@@ -2855,6 +2952,75 @@ describe("ASRouter", () => {
           interrupt: "join",
           triplet: "supercharge",
         });
+      });
+    });
+
+    describe(".setupExtendedTriplets", () => {
+      let setStringPrefStub;
+      let setExperimentActiveStub;
+
+      beforeEach(() => {
+        setStringPrefStub = sandbox.stub(
+          global.Services.prefs,
+          "setStringPref"
+        );
+        setExperimentActiveStub = sandbox.stub(
+          global.TelemetryEnvironment,
+          "setExperimentActive"
+        );
+      });
+
+      it("should generates a control branch configuration and update Router.state", async () => {
+        sandbox.stub(global.Sampling, "ratioSample").resolves(0); // 0 = control branch
+
+        await Router.setupExtendedTriplets();
+
+        assert.propertyVal(Router.state, "extendedTripletsInitialized", true);
+        assert.propertyVal(Router.state, "showExtendedTriplets", true);
+        assert.calledWith(
+          setStringPrefStub,
+          TRAILHEAD_CONFIG.EXTENDED_TRIPLETS_EXPERIMENT_PREF,
+          "control"
+        );
+        assert.calledWith(
+          setExperimentActiveStub,
+          "activity-stream-extended-triplets",
+          "control"
+        );
+      });
+      it("should generates a test branch configuration and update Router.state", async () => {
+        sandbox.stub(global.Sampling, "ratioSample").resolves(1); // 1 = holdback branch
+
+        await Router.setupExtendedTriplets();
+
+        assert.propertyVal(Router.state, "extendedTripletsInitialized", true);
+        assert.propertyVal(Router.state, "showExtendedTriplets", false);
+        assert.calledWith(
+          setStringPrefStub,
+          TRAILHEAD_CONFIG.EXTENDED_TRIPLETS_EXPERIMENT_PREF,
+          "holdback"
+        );
+        assert.calledWith(
+          setExperimentActiveStub,
+          "activity-stream-extended-triplets",
+          "holdback"
+        );
+      });
+      it("should reuse the existing branch if it's already defined", async () => {
+        getStringPrefStub.returns("control");
+
+        await Router.setupExtendedTriplets();
+
+        assert.notCalled(setStringPrefStub);
+      });
+      it("should only run once", async () => {
+        sandbox.spy(Router, "setState");
+
+        await Router.setupExtendedTriplets();
+        await Router.setupExtendedTriplets();
+        await Router.setupExtendedTriplets();
+
+        assert.calledOnce(Router.setState);
       });
     });
   });

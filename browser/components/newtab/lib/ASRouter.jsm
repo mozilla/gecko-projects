@@ -94,6 +94,11 @@ const TRAILHEAD_CONFIG = {
   },
   LOCALES: ["en-US", "en-GB", "en-CA", "de", "de-DE", "fr", "fr-FR"],
   EXPERIMENT_RATIOS: [["", 0], ["interrupts", 1], ["triplets", 3]],
+  // Per bug 1571817, for those who meet the targeting criteria of extended
+  // triplets, 99% users (control group) will see the extended triplets, and
+  // the rest 1% (holdback group) won't.
+  EXPERIMENT_RATIOS_FOR_EXTENDED_TRIPLETS: [["control", 99], ["holdback", 1]],
+  EXTENDED_TRIPLETS_EXPERIMENT_PREF: "trailhead.extendedTriplets.experiment",
 };
 
 const INCOMING_MESSAGE_NAME = "ASRouter:child-to-parent";
@@ -490,10 +495,13 @@ class _ASRouter {
       trailheadTriplet: "",
       messages: [],
       errors: [],
+      extendedTripletsInitialized: false,
+      showExtendedTriplets: true,
     };
     this._triggerHandler = this._triggerHandler.bind(this);
     this._localProviders = localProviders;
     this.blockMessageById = this.blockMessageById.bind(this);
+    this.unblockMessageById = this.unblockMessageById.bind(this);
     this.onMessage = this.onMessage.bind(this);
     this.handleMessageRequest = this.handleMessageRequest.bind(this);
     this.addImpression = this.addImpression.bind(this);
@@ -985,6 +993,40 @@ class _ASRouter {
       type: at.TRAILHEAD_ENROLL_EVENT,
       data,
     });
+  }
+
+  async setupExtendedTriplets() {
+    // Don't re-initialize
+    if (this.state.extendedTripletsInitialized) {
+      return;
+    }
+
+    let branch = Services.prefs.getStringPref(
+      TRAILHEAD_CONFIG.EXTENDED_TRIPLETS_EXPERIMENT_PREF,
+      ""
+    );
+    if (!branch) {
+      const { userId } = ClientEnvironment;
+      branch = await chooseBranch(
+        `${userId}-extended-triplets-experiment`,
+        TRAILHEAD_CONFIG.EXPERIMENT_RATIOS_FOR_EXTENDED_TRIPLETS
+      );
+      Services.prefs.setStringPref(
+        TRAILHEAD_CONFIG.EXTENDED_TRIPLETS_EXPERIMENT_PREF,
+        branch
+      );
+    }
+
+    // In order for ping centre to pick this up, it MUST contain a substring activity-stream
+    const experimentName = `activity-stream-extended-triplets`;
+    TelemetryEnvironment.setExperimentActive(experimentName, branch);
+
+    const state = { extendedTripletsInitialized: true };
+    // Disable the extended triplets for the "holdback" group.
+    if (branch === "holdback") {
+      state.showExtendedTriplets = false;
+    }
+    await this.setState(state);
   }
 
   async setupTrailhead() {
@@ -1486,7 +1528,13 @@ class _ASRouter {
     return impressions;
   }
 
-  handleMessageRequest({ triggerId, template, provider, returnAll = false }) {
+  handleMessageRequest({
+    triggerId,
+    triggerParam,
+    template,
+    provider,
+    returnAll = false,
+  }) {
     const msgs = this._getUnblockedMessages().filter(m => {
       if (provider && m.provider !== provider) {
         return false;
@@ -1502,10 +1550,16 @@ class _ASRouter {
     });
 
     if (returnAll) {
-      return this._findAllMessages(msgs, triggerId && { id: triggerId });
+      return this._findAllMessages(
+        msgs,
+        triggerId && { id: triggerId, param: triggerParam }
+      );
     }
 
-    return this._findMessage(msgs, triggerId && { id: triggerId });
+    return this._findMessage(
+      msgs,
+      triggerId && { id: triggerId, param: triggerParam }
+    );
   }
 
   async setMessageById(id, target, force = true, action = {}) {
@@ -1590,10 +1644,8 @@ class _ASRouter {
         "webextension-install-notify"
       );
       this.messageChannel.sendAsyncMessage(OUTGOING_MESSAGE_NAME, {
-        type: "CLEAR_MESSAGE",
-        data: { id: "RETURN_TO_AMO_1" },
+        type: "CLEAR_INTERRUPT",
       });
-      this.blockMessageById("RETURN_TO_AMO_1");
     };
     Services.obs.addObserver(addonInstallObs, "webextension-install-notify");
   }
@@ -1810,11 +1862,24 @@ class _ASRouter {
       }));
     } else {
       // On new tab, send cards if they match; othwerise send a snippet
-      message =
-        (await this.handleMessageRequest({
-          provider: "onboarding",
-          template: "extended_triplets",
-        })) || (await this.handleMessageRequest({ provider: "snippets" }));
+      message = await this.handleMessageRequest({
+        provider: "onboarding",
+        template: "extended_triplets",
+      });
+
+      // Set up the experiment for extended triplets. It's done here because we
+      // only want to enroll users (for both control and holdback) if they meet
+      // the targeting criteria.
+      if (message) {
+        await this.setupExtendedTriplets();
+      }
+
+      // If no extended triplets message was returned, or the holdback experiment
+      // is active, show snippets instead
+      if (!message || !this.state.showExtendedTriplets) {
+        message = await this.handleMessageRequest({ provider: "snippets" });
+      }
+
       await this.setState({ lastMessageId: message ? message.id : null });
     }
 
@@ -1835,7 +1900,10 @@ class _ASRouter {
       }
     }
 
-    const message = await this.handleMessageRequest({ triggerId: trigger.id });
+    const message = await this.handleMessageRequest({
+      triggerId: trigger.id,
+      triggerParam: trigger.param,
+    });
 
     await this.setState({ lastMessageId: message ? message.id : null });
     await this._sendMessageToTarget(message, target, trigger);
@@ -1859,6 +1927,7 @@ class _ASRouter {
           target,
           action.data && action.data.trigger
         );
+        break;
       case "BLOCK_MESSAGE_BY_ID":
         await this.blockMessageById(action.data.id);
         // Block the message but don't dismiss it in case the action taken has

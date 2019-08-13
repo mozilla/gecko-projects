@@ -1338,7 +1338,7 @@ bool Instance::init(JSContext* cx, const DataSegmentVector& dataSegments,
     return false;
   }
   for (size_t i = 0; i < elemSegments.length(); i++) {
-    if (!elemSegments[i]->active()) {
+    if (elemSegments[i]->kind == ElemSegment::Kind::Passive) {
       passiveElemSegments_[i] = elemSegments[i];
     }
   }
@@ -1966,7 +1966,7 @@ WasmBreakpointSite* Instance::getOrCreateBreakpointSite(JSContext* cx,
   return debug().getOrCreateBreakpointSite(cx, this, offset);
 }
 
-void Instance::destroyBreakpointSite(FreeOp* fop, uint32_t offset) {
+void Instance::destroyBreakpointSite(JSFreeOp* fop, uint32_t offset) {
   MOZ_ASSERT(debugEnabled());
   return debug().destroyBreakpointSite(fop, this, offset);
 }

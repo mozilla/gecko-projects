@@ -25,6 +25,20 @@ var ChromeUtils = require("ChromeUtils");
 var { gDevTools } = require("devtools/client/framework/devtools");
 var EventEmitter = require("devtools/shared/event-emitter");
 var Telemetry = require("devtools/client/shared/telemetry");
+
+loader.lazyRequireGetter(
+  this,
+  "createToolboxStore",
+  "devtools/client/framework/store",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "registerWalkerListeners",
+  "devtools/client/framework/actions/index",
+  true
+);
+
 const { getUnicodeUrl } = require("devtools/client/shared/unicode-url");
 var {
   DOMHelpers,
@@ -118,7 +132,7 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(
   this,
   "ResponsiveUIManager",
-  "devtools/client/responsive.html/manager",
+  "devtools/client/responsive/manager",
   true
 );
 loader.lazyRequireGetter(
@@ -326,6 +340,13 @@ Toolbox.prototype = {
   _prefs: {
     LAST_TOOL: "devtools.toolbox.selectedTool",
     SIDE_ENABLED: "devtools.toolbox.sideEnabled",
+  },
+
+  get store() {
+    if (!this._store) {
+      this._store = createToolboxStore();
+    }
+    return this._store;
   },
 
   get currentToolId() {
@@ -574,7 +595,7 @@ Toolbox.prototype = {
   },
 
   _attachAndResumeThread: async function() {
-    const threadOptions = {
+    const [, threadFront] = await this._target.attachThread({
       autoBlackBox: false,
       ignoreFrameEnvironment: true,
       pauseOnExceptions: Services.prefs.getBoolPref(
@@ -586,8 +607,10 @@ Toolbox.prototype = {
       showOverlayStepButtons: Services.prefs.getBoolPref(
         "devtools.debugger.features.overlay-step-buttons"
       ),
-    };
-    const [, threadFront] = await this._target.attachThread(threadOptions);
+      skipBreakpoints: Services.prefs.getBoolPref(
+        "devtools.debugger.skip-pausing"
+      ),
+    });
 
     try {
       await threadFront.resume();
@@ -924,6 +947,20 @@ Toolbox.prototype = {
     // Add zoom-related shortcuts.
     if (!this._hostOptions || this._hostOptions.zoom === true) {
       ZoomKeys.register(this.win, this.shortcuts);
+    }
+
+    // Monitor shortcuts that are not supported by DevTools, but might be used
+    // by users because they are widely implemented in other developer tools
+    // (example: the command palette triggered via ctrl+P)
+    const wrongShortcuts = ["CmdOrCtrl+P", "CmdOrCtrl+Shift+P"];
+    for (const shortcut of wrongShortcuts) {
+      this.shortcuts.on(shortcut, event => {
+        this.telemetry.recordEvent("wrong_shortcut", "tools", null, {
+          shortcut,
+          tool_id: this.currentToolId,
+          session_id: this.sessionId,
+        });
+      });
     }
   },
 
@@ -3305,6 +3342,7 @@ Toolbox.prototype = {
         this.walker.on("highlighter-ready", this._highlighterReady);
         this.walker.on("highlighter-hide", this._highlighterHidden);
         this._selection.on("new-node-front", this._onNewSelectedNodeFront);
+        registerWalkerListeners(this);
       }.bind(this)();
     }
     return this._initInspector;

@@ -6299,7 +6299,8 @@ exports.CSS_PROPERTIES = {
       "x-large",
       "x-small",
       "xx-large",
-      "xx-small"
+      "xx-small",
+      "xxx-large"
     ]
   },
   "font-family": {
@@ -6393,7 +6394,8 @@ exports.CSS_PROPERTIES = {
       "x-large",
       "x-small",
       "xx-large",
-      "xx-small"
+      "xx-small",
+      "xxx-large"
     ]
   },
   "font-size-adjust": {
@@ -9905,7 +9907,8 @@ exports.CSS_PROPERTIES = {
     "subproperties": [
       "text-decoration-line",
       "text-decoration-style",
-      "text-decoration-color"
+      "text-decoration-color",
+      "text-decoration-thickness"
     ],
     "supports": [
       "color"
@@ -9913,6 +9916,7 @@ exports.CSS_PROPERTIES = {
     "values": [
       "COLOR",
       "-moz-none",
+      "auto",
       "blink",
       "currentColor",
       "dashed",

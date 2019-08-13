@@ -190,7 +190,8 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
                const TabContext& aContext, BrowsingContext* aBrowsingContext,
                uint32_t aChromeFlags, bool aIsTopLevel);
 
-  nsresult Init(mozIDOMWindowProxy* aParent);
+  nsresult Init(mozIDOMWindowProxy* aParent,
+                WindowGlobalChild* aInitialWindowChild);
 
   /** Return a BrowserChild with the given attributes. */
   static already_AddRefed<BrowserChild> Create(
@@ -658,10 +659,6 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
 
  protected:
   virtual ~BrowserChild();
-
-  PWindowGlobalChild* AllocPWindowGlobalChild(const WindowGlobalInit& aInit);
-
-  bool DeallocPWindowGlobalChild(PWindowGlobalChild* aActor);
 
   mozilla::ipc::IPCResult RecvDestroy();
 

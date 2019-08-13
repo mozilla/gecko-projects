@@ -630,6 +630,9 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
                   NS_FRAME_MAY_BE_TRANSFORMED |
                   NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR));
     // clang-format on
+
+    // Copy other bits in nsIFrame from prev-in-flow.
+    mHasColumnSpanSiblings = aPrevInFlow->HasColumnSpanSiblings();
   } else {
     PresContext()->ConstructedFrame();
   }
@@ -7503,9 +7506,9 @@ bool nsIFrame::UpdateOverflow() {
   if (FinishAndStoreOverflow(overflowAreas, GetSize())) {
     nsView* view = GetView();
     if (view) {
-      uint32_t flags = GetXULLayoutFlags();
+      ReflowChildFlags flags = GetXULLayoutFlags();
 
-      if ((flags & NS_FRAME_NO_SIZE_VIEW) == 0) {
+      if (!(flags & ReflowChildFlags::NoSizeView)) {
         // Make sure the frame's view is properly sized.
         nsViewManager* vm = view->GetViewManager();
         vm->ResizeView(view, overflowAreas.VisualOverflow(), true);
@@ -7723,6 +7726,12 @@ void nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix,
       aTo += nsPrintfCString(" scr-overflow=%d,%d,%d,%d", so.x, so.y, so.width,
                              so.height);
     }
+  }
+  bool hasNormalPosition;
+  nsPoint normalPosition = GetNormalPosition(&hasNormalPosition);
+  if (hasNormalPosition) {
+    aTo += nsPrintfCString(" normal-position={%d,%d}", normalPosition.x,
+                           normalPosition.y);
   }
   if (0 != mState) {
     aTo += nsPrintfCString(" [state=%016llx]", (unsigned long long)mState);
@@ -10453,10 +10462,10 @@ void nsFrame::BoxReflow(nsBoxLayoutState& aState, nsPresContext* aPresContext,
 
     NS_ASSERTION(status.IsComplete(), "bad status");
 
-    uint32_t layoutFlags = aState.LayoutFlags();
-    nsContainerFrame::FinishReflowChild(this, aPresContext, aDesiredSize,
-                                        &reflowInput, aX, aY,
-                                        layoutFlags | NS_FRAME_NO_MOVE_FRAME);
+    ReflowChildFlags layoutFlags = aState.LayoutFlags();
+    nsContainerFrame::FinishReflowChild(
+        this, aPresContext, aDesiredSize, &reflowInput, aX, aY,
+        layoutFlags | ReflowChildFlags::NoMoveFrame);
 
     // Save the ascent.  (bug 103925)
     if (IsXULCollapsed()) {
@@ -11772,7 +11781,6 @@ void DR_State::InitFrameTypeTable() {
   AddFrameTypeInfo(LayoutFrameType::Root, "root", "root");
   AddFrameTypeInfo(LayoutFrameType::Scroll, "scroll", "scroll");
   AddFrameTypeInfo(LayoutFrameType::TableCell, "cell", "tableCell");
-  AddFrameTypeInfo(LayoutFrameType::BCTableCell, "bcCell", "bcTableCell");
   AddFrameTypeInfo(LayoutFrameType::TableCol, "col", "tableCol");
   AddFrameTypeInfo(LayoutFrameType::TableColGroup, "colG", "tableColGroup");
   AddFrameTypeInfo(LayoutFrameType::Table, "tbl", "table");

@@ -49,25 +49,6 @@ class BaselineFrame {
     // See comment above 'isDebuggee' in vm/Realm.h for explanation
     // of invariants of debuggee compartments, scripts, and frames.
     DEBUGGEE = 1 << 6,
-
-    // This flag is intended for use whenever the frame is settled on a
-    // native code address without a corresponding RetAddrEntry. In this
-    // case, the frame contains an explicit bytecode offset for frame
-    // iterators.
-    //
-    // There can also be an override pc if the frame has had its
-    // environment chain unwound to a pc during exception handling that is
-    // different from its current pc.
-    //
-    // This flag should never be set on the top frame while we're
-    // executing JIT code. In debug builds, it is checked before and
-    // after VM calls.
-    HAS_OVERRIDE_PC = 1 << 7,
-
-    // If set, we're handling an exception for this frame. This is set for
-    // debug mode OSR sanity checking when it handles corner cases which
-    // only arise during exception handling.
-    HANDLING_EXCEPTION = 1 << 8,
   };
 
  protected:  // Silence Clang warning about unused private fields.
@@ -87,11 +68,6 @@ class BaselineFrame {
   uint32_t frameSize_;
   uint32_t loReturnValue_;  // If HAS_RVAL, the frame's return value.
   uint32_t hiReturnValue_;
-  uint32_t overrideOffset_;  // If HAS_OVERRIDE_PC, the bytecode offset.
-#if JS_BITS_PER_WORD == 32
-  // Ensure frame is 8-byte aligned, see static_assert below.
-  uint32_t padding_;
-#endif
 
  public:
   // Distance between the frame pointer and the frame header (return address).
@@ -106,10 +82,6 @@ class BaselineFrame {
   JSObject* environmentChain() const { return envChain_; }
   void setEnvironmentChain(JSObject* envChain) { envChain_ = envChain; }
   inline JSObject** addressOfEnvironmentChain() { return &envChain_; }
-
-  inline Value* addressOfScratchValue() {
-    return reinterpret_cast<Value*>(&loScratchValue_);
-  }
 
   template <typename SpecificEnvironment>
   inline void pushOnEnvironmentChain(SpecificEnvironment& env);
@@ -237,11 +209,28 @@ class BaselineFrame {
 
   // Switch a JIT frame on the stack to Interpreter mode. The caller is
   // responsible for patching the return address into this frame to a location
-  // in the interpreter code.
-  void switchFromJitToInterpreter(jsbytecode* pc) {
+  // in the interpreter code. Also assert profiler sampling has been suppressed
+  // so the sampler thread doesn't see an inconsistent state while we are
+  // patching frames.
+  void switchFromJitToInterpreter(JSContext* cx, jsbytecode* pc) {
+    MOZ_ASSERT(!cx->isProfilerSamplingEnabled());
     MOZ_ASSERT(!runningInInterpreter());
     flags_ |= RUNNING_IN_INTERPRETER;
     setInterpreterFields(pc);
+  }
+
+  // Like switchFromJitToInterpreter, but set the interpreterICEntry_ field to
+  // nullptr. Initializing this field requires a binary search on the
+  // JitScript's ICEntry list but the exception handler never returns to this
+  // pc anyway so we can avoid the overhead.
+  void switchFromJitToInterpreterForExceptionHandler(JSContext* cx,
+                                                     jsbytecode* pc) {
+    MOZ_ASSERT(!cx->isProfilerSamplingEnabled());
+    MOZ_ASSERT(!runningInInterpreter());
+    flags_ |= RUNNING_IN_INTERPRETER;
+    interpreterScript_ = script();
+    interpreterPC_ = pc;
+    interpreterICEntry_ = nullptr;
   }
 
   bool runningInInterpreter() const { return flags_ & RUNNING_IN_INTERPRETER; }
@@ -317,32 +306,6 @@ class BaselineFrame {
   void setIsDebuggee() { flags_ |= DEBUGGEE; }
   inline void unsetIsDebuggee();
 
-  bool isHandlingException() const { return flags_ & HANDLING_EXCEPTION; }
-  void setIsHandlingException() { flags_ |= HANDLING_EXCEPTION; }
-  void unsetIsHandlingException() { flags_ &= ~HANDLING_EXCEPTION; }
-
-  // See the HAS_OVERRIDE_PC comment.
-  bool hasOverridePc() const { return flags_ & HAS_OVERRIDE_PC; }
-
-  jsbytecode* overridePc() const {
-    MOZ_ASSERT(hasOverridePc());
-    return script()->offsetToPC(overrideOffset_);
-  }
-
-  jsbytecode* maybeOverridePc() const {
-    if (hasOverridePc()) {
-      return overridePc();
-    }
-    return nullptr;
-  }
-
-  void setOverridePc(jsbytecode* pc) {
-    flags_ |= HAS_OVERRIDE_PC;
-    overrideOffset_ = script()->pcToOffset(pc);
-  }
-
-  void clearOverridePc() { flags_ &= ~HAS_OVERRIDE_PC; }
-
   void trace(JSTracer* trc, const JSJitFrameIter& frame);
 
   bool isGlobalFrame() const { return script()->isGlobalCode(); }
@@ -391,9 +354,19 @@ class BaselineFrame {
   static int reverseOffsetOfFrameSize() {
     return -int(Size()) + offsetof(BaselineFrame, frameSize_);
   }
-  static int reverseOffsetOfScratchValue() {
+
+  // The scratch value slot can either be used as a Value slot or as two
+  // separate 32-bit integer slots.
+  static int reverseOffsetOfScratchValueLow32() {
     return -int(Size()) + offsetof(BaselineFrame, loScratchValue_);
   }
+  static int reverseOffsetOfScratchValueHigh32() {
+    return -int(Size()) + offsetof(BaselineFrame, hiScratchValue_);
+  }
+  static int reverseOffsetOfScratchValue() {
+    return reverseOffsetOfScratchValueLow32();
+  }
+
   static int reverseOffsetOfEnvironmentChain() {
     return -int(Size()) + offsetof(BaselineFrame, envChain_);
   }

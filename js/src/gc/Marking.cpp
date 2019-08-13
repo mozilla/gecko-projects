@@ -246,7 +246,8 @@ void js::CheckTracedThing(JSTracer* trc, T* thing) {
       isGcMarkingTracer ||
           IsTracerKind(trc, JS::CallbackTracer::TracerKind::GrayBuffering) ||
           IsTracerKind(trc, JS::CallbackTracer::TracerKind::UnmarkGray) ||
-          IsTracerKind(trc, JS::CallbackTracer::TracerKind::ClearEdges));
+          IsTracerKind(trc, JS::CallbackTracer::TracerKind::ClearEdges) ||
+          IsTracerKind(trc, JS::CallbackTracer::TracerKind::Sweeping));
 
   if (isGcMarkingTracer) {
     GCMarker* gcMarker = GCMarker::fromTracer(trc);
@@ -1502,6 +1503,16 @@ GCMarker::MarkQueueProgress GCMarker::processMarkQueue() {
     return QueueSuspended;
   }
 
+  // If the queue wants to be gray marking, but we've pushed a black object
+  // since set-color-gray was processed, then we can't switch to gray and must
+  // again wait until gray marking is possible.
+  //
+  // Remove this code if the restriction against marking gray during black is
+  // relaxed.
+  if (queueMarkColor == mozilla::Some(MarkColor::Gray) && hasBlackEntries()) {
+    return QueueSuspended;
+  }
+
   // If the queue wants to be marking a particular color, switch to that color.
   // In any case, restore the mark color to whatever it was when we entered
   // this function.
@@ -1548,7 +1559,14 @@ GCMarker::MarkQueueProgress GCMarker::processMarkQueue() {
 
       // Process just the one object that is now on top of the mark stack,
       // possibly pushing more stuff onto the stack.
-      MOZ_ASSERT(!isMarkStackEmpty());
+      if (isMarkStackEmpty()) {
+        MOZ_ASSERT(obj->asTenured().arena()->onDelayedMarkingList());
+        // If we overflow the stack here and delay marking, then we won't be
+        // testing what we think we're testing.
+        AutoEnterOOMUnsafeRegion oomUnsafe;
+        oomUnsafe.crash("Overflowed stack while marking test queue");
+      }
+
       SliceBudget unlimited = SliceBudget::unlimited();
       processMarkStackTop(unlimited);
     } else if (val.isString()) {
@@ -2571,8 +2589,11 @@ void GCMarker::delayMarkingChildren(Cell* cell) {
     markLaterArenas++;
 #endif
   }
-  if (!arena->hasDelayedMarking(color)) {
-    arena->setHasDelayedMarking(color, true);
+  JS::TraceKind kind = MapAllocToTraceKind(arena->getAllocKind());
+  MarkColor colorToMark =
+      TraceKindCanBeMarkedGray(kind) ? color : MarkColor::Black;
+  if (!arena->hasDelayedMarking(colorToMark)) {
+    arena->setHasDelayedMarking(colorToMark, true);
     delayedMarkingWorkAdded = true;
   }
 }
@@ -3433,6 +3454,47 @@ bool js::gc::IsAboutToBeFinalizedInternal(T* thingp) {
   }
   return dying;
 }
+
+template <typename T>
+inline bool SweepingTracer::sweepEdge(T** thingp) {
+  CheckIsMarkedThing(thingp);
+  T* thing = *thingp;
+  JSRuntime* rt = thing->runtimeFromAnyThread();
+
+  if (ThingIsPermanentAtomOrWellKnownSymbol(thing) && runtime() != rt) {
+    return true;
+  }
+
+  TenuredCell& tenured = thing->asTenured();
+  MOZ_ASSERT(tenured.zoneFromAnyThread()->isGCSweeping(),
+             "Should be called during Sweeping.");
+  if (!tenured.isMarkedAny()) {
+    *thingp = nullptr;
+    return false;
+  }
+
+  return true;
+}
+
+bool SweepingTracer::onObjectEdge(JSObject** objp) { return sweepEdge(objp); }
+bool SweepingTracer::onShapeEdge(Shape** shapep) { return sweepEdge(shapep); }
+bool SweepingTracer::onStringEdge(JSString** stringp) {
+  return sweepEdge(stringp);
+}
+bool SweepingTracer::onScriptEdge(JSScript** scriptp) {
+  return sweepEdge(scriptp);
+}
+bool SweepingTracer::onLazyScriptEdge(LazyScript** lazyp) {
+  return sweepEdge(lazyp);
+}
+bool SweepingTracer::onBaseShapeEdge(BaseShape** basep) {
+  return sweepEdge(basep);
+}
+bool SweepingTracer::onScopeEdge(Scope** scopep) { return sweepEdge(scopep); }
+bool SweepingTracer::onRegExpSharedEdge(RegExpShared** sharedp) {
+  return sweepEdge(sharedp);
+}
+bool SweepingTracer::onBigIntEdge(BigInt** bip) { return sweepEdge(bip); }
 
 namespace js {
 namespace gc {

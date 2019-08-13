@@ -4,6 +4,11 @@ use serde_json::Value;
 use crate::common::{from_cookie, from_name, to_cookie, to_name, Cookie, Timeouts};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LegacyWebElement {
+    pub id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Locator {
     pub using: Selector,
     pub value: String,
@@ -76,6 +81,10 @@ pub enum Command {
     DeleteCookies,
     #[serde(rename = "WebDriver:DismissAlert")]
     DismissAlert,
+    #[serde(rename = "WebDriver:ElementClear")]
+    ElementClear(LegacyWebElement),
+    #[serde(rename = "WebDriver:ElementClick")]
+    ElementClick(LegacyWebElement),
     #[serde(rename = "WebDriver:ExecuteAsyncScript")]
     ExecuteAsyncScript(Script),
     #[serde(rename = "WebDriver:ExecuteScript")]
@@ -84,12 +93,36 @@ pub enum Command {
     FindElement(Locator),
     #[serde(rename = "WebDriver:FindElements")]
     FindElements(Locator),
+    #[serde(rename = "WebDriver:FindElement")]
+    FindElementElement {
+        element: String,
+        using: Selector,
+        value: String,
+    },
+    #[serde(rename = "WebDriver:FindElements")]
+    FindElementElements {
+        element: String,
+        using: Selector,
+        value: String,
+    },
     #[serde(rename = "WebDriver:FullscreenWindow")]
     FullscreenWindow,
+    #[serde(rename = "WebDriver:GetActiveElement")]
+    GetActiveElement,
     #[serde(rename = "WebDriver:GetAlertText")]
     GetAlertText,
     #[serde(rename = "WebDriver:GetCookies")]
     GetCookies,
+    #[serde(rename = "WebDriver:GetElementAttribute")]
+    GetElementAttribute { id: String, name: String },
+    #[serde(rename = "WebDriver:GetElementProperty")]
+    GetElementProperty { id: String, name: String },
+    #[serde(rename = "WebDriver:GetElementRect")]
+    GetElementRect(LegacyWebElement),
+    #[serde(rename = "WebDriver:GetElementTagName")]
+    GetElementTagName(LegacyWebElement),
+    #[serde(rename = "WebDriver:GetElementText")]
+    GetElementText(LegacyWebElement),
     #[serde(rename = "WebDriver:GetTimeouts")]
     GetTimeouts,
     #[serde(rename = "WebDriver:GetWindowHandle")]
@@ -98,6 +131,16 @@ pub enum Command {
     GetWindowHandles,
     #[serde(rename = "WebDriver:GetWindowRect")]
     GetWindowRect,
+    #[serde(rename = "WebDriver:Back")]
+    GoBack,
+    #[serde(rename = "WebDriver:Forward")]
+    GoForward,
+    #[serde(rename = "WebDriver:IsElementDisplayed")]
+    IsDisplayed(LegacyWebElement),
+    #[serde(rename = "WebDriver:IsElementEnabled")]
+    IsEnabled(LegacyWebElement),
+    #[serde(rename = "WebDriver:IsElementSelected")]
+    IsSelected(LegacyWebElement),
     #[serde(rename = "WebDriver:MaximizeWindow")]
     MaximizeWindow,
     #[serde(rename = "WebDriver:MinimizeWindow")]
@@ -116,7 +159,7 @@ pub enum Command {
 mod tests {
     use super::*;
     use crate::common::Date;
-    use crate::test::assert_ser_de;
+    use crate::test::{assert_ser, assert_ser_de};
     use serde_json::json;
 
     #[test]
@@ -247,5 +290,17 @@ mod tests {
         let data = NewWindow { type_hint: None };
         let json = json!({"WebDriver:NewWindow": {}});
         assert_ser_de(&Command::NewWindow(data), json);
+    }
+
+    #[test]
+    fn test_json_command_as_struct() {
+        assert_ser(
+            &Command::FindElementElement {
+                element: "foo".into(),
+                using: Selector::XPath,
+                value: "bar".into(),
+            },
+            json!({"WebDriver:FindElement": {"element": "foo", "using": "xpath", "value": "bar" }}),
+        );
     }
 }

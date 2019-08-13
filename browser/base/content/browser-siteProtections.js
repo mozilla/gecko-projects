@@ -4,11 +4,11 @@
 
 /* eslint-env mozilla/browser-window */
 
-ChromeUtils.defineModuleGetter(
-  this,
-  "ContentBlockingAllowList",
-  "resource://gre/modules/ContentBlockingAllowList.jsm"
-);
+XPCOMUtils.defineLazyModuleGetters(this, {
+  ContentBlockingAllowList:
+    "resource://gre/modules/ContentBlockingAllowList.jsm",
+  ToolbarPanelHub: "resource://activity-stream/lib/ToolbarPanelHub.jsm",
+});
 
 XPCOMUtils.defineLazyServiceGetter(
   this,
@@ -28,6 +28,20 @@ var Fingerprinting = {
         "contentBlocking.fingerprintersView.blocked.label"
       ));
     },
+
+    get subViewTitleBlocking() {
+      delete this.subViewTitleBlocking;
+      return (this.subViewTitleBlocking = gNavigatorBundle.getString(
+        "protections.blocking.fingerprinters.title"
+      ));
+    },
+
+    get subViewTitleNotBlocking() {
+      delete this.subViewTitleNotBlocking;
+      return (this.subViewTitleNotBlocking = gNavigatorBundle.getString(
+        "protections.notBlocking.fingerprinters.title"
+      ));
+    },
   },
 
   init() {
@@ -36,9 +50,9 @@ var Fingerprinting = {
       "enabled",
       this.PREF_ENABLED,
       false,
-      () => this.updateCategoryLabel()
+      this.updateCategoryItem.bind(this)
     );
-    this.updateCategoryLabel();
+    this.updateCategoryItem();
   },
 
   get categoryItem() {
@@ -48,10 +62,14 @@ var Fingerprinting = {
     ));
   },
 
-  get categoryLabel() {
-    delete this.categoryLabel;
-    return (this.categoryLabel = document.getElementById(
-      "protections-popup-fingerprinters-state-label"
+  updateCategoryItem() {
+    this.categoryItem.classList.toggle("blocked", this.enabled);
+  },
+
+  get subView() {
+    delete this.subView;
+    return (this.subView = document.getElementById(
+      "protections-popup-fingerprintersView"
     ));
   },
 
@@ -60,22 +78,6 @@ var Fingerprinting = {
     return (this.subViewList = document.getElementById(
       "protections-popup-fingerprintersView-list"
     ));
-  },
-
-  updateCategoryLabel() {
-    let label;
-    if (this.enabled) {
-      label = gProtectionsHandler.showBlockedLabels
-        ? "contentBlocking.fingerprinters.blocking.label"
-        : null;
-    } else {
-      label = gProtectionsHandler.showAllowedLabels
-        ? "contentBlocking.fingerprinters.allowed.label"
-        : null;
-    }
-    this.categoryLabel.textContent = label
-      ? gNavigatorBundle.getString(label)
-      : "";
   },
 
   isBlocking(state) {
@@ -112,6 +114,12 @@ var Fingerprinting = {
 
     this.subViewList.textContent = "";
     this.subViewList.append(fragment);
+    this.subView.setAttribute(
+      "title",
+      this.enabled && !gProtectionsHandler.hasException
+        ? this.strings.subViewTitleBlocking
+        : this.strings.subViewTitleNotBlocking
+    );
   },
 
   _createListItem(origin, actions) {
@@ -132,23 +140,11 @@ var Fingerprinting = {
     // and overflows in our panel.
     listItem.tooltipText = uri.host;
 
-    let image = document.createXULElement("image");
-    image.className = "protections-popup-fingerprintersView-icon";
-    image.classList.toggle("allowed", isAllowed);
-    listItem.append(image);
-
     let label = document.createXULElement("label");
     label.value = uri.host;
     label.className = "protections-popup-list-host-label";
     label.setAttribute("crop", "end");
     listItem.append(label);
-
-    if (!isAllowed) {
-      let stateLabel = document.createXULElement("label");
-      stateLabel.value = this.strings.subViewBlocked;
-      stateLabel.className = "protections-popup-list-state-label";
-      listItem.append(stateLabel);
-    }
 
     return listItem;
   },
@@ -165,6 +161,20 @@ var Cryptomining = {
         "contentBlocking.cryptominersView.blocked.label"
       ));
     },
+
+    get subViewTitleBlocking() {
+      delete this.subViewTitleBlocking;
+      return (this.subViewTitleBlocking = gNavigatorBundle.getString(
+        "protections.blocking.cryptominers.title"
+      ));
+    },
+
+    get subViewTitleNotBlocking() {
+      delete this.subViewTitleNotBlocking;
+      return (this.subViewTitleNotBlocking = gNavigatorBundle.getString(
+        "protections.notBlocking.cryptominers.title"
+      ));
+    },
   },
 
   init() {
@@ -173,9 +183,9 @@ var Cryptomining = {
       "enabled",
       this.PREF_ENABLED,
       false,
-      () => this.updateCategoryLabel()
+      this.updateCategoryItem.bind(this)
     );
-    this.updateCategoryLabel();
+    this.updateCategoryItem();
   },
 
   get categoryItem() {
@@ -185,10 +195,14 @@ var Cryptomining = {
     ));
   },
 
-  get categoryLabel() {
-    delete this.categoryLabel;
-    return (this.categoryLabel = document.getElementById(
-      "protections-popup-cryptominers-state-label"
+  updateCategoryItem() {
+    this.categoryItem.classList.toggle("blocked", this.enabled);
+  },
+
+  get subView() {
+    delete this.subView;
+    return (this.subView = document.getElementById(
+      "protections-popup-cryptominersView"
     ));
   },
 
@@ -197,22 +211,6 @@ var Cryptomining = {
     return (this.subViewList = document.getElementById(
       "protections-popup-cryptominersView-list"
     ));
-  },
-
-  updateCategoryLabel() {
-    let label;
-    if (this.enabled) {
-      label = gProtectionsHandler.showBlockedLabels
-        ? "contentBlocking.cryptominers.blocking.label"
-        : null;
-    } else {
-      label = gProtectionsHandler.showAllowedLabels
-        ? "contentBlocking.cryptominers.allowed.label"
-        : null;
-    }
-    this.categoryLabel.textContent = label
-      ? gNavigatorBundle.getString(label)
-      : "";
   },
 
   isBlocking(state) {
@@ -247,6 +245,12 @@ var Cryptomining = {
 
     this.subViewList.textContent = "";
     this.subViewList.append(fragment);
+    this.subView.setAttribute(
+      "title",
+      this.enabled && !gProtectionsHandler.hasException
+        ? this.strings.subViewTitleBlocking
+        : this.strings.subViewTitleNotBlocking
+    );
   },
 
   _createListItem(origin, actions) {
@@ -267,23 +271,11 @@ var Cryptomining = {
     // and overflows in our panel.
     listItem.tooltipText = uri.host;
 
-    let image = document.createXULElement("image");
-    image.className = "protections-popup-cryptominersView-icon";
-    image.classList.toggle("allowed", isAllowed);
-    listItem.append(image);
-
     let label = document.createXULElement("label");
     label.value = uri.host;
     label.className = "protections-popup-list-host-label";
     label.setAttribute("crop", "end");
     listItem.append(label);
-
-    if (!isAllowed) {
-      let stateLabel = document.createXULElement("label");
-      stateLabel.value = this.strings.subViewBlocked;
-      stateLabel.className = "protections-popup-list-state-label";
-      listItem.append(stateLabel);
-    }
 
     return listItem;
   },
@@ -305,10 +297,10 @@ var TrackingProtection = {
     ));
   },
 
-  get categoryLabel() {
-    delete this.categoryLabel;
-    return (this.categoryLabel = document.getElementById(
-      "protections-popup-tracking-protection-state-label"
+  get subView() {
+    delete this.subView;
+    return (this.subView = document.getElementById(
+      "protections-popup-trackersView"
     ));
   },
 
@@ -331,6 +323,20 @@ var TrackingProtection = {
       delete this.subViewBlocked;
       return (this.subViewBlocked = gNavigatorBundle.getString(
         "contentBlocking.trackersView.blocked.label"
+      ));
+    },
+
+    get subViewTitleBlocking() {
+      delete this.subViewTitleBlocking;
+      return (this.subViewTitleBlocking = gNavigatorBundle.getString(
+        "protections.blocking.trackingContent.title"
+      ));
+    },
+
+    get subViewTitleNotBlocking() {
+      delete this.subViewTitleNotBlocking;
+      return (this.subViewTitleNotBlocking = gNavigatorBundle.getString(
+        "protections.notBlocking.trackingContent.title"
       ));
     },
   },
@@ -379,23 +385,7 @@ var TrackingProtection = {
     this.enabledInPrivateWindows = Services.prefs.getBoolPref(
       this.PREF_ENABLED_IN_PRIVATE_WINDOWS
     );
-    this.updateCategoryLabel();
-  },
-
-  updateCategoryLabel() {
-    let label;
-    if (this.enabled) {
-      label = gProtectionsHandler.showBlockedLabels
-        ? "contentBlocking.trackers.blocking.label"
-        : null;
-    } else {
-      label = gProtectionsHandler.showAllowedLabels
-        ? "contentBlocking.trackers.allowed.label"
-        : null;
-    }
-    this.categoryLabel.textContent = label
-      ? gNavigatorBundle.getString(label)
-      : "";
+    this.categoryItem.classList.toggle("blocked", this.enabled);
   },
 
   isBlocking(state) {
@@ -466,6 +456,12 @@ var TrackingProtection = {
     ) {
       this.subViewList.textContent = "";
       this.subViewList.append(fragment);
+      this.subView.setAttribute(
+        "title",
+        this.enabled && !gProtectionsHandler.hasException
+          ? this.strings.subViewTitleBlocking
+          : this.strings.subViewTitleNotBlocking
+      );
     }
   },
 
@@ -518,23 +514,11 @@ var TrackingProtection = {
     // and overflows in our panel.
     listItem.tooltipText = uri.host;
 
-    let image = document.createXULElement("image");
-    image.className = "protections-popup-trackersView-icon";
-    image.classList.toggle("allowed", isAllowed);
-    listItem.append(image);
-
     let label = document.createXULElement("label");
     label.value = uri.host;
     label.className = "protections-popup-list-host-label";
     label.setAttribute("crop", "end");
     listItem.append(label);
-
-    if (!isAllowed) {
-      let stateLabel = document.createXULElement("label");
-      stateLabel.value = this.strings.subViewBlocked;
-      stateLabel.className = "protections-popup-list-state-label";
-      listItem.append(stateLabel);
-    }
 
     return listItem;
   },
@@ -547,6 +531,7 @@ var ThirdPartyCookies = {
     // of the Preferences UI.
     Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN, // Block all third-party cookies
     Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER, // Block third-party cookies from trackers
+    Ci.nsICookieService.BEHAVIOR_REJECT, // Block all cookies
   ],
 
   get categoryItem() {
@@ -556,10 +541,17 @@ var ThirdPartyCookies = {
     ));
   },
 
-  get categoryLabel() {
-    delete this.categoryLabel;
-    return (this.categoryLabel = document.getElementById(
-      "protections-popup-cookies-state-label"
+  get subView() {
+    delete this.subView;
+    return (this.subView = document.getElementById(
+      "protections-popup-cookiesView"
+    ));
+  },
+
+  get subViewHeading() {
+    delete this.subViewHeading;
+    return (this.subViewHeading = document.getElementById(
+      "protections-popup-cookiesView-heading"
     ));
   },
 
@@ -578,10 +570,10 @@ var ThirdPartyCookies = {
       ));
     },
 
-    get subViewBlocked() {
-      delete this.subViewBlocked;
-      return (this.subViewBlocked = gNavigatorBundle.getString(
-        "contentBlocking.cookiesView.blocked.label"
+    get subViewTitleNotBlocking() {
+      delete this.subViewTitleNotBlocking;
+      return (this.subViewTitleNotBlocking = gNavigatorBundle.getString(
+        "protections.notBlocking.crossSiteTrackingCookies.title"
       ));
     },
   },
@@ -608,54 +600,66 @@ var ThirdPartyCookies = {
     }
   },
 
-  updateCategoryLabel() {
-    let label;
-    switch (this.behaviorPref) {
-      case Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN:
-        label = gProtectionsHandler.showBlockedLabels
-          ? "contentBlocking.cookies.blocking3rdParty.label"
-          : null;
-        break;
-      case Ci.nsICookieService.BEHAVIOR_REJECT:
-        label = gProtectionsHandler.showBlockedLabels
-          ? "contentBlocking.cookies.blockingAll.label"
-          : null;
-        break;
-      case Ci.nsICookieService.BEHAVIOR_LIMIT_FOREIGN:
-        label = gProtectionsHandler.showBlockedLabels
-          ? "contentBlocking.cookies.blockingUnvisited.label"
-          : null;
-        break;
-      case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER:
-        label = gProtectionsHandler.showBlockedLabels
-          ? "contentBlocking.cookies.blockingTrackers.label"
-          : null;
-        break;
-      default:
-        Cu.reportError(
-          `Error: Unknown cookieBehavior pref observed: ${this.behaviorPref}`
-        );
-      // fall through
-      case Ci.nsICookieService.BEHAVIOR_ACCEPT:
-        label = gProtectionsHandler.showAllowedLabels
-          ? "contentBlocking.cookies.allowed.label"
-          : null;
-        break;
-    }
-    this.categoryLabel.textContent = label
-      ? gNavigatorBundle.getString(label)
-      : "";
-  },
-
   init() {
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
       "behaviorPref",
       this.PREF_ENABLED,
       Ci.nsICookieService.BEHAVIOR_ACCEPT,
-      this.updateCategoryLabel.bind(this)
+      this.updateCategoryItem.bind(this)
     );
-    this.updateCategoryLabel();
+    this.updateCategoryItem();
+  },
+
+  get disabledCategoryLabel() {
+    delete this.disabledCategoryLabel;
+    return (this.disabledCategoryLabel = document.getElementById(
+      "protections-popup-cookies-category-label-disabled"
+    ));
+  },
+
+  get enabledCategoryLabel() {
+    delete this.enabledCategoryLabel;
+    return (this.enabledCategoryLabel = document.getElementById(
+      "protections-popup-cookies-category-label-enabled"
+    ));
+  },
+
+  updateCategoryItem() {
+    this.categoryItem.classList.toggle("blocked", this.enabled);
+
+    if (!this.enabled) {
+      this.disabledCategoryLabel.hidden = false;
+      this.enabledCategoryLabel.hidden = true;
+      return;
+    }
+
+    let label;
+    switch (this.behaviorPref) {
+      case Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN:
+        label = "contentBlocking.cookies.blocking3rdParty2.label";
+        break;
+      case Ci.nsICookieService.BEHAVIOR_REJECT:
+        label = "contentBlocking.cookies.blockingAll2.label";
+        break;
+      case Ci.nsICookieService.BEHAVIOR_LIMIT_FOREIGN:
+        label = "contentBlocking.cookies.blockingUnvisited2.label";
+        break;
+      case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER:
+        label = "contentBlocking.cookies.blockingTrackers3.label";
+        break;
+      default:
+        Cu.reportError(
+          `Error: Unknown cookieBehavior pref observed: ${this.behaviorPref}`
+        );
+        break;
+    }
+    this.enabledCategoryLabel.textContent = label
+      ? gNavigatorBundle.getString(label)
+      : "";
+
+    this.disabledCategoryLabel.hidden = true;
+    this.enabledCategoryLabel.hidden = false;
   },
 
   get enabled() {
@@ -685,30 +689,69 @@ var ThirdPartyCookies = {
     this.subViewList.textContent = "";
 
     for (let category of ["firstParty", "trackers", "thirdParty"]) {
+      let itemsToShow;
+      if (category == "trackers" && gProtectionsHandler.hasException) {
+        itemsToShow = categories[category];
+      } else {
+        itemsToShow = categories[category].filter(
+          info => !info.isAllowed || info.hasException
+        );
+      }
+
+      if (!itemsToShow.length) {
+        continue;
+      }
+
       let box = document.createXULElement("vbox");
       let label = document.createXULElement("label");
       label.className = "protections-popup-cookiesView-list-header";
       label.textContent = gNavigatorBundle.getString(
-        `contentBlocking.cookiesView.${category}.label`
+        `contentBlocking.cookiesView.${
+          category == "trackers" ? "trackers2" : category
+        }.label`
       );
       box.appendChild(label);
 
-      for (let info of categories[category]) {
+      for (let info of itemsToShow) {
         box.appendChild(this._createListItem(info));
-      }
-
-      // If the category is empty, add a label noting that to the user.
-      if (categories[category].length == 0) {
-        let emptyLabel = document.createXULElement("label");
-        emptyLabel.classList.add("protections-popup-empty-label");
-        emptyLabel.textContent = gNavigatorBundle.getString(
-          `contentBlocking.cookiesView.${category}.empty.label`
-        );
-        box.appendChild(emptyLabel);
       }
 
       this.subViewList.appendChild(box);
     }
+
+    this.subViewHeading.hidden = false;
+    if (!this.enabled || gProtectionsHandler.hasException) {
+      this.subView.setAttribute("title", this.strings.subViewTitleNotBlocking);
+      return;
+    }
+
+    let title;
+    switch (this.behaviorPref) {
+      case Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN:
+        title = "protections.blocking.cookies.3rdParty.title";
+        this.subViewHeading.hidden = true;
+        break;
+      case Ci.nsICookieService.BEHAVIOR_REJECT:
+        title = "protections.blocking.cookies.all.title";
+        this.subViewHeading.hidden = true;
+        break;
+      case Ci.nsICookieService.BEHAVIOR_LIMIT_FOREIGN:
+        title = "protections.blocking.cookies.unvisited.title";
+        this.subViewHeading.hidden = true;
+        break;
+      case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER:
+        title = "protections.blocking.cookies.trackers.title";
+        break;
+      default:
+        Cu.reportError(
+          `Error: Unknown cookieBehavior pref when updating subview: ${
+            this.behaviorPref
+          }`
+        );
+        break;
+    }
+
+    this.subView.setAttribute("title", gNavigatorBundle.getString(title));
   },
 
   _hasException(origin) {
@@ -848,15 +891,9 @@ var ThirdPartyCookies = {
   _createListItem({ origin, isAllowed, hasException }) {
     let listItem = document.createXULElement("hbox");
     listItem.className = "protections-popup-list-item";
-    listItem.classList.toggle("allowed", isAllowed);
     // Repeat the origin in the tooltip in case it's too long
     // and overflows in our panel.
     listItem.tooltipText = origin;
-
-    let image = document.createXULElement("image");
-    image.className = "protections-popup-cookiesView-icon";
-    image.classList.toggle("allowed", isAllowed);
-    listItem.append(image);
 
     let label = document.createXULElement("label");
     label.value = origin;
@@ -864,20 +901,21 @@ var ThirdPartyCookies = {
     label.setAttribute("crop", "end");
     listItem.append(label);
 
-    let stateLabel;
-    if (isAllowed && hasException) {
-      stateLabel = document.createXULElement("label");
-      stateLabel.value = this.strings.subViewAllowed;
-      stateLabel.className = "protections-popup-list-state-label";
-      listItem.append(stateLabel);
-    } else if (!isAllowed) {
-      stateLabel = document.createXULElement("label");
-      stateLabel.value = this.strings.subViewBlocked;
-      stateLabel.className = "protections-popup-list-state-label";
-      listItem.append(stateLabel);
-    }
-
     if (hasException) {
+      let stateLabel;
+      if (isAllowed) {
+        stateLabel = document.createXULElement("label");
+        stateLabel.value = this.strings.subViewAllowed;
+        stateLabel.className = "protections-popup-list-state-label";
+        listItem.append(stateLabel);
+        listItem.classList.toggle("allowed", true);
+      } else {
+        stateLabel = document.createXULElement("label");
+        stateLabel.value = this.strings.subViewBlocked;
+        stateLabel.className = "protections-popup-list-state-label";
+        listItem.append(stateLabel);
+      }
+
       let removeException = document.createXULElement("button");
       removeException.className = "identity-popup-permission-remove-button";
       removeException.tooltipText = gNavigatorBundle.getFormattedString(
@@ -891,7 +929,6 @@ var ThirdPartyCookies = {
           ? this.strings.subViewBlocked
           : this.strings.subViewAllowed;
         listItem.classList.toggle("allowed", !isAllowed);
-        image.classList.toggle("allowed", !isAllowed);
         removeException.hidden = true;
       });
       listItem.append(removeException);
@@ -906,7 +943,7 @@ var SocialTracking = {
   PREF_NOTIFICATION_UI_ENABLED: "privacy.socialtracking.notification.enabled",
   PREF_SESSION_PAGELOAD_MIN:
     "privacy.socialtracking.notification.session.pageload.min",
-  PREF_LAST_SEEN: "privacy.socialtracking.notification.lastSeen",
+  PREF_LAST_SHOWN: "privacy.socialtracking.notification.lastShown",
   PREF_PERIOD_MIN: "privacy.socialtracking.notification.period.min",
   PREF_COUNTER: "privacy.socialtracking.notification.counter",
   PREF_MAX: "privacy.socialtracking.notification.max",
@@ -916,6 +953,20 @@ var SocialTracking = {
       delete this.subViewBlocked;
       return (this.subViewBlocked = gNavigatorBundle.getString(
         "contentBlocking.fingerprintersView.blocked.label"
+      ));
+    },
+
+    get subViewTitleBlocking() {
+      delete this.subViewTitleBlocking;
+      return (this.subViewTitleBlocking = gNavigatorBundle.getString(
+        "protections.blocking.socialMediaTrackers.title"
+      ));
+    },
+
+    get subViewTitleNotBlocking() {
+      delete this.subViewTitleNotBlocking;
+      return (this.subViewTitleNotBlocking = gNavigatorBundle.getString(
+        "protections.notBlocking.socialMediaTrackers.title"
       ));
     },
   },
@@ -945,8 +996,10 @@ var SocialTracking = {
     );
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
-      "lastSeen",
-      this.PREF_LAST_SEEN
+      "lastShownMillisec",
+      this.PREF_LAST_SHOWN,
+      null,
+      str => parseInt(str)
     );
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
@@ -967,10 +1020,19 @@ var SocialTracking = {
   },
 
   isBlocking(state) {
-    return (
+    let cookieTrackerBlocked =
+      (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER) != 0;
+    let socialtrackingContentBlocked =
       (state &
         Ci.nsIWebProgressListener.STATE_BLOCKED_SOCIALTRACKING_CONTENT) !=
-      0
+      0;
+    let socialtrackingContentLoaded =
+      (state & Ci.nsIWebProgressListener.STATE_LOADED_SOCIALTRACKING_CONTENT) !=
+      0;
+    return (
+      this.enabled &&
+      ((socialtrackingContentLoaded && cookieTrackerBlocked) ||
+        socialtrackingContentBlocked)
     );
   },
 
@@ -993,10 +1055,10 @@ var SocialTracking = {
     ));
   },
 
-  get categoryLabel() {
-    delete this.categoryLabel;
-    return (this.categoryLabel = document.getElementById(
-      "protections-popup-socialblock-state-label"
+  get subView() {
+    delete this.subView;
+    return (this.subView = document.getElementById(
+      "protections-popup-socialblockView"
     ));
   },
 
@@ -1021,6 +1083,12 @@ var SocialTracking = {
 
     this.subViewList.textContent = "";
     this.subViewList.append(fragment);
+    this.subView.setAttribute(
+      "title",
+      this.enabled
+        ? this.strings.subViewTitleBlocking
+        : this.strings.subViewTitleNotBlocking
+    );
   },
 
   _createListItem(origin, actions) {
@@ -1050,7 +1118,7 @@ var SocialTracking = {
   },
 
   onBlocked() {
-    let now = Date.now();
+    let nowMillisec = Date.now();
     // The heuristics to show the pop-up are:
     //   0. a social media tracker is blocked
     //   1. user didn't disable notification UI by:
@@ -1063,14 +1131,14 @@ var SocialTracking = {
     if (
       !this.uiEnabled ||
       this.sessionPageLoad <= this.sessionPageLoadMin ||
-      now - this.lastSeen < this.periodMinMillisec ||
+      nowMillisec - this.lastShownMillisec < this.periodMinMillisec ||
       this.numNotifications >= this.maxNotifications ||
       this.currentPopup
     ) {
       return;
     }
 
-    Services.prefs.setIntPref(this.PREF_LAST_SEEN, now);
+    Services.prefs.setCharPref(this.PREF_LAST_SHOWN, nowMillisec.toString());
     Services.prefs.setIntPref(this.PREF_COUNTER, this.numNotifications + 1);
 
     let browser = gBrowser.selectedBrowser;
@@ -1157,10 +1225,6 @@ var gProtectionsHandler = {
   PREF_ANIMATIONS_ENABLED: "toolkit.cosmeticAnimations.enabled",
   PREF_REPORT_BREAKAGE_URL: "browser.contentblocking.reportBreakage.url",
   PREF_CB_CATEGORY: "browser.contentblocking.category",
-  PREF_SHOW_ALLOWED_LABELS:
-    "browser.contentblocking.control-center.ui.showAllowedLabels",
-  PREF_SHOW_BLOCKED_LABELS:
-    "browser.contentblocking.control-center.ui.showBlockedLabels",
 
   // smart getters
   get _protectionsPopup() {
@@ -1288,6 +1352,24 @@ var gProtectionsHandler = {
     return SocialTracking.sessionPageLoad;
   },
 
+  get noTrackersDetectedDescription() {
+    delete this.noTrackersDetectedDescription;
+    return (this.noTrackersDetectedDescription = document.getElementById(
+      "protections-popup-no-trackers-found-description"
+    ));
+  },
+
+  get _notBlockingWhyLink() {
+    delete this._notBlockingWhyLink;
+    return (this._notBlockingWhyLink = document.getElementById(
+      "protections-popup-not-blocking-section-why"
+    ));
+  },
+
+  get hasException() {
+    return this._protectionsPopup.hasAttribute("hasException");
+  },
+
   strings: {
     get appMenuTitle() {
       delete this.appMenuTitle;
@@ -1353,28 +1435,6 @@ var gProtectionsHandler = {
       "_protectionsPopupToastTimeout",
       "browser.protections_panel.toast.timeout",
       3000
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "showBlockedLabels",
-      this.PREF_SHOW_BLOCKED_LABELS,
-      false,
-      () => {
-        for (let blocker of this.blockers) {
-          blocker.updateCategoryLabel();
-        }
-      }
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "showAllowedLabels",
-      this.PREF_SHOW_ALLOWED_LABELS,
-      false,
-      () => {
-        for (let blocker of this.blockers) {
-          blocker.updateCategoryLabel();
-        }
-      }
     );
 
     for (let blocker of this.blockers) {
@@ -1501,6 +1561,17 @@ var gProtectionsHandler = {
   onPopupShown(event) {
     if (event.target == this._protectionsPopup) {
       window.addEventListener("focus", this, true);
+
+      // Add the "open" attribute to the tracking protection icon container
+      // for styling.
+      gIdentityHandler._trackingProtectionIconContainer.setAttribute(
+        "open",
+        "true"
+      );
+
+      // Insert the info message if needed. This will be shown once and then
+      // remain collapsed.
+      ToolbarPanelHub.insertProtectionPanelMessage(event);
     }
   },
 
@@ -1572,8 +1643,13 @@ var gProtectionsHandler = {
 
     // Don't deal with about:, file: etc.
     if (!ContentBlockingAllowList.canHandle(gBrowser.selectedBrowser)) {
+      // We hide the icon and thus avoid showing the doorhanger, since
+      // the information contained there would mostly be broken and/or
+      // irrelevant anyway.
+      gIdentityHandler._trackingProtectionIconContainer.hidden = true;
       return;
     }
+    gIdentityHandler._trackingProtectionIconContainer.hidden = false;
 
     // Check whether the user has added an exception for this site.
     let hasException = ContentBlockingAllowList.includes(
@@ -1602,6 +1678,7 @@ var gProtectionsHandler = {
 
     let anyDetected = false;
     let anyBlocking = false;
+    this.noTrackersDetectedDescription.hidden = false;
 
     for (let blocker of this.blockers) {
       // Store data on whether the blocker is activated in the current document for
@@ -1609,11 +1686,14 @@ var gProtectionsHandler = {
       // dialog should only be able to open in the currently selected tab and onSecurityChange
       // runs on tab switch, so we can avoid associating the data with the document directly.
       blocker.activated = blocker.isBlocking(event);
-      blocker.categoryItem.classList.toggle("blocked", blocker.enabled);
       let detected = blocker.isDetected(event);
       blocker.categoryItem.hidden = !detected;
       anyDetected = anyDetected || detected;
       anyBlocking = anyBlocking || blocker.activated;
+    }
+
+    if (anyDetected) {
+      this.noTrackersDetectedDescription.hidden = true;
     }
 
     // Check whether the user has added an exception for this site.
@@ -1751,6 +1831,13 @@ var gProtectionsHandler = {
       tpSwitch.toggleAttribute("enabled", currentlyEnabled);
     }
 
+    this._notBlockingWhyLink.setAttribute(
+      "tooltip",
+      currentlyEnabled
+        ? "protections-popup-not-blocking-why-etp-on-tooltip"
+        : "protections-popup-not-blocking-why-etp-off-tooltip"
+    );
+
     // Toggle the breakage link according to the current enable state.
     this.toggleBreakageLink();
 
@@ -1772,6 +1859,23 @@ var gProtectionsHandler = {
       "showdotindicator",
       !currentlyEnabled
     );
+
+    // Give the button an accessible label for screen readers.
+    if (currentlyEnabled) {
+      this._protectionsPopupTPSwitch.setAttribute(
+        "aria-label",
+        gNavigatorBundle.getFormattedString("protections.disableAriaLabel", [
+          host,
+        ])
+      );
+    } else {
+      this._protectionsPopupTPSwitch.setAttribute(
+        "aria-label",
+        gNavigatorBundle.getFormattedString("protections.enableAriaLabel", [
+          host,
+        ])
+      );
+    }
 
     // Update the tooltip of the blocked tracker counter.
     this.maybeUpdateEarliestRecordedDateTooltip();

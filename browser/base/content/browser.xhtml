@@ -100,6 +100,7 @@
   Services.scriptloader.loadSubScript("chrome://browser/content/tabbrowser.js", this);
   Services.scriptloader.loadSubScript("chrome://browser/content/tabbrowser-tab.js", this);
   Services.scriptloader.loadSubScript("chrome://browser/content/tabbrowser-tabs.js", this);
+  Services.scriptloader.loadSubScript("chrome://browser/content/places/places-menupopup.js", this);
   Services.scriptloader.loadSubScript("chrome://browser/content/search/autocomplete-popup.js", this);
   Services.scriptloader.loadSubScript("chrome://browser/content/search/searchbar.js", this);
 
@@ -268,7 +269,7 @@
            aria-labelledby="editBookmarkPanelTitle">
       <box class="panel-header">
         <label id="editBookmarkPanelTitle"/>
-        <toolbarbutton id="editBookmarkPanelInfoButton" oncommand="StarUI.toggleRecommendation();" >
+        <toolbarbutton id="editBookmarkPanelInfoButton" class="panel-info-button" oncommand="StarUI.toggleRecommendation();" >
           <image/>
         </toolbarbutton>
       </box>
@@ -968,12 +969,13 @@
               </box>
               <moz-input-box tooltip="aHTMLTooltip"
                              class="urlbar-input-box"
-                             flex="1">
+                             flex="1"
+                             role="combobox"
+                             aria-owns="urlbarView-results">
                 <html:input id="urlbar-scheme"
                             required="required"/>
                 <html:input id="urlbar-input"
                             anonid="input"
-                            role="combobox"
                             aria-controls="urlbarView-results"
                             aria-autocomplete="both"
                             inputmode="mozAwesomebar"
@@ -1203,6 +1205,7 @@
                            onpopupshowing="document.getElementById('PlacesToolbar')
                                                    ._placesView._onChevronPopupShowing(event);">
               <menupopup id="PlacesChevronPopup"
+                         is="places-popup"
                          placespopup="true"
                          tooltip="bhTooltip" popupsinherittooltip="true"
                          context="placesContext"/>
@@ -1251,6 +1254,7 @@
                      ondrop="PlacesMenuDNDHandler.onDrop(event);"
                      oncommand="BookmarkingUI.onCommand(event);">
         <menupopup id="BMB_bookmarksPopup"
+                   is="places-popup-arrow"
                    class="cui-widget-panel cui-widget-panelview cui-widget-panelWithFooter PanelUI-subView"
                    placespopup="true"
                    context="placesContext"
@@ -1279,6 +1283,7 @@
                 label="&personalbarCmd.label;"
                 container="true">
             <menupopup id="BMB_bookmarksToolbarPopup"
+                       is="places-popup"
                        placespopup="true"
                        context="placesContext"
                        onpopupshowing="if (!this.parentNode._placesView)
@@ -1298,6 +1303,7 @@
                 label="&bookmarksMenuButton.other.label;"
                 container="true">
             <menupopup id="BMB_unsortedBookmarksPopup"
+                       is="places-popup"
                        placespopup="true"
                        context="placesContext"
                        onpopupshowing="if (!this.parentNode._placesView)
@@ -1310,6 +1316,7 @@
                 hidden="true"
                 container="true">
             <menupopup id="BMB_mobileBookmarksPopup"
+                       is="places-popup"
                        placespopup="true"
                        context="placesContext"
                        onpopupshowing="if (!this.parentNode._placesView)

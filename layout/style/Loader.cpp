@@ -12,6 +12,7 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/SRILogHelper.h"
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/AutoRestore.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/Logging.h"
 #include "mozilla/MemoryReporting.h"
@@ -130,11 +131,103 @@ static const char* const gStateStrings[] = {
 
 namespace mozilla {
 
+class SheetLoadDataHashKey : public nsURIHashKey {
+ public:
+  typedef SheetLoadDataHashKey* KeyType;
+  typedef const SheetLoadDataHashKey* KeyTypePointer;
+
+  explicit SheetLoadDataHashKey(const SheetLoadDataHashKey* aKey)
+      : nsURIHashKey(aKey->mKey),
+        mPrincipal(aKey->mPrincipal),
+        mReferrerInfo(aKey->mReferrerInfo),
+        mCORSMode(aKey->mCORSMode),
+        mParsingMode(aKey->mParsingMode) {
+    MOZ_COUNT_CTOR(SheetLoadDataHashKey);
+  }
+
+  SheetLoadDataHashKey(nsIURI* aURI, nsIPrincipal* aPrincipal,
+                       nsIReferrerInfo* aReferrerInfo,
+                       CORSMode aCORSMode,
+                       css::SheetParsingMode aParsingMode)
+      : nsURIHashKey(aURI),
+        mPrincipal(aPrincipal),
+        mReferrerInfo(aReferrerInfo),
+        mCORSMode(aCORSMode),
+        mParsingMode(aParsingMode) {
+    MOZ_COUNT_CTOR(SheetLoadDataHashKey);
+  }
+
+  SheetLoadDataHashKey(SheetLoadDataHashKey&& toMove)
+      : nsURIHashKey(std::move(toMove)),
+        mPrincipal(std::move(toMove.mPrincipal)),
+        mReferrerInfo(std::move(toMove.mReferrerInfo)),
+        mCORSMode(std::move(toMove.mCORSMode)),
+        mParsingMode(std::move(toMove.mParsingMode)) {
+    MOZ_COUNT_CTOR(SheetLoadDataHashKey);
+  }
+
+  explicit SheetLoadDataHashKey(css::SheetLoadData* aLoadData);
+
+  ~SheetLoadDataHashKey() { MOZ_COUNT_DTOR(SheetLoadDataHashKey); }
+
+  SheetLoadDataHashKey* GetKey() const {
+    return const_cast<SheetLoadDataHashKey*>(this);
+  }
+  const SheetLoadDataHashKey* GetKeyPointer() const { return this; }
+
+  bool KeyEquals(const SheetLoadDataHashKey* aKey) const {
+    if (!nsURIHashKey::KeyEquals(aKey->mKey)) {
+      return false;
+    }
+
+    if (!mPrincipal != !aKey->mPrincipal) {
+      // One or the other has a principal, but not both... not equal
+      return false;
+    }
+
+    if (mCORSMode != aKey->mCORSMode) {
+      // Different CORS modes; we don't match
+      return false;
+    }
+
+    if (mParsingMode != aKey->mParsingMode) {
+      return false;
+    }
+
+    bool eq;
+    if (NS_FAILED(mReferrerInfo->Equals(aKey->mReferrerInfo, &eq)) || !eq) {
+      return false;
+    }
+
+    return !mPrincipal ||
+           (NS_SUCCEEDED(mPrincipal->Equals(aKey->mPrincipal, &eq)) && eq);
+  }
+
+  static const SheetLoadDataHashKey* KeyToPointer(SheetLoadDataHashKey* aKey) {
+    return aKey;
+  }
+  static PLDHashNumber HashKey(const SheetLoadDataHashKey* aKey) {
+    return nsURIHashKey::HashKey(aKey->mKey);
+  }
+
+  nsIURI* GetURI() const { return nsURIHashKey::GetKey(); }
+
+  enum { ALLOW_MEMMOVE = true };
+
+ protected:
+  nsCOMPtr<nsIPrincipal> mPrincipal;
+  nsCOMPtr<nsIReferrerInfo> mReferrerInfo;
+  CORSMode mCORSMode;
+  css::SheetParsingMode mParsingMode;
+};
+
+
 SheetLoadDataHashKey::SheetLoadDataHashKey(css::SheetLoadData* aLoadData)
     : nsURIHashKey(aLoadData->mURI),
       mPrincipal(aLoadData->mLoaderPrincipal),
+      mReferrerInfo(aLoadData->ReferrerInfo()),
       mCORSMode(aLoadData->mSheet->GetCORSMode()),
-      mReferrerInfo(aLoadData->ReferrerInfo()) {
+      mParsingMode(aLoadData->mSheet->ParsingMode()) {
   MOZ_COUNT_CTOR(SheetLoadDataHashKey);
 }
 }  // namespace mozilla
@@ -352,6 +445,16 @@ bool LoaderReusableStyleSheets::FindReusableStyleSheet(
   return false;
 }
 
+// A struct keeping alive various records of sheets that are loading, deferred,
+// or already loaded (the later one for caching purposes).
+struct Loader::Sheets {
+  nsBaseHashtable<SheetLoadDataHashKey, RefPtr<StyleSheet>, StyleSheet*>
+      mCompleteSheets;
+  // The SheetLoadData pointers below are weak references.
+  nsDataHashtable<SheetLoadDataHashKey, SheetLoadData*> mLoadingDatas;
+  nsDataHashtable<SheetLoadDataHashKey, SheetLoadData*> mPendingDatas;
+};
+
 /*************************
  * Loader Implementation *
  *************************/
@@ -362,10 +465,6 @@ Loader::Loader()
       mCompatMode(eCompatibility_FullStandards),
       mEnabled(true),
       mReporter(new ConsoleReportCollector())
-#ifdef DEBUG
-      ,
-      mSyncCallback(false)
-#endif
 {
 }
 
@@ -587,8 +686,7 @@ nsresult SheetLoadData::VerifySheetReadyToParse(nsresult aStatus,
     // we annotate each one linked to a valid owning element (node).
     if (net::UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(
             aStatus)) {
-      Document* doc = mLoader->GetDocument();
-      if (doc) {
+      if (Document* doc = mLoader->GetDocument()) {
         for (SheetLoadData* data = this; data; data = data->mNext) {
           // mOwningElement may be null but AddBlockTrackingNode can cope
           nsCOMPtr<nsIContent> content =
@@ -843,7 +941,8 @@ nsresult Loader::CreateSheet(
     css::SheetParsingMode aParsingMode, CORSMode aCORSMode,
     nsIReferrerInfo* aLoadingReferrerInfo, const nsAString& aIntegrity,
     bool aSyncLoad, StyleSheetState& aSheetState, RefPtr<StyleSheet>* aSheet) {
-  LOG(("css::Loader::CreateSheet(%s)", aURI ? aURI->GetSpecOrDefault().get() : "inline"));
+  LOG(("css::Loader::CreateSheet(%s)",
+       aURI ? aURI->GetSpecOrDefault().get() : "inline"));
   MOZ_ASSERT(aSheet, "Null out param!");
 
   if (!mSheets) {
@@ -871,8 +970,8 @@ nsresult Loader::CreateSheet(
     bool fromCompleteSheets = false;
     if (!sheet) {
       // Then our per-document complete sheets.
-      SheetLoadDataHashKey key(aURI, aLoaderPrincipal, aCORSMode,
-                               aLoadingReferrerInfo);
+      SheetLoadDataHashKey key(aURI, aLoaderPrincipal, aLoadingReferrerInfo,
+                               aCORSMode, aParsingMode);
 
       StyleSheet* completeSheet = nullptr;
       mSheets->mCompleteSheets.Get(&key, &completeSheet);
@@ -885,20 +984,19 @@ nsresult Loader::CreateSheet(
     if (sheet) {
       // This sheet came from the XUL cache or our per-document hashtable; it
       // better be a complete sheet.
-      NS_ASSERTION(sheet->IsComplete(),
-                   "Sheet thinks it's not complete while we think it is");
+      MOZ_ASSERT(sheet->IsComplete(),
+                 "Sheet thinks it's not complete while we think it is");
+      MOZ_ASSERT(sheet->ParsingMode() == aParsingMode);
 
       // Make sure it hasn't been forced to have a unique inner;
       // that is an indication that its rules have been exposed to
       // CSSOM and so we can't use it.
       //
       // Similarly, if the sheet doesn't have the right parsing mode just bail.
-      if (sheet->HasForcedUniqueInner() ||
-          sheet->ParsingMode() != aParsingMode) {
-        LOG(
-            ("  Not cloning completed sheet %p because it has a "
-             "forced unique inner (%d) or the wrong parsing mode",
-             sheet.get(), sheet->HasForcedUniqueInner()));
+      if (sheet->HasForcedUniqueInner()) {
+        LOG(("  Not cloning completed sheet %p because it has a "
+             "forced unique inner",
+             sheet.get()));
         sheet = nullptr;
         fromCompleteSheets = false;
       }
@@ -908,8 +1006,8 @@ nsresult Loader::CreateSheet(
     if (!sheet && !aSyncLoad) {
       aSheetState = eSheetLoading;
       SheetLoadData* loadData = nullptr;
-      SheetLoadDataHashKey key(aURI, aLoaderPrincipal, aCORSMode,
-                               aLoadingReferrerInfo);
+      SheetLoadDataHashKey key(aURI, aLoaderPrincipal, aLoadingReferrerInfo,
+                               aCORSMode, aParsingMode);
       mSheets->mLoadingDatas.Get(&key, &loadData);
       if (loadData) {
         sheet = loadData->mSheet;
@@ -965,8 +1063,8 @@ nsresult Loader::CreateSheet(
         // anyone.  Replace it in the cache, so that if our CSSOM is
         // later modified we don't end up with two copies of our inner
         // hanging around.
-        SheetLoadDataHashKey key(aURI, aLoaderPrincipal, aCORSMode,
-                                 aLoadingReferrerInfo);
+        SheetLoadDataHashKey key(aURI, aLoaderPrincipal, aLoadingReferrerInfo,
+                                 aCORSMode, aParsingMode);
         NS_ASSERTION((*aSheet)->IsComplete(),
                      "Should only be caching complete sheets");
         mSheets->mCompleteSheets.Put(&key, *aSheet);
@@ -1357,7 +1455,9 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
 
     cookieSettings = mDocument->CookieSettings();
   }
+
 #ifdef DEBUG
+  AutoRestore<bool> syncCallbackGuard(mSyncCallback);
   mSyncCallback = true;
 #endif
 
@@ -1401,9 +1501,6 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
   }
 
   if (NS_FAILED(rv)) {
-#ifdef DEBUG
-    mSyncCallback = false;
-#endif
     LOG_ERROR(("  Failed to create channel"));
     SheetComplete(aLoadData, rv);
     return rv;
@@ -1503,10 +1600,6 @@ nsresult Loader::LoadSheet(SheetLoadData* aLoadData,
   }
 
   rv = channel->AsyncOpen(streamLoader);
-
-#ifdef DEBUG
-  mSyncCallback = false;
-#endif
 
   if (NS_FAILED(rv)) {
     LOG_ERROR(("  Failed to create stream loader"));
@@ -2227,9 +2320,7 @@ nsresult Loader::PostLoadEvent(nsIURI* aURI, StyleSheet* aSheet,
       aURI, aSheet, false, aElement, aWasAlternate, aMediaMatched, aObserver,
       nullptr, aReferrerInfo, mDocument);
 
-  if (!mPostedEvents.AppendElement(evt)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  mPostedEvents.AppendElement(evt);
 
   nsresult rv;
   RefPtr<SheetLoadData> runnable(evt);

@@ -690,15 +690,15 @@ struct JSRuntime {
   js::WriteOnceData<js::PropertyName*> emptyString;
 
  private:
-  js::MainThreadData<js::FreeOp*> defaultFreeOp_;
+  js::MainThreadData<JSFreeOp*> defaultFreeOp_;
 
  public:
-  js::FreeOp* defaultFreeOp() {
+  JSFreeOp* defaultFreeOp() {
     MOZ_ASSERT(defaultFreeOp_);
     return defaultFreeOp_;
   }
 
-#if !EXPOSE_INTL_API
+#if !ENABLE_INTL_API
   /* Number localization, used by jsnum.cpp. */
   js::WriteOnceData<const char*> thousandsSeparator;
   js::WriteOnceData<const char*> decimalSeparator;

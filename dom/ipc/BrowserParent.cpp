@@ -651,13 +651,13 @@ mozilla::ipc::IPCResult BrowserParent::RecvEnsureLayersConnected(
 
 mozilla::ipc::IPCResult BrowserParent::Recv__delete__() {
   MOZ_RELEASE_ASSERT(XRE_IsParentProcess());
-  ContentParent::UnregisterRemoteFrame(mTabId, Manager()->ChildID(),
-                                       mMarkedDestroying);
-
+  Manager()->NotifyTabDestroyed(mTabId, mMarkedDestroying);
   return IPC_OK();
 }
 
 void BrowserParent::ActorDestroy(ActorDestroyReason why) {
+  ContentProcessManager::GetSingleton()->UnregisterRemoteFrame(mTabId);
+
   if (mRemoteLayerTreeOwner.IsInitialized()) {
     // It's important to unmap layers after the remote browser has been
     // destroyed, otherwise it may still send messages to the compositor which
@@ -1236,31 +1236,32 @@ IPCResult BrowserParent::RecvIndexedDBPermissionRequest(
   return IPC_OK();
 }
 
-IPCResult BrowserParent::RecvPWindowGlobalConstructor(
-    PWindowGlobalParent* aActor, const WindowGlobalInit& aInit) {
-  static_cast<WindowGlobalParent*>(aActor)->Init(aInit);
-  return IPC_OK();
-}
-
-PWindowGlobalParent* BrowserParent::AllocPWindowGlobalParent(
+IPCResult BrowserParent::RecvNewWindowGlobal(
+    ManagedEndpoint<PWindowGlobalParent>&& aEndpoint,
     const WindowGlobalInit& aInit) {
-  // Reference freed in DeallocPWindowGlobalParent.
-  return do_AddRef(new WindowGlobalParent(aInit, /* inproc */ false)).take();
-}
+  // Construct our new WindowGlobalParent, bind, and initialize it.
+  auto wgp = MakeRefPtr<WindowGlobalParent>(aInit, /* inproc */ false);
 
-bool BrowserParent::DeallocPWindowGlobalParent(PWindowGlobalParent* aActor) {
-  // Free reference from AllocPWindowGlobalParent.
-  static_cast<WindowGlobalParent*>(aActor)->Release();
-  return true;
+  BindPWindowGlobalEndpoint(std::move(aEndpoint), wgp);
+  wgp->Init(aInit);
+  return IPC_OK();
 }
 
 IPCResult BrowserParent::RecvPBrowserBridgeConstructor(
     PBrowserBridgeParent* aActor, const nsString& aName,
     const nsString& aRemoteType, BrowsingContext* aBrowsingContext,
     const uint32_t& aChromeFlags, const TabId& aTabId) {
+  // The initial about:blank document loaded in the new iframe will have a newly
+  // created null principal. This is done in the parent process so we don't have
+  // to trust a principal from content.
+  nsCOMPtr<nsIPrincipal> initialPrincipal =
+      NullPrincipal::CreateWithInheritedAttributes(OriginAttributesRef(),
+                                                   /* isFirstParty */ false);
+  WindowGlobalInit windowInit = WindowGlobalActor::AboutBlankInitializer(
+      aBrowsingContext, initialPrincipal);
+
   nsresult rv = static_cast<BrowserBridgeParent*>(aActor)->Init(
-      aName, aRemoteType, CanonicalBrowsingContext::Cast(aBrowsingContext),
-      aChromeFlags, aTabId);
+      aName, aRemoteType, windowInit, aChromeFlags, aTabId);
   if (NS_FAILED(rv)) {
     return IPC_FAIL(this, "Failed to construct BrowserBridgeParent");
   }

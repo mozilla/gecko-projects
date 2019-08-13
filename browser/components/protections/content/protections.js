@@ -7,6 +7,11 @@
 import LockwiseCard from "./lockwise-card.js";
 import MonitorCard from "./monitor-card.js";
 
+// We need to send the close telemetry before unload while we still have a connection to RPM.
+window.addEventListener("beforeunload", () => {
+  document.sendTelemetryEvent("close", "protection_report");
+});
+
 document.addEventListener("DOMContentLoaded", e => {
   let todayInMs = Date.now();
   let weekAgoInMs = todayInMs - 7 * 24 * 60 * 60 * 1000;
@@ -49,6 +54,21 @@ document.addEventListener("DOMContentLoaded", e => {
     );
   }
 
+  let legend = document.getElementById("legend");
+  legend.style.gridTemplateAreas =
+    "'social cookie tracker fingerprinter cryptominer'";
+
+  document.sendTelemetryEvent = (action, object) => {
+    // eslint-disable-next-line no-undef
+    // eslint-disable-next-line no-undef
+    RPMRecordTelemetryEvent("security.ui.protections", action, object, "", {
+      category: cbCategory,
+    });
+  };
+
+  // Send telemetry on arriving and closing this page
+  document.sendTelemetryEvent("show", "protection_report");
+
   let createGraph = data => {
     // All of our dates are recorded as 00:00 GMT, add 12 hours to the timestamp
     // to ensure we display the correct date no matter the user's location.
@@ -86,6 +106,8 @@ document.addEventListener("DOMContentLoaded", e => {
 
       let bar = document.createElement("div");
       bar.className = "graph-bar";
+      let innerBar = document.createElement("div");
+      innerBar.className = "graph-wrapper-bar";
       if (data[dateString]) {
         let content = data[dateString];
         let count = document.createElement("div");
@@ -102,14 +124,16 @@ document.addEventListener("DOMContentLoaded", e => {
             div.className = `${type}-bar inner-bar`;
             div.setAttribute("data-type", type);
             div.style.height = `${dataHeight}%`;
+            div.setAttribute("data-l10n-id", `bar-tooltip-${type}`);
             weekTypeCounts[type] += content[type];
-            bar.appendChild(div);
+            innerBar.appendChild(div);
           }
         }
       } else {
         // There were no content blocking events on this day.
         bar.classList.add("empty");
       }
+      bar.appendChild(innerBar);
       graph.prepend(bar);
       let weekSummary = document.getElementById("graph-week-summary");
       weekSummary.setAttribute(
@@ -117,12 +141,6 @@ document.addEventListener("DOMContentLoaded", e => {
         JSON.stringify({ count: weekCount })
       );
       weekSummary.setAttribute("data-l10n-id", "graph-week-summary");
-
-      // Set the total number of each type of tracker on the tabs
-      for (let type of dataTypes) {
-        document.querySelector(`label[data-type=${type}]`).textContent =
-          weekTypeCounts[type];
-      }
 
       let label = document.createElement("span");
       label.className = "column-label";
@@ -134,35 +152,85 @@ document.addEventListener("DOMContentLoaded", e => {
       graph.append(label);
       date.setDate(date.getDate() - 1);
     }
+    // Set the total number of each type of tracker on the tabs as well as their
+    // "Learn More" links
+    for (let type of dataTypes) {
+      document.querySelector(`label[data-type=${type}]`).textContent =
+        weekTypeCounts[type];
+      const learnMoreLink = document.getElementById(`${type}-link`);
+      learnMoreLink.href = RPMGetFormatURLPref(
+        `browser.contentblocking.report.${type}.url`
+      );
+    }
+
+    // Hide the trackers tab if the user is in standard and
+    // has no recorded trackers blocked.
+    if (weekTypeCounts.tracker == 0 && cbCategory == "standard") {
+      legend.style.gridTemplateAreas = legend.style.gridTemplateAreas.replace(
+        "tracker",
+        ""
+      );
+      let radio = document.getElementById("tab-tracker");
+      radio.setAttribute("disabled", true);
+      document.querySelector("#tab-tracker ~ label").style.display = "none";
+    }
+    let socialEnabled = RPMGetBoolPref(
+      "privacy.socialtracking.block_cookies.enabled",
+      false
+    );
+
+    if (weekTypeCounts.social == 0 && !socialEnabled) {
+      legend.style.gridTemplateAreas = legend.style.gridTemplateAreas.replace(
+        "social",
+        ""
+      );
+      let radio = document.getElementById("tab-social");
+      radio.setAttribute("disabled", true);
+      document.querySelector("#tab-social ~ label").style.display = "none";
+    }
+
+    let firstRadio = document.querySelector("input:not(:disabled)");
+    firstRadio.checked = true;
+    document.body.setAttribute("focuseddatatype", firstRadio.dataset.type);
 
     addListeners();
   };
 
   let addListeners = () => {
     let wrapper = document.querySelector(".body-wrapper");
-    wrapper.addEventListener("mouseover", ev => {
-      if (ev.originalTarget.dataset) {
-        wrapper.classList.add("hover-" + ev.originalTarget.dataset.type);
-      }
-    });
-
-    wrapper.addEventListener("mouseout", ev => {
-      if (ev.originalTarget.dataset) {
-        wrapper.classList.remove("hover-" + ev.originalTarget.dataset.type);
-      }
-    });
-
-    wrapper.addEventListener("click", ev => {
+    let triggerTabClick = ev => {
       if (ev.originalTarget.dataset.type) {
         document.getElementById(`tab-${ev.target.dataset.type}`).click();
       }
-    });
+    };
+
+    let triggerTabFocus = ev => {
+      if (ev.originalTarget.dataset) {
+        wrapper.classList.add("hover-" + ev.originalTarget.dataset.type);
+      }
+    };
+
+    let triggerTabBlur = ev => {
+      if (ev.originalTarget.dataset) {
+        wrapper.classList.remove("hover-" + ev.originalTarget.dataset.type);
+      }
+    };
+    wrapper.addEventListener("mouseout", triggerTabBlur);
+    wrapper.addEventListener("mouseover", triggerTabFocus);
+    wrapper.addEventListener("click", triggerTabClick);
 
     // Change the class on the body to change the color variable.
     let radios = document.querySelectorAll("#legend input");
     for (let radio of radios) {
       radio.addEventListener("change", ev => {
         document.body.setAttribute("focuseddatatype", ev.target.dataset.type);
+      });
+      radio.addEventListener("focus", ev => {
+        wrapper.classList.add("hover-" + ev.originalTarget.dataset.type);
+        document.body.setAttribute("focuseddatatype", ev.target.dataset.type);
+      });
+      radio.addEventListener("blur", ev => {
+        wrapper.classList.remove("hover-" + ev.originalTarget.dataset.type);
       });
     }
   };

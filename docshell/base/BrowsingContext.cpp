@@ -133,13 +133,13 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
   // using transactions to set them, as we haven't been attached yet.
   context->mName = aName;
   context->mOpenerId = aOpener ? aOpener->Id() : 0;
-  context->mCrossOriginPolicy = nsILoadInfo::CROSS_ORIGIN_POLICY_NULL;
-  context->mInheritedCrossOriginPolicy = nsILoadInfo::CROSS_ORIGIN_POLICY_NULL;
+  context->mEmbedderPolicy = nsILoadInfo::EMBEDDER_POLICY_NULL;
 
   BrowsingContext* inherit = aParent ? aParent : aOpener;
   if (inherit) {
     context->mOpenerPolicy = inherit->mOpenerPolicy;
-    context->mInheritedCrossOriginPolicy = inherit->mCrossOriginPolicy;
+    // CORPP 3.1.3 https://mikewest.github.io/corpp/#integration-html
+    context->mEmbedderPolicy = inherit->mEmbedderPolicy;
   }
 
   Register(context);
@@ -206,7 +206,7 @@ BrowsingContext::BrowsingContext(BrowsingContext* aParent,
 void BrowsingContext::SetDocShell(nsIDocShell* aDocShell) {
   // XXX(nika): We should communicate that we are now an active BrowsingContext
   // process to the parent & do other validation here.
-  MOZ_RELEASE_ASSERT(nsDocShell::Cast(aDocShell)->GetBrowsingContext() == this);
+  MOZ_RELEASE_ASSERT(aDocShell->GetBrowsingContext() == this);
   mDocShell = aDocShell;
   mIsInProcess = true;
 }
@@ -232,8 +232,7 @@ void BrowsingContext::SetEmbedderElement(Element* aEmbedder) {
                             "cannot be in bfcache");
 
       RefPtr<BrowsingContext> kungFuDeathGrip(this);
-      RefPtr<BrowsingContext> newParent;
-      container->GetBrowsingContext(getter_AddRefs(newParent));
+      RefPtr<BrowsingContext> newParent(container->GetBrowsingContext());
       mParent->mChildren.RemoveElement(this);
       if (newParent) {
         newParent->mChildren.AppendElement(this);
@@ -555,8 +554,7 @@ bool BrowsingContext::CanAccess(BrowsingContext* aTarget,
 
   // A frame can navigate any frame with a same-origin ancestor.
   for (BrowsingContext* bc = aTarget; bc; bc = bc->GetParent()) {
-    if (bc->mDocShell &&
-        nsDocShell::ValidateOrigin(mDocShell, bc->mDocShell)) {
+    if (bc->mDocShell && nsDocShell::ValidateOrigin(mDocShell, bc->mDocShell)) {
       return true;
     }
   }
@@ -852,57 +850,72 @@ void BrowsingContext::PostMessageMoz(JSContext* aCx,
 }
 
 void BrowsingContext::Transaction::Commit(BrowsingContext* aBrowsingContext) {
+  if (!Validate(aBrowsingContext, nullptr)) {
+    MOZ_CRASH("Cannot commit invalid BrowsingContext transaction");
+  }
+
   if (XRE_IsContentProcess()) {
+    ContentChild* cc = ContentChild::GetSingleton();
+
     // Increment the field epoch for fields affected by this transaction. We
     // only need to do this in content.
-#define MOZ_BC_FIELD_RACY(name, ...)          \
-  if (m##name) {                              \
-    aBrowsingContext->mFieldEpochs.m##name++; \
+    uint64_t epoch = cc->NextBrowsingContextFieldEpoch();
+#define MOZ_BC_FIELD(name, ...)             \
+  if (m##name) {                            \
+    aBrowsingContext->mEpochs.name = epoch; \
   }
-#define MOZ_BC_FIELD(...) /* nothing */
 #include "mozilla/dom/BrowsingContextFieldList.h"
 
-    ContentChild* cc = ContentChild::GetSingleton();
-    cc->SendCommitBrowsingContextTransaction(aBrowsingContext, *this,
-                                             aBrowsingContext->mFieldEpochs);
+    cc->SendCommitBrowsingContextTransaction(aBrowsingContext, *this, epoch);
   } else {
     MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess());
 
     aBrowsingContext->Group()->EachParent([&](ContentParent* aParent) {
-      const FieldEpochs& childEpochs =
-          aBrowsingContext->Canonical()->GetFieldEpochsForChild(aParent);
       Unused << aParent->SendCommitBrowsingContextTransaction(
-          aBrowsingContext, *this, childEpochs);
+          aBrowsingContext, *this, aParent->GetBrowsingContextFieldEpoch());
     });
   }
 
-  Apply(aBrowsingContext, nullptr);
+  Apply(aBrowsingContext);
+}
+bool BrowsingContext::Transaction::Validate(BrowsingContext* aBrowsingContext,
+                                            ContentParent* aSource) {
+#define MOZ_BC_FIELD(name, ...)                                        \
+  if (m##name && !aBrowsingContext->MaySet##name(*m##name, aSource)) { \
+    NS_WARNING("Invalid attempt to set BC field " #name);              \
+    return false;                                                      \
+  }
+#include "mozilla/dom/BrowsingContextFieldList.h"
+
+  mValidated = true;
+  return true;
 }
 
-void BrowsingContext::Transaction::Apply(BrowsingContext* aBrowsingContext,
-                                         ContentParent* aSource,
-                                         const FieldEpochs* aEpochs) {
-  // Filter out racy fields which have been updated in this process since this
-  // transaction was committed in the parent. This should only ever occur in the
-  // content process.
-  if (aEpochs) {
-    MOZ_ASSERT(XRE_IsContentProcess());
-#define MOZ_BC_FIELD_RACY(name, ...)                                 \
-  if (m##name) {                                                     \
-    if (aEpochs->m##name < aBrowsingContext->mFieldEpochs.m##name) { \
-      m##name.reset();                                               \
-    }                                                                \
-  }
-#define MOZ_BC_FIELD(...) /* nothing */
-#include "mozilla/dom/BrowsingContextFieldList.h"
-  }
+bool BrowsingContext::Transaction::Validate(BrowsingContext* aBrowsingContext,
+                                            ContentParent* aSource,
+                                            uint64_t aEpoch) {
+  MOZ_DIAGNOSTIC_ASSERT(XRE_IsContentProcess(),
+                        "Should only be called in content process");
 
-#define MOZ_BC_FIELD(name, ...)                         \
-  if (m##name) {                                        \
-    aBrowsingContext->WillSet##name(*m##name, aSource); \
-    aBrowsingContext->m##name = std::move(*m##name);    \
-    aBrowsingContext->DidSet##name(aSource);            \
-    m##name.reset();                                    \
+  // Clear fields which are obsoleted by the epoch.
+#define MOZ_BC_FIELD(name, ...)                             \
+  if (m##name && aBrowsingContext->mEpochs.name > aEpoch) { \
+    m##name.reset();                                        \
+  }
+#include "mozilla/dom/BrowsingContextFieldList.h"
+
+  return Validate(aBrowsingContext, aSource);
+}
+
+void BrowsingContext::Transaction::Apply(BrowsingContext* aBrowsingContext) {
+  MOZ_RELEASE_ASSERT(mValidated,
+                     "Must validate BrowsingContext Transaction before Apply");
+
+#define MOZ_BC_FIELD(name, ...)                      \
+  if (m##name) {                                     \
+    aBrowsingContext->m##name = std::move(*m##name); \
+    aBrowsingContext->DidSet##name();                \
+    m##name.reset();                                 \
   }
 #include "mozilla/dom/BrowsingContextFieldList.h"
 }
@@ -969,7 +982,7 @@ void BrowsingContext::StartDelayedAutoplayMediaComponents() {
   mDocShell->StartDelayedAutoplayMediaComponents();
 }
 
-void BrowsingContext::DidSetIsActivatedByUserGesture(ContentParent* aSource) {
+void BrowsingContext::DidSetIsActivatedByUserGesture() {
   MOZ_ASSERT(!mParent, "Set user activation flag on non top-level context!");
   USER_ACTIVATION_LOG(
       "Set user gesture activation %d for %s browsing context 0x%08" PRIx64,
@@ -1044,6 +1057,10 @@ bool IPDLParamTraits<dom::BrowsingContext*>::Read(
 void IPDLParamTraits<dom::BrowsingContext::Transaction>::Write(
     IPC::Message* aMessage, IProtocol* aActor,
     const dom::BrowsingContext::Transaction& aTransaction) {
+  MOZ_RELEASE_ASSERT(
+      aTransaction.mValidated,
+      "Must validate BrowsingContext Transaction before sending");
+
 #define MOZ_BC_FIELD(name, ...) \
   WriteIPDLParam(aMessage, aActor, aTransaction.m##name);
 #include "mozilla/dom/BrowsingContextFieldList.h"
@@ -1052,33 +1069,14 @@ void IPDLParamTraits<dom::BrowsingContext::Transaction>::Write(
 bool IPDLParamTraits<dom::BrowsingContext::Transaction>::Read(
     const IPC::Message* aMessage, PickleIterator* aIterator, IProtocol* aActor,
     dom::BrowsingContext::Transaction* aTransaction) {
+  aTransaction->mValidated = false;
+
 #define MOZ_BC_FIELD(name, ...)                                              \
   if (!ReadIPDLParam(aMessage, aIterator, aActor, &aTransaction->m##name)) { \
     return false;                                                            \
   }
 #include "mozilla/dom/BrowsingContextFieldList.h"
 
-  return true;
-}
-
-void IPDLParamTraits<dom::BrowsingContext::FieldEpochs>::Write(
-    IPC::Message* aMessage, IProtocol* aActor,
-    const dom::BrowsingContext::FieldEpochs& aEpochs) {
-#define MOZ_BC_FIELD_RACY(name, ...) \
-  WriteIPDLParam(aMessage, aActor, aEpochs.m##name);
-#define MOZ_BC_FIELD(...) /* nothing */
-#include "mozilla/dom/BrowsingContextFieldList.h"
-}
-
-bool IPDLParamTraits<dom::BrowsingContext::FieldEpochs>::Read(
-    const IPC::Message* aMessage, PickleIterator* aIterator, IProtocol* aActor,
-    dom::BrowsingContext::FieldEpochs* aEpochs) {
-#define MOZ_BC_FIELD_RACY(name, ...)                                    \
-  if (!ReadIPDLParam(aMessage, aIterator, aActor, &aEpochs->m##name)) { \
-    return false;                                                       \
-  }
-#define MOZ_BC_FIELD(...) /* nothing */
-#include "mozilla/dom/BrowsingContextFieldList.h"
   return true;
 }
 
