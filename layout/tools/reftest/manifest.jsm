@@ -461,6 +461,8 @@ function BuildConditionSandbox(aURL) {
     sandbox.retainedDisplayList =
       prefs.getBoolPref("layout.display-list.retain");
 
+    sandbox.usesOverlayScrollbars = g.windowUtils.usesOverlayScrollbars;
+
     // Shortcuts for widget toolkits.
     sandbox.Android = xr.OS == "Android";
     sandbox.cocoaWidget = xr.widgetToolkit == "cocoa";
@@ -532,7 +534,7 @@ sandbox.compareRetainedDisplayLists = g.compareRetainedDisplayLists;
     sandbox.windowsDefaultTheme = g.containingWindow.matchMedia("(-moz-windows-default-theme)").matches;
 
     try {
-        sandbox.nativeThemePref = !prefs.getBoolPref("mozilla.widget.disable-native-theme");
+        sandbox.nativeThemePref = !prefs.getBoolPref("widget.disable-native-theme");
     } catch (e) {
         sandbox.nativeThemePref = true;
     }

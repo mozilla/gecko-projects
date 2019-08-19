@@ -29,6 +29,17 @@ ChromeUtils.defineModuleGetter(
   "Services",
   "resource://gre/modules/Services.jsm"
 );
+ChromeUtils.defineModuleGetter(
+  this,
+  "UIState",
+  "resource://services-sync/UIState.jsm"
+);
+
+ChromeUtils.defineModuleGetter(
+  this,
+  "PlacesUtils",
+  "resource://gre/modules/PlacesUtils.jsm"
+);
 
 XPCOMUtils.defineLazyGetter(this, "log", () => {
   return LoginHelper.createLogger("AboutLoginsParent");
@@ -42,6 +53,9 @@ XPCOMUtils.defineLazyPreferenceGetter(
 
 const ABOUT_LOGINS_ORIGIN = "about:logins";
 const MASTER_PASSWORD_NOTIFICATION_ID = "master-password-login-required";
+const PASSWORD_SYNC_NOTIFICATION_ID = "enable-password-sync";
+
+const HIDE_MOBILE_FOOTER_PREF = "signon.management.page.hideMobileFooter";
 
 // about:logins will always use the privileged content process,
 // even if it is disabled for other consumers such as about:newtab.
@@ -61,7 +75,8 @@ const SUBDOMAIN_REGEX = new RegExp(/^www\d*\./);
 const augmentVanillaLoginObject = login => {
   let title;
   try {
-    title = new URL(login.origin).host;
+    // file:// URIs don't have a host property
+    title = new URL(login.origin).host || login.origin;
   } catch (ex) {
     title = login.origin.replace(SCHEME_REGEX, "");
   }
@@ -110,6 +125,35 @@ var AboutLoginsParent = {
         Services.logins.removeLogin(login);
         break;
       }
+      case "AboutLogins:DismissBreachAlert": {
+        const login = message.data.login;
+
+        await LoginHelper.recordBreachAlertDismissal(login.guid);
+        const logins = await this.getAllLogins();
+        const breachesByLoginGUID = await LoginHelper.getBreachesForLogins(
+          logins
+        );
+        const messageManager = message.target.messageManager;
+        messageManager.sendAsyncMessage(
+          "AboutLogins:UpdateBreaches",
+          breachesByLoginGUID
+        );
+        break;
+      }
+      case "AboutLogins:HideFooter": {
+        Services.prefs.setBoolPref(HIDE_MOBILE_FOOTER_PREF, true);
+        break;
+      }
+      case "AboutLogins:SyncEnable": {
+        message.target.ownerGlobal.gSync.openFxAEmailFirstPage(
+          "password-manager"
+        );
+        break;
+      }
+      case "AboutLogins:SyncOptions": {
+        message.target.ownerGlobal.gSync.openFxAManagePage("password-manager");
+        break;
+      }
       case "AboutLogins:Import": {
         try {
           MigrationUtils.showMigrationWizard(message.target.ownerGlobal, [
@@ -141,9 +185,12 @@ var AboutLoginsParent = {
       case "AboutLogins:OpenMobileAndroid": {
         const MOBILE_ANDROID_URL_PREF =
           "signon.management.page.mobileAndroidURL";
-        const MOBILE_ANDROID_URL = Services.prefs.getStringPref(
+        const linkTrackingSource = message.data.source;
+        let MOBILE_ANDROID_URL = Services.prefs.getStringPref(
           MOBILE_ANDROID_URL_PREF
         );
+        // Append the `utm_creative` query parameter value:
+        MOBILE_ANDROID_URL += linkTrackingSource;
         message.target.ownerGlobal.openWebLinkIn(MOBILE_ANDROID_URL, "tab", {
           relatedToCurrent: true,
         });
@@ -151,9 +198,10 @@ var AboutLoginsParent = {
       }
       case "AboutLogins:OpenMobileIos": {
         const MOBILE_IOS_URL_PREF = "signon.management.page.mobileAppleURL";
-        const MOBILE_IOS_URL = Services.prefs.getStringPref(
-          MOBILE_IOS_URL_PREF
-        );
+        const linkTrackingSource = message.data.source;
+        let MOBILE_IOS_URL = Services.prefs.getStringPref(MOBILE_IOS_URL_PREF);
+        // Append the `utm_creative` query parameter value:
+        MOBILE_IOS_URL += linkTrackingSource;
         message.target.ownerGlobal.openWebLinkIn(MOBILE_IOS_URL, "tab", {
           relatedToCurrent: true,
         });
@@ -180,6 +228,50 @@ var AboutLoginsParent = {
         });
         break;
       }
+      case "AboutLogins:MasterPasswordRequest": {
+        // This doesn't harm if passwords are not encrypted
+        let tokendb = Cc["@mozilla.org/security/pk11tokendb;1"].createInstance(
+          Ci.nsIPK11TokenDB
+        );
+        let token = tokendb.getInternalKeyToken();
+
+        let messageManager = message.target.messageManager;
+
+        // If there is no master password, return as-if authentication succeeded.
+        if (token.checkPassword("")) {
+          messageManager.sendAsyncMessage(
+            "AboutLogins:MasterPasswordResponse",
+            true
+          );
+          return;
+        }
+
+        // If a master password prompt is already open, just exit early and return false.
+        // The user can re-trigger it after responding to the already open dialog.
+        if (Services.logins.uiBusy) {
+          messageManager.sendAsyncMessage(
+            "AboutLogins:MasterPasswordResponse",
+            false
+          );
+          return;
+        }
+
+        // So there's a master password. But since checkPassword didn't succeed, we're logged out (per nsIPK11Token.idl).
+        try {
+          // Relogin and ask for the master password.
+          token.login(true); // 'true' means always prompt for token password. User will be prompted until
+          // clicking 'Cancel' or entering the correct password.
+        } catch (e) {
+          // An exception will be thrown if the user cancels the login prompt dialog.
+          // User is also logged out of Software Security Device.
+        }
+
+        messageManager.sendAsyncMessage(
+          "AboutLogins:MasterPasswordResponse",
+          token.isLoggedIn()
+        );
+        break;
+      }
       case "AboutLogins:Subscribe": {
         if (
           !ChromeUtils.nondeterministicGetWeakSetKeys(this._subscribers).length
@@ -187,6 +279,7 @@ var AboutLoginsParent = {
           Services.obs.addObserver(this, "passwordmgr-crypto-login");
           Services.obs.addObserver(this, "passwordmgr-crypto-loginCanceled");
           Services.obs.addObserver(this, "passwordmgr-storage-changed");
+          Services.obs.addObserver(this, UIState.ON_UPDATE);
         }
         this._subscribers.add(message.target);
 
@@ -196,16 +289,164 @@ var AboutLoginsParent = {
         try {
           messageManager.sendAsyncMessage("AboutLogins:AllLogins", logins);
 
-          if (!BREACH_ALERTS_ENABLED) {
-            return;
+          let syncState = this.getSyncState();
+          messageManager.sendAsyncMessage("AboutLogins:SyncState", syncState);
+          this.updatePasswordSyncNotificationState();
+
+          // App store badges sourced from https://developer.apple.com/app-store/marketing/guidelines/#section-badges.
+          // This array mirrors the file names from the App store directory (./content/third-party/app-store)
+          const appStoreLocales = [
+            "az",
+            "ar",
+            "bg",
+            "cs",
+            "da",
+            "de",
+            "el",
+            "en",
+            "es-mx",
+            "es",
+            "et",
+            "fi",
+            "fr",
+            "he",
+            "hu",
+            "id",
+            "it",
+            "ja",
+            "ko",
+            "lt",
+            "lv",
+            "my",
+            "nb",
+            "nl",
+            "nn",
+            "pl",
+            "pt-br",
+            "pt-pt",
+            "ro",
+            "ru",
+            "si",
+            "sk",
+            "sv",
+            "th",
+            "tl",
+            "tr",
+            "vi",
+            "zh-hans",
+            "zh-hant",
+          ];
+
+          // Google play badges sourced from https://play.google.com/intl/en_us/badges/
+          // This array mirrors the file names from the play store directory (./content/third-party/play-store)
+          const playStoreLocales = [
+            "af",
+            "ar",
+            "az",
+            "be",
+            "bg",
+            "bn",
+            "bs",
+            "ca",
+            "cs",
+            "da",
+            "de",
+            "el",
+            "en",
+            "es",
+            "et",
+            "eu",
+            "fa",
+            "fr",
+            "gl",
+            "gu",
+            "he",
+            "hi",
+            "hr",
+            "hu",
+            "hy",
+            "id",
+            "is",
+            "it",
+            "ja",
+            "ka",
+            "kk",
+            "km",
+            "kn",
+            "ko",
+            "lo",
+            "lt",
+            "lv",
+            "mk",
+            "mr",
+            "ms",
+            "my",
+            "nb",
+            "ne",
+            "nl",
+            "nn",
+            "pa",
+            "pl",
+            "pt-br",
+            "pt",
+            "ro",
+            "ru",
+            "si",
+            "sk",
+            "sl",
+            "sq",
+            "sr",
+            "sv",
+            "ta",
+            "te",
+            "th",
+            "tl",
+            "tr",
+            "uk",
+            "ur",
+            "uz",
+            "vi",
+            "zh-cn",
+            "zh-tw",
+          ];
+
+          const playStoreBadgeLanguage = Services.locale.negotiateLanguages(
+            Services.locale.appLocalesAsBCP47,
+            playStoreLocales,
+            "en-US",
+            Services.locale.langNegStrategyLookup
+          );
+
+          const appStoreBadgeLanguage = Services.locale.negotiateLanguages(
+            Services.locale.appLocalesAsBCP47,
+            appStoreLocales,
+            "en-US",
+            Services.locale.langNegStrategyLookup
+          );
+
+          const selectedBadgeLanguages = {
+            appStoreBadge: appStoreBadgeLanguage,
+            playStoreBadge: playStoreBadgeLanguage,
+          };
+
+          messageManager.sendAsyncMessage(
+            "AboutLogins:LocalizeBadges",
+            selectedBadgeLanguages
+          );
+
+          if (BREACH_ALERTS_ENABLED) {
+            const breachesByLoginGUID = await LoginHelper.getBreachesForLogins(
+              logins
+            );
+            messageManager.sendAsyncMessage(
+              "AboutLogins:UpdateBreaches",
+              breachesByLoginGUID
+            );
           }
 
-          const breachesByLoginGUID = await LoginHelper.getBreachesForLogins(
-            logins
-          );
           messageManager.sendAsyncMessage(
-            "AboutLogins:UpdateBreaches",
-            breachesByLoginGUID
+            "AboutLogins:SendFavicons",
+            await this.getAllFavicons(logins)
           );
         } catch (ex) {
           if (ex.result != Cr.NS_ERROR_NOT_INITIALIZED) {
@@ -254,11 +495,12 @@ var AboutLoginsParent = {
       Services.obs.removeObserver(this, "passwordmgr-crypto-login");
       Services.obs.removeObserver(this, "passwordmgr-crypto-loginCanceled");
       Services.obs.removeObserver(this, "passwordmgr-storage-changed");
+      Services.obs.removeObserver(this, UIState.ON_UPDATE);
       return;
     }
 
     if (topic == "passwordmgr-crypto-login") {
-      this.removeMasterPasswordLoginNotifications();
+      this.removeNotifications(MASTER_PASSWORD_NOTIFICATION_ID);
       this.messageSubscribers(
         "AboutLogins:AllLogins",
         await this.getAllLogins()
@@ -268,6 +510,11 @@ var AboutLoginsParent = {
 
     if (topic == "passwordmgr-crypto-loginCanceled") {
       this.showMasterPasswordLoginNotifications();
+      return;
+    }
+
+    if (topic == UIState.ON_UPDATE) {
+      this.messageSubscribers("AboutLogins:SyncState", this.getSyncState());
       return;
     }
 
@@ -295,66 +542,133 @@ var AboutLoginsParent = {
           return;
         }
         this.messageSubscribers("AboutLogins:LoginRemoved", login);
+        break;
       }
-      default: {
+      case "removeAllLogins": {
+        this.messageSubscribers("AboutLogins:AllLogins", []);
         break;
       }
     }
   },
 
-  async showMasterPasswordLoginNotifications() {
+  async getFavicon(login) {
+    try {
+      const faviconData = await PlacesUtils.promiseFaviconData(login.hostname);
+      return {
+        faviconData,
+        guid: login.guid,
+      };
+    } catch (ex) {
+      return null;
+    }
+  },
+
+  async getAllFavicons(logins) {
+    let favicons = await Promise.all(
+      logins.map(login => this.getFavicon(login))
+    );
+    let vanillaFavicons = {};
+    for (let favicon of favicons) {
+      if (!favicon) {
+        continue;
+      }
+      try {
+        vanillaFavicons[favicon.guid] = {
+          data: favicon.faviconData.data,
+          dataLen: favicon.faviconData.dataLen,
+          mimeType: favicon.faviconData.mimeType,
+        };
+      } catch (ex) {}
+    }
+    return vanillaFavicons;
+  },
+
+  showMasterPasswordLoginNotifications() {
+    this.showNotifications({
+      id: MASTER_PASSWORD_NOTIFICATION_ID,
+      priority: "PRIORITY_WARNING_MEDIUM",
+      iconURL: "chrome://browser/skin/login.svg",
+      messageId: "master-password-notification-message",
+      buttonId: "master-password-reload-button",
+      onClick(browser) {
+        browser.reload();
+      },
+    });
+  },
+
+  showPasswordSyncNotifications() {
+    this.showNotifications({
+      id: PASSWORD_SYNC_NOTIFICATION_ID,
+      priority: "PRIORITY_INFO_MEDIUM",
+      iconURL: "chrome://browser/skin/login.svg",
+      messageId: "enable-password-sync-notification-message",
+      buttonId: "enable-password-sync-preferences-button",
+      onClick(browser) {
+        browser.ownerGlobal.gSync.openPrefs("password-manager");
+      },
+      extraFtl: ["branding/brand.ftl", "browser/branding/sync-brand.ftl"],
+    });
+  },
+
+  showNotifications({
+    id,
+    priority,
+    iconURL,
+    messageId,
+    buttonId,
+    onClick,
+    extraFtl = [],
+  } = {}) {
     for (let subscriber of this._subscriberIterator()) {
       let MozXULElement = subscriber.ownerGlobal.MozXULElement;
       MozXULElement.insertFTLIfNeeded("browser/aboutLogins.ftl");
+      for (let ftl of extraFtl) {
+        MozXULElement.insertFTLIfNeeded(ftl);
+      }
 
       // If there's already an existing notification bar, don't do anything.
       let { gBrowser } = subscriber.ownerGlobal;
       let browser = subscriber;
       let notificationBox = gBrowser.getNotificationBox(browser);
-      let notification = notificationBox.getNotificationWithValue(
-        MASTER_PASSWORD_NOTIFICATION_ID
-      );
+      let notification = notificationBox.getNotificationWithValue(id);
       if (notification) {
         continue;
       }
 
       // Configure the notification bar
-      let priority = notificationBox.PRIORITY_WARNING_MEDIUM;
-      let iconURL = "chrome://browser/skin/login.svg";
-
       let doc = subscriber.ownerDocument;
       let messageFragment = doc.createDocumentFragment();
       let message = doc.createElement("span");
-      doc.l10n.setAttributes(message, "master-password-notification-message");
+      doc.l10n.setAttributes(message, messageId);
       messageFragment.appendChild(message);
 
       let buttons = [
         {
-          "l10n-id": "master-password-reload-button",
+          "l10n-id": buttonId,
           popup: null,
-          callback() {
-            browser.reload();
+          callback: () => {
+            onClick(browser);
           },
         },
       ];
 
       notification = notificationBox.appendNotification(
         messageFragment,
-        MASTER_PASSWORD_NOTIFICATION_ID,
+        id,
         iconURL,
-        priority,
+        notificationBox[priority],
         buttons
       );
     }
   },
 
-  removeMasterPasswordLoginNotifications() {
+  removeNotifications(notificationId) {
     for (let subscriber of this._subscriberIterator()) {
       let { gBrowser } = subscriber.ownerGlobal;
       let browser = subscriber;
       let notificationBox = gBrowser.getNotificationBox(browser);
       let notification = notificationBox.getNotificationWithValue(
-        MASTER_PASSWORD_NOTIFICATION_ID
+        notificationId
       );
       if (!notification) {
         continue;
@@ -412,4 +726,37 @@ var AboutLoginsParent = {
       throw e;
     }
   },
+
+  getSyncState() {
+    const state = UIState.get();
+    // As long as Sync is configured, about:logins will treat it as
+    // authenticated. More diagnostics and error states can be handled
+    // by other more Sync-specific pages.
+    const loggedIn = state.status != UIState.STATUS_NOT_CONFIGURED;
+    return {
+      loggedIn,
+      email: state.email,
+      avatarURL: state.avatarURL,
+    };
+  },
+
+  updatePasswordSyncNotificationState() {
+    const state = this.getSyncState();
+    // Need to explicitly call the getter on lazy preference getters
+    // to activate their observer.
+    let passwordSyncEnabled = PASSWORD_SYNC_ENABLED;
+    if (state.loggedIn && !passwordSyncEnabled) {
+      this.showPasswordSyncNotifications();
+      return;
+    }
+    this.removeNotifications(PASSWORD_SYNC_NOTIFICATION_ID);
+  },
 };
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "PASSWORD_SYNC_ENABLED",
+  "services.sync.engine.passwords",
+  false,
+  AboutLoginsParent.updatePasswordSyncNotificationState.bind(AboutLoginsParent)
+);

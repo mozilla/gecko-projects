@@ -167,9 +167,9 @@ class TextEditor : public EditorBase,
                         const nsAString& aValue) override;
 
   /**
-   * IsEmpty() checks whether the editor is empty.  If editor has only bogus
-   * node, returns true.  If editor's root element has non-empty text nodes or
-   * other nodes like <br>, returns false.
+   * IsEmpty() checks whether the editor is empty.  If editor has only padding
+   * <br> element for empty editor, returns true.  If editor's root element has
+   * non-empty text nodes or other nodes like <br>, returns false.
    */
   nsresult IsEmpty(bool* aIsEmpty) const;
   bool IsEmpty() const {
@@ -467,24 +467,6 @@ class TextEditor : public EditorBase,
   nsresult ReplaceSelectionAsSubAction(const nsAString& aString);
 
   /**
-   * InsertBrElementWithTransaction() creates a <br> element and inserts it
-   * before aPointToInsert.  Then, tries to collapse selection at or after the
-   * new <br> node if aSelect is not eNone.
-   *
-   * @param aPointToInsert      The DOM point where should be <br> node inserted
-   *                            before.
-   * @param aSelect             If eNone, this won't change selection.
-   *                            If eNext, selection will be collapsed after
-   *                            the <br> element.
-   *                            If ePrevious, selection will be collapsed at
-   *                            the <br> element.
-   * @return                    The new <br> node.  If failed to create new
-   *                            <br> node, returns nullptr.
-   */
-  MOZ_CAN_RUN_SCRIPT already_AddRefed<Element> InsertBrElementWithTransaction(
-      const EditorDOMPoint& aPointToInsert, EDirection aSelect = eNone);
-
-  /**
    * Extends the selection for given deletion operation
    * If done, also update aAction to what's actually left to do after the
    * extension.
@@ -493,6 +475,15 @@ class TextEditor : public EditorBase,
 
   static void GetDefaultEditorPrefs(int32_t& aNewLineHandling,
                                     int32_t& aCaretStyle);
+
+  /**
+   * MaybeDoAutoPasswordMasking() may mask password if we're doing auto-masking.
+   */
+  void MaybeDoAutoPasswordMasking() {
+    if (IsPasswordEditor() && IsMaskingPassword()) {
+      MaskAllCharacters();
+    }
+  }
 
   /**
    * SetUnmaskRange() is available only when the instance is a password
@@ -592,6 +583,30 @@ class TextEditor : public EditorBase,
   void BeginEditorInit();
   MOZ_CAN_RUN_SCRIPT
   nsresult EndEditorInit();
+
+  /**
+   * EnsurePaddingBRElementForEmptyEditor() creates padding <br> element for
+   * empty editor or changes padding <br> element for empty last line to for
+   * empty editor when we're empty.
+   */
+  MOZ_CAN_RUN_SCRIPT nsresult EnsurePaddingBRElementForEmptyEditor();
+
+  /**
+   * HandleInlineSpellCheckAfterEdit() does spell-check after handling top level
+   * edit subaction.
+   */
+  nsresult HandleInlineSpellCheckAfterEdit() {
+    MOZ_ASSERT(IsEditActionDataAvailable());
+    if (!GetSpellCheckRestartPoint().IsSet()) {
+      return NS_OK;  // Maybe being initialized.
+    }
+    nsresult rv = HandleInlineSpellCheck(
+        GetSpellCheckRestartPoint().GetContainer(),
+        GetSpellCheckRestartPoint().Offset(), nullptr, 0, nullptr, 0);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to spellcheck");
+    ClearSpellCheckRestartPoint();
+    return rv;
+  }
 
  protected:  // Shouldn't be used by friend classes
   virtual ~TextEditor();

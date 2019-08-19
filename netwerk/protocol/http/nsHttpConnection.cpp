@@ -1699,7 +1699,12 @@ nsresult nsHttpConnection::ResumeRecv() {
   // may get done before the ResumeRecv() call
   mLastReadTime = PR_IntervalNow();
 
-  if (mSocketIn) return mSocketIn->AsyncWait(this, 0, 0, nullptr);
+  if (mSocketIn) {
+    if (!mTLSFilter || !mTLSFilter->HasDataToRecv() || NS_FAILED(ForceRecv())) {
+      return mSocketIn->AsyncWait(this, 0, 0, nullptr);
+    }
+    return NS_OK;
+  }
 
   MOZ_ASSERT_UNREACHABLE("no socket input stream");
   return NS_ERROR_UNEXPECTED;
@@ -1825,9 +1830,10 @@ void nsHttpConnection::CloseTransaction(nsAHttpTransaction* trans,
     // latter case we simply must close the transaction given to us via the
     // argument.
     if (!mTLSFilter->Transaction()) {
-      LOG(("  closing transaction directly"));
-      MOZ_ASSERT(trans);
-      trans->Close(reason);
+      if (trans) {
+        LOG(("  closing transaction directly"));
+        trans->Close(reason);
+      }
     } else {
       LOG(("  closing transactin hanging of off mTLSFilter"));
       mTLSFilter->Close(reason);

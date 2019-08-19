@@ -9,6 +9,7 @@
 #include "nsIContentPolicy.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/StaticPrefs_intl.h"
 #include "nsCommandManager.h"
 #include "nsCOMPtr.h"
 #include "nsGlobalWindow.h"
@@ -342,7 +343,7 @@ void nsHTMLDocument::TryTLD(int32_t& aCharsetSource,
   if (aCharsetSource >= kCharsetFromTopLevelDomain) {
     return;
   }
-  if (!FallbackEncoding::sGuessFallbackFromTopLevelDomain) {
+  if (!StaticPrefs::intl_charset_fallback_tld()) {
     return;
   }
   if (!mDocumentURI) {
@@ -476,8 +477,7 @@ nsresult nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     aChannel->GetOriginalURI(getter_AddRefs(uri));
     // Adapted from nsDocShell:
     // GetSpec can be expensive for some URIs, so check the scheme first.
-    bool isAbout = false;
-    if (uri && NS_SUCCEEDED(uri->SchemeIs("about", &isAbout)) && isAbout) {
+    if (uri && uri->SchemeIs("about")) {
       if (uri->GetSpecOrDefault().EqualsLiteral("about:blank")) {
         loadAsHtml5 = false;
       }
@@ -816,9 +816,7 @@ bool nsHTMLDocument::WillIgnoreCharsetOverride() {
   }
   nsIURI* uri = GetOriginalURI();
   if (uri) {
-    bool schemeIs = false;
-    uri->SchemeIs("about", &schemeIs);
-    if (schemeIs) {
+    if (uri->SchemeIs("about")) {
       return true;
     }
     bool isResource;
@@ -876,5 +874,3 @@ void nsHTMLDocument::GetFormsAndFormControls(nsContentList** aFormList,
   NS_ADDREF(*aFormList = holder->mFormList);
   NS_ADDREF(*aFormControlList = holder->mFormControlList);
 }
-
-void nsHTMLDocument::UserInteractionForTesting() { SetUserHasInteracted(); }

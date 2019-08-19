@@ -29,6 +29,7 @@
 #include "mozilla/Sprintf.h"
 #include "mozilla/StaticPrefs_apz.h"
 #include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_font.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TimeStamp.h"
@@ -752,7 +753,6 @@ already_AddRefed<nsFrameSelection> PresShell::FrameSelection() {
 
 //----------------------------------------------------------------------
 
-static bool sSynthMouseMove = true;
 static uint32_t sNextPresShellId;
 
 /* static */
@@ -849,12 +849,6 @@ PresShell::PresShell()
 #endif
   mLastOSWake = mLoadBegin = TimeStamp::Now();
 
-  static bool addedSynthMouseMove = false;
-  if (!addedSynthMouseMove) {
-    Preferences::AddBoolVarCache(&sSynthMouseMove,
-                                 "layout.reflow.synthMouseMove", true);
-    addedSynthMouseMove = true;
-  }
   PointerEventHandler::Initialize();
 }
 
@@ -1039,14 +1033,14 @@ void PresShell::Init(Document* aDocument, nsPresContext* aPresContext,
   QueryIsActive();
 
   // Setup our font inflation preferences.
-  mFontSizeInflationEmPerLine = nsLayoutUtils::FontSizeInflationEmPerLine();
-  mFontSizeInflationMinTwips = nsLayoutUtils::FontSizeInflationMinTwips();
+  mFontSizeInflationEmPerLine = StaticPrefs::font_size_inflation_emPerLine();
+  mFontSizeInflationMinTwips = StaticPrefs::font_size_inflation_minTwips();
   mFontSizeInflationLineThreshold =
-      nsLayoutUtils::FontSizeInflationLineThreshold();
+      StaticPrefs::font_size_inflation_lineThreshold();
   mFontSizeInflationForceEnabled =
-      nsLayoutUtils::FontSizeInflationForceEnabled();
+      StaticPrefs::font_size_inflation_forceEnabled();
   mFontSizeInflationDisabledInMasterProcess =
-      nsLayoutUtils::FontSizeInflationDisabledInMasterProcess();
+      StaticPrefs::font_size_inflation_disabledInMasterProcess();
   // We'll compute the font size inflation state in Initialize(), when we know
   // the document type.
 
@@ -1061,7 +1055,7 @@ void PresShell::Init(Document* aDocument, nsPresContext* aPresContext,
   }
 
   if (nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell()) {
-    BrowsingContext* bc = nsDocShell::Cast(docShell)->GetBrowsingContext();
+    BrowsingContext* bc = docShell->GetBrowsingContext();
     bool embedderFrameIsHidden = true;
     if (Element* embedderElement = bc->GetEmbedderElement()) {
       if (auto embedderFrame = embedderElement->GetPrimaryFrame()) {
@@ -3635,71 +3629,6 @@ bool PresShell::ScrollFrameRectIntoView(nsIFrame* aFrame, const nsRect& aRect,
   return didScroll;
 }
 
-RectVisibility PresShell::GetRectVisibility(nsIFrame* aFrame,
-                                            const nsRect& aRect,
-                                            nscoord aMinTwips) const {
-  NS_ASSERTION(aFrame->PresContext() == GetPresContext(),
-               "prescontext mismatch?");
-  nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
-  NS_ASSERTION(
-      rootFrame,
-      "How can someone have a frame for this presshell when there's no root?");
-  nsIScrollableFrame* sf = GetRootScrollFrameAsScrollable();
-  nsRect scrollPortRect;
-  if (sf) {
-    scrollPortRect = sf->GetScrollPortRect();
-    nsIFrame* f = do_QueryFrame(sf);
-    scrollPortRect += f->GetOffsetTo(rootFrame);
-  } else {
-    scrollPortRect = nsRect(nsPoint(0, 0), rootFrame->GetSize());
-  }
-
-  // scrollPortRect has the viewport visible area relative to rootFrame.
-  nsRect visibleAreaRect(scrollPortRect);
-  // Find the intersection of this and the frame's ancestor scrollable
-  // frames. We walk the whole ancestor chain to find all the scrollable
-  // frames.
-  nsIScrollableFrame* scrollAncestorFrame =
-      nsLayoutUtils::GetNearestScrollableFrame(
-          aFrame, nsLayoutUtils::SCROLLABLE_INCLUDE_HIDDEN);
-  while (scrollAncestorFrame) {
-    nsRect scrollAncestorRect = scrollAncestorFrame->GetScrollPortRect();
-    nsIFrame* f = do_QueryFrame(scrollAncestorFrame);
-    scrollAncestorRect += f->GetOffsetTo(rootFrame);
-
-    visibleAreaRect = visibleAreaRect.Intersect(scrollAncestorRect);
-
-    // Continue up the chain.
-    scrollAncestorFrame = nsLayoutUtils::GetNearestScrollableFrame(
-        f->GetParent(), nsLayoutUtils::SCROLLABLE_INCLUDE_HIDDEN);
-  }
-
-  // aRect is in the aFrame coordinate space, so bring it into rootFrame
-  // coordinate space.
-  nsRect r = aRect + aFrame->GetOffsetTo(rootFrame);
-  // If aRect is entirely visible then we don't need to ensure that
-  // at least aMinTwips of it is visible
-  if (visibleAreaRect.Contains(r)) {
-    return RectVisibility::Visible;
-  }
-
-  nsRect insetRect = visibleAreaRect;
-  insetRect.Deflate(aMinTwips, aMinTwips);
-  if (r.YMost() <= insetRect.y) {
-    return RectVisibility::AboveViewport;
-  }
-  if (r.y >= insetRect.YMost()) {
-    return RectVisibility::BelowViewport;
-  }
-  if (r.XMost() <= insetRect.x) {
-    return RectVisibility::LeftOfViewport;
-  }
-  if (r.x >= insetRect.XMost()) {
-    return RectVisibility::RightOfViewport;
-  }
-  return RectVisibility::Visible;
-}
-
 void PresShell::ScheduleViewManagerFlush(PaintType aType) {
   if (MOZ_UNLIKELY(mIsDestroying)) {
     return;
@@ -5257,7 +5186,7 @@ nsresult PresShell::SetResolutionAndScaleTo(float aResolution,
   state.mResolution = Some(aResolution);
   SetRenderingState(state);
   if (mMobileViewportManager) {
-    mMobileViewportManager->ResolutionUpdated();
+    mMobileViewportManager->ResolutionUpdated(aOrigin);
   }
   if (aOrigin == ResolutionChangeOrigin::Apz) {
     mResolutionUpdatedByApz = true;
@@ -5336,7 +5265,7 @@ void PresShell::SetRenderingState(const RenderingState& aState) {
 }
 
 void PresShell::SynthesizeMouseMove(bool aFromScroll) {
-  if (!sSynthMouseMove) return;
+  if (!StaticPrefs::layout_reflow_synthMouseMove()) return;
 
   if (mPaintingSuppressed || !mIsActive || !mPresContext) {
     return;
@@ -9121,7 +9050,7 @@ void PresShell::DidDoReflow(bool aInterruptible) {
     mDocument->ScheduleResizeObserversNotification();
   }
 
-  if (sSynthMouseMove) {
+  if (StaticPrefs::layout_reflow_synthMouseMove()) {
     SynthesizeMouseMove(false);
   }
 
@@ -10822,7 +10751,8 @@ nsSize PresShell::GetLayoutViewportSize() const {
 void PresShell::RecomputeFontSizeInflationEnabled() {
   mFontSizeInflationEnabled = DetermineFontSizeInflationState();
 
-  float fontScale = nsLayoutUtils::SystemFontScale();
+  // Divide by 100 to convert the pref from a percentage to a fraction.
+  float fontScale = StaticPrefs::font_size_systemFontScale() / 100.0f;
   if (fontScale == 0.0f) {
     return;
   }
@@ -10982,7 +10912,7 @@ void PresShell::SetIsUnderHiddenEmbedderElement(
   mUnderHiddenEmbedderElement = aUnderHiddenEmbedderElement;
 
   if (nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell()) {
-    BrowsingContext* bc = nsDocShell::Cast(docShell)->GetBrowsingContext();
+    BrowsingContext* bc = docShell->GetBrowsingContext();
 
     // Propagate to children.
     for (BrowsingContext* child : bc->GetChildren()) {

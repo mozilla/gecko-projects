@@ -18,15 +18,12 @@ const { webconsoleSpec } = require("devtools/shared/specs/webconsole");
  * A WebConsoleClient is used as a front end for the WebConsoleActor that is
  * created on the server, hiding implementation details.
  *
- * @param object debuggerClient
+ * @param object client
  *        The DebuggerClient instance we live for.
- * @param object response
- *        The response packet received from the "startListeners" request sent to
- *        the WebConsoleActor.
  */
 class WebConsoleFront extends FrontClassWithSpec(webconsoleSpec) {
-  constructor(client) {
-    super(client);
+  constructor(client, targetFront, parentFront) {
+    super(client, targetFront, parentFront);
     this._client = client;
     this.traits = {};
     this._longStrings = {};
@@ -216,11 +213,11 @@ class WebConsoleFront extends FrontClassWithSpec(webconsoleSpec) {
     };
 
     return new Promise(async (resolve, reject) => {
-      const response = await super.evaluateJSAsync(options);
-      // Null check this in case the client has been detached while waiting
-      // for a response.
+      const { resultID } = await super.evaluateJSAsync(options);
+      // Null check this in case the client has been detached while sending
+      // the one way request
       if (this.pendingEvaluationResults) {
-        this.pendingEvaluationResults.set(response.resultID, resp => {
+        this.pendingEvaluationResults.set(resultID, resp => {
           if (resp.error) {
             reject(resp);
           } else {

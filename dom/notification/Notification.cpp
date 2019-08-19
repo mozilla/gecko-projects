@@ -27,6 +27,7 @@
 #include "mozilla/dom/PromiseWorkerProxy.h"
 #include "mozilla/dom/ServiceWorkerGlobalScopeBinding.h"
 #include "mozilla/dom/ServiceWorkerManager.h"
+#include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WorkerScope.h"
@@ -470,24 +471,21 @@ NS_IMPL_QUERY_INTERFACE_CYCLE_COLLECTION_INHERITED(
 
 NS_IMETHODIMP
 NotificationPermissionRequest::Run() {
-  if (nsContentUtils::IsSystemPrincipal(mPrincipal)) {
+  bool isSystem = nsContentUtils::IsSystemPrincipal(mPrincipal);
+  bool blocked = false;
+  if (isSystem) {
     mPermission = NotificationPermission::Granted;
   } else {
     // File are automatically granted permission.
     nsCOMPtr<nsIURI> uri;
     mPrincipal->GetURI(getter_AddRefs(uri));
 
-    bool isFile = false;
-    if (uri) {
-      uri->SchemeIs("file", &isFile);
-      if (isFile) {
-        mPermission = NotificationPermission::Granted;
-      }
-    }
-
-    if (!isFile && !StaticPrefs::dom_webnotifications_allowinsecure() &&
-        !mWindow->IsSecureContext()) {
+    if (uri && uri->SchemeIs("file")) {
+      mPermission = NotificationPermission::Granted;
+    } else if (!StaticPrefs::dom_webnotifications_allowinsecure() &&
+               !mWindow->IsSecureContext()) {
       mPermission = NotificationPermission::Denied;
+      blocked = true;
       nsCOMPtr<Document> doc = mWindow->GetExtantDoc();
       if (doc) {
         nsContentUtils::ReportToConsole(
@@ -513,6 +511,22 @@ NotificationPermissionRequest::Run() {
     default:
       // ignore
       break;
+  }
+
+  // Check this after checking the prompt prefs to make sure this pref overrides
+  // those.  We rely on this for testing purposes.
+  if (!isSystem && !blocked &&
+      !StaticPrefs::dom_webnotifications_allowcrossoriginiframe() &&
+      !mPrincipal->Subsumes(mTopLevelPrincipal)) {
+    mPermission = NotificationPermission::Denied;
+    blocked = true;
+    nsCOMPtr<Document> doc = mWindow->GetExtantDoc();
+    if (doc) {
+      nsContentUtils::ReportToConsole(
+          nsIScriptError::errorFlag, NS_LITERAL_CSTRING("DOM"), doc,
+          nsContentUtils::eDOM_PROPERTIES,
+          "NotificationsCrossOriginIframeRequestIsForbidden");
+    }
   }
 
   if (mPermission != NotificationPermission::Default) {
@@ -1623,12 +1637,8 @@ NotificationPermission Notification::GetPermissionInternal(
     // Allow files to show notifications by default.
     nsCOMPtr<nsIURI> uri;
     aPrincipal->GetURI(getter_AddRefs(uri));
-    if (uri) {
-      bool isFile;
-      uri->SchemeIs("file", &isFile);
-      if (isFile) {
-        return NotificationPermission::Granted;
-      }
+    if (uri && uri->SchemeIs("file")) {
+      return NotificationPermission::Granted;
     }
   }
 
@@ -2172,13 +2182,17 @@ bool Notification::CreateWorkerRef() {
 class CheckLoadRunnable final : public WorkerMainThreadRunnable {
   nsresult mRv;
   nsCString mScope;
+  ServiceWorkerRegistrationDescriptor mDescriptor;
 
  public:
-  explicit CheckLoadRunnable(WorkerPrivate* aWorker, const nsACString& aScope)
+  explicit CheckLoadRunnable(
+      WorkerPrivate* aWorker, const nsACString& aScope,
+      const ServiceWorkerRegistrationDescriptor& aDescriptor)
       : WorkerMainThreadRunnable(
             aWorker, NS_LITERAL_CSTRING("Notification :: Check Load")),
         mRv(NS_ERROR_DOM_SECURITY_ERR),
-        mScope(aScope) {}
+        mScope(aScope),
+        mDescriptor(aDescriptor) {}
 
   bool MainThreadRun() override {
     nsIPrincipal* principal = mWorkerPrivate->GetPrincipal();
@@ -2188,21 +2202,10 @@ class CheckLoadRunnable final : public WorkerMainThreadRunnable {
       return true;
     }
 
-    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-    if (!swm) {
-      // browser shutdown began
-      mRv = NS_ERROR_FAILURE;
-      return true;
-    }
+    auto activeWorker = mDescriptor.GetActive();
 
-    RefPtr<ServiceWorkerRegistrationInfo> registration =
-        swm->GetRegistration(principal, mScope);
-
-    // This is coming from a ServiceWorkerRegistration.
-    MOZ_ASSERT(registration);
-
-    if (!registration->GetActive() ||
-        registration->GetActive()->ID() != mWorkerPrivate->ServiceWorkerID()) {
+    if (!activeWorker ||
+        activeWorker.ref().Id() != mWorkerPrivate->ServiceWorkerID()) {
       mRv = NS_ERROR_NOT_AVAILABLE;
     }
 
@@ -2216,7 +2219,7 @@ class CheckLoadRunnable final : public WorkerMainThreadRunnable {
 already_AddRefed<Promise> Notification::ShowPersistentNotification(
     JSContext* aCx, nsIGlobalObject* aGlobal, const nsAString& aScope,
     const nsAString& aTitle, const NotificationOptions& aOptions,
-    ErrorResult& aRv) {
+    const ServiceWorkerRegistrationDescriptor& aDescriptor, ErrorResult& aRv) {
   MOZ_ASSERT(aGlobal);
 
   // Validate scope.
@@ -2247,8 +2250,9 @@ already_AddRefed<Promise> Notification::ShowPersistentNotification(
     WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(worker);
     worker->AssertIsOnWorkerThread();
-    RefPtr<CheckLoadRunnable> loadChecker =
-        new CheckLoadRunnable(worker, NS_ConvertUTF16toUTF8(aScope));
+
+    RefPtr<CheckLoadRunnable> loadChecker = new CheckLoadRunnable(
+        worker, NS_ConvertUTF16toUTF8(aScope), aDescriptor);
     loadChecker->Dispatch(Canceling, aRv);
     if (aRv.Failed()) {
       return nullptr;

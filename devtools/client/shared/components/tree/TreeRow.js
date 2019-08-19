@@ -47,8 +47,8 @@ define(function(require, exports, module) {
     static get propTypes() {
       return {
         member: PropTypes.shape({
-          object: PropTypes.obSject,
-          name: PropTypes.sring,
+          object: PropTypes.object,
+          name: PropTypes.string,
           type: PropTypes.string.isRequired,
           rowClass: PropTypes.string.isRequired,
           level: PropTypes.number.isRequired,
@@ -62,8 +62,8 @@ define(function(require, exports, module) {
           loading: PropTypes.bool,
         }),
         decorator: PropTypes.object,
-        renderCell: PropTypes.object,
-        renderLabelCell: PropTypes.object,
+        renderCell: PropTypes.func,
+        renderLabelCell: PropTypes.func,
         columns: PropTypes.array.isRequired,
         id: PropTypes.string.isRequired,
         provider: PropTypes.object.isRequired,

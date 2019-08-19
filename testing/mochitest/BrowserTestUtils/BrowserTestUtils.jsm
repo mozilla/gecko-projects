@@ -11,7 +11,8 @@
 
 // This file uses ContentTask & frame scripts, where these are available.
 /* global addEventListener, removeEventListener, sendAsyncMessage,
-          addMessageListener, removeMessageListener, privateNoteIntentionalCrash */
+          addMessageListener, removeMessageListener,
+          privateNoteIntentionalCrash, ContentTaskUtils */
 
 "use strict";
 
@@ -86,6 +87,23 @@ var gSynthesizeCompositionChangeCount = 0;
 
 const kAboutPageRegistrationContentScript =
   "chrome://mochikit/content/tests/BrowserTestUtils/content-about-page-utils.js";
+
+/**
+ * Create and register BrowserTestUtils Window Actor.
+ */
+function registerActor() {
+  let actorOptions = {
+    child: {
+      moduleURI: "resource://testing-common/BrowserTestUtilsChild.jsm",
+    },
+
+    allFrames: true,
+    includeChrome: true,
+  };
+  ChromeUtils.registerWindowActor("BrowserTestUtils", actorOptions);
+}
+
+registerActor();
 
 var BrowserTestUtils = {
   /**
@@ -745,6 +763,25 @@ var BrowserTestUtils = {
     ) {
       await this.waitForEvent(browser, "XULFrameLoaderCreated");
     }
+  },
+
+  /**
+   * Maybe create a preloaded browser and ensure it's finished loading.
+   *
+   * @param gBrowser (<xul:tabbrowser>)
+   *        The tabbrowser in which to preload a browser.
+   */
+  async maybeCreatePreloadedBrowser(gBrowser) {
+    let win = gBrowser.ownerGlobal;
+    win.NewTabPagePreloading.maybeCreatePreloadedBrowser(win);
+
+    // We cannot use the regular BrowserTestUtils helper for waiting here, since that
+    // would try to insert the preloaded browser, which would only break things.
+    await ContentTask.spawn(gBrowser.preloadedBrowser, null, async () => {
+      await ContentTaskUtils.waitForCondition(() => {
+        return content.document && content.document.readyState == "complete";
+      });
+    });
   },
 
   /**
@@ -1578,7 +1615,7 @@ var BrowserTestUtils = {
   },
 
   /**
-   * Crashes a remote browser tab and cleans up the generated minidumps.
+   * Crashes a remote frame tab and cleans up the generated minidumps.
    * Resolves with the data from the .extra file (the crash annotations).
    *
    * @param (Browser) browser
@@ -1589,15 +1626,19 @@ var BrowserTestUtils = {
    *        tab crash page has loaded.
    * @param (bool) shouldClearMinidumps
    *        True if the minidumps left behind by the crash should be removed.
+   * @param (BrowsingContext) browsingContext
+   *        The context where the frame leaves. Default to
+   *        top level context if not supplied.
    *
    * @returns (Promise)
    * @resolves An Object with key-value pairs representing the data from the
    *           crash report's extra file (if applicable).
    */
-  async crashBrowser(
+  async crashFrame(
     browser,
     shouldShowTabCrashPage = true,
-    shouldClearMinidumps = true
+    shouldClearMinidumps = true,
+    browsingContext
   ) {
     let extra = {};
     let KeyValueParser = {};
@@ -1639,26 +1680,6 @@ var BrowserTestUtils = {
         file.remove(false);
       }
     }
-
-    // This frame script is injected into the remote browser, and used to
-    // intentionally crash the tab. We crash by using js-ctypes and dereferencing
-    // a bad pointer. The crash should happen immediately upon loading this
-    // frame script.
-    let frame_script = () => {
-      const { ctypes } = ChromeUtils.import(
-        "resource://gre/modules/ctypes.jsm"
-      );
-
-      let dies = function() {
-        privateNoteIntentionalCrash();
-        let zero = new ctypes.intptr_t(8);
-        let badptr = ctypes.cast(zero, ctypes.PointerType(ctypes.int32_t));
-        badptr.contents;
-      };
-
-      dump("\nEt tu, Brute?\n");
-      dies();
-    };
 
     let expectedPromises = [];
 
@@ -1751,10 +1772,12 @@ var BrowserTestUtils = {
       );
     }
 
-    // This frame script will crash the remote browser as soon as it is
-    // evaluated.
-    let mm = browser.messageManager;
-    mm.loadFrameScript("data:,(" + frame_script.toString() + ")();", false);
+    // Trigger crash by sending a message to BrowserTestUtils actor.
+    this.sendAsyncMessage(
+      browsingContext || browser.browsingContext,
+      "BrowserTestUtils:CrashFrame",
+      {}
+    );
 
     await Promise.all(expectedPromises);
 
@@ -2186,5 +2209,25 @@ var BrowserTestUtils = {
       );
     }
     return tabbrowser.addTab(uri, params);
+  },
+
+  /**
+   * Sends a message to a specific BrowserTestUtils window actor.
+   * @param aBrowsingContext
+   *        The browsing context where the actor lives.
+   * @param {string} aMessageName
+   *        Name of the message to be sent to the actor.
+   * @param {object} aMessageData
+   *        Extra information to pass to the actor.
+   */
+  async sendAsyncMessage(aBrowsingContext, aMessageName, aMessageData) {
+    if (!aBrowsingContext.currentWindowGlobal) {
+      await this.waitForCondition(() => aBrowsingContext.currentWindowGlobal);
+    }
+
+    let actor = aBrowsingContext.currentWindowGlobal.getActor(
+      "BrowserTestUtils"
+    );
+    actor.sendAsyncMessage(aMessageName, aMessageData);
   },
 };

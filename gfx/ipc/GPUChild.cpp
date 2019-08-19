@@ -17,7 +17,6 @@
 #if defined(XP_WIN)
 #  include "mozilla/gfx/DeviceManagerDx.h"
 #endif
-#include "mozilla/ipc/CrashReporterHost.h"
 #include "mozilla/layers/APZInputBridgeChild.h"
 #include "mozilla/layers/LayerTreeOwnerTracker.h"
 #include "mozilla/Unused.h"
@@ -89,19 +88,6 @@ base::ProcessHandle GPUChild::GetChildProcessHandle() {
   return mHost->GetChildProcessHandle();
 }
 
-PAPZInputBridgeChild* GPUChild::AllocPAPZInputBridgeChild(
-    const LayersId& aLayersId) {
-  APZInputBridgeChild* child = new APZInputBridgeChild();
-  child->AddRef();
-  return child;
-}
-
-bool GPUChild::DeallocPAPZInputBridgeChild(PAPZInputBridgeChild* aActor) {
-  APZInputBridgeChild* child = static_cast<APZInputBridgeChild*>(aActor);
-  child->Release();
-  return true;
-}
-
 mozilla::ipc::IPCResult GPUChild::RecvInitComplete(const GPUDeviceData& aData) {
   // We synchronously requested GPU parameters before this arrived.
   if (mGPUReady) {
@@ -128,14 +114,6 @@ mozilla::ipc::IPCResult GPUChild::RecvGraphicsError(const nsCString& aError) {
     message << "GP+" << aError.get();
     lf->UpdateStringsVector(message.str());
   }
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult GPUChild::RecvInitCrashReporter(
-    Shmem&& aShmem, const NativeThreadId& aThreadId) {
-  mCrashReporter = MakeUnique<ipc::CrashReporterHost>(GeckoProcessType_GPU,
-                                                      aShmem, aThreadId);
-
   return IPC_OK();
 }
 
@@ -250,10 +228,7 @@ mozilla::ipc::IPCResult GPUChild::RecvFinishMemoryReport(
 
 void GPUChild::ActorDestroy(ActorDestroyReason aWhy) {
   if (aWhy == AbnormalShutdown) {
-    if (mCrashReporter) {
-      mCrashReporter->GenerateCrashReport(OtherPid());
-      mCrashReporter = nullptr;
-    }
+    GenerateCrashReport(OtherPid());
 
     Telemetry::Accumulate(
         Telemetry::SUBPROCESS_ABNORMAL_ABORT,

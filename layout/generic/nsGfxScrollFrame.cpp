@@ -473,8 +473,24 @@ bool nsHTMLScrollFrame::TryLayout(ScrollReflowInput* aState,
                std::max(0, compositionSize.height - hScrollbarDesiredHeight));
   }
 
-  nsRect scrolledRect = mHelper.GetUnsnappedScrolledRectInternal(
-      aState->mContentsOverflowAreas.ScrollableOverflow(), scrollPortSize);
+  nsRect overflowRect = aState->mContentsOverflowAreas.ScrollableOverflow();
+  // If the content height expanded by the minimum-scale will be taller than
+  // the scrollable overflow area, we need to expand the area here to tell
+  // properly whether we need to render the overlay vertical scrollbar.
+  // NOTE: This expanded size should NOT be used for non-overley scrollbars
+  // cases since putting the vertical non-overlay scrollbar will make the
+  // content width narrow a little bit, which in turn the minimum scale value
+  // becomes a bit bigger than before, then the vertical scrollbar is no longer
+  // needed, which means the content width becomes the original width, then the
+  // minimum-scale is changed to the original one, and so forth.
+  if (mHelper.UsesOverlayScrollbars() && mHelper.mIsUsingMinimumScaleSize &&
+      mHelper.mMinimumScaleSize.height > overflowRect.YMost()) {
+    MOZ_ASSERT(StaticPrefs::layout_viewport_contains_no_contents_area());
+    overflowRect.height +=
+        mHelper.mMinimumScaleSize.height - overflowRect.YMost();
+  }
+  nsRect scrolledRect =
+      mHelper.GetUnsnappedScrolledRectInternal(overflowRect, scrollPortSize);
   nscoord oneDevPixel = aState->mBoxState.PresContext()->DevPixelsToAppUnits(1);
 
   if (!aForce) {
@@ -623,11 +639,11 @@ void nsHTMLScrollFrame::ReflowScrolledFrame(ScrollReflowInput* aState,
   nsReflowStatus status;
   // No need to pass a true container-size to ReflowChild or
   // FinishReflowChild, because it's only used there when positioning
-  // the frame (i.e. if NS_FRAME_NO_MOVE_FRAME isn't set)
+  // the frame (i.e. if ReflowChildFlags::NoMoveFrame isn't set)
   const nsSize dummyContainerSize;
   ReflowChild(mHelper.mScrolledFrame, presContext, *aMetrics, kidReflowInput,
-              wm, LogicalPoint(wm), dummyContainerSize, NS_FRAME_NO_MOVE_FRAME,
-              status);
+              wm, LogicalPoint(wm), dummyContainerSize,
+              ReflowChildFlags::NoMoveFrame, status);
 
   mHelper.mHasHorizontalScrollbar = didHaveHorizontalScrollbar;
   mHelper.mHasVerticalScrollbar = didHaveVerticalScrollbar;
@@ -637,9 +653,10 @@ void nsHTMLScrollFrame::ReflowScrolledFrame(ScrollReflowInput* aState,
   // resize here would size it to the natural height of the frame,
   // which will usually be different from the scrollport height;
   // invalidating the difference will cause unnecessary repainting.
-  FinishReflowChild(mHelper.mScrolledFrame, presContext, *aMetrics,
-                    &kidReflowInput, wm, LogicalPoint(wm), dummyContainerSize,
-                    NS_FRAME_NO_MOVE_FRAME | NS_FRAME_NO_SIZE_VIEW);
+  FinishReflowChild(
+      mHelper.mScrolledFrame, presContext, *aMetrics, &kidReflowInput, wm,
+      LogicalPoint(wm), dummyContainerSize,
+      ReflowChildFlags::NoMoveFrame | ReflowChildFlags::NoSizeView);
 
   // XXX Some frames (e.g., nsPluginFrame, nsFrameFrame, nsTextFrame) don't
   // bother setting their mOverflowArea. This is wrong because every frame
@@ -855,7 +872,7 @@ void nsHTMLScrollFrame::PlaceScrollArea(ScrollReflowInput& aState,
   // might create its own.
   nsContainerFrame::SyncFrameViewAfterReflow(
       scrolledFrame->PresContext(), scrolledFrame, scrolledFrame->GetView(),
-      scrolledArea, 0);
+      scrolledArea, ReflowChildFlags::Default);
 }
 
 nscoord nsHTMLScrollFrame::GetIntrinsicVScrollbarWidth(
@@ -1676,7 +1693,7 @@ nsresult nsXULScrollFrame::GetFrameName(nsAString& aResult) const {
 
 NS_IMETHODIMP
 nsXULScrollFrame::DoXULLayout(nsBoxLayoutState& aState) {
-  uint32_t flags = aState.LayoutFlags();
+  ReflowChildFlags flags = aState.LayoutFlags();
   nsresult rv = XULLayout(aState);
   aState.SetLayoutFlags(flags);
 
@@ -2752,8 +2769,11 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
   // clamped target position can be different from the current position, so
   // we don't take the early exit, but conceptually we still want to avoid
   // updating |mLastScrollOrigin| and clobbering the visual scroll offset.
+  // We only do this if the visual and layout scroll offsets can diverge
+  // in the first place, because it causes various regressions (bug 1543485
+  // tracks a proper fix).
   bool suppressScrollOriginChange = false;
-  if (aPt == curPos) {
+  if (presContext->PresShell()->GetIsViewportOverridden() && aPt == curPos) {
     suppressScrollOriginChange = true;
   }
 
@@ -2803,12 +2823,20 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
   nsPoint dist(std::abs(pt.x - mLastUpdateFramesPos.x),
                std::abs(pt.y - mLastUpdateFramesPos.y));
   nsSize visualViewportSize = GetVisualViewportSize();
-  nscoord horzAllowance =
-      std::max(visualViewportSize.width / std::max(sHorzScrollFraction, 1),
-               AppUnitsPerCSSPixel());
-  nscoord vertAllowance =
-      std::max(visualViewportSize.height / std::max(sVertScrollFraction, 1),
-               AppUnitsPerCSSPixel());
+  nscoord horzAllowance = std::max(
+      visualViewportSize.width /
+          std::max(
+              StaticPrefs::
+                  layout_framevisibility_amountscrollbeforeupdatehorizontal(),
+              1),
+      AppUnitsPerCSSPixel());
+  nscoord vertAllowance = std::max(
+      visualViewportSize.height /
+          std::max(
+              StaticPrefs::
+                  layout_framevisibility_amountscrollbeforeupdatevertical(),
+              1),
+      AppUnitsPerCSSPixel());
   if (dist.x >= horzAllowance || dist.y >= vertAllowance) {
     needFrameVisibilityUpdate = true;
   }
@@ -3241,10 +3269,6 @@ bool ScrollFrameHelper::sFrameVisPrefsCached = false;
 uint32_t ScrollFrameHelper::sHorzExpandScrollPort = 0;
 /* static */
 uint32_t ScrollFrameHelper::sVertExpandScrollPort = 1;
-/* static */
-int32_t ScrollFrameHelper::sHorzScrollFraction = 2;
-/* static */
-int32_t ScrollFrameHelper::sVertScrollFraction = 2;
 
 /* static */
 void ScrollFrameHelper::EnsureFrameVisPrefsCached() {
@@ -3255,14 +3279,6 @@ void ScrollFrameHelper::EnsureFrameVisPrefsCached() {
     Preferences::AddUintVarCache(&sVertExpandScrollPort,
                                  "layout.framevisibility.numscrollportheights",
                                  1);
-
-    Preferences::AddIntVarCache(
-        &sHorzScrollFraction,
-        "layout.framevisibility.amountscrollbeforeupdatehorizontal", 2);
-    Preferences::AddIntVarCache(
-        &sVertScrollFraction,
-        "layout.framevisibility.amountscrollbeforeupdatevertical", 2);
-
     sFrameVisPrefsCached = true;
   }
 }
@@ -5354,10 +5370,10 @@ bool nsXULScrollFrame::AddRemoveScrollbar(bool& aHasScrollbar, nscoord& aXY,
 
 void nsXULScrollFrame::LayoutScrollArea(nsBoxLayoutState& aState,
                                         const nsPoint& aScrollPosition) {
-  uint32_t oldflags = aState.LayoutFlags();
+  ReflowChildFlags oldflags = aState.LayoutFlags();
   nsRect childRect = nsRect(mHelper.mScrollPort.TopLeft() - aScrollPosition,
                             mHelper.mScrollPort.Size());
-  int32_t flags = NS_FRAME_NO_MOVE_VIEW;
+  ReflowChildFlags flags = ReflowChildFlags::NoMoveView;
 
   nsSize minSize = mHelper.mScrolledFrame->GetXULMinSize(aState);
 
@@ -5858,11 +5874,12 @@ void ScrollFrameHelper::UpdateMinimumScaleSize(
   mMinimumScaleSize = CSSSize::ToAppUnits(ScreenSize(displaySize) / minScale);
 
   // Clamp the min-scale size so it's not taller than the content height.
-  // TODO: Bug 1508177: We can drop this condition once after we shrink the
-  // content even if no content area gets visible.
-  mMinimumScaleSize =
-      Min(mMinimumScaleSize,
-          nsSize(aScrollableOverflow.XMost(), aScrollableOverflow.YMost()));
+  // TODO: Bug 1571599: Drop this check.
+  if (!StaticPrefs::layout_viewport_contains_no_contents_area()) {
+    mMinimumScaleSize =
+        Min(mMinimumScaleSize,
+            nsSize(aScrollableOverflow.XMost(), aScrollableOverflow.YMost()));
+  }
 
   // Ensure the minimum-scale size is never smaller than the ICB size.
   // That could happen if a page has a meta viewport tag with large explicitly
@@ -6151,11 +6168,8 @@ void ScrollFrameHelper::LayoutScrollbars(nsBoxLayoutState& aState,
 
   bool hasResizer = HasResizer();
   bool scrollbarOnLeft = !IsScrollbarOnRight();
-  bool overlayScrollBars =
-      LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars) ||
-      presShell->GetDocument()->InRDMPane();
-  bool overlayScrollBarsWithZoom =
-      overlayScrollBars && mIsRoot && presShell->IsVisualViewportSizeSet();
+  bool overlayScrollBarsWithZoom = UsesOverlayScrollbars() && mIsRoot &&
+                                   presShell->IsVisualViewportSizeSet();
 
   nsSize scrollPortClampingSize = mScrollPort.Size();
   double res = 1.0;
@@ -6621,7 +6635,7 @@ void ScrollFrameHelper::RestoreState(PresState* aState) {
 
   if (mIsRoot) {
     mOuter->PresShell()->SetResolutionAndScaleTo(
-        aState->resolution(), ResolutionChangeOrigin::MainThread);
+        aState->resolution(), ResolutionChangeOrigin::MainThreadRestore);
   }
 }
 
@@ -6983,6 +6997,10 @@ bool ScrollFrameHelper::UsesContainerScrolling() const {
     return mIsRoot;
   }
   return false;
+}
+
+bool ScrollFrameHelper::UsesOverlayScrollbars() const {
+  return Document::UseOverlayScrollbars(mOuter->PresShell()->GetDocument());
 }
 
 bool ScrollFrameHelper::DragScroll(WidgetEvent* aEvent) {

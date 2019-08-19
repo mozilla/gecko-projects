@@ -52,18 +52,6 @@ already_AddRefed<MediaStreamAudioSourceNode> MediaStreamAudioSourceNode::Create(
     return nullptr;
   }
 
-  if (aAudioContext.Graph() !=
-      aOptions.mMediaStream->GetPlaybackStream()->Graph()) {
-    nsCOMPtr<nsPIDOMWindowInner> pWindow = aAudioContext.GetParentObject();
-    Document* document = pWindow ? pWindow->GetExtantDoc() : nullptr;
-    nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                    NS_LITERAL_CSTRING("Web Audio"), document,
-                                    nsContentUtils::eDOM_PROPERTIES,
-                                    "MediaStreamAudioSourceNodeDifferentRate");
-    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-    return nullptr;
-  }
-
   RefPtr<MediaStreamAudioSourceNode> node =
       new MediaStreamAudioSourceNode(&aAudioContext, LockOnTrackPicked);
 
@@ -82,16 +70,9 @@ void MediaStreamAudioSourceNode::Init(DOMMediaStream* aMediaStream,
     return;
   }
 
-  MediaStream* inputStream = aMediaStream->GetPlaybackStream();
-  MediaStreamGraph* graph = Context()->Graph();
-  if (NS_WARN_IF(graph != inputStream->Graph())) {
-    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
-    return;
-  }
-
   mInputStream = aMediaStream;
   AudioNodeEngine* engine = new MediaStreamAudioSourceNodeEngine(this);
-  mStream = AudioNodeExternalInputStream::Create(graph, engine);
+  mStream = AudioNodeExternalInputStream::Create(Context()->Graph(), engine);
   mInputStream->AddConsumerToKeepAlive(ToSupports(this));
 
   mInputStream->RegisterTrackListener(this);
@@ -112,11 +93,23 @@ void MediaStreamAudioSourceNode::Destroy() {
 MediaStreamAudioSourceNode::~MediaStreamAudioSourceNode() { Destroy(); }
 
 void MediaStreamAudioSourceNode::AttachToTrack(
-    const RefPtr<MediaStreamTrack>& aTrack) {
+    const RefPtr<MediaStreamTrack>& aTrack, ErrorResult& aRv) {
   MOZ_ASSERT(!mInputTrack);
   MOZ_ASSERT(aTrack->AsAudioStreamTrack());
+  MOZ_DIAGNOSTIC_ASSERT(!aTrack->Ended());
 
   if (!mStream) {
+    return;
+  }
+
+  if (NS_WARN_IF(Context()->Graph() != aTrack->Graph())) {
+    nsCOMPtr<nsPIDOMWindowInner> pWindow = Context()->GetParentObject();
+    Document* document = pWindow ? pWindow->GetExtantDoc() : nullptr;
+    nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+                                    NS_LITERAL_CSTRING("Web Audio"), document,
+                                    nsContentUtils::eDOM_PROPERTIES,
+                                    "MediaStreamAudioSourceNodeDifferentRate");
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return;
   }
 
@@ -170,8 +163,10 @@ void MediaStreamAudioSourceNode::AttachToRightTrack(
       }
     }
 
-    AttachToTrack(track);
-    MarkActive();
+    if (!track->Ended()) {
+      AttachToTrack(track, aRv);
+      MarkActive();
+    }
     return;
   }
 
@@ -192,7 +187,7 @@ void MediaStreamAudioSourceNode::NotifyTrackAdded(
     return;
   }
 
-  AttachToTrack(aTrack);
+  AttachToTrack(aTrack, IgnoreErrors());
 }
 
 void MediaStreamAudioSourceNode::NotifyTrackRemoved(

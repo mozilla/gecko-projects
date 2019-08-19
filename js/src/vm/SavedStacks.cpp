@@ -347,7 +347,7 @@ bool SavedFrame::finishSavedFrameInit(JSContext* cx, HandleObject ctor,
   return FreezeObject(cx, proto);
 }
 
-static const ClassOps SavedFrameClassOps = {
+static const JSClassOps SavedFrameClassOps = {
     nullptr,               // addProperty
     nullptr,               // delProperty
     nullptr,               // enumerate
@@ -371,14 +371,14 @@ const ClassSpec SavedFrame::classSpec_ = {
     SavedFrame::finishSavedFrameInit,
     ClassSpec::DontDefineConstructor};
 
-/* static */ const Class SavedFrame::class_ = {
+/* static */ const JSClass SavedFrame::class_ = {
     "SavedFrame",
     JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(SavedFrame::JSSLOT_COUNT) |
         JSCLASS_HAS_CACHED_PROTO(JSProto_SavedFrame) |
         JSCLASS_FOREGROUND_FINALIZE,
     &SavedFrameClassOps, &SavedFrame::classSpec_};
 
-const Class SavedFrame::protoClass_ = {
+const JSClass SavedFrame::protoClass_ = {
     js_Object_str, JSCLASS_HAS_CACHED_PROTO(JSProto_SavedFrame),
     JS_NULL_CLASS_OPS, &SavedFrame::classSpec_};
 
@@ -400,7 +400,7 @@ const Class SavedFrame::protoClass_ = {
     JS_PS_END};
 
 /* static */
-void SavedFrame::finalize(FreeOp* fop, JSObject* obj) {
+void SavedFrame::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
   JSPrincipals* p = obj->as<SavedFrame>().getPrincipals();
   if (p) {

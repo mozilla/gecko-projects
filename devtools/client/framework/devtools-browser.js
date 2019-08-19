@@ -30,7 +30,12 @@ loader.lazyRequireGetter(
   "devtools/client/framework/toolbox",
   true
 );
-loader.lazyRequireGetter(this, "DebuggerServer", "devtools/server/main", true);
+loader.lazyRequireGetter(
+  this,
+  "DebuggerServer",
+  "devtools/server/debugger-server",
+  true
+);
 loader.lazyRequireGetter(
   this,
   "DebuggerClient",
@@ -51,7 +56,7 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(
   this,
   "ResponsiveUIManager",
-  "devtools/client/responsive.html/manager",
+  "devtools/client/responsive/manager",
   true
 );
 loader.lazyRequireGetter(
@@ -293,7 +298,9 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
         toolDefinition.preventClosingOnKey ||
         toolbox.hostType == Toolbox.HostType.WINDOW
       ) {
-        toolbox.raise();
+        if (!toolDefinition.preventRaisingOnKey) {
+          toolbox.raise();
+        }
       } else {
         toolbox.destroy();
       }
@@ -352,8 +359,10 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
         BrowserToolboxProcess.init();
         break;
       case "browserConsole":
-        const { HUDService } = require("devtools/client/webconsole/hudservice");
-        HUDService.openBrowserConsoleOrFocus();
+        const {
+          BrowserConsoleManager,
+        } = require("devtools/client/webconsole/browser-console-manager");
+        BrowserConsoleManager.openBrowserConsoleOrFocus();
         break;
       case "responsiveDesignMode":
         ResponsiveUIManager.toggle(window, window.gBrowser.selectedTab, {
@@ -362,13 +371,6 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
         break;
       case "scratchpad":
         ScratchpadManager.openScratchpad();
-        break;
-      case "inspectorMac":
-        await gDevToolsBrowser.selectToolCommand(
-          window,
-          "inspector",
-          startTime
-        );
         break;
     }
   },
@@ -513,7 +515,7 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
   /**
    * Add this DevTools's presence to a browser window's document
    *
-   * @param {XULDocument} doc
+   * @param {HTMLDocument} doc
    *        The document to which devtools should be hooked to.
    */
   _registerBrowserWindow(win) {

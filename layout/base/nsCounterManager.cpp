@@ -176,9 +176,9 @@ void nsCounterList::RecalcAll() {
     SetScope(node);
     if (node->IsContentBasedReset()) {
       node->mValueAfter = 1;
-    } else if ((node->mType == nsCounterChangeNode::INCREMENT ||
-                node->mType == nsCounterChangeNode::SET) &&
-               node->mScopeStart && node->mScopeStart->IsContentBasedReset()) {
+    } else if (node->mType == nsCounterChangeNode::INCREMENT &&
+               node->mScopeStart && node->mScopeStart->IsContentBasedReset() &&
+               node->mPseudoFrame->StyleDisplay()->IsListItem()) {
       ++node->mScopeStart->mValueAfter;
     }
   }
@@ -203,8 +203,7 @@ bool nsCounterManager::AddCounterChanges(nsIFrame* aFrame) {
   // We inherit `display` for some anonymous boxes, but we don't want them to
   // increment the list-item counter.
   const bool requiresListItemIncrement =
-      aFrame->StyleDisplay()->mDisplay == StyleDisplay::ListItem &&
-      !aFrame->Style()->IsAnonBox();
+      aFrame->StyleDisplay()->IsListItem() && !aFrame->Style()->IsAnonBox();
 
   const nsStyleContent* styleContent = aFrame->StyleContent();
 

@@ -168,6 +168,10 @@
 
 #include "DOMMatrix.h"
 
+#if defined(ACCESSIBILITY) && defined(DEBUG)
+#  include "nsAccessibilityService.h"
+#endif
+
 using mozilla::gfx::Matrix4x4;
 
 namespace mozilla {
@@ -1684,8 +1688,15 @@ nsresult Element::BindToTree(BindContext& aContext, nsINode& aParent) {
     }
   }
 
-  // Now recurse into our kids
+  // Call BindToTree on shadow root children.
   nsresult rv;
+  if (ShadowRoot* shadowRoot = GetShadowRoot()) {
+    rv = shadowRoot->Bind();
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  // Now recurse into our kids. Ensure this happens after binding the shadow
+  // root so that directionality of slots is updated.
   {
     BindContext::NestingLevel level(aContext, *this);
     for (nsIContent* child = GetFirstChild(); child;
@@ -1717,12 +1728,6 @@ nsresult Element::BindToTree(BindContext& aContext, nsINode& aParent) {
     // anything... need to fix that.
     // If MayHaveStyle() is true, we must be an nsStyledElement
     static_cast<nsStyledElement*>(this)->ReparseStyleAttribute(false, false);
-  }
-
-  // Call BindToTree on shadow root children.
-  if (ShadowRoot* shadowRoot = GetShadowRoot()) {
-    rv = shadowRoot->Bind();
-    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   // FIXME(emilio): Why is this needed? The element shouldn't even be styled in
@@ -1861,6 +1866,11 @@ void Element::UnbindFromTree(bool aNullParent) {
                  "propagated scrollbar styles) - that's dangerous...");
     }
   }
+
+#  ifdef ACCESSIBILITY
+  MOZ_ASSERT(!GetAccService() || !GetAccService()->HasAccessible(this),
+             "An accessible for this element still exists!");
+#  endif
 #endif
 
   // Ensure that CSS transitions don't continue on an element at a
@@ -4113,19 +4123,16 @@ void Element::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
 
     // Now measure just the ComputedValues (and style structs) under
     // mServoData. This counts towards the relevant fields in |aSizes|.
-    RefPtr<ComputedStyle> sc;
-    if (Servo_Element_HasPrimaryComputedValues(this)) {
-      sc = Servo_Element_GetPrimaryComputedValues(this).Consume();
-      if (!aSizes.mState.HaveSeenPtr(sc.get())) {
-        sc->AddSizeOfIncludingThis(aSizes, &aSizes.mLayoutComputedValuesDom);
+    if (auto* style = Servo_Element_GetMaybeOutOfDateStyle(this)) {
+      if (!aSizes.mState.HaveSeenPtr(style)) {
+        style->AddSizeOfIncludingThis(aSizes, &aSizes.mLayoutComputedValuesDom);
       }
 
       for (size_t i = 0; i < PseudoStyle::kEagerPseudoCount; i++) {
-        if (Servo_Element_HasPseudoComputedValues(this, i)) {
-          sc = Servo_Element_GetPseudoComputedValues(this, i).Consume();
-          if (!aSizes.mState.HaveSeenPtr(sc.get())) {
-            sc->AddSizeOfIncludingThis(aSizes,
-                                       &aSizes.mLayoutComputedValuesDom);
+        if (auto* style = Servo_Element_GetMaybeOutOfDatePseudoStyle(this, i)) {
+          if (!aSizes.mState.HaveSeenPtr(style)) {
+            style->AddSizeOfIncludingThis(aSizes,
+                                          &aSizes.mLayoutComputedValuesDom);
           }
         }
       }

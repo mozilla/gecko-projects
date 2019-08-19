@@ -55,7 +55,7 @@ class WindowGlobalParent final : public WindowGlobalActor,
   }
 
   // Has this actor been shut down
-  bool IsClosed() { return mIPCClosed; }
+  bool IsClosed() { return !CanSend(); }
 
   // Check if this actor is managed by PInProcess, as-in the document is loaded
   // in-process.
@@ -90,7 +90,7 @@ class WindowGlobalParent final : public WindowGlobalActor,
   // which this WindowGlobal is a part of. This will be the nsFrameLoader
   // holding the BrowserParent for remote tabs, and the root content frameloader
   // for non-remote tabs.
-  nsFrameLoader* GetRootFrameLoader() { return mFrameLoader; }
+  already_AddRefed<nsFrameLoader> GetRootFrameLoader();
 
   // The current URI which loaded in the document.
   nsIURI* GetDocumentURI() override { return mDocumentURI; }
@@ -139,6 +139,8 @@ class WindowGlobalParent final : public WindowGlobalActor,
   JSWindowActor::Type GetSide() override { return JSWindowActor::Type::Parent; }
 
   // IPC messages
+  mozilla::ipc::IPCResult RecvLoadURI(dom::BrowsingContext* aTargetBC,
+                                      nsDocShellLoadState* aLoadState);
   mozilla::ipc::IPCResult RecvUpdateDocumentURI(nsIURI* aURI);
   mozilla::ipc::IPCResult RecvSetIsInitialDocument(bool aIsInitialDocument) {
     mIsInitialDocument = aIsInitialDocument;
@@ -156,7 +158,7 @@ class WindowGlobalParent final : public WindowGlobalActor,
 
   void DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
                             const Maybe<IntRect>& aRect, float aScale,
-                            nscolor aBackgroundColor);
+                            nscolor aBackgroundColor, uint32_t aFlags);
 
  private:
   ~WindowGlobalParent();
@@ -165,13 +167,11 @@ class WindowGlobalParent final : public WindowGlobalActor,
   // mutations which may have been made in the actual document.
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
   nsCOMPtr<nsIURI> mDocumentURI;
-  RefPtr<nsFrameLoader> mFrameLoader;
   RefPtr<CanonicalBrowsingContext> mBrowsingContext;
   nsRefPtrHashtable<nsStringHashKey, JSWindowActorParent> mWindowActors;
   uint64_t mInnerWindowId;
   uint64_t mOuterWindowId;
   bool mInProcess;
-  bool mIPCClosed;
   bool mIsInitialDocument;
 
   // True if this window has a "beforeunload" event listener.

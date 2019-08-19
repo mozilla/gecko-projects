@@ -18,6 +18,7 @@
 #include "mozilla/ipc/PParentToChildStreamParent.h"
 #include "mozilla/ipc/PChildToParentStreamParent.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/DataMutex.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/HalTypes.h"
 #include "mozilla/LinkedList.h"
@@ -77,6 +78,7 @@ class SandboxBrokerPolicyFactory;
 #endif
 
 class PreallocatedProcessManagerImpl;
+class BenchmarkStorageParent;
 
 using mozilla::loader::PScriptCacheParent;
 
@@ -113,6 +115,7 @@ class MemoryReport;
 class TabContext;
 class GetFilesHelper;
 class MemoryReportRequestHost;
+class RemoteWorkerManager;
 struct CancelContentJSOptions;
 
 #define NS_CONTENTPARENT_IID                         \
@@ -144,6 +147,7 @@ class ContentParent final : public PContentParent,
 
   friend class mozilla::PreallocatedProcessManagerImpl;
   friend class PContentParent;
+  friend class mozilla::dom::RemoteWorkerManager;
 #ifdef FUZZING
   friend class mozilla::ipc::ProtocolFuzzerHelper;
 #endif
@@ -303,6 +307,8 @@ class ContentParent final : public PContentParent,
       const uint32_t& channelId, FileDescriptor* connection);
   mozilla::ipc::IPCResult RecvCreateReplayingProcess(
       const uint32_t& aChannelId);
+  mozilla::ipc::IPCResult RecvGenerateReplayCrashReport(
+      const uint32_t& aChannelId);
 
   mozilla::ipc::IPCResult RecvCreateGMPService();
 
@@ -358,10 +364,6 @@ class ContentParent final : public PContentParent,
   TestShellParent* GetTestShellSingleton();
 
   jsipc::CPOWManager* GetCPOWManager() override;
-
-  static void UnregisterRemoteFrame(const TabId& aTabId,
-                                    const ContentParentId& aCpId,
-                                    bool aMarkedDestroying);
 
   // This method can be called on any thread.
   void RegisterRemoteWorkerActor();
@@ -477,14 +479,8 @@ class ContentParent final : public PContentParent,
                             nsICycleCollectorLogSink* aSink,
                             nsIDumpGCAndCCLogsCallback* aCallback);
 
-  mozilla::ipc::IPCResult RecvUnregisterRemoteFrame(
-      const TabId& aTabId, const ContentParentId& aCpId,
-      const bool& aMarkedDestroying);
-
   mozilla::ipc::IPCResult RecvNotifyTabDestroying(const TabId& aTabId,
                                                   const ContentParentId& aCpId);
-
-  nsTArray<TabContext> GetManagedTabContext();
 
   POfflineCacheUpdateParent* AllocPOfflineCacheUpdateParent(
       const URIParams& aManifestURI, const URIParams& aDocumentURI,
@@ -764,7 +760,7 @@ class ContentParent final : public PContentParent,
    * Decide whether the process should be kept alive even when it would normally
    * be shut down, for example when all its tabs are closed.
    */
-  bool ShouldKeepProcessAlive() const;
+  bool ShouldKeepProcessAlive();
 
   /**
    * Mark this ContentParent as "troubled". This means that it is still alive,
@@ -789,6 +785,8 @@ class ContentParent final : public PContentParent,
     // Close the channel with error and let the subprocess clean up itself.
     CLOSE_CHANNEL_WITH_ERROR,
   };
+
+  void MaybeAsyncSendShutDownMessage();
 
   /**
    * Exit the subprocess and vamoose.  After this call IsAlive()
@@ -840,25 +838,11 @@ class ContentParent final : public PContentParent,
 
   bool DeallocPRemoteSpellcheckEngineParent(PRemoteSpellcheckEngineParent*);
 
-  PBrowserParent* AllocPBrowserParent(const TabId& aTabId,
-                                      const TabId& aSameTabGroupAs,
-                                      const IPCTabContext& aContext,
-                                      const uint32_t& aChromeFlags,
-                                      const ContentParentId& aCpId,
-                                      BrowsingContext* aBrowsingContext,
-                                      const bool& aIsForBrowser);
-
-  bool DeallocPBrowserParent(PBrowserParent* frame);
-
   mozilla::ipc::IPCResult RecvConstructPopupBrowser(
-      ManagedEndpoint<PBrowserParent>&& actor, const TabId& tabId,
-      const IPCTabContext& context, BrowsingContext* aBrowsingContext,
+      ManagedEndpoint<PBrowserParent>&& actor,
+      ManagedEndpoint<PWindowGlobalParent>&& windowEp, const TabId& tabId,
+      const IPCTabContext& context, const WindowGlobalInit& initialWindowInit,
       const uint32_t& chromeFlags);
-
-  PIPCBlobInputStreamParent* AllocPIPCBlobInputStreamParent(
-      const nsID& aID, const uint64_t& aSize);
-
-  bool DeallocPIPCBlobInputStreamParent(PIPCBlobInputStreamParent* aActor);
 
   mozilla::ipc::IPCResult RecvIsSecureURI(
       const uint32_t& aType, const URIParams& aURI, const uint32_t& aFlags,
@@ -896,7 +880,7 @@ class ContentParent final : public PContentParent,
   bool DeallocPPSMContentDownloaderParent(
       PPSMContentDownloaderParent* aDownloader);
 
-  PExternalHelperAppParent* AllocPExternalHelperAppParent(
+  already_AddRefed<PExternalHelperAppParent> AllocPExternalHelperAppParent(
       const Maybe<URIParams>& aUri,
       const Maybe<mozilla::net::LoadInfoArgs>& aLoadInfoArgs,
       const nsCString& aMimeContentType, const nsCString& aContentDisposition,
@@ -904,8 +888,6 @@ class ContentParent final : public PContentParent,
       const nsString& aContentDispositionFilename, const bool& aForceSave,
       const int64_t& aContentLength, const bool& aWasFileChannel,
       const Maybe<URIParams>& aReferrer, PBrowserParent* aBrowser);
-
-  bool DeallocPExternalHelperAppParent(PExternalHelperAppParent* aService);
 
   mozilla::ipc::IPCResult RecvPExternalHelperAppConstructor(
       PExternalHelperAppParent* actor, const Maybe<URIParams>& uri,
@@ -916,13 +898,15 @@ class ContentParent final : public PContentParent,
       const int64_t& aContentLength, const bool& aWasFileChannel,
       const Maybe<URIParams>& aReferrer, PBrowserParent* aBrowser) override;
 
-  PHandlerServiceParent* AllocPHandlerServiceParent();
-
-  bool DeallocPHandlerServiceParent(PHandlerServiceParent*);
+  already_AddRefed<PHandlerServiceParent> AllocPHandlerServiceParent();
 
   PMediaParent* AllocPMediaParent();
 
   bool DeallocPMediaParent(PMediaParent* aActor);
+
+  PBenchmarkStorageParent* AllocPBenchmarkStorageParent();
+
+  bool DeallocPBenchmarkStorageParent(PBenchmarkStorageParent* aActor);
 
   PPresentationParent* AllocPPresentationParent();
 
@@ -1060,7 +1044,7 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvCommitBrowsingContextTransaction(
       BrowsingContext* aContext, BrowsingContext::Transaction&& aTransaction,
-      BrowsingContext::FieldEpochs&& aEpochs);
+      uint64_t aEpoch);
 
   mozilla::ipc::IPCResult RecvFirstIdle();
 
@@ -1184,6 +1168,10 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvBHRThreadHang(const HangDetails& aHangDetails);
 
+  mozilla::ipc::IPCResult RecvAutomaticStorageAccessCanBeGranted(
+      const Principal& aPrincipal,
+      AutomaticStorageAccessCanBeGrantedResolver&& aResolver);
+
   mozilla::ipc::IPCResult RecvFirstPartyStorageAccessGrantedForOrigin(
       const Principal& aParentPrincipal, const Principal& aTrackingPrincipal,
       const nsCString& aTrackingOrigin, const nsCString& aGrantedOrigin,
@@ -1192,6 +1180,12 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvStoreUserInteractionAsPermission(
       const Principal& aPrincipal);
+
+  mozilla::ipc::IPCResult RecvNotifyMediaActiveChanged(
+      BrowsingContext* aContext, bool aActive);
+
+  mozilla::ipc::IPCResult RecvNotifyMediaAudibleChanged(
+      BrowsingContext* aContext, bool aAudible);
 
   // Notify the ContentChild to enable the input event prioritization when
   // initializing.
@@ -1219,6 +1213,11 @@ class ContentParent final : public PContentParent,
 
   void OnBrowsingContextGroupSubscribe(BrowsingContextGroup* aGroup);
   void OnBrowsingContextGroupUnsubscribe(BrowsingContextGroup* aGroup);
+
+  // See `BrowsingContext::mEpochs` for an explanation of this field.
+  uint64_t GetBrowsingContextFieldEpoch() const {
+    return mBrowsingContextFieldEpoch;
+  }
 
   void UpdateNetworkLinkType();
 
@@ -1255,11 +1254,24 @@ class ContentParent final : public PContentParent,
   // timer.
   nsCOMPtr<nsITimer> mForceKillTimer;
 
-  // Number of active remote workers. This value is increased when a
-  // RemoteWorkerParent actor is created for this ContentProcess and it is
-  // decreased when the actor is destroyed.
+  // `mCount` is increased when a RemoteWorkerParent actor is created for this
+  // ContentProcess and it is decreased when the actor is destroyed.
+  //
+  // `mShutdownStarted` is flipped to `true` when a runnable that calls
+  // `ShutDownProcess` is dispatched; it's needed because the corresponding
+  // Content Process may be shutdown if there's no remote worker actors, and
+  // decrementing `mCount` and the call to `ShutDownProcess` are async. So,
+  // when a worker is going to be spawned and we see that `mCount` is 0,
+  // we can decide whether or not to use that process based on the value of
+  // `mShutdownStarted.`
+  //
   // It's touched on PBackground thread and on main-thread.
-  Atomic<uint32_t> mRemoteWorkerActors;
+  struct RemoteWorkerActorData {
+    uint32_t mCount = 0;
+    bool mShutdownStarted = false;
+  };
+
+  DataMutex<RemoteWorkerActorData> mRemoteWorkerActorData;
 
   // How many tabs we're waiting to finish their destruction
   // sequence.  Precisely, how many BrowserParents have called
@@ -1362,6 +1374,9 @@ class ContentParent final : public PContentParent,
 #endif
 
   nsTHashtable<nsRefPtrHashKey<BrowsingContextGroup>> mGroups;
+
+  // See `BrowsingContext::mEpochs` for an explanation of this field.
+  uint64_t mBrowsingContextFieldEpoch = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(ContentParent, NS_CONTENTPARENT_IID)

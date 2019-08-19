@@ -7,29 +7,27 @@
 #ifndef debugger_Script_h
 #define debugger_Script_h
 
-#include "mozilla/Variant.h"
+#include "jsapi.h"  // for Handle, JSFunctionSpec, JSPropertySpec
 
-#include "jsapi.h"
+#include "NamespaceImports.h"   // for Value, HandleObject, CallArgs
+#include "debugger/Debugger.h"  // for DebuggerScriptReferent
+#include "gc/Rooting.h"         // for HandleNativeObject
+#include "vm/NativeObject.h"    // for NativeObject
 
-#include "debugger/Debugger.h"
-#include "gc/Cell.h"
-#include "gc/Rooting.h"
-#include "js/CallArgs.h"
-#include "js/Class.h"
-#include "js/PropertySpec.h"
-#include "js/RootingAPI.h"
-#include "js/TracingAPI.h"
-#include "js/TypeDecls.h"
-#include "vm/GlobalObject.h"
-#include "vm/JSScript.h"
-#include "vm/NativeObject.h"
-#include "wasm/WasmJS.h"
+class JSObject;
 
 namespace js {
 
+class BaseScript;
+class GlobalObject;
+
+namespace gc {
+struct Cell;
+}
+
 class DebuggerScript : public NativeObject {
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   enum {
     OWNER_SLOT,
@@ -46,7 +44,9 @@ class DebuggerScript : public NativeObject {
                                 Handle<DebuggerScriptReferent> referent,
                                 HandleNativeObject debugger);
 
-  static void trace(JSTracer* trc, JSObject* obj);
+  void trace(JSTracer* trc);
+
+  using ReferentVariant = DebuggerScriptReferent;
 
   inline gc::Cell* getReferentCell() const;
   inline js::BaseScript* getReferentScript() const;
@@ -64,6 +64,7 @@ class DebuggerScript : public NativeObject {
   static bool getDisplayName(JSContext* cx, unsigned argc, Value* vp);
   static bool getUrl(JSContext* cx, unsigned argc, Value* vp);
   static bool getStartLine(JSContext* cx, unsigned argc, Value* vp);
+  static bool getStartColumn(JSContext* cx, unsigned argc, Value* vp);
   static bool getLineCount(JSContext* cx, unsigned argc, Value* vp);
   static bool getSource(JSContext* cx, unsigned argc, Value* vp);
   static bool getSourceStart(JSContext* cx, unsigned argc, Value* vp);
@@ -103,13 +104,14 @@ class DebuggerScript : public NativeObject {
   }
 
  private:
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static const JSPropertySpec properties_[];
   static const JSFunctionSpec methods_[];
 
   class SetPrivateMatcher;
   struct GetStartLineMatcher;
+  struct GetStartColumnMatcher;
   struct GetLineCountMatcher;
   class GetSourceMatcher;
   class GetFormatMatcher;

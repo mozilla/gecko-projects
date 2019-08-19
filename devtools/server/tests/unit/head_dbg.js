@@ -29,7 +29,7 @@ const { NetUtil } = require("resource://gre/modules/NetUtil.jsm");
 const Services = require("Services");
 // Always log packets when running tests. runxpcshelltests.py will throw
 // the output away anyway, unless you give it the --verbose flag.
-Services.prefs.setBoolPref("devtools.debugger.log", true);
+Services.prefs.setBoolPref("devtools.debugger.log", false);
 // Enable remote debugging for the relevant tests.
 Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 
@@ -38,9 +38,9 @@ const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const {
   ActorRegistry,
 } = require("devtools/server/actors/utils/actor-registry");
-const { DebuggerServer } = require("devtools/server/main");
+const { DebuggerServer } = require("devtools/server/debugger-server");
 const { DebuggerServer: WorkerDebuggerServer } = worker.require(
-  "devtools/server/main"
+  "devtools/server/debugger-server"
 );
 const { DebuggerClient } = require("devtools/shared/client/debugger-client");
 const ObjectClient = require("devtools/shared/client/object-client");
@@ -925,15 +925,19 @@ async function setupTestFromUrl(url) {
  * @param Object options
  *        Optional arguments to tweak test environment
  *        - JSPrincipal principal
- *          Principal to use for the debuggee.
+ *          Principal to use for the debuggee. Defaults to systemPrincipal.
  *        - boolean doNotRunWorker
- *          If true, do not run this tests in worker debugger context.
+ *          If true, do not run this tests in worker debugger context. Defaults to false.
+ *        - bool wantXrays
+ *          Whether the debuggee wants Xray vision with respect to same-origin objects
+ *          outside the sandbox. Defaults to true.
  */
 function threadFrontTest(test, options = {}) {
-  let { principal, doNotRunWorker } = options;
-  if (!principal) {
-    principal = systemPrincipal;
-  }
+  const {
+    principal = systemPrincipal,
+    doNotRunWorker = false,
+    wantXrays = true,
+  } = options;
 
   async function runThreadFrontTestWithServer(server, test) {
     // Setup a server and connect a client to it.
@@ -942,7 +946,7 @@ function threadFrontTest(test, options = {}) {
     // Create a custom debuggee and register it to the server.
     // We are using a custom Sandbox as debuggee. Create a new zone because
     // debugger and debuggee must be in different compartments.
-    const debuggee = Cu.Sandbox(principal, { freshZone: true });
+    const debuggee = Cu.Sandbox(principal, { freshZone: true, wantXrays });
     const scriptName = "debuggee.js";
     debuggee.__name = scriptName;
     server.addTestGlobal(debuggee);

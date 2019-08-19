@@ -3085,6 +3085,7 @@ exports.CSS_PROPERTIES = {
       "offset-path",
       "offset-distance",
       "offset-rotate",
+      "offset-anchor",
       "scroll-behavior",
       "scroll-snap-align",
       "scroll-snap-type",
@@ -3153,6 +3154,28 @@ exports.CSS_PROPERTIES = {
       "color-adjust",
       "image-rendering",
       "image-orientation",
+      "dominant-baseline",
+      "text-anchor",
+      "color-interpolation",
+      "color-interpolation-filters",
+      "fill",
+      "fill-opacity",
+      "fill-rule",
+      "shape-rendering",
+      "stroke",
+      "stroke-width",
+      "stroke-linecap",
+      "stroke-linejoin",
+      "stroke-miterlimit",
+      "stroke-opacity",
+      "stroke-dasharray",
+      "stroke-dashoffset",
+      "clip-rule",
+      "marker-start",
+      "marker-mid",
+      "marker-end",
+      "paint-order",
+      "-moz-context-properties",
       "border-collapse",
       "empty-cells",
       "caption-side",
@@ -3194,28 +3217,6 @@ exports.CSS_PROPERTIES = {
       "-moz-user-focus",
       "caret-color",
       "scrollbar-color",
-      "dominant-baseline",
-      "text-anchor",
-      "color-interpolation",
-      "color-interpolation-filters",
-      "fill",
-      "fill-opacity",
-      "fill-rule",
-      "shape-rendering",
-      "stroke",
-      "stroke-width",
-      "stroke-linecap",
-      "stroke-linejoin",
-      "stroke-miterlimit",
-      "stroke-opacity",
-      "stroke-dasharray",
-      "stroke-dashoffset",
-      "clip-rule",
-      "marker-start",
-      "marker-mid",
-      "marker-end",
-      "paint-order",
-      "-moz-context-properties",
       "list-style-position",
       "list-style-type",
       "list-style-image",
@@ -3283,18 +3284,6 @@ exports.CSS_PROPERTIES = {
       "grid-template-areas",
       "column-gap",
       "row-gap",
-      "table-layout",
-      "text-overflow",
-      "text-decoration-line",
-      "text-decoration-style",
-      "text-decoration-color",
-      "initial-letter",
-      "text-decoration-thickness",
-      "ime-mode",
-      "scrollbar-width",
-      "user-select",
-      "-moz-window-dragging",
-      "-moz-force-broken-image-icon",
       "vector-effect",
       "stop-color",
       "stop-opacity",
@@ -3319,6 +3308,18 @@ exports.CSS_PROPERTIES = {
       "rx",
       "ry",
       "r",
+      "table-layout",
+      "text-overflow",
+      "text-decoration-line",
+      "text-decoration-style",
+      "text-decoration-color",
+      "initial-letter",
+      "text-decoration-thickness",
+      "ime-mode",
+      "scrollbar-width",
+      "user-select",
+      "-moz-window-dragging",
+      "-moz-force-broken-image-icon",
       "-moz-box-align",
       "-moz-box-direction",
       "-moz-box-flex",
@@ -5884,29 +5885,20 @@ exports.CSS_PROPERTIES = {
     ],
     "supports": [],
     "values": [
-      "-moz-box",
-      "-moz-deck",
-      "-moz-grid",
-      "-moz-grid-group",
-      "-moz-grid-line",
-      "-moz-groupbox",
-      "-moz-inline-box",
-      "-moz-inline-grid",
-      "-moz-inline-stack",
-      "-moz-popup",
-      "-moz-stack",
       "-webkit-box",
-      "-webkit-flex",
       "-webkit-inline-box",
-      "-webkit-inline-flex",
       "block",
+      "block ruby",
       "contents",
       "flex",
       "flow-root",
+      "flow-root list-item",
       "grid",
       "inherit",
       "initial",
       "inline",
+      "inline flow-root list-item",
+      "inline list-item",
       "inline-block",
       "inline-flex",
       "inline-grid",
@@ -6298,7 +6290,8 @@ exports.CSS_PROPERTIES = {
       "x-large",
       "x-small",
       "xx-large",
-      "xx-small"
+      "xx-small",
+      "xxx-large"
     ]
   },
   "font-family": {
@@ -6392,7 +6385,8 @@ exports.CSS_PROPERTIES = {
       "x-large",
       "x-small",
       "xx-large",
-      "xx-small"
+      "xx-small",
+      "xxx-large"
     ]
   },
   "font-size-adjust": {
@@ -8277,6 +8271,25 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "offset-anchor": {
+    "isInherited": false,
+    "subproperties": [
+      "offset-anchor"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "bottom",
+      "center",
+      "inherit",
+      "initial",
+      "left",
+      "revert",
+      "right",
+      "top",
+      "unset"
+    ]
+  },
   "offset-distance": {
     "isInherited": false,
     "subproperties": [
@@ -9885,7 +9898,8 @@ exports.CSS_PROPERTIES = {
     "subproperties": [
       "text-decoration-line",
       "text-decoration-style",
-      "text-decoration-color"
+      "text-decoration-color",
+      "text-decoration-thickness"
     ],
     "supports": [
       "color"
@@ -9893,11 +9907,13 @@ exports.CSS_PROPERTIES = {
     "values": [
       "COLOR",
       "-moz-none",
+      "auto",
       "blink",
       "currentColor",
       "dashed",
       "dotted",
       "double",
+      "from-font",
       "hsl",
       "hsla",
       "inherit",
@@ -9955,6 +9971,21 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "text-decoration-skip-ink": {
+    "isInherited": true,
+    "subproperties": [
+      "text-decoration-skip-ink"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "none",
+      "revert",
+      "unset"
+    ]
+  },
   "text-decoration-style": {
     "isInherited": false,
     "subproperties": [
@@ -9972,6 +10003,21 @@ exports.CSS_PROPERTIES = {
       "solid",
       "unset",
       "wavy"
+    ]
+  },
+  "text-decoration-thickness": {
+    "isInherited": false,
+    "subproperties": [
+      "text-decoration-thickness"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "from-font",
+      "inherit",
+      "initial",
+      "revert",
+      "unset"
     ]
   },
   "text-emphasis": {
@@ -10185,6 +10231,21 @@ exports.CSS_PROPERTIES = {
       "revert",
       "unset",
       "uppercase"
+    ]
+  },
+  "text-underline-offset": {
+    "isInherited": true,
+    "subproperties": [
+      "text-underline-offset"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "from-font",
+      "inherit",
+      "initial",
+      "revert",
+      "unset"
     ]
   },
   "top": {
@@ -10771,6 +10832,10 @@ exports.PREFERENCES = [
   [
     "font-variation-settings",
     "layout.css.font-variations.enabled"
+  ],
+  [
+    "offset-anchor",
+    "layout.css.motion-path.enabled"
   ],
   [
     "offset-path",

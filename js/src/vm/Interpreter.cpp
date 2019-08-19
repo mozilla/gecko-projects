@@ -25,7 +25,6 @@
 #include "builtin/Eval.h"
 #include "builtin/ModuleObject.h"
 #include "builtin/Promise.h"
-#include "builtin/String.h"
 #include "jit/AtomicOperations.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
@@ -860,7 +859,7 @@ extern bool JS::InstanceofOperator(JSContext* cx, HandleObject obj,
 }
 
 bool js::HasInstance(JSContext* cx, HandleObject obj, HandleValue v, bool* bp) {
-  const Class* clasp = obj->getClass();
+  const JSClass* clasp = obj->getClass();
   RootedValue local(cx, v);
   if (JSHasInstanceOp hasInstance = clasp->getHasInstance()) {
     return hasInstance(cx, obj, &local, bp);
@@ -1794,12 +1793,13 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     COUNT_COVERAGE_PC(REGS.pc);                       \
   JS_END_MACRO
 
-#define SET_SCRIPT(s)                                                       \
-  JS_BEGIN_MACRO                                                            \
-    script = (s);                                                           \
-    MOZ_ASSERT(cx->realm() == script->realm());                             \
-    if (DebugAPI::hasAnyBreakpointsOrStepMode(script) || script->hasScriptCounts()) \
-      activation.enableInterruptsUnconditionally();                         \
+#define SET_SCRIPT(s)                                    \
+  JS_BEGIN_MACRO                                         \
+    script = (s);                                        \
+    MOZ_ASSERT(cx->realm() == script->realm());          \
+    if (DebugAPI::hasAnyBreakpointsOrStepMode(script) || \
+        script->hasScriptCounts())                       \
+      activation.enableInterruptsUnconditionally();      \
   JS_END_MACRO
 
 #define SANITY_CHECKS()              \

@@ -140,7 +140,12 @@ add_task(async function test_clickRemember() {
     );
 
     await checkDoorhangerUsernamePassword("notifyu1", "notifyp1");
+    let promiseNewSavedPassword = TestUtils.topicObserved(
+      "LoginStats:NewSavedPassword",
+      (subject, data) => subject == gBrowser.selectedBrowser
+    );
     clickDoorhangerButton(notif, REMEMBER_BUTTON);
+    await promiseNewSavedPassword;
   });
 
   let logins = Services.logins.getAllLogins();
@@ -303,28 +308,97 @@ add_task(async function test_noPasswordField() {
   );
 });
 
-add_task(async function test_pwOnlyLoginMatchesForm() {
-  info("Check for update popup when existing pw-only login matches form.");
+add_task(async function test_pwOnlyNewLoginMatchesUPForm() {
+  info("Check for update popup when new existing pw-only login matches form.");
   Services.logins.addLogin(login2);
 
-  await testSubmittingLoginForm("subtst_notifications_1.html", function(
+  await testSubmittingLoginForm("subtst_notifications_1.html", async function(
     fieldValues
   ) {
     is(fieldValues.username, "notifyu1", "Checking submitted username");
     is(fieldValues.password, "notifyp1", "Checking submitted password");
     let notif = getCaptureDoorhanger("password-change");
     ok(notif, "checking for notification popup");
-    notif.remove();
+    is(
+      notif.message,
+      "Would you like to add a username to the saved password?",
+      "Check message"
+    );
+
+    let { panel } = PopupNotifications;
+    let passwordVisiblityToggle = panel.querySelector(
+      "#password-notification-visibilityToggle"
+    );
+    ok(
+      !passwordVisiblityToggle.hidden,
+      "Toggle visible for a recently saved pw"
+    );
+
+    await checkDoorhangerUsernamePassword("notifyu1", "notifyp1");
+    clickDoorhangerButton(notif, CHANGE_BUTTON);
+
+    ok(!getCaptureDoorhanger("password-change"), "popup should be gone");
   });
 
   let logins = Services.logins.getAllLogins();
   is(logins.length, 1, "Should only have 1 login");
   let login = logins[0].QueryInterface(Ci.nsILoginMetaInfo);
-  is(login.username, "", "Check the username");
+  is(login.username, "notifyu1", "Check the username");
   is(login.password, "notifyp1", "Check the password");
-  is(login.timesUsed, 1, "Check times used");
+  is(login.timesUsed, 2, "Check times used");
 
-  Services.logins.removeLogin(login2);
+  Services.logins.removeLogin(login);
+});
+
+add_task(async function test_pwOnlyOldLoginMatchesUPForm() {
+  info("Check for update popup when old existing pw-only login matches form.");
+  Services.logins.addLogin(login2);
+
+  // Change the timePasswordChanged to be old so that the password won't be
+  // revealed in the doorhanger.
+  let oldTimeMS = new Date("2009-11-15").getTime();
+  Services.logins.modifyLogin(
+    login2,
+    LoginHelper.newPropertyBag({
+      timeCreated: oldTimeMS,
+      timeLastUsed: oldTimeMS + 1,
+      timePasswordChanged: oldTimeMS,
+    })
+  );
+
+  await testSubmittingLoginForm("subtst_notifications_1.html", async function(
+    fieldValues
+  ) {
+    is(fieldValues.username, "notifyu1", "Checking submitted username");
+    is(fieldValues.password, "notifyp1", "Checking submitted password");
+    let notif = getCaptureDoorhanger("password-change");
+    ok(notif, "checking for notification popup");
+    is(
+      notif.message,
+      "Would you like to add a username to the saved password?",
+      "Check message"
+    );
+
+    let { panel } = PopupNotifications;
+    let passwordVisiblityToggle = panel.querySelector(
+      "#password-notification-visibilityToggle"
+    );
+    ok(passwordVisiblityToggle.hidden, "Toggle hidden for an old saved pw");
+
+    await checkDoorhangerUsernamePassword("notifyu1", "notifyp1");
+    clickDoorhangerButton(notif, CHANGE_BUTTON);
+
+    ok(!getCaptureDoorhanger("password-change"), "popup should be gone");
+  });
+
+  let logins = Services.logins.getAllLogins();
+  is(logins.length, 1, "Should only have 1 login");
+  let login = logins[0].QueryInterface(Ci.nsILoginMetaInfo);
+  is(login.username, "notifyu1", "Check the username");
+  is(login.password, "notifyp1", "Check the password");
+  is(login.timesUsed, 2, "Check times used");
+
+  Services.logins.removeLogin(login);
 });
 
 add_task(async function test_pwOnlyFormMatchesLogin() {
@@ -389,6 +463,7 @@ add_task(async function test_changeUPLoginOnUPForm_dont() {
     is(fieldValues.password, "pass2", "Checking submitted password");
     let notif = getCaptureDoorhanger("password-change");
     ok(notif, "got notification popup");
+    is(notif.message, "Would you like to update this login?", "Check message");
 
     await checkDoorhangerUsernamePassword("notifyu1", "pass2");
     clickDoorhangerButton(notif, DONT_CHANGE_BUTTON);
@@ -415,6 +490,7 @@ add_task(async function test_changeUPLoginOnUPForm_change() {
     is(fieldValues.password, "pass2", "Checking submitted password");
     let notif = getCaptureDoorhanger("password-change");
     ok(notif, "got notification popup");
+    is(notif.message, "Would you like to update this login?", "Check message");
 
     await checkDoorhangerUsernamePassword("notifyu1", "pass2");
     clickDoorhangerButton(notif, CHANGE_BUTTON);
@@ -438,7 +514,7 @@ add_task(async function test_changeUPLoginOnUPForm_change() {
 });
 
 add_task(async function test_changePLoginOnUPForm() {
-  info("Check for change-password popup, p-only login on u+p form.");
+  info("Check for change-password popup, p-only login on u+p form (empty u).");
   Services.logins.addLogin(login2);
 
   await testSubmittingLoginForm("subtst_notifications_9.html", async function(
@@ -448,6 +524,7 @@ add_task(async function test_changePLoginOnUPForm() {
     is(fieldValues.password, "pass2", "Checking submitted password");
     let notif = getCaptureDoorhanger("password-change");
     ok(notif, "got notification popup");
+    is(notif.message, "Would you like to update this password?", "Check msg");
 
     await checkDoorhangerUsernamePassword("", "pass2");
     clickDoorhangerButton(notif, CHANGE_BUTTON);
@@ -475,6 +552,7 @@ add_task(async function test_changePLoginOnPForm() {
     is(fieldValues.password, "notifyp1", "Checking submitted password");
     let notif = getCaptureDoorhanger("password-change");
     ok(notif, "got notification popup");
+    is(notif.message, "Would you like to update this password?", "Check msg");
 
     await checkDoorhangerUsernamePassword("", "notifyp1");
     clickDoorhangerButton(notif, CHANGE_BUTTON);
@@ -749,6 +827,37 @@ add_task(async function test_recipeCaptureFields_ExistingLogin() {
 
 add_task(async function test_noShowPasswordOnDismissal() {
   info("Check for no Show Password field when the doorhanger is dismissed");
+
+  await testSubmittingLoginForm("subtst_notifications_1.html", async function(
+    fieldValues
+  ) {
+    info("Opening popup");
+    let notif = getCaptureDoorhanger("password-save");
+    let { panel } = PopupNotifications;
+
+    info("Hiding popup.");
+    let promiseHidden = BrowserTestUtils.waitForEvent(panel, "popuphidden");
+    panel.hidePopup();
+    await promiseHidden;
+
+    info("Clicking on anchor to reshow popup.");
+    let promiseShown = BrowserTestUtils.waitForEvent(panel, "popupshown");
+    notif.anchorElement.click();
+    await promiseShown;
+
+    let passwordVisiblityToggle = panel.querySelector(
+      "#password-notification-visibilityToggle"
+    );
+    is(
+      passwordVisiblityToggle.hidden,
+      true,
+      "Check that the Show Password field is Hidden"
+    );
+  });
+});
+
+add_task(async function test_showPasswordOn1stOpenOfDismissedByDefault() {
+  info("Show Password toggle when the doorhanger is dismissed by default");
 
   await testSubmittingLoginForm("subtst_notifications_1.html", async function(
     fieldValues

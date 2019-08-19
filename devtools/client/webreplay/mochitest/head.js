@@ -24,7 +24,7 @@ const EXAMPLE_URL =
 async function attachDebugger(tab) {
   const target = await TargetFactory.forTab(tab);
   const toolbox = await gDevTools.showToolbox(target, "jsdebugger");
-  return { toolbox, target };
+  return { toolbox, tab, target };
 }
 
 async function attachRecordingDebugger(
@@ -46,6 +46,12 @@ async function attachRecordingDebugger(
   return { ...dbg, tab, threadFront, target };
 }
 
+async function shutdownDebugger(dbg) {
+  await waitForRequestsToSettle(dbg);
+  await dbg.toolbox.destroy();
+  await gBrowser.removeTab(dbg.tab);
+}
+
 // Return a promise that resolves when a breakpoint has been set.
 async function setBreakpoint(threadFront, expectedFile, lineno, options = {}) {
   const { sources } = await threadFront.getSources();
@@ -59,14 +65,14 @@ async function setBreakpoint(threadFront, expectedFile, lineno, options = {}) {
 function resumeThenPauseAtLineFunctionFactory(method) {
   return async function(threadFront, lineno) {
     threadFront[method]();
-    await threadFront.once("paused", async function(packet) {
-      const { frames } = await threadFront.getFrames(0, 1);
-      const frameLine = frames[0] ? frames[0].where.line : undefined;
-      ok(
-        frameLine == lineno,
-        "Paused at line " + frameLine + " expected " + lineno
-      );
-    });
+    await threadFront.once("paused");
+
+    const { frames } = await threadFront.getFrames(0, 1);
+    const frameLine = frames[0] ? frames[0].where.line : undefined;
+    ok(
+      frameLine == lineno,
+      "Paused at line " + frameLine + " expected " + lineno
+    );
   };
 }
 
@@ -170,4 +176,4 @@ PromiseTestUtils.whitelistRejectionsGlobally(
 // When running the full test suite, long delays can occur early on in tests,
 // before child processes have even been spawned. Allow a longer timeout to
 // avoid failures from this.
-requestLongerTimeout(120);
+requestLongerTimeout(4);

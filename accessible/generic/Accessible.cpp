@@ -29,7 +29,6 @@
 #include "TableAccessible.h"
 #include "TableCellAccessible.h"
 #include "TreeWalker.h"
-#include "XULDocument.h"
 
 #include "nsIDOMXULButtonElement.h"
 #include "nsIDOMXULSelectCntrlEl.h"
@@ -310,7 +309,7 @@ uint64_t Accessible::VisibilityState() const {
   if (!frame) {
     // Element having display:contents is considered visible semantically,
     // despite it doesn't have a visually visible box.
-    if (mContent->IsElement() && mContent->AsElement()->IsDisplayContents()) {
+    if (nsCoreUtils::IsDisplayContents(mContent)) {
       return states::OFFSCREEN;
     }
     return states::INVISIBLE;
@@ -1918,7 +1917,7 @@ void Accessible::AppendTextTo(nsAString& aText, uint32_t aStartOffset,
 
   nsIFrame* frame = GetFrame();
   if (!frame) {
-    if (mContent->IsElement() && mContent->AsElement()->IsDisplayContents()) {
+    if (nsCoreUtils::IsDisplayContents(mContent)) {
       aText += kEmbeddedObjectChar;
     }
     return;
@@ -2079,7 +2078,7 @@ RootAccessible* Accessible::RootAccessible() const {
   }
 
   nsCOMPtr<nsIDocShellTreeItem> root;
-  docShell->GetRootTreeItem(getter_AddRefs(root));
+  docShell->GetInProcessRootTreeItem(getter_AddRefs(root));
   NS_ASSERTION(root, "No root content tree item");
   if (!root) {
     return nullptr;

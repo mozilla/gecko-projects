@@ -44,6 +44,7 @@ class gfxVarReceiver;
   _(UseWebRenderDCompWin, bool, false)                             \
   _(UseWebRenderTripleBufferingWin, bool, false)                   \
   _(UseWebRenderProgramBinaryDisk, bool, false)                    \
+  _(WorkaroundWebRenderIntelBug1556634, bool, false)               \
   _(WebRenderDebugFlags, int32_t, 0)                               \
   _(ScreenDepth, int32_t, 0)                                       \
   _(GREDirectory, nsString, nsString())                            \
@@ -53,7 +54,8 @@ class gfxVarReceiver;
   _(SystemTextQuality, int32_t, 5 /* CLEARTYPE_QUALITY */)         \
   _(LayersWindowRecordingPath, nsCString, nsCString())             \
   _(RemoteCanvasEnabled, bool, false)                              \
-  _(UseDoubleBufferingWithCompositor, bool, false)
+  _(UseDoubleBufferingWithCompositor, bool, false)                 \
+  _(UseGLSwizzle, bool, true)
 
 /* Add new entries above this line. */
 

@@ -86,6 +86,7 @@ using mozilla::dom::ServiceWorkerDescriptor;
 #define NETWORK_NOTIFY_CHANGED_PREF "network.notify.changed"
 #define NETWORK_CAPTIVE_PORTAL_PREF "network.captive-portal-service.enabled"
 #define WEBRTC_PREF_PREFIX "media.peerconnection."
+#define NETWORK_DNS_PREF "network.dns."
 
 #define MAX_RECURSION_COUNT 50
 
@@ -185,7 +186,6 @@ uint32_t nsIOService::gDefaultSegmentCount = 24;
 
 bool nsIOService::sIsDataURIUniqueOpaqueOrigin = false;
 bool nsIOService::sBlockToplevelDataUriNavigations = false;
-bool nsIOService::sBlockFTPSubresources = false;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -224,6 +224,7 @@ static const char* gCallbackPrefs[] = {
 
 static const char* gCallbackPrefsForSocketProcess[] = {
     WEBRTC_PREF_PREFIX,
+    NETWORK_DNS_PREF,
     nullptr,
 };
 
@@ -265,8 +266,6 @@ nsresult nsIOService::Init() {
   Preferences::AddBoolVarCache(
       &sBlockToplevelDataUriNavigations,
       "security.data_uri.block_toplevel_data_uri_navigations", false);
-  Preferences::AddBoolVarCache(&sBlockFTPSubresources,
-                               "security.block_ftp_subresources", true);
   Preferences::AddBoolVarCache(&mOfflineMirrorsConnectivity,
                                OFFLINE_MIRRORS_CONNECTIVITY, true);
 
@@ -1730,9 +1729,7 @@ nsresult nsIOService::SpeculativeConnectInternal(
     bool aAnonymous) {
   NS_ENSURE_ARG(aURI);
 
-  bool isHTTP, isHTTPS;
-  if (!(NS_SUCCEEDED(aURI->SchemeIs("http", &isHTTP)) && isHTTP) &&
-      !(NS_SUCCEEDED(aURI->SchemeIs("https", &isHTTPS)) && isHTTPS)) {
+  if (!aURI->SchemeIs("http") && !aURI->SchemeIs("https")) {
     // We don't speculatively connect to non-HTTP[S] URIs.
     return NS_OK;
   }
@@ -1817,9 +1814,6 @@ bool nsIOService::IsDataURIUniqueOpaqueOrigin() {
 bool nsIOService::BlockToplevelDataUriNavigations() {
   return sBlockToplevelDataUriNavigations;
 }
-
-/*static*/
-bool nsIOService::BlockFTPSubresources() { return sBlockFTPSubresources; }
 
 NS_IMETHODIMP
 nsIOService::NotImplemented() { return NS_ERROR_NOT_IMPLEMENTED; }

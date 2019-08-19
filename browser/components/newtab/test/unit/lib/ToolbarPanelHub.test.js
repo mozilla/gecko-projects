@@ -1,5 +1,6 @@
 import { _ToolbarPanelHub } from "lib/ToolbarPanelHub.jsm";
 import { GlobalOverrider } from "test/unit/utils";
+import { OnboardingMessageProvider } from "lib/OnboardingMessageProvider.jsm";
 import { PanelTestProvider } from "lib/PanelTestProvider.jsm";
 
 describe("ToolbarPanelHub", () => {
@@ -15,6 +16,7 @@ describe("ToolbarPanelHub", () => {
   let addObserverStub;
   let removeObserverStub;
   let getBoolPrefStub;
+  let setBoolPrefStub;
   let waitForInitializedStub;
   let isBrowserPrivateStub;
   let fakeDispatch;
@@ -31,6 +33,7 @@ describe("ToolbarPanelHub", () => {
       appendChild: sandbox.stub(),
       addEventListener: sandbox.stub(),
       hasAttribute: sandbox.stub(),
+      toggleAttribute: sandbox.stub(),
     };
     fakeDocument = {
       l10n: {
@@ -48,6 +51,7 @@ describe("ToolbarPanelHub", () => {
             eventListeners[ev] = fn;
           },
           appendChild: sandbox.stub(),
+          setAttribute: sandbox.stub(),
         };
         createdElements.push(element);
         return element;
@@ -74,6 +78,7 @@ describe("ToolbarPanelHub", () => {
     addObserverStub = sandbox.stub();
     removeObserverStub = sandbox.stub();
     getBoolPrefStub = sandbox.stub();
+    setBoolPrefStub = sandbox.stub();
     fakeDispatch = sandbox.stub();
     isBrowserPrivateStub = sandbox.stub();
     globals.set("EveryWindow", everyWindowStub);
@@ -83,6 +88,7 @@ describe("ToolbarPanelHub", () => {
         addObserver: addObserverStub,
         removeObserver: removeObserverStub,
         getBoolPref: getBoolPrefStub,
+        setBoolPref: setBoolPrefStub,
       },
     });
     globals.set("PrivateBrowsingUtils", {
@@ -93,6 +99,8 @@ describe("ToolbarPanelHub", () => {
     instance.uninit();
     sandbox.restore();
     globals.restore();
+    eventListeners = {};
+    createdElements = [];
   });
   it("should create an instance", () => {
     assert.ok(instance);
@@ -262,6 +270,35 @@ describe("ToolbarPanelHub", () => {
       // Call the click handler to make coverage happy.
       eventListeners.click();
       assert.calledOnce(fakeWindow.ownerGlobal.openLinkIn);
+    });
+    it("should accept string for image attributes", async () => {
+      const messages = (await PanelTestProvider.getMessages()).filter(
+        m => m.template === "whatsnew_panel_message"
+      );
+      getMessagesStub.returns([messages[0], messages[2], messages[1]]);
+
+      await instance.renderMessages(fakeWindow, fakeDocument, "container-id");
+
+      const imageEl = createdElements.find(el => el.tagName === "img");
+      assert.calledOnce(imageEl.setAttribute);
+      assert.calledWithExactly(
+        imageEl.setAttribute,
+        "alt",
+        "Firefox Send Logo"
+      );
+    });
+    it("should accept fluent ids for image attributes", async () => {
+      const messages = (await PanelTestProvider.getMessages()).filter(
+        m => m.template === "whatsnew_panel_message"
+      );
+      messages[0].content.icon_alt = { string_id: "foo" };
+      getMessagesStub.returns([messages[0], messages[2], messages[1]]);
+
+      await instance.renderMessages(fakeWindow, fakeDocument, "container-id");
+
+      const imageEl = createdElements.find(el => el.tagName === "img");
+      assert.calledOnce(fakeDocument.l10n.setAttributes);
+      assert.calledWithExactly(fakeDocument.l10n.setAttributes, imageEl, "foo");
     });
     it("should only render unique dates (no duplicates)", async () => {
       instance._createDateElement = sandbox.stub();
@@ -442,6 +479,50 @@ describe("ToolbarPanelHub", () => {
           "application_menu"
         );
       });
+    });
+  });
+  describe("#insertProtectionPanelMessage", () => {
+    const fakeInsert = () =>
+      instance.insertProtectionPanelMessage({
+        target: { ownerGlobal: fakeWindow, ownerDocument: fakeDocument },
+      });
+    beforeEach(async () => {
+      const onboardingMsgs = await OnboardingMessageProvider.getUntranslatedMessages();
+      await instance.init(waitForInitializedStub, {
+        dispatch: fakeDispatch,
+        getMessages: () =>
+          onboardingMsgs.find(msg => msg.template === "protections_panel"),
+      });
+    });
+    it("should remember it showed", async () => {
+      await fakeInsert();
+
+      assert.calledWithExactly(
+        setBoolPrefStub,
+        "browser.protections_panel.infoMessage.seen",
+        true
+      );
+    });
+    it("should toggle/expand when default collapsed/disabled", async () => {
+      fakeElementById.hasAttribute.returns(true);
+
+      await fakeInsert();
+
+      assert.calledTwice(fakeElementById.toggleAttribute);
+    });
+    it("should toggle again when popup hides", async () => {
+      fakeElementById.addEventListener.callsArg(1);
+
+      await fakeInsert();
+
+      assert.callCount(fakeElementById.toggleAttribute, 4);
+    });
+    it("should open link on click", async () => {
+      await fakeInsert();
+
+      eventListeners.click();
+
+      assert.calledOnce(fakeWindow.ownerGlobal.openLinkIn);
     });
   });
 });

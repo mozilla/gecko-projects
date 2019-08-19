@@ -1429,16 +1429,16 @@ void MacroAssembler::typeOfObject(Register obj, Register scratch, Label* slow,
   branchPtr(Assembler::Equal, scratch, ImmPtr(&JSFunction::class_), isCallable);
 
   // Objects that emulate undefined.
-  Address flags(scratch, Class::offsetOfFlags());
+  Address flags(scratch, JSClass::offsetOfFlags());
   branchTest32(Assembler::NonZero, flags, Imm32(JSCLASS_EMULATES_UNDEFINED),
                isUndefined);
 
   // Handle classes with a call hook.
-  branchPtr(Assembler::Equal, Address(scratch, offsetof(js::Class, cOps)),
+  branchPtr(Assembler::Equal, Address(scratch, offsetof(JSClass, cOps)),
             ImmPtr(nullptr), isObject);
 
-  loadPtr(Address(scratch, offsetof(js::Class, cOps)), scratch);
-  branchPtr(Assembler::Equal, Address(scratch, offsetof(js::ClassOps, call)),
+  loadPtr(Address(scratch, offsetof(JSClass, cOps)), scratch);
+  branchPtr(Assembler::Equal, Address(scratch, offsetof(JSClassOps, call)),
             ImmPtr(nullptr), isObject);
 
   jump(isCallable);
@@ -1570,88 +1570,29 @@ void MacroAssembler::generateBailoutTail(Register scratch,
     loadJSContext(scratch);
     enterFakeExitFrame(scratch, scratch, ExitFrameType::Bare);
 
-    // If monitorStub is non-null, handle resumeAddr appropriately.
-    Label noMonitor;
-    Label done;
-    branchPtr(Assembler::Equal,
-              Address(bailoutInfo, offsetof(BaselineBailoutInfo, monitorStub)),
-              ImmPtr(nullptr), &noMonitor);
+    // Save needed values onto stack temporarily.
+    push(Address(bailoutInfo, offsetof(BaselineBailoutInfo, resumeFramePtr)));
+    push(Address(bailoutInfo, offsetof(BaselineBailoutInfo, resumeAddr)));
 
-    //
-    // Resuming into a monitoring stub chain.
-    //
-    {
-      // Save needed values onto stack temporarily.
-      pushValue(Address(bailoutInfo, offsetof(BaselineBailoutInfo, valueR0)));
-      push(Address(bailoutInfo, offsetof(BaselineBailoutInfo, resumeFramePtr)));
-      push(Address(bailoutInfo, offsetof(BaselineBailoutInfo, resumeAddr)));
-      push(Address(bailoutInfo, offsetof(BaselineBailoutInfo, monitorStub)));
+    // Call a stub to free allocated memory and create arguments objects.
+    setupUnalignedABICall(temp);
+    passABIArg(bailoutInfo);
+    callWithABI(JS_FUNC_TO_DATA_PTR(void*, FinishBailoutToBaseline),
+                MoveOp::GENERAL, CheckUnsafeCallWithABI::DontCheckHasExitFrame);
+    branchIfFalseBool(ReturnReg, exceptionLabel());
 
-      // Call a stub to free allocated memory and create arguments objects.
-      setupUnalignedABICall(temp);
-      passABIArg(bailoutInfo);
-      callWithABI(JS_FUNC_TO_DATA_PTR(void*, FinishBailoutToBaseline),
-                  MoveOp::GENERAL,
-                  CheckUnsafeCallWithABI::DontCheckHasExitFrame);
-      branchIfFalseBool(ReturnReg, exceptionLabel());
+    // Restore values where they need to be and resume execution.
+    AllocatableGeneralRegisterSet enterRegs(GeneralRegisterSet::All());
+    enterRegs.take(BaselineFrameReg);
+    Register jitcodeReg = enterRegs.takeAny();
 
-      // Restore values where they need to be and resume execution.
-      AllocatableGeneralRegisterSet enterMonRegs(GeneralRegisterSet::All());
-      enterMonRegs.take(R0);
-      enterMonRegs.take(ICStubReg);
-      enterMonRegs.take(BaselineFrameReg);
-      enterMonRegs.takeUnchecked(ICTailCallReg);
+    pop(jitcodeReg);
+    pop(BaselineFrameReg);
 
-      pop(ICStubReg);
-      pop(ICTailCallReg);
-      pop(BaselineFrameReg);
-      popValue(R0);
+    // Discard exit frame.
+    addToStackPtr(Imm32(ExitFrameLayout::SizeWithFooter()));
 
-      // Discard exit frame.
-      addToStackPtr(Imm32(ExitFrameLayout::SizeWithFooter()));
-
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-      push(ICTailCallReg);
-#endif
-      jump(Address(ICStubReg, ICStub::offsetOfStubCode()));
-    }
-
-    //
-    // Resuming into main jitcode.
-    //
-    bind(&noMonitor);
-    {
-      // Save needed values onto stack temporarily.
-      pushValue(Address(bailoutInfo, offsetof(BaselineBailoutInfo, valueR0)));
-      pushValue(Address(bailoutInfo, offsetof(BaselineBailoutInfo, valueR1)));
-      push(Address(bailoutInfo, offsetof(BaselineBailoutInfo, resumeFramePtr)));
-      push(Address(bailoutInfo, offsetof(BaselineBailoutInfo, resumeAddr)));
-
-      // Call a stub to free allocated memory and create arguments objects.
-      setupUnalignedABICall(temp);
-      passABIArg(bailoutInfo);
-      callWithABI(JS_FUNC_TO_DATA_PTR(void*, FinishBailoutToBaseline),
-                  MoveOp::GENERAL,
-                  CheckUnsafeCallWithABI::DontCheckHasExitFrame);
-      branchIfFalseBool(ReturnReg, exceptionLabel());
-
-      // Restore values where they need to be and resume execution.
-      AllocatableGeneralRegisterSet enterRegs(GeneralRegisterSet::All());
-      enterRegs.take(R0);
-      enterRegs.take(R1);
-      enterRegs.take(BaselineFrameReg);
-      Register jitcodeReg = enterRegs.takeAny();
-
-      pop(jitcodeReg);
-      pop(BaselineFrameReg);
-      popValue(R1);
-      popValue(R0);
-
-      // Discard exit frame.
-      addToStackPtr(Imm32(ExitFrameLayout::SizeWithFooter()));
-
-      jump(jitcodeReg);
-    }
+    jump(jitcodeReg);
   }
 }
 
@@ -2929,11 +2870,12 @@ void MacroAssembler::branchIfNotInterpretedConstructor(Register fun,
                                                        Label* label) {
   // First, ensure it's a scripted function. It is fine if it is still lazy.
   branchTestFunctionFlags(
-      fun, JSFunction::INTERPRETED | JSFunction::INTERPRETED_LAZY,
+      fun, FunctionFlags::INTERPRETED | FunctionFlags::INTERPRETED_LAZY,
       Assembler::Zero, label);
 
   // Check if the CONSTRUCTOR bit is set.
-  branchTestFunctionFlags(fun, JSFunction::CONSTRUCTOR, Assembler::Zero, label);
+  branchTestFunctionFlags(fun, FunctionFlags::CONSTRUCTOR, Assembler::Zero,
+                          label);
 }
 
 void MacroAssembler::branchTestObjGroupNoSpectreMitigations(
@@ -3014,8 +2956,8 @@ void MacroAssembler::branchIfPretenuredGroup(Register group, Label* label) {
 void MacroAssembler::branchIfNonNativeObj(Register obj, Register scratch,
                                           Label* label) {
   loadObjClassUnsafe(obj, scratch);
-  branchTest32(Assembler::NonZero, Address(scratch, Class::offsetOfFlags()),
-               Imm32(Class::NON_NATIVE), label);
+  branchTest32(Assembler::NonZero, Address(scratch, JSClass::offsetOfFlags()),
+               Imm32(JSClass::NON_NATIVE), label);
 }
 
 void MacroAssembler::branchIfInlineTypedObject(Register obj, Register scratch,

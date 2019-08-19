@@ -20,6 +20,13 @@ XPCOMUtils.defineLazyGetter(this, "DB_PATH", function() {
   return OS.Path.join(OS.Constants.Path.profileDir, "protections.sqlite");
 });
 
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "social_enabled",
+  "privacy.socialtracking.block_cookies.enabled",
+  false
+);
+
 ChromeUtils.defineModuleGetter(
   this,
   "AsyncShutdown",
@@ -161,34 +168,54 @@ TrackingDBService.prototype = {
   identifyType(events) {
     let result = null;
     let isTracker = false;
+    let isSocialTracker = false;
     for (let [state, blocked] of events) {
       if (state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) {
         isTracker = true;
       }
+      if (
+        state & Ci.nsIWebProgressListener.STATE_LOADED_SOCIALTRACKING_CONTENT
+      ) {
+        isSocialTracker = true;
+      }
       if (blocked) {
-        if (state & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT) {
-          result = Ci.nsITrackingDBService.TRACKERS_ID;
-        }
         if (
           state & Ci.nsIWebProgressListener.STATE_BLOCKED_FINGERPRINTING_CONTENT
         ) {
           result = Ci.nsITrackingDBService.FINGERPRINTERS_ID;
-        }
-        if (
-          state & Ci.nsIWebProgressListener.STATE_BLOCKED_CRYPTOMINING_CONTENT
+        } else if (
+          // If STP is enabled and either a social tracker is blocked,
+          // or a cookie was blocked with a social tracking event
+          social_enabled &&
+          ((isSocialTracker &&
+            state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER) ||
+            state &
+              Ci.nsIWebProgressListener.STATE_BLOCKED_SOCIALTRACKING_CONTENT)
         ) {
-          result = Ci.nsITrackingDBService.CRYPTOMINERS_ID;
-        }
-        if (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER) {
+          result = Ci.nsITrackingDBService.SOCIAL_ID;
+        } else if (
+          // If there is a tracker blocked. If there is a social tracker blocked, but STP is not enabled.
+          state & Ci.nsIWebProgressListener.STATE_BLOCKED_TRACKING_CONTENT ||
+          state & Ci.nsIWebProgressListener.STATE_BLOCKED_SOCIALTRACKING_CONTENT
+        ) {
+          result = Ci.nsITrackingDBService.TRACKERS_ID;
+        } else if (
+          // If a tracking cookie was blocked attribute it to tracking cookies. Possible social tracking content,
+          // but STP is not enabled.
+          state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER
+        ) {
           result = Ci.nsITrackingDBService.TRACKING_COOKIES_ID;
-        }
-        if (
+        } else if (
           state &
             Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_BY_PERMISSION ||
           state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_ALL ||
           state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_FOREIGN
         ) {
           result = Ci.nsITrackingDBService.OTHER_COOKIES_BLOCKED_ID;
+        } else if (
+          state & Ci.nsIWebProgressListener.STATE_BLOCKED_CRYPTOMINING_CONTENT
+        ) {
+          result = Ci.nsITrackingDBService.CRYPTOMINERS_ID;
         }
       }
     }

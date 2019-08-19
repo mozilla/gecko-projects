@@ -47,6 +47,11 @@ var gExceptionPaths = [
 
   // Exclude all search-extensions because they aren't referenced by filename
   "resource://search-extensions/",
+
+  // Bug 1550165 - Exclude localized App/Play store badges. These badges
+  // are displayed in a promo area on the first load of about:logins.
+  "chrome://browser/content/aboutlogins/third-party/app-store/",
+  "chrome://browser/content/aboutlogins/third-party/play-store/",
 ];
 
 // These are not part of the omni.ja file, so we find them only when running
@@ -102,9 +107,6 @@ var whitelist = [
   // layout/mathml/nsMathMLChar.cpp
   { file: "resource://gre/res/fonts/mathfontSTIXGeneral.properties" },
   { file: "resource://gre/res/fonts/mathfontUnicode.properties" },
-
-  // Needed by HiddenFrame.jsm, but can't be packaged test-only
-  { file: "chrome://global/content/win.xul" },
 
   // The l10n build system can't package string files only for some platforms.
   {

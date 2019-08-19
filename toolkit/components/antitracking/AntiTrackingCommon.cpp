@@ -14,7 +14,6 @@
 #include "mozilla/Logging.h"
 #include "mozilla/MruCache.h"
 #include "mozilla/Pair.h"
-#include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_extensions.h"
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozIThirdPartyUtil.h"
@@ -77,8 +76,7 @@ bool GetParentPrincipalAndTrackingOrigin(
     nsIURI** aTrackingURI, nsIPrincipal** aTrackingPrincipal) {
   Document* doc = a3rdPartyTrackingWindow->GetDocument();
   // Make sure storage access isn't disabled
-  if (doc && (doc->StorageAccessSandboxed() ||
-              nsContentUtils::IsInPrivateBrowsing(doc))) {
+  if (doc && (doc->StorageAccessSandboxed())) {
     return false;
   }
 
@@ -220,10 +218,7 @@ int32_t CookiesBehavior(nsILoadInfo* aLoadInfo,
 
   // WebExtensions 3rd party URI always get BEHAVIOR_ACCEPT as cookieBehavior,
   // this is semantically equivalent to the principal having a AddonPolicy().
-  bool is3rdPartyMozExt = false;
-  if (NS_SUCCEEDED(
-          a3rdPartyURI->SchemeIs("moz-extension", &is3rdPartyMozExt)) &&
-      is3rdPartyMozExt) {
+  if (a3rdPartyURI->SchemeIs("moz-extension")) {
     return nsICookieService::BEHAVIOR_ACCEPT;
   }
 
@@ -318,8 +313,7 @@ bool CheckContentBlockingAllowList(nsIURI* aTopWinURI,
                                    bool aIsPrivateBrowsing) {
   bool isAllowed = false;
   nsresult rv = AntiTrackingCommon::IsOnContentBlockingAllowList(
-      aTopWinURI, aIsPrivateBrowsing, AntiTrackingCommon::eStorageChecks,
-      isAllowed);
+      aTopWinURI, aIsPrivateBrowsing, isAllowed);
   if (NS_SUCCEEDED(rv) && isAllowed) {
     LOG_SPEC(
         ("The top-level window (%s) is on the content blocking allow list, "
@@ -615,6 +609,41 @@ already_AddRefed<nsPIDOMWindowOuter> GetTopWindow(nsPIDOMWindowInner* aWindow) {
   return pwin.forget();
 }
 
+class TemporaryAccessGrantCacheKey : public PLDHashEntryHdr {
+ public:
+  typedef Pair<nsCOMPtr<nsIPrincipal>, nsCString> KeyType;
+  typedef const KeyType* KeyTypePointer;
+
+  explicit TemporaryAccessGrantCacheKey(KeyTypePointer aKey)
+      : mPrincipal(aKey->first()), mType(aKey->second()) {}
+  TemporaryAccessGrantCacheKey(TemporaryAccessGrantCacheKey&& aOther) = default;
+
+  ~TemporaryAccessGrantCacheKey() = default;
+
+  KeyType GetKey() const { return MakePair(mPrincipal, mType); }
+  bool KeyEquals(KeyTypePointer aKey) const {
+    return !!mPrincipal == !!aKey->first() && mType == aKey->second() &&
+           (mPrincipal ? (mPrincipal->Equals(aKey->first())) : true);
+  }
+
+  static KeyTypePointer KeyToPointer(KeyType& aKey) { return &aKey; }
+  static PLDHashNumber HashKey(KeyTypePointer aKey) {
+    if (!aKey) {
+      return 0;
+    }
+
+    BasePrincipal* bp = BasePrincipal::Cast(aKey->first());
+    return HashGeneric(bp->GetOriginNoSuffixHash(), bp->GetOriginSuffixHash(),
+                       HashString(aKey->second()));
+  }
+
+  enum { ALLOW_MEMMOVE = true };
+
+ private:
+  nsCOMPtr<nsIPrincipal> mPrincipal;
+  nsCString mType;
+};
+
 class TemporaryAccessGrantObserver final : public nsIObserver {
  public:
   NS_DECL_ISUPPORTS
@@ -622,18 +651,33 @@ class TemporaryAccessGrantObserver final : public nsIObserver {
 
   static void Create(nsPermissionManager* aPM, nsIPrincipal* aPrincipal,
                      const nsACString& aType) {
-    nsCOMPtr<nsITimer> timer;
-    RefPtr<TemporaryAccessGrantObserver> observer =
-        new TemporaryAccessGrantObserver(aPM, aPrincipal, aType);
-    nsresult rv = NS_NewTimerWithObserver(getter_AddRefs(timer), observer,
-                                          24 * 60 * 60 * 1000,  // 24 hours
-                                          nsITimer::TYPE_ONE_SHOT);
+    MOZ_ASSERT(XRE_IsParentProcess());
 
-    if (NS_SUCCEEDED(rv)) {
-      observer->SetTimer(timer);
-    } else {
-      timer->Cancel();
+    if (!sObservers) {
+      sObservers = MakeUnique<ObserversTable>();
     }
+    Unused << sObservers
+                  ->LookupForAdd(MakePair(nsCOMPtr<nsIPrincipal>(aPrincipal),
+                                          nsCString(aType)))
+                  .OrInsert([&]() -> nsITimer* {
+                    // Only create a new observer if we don't have a matching
+                    // entry in our hashtable.
+                    nsCOMPtr<nsITimer> timer;
+                    RefPtr<TemporaryAccessGrantObserver> observer =
+                        new TemporaryAccessGrantObserver(aPM, aPrincipal,
+                                                         aType);
+                    nsresult rv = NS_NewTimerWithObserver(
+                        getter_AddRefs(timer), observer,
+                        24 * 60 * 60 * 1000,  // 24 hours
+                        nsITimer::TYPE_ONE_SHOT);
+
+                    if (NS_SUCCEEDED(rv)) {
+                      observer->SetTimer(timer);
+                      return timer;
+                    }
+                    timer->Cancel();
+                    return nullptr;
+                  });
   }
 
   void SetTimer(nsITimer* aTimer) {
@@ -658,11 +702,17 @@ class TemporaryAccessGrantObserver final : public nsIObserver {
   ~TemporaryAccessGrantObserver() = default;
 
  private:
+  typedef nsDataHashtable<TemporaryAccessGrantCacheKey, nsCOMPtr<nsITimer>>
+      ObserversTable;
+  static UniquePtr<ObserversTable> sObservers;
   nsCOMPtr<nsITimer> mTimer;
   RefPtr<nsPermissionManager> mPM;
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsCString mType;
 };
+
+UniquePtr<TemporaryAccessGrantObserver::ObserversTable>
+    TemporaryAccessGrantObserver::sObservers;
 
 NS_IMPL_ISUPPORTS(TemporaryAccessGrantObserver, nsIObserver)
 
@@ -671,6 +721,9 @@ TemporaryAccessGrantObserver::Observe(nsISupports* aSubject, const char* aTopic,
                                       const char16_t* aData) {
   if (strcmp(aTopic, NS_TIMER_CALLBACK_TOPIC) == 0) {
     Unused << mPM->RemoveFromPrincipal(mPrincipal, mType);
+
+    MOZ_ASSERT(sObservers);
+    sObservers->Remove(MakePair(mPrincipal, mType));
   } else if (strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
@@ -681,6 +734,7 @@ TemporaryAccessGrantObserver::Observe(nsISupports* aSubject, const char* aTopic,
       mTimer->Cancel();
       mTimer = nullptr;
     }
+    sObservers.reset();
   }
 
   return NS_OK;
@@ -754,6 +808,107 @@ void SettingsChangeObserver::RunAntiTrackingSettingsChangedCallbacks() {
       callback();
     }
   }
+}
+
+bool CheckAntiTrackingPermission(nsIPrincipal* aPrincipal,
+                                 const nsAutoCString& aType,
+                                 bool aIsInPrivateBrowsing,
+                                 uint32_t* aRejectedReason,
+                                 uint32_t aBlockedReason,
+                                 nsIURI* aPrincipalURI) {
+  nsPermissionManager* permManager = nsPermissionManager::GetInstance();
+  if (NS_WARN_IF(!permManager)) {
+    LOG(("Failed to obtain the permission manager"));
+    return false;
+  }
+
+  uint32_t result = 0;
+  if (aIsInPrivateBrowsing) {
+    LOG_SPEC(("Querying the permissions for private modei looking for a "
+              "permission of type %s for %s",
+              aType.get(), _spec),
+             aPrincipalURI);
+    nsCOMPtr<nsISimpleEnumerator> se;
+    nsresult rv =
+        permManager->GetAllForPrincipal(aPrincipal, getter_AddRefs(se));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      LOG(("Failed to get the list of permissions"));
+      return false;
+    }
+
+    bool more = false;
+    bool found = false;
+    while (NS_SUCCEEDED(se->HasMoreElements(&more)) && more) {
+      nsCOMPtr<nsISupports> supports;
+      Unused << se->GetNext(getter_AddRefs(supports));
+      nsCOMPtr<nsIPermission> permission = do_QueryInterface(supports);
+      if (!permission) {
+        LOG(("Couldn't get the permission for unknown reasons"));
+        continue;
+      }
+
+      nsAutoCString permissionType;
+      if (NS_SUCCEEDED(permission->GetType(permissionType)) &&
+          permissionType != aType) {
+        LOG(("Non-matching permission type: %s", aType.get()));
+        continue;
+      }
+
+      uint32_t capability = 0;
+      if (NS_SUCCEEDED(permission->GetCapability(&capability)) &&
+          capability != nsIPermissionManager::ALLOW_ACTION) {
+        LOG(("Non-matching permission capability: %d", capability));
+        continue;
+      }
+
+      uint32_t expirationType = 0;
+      if (NS_SUCCEEDED(permission->GetExpireType(&expirationType)) &&
+          expirationType != nsIPermissionManager ::EXPIRE_SESSION) {
+        LOG(("Non-matching permission expiration type: %d", expirationType));
+        continue;
+      }
+
+      int64_t expirationTime = 0;
+      if (NS_SUCCEEDED(permission->GetExpireTime(&expirationTime)) &&
+          expirationTime != 0) {
+        LOG(("Non-matching permission expiration time: %" PRId64,
+             expirationTime));
+        continue;
+      }
+
+      LOG(("Found a matching permission"));
+      found = true;
+    }
+
+    if (!found) {
+      if (aRejectedReason) {
+        *aRejectedReason = aBlockedReason;
+      }
+      return false;
+    }
+  } else {
+    nsresult rv = permManager->TestPermissionWithoutDefaultsFromPrincipal(
+        aPrincipal, aType, &result);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      LOG(("Failed to test the permission"));
+      return false;
+    }
+
+    LOG_SPEC(
+        ("Testing permission type %s for %s resulted in %d (%s)", aType.get(),
+         _spec, int(result),
+         result == nsIPermissionManager::ALLOW_ACTION ? "success" : "failure"),
+        aPrincipalURI);
+
+    if (result != nsIPermissionManager::ALLOW_ACTION) {
+      if (aRejectedReason) {
+        *aRejectedReason = aBlockedReason;
+      }
+      return false;
+    }
+  }
+
+  return true;
 }
 
 }  // namespace
@@ -1103,9 +1258,8 @@ AntiTrackingCommon::SaveFirstPartyStorageAccessGrantedForOriginOnParentProcess(
 }
 
 // static
-bool AntiTrackingCommon::IsStorageAccessPermission(nsIPermission* aPermission,
-                                                   nsIPrincipal* aPrincipal) {
-  MOZ_ASSERT(aPermission);
+bool AntiTrackingCommon::CreateStoragePermissionKey(nsIPrincipal* aPrincipal,
+                                                    nsACString& aKey) {
   MOZ_ASSERT(aPrincipal);
 
   nsAutoCString origin;
@@ -1113,6 +1267,16 @@ bool AntiTrackingCommon::IsStorageAccessPermission(nsIPermission* aPermission,
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
+
+  CreatePermissionKey(origin, aKey);
+  return true;
+}
+
+// static
+bool AntiTrackingCommon::IsStorageAccessPermission(nsIPermission* aPermission,
+                                                   nsIPrincipal* aPrincipal) {
+  MOZ_ASSERT(aPermission);
+  MOZ_ASSERT(aPrincipal);
 
   // The permission key may belong either to a tracking origin on the same
   // origin as the granted origin, or on another origin as the granted origin
@@ -1125,10 +1289,13 @@ bool AntiTrackingCommon::IsStorageAccessPermission(nsIPermission* aPermission,
   // shorter permission key and will then do a prefix match on the type of the
   // input permission to see if it is a storage access permission or not.
   nsAutoCString permissionKey;
-  CreatePermissionKey(origin, permissionKey);
+  bool result = CreateStoragePermissionKey(aPrincipal, permissionKey);
+  if (NS_WARN_IF(!result)) {
+    return false;
+  }
 
   nsAutoCString type;
-  rv = aPermission->GetType(type);
+  nsresult rv = aPermission->GetType(type);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
@@ -1316,31 +1483,9 @@ bool AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
     return true;
   }
 
-  nsPermissionManager* permManager = nsPermissionManager::GetInstance();
-  if (NS_WARN_IF(!permManager)) {
-    LOG(("Failed to obtain the permission manager"));
-    return false;
-  }
-
-  uint32_t result = 0;
-  rv = permManager->TestPermissionFromPrincipal(parentPrincipal, type, &result);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    LOG(("Failed to test the permission"));
-    return false;
-  }
-
-  LOG_SPEC(
-      ("Testing permission type %s for %s resulted in %d (%s)", type.get(),
-       _spec, int(result),
-       result == nsIPermissionManager::ALLOW_ACTION ? "success" : "failure"),
-      parentPrincipalURI);
-
-  if (result != nsIPermissionManager::ALLOW_ACTION) {
-    *aRejectedReason = blockedReason;
-    return false;
-  }
-
-  return true;
+  return CheckAntiTrackingPermission(
+      parentPrincipal, type, nsContentUtils::IsInPrivateBrowsing(document),
+      aRejectedReason, blockedReason, parentPrincipalURI);
 }
 
 bool AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
@@ -1594,32 +1739,16 @@ bool AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
   nsAutoCString type;
   CreatePermissionKey(trackingOrigin, origin, type);
 
-  nsPermissionManager* permManager = nsPermissionManager::GetInstance();
-  if (NS_WARN_IF(!permManager)) {
-    LOG(("Failed to obtain the permission manager"));
-    return false;
-  }
-
-  uint32_t result = 0;
-  rv = permManager->TestPermissionWithoutDefaultsFromPrincipal(parentPrincipal,
-                                                               type, &result);
+  uint32_t privateBrowsingId = 0;
+  rv = channelPrincipal->GetPrivateBrowsingId(&privateBrowsingId);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    LOG(("Failed to test the permission"));
+    LOG(("Failed to get the channel principal's private browsing ID"));
     return false;
   }
 
-  LOG_SPEC(
-      ("Testing permission type %s for %s resulted in %d (%s)", type.get(),
-       _spec, int(result),
-       result == nsIPermissionManager::ALLOW_ACTION ? "success" : "failure"),
-      parentPrincipalURI);
-
-  if (result != nsIPermissionManager::ALLOW_ACTION) {
-    *aRejectedReason = blockedReason;
-    return false;
-  }
-
-  return true;
+  return CheckAntiTrackingPermission(parentPrincipal, type, !!privateBrowsingId,
+                                     aRejectedReason, blockedReason,
+                                     parentPrincipalURI);
 }
 
 bool AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
@@ -1697,61 +1826,22 @@ bool AntiTrackingCommon::MaybeIsFirstPartyStorageAccessGrantedFor(
     return false;
   }
 
+  nsIPrincipal* parentPrincipal = parentDocument->NodePrincipal();
+  nsCOMPtr<nsIURI> parentPrincipalURI;
+  Unused << parentPrincipal->GetURI(getter_AddRefs(parentPrincipalURI));
+
   nsAutoCString type;
   CreatePermissionKey(origin, type);
 
-  nsPermissionManager* permManager = nsPermissionManager::GetInstance();
-  if (NS_WARN_IF(!permManager)) {
-    LOG(("Failed to obtain the permission manager"));
-    return false;
-  }
-
-  uint32_t result = 0;
-  rv = permManager->TestPermissionWithoutDefaultsFromPrincipal(
-      parentDocument->NodePrincipal(), type, &result);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    LOG(("Failed to test the permission"));
-    return false;
-  }
-
-  if (MOZ_LOG_TEST(gAntiTrackingLog, LogLevel::Debug)) {
-    nsCOMPtr<nsIURI> parentPrincipalURI;
-    Unused << parentDocument->NodePrincipal()->GetURI(
-        getter_AddRefs(parentPrincipalURI));
-    LOG_SPEC(
-        ("Testing permission type %s for %s resulted in %d (%s)", type.get(),
-         _spec, int(result),
-         result == nsIPermissionManager::ALLOW_ACTION ? "success" : "failure"),
-        parentPrincipalURI);
-  }
-
-  return result == nsIPermissionManager::ALLOW_ACTION;
+  return CheckAntiTrackingPermission(
+      parentPrincipal, type,
+      nsContentUtils::IsInPrivateBrowsing(parentDocument), nullptr, 0,
+      parentPrincipalURI);
 }
 
 nsresult AntiTrackingCommon::IsOnContentBlockingAllowList(
-    nsIURI* aTopWinURI, bool aIsPrivateBrowsing,
-    AntiTrackingCommon::ContentBlockingAllowListPurpose aPurpose,
-    bool& aIsAllowListed) {
+    nsIURI* aTopWinURI, bool aIsPrivateBrowsing, bool& aIsAllowListed) {
   aIsAllowListed = false;
-
-  // For storage checks, check the storage pref, and for annotations checks,
-  // check the corresponding pref as well.  This allows each set of checks to
-  // be disabled individually if needed.
-  if ((aPurpose == eStorageChecks &&
-       !StaticPrefs::browser_contentblocking_allowlist_storage_enabled()) ||
-      (aPurpose == eTrackingAnnotations &&
-       !StaticPrefs::browser_contentblocking_allowlist_annotations_enabled()) ||
-      (aPurpose == eFingerprinting &&
-       !StaticPrefs::privacy_trackingprotection_fingerprinting_enabled()) ||
-      (aPurpose == eCryptomining &&
-       !StaticPrefs::privacy_trackingprotection_cryptomining_enabled()) ||
-      (aPurpose == eSocialTracking &&
-       !StaticPrefs::privacy_trackingprotection_socialtracking_enabled())) {
-    LOG(
-        ("Attempting to check the content blocking allow list aborted because "
-         "the third-party cookies UI has been disabled."));
-    return NS_OK;
-  }
 
   LOG_SPEC(("Deciding whether the user has overridden content blocking for %s",
             _spec),

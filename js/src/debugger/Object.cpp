@@ -6,18 +6,63 @@
 
 #include "debugger/Object-inl.h"
 
-#include "debugger/NoExecute.h"
-#include "debugger/Script.h"
-#include "proxy/ScriptedProxyHandler.h"
-#include "vm/EnvironmentObject.h"
-#include "vm/Instrumentation.h"
-#include "vm/WrapperObject.h"
+#include "mozilla/Maybe.h"   // for Maybe, Nothing, Some
+#include "mozilla/Range.h"   // for Range
+#include "mozilla/Result.h"  // for Result
+#include "mozilla/Vector.h"  // for Vector
 
-#include "debugger/Debugger-inl.h"
-#include "vm/Compartment-inl.h"
-#include "vm/JSAtom-inl.h"
-#include "vm/JSObject-inl.h"
-#include "vm/NativeObject-inl.h"
+#include <string.h>     // for size_t, strlen
+#include <type_traits>  // for remove_reference<>::type
+#include <utility>      // for move
+
+#include "jsapi.h"        // for CallArgs, RootedObject, Rooted
+#include "jsfriendapi.h"  // for GetErrorMessage
+#include "jsutil.h"       // for Min
+
+#include "builtin/Array.h"       // for NewDenseCopiedArray
+#include "debugger/Debugger.h"   // for Completion, Debugger
+#include "debugger/NoExecute.h"  // for LeaveDebuggeeNoExecute
+#include "debugger/Script.h"     // for DebuggerScript
+#include "gc/Barrier.h"          // for ImmutablePropertyNamePtr
+#include "gc/Rooting.h"          // for RootedDebuggerObject
+#include "gc/Tracer.h"       // for TraceManuallyBarrieredCrossCompartmentEdge
+#include "js/Conversions.h"  // for ToObject
+#include "js/HeapAPI.h"      // for IsInsideNursery
+#include "js/Promise.h"      // for PromiseState
+#include "js/Proxy.h"        // for PropertyDescriptor
+#include "js/StableStringChars.h"        // for AutoStableStringChars
+#include "proxy/ScriptedProxyHandler.h"  // for ScriptedProxyHandler
+#include "vm/ArgumentsObject.h"          // for ARGS_LENGTH_MAX
+#include "vm/ArrayObject.h"              // for ArrayObject
+#include "vm/BytecodeUtil.h"             // for JSDVG_SEARCH_STACK
+#include "vm/Compartment.h"              // for Compartment
+#include "vm/EnvironmentObject.h"        // for GetDebugEnvironmentForFunction
+#include "vm/ErrorObject.h"              // for JSObject::is, ErrorObject
+#include "vm/GlobalObject.h"             // for JSObject::is, GlobalObject
+#include "vm/Instrumentation.h"          // for RealmInstrumentation
+#include "vm/Interpreter.h"              // for Call
+#include "vm/JSAtom.h"                   // for Atomize, js_apply_str
+#include "vm/JSContext.h"                // for JSContext, ReportValueError
+#include "vm/JSFunction.h"               // for JSFunction
+#include "vm/JSScript.h"                 // for JSScript
+#include "vm/NativeObject.h"             // for NativeObject, JSObject::is
+#include "vm/ObjectGroup.h"              // for GenericObject, NewObjectKind
+#include "vm/ObjectOperations.h"         // for DefineProperty
+#include "vm/Realm.h"                    // for AutoRealm, ErrorCopier, Realm
+#include "vm/Runtime.h"                  // for JSAtomState
+#include "vm/SavedFrame.h"               // for SavedFrame
+#include "vm/Scope.h"                    // for PositionalFormalParameterIter
+#include "vm/Shape.h"                    // for Shape
+#include "vm/Stack.h"                    // for InvokeArgs
+#include "vm/StringType.h"               // for JSAtom, PropertyName
+#include "vm/WrapperObject.h"            // for JSObject::is, WrapperObject
+
+#include "vm/Compartment-inl.h"       // for Compartment::wrap
+#include "vm/JSAtom-inl.h"            // for ValueToId
+#include "vm/JSObject-inl.h"          // for GetObjectClassName, InitClass
+#include "vm/NativeObject-inl.h"      // for NativeObject::global
+#include "vm/ObjectOperations-inl.h"  // for DeleteProperty, GetProperty
+#include "vm/Realm-inl.h"             // for AutoRealm::AutoRealm
 
 using namespace js;
 
@@ -26,29 +71,32 @@ using mozilla::Maybe;
 using mozilla::Nothing;
 using mozilla::Some;
 
-const ClassOps DebuggerObject::classOps_ = {nullptr, /* addProperty */
-                                            nullptr, /* delProperty */
-                                            nullptr, /* enumerate   */
-                                            nullptr, /* newEnumerate */
-                                            nullptr, /* resolve     */
-                                            nullptr, /* mayResolve  */
-                                            nullptr, /* finalize    */
-                                            nullptr, /* call        */
-                                            nullptr, /* hasInstance */
-                                            nullptr, /* construct   */
-                                            trace};
+const JSClassOps DebuggerObject::classOps_ = {
+    nullptr,                         /* addProperty */
+    nullptr,                         /* delProperty */
+    nullptr,                         /* enumerate   */
+    nullptr,                         /* newEnumerate */
+    nullptr,                         /* resolve     */
+    nullptr,                         /* mayResolve  */
+    nullptr,                         /* finalize    */
+    nullptr,                         /* call        */
+    nullptr,                         /* hasInstance */
+    nullptr,                         /* construct   */
+    CallTraceMethod<DebuggerObject>, /* trace */
+};
 
-const Class DebuggerObject::class_ = {
+const JSClass DebuggerObject::class_ = {
     "Object", JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS),
     &classOps_};
 
-void DebuggerObject::trace(JSTracer* trc, JSObject* obj) {
+void DebuggerObject::trace(JSTracer* trc) {
   // There is a barrier on private pointers, so the Unbarriered marking
   // is okay.
-  if (JSObject* referent = (JSObject*)obj->as<NativeObject>().getPrivate()) {
-    TraceManuallyBarrieredCrossCompartmentEdge(trc, obj, &referent,
-                                               "Debugger.Object referent");
-    obj->as<NativeObject>().setPrivateUnbarriered(referent);
+  if (JSObject* referent = (JSObject*)getPrivate()) {
+    TraceManuallyBarrieredCrossCompartmentEdge(
+        trc, static_cast<JSObject*>(this), &referent,
+        "Debugger.Object referent");
+    setPrivateUnbarriered(referent);
   }
 }
 
@@ -1219,7 +1267,7 @@ bool DebuggerObject::makeDebuggeeNativeFunctionMethod(JSContext* cx,
                                                       Value* vp) {
   THIS_DEBUGOBJECT(cx, argc, vp, "makeDebuggeeNativeFunction", args, object);
   if (!args.requireAtLeast(
-           cx, "Debugger.Object.prototype.makeDebuggeeNativeFunction", 1)) {
+          cx, "Debugger.Object.prototype.makeDebuggeeNativeFunction", 1)) {
     return false;
   }
 
@@ -1259,8 +1307,8 @@ bool DebuggerObject::setInstrumentationMethod(JSContext* cx, unsigned argc,
                                               Value* vp) {
   THIS_DEBUGOBJECT(cx, argc, vp, "setInstrumentation", args, object);
 
-  if (!args.requireAtLeast(
-           cx, "Debugger.Object.prototype.setInstrumentation", 2)) {
+  if (!args.requireAtLeast(cx, "Debugger.Object.prototype.setInstrumentation",
+                           2)) {
     return false;
   }
 
@@ -1322,8 +1370,7 @@ bool DebuggerObject::setInstrumentationMethod(JSContext* cx, unsigned argc,
 
 /* static */
 bool DebuggerObject::setInstrumentationActiveMethod(JSContext* cx,
-                                                    unsigned argc,
-                                                    Value* vp) {
+                                                    unsigned argc, Value* vp) {
   THIS_DEBUGOBJECT(cx, argc, vp, "setInstrumentationActive", args, object);
 
   if (!DebuggerObject::requireGlobal(cx, object)) {
@@ -1331,7 +1378,7 @@ bool DebuggerObject::setInstrumentationActiveMethod(JSContext* cx,
   }
 
   if (!args.requireAtLeast(
-      cx, "Debugger.Object.prototype.setInstrumentationActive", 1)) {
+          cx, "Debugger.Object.prototype.setInstrumentationActive", 1)) {
     return false;
   }
 

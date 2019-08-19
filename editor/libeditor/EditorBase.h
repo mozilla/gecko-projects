@@ -18,6 +18,7 @@
 #include "mozilla/TransactionManager.h"  // for TransactionManager
 #include "mozilla/WeakPtr.h"             // for WeakPtr
 #include "mozilla/dom/DataTransfer.h"    // for dom::DataTransfer
+#include "mozilla/dom/HTMLBRElement.h"   // for dom::HTMLBRElement
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/Text.h"
 #include "nsCOMPtr.h"  // for already_AddRefed, nsCOMPtr
@@ -90,19 +91,21 @@ class TextServicesDocument;
 class TypeInState;
 class WSRunObject;
 
+template <typename NodeType>
+class CreateNodeResultBase;
+typedef CreateNodeResultBase<dom::Element> CreateElementResult;
+
 namespace dom {
 class DataTransfer;
 class DragEvent;
 class Element;
 class EventTarget;
+class HTMLBRElement;
 }  // namespace dom
 
 namespace widget {
 struct IMEState;
 }  // namespace widget
-
-#define kMOZEditorBogusNodeAttrAtom nsGkAtoms::mozeditorbogusnode
-#define kMOZEditorBogusNodeValue NS_LITERAL_STRING("TRUE")
 
 /**
  * SplitAtEdges is for EditorBase::SplitNodeDeepWithTransaction(),
@@ -635,6 +638,21 @@ class EditorBase : public nsIEditor,
     const RefPtr<Selection>& SelectionRefPtr() const { return mSelection; }
     EditAction GetEditAction() const { return mEditAction; }
 
+    template <typename PT, typename CT>
+    void SetSpellCheckRestartPoint(const EditorDOMPointBase<PT, CT>& aPoint) {
+      MOZ_ASSERT(aPoint.IsSet());
+      // We should store only container and offset because new content may
+      // be inserted before referring child.
+      // XXX Shouldn't we compare whether aPoint is before
+      //     mSpellCheckRestartPoint if it's set.
+      mSpellCheckRestartPoint =
+          EditorDOMPoint(aPoint.GetContainer(), aPoint.Offset());
+    }
+    void ClearSpellCheckRestartPoint() { mSpellCheckRestartPoint.Clear(); }
+    const EditorDOMPoint& GetSpellCheckRestartPoint() const {
+      return mSpellCheckRestartPoint;
+    }
+
     void SetData(const nsAString& aData) { mData = aData; }
     const nsString& GetData() const { return mData; }
 
@@ -690,6 +708,7 @@ class EditorBase : public nsIEditor,
         case EditSubAction::eCreateOrChangeDefinitionList:
         case EditSubAction::eInsertElement:
         case EditSubAction::eInsertQuotation:
+        case EditSubAction::eInsertQuotedText:
         case EditSubAction::ePasteHTMLContent:
         case EditSubAction::eInsertHTMLSource:
         case EditSubAction::eSetPositionToAbsolute:
@@ -707,7 +726,7 @@ class EditorBase : public nsIEditor,
         case EditSubAction::eUndo:
         case EditSubAction::eRedo:
         case EditSubAction::eComputeTextToOutput:
-        case EditSubAction::eCreateBogusNode:
+        case EditSubAction::eCreatePaddingBRElementForEmptyEditor:
         case EditSubAction::eNone:
           MOZ_ASSERT(aDirection == eNone);
           mDirectionOfTopLevelEditSubAction = eNone;
@@ -778,6 +797,10 @@ class EditorBase : public nsIEditor,
 
     // The dataTransfer should be set to InputEvent.dataTransfer.
     RefPtr<dom::DataTransfer> mDataTransfer;
+
+    // Start point where spell checker should check from.  This is used only
+    // by TextEditor.
+    EditorDOMPoint mSpellCheckRestartPoint;
 
     EditAction mEditAction;
     EditSubAction mTopLevelEditSubAction;
@@ -892,6 +915,22 @@ class EditorBase : public nsIEditor,
     return mEditActionData->RangeUpdaterRef();
   }
 
+  template <typename PT, typename CT>
+  void SetSpellCheckRestartPoint(const EditorDOMPointBase<PT, CT>& aPoint) {
+    MOZ_ASSERT(IsEditActionDataAvailable());
+    return mEditActionData->SetSpellCheckRestartPoint(aPoint);
+  }
+
+  void ClearSpellCheckRestartPoint() {
+    MOZ_ASSERT(IsEditActionDataAvailable());
+    return mEditActionData->ClearSpellCheckRestartPoint();
+  }
+
+  const EditorDOMPoint& GetSpellCheckRestartPoint() const {
+    MOZ_ASSERT(IsEditActionDataAvailable());
+    return mEditActionData->GetSpellCheckRestartPoint();
+  }
+
   /**
    * GetCompositionStartPoint() and GetCompositionEndPoint() returns start and
    * end point of composition string if there is.  Otherwise, returns non-set
@@ -965,6 +1004,18 @@ class EditorBase : public nsIEditor,
    */
   MOZ_CAN_RUN_SCRIPT nsresult InsertNodeWithTransaction(
       nsIContent& aContentToInsert, const EditorDOMPoint& aPointToInsert);
+
+  /**
+   * InsertPaddingBRElementForEmptyLastLineWithTransaction() creates a padding
+   * <br> element with setting flags to NS_PADDING_FOR_EMPTY_LAST_LINE and
+   * inserts it around aPointToInsert.
+   *
+   * @param aPointToInsert      The DOM point where should be <br> node inserted
+   *                            before.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE CreateElementResult
+  InsertPaddingBRElementForEmptyLastLineWithTransaction(
+      const EditorDOMPoint& aPointToInsert);
 
   /**
    * ReplaceContainerWithTransaction() creates new element whose name is
@@ -1451,9 +1502,32 @@ class EditorBase : public nsIEditor,
   EditorDOMPoint JoinNodesDeepWithTransaction(nsIContent& aLeftNode,
                                               nsIContent& aRightNode);
 
+  /**
+   * HasPaddingBRElementForEmptyEditor() returns true if there is a padding
+   * <br> element for empty editor.  When this returns true, it means that
+   * we're empty.
+   */
+  bool HasPaddingBRElementForEmptyEditor() const {
+    return !!mPaddingBRElementForEmptyEditor;
+  }
+
+  /**
+   * EnsureNoPaddingBRElementForEmptyEditor() removes padding <br> element
+   * for empty editor if there is.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  EnsureNoPaddingBRElementForEmptyEditor();
+
+  /**
+   * MaybeCreatePaddingBRElementForEmptyEditor() creates padding <br> element
+   * for empty editor if there is no children.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  MaybeCreatePaddingBRElementForEmptyEditor();
+
   MOZ_CAN_RUN_SCRIPT nsresult DoTransactionInternal(nsITransaction* aTxn);
 
-  virtual bool IsBlockNode(nsINode* aNode);
+  virtual bool IsBlockNode(nsINode* aNode) const;
 
   /**
    * Set outOffset to the offset of aChild in the parent.
@@ -1464,40 +1538,42 @@ class EditorBase : public nsIEditor,
   /**
    * Get the previous node.
    */
-  nsIContent* GetPreviousNode(const EditorRawDOMPoint& aPoint) {
+  nsIContent* GetPreviousNode(const EditorRawDOMPoint& aPoint) const {
     return GetPreviousNodeInternal(aPoint, false, true, false);
   }
-  nsIContent* GetPreviousElementOrText(const EditorRawDOMPoint& aPoint) {
+  nsIContent* GetPreviousElementOrText(const EditorRawDOMPoint& aPoint) const {
     return GetPreviousNodeInternal(aPoint, false, false, false);
   }
-  nsIContent* GetPreviousEditableNode(const EditorRawDOMPoint& aPoint) {
+  nsIContent* GetPreviousEditableNode(const EditorRawDOMPoint& aPoint) const {
     return GetPreviousNodeInternal(aPoint, true, true, false);
   }
-  nsIContent* GetPreviousNodeInBlock(const EditorRawDOMPoint& aPoint) {
+  nsIContent* GetPreviousNodeInBlock(const EditorRawDOMPoint& aPoint) const {
     return GetPreviousNodeInternal(aPoint, false, true, true);
   }
-  nsIContent* GetPreviousElementOrTextInBlock(const EditorRawDOMPoint& aPoint) {
+  nsIContent* GetPreviousElementOrTextInBlock(
+      const EditorRawDOMPoint& aPoint) const {
     return GetPreviousNodeInternal(aPoint, false, false, true);
   }
-  nsIContent* GetPreviousEditableNodeInBlock(const EditorRawDOMPoint& aPoint) {
+  nsIContent* GetPreviousEditableNodeInBlock(
+      const EditorRawDOMPoint& aPoint) const {
     return GetPreviousNodeInternal(aPoint, true, true, true);
   }
-  nsIContent* GetPreviousNode(nsINode& aNode) {
+  nsIContent* GetPreviousNode(nsINode& aNode) const {
     return GetPreviousNodeInternal(aNode, false, true, false);
   }
-  nsIContent* GetPreviousElementOrText(nsINode& aNode) {
+  nsIContent* GetPreviousElementOrText(nsINode& aNode) const {
     return GetPreviousNodeInternal(aNode, false, false, false);
   }
-  nsIContent* GetPreviousEditableNode(nsINode& aNode) {
+  nsIContent* GetPreviousEditableNode(nsINode& aNode) const {
     return GetPreviousNodeInternal(aNode, true, true, false);
   }
-  nsIContent* GetPreviousNodeInBlock(nsINode& aNode) {
+  nsIContent* GetPreviousNodeInBlock(nsINode& aNode) const {
     return GetPreviousNodeInternal(aNode, false, true, true);
   }
-  nsIContent* GetPreviousElementOrTextInBlock(nsINode& aNode) {
+  nsIContent* GetPreviousElementOrTextInBlock(nsINode& aNode) const {
     return GetPreviousNodeInternal(aNode, false, false, true);
   }
-  nsIContent* GetPreviousEditableNodeInBlock(nsINode& aNode) {
+  nsIContent* GetPreviousEditableNodeInBlock(nsINode& aNode) const {
     return GetPreviousNodeInternal(aNode, true, true, true);
   }
 
@@ -1528,47 +1604,50 @@ class EditorBase : public nsIEditor,
    * node.
    */
   template <typename PT, typename CT>
-  nsIContent* GetNextNode(const EditorDOMPointBase<PT, CT>& aPoint) {
+  nsIContent* GetNextNode(const EditorDOMPointBase<PT, CT>& aPoint) const {
     return GetNextNodeInternal(aPoint, false, true, false);
   }
   template <typename PT, typename CT>
-  nsIContent* GetNextElementOrText(const EditorDOMPointBase<PT, CT>& aPoint) {
+  nsIContent* GetNextElementOrText(
+      const EditorDOMPointBase<PT, CT>& aPoint) const {
     return GetNextNodeInternal(aPoint, false, false, false);
   }
   template <typename PT, typename CT>
-  nsIContent* GetNextEditableNode(const EditorDOMPointBase<PT, CT>& aPoint) {
+  nsIContent* GetNextEditableNode(
+      const EditorDOMPointBase<PT, CT>& aPoint) const {
     return GetNextNodeInternal(aPoint, true, true, false);
   }
   template <typename PT, typename CT>
-  nsIContent* GetNextNodeInBlock(const EditorDOMPointBase<PT, CT>& aPoint) {
+  nsIContent* GetNextNodeInBlock(
+      const EditorDOMPointBase<PT, CT>& aPoint) const {
     return GetNextNodeInternal(aPoint, false, true, true);
   }
   template <typename PT, typename CT>
   nsIContent* GetNextElementOrTextInBlock(
-      const EditorDOMPointBase<PT, CT>& aPoint) {
+      const EditorDOMPointBase<PT, CT>& aPoint) const {
     return GetNextNodeInternal(aPoint, false, false, true);
   }
   template <typename PT, typename CT>
   nsIContent* GetNextEditableNodeInBlock(
-      const EditorDOMPointBase<PT, CT>& aPoint) {
+      const EditorDOMPointBase<PT, CT>& aPoint) const {
     return GetNextNodeInternal(aPoint, true, true, true);
   }
-  nsIContent* GetNextNode(nsINode& aNode) {
+  nsIContent* GetNextNode(nsINode& aNode) const {
     return GetNextNodeInternal(aNode, false, true, false);
   }
-  nsIContent* GetNextElementOrText(nsINode& aNode) {
+  nsIContent* GetNextElementOrText(nsINode& aNode) const {
     return GetNextNodeInternal(aNode, false, false, false);
   }
-  nsIContent* GetNextEditableNode(nsINode& aNode) {
+  nsIContent* GetNextEditableNode(nsINode& aNode) const {
     return GetNextNodeInternal(aNode, true, true, false);
   }
-  nsIContent* GetNextNodeInBlock(nsINode& aNode) {
+  nsIContent* GetNextNodeInBlock(nsINode& aNode) const {
     return GetNextNodeInternal(aNode, false, true, true);
   }
-  nsIContent* GetNextElementOrTextInBlock(nsINode& aNode) {
+  nsIContent* GetNextElementOrTextInBlock(nsINode& aNode) const {
     return GetNextNodeInternal(aNode, false, false, true);
   }
-  nsIContent* GetNextEditableNodeInBlock(nsINode& aNode) {
+  nsIContent* GetNextEditableNodeInBlock(nsINode& aNode) const {
     return GetNextNodeInternal(aNode, true, true, true);
   }
 
@@ -1577,14 +1656,14 @@ class EditorBase : public nsIEditor,
    * return nullptr if aCurrentNode has no children.
    */
   nsIContent* GetRightmostChild(nsINode* aCurrentNode,
-                                bool bNoBlockCrossing = false);
+                                bool bNoBlockCrossing = false) const;
 
   /**
    * Get the leftmost child of aCurrentNode;
    * return nullptr if aCurrentNode has no children.
    */
   nsIContent* GetLeftmostChild(nsINode* aCurrentNode,
-                               bool bNoBlockCrossing = false);
+                               bool bNoBlockCrossing = false) const;
 
   /**
    * Returns true if aParent can contain a child of type aTag.
@@ -1609,18 +1688,18 @@ class EditorBase : public nsIEditor,
   /**
    * Returns true if aNode is a container.
    */
-  virtual bool IsContainer(nsINode* aNode);
+  virtual bool IsContainer(nsINode* aNode) const;
 
   /**
    * returns true if aNode is an editable node.
    */
-  bool IsEditable(nsINode* aNode) {
+  bool IsEditable(nsINode* aNode) const {
     if (NS_WARN_IF(!aNode)) {
       return false;
     }
 
-    if (!aNode->IsContent() || IsMozEditorBogusNode(aNode) ||
-        !IsModifiableNode(*aNode)) {
+    if (!aNode->IsContent() || !IsModifiableNode(*aNode) ||
+        EditorBase::IsPaddingBRElementForEmptyEditor(*aNode)) {
       return false;
     }
 
@@ -1638,26 +1717,34 @@ class EditorBase : public nsIEditor,
   }
 
   /**
-   * Returns true if aNode is a usual element node (not bogus node) or
-   * a text node.  In other words, returns true if aNode is a usual element
-   * node or visible data node.
+   * Returns true if aNode is a usual element node (not padding <br> element
+   * for empty editor) or a text node.  In other words, returns true if aNode
+   * is a usual element node or visible data node.
    */
   bool IsElementOrText(const nsINode& aNode) const {
-    if (!aNode.IsContent() || IsMozEditorBogusNode(&aNode)) {
-      return false;
+    if (aNode.IsText()) {
+      return true;
     }
-    return aNode.NodeType() == nsINode::ELEMENT_NODE ||
-           aNode.NodeType() == nsINode::TEXT_NODE;
+    return aNode.IsElement() &&
+           !EditorBase::IsPaddingBRElementForEmptyEditor(aNode);
   }
 
   /**
-   * Returns true if aNode is a MozEditorBogus node.
+   * Returns true if aNode is a <br> element and it's marked as padding for
+   * empty editor.
    */
-  bool IsMozEditorBogusNode(const nsINode* aNode) const {
-    return aNode && aNode->IsElement() &&
-           aNode->AsElement()->AttrValueIs(
-               kNameSpaceID_None, kMOZEditorBogusNodeAttrAtom,
-               kMOZEditorBogusNodeValue, eCaseMatters);
+  static bool IsPaddingBRElementForEmptyEditor(const nsINode& aNode) {
+    const dom::HTMLBRElement* brElement = dom::HTMLBRElement::FromNode(&aNode);
+    return brElement && brElement->IsPaddingForEmptyEditor();
+  }
+
+  /**
+   * Returns true if aNode is a <br> element and it's marked as padding for
+   * empty last line.
+   */
+  static bool IsPaddingBRElementForEmptyLastLine(const nsINode& aNode) {
+    const dom::HTMLBRElement* brElement = dom::HTMLBRElement::FromNode(&aNode);
+    return brElement && brElement->IsPaddingForEmptyLastLine();
   }
 
   /**
@@ -1742,8 +1829,7 @@ class EditorBase : public nsIEditor,
     mAllowsTransactionsToChangeSelection = aAllow;
   }
 
-  nsresult HandleInlineSpellCheck(EditSubAction aEditSubAction,
-                                  nsINode* previousSelectedNode,
+  nsresult HandleInlineSpellCheck(nsINode* previousSelectedNode,
                                   uint32_t previousSelectedOffset,
                                   nsINode* aStartContainer,
                                   uint32_t aStartOffset, nsINode* aEndContainer,
@@ -1953,10 +2039,10 @@ class EditorBase : public nsIEditor,
    * Helper for GetPreviousNodeInternal() and GetNextNodeInternal().
    */
   nsIContent* FindNextLeafNode(nsINode* aCurrentNode, bool aGoForward,
-                               bool bNoBlockCrossing);
+                               bool bNoBlockCrossing) const;
   nsIContent* FindNode(nsINode* aCurrentNode, bool aGoForward,
                        bool aEditableNode, bool aFindAnyDataNode,
-                       bool bNoBlockCrossing);
+                       bool bNoBlockCrossing) const;
 
   /**
    * Get the node immediately previous node of aNode.
@@ -1973,7 +2059,7 @@ class EditorBase : public nsIEditor,
    */
   nsIContent* GetPreviousNodeInternal(nsINode& aNode, bool aFindEditableNode,
                                       bool aFindAnyDataNode,
-                                      bool aNoBlockCrossing);
+                                      bool aNoBlockCrossing) const;
 
   /**
    * And another version that takes a point in DOM tree rather than a node.
@@ -1981,7 +2067,7 @@ class EditorBase : public nsIEditor,
   nsIContent* GetPreviousNodeInternal(const EditorRawDOMPoint& aPoint,
                                       bool aFindEditableNode,
                                       bool aFindAnyDataNode,
-                                      bool aNoBlockCrossing);
+                                      bool aNoBlockCrossing) const;
 
   /**
    * Get the node immediately next node of aNode.
@@ -1997,14 +2083,15 @@ class EditorBase : public nsIEditor,
    *                             next node, returns nullptr.
    */
   nsIContent* GetNextNodeInternal(nsINode& aNode, bool aFindEditableNode,
-                                  bool aFindAnyDataNode, bool bNoBlockCrossing);
+                                  bool aFindAnyDataNode,
+                                  bool bNoBlockCrossing) const;
 
   /**
    * And another version that takes a point in DOM tree rather than a node.
    */
   nsIContent* GetNextNodeInternal(const EditorRawDOMPoint& aPoint,
                                   bool aFindEditableNode, bool aFindAnyDataNode,
-                                  bool aNoBlockCrossing);
+                                  bool aNoBlockCrossing) const;
 
   virtual nsresult InstallEventListeners();
   virtual void CreateEventListeners();
@@ -2074,6 +2161,18 @@ class EditorBase : public nsIEditor,
   };
   MOZ_CAN_RUN_SCRIPT
   void NotifyEditorObservers(NotificationForEditorObservers aNotification);
+
+  /**
+   * PrepareToInsertBRElement() returns a point where new <br> element should
+   * be inserted.  If aPointToInsert points middle of a text node, this method
+   * splits the text node and returns the point before right node.
+   *
+   * @param aPointToInsert      Candidate point to insert new <br> element.
+   * @return                    Computed point to insert new <br> element.
+   *                            If something failed, this is unset.
+   */
+  MOZ_CAN_RUN_SCRIPT EditorDOMPoint
+  PrepareToInsertBRElement(const EditorDOMPoint& aPointToInsert);
 
  private:
   nsCOMPtr<nsISelectionController> mSelectionController;
@@ -2262,6 +2361,11 @@ class EditorBase : public nsIEditor,
   RefPtr<TransactionManager> mTransactionManager;
   // Cached root node.
   RefPtr<Element> mRootElement;
+
+  // mPaddingBRElementForEmptyEditor should be used for placing caret
+  // at proper position when editor is empty.
+  RefPtr<dom::HTMLBRElement> mPaddingBRElementForEmptyEditor;
+
   // The form field as an event receiver.
   nsCOMPtr<dom::EventTarget> mEventTarget;
   RefPtr<EditorEventListener> mEventListener;
@@ -2348,6 +2452,7 @@ class EditorBase : public nsIEditor,
   friend class TextEditRules;
   friend class TypeInState;
   friend class WSRunObject;
+  friend class WSRunScanner;
   friend class nsIEditor;
 };
 

@@ -19,8 +19,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ExtensionParent: "resource://gre/modules/ExtensionParent.jsm",
   getVerificationHash: "resource://gre/modules/SearchEngine.jsm",
   OS: "resource://gre/modules/osfile.jsm",
-  RemoteSettings: "resource://services-settings/remote-settings.js",
-  RemoteSettingsClient: "resource://services-settings/RemoteSettingsClient.jsm",
+  IgnoreLists: "resource://gre/modules/IgnoreLists.jsm",
   SearchEngine: "resource://gre/modules/SearchEngine.jsm",
   SearchStaticData: "resource://gre/modules/SearchStaticData.jsm",
   SearchUtils: "resource://gre/modules/SearchUtils.jsm",
@@ -31,6 +30,13 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 XPCOMUtils.defineLazyServiceGetters(this, {
   gEnvironment: ["@mozilla.org/process/environment;1", "nsIEnvironment"],
 });
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "gSeparatePrivateDefault",
+  SearchUtils.BROWSER_SEARCH_PREF + "separatePrivateDefault",
+  false
+);
 
 XPCOMUtils.defineLazyPreferenceGetter(
   this,
@@ -191,7 +197,7 @@ var ensureKnownRegion = async function(ss) {
 
 // Store the result of the geoip request as well as any other values and
 // telemetry which depend on it.
-function storeRegion(region) {
+async function storeRegion(region) {
   let isTimezoneUS = isUSTimezone();
   // If it's a US region, but not a US timezone, we don't store the value.
   // This works because no region defaults to ZZ (unknown) in nsURLFormatter
@@ -214,7 +220,7 @@ function storeRegion(region) {
   }
   // telemetry to compare our geoip response with platform-specific country data.
   // On Mac and Windows, we can get a country code via sysinfo
-  let platformCC = Services.sysinfo.get("countryCode");
+  let platformCC = await Services.sysinfo.countryCode;
   if (platformCC) {
     let probeUSMismatched, probeNonUSMismatched;
     switch (Services.appinfo.OS) {
@@ -300,7 +306,7 @@ function fetchRegion(ss) {
       // Even if we timed out, we want to save the region and everything
       // related so next startup sees the value and doesn't retry this dance.
       if (result) {
-        storeRegion(result);
+        storeRegion(result).catch(Cu.reportError);
       }
       Services.telemetry
         .getHistogramById("SEARCH_SERVICE_COUNTRY_FETCH_RESULT")
@@ -623,9 +629,15 @@ SearchService.prototype = {
   _visibleDefaultEngines: [],
 
   /**
-   * The short name of the suggested default search engine from the configuration.
+   * The user visible name of the configuration suggested default search engine.
    */
   _searchDefault: null,
+
+  /**
+   * The user visible name of the configuration suggested default search engine
+   * for private browsing mode.
+   */
+  _searchPrivateDefault: null,
 
   /**
    * The suggested order of engines from the configuration.
@@ -655,6 +667,22 @@ SearchService.prototype = {
    * to validate the value is set by the application.
    */
   _metaData: {},
+
+  /**
+   * Resets the locally stored data to the original empty values in preparation
+   * for a reinit or a reset.
+   */
+  _resetLocalData() {
+    this._engines.clear();
+    this.__sortedEngines = null;
+    this._currentEngine = null;
+    this._privateEngine = null;
+    this._visibleDefaultEngines = [];
+    this._searchDefault = null;
+    this._searchPrivateDefault = null;
+    this._searchOrder = [];
+    this._metaData = {};
+  },
 
   // If initialization has not been completed yet, perform synchronous
   // initialization.
@@ -741,46 +769,6 @@ SearchService.prototype = {
   },
 
   /**
-   * Obtains the current ignore list from remote settings. This includes
-   * verifying the signature of the ignore list within the database.
-   *
-   * If the signature in the database is invalid, the database will be wiped
-   * and the stored dump will be used, until the settings next update.
-   *
-   * Note that this may cause a network check of the certificate, but that
-   * should generally be quick.
-   *
-   * @param {RemoteSettings} ignoreListSettings
-   *   The remote settings object associated with the ignore list.
-   * @param {boolean} [firstTime]
-   *   Internal boolean to indicate if this is the first time check or not.
-   * @returns {array}
-   *   An array of objects in the database, or an empty array if none
-   *   could be obtained.
-   */
-  async _getRemoteSettings(ignoreListSettings, firstTime = true) {
-    try {
-      return ignoreListSettings.get({ verifySignature: true });
-    } catch (ex) {
-      if (
-        ex instanceof RemoteSettingsClient.InvalidSignatureError &&
-        firstTime
-      ) {
-        // The local database is invalid, try and reset it.
-        const collection = await ignoreListSettings.openCollection();
-        await collection.clear();
-        await collection.db.close();
-        // Now call this again.
-        return this._getRemoteSettings(ignoreListSettings, false);
-      }
-      // Don't throw an error just log it, just continue with no data, and hopefully
-      // a sync will fix things later on.
-      Cu.reportError(ex);
-      return [];
-    }
-  },
-
-  /**
    * Obtains the remote settings for the search service. This should only be
    * called from init(). Any subsequent updates to the remote settings are
    * handled via a sync listener.
@@ -790,15 +778,10 @@ SearchService.prototype = {
    * hence the `get` may take a while to return.
    */
   async _setupRemoteSettings() {
-    const ignoreListSettings = RemoteSettings(
-      SearchUtils.SETTINGS_IGNORELIST_KEY
-    );
-    // Trigger a get of the initial value.
-    const current = await this._getRemoteSettings(ignoreListSettings);
-
     // Now we have the values, listen for future updates.
     this._ignoreListListener = this._handleIgnoreListUpdated.bind(this);
-    ignoreListSettings.on("sync", this._ignoreListListener);
+
+    const current = await IgnoreLists.getAndSubscribe(this._ignoreListListener);
 
     await this._handleIgnoreListUpdated({ data: { current } });
     Services.obs.notifyObservers(
@@ -911,24 +894,32 @@ SearchService.prototype = {
     return this.__sortedEngines;
   },
 
-  // Get the original Engine object that is the default for this region,
-  // ignoring changes the user may have subsequently made.
-  get originalDefaultEngine() {
-    let defaultEngineName = this.getVerifiedGlobalAttr("searchDefault");
+  /**
+   * Returns the engine that is the default for this locale/region, ignoring any
+   * user changes to the default engine.
+   *
+   * @param {boolean} privateMode
+   *   Set to true to return the default engine in private mode,
+   *   false for normal mode.
+   * @returns {SearchEngine}
+   *   The engine that is default.
+   */
+  _originalDefaultEngine(privateMode = false) {
+    let defaultEngineName = this.getVerifiedGlobalAttr(
+      privateMode ? "searchDefaultPrivate" : "searchDefault"
+    );
     if (!defaultEngineName) {
       // We only allow the old defaultenginename pref for distributions
       // We can't use isPartnerBuild because we need to allow reading
       // of the defaultengine name pref for funnelcakes.
-      if (distroID) {
+      if (distroID && !privateMode) {
         let defaultPrefB = Services.prefs.getDefaultBranch(
           SearchUtils.BROWSER_SEARCH_PREF
         );
-        let nsIPLS = Ci.nsIPrefLocalizedString;
-
         try {
           defaultEngineName = defaultPrefB.getComplexValue(
             "defaultenginename",
-            nsIPLS
+            Ci.nsIPrefLocalizedString
           ).data;
         } catch (ex) {
           // If the default pref is invalid (e.g. an add-on set it to a bogus value)
@@ -939,18 +930,45 @@ SearchService.prototype = {
           defaultEngineName = this._searchDefault;
         }
       } else {
-        defaultEngineName = this._searchDefault;
+        defaultEngineName = privateMode
+          ? this._searchPrivateDefault
+          : this._searchDefault;
       }
+    }
+
+    if (!defaultEngineName && privateMode) {
+      // We don't have a separate engine, fall back to the non-private one.
+      return this._originalDefaultEngine(false);
     }
 
     let defaultEngine = this.getEngineByName(defaultEngineName);
     if (!defaultEngine) {
       // Something unexpected as happened. In order to recover the original default engine,
-      // use the first visible engine which us what currentEngine will use.
+      // use the first visible engine which is the best we can do.
       return this._getSortedEngines(false)[0];
     }
 
     return defaultEngine;
+  },
+
+  /**
+   * @returns {SearchEngine}
+   *   The engine that is the default for this locale/region, ignoring any
+   *   user changes to the default engine.
+   */
+  get originalDefaultEngine() {
+    return this._originalDefaultEngine();
+  },
+
+  /**
+   * @returns {SearchEngine}
+   *   The engine that is the default for this locale/region in private browsing
+   *   mode, ignoring any user changes to the default engine.
+   *   Note: if there is no default for this locale/region, then the non-private
+   *   browsing engine will be returned.
+   */
+  get originalPrivateDefaultEngine() {
+    return this._originalDefaultEngine(gSeparatePrivateDefault);
   },
 
   resetToOriginalDefaultEngine() {
@@ -1257,13 +1275,7 @@ SearchService.prototype = {
         }
 
         // Clear the engines, too, so we don't stick with the stale ones.
-        this._engines.clear();
-        this.__sortedEngines = null;
-        this._currentEngine = null;
-        this._visibleDefaultEngines = [];
-        this._searchDefault = null;
-        this._searchOrder = [];
-        this._metaData = {};
+        this._resetLocalData();
 
         // Tests that want to force a synchronous re-initialization need to
         // be notified when we are done uninitializing.
@@ -1324,13 +1336,10 @@ SearchService.prototype = {
    */
   reset() {
     gInitialized = false;
+    this._resetLocalData();
     this._initObservers = PromiseUtils.defer();
-    this._initStarted = this.__sortedEngines = this._currentEngine = this._searchDefault = null;
+    this._initStarted = null;
     this._startupExtensions = new Set();
-    this._engines.clear();
-    this._visibleDefaultEngines = [];
-    this._searchOrder = [];
-    this._metaData = {};
   },
 
   /**
@@ -1786,6 +1795,24 @@ SearchService.prototype = {
     if (
       searchRegion &&
       searchRegion in searchSettings &&
+      "searchPrivateDefault" in searchSettings[searchRegion]
+    ) {
+      this._searchPrivateDefault =
+        searchSettings[searchRegion].searchPrivateDefault;
+    } else if ("searchPrivateDefault" in searchSettings.default) {
+      this._searchPrivateDefault = searchSettings.default.searchPrivateDefault;
+    } else {
+      this._searchPrivateDefault = json.default.searchPrivateDefault;
+    }
+
+    if (!this._searchPrivateDefault) {
+      // Fallback to the normal default if nothing is specified for private mode.
+      this._searchPrivateDefault = this._searchDefault;
+    }
+
+    if (
+      searchRegion &&
+      searchRegion in searchSettings &&
       "searchOrder" in searchSettings[searchRegion]
     ) {
       this._searchOrder = searchSettings[searchRegion].searchOrder;
@@ -2099,6 +2126,14 @@ SearchService.prototype = {
     return engines;
   },
 
+  /**
+   * Returns the engine associated with the name.
+   *
+   * @param {string} engineName
+   *   The name of the engine.
+   * @returns {SearchEngine}
+   *   The associated engine if found, null otherwise.
+   */
   getEngineByName(engineName) {
     this._ensureInitialized();
     return this._engines.get(engineName) || null;
@@ -2222,6 +2257,13 @@ SearchService.prototype = {
     locale = DEFAULT_TAG,
     initEngine = false
   ) {
+    let params = this.getEngineParams(extension, manifest, locale, {
+      initEngine,
+    });
+    return this.addEngineWithDetails(params.name, params);
+  },
+
+  getEngineParams(extension, manifest, locale, extraParams = {}) {
     let { IconDetails } = ExtensionParent;
 
     // General set of icons for an engine.
@@ -2255,6 +2297,11 @@ SearchService.prototype = {
       shortName += "-" + locale;
     }
 
+    let searchUrlGetParams = searchProvider.search_url_get_params;
+    if (extraParams.code) {
+      searchUrlGetParams = "?" + extraParams.code;
+    }
+
     let params = {
       name: searchProvider.name.trim(),
       shortName,
@@ -2263,7 +2310,7 @@ SearchService.prototype = {
       // AddonManager will sometimes encode the URL via `new URL()`. We want
       // to ensure we're always dealing with decoded urls.
       template: decodeURI(searchProvider.search_url),
-      searchGetParams: searchProvider.search_url_get_params,
+      searchGetParams: searchUrlGetParams,
       searchPostParams: searchProvider.search_url_post_params,
       iconURL: searchProvider.favicon_url || preferredIconUrl,
       icons: iconList,
@@ -2276,10 +2323,10 @@ SearchService.prototype = {
       suggestGetParams: searchProvider.suggest_url_get_params,
       queryCharset: searchProvider.encoding || "UTF-8",
       mozParams: searchProvider.params,
-      initEngine,
+      initEngine: extraParams.initEngine || false,
     };
 
-    return this.addEngineWithDetails(params.name, params);
+    return params;
   },
 
   async addEngine(engineURL, iconURL, confirm, extensionID) {
@@ -3096,10 +3143,7 @@ SearchService.prototype = {
 
   _removeObservers() {
     if (this._ignoreListListener) {
-      RemoteSettings(SearchUtils.SETTINGS_IGNORELIST_KEY).off(
-        "sync",
-        this._ignoreListListener
-      );
+      IgnoreLists.unsubscribe(this._ignoreListListener);
       delete this._ignoreListListener;
     }
 

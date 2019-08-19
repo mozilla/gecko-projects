@@ -945,8 +945,7 @@ void Instance::initElems(uint32_t tableIndex, const ElemSegment& seg,
   RootedAnyRef ref(TlsContext.get(), AnyRef::fromCompiledCode(initValue));
   Table& table = *instance->tables()[tableIndex];
 
-  JSContext* cx = TlsContext.get();
-  uint32_t oldSize = table.grow(delta, cx);
+  uint32_t oldSize = table.grow(delta);
 
   if (oldSize != uint32_t(-1) && initValue != nullptr) {
     switch (table.kind()) {
@@ -954,7 +953,7 @@ void Instance::initElems(uint32_t tableIndex, const ElemSegment& seg,
         table.fillAnyRef(oldSize, delta, ref);
         break;
       case TableKind::FuncRef:
-        table.fillFuncRef(oldSize, delta, ref, cx);
+        table.fillFuncRef(oldSize, delta, ref, TlsContext.get());
         break;
       case TableKind::AsmJS:
         MOZ_CRASH("not asm.js");
@@ -996,6 +995,36 @@ void Instance::initElems(uint32_t tableIndex, const ElemSegment& seg,
   MOZ_ASSERT(SASigTableSize.failureMode == FailureMode::Infallible);
   Table& table = *instance->tables()[tableIndex];
   return table.length();
+}
+
+/* static */ void* Instance::funcRef(Instance* instance, uint32_t funcIndex) {
+  MOZ_ASSERT(SASigFuncRef.failureMode == FailureMode::FailOnInvalidRef);
+  JSContext* cx = TlsContext.get();
+
+  Tier tier = instance->code().bestTier();
+  const MetadataTier& metadataTier = instance->metadata(tier);
+  const FuncImportVector& funcImports = metadataTier.funcImports;
+
+  // If this is an import, we need to recover the original wrapper function to
+  // maintain referential equality between a re-exported function and
+  // 'ref.func'. The imported function object is stable across tiers, which is
+  // what we want.
+  if (funcIndex < funcImports.length()) {
+    FuncImportTls& import = instance->funcImportTls(funcImports[funcIndex]);
+    return AnyRef::fromJSObject(import.fun).forCompiledCode();
+  }
+
+  RootedFunction fun(cx);
+  RootedWasmInstanceObject instanceObj(cx, instance->object());
+  if (!WasmInstanceObject::getExportedFunction(cx, instanceObj, funcIndex,
+                                               &fun)) {
+    // Validation ensures that we always have a valid funcIndex, so we must
+    // have OOM'ed
+    ReportOutOfMemory(cx);
+    return AnyRef::invalid().forCompiledCode();
+  }
+
+  return AnyRef::fromJSObject(fun).forCompiledCode();
 }
 
 /* static */ void Instance::postBarrier(Instance* instance,
@@ -1338,7 +1367,7 @@ bool Instance::init(JSContext* cx, const DataSegmentVector& dataSegments,
     return false;
   }
   for (size_t i = 0; i < elemSegments.length(); i++) {
-    if (!elemSegments[i]->active()) {
+    if (elemSegments[i]->kind == ElemSegment::Kind::Passive) {
       passiveElemSegments_[i] = elemSegments[i];
     }
   }
@@ -1859,7 +1888,7 @@ void Instance::ensureProfilingLabels(bool profilingEnabled) const {
   return code_->ensureProfilingLabels(profilingEnabled);
 }
 
-void Instance::onMovingGrowMemory(uint8_t* prevMemoryBase) {
+void Instance::onMovingGrowMemory() {
   MOZ_ASSERT(!isAsmJS());
   MOZ_ASSERT(!memory_->isShared());
 
@@ -1966,14 +1995,13 @@ WasmBreakpointSite* Instance::getOrCreateBreakpointSite(JSContext* cx,
   return debug().getOrCreateBreakpointSite(cx, this, offset);
 }
 
-void Instance::destroyBreakpointSite(FreeOp* fop, uint32_t offset) {
+void Instance::destroyBreakpointSite(JSFreeOp* fop, uint32_t offset) {
   MOZ_ASSERT(debugEnabled());
   return debug().destroyBreakpointSite(fop, this, offset);
 }
 
 void Instance::addSizeOfMisc(MallocSizeOf mallocSizeOf,
                              Metadata::SeenSet* seenMetadata,
-                             ShareableBytes::SeenSet* seenBytes,
                              Code::SeenSet* seenCode,
                              Table::SeenSet* seenTables, size_t* code,
                              size_t* data) const {
@@ -1984,8 +2012,8 @@ void Instance::addSizeOfMisc(MallocSizeOf mallocSizeOf,
   }
 
   if (maybeDebug_) {
-    maybeDebug_->addSizeOfMisc(mallocSizeOf, seenMetadata, seenBytes, seenCode,
-                               code, data);
+    maybeDebug_->addSizeOfMisc(mallocSizeOf, seenMetadata, seenCode, code,
+                               data);
   }
 
   code_->addSizeOfMiscIfNotSeen(mallocSizeOf, seenMetadata, seenCode, code,

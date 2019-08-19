@@ -8,7 +8,6 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIScriptContext.h"
-#include "nsIDocShell.h"
 #include "nsDocShellLoadState.h"
 #include "nsIWebNavigation.h"
 #include "nsIURIFixup.h"
@@ -25,6 +24,7 @@
 #include "nsITextToSubURI.h"
 #include "nsJSUtils.h"
 #include "nsContentUtils.h"
+#include "nsDocShell.h"
 #include "nsGlobalWindow.h"
 #include "mozilla/Likely.h"
 #include "nsCycleCollectionParticipant.h"
@@ -132,13 +132,8 @@ already_AddRefed<nsDocShellLoadState> Location::CheckURL(
       // cleaner, but given that we need to start using Source Browsing
       // Context for referrer (see Bug 960639) this may be wasted effort at
       // this stage.
-      if (principalURI) {
-        bool isNullPrincipalScheme;
-        rv = principalURI->SchemeIs(NS_NULLPRINCIPAL_SCHEME,
-                                    &isNullPrincipalScheme);
-        if (NS_SUCCEEDED(rv) && !isNullPrincipalScheme) {
-          sourceURI = principalURI;
-        }
+      if (principalURI && !principalURI->SchemeIs(NS_NULLPRINCIPAL_SCHEME)) {
+        sourceURI = principalURI;
       }
     }
   } else {
@@ -669,19 +664,7 @@ void Location::SetProtocol(const nsAString& aProtocol,
     return;
   }
 
-  bool isHttp;
-  aRv = uri->SchemeIs("http", &isHttp);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return;
-  }
-
-  bool isHttps;
-  aRv = uri->SchemeIs("https", &isHttps);
-  if (NS_WARN_IF(aRv.Failed())) {
-    return;
-  }
-
-  if (!isHttp && !isHttps) {
+  if (!uri->SchemeIs("http") && !uri->SchemeIs("https")) {
     // No-op, per spec.
     return;
   }
@@ -748,33 +731,30 @@ void Location::SetSearch(const nsAString& aSearch,
   SetURI(uri, aSubjectPrincipal, aRv);
 }
 
-nsresult Location::Reload(bool aForceget) {
+void Location::Reload(bool aForceget, ErrorResult& aRv) {
   nsCOMPtr<nsIDocShell> docShell(do_QueryReferent(mDocShell));
-  nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(docShell));
-  nsCOMPtr<nsPIDOMWindowOuter> window =
-      docShell ? docShell->GetWindow() : nullptr;
-
-  if (window && window->IsHandlingResizeEvent()) {
-    // location.reload() was called on a window that is handling a
-    // resize event. Sites do this since Netscape 4.x needed it, but
-    // we don't, and it's a horrible experience for nothing. In stead
-    // of reloading the page, just clear style data and reflow the
-    // page since some sites may use this trick to work around gecko
-    // reflow bugs, and this should have the same effect.
-
-    nsCOMPtr<Document> doc = window->GetExtantDoc();
-
-    nsPresContext* pcx;
-    if (doc && (pcx = doc->GetPresContext())) {
-      pcx->RebuildAllStyleData(NS_STYLE_HINT_REFLOW,
-                               RestyleHint::RestyleSubtree());
-    }
-
-    return NS_OK;
+  if (!docShell) {
+    return aRv.Throw(NS_ERROR_FAILURE);
   }
 
-  if (!webNav) {
-    return NS_ERROR_FAILURE;
+  if (StaticPrefs::dom_block_reload_from_resize_event_handler()) {
+    nsCOMPtr<nsPIDOMWindowOuter> window = docShell->GetWindow();
+    if (window && window->IsHandlingResizeEvent()) {
+      // location.reload() was called on a window that is handling a
+      // resize event. Sites do this since Netscape 4.x needed it, but
+      // we don't, and it's a horrible experience for nothing. In stead
+      // of reloading the page, just clear style data and reflow the
+      // page since some sites may use this trick to work around gecko
+      // reflow bugs, and this should have the same effect.
+      RefPtr<Document> doc = window->GetExtantDoc();
+
+      nsPresContext* pcx;
+      if (doc && (pcx = doc->GetPresContext())) {
+        pcx->RebuildAllStyleData(NS_STYLE_HINT_REFLOW,
+                                 RestyleHint::RestyleSubtree());
+      }
+      return;
+    }
   }
 
   uint32_t reloadFlags = nsIWebNavigation::LOAD_FLAGS_NONE;
@@ -784,15 +764,13 @@ nsresult Location::Reload(bool aForceget) {
                   nsIWebNavigation::LOAD_FLAGS_BYPASS_PROXY;
   }
 
-  nsresult rv = webNav->Reload(reloadFlags);
-  if (rv == NS_BINDING_ABORTED) {
-    // This happens when we attempt to reload a POST result and the user says
-    // no at the "do you want to reload?" prompt.  Don't propagate this one
-    // back to callers.
-    rv = NS_OK;
+  nsresult rv = nsDocShell::Cast(docShell)->Reload(reloadFlags);
+  if (NS_FAILED(rv) && rv != NS_BINDING_ABORTED) {
+    // NS_BINDING_ABORTED is returned when we attempt to reload a POST result
+    // and the user says no at the "do you want to reload?" prompt.  Don't
+    // propagate this one back to callers.
+    return aRv.Throw(rv);
   }
-
-  return rv;
 }
 
 void Location::Replace(const nsAString& aUrl, nsIPrincipal& aSubjectPrincipal,

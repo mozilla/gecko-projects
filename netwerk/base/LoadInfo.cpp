@@ -97,6 +97,7 @@ LoadInfo::LoadInfo(
       mServiceWorkerTaintingSynthesized(false),
       mDocumentHasUserInteracted(false),
       mDocumentHasLoaded(false),
+      mSkipContentSniffing(false),
       mIsFromProcessingFrameAttributes(false) {
   MOZ_ASSERT(mLoadingPrincipal);
   MOZ_ASSERT(mTriggeringPrincipal);
@@ -187,8 +188,7 @@ LoadInfo::LoadInfo(
               innerWindow->GetTopLevelStorageAreaPrincipal();
         } else if (contextOuter->IsTopLevelWindow()) {
           Document* doc = innerWindow->GetExtantDoc();
-          if (!doc || (!doc->StorageAccessSandboxed() &&
-                       !nsContentUtils::IsInPrivateBrowsing(doc))) {
+          if (!doc || (!doc->StorageAccessSandboxed())) {
             mTopLevelStorageAreaPrincipal = innerWindow->GetPrincipal();
           }
 
@@ -270,9 +270,7 @@ LoadInfo::LoadInfo(
       if (uri) {
         // Checking https not secure context as http://localhost can't be
         // upgraded
-        bool isHttpsScheme;
-        nsresult rv = uri->SchemeIs("https", &isHttpsScheme);
-        if (NS_SUCCEEDED(rv) && isHttpsScheme) {
+        if (uri->SchemeIs("https")) {
           if (nsMixedContentBlocker::ShouldUpgradeMixedDisplayContent()) {
             mBrowserUpgradeInsecureRequests = true;
           } else {
@@ -358,6 +356,7 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
       mServiceWorkerTaintingSynthesized(false),
       mDocumentHasUserInteracted(false),
       mDocumentHasLoaded(false),
+      mSkipContentSniffing(false),
       mIsFromProcessingFrameAttributes(false) {
   // Top-level loads are never third-party
   // Grab the information we can out of the window.
@@ -475,6 +474,7 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
       mDocumentHasUserInteracted(rhs.mDocumentHasUserInteracted),
       mDocumentHasLoaded(rhs.mDocumentHasLoaded),
       mCspNonce(rhs.mCspNonce),
+      mSkipContentSniffing(rhs.mSkipContentSniffing),
       mIsFromProcessingFrameAttributes(rhs.mIsFromProcessingFrameAttributes) {}
 
 LoadInfo::LoadInfo(
@@ -508,7 +508,7 @@ LoadInfo::LoadInfo(
     bool aIsPreflight, bool aLoadTriggeredFromExternal,
     bool aServiceWorkerTaintingSynthesized, bool aDocumentHasUserInteracted,
     bool aDocumentHasLoaded, const nsAString& aCspNonce,
-    uint32_t aRequestBlockingReason)
+    bool aSkipContentSniffing, uint32_t aRequestBlockingReason)
     : mLoadingPrincipal(aLoadingPrincipal),
       mTriggeringPrincipal(aTriggeringPrincipal),
       mPrincipalToInherit(aPrincipalToInherit),
@@ -559,6 +559,7 @@ LoadInfo::LoadInfo(
       mDocumentHasUserInteracted(aDocumentHasUserInteracted),
       mDocumentHasLoaded(aDocumentHasLoaded),
       mCspNonce(aCspNonce),
+      mSkipContentSniffing(aSkipContentSniffing),
       mIsFromProcessingFrameAttributes(false) {
   // Only top level TYPE_DOCUMENT loads can have a null loadingPrincipal
   MOZ_ASSERT(mLoadingPrincipal ||
@@ -1318,6 +1319,18 @@ LoadInfo::SetCspNonce(const nsAString& aCspNonce) {
   MOZ_ASSERT(!mInitialSecurityCheckDone,
              "setting the nonce is only allowed before any sec checks");
   mCspNonce = aCspNonce;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::GetSkipContentSniffing(bool* aSkipContentSniffing) {
+  *aSkipContentSniffing = mSkipContentSniffing;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::SetSkipContentSniffing(bool aSkipContentSniffing) {
+  mSkipContentSniffing = aSkipContentSniffing;
   return NS_OK;
 }
 

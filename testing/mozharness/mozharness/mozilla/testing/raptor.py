@@ -6,6 +6,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 import argparse
 import copy
+import glob
 import os
 import re
 import sys
@@ -162,6 +163,11 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "help": "The number of times a cold load test is repeated (for cold load tests only, "
                     "where the browser is shutdown and restarted between test iterations)"
         }],
+        [["--test-url-params"], {
+            "action": "store",
+            "dest": "test_url_params",
+            "help": "Parameters to add to the test_url query string"
+        }],
         [["--host"], {
             "dest": "host",
             "help": "Hostname from which to serve urls (default: 127.0.0.1). "
@@ -285,6 +291,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
         self.gecko_profile_interval = self.config.get('gecko_profile_interval')
         self.gecko_profile_entries = self.config.get('gecko_profile_entries')
         self.test_packages_url = self.config.get('test_packages_url')
+        self.test_url_params = self.config.get('test_url_params')
         self.host = self.config.get('host')
         if self.host == 'HOST_IP':
             self.host = os.environ['HOST_IP']
@@ -412,6 +419,9 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             kw_options['symbolsPath'] = self.symbols_path
         if self.config.get('obj_path', None) is not None:
             kw_options['obj-path'] = self.config['obj_path']
+        if self.test_url_params:
+            kw_options['test-url-params'] = self.test_url_params
+
         kw_options.update(kw)
         if self.host:
             kw_options['host'] = self.host
@@ -671,16 +681,24 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             self.info(str(dest))
             self._artifact_perf_data(src, dest)
 
-            if self.power_test:
-                src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'raptor-power.json')
-                self._artifact_perf_data(src, dest)
+            # make individual perfherder data json's for each supporting data type
+            for file in glob.glob(os.path.join(self.query_abs_dirs()['abs_work_dir'], '*')):
+                path, filename = os.path.split(file)
 
-            if self.memory_test:
-                src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'raptor-memory.json')
-                self._artifact_perf_data(src, dest)
+                if not filename.startswith('raptor-'):
+                    continue
 
-            if self.cpu_test:
-                src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'raptor-cpu.json')
+                # filename is expected to contain a unique data name
+                # i.e. raptor-os-baseline-power.json would result in
+                # the data name os-baseline-power
+                data_name = '-'.join(filename.split('-')[1:])
+                data_name = '.'.join(data_name.split('.')[:-1])
+
+                src = file
+                dest = os.path.join(
+                    env['MOZ_UPLOAD_DIR'],
+                    'perfherder-data-%s.json' % data_name
+                )
                 self._artifact_perf_data(src, dest)
 
             src = os.path.join(self.query_abs_dirs()['abs_work_dir'], 'screenshots.html')

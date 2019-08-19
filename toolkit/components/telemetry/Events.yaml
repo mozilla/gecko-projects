@@ -294,6 +294,30 @@ extensions.data:
       These events are sent when an extension is migrating its data to the new IndexedDB backend,
       the value of this event is the addon id.
 
+homepage:
+  preference:
+    objects: ["ignore"]
+    release_channel_collection: opt-out
+    products:
+      - "firefox"
+      - "fennec"
+    record_in_processes: ["main"]
+    description: >
+      This is recorded whenever the homepage preference is either reset due to
+      being on the ignore list, or setting is blocked due to being on the same
+      list.
+      The value field records the reason for the ignore. "saved_reset" for
+      when a saved preference value is reset. "set_blocked" for when the setting
+      was blocked and "set_blocked_extension" for when we know a WebExtension
+      attempting to set it was blocked.
+    bug_numbers: [1535049]
+    notification_emails:
+      - "mdeboer@mozilla.com"
+      - "rharter@mozilla.com"
+    expiry_version: never
+    extra_keys:
+      webExtensionId: The identifier of the webextension, if known.
+
 navigation:
   search:
     objects: ["about_home", "about_newtab", "contextmenu", "oneoff",
@@ -511,7 +535,7 @@ normandy:
 
 pwmgr:
   open_management:
-    objects: ["autocomplete", "capturedoorhanger", "contextmenu", "pageinfo", "preferences", "mainmenu"]
+    objects: ["autocomplete", "capturedoorhanger", "contextmenu", "pageinfo", "preferences", "mainmenu", "fxamenu"]
     methods: ["open_management"]
     description: >
       Sent when opening the password management UI.
@@ -598,8 +622,10 @@ fxa_avatar_menu:
       "sync_tabs",
       "sync_tabs_sidebar",
       "toolbar_icon",
-      "unver_sync_settings"
-    ]
+      "unver_sync_settings",
+      "open_monitor",
+      "open_send"
+      ]
     methods: ["click"]
     release_channel_collection: opt-out
     products:
@@ -622,13 +648,17 @@ fxa_app_menu:
     objects: [
       "account_settings",
       "cad",
+      "login",
       "send_tab",
       "sync_now",
       "sync_settings",
       "sync_tabs",
       "sync_tabs_sidebar",
-      "toolbar_icon"
-    ]
+      "toolbar_icon",
+      "unver_sync_settings",
+      "open_monitor",
+      "open_send"
+      ]
     methods: ["click"]
     release_channel_collection: opt-out
     products:
@@ -1396,6 +1426,20 @@ devtools.main:
       prompt_enabled: True if the user enables the prompt, false otherwise.
       runtime_id: Random id generated to track events related to a single runtime
       session_id: The start time of the session in milliseconds since epoch (Unix Timestamp) e.g. 1396381378123.
+  wrong_shortcut:
+    objects: ["tools"]
+    bug_numbers: [1567497]
+    notification_emails: ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"]
+    products:
+      - "firefox"
+    record_in_processes: ["main"]
+    description: User tried to use a shortcut we don't support yet in devtools.
+    release_channel_collection: opt-out
+    expiry_version: "75"
+    extra_keys:
+      shortcut: The shortcut pressed by the user
+      tool_id: The id of the panel the user was using
+      session_id: The start time of the session in milliseconds since epoch (Unix Timestamp) e.g. 1396381378123.
 
 security.ui.certerror:
   load:
@@ -1449,6 +1493,69 @@ security.ui.certerror:
       is_frame: If the error page is loaded in an iframe.
       has_sts: If the error page is for a site with HSTS headers or with a pinned key.
       panel_open: If the advanced panel was open at the time of the interaction.
+
+security.ui.protections:
+  show:
+    objects: [
+      "protection_report",
+    ]
+    bug_numbers:
+      - 1557050
+    description: >
+      User arrived on the protection report.
+    expiry_version: "75"
+    record_in_processes: ["content"]
+    release_channel_collection: opt-out
+    notification_emails:
+      - chsiang@mozilla.com
+      - seceng-telemetry@mozilla.com
+    products:
+      - firefox
+    extra_keys:
+      category: The category of protections the user is in, standard, strict or custom.
+  close:
+    objects: [
+      "protection_report",
+    ]
+    bug_numbers:
+      - 1557050
+    description: >
+      User closed on the protection report.
+    expiry_version: "75"
+    record_in_processes: ["content"]
+    release_channel_collection: opt-out
+    notification_emails:
+      - chsiang@mozilla.com
+      - seceng-telemetry@mozilla.com
+    products:
+      - firefox
+    extra_keys:
+      category: The category of protections the user is in, standard, strict or custom.
+  click:
+    bug_numbers:
+      - 1557050
+    description: >
+      User interaction by click events on the protection report.
+    objects: [
+      "lw_app_link",
+      "lw_open_button",
+      "lw_sync_link",
+      "lw_about_link",
+      "lw_open_breach_link",
+      "mtr_report_link",
+      "mtr_about_link",
+      "mtr_signup_button",
+    ]
+    expiry_version: "75"
+    record_in_processes: ["content"]
+    release_channel_collection: opt-out
+    notification_emails:
+      - chsiang@mozilla.com
+      - seceng-telemetry@mozilla.com
+    products:
+      - firefox
+    extra_keys:
+      category: The category of protections the user is in, standard, strict or custom.
 
 security.ui.identitypopup:
   open:
@@ -1560,6 +1667,44 @@ intl.ui.browserLanguage:
     release_channel_collection: opt-out
     record_in_processes: ["main"]
     bug_numbers: [1486507, 1553311]
+
+security:
+  evalUsage:
+    objects: ["systemContext", "parentProcess"]
+    bug_numbers:
+      - 1567623
+    description: >
+      eval() (or an eval()-like method) was called while running in the System Principal
+      context or the Parent Process.
+      Expected values are:
+        chromeuri - chrome:// file
+        resourceuri - resource:// file
+        singlestring - A single file or string with no slashes
+        mozillaextension - An extension claiming to be from *mozilla.org
+        otherextension - Another extension not from Mozilla
+        suspectedUserChromeJS - A filepath ending in .uc.js
+        other - Unknown
+        regexfailure - Our Regex Matching code threw an error
+      The fileinfo key may contain additional information about the file that caused the eval()
+      depending on the above value. Resource, Chrome, and SingleString will contain the full value.
+      Extensions will contain the full value; however .xpi! will be shortened to !,
+      shield.mozilla.org! to s! and mozilla.org! to m!.  UserChromeJS, Other, and Regexfailure should
+      have no value.
+    expiry_version: "never"
+    notification_emails:
+      - tom@mozilla.com
+      - ckerschb@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - firefox
+      - fennec
+      - geckoview
+    expiry_version: "75"
+    record_in_processes:
+      - all
+    extra_keys:
+      fileinfo: Information about the file that triggered eval
+
 
 # This data collection is intended for study-only collection
 # and is not meant to be enabled permanently on opt-in or opt-out.

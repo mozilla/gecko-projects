@@ -29,10 +29,10 @@
 #ifdef XP_MACOSX
 #  include "gfxPlatformMac.h"
 #endif
-#include "gfxRect.h"                    // for gfxRect
-#include "gfxUtils.h"                   // for frame color util
-#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
-#include "mozilla/RefPtr.h"             // for RefPtr, already_AddRefed
+#include "gfxRect.h"             // for gfxRect
+#include "gfxUtils.h"            // for frame color util
+#include "mozilla/Assertions.h"  // for MOZ_ASSERT, etc
+#include "mozilla/RefPtr.h"      // for RefPtr, already_AddRefed
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/gfx/2D.h"             // for DrawTarget
@@ -128,6 +128,13 @@ void HostLayerManager::RecordPaintTimes(const PaintTiming& aTiming) {
 
 void HostLayerManager::RecordUpdateTime(float aValue) {
   mDiagnostics->RecordUpdateTime(aValue);
+}
+
+void HostLayerManager::WriteCollectedFrames() {
+  if (mCompositionRecorder) {
+    mCompositionRecorder->WriteCollectedFrames();
+    mCompositionRecorder = nullptr;
+  }
 }
 
 /**
@@ -539,7 +546,6 @@ void LayerManagerComposite::UpdateAndRender() {
     return;
   }
 
-  nsIntRegion invalid;
   // The results of our drawing always go directly into a pixel buffer,
   // so we don't need to pass any global transform here.
   mRoot->ComputeEffectiveTransforms(gfx::Matrix4x4());
@@ -552,44 +558,46 @@ void LayerManagerComposite::UpdateAndRender() {
     // immediately use the resulting damage area, since ComputeDifferences
     // is also responsible for invalidates intermediate surfaces in
     // ContainerLayers.
-    nsIntRegion changed;
 
+    nsIntRegion changed;
     const bool overflowed = !mClonedLayerTreeProperties->ComputeDifferences(
         mRoot, changed, nullptr);
 
     if (overflowed) {
-      changed = mTarget ? mTargetBounds : mRenderBounds;
+      changed = mRenderBounds;
     }
 
-    if (mTarget) {
-      // Since we're composing to an external target, we're not going to use
-      // the damage region from layers changes - we want to composite
-      // everything in the target bounds. Instead we accumulate the layers
-      // damage region for the next window composite.
-      mInvalidRegion.Or(mInvalidRegion, changed);
-    } else {
-      invalid = std::move(changed);
-    }
+    mInvalidRegion.Or(mInvalidRegion, changed);
   }
 
+  nsIntRegion invalid;
   if (mTarget) {
-    invalid.Or(invalid, mTargetBounds);
+    // Since we're composing to an external target, we're not going to use
+    // the damage region from layers changes - we want to composite
+    // everything in the target bounds. The layers damage region has been
+    // stored in mInvalidRegion and will be picked up by the next window
+    // composite.
+    invalid = mTargetBounds;
   } else {
-    // If we didn't have a previous layer tree, invalidate the entire render
-    // area.
     if (!mClonedLayerTreeProperties) {
-      invalid.Or(invalid, mRenderBounds);
+      // If we didn't have a previous layer tree, invalidate the entire render
+      // area.
+      mInvalidRegion = mRenderBounds;
     }
 
-    // Add any additional invalid rects from the window manager or previous
-    // damage computed during ComposeToTarget().
-    invalid.Or(invalid, mInvalidRegion);
-    mInvalidRegion.SetEmpty();
+    invalid = mInvalidRegion;
   }
 
   if (invalid.IsEmpty() && !mWindowOverlayChanged) {
     // Composition requested, but nothing has changed. Don't do any work.
     mClonedLayerTreeProperties = LayerProperties::CloneFrom(GetRoot());
+    mProfilerScreenshotGrabber.NotifyEmptyFrame();
+
+    // Discard the current payloads. These payloads did not require a composite
+    // (they caused no changes to anything visible), so we don't want to measure
+    // their latency.
+    mPayload.Clear();
+
     return;
   }
 
@@ -597,11 +605,15 @@ void LayerManagerComposite::UpdateAndRender() {
   // so we will invalidate after we've decided if something changed.
   InvalidateDebugOverlay(invalid, mRenderBounds);
 
-  Render(invalid, opaque);
+  bool rendered = Render(invalid, opaque);
 #if defined(MOZ_WIDGET_ANDROID)
   RenderToPresentationSurface();
 #endif
-  mWindowOverlayChanged = false;
+
+  if (!mTarget && rendered) {
+    mInvalidRegion.SetEmpty();
+    mWindowOverlayChanged = false;
+  }
 
   // Update cached layer tree information.
   mClonedLayerTreeProperties = LayerProperties::CloneFrom(GetRoot());
@@ -889,13 +901,13 @@ class ScopedCompositorRenderOffset {
 };
 #endif  // defined(MOZ_WIDGET_ANDROID)
 
-void LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
+bool LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
                                    const nsIntRegion& aOpaqueRegion) {
   AUTO_PROFILER_LABEL("LayerManagerComposite::Render", GRAPHICS);
 
   if (mDestroyed || !mCompositor || mCompositor->IsDestroyed()) {
     NS_WARNING("Call on destroyed layer manager");
-    return;
+    return false;
   }
 
   mCompositor->RequestAllowFrameRecording(!!mCompositionRecorder);
@@ -939,7 +951,7 @@ void LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
     AUTO_PROFILER_LABEL("LayerManagerComposite::Render:Prerender", GRAPHICS);
 
     if (!mCompositor->GetWidget()->PreRender(&widgetContext)) {
-      return;
+      return false;
     }
   }
 
@@ -981,7 +993,13 @@ void LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
   if (actualBounds.IsEmpty()) {
     mProfilerScreenshotGrabber.NotifyEmptyFrame();
     mCompositor->GetWidget()->PostRender(&widgetContext);
-    return;
+
+    // Discard the current payloads. These payloads did not require a composite
+    // (they caused no changes to anything visible), so we don't want to measure
+    // their latency.
+    mPayload.Clear();
+
+    return true;
   }
 
   // Allow widget to render a custom background.
@@ -1031,6 +1049,8 @@ void LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
   mCompositor->GetWidget()->DrawWindowOverlay(
       &widgetContext, LayoutDeviceIntRect::FromUnknownRect(actualBounds));
 
+  mCompositor->NormalDrawingDone();
+
   mProfilerScreenshotGrabber.MaybeGrabScreenshot(mCompositor);
 
   if (mCompositionRecorder) {
@@ -1049,8 +1069,6 @@ void LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
       }
     }
   }
-
-  mCompositor->NormalDrawingDone();
 
 #if defined(MOZ_WIDGET_ANDROID)
   // Depending on the content shift the toolbar may be rendered on top of
@@ -1082,6 +1100,8 @@ void LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
   mPayload.Clear();
 
   mCompositor->WaitForGPU();
+
+  return true;
 }
 
 #if defined(MOZ_WIDGET_ANDROID)

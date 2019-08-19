@@ -76,6 +76,8 @@
 #include "nsFontFaceUtils.h"
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/ServoBindings.h"
+#include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_zoom.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/Telemetry.h"
@@ -144,13 +146,11 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       mPresShell(nullptr),
       mDocument(aDocument),
       mMedium(aType == eContext_Galley ? nsGkAtoms::screen : nsGkAtoms::print),
-      mMediaEmulated(mMedium),
       mInflationDisabledForShrinkWrap(false),
       mSystemFontScale(1.0),
       mTextZoom(1.0),
       mEffectiveTextZoom(1.0),
       mFullZoom(1.0),
-      mOverrideDPPX(0.0),
       mLastFontInflationScreenSize(gfxSize(-1.0, -1.0)),
       mCurAppUnitsPerDevPixel(0),
       mAutoQualityMinFontSizePixelsPref(0),
@@ -186,7 +186,6 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       mPendingUIResolutionChanged(false),
       mPrefChangePendingNeedsReflow(false),
       mPostedPrefChangedRunnable(false),
-      mIsEmulatingMedia(false),
       mIsGlyph(false),
       mUsesRootEMUnits(false),
       mUsesExChUnits(false),
@@ -690,12 +689,7 @@ void nsPresContext::AttachPresShell(mozilla::PresShell* aPresShell) {
   nsIURI* docURI = doc->GetDocumentURI();
 
   if (IsDynamic() && docURI) {
-    bool isChrome = false;
-    bool isRes = false;
-    docURI->SchemeIs("chrome", &isChrome);
-    docURI->SchemeIs("resource", &isRes);
-
-    if (!isChrome && !isRes)
+    if (!docURI->SchemeIs("chrome") && !docURI->SchemeIs("resource"))
       mImageAnimationMode = mImageAnimationModePref;
     else
       mImageAnimationMode = imgIContainer::kNormalAnimMode;
@@ -927,8 +921,8 @@ void nsPresContext::SetImageAnimationMode(uint16_t aMode) {
 
 void nsPresContext::UpdateEffectiveTextZoom() {
   float newZoom = mSystemFontScale * mTextZoom;
-  float minZoom = nsLayoutUtils::MinZoom();
-  float maxZoom = nsLayoutUtils::MaxZoom();
+  float minZoom = StaticPrefs::zoom_minPercent() / 100.0f;
+  float maxZoom = StaticPrefs::zoom_maxPercent() / 100.0f;
 
   if (newZoom < minZoom) {
     newZoom = minZoom;
@@ -982,12 +976,23 @@ void nsPresContext::SetOverrideDPPX(float aDPPX) {
   // SetOverrideDPPX is called during navigations, including history
   // traversals.  In that case, it's typically called with our current value,
   // and we don't need to actually do anything.
-  if (aDPPX == mOverrideDPPX) {
+  if (aDPPX == GetOverrideDPPX()) {
     return;
   }
 
-  mOverrideDPPX = aDPPX;
+  mMediaEmulationData.mDPPX = aDPPX;
   MediaFeatureValuesChanged({MediaFeatureChangeReason::ResolutionChange});
+}
+
+void nsPresContext::SetOverridePrefersColorScheme(
+    const Maybe<StylePrefersColorScheme>& aOverride) {
+  if (GetOverridePrefersColorScheme() == aOverride) {
+    return;
+  }
+  mMediaEmulationData.mPrefersColorScheme = aOverride;
+  // This is a bit of a lie, but it's the code-path that gets taken for regular
+  // system metrics changes via ThemeChanged().
+  MediaFeatureValuesChanged({MediaFeatureChangeReason::SystemMetricsChange});
 }
 
 gfxSize nsPresContext::ScreenSizeInchesForFontInflation(bool* aChanged) {
@@ -1014,9 +1019,21 @@ gfxSize nsPresContext::ScreenSizeInchesForFontInflation(bool* aChanged) {
   return deviceSizeInches;
 }
 
-static bool CheckOverflow(ComputedStyle* aComputedStyle,
+static bool CheckOverflow(const ComputedStyle* aComputedStyle,
                           ScrollStyles* aStyles) {
+  // If they're not styled yet, we'll get around to it when constructing frames
+  // for the element.
+  if (!aComputedStyle) {
+    return false;
+  }
   const nsStyleDisplay* display = aComputedStyle->StyleDisplay();
+
+  // If they will generate no box, just don't.
+  if (display->mDisplay == StyleDisplay::None ||
+      display->mDisplay == StyleDisplay::Contents) {
+    return false;
+  }
+
   if (display->mOverflowX == StyleOverflow::Visible &&
       display->mOverscrollBehaviorX == StyleOverscrollBehavior::Auto &&
       display->mOverscrollBehaviorY == StyleOverscrollBehavior::Auto &&
@@ -1035,19 +1052,23 @@ static bool CheckOverflow(ComputedStyle* aComputedStyle,
 }
 
 // https://drafts.csswg.org/css-overflow/#overflow-propagation
+//
+// NOTE(emilio): We may need to use out-of-date styles for this, since this is
+// called from nsCSSFrameConstructor::ContentRemoved. We could refactor this a
+// bit to avoid doing that, and also fix correctness issues (we don't invalidate
+// properly when we insert a body element and there is a previous one, for
+// example).
 static Element* GetPropagatedScrollStylesForViewport(
     nsPresContext* aPresContext, ScrollStyles* aStyles) {
   Document* document = aPresContext->Document();
   Element* docElement = document->GetRootElement();
-
   // docElement might be null if we're doing this after removing it.
   if (!docElement) {
     return nullptr;
   }
 
   // Check the style on the document root element
-  ServoStyleSet* styleSet = aPresContext->StyleSet();
-  RefPtr<ComputedStyle> rootStyle = styleSet->ResolveStyleLazily(*docElement);
+  const auto* rootStyle = Servo_Element_GetMaybeOutOfDateStyle(docElement);
   if (CheckOverflow(rootStyle, aStyles)) {
     // tell caller we stole the overflow style from the root element
     return docElement;
@@ -1064,20 +1085,13 @@ static Element* GetPropagatedScrollStylesForViewport(
 
   Element* bodyElement = document->AsHTMLDocument()->GetBodyElement();
   if (!bodyElement) {
-    // No body, nothing to do here.
     return nullptr;
   }
 
   MOZ_ASSERT(bodyElement->IsHTMLElement(nsGkAtoms::body),
              "GetBodyElement returned something bogus");
 
-  // FIXME(emilio): We could make these just a ResolveServoStyle call if we
-  // looked at `display` on the root, and updated styles properly before doing
-  // this on first construction:
-  //
-  // https://github.com/w3c/csswg-drafts/issues/3779
-  RefPtr<ComputedStyle> bodyStyle = styleSet->ResolveStyleLazily(*bodyElement);
-
+  const auto* bodyStyle = Servo_Element_GetMaybeOutOfDateStyle(bodyElement);
   if (CheckOverflow(bodyStyle, aStyles)) {
     // tell caller we stole the overflow style from the body element
     return bodyElement;
@@ -1160,10 +1174,6 @@ void nsPresContext::SetBidi(uint32_t aSource) {
 }
 
 uint32_t nsPresContext::GetBidi() const { return Document()->GetBidiOptions(); }
-
-bool nsPresContext::IsTopLevelWindowInactive() {
-  return Document()->IsTopLevelWindowInactive();
-}
 
 void nsPresContext::RecordInteractionTime(InteractionType aType,
                                           const TimeStamp& aTimeStamp) {
@@ -1423,23 +1433,12 @@ void nsPresContext::UIResolutionChangedInternalScale(double aScale) {
                                    &aScale);
 }
 
-void nsPresContext::EmulateMedium(const nsAString& aMediaType) {
-  nsAtom* previousMedium = Medium();
-  mIsEmulatingMedia = true;
+void nsPresContext::EmulateMedium(nsAtom* aMediaType) {
+  MOZ_ASSERT(!aMediaType || aMediaType->IsAsciiLowercase());
+  RefPtr<const nsAtom> oldMedium = Medium();
+  mMediaEmulationData.mMedium = aMediaType;
 
-  nsAutoString mediaType;
-  nsContentUtils::ASCIIToLower(aMediaType, mediaType);
-
-  mMediaEmulated = NS_Atomize(mediaType);
-  if (mMediaEmulated != previousMedium && mPresShell) {
-    MediaFeatureValuesChanged({MediaFeatureChangeReason::MediumChange});
-  }
-}
-
-void nsPresContext::StopEmulatingMedium() {
-  nsAtom* previousMedium = Medium();
-  mIsEmulatingMedia = false;
-  if (Medium() != previousMedium) {
+  if (Medium() != oldMedium) {
     MediaFeatureValuesChanged({MediaFeatureChangeReason::MediumChange});
   }
 }
@@ -2239,7 +2238,7 @@ void nsPresContext::ReflowStarted(bool aInterruptible) {
   // We don't support interrupting in paginated contexts, since page
   // sequences only handle initial reflow
   mInterruptsEnabled = aInterruptible && !IsPaginated() &&
-                       nsLayoutUtils::InterruptibleReflowEnabled();
+                       StaticPrefs::layout_interruptible_reflow_enabled();
 
   // Don't set mHasPendingInterrupt based on HavePendingInputEvent() here.  If
   // we ever change that, then we need to update the code in

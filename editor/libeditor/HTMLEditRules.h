@@ -78,11 +78,8 @@ class HTMLEditRules : public TextEditRules {
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult Init(TextEditor* aTextEditor) override;
   virtual nsresult DetachEditor() override;
-  virtual nsresult BeforeEdit(EditSubAction aEditSubAction,
-                              nsIEditor::EDirection aDirection) override;
-  MOZ_CAN_RUN_SCRIPT
-  virtual nsresult AfterEdit(EditSubAction aEditSubAction,
-                             nsIEditor::EDirection aDirection) override;
+  virtual nsresult BeforeEdit() override;
+  MOZ_CAN_RUN_SCRIPT virtual nsresult AfterEdit() override;
   // NOTE: Don't mark WillDoAction() nor DidDoAction() as MOZ_CAN_RUN_SCRIPT
   //       because they are too generic and doing it makes a lot of public
   //       editor methods marked as MOZ_CAN_RUN_SCRIPT too, but some of them
@@ -94,7 +91,7 @@ class HTMLEditRules : public TextEditRules {
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   virtual nsresult DidDoAction(EditSubActionInfo& aInfo,
                                nsresult aResult) override;
-  virtual bool DocumentIsEmpty() override;
+  virtual bool DocumentIsEmpty() const override;
 
   /**
    * DocumentModified() is called when editor content is changed.
@@ -135,13 +132,6 @@ class HTMLEditRules : public TextEditRules {
 
   void StartToListenToEditSubActions() { mListenerEnabled = true; }
   void EndListeningToEditSubActions() { mListenerEnabled = false; }
-
-  /**
-   * OnModifyDocument() is called when DocumentModifiedWorker() calls
-   * HTMLEditor::OnModifyDocument().  The caller guarantees that there
-   * is AutoEditActionDataSetter instance in the editor.
-   */
-  MOZ_CAN_RUN_SCRIPT void OnModifyDocument();
 
  protected:
   virtual ~HTMLEditRules() = default;
@@ -190,12 +180,6 @@ class HTMLEditRules : public TextEditRules {
                                        const nsAString* inString,
                                        nsAString* outString,
                                        int32_t aMaxLength);
-
-  /**
-   * WillLoadHTML() is called before loading enter document from source.
-   * This removes bogus node if there is.
-   */
-  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult WillLoadHTML();
 
   /**
    * WillInsertParagraphSeparator() is called when insertParagraph command is
@@ -277,26 +261,28 @@ class HTMLEditRules : public TextEditRules {
   }
 
   /**
-   * Insert moz-<br> element (<br type="_moz">) into aNode when aNode is a
+   * Insert padding <br> element for empty last line into aNode when aNode is a
    * block and it has no children.
    */
-  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult InsertMozBRIfNeeded(nsINode& aNode) {
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  InsertPaddingBRElementForEmptyLastLineIfNeeded(nsINode& aNode) {
     return InsertBRIfNeededInternal(aNode, true);
   }
 
   /**
-   * Insert a normal <br> element or a moz-<br> element to aNode when
-   * aNode is a block and it has no children.  Use InsertBRIfNeeded() or
-   * InsertMozBRIfNeeded() instead.
+   * Insert a normal <br> element or a padding <br> element for empty last line
+   * to aNode when aNode is a block and it has no children.  Use
+   * InsertBRIfNeeded() or InsertPaddingBRElementForEmptyLastLineIfNeeded()
+   * instead.
    *
-   * @param aNode           Reference to a block parent.
-   * @param aInsertMozBR    true if this should insert a moz-<br> element.
-   *                        Otherwise, i.e., this should insert a normal <br>
-   *                        element, false.
+   * @param aNode               Reference to a block parent.
+   * @param aForPadding         true if this should insert a <br> element for
+   *                            placing caret at empty last line.
+   *                            Otherwise, i.e., this should insert a normal
+   *                            <br> element, false.
    */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult InsertBRIfNeededInternal(nsINode& aNode,
-                                                 bool aInsertMozBR);
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  InsertBRIfNeededInternal(nsINode& aNode, bool aForPadding);
 
   /**
    * GetGoodSelPointForNode() finds where at a node you would want to set the
@@ -536,8 +522,8 @@ class HTMLEditRules : public TextEditRules {
 
   /**
    * Called after creating a basic block, indenting, outdenting or aligning
-   * contents.  This method inserts moz-<br> element if start container of
-   * Selection needs it.
+   * contents.  This method inserts a padding <br> element for empty last line
+   * if start container of Selection needs it.
    */
   MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult DidMakeBasicBlock();
 
@@ -635,7 +621,7 @@ class HTMLEditRules : public TextEditRules {
   void GetInnerContent(nsINode& aNode,
                        nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
                        int32_t* aIndex, Lists aLists = Lists::yes,
-                       Tables aTables = Tables::yes);
+                       Tables aTables = Tables::yes) const;
 
   /**
    * If aNode is the descendant of a listitem, return that li.  But table
@@ -712,9 +698,7 @@ class HTMLEditRules : public TextEditRules {
    * Called after handling edit action.  This may adjust Selection, remove
    * unnecessary empty nodes, create <br> elements if needed, etc.
    */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult AfterEditInner(EditSubAction aEditSubAction,
-                                       nsIEditor::EDirection aDirection);
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult AfterEditInner();
 
   /**
    * IndentAroundSelectionWithCSS() indents around Selection with CSS.
@@ -917,20 +901,20 @@ class HTMLEditRules : public TextEditRules {
    */
   EditorDOMPoint GetPromotedPoint(RulesEndpoint aWhere, nsINode& aNode,
                                   int32_t aOffset,
-                                  EditSubAction aEditSubAction);
+                                  EditSubAction aEditSubAction) const;
 
   /**
    * GetPromotedRanges() runs all the selection range endpoint through
    * GetPromotedPoint().
    */
   void GetPromotedRanges(nsTArray<RefPtr<nsRange>>& outArrayOfRanges,
-                         EditSubAction aEditSubAction);
+                         EditSubAction aEditSubAction) const;
 
   /**
    * PromoteRange() expands a range to include any parents for which all
    * editable children are already in range.
    */
-  void PromoteRange(nsRange& aRange, EditSubAction aEditSubAction);
+  void PromoteRange(nsRange& aRange, EditSubAction aEditSubAction) const;
 
   /**
    * GetNodesForOperation() runs through the ranges in the array and construct a
@@ -944,7 +928,7 @@ class HTMLEditRules : public TextEditRules {
   MOZ_MUST_USE nsresult GetNodesForOperation(
       nsTArray<RefPtr<nsRange>>& aArrayOfRanges,
       nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
-      EditSubAction aEditSubAction, TouchContent aTouchContent);
+      EditSubAction aEditSubAction, TouchContent aTouchContent) const;
 
   void GetChildNodesForOperation(
       nsINode& aNode, nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes);
@@ -957,7 +941,7 @@ class HTMLEditRules : public TextEditRules {
   MOZ_MUST_USE nsresult
   GetNodesFromPoint(const EditorDOMPoint& aPoint, EditSubAction aEditSubAction,
                     nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes,
-                    TouchContent aTouchContent);
+                    TouchContent aTouchContent) const;
 
   /**
    * GetNodesFromSelection() constructs a list of nodes from the selection that
@@ -967,18 +951,20 @@ class HTMLEditRules : public TextEditRules {
   MOZ_MUST_USE nsresult
   GetNodesFromSelection(EditSubAction aEditSubAction,
                         nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes,
-                        TouchContent aTouchContent);
+                        TouchContent aTouchContent) const;
 
   enum class EntireList { no, yes };
   MOZ_CAN_RUN_SCRIPT
   MOZ_MUST_USE nsresult
   GetListActionNodes(nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
-                     EntireList aEntireList, TouchContent aTouchContent);
-  void GetDefinitionListItemTypes(Element* aElement, bool* aDT, bool* aDD);
+                     EntireList aEntireList, TouchContent aTouchContent) const;
+  void GetDefinitionListItemTypes(Element* aElement, bool* aDT,
+                                  bool* aDD) const;
   MOZ_CAN_RUN_SCRIPT
   nsresult GetParagraphFormatNodes(
       nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes);
-  void LookInsideDivBQandList(nsTArray<OwningNonNull<nsINode>>& aNodeArray);
+  void LookInsideDivBQandList(
+      nsTArray<OwningNonNull<nsINode>>& aNodeArray) const;
 
   /**
    * BustUpInlinesAtRangeEndpoints() splits nodes at both start and end of
@@ -991,7 +977,8 @@ class HTMLEditRules : public TextEditRules {
    *                            split.
    */
   MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult BustUpInlinesAtRangeEndpoints(RangeItem& aRangeItem);
+  MOZ_MUST_USE nsresult
+  BustUpInlinesAtRangeEndpoints(RangeItem& aRangeItem) const;
 
   /**
    * BustUpInlinesAtBRs() splits before all <br> elements in aNode.  All <br>
@@ -1005,15 +992,16 @@ class HTMLEditRules : public TextEditRules {
    *                            aNode itself.
    */
   MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult BustUpInlinesAtBRs(
-      nsIContent& aNode, nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes);
+  MOZ_MUST_USE nsresult
+  BustUpInlinesAtBRs(nsIContent& aNode,
+                     nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes) const;
 
   /**
    * GetHiestInlineParent() returns the highest inline node parent between
    * aNode and the editing host.  Even if the editing host is an inline
    * element, this method never returns the editing host as the result.
    */
-  nsIContent* GetHighestInlineParent(nsINode& aNode);
+  nsIContent* GetHighestInlineParent(nsINode& aNode) const;
 
   /**
    * MakeTransitionList() detects all the transitions in the array, where a
@@ -1360,9 +1348,11 @@ class HTMLEditRules : public TextEditRules {
  protected:
   HTMLEditor* mHTMLEditor;
   RefPtr<nsRange> mDocChangeRange;
+  bool mInitialized;
   bool mListenerEnabled;
   bool mReturnInEmptyLIKillsList;
   bool mDidDeleteSelection;
+  bool mDidExplicitlySetInterline;
   bool mDidRangedDelete;
   bool mDidEmptyParentBlocksRemoved;
   bool mRestoreContentEditableCount;

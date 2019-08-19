@@ -328,6 +328,15 @@ shortcuts-modifier-other = Include Ctrl or Alt
 shortcuts-invalid = Invalid combination
 shortcuts-letter = Type a letter
 shortcuts-system = Can’t override a { -brand-short-name } shortcut
+
+# String displayed in warning label when there is a duplicate shortcut
+shortcuts-duplicate = Duplicate shortcut
+
+# String displayed when a keyboard shortcut is already assigned to more than one add-on
+# Variables:
+#   $shortcut (string) - Shortcut string for the add-on
+shortcuts-duplicate-warning-message = { $shortcut } is being used as a shortcut in more than one case. Duplicate shortcuts may cause unexpected behavior.
+
 # String displayed when a keyboard shortcut is already used by another add-on
 # Variables:
 #   $addon (string) - Name of the add-on
@@ -392,8 +401,20 @@ details-addon-button = Details
 release-notes-addon-button = Release Notes
 permissions-addon-button = Permissions
 
-addons-enabled-heading = Enabled
-addons-disabled-heading = Disabled
+extension-enabled-heading = Enabled
+extension-disabled-heading = Disabled
+
+theme-enabled-heading = Enabled
+theme-disabled-heading = Disabled
+
+plugin-enabled-heading = Enabled
+plugin-disabled-heading = Disabled
+
+dictionary-enabled-heading = Enabled
+dictionary-disabled-heading = Disabled
+
+locale-enabled-heading = Enabled
+locale-disabled-heading = Disabled
 
 ask-to-activate-button = Ask to Activate
 always-activate-button = Always Activate

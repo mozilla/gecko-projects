@@ -52,7 +52,7 @@ class BasicCompositor : public Compositor {
 
   bool Initialize(nsCString* const out_failureReason) override;
 
-  void DetachWidget() override;
+  void Destroy() override;
 
   TextureFactoryIdentifier GetTextureFactoryIdentifier() override;
 
@@ -118,6 +118,7 @@ class BasicCompositor : public Compositor {
                   const nsIntRegion& aOpaqueRegion,
                   gfx::IntRect* aClipRectOut = nullptr,
                   gfx::IntRect* aRenderBoundsOut = nullptr) override;
+  void NormalDrawingDone() override;
   void EndFrame() override;
 
   bool SupportsPartialTextureUpdate() override { return true; }

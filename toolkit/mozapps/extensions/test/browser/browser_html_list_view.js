@@ -597,13 +597,17 @@ add_task(async function testThemeList() {
     "There is one enabled theme"
   );
 
-  let themesChanged = waitForThemeChange(list);
-  card.querySelector('[action="toggle-disabled"]').click();
-  await themesChanged;
+  let toggleThemeEnabled = async () => {
+    let themesChanged = waitForThemeChange(list);
+    card.querySelector('[action="toggle-disabled"]').click();
+    await themesChanged;
 
-  await TestUtils.waitForCondition(
-    () => enabledSection.querySelectorAll("addon-card").length == 1
-  );
+    await TestUtils.waitForCondition(
+      () => enabledSection.querySelectorAll("addon-card").length == 1
+    );
+  };
+
+  await toggleThemeEnabled();
 
   is(
     card.parentNode,
@@ -615,6 +619,31 @@ add_task(async function testThemeList() {
     1,
     "There is one enabled theme"
   );
+
+  // Re-enable the theme.
+  await toggleThemeEnabled();
+  is(card.parentNode, enabledSection, "Card is back in the Enabled section");
+
+  // Remove theme and verify that the default theme is re-enabled.
+  let removed = BrowserTestUtils.waitForEvent(list, "remove");
+  // Confirm removal.
+  promptService._response = 0;
+  card.querySelector('[action="remove"]').click();
+  await removed;
+  is(card.parentNode, null, "Card has been removed from the view");
+  await TestUtils.waitForCondition(
+    () => enabledSection.querySelectorAll("addon-card").length == 1
+  );
+
+  let defaultTheme = getCardByAddonId(doc, "default-theme@mozilla.org");
+  is(defaultTheme.parentNode, enabledSection, "The default theme is reenabled");
+
+  await testUndoPendingUninstall(list, card.addon);
+  await TestUtils.waitForCondition(
+    () => enabledSection.querySelectorAll("addon-card").length == 1
+  );
+  is(defaultTheme.parentNode, disabledSection, "The default theme is disabled");
+  ok(getCardByAddonId(enabledSection, theme.id), "Theme should be reenabled");
 
   await theme.unload();
   await closeView(win);
@@ -753,6 +782,70 @@ add_task(async function testExtensionGenericIcon() {
 
   await extension.unload();
   await closeView(win);
+});
+
+add_task(async function testSectionHeadingKeys() {
+  let mockProvider = new MockProvider();
+
+  mockProvider.createAddons([
+    {
+      id: "test-theme",
+      name: "Test Theme",
+      type: "theme",
+    },
+    {
+      id: "test-extension-disabled",
+      name: "Test Disabled Extension",
+      type: "extension",
+      userDisabled: true,
+    },
+    {
+      id: "test-plugin-disabled",
+      name: "Test Disabled Plugin",
+      type: "plugin",
+      userDisabled: true,
+    },
+    {
+      id: "test-locale",
+      name: "Test Enabled Locale",
+      type: "locale",
+    },
+    {
+      id: "test-locale-disabled",
+      name: "Test Disabled Locale",
+      type: "locale",
+      userDisabled: true,
+    },
+    {
+      id: "test-dictionary",
+      name: "Test Enabled Dictionary",
+      type: "dictionary",
+    },
+    {
+      id: "test-dictionary-disabled",
+      name: "Test Disabled Dictionary",
+      type: "dictionary",
+      userDisabled: true,
+    },
+  ]);
+
+  for (let type of ["extension", "theme", "plugin", "locale", "dictionary"]) {
+    let win = await loadInitialView(type);
+    let doc = win.document;
+
+    for (let status of ["enabled", "disabled"]) {
+      let section = getSection(doc, status);
+      let el = section.querySelector(".list-section-heading");
+      isnot(el, null, "Should have heading present");
+      is(
+        doc.l10n.getAttributes(el).id,
+        `${type}-${status}-heading`,
+        `Should have correct ${status} heading for ${type} section`
+      );
+    }
+
+    await closeView(win);
+  }
 });
 
 add_task(async function testDisabledDimming() {

@@ -128,9 +128,11 @@ class SourceTreeItem extends Component<Props, State> {
           const blackBoxMenuItem = {
             id: "node-menu-blackbox",
             label: source.isBlackBoxed
-              ? L10N.getStr("sourceFooter.unblackbox")
-              : L10N.getStr("sourceFooter.blackbox"),
-            accesskey: L10N.getStr("sourceFooter.blackbox.accesskey"),
+              ? L10N.getStr("blackboxContextItem.unblackbox")
+              : L10N.getStr("blackboxContextItem.blackbox"),
+            accesskey: source.isBlackBoxed
+              ? L10N.getStr("blackboxContextItem.unblackbox.accesskey")
+              : L10N.getStr("blackboxContextItem.blackbox.accesskey"),
             disabled: !shouldBlackbox(source),
             click: () => this.props.toggleBlackBox(cx, source),
           };
@@ -250,6 +252,10 @@ class SourceTreeItem extends Component<Props, State> {
         return <AccessibleImage className="globe-small" />;
       }
       return <AccessibleImage className="folder" />;
+    }
+
+    if (source && source.isBlackBoxed) {
+      return <AccessibleImage className="blackBox" />;
     }
 
     if (hasPrettySource) {

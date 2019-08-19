@@ -1340,6 +1340,12 @@ void gfxWindowsPlatform::InitializeD3D11Config() {
 
   d3d11.EnableByDefault();
 
+  // Check if the user really, really wants WARP.
+  if (StaticPrefs::layers_d3d11_force_warp_AtStartup()) {
+    // Force D3D11 on even if we disabled it.
+    d3d11.UserForceEnable("User force-enabled WARP");
+  }
+
   if (!IsWin8OrLater() &&
       !DeviceManagerDx::Get()->CheckRemotePresentSupport()) {
     nsCOMPtr<nsIGfxInfo> gfxInfo;
@@ -1362,15 +1368,10 @@ void gfxWindowsPlatform::InitializeD3D11Config() {
 
   nsCString message;
   nsCString failureId;
-  if (!gfxPlatform::IsGfxInfoStatusOkay(nsIGfxInfo::FEATURE_DIRECT3D_11_LAYERS,
+  if (StaticPrefs::layers_d3d11_enable_blacklist_AtStartup() &&
+      !gfxPlatform::IsGfxInfoStatusOkay(nsIGfxInfo::FEATURE_DIRECT3D_11_LAYERS,
                                         &message, failureId)) {
     d3d11.Disable(FeatureStatus::Blacklisted, message.get(), failureId);
-  }
-
-  // Check if the user really, really wants WARP.
-  if (StaticPrefs::layers_d3d11_force_warp_AtStartup()) {
-    // Force D3D11 on even if we disabled it.
-    d3d11.UserForceEnable("User force-enabled WARP");
   }
 
   InitializeAdvancedLayersConfig();
@@ -1384,10 +1385,9 @@ void gfxWindowsPlatform::InitializeAdvancedLayersConfig() {
   }
 
   FeatureState& al = gfxConfig::GetFeature(Feature::ADVANCED_LAYERS);
-  al.SetDefaultFromPref(
-      StaticPrefs::GetPrefName_layers_mlgpu_enabled(),
-      true /* aIsEnablePref */,
-      StaticPrefs::GetPrefDefault_layers_mlgpu_enabled());
+  al.SetDefaultFromPref(StaticPrefs::GetPrefName_layers_mlgpu_enabled(),
+                        true /* aIsEnablePref */,
+                        StaticPrefs::GetPrefDefault_layers_mlgpu_enabled());
 
   // Windows 7 has an extra pref since it uses totally different buffer paths
   // that haven't been performance tested yet.
@@ -1544,9 +1544,9 @@ void gfxWindowsPlatform::InitializeD2DConfig() {
     return;
   }
 
-  d2d1.SetDefaultFromPref(
-      StaticPrefs::GetPrefName_gfx_direct2d_disabled(), false,
-      StaticPrefs::GetPrefDefault_gfx_direct2d_disabled());
+  d2d1.SetDefaultFromPref(StaticPrefs::GetPrefName_gfx_direct2d_disabled(),
+                          false,
+                          StaticPrefs::GetPrefDefault_gfx_direct2d_disabled());
 
   nsCString message;
   nsCString failureId;

@@ -330,10 +330,7 @@ nsresult IDBFactory::AllowedForWindowInternal(nsPIDOMWindowInner* aWindow,
   MOZ_ALWAYS_SUCCEEDS(principal->GetURI(getter_AddRefs(uri)));
   MOZ_ASSERT(uri);
 
-  bool isAbout = false;
-  MOZ_ALWAYS_SUCCEEDS(uri->SchemeIs("about", &isAbout));
-
-  if (isAbout) {
+  if (uri->SchemeIs("about")) {
     nsCOMPtr<nsIAboutModule> module;
     if (NS_SUCCEEDED(NS_GetAboutModule(uri, getter_AddRefs(module)))) {
       uint32_t flags;
@@ -450,12 +447,8 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::Open(
       if (principal) {
         nsCOMPtr<nsIURI> uri;
         nsresult rv = principal->GetURI(getter_AddRefs(uri));
-        if (NS_SUCCEEDED(rv) && uri) {
-          bool isAbout;
-          rv = uri->SchemeIs("about", &isAbout);
-          if (NS_SUCCEEDED(rv) && isAbout) {
-            ignore = true;
-          }
+        if (NS_SUCCEEDED(rv) && uri && uri->SchemeIs("about")) {
+          ignore = true;
         }
       }
     }
@@ -502,13 +495,19 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::DeleteDatabase(
 int16_t IDBFactory::Cmp(JSContext* aCx, JS::Handle<JS::Value> aFirst,
                         JS::Handle<JS::Value> aSecond, ErrorResult& aRv) {
   Key first, second;
-  first.SetFromJSVal(aCx, aFirst, aRv);
-  if (aRv.Failed()) {
+  auto result = first.SetFromJSVal(aCx, aFirst, aRv);
+  if (!result.Is(Ok, aRv)) {
+    if (result.Is(Invalid, aRv)) {
+      aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
+    }
     return 0;
   }
 
-  second.SetFromJSVal(aCx, aSecond, aRv);
-  if (aRv.Failed()) {
+  result = second.SetFromJSVal(aCx, aSecond, aRv);
+  if (!result.Is(Ok, aRv)) {
+    if (result.Is(Invalid, aRv)) {
+      aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
+    }
     return 0;
   }
 

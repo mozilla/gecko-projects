@@ -18,7 +18,6 @@
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/SystemGroup.h"
 #include "mozilla/TaskQueue.h"
-#include "mozilla/Telemetry.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "nsIGfxInfo.h"
@@ -280,6 +279,13 @@ void BenchmarkPlayback::GlobalShutdown() {
 
   mFinished = true;
 
+  if (mTrackDemuxer) {
+    mTrackDemuxer->Reset();
+    mTrackDemuxer->BreakCycles();
+    mTrackDemuxer = nullptr;
+  }
+  mDemuxer = nullptr;
+
   if (mDecoder) {
     RefPtr<Benchmark> ref(mGlobalState);
     mDecoder->Flush()->Then(
@@ -295,13 +301,6 @@ void BenchmarkPlayback::GlobalShutdown() {
   } else {
     FinalizeShutdown();
   }
-
-  if (mTrackDemuxer) {
-    mTrackDemuxer->Reset();
-    mTrackDemuxer->BreakCycles();
-    mTrackDemuxer = nullptr;
-  }
-  mDemuxer = nullptr;
 }
 
 void BenchmarkPlayback::Output(MediaDataDecoder::DecodedData&& aResults) {

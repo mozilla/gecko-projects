@@ -70,13 +70,14 @@ class NewRenderer : public RendererEvent {
     *mUseDComp = compositor->UseDComp();
     *mUseTripleBuffering = compositor->UseTripleBuffering();
 
+    bool allow_texture_swizzling = gfx::gfxVars::UseGLSwizzle();
     bool isMainWindow = true;  // TODO!
     bool supportLowPriorityTransactions = isMainWindow;
     bool supportPictureCaching = isMainWindow;
     wr::Renderer* wrRenderer = nullptr;
     if (!wr_window_new(
             aWindowId, mSize.width, mSize.height,
-            supportLowPriorityTransactions,
+            supportLowPriorityTransactions, allow_texture_swizzling,
             StaticPrefs::gfx_webrender_picture_caching() &&
                 supportPictureCaching,
             StaticPrefs::gfx_webrender_start_debug_server(), compositor->gl(),
@@ -579,11 +580,11 @@ void WebRenderAPI::Capture() {
 }
 
 void WebRenderAPI::SetCompositionRecorder(
-    RefPtr<layers::WebRenderCompositionRecorder>&& aRecorder) {
+    UniquePtr<layers::WebRenderCompositionRecorder> aRecorder) {
   class SetCompositionRecorderEvent final : public RendererEvent {
    public:
     explicit SetCompositionRecorderEvent(
-        RefPtr<layers::WebRenderCompositionRecorder>&& aRecorder)
+        UniquePtr<layers::WebRenderCompositionRecorder> aRecorder)
         : mRecorder(std::move(aRecorder)) {
       MOZ_COUNT_CTOR(SetCompositionRecorderEvent);
     }
@@ -600,12 +601,31 @@ void WebRenderAPI::SetCompositionRecorder(
     }
 
    private:
-    RefPtr<layers::WebRenderCompositionRecorder> mRecorder;
+    UniquePtr<layers::WebRenderCompositionRecorder> mRecorder;
   };
 
   auto event = MakeUnique<SetCompositionRecorderEvent>(std::move(aRecorder));
   RunOnRenderThread(std::move(event));
 }
+
+void WebRenderAPI::WriteCollectedFrames() {
+  class WriteCollectedFramesEvent final : public RendererEvent {
+   public:
+    explicit WriteCollectedFramesEvent() {
+      MOZ_COUNT_CTOR(WriteCollectedFramesEvent);
+    }
+
+    ~WriteCollectedFramesEvent() { MOZ_COUNT_DTOR(WriteCollectedFramesEvent); }
+
+    void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+      aRenderThread.WriteCollectedFramesForWindow(aWindowId);
+    }
+  };
+
+  auto event = MakeUnique<WriteCollectedFramesEvent>();
+  RunOnRenderThread(std::move(event));
+}
+
 void TransactionBuilder::Clear() { wr_resource_updates_clear(mTxn); }
 
 void TransactionBuilder::Notify(wr::Checkpoint aWhen,
@@ -1017,6 +1037,25 @@ void DisplayListBuilder::PushClearRectWithComplexRegion(
 
   wr_dp_push_clear_rect_with_parent_clip(mWrState, aBounds, clip,
                                          &spaceAndClip);
+}
+
+void DisplayListBuilder::PushBackdropFilter(
+    const wr::LayoutRect& aBounds, const wr::ComplexClipRegion& aRegion,
+    const nsTArray<wr::FilterOp>& aFilters,
+    const nsTArray<wr::WrFilterData>& aFilterDatas, bool aIsBackfaceVisible) {
+  wr::LayoutRect clip = MergeClipLeaf(aBounds);
+  WRDL_LOG("PushBackdropFilter b=%s c=%s\n", mWrState,
+           Stringify(aBounds).c_str(), Stringify(clip).c_str());
+
+  AutoTArray<wr::ComplexClipRegion, 1> clips;
+  clips.AppendElement(aRegion);
+  auto clipId = DefineClip(Nothing(), aBounds, &clips, nullptr);
+  auto spaceAndClip = WrSpaceAndClip{mCurrentSpaceAndClipChain.space, clipId};
+
+  wr_dp_push_backdrop_filter_with_parent_clip(
+      mWrState, aBounds, clip, aIsBackfaceVisible, &spaceAndClip,
+      aFilters.Elements(), aFilters.Length(), aFilterDatas.Elements(),
+      aFilterDatas.Length());
 }
 
 void DisplayListBuilder::PushLinearGradient(

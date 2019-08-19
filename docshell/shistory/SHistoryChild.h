@@ -8,6 +8,7 @@
 #define mozilla_dom_SHistoryChild_h
 
 #include "mozilla/dom/PSHistoryChild.h"
+#include "nsExpirationTracker.h"
 #include "nsISHistory.h"
 #include "nsWeakReference.h"
 

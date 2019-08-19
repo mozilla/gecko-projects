@@ -305,8 +305,8 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
     WasmArrayRawBuffer* wasmBuffer() const;
   };
 
-  static const Class class_;
-  static const Class protoClass_;
+  static const JSClass class_;
+  static const JSClass protoClass_;
 
   static bool byteLengthGetter(JSContext* cx, unsigned argc, Value* vp);
 
@@ -389,7 +389,7 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
   }
   bool hasInlineData() const { return dataPointer() == inlineDataPointer(); }
 
-  void releaseData(FreeOp* fop);
+  void releaseData(JSFreeOp* fop);
 
   BufferKind bufferKind() const {
     return BufferKind(flags() & BUFFER_KIND_MASK);
@@ -427,7 +427,7 @@ class ArrayBufferObject : public ArrayBufferObjectMaybeShared {
 #endif
   uint32_t wasmBoundsCheckLimit() const;
 
-  static void finalize(FreeOp* fop, JSObject* obj);
+  static void finalize(JSFreeOp* fop, JSObject* obj);
 
   static BufferContents createMappedContents(int fd, size_t offset,
                                              size_t length);

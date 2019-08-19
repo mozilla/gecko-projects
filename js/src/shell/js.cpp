@@ -479,7 +479,6 @@ static bool enableWasmVerbose = false;
 static bool enableTestWasmAwaitTier2 = false;
 static bool enableAsyncStacks = false;
 static bool enableStreams = false;
-static bool enableBigInt = false;
 static bool enableFields = false;
 static bool enableAwaitFix = false;
 #ifdef JS_GC_ZEAL
@@ -522,7 +521,7 @@ static JSObject* NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
  * where global |this| is a WindowProxy. All requests are forwarded to the
  * underlying global and no navigation is supported.
  */
-const js::Class ShellWindowProxyClass =
+const JSClass ShellWindowProxyClass =
     PROXY_CLASS_DEF("ShellWindowProxy", JSCLASS_HAS_RESERVED_SLOTS(1));
 
 JSObject* NewShellWindowProxy(JSContext* cx, JS::HandleObject global) {
@@ -1257,6 +1256,10 @@ static bool AddIntlExtras(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   if (!js::AddMozDateTimeFormatConstructor(cx, intl)) {
+    return false;
+  }
+
+  if (!js::AddLocaleConstructor(cx, intl)) {
     return false;
   }
 
@@ -2838,8 +2841,7 @@ static bool GetScriptAndPCArgs(JSContext* cx, CallArgs& args,
   if (!args.get(0).isUndefined()) {
     HandleValue v = args[0];
     unsigned intarg = 0;
-    if (v.isObject() &&
-        JS_GetClass(&v.toObject()) == Jsvalify(&JSFunction::class_)) {
+    if (v.isObject() && JS_GetClass(&v.toObject()) == &JSFunction::class_) {
       script = TestingFunctionArgumentToScript(cx, v);
       if (!script) {
         return false;
@@ -3780,7 +3782,6 @@ static const JSClass sandbox_class = {"sandbox", JSCLASS_GLOBAL_FLAGS,
 static void SetStandardRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
       .setSharedMemoryAndAtomicsEnabled(enableSharedMemory)
-      .setBigIntEnabled(enableBigInt)
       .setStreamsEnabled(enableStreams)
       .setFieldsEnabled(enableFields)
       .setAwaitFixEnabled(enableAwaitFix);
@@ -6203,13 +6204,6 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
                            : ShellGlobalKind::GlobalObject;
     }
 
-    if (!JS_GetProperty(cx, opts, "enableBigInt", &v)) {
-      return false;
-    }
-    if (v.isBoolean()) {
-      creationOptions.setBigIntEnabled(v.toBoolean());
-    }
-
     if (!JS_GetProperty(cx, opts, "systemPrincipal", &v)) {
       return false;
     }
@@ -6982,10 +6976,10 @@ typedef RefPtr<StreamCacheEntry> StreamCacheEntryPtr;
 
 class StreamCacheEntryObject : public NativeObject {
   static const unsigned CACHE_ENTRY_SLOT = 0;
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
   static const JSPropertySpec properties_;
 
-  static void finalize(FreeOp*, JSObject* obj) {
+  static void finalize(JSFreeOp*, JSObject* obj) {
     obj->as<StreamCacheEntryObject>().cache().Release();
   }
 
@@ -7024,7 +7018,7 @@ class StreamCacheEntryObject : public NativeObject {
 
  public:
   static const unsigned RESERVED_SLOTS = 1;
-  static const Class class_;
+  static const JSClass class_;
   static const JSPropertySpec properties[];
 
   static bool construct(JSContext* cx, unsigned argc, Value* vp) {
@@ -7079,7 +7073,7 @@ class StreamCacheEntryObject : public NativeObject {
   }
 };
 
-const ClassOps StreamCacheEntryObject::classOps_ = {
+const JSClassOps StreamCacheEntryObject::classOps_ = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* enumerate */
@@ -7088,7 +7082,7 @@ const ClassOps StreamCacheEntryObject::classOps_ = {
     nullptr, /* mayResolve */
     StreamCacheEntryObject::finalize};
 
-const Class StreamCacheEntryObject::class_ = {
+const JSClass StreamCacheEntryObject::class_ = {
     "StreamCacheEntryObject",
     JSCLASS_HAS_RESERVED_SLOTS(StreamCacheEntryObject::RESERVED_SLOTS) |
         JSCLASS_BACKGROUND_FINALIZE,
@@ -8104,7 +8098,7 @@ static const JSClass TransplantableDOMObjectClass = {
     "TransplantableDOMObject",
     JSCLASS_IS_DOMJSCLASS | JSCLASS_HAS_RESERVED_SLOTS(1)};
 
-static const Class TransplantableDOMProxyObjectClass =
+static const JSClass TransplantableDOMProxyObjectClass =
     PROXY_CLASS_DEF("TransplantableDOMProxyObject",
                     JSCLASS_IS_DOMJSCLASS | JSCLASS_HAS_RESERVED_SLOTS(1));
 
@@ -8331,8 +8325,8 @@ static bool TransplantableObject(JSContext* cx, unsigned argc, Value* vp) {
 
   if (!source) {
     if (!createProxy) {
-      source = NewBuiltinClassInstance(
-          cx, Valueify(&TransplantableDOMObjectClass), TenuredObject);
+      source = NewBuiltinClassInstance(cx, &TransplantableDOMObjectClass,
+                                       TenuredObject);
       if (!source) {
         return false;
       }
@@ -9791,7 +9785,7 @@ static void InitDOMObject(HandleObject obj) {
 
 static JSObject* GetDOMPrototype(JSContext* cx, JSObject* global) {
   MOZ_ASSERT(JS_IsGlobalObject(global));
-  if (GetObjectJSClass(global) != &global_class) {
+  if (GetObjectClass(global) != &global_class) {
     JS_ReportErrorASCII(cx, "Can't get FakeDOMObject prototype in sandbox");
     return nullptr;
   }
@@ -9826,10 +9820,10 @@ static bool dom_constructor(JSContext* cx, unsigned argc, JS::Value* vp) {
   return true;
 }
 
-static bool InstanceClassHasProtoAtDepth(const Class* clasp, uint32_t protoID,
+static bool InstanceClassHasProtoAtDepth(const JSClass* clasp, uint32_t protoID,
                                          uint32_t depth) {
   // Only the (fake) DOM object supports any JIT optimizations.
-  return clasp == Valueify(GetDomClass());
+  return clasp == GetDomClass();
 }
 
 static bool ShellBuildId(JS::BuildIdCharVector* buildId) {
@@ -10210,7 +10204,6 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   enableTestWasmAwaitTier2 = op.getBoolOption("test-wasm-await-tier2");
   enableAsyncStacks = !op.getBoolOption("no-async-stacks");
   enableStreams = !op.getBoolOption("no-streams");
-  enableBigInt = !op.getBoolOption("no-bigint");
   enableFields = !op.getBoolOption("disable-experimental-fields");
   enableAwaitFix = op.getBoolOption("enable-experimental-await-fix");
 
@@ -10962,7 +10955,6 @@ int main(int argc, char** argv, char** envp) {
       !op.addBoolOption('\0', "enable-streams",
                         "Enable WHATWG Streams (default)") ||
       !op.addBoolOption('\0', "no-streams", "Disable WHATWG Streams") ||
-      !op.addBoolOption('\0', "no-bigint", "Disable BigInt support") ||
       !op.addBoolOption('\0', "disable-experimental-fields",
                         "Disable public fields in classes") ||
       !op.addBoolOption('\0', "enable-experimental-await-fix",
@@ -11250,8 +11242,8 @@ int main(int argc, char** argv, char** envp) {
   if (cpuCount < 0) {
     cpuCount = op.getIntOption("thread-count");  // Legacy name
   }
-  if (cpuCount >= 0) {
-    SetFakeCPUCount(cpuCount);
+  if (cpuCount >= 0 && !SetFakeCPUCount(cpuCount)) {
+    return 1;
   }
 
   size_t nurseryBytes = JS::DefaultNurseryBytes;

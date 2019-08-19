@@ -102,7 +102,9 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   mozilla::Maybe<EitherParser> ep_ = {};
   BCEParserHandle* parser = nullptr;
 
-  unsigned firstLine = 0; /* first line, for JSScript::initFromEmitter */
+  // First line and column, for JSScript::initFromEmitter.
+  unsigned firstLine = 0;
+  unsigned firstColumn = 0;
 
   uint32_t maxFixedSlots = 0; /* maximum number of fixed frame slots so far */
 
@@ -175,7 +177,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   // Internal constructor, for delegation use only.
   BytecodeEmitter(
       BytecodeEmitter* parent, SharedContext* sc, JS::Handle<JSScript*> script,
-      JS::Handle<LazyScript*> lazyScript, uint32_t lineNum,
+      JS::Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
       EmitterMode emitterMode,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid());
 
@@ -194,60 +196,27 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   BytecodeEmitter(
       BytecodeEmitter* parent, BCEParserHandle* parser, SharedContext* sc,
       JS::Handle<JSScript*> script, JS::Handle<LazyScript*> lazyScript,
-      uint32_t lineNum, EmitterMode emitterMode = Normal,
+      uint32_t line, uint32_t column, EmitterMode emitterMode = Normal,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid());
 
   BytecodeEmitter(
       BytecodeEmitter* parent, const EitherParser& parser, SharedContext* sc,
       JS::Handle<JSScript*> script, JS::Handle<LazyScript*> lazyScript,
-      uint32_t lineNum, EmitterMode emitterMode = Normal,
+      uint32_t line, uint32_t column, EmitterMode emitterMode = Normal,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid());
 
   template <typename Unit>
   BytecodeEmitter(
       BytecodeEmitter* parent, Parser<FullParseHandler, Unit>* parser,
       SharedContext* sc, JS::Handle<JSScript*> script,
-      JS::Handle<LazyScript*> lazyScript, uint32_t lineNum,
+      JS::Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
       EmitterMode emitterMode = Normal,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid())
       : BytecodeEmitter(parent, EitherParser(parser), sc, script, lazyScript,
-                        lineNum, emitterMode, fieldInitializers) {}
-
-  // An alternate constructor that uses a TokenPos for the starting
-  // line and that sets functionBodyEndPos as well.
-  BytecodeEmitter(
-      BytecodeEmitter* parent, BCEParserHandle* parser, SharedContext* sc,
-      JS::Handle<JSScript*> script, JS::Handle<LazyScript*> lazyScript,
-      TokenPos bodyPosition, EmitterMode emitterMode = Normal,
-      FieldInitializers fieldInitializers = FieldInitializers::Invalid())
-      : BytecodeEmitter(parent, parser, sc, script, lazyScript,
-                        parser->errorReporter().lineAt(bodyPosition.begin),
-                        emitterMode, fieldInitializers) {
-    initFromBodyPosition(bodyPosition);
-  }
-
-  BytecodeEmitter(
-      BytecodeEmitter* parent, const EitherParser& parser, SharedContext* sc,
-      JS::Handle<JSScript*> script, JS::Handle<LazyScript*> lazyScript,
-      TokenPos bodyPosition, EmitterMode emitterMode = Normal,
-      FieldInitializers fieldInitializers = FieldInitializers::Invalid())
-      : BytecodeEmitter(parent, parser, sc, script, lazyScript,
-                        parser.errorReporter().lineAt(bodyPosition.begin),
-                        emitterMode, fieldInitializers) {
-    initFromBodyPosition(bodyPosition);
-  }
-
-  template <typename Unit>
-  BytecodeEmitter(
-      BytecodeEmitter* parent, Parser<FullParseHandler, Unit>* parser,
-      SharedContext* sc, JS::Handle<JSScript*> script,
-      JS::Handle<LazyScript*> lazyScript, TokenPos bodyPosition,
-      EmitterMode emitterMode = Normal,
-      FieldInitializers fieldInitializers = FieldInitializers::Invalid())
-      : BytecodeEmitter(parent, EitherParser(parser), sc, script, lazyScript,
-                        bodyPosition, emitterMode, fieldInitializers) {}
+                        line, column, emitterMode, fieldInitializers) {}
 
   MOZ_MUST_USE bool init();
+  MOZ_MUST_USE bool init(TokenPos bodyPosition);
 
   template <typename T>
   T* findInnermostNestableControl() const;
@@ -528,9 +497,16 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   MOZ_MUST_USE bool emitArgOp(JSOp op, uint16_t slot);
   MOZ_MUST_USE bool emitEnvCoordOp(JSOp op, EnvironmentCoordinate ec);
 
-  MOZ_MUST_USE bool emitGetNameAtLocation(JSAtom* name,
+  MOZ_MUST_USE bool emitGetNameAtLocation(Handle<JSAtom*> name,
                                           const NameLocation& loc);
-  MOZ_MUST_USE bool emitGetName(JSAtom* name) {
+  MOZ_MUST_USE bool emitGetNameAtLocation(ImmutablePropertyNamePtr name,
+                                          const NameLocation& loc) {
+    return emitGetNameAtLocation(name.toHandle(), loc);
+  }
+  MOZ_MUST_USE bool emitGetName(Handle<JSAtom*> name) {
+    return emitGetNameAtLocation(name, lookupName(name));
+  }
+  MOZ_MUST_USE bool emitGetName(ImmutablePropertyNamePtr name) {
     return emitGetNameAtLocation(name, lookupName(name));
   }
   MOZ_MUST_USE bool emitGetName(NameNode* name);
@@ -543,11 +519,8 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   MOZ_MUST_USE bool emitDeclarationList(ListNode* declList);
   MOZ_MUST_USE bool emitSingleDeclaration(ListNode* declList, NameNode* decl,
                                           ParseNode* initializer);
-  // emitSetFunName should be of type ElemOpEmitter::EmitSetFunctionName, but
-  // that's not possible due to C++ declaration order.
   MOZ_MUST_USE bool emitAssignmentRhs(ParseNode* rhs,
-                                      HandleAtom anonFunctionName,
-                                      bool* emitSetFunName);
+                                      HandleAtom anonFunctionName);
   MOZ_MUST_USE bool emitAssignmentRhs(uint8_t offset);
 
   MOZ_MUST_USE bool emitNewInit();
@@ -755,7 +728,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   MOZ_MUST_USE bool emitFunctionFormalParameters(ListNode* paramsBody);
   MOZ_MUST_USE bool emitInitializeFunctionSpecialNames();
   MOZ_MUST_USE bool emitLexicalInitialization(NameNode* name);
-  MOZ_MUST_USE bool emitLexicalInitialization(JSAtom* name);
+  MOZ_MUST_USE bool emitLexicalInitialization(Handle<JSAtom*> name);
 
   // Emit bytecode for the spread operator.
   //

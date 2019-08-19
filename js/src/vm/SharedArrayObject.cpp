@@ -274,7 +274,7 @@ SharedArrayRawBuffer* SharedArrayBufferObject::rawBufferObject() const {
   return reinterpret_cast<SharedArrayRawBuffer*>(v.toPrivate());
 }
 
-void SharedArrayBufferObject::Finalize(FreeOp* fop, JSObject* obj) {
+void SharedArrayBufferObject::Finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->maybeOnHelperThread());
 
   SharedArrayBufferObject& buf = obj->as<SharedArrayBufferObject>();
@@ -343,7 +343,7 @@ SharedArrayBufferObject* SharedArrayBufferObject::createFromNewRawBuffer(
   return obj;
 }
 
-static const ClassOps SharedArrayBufferObjectClassOps = {
+static const JSClassOps SharedArrayBufferObjectClassOps = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* enumerate */
@@ -379,7 +379,7 @@ static const ClassSpec SharedArrayBufferObjectClassSpec = {
     sharedarray_proto_functions,
     sharedarray_proto_properties};
 
-const Class SharedArrayBufferObject::class_ = {
+const JSClass SharedArrayBufferObject::class_ = {
     "SharedArrayBuffer",
     JSCLASS_DELAY_METADATA_BUILDER |
         JSCLASS_HAS_RESERVED_SLOTS(SharedArrayBufferObject::RESERVED_SLOTS) |
@@ -388,7 +388,7 @@ const Class SharedArrayBufferObject::class_ = {
     &SharedArrayBufferObjectClassOps, &SharedArrayBufferObjectClassSpec,
     JS_NULL_CLASS_EXT};
 
-const Class SharedArrayBufferObject::protoClass_ = {
+const JSClass SharedArrayBufferObject::protoClass_ = {
     "SharedArrayBufferPrototype",
     JSCLASS_HAS_CACHED_PROTO(JSProto_SharedArrayBuffer), JS_NULL_CLASS_OPS,
     &SharedArrayBufferObjectClassSpec};

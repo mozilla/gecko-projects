@@ -32,7 +32,6 @@
 #include "nsPIWindowRoot.h"
 #include "nsFrameManager.h"
 #include "nsIObserverService.h"
-#include "XULDocument.h"
 #include "mozilla/AnimationUtils.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/Element.h"
@@ -1605,7 +1604,7 @@ bool nsXULPopupManager::MayShowPopup(nsMenuPopupFrame* aPopup) {
   if (!baseWin) return false;
 
   nsCOMPtr<nsIDocShellTreeItem> root;
-  dsti->GetRootTreeItem(getter_AddRefs(root));
+  dsti->GetInProcessRootTreeItem(getter_AddRefs(root));
   if (!root) {
     return false;
   }

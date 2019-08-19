@@ -14,18 +14,7 @@ const { MESSAGE_SOURCE } = require("devtools/client/webconsole/constants");
 const clipboardHelper = require("devtools/shared/platform/clipboard");
 const { l10n } = require("devtools/client/webconsole/utils/messages");
 
-loader.lazyRequireGetter(
-  this,
-  "showSaveFileDialog",
-  "devtools/shared/DevToolsUtils",
-  true
-);
-loader.lazyRequireGetter(
-  this,
-  "saveFileStream",
-  "devtools/shared/DevToolsUtils",
-  true
-);
+loader.lazyRequireGetter(this, "saveAs", "devtools/shared/DevToolsUtils", true);
 loader.lazyRequireGetter(
   this,
   "openContentLink",
@@ -164,7 +153,7 @@ function createContextMenu(
           selectedObjectActor: actor,
         };
 
-        webConsoleUI.jsterm.requestEvaluation(evalString, options).then(res => {
+        webConsoleUI.evaluateJSAsync(evalString, options).then(res => {
           webConsoleUI.jsterm.focus();
           webConsoleUI.hud.setInputValue(res.result);
         });
@@ -204,8 +193,10 @@ function createContextMenu(
         if (actor) {
           // The Debugger.Object of the OA will be bound to |_self| during evaluation.
           // See server/actors/webconsole/eval-with-debugger.js `evalWithDebugger`.
-          webConsoleUI.webConsoleClient
-            .evaluateJSAsync("copy(_self)", { selectedObjectActor: actor })
+          webConsoleUI
+            .evaluateJSAsync("copy(_self)", {
+              selectedObjectActor: actor,
+            })
             .then(res => {
               clipboardHelper.copyString(res.helperResult.value);
             });
@@ -253,22 +244,16 @@ function createContextMenu(
       id: "console-menu-export-file",
       label: l10n.getStr("webconsole.menu.exportSubmenu.exportFile.label"),
       disabled: false,
-      click: async () => {
+      // Note: not async, but returns a promise for the actual save.
+      click: () => {
         const date = new Date();
         const suggestedName =
           `console-export-${date.getFullYear()}-` +
           `${date.getMonth() + 1}-${date.getDate()}_${date.getHours()}-` +
           `${date.getMinutes()}-${date.getSeconds()}.txt`;
-        const returnFile = await showSaveFileDialog(win, suggestedName);
-        const converter = Cc[
-          "@mozilla.org/intl/scriptableunicodeconverter"
-        ].createInstance(Ci.nsIScriptableUnicodeConverter);
-        converter.charset = "UTF-8";
         const webconsoleOutput = parentNode.querySelector(".webconsole-output");
-        const istream = converter.convertToInputStream(
-          getElementText(webconsoleOutput)
-        );
-        return saveFileStream(returnFile, istream);
+        const data = new TextEncoder().encode(getElementText(webconsoleOutput));
+        return saveAs(window, data, suggestedName);
       },
     })
   );

@@ -71,6 +71,10 @@ DebuggerPanel.prototype = {
     return this._store.getState();
   },
 
+  getToolboxStore: function() {
+    return this.toolbox.store;
+  },
+
   openLink: function(url) {
     openContentLink(url);
   },
@@ -80,9 +84,8 @@ DebuggerPanel.prototype = {
   },
 
   openConsoleAndEvaluate: async function(input) {
-    const webconsolePanel = await this.toolbox.selectTool("webconsole");
-    const jsterm = webconsolePanel.hud.jsterm;
-    jsterm.execute(input);
+    const { hud } = await this.toolbox.selectTool("webconsole");
+    hud.ui.wrapper.dispatchEvaluateExpression(input);
   },
 
   openElementInInspector: async function(grip) {
@@ -138,12 +141,9 @@ DebuggerPanel.prototype = {
     frames.forEach(frame => {
       frame.actor = frame.id;
     });
+    const target = this._client.lookupTarget(thread);
 
-    return { frames, selected };
-  },
-
-  lookupConsoleClient: function(thread) {
-    return this._client.lookupConsoleClient(thread);
+    return { frames, selected, target };
   },
 
   getMappedExpression(expression) {
@@ -160,9 +160,14 @@ DebuggerPanel.prototype = {
     return this._actions.selectSourceURL(cx, url, { line, column });
   },
 
-  selectSource(sourceId, line, column) {
+  async selectSource(sourceId, line, column) {
     const cx = this._selectors.getContext(this._getState());
-    return this._actions.selectSource(cx, sourceId, { line, column });
+    const location = { sourceId, line, column };
+
+    await this._actions.selectSource(cx, sourceId, location);
+    if (this._selectors.hasLogpoint(this._getState(), location)) {
+      this._actions.openConditionalPanel(location, true);
+    }
   },
 
   canLoadSource(sourceId) {

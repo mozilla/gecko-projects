@@ -18,6 +18,11 @@ pref("devtools.toolbox.splitconsoleEnabled", false);
 pref("devtools.toolbox.splitconsoleHeight", 100);
 pref("devtools.toolbox.tabsOrder", "");
 
+// The fission pref is enabling the "Omniscient Browser Toolbox", which will make it
+// possible to debug anything in Firefox (See Bug 1570639 for more information).
+// ⚠ This is a work in progress. Expect weirdness when the pref is flipped on ⚠
+pref("devtools.browsertoolbox.fission", false);
+
 // Toolbox Button preferences
 pref("devtools.command-button-pick.enabled", true);
 pref("devtools.command-button-frames.enabled", true);
@@ -158,12 +163,17 @@ pref("devtools.serviceWorkers.testing.enabled", false);
 // Enable the Network Monitor
 pref("devtools.netmonitor.enabled", true);
 
+// Enable Network Search
+pref("devtools.netmonitor.features.search", false);
+
 // Enable the Application panel
 pref("devtools.application.enabled", false);
 
 // The default Network Monitor UI settings
 pref("devtools.netmonitor.panes-network-details-width", 550);
 pref("devtools.netmonitor.panes-network-details-height", 450);
+pref("devtools.netmonitor.panes-search-width", 550);
+pref("devtools.netmonitor.panes-search-height", 450);
 pref("devtools.netmonitor.filters", "[\"all\"]");
 pref("devtools.netmonitor.visibleColumns",
   "[\"status\",\"method\",\"domain\",\"file\",\"cause\",\"type\",\"transferred\",\"contentSize\",\"waterfall\"]"
@@ -171,6 +181,10 @@ pref("devtools.netmonitor.visibleColumns",
 pref("devtools.netmonitor.columnsData",
   '[{"name":"status","minWidth":30,"width":5}, {"name":"method","minWidth":30,"width":5}, {"name":"domain","minWidth":30,"width":10}, {"name":"file","minWidth":30,"width":25}, {"name":"url","minWidth":30,"width":25}, {"name":"cause","minWidth":30,"width":10},{"name":"type","minWidth":30,"width":5},{"name":"transferred","minWidth":30,"width":10},{"name":"contentSize","minWidth":30,"width":5},{"name":"waterfall","minWidth":150,"width":25}]');
 pref("devtools.netmonitor.ws.payload-preview-height", 128);
+pref("devtools.netmonitor.ws.visibleColumns",
+  '["data", "time"]'
+);
+pref("devtools.netmonitor.ws.displayed-frames.limit", 500);
 
 pref("devtools.netmonitor.response.ui.limit", 10240);
 
@@ -279,9 +293,6 @@ pref("devtools.webconsole.sidebarToggle", true);
 #else
 pref("devtools.webconsole.sidebarToggle", false);
 #endif
-
-// Enable CodeMirror in the JsTerm
-pref("devtools.webconsole.jsterm.codeMirror", true);
 
 // Enable editor mode in the console in Nightly builds.
 #if defined(NIGHTLY_BUILD)
@@ -392,3 +403,8 @@ pref("devtools.aboutdebugging.collapsibilities.temporaryExtension", false);
 
 // Map top-level await expressions in the console
 pref("devtools.debugger.features.map-await-expression", true);
+
+// Disable autohide for DevTools popups and tooltips.
+// This is currently not exposed by any UI to avoid making
+// about:devtools-toolbox tabs unusable by mistake.
+pref("devtools.popup.disable_autohide", false);

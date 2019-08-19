@@ -1,3 +1,17 @@
+/* Scroll to bottom */
+
+#messages-panel .uncontrolled {
+  flex-direction: column;
+}
+
+#messages-panel .ws-frames-list-scroll-anchor {
+  /* anchor nodes are required to have non-zero area */
+  min-height: 1px;
+  margin: 0;
+  padding: 0;
+  border: none;
+ }
+
 /* Empty notice */
 
 #messages-panel .ws-frame-list-empty-notice {
@@ -37,6 +51,7 @@
 }
 
 /* Use lining numbers so that seconds and milliseconds align */
+
 #messages-panel .ws-frames-list-time {
   font-variant-numeric: tabular-nums;
 }
@@ -67,4 +82,66 @@
 #messages-panel .treeTable .objectBox {
   white-space: normal;
   overflow-wrap: break-word;
+}
+
+/* Styles related to truncated data */
+
+.theme-light #messages-panel .truncated-data-message {
+  background: var(--grey-20);
+}
+
+.theme-dark #messages-panel .truncated-data-message {
+  background: var(--grey-70);
+}
+
+.truncated-data-message {
+  border-bottom: 1px solid var(--theme-splitter-color);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* Styles related to truncated messages */
+
+.theme-light #messages-panel .truncated-messages-header {
+  background: var(--grey-20);
+}
+
+.theme-dark #messages-panel .truncated-messages-header {
+  background: var(--grey-70);
+}
+
+.theme-dark #messages-panel .truncated-messages-warning-icon {
+  fill: var(--grey-40);
+}
+
+#messages-panel .truncated-messages-cell {
+  padding: 0; /* reset td default padding */
+}
+
+#messages-panel .truncated-messages-header {
+  border-bottom: 1px solid var(--theme-splitter-color);
+  padding: 2px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#messages-panel .truncated-messages-container,
+#messages-panel .truncated-messages-checkbox-label {
+  display: flex;
+  align-items: center;
+}
+
+#messages-panel .truncated-messages-warning-icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  background-image: url(chrome://global/skin/icons/info.svg);
+  background-repeat: no-repeat;
+  -moz-context-properties: fill;
+  fill: inherit;
+}
+
+#messages-panel .truncation-checkbox {
+  margin-right: 5px;
 }

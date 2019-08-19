@@ -32,7 +32,6 @@
 #include "jspubtd.h"
 #include "jstypes.h"
 
-#include "builtin/String.h"
 #include "gc/FreeOp.h"
 #include "gc/Marking.h"
 #include "jit/Ion.h"
@@ -105,6 +104,8 @@ js::AutoCycleDetector::~AutoCycleDetector() {
 bool JSContext::init(ContextKind kind) {
   // Skip most of the initialization if this thread will not be running JS.
   if (kind == ContextKind::MainThread) {
+    TlsContext.set(this);
+    currentThread_ = ThisThread::GetId();
     if (!regexpStack.ref().init()) {
       return false;
     }
@@ -156,14 +157,13 @@ JSContext* js::NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes,
     return nullptr;
   }
 
-  if (!runtime->init(cx, maxBytes, maxNurseryBytes)) {
-    runtime->destroyRuntime();
+  if (!cx->init(ContextKind::MainThread)) {
     js_delete(cx);
     js_delete(runtime);
     return nullptr;
   }
 
-  if (!cx->init(ContextKind::MainThread)) {
+  if (!runtime->init(cx, maxBytes, maxNurseryBytes)) {
     runtime->destroyRuntime();
     js_delete(cx);
     js_delete(runtime);
@@ -1226,6 +1226,7 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       freeLists_(this, nullptr),
       atomsZoneFreeLists_(this),
       defaultFreeOp_(this, runtime, true),
+      freeUnusedMemory(false),
       jitActivation(this, nullptr),
       regexpStack(this),
       activation_(this, nullptr),
@@ -1246,11 +1247,8 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       autoFlushICache_(this, nullptr),
       dtoaState(this, nullptr),
       suppressGC(this, 0),
-#ifdef DEBUG
-      ionCompiling(this, false),
-      ionCompilingSafeForMinorGC(this, false),
-      performingGC(this, false),
       gcSweeping(this, false),
+#ifdef DEBUG
       isTouchingGrayThings(this, false),
       noNurseryAllocationCheck(this, 0),
       disableStrictProxyCheckingCount(this, 0),
@@ -1274,7 +1272,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       unwrappedExceptionStack_(this),
       overRecursed_(this, false),
       propagatingForcedReturn_(this, false),
-      liveVolatileJitFrameIter_(this, nullptr),
       reportGranularity(this, JS_DEFAULT_JITREPORT_GRANULARITY),
       resolvingList(this, nullptr),
 #ifdef DEBUG
@@ -1305,9 +1302,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
 {
   MOZ_ASSERT(static_cast<JS::RootingContext*>(this) ==
              JS::RootingContext::get(this));
-
-  MOZ_ASSERT(!TlsContext.get());
-  TlsContext.set(this);
 }
 
 JSContext::~JSContext() {
@@ -1337,7 +1331,17 @@ JSContext::~JSContext() {
 
   js_delete(atomsZoneFreeLists_.ref());
 
-  MOZ_ASSERT(TlsContext.get() == this);
+  TlsContext.set(nullptr);
+}
+
+void JSContext::setHelperThread(AutoLockHelperThreadState& locked) {
+  MOZ_ASSERT_IF(!JSRuntime::hasLiveRuntimes(), !TlsContext.get());
+  TlsContext.set(this);
+  currentThread_ = ThisThread::GetId();
+}
+
+void JSContext::clearHelperThread(AutoLockHelperThreadState& locked) {
+  currentThread_ = Thread::Id();
   TlsContext.set(nullptr);
 }
 
@@ -1455,15 +1459,6 @@ void JSContext::resetJitStackLimit() {
 
 void JSContext::initJitStackLimit() { resetJitStackLimit(); }
 
-void JSContext::updateMallocCounter(size_t nbytes) {
-  if (!zone()) {
-    runtime()->updateMallocCounter(nbytes);
-    return;
-  }
-
-  zone()->updateMallocCounter(nbytes);
-}
-
 #ifdef JS_CRASH_DIAGNOSTICS
 void ContextChecks::check(AbstractFramePtr frame, int argIndex) {
   if (frame) {
@@ -1495,7 +1490,13 @@ void AutoEnterOOMUnsafeRegion::crash(size_t size, const char* reason) {
 
 #ifdef DEBUG
 AutoUnsafeCallWithABI::AutoUnsafeCallWithABI(UnsafeABIStrictness strictness)
-    : cx_(TlsContext.get()), nested_(cx_->hasAutoUnsafeCallWithABI), nogc(cx_) {
+    : cx_(TlsContext.get()),
+      nested_(cx_ ? cx_->hasAutoUnsafeCallWithABI : false),
+      nogc(cx_) {
+  if (!cx_) {
+    // This is a helper thread doing Ion or Wasm compilation - nothing to do.
+    return;
+  }
   switch (strictness) {
     case UnsafeABIStrictness::NoExceptions:
       MOZ_ASSERT(!JS_IsExceptionPending(cx_));
@@ -1513,6 +1514,9 @@ AutoUnsafeCallWithABI::AutoUnsafeCallWithABI(UnsafeABIStrictness strictness)
 }
 
 AutoUnsafeCallWithABI::~AutoUnsafeCallWithABI() {
+  if (!cx_) {
+    return;
+  }
   MOZ_ASSERT(cx_->hasAutoUnsafeCallWithABI);
   if (!nested_) {
     cx_->hasAutoUnsafeCallWithABI = false;

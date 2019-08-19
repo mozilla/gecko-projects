@@ -30,6 +30,7 @@
 #include "mozilla/net/SocketProcessParent.h"
 #include "mozilla/net/PSocketProcessBridgeParent.h"
 #ifdef MOZ_WEBRTC
+#  include "mozilla/net/ProxyConfigLookupParent.h"
 #  include "mozilla/net/StunAddrsRequestParent.h"
 #  include "mozilla/net/WebrtcProxyChannelParent.h"
 #endif
@@ -171,24 +172,23 @@ const char* NeckoParent::GetValidatedOriginAttributes(
     return "SerializedLoadContext from child is null";
   }
 
-  nsTArray<TabContext> contextArray =
-      static_cast<ContentParent*>(aContent)->GetManagedTabContext();
-
   nsAutoCString serializedSuffix;
   aSerialized.mOriginAttributes.CreateAnonymizedSuffix(serializedSuffix);
 
   nsAutoCString debugString;
-  for (uint32_t i = 0; i < contextArray.Length(); i++) {
-    const TabContext& tabContext = contextArray[i];
+  const auto& browsers = aContent->ManagedPBrowserParent();
+  for (auto iter = browsers.ConstIter(); !iter.Done(); iter.Next()) {
+    auto* browserParent = BrowserParent::GetFrom(iter.Get()->GetKey());
 
     if (!ChromeUtils::IsOriginAttributesEqual(
-            aSerialized.mOriginAttributes, tabContext.OriginAttributesRef())) {
+            aSerialized.mOriginAttributes,
+            browserParent->OriginAttributesRef())) {
       debugString.AppendLiteral("(");
       debugString.Append(serializedSuffix);
       debugString.AppendLiteral(",");
 
       nsAutoCString tabSuffix;
-      tabContext.OriginAttributesRef().CreateAnonymizedSuffix(tabSuffix);
+      browserParent->OriginAttributesRef().CreateAnonymizedSuffix(tabSuffix);
       debugString.Append(tabSuffix);
 
       debugString.AppendLiteral(")");
@@ -982,8 +982,37 @@ mozilla::ipc::IPCResult NeckoParent::RecvEnsureHSTSData(
   };
   RefPtr<HSTSDataCallbackWrapper> wrapper =
       new HSTSDataCallbackWrapper(std::move(callback));
-  gHttpHandler->EnsureHSTSDataReadyNative(wrapper.forget());
+  gHttpHandler->EnsureHSTSDataReadyNative(wrapper);
   return IPC_OK();
+}
+
+PProxyConfigLookupParent* NeckoParent::AllocPProxyConfigLookupParent() {
+#ifdef MOZ_WEBRTC
+  RefPtr<ProxyConfigLookupParent> actor = new ProxyConfigLookupParent();
+  return actor.forget().take();
+#else
+  return nullptr;
+#endif
+}
+
+mozilla::ipc::IPCResult NeckoParent::RecvPProxyConfigLookupConstructor(
+    PProxyConfigLookupParent* aActor) {
+#ifdef MOZ_WEBRTC
+  ProxyConfigLookupParent* actor =
+      static_cast<ProxyConfigLookupParent*>(aActor);
+  actor->DoProxyLookup();
+#endif
+  return IPC_OK();
+}
+
+bool NeckoParent::DeallocPProxyConfigLookupParent(
+    PProxyConfigLookupParent* aActor) {
+#ifdef MOZ_WEBRTC
+  RefPtr<ProxyConfigLookupParent> actor =
+      dont_AddRef(static_cast<ProxyConfigLookupParent*>(aActor));
+  MOZ_ASSERT(actor);
+#endif
+  return true;
 }
 
 }  // namespace net

@@ -116,10 +116,11 @@ class UrlbarResult {
           ? [this.payload.title, this.payloadHighlights.title]
           : [this.payload.url || "", this.payloadHighlights.url || []];
       case UrlbarUtils.RESULT_TYPE.SEARCH:
-        if (this.payload.isKeywordOffer) {
-          return this.heuristic
-            ? ["", []]
-            : [this.payload.keyword, this.payloadHighlights.keyword];
+        switch (this.payload.keywordOffer) {
+          case UrlbarUtils.KEYWORD_OFFER.SHOW:
+            return [this.payload.keyword, this.payloadHighlights.keyword];
+          case UrlbarUtils.KEYWORD_OFFER.HIDE:
+            return ["", []];
         }
         return this.payload.suggestion
           ? [this.payload.suggestion, this.payloadHighlights.suggestion]
@@ -168,9 +169,9 @@ class UrlbarResult {
    * @returns {array} An array [payload, payloadHighlights].
    */
   static payloadAndSimpleHighlights(tokens, payloadInfo) {
-    // Convert string values in payloadInfo to [value, false] arrays.
+    // Convert scalar values in payloadInfo to [value] arrays.
     for (let [name, info] of Object.entries(payloadInfo)) {
-      if (typeof info == "string") {
+      if (!Array.isArray(info)) {
         payloadInfo[name] = [info];
       }
     }

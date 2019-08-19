@@ -4,17 +4,25 @@
 :root {
   --card-padding: 24px;
   --social-color: #9059FF;
-  --social-color-darker: #7F40FF;
   --cookie-color: #0090F4;
-  --cookie-color-darker: #0073C3;
   --tracker-color: #2AC3A2;
-  --tracker-color-darker: #229C82;
-  --orange: #FFA436;
-  --dark-orange: #FF981D;
-  --grey: #8F8F9D;
-  --dark-grey: #818191;
+  --fingerprinter-color: #FFA436;
+  --cryptominer-color: #ADADBC;
+
+  /* Highlight colors for trackers */
+  --social-highlight-color: #7B4CDB;
+  --cookie-highlight-color: #0081DB;
+  --tracker-highlight-color: #23A488;
+  --fingerprinter-highlight-color: #D37F17;
+  --cryptominer-highlight-color: #9292A0;
+
   --tab-highlight: var(--social-color); /* start with social selected */
   --column-width: 16px;
+  --graph-empty: #CECECF;
+
+  /* Colors for the loading indicator */
+  --protection-report-loader-color-stop: #AEAEAE3D;
+  --protection-report-loader-gradient-opacity: .95;
 }
 
 body {
@@ -34,11 +42,15 @@ body[focuseddatatype=tracker] {
 }
 
 body[focuseddatatype=fingerprinter] {
-  --tab-highlight: var(--orange);
+  --tab-highlight: var(--fingerprinter-color);
 }
 
 body[focuseddatatype=cryptominer] {
-  --tab-highlight: var(--grey);
+  --tab-highlight: var(--cryptominer-color);
+}
+
+h2 {
+  font-weight: 700;
 }
 
 #report-title {
@@ -71,7 +83,7 @@ body[focuseddatatype=cryptominer] {
 
 /* We want to hide certain components depending on its state. */
 a.hidden,
-.card-body.hidden,
+.loading .card-body.hidden,
 .lockwise-card.hidden,
 #lockwise-body-content .has-logins.hidden,
 #lockwise-body-content .no-logins.hidden,
@@ -80,7 +92,12 @@ a.hidden,
 .monitor-card.no-logins #monitor-header-content a,
 .monitor-card.no-logins .inline-text-icon.monitor-scanned-text,
 .monitor-card.has-logins #sign-up-for-monitor-link,
-#monitor-body-content .monitor-breached-passwords.hidden {
+#monitor-body-content .monitor-breached-passwords.hidden,
+.loading a,
+.loading button,
+.loading .card-title,
+.loading .content,
+.loading .monitor-scanned-text {
   display: none;
 }
 
@@ -89,10 +106,27 @@ a.hidden,
   height: 60px;
   grid-column: 1;
   margin: 0 auto;
+  z-index: 1;
 }
 
 .etp-card .icon {
-  background: url("chrome://browser/content/logos/tracking-protection.svg") no-repeat center/cover;
+  background: url("chrome://browser/content/logos/tracking-protection.svg") no-repeat center/contain;
+}
+
+@supports -moz-bool-pref("browser.in-content.dark-mode") {
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --social-highlight-color: #9661FF;
+      --cookie-highlight-color: #2BA8FF;
+      --tracker-highlight-color: #39E1BC;
+      --fingerprinter-highlight-color: #FFB65E;
+      --cryptominer-highlight-color: #BEBECA;
+    }
+
+    .etp-card .icon {
+      background: url("chrome://browser/content/logos/tracking-protection-dark-theme.svg") no-repeat center/contain;
+    }
+  }
 }
 
 .lockwise-card .icon {
@@ -133,22 +167,32 @@ a.hidden,
   cursor: default;
 }
 
+#protection-details,
+.inline-text-icon {
+  padding: 4px;
+  padding-inline-start: 24px;
+}
+
 #protection-details {
   -moz-context-properties: fill;
   fill: currentColor;
   background: url("chrome://browser/skin/settings.svg") no-repeat 3px 3px;
-  padding: 4px 4px 4px 24px;
   font-size: 0.75em;
   display: inline;
   cursor: default;
 }
 
-#protection-details:hover {
+#protection-details:hover,
+#protection-details:focus {
   background-color: var(--in-content-button-background);
 }
 
 #protection-details:hover:active {
   background-color: var(--in-content-button-background-hover);
+}
+
+#protection-details:-moz-focusring {
+  outline: none;
 }
 
 #protection-details span {
@@ -190,18 +234,16 @@ a.hidden,
 /* Graph Bars */
 .graph-bar {
   grid-row: 1 / -2;
-  justify-self: center;
   align-self: flex-end;
   width: var(--column-width);
   position: relative;
 }
 
-.graph-bar div:nth-child(2){
-  border-radius: 2px 2px 0 0;
-}
-
-.graph-bar div:last-child{
-  border-radius: 0 0 2px 2px;
+.graph-wrapper-bar {
+  height: 100%;
+  width: 100%;
+  border-radius: 2px;
+  overflow: hidden;
 }
 
 .graph-bar:hover {
@@ -210,7 +252,7 @@ a.hidden,
 
 .graph-bar.empty {
   height: 0;
-  border: 1px rgba(12,12,13,0.2) solid;
+  border: 1px var(--graph-empty) solid;
   border-radius: 4px;
   cursor: default;
 }
@@ -220,7 +262,7 @@ a.hidden,
 }
 
 .hover-social .social-bar {
-  background-color: var(--social-color-darker);
+  background-color: var(--social-highlight-color);
 }
 
 .cookie-bar {
@@ -228,7 +270,7 @@ a.hidden,
 }
 
 .hover-cookie .cookie-bar {
-  background-color: var(--cookie-color-darker);
+  background-color: var(--cookie-highlight-color);
 }
 
 .tracker-bar {
@@ -236,27 +278,26 @@ a.hidden,
 }
 
 .hover-tracker .tracker-bar {
-  background-color: var(--tracker-color-darker);
+  background-color: var(--tracker-highlight-color);
 }
 
 .fingerprinter-bar {
-  background-color: var(--orange);
+  background-color: var(--fingerprinter-color);
 }
 
 .hover-fingerprinter .fingerprinter-bar {
-  background-color: var(--dark-orange);
+  background-color: var(--fingerprinter-highlight-color);
 }
 
 .cryptominer-bar {
-  background-color: var(--grey);
+  background-color: var(--cryptominer-color);
 }
 
 .hover-cryptominer .cryptominer-bar {
-  background-color: var(--dark-grey);
+  background-color: var(--cryptominer-highlight-color);
 }
 
 .column-label {
-  justify-self: center;
   margin-top: 5px;
   font-size: 0.9em;
   width: var(--column-width);
@@ -269,45 +310,97 @@ a.hidden,
 }
 
 /* Legend */
-input {
-  display: none;
+#graphLegendDescription {
+  position: absolute;
+  opacity: 0;
+  z-index: -1;
+}
+
+input[type="radio"] {
+  position: absolute;
+  left: -100px;
+}
+
+[dir="rtl"] input[type="radio"] {
+  right: -100px;
+}
+
+#legend input:focus + label {
+  outline: solid 1px;
+  outline-offset: -1px;
+  outline-color: var(--tab-highlight);
+}
+
+#legend {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-template-rows: auto auto;
+  grid-gap: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+#highlight {
+  background: var(--tab-highlight);
+  position: absolute;
+  height: 3px;
+  width: 100%;
+  align-self: end;
+  grid-column: 1 / span 1;
+  grid-row: 1 / 1;
+}
+
+#highlight-hover {
+  position: absolute;
+  height: 4px;
+  width: 100%;
+  bottom: -1px;
+  align-self: end;
 }
 
 #legend label {
   display: inline-block;
   margin-bottom: -1px;
   padding: 15px 23px;
+  padding-inline-end: 5px;
   border: 3px solid transparent;
   -moz-context-properties: fill;
-  fill: currentColor;
   background-repeat: no-repeat;
   background-position: left center;
   background-size: 16px;
 }
 
+[dir="rtl"] #legend label {
+  background-position: right center;
+}
+
+#legend label:-moz-focusring {
+  outline: none;
+}
+
 label[data-type="social"] {
   background-image: url(chrome://browser/skin/controlcenter/socialblock.svg);
-  color: var(--social-color);
+  fill: var(--social-color);
 }
 
 label[data-type="cookie"] {
   background-image: url(chrome://browser/skin/controlcenter/3rdpartycookies.svg);
-  color: var(--cookie-color);
+  fill: var(--cookie-color);
 }
 
 label[data-type="tracker"] {
   background-image: url(chrome://browser/skin/controlcenter/tracker-image.svg);
-  color: var(--tracker-color);
+  fill: var(--tracker-color);
 }
 
 label[data-type="fingerprinter"] {
   background-image: url(chrome://browser/skin/controlcenter/fingerprinters.svg);
-  color: var(--orange);
+  fill: var(--fingerprinter-color);
 }
 
 label[data-type="cryptominer"] {
   background-image: url(chrome://browser/skin/controlcenter/cryptominers.svg);
-  color: var(--grey);
+  fill: var(--cryptominer-color);
 }
 
 .hover-social label[for="tab-social"],
@@ -316,12 +409,7 @@ label[data-type="cryptominer"] {
 .hover-fingerprinter label[for="tab-fingerprinter"],
 .hover-cryptominer label[for="tab-cryptominer"],
 label:hover {
-  background-color: var(--in-content-box-background-hover);
   cursor: pointer;
-}
-
-#legend input:checked + label {
-  border-bottom: 3px solid var(--tab-highlight);
 }
 
 .tab-content {
@@ -329,10 +417,8 @@ label:hover {
   padding: 22px 20px 20px;
   border-top: 1px solid var(--tab-highlight);
   background-color: var(--in-content-box-background-odd);
-  color: var(--in-content-deemphasized-text);
   font-size: 0.8em;
   line-height: 1.75;
-  min-height: 130px;
 }
 
 .tab-content .content-title {
@@ -349,6 +435,43 @@ label:hover {
 #tab-fingerprinter:checked ~ #fingerprinter,
 #tab-cryptominer:checked ~ #cryptominer {
   display: block;
+  grid-column: 1/ -1;
+  grid-row: 2;
+}
+
+input[data-type="social"]:checked ~ #highlight,
+.hover-social label[for="tab-social"] ~ #highlight-hover,
+label[for="tab-social"]:hover ~ #highlight-hover {
+  background-color: var(--social-color);
+  grid-area: social;
+}
+
+input[data-type="cookie"]:checked  ~ #highlight,
+.hover-cookie label[for="tab-cookie"] ~ #highlight-hover,
+label[for="tab-cookie"]:hover ~ #highlight-hover {
+  background-color: var(--cookie-color);
+  grid-area: cookie;
+}
+
+input[data-type="tracker"]:checked  ~ #highlight,
+.hover-tracker label[for="tab-tracker"] ~ #highlight-hover,
+label[for="tab-tracker"]:hover ~ #highlight-hover {
+  background-color: var(--tracker-color);
+  grid-area: tracker;
+}
+
+input[data-type="fingerprinter"]:checked  ~ #highlight,
+.hover-fingerprinter label[for="tab-fingerprinter"] ~ #highlight-hover,
+label[for="tab-fingerprinter"]:hover ~ #highlight-hover {
+  background-color: var(--fingerprinter-color);
+  grid-area: fingerprinter;
+}
+
+input[data-type="cryptominer"]:checked ~ #highlight,
+.hover-cryptominer label[for="tab-cryptominer"] ~ #highlight-hover,
+label[for="tab-cryptominer"]:hover ~ #highlight-hover {
+  background-color: var(--cryptominer-color);
+  grid-area: cryptominer;
 }
 
 /* Lockwise Card */
@@ -370,14 +493,6 @@ label:hover {
   grid-gap: 10px;
 }
 
-.number-of-logins {
-  background-color: var(--dark-grey);
-}
-
-.number-of-synced-devices {
-  background-color: var(--orange);
-}
-
 .inline-text-icon {
   -moz-context-properties: fill;
   fill: currentColor;
@@ -385,8 +500,13 @@ label:hover {
   background-repeat: no-repeat;
   background-position-x: 3px;
   background-position-y: 5px;
-  padding: 4px 4px 4px 24px;
-  display: inline;
+  padding: 4px;
+  padding-inline-start: 24px;
+}
+
+[dir="rtl"] #protection-details,
+[dir="rtl"] .inline-text-icon {
+  background-position-x: 100%;
 }
 
 .lockwise-mobile-app-icon {
@@ -395,6 +515,11 @@ label:hover {
   background: url("chrome://browser/content/logos/lockwise-mobile-app.svg") no-repeat center/cover;
   width: 38px;
   height: 35px;
+}
+
+.passwords-stored-text,
+.synced-devices-text {
+  width: max-content;
 }
 
 .passwords-stored-text {
@@ -406,9 +531,11 @@ label:hover {
 }
 
 .block {
+  background-color: var(--grey-60);
   border-radius: 4px;
   text-align: center;
   font-size: 1.125em;
+  font-weight: bold;
   color: #fff;
   padding: 7px;
   line-height: 18px;
@@ -431,6 +558,7 @@ label:hover {
   padding-top: 20px;
   line-height: 18px;
   grid-column-gap: 10px;
+  margin-bottom: 20px;
 }
 
 .monitor-scanned-text {
@@ -441,6 +569,7 @@ label:hover {
 .monitor-card #monitor-header-content > a {
   display: block;
   margin-block-start: 5px;
+  width: max-content;
 }
 
 .monitor-card.has-logins #monitor-body-content {
@@ -499,6 +628,10 @@ label:hover {
   flex-wrap: wrap;
 }
 
+.monitor-icon {
+  margin-inline-end: 3px;
+}
+
 .monitor-stat .monitor-icon {
   background-size: 24px 24px;
   background-repeat: no-repeat;
@@ -509,7 +642,7 @@ label:hover {
   height: 24px;
   display: block;
   padding: 5px;
-  background-position-y: center;
+  background-position: center;
 }
 
 .info-text {
@@ -519,7 +652,9 @@ label:hover {
 }
 
 .number-of-breaches.block {
-  background-color: var(--orange);
+  font-size: 1.45em;
+  color: var(--grey-90);
+  background-color: var(--orange-50);
   padding: 15px;
 }
 
@@ -542,4 +677,35 @@ label:hover {
 #sign-up-for-monitor-link:focus {
   box-shadow: 0 0 0 1px #0a84ff inset, 0 0 0 1px #0a84ff, 0 0 0 4px rgba(10, 132, 255, 0.3);
   outline: none;
+}
+
+.monitor-card.loading::after,
+.lockwise-card.loading::after {
+  position: absolute;
+  height: 110px;
+  width: 765px;
+  content: "";
+  background-image: linear-gradient(to right, var(--in-content-box-background) 0%, var(--protection-report-loader-color-stop) 30%, var(--in-content-box-background) 40%, var(--in-content-box-background) 100%);
+  background-repeat: no-repeat;
+  animation-duration: 2s;
+  animation-iteration-count: infinite;
+  animation-name: loading;
+  animation-timing-function: cubic-bezier(.07,.95,1,1);
+  background-size: 700px 100%;
+  opacity: var(--protection-report-loader-gradient-opacity);
+}
+
+@keyframes loading {
+  0% {
+    background-position-x: -300px;
+  }
+
+  100% {
+    background-position-x: 700px;
+    opacity: .02;
+  }
+}
+
+.monitor-card.has-logins .card-body {
+  padding-block-end: 0;
 }

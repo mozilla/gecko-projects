@@ -7,6 +7,7 @@ toolkit.jar:
     content/extensions/dummy.xul
     content/extensions/ext-browser-content.js
     content/extensions/ext-toolkit.json
+    content/extensions/parent/ext-activityLog.js (parent/ext-activityLog.js)
     content/extensions/parent/ext-alarms.js (parent/ext-alarms.js)
     content/extensions/parent/ext-backgroundPage.js (parent/ext-backgroundPage.js)
     content/extensions/parent/ext-browserSettings.js (parent/ext-browserSettings.js)
@@ -41,9 +42,6 @@ toolkit.jar:
     content/extensions/parent/ext-telemetry.js (parent/ext-telemetry.js)
     content/extensions/parent/ext-theme.js (parent/ext-theme.js)
     content/extensions/parent/ext-toolkit.js (parent/ext-toolkit.js)
-#ifndef ANDROID
-    content/extensions/parent/ext-topSites.js (parent/ext-topSites.js)
-#endif
     content/extensions/parent/ext-userScripts.js (parent/ext-userScripts.js)
     content/extensions/parent/ext-webRequest.js (parent/ext-webRequest.js)
     content/extensions/parent/ext-webNavigation.js (parent/ext-webNavigation.js)

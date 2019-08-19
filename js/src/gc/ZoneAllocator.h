@@ -21,7 +21,10 @@ class Zone;
 namespace js {
 
 namespace gc {
-void MaybeMallocTriggerZoneGC(JSRuntime* rt, ZoneAllocator* zoneAlloc);
+void MaybeMallocTriggerZoneGC(JSRuntime* rt, ZoneAllocator* zoneAlloc,
+                              const HeapSize& heap,
+                              const ZoneThreshold& threshold,
+                              JS::GCReason reason);
 }
 
 // Base class of JS::Zone that provides malloc memory allocation and accounting.
@@ -43,32 +46,17 @@ class ZoneAllocator : public JS::shadow::Zone,
                                    void* reallocPtr = nullptr);
   void reportAllocationOverflow() const;
 
-  void setGCMaxMallocBytes(size_t value, const js::AutoLockGC& lock) {
-    gcMallocCounter.setMax(value, lock);
-  }
-  void updateMallocCounter(size_t nbytes) {
-    updateMemoryCounter(gcMallocCounter, nbytes);
-  }
   void adoptMallocBytes(ZoneAllocator* other) {
-    gcMallocCounter.adopt(other->gcMallocCounter);
     gcMallocBytes.adopt(other->gcMallocBytes);
+    gcJitBytes.adopt(other->gcJitBytes);
 #ifdef DEBUG
     gcMallocTracker.adopt(other->gcMallocTracker);
 #endif
   }
-  size_t GCMaxMallocBytes() const { return gcMallocCounter.maxBytes(); }
-  size_t GCMallocBytes() const { return gcMallocCounter.bytes(); }
 
-  void updateJitCodeMallocBytes(size_t nbytes) {
-    updateMemoryCounter(jitCodeCounter, nbytes);
-  }
-
-  void updateAllGCMallocCountersOnGCStart();
-  void updateAllGCMallocCountersOnGCEnd(const js::AutoLockGC& lock);
-  void updateAllGCThresholds(gc::GCRuntime& gc,
-                             JSGCInvocationKind invocationKind,
-                             const js::AutoLockGC& lock);
-  js::gc::TriggerKind shouldTriggerGCForTooMuchMalloc();
+  void updateMemoryCountersOnGCStart();
+  void updateGCThresholds(gc::GCRuntime& gc, JSGCInvocationKind invocationKind,
+                          const js::AutoLockGC& lock);
 
   // Memory accounting APIs for malloc memory owned by GC cells.
 
@@ -84,10 +72,13 @@ class ZoneAllocator : public JS::shadow::Zone,
 #endif
   }
 
-  void removeCellMemory(js::gc::Cell* cell, size_t nbytes, js::MemoryUse use) {
+  void removeCellMemory(js::gc::Cell* cell, size_t nbytes, js::MemoryUse use,
+                        bool wasSwept = false) {
     MOZ_ASSERT(cell);
     MOZ_ASSERT(nbytes);
-    gcMallocBytes.removeBytes(nbytes);
+    MOZ_ASSERT_IF(CurrentThreadIsGCSweeping(), wasSwept);
+
+    gcMallocBytes.removeBytes(nbytes, wasSwept);
 
 #ifdef DEBUG
     gcMallocTracker.untrackMemory(cell, nbytes, use);
@@ -122,40 +113,45 @@ class ZoneAllocator : public JS::shadow::Zone,
 
     maybeMallocTriggerZoneGC();
   }
-  void decPolicyMemory(js::ZoneAllocPolicy* policy, size_t nbytes) {
+  void decPolicyMemory(js::ZoneAllocPolicy* policy, size_t nbytes,
+                       bool wasSwept) {
     MOZ_ASSERT(nbytes);
-    gcMallocBytes.removeBytes(nbytes);
+    MOZ_ASSERT_IF(CurrentThreadIsGCSweeping(), wasSwept);
+
+    gcMallocBytes.removeBytes(nbytes, wasSwept);
 
 #ifdef DEBUG
     gcMallocTracker.decPolicyMemory(policy, nbytes);
 #endif
   }
 
+  void incJitMemory(size_t nbytes) {
+    MOZ_ASSERT(nbytes);
+    gcJitBytes.addBytes(nbytes);
+    maybeTriggerZoneGC(gcJitBytes, gcJitThreshold,
+                       JS::GCReason::TOO_MUCH_JIT_CODE);
+  }
+  void decJitMemory(size_t nbytes) {
+    MOZ_ASSERT(nbytes);
+    gcJitBytes.removeBytes(nbytes, true);
+  }
+
   // Check malloc allocation threshold and trigger a zone GC if necessary.
   void maybeMallocTriggerZoneGC() {
-    JSRuntime* rt = runtimeFromAnyThread();
-    if (gcMallocBytes.gcBytes() >= gcMallocThreshold.gcTriggerBytes() &&
-        rt->heapState() == JS::HeapState::Idle) {
-      gc::MaybeMallocTriggerZoneGC(rt, this);
-    }
+    maybeTriggerZoneGC(gcMallocBytes, gcMallocThreshold,
+                       JS::GCReason::TOO_MUCH_MALLOC);
   }
 
  private:
-  void updateMemoryCounter(js::gc::MemoryCounter& counter, size_t nbytes) {
+  void maybeTriggerZoneGC(const js::gc::HeapSize& heap,
+                          const js::gc::ZoneThreshold& threshold,
+                          JS::GCReason reason) {
     JSRuntime* rt = runtimeFromAnyThread();
-
-    counter.update(nbytes);
-    auto trigger = counter.shouldTriggerGC(rt->gc.tunables);
-    if (MOZ_LIKELY(trigger == js::gc::NoTrigger) ||
-        trigger <= counter.triggered()) {
-      return;
+    if (heap.gcBytes() >= threshold.gcTriggerBytes() &&
+        rt->heapState() == JS::HeapState::Idle) {
+      gc::MaybeMallocTriggerZoneGC(rt, this, heap, threshold, reason);
     }
-
-    maybeTriggerGCForTooMuchMalloc(counter, trigger);
   }
-
-  void maybeTriggerGCForTooMuchMalloc(js::gc::MemoryCounter& counter,
-                                      js::gc::TriggerKind trigger);
 
  public:
   // Track GC heap size under this Zone.
@@ -168,13 +164,6 @@ class ZoneAllocator : public JS::shadow::Zone,
   // the current GC.
   js::MainThreadData<size_t> gcDelayBytes;
 
- private:
-  // Malloc counter to measure memory pressure for GC scheduling. This counter
-  // is used for allocations where the size of the allocation is not known on
-  // free. Currently this is used for all internal malloc allocations.
-  js::gc::MemoryCounter gcMallocCounter;
-
- public:
   // Malloc counter used for allocations where size information is
   // available. Used for some internal and all tracked external allocations.
   js::gc::HeapSize gcMallocBytes;
@@ -182,16 +171,18 @@ class ZoneAllocator : public JS::shadow::Zone,
   // Thresholds used to trigger GC based on malloc allocations.
   js::gc::ZoneMallocThreshold gcMallocThreshold;
 
+  // Malloc counter used for JIT code allocation.
+  js::gc::HeapSize gcJitBytes;
+
+  // Thresholds used to trigger GC based on JIT allocations.
+  js::gc::ZoneFixedThreshold gcJitThreshold;
+
  private:
 #ifdef DEBUG
   // In debug builds, malloc allocations can be tracked to make debugging easier
   // (possible?) if allocation and free sizes don't balance.
   js::gc::MemoryTracker gcMallocTracker;
 #endif
-
-  // Counter of JIT code executable memory for GC scheduling. Also imprecise,
-  // since wasm can generate code that outlives a zone.
-  js::gc::MemoryCounter jitCodeCounter;
 
   friend class js::gc::GCRuntime;
 };
@@ -288,7 +279,7 @@ class ZoneAllocPolicy : public MallocProvider<ZoneAllocPolicy> {
     MOZ_ASSERT(zone_);
     return zone_;
   }
-  void decMemory(size_t nbytes) { zone_->decPolicyMemory(this, nbytes); }
+  void decMemory(size_t nbytes);
 };
 
 // Functions for memory accounting on the zone.
@@ -315,22 +306,23 @@ inline void AddCellMemory(gc::Cell* cell, size_t nbytes, MemoryUse use) {
 // follow a call to AddCellMemory with the same size and use.
 
 inline void RemoveCellMemory(gc::TenuredCell* cell, size_t nbytes,
-                             MemoryUse use) {
+                             MemoryUse use, bool wasSwept = false) {
   if (nbytes) {
     auto zoneBase = ZoneAllocator::from(cell->zoneFromAnyThread());
-    zoneBase->removeCellMemory(cell, nbytes, use);
+    zoneBase->removeCellMemory(cell, nbytes, use, wasSwept);
   }
 }
-inline void RemoveCellMemory(gc::Cell* cell, size_t nbytes, MemoryUse use) {
+inline void RemoveCellMemory(gc::Cell* cell, size_t nbytes, MemoryUse use,
+                             bool wasSwept = false) {
   if (cell->isTenured()) {
-    RemoveCellMemory(&cell->asTenured(), nbytes, use);
+    RemoveCellMemory(&cell->asTenured(), nbytes, use, wasSwept);
   }
 }
 
 // Initialize an object's reserved slot with a private value pointing to
 // malloc-allocated memory and associate the memory with the object.
 //
-// This call should be matched with a call to FreeOp::free_/delete_ in the
+// This call should be matched with a call to JSFreeOp::free_/delete_ in the
 // object's finalizer to free the memory and update the memory accounting.
 
 inline void InitReservedSlot(NativeObject* obj, uint32_t slot, void* ptr,
@@ -347,7 +339,7 @@ inline void InitReservedSlot(NativeObject* obj, uint32_t slot, T* ptr,
 // Initialize an object's private slot with a pointer to malloc-allocated memory
 // and associate the memory with the object.
 //
-// This call should be matched with a call to FreeOp::free_/delete_ in the
+// This call should be matched with a call to JSFreeOp::free_/delete_ in the
 // object's finalizer to free the memory and update the memory accounting.
 
 inline void InitObjectPrivate(NativeObject* obj, void* ptr, size_t nbytes,

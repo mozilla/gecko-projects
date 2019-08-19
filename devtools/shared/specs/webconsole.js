@@ -14,9 +14,6 @@ const {
 
 types.addDictType("console.traits", {
   evaluateJSAsync: "boolean",
-  transferredResponseSize: "boolean",
-  selectedObjectActor: "boolean",
-  fetchCacheDescriptor: "boolean",
 });
 
 types.addDictType("console.startlisteners", {
@@ -106,9 +103,9 @@ const webconsoleSpecPrototype = {
      * Start the given Web Console listeners.
      *
      * @see webconsoleFront LISTENERS
-     * @Arg array listeners
-     *        Array of listeners you want to start. See this.LISTENERS for
-     *        known listeners.
+     * @Arg array events
+     *        Array of events you want to start. See this.LISTENERS for
+     *        known events.
      */
     startListeners: {
       request: {
@@ -120,9 +117,9 @@ const webconsoleSpecPrototype = {
      * Stop the given Web Console listeners.
      *
      * @see webconsoleFront LISTENERS
-     * @Arg array listeners
-     *        Array of listeners you want to stop. See this.LISTENERS for
-     *        known listeners.
+     * @Arg array events
+     *        Array of events you want to stop. See this.LISTENERS for
+     *        known events.
      * @Arg function onResponse
      *        Function to invoke when the server response is received.
      */

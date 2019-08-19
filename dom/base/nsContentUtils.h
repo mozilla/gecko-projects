@@ -547,8 +547,6 @@ class nsContentUtils {
    * Returns true if aChar is of class Ps, Pi, Po, Pf, or Pe.
    */
   static bool IsFirstLetterPunctuation(uint32_t aChar);
-  static bool IsFirstLetterPunctuationAt(const nsTextFragment* aFrag,
-                                         uint32_t aOffset);
 
   /**
    * Returns true if aChar is of class Lu, Ll, Lt, Lm, Lo, Nd, Nl or No
@@ -1101,6 +1099,8 @@ class nsContentUtils {
     eMATHML_PROPERTIES,
     eSECURITY_PROPERTIES,
     eNECKO_PROPERTIES,
+    eFORMS_PROPERTIES_MAYBESPOOF,
+    eFORMS_PROPERTIES_en_US,
     PropertiesFile_COUNT
   };
   static nsresult ReportToConsole(
@@ -3074,6 +3074,12 @@ class nsContentUtils {
   static uint64_t GenerateProcessSpecificId(uint64_t aId);
 
   /**
+   * Generate a window ID which is unique across processes and will never be
+   * recycled.
+   */
+  static uint64_t GenerateWindowId();
+
+  /**
    * Determine whether or not the user is currently interacting with the web
    * browser. This method is safe to call from off of the main thread.
    */
@@ -3241,7 +3247,6 @@ class nsContentUtils {
   static nsIInterfaceRequestor* sSameOriginChecker;
 
   static bool sIsHandlingKeyBoardEvent;
-  static bool sAllowXULXBL_for_file;
 #ifndef RELEASE_OR_BETA
   static bool sBypassCSSOMOriginCheck;
 #endif

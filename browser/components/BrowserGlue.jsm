@@ -95,6 +95,14 @@ let ACTORS = {
     allFrames: true,
   },
 
+  Prompt: {
+    parent: {
+      moduleURI: "resource:///actors/PromptParent.jsm",
+    },
+
+    allFrames: true,
+  },
+
   SwitchDocumentDirection: {
     child: {
       moduleURI: "resource:///actors/SwitchDocumentDirectionChild.jsm",
@@ -124,8 +132,11 @@ let LEGACY_ACTORS = {
       matches: ["about:logins", "about:logins?*"],
       module: "resource:///actors/AboutLoginsChild.jsm",
       events: {
+        AboutLoginsCopyLoginDetail: { wantUntrusted: true },
         AboutLoginsCreateLogin: { wantUntrusted: true },
         AboutLoginsDeleteLogin: { wantUntrusted: true },
+        AboutLoginsDismissBreachAlert: { wantUntrusted: true },
+        AboutLoginsHideFooter: { wantUntrusted: true },
         AboutLoginsImport: { wantUntrusted: true },
         AboutLoginsInit: { wantUntrusted: true },
         AboutLoginsOpenFAQ: { wantUntrusted: true },
@@ -135,14 +146,20 @@ let LEGACY_ACTORS = {
         AboutLoginsOpenPreferences: { wantUntrusted: true },
         AboutLoginsOpenSite: { wantUntrusted: true },
         AboutLoginsRecordTelemetryEvent: { wantUntrusted: true },
+        AboutLoginsSyncEnable: { wantUntrusted: true },
+        AboutLoginsSyncOptions: { wantUntrusted: true },
         AboutLoginsUpdateLogin: { wantUntrusted: true },
       },
       messages: [
         "AboutLogins:AllLogins",
-        "AboutLogins:UpdateBreaches",
+        "AboutLogins:LocalizeBadges",
         "AboutLogins:LoginAdded",
         "AboutLogins:LoginModified",
         "AboutLogins:LoginRemoved",
+        "AboutLogins:MasterPasswordResponse",
+        "AboutLogins:SendFavicons",
+        "AboutLogins:SyncState",
+        "AboutLogins:UpdateBreaches",
       ],
     },
   },
@@ -368,7 +385,10 @@ let LEGACY_ACTORS = {
 };
 
 (function earlyBlankFirstPaint() {
-  if (!Services.prefs.getBoolPref("browser.startup.blankWindow", false)) {
+  if (
+    AppConstants.platform == "macosx" ||
+    !Services.prefs.getBoolPref("browser.startup.blankWindow", false)
+  ) {
     return;
   }
 
@@ -535,7 +555,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PluginManager: "resource:///actors/PluginParent.jsm",
   PictureInPicture: "resource://gre/modules/PictureInPicture.jsm",
   ReaderParent: "resource:///modules/ReaderParent.jsm",
-  RemotePrompt: "resource:///modules/RemotePrompt.jsm",
 });
 
 /* global ContentPrefServiceParent:false, ContentSearch:false,
@@ -620,7 +639,10 @@ const listeners = {
   mm: {
     "AboutLogins:CreateLogin": ["AboutLoginsParent"],
     "AboutLogins:DeleteLogin": ["AboutLoginsParent"],
+    "AboutLogins:DismissBreachAlert": ["AboutLoginsParent"],
+    "AboutLogins:HideFooter": ["AboutLoginsParent"],
     "AboutLogins:Import": ["AboutLoginsParent"],
+    "AboutLogins:MasterPasswordRequest": ["AboutLoginsParent"],
     "AboutLogins:OpenFAQ": ["AboutLoginsParent"],
     "AboutLogins:OpenFeedback": ["AboutLoginsParent"],
     "AboutLogins:OpenPreferences": ["AboutLoginsParent"],
@@ -628,6 +650,8 @@ const listeners = {
     "AboutLogins:OpenMobileIos": ["AboutLoginsParent"],
     "AboutLogins:OpenSite": ["AboutLoginsParent"],
     "AboutLogins:Subscribe": ["AboutLoginsParent"],
+    "AboutLogins:SyncEnable": ["AboutLoginsParent"],
+    "AboutLogins:SyncOptions": ["AboutLoginsParent"],
     "AboutLogins:UpdateLogin": ["AboutLoginsParent"],
     "Content:Click": ["ContentClick"],
     ContentSearch: ["ContentSearch"],
@@ -637,7 +661,7 @@ const listeners = {
     "PictureInPicture:Close": ["PictureInPicture"],
     "PictureInPicture:Playing": ["PictureInPicture"],
     "PictureInPicture:Paused": ["PictureInPicture"],
-    "Prompt:Open": ["RemotePrompt"],
+    "PictureInPicture:OpenToggleContextMenu": ["PictureInPicture"],
     "Reader:FaviconRequest": ["ReaderParent"],
     "Reader:UpdateReaderButton": ["ReaderParent"],
     // PLEASE KEEP THIS LIST IN SYNC WITH THE MOBILE LISTENERS IN BrowserCLH.js
@@ -648,7 +672,6 @@ const listeners = {
     "PasswordManager:autoCompleteLogins": ["LoginManagerParent"],
     "PasswordManager:removeLogin": ["LoginManagerParent"],
     "PasswordManager:insecureLoginFormPresent": ["LoginManagerParent"],
-    "PasswordManager:OpenFeedback": ["AboutLoginsParent"],
     "PasswordManager:OpenPreferences": ["LoginManagerParent"],
     // PLEASE KEEP THIS LIST IN SYNC WITH THE MOBILE LISTENERS IN BrowserCLH.js
     "rtcpeer:CancelRequest": ["webrtcUI"],
@@ -1223,7 +1246,9 @@ BrowserGlue.prototype = {
       "resource:///modules/themes/dark/"
     );
 
-    Normandy.init();
+    if (AppConstants.MOZ_NORMANDY) {
+      Normandy.init();
+    }
 
     SaveToPocket.init();
     Services.obs.notifyObservers(null, "browser-ui-startup-complete");
@@ -1675,8 +1700,14 @@ BrowserGlue.prototype = {
   },
 
   _updateAutoplayPref() {
-    let blocked = Services.prefs.getIntPref("media.autoplay.default", 1);
-    Services.telemetry.scalarSet("media.autoplay_default_blocked", blocked);
+    const blocked = Services.prefs.getIntPref("media.autoplay.default", 1);
+    const telemetry = Services.telemetry.getHistogramById(
+      "AUTOPLAY_DEFAULT_SETTING_CHANGE"
+    );
+    const labels = { 0: "allow", 1: "blockAudible", 5: "blockAll" };
+    if (blocked in labels) {
+      telemetry.add(labels[blocked]);
+    }
   },
 
   _setPrefExpectations() {
@@ -2673,7 +2704,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 84;
+    const UI_VERSION = 87;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -3020,7 +3051,7 @@ BrowserGlue.prototype = {
             HomePage.reset();
           } else {
             value = updated;
-            HomePage.set(value);
+            HomePage.safeSet(value);
           }
         }
       }
@@ -3052,6 +3083,41 @@ BrowserGlue.prototype = {
             (p.expireType == EXPIRE_NEVER || p.expireType == EXPIRE_TIME)
         );
       flashPermissions.forEach(p => Services.perms.removePermission(p));
+    }
+
+    // currentUIVersion < 85 is missing due to the following:
+    // Origianlly, Bug #1568900 added currentUIVersion 85 but was targeting FF70 release.
+    // In between it landing in FF70, Bug #1562601 (currentUIVersion 86) landed and
+    // was uplifted to Beta. To make sure the migration doesn't get skipped, the
+    // code block that was at 85 has been moved/bumped to currentUIVersion 87.
+
+    if (currentUIVersion < 86) {
+      // If the user has set "media.autoplay.allow-muted" to false
+      // migrate that to media.autoplay.default=BLOCKED_ALL.
+      if (
+        Services.prefs.prefHasUserValue("media.autoplay.allow-muted") &&
+        !Services.prefs.getBoolPref("media.autoplay.allow-muted") &&
+        !Services.prefs.prefHasUserValue("media.autoplay.default") &&
+        Services.prefs.getIntPref("media.autoplay.default") ==
+          Ci.nsIAutoplay.BLOCKED
+      ) {
+        Services.prefs.setIntPref(
+          "media.autoplay.default",
+          Ci.nsIAutoplay.BLOCKED_ALL
+        );
+      }
+      Services.prefs.clearUserPref("media.autoplay.allow-muted");
+    }
+
+    if (currentUIVersion < 87) {
+      const TRACKING_TABLE_PREF = "urlclassifier.trackingTable";
+      const CUSTOM_BLOCKING_PREF =
+        "browser.contentblocking.customBlockList.preferences.ui.enabled";
+      // Check if user has set custom tables pref, and show custom block list UI
+      // in the about:preferences#privacy custom panel.
+      if (Services.prefs.prefHasUserValue(TRACKING_TABLE_PREF)) {
+        Services.prefs.setBoolPref(CUSTOM_BLOCKING_PREF, true);
+      }
     }
 
     // Update the migration version.
@@ -3574,6 +3640,7 @@ var ContentBlockingCategoriesPrefs = {
         "network.cookie.cookieBehavior": null,
         "privacy.trackingprotection.pbmode.enabled": null,
         "privacy.trackingprotection.enabled": null,
+        "privacy.trackingprotection.socialtracking.enabled": null,
         "privacy.trackingprotection.fingerprinting.enabled": null,
         "privacy.trackingprotection.cryptomining.enabled": null,
       },
@@ -3581,6 +3648,7 @@ var ContentBlockingCategoriesPrefs = {
         "network.cookie.cookieBehavior": null,
         "privacy.trackingprotection.pbmode.enabled": null,
         "privacy.trackingprotection.enabled": null,
+        "privacy.trackingprotection.socialtracking.enabled": null,
         "privacy.trackingprotection.fingerprinting.enabled": null,
         "privacy.trackingprotection.cryptomining.enabled": null,
       },
@@ -3629,6 +3697,16 @@ var ContentBlockingCategoriesPrefs = {
         case "-cm":
           this.CATEGORY_PREFS[type][
             "privacy.trackingprotection.cryptomining.enabled"
+          ] = false;
+          break;
+        case "stp":
+          this.CATEGORY_PREFS[type][
+            "privacy.trackingprotection.socialtracking.enabled"
+          ] = true;
+          break;
+        case "-stp":
+          this.CATEGORY_PREFS[type][
+            "privacy.trackingprotection.socialtracking.enabled"
           ] = false;
           break;
         case "cookieBehavior0":
@@ -3901,16 +3979,6 @@ ContentPermissionPrompt.prototype = {
       return;
     }
     schemeHistogram.add(type, scheme);
-
-    // request.element should be the browser element in e10s.
-    if (request.element && request.element.contentPrincipal) {
-      let thirdPartyHistogram = Services.telemetry.getKeyedHistogramById(
-        "PERMISSION_REQUEST_THIRD_PARTY_ORIGIN"
-      );
-      let isThirdParty =
-        request.principal.origin != request.element.contentPrincipal.origin;
-      thirdPartyHistogram.add(type, isThirdParty);
-    }
 
     let userInputHistogram = Services.telemetry.getKeyedHistogramById(
       "PERMISSION_REQUEST_HANDLING_USER_INPUT"

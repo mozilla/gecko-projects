@@ -625,6 +625,8 @@ nsresult nsHttpConnectionMgr::UpdateRequestTokenBucket(
 nsresult nsHttpConnectionMgr::ClearConnectionHistory() {
   MOZ_ASSERT(OnSocketThread(), "not on socket thread");
 
+  LOG(("nsHttpConnectionMgr::ClearConnectionHistory"));
+
   for (auto iter = mCT.Iter(); !iter.Done(); iter.Next()) {
     RefPtr<nsConnectionEntry> ent = iter.Data();
     if (ent->mIdleConns.Length() == 0 && ent->mActiveConns.Length() == 0 &&
@@ -2834,6 +2836,26 @@ void nsHttpConnectionMgr::OnMsgReclaimConnection(int32_t, ARefBase* param) {
   if (ent->mActiveConns.RemoveElement(conn)) {
     DecrementActiveConnCount(conn);
     ConditionallyStopTimeoutTick();
+  } else if (conn->EverUsedSpdy()) {
+    LOG(("nsHttpConnection %p not found in its connection entry, try ^anon",
+         conn));
+    // repeat for flipped anon flag as we share connection entries for spdy
+    // connections.
+    RefPtr<nsHttpConnectionInfo> anonInvertedCI(ci->Clone());
+    anonInvertedCI->SetAnonymous(!ci->GetAnonymous());
+
+    nsConnectionEntry* ent = mCT.GetWeak(anonInvertedCI->HashKey());
+    if (ent) {
+      if (ent->mActiveConns.RemoveElement(conn)) {
+        DecrementActiveConnCount(conn);
+        ConditionallyStopTimeoutTick();
+      } else {
+        LOG(
+            ("nsHttpConnection %p could not be removed from its entry's active "
+             "list",
+             conn));
+      }
+    }
   }
 
   if (conn->CanReuse()) {

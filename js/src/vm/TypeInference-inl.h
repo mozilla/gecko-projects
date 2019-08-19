@@ -35,6 +35,7 @@
 
 #include "jit/JitScript-inl.h"
 #include "vm/JSContext-inl.h"
+#include "vm/JSScript-inl.h"
 #include "vm/ObjectGroup-inl.h"
 
 namespace js {
@@ -418,7 +419,7 @@ struct MOZ_RAII AutoEnterAnalysis {
   // Prevent us from calling the objectMetadataCallback.
   js::AutoSuppressAllocationMetadataBuilder suppressMetadata;
 
-  FreeOp* freeOp;
+  JSFreeOp* freeOp;
   Zone* zone;
 
   explicit AutoEnterAnalysis(JSContext* cx)
@@ -426,7 +427,7 @@ struct MOZ_RAII AutoEnterAnalysis {
     init(cx->defaultFreeOp(), cx->zone());
   }
 
-  AutoEnterAnalysis(FreeOp* fop, Zone* zone)
+  AutoEnterAnalysis(JSFreeOp* fop, Zone* zone)
       : suppressGC(TlsContext.get()), suppressMetadata(zone) {
     init(fop, zone);
   }
@@ -444,7 +445,7 @@ struct MOZ_RAII AutoEnterAnalysis {
   }
 
  private:
-  void init(FreeOp* fop, Zone* zone) {
+  void init(JSFreeOp* fop, Zone* zone) {
 #ifdef JS_CRASH_DIAGNOSTICS
     MOZ_RELEASE_ASSERT(CurrentThreadCanAccessZone(zone));
 #endif
@@ -473,7 +474,7 @@ inline void TypeMonitorCall(JSContext* cx, const js::CallArgs& args,
                             bool constructing) {
   if (args.callee().is<JSFunction>()) {
     JSFunction* fun = &args.callee().as<JSFunction>();
-    if (fun->isInterpreted() && fun->nonLazyScript()->jitScript()) {
+    if (fun->isInterpreted() && fun->nonLazyScript()->hasJitScript()) {
       TypeMonitorCallSlow(cx, &args.callee(), args, constructing);
     }
   }
@@ -658,7 +659,7 @@ inline void MarkObjectStateChange(JSContext* cx, JSObject* obj) {
                                                          TypeSet::Type type) {
   cx->check(script, type);
 
-  JitScript* jitScript = script->jitScript();
+  JitScript* jitScript = script->maybeJitScript();
   if (!jitScript) {
     return;
   }
@@ -686,7 +687,7 @@ inline void MarkObjectStateChange(JSContext* cx, JSObject* obj) {
                                                         TypeSet::Type type) {
   cx->check(script->compartment(), type);
 
-  JitScript* jitScript = script->jitScript();
+  JitScript* jitScript = script->maybeJitScript();
   if (!jitScript) {
     return;
   }
@@ -1167,7 +1168,7 @@ inline bool TypeSet::hasSingleton(unsigned i) const {
   return getSingletonNoBarrier(i);
 }
 
-inline const Class* TypeSet::getObjectClass(unsigned i) const {
+inline const JSClass* TypeSet::getObjectClass(unsigned i) const {
   if (JSObject* object = getSingleton(i)) {
     return object->getClass();
   }
@@ -1317,10 +1318,10 @@ inline AutoSweepObjectGroup::~AutoSweepObjectGroup() {
 inline AutoSweepJitScript::AutoSweepJitScript(JSScript* script)
 #ifdef DEBUG
     : zone_(script->zone()),
-      jitScript_(script->jitScript())
+      jitScript_(script->maybeJitScript())
 #endif
 {
-  if (jit::JitScript* jitScript = script->jitScript()) {
+  if (jit::JitScript* jitScript = script->maybeJitScript()) {
     Zone* zone = script->zone();
     if (jitScript->typesNeedsSweep(zone)) {
       jitScript->sweepTypes(*this, zone);

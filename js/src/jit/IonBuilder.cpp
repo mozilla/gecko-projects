@@ -22,6 +22,7 @@
 #include "jit/Lowering.h"
 #include "jit/MIRGraph.h"
 #include "vm/ArgumentsObject.h"
+#include "vm/BytecodeUtil.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/Instrumentation.h"
 #include "vm/Opcodes.h"
@@ -139,6 +140,7 @@ IonBuilder::IonBuilder(JSContext* analysisContext, CompileRealm* realm,
       analysisContext(analysisContext),
       baselineFrame_(baselineFrame),
       constraints_(constraints),
+      tiOracle_(this, constraints),
       thisTypes(nullptr),
       argTypes(nullptr),
       typeArray(nullptr),
@@ -653,7 +655,7 @@ AbortReasonOr<Ok> IonBuilder::analyzeNewLoopTypes(
       last = earlier;
     }
 
-    if (CodeSpec[*last].format & JOF_TYPESET) {
+    if (BytecodeOpHasTypeSet(JSOp(*last))) {
       TemporaryTypeSet* typeSet = bytecodeTypes(last);
       if (!typeSet->empty()) {
         MIRType type = typeSet->getKnownMIRType();
@@ -4024,7 +4026,7 @@ class AutoAccumulateReturns {
 IonBuilder::InliningResult IonBuilder::inlineScriptedCall(CallInfo& callInfo,
                                                           JSFunction* target) {
   MOZ_ASSERT(target->hasScript());
-  MOZ_ASSERT(IsIonInlinablePC(pc));
+  MOZ_ASSERT(IsIonInlinableOp(JSOp(*pc)));
 
   MBasicBlock::BackupPoint backup(current);
   if (!backup.init(alloc())) {
@@ -4895,7 +4897,7 @@ AbortReasonOr<Ok> IonBuilder::inlineCalls(CallInfo& callInfo,
                                           BoolVector& choiceSet,
                                           MGetPropertyCache* maybeCache) {
   // Only handle polymorphic inlining.
-  MOZ_ASSERT(IsIonInlinablePC(pc));
+  MOZ_ASSERT(IsIonInlinableOp(JSOp(*pc)));
   MOZ_ASSERT(choiceSet.length() == targets.length());
   MOZ_ASSERT_IF(!maybeCache, targets.length() >= 2);
   MOZ_ASSERT_IF(maybeCache, targets.length() >= 1);
@@ -5344,7 +5346,7 @@ MDefinition* IonBuilder::createThisScriptedSingleton(JSFunction* target) {
   }
 
   JSScript* targetScript = target->nonLazyScript();
-  JitScript* jitScript = targetScript->jitScript();
+  JitScript* jitScript = targetScript->maybeJitScript();
   if (!jitScript) {
     return nullptr;
   }
@@ -5414,7 +5416,7 @@ MDefinition* IonBuilder::createThisScriptedBaseline(MDefinition* callee) {
   }
 
   JSScript* targetScript = target->nonLazyScript();
-  JitScript* jitScript = targetScript->jitScript();
+  JitScript* jitScript = targetScript->maybeJitScript();
   if (!jitScript) {
     return nullptr;
   }
@@ -5643,7 +5645,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_spreadcall() {
   // If we know class, ensure it is what we expected
   MDefinition* argument = current->peek(-1);
   if (TemporaryTypeSet* objTypes = argument->resultTypeSet()) {
-    if (const Class* clasp = objTypes->getKnownClass(constraints())) {
+    if (const JSClass* clasp = objTypes->getKnownClass(constraints())) {
       MOZ_ASSERT(clasp == &ArrayObject::class_);
     }
   }
@@ -6115,7 +6117,7 @@ bool IonBuilder::testNeedsArgumentCheck(JSFunction* target,
   }
 
   JSScript* targetScript = target->nonLazyScript();
-  JitScript* jitScript = targetScript->jitScript();
+  JitScript* jitScript = targetScript->maybeJitScript();
   if (!jitScript) {
     return true;
   }
@@ -7682,7 +7684,7 @@ void IonBuilder::maybeMarkEmpty(MDefinition* ins) {
 }
 
 // Return whether property lookups can be performed effectlessly on clasp.
-static bool ClassHasEffectlessLookup(const Class* clasp) {
+static bool ClassHasEffectlessLookup(const JSClass* clasp) {
   return IsTypedObjectClass(clasp) ||
          (clasp->isNative() && !clasp->getOpsLookupProperty());
 }
@@ -7697,7 +7699,7 @@ static bool ObjectHasExtraOwnProperty(CompileRealm* realm,
                                                     id);
   }
 
-  const Class* clasp = object->clasp();
+  const JSClass* clasp = object->clasp();
 
   // Array |length| properties are not reflected in type information.
   if (clasp == &ArrayObject::class_) {
@@ -7860,7 +7862,7 @@ JSObject* IonBuilder::testSingletonPropertyTypes(MDefinition* obj, jsid id) {
           key->ensureTrackedProperty(analysisContext, id);
         }
 
-        const Class* clasp = key->clasp();
+        const JSClass* clasp = key->clasp();
         if (!ClassHasEffectlessLookup(clasp) ||
             ObjectHasExtraOwnProperty(realm, key, id)) {
           return nullptr;
@@ -7929,7 +7931,7 @@ AbortReasonOr<bool> IonBuilder::testNotDefinedProperty(
         return false;
       }
 
-      const Class* clasp = key->clasp();
+      const JSClass* clasp = key->clasp();
       if (!ClassHasEffectlessLookup(clasp) ||
           ObjectHasExtraOwnProperty(realm, key, id)) {
         return false;
@@ -8869,8 +8871,8 @@ AbortReasonOr<Ok> IonBuilder::pushDerivedTypedObject(
   // The prototype will be determined based on the type descriptor (and is
   // immutable).
   TemporaryTypeSet* objTypes = obj->resultTypeSet();
-  const Class* expectedClass = nullptr;
-  if (const Class* objClass =
+  const JSClass* expectedClass = nullptr;
+  if (const JSClass* objClass =
           objTypes ? objTypes->getKnownClass(constraints()) : nullptr) {
     MOZ_ASSERT(IsTypedObjectClass(objClass));
     expectedClass =
@@ -8882,7 +8884,7 @@ AbortReasonOr<Ok> IonBuilder::pushDerivedTypedObject(
   // Determine (if possible) the class/proto that the observed type set
   // describes.
   TemporaryTypeSet* observedTypes = bytecodeTypes(pc);
-  const Class* observedClass = observedTypes->getKnownClass(constraints());
+  const JSClass* observedClass = observedTypes->getKnownClass(constraints());
 
   // If expectedClass/expectedProto are both non-null (and hence known), we
   // can predict precisely what object group derivedTypedObj will have.
@@ -9902,7 +9904,7 @@ AbortReasonOr<Ok> IonBuilder::initOrSetElemTryCache(bool* emitted,
   MOZ_TRY_VAR(guardHoles, ElementAccessHasExtraIndexedProperty(this, object));
 
   // Make sure the object being written to doesn't have copy on write elements.
-  const Class* clasp =
+  const JSClass* clasp =
       object->resultTypeSet()
           ? object->resultTypeSet()->getKnownClass(constraints())
           : nullptr;
@@ -10508,7 +10510,7 @@ NativeObject* IonBuilder::commonPrototypeWithGetterSetter(
         return nullptr;
       }
 
-      const Class* clasp = key->clasp();
+      const JSClass* clasp = key->clasp();
       if (!ClassHasEffectlessLookup(clasp)) {
         return nullptr;
       }
@@ -10739,7 +10741,7 @@ AbortReasonOr<Ok> IonBuilder::annotateGetPropertyCache(
     }
     JSObject* proto = checkNurseryObject(key->proto().toObject());
 
-    const Class* clasp = key->clasp();
+    const JSClass* clasp = key->clasp();
     if (!ClassHasEffectlessLookup(clasp) ||
         ObjectHasExtraOwnProperty(realm, key, NameToId(name))) {
       continue;
@@ -13745,7 +13747,7 @@ AbortReasonOr<Ok> IonBuilder::loadTypedObjectElements(
   }
 
   TemporaryTypeSet* ownerTypes = owner->resultTypeSet();
-  const Class* clasp =
+  const JSClass* clasp =
       ownerTypes ? ownerTypes->getKnownClass(constraints()) : nullptr;
   if (clasp && IsInlineTypedObjectClass(clasp)) {
     // Perform the load directly from the owner pointer.

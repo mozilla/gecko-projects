@@ -41,7 +41,6 @@
 #include "nsStyleConsts.h"
 #include "nsString.h"
 #include "nsXULControllers.h"
-#include "XULDocument.h"
 #include "nsXULPopupListener.h"
 #include "nsContentUtils.h"
 #include "nsContentList.h"
@@ -77,7 +76,9 @@
 #include "XULMenuElement.h"
 #include "XULPopupElement.h"
 #include "XULTreeElement.h"
+#include "nsXULPrototypeCache.h"
 
+#include "mozilla/dom/nsCSPUtils.h"
 #include "mozilla/dom/XULElementBinding.h"
 #include "mozilla/dom/XULBroadcastManager.h"
 #include "mozilla/dom/MouseEventBinding.h"
@@ -678,6 +679,29 @@ nsresult nsXULElement::BindToTree(BindContext& aContext, nsINode& aParent) {
         "Unexpected XUL element in non-XUL doc");
   }
 #endif
+
+  // Within Bug 1492063 and its dependencies we started to apply a
+  // CSP to system privileged about pages. Since some about: pages
+  // are implemented in *.xul files we added this workaround to
+  // apply a CSP to them. To do so, we check the introduced custom
+  // attribute 'csp' on the root element.
+  if (doc.GetRootElement() == this) {
+    nsAutoString cspPolicyStr;
+    GetAttr(kNameSpaceID_None, nsGkAtoms::csp, cspPolicyStr);
+
+#ifdef DEBUG
+    {
+      nsCOMPtr<nsIContentSecurityPolicy> docCSP = doc.GetCsp();
+      uint32_t policyCount = 0;
+      if (docCSP) {
+        docCSP->GetPolicyCount(&policyCount);
+      }
+      MOZ_ASSERT(policyCount == 0, "how come we already have a policy?");
+    }
+#endif
+
+    CSP_ApplyMetaCSPToDoc(doc, cspPolicyStr);
+  }
 
   if (NodeInfo()->Equals(nsGkAtoms::keyset, kNameSpaceID_XUL)) {
     // Create our XUL key listener and hook it up.
@@ -1877,12 +1901,9 @@ nsresult nsXULPrototypeScript::Serialize(
 
 nsresult nsXULPrototypeScript::SerializeOutOfLine(
     nsIObjectOutputStream* aStream, nsXULPrototypeDocument* aProtoDoc) {
-  nsresult rv = NS_ERROR_NOT_IMPLEMENTED;
-
-  bool isChrome = false;
-  if (NS_FAILED(mSrcURI->SchemeIs("chrome", &isChrome)) || !isChrome)
+  if (!mSrcURI->SchemeIs("chrome"))
     // Don't cache scripts that don't come from chrome uris.
-    return rv;
+    return NS_ERROR_NOT_IMPLEMENTED;
 
   nsXULPrototypeCache* cache = nsXULPrototypeCache::GetInstance();
   if (!cache) return NS_ERROR_OUT_OF_MEMORY;
@@ -1900,7 +1921,7 @@ nsresult nsXULPrototypeScript::SerializeOutOfLine(
   if (exists) return NS_OK;
 
   nsCOMPtr<nsIObjectOutputStream> oos;
-  rv = cache->GetOutputStream(mSrcURI, getter_AddRefs(oos));
+  nsresult rv = cache->GetOutputStream(mSrcURI, getter_AddRefs(oos));
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsresult tmp = Serialize(oos, aProtoDoc, nullptr);
@@ -1958,7 +1979,7 @@ nsresult nsXULPrototypeScript::DeserializeOutOfLine(
     if (mSrcURI) {
       // NB: we must check the XUL script cache early, to avoid
       // multiple deserialization attempts for a given script.
-      // Note that XULDocument::LoadScript
+      // Note that PrototypeDocumentContentSink::LoadScript
       // checks the XUL script cache too, in order to handle the
       // serialization case.
       //
@@ -1990,13 +2011,9 @@ nsresult nsXULPrototypeScript::DeserializeOutOfLine(
         rv = Deserialize(objectInput, aProtoDoc, nullptr, nullptr);
 
       if (NS_SUCCEEDED(rv)) {
-        if (useXULCache && mSrcURI) {
-          bool isChrome = false;
-          mSrcURI->SchemeIs("chrome", &isChrome);
-          if (isChrome) {
-            JS::Rooted<JSScript*> script(RootingCx(), GetScriptObject());
-            cache->PutScript(mSrcURI, script);
-          }
+        if (useXULCache && mSrcURI && mSrcURI->SchemeIs("chrome")) {
+          JS::Rooted<JSScript*> script(RootingCx(), GetScriptObject());
+          cache->PutScript(mSrcURI, script);
         }
         cache->FinishInputStream(mSrcURI);
       } else {

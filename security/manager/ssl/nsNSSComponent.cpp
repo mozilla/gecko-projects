@@ -1251,7 +1251,7 @@ void nsNSSComponent::UpdateCertVerifierWithEnterpriseRoots() {
 // Enable the TLS versions given in the prefs, defaulting to TLS 1.0 (min) and
 // TLS 1.2 (max) when the prefs aren't set or set to invalid values.
 nsresult nsNSSComponent::setEnabledTLSVersions() {
-  // keep these values in sync with security-prefs.js
+  // Keep these values in sync with all.js.
   // 1 means TLS 1.0, 2 means TLS 1.1, etc.
   static const uint32_t PSM_DEFAULT_MIN_TLS_VERSION = 1;
   static const uint32_t PSM_DEFAULT_MAX_TLS_VERSION = 4;
@@ -1571,7 +1571,10 @@ static nsresult InitializeNSSWithFallbacks(const nsACString& profilePath,
 #ifndef ANDROID
   PRErrorCode savedPRErrorCode1;
 #endif  // ifndef ANDROID
-  SECStatus srv = ::mozilla::psm::InitializeNSS(profilePath, false, !safeMode);
+  PKCS11DBConfig safeModeDBConfig =
+      safeMode ? PKCS11DBConfig::DoNotLoadModules : PKCS11DBConfig::LoadModules;
+  SECStatus srv = ::mozilla::psm::InitializeNSS(
+      profilePath, NSSDBConfig::ReadWrite, safeModeDBConfig);
   if (srv == SECSuccess) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized NSS in r/w mode"));
 #ifndef ANDROID
@@ -1584,7 +1587,8 @@ static nsresult InitializeNSSWithFallbacks(const nsACString& profilePath,
   PRErrorCode savedPRErrorCode2;
 #endif  // ifndef ANDROID
   // That failed. Try read-only mode.
-  srv = ::mozilla::psm::InitializeNSS(profilePath, true, !safeMode);
+  srv = ::mozilla::psm::InitializeNSS(profilePath, NSSDBConfig::ReadOnly,
+                                      safeModeDBConfig);
   if (srv == SECSuccess) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized NSS in r-o mode"));
     return NS_OK;
@@ -1611,7 +1615,8 @@ static nsresult InitializeNSSWithFallbacks(const nsACString& profilePath,
     // problem, but for some reason the combination of read-only and no-moddb
     // flags causes NSS initialization to fail, so unfortunately we have to use
     // read-write mode.
-    srv = ::mozilla::psm::InitializeNSS(profilePath, false, false);
+    srv = ::mozilla::psm::InitializeNSS(profilePath, NSSDBConfig::ReadWrite,
+                                        PKCS11DBConfig::DoNotLoadModules);
     if (srv == SECSuccess) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("FIPS may be the problem"));
       // Unload NSS so we can attempt to fix this situation for the user.
@@ -1637,12 +1642,14 @@ static nsresult InitializeNSSWithFallbacks(const nsACString& profilePath,
 #  endif
         return rv;
       }
-      srv = ::mozilla::psm::InitializeNSS(profilePath, false, true);
+      srv = ::mozilla::psm::InitializeNSS(profilePath, NSSDBConfig::ReadWrite,
+                                          PKCS11DBConfig::LoadModules);
       if (srv == SECSuccess) {
         MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized in r/w mode"));
         return NS_OK;
       }
-      srv = ::mozilla::psm::InitializeNSS(profilePath, true, true);
+      srv = ::mozilla::psm::InitializeNSS(profilePath, NSSDBConfig::ReadOnly,
+                                          PKCS11DBConfig::LoadModules);
       if (srv == SECSuccess) {
         MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("initialized in r-o mode"));
         return NS_OK;

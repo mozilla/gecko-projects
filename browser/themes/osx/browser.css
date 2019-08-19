@@ -267,7 +267,8 @@
 
 %include ../shared/identity-block/identity-block.inc.css
 
-#identity-box:not(:active):-moz-focusring {
+#identity-box:not(:active):-moz-focusring,
+#tracking-protection-icon-container:not(:active):-moz-focusring {
   border-inline-end-style: none;
 }
 
@@ -317,7 +318,7 @@
   border-top: 1px solid #C7C7C7;
 }
 
-#urlbarView-results {
+#urlbar-results {
   font-size: 14px;
 }
 
@@ -650,21 +651,6 @@
   color: HighlightText !important;
 }
 
-/* rules for menupopup drop indicators */
-.menupopup-drop-indicator-bar {
-  position: relative;
-  /* these two margins must together compensate the indicator's height */
-  margin-top: -1px;
-  margin-bottom: -1px;
-}
-
-.menupopup-drop-indicator {
-  list-style-image: none;
-  height: 2px;
-  margin-inline-end: -4em;
-  background-color: Highlight;
-}
-
 %include ../shared/notification-icons.inc.css
 
 /* Translation */
@@ -844,11 +830,6 @@ menulist.translate-infobar-element > .menulist-dropmarker {
 #context-navigation > .menuitem-iconic {
   padding-left: 0;
   padding-right: 0;
-}
-
-.browser-extension-panel > .panel-arrowcontainer > .panel-arrowcontent {
-  padding: 0;
-  overflow: hidden;
 }
 
 .cui-widget-panelview[id^=PanelUI-webext-] {

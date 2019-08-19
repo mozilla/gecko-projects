@@ -5466,6 +5466,8 @@ var gCSSProperties = {
       "flex",
       "inline-flex",
       "list-item",
+      "inline list-item",
+      "inline flow-root list-item",
       "inline-block",
       "table",
       "inline-table",
@@ -5477,6 +5479,7 @@ var gCSSProperties = {
       "table-column",
       "table-cell",
       "table-caption",
+      "block ruby",
       "ruby",
       "ruby-base",
       "ruby-base-container",
@@ -5697,6 +5700,7 @@ var gCSSProperties = {
       "2em",
       "50%",
       "xx-small",
+      "xxx-large",
       "36pt",
       "8px",
       "larger",
@@ -7253,6 +7257,7 @@ var gCSSProperties = {
       "text-decoration-color",
       "text-decoration-line",
       "text-decoration-style",
+      "text-decoration-thickness",
     ],
     initial_values: ["none"],
     other_values: [
@@ -7268,6 +7273,12 @@ var gCSSProperties = {
       "red underline",
       "#ff0000 underline",
       "dotted underline",
+      "solid underline 50px",
+      "underline 50px blue",
+      "50px dotted line-through purple",
+      "overline 2em",
+      "underline from-font",
+      "red from-font overline",
     ],
     invalid_values: [
       "none none",
@@ -7279,6 +7290,9 @@ var gCSSProperties = {
       "underline overline line-through blink none",
       "underline overline line-throuh blink blink",
       "rgb(0, rubbish, 0) underline",
+      "5% underline blue",
+      "dotted line-through 25%",
+      "from font blue underline",
     ],
   },
   "text-decoration-color": {
@@ -7348,10 +7362,33 @@ var gCSSProperties = {
       "wave",
     ],
   },
+  "text-decoration-thickness": {
+    domProp: "textDecorationThickness",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    applies_to_first_letter: true,
+    applies_to_first_line: true,
+    applies_to_placeholder: true,
+    applies_to_cue: true,
+    initial_values: ["auto"],
+    other_values: ["from-font", "0", "-14px", "25px", "100em", "-45em"],
+    invalid_values: [
+      "13",
+      "-25",
+      "rubbish",
+      ",./!@#$",
+      "43%",
+      "-10%",
+      "from font",
+    ],
+  },
   "text-decoration-skip-ink": {
     domProp: "textDecorationSkipInk",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
+    applies_to_first_letter: true,
+    applies_to_first_line: true,
+    applies_to_placeholder: true,
     initial_values: ["auto"],
     other_values: ["none"],
     invalid_values: [
@@ -7372,17 +7409,20 @@ var gCSSProperties = {
     domProp: "textUnderlineOffset",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
+    applies_to_first_letter: true,
+    applies_to_first_line: true,
+    applies_to_placeholder: true,
     initial_values: ["auto"],
-    other_values: ["0", "-14px", "25px", "100em", "-45em"],
-    invalid_values: ["13", "-25", "rubbish", ",./!@#$", "43%", "-10%"],
-  },
-  "text-decoration-thickness": {
-    domProp: "textDecorationThickness",
-    inherited: false,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: ["auto"],
-    other_values: ["0", "-14px", "25px", "100em", "-45em"],
-    invalid_values: ["13", "-25", "rubbish", ",./!@#$", "43%", "-10%"],
+    other_values: ["from-font", "0", "-14px", "25px", "100em", "-45em"],
+    invalid_values: [
+      "13",
+      "-25",
+      "rubbish",
+      ",./!@#$",
+      "43%",
+      "-10%",
+      "from font",
+    ],
   },
   "text-emphasis": {
     domProp: "textEmphasis",
@@ -11344,6 +11384,8 @@ gCSSProperties["grid-auto-columns"] = {
     "fit-content(1px)",
     "fit-content(calc(1px - 99%))",
     "fit-content(10%)",
+    "40px 12%",
+    "2.5fr min-content fit-content(1px)",
   ],
   invalid_values: [
     "",
@@ -11362,6 +11404,7 @@ gCSSProperties["grid-auto-columns"] = {
     "fit-content(-1px)",
     "fit-content(auto)",
     "fit-content(min-content)",
+    "1px [a] 1px",
   ],
 };
 gCSSProperties["grid-auto-rows"] = {
@@ -11628,6 +11671,7 @@ gCSSProperties["grid"] = {
   initial_values: ["none", "none / none"],
   other_values: [
     "auto-flow 40px / none",
+    "auto-flow 40px 100px / 0",
     "auto-flow / 40px",
     "auto-flow dense auto / auto",
     "dense auto-flow minmax(min-content, 2fr) / auto",
@@ -11647,7 +11691,7 @@ gCSSProperties["grid"] = {
     "0 / auto-flow [a] 0",
     "auto-flow -20px / 0",
     "auto-flow 200ms / 0",
-    "auto-flow 40px 100px / 0",
+    "auto-flow 1px [a] 1px / 0",
   ].concat(
     gCSSProperties["grid-template"].invalid_values,
     gCSSProperties["grid-auto-flow"].other_values,
@@ -12790,6 +12834,23 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
     initial_values: ["auto"],
     other_values: ["reverse", "0deg", "0rad reverse", "-45deg", "5turn auto"],
     invalid_values: ["none", "10px", "reverse 0deg reverse", "reverse auto"],
+  };
+
+  gCSSProperties["offset-anchor"] = {
+    domProp: "offsetAnchor",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: ["auto"],
+    other_values: [
+      "left bottom",
+      "center center",
+      "calc(20% + 10px) center",
+      "right 30em",
+      "10px 20%",
+      "left -10px top -20%",
+      "right 10% bottom 20em",
+    ],
+    invalid_values: ["none", "10deg", "left 10% top"],
   };
 }
 

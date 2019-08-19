@@ -114,7 +114,14 @@ inline bool StyleArcInner<T>::DecrementRef() {
   if (count.fetch_sub(1, std::memory_order_release) != 1) {
     return false;
   }
+#ifdef MOZ_TSAN
+  // TSan doesn't understand std::atomic_thread_fence, so in order
+  // to avoid a false positive for every time a refcounted object
+  // is deleted, we replace the fence with an atomic operation.
   count.load(std::memory_order_acquire);
+#else
+  std::atomic_thread_fence(std::memory_order_acquire);
+#endif
   MOZ_LOG_DTOR(this, "ServoArc", 8);
   return true;
 }
@@ -353,16 +360,8 @@ inline const URLExtraData& StyleComputedUrl::ExtraData() const {
 inline StyleLoadData& StyleComputedUrl::LoadData() const {
   return _0.LoadData();
 }
-inline CORSMode StyleComputedUrl::CorsMode() const {
-  switch (_0._0->cors_mode) {
-    case StyleCorsMode::Anonymous:
-      return CORSMode::CORS_ANONYMOUS;
-    case StyleCorsMode::None:
-      return CORSMode::CORS_NONE;
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unknown cors-mode from style?");
-      return CORSMode::CORS_NONE;
-  }
+inline StyleCorsMode StyleComputedUrl::CorsMode() const {
+  return _0._0->cors_mode;
 }
 inline nsIURI* StyleComputedUrl::GetURI() const { return _0.GetURI(); }
 
@@ -640,6 +639,52 @@ inline const LengthPercentage& BorderRadius::Get(HalfCorner aCorner) const {
 template <>
 inline bool StyleTrackBreadth::HasPercent() const {
   return IsBreadth() && AsBreadth().HasPercent();
+}
+
+// Implemented in nsStyleStructs.cpp
+template <>
+bool StyleTransform::HasPercent() const;
+
+template <>
+inline bool StyleTransformOrigin::HasPercent() const {
+  // NOTE(emilio): `depth` is just a `<length>` so doesn't have a percentage at
+  // all.
+  return horizontal.HasPercent() || vertical.HasPercent();
+}
+
+template <>
+inline Maybe<size_t> StyleGridTemplateComponent::RepeatAutoIndex() const {
+  if (!IsTrackList()) {
+    return Nothing();
+  }
+  auto& list = *AsTrackList();
+  return list.auto_repeat_index < list.values.Length()
+             ? Some(list.auto_repeat_index)
+             : Nothing();
+}
+
+template <>
+inline bool StyleGridTemplateComponent::HasRepeatAuto() const {
+  return RepeatAutoIndex().isSome();
+}
+
+template <>
+inline Span<const StyleGenericTrackListValue<LengthPercentage, StyleInteger>>
+StyleGridTemplateComponent::TrackListValues() const {
+  if (IsTrackList()) {
+    return AsTrackList()->values.AsSpan();
+  }
+  return {};
+}
+
+template <>
+inline const StyleGenericTrackRepeat<LengthPercentage, StyleInteger>*
+StyleGridTemplateComponent::GetRepeatAutoValue() const {
+  auto index = RepeatAutoIndex();
+  if (!index) {
+    return nullptr;
+  }
+  return &TrackListValues()[*index].AsTrackRepeat();
 }
 
 }  // namespace mozilla

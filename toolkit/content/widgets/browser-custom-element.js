@@ -306,6 +306,8 @@
 
       this._csp = null;
 
+      this._referrerInfo = null;
+
       this._contentRequestContextID = null;
 
       this._fullZoom = 1;
@@ -801,6 +803,12 @@
       } else {
         this.markupDocumentViewer.fullZoom = val;
       }
+    }
+
+    get referrerInfo() {
+      return this.isRemoteBrowser
+        ? this._referrerInfo
+        : this.contentDocument.referrerInfo;
     }
 
     get fullZoom() {
@@ -1560,6 +1568,7 @@
       aContentPrincipal,
       aContentStoragePrincipal,
       aCSP,
+      aReferrerInfo,
       aIsSynthetic,
       aInnerWindowID,
       aHaveRequestContextID,
@@ -1584,6 +1593,7 @@
         this._contentPrincipal = aContentPrincipal;
         this._contentStoragePrincipal = aContentStoragePrincipal;
         this._csp = aCSP;
+        this._referrerInfo = aReferrerInfo;
         this._isSyntheticDocument = aIsSynthetic;
         this._innerWindowID = aInnerWindowID;
         this._contentRequestContextID = aHaveRequestContextID
@@ -1830,6 +1840,7 @@
             }
             // don't break here. we need to eat keydown events.
           }
+          // fall through
           case "keypress":
           case "keyup": {
             // All keyevents should be eaten here during autoscrolling.
@@ -2111,6 +2122,14 @@
       }
 
       sendToChildren(this.browsingContext, false);
+    }
+
+    enterModalState() {
+      this.sendMessageToActor("EnterModalState", {}, "BrowserElement", true);
+    }
+
+    leaveModalState() {
+      this.sendMessageToActor("LeaveModalState", {}, "BrowserElement", true);
     }
   }
 

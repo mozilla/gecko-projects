@@ -87,7 +87,7 @@ class NewProxyCache {
   mozilla::UniquePtr<Entry[], JS::FreePolicy> entries_;
 
  public:
-  MOZ_ALWAYS_INLINE bool lookup(const Class* clasp, TaggedProto proto,
+  MOZ_ALWAYS_INLINE bool lookup(const JSClass* clasp, TaggedProto proto,
                                 ObjectGroup** group, Shape** shape) const {
     if (!entries_) {
       return false;
@@ -462,7 +462,7 @@ class JS::Realm : public JS::shadow::Realm {
   ~Realm();
 
   MOZ_MUST_USE bool init(JSContext* cx, JSPrincipals* principals);
-  void destroy(js::FreeOp* fop);
+  void destroy(JSFreeOp* fop);
   void clearTables();
 
   void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
@@ -562,8 +562,8 @@ class JS::Realm : public JS::shadow::Realm {
 
   void purge();
 
-  void fixupAfterMovingGC();
-  void fixupScriptMapsAfterMovingGC();
+  void fixupAfterMovingGC(JSTracer* trc);
+  void fixupScriptMapsAfterMovingGC(JSTracer* trc);
 
 #ifdef JSGC_HASH_TABLE_CHECKS
   void checkObjectGroupTablesAfterMovingGC() {
@@ -892,8 +892,9 @@ class MOZ_RAII AutoAllocInAtomsZone {
   inline ~AutoAllocInAtomsZone();
 };
 
-// For the one place where we need to enter a realm when we may have been
-// allocating in the the atoms zone, this leaves the atoms zone temporarily.
+// During GC we sometimes need to enter a realm when we may have been allocating
+// in the the atoms zone. This leaves the atoms zone temporarily. This happens
+// in embedding callbacks and when we need to mark object groups as pretenured.
 class MOZ_RAII AutoMaybeLeaveAtomsZone {
   JSContext* const cx_;
   bool wasInAtomsZone_;

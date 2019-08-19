@@ -30,6 +30,8 @@
 #include "mozilla/dom/LSObject.h"
 #include "mozilla/dom/Storage.h"
 #include "mozilla/dom/MaybeCrossOriginObject.h"
+#include "mozilla/dom/MediaController.h"
+#include "mozilla/dom/MediaControlUtils.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
@@ -173,7 +175,6 @@
 #include "nsNetCID.h"
 #include "nsIArray.h"
 
-#include "XULDocument.h"
 #include "nsIDOMXULCommandDispatcher.h"
 
 #include "nsBindingManager.h"
@@ -270,6 +271,12 @@ using mozilla::BasePrincipal;
 using mozilla::OriginAttributes;
 using mozilla::TimeStamp;
 
+extern mozilla::LazyLogModule gMediaControlLog;
+
+#define MC_LOG(msg, ...)                     \
+  MOZ_LOG(gMediaControlLog, LogLevel::Debug, \
+          ("WindowOuter=%p, " msg, this, ##__VA_ARGS__))
+
 #define FORWARD_TO_INNER(method, args, err_rval)       \
   PR_BEGIN_MACRO                                       \
   if (!mInnerWindow) {                                 \
@@ -311,8 +318,6 @@ extern LazyLogModule gPageCacheLog;
 
 static int32_t gOpenPopupSpamCount = 0;
 
-static bool gSyncContentBlockingNotifications = false;
-
 nsGlobalWindowOuter::OuterWindowByIdTable*
     nsGlobalWindowOuter::sOuterWindowsById = nullptr;
 
@@ -342,7 +347,7 @@ nsPIDOMWindowOuter* nsPIDOMWindowOuter::GetFromCurrentInner(
 // We store the nsGlobalWindowOuter* in our first slot.
 //
 // We store our holder weakmap in the second slot.
-const js::Class OuterWindowProxyClass = PROXY_CLASS_DEF(
+const JSClass OuterWindowProxyClass = PROXY_CLASS_DEF(
     "Proxy", JSCLASS_HAS_RESERVED_SLOTS(2)); /* additional class flags */
 
 static const size_t OUTER_WINDOW_SLOT = 0;
@@ -1875,7 +1880,8 @@ static nsresult CreateNativeGlobalForInner(JSContext* aCx,
 
 nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
                                              nsISupports* aState,
-                                             bool aForceReuseInnerWindow) {
+                                             bool aForceReuseInnerWindow,
+                                             WindowGlobalChild* aActor) {
   MOZ_ASSERT(mDocumentPrincipal == nullptr,
              "mDocumentPrincipal prematurely set!");
   MOZ_ASSERT(mDocumentStoragePrincipal == nullptr,
@@ -2008,7 +2014,7 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
       newInnerWindow = wsh->GetInnerWindow();
       newInnerGlobal = newInnerWindow->GetWrapper();
     } else {
-      newInnerWindow = nsGlobalWindowInner::Create(this, thisChrome);
+      newInnerWindow = nsGlobalWindowInner::Create(this, thisChrome, aActor);
       if (StaticPrefs::dom_timeout_defer_during_load()) {
         // ensure the initial loading state is known
         newInnerWindow->SetActiveLoadingState(
@@ -2063,6 +2069,9 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
       JS::Rooted<JSObject*> outer(
           cx, NewOuterWindowProxy(cx, newInnerGlobal, thisChrome));
       NS_ENSURE_TRUE(outer, NS_ERROR_FAILURE);
+
+      mBrowsingContext->CleanUpDanglingRemoteOuterWindowProxies(cx, &outer);
+      MOZ_ASSERT(js::IsWindowProxy(outer));
 
       js::SetProxyReservedSlot(outer, OUTER_WINDOW_SLOT,
                                js::PrivateValue(ToSupports(this)));
@@ -2215,9 +2224,9 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
 
   // Tell the WindowGlobalParent that it should become the current window global
   // for our BrowsingContext if it isn't already.
-  mInnerWindow->GetWindowGlobalChild()->SendUpdateDocumentURI(
-      aDocument->GetDocumentURI());
-  mInnerWindow->GetWindowGlobalChild()->SendBecomeCurrentWindowGlobal();
+  WindowGlobalChild* wgc = mInnerWindow->GetWindowGlobalChild();
+  wgc->SetDocumentURI(aDocument->GetDocumentURI());
+  wgc->SendBecomeCurrentWindowGlobal();
 
   // We no longer need the old inner window.  Start its destruction if
   // its not being reused and clear our reference.
@@ -2324,7 +2333,7 @@ void nsGlobalWindowOuter::PrepareForProcessChange(JSObject* aProxy) {
     MOZ_CRASH("PrepareForProcessChange GetRemoteOuterWindowProxy");
   }
 
-  if (!xpc::TransplantObject(cx, localProxy, remoteProxy)) {
+  if (!xpc::TransplantObjectNukingXrayWaiver(cx, localProxy, remoteProxy)) {
     MOZ_CRASH("PrepareForProcessChange TransplantObject");
   }
 }
@@ -2878,6 +2887,26 @@ SuspendTypes nsPIDOMWindowOuter::GetMediaSuspend() const {
   return mMediaSuspend;
 }
 
+void nsPIDOMWindowOuter::UpdateMediaAction(const MediaControlActions aAction) {
+  // TODO : we now temporarily map MediaControlActions to nsISuspendedTypes in
+  // order to control media, but for long term goal in which we should not rely
+  // on nsISuspendedTypes and completely decouple them. See bug1571493.
+  MC_LOG("UpdateMediaAction %s", ToMediaControlActionsStr(aAction));
+  switch (aAction) {
+    case MediaControlActions::ePlay:
+      SetMediaSuspend(nsISuspendedTypes::NONE_SUSPENDED);
+      break;
+    case MediaControlActions::ePause:
+      SetMediaSuspend(nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE);
+      break;
+    case MediaControlActions::eStop:
+      SetMediaSuspend(nsISuspendedTypes::SUSPENDED_STOP_DISPOSABLE);
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Invalid action.");
+  };
+}
+
 void nsPIDOMWindowOuter::SetMediaSuspend(SuspendTypes aSuspend) {
   if (!IsDisposableSuspend(aSuspend)) {
     MaybeNotifyMediaResumedFromBlock(aSuspend);
@@ -3283,7 +3312,7 @@ nsPIDOMWindowOuter* nsGlobalWindowOuter::GetSanitizedOpener(
 
   if (openerDocShell) {
     nsCOMPtr<nsIDocShellTreeItem> openerRootItem;
-    openerDocShell->GetRootTreeItem(getter_AddRefs(openerRootItem));
+    openerDocShell->GetInProcessRootTreeItem(getter_AddRefs(openerRootItem));
     nsCOMPtr<nsIDocShell> openerRootDocShell(do_QueryInterface(openerRootItem));
     if (openerRootDocShell) {
       nsIDocShell::AppType appType = openerRootDocShell->GetAppType();
@@ -3736,7 +3765,18 @@ double nsGlobalWindowOuter::GetDevicePixelRatioOuter(CallerType aCallerType) {
   }
 
   if (nsContentUtils::ResistFingerprinting(aCallerType)) {
-    return 1.0;
+    // Spoofing the DevicePixelRatio causes blurriness in some situations
+    // on HiDPI displays. pdf.js is a non-system caller; but it can't
+    // expose the fingerprintable information, so we can safely disable
+    // spoofing in this situation. It doesn't address the issue for
+    // web-rendered content (including pdf.js instances on the web.)
+    // In the future we hope to have a better solution to fix all HiDPI
+    // blurriness...
+    nsAutoCString origin;
+    nsresult rv = this->GetPrincipal()->GetOrigin(origin);
+    if (NS_FAILED(rv) || origin != NS_LITERAL_CSTRING("resource://pdf.js")) {
+      return 1.0;
+    }
   }
 
   float overrideDPPX = presContext->GetOverrideDPPX();
@@ -3999,7 +4039,7 @@ already_AddRefed<BrowsingContext> nsGlobalWindowOuter::GetChildWindow(
     const nsAString& aName) {
   NS_ENSURE_TRUE(mBrowsingContext, nullptr);
 
-  return do_AddRef(mBrowsingContext->FindChildWithName(aName));
+  return do_AddRef(mBrowsingContext->FindChildWithName(aName, *mBrowsingContext));
 }
 
 bool nsGlobalWindowOuter::DispatchCustomEvent(const nsAString& aEventName) {
@@ -4394,7 +4434,7 @@ nsresult nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
   // via the DocShell tree, and if we are not already the root,
   // call SetFullscreen on that window instead.
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  mDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
+  mDocShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   nsCOMPtr<nsPIDOMWindowOuter> window =
       rootItem ? rootItem->GetWindow() : nullptr;
   if (!window) return NS_ERROR_FAILURE;
@@ -4569,7 +4609,7 @@ bool nsGlobalWindowOuter::Fullscreen() const {
   // Get the fullscreen value of the root window, to always have the value
   // accurate, even when called from content.
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  mDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
+  mDocShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   if (rootItem == mDocShell) {
     if (!XRE_IsContentProcess()) {
       // We are the root window. Return our internal value.
@@ -4922,7 +4962,7 @@ void nsGlobalWindowOuter::FocusOuter() {
   fm->GetActiveWindow(getter_AddRefs(activeDOMWindow));
 
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  mDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
+  mDocShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   nsCOMPtr<nsPIDOMWindowOuter> rootWin =
       rootItem ? rootItem->GetWindow() : nullptr;
   auto* activeWindow = nsPIDOMWindowOuter::From(activeDOMWindow);
@@ -5417,14 +5457,6 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
   nsCOMPtr<nsIClassifiedChannel> trackingChannel =
       do_QueryInterface(aTrackingChannel);
 
-  static bool prefInitialized = false;
-  if (!prefInitialized) {
-    Preferences::AddBoolVarCache(
-        &gSyncContentBlockingNotifications,
-        "dom.testing.sync-content-blocking-notifications", false);
-    prefInitialized = true;
-  }
-
   nsCOMPtr<nsIRunnable> func = NS_NewRunnableFunction(
       "NotifyContentBlockingEventDelayed",
       [doc, docShell, uri, channel, aEvent, aBlocked, aReason,
@@ -5571,7 +5603,7 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
                                                                         event);
       });
   nsresult rv;
-  if (gSyncContentBlockingNotifications) {
+  if (StaticPrefs::dom_testing_sync_content_blocking_notifications()) {
     rv = func->Run();
   } else {
     rv = NS_DispatchToCurrentThreadQueue(func.forget(), 100,
@@ -5723,10 +5755,9 @@ void nsGlobalWindowOuter::FireAbuseEvents(
 Nullable<WindowProxyHolder> nsGlobalWindowOuter::OpenOuter(
     const nsAString& aUrl, const nsAString& aName, const nsAString& aOptions,
     ErrorResult& aError) {
-  nsCOMPtr<nsPIDOMWindowOuter> window;
-  aError = OpenJS(aUrl, aName, aOptions, getter_AddRefs(window));
   RefPtr<BrowsingContext> bc;
-  if (!window || !(bc = window->GetBrowsingContext())) {
+  aError = OpenJS(aUrl, aName, aOptions, getter_AddRefs(bc));
+  if (!bc) {
     return nullptr;
   }
   return WindowProxyHolder(bc.forget());
@@ -5737,7 +5768,7 @@ nsresult nsGlobalWindowOuter::Open(const nsAString& aUrl,
                                    const nsAString& aOptions,
                                    nsDocShellLoadState* aLoadState,
                                    bool aForceNoOpener,
-                                   nsPIDOMWindowOuter** _retval) {
+                                   BrowsingContext** _retval) {
   return OpenInternal(aUrl, aName, aOptions,
                       false,             // aDialog
                       false,             // aContentModal
@@ -5751,7 +5782,7 @@ nsresult nsGlobalWindowOuter::Open(const nsAString& aUrl,
 nsresult nsGlobalWindowOuter::OpenJS(const nsAString& aUrl,
                                      const nsAString& aName,
                                      const nsAString& aOptions,
-                                     nsPIDOMWindowOuter** _retval) {
+                                     BrowsingContext** _retval) {
   return OpenInternal(aUrl, aName, aOptions,
                       false,             // aDialog
                       false,             // aContentModal
@@ -5770,7 +5801,7 @@ nsresult nsGlobalWindowOuter::OpenDialog(const nsAString& aUrl,
                                          const nsAString& aName,
                                          const nsAString& aOptions,
                                          nsISupports* aExtraArgument,
-                                         nsPIDOMWindowOuter** _retval) {
+                                         BrowsingContext** _retval) {
   return OpenInternal(aUrl, aName, aOptions,
                       true,                     // aDialog
                       false,                    // aContentModal
@@ -5788,7 +5819,7 @@ nsresult nsGlobalWindowOuter::OpenDialog(const nsAString& aUrl,
 nsresult nsGlobalWindowOuter::OpenNoNavigate(const nsAString& aUrl,
                                              const nsAString& aName,
                                              const nsAString& aOptions,
-                                             nsPIDOMWindowOuter** _retval) {
+                                             BrowsingContext** _retval) {
   return OpenInternal(aUrl, aName, aOptions,
                       false,             // aDialog
                       false,             // aContentModal
@@ -5813,7 +5844,7 @@ Nullable<WindowProxyHolder> nsGlobalWindowOuter::OpenDialogOuter(
     return nullptr;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> dialog;
+  RefPtr<BrowsingContext> dialog;
   aError = OpenInternal(aUrl, aName, aOptions,
                         true,                // aDialog
                         false,               // aContentModal
@@ -5824,11 +5855,10 @@ Nullable<WindowProxyHolder> nsGlobalWindowOuter::OpenDialogOuter(
                         nullptr,             // aLoadState
                         false,               // aForceNoOpener
                         getter_AddRefs(dialog));
-  RefPtr<BrowsingContext> bc;
-  if (!dialog || !(bc = dialog->GetBrowsingContext())) {
+  if (!dialog) {
     return nullptr;
   }
-  return WindowProxyHolder(bc.forget());
+  return WindowProxyHolder(dialog.forget());
 }
 
 BrowsingContext* nsGlobalWindowOuter::GetFramesOuter() {
@@ -6302,6 +6332,8 @@ void nsGlobalWindowOuter::FinalClose() {
   // Flag that we were closed.
   mIsClosed = true;
 
+  GetBrowsingContext()->SetClosed(true);
+
   // If we get here from CloseOuter then it means that the parent process is
   // going to close our window for us. It's just important to set mIsClosed.
   if (XRE_GetProcessType() == GeckoProcessType_Content) {
@@ -6345,7 +6377,7 @@ void nsGlobalWindowOuter::ReallyCloseWindow() {
     if (mDocShell) {
       nsCOMPtr<nsIBrowserDOMWindow> bwin;
       nsCOMPtr<nsIDocShellTreeItem> rootItem;
-      mDocShell->GetRootTreeItem(getter_AddRefs(rootItem));
+      mDocShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
       nsCOMPtr<nsPIDOMWindowOuter> rootWin =
           rootItem ? rootItem->GetWindow() : nullptr;
       nsCOMPtr<nsIDOMChromeWindow> chromeWin(do_QueryInterface(rootWin));
@@ -6825,7 +6857,7 @@ bool nsGlobalWindowOuter::IsTopLevelWindowActive() {
   }
 
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  treeItem->GetRootTreeItem(getter_AddRefs(rootItem));
+  treeItem->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   if (!rootItem) {
     return false;
   }
@@ -7120,7 +7152,7 @@ nsresult nsGlobalWindowOuter::OpenInternal(
     bool aDialog, bool aContentModal, bool aCalledNoScript, bool aDoJSFixups,
     bool aNavigate, nsIArray* argv, nsISupports* aExtraArgument,
     nsDocShellLoadState* aLoadState, bool aForceNoOpener,
-    nsPIDOMWindowOuter** aReturn) {
+    BrowsingContext** aReturn) {
 #ifdef DEBUG
   uint32_t argc = 0;
   if (argv) argv->GetLength(&argc);
@@ -7237,7 +7269,7 @@ nsresult nsGlobalWindowOuter::OpenInternal(
     }
   }
 
-  nsCOMPtr<mozIDOMWindowProxy> domReturn;
+  RefPtr<BrowsingContext> domReturn;
 
   nsCOMPtr<nsIWindowWatcher> wwatch =
       do_GetService(NS_WINDOWWATCHER_CONTRACTID, &rv);
@@ -7306,7 +7338,8 @@ nsresult nsGlobalWindowOuter::OpenInternal(
   }
 
   if (domReturn && aDoJSFixups) {
-    nsCOMPtr<nsIDOMChromeWindow> chrome_win(do_QueryInterface(domReturn));
+    nsCOMPtr<nsIDOMChromeWindow> chrome_win(
+        do_QueryInterface(domReturn->GetDOMWindow()));
     if (!chrome_win) {
       // A new non-chrome window was created from a call to
       // window.open() from JavaScript, make sure there's a document in
@@ -7316,12 +7349,14 @@ nsresult nsGlobalWindowOuter::OpenInternal(
       // XXXbz should this just use EnsureInnerWindow()?
 
       // Force document creation.
-      nsCOMPtr<Document> doc = nsPIDOMWindowOuter::From(domReturn)->GetDoc();
-      Unused << doc;
+      if (nsPIDOMWindowOuter* win = domReturn->GetDOMWindow()) {
+        nsCOMPtr<Document> doc = win->GetDoc();
+        Unused << doc;
+      }
     }
   }
 
-  *aReturn = do_AddRef(nsPIDOMWindowOuter::From(domReturn)).take();
+  domReturn.forget(aReturn);
   return NS_OK;
 }
 

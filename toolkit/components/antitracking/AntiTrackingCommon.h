@@ -100,6 +100,11 @@ class AntiTrackingCommon final {
       StorageAccessGrantedReason aReason,
       const PerformFinalChecks& aPerformFinalChecks = nullptr);
 
+  // Given a principal, returns the storage permission key that will be used for
+  // the principal.  Returns true on success.
+  static bool CreateStoragePermissionKey(nsIPrincipal* aPrincipal,
+                                         nsACString& aKey);
+
   // Returns true if the permission passed in is a storage access permission
   // for the passed in principal argument.
   static bool IsStorageAccessPermission(nsIPermission* aPermission,
@@ -125,19 +130,10 @@ class AntiTrackingCommon final {
       const nsCString& aParentOrigin, const nsCString& aGrantedOrigin,
       int aAllowMode);
 
-  enum ContentBlockingAllowListPurpose {
-    eStorageChecks,
-    eTrackingProtection,
-    eTrackingAnnotations,
-    eFingerprinting,
-    eCryptomining,
-    eSocialTracking,
-  };
-
   // Check whether a top window URI is on the content blocking allow list.
-  static nsresult IsOnContentBlockingAllowList(
-      nsIURI* aTopWinURI, bool aIsPrivateBrowsing,
-      ContentBlockingAllowListPurpose aPurpose, bool& aIsAllowListed);
+  static nsresult IsOnContentBlockingAllowList(nsIURI* aTopWinURI,
+                                               bool aIsPrivateBrowsing,
+                                               bool& aIsAllowListed);
 
   enum class BlockingDecision {
     eBlock,

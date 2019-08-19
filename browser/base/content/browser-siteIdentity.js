@@ -36,6 +36,13 @@ var gIdentityHandler = {
   _isSecureInternalUI: false,
 
   /**
+   * Whether the content window is considered a "secure context". This
+   * includes "potentially trustworthy" origins such as file:// URLs or localhost.
+   * https://w3c.github.io/webappsec-secure-contexts/#is-origin-trustworthy
+   */
+  _isSecureContext: false,
+
+  /**
    * nsITransportSecurityInfo metadata provided by gBrowser.securityUI the last
    * time the identity UI was updated, or null if the connection is not secure.
    */
@@ -50,13 +57,25 @@ var gIdentityHandler = {
    * RegExp used to decide if an about url should be shown as being part of
    * the browser UI.
    */
-  _secureInternalUIWhitelist: /^(?:accounts|addons|cache|config|crashes|downloads|license|logins|preferences|protections|rights|sessionrestore|support|welcomeback)(?:[?#]|$)/i,
+  _secureInternalUIWhitelist: /^(?:accounts|addons|cache|certificate|config|crashes|downloads|license|logins|preferences|protections|rights|sessionrestore|support|welcomeback)(?:[?#]|$)/i,
 
-  get _isBroken() {
+  /**
+   * Whether the established HTTPS connection is considered "broken".
+   * This could have several reasons, such as mixed content or weak
+   * cryptography. If this is true, _isSecureConnection is false.
+   */
+  get _isBrokenConnection() {
     return this._state & Ci.nsIWebProgressListener.STATE_IS_BROKEN;
   },
 
-  get _isSecure() {
+  /**
+   * Whether the connection to the current site was done via secure
+   * transport. Note that this attribute is not true in all cases that
+   * the site was accessed via HTTPS, i.e. _isSecureConnection will
+   * be false when _isBrokenConnection is true, even though the page
+   * was loaded over HTTPS.
+   */
+  get _isSecureConnection() {
     // If a <browser> is included within a chrome document, then this._state
     // will refer to the security state for the <browser> and not the top level
     // document. In this case, don't upgrade the security state in the UI
@@ -140,10 +159,10 @@ var gIdentityHandler = {
       "identity-popup-mainView-panel-header-span"
     ));
   },
-  get _identityPopupContentHost() {
-    delete this._identityPopupContentHost;
-    return (this._identityPopupContentHost = document.getElementById(
-      "identity-popup-host"
+  get _identityPopupSecurityEVContentOwner() {
+    delete this._identityPopupSecurityEVContentOwner;
+    return (this._identityPopupSecurityEVContentOwner = document.getElementById(
+      "identity-popup-security-ev-content-owner"
     ));
   },
   get _identityPopupContentOwner() {
@@ -249,10 +268,28 @@ var gIdentityHandler = {
     }
     return (this._permissionAnchors = permissionAnchors);
   },
+  get _permissionGrantedIndicator() {
+    delete this._permissionGrantedIndicator;
+    return (this._permissionGrantedIndicator = document.getElementById(
+      "identity-popup-permissions-granted-indicator"
+    ));
+  },
   get _trackingProtectionIconContainer() {
     delete this._trackingProtectionIconContainer;
     return (this._trackingProtectionIconContainer = document.getElementById(
       "tracking-protection-icon-container"
+    ));
+  },
+
+  get _geoSharingIcon() {
+    delete this._geoSharingIcon;
+    return (this._geoSharingIcon = document.getElementById("geo-sharing-icon"));
+  },
+
+  get _webRTCSharingIcon() {
+    delete this._webRTCSharingIcon;
+    return (this._webRTCSharingIcon = document.getElementById(
+      "webrtc-sharing-icon"
     ));
   },
 
@@ -301,6 +338,28 @@ var gIdentityHandler = {
       false
     );
     return this._protectionsPanelEnabled;
+  },
+
+  get _useGrayLockIcon() {
+    delete this._useGrayLockIcon;
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "_useGrayLockIcon",
+      "security.secure_connection_icon_color_gray",
+      false
+    );
+    return this._useGrayLockIcon;
+  },
+
+  get _showExtendedValidation() {
+    delete this._showExtendedValidation;
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "_showExtendedValidation",
+      "security.identityblock.show_extended_validation",
+      false
+    );
+    return this._showExtendedValidation;
   },
 
   /**
@@ -457,6 +516,7 @@ var gIdentityHandler = {
     // the documentation of the individual properties for details.
     this.setURI(uri);
     this._secInfo = gBrowser.securityUI.secInfo;
+    this._isSecureContext = gBrowser.securityUI.isSecureContext;
 
     // Then, update the user interface with the available data.
     this.refreshIdentityBlock();
@@ -513,12 +573,27 @@ var gIdentityHandler = {
     let tab = gBrowser.selectedTab;
     this._sharingState = tab._sharingState;
 
-    this._identityBox.removeAttribute("paused");
-    this._identityBox.removeAttribute("sharing");
-    if (this._sharingState && this._sharingState.sharing) {
-      this._identityBox.setAttribute("sharing", this._sharingState.sharing);
-      if (this._sharingState.paused) {
-        this._identityBox.setAttribute("paused", "true");
+    this._webRTCSharingIcon.removeAttribute("paused");
+    this._webRTCSharingIcon.removeAttribute("sharing");
+    this._geoSharingIcon.removeAttribute("sharing");
+
+    if (this._sharingState) {
+      if (
+        this._sharingState &&
+        this._sharingState.webRTC &&
+        this._sharingState.webRTC.sharing
+      ) {
+        this._webRTCSharingIcon.setAttribute(
+          "sharing",
+          this._sharingState.webRTC.sharing
+        );
+
+        if (this._sharingState.webRTC.paused) {
+          this._webRTCSharingIcon.setAttribute("paused", "true");
+        }
+      }
+      if (this._sharingState.geo) {
+        this._geoSharingIcon.setAttribute("sharing", this._sharingState.geo);
       }
     }
 
@@ -557,6 +632,14 @@ var gIdentityHandler = {
       // Some URIs might have no hosts.
     }
 
+    if (this._uri.schemeIs("about")) {
+      // For example in about:certificate the original URL is
+      // about:certificate?cert=<large base64 encoded data>&cert=<large base64 encoded data>&cert=...
+      // So, instead of showing that large string in the identity panel header, we are just showing
+      // about:certificate now. For the other about pages we are just showing about:<page>
+      host = "about:" + this._uri.filePath;
+    }
+
     let readerStrippedURI = ReaderMode.getOriginalUrlObjectForDisplay(
       this._uri.displaySpec
     );
@@ -583,10 +666,10 @@ var gIdentityHandler = {
    */
   get pointerlockFsWarningClassName() {
     // Note that the fullscreen warning does not handle _isSecureInternalUI.
-    if (this._uriHasHost && this._isEV) {
+    if (this._uriHasHost && this._isEV && this._showExtendedValidation) {
       return "verifiedIdentity";
     }
-    if (this._uriHasHost && this._isSecure) {
+    if (this._uriHasHost && this._isSecureConnection) {
       return "verifiedDomain";
     }
     return "unknownIdentity";
@@ -607,10 +690,34 @@ var gIdentityHandler = {
   },
 
   /**
+   * Returns whether the current URI results in an "invalid"
+   * URL bar state, which effectively means hidden security
+   * indicators.
+   */
+  _hasInvalidPageProxyState() {
+    return (
+      !this._uriHasHost &&
+      this._uri &&
+      isBlankPageURL(this._uri.spec) &&
+      !this._uri.schemeIs("moz-extension")
+    );
+  },
+
+  /**
    * Updates the identity block user interface with the data from this object.
    */
   refreshIdentityBlock() {
     if (!this._identityBox) {
+      return;
+    }
+
+    // If this condition is true, the URL bar will have an "invalid"
+    // pageproxystate, which will hide the security indicators. Thus, we can
+    // safely avoid updating the security UI.
+    //
+    // This will also filter out intermediate about:blank loads to avoid
+    // flickering the identity block and doing unnecessary work.
+    if (this._hasInvalidPageProxyState()) {
       return;
     }
 
@@ -620,10 +727,12 @@ var gIdentityHandler = {
     let icon_labels_dir = "ltr";
 
     if (this._isSecureInternalUI) {
+      // This is a secure internal Firefox page.
       this._identityBox.className = "chromeUI";
       let brandBundle = document.getElementById("bundle_brand");
       icon_label = brandBundle.getString("brandShorterName");
-    } else if (this._uriHasHost && this._isEV) {
+    } else if (this._uriHasHost && this._isEV && this._showExtendedValidation) {
+      // This is a secure connection with EV.
       this._identityBox.className = "verifiedIdentity";
       if (this._isMixedActiveContentBlocked) {
         this._identityBox.classList.add("mixedActiveBlocked");
@@ -654,13 +763,15 @@ var gIdentityHandler = {
           : "ltr";
       }
     } else if (this._pageExtensionPolicy) {
+      // This is a WebExtension page.
       this._identityBox.className = "extensionPage";
       let extensionName = this._pageExtensionPolicy.name;
       icon_label = gNavigatorBundle.getFormattedString(
         "identity.extension.label",
         [extensionName]
       );
-    } else if (this._uriHasHost && this._isSecure) {
+    } else if (this._uriHasHost && this._isSecureConnection) {
+      // This is a secure connection.
       this._identityBox.className = "verifiedDomain";
       if (this._isMixedActiveContentBlocked) {
         this._identityBox.classList.add("mixedActiveBlocked");
@@ -672,46 +783,48 @@ var gIdentityHandler = {
           [this.getIdentityData().caOrg]
         );
       }
-    } else if (!this._uriHasHost) {
+    } else if (this._isBrokenConnection) {
+      // This is a secure connection, but something is wrong.
       this._identityBox.className = "unknownIdentity";
+
+      if (this._isMixedActiveContentLoaded) {
+        this._identityBox.classList.add("mixedActiveContent");
+      } else if (this._isMixedActiveContentBlocked) {
+        this._identityBox.classList.add(
+          "mixedDisplayContentLoadedActiveBlocked"
+        );
+      } else if (this._isMixedPassiveContentLoaded) {
+        this._identityBox.classList.add("mixedDisplayContent");
+      } else {
+        this._identityBox.classList.add("weakCipher");
+      }
     } else if (
-      gBrowser.selectedBrowser.documentURI &&
-      (gBrowser.selectedBrowser.documentURI.scheme == "about" ||
-        gBrowser.selectedBrowser.documentURI.scheme == "chrome")
+      this._isSecureContext ||
+      (gBrowser.selectedBrowser.documentURI &&
+        (gBrowser.selectedBrowser.documentURI.scheme == "about" ||
+          gBrowser.selectedBrowser.documentURI.scheme == "chrome"))
     ) {
-      // For net errors we should not show notSecure as it's likely confusing
+      // This is a local resource (and shouldn't be marked insecure).
       this._identityBox.className = "unknownIdentity";
     } else {
-      if (this._isBroken) {
-        this._identityBox.className = "unknownIdentity";
+      // This is an insecure connection.
+      let warnOnInsecure =
+        this._insecureConnectionIconEnabled ||
+        (this._insecureConnectionIconPBModeEnabled &&
+          PrivateBrowsingUtils.isWindowPrivate(window));
+      let className = warnOnInsecure ? "notSecure" : "unknownIdentity";
+      this._identityBox.className = className;
+      tooltip = warnOnInsecure
+        ? gNavigatorBundle.getString("identity.notSecure.tooltip")
+        : "";
 
-        if (this._isMixedActiveContentLoaded) {
-          this._identityBox.classList.add("mixedActiveContent");
-        } else if (this._isMixedActiveContentBlocked) {
-          this._identityBox.classList.add(
-            "mixedDisplayContentLoadedActiveBlocked"
-          );
-        } else if (this._isMixedPassiveContentLoaded) {
-          this._identityBox.classList.add("mixedDisplayContent");
-        } else {
-          this._identityBox.classList.add("weakCipher");
-        }
-      } else {
-        let warnOnInsecure =
-          this._insecureConnectionIconEnabled ||
-          (this._insecureConnectionIconPBModeEnabled &&
-            PrivateBrowsingUtils.isWindowPrivate(window));
-        let className = warnOnInsecure ? "notSecure" : "unknownIdentity";
-        this._identityBox.className = className;
-
-        let warnTextOnInsecure =
-          this._insecureConnectionTextEnabled ||
-          (this._insecureConnectionTextPBModeEnabled &&
-            PrivateBrowsingUtils.isWindowPrivate(window));
-        if (warnTextOnInsecure) {
-          icon_label = gNavigatorBundle.getString("identity.notSecure.label");
-          this._identityBox.classList.add("notSecureText");
-        }
+      let warnTextOnInsecure =
+        this._insecureConnectionTextEnabled ||
+        (this._insecureConnectionTextPBModeEnabled &&
+          PrivateBrowsingUtils.isWindowPrivate(window));
+      if (warnTextOnInsecure) {
+        icon_label = gNavigatorBundle.getString("identity.notSecure.label");
+        this._identityBox.classList.add("notSecureText");
       }
       if (this._hasInsecureLoginForms) {
         // Insecure login forms can only be present on "unknown identity"
@@ -775,6 +888,13 @@ var gIdentityHandler = {
       let icon = permissionAnchors.popup;
       icon.setAttribute("showing", "true");
     }
+
+    // Gray lock icon for secure connections if pref set
+    this._updateAttribute(
+      this._identityIcon,
+      "lock-icon-gray",
+      this._useGrayLockIcon
+    );
 
     // Push the appropriate strings out to the UI
     this._identityIcon.setAttribute("tooltiptext", tooltip);
@@ -856,7 +976,7 @@ var gIdentityHandler = {
       connection = "secure-ev";
     } else if (this._isCertUserOverridden) {
       connection = "secure-cert-user-overridden";
-    } else if (this._isSecure) {
+    } else if (this._isSecureConnection) {
       connection = "secure";
       customRoot = this._hasCustomRoot();
     }
@@ -884,32 +1004,31 @@ var gIdentityHandler = {
     // cipher.
     let ciphers = "";
     if (
-      this._isBroken &&
+      this._isBrokenConnection &&
       !this._isMixedActiveContentLoaded &&
       !this._isMixedPassiveContentLoaded
     ) {
       ciphers = "weak";
     }
 
+    // Gray lock icon for secure connections if pref set
+    this._updateAttribute(
+      this._identityPopup,
+      "lock-icon-gray",
+      this._useGrayLockIcon
+    );
+
     // Update all elements.
     let elementIDs = ["identity-popup", "identity-popup-securityView-body"];
 
-    function updateAttribute(elem, attr, value) {
-      if (value) {
-        elem.setAttribute(attr, value);
-      } else {
-        elem.removeAttribute(attr);
-      }
-    }
-
     for (let id of elementIDs) {
       let element = document.getElementById(id);
-      updateAttribute(element, "connection", connection);
-      updateAttribute(element, "loginforms", loginforms);
-      updateAttribute(element, "ciphers", ciphers);
-      updateAttribute(element, "mixedcontent", mixedcontent);
-      updateAttribute(element, "isbroken", this._isBroken);
-      updateAttribute(element, "customroot", customRoot);
+      this._updateAttribute(element, "connection", connection);
+      this._updateAttribute(element, "loginforms", loginforms);
+      this._updateAttribute(element, "ciphers", ciphers);
+      this._updateAttribute(element, "mixedcontent", mixedcontent);
+      this._updateAttribute(element, "isbroken", this._isBrokenConnection);
+      this._updateAttribute(element, "customroot", customRoot);
     }
 
     // Initialize the optional strings to empty values
@@ -919,7 +1038,7 @@ var gIdentityHandler = {
     let owner = "";
 
     // Fill in the CA name if we have a valid TLS certificate.
-    if (this._isSecure || this._isCertUserOverridden) {
+    if (this._isSecureConnection || this._isCertUserOverridden) {
       verifier = this._identityIconLabels.tooltipText;
     }
 
@@ -949,10 +1068,15 @@ var gIdentityHandler = {
 
     // Push the appropriate strings out to the UI.
     this._identityPopupMainViewHeaderLabel.textContent = gNavigatorBundle.getFormattedString(
-      "identity.headerWithHost",
+      "identity.headerMainWithHost",
       [host]
     );
-    this._identityPopupContentHost.textContent = host;
+
+    this._identityPopupSecurityEVContentOwner.textContent = gNavigatorBundle.getFormattedString(
+      "identity.ev.contentOwner",
+      [owner]
+    );
+
     this._identityPopupContentOwner.textContent = owner;
     this._identityPopupContentSupp.textContent = supplemental;
     this._identityPopupContentVerif.textContent = verifier;
@@ -1131,6 +1255,7 @@ var gIdentityHandler = {
       )
     ) {
       this.refreshIdentityBlock();
+      this.updateSitePermissionsGrantedIndicator();
     }
   },
 
@@ -1174,6 +1299,14 @@ var gIdentityHandler = {
     }
   },
 
+  _updateAttribute(elem, attr, value) {
+    if (value) {
+      elem.setAttribute(attr, value);
+    } else {
+      elem.removeAttribute(attr);
+    }
+  },
+
   updateSitePermissions() {
     while (this._permissionList.hasChildNodes()) {
       this._permissionList.removeChild(this._permissionList.lastChild);
@@ -1183,18 +1316,33 @@ var gIdentityHandler = {
       gBrowser.selectedBrowser
     );
 
-    if (this._sharingState) {
+    if (this._sharingState && this._sharingState.geo) {
+      let geoPermission = permissions.find(perm => perm.id === "geo");
+      if (geoPermission) {
+        geoPermission.sharingState = true;
+      } else {
+        permissions.push({
+          id: "geo",
+          state: SitePermissions.ALLOW,
+          scope: SitePermissions.SCOPE_REQUEST,
+          sharingState: true,
+        });
+      }
+    }
+
+    if (this._sharingState && this._sharingState.webRTC) {
+      let webrtcState = this._sharingState.webRTC;
       // If WebRTC device or screen permissions are in use, we need to find
       // the associated permission item to set the sharingState field.
       for (let id of ["camera", "microphone", "screen"]) {
-        if (this._sharingState[id]) {
+        if (webrtcState[id]) {
           let found = false;
           for (let permission of permissions) {
             if (permission.id != id) {
               continue;
             }
             found = true;
-            permission.sharingState = this._sharingState[id];
+            permission.sharingState = webrtcState[id];
             break;
           }
           if (!found) {
@@ -1205,7 +1353,7 @@ var gIdentityHandler = {
               id,
               state: SitePermissions.ALLOW,
               scope: SitePermissions.SCOPE_REQUEST,
-              sharingState: this._sharingState[id],
+              sharingState: webrtcState[id],
             });
           }
         }
@@ -1232,6 +1380,11 @@ var gIdentityHandler = {
       ) {
         this._createBlockedPopupIndicator();
         hasBlockedPopupIndicator = true;
+      } else if (
+        permission.id == "geo" &&
+        permission.state === SitePermissions.ALLOW
+      ) {
+        this._createGeoLocationLastAccessIndicator();
       }
     }
 
@@ -1259,6 +1412,31 @@ var gIdentityHandler = {
     } else {
       this._permissionEmptyHint.setAttribute("hidden", "true");
     }
+
+    this.updateSitePermissionsGrantedIndicator();
+  },
+
+  updateSitePermissionsGrantedIndicator() {
+    let hasGrantedPermissions = false;
+
+    let permissions = SitePermissions.getAllPermissionDetailsForBrowser(
+      gBrowser.selectedBrowser
+    );
+
+    for (let permission of permissions) {
+      if (
+        permission.state === SitePermissions.ALLOW ||
+        permission.state === SitePermissions.ALLOW_COOKIES_FOR_SESSION
+      ) {
+        hasGrantedPermissions = true;
+      }
+    }
+
+    // Display the permission granted indicator if necessary.
+    this._permissionGrantedIndicator.toggleAttribute(
+      "show",
+      hasGrantedPermissions
+    );
   },
 
   _createPermissionItem(aPermission) {
@@ -1272,7 +1450,10 @@ var gIdentityHandler = {
       "identity-popup-permission-icon",
       aPermission.id + "-icon"
     );
-    if (aPermission.state == SitePermissions.BLOCK) {
+    if (
+      aPermission.state == SitePermissions.BLOCK ||
+      aPermission.state == SitePermissions.AUTOPLAY_BLOCKED_ALL
+    ) {
       img.classList.add("blocked-permission-icon");
     }
 
@@ -1288,9 +1469,7 @@ var gIdentityHandler = {
       // Synchronize control center and identity block blinking animations.
       window
         .promiseDocumentFlushed(() => {
-          let sharingIconBlink = document
-            .getElementById("sharing-icon")
-            .getAnimations()[0];
+          let sharingIconBlink = this._webRTCSharingIcon.getAnimations()[0];
           let imgBlink = img.getAnimations()[0];
           return [sharingIconBlink, imgBlink];
         })
@@ -1403,6 +1582,24 @@ var gIdentityHandler = {
       return container;
     }
 
+    if (aPermission.id == "geo") {
+      let block = document.createXULElement("vbox");
+      block.setAttribute("id", "identity-popup-geo-container");
+
+      let button = this._createPermissionClearButton(aPermission, block);
+      container.appendChild(button);
+
+      block.appendChild(container);
+      return block;
+    }
+
+    let button = this._createPermissionClearButton(aPermission, container);
+    container.appendChild(button);
+
+    return container;
+  },
+
+  _createPermissionClearButton(aPermission, container) {
     let button = document.createXULElement("button");
     button.setAttribute("class", "identity-popup-permission-remove-button");
     let tooltiptext = gNavigatorBundle.getString("permissions.remove.tooltip");
@@ -1414,7 +1611,7 @@ var gIdentityHandler = {
         aPermission.sharingState &&
         ["camera", "microphone", "screen"].includes(aPermission.id)
       ) {
-        let windowId = this._sharingState.windowId;
+        let windowId = this._sharingState.webRTC.windowId;
         if (aPermission.id == "screen") {
           windowId = "screen:" + windowId;
         } else {
@@ -1426,7 +1623,7 @@ var gIdentityHandler = {
             // It's not possible to stop sharing one of camera/microphone
             // without the other.
             for (let id of ["camera", "microphone"]) {
-              if (this._sharingState[id]) {
+              if (this._sharingState.webRTC[id]) {
                 let perm = SitePermissions.getForPrincipal(principal, id);
                 if (
                   perm.state == SitePermissions.ALLOW &&
@@ -1451,11 +1648,71 @@ var gIdentityHandler = {
       PanelView.forNode(
         this._identityPopupMainView
       ).descriptionHeightWorkaround();
+
+      if (aPermission.id === "geo") {
+        gBrowser.updateBrowserSharing(browser, { geo: false });
+      }
     });
 
-    container.appendChild(button);
+    return button;
+  },
 
-    return container;
+  _getGeoLocationLastAccess() {
+    return new Promise(resolve => {
+      let lastAccess = null;
+      ContentPrefService2.getByDomainAndName(
+        gBrowser.currentURI.spec,
+        "permissions.geoLocation.lastAccess",
+        gBrowser.selectedBrowser.loadContext,
+        {
+          handleResult(pref) {
+            lastAccess = pref.value;
+          },
+          handleCompletion() {
+            resolve(lastAccess);
+          },
+        }
+      );
+    });
+  },
+
+  async _createGeoLocationLastAccessIndicator() {
+    let lastAccessStr = await this._getGeoLocationLastAccess();
+
+    if (lastAccessStr == null) {
+      return;
+    }
+    let lastAccess = new Date(lastAccessStr);
+    if (isNaN(lastAccess)) {
+      Cu.reportError("Invalid timestamp for last geolocation access");
+      return;
+    }
+
+    let icon = document.createXULElement("image");
+    icon.setAttribute("class", "popup-subitem");
+
+    let indicator = document.createXULElement("hbox");
+    indicator.setAttribute("class", "identity-popup-permission-item");
+    indicator.setAttribute("align", "center");
+    indicator.setAttribute("id", "geo-access-indicator-item");
+
+    let timeFormat = new Services.intl.RelativeTimeFormat(undefined, {});
+
+    let text = document.createXULElement("label");
+    text.setAttribute("flex", "1");
+    text.setAttribute("class", "identity-popup-permission-label");
+
+    text.textContent = gNavigatorBundle.getFormattedString(
+      "geolocationLastAccessIndicatorText",
+      [timeFormat.formatBestUnit(lastAccess)]
+    );
+
+    indicator.appendChild(icon);
+    indicator.appendChild(text);
+
+    document
+      .getElementById("identity-popup-geo-container")
+      .appendChild(indicator);
   },
 
   _createBlockedPopupIndicator() {

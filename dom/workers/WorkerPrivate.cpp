@@ -36,6 +36,7 @@
 #include "mozilla/dom/PerformanceStorageWorker.h"
 #include "mozilla/dom/PromiseDebugging.h"
 #include "mozilla/dom/RemoteWorkerChild.h"
+#include "mozilla/dom/RemoteWorkerService.h"
 #include "mozilla/dom/TimeoutHandler.h"
 #include "mozilla/dom/WorkerBinding.h"
 #include "mozilla/StorageAccess.h"
@@ -53,6 +54,7 @@
 #include "nsIURI.h"
 #include "nsIURL.h"
 #include "nsPrintfCString.h"
+#include "nsProxyRelease.h"
 #include "nsQueryObject.h"
 #include "nsRFPService.h"
 #include "nsSandboxFlags.h"
@@ -3651,6 +3653,8 @@ bool WorkerPrivate::RunCurrentSyncLoop() {
   JSContext* cx = GetJSContext();
   MOZ_ASSERT(cx);
 
+  AutoPushEventLoopGlobal eventLoopGlobal(this, cx);
+
   // This should not change between now and the time we finish running this sync
   // loop.
   uint32_t currentLoopIndex = mSyncLoopStack.Length() - 1;
@@ -3715,7 +3719,10 @@ bool WorkerPrivate::RunCurrentSyncLoop() {
       MOZ_ALWAYS_TRUE(NS_ProcessNextEvent(mThread, false));
 
       // Now *might* be a good time to GC. Let the JS engine make the decision.
-      if (JS::CurrentGlobalOrNull(cx)) {
+      if (GetCurrentEventLoopGlobal()) {
+        // If GetCurrentEventLoopGlobal() is non-null, our JSContext is in a
+        // Realm, so it's safe to try to GC.
+        MOZ_ASSERT(JS::CurrentGlobalOrNull(cx));
         JS_MaybeGC(cx);
       }
     }
@@ -3904,6 +3911,9 @@ void WorkerPrivate::EnterDebuggerEventLoop() {
 
   JSContext* cx = GetJSContext();
   MOZ_ASSERT(cx);
+
+  AutoPushEventLoopGlobal eventLoopGlobal(this, cx);
+
   CycleCollectedJSContext* ccjscx = CycleCollectedJSContext::Get();
 
   uint32_t currentEventLoopLevel = ++data->mDebuggerEventLoopLevel;
@@ -3958,7 +3968,10 @@ void WorkerPrivate::EnterDebuggerEventLoop() {
       ccjscx->PerformDebuggerMicroTaskCheckpoint();
 
       // Now *might* be a good time to GC. Let the JS engine make the decision.
-      if (JS::CurrentGlobalOrNull(cx)) {
+      if (GetCurrentEventLoopGlobal()) {
+        // If GetCurrentEventLoopGlobal() is non-null, our JSContext is in a
+        // Realm, so it's safe to try to GC.
+        MOZ_ASSERT(JS::CurrentGlobalOrNull(cx));
         JS_MaybeGC(cx);
       }
     }
@@ -4134,6 +4147,7 @@ void WorkerPrivate::ReportError(JSContext* aCx,
                                           &stackGlobal);
 
   if (stack) {
+    JSAutoRealm ar(aCx, stackGlobal);
     report->SerializeWorkerStack(aCx, this, stack);
   }
 
@@ -4846,6 +4860,40 @@ RemoteWorkerChild* WorkerPrivate::GetRemoteWorkerController() {
   return mRemoteWorkerController;
 }
 
+void WorkerPrivate::SetRemoteWorkerControllerWeakRef(
+    ThreadSafeWeakPtr<RemoteWorkerChild> aWeakRef) {
+  MOZ_ASSERT(aWeakRef);
+  MOZ_ASSERT(!mRemoteWorkerControllerWeakRef);
+  MOZ_ASSERT(IsServiceWorker());
+
+  mRemoteWorkerControllerWeakRef = std::move(aWeakRef);
+}
+
+ThreadSafeWeakPtr<RemoteWorkerChild>
+WorkerPrivate::GetRemoteWorkerControllerWeakRef() {
+  MOZ_ASSERT(IsServiceWorker());
+  return mRemoteWorkerControllerWeakRef;
+}
+
+RefPtr<GenericPromise> WorkerPrivate::SetServiceWorkerSkipWaitingFlag() {
+  AssertIsOnWorkerThread();
+  MOZ_ASSERT(IsServiceWorker());
+
+  RefPtr<RemoteWorkerChild> rwc(mRemoteWorkerControllerWeakRef);
+
+  if (!rwc) {
+    return GenericPromise::CreateAndReject(NS_ERROR_DOM_ABORT_ERR, __func__);
+  }
+
+  RefPtr<GenericPromise> promise =
+      rwc->MaybeSendSetServiceWorkerSkipWaitingFlag();
+
+  NS_ProxyRelease("WorkerPrivate::mRemoteWorkerControllerWeakRef",
+                  RemoteWorkerService::Thread(), rwc.forget());
+
+  return promise;
+}
+
 nsAString& WorkerPrivate::Id() {
   AssertIsOnMainThread();
 
@@ -4963,6 +5011,21 @@ WorkerPrivate::EventTarget::IsOnCurrentThreadInfallible() {
   }
 
   return mWorkerPrivate->IsOnCurrentThread();
+}
+
+WorkerPrivate::AutoPushEventLoopGlobal::AutoPushEventLoopGlobal(
+    WorkerPrivate* aWorkerPrivate, JSContext* aCx)
+    : mWorkerPrivate(aWorkerPrivate) {
+  MOZ_ACCESS_THREAD_BOUND(mWorkerPrivate->mWorkerThreadAccessible, data);
+  mOldEventLoopGlobal = data->mCurrentEventLoopGlobal.forget();
+  if (JSObject* global = JS::CurrentGlobalOrNull(aCx)) {
+    data->mCurrentEventLoopGlobal = xpc::NativeGlobal(global);
+  }
+}
+
+WorkerPrivate::AutoPushEventLoopGlobal::~AutoPushEventLoopGlobal() {
+  MOZ_ACCESS_THREAD_BOUND(mWorkerPrivate->mWorkerThreadAccessible, data);
+  data->mCurrentEventLoopGlobal = mOldEventLoopGlobal.forget();
 }
 
 }  // namespace dom

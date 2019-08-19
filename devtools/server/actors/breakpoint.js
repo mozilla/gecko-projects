@@ -191,8 +191,7 @@ BreakpointActor.prototype = {
 
     if (
       this.threadActor.sources.isBlackBoxed(sourceActor.url, line, column) ||
-      this.threadActor.skipBreakpoints ||
-      frame.onStep
+      this.threadActor.skipBreakpoints
     ) {
       return undefined;
     }
@@ -208,7 +207,7 @@ BreakpointActor.prototype = {
       return undefined;
     }
 
-    if (!this.threadActor.hasMoved(location, "breakpoint")) {
+    if (!this.threadActor.hasMoved(frame, "breakpoint")) {
       return undefined;
     }
 
@@ -248,7 +247,7 @@ BreakpointActor.prototype = {
       } else if ("return" in completion) {
         value = completion.return;
       } else {
-        value = ["[Logpoint threw]: " + this.getThrownMessage(completion)];
+        value = [this.getThrownMessage(completion)];
         level = "logPointError";
       }
 

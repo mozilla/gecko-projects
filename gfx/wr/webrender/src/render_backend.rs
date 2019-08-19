@@ -308,6 +308,10 @@ impl DataStores {
                 let prim_data = &self.yuv_image[data_handle];
                 &prim_data.common
             }
+            PrimitiveInstanceKind::Backdrop { data_handle, .. } => {
+                let prim_data = &self.backdrop[data_handle];
+                &prim_data.common
+            }
             PrimitiveInstanceKind::PushClipChain |
             PrimitiveInstanceKind::PopClipChain => {
                 unreachable!();
@@ -1410,6 +1414,7 @@ impl RenderBackend {
         }
 
         let requires_frame_build = self.requires_frame_build();
+        let use_multiple_documents = self.documents.len() > 1;
         let doc = self.documents.get_mut(&document_id).unwrap();
         doc.has_built_scene |= has_built_scene;
 
@@ -1447,6 +1452,10 @@ impl RenderBackend {
             if resource_updates.iter().any(|update| {
                 match update {
                     ResourceUpdate::UpdateImage(update_image) => {
+                        // TODO is_image_active() does not have multiple documents support.
+                        if use_multiple_documents {
+                            return true;
+                        }
                         if !resource_cache.is_image_active(update_image.key) {
                             return false;
                         }

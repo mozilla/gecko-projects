@@ -10,10 +10,12 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/EditAction.h"
 #include "mozilla/EditorDOMPoint.h"
+#include "mozilla/EditorUtils.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/mozInlineSpellChecker.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/StaticPrefs_editor.h"
 #include "mozilla/TextEvents.h"
 
 #include "nsCRT.h"
@@ -93,63 +95,23 @@ static bool IsNamedAnchorTag(const nsAtom& aTagName) {
   return &aTagName == nsGkAtoms::anchor;
 }
 
-class HTMLEditorPrefs final {
- public:
-  static bool IsResizingUIEnabledByDefault() {
-    EnsurePrefValues();
-    return sUserWantsToEnableResizingUIByDefault;
-  }
-  static bool IsInlineTableEditingUIEnabledByDefault() {
-    EnsurePrefValues();
-    return sUserWantsToEnableInlineTableEditingUIByDefault;
-  }
-  static bool IsAbsolutePositioningUIEnabledByDefault() {
-    EnsurePrefValues();
-    return sUserWantsToEnableAbsolutePositioningUIByDefault;
-  }
-
- private:
-  static bool sUserWantsToEnableResizingUIByDefault;
-  static bool sUserWantsToEnableInlineTableEditingUIByDefault;
-  static bool sUserWantsToEnableAbsolutePositioningUIByDefault;
-
-  static void EnsurePrefValues() {
-    static bool sInitialized = false;
-    if (sInitialized) {
-      return;
-    }
-    Preferences::AddBoolVarCache(&sUserWantsToEnableResizingUIByDefault,
-                                 "editor.resizing.enabled_by_default");
-    Preferences::AddBoolVarCache(
-        &sUserWantsToEnableInlineTableEditingUIByDefault,
-        "editor.inline_table_editing.enabled_by_default");
-    Preferences::AddBoolVarCache(
-        &sUserWantsToEnableAbsolutePositioningUIByDefault,
-        "editor.positioning.enabled_by_default");
-    sInitialized = true;
-  }
-};
-
-bool HTMLEditorPrefs::sUserWantsToEnableResizingUIByDefault = false;
-bool HTMLEditorPrefs::sUserWantsToEnableInlineTableEditingUIByDefault = false;
-bool HTMLEditorPrefs::sUserWantsToEnableAbsolutePositioningUIByDefault = false;
-
 HTMLEditor::HTMLEditor()
     : mCRInParagraphCreatesParagraph(false),
       mCSSAware(false),
       mSelectedCellIndex(0),
-      mIsObjectResizingEnabled(HTMLEditorPrefs::IsResizingUIEnabledByDefault()),
+      mIsObjectResizingEnabled(
+          StaticPrefs::editor_resizing_enabled_by_default()),
       mIsResizing(false),
       mPreserveRatio(false),
       mResizedObjectIsAnImage(false),
       mIsAbsolutelyPositioningEnabled(
-          HTMLEditorPrefs::IsAbsolutePositioningUIEnabledByDefault()),
+          StaticPrefs::editor_positioning_enabled_by_default()),
       mResizedObjectIsAbsolutelyPositioned(false),
       mGrabberClicked(false),
       mIsMoving(false),
       mSnapToGridEnabled(false),
       mIsInlineTableEditingEnabled(
-          HTMLEditorPrefs::IsInlineTableEditingUIEnabledByDefault()),
+          StaticPrefs::editor_inline_table_editing_enabled_by_default()),
       mOriginalX(0),
       mOriginalY(0),
       mResizedObjectX(0),
@@ -801,7 +763,7 @@ HTMLEditor::NodeIsBlock(nsINode* aNode, bool* aIsBlock) {
   return NS_OK;
 }
 
-bool HTMLEditor::IsBlockNode(nsINode* aNode) {
+bool HTMLEditor::IsBlockNode(nsINode* aNode) const {
   return aNode && NodeIsBlockStatic(aNode);
 }
 
@@ -1186,10 +1148,10 @@ nsresult HTMLEditor::InsertBrElementAtSelectionWithTransaction() {
     return NS_ERROR_FAILURE;
   }
 
-  // InsertBrElementWithTransaction() will set selection after the new <br>
+  // InsertBRElementWithTransaction() will set selection after the new <br>
   // element.
   RefPtr<Element> newBrElement =
-      InsertBrElementWithTransaction(atStartOfSelection, eNext);
+      InsertBRElementWithTransaction(atStartOfSelection, eNext);
   if (NS_WARN_IF(!newBrElement)) {
     return NS_ERROR_FAILURE;
   }
@@ -1644,7 +1606,7 @@ nsresult HTMLEditor::InsertElementAtSelectionAsAction(
                              "Failed to advance offset from inserted point");
         // Collapse selection to the new <br> element node after creating it.
         RefPtr<Element> newBrElement =
-            InsertBrElementWithTransaction(insertedPoint, ePrevious);
+            InsertBRElementWithTransaction(insertedPoint, ePrevious);
         if (NS_WARN_IF(!newBrElement)) {
           return NS_ERROR_FAILURE;
         }
@@ -3145,17 +3107,15 @@ nsresult HTMLEditor::AddOverrideStyleSheetInternal(const nsAString& aURL) {
   // We MUST ONLY load synchronous local files (no @import)
   // XXXbz Except this will actually try to load remote files
   // synchronously, of course..
-  RefPtr<StyleSheet> sheet;
   // Editor override style sheets may want to style Gecko anonymous boxes
-  DebugOnly<nsresult> ignoredRv =
-      presShell->GetDocument()->CSSLoader()->LoadSheetSync(
-          uaURI, css::eAgentSheetFeatures, true, &sheet);
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(ignoredRv), "LoadSheetSync() failed");
-
+  auto result = presShell->GetDocument()->CSSLoader()->LoadSheetSync(
+      uaURI, css::eAgentSheetFeatures, css::Loader::UseSystemPrincipal::Yes);
   // Synchronous loads should ALWAYS return completed
-  if (NS_WARN_IF(!sheet)) {
-    return NS_ERROR_FAILURE;
+  if (NS_WARN_IF(result.isErr())) {
+    return result.unwrapErr();
   }
+
+  RefPtr<StyleSheet> sheet = result.unwrap();
 
   // Add the override style sheet
   // (This checks if already exists)
@@ -3403,7 +3363,7 @@ nsresult HTMLEditor::DeleteNodeWithTransaction(nsINode& aNode) {
   // XXX This is not a override method of EditorBase's method.  This might
   //     cause not called accidentally.  We need to investigate this issue.
   if (NS_WARN_IF(!IsModifiableNode(*aNode.AsContent()) &&
-                 !IsMozEditorBogusNode(aNode.AsContent()))) {
+                 !EditorBase::IsPaddingBRElementForEmptyEditor(aNode))) {
     return NS_ERROR_FAILURE;
   }
   nsresult rv = EditorBase::DeleteNodeWithTransaction(aNode);
@@ -3414,6 +3374,8 @@ nsresult HTMLEditor::DeleteNodeWithTransaction(nsINode& aNode) {
 }
 
 nsresult HTMLEditor::DeleteAllChildrenWithTransaction(Element& aElement) {
+  MOZ_ASSERT(IsEditActionDataAvailable());
+
   // Prevent rules testing until we're done
   AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
       *this, EditSubAction::eDeleteNode, nsIEditor::eNext);
@@ -3565,6 +3527,67 @@ nsresult HTMLEditor::InsertTextWithTransaction(
       aDocument, aStringToInsert, aPointToInsert, aPointAfterInsertedString);
 }
 
+already_AddRefed<Element> HTMLEditor::InsertBRElementWithTransaction(
+    const EditorDOMPoint& aPointToInsert, EDirection aSelect /* = eNone */) {
+  MOZ_ASSERT(IsEditActionDataAvailable());
+
+  EditorDOMPoint pointToInsert = PrepareToInsertBRElement(aPointToInsert);
+  if (NS_WARN_IF(!pointToInsert.IsSet())) {
+    return nullptr;
+  }
+
+  RefPtr<Element> newBRElement =
+      CreateNodeWithTransaction(*nsGkAtoms::br, pointToInsert);
+  if (NS_WARN_IF(!newBRElement)) {
+    return nullptr;
+  }
+
+  switch (aSelect) {
+    case eNone:
+      break;
+    case eNext: {
+      SelectionRefPtr()->SetInterlinePosition(true, IgnoreErrors());
+      // Collapse selection after the <br> node.
+      EditorRawDOMPoint afterBRElement(newBRElement);
+      if (afterBRElement.IsSet()) {
+        DebugOnly<bool> advanced = afterBRElement.AdvanceOffset();
+        NS_WARNING_ASSERTION(advanced,
+                             "Failed to advance offset after the <br> element");
+        ErrorResult error;
+        SelectionRefPtr()->Collapse(afterBRElement, error);
+        NS_WARNING_ASSERTION(
+            !error.Failed(),
+            "Failed to collapse selection after the <br> element");
+      } else {
+        NS_WARNING("The <br> node is not in the DOM tree?");
+      }
+      break;
+    }
+    case ePrevious: {
+      SelectionRefPtr()->SetInterlinePosition(true, IgnoreErrors());
+      // Collapse selection at the <br> node.
+      EditorRawDOMPoint atBRElement(newBRElement);
+      if (atBRElement.IsSet()) {
+        ErrorResult error;
+        SelectionRefPtr()->Collapse(atBRElement, error);
+        NS_WARNING_ASSERTION(
+            !error.Failed(),
+            "Failed to collapse selection at the <br> element");
+      } else {
+        NS_WARNING("The <br> node is not in the DOM tree?");
+      }
+      break;
+    }
+    default:
+      NS_WARNING(
+          "aSelect has invalid value, the caller need to set selection "
+          "by itself");
+      break;
+  }
+
+  return newBRElement.forget();
+}
+
 void HTMLEditor::ContentAppended(nsIContent* aFirstNewContent) {
   DoContentInserted(aFirstNewContent, eAppended);
 }
@@ -3616,8 +3639,8 @@ void HTMLEditor::DoContentInserted(nsIContent* aChild,
   }
   // We don't need to handle our own modifications
   else if (!GetTopLevelEditSubAction() && container->IsEditable()) {
-    if (IsMozEditorBogusNode(aChild)) {
-      // Ignore insertion of the bogus node
+    if (EditorBase::IsPaddingBRElementForEmptyEditor(*aChild)) {
+      // Ignore insertion of the padding <br> element.
       return;
     }
     RefPtr<HTMLEditRules> htmlRules = mRules->AsHTMLEditRules();
@@ -3662,8 +3685,8 @@ void HTMLEditor::ContentRemoved(nsIContent* aChild,
     // We don't need to handle our own modifications
   } else if (!GetTopLevelEditSubAction() &&
              aChild->GetParentNode()->IsEditable()) {
-    if (aChild && IsMozEditorBogusNode(aChild)) {
-      // Ignore removal of the bogus node
+    if (aChild && EditorBase::IsPaddingBRElementForEmptyEditor(*aChild)) {
+      // Ignore removal of the padding <br> element for empty editor.
       return;
     }
 
@@ -3686,7 +3709,7 @@ void HTMLEditor::OnStartToHandleTopLevelEditSubAction(
 
   MOZ_ASSERT(GetTopLevelEditSubAction() == aEditSubAction);
   MOZ_ASSERT(GetDirectionOfTopLevelEditSubAction() == aDirection);
-  DebugOnly<nsresult> rv = rules->BeforeEdit(aEditSubAction, aDirection);
+  DebugOnly<nsresult> rv = rules->BeforeEdit();
   NS_WARNING_ASSERTION(
       NS_SUCCEEDED(rv),
       "HTMLEditRules::BeforeEdit() failed to handle something");
@@ -3697,10 +3720,7 @@ void HTMLEditor::OnEndHandlingTopLevelEditSubAction() {
   RefPtr<TextEditRules> rules(mRules);
 
   // post processing
-  DebugOnly<nsresult> rv =
-      rules ? rules->AfterEdit(GetTopLevelEditSubAction(),
-                               GetDirectionOfTopLevelEditSubAction())
-            : NS_OK;
+  DebugOnly<nsresult> rv = rules ? rules->AfterEdit() : NS_OK;
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                        "HTMLEditRules::AfterEdit() failed to handle something");
   EditorBase::OnEndHandlingTopLevelEditSubAction();
@@ -3721,7 +3741,7 @@ bool HTMLEditor::TagCanContainTag(nsAtom& aParentTag, nsAtom& aChildTag) const {
   return HTMLEditUtils::CanContain(parentTagEnum, childTagEnum);
 }
 
-bool HTMLEditor::IsContainer(nsINode* aNode) {
+bool HTMLEditor::IsContainer(nsINode* aNode) const {
   MOZ_ASSERT(aNode);
 
   int32_t tagEnum;
@@ -3751,7 +3771,7 @@ nsresult HTMLEditor::SelectEntireDocument() {
   RefPtr<TextEditRules> rules(mRules);
 
   // If we're empty, don't select all children because that would select the
-  // bogus node.
+  // padding <br> element for empty editor.
   if (rules->DocumentIsEmpty()) {
     nsresult rv = SelectionRefPtr()->Collapse(rootElement, 0);
     NS_WARNING_ASSERTION(
@@ -3980,7 +4000,7 @@ nsresult HTMLEditor::RemoveBlockContainerWithTransaction(Element& aElement) {
         !sibling->IsHTMLElement(nsGkAtoms::br) && !IsBlockNode(child)) {
       // Insert br node
       RefPtr<Element> brElement =
-          InsertBrElementWithTransaction(EditorDOMPoint(&aElement, 0));
+          InsertBRElementWithTransaction(EditorDOMPoint(&aElement, 0));
       if (NS_WARN_IF(!brElement)) {
         return NS_ERROR_FAILURE;
       }
@@ -4000,7 +4020,7 @@ nsresult HTMLEditor::RemoveBlockContainerWithTransaction(Element& aElement) {
         // Insert br node
         EditorDOMPoint endOfNode;
         endOfNode.SetToEndOf(&aElement);
-        RefPtr<Element> brElement = InsertBrElementWithTransaction(endOfNode);
+        RefPtr<Element> brElement = InsertBRElementWithTransaction(endOfNode);
         if (NS_WARN_IF(!brElement)) {
           return NS_ERROR_FAILURE;
         }
@@ -4021,7 +4041,7 @@ nsresult HTMLEditor::RemoveBlockContainerWithTransaction(Element& aElement) {
           !sibling->IsHTMLElement(nsGkAtoms::br)) {
         // Insert br node
         RefPtr<Element> brElement =
-            InsertBrElementWithTransaction(EditorDOMPoint(&aElement, 0));
+            InsertBRElementWithTransaction(EditorDOMPoint(&aElement, 0));
         if (NS_WARN_IF(!brElement)) {
           return NS_ERROR_FAILURE;
         }
@@ -4124,8 +4144,8 @@ nsIContent* HTMLEditor::GetNextHTMLElementOrTextInternal(
                           : GetNextElementOrText(aPoint);
 }
 
-nsIContent* HTMLEditor::GetNextEditableHTMLNodeInternal(nsINode& aNode,
-                                                        bool aNoBlockCrossing) {
+nsIContent* HTMLEditor::GetNextEditableHTMLNodeInternal(
+    nsINode& aNode, bool aNoBlockCrossing) const {
   if (!GetActiveEditingHost()) {
     return nullptr;
   }
@@ -4135,7 +4155,7 @@ nsIContent* HTMLEditor::GetNextEditableHTMLNodeInternal(nsINode& aNode,
 
 template <typename PT, typename CT>
 nsIContent* HTMLEditor::GetNextEditableHTMLNodeInternal(
-    const EditorDOMPointBase<PT, CT>& aPoint, bool aNoBlockCrossing) {
+    const EditorDOMPointBase<PT, CT>& aPoint, bool aNoBlockCrossing) const {
   if (!GetActiveEditingHost()) {
     return nullptr;
   }
@@ -4211,7 +4231,7 @@ nsIContent* HTMLEditor::GetLastEditableLeaf(nsINode& aNode) {
   return child;
 }
 
-bool HTMLEditor::IsInVisibleTextFrames(Text& aText) {
+bool HTMLEditor::IsInVisibleTextFrames(Text& aText) const {
   nsISelectionController* selectionController = GetSelectionController();
   if (NS_WARN_IF(!selectionController)) {
     return false;
@@ -4236,7 +4256,7 @@ bool HTMLEditor::IsInVisibleTextFrames(Text& aText) {
   return isVisible;
 }
 
-bool HTMLEditor::IsVisibleTextNode(Text& aText) {
+bool HTMLEditor::IsVisibleTextNode(Text& aText) const {
   if (!aText.TextDataLength()) {
     return false;
   }
@@ -4245,12 +4265,12 @@ bool HTMLEditor::IsVisibleTextNode(Text& aText) {
     return true;
   }
 
-  WSRunObject wsRunObj(this, &aText, 0);
+  WSRunScanner wsRunScanner(this, &aText, 0);
   nsCOMPtr<nsINode> nextVisibleNode;
   WSType visibleNodeType;
-  wsRunObj.NextVisibleNode(EditorRawDOMPoint(&aText, 0),
-                           address_of(nextVisibleNode), nullptr,
-                           &visibleNodeType);
+  wsRunScanner.NextVisibleNode(EditorRawDOMPoint(&aText, 0),
+                               address_of(nextVisibleNode), nullptr,
+                               &visibleNodeType);
   return (visibleNodeType == WSType::normalWS ||
           visibleNodeType == WSType::text) &&
          &aText == nextVisibleNode;
@@ -4264,7 +4284,7 @@ bool HTMLEditor::IsVisibleTextNode(Text& aText) {
 nsresult HTMLEditor::IsEmptyNode(nsINode* aNode, bool* outIsEmptyNode,
                                  bool aSingleBRDoesntCount,
                                  bool aListOrCellNotEmpty,
-                                 bool aSafeToAskFrames) {
+                                 bool aSafeToAskFrames) const {
   NS_ENSURE_TRUE(aNode && outIsEmptyNode, NS_ERROR_NULL_POINTER);
   *outIsEmptyNode = true;
   bool seenBR = false;
@@ -4278,7 +4298,8 @@ nsresult HTMLEditor::IsEmptyNode(nsINode* aNode, bool* outIsEmptyNode,
 nsresult HTMLEditor::IsEmptyNodeImpl(nsINode* aNode, bool* outIsEmptyNode,
                                      bool aSingleBRDoesntCount,
                                      bool aListOrCellNotEmpty,
-                                     bool aSafeToAskFrames, bool* aSeenBR) {
+                                     bool aSafeToAskFrames,
+                                     bool* aSeenBR) const {
   NS_ENSURE_TRUE(aNode && outIsEmptyNode && aSeenBR, NS_ERROR_NULL_POINTER);
 
   if (Text* text = aNode->GetAsText()) {
@@ -4745,7 +4766,7 @@ nsresult HTMLEditor::CopyLastEditableChildStylesWithTransaction(
   }
 
   RefPtr<Element> brElement =
-      InsertBrElementWithTransaction(EditorDOMPoint(firstClonsedElement, 0));
+      InsertBRElementWithTransaction(EditorDOMPoint(firstClonsedElement, 0));
   if (NS_WARN_IF(!brElement)) {
     return NS_ERROR_FAILURE;
   }
@@ -5243,21 +5264,42 @@ nsHTMLDocument* HTMLEditor::GetHTMLDocument() const {
   return doc->AsHTMLDocument();
 }
 
-void HTMLEditor::OnModifyDocument() {
-  MOZ_ASSERT(mRules);
-
-  RefPtr<HTMLEditRules> htmlRules = mRules->AsHTMLEditRules();
+nsresult HTMLEditor::OnModifyDocument() {
   if (IsEditActionDataAvailable()) {
-    htmlRules->OnModifyDocument();
-    return;
+    return OnModifyDocumentInternal();
   }
 
-  AutoEditActionDataSetter editActionData(*this, EditAction::eCreateBogusNode);
+  AutoEditActionDataSetter editActionData(
+      *this, EditAction::eCreatePaddingBRElementForEmptyEditor);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
-    return;
+    return NS_ERROR_NOT_AVAILABLE;
   }
 
-  htmlRules->OnModifyDocument();
+  return OnModifyDocumentInternal();
+}
+
+nsresult HTMLEditor::OnModifyDocumentInternal() {
+  MOZ_ASSERT(IsEditActionDataAvailable());
+
+  // EnsureNoPaddingBRElementForEmptyEditor() below may cause a flush, which
+  // could destroy the editor
+  nsAutoScriptBlockerSuppressNodeRemoved scriptBlocker;
+
+  // Delete our padding <br> element for empty editor, if we have one, since
+  // the document might not be empty any more.
+  nsresult rv = EnsureNoPaddingBRElementForEmptyEditor();
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                       "Failed to remove the padding <br> element");
+  if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED)) {
+    return rv;
+  }
+
+  // Try to recreate the padding <br> element for empty editor if needed.
+  rv = MaybeCreatePaddingBRElementForEmptyEditor();
+  NS_WARNING_ASSERTION(
+      rv != NS_ERROR_EDITOR_DESTROYED,
+      "The editor has been destroyed during creating a padding <br> element");
+  return rv;
 }
 
 }  // namespace mozilla

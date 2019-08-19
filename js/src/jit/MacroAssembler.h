@@ -1307,8 +1307,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void branchIfInterpreted(Register fun, bool isConstructing,
                                   Label* label);
 
-  inline void branchFunctionKind(Condition cond, JSFunction::FunctionKind kind,
-                                 Register fun, Register scratch, Label* label);
+  inline void branchFunctionKind(Condition cond,
+                                 FunctionFlags::FunctionKind kind, Register fun,
+                                 Register scratch, Label* label);
 
   void branchIfNotInterpretedConstructor(Register fun, Register scratch,
                                          Label* label);
@@ -1322,11 +1323,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // register but the caller may pass a different register.
 
   inline void branchTestObjClass(Condition cond, Register obj,
-                                 const js::Class* clasp, Register scratch,
+                                 const JSClass* clasp, Register scratch,
                                  Register spectreRegToZero, Label* label);
   inline void branchTestObjClassNoSpectreMitigations(Condition cond,
                                                      Register obj,
-                                                     const js::Class* clasp,
+                                                     const JSClass* clasp,
                                                      Register scratch,
                                                      Label* label);
 

@@ -6,57 +6,96 @@
 
 #include "debugger/Script-inl.h"
 
-#include "debugger/Debugger.h"
-#include "debugger/DebugScript.h"
-#include "wasm/WasmInstance.h"
+#include "mozilla/Maybe.h"   // for Some, Maybe
+#include "mozilla/Span.h"    // for Span
+#include "mozilla/Vector.h"  // for Vector
 
-#include "vm/BytecodeUtil-inl.h"
-#include "vm/JSObject-inl.h"
-#include "vm/JSScript-inl.h"
+#include <stddef.h>  // for ptrdiff_t
+#include <stdint.h>  // for uint32_t, SIZE_MAX, int32_t
+
+#include "jsapi.h"             // for CallArgs, Rooted, CallArgsFromVp
+#include "jsfriendapi.h"       // for GetErrorMessage
+#include "jsnum.h"             // for ToNumber
+#include "NamespaceImports.h"  // for CallArgs, RootedValue
+
+#include "builtin/Array.h"         // for NewDenseEmptyArray
+#include "debugger/Debugger.h"     // for DebuggerScriptReferent, Debugger
+#include "debugger/DebugScript.h"  // for DebugScript
+#include "debugger/Source.h"       // for DebuggerSource
+#include "gc/Barrier.h"            // for ImmutablePropertyNamePtr
+#include "gc/GC.h"                 // for MemoryUse, MemoryUse::Breakpoint
+#include "gc/Rooting.h"            // for RootedDebuggerScript
+#include "gc/Tracer.h"         // for TraceManuallyBarrieredCrossCompartmentEdge
+#include "gc/Zone.h"           // for Zone
+#include "gc/ZoneAllocator.h"  // for AddCellMemory
+#include "js/HeapAPI.h"        // for GCCellPtr
+#include "js/Wrapper.h"        // for UncheckedUnwrap
+#include "vm/ArrayObject.h"    // for ArrayObject
+#include "vm/BytecodeUtil.h"   // for GET_JUMP_OFFSET
+#include "vm/GlobalObject.h"   // for GlobalObject
+#include "vm/JSContext.h"      // for JSContext, ReportValueError
+#include "vm/JSFunction.h"     // for JSFunction
+#include "vm/JSObject.h"       // for RequireObject, JSObject
+#include "vm/ObjectGroup.h"    // for TenuredObject
+#include "vm/ObjectOperations.h"  // for DefineDataProperty, HasOwnProperty
+#include "vm/Realm.h"             // for AutoRealm
+#include "vm/Runtime.h"           // for JSAtomState, JSRuntime
+#include "vm/StringType.h"        // for NameToId, PropertyName, JSAtom
+#include "wasm/WasmDebug.h"       // for ExprLoc, DebugState
+#include "wasm/WasmInstance.h"    // for Instance
+#include "wasm/WasmTypes.h"       // for Bytes
+
+#include "vm/BytecodeUtil-inl.h"      // for BytecodeRangeWithPosition
+#include "vm/JSAtom-inl.h"            // for ValueToId
+#include "vm/JSObject-inl.h"          // for NewBuiltinClassInstance
+#include "vm/JSScript-inl.h"          // for LazyScript::functionDelazifying
+#include "vm/ObjectOperations-inl.h"  // for GetProperty
+#include "vm/Realm-inl.h"             // for AutoRealm::AutoRealm
 
 using namespace js;
 
 using mozilla::Maybe;
 using mozilla::Some;
 
-const ClassOps DebuggerScript::classOps_ = {nullptr, /* addProperty */
-                                            nullptr, /* delProperty */
-                                            nullptr, /* enumerate   */
-                                            nullptr, /* newEnumerate */
-                                            nullptr, /* resolve     */
-                                            nullptr, /* mayResolve  */
-                                            nullptr, /* finalize    */
-                                            nullptr, /* call        */
-                                            nullptr, /* hasInstance */
-                                            nullptr, /* construct   */
-                                            trace};
+const JSClassOps DebuggerScript::classOps_ = {
+    nullptr,                         /* addProperty */
+    nullptr,                         /* delProperty */
+    nullptr,                         /* enumerate   */
+    nullptr,                         /* newEnumerate */
+    nullptr,                         /* resolve     */
+    nullptr,                         /* mayResolve  */
+    nullptr,                         /* finalize    */
+    nullptr,                         /* call        */
+    nullptr,                         /* hasInstance */
+    nullptr,                         /* construct   */
+    CallTraceMethod<DebuggerScript>, /* trace */
+};
 
-const Class DebuggerScript::class_ = {
+const JSClass DebuggerScript::class_ = {
     "Script", JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS),
     &classOps_};
 
-/* static */
-void DebuggerScript::trace(JSTracer* trc, JSObject* obj) {
-  DebuggerScript* self = &obj->as<DebuggerScript>();
+void DebuggerScript::trace(JSTracer* trc) {
+  JSObject* upcast = this;
   // This comes from a private pointer, so no barrier needed.
-  gc::Cell* cell = self->getReferentCell();
+  gc::Cell* cell = getReferentCell();
   if (cell) {
     if (cell->is<JSScript>()) {
       JSScript* script = cell->as<JSScript>();
       TraceManuallyBarrieredCrossCompartmentEdge(
-          trc, self, &script, "Debugger.Script script referent");
-      self->setPrivateUnbarriered(script);
+          trc, upcast, &script, "Debugger.Script script referent");
+      setPrivateUnbarriered(script);
     } else if (cell->is<LazyScript>()) {
       LazyScript* lazyScript = cell->as<LazyScript>();
       TraceManuallyBarrieredCrossCompartmentEdge(
-          trc, self, &lazyScript, "Debugger.Script lazy script referent");
-      self->setPrivateUnbarriered(lazyScript);
+          trc, upcast, &lazyScript, "Debugger.Script lazy script referent");
+      setPrivateUnbarriered(lazyScript);
     } else {
       JSObject* wasm = cell->as<JSObject>();
       TraceManuallyBarrieredCrossCompartmentEdge(
-          trc, self, &wasm, "Debugger.Script wasm referent");
+          trc, upcast, &wasm, "Debugger.Script wasm referent");
       MOZ_ASSERT(wasm->is<WasmInstanceObject>());
-      self->setPrivateUnbarriered(wasm);
+      setPrivateUnbarriered(wasm);
     }
   }
 }
@@ -217,6 +256,7 @@ Result CallScriptMethod(HandleDebuggerScript obj,
     return (script->*ifJSScript)();
   }
 
+  MOZ_ASSERT(obj->getReferent().is<LazyScript*>());
   LazyScript* lazyScript = obj->getReferent().as<LazyScript*>();
   return (lazyScript->*ifLazyScript)();
 }
@@ -226,8 +266,7 @@ bool DebuggerScript::getIsGeneratorFunction(JSContext* cx, unsigned argc,
                                             Value* vp) {
   THIS_DEBUGSCRIPT_SCRIPT_MAYBE_LAZY(cx, argc, vp, "(get isGeneratorFunction)",
                                      args, obj);
-  args.rval().setBoolean(
-      CallScriptMethod(obj, &JSScript::isGenerator, &LazyScript::isGenerator));
+  args.rval().setBoolean(obj->getReferentScript()->isGenerator());
   return true;
 }
 
@@ -236,8 +275,7 @@ bool DebuggerScript::getIsAsyncFunction(JSContext* cx, unsigned argc,
                                         Value* vp) {
   THIS_DEBUGSCRIPT_SCRIPT_MAYBE_LAZY(cx, argc, vp, "(get isAsyncFunction)",
                                      args, obj);
-  args.rval().setBoolean(
-      CallScriptMethod(obj, &JSScript::isAsync, &LazyScript::isAsync));
+  args.rval().setBoolean(obj->getReferentScript()->isAsync());
   return true;
 }
 
@@ -325,6 +363,25 @@ bool DebuggerScript::getStartLine(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+struct DebuggerScript::GetStartColumnMatcher {
+  using ReturnType = uint32_t;
+
+  ReturnType match(HandleScript script) { return script->column(); }
+  ReturnType match(Handle<LazyScript*> lazyScript) {
+    return lazyScript->column();
+  }
+  ReturnType match(Handle<WasmInstanceObject*> wasmInstance) { return 0; }
+};
+
+/* static */
+bool DebuggerScript::getStartColumn(JSContext* cx, unsigned argc, Value* vp) {
+  THIS_DEBUGSCRIPT_REFERENT(cx, argc, vp, "(get startColumn)", args, obj,
+                            referent);
+  GetStartColumnMatcher matcher;
+  args.rval().setNumber(referent.match(matcher));
+  return true;
+}
+
 struct DebuggerScript::GetLineCountMatcher {
   JSContext* cx_;
   double totalLines;
@@ -373,7 +430,7 @@ class DebuggerScript::GetSourceMatcher {
  public:
   GetSourceMatcher(JSContext* cx, Debugger* dbg) : cx_(cx), dbg_(dbg) {}
 
-  using ReturnType = JSObject*;
+  using ReturnType = DebuggerSource*;
 
   ReturnType match(HandleScript script) {
     // JSScript holds the refefence to possibly wrapped ScriptSourceObject.
@@ -400,7 +457,7 @@ bool DebuggerScript::getSource(JSContext* cx, unsigned argc, Value* vp) {
   Debugger* dbg = Debugger::fromChildJSObject(obj);
 
   GetSourceMatcher matcher(cx, dbg);
-  RootedObject sourceObject(cx, referent.match(matcher));
+  RootedDebuggerSource sourceObject(cx, referent.match(matcher));
   if (!sourceObject) {
     return false;
   }
@@ -825,7 +882,7 @@ class DebuggerScript::GetPossibleBreakpointsMatcher {
 
     Vector<wasm::ExprLoc> offsets(cx_);
     if (instance.debugEnabled() &&
-        !instance.debug().getAllColumnOffsets(cx_, &offsets)) {
+        !instance.debug().getAllColumnOffsets(&offsets)) {
       return false;
     }
 
@@ -1574,7 +1631,7 @@ class DebuggerScript::GetAllColumnOffsetsMatcher {
 
     Vector<wasm::ExprLoc> offsets(cx_);
     if (instance.debugEnabled() &&
-        !instance.debug().getAllColumnOffsets(cx_, &offsets)) {
+        !instance.debug().getAllColumnOffsets(&offsets)) {
       return false;
     }
 
@@ -1665,7 +1722,7 @@ class DebuggerScript::GetLineOffsetsMatcher {
 
     Vector<uint32_t> offsets(cx_);
     if (instance.debugEnabled() &&
-        !instance.debug().getLineOffsets(cx_, lineno_, &offsets)) {
+        !instance.debug().getLineOffsets(lineno_, &offsets)) {
       return false;
     }
 
@@ -2119,6 +2176,7 @@ const JSPropertySpec DebuggerScript::properties_[] = {
     JS_PSG("displayName", getDisplayName, 0),
     JS_PSG("url", getUrl, 0),
     JS_PSG("startLine", getStartLine, 0),
+    JS_PSG("startColumn", getStartColumn, 0),
     JS_PSG("lineCount", getLineCount, 0),
     JS_PSG("source", getSource, 0),
     JS_PSG("sourceStart", getSourceStart, 0),

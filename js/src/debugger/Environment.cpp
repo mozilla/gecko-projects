@@ -6,15 +6,43 @@
 
 #include "debugger/Environment-inl.h"
 
-#include "mozilla/Assertions.h"
+#include "mozilla/Assertions.h"  // for AssertionConditionType
+#include "mozilla/Maybe.h"       // for Maybe, Some, Nothing
+#include "mozilla/Vector.h"      // for Vector
 
-#include "debugger/Debugger.h"
-#include "debugger/Object.h"
-#include "frontend/BytecodeCompiler.h"
-#include "vm/Realm.h"
+#include <string.h>  // for strlen, size_t
+#include <utility>   // for move
 
-#include "vm/Compartment-inl.h"
-#include "vm/EnvironmentObject-inl.h"
+#include "jsapi.h"        // for Rooted, CallArgs, MutableHandle
+#include "jsfriendapi.h"  // for GetErrorMessage, GetPropertyKeys
+
+#include "debugger/Debugger.h"          // for Env, Debugger, ValueToIdentifier
+#include "debugger/Object.h"            // for DebuggerObject
+#include "frontend/BytecodeCompiler.h"  // for IsIdentifier
+#include "gc/Rooting.h"                 // for RootedDebuggerEnvironment
+#include "gc/Tracer.h"       // for TraceManuallyBarrieredCrossCompartmentEdge
+#include "js/HeapAPI.h"      // for IsInsideNursery
+#include "vm/Compartment.h"  // for Compartment
+#include "vm/EnvironmentObject.h"  // for JSObject::is, DebugEnvironmentProxy
+#include "vm/JSAtom.h"             // for Atomize, PinAtom
+#include "vm/JSContext.h"          // for JSContext
+#include "vm/JSFunction.h"         // for JSFunction
+#include "vm/JSObject.h"           // for JSObject, RequireObject
+#include "vm/NativeObject.h"       // for NativeObject, JSObject::is
+#include "vm/ObjectGroup.h"        // for GenericObject, NewObjectKind
+#include "vm/Realm.h"              // for AutoRealm, ErrorCopier
+#include "vm/Scope.h"              // for ScopeKind, ScopeKindString
+#include "vm/StringType.h"         // for JSAtom
+
+#include "vm/Compartment-inl.h"        // for Compartment::wrap
+#include "vm/EnvironmentObject-inl.h"  // for JSObject::enclosingEnvironment
+#include "vm/JSObject-inl.h"           // for IsInternalFunctionObject
+#include "vm/ObjectOperations-inl.h"   // for HasProperty, GetProperty
+#include "vm/Realm-inl.h"              // for AutoRealm::AutoRealm
+
+namespace js {
+class GlobalObject;
+}
 
 using namespace js;
 
@@ -23,31 +51,34 @@ using mozilla::Maybe;
 using mozilla::Nothing;
 using mozilla::Some;
 
-const ClassOps DebuggerEnvironment::classOps_ = {nullptr, /* addProperty */
-                                                 nullptr, /* delProperty */
-                                                 nullptr, /* enumerate   */
-                                                 nullptr, /* newEnumerate */
-                                                 nullptr, /* resolve     */
-                                                 nullptr, /* mayResolve  */
-                                                 nullptr, /* finalize    */
-                                                 nullptr, /* call        */
-                                                 nullptr, /* hasInstance */
-                                                 nullptr, /* construct   */
-                                                 trace};
+const JSClassOps DebuggerEnvironment::classOps_ = {
+    nullptr,                              /* addProperty */
+    nullptr,                              /* delProperty */
+    nullptr,                              /* enumerate   */
+    nullptr,                              /* newEnumerate */
+    nullptr,                              /* resolve     */
+    nullptr,                              /* mayResolve  */
+    nullptr,                              /* finalize    */
+    nullptr,                              /* call        */
+    nullptr,                              /* hasInstance */
+    nullptr,                              /* construct   */
+    CallTraceMethod<DebuggerEnvironment>, /* trace */
+};
 
-const Class DebuggerEnvironment::class_ = {
+const JSClass DebuggerEnvironment::class_ = {
     "Environment",
     JSCLASS_HAS_PRIVATE |
         JSCLASS_HAS_RESERVED_SLOTS(DebuggerEnvironment::RESERVED_SLOTS),
     &classOps_};
 
-void DebuggerEnvironment::trace(JSTracer* trc, JSObject* obj) {
+void DebuggerEnvironment::trace(JSTracer* trc) {
   // There is a barrier on private pointers, so the Unbarriered marking
   // is okay.
-  if (Env* referent = (JSObject*)obj->as<NativeObject>().getPrivate()) {
-    TraceManuallyBarrieredCrossCompartmentEdge(trc, obj, &referent,
-                                               "Debugger.Environment referent");
-    obj->as<NativeObject>().setPrivateUnbarriered(referent);
+  if (Env* referent = (JSObject*)getPrivate()) {
+    TraceManuallyBarrieredCrossCompartmentEdge(
+        trc, static_cast<JSObject*>(this), &referent,
+        "Debugger.Environment referent");
+    setPrivateUnbarriered(referent);
   }
 }
 

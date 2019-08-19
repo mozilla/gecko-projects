@@ -754,16 +754,16 @@ HTMLTooltip.prototype = {
    */
   async hide({ fromMouseup = false } = {}) {
     // Exit if the disable autohide setting is in effect.
-    if (Services.prefs.getBoolPref("ui.popup.disable_autohide", false)) {
+    if (Services.prefs.getBoolPref("devtools.popup.disable_autohide", false)) {
       return;
     }
 
-    this.doc.defaultView.clearTimeout(this.attachEventsTimer);
     if (!this.isVisible()) {
       this.emit("hidden");
       return;
     }
 
+    this.doc.defaultView.clearTimeout(this.attachEventsTimer);
     // If the tooltip is hidden from a mouseup event, wait for a potential click event
     // to be consumed before removing event listeners.
     if (fromMouseup) {
@@ -829,14 +829,19 @@ HTMLTooltip.prototype = {
       container.classList.add(...this.className.split(" "));
     }
 
-    let html = '<div class="tooltip-filler"></div>';
-    html += '<div class="tooltip-panel"></div>';
+    const filler = this.doc.createElementNS(XHTML_NS, "div");
+    filler.classList.add("tooltip-filler");
+    container.appendChild(filler);
+
+    const panel = this.doc.createElementNS(XHTML_NS, "div");
+    panel.classList.add("tooltip-panel");
+    container.appendChild(panel);
 
     if (this.type === TYPE.ARROW || this.type === TYPE.DOORHANGER) {
-      html += '<div class="tooltip-arrow"></div>';
+      const arrow = this.doc.createElementNS(XHTML_NS, "div");
+      arrow.classList.add("tooltip-arrow");
+      container.appendChild(arrow);
     }
-    // eslint-disable-next-line no-unsanitized/property
-    container.innerHTML = html;
     return container;
   },
 

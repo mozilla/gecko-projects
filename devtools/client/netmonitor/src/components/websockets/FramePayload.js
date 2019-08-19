@@ -11,6 +11,7 @@ const {
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const { div } = dom;
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+const Services = require("Services");
 const { L10N } = require("devtools/client/netmonitor/src/utils/l10n.js");
 const {
   getFramePayload,
@@ -19,6 +20,11 @@ const {
 const {
   getFormattedSize,
 } = require("devtools/client/netmonitor/src/utils/format-utils.js");
+const MESSAGE_DATA_LIMIT = Services.prefs.getIntPref(
+  "devtools.netmonitor.ws.messageDataLimit"
+);
+const MESSAGE_DATA_TRUNCATED = L10N.getStr("messageDataTruncated");
+const SocketIODecoder = require("devtools/client/netmonitor/src/components/websockets/parsers/socket-io/index.js");
 
 // Components
 const Accordion = createFactory(
@@ -50,42 +56,97 @@ class FramePayload extends Component {
       payload: "",
       isFormattedData: false,
       formattedData: {},
+      formattedDataTitle: "",
     };
   }
 
   componentDidMount() {
+    this.updateFramePayload();
+  }
+
+  componentDidUpdate(prevProps) {
+    if (this.props.selectedFrame !== prevProps.selectedFrame) {
+      this.updateFramePayload();
+    }
+  }
+
+  updateFramePayload() {
     const { selectedFrame, connector } = this.props;
+
     getFramePayload(selectedFrame.payload, connector.getLongString).then(
       payload => {
-        const { json } = isJSON(payload);
+        const { formattedData, formattedDataTitle } = this.parsePayload(
+          payload
+        );
         this.setState({
           payload,
-          isFormattedData: !!json,
-          formattedData: json,
+          isFormattedData: !!formattedData,
+          formattedData,
+          formattedDataTitle,
         });
       }
     );
   }
 
-  componentWillReceiveProps(nextProps) {
-    const { selectedFrame, connector } = nextProps;
-    getFramePayload(selectedFrame.payload, connector.getLongString).then(
-      payload => {
-        const { json } = isJSON(payload);
-        this.setState({
-          payload,
-          isFormattedData: !!json,
-          formattedData: json,
-        });
-      }
-    );
+  parsePayload(payload) {
+    // socket.io payload
+    const socketIOPayload = this.parseSocketIOPayload(payload);
+    if (socketIOPayload) {
+      return {
+        formattedData: socketIOPayload,
+        formattedDataTitle: "Socket.IO",
+      };
+    }
+    // json payload
+    const { json } = isJSON(payload);
+    if (json) {
+      return {
+        formattedData: json,
+        formattedDataTitle: "JSON",
+      };
+    }
+    return {
+      formattedData: null,
+      formattedDataTitle: "",
+    };
+  }
+
+  parseSocketIOPayload(payload) {
+    let result;
+    // Try decoding socket.io frames
+    try {
+      const decoder = new SocketIODecoder();
+      decoder.on("decoded", decodedPacket => {
+        if (
+          decodedPacket &&
+          !decodedPacket.data.includes("parser error") &&
+          decodedPacket.type
+        ) {
+          result = decodedPacket;
+        }
+      });
+      decoder.add(payload);
+      return result;
+    } catch (err) {
+      // Ignore errors
+    }
+    return null;
   }
 
   render() {
+    let payload = this.state.payload;
+    let isTruncated = false;
+    if (this.state.payload.length >= MESSAGE_DATA_LIMIT) {
+      payload = payload.substring(0, MESSAGE_DATA_LIMIT);
+      isTruncated = true;
+    }
+
     const items = [
       {
         className: "rawData",
-        component: RawData({ payload: this.state.payload }),
+        component: RawData({
+          payload,
+        }),
         header: L10N.getFormatStrWithNumbers(
           "netmonitor.ws.rawData.header",
           getFormattedSize(this.state.payload.length)
@@ -94,7 +155,7 @@ class FramePayload extends Component {
         opened: true,
       },
     ];
-    if (this.state.isFormattedData) {
+    if (!isTruncated && this.state.isFormattedData) {
       items.push({
         className: "formattedData",
         component: JSONPreview({
@@ -106,7 +167,9 @@ class FramePayload extends Component {
             },
           ],
         }),
-        header: `JSON (${getFormattedSize(this.state.payload.length)})`,
+        header: `${this.state.formattedDataTitle} (${getFormattedSize(
+          this.state.payload.length
+        )})`,
         labelledby: "ws-frame-formattedData-header",
         opened: true,
       });
@@ -116,6 +179,13 @@ class FramePayload extends Component {
       {
         className: "ws-frame-payload",
       },
+      isTruncated &&
+        div(
+          {
+            className: "truncated-data-message",
+          },
+          MESSAGE_DATA_TRUNCATED
+        ),
       Accordion({
         items,
       })

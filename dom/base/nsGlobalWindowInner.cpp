@@ -110,6 +110,7 @@
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/StaticPrefs_page_load.h"
 #include "PaintWorkletImpl.h"
 
 // Interfaces Needed
@@ -838,8 +839,9 @@ class PromiseDocumentFlushedResolver final {
 //***    nsGlobalWindowInner: Object Management
 //*****************************************************************************
 
-nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow)
-    : nsPIDOMWindowInner(aOuterWindow),
+nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow,
+                                         WindowGlobalChild* aActor)
+    : nsPIDOMWindowInner(aOuterWindow, aActor),
       mozilla::webgpu::InstanceProvider(this),
       mWasOffline(false),
       mHasHadSlowScript(false),
@@ -905,16 +907,6 @@ nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow)
     if (docShell) {
       mBrowserChild = docShell->GetBrowserChild();
     }
-  }
-
-  // We could have failed the first time through trying
-  // to create the entropy collector, so we should
-  // try to get one until we succeed.
-
-  static bool sFirstTime = true;
-  if (sFirstTime) {
-    sFirstTime = false;
-    TimeoutManager::Initialize();
   }
 
   if (gDumpFile == nullptr) {
@@ -1615,9 +1607,7 @@ void nsGlobalWindowInner::InnerSetNewDocument(JSContext* aCx,
   // FIXME: Currently, devtools can crete a fallback webextension window global
   // in the content process which does not have a corresponding BrowserChild
   // actor. This means we have no actor to be our parent. (Bug 1498293)
-  MOZ_DIAGNOSTIC_ASSERT(!mWindowGlobalChild,
-                        "Shouldn't have created WindowGlobalChild yet!");
-  if (XRE_IsParentProcess() || mBrowserChild) {
+  if (!mWindowGlobalChild && (XRE_IsParentProcess() || mBrowserChild)) {
     mWindowGlobalChild = WindowGlobalChild::Create(this);
   }
 
@@ -1663,18 +1653,13 @@ nsresult nsGlobalWindowInner::EnsureClientSource() {
 
     // Note, this is mostly copied from NS_IsAboutBlank().  Its duplicated
     // here so we can efficiently check about:srcdoc as well.
-    bool isAbout = false;
-    if (NS_SUCCEEDED(uri->SchemeIs("about", &isAbout)) && isAbout) {
+    if (uri->SchemeIs("about")) {
       nsCString spec = uri->GetSpecOrDefault();
       ignoreLoadInfo = spec.EqualsLiteral("about:blank") ||
                        spec.EqualsLiteral("about:srcdoc");
     } else {
       // Its not an about: URL, so now check for our other URL types.
-      bool isData = false;
-      bool isBlob = false;
-      ignoreLoadInfo =
-          (NS_SUCCEEDED(uri->SchemeIs("data", &isData)) && isData) ||
-          (NS_SUCCEEDED(uri->SchemeIs("blob", &isBlob)) && isBlob);
+      ignoreLoadInfo = uri->SchemeIs("data") || uri->SchemeIs("blob");
     }
 
     if (!ignoreLoadInfo) {
@@ -2293,23 +2278,18 @@ bool nsGlobalWindowInner::ShouldReportForServiceWorkerScope(
   return result;
 }
 
-already_AddRefed<InstallTriggerImpl> nsGlobalWindowInner::GetInstallTrigger() {
+InstallTriggerImpl* nsGlobalWindowInner::GetInstallTrigger() {
   if (!mInstallTrigger) {
-    JS::Rooted<JSObject*> jsImplObj(RootingCx());
     ErrorResult rv;
-    ConstructJSImplementation("@mozilla.org/addons/installtrigger;1", this,
-                              &jsImplObj, rv);
+    mInstallTrigger = ConstructJSImplementation<InstallTriggerImpl>(
+        "@mozilla.org/addons/installtrigger;1", this, rv);
     if (rv.Failed()) {
       rv.SuppressException();
       return nullptr;
     }
-    MOZ_RELEASE_ASSERT(!js::IsWrapper(jsImplObj));
-    JS::Rooted<JSObject*> jsImplGlobal(RootingCx(),
-                                       JS::GetNonCCWObjectGlobal(jsImplObj));
-    mInstallTrigger = new InstallTriggerImpl(jsImplObj, jsImplGlobal, this);
   }
 
-  return do_AddRef(mInstallTrigger);
+  return mInstallTrigger;
 }
 
 nsIDOMWindowUtils* nsGlobalWindowInner::GetWindowUtils(ErrorResult& aRv) {
@@ -2595,8 +2575,9 @@ void nsGlobalWindowInner::AddDeprioritizedLoadRunner(nsIRunnable* aRunner) {
   MOZ_ASSERT(GetWindowForDeprioritizedLoadRunner() == this);
   RefPtr<DeprioritizedLoadRunner> runner = new DeprioritizedLoadRunner(aRunner);
   mDeprioritizedLoadRunner.insertBack(runner);
-  NS_DispatchToCurrentThreadQueue(runner.forget(), 5000,
-                                  EventQueuePriority::Idle);
+  NS_DispatchToCurrentThreadQueue(
+      runner.forget(), StaticPrefs::page_load_deprioritization_period(),
+      EventQueuePriority::Idle);
 }
 
 // nsISpeechSynthesisGetter
@@ -3520,17 +3501,6 @@ void nsGlobalWindowInner::Blur(ErrorResult& aError) {
 
 void nsGlobalWindowInner::Stop(ErrorResult& aError) {
   FORWARD_TO_OUTER_OR_THROW(StopOuter, (aError), aError, );
-}
-
-/* static */
-bool nsGlobalWindowInner::IsWindowPrintEnabled(JSContext*, JSObject*) {
-  static bool called = false;
-  static bool printDisabled = false;
-  if (!called) {
-    called = true;
-    Preferences::AddBoolVarCache(&printDisabled, "dom.disable_window_print");
-  }
-  return !printDisabled;
 }
 
 void nsGlobalWindowInner::Print(ErrorResult& aError) {
@@ -5636,8 +5606,7 @@ nsIPrincipal* nsGlobalWindowInner::GetTopLevelPrincipal() {
 }
 
 nsIPrincipal* nsGlobalWindowInner::GetTopLevelStorageAreaPrincipal() {
-  if (mDoc && (mDoc->StorageAccessSandboxed() ||
-               nsContentUtils::IsInPrivateBrowsing(mDoc))) {
+  if (mDoc && (mDoc->StorageAccessSandboxed())) {
     // Storage access is disabled
     return nullptr;
   }
@@ -5883,7 +5852,7 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
   timeout->mRunning = true;
 
   // Push this timeout's popup control state, which should only be
-  // eabled the first time a timeout fires that was created while
+  // enabled the first time a timeout fires that was created while
   // popups were enabled and with a delay less than
   // "dom.disable_open_click_delay".
   AutoPopupStatePusher popupStatePusher(timeout->mPopupState);
@@ -6775,22 +6744,17 @@ bool nsGlobalWindowInner::IsSecureContext() const {
   return JS::GetIsSecureContext(realm);
 }
 
-already_AddRefed<External> nsGlobalWindowInner::GetExternal(ErrorResult& aRv) {
+External* nsGlobalWindowInner::GetExternal(ErrorResult& aRv) {
 #ifdef HAVE_SIDEBAR
   if (!mExternal) {
-    JS::Rooted<JSObject*> jsImplObj(RootingCx());
-    ConstructJSImplementation("@mozilla.org/sidebar;1", this, &jsImplObj, aRv);
+    mExternal = ConstructJSImplementation<External>("@mozilla.org/sidebar;1",
+                                                    this, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }
-    MOZ_RELEASE_ASSERT(!js::IsWrapper(jsImplObj));
-    JS::Rooted<JSObject*> jsImplGlobal(RootingCx(),
-                                       JS::GetNonCCWObjectGlobal(jsImplObj));
-    mExternal = new External(jsImplObj, jsImplGlobal, this);
   }
 
-  RefPtr<External> external = static_cast<External*>(mExternal.get());
-  return external.forget();
+  return static_cast<External*>(mExternal.get());
 #else
   aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
   return nullptr;
@@ -7142,11 +7106,17 @@ mozilla::dom::TabGroup* nsPIDOMWindowInner::TabGroup() {
 
 /* static */
 already_AddRefed<nsGlobalWindowInner> nsGlobalWindowInner::Create(
-    nsGlobalWindowOuter* aOuterWindow, bool aIsChrome) {
-  RefPtr<nsGlobalWindowInner> window = new nsGlobalWindowInner(aOuterWindow);
+    nsGlobalWindowOuter* aOuterWindow, bool aIsChrome,
+    WindowGlobalChild* aActor) {
+  RefPtr<nsGlobalWindowInner> window =
+      new nsGlobalWindowInner(aOuterWindow, aActor);
   if (aIsChrome) {
     window->mIsChrome = true;
     window->mCleanMessageManager = true;
+  }
+
+  if (aActor) {
+    aActor->InitWindowGlobal(window);
   }
 
   window->InitWasOffline();
@@ -7201,14 +7171,8 @@ bool nsPIDOMWindowInner::HasStorageAccessGranted(
   return mStorageAccessGranted.Contains(aPermissionKey);
 }
 
-// XXX: Can we define this in a header instead of here?
-namespace mozilla {
-namespace dom {
-extern uint64_t NextWindowID();
-}  // namespace dom
-}  // namespace mozilla
-
-nsPIDOMWindowInner::nsPIDOMWindowInner(nsPIDOMWindowOuter* aOuterWindow)
+nsPIDOMWindowInner::nsPIDOMWindowInner(nsPIDOMWindowOuter* aOuterWindow,
+                                       WindowGlobalChild* aActor)
     : mMutationBits(0),
       mActivePeerConnections(0),
       mIsDocumentLoaded(false),
@@ -7220,16 +7184,24 @@ nsPIDOMWindowInner::nsPIDOMWindowInner(nsPIDOMWindowOuter* aOuterWindow)
       mMayHavePointerEnterLeaveEventListener(false),
       mMayHaveTextEventListenerInDefaultGroup(false),
       mOuterWindow(aOuterWindow),
-      // Make sure no actual window ends up with mWindowID == 0
-      mWindowID(NextWindowID()),
+      mWindowID(0),
       mHasNotifiedGlobalCreated(false),
       mMarkedCCGeneration(0),
       mHasTriedToCacheTopInnerWindow(false),
       mNumOfIndexedDBDatabases(0),
       mNumOfOpenWebSockets(0),
-      mEvent(nullptr) {
+      mEvent(nullptr),
+      mWindowGlobalChild(aActor) {
   MOZ_ASSERT(aOuterWindow);
   mBrowsingContext = aOuterWindow->GetBrowsingContext();
+
+  if (mWindowGlobalChild) {
+    mWindowID = aActor->InnerWindowId();
+
+    MOZ_ASSERT(mWindowGlobalChild->BrowsingContext() == mBrowsingContext);
+  } else {
+    mWindowID = nsContentUtils::GenerateWindowId();
+  }
 }
 
 void nsPIDOMWindowInner::RegisterReportingObserver(ReportingObserver* aObserver,

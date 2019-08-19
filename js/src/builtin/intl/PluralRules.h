@@ -20,11 +20,9 @@ struct UPluralRules;
 
 namespace js {
 
-class FreeOp;
-
 class PluralRulesObject : public NativeObject {
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   static constexpr uint32_t INTERNALS_SLOT = 0;
   static constexpr uint32_t UPLURAL_RULES_SLOT = 1;
@@ -73,9 +71,9 @@ class PluralRulesObject : public NativeObject {
   }
 
  private:
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
-  static void finalize(FreeOp* fop, JSObject* obj);
+  static void finalize(JSFreeOp* fop, JSObject* obj);
 };
 
 extern JSObject* CreatePluralRulesPrototype(JSContext* cx,

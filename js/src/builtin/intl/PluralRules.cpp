@@ -11,6 +11,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
 
+#include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
 #include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/NumberFormat.h"
@@ -33,15 +34,15 @@ using js::intl::CallICU;
 using js::intl::GetAvailableLocales;
 using js::intl::IcuLocale;
 
-const ClassOps PluralRulesObject::classOps_ = {nullptr, /* addProperty */
-                                               nullptr, /* delProperty */
-                                               nullptr, /* enumerate */
-                                               nullptr, /* newEnumerate */
-                                               nullptr, /* resolve */
-                                               nullptr, /* mayResolve */
-                                               PluralRulesObject::finalize};
+const JSClassOps PluralRulesObject::classOps_ = {nullptr, /* addProperty */
+                                                 nullptr, /* delProperty */
+                                                 nullptr, /* enumerate */
+                                                 nullptr, /* newEnumerate */
+                                                 nullptr, /* resolve */
+                                                 nullptr, /* mayResolve */
+                                                 PluralRulesObject::finalize};
 
-const Class PluralRulesObject::class_ = {
+const JSClass PluralRulesObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(PluralRulesObject::SLOT_COUNT) |
         JSCLASS_FOREGROUND_FINALIZE,
@@ -114,7 +115,7 @@ static bool PluralRules(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-void js::PluralRulesObject::finalize(FreeOp* fop, JSObject* obj) {
+void js::PluralRulesObject::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
 
   auto* pluralRules = &obj->as<PluralRulesObject>();
@@ -173,15 +174,10 @@ bool js::intl_PluralRules_availableLocales(JSContext* cx, unsigned argc,
   CallArgs args = CallArgsFromVp(argc, vp);
   MOZ_ASSERT(args.length() == 0);
 
-  RootedValue result(cx);
   // We're going to use ULocale availableLocales as per ICU recommendation:
   // https://ssl.icu-project.org/trac/ticket/12756
-  if (!GetAvailableLocales(cx, uloc_countAvailable, uloc_getAvailable,
-                           &result)) {
-    return false;
-  }
-  args.rval().set(result);
-  return true;
+  return GetAvailableLocales(cx, uloc_countAvailable, uloc_getAvailable,
+                             args.rval());
 }
 
 /**
@@ -417,9 +413,6 @@ bool js::intl_GetPluralCategories(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  RootedValue element(cx);
-  uint32_t i = 0;
-
   do {
     int32_t catSize;
     const char* cat = uenum_next(ue, &catSize, &status);
@@ -438,8 +431,7 @@ bool js::intl_GetPluralCategories(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
 
-    element.setString(str);
-    if (!DefineDataElement(cx, res, i++, element)) {
+    if (!NewbornArrayPush(cx, res, StringValue(str))) {
       return false;
     }
   } while (true);

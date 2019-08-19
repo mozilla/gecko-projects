@@ -180,19 +180,12 @@ static bool MaybeWrapWindowProxy(JSContext* cx, HandleObject origObj,
   }
 
   if (bc->IsInProcess()) {
-    // If the bc is in process, we should have a local window proxy for it
-    // already.
-    MOZ_ASSERT(bc->GetWindowProxy());
+    // Any remote window proxies for bc should have been cleaned up by a call to
+    // CleanUpDanglingRemoteOuterWindowProxies() before now, so obj must be a
+    // local outer window proxy.
+    MOZ_RELEASE_ASSERT(isWindowProxy);
 
-    if (isWindowProxy) {
-      retObj.set(obj);
-    } else {
-      // XXX Turning remote window proxies into local window proxies will be
-      // implemented as part of bug 1559489, so don't allow it for now. To
-      // implement bug 1559489, we can return bc->GetWindowProxy() for the
-      // remote proxy case.
-      retObj.set(JS_NewDeadWrapper(cx));
-    }
+    retObj.set(obj);
   } else {
     // If bc is not in process, then use a remote window proxy, whether or not
     // obj is one already.
@@ -838,6 +831,27 @@ JSObject* TransplantObjectRetainingXrayExpandos(JSContext* cx,
   }
 
   return newIdentity;
+}
+
+static void NukeXrayWaiver(JSContext* cx, JS::HandleObject obj) {
+  RootedObject waiver(cx, WrapperFactory::GetXrayWaiver(obj));
+  if (!waiver) {
+    return;
+  }
+
+  XPCWrappedNativeScope* scope = ObjectScope(waiver);
+  JSObject* key = Wrapper::wrappedObject(waiver);
+  MOZ_ASSERT(scope->mWaiverWrapperMap->Find(key));
+  scope->mWaiverWrapperMap->Remove(key);
+
+  js::NukeNonCCWProxy(cx, waiver);
+}
+
+JSObject* TransplantObjectNukingXrayWaiver(JSContext* cx,
+                                           JS::HandleObject origObj,
+                                           JS::HandleObject target) {
+  NukeXrayWaiver(cx, origObj);
+  return JS_TransplantObject(cx, origObj, target);
 }
 
 nsIGlobalObject* NativeGlobal(JSObject* obj) {

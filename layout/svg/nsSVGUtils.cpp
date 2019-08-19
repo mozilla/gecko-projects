@@ -45,6 +45,7 @@
 #include "SVGTextFrame.h"
 #include "nsTextFrame.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_svg.h"
 #include "mozilla/SVGContextPaint.h"
 #include "mozilla/Unused.h"
 #include "mozilla/gfx/2D.h"
@@ -62,19 +63,17 @@ using namespace mozilla::dom::SVGUnitTypes_Binding;
 using namespace mozilla::gfx;
 using namespace mozilla::image;
 
-static bool sSVGDisplayListHitTestingEnabled;
-static bool sSVGDisplayListPaintingEnabled;
-static bool sSVGNewGetBBoxEnabled;
-
 bool NS_SVGDisplayListHitTestingEnabled() {
-  return sSVGDisplayListHitTestingEnabled;
+  return StaticPrefs::svg_display_lists_hit_testing_enabled();
 }
 
 bool NS_SVGDisplayListPaintingEnabled() {
-  return sSVGDisplayListPaintingEnabled;
+  return StaticPrefs::svg_display_lists_painting_enabled();
 }
 
-bool NS_SVGNewGetBBoxEnabled() { return sSVGNewGetBBoxEnabled; }
+bool NS_SVGNewGetBBoxEnabled() {
+  return StaticPrefs::svg_new_getBBox_enabled();
+}
 
 // we only take the address of this:
 static mozilla::gfx::UserDataKey sSVGAutoRenderStateKey;
@@ -110,17 +109,6 @@ bool SVGAutoRenderState::IsPaintingToWindow(DrawTarget* aDrawTarget) {
     return static_cast<SVGAutoRenderState*>(state)->mPaintingToWindow;
   }
   return false;
-}
-
-void nsSVGUtils::Init() {
-  Preferences::AddBoolVarCache(&sSVGDisplayListHitTestingEnabled,
-                               "svg.display-lists.hit-testing.enabled");
-
-  Preferences::AddBoolVarCache(&sSVGDisplayListPaintingEnabled,
-                               "svg.display-lists.painting.enabled");
-
-  Preferences::AddBoolVarCache(&sSVGNewGetBBoxEnabled,
-                               "svg.new-getBBox.enabled");
 }
 
 nsRect nsSVGUtils::GetPostFilterVisualOverflowRect(

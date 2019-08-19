@@ -27,6 +27,14 @@ MediaTransportHandlerIPC::MediaTransportHandlerIPC(
           const RefPtr<net::SocketProcessBridgeChild>& aBridge) {
         ipc::PBackgroundChild* actor =
             ipc::BackgroundChild::GetOrCreateSocketActorForCurrentThread();
+        if (!actor) {
+          NS_WARNING(
+              "MediaTransportHandlerIPC async init failed! Webrtc networking "
+              "will not work!");
+          return InitPromise::CreateAndReject(
+              nsCString("GetOrCreateSocketActorForCurrentThread failed!"),
+              __func__);
+        }
         MediaTransportChild* child = new MediaTransportChild(this);
         actor->SetEventTargetForActor(child, mCallbackThread);
         // PBackgroungChild owns mChild! When it is done with it,
@@ -249,13 +257,12 @@ void MediaTransportHandlerIPC::RemoveTransportsExcept(
 }
 
 void MediaTransportHandlerIPC::StartIceChecks(
-    bool aIsControlling, bool aIsOfferer,
-    const std::vector<std::string>& aIceOptions) {
+    bool aIsControlling, const std::vector<std::string>& aIceOptions) {
   mInitPromise->Then(
       mCallbackThread, __func__,
       [=, self = RefPtr<MediaTransportHandlerIPC>(this)](bool /*dummy*/) {
         if (mChild) {
-          mChild->SendStartIceChecks(aIsControlling, aIsOfferer, aIceOptions);
+          mChild->SendStartIceChecks(aIsControlling, aIceOptions);
         }
       },
       [](const nsCString& aError) {});

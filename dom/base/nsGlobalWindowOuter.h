@@ -140,7 +140,7 @@ extern already_AddRefed<nsIScriptTimeoutHandler> NS_CreateJSTimeoutHandler(
     JSContext* aCx, nsGlobalWindowInner* aWindow, const nsAString& aExpression,
     mozilla::ErrorResult& aError);
 
-extern const js::Class OuterWindowProxyClass;
+extern const JSClass OuterWindowProxyClass;
 
 //*****************************************************************************
 // nsGlobalWindowOuter
@@ -260,7 +260,8 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
       const nsAString& aGroup);
 
   nsresult OpenJS(const nsAString& aUrl, const nsAString& aName,
-                  const nsAString& aOptions, nsPIDOMWindowOuter** _retval);
+                  const nsAString& aOptions,
+                  mozilla::dom::BrowsingContext** _retval);
 
   virtual mozilla::EventListenerManager* GetExistingListenerManager()
       const override;
@@ -312,8 +313,9 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
 
   void DetachFromDocShell();
 
-  virtual nsresult SetNewDocument(Document* aDocument, nsISupports* aState,
-                                  bool aForceReuseInnerWindow) override;
+  virtual nsresult SetNewDocument(
+      Document* aDocument, nsISupports* aState, bool aForceReuseInnerWindow,
+      mozilla::dom::WindowGlobalChild* aActor = nullptr) override;
 
   // Outer windows only.
   static void PrepareForProcessChange(JSObject* aProxy);
@@ -565,7 +567,8 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
       mozilla::ErrorResult& aError);
   nsresult Open(const nsAString& aUrl, const nsAString& aName,
                 const nsAString& aOptions, nsDocShellLoadState* aLoadState,
-                bool aForceNoOpener, nsPIDOMWindowOuter** _retval) override;
+                bool aForceNoOpener,
+                mozilla::dom::BrowsingContext** _retval) override;
   mozilla::dom::Navigator* GetNavigator() override;
 
 #if defined(MOZ_WIDGET_ANDROID)
@@ -634,7 +637,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
       mozilla::ErrorResult& aError);
   nsresult OpenDialog(const nsAString& aUrl, const nsAString& aName,
                       const nsAString& aOptions, nsISupports* aExtraArgument,
-                      nsPIDOMWindowOuter** _retval) override;
+                      mozilla::dom::BrowsingContext** _retval) override;
   void UpdateCommands(const nsAString& anAction, mozilla::dom::Selection* aSel,
                       int16_t aReason) override;
 
@@ -760,9 +763,9 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   // Window Control Functions
 
   // Outer windows only.
-  virtual nsresult OpenNoNavigate(const nsAString& aUrl, const nsAString& aName,
-                                  const nsAString& aOptions,
-                                  nsPIDOMWindowOuter** _retval) override;
+  virtual nsresult OpenNoNavigate(
+      const nsAString& aUrl, const nsAString& aName, const nsAString& aOptions,
+      mozilla::dom::BrowsingContext** _retval) override;
 
  private:
   explicit nsGlobalWindowOuter(uint64_t aWindowID);
@@ -822,7 +825,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
                         bool aDoJSFixups, bool aNavigate, nsIArray* argv,
                         nsISupports* aExtraArgument,
                         nsDocShellLoadState* aLoadState, bool aForceNoOpener,
-                        nsPIDOMWindowOuter** aReturn);
+                        mozilla::dom::BrowsingContext** aReturn);
 
   // Checks that the channel was loaded by the URI currently loaded in aDoc
   static bool SameLoadingURI(Document* aDoc, nsIChannel* aChannel);

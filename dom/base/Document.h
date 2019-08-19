@@ -8,6 +8,7 @@
 
 #include "mozilla/EventStates.h"  // for EventStates
 #include "mozilla/FlushType.h"    // for enum
+#include "mozilla/MozPromise.h"   // for MozPromise
 #include "mozilla/Pair.h"         // for Pair
 #include "mozilla/Saturate.h"     // for SaturateUint32
 #include "nsAutoPtr.h"            // for member
@@ -217,7 +218,6 @@ class XPathEvaluator;
 class XPathExpression;
 class XPathNSResolver;
 class XPathResult;
-class XULDocument;
 template <typename>
 class Sequence;
 
@@ -909,6 +909,11 @@ class Document : public nsINode,
   nsIURI* GetBaseURI(bool aTryUseXHRDocBaseURI = false) const final;
 
   void SetBaseURI(nsIURI* aURI);
+
+  /**
+   * Resolves a URI based on the document's base URI.
+   */
+  Result<nsCOMPtr<nsIURI>, nsresult> ResolveWithBaseURI(const nsAString& aURI);
 
   /**
    * Return the URL data which style system needs for resolving url value.
@@ -2388,14 +2393,10 @@ class Document : public nsINode,
   bool IsHTMLOrXHTML() const { return mType == eHTML || mType == eXHTML; }
   bool IsXMLDocument() const { return !IsHTMLDocument(); }
   bool IsSVGDocument() const { return mType == eSVG; }
-  bool IsXULDocument() const { return mType == eXUL; }
   bool IsUnstyledDocument() {
     return IsLoadedAsData() || IsLoadedAsInteractiveData();
   }
   bool LoadsFullXULStyleSheetUpFront() {
-    if (IsXULDocument()) {
-      return true;
-    }
     if (IsSVGDocument()) {
       return false;
     }
@@ -3734,12 +3735,6 @@ class Document : public nsINode,
    */
   inline SVGDocument* AsSVGDocument();
 
-  /**
-   * Asserts IsXULDocument, and can't return null.
-   * Defined inline in XULDocument.h
-   */
-  inline XULDocument* AsXULDocument();
-
   /*
    * Given a node, get a weak reference to it and append that reference to
    * mBlockedNodesByClassifier. Can be used later on to look up a node in it.
@@ -4134,7 +4129,13 @@ class Document : public nsINode,
   bool InRDMPane() const { return mInRDMPane; }
   void SetInRDMPane(bool aInRDMPane) { mInRDMPane = aInRDMPane; }
 
+  // Returns true if we use overlay scrollbars on the system wide or on the
+  // given document.
+  static bool UseOverlayScrollbars(const Document* aDocument);
+
   static bool HasRecentlyStartedForegroundLoads();
+
+  static bool AutomaticStorageAccessCanBeGranted(nsIPrincipal* aPrincipal);
 
  protected:
   void DoUpdateSVGUseElementShadowTrees();
@@ -4403,6 +4404,10 @@ class Document : public nsINode,
   static void* UseExistingNameString(nsINode* aRootNode, const nsString* aName);
 
   void MaybeResolveReadyForIdle();
+
+  typedef MozPromise<bool, bool, true> AutomaticStorageAccessGrantPromise;
+  MOZ_MUST_USE RefPtr<AutomaticStorageAccessGrantPromise>
+  AutomaticStorageAccessCanBeGranted();
 
   // This should *ONLY* be used in GetCookie/SetCookie.
   already_AddRefed<nsIChannel> CreateDummyChannelForCookies(
@@ -4855,8 +4860,7 @@ class Document : public nsINode,
     eHTML,
     eXHTML,
     eGenericXML,
-    eSVG,
-    eXUL
+    eSVG
   };
 
   Type mType;

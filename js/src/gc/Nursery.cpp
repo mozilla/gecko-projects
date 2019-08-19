@@ -409,7 +409,7 @@ void js::Nursery::leaveZealMode() {
 
 JSObject* js::Nursery::allocateObject(JSContext* cx, size_t size,
                                       size_t nDynamicSlots,
-                                      const js::Class* clasp) {
+                                      const JSClass* clasp) {
   // Ensure there's enough space to replace the contents with a
   // RelocationOverlay.
   MOZ_ASSERT(size >= sizeof(RelocationOverlay));
@@ -1151,7 +1151,6 @@ float js::Nursery::doPretenuring(JSRuntime* rt, JS::GCReason reason,
       }
 
       ObjectGroup* group = entry.group;
-      AutoMaybeLeaveAtomsZone leaveAtomsZone(cx);
       AutoRealm ar(cx, group);
       AutoSweepObjectGroup sweep(group);
       if (group->canPreTenure(sweep)) {
@@ -1224,7 +1223,7 @@ void js::Nursery::sweep(JSTracer* trc) {
   }
 
   for (ZonesIter zone(trc->runtime(), SkipAtoms); !zone.done(); zone.next()) {
-    zone->sweepAfterMinorGC();
+    zone->sweepAfterMinorGC(trc);
   }
 
   sweepDictionaryModeObjects();
@@ -1405,14 +1404,6 @@ void js::Nursery::maybeResizeNursery(JS::GCReason reason) {
 }
 
 bool js::Nursery::maybeResizeExact(JS::GCReason reason) {
-  // Disable the nursery if the user changed the configuration setting. The
-  // nursery can only be re-enabled by resetting the configuration and
-  // restarting firefox.
-  if (tunables().gcMaxNurseryBytes() == 0) {
-    disable();
-    return true;
-  }
-
   // Shrink the nursery to its minimum size if we ran out of memory or
   // received a memory pressure event.
   if (gc::IsOOMReason(reason) || runtime()->gc.systemHasLowMemory()) {
@@ -1427,6 +1418,7 @@ bool js::Nursery::maybeResizeExact(JS::GCReason reason) {
   }
 #endif
 
+  MOZ_ASSERT(tunables().gcMaxNurseryBytes() >= ArenaSize);
   CheckedInt<unsigned> newMaxNurseryChunksChecked =
       (JS_ROUND(CheckedInt<size_t>(tunables().gcMaxNurseryBytes()), ChunkSize) /
        ChunkSize)

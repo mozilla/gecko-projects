@@ -12,14 +12,17 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/CondVar.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "mozilla/MozPromise.h"
 #include "mozilla/RelativeTimeline.h"
 #include "mozilla/StorageAccess.h"
+#include "mozilla/ThreadSafeWeakPtr.h"
 #include "nsContentUtils.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIEventTarget.h"
 #include "nsTObserverArray.h"
 
 #include "js/ContextOptions.h"
+#include "mozilla/dom/RemoteWorkerChild.h"
 #include "mozilla/dom/Worker.h"
 #include "mozilla/dom/WorkerLoadInfo.h"
 #include "mozilla/dom/workerinternals/JSSettings.h"
@@ -43,7 +46,6 @@ class Function;
 class MessagePort;
 class MessagePortIdentifier;
 class PerformanceStorage;
-class RemoteWorkerChild;
 class TimeoutHandler;
 class WorkerControlRunnable;
 class WorkerCSPEventListener;
@@ -315,6 +317,14 @@ class WorkerPrivate : public RelativeTimeline {
   WorkerDebuggerGlobalScope* DebuggerGlobalScope() const {
     MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
     return data->mDebuggerScope;
+  }
+
+  // Get the global associated with the current nested event loop.  Will return
+  // null if we're not in a nested event loop or that nested event loop does not
+  // have an associated global.
+  nsIGlobalObject* GetCurrentEventLoopGlobal() const {
+    MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
+    return data->mCurrentEventLoopGlobal;
   }
 
   nsICSPEventListener* CSPEventListener() const;
@@ -789,6 +799,13 @@ class WorkerPrivate : public RelativeTimeline {
 
   void SetRemoteWorkerController(RemoteWorkerChild* aController);
 
+  void SetRemoteWorkerControllerWeakRef(
+      ThreadSafeWeakPtr<RemoteWorkerChild> aWeakRef);
+
+  ThreadSafeWeakPtr<RemoteWorkerChild> GetRemoteWorkerControllerWeakRef();
+
+  RefPtr<GenericPromise> SetServiceWorkerSkipWaitingFlag();
+
   // We can assume that an nsPIDOMWindow will be available for Freeze, Thaw
   // as these are only used for globals going in and out of the bfcache.
   bool Freeze(nsPIDOMWindowInner* aWindow);
@@ -1065,6 +1082,9 @@ class WorkerPrivate : public RelativeTimeline {
   // Only touched on the parent thread. This is set only if IsSharedWorker().
   RefPtr<RemoteWorkerChild> mRemoteWorkerController;
 
+  // This is set only if IsServiceWorker().
+  ThreadSafeWeakPtr<RemoteWorkerChild> mRemoteWorkerControllerWeakRef;
+
   JS::UniqueChars mDefaultLocale;  // nulled during worker JSContext init
   TimeStamp mKillTime;
   WorkerStatus mParentStatus;
@@ -1098,6 +1118,19 @@ class WorkerPrivate : public RelativeTimeline {
 
     UniquePtr<ClientSource> mClientSource;
 
+    // While running a nested event loop, whether a sync loop or a debugger
+    // event loop we want to keep track of which global is running it, if any,
+    // so runnables that run off that event loop can get at that information. In
+    // practice this only matters for various worker debugger runnables running
+    // against sandboxes, because all other runnables know which globals they
+    // belong to already.  We could also address this by threading the relevant
+    // global through the chains of runnables involved, but we'd need to thread
+    // it through some runnables that run on the main thread, and that would
+    // require some care to make sure things get released on the correct thread,
+    // which we'd rather avoid.  This member is only accessed on the worker
+    // thread.
+    nsCOMPtr<nsIGlobalObject> mCurrentEventLoopGlobal;
+
     uint32_t mNumWorkerRefsPreventingShutdownStart;
     uint32_t mDebuggerEventLoopLevel;
 
@@ -1112,6 +1145,17 @@ class WorkerPrivate : public RelativeTimeline {
     bool mOnLine;
   };
   ThreadBound<WorkerThreadAccessible> mWorkerThreadAccessible;
+
+  class MOZ_RAII AutoPushEventLoopGlobal {
+   public:
+    AutoPushEventLoopGlobal(WorkerPrivate* aWorkerPrivate, JSContext* aCx);
+    ~AutoPushEventLoopGlobal();
+
+   private:
+    WorkerPrivate* mWorkerPrivate;
+    nsCOMPtr<nsIGlobalObject> mOldEventLoopGlobal;
+  };
+  friend class AutoPushEventLoopGlobal;
 
   uint32_t mPostSyncLoopOperations;
 

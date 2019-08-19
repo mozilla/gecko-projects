@@ -282,6 +282,7 @@ exports.ANIMATION_TYPE_FOR_LONGHANDS = [
       "mask-position-y",
       "mask-size",
       "object-position",
+      "offset-anchor",
       "offset-path",
       "offset-rotate",
       "order",

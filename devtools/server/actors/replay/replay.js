@@ -241,6 +241,44 @@ dbg.onNewScript = function(script) {
   installPendingHandlers();
 };
 
+// Listen to the content of all loaded HTML files, with similar logic to that
+// in TabSources.
+const gHtmlContent = new Map();
+
+getWindow().docShell.watchedByDevtools = true;
+
+Services.obs.addObserver(
+  {
+    observe(subject, topic, data) {
+      assert(topic == "webnavigation-create");
+      subject.watchedByDevtools = true;
+    },
+  },
+  "webnavigation-create"
+);
+
+Services.obs.addObserver(
+  {
+    observe(subject, topic, data) {
+      assert(topic == "devtools-html-content");
+      const { uri, offset, contents } = JSON.parse(data);
+      if (gHtmlContent.has(uri)) {
+        const existing = gHtmlContent.get(uri);
+        if (existing.content.length == offset) {
+          assert(!existing.complete);
+          existing.content = existing.content + contents;
+        }
+      } else {
+        gHtmlContent.set(uri, {
+          content: contents,
+          contentType: "text/html",
+        });
+      }
+    },
+  },
+  "devtools-html-content"
+);
+
 ///////////////////////////////////////////////////////////////////////////////
 // Object Snapshots
 ///////////////////////////////////////////////////////////////////////////////
@@ -1433,6 +1471,8 @@ function getPauseData() {
     const names = getEnvironmentNames(env);
     rv.environments[id] = { data, names };
 
+    names.forEach(({ value }) => addValue(value, true));
+
     addObject(data.callee);
     addEnvironment(data.parent);
   }
@@ -1517,6 +1557,9 @@ const gRequestHandlers = {
   },
 
   getContent(request) {
+    if (gHtmlContent.has(request.url)) {
+      return gHtmlContent.get(request.url);
+    }
     return RecordReplayControl.getContent(request.url);
   },
 

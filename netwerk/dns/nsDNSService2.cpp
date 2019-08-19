@@ -523,15 +523,19 @@ NS_IMPL_ISUPPORTS(nsDNSService, nsIDNSService, nsPIDNSService, nsIObserver,
 static StaticRefPtr<nsDNSService> gDNSService;
 
 already_AddRefed<nsIDNSService> nsDNSService::GetXPCOMSingleton() {
-  if (IsNeckoChild()) {
+  if (XRE_IsParentProcess()) {
+    return GetSingleton();
+  }
+
+  if (XRE_IsContentProcess() || XRE_IsSocketProcess()) {
     return ChildDNSService::GetSingleton();
   }
 
-  return GetSingleton();
+  return nullptr;
 }
 
 already_AddRefed<nsDNSService> nsDNSService::GetSingleton() {
-  NS_ASSERTION(!IsNeckoChild(), "not a parent process");
+  NS_ASSERTION(XRE_IsParentProcess(), "not a parent process");
 
   if (!gDNSService) {
     gDNSService = new nsDNSService();

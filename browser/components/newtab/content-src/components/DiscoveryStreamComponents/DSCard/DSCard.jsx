@@ -8,12 +8,78 @@ import { DSLinkMenu } from "../DSLinkMenu/DSLinkMenu";
 import { ImpressionStats } from "../../DiscoveryStreamImpressionStats/ImpressionStats";
 import React from "react";
 import { SafeAnchor } from "../SafeAnchor/SafeAnchor";
+import { DSContextFooter } from "../DSContextFooter/DSContextFooter.jsx";
+
+export const DefaultMeta = ({
+  source,
+  title,
+  excerpt,
+  context,
+  context_type,
+  cta,
+  engagement,
+}) => (
+  <div className="meta">
+    <div className="info-wrap">
+      <p className="source clamp">{source}</p>
+      <header className="title clamp">{title}</header>
+      {excerpt && <p className="excerpt clamp">{excerpt}</p>}
+      {cta && (
+        <div role="link" className="cta-link icon icon-arrow" tabIndex="0">
+          {cta}
+        </div>
+      )}
+    </div>
+    <DSContextFooter
+      context_type={context_type}
+      context={context}
+      engagement={engagement}
+    />
+  </div>
+);
+
+export const VariantMeta = ({
+  source,
+  title,
+  excerpt,
+  context,
+  context_type,
+  cta,
+  engagement,
+  sponsor,
+}) => (
+  <div className="meta">
+    <div className="info-wrap">
+      <p className="source clamp">
+        {sponsor ? sponsor : source}
+        {context && ` · Sponsored`}
+      </p>
+      <header className="title clamp">{title}</header>
+      {excerpt && <p className="excerpt clamp">{excerpt}</p>}
+    </div>
+    {context && cta && <button className="button cta-button">{cta}</button>}
+    {!context && (
+      <DSContextFooter
+        context_type={context_type}
+        context={context}
+        engagement={engagement}
+      />
+    )}
+  </div>
+);
 
 export class DSCard extends React.PureComponent {
   constructor(props) {
     super(props);
 
     this.onLinkClick = this.onLinkClick.bind(this);
+    this.setPlaceholderRef = element => {
+      this.placholderElement = element;
+    };
+
+    this.state = {
+      isSeen: false,
+    };
   }
 
   onLinkClick(event) {
@@ -44,9 +110,45 @@ export class DSCard extends React.PureComponent {
     }
   }
 
+  onSeen(entries) {
+    if (this.state) {
+      const entry = entries.find(e => e.isIntersecting);
+
+      if (entry) {
+        if (this.placholderElement) {
+          this.observer.unobserve(this.placholderElement);
+        }
+
+        // Stop observing since element has been seen
+        this.setState({
+          isSeen: true,
+        });
+      }
+    }
+  }
+
+  componentDidMount() {
+    if (this.placholderElement) {
+      this.observer = new IntersectionObserver(this.onSeen.bind(this));
+      this.observer.observe(this.placholderElement);
+    }
+  }
+
+  componentWillUnmount() {
+    // Remove observer on unmount
+    if (this.observer && this.placholderElement) {
+      this.observer.unobserve(this.placholderElement);
+    }
+  }
+
   render() {
+    if (this.props.placeholder || !this.state.isSeen) {
+      return (
+        <div className="ds-card placeholder" ref={this.setPlaceholderRef} />
+      );
+    }
     return (
-      <div className={`ds-card${this.props.placeholder ? " placeholder" : ""}`}>
+      <div className="ds-card">
         <SafeAnchor
           className="ds-card-link"
           dispatch={this.props.dispatch}
@@ -60,18 +162,29 @@ export class DSCard extends React.PureComponent {
               rawSource={this.props.raw_image_src}
             />
           </div>
-          <div className="meta">
-            <div className="info-wrap">
-              <p className="source clamp">{this.props.source}</p>
-              <header className="title clamp">{this.props.title}</header>
-              {this.props.excerpt && (
-                <p className="excerpt clamp">{this.props.excerpt}</p>
-              )}
-            </div>
-            {this.props.context && (
-              <p className="context">{this.props.context}</p>
-            )}
-          </div>
+          {this.props.cta_variant && (
+            <VariantMeta
+              source={this.props.source}
+              title={this.props.title}
+              excerpt={this.props.excerpt}
+              context={this.props.context}
+              context_type={this.props.context_type}
+              engagement={this.props.engagement}
+              cta={this.props.cta}
+              sponsor={this.props.sponsor}
+            />
+          )}
+          {!this.props.cta_variant && (
+            <DefaultMeta
+              source={this.props.source}
+              title={this.props.title}
+              excerpt={this.props.excerpt}
+              context={this.props.context}
+              engagement={this.props.engagement}
+              context_type={this.props.context_type}
+              cta={this.props.cta}
+            />
+          )}
           <ImpressionStats
             campaignId={this.props.campaignId}
             rows={[
@@ -87,20 +200,18 @@ export class DSCard extends React.PureComponent {
             source={this.props.type}
           />
         </SafeAnchor>
-        {!this.props.placeholder && (
-          <DSLinkMenu
-            id={this.props.id}
-            index={this.props.pos}
-            dispatch={this.props.dispatch}
-            url={this.props.url}
-            title={this.props.title}
-            source={this.props.source}
-            type={this.props.type}
-            pocket_id={this.props.pocket_id}
-            shim={this.props.shim}
-            bookmarkGuid={this.props.bookmarkGuid}
-          />
-        )}
+        <DSLinkMenu
+          id={this.props.id}
+          index={this.props.pos}
+          dispatch={this.props.dispatch}
+          url={this.props.url}
+          title={this.props.title}
+          source={this.props.source}
+          type={this.props.type}
+          pocket_id={this.props.pocket_id}
+          shim={this.props.shim}
+          bookmarkGuid={this.props.bookmarkGuid}
+        />
       </div>
     );
   }

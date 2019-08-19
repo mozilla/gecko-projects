@@ -27,6 +27,7 @@
 #include "mozilla/net/ClassifierDummyChannelChild.h"
 #include "mozilla/net/SocketProcessBridgeChild.h"
 #ifdef MOZ_WEBRTC
+#  include "mozilla/net/ProxyConfigLookupChild.h"
 #  include "mozilla/net/StunAddrsRequestChild.h"
 #  include "mozilla/net/WebrtcProxyChannelChild.h"
 #endif
@@ -59,7 +60,10 @@ NeckoChild::~NeckoChild() {
 }
 
 void NeckoChild::InitNeckoChild() {
-  MOZ_ASSERT(IsNeckoChild(), "InitNeckoChild called by non-child!");
+  if (!IsNeckoChild()) {
+    MOZ_ASSERT(false, "InitNeckoChild called by non-child!");
+    return;
+  }
 
   if (!gNeckoChild) {
     mozilla::dom::ContentChild* cpc =
@@ -422,6 +426,19 @@ PClassifierDummyChannelChild* NeckoChild::AllocPClassifierDummyChannelChild(
 bool NeckoChild::DeallocPClassifierDummyChannelChild(
     PClassifierDummyChannelChild* aActor) {
   delete static_cast<ClassifierDummyChannelChild*>(aActor);
+  return true;
+}
+
+PProxyConfigLookupChild* NeckoChild::AllocPProxyConfigLookupChild() {
+  MOZ_CRASH("AllocPProxyConfigLookupChild should not be called");
+  return nullptr;
+}
+
+bool NeckoChild::DeallocPProxyConfigLookupChild(
+    PProxyConfigLookupChild* aActor) {
+#ifdef MOZ_WEBRTC
+  delete static_cast<ProxyConfigLookupChild*>(aActor);
+#endif
   return true;
 }
 

@@ -90,7 +90,7 @@ struct FrameStats {
  * protocol, which is per-browser. A lot of the functions in the protocol are
  * basically multiplexing/demultiplexing stuff in PLayerTransaction.
  */
-sync protocol PCompositorBridge
+sync refcounted protocol PCompositorBridge
 {
   manager PCompositorManager;
 
@@ -267,8 +267,11 @@ parent:
   sync CheckContentOnlyTDR(uint32_t sequenceNum)
     returns (bool isContentOnlyTDR);
 
-  async BeginRecording(TimeStamp aRecordingStart);
-  sync EndRecording();
+  async BeginRecording(TimeStamp aRecordingStart)
+    returns (bool success);
+
+  sync EndRecording()
+    returns (bool success);
 
 child:
   // Send back Compositor Frame Metrics from APZCs so tiled layers can

@@ -13,6 +13,7 @@
 "use strict";
 
 const EXPORTED_SYMBOLS = ["LoginHelper"];
+const REMOTE_SETTINGS_BREACHES_COLLECTION = "fxmonitor-breaches";
 
 // Globals
 
@@ -25,6 +26,12 @@ ChromeUtils.defineModuleGetter(
   this,
   "RemoteSettings",
   "resource://services-settings/remote-settings.js"
+);
+
+ChromeUtils.defineModuleGetter(
+  this,
+  "RemoteSettingsClient",
+  "resource://services-settings/RemoteSettingsClient.jsm"
 );
 
 /**
@@ -449,7 +456,7 @@ this.LoginHelper = {
 
       for (let prop of aNewLoginData.enumerator) {
         switch (prop.name) {
-          // nsILoginInfo
+          // nsILoginInfo (fall through)
           case "origin":
           case "httpRealm":
           case "formActionOrigin":
@@ -457,7 +464,7 @@ this.LoginHelper = {
           case "password":
           case "usernameField":
           case "passwordField":
-          // nsILoginMetaInfo
+          // nsILoginMetaInfo (fall through)
           case "guid":
           case "timeCreated":
           case "timeLastUsed":
@@ -1106,25 +1113,65 @@ this.LoginHelper = {
     }
   },
 
+  async recordBreachAlertDismissal(loginGuid) {
+    await Services.logins.initializationPromise;
+    const storageJSON =
+      Services.logins.wrappedJSObject._storage.wrappedJSObject;
+
+    return storageJSON.recordBreachAlertDismissal(loginGuid);
+  },
+
   async getBreachesForLogins(logins, breaches = null) {
+    const breachesByLoginGUID = new Map();
     if (!breaches) {
-      breaches = await RemoteSettings("fxmonitor-breaches").get();
+      try {
+        breaches = await RemoteSettings(
+          REMOTE_SETTINGS_BREACHES_COLLECTION
+        ).get();
+      } catch (ex) {
+        if (ex instanceof RemoteSettingsClient.UnknownCollectionError) {
+          log.warn(
+            "Could not get Remote Settings collection.",
+            REMOTE_SETTINGS_BREACHES_COLLECTION,
+            ex
+          );
+          return breachesByLoginGUID;
+        }
+        throw ex;
+      }
     }
+    const BREACH_ALERT_URL = Services.prefs.getStringPref(
+      "signon.management.page.breachAlertUrl"
+    );
+    const baseBreachAlertURL = new URL(BREACH_ALERT_URL);
+
+    await Services.logins.initializationPromise;
+    const storageJSON =
+      Services.logins.wrappedJSObject._storage.wrappedJSObject;
+    const dismissedBreachAlertsByLoginGUID = storageJSON.getBreachAlertDismissalsByLoginGUID();
 
     // Determine potentially breached logins by checking their origin and the last time
     // they were changed. It's important to note here that we are NOT considering the
     // username and password of that login.
-    const breachesByLoginGUID = new Map();
     for (const login of logins) {
       const loginURI = Services.io.newURI(login.origin);
       for (const breach of breaches) {
         if (!breach.Domain) {
           continue;
         }
+        const breachDate = new Date(breach.BreachDate).getTime();
+        const breachAddedDate = new Date(breach.AddedDate).getTime();
         if (
           Services.eTLD.hasRootDomain(loginURI.host, breach.Domain) &&
-          login.timePasswordChanged < new Date(breach.BreachDate).getTime()
+          breach.hasOwnProperty("DataClasses") &&
+          breach.DataClasses.includes("Passwords") &&
+          login.timePasswordChanged < breachDate &&
+          (!dismissedBreachAlertsByLoginGUID[login.guid] ||
+            dismissedBreachAlertsByLoginGUID[login.guid]
+              .timeBreachAlertDismissed < breachAddedDate)
         ) {
+          let breachAlertURL = new URL(breach.Name, baseBreachAlertURL);
+          breach.breachAlertURL = breachAlertURL.href;
           breachesByLoginGUID.set(login.guid, breach);
         }
       }

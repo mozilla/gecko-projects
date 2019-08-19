@@ -1281,9 +1281,10 @@ media:
     bug_numbers:
       - 1476456
       - 1499803
+      - 1570634
     description: >
       The number of times a top level document is loaded.
-    expires: "68"
+    expires: "74"
     kind: uint
     notification_emails:
       - cpearce@mozilla.com
@@ -1292,19 +1293,18 @@ media:
     release_channel_collection: opt-out
     products:
       - 'firefox'
-      - 'fennec'
       - 'geckoview'
     record_in_processes:
-      - main
       - content
 
   page_had_media_count:
     bug_numbers:
       - 1476456
       - 1499803
+      - 1570634
     description: >
       The number of times a document hierarchy contained at least one audible HTMLMediaElement that had play() called upon it.
-    expires: "68"
+    expires: "74"
     kind: uint
     notification_emails:
       - cpearce@mozilla.com
@@ -1313,40 +1313,18 @@ media:
     release_channel_collection: opt-out
     products:
       - 'firefox'
-      - 'fennec'
       - 'geckoview'
     record_in_processes:
-      - main
-      - content
-
-  page_had_play_revoked_count:
-    bug_numbers:
-      - 1476456
-      - 1499803
-    description: >
-      The number of times a document hierarchy contained at least one muted playing HTMLMediaElement that was paused due to becoming unmuted while not being allowed to autoplay.
-    expires: "68"
-    kind: uint
-    notification_emails:
-      - cpearce@mozilla.com
-      - alwu@mozilla.com
-      - nohlmeier@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
       - content
 
   autoplay_would_not_be_allowed_count:
     bug_numbers:
       - 1476456
       - 1499803
+      - 1570634
     description: >
       The number of HTMLMediaElement autoplays on audible HTMLMediaElements which would not be allowed to play if block autoplay was enabled; we'd either prompt for permission to play or block outright depending on user preferences.
-    expires: "68"
+    expires: "74"
     kind: uint
     notification_emails:
       - cpearce@mozilla.com
@@ -1355,40 +1333,18 @@ media:
     release_channel_collection: opt-out
     products:
       - 'firefox'
-      - 'fennec'
       - 'geckoview'
     record_in_processes:
-      - main
-      - content
-
-  allowed_autoplay_no_audio_track_count:
-    bug_numbers:
-      - 1480484
-      - 1499803
-    description: >
-      The number of HTMLMediaElement autoplays on HTMLMediaElements without an audio track which would be allowed to play.
-    expires: "68"
-    kind: uint
-    notification_emails:
-      - cpearce@mozilla.com
-      - alwu@mozilla.com
-      - nohlmeier@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
       - content
 
   autoplay_would_be_allowed_count:
     bug_numbers:
       - 1476456
       - 1499803
+      - 1570634
     description: >
       The number of HTMLMediaElement autoplays on audible HTMLMediaElements that would have been allowed (not blocked) by the autoplay policy if block autoplay was enabled.
-    expires: "68"
+    expires: "74"
     kind: uint
     notification_emails:
       - cpearce@mozilla.com
@@ -1397,72 +1353,8 @@ media:
     release_channel_collection: opt-out
     products:
       - 'firefox'
-      - 'fennec'
       - 'geckoview'
     record_in_processes:
-      - main
-      - content
-
-  blocked_no_metadata:
-    bug_numbers:
-      - 1483703
-      - 1499803
-    description: >
-      The number of HTMLMediaElements which we blocked because they hadn't loaded metadata yet.
-    expires: "68"
-    kind: uint
-    notification_emails:
-      - cpearce@mozilla.com
-      - alwu@mozilla.com
-      - nohlmeier@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-      - content
-
-  blocked_no_metadata_endup_no_audio_track:
-    bug_numbers:
-      - 1483703
-      - 1499803
-    description: >
-      The number of HTMLMediaElements which were blocked because they hadn't loaded metadata yet, but ended up having no audio track.
-    expires: "68"
-    kind: uint
-    notification_emails:
-      - cpearce@mozilla.com
-      - alwu@mozilla.com
-      - nohlmeier@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
-      - content
-
-  autoplay_default_blocked:
-    bug_numbers:
-      - 1521947
-    description: >
-      Whether the user blocked autoplay by default. Recorded when the preference is toggled.
-    expires: "72"
-    kind: boolean
-    notification_emails:
-      - cpearce@mozilla.com
-      - alwu@mozilla.com
-      - nohlmeier@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - main
       - content
 
 # The following section contains content process base counters.
@@ -3103,6 +2995,51 @@ idb.failure:
     record_in_processes:
       - 'main'
 
+# The following section contains scalars for the PDF viewer.
+pdf.viewer:
+  used:
+    bug_numbers:
+      - 1566882
+    description: >
+      How many times PDF Viewer was used.
+    expires: never
+    notification_emails:
+      - bdahl@mozilla.com
+    kind: uint
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+      - 'content'
+  fallback_shown:
+    bug_numbers:
+      - 1566882
+    description: >
+      How many times PDF Viewer fallback bar was shown.
+    expires: "75"
+    notification_emails:
+      - bdahl@mozilla.com
+    kind: uint
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+      - 'content'
+  print:
+    bug_numbers:
+      - 1566882
+    description: >
+      How many times PDF Viewer print functionality was used.
+    expires: "75"
+    notification_emails:
+      - bdahl@mozilla.com
+    kind: uint
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+      - 'content'
+
 # The following section contains probes that record timestamps.
 timestamps:
   first_paint:
@@ -4443,6 +4380,7 @@ networking:
       - 1546796
       - 1546906
       - 1550756
+      - 1572666
     description: >
       How many KB of HTTP data transferred by type, there are some categories
       separated by keys based on 5 parameters:
@@ -4488,6 +4426,7 @@ networking:
       - 'geckoview'
     record_in_processes:
       - 'main'
+    release_channel_collection: opt-out
 
   data_transferred_captive_portal:
     bug_numbers:

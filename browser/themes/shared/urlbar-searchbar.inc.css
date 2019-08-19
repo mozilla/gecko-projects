@@ -220,6 +220,14 @@
   list-style-image: url("chrome://browser/skin/device-desktop.svg");
 }
 
+.pageAction-sendToDevice-device[clientType=tv] {
+  list-style-image: url("chrome://browser/skin/device-tv.svg");
+}
+
+.pageAction-sendToDevice-device[clientType=vr] {
+  list-style-image: url("chrome://browser/skin/device-vr.svg");
+}
+
 .pageAction-sendToDevice-device.signintosync,
 #pageAction-panel-sendToDevice-fxa,
 #pageAction-urlbar-sendToDevice-fxa {
@@ -243,13 +251,8 @@
   min-height: 11px;
 }
 
-#pageActionActivatedActionPanel[actionID="pocket"] > .panel-arrowcontainer > .panel-arrowcontent {
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-#pageActionActivatedActionPanel[actionID="pocket"] > .panel-arrowcontainer > .panel-arrowbox > .panel-arrow {
-  fill: #fbfbfb;
+#pageActionActivatedActionPanel[actionID="pocket"] {
+  --arrowpanel-background: #fbfbfb;
 }
 
 /* URL bar and page action buttons */

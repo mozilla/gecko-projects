@@ -31,7 +31,9 @@
 #include "mozilla/dom/WheelEventBinding.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_mousewheel.h"
 #include "mozilla/StaticPrefs_ui.h"
+#include "mozilla/StaticPrefs_zoom.h"
 
 #include "ContentEventHandler.h"
 #include "IMEContentObserver.h"
@@ -250,7 +252,6 @@ EventStateManager::EventStateManager()
     UpdateUserActivityTimer();
   }
   ++sESMInstanceCount;
-  WheelTransaction::InitializeStatics();
 }
 
 nsresult EventStateManager::UpdateUserActivityTimer() {
@@ -940,8 +941,7 @@ static bool IsAccessKeyTarget(nsIContent* aContent, nsIFrame* aFrame,
       !contentKey.Equals(aKey, nsCaseInsensitiveStringComparator()))
     return false;
 
-  if (!aContent->OwnerDoc()->IsXULDocument() && !aContent->IsXULElement())
-    return true;
+  if (!aContent->IsXULElement()) return true;
 
   // For XUL we do visibility checks.
   if (!aFrame) return false;
@@ -2128,8 +2128,8 @@ nsresult EventStateManager::ChangeTextSize(int32_t change) {
 
   if (cv) {
     float textzoom;
-    float zoomMin = ((float)Preferences::GetInt("zoom.minPercent", 50)) / 100;
-    float zoomMax = ((float)Preferences::GetInt("zoom.maxPercent", 300)) / 100;
+    float zoomMin = ((float)StaticPrefs::zoom_minPercent()) / 100;
+    float zoomMax = ((float)StaticPrefs::zoom_maxPercent()) / 100;
     cv->GetTextZoom(&textzoom);
     textzoom += ((float)change) / 10;
     if (textzoom < zoomMin)
@@ -2149,8 +2149,8 @@ nsresult EventStateManager::ChangeFullZoom(int32_t change) {
 
   if (cv) {
     float fullzoom;
-    float zoomMin = ((float)Preferences::GetInt("zoom.minPercent", 50)) / 100;
-    float zoomMax = ((float)Preferences::GetInt("zoom.maxPercent", 300)) / 100;
+    float zoomMin = ((float)StaticPrefs::zoom_minPercent()) / 100;
+    float zoomMax = ((float)StaticPrefs::zoom_maxPercent()) / 100;
     cv->GetFullZoom(&fullzoom);
     fullzoom += ((float)change) / 10;
     if (fullzoom < zoomMin)
@@ -3948,8 +3948,6 @@ nsresult EventStateManager::SetCursor(StyleCursorKind aCursor,
   NS_ENSURE_TRUE(mDocument, NS_ERROR_FAILURE);
   sMouseOverDocument = mDocument.get();
 
-  nsCursor c;
-
   NS_ENSURE_TRUE(aWidget, NS_ERROR_FAILURE);
   if (aLockCursor) {
     if (StyleCursorKind::Auto != aCursor) {
@@ -3959,8 +3957,8 @@ nsresult EventStateManager::SetCursor(StyleCursorKind aCursor,
       mLockCursor = kInvalidCursorKind;
     }
   }
+  nsCursor c;
   switch (aCursor) {
-    default:
     case StyleCursorKind::Auto:
     case StyleCursorKind::Default:
       c = eCursor_standard;
@@ -4066,6 +4064,10 @@ nsresult EventStateManager::SetCursor(StyleCursorKind aCursor,
       break;
     case StyleCursorKind::None:
       c = eCursor_none;
+      break;
+    default:
+      MOZ_ASSERT_UNREACHABLE("Unknown cursor kind");
+      c = eCursor_standard;
       break;
   }
 
@@ -5839,7 +5841,8 @@ void EventStateManager::DeltaAccumulator::InitLineOrPageDelta(
   // Reset if the previous wheel event is too old.
   if (!mLastTime.IsNull()) {
     TimeDuration duration = TimeStamp::Now() - mLastTime;
-    if (duration.ToMilliseconds() > WheelTransaction::GetTimeoutTime()) {
+    if (duration.ToMilliseconds() >
+        StaticPrefs::mousewheel_transaction_timeout()) {
       Reset();
     }
   }
@@ -6329,16 +6332,12 @@ void EventStateManager::Prefs::Init() {
     return;
   }
 
-  DebugOnly<nsresult> rv = Preferences::AddBoolVarCache(
-      &sKeyCausesActivation, "accessibility.accesskeycausesactivation",
-      sKeyCausesActivation);
-  MOZ_ASSERT(NS_SUCCEEDED(rv),
-             "Failed to observe \"accessibility.accesskeycausesactivation\"");
-  rv = Preferences::AddBoolVarCache(&sClickHoldContextMenu,
-                                    "ui.click_hold_context_menus",
-                                    sClickHoldContextMenu);
-  MOZ_ASSERT(NS_SUCCEEDED(rv),
-             "Failed to observe \"ui.click_hold_context_menus\"");
+  Preferences::AddBoolVarCache(&sKeyCausesActivation,
+                               "accessibility.accesskeycausesactivation",
+                               sKeyCausesActivation);
+  Preferences::AddBoolVarCache(&sClickHoldContextMenu,
+                               "ui.click_hold_context_menus",
+                               sClickHoldContextMenu);
   sPrefsAlreadyCached = true;
 }
 

@@ -630,7 +630,7 @@ void ReflowInput::InitResizeFlags(nsPresContext* aPresContext,
     // value it's relative to has changed.
     SetBResize(true);
     mFlags.mIsBResizeForPercentages = true;
-  } else if (IsTableCell(aFrameType) &&
+  } else if (aFrameType == LayoutFrameType::TableCell &&
              (mFlags.mSpecialBSizeReflow ||
               (mFrame->FirstInFlow()->GetStateBits() &
                NS_TABLE_CELL_HAD_SPECIAL_REFLOW)) &&
@@ -688,7 +688,7 @@ void ReflowInput::InitResizeFlags(nsPresContext* aPresContext,
   // the special bsize reflow, since in that case it will already be
   // set correctly above if we need it set.
   if (!IsBResize() && mCBReflowInput &&
-      (IsTableCell(mCBReflowInput->mFrame->Type()) ||
+      (mCBReflowInput->mFrame->IsTableCellFrame() ||
        mCBReflowInput->mFlags.mHeightDependsOnAncestorCell) &&
       !mCBReflowInput->mFlags.mSpecialBSizeReflow && dependsOnCBBSize) {
     SetBResize(true);
@@ -837,8 +837,8 @@ void ReflowInput::InitDynamicReflowRoot() {
   // Subgrids are never reflow roots, but 'contain:layout/paint' prevents
   // creating a subgrid in the first place.
   if (canBeDynamicReflowRoot &&
-      (mStylePosition->GridTemplateColumns().mIsSubgrid ||
-       mStylePosition->GridTemplateRows().mIsSubgrid) &&
+      (mStylePosition->mGridTemplateColumns.IsSubgrid() ||
+       mStylePosition->mGridTemplateRows.IsSubgrid()) &&
       !(mStyleDisplay->IsContainLayout() || mStyleDisplay->IsContainPaint())) {
     // NOTE: we could check that 'display' of our content's primary frame is
     // '[inline-]grid' here but that's probably not worth it in practice.
@@ -894,46 +894,35 @@ void ReflowInput::InitFrameType(LayoutFrameType aFrameType) {
       frameType = NS_CSS_FRAME_TYPE_UNKNOWN;
     }
   } else {
-    switch (GetDisplay()) {
-      case StyleDisplay::Block:
-      case StyleDisplay::ListItem:
-      case StyleDisplay::Table:
-      case StyleDisplay::TableCaption:
-      case StyleDisplay::Flex:
-      case StyleDisplay::WebkitBox:
-      case StyleDisplay::Grid:
-      case StyleDisplay::FlowRoot:
-      case StyleDisplay::RubyTextContainer:
+    switch (disp->DisplayOutside()) {
+      case StyleDisplayOutside::Block:
+      case StyleDisplayOutside::TableCaption:
         frameType = NS_CSS_FRAME_TYPE_BLOCK;
         break;
 
-      case StyleDisplay::Inline:
-      case StyleDisplay::InlineBlock:
-      case StyleDisplay::InlineTable:
-      case StyleDisplay::MozInlineBox:
-      case StyleDisplay::MozInlineGrid:
-      case StyleDisplay::MozInlineStack:
-      case StyleDisplay::InlineFlex:
-      case StyleDisplay::WebkitInlineBox:
-      case StyleDisplay::InlineGrid:
-      case StyleDisplay::Ruby:
-      case StyleDisplay::RubyBase:
-      case StyleDisplay::RubyText:
-      case StyleDisplay::RubyBaseContainer:
+      case StyleDisplayOutside::Inline:
         frameType = NS_CSS_FRAME_TYPE_INLINE;
         break;
 
-      case StyleDisplay::TableCell:
-      case StyleDisplay::TableRowGroup:
-      case StyleDisplay::TableColumn:
-      case StyleDisplay::TableColumnGroup:
-      case StyleDisplay::TableHeaderGroup:
-      case StyleDisplay::TableFooterGroup:
-      case StyleDisplay::TableRow:
+      case StyleDisplayOutside::InternalTable:
         frameType = NS_CSS_FRAME_TYPE_INTERNAL_TABLE;
         break;
 
-      case StyleDisplay::None:
+      case StyleDisplayOutside::InternalRuby:
+        switch (disp->DisplayInside()) {
+          case StyleDisplayInside::RubyTextContainer:
+            frameType = NS_CSS_FRAME_TYPE_BLOCK;
+            break;
+          case StyleDisplayInside::RubyBase:
+          case StyleDisplayInside::RubyText:
+          case StyleDisplayInside::RubyBaseContainer:
+            frameType = NS_CSS_FRAME_TYPE_INLINE;
+            break;
+          default:
+            MOZ_ASSERT_UNREACHABLE("unexpected inside for InternalRuby");
+        }
+        break;
+
       default:
         frameType = NS_CSS_FRAME_TYPE_UNKNOWN;
         break;
@@ -2241,7 +2230,7 @@ void ReflowInput::InitConstraints(
       // passed in.
       // XXX It seems like this could lead to bugs with min-height and friends
       if (cbri->mParentReflowInput) {
-        if (IsTableCell(cbri->mFrame->Type())) {
+        if (cbri->mFrame->IsTableCellFrame()) {
           // use the cell's computed block size
           cbSize.BSize(wm) = cbri->ComputedSize(wm).BSize(wm);
         }
@@ -2276,7 +2265,7 @@ void ReflowInput::InitConstraints(
           // in quirks mode, get the cb height using the special quirk method
           if (!wm.IsVertical() &&
               eCompatibility_NavQuirks == aPresContext->CompatibilityMode()) {
-            if (!IsTableCell(cbri->mFrame->Type())) {
+            if (!cbri->mFrame->IsTableCellFrame()) {
               cbSize.BSize(wm) = CalcQuirkContainingBlockHeight(cbri);
               if (cbSize.BSize(wm) == NS_UNCONSTRAINEDSIZE) {
                 isAutoBSize = true;

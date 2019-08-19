@@ -169,8 +169,8 @@ class SharedArrayBufferObject : public ArrayBufferObjectMaybeShared {
 
   static const uint8_t RESERVED_SLOTS = 2;
 
-  static const Class class_;
-  static const Class protoClass_;
+  static const JSClass class_;
+  static const JSClass protoClass_;
 
   static bool byteLengthGetter(JSContext* cx, unsigned argc, Value* vp);
 
@@ -187,7 +187,7 @@ class SharedArrayBufferObject : public ArrayBufferObjectMaybeShared {
                                       uint32_t length,
                                       HandleObject proto = nullptr);
 
-  static void Finalize(FreeOp* fop, JSObject* obj);
+  static void Finalize(JSFreeOp* fop, JSObject* obj);
 
   static void addSizeOfExcludingThis(JSObject* obj,
                                      mozilla::MallocSizeOf mallocSizeOf,

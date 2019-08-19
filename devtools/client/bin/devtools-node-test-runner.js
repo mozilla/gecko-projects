@@ -46,7 +46,7 @@ const SUITES = {
     type: TEST_TYPES.JEST,
   },
   webconsole: {
-    path: "../webconsole/test",
+    path: "../webconsole/test/node",
     type: TEST_TYPES.MOCHA,
   },
 };
@@ -146,6 +146,10 @@ function runTests() {
     console.log(`[devtools-node-test-runner] Test suite [${suite}] succeeded`);
   } else {
     console.log(`[devtools-node-test-runner] Test suite [${suite}] failed`);
+    console.log(
+      "[devtools-node-test-runner] You can find documentation about the " +
+        "devtools node tests at https://docs.firefox-dev.tools/tests/node-tests.html"
+    );
   }
   return success;
 }

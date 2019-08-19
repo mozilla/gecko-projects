@@ -1230,51 +1230,31 @@ pub extern "C" fn Servo_Element_SizeOfExcludingThisAndCVs(
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_Element_HasPrimaryComputedValues(element: &RawGeckoElement) -> bool {
-    let element = GeckoElement(element);
-    let data = element
-        .borrow_data()
-        .expect("Looking for CVs on unstyled element");
-    data.has_styles()
-}
-
-#[no_mangle]
-pub extern "C" fn Servo_Element_GetPrimaryComputedValues(
+pub extern "C" fn Servo_Element_GetMaybeOutOfDateStyle(
     element: &RawGeckoElement,
-) -> Strong<ComputedValues> {
+) -> *const ComputedValues {
     let element = GeckoElement(element);
-    let data = element
-        .borrow_data()
-        .expect("Getting CVs on unstyled element");
-    data.styles.primary().clone().into()
+    let data = match element.borrow_data() {
+        Some(d) => d,
+        None => return ptr::null(),
+    };
+    &**data.styles.primary() as *const _
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_Element_HasPseudoComputedValues(
+pub extern "C" fn Servo_Element_GetMaybeOutOfDatePseudoStyle(
     element: &RawGeckoElement,
     index: usize,
-) -> bool {
+) -> *const ComputedValues {
     let element = GeckoElement(element);
-    let data = element
-        .borrow_data()
-        .expect("Looking for CVs on unstyled element");
-    data.styles.pseudos.as_array()[index].is_some()
-}
-
-#[no_mangle]
-pub extern "C" fn Servo_Element_GetPseudoComputedValues(
-    element: &RawGeckoElement,
-    index: usize,
-) -> Strong<ComputedValues> {
-    let element = GeckoElement(element);
-    let data = element
-        .borrow_data()
-        .expect("Getting CVs that aren't present");
-    data.styles.pseudos.as_array()[index]
-        .as_ref()
-        .expect("Getting CVs that aren't present")
-        .clone()
-        .into()
+    let data = match element.borrow_data() {
+        Some(d) => d,
+        None => return ptr::null(),
+    };
+    match data.styles.pseudos.as_array()[index].as_ref() {
+        Some(style) => &**style as *const _,
+        None => ptr::null(),
+    }
 }
 
 #[no_mangle]
@@ -6040,15 +6020,7 @@ pub unsafe extern "C" fn Servo_GetPropertyValue(
     prop: nsCSSPropertyID,
     value: *mut nsAString,
 ) {
-    use style::properties::PropertyFlags;
-
     if let Ok(longhand) = LonghandId::from_nscsspropertyid(prop) {
-        debug_assert!(
-            !longhand
-                .flags()
-                .contains(PropertyFlags::GETCS_NEEDS_LAYOUT_FLUSH),
-            "We're not supposed to serialize layout-dependent properties"
-        );
         style
             .get_longhand_property_value(longhand, &mut CssWriter::new(&mut *value))
             .unwrap();
@@ -6067,12 +6039,6 @@ pub unsafe extern "C" fn Servo_GetPropertyValue(
             !longhand.is_logical(),
             "This won't quite do the right thing if we want to serialize \
              logical shorthands"
-        );
-        debug_assert!(
-            !longhand
-                .flags()
-                .contains(PropertyFlags::GETCS_NEEDS_LAYOUT_FLUSH),
-            "Layout-dependent properties shouldn't get here"
         );
         let animated = AnimationValue::from_computed_values(longhand, style).expect(
             "Somebody tried to serialize a shorthand with \

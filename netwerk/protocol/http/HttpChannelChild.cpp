@@ -3927,20 +3927,17 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvIssueDeprecationWarning(
 }
 
 bool HttpChannelChild::ShouldInterceptURI(nsIURI* aURI, bool& aShouldUpgrade) {
-  bool isHttps = false;
-  nsresult rv = aURI->SchemeIs("https", &isHttps);
-  NS_ENSURE_SUCCESS(rv, false);
   nsCOMPtr<nsIPrincipal> resultPrincipal;
-  if (!isHttps && mLoadInfo) {
+  if (!aURI->SchemeIs("https") && mLoadInfo) {
     nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
         this, getter_AddRefs(resultPrincipal));
   }
   OriginAttributes originAttributes;
   NS_ENSURE_TRUE(NS_GetOriginAttributes(this, originAttributes), false);
   bool notused = false;
-  rv = NS_ShouldSecureUpgrade(aURI, mLoadInfo, resultPrincipal,
-                              mPrivateBrowsing, mAllowSTS, originAttributes,
-                              aShouldUpgrade, nullptr, notused);
+  nsresult rv = NS_ShouldSecureUpgrade(
+      aURI, mLoadInfo, resultPrincipal, mPrivateBrowsing, mAllowSTS,
+      originAttributes, aShouldUpgrade, nullptr, notused);
   NS_ENSURE_SUCCESS(rv, false);
 
   nsCOMPtr<nsIURI> upgradedURI;
@@ -4061,6 +4058,10 @@ nsresult HttpChannelChild::CrossProcessRedirectFinished(nsresult aStatus) {
     return NS_BINDING_FAILED;
   }
 
+  if (!mCanceled && NS_SUCCEEDED(mStatus)) {
+    mStatus = aStatus;
+  }
+
   // The loadInfo is updated in nsDocShell::OpenInitializedChannel to have the
   // correct attributes (such as browsingContextID).
   // We need to send it to the parent channel so the two match, which is done
@@ -4069,7 +4070,7 @@ nsresult HttpChannelChild::CrossProcessRedirectFinished(nsresult aStatus) {
   Maybe<LoadInfoArgs> loadInfoArgs;
   MOZ_ALWAYS_SUCCEEDS(
       mozilla::ipc::LoadInfoToLoadInfoArgs(loadInfo, &loadInfoArgs));
-  Unused << SendCrossProcessRedirectDone(aStatus, loadInfoArgs);
+  Unused << SendCrossProcessRedirectDone(mStatus, loadInfoArgs);
   return NS_OK;
 }
 

@@ -20,17 +20,18 @@
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Move.h"
+#include "mozilla/mozalloc.h"
+#include "mozilla/OwningNonNull.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/RangeUtils.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLBRElement.h"
+#include "mozilla/dom/RangeBinding.h"
 #include "mozilla/dom/Selection.h"
 #include "mozilla/dom/StaticRange.h"
-#include "mozilla/dom/Element.h"
-#include "mozilla/dom/RangeBinding.h"
-#include "mozilla/OwningNonNull.h"
-#include "mozilla/mozalloc.h"
 #include "nsAString.h"
 #include "nsAlgorithm.h"
 #include "nsCRT.h"
@@ -69,9 +70,6 @@ namespace mozilla {
 
 using namespace dom;
 
-// const static char* kMOZEditorBogusNodeAttr="MOZ_EDITOR_BOGUS_NODE";
-// const static char* kMOZEditorBogusNodeValue="TRUE";
-
 enum { kLonely = 0, kPrevSib = 1, kNextSib = 2, kBothSibs = 3 };
 
 /********************************************************
@@ -79,18 +77,24 @@ enum { kLonely = 0, kPrevSib = 1, kNextSib = 2, kBothSibs = 3 };
  ********************************************************/
 
 static bool IsStyleCachePreservingSubAction(EditSubAction aEditSubAction) {
-  return aEditSubAction == EditSubAction::eDeleteSelectedContent ||
-         aEditSubAction == EditSubAction::eInsertLineBreak ||
-         aEditSubAction == EditSubAction::eInsertParagraphSeparator ||
-         aEditSubAction == EditSubAction::eCreateOrChangeList ||
-         aEditSubAction == EditSubAction::eIndent ||
-         aEditSubAction == EditSubAction::eOutdent ||
-         aEditSubAction == EditSubAction::eSetOrClearAlignment ||
-         aEditSubAction == EditSubAction::eCreateOrRemoveBlock ||
-         aEditSubAction == EditSubAction::eRemoveList ||
-         aEditSubAction == EditSubAction::eCreateOrChangeDefinitionList ||
-         aEditSubAction == EditSubAction::eInsertElement ||
-         aEditSubAction == EditSubAction::eInsertQuotation;
+  switch (aEditSubAction) {
+    case EditSubAction::eDeleteSelectedContent:
+    case EditSubAction::eInsertLineBreak:
+    case EditSubAction::eInsertParagraphSeparator:
+    case EditSubAction::eCreateOrChangeList:
+    case EditSubAction::eIndent:
+    case EditSubAction::eOutdent:
+    case EditSubAction::eSetOrClearAlignment:
+    case EditSubAction::eCreateOrRemoveBlock:
+    case EditSubAction::eRemoveList:
+    case EditSubAction::eCreateOrChangeDefinitionList:
+    case EditSubAction::eInsertElement:
+    case EditSubAction::eInsertQuotation:
+    case EditSubAction::eInsertQuotedText:
+      return true;
+    default:
+      return false;
+  }
 }
 
 static nsAtom& ParagraphSeparatorElement(ParagraphSeparator separator) {
@@ -185,9 +189,11 @@ class MOZ_RAII AutoSetTemporaryAncestorLimiter final {
 
 HTMLEditRules::HTMLEditRules()
     : mHTMLEditor(nullptr),
+      mInitialized(false),
       mListenerEnabled(false),
       mReturnInEmptyLIKillsList(false),
       mDidDeleteSelection(false),
+      mDidExplicitlySetInterline(false),
       mDidRangedDelete(false),
       mDidEmptyParentBlocksRemoved(false),
       mRestoreContentEditableCount(false),
@@ -201,6 +207,7 @@ void HTMLEditRules::InitFields() {
   mDocChangeRange = nullptr;
   mReturnInEmptyLIKillsList = true;
   mDidDeleteSelection = false;
+  mDidExplicitlySetInterline = false;
   mDidRangedDelete = false;
   mDidEmptyParentBlocksRemoved = false;
   mRestoreContentEditableCount = false;
@@ -279,9 +286,6 @@ nsresult HTMLEditRules::Init(TextEditor* aTextEditor) {
 
   mUtilRange = new nsRange(node);
 
-  // set up mDocChangeRange to be whole doc
-  // temporarily turn off rules sniffing
-  AutoLockRulesSniffing lockIt(this);
   if (!mDocChangeRange) {
     mDocChangeRange = new nsRange(node);
   }
@@ -303,6 +307,8 @@ nsresult HTMLEditRules::Init(TextEditor* aTextEditor) {
 
   StartToListenToEditSubActions();
 
+  mInitialized = true;  // Start to handle edit sub-actions.
+
   return NS_OK;
 }
 
@@ -312,141 +318,146 @@ nsresult HTMLEditRules::DetachEditor() {
   return TextEditRules::DetachEditor();
 }
 
-nsresult HTMLEditRules::BeforeEdit(EditSubAction aEditSubAction,
-                                   nsIEditor::EDirection aDirection) {
+nsresult HTMLEditRules::BeforeEdit() {
+  MOZ_ASSERT(!mIsHandling);
+
   if (NS_WARN_IF(!CanHandleEditAction())) {
     return NS_ERROR_EDITOR_DESTROYED;
   }
 
-  if (mLockRulesSniffing) {
-    return NS_OK;
+  if (!mInitialized) {
+    return NS_OK;  // We should do nothing if we're being initialized.
   }
 
-  AutoLockRulesSniffing lockIt(this);
   mDidExplicitlySetInterline = false;
 
-  if (!mActionNesting) {
-    mActionNesting++;
+#ifdef DEBUG
+  mIsHandling = true;
+#endif  // #ifdef DEBUG
 
-    // Clear our flag about if just deleted a range
-    mDidRangedDelete = false;
+  // Clear our flag about if just deleted a range
+  mDidRangedDelete = false;
 
-    AutoSafeEditorData setData(*this, *mHTMLEditor);
+  AutoSafeEditorData setData(*this, *mHTMLEditor);
 
-    // Remember where our selection was before edit action took place:
-    if (HTMLEditorRef().GetCompositionStartPoint().IsSet()) {
-      // If there is composition string, let's remember current composition
-      // range.
-      mRangeItem->StoreRange(HTMLEditorRef().GetCompositionStartPoint(),
-                             HTMLEditorRef().GetCompositionEndPoint());
-    } else {
-      // Get the selection location
-      if (!SelectionRefPtr()->RangeCount()) {
-        return NS_ERROR_UNEXPECTED;
-      }
-      mRangeItem->StoreRange(SelectionRefPtr()->GetRangeAt(0));
+  // Remember where our selection was before edit action took place:
+  if (HTMLEditorRef().GetCompositionStartPoint().IsSet()) {
+    // If there is composition string, let's remember current composition
+    // range.
+    mRangeItem->StoreRange(HTMLEditorRef().GetCompositionStartPoint(),
+                           HTMLEditorRef().GetCompositionEndPoint());
+  } else {
+    // Get the selection location
+    if (!SelectionRefPtr()->RangeCount()) {
+      return NS_ERROR_UNEXPECTED;
     }
-    nsCOMPtr<nsINode> selStartNode = mRangeItem->mStartContainer;
-    nsCOMPtr<nsINode> selEndNode = mRangeItem->mEndContainer;
+    mRangeItem->StoreRange(SelectionRefPtr()->GetRangeAt(0));
+  }
+  nsCOMPtr<nsINode> selStartNode = mRangeItem->mStartContainer;
+  nsCOMPtr<nsINode> selEndNode = mRangeItem->mEndContainer;
 
-    // Register with range updater to track this as we perturb the doc
-    HTMLEditorRef().RangeUpdaterRef().RegisterRangeItem(mRangeItem);
+  // Register with range updater to track this as we perturb the doc
+  HTMLEditorRef().RangeUpdaterRef().RegisterRangeItem(mRangeItem);
 
-    // Clear deletion state bool
-    mDidDeleteSelection = false;
+  // Clear deletion state bool
+  mDidDeleteSelection = false;
 
-    // Clear out mDocChangeRange and mUtilRange
-    if (mDocChangeRange) {
-      // Clear out our accounting of what changed
-      mDocChangeRange->Reset();
+  // Clear out mDocChangeRange and mUtilRange
+  if (mDocChangeRange) {
+    // Clear out our accounting of what changed
+    mDocChangeRange->Reset();
+  }
+  if (mUtilRange) {
+    // Ditto for mUtilRange.
+    mUtilRange->Reset();
+  }
+
+  // Remember current inline styles for deletion and normal insertion ops
+  bool cacheInlineStyles;
+  switch (HTMLEditorRef().GetTopLevelEditSubAction()) {
+    case EditSubAction::eInsertText:
+    case EditSubAction::eInsertTextComingFromIME:
+    case EditSubAction::eDeleteSelectedContent:
+      cacheInlineStyles = true;
+      break;
+    default:
+      cacheInlineStyles = IsStyleCachePreservingSubAction(
+          HTMLEditorRef().GetTopLevelEditSubAction());
+      break;
+  }
+  if (cacheInlineStyles) {
+    nsCOMPtr<nsINode> selNode =
+        HTMLEditorRef().GetDirectionOfTopLevelEditSubAction() ==
+                nsIEditor::eNext
+            ? selEndNode
+            : selStartNode;
+    nsresult rv = CacheInlineStyles(selNode);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
     }
-    if (mUtilRange) {
-      // Ditto for mUtilRange.
-      mUtilRange->Reset();
-    }
+  }
 
-    // Remember current inline styles for deletion and normal insertion ops
-    if (aEditSubAction == EditSubAction::eInsertText ||
-        aEditSubAction == EditSubAction::eInsertTextComingFromIME ||
-        aEditSubAction == EditSubAction::eDeleteSelectedContent ||
-        IsStyleCachePreservingSubAction(aEditSubAction)) {
-      nsCOMPtr<nsINode> selNode =
-          aDirection == nsIEditor::eNext ? selEndNode : selStartNode;
-      nsresult rv = CacheInlineStyles(selNode);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-      }
-    }
+  // Stabilize the document against contenteditable count changes
+  Document* doc = HTMLEditorRef().GetDocument();
+  if (NS_WARN_IF(!doc)) {
+    return NS_ERROR_FAILURE;
+  }
+  if (doc->GetEditingState() == Document::EditingState::eContentEditable) {
+    doc->ChangeContentEditableCount(nullptr, +1);
+    mRestoreContentEditableCount = true;
+  }
 
-    // Stabilize the document against contenteditable count changes
+  // Check that selection is in subtree defined by body node
+  nsresult rv = ConfirmSelectionInBody();
+  if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED)) {
+    return NS_ERROR_EDITOR_DESTROYED;
+  }
+
+  return NS_OK;
+}
+
+nsresult HTMLEditRules::AfterEdit() {
+  if (NS_WARN_IF(!CanHandleEditAction())) {
+    return NS_ERROR_EDITOR_DESTROYED;
+  }
+
+  if (!mInitialized) {
+    return NS_OK;  // We should do nothing if we're being initialized.
+  }
+
+#ifdef DEBUG
+  MOZ_ASSERT(mIsHandling);
+  mIsHandling = false;
+#endif  // #ifdef DEBUG
+
+  AutoSafeEditorData setData(*this, *mHTMLEditor);
+
+  // Do all the tricky stuff
+  nsresult rv = AfterEditInner();
+  // Perhaps, we need to do the following jobs even if the editor has been
+  // destroyed since they adjust some states of HTML document but don't
+  // modify the DOM tree nor Selection.
+
+  // Free up selectionState range item
+  HTMLEditorRef().RangeUpdaterRef().DropRangeItem(mRangeItem);
+
+  // Reset the contenteditable count to its previous value
+  if (mRestoreContentEditableCount) {
     Document* doc = HTMLEditorRef().GetDocument();
     if (NS_WARN_IF(!doc)) {
       return NS_ERROR_FAILURE;
     }
     if (doc->GetEditingState() == Document::EditingState::eContentEditable) {
-      doc->ChangeContentEditableCount(nullptr, +1);
-      mRestoreContentEditableCount = true;
+      doc->ChangeContentEditableCount(nullptr, -1);
     }
-
-    // Check that selection is in subtree defined by body node
-    nsresult rv = ConfirmSelectionInBody();
-    if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED)) {
-      return NS_ERROR_EDITOR_DESTROYED;
-    }
-    // Let rules remember the top level action
-    mTopLevelEditSubAction = aEditSubAction;
+    mRestoreContentEditableCount = false;
   }
-  return NS_OK;
+
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "AfterEditInner() failed");
+  return rv;
 }
 
-nsresult HTMLEditRules::AfterEdit(EditSubAction aEditSubAction,
-                                  nsIEditor::EDirection aDirection) {
-  if (NS_WARN_IF(!CanHandleEditAction())) {
-    return NS_ERROR_EDITOR_DESTROYED;
-  }
-
-  if (mLockRulesSniffing) {
-    return NS_OK;
-  }
-
-  AutoLockRulesSniffing lockIt(this);
-
-  MOZ_ASSERT(mActionNesting > 0);
-  nsresult rv = NS_OK;
-  mActionNesting--;
-  if (!mActionNesting) {
-    AutoSafeEditorData setData(*this, *mHTMLEditor);
-
-    // Do all the tricky stuff
-    rv = AfterEditInner(aEditSubAction, aDirection);
-    // Perhaps, we need to do the following jobs even if the editor has been
-    // destroyed since they adjust some states of HTML document but don't
-    // modify the DOM tree nor Selection.
-
-    // Free up selectionState range item
-    HTMLEditorRef().RangeUpdaterRef().DropRangeItem(mRangeItem);
-
-    // Reset the contenteditable count to its previous value
-    if (mRestoreContentEditableCount) {
-      Document* doc = HTMLEditorRef().GetDocument();
-      if (NS_WARN_IF(!doc)) {
-        return NS_ERROR_FAILURE;
-      }
-      if (doc->GetEditingState() == Document::EditingState::eContentEditable) {
-        doc->ChangeContentEditableCount(nullptr, -1);
-      }
-      mRestoreContentEditableCount = false;
-    }
-  }
-
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-  return NS_OK;
-}
-
-nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
-                                       nsIEditor::EDirection aDirection) {
+nsresult HTMLEditRules::AfterEditInner() {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   nsresult rv = ConfirmSelectionInBody();
@@ -454,9 +465,12 @@ nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
     return NS_ERROR_EDITOR_DESTROYED;
   }
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to normalize Selection");
-  if (aEditSubAction == EditSubAction::eReplaceHeadWithHTMLSource ||
-      aEditSubAction == EditSubAction::eCreateBogusNode) {
-    return NS_OK;
+  switch (HTMLEditorRef().GetTopLevelEditSubAction()) {
+    case EditSubAction::eReplaceHeadWithHTMLSource:
+    case EditSubAction::eCreatePaddingBRElementForEmptyEditor:
+      return NS_OK;
+    default:
+      break;
   }
 
   nsCOMPtr<nsINode> rangeStartContainer, rangeEndContainer;
@@ -473,14 +487,15 @@ nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
     }
   }
 
-  if (bDamagedRange && !((aEditSubAction == EditSubAction::eUndo) ||
-                         (aEditSubAction == EditSubAction::eRedo))) {
+  if (bDamagedRange &&
+      HTMLEditorRef().GetTopLevelEditSubAction() != EditSubAction::eUndo &&
+      HTMLEditorRef().GetTopLevelEditSubAction() != EditSubAction::eRedo) {
     // don't let any txns in here move the selection around behind our back.
     // Note that this won't prevent explicit selection setting from working.
     AutoTransactionsConserveSelection dontChangeMySelection(HTMLEditorRef());
 
     // expand the "changed doc range" as needed
-    PromoteRange(*mDocChangeRange, aEditSubAction);
+    PromoteRange(*mDocChangeRange, HTMLEditorRef().GetTopLevelEditSubAction());
 
     // if we did a ranged deletion or handling backspace key, make sure we have
     // a place to put caret.
@@ -491,7 +506,8 @@ nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
     // However, we shouldn't insert <br> elements if we've already removed
     // empty block parents because users may want to disappear the line by
     // the deletion.
-    if (aEditSubAction == EditSubAction::eDeleteSelectedContent &&
+    if (HTMLEditorRef().GetTopLevelEditSubAction() ==
+            EditSubAction::eDeleteSelectedContent &&
         mDidRangedDelete && !mDidEmptyParentBlocksRemoved) {
       nsresult rv = InsertBRIfNeeded();
       if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -509,16 +525,21 @@ nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
         "Failed to insert <br> elements to empty list items and table cells");
 
     // merge any adjacent text nodes
-    if (aEditSubAction != EditSubAction::eInsertText &&
-        aEditSubAction != EditSubAction::eInsertTextComingFromIME) {
-      RefPtr<nsRange> docChangeRange = mDocChangeRange;
-      nsresult rv = MOZ_KnownLive(HTMLEditorRef())
-                        .CollapseAdjacentTextNodes(docChangeRange);
-      if (NS_WARN_IF(!CanHandleEditAction())) {
-        return NS_ERROR_EDITOR_DESTROYED;
-      }
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
+    switch (HTMLEditorRef().GetTopLevelEditSubAction()) {
+      case EditSubAction::eInsertText:
+      case EditSubAction::eInsertTextComingFromIME:
+        break;
+      default: {
+        RefPtr<nsRange> docChangeRange = mDocChangeRange;
+        nsresult rv = MOZ_KnownLive(HTMLEditorRef())
+                          .CollapseAdjacentTextNodes(docChangeRange);
+        if (NS_WARN_IF(!CanHandleEditAction())) {
+          return NS_ERROR_EDITOR_DESTROYED;
+        }
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+        break;
       }
     }
 
@@ -530,49 +551,57 @@ nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
 
     // attempt to transform any unneeded nbsp's into spaces after doing various
     // operations
-    if (aEditSubAction == EditSubAction::eInsertText ||
-        aEditSubAction == EditSubAction::eInsertTextComingFromIME ||
-        aEditSubAction == EditSubAction::eDeleteSelectedContent ||
-        aEditSubAction == EditSubAction::eInsertLineBreak ||
-        aEditSubAction == EditSubAction::eInsertParagraphSeparator ||
-        aEditSubAction == EditSubAction::ePasteHTMLContent ||
-        aEditSubAction == EditSubAction::eInsertHTMLSource) {
-      // TODO: Temporarily, WSRunObject replaces ASCII whitespaces with NPSPs
-      //       and then, we'll replace them with ASCII whitespaces here.  We
-      //       should avoid this overwriting things as far as possible because
-      //       replacing characters in text nodes causes running mutation event
-      //       listeners which are really expensive.
-      // Adjust end of composition string if there is composition string.
-      EditorRawDOMPoint pointToAdjust(HTMLEditorRef().GetCompositionEndPoint());
-      if (!pointToAdjust.IsSet()) {
-        // Otherwise, adjust current selection start point.
-        pointToAdjust = EditorBase::GetStartPoint(*SelectionRefPtr());
-        if (NS_WARN_IF(!pointToAdjust.IsSet())) {
+    switch (HTMLEditorRef().GetTopLevelEditSubAction()) {
+      case EditSubAction::eInsertText:
+      case EditSubAction::eInsertTextComingFromIME:
+      case EditSubAction::eDeleteSelectedContent:
+      case EditSubAction::eInsertLineBreak:
+      case EditSubAction::eInsertParagraphSeparator:
+      case EditSubAction::ePasteHTMLContent:
+      case EditSubAction::eInsertHTMLSource: {
+        // TODO: Temporarily, WSRunObject replaces ASCII whitespaces with NPSPs
+        //       and then, we'll replace them with ASCII whitespaces here.  We
+        //       should avoid this overwriting things as far as possible because
+        //       replacing characters in text nodes causes running mutation
+        //       event listeners which are really expensive.
+        // Adjust end of composition string if there is composition string.
+        EditorRawDOMPoint pointToAdjust(
+            HTMLEditorRef().GetCompositionEndPoint());
+        if (!pointToAdjust.IsSet()) {
+          // Otherwise, adjust current selection start point.
+          pointToAdjust = EditorBase::GetStartPoint(*SelectionRefPtr());
+          if (NS_WARN_IF(!pointToAdjust.IsSet())) {
+            return NS_ERROR_FAILURE;
+          }
+        }
+        rv = WSRunObject(&HTMLEditorRef(), pointToAdjust).AdjustWhitespace();
+        if (NS_WARN_IF(!CanHandleEditAction())) {
+          return NS_ERROR_EDITOR_DESTROYED;
+        }
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+
+        // also do this for original selection endpoints.
+        if (NS_WARN_IF(!mRangeItem->mStartContainer) ||
+            NS_WARN_IF(!mRangeItem->mEndContainer)) {
           return NS_ERROR_FAILURE;
         }
-      }
-      rv = WSRunObject(&HTMLEditorRef(), pointToAdjust).AdjustWhitespace();
-      if (NS_WARN_IF(!CanHandleEditAction())) {
-        return NS_ERROR_EDITOR_DESTROYED;
-      }
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-      }
-
-      // also do this for original selection endpoints.
-      NS_ENSURE_STATE(mRangeItem->mStartContainer);
-      NS_ENSURE_STATE(mRangeItem->mEndContainer);
-      WSRunObject(&HTMLEditorRef(), mRangeItem->mStartContainer,
-                  mRangeItem->mStartOffset)
-          .AdjustWhitespace();
-      // we only need to handle old selection endpoint if it was different from
-      // start
-      if (mRangeItem->mStartContainer != mRangeItem->mEndContainer ||
-          mRangeItem->mStartOffset != mRangeItem->mEndOffset) {
-        WSRunObject(&HTMLEditorRef(), mRangeItem->mEndContainer,
-                    mRangeItem->mEndOffset)
+        WSRunObject(&HTMLEditorRef(), mRangeItem->mStartContainer,
+                    mRangeItem->mStartOffset)
             .AdjustWhitespace();
+        // we only need to handle old selection endpoint if it was different
+        // from start
+        if (mRangeItem->mStartContainer != mRangeItem->mEndContainer ||
+            mRangeItem->mStartOffset != mRangeItem->mEndOffset) {
+          WSRunObject(&HTMLEditorRef(), mRangeItem->mEndContainer,
+                      mRangeItem->mEndOffset)
+              .AdjustWhitespace();
+        }
+        break;
       }
+      default:
+        break;
     }
 
     // if we created a new block, make sure selection lands in it
@@ -591,7 +620,7 @@ nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
     // are removed, Selection should've been adjusted by the method which
     // did it.
     if (!mDidEmptyParentBlocksRemoved) {
-      switch (aEditSubAction) {
+      switch (HTMLEditorRef().GetTopLevelEditSubAction()) {
         case EditSubAction::eInsertText:
         case EditSubAction::eInsertTextComingFromIME:
         case EditSubAction::eDeleteSelectedContent:
@@ -599,7 +628,8 @@ nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
         case EditSubAction::eInsertParagraphSeparator:
         case EditSubAction::ePasteHTMLContent:
         case EditSubAction::eInsertHTMLSource:
-          rv = AdjustSelection(aDirection);
+          rv = AdjustSelection(
+              HTMLEditorRef().GetDirectionOfTopLevelEditSubAction());
           if (NS_WARN_IF(NS_FAILED(rv))) {
             return rv;
           }
@@ -610,10 +640,19 @@ nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
     }
 
     // check for any styles which were removed inappropriately
-    if (aEditSubAction == EditSubAction::eInsertText ||
-        aEditSubAction == EditSubAction::eInsertTextComingFromIME ||
-        aEditSubAction == EditSubAction::eDeleteSelectedContent ||
-        IsStyleCachePreservingSubAction(aEditSubAction)) {
+    bool reapplyCachedStyle;
+    switch (HTMLEditorRef().GetTopLevelEditSubAction()) {
+      case EditSubAction::eInsertText:
+      case EditSubAction::eInsertTextComingFromIME:
+      case EditSubAction::eDeleteSelectedContent:
+        reapplyCachedStyle = true;
+        break;
+      default:
+        reapplyCachedStyle = IsStyleCachePreservingSubAction(
+            HTMLEditorRef().GetTopLevelEditSubAction());
+        break;
+    }
+    if (reapplyCachedStyle) {
       HTMLEditorRef().mTypeInState->UpdateSelState(SelectionRefPtr());
       rv = ReapplyCachedStyles();
       if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -624,14 +663,18 @@ nsresult HTMLEditRules::AfterEditInner(EditSubAction aEditSubAction,
   }
 
   rv = HTMLEditorRef().HandleInlineSpellCheck(
-      aEditSubAction, mRangeItem->mStartContainer, mRangeItem->mStartOffset,
+      mRangeItem->mStartContainer, mRangeItem->mStartOffset,
       rangeStartContainer, rangeStartOffset, rangeEndContainer, rangeEndOffset);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
   // detect empty doc
-  rv = CreateBogusNodeIfNeeded();
+  // XXX Need to investigate when the padding <br> element is removed because
+  //     I don't see the <br> element with testing manually.  If it won't be
+  //     used, we can get rid of this cost.
+  rv = MOZ_KnownLive(HTMLEditorRef())
+           .MaybeCreatePaddingBRElementForEmptyEditor();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -658,9 +701,7 @@ nsresult HTMLEditRules::WillDoAction(EditSubActionInfo& aInfo, bool* aCancel,
 
   // Deal with actions for which we don't need to check whether the selection is
   // editable.
-  if (aInfo.mEditSubAction == EditSubAction::eComputeTextToOutput ||
-      aInfo.mEditSubAction == EditSubAction::eUndo ||
-      aInfo.mEditSubAction == EditSubAction::eRedo) {
+  if (aInfo.mEditSubAction == EditSubAction::eComputeTextToOutput) {
     return TextEditRules::WillDoAction(aInfo, aCancel, aHandled);
   }
 
@@ -709,8 +750,6 @@ nsresult HTMLEditRules::WillDoAction(EditSubActionInfo& aInfo, bool* aCancel,
       UndefineCaretBidiLevel();
       return WillInsertText(aInfo.mEditSubAction, aCancel, aHandled,
                             aInfo.inString, aInfo.outString, aInfo.maxLength);
-    case EditSubAction::eInsertHTMLSource:
-      return WillLoadHTML();
     case EditSubAction::eInsertParagraphSeparator: {
       UndefineCaretBidiLevel();
       EditActionResult result = WillInsertParagraphSeparator();
@@ -754,7 +793,8 @@ nsresult HTMLEditRules::WillDoAction(EditSubActionInfo& aInfo, bool* aCancel,
     case EditSubAction::eCreateOrChangeDefinitionList:
       return WillMakeDefListItem(aInfo.blockType, aInfo.entireList, aCancel,
                                  aHandled);
-    case EditSubAction::eInsertElement: {
+    case EditSubAction::eInsertElement:
+    case EditSubAction::eInsertQuotedText: {
       nsresult rv = WillInsert(aCancel);
       if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED)) {
         return NS_ERROR_EDITOR_DESTROYED;
@@ -766,6 +806,11 @@ nsresult HTMLEditRules::WillDoAction(EditSubActionInfo& aInfo, bool* aCancel,
       return WillRelativeChangeZIndex(-1, aCancel, aHandled);
     case EditSubAction::eIncreaseZIndex:
       return WillRelativeChangeZIndex(1, aCancel, aHandled);
+    case EditSubAction::eInsertHTMLSource:
+    case EditSubAction::eUndo:
+    case EditSubAction::eRedo:
+      MOZ_ASSERT_UNREACHABLE("This path should've been dead code");
+      return NS_ERROR_UNEXPECTED;
     default:
       return TextEditRules::WillDoAction(aInfo, aCancel, aHandled);
   }
@@ -799,12 +844,24 @@ nsresult HTMLEditRules::DidDoAction(EditSubActionInfo& aInfo,
       }
       return DidAbsolutePosition();
     }
+    case EditSubAction::eInsertElement:
+    case EditSubAction::eInsertQuotedText:
+      return NS_OK;
+    case EditSubAction::eInsertHTMLSource:
+    case EditSubAction::eUndo:
+    case EditSubAction::eRedo:
+      MOZ_ASSERT_UNREACHABLE("This path should've been dead code");
+      return NS_ERROR_UNEXPECTED;
     default:
       return TextEditRules::DidDoAction(aInfo, aResult);
   }
 }
 
-bool HTMLEditRules::DocumentIsEmpty() { return !!mBogusNode; }
+bool HTMLEditRules::DocumentIsEmpty() const {
+  // XXX This is wrong.  Even if there is no padding <br> element for empty
+  //     editor, the editor may be empty.
+  return HTMLEditorRef().HasPaddingBRElementForEmptyEditor();
+}
 
 nsresult HTMLEditRules::GetListState(bool* aMixed, bool* aOL, bool* aUL,
                                      bool* aDL) {
@@ -1232,21 +1289,28 @@ nsresult HTMLEditRules::GetFormatString(nsINode* aNode, nsAString& outFormat) {
 nsresult HTMLEditRules::WillInsert(bool* aCancel) {
   MOZ_ASSERT(IsEditorDataAvailable());
 
-  nsresult rv = TextEditRules::WillInsert(aCancel);
+  // XXX Why don't we stop handling this call if we're readonly or disabled?
+  if (aCancel && (IsReadonly() || IsDisabled())) {
+    *aCancel = true;
+  }
+
+  nsresult rv =
+      MOZ_KnownLive(HTMLEditorRef()).EnsureNoPaddingBRElementForEmptyEditor();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
-  // Adjust selection to prevent insertion after a moz-BR.  This next only
-  // works for collapsed selections right now, because selection is a pain to
-  // work with when not collapsed.  (no good way to extend start or end of
-  // selection), so we ignore those types of selections.
+  // Adjust selection to prevent insertion after a padding <br> element for
+  // empty last line.  This next only works for collapsed selections right
+  // now, because selection is a pain to work with when not collapsed.  (no
+  // good way to extend start or end of selection), so we ignore those types
+  // of selections.
   if (!SelectionRefPtr()->IsCollapsed()) {
     return NS_OK;
   }
 
-  // If we are after a mozBR in the same block, then move selection to be
-  // before it
+  // If we are after a padding <br> element for empty last line in the same
+  // block, then move selection to be before it
   nsRange* firstRange = SelectionRefPtr()->GetRangeAt(0);
   if (NS_WARN_IF(!firstRange)) {
     return NS_ERROR_FAILURE;
@@ -1261,15 +1325,16 @@ nsresult HTMLEditRules::WillInsert(bool* aCancel) {
   // Get prior node
   nsCOMPtr<nsIContent> priorNode =
       HTMLEditorRef().GetPreviousEditableHTMLNode(atStartOfSelection);
-  if (priorNode && TextEditUtils::IsMozBR(priorNode)) {
+  if (priorNode && EditorBase::IsPaddingBRElementForEmptyLastLine(*priorNode)) {
     RefPtr<Element> block1 =
         HTMLEditorRef().GetBlock(*atStartOfSelection.GetContainer());
     RefPtr<Element> block2 = HTMLEditorRef().GetBlockNodeParent(priorNode);
 
     if (block1 && block1 == block2) {
-      // If we are here then the selection is right after a mozBR that is in
-      // the same block as the selection.  We need to move the selection start
-      // to be before the mozBR.
+      // If we are here then the selection is right after a padding <br>
+      // element for empty last line that is in the same block as the
+      // selection.  We need to move the selection start to be before the
+      // padding <br> element.
       EditorRawDOMPoint point(priorNode);
       ErrorResult error;
       SelectionRefPtr()->Collapse(point, error);
@@ -1283,18 +1348,25 @@ nsresult HTMLEditRules::WillInsert(bool* aCancel) {
     }
   }
 
-  if (mDidDeleteSelection &&
-      (mTopLevelEditSubAction == EditSubAction::eInsertText ||
-       mTopLevelEditSubAction == EditSubAction::eInsertTextComingFromIME ||
-       mTopLevelEditSubAction == EditSubAction::eDeleteSelectedContent)) {
-    nsresult rv = ReapplyCachedStyles();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+  if (mDidDeleteSelection) {
+    switch (HTMLEditorRef().GetTopLevelEditSubAction()) {
+      case EditSubAction::eInsertText:
+      case EditSubAction::eInsertTextComingFromIME:
+      case EditSubAction::eDeleteSelectedContent: {
+        nsresult rv = ReapplyCachedStyles();
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return rv;
+        }
+        break;
+      }
+      default:
+        break;
     }
   }
   // For most actions we want to clear the cached styles, but there are
   // exceptions
-  if (!IsStyleCachePreservingSubAction(mTopLevelEditSubAction)) {
+  if (!IsStyleCachePreservingSubAction(
+          HTMLEditorRef().GetTopLevelEditSubAction())) {
     ClearCachedStyles();
   }
   return NS_OK;
@@ -1474,7 +1546,7 @@ nsresult HTMLEditRules::WillInsertText(EditSubAction aEditSubAction,
         // is it a return?
         if (subStr.Equals(newlineStr)) {
           RefPtr<Element> brElement = MOZ_KnownLive(HTMLEditorRef())
-                                          .InsertBrElementWithTransaction(
+                                          .InsertBRElementWithTransaction(
                                               currentPoint, nsIEditor::eNone);
           if (NS_WARN_IF(!CanHandleEditAction())) {
             return NS_ERROR_EDITOR_DESTROYED;
@@ -1635,27 +1707,6 @@ nsresult HTMLEditRules::WillInsertText(EditSubAction aEditSubAction,
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-  return NS_OK;
-}
-
-nsresult HTMLEditRules::WillLoadHTML() {
-  MOZ_ASSERT(IsEditorDataAvailable());
-
-  // Delete mBogusNode if it exists. If we really need one,
-  // it will be added during post-processing in AfterEditInner().
-
-  if (mBogusNode) {
-    // A mutation event listener may recreate bogus node again during the
-    // call of DeleteNodeWithTransaction().  So, move it first.
-    nsCOMPtr<nsINode> bogusNode(std::move(mBogusNode));
-    DebugOnly<nsresult> rv =
-        MOZ_KnownLive(HTMLEditorRef()).DeleteNodeWithTransaction(*bogusNode);
-    if (NS_WARN_IF(!CanHandleEditAction())) {
-      return NS_ERROR_EDITOR_DESTROYED;
-    }
-    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to remove the bogus node");
-  }
-
   return NS_OK;
 }
 
@@ -1849,7 +1900,7 @@ EditActionResult HTMLEditRules::WillInsertParagraphSeparator() {
     endOfBlockParent.SetToEndOf(blockParent);
     RefPtr<Element> brElement =
         MOZ_KnownLive(HTMLEditorRef())
-            .InsertBrElementWithTransaction(endOfBlockParent);
+            .InsertBRElementWithTransaction(endOfBlockParent);
     if (NS_WARN_IF(!CanHandleEditAction())) {
       return EditActionIgnored(NS_ERROR_EDITOR_DESTROYED);
     }
@@ -1937,7 +1988,7 @@ nsresult HTMLEditRules::InsertBRElement(const EditorDOMPoint& aPointToBreak) {
   RefPtr<Element> brElement;
   if (IsPlaintextEditor()) {
     brElement = MOZ_KnownLive(HTMLEditorRef())
-                    .InsertBrElementWithTransaction(aPointToBreak);
+                    .InsertBRElementWithTransaction(aPointToBreak);
     if (NS_WARN_IF(!CanHandleEditAction())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }
@@ -2144,7 +2195,7 @@ EditActionResult HTMLEditRules::SplitMailCites() {
       endOfPreviousNodeOfSplitPoint.SetToEndOf(previousNodeOfSplitPoint);
       RefPtr<Element> invisibleBrElement =
           MOZ_KnownLive(HTMLEditorRef())
-              .InsertBrElementWithTransaction(endOfPreviousNodeOfSplitPoint);
+              .InsertBRElementWithTransaction(endOfPreviousNodeOfSplitPoint);
       if (NS_WARN_IF(!CanHandleEditAction())) {
         return EditActionIgnored(NS_ERROR_EDITOR_DESTROYED);
       }
@@ -2159,7 +2210,7 @@ EditActionResult HTMLEditRules::SplitMailCites() {
   EditorDOMPoint pointToInsertBrNode(splitCiteNodeResult.SplitPoint());
   RefPtr<Element> brElement =
       MOZ_KnownLive(HTMLEditorRef())
-          .InsertBrElementWithTransaction(pointToInsertBrNode);
+          .InsertBRElementWithTransaction(pointToInsertBrNode);
   if (NS_WARN_IF(!CanHandleEditAction())) {
     return EditActionIgnored(NS_ERROR_EDITOR_DESTROYED);
   }
@@ -2210,7 +2261,7 @@ EditActionResult HTMLEditRules::SplitMailCites() {
           // In case we're at the very end.
           wsType == WSType::thisBlock) {
         brElement = MOZ_KnownLive(HTMLEditorRef())
-                        .InsertBrElementWithTransaction(pointToCreateNewBrNode);
+                        .InsertBRElementWithTransaction(pointToCreateNewBrNode);
         if (NS_WARN_IF(!CanHandleEditAction())) {
           return EditActionIgnored(NS_ERROR_EDITOR_DESTROYED);
         }
@@ -2283,8 +2334,9 @@ nsresult HTMLEditRules::WillDeleteSelection(
   // CreateStyleForInsertText()
   mDidDeleteSelection = true;
 
-  // If there is only bogus content, cancel the operation
-  if (mBogusNode) {
+  // If there is only padding <br> element for empty editor, cancel the
+  // operation.
+  if (HTMLEditorRef().HasPaddingBRElementForEmptyEditor()) {
     *aCancel = true;
     return NS_OK;
   }
@@ -2440,8 +2492,7 @@ nsresult HTMLEditRules::WillDeleteSelection(
         // Bug 1068979: delete both codepoints if surrogate pair
         if (so > 0) {
           const nsTextFragment* text = &nodeAsText->TextFragment();
-          if (NS_IS_LOW_SURROGATE(text->CharAt(so)) &&
-              NS_IS_HIGH_SURROGATE(text->CharAt(so - 1))) {
+          if (text->IsLowSurrogateFollowingHighSurrogateAt(so)) {
             so--;
           }
         }
@@ -3239,7 +3290,7 @@ nsresult HTMLEditRules::InsertBRIfNeeded() {
                                       *nsGkAtoms::br)) {
       RefPtr<Element> brElement =
           MOZ_KnownLive(HTMLEditorRef())
-              .InsertBrElementWithTransaction(atStartOfSelection,
+              .InsertBRElementWithTransaction(atStartOfSelection,
                                               nsIEditor::ePrevious);
       if (NS_WARN_IF(!CanHandleEditAction())) {
         return NS_ERROR_EDITOR_DESTROYED;
@@ -3862,7 +3913,7 @@ nsresult HTMLEditRules::DidDeleteSelection() {
       if (atCiteNode.IsSet() && seenBR) {
         RefPtr<Element> brElement =
             MOZ_KnownLive(HTMLEditorRef())
-                .InsertBrElementWithTransaction(atCiteNode);
+                .InsertBRElementWithTransaction(atCiteNode);
         if (NS_WARN_IF(!CanHandleEditAction())) {
           return NS_ERROR_EDITOR_DESTROYED;
         }
@@ -3882,11 +3933,12 @@ nsresult HTMLEditRules::DidDeleteSelection() {
   }
 
   // call through to base class
-  nsresult rv = TextEditRules::DidDeleteSelection();
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-  return NS_OK;
+  nsresult rv = TextEditRules::DidDeleteSelection(
+      mDidExplicitlySetInterline ? SetSelectionInterLinePosition::No
+                                 : SetSelectionInterLinePosition::Yes);
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                       "TextEditRules::DidDeleteSelection() failed");
+  return rv;
 }
 
 nsresult HTMLEditRules::WillMakeList(const nsAString* aListType,
@@ -4526,7 +4578,7 @@ nsresult HTMLEditRules::MakeBasicBlock(nsAtom& blockType) {
       EditorDOMPoint pointToInsertBrNode(splitNodeResult.SplitPoint());
       // Put a <br> element at the split point
       brContent = MOZ_KnownLive(HTMLEditorRef())
-                      .InsertBrElementWithTransaction(pointToInsertBrNode);
+                      .InsertBRElementWithTransaction(pointToInsertBrNode);
       if (NS_WARN_IF(!CanHandleEditAction())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -4645,8 +4697,8 @@ nsresult HTMLEditRules::DidMakeBasicBlock() {
   if (NS_WARN_IF(!atStartOfSelection.IsSet())) {
     return NS_ERROR_FAILURE;
   }
-  nsresult rv =
-      InsertMozBRIfNeeded(MOZ_KnownLive(*atStartOfSelection.Container()));
+  nsresult rv = InsertPaddingBRElementForEmptyLastLineIfNeeded(
+      MOZ_KnownLive(*atStartOfSelection.Container()));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -6138,10 +6190,14 @@ nsresult HTMLEditRules::AlignContentsAtSelection(const nsAString& aAlignType) {
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
-    // Put in a moz-br so that it won't get deleted
-    CreateElementResult createMozBrResult = CreateMozBR(EditorDOMPoint(div, 0));
-    if (NS_WARN_IF(createMozBrResult.Failed())) {
-      return createMozBrResult.Rv();
+    // Put in a padding <br> element for empty last line so that it won't get
+    // deleted.
+    CreateElementResult createPaddingBRResult =
+        MOZ_KnownLive(HTMLEditorRef())
+            .InsertPaddingBRElementForEmptyLastLineWithTransaction(
+                EditorDOMPoint(div, 0));
+    if (NS_WARN_IF(createPaddingBRResult.Failed())) {
+      return createPaddingBRResult.Rv();
     }
     EditorRawDOMPoint atStartOfDiv(div, 0);
     // Don't restore the selection
@@ -6440,7 +6496,7 @@ nsresult HTMLEditRules::MaybeDeleteTopMostEmptyAncestor(
       if (!HTMLEditUtils::IsList(atBlockParent.GetContainer())) {
         RefPtr<Element> brElement =
             MOZ_KnownLive(HTMLEditorRef())
-                .InsertBrElementWithTransaction(atBlockParent);
+                .InsertBRElementWithTransaction(atBlockParent);
         if (NS_WARN_IF(!CanHandleEditAction())) {
           return NS_ERROR_EDITOR_DESTROYED;
         }
@@ -6595,7 +6651,7 @@ Element* HTMLEditRules::CheckForInvisibleBR(Element& aBlock, BRLocation aWhere,
 
 void HTMLEditRules::GetInnerContent(
     nsINode& aNode, nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
-    int32_t* aIndex, Lists aLists, Tables aTables) {
+    int32_t* aIndex, Lists aLists, Tables aTables) const {
   MOZ_ASSERT(IsEditorDataAvailable());
   MOZ_ASSERT(aIndex);
 
@@ -6885,9 +6941,9 @@ nsresult HTMLEditRules::NormalizeSelection() {
   return error.StealNSResult();
 }
 
-EditorDOMPoint HTMLEditRules::GetPromotedPoint(RulesEndpoint aWhere,
-                                               nsINode& aNode, int32_t aOffset,
-                                               EditSubAction aEditSubAction) {
+EditorDOMPoint HTMLEditRules::GetPromotedPoint(
+    RulesEndpoint aWhere, nsINode& aNode, int32_t aOffset,
+    EditSubAction aEditSubAction) const {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   // we do one thing for text actions, something else entirely for other
@@ -7075,7 +7131,8 @@ EditorDOMPoint HTMLEditRules::GetPromotedPoint(RulesEndpoint aWhere,
 }
 
 void HTMLEditRules::GetPromotedRanges(
-    nsTArray<RefPtr<nsRange>>& outArrayOfRanges, EditSubAction aEditSubAction) {
+    nsTArray<RefPtr<nsRange>>& outArrayOfRanges,
+    EditSubAction aEditSubAction) const {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   uint32_t rangeCount = SelectionRefPtr()->RangeCount();
@@ -7097,7 +7154,7 @@ void HTMLEditRules::GetPromotedRanges(
 }
 
 void HTMLEditRules::PromoteRange(nsRange& aRange,
-                                 EditSubAction aEditSubAction) {
+                                 EditSubAction aEditSubAction) const {
   MOZ_ASSERT(IsEditorDataAvailable());
   MOZ_ASSERT(!aRange.IsInSelection());
 
@@ -7192,7 +7249,7 @@ class UniqueFunctor final : public BoolDomIterFunctor {
 nsresult HTMLEditRules::GetNodesForOperation(
     nsTArray<RefPtr<nsRange>>& aArrayOfRanges,
     nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
-    EditSubAction aEditSubAction, TouchContent aTouchContent) {
+    EditSubAction aEditSubAction, TouchContent aTouchContent) const {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   if (aTouchContent == TouchContent::yes) {
@@ -7367,7 +7424,7 @@ void HTMLEditRules::GetChildNodesForOperation(
 
 nsresult HTMLEditRules::GetListActionNodes(
     nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes, EntireList aEntireList,
-    TouchContent aTouchContent) {
+    TouchContent aTouchContent) const {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   // Added this in so that ui code can ask to change an entire list, even if
@@ -7430,7 +7487,7 @@ nsresult HTMLEditRules::GetListActionNodes(
 }
 
 void HTMLEditRules::LookInsideDivBQandList(
-    nsTArray<OwningNonNull<nsINode>>& aNodeArray) {
+    nsTArray<OwningNonNull<nsINode>>& aNodeArray) const {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   // If there is only one node in the array, and it is a list, div, or
@@ -7475,7 +7532,7 @@ void HTMLEditRules::LookInsideDivBQandList(
 }
 
 void HTMLEditRules::GetDefinitionListItemTypes(dom::Element* aElement,
-                                               bool* aDT, bool* aDD) {
+                                               bool* aDT, bool* aDD) const {
   MOZ_ASSERT(aElement);
   MOZ_ASSERT(aElement->IsHTMLElement(nsGkAtoms::dl));
   MOZ_ASSERT(aDT);
@@ -7527,7 +7584,8 @@ nsresult HTMLEditRules::GetParagraphFormatNodes(
   return NS_OK;
 }
 
-nsresult HTMLEditRules::BustUpInlinesAtRangeEndpoints(RangeItem& aRangeItem) {
+nsresult HTMLEditRules::BustUpInlinesAtRangeEndpoints(
+    RangeItem& aRangeItem) const {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   bool isCollapsed = aRangeItem.mStartContainer == aRangeItem.mEndContainer &&
@@ -7591,7 +7649,8 @@ nsresult HTMLEditRules::BustUpInlinesAtRangeEndpoints(RangeItem& aRangeItem) {
 }
 
 nsresult HTMLEditRules::BustUpInlinesAtBRs(
-    nsIContent& aNode, nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes) {
+    nsIContent& aNode,
+    nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes) const {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   // First build up a list of all the break nodes inside the inline container.
@@ -7655,7 +7714,7 @@ nsresult HTMLEditRules::BustUpInlinesAtBRs(
   return NS_OK;
 }
 
-nsIContent* HTMLEditRules::GetHighestInlineParent(nsINode& aNode) {
+nsIContent* HTMLEditRules::GetHighestInlineParent(nsINode& aNode) const {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   if (!aNode.IsContent() || IsBlockNode(aNode)) {
@@ -7693,7 +7752,7 @@ nsIContent* HTMLEditRules::GetHighestInlineParent(nsINode& aNode) {
 nsresult HTMLEditRules::GetNodesFromPoint(
     const EditorDOMPoint& aPoint, EditSubAction aEditSubAction,
     nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes,
-    TouchContent aTouchContent) {
+    TouchContent aTouchContent) const {
   if (NS_WARN_IF(!aPoint.IsSet())) {
     return NS_ERROR_INVALID_ARG;
   }
@@ -7726,7 +7785,7 @@ nsresult HTMLEditRules::GetNodesFromPoint(
 nsresult HTMLEditRules::GetNodesFromSelection(
     EditSubAction aEditSubAction,
     nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes,
-    TouchContent aTouchContent) {
+    TouchContent aTouchContent) const {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   // Promote selection ranges
@@ -7820,7 +7879,8 @@ nsresult HTMLEditRules::ReturnInHeader(Element& aHeader, nsINode& aNode,
   NS_WARNING_ASSERTION(splitHeaderResult.Succeeded(),
                        "Failed to split aHeader");
 
-  // If the previous heading of split point is empty, put a mozbr into it.
+  // If the previous heading of split point is empty, put a padding <br>
+  // element for empty last line into it.
   nsCOMPtr<nsIContent> prevItem = HTMLEditorRef().GetPriorHTMLSibling(&aHeader);
   if (prevItem) {
     MOZ_DIAGNOSTIC_ASSERT(HTMLEditUtils::IsHeader(*prevItem));
@@ -7830,10 +7890,12 @@ nsresult HTMLEditRules::ReturnInHeader(Element& aHeader, nsINode& aNode,
       return rv;
     }
     if (isEmptyNode) {
-      CreateElementResult createMozBrResult =
-          CreateMozBR(EditorDOMPoint(prevItem, 0));
-      if (NS_WARN_IF(createMozBrResult.Failed())) {
-        return createMozBrResult.Rv();
+      CreateElementResult createPaddingBRResult =
+          MOZ_KnownLive(HTMLEditorRef())
+              .InsertPaddingBRElementForEmptyLastLineWithTransaction(
+                  EditorDOMPoint(prevItem, 0));
+      if (NS_WARN_IF(createPaddingBRResult.Failed())) {
+        return createPaddingBRResult.Rv();
       }
     }
   }
@@ -7877,7 +7939,7 @@ nsresult HTMLEditRules::ReturnInHeader(Element& aHeader, nsINode& aNode,
       // Append a <br> to it
       RefPtr<Element> brElement =
           MOZ_KnownLive(HTMLEditorRef())
-              .InsertBrElementWithTransaction(EditorDOMPoint(pNode, 0));
+              .InsertBRElementWithTransaction(EditorDOMPoint(pNode, 0));
       if (NS_WARN_IF(!CanHandleEditAction())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -8024,7 +8086,7 @@ EditActionResult HTMLEditRules::ReturnInParagraph(Element& aParentDivOrP) {
       brContent = HTMLEditorRef().GetPriorHTMLSibling(
           atStartOfSelection.GetContainer());
       if (!brContent || !HTMLEditorRef().IsVisibleBRElement(brContent) ||
-          TextEditUtils::HasMozAttr(brContent)) {
+          EditorBase::IsPaddingBRElementForEmptyLastLine(*brContent)) {
         pointToInsertBR.Set(atStartOfSelection.GetContainer());
         brContent = nullptr;
       }
@@ -8034,7 +8096,7 @@ EditActionResult HTMLEditRules::ReturnInParagraph(Element& aParentDivOrP) {
       brContent =
           HTMLEditorRef().GetNextHTMLSibling(atStartOfSelection.GetContainer());
       if (!brContent || !HTMLEditorRef().IsVisibleBRElement(brContent) ||
-          TextEditUtils::HasMozAttr(brContent)) {
+          EditorBase::IsPaddingBRElementForEmptyLastLine(*brContent)) {
         pointToInsertBR.Set(atStartOfSelection.GetContainer());
         DebugOnly<bool> advanced = pointToInsertBR.AdvanceOffset();
         NS_WARNING_ASSERTION(advanced,
@@ -8072,11 +8134,11 @@ EditActionResult HTMLEditRules::ReturnInParagraph(Element& aParentDivOrP) {
     nsCOMPtr<nsIContent> nearNode;
     nearNode = HTMLEditorRef().GetPreviousEditableHTMLNode(atStartOfSelection);
     if (!nearNode || !HTMLEditorRef().IsVisibleBRElement(nearNode) ||
-        TextEditUtils::HasMozAttr(nearNode)) {
+        EditorBase::IsPaddingBRElementForEmptyLastLine(*nearNode)) {
       // is there a BR after it?
       nearNode = HTMLEditorRef().GetNextEditableHTMLNode(atStartOfSelection);
       if (!nearNode || !HTMLEditorRef().IsVisibleBRElement(nearNode) ||
-          TextEditUtils::HasMozAttr(nearNode)) {
+          EditorBase::IsPaddingBRElementForEmptyLastLine(*nearNode)) {
         pointToInsertBR = atStartOfSelection;
         splitAfterNewBR = true;
       }
@@ -8092,7 +8154,7 @@ EditActionResult HTMLEditRules::ReturnInParagraph(Element& aParentDivOrP) {
     }
 
     brContent = MOZ_KnownLive(HTMLEditorRef())
-                    .InsertBrElementWithTransaction(pointToInsertBR);
+                    .InsertBRElementWithTransaction(pointToInsertBR);
     if (NS_WARN_IF(!CanHandleEditAction())) {
       return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
     }
@@ -8175,11 +8237,11 @@ nsresult HTMLEditRules::SplitParagraph(
   }
 
   // We need to ensure to both paragraphs visible even if they are empty.
-  // However, moz-<br> element isn't useful in this case because moz-<br>
-  // elements will be ignored by PlaintextSerializer.  Additionally,
-  // moz-<br> will be exposed as <br> with Element.innerHTML.  Therefore,
-  // we can use normal <br> elements for placeholder in this case.
-  // Note that Chromium also behaves so.
+  // However, padding <br> element for empty last line isn't useful in this
+  // case because it'll be ignored by PlaintextSerializer.  Additionally,
+  // it'll be exposed as <br> with Element.innerHTML.  Therefore, we can use
+  // normal <br> elements for placeholder in this case.  Note that Chromium
+  // also behaves so.
   rv = InsertBRIfNeeded(MOZ_KnownLive(*splitDivOrPResult.GetPreviousNode()));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -8300,7 +8362,7 @@ nsresult HTMLEditRules::ReturnInListItem(Element& aListItem, nsINode& aNode,
       // Append a <br> to it
       RefPtr<Element> brElement =
           MOZ_KnownLive(HTMLEditorRef())
-              .InsertBrElementWithTransaction(EditorDOMPoint(pNode, 0));
+              .InsertBRElementWithTransaction(EditorDOMPoint(pNode, 0));
       if (NS_WARN_IF(!CanHandleEditAction())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -8361,10 +8423,12 @@ nsresult HTMLEditRules::ReturnInListItem(Element& aListItem, nsINode& aNode,
       return rv;
     }
     if (isEmptyNode) {
-      CreateElementResult createMozBrResult =
-          CreateMozBR(EditorDOMPoint(prevItem, 0));
-      if (NS_WARN_IF(createMozBrResult.Failed())) {
-        return createMozBrResult.Rv();
+      CreateElementResult createPaddingBRResult =
+          MOZ_KnownLive(HTMLEditorRef())
+              .InsertPaddingBRElementForEmptyLastLineWithTransaction(
+                  EditorDOMPoint(prevItem, 0));
+      if (NS_WARN_IF(createPaddingBRResult.Failed())) {
+        return createPaddingBRResult.Rv();
       }
     } else {
       rv = HTMLEditorRef().IsEmptyNode(&aListItem, &isEmptyNode, true);
@@ -9209,7 +9273,8 @@ nsresult HTMLEditRules::ReapplyCachedStyles() {
       }
       // This style has disappeared through deletion.  Let's add the styles to
       // mTypeInState when same style isn't applied to the node already.
-      if ((!bAny || IsStyleCachePreservingSubAction(mTopLevelEditSubAction)) &&
+      if ((!bAny || IsStyleCachePreservingSubAction(
+                        HTMLEditorRef().GetTopLevelEditSubAction())) &&
           (!styleAtInsertionPoint[i].mPresent ||
            styleAtInsertionPoint[i].value != mCachedStyles[i].value)) {
         HTMLEditorRef().mTypeInState->SetProp(mCachedStyles[i].tag,
@@ -9243,7 +9308,7 @@ HTMLEditRules::InsertBRElementToEmptyListItemsAndTableCellsInChangedRange() {
   }
   iter.AppendList(functor, nodeArray);
 
-  // Put moz-br's into these empty li's and td's
+  // Put padding <br> elements for empty <li> and <td>.
   for (auto& node : nodeArray) {
     // Need to put br at END of node.  It may have empty containers in it and
     // still pass the "IsEmptyNode" test, and we want the br's to be after
@@ -9251,11 +9316,11 @@ HTMLEditRules::InsertBRElementToEmptyListItemsAndTableCellsInChangedRange() {
     // is in this node.
     EditorDOMPoint endOfNode;
     endOfNode.SetToEndOf(node);
-    // XXX This method should return nsreuslt due to may be destroyed by this
-    //     CreateMozBr() call.
-    CreateElementResult createMozBrResult = CreateMozBR(endOfNode);
-    if (NS_WARN_IF(createMozBrResult.Failed())) {
-      return createMozBrResult.Rv();
+    CreateElementResult createPaddingBRResult =
+        MOZ_KnownLive(HTMLEditorRef())
+            .InsertPaddingBRElementForEmptyLastLineWithTransaction(endOfNode);
+    if (NS_WARN_IF(createPaddingBRResult.Failed())) {
+      return createPaddingBRResult.Rv();
     }
   }
   return NS_OK;
@@ -9455,14 +9520,16 @@ nsresult HTMLEditRules::AdjustSelection(nsIEditor::EDirection aAction) {
       if (point.GetContainer() == rootElement) {
         // Our root node is completely empty. Don't add a <br> here.
         // AfterEditInner() will add one for us when it calls
-        // CreateBogusNodeIfNeeded()!
+        // TextEditor::MaybeCreatePaddingBRElementForEmptyEditor()!
         return NS_OK;
       }
 
       // we know we can skip the rest of this routine given the cirumstance
-      CreateElementResult createMozBrResult = CreateMozBR(point);
-      if (NS_WARN_IF(createMozBrResult.Failed())) {
-        return createMozBrResult.Rv();
+      CreateElementResult createPaddingBRResult =
+          MOZ_KnownLive(HTMLEditorRef())
+              .InsertPaddingBRElementForEmptyLastLineWithTransaction(point);
+      if (NS_WARN_IF(createPaddingBRResult.Failed())) {
+        return createPaddingBRResult.Rv();
       }
       return NS_OK;
     }
@@ -9473,7 +9540,8 @@ nsresult HTMLEditRules::AdjustSelection(nsIEditor::EDirection aAction) {
     return NS_OK;  // we LIKE it when we are in a text node.  that RULZ
   }
 
-  // do we need to insert a special mozBR?  We do if we are:
+  // Do we need to insert a padding <br> element for empty last line?  We do
+  // if we are:
   // 1) prior node is in same block where selection is AND
   // 2) prior node is a br AND
   // 3) that br is not visible
@@ -9490,12 +9558,15 @@ nsresult HTMLEditRules::AdjustSelection(nsIEditor::EDirection aAction) {
           // need to insert special moz BR. Why?  Because if we don't
           // the user will see no new line for the break.  Also, things
           // like table cells won't grow in height.
-          CreateElementResult createMozBrResult = CreateMozBR(point);
-          if (NS_WARN_IF(createMozBrResult.Failed())) {
-            return createMozBrResult.Rv();
+          CreateElementResult createPaddingBRResult =
+              MOZ_KnownLive(HTMLEditorRef())
+                  .InsertPaddingBRElementForEmptyLastLineWithTransaction(point);
+          if (NS_WARN_IF(createPaddingBRResult.Failed())) {
+            return createPaddingBRResult.Rv();
           }
-          point.Set(createMozBrResult.GetNewNode());
-          // selection stays *before* moz-br, sticking to it
+          point.Set(createPaddingBRResult.GetNewNode());
+          // Selection stays *before* padding <br> element for empty last line,
+          // sticking to it.
           ErrorResult error;
           SelectionRefPtr()->SetInterlinePosition(true, error);
           if (NS_WARN_IF(!CanHandleEditAction())) {
@@ -9516,9 +9587,11 @@ nsresult HTMLEditRules::AdjustSelection(nsIEditor::EDirection aAction) {
         } else {
           nsCOMPtr<nsIContent> nextNode =
               HTMLEditorRef().GetNextEditableHTMLNodeInBlock(*nearNode);
-          if (nextNode && TextEditUtils::IsMozBR(nextNode)) {
-            // selection between br and mozbr.  make it stick to mozbr
-            // so that it will be on blank line.
+          if (nextNode &&
+              EditorBase::IsPaddingBRElementForEmptyLastLine(*nextNode)) {
+            // Selection between a <br> element and a padding <br> element for
+            // empty last line.  Make it stick to the padding <br> element so
+            // that it will be on blank line.
             IgnoredErrorResult ignoredError;
             SelectionRefPtr()->SetInterlinePosition(true, ignoredError);
             NS_WARNING_ASSERTION(!ignoredError.Failed(),
@@ -9767,7 +9840,7 @@ nsresult HTMLEditRules::RemoveEmptyNodesInChangedRange() {
       // but preserve br.
       RefPtr<Element> brElement =
           MOZ_KnownLive(HTMLEditorRef())
-              .InsertBrElementWithTransaction(EditorDOMPoint(delNode));
+              .InsertBRElementWithTransaction(EditorDOMPoint(delNode));
       if (NS_WARN_IF(!CanHandleEditAction())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -10151,7 +10224,7 @@ nsresult HTMLEditRules::UpdateDocChangeRange(nsRange* aRange) {
 }
 
 nsresult HTMLEditRules::InsertBRIfNeededInternal(nsINode& aNode,
-                                                 bool aInsertMozBR) {
+                                                 bool aForPadding) {
   MOZ_ASSERT(IsEditorDataAvailable());
 
   if (!IsBlockNode(aNode)) {
@@ -10167,13 +10240,24 @@ nsresult HTMLEditRules::InsertBRIfNeededInternal(nsINode& aNode,
     return NS_OK;
   }
 
-  CreateElementResult createBrResult =
-      !aInsertMozBR ? CreateBR(EditorDOMPoint(&aNode, 0))
-                    : CreateMozBR(EditorDOMPoint(&aNode, 0));
-  if (NS_WARN_IF(createBrResult.Failed())) {
-    return createBrResult.Rv();
+  if (aForPadding) {
+    CreateElementResult createBRResult =
+        MOZ_KnownLive(HTMLEditorRef())
+            .InsertPaddingBRElementForEmptyLastLineWithTransaction(
+                EditorDOMPoint(&aNode, 0));
+    NS_WARNING_ASSERTION(createBRResult.Succeeded(),
+                         "Failed to create padding <br> element");
+    return createBRResult.Rv();
   }
-  return NS_OK;
+
+  RefPtr<Element> brElement =
+      MOZ_KnownLive(HTMLEditorRef())
+          .InsertBRElementWithTransaction(EditorDOMPoint(&aNode, 0));
+  if (NS_WARN_IF(!CanHandleEditAction())) {
+    return NS_ERROR_EDITOR_DESTROYED;
+  }
+  NS_WARNING_ASSERTION(brElement, "Failed to create <br> element");
+  return brElement ? NS_OK : NS_ERROR_FAILURE;
 }
 
 void HTMLEditRules::DidCreateNode(Element& aNewElement) {
@@ -10493,7 +10577,7 @@ nsresult HTMLEditRules::MakeSureElemStartsOrEndsOnCR(nsINode& aNode,
     }
     RefPtr<Element> brElement =
         MOZ_KnownLive(HTMLEditorRef())
-            .InsertBrElementWithTransaction(pointToInsert);
+            .InsertBRElementWithTransaction(pointToInsert);
     if (NS_WARN_IF(!CanHandleEditAction())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }
@@ -11083,34 +11167,10 @@ void HTMLEditRules::DocumentModifiedWorker() {
   }
 
   RefPtr<HTMLEditor> htmlEditor(mHTMLEditor);
-  htmlEditor->OnModifyDocument();
-}
-
-void HTMLEditRules::OnModifyDocument() {
-  MOZ_ASSERT(mHTMLEditor);
-
-  AutoSafeEditorData setData(*this, *mHTMLEditor);
-
-  // DeleteNodeWithTransaction() below may cause a flush, which could destroy
-  // the editor
-  nsAutoScriptBlockerSuppressNodeRemoved scriptBlocker;
-
-  // Delete our bogus node, if we have one, since the document might not be
-  // empty any more.
-  if (mBogusNode) {
-    // A mutation event listener may recreate bogus node again during the
-    // call of DeleteNodeWithTransaction().  So, move it first.
-    nsCOMPtr<nsIContent> bogusNode(std::move(mBogusNode));
-    DebugOnly<nsresult> rv =
-        MOZ_KnownLive(HTMLEditorRef()).DeleteNodeWithTransaction(*bogusNode);
-    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to remove the bogus node");
-  }
-
-  // Try to recreate the bogus node if needed.
-  DebugOnly<nsresult> rv = CreateBogusNodeIfNeeded();
-  NS_WARNING_ASSERTION(
-      rv.value != NS_ERROR_EDITOR_DESTROYED,
-      "The editor has been destroyed during creating a bogus node");
+  nsresult rv = htmlEditor->OnModifyDocument();
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                       "HTMLEditor::OnModifyDocument() failed");
+  Unused << rv;
 }
 
 }  // namespace mozilla

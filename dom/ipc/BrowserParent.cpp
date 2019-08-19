@@ -25,6 +25,7 @@
 #include "mozilla/dom/RemoteDragStartData.h"
 #include "mozilla/dom/RemoteWebProgress.h"
 #include "mozilla/dom/RemoteWebProgressRequest.h"
+#include "mozilla/dom/SessionStoreUtils.h"
 #include "mozilla/dom/SessionStoreUtilsBinding.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/gfx/2D.h"
@@ -650,13 +651,13 @@ mozilla::ipc::IPCResult BrowserParent::RecvEnsureLayersConnected(
 
 mozilla::ipc::IPCResult BrowserParent::Recv__delete__() {
   MOZ_RELEASE_ASSERT(XRE_IsParentProcess());
-  ContentParent::UnregisterRemoteFrame(mTabId, Manager()->ChildID(),
-                                       mMarkedDestroying);
-
+  Manager()->NotifyTabDestroyed(mTabId, mMarkedDestroying);
   return IPC_OK();
 }
 
 void BrowserParent::ActorDestroy(ActorDestroyReason why) {
+  ContentProcessManager::GetSingleton()->UnregisterRemoteFrame(mTabId);
+
   if (mRemoteLayerTreeOwner.IsInitialized()) {
     // It's important to unmap layers after the remote browser has been
     // destroyed, otherwise it may still send messages to the compositor which
@@ -1235,49 +1236,43 @@ IPCResult BrowserParent::RecvIndexedDBPermissionRequest(
   return IPC_OK();
 }
 
-IPCResult BrowserParent::RecvPWindowGlobalConstructor(
-    PWindowGlobalParent* aActor, const WindowGlobalInit& aInit) {
-  static_cast<WindowGlobalParent*>(aActor)->Init(aInit);
-  return IPC_OK();
-}
-
-PWindowGlobalParent* BrowserParent::AllocPWindowGlobalParent(
+IPCResult BrowserParent::RecvNewWindowGlobal(
+    ManagedEndpoint<PWindowGlobalParent>&& aEndpoint,
     const WindowGlobalInit& aInit) {
-  // Reference freed in DeallocPWindowGlobalParent.
-  return do_AddRef(new WindowGlobalParent(aInit, /* inproc */ false)).take();
-}
+  // Construct our new WindowGlobalParent, bind, and initialize it.
+  auto wgp = MakeRefPtr<WindowGlobalParent>(aInit, /* inproc */ false);
 
-bool BrowserParent::DeallocPWindowGlobalParent(PWindowGlobalParent* aActor) {
-  // Free reference from AllocPWindowGlobalParent.
-  static_cast<WindowGlobalParent*>(aActor)->Release();
-  return true;
+  BindPWindowGlobalEndpoint(std::move(aEndpoint), wgp);
+  wgp->Init(aInit);
+  return IPC_OK();
 }
 
 IPCResult BrowserParent::RecvPBrowserBridgeConstructor(
     PBrowserBridgeParent* aActor, const nsString& aName,
     const nsString& aRemoteType, BrowsingContext* aBrowsingContext,
     const uint32_t& aChromeFlags, const TabId& aTabId) {
+  // The initial about:blank document loaded in the new iframe will have a newly
+  // created null principal. This is done in the parent process so we don't have
+  // to trust a principal from content.
+  nsCOMPtr<nsIPrincipal> initialPrincipal =
+      NullPrincipal::CreateWithInheritedAttributes(OriginAttributesRef(),
+                                                   /* isFirstParty */ false);
+  WindowGlobalInit windowInit = WindowGlobalActor::AboutBlankInitializer(
+      aBrowsingContext, initialPrincipal);
+
   nsresult rv = static_cast<BrowserBridgeParent*>(aActor)->Init(
-      aName, aRemoteType, CanonicalBrowsingContext::Cast(aBrowsingContext),
-      aChromeFlags, aTabId);
+      aName, aRemoteType, windowInit, aChromeFlags, aTabId);
   if (NS_FAILED(rv)) {
     return IPC_FAIL(this, "Failed to construct BrowserBridgeParent");
   }
   return IPC_OK();
 }
 
-PBrowserBridgeParent* BrowserParent::AllocPBrowserBridgeParent(
+already_AddRefed<PBrowserBridgeParent> BrowserParent::AllocPBrowserBridgeParent(
     const nsString& aName, const nsString& aRemoteType,
     BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags,
     const TabId& aTabId) {
-  // Reference freed in DeallocPBrowserBridgeParent.
-  return do_AddRef(new BrowserBridgeParent()).take();
-}
-
-bool BrowserParent::DeallocPBrowserBridgeParent(PBrowserBridgeParent* aActor) {
-  // Free reference from AllocPBrowserBridgeParent.
-  static_cast<BrowserBridgeParent*>(aActor)->Release();
-  return true;
+  return do_AddRef(new BrowserBridgeParent());
 }
 
 void BrowserParent::SendMouseEvent(const nsAString& aType, float aX, float aY,
@@ -2494,6 +2489,8 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnLocationChange(
         PrincipalInfoToPrincipal(aLocationChangeData->contentPrincipal());
     nsCOMPtr<nsIPrincipal> contentStoragePrincipal = PrincipalInfoToPrincipal(
         aLocationChangeData->contentStoragePrincipal());
+    nsCOMPtr<nsIReferrerInfo> referrerInfo =
+        aLocationChangeData->referrerInfo();
 
     Unused << browser->SetIsNavigating(aLocationChangeData->isNavigating());
     Unused << browser->UpdateForLocationChange(
@@ -2501,7 +2498,7 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnLocationChange(
         aLocationChangeData->mayEnableCharacterEncodingMenu(),
         aLocationChangeData->charsetAutodetected(),
         aLocationChangeData->documentURI(), aLocationChangeData->title(),
-        contentPrincipal, contentStoragePrincipal, csp,
+        contentPrincipal, contentStoragePrincipal, csp, referrerInfo,
         aLocationChangeData->isSyntheticDocument(),
         aWebProgressData->innerDOMWindowID(),
         aLocationChangeData->requestContextID().isSome(),
@@ -2652,8 +2649,11 @@ void BrowserParent::ReconstructWebProgressAndRequest(
 mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
     const Maybe<nsCString>& aDocShellCaps, const Maybe<bool>& aPrivatedMode,
     const nsTArray<nsCString>&& aPositions,
-    const nsTArray<int32_t>&& aPositionDescendants, const uint32_t& aFlushId,
-    const bool& aIsFinal, const uint32_t& aEpoch) {
+    const nsTArray<int32_t>&& aPositionDescendants,
+    const nsTArray<InputFormData>& aInputs,
+    const nsTArray<CollectedInputDataValue>& aIdVals,
+    const nsTArray<CollectedInputDataValue>& aXPathVals,
+    const uint32_t& aFlushId, const bool& aIsFinal, const uint32_t& aEpoch) {
   UpdateSessionStoreData data;
   if (aDocShellCaps.isSome()) {
     data.mDocShellCaps.Construct() = aDocShellCaps.value();
@@ -2665,6 +2665,30 @@ mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
     data.mPositions.Construct().Assign(std::move(aPositions));
     data.mPositionDescendants.Construct().Assign(
         std::move(aPositionDescendants));
+  }
+  if (aIdVals.Length() != 0) {
+    SessionStoreUtils::ComposeInputData(aIdVals, data.mId.Construct());
+  }
+  if (aXPathVals.Length() != 0) {
+    SessionStoreUtils::ComposeInputData(aXPathVals, data.mXpath.Construct());
+  }
+  if (aInputs.Length() != 0) {
+    nsTArray<int> descendants, numId, numXPath;
+    nsTArray<nsString> innerHTML;
+    nsTArray<nsCString> url;
+    for (const InputFormData& input : aInputs) {
+      descendants.AppendElement(input.descendants);
+      numId.AppendElement(input.numId);
+      numXPath.AppendElement(input.numXPath);
+      innerHTML.AppendElement(input.innerHTML);
+      url.AppendElement(input.url);
+    }
+
+    data.mInputDescendants.Construct().Assign(std::move(descendants));
+    data.mNumId.Construct().Assign(std::move(numId));
+    data.mNumXPath.Construct().Assign(std::move(numXPath));
+    data.mInnerHTML.Construct().Assign(std::move(innerHTML));
+    data.mUrl.Construct().Assign(std::move(url));
   }
 
   nsCOMPtr<nsISessionStoreFunctions> funcs =
@@ -3536,7 +3560,6 @@ class FakeChannel final : public nsIChannel,
   NS_IMETHOD GetUsePrivateBrowsing(bool*) NO_IMPL;
   NS_IMETHOD SetUsePrivateBrowsing(bool) NO_IMPL;
   NS_IMETHOD SetPrivateBrowsing(bool) NO_IMPL;
-  NS_IMETHOD GetIsInIsolatedMozBrowserElement(bool*) NO_IMPL;
   NS_IMETHOD GetScriptableOriginAttributes(JSContext*,
                                            JS::MutableHandleValue) NO_IMPL;
   NS_IMETHOD_(void)

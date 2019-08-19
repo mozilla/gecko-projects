@@ -447,7 +447,7 @@ static uint64_t ExtractBlockIndex(const BlocksRingBuffer::BlockIndex bi) {
 void TestBlocksRingBufferAPI() {
   printf("TestBlocksRingBufferAPI...\n");
 
-  // Deleter will store about-to-be-deleted value in `lastDestroyed`.
+  // Entry destructor will store about-to-be-cleared value in `lastDestroyed`.
   uint32_t lastDestroyed = 0;
 
   // Create a 16-byte buffer, enough to store up to 3 entries (1 byte size + 4
@@ -461,18 +461,17 @@ void TestBlocksRingBufferAPI() {
   // Start a temporary block to constrain buffer lifetime.
   {
     BlocksRingBuffer rb(&buffer[MBSize], MakePowerOfTwo32<MBSize>(),
-                        [&](BlocksRingBuffer::EntryReader aReader) {
+                        [&](BlocksRingBuffer::EntryReader& aReader) {
                           lastDestroyed = aReader.ReadObject<uint32_t>();
                         });
 
-#  define VERIFY_START_END_DESTROYED(aStart, aEnd, aLastDestroyed)        \
-    rb.Read([&](const BlocksRingBuffer::Reader aReader) {                 \
-      MOZ_RELEASE_ASSERT(ExtractBlockIndex(aReader.BufferRangeStart()) == \
-                         (aStart));                                       \
-      MOZ_RELEASE_ASSERT(ExtractBlockIndex(aReader.BufferRangeEnd()) ==   \
-                         (aEnd));                                         \
-      MOZ_RELEASE_ASSERT(lastDestroyed == (aLastDestroyed));              \
-    });
+#  define VERIFY_START_END_DESTROYED(aStart, aEnd, aLastDestroyed)          \
+    {                                                                       \
+      BlocksRingBuffer::State state = rb.GetState();                        \
+      MOZ_RELEASE_ASSERT(ExtractBlockIndex(state.mRangeStart) == (aStart)); \
+      MOZ_RELEASE_ASSERT(ExtractBlockIndex(state.mRangeEnd) == (aEnd));     \
+      MOZ_RELEASE_ASSERT(lastDestroyed == (aLastDestroyed));                \
+    }
 
     // All entries will contain one 32-bit number. The resulting blocks will
     // have the following structure:
@@ -525,10 +524,13 @@ void TestBlocksRingBufferAPI() {
     //   - S[4 |    int(1)    ]E
     VERIFY_START_END_DESTROYED(1, 6, 0);
 
-    // Push `2` through EntryReserver, check output BlockIndex.
-    auto bi2 = rb.Put([](BlocksRingBuffer::EntryReserver aER) {
-      return aER.WriteObject(uint32_t(2));
-    });
+    // Push `2` through ReserveAndPut, check output BlockIndex.
+    auto bi2 = rb.ReserveAndPut([]() { return sizeof(uint32_t); },
+                                [](BlocksRingBuffer::EntryWriter* aEW) {
+                                  MOZ_RELEASE_ASSERT(!!aEW);
+                                  aEW->WriteObject(uint32_t(2));
+                                  return aEW->CurrentBlockIndex();
+                                });
     static_assert(
         std::is_same<decltype(bi2), BlocksRingBuffer::BlockIndex>::value,
         "All index-returning functions should return a "
@@ -600,15 +602,14 @@ void TestBlocksRingBufferAPI() {
     MOZ_RELEASE_ASSERT(!(bi2Next < bi2));
     MOZ_RELEASE_ASSERT(!(bi2Next <= bi2));
 
-    // Push `3` through EntryReserver and then EntryWriter, check writer output
+    // Push `3` through Put, check writer output
     // is returned to the initial caller.
-    auto put3 = rb.Put([&](BlocksRingBuffer::EntryReserver aER) {
-      return aER.Reserve(
-          sizeof(uint32_t), [&](BlocksRingBuffer::EntryWriter aEW) {
-            aEW.WriteObject(uint32_t(3));
-            return float(ExtractBlockIndex(aEW.CurrentBlockIndex()));
-          });
-    });
+    auto put3 =
+        rb.Put(sizeof(uint32_t), [&](BlocksRingBuffer::EntryWriter* aEW) {
+          MOZ_RELEASE_ASSERT(!!aEW);
+          aEW->WriteObject(uint32_t(3));
+          return float(ExtractBlockIndex(aEW->CurrentBlockIndex()));
+        });
     static_assert(std::is_same<decltype(put3), float>::value,
                   "Expect float as returned by callback.");
     MOZ_RELEASE_ASSERT(put3 == 11.0);
@@ -635,7 +636,7 @@ void TestBlocksRingBufferAPI() {
 
     // Check that we have `1` to `3`.
     uint32_t count = 0;
-    rb.ReadEach([&](BlocksRingBuffer::EntryReader aReader) {
+    rb.ReadEach([&](BlocksRingBuffer::EntryReader& aReader) {
       MOZ_RELEASE_ASSERT(aReader.ReadObject<uint32_t>() == ++count);
     });
     MOZ_RELEASE_ASSERT(count == 3);
@@ -661,26 +662,26 @@ void TestBlocksRingBufferAPI() {
 
     // Check that we have `2` to `4`.
     count = 1;
-    rb.ReadEach([&](BlocksRingBuffer::EntryReader aReader) {
+    rb.ReadEach([&](BlocksRingBuffer::EntryReader& aReader) {
       MOZ_RELEASE_ASSERT(aReader.ReadObject<uint32_t>() == ++count);
     });
     MOZ_RELEASE_ASSERT(count == 4);
 
-    // Push 5 through EntryReserver then EntryWriter, no returns.
+    // Push 5 through Put, no returns.
     // This will destroy the second entry.
     // Check that the EntryWriter can access bi4 but not bi2.
-    auto bi5 = rb.Put([&](BlocksRingBuffer::EntryReserver aER) {
-      return aER.Reserve(
-          sizeof(uint32_t), [&](BlocksRingBuffer::EntryWriter aEW) {
-            aEW.WriteObject(uint32_t(5));
-            MOZ_RELEASE_ASSERT(aEW.GetEntryAt(bi2).isNothing());
-            MOZ_RELEASE_ASSERT(aEW.GetEntryAt(bi4).isSome());
-            MOZ_RELEASE_ASSERT(aEW.GetEntryAt(bi4)->CurrentBlockIndex() == bi4);
-            MOZ_RELEASE_ASSERT(aEW.GetEntryAt(bi4)->ReadObject<uint32_t>() ==
-                               4);
-            return aEW.CurrentBlockIndex();
-          });
-    });
+    auto bi5_6 =
+        rb.Put(sizeof(uint32_t), [&](BlocksRingBuffer::EntryWriter* aEW) {
+          MOZ_RELEASE_ASSERT(!!aEW);
+          aEW->WriteObject(uint32_t(5));
+          MOZ_RELEASE_ASSERT(aEW->GetEntryAt(bi2).isNothing());
+          MOZ_RELEASE_ASSERT(aEW->GetEntryAt(bi4).isSome());
+          MOZ_RELEASE_ASSERT(aEW->GetEntryAt(bi4)->CurrentBlockIndex() == bi4);
+          MOZ_RELEASE_ASSERT(aEW->GetEntryAt(bi4)->ReadObject<uint32_t>() == 4);
+          return MakePair(aEW->CurrentBlockIndex(), aEW->BlockEndIndex());
+        });
+    auto& bi5 = bi5_6.first();
+    auto& bi6 = bi5_6.second();
     //  16  17  18  19  20  21  22  23  24  25  26  11  12  13  14  15 (16)
     //  [4 |    int(4)    ] [4 |    int(5)    ]E ? S[4 |    int(3)    ]
     VERIFY_START_END_DESTROYED(11, 26, 2);
@@ -700,12 +701,12 @@ void TestBlocksRingBufferAPI() {
 
     // Check that we have `3` to `5`.
     count = 2;
-    rb.ReadEach([&](BlocksRingBuffer::EntryReader aReader) {
+    rb.ReadEach([&](BlocksRingBuffer::EntryReader& aReader) {
       MOZ_RELEASE_ASSERT(aReader.ReadObject<uint32_t>() == ++count);
     });
     MOZ_RELEASE_ASSERT(count == 5);
 
-    // Delete everything before `4`, this should delete `3`.
+    // Clear everything before `4`, this should destroy `3`.
     rb.ClearBefore(bi4);
     //  16  17  18  19  20  21  22  23  24  25  26  11  12  13  14  15
     // S[4 |    int(4)    ] [4 |    int(5)    ]E ?   ?   ?   ?   ?   ?
@@ -713,19 +714,19 @@ void TestBlocksRingBufferAPI() {
 
     // Check that we have `4` to `5`.
     count = 3;
-    rb.ReadEach([&](BlocksRingBuffer::EntryReader aReader) {
+    rb.ReadEach([&](BlocksRingBuffer::EntryReader& aReader) {
       MOZ_RELEASE_ASSERT(aReader.ReadObject<uint32_t>() == ++count);
     });
     MOZ_RELEASE_ASSERT(count == 5);
 
-    // Delete everything before `4` again, nothing to delete.
+    // Clear everything before `4` again, nothing to destroy.
     lastDestroyed = 0;
     rb.ClearBefore(bi4);
     VERIFY_START_END_DESTROYED(16, 26, 0);
 
-    // Delete everything, this should delete `4` and `5`, and bring the start
+    // Clear everything, this should destroy `4` and `5`, and bring the start
     // index where the end index currently is.
-    rb.Clear();
+    rb.ClearBefore(bi6);
     //  16  17  18  19  20  21  22  23  24  25  26  11  12  13  14  15
     //   ?   ?   ?   ?   ?   ?   ?   ?   ?   ? SE?   ?   ?   ?   ?   ?
     VERIFY_START_END_DESTROYED(26, 26, 5);
@@ -738,18 +739,19 @@ void TestBlocksRingBufferAPI() {
       MOZ_RELEASE_ASSERT(aMaybeReader.isNothing());
     });
 
-    // Delete everything before now-deleted `4`, nothing to delete.
+    // Clear everything before now-cleared `4`, nothing to destroy.
     lastDestroyed = 0;
     rb.ClearBefore(bi4);
     VERIFY_START_END_DESTROYED(26, 26, 0);
 
     // Push `6` directly.
-    MOZ_RELEASE_ASSERT(ExtractBlockIndex(rb.PutObject(uint32_t(6))) == 26);
+    MOZ_RELEASE_ASSERT(rb.PutObject(uint32_t(6)) == bi6);
     //  16  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31
     //   ?   ?   ?   ?   ?   ?   ?   ?   ?   ? S[4 |    int(6)    ]E ?
     VERIFY_START_END_DESTROYED(26, 31, 0);
 
-    // End of block where rb lives, should call deleter on destruction.
+    // End of block where rb lives, BlocksRingBuffer destructor should call
+    // entry destructor for remaining entries.
   }
   MOZ_RELEASE_ASSERT(lastDestroyed == 6);
 
@@ -772,10 +774,209 @@ void TestBlocksRingBufferAPI() {
   printf("TestBlocksRingBufferAPI done\n");
 }
 
+void TestBlocksRingBufferUnderlyingBufferChanges() {
+  printf("TestBlocksRingBufferUnderlyingBufferChanges...\n");
+
+  // Out-of-session BlocksRingBuffer to start with.
+  BlocksRingBuffer rb;
+
+  // Block index to read at. Initially "null", but may be changed below.
+  BlocksRingBuffer::BlockIndex bi;
+
+  // Test all rb APIs when rb is out-of-session and therefore doesn't have an
+  // underlying buffer.
+  auto testOutOfSession = [&]() {
+    MOZ_RELEASE_ASSERT(rb.BufferLength().isNothing());
+    BlocksRingBuffer::State state = rb.GetState();
+    // When out-of-session, range start and ends are the same, and there are no
+    // pushed&cleared blocks.
+    MOZ_RELEASE_ASSERT(state.mRangeStart == state.mRangeEnd);
+    MOZ_RELEASE_ASSERT(state.mPushedBlockCount == 0);
+    MOZ_RELEASE_ASSERT(state.mClearedBlockCount == 0);
+    // `Put()` functions run the callback with `Nothing`.
+    int32_t ran = 0;
+    rb.Put(1, [&](BlocksRingBuffer::EntryWriter* aMaybeEntryWriter) {
+      MOZ_RELEASE_ASSERT(!aMaybeEntryWriter);
+      ++ran;
+    });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    // `PutFrom` won't do anything, and returns the null BlockIndex.
+    MOZ_RELEASE_ASSERT(rb.PutFrom(&ran, sizeof(ran)) ==
+                       BlocksRingBuffer::BlockIndex{});
+    MOZ_RELEASE_ASSERT(rb.PutObject(ran) == BlocksRingBuffer::BlockIndex{});
+    // `Read()` functions run the callback with `Nothing`.
+    ran = 0;
+    rb.Read([&](BlocksRingBuffer::Reader* aReader) {
+      MOZ_RELEASE_ASSERT(!aReader);
+      ++ran;
+    });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    ran = 0;
+    rb.ReadAt(BlocksRingBuffer::BlockIndex{},
+              [&](Maybe<BlocksRingBuffer::EntryReader>&& aMaybeEntryReader) {
+                MOZ_RELEASE_ASSERT(aMaybeEntryReader.isNothing());
+                ++ran;
+              });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    ran = 0;
+    rb.ReadAt(bi,
+              [&](Maybe<BlocksRingBuffer::EntryReader>&& aMaybeEntryReader) {
+                MOZ_RELEASE_ASSERT(aMaybeEntryReader.isNothing());
+                ++ran;
+              });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    // `ReadEach` shouldn't run the callback (nothing to read).
+    rb.ReadEach([](auto&&) { MOZ_RELEASE_ASSERT(false); });
+  };
+
+  // As `testOutOfSession()` attempts to modify the buffer, we run it twice to
+  // make sure one run doesn't influence the next one.
+  testOutOfSession();
+  testOutOfSession();
+
+  rb.ClearBefore(bi);
+  testOutOfSession();
+  testOutOfSession();
+
+  rb.Clear();
+  testOutOfSession();
+  testOutOfSession();
+
+  rb.Reset();
+  testOutOfSession();
+  testOutOfSession();
+
+  constexpr uint32_t MBSize = 32;
+
+  rb.Set(MakePowerOfTwo<BlocksRingBuffer::Length, MBSize>());
+
+  constexpr bool EMPTY = true;
+  constexpr bool NOT_EMPTY = false;
+  // Test all rb APIs when rb has an underlying buffer.
+  auto testInSession = [&](bool aExpectEmpty) {
+    MOZ_RELEASE_ASSERT(rb.BufferLength().isSome());
+    BlocksRingBuffer::State state = rb.GetState();
+    if (aExpectEmpty) {
+      MOZ_RELEASE_ASSERT(state.mRangeStart == state.mRangeEnd);
+      MOZ_RELEASE_ASSERT(state.mPushedBlockCount == 0);
+      MOZ_RELEASE_ASSERT(state.mClearedBlockCount == 0);
+    } else {
+      MOZ_RELEASE_ASSERT(state.mRangeStart < state.mRangeEnd);
+      MOZ_RELEASE_ASSERT(state.mPushedBlockCount > 0);
+      MOZ_RELEASE_ASSERT(state.mClearedBlockCount <= state.mPushedBlockCount);
+    }
+    int32_t ran = 0;
+    // The following three `Put...` will write three int32_t of value 1.
+    bi = rb.Put(sizeof(ran),
+                [&](BlocksRingBuffer::EntryWriter* aMaybeEntryWriter) {
+                  MOZ_RELEASE_ASSERT(!!aMaybeEntryWriter);
+                  ++ran;
+                  aMaybeEntryWriter->WriteObject(ran);
+                  return aMaybeEntryWriter->CurrentBlockIndex();
+                });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    MOZ_RELEASE_ASSERT(rb.PutFrom(&ran, sizeof(ran)) !=
+                       BlocksRingBuffer::BlockIndex{});
+    MOZ_RELEASE_ASSERT(rb.PutObject(ran) != BlocksRingBuffer::BlockIndex{});
+    ran = 0;
+    rb.Read([&](BlocksRingBuffer::Reader* aReader) {
+      MOZ_RELEASE_ASSERT(!!aReader);
+      ++ran;
+    });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    ran = 0;
+    rb.ReadEach([&](BlocksRingBuffer::EntryReader& aEntryReader) {
+      MOZ_RELEASE_ASSERT(aEntryReader.RemainingBytes() == sizeof(ran));
+      MOZ_RELEASE_ASSERT(aEntryReader.ReadObject<decltype(ran)>() == 1);
+      ++ran;
+    });
+    MOZ_RELEASE_ASSERT(ran >= 3);
+    ran = 0;
+    rb.ReadAt(BlocksRingBuffer::BlockIndex{},
+              [&](Maybe<BlocksRingBuffer::EntryReader>&& aMaybeEntryReader) {
+                MOZ_RELEASE_ASSERT(aMaybeEntryReader.isNothing());
+                ++ran;
+              });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    ran = 0;
+    rb.ReadAt(bi,
+              [&](Maybe<BlocksRingBuffer::EntryReader>&& aMaybeEntryReader) {
+                MOZ_RELEASE_ASSERT(aMaybeEntryReader.isNothing() == !bi);
+                ++ran;
+              });
+    MOZ_RELEASE_ASSERT(ran == 1);
+  };
+
+  testInSession(EMPTY);
+  testInSession(NOT_EMPTY);
+
+  rb.Set(MakePowerOfTwo<BlocksRingBuffer::Length, 32>());
+  MOZ_RELEASE_ASSERT(rb.BufferLength().isSome());
+  rb.ReadEach([](auto&&) { MOZ_RELEASE_ASSERT(false); });
+
+  testInSession(EMPTY);
+  testInSession(NOT_EMPTY);
+
+  rb.Reset();
+  testOutOfSession();
+  testOutOfSession();
+
+  uint8_t buffer[MBSize * 3];
+  for (size_t i = 0; i < MBSize * 3; ++i) {
+    buffer[i] = uint8_t('A' + i);
+  }
+
+  rb.Set(&buffer[MBSize], MakePowerOfTwo<BlocksRingBuffer::Length, MBSize>());
+  MOZ_RELEASE_ASSERT(rb.BufferLength().isSome());
+  rb.ReadEach([](auto&&) { MOZ_RELEASE_ASSERT(false); });
+
+  testInSession(EMPTY);
+  testInSession(NOT_EMPTY);
+
+  rb.Reset();
+  testOutOfSession();
+  testOutOfSession();
+
+  int cleared = 0;
+  rb.Set(&buffer[MBSize], MakePowerOfTwo<BlocksRingBuffer::Length, MBSize>(),
+         [&](auto&&) { ++cleared; });
+  MOZ_RELEASE_ASSERT(rb.BufferLength().isSome());
+  rb.ReadEach([](auto&&) { MOZ_RELEASE_ASSERT(false); });
+
+  testInSession(EMPTY);
+  testInSession(NOT_EMPTY);
+
+  // Remove the current underlying buffer, this should clear all entries.
+  rb.Reset();
+  // The above should clear all entries (2 tests, three entries each).
+  MOZ_RELEASE_ASSERT(cleared == 2 * 3);
+
+  // Check that only the provided stack-based sub-buffer was modified.
+  uint32_t changed = 0;
+  for (size_t i = MBSize; i < MBSize * 2; ++i) {
+    changed += (buffer[i] == uint8_t('A' + i)) ? 0 : 1;
+  }
+  // Expect at least 75% changes.
+  MOZ_RELEASE_ASSERT(changed >= MBSize * 6 / 8);
+
+  // Everything around the sub-buffer should be unchanged.
+  for (size_t i = 0; i < MBSize; ++i) {
+    MOZ_RELEASE_ASSERT(buffer[i] == uint8_t('A' + i));
+  }
+  for (size_t i = MBSize * 2; i < MBSize * 3; ++i) {
+    MOZ_RELEASE_ASSERT(buffer[i] == uint8_t('A' + i));
+  }
+
+  testOutOfSession();
+  testOutOfSession();
+
+  printf("TestBlocksRingBufferUnderlyingBufferChanges done\n");
+}
+
 void TestBlocksRingBufferThreading() {
   printf("TestBlocksRingBufferThreading...\n");
 
-  // Deleter will store about-to-be-deleted value in `lastDestroyed`.
+  // Entry destructor will store about-to-be-cleared value in `lastDestroyed`.
   std::atomic<int> lastDestroyed{0};
 
   constexpr uint32_t MBSize = 8192;
@@ -784,7 +985,7 @@ void TestBlocksRingBufferThreading() {
     buffer[i] = uint8_t('A' + i);
   }
   BlocksRingBuffer rb(&buffer[MBSize], MakePowerOfTwo32<MBSize>(),
-                      [&](BlocksRingBuffer::EntryReader aReader) {
+                      [&](BlocksRingBuffer::EntryReader& aReader) {
                         lastDestroyed = aReader.ReadObject<int>();
                       });
 
@@ -792,12 +993,20 @@ void TestBlocksRingBufferThreading() {
   std::atomic<bool> stopReader{false};
   std::thread reader([&]() {
     for (;;) {
-      Pair<uint64_t, uint64_t> counts = rb.GetPushedAndDeletedCounts();
-      printf("Reader: pushed=%llu deleted=%llu alive=%llu lastDestroyed=%d\n",
-             static_cast<unsigned long long>(counts.first()),
-             static_cast<unsigned long long>(counts.second()),
-             static_cast<unsigned long long>(counts.first() - counts.second()),
-             int(lastDestroyed));
+      BlocksRingBuffer::State state = rb.GetState();
+      printf(
+          "Reader: range=%llu..%llu (%llu bytes) pushed=%llu cleared=%llu "
+          "(alive=%llu) lastDestroyed=%d\n",
+          static_cast<unsigned long long>(ExtractBlockIndex(state.mRangeStart)),
+          static_cast<unsigned long long>(ExtractBlockIndex(state.mRangeEnd)),
+          static_cast<unsigned long long>(ExtractBlockIndex(state.mRangeEnd)) -
+              static_cast<unsigned long long>(
+                  ExtractBlockIndex(state.mRangeStart)),
+          static_cast<unsigned long long>(state.mPushedBlockCount),
+          static_cast<unsigned long long>(state.mClearedBlockCount),
+          static_cast<unsigned long long>(state.mPushedBlockCount -
+                                          state.mClearedBlockCount),
+          int(lastDestroyed));
       if (stopReader) {
         break;
       }
@@ -817,9 +1026,10 @@ void TestBlocksRingBufferThreading() {
             // Reserve as many bytes as the thread number (but at least enough
             // to store an int), and write an increasing int.
             rb.Put(std::max(aThreadNo, int(sizeof(push))),
-                   [&](BlocksRingBuffer::EntryWriter aEW) {
-                     aEW.WriteObject(aThreadNo * 1000000 + push);
-                     aEW += aEW.RemainingBytes();
+                   [&](BlocksRingBuffer::EntryWriter* aEW) {
+                     MOZ_RELEASE_ASSERT(!!aEW);
+                     aEW->WriteObject(aThreadNo * 1000000 + push);
+                     *aEW += aEW->RemainingBytes();
                    });
           }
         },
@@ -892,6 +1102,7 @@ void TestProfiler() {
   TestLEB128();
   TestModuloBuffer();
   TestBlocksRingBufferAPI();
+  TestBlocksRingBufferUnderlyingBufferChanges();
   TestBlocksRingBufferThreading();
 
   {
@@ -932,6 +1143,39 @@ void TestProfiler() {
       AUTO_BASE_PROFILER_THREAD_SLEEP;
       SleepMilli(1000);
     }
+
+    Maybe<baseprofiler::ProfilerBufferInfo> info =
+        baseprofiler::profiler_get_buffer_info();
+    MOZ_RELEASE_ASSERT(info.isSome());
+    printf("Profiler buffer range: %llu .. %llu (%llu bytes)\n",
+           static_cast<unsigned long long>(info->mRangeStart),
+           static_cast<unsigned long long>(info->mRangeEnd),
+           // sizeof(ProfileBufferEntry) == 9
+           (static_cast<unsigned long long>(info->mRangeEnd) -
+            static_cast<unsigned long long>(info->mRangeStart)) *
+               9);
+    printf("Stats:         min(ns) .. mean(ns) .. max(ns)  [count]\n");
+    printf("- Intervals:   %7.1f .. %7.1f  .. %7.1f  [%u]\n",
+           info->mIntervalsNs.min,
+           info->mIntervalsNs.sum / info->mIntervalsNs.n,
+           info->mIntervalsNs.max, info->mIntervalsNs.n);
+    printf("- Overheads:   %7.1f .. %7.1f  .. %7.1f  [%u]\n",
+           info->mOverheadsNs.min,
+           info->mOverheadsNs.sum / info->mOverheadsNs.n,
+           info->mOverheadsNs.max, info->mOverheadsNs.n);
+    printf("  - Locking:   %7.1f .. %7.1f  .. %7.1f  [%u]\n",
+           info->mLockingsNs.min, info->mLockingsNs.sum / info->mLockingsNs.n,
+           info->mLockingsNs.max, info->mLockingsNs.n);
+    printf("  - Clearning: %7.1f .. %7.1f  .. %7.1f  [%u]\n",
+           info->mCleaningsNs.min,
+           info->mCleaningsNs.sum / info->mCleaningsNs.n,
+           info->mCleaningsNs.max, info->mCleaningsNs.n);
+    printf("  - Counters:  %7.1f .. %7.1f  .. %7.1f  [%u]\n",
+           info->mCountersNs.min, info->mCountersNs.sum / info->mCountersNs.n,
+           info->mCountersNs.max, info->mCountersNs.n);
+    printf("  - Threads:   %7.1f .. %7.1f  .. %7.1f  [%u]\n",
+           info->mThreadsNs.min, info->mThreadsNs.sum / info->mThreadsNs.n,
+           info->mThreadsNs.max, info->mThreadsNs.n);
 
     printf("baseprofiler_save_profile_to_file()...\n");
     baseprofiler::profiler_save_profile_to_file("TestProfiler_profile.json");

@@ -4,9 +4,8 @@
 
 // @flow
 
-import { prepareSourcePayload, createWorker } from "./create";
-import { supportsWorkers, updateWorkerClients } from "./workers";
-import { features } from "../../utils/prefs";
+import { prepareSourcePayload, createTarget } from "./create";
+import { updateTargets } from "./targets";
 
 import Reps from "devtools-reps";
 import type { Node } from "devtools-reps";
@@ -27,7 +26,7 @@ import type {
 } from "../../types";
 
 import type {
-  TabTarget,
+  Target,
   DebuggerClient,
   Grip,
   ThreadFront,
@@ -40,9 +39,9 @@ import type {
   EventListenerActiveList,
 } from "../../actions/types";
 
-let workerClients: Object;
-let threadFront: ThreadFront;
-let tabTarget: TabTarget;
+let targets: { [string]: Target };
+let currentThreadFront: ThreadFront;
+let currentTarget: Target;
 let debuggerClient: DebuggerClient;
 let sourceActors: { [ActorId]: SourceId };
 let breakpoints: { [string]: Object };
@@ -51,17 +50,17 @@ let supportsWasm: boolean;
 
 type Dependencies = {
   threadFront: ThreadFront,
-  tabTarget: TabTarget,
+  tabTarget: Target,
   debuggerClient: DebuggerClient,
   supportsWasm: boolean,
 };
 
 function setupCommands(dependencies: Dependencies) {
-  threadFront = dependencies.threadFront;
-  tabTarget = dependencies.tabTarget;
+  currentThreadFront = dependencies.threadFront;
+  currentTarget = dependencies.tabTarget;
   debuggerClient = dependencies.debuggerClient;
   supportsWasm = dependencies.supportsWasm;
-  workerClients = {};
+  targets = {};
   sourceActors = {};
   breakpoints = {};
 }
@@ -98,25 +97,25 @@ function sendPacket(packet: Object) {
   return debuggerClient.request(packet);
 }
 
+function lookupTarget(thread: string) {
+  if (thread == currentThreadFront.actor) {
+    return currentTarget;
+  }
+
+  if (!targets[thread]) {
+    throw new Error(`Unknown thread front: ${thread}`);
+  }
+
+  return targets[thread];
+}
+
 function lookupThreadFront(thread: string) {
-  if (thread == threadFront.actor) {
-    return threadFront;
-  }
-  if (!workerClients[thread]) {
-    throw new Error(`Unknown thread client: ${thread}`);
-  }
-  return workerClients[thread].thread;
+  const target = lookupTarget(thread);
+  return target.threadFront;
 }
 
-function lookupConsoleClient(thread: string) {
-  if (thread == threadFront.actor) {
-    return tabTarget.activeConsole;
-  }
-  return workerClients[thread].console;
-}
-
-function listWorkerThreadFronts() {
-  return (Object.values(workerClients): any).map(({ thread }) => thread);
+function listThreadFronts() {
+  return (Object.values(targets): any).map(target => target.threadFront);
 }
 
 function forEachThread(iteratee) {
@@ -126,7 +125,7 @@ function forEachThread(iteratee) {
   // resolve in FIFO order, and this could result in client and server state
   // going out of sync.
 
-  const promises = [threadFront, ...listWorkerThreadFronts()].map(
+  const promises = [currentThreadFront, ...listThreadFronts()].map(
     // If a thread shuts down while sending the message then it will
     // throw. Ignore these exceptions.
     t => iteratee(t).catch(e => console.log(e))
@@ -174,11 +173,11 @@ async function sourceContents({
 }
 
 function setXHRBreakpoint(path: string, method: string) {
-  return threadFront.setXHRBreakpoint(path, method);
+  return currentThreadFront.setXHRBreakpoint(path, method);
 }
 
 function removeXHRBreakpoint(path: string, method: string) {
-  return threadFront.removeXHRBreakpoint(path, method);
+  return currentThreadFront.removeXHRBreakpoint(path, method);
 }
 
 // Get the string key to use for a breakpoint location.
@@ -186,17 +185,22 @@ function removeXHRBreakpoint(path: string, method: string) {
 function locationKey(location: BreakpointLocation) {
   const { sourceUrl, line, column } = location;
   const sourceId = location.sourceId || "";
-  return `${(sourceUrl: any)}:${(sourceId: any)}:${line}:${(column: any)}`;
+  // $FlowIgnore
+  return `${sourceUrl}:${sourceId}:${line}:${column}`;
 }
 
 function detachWorkers() {
-  for (const thread of listWorkerThreadFronts()) {
+  for (const thread of listThreadFronts()) {
     thread.detach();
   }
 }
 
 function maybeGenerateLogGroupId(options) {
-  if (options.logValue && tabTarget.traits && tabTarget.traits.canRewind) {
+  if (
+    options.logValue &&
+    currentTarget.traits &&
+    currentTarget.traits.canRewind
+  ) {
     return { ...options, logGroupId: `logGroup-${Math.random()}` };
   }
   return options;
@@ -204,8 +208,8 @@ function maybeGenerateLogGroupId(options) {
 
 function maybeClearLogpoint(location: BreakpointLocation) {
   const bp = breakpoints[locationKey(location)];
-  if (bp && bp.options.logGroupId && tabTarget.activeConsole) {
-    tabTarget.activeConsole.emit(
+  if (bp && bp.options.logGroupId && currentTarget.activeConsole) {
+    currentTarget.activeConsole.emit(
       "clearLogpointMessages",
       bp.options.logGroupId
     );
@@ -249,13 +253,12 @@ function evaluate(
   { thread, frameId }: EvaluateParam = {}
 ): Promise<{ result: Grip | null }> {
   const params = { thread, frameActor: frameId };
-  if (!tabTarget || !script) {
+  if (!currentTarget || !script) {
     return Promise.resolve({ result: null });
   }
 
-  const console = thread
-    ? lookupConsoleClient(thread)
-    : tabTarget.activeConsole;
+  const target = thread ? lookupTarget(thread) : currentTarget;
+  const console = target.activeConsole;
   if (!console) {
     return Promise.resolve({ result: null });
   }
@@ -268,11 +271,11 @@ function autocomplete(
   cursor: number,
   frameId: ?string
 ): Promise<mixed> {
-  if (!tabTarget || !tabTarget.activeConsole || !input) {
+  if (!currentTarget || !currentTarget.activeConsole || !input) {
     return Promise.resolve({});
   }
   return new Promise(resolve => {
-    tabTarget.activeConsole.autocomplete(
+    currentTarget.activeConsole.autocomplete(
       input,
       cursor,
       result => resolve(result),
@@ -282,11 +285,11 @@ function autocomplete(
 }
 
 function navigate(url: string): Promise<*> {
-  return tabTarget.navigateTo({ url });
+  return currentTarget.navigateTo({ url });
 }
 
 function reload(): Promise<*> {
-  return tabTarget.reload();
+  return currentTarget.reload();
 }
 
 function getProperties(thread: string, grip: Grip): Promise<*> {
@@ -330,7 +333,7 @@ async function blackBox(
   isBlackBoxed: boolean,
   range?: Range
 ): Promise<*> {
-  const sourceFront = threadFront.source({ actor: sourceActor.actor });
+  const sourceFront = currentThreadFront.source({ actor: sourceActor.actor });
   if (isBlackBoxed) {
     await sourceFront.unblackBox(range);
   } else {
@@ -358,7 +361,7 @@ async function getEventListenerBreakpointTypes(): Promise<
 > {
   let categories;
   try {
-    categories = await threadFront.getAvailableEventBreakpoints();
+    categories = await currentThreadFront.getAvailableEventBreakpoints();
 
     if (!Array.isArray(categories)) {
       // When connecting to older browser that had our placeholder
@@ -392,7 +395,7 @@ async function getSources(
 }
 
 async function fetchSources(): Promise<Array<GeneratedSourceData>> {
-  return getSources(threadFront);
+  return getSources(currentThreadFront);
 }
 
 function getSourceForActor(actor: ActorId) {
@@ -403,103 +406,70 @@ function getSourceForActor(actor: ActorId) {
 }
 
 async function fetchWorkers(): Promise<Worker[]> {
-  if (features.windowlessWorkers) {
-    const options = {
-      breakpoints,
-      eventBreakpoints,
-      observeAsmJS: true,
-    };
+  const options = {
+    breakpoints,
+    eventBreakpoints,
+    observeAsmJS: true,
+  };
 
-    const newWorkerClients = await updateWorkerClients({
-      tabTarget,
-      debuggerClient,
-      threadFront,
-      workerClients,
-      options,
-    });
+  const newTargets = await updateTargets({
+    currentTarget,
+    debuggerClient,
+    targets,
+    options,
+  });
 
-    // Fetch the sources and install breakpoints on any new workers.
-    const workerNames = Object.getOwnPropertyNames(newWorkerClients);
-    for (const actor of workerNames) {
-      if (!workerClients[actor]) {
-        const client = newWorkerClients[actor].thread;
-
-        // This runs in the background and populates some data, but we also
-        // want to allow it to fail quietly. For instance, it is pretty easy
-        // for source clients to throw during the fetch if their thread
-        // shuts down, and this would otherwise cause test failures.
-        getSources(client).catch(e => console.error(e));
-      }
+  // Fetch the sources and install breakpoints on any new workers.
+  // NOTE: This runs in the background and fails quitely because it is
+  // pretty easy for sources to throw during the fetch if their thread
+  // shuts down, which would cause test failures.
+  for (const actor in newTargets) {
+    if (!targets[actor]) {
+      const { threadFront } = newTargets[actor];
+      getSources(threadFront).catch(e => console.error(e));
     }
-
-    workerClients = newWorkerClients;
-
-    return workerNames.map(actor =>
-      createWorker(actor, workerClients[actor].url)
-    );
   }
 
-  if (!supportsWorkers(tabTarget)) {
-    return Promise.resolve([]);
-  }
-
-  const { workers } = await tabTarget.listWorkers();
-  return workers;
+  targets = newTargets;
+  return Object.keys(targets).map(id => createTarget(id, targets[id]));
 }
 
 function getMainThread() {
-  return threadFront.actor;
+  return currentThreadFront.actor;
 }
 
-async function getBreakpointPositions(
-  actors: Array<SourceActor>,
-  range: ?Range
-): Promise<{ [string]: number[] }> {
-  const sourcePositions = {};
-
-  for (const { thread, actor } of actors) {
-    const sourceThreadFront = lookupThreadFront(thread);
-    const sourceFront = sourceThreadFront.source({ actor });
-    const positions = await sourceFront.getBreakpointPositionsCompressed(range);
-
-    for (const line of Object.keys(positions)) {
-      let columns = positions[line];
-      const existing = sourcePositions[line];
-      if (existing) {
-        columns = [...new Set([...existing, ...columns])];
-      }
-
-      sourcePositions[line] = columns;
-    }
-  }
-  return sourcePositions;
+async function getSourceActorBreakpointPositions(
+  { thread, actor }: SourceActor,
+  range: Range
+): Promise<{ [number]: number[] }> {
+  const sourceThreadFront = lookupThreadFront(thread);
+  const sourceFront = sourceThreadFront.source({ actor });
+  return sourceFront.getBreakpointPositionsCompressed(range);
 }
 
-async function getBreakableLines(actors: Array<SourceActor>) {
-  let lines = [];
-  for (const { thread, actor } of actors) {
-    const sourceThreadFront = lookupThreadFront(thread);
-    const sourceFront = sourceThreadFront.source({ actor });
-    let actorLines = [];
-    try {
-      actorLines = await sourceFront.getBreakableLines();
-    } catch (e) {
-      // Handle backward compatibility
-      if (
-        e.message &&
-        e.message.match(/does not recognize the packet type getBreakableLines/)
-      ) {
-        const pos = await sourceFront.getBreakpointPositionsCompressed();
-        actorLines = Object.keys(pos).map(line => Number(line));
-      } else if (!e.message || !e.message.match(/Connection closed/)) {
-        throw e;
-      }
+async function getSourceActorBreakableLines({
+  thread,
+  actor,
+}: SourceActor): Promise<Array<number>> {
+  const sourceThreadFront = lookupThreadFront(thread);
+  const sourceFront = sourceThreadFront.source({ actor });
+  let actorLines = [];
+  try {
+    actorLines = await sourceFront.getBreakableLines();
+  } catch (e) {
+    // Handle backward compatibility
+    if (
+      e.message &&
+      e.message.match(/does not recognize the packet type getBreakableLines/)
+    ) {
+      const pos = await sourceFront.getBreakpointPositionsCompressed();
+      actorLines = Object.keys(pos).map(line => Number(line));
+    } else if (!e.message || !e.message.match(/Connection closed/)) {
+      throw e;
     }
-
-    lines = [...new Set([...lines, ...actorLines])];
   }
 
-  return lines;
+  return actorLines;
 }
 
 const clientCommands = {
@@ -519,8 +489,8 @@ const clientCommands = {
   breakOnNext,
   sourceContents,
   getSourceForActor,
-  getBreakpointPositions,
-  getBreakableLines,
+  getSourceActorBreakpointPositions,
+  getSourceActorBreakableLines,
   hasBreakpoint,
   setBreakpoint,
   setXHRBreakpoint,
@@ -544,7 +514,7 @@ const clientCommands = {
   getEventListenerBreakpointTypes,
   detachWorkers,
   hasWasmSupport,
-  lookupConsoleClient,
+  lookupTarget,
 };
 
 export { setupCommands, clientCommands };

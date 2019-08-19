@@ -37,7 +37,6 @@
 #include "builtin/MapObject.h"
 #include "builtin/Promise.h"
 #include "builtin/Stream.h"
-#include "builtin/String.h"
 #include "builtin/Symbol.h"
 #ifdef ENABLE_TYPED_OBJECTS
 #  include "builtin/TypedObject.h"
@@ -590,10 +589,8 @@ JS_PUBLIC_API bool JS_WrapValue(JSContext* cx, MutableHandleValue vp) {
 
 static void ReleaseAssertObjectHasNoWrappers(JSContext* cx,
                                              HandleObject target) {
-  RootedValue origv(cx, ObjectValue(*target));
-
   for (CompartmentsIter c(cx->runtime()); !c.done(); c.next()) {
-    if (c->lookupWrapper(origv)) {
+    if (c->lookupWrapper(target)) {
       MOZ_CRASH("wrapper found for target object");
     }
   }
@@ -662,17 +659,21 @@ static void ReleaseAssertObjectHasNoWrappers(JSContext* cx,
  * we intentionally crash instead.
  */
 
+static void CheckTransplantObject(JSObject* obj) {
+#ifdef DEBUG
+  MOZ_ASSERT(!obj->is<CrossCompartmentWrapperObject>());
+  JS::AssertCellIsNotGray(obj);
+#endif
+}
+
 JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
                                             HandleObject target) {
   AssertHeapIsIdle();
   MOZ_ASSERT(origobj != target);
-  MOZ_ASSERT(!origobj->is<CrossCompartmentWrapperObject>());
-  MOZ_ASSERT(!target->is<CrossCompartmentWrapperObject>());
+  CheckTransplantObject(origobj);
+  CheckTransplantObject(target);
   ReleaseAssertObjectHasNoWrappers(cx, target);
-  JS::AssertCellIsNotGray(origobj);
-  JS::AssertCellIsNotGray(target);
 
-  RootedValue origv(cx, ObjectValue(*origobj));
   RootedObject newIdentity(cx);
 
   // Don't allow a compacting GC to observe any intermediate state.
@@ -690,11 +691,11 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
     AutoRealm ar(cx, origobj);
     JSObject::swap(cx, origobj, target);
     newIdentity = origobj;
-  } else if (WrapperMap::Ptr p = destination->lookupWrapper(origv)) {
+  } else if (ObjectWrapperMap::Ptr p = destination->lookupWrapper(origobj)) {
     // There might already be a wrapper for the original object in
     // the new compartment. If there is, we use its identity and swap
     // in the contents of |target|.
-    newIdentity = &p->value().get().toObject();
+    newIdentity = p->value().get();
 
     // When we remove origv from the wrapper map, its wrapper, newIdentity,
     // must immediately cease to be a cross-compartment wrapper. Nuke it.
@@ -728,7 +729,7 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
     JSObject::swap(cx, origobj, newIdentityWrapper);
     if (origobj->compartment()->lookupWrapper(newIdentity)) {
       MOZ_ASSERT(origobj->is<CrossCompartmentWrapperObject>());
-      if (!origobj->compartment()->putWrapper(cx, CrossCompartmentKey(newIdentity), origv)) {
+      if (!origobj->compartment()->putWrapper(cx, newIdentity, origobj)) {
         MOZ_CRASH();
       }
     }
@@ -738,6 +739,71 @@ JS_PUBLIC_API JSObject* JS_TransplantObject(JSContext* cx, HandleObject origobj,
   // ambiguity.
   JS::AssertCellIsNotGray(newIdentity);
   return newIdentity;
+}
+
+JS_FRIEND_API void js::RemapRemoteWindowProxies(
+    JSContext* cx, CompartmentTransplantCallback* callback,
+    MutableHandleObject target) {
+  AssertHeapIsIdle();
+  CheckTransplantObject(target);
+  ReleaseAssertObjectHasNoWrappers(cx, target);
+
+  // |target| can't be a remote proxy, because we expect it to get a CCW when
+  // wrapped across compartments.
+  MOZ_ASSERT(!js::IsDOMRemoteProxyObject(target));
+
+  // Don't allow a compacting GC to observe any intermediate state.
+  AutoDisableCompactingGC nocgc(cx);
+
+  AutoDisableProxyCheck adpc;
+
+  AutoEnterOOMUnsafeRegion oomUnsafe;
+  if (!CheckSystemRecursionLimit(cx)) {
+    oomUnsafe.crash("js::RemapRemoteWindowProxies");
+  }
+
+  RootedObject targetCompartmentProxy(cx);
+  JS::RootedVector<JSObject*> otherProxies(cx);
+
+  // Use the callback to find remote proxies in all compartments that match
+  // whatever criteria callback uses.
+  for (CompartmentsIter c(cx->runtime()); !c.done(); c.next()) {
+    RootedObject remoteProxy(cx, callback->getObjectToTransplant(c));
+    if (!remoteProxy) {
+      continue;
+    }
+    // The object the callback returns should be a DOM remote proxy object in
+    // the compartment c. We rely on it being a DOM remote proxy because that
+    // means that it won't have any cross-compartment wrappers.
+    MOZ_ASSERT(js::IsDOMRemoteProxyObject(remoteProxy));
+    MOZ_ASSERT(remoteProxy->compartment() == c);
+    CheckTransplantObject(remoteProxy);
+
+    // Immediately turn the DOM remote proxy object into a dead proxy object
+    // so we don't have to worry about anything weird going on with it.
+    js::NukeNonCCWProxy(cx, remoteProxy);
+
+    if (remoteProxy->compartment() == target->compartment()) {
+      targetCompartmentProxy = remoteProxy;
+    } else if (!otherProxies.append(remoteProxy)) {
+      oomUnsafe.crash("js::RemapRemoteWindowProxies");
+    }
+  }
+
+  // If there was a remote proxy in |target|'s compartment, we need to use it
+  // instead of |target|, in case it had any references, so swap it. Do this
+  // before any other compartment so that the target object will be set up
+  // correctly before we start wrapping it into other compartments.
+  if (targetCompartmentProxy) {
+    AutoRealm ar(cx, targetCompartmentProxy);
+    JSObject::swap(cx, targetCompartmentProxy, target);
+    target.set(targetCompartmentProxy);
+  }
+
+  for (JSObject*& obj : otherProxies) {
+    RootedObject deadWrapper(cx, obj);
+    js::RemapDeadWrapper(cx, deadWrapper, target);
+  }
 }
 
 /*
@@ -854,7 +920,7 @@ JS_PUBLIC_API bool JS_ResolveStandardClass(JSContext* cx, HandleObject obj,
   // property, so we won't resolve anything.
   JSProtoKey key = stdnm ? stdnm->key : JSProto_Null;
   if (key != JSProto_Null) {
-    const Class* clasp = ProtoKeyToClass(key);
+    const JSClass* clasp = ProtoKeyToClass(key);
     if (!clasp || clasp->specShouldDefineConstructor()) {
       if (!GlobalObject::ensureConstructor(cx, global, key)) {
         return false;
@@ -929,7 +995,7 @@ static bool EnumerateStandardClassesInTable(JSContext* cx,
       continue;
     }
 
-    if (const Class* clasp = ProtoKeyToClass(key)) {
+    if (const JSClass* clasp = ProtoKeyToClass(key)) {
       if (!clasp->specShouldDefineConstructor()) {
         continue;
       }
@@ -1150,7 +1216,7 @@ JS_PUBLIC_API void* JS_string_realloc(JSContext* cx, void* p, size_t oldBytes,
 JS_PUBLIC_API void JS_string_free(JSContext* cx, void* p) { return js_free(p); }
 
 JS_PUBLIC_API void JS_freeop(JSFreeOp* fop, void* p) {
-  return FreeOp::get(fop)->freeUntracked(p);
+  return fop->freeUntracked(p);
 }
 
 JS_PUBLIC_API void JS::AddAssociatedMemory(JSObject* obj, size_t nbytes,
@@ -1172,7 +1238,8 @@ JS_PUBLIC_API void JS::RemoveAssociatedMemory(JSObject* obj, size_t nbytes,
     return;
   }
 
-  obj->zoneFromAnyThread()->removeCellMemory(obj, nbytes, js::MemoryUse(use));
+  JSRuntime* rt = obj->runtimeFromAnyThread();
+  rt->defaultFreeOp()->removeCellMemory(obj, nbytes, js::MemoryUse(use));
 }
 
 #undef JS_AddRoot
@@ -1207,8 +1274,8 @@ JS_PUBLIC_API void JS_GC(JSContext* cx, JS::GCReason reason) {
 }
 
 JS_PUBLIC_API void JS_MaybeGC(JSContext* cx) {
-  gc::GCRuntime& gc = cx->runtime()->gc;
-  gc.maybeGC(cx->zone());
+  AssertHeapIsIdle();
+  cx->runtime()->gc.maybeGC();
 }
 
 JS_PUBLIC_API void JS_SetGCCallback(JSContext* cx, JSGCCallback cb,
@@ -1294,7 +1361,6 @@ JS_PUBLIC_API void JS_SetGCParametersBasedOnAvailableMemory(JSContext* cx,
   };
 
   static const JSGCConfig minimal[] = {
-      {JSGC_MAX_MALLOC_BYTES, 6 * 1024 * 1024},
       {JSGC_SLICE_TIME_BUDGET_MS, 30},
       {JSGC_HIGH_FREQUENCY_TIME_LIMIT, 1500},
       {JSGC_HIGH_FREQUENCY_HIGH_LIMIT, 40},
@@ -1309,7 +1375,6 @@ JS_PUBLIC_API void JS_SetGCParametersBasedOnAvailableMemory(JSContext* cx,
       {JSGC_MODE, JSGC_MODE_ZONE_INCREMENTAL}};
 
   static const JSGCConfig nominal[] = {
-      {JSGC_MAX_MALLOC_BYTES, 6 * 1024 * 1024},
       {JSGC_SLICE_TIME_BUDGET_MS, 30},
       {JSGC_HIGH_FREQUENCY_TIME_LIMIT, 1000},
       {JSGC_HIGH_FREQUENCY_HIGH_LIMIT, 500},
@@ -1505,8 +1570,8 @@ JS_PUBLIC_API JSObject* JS_InitClass(JSContext* cx, HandleObject obj,
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
   cx->check(obj, parent_proto);
-  return InitClass(cx, obj, parent_proto, Valueify(clasp), constructor, nargs,
-                   ps, fs, static_ps, static_fs);
+  return InitClass(cx, obj, parent_proto, clasp, constructor, nargs, ps, fs,
+                   static_ps, static_fs);
 }
 
 JS_PUBLIC_API bool JS_LinkConstructorAndPrototype(JSContext* cx,
@@ -1516,7 +1581,7 @@ JS_PUBLIC_API bool JS_LinkConstructorAndPrototype(JSContext* cx,
 }
 
 JS_PUBLIC_API const JSClass* JS_GetClass(JSObject* obj) {
-  return obj->getJSClass();
+  return obj->getClass();
 }
 
 JS_PUBLIC_API bool JS_InstanceOf(JSContext* cx, HandleObject obj,
@@ -1529,9 +1594,9 @@ JS_PUBLIC_API bool JS_InstanceOf(JSContext* cx, HandleObject obj,
     cx->check(args->thisv(), args->calleev());
   }
 #endif
-  if (!obj || obj->getJSClass() != clasp) {
+  if (!obj || obj->getClass() != clasp) {
     if (args) {
-      ReportIncompatibleMethod(cx, *args, Valueify(clasp));
+      ReportIncompatibleMethod(cx, *args, clasp);
     }
     return false;
   }
@@ -1656,8 +1721,7 @@ JS_PUBLIC_API JSObject* JS_NewGlobalObject(JSContext* cx, const JSClass* clasp,
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
 
-  return GlobalObject::new_(cx, Valueify(clasp), principals, hookOption,
-                            options);
+  return GlobalObject::new_(cx, clasp, principals, hookOption, options);
 }
 
 JS_PUBLIC_API void JS_GlobalObjectTraceHook(JSTracer* trc, JSObject* global) {
@@ -1709,12 +1773,11 @@ JS_PUBLIC_API void JS_FireOnNewGlobalObject(JSContext* cx,
   cx->runtime()->ensureRealmIsRecordingAllocations(globalObject);
 }
 
-JS_PUBLIC_API JSObject* JS_NewObject(JSContext* cx, const JSClass* jsclasp) {
+JS_PUBLIC_API JSObject* JS_NewObject(JSContext* cx, const JSClass* clasp) {
   MOZ_ASSERT(!cx->zone()->isAtomsZone());
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
 
-  const Class* clasp = Valueify(jsclasp);
   if (!clasp) {
     clasp = &PlainObject::class_; /* default class is Object */
   }
@@ -1726,14 +1789,13 @@ JS_PUBLIC_API JSObject* JS_NewObject(JSContext* cx, const JSClass* jsclasp) {
 }
 
 JS_PUBLIC_API JSObject* JS_NewObjectWithGivenProto(JSContext* cx,
-                                                   const JSClass* jsclasp,
+                                                   const JSClass* clasp,
                                                    HandleObject proto) {
   MOZ_ASSERT(!cx->zone()->isAtomsZone());
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
   cx->check(proto);
 
-  const Class* clasp = Valueify(jsclasp);
   if (!clasp) {
     clasp = &PlainObject::class_; /* default class is Object */
   }
@@ -1764,7 +1826,7 @@ JS_PUBLIC_API JSObject* JS_NewObjectForConstructor(JSContext* cx,
 
   RootedObject newTarget(cx, &args.newTarget().toObject());
   cx->check(newTarget);
-  return CreateThis(cx, Valueify(clasp), newTarget);
+  return CreateThis(cx, clasp, newTarget);
 }
 
 JS_PUBLIC_API bool JS_IsNative(JSObject* obj) { return obj->isNative(); }
@@ -2857,14 +2919,12 @@ static bool DefineSelfHostedProperty(JSContext* cx, HandleObject obj,
 }
 
 JS_PUBLIC_API JSObject* JS_DefineObject(JSContext* cx, HandleObject obj,
-                                        const char* name,
-                                        const JSClass* jsclasp,
+                                        const char* name, const JSClass* clasp,
                                         unsigned attrs) {
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
   cx->check(obj);
 
-  const Class* clasp = Valueify(jsclasp);
   if (!clasp) {
     clasp = &PlainObject::class_; /* default class is Object */
   }
@@ -3010,7 +3070,7 @@ JS_PUBLIC_API void JS_SetAllNonReservedSlotsToUndefined(JS::HandleObject obj) {
     return;
   }
 
-  const Class* clasp = obj->getClass();
+  const JSClass* clasp = obj->getClass();
   unsigned numReserved = JSCLASS_RESERVED_SLOTS(clasp);
   unsigned numSlots = obj->as<NativeObject>().slotSpan();
   for (unsigned i = numReserved; i < numSlots; i++) {
@@ -3312,7 +3372,7 @@ static JSObject* CloneFunctionObject(JSContext* cx, HandleObject funobj,
   // Only allow cloning normal, interpreted functions.
   RootedFunction fun(cx, &funobj->as<JSFunction>());
   if (fun->isNative() || fun->isBoundFunction() ||
-      fun->kind() != JSFunction::NormalFunction || fun->isExtended() ||
+      fun->kind() != FunctionFlags::NormalFunction || fun->isExtended() ||
       fun->isSelfHostedBuiltin()) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_CANT_CLONE_OBJECT);
@@ -3480,7 +3540,6 @@ void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
   introductionOffset = rhs.introductionOffset;
   hasIntroductionInfo = rhs.hasIntroductionInfo;
   hideScriptFromDebugger = rhs.hideScriptFromDebugger;
-  bigIntEnabledOption = rhs.bigIntEnabledOption;
   fieldsEnabledOption = rhs.fieldsEnabledOption;
 };
 
@@ -3577,7 +3636,6 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
   }
   throwOnAsmJSValidationFailureOption =
       cx->options().throwOnAsmJSValidationFailure();
-  bigIntEnabledOption = cx->realm()->creationOptions().getBigIntEnabled();
   fieldsEnabledOption = cx->realm()->creationOptions().getFieldsEnabled();
 
   // Certain modes of operation disallow syntax parsing in general.

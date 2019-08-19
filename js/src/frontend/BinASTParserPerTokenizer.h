@@ -293,6 +293,8 @@ class BinASTParserPerTokenizer : public BinASTParserBase,
   mozilla::Maybe<Tokenizer> tokenizer_;
   VariableDeclarationKind variableDeclarationKind_;
 
+  FunctionTreeHolder treeHolder_;
+
   friend class BinASTParseContext;
   friend class AutoVariableDeclarationKind;
 
@@ -329,7 +331,8 @@ class BinASTParseContext : public ParseContext {
   BinASTParseContext(JSContext* cx, BinASTParserPerTokenizer<Tok>* parser,
                      SharedContext* sc, Directives* newDirectives)
       : ParseContext(cx, parser->pc_, sc, *parser, parser->usedNames_,
-                     newDirectives, /* isFull = */ true) {}
+                     parser->treeHolder_, newDirectives,
+                     /* isFull = */ true) {}
 };
 
 void TraceBinASTParser(JSTracer* trc, JS::AutoGCRooter* parser);

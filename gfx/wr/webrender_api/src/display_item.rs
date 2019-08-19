@@ -105,6 +105,7 @@ pub enum DisplayItem {
     RadialGradient(RadialGradientDisplayItem),
     Image(ImageDisplayItem),
     YuvImage(YuvImageDisplayItem),
+    BackdropFilter(BackdropFilterDisplayItem),
 
     // Clips
     Clip(ClipDisplayItem),
@@ -148,6 +149,7 @@ pub enum DebugDisplayItem {
     RadialGradient(RadialGradientDisplayItem),
     Image(ImageDisplayItem),
     YuvImage(YuvImageDisplayItem),
+    BackdropFilter(BackdropFilterDisplayItem),
 
     Clip(ClipDisplayItem, Vec<ComplexClipRegion>),
     ClipChain(ClipChainItem, Vec<ClipId>),
@@ -611,6 +613,13 @@ pub struct RadialGradientDisplayItem {
     pub tile_spacing: LayoutSize,
 }
 
+/// Renders a filtered region of its backdrop
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
+pub struct BackdropFilterDisplayItem {
+    pub common: CommonItemProperties,
+}
+// IMPLICIT: filters: Vec<FilterOp>, filter_datas: Vec<FilterData>, filter_primitives: Vec<FilterPrimitive>
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct ReferenceFrameDisplayListItem {
     pub origin: LayoutPoint,
@@ -652,7 +661,10 @@ pub struct StackingContext {
     pub raster_space: RasterSpace,
     /// True if picture caching should be used on this stacking context.
     pub cache_tiles: bool,
-} // IMPLICIT: filters: Vec<FilterOp>, filter_datas: Vec<FilterData>, filter_primitives: Vec<FilterPrimitive>
+    /// True if this stacking context is a backdrop root.
+    pub is_backdrop_root: bool,
+}
+// IMPLICIT: filters: Vec<FilterOp>, filter_datas: Vec<FilterData>, filter_primitives: Vec<FilterPrimitive>
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, PeekPoke)]
@@ -711,7 +723,6 @@ pub enum MixBlendMode {
     Luminosity = 15,
 }
 
-/// An input to a SVG filter primitive.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize, PeekPoke)]
 pub enum ColorSpace {
@@ -719,6 +730,35 @@ pub enum ColorSpace {
     LinearRgb,
 }
 
+/// Available composite operoations for the composite filter primitive
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Deserialize, MallocSizeOf, PartialEq, Serialize, PeekPoke)]
+pub enum CompositeOperator {
+    Over,
+    In,
+    Atop,
+    Out,
+    Xor,
+    Lighter,
+    Arithmetic([f32; 4]),
+}
+
+impl CompositeOperator {
+    // This must stay in sync with the composite operator defines in cs_svg_filter.glsl
+    pub fn as_int(&self) -> u32 {
+        match self {
+            CompositeOperator::Over => 0,
+            CompositeOperator::In => 1,
+            CompositeOperator::Out => 2,
+            CompositeOperator::Atop => 3,
+            CompositeOperator::Xor => 4,
+            CompositeOperator::Lighter => 5,
+            CompositeOperator::Arithmetic(..) => 6,
+        }
+    }
+}
+
+/// An input to a SVG filter primitive.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, MallocSizeOf, PartialEq, Serialize, PeekPoke)]
 pub enum FilterPrimitiveInput {
@@ -825,6 +865,21 @@ pub struct IdentityPrimitive {
     pub input: FilterPrimitiveInput,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
+pub struct OffsetPrimitive {
+    pub input: FilterPrimitiveInput,
+    pub offset: LayoutVector2D,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
+pub struct CompositePrimitive {
+    pub input1: FilterPrimitiveInput,
+    pub input2: FilterPrimitiveInput,
+    pub operator: CompositeOperator,
+}
+
 /// See: https://github.com/eqrion/cbindgen/issues/9
 /// cbindgen:derive-eq=false
 #[repr(C)]
@@ -840,6 +895,8 @@ pub enum FilterPrimitiveKind {
     ColorMatrix(ColorMatrixPrimitive),
     DropShadow(DropShadowPrimitive),
     ComponentTransfer(ComponentTransferPrimitive),
+    Offset(OffsetPrimitive),
+    Composite(CompositePrimitive),
 }
 
 impl Default for FilterPrimitiveKind {
@@ -860,6 +917,8 @@ impl FilterPrimitiveKind {
             FilterPrimitiveKind::Identity(..) |
             FilterPrimitiveKind::Blend(..) |
             FilterPrimitiveKind::ColorMatrix(..) |
+            FilterPrimitiveKind::Offset(..) |
+            FilterPrimitiveKind::Composite(..) |
             // Component transfer's filter data is sanitized separately.
             FilterPrimitiveKind::ComponentTransfer(..) => {}
         }
@@ -1364,6 +1423,7 @@ impl DisplayItem {
             DisplayItem::StickyFrame(..) => "sticky_frame",
             DisplayItem::Text(..) => "text",
             DisplayItem::YuvImage(..) => "yuv_image",
+            DisplayItem::BackdropFilter(..) => "backdrop_filter",
         }
     }
 }
@@ -1407,5 +1467,6 @@ impl_default_for_enums! {
     YuvData => NV12(ImageKey::default(), ImageKey::default()),
     YuvFormat => NV12,
     FilterPrimitiveInput => Original,
-    ColorSpace => Srgb
+    ColorSpace => Srgb,
+    CompositeOperator => Over
 }

@@ -755,8 +755,7 @@ fuzzy-if(skiaContent,0-2,0-3) == 385870-2.html 385870-2-ref.html
 == 386014-1c.html 386014-1-ref.html
 == 386065-1.html 386065-1-ref.html
 == 386065-2.html about:blank
-test-pref(layout.float-fragments-inside-column.enabled,false) fails == 386147-1.html 386147-1-ref.html
-test-pref(layout.float-fragments-inside-column.enabled,true) == 386147-1.html 386147-1-ref.html
+== 386147-1.html 386147-1-ref.html
 == 386310-1a.html 386310-1-ref.html
 == 386310-1b.html 386310-1-ref.html
 == 386310-1c.html 386310-1-ref.html
@@ -1026,7 +1025,7 @@ fuzzy-if(Android,0-11,0-17) fuzzy-if(webrender,0-1,0-10) == 413361-1.html 413361
 == 421436-1a.html 421436-1-ref.html
 == 421436-1b.html 421436-1-ref.html
 fuzzy-if(skiaContent,0-1,0-40) == 421632-1.html 421632-1-ref.html
-!= 421710-1.html about:blank
+asserts(1-1) != 421710-1.html about:blank # Bug 1574046
 fails-if(Android) fuzzy-if(webrender,63-64,1024-1024) fails-if(usesRepeatResampling&&!(webrender&&winWidget)) == 421885-1.xml 421885-1-ref.xml
 == 421955-1.html 421955-1-ref.html
 == 422249-1.html 422249-1-ref.html
@@ -1526,8 +1525,7 @@ fuzzy-if(Android,0-2,0-48) == 563584-2.html 563584-2-ref.html
 fuzzy-if(Android,0-4,0-180) == 563584-3.html 563584-3-ref.html
 fuzzy-if(Android,0-4,0-180) == 563584-4.html 563584-4-ref.html
 fuzzy-if(Android,0-2,0-48) == 563584-5.html 563584-5-ref.html
-test-pref(layout.float-fragments-inside-column.enabled,false) == 563584-6-columns.html 563584-6-columns-ref.html
-test-pref(layout.float-fragments-inside-column.enabled,true) == 563584-6-columns.html 563584-6-columns-ref-enabled.html
+== 563584-6-columns.html 563584-6-columns-ref.html
 fuzzy-if(Android,0-2,0-48) == 563584-6-printing.html 563584-6-printing-ref.html
 fuzzy-if(Android,0-2,0-48) == 563584-7.html 563584-7-ref.html
 # FIXME: It would be nice to have variants of these -8 tests for the
@@ -2112,6 +2110,7 @@ fuzzy-if(!webrender,0-6,0-34) fuzzy-if(geckoview,9-9,44-44) fails-if(webrender) 
 == 1535040-1.html 1535040-1-ref.html
 == 1545360-1.xhtml 1545360-1-ref.xhtml
 skip-if(!asyncPan) == 1544895.html 1544895-ref.html
+== 1547759-1.html 1547759-1-ref.html
 == 1548809.html 1548809-ref.html
 != 1552789-1.html 1552789-ref-1.html
 == 1558937-1.html 1558937-1-ref.html

@@ -371,7 +371,7 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#ifdef EXPOSE_INTL_API
+#ifdef ENABLE_INTL_API
   value = BooleanValue(true);
 #else
   value = BooleanValue(false);
@@ -494,10 +494,10 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
 
 #define FOR_EACH_GC_PARAM(_)                                                 \
   _("maxBytes", JSGC_MAX_BYTES, true)                                        \
-  _("maxMallocBytes", JSGC_MAX_MALLOC_BYTES, true)                           \
   _("minNurseryBytes", JSGC_MIN_NURSERY_BYTES, true)                         \
   _("maxNurseryBytes", JSGC_MAX_NURSERY_BYTES, true)                         \
   _("gcBytes", JSGC_BYTES, false)                                            \
+  _("nurseryBytes", JSGC_NURSERY_BYTES, false)                               \
   _("gcNumber", JSGC_NUMBER, false)                                          \
   _("mode", JSGC_MODE, true)                                                 \
   _("unusedChunks", JSGC_UNUSED_CHUNKS, false)                               \
@@ -513,9 +513,8 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
   _("dynamicHeapGrowth", JSGC_DYNAMIC_HEAP_GROWTH, true)                     \
   _("dynamicMarkSlice", JSGC_DYNAMIC_MARK_SLICE, true)                       \
   _("allocationThreshold", JSGC_ALLOCATION_THRESHOLD, true)                  \
-  _("allocationThresholdFactor", JSGC_ALLOCATION_THRESHOLD_FACTOR, true)     \
-  _("allocationThresholdFactorAvoidInterrupt",                               \
-    JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT, true)                  \
+  _("nonIncrementalFactor", JSGC_NON_INCREMENTAL_FACTOR, true)               \
+  _("avoidInterruptFactor", JSGC_AVOID_INTERRUPT_FACTOR, true)               \
   _("minEmptyChunkCount", JSGC_MIN_EMPTY_CHUNK_COUNT, true)                  \
   _("maxEmptyChunkCount", JSGC_MAX_EMPTY_CHUNK_COUNT, true)                  \
   _("compactingEnabled", JSGC_COMPACTING_ENABLED, true)                      \
@@ -526,7 +525,9 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
     JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION_PERCENT, true)           \
   _("pretenureThreshold", JSGC_PRETENURE_THRESHOLD, true)                    \
   _("pretenureGroupThreshold", JSGC_PRETENURE_GROUP_THRESHOLD, true)         \
-  _("zoneAllocDelayKB", JSGC_ZONE_ALLOC_DELAY_KB, true)
+  _("zoneAllocDelayKB", JSGC_ZONE_ALLOC_DELAY_KB, true)                      \
+  _("mallocThresholdBase", JSGC_MALLOC_THRESHOLD_BASE, true)                 \
+  _("mallocGrowthFactor", JSGC_MALLOC_GROWTH_FACTOR, true)
 
 static const struct ParamInfo {
   const char* name;
@@ -584,7 +585,6 @@ static bool GCParameter(JSContext* cx, unsigned argc, Value* vp) {
   if (disableOOMFunctions) {
     switch (param) {
       case JSGC_MAX_BYTES:
-      case JSGC_MAX_MALLOC_BYTES:
       case JSGC_MAX_NURSERY_BYTES:
         args.rval().setUndefined();
         return true;
@@ -2851,6 +2851,8 @@ static bool testingFunc_inIon(JSContext* cx, unsigned argc, Value* vp) {
     // succeeds. Note: This script may have be inlined into its caller.
     if (iter.isIon()) {
       iter.script()->resetWarmUpResetCounter();
+    } else if (!iter.script()->canIonCompile()) {
+      return ReturnStringCopy(cx, args, "Unable to Ion-compile this script.");
     } else if (iter.script()->getWarmUpResetCount() >= JitWarmupResetLimit) {
       return ReturnStringCopy(
           cx, args, "Compilation is being repeatedly prevented. Giving up.");
@@ -2937,10 +2939,10 @@ class CloneBufferObject : public NativeObject {
   static const size_t NUM_SLOTS = 2;
 
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   static CloneBufferObject* Create(JSContext* cx) {
-    RootedObject obj(cx, JS_NewObject(cx, Jsvalify(&class_)));
+    RootedObject obj(cx, JS_NewObject(cx, &class_));
     if (!obj) {
       return nullptr;
     }
@@ -3147,20 +3149,21 @@ class CloneBufferObject : public NativeObject {
     return CallNonGenericMethod<is, getCloneBufferAsArrayBuffer_impl>(cx, args);
   }
 
-  static void Finalize(FreeOp* fop, JSObject* obj) {
+  static void Finalize(JSFreeOp* fop, JSObject* obj) {
     obj->as<CloneBufferObject>().discard();
   }
 };
 
-static const ClassOps CloneBufferObjectClassOps = {nullptr, /* addProperty */
-                                                   nullptr, /* delProperty */
-                                                   nullptr, /* enumerate */
-                                                   nullptr, /* newEnumerate */
-                                                   nullptr, /* resolve */
-                                                   nullptr, /* mayResolve */
-                                                   CloneBufferObject::Finalize};
+static const JSClassOps CloneBufferObjectClassOps = {
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* enumerate */
+    nullptr, /* newEnumerate */
+    nullptr, /* resolve */
+    nullptr, /* mayResolve */
+    CloneBufferObject::Finalize};
 
-const Class CloneBufferObject::class_ = {
+const JSClass CloneBufferObject::class_ = {
     "CloneBuffer",
     JSCLASS_HAS_RESERVED_SLOTS(CloneBufferObject::NUM_SLOTS) |
         JSCLASS_FOREGROUND_FINALIZE,
@@ -4342,7 +4345,7 @@ static bool AllocationMarker(JSContext* cx, unsigned argc, Value* vp) {
     allocateInsideNursery = ToBoolean(nurseryVal);
   }
 
-  static const Class cls = {"AllocationMarker"};
+  static const JSClass cls = {"AllocationMarker"};
 
   auto newKind = allocateInsideNursery ? GenericObject : TenuredObject;
   RootedObject obj(cx, NewObjectWithGivenProto(cx, &cls, nullptr, newKind));
@@ -4398,6 +4401,10 @@ static void minorGC(JSContext* cx, JSGCStatus status, void* data) {
 // Process global, should really be runtime-local.
 static MajorGC majorGCInfo;
 static MinorGC minorGCInfo;
+
+static void enterNullRealm(JSContext* cx, JSGCStatus status, void* data) {
+  JSAutoNullableRealm enterRealm(cx, nullptr);
+}
 
 } /* namespace gcCallback */
 
@@ -4486,6 +4493,8 @@ static bool SetGCCallback(JSContext* cx, unsigned argc, Value* vp) {
     gcCallback::majorGCInfo.phases = phases;
     gcCallback::majorGCInfo.depth = depth;
     JS_SetGCCallback(cx, gcCallback::majorGC, &gcCallback::majorGCInfo);
+  } else if (StringEqualsAscii(action, "enterNullRealm")) {
+    JS_SetGCCallback(cx, gcCallback::enterNullRealm, nullptr);
   } else {
     JS_ReportErrorASCII(cx, "Unknown GC callback action");
     return false;
@@ -5687,6 +5696,28 @@ static bool MonitorType(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool MarkObjectPropertiesUnknown(JSContext* cx, unsigned argc,
+                                        Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  RootedObject callee(cx, &args.callee());
+
+  if (!args.get(0).isObject()) {
+    ReportUsageErrorASCII(cx, callee, "Argument must be an object");
+    return false;
+  }
+
+  RootedObject obj(cx, &args[0].toObject());
+  RootedObjectGroup group(cx, JSObject::getGroup(cx, obj));
+  if (!group) {
+    return false;
+  }
+
+  MarkObjectGroupUnknownProperties(cx, group);
+
+  args.rval().setUndefined();
+  return true;
+}
+
 JSScript* js::TestingFunctionArgumentToScript(
     JSContext* cx, HandleValue v, JSFunction** funp /* = nullptr */) {
   if (v.isString()) {
@@ -6699,6 +6730,10 @@ gc::ZealModeHelpText),
 "    baselineCompile();  for (var i=0; i<1; i++) {} ...\n"
 "  The interpreter will enter the new jitcode at the loop header unless\n"
 "  baselineCompile returned a string or threw an error.\n"),
+
+    JS_FN_HELP("markObjectPropertiesUnknown", MarkObjectPropertiesUnknown, 1, 0,
+"markObjectPropertiesUnknown(obj)",
+"  Mark all objects in obj's object group as having unknown properties.\n"),
 
     JS_FS_HELP_END
 };

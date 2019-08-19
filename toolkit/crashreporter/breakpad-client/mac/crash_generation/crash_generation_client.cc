@@ -39,7 +39,7 @@ namespace google_breakpad {
 bool CrashGenerationClient::RequestDumpForException(
     int exception_type,
     int exception_code,
-    int exception_subcode,
+    int64_t exception_subcode,
     mach_port_t crashing_thread) {
   // The server will send a message to this port indicating that it
   // has finished its work.
@@ -57,9 +57,11 @@ bool CrashGenerationClient::RequestDumpForException(
   info.exception_subcode = exception_subcode;
   info.child_pid = getpid();
 
-  // When recording/replaying, associate minidumps with the middleman process
-  // so that the UI process can find them.
-  if (mozilla::recordreplay::IsRecordingOrReplaying()) {
+  // Recording processes are managed by a middleman process, rather than the
+  // parent process. Associate their minidumps with the middleman's pid so that
+  // the parent process can find them. Replaying processes are managed by the
+  // parent process directly, and don't need this treatment.
+  if (mozilla::recordreplay::IsRecording()) {
     info.child_pid = mozilla::recordreplay::child::MiddlemanProcessId();
   }
 

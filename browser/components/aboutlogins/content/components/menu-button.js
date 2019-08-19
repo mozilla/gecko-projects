@@ -35,7 +35,10 @@ export default class MenuButton extends HTMLElement {
   handleEvent(event) {
     switch (event.type) {
       case "blur": {
-        if (event.target == this) {
+        if (
+          event.explicitOriginalTarget &&
+          event.explicitOriginalTarget.closest(".menu") == this._menu
+        ) {
           // Only hide the menu if focus has left the menu-button.
           return;
         }
@@ -56,7 +59,7 @@ export default class MenuButton extends HTMLElement {
         if (event.originalTarget == this._menuButton) {
           this._toggleMenu();
           if (!this._menu.hidden) {
-            this._focusSuccessor(true);
+            this._menuButton.focus();
           }
           return;
         }
@@ -64,9 +67,11 @@ export default class MenuButton extends HTMLElement {
         let classList = event.originalTarget.classList;
         if (classList.contains("menuitem-button")) {
           let eventName = event.originalTarget.dataset.eventName;
+          const linkTrackingSource = "Elipsis_Menu";
           document.dispatchEvent(
             new CustomEvent(eventName, {
               bubbles: true,
+              detail: linkTrackingSource,
             })
           );
         }

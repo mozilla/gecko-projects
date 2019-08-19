@@ -19,11 +19,11 @@ var { Task } = require("devtools/shared/task");
 var asyncStorage = require("devtools/shared/async-storage");
 
 const {
-  getSelectedLocation
+  getSelectedLocation,
 } = require("devtools/client/debugger/src/utils/selected-location");
 
 const {
-  resetSchemaVersion
+  resetSchemaVersion,
 } = require("devtools/client/debugger/src/utils/prefs");
 
 function log(msg, data) {
@@ -38,10 +38,34 @@ function logThreadEvents(dbg, event) {
   });
 }
 
-async function waitFor(condition) {
-  await BrowserTestUtils.waitForCondition(condition, "waitFor", 10, 500);
-  return condition();
-}
+/**
+ * Wait for a predicate to return a result.
+ *
+ * @param function condition
+ *        Invoked once in a while until it returns a truthy value. This should be an
+ *        idempotent function, since we have to run it a second time after it returns
+ *        true in order to return the value.
+ * @param string message [optional]
+ *        A message to output if the condition fails.
+ * @param number interval [optional]
+ *        How often the predicate is invoked, in milliseconds.
+ * @return object
+ *         A promise that is resolved with the result of the condition.
+ */
+async function waitFor(
+  condition,
+  message = "waitFor",
+  interval = 10,
+  maxTries = 500
+) {
+  await BrowserTestUtils.waitForCondition(
+    condition,
+    message,
+    interval,
+    maxTries
+  );
+   return condition();
+ }
 
 // Wait until an action of `type` is dispatched. This is different
 // then `waitForDispatch` because it doesn't wait for async actions
@@ -57,7 +81,7 @@ function waitForNextDispatch(store, actionType) {
       predicate: action => action.type === actionType,
       run: (dispatch, getState, action) => {
         resolve(action);
-      }
+      },
     });
   });
 }
@@ -93,7 +117,7 @@ function waitForDispatch(dbg, actionType, eventRepeat = 1) {
       },
       run: (dispatch, getState, action) => {
         resolve(action);
-      }
+      },
     });
   });
 }
@@ -211,14 +235,14 @@ function waitForSelectedSource(dbg, url) {
   const {
     getSelectedSourceWithContent,
     hasSymbols,
-    getBreakableLines
+    getBreakableLines,
   } = dbg.selectors;
 
   return waitForState(
     dbg,
     state => {
-      const { source, content } = getSelectedSourceWithContent() || {};
-      if (!content) {
+      const source = getSelectedSourceWithContent() || {};
+      if (!source.content) {
         return false;
       }
 
@@ -266,7 +290,7 @@ function assertEmptyLines(dbg, lines) {
 
 function getVisibleSelectedFrameLine(dbg) {
   const {
-    selectors: { getVisibleSelectedFrame }
+    selectors: { getVisibleSelectedFrame },
   } = dbg;
   const frame = getVisibleSelectedFrame();
   return frame && frame.location.line;
@@ -294,9 +318,8 @@ function assertPausedLocation(dbg) {
 function assertDebugLine(dbg, line) {
   // Check the debug line
   const lineInfo = getCM(dbg).lineInfo(line - 1);
-  const { source, content } =
-    dbg.selectors.getSelectedSourceWithContent() || {};
-  if (source && !content) {
+  const source = dbg.selectors.getSelectedSourceWithContent() || {};
+  if (source && !source.content) {
     const url = source.url;
     ok(
       false,
@@ -491,14 +514,9 @@ function isSelectedFrameSelected(dbg, state) {
   // Make sure the source text is completely loaded for the
   // source we are paused in.
   const sourceId = frame.location.sourceId;
-  const { source, content } =
-    dbg.selectors.getSelectedSourceWithContent() || {};
+  const source = dbg.selectors.getSelectedSourceWithContent() || {};
 
-  if (!source) {
-    return false;
-  }
-
-  if (!content) {
+  if (!source || !source.content) {
     return false;
   }
 
@@ -508,7 +526,7 @@ function isSelectedFrameSelected(dbg, state) {
 /**
  * Clear all the debugger related preferences.
  */
-async function clearDebuggerPreferences() {
+async function clearDebuggerPreferences(prefs = []) {
   resetSchemaVersion();
   asyncStorage.clear();
   Services.prefs.clearUserPref("devtools.recordreplay.enabled");
@@ -522,6 +540,9 @@ async function clearDebuggerPreferences() {
   Services.prefs.clearUserPref("devtools.debugger.skip-pausing");
   Services.prefs.clearUserPref("devtools.debugger.map-scopes-enabled");
   await pushPref("devtools.debugger.log-actions", true);
+  for (const pref of prefs) {
+    await pushPref(...pref);
+  }
 }
 
 /**
@@ -541,8 +562,8 @@ async function initDebugger(url, ...sources) {
   return dbg;
 }
 
-async function initPane(url, pane) {
-  await clearDebuggerPreferences();
+async function initPane(url, pane, prefs) {
+  await clearDebuggerPreferences(prefs);
   return openNewTabAndToolbox(EXAMPLE_URL + url, pane);
 }
 
@@ -782,7 +803,7 @@ function getFirstBreakpointColumn(dbg, { line, sourceId }) {
   const source = getSource(sourceId);
   const position = getFirstBreakpointPosition({
     line,
-    sourceId
+    sourceId,
   });
 
   return getSelectedLocation(position, source).column;
@@ -843,7 +864,7 @@ function findBreakpoint(dbg, url, line) {
 
 async function loadAndAddBreakpoint(dbg, filename, line, column) {
   const {
-    selectors: { getBreakpoint, getBreakpointCount, getBreakpointsMap }
+    selectors: { getBreakpoint, getBreakpointCount, getBreakpointsMap },
   } = dbg;
 
   await waitForSources(dbg, filename);
@@ -885,7 +906,7 @@ async function invokeWithBreakpoint(
 
   const invokeFailed = await Promise.race([
     waitForPaused(dbg),
-    invokeResult.then(() => new Promise(() => {}), () => true)
+    invokeResult.then(() => new Promise(() => {}), () => true),
   ]);
 
   if (invokeFailed) {
@@ -987,7 +1008,7 @@ async function togglePauseOnExceptions(
 
 function waitForActive(dbg) {
   const {
-    selectors: { getIsPaused, getCurrentThread }
+    selectors: { getIsPaused, getCurrentThread },
   } = dbg;
   return waitForState(dbg, state => !getIsPaused(getCurrentThread()), "active");
 }
@@ -1009,7 +1030,7 @@ function invokeInTab(fnc, ...args) {
   info(`Invoking in tab: ${fnc}(${args.map(uneval).join(",")})`);
   return ContentTask.spawn(gBrowser.selectedBrowser, { fnc, args }, function*({
     fnc,
-    args
+    args,
   }) {
     return content.wrappedJSObject[fnc](...args);
   });
@@ -1051,7 +1072,7 @@ const keyMappings = {
   ShiftEnter: { code: "VK_RETURN", modifiers: shiftOrAlt },
   AltEnter: {
     code: "VK_RETURN",
-    modifiers: { altKey: true }
+    modifiers: { altKey: true },
   },
   Up: { code: "VK_UP" },
   Down: { code: "VK_DOWN" },
@@ -1068,8 +1089,8 @@ const keyMappings = {
   stepInKey: { code: "VK_F11", modifiers: { ctrlKey: isLinux } },
   stepOutKey: {
     code: "VK_F11",
-    modifiers: { ctrlKey: isLinux, shiftKey: true }
-  }
+    modifiers: { ctrlKey: isLinux, shiftKey: true },
+  },
 };
 
 /**
@@ -1195,7 +1216,7 @@ const selectors = {
     enableOthers: "#node-menu-enable-others",
     remove: "#node-menu-delete-self",
     removeOthers: "#node-menu-delete-other",
-    removeCondition: "#node-menu-remove-condition"
+    removeCondition: "#node-menu-remove-condition",
   },
   columnBreakpoints: ".column-breakpoint",
   scopes: ".scopes-list",
@@ -1263,7 +1284,9 @@ const selectors = {
   threadsPaneItems: ".workers-pane .worker",
   threadsPaneItem: i => `.workers-pane .worker:nth-child(${i})`,
   threadsPaneItemPause: i => `${selectors.threadsPaneItem(i)} .pause-badge`,
-  CodeMirrorLines: ".CodeMirror-lines"
+  CodeMirrorLines: ".CodeMirror-lines",
+  inlinePreviewLables: ".CodeMirror-linewidget .inline-preview-label",
+  inlinePreviewValues: ".CodeMirror-linewidget .inline-preview-value",
 };
 
 function getSelector(elementName, ...args) {
@@ -1512,7 +1535,7 @@ async function hoverAtPos(dbg, { line, ch }) {
     new MouseEvent("mouseover", {
       bubbles: true,
       cancelable: true,
-      view: dbg.win
+      view: dbg.win,
     })
   );
 
@@ -1597,18 +1620,18 @@ async function assertPreviews(dbg, previews) {
         await assertPreviewPopup(dbg, line, column, {
           expression,
           field,
-          value
+          value,
         });
       }
     } else {
       await assertPreviewTextValue(dbg, line, column, {
         expression,
-        text: result
+        text: result,
       });
     }
 
     const { target } = dbg.selectors.getPreview(getContext(dbg));
-    InspectorUtils.removePseudoClassLock(target, ':hover')
+    InspectorUtils.removePseudoClassLock(target, ":hover");
     dbg.actions.clearPreview(getContext(dbg));
   }
 }
@@ -1751,15 +1774,15 @@ async function checkEvaluateInTopFrame(target, text, expected) {
   ok(rval == expected, `Eval returned ${expected}`);
 }
 
-async function findConsoleMessage(dbg, query) {
-  const [message] = await findConsoleMessages(dbg, query);
+async function findConsoleMessage({toolbox}, query) {
+  const [message] = await findConsoleMessages(toolbox, query);
   const value = message.querySelector(".message-body").innerText;
   const link = message.querySelector(".frame-link-source-inner").innerText;
   return { value, link };
 }
 
-async function findConsoleMessages(dbg, query) {
-  const webConsole = await dbg.toolbox.getPanel("webconsole");
+async function findConsoleMessages(toolbox, query) {
+  const webConsole = await toolbox.getPanel("webconsole");
   const win = webConsole._frameWindow;
   return Array.prototype.filter.call(
     win.document.querySelectorAll(".message"),
@@ -1767,9 +1790,25 @@ async function findConsoleMessages(dbg, query) {
   );
 }
 
-async function hasConsoleMessage(dbg, msg) {
+async function hasConsoleMessage({toolbox}, msg) {
   return waitFor(async () => {
-    const messages = await findConsoleMessages(dbg, msg);
+    const messages = await findConsoleMessages(toolbox, msg);
     return messages.length > 0;
   });
+}
+
+function evaluateExpressionInConsole(hud, expression) {
+  const onResult = new Promise(res => {
+    const onNewMessage = messages => {
+      for (let message of messages) {
+        if (message.node.classList.contains("result")) {
+          hud.ui.off("new-messages", onNewMessage);
+          res(message.node);
+        }
+      }
+    };
+    hud.ui.on("new-messages", onNewMessage);
+  });
+  hud.ui.wrapper.dispatchEvaluateExpression(expression);
+  return onResult;
 }

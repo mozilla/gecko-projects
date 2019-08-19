@@ -235,7 +235,7 @@ struct SelfHostedLazyScript {
 
 }  // namespace js
 
-struct JSRuntime : public js::MallocProvider<JSRuntime> {
+struct JSRuntime {
  private:
   friend class js::Activation;
   friend class js::ActivationIterator;
@@ -439,13 +439,11 @@ struct JSRuntime : public js::MallocProvider<JSRuntime> {
   js::MainThreadData<js::CTypesActivityCallback> ctypesActivityCallback;
 
  private:
-  js::WriteOnceData<const js::Class*> windowProxyClass_;
+  js::WriteOnceData<const JSClass*> windowProxyClass_;
 
  public:
-  const js::Class* maybeWindowProxyClass() const { return windowProxyClass_; }
-  void setWindowProxyClass(const js::Class* clasp) {
-    windowProxyClass_ = clasp;
-  }
+  const JSClass* maybeWindowProxyClass() const { return windowProxyClass_; }
+  void setWindowProxyClass(const JSClass* clasp) { windowProxyClass_ = clasp; }
 
  private:
   // List of non-ephemeron weak containers to sweep during
@@ -527,7 +525,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime> {
 #ifdef DEBUG
   bool currentThreadHasScriptDataAccess() const {
     if (!hasHelperThreadZones()) {
-      return CurrentThreadCanAccessRuntime(this) &&
+      return js::CurrentThreadCanAccessRuntime(this) &&
              activeThreadHasScriptDataAccess;
     }
 
@@ -535,7 +533,7 @@ struct JSRuntime : public js::MallocProvider<JSRuntime> {
   }
 
   bool currentThreadHasAtomsTableAccess() const {
-    return CurrentThreadCanAccessRuntime(this) &&
+    return js::CurrentThreadCanAccessRuntime(this) &&
            atoms_->mainThreadHasAllLocks();
   }
 #endif
@@ -690,15 +688,15 @@ struct JSRuntime : public js::MallocProvider<JSRuntime> {
   js::WriteOnceData<js::PropertyName*> emptyString;
 
  private:
-  js::MainThreadData<js::FreeOp*> defaultFreeOp_;
+  js::MainThreadData<JSFreeOp*> defaultFreeOp_;
 
  public:
-  js::FreeOp* defaultFreeOp() {
+  JSFreeOp* defaultFreeOp() {
     MOZ_ASSERT(defaultFreeOp_);
     return defaultFreeOp_;
   }
 
-#if !EXPOSE_INTL_API
+#if !ENABLE_INTL_API
   /* Number localization, used by jsnum.cpp. */
   js::WriteOnceData<const char*> thousandsSeparator;
   js::WriteOnceData<const char*> decimalSeparator;
@@ -853,16 +851,6 @@ struct JSRuntime : public js::MallocProvider<JSRuntime> {
   JSRuntime* thisFromCtor() { return this; }
 
  public:
-  /*
-   * Call this after allocating memory held by GC things, to update memory
-   * pressure counters or report the OOM error if necessary. If oomError and
-   * cx is not null the function also reports OOM error.
-   *
-   * The function must be called outside the GC lock and in case of OOM error
-   * the caller must ensure that no deadlock possible during OOM reporting.
-   */
-  void updateMallocCounter(size_t nbytes);
-
   void reportAllocationOverflow() { js::ReportAllocationOverflow(nullptr); }
 
   /*

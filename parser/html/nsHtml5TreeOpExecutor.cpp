@@ -14,6 +14,7 @@
 #include "mozAutoDocUpdate.h"
 #include "mozilla/IdleTaskRunner.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_content.h"
 #include "mozilla/StaticPrefs_security.h"
 #include "mozilla/StaticPrefs_view_source.h"
 #include "mozilla/css/Loader.h"
@@ -315,9 +316,10 @@ void nsHtml5TreeOpExecutor::ContinueInterruptedParsingAsync() {
         &BackgroundFlushCallback,
         "nsHtml5TreeOpExecutor::BackgroundFlushCallback",
         250,  // The hard deadline: 250ms.
-        nsContentSink::sInteractiveParseTime / 1000,  // Required budget.
-        true,                                         // repeating
-        [] { return false; });                        // MayStopProcessing
+        StaticPrefs::content_sink_interactive_parse_time() /
+            1000,               // Required budget.
+        true,                   // repeating
+        [] { return false; });  // MayStopProcessing
   }
 }
 
@@ -878,9 +880,7 @@ nsIURI* nsHtml5TreeOpExecutor::GetViewSourceBaseURI() {
     }
 
     nsCOMPtr<nsIURI> orig = mDocument->GetOriginalURI();
-    bool isViewSource;
-    orig->SchemeIs("view-source", &isViewSource);
-    if (isViewSource) {
+    if (orig->SchemeIs("view-source")) {
       nsCOMPtr<nsINestedURI> nested = do_QueryInterface(orig);
       NS_ASSERTION(nested, "URI with scheme view-source didn't QI to nested!");
       nested->GetInnerURI(getter_AddRefs(mViewSourceBaseURI));
@@ -897,11 +897,10 @@ bool nsHtml5TreeOpExecutor::IsExternalViewSource() {
   if (!StaticPrefs::view_source_editor_external()) {
     return false;
   }
-  bool isViewSource = false;
   if (mDocumentURI) {
-    mDocumentURI->SchemeIs("view-source", &isViewSource);
+    return mDocumentURI->SchemeIs("view-source");
   }
-  return isViewSource;
+  return false;
 }
 
 // Speculative loading

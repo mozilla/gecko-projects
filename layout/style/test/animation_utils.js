@@ -506,10 +506,18 @@ const ExpectComparisonTo = {
     var compare;
     var normalizedToString = JSON.stringify;
     switch (property) {
-      case "transform":
       case "translate":
       case "rotate":
       case "scale":
+        if (runningOn == RunningOn.MainThread) {
+          normalize = value => value;
+          compare = function(a, b, error) {
+            return a == b;
+          };
+          break;
+        }
+      // fall through
+      case "transform":
         normalize = convertTo3dMatrix;
         compare = matricesRoughlyEqual;
         normalizedToString = convert3dMatrixToString;

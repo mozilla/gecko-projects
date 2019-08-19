@@ -151,18 +151,9 @@ function Inspector(toolbox) {
   this.telemetry = toolbox.telemetry;
   this.store = Store();
 
-  this._markupBox = this.panelDoc.getElementById("markup-box");
-
   // Map [panel id => panel instance]
   // Stores all the instances of sidebar panels like rule view, computed view, ...
   this._panels = new Map();
-
-  this.reflowTracker = new ReflowTracker(this._target);
-  this.styleChangeTracker = new InspectorStyleChangeTracker(this);
-
-  // Store the URL of the target page prior to navigation in order to ensure
-  // telemetry counts in the Grid Inspector are not double counted on reload.
-  this.previousURL = this.target.url;
 
   this._clearSearchResultsLabel = this._clearSearchResultsLabel.bind(this);
   this._handleRejectionIfNotDestroyed = this._handleRejectionIfNotDestroyed.bind(
@@ -188,29 +179,33 @@ function Inspector(toolbox) {
   this.onSidebarToggle = this.onSidebarToggle.bind(this);
   this.handleThreadPaused = this.handleThreadPaused.bind(this);
   this.handleThreadResumed = this.handleThreadResumed.bind(this);
-
-  this._target.on("will-navigate", this._onBeforeNavigate);
 }
 
 Inspector.prototype = {
   /**
-   * open is effectively an asynchronous constructor
+   * InspectorPanel.open() is effectively an asynchronous constructor.
+   * Set any attributes or listeners that rely on the document being loaded or fronts
+   * from the InspectorFront and Target here.
    */
   async init() {
     // Localize all the nodes containing a data-localization attribute.
     localizeMarkup(this.panelDoc);
 
     // When replaying, we need to listen to changes in the target's pause state.
-    if (this._target.isReplayEnabled()) {
+    if (this.target.isReplayEnabled()) {
       let dbg = this._toolbox.getPanel("jsdebugger");
       if (!dbg) {
         dbg = await this._toolbox.loadTool("jsdebugger");
       }
       this._replayResumed = !dbg.isPaused();
 
-      this._target.threadFront.on("paused", this.handleThreadPaused);
-      this._target.threadFront.on("resumed", this.handleThreadResumed);
+      this.target.threadFront.on("paused", this.handleThreadPaused);
+      this.target.threadFront.on("resumed", this.handleThreadResumed);
     }
+
+    await this.initInspectorFront();
+
+    this.target.on("will-navigate", this._onBeforeNavigate);
 
     await Promise.all([
       this._getCssProperties(),
@@ -220,27 +215,25 @@ Inspector.prototype = {
       this._getChangesFront(),
     ]);
 
+    // Store the URL of the target page prior to navigation in order to ensure
+    // telemetry counts in the Grid Inspector are not double counted on reload.
+    this.previousURL = this.target.url;
+    this.reflowTracker = new ReflowTracker(this.target);
+    this.styleChangeTracker = new InspectorStyleChangeTracker(this);
+
+    this._markupBox = this.panelDoc.getElementById("markup-box");
+
     return this._deferredOpen();
+  },
+
+  async initInspectorFront() {
+    this.inspectorFront = await this.target.getFront("inspector");
+    this.highlighter = this.inspectorFront.highlighter;
+    this.walker = this.inspectorFront.walker;
   },
 
   get toolbox() {
     return this._toolbox;
-  },
-
-  get inspectorFront() {
-    return this.toolbox.inspectorFront;
-  },
-
-  get walker() {
-    return this.toolbox.walker;
-  },
-
-  get selection() {
-    return this.toolbox.selection;
-  },
-
-  get highlighter() {
-    return this.toolbox.highlighter;
   },
 
   get highlighters() {
@@ -291,14 +284,6 @@ Inspector.prototype = {
     }
   },
 
-  get notificationBox() {
-    if (!this._notificationBox) {
-      this._notificationBox = this.toolbox.getNotificationBox();
-    }
-
-    return this._notificationBox;
-  },
-
   get search() {
     if (!this._search) {
       this._search = new InspectorSearch(
@@ -309,6 +294,10 @@ Inspector.prototype = {
     }
 
     return this._search;
+  },
+
+  get selection() {
+    return this.toolbox.selection;
   },
 
   get cssProperties() {
@@ -328,6 +317,7 @@ Inspector.prototype = {
   },
 
   _deferredOpen: async function() {
+    const onMarkupLoaded = this.once("markuploaded");
     this._initMarkup();
     this.isReady = false;
 
@@ -349,9 +339,9 @@ Inspector.prototype = {
       "visible";
 
     // Setup the sidebar panels.
-    this.setupSidebar();
+    await this.setupSidebar();
 
-    await this.once("markuploaded");
+    await onMarkupLoaded;
     this.isReady = true;
 
     // All the components are initialized. Take care of the remaining initialization
@@ -404,7 +394,7 @@ Inspector.prototype = {
     // the ChangesActor. We want the ChangesActor to be guaranteed available before
     // the user makes any changes.
     this.changesFront = await this.toolbox.target.getFront("changes");
-    this.changesFront.start();
+    await this.changesFront.start();
     return this.changesFront;
   },
 
@@ -1629,7 +1619,6 @@ Inspector.prototype = {
     this._is3PaneModeEnabled = null;
     this._markupBox = null;
     this._markupFrame = null;
-    this._notificationBox = null;
     this._target = null;
     this._toolbox = null;
     this.breadcrumbs = null;

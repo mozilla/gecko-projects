@@ -223,10 +223,15 @@ exports.unwrap = function unwrap(obj) {
  * @return boolean
  */
 exports.isSafeDebuggerObject = function(obj) {
+  // CPOW usage is forbidden outside tests (bug 1465911)
+  if (exports.isCPOW(obj)) {
+    return false;
+  }
+
   const unwrapped = exports.unwrap(obj);
 
   // Objects belonging to an invisible-to-debugger compartment might be proxies,
-  // so just in case consider them unsafe. CPOWs are included in this case.
+  // so just in case consider them unsafe.
   if (unwrapped === undefined) {
     return false;
   }
@@ -776,21 +781,25 @@ exports.openFileStream = function(filePath) {
 };
 
 /**
- * Open the file at the given path for writing.
+ * Save the given data to disk after asking the user where to do so.
  *
- * @param {String} filePath
+ * @param {Window} parentWindow
+ *        The parent window to use to display the filepicker.
+ * @param {UInt8Array} dataArray
+ *        The data to write to the file.
+ * @param {String} fileName
+ *        The suggested filename.
  */
-exports.saveFileStream = function(filePath, istream) {
-  return new Promise((resolve, reject) => {
-    const ostream = FileUtils.openSafeFileOutputStream(filePath);
-    NetUtil.asyncCopy(istream, ostream, status => {
-      if (!components.isSuccessCode(status)) {
-        reject(new Error(`Could not save "${filePath}"`));
-        return;
-      }
-      FileUtils.closeSafeFileOutputStream(ostream);
-      resolve();
-    });
+exports.saveAs = async function(parentWindow, dataArray, fileName = "") {
+  let returnFile;
+  try {
+    returnFile = await exports.showSaveFileDialog(parentWindow, fileName);
+  } catch (ex) {
+    return;
+  }
+
+  await OS.File.writeAtomic(returnFile.path, dataArray, {
+    tmpPath: returnFile.path + ".tmp",
   });
 };
 

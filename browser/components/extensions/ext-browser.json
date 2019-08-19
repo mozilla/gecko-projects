@@ -199,8 +199,8 @@
     ]
   },
   "topSites": {
-    "url": "chrome://extensions/content/parent/ext-topSites.js",
-    "schema": "chrome://extensions/content/schemas/top_sites.json",
+    "url": "chrome://browser/content/parent/ext-topSites.js",
+    "schema": "chrome://browser/content/schemas/top_sites.json",
     "scopes": ["addon_parent"],
     "paths": [
       ["topSites"]
@@ -211,7 +211,8 @@
     "schema": "chrome://browser/content/schemas/urlbar.json",
     "scopes": ["addon_parent"],
     "paths": [
-      ["urlbar"]
+      ["urlbar"],
+      ["urlbar", "contextualTip"]
     ]
   },
   "urlOverrides": {

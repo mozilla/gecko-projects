@@ -1502,6 +1502,13 @@ var PlacesUtils = {
   promiseLargeCacheDBConnection: () => gAsyncDBLargeCacheConnPromised,
 
   /**
+   * Returns a Sqlite.jsm wrapper for the main Places connection. Most callers
+   * should prefer `withConnectionWrapper`, which ensures that all database
+   * operations finish before the connection is closed.
+   */
+  promiseUnsafeWritableDBConnection: () => gAsyncDBWrapperPromised,
+
+  /**
    * Performs a read/write operation on the Places database through a Sqlite.jsm
    * wrapped connection to the Places database.
    *
@@ -1629,6 +1636,13 @@ var PlacesUtils = {
    */
   invalidateCachedGuidFor(aItemId) {
     GuidHelper.invalidateCacheForItemId(aItemId);
+  },
+
+  /**
+   * Invalidates the entire GUID cache.
+   */
+  invalidateCachedGuids() {
+    GuidHelper.invalidateCache();
   },
 
   /**
@@ -2901,6 +2915,11 @@ var GuidHelper = {
     let guid = this.guidsForIds.get(aItemId);
     this.guidsForIds.delete(aItemId);
     this.idsForGuids.delete(guid);
+  },
+
+  invalidateCache() {
+    this.guidsForIds.clear();
+    this.idsForGuids.clear();
   },
 
   ensureObservingRemovedItems() {

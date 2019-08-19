@@ -7,26 +7,28 @@
 "use strict";
 
 import { parse } from "./certDecoder.js";
-const { stringToArrayBuffer } = pvutils.pvutils;
+import { pemToDER } from "./utils.js";
 
-const derString =
-  '0\x82\x06F0\x82\x05.\xA0\x03\x02\x01\x02\x02\x10\f\x97n>B8\xF4 \xD6=\xDF\x86\xEF\xEB\xBA\x900\r\x06\t*\x86H\x86\xF7\r\x01\x01\v\x05\x000M1\v0\t\x06\x03U\x04\x06\x13\x02US1\x150\x13\x06\x03U\x04\n\x13\fDigiCert Inc1\'0%\x06\x03U\x04\x03\x13\x1EDigiCert SHA2 Secure Server CA0\x1E\x17\r181105000000Z\x17\r191113120000Z0\x81\x831\v0\t\x06\x03U\x04\x06\x13\x02US1\x130\x11\x06\x03U\x04\b\x13\nCalifornia1\x160\x14\x06\x03U\x04\x07\x13\rMountain View1\x1C0\x1A\x06\x03U\x04\n\x13\x13Mozilla Corporation1\x0F0\r\x06\x03U\x04\v\x13\x06WebOps1\x180\x16\x06\x03U\x04\x03\x13\x0Fwww.mozilla.org0\x82\x01"0\r\x06\t*\x86H\x86\xF7\r\x01\x01\x01\x05\x00\x03\x82\x01\x0F\x000\x82\x01\n\x02\x82\x01\x01\x00\xB8\xAA\xEE\xCAi$\x9AJ\x82&\x1E\xD0\x8Ee\xE5P\xE0\\,Tr\xC3\x92\xC6\xFE\xF5\x14YZ\xEC\xC4-\xA0\xB1\xB4|X\x9A\xBEq\x8A\x18\x06\x9A\rU+J\xAC\xEE\x14\xDA\xB0a\xD4a\x1Bq\xCB\xD3\xEA\xA2\x8E@\x8F\xA9\x8E0\xF1\xC7\xD7&E\xDB\x9B\x191\xA9\xF0\xBD\f\x17Z!V\xF8H\xBD\x82\xEE\x98\xE1(D0\xCFS\x83\xEF\x18\x98\xC6\x85\xE9?\xA2;\xDEt\xF5\x9E\xF1\xD8\\\x88y18-\xAA<VoTS0\x83_\xE8\xFD\xBF4\xD7\x8E\xC1\xC1\x94&\xCC\x1D|\x9Aq\xEC\x99\xCC\x8A\x96\x9B\x027\xCAq\xC3\xCE\xAEj\x8FH\xBA\x7F e\n\xEC\x96U\xBA\xE2\xB4\xD9\x95\x14y\xEA\x91\xDD\x01\xCB\x86\x02\x86ca\x9CpK\xD6~\x96\xFA\xD2\x8CH+u\xD7\xA6[!\x86jZ\xB2\x16\x9Dk^UL\xD57\xF8\xFC\x86\x16\x01\x05\xD3\x815\r\xDFM\xEE\xDF\x13#\xB2\xCE\xD0+\xB7\x94\x0E\xC0\x02G\x18\x96<\xB5\xBD]\x00\xDD\xD5\xCF\xB2\xBD\xA6\t+8\t\xDB\x02\x03\x01\x00\x01\xA3\x82\x02\xE90\x82\x02\xE50\x1F\x06\x03U\x1D#\x04\x180\x16\x80\x14\x0F\x80a\x1C\x821a\xD5/(\xE7\x8DF8\xB4,\xE1\xC6\xD9\xE20\x1D\x06\x03U\x1D\x0E\x04\x16\x04\x14\xDAR\xBD!\x9C7eS\xFC\x1FSu\x0F\x1E_\x07\x9B\xA3\xAD?0\'\x06\x03U\x1D\x11\x04 0\x1E\x82\x0Fwww.mozilla.org\x82\vmozilla.org0\x0E\x06\x03U\x1D\x0F\x01\x01\xFF\x04\x04\x03\x02\x05\xA00\x1D\x06\x03U\x1D%\x04\x160\x14\x06\b+\x06\x01\x05\x05\x07\x03\x01\x06\b+\x06\x01\x05\x05\x07\x03\x020k\x06\x03U\x1D\x1F\x04d0b0/\xA0-\xA0+\x86)http://crl3.digicert.com/ssca-sha2-g6.crl0/\xA0-\xA0+\x86)http://crl4.digicert.com/ssca-sha2-g6.crl0L\x06\x03U\x1D \x04E0C07\x06\t`\x86H\x01\x86\xFDl\x01\x010*0(\x06\b+\x06\x01\x05\x05\x07\x02\x01\x16\x1Chttps://www.digicert.com/CPS0\b\x06\x06g\x81\f\x01\x02\x020|\x06\b+\x06\x01\x05\x05\x07\x01\x01\x04p0n0$\x06\b+\x06\x01\x05\x05\x070\x01\x86\x18http://ocsp.digicert.com0F\x06\b+\x06\x01\x05\x05\x070\x02\x86:http://cacerts.digicert.com/DigiCertSHA2SecureServerCA.crt0\f\x06\x03U\x1D\x13\x01\x01\xFF\x04\x020\x000\x82\x01\x02\x06\n+\x06\x01\x04\x01\xD6y\x02\x04\x02\x04\x81\xF3\x04\x81\xF0\x00\xEE\x00u\x00\xA4\xB9\t\x90\xB4\x18X\x14\x87\xBB\x13\xA2\xCCgp\n<5\x98\x04\xF9\x1B\xDF\xB8\xE3w\xCD\x0E\xC8\r\xDC\x10\x00\x00\x01f\xE6\x16\x88|\x00\x00\x04\x03\x00F0D\x02 fs\x12\x1FR]\x1B\xA3@Hu\x93\xC0=&\x94\xFF\xF3n\xBD!\xCC\xFD\xBA\xDD\xCD6bm\x03S\xAE\x02 G\xB8@rC?\x8E\xE3\xD1\xBE\xA8L[\xBAF\xB6s\xD4\xD4=r\xAF\x00\xCFR\xA70\xA4nhP%\x00u\x00\x87u\xBF\xE7Y|\xF8\x8CC\x99_\xBD\xF3n\xFFV\x8DGV6\xFFJ\xB5`\xC1\xB4\xEA\xFF^\xA0\x83\x0F\x00\x00\x01f\xE6\x16\x89\x02\x00\x00\x04\x03\x00F0D\x02 1\x18\xB5\xE4Q\xA3\x80\x91\x98W5\xE3Q\xDE\x95\xB2j\x16^*d\x9A1v\x9D\x82\xED|I\xF2\xB5d\x02 *\xDC.\xE5\xE1\xB1+\xBE\xAB\x81\xAB3,&}y\xD0H\x8E\xE54\f\xAA+\xCC\xF5.\xC5E\xC5cD0\r\x06\t*\x86H\x86\xF7\r\x01\x01\v\x05\x00\x03\x82\x01\x01\x00\xA2\xC9\x00S\xB7\xC2\xE6\x8F\xE4\xC3?y\xDDe\x86NTsf\x83\xA2H\\3\xB5\xF2\xBD\xD8D)!\xDB\x80\xF8\\\x80\xCA\x13\xF5\x82\x15\xA0\xF6\xBB\xD2\x03B\xE8\xA1\xDC\xC2\x85\xEE\xD2\x0F0\xB7\xB5\xFAVmj\x97\xFE\xBC\x1B\x9A\xBC\xE3\x89\x05\xB8.\x89>^\vU?fr \xFEUn\x9B\x1DD\x97\x0F\xDCb|\xBFC\xA9\xD2t!\xCD\x12\x96T\xE53\xEA*\xE5\xA0\x1E;\x15\x10\x19xW"\xA8\xFA}$/\xF5\xF4\r\xEAe\xF1@\x8A\x1C\xFE\b\xF1\xB5\xEB$\xAB\xF5e\xF1\x89\x98\xD4R\x19?\xD0a\xEE\r\xBB\x93\x16}\x18\x00\x06B\xD8\xD3/M\xD1\xCC\xA0.J\x0E\xB2x\x89\x98U\xD4\x16j\xC7;P\xF9\xC1^T@\xCD\x9F>8\x94\xE1Q\xBC\xCA\xD7\xA6\xB6\b\x8D\xD1\x83\x86\xA0)"d\xFA\xE08\xEE\x1D\x7F"i\xA7\x82\x91KE\xBF\xCC\xBD\x15\xFA\x1FZ\x16qK\xB2\x1F\xA3\xBB=\x97e\xD1\x8ApN\x9C5Lr.\xA8!\xA5\xFF\nO\x83$ q3';
-
-let gElements = {};
-
-document.addEventListener("DOMContentLoaded", e => {
-  buildChain();
-  gElements.certificateSection = document.querySelector("certificate-section");
+document.addEventListener("DOMContentLoaded", async e => {
+  let url = new URL(document.URL);
+  let certInfo = url.searchParams.getAll("cert");
+  if (certInfo.length === 0) {
+    await render(false, true);
+    return;
+  }
+  certInfo = certInfo.map(cert => decodeURIComponent(cert));
+  await buildChain(certInfo);
 });
 
 export const updateSelectedItem = (() => {
   let state;
   return selectedItem => {
+    let certificateSection = document.querySelector("certificate-section");
     if (selectedItem) {
       if (state !== selectedItem) {
         state = selectedItem;
-        gElements.certificateSection.updateCertificateSource(selectedItem);
-        gElements.certificateSection.updateSelectedTab(selectedItem);
+        certificateSection.updateCertificateSource(selectedItem);
+        certificateSection.updateSelectedTab(selectedItem);
       }
     }
     return state;
@@ -34,203 +36,388 @@ export const updateSelectedItem = (() => {
 })();
 
 const createEntryItem = (label, info) => {
+  if (label == null || info == null) {
+    return null;
+  }
   return {
     label,
     info,
   };
 };
 
-const adjustCertInformation = cert => {
-  let certItems = [];
-
-  // Subject Name section
-  certItems.push({
-    sectionTitle: "Subject Name",
-    sectionItems: cert.subject.entries.map(entry =>
-      createEntryItem(entry[0], entry[1])
-    ),
-    Critical: false,
-  });
-
-  // Issuer Name section
-  certItems.push({
-    sectionTitle: "Issuer Name",
-    sectionItems: cert.issuer.entries.map(entry =>
-      createEntryItem(entry[0], entry[1])
-    ),
-    Critical: false,
-  });
-
-  // Validity section
-  certItems.push({
-    sectionTitle: "Validity",
-    sectionItems: [
-      createEntryItem("Not Before", cert.notBefore),
-      createEntryItem("Not After", cert.notAfter),
-    ],
-    Critical: false,
-  });
-
-  // Subject Alt Names section
-  certItems.push({
-    sectionTitle: "Subject Alt Names",
-    sectionItems: cert.ext.san.altNames.map(entry =>
-      createEntryItem(entry[0], entry[1])
-    ),
-    Critical: cert.ext.san.critical || false,
-  });
-
-  // Public Key Info section
-  certItems.push({
-    sectionTitle: "Public Key Info",
-    sectionItems: [
-      createEntryItem("Algorithm", cert.subjectPublicKeyInfo.kty),
-      createEntryItem("Key size", cert.subjectPublicKeyInfo.keysize),
-      createEntryItem("Curve", cert.subjectPublicKeyInfo.crv),
-      createEntryItem("Public Value", cert.subjectPublicKeyInfo.xy),
-      createEntryItem("Exponent", cert.subjectPublicKeyInfo.e),
-      createEntryItem("Modulus", cert.subjectPublicKeyInfo.n),
-    ],
-    Critical: false,
-  });
-
-  // Miscellaneous section
-  certItems.push({
-    sectionTitle: "Miscellaneous",
-    sectionItems: [
-      createEntryItem("Serial Number", cert.serialNumber),
-      createEntryItem("Signature Algorithm", cert.signature.name),
-      createEntryItem("Version", cert.version),
-      createEntryItem("Download", cert.files.pem),
-    ],
-    Critical: false,
-  });
-
-  // Fingerprints section
-  certItems.push({
-    sectionTitle: "Fingerprints",
-    sectionItems: [
-      createEntryItem("SHA-256", cert.fingerprint.sha256),
-      createEntryItem("SHA-1", cert.fingerprint.sha1),
-    ],
-    Critical: false,
-  });
-
-  // Basic Constraints section
-  certItems.push({
-    sectionTitle: "Basic Constraints",
-    sectionItems: [
-      createEntryItem("Certificate Authority", cert.ext.basicConstraintscA),
-    ],
-    Critical: cert.ext.basicConstraints.critical || false,
-  });
-
-  // Key Usages section
-  certItems.push({
-    sectionTitle: "Key Usages",
-    sectionItems: [createEntryItem("Purposes", cert.ext.keyUsages.purposes)],
-    Critical: cert.ext.keyUsages.critical || false,
-  });
-
-  // Extended Key Usages section
-  certItems.push({
-    sectionTitle: "Extended Key Usages",
-    sectionItems: [createEntryItem("Purposes", cert.ext.eKeyUsages.purposes)],
-    Critical: cert.ext.eKeyUsages.critical || false,
-  });
-
-  // OCSP Stapling section
-  certItems.push({
-    sectionTitle: "OCSP Stapling",
-    sectionItems: [createEntryItem("Required", cert.ext.ocspStaple.critical)],
-    Critical: cert.ext.ocspStaple.critical || false,
-  });
-
-  // Subject Key ID section
-  certItems.push({
-    sectionTitle: "Subject Key ID",
-    sectionItems: [createEntryItem("Key ID", cert.ext.sKID.id)],
-    Critical: cert.ext.sKID.critical || false,
-  });
-
-  // Authority Key ID section
-  certItems.push({
-    sectionTitle: "Authority Key ID",
-    sectionItems: [createEntryItem("Key ID", cert.ext.aKID.id)],
-    Critical: cert.ext.aKID.critical || false,
-  });
-
-  // CRL Endpoints section
-  certItems.push({
-    sectionTitle: "CRL Endpoints",
-    sectionItems: cert.ext.crlPoints.points.map(entry => {
-      let label = "Distribution Point";
-      return createEntryItem(label, entry);
-    }),
-    Critical: cert.ext.crlPoints.critical || false,
-  });
-
-  // // Authority Info (AIA) section
-  let items = [];
-  cert.ext.aia.descriptions.forEach(entry => {
-    items.push(createEntryItem("Location", entry.location));
-    items.push(createEntryItem("Method", entry.method));
-  });
-  certItems.push({
-    sectionTitle: "Authority Info (AIA)",
-    sectionItems: items,
-    Critical: cert.ext.aia.critical || false,
-  });
-
-  // Certificate Policies section
-  items = [];
-  cert.ext.cp.policies.forEach(entry => {
-    items.push(createEntryItem("Policy", entry.name + " ( " + entry.id + " )"));
-    items.push(createEntryItem("Value", entry.value));
-    if (entry.qualifiers) {
-      entry.qualifiers.forEach(qualifier => {
-        items.push(
-          createEntryItem(
-            "Qualifier",
-            qualifier.name + " ( " + qualifier.id + " )"
-          )
-        );
-        items.push(createEntryItem("Value", qualifier.value));
-      });
-    }
-  });
-  certItems.push({
-    sectionTitle: "Certificate Policies",
-    sectionItems: items,
-    Critical: cert.ext.cp.critical || false,
-  });
-
-  // Embedded SCTs section
-  items = [];
-  cert.ext.scts.timestamps.forEach(entry => {
-    for (let key of Object.keys(entry)) {
-      items.push(createEntryItem(key, entry[key]));
-    }
-  });
-  certItems.push({
-    sectionTitle: "Embedded SCTs",
-    sectionItems: items,
-    Critical: cert.ext.scts.critical || false,
-  });
-
-  certItems.push({
-    tabName: cert.subject.cn,
-  });
-
-  return certItems;
+const addToResultUsing = (callback, certItems, sectionTitle, Critical) => {
+  let items = callback();
+  if (items.length > 0) {
+    certItems.push({
+      sectionTitle,
+      sectionItems: items,
+      Critical,
+    });
+  }
 };
 
-const buildChain = async () => {
-  let chain = [derString];
-  let builtChain = chain.map(cert => {
-    return stringToArrayBuffer(cert);
-  });
-  let certs = await Promise.all(builtChain.map(cert => parse(cert)));
-  let adjustedCerts = certs.map(adjustCertInformation);
-  console.log("adjustedCerts ", adjustedCerts);
+const getElementByPathOrFalse = (obj, pathString) => {
+  let pathArray = pathString.split(".");
+  let result = obj;
+  for (let entry of pathArray) {
+    result = result[entry];
+    if (result == null) {
+      return false;
+    }
+  }
+  return result ? result : false;
+};
+
+const adjustCertInformation = cert => {
+  let certItems = [];
+  let tabName = cert.subject ? cert.subject.cn || "" : "";
+
+  if (!cert) {
+    return {
+      certItems,
+      tabName,
+    };
+  }
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.subject && cert.subject.entries) {
+        items = cert.subject.entries
+          .map(entry => createEntryItem(entry[0], entry[1]))
+          .filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Subject Name",
+    false
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.issuer && cert.issuer.entries) {
+        items = cert.issuer.entries
+          .map(entry => createEntryItem(entry[0], entry[1]))
+          .filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Issuer Name",
+    false
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.notBefore && cert.notAfter) {
+        items = [
+          createEntryItem("Not Before", cert.notBefore),
+          createEntryItem("Not Before UTC", cert.notBeforeUTC),
+          createEntryItem("Not After", cert.notAfter),
+          createEntryItem("Not After UTC", cert.notAfterUTC),
+        ].filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Validity",
+    false
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext && cert.ext.san && cert.ext.san.altNames) {
+        items = cert.ext.san.altNames
+          .map(entry => createEntryItem(entry[0], entry[1]))
+          .filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Subject Alt Names",
+    getElementByPathOrFalse(cert, "ext.san.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.subjectPublicKeyInfo) {
+        items = [
+          createEntryItem("Algorithm", cert.subjectPublicKeyInfo.kty),
+          createEntryItem("Key size", cert.subjectPublicKeyInfo.keysize),
+          createEntryItem("Curve", cert.subjectPublicKeyInfo.crv),
+          createEntryItem("Public Value", cert.subjectPublicKeyInfo.xy),
+          createEntryItem("Exponent", cert.subjectPublicKeyInfo.e),
+          createEntryItem("Modulus", cert.subjectPublicKeyInfo.n),
+        ].filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Public Key Info",
+    false
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [
+        createEntryItem("Serial Number", cert.serialNumber),
+        createEntryItem(
+          "Signature Algorithm",
+          cert.signature ? cert.signature.name : null
+        ),
+        createEntryItem("Version", cert.version),
+        createEntryItem("Download", cert.files ? cert.files.pem : null),
+      ].filter(elem => elem != null);
+      return items;
+    },
+    certItems,
+    "Miscellaneous",
+    false
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.fingerprint) {
+        items = [
+          createEntryItem("SHA-256", cert.fingerprint.sha256),
+          createEntryItem("SHA-1", cert.fingerprint.sha1),
+        ].filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Fingerprints",
+    false
+  );
+
+  if (!cert.ext) {
+    return {
+      certItems,
+      tabName,
+    };
+  }
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.basicConstraints) {
+        items = [
+          createEntryItem(
+            "Certificate Authority",
+            cert.ext.basicConstraints.cA
+          ),
+        ].filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Basic Constraints",
+    getElementByPathOrFalse(cert, "ext.basicConstraints.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.keyUsages) {
+        items = [
+          createEntryItem("Purposes", cert.ext.keyUsages.purposes),
+        ].filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Key Usages",
+    getElementByPathOrFalse(cert, "ext.keyUsages.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.eKeyUsages) {
+        items = [
+          createEntryItem("Purposes", cert.ext.eKeyUsages.purposes),
+        ].filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Extended Key Usages",
+    getElementByPathOrFalse(cert, "ext.eKeyUsages.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.ocspStaple) {
+        items = [
+          createEntryItem("Required", cert.ext.ocspStaple.critical),
+        ].filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "OCSP Stapling",
+    getElementByPathOrFalse(cert, "ext.ocspStaple.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.sKID) {
+        items = [createEntryItem("Key ID", cert.ext.sKID.id)].filter(
+          elem => elem != null
+        );
+      }
+      return items;
+    },
+    certItems,
+    "Subject Key ID",
+    getElementByPathOrFalse(cert, "ext.sKID.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.aKID) {
+        items = [createEntryItem("Key ID", cert.ext.aKID.id)].filter(
+          elem => elem != null
+        );
+      }
+      return items;
+    },
+    certItems,
+    "Authority Key ID",
+    getElementByPathOrFalse(cert, "ext.aKID.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.crlPoints && cert.ext.crlPoints.points) {
+        items = cert.ext.crlPoints.points
+          .map(entry => {
+            let label = "Distribution Point";
+            return createEntryItem(label, entry);
+          })
+          .filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "CRL Endpoints",
+    getElementByPathOrFalse(cert, "ext.crlPoints.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.aia && cert.ext.aia.descriptions) {
+        cert.ext.aia.descriptions.forEach(entry => {
+          items.push(createEntryItem("Location", entry.location));
+          items.push(createEntryItem("Method", entry.method));
+        });
+        items.filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Authority Info (AIA)",
+    getElementByPathOrFalse(cert, "ext.aia.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.cp && cert.ext.cp.policies) {
+        cert.ext.cp.policies.forEach(entry => {
+          items.push(
+            createEntryItem("Policy", entry.name + " ( " + entry.id + " )")
+          );
+          items.push(createEntryItem("Value", entry.value));
+          if (entry.qualifiers) {
+            entry.qualifiers.forEach(qualifier => {
+              items.push(
+                createEntryItem(
+                  "Qualifier",
+                  qualifier.name + " ( " + qualifier.id + " )"
+                )
+              );
+              items.push(createEntryItem("Value", qualifier.value));
+            });
+          }
+        });
+        items.filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Certificate Policies",
+    getElementByPathOrFalse(cert, "ext.cp.critical")
+  );
+
+  addToResultUsing(
+    () => {
+      let items = [];
+      if (cert.ext.scts && cert.ext.scts.timestamps) {
+        cert.ext.scts.timestamps.forEach(entry => {
+          for (let key of Object.keys(entry)) {
+            items.push(createEntryItem(key, entry[key]));
+          }
+        });
+        items.filter(elem => elem != null);
+      }
+      return items;
+    },
+    certItems,
+    "Embedded SCTs",
+    getElementByPathOrFalse(cert, "ext.scts.critical")
+  );
+
+  return {
+    certItems,
+    tabName,
+  };
+};
+
+const render = async (certs, error) => {
+  await customElements.whenDefined("certificate-section");
+  const CertificateSection = customElements.get("certificate-section");
+  document.querySelector("body").append(new CertificateSection(certs, error));
+  return Promise.resolve();
+};
+
+const buildChain = async chain => {
+  await Promise.all(
+    chain
+      .map(cert => {
+        try {
+          return pemToDER(cert);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      })
+      .map(cert => {
+        try {
+          return parse(cert);
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      })
+  )
+    .then(certs => {
+      if (certs.length === 0) {
+        return Promise.reject();
+      }
+      let adjustedCerts = certs.map(cert => adjustCertInformation(cert));
+      return render(adjustedCerts, false);
+    })
+    .catch(err => {
+      render(null, true);
+    });
 };

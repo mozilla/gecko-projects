@@ -8,7 +8,6 @@
 
 #include "mozilla/AntiTrackingCommon.h"
 #include "mozilla/net/UrlClassifierCommon.h"
-#include "mozilla/StaticPrefs_privacy.h"
 #include "nsContentUtils.h"
 #include "nsNetUtil.h"
 
@@ -90,11 +89,6 @@ UrlClassifierFeatureSocialTrackingAnnotation::MaybeCreate(
        "%p",
        aChannel));
 
-  if (!StaticPrefs::
-          privacy_trackingprotection_socialtracking_annotate_enabled()) {
-    return nullptr;
-  }
-
   if (!UrlClassifierCommon::ShouldEnableClassifier(aChannel)) {
     return nullptr;
   }
@@ -149,9 +143,6 @@ UrlClassifierFeatureSocialTrackingAnnotation::ProcessChannel(
           {NS_LITERAL_CSTRING("social-tracking-protection-twitter-"),
            nsIHttpChannel::ClassificationFlags::
                CLASSIFIED_SOCIALTRACKING_TWITTER},
-          {NS_LITERAL_CSTRING("social-tracking-protection-youtube-"),
-           nsIHttpChannel::ClassificationFlags::
-               CLASSIFIED_SOCIALTRACKING_YOUTUBE},
       };
 
   uint32_t flags = UrlClassifierCommon::TablesToClassificationFlags(
@@ -159,7 +150,7 @@ UrlClassifierFeatureSocialTrackingAnnotation::ProcessChannel(
       nsIHttpChannel::ClassificationFlags::CLASSIFIED_SOCIALTRACKING);
 
   UrlClassifierCommon::AnnotateChannel(
-      aChannel, AntiTrackingCommon::eSocialTracking, flags,
+      aChannel, flags,
       nsIWebProgressListener::STATE_LOADED_SOCIALTRACKING_CONTENT);
 
   return NS_OK;

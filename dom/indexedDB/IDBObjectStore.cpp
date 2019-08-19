@@ -689,26 +689,16 @@ class ValueDeserializationHelper {
     MOZ_ASSERT(aFile.mType == StructuredCloneFile::eWasmBytecode);
     MOZ_ASSERT(!aFile.mBlob);
 
-    // If we don't have a WasmModule, we are probably using it for an index
-    // creation, but Wasm module can't be used in index creation, so just make a
-    // dummy object.
-    if (!aFile.mWasmModule) {
-      JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
+    // Just create a plain object here, support for de-serialization of
+    // WebAssembly.Modules has been removed in bug 1561876. Full removal is
+    // tracked in bug 1487479.
 
-      if (NS_WARN_IF(!obj)) {
-        return false;
-      }
-
-      aResult.set(obj);
-      return true;
-    }
-
-    JS::Rooted<JSObject*> moduleObj(aCx, aFile.mWasmModule->createObject(aCx));
-    if (NS_WARN_IF(!moduleObj)) {
+    JS::Rooted<JSObject*> obj(aCx, JS_NewPlainObject(aCx));
+    if (NS_WARN_IF(!obj)) {
       return false;
     }
 
-    aResult.set(moduleObj);
+    aResult.set(obj);
     return true;
   }
 };
@@ -804,7 +794,7 @@ JSObject* CopyingStructuredCloneReadCallback(JSContext* aCx,
   MOZ_ASSERT(aTag != SCTAG_DOM_FILE_WITHOUT_LASTMODIFIEDDATE);
 
   if (aTag == SCTAG_DOM_BLOB || aTag == SCTAG_DOM_FILE ||
-      aTag == SCTAG_DOM_MUTABLEFILE || aTag == SCTAG_DOM_WASM) {
+      aTag == SCTAG_DOM_MUTABLEFILE) {
     auto* cloneInfo =
         static_cast<IDBObjectStore::StructuredCloneInfo*>(aClosure);
 
@@ -854,28 +844,14 @@ JSObject* CopyingStructuredCloneReadCallback(JSContext* aCx,
       return result;
     }
 
-    if (aTag == SCTAG_DOM_MUTABLEFILE) {
-      MOZ_ASSERT(file.mType == StructuredCloneFile::eMutableFile);
+    MOZ_ASSERT(file.mType == StructuredCloneFile::eMutableFile);
 
-      JS::Rooted<JS::Value> wrappedMutableFile(aCx);
-      if (NS_WARN_IF(!ToJSValue(aCx, file.mMutableFile, &wrappedMutableFile))) {
-        return nullptr;
-      }
-
-      result.set(&wrappedMutableFile.toObject());
-
-      return result;
-    }
-
-    MOZ_ASSERT(file.mType == StructuredCloneFile::eWasmBytecode);
-
-    JS::Rooted<JSObject*> wrappedModule(aCx,
-                                        file.mWasmModule->createObject(aCx));
-    if (NS_WARN_IF(!wrappedModule)) {
+    JS::Rooted<JS::Value> wrappedMutableFile(aCx);
+    if (NS_WARN_IF(!ToJSValue(aCx, file.mMutableFile, &wrappedMutableFile))) {
       return nullptr;
     }
 
-    result.set(wrappedModule);
+    result.set(&wrappedMutableFile.toObject());
 
     return result;
   }
@@ -947,9 +923,12 @@ void IDBObjectStore::AppendIndexUpdateInfo(
     updateInfo->indexId() = aIndexID;
     updateInfo->value() = key;
     if (localeAware) {
-      aRv = key.ToLocaleBasedKey(updateInfo->localizedValue(), aLocale);
-      if (NS_WARN_IF(aRv.Failed())) {
-        aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+      auto result =
+          key.ToLocaleBasedKey(updateInfo->localizedValue(), aLocale, aRv);
+      if (NS_WARN_IF(!result.Is(Ok, aRv))) {
+        if (result.Is(Invalid, aRv)) {
+          aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        }
         return;
       }
     }
@@ -986,8 +965,8 @@ void IDBObjectStore::AppendIndexUpdateInfo(
       }
 
       Key value;
-      value.SetFromJSVal(aCx, arrayItem, aRv);
-      if (aRv.Failed() || value.IsUnset()) {
+      auto result = value.SetFromJSVal(aCx, arrayItem, aRv);
+      if (!result.Is(Ok, aRv) || value.IsUnset()) {
         // Not a value we can do anything with, ignore it.
         aRv.SuppressException();
         continue;
@@ -997,17 +976,20 @@ void IDBObjectStore::AppendIndexUpdateInfo(
       updateInfo->indexId() = aIndexID;
       updateInfo->value() = value;
       if (localeAware) {
-        aRv = value.ToLocaleBasedKey(updateInfo->localizedValue(), aLocale);
-        if (NS_WARN_IF(aRv.Failed())) {
-          aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        auto result =
+            value.ToLocaleBasedKey(updateInfo->localizedValue(), aLocale, aRv);
+        if (NS_WARN_IF(!result.Is(Ok, aRv))) {
+          if (result.Is(Invalid, aRv)) {
+            aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+          }
           return;
         }
       }
     }
   } else {
     Key value;
-    value.SetFromJSVal(aCx, val, aRv);
-    if (aRv.Failed() || value.IsUnset()) {
+    auto result = value.SetFromJSVal(aCx, val, aRv);
+    if (!result.Is(Ok, aRv) || value.IsUnset()) {
       // Not a value we can do anything with, ignore it.
       aRv.SuppressException();
       return;
@@ -1017,9 +999,12 @@ void IDBObjectStore::AppendIndexUpdateInfo(
     updateInfo->indexId() = aIndexID;
     updateInfo->value() = value;
     if (localeAware) {
-      aRv = value.ToLocaleBasedKey(updateInfo->localizedValue(), aLocale);
-      if (NS_WARN_IF(aRv.Failed())) {
-        aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+      auto result =
+          value.ToLocaleBasedKey(updateInfo->localizedValue(), aLocale, aRv);
+      if (NS_WARN_IF(!result.Is(Ok, aRv))) {
+        if (result.Is(Invalid, aRv)) {
+          aRv.Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        }
         return;
       }
     }
@@ -1417,8 +1402,11 @@ void IDBObjectStore::GetAddInfo(JSContext* aCx, ValueWrapper& aValueWrapper,
 
   if (!HasValidKeyPath()) {
     // Out-of-line keys must be passed in.
-    aKey.SetFromJSVal(aCx, aKeyVal, aRv);
-    if (aRv.Failed()) {
+    auto result = aKey.SetFromJSVal(aCx, aKeyVal, aRv);
+    if (!result.Is(Ok, aRv)) {
+      if (result.Is(Invalid, aRv)) {
+        aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
+      }
       return;
     }
   } else if (!isAutoIncrement) {

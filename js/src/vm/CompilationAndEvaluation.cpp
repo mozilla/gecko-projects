@@ -34,7 +34,7 @@
 #include "vm/JSContext.h"          // JSContext
 
 #include "debugger/DebugAPI-inl.h"  // js::DebugAPI
-#include "vm/JSContext-inl.h"  // JSContext::check
+#include "vm/JSContext-inl.h"       // JSContext::check
 
 using mozilla::Utf8Unit;
 
@@ -347,7 +347,7 @@ class FunctionCompiler {
 
     RootedFunction fun(
         cx_,
-        NewScriptedFunction(cx_, 0, JSFunction::INTERPRETED_NORMAL,
+        NewScriptedFunction(cx_, 0, FunctionFlags::INTERPRETED_NORMAL,
                             nameIsIdentifier_ ? HandleAtom(nameAtom_) : nullptr,
                             /* proto = */ nullptr, gc::AllocKind::FUNCTION,
                             TenuredObject, enclosingEnv));

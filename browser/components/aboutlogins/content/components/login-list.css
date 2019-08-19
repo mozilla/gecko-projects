@@ -13,7 +13,7 @@
 .meta {
   display: flex;
   align-items: center;
-  padding: 5px 18px;
+  padding: 5px 16px;
   border-bottom: 1px solid var(--in-content-box-border-color);
   background-color: var(--in-content-box-background);
   color: var(--in-content-deemphasized-text);
@@ -39,6 +39,29 @@
   margin-inline-start: 18px;
 }
 
+.container {
+  display: contents;
+}
+
+:host(.no-logins:not(.create-login-selected)) ol,
+:host(:not(.no-logins)) .intro,
+:host(.create-login-selected) .intro,
+:host(:not(.create-login-selected)) #new-login-list-item {
+  display: none;
+}
+
+.intro {
+  text-align: center;
+  padding: 1em;
+  max-width: 50ch; /* This should be kept in sync with login-list-item username and title max-width */
+  flex-grow: 1;
+  border-bottom: 1px solid var(--in-content-box-border-color);
+}
+
+.intro span {
+  font-size: 0.85em;
+}
+
 ol {
   margin-top: 0;
   margin-bottom: 0;
@@ -53,10 +76,11 @@ ol {
 }
 
 .login-list-item {
-  display: block;
+  display: flex;
+  align-items: center;
   padding: 10px;
   padding-inline-end: 18px;
-  padding-inline-start: 14px;
+  padding-inline-start: 12px;
   border-inline-start: 4px solid transparent;
   border-bottom: 1px solid var(--in-content-box-border-color);
 }
@@ -79,23 +103,65 @@ ol {
   background-color: var(--in-content-box-background-hover);
 }
 
-.login-list-item.breached {
-  border-inline-start-color: var(--in-content-border-invalid);
-}
-
 .login-list-item.selected .title {
   font-weight: 600;
+}
+
+.labels {
+  flex-grow: 1;
+  overflow: hidden;
 }
 
 .title,
 .username {
   display: block;
-  max-width: 50ch;
   text-overflow: ellipsis;
   overflow: hidden;
+}
+
+.favicon-wrapper {
+  height: 16px;
+  width: 16px;
+  background-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
+  background-repeat: no-repeat;
+  margin-inline-end: 12px;
+  -moz-context-properties: fill;
+}
+
+.favicon-wrapper.hide-default-favicon {
+  background-image: none;
+}
+
+.favicon {
+  width: 16px;
 }
 
 .username {
   font-size: 0.85em;
   color: var(--in-content-deemphasized-text);
+}
+
+.login-list-item.breached {
+  padding-inline-end: 48px;
+  background-image: url("chrome://global/skin/icons/warning.svg");
+  background-position: right 24px center;
+  background-repeat: no-repeat;
+  -moz-context-properties: fill;
+  fill: var(--red-90);
+}
+
+.login-list-item.breached:dir(rtl) {
+  background-position: left 24px center;
+}
+
+@supports -moz-bool-pref("browser.in-content.dark-mode") {
+  @media (prefers-color-scheme: dark) {
+    .login-list-item.breached {
+      fill: var(--red-60);
+    }
+
+    .favicon-wrapper {
+      fill: var(--in-content-border-hover);
+    }
+  }
 }

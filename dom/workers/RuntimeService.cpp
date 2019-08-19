@@ -432,14 +432,6 @@ void LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */) {
       continue;
     }
 
-    matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX "high_water_mark");
-    if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 1)) {
-      int32_t prefValue = GetWorkerPref(matchName, 128);
-      UpdateOtherJSGCMemoryOption(rts, JSGC_MAX_MALLOC_BYTES,
-                                  uint32_t(prefValue) * 1024 * 1024);
-      continue;
-    }
-
     matchName.RebindLiteral(PREF_MEM_OPTIONS_PREFIX
                             "gc_high_frequency_time_limit_ms");
     if (memPrefName == matchName || (gRuntimeServiceDuringInit && index == 2)) {
@@ -1609,14 +1601,11 @@ nsresult RuntimeService::Init() {
   // We assume atomic 32bit reads/writes. If this assumption doesn't hold on
   // some wacky platform then the worst that could happen is that the close
   // handler will run for a slightly different amount of time.
-  if (NS_FAILED(Preferences::AddIntVarCache(
-          &sDefaultJSSettings.content.maxScriptRuntime,
-          PREF_MAX_SCRIPT_RUN_TIME_CONTENT, MAX_SCRIPT_RUN_TIME_SEC)) ||
-      NS_FAILED(Preferences::AddIntVarCache(
-          &sDefaultJSSettings.chrome.maxScriptRuntime,
-          PREF_MAX_SCRIPT_RUN_TIME_CHROME, -1))) {
-    NS_WARNING("Failed to register timeout cache!");
-  }
+  Preferences::AddIntVarCache(&sDefaultJSSettings.content.maxScriptRuntime,
+                              PREF_MAX_SCRIPT_RUN_TIME_CONTENT,
+                              MAX_SCRIPT_RUN_TIME_SEC);
+  Preferences::AddIntVarCache(&sDefaultJSSettings.chrome.maxScriptRuntime,
+                              PREF_MAX_SCRIPT_RUN_TIME_CHROME, -1);
 
   int32_t maxPerDomain =
       Preferences::GetInt(PREF_WORKERS_MAX_PER_DOMAIN, MAX_WORKERS_PER_DOMAIN);

@@ -190,8 +190,6 @@ class Compositor : public TextureSourceProvider {
   void Destroy() override;
   bool IsDestroyed() const { return mIsDestroyed; }
 
-  virtual void DetachWidget() { mWidget = nullptr; }
-
   /**
    * Request a texture host identifier that may be used for creating textures
    * across process or thread boundaries that are compatible with this
@@ -430,6 +428,12 @@ class Compositor : public TextureSourceProvider {
   /**
    * Notification that we've finished issuing draw commands for normal
    * layers (as opposed to the diagnostic overlay which comes after).
+   * This is called between BeginFrame and EndFrame, and it's called before
+   * GetWindowRenderTarget() is called for the purposes of screenshot capturing.
+   * That next call to GetWindowRenderTarget() expects up-to-date contents for
+   * the current frame.
+   * Called at a time when the current render target is the one that BeginFrame
+   * put in place.
    */
   virtual void NormalDrawingDone() {}
 

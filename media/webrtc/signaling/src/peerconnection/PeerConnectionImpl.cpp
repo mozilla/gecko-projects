@@ -35,6 +35,7 @@
 
 #include "AudioConduit.h"
 #include "VideoConduit.h"
+#include "MediaStreamGraph.h"
 #include "runnable_utils.h"
 #include "PeerConnectionCtx.h"
 #include "PeerConnectionImpl.h"
@@ -307,7 +308,6 @@ PeerConnectionImpl::PeerConnectionImpl(const GlobalObject* aGlobal)
       mIceRestartCount(0),
       mIceRollbackCount(0),
       mHaveConfiguredCodecs(false),
-      mAddCandidateErrorCount(0),
       mTrickle(true)  // TODO(ekr@rtfm.com): Use pref
       ,
       mPrivateWindow(false),
@@ -1507,20 +1507,6 @@ PeerConnectionImpl::AddIceCandidate(
 
   CSFLogDebug(LOGTAG, "AddIceCandidate: %s %s", aCandidate, aUfrag);
 
-  // When remote candidates are added before our ICE ctx is up and running
-  // (the transition to New is async through STS, so this is not impossible),
-  // we won't record them as trickle candidates. Is this what we want?
-  if (!mIceStartTime.IsNull()) {
-    TimeDuration timeDelta = TimeStamp::Now() - mIceStartTime;
-    if (mIceConnectionState == RTCIceConnectionState::Failed) {
-      Telemetry::Accumulate(Telemetry::WEBRTC_ICE_LATE_TRICKLE_ARRIVAL_TIME,
-                            timeDelta.ToMilliseconds());
-    } else {
-      Telemetry::Accumulate(Telemetry::WEBRTC_ICE_ON_TIME_TRICKLE_ARRIVAL_TIME,
-                            timeDelta.ToMilliseconds());
-    }
-  }
-
   std::string transportId;
   Maybe<unsigned short> level;
   if (!aLevel.IsNull()) {
@@ -1539,7 +1525,6 @@ PeerConnectionImpl::AddIceCandidate(
     }
     mPCObserver->OnAddIceCandidateSuccess(rv);
   } else {
-    ++mAddCandidateErrorCount;
     std::string errorString = mJsepSession->GetLastError();
 
     CSFLogError(LOGTAG,
@@ -1797,18 +1782,7 @@ OwningNonNull<dom::MediaStreamTrack> PeerConnectionImpl::CreateReceiveTrack(
     SdpMediaSection::MediaType type) {
   bool audio = (type == SdpMediaSection::MediaType::kAudio);
 
-  MediaStreamGraph* graph = MediaStreamGraph::GetInstance(
-      audio ? MediaStreamGraph::AUDIO_THREAD_DRIVER
-            : MediaStreamGraph::SYSTEM_THREAD_DRIVER,
-      GetWindow(), MediaStreamGraph::REQUEST_DEFAULT_SAMPLE_RATE);
-
-  RefPtr<DOMMediaStream> stream =
-      DOMMediaStream::CreateSourceStreamAsInput(GetWindow(), graph);
-
-  CSFLogDebug(LOGTAG, "Created media stream %p, inner: %p", stream.get(),
-              stream->GetInputStream());
-
-  // Set the principal used for creating the tracks. This makes the stream
+  // Set the principal used for creating the tracks. This makes the track
   // data (audio/video samples) accessible to the receiving page. We're
   // only certain that privacy hasn't been requested if we're connected.
   nsCOMPtr<nsIPrincipal> principal;
@@ -1817,32 +1791,41 @@ OwningNonNull<dom::MediaStreamTrack> PeerConnectionImpl::CreateReceiveTrack(
   if (mPrivacyRequested.isSome() && !*mPrivacyRequested) {
     principal = doc->NodePrincipal();
   } else {
-    // we're either certain that we need isolation for the streams, OR
-    // we're not sure and we can fix the stream in SetDtlsConnected
+    // we're either certain that we need isolation for the tracks, OR
+    // we're not sure and we can fix the track in SetDtlsConnected
     principal =
         NullPrincipal::CreateWithInheritedAttributes(doc->NodePrincipal());
   }
 
+  MediaStreamGraph* graph = MediaStreamGraph::GetInstance(
+      audio ? MediaStreamGraph::AUDIO_THREAD_DRIVER
+            : MediaStreamGraph::SYSTEM_THREAD_DRIVER,
+      GetWindow(), MediaStreamGraph::REQUEST_DEFAULT_SAMPLE_RATE);
+
   RefPtr<MediaStreamTrack> track;
+  RefPtr<RemoteTrackSource> trackSource;
+  RefPtr<SourceMediaStream> source = graph->CreateSourceStream();
   if (audio) {
-    track = stream->CreateDOMTrack(
-        333,  // Use a constant TrackID. Dependents read this from the DOM
-              // track.
-        MediaSegment::AUDIO,
-        new RemoteTrackSource(principal,
-                              NS_ConvertASCIItoUTF16("remote audio")));
+    trackSource = new RemoteTrackSource(source, principal,
+                                        NS_ConvertASCIItoUTF16("remote audio"));
+    track = new AudioStreamTrack(GetWindow(), source,
+                                 333,  // Use a constant TrackID. Dependents
+                                       // read this from the DOM track.
+                                 trackSource);
   } else {
-    track = stream->CreateDOMTrack(
-        666,  // Use a constant TrackID. Dependents read this from the DOM
-              // track.
-        MediaSegment::VIDEO,
-        new RemoteTrackSource(principal,
-                              NS_ConvertASCIItoUTF16("remote video")));
+    trackSource = new RemoteTrackSource(source, principal,
+                                        NS_ConvertASCIItoUTF16("remote video"));
+    track = new VideoStreamTrack(GetWindow(), source,
+                                 666,  // Use a constant TrackID. Dependents
+                                       // read this from the DOM track.
+                                 trackSource);
   }
 
-  stream->AddTrackInternal(track);
+  CSFLogDebug(LOGTAG, "Created %s track %p, inner: %p",
+              audio ? "audio" : "video", track.get(), track->GetStream());
+
   // Spec says remote tracks start out muted.
-  track->MutedChanged(true);
+  trackSource->SetMuted(true);
 
   return OwningNonNull<dom::MediaStreamTrack>(*track);
 }
@@ -2413,20 +2396,6 @@ void PeerConnectionImpl::SendLocalIceCandidateToContent(
                               ObString(ufrag.c_str()), rv);
 }
 
-static bool isDone(RTCIceConnectionState state) {
-  return state != RTCIceConnectionState::Checking &&
-         state != RTCIceConnectionState::New;
-}
-
-static bool isSucceeded(RTCIceConnectionState state) {
-  return state == RTCIceConnectionState::Connected ||
-         state == RTCIceConnectionState::Completed;
-}
-
-static bool isFailed(RTCIceConnectionState state) {
-  return state == RTCIceConnectionState::Failed;
-}
-
 void PeerConnectionImpl::IceConnectionStateChange(
     dom::RTCIceConnectionState domState) {
   PC_AUTO_ENTER_API_CALL_VOID_RETURN(false);
@@ -2437,18 +2406,6 @@ void PeerConnectionImpl::IceConnectionStateChange(
     // no work to be done since the states are the same.
     // this can happen during ICE rollback situations.
     return;
-  }
-
-  if (!isDone(mIceConnectionState) && isDone(domState)) {
-    if (isSucceeded(domState)) {
-      Telemetry::Accumulate(
-          Telemetry::WEBRTC_ICE_ADD_CANDIDATE_ERRORS_GIVEN_SUCCESS,
-          mAddCandidateErrorCount);
-    } else if (isFailed(domState)) {
-      Telemetry::Accumulate(
-          Telemetry::WEBRTC_ICE_ADD_CANDIDATE_ERRORS_GIVEN_FAILURE,
-          mAddCandidateErrorCount);
-    }
   }
 
   mIceConnectionState = domState;

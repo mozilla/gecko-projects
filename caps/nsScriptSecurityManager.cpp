@@ -7,6 +7,7 @@
 #include "nsScriptSecurityManager.h"
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/StaticPrefs_security.h"
 #include "mozilla/StoragePrincipalHelper.h"
 
 #include "xpcpublic.h"
@@ -361,7 +362,7 @@ nsScriptSecurityManager::GetChannelURIPrincipal(nsIChannel* aChannel,
   MOZ_ASSERT(aChannel, "Must have channel!");
 
   // Get the principal from the URI.  Make sure this does the same thing
-  // as Document::Reset and XULDocument::StartDocumentLoad.
+  // as Document::Reset and PrototypeDocumentContentSink::Init.
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -400,12 +401,6 @@ bool nsScriptSecurityManager::ContentSecurityPolicyPermitsJSAction(
     JSContext* cx, JS::HandleValue aValue) {
   MOZ_ASSERT(cx == nsContentUtils::GetCurrentJSContext());
 
-#if !defined(ANDROID) && (defined(NIGHTLY_BUILD) || defined(DEBUG))
-  nsCOMPtr<nsIPrincipal> subjectPrincipal = nsContentUtils::SubjectPrincipal();
-  nsContentSecurityManager::AssertEvalNotUsingSystemPrincipal(subjectPrincipal,
-                                                              cx);
-#endif
-
   // Get the window, if any, corresponding to the current global
   nsCOMPtr<nsIContentSecurityPolicy> csp;
   if (nsGlobalWindowInner* win = xpc::CurrentWindowOrNull(cx)) {
@@ -428,24 +423,36 @@ bool nsScriptSecurityManager::ContentSecurityPolicyPermitsJSAction(
   bool reportViolation = false;
   nsresult rv = csp->GetAllowsEval(&reportViolation, &evalOK);
 
-  if (NS_FAILED(rv)) {
-    NS_WARNING("CSP: failed to get allowsEval");
-    return true;  // fail open to not break sites.
-  }
-
-  if (reportViolation) {
+  // A little convoluted. We want the scriptSample for a) reporting a violation
+  // or b) passing it to AssertEvalNotUsingSystemPrincipal or c) we're in the
+  // parent process. So do the work to get it if either of those cases is true.
+  nsAutoJSString scriptSample;
+  nsCOMPtr<nsIPrincipal> subjectPrincipal = nsContentUtils::SubjectPrincipal();
+  if (reportViolation || subjectPrincipal->IsSystemPrincipal() ||
+      XRE_IsE10sParentProcess()) {
     JS::Rooted<JSString*> jsString(cx, JS::ToString(cx, aValue));
     if (NS_WARN_IF(!jsString)) {
       JS_ClearPendingException(cx);
       return false;
     }
 
-    nsAutoJSString scriptSample;
     if (NS_WARN_IF(!scriptSample.init(cx, jsString))) {
       JS_ClearPendingException(cx);
       return false;
     }
+  }
 
+#if !defined(ANDROID) && (defined(NIGHTLY_BUILD) || defined(DEBUG))
+  nsContentSecurityManager::AssertEvalNotRestricted(cx, subjectPrincipal,
+                                                    scriptSample);
+#endif
+
+  if (NS_FAILED(rv)) {
+    NS_WARNING("CSP: failed to get allowsEval");
+    return true;  // fail open to not break sites.
+  }
+
+  if (reportViolation) {
     JS::AutoFilename scriptFilename;
     nsAutoString fileName;
     unsigned lineNum = 0;
@@ -669,30 +676,15 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
   rv = sourceBaseURI->GetScheme(sourceScheme);
   if (NS_FAILED(rv)) return rv;
 
-  // When comparing schemes, if the relevant pref is set, view-source URIs
-  // are reachable from same-protocol (so e.g. file: can link to
-  // view-source:file). This is required for reftests.
-  static bool sViewSourceReachableFromInner = false;
-  static bool sCachedViewSourcePref = false;
-  if (!sCachedViewSourcePref) {
-    sCachedViewSourcePref = true;
-    mozilla::Preferences::AddBoolVarCache(
-        &sViewSourceReachableFromInner,
-        "security.view-source.reachable-from-inner-protocol");
-  }
-
-  bool targetIsViewSource = false;
-
   if (sourceScheme.LowerCaseEqualsLiteral(NS_NULLPRINCIPAL_SCHEME)) {
     // A null principal can target its own URI.
     if (sourceURI == aTargetURI) {
       return NS_OK;
     }
-  } else if (sViewSourceReachableFromInner &&
+  } else if (StaticPrefs::
+                 security_view_source_reachable_from_inner_protocol() &&
              sourceScheme.EqualsIgnoreCase(targetScheme.get()) &&
-             NS_SUCCEEDED(
-                 aTargetURI->SchemeIs("view-source", &targetIsViewSource)) &&
-             targetIsViewSource) {
+             aTargetURI->SchemeIs("view-source")) {
     // exception for foo: linking to view-source:foo for reftests...
     return NS_OK;
   } else if (sourceScheme.EqualsIgnoreCase("file") &&
@@ -886,18 +878,7 @@ nsresult nsScriptSecurityManager::CheckLoadURIFlags(
       }
 
       if (targetScheme.EqualsLiteral("resource")) {
-        // Mochitests that need to load resource:// URIs not declared
-        // content-accessible in manifests should set the preference
-        // "security.all_resource_uri_content_accessible" true.
-        static bool sSecurityPrefCached = false;
-        static bool sAllResourceUriContentAccessible = false;
-        if (!sSecurityPrefCached) {
-          sSecurityPrefCached = true;
-          Preferences::AddBoolVarCache(
-              &sAllResourceUriContentAccessible,
-              "security.all_resource_uri_content_accessible", false);
-        }
-        if (sAllResourceUriContentAccessible) {
+        if (StaticPrefs::security_all_resource_uri_content_accessible()) {
           return NS_OK;
         }
 
@@ -952,9 +933,7 @@ nsresult nsScriptSecurityManager::CheckLoadURIFlags(
     }
 
     // Allow chrome://
-    bool isChrome = false;
-    if (NS_SUCCEEDED(aSourceBaseURI->SchemeIs("chrome", &isChrome)) &&
-        isChrome) {
+    if (aSourceBaseURI->SchemeIs("chrome")) {
       return NS_OK;
     }
 
@@ -1516,8 +1495,6 @@ nsresult nsScriptSecurityManager::InitPrefs() {
   Preferences::RegisterPrefixCallbacks(
       PREF_CHANGE_METHOD(nsScriptSecurityManager::ScriptSecurityPrefChanged),
       kObservedPrefs, this);
-
-  OriginAttributes::InitPrefs();
 
   return NS_OK;
 }

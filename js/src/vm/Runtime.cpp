@@ -40,7 +40,7 @@
 #include "js/SliceBudget.h"
 #include "js/StableStringChars.h"
 #include "js/Wrapper.h"
-#if EXPOSE_INTL_API
+#if ENABLE_INTL_API
 #  include "unicode/uloc.h"
 #endif
 #include "util/Windows.h"
@@ -137,7 +137,7 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
       gcInitialized(false),
       emptyString(nullptr),
       defaultFreeOp_(nullptr),
-#if !EXPOSE_INTL_API
+#if !ENABLE_INTL_API
       thousandsSeparator(nullptr),
       decimalSeparator(nullptr),
       numGrouping(nullptr),
@@ -267,14 +267,14 @@ void JSRuntime::destroyRuntime() {
     CancelOffThreadParses(this);
     CancelOffThreadCompressions(this);
 
-    /* Remove persistent GC roots. */
-    gc.finishRoots();
-
     /*
      * Flag us as being destroyed. This allows the GC to free things like
      * interned atoms and Ion trampolines.
      */
     beingDestroyed_ = true;
+
+    /* Remove persistent GC roots. */
+    gc.finishRoots();
 
     /* Allow the GC to release scripts that were being profiled. */
     profilingScripts = false;
@@ -287,13 +287,14 @@ void JSRuntime::destroyRuntime() {
 
   MOZ_ASSERT(!hasHelperThreadZones());
 
-  /*
-   * Even though all objects in the compartment are dead, we may have keep
-   * some filenames around because of gcKeepAtoms.
-   */
-  FreeScriptData(this);
+#ifdef DEBUG
+  {
+    AutoLockScriptData lock(this);
+    MOZ_ASSERT(scriptDataTable(lock).empty());
+  }
+#endif
 
-#if !EXPOSE_INTL_API
+#if !ENABLE_INTL_API
   FinishRuntimeNumberState(this);
 #endif
 
@@ -535,7 +536,7 @@ const char* JSRuntime::getDefaultLocale() {
 
   // Use ICU if available to retrieve the default locale, this ensures ICU's
   // default locale matches our default locale.
-#if EXPOSE_INTL_API
+#if ENABLE_INTL_API
   const char* locale = uloc_getDefault();
 #else
   const char* locale = setlocale(LC_ALL, nullptr);
@@ -567,12 +568,12 @@ void JSRuntime::traceSharedIntlData(JSTracer* trc) {
   sharedIntlData.ref().trace(trc);
 }
 
-FreeOp::FreeOp(JSRuntime* maybeRuntime, bool isDefault)
-    : JSFreeOp(maybeRuntime), isDefault(isDefault) {
+JSFreeOp::JSFreeOp(JSRuntime* maybeRuntime, bool isDefault)
+    : runtime_(maybeRuntime), isDefault(isDefault), isCollecting_(!isDefault) {
   MOZ_ASSERT_IF(maybeRuntime, CurrentThreadCanAccessRuntime(maybeRuntime));
 }
 
-FreeOp::~FreeOp() {
+JSFreeOp::~JSFreeOp() {
   for (size_t i = 0; i < freeLaterList.length(); i++) {
     freeUntracked(freeLaterList[i]);
   }
@@ -689,10 +690,6 @@ js::HashNumber JSRuntime::randomHashCode() {
   }
 
   return HashNumber(randomHashCodeGenerator_->next());
-}
-
-void JSRuntime::updateMallocCounter(size_t nbytes) {
-  gc.updateMallocCounter(nbytes);
 }
 
 JS_FRIEND_API void* JSRuntime::onOutOfMemory(AllocFunction allocFunc,
@@ -836,7 +833,8 @@ bool js::CurrentThreadCanAccessZone(Zone* zone) {
 
 #ifdef DEBUG
 bool js::CurrentThreadIsPerformingGC() {
-  return TlsContext.get()->performingGC;
+  JSContext* cx = TlsContext.get();
+  return cx->defaultFreeOp()->isCollecting();
 }
 #endif
 

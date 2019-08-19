@@ -48,6 +48,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PanelMultiView: "resource:///modules/PanelMultiView.jsm",
   PanelView: "resource:///modules/PanelMultiView.jsm",
   PermitUnloader: "resource://gre/actors/BrowserElementParent.jsm",
+  PictureInPicture: "resource://gre/modules/PictureInPicture.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
   PlacesTransactions: "resource://gre/modules/PlacesTransactions.jsm",
@@ -242,6 +243,10 @@ XPCOMUtils.defineLazyScriptGetter(
 // lazy service getters
 
 XPCOMUtils.defineLazyServiceGetters(this, {
+  ContentPrefService2: [
+    "@mozilla.org/content-pref/service;1",
+    "nsIContentPrefService2",
+  ],
   classifierService: [
     "@mozilla.org/url-classifier/dbservice;1",
     "nsIURIClassifier",
@@ -271,6 +276,12 @@ if (AppConstants.MOZ_CRASHREPORTER) {
 
 XPCOMUtils.defineLazyGetter(this, "RTL_UI", () => {
   return Services.locale.isAppLocaleRTL;
+});
+
+XPCOMUtils.defineLazyGetter(this, "gBrandBundle", () => {
+  return Services.strings.createBundle(
+    "chrome://branding/locale/brand.properties"
+  );
 });
 
 XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", () => {
@@ -487,6 +498,36 @@ XPCOMUtils.defineLazyPreferenceGetter(
 
 XPCOMUtils.defineLazyPreferenceGetter(
   this,
+  "gFxaSendLoginUrl",
+  "identity.fxaccounts.service.sendLoginUrl",
+  false,
+  (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(gFxaToolbarEnabled);
+  }
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "gFxaMonitorLoginUrl",
+  "identity.fxaccounts.service.monitorLoginUrl",
+  false,
+  (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(gFxaToolbarEnabled);
+  }
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "gMsgingSystemFxABadge",
+  "browser.messaging-system.fxatoolbarbadge.enabled",
+  true,
+  (aPref, aOldVal, aNewVal) => {
+    showFxaToolbarMenu(gFxaToolbarEnabled);
+  }
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
   "gHtmlAboutAddonsEnabled",
   "extensions.htmlaboutaddons.enabled",
   false
@@ -627,11 +668,25 @@ function showFxaToolbarMenu(enable) {
 
     // We set an attribute here so that we can toggle the custom
     // badge depending on whether the FxA menu was ever accessed.
-    if (!gFxaToolbarAccessed) {
+    // If badging is handled by Messaging System we shouldn't set
+    // the attribute.
+    if (!gFxaToolbarAccessed && !gMsgingSystemFxABadge) {
       mainWindowEl.setAttribute("fxa_avatar_badged", "badged");
     } else {
       mainWindowEl.removeAttribute("fxa_avatar_badged");
     }
+
+    // When the pref for a FxA service is removed, we remove it from
+    // the FxA toolbar menu as well. This is useful when the service
+    // might not be available that browser.
+    document.getElementById(
+      "PanelUI-fxa-menu-send-button"
+    ).hidden = !gFxaSendLoginUrl;
+    document.getElementById(
+      "PanelUI-fxa-menu-monitor-button"
+    ).hidden = !gFxaMonitorLoginUrl;
+    document.getElementById("fxa-menu-service-separator").hidden =
+      !gFxaSendLoginUrl && !gFxaMonitorLoginUrl;
   } else {
     mainWindowEl.removeAttribute("fxatoolbarmenu");
   }
@@ -1987,11 +2042,11 @@ var gBrowserInit = {
     BrowserSearch.delayedStartupInit();
     AutoShowBookmarksToolbar.init();
     gProtectionsHandler.init();
+    HomePage.init().catch(Cu.reportError);
 
     let safeMode = document.getElementById("helpSafeMode");
     if (Services.appinfo.inSafeMode) {
-      safeMode.label = safeMode.getAttribute("stoplabel");
-      safeMode.accessKey = safeMode.getAttribute("stopaccesskey");
+      document.l10n.setAttributes(safeMode, "menu-help-safe-mode-with-addons");
     }
 
     // BiDi UI
@@ -3584,8 +3639,13 @@ var BrowserOnClick = {
         securityInfo = getSecurityInfo(securityInfoAsString);
         cert = securityInfo.serverCert;
         if (Services.prefs.getBoolPref("security.aboutcertificate.enabled")) {
-          let derb64 = encodeURIComponent(btoa(getDERString(cert)));
-          let url = `about:certificate?cert=${derb64}`;
+          let certChain = getCertificateChain(securityInfo.failedCertChain);
+          let certs = certChain.map(elem =>
+            encodeURIComponent(elem.getBase64DERString())
+          );
+          let certsStringURL = certs.map(elem => `cert=${elem}`);
+          certsStringURL = certsStringURL.join("&");
+          let url = `about:certificate?${certsStringURL}`;
           openTrustedLinkIn(url, "tab", {
             triggeringPrincipal: browser.contentPrincipal,
           });
@@ -3919,19 +3979,10 @@ function getSecurityInfo(securityInfoAsString) {
   return securityInfo;
 }
 
-// TODO: can we pull getDERString and getPEMString in from pippki.js instead of
+// TODO: can we pull getPEMString in from pippki.js instead of
 // duplicating them here?
-function getDERString(cert) {
-  var derArray = cert.getRawDER();
-  var derString = "";
-  for (var i = 0; i < derArray.length; i++) {
-    derString += String.fromCharCode(derArray[i]);
-  }
-  return derString;
-}
-
 function getPEMString(cert) {
-  var derb64 = btoa(getDERString(cert));
+  var derb64 = cert.getBase64DERString();
   // Wrap the Base64 string into lines of 64 characters,
   // with CRLF line breaks (as specified in RFC 1421).
   var wrapped = derb64.replace(/(\S{64}(?!$))/g, "$1\r\n");
@@ -3940,6 +3991,14 @@ function getPEMString(cert) {
     wrapped +
     "\r\n-----END CERTIFICATE-----\r\n"
   );
+}
+
+function getCertificateChain(certChain) {
+  let certificates = [];
+  for (let cert of certChain.getEnumerator()) {
+    certificates.push(cert);
+  }
+  return certificates;
 }
 
 var PrintPreviewListener = {
@@ -4156,11 +4215,7 @@ function openHomeDialog(aURL) {
   );
 
   if (pressedVal == 0) {
-    try {
-      HomePage.set(aURL);
-    } catch (ex) {
-      dump("Failed to set the home page.\n" + ex + "\n");
-    }
+    HomePage.set(aURL).catch(Cu.reportError);
   }
 }
 
@@ -5410,12 +5465,23 @@ var XULBrowserWindow = {
     elt.label = tooltip;
     elt.style.direction = direction;
 
-    elt.openPopupAtScreen(
-      browser.screenX + x,
-      browser.screenY + y,
-      false,
-      null
-    );
+    let screenX;
+    let screenY;
+
+    if (browser instanceof XULElement) {
+      // XUL element such as <browser> has the `screenX` and `screenY` fields.
+      // https://searchfox.org/mozilla-central/source/dom/webidl/XULElement.webidl
+      screenX = browser.screenX;
+      screenY = browser.screenY;
+    } else {
+      // In case of HTML element such as <iframe> which RDM uses,
+      // calculate the coordinate manually since it does not have the fields.
+      const componentBounds = browser.getBoundingClientRect();
+      screenX = window.screenX + componentBounds.x;
+      screenY = window.screenY + componentBounds.y;
+    }
+
+    elt.openPopupAtScreen(screenX + x, screenY + y, false, null);
   },
 
   hideTooltip() {
@@ -5441,7 +5507,7 @@ var XULBrowserWindow = {
   shouldLoadURI(
     aDocShell,
     aURI,
-    aReferrer,
+    aReferrerInfo,
     aHasPostData,
     aTriggeringPrincipal,
     aCsp
@@ -5463,14 +5529,14 @@ var XULBrowserWindow = {
       return true;
     }
 
-    if (!E10SUtils.shouldLoadURI(aDocShell, aURI, aReferrer, aHasPostData)) {
+    if (!E10SUtils.shouldLoadURI(aDocShell, aURI, aHasPostData)) {
       // XXX: Do we want to complain if we have post data but are still
       // redirecting the load? Perhaps a telemetry probe? Theoretically we
       // shouldn't do this, as it throws out data. See bug 1348018.
       E10SUtils.redirectLoad(
         aDocShell,
         aURI,
-        aReferrer,
+        aReferrerInfo,
         aTriggeringPrincipal,
         false,
         null,
@@ -5993,6 +6059,7 @@ var CombinedStopReload = {
         if (event.button == 0 && !this.stop.disabled) {
           this._stopClicked = true;
         }
+        break;
       case "animationend": {
         if (
           event.target.classList.contains("toolbarbutton-animatable-image") &&
@@ -6289,7 +6356,7 @@ var TabsProgressListener = {
 
     let tab = gBrowser.getTabForBrowser(aBrowser);
     if (tab && tab._sharingState) {
-      gBrowser.setBrowserSharing(aBrowser, {});
+      gBrowser.resetBrowserSharing(aBrowser);
     }
     webrtcUI.forgetStreamsFromBrowser(aBrowser);
 
@@ -6427,7 +6494,7 @@ nsBrowserAccess.prototype = {
       throw Cr.NS_ERROR_FAILURE;
     }
 
-    var newWindow = null;
+    var browsingContext = null;
     var isExternal = !!(aFlags & Ci.nsIBrowserDOMWindow.OPEN_EXTERNAL);
 
     if (aOpener && isExternal) {
@@ -6491,7 +6558,7 @@ nsBrowserAccess.prototype = {
         // Pass all params to openDialog to ensure that "url" isn't passed through
         // loadOneOrMoreURIs, which splits based on "|"
         try {
-          newWindow = openDialog(
+          openDialog(
             AppConstants.BROWSER_CHROME_URL,
             "_blank",
             features,
@@ -6508,6 +6575,17 @@ nsBrowserAccess.prototype = {
             null,
             aCsp
           );
+          // At this point, the new browser window is just starting to load, and
+          // hasn't created the content <browser> that we should return. So we
+          // can't actually return a valid BrowsingContext for this load without
+          // spinning the event loop.
+          //
+          // Fortunately, no current callers of this API who pass OPEN_NEWWINDOW
+          // actually use the return value, so we're safe returning null for
+          // now.
+          //
+          // Ideally this should be fixed.
+          browsingContext = null;
         } catch (ex) {
           Cu.reportError(ex);
         }
@@ -6541,12 +6619,13 @@ nsBrowserAccess.prototype = {
           aCsp
         );
         if (browser) {
-          newWindow = browser.contentWindow;
+          browsingContext = browser.browsingContext;
         }
         break;
       default:
         // OPEN_CURRENTWINDOW or an illegal value
-        newWindow = window.content;
+        browsingContext =
+          window.content && BrowsingContext.getFromWindow(window.content);
         if (aURI) {
           let loadflags = isExternal
             ? Ci.nsIWebNavigation.LOAD_FLAGS_FROM_EXTERNAL
@@ -6564,7 +6643,7 @@ nsBrowserAccess.prototype = {
           window.focus();
         }
     }
-    return newWindow;
+    return browsingContext;
   },
 
   createContentWindowInFrame: function browser_createContentWindowInFrame(

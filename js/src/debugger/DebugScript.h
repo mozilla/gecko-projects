@@ -7,9 +7,20 @@
 #ifndef dbg_DebugScript_h
 #define dbg_DebugScript_h
 
-#include "debugger/Debugger.h"
+#include <stddef.h>  // for offsetof
+#include <stddef.h>  // for size_t
+#include <stdint.h>  // for uint32_t
+
+#include "jsapi.h"
+
+namespace JS {
+class Realm;
+}
 
 namespace js {
+
+class BreakpointSite;
+class Debugger;
 
 // DebugScript manages the internal debugger state for a JSScript, which may be
 // associated with multiple Debuggers.
@@ -71,13 +82,13 @@ class DebugScript {
   static BreakpointSite* getOrCreateBreakpointSite(JSContext* cx,
                                                    JSScript* script,
                                                    jsbytecode* pc);
-  static void destroyBreakpointSite(FreeOp* fop, JSScript* script,
+  static void destroyBreakpointSite(JSFreeOp* fop, JSScript* script,
                                     jsbytecode* pc);
 
-  static void clearBreakpointsIn(FreeOp* fop, Realm* realm,
-                                 Debugger* dbg, JSObject* handler);
-  static void clearBreakpointsIn(FreeOp* fop, JSScript* script,
-                                 Debugger* dbg, JSObject* handler);
+  static void clearBreakpointsIn(JSFreeOp* fop, JS::Realm* realm, Debugger* dbg,
+                                 JSObject* handler);
+  static void clearBreakpointsIn(JSFreeOp* fop, JSScript* script, Debugger* dbg,
+                                 JSObject* handler);
 
 #ifdef DEBUG
   static uint32_t getStepperCount(JSScript* script);
@@ -90,7 +101,7 @@ class DebugScript {
    * Only incrementing is fallible, as it could allocate a DebugScript.
    */
   static bool incrementStepperCount(JSContext* cx, JSScript* script);
-  static void decrementStepperCount(FreeOp* fop, JSScript* script);
+  static void decrementStepperCount(JSFreeOp* fop, JSScript* script);
 
   /*
    * Increment or decrement the generator observer count. If the count is
@@ -99,7 +110,7 @@ class DebugScript {
    * Only incrementing is fallible, as it could allocate a DebugScript.
    */
   static bool incrementGeneratorObserverCount(JSContext* cx, JSScript* script);
-  static void decrementGeneratorObserverCount(FreeOp* fop, JSScript* script);
+  static void decrementGeneratorObserverCount(JSFreeOp* fop, JSScript* script);
 };
 
 } /* namespace js */

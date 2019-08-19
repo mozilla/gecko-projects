@@ -56,13 +56,17 @@ class WebSocketsPanel extends Component {
 
     this.searchboxRef = createRef();
     this.clearFilterText = this.clearFilterText.bind(this);
+    this.handleContainerElement = this.handleContainerElement.bind(this);
+    this.state = {
+      startPanelContainer: null,
+    };
   }
 
-  componentDidUpdate(nextProps) {
+  componentDidUpdate(prevProps) {
     const { selectedFrameVisible, openFrameDetailsTab, channelId } = this.props;
 
     // If a new WebSocket connection is selected, clear the filter text
-    if (channelId !== nextProps.channelId) {
+    if (channelId !== prevProps.channelId) {
       this.clearFilterText();
     }
 
@@ -72,6 +76,9 @@ class WebSocketsPanel extends Component {
   }
 
   componentWillUnmount() {
+    const { openFrameDetailsTab } = this.props;
+    openFrameDetailsTab(false);
+
     const { clientHeight } = findDOMNode(this.refs.endPanel) || {};
 
     if (clientHeight) {
@@ -79,6 +86,16 @@ class WebSocketsPanel extends Component {
         "devtools.netmonitor.ws.payload-preview-height",
         clientHeight
       );
+    }
+  }
+
+  /* Store the parent DOM element of the SplitBox startPanel's element.
+     We need this element for as an option for the IntersectionObserver */
+  handleContainerElement(element) {
+    if (!this.state.startPanelContainer) {
+      this.setState({
+        startPanelContainer: element,
+      });
     }
   }
 
@@ -92,6 +109,9 @@ class WebSocketsPanel extends Component {
   render() {
     const { frameDetailsOpen, connector, selectedFrame } = this.props;
 
+    const searchboxRef = this.searchboxRef;
+    const startPanelContainer = this.state.startPanelContainer;
+
     const initialHeight = Services.prefs.getIntPref(
       "devtools.netmonitor.ws.payload-preview-height"
     );
@@ -99,7 +119,7 @@ class WebSocketsPanel extends Component {
     return div(
       { className: "monitor-panel" },
       Toolbar({
-        searchboxRef: this.searchboxRef,
+        searchboxRef,
       }),
       SplitBox({
         className: "devtools-responsive-container",
@@ -107,7 +127,11 @@ class WebSocketsPanel extends Component {
         minSize: "50px",
         maxSize: "80%",
         splitterSize: frameDetailsOpen ? 1 : 0,
-        startPanel: FrameListContent({ connector }),
+        onSelectContainerElement: this.handleContainerElement,
+        startPanel: FrameListContent({
+          connector,
+          startPanelContainer,
+        }),
         endPanel:
           frameDetailsOpen &&
           FramePayload({

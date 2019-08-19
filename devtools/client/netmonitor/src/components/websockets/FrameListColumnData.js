@@ -7,7 +7,6 @@
 const { Component } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
-const { getFramePayload } = require("../../utils/request-utils");
 const { L10N } = require("../../utils/l10n");
 
 /**
@@ -17,54 +16,28 @@ class FrameListColumnData extends Component {
   static get propTypes() {
     return {
       item: PropTypes.object.isRequired,
-      index: PropTypes.number.isRequired,
       connector: PropTypes.object.isRequired,
     };
   }
 
-  constructor(props) {
-    super(props);
-
-    this.state = {
-      payload: "",
-    };
-  }
-
-  componentDidMount() {
-    const { item, connector } = this.props;
-    getFramePayload(item.payload, connector.getLongString).then(payload => {
-      this.setState({
-        payload,
-      });
-    });
-  }
-
-  componentWillReceiveProps(nextProps) {
-    const { item, connector } = nextProps;
-    getFramePayload(item.payload, connector.getLongString).then(payload => {
-      this.setState({
-        payload,
-      });
-    });
-  }
-
   render() {
-    const { index } = this.props;
-    const { type } = this.props.item;
+    const { type, payload } = this.props.item;
     const typeLabel = L10N.getStr(`netmonitor.ws.type.${type}`);
+
+    // If payload is a LongStringActor object, we show the first 1000 characters
+    const displayedPayload = payload.initial ? payload.initial : payload;
 
     return dom.td(
       {
-        key: index,
         className: "ws-frames-list-column ws-frames-list-payload",
-        title: typeLabel + " " + this.state.payload,
+        title: typeLabel + " " + displayedPayload,
       },
       dom.img({
         alt: typeLabel,
         className: `ws-frames-list-type-icon ws-frames-list-type-icon-${type}`,
         src: `chrome://devtools/content/netmonitor/src/assets/icons/arrow-up.svg`,
       }),
-      " " + this.state.payload
+      " " + displayedPayload
     );
   }
 }

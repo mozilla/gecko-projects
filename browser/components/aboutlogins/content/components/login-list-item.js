@@ -10,15 +10,20 @@
  */
 export default class LoginListItemFactory {
   static create(login) {
-    let loginListItemTemplate = document.querySelector(
-      "#login-list-item-template"
-    );
-    let loginListItem = loginListItemTemplate.content.cloneNode(true);
-    let listItem = loginListItem.querySelector("li");
-    let title = loginListItem.querySelector(".title");
-    let username = loginListItem.querySelector(".username");
+    let template = document.querySelector("#login-list-item-template");
+    let fragment = template.content.cloneNode(true);
+    let listItem = fragment.firstElementChild;
 
-    listItem.setAttribute("role", "option");
+    LoginListItemFactory.update(listItem, login);
+
+    return listItem;
+  }
+
+  static update(listItem, login) {
+    let title = listItem.querySelector(".title");
+    let username = listItem.querySelector(".username");
+    let favicon = listItem.querySelector(".favicon");
+    let faviconWrapper = listItem.querySelector(".favicon-wrapper");
 
     if (!login.guid) {
       listItem.id = "new-login-list-item";
@@ -27,17 +32,24 @@ export default class LoginListItemFactory {
         username,
         "login-list-item-subtitle-new-login"
       );
-      return listItem;
+      return;
     }
 
     // Prepend the ID with a string since IDs must not begin with a number.
-    listItem.id = "lli-" + login.guid;
-    listItem.dataset.guid = login.guid;
-    listItem._login = login;
-    title.textContent = login.title;
-    if (login.username.trim()) {
-      username.removeAttribute("data-l10n-id");
-      username.textContent = login.username.trim();
+    if (!listItem.id) {
+      listItem.id = "lli-" + login.guid;
+      listItem.dataset.guid = login.guid;
+    }
+    if (title.textContent != login.title) {
+      title.textContent = login.title;
+    }
+
+    let trimmedUsernameValue = login.username.trim();
+    if (trimmedUsernameValue) {
+      if (username.textContent != trimmedUsernameValue) {
+        username.removeAttribute("data-l10n-id");
+        username.textContent = trimmedUsernameValue;
+      }
     } else {
       document.l10n.setAttributes(
         username,
@@ -45,6 +57,12 @@ export default class LoginListItemFactory {
       );
     }
 
-    return listItem;
+    if (login.faviconDataURI) {
+      faviconWrapper.classList.add("hide-default-favicon");
+      favicon.src = login.faviconDataURI;
+      document.l10n.setAttributes(favicon, "login-favicon", {
+        title: login.title,
+      });
+    }
   }
 }

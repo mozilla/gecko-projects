@@ -905,7 +905,11 @@ const browsingContextTargetPrototype = {
   _destroyThreadActor() {
     this.threadActor.exit();
     this.threadActor = null;
-    this._sources = null;
+
+    if (this._sources) {
+      this._sources.destroy();
+      this._sources = null;
+    }
   },
 
   /**
@@ -1135,6 +1139,9 @@ const browsingContextTargetPrototype = {
         options.serviceWorkersTestingEnabled
       );
     }
+    if (typeof options.restoreFocus == "boolean") {
+      this._restoreFocus = options.restoreFocus;
+    }
 
     // Reload if:
     //  - there's an explicit `performReload` flag and it's true
@@ -1157,6 +1164,9 @@ const browsingContextTargetPrototype = {
     this._setCacheDisabled(false);
     this._setServiceWorkersTestingEnabled(false);
     this._setPaintFlashingEnabled(false);
+    if (this._restoreFocus) {
+      this.window.focus();
+    }
   },
 
   /**
@@ -1258,33 +1268,6 @@ const browsingContextTargetPrototype = {
     return windowUtils.serviceWorkersTestingEnabled;
   },
 
-  /**
-   * Prepare to enter a nested event loop by disabling debuggee events.
-   */
-  preNest() {
-    if (!this.window) {
-      // The browsing context is already closed.
-      return;
-    }
-    const windowUtils = this.window.windowUtils;
-
-    windowUtils.suppressEventHandling(true);
-    windowUtils.suspendTimeouts();
-  },
-
-  /**
-   * Prepare to exit a nested event loop by enabling debuggee events.
-   */
-  postNest(nestData) {
-    if (!this.window) {
-      // The browsing context is already closed.
-      return;
-    }
-    const windowUtils = this.window.windowUtils;
-    windowUtils.resumeTimeouts();
-    windowUtils.suppressEventHandling(false);
-  },
-
   _changeTopLevelDocument(window) {
     // Fake a will-navigate on the previous document
     // to let a chance to unregister it
@@ -1304,7 +1287,7 @@ const browsingContextTargetPrototype = {
       }
 
       // Then fake window-ready and navigate on the given document
-      this._windowReady(window, true);
+      this._windowReady(window, { isFrameSwitching: true });
       DevToolsUtils.executeSoon(() => {
         this._navigate(window, true);
       });
@@ -1332,7 +1315,7 @@ const browsingContextTargetPrototype = {
    * debugging, which may have been disabled temporarily by the
    * DebuggerProgressListener.
    */
-  _windowReady(window, isFrameSwitching = false) {
+  _windowReady(window, { isFrameSwitching, isBFCache } = {}) {
     const isTopLevel = window == this.window;
 
     // We just reset iframe list on WillNavigate, so we now list all existing
@@ -1344,27 +1327,9 @@ const browsingContextTargetPrototype = {
     this.emit("window-ready", {
       window: window,
       isTopLevel: isTopLevel,
+      isBFCache,
       id: getWindowID(window),
     });
-
-    // TODO bug 997119: move that code to ThreadActor by listening to
-    // window-ready
-    const threadActor = this.threadActor;
-    if (isTopLevel && threadActor.state != "detached") {
-      this.sources.reset();
-      threadActor.clearDebuggees();
-      threadActor.dbg.enable();
-      threadActor.maybePauseOnExceptions();
-      // Update the global no matter if the debugger is on or off,
-      // otherwise the global will be wrong when enabled later.
-      threadActor.global = window;
-    }
-
-    // Refresh the debuggee list when a new window object appears (top window or
-    // iframe).
-    if (threadActor.attached) {
-      threadActor.dbg.addDebuggees();
-    }
   },
 
   _windowDestroyed(window, id = null, isFrozen = false) {
@@ -1417,16 +1382,6 @@ const browsingContextTargetPrototype = {
       return;
     }
 
-    // Proceed normally only if the debuggee is not paused.
-    // TODO bug 997119: move that code to ThreadActor by listening to
-    // will-navigate
-    const threadActor = this.threadActor;
-    if (threadActor.state == "paused") {
-      threadActor.unsafeSynchronize(Promise.resolve(threadActor.doResume()));
-      threadActor.dbg.disable();
-    }
-    threadActor.disableAllBreakpoints();
-
     this.emit("tabNavigated", {
       url: newURI,
       nativeConsoleAPI: true,
@@ -1459,12 +1414,6 @@ const browsingContextTargetPrototype = {
     // (we will only update thread actor on window-ready)
     if (!isTopLevel) {
       return;
-    }
-
-    // TODO bug 997119: move that code to ThreadActor by listening to navigate
-    const threadActor = this.threadActor;
-    if (threadActor.state == "running") {
-      threadActor.dbg.enable();
     }
 
     this.emit("tabNavigated", {
@@ -1658,20 +1607,22 @@ DebuggerProgressListener.prototype = {
     const window = evt.target.defaultView;
     const innerID = getWindowID(window);
 
-    // This method is alled on DOMWindowCreated and pageshow
-    // The common scenario is DOMWindowCreated, which is fired when the document
-    // loads. But we are to listen for pageshow in order to handle BFCache.
-    // When a page does into the BFCache, a pagehide event is fired with persisted=true
-    // but it doesn't necessarely mean persisted will be true for the pageshow
-    // event fired when the page is reloaded from the BFCache (see bug 1378133)
-    // So just check if we already know this window and accept any that isn't known yet
+    // This handler is called for two events: "DOMWindowCreated" and "pageshow".
+    // Bail out if we already processed this window.
     if (this._knownWindowIDs.has(innerID)) {
       return;
     }
-
-    this._targetActor._windowReady(window);
-
     this._knownWindowIDs.set(innerID, window);
+
+    // For a regular page navigation, "DOMWindowCreated" is fired before
+    // "pageshow". If the current event is "pageshow" but we have not processed
+    // the window yet, it means this is a BF cache navigation. In theory,
+    // `event.persisted` should be set for BF cache navigation events, but it is
+    // not always available, so we fallback on checking if "pageshow" is the
+    // first event received for a given window (see Bug 1378133).
+    const isBFCache = evt.type == "pageshow";
+
+    this._targetActor._windowReady(window, { isBFCache });
   }, "DebuggerProgressListener.prototype.onWindowCreated"),
 
   onWindowHidden: DevToolsUtils.makeInfallible(function(evt) {

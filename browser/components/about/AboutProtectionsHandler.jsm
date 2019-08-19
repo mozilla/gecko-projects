@@ -38,6 +38,7 @@ let idToTextMap = new Map([
   [Ci.nsITrackingDBService.TRACKING_COOKIES_ID, "cookie"],
   [Ci.nsITrackingDBService.CRYPTOMINERS_ID, "cryptominer"],
   [Ci.nsITrackingDBService.FINGERPRINTERS_ID, "fingerprinter"],
+  [Ci.nsITrackingDBService.SOCIAL_ID, "social"],
 ]);
 
 const MONITOR_API_ENDPOINT = "https://monitor.firefox.com/user/breach-stats";
@@ -78,6 +79,10 @@ var AboutProtectionsHandler = {
     for (let topic of this._topics) {
       this.pageListener.addMessageListener(topic, this.receiveMessage);
     }
+    Services.telemetry.setEventRecordingEnabled(
+      "security.ui.protections",
+      true
+    );
     this._inited = true;
   },
 
@@ -157,15 +162,27 @@ var AboutProtectionsHandler = {
    */
   async getLoginData() {
     let syncedDevices = [];
-    const hasFxa = await fxAccounts.accountStatus();
+    let hasFxa = false;
 
-    if (hasFxa) {
-      syncedDevices = await fxAccounts.getDeviceList();
+    try {
+      if ((hasFxa = await fxAccounts.accountStatus())) {
+        syncedDevices = await fxAccounts.getDeviceList();
+      }
+    } catch (e) {
+      Cu.reportError("There was an error fetching login data: ", e.message);
     }
+
+    const userFacingLogins =
+      Services.logins.countLogins("", "", "") -
+      Services.logins.countLogins(
+        "chrome://FirefoxAccounts",
+        null,
+        "Firefox Accounts credentials"
+      );
 
     return {
       hasFxa,
-      numLogins: Services.logins.countLogins("", "", ""),
+      numLogins: userFacingLogins,
       numSyncedDevices: syncedDevices.length,
     };
   },
@@ -185,57 +202,50 @@ var AboutProtectionsHandler = {
     let monitorData = {};
     let potentiallyBreachedLogins = null;
     let userEmail = null;
-    const hasFxa = await fxAccounts.accountStatus();
+    let token = await this.getMonitorScopedOAuthToken();
 
-    if (hasFxa) {
-      let token = await this.getMonitorScopedOAuthToken();
-
-      if (!token) {
-        return { error: true };
-      }
-
-      try {
+    try {
+      if ((await fxAccounts.accountStatus()) && token) {
         monitorData = await this.fetchUserBreachStats(token);
-      } catch (e) {
-        Cu.reportError(e.message);
-        // If the user's OAuth token is invalid, we clear the cached token and refetch
-        // again. If OAuth token is invalid after the second fetch, then the monitor UI
-        // will simply show the "no logins" UI version.
-        if (e.message === INVALID_OAUTH_TOKEN) {
-          await fxAccounts.removeCachedOAuthToken({ token });
-          token = await await this.getMonitorScopedOAuthToken();
 
-          try {
-            monitorData = await this.fetchUserBreachStats(token);
-          } catch (_) {
-            Cu.reportError(e.message);
-            monitorData.errorMessage = INVALID_OAUTH_TOKEN;
-          }
-        } else {
-          monitorData.errorMessage = e.message;
+        // Get the stats for number of potentially breached Lockwise passwords if no master
+        // password is set.
+        if (!LoginHelper.isMasterPasswordSet()) {
+          const logins = await LoginHelper.getAllUserFacingLogins();
+          potentiallyBreachedLogins = await LoginHelper.getBreachesForLogins(
+            logins
+          );
         }
+      } else {
+        // If no account exists, then the user is not logged in with an fxAccount.
+        monitorData = {
+          errorMessage: "No account",
+        };
       }
+    } catch (e) {
+      Cu.reportError(e.message);
+      monitorData.errorMessage = e.message;
 
-      // Get the stats for number of potentially breached Lockwise passwords if no master
-      // password is set.
-      if (!LoginHelper.isMasterPasswordSet()) {
-        const logins = await LoginHelper.getAllUserFacingLogins();
-        potentiallyBreachedLogins = await LoginHelper.getBreachesForLogins(
-          logins
-        );
+      // If the user's OAuth token is invalid, we clear the cached token and refetch
+      // again. If OAuth token is invalid after the second fetch, then the monitor UI
+      // will simply show the "no logins" UI version.
+      if (e.message === INVALID_OAUTH_TOKEN) {
+        await fxAccounts.removeCachedOAuthToken({ token });
+        token = await this.getMonitorScopedOAuthToken();
 
-        // If the user isn't subscribed to Monitor, then send back their email so the
-        // protections report can direct them to the proper OAuth flow on Monitor.
-        if (monitorData.errorMessage) {
-          const { email } = await fxAccounts.getSignedInUser();
-          userEmail = email;
+        try {
+          monitorData = await this.fetchUserBreachStats(token);
+        } catch (_) {
+          Cu.reportError(e.message);
         }
+      } else if (e.message === USER_UNSUBSCRIBED_TO_MONITOR) {
+        // Send back user's email so the protections report can direct them to the proper
+        // OAuth flow on Monitor.
+        const { email } = await fxAccounts.getSignedInUser();
+        userEmail = email;
+      } else {
+        monitorData.errorMessage = e.message || "An error ocurred.";
       }
-    } else {
-      // If no account exists, then the user is not logged in with an fxAccount.
-      monitorData = {
-        errorMessage: "No account",
-      };
     }
 
     return {
@@ -316,10 +326,27 @@ var AboutProtectionsHandler = {
           if (largest < dataToSend[timestamp].total) {
             largest = dataToSend[timestamp].total;
           }
-          dataToSend.largest = largest;
         }
+        dataToSend.largest = largest;
         dataToSend.earliestDate = earliestDate;
         dataToSend.sumEvents = sumEvents;
+
+        let weekdays = Services.intl.getDisplayNames(undefined, {
+          style: "short",
+          keys: [
+            "dates/gregorian/weekdays/sunday",
+            "dates/gregorian/weekdays/monday",
+            "dates/gregorian/weekdays/tuesday",
+            "dates/gregorian/weekdays/wednesday",
+            "dates/gregorian/weekdays/thursday",
+            "dates/gregorian/weekdays/friday",
+            "dates/gregorian/weekdays/saturday",
+            "dates/gregorian/weekdays/sunday",
+          ],
+        });
+        weekdays = Object.values(weekdays.values);
+        dataToSend.weekdays = weekdays;
+
         this.sendMessage(
           aMessage.target,
           "SendContentBlockingRecords",

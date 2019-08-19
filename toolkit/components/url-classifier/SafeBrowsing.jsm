@@ -174,10 +174,8 @@ const FEATURES = [
       "urlclassifier.features.fingerprinting.annotate.whitelistTables",
     ],
     enabled() {
-      return Services.prefs.getBoolPref(
-        "privacy.trackingprotection.fingerprinting.annotate.enabled",
-        false
-      );
+      // Annotation features are enabled by default.
+      return true;
     },
     update() {
       return Services.prefs.getBoolPref(
@@ -212,10 +210,8 @@ const FEATURES = [
       "urlclassifier.features.cryptomining.annotate.whitelistTables",
     ],
     enabled() {
-      return Services.prefs.getBoolPref(
-        "privacy.trackingprotection.annotate.cryptomining.enabled",
-        false
-      );
+      // Annotation features are enabled by default.
+      return true;
     },
     update() {
       return Services.prefs.getBoolPref(
@@ -250,10 +246,8 @@ const FEATURES = [
       "urlclassifier.features.socialtracking.annotate.whitelistTables",
     ],
     enabled() {
-      return Services.prefs.getBoolPref(
-        "privacy.trackingprotection.socialtracking.annotate.enabled",
-        false
-      );
+      // Annotation features are enabled by default.
+      return true;
     },
     update() {
       return Services.prefs.getBoolPref(

@@ -275,14 +275,16 @@ nsIFrame::LogicalSides nsTableRowGroupFrame::GetLogicalSkipSides(
 // Position and size aKidFrame and update our reflow input.
 void nsTableRowGroupFrame::PlaceChild(
     nsPresContext* aPresContext, TableRowGroupReflowInput& aReflowInput,
-    nsIFrame* aKidFrame, WritingMode aWM, const LogicalPoint& aKidPosition,
-    const nsSize& aContainerSize, ReflowOutput& aDesiredSize,
-    const nsRect& aOriginalKidRect, const nsRect& aOriginalKidVisualOverflow) {
+    nsIFrame* aKidFrame, const ReflowInput& aKidReflowInput, WritingMode aWM,
+    const LogicalPoint& aKidPosition, const nsSize& aContainerSize,
+    ReflowOutput& aDesiredSize, const nsRect& aOriginalKidRect,
+    const nsRect& aOriginalKidVisualOverflow) {
   bool isFirstReflow = aKidFrame->HasAnyStateBits(NS_FRAME_FIRST_REFLOW);
 
   // Place and size the child
-  FinishReflowChild(aKidFrame, aPresContext, aDesiredSize, nullptr, aWM,
-                    aKidPosition, aContainerSize, 0);
+  FinishReflowChild(aKidFrame, aPresContext, aDesiredSize, &aKidReflowInput,
+                    aWM, aKidPosition, aContainerSize,
+                    ReflowChildFlags::ApplyRelativePositioning);
 
   nsTableFrame* tableFrame = GetTableFrame();
   if (tableFrame->IsBorderCollapse()) {
@@ -406,12 +408,12 @@ void nsTableRowGroupFrame::ReflowChildren(
 
       LogicalPoint kidPosition(wm, 0, aReflowInput.bCoord);
       ReflowChild(kidFrame, aPresContext, desiredSize, kidReflowInput, wm,
-                  kidPosition, containerSize, 0, aStatus);
-      kidReflowInput.ApplyRelativePositioning(&kidPosition, containerSize);
+                  kidPosition, containerSize, ReflowChildFlags::Default,
+                  aStatus);
 
       // Place the child
-      PlaceChild(aPresContext, aReflowInput, kidFrame, wm, kidPosition,
-                 containerSize, desiredSize,
+      PlaceChild(aPresContext, aReflowInput, kidFrame, kidReflowInput, wm,
+                 kidPosition, containerSize, desiredSize,
                  oldKidRect.GetPhysicalRect(wm, containerSize),
                  oldKidVisualOverflow);
       aReflowInput.bCoord += cellSpacingB;
@@ -1159,7 +1161,7 @@ nsresult nsTableRowGroupFrame::SplitRowGroup(nsPresContext* aPresContext,
         // Reflow the cell with the constrained height. A cell with rowspan >1
         // will get this reflow later during SplitSpanningCells.
         ReflowChild(rowFrame, aPresContext, rowMetrics, rowReflowInput, 0, 0,
-                    NS_FRAME_NO_MOVE_FRAME, aStatus);
+                    ReflowChildFlags::NoMoveFrame, aStatus);
         rowFrame->SetSize(nsSize(rowMetrics.Width(), rowMetrics.Height()));
         rowFrame->DidReflow(aPresContext, nullptr);
         rowFrame->DidResize();

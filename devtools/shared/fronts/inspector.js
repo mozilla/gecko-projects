@@ -1,18 +1,12 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 "use strict";
 
+const Services = require("Services");
+const defer = require("devtools/shared/defer");
 const Telemetry = require("devtools/client/shared/telemetry");
-const telemetry = new Telemetry();
-const { NodePicker } = require("devtools/shared/fronts/inspector/node-picker");
-const TELEMETRY_EYEDROPPER_OPENED = "DEVTOOLS_EYEDROPPER_OPENED_COUNT";
-const TELEMETRY_EYEDROPPER_OPENED_MENU =
-  "DEVTOOLS_MENU_EYEDROPPER_OPENED_COUNT";
-const SHOW_ALL_ANONYMOUS_CONTENT_PREF =
-  "devtools.inspector.showAllAnonymousContent";
-const SHOW_UA_SHADOW_ROOTS_PREF = "devtools.inspector.showUserAgentShadowRoots";
-
 const {
   FrontClassWithSpec,
   types,
@@ -23,20 +17,21 @@ const {
   walkerSpec,
 } = require("devtools/shared/specs/inspector");
 
-const Services = require("Services");
-const defer = require("devtools/shared/defer");
 loader.lazyRequireGetter(
   this,
   "nodeConstants",
   "devtools/shared/dom-node-constants"
 );
-loader.lazyRequireGetter(
-  this,
-  "Selection",
-  "devtools/client/framework/selection",
-  true
-);
 loader.lazyRequireGetter(this, "flags", "devtools/shared/flags");
+
+const TELEMETRY_EYEDROPPER_OPENED = "DEVTOOLS_EYEDROPPER_OPENED_COUNT";
+const TELEMETRY_EYEDROPPER_OPENED_MENU =
+  "DEVTOOLS_MENU_EYEDROPPER_OPENED_COUNT";
+const SHOW_ALL_ANONYMOUS_CONTENT_PREF =
+  "devtools.inspector.showAllAnonymousContent";
+const SHOW_UA_SHADOW_ROOTS_PREF = "devtools.inspector.showUserAgentShadowRoots";
+
+const telemetry = new Telemetry();
 
 /**
  * Client side of the DOM walker.
@@ -52,8 +47,8 @@ class WalkerFront extends FrontClassWithSpec(walkerSpec) {
     });
   }
 
-  constructor(client) {
-    super(client);
+  constructor(client, targetFront, parentFront) {
+    super(client, targetFront, parentFront);
     this._createRootNodePromise();
     this._orphaned = new Set();
     this._retainedOrphans = new Set();
@@ -452,6 +447,25 @@ class WalkerFront extends FrontClassWithSpec(walkerSpec) {
       nextSibling: nextSibling,
     };
   }
+
+  async children(node, options) {
+    if (!node.remoteFrame) {
+      return super.children(node, options);
+    }
+    // First get the target actor form of this remote frame element
+    const target = await node.connectToRemoteFrame();
+    // Then get an inspector front, and grab its walker front
+    const walker = (await target.getFront("inspector")).walker;
+    // Finally retrieve the NodeFront of the remote frame's document
+    const documentNode = await walker.getRootNode();
+
+    // And return the same kind of response `walker.children` returns
+    return {
+      nodes: [documentNode],
+      hasFirst: true,
+      hasLast: true,
+    };
+  }
 }
 
 exports.WalkerFront = WalkerFront;
@@ -462,8 +476,8 @@ registerFront(WalkerFront);
  * inspector-related actors, including the walker.
  */
 class InspectorFront extends FrontClassWithSpec(inspectorSpec) {
-  constructor(client) {
-    super(client);
+  constructor(client, targetFront, parentFront) {
+    super(client, targetFront, parentFront);
 
     this._client = client;
     this._highlighters = new Map();
@@ -475,13 +489,6 @@ class InspectorFront extends FrontClassWithSpec(inspectorSpec) {
   // async initialization
   async initialize() {
     await Promise.all([this._getWalker(), this._getHighlighter()]);
-
-    this.selection = new Selection(this.walker);
-    this.nodePicker = new NodePicker(
-      this.highlighter,
-      this.walker,
-      this.selection
-    );
   }
 
   async _getWalker() {
@@ -507,9 +514,6 @@ class InspectorFront extends FrontClassWithSpec(inspectorSpec) {
   }
 
   destroy() {
-    // Selection isn't a Front and so isn't managed by InspectorFront
-    // and has to be destroyed manually
-    this.selection.destroy();
     // Highlighter fronts are managed by InspectorFront and so will be
     // automatically destroyed. But we have to clear the `_highlighters`
     // Map as well as explicitly call `finalize` request on all of them.

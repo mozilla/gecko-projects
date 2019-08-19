@@ -24,6 +24,7 @@
 #include "builtin/intl/Collator.h"
 #include "builtin/intl/DateTimeFormat.h"
 #include "builtin/intl/IntlObject.h"
+#include "builtin/intl/Locale.h"
 #include "builtin/intl/NumberFormat.h"
 #include "builtin/intl/PluralRules.h"
 #include "builtin/intl/RelativeTimeFormat.h"
@@ -34,6 +35,7 @@
 #include "builtin/Reflect.h"
 #include "builtin/RegExp.h"
 #include "builtin/SelfHostingDefines.h"
+#include "builtin/String.h"
 #include "builtin/TypedObject.h"
 #include "builtin/WeakMapObject.h"
 #include "frontend/BytecodeCompiler.h"  // js::frontend::CreateScriptSourceObject
@@ -974,7 +976,7 @@ static bool intrinsic_SetCanonicalName(JSContext* cx, unsigned argc,
   }
 
   // _SetCanonicalName can only be called on top-level function declarations.
-  MOZ_ASSERT(fun->kind() == JSFunction::NormalFunction);
+  MOZ_ASSERT(fun->kind() == FunctionFlags::NormalFunction);
   MOZ_ASSERT(!fun->isLambda());
 
   // It's an error to call _SetCanonicalName multiple times.
@@ -2181,20 +2183,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
                     StringToLowerCase),
     JS_INLINABLE_FN("std_String_toUpperCase", str_toUpperCase, 0, 0,
                     StringToUpperCase),
-
-    JS_INLINABLE_FN("std_String_charAt", str_charAt, 1, 0, StringCharAt),
     JS_FN("std_String_endsWith", str_endsWith, 1, 0),
-    JS_FN("std_String_trim", str_trim, 0, 0),
-    JS_FN("std_String_trimStart", str_trimStart, 0, 0),
-    JS_FN("std_String_trimEnd", str_trimEnd, 0, 0),
-#if !EXPOSE_INTL_API
-    JS_FN("std_String_toLocaleLowerCase", str_toLocaleLowerCase, 0, 0),
-    JS_FN("std_String_toLocaleUpperCase", str_toLocaleUpperCase, 0, 0),
-    JS_FN("std_String_localeCompare", str_localeCompare, 1, 0),
-#else
-    JS_FN("std_String_normalize", str_normalize, 0, 0),
-#endif
-    JS_FN("std_String_concat", str_concat, 1, 0),
 
     JS_FN("std_TypedArray_buffer", js::TypedArray_bufferGetter, 1, 0),
 
@@ -2449,7 +2438,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
 #define LOAD_AND_STORE_SCALAR_FN_DECLS(_constant, _type, _name)         \
     JS_FN("Store_" #_name, js::StoreScalar##_type::Func, 3, 0),         \
     JS_FN("Load_" #_name,  js::LoadScalar##_type::Func, 3, 0),
-    JS_FOR_EACH_UNIQUE_SCALAR_TYPE_REPR_CTYPE(LOAD_AND_STORE_SCALAR_FN_DECLS)
+    JS_FOR_EACH_UNIQUE_SCALAR_NUMBER_TYPE_REPR_CTYPE(LOAD_AND_STORE_SCALAR_FN_DECLS)
+    JS_FOR_EACH_SCALAR_BIGINT_TYPE_REPR(LOAD_AND_STORE_SCALAR_FN_DECLS)
 // clang-format on
 #undef LOAD_AND_STORE_SCALAR_FN_DECLS
 
@@ -2502,12 +2492,18 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("intl_FormatRelativeTime", intl_FormatRelativeTime, 4, 0),
     JS_FN("intl_toLocaleLowerCase", intl_toLocaleLowerCase, 2, 0),
     JS_FN("intl_toLocaleUpperCase", intl_toLocaleUpperCase, 2, 0),
+    JS_FN("intl_CreateUninitializedLocale", intl_CreateUninitializedLocale, 0,
+          0),
+    JS_FN("intl_AddLikelySubtags", intl_AddLikelySubtags, 3, 0),
+    JS_FN("intl_RemoveLikelySubtags", intl_RemoveLikelySubtags, 3, 0),
 
     JS_INLINABLE_FN("GuardToCollator", intrinsic_GuardToBuiltin<CollatorObject>,
                     1, 0, IntlGuardToCollator),
     JS_INLINABLE_FN("GuardToDateTimeFormat",
                     intrinsic_GuardToBuiltin<DateTimeFormatObject>, 1, 0,
                     IntlGuardToDateTimeFormat),
+    JS_INLINABLE_FN("GuardToLocale", intrinsic_GuardToBuiltin<LocaleObject>, 1,
+                    0, IntlGuardToLocale),
     JS_INLINABLE_FN("GuardToNumberFormat",
                     intrinsic_GuardToBuiltin<NumberFormatObject>, 1, 0,
                     IntlGuardToNumberFormat),
@@ -2520,6 +2516,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
 
     JS_FN("IsWrappedDateTimeFormat",
           intrinsic_IsWrappedInstanceOfBuiltin<DateTimeFormatObject>, 1, 0),
+    JS_FN("IsWrappedLocale", intrinsic_IsWrappedInstanceOfBuiltin<LocaleObject>,
+          1, 0),
     JS_FN("IsWrappedNumberFormat",
           intrinsic_IsWrappedInstanceOfBuiltin<NumberFormatObject>, 1, 0),
 
@@ -2527,6 +2525,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
           CallNonGenericSelfhostedMethod<Is<CollatorObject>>, 2, 0),
     JS_FN("CallDateTimeFormatMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<DateTimeFormatObject>>, 2, 0),
+    JS_FN("CallLocaleMethodIfWrapped",
+          CallNonGenericSelfhostedMethod<Is<LocaleObject>>, 2, 0),
     JS_FN("CallNumberFormatMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<NumberFormatObject>>, 2, 0),
     JS_FN("CallPluralRulesMethodIfWrapped",
@@ -2639,20 +2639,20 @@ GlobalObject* JSRuntime::createSelfHostingGlobal(JSContext* cx) {
     return nullptr;
   }
 
-  static const ClassOps shgClassOps = {nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       nullptr,
-                                       JS_GlobalObjectTraceHook};
+  static const JSClassOps shgClassOps = {nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         nullptr,
+                                         JS_GlobalObjectTraceHook};
 
-  static const Class shgClass = {"self-hosting-global", JSCLASS_GLOBAL_FLAGS,
-                                 &shgClassOps};
+  static const JSClass shgClass = {"self-hosting-global", JSCLASS_GLOBAL_FLAGS,
+                                   &shgClassOps};
 
   AutoRealmUnchecked ar(cx, realm);
   Rooted<GlobalObject*> shg(cx, GlobalObject::createInternal(cx, &shgClass));
@@ -2991,7 +2991,7 @@ static JSObject* CloneObject(JSContext* cx,
       // Arrow functions use the first extended slot for their lexical |this|
       // value. And methods use the first extended slot for their home-object.
       // We only expect to see normal functions here.
-      MOZ_ASSERT(selfHostedFunction->kind() == JSFunction::NormalFunction);
+      MOZ_ASSERT(selfHostedFunction->kind() == FunctionFlags::NormalFunction);
       js::gc::AllocKind kind = hasName ? gc::AllocKind::FUNCTION_EXTENDED
                                        : selfHostedFunction->getAllocKind();
 
@@ -3121,7 +3121,7 @@ bool JSRuntime::createLazySelfHostedFunctionClone(
     funName = selfHostedFun->explicitName();
   }
 
-  fun.set(NewScriptedFunction(cx, nargs, JSFunction::INTERPRETED, funName,
+  fun.set(NewScriptedFunction(cx, nargs, FunctionFlags::INTERPRETED, funName,
                               proto, gc::AllocKind::FUNCTION_EXTENDED,
                               newKind));
   if (!fun) {
@@ -3177,7 +3177,7 @@ bool JSRuntime::cloneSelfHostedFunctionScript(JSContext* cx,
   MOZ_ASSERT(targetFun->strict(), "Self-hosted builtins must be strict");
 
   // The target function might have been relazified after its flags changed.
-  targetFun->setFlags(targetFun->flags() | sourceFun->flags());
+  targetFun->setFlags(targetFun->flags().toRaw() | sourceFun->flags().toRaw());
   return true;
 }
 

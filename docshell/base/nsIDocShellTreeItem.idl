@@ -79,6 +79,7 @@ interface nsIDocShellTreeItem : nsISupports
 	@deprecated: Use `BrowsingContext::Top()` instead.
 	(NOTE: `BrowsingContext::Top()` will not cross isolation boundaries)
 	*/
+	[binaryname(InProcessRootTreeItem)]
 	readonly attribute nsIDocShellTreeItem rootTreeItem;
 
 	/*
@@ -204,6 +205,14 @@ interface nsIDocShellTreeItem : nsISupports
 	                                      in boolean aSameType,
 	                                      in nsIDocShellTreeItem aRequestor,
 	                                      in nsIDocShellTreeItem aOriginalRequestor);
+
+  /**
+   * BrowsingContext associated with the DocShell.
+   */
+  [binaryname(BrowsingContextXPCOM)]
+  readonly attribute BrowsingContext browsingContext;
+
+  [noscript,notxpcom,nostdcall] BrowsingContext getBrowsingContext();
 
   /**
    * Returns the DOM outer window for the content viewer.

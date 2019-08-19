@@ -13,6 +13,7 @@
 
 #include "jsfriendapi.h"
 
+#include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
 #include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/ScopedICUObject.h"
@@ -45,7 +46,7 @@ using js::intl::INITIAL_CHAR_BUFFER_SIZE;
 using js::intl::SharedIntlData;
 using js::intl::StringsAreEqual;
 
-const ClassOps DateTimeFormatObject::classOps_ = {
+const JSClassOps DateTimeFormatObject::classOps_ = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* enumerate */
@@ -54,7 +55,7 @@ const ClassOps DateTimeFormatObject::classOps_ = {
     nullptr, /* mayResolve */
     DateTimeFormatObject::finalize};
 
-const Class DateTimeFormatObject::class_ = {
+const JSClass DateTimeFormatObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(DateTimeFormatObject::SLOT_COUNT) |
         JSCLASS_FOREGROUND_FINALIZE,
@@ -110,10 +111,9 @@ static bool DateTimeFormat(JSContext* cx, const CallArgs& args, bool construct,
     return false;
   }
 
-  dateTimeFormat->setReservedSlot(DateTimeFormatObject::INTERNALS_SLOT,
-                                  NullValue());
-  dateTimeFormat->setReservedSlot(DateTimeFormatObject::UDATE_FORMAT_SLOT,
-                                  PrivateValue(nullptr));
+  dateTimeFormat->setFixedSlot(DateTimeFormatObject::INTERNALS_SLOT,
+                               NullValue());
+  dateTimeFormat->setDateFormat(nullptr);
 
   RootedValue thisValue(
       cx, construct ? ObjectValue(*dateTimeFormat) : args.thisv());
@@ -156,12 +156,10 @@ bool js::intl_DateTimeFormat(JSContext* cx, unsigned argc, Value* vp) {
   return DateTimeFormat(cx, args, true, DateTimeFormatOptions::Standard);
 }
 
-void js::DateTimeFormatObject::finalize(FreeOp* fop, JSObject* obj) {
+void js::DateTimeFormatObject::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
 
-  const Value& slot = obj->as<DateTimeFormatObject>().getReservedSlot(
-      DateTimeFormatObject::UDATE_FORMAT_SLOT);
-  if (UDateFormat* df = static_cast<UDateFormat*>(slot.toPrivate())) {
+  if (UDateFormat* df = obj->as<DateTimeFormatObject>().getDateFormat()) {
     udat_close(df);
   }
 }
@@ -231,13 +229,8 @@ bool js::intl_DateTimeFormat_availableLocales(JSContext* cx, unsigned argc,
   CallArgs args = CallArgsFromVp(argc, vp);
   MOZ_ASSERT(args.length() == 0);
 
-  RootedValue result(cx);
-  if (!GetAvailableLocales(cx, udat_countAvailable, udat_getAvailable,
-                           &result)) {
-    return false;
-  }
-  args.rval().set(result);
-  return true;
+  return GetAvailableLocales(cx, udat_countAvailable, udat_getAvailable,
+                             args.rval());
 }
 
 static bool DefaultCalendar(JSContext* cx, const UniqueChars& locale,
@@ -292,15 +285,14 @@ bool js::intl_availableCalendars(JSContext* cx, unsigned argc, Value* vp) {
   if (!calendars) {
     return false;
   }
-  uint32_t index = 0;
 
   // We need the default calendar for the locale as the first result.
-  RootedValue element(cx);
-  if (!DefaultCalendar(cx, locale, &element)) {
+  RootedValue defaultCalendar(cx);
+  if (!DefaultCalendar(cx, locale, &defaultCalendar)) {
     return false;
   }
 
-  if (!DefineDataElement(cx, calendars, index++, element)) {
+  if (!NewbornArrayPush(cx, calendars, defaultCalendar)) {
     return false;
   }
 
@@ -339,8 +331,7 @@ bool js::intl_availableCalendars(JSContext* cx, unsigned argc, Value* vp) {
     if (!jscalendar) {
       return false;
     }
-    element = StringValue(jscalendar);
-    if (!DefineDataElement(cx, calendars, index++, element)) {
+    if (!NewbornArrayPush(cx, calendars, StringValue(jscalendar))) {
       return false;
     }
 
@@ -351,8 +342,7 @@ bool js::intl_availableCalendars(JSContext* cx, unsigned argc, Value* vp) {
         if (!jscalendar) {
           return false;
         }
-        element = StringValue(jscalendar);
-        if (!DefineDataElement(cx, calendars, index++, element)) {
+        if (!NewbornArrayPush(cx, calendars, StringValue(jscalendar))) {
           return false;
         }
       }
@@ -782,7 +772,7 @@ static FieldType GetFieldTypeForFormatField(UDateFormatField fieldName) {
 
     case UDAT_FRACTIONAL_SECOND_FIELD:
 #ifdef NIGHTLY_BUILD
-      return &JSAtomState::fractionalSecondDigits;
+      return &JSAtomState::fractionalSecond;
 #else
       // Currently restricted to Nightly.
       return &JSAtomState::unknown;
@@ -862,9 +852,7 @@ static bool intl_FormatToPartsDateTime(JSContext* cx, UDateFormat* df,
 
   size_t lastEndIndex = 0;
 
-  uint32_t partIndex = 0;
   RootedObject singlePart(cx);
-  RootedValue partType(cx);
   RootedValue val(cx);
 
   auto AppendPart = [&](FieldType type, size_t beginIndex, size_t endIndex) {
@@ -873,8 +861,8 @@ static bool intl_FormatToPartsDateTime(JSContext* cx, UDateFormat* df,
       return false;
     }
 
-    partType = StringValue(cx->names().*type);
-    if (!DefineDataProperty(cx, singlePart, cx->names().type, partType)) {
+    val = StringValue(cx->names().*type);
+    if (!DefineDataProperty(cx, singlePart, cx->names().type, val)) {
       return false;
     }
 
@@ -889,13 +877,11 @@ static bool intl_FormatToPartsDateTime(JSContext* cx, UDateFormat* df,
       return false;
     }
 
-    val = ObjectValue(*singlePart);
-    if (!DefineDataElement(cx, partsArray, partIndex, val)) {
+    if (!NewbornArrayPush(cx, partsArray, ObjectValue(*singlePart))) {
       return false;
     }
 
     lastEndIndex = endIndex;
-    partIndex++;
     return true;
   };
 
@@ -964,17 +950,13 @@ bool js::intl_FormatDateTime(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   // Obtain a cached UDateFormat object.
-  void* priv =
-      dateTimeFormat->getReservedSlot(DateTimeFormatObject::UDATE_FORMAT_SLOT)
-          .toPrivate();
-  UDateFormat* df = static_cast<UDateFormat*>(priv);
+  UDateFormat* df = dateTimeFormat->getDateFormat();
   if (!df) {
     df = NewUDateFormat(cx, dateTimeFormat);
     if (!df) {
       return false;
     }
-    dateTimeFormat->setReservedSlot(DateTimeFormatObject::UDATE_FORMAT_SLOT,
-                                    PrivateValue(df));
+    dateTimeFormat->setDateFormat(df);
   }
 
   // Use the UDateFormat to actually format the time stamp.

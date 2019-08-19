@@ -24,6 +24,7 @@ var Services = require("Services");
 var ChromeUtils = require("ChromeUtils");
 var { gDevTools } = require("devtools/client/framework/devtools");
 var EventEmitter = require("devtools/shared/event-emitter");
+const Selection = require("devtools/client/framework/selection");
 var Telemetry = require("devtools/client/shared/telemetry");
 const { getUnicodeUrl } = require("devtools/client/shared/unicode-url");
 var {
@@ -37,12 +38,29 @@ var Startup = Cc["@mozilla.org/devtools/startup-clh;1"].getService(
 const { BrowserLoader } = ChromeUtils.import(
   "resource://devtools/client/shared/browser-loader.js"
 );
+loader.lazyRequireGetter(
+  this,
+  "NodePicker",
+  "devtools/client/inspector/node-picker"
+);
 
 const { LocalizationHelper } = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper(
   "devtools/client/locales/toolbox.properties"
 );
 
+loader.lazyRequireGetter(
+  this,
+  "createToolboxStore",
+  "devtools/client/framework/store",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "registerWalkerListeners",
+  "devtools/client/framework/actions/index",
+  true
+);
 loader.lazyRequireGetter(
   this,
   "AppConstants",
@@ -76,8 +94,8 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "HUDService",
-  "devtools/client/webconsole/hudservice",
+  "BrowserConsoleManager",
+  "devtools/client/webconsole/browser-console-manager",
   true
 );
 loader.lazyRequireGetter(
@@ -118,7 +136,7 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(
   this,
   "ResponsiveUIManager",
-  "devtools/client/responsive.html/manager",
+  "devtools/client/responsive/manager",
   true
 );
 loader.lazyRequireGetter(
@@ -182,6 +200,7 @@ function Toolbox(
   this._target = target;
   this._win = contentWindow;
   this.frameId = frameId;
+  this.selection = new Selection();
   this.telemetry = new Telemetry();
 
   // The session ID is used to determine which telemetry events belong to which
@@ -223,8 +242,6 @@ function Toolbox(
   this._splitConsoleOnKeypress = this._splitConsoleOnKeypress.bind(this);
   this.closeToolbox = this.closeToolbox.bind(this);
   this.destroy = this.destroy.bind(this);
-  this._highlighterReady = this._highlighterReady.bind(this);
-  this._highlighterHidden = this._highlighterHidden.bind(this);
   this._applyCacheSettings = this._applyCacheSettings.bind(this);
   this._applyServiceWorkersTestingSettings = this._applyServiceWorkersTestingSettings.bind(
     this
@@ -243,6 +260,8 @@ function Toolbox(
   this._onPickerStarted = this._onPickerStarted.bind(this);
   this._onPickerStopped = this._onPickerStopped.bind(this);
   this._onPickerCanceled = this._onPickerCanceled.bind(this);
+  this._onPickerPicked = this._onPickerPicked.bind(this);
+  this._onPickerPreviewed = this._onPickerPreviewed.bind(this);
   this._onInspectObject = this._onInspectObject.bind(this);
   this._onNewSelectedNodeFront = this._onNewSelectedNodeFront.bind(this);
   this._onToolSelected = this._onToolSelected.bind(this);
@@ -287,6 +306,8 @@ function Toolbox(
   this.on("host-changed", this._refreshHostTitle);
   this.on("select", this._onToolSelected);
 
+  this.selection.on("new-node-front", this._onNewSelectedNodeFront);
+
   gDevTools.on("tool-registered", this._toolRegistered);
   gDevTools.on("tool-unregistered", this._toolUnregistered);
 
@@ -326,6 +347,13 @@ Toolbox.prototype = {
   _prefs: {
     LAST_TOOL: "devtools.toolbox.selectedTool",
     SIDE_ENABLED: "devtools.toolbox.sideEnabled",
+  },
+
+  get store() {
+    if (!this._store) {
+      this._store = createToolboxStore();
+    }
+    return this._store;
   },
 
   get currentToolId() {
@@ -509,14 +537,6 @@ Toolbox.prototype = {
   },
 
   /**
-   * Get the toolbox's node selection. Note that it may not always have been
-   * initialized first. Use `initInspector()` if needed.
-   */
-  get selection() {
-    return this._selection;
-  },
-
-  /**
    * Get the toggled state of the split console
    */
   get splitConsole() {
@@ -574,7 +594,7 @@ Toolbox.prototype = {
   },
 
   _attachAndResumeThread: async function() {
-    const threadOptions = {
+    const [, threadFront] = await this._target.attachThread({
       autoBlackBox: false,
       ignoreFrameEnvironment: true,
       pauseOnExceptions: Services.prefs.getBoolPref(
@@ -586,8 +606,10 @@ Toolbox.prototype = {
       showOverlayStepButtons: Services.prefs.getBoolPref(
         "devtools.debugger.features.overlay-step-buttons"
       ),
-    };
-    const [, threadFront] = await this._target.attachThread(threadOptions);
+      skipBreakpoints: Services.prefs.getBoolPref(
+        "devtools.debugger.skip-pausing"
+      ),
+    });
 
     try {
       await threadFront.resume();
@@ -763,6 +785,19 @@ Toolbox.prototype = {
 
       await promise.all([splitConsolePromise, framesPromise]);
 
+      // We do not expect the focus to be restored when using about:debugging toolboxes
+      // Otherwise, when reloading the toolbox, the debugged tab will be focused.
+      if (this.hostType !== Toolbox.HostType.PAGE) {
+        // Request the actor to restore the focus to the content page once the
+        // target is detached. This typically happens when the console closes.
+        // We restore the focus as it may have been stolen by the console input.
+        await this.target.reconfigure({
+          options: {
+            restoreFocus: true,
+          },
+        });
+      }
+
       // Lazily connect to the profiler here and don't wait for it to complete,
       // used to intercept console.profile calls before the performance tools are open.
       const performanceFrontConnection = this.initPerformance();
@@ -912,6 +947,20 @@ Toolbox.prototype = {
     if (!this._hostOptions || this._hostOptions.zoom === true) {
       ZoomKeys.register(this.win, this.shortcuts);
     }
+
+    // Monitor shortcuts that are not supported by DevTools, but might be used
+    // by users because they are widely implemented in other developer tools
+    // (example: the command palette triggered via ctrl+P)
+    const wrongShortcuts = ["CmdOrCtrl+P", "CmdOrCtrl+Shift+P"];
+    for (const shortcut of wrongShortcuts) {
+      this.shortcuts.on(shortcut, event => {
+        this.telemetry.recordEvent("wrong_shortcut", "tools", null, {
+          shortcut,
+          tool_id: this.currentToolId,
+          session_id: this.sessionId,
+        });
+      });
+    }
   },
 
   _removeShortcuts: function() {
@@ -948,7 +997,7 @@ Toolbox.prototype = {
       if (id == "browserConsole") {
         // Add key for toggling the browser console from the detached window
         shortcuts.on(electronKey, () => {
-          HUDService.toggleBrowserConsole();
+          BrowserConsoleManager.toggleBrowserConsole();
         });
       } else if (toolId) {
         // KeyShortcuts contain tool-specific and global key shortcuts,
@@ -1723,7 +1772,7 @@ Toolbox.prototype = {
       if (!this.inspectorFront) {
         await this.initInspector();
       }
-      this.inspectorFront.nodePicker.togglePicker(focus);
+      this.nodePicker.togglePicker(focus);
     }
   },
 
@@ -1737,7 +1786,7 @@ Toolbox.prototype = {
       if (currentPanel.cancelPicker) {
         currentPanel.cancelPicker();
       } else {
-        this.inspectorFront.nodePicker.cancel();
+        this.nodePicker.cancel();
       }
       // Stop the console from toggling.
       event.stopImmediatePropagation();
@@ -1748,7 +1797,7 @@ Toolbox.prototype = {
     this.tellRDMAboutPickerState(true);
     this.pickerButton.isChecked = true;
     await this.selectTool("inspector", "inspect_dom");
-    this.on("select", this.inspectorFront.nodePicker.stop);
+    this.on("select", this.nodePicker.stop);
   },
 
   _onPickerStarted: async function() {
@@ -1758,9 +1807,27 @@ Toolbox.prototype = {
 
   _onPickerStopped: function() {
     this.tellRDMAboutPickerState(false);
-    this.off("select", this.inspectorFront.nodePicker.stop);
+    this.off("select", this.nodePicker.stop);
     this.doc.removeEventListener("keypress", this._onPickerKeypress, true);
     this.pickerButton.isChecked = false;
+  },
+
+  /**
+   * When the picker is canceled, make sure the toolbox
+   * gets the focus.
+   */
+  _onPickerCanceled: function() {
+    if (this.hostType !== Toolbox.HostType.WINDOW) {
+      this.win.focus();
+    }
+  },
+
+  _onPickerPicked: function(nodeFront) {
+    this.selection.setNodeFront(nodeFront, { reason: "picker-node-picked" });
+  },
+
+  _onPickerPreviewed: function(nodeFront) {
+    this.selection.setNodeFront(nodeFront, { reason: "picker-node-previewed" });
   },
 
   /**
@@ -1782,14 +1849,6 @@ Toolbox.prototype = {
 
     const ui = ResponsiveUIManager.getResponsiveUIForTab(tab);
     await ui.emulationFront.setElementPickerState(state);
-  },
-
-  /**
-   * When the picker is canceled, make sure the toolbox
-   * gets the focus.
-   */
-  _onPickerCanceled: function() {
-    this.win.focus();
   },
 
   /**
@@ -2253,7 +2312,7 @@ Toolbox.prototype = {
           // can happen in unit tests where the tests are rapidly opening and closing the
           // toolbox and we encounter the scenario where the toolbox is closing as
           // the inspector is still loading.
-          if (this._destroyingInspector) {
+          if (!this._inspector || !iframe.contentWindow) {
             return;
           }
         }
@@ -3266,30 +3325,18 @@ Toolbox.prototype = {
         // than most other fronts because it is closely related to the toolbox.
         // TODO: replace with getFront once inspector is separated from the toolbox
         // TODO: remove these bindings
-        this._inspector = await this.target.getInspector();
+        this._inspector = await this.target.getFront("inspector");
         this._walker = this.inspectorFront.walker;
         this._highlighter = this.inspectorFront.highlighter;
-        this._selection = this.inspectorFront.selection;
+        this.nodePicker = new NodePicker(this.target, this.selection);
 
-        this.inspectorFront.nodePicker.on(
-          "picker-starting",
-          this._onPickerStarting
-        );
-        this.inspectorFront.nodePicker.on(
-          "picker-started",
-          this._onPickerStarted
-        );
-        this.inspectorFront.nodePicker.on(
-          "picker-stopped",
-          this._onPickerStopped
-        );
-        this.inspectorFront.nodePicker.on(
-          "picker-node-canceled",
-          this._onPickerCanceled
-        );
-        this.walker.on("highlighter-ready", this._highlighterReady);
-        this.walker.on("highlighter-hide", this._highlighterHidden);
-        this._selection.on("new-node-front", this._onNewSelectedNodeFront);
+        this.nodePicker.on("picker-starting", this._onPickerStarting);
+        this.nodePicker.on("picker-started", this._onPickerStarted);
+        this.nodePicker.on("picker-stopped", this._onPickerStopped);
+        this.nodePicker.on("picker-node-canceled", this._onPickerCanceled);
+        this.nodePicker.on("picker-node-picked", this._onPickerPicked);
+        this.nodePicker.on("picker-node-previewed", this._onPickerPreviewed);
+        registerWalkerListeners(this);
       }.bind(this)();
     }
     return this._initInspector;
@@ -3397,29 +3444,17 @@ Toolbox.prototype = {
    * TODO: move to the inspector front once we can have listener hooks into fronts
    */
   destroyInspector: function() {
-    if (this._destroyingInspector) {
-      return this._destroyingInspector;
+    if (!this._inspector) {
+      return;
     }
 
-    this._destroyingInspector = async function() {
-      if (!this._inspector && !this._initInspector) {
-        return;
-      }
+    // Temporary fix for bug #1493131 - inspector has a different life cycle
+    // than most other fronts because it is closely related to the toolbox.
+    this._inspector.destroy();
 
-      // Ensure that the inspector isn't still being initiated, otherwise race conditions
-      // in the initialization process can throw errors.
-      await this._initInspector;
-
-      // Temporary fix for bug #1493131 - inspector has a different life cycle
-      // than most other fronts because it is closely related to the toolbox.
-      await this._inspector.destroy();
-
-      this._inspector = null;
-      this._highlighter = null;
-      this._selection = null;
-      this._walker = null;
-    }.bind(this)();
-    return this._destroyingInspector;
+    this._inspector = null;
+    this._highlighter = null;
+    this._walker = null;
   },
 
   /**
@@ -3541,9 +3576,6 @@ Toolbox.prototype = {
     this.browserRequire = null;
     this._toolNames = null;
 
-    // Destroying the walker and inspector fronts
-    outstanding.push(this.destroyInspector());
-
     // Reset preferences set by the toolbox
     outstanding.push(this.resetPreference());
 
@@ -3587,7 +3619,13 @@ Toolbox.prototype = {
       resolve(
         settleAll(outstanding)
           .catch(console.error)
-          .then(() => {
+          .then(async () => {
+            // Destroying the walker and inspector fronts
+            this.destroyInspector();
+
+            this.selection.destroy();
+            this.selection = null;
+
             if (this._netMonitorAPI) {
               this._netMonitorAPI.destroy();
               this._netMonitorAPI = null;
@@ -3660,14 +3698,6 @@ Toolbox.prototype = {
     await onceDestroyed;
 
     Services.obs.removeObserver(leakCheckObserver, topic);
-  },
-
-  _highlighterReady: function() {
-    this.emit("highlighter-ready");
-  },
-
-  _highlighterHidden: function() {
-    this.emit("highlighter-hide");
   },
 
   /**

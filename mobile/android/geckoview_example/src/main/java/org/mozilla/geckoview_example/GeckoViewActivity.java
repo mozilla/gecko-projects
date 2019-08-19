@@ -19,6 +19,7 @@ import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.WebExtension;
 import org.mozilla.geckoview.WebExtensionController;
 import org.mozilla.geckoview.WebRequestError;
+import org.mozilla.geckoview.RuntimeTelemetry;
 
 import android.Manifest;
 import android.app.Activity;
@@ -78,6 +79,7 @@ public class GeckoViewActivity extends AppCompatActivity {
     private boolean mUsePrivateBrowsing;
     private boolean mEnableRemoteDebugging;
     private boolean mKillProcessOnDestroy;
+    private boolean mDesktopMode;
 
     private boolean mShowNotificationsRejected;
     private ArrayList<String> mAcceptedPersistentStorage = new ArrayList<String>();
@@ -150,9 +152,12 @@ public class GeckoViewActivity extends AppCompatActivity {
                     .remoteDebuggingEnabled(mEnableRemoteDebugging)
                     .consoleOutput(true)
                     .contentBlocking(new ContentBlocking.Settings.Builder()
-                        .categories(ContentBlocking.AT_DEFAULT)
+                        .antiTracking(ContentBlocking.AntiTracking.DEFAULT)
+                        .safeBrowsing(ContentBlocking.SafeBrowsing.DEFAULT)
+                        .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_NON_TRACKERS)
                         .build())
-                    .crashHandler(ExampleCrashHandler.class);
+                    .crashHandler(ExampleCrashHandler.class)
+                    .telemetryDelegate(new ExampleTelemetryDelegate());
 
             sGeckoRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
 
@@ -222,6 +227,12 @@ public class GeckoViewActivity extends AppCompatActivity {
                 .usePrivateMode(mUsePrivateBrowsing)
                 .useTrackingProtection(mUseTrackingProtection)
                 .fullAccessibilityTree(mFullAccessibilityTree)
+                .viewportMode(mDesktopMode
+                        ? GeckoSessionSettings.VIEWPORT_MODE_DESKTOP
+                        : GeckoSessionSettings.VIEWPORT_MODE_MOBILE)
+                .userAgentMode(mDesktopMode
+                        ? GeckoSessionSettings.USER_AGENT_MODE_DESKTOP
+                        : GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
                 .build());
         connectSession(session);
 
@@ -249,6 +260,7 @@ public class GeckoViewActivity extends AppCompatActivity {
         session.setSelectionActionDelegate(new BasicSelectionActionDelegate(this));
 
         updateTrackingProtection(session);
+        updateDesktopMode(session);
     }
 
     private void recreateSession() {
@@ -277,6 +289,15 @@ public class GeckoViewActivity extends AppCompatActivity {
         } else {
             recreateSession();
         }
+    }
+
+    private void updateDesktopMode(GeckoSession session) {
+        session.getSettings().setViewportMode(mDesktopMode
+                ? GeckoSessionSettings.VIEWPORT_MODE_DESKTOP
+                : GeckoSessionSettings.VIEWPORT_MODE_MOBILE);
+        session.getSettings().setUserAgentMode(mDesktopMode
+                ? GeckoSessionSettings.USER_AGENT_MODE_DESKTOP
+                : GeckoSessionSettings.USER_AGENT_MODE_MOBILE);
     }
 
     private void updateTrackingProtection(GeckoSession session) {
@@ -311,6 +332,7 @@ public class GeckoViewActivity extends AppCompatActivity {
         menu.findItem(R.id.action_e10s).setChecked(mUseMultiprocess);
         menu.findItem(R.id.action_tp).setChecked(mUseTrackingProtection);
         menu.findItem(R.id.action_pb).setChecked(mUsePrivateBrowsing);
+        menu.findItem(R.id.desktop_mode).setChecked(mDesktopMode);
         menu.findItem(R.id.action_remote_debugging).setChecked(mEnableRemoteDebugging);
         menu.findItem(R.id.action_forward).setEnabled(mCanGoForward);
         return true;
@@ -333,6 +355,11 @@ public class GeckoViewActivity extends AppCompatActivity {
             case R.id.action_tp:
                 mUseTrackingProtection = !mUseTrackingProtection;
                 updateTrackingProtection(session);
+                session.reload();
+                break;
+            case R.id.desktop_mode:
+                mDesktopMode = !mDesktopMode;
+                updateDesktopMode(session);
                 session.reload();
                 break;
             case R.id.action_pb:
@@ -1061,23 +1088,41 @@ public class GeckoViewActivity extends AppCompatActivity {
         @Override
         public void onContentBlocked(final GeckoSession session,
                                      final ContentBlocking.BlockEvent event) {
-            Log.d(LOGTAG, "onContentBlocked " + event.categories +
-                  " (" + event.uri + ")");
-            if ((event.categories & ContentBlocking.AT_TEST) != 0) {
+            Log.d(LOGTAG, "onContentBlocked" +
+                  " AT: " + event.getAntiTrackingCategory() +
+                  " SB: " + event.getSafeBrowsingCategory() +
+                  " CB: " + event.getCookieBehaviorCategory() +
+                  " URI: " + event.uri);
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.TEST) != 0) {
                 mBlockedTest++;
             }
-            if ((event.categories & ContentBlocking.AT_AD) != 0) {
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.AD) != 0) {
                 mBlockedAds++;
             }
-            if ((event.categories & ContentBlocking.AT_ANALYTIC) != 0) {
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.ANALYTIC) != 0) {
                 mBlockedAnalytics++;
             }
-            if ((event.categories & ContentBlocking.AT_SOCIAL) != 0) {
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.SOCIAL) != 0) {
                 mBlockedSocial++;
             }
-            if ((event.categories & ContentBlocking.AT_CONTENT) != 0) {
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.CONTENT) != 0) {
                 mBlockedContent++;
             }
+        }
+
+        @Override
+        public void onContentLoaded(final GeckoSession session,
+                                    final ContentBlocking.BlockEvent event) {
+            Log.d(LOGTAG, "onContentLoaded" +
+                  " AT: " + event.getAntiTrackingCategory() +
+                  " SB: " + event.getSafeBrowsingCategory() +
+                  " CB: " + event.getCookieBehaviorCategory() +
+                  " URI: " + event.uri);
         }
     }
 
@@ -1143,6 +1188,14 @@ public class GeckoViewActivity extends AppCompatActivity {
                     .setCategory(NotificationCompat.CATEGORY_SERVICE);
 
             notificationManager.notify(mNotificationId, builder.build());
+        }
+    }
+
+    private final class ExampleTelemetryDelegate
+            implements RuntimeTelemetry.Delegate {
+        @Override
+        public void onTelemetryReceived(final @NonNull RuntimeTelemetry.Metric metric) {
+            Log.d(LOGTAG, "onTelemetryReceived " + metric);
         }
     }
 }

@@ -30,6 +30,7 @@
 #include "nsIAuthPrompt2.h"
 #include "nsIAuthPromptAdapterFactory.h"
 #include "nsIBufferedStreams.h"
+#include "nsBufferedStreams.h"
 #include "nsIChannelEventSink.h"
 #include "nsIContentSniffer.h"
 #include "mozilla/dom/Document.h"
@@ -866,14 +867,7 @@ bool NS_LoadGroupMatchesPrincipal(nsILoadGroup* aLoadGroup,
                                 getter_AddRefs(loadContext));
   NS_ENSURE_TRUE(loadContext, false);
 
-  // Verify load context browser flag match the principal
-  bool contextInIsolatedBrowser;
-  nsresult rv =
-      loadContext->GetIsInIsolatedMozBrowserElement(&contextInIsolatedBrowser);
-  NS_ENSURE_SUCCESS(rv, false);
-
-  return contextInIsolatedBrowser ==
-         aPrincipal->GetIsInIsolatedMozBrowserElement();
+  return true;
 }
 
 nsresult NS_NewDownloader(nsIStreamListener** result,
@@ -1276,7 +1270,9 @@ MOZ_MUST_USE nsresult NS_NewBufferedInputStream(
   if (NS_SUCCEEDED(rv)) {
     rv = in->Init(inputStream, aBufferSize);
     if (NS_SUCCEEDED(rv)) {
-      in.forget(aResult);
+      *aResult = static_cast<nsBufferedInputStream*>(in.get())
+                     ->GetInputStream()
+                     .take();
     }
   }
   return rv;
@@ -1848,7 +1844,13 @@ nsresult NS_NewURI(nsIURI** aURI, const nsACString& aSpec,
         .Finalize(aURI);
   }
 
-  if (scheme.EqualsLiteral("dweb") || scheme.EqualsLiteral("dat")) {
+  // web-extensions can add custom protocol implementations with standard URLs
+  // that have notion of hostname, authority and relative URLs. Below we
+  // manually check agains set of known protocols schemes until more general
+  // solution is in place (See Bug 1569733)
+  if (scheme.EqualsLiteral("dweb") || scheme.EqualsLiteral("dat") ||
+      scheme.EqualsLiteral("ipfs") || scheme.EqualsLiteral("ipns") ||
+      scheme.EqualsLiteral("ssb") || scheme.EqualsLiteral("wtp")) {
     return NewStandardURI(aSpec, aCharset, aBaseURI, -1, aURI);
   }
 
@@ -2546,8 +2548,7 @@ bool NS_IsHSTSUpgradeRedirect(nsIChannel* aOldChannel, nsIChannel* aNewChannel,
     return false;
   }
 
-  bool isHttp;
-  if (NS_FAILED(oldURI->SchemeIs("http", &isHttp)) || !isHttp) {
+  if (!oldURI->SchemeIs("http")) {
     return false;
   }
 
@@ -2663,8 +2664,7 @@ void net_EnsurePSMInit() {
 
 bool NS_IsAboutBlank(nsIURI* uri) {
   // GetSpec can be expensive for some URIs, so check the scheme first.
-  bool isAbout = false;
-  if (NS_FAILED(uri->SchemeIs("about", &isAbout)) || !isAbout) {
+  if (!uri->SchemeIs("about")) {
     return false;
   }
 
@@ -2728,6 +2728,35 @@ void NS_SniffContent(const char* aSnifferType, nsIRequest* aRequest,
   }
 
   aSniffedType.Truncate();
+
+  // If the Sniffers did not hit and NoSniff is set
+  // Check if we have any MIME Type at all or report an
+  // Error to the Console
+  nsCOMPtr<nsIHttpChannel> channel = do_QueryInterface(aRequest);
+  if (channel) {
+    nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+
+    if (loadInfo->GetSkipContentSniffing()) {
+      nsAutoCString type;
+      channel->GetContentType(type);
+
+      if (type.Equals(nsCString("application/x-unknown-content-type"))) {
+        nsCOMPtr<nsIURI> requestUri;
+        channel->GetURI(getter_AddRefs(requestUri));
+        nsAutoCString spec;
+        requestUri->GetSpec(spec);
+        if (spec.Length() > 50) {
+          spec.Truncate(50);
+          spec.AppendLiteral("...");
+        }
+        channel->LogMimeTypeMismatch(
+            nsCString("XTCOWithMIMEValueMissing"), false,
+            NS_ConvertUTF8toUTF16(spec),
+            // Type is not used in the Error Message but required
+            NS_ConvertUTF8toUTF16(type));
+      }
+    }
+  }
 }
 
 bool NS_IsSrcdocChannel(nsIChannel* aChannel) {
@@ -2759,9 +2788,7 @@ nsresult NS_ShouldSecureUpgrade(
   // data (it is read-only).
   // if the connection is not using SSL and either the exact host matches or
   // a superdomain wants to force HTTPS, do it.
-  bool isHttps = false;
-  nsresult rv = aURI->SchemeIs("https", &isHttps);
-  NS_ENSURE_SUCCESS(rv, rv);
+  bool isHttps = aURI->SchemeIs("https");
 
   if (!isHttps &&
       !nsMixedContentBlocker::IsPotentiallyTrustworthyLoopbackURL(aURI)) {
@@ -2868,7 +2895,7 @@ nsresult NS_ShouldSecureUpgrade(
     if (!storageReady && gSocketTransportService && aResultCallback) {
       nsCOMPtr<nsIURI> uri = aURI;
       nsCOMPtr<nsISiteSecurityService> service = sss;
-      rv = gSocketTransportService->Dispatch(
+      nsresult rv = gSocketTransportService->Dispatch(
           NS_NewRunnableFunction(
               "net::NS_ShouldSecureUpgrade",
               [service{std::move(service)}, uri{std::move(uri)}, flags(flags),
@@ -2898,8 +2925,9 @@ nsresult NS_ShouldSecureUpgrade(
       return rv;
     }
 
-    rv = sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS, aURI, flags,
-                          aOriginAttributes, nullptr, &hstsSource, &isStsHost);
+    nsresult rv =
+        sss->IsSecureURI(nsISiteSecurityService::HEADER_HSTS, aURI, flags,
+                         aOriginAttributes, nullptr, &hstsSource, &isStsHost);
 
     // if the SSS check fails, it's likely because this load is on a
     // malformed URI or something else in the setup is wrong, so any error
@@ -2966,8 +2994,7 @@ nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel* aChannel) {
   nsINode* node = loadInfo->LoadingNode();
   if (node) {
     nsIURI* uri = node->OwnerDoc()->GetDocumentURI();
-    nsresult rv = uri->SchemeIs("about", &isAboutPage);
-    NS_ENSURE_SUCCESS(rv, rv);
+    isAboutPage = uri->SchemeIs("about");
   }
 
   if (isAboutPage) {
@@ -2986,29 +3013,17 @@ nsresult NS_CompareLoadInfoAndLoadContext(nsIChannel* aChannel) {
     return NS_OK;
   }
 
-  bool loadContextIsInBE = false;
-  nsresult rv =
-      loadContext->GetIsInIsolatedMozBrowserElement(&loadContextIsInBE);
-  if (NS_FAILED(rv)) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
   OriginAttributes originAttrsLoadInfo = loadInfo->GetOriginAttributes();
   OriginAttributes originAttrsLoadContext;
   loadContext->GetOriginAttributes(originAttrsLoadContext);
 
   LOG(
-      ("NS_CompareLoadInfoAndLoadContext - loadInfo: %d, %d, %d; "
-       "loadContext: %d %d, %d. [channel=%p]",
-       originAttrsLoadInfo.mInIsolatedMozBrowser,
+      ("NS_CompareLoadInfoAndLoadContext - loadInfo: %d, %d; "
+       "loadContext: %d, %d. [channel=%p]",
        originAttrsLoadInfo.mUserContextId,
-       originAttrsLoadInfo.mPrivateBrowsingId, loadContextIsInBE,
+       originAttrsLoadInfo.mPrivateBrowsingId,
        originAttrsLoadContext.mUserContextId,
        originAttrsLoadContext.mPrivateBrowsingId, aChannel));
-
-  MOZ_ASSERT(originAttrsLoadInfo.mInIsolatedMozBrowser == loadContextIsInBE,
-             "The value of InIsolatedMozBrowser in the loadContext and in "
-             "the loadInfo are not the same!");
 
   MOZ_ASSERT(originAttrsLoadInfo.mUserContextId ==
                  originAttrsLoadContext.mUserContextId,

@@ -2,6 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// Please indent all prefs defined within #ifdef/#ifndef conditions. This
+// improves readability, particular for conditional blocks that exceed a single
+// screen.
+
 #filter substitution
 
 #include mobile.js
@@ -21,10 +25,13 @@ pref("toolkit.telemetry.eventping.enabled", false);
 pref("geckoview.console.enabled", false);
 
 #ifdef RELEASE_OR_BETA
-pref("geckoview.logging", "Warn");
+  pref("geckoview.logging", "Warn");
 #else
-pref("geckoview.logging", "Debug");
+  pref("geckoview.logging", "Debug");
 #endif
+
+// Enable capture attribute for file input.
+pref("dom.capture.enabled", true);
 
 // Disable Web Push until we get it working
 pref("dom.push.enabled", false);

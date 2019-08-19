@@ -111,7 +111,6 @@ def mozharness_test_on_docker(config, job, taskdesc):
         'NEED_WINDOW_MANAGER': 'true',
         'NEED_COMPIZ': 'true',
         'ENABLE_E10S': str(bool(test.get('e10s'))).lower(),
-        'MOZ_AUTOMATION': '1',
         'WORKING_DIR': '/builds/worker',
     })
 
@@ -219,7 +218,6 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
         worker = taskdesc['worker'] = job['worker']
 
     bitbar_script = 'test-linux.sh'
-    bitbar_wrapper = '/builds/taskcluster/script.py'
 
     is_macosx = worker['os'] == 'macosx'
     is_windows = worker['os'] == 'windows'
@@ -289,7 +287,6 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
     worker['artifacts'] = artifacts
 
     env = worker.setdefault('env', {})
-    env['MOZ_AUTOMATION'] = '1'
     env['GECKO_HEAD_REPOSITORY'] = config.params['head_repository']
     env['GECKO_HEAD_REV'] = config.params['head_rev']
 
@@ -338,7 +335,6 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
         ]
     elif is_bitbar:
         mh_command = [
-            bitbar_wrapper,
             'bash',
             "./{}".format(bitbar_script)
         ]
@@ -470,7 +466,6 @@ def mozharness_test_on_script_engine_autophone(config, job, taskdesc):
         "NO_FAIL_ON_TEST_ERRORS": '1',
         "MOZ_HIDE_RESULTS_TABLE": '1',
         "MOZ_NODE_PATH": "/usr/local/bin/node",
-        'MOZ_AUTOMATION': '1',
         'WORKING_DIR': '/builds/worker',
         'WORKSPACE': '/builds/worker/workspace',
         'TASKCLUSTER_WORKER_TYPE': job['worker-type'],

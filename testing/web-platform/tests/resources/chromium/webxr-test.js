@@ -78,7 +78,7 @@ class ChromeXRTest {
 
 // Mocking class definitions
 
-// Mock service implements both the VRService and XRDevice mojo interfaces.
+// Mock service implements the VRService mojo interface.
 class MockVRService {
   constructor() {
     this.bindingSet_ = new mojo.BindingSet(device.mojom.VRService);
@@ -122,24 +122,14 @@ class MockVRService {
     }
   }
 
-  // VRService implementation.
-  requestDevice() {
-    if (this.runtimes_.length > 0) {
-      let devicePtr = new device.mojom.XRDevicePtr();
-      new mojo.Binding(
-          device.mojom.XRDevice, this, mojo.makeRequest(devicePtr));
-
-      return Promise.resolve({device: devicePtr});
-    } else {
-      return Promise.resolve({device: null});
-    }
-  }
-
   setClient(client) {
+    if (this.client_) {
+      throw new Error("setClient should only be called once");
+    }
+
     this.client_ = client;
   }
 
-  // XRDevice implementation.
   requestSession(sessionOptions, was_activation) {
     let requests = [];
     // Request a session from all the runtimes.
@@ -564,6 +554,7 @@ class MockXRInputSource {
     this.handedness_ = fakeInputSourceInit.handedness;
     this.target_ray_mode_ = fakeInputSourceInit.targetRayMode;
     this.setPointerOrigin(fakeInputSourceInit.pointerOrigin);
+    this.setProfiles(fakeInputSourceInit.profiles);
 
     this.primary_input_pressed_ = false;
     if (fakeInputSourceInit.selectionStarted != null) {
@@ -603,7 +594,8 @@ class MockXRInputSource {
   }
 
   setProfiles(profiles) {
-    // Profiles are not yet implemented by chromium
+    this.desc_dirty_ = true;
+    this.profiles_ = profiles;
   }
 
   setGripOrigin(transform, emulatedPosition = false) {
@@ -771,6 +763,8 @@ class MockXRInputSource {
       }
 
       input_desc.pointerOffset = this.pointer_offset_;
+
+      input_desc.profiles = this.profiles_;
 
       input_state.description = input_desc;
 

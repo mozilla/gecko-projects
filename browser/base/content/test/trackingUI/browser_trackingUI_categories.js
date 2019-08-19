@@ -19,115 +19,74 @@ registerCleanupFunction(function() {
   Services.prefs.clearUserPref(FP_PREF);
 });
 
-add_task(async function testCategoryLabelsInAppMenu() {
-  await BrowserTestUtils.withNewTab("http://www.example.com", async function() {
-    let cuiTestUtils = new CustomizableUITestUtils(window);
-    await cuiTestUtils.openMainMenu();
-
-    let appMenuCategoryLabel = document.getElementById("appMenu-tp-category");
-    ok(appMenuCategoryLabel.value, "The appMenuCategory label exists");
-
-    Services.prefs.setStringPref(CAT_PREF, "strict");
-    await TestUtils.waitForCondition(
-      () =>
-        appMenuCategoryLabel.value ==
-        gNavigatorBundle.getString("contentBlocking.category.strict")
-    );
-    is(
-      appMenuCategoryLabel.value,
-      gNavigatorBundle.getString("contentBlocking.category.strict"),
-      "The appMenuCategory label has been changed to strict"
-    );
-
-    Services.prefs.setStringPref(CAT_PREF, "standard");
-    await TestUtils.waitForCondition(
-      () =>
-        appMenuCategoryLabel.value ==
-        gNavigatorBundle.getString("contentBlocking.category.standard")
-    );
-    is(
-      appMenuCategoryLabel.value,
-      gNavigatorBundle.getString("contentBlocking.category.standard"),
-      "The appMenuCategory label has been changed to standard"
-    );
-
-    Services.prefs.setStringPref(CAT_PREF, "custom");
-    await TestUtils.waitForCondition(
-      () =>
-        appMenuCategoryLabel.value ==
-        gNavigatorBundle.getString("contentBlocking.category.custom")
-    );
-    is(
-      appMenuCategoryLabel.value,
-      gNavigatorBundle.getString("contentBlocking.category.custom"),
-      "The appMenuCategory label has been changed to custom"
-    );
-  });
-});
-
 add_task(async function testSubcategoryLabels() {
-  SpecialPowers.pushPrefEnv({
-    set: [
-      ["browser.contentblocking.control-center.ui.showAllowedLabels", true],
-      ["browser.contentblocking.control-center.ui.showBlockedLabels", true],
-    ],
-  });
-
   await BrowserTestUtils.withNewTab("http://www.example.com", async function() {
-    let categoryLabel = document.getElementById(
-      "protections-popup-tracking-protection-state-label"
+    let categoryItem = document.getElementById(
+      "protections-popup-category-tracking-protection"
     );
 
     Services.prefs.setBoolPref(TP_PREF, true);
     await TestUtils.waitForCondition(
-      () =>
-        categoryLabel.textContent ==
-        gNavigatorBundle.getString("contentBlocking.trackers.blocking.label"),
-      "The category label has updated correctly"
+      () => categoryItem.classList.contains("blocked"),
+      "The category item has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString("contentBlocking.trackers.blocking.label")
-    );
+    ok(categoryItem.classList.contains("blocked"));
 
     Services.prefs.setBoolPref(TP_PREF, false);
     await TestUtils.waitForCondition(
-      () =>
-        categoryLabel.textContent ==
-        gNavigatorBundle.getString("contentBlocking.trackers.allowed.label"),
-      "The category label has updated correctly"
+      () => !categoryItem.classList.contains("blocked"),
+      "The category item has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString("contentBlocking.trackers.allowed.label")
-    );
+    ok(!categoryItem.classList.contains("blocked"));
 
-    categoryLabel = document.getElementById(
-      "protections-popup-cookies-state-label"
+    categoryItem = document.getElementById(
+      "protections-popup-category-cookies"
+    );
+    let categoryLabelDisabled = document.getElementById(
+      "protections-popup-cookies-category-label-disabled"
+    );
+    let categoryLabelEnabled = document.getElementById(
+      "protections-popup-cookies-category-label-enabled"
     );
 
     Services.prefs.setIntPref(TPC_PREF, Ci.nsICookieService.BEHAVIOR_ACCEPT);
     await TestUtils.waitForCondition(
       () =>
-        categoryLabel.textContent ==
-        gNavigatorBundle.getString("contentBlocking.cookies.allowed.label"),
+        !categoryItem.classList.contains("blocked") &&
+        !categoryLabelDisabled.hidden &&
+        categoryLabelEnabled.hidden,
       "The category label has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString("contentBlocking.cookies.allowed.label")
+    ok(
+      !categoryItem.classList.contains("blocked") &&
+        !categoryLabelDisabled.hidden &&
+        categoryLabelEnabled.hidden
     );
 
     Services.prefs.setIntPref(TPC_PREF, Ci.nsICookieService.BEHAVIOR_REJECT);
     await TestUtils.waitForCondition(
       () =>
-        categoryLabel.textContent ==
-        gNavigatorBundle.getString("contentBlocking.cookies.blockingAll.label"),
+        categoryItem.classList.contains("blocked") &&
+        categoryLabelDisabled.hidden &&
+        !categoryLabelEnabled.hidden,
       "The category label has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString("contentBlocking.cookies.blockingAll.label")
+    ok(
+      categoryItem.classList.contains("blocked") &&
+        categoryLabelDisabled.hidden &&
+        !categoryLabelEnabled.hidden
+    );
+    await TestUtils.waitForCondition(
+      () =>
+        categoryLabelEnabled.textContent ==
+        gNavigatorBundle.getString(
+          "contentBlocking.cookies.blockingAll2.label"
+        ),
+      "The category label has updated correctly"
+    );
+    ok(
+      categoryLabelEnabled.textContent ==
+        gNavigatorBundle.getString("contentBlocking.cookies.blockingAll2.label")
     );
 
     Services.prefs.setIntPref(
@@ -136,17 +95,29 @@ add_task(async function testSubcategoryLabels() {
     );
     await TestUtils.waitForCondition(
       () =>
-        categoryLabel.textContent ==
+        categoryItem.classList.contains("blocked") &&
+        categoryLabelDisabled.hidden &&
+        !categoryLabelEnabled.hidden,
+      "The category label has updated correctly"
+    );
+    ok(
+      categoryItem.classList.contains("blocked") &&
+        categoryLabelDisabled.hidden &&
+        !categoryLabelEnabled.hidden
+    );
+    await TestUtils.waitForCondition(
+      () =>
+        categoryLabelEnabled.textContent ==
         gNavigatorBundle.getString(
-          "contentBlocking.cookies.blocking3rdParty.label"
+          "contentBlocking.cookies.blocking3rdParty2.label"
         ),
       "The category label has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString(
-        "contentBlocking.cookies.blocking3rdParty.label"
-      )
+    ok(
+      categoryLabelEnabled.textContent ==
+        gNavigatorBundle.getString(
+          "contentBlocking.cookies.blocking3rdParty2.label"
+        )
     );
 
     Services.prefs.setIntPref(
@@ -155,17 +126,29 @@ add_task(async function testSubcategoryLabels() {
     );
     await TestUtils.waitForCondition(
       () =>
-        categoryLabel.textContent ==
+        categoryItem.classList.contains("blocked") &&
+        categoryLabelDisabled.hidden &&
+        !categoryLabelEnabled.hidden,
+      "The category label has updated correctly"
+    );
+    ok(
+      categoryItem.classList.contains("blocked") &&
+        categoryLabelDisabled.hidden &&
+        !categoryLabelEnabled.hidden
+    );
+    await TestUtils.waitForCondition(
+      () =>
+        categoryLabelEnabled.textContent ==
         gNavigatorBundle.getString(
-          "contentBlocking.cookies.blockingTrackers.label"
+          "contentBlocking.cookies.blockingTrackers3.label"
         ),
       "The category label has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString(
-        "contentBlocking.cookies.blockingTrackers.label"
-      )
+    ok(
+      categoryLabelEnabled.textContent ==
+        gNavigatorBundle.getString(
+          "contentBlocking.cookies.blockingTrackers3.label"
+        )
     );
 
     Services.prefs.setIntPref(
@@ -174,83 +157,51 @@ add_task(async function testSubcategoryLabels() {
     );
     await TestUtils.waitForCondition(
       () =>
-        categoryLabel.textContent ==
-        gNavigatorBundle.getString(
-          "contentBlocking.cookies.blockingUnvisited.label"
-        ),
+        !categoryItem.classList.contains("blocked") &&
+        !categoryLabelDisabled.hidden &&
+        categoryLabelEnabled.hidden,
       "The category label has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString(
-        "contentBlocking.cookies.blockingUnvisited.label"
-      )
+    ok(
+      !categoryItem.classList.contains("blocked") &&
+        !categoryLabelDisabled.hidden &&
+        categoryLabelEnabled.hidden
     );
 
-    categoryLabel = document.getElementById(
-      "protections-popup-fingerprinters-state-label"
+    categoryItem = document.getElementById(
+      "protections-popup-category-fingerprinters"
     );
 
     Services.prefs.setBoolPref(FP_PREF, true);
     await TestUtils.waitForCondition(
-      () =>
-        categoryLabel.textContent ==
-        gNavigatorBundle.getString(
-          "contentBlocking.fingerprinters.blocking.label"
-        ),
-      "The category label has updated correctly"
+      () => categoryItem.classList.contains("blocked"),
+      "The category item has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString(
-        "contentBlocking.fingerprinters.blocking.label"
-      )
-    );
+    ok(categoryItem.classList.contains("blocked"));
 
     Services.prefs.setBoolPref(FP_PREF, false);
     await TestUtils.waitForCondition(
-      () =>
-        categoryLabel.textContent ==
-        gNavigatorBundle.getString(
-          "contentBlocking.fingerprinters.allowed.label"
-        ),
-      "The category label has updated correctly"
+      () => !categoryItem.classList.contains("blocked"),
+      "The category item has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString("contentBlocking.fingerprinters.allowed.label")
-    );
+    ok(!categoryItem.classList.contains("blocked"));
 
-    categoryLabel = document.getElementById(
-      "protections-popup-cryptominers-state-label"
+    categoryItem = document.getElementById(
+      "protections-popup-category-cryptominers"
     );
 
     Services.prefs.setBoolPref(CM_PREF, true);
     await TestUtils.waitForCondition(
-      () =>
-        categoryLabel.textContent ==
-        gNavigatorBundle.getString(
-          "contentBlocking.cryptominers.blocking.label"
-        ),
-      "The category label has updated correctly"
+      () => categoryItem.classList.contains("blocked"),
+      "The category item has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString("contentBlocking.cryptominers.blocking.label")
-    );
+    ok(categoryItem.classList.contains("blocked"));
 
     Services.prefs.setBoolPref(CM_PREF, false);
     await TestUtils.waitForCondition(
-      () =>
-        categoryLabel.textContent ==
-        gNavigatorBundle.getString(
-          "contentBlocking.cryptominers.allowed.label"
-        ),
-      "The category label has updated correctly"
+      () => !categoryItem.classList.contains("blocked"),
+      "The category item has updated correctly"
     );
-    is(
-      categoryLabel.textContent,
-      gNavigatorBundle.getString("contentBlocking.cryptominers.allowed.label")
-    );
+    ok(!categoryItem.classList.contains("blocked"));
   });
 });

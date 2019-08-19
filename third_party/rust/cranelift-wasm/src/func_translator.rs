@@ -5,9 +5,10 @@
 //! WebAssembly module and the runtime environment.
 
 use crate::code_translator::translate_operator;
-use crate::environ::{FuncEnvironment, ReturnMode, WasmError, WasmResult};
-use crate::state::TranslationState;
+use crate::environ::{FuncEnvironment, ReturnMode, WasmResult};
+use crate::state::{TranslationState, VisibleTranslationState};
 use crate::translation_utils::get_vmctx_value_label;
+use crate::wasm_unsupported;
 use cranelift_codegen::entity::EntityRef;
 use cranelift_codegen::ir::{self, Ebb, InstBuilder, ValueLabel};
 use cranelift_codegen::timing;
@@ -89,7 +90,8 @@ impl FuncTranslator {
         let entry_block = builder.create_ebb();
         builder.append_ebb_params_for_function_params(entry_block);
         builder.switch_to_block(entry_block); // This also creates values for the arguments.
-        builder.seal_block(entry_block);
+        builder.seal_block(entry_block); // Declare all predecessors known.
+
         // Make sure the entry block is inserted in the layout before we make any callbacks to
         // `environ`. The callback functions may need to insert things in the entry block.
         builder.ensure_inserted_ebb();
@@ -175,7 +177,7 @@ fn declare_locals(
         I64 => builder.ins().iconst(ir::types::I64, 0),
         F32 => builder.ins().f32const(ir::immediates::Ieee32::with_bits(0)),
         F64 => builder.ins().f64const(ir::immediates::Ieee64::with_bits(0)),
-        _ => return Err(WasmError::Unsupported("unsupported local type")),
+        ty => wasm_unsupported!("unsupported local type {:?}", ty),
     };
 
     let ty = builder.func.dfg.value_type(zeroval);
@@ -206,7 +208,9 @@ fn parse_function_body<FE: FuncEnvironment + ?Sized>(
     while !state.control_stack.is_empty() {
         builder.set_srcloc(cur_srcloc(&reader));
         let op = reader.read_operator()?;
-        translate_operator(op, builder, state, environ)?;
+        environ.before_translate_operator(&op, builder, &VisibleTranslationState::new(state))?;
+        translate_operator(&op, builder, state, environ)?;
+        environ.after_translate_operator(&op, builder, &VisibleTranslationState::new(state))?;
     }
 
     // The final `End` operator left us in the exit block where we need to manually add a return

@@ -99,7 +99,7 @@ nsString MediaEngineDefaultVideoSource::GetGroupId() const {
 
 uint32_t MediaEngineDefaultVideoSource::GetBestFitnessDistance(
     const nsTArray<const NormalizedConstraintSet*>& aConstraintSets,
-    const nsString& aDeviceId) const {
+    const nsString& aDeviceId, const nsString& aGroupId) const {
   AssertIsOnOwningThread();
 
   uint64_t distance = 0;
@@ -107,6 +107,8 @@ uint32_t MediaEngineDefaultVideoSource::GetBestFitnessDistance(
   for (const auto* cs : aConstraintSets) {
     distance +=
         MediaConstraintsHelper::FitnessDistance(Some(aDeviceId), cs->mDeviceId);
+    distance +=
+        MediaConstraintsHelper::FitnessDistance(Some(aGroupId), cs->mGroupId);
 
     Maybe<nsString> facingMode = Nothing();
     distance +=
@@ -136,7 +138,7 @@ void MediaEngineDefaultVideoSource::GetSettings(
 
 nsresult MediaEngineDefaultVideoSource::Allocate(
     const MediaTrackConstraints& aConstraints, const MediaEnginePrefs& aPrefs,
-    const nsString& aDeviceId,
+    const nsString& aDeviceId, const nsString& aGroupId,
     const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
     const char** aOutBadConstraint) {
   AssertIsOnOwningThread();
@@ -249,8 +251,7 @@ void MediaEngineDefaultVideoSource::SetTrack(
   mStream = aStream;
   mTrackID = aTrackID;
   mPrincipalHandle = aPrincipal;
-  aStream->AddTrack(aTrackID, new VideoSegment(),
-                    SourceMediaStream::ADDTRACK_QUEUED);
+  aStream->AddTrack(aTrackID, new VideoSegment());
 }
 
 nsresult MediaEngineDefaultVideoSource::Start() {
@@ -315,7 +316,8 @@ nsresult MediaEngineDefaultVideoSource::Stop() {
 
 nsresult MediaEngineDefaultVideoSource::Reconfigure(
     const MediaTrackConstraints& aConstraints, const MediaEnginePrefs& aPrefs,
-    const nsString& aDeviceId, const char** aOutBadConstraint) {
+    const nsString& aDeviceId, const nsString& aGroupId,
+    const char** aOutBadConstraint) {
   return NS_OK;
 }
 
@@ -423,12 +425,12 @@ nsString MediaEngineDefaultAudioSource::GetGroupId() const {
 
 uint32_t MediaEngineDefaultAudioSource::GetBestFitnessDistance(
     const nsTArray<const NormalizedConstraintSet*>& aConstraintSets,
-    const nsString& aDeviceId) const {
+    const nsString& aDeviceId, const nsString& aGroupId) const {
   uint32_t distance = 0;
 #ifdef MOZ_WEBRTC
   for (const auto* cs : aConstraintSets) {
-    distance =
-        MediaConstraintsHelper::GetMinimumFitnessDistance(*cs, aDeviceId);
+    distance = MediaConstraintsHelper::GetMinimumFitnessDistance(*cs, aDeviceId,
+                                                                 aGroupId);
     break;  // distance is read from first entry only
   }
 #endif
@@ -446,7 +448,7 @@ void MediaEngineDefaultAudioSource::GetSettings(
 
 nsresult MediaEngineDefaultAudioSource::Allocate(
     const MediaTrackConstraints& aConstraints, const MediaEnginePrefs& aPrefs,
-    const nsString& aDeviceId,
+    const nsString& aDeviceId, const nsString& aGroupId,
     const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
     const char** aOutBadConstraint) {
   AssertIsOnOwningThread();
@@ -494,8 +496,7 @@ void MediaEngineDefaultAudioSource::SetTrack(
   mStream = aStream;
   mTrackID = aTrackID;
   mPrincipalHandle = aPrincipal;
-  aStream->AddAudioTrack(aTrackID, aStream->GraphRate(), new AudioSegment(),
-                         SourceMediaStream::ADDTRACK_QUEUED);
+  aStream->AddAudioTrack(aTrackID, aStream->GraphRate(), new AudioSegment());
 }
 
 nsresult MediaEngineDefaultAudioSource::Start() {
@@ -549,7 +550,8 @@ nsresult MediaEngineDefaultAudioSource::Stop() {
 
 nsresult MediaEngineDefaultAudioSource::Reconfigure(
     const MediaTrackConstraints& aConstraints, const MediaEnginePrefs& aPrefs,
-    const nsString& aDeviceId, const char** aOutBadConstraint) {
+    const nsString& aDeviceId, const nsString& aGroupId,
+    const char** aOutBadConstraint) {
   return NS_OK;
 }
 

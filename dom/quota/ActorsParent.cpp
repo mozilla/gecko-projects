@@ -51,6 +51,7 @@
 #include "mozilla/Mutex.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextUtils.h"
 #include "mozilla/Telemetry.h"
@@ -104,14 +105,6 @@
 // The amount of time, in milliseconds, that we will wait for active storage
 // transactions on shutdown before aborting them.
 #define DEFAULT_SHUTDOWN_TIMER_MS 30000
-
-// Preference that users can set to override temporary storage smart limit
-// calculation.
-#define PREF_FIXED_LIMIT "dom.quotaManager.temporaryStorage.fixedLimit"
-#define PREF_CHUNK_SIZE "dom.quotaManager.temporaryStorage.chunkSize"
-
-// Preference that is used to enable testing features
-#define PREF_TESTING_FEATURES "dom.quotaManager.testing"
 
 // profile-before-change, when we need to shut down quota manager
 #define PROFILE_BEFORE_CHANGE_QM_OBSERVER_ID "profile-before-change-qm"
@@ -1564,14 +1557,6 @@ StaticRefPtr<QuotaManager> gInstance;
 bool gCreateFailed = false;
 mozilla::Atomic<bool> gShutdown(false);
 
-// Constants for temporary storage limit computing.
-static const int32_t kDefaultFixedLimitKB = -1;
-static const uint32_t kDefaultChunkSizeKB = 10 * 1024;
-Atomic<int32_t, Relaxed> gFixedLimitKB(kDefaultFixedLimitKB);
-Atomic<uint32_t, Relaxed> gChunkSizeKB(kDefaultChunkSizeKB);
-
-Atomic<bool> gTestingEnabled(false);
-
 class StorageOperationBase {
  protected:
   struct OriginProps;
@@ -2312,11 +2297,13 @@ nsresult GetTemporaryStorageLimit(nsIFile* aDirectory, uint64_t aCurrentUsage,
 
   uint64_t availableKB =
       static_cast<uint64_t>((bytesAvailable + aCurrentUsage) / 1024);
+  uint32_t chunkSizeKB =
+      StaticPrefs::dom_quotaManager_temporaryStorage_chunkSize();
 
-  // Grow/shrink in gChunkSizeKB units, deliberately, so that in the common case
+  // Grow/shrink in chunkSizeKB units, deliberately, so that in the common case
   // we don't shrink temporary storage and evict origin data every time we
   // initialize.
-  availableKB = (availableKB / gChunkSizeKB) * gChunkSizeKB;
+  availableKB = (availableKB / chunkSizeKB) * chunkSizeKB;
 
   // Allow temporary storage to consume up to half the available space.
   uint64_t resultKB = availableKB * .50;
@@ -2346,18 +2333,6 @@ void InitializeQuotaManager() {
 
   if (NS_FAILED(QuotaManager::Initialize())) {
     NS_WARNING("Failed to initialize quota manager!");
-  }
-
-  if (NS_FAILED(Preferences::AddAtomicIntVarCache(
-          &gFixedLimitKB, PREF_FIXED_LIMIT, kDefaultFixedLimitKB)) ||
-      NS_FAILED(Preferences::AddAtomicUintVarCache(
-          &gChunkSizeKB, PREF_CHUNK_SIZE, kDefaultChunkSizeKB))) {
-    NS_WARNING("Unable to respond to temp storage pref changes!");
-  }
-
-  if (NS_FAILED(Preferences::AddAtomicBoolVarCache(
-          &gTestingEnabled, PREF_TESTING_FEATURES, false))) {
-    NS_WARNING("Unable to respond to testing pref changes!");
   }
 
 #ifdef DEBUG
@@ -5849,8 +5824,11 @@ nsresult QuotaManager::EnsureTemporaryStorageIsInitialized() {
   Telemetry::AccumulateTimeDelta(Telemetry::QM_REPOSITORIES_INITIALIZATION_TIME,
                                  startTime, TimeStamp::Now());
 
-  if (gFixedLimitKB >= 0) {
-    mTemporaryStorageLimit = static_cast<uint64_t>(gFixedLimitKB) * 1024;
+  if (StaticPrefs::dom_quotaManager_temporaryStorage_fixedLimit() >= 0) {
+    mTemporaryStorageLimit =
+        static_cast<uint64_t>(
+            StaticPrefs::dom_quotaManager_temporaryStorage_fixedLimit()) *
+        1024;
   } else {
     nsCOMPtr<nsIFile> storageDir =
         do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv);

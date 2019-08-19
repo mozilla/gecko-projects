@@ -405,6 +405,13 @@ class StaticAnalysis(MachCommandBase):
 
     def dump_cov_artifact(self, cov_results, source, output):
         # Parse Coverity json into structured issues
+
+        def relpath(path):
+            '''Build path relative to repository root'''
+            if path.startswith(self.topsrcdir):
+                return os.path.relpath(path, self.topsrcdir)
+            return path
+
         with open(cov_results) as f:
             result = json.load(f)
 
@@ -421,6 +428,7 @@ class StaticAnalysis(MachCommandBase):
                 dict_issue = {
                     'line': issue['mainEventLineNumber'],
                     'flag': issue['checkerName'],
+                    'build_error': issue['checkerName'].startswith('RW.CLANG'),
                     'message': event_path['eventDescription'],
                     'reliability': self.get_reliability_index_for_cov_checker(
                         issue['checkerName']
@@ -435,7 +443,7 @@ class StaticAnalysis(MachCommandBase):
                 # Embed all events into extra message
                 for event in issue['events']:
                     dict_issue['extra']['stack'].append(
-                        {'file_path': event['strippedFilePathname'],
+                        {'file_path': relpath(event['strippedFilePathname']),
                          'line_number': event['lineNumber'],
                          'path_type': event['eventTag'],
                          'description': event['eventDescription']})
@@ -453,6 +461,7 @@ class StaticAnalysis(MachCommandBase):
                                 issue['strippedMainEventFilePathname'])
                              )
                     continue
+                path = relpath(path)
                 if path in files_list:
                     files_list[path]['warnings'].append(build_element(issue))
                 else:
@@ -921,7 +930,7 @@ class StaticAnalysis(MachCommandBase):
         # Configure the tree or download clang-tidy package, depending on the option that we choose
         if intree_tool:
             _, config, _ = self._get_config_environment()
-            clang_tools_path = self.topsrcdir
+            clang_tools_path = os.environ['MOZ_FETCHES_DIR']
             self._clang_tidy_path = mozpath.join(
                 clang_tools_path, "clang-tidy", "bin",
                 "clang-tidy" + config.substs.get('BIN_SUFFIX', ''))
@@ -1804,7 +1813,7 @@ class StaticAnalysis(MachCommandBase):
         rc, config, _ = self._get_config_environment()
         if rc != 0:
             return rc
-        infer_path = self.topsrcdir if intree_tool else \
+        infer_path = os.environ['MOZ_FETCHES_DIR'] if intree_tool else \
             mozpath.join(self._mach_context.state_dir, 'infer')
         self._infer_path = mozpath.join(infer_path, 'infer', 'bin', 'infer' +
                                         config.substs.get('BIN_SUFFIX', ''))

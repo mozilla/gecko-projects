@@ -509,7 +509,7 @@ class CGDOMJSClass(CGThing):
 
         return fill(
             """
-            static const js::ClassOps sClassOps = {
+            static const JSClassOps sClassOps = {
               ${addProperty}, /* addProperty */
               nullptr,               /* delProperty */
               nullptr,               /* enumerate */
@@ -781,7 +781,7 @@ class CGInterfaceObjectJSClass(CGThing):
         else:
             ret = fill(
                 """
-                static const js::ClassOps sInterfaceObjectClassOps = {
+                static const JSClassOps sInterfaceObjectClassOps = {
                     nullptr,               /* addProperty */
                     nullptr,               /* delProperty */
                     nullptr,               /* enumerate */
@@ -1130,11 +1130,12 @@ class CGHeaders(CGWrapper):
         bindingHeaders = set()
         declareIncludes = set(declareIncludes)
 
-        def addHeadersForType((t, dictionary)):
+        def addHeadersForType(typeAndPossibleDictionary):
             """
             Add the relevant headers for this type.  We use dictionary, if
             passed, to decide what to do with interface types.
             """
+            t, dictionary = typeAndPossibleDictionary
             # Dictionaries have members that need to be actually
             # declared, not just forward-declared.
             if dictionary:
@@ -1763,7 +1764,7 @@ def finalizeHook(descriptor, hookName, freeOp, obj):
     if descriptor.wrapperCache:
         finalize += "ClearWrapper(self, self, %s);\n" % obj
     if descriptor.isGlobal():
-        finalize += "mozilla::dom::FinalizeGlobal(CastToJSFreeOp(%s), %s);\n" % (freeOp, obj)
+        finalize += "mozilla::dom::FinalizeGlobal(%s, %s);\n" % (freeOp, obj)
     finalize += fill(
         """
         if (size_t mallocBytes = BindingJSObjectMallocBytes(self)) {
@@ -1782,7 +1783,7 @@ class CGClassFinalizeHook(CGAbstractClassHook):
     A hook for finalize, used to release our native object.
     """
     def __init__(self, descriptor):
-        args = [Argument('js::FreeOp*', 'fop'), Argument('JSObject*', 'obj')]
+        args = [Argument('JSFreeOp*', 'fop'), Argument('JSObject*', 'obj')]
         CGAbstractClassHook.__init__(self, descriptor, FINALIZE_HOOK_NAME,
                                      'void', args)
 
@@ -2012,6 +2013,9 @@ def isChromeOnly(m):
 
 def prefIdentifier(pref):
     return pref.replace(".", "_").replace("-", "_")
+
+def prefHeader(pref):
+    return "mozilla/StaticPrefs_%s.h" % pref.partition(".")[0]
 
 class MemberCondition:
     """
@@ -2928,7 +2932,7 @@ class CGNativeProperties(CGList):
                 post = fill(
                     """
                     $*{post}
-                    static_assert(${propertyInfoCount} < 1ull << CHAR_BIT * sizeof(${name}.propertyInfoCount),
+                    static_assert(${propertyInfoCount} < 1ull << (CHAR_BIT * sizeof(${name}.propertyInfoCount)),
                         "We have a property info count that is oversized");
                     """,
                     post=post,
@@ -8096,7 +8100,7 @@ class CGPerSignatureCall(CGThing):
         }
         try:
             wrapCode += wrapForType(self.returnType, self.descriptor, resultTemplateValues)
-        except MethodNotNewObjectError, err:
+        except MethodNotNewObjectError as err:
             assert not returnsNewObject
             raise TypeError("%s being returned from non-NewObject method or property %s.%s" %
                             (err.typename,
@@ -14754,23 +14758,25 @@ class CGBindingRoot(CGThing):
             return any(PropertyDefiner.getControllingCondition(m, desc).hasDisablers()
                        for m in iface.members if (m.isMethod() or m.isAttr() or m.isConst()))
 
-        def dictionaryHasPrefControlledMember(dictionary):
+        def addPrefHeaderForObject(bindingHeaders, obj):
+            """
+            obj might be a dictionary member or an interface.
+            """
+            pref = PropertyDefiner.getStringAttr(obj, "Pref")
+            if pref:
+                bindingHeaders[prefHeader(pref)] = True
+
+        def addPrefHeadersForDictionary(bindingHeaders, dictionary):
             while dictionary:
-                if (any(m.getExtendedAttribute("Pref") for m in dictionary.members)):
-                    return True
+                for m in dictionary.members:
+                    addPrefHeaderForObject(bindingHeaders, m)
                 dictionary = dictionary.parent
-            return False
 
-        def descriptorRequiresPreferences(desc):
-            iface = desc.interface
-            return iface.getExtendedAttribute("Pref") is not None
+        for d in dictionaries:
+            addPrefHeadersForDictionary(bindingHeaders, d)
+        for d in descriptors:
+            addPrefHeaderForObject(bindingHeaders, d.interface)
 
-        # Bug 1568729: ideally we'd be smarter about this, and only include the
-        # required StaticPrefs_*.h file, rather than StaticPrefsAll.h, which
-        # includes all StaticPrefs_*.h files.
-        bindingHeaders["mozilla/StaticPrefsAll.h"] = (
-            any(descriptorRequiresPreferences(d) for d in descriptors) or
-            any(dictionaryHasPrefControlledMember(d) for d in dictionaries))
         bindingHeaders["mozilla/dom/WebIDLPrefs.h"] = any(
             descriptorHasPrefDisabler(d) for d in descriptors)
         bindingHeaders["nsContentUtils.h"] = (
@@ -15902,7 +15908,7 @@ class CGJSImplMethod(CGJSImplMember):
             initCall = fill(
                 """
                 // Wrap the object before calling __Init so that __DOM_IMPL__ is available.
-                JS::Rooted<JSObject*> scopeObj(cx, globalHolder->GetGlobalJSObject());
+                JS::Rooted<JSObject*> scopeObj(cx, global.Get());
                 MOZ_ASSERT(js::IsObjectInContextCompartment(scopeObj, cx));
                 JS::Rooted<JS::Value> wrappedVal(cx);
                 if (!GetOrCreateDOMReflector(cx, impl, &wrappedVal, aGivenProto)) {
@@ -15925,17 +15931,11 @@ class CGJSImplMethod(CGJSImplMember):
 def genConstructorBody(descriptor, initCall=""):
     return fill(
         """
-        JS::Rooted<JSObject*> jsImplObj(cx);
-        nsCOMPtr<nsIGlobalObject> globalHolder =
-          ConstructJSImplementation("${contractId}", global, &jsImplObj, aRv);
+        RefPtr<${implClass}> impl =
+          ConstructJSImplementation<${implClass}>("${contractId}", global, aRv);
         if (aRv.Failed()) {
           return nullptr;
         }
-        // We should be getting the implementation object for the relevant
-        // contract here, which should never be a cross-compartment wrapper.
-        JS::Rooted<JSObject*> jsImplGlobal(cx, JS::GetNonCCWObjectGlobal(jsImplObj));
-        // Build the C++ implementation.
-        RefPtr<${implClass}> impl = new ${implClass}(jsImplObj, jsImplGlobal, globalHolder);
         $*{initCall}
         return impl.forget();
         """,
@@ -18077,14 +18077,12 @@ class GlobalGenRoots():
     @staticmethod
     def WebIDLPrefs(config):
         prefs = set()
-        # Bug 1568729: ideally we'd be smarter about this, and only include the
-        # required StaticPrefs_*.h file, rather than StaticPrefsAll.h, which
-        # includes all StaticPrefs_*.h files.
-        headers = set(["mozilla/dom/WebIDLPrefs.h", "mozilla/StaticPrefsAll.h"])
+        headers = set(["mozilla/dom/WebIDLPrefs.h"])
         for d in config.getDescriptors(hasInterfaceOrInterfacePrototypeObject=True):
             for m in d.interface.members:
                 pref = PropertyDefiner.getStringAttr(m, "Pref")
                 if pref:
+                    headers.add(prefHeader(pref))
                     prefs.add((pref, prefIdentifier(pref)))
         prefs = sorted(prefs)
         declare = fill(

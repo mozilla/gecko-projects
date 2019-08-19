@@ -182,18 +182,14 @@ xpcom/xpidl/export: xpcom/idl-parser/xpidl/export
 dom/bindings/export: layout/style/export
 
 ifdef ENABLE_CLANG_PLUGIN
-$(filter-out config/host build/unix/stdc++compat/% build/clang-plugin/%,$(compile_targets)): build/clang-plugin/host build/clang-plugin/tests/target
-build/clang-plugin/tests/target: build/clang-plugin/host
+$(filter-out config/host build/unix/stdc++compat/% build/clang-plugin/%,$(compile_targets)): build/clang-plugin/host build/clang-plugin/tests/target-objects
+build/clang-plugin/tests/target-objects: build/clang-plugin/host
 endif
 
 # Interdependencies that moz.build world don't know about yet for compilation.
 # Note some others are hardcoded or "guessed" in recursivemake.py and emitter.py
 ifeq ($(MOZ_WIDGET_TOOLKIT),gtk3)
 toolkit/library/target: widget/gtk/mozgtk/gtk3/target
-endif
-ifdef MOZ_LDAP_XPCOM
-ldap/target: security/target mozglue/build/target
-toolkit/library/target: ldap/target
 endif
 endif
 # Most things are built during compile (target/host), but some things happen during export

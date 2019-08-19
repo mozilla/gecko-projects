@@ -153,7 +153,7 @@ extern already_AddRefed<nsIScriptTimeoutHandler> NS_CreateJSTimeoutHandler(
     JSContext* aCx, nsGlobalWindowInner* aWindow, const nsAString& aExpression,
     mozilla::ErrorResult& aError);
 
-extern const js::Class OuterWindowProxyClass;
+extern const JSClass OuterWindowProxyClass;
 
 //*****************************************************************************
 // nsGlobalWindowInner: Global Object for Scripting
@@ -232,7 +232,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   }
 
   static already_AddRefed<nsGlobalWindowInner> Create(
-      nsGlobalWindowOuter* aOuter, bool aIsChrome);
+      nsGlobalWindowOuter* aOuter, bool aIsChrome,
+      mozilla::dom::WindowGlobalChild* aActor);
 
   // nsISupports
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -390,9 +391,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   static bool IsRequestIdleCallbackEnabled(JSContext* aCx,
                                            JSObject* /* unused */);
-
-  static bool IsWindowPrintEnabled(JSContext* /* unused */,
-                                   JSObject* /* unused */);
 
   static bool RegisterProtocolHandlerAllowedForContext(JSContext* /* unused */,
                                                        JSObject* aObj);
@@ -618,7 +616,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
       mozilla::ErrorResult& aError);
 
  protected:
-  explicit nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow);
+  explicit nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow,
+                               mozilla::dom::WindowGlobalChild* aActor);
   // Initializes the mWasOffline member variable
   void InitWasOffline();
 
@@ -653,8 +652,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   void GetSidebar(mozilla::dom::OwningExternalOrWindowProxy& aResult,
                   mozilla::ErrorResult& aRv);
-  already_AddRefed<mozilla::dom::External> GetExternal(
-      mozilla::ErrorResult& aRv);
+  mozilla::dom::External* GetExternal(mozilla::ErrorResult& aRv);
 
   mozilla::dom::Worklet* GetPaintWorklet(mozilla::ErrorResult& aRv);
 
@@ -946,7 +944,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   bool ShouldReportForServiceWorkerScope(const nsAString& aScope);
 
-  already_AddRefed<mozilla::dom::InstallTriggerImpl> GetInstallTrigger();
+  mozilla::dom::InstallTriggerImpl* GetInstallTrigger();
 
   nsIDOMWindowUtils* GetWindowUtils(mozilla::ErrorResult& aRv);
 

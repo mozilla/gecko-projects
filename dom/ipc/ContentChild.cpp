@@ -17,6 +17,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/BackgroundHangMonitor.h"
+#include "mozilla/BenchmarkStorageChild.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/MemoryTelemetry.h"
 #include "mozilla/NullPrincipal.h"
@@ -57,6 +58,7 @@
 #include "mozilla/dom/SHistoryChild.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/dom/URLClassifierChild.h"
+#include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WorkerDebugger.h"
 #include "mozilla/dom/WorkerDebuggerManager.h"
 #include "mozilla/dom/ipc/SharedMap.h"
@@ -229,6 +231,7 @@
 #endif
 
 #include "mozilla/dom/File.h"
+#include "mozilla/dom/MediaController.h"
 #include "mozilla/dom/PPresentationChild.h"
 #include "mozilla/dom/PresentationIPCService.h"
 #include "mozilla/ipc/InputStreamUtils.h"
@@ -773,7 +776,7 @@ ContentChild::ProvideWindow(mozIDOMWindowProxy* aParent, uint32_t aChromeFlags,
                             const nsAString& aName, const nsACString& aFeatures,
                             bool aForceNoOpener, bool aForceNoReferrer,
                             nsDocShellLoadState* aLoadState, bool* aWindowIsNew,
-                            mozIDOMWindowProxy** aReturn) {
+                            BrowsingContext** aReturn) {
   return ProvideWindowCommon(
       nullptr, aParent, false, aChromeFlags, aCalledFromJS, aPositionSpecified,
       aSizeSpecified, aURI, aName, aFeatures, aForceNoOpener, aForceNoReferrer,
@@ -862,7 +865,7 @@ nsresult ContentChild::ProvideWindowCommon(
     bool aSizeSpecified, nsIURI* aURI, const nsAString& aName,
     const nsACString& aFeatures, bool aForceNoOpener, bool aForceNoReferrer,
     nsDocShellLoadState* aLoadState, bool* aWindowIsNew,
-    mozIDOMWindowProxy** aReturn) {
+    BrowsingContext** aReturn) {
   *aReturn = nullptr;
 
   nsAutoPtr<IPCTabContext> ipcContext;
@@ -976,9 +979,25 @@ nsresult ContentChild::ProvideWindowCommon(
       nullptr, openerBC, aName, BrowsingContext::Type::Content);
 
   TabContext newTabContext = aTabOpener ? *aTabOpener : TabContext();
-  RefPtr<BrowserChild> newChild =
-      new BrowserChild(this, tabId, tabGroup, newTabContext, browsingContext,
-                       aChromeFlags, /* aIsTopLevel */ true);
+
+  // The initial about:blank document we generate within the nsDocShell will
+  // almost certainly be replaced at some point. Unfortunately, getting the
+  // principal right here causes bugs due to frame scripts not getting events
+  // they expect, due to the real initial about:blank not being created yet.
+  //
+  // For this reason, we intentionally mispredict the initial principal here, so
+  // that we can act the same as we did before when not predicting a result
+  // principal. This `PWindowGlobal` will almost immediately be destroyed.
+  nsCOMPtr<nsIPrincipal> initialPrincipal =
+      NullPrincipal::Create(newTabContext.OriginAttributesRef());
+  WindowGlobalInit windowInit = WindowGlobalActor::AboutBlankInitializer(
+      browsingContext, initialPrincipal);
+
+  auto windowChild = MakeRefPtr<WindowGlobalChild>(windowInit, nullptr);
+
+  auto newChild = MakeRefPtr<BrowserChild>(this, tabId, tabGroup, newTabContext,
+                                           browsingContext, aChromeFlags,
+                                           /* aIsTopLevel */ true);
 
   if (aTabOpener) {
     MOZ_ASSERT(ipcContext->type() == IPCTabContext::TPopupIPCTabContext);
@@ -993,24 +1012,31 @@ nsresult ContentChild::ProvideWindowCommon(
     return NS_ERROR_ABORT;
   }
 
-  // Open a remote endpoint for our PBrowser actor. DeallocPBrowserChild
-  // releases the ref taken.
-  ManagedEndpoint<PBrowserParent> parentEp =
-      OpenPBrowserEndpoint(do_AddRef(newChild).take());
+  // Open a remote endpoint for our PBrowser actor.
+  ManagedEndpoint<PBrowserParent> parentEp = OpenPBrowserEndpoint(newChild);
   if (NS_WARN_IF(!parentEp.IsValid())) {
     return NS_ERROR_ABORT;
   }
 
-  // Tell the parent process to set up its PBrowserParent.
-  if (NS_WARN_IF(!SendConstructPopupBrowser(std::move(parentEp), tabId,
-                                            *ipcContext, browsingContext,
-                                            aChromeFlags))) {
+  // Open a remote endpoint for our PWindowGlobal actor.
+  ManagedEndpoint<PWindowGlobalParent> windowParentEp =
+      newChild->OpenPWindowGlobalEndpoint(windowChild);
+  if (NS_WARN_IF(!windowParentEp.IsValid())) {
     return NS_ERROR_ABORT;
   }
 
+  // Tell the parent process to set up its PBrowserParent.
+  if (NS_WARN_IF(!SendConstructPopupBrowser(
+          std::move(parentEp), std::move(windowParentEp), tabId, *ipcContext,
+          windowInit, aChromeFlags))) {
+    return NS_ERROR_ABORT;
+  }
+
+  windowChild->Init();
+
   // Now that |newChild| has had its IPC link established, call |Init| to set it
   // up.
-  if (NS_FAILED(newChild->Init(aParent))) {
+  if (NS_FAILED(newChild->Init(aParent, windowChild))) {
     return NS_ERROR_ABORT;
   }
 
@@ -1106,9 +1132,7 @@ nsresult ContentChild::ProvideWindowCommon(
       newChild->RecvLoadURL(urlToLoad, showInfo);
     }
 
-    nsCOMPtr<mozIDOMWindowProxy> win =
-        do_GetInterface(newChild->WebNavigation());
-    win.forget(aReturn);
+    browsingContext.forget(aReturn);
   };
 
   // NOTE: Capturing by reference here is safe, as this function won't return
@@ -1809,9 +1833,10 @@ bool ContentChild::DeallocPJavaScriptChild(PJavaScriptChild* aChild) {
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvConstructBrowser(
-    ManagedEndpoint<PBrowserChild>&& aBrowserEp, const TabId& aTabId,
+    ManagedEndpoint<PBrowserChild>&& aBrowserEp,
+    ManagedEndpoint<PWindowGlobalChild>&& aWindowEp, const TabId& aTabId,
     const TabId& aSameTabGroupAs, const IPCTabContext& aContext,
-    BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags,
+    const WindowGlobalInit& aWindowInit, const uint32_t& aChromeFlags,
     const ContentParentId& aCpID, const bool& aIsForBrowser,
     const bool& aIsTopLevel) {
   MOZ_ASSERT(!IsShuttingDown());
@@ -1842,17 +1867,24 @@ mozilla::ipc::IPCResult ContentChild::RecvConstructBrowser(
     MOZ_CRASH("Invalid TabContext received from the parent process.");
   }
 
-  RefPtr<BrowserChild> browserChild =
-      BrowserChild::Create(this, aTabId, aSameTabGroupAs, tc.GetTabContext(),
-                           aBrowsingContext, aChromeFlags, aIsTopLevel);
+  auto windowChild = MakeRefPtr<WindowGlobalChild>(aWindowInit, nullptr);
 
-  // Bind the created BrowserChild to IPC to actually link the actor. The ref
-  // here is released in DeallocPBrowserChild.
-  if (NS_WARN_IF(!BindPBrowserEndpoint(std::move(aBrowserEp),
-                                       do_AddRef(browserChild).take()))) {
+  RefPtr<BrowserChild> browserChild = BrowserChild::Create(
+      this, aTabId, aSameTabGroupAs, tc.GetTabContext(),
+      aWindowInit.browsingContext(), aChromeFlags, aIsTopLevel);
+
+  // Bind the created BrowserChild to IPC to actually link the actor.
+  if (NS_WARN_IF(!BindPBrowserEndpoint(std::move(aBrowserEp), browserChild))) {
     return IPC_FAIL(this, "BindPBrowserEndpoint failed");
   }
 
+  if (NS_WARN_IF(!browserChild->BindPWindowGlobalEndpoint(std::move(aWindowEp),
+                                                          windowChild))) {
+    return IPC_FAIL(this, "BindPWindowGlobalEndpoint failed");
+  }
+  windowChild->Init();
+
+  // Ensure that a TabGroup is set for our BrowserChild before running `Init`.
   if (!browserChild->mTabGroup) {
     browserChild->mTabGroup = TabGroup::GetFromActor(browserChild);
 
@@ -1862,7 +1894,8 @@ mozilla::ipc::IPCResult ContentChild::RecvConstructBrowser(
     }
   }
 
-  if (NS_WARN_IF(NS_FAILED(browserChild->Init(/* aOpener */ nullptr)))) {
+  if (NS_WARN_IF(
+          NS_FAILED(browserChild->Init(/* aOpener */ nullptr, windowChild)))) {
     return IPC_FAIL(browserChild, "BrowserChild::Init failed");
   }
 
@@ -1900,27 +1933,12 @@ bool ContentChild::DeallocPFileDescriptorSetChild(
   return true;
 }
 
-bool ContentChild::DeallocPBrowserChild(PBrowserChild* aIframe) {
-  BrowserChild* child = static_cast<BrowserChild*>(aIframe);
-  NS_RELEASE(child);
-  return true;
-}
-
-PIPCBlobInputStreamChild* ContentChild::AllocPIPCBlobInputStreamChild(
-    const nsID& aID, const uint64_t& aSize) {
-  // IPCBlobInputStreamChild is refcounted. Here it's created and in
-  // DeallocPIPCBlobInputStreamChild is released.
-
+already_AddRefed<PIPCBlobInputStreamChild>
+ContentChild::AllocPIPCBlobInputStreamChild(const nsID& aID,
+                                            const uint64_t& aSize) {
   RefPtr<IPCBlobInputStreamChild> actor =
       new IPCBlobInputStreamChild(aID, aSize);
-  return actor.forget().take();
-}
-
-bool ContentChild::DeallocPIPCBlobInputStreamChild(
-    PIPCBlobInputStreamChild* aActor) {
-  RefPtr<IPCBlobInputStreamChild> actor =
-      dont_AddRef(static_cast<IPCBlobInputStreamChild*>(aActor));
-  return true;
+  return actor.forget();
 }
 
 mozilla::PRemoteSpellcheckEngineChild*
@@ -2074,10 +2092,8 @@ already_AddRefed<RemoteBrowser> ContentChild::CreateBrowser(
   TabId tabId(nsContentUtils::GenerateTabId());
   RefPtr<BrowserBridgeChild> browserBridge =
       new BrowserBridgeChild(aFrameLoader, aBrowsingContext, tabId);
-  // Reference is freed in BrowserChild::DeallocPBrowserBridgeChild.
   browserChild->SendPBrowserBridgeConstructor(
-      do_AddRef(browserBridge).take(),
-      PromiseFlatString(aContext.PresentationURL()), aRemoteType,
+      browserBridge, PromiseFlatString(aContext.PresentationURL()), aRemoteType,
       aBrowsingContext, chromeFlags, tabId);
   browserBridge->mIPCOpen = true;
 
@@ -2196,45 +2212,22 @@ bool ContentChild::DeallocPPSMContentDownloaderChild(
   return true;
 }
 
-PExternalHelperAppChild* ContentChild::AllocPExternalHelperAppChild(
-    const Maybe<URIParams>& uri,
-    const Maybe<mozilla::net::LoadInfoArgs>& aLoadInfoArgs,
-    const nsCString& aMimeContentType, const nsCString& aContentDisposition,
-    const uint32_t& aContentDispositionHint,
-    const nsString& aContentDispositionFilename, const bool& aForceSave,
-    const int64_t& aContentLength, const bool& aWasFileChannel,
-    const Maybe<URIParams>& aReferrer, PBrowserChild* aBrowser) {
-  auto* child = new ExternalHelperAppChild();
-  child->AddRef();
-  return child;
-}
-
-bool ContentChild::DeallocPExternalHelperAppChild(
-    PExternalHelperAppChild* aService) {
-  ExternalHelperAppChild* child =
-      static_cast<ExternalHelperAppChild*>(aService);
-  child->Release();
-  return true;
-}
-
-PHandlerServiceChild* ContentChild::AllocPHandlerServiceChild() {
-  auto* actor = new HandlerServiceChild();
-  actor->AddRef();
-  return actor;
-}
-
-bool ContentChild::DeallocPHandlerServiceChild(
-    PHandlerServiceChild* aHandlerServiceChild) {
-  static_cast<HandlerServiceChild*>(aHandlerServiceChild)->Release();
-  return true;
-}
-
 media::PMediaChild* ContentChild::AllocPMediaChild() {
   return media::AllocPMediaChild();
 }
 
 bool ContentChild::DeallocPMediaChild(media::PMediaChild* aActor) {
   return media::DeallocPMediaChild(aActor);
+}
+
+PBenchmarkStorageChild* ContentChild::AllocPBenchmarkStorageChild() {
+  return BenchmarkStorageChild::Instance();
+}
+
+bool ContentChild::DeallocPBenchmarkStorageChild(
+    PBenchmarkStorageChild* aActor) {
+  delete aActor;
+  return true;
 }
 
 PSpeechSynthesisChild* ContentChild::AllocPSpeechSynthesisChild() {
@@ -3215,48 +3208,6 @@ mozilla::ipc::IPCResult ContentChild::RecvSetAudioSessionData(
 #endif
 }
 
-// This code goes here rather than nsGlobalWindow.cpp because nsGlobalWindow.cpp
-// can't include ContentChild.h since it includes windows.h.
-
-static uint64_t gNextWindowID = 0;
-
-// We use only 53 bits for the window ID so that it can be converted to and from
-// a JS value without loss of precision. The upper bits of the window ID hold
-// the process ID. The lower bits identify the window.
-static const uint64_t kWindowIDTotalBits = 53;
-static const uint64_t kWindowIDProcessBits = 22;
-static const uint64_t kWindowIDWindowBits =
-    kWindowIDTotalBits - kWindowIDProcessBits;
-
-// Try to return a window ID that is unique across processes and that will never
-// be recycled.
-uint64_t NextWindowID() {
-  uint64_t processID = 0;
-  if (XRE_IsContentProcess()) {
-    ContentChild* cc = ContentChild::GetSingleton();
-    processID = cc->GetID();
-  }
-
-  MOZ_RELEASE_ASSERT(processID < (uint64_t(1) << kWindowIDProcessBits));
-  uint64_t processBits =
-      processID & ((uint64_t(1) << kWindowIDProcessBits) - 1);
-
-  // Make sure no actual window ends up with mWindowID == 0.
-  uint64_t windowID = ++gNextWindowID;
-
-  MOZ_RELEASE_ASSERT(windowID < (uint64_t(1) << kWindowIDWindowBits));
-  uint64_t windowBits = windowID & ((uint64_t(1) << kWindowIDWindowBits) - 1);
-
-  // Make sure that the middleman process doesn't generate WindowIDs which
-  // conflict with the process it's wrapping (which shares a ContentParentID
-  // with it).
-  if (recordreplay::IsMiddleman()) {
-    windowBits |= uint64_t(1) << (kWindowIDWindowBits - 1);
-  }
-
-  return (processBits << kWindowIDWindowBits) | windowBits;
-}
-
 mozilla::ipc::IPCResult ContentChild::RecvInvokeDragSession(
     nsTArray<IPCDataTransfer>&& aTransfers, const uint32_t& aAction) {
   nsCOMPtr<nsIDragService> dragService =
@@ -3780,6 +3731,16 @@ mozilla::ipc::IPCResult ContentChild::RecvSetMediaMuted(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult ContentChild::RecvUpdateMediaAction(
+    BrowsingContext* aContext, MediaControlActions aAction) {
+  MOZ_ASSERT(aContext);
+  nsCOMPtr<nsPIDOMWindowOuter> window = aContext->GetDOMWindow();
+  if (window) {
+    window->UpdateMediaAction(aAction);
+  }
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult ContentChild::RecvDestroySHEntrySharedState(
     const uint64_t& aID) {
   SHEntryChildShared::Remove(aID);
@@ -3823,9 +3784,14 @@ already_AddRefed<nsIEventTarget> ContentChild::GetSpecificMessageEventTarget(
       // our newly created actor, and sameTabGroupAs is needed to determine if
       // we're going to join an existing TabGroup.
       ManagedEndpoint<PBrowserChild> endpoint;
+      ManagedEndpoint<PWindowGlobalChild> windowGlobalEndpoint;
       TabId tabId, sameTabGroupAs;
       PickleIterator iter(aMsg);
       if (NS_WARN_IF(!IPC::ReadParam(&aMsg, &iter, &endpoint))) {
+        return nullptr;
+      }
+      aMsg.IgnoreSentinel(&iter);
+      if (NS_WARN_IF(!IPC::ReadParam(&aMsg, &iter, &windowGlobalEndpoint))) {
         return nullptr;
       }
       aMsg.IgnoreSentinel(&iter);
@@ -4087,10 +4053,18 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowPostMessage(
 
 mozilla::ipc::IPCResult ContentChild::RecvCommitBrowsingContextTransaction(
     BrowsingContext* aContext, BrowsingContext::Transaction&& aTransaction,
-    BrowsingContext::FieldEpochs&& aEpochs) {
-  if (aContext) {
-    aTransaction.Apply(aContext, nullptr, &aEpochs);
+    uint64_t aEpoch) {
+  if (!aContext || aContext->IsDiscarded()) {
+    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
+            ("ChildIPC: Trying to send a message to dead or detached context"));
+    return IPC_OK();
   }
+
+  if (!aTransaction.Validate(aContext, nullptr, aEpoch)) {
+    return IPC_FAIL(this, "Invalid BrowsingContext transaction from Parent");
+  }
+
+  aTransaction.Apply(aContext);
   return IPC_OK();
 }
 

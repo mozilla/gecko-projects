@@ -1,12 +1,18 @@
 import {
   DSCard,
+  DefaultMeta,
   PlaceholderDSCard,
+  VariantMeta,
 } from "content-src/components/DiscoveryStreamComponents/DSCard/DSCard";
+import {
+  DSContextFooter,
+  StatusMessage,
+} from "content-src/components/DiscoveryStreamComponents/DSContextFooter/DSContextFooter";
 import { actionCreators as ac } from "common/Actions.jsm";
 import { DSLinkMenu } from "content-src/components/DiscoveryStreamComponents/DSLinkMenu/DSLinkMenu";
 import React from "react";
 import { SafeAnchor } from "content-src/components/DiscoveryStreamComponents/SafeAnchor/SafeAnchor";
-import { shallow } from "enzyme";
+import { shallow, mount } from "enzyme";
 
 describe("<DSCard>", () => {
   let wrapper;
@@ -14,6 +20,7 @@ describe("<DSCard>", () => {
 
   beforeEach(() => {
     wrapper = shallow(<DSCard />);
+    wrapper.setState({ isSeen: true });
     sandbox = sinon.createSandbox();
   });
 
@@ -71,12 +78,31 @@ describe("<DSCard>", () => {
     assert.equal(wrapper.find(".active").length, 0);
   });
 
+  it("should render badges for pocket, bookmark when not a spoc element ", () => {
+    wrapper = mount(<DSCard context_type="bookmark" />);
+    wrapper.setState({ isSeen: true });
+    const contextFooter = wrapper.find(DSContextFooter);
+
+    assert.lengthOf(contextFooter.find(StatusMessage), 1);
+  });
+
+  it("should render Sponsored Context for a spoc element", () => {
+    const context = "Sponsored by Foo";
+    wrapper = mount(<DSCard context_type="bookmark" context={context} />);
+    wrapper.setState({ isSeen: true });
+    const contextFooter = wrapper.find(DSContextFooter);
+
+    assert.lengthOf(contextFooter.find(StatusMessage), 0);
+    assert.equal(contextFooter.find(".story-sponsored-label").text(), context);
+  });
+
   describe("onLinkClick", () => {
     let dispatch;
 
     beforeEach(() => {
       dispatch = sandbox.stub();
       wrapper = shallow(<DSCard dispatch={dispatch} />);
+      wrapper.setState({ isSeen: true });
     });
 
     it("should call dispatch with the correct events", () => {
@@ -134,6 +160,106 @@ describe("<DSCard>", () => {
       );
     });
   });
+
+  describe("DSCard with CTA", () => {
+    beforeEach(() => {
+      wrapper = mount(<DSCard />);
+      wrapper.setState({ isSeen: true });
+    });
+
+    it("should render Default Meta", () => {
+      const default_meta = wrapper.find(DefaultMeta);
+      assert.ok(default_meta.exists());
+    });
+
+    it("should not render cta-link for item with no cta", () => {
+      const meta = wrapper.find(DefaultMeta);
+      assert.notOk(meta.find(".cta-link").exists());
+    });
+
+    it("should render cta-link by default when item has cta", () => {
+      wrapper.setProps({ cta: "test" });
+      const meta = wrapper.find(DefaultMeta);
+      assert.equal(meta.find(".cta-link").text(), "test");
+    });
+
+    it("should not render cta-button for non spoc content", () => {
+      wrapper.setProps({ cta: "test", cta_variant: true });
+      const meta = wrapper.find(VariantMeta);
+      assert.lengthOf(meta.find(".cta-button"), 0);
+    });
+
+    it("should render cta-button when item has cta and cta button variant is true and is spoc", () => {
+      wrapper.setProps({
+        cta: "test",
+        cta_variant: true,
+        context: "Sponsored by Foo",
+      });
+      const meta = wrapper.find(VariantMeta);
+      assert.equal(meta.find(".cta-button").text(), "test");
+    });
+
+    it("should not render Sponsored by label in footer for spoc item with cta button variant", () => {
+      wrapper.setProps({
+        cta: "test",
+        context: "Sponsored by test",
+        cta_variant: true,
+      });
+
+      assert.ok(wrapper.find(VariantMeta).exists());
+      assert.notOk(wrapper.find(DSContextFooter).exists());
+    });
+
+    it("should render sponsor text on top for spoc item and cta_variant true", () => {
+      wrapper.setProps({
+        sponsor: "Test",
+        context: "Sponsored by test",
+        cta_variant: true,
+      });
+
+      assert.ok(wrapper.find(VariantMeta).exists());
+      const meta = wrapper.find(VariantMeta);
+      assert.equal(meta.find(".source").text(), "Test · Sponsored");
+    });
+  });
+  describe("DSCard with Intersection Observer", () => {
+    beforeEach(() => {
+      wrapper = shallow(<DSCard />);
+    });
+
+    it("should render card when seen", () => {
+      let card = wrapper.find("div.ds-card.placeholder");
+      assert.lengthOf(card, 1);
+
+      wrapper.instance().observer = {
+        unobserve: sandbox.stub(),
+      };
+      wrapper.instance().placholderElement = "element";
+
+      wrapper.instance().onSeen([
+        {
+          isIntersecting: true,
+        },
+      ]);
+
+      assert.isTrue(wrapper.instance().state.isSeen);
+      card = wrapper.find("div.ds-card.placeholder");
+      assert.lengthOf(card, 0);
+      assert.lengthOf(wrapper.find(SafeAnchor), 1);
+      assert.calledOnce(wrapper.instance().observer.unobserve);
+      assert.calledWith(wrapper.instance().observer.unobserve, "element");
+    });
+
+    it("should setup proper placholder ref for isSeen", () => {
+      wrapper.instance().setPlaceholderRef("element");
+      assert.equal(wrapper.instance().placholderElement, "element");
+    });
+
+    it("should setup observer on componentDidMount", () => {
+      wrapper = mount(<DSCard />);
+      assert.isTrue(!!wrapper.instance().observer);
+    });
+  });
 });
 
 describe("<PlaceholderDSCard> component", () => {
@@ -148,21 +274,21 @@ describe("<PlaceholderDSCard> component", () => {
 
   it("should contain placeholder div", () => {
     const wrapper = shallow(<DSCard placeholder={true} />);
+    wrapper.setState({ isSeen: true });
     const card = wrapper.find("div.ds-card.placeholder");
     assert.lengthOf(card, 1);
   });
 
   it("should not be clickable", () => {
     const wrapper = shallow(<DSCard placeholder={true} />);
+    wrapper.setState({ isSeen: true });
     const anchor = wrapper.find("SafeAnchor.ds-card-link");
-    assert.lengthOf(anchor, 1);
-
-    const linkClick = anchor.prop("onLinkClick");
-    assert.isUndefined(linkClick);
+    assert.lengthOf(anchor, 0);
   });
 
   it("should not have context menu", () => {
     const wrapper = shallow(<DSCard placeholder={true} />);
+    wrapper.setState({ isSeen: true });
     const linkMenu = wrapper.find(DSLinkMenu);
     assert.lengthOf(linkMenu, 0);
   });

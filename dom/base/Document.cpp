@@ -34,11 +34,13 @@
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_full_screen_api.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_page_load.h"
 #include "mozilla/StaticPrefs_plugins.h"
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StaticPrefs_security.h"
 #include "mozilla/StorageAccess.h"
 #include "mozilla/TextEditor.h"
+#include "mozilla/URLDecorationStripper.h"
 #include "mozilla/URLExtraData.h"
 #include "mozilla/Base64.h"
 #include <algorithm>
@@ -120,6 +122,7 @@
 #include "nsLayoutUtils.h"  // for GetFrameForPoint
 #include "nsIFrame.h"
 #include "nsIBrowserChild.h"
+#include "nsImportModule.h"
 
 #include "nsRange.h"
 #include "mozilla/dom/DocumentType.h"
@@ -135,10 +138,12 @@
 #include "nsAboutProtocolUtils.h"
 #include "nsCanvasFrame.h"
 #include "nsContentCID.h"
+#include "nsContentSecurityUtils.h"
 #include "nsError.h"
 #include "nsPresContext.h"
 #include "nsThreadUtils.h"
 #include "nsNodeInfoManager.h"
+#include "nsIBrowserUsage.h"
 #include "nsIEditingSession.h"
 #include "nsIFileChannel.h"
 #include "nsIMultiPartChannel.h"
@@ -155,7 +160,8 @@
 #include "nsIAuthPrompt2.h"
 
 #include "nsIScriptSecurityManager.h"
-#include "nsIPermissionManager.h"
+#include "nsIPermission.h"
+#include "nsPermissionManager.h"
 #include "nsIPrincipal.h"
 #include "nsIPrivateBrowsingChannel.h"
 #include "ExpandedPrincipal.h"
@@ -325,6 +331,7 @@
 #include "mozilla/PendingFullscreenEvent.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/ResultExtensions.h"
 #include "nsHTMLTags.h"
 #include "MobileViewportManager.h"
 #include "NodeUbiReporting.h"
@@ -832,19 +839,14 @@ nsresult ExternalResourceMap::AddExternalResource(nsIURI* aURI,
     doc = aViewer->GetDocument();
     NS_ASSERTION(doc, "Must have a document");
 
-    if (doc->IsXULDocument()) {
-      // We don't handle XUL stuff here yet.
-      rv = NS_ERROR_NOT_AVAILABLE;
-    } else {
-      doc->SetDisplayDocument(aDisplayDocument);
+    doc->SetDisplayDocument(aDisplayDocument);
 
-      // Make sure that hiding our viewer will tear down its presentation.
-      aViewer->SetSticky(false);
+    // Make sure that hiding our viewer will tear down its presentation.
+    aViewer->SetSticky(false);
 
-      rv = aViewer->Init(nullptr, nsIntRect(0, 0, 0, 0));
-      if (NS_SUCCEEDED(rv)) {
-        rv = aViewer->Open(nullptr, nullptr);
-      }
+    rv = aViewer->Init(nullptr, nsIntRect(0, 0, 0, 0), nullptr);
+    if (NS_SUCCEEDED(rv)) {
+      rv = aViewer->Open(nullptr, nullptr);
     }
 
     if (NS_FAILED(rv)) {
@@ -1391,9 +1393,7 @@ bool Document::CallerIsTrustedAboutCertError(JSContext* aCx,
 
   // getSpec is an expensive operation, hence we first check the scheme
   // to see if the caller is actually an about: page.
-  bool isAboutScheme = false;
-  uri->SchemeIs("about", &isAboutScheme);
-  if (!isAboutScheme) {
+  if (!uri->SchemeIs("about")) {
     return false;
   }
 
@@ -1658,11 +1658,7 @@ bool Document::IsAboutPage() const {
   nsCOMPtr<nsIPrincipal> principal = NodePrincipal();
   nsCOMPtr<nsIURI> uri;
   principal->GetURI(getter_AddRefs(uri));
-  bool isAboutScheme = true;
-  if (uri) {
-    uri->SchemeIs("about", &isAboutScheme);
-  }
-  return isAboutScheme;
+  return !uri || uri->SchemeIs("about");
 }
 
 void Document::ConstructUbiNode(void* storage) {
@@ -1742,9 +1738,6 @@ Document::~Document() {
       ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_COUNT, 1);
       if (mDocTreeHadAudibleMedia) {
         ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_HAD_MEDIA_COUNT, 1);
-      }
-      if (mDocTreeHadPlayRevoked) {
-        ScalarAdd(Telemetry::ScalarID::MEDIA_PAGE_HAD_PLAY_REVOKED_COUNT, 1);
       }
 
       if (IsHTMLDocument()) {
@@ -2267,7 +2260,7 @@ void Document::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup) {
   nsCOMPtr<nsIPrincipal> principal;
   nsCOMPtr<nsIPrincipal> storagePrincipal;
   if (aChannel) {
-    // Note: this code is duplicated in XULDocument::StartDocumentLoad and
+    // Note: this code is duplicated in PrototypeDocumentContentSink::Init and
     // nsScriptSecurityManager::GetChannelResultPrincipals.
     // Note: this should match nsDocShell::OnLoadingSite
     NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
@@ -3396,9 +3389,8 @@ void Document::SetDocumentURI(nsIURI* aURI) {
 
   // Tell our WindowGlobalParent that the document's URI has been changed.
   nsPIDOMWindowInner* inner = GetInnerWindow();
-  WindowGlobalChild* wgc = inner ? inner->GetWindowGlobalChild() : nullptr;
-  if (wgc) {
-    Unused << wgc->SendUpdateDocumentURI(mDocumentURI);
+  if (inner && inner->GetWindowGlobalChild()) {
+    inner->GetWindowGlobalChild()->SetDocumentURI(mDocumentURI);
   }
 }
 
@@ -3506,8 +3498,7 @@ void Document::SetPrincipals(nsIPrincipal* aNewPrincipal,
   if (aNewPrincipal && mAllowDNSPrefetch && sDisablePrefetchHTTPSPref) {
     nsCOMPtr<nsIURI> uri;
     aNewPrincipal->GetURI(getter_AddRefs(uri));
-    bool isHTTPS;
-    if (!uri || NS_FAILED(uri->SchemeIs("https", &isHTTPS)) || isHTTPS) {
+    if (!uri || uri->SchemeIs("https")) {
       mAllowDNSPrefetch = false;
     }
   }
@@ -5418,7 +5409,7 @@ void Document::GetReferrer(nsAString& aReferrer) const {
   }
 
   nsAutoCString uri;
-  nsresult rv = referrer->GetSpec(uri);
+  nsresult rv = URLDecorationStripper::StripTrackingIdentifiers(referrer, uri);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return;
   }
@@ -5760,6 +5751,14 @@ void Document::SetBaseURI(nsIURI* aURI) {
   RefreshLinkHrefs();
 }
 
+Result<nsCOMPtr<nsIURI>, nsresult> Document::ResolveWithBaseURI(
+    const nsAString& aURI) {
+  nsCOMPtr<nsIURI> resolvedURI;
+  MOZ_TRY(
+      NS_NewURI(getter_AddRefs(resolvedURI), aURI, nullptr, GetDocBaseURI()));
+  return std::move(resolvedURI);
+}
+
 URLExtraData* Document::DefaultStyleAttrURLData() {
   MOZ_ASSERT(NS_IsMainThread());
   nsIURI* baseURI = GetDocBaseURI();
@@ -5949,6 +5948,12 @@ already_AddRefed<PresShell> Document::CreatePresShell(
     // Gaining a shell causes changes in how media queries are evaluated, so
     // invalidate that.
     aContext->MediaFeatureValuesChanged({MediaFeatureChange::kAllChanges});
+  } else {
+    // Otherwise, we need to at least recompute the initial style now that our
+    // resolution and such may have changed. This is done by
+    // MediaFeatureValuesChanged above otherwise, see
+    // kMediaFeaturesAffectingDefaultStyle.
+    mStyleSet->ClearCachedStyleData();
   }
 
   // Make sure to never paint if we belong to an invisible DocShell.
@@ -6072,6 +6077,10 @@ void Document::DeletePresShell() {
 
   if (mResizeObserverController) {
     mResizeObserverController->ShellDetachedFromDocument();
+  }
+
+  if (IsEditingOn()) {
+    TurnEditingOff();
   }
 
   PresShell* oldPresShell = mPresShell;
@@ -6476,9 +6485,13 @@ nsresult Document::LoadAdditionalStyleSheet(additionalSheetType aType,
       MOZ_CRASH("impossible value for aType");
   }
 
-  RefPtr<StyleSheet> sheet;
-  nsresult rv = loader->LoadSheetSync(aSheetURI, parsingMode, true, &sheet);
-  NS_ENSURE_SUCCESS(rv, rv);
+  auto result = loader->LoadSheetSync(aSheetURI, parsingMode,
+                                      css::Loader::UseSystemPrincipal::Yes);
+  if (result.isErr()) {
+    return result.unwrapErr();
+  }
+
+  RefPtr<StyleSheet> sheet = result.unwrap();
 
   sheet->SetAssociatedDocumentOrShadowRoot(
       this, StyleSheet::OwnedByDocumentOrShadowRoot);
@@ -6636,7 +6649,7 @@ bool Document::IsTopLevelWindowInactive() const {
   }
 
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  treeItem->GetRootTreeItem(getter_AddRefs(rootItem));
+  treeItem->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   if (!rootItem) {
     return false;
   }
@@ -7151,83 +7164,6 @@ void Document::DispatchContentLoadedEvents() {
   UnblockOnload(true);
 }
 
-#if defined(DEBUG) && !defined(ANDROID)
-// We want to get to a point where all about: pages ship with a CSP. This
-// assertion ensures that we can not deploy new about: pages without a CSP.
-// Initially we will whitelist legacy about: pages which not yet have a CSP
-// attached, but ultimately that whitelist should disappear.
-// Please note that any about: page should not use inline JS or inline CSS,
-// and instead should load JS and CSS from an external file (*.js, *.css)
-// which allows us to apply a strong CSP omitting 'unsafe-inline'. Ideally,
-// the CSP allows precisely the resources that need to be loaded; but it
-// should at least be as strong as:
-// <meta http-equiv="Content-Security-Policy" content="default-src chrome:"/>
-static void AssertAboutPageHasCSP(Document* aDocument) {
-  // Check if we are loading an about: URI at all
-  nsCOMPtr<nsIURI> documentURI = aDocument->GetDocumentURI();
-  bool isAboutURI =
-      (NS_SUCCEEDED(documentURI->SchemeIs("about", &isAboutURI)) && isAboutURI);
-
-  if (!isAboutURI ||
-      Preferences::GetBool("csp.skip_about_page_has_csp_assert")) {
-    return;
-  }
-
-  // Potentially init the legacy whitelist of about URIs without a CSP.
-  static StaticAutoPtr<nsTArray<nsCString>> sLegacyAboutPagesWithNoCSP;
-  if (!sLegacyAboutPagesWithNoCSP ||
-      Preferences::GetBool("csp.overrule_about_uris_without_csp_whitelist")) {
-    sLegacyAboutPagesWithNoCSP = new nsTArray<nsCString>();
-    nsAutoCString legacyAboutPages;
-    Preferences::GetCString("csp.about_uris_without_csp", legacyAboutPages);
-    for (const nsACString& hostString : legacyAboutPages.Split(',')) {
-      // please note that for the actual whitelist we only store the path of
-      // about: URI. Let's reassemble the full about URI here so we don't
-      // have to remove query arguments later.
-      nsCString aboutURI;
-      aboutURI.AppendLiteral("about:");
-      aboutURI.Append(hostString);
-      sLegacyAboutPagesWithNoCSP->AppendElement(aboutURI);
-    }
-    ClearOnShutdown(&sLegacyAboutPagesWithNoCSP);
-  }
-
-  // Check if the about URI is whitelisted
-  nsAutoCString aboutSpec;
-  documentURI->GetSpec(aboutSpec);
-  ToLowerCase(aboutSpec);
-  for (auto& legacyPageEntry : *sLegacyAboutPagesWithNoCSP) {
-    // please note that we perform a substring match here on purpose,
-    // so we don't have to deal and parse out all the query arguments
-    // the various about pages rely on.
-    if (aboutSpec.Find(legacyPageEntry) == 0) {
-      return;
-    }
-  }
-
-  nsCOMPtr<nsIContentSecurityPolicy> csp = aDocument->GetCsp();
-  bool foundDefaultSrc = false;
-  if (csp) {
-    uint32_t policyCount = 0;
-    csp->GetPolicyCount(&policyCount);
-    nsAutoString parsedPolicyStr;
-    for (uint32_t i = 0; i < policyCount; ++i) {
-      csp->GetPolicyString(i, parsedPolicyStr);
-      if (parsedPolicyStr.Find("default-src") >= 0) {
-        foundDefaultSrc = true;
-        break;
-      }
-    }
-  }
-  if (Preferences::GetBool("csp.overrule_about_uris_without_csp_whitelist")) {
-    NS_ASSERTION(foundDefaultSrc, "about: page must have a CSP");
-    return;
-  }
-  MOZ_ASSERT(foundDefaultSrc,
-             "about: page must contain a CSP including default-src");
-}
-#endif
-
 void Document::EndLoad() {
   bool turnOnEditing =
       mParser && (HasFlag(NODE_IS_EDITABLE) || mContentEditableCount > 0);
@@ -7235,7 +7171,7 @@ void Document::EndLoad() {
 #if defined(DEBUG) && !defined(ANDROID)
   // only assert if nothing stopped the load on purpose
   if (!mParserAborted) {
-    AssertAboutPageHasCSP(this);
+    nsContentSecurityUtils::AssertAboutPageHasCSP(this);
   }
 #endif
 
@@ -7552,16 +7488,6 @@ already_AddRefed<Element> Document::CreateElement(
     ErrorResult& rv) {
   rv = nsContentUtils::CheckQName(aTagName, false);
   if (rv.Failed()) {
-    return nullptr;
-  }
-
-  // Temporary check until XULDocument has been removed.
-  if (IsXULDocument()) {
-#if DEBUG
-    xpc_DumpJSStack(true, true, false);
-#endif
-    MOZ_ASSERT_UNREACHABLE("CreateElement() not allowed in XUL document.");
-    rv.Throw(NS_ERROR_FAILURE);
     return nullptr;
   }
 
@@ -8714,12 +8640,12 @@ mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> Document::Open(
     return nullptr;
   }
   RefPtr<nsGlobalWindowOuter> win = nsGlobalWindowOuter::Cast(outer);
-  nsCOMPtr<nsPIDOMWindowOuter> newWindow;
-  rv = win->OpenJS(aURL, aName, aFeatures, getter_AddRefs(newWindow));
-  if (!newWindow) {
+  RefPtr<BrowsingContext> newBC;
+  rv = win->OpenJS(aURL, aName, aFeatures, getter_AddRefs(newBC));
+  if (!newBC) {
     return nullptr;
   }
-  return WindowProxyHolder(newWindow->GetBrowsingContext());
+  return WindowProxyHolder(newBC.forget());
 }
 
 Document* Document::Open(const Optional<nsAString>& /* unused */,
@@ -9464,7 +9390,7 @@ static Maybe<LayoutDeviceToScreenScale> ParseScaleString(
   }
 
   nsresult scaleErrorCode;
-  float scale = aScaleString.ToFloat(&scaleErrorCode);
+  float scale = aScaleString.ToFloatAllowTrailingChars(&scaleErrorCode);
   if (NS_FAILED(scaleErrorCode)) {
     return Some(LayoutDeviceToScreenScale(kViewportMinScale));
   }
@@ -10508,10 +10434,7 @@ bool Document::CanSavePresentation(nsIRequest* aNewRequest,
 }
 
 static bool HasHttpScheme(nsIURI* aURI) {
-  bool isHttpish = false;
-  return aURI &&
-         ((NS_SUCCEEDED(aURI->SchemeIs("http", &isHttpish)) && isHttpish) ||
-          (NS_SUCCEEDED(aURI->SchemeIs("https", &isHttpish)) && isHttpish));
+  return aURI && (aURI->SchemeIs("http") || aURI->SchemeIs("https"));
 }
 
 void Document::Destroy() {
@@ -11523,26 +11446,27 @@ void Document::PreloadStyle(
       ReferrerInfo::CreateFromDocumentAndPolicyOverride(this, aReferrerPolicy);
 
   // Charset names are always ASCII.
-  CSSLoader()->LoadSheet(uri, true, NodePrincipal(), aEncoding, referrerInfo,
-                         obs, Element::StringToCORSMode(aCrossOriginAttr),
-                         aIntegrity);
+  Unused << CSSLoader()->LoadSheet(
+      uri, css::Loader::IsPreload::Yes, NodePrincipal(), aEncoding,
+      referrerInfo, obs, Element::StringToCORSMode(aCrossOriginAttr),
+      aIntegrity);
 }
 
 RefPtr<StyleSheet> Document::LoadChromeSheetSync(nsIURI* uri) {
-  RefPtr<StyleSheet> sheet;
-  CSSLoader()->LoadSheetSync(uri, css::eAuthorSheetFeatures, false, &sheet);
-  return sheet;
+  return CSSLoader()
+      ->LoadSheetSync(uri, css::eAuthorSheetFeatures)
+      .unwrapOr(nullptr);
 }
 
 void Document::ResetDocumentDirection() {
-  if (!(nsContentUtils::IsChromeDoc(this) || IsXULDocument())) {
+  if (!nsContentUtils::IsChromeDoc(this)) {
     return;
   }
   UpdateDocumentStates(NS_DOCUMENT_STATE_RTL_LOCALE, true);
 }
 
 bool Document::IsDocumentRightToLeft() {
-  if (!(nsContentUtils::IsChromeDoc(this) || IsXULDocument())) {
+  if (!nsContentUtils::IsChromeDoc(this)) {
     return false;
   }
   // setting the localedir attribute on the root element forces a
@@ -11569,17 +11493,12 @@ bool Document::IsDocumentRightToLeft() {
   if (!reg) return false;
 
   nsAutoCString package;
-  bool isChrome;
-  if (NS_SUCCEEDED(mDocumentURI->SchemeIs("chrome", &isChrome)) && isChrome) {
+  if (mDocumentURI->SchemeIs("chrome")) {
     mDocumentURI->GetHostPort(package);
   } else {
     // use the 'global' package for about and resource uris.
     // otherwise, just default to left-to-right.
-    bool isAbout, isResource;
-    if (NS_SUCCEEDED(mDocumentURI->SchemeIs("about", &isAbout)) && isAbout) {
-      package.AssignLiteral("global");
-    } else if (NS_SUCCEEDED(mDocumentURI->SchemeIs("resource", &isResource)) &&
-               isResource) {
+    if (mDocumentURI->SchemeIs("about") || mDocumentURI->SchemeIs("resource")) {
       package.AssignLiteral("global");
     } else {
       return false;
@@ -12508,13 +12427,13 @@ class UnblockParsingPromiseHandler final : public PromiseNativeHandler {
   void ResolvedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override {
     MaybeUnblockParser();
 
-    mPromise->MaybeResolve(aCx, aValue);
+    mPromise->MaybeResolve(aValue);
   }
 
   void RejectedCallback(JSContext* aCx, JS::Handle<JS::Value> aValue) override {
     MaybeUnblockParser();
 
-    mPromise->MaybeReject(aCx, aValue);
+    mPromise->MaybeReject(aValue);
   }
 
  protected:
@@ -12903,7 +12822,8 @@ class PendingFullscreenChangeList {
           // Use a temporary to avoid undefined behavior from passing
           // mRootShellForIteration.
           nsCOMPtr<nsIDocShellTreeItem> root;
-          mRootShellForIteration->GetRootTreeItem(getter_AddRefs(root));
+          mRootShellForIteration->GetInProcessRootTreeItem(
+              getter_AddRefs(root));
           mRootShellForIteration = root.forget();
         }
         SkipToNextMatch();
@@ -13316,8 +13236,8 @@ void Document::CleanupFullscreenState() {
   // Restore the zoom level that was in place prior to entering fullscreen.
   if (PresShell* presShell = GetPresShell()) {
     if (presShell->GetMobileViewportManager()) {
-      presShell->SetResolutionAndScaleTo(mSavedResolution,
-                                         ResolutionChangeOrigin::MainThread);
+      presShell->SetResolutionAndScaleTo(
+          mSavedResolution, ResolutionChangeOrigin::MainThreadRestore);
     }
   }
 
@@ -13409,7 +13329,7 @@ static bool IsInActiveTab(Document* aDoc) {
   }
 
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  docshell->GetRootTreeItem(getter_AddRefs(rootItem));
+  docshell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   if (!rootItem) {
     return false;
   }
@@ -13556,7 +13476,7 @@ static nsCOMPtr<nsPIDOMWindowOuter> GetRootWindow(Document* aDoc) {
     return nullptr;
   }
   nsCOMPtr<nsIDocShellTreeItem> rootItem;
-  docShell->GetRootTreeItem(getter_AddRefs(rootItem));
+  docShell->GetInProcessRootTreeItem(getter_AddRefs(rootItem));
   return rootItem ? rootItem->GetWindow() : nullptr;
 }
 
@@ -13715,7 +13635,7 @@ bool Document::ApplyFullscreen(UniquePtr<FullscreenRequest> aRequest) {
         child->mSavedResolution = presShell->GetResolution();
         presShell->SetResolutionAndScaleTo(
             manager->ComputeIntrinsicResolution(),
-            ResolutionChangeOrigin::MainThread);
+            ResolutionChangeOrigin::MainThreadRestore);
       }
     }
 
@@ -14145,8 +14065,11 @@ void Document::DocAddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const {
   // Lumping in the loader with the style-sheets size is not ideal,
   // but most of the things in there are in fact stylesheets, so it
   // doesn't seem worthwhile to separate it out.
-  aWindowSizes.mLayoutStyleSheetsSize +=
-      CSSLoader()->SizeOfIncludingThis(aWindowSizes.mState.mMallocSizeOf);
+  // This can be null if we've already been unlinked.
+  if (mCSSLoader) {
+    aWindowSizes.mLayoutStyleSheetsSize +=
+        mCSSLoader->SizeOfIncludingThis(aWindowSizes.mState.mMallocSizeOf);
+  }
 
   aWindowSizes.mDOMOtherSize += mAttrStyleSheet
                                     ? mAttrStyleSheet->DOMSizeOfIncludingThis(
@@ -14379,27 +14302,13 @@ const Document* Document::GetTopLevelContentDocument() const {
   return parent;
 }
 
-static bool MightBeChromeScheme(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  bool isChrome = true;
-  aURI->SchemeIs("chrome", &isChrome);
-  return isChrome;
-}
-
-static bool MightBeAboutOrChromeScheme(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  bool isAbout = true;
-  aURI->SchemeIs("about", &isAbout);
-  return isAbout || MightBeChromeScheme(aURI);
-}
-
 void Document::PropagateUseCounters(Document* aParentDocument) {
   MOZ_ASSERT(this != aParentDocument);
 
   // Don't count chrome resources, even in the web content.
   nsCOMPtr<nsIURI> uri;
   NodePrincipal()->GetURI(getter_AddRefs(uri));
-  if (!uri || MightBeChromeScheme(uri)) {
+  if (!uri || uri->SchemeIs("chrome")) {
     return;
   }
 
@@ -14507,7 +14416,8 @@ void Document::ReportUseCounters(UseCounterReportKind aKind) {
       (IsContentDocument() || IsResourceDoc())) {
     nsCOMPtr<nsIURI> uri;
     NodePrincipal()->GetURI(getter_AddRefs(uri));
-    if (!uri || MightBeAboutOrChromeScheme(uri)) {
+    if (!uri || uri->SchemeIs("about") || uri->SchemeIs("chrome") ||
+        uri->SchemeIs("resource")) {
       return;
     }
 
@@ -15538,30 +15448,20 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
   //         user settings, anti-clickjacking heuristics, or prompting the
   //         user for explicit permission. Reject if some rule is not fulfilled.
 
-  if (nsContentUtils::IsInPrivateBrowsing(this)) {
-    // If the document is in PB mode, it doesn't have access to its persistent
-    // cookie jar, so reject the promise here.
-    promise->MaybeRejectWithUndefined();
-    return promise.forget();
-  }
-
   if (CookieSettings()->GetRejectThirdPartyTrackers() && inner) {
     // Only do something special for third-party tracking content.
     if (StorageDisabledByAntiTracking(this, nullptr)) {
       // Note: If this has returned true, the top-level document is guaranteed
       // to not be on the Content Blocking allow list.
       DebugOnly<bool> isOnAllowList = false;
-      // If we have a parent document, it has to be non-private since we
-      // verified earlier that our own document is non-private and a private
-      // document can never have a non-private document as its child.
-      MOZ_ASSERT_IF(parent, !nsContentUtils::IsInPrivateBrowsing(parent));
       MOZ_ASSERT_IF(
           NS_SUCCEEDED(AntiTrackingCommon::IsOnContentBlockingAllowList(
-              parent->GetDocumentURI(), false,
-              AntiTrackingCommon::eStorageChecks, isOnAllowList)),
+              parent->GetDocumentURI(), false, isOnAllowList)),
           !isOnAllowList);
 
-      auto performFinalChecks = [inner]()
+      RefPtr<Document> self(this);
+
+      auto performFinalChecks = [inner, self]()
           -> RefPtr<AntiTrackingCommon::StorageAccessFinalCheckPromise> {
         RefPtr<AntiTrackingCommon::StorageAccessFinalCheckPromise::Private> p =
             new AntiTrackingCommon::StorageAccessFinalCheckPromise::Private(
@@ -15570,17 +15470,23 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
             StorageAccessPermissionRequest::Create(
                 inner,
                 // Allow
-                [p] { p->Resolve(AntiTrackingCommon::eAllow, __func__); },
-                // Allow auto grant
                 [p] {
-                  p->Resolve(AntiTrackingCommon::eAllowAutoGrant, __func__);
+                  Telemetry::AccumulateCategorical(
+                      Telemetry::LABELS_STORAGE_ACCESS_API_UI::Allow);
+                  p->Resolve(AntiTrackingCommon::eAllow, __func__);
                 },
                 // Allow on any site
                 [p] {
+                  Telemetry::AccumulateCategorical(
+                      Telemetry::LABELS_STORAGE_ACCESS_API_UI::AllowOnAnySite);
                   p->Resolve(AntiTrackingCommon::eAllowOnAnySite, __func__);
                 },
                 // Block
-                [p] { p->Reject(false, __func__); });
+                [p] {
+                  Telemetry::AccumulateCategorical(
+                      Telemetry::LABELS_STORAGE_ACCESS_API_UI::Deny);
+                  p->Reject(false, __func__);
+                });
 
         typedef ContentPermissionRequestBase::PromptResult PromptResult;
         PromptResult pr = sapr->CheckPromptPrefs();
@@ -15596,22 +15502,65 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
           }
         }
 
-        if (pr != PromptResult::Pending) {
-          MOZ_ASSERT_IF(pr != PromptResult::Granted,
-                        pr == PromptResult::Denied);
-          if (pr == PromptResult::Granted) {
-            return AntiTrackingCommon::StorageAccessFinalCheckPromise::
-                CreateAndResolve(onAnySite ? AntiTrackingCommon::eAllowOnAnySite
-                                           : AntiTrackingCommon::eAllow,
-                                 __func__);
-          }
-          return AntiTrackingCommon::StorageAccessFinalCheckPromise::
-              CreateAndReject(false, __func__);
+        if (pr == PromptResult::Pending) {
+          // We're about to show a prompt, record the request attempt
+          Telemetry::AccumulateCategorical(
+              Telemetry::LABELS_STORAGE_ACCESS_API_UI::Request);
         }
 
-        sapr->RequestDelayedTask(
-            inner->EventTargetFor(TaskCategory::Other),
-            ContentPermissionRequestBase::DelayedTaskType::Request);
+        self->AutomaticStorageAccessCanBeGranted()->Then(
+            GetCurrentThreadSerialEventTarget(), __func__,
+            [p, pr, sapr, inner, onAnySite](
+                const AutomaticStorageAccessGrantPromise::ResolveOrRejectValue&
+                    aValue) -> void {
+              // Make a copy because we can't modified copy-captured lambda
+              // variables.
+              PromptResult pr2 = pr;
+
+              bool storageAccessCanBeGrantedAutomatically =
+                  aValue.IsResolve() && aValue.ResolveValue();
+
+              bool autoGrant = false;
+              if (pr2 == PromptResult::Pending &&
+                  storageAccessCanBeGrantedAutomatically) {
+                pr2 = PromptResult::Granted;
+                autoGrant = true;
+
+                Telemetry::AccumulateCategorical(
+                    Telemetry::LABELS_STORAGE_ACCESS_API_UI::
+                        AllowAutomatically);
+              }
+
+              if (pr2 != PromptResult::Pending) {
+                MOZ_ASSERT_IF(pr2 != PromptResult::Granted,
+                              pr2 == PromptResult::Denied);
+                if (pr2 == PromptResult::Granted) {
+                  AntiTrackingCommon::StorageAccessPromptChoices choice =
+                      AntiTrackingCommon::eAllow;
+                  if (onAnySite) {
+                    choice = AntiTrackingCommon::eAllowOnAnySite;
+                  } else if (autoGrant) {
+                    choice = AntiTrackingCommon::eAllowAutoGrant;
+                  }
+                  if (!autoGrant) {
+                    p->Resolve(choice, __func__);
+                  } else {
+                    sapr->MaybeDelayAutomaticGrants()->Then(
+                        GetCurrentThreadSerialEventTarget(), __func__,
+                        [p, choice] { p->Resolve(choice, __func__); },
+                        [p] { p->Reject(false, __func__); });
+                  }
+                  return;
+                }
+                p->Reject(false, __func__);
+                return;
+              }
+
+              sapr->RequestDelayedTask(
+                  inner->EventTargetFor(TaskCategory::Other),
+                  ContentPermissionRequestBase::DelayedTaskType::Request);
+            });
+
         return p.forget();
       };
       AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(
@@ -15639,6 +15588,122 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
   outer->SetHasStorageAccess(true);
   promise->MaybeResolveWithUndefined();
   return promise.forget();
+}
+
+RefPtr<Document::AutomaticStorageAccessGrantPromise>
+Document::AutomaticStorageAccessCanBeGranted() {
+  if (XRE_IsContentProcess()) {
+    // In the content process, we need to ask the parent process to compute
+    // this.  The reason is that nsIPermissionManager::GetAllWithTypePrefix()
+    // isn't accessible in the content process.
+    ContentChild* cc = ContentChild::GetSingleton();
+    MOZ_ASSERT(cc);
+
+    return cc
+        ->SendAutomaticStorageAccessCanBeGranted(
+            IPC::Principal(NodePrincipal()))
+        ->Then(
+            GetCurrentThreadSerialEventTarget(), __func__,
+            [](const ContentChild::AutomaticStorageAccessCanBeGrantedPromise::
+                   ResolveOrRejectValue& aValue) {
+              if (aValue.IsResolve()) {
+                return AutomaticStorageAccessGrantPromise::CreateAndResolve(
+                    aValue.ResolveValue(), __func__);
+              }
+
+              return AutomaticStorageAccessGrantPromise::CreateAndReject(
+                  false, __func__);
+            });
+  }
+
+  if (XRE_IsParentProcess()) {
+    // In the parent process, we can directly compute this.
+    return AutomaticStorageAccessGrantPromise::CreateAndResolve(
+        AutomaticStorageAccessCanBeGranted(NodePrincipal()), __func__);
+  }
+
+  return AutomaticStorageAccessGrantPromise::CreateAndReject(false, __func__);
+}
+
+bool Document::AutomaticStorageAccessCanBeGranted(nsIPrincipal* aPrincipal) {
+  nsAutoCString prefix;
+  AntiTrackingCommon::CreateStoragePermissionKey(aPrincipal, prefix);
+
+  nsPermissionManager* permManager = nsPermissionManager::GetInstance();
+  if (NS_WARN_IF(!permManager)) {
+    return false;
+  }
+
+  typedef nsTArray<RefPtr<nsIPermission>> Permissions;
+  Permissions perms;
+  nsresult rv = permManager->GetAllWithTypePrefix(prefix, perms);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  nsAutoCString prefix2(prefix);
+  prefix2.Append('^');
+  typedef nsTArray<nsCString> Origins;
+  Origins origins;
+
+  for (const auto& perm : perms) {
+    nsAutoCString type;
+    rv = perm->GetType(type);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return false;
+    }
+    // Let's make sure that we're not looking at a permission for
+    // https://exampletracker.company when we mean to look for the
+    // permission for https://exampletracker.com!
+    if (type != prefix && StringHead(type, prefix2.Length()) != prefix2) {
+      continue;
+    }
+
+    nsCOMPtr<nsIPrincipal> principal;
+    rv = perm->GetPrincipal(getter_AddRefs(principal));
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return false;
+    }
+
+    nsAutoCString origin;
+    rv = principal->GetOrigin(origin);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return false;
+    }
+
+    ToLowerCase(origin);
+
+    if (origins.IndexOf(origin) == Origins::NoIndex) {
+      origins.AppendElement(origin);
+    }
+  }
+
+  nsCOMPtr<nsIBrowserUsage> bu =
+      do_ImportModule("resource:///modules/BrowserUsageTelemetry.jsm");
+  if (NS_WARN_IF(!bu)) {
+    return false;
+  }
+
+  uint32_t uniqueDomainsVisitedInPast24Hours = 0;
+  rv = bu->GetUniqueDomainsVisitedInPast24Hours(
+      &uniqueDomainsVisitedInPast24Hours);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  // one percent of the number of top-levels origins visited in the current
+  // session (but not to exceed 24 hours), or the value of the
+  // dom.storage_access.max_concurrent_auto_grants preference, whichever is
+  // higher.
+  size_t maxConcurrentAutomaticGrants = std::max(
+      std::max(int(std::floor(uniqueDomainsVisitedInPast24Hours / 100)),
+               StaticPrefs::dom_storage_access_max_concurrent_auto_grants()),
+      0);
+
+  size_t originsThirdPartyHasAccessTo = origins.Length();
+
+  return StaticPrefs::dom_storage_access_auto_grants() &&
+         originsThirdPartyHasAccessTo < maxConcurrentAutomaticGrants;
 }
 
 void Document::RecordNavigationTiming(ReadyState aReadyState) {
@@ -15869,6 +15934,12 @@ void Document::RemoveToplevelLoadingDocument(Document* aDoc) {
   }
 }
 
+// static
+bool Document::UseOverlayScrollbars(const Document* aDocument) {
+  return LookAndFeel::GetInt(LookAndFeel::eIntID_UseOverlayScrollbars) ||
+         (aDocument && aDocument->InRDMPane());
+}
+
 bool Document::HasRecentlyStartedForegroundLoads() {
   if (!sLoadingForegroundTopLevelContentDocument) {
     return false;
@@ -15882,7 +15953,8 @@ bool Document::HasRecentlyStartedForegroundLoads() {
       nsPIDOMWindowInner* win = doc->GetInnerWindow();
       if (win) {
         Performance* perf = win->GetPerformance();
-        if (perf && perf->Now() < 5000) {
+        if (perf &&
+            perf->Now() < StaticPrefs::page_load_deprioritization_period()) {
           return true;
         }
       }

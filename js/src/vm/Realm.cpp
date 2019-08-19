@@ -62,16 +62,12 @@ Realm::Realm(Compartment* comp, const JS::RealmOptions& options)
 
 Realm::~Realm() {
   MOZ_ASSERT(!hasBeenEnteredIgnoringJit());
+  MOZ_ASSERT(!isDebuggee());
 
   // Write the code coverage information in a file.
   if (coverage::IsLCovEnabled()) {
     runtime_->lcovOutput().writeLCovResult(lcovOutput);
   }
-
-  // We can have a debuggee realm here only if we are destroying the runtime and
-  // leaked GC things.
-  MOZ_ASSERT_IF(runtime_->gc.shutdownCollectedEverything(), !isDebuggee());
-  unsetIsDebuggee();
 
   MOZ_ASSERT(runtime_->numRealms > 0);
   runtime_->numRealms--;
@@ -475,11 +471,11 @@ void Realm::sweepTemplateObjects() {
   }
 }
 
-void Realm::fixupAfterMovingGC() {
+void Realm::fixupAfterMovingGC(JSTracer* trc) {
   purge();
   fixupGlobal();
   objectGroups_.fixupTablesAfterMovingGC();
-  fixupScriptMapsAfterMovingGC();
+  fixupScriptMapsAfterMovingGC(trc);
 }
 
 void Realm::fixupGlobal() {
@@ -489,15 +485,15 @@ void Realm::fixupGlobal() {
   }
 }
 
-void Realm::fixupScriptMapsAfterMovingGC() {
+void Realm::fixupScriptMapsAfterMovingGC(JSTracer* trc) {
   // Map entries are removed by JSScript::finalize, but we need to update the
   // script pointers here in case they are moved by the GC.
 
   if (scriptCountsMap) {
     for (ScriptCountsMap::Enum e(*scriptCountsMap); !e.empty(); e.popFront()) {
       JSScript* script = e.front().key();
-      if (!IsAboutToBeFinalizedUnbarriered(&script) &&
-          script != e.front().key()) {
+      TraceManuallyBarrieredEdge(trc, &script, "Realm::scriptCountsMap::key");
+      if (script != e.front().key()) {
         e.rekeyFront(script);
       }
     }

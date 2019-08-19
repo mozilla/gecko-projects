@@ -12,6 +12,9 @@ const { ActorChild } = ChromeUtils.import(
 const { LoginHelper } = ChromeUtils.import(
   "resource://gre/modules/LoginHelper.jsm"
 );
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 ChromeUtils.defineModuleGetter(
@@ -19,13 +22,26 @@ ChromeUtils.defineModuleGetter(
   "AppConstants",
   "resource://gre/modules/AppConstants.jsm"
 );
+
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "ClipboardHelper",
+  "@mozilla.org/widget/clipboardhelper;1",
+  "nsIClipboardHelper"
+);
+
 const TELEMETRY_EVENT_CATEGORY = "pwmgr";
+
+let masterPasswordPromise;
+
+const HIDE_MOBILE_FOOTER_PREF = "signon.management.page.hideMobileFooter";
 
 class AboutLoginsChild extends ActorChild {
   handleEvent(event) {
     switch (event.type) {
       case "AboutLoginsInit": {
-        this.mm.sendAsyncMessage("AboutLogins:Subscribe");
+        let messageManager = this.mm;
+        messageManager.sendAsyncMessage("AboutLogins:Subscribe");
 
         let documentElement = this.content.document.documentElement;
         documentElement.classList.toggle(
@@ -38,6 +54,18 @@ class AboutLoginsChild extends ActorChild {
           doLoginsMatch(loginA, loginB) {
             return LoginHelper.doLoginsMatch(loginA, loginB, {});
           },
+          getLoginOrigin(uriString) {
+            return LoginHelper.getLoginOrigin(uriString);
+          },
+          promptForMasterPassword(resolve) {
+            masterPasswordPromise = {
+              resolve,
+            };
+
+            messageManager.sendAsyncMessage(
+              "AboutLogins:MasterPasswordRequest"
+            );
+          },
         };
         waivedContent.AboutLoginsUtils = Cu.cloneInto(
           AboutLoginsUtils,
@@ -46,6 +74,14 @@ class AboutLoginsChild extends ActorChild {
             cloneFunctions: true,
           }
         );
+        this.sendToContent("InitialInfo", {
+          hideMobileFooter: Services.prefs.getBoolPref(HIDE_MOBILE_FOOTER_PREF),
+          appLocales: Services.locale.appLocalesAsBCP47,
+        });
+        break;
+      }
+      case "AboutLoginsCopyLoginDetail": {
+        ClipboardHelper.copyString(event.detail);
         break;
       }
       case "AboutLoginsCreateLogin": {
@@ -60,6 +96,16 @@ class AboutLoginsChild extends ActorChild {
         });
         break;
       }
+      case "AboutLoginsDismissBreachAlert": {
+        this.mm.sendAsyncMessage("AboutLogins:DismissBreachAlert", {
+          login: event.detail,
+        });
+        break;
+      }
+      case "AboutLoginsHideFooter": {
+        this.mm.sendAsyncMessage("AboutLogins:HideFooter");
+        break;
+      }
       case "AboutLoginsImport": {
         this.mm.sendAsyncMessage("AboutLogins:Import");
         break;
@@ -69,11 +115,15 @@ class AboutLoginsChild extends ActorChild {
         break;
       }
       case "AboutLoginsOpenMobileAndroid": {
-        this.mm.sendAsyncMessage("AboutLogins:OpenMobileAndroid");
+        this.mm.sendAsyncMessage("AboutLogins:OpenMobileAndroid", {
+          source: event.detail,
+        });
         break;
       }
       case "AboutLoginsOpenMobileIos": {
-        this.mm.sendAsyncMessage("AboutLogins:OpenMobileIos");
+        this.mm.sendAsyncMessage("AboutLogins:OpenMobileIos", {
+          source: event.detail,
+        });
         break;
       }
       case "AboutLoginsOpenFeedback": {
@@ -105,6 +155,14 @@ class AboutLoginsChild extends ActorChild {
         }
         break;
       }
+      case "AboutLoginsSyncEnable": {
+        this.mm.sendAsyncMessage("AboutLogins:SyncEnable");
+        break;
+      }
+      case "AboutLoginsSyncOptions": {
+        this.mm.sendAsyncMessage("AboutLogins:SyncOptions");
+        break;
+      }
       case "AboutLoginsUpdateLogin": {
         this.mm.sendAsyncMessage("AboutLogins:UpdateLogin", {
           login: event.detail,
@@ -119,8 +177,8 @@ class AboutLoginsChild extends ActorChild {
       case "AboutLogins:AllLogins":
         this.sendToContent("AllLogins", message.data);
         break;
-      case "AboutLogins:UpdateBreaches":
-        this.sendToContent("UpdateBreaches", message.data);
+      case "AboutLogins:LocalizeBadges":
+        this.sendToContent("LocalizeBadges", message.data);
         break;
       case "AboutLogins:LoginAdded":
         this.sendToContent("LoginAdded", message.data);
@@ -130,6 +188,20 @@ class AboutLoginsChild extends ActorChild {
         break;
       case "AboutLogins:LoginRemoved":
         this.sendToContent("LoginRemoved", message.data);
+        break;
+      case "AboutLogins:MasterPasswordResponse":
+        if (masterPasswordPromise) {
+          masterPasswordPromise.resolve(message.data);
+        }
+        break;
+      case "AboutLogins:SendFavicons":
+        this.sendToContent("SendFavicons", message.data);
+        break;
+      case "AboutLogins:SyncState":
+        this.sendToContent("SyncState", message.data);
+        break;
+      case "AboutLogins:UpdateBreaches":
+        this.sendToContent("UpdateBreaches", message.data);
         break;
     }
   }

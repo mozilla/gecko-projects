@@ -15,7 +15,7 @@ add_task(async function() {
   const dbg = await attachRecordingDebugger("doc_inspector_basic.html", {
     waitForRecording: true,
   });
-  const { threadFront, tab, toolbox } = dbg;
+  const { threadFront, toolbox } = dbg;
 
   await threadFront.interrupt();
   await threadFront.resume();
@@ -24,11 +24,11 @@ add_task(async function() {
   const bp = await setBreakpoint(threadFront, "doc_inspector_basic.html", 9);
   await rewindToLine(threadFront, 9);
 
-  const { inspector, testActor } = await openInspector();
+  const { testActor } = await openInspector();
 
   info("Waiting for element picker to become active.");
   toolbox.win.focus();
-  await toolbox.inspectorFront.nodePicker.start();
+  await toolbox.nodePicker.start();
 
   info("Moving mouse over div.");
   await moveMouseOver("#maindiv", 1, 1);
@@ -39,8 +39,7 @@ add_task(async function() {
   await testActor.isNodeCorrectlyHighlighted("#maindiv", is);
 
   await threadFront.removeBreakpoint(bp);
-  await toolbox.closeToolbox();
-  await gBrowser.removeTab(tab);
+  await shutdownDebugger(dbg);
 
   function moveMouseOver(selector, x, y) {
     info("Waiting for element " + selector + " to be highlighted");
@@ -50,6 +49,6 @@ add_task(async function() {
       y,
       options: { type: "mousemove" },
     });
-    return inspector.inspectorFront.nodePicker.once("picker-node-hovered");
+    return toolbox.nodePicker.once("picker-node-hovered");
   }
 });

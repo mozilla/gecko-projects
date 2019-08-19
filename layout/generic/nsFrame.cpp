@@ -546,7 +546,8 @@ static bool IsFontSizeInflationContainer(nsIFrame* aFrame,
   nsIContent* content = aFrame->GetContent();
   LayoutFrameType frameType = aFrame->Type();
   bool isInline =
-      (aFrame->GetDisplay() == StyleDisplay::Inline ||
+      (nsStyleDisplay::DisplayInside(aFrame->GetDisplay()) ==
+           StyleDisplayInside::Inline ||
        RubyUtils::IsRubyBox(frameType) ||
        (aFrame->IsFloating() && frameType == LayoutFrameType::Letter) ||
        // Given multiple frames for the same node, only the
@@ -615,24 +616,40 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
   if (aPrevInFlow) {
     mWritingMode = aPrevInFlow->GetWritingMode();
 
-    // Make sure the general flags bits are the same
-    nsFrameState state = aPrevInFlow->GetStateBits();
+    // Copy some state bits from prev-in-flow (the bits that should apply
+    // throughout a continuation chain). The bits are sorted according to their
+    // order in nsFrameStateBits.h.
 
-    // Make bits that are currently off (see constructor) the same:
-    AddStateBits(state &
-                 (NS_FRAME_INDEPENDENT_SELECTION | NS_FRAME_PART_OF_IBSPLIT |
+    // clang-format off
+    AddStateBits(aPrevInFlow->GetStateBits() &
+                 (NS_FRAME_ANONYMOUSCONTENTCREATOR_CONTENT |
+                  NS_FRAME_GENERATED_CONTENT |
+                  NS_FRAME_OUT_OF_FLOW |
+                  NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN |
+                  NS_FRAME_INDEPENDENT_SELECTION |
+                  NS_FRAME_PART_OF_IBSPLIT |
                   NS_FRAME_MAY_BE_TRANSFORMED |
-                  NS_FRAME_CAN_HAVE_ABSPOS_CHILDREN));
+                  NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR));
+    // clang-format on
+
+    // Copy other bits in nsIFrame from prev-in-flow.
+    mHasColumnSpanSiblings = aPrevInFlow->HasColumnSpanSiblings();
   } else {
     PresContext()->ConstructedFrame();
   }
   if (GetParent()) {
-    nsFrameState state = GetParent()->GetStateBits();
+    // Copy some state bits from our parent (the bits that should apply
+    // recursively throughout a subtree). The bits are sorted according to their
+    // order in nsFrameStateBits.h.
 
-    // Make bits that are currently off (see constructor) the same:
-    AddStateBits(state & (NS_FRAME_INDEPENDENT_SELECTION |
-                          NS_FRAME_GENERATED_CONTENT | NS_FRAME_IS_SVG_TEXT |
-                          NS_FRAME_IN_POPUP | NS_FRAME_IS_NONDISPLAY));
+    // clang-format off
+    AddStateBits(GetParent()->GetStateBits() &
+                 (NS_FRAME_GENERATED_CONTENT |
+                  NS_FRAME_INDEPENDENT_SELECTION |
+                  NS_FRAME_IS_SVG_TEXT |
+                  NS_FRAME_IN_POPUP |
+                  NS_FRAME_IS_NONDISPLAY));
+    // clang-format on
 
     if (HasAnyStateBits(NS_FRAME_IN_POPUP) && TrackingVisibility()) {
       // Assume all frames in popups are visible.
@@ -642,7 +659,6 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
   if (aPrevInFlow) {
     mMayHaveOpacityAnimation = aPrevInFlow->MayHaveOpacityAnimation();
     mMayHaveTransformAnimation = aPrevInFlow->MayHaveTransformAnimation();
-    mState |= aPrevInFlow->mState & NS_FRAME_MAY_BE_TRANSFORMED;
   } else if (mContent) {
     // It's fine to fetch the EffectSet for the style frame here because in the
     // following code we take care of the case where animations may target
@@ -746,8 +762,10 @@ void nsFrame::Init(nsIContent* aContent, nsContainerFrame* aParent,
   // newly created frames.
   // Note: We don't need to do this for placeholders since placeholders have
   // different styles so that the styles don't have visibility:hidden even if
-  // the parent has visibility:hidden style.
-  if (!IsPlaceholderFrame()) {
+  // the parent has visibility:hidden style. We also don't need to update the
+  // state when creating continuations because its visibility is the same as its
+  // prev-in-flow, and the animation code cares only primary frames.
+  if (!IsPlaceholderFrame() && !aPrevInFlow) {
     UpdateVisibleDescendantsState();
   }
 }
@@ -2514,6 +2532,35 @@ inline static bool IsSVGContentWithCSSClip(const nsIFrame* aFrame) {
                                                   nsGkAtoms::foreignObject);
 }
 
+bool nsIFrame::FormsBackdropRoot(const nsStyleDisplay* aStyleDisplay,
+                                 const nsStyleEffects* aStyleEffects,
+                                 const nsStyleSVGReset* aStyleSVGReset) {
+  // Check if this is a root frame.
+  if (!GetParent()) {
+    return true;
+  }
+
+  // Check for filter effects.
+  if (aStyleEffects->HasFilters() || aStyleEffects->HasBackdropFilters() ||
+      aStyleEffects->HasMixBlendMode()) {
+    return true;
+  }
+
+  // Check for opacity.
+  if (HasOpacity(aStyleDisplay, aStyleEffects)) {
+    return true;
+  }
+
+  // Check for mask or clip path.
+  if (aStyleSVGReset->HasMask() || aStyleSVGReset->HasClipPath()) {
+    return true;
+  }
+
+  // TODO(cbrewster): Check will-change attributes
+
+  return false;
+}
+
 Maybe<nsRect> nsIFrame::GetClipPropClipRect(const nsStyleDisplay* aDisp,
                                             const nsStyleEffects* aEffects,
                                             const nsSize& aSize) const {
@@ -2667,6 +2714,30 @@ class AutoSaveRestoreContainsBlendMode {
 
   ~AutoSaveRestoreContainsBlendMode() {
     mBuilder.SetContainsBlendMode(mSavedContainsBlendMode);
+  }
+};
+
+class AutoSaveRestoreContainsBackdropFilter {
+  nsDisplayListBuilder& mBuilder;
+  bool mSavedContainsBackdropFilter;
+
+ public:
+  explicit AutoSaveRestoreContainsBackdropFilter(nsDisplayListBuilder& aBuilder)
+      : mBuilder(aBuilder),
+        mSavedContainsBackdropFilter(aBuilder.ContainsBackdropFilter()) {}
+
+  /**
+   * This is called if a stacking context which does not form a backdrop root
+   * contains a descendent with a backdrop filter. In this case we need to
+   * delegate backdrop root creation to the next parent in the tree until we hit
+   * the nearest backdrop root ancestor.
+   */
+  void DelegateUp(bool aContainsBackdropFilter) {
+    mSavedContainsBackdropFilter = aContainsBackdropFilter;
+  }
+
+  ~AutoSaveRestoreContainsBackdropFilter() {
+    mBuilder.SetContainsBackdropFilter(mSavedContainsBackdropFilter);
   }
 };
 
@@ -3005,6 +3076,19 @@ void nsIFrame::BuildDisplayListForStackingContext(
   AutoSaveRestoreContainsBlendMode autoRestoreBlendMode(*aBuilder);
   aBuilder->SetContainsBlendMode(false);
 
+  bool backdropFilterEnabled =
+      StaticPrefs::layout_css_backdrop_filter_enabled();
+  bool usingBackdropFilter =
+      backdropFilterEnabled && effects->HasBackdropFilters() &&
+      nsDisplayBackdropFilters::CanCreateWebRenderCommands(aBuilder, this);
+
+  if (usingBackdropFilter) {
+    aBuilder->SetContainsBackdropFilter(true);
+  }
+
+  AutoSaveRestoreContainsBackdropFilter autoRestoreBackdropFilter(*aBuilder);
+  aBuilder->SetContainsBackdropFilter(false);
+
   nsRect visibleRectOutsideTransform = visibleRect;
   bool allowAsyncAnimation = false;
   bool inTransform = aBuilder->IsInTransform();
@@ -3075,7 +3159,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
     }
   }
 
-  bool usingFilter = StyleEffects()->HasFilters();
+  bool usingFilter = effects->HasFilters();
   bool usingMask = nsSVGIntegrationUtils::UsingMaskOrClipPathForFrame(this);
   bool usingSVGEffects = usingFilter || usingMask;
 
@@ -3196,6 +3280,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
 
   nsDisplayListCollection set(aBuilder);
   Maybe<nsRect> clipForMask;
+  bool insertBackdropRoot;
   {
     DisplayListClipState::AutoSaveRestore nestedClipState(aBuilder);
     nsDisplayListBuilder::AutoInTransformSetter inTransformSetter(aBuilder,
@@ -3252,6 +3337,10 @@ void nsIFrame::BuildDisplayListForStackingContext(
     aBuilder->Check();
     aBuilder->DisplayCaret(this, set.Content());
 
+    insertBackdropRoot = backdropFilterEnabled &&
+                         aBuilder->ContainsBackdropFilter() &&
+                         FormsBackdropRoot(disp, effects, StyleSVGReset());
+
     // Blend modes are a real pain for retained display lists. We build a blend
     // container item if the built list contains any blend mode items within
     // the current stacking context. This can change without an invalidation
@@ -3270,13 +3359,21 @@ void nsIFrame::BuildDisplayListForStackingContext(
     // to remove any existing content that isn't wrapped in the blend container,
     // and then we need to build content infront/behind the blend container
     // to get correct positioning during merging.
-    if (aBuilder->ContainsBlendMode() && aBuilder->IsRetainingDisplayList()) {
+    if ((insertBackdropRoot || aBuilder->ContainsBlendMode()) &&
+        aBuilder->IsRetainingDisplayList()) {
       if (!aBuilder->GetDirtyRect().Contains(aBuilder->GetVisibleRect())) {
         aBuilder->SetPartialBuildFailed(true);
       } else {
         aBuilder->SetDisablePartialUpdates(true);
       }
     }
+  }
+
+  // If a child contains a backdrop filter, but this stacking context does not
+  // form a backdrop root, we need to propogate up the tree until we find an
+  // ancestor that does form a backdrop root.
+  if (!insertBackdropRoot && aBuilder->ContainsBackdropFilter()) {
+    autoRestoreBackdropFilter.DelegateUp(true);
   }
 
   if (aBuilder->IsBackgroundOnly()) {
@@ -3327,6 +3424,23 @@ void nsIFrame::BuildDisplayListForStackingContext(
     DisplayListClipState::AutoSaveRestore blendContainerClipState(aBuilder);
     resultList.AppendToTop(nsDisplayBlendContainer::CreateForMixBlendMode(
         aBuilder, this, &resultList, containerItemASR));
+    ct.TrackContainer(resultList.GetTop());
+  }
+
+  if (insertBackdropRoot) {
+    DisplayListClipState::AutoSaveRestore backdropRootContainerClipState(
+        aBuilder);
+    resultList.AppendNewToTop<nsDisplayBackdropRootContainer>(
+        aBuilder, this, &resultList, containerItemASR);
+    ct.TrackContainer(resultList.GetTop());
+  }
+
+  if (usingBackdropFilter) {
+    DisplayListClipState::AutoSaveRestore clipState(aBuilder);
+    nsRect backdropRect =
+        GetRectRelativeToSelf() + aBuilder->ToReferenceFrame(this);
+    resultList.AppendNewToTop<nsDisplayBackdropFilters>(
+        aBuilder, this, &resultList, backdropRect);
     ct.TrackContainer(resultList.GetTop());
   }
 
@@ -5190,7 +5304,8 @@ static nsIFrame::ContentOffsets OffsetsForSingleFrame(nsIFrame* aFrame,
   // Figure out whether the offsets should be over, after, or before the frame
   nsRect rect(nsPoint(0, 0), aFrame->GetSize());
 
-  bool isBlock = aFrame->GetDisplay() != StyleDisplay::Inline;
+  bool isBlock = nsStyleDisplay::DisplayInside(aFrame->GetDisplay()) !=
+                 StyleDisplayInside::Inline;
   bool isRtl =
       (aFrame->StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL);
   if ((isBlock && rect.y < aPoint.y) ||
@@ -7489,9 +7604,9 @@ bool nsIFrame::UpdateOverflow() {
   if (FinishAndStoreOverflow(overflowAreas, GetSize())) {
     nsView* view = GetView();
     if (view) {
-      uint32_t flags = GetXULLayoutFlags();
+      ReflowChildFlags flags = GetXULLayoutFlags();
 
-      if ((flags & NS_FRAME_NO_SIZE_VIEW) == 0) {
+      if (!(flags & ReflowChildFlags::NoSizeView)) {
         // Make sure the frame's view is properly sized.
         nsViewManager* vm = view->GetViewManager();
         vm->ResizeView(view, overflowAreas.VisualOverflow(), true);
@@ -7709,6 +7824,12 @@ void nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix,
       aTo += nsPrintfCString(" scr-overflow=%d,%d,%d,%d", so.x, so.y, so.width,
                              so.height);
     }
+  }
+  bool hasNormalPosition;
+  nsPoint normalPosition = GetNormalPosition(&hasNormalPosition);
+  if (hasNormalPosition) {
+    aTo += nsPrintfCString(" normal-position={%d,%d}", normalPosition.x,
+                           normalPosition.y);
   }
   if (0 != mState) {
     aTo += nsPrintfCString(" [state=%016llx]", (unsigned long long)mState);
@@ -9243,7 +9364,7 @@ static void ComputeAndIncludeOutlineArea(nsIFrame* aFrame,
   const nscoord offset = outline->mOutlineOffset.ToAppUnits();
   nsRect outerRect(innerRect);
   bool useOutlineAuto = false;
-  if (nsLayoutUtils::IsOutlineStyleAutoEnabled()) {
+  if (StaticPrefs::layout_css_outline_style_auto_enabled()) {
     useOutlineAuto = outline->mOutlineStyle.IsAuto();
     if (MOZ_UNLIKELY(useOutlineAuto)) {
       nsPresContext* presContext = aFrame->PresContext();
@@ -10439,10 +10560,10 @@ void nsFrame::BoxReflow(nsBoxLayoutState& aState, nsPresContext* aPresContext,
 
     NS_ASSERTION(status.IsComplete(), "bad status");
 
-    uint32_t layoutFlags = aState.LayoutFlags();
-    nsContainerFrame::FinishReflowChild(this, aPresContext, aDesiredSize,
-                                        &reflowInput, aX, aY,
-                                        layoutFlags | NS_FRAME_NO_MOVE_FRAME);
+    ReflowChildFlags layoutFlags = aState.LayoutFlags();
+    nsContainerFrame::FinishReflowChild(
+        this, aPresContext, aDesiredSize, &reflowInput, aX, aY,
+        layoutFlags | ReflowChildFlags::NoMoveFrame);
 
     // Save the ascent.  (bug 103925)
     if (IsXULCollapsed()) {
@@ -10756,7 +10877,8 @@ bool nsIFrame::IsStackingContext(const nsStyleDisplay* aStyleDisplay,
                             aStylePosition->mZIndex.IsInteger())) ||
          (aStyleDisplay->mWillChange.bits &
           StyleWillChangeBits_STACKING_CONTEXT) ||
-         aStyleDisplay->mIsolation != NS_STYLE_ISOLATION_AUTO;
+         aStyleDisplay->mIsolation != NS_STYLE_ISOLATION_AUTO ||
+         aStyleEffects->HasBackdropFilters();
 }
 
 bool nsIFrame::IsStackingContext() {
@@ -11758,7 +11880,6 @@ void DR_State::InitFrameTypeTable() {
   AddFrameTypeInfo(LayoutFrameType::Root, "root", "root");
   AddFrameTypeInfo(LayoutFrameType::Scroll, "scroll", "scroll");
   AddFrameTypeInfo(LayoutFrameType::TableCell, "cell", "tableCell");
-  AddFrameTypeInfo(LayoutFrameType::BCTableCell, "bcCell", "bcTableCell");
   AddFrameTypeInfo(LayoutFrameType::TableCol, "col", "tableCol");
   AddFrameTypeInfo(LayoutFrameType::TableColGroup, "colG", "tableColGroup");
   AddFrameTypeInfo(LayoutFrameType::Table, "tbl", "table");

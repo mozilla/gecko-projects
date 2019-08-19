@@ -67,7 +67,8 @@ include = [
   "ComputedFontWeightRange",
   "ComputedTimingFunction",
   "CursorKind",
-  "Display",
+  "DisplayOutside",
+  "DisplayInside",
   "DisplayMode",
   "PrefersColorScheme",
   "ExtremumLength",
@@ -103,12 +104,14 @@ include = [
   "LengthOrAuto",
   "NonNegativeLengthOrAuto",
   "TextDecorationSkipInk",
+  "TextDecorationLength",
   "Rect",
   "IntersectionObserverRootMargin",
   "Size",
   "MaxSize",
   "FlexBasis",
   "Position",
+  "PositionOrAuto",
   "BackgroundSize",
   "BorderImageSlice",
   "BorderSpacing",
@@ -160,8 +163,11 @@ include = [
   "GridLine",
   "TrackSize",
   "TrackBreadth",
+  "ImplicitGridTracks",
   "SVGPaint",
   "SVGPaintKind",
+  "GridTemplateComponent",
+  "TextEmphasisStyle",
 ]
 item_types = ["enums", "structs", "typedefs", "functions", "constants"]
 renaming_overrides_prefixing = true
@@ -284,6 +290,7 @@ renaming_overrides_prefixing = true
 """
 
 "GenericPosition" = """
+  inline bool HasPercent() const;
   inline bool DependsOnPositioningAreaSize() const;
   static inline StyleGenericPosition FromPercentage(float);
 """
@@ -498,9 +505,14 @@ renaming_overrides_prefixing = true
   inline nsDependentCSubstring AsString() const;
 """
 
+"GenericTransformOrigin" = """
+  inline bool HasPercent() const;
+"""
+
 "GenericTransform" = """
   inline Span<const T> Operations() const;
   inline bool IsNone() const;
+  bool HasPercent() const;
 """
 
 "GenericTransformOperation" = """
@@ -592,7 +604,7 @@ renaming_overrides_prefixing = true
 
   inline bool IsLocalRef() const;
   inline bool HasRef() const;
-  inline CORSMode CorsMode() const;
+  inline StyleCorsMode CorsMode() const;
   already_AddRefed<nsIURI> ResolveLocalRef(nsIURI* aBase) const;
   already_AddRefed<nsIURI> ResolveLocalRef(const nsIContent* aContent) const;
   imgRequestProxy* LoadImage(mozilla::dom::Document&);
@@ -636,6 +648,7 @@ renaming_overrides_prefixing = true
   // initializing the fields properly.
   StyleGenericTrackSize() {}
  public:
+  // Implemented in nsGridContainerFrame.cpp
   inline const StyleGenericTrackBreadth<L>& GetMin() const;
   inline const StyleGenericTrackBreadth<L>& GetMax() const;
 """
@@ -655,5 +668,24 @@ renaming_overrides_prefixing = true
   // constructor functions still work as expected. They take care of
   // initializing the fields properly.
   StyleGenericSVGPaintFallback() {}
+ public:
+"""
+
+"GenericGridTemplateComponent" = """
+  StyleGenericGridTemplateComponent() {}
+ public:
+  inline Maybe<size_t> RepeatAutoIndex() const;
+  inline const StyleGenericTrackRepeat<L, I>* GetRepeatAutoValue() const;
+  inline bool HasRepeatAuto() const;
+  inline Span<const StyleOwnedSlice<StyleCustomIdent>> LineNameLists(bool aIsSubgrid) const;
+  inline Span<const StyleGenericTrackListValue<L, I>> TrackListValues() const;
+"""
+
+"TextEmphasisStyle" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
+  StyleTextEmphasisStyle() {}
  public:
 """

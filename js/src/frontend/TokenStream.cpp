@@ -2475,7 +2475,7 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::decimalNumber(
                            this->sourceUnits.addressOfNextCodeUnit(), &dval)) {
       return false;
     }
-  } else if (unit == 'n' && anyCharsAccess().options().bigIntEnabledOption) {
+  } else if (unit == 'n') {
     isBigInt = true;
     unit = peekCodeUnit();
   } else {
@@ -2677,7 +2677,6 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::regexpLiteral(
 template <typename Unit, class AnyCharsAccess>
 MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::bigIntLiteral(
     TokenStart start, Modifier modifier, TokenKind* out) {
-  MOZ_ASSERT(anyCharsAccess().options().bigIntEnabledOption);
   MOZ_ASSERT(this->sourceUnits.previousCodeUnit() == toUnit('n'));
   MOZ_ASSERT(this->sourceUnits.offset() > start.offset());
   uint32_t length = this->sourceUnits.offset() - start.offset();
@@ -2888,7 +2887,6 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
     if (c1kind == ZeroDigit) {
       TokenStart start(this->sourceUnits, -1);
       int radix;
-      bool isLegacyOctalOrNoctal = false;
       bool isBigInt = false;
       const Unit* numStart;
       unit = getCodeUnit();
@@ -2947,7 +2945,6 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
         }
 
         radix = 8;
-        isLegacyOctalOrNoctal = true;
         // one past the '0'
         numStart = this->sourceUnits.addressOfNextCodeUnit() - 1;
 
@@ -2961,6 +2958,11 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
 
         if (unit == '_') {
           error(JSMSG_SEPARATOR_IN_ZERO_PREFIXED_NUMBER);
+          return badToken();
+        }
+
+        if (unit == 'n') {
+          error(JSMSG_BIGINT_INVALID_SYNTAX);
           return badToken();
         }
 
@@ -2981,11 +2983,7 @@ MOZ_MUST_USE bool TokenStreamSpecific<Unit, AnyCharsAccess>::getTokenInternal(
         return decimalNumber(unit, start, numStart, modifier, ttp);
       }
 
-      if (unit == 'n' && anyCharsAccess().options().bigIntEnabledOption) {
-        if (isLegacyOctalOrNoctal) {
-          error(JSMSG_BIGINT_INVALID_SYNTAX);
-          return badToken();
-        }
+      if (unit == 'n') {
         isBigInt = true;
         unit = peekCodeUnit();
       } else {

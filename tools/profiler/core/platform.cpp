@@ -213,9 +213,6 @@ static uint32_t AvailableFeatures() {
 #if !defined(MOZ_TASK_TRACER)
   ProfilerFeature::ClearTaskTracer(features);
 #endif
-#if !(defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY))
-  ProfilerFeature::ClearMemory(features);
-#endif
   if (!JS::TraceLoggerSupported()) {
     ProfilerFeature::ClearJSTracer(features);
   }
@@ -235,7 +232,7 @@ static uint32_t DefaultFeatures() {
 static uint32_t StartupExtraDefaultFeatures() {
   // Enable mainthreadio by default for startup profiles as startup is heavy on
   // I/O operations, and main thread I/O is really important to see there.
-  return ProfilerFeature::MainThreadIO | ProfilerFeature::Memory;
+  return ProfilerFeature::MainThreadIO;
 }
 
 class PSMutex : public StaticMutex {};
@@ -1083,8 +1080,8 @@ class Registers {
   void Clear() { memset(this, 0, sizeof(*this)); }
 
   // These fields are filled in by
-  // SamplerThread::SuspendAndSampleAndResumeThread() for periodic and
-  // backtrace samples, and by SyncPopulate() for synchronous samples.
+  // Sampler::SuspendAndSampleAndResumeThread() for periodic and backtrace
+  // samples, and by SyncPopulate() for synchronous samples.
   Address mPC;  // Instruction pointer.
   Address mSP;  // Stack pointer.
   Address mFP;  // Frame pointer.
@@ -2125,7 +2122,6 @@ static void locked_profiler_stream_json_for_this_process(
   buffer.StreamProfilerOverheadToJSON(aWriter, CorePS::ProcessStartTime(),
                                       aSinceTime);
   buffer.StreamCountersToJSON(aWriter, CorePS::ProcessStartTime(), aSinceTime);
-  buffer.StreamMemoryToJSON(aWriter, CorePS::ProcessStartTime(), aSinceTime);
 
   // Data of TaskTracer doesn't belong in the circular buffer.
   if (ActivePS::FeatureTaskTracer(aLock)) {
@@ -2431,7 +2427,7 @@ class Sampler {
 // active. It periodically runs through all registered threads, finds those
 // that should be sampled, then pauses and samples them.
 
-class SamplerThread : public Sampler {
+class SamplerThread {
  public:
   // Creates a sampler thread, but doesn't start it.
   SamplerThread(PSLockRef aLock, uint32_t aActivityGeneration,
@@ -2448,6 +2444,9 @@ class SamplerThread : public Sampler {
   // This suspends the calling thread for the given number of microseconds.
   // Best effort timing.
   void SleepMicro(uint32_t aMicroseconds);
+
+  // The sampler used to suspend and sample threads.
+  Sampler mSampler;
 
   // The activity generation, for detecting when the sampler thread must stop.
   const uint32_t mActivityGeneration;
@@ -2513,23 +2512,6 @@ void SamplerThread::Run() {
         TimeDuration delta = sampleStart - CorePS::ProcessStartTime();
         ProfileBuffer& buffer = ActivePS::Buffer(lock);
 
-        // Report memory use
-        int64_t rssMemory = 0;
-        int64_t ussMemory = 0;
-        if (ActivePS::FeatureMemory(lock)) {
-          rssMemory = nsMemoryReporterManager::ResidentFast();
-#if defined(GP_OS_linux) || defined(GP_OS_android)
-          ussMemory = nsMemoryReporterManager::ResidentUnique();
-#endif
-          if (rssMemory != 0) {
-            buffer.AddEntry(ProfileBufferEntry::ResidentMemory(rssMemory));
-            if (ussMemory != 0) {
-              buffer.AddEntry(ProfileBufferEntry::UnsharedMemory(ussMemory));
-            }
-          }
-          buffer.AddEntry(ProfileBufferEntry::Time(delta.ToMilliseconds()));
-        }
-
         // handle per-process generic counters
         const Vector<BaseProfilerCount*>& counters = CorePS::Counters(lock);
         TimeStamp now = TimeStamp::NowUnfuzzed();
@@ -2578,15 +2560,10 @@ void SamplerThread::Run() {
           }
 
           now = TimeStamp::NowUnfuzzed();
-          SuspendAndSampleAndResumeThread(
+          mSampler.SuspendAndSampleAndResumeThread(
               lock, *registeredThread, [&](const Registers& aRegs) {
                 DoPeriodicSample(lock, *registeredThread, *profiledThreadData,
                                  now, aRegs);
-                // only report these once per sample-time (if 0 we don't put
-                // them in the buffer, so for the rest of the threads we won't
-                // insert them)
-                rssMemory = 0;
-                ussMemory = 0;
               });
         }
 
@@ -2600,16 +2577,10 @@ void SamplerThread::Run() {
 #endif
         TimeStamp threadsSampled = TimeStamp::NowUnfuzzed();
 
-        buffer.AddEntry(
-            ProfileBufferEntry::ProfilerOverheadTime(delta.ToMilliseconds()));
-        buffer.AddEntry(ProfileBufferEntry::ProfilerOverheadDuration(
-            (lockAcquired - sampleStart).ToMilliseconds()));
-        buffer.AddEntry(ProfileBufferEntry::ProfilerOverheadDuration(
-            (expiredMarkersCleaned - lockAcquired).ToMilliseconds()));
-        buffer.AddEntry(ProfileBufferEntry::ProfilerOverheadDuration(
-            (countersSampled - expiredMarkersCleaned).ToMilliseconds()));
-        buffer.AddEntry(ProfileBufferEntry::ProfilerOverheadDuration(
-            (threadsSampled - countersSampled).ToMilliseconds()));
+        buffer.CollectOverheadStats(delta, lockAcquired - sampleStart,
+                                    expiredMarkersCleaned - lockAcquired,
+                                    countersSampled - expiredMarkersCleaned,
+                                    threadsSampled - countersSampled);
       }
 
       Maybe<double> duration = ActivePS::Duration(lock);
@@ -3324,9 +3295,7 @@ Maybe<ProfilerBufferInfo> profiler_get_buffer_info() {
     return Nothing();
   }
 
-  return Some(ProfilerBufferInfo{ActivePS::Buffer(lock).mRangeStart,
-                                 ActivePS::Buffer(lock).mRangeEnd,
-                                 ActivePS::Capacity(lock).Value()});
+  return Some(ActivePS::Buffer(lock).GetProfilerBufferInfo());
 }
 
 static void PollJSSamplingForCurrentThread() {

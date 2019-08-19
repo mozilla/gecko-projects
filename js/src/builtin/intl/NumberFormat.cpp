@@ -22,6 +22,7 @@
 #include <string>
 #include <type_traits>
 
+#include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
 #include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/ScopedICUObject.h"
@@ -57,15 +58,15 @@ using js::intl::IcuLocale;
 
 using JS::AutoStableStringChars;
 
-const ClassOps NumberFormatObject::classOps_ = {nullptr, /* addProperty */
-                                                nullptr, /* delProperty */
-                                                nullptr, /* enumerate */
-                                                nullptr, /* newEnumerate */
-                                                nullptr, /* resolve */
-                                                nullptr, /* mayResolve */
-                                                NumberFormatObject::finalize};
+const JSClassOps NumberFormatObject::classOps_ = {nullptr, /* addProperty */
+                                                  nullptr, /* delProperty */
+                                                  nullptr, /* enumerate */
+                                                  nullptr, /* newEnumerate */
+                                                  nullptr, /* resolve */
+                                                  nullptr, /* mayResolve */
+                                                  NumberFormatObject::finalize};
 
-const Class NumberFormatObject::class_ = {
+const JSClass NumberFormatObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(NumberFormatObject::SLOT_COUNT) |
         JSCLASS_FOREGROUND_FINALIZE,
@@ -149,7 +150,7 @@ bool js::intl_NumberFormat(JSContext* cx, unsigned argc, Value* vp) {
   return NumberFormat(cx, args, true);
 }
 
-void js::NumberFormatObject::finalize(FreeOp* fop, JSObject* obj) {
+void js::NumberFormatObject::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
 
   auto* numberFormat = &obj->as<NumberFormatObject>();
@@ -214,13 +215,8 @@ bool js::intl_NumberFormat_availableLocales(JSContext* cx, unsigned argc,
   CallArgs args = CallArgsFromVp(argc, vp);
   MOZ_ASSERT(args.length() == 0);
 
-  RootedValue result(cx);
-  if (!GetAvailableLocales(cx, unum_countAvailable, unum_getAvailable,
-                           &result)) {
-    return false;
-  }
-  args.rval().set(result);
-  return true;
+  return GetAvailableLocales(cx, unum_countAvailable, unum_getAvailable,
+                             args.rval());
 }
 
 bool js::intl_numberingSystem(JSContext* cx, unsigned argc, Value* vp) {
@@ -1347,7 +1343,6 @@ ArrayObject* NumberFormatFields::toArray(JSContext* cx,
 
   // Finally, generate the result array.
   size_t lastEndIndex = 0;
-  uint32_t partIndex = 0;
   RootedObject singlePart(cx);
   RootedValue propVal(cx);
 
@@ -1401,13 +1396,11 @@ ArrayObject* NumberFormatFields::toArray(JSContext* cx,
       }
     }
 
-    propVal.setObject(*singlePart);
-    if (!DefineDataElement(cx, partsArray, partIndex, propVal)) {
+    if (!NewbornArrayPush(cx, partsArray, ObjectValue(*singlePart))) {
       return nullptr;
     }
 
     lastEndIndex = endIndex;
-    partIndex++;
   } while (true);
 
   MOZ_ASSERT(lastEndIndex == overallResult->length(),

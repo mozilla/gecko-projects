@@ -25,7 +25,6 @@
 // For JSFunctionSpecWithHelp
 #include "jsfriendapi.h"
 
-#include "builtin/String.h"
 #include "gc/FreeOp.h"
 #include "js/CharacterEncoding.h"
 #include "js/Conversions.h"
@@ -417,7 +416,7 @@ class FileObject : public NativeObject {
   enum : uint32_t { FILE_SLOT = 0, NUM_SLOTS };
 
  public:
-  static const js::Class class_;
+  static const JSClass class_;
 
   static FileObject* create(JSContext* cx, RCFile* file) {
     FileObject* obj = js::NewBuiltinClassInstance<FileObject>(cx);
@@ -430,10 +429,10 @@ class FileObject : public NativeObject {
     return obj;
   }
 
-  static void finalize(FreeOp* fop, JSObject* obj) {
+  static void finalize(JSFreeOp* fop, JSObject* obj) {
     FileObject* fileObj = &obj->as<FileObject>();
     RCFile* file = fileObj->rcFile();
-    RemoveCellMemory(obj, sizeof(*file), MemoryUse::FileObjectFile);
+    fop->removeCellMemory(obj, sizeof(*file), MemoryUse::FileObjectFile);
     if (file->release()) {
       fop->deleteUntracked(file);
     }
@@ -457,7 +456,7 @@ class FileObject : public NativeObject {
   }
 };
 
-static const js::ClassOps FileObjectClassOps = {
+static const JSClassOps FileObjectClassOps = {
     nullptr,              /* addProperty */
     nullptr,              /* delProperty */
     nullptr,              /* enumerate */
@@ -471,7 +470,7 @@ static const js::ClassOps FileObjectClassOps = {
     nullptr               /* trace */
 };
 
-const js::Class FileObject::class_ = {
+const JSClass FileObject::class_ = {
     "File",
     JSCLASS_HAS_RESERVED_SLOTS(FileObject::NUM_SLOTS) |
         JSCLASS_FOREGROUND_FINALIZE,

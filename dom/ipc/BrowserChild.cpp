@@ -55,6 +55,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/ProcessHangMonitor.h"
+#include "mozilla/ResultExtensions.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
@@ -491,8 +492,11 @@ bool BrowserChild::DoUpdateZoomConstraints(
   return true;
 }
 
-nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent) {
+nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent,
+                            WindowGlobalChild* aInitialWindowChild) {
   MOZ_DIAGNOSTIC_ASSERT(mTabGroup);
+  MOZ_ASSERT_IF(aInitialWindowChild,
+                aInitialWindowChild->BrowsingContext() == mBrowsingContext);
 
   nsCOMPtr<nsIWidget> widget = nsIWidget::CreatePuppetWidget(this);
   mPuppetWidget = static_cast<PuppetWidget*>(widget.get());
@@ -503,11 +507,10 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent) {
   mPuppetWidget->InfallibleCreate(nullptr,
                                   nullptr,  // no parents
                                   LayoutDeviceIntRect(0, 0, 0, 0),
-                                  nullptr  // HandleWidgetEvent
-  );
+                                  nullptr);  // HandleWidgetEvent
 
   mWebBrowser = nsWebBrowser::Create(this, mPuppetWidget, OriginAttributesRef(),
-                                     mBrowsingContext);
+                                     mBrowsingContext, aInitialWindowChild);
   nsIWebBrowser* webBrowser = mWebBrowser;
 
   mWebNav = do_QueryInterface(webBrowser);
@@ -903,7 +906,7 @@ BrowserChild::ProvideWindow(mozIDOMWindowProxy* aParent, uint32_t aChromeFlags,
                             const nsAString& aName, const nsACString& aFeatures,
                             bool aForceNoOpener, bool aForceNoReferrer,
                             nsDocShellLoadState* aLoadState, bool* aWindowIsNew,
-                            mozIDOMWindowProxy** aReturn) {
+                            BrowsingContext** aReturn) {
   *aReturn = nullptr;
 
   // If aParent is inside an <iframe mozbrowser> and this isn't a request to
@@ -926,7 +929,14 @@ BrowserChild::ProvideWindow(mozIDOMWindowProxy* aParent, uint32_t aChromeFlags,
     if (openLocation == nsIBrowserDOMWindow::OPEN_CURRENTWINDOW) {
       nsCOMPtr<nsIWebBrowser> browser = do_GetInterface(WebNavigation());
       *aWindowIsNew = false;
-      return browser->GetContentDOMWindow(aReturn);
+
+      nsCOMPtr<mozIDOMWindowProxy> win;
+      MOZ_TRY(browser->GetContentDOMWindow(getter_AddRefs(win)));
+
+      RefPtr<BrowsingContext> bc(
+          nsPIDOMWindowOuter::From(win)->GetBrowsingContext());
+      bc.forget(aReturn);
+      return NS_OK;
     }
   }
 
@@ -941,9 +951,14 @@ BrowserChild::ProvideWindow(mozIDOMWindowProxy* aParent, uint32_t aChromeFlags,
 }
 
 void BrowserChild::DestroyWindow() {
-  if (mBrowsingContext) {
-    mBrowsingContext = nullptr;
-  }
+  mBrowsingContext = nullptr;
+
+  // TabGroups contain circular references to their event queues that they break
+  // when the last window leaves. If we never attached a window to our TabGroup,
+  // though, it will never see a window leave, and will therefore never break
+  // its circular references. If it hasn't had a window attached by now, it
+  // never will, so have it destroy itself now if it's empty.
+  mTabGroup->MaybeDestroy();
 
   if (mStatusFilter) {
     if (nsCOMPtr<nsIWebProgress> webProgress =
@@ -3275,34 +3290,6 @@ bool BrowserChild::DeallocPPaymentRequestChild(PPaymentRequestChild* actor) {
   return true;
 }
 
-PWindowGlobalChild* BrowserChild::AllocPWindowGlobalChild(
-    const WindowGlobalInit&) {
-  MOZ_CRASH("We should never be manually allocating PWindowGlobalChild actors");
-  return nullptr;
-}
-
-bool BrowserChild::DeallocPWindowGlobalChild(PWindowGlobalChild* aActor) {
-  // This reference was added in WindowGlobalChild::Create.
-  static_cast<WindowGlobalChild*>(aActor)->Release();
-  return true;
-}
-
-PBrowserBridgeChild* BrowserChild::AllocPBrowserBridgeChild(const nsString&,
-                                                            const nsString&,
-                                                            BrowsingContext*,
-                                                            const uint32_t&,
-                                                            const TabId&) {
-  MOZ_CRASH(
-      "We should never be manually allocating PBrowserBridgeChild actors");
-  return nullptr;
-}
-
-bool BrowserChild::DeallocPBrowserBridgeChild(PBrowserBridgeChild* aActor) {
-  // This reference was added in BrowserBridgeChild::Create.
-  static_cast<BrowserBridgeChild*>(aActor)->Release();
-  return true;
-}
-
 ScreenIntSize BrowserChild::GetInnerSize() {
   LayoutDeviceIntSize innerSize =
       RoundedToInt(mUnscaledInnerSize * mPuppetWidget->GetDefaultScale());
@@ -3337,6 +3324,7 @@ void BrowserChild::PaintWhileInterruptingJS(
     return;
   }
 
+  MOZ_DIAGNOSTIC_ASSERT(nsContentUtils::IsSafeToRunScript());
   nsAutoScriptBlocker scriptBlocker;
   RecvRenderLayers(true /* aEnabled */, aForceRepaint, aEpoch);
 }
@@ -3617,6 +3605,7 @@ NS_IMETHODIMP BrowserChild::OnLocationChange(nsIWebProgress* aWebProgress,
       MOZ_TRY(CSPToCSPInfo(csp, &locationChangeData->csp().ref()));
     }
 
+    locationChangeData->referrerInfo() = document->ReferrerInfo();
     locationChangeData->isSyntheticDocument() = document->IsSyntheticDocument();
 
     if (nsCOMPtr<nsILoadGroup> loadGroup = document->GetDocumentLoadGroup()) {
@@ -3801,9 +3790,15 @@ bool BrowserChild::UpdateSessionStore(uint32_t aFlushId, bool aIsFinal) {
     store->GetScrollPositions(positions, positionDescendants);
   }
 
-  Unused << SendSessionStoreUpdate(docShellCaps, privatedMode, positions,
-                                   positionDescendants, aFlushId, aIsFinal,
-                                   mSessionStoreListener->GetEpoch());
+  nsTArray<InputFormData> inputs;
+  nsTArray<CollectedInputDataValue> idVals, xPathVals;
+  if (store->IsFormDataChanged()) {
+    inputs = store->GetInputs(idVals, xPathVals);
+  }
+
+  Unused << SendSessionStoreUpdate(
+      docShellCaps, privatedMode, positions, positionDescendants, inputs,
+      idVals, xPathVals, aFlushId, aIsFinal, mSessionStoreListener->GetEpoch());
   return true;
 }
 
@@ -3859,7 +3854,7 @@ Nullable<WindowProxyHolder> BrowserChildMessageManager::GetContent(
   if (!docShell) {
     return nullptr;
   }
-  return WindowProxyHolder(nsDocShell::Cast(docShell)->GetBrowsingContext());
+  return WindowProxyHolder(docShell->GetBrowsingContext());
 }
 
 already_AddRefed<nsIDocShell> BrowserChildMessageManager::GetDocShell(

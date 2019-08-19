@@ -84,7 +84,8 @@ strong {
 
 .devtools-tooltip-inactive-css {
   color: var(--theme-body-color);
-  padding: 5px 13px;
+  padding: 7px 14px 9px;
+  font-size: 12px;
   margin: 0;
 }
 
@@ -96,7 +97,7 @@ strong {
 
 .devtools-tooltip-inactive-css p {
   margin-block-start: 0;
-  margin-block-end: 0.63em;
+  margin-block-end: calc(1em - 4px);
 }
 
 .devtools-tooltip-inactive-css p:last-child {
@@ -106,10 +107,6 @@ strong {
 .devtools-tooltip-inactive-css .link {
   color: var(--theme-highlight-blue);
   cursor: pointer;
-}
-
-.tooltip-bottom .devtools-tooltip-inactive-css {
-  padding: 2px 13px 7px;
 }
 
 /* Tooltip: Tiles */
@@ -361,6 +358,7 @@ strong {
    * padding.
    */
   margin-bottom: 0;
+  padding-top: 6px;
   padding-bottom: 2px;
 }
 
@@ -371,6 +369,7 @@ strong {
    */
   margin-top: 0;
   padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 .tooltip-container[type="doorhanger"].tooltip-top > .tooltip-arrow {
@@ -443,7 +442,7 @@ strong {
   background-position: center left 7px;
 }
 
-.tooltip-container[type="doorhanger"] .menuitem > .command[aria-checked="true"]:-moz-locale-dir(rtl) {
+.tooltip-container[type="doorhanger"] .menuitem > .command[aria-checked="true"]:dir(rtl) {
   background-position: center right 7px;
 }
 
@@ -625,6 +624,12 @@ strong {
   line-height: 14px;
 }
 
+.event-tooltip-editor-frame {
+  border-style: none;
+  height: 100%;
+  width: 100%;
+}
+
 /* Tooltip: HTML Search */
 
 #searchbox-panel-listbox {
@@ -639,6 +644,55 @@ strong {
 }
 
 /* Tooltip: Image tooltip */
+
+/*
+ * Overview of the Image Tooltip layout.
+ *
+ * ┌─────────────────────────────────────────┐
+ * │ .devtools-tooltip-image-container       │
+ * │ ┌─────────────────────────────────────┐ │
+ * │ │ .devtools-tooltip-image-wrapper     │ │
+ * │ │ ┌─────────────────────────────────┐ │ │
+ * │ │ │ .devtools-tooltip-image         │ │ │
+ * │ │ │ (the actual image tag)          │ │ │
+ * │ │ └─────────────────────────────────┘ │ │
+ * │ └─────────────────────────────────────┘ │
+ * │ ┌─────────────────────────────────────┐ │
+ * │ │ .devtools-tooltip-image-dimensions  │ │
+ * │ └─────────────────────────────────────┘ │
+ * └─────────────────────────────────────────┘
+ *
+ */
+
+.devtools-tooltip-image-container {
+  /* Saved as variables to be synchronized easily with ImageTooltipHelper.js */
+  --image-tooltip-image-padding: 4px;
+  --image-tooltip-label-height: 20px;
+
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 100px;
+  text-align: center;
+}
+
+.devtools-tooltip-image-wrapper {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  padding: var(--image-tooltip-image-padding);
+  justify-content: center;
+  min-height: 1px
+}
+
+.devtools-tooltip-image {
+  max-height: 100%;
+}
+
+.devtools-tooltip-image-dimensions {
+  height: var(--image-tooltip-label-height);
+  text-align: center;
+}
 
 .devtools-tooltip-image-broken {
   box-sizing: border-box;

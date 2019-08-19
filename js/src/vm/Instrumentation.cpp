@@ -9,6 +9,7 @@
 #include "jsapi.h"
 
 #include "debugger/DebugAPI.h"
+#include "proxy/DeadObjectProxy.h"
 
 #include "vm/JSObject-inl.h"
 
@@ -34,7 +35,7 @@ static RealmInstrumentation* GetInstrumentation(JSObject* obj) {
 }
 
 /* static */
-void RealmInstrumentation::holderFinalize(FreeOp* fop, JSObject* obj) {
+void RealmInstrumentation::holderFinalize(JSFreeOp* fop, JSObject* obj) {
   RealmInstrumentation* instrumentation = GetInstrumentation(obj);
   fop->delete_(obj, instrumentation, MemoryUse::RealmInstrumentation);
 }
@@ -45,34 +46,32 @@ void RealmInstrumentation::holderTrace(JSTracer* trc, JSObject* obj) {
   instrumentation->trace(trc);
 }
 
-static const ClassOps InstrumentationHolderClassOps = {
-  nullptr, /* addProperty */
-  nullptr, /* delProperty */
-  nullptr, /* enumerate */
-  nullptr, /* newEnumerate */
-  nullptr, /* resolve */
-  nullptr, /* mayResolve */
-  RealmInstrumentation::holderFinalize,
-  nullptr, /* call */
-  nullptr, /* hasInstance */
-  nullptr, /* construct */
-  RealmInstrumentation::holderTrace,
+static const JSClassOps InstrumentationHolderClassOps = {
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* enumerate */
+    nullptr, /* newEnumerate */
+    nullptr, /* resolve */
+    nullptr, /* mayResolve */
+    RealmInstrumentation::holderFinalize,
+    nullptr, /* call */
+    nullptr, /* hasInstance */
+    nullptr, /* construct */
+    RealmInstrumentation::holderTrace,
 };
 
-static const Class InstrumentationHolderClass = {
+static const JSClass InstrumentationHolderClass = {
     "Instrumentation Holder",
     JSCLASS_HAS_RESERVED_SLOTS(ReservedSlotCount) | JSCLASS_FOREGROUND_FINALIZE,
-    &InstrumentationHolderClassOps, JS_NULL_CLASS_SPEC, JS_NULL_CLASS_EXT
-  };
+    &InstrumentationHolderClassOps, JS_NULL_CLASS_SPEC, JS_NULL_CLASS_EXT};
 
 static const char* instrumentationNames[] = {
 #define DEFINE_INSTRUMENTATION_STRING(_1, String, _2) String,
-  FOR_EACH_INSTRUMENTATION_KIND(DEFINE_INSTRUMENTATION_STRING)
+    FOR_EACH_INSTRUMENTATION_KIND(DEFINE_INSTRUMENTATION_STRING)
 #undef DEFINE_INSTRUMENTATION_STRING
 };
 
-static bool StringToInstrumentationKind(JSContext* cx,
-                                        HandleString str,
+static bool StringToInstrumentationKind(JSContext* cx, HandleString str,
                                         InstrumentationKind* result) {
   for (size_t i = 0; i < mozilla::ArrayLength(instrumentationNames); i++) {
     bool match;
@@ -80,7 +79,7 @@ static bool StringToInstrumentationKind(JSContext* cx,
       return false;
     }
     if (match) {
-      *result = (InstrumentationKind) (1 << i);
+      *result = (InstrumentationKind)(1 << i);
       return true;
     }
   }
@@ -93,7 +92,7 @@ static bool StringToInstrumentationKind(JSContext* cx,
 JSAtom* RealmInstrumentation::getInstrumentationKindName(
     JSContext* cx, InstrumentationKind kind) {
   for (size_t i = 0; i < mozilla::ArrayLength(instrumentationNames); i++) {
-    if (kind == (InstrumentationKind) (1 << i)) {
+    if (kind == (InstrumentationKind)(1 << i)) {
       JSString* str = JS_AtomizeString(cx, instrumentationNames[i]);
       if (!str) {
         return nullptr;
@@ -133,11 +132,12 @@ bool RealmInstrumentation::install(JSContext* cx, Handle<GlobalObject*> global,
     if (!StringToInstrumentationKind(cx, str, &kind)) {
       return false;
     }
-    kinds |= (uint32_t) kind;
+    kinds |= (uint32_t)kind;
   }
 
-  UniquePtr<RealmInstrumentation> instrumentation =
-      MakeUnique<RealmInstrumentation>(cx->zone(), callback, dbgObject, kinds);
+  Rooted<UniquePtr<RealmInstrumentation>> instrumentation(
+      cx,
+      MakeUnique<RealmInstrumentation>(cx->zone(), callback, dbgObject, kinds));
   if (!instrumentation) {
     ReportOutOfMemory(cx);
     return false;
@@ -158,8 +158,7 @@ bool RealmInstrumentation::install(JSContext* cx, Handle<GlobalObject*> global,
 /* static */
 bool RealmInstrumentation::setActive(JSContext* cx,
                                      Handle<GlobalObject*> global,
-                                     Debugger* dbg,
-                                     bool active) {
+                                     Debugger* dbg, bool active) {
   MOZ_ASSERT(global == cx->global());
 
   RootedObject holder(cx, global->getInstrumentationHolder());
@@ -224,13 +223,18 @@ uint32_t RealmInstrumentation::getInstrumentationKinds(GlobalObject* global) {
 /* static */
 bool RealmInstrumentation::getScriptId(JSContext* cx,
                                        Handle<GlobalObject*> global,
-                                       HandleScript script,
-                                       int32_t* id) {
+                                       HandleScript script, int32_t* id) {
   MOZ_ASSERT(global == cx->global());
   RootedObject holder(cx, global->getInstrumentationHolder());
   RealmInstrumentation* instrumentation = GetInstrumentation(holder);
 
   RootedObject dbgObject(cx, UncheckedUnwrap(instrumentation->dbgObject));
+
+  if (IsDeadProxyObject(dbgObject)) {
+    JS_ReportErrorASCII(cx, "Instrumentation debugger object is dead");
+    return false;
+  }
+
   AutoRealm ar(cx, dbgObject);
 
   RootedValue idValue(cx);
@@ -266,4 +270,9 @@ bool InstrumentationScriptIdOperation(JSContext* cx, HandleScript script,
   return true;
 }
 
-} // namespace js
+bool GlobalHasInstrumentation(JSObject* global) {
+  return global->is<js::GlobalObject>() &&
+         global->as<js::GlobalObject>().getInstrumentationHolder();
+}
+
+}  // namespace js

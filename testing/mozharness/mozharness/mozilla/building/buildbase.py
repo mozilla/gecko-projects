@@ -380,12 +380,6 @@ class BuildOptionParser(object):
         'aarch64-beta-debug': 'builds/releng_sub_%s_configs/%s_aarch64_beta_debug.py',
         'aarch64-pgo': 'builds/releng_sub_%s_configs/%s_aarch64_pgo.py',
         'aarch64-debug': 'builds/releng_sub_%s_configs/%s_aarch64_debug.py',
-        'android-test': 'builds/releng_sub_%s_configs/%s_test.py',
-        'android-test-ccov': 'builds/releng_sub_%s_configs/%s_test_ccov.py',
-        'android-checkstyle': 'builds/releng_sub_%s_configs/%s_checkstyle.py',
-        'android-api-lint': 'builds/releng_sub_%s_configs/%s_api_lint.py',
-        'android-lint': 'builds/releng_sub_%s_configs/%s_lint.py',
-        'android-findbugs': 'builds/releng_sub_%s_configs/%s_findbugs.py',
         'android-geckoview-docs': 'builds/releng_sub_%s_configs/%s_geckoview_docs.py',
         'valgrind': 'builds/releng_sub_%s_configs/%s_valgrind.py',
         'tup': 'builds/releng_sub_%s_configs/%s_tup.py',
@@ -1326,7 +1320,6 @@ or run without that action (ie: --no-{action})"
         yield {
             'name': 'sccache hit rate',
             'value': hits,
-            'extraOptions': self.perfherder_resource_options(),
             'subtests': [],
             'lowerIsBetter': False
         }
@@ -1334,7 +1327,6 @@ or run without that action (ie: --no-{action})"
         yield {
             'name': 'sccache cache_write_errors',
             'value': stats['stats']['cache_write_errors'],
-            'extraOptions': self.perfherder_resource_options(),
             'alertThreshold': 50.0,
             'subtests': [],
         }
@@ -1342,7 +1334,6 @@ or run without that action (ie: --no-{action})"
         yield {
             'name': 'sccache requests_not_cacheable',
             'value': stats['stats']['requests_not_cacheable'],
-            'extraOptions': self.perfherder_resource_options(),
             'alertThreshold': 50.0,
             'subtests': [],
         }

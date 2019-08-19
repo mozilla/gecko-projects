@@ -11,16 +11,19 @@ const {
   WS_CLEAR_FRAMES,
   WS_TOGGLE_FRAME_FILTER_TYPE,
   WS_SET_REQUEST_FILTER_TEXT,
+  WS_TOGGLE_COLUMN,
+  WS_RESET_COLUMNS,
 } = require("../constants");
 
 /**
  * Add frame into state.
  */
-function addFrame(httpChannelId, data) {
+function addFrame(httpChannelId, data, batch) {
   return {
     type: WS_ADD_FRAME,
     httpChannelId,
     data,
+    meta: { batch },
   };
 }
 
@@ -79,6 +82,28 @@ function setFrameFilterText(text) {
   };
 }
 
+/**
+ * Resets all WebSockets columns to their default state.
+ *
+ */
+function resetWebSocketsColumns() {
+  return {
+    type: WS_RESET_COLUMNS,
+  };
+}
+
+/**
+ * Toggles a WebSockets column
+ *
+ * @param {string} column - The column that is going to be toggled
+ */
+function toggleWebSocketsColumn(column) {
+  return {
+    type: WS_TOGGLE_COLUMN,
+    column,
+  };
+}
+
 module.exports = {
   addFrame,
   selectFrame,
@@ -86,4 +111,6 @@ module.exports = {
   clearFrames,
   toggleFrameFilterType,
   setFrameFilterText,
+  resetWebSocketsColumns,
+  toggleWebSocketsColumn,
 };

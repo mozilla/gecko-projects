@@ -21,11 +21,11 @@
 
 namespace mozilla {
 
-class AutoLockRulesSniffing;
 class EditSubActionInfo;
 class HTMLEditor;
 class HTMLEditRules;
 namespace dom {
+class HTMLBRElement;
 class Selection;
 }  // namespace dom
 
@@ -79,11 +79,8 @@ class TextEditRules {
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult Init(TextEditor* aTextEditor);
   virtual nsresult DetachEditor();
-  virtual nsresult BeforeEdit(EditSubAction aEditSubAction,
-                              nsIEditor::EDirection aDirection);
-  MOZ_CAN_RUN_SCRIPT
-  virtual nsresult AfterEdit(EditSubAction aEditSubAction,
-                             nsIEditor::EDirection aDirection);
+  virtual nsresult BeforeEdit();
+  MOZ_CAN_RUN_SCRIPT virtual nsresult AfterEdit();
   // NOTE: Don't mark WillDoAction() nor DidDoAction() as MOZ_CAN_RUN_SCRIPT
   //       because they are too generic and doing it makes a lot of public
   //       editor methods marked as MOZ_CAN_RUN_SCRIPT too, but some of them
@@ -100,7 +97,7 @@ class TextEditRules {
    * nodes.  Otherwise, i.e., there is no meaningful content,
    * return true.
    */
-  virtual bool DocumentIsEmpty();
+  virtual bool DocumentIsEmpty() const;
 
   bool DontEchoPassword() const;
 
@@ -129,8 +126,6 @@ class TextEditRules {
    * @param aString the string to be modified in place.
    */
   void HandleNewLines(nsString& aString);
-
-  bool HasBogusNode() { return !!mBogusNode; }
 
  protected:
   void InitFields();
@@ -186,16 +181,6 @@ class TextEditRules {
                                     int32_t aMaxLength);
 
   /**
-   * Called before inserting something into the editor.
-   * This method may removes mBougsNode if there is.  Therefore, this method
-   * might cause destroying the editor.
-   *
-   * @param aCancel             Returns true if the operation is canceled.
-   *                            This can be nullptr.
-   */
-  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult WillInsert(bool* aCancel = nullptr);
-
-  /**
    * Called before deleting selected content.
    * This method may actually remove the selected content with
    * DeleteSelectionWithTransaction().  So, this might cause destroying the
@@ -229,17 +214,16 @@ class TextEditRules {
    * This method may remove empty text node and makes guarantee that caret
    * is never at left of <br> element.
    */
-  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult DidDeleteSelection();
+  enum class SetSelectionInterLinePosition {
+    Yes,
+    No,
+  };
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult DidDeleteSelection(
+      SetSelectionInterLinePosition aSetSelectionInterLinePosition);
 
   nsresult WillSetTextProperty(bool* aCancel, bool* aHandled);
 
   nsresult WillRemoveTextProperty(bool* aCancel, bool* aHandled);
-
-  nsresult WillUndo(bool* aCancel, bool* aHandled);
-  nsresult DidUndo(nsresult aResult);
-
-  nsresult WillRedo(bool* aCancel, bool* aHandled);
-  nsresult DidRedo(nsresult aResult);
 
   /**
    * Called prior to nsIEditor::OutputToString.
@@ -253,19 +237,16 @@ class TextEditRules {
                           uint32_t aFlags, bool* aOutCancel, bool* aHandled);
 
   /**
-   * Check for and replace a redundant trailing break.
-   */
-  MOZ_MUST_USE nsresult RemoveRedundantTrailingBR();
-
-  /**
    * Creates a trailing break in the text doc if there is not one already.
    */
   MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult CreateTrailingBRIfNeeded();
 
   /**
-   * Creates a bogus <br> node if the root element has no editable content.
+   * Creates a padding <br> element for empty editor if the root element has no
+   * editable content.
    */
-  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult CreateBogusNodeIfNeeded();
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  CreatePaddingBRElementForEmptyEditorIfNeeded();
 
   /**
    * Returns a truncated insertion string if insertion would place us over
@@ -274,46 +255,6 @@ class TextEditRules {
   nsresult TruncateInsertionIfNeeded(const nsAString* aInString,
                                      nsAString* aOutString, int32_t aMaxLength,
                                      bool* aTruncated);
-
-  /**
-   * Create a normal <br> element and insert it to aPointToInsert.
-   *
-   * @param aPointToInsert  The point where the new <br> element will be
-   *                        inserted.
-   * @return                Returns created <br> element or an error code
-   *                        if couldn't create new <br> element.
-   */
-  MOZ_CAN_RUN_SCRIPT CreateElementResult
-  CreateBR(const EditorDOMPoint& aPointToInsert) {
-    CreateElementResult ret = CreateBRInternal(aPointToInsert, false);
-#ifdef DEBUG
-    // If editor is destroyed, it must return NS_ERROR_EDITOR_DESTROYED.
-    if (!CanHandleEditAction()) {
-      MOZ_ASSERT(ret.Rv() == NS_ERROR_EDITOR_DESTROYED);
-    }
-#endif  // #ifdef DEBUG
-    return ret;
-  }
-
-  /**
-   * Create a moz-<br> element and insert it to aPointToInsert.
-   *
-   * @param aPointToInsert  The point where the new moz-<br> element will be
-   *                        inserted.
-   * @return                Returns created <br> element or an error code
-   *                        if couldn't create new <br> element.
-   */
-  MOZ_CAN_RUN_SCRIPT CreateElementResult
-  CreateMozBR(const EditorDOMPoint& aPointToInsert) {
-    CreateElementResult ret = CreateBRInternal(aPointToInsert, true);
-#ifdef DEBUG
-    // If editor is destroyed, it must return NS_ERROR_EDITOR_DESTROYED.
-    if (!CanHandleEditAction()) {
-      MOZ_ASSERT(ret.Rv() == NS_ERROR_EDITOR_DESTROYED);
-    }
-#endif  // #ifdef DEBUG
-    return ret;
-  }
 
   void UndefineCaretBidiLevel();
 
@@ -326,7 +267,8 @@ class TextEditRules {
    * text node if:
    * - the editor is text editor
    * - and Selection is collapsed at the end of the text node
-   * - and the text node is followed by moz-<br>.
+   * - and the text node is followed by a padding <br> element for empty last
+   *   line.
    */
   MOZ_MUST_USE nsresult CollapseSelectionToTrailingBRIfNeeded();
 
@@ -340,20 +282,6 @@ class TextEditRules {
 
  private:
   TextEditor* MOZ_NON_OWNING_REF mTextEditor;
-
-  /**
-   * Create a normal <br> element or a moz-<br> element and insert it to
-   * aPointToInsert.
-   *
-   * @param aParentToInsert     The point where the new <br> element will be
-   *                            inserted.
-   * @param aCreateMozBR        true if the caller wants to create a moz-<br>
-   *                            element.  Otherwise, false.
-   * @return                    Returns created <br> element and error code.
-   *                            If it succeeded, never returns nullptr.
-   */
-  MOZ_CAN_RUN_SCRIPT CreateElementResult
-  CreateBRInternal(const EditorDOMPoint& aPointToInsert, bool aCreateMozBR);
 
  protected:
   /**
@@ -436,24 +364,11 @@ class TextEditRules {
    */
   inline already_AddRefed<nsINode> GetTextNodeAroundSelectionStartContainer();
 
-  // Magic node acts as placeholder in empty doc.
-  nsCOMPtr<nsIContent> mBogusNode;
-  // Cached selected node.
-  nsCOMPtr<nsINode> mCachedSelectionNode;
-  // Cached selected offset.
-  uint32_t mCachedSelectionOffset;
-  uint32_t mActionNesting;
-  bool mLockRulesSniffing;
-  bool mDidExplicitlySetInterline;
-  // In bidirectional text, delete characters not visually adjacent to the
-  // caret without moving the caret first.
-  bool mDeleteBidiImmediately;
-  bool mIsHTMLEditRules;
-  // The top level editor action.
-  EditSubAction mTopLevelEditSubAction;
+#ifdef DEBUG
+  bool mIsHandling;
+#endif  // #ifdef DEBUG
 
-  // friends
-  friend class AutoLockRulesSniffing;
+  bool mIsHTMLEditRules;
 };
 
 /**
@@ -502,29 +417,6 @@ class MOZ_STACK_CLASS EditSubActionInfo final {
 
   // EditSubAction::eCreateOrRemoveBlock
   const nsAString* blockType;
-};
-
-/**
- * Stack based helper class for managing TextEditRules::mLockRluesSniffing.
- * This class sets a bool letting us know to ignore any rules sniffing
- * that tries to occur reentrantly.
- */
-class MOZ_STACK_CLASS AutoLockRulesSniffing final {
- public:
-  explicit AutoLockRulesSniffing(TextEditRules* aRules) : mRules(aRules) {
-    if (mRules) {
-      mRules->mLockRulesSniffing = true;
-    }
-  }
-
-  ~AutoLockRulesSniffing() {
-    if (mRules) {
-      mRules->mLockRulesSniffing = false;
-    }
-  }
-
- protected:
-  TextEditRules* mRules;
 };
 
 /**

@@ -365,16 +365,16 @@ bool nsCoreUtils::IsTabDocument(Document* aDocumentNode) {
 
   // Parent of docshell for tab document running in chrome process is root.
   nsCOMPtr<nsIDocShellTreeItem> rootTreeItem;
-  treeItem->GetRootTreeItem(getter_AddRefs(rootTreeItem));
+  treeItem->GetInProcessRootTreeItem(getter_AddRefs(rootTreeItem));
 
   return parentTreeItem == rootTreeItem;
 }
 
 bool nsCoreUtils::IsErrorPage(Document* aDocument) {
   nsIURI* uri = aDocument->GetDocumentURI();
-  bool isAboutScheme = false;
-  uri->SchemeIs("about", &isAboutScheme);
-  if (!isAboutScheme) return false;
+  if (!uri->SchemeIs("about")) {
+    return false;
+  }
 
   nsAutoCString path;
   uri->GetPathQueryRef(path);
@@ -544,4 +544,9 @@ void nsCoreUtils::DispatchAccEvent(RefPtr<nsIAccessibleEvent> event) {
   NS_ENSURE_TRUE_VOID(obsService);
 
   obsService->NotifyObservers(event, NS_ACCESSIBLE_EVENT_TOPIC, nullptr);
+}
+
+bool nsCoreUtils::IsDisplayContents(nsIContent* aContent) {
+  return aContent && aContent->IsElement() &&
+         aContent->AsElement()->IsDisplayContents();
 }

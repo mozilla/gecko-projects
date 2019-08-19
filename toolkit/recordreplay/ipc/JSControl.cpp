@@ -6,6 +6,7 @@
 
 #include "JSControl.h"
 
+#include "mozilla/Base64.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StaticPtr.h"
 #include "js/CharacterEncoding.h"
@@ -13,6 +14,7 @@
 #include "js/JSON.h"
 #include "js/PropertySpec.h"
 #include "ChildInternal.h"
+#include "MemorySnapshot.h"
 #include "ParentInternal.h"
 #include "nsImportModule.h"
 #include "rrIControl.h"
@@ -50,8 +52,16 @@ static parent::ChildProcessInfo* GetChildById(JSContext* aCx,
     return nullptr;
   }
   parent::ChildProcessInfo* child = parent::GetChildProcess(aValue.toNumber());
-  if (!child || (!aAllowUnpaused && !child->IsPaused())) {
-    JS_ReportErrorASCII(aCx, "Unpaused or bad child ID");
+  if (!child) {
+    JS_ReportErrorASCII(aCx, "Bad child ID");
+    return nullptr;
+  }
+  if (child->HasCrashed()) {
+    JS_ReportErrorASCII(aCx, "Child has crashed");
+    return nullptr;
+  }
+  if (!aAllowUnpaused && !child->IsPaused()) {
+    JS_ReportErrorASCII(aCx, "Child is unpaused");
     return nullptr;
   }
   return child;
@@ -124,6 +134,19 @@ void AfterSaveRecording() {
   if (NS_FAILED(gControl->AfterSaveRecording())) {
     MOZ_CRASH("AfterSaveRecording");
   }
+}
+
+bool RecoverFromCrash(parent::ChildProcessInfo* aChild) {
+  MOZ_RELEASE_ASSERT(gControl);
+
+  AutoSafeJSContext cx;
+  JSAutoRealm ar(cx, xpc::PrivilegedJunkScope());
+
+  if (NS_FAILED(gControl->ChildCrashed(aChild->GetId()))) {
+    return false;
+  }
+
+  return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -242,7 +265,7 @@ static bool Middleman_HadRepaint(JSContext* aCx, unsigned aArgc, Value* aVp) {
       return false;
     }
 
-    nsDependentCString dataCString((const char*) dataChars, dataLength);
+    nsDependentCString dataCString((const char*)dataChars, dataLength);
     nsresult rv = Base64Decode(dataCString, dataBinary);
     decodeFailed = NS_FAILED(rv);
   }
@@ -315,8 +338,7 @@ static bool Middleman_WaitUntilPaused(JSContext* aCx, unsigned aArgc,
   return true;
 }
 
-static bool Middleman_Atomize(JSContext* aCx, unsigned aArgc,
-                                      Value* aVp) {
+static bool Middleman_Atomize(JSContext* aCx, unsigned aArgc, Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
 
   if (!args.get(0).isString()) {
@@ -380,7 +402,7 @@ MOZ_EXPORT bool RecordReplayInterface_ShouldUpdateProgressCounter(
     // Scripts in this file are internal to the record/replay infrastructure and
     // run non-deterministically between recording and replaying.
     return aURL && strcmp(aURL, ReplayScriptURL) &&
-      strcmp(aURL, "resource://devtools/shared/execution-point-utils.js");
+           strcmp(aURL, "resource://devtools/shared/execution-point-utils.js");
   } else {
     return aURL && strncmp(aURL, "resource:", 9) && strncmp(aURL, "chrome:", 7);
   }
@@ -854,7 +876,8 @@ static bool RecordReplay_Repaint(JSContext* aCx, unsigned aArgc, Value* aVp) {
   return true;
 }
 
-static bool RecordReplay_MemoryUsage(JSContext* aCx, unsigned aArgc, Value* aVp) {
+static bool RecordReplay_MemoryUsage(JSContext* aCx, unsigned aArgc,
+                                     Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
 
   if (!args.get(0).isNumber()) {
@@ -864,12 +887,12 @@ static bool RecordReplay_MemoryUsage(JSContext* aCx, unsigned aArgc, Value* aVp)
 
   size_t kind = args.get(0).toNumber();
 
-  if (kind >= (size_t) MemoryKind::Count) {
+  if (kind >= (size_t)MemoryKind::Count) {
     JS_ReportErrorASCII(aCx, "Memory kind out of range");
     return false;
   }
 
-  args.rval().setDouble(GetMemoryUsage((MemoryKind) kind));
+  args.rval().setDouble(GetMemoryUsage((MemoryKind)kind));
   return true;
 }
 
@@ -942,8 +965,8 @@ struct ScriptHitInfo {
     }
 
     static bool match(const ScriptHitKey& aFirst, const ScriptHitKey& aSecond) {
-      return aFirst.mScript == aSecond.mScript
-          && aFirst.mOffset == aSecond.mOffset;
+      return aFirst.mScript == aSecond.mScript &&
+             aFirst.mOffset == aSecond.mOffset;
     }
   };
 
@@ -976,13 +999,15 @@ struct ScriptHitInfo {
       mInfo.append(nullptr);
     }
     if (!mInfo[aCheckpoint]) {
-      void* mem = AllocateMemory(sizeof(CheckpointInfo), MemoryKind::ScriptHits);
-      mInfo[aCheckpoint] = new(mem) CheckpointInfo();
+      void* mem =
+          AllocateMemory(sizeof(CheckpointInfo), MemoryKind::ScriptHits);
+      mInfo[aCheckpoint] = new (mem) CheckpointInfo();
     }
     return mInfo[aCheckpoint];
   }
 
-  ScriptHitChunk* FindHits(uint32_t aCheckpoint, uint32_t aScript, uint32_t aOffset) {
+  ScriptHitChunk* FindHits(uint32_t aCheckpoint, uint32_t aScript,
+                           uint32_t aOffset) {
     CheckpointInfo* info = GetInfo(aCheckpoint);
 
     ScriptHitKey key(aScript, aOffset);
@@ -1032,9 +1057,8 @@ struct ScriptHitInfo {
     return result;
   }
 
-  void AddChangeFrame(uint32_t aCheckpoint, uint32_t aWhich,
-                      uint32_t aScript, uint32_t aFrameIndex,
-                      ProgressCounter aProgress) {
+  void AddChangeFrame(uint32_t aCheckpoint, uint32_t aWhich, uint32_t aScript,
+                      uint32_t aFrameIndex, ProgressCounter aProgress) {
     CheckpointInfo* info = GetInfo(aCheckpoint);
     MOZ_RELEASE_ASSERT(aWhich < NumChangeFrameKinds);
     info->mChangeFrames[aWhich].emplaceBack(aScript, aFrameIndex, aProgress);
@@ -1136,8 +1160,8 @@ static bool RecordReplay_OnScriptHit(JSContext* aCx, unsigned aArgc,
     return true;
   }
 
-  gScriptHits->AddHit(GetLastCheckpoint(), script, offset,
-                      frameIndex, gProgressCounter);
+  gScriptHits->AddHit(GetLastCheckpoint(), script, offset, frameIndex,
+                      gProgressCounter);
   args.rval().setUndefined();
   return true;
 }
@@ -1165,8 +1189,8 @@ static bool RecordReplay_OnChangeFrame(JSContext* aCx, unsigned aArgc,
   }
 
   uint32_t frameIndex = gFrameDepth - 1;
-  gScriptHits->AddChangeFrame(GetLastCheckpoint(), Kind,
-                              script, frameIndex, gProgressCounter);
+  gScriptHits->AddChangeFrame(GetLastCheckpoint(), Kind, script, frameIndex,
+                              gProgressCounter);
 
   if (Kind == ChangeFrameExit) {
     gFrameDepth--;
@@ -1223,8 +1247,7 @@ static bool RecordReplay_FindScriptHits(JSContext* aCx, unsigned aArgc,
                                         Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
 
-  if (!args.get(0).isNumber() ||
-      !args.get(1).isNumber() ||
+  if (!args.get(0).isNumber() || !args.get(1).isNumber() ||
       !args.get(2).isNumber()) {
     JS_ReportErrorASCII(aCx, "Bad parameters");
     return false;
@@ -1244,9 +1267,9 @@ static bool RecordReplay_FindScriptHits(JSContext* aCx, unsigned aArgc,
         RootedObject hitObject(aCx, JS_NewObject(aCx, nullptr));
         if (!hitObject ||
             !JS_DefineProperty(aCx, hitObject, "progress",
-                               (double) hit.mProgress, JSPROP_ENUMERATE) ||
-            !JS_DefineProperty(aCx, hitObject, "frameIndex",
-                               hit.mFrameIndex, JSPROP_ENUMERATE) ||
+                               (double)hit.mProgress, JSPROP_ENUMERATE) ||
+            !JS_DefineProperty(aCx, hitObject, "frameIndex", hit.mFrameIndex,
+                               JSPROP_ENUMERATE) ||
             !values.append(ObjectValue(*hitObject))) {
           return false;
         }
@@ -1265,7 +1288,7 @@ static bool RecordReplay_FindScriptHits(JSContext* aCx, unsigned aArgc,
 }
 
 static bool RecordReplay_FindChangeFrames(JSContext* aCx, unsigned aArgc,
-                                         Value* aVp) {
+                                          Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
 
   if (!args.get(0).isNumber() || !args.get(1).isNumber()) {
@@ -1289,12 +1312,12 @@ static bool RecordReplay_FindChangeFrames(JSContext* aCx, unsigned aArgc,
     for (const ScriptHitInfo::AnyScriptHit& hit : *hits) {
       RootedObject hitObject(aCx, JS_NewObject(aCx, nullptr));
       if (!hitObject ||
-          !JS_DefineProperty(aCx, hitObject, "script",
-                             hit.mScript, JSPROP_ENUMERATE) ||
-          !JS_DefineProperty(aCx, hitObject, "progress",
-                             (double) hit.mProgress, JSPROP_ENUMERATE) ||
-          !JS_DefineProperty(aCx, hitObject, "frameIndex",
-                             hit.mFrameIndex, JSPROP_ENUMERATE) ||
+          !JS_DefineProperty(aCx, hitObject, "script", hit.mScript,
+                             JSPROP_ENUMERATE) ||
+          !JS_DefineProperty(aCx, hitObject, "progress", (double)hit.mProgress,
+                             JSPROP_ENUMERATE) ||
+          !JS_DefineProperty(aCx, hitObject, "frameIndex", hit.mFrameIndex,
+                             JSPROP_ENUMERATE) ||
           !values.append(ObjectValue(*hitObject))) {
         return false;
       }

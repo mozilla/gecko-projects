@@ -2503,10 +2503,6 @@ void nsJSContext::EnsureStatics() {
 
   // Set these global xpconnect options...
   Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackMB,
-                                       "javascript.options.mem.high_water_mark",
-                                       (void*)JSGC_MAX_MALLOC_BYTES);
-
-  Preferences::RegisterCallbackAndCall(SetMemoryPrefChangedCallbackMB,
                                        "javascript.options.mem.max",
                                        (void*)JSGC_MAX_BYTES);
   Preferences::RegisterCallbackAndCall(SetMemoryNurseryPrefChangedCallback,
@@ -2576,12 +2572,12 @@ void nsJSContext::EnsureStatics() {
       (void*)JSGC_ALLOCATION_THRESHOLD);
   Preferences::RegisterCallbackAndCall(
       SetMemoryPrefChangedCallbackInt,
-      "javascript.options.mem.gc_allocation_threshold_factor",
-      (void*)JSGC_ALLOCATION_THRESHOLD_FACTOR);
+      "javascript.options.mem.gc_non_incremental_factor",
+      (void*)JSGC_NON_INCREMENTAL_FACTOR);
   Preferences::RegisterCallbackAndCall(
       SetMemoryPrefChangedCallbackInt,
-      "javascript.options.mem.gc_allocation_threshold_factor_avoid_interrupt",
-      (void*)JSGC_ALLOCATION_THRESHOLD_FACTOR_AVOID_INTERRUPT);
+      "javascript.options.mem.gc_avoid_interrupt_factor",
+      (void*)JSGC_AVOID_INTERRUPT_FACTOR);
 
   Preferences::RegisterCallbackAndCall(SetIncrementalCCPrefChangedCallback,
                                        "dom.cycle_collector.incremental");

@@ -185,15 +185,11 @@ void nsGenericHTMLElement::GetAccessKeyLabel(nsString& aLabel) {
   }
 }
 
-static bool IsTableCell(LayoutFrameType frameType) {
-  return LayoutFrameType::TableCell == frameType ||
-         LayoutFrameType::BCTableCell == frameType;
-}
-
 static bool IsOffsetParent(nsIFrame* aFrame) {
   LayoutFrameType frameType = aFrame->Type();
 
-  if (IsTableCell(frameType) || frameType == LayoutFrameType::Table) {
+  if (frameType == LayoutFrameType::TableCell ||
+      frameType == LayoutFrameType::Table) {
     // Per the IDL for Element, only td, th, and table are acceptable
     // offsetParents apart from body or positioned elements; we need to check
     // the content type as well as the frame type so we ignore anonymous tables
@@ -962,7 +958,9 @@ bool nsGenericHTMLElement::ParseAlignValue(const nsAString& aString,
 
       {"top", StyleVerticalAlignKeyword::Top},
       {"middle", StyleVerticalAlignKeyword::MozMiddleWithBaseline},
-      {"bottom", StyleVerticalAlignKeyword::Bottom},
+
+      // Intentionally not bottom.
+      {"bottom", StyleVerticalAlignKeyword::Baseline},
 
       {"center", StyleVerticalAlignKeyword::MozMiddleWithBaseline},
       {"baseline", StyleVerticalAlignKeyword::Baseline},
@@ -2684,9 +2682,8 @@ nsresult nsGenericHTMLElement::NewURIFromString(const nsAString& aURISpec,
 
   nsCOMPtr<Document> doc = OwnerDoc();
 
-  nsresult rv =
-      nsContentUtils::NewURIWithDocumentCharset(aURI, aURISpec, doc,
-                                                GetBaseURI());
+  nsresult rv = nsContentUtils::NewURIWithDocumentCharset(aURI, aURISpec, doc,
+                                                          GetBaseURI());
   NS_ENSURE_SUCCESS(rv, rv);
 
   bool equal;

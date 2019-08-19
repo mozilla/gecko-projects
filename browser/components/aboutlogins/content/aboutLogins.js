@@ -2,42 +2,52 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-let gElements = {};
+// The init code isn't wrapped in a DOMContentLoaded/load event listener so the
+// page works properly when restored from session restore.
+const gElements = {
+  fxAccountsButton: document.querySelector("fxaccounts-button"),
+  loginList: document.querySelector("login-list"),
+  loginIntro: document.querySelector("login-intro"),
+  loginItem: document.querySelector("login-item"),
+  loginFilter: document.querySelector("login-filter"),
+  loginFooter: document.querySelector("login-footer"),
+};
 
-document.addEventListener(
-  "DOMContentLoaded",
-  () => {
-    gElements.loginList = document.querySelector("login-list");
-    gElements.loginItem = document.querySelector("login-item");
-    gElements.loginFilter = document.querySelector("login-filter");
+let numberOfLogins = 0;
 
-    let { searchParams } = new URL(document.location);
-    if (searchParams.get("filter")) {
-      gElements.loginFilter.value = searchParams.get("filter");
-    }
+let { searchParams } = new URL(document.location);
+if (searchParams.get("filter")) {
+  gElements.loginFilter.value = searchParams.get("filter");
+}
 
-    document.dispatchEvent(
-      new CustomEvent("AboutLoginsInit", { bubbles: true })
-    );
+gElements.loginFilter.focus();
 
-    gElements.loginFilter.focus();
-  },
-  { once: true }
-);
+function updateNoLogins() {
+  document.documentElement.classList.toggle("no-logins", numberOfLogins == 0);
+  gElements.loginList.classList.toggle("no-logins", numberOfLogins == 0);
+}
 
 window.addEventListener("AboutLoginsChromeToContent", event => {
   switch (event.detail.messageType) {
     case "AllLogins": {
       gElements.loginList.setLogins(event.detail.value);
+      numberOfLogins = event.detail.value.length;
+      updateNoLogins();
       break;
     }
-    case "UpdateBreaches": {
-      gElements.loginList.updateBreaches(event.detail.value);
+    case "InitialInfo": {
+      gElements.loginFooter.hidden = event.detail.value.hideMobileFooter;
+      break;
+    }
+    case "LocalizeBadges": {
+      gElements.loginFooter.showStoreIconsForLocales(event.detail.value);
       break;
     }
     case "LoginAdded": {
       gElements.loginList.loginAdded(event.detail.value);
       gElements.loginItem.loginAdded(event.detail.value);
+      numberOfLogins++;
+      updateNoLogins();
       break;
     }
     case "LoginModified": {
@@ -48,7 +58,24 @@ window.addEventListener("AboutLoginsChromeToContent", event => {
     case "LoginRemoved": {
       gElements.loginList.loginRemoved(event.detail.value);
       gElements.loginItem.loginRemoved(event.detail.value);
+      numberOfLogins--;
+      updateNoLogins();
+      break;
+    }
+    case "SendFavicons": {
+      gElements.loginList.addFavicons(event.detail.value);
+      break;
+    }
+    case "SyncState": {
+      gElements.fxAccountsButton.updateState(event.detail.value);
+      break;
+    }
+    case "UpdateBreaches": {
+      gElements.loginList.updateBreaches(event.detail.value);
+      gElements.loginItem.updateBreaches(event.detail.value);
       break;
     }
   }
 });
+
+document.dispatchEvent(new CustomEvent("AboutLoginsInit", { bubbles: true }));

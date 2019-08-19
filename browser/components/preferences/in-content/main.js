@@ -1077,7 +1077,7 @@ var gMainPane = {
     if (value) {
       // We need to restore the blank homepage setting in our other pref
       if (startupPref.value === this.STARTUP_PREF_BLANK) {
-        HomePage.set("about:blank");
+        HomePage.safeSet("about:blank");
       }
       newValue = this.STARTUP_PREF_RESTORE_SESSION;
       let warnOnQuitPref = Preferences.get("browser.sessionstore.warnOnQuit");
@@ -3183,6 +3183,7 @@ class HandlerInfoWrapper {
         if (this instanceof InternalHandlerInfoWrapper) {
           return "ask";
         }
+        break;
 
       case kActionUsePlugin:
         return "plugin";
@@ -3201,10 +3202,10 @@ class HandlerInfoWrapper {
         if (gMainPane.isValidHandlerApp(preferredApp)) {
           return gMainPane._getIconURLForHandlerApp(preferredApp);
         }
-      // Explicit fall-through
 
       // This should never happen, but if preferredAction is set to some weird
       // value, then fall back to the generic application icon.
+      // Explicit fall-through
       default:
         return ICON_URL_APP;
     }

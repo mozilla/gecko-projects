@@ -19,12 +19,22 @@
 #include "vm/Xdr.h"
 #include "wasm/WasmInstance.h"
 
+#ifdef DEBUG
+#  include "vm/BytecodeIterator.h"
+#  include "vm/BytecodeLocation.h"
+#endif
+
 #include "gc/Marking-inl.h"
 #include "vm/JSAtom-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/Stack-inl.h"
 #include "vm/TypeInference-inl.h"
+
+#ifdef DEBUG
+#  include "vm/BytecodeIterator-inl.h"
+#  include "vm/BytecodeLocation-inl.h"
+#endif
 
 using namespace js;
 
@@ -226,7 +236,7 @@ CallObject* CallObject::createHollowForDebug(JSContext* cx,
   return callobj;
 }
 
-const Class CallObject::class_ = {
+const JSClass CallObject::class_ = {
     "Call", JSCLASS_HAS_RESERVED_SLOTS(CallObject::RESERVED_SLOTS)};
 
 /*****************************************************************************/
@@ -332,7 +342,7 @@ VarEnvironmentObject* VarEnvironmentObject::createHollowForDebug(
   return env;
 }
 
-const Class VarEnvironmentObject::class_ = {
+const JSClass VarEnvironmentObject::class_ = {
     "Var", JSCLASS_HAS_RESERVED_SLOTS(VarEnvironmentObject::RESERVED_SLOTS)};
 
 /*****************************************************************************/
@@ -348,13 +358,13 @@ const ObjectOps ModuleEnvironmentObject::objectOps_ = {
     nullptr, /* getElements */
     nullptr};
 
-const ClassOps ModuleEnvironmentObject::classOps_ = {
+const JSClassOps ModuleEnvironmentObject::classOps_ = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* enumerate */
     ModuleEnvironmentObject::newEnumerate};
 
-const Class ModuleEnvironmentObject::class_ = {
+const JSClass ModuleEnvironmentObject::class_ = {
     "ModuleEnvironmentObject",
     JSCLASS_HAS_RESERVED_SLOTS(ModuleEnvironmentObject::RESERVED_SLOTS),
     &ModuleEnvironmentObject::classOps_,
@@ -571,7 +581,7 @@ bool ModuleEnvironmentObject::newEnumerate(JSContext* cx, HandleObject obj,
 
 /*****************************************************************************/
 
-const Class WasmInstanceEnvironmentObject::class_ = {
+const JSClass WasmInstanceEnvironmentObject::class_ = {
     "WasmInstance",
     JSCLASS_HAS_RESERVED_SLOTS(WasmInstanceEnvironmentObject::RESERVED_SLOTS)};
 
@@ -608,7 +618,7 @@ WasmInstanceEnvironmentObject::createHollowForDebug(
 
 /*****************************************************************************/
 
-const Class WasmFunctionCallObject::class_ = {
+const JSClass WasmFunctionCallObject::class_ = {
     "WasmCall",
     JSCLASS_HAS_RESERVED_SLOTS(WasmFunctionCallObject::RESERVED_SLOTS)};
 
@@ -806,7 +816,7 @@ static const ObjectOps WithEnvironmentObjectOps = {
     nullptr,
 };
 
-const Class WithEnvironmentObject::class_ = {
+const JSClass WithEnvironmentObject::class_ = {
     "With",
     JSCLASS_HAS_RESERVED_SLOTS(WithEnvironmentObject::RESERVED_SLOTS),
     JS_NULL_CLASS_OPS,
@@ -833,7 +843,7 @@ NonSyntacticVariablesObject* NonSyntacticVariablesObject::create(
   return obj;
 }
 
-const Class NonSyntacticVariablesObject::class_ = {
+const JSClass NonSyntacticVariablesObject::class_ = {
     "NonSyntacticVariablesObject",
     JSCLASS_HAS_RESERVED_SLOTS(NonSyntacticVariablesObject::RESERVED_SLOTS)};
 
@@ -1090,7 +1100,7 @@ void LexicalEnvironmentObject::setWindowProxyThisValue(JSObject* obj) {
   setReservedSlot(THIS_VALUE_OR_SCOPE_SLOT, ObjectValue(*obj));
 }
 
-const Class LexicalEnvironmentObject::class_ = {
+const JSClass LexicalEnvironmentObject::class_ = {
     "LexicalEnvironment",
     JSCLASS_HAS_RESERVED_SLOTS(LexicalEnvironmentObject::RESERVED_SLOTS),
     JS_NULL_CLASS_OPS,
@@ -1231,7 +1241,7 @@ static const ObjectOps RuntimeLexicalErrorObjectObjectOps = {
     nullptr, /* this */
 };
 
-const Class RuntimeLexicalErrorObject::class_ = {
+const JSClass RuntimeLexicalErrorObject::class_ = {
     "RuntimeLexicalError",
     JSCLASS_HAS_RESERVED_SLOTS(RuntimeLexicalErrorObject::RESERVED_SLOTS),
     JS_NULL_CLASS_OPS,
@@ -3771,22 +3781,22 @@ static bool RemoveReferencedNames(JSContext* cx, HandleScript script,
   //   these names and putting eval in an inner script is bad news if you
   //   care about entraining variables unnecessarily.
 
-  for (jsbytecode* pc = script->code(); pc != script->codeEnd();
-       pc += GetBytecodeLength(pc)) {
+  AllBytecodesIterable iter(script);
+  for (BytecodeLocation loc : iter) {
     PropertyName* name;
 
-    switch (JSOp(*pc)) {
+    switch (loc.getOp()) {
       case JSOP_GETNAME:
       case JSOP_SETNAME:
       case JSOP_STRICTSETNAME:
-        name = script->getName(pc);
+        name = script->getName(loc.toRawBytecode());
         break;
 
       case JSOP_GETGNAME:
       case JSOP_SETGNAME:
       case JSOP_STRICTSETGNAME:
         if (script->hasNonSyntacticScope()) {
-          name = script->getName(pc);
+          name = script->getName(loc.toRawBytecode());
         } else {
           name = nullptr;
         }
@@ -3794,7 +3804,7 @@ static bool RemoveReferencedNames(JSContext* cx, HandleScript script,
 
       case JSOP_GETALIASEDVAR:
       case JSOP_SETALIASEDVAR:
-        name = EnvironmentCoordinateNameSlow(script, pc);
+        name = EnvironmentCoordinateNameSlow(script, loc.toRawBytecode());
         break;
 
       default:

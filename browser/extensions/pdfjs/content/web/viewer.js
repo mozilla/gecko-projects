@@ -575,7 +575,11 @@ let PDFViewerApplication = {
       eventBus
     });
     pdfLinkService.setHistory(this.pdfHistory);
-    this.findBar = new _pdf_find_bar.PDFFindBar(appConfig.findBar, eventBus, this.l10n);
+
+    if (!this.supportsIntegratedFind) {
+      this.findBar = new _pdf_find_bar.PDFFindBar(appConfig.findBar, eventBus, this.l10n);
+    }
+
     this.pdfDocumentProperties = new _pdf_document_properties.PDFDocumentProperties(appConfig.documentProperties, this.overlayManager, eventBus, this.l10n);
     this.pdfCursorTools = new _pdf_cursor_tools.PDFCursorTools({
       container,
@@ -806,7 +810,11 @@ let PDFViewerApplication = {
     this.pdfSidebar.reset();
     this.pdfOutlineViewer.reset();
     this.pdfAttachmentViewer.reset();
-    this.findBar.reset();
+
+    if (this.findBar) {
+      this.findBar.reset();
+    }
+
     this.toolbar.reset();
     this.secondaryToolbar.reset();
 
@@ -1242,8 +1250,8 @@ let PDFViewerApplication = {
         this.fallback(_pdfjsLib.UNSUPPORTED_FEATURES.forms);
       }
 
-      let versionId = String(info.PDFFormatVersion).slice(-1) | 0;
-      let generatorId = 0;
+      const versionId = `v${info.PDFFormatVersion.replace('.', '_')}`;
+      let generatorId = 'other';
       const KNOWN_GENERATORS = ['acrobat distiller', 'acrobat pdfwriter', 'adobe livecycle', 'adobe pdf library', 'adobe photoshop', 'ghostscript', 'tcpdf', 'cairo', 'dvipdfm', 'dvips', 'pdftex', 'pdfkit', 'itext', 'prince', 'quarkxpress', 'mac os x', 'microsoft', 'openoffice', 'oracle', 'luradocument', 'pdf-xchange', 'antenna house', 'aspose.cells', 'fpdf'];
 
       if (info.Producer) {
@@ -1252,7 +1260,7 @@ let PDFViewerApplication = {
             return false;
           }
 
-          generatorId = i + 1;
+          generatorId = s.replace(/[ .\-]/g, '_');
           return true;
         }.bind(null, info.Producer.toLowerCase()));
       }
@@ -1630,9 +1638,6 @@ function webViewerInitialized() {
       });
     }
   }, true);
-  appConfig.sidebar.toggleButton.addEventListener('click', function () {
-    PDFViewerApplication.pdfSidebar.toggle();
-  });
 
   try {
     webViewerOpenFileViaURL(file);
@@ -1680,7 +1685,8 @@ function webViewerPageRendered(evt) {
   }
 
   PDFViewerApplication.externalServices.reportTelemetry({
-    type: 'pageInfo'
+    type: 'pageInfo',
+    timestamp: evt.timestamp
   });
   PDFViewerApplication.pdfDocument.getStats().then(function (stats) {
     PDFViewerApplication.externalServices.reportTelemetry({
@@ -2015,19 +2021,16 @@ function setZoomDisabledTimeout() {
 }
 
 function webViewerWheel(evt) {
-  let pdfViewer = PDFViewerApplication.pdfViewer;
+  const {
+    pdfViewer,
+    supportedMouseWheelZoomModifierKeys
+  } = PDFViewerApplication;
 
   if (pdfViewer.isInPresentationMode) {
     return;
   }
 
-  if (evt.ctrlKey || evt.metaKey) {
-    let support = PDFViewerApplication.supportedMouseWheelZoomModifierKeys;
-
-    if (evt.ctrlKey && !support.ctrlKey || evt.metaKey && !support.metaKey) {
-      return;
-    }
-
+  if (evt.ctrlKey && supportedMouseWheelZoomModifierKeys.ctrlKey || evt.metaKey && supportedMouseWheelZoomModifierKeys.metaKey) {
     evt.preventDefault();
 
     if (zoomDisabledTimeout || document.visibilityState === 'hidden') {
@@ -4158,6 +4161,9 @@ class PDFSidebar {
       if (evt.target === this.viewerContainer) {
         this.outerContainer.classList.remove('sidebarMoving');
       }
+    });
+    this.toggleButton.addEventListener('click', () => {
+      this.toggle();
     });
     this.thumbnailButton.addEventListener('click', () => {
       this.switchView(SidebarView.THUMBS);
@@ -6683,12 +6689,12 @@ class PDFLinkService {
       return;
     }
 
-    let refStr = pageRef.num + ' ' + pageRef.gen + ' R';
+    const refStr = pageRef.gen === 0 ? `${pageRef.num}R` : `${pageRef.num}R${pageRef.gen}`;
     this._pagesRefCache[refStr] = pageNum;
   }
 
   _cachedPageNumber(pageRef) {
-    let refStr = pageRef.num + ' ' + pageRef.gen + ' R';
+    const refStr = pageRef.gen === 0 ? `${pageRef.num}R` : `${pageRef.num}R${pageRef.gen}`;
     return this._pagesRefCache && this._pagesRefCache[refStr] || null;
   }
 
@@ -10905,6 +10911,8 @@ class Toolbar {
     this.pageScale = _ui_utils.DEFAULT_SCALE;
 
     this._updateUIState(true);
+
+    this.updateLoadingIndicatorState();
   }
 
   _bindListeners() {

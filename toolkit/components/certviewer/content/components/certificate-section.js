@@ -3,13 +3,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { updateSelectedItem } from "../certviewer.js";
-import { certArray } from "./dummy-info.js";
 import { InfoGroup } from "./info-group.js";
 import { ErrorSection } from "./error-section.js";
 
 class CertificateSection extends HTMLElement {
-  constructor() {
+  constructor(certs, error) {
     super();
+    this.certs = certs;
+    this.error = error;
   }
 
   connectedCallback() {
@@ -34,42 +35,32 @@ class CertificateSection extends HTMLElement {
       "certificate-viewer-certificate-section-title"
     );
 
-    // TODO: Render based on certificate error.
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1560513
-    let error = true;
-
     this.infoGroupContainer = this.shadowRoot.querySelector(".info-groups");
 
-    if (error) {
+    if (this.error) {
       title.classList.add("error");
       certificateTabs.appendChild(new ErrorSection());
       return;
     }
-
-    this.createInfoGroupsContainers();
-    for (let i = 0; i < certArray.length; i++) {
-      let tab = document.createElement("button");
-      tab.textContent = "tab" + i;
-      tab.setAttribute("id", "tab" + i);
-      tab.setAttribute("aria-controls", "panel" + i);
-      tab.setAttribute("idnumber", i);
-      tab.setAttribute("role", "tab");
-      tab.classList.add("certificate-tab");
-      tab.classList.add("tab");
-      certificateTabs.appendChild(tab);
-
-      // If it is the first tab, allow it to be tabbable by the user.
-      // If it isn't the first tab, do not allow tab functionality,
-      // as arrow functionality is implemented in certviewer.js.
-      if (i === 0) {
-        tab.classList.add("selected");
-        tab.setAttribute("tabindex", 0);
-      } else {
-        tab.setAttribute("tabindex", -1);
-      }
-      this.infoGroupsContainers[0].classList.add("selected");
+    for (let i = 0; i < this.certs.length; i++) {
+      this.createInfoGroupsContainers(this.certs[i].certItems, i);
+      this.createTabSection(this.certs[i].tabName, i, certificateTabs);
     }
     this.setAccessibilityEventListeners();
+    this.addClassForPadding();
+  }
+
+  // Adds class selector for items that need padding,
+  // as nth-child/parent-based selectors aren't supported
+  // due to the encapsulation of custom-element CSS.
+  addClassForPadding() {
+    let items = this.shadowRoot
+      .querySelector(".embedded-scts")
+      .shadowRoot.querySelectorAll(".version");
+
+    for (let i = 0; i < items.length; i++) {
+      items[i].classList.add("padding");
+    }
   }
 
   /* Information on setAccessibilityEventListeners() can be found
@@ -115,23 +106,43 @@ class CertificateSection extends HTMLElement {
     });
   }
 
-  createInfoGroupsContainers() {
-    for (let i = 0; i < certArray.length; i++) {
-      this.infoGroupsContainers[i] = document.createElement("div");
-      this.infoGroupsContainers[i].setAttribute("id", "panel" + i);
-      this.infoGroupsContainers[i].setAttribute("role", "tabpanel");
-      this.infoGroupsContainers[i].setAttribute("tabindex", 0);
-      this.infoGroupsContainers[i].setAttribute("aria-labelledby", "tab" + i);
-      if (i !== 0) {
-        this.infoGroupsContainers[i].setAttribute("hidden", true);
-      }
-      this.infoGroupsContainers[i].classList.add("info-groups");
-      this.shadowRoot.appendChild(this.infoGroupsContainers[i]);
-      let arrayItem = certArray[i];
-      for (let j = 0; j < arrayItem.length; j++) {
-        this.infoGroupsContainers[i].appendChild(new InfoGroup(arrayItem[j]));
-      }
+  createInfoGroupsContainers(certArray, i) {
+    this.infoGroupsContainers[i] = document.createElement("div");
+    this.infoGroupsContainers[i].setAttribute("id", "panel" + i);
+    this.infoGroupsContainers[i].setAttribute("role", "tabpanel");
+    this.infoGroupsContainers[i].setAttribute("tabindex", 0);
+    this.infoGroupsContainers[i].setAttribute("aria-labelledby", "tab" + i);
+    if (i !== 0) {
+      this.infoGroupsContainers[i].setAttribute("hidden", true);
     }
+    this.infoGroupsContainers[i].classList.add("info-groups");
+    this.shadowRoot.appendChild(this.infoGroupsContainers[i]);
+    for (let j = 0; j < certArray.length; j++) {
+      this.infoGroupsContainers[i].appendChild(new InfoGroup(certArray[j]));
+    }
+  }
+
+  createTabSection(tabName, i, certificateTabs) {
+    let tab = document.createElement("button");
+    tab.textContent = tabName;
+    tab.setAttribute("id", "tab" + i);
+    tab.setAttribute("aria-controls", "panel" + i);
+    tab.setAttribute("idnumber", i);
+    tab.setAttribute("role", "tab");
+    tab.classList.add("certificate-tab");
+    tab.classList.add("tab");
+    certificateTabs.appendChild(tab);
+
+    // If it is the first tab, allow it to be tabbable by the user.
+    // If it isn't the first tab, do not allow tab functionality,
+    // as arrow functionality is implemented in certviewer.js.
+    if (i === 0) {
+      tab.classList.add("selected");
+      tab.setAttribute("tabindex", 0);
+    } else {
+      tab.setAttribute("tabindex", -1);
+    }
+    this.infoGroupsContainers[0].classList.add("selected");
   }
 
   updateSelectedTab(index) {
