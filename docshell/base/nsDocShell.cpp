@@ -9025,8 +9025,9 @@ nsresult nsDocShell::HandleSameDocumentNavigation(
 
   // If we're doing a history load, use its scroll restoration state.
   if (aLoadState->SHEntry()) {
-    nsresult rv = aLoadState->SHEntry()->GetScrollRestorationIsManual(
-        &scrollRestorationIsManual);
+    DebugOnly<nsresult> rv =
+        aLoadState->SHEntry()->GetScrollRestorationIsManual(
+            &scrollRestorationIsManual);
     MOZ_ASSERT(NS_SUCCEEDED(rv), "Didn't expect this to fail.");
   }
 
