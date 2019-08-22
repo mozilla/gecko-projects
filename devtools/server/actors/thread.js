@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -443,6 +441,12 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       this.pauseOverlay
     ) {
       const reason = this._priorPause.why.type;
+
+      // Do not show the pause overlay when scanning
+      if (this.dbg.replaying) {
+        return;
+      }
+
       this.pauseOverlay.show(null, { reason });
     }
   },
@@ -929,7 +933,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // Continue if:
     // 1. the location is not a valid breakpoint position
     // 2. the source is not blackboxed
-    // 3. has not moved
+    // 3. we have not moved since the last pause
     if (
       !meta.isBreakpoint ||
       this.sources.isFrameBlackBoxed(frame) ||
@@ -942,6 +946,11 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // 1. the frame has changed
     // 2. the location is a step position.
     return frame !== startFrame || meta.isStepStart;
+  },
+
+  atBreakpointLocation(frame) {
+    const location = this.sources.getFrameLocation(frame);
+    return !!this.breakpointActorMap.get(location);
   },
 
   createCompletionGrip: function(packet, completion) {
@@ -1760,16 +1769,17 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    */
   onDebuggerStatement: function(frame) {
     const location = this.sources.getFrameLocation(frame);
-    const url = location.sourceActor.url;
 
     // Don't pause if
-    // 1. the debugger is in the same position
+    // 1. we have not moved since the last pause
     // 2. breakpoints are disabled
     // 3. the source is blackboxed
+    // 4. there is a breakpoint at the same location
     if (
       !this.hasMoved(frame, "debuggerStatement") ||
       this.skipBreakpoints ||
-      this.sources.isBlackBoxed(url)
+      this.sources.isBlackBoxed(location.sourceUrl) ||
+      this.atBreakpointLocation(frame)
     ) {
       return undefined;
     }

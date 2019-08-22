@@ -318,11 +318,11 @@ function MarkupView(inspector, frame, controllerWindow) {
   this.walker.on("mutations", this._mutationObserver);
   this.win.addEventListener("copy", this._onCopy);
   this.win.addEventListener("mouseup", this._onMouseUp);
-  this.inspector.inspectorFront.nodePicker.on(
+  this.inspector.toolbox.nodePicker.on(
     "picker-node-canceled",
     this._onToolboxPickerCanceled
   );
-  this.inspector.inspectorFront.nodePicker.on(
+  this.inspector.toolbox.nodePicker.on(
     "picker-node-hovered",
     this._onToolboxPickerHover
   );
@@ -2191,13 +2191,18 @@ MarkupView.prototype = {
   /**
    * Return a list of the children to display for this container.
    */
-  _getVisibleChildren: function(container, centered) {
+  _getVisibleChildren: async function(container, centered) {
     let maxChildren = container.maxChildren || this.maxChildren;
     if (maxChildren == -1) {
       maxChildren = undefined;
     }
 
-    return this.walker.children(container.node, {
+    // We have to use node's walker and not a top level walker
+    // as for fission frames, we are going to have multiple walkers
+    const inspectorFront = await container.node.targetFront.getFront(
+      "inspector"
+    );
+    return inspectorFront.walker.children(container.node, {
       maxNodes: maxChildren,
       center: centered,
     });
@@ -2264,7 +2269,7 @@ MarkupView.prototype = {
     this._elt.removeEventListener("mouseout", this._onMouseOut);
     this._frame.removeEventListener("focus", this._onFocus);
     this.inspector.selection.off("new-node-front", this._onNewSelection);
-    this.inspector.inspectorFront.nodePicker.off(
+    this.inspector.toolbox.nodePicker.off(
       "picker-node-hovered",
       this._onToolboxPickerHover
     );

@@ -75,11 +75,10 @@ pub use self::resolution::Resolution;
 pub use self::svg::MozContextProperties;
 pub use self::svg::{SVGLength, SVGOpacity, SVGPaint, SVGPaintKind};
 pub use self::svg::{SVGPaintOrder, SVGStrokeDashArray, SVGWidth};
-pub use self::table::XSpan;
-pub use self::text::TextDecorationSkipInk;
 pub use self::text::{InitialLetter, LetterSpacing, LineBreak, LineHeight};
 pub use self::text::{OverflowWrap, TextOverflow, WordBreak, WordSpacing};
 pub use self::text::{TextAlign, TextEmphasisPosition, TextEmphasisStyle};
+pub use self::text::{TextDecorationLength, TextDecorationSkipInk};
 pub use self::time::Time;
 pub use self::transform::{Rotate, Scale, Transform, TransformOperation};
 pub use self::transform::{TransformOrigin, TransformStyle, Translate};
@@ -116,7 +115,6 @@ pub mod position;
 pub mod rect;
 pub mod resolution;
 pub mod svg;
-pub mod table;
 pub mod text;
 pub mod time;
 pub mod transform;
@@ -230,7 +228,7 @@ impl<'a> Context<'a> {
 
     /// Apply text-zoom if enabled.
     #[cfg(feature = "gecko")]
-    pub fn maybe_zoom_text(&self, size: NonNegativeLength) -> NonNegativeLength {
+    pub fn maybe_zoom_text(&self, size: CSSPixelLength) -> CSSPixelLength {
         // We disable zoom for <svg:text> by unsetting the
         // -x-text-zoom property, which leads to a false value
         // in mAllowZoom
@@ -243,7 +241,7 @@ impl<'a> Context<'a> {
 
     /// (Servo doesn't do text-zoom)
     #[cfg(feature = "servo")]
-    pub fn maybe_zoom_text(&self, size: NonNegativeLength) -> NonNegativeLength {
+    pub fn maybe_zoom_text(&self, size: CSSPixelLength) -> CSSPixelLength {
         size
     }
 }

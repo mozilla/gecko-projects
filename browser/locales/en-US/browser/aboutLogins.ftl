@@ -4,6 +4,15 @@
 
 about-logins-page-title = Logins & Passwords
 
+# "Google Play" and "App Store" are both branding and should not be translated
+
+login-app-promo-title = Take your passwords everywhere
+login-app-promo-subtitle = Get the free { -lockwise-brand-name } app
+login-app-promo-android =
+  .alt = Get it on Google Play
+login-app-promo-apple =
+  .alt = Download on the App Store
+
 login-filter =
   .placeholder = Search Logins
 
@@ -130,3 +139,5 @@ confirm-discard-changes-dialog-confirm-button = Discard
 
 breach-alert-text = Passwords were leaked or stolen from this website since you last updated your login details. Change your password to protect your account.
 breach-alert-link = Learn more about this breach.
+breach-alert-dismiss = 
+    .title = Close this alert

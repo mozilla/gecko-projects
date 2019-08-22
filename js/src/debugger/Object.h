@@ -36,7 +36,7 @@ enum { JSSLOT_DEBUGOBJECT_OWNER, JSSLOT_DEBUGOBJECT_COUNT };
 
 class DebuggerObject : public NativeObject {
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   static NativeObject* initClass(JSContext* cx, Handle<GlobalObject*> global,
                                  HandleObject debugCtor);
@@ -44,7 +44,7 @@ class DebuggerObject : public NativeObject {
                                 HandleObject referent,
                                 HandleNativeObject debugger);
 
-  static void trace(JSTracer* trc, JSObject* obj);
+  void trace(JSTracer* trc);
 
   // Properties
   static MOZ_MUST_USE bool getClassName(JSContext* cx,
@@ -174,7 +174,7 @@ class DebuggerObject : public NativeObject {
 
   static const unsigned RESERVED_SLOTS = 1;
 
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static const JSPropertySpec properties_[];
   static const JSPropertySpec promiseProperties_[];

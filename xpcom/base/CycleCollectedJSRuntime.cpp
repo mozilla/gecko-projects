@@ -620,7 +620,7 @@ void CycleCollectedJSRuntime::DescribeGCThing(
   if (aThing.is<JSObject>()) {
     JSObject* obj = &aThing.as<JSObject>();
     compartmentAddress = (uint64_t)js::GetObjectCompartment(obj);
-    const js::Class* clasp = js::GetObjectClass(obj);
+    const JSClass* clasp = js::GetObjectClass(obj);
 
     // Give the subclass a chance to do something
     if (DescribeCustomObjects(obj, clasp, name)) {
@@ -655,7 +655,7 @@ void CycleCollectedJSRuntime::NoteGCThingJSChildren(
 }
 
 void CycleCollectedJSRuntime::NoteGCThingXPCOMChildren(
-    const js::Class* aClasp, JSObject* aObj,
+    const JSClass* aClasp, JSObject* aObj,
     nsCycleCollectionTraversalCallback& aCb) const {
   MOZ_ASSERT(aClasp);
   MOZ_ASSERT(aClasp == js::GetObjectClass(aObj));
@@ -1185,7 +1185,7 @@ void CycleCollectedJSRuntime::JSObjectsTenured() {
     MOZ_DIAGNOSTIC_ASSERT(wrapper || recordreplay::IsReplaying());
     if (!JS::ObjectIsTenured(wrapper)) {
       MOZ_ASSERT(!cache->PreservingWrapper());
-      const JSClass* jsClass = js::GetObjectJSClass(wrapper);
+      const JSClass* jsClass = js::GetObjectClass(wrapper);
       jsClass->doFinalize(nullptr, wrapper);
     }
   }
@@ -1356,13 +1356,6 @@ void CycleCollectedJSRuntime::FinalizeDeferredThings(
       // we need to just continue processing it.
       return;
     }
-  }
-
-  // When recording or replaying, execute triggers that were activated recently
-  // by mozilla::DeferredFinalize. This will populate the deferred finalizer
-  // table with a consistent set of entries between the recording and replay.
-  if (recordreplay::IsRecordingOrReplaying()) {
-    recordreplay::ExecuteTriggers();
   }
 
   if (mDeferredFinalizerTable.Count() == 0) {

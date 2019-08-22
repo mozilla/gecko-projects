@@ -117,6 +117,13 @@ class CompositorWidget {
   virtual void PostRender(WidgetRenderingContext* aContext) {}
 
   /**
+   * Called on the same thread as PreRender/PostRender during destruction.
+   * This method gives the widget a chance to do any cleanup for state that it
+   * created during PreRender / PostRender.
+   */
+  virtual void DoCompositorCleanup() {}
+
+  /**
    * Called before the LayerManager draws the layer tree.
    *
    * Always called from the compositing thread.
@@ -155,8 +162,9 @@ class CompositorWidget {
    * after each composition.
    */
   virtual void EndRemoteDrawing() {}
-  virtual void EndRemoteDrawingInRegion(gfx::DrawTarget* aDrawTarget,
-                                        LayoutDeviceIntRegion& aInvalidRegion) {
+  virtual void EndRemoteDrawingInRegion(
+      gfx::DrawTarget* aDrawTarget,
+      const LayoutDeviceIntRegion& aInvalidRegion) {
     EndRemoteDrawing();
   }
 
@@ -228,8 +236,8 @@ class CompositorWidget {
    * Create a backbuffer for the software compositor.
    */
   virtual already_AddRefed<gfx::DrawTarget> GetBackBufferDrawTarget(
-      gfx::DrawTarget* aScreenTarget, const LayoutDeviceIntRect& aRect,
-      const LayoutDeviceIntRect& aClearRect);
+      gfx::DrawTarget* aScreenTarget, const gfx::IntRect& aRect,
+      bool* aOutIsCleared);
 
   /**
    * Ensure end of composition to back buffer.

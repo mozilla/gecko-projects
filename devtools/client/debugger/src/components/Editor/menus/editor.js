@@ -123,9 +123,11 @@ const blackBoxMenuItem = (
 ) => ({
   id: "node-menu-blackbox",
   label: selectedSource.isBlackBoxed
-    ? L10N.getStr("sourceFooter.unblackbox")
-    : L10N.getStr("sourceFooter.blackbox"),
-  accesskey: L10N.getStr("sourceFooter.blackbox.accesskey"),
+    ? L10N.getStr("blackboxContextItem.unblackbox")
+    : L10N.getStr("blackboxContextItem.blackbox"),
+  accesskey: selectedSource.isBlackBoxed
+    ? L10N.getStr("blackboxContextItem.unblackbox.accesskey")
+    : L10N.getStr("blackboxContextItem.blackbox.accesskey"),
   disabled: !shouldBlackbox(selectedSource),
   click: () => editorActions.toggleBlackBox(cx, selectedSource),
 });
@@ -166,7 +168,7 @@ const downloadFileItem = (
 export function editorMenuItems({
   cx,
   editorActions,
-  selectedSourceWithContent,
+  selectedSource,
   location,
   selectionText,
   hasPrettySource,
@@ -175,7 +177,7 @@ export function editorMenuItems({
 }: {
   cx: ThreadContext,
   editorActions: EditorItemActions,
-  selectedSourceWithContent: SourceWithContent,
+  selectedSource: SourceWithContent,
   location: SourceLocation,
   selectionText: string,
   hasPrettySource: boolean,
@@ -183,7 +185,11 @@ export function editorMenuItems({
   isPaused: boolean,
 }) {
   const items = [];
-  const { source: selectedSource, content } = selectedSourceWithContent;
+
+  const content =
+    selectedSource.content && isFulfilled(selectedSource.content)
+      ? selectedSource.content.value
+      : null;
 
   items.push(
     jumpToMappedLocationItem(
@@ -195,17 +201,15 @@ export function editorMenuItems({
     ),
     continueToHereItem(cx, location, isPaused, editorActions),
     { type: "separator" },
-    ...(content && isFulfilled(content)
-      ? [copyToClipboardItem(content.value, editorActions)]
-      : []),
+    ...(content ? [copyToClipboardItem(content, editorActions)] : []),
     ...(!selectedSource.isWasm
       ? [
           copySourceItem(selectedSource, selectionText, editorActions),
           copySourceUri2Item(selectedSource, editorActions),
         ]
       : []),
-    ...(content && isFulfilled(content)
-      ? [downloadFileItem(selectedSource, content.value, editorActions)]
+    ...(content
+      ? [downloadFileItem(selectedSource, content, editorActions)]
       : []),
     { type: "separator" },
     showSourceMenuItem(cx, selectedSource, editorActions),

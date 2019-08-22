@@ -2840,11 +2840,24 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
   Maybe<CorsPreflightArgs> optionalCorsPreflightArgs;
   GetClientSetCorsPreflightParameters(optionalCorsPreflightArgs);
 
-  // NB: This call forces us to cache mTopWindowURI if we haven't already.
+  // NB: This call forces us to cache mTopWindowURI and
+  // mContentBlockingAllowListPrincipal if we haven't already.
   nsCOMPtr<nsIURI> uri;
   GetTopWindowURI(mURI, getter_AddRefs(uri));
 
   SerializeURI(mTopWindowURI, openArgs.topWindowURI());
+
+  if (mContentBlockingAllowListPrincipal) {
+    PrincipalInfo principalInfo;
+    rv = PrincipalToPrincipalInfo(mContentBlockingAllowListPrincipal,
+                                  &principalInfo);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+    openArgs.contentBlockingAllowListPrincipal() = principalInfo;
+  } else {
+    openArgs.contentBlockingAllowListPrincipal() = void_t();
+  }
 
   openArgs.preflightArgs() = optionalCorsPreflightArgs;
 
@@ -4058,6 +4071,10 @@ nsresult HttpChannelChild::CrossProcessRedirectFinished(nsresult aStatus) {
     return NS_BINDING_FAILED;
   }
 
+  if (!mCanceled && NS_SUCCEEDED(mStatus)) {
+    mStatus = aStatus;
+  }
+
   // The loadInfo is updated in nsDocShell::OpenInitializedChannel to have the
   // correct attributes (such as browsingContextID).
   // We need to send it to the parent channel so the two match, which is done
@@ -4066,7 +4083,7 @@ nsresult HttpChannelChild::CrossProcessRedirectFinished(nsresult aStatus) {
   Maybe<LoadInfoArgs> loadInfoArgs;
   MOZ_ALWAYS_SUCCEEDS(
       mozilla::ipc::LoadInfoToLoadInfoArgs(loadInfo, &loadInfoArgs));
-  Unused << SendCrossProcessRedirectDone(aStatus, loadInfoArgs);
+  Unused << SendCrossProcessRedirectDone(mStatus, loadInfoArgs);
   return NS_OK;
 }
 

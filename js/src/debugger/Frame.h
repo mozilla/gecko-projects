@@ -100,7 +100,7 @@ enum class DebuggerFrameImplementation { Interpreter, Baseline, Ion, Wasm };
 
 class DebuggerArguments : public NativeObject {
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   static DebuggerArguments* create(JSContext* cx, HandleObject proto,
                                    HandleDebuggerFrame frame);
@@ -117,7 +117,7 @@ class DebuggerFrame : public NativeObject {
   friend class ScriptedOnPopHandler;
 
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   enum {
     OWNER_SLOT = 0,
@@ -141,7 +141,7 @@ class DebuggerFrame : public NativeObject {
     RESERVED_SLOTS,
   };
 
-  static void trace(JSTracer* trc, JSObject* obj);
+  void trace(JSTracer* trc);
 
   static NativeObject* initClass(JSContext* cx, Handle<GlobalObject*> global,
                                  HandleObject dbgCtor);
@@ -250,7 +250,7 @@ class DebuggerFrame : public NativeObject {
   bool hasAnyLiveHooks() const;
 
  private:
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static const JSPropertySpec properties_[];
   static const JSFunctionSpec methods_[];

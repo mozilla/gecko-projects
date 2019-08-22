@@ -4,8 +4,6 @@
 
 package org.mozilla.geckoview.test
 
-import android.os.Handler
-import android.os.Looper
 import android.support.test.InstrumentationRegistry
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.ContentBlocking
@@ -29,6 +27,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Ignore
 import org.junit.Test
+import org.junit.Assume.assumeThat
 import org.junit.runner.RunWith
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule
 import org.mozilla.geckoview.test.util.HttpBin
@@ -197,6 +196,10 @@ class NavigationDelegateTest : BaseSessionTest() {
 
     @Setting(key = Setting.Key.USE_TRACKING_PROTECTION, value = "true")
     @Test fun trackingProtection() {
+        // TODO: Bug 1564373
+        assumeThat(sessionRule.env.isDebugBuild && sessionRule.env.isX86,
+                equalTo(false))
+
         val category = ContentBlocking.AntiTracking.TEST
         sessionRule.runtime.settings.contentBlocking.setAntiTracking(category)
         sessionRule.session.loadTestPath(TRACKERS_PATH)
@@ -864,15 +867,10 @@ class NavigationDelegateTest : BaseSessionTest() {
         sessionRule.waitForPageStop()
 
         sessionRule.forCallbacksDuringWait(object : Callbacks.NavigationDelegate {
-            @AssertCalled(count = 1, order = [1])
+            @AssertCalled(count = 0, order = [1])
             override fun onLoadRequest(session: GeckoSession,
                                        request: LoadRequest):
                                        GeckoResult<AllowOrDeny>? {
-                assertThat("URI should match", request.uri, endsWith(HELLO_HTML_PATH))
-                assertThat("Trigger URL should be null", request.triggerUri,
-                           nullValue())
-                assertThat("Target should match", request.target,
-                           equalTo(GeckoSession.NavigationDelegate.TARGET_WINDOW_CURRENT))
                 return null
             }
 
@@ -901,15 +899,10 @@ class NavigationDelegateTest : BaseSessionTest() {
         sessionRule.waitForPageStop()
 
         sessionRule.forCallbacksDuringWait(object : Callbacks.NavigationDelegate {
-            @AssertCalled(count = 1, order = [1])
+            @AssertCalled(count = 0, order = [1])
             override fun onLoadRequest(session: GeckoSession,
                                        request: LoadRequest):
                                        GeckoResult<AllowOrDeny>? {
-                assertThat("URI should match", request.uri, endsWith(HELLO2_HTML_PATH))
-                assertThat("Trigger URL should be null", request.triggerUri,
-                           nullValue())
-                assertThat("Target should match", request.target,
-                           equalTo(GeckoSession.NavigationDelegate.TARGET_WINDOW_CURRENT))
                 return null
             }
 

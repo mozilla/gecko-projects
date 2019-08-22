@@ -12,7 +12,7 @@ use crate::values::computed::text::TextOverflow as ComputedTextOverflow;
 use crate::values::computed::{Context, ToComputedValue};
 use crate::values::generics::text::InitialLetter as GenericInitialLetter;
 use crate::values::generics::text::LineHeight as GenericLineHeight;
-use crate::values::generics::text::Spacing;
+use crate::values::generics::text::{GenericTextDecorationLength, Spacing};
 use crate::values::specified::length::NonNegativeLengthPercentage;
 use crate::values::specified::length::{FontRelativeLength, Length};
 use crate::values::specified::length::{LengthPercentage, NoCalcLength};
@@ -90,8 +90,7 @@ impl ToComputedValue for LineHeight {
                 let result = match non_negative_lp.0 {
                     LengthPercentage::Length(NoCalcLength::Absolute(ref abs)) => {
                         context
-                            .maybe_zoom_text(abs.to_computed_value(context).into())
-                            .0
+                            .maybe_zoom_text(abs.to_computed_value(context))
                     },
                     LengthPercentage::Length(ref length) => length.to_computed_value(context),
                     LengthPercentage::Percentage(ref p) => FontRelativeLength::Em(p.0)
@@ -1038,4 +1037,21 @@ pub enum OverflowWrap {
 pub enum TextDecorationSkipInk {
     Auto,
     None,
+}
+
+/// Implements type for `text-underline-offset` and `text-decoration-thickness` properties
+pub type TextDecorationLength = GenericTextDecorationLength<Length>;
+
+impl TextDecorationLength {
+    /// `Auto` value.
+    #[inline]
+    pub fn auto() -> Self {
+        GenericTextDecorationLength::Auto
+    }
+
+    /// Whether this is the `Auto` value.
+    #[inline]
+    pub fn is_auto(&self) -> bool {
+        matches!(*self, GenericTextDecorationLength::Auto)
+    }
 }

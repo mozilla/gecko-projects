@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* vim:set ts=2 sw=2 sts=2 et: */
 /*
  * Software License Agreement (BSD License)
  *
@@ -594,8 +593,6 @@ var NetworkHelper = {
      *   => .errorMessage is not available
      *      => state === "weak"
      */
-
-    securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
 
     const wpl = Ci.nsIWebProgressListener;
     const NSSErrorsService = Cc["@mozilla.org/nss_errors_service;1"].getService(

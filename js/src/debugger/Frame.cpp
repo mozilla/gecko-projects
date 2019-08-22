@@ -172,21 +172,21 @@ inline js::Debugger* js::DebuggerFrame::owner() const {
   return Debugger::fromJSObject(dbgobj);
 }
 
-const ClassOps DebuggerFrame::classOps_ = {
-    nullptr,  /* addProperty */
-    nullptr,  /* delProperty */
-    nullptr,  /* enumerate   */
-    nullptr,  /* newEnumerate */
-    nullptr,  /* resolve     */
-    nullptr,  /* mayResolve  */
-    finalize, /* finalize */
-    nullptr,  /* call        */
-    nullptr,  /* hasInstance */
-    nullptr,  /* construct   */
-    trace,    /* trace */
+const JSClassOps DebuggerFrame::classOps_ = {
+    nullptr,                        /* addProperty */
+    nullptr,                        /* delProperty */
+    nullptr,                        /* enumerate   */
+    nullptr,                        /* newEnumerate */
+    nullptr,                        /* resolve     */
+    nullptr,                        /* mayResolve  */
+    finalize,                       /* finalize */
+    nullptr,                        /* call        */
+    nullptr,                        /* hasInstance */
+    nullptr,                        /* construct   */
+    CallTraceMethod<DebuggerFrame>, /* trace */
 };
 
-const Class DebuggerFrame::class_ = {
+const JSClass DebuggerFrame::class_ = {
     "Frame",
     JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS) |
         // We require foreground finalization so we can destruct GeneratorInfo's
@@ -196,7 +196,7 @@ const Class DebuggerFrame::class_ = {
 
 enum { JSSLOT_DEBUGARGUMENTS_FRAME, JSSLOT_DEBUGARGUMENTS_COUNT };
 
-const Class DebuggerArguments::class_ = {
+const JSClass DebuggerArguments::class_ = {
     "Arguments", JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_DEBUGARGUMENTS_COUNT)};
 
 bool DebuggerFrame::resume(const FrameIter& iter) {
@@ -1075,20 +1075,18 @@ void DebuggerFrame::finalize(JSFreeOp* fop, JSObject* obj) {
   }
 }
 
-/* static */
-void DebuggerFrame::trace(JSTracer* trc, JSObject* obj) {
-  OnStepHandler* onStepHandler = obj->as<DebuggerFrame>().onStepHandler();
+void DebuggerFrame::trace(JSTracer* trc) {
+  OnStepHandler* onStepHandler = this->onStepHandler();
   if (onStepHandler) {
     onStepHandler->trace(trc);
   }
-  OnPopHandler* onPopHandler = obj->as<DebuggerFrame>().onPopHandler();
+  OnPopHandler* onPopHandler = this->onPopHandler();
   if (onPopHandler) {
     onPopHandler->trace(trc);
   }
 
-  DebuggerFrame& frameObj = obj->as<DebuggerFrame>();
-  if (frameObj.hasGenerator()) {
-    frameObj.generatorInfo()->trace(trc, frameObj);
+  if (hasGenerator()) {
+    generatorInfo()->trace(trc, *this);
   }
 }
 

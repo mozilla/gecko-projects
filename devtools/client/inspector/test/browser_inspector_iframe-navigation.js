@@ -1,4 +1,3 @@
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
@@ -12,21 +11,20 @@ const TEST_URI =
   "<iframe src='data:text/html;charset=utf-8,hello world'></iframe>";
 
 add_task(async function() {
-  const { inspector, toolbox, testActor } = await openInspectorForURL(TEST_URI);
-  const { inspectorFront } = inspector;
+  const { toolbox, testActor } = await openInspectorForURL(TEST_URI);
 
   info("Starting element picker.");
   await startPicker(toolbox);
 
-  info("Waiting for highlighter to activate.");
-  const highlighterShowing = toolbox.once("highlighter-ready");
+  info("Waiting for body to be hovered.");
+  const onHovered = toolbox.nodePicker.once("picker-node-hovered");
   testActor.synthesizeMouse({
     selector: "body",
     options: { type: "mousemove" },
     x: 1,
     y: 1,
   });
-  await highlighterShowing;
+  await onHovered;
 
   let isVisible = await testActor.isHighlighting();
   ok(isVisible, "Inspector is highlighting.");
@@ -41,5 +39,5 @@ add_task(async function() {
   ok(isVisible, "Inspector is highlighting after iframe nav.");
 
   info("Stopping element picker.");
-  await inspectorFront.nodePicker.stop();
+  await toolbox.nodePicker.stop();
 });

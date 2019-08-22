@@ -585,7 +585,7 @@ nsChangeHint nsStyleList::CalcDifference(
   // and thus these properties should not affect it either. This also
   // relies on that when the display value changes from something else
   // to list-item, that change itself would cause ReconstructFrame.
-  if (aOldDisplay.mDisplay == StyleDisplay::ListItem) {
+  if (aOldDisplay.IsListItem()) {
     if (mListStylePosition != aNewData.mListStylePosition) {
       return nsChangeHint_ReconstructFrame;
     }
@@ -750,7 +750,7 @@ nsStyleSVG::nsStyleSVG(const Document& aDocument)
       mColorInterpolation(NS_STYLE_COLOR_INTERPOLATION_SRGB),
       mColorInterpolationFilters(NS_STYLE_COLOR_INTERPOLATION_LINEARRGB),
       mFillRule(StyleFillRule::Nonzero),
-      mPaintOrder(NS_STYLE_PAINT_ORDER_NORMAL),
+      mPaintOrder(0),
       mShapeRendering(NS_STYLE_SHAPE_RENDERING_AUTO),
       mStrokeLinecap(NS_STYLE_STROKE_LINECAP_BUTT),
       mStrokeLinejoin(NS_STYLE_STROKE_LINEJOIN_MITER),
@@ -1416,19 +1416,20 @@ uint8_t nsStylePosition::UsedJustifySelf(ComputedStyle* aParent) const {
 //
 
 nsStyleTable::nsStyleTable(const Document& aDocument)
-    : mLayoutStrategy(NS_STYLE_TABLE_LAYOUT_AUTO), mSpan(1) {
+    : mLayoutStrategy(NS_STYLE_TABLE_LAYOUT_AUTO), mXSpan(1) {
   MOZ_COUNT_CTOR(nsStyleTable);
 }
 
 nsStyleTable::~nsStyleTable() { MOZ_COUNT_DTOR(nsStyleTable); }
 
 nsStyleTable::nsStyleTable(const nsStyleTable& aSource)
-    : mLayoutStrategy(aSource.mLayoutStrategy), mSpan(aSource.mSpan) {
+    : mLayoutStrategy(aSource.mLayoutStrategy), mXSpan(aSource.mXSpan) {
   MOZ_COUNT_CTOR(nsStyleTable);
 }
 
 nsChangeHint nsStyleTable::CalcDifference(const nsStyleTable& aNewData) const {
-  if (mSpan != aNewData.mSpan || mLayoutStrategy != aNewData.mLayoutStrategy) {
+  if (mXSpan != aNewData.mXSpan ||
+      mLayoutStrategy != aNewData.mLayoutStrategy) {
     return nsChangeHint_ReconstructFrame;
   }
   return nsChangeHint(0);
@@ -1970,7 +1971,7 @@ bool nsStyleImage::IsComplete() const {
   }
 }
 
-bool nsStyleImage::IsLoaded() const {
+bool nsStyleImage::IsSizeAvailable() const {
   switch (mType) {
     case eStyleImageType_Null:
       return false;
@@ -1985,7 +1986,7 @@ bool nsStyleImage::IsLoaded() const {
       uint32_t status = imgIRequest::STATUS_ERROR;
       return NS_SUCCEEDED(req->GetImageStatus(&status)) &&
              !(status & imgIRequest::STATUS_ERROR) &&
-             (status & imgIRequest::STATUS_LOAD_COMPLETE);
+             (status & imgIRequest::STATUS_SIZE_AVAILABLE);
     }
     default:
       MOZ_ASSERT_UNREACHABLE("unexpected image type");
@@ -3300,7 +3301,7 @@ nsStyleTextReset::nsStyleTextReset(const Document& aDocument)
       mInitialLetterSink(0),
       mInitialLetterSize(0.0f),
       mTextDecorationColor(StyleColor::CurrentColor()),
-      mTextDecorationThickness(LengthOrAuto::Auto()) {
+      mTextDecorationThickness(StyleTextDecorationLength::Auto()) {
   MOZ_COUNT_CTOR(nsStyleTextReset);
 }
 
@@ -3381,7 +3382,7 @@ nsStyleText::nsStyleText(const Document& aDocument)
       mLetterSpacing({0.}),
       mLineHeight(StyleLineHeight::Normal()),
       mTextIndent(LengthPercentage::Zero()),
-      mTextUnderlineOffset(LengthOrAuto::Auto()),
+      mTextUnderlineOffset(StyleTextDecorationLength::Auto()),
       mTextDecorationSkipInk(StyleTextDecorationSkipInk::Auto),
       mWebkitTextStrokeWidth(0),
       mTextEmphasisStyle(StyleTextEmphasisStyle::None()) {
@@ -3800,6 +3801,11 @@ nsChangeHint nsStyleEffects::CalcDifference(
 
   if (mMixBlendMode != aNewData.mMixBlendMode) {
     hint |= nsChangeHint_RepaintFrame;
+  }
+
+  if (HasBackdropFilters() != aNewData.HasBackdropFilters()) {
+    // A change from/to being a containing block for position:fixed.
+    hint |= nsChangeHint_UpdateContainingBlock;
   }
 
   if (mBackdropFilters != aNewData.mBackdropFilters) {

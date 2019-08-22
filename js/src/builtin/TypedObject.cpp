@@ -39,7 +39,7 @@ using mozilla::PointerRangeSize;
 
 using namespace js;
 
-const Class js::TypedObjectModuleObject::class_ = {
+const JSClass js::TypedObjectModuleObject::class_ = {
     "TypedObject", JSCLASS_HAS_RESERVED_SLOTS(SlotCount) |
                        JSCLASS_HAS_CACHED_PROTO(JSProto_TypedObject)};
 
@@ -193,7 +193,7 @@ static JSObject* GetPrototype(JSContext* cx, HandleObject obj) {
  * typed object prototypes cannot be mutated.
  */
 
-const Class js::TypedProto::class_ = {
+const JSClass js::TypedProto::class_ = {
     "TypedProto", JSCLASS_HAS_RESERVED_SLOTS(JS_TYPROTO_SLOTS)};
 
 /***************************************************************************
@@ -205,16 +205,16 @@ const Class js::TypedProto::class_ = {
  * distinguish which scalar type object this actually is.
  */
 
-static const ClassOps ScalarTypeDescrClassOps = {nullptr, /* addProperty */
-                                                 nullptr, /* delProperty */
-                                                 nullptr, /* enumerate */
-                                                 nullptr, /* newEnumerate */
-                                                 nullptr, /* resolve */
-                                                 nullptr, /* mayResolve */
-                                                 TypeDescr::finalize,
-                                                 ScalarTypeDescr::call};
+static const JSClassOps ScalarTypeDescrClassOps = {nullptr, /* addProperty */
+                                                   nullptr, /* delProperty */
+                                                   nullptr, /* enumerate */
+                                                   nullptr, /* newEnumerate */
+                                                   nullptr, /* resolve */
+                                                   nullptr, /* mayResolve */
+                                                   TypeDescr::finalize,
+                                                   ScalarTypeDescr::call};
 
-const Class js::ScalarTypeDescr::class_ = {
+const JSClass js::ScalarTypeDescr::class_ = {
     "Scalar",
     JSCLASS_HAS_RESERVED_SLOTS(JS_DESCR_SLOTS) | JSCLASS_BACKGROUND_FINALIZE,
     &ScalarTypeDescrClassOps};
@@ -358,16 +358,17 @@ TypeDescr* GlobalObject::getOrCreateReferenceTypeDescr(
  * reference type object this actually is.
  */
 
-static const ClassOps ReferenceTypeDescrClassOps = {nullptr, /* addProperty */
-                                                    nullptr, /* delProperty */
-                                                    nullptr, /* enumerate */
-                                                    nullptr, /* newEnumerate */
-                                                    nullptr, /* resolve */
-                                                    nullptr, /* mayResolve */
-                                                    TypeDescr::finalize,
-                                                    ReferenceTypeDescr::call};
+static const JSClassOps ReferenceTypeDescrClassOps = {
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* enumerate */
+    nullptr, /* newEnumerate */
+    nullptr, /* resolve */
+    nullptr, /* mayResolve */
+    TypeDescr::finalize,
+    ReferenceTypeDescr::call};
 
-const Class js::ReferenceTypeDescr::class_ = {
+const JSClass js::ReferenceTypeDescr::class_ = {
     "Reference",
     JSCLASS_HAS_RESERVED_SLOTS(JS_DESCR_SLOTS) | JSCLASS_BACKGROUND_FINALIZE,
     &ReferenceTypeDescrClassOps};
@@ -498,18 +499,18 @@ static TypedProto* CreatePrototypeObjectForComplexTypeInstance(
                                              SingletonObject);
 }
 
-static const ClassOps ArrayTypeDescrClassOps = {nullptr, /* addProperty */
-                                                nullptr, /* delProperty */
-                                                nullptr, /* enumerate */
-                                                nullptr, /* newEnumerate */
-                                                nullptr, /* resolve */
-                                                nullptr, /* mayResolve */
-                                                TypeDescr::finalize,
-                                                nullptr, /* call */
-                                                nullptr, /* hasInstance */
-                                                TypedObject::construct};
+static const JSClassOps ArrayTypeDescrClassOps = {nullptr, /* addProperty */
+                                                  nullptr, /* delProperty */
+                                                  nullptr, /* enumerate */
+                                                  nullptr, /* newEnumerate */
+                                                  nullptr, /* resolve */
+                                                  nullptr, /* mayResolve */
+                                                  TypeDescr::finalize,
+                                                  nullptr, /* call */
+                                                  nullptr, /* hasInstance */
+                                                  TypedObject::construct};
 
-const Class ArrayTypeDescr::class_ = {
+const JSClass ArrayTypeDescr::class_ = {
     "ArrayType",
     JSCLASS_HAS_RESERVED_SLOTS(JS_DESCR_SLOTS) | JSCLASS_BACKGROUND_FINALIZE,
     &ArrayTypeDescrClassOps};
@@ -747,18 +748,18 @@ bool js::IsTypedObjectArray(JSObject& obj) {
  * StructType class
  */
 
-static const ClassOps StructTypeDescrClassOps = {nullptr, /* addProperty */
-                                                 nullptr, /* delProperty */
-                                                 nullptr, /* enumerate */
-                                                 nullptr, /* newEnumerate */
-                                                 nullptr, /* resolve */
-                                                 nullptr, /* mayResolve */
-                                                 TypeDescr::finalize,
-                                                 StructTypeDescr::call,
-                                                 nullptr, /* hasInstance */
-                                                 TypedObject::construct};
+static const JSClassOps StructTypeDescrClassOps = {nullptr, /* addProperty */
+                                                   nullptr, /* delProperty */
+                                                   nullptr, /* enumerate */
+                                                   nullptr, /* newEnumerate */
+                                                   nullptr, /* resolve */
+                                                   nullptr, /* mayResolve */
+                                                   TypeDescr::finalize,
+                                                   StructTypeDescr::call,
+                                                   nullptr, /* hasInstance */
+                                                   TypedObject::construct};
 
-const Class StructTypeDescr::class_ = {
+const JSClass StructTypeDescr::class_ = {
     "StructType",
     JSCLASS_HAS_RESERVED_SLOTS(JS_DESCR_SLOTS) | JSCLASS_BACKGROUND_FINALIZE,
     &StructTypeDescrClassOps};
@@ -1604,7 +1605,7 @@ void OutlineTypedObject::setOwnerAndData(JSObject* owner, uint8_t* data) {
 
 /*static*/
 OutlineTypedObject* OutlineTypedObject::createUnattachedWithClass(
-    JSContext* cx, const Class* clasp, HandleTypeDescr descr,
+    JSContext* cx, const JSClass* clasp, HandleTypeDescr descr,
     gc::InitialHeap heap) {
   MOZ_ASSERT(clasp == &OutlineTransparentTypedObject::class_ ||
              clasp == &OutlineOpaqueTypedObject::class_);
@@ -1677,9 +1678,9 @@ OutlineTypedObject* OutlineTypedObject::createDerived(
   MOZ_ASSERT(offset <= typedObj->size());
   MOZ_ASSERT(offset + type->size() <= typedObj->size());
 
-  const js::Class* clasp = typedObj->opaque()
-                               ? &OutlineOpaqueTypedObject::class_
-                               : &OutlineTransparentTypedObject::class_;
+  const JSClass* clasp = typedObj->opaque()
+                             ? &OutlineOpaqueTypedObject::class_
+                             : &OutlineTransparentTypedObject::class_;
   Rooted<OutlineTypedObject*> obj(cx);
   obj = createUnattachedWithClass(cx, clasp, type);
   if (!obj) {
@@ -2189,8 +2190,9 @@ InlineTypedObject* InlineTypedObject::create(JSContext* cx,
                                              gc::InitialHeap heap) {
   gc::AllocKind allocKind = allocKindForTypeDescriptor(descr);
 
-  const Class* clasp = descr->opaque() ? &InlineOpaqueTypedObject::class_
-                                       : &InlineTransparentTypedObject::class_;
+  const JSClass* clasp = descr->opaque()
+                             ? &InlineOpaqueTypedObject::class_
+                             : &InlineTransparentTypedObject::class_;
 
   RootedObjectGroup group(
       cx, ObjectGroup::defaultNewGroup(
@@ -2278,26 +2280,26 @@ const ObjectOps TypedObject::objectOps_ = {
     nullptr, /* thisValue */
 };
 
-#define DEFINE_TYPEDOBJ_CLASS(Name, Trace, Moved)                          \
-  static const ClassOps Name##ClassOps = {                                 \
-      nullptr, /* addProperty */                                           \
-      nullptr, /* delProperty */                                           \
-      nullptr, /* enumerate   */                                           \
-      TypedObject::obj_newEnumerate,                                       \
-      nullptr, /* resolve     */                                           \
-      nullptr, /* mayResolve  */                                           \
-      nullptr, /* finalize    */                                           \
-      nullptr, /* call        */                                           \
-      nullptr, /* hasInstance */                                           \
-      nullptr, /* construct   */                                           \
-      Trace,                                                               \
-  };                                                                       \
-  static const ClassExtension Name##ClassExt = {                           \
-      Moved /* objectMovedOp */                                            \
-  };                                                                       \
-  const Class Name::class_ = {                                             \
-      #Name,           Class::NON_NATIVE | JSCLASS_DELAY_METADATA_BUILDER, \
-      &Name##ClassOps, JS_NULL_CLASS_SPEC,                                 \
+#define DEFINE_TYPEDOBJ_CLASS(Name, Trace, Moved)                            \
+  static const JSClassOps Name##ClassOps = {                                 \
+      nullptr, /* addProperty */                                             \
+      nullptr, /* delProperty */                                             \
+      nullptr, /* enumerate   */                                             \
+      TypedObject::obj_newEnumerate,                                         \
+      nullptr, /* resolve     */                                             \
+      nullptr, /* mayResolve  */                                             \
+      nullptr, /* finalize    */                                             \
+      nullptr, /* call        */                                             \
+      nullptr, /* hasInstance */                                             \
+      nullptr, /* construct   */                                             \
+      Trace,                                                                 \
+  };                                                                         \
+  static const ClassExtension Name##ClassExt = {                             \
+      Moved /* objectMovedOp */                                              \
+  };                                                                         \
+  const JSClass Name::class_ = {                                             \
+      #Name,           JSClass::NON_NATIVE | JSCLASS_DELAY_METADATA_BUILDER, \
+      &Name##ClassOps, JS_NULL_CLASS_SPEC,                                   \
       &Name##ClassExt, &TypedObject::objectOps_}
 
 DEFINE_TYPEDOBJ_CLASS(OutlineTransparentTypedObject,
@@ -2370,7 +2372,7 @@ bool TypedObject::construct(JSContext* cx, unsigned int argc, Value* vp) {
     js::HandleShape shape, js::HandleObjectGroup group) {
   debugCheckNewObject(group, shape, kind, heap);
 
-  const js::Class* clasp = group->clasp();
+  const JSClass* clasp = group->clasp();
   MOZ_ASSERT(::IsTypedObjectClass(clasp));
 
   JSObject* obj =

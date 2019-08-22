@@ -742,7 +742,7 @@ size_t js::proxy_ObjectMoved(JSObject* obj, JSObject* old) {
   return proxy.handler()->objectMoved(obj, old);
 }
 
-const ClassOps js::ProxyClassOps = {
+const JSClassOps js::ProxyClassOps = {
     nullptr,            /* addProperty */
     nullptr,            /* delProperty */
     nullptr,            /* enumerate   */
@@ -765,7 +765,7 @@ const ObjectOps js::ProxyObjectOps = {
     proxy_DeleteProperty, Proxy::getElements,
     Proxy::fun_toString};
 
-const Class js::ProxyClass =
+const JSClass js::ProxyClass =
     PROXY_CLASS_DEF("Proxy", JSCLASS_HAS_CACHED_PROTO(JSProto_Proxy) |
                                  JSCLASS_HAS_RESERVED_SLOTS(2));
 

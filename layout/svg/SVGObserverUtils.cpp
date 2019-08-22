@@ -10,7 +10,6 @@
 // Keep others in (case-insensitive) order:
 #include "mozilla/css/ImageLoader.h"
 #include "mozilla/dom/CanvasRenderingContext2D.h"
-#include "mozilla/net/ReferrerPolicy.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/RestyleManager.h"
 #include "nsCSSFrameConstructor.h"
@@ -1706,7 +1705,8 @@ already_AddRefed<nsIURI> SVGObserverUtils::GetBaseURLForLocalRef(
 
 already_AddRefed<URLAndReferrerInfo> SVGObserverUtils::GetFilterURI(
     nsIFrame* aFrame, const StyleFilter& aFilter) {
-  MOZ_ASSERT(!aFrame->StyleEffects()->mFilters.IsEmpty());
+  MOZ_ASSERT(!aFrame->StyleEffects()->mFilters.IsEmpty() ||
+             !aFrame->StyleEffects()->mBackdropFilters.IsEmpty());
   MOZ_ASSERT(aFilter.IsUrl());
   return ResolveURLUsingLocalRef(aFrame, aFilter.AsUrl());
 }

@@ -22,7 +22,7 @@ namespace js {
 
 class DebuggerSource : public NativeObject {
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   enum {
     OWNER_SLOT,
@@ -36,7 +36,7 @@ class DebuggerSource : public NativeObject {
                                 Handle<DebuggerSourceReferent> referent,
                                 HandleNativeObject debugger);
 
-  static void trace(JSTracer* trc, JSObject* obj);
+  void trace(JSTracer* trc);
 
   using ReferentVariant = DebuggerSourceReferent;
 
@@ -54,6 +54,7 @@ class DebuggerSource : public NativeObject {
   static bool getText(JSContext* cx, unsigned argc, Value* vp);
   static bool getBinary(JSContext* cx, unsigned argc, Value* vp);
   static bool getURL(JSContext* cx, unsigned argc, Value* vp);
+  static bool getStartLine(JSContext* cx, unsigned argc, Value* vp);
   static bool getId(JSContext* cx, unsigned argc, Value* vp);
   static bool getDisplayURL(JSContext* cx, unsigned argc, Value* vp);
   static bool getElement(JSContext* cx, unsigned argc, Value* vp);
@@ -63,9 +64,10 @@ class DebuggerSource : public NativeObject {
   static bool getIntroductionType(JSContext* cx, unsigned argc, Value* vp);
   static bool setSourceMapURL(JSContext* cx, unsigned argc, Value* vp);
   static bool getSourceMapURL(JSContext* cx, unsigned argc, Value* vp);
+  static bool reparse(JSContext* cx, unsigned argc, Value* vp);
 
  private:
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static const JSPropertySpec properties_[];
   static const JSFunctionSpec methods_[];

@@ -31,34 +31,32 @@ Zone* const Zone::NotOnList = reinterpret_cast<Zone*>(1);
 
 ZoneAllocator::ZoneAllocator(JSRuntime* rt)
     : JS::shadow::Zone(rt, &rt->gc.marker),
-      zoneSize(&rt->gc.heapSize),
-      gcMallocBytes(nullptr),
-      gcJitBytes(nullptr),
-      gcJitThreshold(jit::MaxCodeBytesPerProcess * 0.8) {
+      gcHeapSize(&rt->gc.heapSize),
+      mallocHeapSize(nullptr),
+      jitHeapSize(nullptr),
+      jitHeapThreshold(jit::MaxCodeBytesPerProcess * 0.8) {
   AutoLockGC lock(rt);
   updateGCThresholds(rt->gc, GC_NORMAL, lock);
 }
 
 ZoneAllocator::~ZoneAllocator() {
 #ifdef DEBUG
-  if (runtimeFromAnyThread()->gc.shutdownCollectedEverything()) {
-    gcMallocTracker.checkEmptyOnDestroy();
-    MOZ_ASSERT(zoneSize.gcBytes() == 0);
-    MOZ_ASSERT(gcMallocBytes.gcBytes() == 0);
-    MOZ_ASSERT(gcJitBytes.gcBytes() == 0);
-  }
+  mallocTracker.checkEmptyOnDestroy();
+  MOZ_ASSERT(gcHeapSize.bytes() == 0);
+  MOZ_ASSERT(mallocHeapSize.bytes() == 0);
+  MOZ_ASSERT(jitHeapSize.bytes() == 0);
 #endif
 }
 
 void ZoneAllocator::fixupAfterMovingGC() {
 #ifdef DEBUG
-  gcMallocTracker.fixupAfterMovingGC();
+  mallocTracker.fixupAfterMovingGC();
 #endif
 }
 
 void js::ZoneAllocator::updateMemoryCountersOnGCStart() {
-  zoneSize.updateOnGCStart();
-  gcMallocBytes.updateOnGCStart();
+  gcHeapSize.updateOnGCStart();
+  mallocHeapSize.updateOnGCStart();
 }
 
 void js::ZoneAllocator::updateGCThresholds(GCRuntime& gc,
@@ -66,11 +64,11 @@ void js::ZoneAllocator::updateGCThresholds(GCRuntime& gc,
                                            const js::AutoLockGC& lock) {
   // This is called repeatedly during a GC to update thresholds as memory is
   // freed.
-  threshold.updateAfterGC(zoneSize.retainedBytes(), invocationKind, gc.tunables,
-                          gc.schedulingState, lock);
-  gcMallocThreshold.updateAfterGC(gcMallocBytes.retainedBytes(),
-                                  gc.tunables.mallocThresholdBase(),
-                                  gc.tunables.mallocGrowthFactor(), lock);
+  gcHeapThreshold.updateAfterGC(gcHeapSize.retainedBytes(), invocationKind,
+                                gc.tunables, gc.schedulingState, lock);
+  mallocHeapThreshold.updateAfterGC(mallocHeapSize.retainedBytes(),
+                                    gc.tunables.mallocThresholdBase(),
+                                    gc.tunables.mallocGrowthFactor(), lock);
 }
 
 void ZoneAllocPolicy::decMemory(size_t nbytes) {
@@ -133,6 +131,8 @@ JS::Zone::Zone(JSRuntime* rt)
 
 Zone::~Zone() {
   MOZ_ASSERT(helperThreadUse_ == HelperThreadUse::None);
+  MOZ_ASSERT(gcWeakMapList().isEmpty());
+  MOZ_ASSERT_IF(regExps_.ref(), regExps().empty());
 
   JSRuntime* rt = runtimeFromAnyThread();
   if (this == rt->gc.systemZone) {
@@ -141,15 +141,6 @@ Zone::~Zone() {
 
   js_delete(debuggers.ref());
   js_delete(jitZone_.ref());
-
-#ifdef DEBUG
-  // Avoid assertions failures warning that not everything has been destroyed
-  // if the embedding leaked GC things.
-  if (!rt->gc.shutdownCollectedEverything()) {
-    gcWeakMapList().clear();
-    regExps().clear();
-  }
-#endif
 }
 
 bool Zone::init(bool isSystemArg) {
@@ -357,8 +348,9 @@ void Zone::discardJitCode(JSFreeOp* fop,
   if (discardBaselineCode || discardJitScripts) {
 #ifdef DEBUG
     // Assert no JitScripts are marked as active.
-    for (auto script = cellIter<JSScript>(); !script.done(); script.next()) {
-      if (jit::JitScript* jitScript = script.unbarrieredGet()->jitScript()) {
+    for (auto iter = cellIter<JSScript>(); !iter.done(); iter.next()) {
+      JSScript* script = iter.unbarrieredGet();
+      if (jit::JitScript* jitScript = script->maybeJitScript()) {
         MOZ_ASSERT(!jitScript->active());
       }
     }
@@ -373,12 +365,18 @@ void Zone::discardJitCode(JSFreeOp* fop,
 
   for (auto script = cellIterUnsafe<JSScript>(); !script.done();
        script.next()) {
+    jit::JitScript* jitScript = script->maybeJitScript();
+    if (!jitScript) {
+      continue;
+    }
+
     jit::FinishInvalidation(fop, script);
 
     // Discard baseline script if it's not marked as active.
-    if (discardBaselineCode && script->hasBaselineScript() &&
-        !script->jitScript()->active()) {
-      jit::FinishDiscardBaselineScript(fop, script);
+    if (discardBaselineCode) {
+      if (jitScript->hasBaselineScript() && !jitScript->active()) {
+        jit::FinishDiscardBaselineScript(fop, script);
+      }
     }
 
     // Warm-up counter for scripts are reset on GC. After discarding code we
@@ -391,26 +389,28 @@ void Zone::discardJitCode(JSFreeOp* fop,
     // JIT code.
     if (discardJitScripts) {
       script->maybeReleaseJitScript(fop);
-    }
-
-    if (jit::JitScript* jitScript = script->jitScript()) {
-      // If we did not release the JitScript, we need to purge optimized IC
-      // stubs because the optimizedStubSpace will be purged below.
-      if (discardBaselineCode) {
-        jitScript->purgeOptimizedStubs(script);
-
-        // ICs were purged so the script will need to warm back up before it can
-        // be inlined during Ion compilation.
-        jitScript->clearIonCompiledOrInlined();
+      jitScript = script->maybeJitScript();
+      if (!jitScript) {
+        continue;
       }
-
-      // Clear the JitScript's control flow graph. The LifoAlloc is purged
-      // below.
-      jitScript->clearControlFlowGraph();
-
-      // Finally, reset the active flag.
-      jitScript->resetActive();
     }
+
+    // If we did not release the JitScript, we need to purge optimized IC
+    // stubs because the optimizedStubSpace will be purged below.
+    if (discardBaselineCode) {
+      jitScript->purgeOptimizedStubs(script);
+
+      // ICs were purged so the script will need to warm back up before it can
+      // be inlined during Ion compilation.
+      jitScript->clearIonCompiledOrInlined();
+    }
+
+    // Clear the JitScript's control flow graph. The LifoAlloc is purged
+    // below.
+    jitScript->clearControlFlowGraph();
+
+    // Finally, reset the active flag.
+    jitScript->resetActive();
   }
 
   /*
@@ -533,7 +533,7 @@ bool Zone::addTypeDescrObject(JSContext* cx, HandleObject obj) {
 
 void Zone::deleteEmptyCompartment(JS::Compartment* comp) {
   MOZ_ASSERT(comp->zone() == this);
-  MOZ_ASSERT(arenas.checkEmptyArenaLists());
+  arenas.checkEmptyArenaLists();
 
   MOZ_ASSERT(compartments().length() == 1);
   MOZ_ASSERT(compartments()[0] == comp);

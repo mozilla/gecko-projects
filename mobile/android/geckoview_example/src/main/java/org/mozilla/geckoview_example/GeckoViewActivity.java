@@ -16,20 +16,29 @@ import org.mozilla.geckoview.GeckoRuntimeSettings;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
+import org.mozilla.geckoview.GeckoWebExecutor;
 import org.mozilla.geckoview.WebExtension;
 import org.mozilla.geckoview.WebExtensionController;
+import org.mozilla.geckoview.WebNotification;
+import org.mozilla.geckoview.WebNotificationDelegate;
+import org.mozilla.geckoview.WebRequest;
 import org.mozilla.geckoview.WebRequestError;
 import org.mozilla.geckoview.RuntimeTelemetry;
+import org.mozilla.geckoview.WebResponse;
 
 import android.Manifest;
 import android.app.Activity;
 import android.app.DownloadManager;
+import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -55,6 +64,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Locale;
@@ -79,6 +89,7 @@ public class GeckoViewActivity extends AppCompatActivity {
     private boolean mUsePrivateBrowsing;
     private boolean mEnableRemoteDebugging;
     private boolean mKillProcessOnDestroy;
+    private boolean mDesktopMode;
 
     private boolean mShowNotificationsRejected;
     private ArrayList<String> mAcceptedPersistentStorage = new ArrayList<String>();
@@ -88,6 +99,10 @@ public class GeckoViewActivity extends AppCompatActivity {
     private boolean mCanGoBack;
     private boolean mCanGoForward;
     private boolean mFullScreen;
+
+    private HashMap<String, Integer> mNotificationIDMap = new HashMap<>();
+    private HashMap<Integer, WebNotification> mNotificationMap = new HashMap<>();
+    private int mLastID = 100;
 
     private ProgressBar mProgressView;
 
@@ -171,9 +186,61 @@ public class GeckoViewActivity extends AppCompatActivity {
                 public GeckoResult<AllowOrDeny> onCloseTab(WebExtension source, GeckoSession session) {
                     TabSession tabSession = mTabSessionManager.getSession(session);
                     closeTab(tabSession);
-                    return GeckoResult.ALLOW;
+                    return GeckoResult.fromValue(AllowOrDeny.ALLOW);
                 }
             });
+
+            // `getSystemService` call requires API level 23
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                sGeckoRuntime.setWebNotificationDelegate(new WebNotificationDelegate() {
+                    NotificationManager notificationManager = getSystemService(NotificationManager.class);
+                    @Override
+                    public void onShowNotification(@NonNull WebNotification notification) {
+                        Intent clickIntent = new Intent(GeckoViewActivity.this, GeckoViewActivity.class);
+                        clickIntent.putExtra("onClick",notification.tag);
+                        PendingIntent dismissIntent = PendingIntent.getActivity(GeckoViewActivity.this, mLastID, clickIntent, 0);
+
+                        Notification.Builder builder = new Notification.Builder(GeckoViewActivity.this)
+                                .setContentTitle(notification.title)
+                                .setContentText(notification.text)
+                                .setSmallIcon(R.drawable.ic_status_logo)
+                                .setContentIntent(dismissIntent)
+                                .setAutoCancel(true);
+
+                        mNotificationIDMap.put(notification.tag, mLastID);
+                        mNotificationMap.put(mLastID, notification);
+
+                        if (notification.imageUrl != null && notification.imageUrl.length() > 0) {
+                            final GeckoWebExecutor executor = new GeckoWebExecutor(sGeckoRuntime);
+
+                            GeckoResult<WebResponse> response = executor.fetch(
+                                    new WebRequest.Builder(notification.imageUrl)
+                                            .addHeader("Accept", "image")
+                                            .build());
+                            response.accept(value -> {
+                                Bitmap bitmap = BitmapFactory.decodeStream(value.body);
+                                builder.setLargeIcon(Icon.createWithBitmap(bitmap));
+                                notificationManager.notify(mLastID++, builder.build());
+                            });
+                        } else {
+                            notificationManager.notify(mLastID++, builder.build());
+                        }
+
+                    }
+
+                    @Override
+                    public void onCloseNotification(@NonNull WebNotification notification) {
+                        if (mNotificationIDMap.containsKey(notification.tag)) {
+                            int id = mNotificationIDMap.get(notification.tag);
+                            notificationManager.cancel(id);
+                            mNotificationMap.remove(id);
+                            mNotificationIDMap.remove(notification.tag);
+                        }
+                    }
+                });
+
+
+            }
         }
 
         if(savedInstanceState == null) {
@@ -226,6 +293,12 @@ public class GeckoViewActivity extends AppCompatActivity {
                 .usePrivateMode(mUsePrivateBrowsing)
                 .useTrackingProtection(mUseTrackingProtection)
                 .fullAccessibilityTree(mFullAccessibilityTree)
+                .viewportMode(mDesktopMode
+                        ? GeckoSessionSettings.VIEWPORT_MODE_DESKTOP
+                        : GeckoSessionSettings.VIEWPORT_MODE_MOBILE)
+                .userAgentMode(mDesktopMode
+                        ? GeckoSessionSettings.USER_AGENT_MODE_DESKTOP
+                        : GeckoSessionSettings.USER_AGENT_MODE_MOBILE)
                 .build());
         connectSession(session);
 
@@ -253,6 +326,7 @@ public class GeckoViewActivity extends AppCompatActivity {
         session.setSelectionActionDelegate(new BasicSelectionActionDelegate(this));
 
         updateTrackingProtection(session);
+        updateDesktopMode(session);
     }
 
     private void recreateSession() {
@@ -281,6 +355,15 @@ public class GeckoViewActivity extends AppCompatActivity {
         } else {
             recreateSession();
         }
+    }
+
+    private void updateDesktopMode(GeckoSession session) {
+        session.getSettings().setViewportMode(mDesktopMode
+                ? GeckoSessionSettings.VIEWPORT_MODE_DESKTOP
+                : GeckoSessionSettings.VIEWPORT_MODE_MOBILE);
+        session.getSettings().setUserAgentMode(mDesktopMode
+                ? GeckoSessionSettings.USER_AGENT_MODE_DESKTOP
+                : GeckoSessionSettings.USER_AGENT_MODE_MOBILE);
     }
 
     private void updateTrackingProtection(GeckoSession session) {
@@ -315,6 +398,7 @@ public class GeckoViewActivity extends AppCompatActivity {
         menu.findItem(R.id.action_e10s).setChecked(mUseMultiprocess);
         menu.findItem(R.id.action_tp).setChecked(mUseTrackingProtection);
         menu.findItem(R.id.action_pb).setChecked(mUsePrivateBrowsing);
+        menu.findItem(R.id.desktop_mode).setChecked(mDesktopMode);
         menu.findItem(R.id.action_remote_debugging).setChecked(mEnableRemoteDebugging);
         menu.findItem(R.id.action_forward).setEnabled(mCanGoForward);
         return true;
@@ -337,6 +421,11 @@ public class GeckoViewActivity extends AppCompatActivity {
             case R.id.action_tp:
                 mUseTrackingProtection = !mUseTrackingProtection;
                 updateTrackingProtection(session);
+                session.reload();
+                break;
+            case R.id.desktop_mode:
+                mDesktopMode = !mDesktopMode;
+                updateDesktopMode(session);
                 session.reload();
                 break;
             case R.id.action_pb:
@@ -407,6 +496,7 @@ public class GeckoViewActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
+    @Override
     protected void onNewIntent(final Intent intent) {
         super.onNewIntent(intent);
 
@@ -417,6 +507,15 @@ public class GeckoViewActivity extends AppCompatActivity {
             }
             finish();
             return;
+        }
+
+        if (intent.hasExtra("onClick")) {
+            int key = intent.getExtras().getInt("onClick");
+            WebNotification notification = mNotificationMap.get(key);
+            if (notification != null) {
+                notification.click();
+                mNotificationMap.remove(key);
+            }
         }
 
         setIntent(intent);

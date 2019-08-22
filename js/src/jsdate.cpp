@@ -1470,16 +1470,16 @@ void DateObject::setUTCTime(ClippedTime t, MutableHandleValue vp) {
 }
 
 void DateObject::fillLocalTimeSlots() {
-  const int32_t localTZA = DateTimeInfo::localTZA();
+  const int32_t utcTZOffset = DateTimeInfo::utcToLocalStandardOffsetSeconds();
 
   /* Check if the cache is already populated. */
   if (!getReservedSlot(LOCAL_TIME_SLOT).isUndefined() &&
-      getReservedSlot(TZA_SLOT).toInt32() == localTZA) {
+      getReservedSlot(UTC_TIME_ZONE_OFFSET_SLOT).toInt32() == utcTZOffset) {
     return;
   }
 
   /* Remember time zone used to generate the local cache. */
-  setReservedSlot(TZA_SLOT, Int32Value(localTZA));
+  setReservedSlot(UTC_TIME_ZONE_OFFSET_SLOT, Int32Value(utcTZOffset));
 
   double utcTime = UTCTime().toNumber();
 
@@ -3360,14 +3360,14 @@ static const ClassSpec DateObjectClassSpec = {
     nullptr,
     FinishDateClassInit};
 
-const Class DateObject::class_ = {js_Date_str,
-                                  JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS) |
-                                      JSCLASS_HAS_CACHED_PROTO(JSProto_Date),
-                                  JS_NULL_CLASS_OPS, &DateObjectClassSpec};
+const JSClass DateObject::class_ = {js_Date_str,
+                                    JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS) |
+                                        JSCLASS_HAS_CACHED_PROTO(JSProto_Date),
+                                    JS_NULL_CLASS_OPS, &DateObjectClassSpec};
 
-const Class DateObject::protoClass_ = {js_Object_str,
-                                       JSCLASS_HAS_CACHED_PROTO(JSProto_Date),
-                                       JS_NULL_CLASS_OPS, &DateObjectClassSpec};
+const JSClass DateObject::protoClass_ = {
+    js_Object_str, JSCLASS_HAS_CACHED_PROTO(JSProto_Date), JS_NULL_CLASS_OPS,
+    &DateObjectClassSpec};
 
 JSObject* js::NewDateObjectMsec(JSContext* cx, ClippedTime t,
                                 HandleObject proto /* = nullptr */) {

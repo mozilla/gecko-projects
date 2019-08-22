@@ -409,7 +409,7 @@ void js::Nursery::leaveZealMode() {
 
 JSObject* js::Nursery::allocateObject(JSContext* cx, size_t size,
                                       size_t nDynamicSlots,
-                                      const js::Class* clasp) {
+                                      const JSClass* clasp) {
   // Ensure there's enough space to replace the contents with a
   // RelocationOverlay.
   MOZ_ASSERT(size >= sizeof(RelocationOverlay));
@@ -957,8 +957,8 @@ void js::Nursery::collect(JS::GCReason reason) {
 
   // We ignore gcMaxBytes when allocating for minor collection. However, if we
   // overflowed, we disable the nursery. The next time we allocate, we'll fail
-  // because gcBytes >= gcMaxBytes.
-  if (rt->gc.heapSize.gcBytes() >= tunables().gcMaxBytes()) {
+  // because bytes >= gcMaxBytes.
+  if (rt->gc.heapSize.bytes() >= tunables().gcMaxBytes()) {
     disable();
   }
 
@@ -1151,7 +1151,6 @@ float js::Nursery::doPretenuring(JSRuntime* rt, JS::GCReason reason,
       }
 
       ObjectGroup* group = entry.group;
-      AutoMaybeLeaveAtomsZone leaveAtomsZone(cx);
       AutoRealm ar(cx, group);
       AutoSweepObjectGroup sweep(group);
       if (group->canPreTenure(sweep)) {

@@ -56,6 +56,10 @@ class WebSocketsPanel extends Component {
 
     this.searchboxRef = createRef();
     this.clearFilterText = this.clearFilterText.bind(this);
+    this.handleContainerElement = this.handleContainerElement.bind(this);
+    this.state = {
+      startPanelContainer: null,
+    };
   }
 
   componentDidUpdate(prevProps) {
@@ -85,6 +89,16 @@ class WebSocketsPanel extends Component {
     }
   }
 
+  /* Store the parent DOM element of the SplitBox startPanel's element.
+     We need this element for as an option for the IntersectionObserver */
+  handleContainerElement(element) {
+    if (!this.state.startPanelContainer) {
+      this.setState({
+        startPanelContainer: element,
+      });
+    }
+  }
+
   // Reset the filter text
   clearFilterText() {
     if (this.searchboxRef) {
@@ -93,7 +107,15 @@ class WebSocketsPanel extends Component {
   }
 
   render() {
-    const { frameDetailsOpen, connector, selectedFrame } = this.props;
+    const {
+      frameDetailsOpen,
+      connector,
+      selectedFrame,
+      channelId,
+    } = this.props;
+
+    const searchboxRef = this.searchboxRef;
+    const startPanelContainer = this.state.startPanelContainer;
 
     const initialHeight = Services.prefs.getIntPref(
       "devtools.netmonitor.ws.payload-preview-height"
@@ -102,7 +124,7 @@ class WebSocketsPanel extends Component {
     return div(
       { className: "monitor-panel" },
       Toolbar({
-        searchboxRef: this.searchboxRef,
+        searchboxRef,
       }),
       SplitBox({
         className: "devtools-responsive-container",
@@ -110,7 +132,12 @@ class WebSocketsPanel extends Component {
         minSize: "50px",
         maxSize: "80%",
         splitterSize: frameDetailsOpen ? 1 : 0,
-        startPanel: FrameListContent({ connector }),
+        onSelectContainerElement: this.handleContainerElement,
+        startPanel: FrameListContent({
+          connector,
+          startPanelContainer,
+          channelId,
+        }),
         endPanel:
           frameDetailsOpen &&
           FramePayload({

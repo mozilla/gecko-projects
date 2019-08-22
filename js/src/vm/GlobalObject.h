@@ -240,10 +240,10 @@ class GlobalObject : public NativeObject {
   static GlobalObject* create(...) = delete;
 
   friend struct ::JSRuntime;
-  static GlobalObject* createInternal(JSContext* cx, const Class* clasp);
+  static GlobalObject* createInternal(JSContext* cx, const JSClass* clasp);
 
  public:
-  static GlobalObject* new_(JSContext* cx, const Class* clasp,
+  static GlobalObject* new_(JSContext* cx, const JSClass* clasp,
                             JSPrincipals* principals,
                             JS::OnNewGlobalHookOption hookOption,
                             const JS::RealmOptions& options);
@@ -272,14 +272,14 @@ class GlobalObject : public NativeObject {
    */
   static NativeObject* createBlankPrototype(JSContext* cx,
                                             Handle<GlobalObject*> global,
-                                            const js::Class* clasp);
+                                            const JSClass* clasp);
 
   /*
    * Identical to createBlankPrototype, but uses proto as the [[Prototype]]
    * of the returned blank prototype.
    */
   static NativeObject* createBlankPrototypeInheriting(JSContext* cx,
-                                                      const js::Class* clasp,
+                                                      const JSClass* clasp,
                                                       HandleObject proto);
 
   template <typename T>
@@ -475,11 +475,13 @@ class GlobalObject : public NativeObject {
     return &global->getPrototype(JSProto_WeakSet).toObject().as<NativeObject>();
   }
 
+#if ENABLE_INTL_API
   static JSObject* getOrCreateIntlObject(JSContext* cx,
                                          Handle<GlobalObject*> global) {
     return getOrCreateObject(cx, global, APPLICATION_SLOTS + JSProto_Intl,
                              initIntlObject);
   }
+#endif
 
   static JSObject* getOrCreateTypedObjectModule(JSContext* cx,
                                                 Handle<GlobalObject*> global) {
@@ -498,6 +500,7 @@ class GlobalObject : public NativeObject {
 
   TypedObjectModuleObject& getTypedObjectModule() const;
 
+#if ENABLE_INTL_API
   static JSObject* getOrCreateCollatorPrototype(JSContext* cx,
                                                 Handle<GlobalObject*> global) {
     return getOrCreateObject(cx, global, COLLATOR_PROTO, initIntlObject);
@@ -543,6 +546,7 @@ class GlobalObject : public NativeObject {
                                               Handle<GlobalObject*> global) {
     return getOrCreateObject(cx, global, LOCALE_PROTO, initIntlObject);
   }
+#endif  // ENABLE_INTL_API
 
   static bool ensureModulePrototypesCreated(JSContext* cx,
                                             Handle<GlobalObject*> global);
@@ -843,11 +847,13 @@ class GlobalObject : public NativeObject {
   static bool initMapIteratorProto(JSContext* cx, Handle<GlobalObject*> global);
   static bool initSetIteratorProto(JSContext* cx, Handle<GlobalObject*> global);
 
+#ifdef ENABLE_INTL_API
   // Implemented in builtin/intl/IntlObject.cpp.
   static bool initIntlObject(JSContext* cx, Handle<GlobalObject*> global);
 
   // Implemented in builtin/intl/Locale.cpp.
   static bool addLocaleConstructor(JSContext* cx, HandleObject intl);
+#endif
 
   // Implemented in builtin/ModuleObject.cpp
   static bool initModuleProto(JSContext* cx, Handle<GlobalObject*> global);
@@ -914,7 +920,7 @@ class GlobalObject : public NativeObject {
   // A class used in place of a prototype during off-thread parsing.
   struct OffThreadPlaceholderObject : public NativeObject {
     static const int32_t SlotIndexSlot = 0;
-    static const Class class_;
+    static const JSClass class_;
     static OffThreadPlaceholderObject* New(JSContext* cx, unsigned slot);
     inline int32_t getSlotIndex() const;
   };

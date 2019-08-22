@@ -14,7 +14,6 @@ var EXPORTED_SYMBOLS = [
 ];
 
 /* exported Extension, ExtensionData */
-/* globals Extension ExtensionData */
 
 /*
  * This file is the main entry point for extensions. When an extension
@@ -147,6 +146,7 @@ const CHILD_SHUTDOWN_TIMEOUT_MS = 8000;
 
 // Permissions that are only available to privileged extensions.
 const PRIVILEGED_PERMS = new Set([
+  "activityLog",
   "mozillaAddons",
   "geckoViewAddons",
   "telemetry",
@@ -318,7 +318,7 @@ var UninstallObserver = {
         let storage = Services.domStorageManager.getStorage(
           null,
           principal,
-          storagePrincipal
+          principal
         );
         if (storage) {
           storage.clear();

@@ -29,8 +29,7 @@ class BlockReflowInput {
   // Block reflow input flags.
   struct Flags {
     Flags()
-        : mHasUnconstrainedBSize(false),
-          mIsBStartMarginRoot(false),
+        : mIsBStartMarginRoot(false),
           mIsBEndMarginRoot(false),
           mShouldApplyBStartMargin(false),
           mIsFirstInflow(false),
@@ -40,12 +39,6 @@ class BlockReflowInput {
           mIsOverflowContainer(false),
           mIsFloatListInBlockPropertyTable(false),
           mCanHaveOverflowMarkers(false) {}
-
-    // Set in the BlockReflowInput constructor when the frame being reflowed has
-    // been given NS_UNCONSTRAINEDSIZE as its available BSize in the
-    // ReflowInput. If set, NS_UNCONSTRAINEDSIZE is passed to nsLineLayout as
-    // the available BSize.
-    bool mHasUnconstrainedBSize : 1;
 
     // Set in the BlockReflowInput constructor when reflowing a "block margin
     // root" frame (i.e. a frame with the NS_BLOCK_MARGIN_ROOT flag set, for
@@ -198,12 +191,6 @@ class BlockReflowInput {
    * Return mBlock's computed physical border+padding with GetSkipSides applied.
    */
   const mozilla::LogicalMargin& BorderPadding() const { return mBorderPadding; }
-
-  /**
-   * Retrieve the block-axis content size "consumed" by any prev-in-flows.
-   * @note the value is cached so subsequent calls will return the same value
-   */
-  nscoord ConsumedBSize();
 
   // Reconstruct the previous block-end margin that goes before |aLine|.
   void ReconstructMarginBefore(nsLineList::iterator aLine);
@@ -384,9 +371,9 @@ class BlockReflowInput {
 
   StyleClear mFloatBreakType;
 
-  // The amount of computed block-direction size "consumed" by
-  // previous-in-flows.
-  nscoord mConsumedBSize;
+  // The amount of computed content block-size "consumed" by our previous
+  // continuations.
+  const nscoord mConsumedBSize;
 
   // Cache the current line's BSize if nsBlockFrame::PlaceLine() fails to
   // place the line. When redoing the line, it will be used to query the

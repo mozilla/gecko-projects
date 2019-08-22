@@ -566,18 +566,6 @@ const startupPhases = {
       condition: WIN,
       stat: 1,
     },
-    {
-      // bug 1543090
-      path: "GreD:omni.ja",
-      condition: WIN,
-      stat: 1,
-    },
-    {
-      // bug 1543090
-      path: "XCurProcD:omni.ja",
-      condition: WIN,
-      stat: 2,
-    },
   ],
 
   // Things that are expected to be completely out of the startup path
@@ -884,7 +872,7 @@ add_task(async function() {
     });
   }
 
-  let tmpPath = expandWhitelistPath(MAC ? "TmpD:" : "/dev/shm").toLowerCase();
+  let tmpPath = expandWhitelistPath("TmpD:").toLowerCase();
   let shouldPass = true;
   for (let phase in phases) {
     let whitelist = startupPhases[phase];
@@ -919,15 +907,22 @@ add_task(async function() {
         continue;
       }
 
-      if (!WIN) {
-        if (filename == "/dev/urandom") {
-          continue;
-        }
+      if (!WIN && filename == "/dev/urandom") {
+        continue;
+      }
 
-        // Ignore I/O due to IPC. This doesn't really touch the disk.
-        if (filename.startsWith(tmpPath + "/org.chromium.")) {
-          continue;
-        }
+      // /dev/shm is always tmpfs (a memory filesystem); this isn't
+      // really I/O any more than mmap/munmap are.
+      if (LINUX && filename.startsWith("/dev/shm/")) {
+        continue;
+      }
+
+      // Shared memory uses temporary files on MacOS <= 10.11 to avoid
+      // a kernel security bug that will never be patched (see
+      // https://crbug.com/project-zero/1671 for details).  This can
+      // be removed when we no longer support those OS versions.
+      if (MAC && filename.startsWith(tmpPath + "/org.mozilla.ipc.")) {
+        continue;
       }
 
       let expected = false;

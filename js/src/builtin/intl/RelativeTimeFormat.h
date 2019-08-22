@@ -15,11 +15,13 @@
 #include "js/Class.h"
 #include "vm/NativeObject.h"
 
+struct URelativeDateTimeFormatter;
+
 namespace js {
 
 class RelativeTimeFormatObject : public NativeObject {
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   static constexpr uint32_t INTERNALS_SLOT = 0;
   static constexpr uint32_t URELATIVE_TIME_FORMAT_SLOT = 1;
@@ -29,8 +31,20 @@ class RelativeTimeFormatObject : public NativeObject {
                 "INTERNALS_SLOT must match self-hosting define for internals "
                 "object slot");
 
+  URelativeDateTimeFormatter* getRelativeDateTimeFormatter() const {
+    const auto& slot = getFixedSlot(URELATIVE_TIME_FORMAT_SLOT);
+    if (slot.isUndefined()) {
+      return nullptr;
+    }
+    return static_cast<URelativeDateTimeFormatter*>(slot.toPrivate());
+  }
+
+  void setRelativeDateTimeFormatter(URelativeDateTimeFormatter* rtf) {
+    setFixedSlot(URELATIVE_TIME_FORMAT_SLOT, PrivateValue(rtf));
+  }
+
  private:
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static void finalize(JSFreeOp* fop, JSObject* obj);
 };

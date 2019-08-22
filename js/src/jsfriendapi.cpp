@@ -121,8 +121,8 @@ JS_FRIEND_API JSObject* JS_NewObjectWithUniqueType(JSContext* cx,
    * ObjectGroup attached to our proto with information about our object, since
    * we're not going to be using that ObjectGroup anyway.
    */
-  RootedObject obj(cx, NewObjectWithGivenProto(cx, Valueify(clasp), nullptr,
-                                               SingletonObject));
+  RootedObject obj(
+      cx, NewObjectWithGivenProto(cx, clasp, nullptr, SingletonObject));
   if (!obj) {
     return nullptr;
   }
@@ -1201,6 +1201,11 @@ const void* js::GetDOMRemoteProxyHandlerFamily() {
   return gDOMRemoteProxyHandlerFamily;
 }
 
+JS_FRIEND_API bool js::IsDOMRemoteProxyObject(JSObject* object) {
+  return js::IsProxy(object) && js::GetProxyHandler(object)->family() ==
+                                    js::GetDOMRemoteProxyHandlerFamily();
+}
+
 static XrayJitInfo* gXrayJitInfo = nullptr;
 
 JS_FRIEND_API void js::SetXrayJitInfo(XrayJitInfo* info) {
@@ -1298,7 +1303,7 @@ JS_FRIEND_API JSAtom* js::GetPropertyNameFromPC(JSScript* script,
 }
 
 JS_FRIEND_API void js::SetWindowProxyClass(JSContext* cx,
-                                           const js::Class* clasp) {
+                                           const JSClass* clasp) {
   MOZ_ASSERT(!cx->runtime()->maybeWindowProxyClass());
   cx->runtime()->setWindowProxyClass(clasp);
 }
@@ -1396,7 +1401,7 @@ JS_FRIEND_API JS::Value js::MaybeGetScriptPrivate(JSObject* object) {
 }
 
 JS_FRIEND_API uint64_t js::GetGCHeapUsageForObjectZone(JSObject* obj) {
-  return obj->zone()->zoneSize.gcBytes();
+  return obj->zone()->gcHeapSize.bytes();
 }
 
 #ifdef DEBUG

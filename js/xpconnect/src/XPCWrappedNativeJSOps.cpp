@@ -565,7 +565,7 @@ enum WNHelperType { WN_NOHELPER, WN_HELPER };
 
 static void WrappedNativeFinalize(JSFreeOp* fop, JSObject* obj,
                                   WNHelperType helperType) {
-  const js::Class* clazz = js::GetObjectClass(obj);
+  const JSClass* clazz = js::GetObjectClass(obj);
   if (clazz->flags & JSCLASS_DOM_GLOBAL) {
     mozilla::dom::DestroyProtoAndIfaceCache(obj);
   }
@@ -606,7 +606,7 @@ void XPC_WN_NoHelper_Finalize(JSFreeOp* fop, JSObject* obj) {
 
 /* static */
 void XPCWrappedNative::Trace(JSTracer* trc, JSObject* obj) {
-  const js::Class* clazz = js::GetObjectClass(obj);
+  const JSClass* clazz = js::GetObjectClass(obj);
   if (clazz->flags & JSCLASS_DOM_GLOBAL) {
     mozilla::dom::TraceProtoAndIfaceCache(trc, obj);
   }
@@ -644,7 +644,7 @@ static bool XPC_WN_NoHelper_Resolve(JSContext* cx, HandleObject obj,
       resolvedp);
 }
 
-static const js::ClassOps XPC_WN_NoHelper_JSClassOps = {
+static const JSClassOps XPC_WN_NoHelper_JSClassOps = {
     XPC_WN_OnlyIWrite_AddPropertyStub,  // addProperty
     XPC_WN_CannotDeletePropertyStub,    // delProperty
     XPC_WN_Shared_Enumerate,            // enumerate
@@ -660,7 +660,7 @@ static const js::ClassOps XPC_WN_NoHelper_JSClassOps = {
 
 const js::ClassExtension XPC_WN_JSClassExtension = {WrappedNativeObjectMoved};
 
-const js::Class XPC_WN_NoHelper_JSClass = {
+const JSClass XPC_WN_NoHelper_JSClass = {
     "XPCWrappedNative_NoHelper",
     XPC_WRAPPER_FLAGS | JSCLASS_IS_WRAPPED_NATIVE |
         JSCLASS_PRIVATE_IS_NSISUPPORTS | JSCLASS_FOREGROUND_FINALIZE,
@@ -906,7 +906,7 @@ MOZ_ALWAYS_INLINE JSObject* FixUpThisIfBroken(JSObject* obj, JSObject* funobj) {
     JSObject* parentObj =
         &js::GetFunctionNativeReserved(funobj, XPC_FUNCTION_PARENT_OBJECT_SLOT)
              .toObject();
-    const js::Class* parentClass = js::GetObjectClass(parentObj);
+    const JSClass* parentClass = js::GetObjectClass(parentObj);
     if (MOZ_UNLIKELY(
             (IS_NOHELPER_CLASS(parentClass) || IS_CU_CLASS(parentClass)) &&
             (js::GetObjectClass(obj) != parentClass))) {
@@ -1086,7 +1086,7 @@ static bool XPC_WN_Proto_Resolve(JSContext* cx, HandleObject obj, HandleId id,
       JSPROP_READONLY | JSPROP_PERMANENT | JSPROP_ENUMERATE, resolvedp);
 }
 
-static const js::ClassOps XPC_WN_Proto_JSClassOps = {
+static const JSClassOps XPC_WN_Proto_JSClassOps = {
     XPC_WN_OnlyIWrite_Proto_AddPropertyStub,  // addProperty
     XPC_WN_CannotDeletePropertyStub,          // delProperty
     XPC_WN_Proto_Enumerate,                   // enumerate
@@ -1103,7 +1103,7 @@ static const js::ClassOps XPC_WN_Proto_JSClassOps = {
 static const js::ClassExtension XPC_WN_Proto_ClassExtension = {
     XPC_WN_Proto_ObjectMoved};
 
-const js::Class XPC_WN_Proto_JSClass = {
+const JSClass XPC_WN_Proto_JSClass = {
     "XPC_WN_Proto_JSClass",       XPC_WRAPPER_FLAGS,
     &XPC_WN_Proto_JSClassOps,     JS_NULL_CLASS_SPEC,
     &XPC_WN_Proto_ClassExtension, JS_NULL_OBJECT_OPS};
@@ -1175,7 +1175,7 @@ static_assert(((XPC_WRAPPER_FLAGS >> JSCLASS_RESERVED_SLOTS_SHIFT) &
                JSCLASS_RESERVED_SLOTS_MASK) == 0,
               "XPC_WRAPPER_FLAGS should not include any reserved slots");
 
-static const js::ClassOps XPC_WN_Tearoff_JSClassOps = {
+static const JSClassOps XPC_WN_Tearoff_JSClassOps = {
     XPC_WN_OnlyIWrite_AddPropertyStub,  // addProperty
     XPC_WN_CannotDeletePropertyStub,    // delProperty
     XPC_WN_TearOff_Enumerate,           // enumerate
@@ -1192,7 +1192,7 @@ static const js::ClassOps XPC_WN_Tearoff_JSClassOps = {
 static const js::ClassExtension XPC_WN_Tearoff_JSClassExtension = {
     XPC_WN_TearOff_ObjectMoved};
 
-const js::Class XPC_WN_Tearoff_JSClass = {
+const JSClass XPC_WN_Tearoff_JSClass = {
     "WrappedNative_TearOff",
     XPC_WRAPPER_FLAGS |
         JSCLASS_HAS_RESERVED_SLOTS(XPC_WN_TEAROFF_RESERVED_SLOTS),

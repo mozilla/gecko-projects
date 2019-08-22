@@ -195,7 +195,7 @@ ${helpers.predefined_type(
     spec="https://drafts.csswg.org/css-text/#propdef-white-space"
     servo_restyle_damage="rebuild_and_reflow"
 >
-    % if engine == "servo-2013":
+    % if engine in ["servo-2013", "servo-2020"]:
     impl SpecifiedValue {
         pub fn allow_wrap(&self) -> bool {
             match *self {
@@ -382,8 +382,8 @@ ${helpers.single_keyword(
 // text underline offset
 ${helpers.predefined_type(
     "text-underline-offset",
-    "LengthOrAuto",
-    "computed::LengthOrAuto::auto()",
+    "TextDecorationLength",
+    "generics::text::GenericTextDecorationLength::Auto",
     engines="gecko",
     animation_value_type="ComputedValue",
     gecko_pref="layout.css.text-underline-offset.enabled",

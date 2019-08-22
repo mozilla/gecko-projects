@@ -10,8 +10,7 @@
     <link rel="localization" href="browser/branding/brandings.ftl"/>
     <link rel="localization" href="branding/brand.ftl"/>
     <link rel="localization" href="browser/branding/sync-brand.ftl">
-    <!-- rename to browser/protections.ftl when exposing to l10n -->
-    <link rel="localization" href="preview/protections.ftl">
+    <link rel="localization" href="browser/protections.ftl">
     <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
     <link rel="stylesheet" href="chrome://browser/content/protections.css">
     <link rel="icon" href="chrome://browser/skin/controlcenter/dashboard.svg">
@@ -37,52 +36,52 @@
           <div class="body-wrapper">
             <p id="graph-week-summary"></p>
             <div id="graph-wrapper">
-              <div id="graph"></div>
+              <div id="graph" role="table" aria-labelledby="graphLegendDescription"></div>
               <div id="legend">
                 <label id="graphLegendDescription" data-l10n-id="graph-legend-description"></label>
-                <input id="tab-social" data-type="social" type="radio" name="tabs" aria-describedby="socialTitle" checked>
-                <label for="tab-social" data-type="social"></label>
+                <input id="tab-social" data-type="social" type="radio" name="tabs" aria-labelledby="socialLabel socialTitle" aria-describedby="socialContent" checked>
+                <label id="socialLabel" for="tab-social" data-type="social"></label>
 
-                <input id="tab-cookie" data-type="cookie" type="radio" name="tabs" aria-describedby="cookieTitle">
-                <label for="tab-cookie" data-type="cookie"></label>
+                <input id="tab-cookie" data-type="cookie" type="radio" name="tabs" aria-labelledby="cookieLabel cookieTitle" aria-describedby="cookieContent">
+                <label id="cookieLabel" for="tab-cookie" data-type="cookie"></label>
 
-                <input id="tab-tracker" data-type="tracker" type="radio" name="tabs" aria-describedby="trackerTitle">
-                <label for="tab-tracker" data-type="tracker"></label>
+                <input id="tab-tracker" data-type="tracker" type="radio" name="tabs" aria-labelledby="trackerLabel trackerTitle" aria-describedby="trackerContent">
+                <label id="trackerLabel" for="tab-tracker" data-type="tracker"></label>
 
-                <input id="tab-fingerprinter" data-type="fingerprinter" type="radio" name="tabs" aria-describedby="fingerprinterTitle">
-                <label for="tab-fingerprinter" data-type="fingerprinter"></label>
+                <input id="tab-fingerprinter" data-type="fingerprinter" type="radio" name="tabs" aria-labelledby="fingerprinterLabel fingerprinterTitle" aria-describedby="fingerprinterContent">
+                <label id="fingerprinterLabel" for="tab-fingerprinter" data-type="fingerprinter"></label>
 
-                <input id="tab-cryptominer" data-type="cryptominer" type="radio" name="tabs" aria-describedby="cryptominerTitle">
-                <label for="tab-cryptominer" data-type="cryptominer"></label>
+                <input id="tab-cryptominer" data-type="cryptominer" type="radio" name="tabs" aria-labelledby="cryptominerLabel cryptominerTitle" aria-describedby="cryptominerContent">
+                <label id="cryptominerLabel" for="tab-cryptominer" data-type="cryptominer"></label>
                 <div id=highlight></div>
                 <div id=highlight-hover></div>
                 <div id="social" class="tab-content">
                   <p id="socialTitle" class="content-title" data-l10n-id="social-tab-title"></p>
-                  <p data-l10n-id="social-tab-contant">
+                  <p id="socialContent" data-l10n-id="social-tab-contant">
                     <a target="_blank" id="social-link" data-l10n-name="learn-more-link"></a>
                   </p>
                 </div>
                 <div id="cookie" class="tab-content">
                   <p id="cookieTitle" class="content-title" data-l10n-id="cookie-tab-title"></p>
-                  <p data-l10n-id="cookie-tab-content">
+                  <p id="cookieContent" data-l10n-id="cookie-tab-content">
                     <a target="_blank" id="cookie-link" data-l10n-name="learn-more-link"></a>
                   </p>
                 </div>
                 <div id="tracker" class="tab-content">
                   <p id="trackerTitle" class="content-title" data-l10n-id="tracker-tab-title"></p>
-                  <p data-l10n-id="tracker-tab-content">
+                  <p id="trackerContent" data-l10n-id="tracker-tab-content">
                     <a target="_blank" id="tracker-link" data-l10n-name="learn-more-link"></a>
                   </p>
                 </div>
                 <div id="fingerprinter" class="tab-content">
                   <p id="fingerprinterTitle" class="content-title" data-l10n-id="fingerprinter-tab-title"></p>
-                  <p data-l10n-id="fingerprinter-tab-content">
+                  <p id="fingerprinterContent" data-l10n-id="fingerprinter-tab-content">
                     <a target="_blank" id="fingerprinter-link" data-l10n-name="learn-more-link"></a>
                   </p>
                 </div>
                 <div id="cryptominer" class="tab-content">
                   <p id="cryptominerTitle" class="content-title" data-l10n-id="cryptominer-tab-title"></p>
-                  <p data-l10n-id="cryptominer-tab-content">
+                  <p id="cryptominerContent" data-l10n-id="cryptominer-tab-content">
                     <a target="_blank" id="cryptominer-link" data-l10n-name="learn-more-link"></a>
                   </p>
                 </div>
@@ -113,32 +112,34 @@
           <div class="card-body hidden">
             <div class="body-wrapper">
               <div id="monitor-body-content">
-                <div class="monitor-block email">
-                  <span class="monitor-stat">
-                    <span class="monitor-icon"></span>
-                    <span data-type="stored-emails">
-                      <!-- Display number of stored emails here. -->
-                    </span>
-                  </span>
-                  <span id="info-monitored-addresses" class="info-text"></span>
-                </div>
-                <div class="monitor-block breaches">
-                  <span class="monitor-stat">
-                    <span class="monitor-icon"></span>
-                    <span data-type="known-breaches">
-                      <!-- Display number of known breaches here. -->
-                    </span>
-                  </span>
-                  <span id="info-known-breaches" class="info-text"></span>
-                </div>
-                <div class="monitor-block passwords">
-                  <span class="monitor-stat">
-                      <span class="monitor-icon"></span>
-                      <span data-type="exposed-passwords">
-                        <!-- Display number of exposed passwords here. -->
+                <div class="monitor-info-wrapper">
+                  <div class="monitor-block email">
+                      <span class="monitor-stat">
+                        <span class="monitor-icon"></span>
+                        <span data-type="stored-emails">
+                          <!-- Display number of stored emails here. -->
+                        </span>
                       </span>
-                  </span>
-                  <span id="info-exposed-passwords" class="info-text"></span>
+                      <span id="info-monitored-addresses" class="info-text"></span>
+                    </div>
+                    <div class="monitor-block breaches">
+                      <span class="monitor-stat">
+                        <span class="monitor-icon"></span>
+                        <span data-type="known-breaches">
+                          <!-- Display number of known breaches here. -->
+                        </span>
+                      </span>
+                      <span id="info-known-breaches" class="info-text"></span>
+                    </div>
+                    <div class="monitor-block passwords">
+                      <span class="monitor-stat">
+                          <span class="monitor-icon"></span>
+                          <span data-type="exposed-passwords">
+                            <!-- Display number of exposed passwords here. -->
+                          </span>
+                      </span>
+                      <span id="info-exposed-passwords" class="info-text"></span>
+                    </div>
                 </div>
                 <div id="full-report-link" class="monitor-view-full-report" data-l10n-id="full-report-link">
                   <a target="_blank" id="monitor-inline-link" data-l10n-name="monitor-inline-link" href=""></a>
@@ -193,6 +194,7 @@
                   <!-- Display message for status of synced devices here. -->
                 </span>
                 <a id="turn-on-sync" tabindex="0" class="hidden" href="" data-l10n-id="turn-on-sync"></a>
+                <a id="manage-devices" target="_blank" class="hidden" href="" data-l10n-id="manage-devices"></a>
               </span>
             </div>
           </div>

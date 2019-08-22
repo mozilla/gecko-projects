@@ -12,12 +12,15 @@
 #include "mozilla/FloatingPoint.h"
 
 #include "builtin/intl/CommonFunctions.h"
-#include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/NumberFormat.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "gc/FreeOp.h"
 #include "js/CharacterEncoding.h"
 #include "js/PropertySpec.h"
+#include "unicode/udisplaycontext.h"
+#include "unicode/uloc.h"
+#include "unicode/ureldatefmt.h"
+#include "unicode/utypes.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
 #include "vm/StringType.h"
@@ -32,7 +35,7 @@ using js::intl::IcuLocale;
 
 /**************** RelativeTimeFormat *****************/
 
-const ClassOps RelativeTimeFormatObject::classOps_ = {
+const JSClassOps RelativeTimeFormatObject::classOps_ = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* enumerate */
@@ -41,7 +44,7 @@ const ClassOps RelativeTimeFormatObject::classOps_ = {
     nullptr, /* mayResolve */
     RelativeTimeFormatObject::finalize};
 
-const Class RelativeTimeFormatObject::class_ = {
+const JSClass RelativeTimeFormatObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(RelativeTimeFormatObject::SLOT_COUNT) |
         JSCLASS_FOREGROUND_FINALIZE,
@@ -106,12 +109,6 @@ static bool RelativeTimeFormat(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  relativeTimeFormat->setReservedSlot(RelativeTimeFormatObject::INTERNALS_SLOT,
-                                      NullValue());
-  relativeTimeFormat->setReservedSlot(
-      RelativeTimeFormatObject::URELATIVE_TIME_FORMAT_SLOT,
-      PrivateValue(nullptr));
-
   HandleValue locales = args.get(0);
   HandleValue options = args.get(1);
 
@@ -129,12 +126,8 @@ static bool RelativeTimeFormat(JSContext* cx, unsigned argc, Value* vp) {
 void js::RelativeTimeFormatObject::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
 
-  constexpr auto RT_FORMAT_SLOT =
-      RelativeTimeFormatObject::URELATIVE_TIME_FORMAT_SLOT;
-  const Value& slot =
-      obj->as<RelativeTimeFormatObject>().getReservedSlot(RT_FORMAT_SLOT);
   if (URelativeDateTimeFormatter* rtf =
-          static_cast<URelativeDateTimeFormatter*>(slot.toPrivate())) {
+          obj->as<RelativeTimeFormatObject>().getRelativeDateTimeFormatter()) {
     ureldatefmt_close(rtf);
   }
 }
@@ -365,17 +358,14 @@ bool js::intl_FormatRelativeTime(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   // Obtain a cached URelativeDateTimeFormatter object.
-  constexpr auto RT_FORMAT_SLOT =
-      RelativeTimeFormatObject::URELATIVE_TIME_FORMAT_SLOT;
-  void* priv = relativeTimeFormat->getReservedSlot(RT_FORMAT_SLOT).toPrivate();
   URelativeDateTimeFormatter* rtf =
-      static_cast<URelativeDateTimeFormatter*>(priv);
+      relativeTimeFormat->getRelativeDateTimeFormatter();
   if (!rtf) {
     rtf = NewURelativeDateTimeFormatter(cx, relativeTimeFormat);
     if (!rtf) {
       return false;
     }
-    relativeTimeFormat->setReservedSlot(RT_FORMAT_SLOT, PrivateValue(rtf));
+    relativeTimeFormat->setRelativeDateTimeFormatter(rtf);
   }
 
   URelativeDateTimeUnit relDateTimeUnit;

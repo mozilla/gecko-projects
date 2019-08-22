@@ -1,4 +1,3 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -112,22 +111,6 @@
 .breadcrumbs-widget-item:first-child::before {
   /* The first crumb does not need any separator before itself */
   content: unset;
-}
-
-.breadcrumbs-widget-item:dir(rtl)::before {
-  transform: scaleX(-1);
-}
-
-/* RTL support: move the images that were on the left to the right,
- * and move images that were on the right to the left.
- */
-.breadcrumbs-widget-item:dir(rtl) {
-  padding: 0 20px 0 8px;
-}
-
-.breadcrumbs-widget-item:dir(rtl),
-.breadcrumbs-widget-item[checked] + .breadcrumbs-widget-item:dir(rtl) {
-  background-position: center right;
 }
 
 .breadcrumbs-widget-item:not(:first-child)::before {

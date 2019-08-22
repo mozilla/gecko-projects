@@ -714,6 +714,28 @@ def setup_raptor(config, tests):
 
 
 @transforms.add
+def setup_browsertime_flag(config, tests):
+    """Optionally add `--browsertime` flag to Raptor pageload tests."""
+
+    browsertime_flag = config.params['try_task_config'].get('browsertime', False)
+
+    for test in tests:
+        if not browsertime_flag or test['suite'] != 'raptor':
+            yield test
+            continue
+
+        if test['treeherder-symbol'].startswith('Rap'):
+            # The Rap group is subdivided as Rap{-fenix,-refbrow,-fennec}(...),
+            # so `taskgraph.util.treeherder.replace_group` isn't appropriate.
+            test['treeherder-symbol'] = test['treeherder-symbol'].replace('Rap', 'Btime', 1)
+
+        extra_options = test.setdefault('mozharness', {}).setdefault('extra-options', [])
+        extra_options.append('--browsertime')
+
+        yield test
+
+
+@transforms.add
 def handle_artifact_prefix(config, tests):
     """Handle translating `artifact_prefix` appropriately"""
     for test in tests:
@@ -1206,8 +1228,11 @@ def enable_webrender(config, tests):
     """
     for test in tests:
         if test.get('webrender'):
-            test['mozharness'].setdefault('extra-options', [])\
-                              .append("--enable-webrender")
+            extra_options = test['mozharness'].setdefault('extra-options', [])
+            extra_options.append("--enable-webrender")
+            # We only want to 'setpref' on tests that have a profile
+            if not test['attributes']['unittest_category'] in ['cppunittest', 'gtest', 'raptor']:
+                extra_options.append("--setpref=layers.d3d11.enable-blacklist=false")
 
         yield test
 
@@ -1416,15 +1441,16 @@ def make_job_description(config, tests):
             schedules = [category, platform_family(test['build-platform'])]
 
         if test.get('when'):
+            # This may still be used by comm-central.
             jobdesc['when'] = test['when']
         elif 'optimization' in test:
             jobdesc['optimization'] = test['optimization']
-        elif not config.params.is_try() and category not in INCLUSIVE_COMPONENTS:
-            # for non-try branches and non-inclusive suites, include SETA
-            jobdesc['optimization'] = {'skip-unless-schedules-or-seta': schedules}
+        elif config.params.is_try():
+            jobdesc['optimization'] = {'test-try': schedules}
+        elif category in INCLUSIVE_COMPONENTS:
+            jobdesc['optimization'] = {'test-inclusive': schedules}
         else:
-            # otherwise just use skip-unless-schedules
-            jobdesc['optimization'] = {'skip-unless-schedules': schedules}
+            jobdesc['optimization'] = {'test': schedules}
 
         run = jobdesc['run'] = {}
         run['using'] = 'mozharness-test'

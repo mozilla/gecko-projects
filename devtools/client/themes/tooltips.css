@@ -1,4 +1,3 @@
-/* vim:set ts=2 sw=2 sts=2 et: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -84,7 +83,8 @@ strong {
 
 .devtools-tooltip-inactive-css {
   color: var(--theme-body-color);
-  padding: 5px 13px;
+  padding: 7px 14px 9px;
+  font-size: 12px;
   margin: 0;
 }
 
@@ -96,7 +96,7 @@ strong {
 
 .devtools-tooltip-inactive-css p {
   margin-block-start: 0;
-  margin-block-end: 0.63em;
+  margin-block-end: calc(1em - 4px);
 }
 
 .devtools-tooltip-inactive-css p:last-child {
@@ -106,10 +106,6 @@ strong {
 .devtools-tooltip-inactive-css .link {
   color: var(--theme-highlight-blue);
   cursor: pointer;
-}
-
-.tooltip-bottom .devtools-tooltip-inactive-css {
-  padding: 2px 13px 7px;
 }
 
 /* Tooltip: Tiles */
@@ -226,12 +222,14 @@ strong {
   flex-shrink: 0;
 }
 
-/* In RTL locales, only use RTL on the tooltip content, keep LTR for positioning */
-.tooltip-container:-moz-locale-dir(rtl) {
+/* In RTL locales and context, only use RTL on the tooltip content, keep LTR for positioning */
+.tooltip-container:-moz-locale-dir(rtl),
+.tooltip-container:dir(rtl) {
   direction: ltr;
 }
 
-.tooltip-panel:-moz-locale-dir(rtl) {
+.tooltip-panel:-moz-locale-dir(rtl),
+.tooltip-panel:dir(rtl) {
   direction: rtl;
 }
 
@@ -361,6 +359,7 @@ strong {
    * padding.
    */
   margin-bottom: 0;
+  padding-top: 6px;
   padding-bottom: 2px;
 }
 
@@ -371,6 +370,7 @@ strong {
    */
   margin-top: 0;
   padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 .tooltip-container[type="doorhanger"].tooltip-top > .tooltip-arrow {
@@ -443,8 +443,9 @@ strong {
   background-position: center left 7px;
 }
 
-.tooltip-container[type="doorhanger"] .menuitem > .command[aria-checked="true"]:-moz-locale-dir(rtl) {
-  background-position: center right 7px;
+.tooltip-container[type="doorhanger"] .menuitem > .command[aria-checked="true"]:-moz-locale-dir(rtl),
+.tooltip-container[type="doorhanger"] .menuitem > .command[aria-checked="true"]:dir(rtl) {
+  background-position-x: right 7px;
 }
 
 .tooltip-container[type="doorhanger"] .menuitem > .command > .label {

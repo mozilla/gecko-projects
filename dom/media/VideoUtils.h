@@ -81,7 +81,7 @@ class MOZ_STACK_CLASS ReentrantMonitorConditionallyEnter {
   ReentrantMonitorConditionallyEnter(const ReentrantMonitorConditionallyEnter&);
   ReentrantMonitorConditionallyEnter& operator=(
       const ReentrantMonitorConditionallyEnter&);
-  static void* operator new(size_t) CPP_THROW_NEW;
+  static void* operator new(size_t) noexcept(true);
   static void operator delete(void*);
 
   ReentrantMonitor* mReentrantMonitor;
@@ -184,6 +184,7 @@ class AutoSetOnScopeExit {
 enum class MediaThreadType {
   PLAYBACK,          // MediaDecoderStateMachine and MediaFormatReader
   PLATFORM_DECODER,  // MediaDataDecoder
+  PLATFORM_ENCODER,  // MediaDataEncoder
   MSG_CONTROL,
   WEBRTC_DECODER,
   MDSM,

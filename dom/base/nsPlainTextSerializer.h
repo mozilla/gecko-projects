@@ -88,9 +88,16 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
   void EnsureVerticalSpace(int32_t noOfRows);
   void FlushLine();
   void OutputQuotesAndIndent(bool stripTrailingSpaces = false);
+
+  void MaybeReplaceNbspsForOutput(nsString& aString) const;
+
   void Output(nsString& aString);
   void Write(const nsAString& aString);
-  bool IsInPre();
+
+  // @return true, iff the elements' whitespace and newline characters have to
+  //         be preserved according to its style or because it's a `<pre>`
+  //         element.
+  bool IsElementPreformatted() const;
   bool IsInOL();
   bool IsCurrentNodeConverted();
   bool MustSuppressLeaf();
@@ -107,14 +114,15 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
 
   // Inlined functions
   inline bool MayWrap() {
-    return mWrapColumn && ((mFlags & nsIDocumentEncoder::OutputFormatted) ||
-                           (mFlags & nsIDocumentEncoder::OutputWrap));
+    return mWrapColumn &&
+           ((mSettings.mFlags & nsIDocumentEncoder::OutputFormatted) ||
+            (mSettings.mFlags & nsIDocumentEncoder::OutputWrap));
   }
   inline bool MayBreakLines() {
-    return !(mFlags & nsIDocumentEncoder::OutputDisallowLineBreaking);
+    return !(mSettings.mFlags & nsIDocumentEncoder::OutputDisallowLineBreaking);
   }
 
-  inline bool DoOutput() { return mHeadLevel == 0; }
+  inline bool DoOutput() const { return mHeadLevel == 0; }
 
   inline bool IsQuotedLine(const nsAString& aLine) {
     return !aLine.IsEmpty() && aLine.First() == char16_t('>');
@@ -126,18 +134,49 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
   void PushBool(nsTArray<bool>& aStack, bool aValue);
   bool PopBool(nsTArray<bool>& aStack);
 
-  bool ShouldReplaceContainerWithPlaceholder(nsAtom* aTag);
   bool IsIgnorableRubyAnnotation(nsAtom* aTag);
 
-  bool IsElementPreformatted(mozilla::dom::Element* aElement);
-  bool IsElementBlock(mozilla::dom::Element* aElement);
+  // @return true, iff the elements' whitespace and newline characters have to
+  //         be preserved according to its style or because it's a `<pre>`
+  //         element.
+  static bool IsElementPreformatted(mozilla::dom::Element* aElement);
+
+  // https://drafts.csswg.org/css-display/#block-level
+  static bool IsCssBlockLevelElement(mozilla::dom::Element* aElement);
 
  private:
-  nsString mCurrentLine;
   uint32_t mHeadLevel;
   bool mAtFirstColumn;
 
-  bool mStructs;  // Output structs (pref)
+  struct Settings {
+    // Pref: converter.html2txt.structs.
+    bool mStructs = true;
+
+    // Pref: converter.html2txt.header_strategy.
+    int32_t mHeaderStrategy = 1; /* Header strategy (pref)
+                                  0 = no indention
+                                  1 = indention, increased with
+                                      header level (default)
+                                  2 = numbering and slight indention */
+
+    // Flags defined in nsIDocumentEncoder.idl.
+    int32_t mFlags = 0;
+
+    // Whether the output should include ruby annotations.
+    bool mWithRubyAnnotation = false;
+  };
+
+  Settings mSettings;
+
+  struct CurrentLineContent {
+    // Excludes indentation and quotes.
+    nsString mValue;
+
+    // The width of the line as it will appear on the screen (approx.).
+    uint32_t mWidth = 0;
+  };
+
+  CurrentLineContent mCurrentLineContent;
 
   // If we've just written out a cite blockquote, we need to remember it
   // so we don't duplicate spaces before a <pre wrap> (which mail uses to quote
@@ -149,16 +188,12 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
   // That could be, for instance, the bullet in a bulleted list.
   nsString mInIndentString;
   int32_t mCiteQuoteLevel;
-  int32_t mFlags;
   int32_t mFloatingLines;  // To store the number of lazy line breaks
 
   // The wrap column is how many standard sized chars (western languages)
   // should be allowed on a line. There could be less chars if the chars
   // are wider than latin chars of more if the chars are more narrow.
   uint32_t mWrapColumn;
-
-  // The width of the line as it will appear on the screen (approx.)
-  uint32_t mCurrentLineWidth;
 
   // Treat quoted text as though it's preformatted -- don't wrap it.
   // Having it on a pref is a temporary measure, See bug 69638.
@@ -171,7 +206,6 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
   bool mInWhitespace;
   bool mPreFormattedMail;  // we're dealing with special DOM
                            // used by Thunderbird code.
-  bool mStartedOutput;     // we've produced at least a character
 
   // While handling a new tag, this variable should remind if any line break
   // is due because of a closing tag. Setting it to "TRUE" while closing the
@@ -181,15 +215,7 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
 
   bool mPreformattedBlockBoundary;
 
-  // Whether the output should include ruby annotations.
-  bool mWithRubyAnnotation;
-
   nsString mURL;
-  int32_t mHeaderStrategy;   /* Header strategy (pref)
-                                0 = no indention
-                                1 = indention, increased with
-                                    header level (default)
-                                2 = numbering and slight indention */
   int32_t mHeaderCounter[7]; /* For header-numbering:
                                 Number of previous headers of
                                 the same depth and in the same
@@ -234,8 +260,6 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
   // variable, but that causes issues with OpenBSD and module unloading.
   const nsString kSpace;
 
-  // If nsIDocumentEncoder::OutputNonTextContentAsPlaceholder is set, the child
-  // nodes of specific nodes - <iframe>, <canvas>, etc. should be ignored.
   // mIgnoredChildNodeLevel is used to tell if current node is an ignorable
   // child node. The initial value of mIgnoredChildNodeLevel is 0. When
   // serializer enters those specific nodes, mIgnoredChildNodeLevel increases

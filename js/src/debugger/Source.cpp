@@ -20,6 +20,7 @@
 #include "debugger/Debugger.h"  // for DebuggerSourceReferent, Debugger
 #include "debugger/Script.h"    // for DebuggerScript
 #include "gc/Tracer.h"  // for TraceManuallyBarrieredCrossCompartmentEdge
+#include "js/CompilationAndEvaluation.h" // for Compile
 #include "js/StableStringChars.h"  // for AutoStableStringChars
 #include "vm/BytecodeUtil.h"       // for JSDVG_SEARCH_STACK
 #include "vm/JSContext.h"          // for JSContext (ptr only)
@@ -49,19 +50,21 @@ using mozilla::Maybe;
 using mozilla::Nothing;
 using mozilla::Some;
 
-const ClassOps DebuggerSource::classOps_ = {nullptr, /* addProperty */
-                                            nullptr, /* delProperty */
-                                            nullptr, /* enumerate   */
-                                            nullptr, /* newEnumerate */
-                                            nullptr, /* resolve     */
-                                            nullptr, /* mayResolve  */
-                                            nullptr, /* finalize    */
-                                            nullptr, /* call        */
-                                            nullptr, /* hasInstance */
-                                            nullptr, /* construct   */
-                                            trace};
+const JSClassOps DebuggerSource::classOps_ = {
+    nullptr,                         /* addProperty */
+    nullptr,                         /* delProperty */
+    nullptr,                         /* enumerate   */
+    nullptr,                         /* newEnumerate */
+    nullptr,                         /* resolve     */
+    nullptr,                         /* mayResolve  */
+    nullptr,                         /* finalize    */
+    nullptr,                         /* call        */
+    nullptr,                         /* hasInstance */
+    nullptr,                         /* construct   */
+    CallTraceMethod<DebuggerSource>, /* trace */
+};
 
-const Class DebuggerSource::class_ = {
+const JSClass DebuggerSource::class_ = {
     "Source", JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS),
     &classOps_};
 
@@ -105,15 +108,14 @@ DebuggerSourceReferent DebuggerSource::getReferent() const {
   return AsVariant(static_cast<ScriptSourceObject*>(nullptr));
 }
 
-/* static */
-void DebuggerSource::trace(JSTracer* trc, JSObject* obj) {
-  DebuggerSource* sourceObj = &obj->as<DebuggerSource>();
+void DebuggerSource::trace(JSTracer* trc) {
   // There is a barrier on private pointers, so the Unbarriered marking
   // is okay.
-  if (JSObject* referent = sourceObj->getReferentRawObject()) {
-    TraceManuallyBarrieredCrossCompartmentEdge(trc, sourceObj, &referent,
-                                               "Debugger.Source referent");
-    sourceObj->setPrivateUnbarriered(referent);
+  if (JSObject* referent = getReferentRawObject()) {
+    TraceManuallyBarrieredCrossCompartmentEdge(
+        trc, static_cast<JSObject*>(this), &referent,
+        "Debugger.Source referent");
+    setPrivateUnbarriered(referent);
   }
 }
 
@@ -310,6 +312,28 @@ bool DebuggerSource::getURL(JSContext* cx, unsigned argc, Value* vp) {
   } else {
     args.rval().setNull();
   }
+  return true;
+}
+
+class DebuggerSourceGetStartLineMatcher {
+ public:
+  using ReturnType = uint32_t;
+
+  ReturnType match(HandleScriptSourceObject sourceObject) {
+    ScriptSource* ss = sourceObject->source();
+    return ss->startLine();
+  }
+  ReturnType match(Handle<WasmInstanceObject*> instanceObj) { return 0; }
+};
+
+/* static */
+bool DebuggerSource::getStartLine(JSContext* cx, unsigned argc, Value* vp) {
+  THIS_DEBUGSOURCE_REFERENT(cx, argc, vp, "(get startLine)", args, obj,
+                            referent);
+
+  DebuggerSourceGetStartLineMatcher matcher;
+  uint32_t line = referent.match(matcher);
+  args.rval().setNumber(line);
   return true;
 }
 
@@ -598,10 +622,73 @@ bool DebuggerSource::getSourceMapURL(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+template <typename Unit>
+static JSScript* ReparseSource(JSContext* cx, HandleScriptSourceObject sso) {
+  AutoRealm ar(cx, sso);
+  ScriptSource* ss = sso->source();
+
+  JS::CompileOptions options(cx);
+  options.hideScriptFromDebugger = true;
+  options.setFileAndLine(ss->filename(), ss->startLine());
+
+  UncompressedSourceCache::AutoHoldEntry holder;
+
+  ScriptSource::PinnedUnits<Unit> units(cx, ss, holder, 0, ss->length());
+  if (!units.get()) {
+    return nullptr;
+  }
+
+  JS::SourceText<Unit> srcBuf;
+  if (!srcBuf.init(cx, units.get(), ss->length(),
+                   JS::SourceOwnership::Borrowed)) {
+    return nullptr;
+  }
+
+  return JS::Compile(cx, options, srcBuf);
+}
+
+/* static */
+bool DebuggerSource::reparse(JSContext* cx, unsigned argc, Value* vp) {
+  THIS_DEBUGSOURCE_REFERENT(cx, argc, vp, "reparse", args, obj,
+                            referent);
+  if (!referent.is<ScriptSourceObject*>()) {
+    JS_ReportErrorASCII(cx, "Source object required");
+    return false;
+  }
+
+  RootedScriptSourceObject sso(cx, referent.as<ScriptSourceObject*>());
+
+  if (!sso->source()->hasSourceText()) {
+    JS_ReportErrorASCII(cx, "Source object missing text");
+    return false;
+  }
+
+  RootedScript script(cx);
+  if (sso->source()->hasSourceType<mozilla::Utf8Unit>()) {
+    script = ReparseSource<mozilla::Utf8Unit>(cx, sso);
+  } else {
+    script = ReparseSource<char16_t>(cx, sso);
+  }
+
+  if (!script) {
+    return false;
+  }
+
+  Debugger* dbg = Debugger::fromChildJSObject(obj);
+  RootedObject scriptDO(cx, dbg->wrapScript(cx, script));
+  if (!scriptDO) {
+    return false;
+  }
+
+  args.rval().setObject(*scriptDO);
+  return true;
+}
+
 const JSPropertySpec DebuggerSource::properties_[] = {
     JS_PSG("text", getText, 0),
     JS_PSG("binary", getBinary, 0),
     JS_PSG("url", getURL, 0),
+    JS_PSG("startLine", getStartLine, 0),
     JS_PSG("id", getId, 0),
     JS_PSG("element", getElement, 0),
     JS_PSG("displayURL", getDisplayURL, 0),
@@ -612,4 +699,6 @@ const JSPropertySpec DebuggerSource::properties_[] = {
     JS_PSGS("sourceMapURL", getSourceMapURL, setSourceMapURL, 0),
     JS_PS_END};
 
-const JSFunctionSpec DebuggerSource::methods_[] = {JS_FS_END};
+const JSFunctionSpec DebuggerSource::methods_[] = {
+    JS_FN("reparse", reparse, 0, 0),
+    JS_FS_END};

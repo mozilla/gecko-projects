@@ -20,6 +20,7 @@
 #include "nsWrapperCache.h"
 #include "nsILoadInfo.h"
 
+class nsDocShellLoadState;
 class nsGlobalWindowOuter;
 class nsIPrincipal;
 class nsOuterWindowProxy;
@@ -139,6 +140,15 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   void SetDocShell(nsIDocShell* aDocShell);
   void ClearDocShell() { mDocShell = nullptr; }
 
+  // This cleans up remote outer window proxies that might have been left behind
+  // when the browsing context went from being remote to local. It does this by
+  // turning them into cross-compartment wrappers to aOuter. If there is already
+  // a remote proxy in the compartment of aOuter, then aOuter will get swapped
+  // to it and the value of aOuter will be set to the object that used to be the
+  // remote proxy and is now an OuterWindowProxy.
+  void CleanUpDanglingRemoteOuterWindowProxies(
+      JSContext* aCx, JS::MutableHandle<JSObject*> aOuter);
+
   // Get the embedder element for this BrowsingContext if the embedder is
   // in-process, or null if it's not.
   Element* GetEmbedderElement() const { return mEmbedderElement; }
@@ -170,6 +180,11 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // Restore cached browsing contexts.
   void RestoreChildren(Children&& aChildren, bool aFromIPC = false);
 
+  // Triggers a load in the process which currently owns this BrowsingContext.
+  // aAccessor is the context which initiated the load, and may be null only for
+  // in-process BrowsingContexts.
+  void LoadURI(BrowsingContext* aAccessor, nsDocShellLoadState* aLoadState);
+
   // Determine if the current BrowsingContext was 'cached' by the logic in
   // CacheChildren.
   bool IsCached();
@@ -200,6 +215,23 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
 
   bool HasOpener() const;
 
+  /**
+   * When a new browsing context is opened by a sandboxed document, it needs to
+   * keep track of the browsing context that opened it, so that it can be
+   * navigated by it.  This is the "one permitted sandboxed navigator".
+   */
+  already_AddRefed<BrowsingContext> GetOnePermittedSandboxedNavigator() const {
+    return Get(mOnePermittedSandboxedNavigatorId);
+  }
+  void SetOnePermittedSandboxedNavigator(BrowsingContext* aNavigator) {
+    if (mOnePermittedSandboxedNavigatorId) {
+      MOZ_ASSERT(false,
+                 "One Permitted Sandboxed Navigator should only be set once.");
+    } else {
+      SetOnePermittedSandboxedNavigatorId(aNavigator ? aNavigator->Id() : 0);
+    }
+  }
+
   void GetChildren(Children& aChildren);
 
   BrowsingContextGroup* Group() { return mGroup; }
@@ -214,13 +246,17 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // BrowsingContext::FindWithName(const nsAString&) is equivalent to
   // calling nsIDocShellTreeItem::FindItemWithName(aName, nullptr,
   // nullptr, false, <return value>).
-  BrowsingContext* FindWithName(const nsAString& aName);
+  BrowsingContext* FindWithName(const nsAString& aName,
+                                BrowsingContext& aRequestingContext);
+
 
   // Find a browsing context in this context's list of
   // children. Doesn't consider the special names, '_self', '_parent',
   // '_top', or '_blank'. Performs access control with regard to
   // 'this'.
-  BrowsingContext* FindChildWithName(const nsAString& aName);
+  BrowsingContext* FindChildWithName(const nsAString& aName,
+                                     BrowsingContext& aRequestingContext);
+
 
   nsISupports* GetParentObject() const;
   JSObject* WrapObject(JSContext* aCx,
@@ -381,16 +417,21 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
                   uint64_t aBrowsingContextId, Type aType);
 
  private:
+  // Returns true if the given name is one of the "special" names, currently:
+  // "_self", "_parent", "_top", or "_blank".
+  static bool IsSpecialName(const nsAString& aName);
+
   // Find the special browsing context if aName is '_self', '_parent',
   // '_top', but not '_blank'. The latter is handled in FindWithName
-  BrowsingContext* FindWithSpecialName(const nsAString& aName);
+  BrowsingContext* FindWithSpecialName(const nsAString& aName,
+                                       BrowsingContext& aRequestingContext);
 
   // Find a browsing context in the subtree rooted at 'this' Doesn't
   // consider the special names, '_self', '_parent', '_top', or
   // '_blank'. Performs access control with regard to
   // 'aRequestingContext'.
   BrowsingContext* FindWithNameInSubtree(const nsAString& aName,
-                                         BrowsingContext* aRequestingContext);
+                                         BrowsingContext& aRequestingContext);
 
   // Removes the context from its group and sets mIsDetached to true.
   void Unregister();
@@ -451,6 +492,11 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // Ensure that we only set the flag on the top level browsing context.
   void DidSetIsActivatedByUserGesture();
 
+  // Ensure that we only set the flag on the top level browsingContext.
+  // And then, we do a pre-order walk in the tree to refresh the
+  // volume of all media elements.
+  void DidSetMuted();
+
   // Type of BrowsingContent
   const Type mType;
 
@@ -491,6 +537,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // Has this browsing context been discarded? BrowsingContexts should
   // only be discarded once.
   bool mIsDiscarded : 1;
+
+  // This is true if the BrowsingContext was out of process, but is now in
+  // process, and might have remote window proxies that need to be cleaned up.
+  bool mDanglingRemoteOuterProxies : 1;
 };
 
 /**

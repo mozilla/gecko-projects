@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -657,6 +655,7 @@ const gOnPopFilters = [];
 function clearPositionHandlers() {
   dbg.clearAllBreakpoints();
   dbg.onEnterFrame = undefined;
+  dbg.onDebuggerStatement = undefined;
 
   gHasEnterFrameHandler = false;
   gPendingPcHandlers.length = 0;
@@ -910,13 +909,22 @@ let gManifest;
 // manifest started executing.
 let gManifestStartTime;
 
+// Points of any debugger statements that need to be flushed to the middleman.
+const gNewDebuggerStatements = [];
+
+// Whether to pause on debugger statements when running forward.
+let gPauseOnDebuggerStatement = false;
+
 // Handlers that run when a manifest is first received. This must be specified
 // for all manifests.
 const gManifestStartHandlers = {
-  resume({ breakpoints }) {
+  resume({ breakpoints, pauseOnDebuggerStatement }) {
     RecordReplayControl.resumeExecution();
     gManifestStartTime = RecordReplayControl.currentExecutionTime();
     breakpoints.forEach(ensurePositionHandler);
+
+    gPauseOnDebuggerStatement = pauseOnDebuggerStatement;
+    dbg.onDebuggerStatement = debuggerStatementHit;
   },
 
   restoreCheckpoint({ target }) {
@@ -1046,18 +1054,24 @@ function currentScriptedExecutionPoint() {
   });
 }
 
+function finishResume(point) {
+  RecordReplayControl.manifestFinished({
+    point,
+    duration: RecordReplayControl.currentExecutionTime() - gManifestStartTime,
+    consoleMessages: gNewConsoleMessages,
+    scripts: gNewScripts,
+    debuggerStatements: gNewDebuggerStatements,
+  });
+  gNewConsoleMessages.length = 0;
+  gNewScripts.length = 0;
+  gNewDebuggerStatements.length = 0;
+}
+
 // Handlers that run after a checkpoint is reached to see if the manifest has
 // finished. This does not need to be specified for all manifests.
 const gManifestFinishedAfterCheckpointHandlers = {
   resume(_, point) {
-    RecordReplayControl.manifestFinished({
-      point,
-      duration: RecordReplayControl.currentExecutionTime() - gManifestStartTime,
-      consoleMessages: gNewConsoleMessages,
-      scripts: gNewScripts,
-    });
-    gNewConsoleMessages.length = 0;
-    gNewScripts.length = 0;
+    finishResume(point);
   },
 
   runToPoint({ endpoint }, point) {
@@ -1138,11 +1152,7 @@ function AfterCheckpoint(id, restoredCheckpoint) {
 const gManifestPositionHandlers = {
   resume(manifest, point) {
     clearPositionHandlers();
-    RecordReplayControl.manifestFinished({
-      point,
-      consoleMessages: gNewConsoleMessages,
-      scripts: gNewScripts,
-    });
+    finishResume(point);
   },
 
   runToPoint({ endpoint }, point) {
@@ -1160,6 +1170,17 @@ function positionHit(position, frame) {
     gManifestPositionHandlers[gManifest.kind](gManifest, point);
   } else {
     throwError(`Unexpected manifest in positionHit: ${gManifest.kind}`);
+  }
+}
+
+function debuggerStatementHit() {
+  assert(gManifest.kind == "resume");
+  const point = currentScriptedExecutionPoint();
+  gNewDebuggerStatements.push(point);
+
+  if (gPauseOnDebuggerStatement) {
+    clearPositionHandlers();
+    finishResume(point);
   }
 }
 
@@ -1470,6 +1491,8 @@ function getPauseData() {
     const data = getObjectData(id);
     const names = getEnvironmentNames(env);
     rv.environments[id] = { data, names };
+
+    names.forEach(({ value }) => addValue(value, true));
 
     addObject(data.callee);
     addEnvironment(data.parent);

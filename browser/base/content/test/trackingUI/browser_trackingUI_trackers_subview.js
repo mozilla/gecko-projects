@@ -4,6 +4,10 @@
 
 "use strict";
 
+const { PermissionTestUtils } = ChromeUtils.import(
+  "resource://testing-common/PermissionTestUtils.jsm"
+);
+
 const TRACKING_PAGE =
   "http://tracking.example.org/browser/browser/base/content/test/trackingUI/trackingPage.html";
 
@@ -41,15 +45,6 @@ async function assertSitesListed(blocked) {
       ".protections-popup-list-item"
     );
     is(listItems.length, 1, "We have 1 tracker in the list");
-
-    let strictInfo = document.getElementById(
-      "protections-popup-trackersView-strict-info"
-    );
-    is(
-      BrowserTestUtils.is_hidden(strictInfo),
-      Services.prefs.getBoolPref(TP_PREF),
-      "Strict info is hidden if TP is enabled."
-    );
 
     let mainView = document.getElementById("protections-popup-mainView");
     viewShown = BrowserTestUtils.waitForEvent(mainView, "ViewShown");
@@ -113,10 +108,14 @@ add_task(async function testTrackersSubView() {
   await assertSitesListed(true);
   info("Testing trackers subview with TP enabled and a CB exception.");
   let uri = Services.io.newURI("https://tracking.example.org");
-  Services.perms.add(uri, "trackingprotection", Services.perms.ALLOW_ACTION);
+  PermissionTestUtils.add(
+    uri,
+    "trackingprotection",
+    Services.perms.ALLOW_ACTION
+  );
   await assertSitesListed(false);
   info("Testing trackers subview with TP enabled and a CB exception removed.");
-  Services.perms.remove(uri, "trackingprotection");
+  PermissionTestUtils.remove(uri, "trackingprotection");
   await assertSitesListed(true);
 
   Services.prefs.clearUserPref(TP_PREF);

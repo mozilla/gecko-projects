@@ -4,7 +4,6 @@
 
 "use strict";
 
-const { L10N } = require("devtools/client/netmonitor/src/utils/l10n");
 const {
   ObjectProvider,
 } = require("devtools/client/shared/components/tree/ObjectProvider");
@@ -37,28 +36,15 @@ const SearchProvider = {
   getLabel(object) {
     if (object.resource) {
       return this.getResourceLabel(object);
-    } else if (object.type) {
-      switch (object.type) {
-        case "url":
-          return this.getUrlLabel(object);
-        case "responseContent":
-          return this.getResponseContent(object);
-        case "requestCookies":
-          return this.getRequestCookies();
-        case "responseCookies":
-          return this.getResponseCookies();
-        case "requestHeaders":
-          return this.getRequestHeaders();
-        case "responseHeaders":
-          return this.getResponseHeaders();
-      }
+    } else if (object.label) {
+      return object.label;
     }
     return ObjectProvider.getLabel(object);
   },
 
   getValue(object) {
     if (object.resource) {
-      return object.resource.url;
+      return "";
     } else if (object.type) {
       return object.value;
     }
@@ -84,37 +70,10 @@ const SearchProvider = {
   },
 
   getResourceLabel(object) {
-    const resourceLabel =
+    return (
       getFileName(object.resource.urlDetails.baseNameWithQuery) ||
-      object.resource.urlDetails.host;
-    if (resourceLabel.length > 30) {
-      return resourceLabel.substring(0, 30) + "…";
-    }
-    return resourceLabel;
-  },
-
-  getUrlLabel(object) {
-    return object.label.substring(0, 100);
-  },
-
-  getResponseContent(object) {
-    return object.line + "";
-  },
-
-  getRequestCookies() {
-    return "Set-Cookie";
-  },
-
-  getResponseCookies() {
-    return "Cookie";
-  },
-
-  getRequestHeaders() {
-    return L10N.getStr("netmonitor.search.labels.requestHeaders");
-  },
-
-  getResponseHeaders() {
-    return L10N.getStr("netmonitor.search.labels.responseHeaders");
+      object.resource.urlDetails.host
+    );
   },
 };
 

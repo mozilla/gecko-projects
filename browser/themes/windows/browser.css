@@ -560,44 +560,15 @@ menuitem.bookmark-item {
   }
 }
 
-#urlbar-input:-moz-lwtheme::placeholder,
-.searchbar-textbox:-moz-lwtheme > moz-input-box > html|*.textbox-input::placeholder {
-  opacity: 1.0;
-  color: #777;
-}
-
 /* ::::: URL Bar Zoom Reset Button ::::: */
-@keyframes urlbar-zoom-reset-pulse {
-  0% {
-    transform: scale(0);
-  }
-  75% {
-    transform: scale(1.5);
-  }
-  100% {
-    transform: scale(1.0);
-  }
-}
-
-#urlbar-zoom-button {
-  -moz-appearance: none;
-  color: inherit;
-}
 
 .urlbar-display {
-  margin-top: 0;
-  margin-bottom: 0;
   margin-inline-start: 0;
-  color: GrayText;
 }
 
 #pageAction-urlbar-shareURL,
 #pageAction-panel-shareURL {
   list-style-image: url("chrome://browser/skin/share.svg");
-}
-
-#search-container {
-  min-width: calc(54px + 11ch);
 }
 
 /* identity box */
@@ -609,7 +580,7 @@ menuitem.bookmark-item {
 %include ../shared/autocomplete.inc.css
 %include ../shared/urlbar-autocomplete.inc.css
 
-#urlbarView-results {
+.urlbarView {
   font-size: 1.15em;
 }
 

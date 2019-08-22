@@ -45,6 +45,7 @@
 
 #if defined(FUZZING)
 #  include "FuzzyLayer.h"
+#  include "FuzzySecurityInfo.h"
 #  include "mozilla/StaticPrefs_fuzzing.h"
 #endif
 
@@ -1061,7 +1062,7 @@ nsresult nsSocketTransport::ResolveHost() {
       esniHost.Append("_esni.");
       // This might end up being the SocketHost
       // see https://github.com/ekr/draft-rescorla-tls-esni/issues/61
-      esniHost.Append(mOriginHost);
+      esniHost.Append(SocketHost());
       rv = dns->AsyncResolveByTypeNative(
           esniHost, nsIDNSService::RESOLVE_TYPE_TXT, dnsFlags, this,
           mSocketTransportService, mOriginAttributes,
@@ -1362,6 +1363,11 @@ nsresult nsSocketTransport::InitiateSocket() {
       return rv;
     }
     SOCKET_LOG(("Successfully attached fuzzing IOLayer.\n"));
+
+    if (usingSSL) {
+      mSecInfo = static_cast<nsISupports*>(
+          static_cast<nsISSLSocketControl*>(new FuzzySecurityInfo()));
+    }
   }
 #endif
 

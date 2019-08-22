@@ -59,11 +59,31 @@ class PictureInPictureToggleChild extends ActorChild {
     // itself.
     this.weakDocStates = new WeakMap();
     this.toggleEnabled = Services.prefs.getBoolPref(TOGGLE_ENABLED_PREF);
+
+    Services.prefs.addObserver(TOGGLE_ENABLED_PREF, this);
     this.toggleTesting = Services.prefs.getBoolPref(TOGGLE_TESTING_PREF, false);
   }
 
   cleanup() {
     this.removeMouseButtonListeners();
+    Services.prefs.removeObserver(TOGGLE_ENABLED_PREF, this);
+  }
+
+  observe(subject, topic, data) {
+    if (topic == "nsPref:changed" && data == TOGGLE_ENABLED_PREF) {
+      this.toggleEnabled = Services.prefs.getBoolPref(TOGGLE_ENABLED_PREF);
+
+      if (this.toggleEnabled) {
+        // We have enabled the Picture-in-Picture toggle, so we need to make
+        // sure we register all of the videos that might already be on the page.
+        this.content.requestIdleCallback(() => {
+          let videos = this.content.document.querySelectorAll("video");
+          for (let video of videos) {
+            this.registerVideo(video);
+          }
+        });
+      }
+    }
   }
 
   /**
@@ -118,10 +138,15 @@ class PictureInPictureToggleChild extends ActorChild {
         if (
           this.toggleEnabled &&
           event.target instanceof this.content.HTMLVideoElement &&
-          !event.target.controls &&
           event.target.ownerDocument == this.content.document
         ) {
           this.registerVideo(event.target);
+        }
+        break;
+      }
+      case "contextmenu": {
+        if (this.toggleEnabled) {
+          this.checkContextMenu(event);
         }
         break;
       }
@@ -621,6 +646,39 @@ class PictureInPictureToggleChild extends ActorChild {
   }
 
   /**
+   * Checks a contextmenu event to see if the mouse is currently over the
+   * Picture-in-Picture toggle. If so, sends a message to the parent process
+   * to open up the Picture-in-Picture toggle context menu.
+   *
+   * @param {MouseEvent} event A contextmenu event.
+   */
+  checkContextMenu(event) {
+    let state = this.docState;
+
+    let video = state.weakOverVideo && state.weakOverVideo.get();
+    if (!video) {
+      return;
+    }
+
+    let shadowRoot = video.openOrClosedShadowRoot;
+    if (!shadowRoot) {
+      return;
+    }
+
+    let toggle = shadowRoot.getElementById("pictureInPictureToggleButton");
+    if (this.isMouseOverToggle(toggle, event)) {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+
+      this.mm.sendAsyncMessage("PictureInPicture:OpenToggleContextMenu", {
+        screenX: event.screenX,
+        screenY: event.screenY,
+        mozInputSource: event.mozInputSource,
+      });
+    }
+  }
+
+  /**
    * This is a test-only function that returns true if a video is being tracked
    * for mouseover events after having intersected the viewport.
    */
@@ -856,15 +914,16 @@ class PictureInPictureChild extends ActorChild {
     // This way, we sidestep the AutoplayPolicy blocking stuff.
     playerVideo.muted = true;
 
+    // Strip any inline styles off of the video, and try to get rid of any surrounding
+    // whitespace.
+    playerVideo.setAttribute("style", "");
+    doc.body.style.overflow = "hidden";
+    doc.body.style.margin = "0";
+
     // Force the player video to assume maximum height and width of the
     // containing window
     playerVideo.style.height = "100vh";
     playerVideo.style.width = "100vw";
-
-    // And now try to get rid of as much surrounding whitespace as possible.
-    playerVideo.style.margin = "0";
-    doc.body.style.overflow = "hidden";
-    doc.body.style.margin = "0";
 
     doc.body.appendChild(playerVideo);
 

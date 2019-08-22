@@ -2,6 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// Please indent all prefs defined within #ifdef/#ifndef conditions. This
+// improves readability, particular for conditional blocks that exceed a single
+// screen.
+
 #filter substitution
 
 // For browser.js element
@@ -41,9 +45,6 @@ pref("browser.tabs.disableBackgroundZombification", false);
 // Controlled by Switchboard experiment "offline-cache".
 pref("browser.tabs.useCache", false);
 
-// From libpref/src/init/all.js, extended to allow a slightly wider zoom range.
-pref("zoom.minPercent", 20);
-pref("zoom.maxPercent", 400);
 pref("toolkit.zoomManager.zoomValues", ".2,.3,.5,.67,.8,.9,1,1.1,1.2,1.33,1.5,1.7,2,2.4,3,4");
 
 // Mobile will use faster, less durable mode.
@@ -346,8 +347,6 @@ pref("devtools.debugger.unix-domain-socket", "@ANDROID_PACKAGE_NAME@/firefox-deb
 pref("devtools.remote.usb.enabled", false);
 pref("devtools.remote.wifi.enabled", false);
 
-pref("font.size.inflation.minTwips", 0);
-
 // When true, zooming will be enabled on all sites, even ones that declare user-scalable=no.
 pref("browser.ui.zoom.force-user-scalable", false);
 
@@ -398,11 +397,11 @@ pref("app.privacyURL", "https://www.mozilla.org/privacy/firefox/");
 pref("app.creditsURL", "https://www.mozilla.org/credits/");
 pref("app.channelURL", "https://www.mozilla.org/%LOCALE%/firefox/channel/");
 #if MOZ_UPDATE_CHANNEL == aurora
-pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/mobile/%VERSION%/auroranotes/");
+  pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/mobile/%VERSION%/auroranotes/");
 #elif MOZ_UPDATE_CHANNEL == beta
-pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/mobile/%VERSION%beta/releasenotes/");
+  pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/mobile/%VERSION%beta/releasenotes/");
 #else
-pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/mobile/%VERSION%/releasenotes/");
+  pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/mobile/%VERSION%/releasenotes/");
 #endif
 
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
@@ -459,9 +458,8 @@ pref("app.update.autodownload", "wifi");
 pref("app.update.url.android", "https://aus5.mozilla.org/update/4/%PRODUCT%/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%MOZ_VERSION%/update.xml");
 
 #ifdef MOZ_UPDATER
-/* prefs used specifically for updating the app */
-pref("app.update.channel", "@MOZ_UPDATE_CHANNEL@");
-
+  /* prefs used specifically for updating the app */
+  pref("app.update.channel", "@MOZ_UPDATE_CHANNEL@");
 #endif
 
 // replace newlines with spaces on paste into single-line text boxes
@@ -780,7 +778,7 @@ pref("dom.push.serverURL", "https://updates.push.services.mozilla.com/v1/gcm/@MO
 pref("dom.push.maxRecentMessageIDsPerSubscription", 0);
 
 #ifdef MOZ_ANDROID_GCM
-pref("dom.push.enabled", true);
+  pref("dom.push.enabled", true);
 #endif
 
 // The remote content URL where FxAccountsWebChannel messages originate.  Must use HTTPS.
@@ -812,6 +810,7 @@ pref("media.navigator.permission.device", true);
 
 // Allow system add-on updates
 pref("extensions.systemAddon.update.url", "https://aus5.mozilla.org/update/3/SystemAddons/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
+pref("extensions.systemAddon.update.enabled", true);
 
 // E10s stuff. We don't support 'file' or 'priveleged' process types.
 pref("browser.tabs.remote.separateFileUriProcess", false);

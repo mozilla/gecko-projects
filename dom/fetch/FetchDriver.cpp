@@ -579,10 +579,9 @@ nsresult FetchDriver::HttpFetch(
     // associated referrer policy.
     // Basically, "client" is not in our implementation, we use
     // EnvironmentReferrerPolicy of the worker or document context
-    net::ReferrerPolicy net_referrerPolicy =
-        mRequest->GetEnvironmentReferrerPolicy();
+    ReferrerPolicy referrerPolicy = mRequest->GetEnvironmentReferrerPolicy();
     if (mRequest->ReferrerPolicy_() == ReferrerPolicy::_empty) {
-      mRequest->SetReferrerPolicy(net_referrerPolicy);
+      mRequest->SetReferrerPolicy(referrerPolicy);
     }
     // Step 6 of https://fetch.spec.whatwg.org/#main-fetch
     // If request’s referrer policy is the empty string,
@@ -590,8 +589,8 @@ nsresult FetchDriver::HttpFetch(
     if (mRequest->ReferrerPolicy_() == ReferrerPolicy::_empty) {
       nsCOMPtr<nsILoadInfo> loadInfo = httpChan->LoadInfo();
       bool isPrivate = loadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
-      net::ReferrerPolicy referrerPolicy = static_cast<net::ReferrerPolicy>(
-          ReferrerInfo::GetDefaultReferrerPolicy(httpChan, uri, isPrivate));
+      referrerPolicy =
+          ReferrerInfo::GetDefaultReferrerPolicy(httpChan, uri, isPrivate);
       mRequest->SetReferrerPolicy(referrerPolicy);
     }
 
@@ -810,7 +809,12 @@ FetchDriver::OnStartRequest(nsIRequest* aRequest) {
 
   // We should only get to the following code once.
   MOZ_ASSERT(!mPipeOutputStream);
-  MOZ_ASSERT(mObserver);
+
+  if (!mObserver) {
+    MOZ_ASSERT(false, "We should have mObserver here.");
+    FailWithNetworkError(NS_ERROR_UNEXPECTED);
+    return NS_ERROR_UNEXPECTED;
+  }
 
   mNeedToObserveOnDataAvailable = mObserver->NeedOnDataAvailable();
 
@@ -1343,25 +1347,17 @@ FetchDriver::AsyncOnChannelRedirect(nsIChannel* aOldChannel,
   // In redirect, httpChannel already took referrer-policy into account, so
   // updates request’s associated referrer policy from channel.
   if (httpChannel) {
-    nsCOMPtr<nsIURI> computedReferrer;
+    nsAutoString computedReferrerSpec;
     nsCOMPtr<nsIReferrerInfo> referrerInfo = httpChannel->GetReferrerInfo();
     if (referrerInfo) {
-      mRequest->SetReferrerPolicy(
-          static_cast<net::ReferrerPolicy>(referrerInfo->GetReferrerPolicy()));
-      computedReferrer = referrerInfo->GetComputedReferrer();
+      mRequest->SetReferrerPolicy(referrerInfo->ReferrerPolicy());
+      Unused << referrerInfo->GetComputedReferrerSpec(computedReferrerSpec);
     }
 
     // Step 8 https://fetch.spec.whatwg.org/#main-fetch
     // If request’s referrer is not "no-referrer" (empty), set request’s
     // referrer to the result of invoking determine request’s referrer.
-    if (computedReferrer) {
-      nsAutoCString spec;
-      rv = computedReferrer->GetSpec(spec);
-      NS_ENSURE_SUCCESS(rv, rv);
-      mRequest->SetReferrer(NS_ConvertUTF8toUTF16(spec));
-    } else {
-      mRequest->SetReferrer(EmptyString());
-    }
+    mRequest->SetReferrer(computedReferrerSpec);
   }
 
   aCallback->OnRedirectVerifyCallback(NS_OK);
@@ -1457,6 +1453,8 @@ void FetchDriver::SetRequestHeaders(nsIHttpChannel* aChannel) const {
 }
 
 void FetchDriver::Abort() {
+  MOZ_DIAGNOSTIC_ASSERT(NS_IsMainThread());
+
   if (mObserver) {
 #ifdef DEBUG
     mResponseAvailableCalled = true;

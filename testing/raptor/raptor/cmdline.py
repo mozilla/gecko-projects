@@ -147,6 +147,8 @@ def create_parser(mach_interface=False):
             help="Flag which indicates if Raptor should not offer to install Android APK.")
 
     # Arguments for invoking browsertime.
+    add_arg('--browsertime', dest='browsertime', default=False, action="store_true",
+            help="Whether to use browsertime to execute pageload tests")
     add_arg('--browsertime-node', dest='browsertime_node',
             help="path to Node.js executable")
     add_arg('--browsertime-browsertimejs', dest='browsertime_browsertimejs',
@@ -180,6 +182,16 @@ def verify_options(parser, args):
                 or args.host in ('localhost', '127.0.0.1'):
             parser.error("Power test is only supported when running Raptor on Firefox Android "
                          "browsers when host is specified!")
+
+    if args.cpu_test:
+        if args.app not in ["fennec", "geckoview", "refbrow", "fenix"]:
+            parser.error("CPU test is only supported when running Raptor on Firefox Android "
+                         "browsers!")
+
+    if args.memory_test:
+        if args.app not in ["fennec", "geckoview", "refbrow", "fenix"]:
+            parser.error("Memory test is only supported when running Raptor on Firefox Android "
+                         "browsers!")
 
     # if --enable-webrender specified, must be on desktop firefox or geckoview-based browser.
     if args.enable_webrender:

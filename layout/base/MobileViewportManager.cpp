@@ -105,14 +105,16 @@ void MobileViewportManager::RequestReflow(bool aForceAdjustResolution) {
   RefreshViewportSize(aForceAdjustResolution);
 }
 
-void MobileViewportManager::ResolutionUpdated() {
+void MobileViewportManager::ResolutionUpdated(
+    mozilla::ResolutionChangeOrigin aOrigin) {
   MVM_LOG("%p: resolution updated\n", this);
 
   if (!mContext) {
     return;
   }
 
-  if (!mPainted) {
+  if (!mPainted &&
+      aOrigin == mozilla::ResolutionChangeOrigin::MainThreadRestore) {
     // Save the value, so our default zoom calculation
     // can take it into account later on.
     SetRestoreResolution(mContext->GetResolution());
@@ -126,8 +128,7 @@ MobileViewportManager::HandleEvent(dom::Event* event) {
   event->GetType(type);
 
   if (type.Equals(DOM_META_ADDED)) {
-    MVM_LOG("%p: got a dom-meta-added event\n", this);
-    RefreshViewportSize(mPainted);
+    HandleDOMMetaAdded();
   } else if (type.Equals(DOM_META_CHANGED)) {
     MVM_LOG("%p: got a dom-meta-changed event\n", this);
     RefreshViewportSize(mPainted);
@@ -142,6 +143,27 @@ MobileViewportManager::HandleEvent(dom::Event* event) {
     }
   }
   return NS_OK;
+}
+
+void MobileViewportManager::HandleDOMMetaAdded() {
+  MVM_LOG("%p: got a dom-meta-added event\n", this);
+  if (mPainted && mContext->IsDocumentLoading()) {
+    // It's possible that we get a DOMMetaAdded event after the page
+    // has already been painted, but before the document finishes loading.
+    // In such a case, we've already run SetInitialViewport() on
+    // "before-first-paint", and won't run it again on "load" (because
+    // mPainted=true). But that SetInitialViewport() call didn't know the
+    // "initial-scale" from this meta viewport tag. To ensure we respect
+    // the "initial-scale", call SetInitialViewport() again.
+    // Note: It's important that we only do this if mPainted=true. In the
+    // usual case, we get the DOMMetaAdded before the first paint, sometimes
+    // even before we have a frame tree, and calling SetInitialViewport()
+    // before we have a frame tree will skip some important steps (e.g.
+    // updating display port margins).
+    SetInitialViewport();
+  } else {
+    RefreshViewportSize(mPainted);
+  }
 }
 
 NS_IMETHODIMP
@@ -410,6 +432,8 @@ void MobileViewportManager::UpdateResolution(
   }
 
   // If the zoom has changed, update the pres shell resolution accordingly.
+  // We characterize this as MainThreadAdjustment, because we don't want our
+  // change here to be remembered as a restore resolution.
   if (newZoom) {
     // Non-positive zoom factors can produce NaN or negative viewport sizes,
     // so we better be sure we've got a positive zoom factor.
@@ -417,7 +441,8 @@ void MobileViewportManager::UpdateResolution(
                "zoom factor must be positive");
     LayoutDeviceToLayerScale resolution = ZoomToResolution(*newZoom, cssToDev);
     MVM_LOG("%p: setting resolution %f\n", this, resolution.scale);
-    mContext->SetResolutionAndScaleTo(resolution.scale);
+    mContext->SetResolutionAndScaleTo(
+        resolution.scale, ResolutionChangeOrigin::MainThreadAdjustment);
 
     MVM_LOG("%p: New zoom is %f\n", this, newZoom->scale);
   }
@@ -589,10 +614,13 @@ void MobileViewportManager::ShrinkToDisplaySizeIfNeeded(
     return;
   }
 
-  if (!mContext->AllowZoomingForDocument()) {
+  if (!mContext->AllowZoomingForDocument() || mContext->IsInReaderMode()) {
     // If zoom is disabled, we don't scale down wider contents to fit them
     // into device screen because users won't be able to zoom out the tiny
     // contents.
+    // We special-case reader mode, because it doesn't allow zooming, but
+    // the restriction is often not yet in place at the time this logic
+    // runs.
     return;
   }
 

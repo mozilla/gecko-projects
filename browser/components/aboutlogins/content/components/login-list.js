@@ -90,22 +90,22 @@ export default class LoginList extends HTMLElement {
     // Show, hide, and update state of the list items per the applied search filter.
     for (let guid of this._loginGuidsSortedOrder) {
       let { listItem } = this._logins[guid];
+
       if (guid == this._selectedGuid) {
         this._setListItemAsSelected(listItem);
       }
-      if (
-        this._breachesByLoginGUID &&
-        this._breachesByLoginGUID.has(listItem.dataset.guid)
-      ) {
-        listItem.classList.add("breached");
-      }
-
+      listItem.classList.toggle(
+        "breached",
+        !!this._breachesByLoginGUID &&
+          this._breachesByLoginGUID.has(listItem.dataset.guid)
+      );
       listItem.hidden = !visibleLoginGuids.has(listItem.dataset.guid);
     }
-    this.classList.toggle(
-      "create-login-selected",
-      this._selectedGuid == null && Object.keys(this._logins).length > 0
-    );
+
+    let createLoginSelected =
+      this._selectedGuid == null && Object.keys(this._logins).length > 0;
+    this.classList.toggle("create-login-selected", createLoginSelected);
+    this._createLoginButton.disabled = createLoginSelected;
 
     // Re-arrange the login-list-items according to their sort
     for (let i = this._loginGuidsSortedOrder.length - 1; i >= 0; i--) {
@@ -122,7 +122,11 @@ export default class LoginList extends HTMLElement {
     switch (event.type) {
       case "click": {
         if (event.originalTarget == this._createLoginButton) {
-          window.dispatchEvent(new CustomEvent("AboutLoginsShowBlankLogin"));
+          window.dispatchEvent(
+            new CustomEvent("AboutLoginsShowBlankLogin", {
+              cancelable: true,
+            })
+          );
           recordTelemetryEvent({ object: "new_login", method: "new" });
           return;
         }
@@ -191,8 +195,10 @@ export default class LoginList extends HTMLElement {
         break;
       }
       case "AboutLoginsShowBlankLogin": {
-        this._selectedGuid = null;
-        this._setListItemAsSelected(this._blankLoginListItem);
+        if (!event.defaultPrevented) {
+          this._selectedGuid = null;
+          this._setListItemAsSelected(this._blankLoginListItem);
+        }
         break;
       }
       case "keydown": {
@@ -267,6 +273,7 @@ export default class LoginList extends HTMLElement {
   updateBreaches(breachesByLoginGUID) {
     this._breachesByLoginGUID = breachesByLoginGUID;
     if (this._breachesByLoginGUID.size === 0) {
+      this.render();
       return;
     }
     const breachedSortOptionElement = this._sortSelect.namedItem("breached");
@@ -276,6 +283,7 @@ export default class LoginList extends HTMLElement {
     this._sortSelect.dispatchEvent(
       new CustomEvent("change", { bubbles: true })
     );
+    this.render();
   }
 
   /**
@@ -465,7 +473,7 @@ export default class LoginList extends HTMLElement {
     this._list.setAttribute("aria-activedescendant", newlyFocusedItem.id);
     activeDescendant.classList.remove("keyboard-selected");
     newlyFocusedItem.classList.add("keyboard-selected");
-    newlyFocusedItem.scrollIntoView(false);
+    newlyFocusedItem.scrollIntoView({ block: "nearest" });
   }
 
   _setListItemAsSelected(listItem) {
@@ -475,11 +483,14 @@ export default class LoginList extends HTMLElement {
       oldSelectedItem.removeAttribute("aria-selected");
     }
     this.classList.toggle("create-login-selected", !listItem.dataset.guid);
+    this._createLoginButton.disabled = !listItem.dataset.guid;
     listItem.classList.add("selected");
     listItem.setAttribute("aria-selected", "true");
-    listItem.scrollIntoView();
     this._list.setAttribute("aria-activedescendant", listItem.id);
     this._selectedGuid = listItem.dataset.guid;
+
+    // Scroll item into view if it isn't visible
+    listItem.scrollIntoView({ block: "nearest" });
   }
 }
 customElements.define("login-list", LoginList);

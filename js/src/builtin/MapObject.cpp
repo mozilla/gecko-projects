@@ -124,18 +124,19 @@ HashableValue HashableValue::trace(JSTracer* trc) const {
 
 namespace {} /* anonymous namespace */
 
-static const ClassOps MapIteratorObjectClassOps = {nullptr, /* addProperty */
-                                                   nullptr, /* delProperty */
-                                                   nullptr, /* enumerate */
-                                                   nullptr, /* newEnumerate */
-                                                   nullptr, /* resolve */
-                                                   nullptr, /* mayResolve */
-                                                   MapIteratorObject::finalize};
+static const JSClassOps MapIteratorObjectClassOps = {
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* enumerate */
+    nullptr, /* newEnumerate */
+    nullptr, /* resolve */
+    nullptr, /* mayResolve */
+    MapIteratorObject::finalize};
 
 static const ClassExtension MapIteratorObjectClassExtension = {
     MapIteratorObject::objectMoved};
 
-const Class MapIteratorObject::class_ = {
+const JSClass MapIteratorObject::class_ = {
     "Map Iterator",
     JSCLASS_HAS_RESERVED_SLOTS(MapIteratorObject::SlotCount) |
         JSCLASS_FOREGROUND_FINALIZE | JSCLASS_SKIP_NURSERY_FINALIZE,
@@ -370,17 +371,17 @@ JSObject* MapIteratorObject::createResultPair(JSContext* cx) {
 
 /*** Map ********************************************************************/
 
-const ClassOps MapObject::classOps_ = {nullptr,  // addProperty
-                                       nullptr,  // delProperty
-                                       nullptr,  // enumerate
-                                       nullptr,  // newEnumerate
-                                       nullptr,  // resolve
-                                       nullptr,  // mayResolve
-                                       finalize,
-                                       nullptr,  // call
-                                       nullptr,  // hasInstance
-                                       nullptr,  // construct
-                                       trace};
+const JSClassOps MapObject::classOps_ = {nullptr,  // addProperty
+                                         nullptr,  // delProperty
+                                         nullptr,  // enumerate
+                                         nullptr,  // newEnumerate
+                                         nullptr,  // resolve
+                                         nullptr,  // mayResolve
+                                         finalize,
+                                         nullptr,  // call
+                                         nullptr,  // hasInstance
+                                         nullptr,  // construct
+                                         trace};
 
 const ClassSpec MapObject::classSpec_ = {
     GenericCreateConstructor<MapObject::construct, 0, gc::AllocKind::FUNCTION>,
@@ -391,14 +392,14 @@ const ClassSpec MapObject::classSpec_ = {
     MapObject::properties,
 };
 
-const Class MapObject::class_ = {
+const JSClass MapObject::class_ = {
     "Map",
     JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(MapObject::SlotCount) |
         JSCLASS_HAS_CACHED_PROTO(JSProto_Map) | JSCLASS_FOREGROUND_FINALIZE |
         JSCLASS_SKIP_NURSERY_FINALIZE,
     &MapObject::classOps_, &MapObject::classSpec_};
 
-const Class MapObject::protoClass_ = {
+const JSClass MapObject::protoClass_ = {
     js_Object_str, JSCLASS_HAS_CACHED_PROTO(JSProto_Map), JS_NULL_CLASS_OPS,
     &MapObject::classSpec_};
 
@@ -905,18 +906,19 @@ bool MapObject::clear(JSContext* cx, HandleObject obj) {
 
 /*** SetIterator ************************************************************/
 
-static const ClassOps SetIteratorObjectClassOps = {nullptr, /* addProperty */
-                                                   nullptr, /* delProperty */
-                                                   nullptr, /* enumerate */
-                                                   nullptr, /* newEnumerate */
-                                                   nullptr, /* resolve */
-                                                   nullptr, /* mayResolve */
-                                                   SetIteratorObject::finalize};
+static const JSClassOps SetIteratorObjectClassOps = {
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* enumerate */
+    nullptr, /* newEnumerate */
+    nullptr, /* resolve */
+    nullptr, /* mayResolve */
+    SetIteratorObject::finalize};
 
 static const ClassExtension SetIteratorObjectClassExtension = {
     SetIteratorObject::objectMoved};
 
-const Class SetIteratorObject::class_ = {
+const JSClass SetIteratorObject::class_ = {
     "Set Iterator",
     JSCLASS_HAS_RESERVED_SLOTS(SetIteratorObject::SlotCount) |
         JSCLASS_FOREGROUND_FINALIZE | JSCLASS_SKIP_NURSERY_FINALIZE,
@@ -1119,17 +1121,17 @@ JSObject* SetIteratorObject::createResult(JSContext* cx) {
 
 /*** Set ********************************************************************/
 
-const ClassOps SetObject::classOps_ = {nullptr,  // addProperty
-                                       nullptr,  // delProperty
-                                       nullptr,  // enumerate
-                                       nullptr,  // newEnumerate
-                                       nullptr,  // resolve
-                                       nullptr,  // mayResolve
-                                       finalize,
-                                       nullptr,  // call
-                                       nullptr,  // hasInstance
-                                       nullptr,  // construct
-                                       trace};
+const JSClassOps SetObject::classOps_ = {nullptr,  // addProperty
+                                         nullptr,  // delProperty
+                                         nullptr,  // enumerate
+                                         nullptr,  // newEnumerate
+                                         nullptr,  // resolve
+                                         nullptr,  // mayResolve
+                                         finalize,
+                                         nullptr,  // call
+                                         nullptr,  // hasInstance
+                                         nullptr,  // construct
+                                         trace};
 
 const ClassSpec SetObject::classSpec_ = {
     GenericCreateConstructor<SetObject::construct, 0, gc::AllocKind::FUNCTION>,
@@ -1140,7 +1142,7 @@ const ClassSpec SetObject::classSpec_ = {
     SetObject::properties,
 };
 
-const Class SetObject::class_ = {
+const JSClass SetObject::class_ = {
     "Set",
     JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(SetObject::SlotCount) |
         JSCLASS_HAS_CACHED_PROTO(JSProto_Set) | JSCLASS_FOREGROUND_FINALIZE |
@@ -1149,7 +1151,7 @@ const Class SetObject::class_ = {
     &SetObject::classSpec_,
 };
 
-const Class SetObject::protoClass_ = {
+const JSClass SetObject::protoClass_ = {
     js_Object_str, JSCLASS_HAS_CACHED_PROTO(JSProto_Set), JS_NULL_CLASS_OPS,
     &SetObject::classSpec_};
 

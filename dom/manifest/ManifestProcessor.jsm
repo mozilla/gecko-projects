@@ -18,7 +18,6 @@
  * TODO: The constructor should accept the UA's supported orientations.
  * TODO: The constructor should accept the UA's supported display modes.
  */
-/* globals Components, ValueExtractor, ImageObjectProcessor, ConsoleAPI*/
 "use strict";
 
 const { XPCOMUtils } = ChromeUtils.import(
@@ -94,7 +93,9 @@ var ManifestProcessor = {
     let rawManifest = {};
     try {
       rawManifest = JSON.parse(jsonText);
-    } catch (e) {}
+    } catch (e) {
+      errors.push({ type: "json", error: e.message });
+    }
     if (rawManifest === null) {
       return null;
     }

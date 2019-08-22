@@ -509,7 +509,7 @@ class CGDOMJSClass(CGThing):
 
         return fill(
             """
-            static const js::ClassOps sClassOps = {
+            static const JSClassOps sClassOps = {
               ${addProperty}, /* addProperty */
               nullptr,               /* delProperty */
               nullptr,               /* enumerate */
@@ -781,7 +781,7 @@ class CGInterfaceObjectJSClass(CGThing):
         else:
             ret = fill(
                 """
-                static const js::ClassOps sInterfaceObjectClassOps = {
+                static const JSClassOps sInterfaceObjectClassOps = {
                     nullptr,               /* addProperty */
                     nullptr,               /* delProperty */
                     nullptr,               /* enumerate */
@@ -2932,7 +2932,7 @@ class CGNativeProperties(CGList):
                 post = fill(
                     """
                     $*{post}
-                    static_assert(${propertyInfoCount} < 1ull << CHAR_BIT * sizeof(${name}.propertyInfoCount),
+                    static_assert(${propertyInfoCount} < 1ull << (CHAR_BIT * sizeof(${name}.propertyInfoCount)),
                         "We have a property info count that is oversized");
                     """,
                     post=post,

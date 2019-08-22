@@ -24,7 +24,30 @@ var Services = require("Services");
 var ChromeUtils = require("ChromeUtils");
 var { gDevTools } = require("devtools/client/framework/devtools");
 var EventEmitter = require("devtools/shared/event-emitter");
+const Selection = require("devtools/client/framework/selection");
 var Telemetry = require("devtools/client/shared/telemetry");
+const { getUnicodeUrl } = require("devtools/client/shared/unicode-url");
+var {
+  DOMHelpers,
+} = require("resource://devtools/client/shared/DOMHelpers.jsm");
+const { KeyCodes } = require("devtools/client/shared/keycodes");
+var Startup = Cc["@mozilla.org/devtools/startup-clh;1"].getService(
+  Ci.nsISupports
+).wrappedJSObject;
+
+const { BrowserLoader } = ChromeUtils.import(
+  "resource://devtools/client/shared/browser-loader.js"
+);
+loader.lazyRequireGetter(
+  this,
+  "NodePicker",
+  "devtools/client/inspector/node-picker"
+);
+
+const { LocalizationHelper } = require("devtools/shared/l10n");
+const L10N = new LocalizationHelper(
+  "devtools/client/locales/toolbox.properties"
+);
 
 loader.lazyRequireGetter(
   this,
@@ -38,25 +61,6 @@ loader.lazyRequireGetter(
   "devtools/client/framework/actions/index",
   true
 );
-
-const { getUnicodeUrl } = require("devtools/client/shared/unicode-url");
-var {
-  DOMHelpers,
-} = require("resource://devtools/client/shared/DOMHelpers.jsm");
-const { KeyCodes } = require("devtools/client/shared/keycodes");
-var Startup = Cc["@mozilla.org/devtools/startup-clh;1"].getService(
-  Ci.nsISupports
-).wrappedJSObject;
-
-const { BrowserLoader } = ChromeUtils.import(
-  "resource://devtools/client/shared/browser-loader.js"
-);
-
-const { LocalizationHelper } = require("devtools/shared/l10n");
-const L10N = new LocalizationHelper(
-  "devtools/client/locales/toolbox.properties"
-);
-
 loader.lazyRequireGetter(
   this,
   "AppConstants",
@@ -196,6 +200,7 @@ function Toolbox(
   this._target = target;
   this._win = contentWindow;
   this.frameId = frameId;
+  this.selection = new Selection();
   this.telemetry = new Telemetry();
 
   // The session ID is used to determine which telemetry events belong to which
@@ -237,8 +242,6 @@ function Toolbox(
   this._splitConsoleOnKeypress = this._splitConsoleOnKeypress.bind(this);
   this.closeToolbox = this.closeToolbox.bind(this);
   this.destroy = this.destroy.bind(this);
-  this._highlighterReady = this._highlighterReady.bind(this);
-  this._highlighterHidden = this._highlighterHidden.bind(this);
   this._applyCacheSettings = this._applyCacheSettings.bind(this);
   this._applyServiceWorkersTestingSettings = this._applyServiceWorkersTestingSettings.bind(
     this
@@ -257,6 +260,8 @@ function Toolbox(
   this._onPickerStarted = this._onPickerStarted.bind(this);
   this._onPickerStopped = this._onPickerStopped.bind(this);
   this._onPickerCanceled = this._onPickerCanceled.bind(this);
+  this._onPickerPicked = this._onPickerPicked.bind(this);
+  this._onPickerPreviewed = this._onPickerPreviewed.bind(this);
   this._onInspectObject = this._onInspectObject.bind(this);
   this._onNewSelectedNodeFront = this._onNewSelectedNodeFront.bind(this);
   this._onToolSelected = this._onToolSelected.bind(this);
@@ -300,6 +305,8 @@ function Toolbox(
 
   this.on("host-changed", this._refreshHostTitle);
   this.on("select", this._onToolSelected);
+
+  this.selection.on("new-node-front", this._onNewSelectedNodeFront);
 
   gDevTools.on("tool-registered", this._toolRegistered);
   gDevTools.on("tool-unregistered", this._toolUnregistered);
@@ -527,14 +534,6 @@ Toolbox.prototype = {
    */
   get walker() {
     return this._walker;
-  },
-
-  /**
-   * Get the toolbox's node selection. Note that it may not always have been
-   * initialized first. Use `initInspector()` if needed.
-   */
-  get selection() {
-    return this._selection;
   },
 
   /**
@@ -766,7 +765,7 @@ Toolbox.prototype = {
       if (Services.prefs.getBoolPref(SPLITCONSOLE_ENABLED_PREF)) {
         splitConsolePromise = this.openSplitConsole();
         this.telemetry.addEventProperty(
-          this.win,
+          this.topWindow,
           "open",
           "tools",
           null,
@@ -775,7 +774,7 @@ Toolbox.prototype = {
         );
       } else {
         this.telemetry.addEventProperty(
-          this.win,
+          this.topWindow,
           "open",
           "tools",
           null,
@@ -1296,7 +1295,7 @@ Toolbox.prototype = {
     const currentTheme = Services.prefs.getCharPref("devtools.theme");
     this.telemetry.keyedScalarAdd(CURRENT_THEME_SCALAR, currentTheme, 1);
 
-    const browserWin = this.win.top;
+    const browserWin = this.topWindow;
     this.telemetry.preparePendingEvent(browserWin, "open", "tools", null, [
       "entrypoint",
       "first_panel",
@@ -1773,7 +1772,7 @@ Toolbox.prototype = {
       if (!this.inspectorFront) {
         await this.initInspector();
       }
-      this.inspectorFront.nodePicker.togglePicker(focus);
+      this.nodePicker.togglePicker(focus);
     }
   },
 
@@ -1787,7 +1786,7 @@ Toolbox.prototype = {
       if (currentPanel.cancelPicker) {
         currentPanel.cancelPicker();
       } else {
-        this.inspectorFront.nodePicker.cancel();
+        this.nodePicker.cancel();
       }
       // Stop the console from toggling.
       event.stopImmediatePropagation();
@@ -1798,7 +1797,7 @@ Toolbox.prototype = {
     this.tellRDMAboutPickerState(true);
     this.pickerButton.isChecked = true;
     await this.selectTool("inspector", "inspect_dom");
-    this.on("select", this.inspectorFront.nodePicker.stop);
+    this.on("select", this.nodePicker.stop);
   },
 
   _onPickerStarted: async function() {
@@ -1808,9 +1807,27 @@ Toolbox.prototype = {
 
   _onPickerStopped: function() {
     this.tellRDMAboutPickerState(false);
-    this.off("select", this.inspectorFront.nodePicker.stop);
+    this.off("select", this.nodePicker.stop);
     this.doc.removeEventListener("keypress", this._onPickerKeypress, true);
     this.pickerButton.isChecked = false;
+  },
+
+  /**
+   * When the picker is canceled, make sure the toolbox
+   * gets the focus.
+   */
+  _onPickerCanceled: function() {
+    if (this.hostType !== Toolbox.HostType.WINDOW) {
+      this.win.focus();
+    }
+  },
+
+  _onPickerPicked: function(nodeFront) {
+    this.selection.setNodeFront(nodeFront, { reason: "picker-node-picked" });
+  },
+
+  _onPickerPreviewed: function(nodeFront) {
+    this.selection.setNodeFront(nodeFront, { reason: "picker-node-previewed" });
   },
 
   /**
@@ -1832,16 +1849,6 @@ Toolbox.prototype = {
 
     const ui = ResponsiveUIManager.getResponsiveUIForTab(tab);
     await ui.emulationFront.setElementPickerState(state);
-  },
-
-  /**
-   * When the picker is canceled, make sure the toolbox
-   * gets the focus.
-   */
-  _onPickerCanceled: function() {
-    if (this.hostType !== Toolbox.HostType.WINDOW) {
-      this.win.focus();
-    }
   },
 
   /**
@@ -2569,7 +2576,7 @@ Toolbox.prototype = {
       });
     }
 
-    this.telemetry.addEventProperties(this.win, "open", "tools", null, {
+    this.telemetry.addEventProperties(this.topWindow, "open", "tools", null, {
       width: width,
       session_id: this.sessionId,
     });
@@ -3321,27 +3328,14 @@ Toolbox.prototype = {
         this._inspector = await this.target.getFront("inspector");
         this._walker = this.inspectorFront.walker;
         this._highlighter = this.inspectorFront.highlighter;
-        this._selection = this.inspectorFront.selection;
+        this.nodePicker = new NodePicker(this.target, this.selection);
 
-        this.inspectorFront.nodePicker.on(
-          "picker-starting",
-          this._onPickerStarting
-        );
-        this.inspectorFront.nodePicker.on(
-          "picker-started",
-          this._onPickerStarted
-        );
-        this.inspectorFront.nodePicker.on(
-          "picker-stopped",
-          this._onPickerStopped
-        );
-        this.inspectorFront.nodePicker.on(
-          "picker-node-canceled",
-          this._onPickerCanceled
-        );
-        this.walker.on("highlighter-ready", this._highlighterReady);
-        this.walker.on("highlighter-hide", this._highlighterHidden);
-        this._selection.on("new-node-front", this._onNewSelectedNodeFront);
+        this.nodePicker.on("picker-starting", this._onPickerStarting);
+        this.nodePicker.on("picker-started", this._onPickerStarted);
+        this.nodePicker.on("picker-stopped", this._onPickerStopped);
+        this.nodePicker.on("picker-node-canceled", this._onPickerCanceled);
+        this.nodePicker.on("picker-node-picked", this._onPickerPicked);
+        this.nodePicker.on("picker-node-previewed", this._onPickerPreviewed);
         registerWalkerListeners(this);
       }.bind(this)();
     }
@@ -3460,7 +3454,6 @@ Toolbox.prototype = {
 
     this._inspector = null;
     this._highlighter = null;
-    this._selection = null;
     this._walker = null;
   },
 
@@ -3628,7 +3621,10 @@ Toolbox.prototype = {
           .catch(console.error)
           .then(async () => {
             // Destroying the walker and inspector fronts
-            await this.destroyInspector();
+            this.destroyInspector();
+
+            this.selection.destroy();
+            this.selection = null;
 
             if (this._netMonitorAPI) {
               this._netMonitorAPI.destroy();
@@ -3702,14 +3698,6 @@ Toolbox.prototype = {
     await onceDestroyed;
 
     Services.obs.removeObserver(leakCheckObserver, topic);
-  },
-
-  _highlighterReady: function() {
-    this.emit("highlighter-ready");
-  },
-
-  _highlighterHidden: function() {
-    this.emit("highlighter-hide");
   },
 
   /**

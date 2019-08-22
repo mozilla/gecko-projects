@@ -60,54 +60,62 @@ add_task(async function test_login_item() {
       );
 
       let editButton = loginItem.shadowRoot.querySelector(".edit-button");
-      editButton.click();
-      await Promise.resolve();
 
-      usernameInput.value += "-undome";
-      passwordInput.value += "-undome";
+      async function test_discard_dialog(exitPoint) {
+        editButton.click();
+        await Promise.resolve();
 
-      let dialog = content.document.querySelector("confirmation-dialog");
-      ok(dialog.hidden, "Confirm dialog should initially be hidden");
+        usernameInput.value += "-undome";
+        passwordInput.value += "-undome";
+
+        let dialog = content.document.querySelector("confirmation-dialog");
+        ok(dialog.hidden, "Confirm dialog should initially be hidden");
+
+        exitPoint.click();
+
+        ok(!dialog.hidden, "Confirm dialog should be visible");
+
+        let confirmDiscardButton = dialog.shadowRoot.querySelector(
+          ".confirm-button"
+        );
+        await content.document.l10n.translateElements([
+          dialog.shadowRoot.querySelector(".title"),
+          dialog.shadowRoot.querySelector(".message"),
+          confirmDiscardButton,
+        ]);
+
+        confirmDiscardButton.click();
+
+        ok(dialog.hidden, "Confirm dialog should be hidden after confirming");
+
+        await Promise.resolve();
+        loginListItem.click();
+
+        await ContentTaskUtils.waitForCondition(
+          () => usernameInput.value == login.username
+        );
+
+        is(
+          usernameInput.value,
+          login.username,
+          "Username change should be reverted"
+        );
+        is(
+          passwordInput.value,
+          login.password,
+          "Password change should be reverted"
+        );
+        is(
+          passwordInput.style.width,
+          login.password.length + "ch",
+          "Password field width shouldn't have changed"
+        );
+      }
+
+      await test_discard_dialog(loginList._createLoginButton);
 
       let cancelButton = loginItem.shadowRoot.querySelector(".cancel-button");
-      cancelButton.click();
-
-      ok(!dialog.hidden, "Confirm dialog should be visible");
-
-      let confirmDiscardButton = dialog.shadowRoot.querySelector(
-        ".confirm-button"
-      );
-      await content.document.l10n.translateElements([
-        dialog.shadowRoot.querySelector(".title"),
-        dialog.shadowRoot.querySelector(".message"),
-        confirmDiscardButton,
-      ]);
-
-      confirmDiscardButton.click();
-
-      ok(dialog.hidden, "Confirm dialog should be hidden after confirming");
-
-      usernameInput = loginItem.shadowRoot.querySelector(
-        "input[name='username']"
-      );
-      passwordInput = loginItem.shadowRoot.querySelector(
-        "input[name='password']"
-      );
-
-      await ContentTaskUtils.waitForCondition(
-        () => usernameInput.value == login.username
-      );
-
-      is(
-        usernameInput.value,
-        login.username,
-        "Username change should be reverted"
-      );
-      is(
-        passwordInput.value,
-        login.password,
-        "Password change should be reverted"
-      );
+      await test_discard_dialog(cancelButton);
 
       editButton.click();
       await Promise.resolve();
@@ -122,12 +130,6 @@ add_task(async function test_login_item() {
       );
       saveChangesButton.click();
 
-      usernameInput = loginItem.shadowRoot.querySelector(
-        "input[name='username']"
-      );
-      passwordInput = loginItem.shadowRoot.querySelector(
-        "input[name='password']"
-      );
       await ContentTaskUtils.waitForCondition(() => {
         let guid = loginList._loginGuidsSortedOrder[0];
         let updatedLogin = loginList._logins[guid].login;
@@ -141,6 +143,11 @@ add_task(async function test_login_item() {
       ok(
         !loginItem.dataset.editing,
         "LoginItem should not be in 'edit' mode after saving"
+      );
+      is(
+        passwordInput.style.width,
+        passwordInput.value.length + "ch",
+        "Password field width should be correctly updated"
       );
 
       editButton.click();

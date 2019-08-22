@@ -94,6 +94,9 @@ convenience of Safari and Chrome users on macOS. See bug 1398988. -->
 <!ENTITY fullScreenExit.label "Exit Full Screen Mode">
 <!ENTITY fullScreenExit.accesskey "F">
 
+<!ENTITY pictureInPictureHideToggle.label "Hide Picture-in-Picture Toggle">
+<!ENTITY pictureInPictureHideToggle.accesskey "H">
+
 <!-- LOCALIZATION NOTE (fxa.menu) Used to define the different labels
      for the Firefox Account toolbar menu screen. The `Signed in as` text is
      followed by the user's email. -->
@@ -109,10 +112,6 @@ convenience of Safari and Chrome users on macOS. See bug 1398988. -->
 
 <!-- LOCALIZATION NOTE (fxa.service) Used to define the different FxA services
      for the Firefox Account toolbar menu screen.  -->
-<!ENTITY fxa.service.send.description "Upload and share files with end-to-end encryption plus a link that automatically expires.">
-<!ENTITY fxa.service.send.launch "Launch &sendShortName;">
-<!ENTITY fxa.service.monitor.description "Check if your email has appeared in a data breach and get alerted if it appears in a new breach.">
-<!ENTITY fxa.service.monitor.launch "Launch &monitorShortName;">
 <!ENTITY fxa.service.sendTab.description "Send a tab instantly to any device you’re signed in on.">
 
 <!-- LOCALIZATION NOTE (fullscreenWarning.beforeDomain.label,
@@ -428,26 +427,11 @@ convenience of Safari and Chrome users on macOS. See bug 1398988. -->
 <!ENTITY searchInput.placeholder      "Search">
 <!ENTITY searchIcon.tooltip           "Search">
 
-<!-- LOCALIZATION NOTE (searchFor.label, searchWith.label):
-     These two strings are used to build the header above the list of one-click
-     search providers:  "Search for <used typed keywords> with:" -->
-<!ENTITY searchFor.label              "Search for ">
-<!ENTITY searchWith.label             " with:">
+<!-- LOCALIZATION NOTE (searchWithDesc.label):
+     This string prompts the user to use the list of one-click search engines in
+     the Urlbar and searchbar. -->
+<!ENTITY searchWithDesc.label         "This time, search with:">
 
-<!-- LOCALIZATION NOTE (search.label, searchAfter.label):
-     This string is used to build the header above the list of one-click search
-     providers when a one off engine has been selected.  The searchAfter text is
-     intentionally left empty for en-US and can be used by other localizations to
-     display a string after the search engine name.  This string will be displayed
-     as:  "Search <selected engine name><searchAfter.label text>" -->
-<!ENTITY search.label                 "Search ">
-<!ENTITY searchAfter.label            "">
-
-<!-- LOCALIZATION NOTE (searchWithHeader.label):
-     The wording of this string should be as close as possible to
-     searchFor.label and searchWith.label. This string will be used instead of
-     them when the user has not typed any keyword. -->
-<!ENTITY searchWithHeader.label       "Search with:">
 <!-- LOCALIZATION NOTE (changeSearchSettings.button):
      This string won't wrap, so if the translated string is longer,
      consider translating it as if it said only "Search Settings". -->
@@ -765,8 +749,18 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY protections.siteNotWorkingView.siteStillBroken.label "Site still broken after turning off protections?">
 <!ENTITY protections.siteNotWorkingView.sendReport.label "Send a report">
 
-<!ENTITY protections.blocking.label "Blocking">
-<!ENTITY protections.notBlocking.label "Not Blocking">
+<!-- LOCALIZATION NOTE (protections.blocking2.label, protections.notBlocking2.label, protections.notFound.label):
+     In the protections panel, Content Blocking category items are in three sections:
+     "Blocked" for categories being blocked in the current page,
+     "Allowed" for categories detected but not blocked in the current page, and
+     "None Detected" for categories not detected in the current page.
+     These strings are used in the header labels of each of these sections. -->
+<!ENTITY protections.blocking2.label "Blocked">
+<!ENTITY protections.notBlocking2.label "Allowed">
+<!ENTITY protections.notFound.label "None Detected">
+<!-- LOCALIZATION NOTE (protections.notBlocking.why.label, protections.notBlocking.why.etp*.tooltip):
+     The "Allowed" header also includes a "Why?" link that, when hovered, shows
+     a tooltip explaining why these items were not blocked in the page. -->
 <!ENTITY protections.notBlocking.why.label "Why?">
 <!ENTITY protections.notBlocking.why.etpOn.tooltip "Blocking these could break elements of some websites. Without trackers, some buttons, forms, and login fields might not work.">
 <!ENTITY protections.notBlocking.why.etpOff.tooltip "Turning off protections will allow all trackers on this site. It may also improve some website functionality.">
@@ -809,8 +803,6 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 
 <!ENTITY contentBlocking.manageSettings2.label "Manage Protection Settings">
 <!ENTITY contentBlocking.manageSettings.accesskey "M">
-
-<!ENTITY contentBlocking.trackersView.strictInfo.label "To block all trackers, set content blocking to “Strict”.">
 
 <!ENTITY contentBlocking.socialblock.label "Social Media Trackers">
 

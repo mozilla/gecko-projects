@@ -65,6 +65,9 @@ export default class LoginItem extends HTMLElement {
     this._timeChanged = this.shadowRoot.querySelector(".time-changed");
     this._timeUsed = this.shadowRoot.querySelector(".time-used");
     this._breachAlert = this.shadowRoot.querySelector(".breach-alert");
+    this._dismissBreachAlert = this.shadowRoot.querySelector(
+      ".dismiss-breach-alert"
+    );
 
     this.render();
 
@@ -73,6 +76,7 @@ export default class LoginItem extends HTMLElement {
     this._copyPasswordButton.addEventListener("click", this);
     this._copyUsernameButton.addEventListener("click", this);
     this._deleteButton.addEventListener("click", this);
+    this._dismissBreachAlert.addEventListener("click", this);
     this._editButton.addEventListener("click", this);
     this._form.addEventListener("submit", this);
     this._openSiteButton.addEventListener("click", this);
@@ -92,6 +96,10 @@ export default class LoginItem extends HTMLElement {
         ".breach-alert-link"
       );
       breachAlertLink.href = breachDetails.breachAlertURL;
+      document.l10n.setAttributes(
+        this._dismissBreachAlert,
+        "breach-alert-dismiss"
+      );
       this._breachAlert.hidden = false;
     }
     document.l10n.setAttributes(this._timeCreated, "login-item-time-created", {
@@ -135,6 +143,15 @@ export default class LoginItem extends HTMLElement {
     this.render();
   }
 
+  dismissBreachAlert() {
+    document.dispatchEvent(
+      new CustomEvent("AboutLoginsDismissBreachAlert", {
+        bubbles: true,
+        detail: this._login,
+      })
+    );
+  }
+
   async handleEvent(event) {
     switch (event.type) {
       case "AboutLoginsInitialLoginSelected": {
@@ -146,27 +163,11 @@ export default class LoginItem extends HTMLElement {
         break;
       }
       case "AboutLoginsLoginSelected": {
-        let login = event.detail;
-        if (this.hasPendingChanges()) {
-          event.preventDefault();
-          this.showConfirmationDialog("discard-changes", () => {
-            // Clear any pending changes
-            this.setLogin(login);
-
-            window.dispatchEvent(
-              new CustomEvent("AboutLoginsLoginSelected", {
-                detail: login,
-                cancelable: true,
-              })
-            );
-          });
-        } else {
-          this.setLogin(login);
-        }
+        this.confirmPendingChangesOnEvent(event, event.detail);
         break;
       }
       case "AboutLoginsShowBlankLogin": {
-        this.setLogin({});
+        this.confirmPendingChangesOnEvent(event, {});
         break;
       }
       case "blur": {
@@ -267,6 +268,10 @@ export default class LoginItem extends HTMLElement {
           });
           return;
         }
+        if (classList.contains("dismiss-breach-alert")) {
+          this.dismissBreachAlert();
+          return;
+        }
         if (classList.contains("edit-button")) {
           this._toggleEditing();
 
@@ -319,6 +324,31 @@ export default class LoginItem extends HTMLElement {
           recordTelemetryEvent({ object: "new_login", method: "save" });
         }
       }
+    }
+  }
+
+  /**
+   * Helper to show the "Discard changes" confirmation dialog and delay the
+   * received event after confirmation.
+   * @param {object} event The event to be delayed.
+   * @param {object} login The login to be shown on confirmation.
+   */
+  confirmPendingChangesOnEvent(event, login) {
+    if (this.hasPendingChanges()) {
+      event.preventDefault();
+      this.showConfirmationDialog("discard-changes", () => {
+        // Clear any pending changes
+        this.setLogin(login);
+
+        window.dispatchEvent(
+          new CustomEvent(event.type, {
+            detail: login,
+            cancelable: false,
+          })
+        );
+      });
+    } else {
+      this.setLogin(login);
     }
   }
 
@@ -451,8 +481,8 @@ export default class LoginItem extends HTMLElement {
       return;
     }
 
-    this._toggleEditing(false);
     this._login = login;
+    this._toggleEditing(false);
     this.render();
   }
 
@@ -468,8 +498,8 @@ export default class LoginItem extends HTMLElement {
       return;
     }
 
-    this._toggleEditing(false);
     this._login = {};
+    this._toggleEditing(false);
     this.render();
   }
 

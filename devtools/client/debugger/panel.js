@@ -3,9 +3,6 @@
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const { LocalizationHelper } = require("devtools/shared/l10n");
-const {
-  gDevToolsBrowser,
-} = require("devtools/client/framework/devtools-browser");
 loader.lazyRequireGetter(
   this,
   "openContentLink",
@@ -77,10 +74,6 @@ DebuggerPanel.prototype = {
 
   openLink: function(url) {
     openContentLink(url);
-  },
-
-  openWorkerToolbox: function(workerTargetFront) {
-    return gDevToolsBrowser.openWorkerToolbox(workerTargetFront, "jsdebugger");
   },
 
   openConsoleAndEvaluate: async function(input) {
@@ -160,9 +153,14 @@ DebuggerPanel.prototype = {
     return this._actions.selectSourceURL(cx, url, { line, column });
   },
 
-  selectSource(sourceId, line, column) {
+  async selectSource(sourceId, line, column) {
     const cx = this._selectors.getContext(this._getState());
-    return this._actions.selectSource(cx, sourceId, { line, column });
+    const location = { sourceId, line, column };
+
+    await this._actions.selectSource(cx, sourceId, location);
+    if (this._selectors.hasLogpoint(this._getState(), location)) {
+      this._actions.openConditionalPanel(location, true);
+    }
   },
 
   canLoadSource(sourceId) {

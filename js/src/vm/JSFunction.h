@@ -315,7 +315,7 @@ class FunctionFlags {
 
 class JSFunction : public js::NativeObject {
  public:
-  static const js::Class class_;
+  static const JSClass class_;
 
  private:
   /*
@@ -551,7 +551,7 @@ class JSFunction : public js::NativeObject {
   JSAtom* infallibleGetUnresolvedName(JSContext* cx);
 
   static bool getUnresolvedName(JSContext* cx, js::HandleFunction fun,
-                                js::MutableHandleString v);
+                                js::MutableHandleValue v);
 
   static JSLinearString* getBoundFunctionName(JSContext* cx,
                                               js::HandleFunction fun);
@@ -1233,7 +1233,7 @@ XDRResult XDRInterpretedFunction(XDRState<mode>* xdr,
  * is what was called.
  */
 extern void ReportIncompatibleMethod(JSContext* cx, const CallArgs& args,
-                                     const Class* clasp);
+                                     const JSClass* clasp);
 
 /*
  * Report an error that call.thisv is not an acceptable this for the callee

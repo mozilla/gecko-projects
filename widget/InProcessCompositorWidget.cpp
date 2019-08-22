@@ -44,6 +44,10 @@ void InProcessCompositorWidget::PostRender(WidgetRenderingContext* aContext) {
   mWidget->PostRender(aContext);
 }
 
+void InProcessCompositorWidget::DoCompositorCleanup() {
+  mWidget->DoCompositorCleanup();
+}
+
 void InProcessCompositorWidget::DrawWindowUnderlay(
     WidgetRenderingContext* aContext, LayoutDeviceIntRect aRect) {
   mWidget->DrawWindowUnderlay(aContext, aRect);
@@ -70,7 +74,7 @@ void InProcessCompositorWidget::EndRemoteDrawing() {
 }
 
 void InProcessCompositorWidget::EndRemoteDrawingInRegion(
-    gfx::DrawTarget* aDrawTarget, LayoutDeviceIntRegion& aInvalidRegion) {
+    gfx::DrawTarget* aDrawTarget, const LayoutDeviceIntRegion& aInvalidRegion) {
   mWidget->EndRemoteDrawingInRegion(aDrawTarget, aInvalidRegion);
 }
 

@@ -1441,12 +1441,14 @@ nsresult ProcessXCTO(nsHttpChannel* aChannel, nsIURI* aURI,
                            Report::Error);
     return NS_ERROR_CORRUPTED_CONTENT;
   }
+
   auto policyType = aLoadInfo->GetExternalContentPolicyType();
-  if (policyType == nsIContentPolicy::TYPE_DOCUMENT ||
-      policyType == nsIContentPolicy::TYPE_SUBDOCUMENT) {
+  if ((policyType == nsIContentPolicy::TYPE_DOCUMENT ||
+       policyType == nsIContentPolicy::TYPE_SUBDOCUMENT) &&
+      gHttpHandler->IsDocumentNosniffEnabled()) {
     // If the header XCTO nosniff is set for any browsing context, then
     // we set the skipContentSniffing flag on the Loadinfo. Within
-    // NS_SniffContent we then bail early and do not do any sniffing.
+    // GetMIMETypeFromContent we then bail early and do not do any sniffing.
     aLoadInfo->SetSkipContentSniffing(true);
     return NS_OK;
   }
@@ -7679,8 +7681,10 @@ nsHttpChannel::OnStartRequest(nsIRequest* request) {
              "Unexpected request");
 
   MOZ_ASSERT(mRaceCacheWithNetwork || !(mTransactionPump && mCachePump) ||
-                 mCachedContentIsPartial,
-             "If we have both pumps, the cache content must be partial");
+                 mCachedContentIsPartial || mTransactionReplaced,
+             "If we have both pumps, we're racing cache with network, the cache"
+             " content is partial, or the cache entry was revalidated and "
+             "OnStopRequest was not called yet for the transaction pump.");
 
   mAfterOnStartRequestBegun = true;
   if (mOnStartRequestTimestamp.IsNull()) {
@@ -10360,15 +10364,15 @@ void nsHttpChannel::ReEvaluateReferrerAfterTrackingStatusIsKnown() {
     // tracking channel, we may need to set our referrer with referrer policy
     // once again to ensure our defaults properly take effect now.
     if (mReferrerInfo) {
-      dom::ReferrerInfo* referrerInfo =
-          static_cast<dom::ReferrerInfo*>(mReferrerInfo.get());
+      ReferrerInfo* referrerInfo =
+          static_cast<ReferrerInfo*>(mReferrerInfo.get());
 
       if (referrerInfo->IsPolicyOverrided() &&
-          referrerInfo->GetReferrerPolicy() ==
+          referrerInfo->ReferrerPolicy() ==
               ReferrerInfo::GetDefaultReferrerPolicy(nullptr, nullptr,
                                                      isPrivate)) {
         nsCOMPtr<nsIReferrerInfo> newReferrerInfo =
-            referrerInfo->CloneWithNewPolicy(RP_Unset);
+            referrerInfo->CloneWithNewPolicy(ReferrerPolicy::_empty);
         SetReferrerInfo(newReferrerInfo, false, true);
       }
     }

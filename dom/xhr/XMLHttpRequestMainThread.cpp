@@ -2013,7 +2013,7 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request) {
 
     // the spec requires the response document.referrer to be the empty string
     nsCOMPtr<nsIReferrerInfo> referrerInfo =
-        new ReferrerInfo(nullptr, true, mResponseXML->GetReferrerPolicy());
+        new ReferrerInfo(nullptr, mResponseXML->ReferrerPolicy());
     mResponseXML->SetReferrerInfo(referrerInfo);
 
     mXMLParserStreamListener = listener;
@@ -2426,12 +2426,8 @@ void XMLHttpRequestMainThread::MaybeLowerChannelPriority() {
   }
 
   JSContext* cx = jsapi.cx();
-  nsAutoCString fileNameString;
-  if (!nsJSUtils::GetCallingLocation(cx, fileNameString)) {
-    return;
-  }
 
-  if (!doc->IsScriptTracking(fileNameString)) {
+  if (!doc->IsScriptTracking(cx)) {
     return;
   }
 
@@ -2858,7 +2854,7 @@ nsresult XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
 
   mIsMappedArrayBuffer = false;
   if (mResponseType == XMLHttpRequestResponseType::Arraybuffer &&
-      IsMappedArrayBufferEnabled()) {
+      StaticPrefs::dom_mapped_arraybuffer_enabled()) {
     nsCOMPtr<nsIURI> uri;
     nsAutoCString scheme;
 
@@ -2952,20 +2948,6 @@ nsresult XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
   }
 
   return rv;
-}
-
-/* static */
-bool XMLHttpRequestMainThread::IsMappedArrayBufferEnabled() {
-  static bool sMappedArrayBufferAdded = false;
-  static bool sIsMappedArrayBufferEnabled;
-
-  if (!sMappedArrayBufferAdded) {
-    Preferences::AddBoolVarCache(&sIsMappedArrayBufferEnabled,
-                                 "dom.mapped_arraybuffer.enabled", true);
-    sMappedArrayBufferAdded = true;
-  }
-
-  return sIsMappedArrayBufferEnabled;
 }
 
 // http://dvcs.w3.org/hg/xhr/raw-file/tip/Overview.html#dom-xmlhttprequest-setrequestheader

@@ -5885,29 +5885,20 @@ exports.CSS_PROPERTIES = {
     ],
     "supports": [],
     "values": [
-      "-moz-box",
-      "-moz-deck",
-      "-moz-grid",
-      "-moz-grid-group",
-      "-moz-grid-line",
-      "-moz-groupbox",
-      "-moz-inline-box",
-      "-moz-inline-grid",
-      "-moz-inline-stack",
-      "-moz-popup",
-      "-moz-stack",
       "-webkit-box",
-      "-webkit-flex",
       "-webkit-inline-box",
-      "-webkit-inline-flex",
       "block",
+      "block ruby",
       "contents",
       "flex",
       "flow-root",
+      "flow-root list-item",
       "grid",
       "inherit",
       "initial",
       "inline",
+      "inline flow-root list-item",
+      "inline list-item",
       "inline-block",
       "inline-flex",
       "inline-grid",
@@ -9922,6 +9913,7 @@ exports.CSS_PROPERTIES = {
       "dashed",
       "dotted",
       "double",
+      "from-font",
       "hsl",
       "hsla",
       "inherit",
@@ -9979,6 +9971,21 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "text-decoration-skip-ink": {
+    "isInherited": true,
+    "subproperties": [
+      "text-decoration-skip-ink"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "none",
+      "revert",
+      "unset"
+    ]
+  },
   "text-decoration-style": {
     "isInherited": false,
     "subproperties": [
@@ -9996,6 +10003,21 @@ exports.CSS_PROPERTIES = {
       "solid",
       "unset",
       "wavy"
+    ]
+  },
+  "text-decoration-thickness": {
+    "isInherited": false,
+    "subproperties": [
+      "text-decoration-thickness"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "from-font",
+      "inherit",
+      "initial",
+      "revert",
+      "unset"
     ]
   },
   "text-emphasis": {
@@ -10209,6 +10231,21 @@ exports.CSS_PROPERTIES = {
       "revert",
       "unset",
       "uppercase"
+    ]
+  },
+  "text-underline-offset": {
+    "isInherited": true,
+    "subproperties": [
+      "text-underline-offset"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "from-font",
+      "inherit",
+      "initial",
+      "revert",
+      "unset"
     ]
   },
   "top": {

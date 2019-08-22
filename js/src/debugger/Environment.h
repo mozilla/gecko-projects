@@ -26,8 +26,6 @@ struct JSContext;
 namespace js {
 
 class GlobalObject;
-struct Class;
-struct ClassOps;
 
 enum class DebuggerEnvironmentType { Declarative, With, Object };
 
@@ -37,7 +35,7 @@ class DebuggerEnvironment : public NativeObject {
 
   static const unsigned RESERVED_SLOTS = 1;
 
-  static const Class class_;
+  static const JSClass class_;
 
   static NativeObject* initClass(JSContext* cx, Handle<GlobalObject*> global,
                                  HandleObject dbgCtor);
@@ -45,7 +43,7 @@ class DebuggerEnvironment : public NativeObject {
                                      HandleObject referent,
                                      HandleNativeObject debugger);
 
-  static void trace(JSTracer* trc, JSObject* obj);
+  void trace(JSTracer* trc);
 
   DebuggerEnvironmentType type() const;
   mozilla::Maybe<ScopeKind> scopeKind() const;
@@ -73,7 +71,7 @@ class DebuggerEnvironment : public NativeObject {
                                        HandleId id, HandleValue value);
 
  private:
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static const JSPropertySpec properties_[];
   static const JSFunctionSpec methods_[];

@@ -6,8 +6,12 @@
 
 #include "ServiceWorkerPrivate.h"
 
+#include <utility>
+
 #include "ServiceWorkerCloneData.h"
 #include "ServiceWorkerManager.h"
+#include "ServiceWorkerPrivateImpl.h"
+#include "ServiceWorkerUtils.h"
 #include "nsContentUtils.h"
 #include "nsICacheInfoChannel.h"
 #include "nsIHttpChannelInternal.h"
@@ -40,8 +44,11 @@
 #include "mozilla/dom/WorkerRunnable.h"
 #include "mozilla/dom/WorkerScope.h"
 #include "mozilla/dom/ipc/StructuredCloneData.h"
+#include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/net/CookieSettings.h"
 #include "mozilla/net/NeckoChannelParams.h"
+#include "mozilla/Services.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/Unused.h"
 #include "nsIReferrerInfo.h"
@@ -68,26 +75,17 @@ NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(ServiceWorkerPrivate, Release)
 // still be a valid value since it was set prior to dispatching the runnable.
 Atomic<uint32_t> gDOMDisableOpenClickDelay(0);
 
-// Used to keep track of pending waitUntil as well as in-flight extendable
-// events. When the last token is released, we attempt to terminate the worker.
-class KeepAliveToken final : public nsISupports {
- public:
-  NS_DECL_ISUPPORTS
+KeepAliveToken::KeepAliveToken(ServiceWorkerPrivate* aPrivate)
+    : mPrivate(aPrivate) {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aPrivate);
+  mPrivate->AddToken();
+}
 
-  explicit KeepAliveToken(ServiceWorkerPrivate* aPrivate) : mPrivate(aPrivate) {
-    MOZ_ASSERT(NS_IsMainThread());
-    MOZ_ASSERT(aPrivate);
-    mPrivate->AddToken();
-  }
-
- private:
-  ~KeepAliveToken() {
-    MOZ_ASSERT(NS_IsMainThread());
-    mPrivate->ReleaseToken();
-  }
-
-  RefPtr<ServiceWorkerPrivate> mPrivate;
-};
+KeepAliveToken::~KeepAliveToken() {
+  MOZ_ASSERT(NS_IsMainThread());
+  mPrivate->ReleaseToken();
+}
 
 NS_IMPL_ISUPPORTS0(KeepAliveToken)
 
@@ -98,11 +96,25 @@ ServiceWorkerPrivate::ServiceWorkerPrivate(ServiceWorkerInfo* aInfo)
 
   mIdleWorkerTimer = NS_NewTimer();
   MOZ_ASSERT(mIdleWorkerTimer);
+
+  if (ServiceWorkerParentInterceptEnabled()) {
+    RefPtr<ServiceWorkerPrivateImpl> inner = new ServiceWorkerPrivateImpl(this);
+
+    // Assert in all debug builds as well as non-debug Nightly and Dev Edition.
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    MOZ_DIAGNOSTIC_ASSERT(NS_SUCCEEDED(inner->Initialize()));
+#else
+    MOZ_ALWAYS_SUCCEEDS(inner->Initialize());
+#endif
+
+    mInner = inner.forget();
+  }
 }
 
 ServiceWorkerPrivate::~ServiceWorkerPrivate() {
   MOZ_ASSERT(!mWorkerPrivate);
   MOZ_ASSERT(!mTokenCount);
+  MOZ_ASSERT(!mInner);
   MOZ_ASSERT(!mInfo);
   MOZ_ASSERT(mSupportsArray.IsEmpty());
   MOZ_ASSERT(mIdlePromiseHolder.IsEmpty());
@@ -189,6 +201,12 @@ class CheckScriptEvaluationWithCallback final : public WorkerRunnable {
 
 nsresult ServiceWorkerPrivate::CheckScriptEvaluation(
     LifeCycleEventCallback* aScriptEvaluationCallback) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (mInner) {
+    return mInner->CheckScriptEvaluation(aScriptEvaluationCallback);
+  }
+
   nsresult rv = SpawnWorkerIfNeeded(LifeCycleEvent);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -203,15 +221,6 @@ nsresult ServiceWorkerPrivate::CheckScriptEvaluation(
 }
 
 namespace {
-
-enum ExtendableEventResult { Rejected = 0, Resolved };
-
-class ExtendableEventCallback {
- public:
-  virtual void FinishedWithResult(ExtendableEventResult aResult) = 0;
-
-  NS_INLINE_DECL_PURE_VIRTUAL_REFCOUNTING
-};
 
 class KeepAliveHandler final : public ExtendableEvent::ExtensionsHandler,
                                public PromiseNativeHandler {
@@ -516,6 +525,10 @@ nsresult ServiceWorkerPrivate::SendMessageEvent(
     const ClientInfoAndState& aClientInfoAndState) {
   MOZ_ASSERT(NS_IsMainThread());
 
+  if (mInner) {
+    return mInner->SendMessageEvent(std::move(aData), aClientInfoAndState);
+  }
+
   nsresult rv = SpawnWorkerIfNeeded(MessageEvent);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -724,6 +737,12 @@ bool LifecycleEventWorkerRunnable::DispatchLifecycleEvent(
 
 nsresult ServiceWorkerPrivate::SendLifeCycleEvent(
     const nsAString& aEventType, LifeCycleEventCallback* aCallback) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (mInner) {
+    return mInner->SendLifeCycleEvent(aEventType, aCallback);
+  }
+
   nsresult rv = SpawnWorkerIfNeeded(LifeCycleEvent);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -884,6 +903,12 @@ class SendPushSubscriptionChangeEventRunnable final
 nsresult ServiceWorkerPrivate::SendPushEvent(
     const nsAString& aMessageId, const Maybe<nsTArray<uint8_t>>& aData,
     ServiceWorkerRegistrationInfo* aRegistration) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (mInner) {
+    return mInner->SendPushEvent(aRegistration, aMessageId, aData);
+  }
+
   nsresult rv = SpawnWorkerIfNeeded(PushEvent);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -911,6 +936,12 @@ nsresult ServiceWorkerPrivate::SendPushEvent(
 }
 
 nsresult ServiceWorkerPrivate::SendPushSubscriptionChangeEvent() {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (mInner) {
+    return mInner->SendPushSubscriptionChangeEvent();
+  }
+
   nsresult rv = SpawnWorkerIfNeeded(PushSubscriptionChangeEvent);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1126,6 +1157,8 @@ nsresult ServiceWorkerPrivate::SendNotificationEvent(
     const nsAString& aDir, const nsAString& aLang, const nsAString& aBody,
     const nsAString& aTag, const nsAString& aIcon, const nsAString& aData,
     const nsAString& aBehavior, const nsAString& aScope) {
+  MOZ_ASSERT(NS_IsMainThread());
+
   WakeUpReason why;
   if (aEventName.EqualsLiteral(NOTIFICATION_CLICK_EVENT_NAME)) {
     why = NotificationClickEvent;
@@ -1136,6 +1169,12 @@ nsresult ServiceWorkerPrivate::SendNotificationEvent(
   } else {
     MOZ_ASSERT_UNREACHABLE("Invalid notification event name");
     return NS_ERROR_FAILURE;
+  }
+
+  if (mInner) {
+    return mInner->SendNotificationEvent(aEventName, aID, aTitle, aDir, aLang,
+                                         aBody, aTag, aIcon, aData, aBehavior,
+                                         aScope, gDOMDisableOpenClickDelay);
   }
 
   nsresult rv = SpawnWorkerIfNeeded(why);
@@ -1177,7 +1216,7 @@ class FetchEventRunnable : public ExtendableFunctionalEventWorkerRunnable,
   nsContentPolicyType mContentPolicyType;
   nsCOMPtr<nsIInputStream> mUploadStream;
   int64_t mUploadStreamContentLength;
-  nsCString mReferrer;
+  nsString mReferrer;
   ReferrerPolicy mReferrerPolicy;
   nsString mIntegrity;
   const bool mIsNonSubresourceRequest;
@@ -1210,7 +1249,7 @@ class FetchEventRunnable : public ExtendableFunctionalEventWorkerRunnable,
         mRequestCredentials(RequestCredentials::Same_origin),
         mContentPolicyType(nsIContentPolicy::TYPE_INVALID),
         mUploadStreamContentLength(-1),
-        mReferrer(kFETCH_CLIENT_REFERRER_STR),
+        mReferrer(NS_LITERAL_STRING(kFETCH_CLIENT_REFERRER_STR)),
         mReferrerPolicy(ReferrerPolicy::_empty),
         mIsNonSubresourceRequest(aIsNonSubresourceRequest) {
     MOZ_ASSERT(aWorkerPrivate);
@@ -1256,48 +1295,12 @@ class FetchEventRunnable : public ExtendableFunctionalEventWorkerRunnable,
     nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(channel);
     MOZ_ASSERT(httpChannel, "How come we don't have an HTTP channel?");
 
-    mReferrer = EmptyCString();
-    uint32_t referrerPolicy = 0;
+    mReferrerPolicy = ReferrerPolicy::_empty;
+    mReferrer = EmptyString();
     nsCOMPtr<nsIReferrerInfo> referrerInfo = httpChannel->GetReferrerInfo();
     if (referrerInfo) {
-      referrerPolicy = referrerInfo->GetReferrerPolicy();
-      nsCOMPtr<nsIURI> computedReferrer = referrerInfo->GetComputedReferrer();
-      if (computedReferrer) {
-        rv = computedReferrer->GetSpec(mReferrer);
-        NS_ENSURE_SUCCESS(rv, rv);
-      }
-    }
-    switch (referrerPolicy) {
-      case nsIHttpChannel::REFERRER_POLICY_UNSET:
-        mReferrerPolicy = ReferrerPolicy::_empty;
-        break;
-      case nsIHttpChannel::REFERRER_POLICY_NO_REFERRER:
-        mReferrerPolicy = ReferrerPolicy::No_referrer;
-        break;
-      case nsIHttpChannel::REFERRER_POLICY_ORIGIN:
-        mReferrerPolicy = ReferrerPolicy::Origin;
-        break;
-      case nsIHttpChannel::REFERRER_POLICY_NO_REFERRER_WHEN_DOWNGRADE:
-        mReferrerPolicy = ReferrerPolicy::No_referrer_when_downgrade;
-        break;
-      case nsIHttpChannel::REFERRER_POLICY_ORIGIN_WHEN_XORIGIN:
-        mReferrerPolicy = ReferrerPolicy::Origin_when_cross_origin;
-        break;
-      case nsIHttpChannel::REFERRER_POLICY_UNSAFE_URL:
-        mReferrerPolicy = ReferrerPolicy::Unsafe_url;
-        break;
-      case nsIHttpChannel::REFERRER_POLICY_SAME_ORIGIN:
-        mReferrerPolicy = ReferrerPolicy::Same_origin;
-        break;
-      case nsIHttpChannel::REFERRER_POLICY_STRICT_ORIGIN_WHEN_XORIGIN:
-        mReferrerPolicy = ReferrerPolicy::Strict_origin_when_cross_origin;
-        break;
-      case nsIHttpChannel::REFERRER_POLICY_STRICT_ORIGIN:
-        mReferrerPolicy = ReferrerPolicy::Strict_origin;
-        break;
-      default:
-        MOZ_ASSERT_UNREACHABLE("Invalid Referrer Policy enum value?");
-        break;
+      mReferrerPolicy = referrerInfo->ReferrerPolicy();
+      Unused << referrerInfo->GetComputedReferrerSpec(mReferrer);
     }
 
     rv = httpChannel->GetRequestMethod(mMethod);
@@ -1429,9 +1432,8 @@ class FetchEventRunnable : public ExtendableFunctionalEventWorkerRunnable,
     }
     RefPtr<InternalRequest> internalReq = new InternalRequest(
         mSpec, mFragment, mMethod, internalHeaders.forget(), mCacheMode,
-        mRequestMode, mRequestRedirect, mRequestCredentials,
-        NS_ConvertUTF8toUTF16(mReferrer), mReferrerPolicy, mContentPolicyType,
-        mIntegrity);
+        mRequestMode, mRequestRedirect, mRequestCredentials, mReferrer,
+        mReferrerPolicy, mContentPolicyType, mIntegrity);
     internalReq->SetBody(mUploadStream, mUploadStreamContentLength);
     // For Telemetry, note that this Request object was created by a Fetch
     // event.
@@ -1587,6 +1589,11 @@ nsresult ServiceWorkerPrivate::SendFetchEvent(
     return NS_OK;
   }
 
+  if (mInner) {
+    return mInner->SendFetchEvent(std::move(registration), aChannel, aClientId,
+                                  aResultingClientId, aIsReload);
+  }
+
   aChannel->SetLaunchServiceWorkerStart(TimeStamp::Now());
   aChannel->SetDispatchFetchEventStart(TimeStamp::Now());
 
@@ -1634,6 +1641,7 @@ nsresult ServiceWorkerPrivate::SpawnWorkerIfNeeded(WakeUpReason aWhy,
                                                    bool* aNewWorkerCreated,
                                                    nsILoadGroup* aLoadGroup) {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mInner);
 
   // Defaults to no new worker created, but if there is one, we'll set the value
   // to true at the end of this function.
@@ -1790,6 +1798,10 @@ void ServiceWorkerPrivate::RemoveISupports(nsISupports* aSupports) {
 void ServiceWorkerPrivate::TerminateWorker() {
   MOZ_ASSERT(NS_IsMainThread());
 
+  if (mInner) {
+    return mInner->TerminateWorker();
+  }
+
   mIdleWorkerTimer->Cancel();
   mIdleKeepAliveToken = nullptr;
   if (mWorkerPrivate) {
@@ -1817,8 +1829,15 @@ void ServiceWorkerPrivate::TerminateWorker() {
 
 void ServiceWorkerPrivate::NoteDeadServiceWorkerInfo() {
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (mInner) {
+    mInner->NoteDeadOuter();
+    mInner = nullptr;
+  } else {
+    TerminateWorker();
+  }
+
   mInfo = nullptr;
-  TerminateWorker();
 }
 
 namespace {
@@ -1843,6 +1862,10 @@ class UpdateStateControlRunnable final
 
 void ServiceWorkerPrivate::UpdateState(ServiceWorkerState aState) {
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (mInner) {
+    return mInner->UpdateState(aState);
+  }
 
   if (!mWorkerPrivate) {
     MOZ_DIAGNOSTIC_ASSERT(mPendingFunctionalEvents.IsEmpty());
@@ -1872,6 +1895,11 @@ nsresult ServiceWorkerPrivate::GetDebugger(nsIWorkerDebugger** aResult) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aResult);
 
+  if (mInner) {
+    *aResult = nullptr;
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+
   if (!mDebuggerCount) {
     return NS_OK;
   }
@@ -1891,8 +1919,29 @@ nsresult ServiceWorkerPrivate::AttachDebugger() {
   // and cancel the idle timeout. The idle timeout should not be reset until
   // the last debugger detached from the worker.
   if (!mDebuggerCount) {
-    nsresult rv = SpawnWorkerIfNeeded(AttachEvent);
+    nsresult rv = mInner ? mInner->SpawnWorkerIfNeeded()
+                         : SpawnWorkerIfNeeded(AttachEvent);
     NS_ENSURE_SUCCESS(rv, rv);
+
+    /**
+     * Under parent-intercept mode (i.e. non-null `mInner`), renewing the idle
+     * KeepAliveToken for spawning workers happens asynchronously, rather than
+     * synchronously without parent-intercept (see
+     * `ServiceWorkerPrivate::SpawnWorkerIfNeeded`). The asynchronous renewal is
+     * because the actual spawning of workers under parent-intercept occurs in a
+     * content process, so we will only renew once notified that the worker has
+     * been successfully created
+     * (see `ServiceWorkerPrivateImpl::CreationSucceeded`).
+     *
+     * This means that the DevTools way of starting up a worker by calling
+     * `AttachDebugger` immediately followed by `DetachDebugger` will spawn and
+     * immediately terminate a worker (because `mTokenCount` is possibly 0
+     * due to the idle KeepAliveToken being created asynchronously). So, just
+     * renew the KeepAliveToken right now.
+     */
+    if (mInner) {
+      RenewKeepAliveToken(AttachEvent);
+    }
 
     mIdleWorkerTimer->Cancel();
   }
@@ -1986,7 +2035,10 @@ void ServiceWorkerPrivate::NoteIdleWorkerCallback(nsITimer* aTimer) {
   // Release ServiceWorkerPrivate's token, since the grace period has ended.
   mIdleKeepAliveToken = nullptr;
 
-  if (mWorkerPrivate) {
+  if (mWorkerPrivate || (mInner && !mInner->WorkerIsDead())) {
+    // There sould only be EITHER mWorkerPrivate or mInner (but not both).
+    MOZ_ASSERT(!(mWorkerPrivate && mInner));
+
     // If we still have a workerPrivate at this point it means there are pending
     // waitUntil promises. Wait a bit more until we forcibly terminate the
     // worker.
@@ -2017,7 +2069,7 @@ void ServiceWorkerPrivate::TerminateWorkerCallback(nsITimer* aTimer) {
 
 void ServiceWorkerPrivate::RenewKeepAliveToken(WakeUpReason aWhy) {
   // We should have an active worker if we're renewing the keep alive token.
-  MOZ_ASSERT(mWorkerPrivate);
+  MOZ_ASSERT(mWorkerPrivate || (mInner && !mInner->WorkerIsDead()));
 
   // If there is at least one debugger attached to the worker, the idle worker
   // timeout was canceled when the first debugger attached to the worker. It
@@ -2072,8 +2124,13 @@ void ServiceWorkerPrivate::ReleaseToken() {
 already_AddRefed<KeepAliveToken>
 ServiceWorkerPrivate::CreateEventKeepAliveToken() {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mWorkerPrivate);
-  MOZ_ASSERT(mIdleKeepAliveToken);
+
+  // When the WorkerPrivate is in a separate process, we first hold a normal
+  // KeepAliveToken. Then, after we're notified that the worker is alive, we
+  // create the idle KeepAliveToken.
+  MOZ_ASSERT(mWorkerPrivate || (mInner && !mInner->WorkerIsDead()));
+  MOZ_ASSERT(mIdleKeepAliveToken || (mInner && !mInner->WorkerIsDead()));
+
   RefPtr<KeepAliveToken> ref = new KeepAliveToken(this);
   return ref.forget();
 }

@@ -649,18 +649,13 @@ var Policies = {
             for (let location of param.Install) {
               let uri;
               try {
-                uri = Services.io.newURI(location);
-              } catch (e) {
-                // If it's not a URL, it's probably a file path.
-                // Assume location is a file path
+                // We need to try as a file first because
+                // Windows paths are valid URIs.
                 // This is done for legacy support (old API)
-                try {
-                  let xpiFile = new FileUtils.File(location);
-                  uri = Services.io.newFileURI(xpiFile);
-                } catch (ex) {
-                  log.error(`Invalid extension path location - ${location}`);
-                  return;
-                }
+                let xpiFile = new FileUtils.File(location);
+                uri = Services.io.newFileURI(xpiFile);
+              } catch (e) {
+                uri = Services.io.newURI(location);
               }
               installAddonFromURL(uri.spec);
             }
@@ -877,9 +872,8 @@ var Policies = {
             true
           );
         } else {
-          runOncePerModification("setHomepage", homepages, () => {
-            Services.prefs.clearUserPref("browser.startup.homepage");
-          });
+          // Clear out old run once modification that is no longer used.
+          clearRunOnceModification("setHomepage");
         }
       }
       if (param.StartPage) {
@@ -1436,7 +1430,7 @@ function setDefaultPermission(policyName, policyParam) {
 /**
  * addAllowDenyPermissions
  *
- * Helper function to call the permissions manager (Services.perms.add)
+ * Helper function to call the permissions manager (Services.perms.addFromPrincipal)
  * for two arrays of URLs.
  *
  * @param {string} permissionName
@@ -1452,8 +1446,8 @@ function addAllowDenyPermissions(permissionName, allowList, blockList) {
 
   for (let origin of allowList) {
     try {
-      Services.perms.add(
-        Services.io.newURI(origin.href),
+      Services.perms.addFromPrincipal(
+        Services.scriptSecurityManager.createContentPrincipalFromOrigin(origin),
         permissionName,
         Ci.nsIPermissionManager.ALLOW_ACTION,
         Ci.nsIPermissionManager.EXPIRE_POLICY
@@ -1465,8 +1459,8 @@ function addAllowDenyPermissions(permissionName, allowList, blockList) {
   }
 
   for (let origin of blockList) {
-    Services.perms.add(
-      Services.io.newURI(origin.href),
+    Services.perms.addFromPrincipal(
+      Services.scriptSecurityManager.createContentPrincipalFromOrigin(origin),
       permissionName,
       Ci.nsIPermissionManager.DENY_ACTION,
       Ci.nsIPermissionManager.EXPIRE_POLICY

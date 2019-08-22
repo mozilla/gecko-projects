@@ -1975,26 +1975,12 @@ static nsresult SelectProfile(nsToolkitProfileService* aProfileSvc,
 
   // reset-profile and migration args need to be checked before any profiles are
   // chosen below.
-  ArgResult ar = CheckArg("reset-profile", nullptr,
-                          CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
-  if (ar == ARG_BAD) {
-    PR_fprintf(PR_STDERR,
-               "Error: argument --reset-profile is invalid when argument "
-               "--osint is specified\n");
-    return NS_ERROR_FAILURE;
-  }
+  ArgResult ar = CheckArg("reset-profile");
   if (ar == ARG_FOUND) {
     gDoProfileReset = true;
   }
 
-  ar = CheckArg("migration", nullptr,
-                CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
-  if (ar == ARG_BAD) {
-    PR_fprintf(PR_STDERR,
-               "Error: argument --migration is invalid when argument --osint "
-               "is specified\n");
-    return NS_ERROR_FAILURE;
-  }
+  ar = CheckArg("migration");
   if (ar == ARG_FOUND) {
     gDoMigration = true;
   }
@@ -2727,11 +2713,6 @@ static void MOZ_gdk_display_close(GdkDisplay* display) {
   if (gtk_check_version(3, 9, 8) != NULL) skip_display_close = true;
 #    endif
 
-  // Get a (new) Pango context that holds a reference to the fontmap that
-  // GTK has been using.  gdk_pango_context_get() must be called while GTK
-  // has a default display.
-  PangoContext* pangoContext = gdk_pango_context_get();
-
   bool buggyCairoShutdown = cairo_version() < CAIRO_VERSION_ENCODE(1, 4, 0);
 
   if (!buggyCairoShutdown) {
@@ -2741,26 +2722,6 @@ static void MOZ_gdk_display_close(GdkDisplay* display) {
     // references to Display objects (see bug 469831).
     if (!skip_display_close) gdk_display_close(display);
   }
-
-  // Clean up PangoCairo's default fontmap.
-  // This pango_fc_font_map_shutdown call (and the associated code to
-  // get the font map) really shouldn't be needed anymore, except that
-  // it's needed to avoid having cairo_debug_reset_static_data fatally
-  // assert if we've leaked other things that hold on to the fontmap,
-  // which is something that currently happens in mochitest-plugins.
-  // Even if it didn't happen in mochitest-plugins, we probably want to
-  // avoid the crash-on-leak problem since it makes it harder to use
-  // many of our leak tools to debug leaks.
-
-  // This doesn't take a reference.
-  PangoFontMap* fontmap = pango_context_get_font_map(pangoContext);
-  // Do some shutdown of the fontmap, which releases the fonts, clearing a
-  // bunch of circular references from the fontmap through the fonts back to
-  // itself.  The shutdown that this does is much less than what's done by
-  // the fontmap's finalize, though.
-  if (PANGO_IS_FC_FONT_MAP(fontmap))
-    pango_fc_font_map_shutdown(PANGO_FC_FONT_MAP(fontmap));
-  g_object_unref(pangoContext);
 
   // Tell PangoCairo to release its default fontmap.
   pango_cairo_font_map_set_default(nullptr);
@@ -3129,8 +3090,7 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
 
   // Check for application.ini overrides
   const char* override = nullptr;
-  ar = CheckArg("override", &override,
-                CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
+  ar = CheckArg("override", &override);
   if (ar == ARG_BAD) {
     Output(true, "Incorrect number of arguments passed to --override");
     return 1;
@@ -3417,14 +3377,7 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
   // Handle --no-remote and --new-instance command line arguments. Setup
   // the environment to better accommodate other components and various
   // restart scenarios.
-  ar = CheckArg("no-remote", nullptr,
-                CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
-  if (ar == ARG_BAD) {
-    PR_fprintf(PR_STDERR,
-               "Error: argument --no-remote is invalid when argument --osint "
-               "is specified\n");
-    return 1;
-  }
+  ar = CheckArg("no-remote");
   if (ar == ARG_FOUND || EnvHasValue("MOZ_NO_REMOTE")) {
     mDisableRemoteClient = true;
     mDisableRemoteServer = true;
@@ -3433,14 +3386,7 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
     }
   }
 
-  ar = CheckArg("new-instance", nullptr,
-                CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
-  if (ar == ARG_BAD) {
-    PR_fprintf(PR_STDERR,
-               "Error: argument --new-instance is invalid when argument "
-               "--osint is specified\n");
-    return 1;
-  }
+  ar = CheckArg("new-instance");
   if (ar == ARG_FOUND || EnvHasValue("MOZ_NEW_INSTANCE")) {
     mDisableRemoteClient = true;
   }
@@ -3451,15 +3397,7 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
   CheckArg("new-instance");
 #endif
 
-  ar = CheckArg("offline", nullptr,
-                CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
-  if (ar == ARG_BAD) {
-    PR_fprintf(PR_STDERR,
-               "Error: argument --offline is invalid when argument --osint is "
-               "specified\n");
-    return 1;
-  }
-
+  ar = CheckArg("offline");
   if (ar || EnvHasValue("XRE_START_OFFLINE")) {
     mStartOffline = true;
   }
@@ -4644,9 +4582,15 @@ nsresult XREMain::XRE_mainRun() {
  *            .app/Contents/Resources.
  */
 int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
+  gArgc = argc;
+  gArgv = argv;
+
+  EnsureCommandlineSafe(gArgc, gArgv);
+  // DO NOT TOUCH THE COMMANDLINE ARGS BEFORE THIS!
+
   ScopedLogging log;
 
-  mozilla::LogModule::Init(argc, argv);
+  mozilla::LogModule::Init(gArgc, gArgv);
 
 #ifdef MOZ_CODE_COVERAGE
   CodeCoverageHandler::Init();
@@ -4657,9 +4601,6 @@ int XREMain::XRE_main(int argc, char* argv[], const BootstrapConfig& aConfig) {
   AUTO_PROFILER_LABEL("XREMain::XRE_main", OTHER);
 
   nsresult rv = NS_OK;
-
-  gArgc = argc;
-  gArgv = argv;
 
   if (aConfig.appData) {
     mAppData = MakeUnique<XREAppData>(*aConfig.appData);
@@ -4886,13 +4827,10 @@ nsresult XRE_InitCommandLine(int aArgc, char* aArgv[]) {
   recordreplay::parent::InitializeUIProcess(gArgc, gArgv);
 
   const char* path = nullptr;
-  ArgResult ar = CheckArg("greomni", &path,
-                          CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
+  ArgResult ar = CheckArg("greomni", &path);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR,
-               "Error: argument --greomni requires a path argument or the "
-               "--osint argument was specified with the --appomni argument "
-               "which is invalid\n");
+               "Error: argument --greomni requires a path argument\n");
     return NS_ERROR_FAILURE;
   }
 
@@ -4905,13 +4843,10 @@ nsresult XRE_InitCommandLine(int aArgc, char* aArgv[]) {
     return rv;
   }
 
-  ar = CheckArg("appomni", &path,
-                CheckArgFlag::CheckOSInt | CheckArgFlag::RemoveArg);
+  ar = CheckArg("appomni", &path);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR,
-               "Error: argument --appomni requires a path argument or the "
-               "--osint argument was specified with the --appomni argument "
-               "which is invalid\n");
+               "Error: argument --appomni requires a path argument\n");
     return NS_ERROR_FAILURE;
   }
 

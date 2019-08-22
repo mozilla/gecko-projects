@@ -21,6 +21,8 @@
 
 #include "builtin/intl/CommonFunctions.h"
 #include "js/TypeDecls.h"
+#include "unicode/uloc.h"
+#include "unicode/utypes.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
 #include "vm/StringType.h"
@@ -30,7 +32,7 @@
 
 using namespace js;
 
-const Class LocaleObject::class_ = {
+const JSClass LocaleObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(LocaleObject::SLOT_COUNT),
 };

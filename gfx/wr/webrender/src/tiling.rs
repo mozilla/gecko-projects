@@ -1320,7 +1320,9 @@ impl CompositeOps {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.filters.is_empty() && self.filter_datas.is_empty() && self.mix_blend_mode.is_none()
+        self.filters.is_empty() &&
+            self.filter_primitives.is_empty() &&
+            self.mix_blend_mode.is_none()
     }
 }
 
@@ -1500,6 +1502,7 @@ impl SvgFilterTask {
             SvgFilterInfo::Offset(..) => 7,
             SvgFilterInfo::ComponentTransfer(..) => 8,
             SvgFilterInfo::Identity => 9,
+            SvgFilterInfo::Composite(..) => 10,
         };
 
         let input_count = match filter {
@@ -1515,7 +1518,8 @@ impl SvgFilterTask {
 
             // Not techincally a 2 input filter, but we have 2 inputs here: original content & blurred content.
             SvgFilterInfo::DropShadow(..) |
-            SvgFilterInfo::Blend(..) => 2,
+            SvgFilterInfo::Blend(..) |
+            SvgFilterInfo::Composite(..) => 2,
         };
 
         let generic_int = match filter {
@@ -1525,7 +1529,8 @@ impl SvgFilterTask {
                   data.g_func.to_int() << 8 |
                   data.b_func.to_int() << 4 |
                   data.a_func.to_int()) as u16),
-
+            SvgFilterInfo::Composite(operator) =>
+                operator.as_int() as u16,
             SvgFilterInfo::LinearToSrgb |
             SvgFilterInfo::SrgbToLinear |
             SvgFilterInfo::Flood(..) |

@@ -37,7 +37,7 @@ using namespace js;
 // ObjectGroup
 /////////////////////////////////////////////////////////////////////
 
-ObjectGroup::ObjectGroup(const Class* clasp, TaggedProto proto,
+ObjectGroup::ObjectGroup(const JSClass* clasp, TaggedProto proto,
                          JS::Realm* realm, ObjectGroupFlags initialFlags)
     : clasp_(clasp), proto_(proto), realm_(realm), flags_(initialFlags) {
   /* Windows may not appear on prototype chains. */
@@ -282,7 +282,7 @@ bool JSObject::splicePrototype(JSContext* cx, HandleObject obj,
   MOZ_ASSERT_IF(proto.isObject(), !IsWindow(proto.toObject()));
 
 #ifdef DEBUG
-  const Class* oldClass = obj->getClass();
+  const JSClass* oldClass = obj->getClass();
 #endif
 
   if (proto.isObject()) {
@@ -356,8 +356,7 @@ ObjectGroup* JSObject::makeLazyGroup(JSContext* cx, HandleObject obj) {
 
 /* static */
 bool JSObject::setNewGroupUnknown(JSContext* cx, ObjectGroupRealm& realm,
-                                  const js::Class* clasp,
-                                  JS::HandleObject obj) {
+                                  const JSClass* clasp, JS::HandleObject obj) {
   ObjectGroup::setDefaultNewGroupUnknown(cx, realm, clasp, obj);
   return JSObject::setFlags(cx, obj, BaseShape::NEW_GROUP_UNKNOWN);
 }
@@ -386,11 +385,11 @@ struct ObjectGroupRealm::NewEntry {
       : group(group), associated(associated) {}
 
   struct Lookup {
-    const Class* clasp;
+    const JSClass* clasp;
     TaggedProto proto;
     JSObject* associated;
 
-    Lookup(const Class* clasp, TaggedProto proto, JSObject* associated)
+    Lookup(const JSClass* clasp, TaggedProto proto, JSObject* associated)
         : clasp(clasp), proto(proto), associated(associated) {
       MOZ_ASSERT((associated && associated->is<JSFunction>()) == !clasp);
     }
@@ -404,6 +403,22 @@ struct ObjectGroupRealm::NewEntry {
       }
     }
   };
+
+  bool needsSweep() {
+    return IsAboutToBeFinalized(&group) ||
+           (associated && IsAboutToBeFinalizedUnbarriered(&associated));
+  }
+
+  bool operator==(const NewEntry& other) const {
+    return group == other.group && associated == other.associated;
+  }
+};
+
+namespace js {
+template <>
+struct MovableCellHasher<ObjectGroupRealm::NewEntry> {
+  using Key = ObjectGroupRealm::NewEntry;
+  using Lookup = ObjectGroupRealm::NewEntry::Lookup;
 
   static bool hasHash(const Lookup& l) {
     return MovableCellHasher<TaggedProto>::hasHash(l.proto) &&
@@ -436,37 +451,14 @@ struct ObjectGroupRealm::NewEntry {
     return MovableCellHasher<JSObject*>::match(key.associated,
                                                lookup.associated);
   }
-
-  static void rekey(NewEntry& k, const NewEntry& newKey) { k = newKey; }
-
-  bool needsSweep() {
-    return IsAboutToBeFinalized(&group) ||
-           (associated && IsAboutToBeFinalizedUnbarriered(&associated));
-  }
-
-  bool operator==(const NewEntry& other) const {
-    return group == other.group && associated == other.associated;
-  }
 };
-
-namespace mozilla {
-template <>
-struct FallibleHashMethods<ObjectGroupRealm::NewEntry> {
-  template <typename Lookup>
-  static bool hasHash(Lookup&& l) {
-    return ObjectGroupRealm::NewEntry::hasHash(std::forward<Lookup>(l));
-  }
-  template <typename Lookup>
-  static bool ensureHash(Lookup&& l) {
-    return ObjectGroupRealm::NewEntry::ensureHash(std::forward<Lookup>(l));
-  }
-};
-}  // namespace mozilla
+} // namespace js
 
 class ObjectGroupRealm::NewTable
-    : public JS::WeakCache<
-          js::GCHashSet<NewEntry, NewEntry, SystemAllocPolicy>> {
-  using Table = js::GCHashSet<NewEntry, NewEntry, SystemAllocPolicy>;
+    : public JS::WeakCache<js::GCHashSet<NewEntry, MovableCellHasher<NewEntry>,
+                                         SystemAllocPolicy>> {
+  using Table =
+      js::GCHashSet<NewEntry, MovableCellHasher<NewEntry>, SystemAllocPolicy>;
   using Base = JS::WeakCache<Table>;
 
  public:
@@ -482,7 +474,7 @@ class ObjectGroupRealm::NewTable
 }
 
 MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
-    const Class* clasp, TaggedProto proto, JSObject* associated) {
+    const JSClass* clasp, TaggedProto proto, JSObject* associated) {
   if (group_ && associated_ == associated && group_->proto() == proto &&
       (!clasp || group_->clasp() == clasp)) {
     return group_;
@@ -491,7 +483,7 @@ MOZ_ALWAYS_INLINE ObjectGroup* ObjectGroupRealm::DefaultNewGroupCache::lookup(
 }
 
 /* static */
-ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const Class* clasp,
+ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const JSClass* clasp,
                                           TaggedProto proto,
                                           JSObject* associated) {
   MOZ_ASSERT_IF(associated, proto.isObject());
@@ -648,7 +640,7 @@ ObjectGroup* ObjectGroup::defaultNewGroup(JSContext* cx, const Class* clasp,
 /* static */
 ObjectGroup* ObjectGroup::lazySingletonGroup(JSContext* cx,
                                              ObjectGroup* oldGroup,
-                                             const Class* clasp,
+                                             const JSClass* clasp,
                                              TaggedProto proto) {
   ObjectGroupRealm& realm = oldGroup ? ObjectGroupRealm::get(oldGroup)
                                      : ObjectGroupRealm::getForNewObject(cx);
@@ -695,7 +687,7 @@ ObjectGroup* ObjectGroup::lazySingletonGroup(JSContext* cx,
 /* static */
 void ObjectGroup::setDefaultNewGroupUnknown(JSContext* cx,
                                             ObjectGroupRealm& realm,
-                                            const Class* clasp,
+                                            const JSClass* clasp,
                                             HandleObject obj) {
   // If the object already has a new group, mark that group as unknown.
   ObjectGroupRealm::NewTable* table = realm.defaultNewTable;
@@ -712,7 +704,7 @@ void ObjectGroup::setDefaultNewGroupUnknown(JSContext* cx,
 
 #ifdef DEBUG
 /* static */
-bool ObjectGroup::hasDefaultNewGroup(JSObject* proto, const Class* clasp,
+bool ObjectGroup::hasDefaultNewGroup(JSObject* proto, const JSClass* clasp,
                                      ObjectGroup* group) {
   ObjectGroupRealm::NewTable* table =
       ObjectGroupRealm::get(group).defaultNewTable;
@@ -727,7 +719,7 @@ bool ObjectGroup::hasDefaultNewGroup(JSObject* proto, const Class* clasp,
 }
 #endif /* DEBUG */
 
-inline const Class* GetClassForProtoKey(JSProtoKey key) {
+inline const JSClass* GetClassForProtoKey(JSProtoKey key) {
   switch (key) {
     case JSProto_Null:
     case JSProto_Object:
@@ -1327,8 +1319,7 @@ JSObject* ObjectGroup::newPlainObject(JSContext* cx, IdValuePair* properties,
 // ObjectGroupRealm AllocationSiteTable
 /////////////////////////////////////////////////////////////////////
 
-struct ObjectGroupRealm::AllocationSiteKey
-    : public DefaultHasher<AllocationSiteKey> {
+struct ObjectGroupRealm::AllocationSiteKey {
   WeakHeapPtrScript script;
 
   uint32_t offset : 24;
@@ -1363,23 +1354,6 @@ struct ObjectGroupRealm::AllocationSiteKey
     proto = std::move(key.proto);
   }
 
-  static inline HashNumber hash(const AllocationSiteKey& key) {
-    JSScript* script = key.script.unbarrieredGet();
-    JSObject* proto = key.proto.unbarrieredGet();
-    HashNumber hash = mozilla::HashGeneric(key.offset, key.kind);
-    hash = mozilla::AddToHash(hash, MovableCellHasher<JSScript*>::hash(script));
-    hash = mozilla::AddToHash(hash, MovableCellHasher<JSObject*>::hash(proto));
-    return hash;
-  }
-
-  static inline bool match(const AllocationSiteKey& a,
-                           const AllocationSiteKey& b) {
-    return a.offset == b.offset && a.kind == b.kind &&
-           MovableCellHasher<JSScript*>::match(a.script.unbarrieredGet(),
-                                               b.script.unbarrieredGet()) &&
-           MovableCellHasher<JSObject*>::match(a.proto, b.proto);
-  }
-
   void trace(JSTracer* trc) {
     TraceRoot(trc, &script, "AllocationSiteKey script");
     TraceNullableRoot(trc, &proto, "AllocationSiteKey proto");
@@ -1396,12 +1370,47 @@ struct ObjectGroupRealm::AllocationSiteKey
   }
 };
 
+namespace js {
+template <>
+struct MovableCellHasher<ObjectGroupRealm::AllocationSiteKey> {
+  using Key = ObjectGroupRealm::AllocationSiteKey;
+  using Lookup = ObjectGroupRealm::AllocationSiteKey;
+
+  static bool hasHash(const Lookup& l) {
+    return MovableCellHasher<JSScript*>::hasHash(l.script.unbarrieredGet()) &&
+           MovableCellHasher<JSObject*>::hasHash(l.proto.unbarrieredGet());
+  }
+  static bool ensureHash(const Lookup& l) {
+    return MovableCellHasher<JSScript*>::ensureHash(
+               l.script.unbarrieredGet()) &&
+           MovableCellHasher<JSObject*>::ensureHash(l.proto.unbarrieredGet());
+  }
+  static inline HashNumber hash(const Key& key) {
+    HashNumber hash = mozilla::HashGeneric(key.offset, key.kind);
+    hash = mozilla::AddToHash(
+        hash, MovableCellHasher<JSScript*>::hash(key.script.unbarrieredGet()));
+    hash = mozilla::AddToHash(
+        hash, MovableCellHasher<JSObject*>::hash(key.proto.unbarrieredGet()));
+    return hash;
+  }
+
+  static inline bool match(const Key& a, const Lookup& b) {
+    return a.offset == b.offset && a.kind == b.kind &&
+           MovableCellHasher<JSScript*>::match(a.script.unbarrieredGet(),
+                                               b.script.unbarrieredGet()) &&
+           MovableCellHasher<JSObject*>::match(a.proto.unbarrieredGet(),
+                                               b.proto.unbarrieredGet());
+  }
+};
+} // namespace js
+
 class ObjectGroupRealm::AllocationSiteTable
-    : public JS::WeakCache<
-          js::GCHashMap<AllocationSiteKey, WeakHeapPtrObjectGroup,
-                        AllocationSiteKey, SystemAllocPolicy>> {
-  using Table = js::GCHashMap<AllocationSiteKey, WeakHeapPtrObjectGroup,
-                              AllocationSiteKey, SystemAllocPolicy>;
+    : public JS::WeakCache<js::GCHashMap<
+          AllocationSiteKey, WeakHeapPtrObjectGroup,
+          MovableCellHasher<AllocationSiteKey>, SystemAllocPolicy>> {
+  using Table =
+      js::GCHashMap<AllocationSiteKey, WeakHeapPtrObjectGroup,
+                    MovableCellHasher<AllocationSiteKey>, SystemAllocPolicy>;
   using Base = JS::WeakCache<Table>;
 
  public:
@@ -1638,7 +1647,7 @@ ObjectGroupRealm::~ObjectGroupRealm() {
   stringSplitStringGroup = nullptr;
 }
 
-void ObjectGroupRealm::removeDefaultNewGroup(const Class* clasp,
+void ObjectGroupRealm::removeDefaultNewGroup(const JSClass* clasp,
                                              TaggedProto proto,
                                              JSObject* associated) {
   auto p = defaultNewTable->lookup(NewEntry::Lookup(clasp, proto, associated));
@@ -1648,7 +1657,7 @@ void ObjectGroupRealm::removeDefaultNewGroup(const Class* clasp,
   defaultNewGroupCache.purge();
 }
 
-void ObjectGroupRealm::replaceDefaultNewGroup(const Class* clasp,
+void ObjectGroupRealm::replaceDefaultNewGroup(const JSClass* clasp,
                                               TaggedProto proto,
                                               JSObject* associated,
                                               ObjectGroup* group) {
@@ -1668,8 +1677,8 @@ void ObjectGroupRealm::replaceDefaultNewGroup(const Class* clasp,
 
 /* static */
 ObjectGroup* ObjectGroupRealm::makeGroup(
-    JSContext* cx, Realm* realm, const Class* clasp, Handle<TaggedProto> proto,
-    ObjectGroupFlags initialFlags /* = 0 */) {
+    JSContext* cx, Realm* realm, const JSClass* clasp,
+    Handle<TaggedProto> proto, ObjectGroupFlags initialFlags /* = 0 */) {
   MOZ_ASSERT_IF(proto.isObject(),
                 cx->isInsideCurrentCompartment(proto.toObject()));
 

@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -18,15 +16,12 @@ const { webconsoleSpec } = require("devtools/shared/specs/webconsole");
  * A WebConsoleClient is used as a front end for the WebConsoleActor that is
  * created on the server, hiding implementation details.
  *
- * @param object debuggerClient
+ * @param object client
  *        The DebuggerClient instance we live for.
- * @param object response
- *        The response packet received from the "startListeners" request sent to
- *        the WebConsoleActor.
  */
 class WebConsoleFront extends FrontClassWithSpec(webconsoleSpec) {
-  constructor(client) {
-    super(client);
+  constructor(client, targetFront, parentFront) {
+    super(client, targetFront, parentFront);
     this._client = client;
     this.traits = {};
     this._longStrings = {};

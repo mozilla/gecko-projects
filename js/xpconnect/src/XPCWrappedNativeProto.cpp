@@ -28,8 +28,6 @@ XPCWrappedNativeProto::XPCWrappedNativeProto(
 #ifdef DEBUG
   gDEBUG_LiveProtoCount++;
 #endif
-
-  RecordReplayRegisterDeferredFinalizeThing(nullptr, nullptr, mClassInfo);
 }
 
 XPCWrappedNativeProto::~XPCWrappedNativeProto() {
@@ -52,12 +50,15 @@ bool XPCWrappedNativeProto::Init(JSContext* cx, nsIXPCScriptable* scriptable) {
   mScriptable = scriptable;
 
   JS::RootedObject proto(cx, JS::GetRealmObjectPrototype(cx));
-  mJSProtoObject = JS_NewObjectWithUniqueType(
-      cx, js::Jsvalify(&XPC_WN_Proto_JSClass), proto);
+  mJSProtoObject = JS_NewObjectWithUniqueType(cx, &XPC_WN_Proto_JSClass, proto);
 
   bool success = !!mJSProtoObject;
   if (success) {
     JS_SetPrivate(mJSProtoObject, this);
+
+    // Never collect the proto object while recording or replaying, to avoid
+    // non-deterministically releasing references during finalization.
+    recordreplay::HoldJSObject(mJSProtoObject);
   }
 
   return success;

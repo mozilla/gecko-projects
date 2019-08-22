@@ -181,10 +181,10 @@ class TenuredCell : public Cell {
   inline bool isInsideZone(JS::Zone* zone) const;
 
   MOZ_ALWAYS_INLINE JS::shadow::Zone* shadowZone() const {
-    return JS::shadow::Zone::asShadowZone(zone());
+    return JS::shadow::Zone::from(zone());
   }
   MOZ_ALWAYS_INLINE JS::shadow::Zone* shadowZoneFromAnyThread() const {
-    return JS::shadow::Zone::asShadowZone(zoneFromAnyThread());
+    return JS::shadow::Zone::from(zoneFromAnyThread());
   }
 
   template <class T>
@@ -292,7 +292,7 @@ inline JS::TraceKind Cell::getTraceKind() const {
 }
 
 /* static */ MOZ_ALWAYS_INLINE bool Cell::needWriteBarrierPre(JS::Zone* zone) {
-  return JS::shadow::Zone::asShadowZone(zone)->needsIncrementalBarrier();
+  return JS::shadow::Zone::from(zone)->needsIncrementalBarrier();
 }
 
 /* static */ MOZ_ALWAYS_INLINE TenuredCell* TenuredCell::fromPointer(
@@ -525,6 +525,11 @@ class CellWithLengthAndFlags : public BaseCell {
     uintptr_t data = flags_;
     setLengthAndFlags(len, flags);
     return data;
+  }
+
+  // Returns the offset of flags_. JIT code should use offsetOfFlags below.
+  static constexpr size_t offsetOfRawFlagsField() {
+    return offsetof(CellWithLengthAndFlags, flags_);
   }
 
   // Offsets for direct field from jit code. A number of places directly

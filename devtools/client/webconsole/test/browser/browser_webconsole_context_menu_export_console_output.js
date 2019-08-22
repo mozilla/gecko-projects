@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
@@ -155,6 +153,7 @@ async function exportAllToFile(hud, message) {
   ]);
   MockFilePicker.setFiles([nsiFile]);
   exportFile.click();
+  info("Exporting to file");
 
   // The file may not be ready yet.
   await waitFor(() => OS.File.exists(nsiFile.path));

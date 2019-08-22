@@ -114,6 +114,8 @@ class WindowGlobalChild final : public WindowGlobalActor,
   mozilla::ipc::IPCResult RecvRawMessage(const JSWindowActorMessageMeta& aMeta,
                                          const ClonedMessageData& aData);
 
+  mozilla::ipc::IPCResult RecvLoadURIInChild(nsDocShellLoadState* aLoadState);
+
   mozilla::ipc::IPCResult RecvChangeFrameRemoteness(
       dom::BrowsingContext* aBc, const nsString& aRemoteType,
       uint64_t aPendingSwitchId, ChangeFrameRemotenessResolver&& aResolver);
@@ -121,6 +123,7 @@ class WindowGlobalChild final : public WindowGlobalActor,
   mozilla::ipc::IPCResult RecvDrawSnapshot(const Maybe<IntRect>& aRect,
                                            const float& aScale,
                                            const nscolor& aBackgroundColor,
+                                           const uint32_t& aFlags,
                                            DrawSnapshotResolver&& aResolve);
 
   mozilla::ipc::IPCResult RecvGetSecurityInfo(

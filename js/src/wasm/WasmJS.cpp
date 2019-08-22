@@ -657,15 +657,15 @@ static bool GetLimits(JSContext* cx, HandleObject obj, uint32_t maxInitial,
 // ============================================================================
 // WebAssembly.Module class and methods
 
-const ClassOps WasmModuleObject::classOps_ = {nullptr, /* addProperty */
-                                              nullptr, /* delProperty */
-                                              nullptr, /* enumerate */
-                                              nullptr, /* newEnumerate */
-                                              nullptr, /* resolve */
-                                              nullptr, /* mayResolve */
-                                              WasmModuleObject::finalize};
+const JSClassOps WasmModuleObject::classOps_ = {nullptr, /* addProperty */
+                                                nullptr, /* delProperty */
+                                                nullptr, /* enumerate */
+                                                nullptr, /* newEnumerate */
+                                                nullptr, /* resolve */
+                                                nullptr, /* mayResolve */
+                                                WasmModuleObject::finalize};
 
-const Class WasmModuleObject::class_ = {
+const JSClass WasmModuleObject::class_ = {
     "WebAssembly.Module",
     JSCLASS_DELAY_METADATA_BUILDER |
         JSCLASS_HAS_RESERVED_SLOTS(WasmModuleObject::RESERVED_SLOTS) |
@@ -1176,19 +1176,19 @@ const Module& WasmModuleObject::module() const {
 // ============================================================================
 // WebAssembly.Instance class and methods
 
-const ClassOps WasmInstanceObject::classOps_ = {nullptr, /* addProperty */
-                                                nullptr, /* delProperty */
-                                                nullptr, /* enumerate */
-                                                nullptr, /* newEnumerate */
-                                                nullptr, /* resolve */
-                                                nullptr, /* mayResolve */
-                                                WasmInstanceObject::finalize,
-                                                nullptr, /* call */
-                                                nullptr, /* hasInstance */
-                                                nullptr, /* construct */
-                                                WasmInstanceObject::trace};
+const JSClassOps WasmInstanceObject::classOps_ = {nullptr, /* addProperty */
+                                                  nullptr, /* delProperty */
+                                                  nullptr, /* enumerate */
+                                                  nullptr, /* newEnumerate */
+                                                  nullptr, /* resolve */
+                                                  nullptr, /* mayResolve */
+                                                  WasmInstanceObject::finalize,
+                                                  nullptr, /* call */
+                                                  nullptr, /* hasInstance */
+                                                  nullptr, /* construct */
+                                                  WasmInstanceObject::trace};
 
-const Class WasmInstanceObject::class_ = {
+const JSClass WasmInstanceObject::class_ = {
     "WebAssembly.Instance",
     JSCLASS_DELAY_METADATA_BUILDER |
         JSCLASS_HAS_RESERVED_SLOTS(WasmInstanceObject::RESERVED_SLOTS) |
@@ -1603,15 +1603,15 @@ uint32_t wasm::ExportedFunctionToFuncIndex(JSFunction* fun) {
 // ============================================================================
 // WebAssembly.Memory class and methods
 
-const ClassOps WasmMemoryObject::classOps_ = {nullptr, /* addProperty */
-                                              nullptr, /* delProperty */
-                                              nullptr, /* enumerate */
-                                              nullptr, /* newEnumerate */
-                                              nullptr, /* resolve */
-                                              nullptr, /* mayResolve */
-                                              WasmMemoryObject::finalize};
+const JSClassOps WasmMemoryObject::classOps_ = {nullptr, /* addProperty */
+                                                nullptr, /* delProperty */
+                                                nullptr, /* enumerate */
+                                                nullptr, /* newEnumerate */
+                                                nullptr, /* resolve */
+                                                nullptr, /* mayResolve */
+                                                WasmMemoryObject::finalize};
 
-const Class WasmMemoryObject::class_ = {
+const JSClass WasmMemoryObject::class_ = {
     "WebAssembly.Memory",
     JSCLASS_DELAY_METADATA_BUILDER |
         JSCLASS_HAS_RESERVED_SLOTS(WasmMemoryObject::RESERVED_SLOTS) |
@@ -1893,7 +1893,6 @@ uint32_t WasmMemoryObject::grow(HandleWasmMemoryObject memory, uint32_t delta,
   }
 
   RootedArrayBufferObject newBuf(cx);
-  uint8_t* prevMemoryBase = nullptr;
 
   if (Maybe<uint32_t> maxSize = oldBuf->wasmMaxSize()) {
     if (newSize.value() > maxSize.value()) {
@@ -1912,7 +1911,6 @@ uint32_t WasmMemoryObject::grow(HandleWasmMemoryObject memory, uint32_t delta,
     }
 #else
     MOZ_ASSERT(memory->movingGrowable());
-    prevMemoryBase = oldBuf->dataPointer();
     if (!ArrayBufferObject::wasmMovingGrowToSize(newSize.value(), oldBuf,
                                                  &newBuf, cx)) {
       return -1;
@@ -1925,10 +1923,9 @@ uint32_t WasmMemoryObject::grow(HandleWasmMemoryObject memory, uint32_t delta,
   // Only notify moving-grow-observers after the BUFFER_SLOT has been updated
   // since observers will call buffer().
   if (memory->hasObservers()) {
-    MOZ_ASSERT(prevMemoryBase);
     for (InstanceSet::Range r = memory->observers().all(); !r.empty();
          r.popFront()) {
-      r.front()->instance().onMovingGrowMemory(prevMemoryBase);
+      r.front()->instance().onMovingGrowMemory();
     }
   }
 
@@ -1943,19 +1940,19 @@ bool js::wasm::IsSharedWasmMemoryObject(JSObject* obj) {
 // ============================================================================
 // WebAssembly.Table class and methods
 
-const ClassOps WasmTableObject::classOps_ = {nullptr, /* addProperty */
-                                             nullptr, /* delProperty */
-                                             nullptr, /* enumerate */
-                                             nullptr, /* newEnumerate */
-                                             nullptr, /* resolve */
-                                             nullptr, /* mayResolve */
-                                             WasmTableObject::finalize,
-                                             nullptr, /* call */
-                                             nullptr, /* hasInstance */
-                                             nullptr, /* construct */
-                                             WasmTableObject::trace};
+const JSClassOps WasmTableObject::classOps_ = {nullptr, /* addProperty */
+                                               nullptr, /* delProperty */
+                                               nullptr, /* enumerate */
+                                               nullptr, /* newEnumerate */
+                                               nullptr, /* resolve */
+                                               nullptr, /* mayResolve */
+                                               WasmTableObject::finalize,
+                                               nullptr, /* call */
+                                               nullptr, /* hasInstance */
+                                               nullptr, /* construct */
+                                               WasmTableObject::trace};
 
-const Class WasmTableObject::class_ = {
+const JSClass WasmTableObject::class_ = {
     "WebAssembly.Table",
     JSCLASS_DELAY_METADATA_BUILDER |
         JSCLASS_HAS_RESERVED_SLOTS(WasmTableObject::RESERVED_SLOTS) |
@@ -2237,7 +2234,7 @@ bool WasmTableObject::growImpl(JSContext* cx, const CallArgs& args) {
     return false;
   }
 
-  uint32_t oldLength = table.grow(delta, cx);
+  uint32_t oldLength = table.grow(delta);
 
   if (oldLength == uint32_t(-1)) {
     JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_GROW,
@@ -2318,19 +2315,19 @@ Table& WasmTableObject::table() const {
 // ============================================================================
 // WebAssembly.global class and methods
 
-const ClassOps WasmGlobalObject::classOps_ = {nullptr, /* addProperty */
-                                              nullptr, /* delProperty */
-                                              nullptr, /* enumerate */
-                                              nullptr, /* newEnumerate */
-                                              nullptr, /* resolve */
-                                              nullptr, /* mayResolve */
-                                              WasmGlobalObject::finalize,
-                                              nullptr, /* call */
-                                              nullptr, /* hasInstance */
-                                              nullptr, /* construct */
-                                              WasmGlobalObject::trace};
+const JSClassOps WasmGlobalObject::classOps_ = {nullptr, /* addProperty */
+                                                nullptr, /* delProperty */
+                                                nullptr, /* enumerate */
+                                                nullptr, /* newEnumerate */
+                                                nullptr, /* resolve */
+                                                nullptr, /* mayResolve */
+                                                WasmGlobalObject::finalize,
+                                                nullptr, /* call */
+                                                nullptr, /* hasInstance */
+                                                nullptr, /* construct */
+                                                WasmGlobalObject::trace};
 
-const Class WasmGlobalObject::class_ = {
+const JSClass WasmGlobalObject::class_ = {
     "WebAssembly.Global",
     JSCLASS_HAS_RESERVED_SLOTS(WasmGlobalObject::RESERVED_SLOTS) |
         JSCLASS_BACKGROUND_FINALIZE,
@@ -3422,7 +3419,7 @@ class ResolveResponseClosure : public NativeObject {
   static const unsigned PROMISE_OBJ_SLOT = 1;
   static const unsigned INSTANTIATE_SLOT = 2;
   static const unsigned IMPORT_OBJ_SLOT = 3;
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static void finalize(JSFreeOp* fop, JSObject* obj) {
     auto& closure = obj->as<ResolveResponseClosure>();
@@ -3432,7 +3429,7 @@ class ResolveResponseClosure : public NativeObject {
 
  public:
   static const unsigned RESERVED_SLOTS = 4;
-  static const Class class_;
+  static const JSClass class_;
 
   static ResolveResponseClosure* create(JSContext* cx, const CompileArgs& args,
                                         HandleObject promise, bool instantiate,
@@ -3468,7 +3465,7 @@ class ResolveResponseClosure : public NativeObject {
   }
 };
 
-const ClassOps ResolveResponseClosure::classOps_ = {
+const JSClassOps ResolveResponseClosure::classOps_ = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* enumerate */
@@ -3477,7 +3474,7 @@ const ClassOps ResolveResponseClosure::classOps_ = {
     nullptr, /* mayResolve */
     ResolveResponseClosure::finalize};
 
-const Class ResolveResponseClosure::class_ = {
+const JSClass ResolveResponseClosure::class_ = {
     "WebAssembly ResolveResponseClosure",
     JSCLASS_DELAY_METADATA_BUILDER |
         JSCLASS_HAS_RESERVED_SLOTS(ResolveResponseClosure::RESERVED_SLOTS) |
@@ -3657,7 +3654,7 @@ static const JSFunctionSpec WebAssembly_static_methods[] = {
           JSPROP_ENUMERATE),
     JS_FS_END};
 
-const Class js::WebAssemblyClass = {
+const JSClass js::WebAssemblyClass = {
     js_WebAssembly_str, JSCLASS_HAS_CACHED_PROTO(JSProto_WebAssembly)};
 
 template <class Class>

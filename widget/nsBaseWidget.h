@@ -448,6 +448,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
     return true;
   }
   virtual void PostRender(mozilla::widget::WidgetRenderingContext* aContext) {}
+  virtual void DoCompositorCleanup() {}
   virtual void DrawWindowUnderlay(
       mozilla::widget::WidgetRenderingContext* aContext,
       LayoutDeviceIntRect aRect) {}
@@ -460,8 +461,8 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
     return StartRemoteDrawing();
   }
   virtual void EndRemoteDrawing() {}
-  virtual void EndRemoteDrawingInRegion(DrawTarget* aDrawTarget,
-                                        LayoutDeviceIntRegion& aInvalidRegion) {
+  virtual void EndRemoteDrawingInRegion(
+      DrawTarget* aDrawTarget, const LayoutDeviceIntRegion& aInvalidRegion) {
     EndRemoteDrawing();
   }
   virtual void CleanupRemoteDrawing() {}

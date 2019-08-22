@@ -27,7 +27,7 @@ struct Cell;
 
 class DebuggerScript : public NativeObject {
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   enum {
     OWNER_SLOT,
@@ -44,7 +44,7 @@ class DebuggerScript : public NativeObject {
                                 Handle<DebuggerScriptReferent> referent,
                                 HandleNativeObject debugger);
 
-  static void trace(JSTracer* trc, JSObject* obj);
+  void trace(JSTracer* trc);
 
   using ReferentVariant = DebuggerScriptReferent;
 
@@ -60,6 +60,7 @@ class DebuggerScript : public NativeObject {
   // JS methods
   static bool getIsGeneratorFunction(JSContext* cx, unsigned argc, Value* vp);
   static bool getIsAsyncFunction(JSContext* cx, unsigned argc, Value* vp);
+  static bool getIsFunction(JSContext* cx, unsigned argc, Value* vp);
   static bool getIsModule(JSContext* cx, unsigned argc, Value* vp);
   static bool getDisplayName(JSContext* cx, unsigned argc, Value* vp);
   static bool getUrl(JSContext* cx, unsigned argc, Value* vp);
@@ -104,7 +105,7 @@ class DebuggerScript : public NativeObject {
   }
 
  private:
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static const JSPropertySpec properties_[];
   static const JSFunctionSpec methods_[];

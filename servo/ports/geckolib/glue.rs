@@ -1230,51 +1230,31 @@ pub extern "C" fn Servo_Element_SizeOfExcludingThisAndCVs(
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_Element_HasPrimaryComputedValues(element: &RawGeckoElement) -> bool {
-    let element = GeckoElement(element);
-    let data = element
-        .borrow_data()
-        .expect("Looking for CVs on unstyled element");
-    data.has_styles()
-}
-
-#[no_mangle]
-pub extern "C" fn Servo_Element_GetPrimaryComputedValues(
+pub extern "C" fn Servo_Element_GetMaybeOutOfDateStyle(
     element: &RawGeckoElement,
-) -> Strong<ComputedValues> {
+) -> *const ComputedValues {
     let element = GeckoElement(element);
-    let data = element
-        .borrow_data()
-        .expect("Getting CVs on unstyled element");
-    data.styles.primary().clone().into()
+    let data = match element.borrow_data() {
+        Some(d) => d,
+        None => return ptr::null(),
+    };
+    &**data.styles.primary() as *const _
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_Element_HasPseudoComputedValues(
+pub extern "C" fn Servo_Element_GetMaybeOutOfDatePseudoStyle(
     element: &RawGeckoElement,
     index: usize,
-) -> bool {
+) -> *const ComputedValues {
     let element = GeckoElement(element);
-    let data = element
-        .borrow_data()
-        .expect("Looking for CVs on unstyled element");
-    data.styles.pseudos.as_array()[index].is_some()
-}
-
-#[no_mangle]
-pub extern "C" fn Servo_Element_GetPseudoComputedValues(
-    element: &RawGeckoElement,
-    index: usize,
-) -> Strong<ComputedValues> {
-    let element = GeckoElement(element);
-    let data = element
-        .borrow_data()
-        .expect("Getting CVs that aren't present");
-    data.styles.pseudos.as_array()[index]
-        .as_ref()
-        .expect("Getting CVs that aren't present")
-        .clone()
-        .into()
+    let data = match element.borrow_data() {
+        Some(d) => d,
+        None => return ptr::null(),
+    };
+    match data.styles.pseudos.as_array()[index].as_ref() {
+        Some(style) => &**style as *const _,
+        None => ptr::null(),
+    }
 }
 
 #[no_mangle]
@@ -4713,12 +4693,12 @@ pub extern "C" fn Servo_DeclarationBlock_SetIntValue(
     value: i32,
 ) {
     use style::properties::longhands::_moz_script_level::SpecifiedValue as MozScriptLevel;
-    use style::properties::longhands::_x_span::computed_value::T as Span;
     use style::properties::PropertyDeclaration;
+    use style::values::specified::Integer;
 
     let long = get_longhand_from_id!(property);
     let prop = match_wrap_declared! { long,
-        XSpan => Span(value),
+        XSpan => Integer::new(value),
         // Gecko uses Integer values to signal that it is relative
         MozScriptLevel => MozScriptLevel::Relative(value),
     };

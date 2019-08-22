@@ -696,10 +696,9 @@ nsresult ImageLoader::OnSizeAvailable(imgIRequest* aRequest,
     return NS_OK;
   }
 
-  for (FrameWithFlags& fwf : *frameSet) {
-    nsIFrame* frame = fwf.mFrame;
-    if (frame->StyleVisibility()->IsVisible()) {
-      frame->MarkNeedsDisplayItemRebuild();
+  for (const FrameWithFlags& fwf : *frameSet) {
+    if (fwf.mFrame->StyleVisibility()->IsVisible()) {
+      fwf.mFrame->SchedulePaint();
     }
   }
 
@@ -789,20 +788,6 @@ nsresult ImageLoader::OnLoadComplete(imgIRequest* aRequest) {
   }
 
   return NS_OK;
-}
-
-void ImageLoader::FlushUseCounters() {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  for (auto iter = mRegisteredImages.Iter(); !iter.Done(); iter.Next()) {
-    if (imgRequestProxy* request = iter.Data()) {
-      nsCOMPtr<imgIContainer> container;
-      request->GetImage(getter_AddRefs(container));
-      if (container) {
-        static_cast<image::Image*>(container.get())->ReportUseCounters();
-      }
-    }
-  }
 }
 
 bool ImageLoader::ImageReflowCallback::ReflowFinished() {

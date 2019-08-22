@@ -345,11 +345,11 @@ struct nsStyleImage {
    */
   bool IsComplete() const;
   /**
-   * @return true if this image is loaded without error;
+   * @return true if this image has an available size, and hasn't errored.
    * always returns true if |mType| is |eStyleImageType_Gradient| or
    * |eStyleImageType_Element|.
    */
-  bool IsLoaded() const;
+  bool IsSizeAvailable() const;
   /**
    * @return true if it is 100% confident that this image contains no pixel
    * to draw.
@@ -766,8 +766,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleBorder {
         (HasVisibleStyle(aSide) ? mBorder.Side(aSide) : 0);
   }
 
-  inline bool IsBorderImageLoaded() const {
-    return mBorderImageSource.IsLoaded();
+  inline bool IsBorderImageSizeAvailable() const {
+    return mBorderImageSource.IsSizeAvailable();
   }
 
   nsMargin GetImageOutset() const;
@@ -1113,7 +1113,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTextReset {
   nscoord mInitialLetterSink;    // 0 means normal
   float mInitialLetterSize;      // 0.0f means normal
   mozilla::StyleColor mTextDecorationColor;
-  mozilla::StyleLengthOrAuto mTextDecorationThickness;
+  mozilla::StyleTextDecorationLength mTextDecorationThickness;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
@@ -1157,7 +1157,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleText {
   mozilla::StyleLineHeight mLineHeight;
   mozilla::LengthPercentage mTextIndent;
 
-  mozilla::StyleLengthOrAuto mTextUnderlineOffset;
+  mozilla::StyleTextDecorationLength mTextUnderlineOffset;
   mozilla::StyleTextDecorationSkipInk mTextDecorationSkipInk;
 
   nscoord mWebkitTextStrokeWidth;  // coord
@@ -1598,47 +1598,55 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
     return mAppearance != mozilla::StyleAppearance::None;
   }
 
-  bool IsBlockInsideStyle() const {
-    return mozilla::StyleDisplay::Block == mDisplay ||
-           mozilla::StyleDisplay::ListItem == mDisplay ||
-           mozilla::StyleDisplay::InlineBlock == mDisplay ||
-           mozilla::StyleDisplay::TableCaption == mDisplay ||
-           mozilla::StyleDisplay::FlowRoot == mDisplay;
-    // Should TABLE_CELL be included here?  They have
-    // block frames nested inside of them.
-    // (But please audit all callers before changing.)
+  static mozilla::StyleDisplayOutside DisplayOutside(
+      mozilla::StyleDisplay aDisplay) {
+    return mozilla::StyleDisplayOutside(
+        (uint16_t(aDisplay) >> mozilla::STYLE_DISPLAY_INSIDE_BITS) &
+        uint16_t(((1 << mozilla::STYLE_DISPLAY_OUTSIDE_BITS) - 1)));
+  }
+  mozilla::StyleDisplayOutside DisplayOutside() const {
+    return DisplayOutside(mDisplay);
   }
 
+  static mozilla::StyleDisplayInside DisplayInside(
+      mozilla::StyleDisplay aDisplay) {
+    return mozilla::StyleDisplayInside(
+        uint16_t(aDisplay) &
+        uint16_t(((1 << mozilla::STYLE_DISPLAY_INSIDE_BITS) - 1)));
+  }
+  mozilla::StyleDisplayInside DisplayInside() const {
+    return DisplayInside(mDisplay);
+  }
+
+  static bool IsListItem(mozilla::StyleDisplay aDisplay) {
+    return !!(uint16_t(aDisplay) & mozilla::STYLE_DISPLAY_LIST_ITEM_BIT);
+  }
+  bool IsListItem() const { return IsListItem(mDisplay); }
+
   bool IsInlineInsideStyle() const {
-    return mozilla::StyleDisplay::Inline == mDisplay ||
-           mozilla::StyleDisplay::Ruby == mDisplay ||
-           mozilla::StyleDisplay::RubyBase == mDisplay ||
-           mozilla::StyleDisplay::RubyBaseContainer == mDisplay ||
-           mozilla::StyleDisplay::RubyText == mDisplay ||
-           mozilla::StyleDisplay::RubyTextContainer == mDisplay;
+    auto inside = DisplayInside();
+    return inside == mozilla::StyleDisplayInside::Inline ||
+           inside == mozilla::StyleDisplayInside::Ruby ||
+           inside == mozilla::StyleDisplayInside::RubyBase ||
+           inside == mozilla::StyleDisplayInside::RubyBaseContainer ||
+           inside == mozilla::StyleDisplayInside::RubyText ||
+           inside == mozilla::StyleDisplayInside::RubyTextContainer;
   }
 
   bool IsBlockOutsideStyle() const {
-    return mozilla::StyleDisplay::Block == mDisplay ||
-           mozilla::StyleDisplay::Flex == mDisplay ||
-           mozilla::StyleDisplay::WebkitBox == mDisplay ||
-           mozilla::StyleDisplay::Grid == mDisplay ||
-           mozilla::StyleDisplay::ListItem == mDisplay ||
-           mozilla::StyleDisplay::Table == mDisplay ||
-           mozilla::StyleDisplay::FlowRoot == mDisplay;
+    return DisplayOutside() == mozilla::StyleDisplayOutside::Block;
   }
 
   static bool IsDisplayTypeInlineOutside(mozilla::StyleDisplay aDisplay) {
-    return mozilla::StyleDisplay::Inline == aDisplay ||
-           mozilla::StyleDisplay::InlineBlock == aDisplay ||
-           mozilla::StyleDisplay::InlineTable == aDisplay ||
-           mozilla::StyleDisplay::MozInlineBox == aDisplay ||
-           mozilla::StyleDisplay::InlineFlex == aDisplay ||
-           mozilla::StyleDisplay::WebkitInlineBox == aDisplay ||
-           mozilla::StyleDisplay::InlineGrid == aDisplay ||
-           mozilla::StyleDisplay::MozInlineGrid == aDisplay ||
-           mozilla::StyleDisplay::MozInlineStack == aDisplay ||
-           mozilla::StyleDisplay::Ruby == aDisplay ||
+    auto outside = DisplayOutside(aDisplay);
+    if (outside == mozilla::StyleDisplayOutside::Inline) {
+      return true;
+    }
+    // just an optimization for the common case:
+    if (outside == mozilla::StyleDisplayOutside::Block) {
+      return false;
+    }
+    return mozilla::StyleDisplay::MozInlineBox == aDisplay ||
            mozilla::StyleDisplay::RubyBase == aDisplay ||
            mozilla::StyleDisplay::RubyBaseContainer == aDisplay ||
            mozilla::StyleDisplay::RubyText == aDisplay ||
@@ -1654,17 +1662,11 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   }
 
   bool IsInnerTableStyle() const {
-    return mozilla::StyleDisplay::TableCell == mDisplay ||
-           IsInternalTableStyleExceptCell();
+    return DisplayOutside() == mozilla::StyleDisplayOutside::InternalTable;
   }
 
   bool IsInternalTableStyleExceptCell() const {
-    return mozilla::StyleDisplay::TableRow == mDisplay ||
-           mozilla::StyleDisplay::TableRowGroup == mDisplay ||
-           mozilla::StyleDisplay::TableHeaderGroup == mDisplay ||
-           mozilla::StyleDisplay::TableFooterGroup == mDisplay ||
-           mozilla::StyleDisplay::TableColumn == mDisplay ||
-           mozilla::StyleDisplay::TableColumnGroup == mDisplay;
+    return IsInnerTableStyle() && mozilla::StyleDisplay::TableCell != mDisplay;
   }
 
   bool IsFloatingStyle() const { return mozilla::StyleFloat::None != mFloat; }
@@ -1687,7 +1689,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   }
 
   static bool IsRubyDisplayType(mozilla::StyleDisplay aDisplay) {
-    return mozilla::StyleDisplay::Ruby == aDisplay ||
+    return DisplayInside(aDisplay) == mozilla::StyleDisplayInside::Ruby ||
            IsInternalRubyDisplayType(aDisplay);
   }
 
@@ -1742,7 +1744,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
     // exemption as necessary.
     return (mContain & mozilla::StyleContain_SIZE) &&
            !IsInternalRubyDisplayType() &&
-           (mozilla::StyleDisplay::Table != mDisplay) && !IsInnerTableStyle();
+           DisplayInside() != mozilla::StyleDisplayInside::Table &&
+           !IsInnerTableStyle();
   }
 
   /* Returns whether the element has the transform property or a related
@@ -1794,7 +1797,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   // style struct is for.  If the frame is for SVG text, the return
   // value will be massaged to be something that makes sense for
   // SVG text.
-  inline bool IsBlockInside(const nsIFrame* aContextFrame) const;
   inline bool IsBlockOutside(const nsIFrame* aContextFrame) const;
   inline bool IsInlineOutside(const nsIFrame* aContextFrame) const;
   inline bool IsOriginalDisplayInlineOutside(
@@ -1877,7 +1879,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTable {
   nsChangeHint CalcDifference(const nsStyleTable& aNewData) const;
 
   uint8_t mLayoutStrategy;  // NS_STYLE_TABLE_LAYOUT_*
-  int32_t mSpan;  // -x-span; the number of columns spanned by a colgroup or col
+  int32_t mXSpan;  // The number of columns spanned by a colgroup or col
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTableBorder {
@@ -2165,7 +2167,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleXUL {
   nsChangeHint CalcDifference(const nsStyleXUL& aNewData) const;
 
   float mBoxFlex;
-  uint32_t mBoxOrdinal;
+  int32_t mBoxOrdinal;
   mozilla::StyleBoxAlign mBoxAlign;
   mozilla::StyleBoxDirection mBoxDirection;
   mozilla::StyleBoxOrient mBoxOrient;
@@ -2248,7 +2250,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
   uint8_t mColorInterpolation;         // NS_STYLE_COLOR_INTERPOLATION_*
   uint8_t mColorInterpolationFilters;  // NS_STYLE_COLOR_INTERPOLATION_*
   mozilla::StyleFillRule mFillRule;
-  uint8_t mPaintOrder;        // bitfield of NS_STYLE_PAINT_ORDER_* values
+  mozilla::StyleSVGPaintOrder mPaintOrder;
   uint8_t mShapeRendering;    // NS_STYLE_SHAPE_RENDERING_*
   uint8_t mStrokeLinecap;     // NS_STYLE_STROKE_LINECAP_*
   uint8_t mStrokeLinejoin;    // NS_STYLE_STROKE_LINEJOIN_*
@@ -2376,6 +2378,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleEffects {
 
   bool HasFilters() const { return !mFilters.IsEmpty(); }
 
+  bool HasBackdropFilters() const { return !mBackdropFilters.IsEmpty(); }
+
   bool HasBoxShadowWithInset(bool aInset) const {
     for (auto& shadow : mBoxShadow.AsSpan()) {
       if (shadow.inset == aInset) {
@@ -2383,6 +2387,10 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleEffects {
       }
     }
     return false;
+  }
+
+  bool HasMixBlendMode() const {
+    return mMixBlendMode != NS_STYLE_BLEND_NORMAL;
   }
 
   mozilla::StyleOwnedSlice<mozilla::StyleFilter> mFilters;

@@ -11,13 +11,18 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
 
+#include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
-#include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/NumberFormat.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "gc/FreeOp.h"
 #include "js/CharacterEncoding.h"
 #include "js/PropertySpec.h"
+#include "unicode/uenum.h"
+#include "unicode/uloc.h"
+#include "unicode/unumberformatter.h"
+#include "unicode/upluralrules.h"
+#include "unicode/utypes.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
 #include "vm/StringType.h"
@@ -33,15 +38,15 @@ using js::intl::CallICU;
 using js::intl::GetAvailableLocales;
 using js::intl::IcuLocale;
 
-const ClassOps PluralRulesObject::classOps_ = {nullptr, /* addProperty */
-                                               nullptr, /* delProperty */
-                                               nullptr, /* enumerate */
-                                               nullptr, /* newEnumerate */
-                                               nullptr, /* resolve */
-                                               nullptr, /* mayResolve */
-                                               PluralRulesObject::finalize};
+const JSClassOps PluralRulesObject::classOps_ = {nullptr, /* addProperty */
+                                                 nullptr, /* delProperty */
+                                                 nullptr, /* enumerate */
+                                                 nullptr, /* newEnumerate */
+                                                 nullptr, /* resolve */
+                                                 nullptr, /* mayResolve */
+                                                 PluralRulesObject::finalize};
 
-const Class PluralRulesObject::class_ = {
+const JSClass PluralRulesObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(PluralRulesObject::SLOT_COUNT) |
         JSCLASS_FOREGROUND_FINALIZE,
@@ -94,11 +99,6 @@ static bool PluralRules(JSContext* cx, unsigned argc, Value* vp) {
   if (!pluralRules) {
     return false;
   }
-
-  pluralRules->setFixedSlot(PluralRulesObject::INTERNALS_SLOT, NullValue());
-  pluralRules->setPluralRules(nullptr);
-  pluralRules->setNumberFormatter(nullptr);
-  pluralRules->setFormattedNumber(nullptr);
 
   HandleValue locales = args.get(0);
   HandleValue options = args.get(1);
@@ -412,9 +412,6 @@ bool js::intl_GetPluralCategories(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  RootedValue element(cx);
-  uint32_t i = 0;
-
   do {
     int32_t catSize;
     const char* cat = uenum_next(ue, &catSize, &status);
@@ -433,8 +430,7 @@ bool js::intl_GetPluralCategories(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
 
-    element.setString(str);
-    if (!DefineDataElement(cx, res, i++, element)) {
+    if (!NewbornArrayPush(cx, res, StringValue(str))) {
       return false;
     }
   } while (true);

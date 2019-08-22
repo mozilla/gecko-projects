@@ -1506,7 +1506,7 @@ bool nsContentUtils::IsHTMLWhitespaceOrNBSP(char16_t aChar) {
 }
 
 /* static */
-bool nsContentUtils::IsHTMLBlock(nsIContent* aContent) {
+bool nsContentUtils::IsHTMLBlockLevelElement(nsIContent* aContent) {
   return aContent->IsAnyOfHTMLElements(
       nsGkAtoms::address, nsGkAtoms::article, nsGkAtoms::aside,
       nsGkAtoms::blockquote, nsGkAtoms::center, nsGkAtoms::dir, nsGkAtoms::div,
@@ -3724,7 +3724,7 @@ nsresult nsContentUtils::ReportToConsoleByWindowID(
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  nsAutoCString spec;
+  nsAutoString spec;
   if (!aLineNumber && aLocationMode == eUSE_CALLING_LOCATION) {
     JSContext* cx = GetCurrentJSContext();
     if (cx) {
@@ -3737,11 +3737,10 @@ nsresult nsContentUtils::ReportToConsoleByWindowID(
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (!spec.IsEmpty()) {
-    rv =
-        errorObject->InitWithWindowID(aErrorText,
-                                      NS_ConvertUTF8toUTF16(spec),  // file name
-                                      aSourceLine, aLineNumber, aColumnNumber,
-                                      aErrorFlags, aCategory, aInnerWindowID);
+    rv = errorObject->InitWithWindowID(aErrorText,
+                                       spec,  // file name
+                                       aSourceLine, aLineNumber, aColumnNumber,
+                                       aErrorFlags, aCategory, aInnerWindowID);
   } else {
     rv = errorObject->InitWithSourceURI(aErrorText, aURI, aSourceLine,
                                         aLineNumber, aColumnNumber, aErrorFlags,
@@ -7882,32 +7881,11 @@ bool nsContentUtils::IsUpgradableDisplayType(nsContentPolicyType aType) {
 }
 
 // static
-net::ReferrerPolicy nsContentUtils::GetReferrerPolicyFromHeader(
-    const nsAString& aHeader) {
-  // Multiple headers could be concatenated into one comma-separated
-  // list of policies. Need to tokenize the multiple headers.
-  nsCharSeparatedTokenizer tokenizer(aHeader, ',');
-  nsAutoString token;
-  net::ReferrerPolicy referrerPolicy = mozilla::net::RP_Unset;
-  while (tokenizer.hasMoreTokens()) {
-    token = tokenizer.nextToken();
-    if (token.IsEmpty()) {
-      continue;
-    }
-    net::ReferrerPolicy policy = net::ReferrerPolicyFromString(token);
-    if (policy != net::RP_Unset) {
-      referrerPolicy = policy;
-    }
-  }
-  return referrerPolicy;
-}
-
-// static
-net::ReferrerPolicy nsContentUtils::GetReferrerPolicyFromChannel(
+ReferrerPolicy nsContentUtils::GetReferrerPolicyFromChannel(
     nsIChannel* aChannel) {
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
   if (!httpChannel) {
-    return net::RP_Unset;
+    return ReferrerPolicy::_empty;
   }
 
   nsresult rv;
@@ -7915,10 +7893,11 @@ net::ReferrerPolicy nsContentUtils::GetReferrerPolicyFromChannel(
   rv = httpChannel->GetResponseHeader(NS_LITERAL_CSTRING("referrer-policy"),
                                       headerValue);
   if (NS_FAILED(rv) || headerValue.IsEmpty()) {
-    return net::RP_Unset;
+    return ReferrerPolicy::_empty;
   }
 
-  return GetReferrerPolicyFromHeader(NS_ConvertUTF8toUTF16(headerValue));
+  return ReferrerInfo::ReferrerPolicyFromHeaderString(
+      NS_ConvertUTF8toUTF16(headerValue));
 }
 
 // static

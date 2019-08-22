@@ -46,7 +46,7 @@ void RealmInstrumentation::holderTrace(JSTracer* trc, JSObject* obj) {
   instrumentation->trace(trc);
 }
 
-static const ClassOps InstrumentationHolderClassOps = {
+static const JSClassOps InstrumentationHolderClassOps = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* enumerate */
@@ -60,7 +60,7 @@ static const ClassOps InstrumentationHolderClassOps = {
     RealmInstrumentation::holderTrace,
 };
 
-static const Class InstrumentationHolderClass = {
+static const JSClass InstrumentationHolderClass = {
     "Instrumentation Holder",
     JSCLASS_HAS_RESERVED_SLOTS(ReservedSlotCount) | JSCLASS_FOREGROUND_FINALIZE,
     &InstrumentationHolderClassOps, JS_NULL_CLASS_SPEC, JS_NULL_CLASS_EXT};

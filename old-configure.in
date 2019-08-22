@@ -800,7 +800,7 @@ case "$target" in
         fi
         # Silence VS2017 15.5+ TR1 deprecation warnings hit by older gtest versions
         CXXFLAGS="$CXXFLAGS -D_SILENCE_TR1_NAMESPACE_DEPRECATION_WARNING"
-        LIBS="$LIBS kernel32.lib user32.lib gdi32.lib winmm.lib wsock32.lib advapi32.lib secur32.lib"
+        LIBS="$LIBS user32.lib gdi32.lib winmm.lib wsock32.lib advapi32.lib secur32.lib"
         MOZ_DEBUG_LDFLAGS='-DEBUG'
         WARNINGS_AS_ERRORS='-WX'
         # Use a higher optimization level for clang-cl, so we can come closer
@@ -1785,7 +1785,7 @@ gtk*)
 esac
 
 if test "$COMPILE_ENVIRONMENT"; then
-  if test "$MOZ_WIDGET_TOOLKIT" = gtk3; then
+  if test "$MOZ_WIDGET_TOOLKIT" = gtk; then
     PKG_CHECK_MODULES(MOZ_GTK3, gtk+-3.0 >= $GTK3_VERSION gtk+-unix-print-3.0 glib-2.0 gobject-2.0 gio-unix-2.0 $GDK_PACKAGES)
     MOZ_GTK3_CFLAGS="-I${_topsrcdir}/widget/gtk/compat-gtk3 $MOZ_GTK3_CFLAGS"
     TK_CFLAGS=$MOZ_GTK3_CFLAGS
@@ -2571,7 +2571,6 @@ fi
 
 fi # ! SKIP_COMPILER_CHECKS
 
-AC_DEFINE(CPP_THROW_NEW, [throw()])
 AC_LANG_C
 
 if test "$COMPILE_ENVIRONMENT"; then
@@ -3276,7 +3275,6 @@ dnl ========================================================
 
 dnl The following defines are used by xpcom
 _NON_GLOBAL_ACDEFINES="$_NON_GLOBAL_ACDEFINES
-CPP_THROW_NEW
 HAVE_GETPAGESIZE
 HAVE_STATVFS64
 HAVE_STATVFS

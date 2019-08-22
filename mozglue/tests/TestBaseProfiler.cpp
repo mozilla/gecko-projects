@@ -303,7 +303,16 @@ static void TestModuloBuffer(ModuloBuffer<>& mb, uint32_t MBSize) {
   MOZ_RELEASE_ASSERT(--arit == mb.ReaderAt(0));
   MOZ_RELEASE_ASSERT(arit == mb.ReaderAt(0));
 
+  MOZ_RELEASE_ASSERT(arit++ == mb.ReaderAt(0));
+  MOZ_RELEASE_ASSERT(arit == mb.ReaderAt(1));
+
+  MOZ_RELEASE_ASSERT(arit-- == mb.ReaderAt(1));
+  MOZ_RELEASE_ASSERT(arit == mb.ReaderAt(0));
+
   MOZ_RELEASE_ASSERT(arit + 3 == mb.ReaderAt(3));
+  MOZ_RELEASE_ASSERT(arit == mb.ReaderAt(0));
+
+  MOZ_RELEASE_ASSERT(4 + arit == mb.ReaderAt(4));
   MOZ_RELEASE_ASSERT(arit == mb.ReaderAt(0));
 
   // (Can't have assignments inside asserts, hence the split.)
@@ -316,6 +325,10 @@ static void TestModuloBuffer(ModuloBuffer<>& mb, uint32_t MBSize) {
 
   const bool checkMinusEq = ((arit -= 2) == mb.ReaderAt(1));
   MOZ_RELEASE_ASSERT(checkMinusEq);
+  MOZ_RELEASE_ASSERT(arit == mb.ReaderAt(1));
+
+  // Random access.
+  MOZ_RELEASE_ASSERT(&arit[3] == &*(arit + 3));
   MOZ_RELEASE_ASSERT(arit == mb.ReaderAt(1));
 
   // Iterator difference.
@@ -349,6 +362,45 @@ static void TestModuloBuffer(ModuloBuffer<>& mb, uint32_t MBSize) {
   // Or assigned.
   it2 = it;
   MOZ_RELEASE_ASSERT(it2.CurrentIndex() == 2);
+
+  // Iterator traits.
+  static_assert(std::is_same<std::iterator_traits<MB::Reader>::difference_type,
+                             MB::Index>::value,
+                "ModuloBuffer::Reader::difference_type should be Index");
+  static_assert(std::is_same<std::iterator_traits<MB::Reader>::value_type,
+                             MB::Byte>::value,
+                "ModuloBuffer::Reader::value_type should be Byte");
+  static_assert(std::is_same<std::iterator_traits<MB::Reader>::pointer,
+                             const MB::Byte*>::value,
+                "ModuloBuffer::Reader::pointer should be const Byte*");
+  static_assert(std::is_same<std::iterator_traits<MB::Reader>::reference,
+                             const MB::Byte&>::value,
+                "ModuloBuffer::Reader::reference should be const Byte&");
+  static_assert(std::is_base_of<
+                    std::input_iterator_tag,
+                    std::iterator_traits<MB::Reader>::iterator_category>::value,
+                "ModuloBuffer::Reader::iterator_category should be derived "
+                "from input_iterator_tag");
+  static_assert(std::is_base_of<
+                    std::forward_iterator_tag,
+                    std::iterator_traits<MB::Reader>::iterator_category>::value,
+                "ModuloBuffer::Reader::iterator_category should be derived "
+                "from forward_iterator_tag");
+  static_assert(std::is_base_of<
+                    std::bidirectional_iterator_tag,
+                    std::iterator_traits<MB::Reader>::iterator_category>::value,
+                "ModuloBuffer::Reader::iterator_category should be derived "
+                "from bidirectional_iterator_tag");
+  static_assert(
+      std::is_same<std::iterator_traits<MB::Reader>::iterator_category,
+                   std::random_access_iterator_tag>::value,
+      "ModuloBuffer::Reader::iterator_category should be "
+      "random_access_iterator_tag");
+
+  // Use as input iterator by std::string constructor (which is only considered
+  // with proper input iterators.)
+  std::string s(mb.ReaderAt(0), mb.ReaderAt(2));
+  MOZ_RELEASE_ASSERT(s == "xy");
 
   // Write 4-byte number at index 2.
   it.WriteObject(int32_t(123));
@@ -524,10 +576,13 @@ void TestBlocksRingBufferAPI() {
     //   - S[4 |    int(1)    ]E
     VERIFY_START_END_DESTROYED(1, 6, 0);
 
-    // Push `2` through EntryReserver, check output BlockIndex.
-    auto bi2 = rb.Put([](BlocksRingBuffer::EntryReserver aER) {
-      return aER.WriteObject(uint32_t(2));
-    });
+    // Push `2` through ReserveAndPut, check output BlockIndex.
+    auto bi2 = rb.ReserveAndPut([]() { return sizeof(uint32_t); },
+                                [](BlocksRingBuffer::EntryWriter* aEW) {
+                                  MOZ_RELEASE_ASSERT(!!aEW);
+                                  aEW->WriteObject(uint32_t(2));
+                                  return aEW->CurrentBlockIndex();
+                                });
     static_assert(
         std::is_same<decltype(bi2), BlocksRingBuffer::BlockIndex>::value,
         "All index-returning functions should return a "
@@ -599,15 +654,14 @@ void TestBlocksRingBufferAPI() {
     MOZ_RELEASE_ASSERT(!(bi2Next < bi2));
     MOZ_RELEASE_ASSERT(!(bi2Next <= bi2));
 
-    // Push `3` through EntryReserver and then EntryWriter, check writer output
+    // Push `3` through Put, check writer output
     // is returned to the initial caller.
-    auto put3 = rb.Put([&](BlocksRingBuffer::EntryReserver aER) {
-      return aER.Reserve(
-          sizeof(uint32_t), [&](BlocksRingBuffer::EntryWriter aEW) {
-            aEW.WriteObject(uint32_t(3));
-            return float(ExtractBlockIndex(aEW.CurrentBlockIndex()));
-          });
-    });
+    auto put3 =
+        rb.Put(sizeof(uint32_t), [&](BlocksRingBuffer::EntryWriter* aEW) {
+          MOZ_RELEASE_ASSERT(!!aEW);
+          aEW->WriteObject(uint32_t(3));
+          return float(ExtractBlockIndex(aEW->CurrentBlockIndex()));
+        });
     static_assert(std::is_same<decltype(put3), float>::value,
                   "Expect float as returned by callback.");
     MOZ_RELEASE_ASSERT(put3 == 11.0);
@@ -665,21 +719,19 @@ void TestBlocksRingBufferAPI() {
     });
     MOZ_RELEASE_ASSERT(count == 4);
 
-    // Push 5 through EntryReserver then EntryWriter, no returns.
+    // Push 5 through Put, no returns.
     // This will destroy the second entry.
     // Check that the EntryWriter can access bi4 but not bi2.
-    auto bi5_6 = rb.Put([&](BlocksRingBuffer::EntryReserver aER) {
-      return aER.Reserve(
-          sizeof(uint32_t), [&](BlocksRingBuffer::EntryWriter aEW) {
-            aEW.WriteObject(uint32_t(5));
-            MOZ_RELEASE_ASSERT(aEW.GetEntryAt(bi2).isNothing());
-            MOZ_RELEASE_ASSERT(aEW.GetEntryAt(bi4).isSome());
-            MOZ_RELEASE_ASSERT(aEW.GetEntryAt(bi4)->CurrentBlockIndex() == bi4);
-            MOZ_RELEASE_ASSERT(aEW.GetEntryAt(bi4)->ReadObject<uint32_t>() ==
-                               4);
-            return MakePair(aEW.CurrentBlockIndex(), aEW.BlockEndIndex());
-          });
-    });
+    auto bi5_6 =
+        rb.Put(sizeof(uint32_t), [&](BlocksRingBuffer::EntryWriter* aEW) {
+          MOZ_RELEASE_ASSERT(!!aEW);
+          aEW->WriteObject(uint32_t(5));
+          MOZ_RELEASE_ASSERT(aEW->GetEntryAt(bi2).isNothing());
+          MOZ_RELEASE_ASSERT(aEW->GetEntryAt(bi4).isSome());
+          MOZ_RELEASE_ASSERT(aEW->GetEntryAt(bi4)->CurrentBlockIndex() == bi4);
+          MOZ_RELEASE_ASSERT(aEW->GetEntryAt(bi4)->ReadObject<uint32_t>() == 4);
+          return MakePair(aEW->CurrentBlockIndex(), aEW->BlockEndIndex());
+        });
     auto& bi5 = bi5_6.first();
     auto& bi6 = bi5_6.second();
     //  16  17  18  19  20  21  22  23  24  25  26  11  12  13  14  15 (16)
@@ -697,6 +749,30 @@ void TestBlocksRingBufferAPI() {
       MOZ_RELEASE_ASSERT(aMaybeReader->ReadObject<uint32_t>() == 5);
       MOZ_RELEASE_ASSERT(
           aMaybeReader->GetEntryAt(aMaybeReader->NextBlockIndex()).isNothing());
+    });
+
+    rb.Read([&](BlocksRingBuffer::Reader* aReader) {
+      MOZ_RELEASE_ASSERT(!!aReader);
+      // begin() and end() should be at the range edges (verified above).
+      MOZ_RELEASE_ASSERT(
+          ExtractBlockIndex(aReader->begin().CurrentBlockIndex()) == 11);
+      MOZ_RELEASE_ASSERT(
+          ExtractBlockIndex(aReader->end().CurrentBlockIndex()) == 26);
+      // Null BlockIndex clamped to the beginning.
+      MOZ_RELEASE_ASSERT(aReader->At(bi0) == aReader->begin());
+      // Cleared block index clamped to the beginning.
+      MOZ_RELEASE_ASSERT(aReader->At(bi2) == aReader->begin());
+      // At(begin) same as begin().
+      MOZ_RELEASE_ASSERT(aReader->At(aReader->begin().CurrentBlockIndex()) ==
+                         aReader->begin());
+      // bi5 at expected position.
+      MOZ_RELEASE_ASSERT(
+          ExtractBlockIndex(aReader->At(bi5).CurrentBlockIndex()) == 21);
+      // bi6 at expected position at the end.
+      MOZ_RELEASE_ASSERT(aReader->At(bi6) == aReader->end());
+      // At(end) same as end().
+      MOZ_RELEASE_ASSERT(aReader->At(aReader->end().CurrentBlockIndex()) ==
+                         aReader->end());
     });
 
     // Check that we have `3` to `5`.
@@ -774,6 +850,205 @@ void TestBlocksRingBufferAPI() {
   printf("TestBlocksRingBufferAPI done\n");
 }
 
+void TestBlocksRingBufferUnderlyingBufferChanges() {
+  printf("TestBlocksRingBufferUnderlyingBufferChanges...\n");
+
+  // Out-of-session BlocksRingBuffer to start with.
+  BlocksRingBuffer rb;
+
+  // Block index to read at. Initially "null", but may be changed below.
+  BlocksRingBuffer::BlockIndex bi;
+
+  // Test all rb APIs when rb is out-of-session and therefore doesn't have an
+  // underlying buffer.
+  auto testOutOfSession = [&]() {
+    MOZ_RELEASE_ASSERT(rb.BufferLength().isNothing());
+    BlocksRingBuffer::State state = rb.GetState();
+    // When out-of-session, range start and ends are the same, and there are no
+    // pushed&cleared blocks.
+    MOZ_RELEASE_ASSERT(state.mRangeStart == state.mRangeEnd);
+    MOZ_RELEASE_ASSERT(state.mPushedBlockCount == 0);
+    MOZ_RELEASE_ASSERT(state.mClearedBlockCount == 0);
+    // `Put()` functions run the callback with `Nothing`.
+    int32_t ran = 0;
+    rb.Put(1, [&](BlocksRingBuffer::EntryWriter* aMaybeEntryWriter) {
+      MOZ_RELEASE_ASSERT(!aMaybeEntryWriter);
+      ++ran;
+    });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    // `PutFrom` won't do anything, and returns the null BlockIndex.
+    MOZ_RELEASE_ASSERT(rb.PutFrom(&ran, sizeof(ran)) ==
+                       BlocksRingBuffer::BlockIndex{});
+    MOZ_RELEASE_ASSERT(rb.PutObject(ran) == BlocksRingBuffer::BlockIndex{});
+    // `Read()` functions run the callback with `Nothing`.
+    ran = 0;
+    rb.Read([&](BlocksRingBuffer::Reader* aReader) {
+      MOZ_RELEASE_ASSERT(!aReader);
+      ++ran;
+    });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    ran = 0;
+    rb.ReadAt(BlocksRingBuffer::BlockIndex{},
+              [&](Maybe<BlocksRingBuffer::EntryReader>&& aMaybeEntryReader) {
+                MOZ_RELEASE_ASSERT(aMaybeEntryReader.isNothing());
+                ++ran;
+              });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    ran = 0;
+    rb.ReadAt(bi,
+              [&](Maybe<BlocksRingBuffer::EntryReader>&& aMaybeEntryReader) {
+                MOZ_RELEASE_ASSERT(aMaybeEntryReader.isNothing());
+                ++ran;
+              });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    // `ReadEach` shouldn't run the callback (nothing to read).
+    rb.ReadEach([](auto&&) { MOZ_RELEASE_ASSERT(false); });
+  };
+
+  // As `testOutOfSession()` attempts to modify the buffer, we run it twice to
+  // make sure one run doesn't influence the next one.
+  testOutOfSession();
+  testOutOfSession();
+
+  rb.ClearBefore(bi);
+  testOutOfSession();
+  testOutOfSession();
+
+  rb.Clear();
+  testOutOfSession();
+  testOutOfSession();
+
+  rb.Reset();
+  testOutOfSession();
+  testOutOfSession();
+
+  constexpr uint32_t MBSize = 32;
+
+  rb.Set(MakePowerOfTwo<BlocksRingBuffer::Length, MBSize>());
+
+  constexpr bool EMPTY = true;
+  constexpr bool NOT_EMPTY = false;
+  // Test all rb APIs when rb has an underlying buffer.
+  auto testInSession = [&](bool aExpectEmpty) {
+    MOZ_RELEASE_ASSERT(rb.BufferLength().isSome());
+    BlocksRingBuffer::State state = rb.GetState();
+    if (aExpectEmpty) {
+      MOZ_RELEASE_ASSERT(state.mRangeStart == state.mRangeEnd);
+      MOZ_RELEASE_ASSERT(state.mPushedBlockCount == 0);
+      MOZ_RELEASE_ASSERT(state.mClearedBlockCount == 0);
+    } else {
+      MOZ_RELEASE_ASSERT(state.mRangeStart < state.mRangeEnd);
+      MOZ_RELEASE_ASSERT(state.mPushedBlockCount > 0);
+      MOZ_RELEASE_ASSERT(state.mClearedBlockCount <= state.mPushedBlockCount);
+    }
+    int32_t ran = 0;
+    // The following three `Put...` will write three int32_t of value 1.
+    bi = rb.Put(sizeof(ran),
+                [&](BlocksRingBuffer::EntryWriter* aMaybeEntryWriter) {
+                  MOZ_RELEASE_ASSERT(!!aMaybeEntryWriter);
+                  ++ran;
+                  aMaybeEntryWriter->WriteObject(ran);
+                  return aMaybeEntryWriter->CurrentBlockIndex();
+                });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    MOZ_RELEASE_ASSERT(rb.PutFrom(&ran, sizeof(ran)) !=
+                       BlocksRingBuffer::BlockIndex{});
+    MOZ_RELEASE_ASSERT(rb.PutObject(ran) != BlocksRingBuffer::BlockIndex{});
+    ran = 0;
+    rb.Read([&](BlocksRingBuffer::Reader* aReader) {
+      MOZ_RELEASE_ASSERT(!!aReader);
+      ++ran;
+    });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    ran = 0;
+    rb.ReadEach([&](BlocksRingBuffer::EntryReader& aEntryReader) {
+      MOZ_RELEASE_ASSERT(aEntryReader.RemainingBytes() == sizeof(ran));
+      MOZ_RELEASE_ASSERT(aEntryReader.ReadObject<decltype(ran)>() == 1);
+      ++ran;
+    });
+    MOZ_RELEASE_ASSERT(ran >= 3);
+    ran = 0;
+    rb.ReadAt(BlocksRingBuffer::BlockIndex{},
+              [&](Maybe<BlocksRingBuffer::EntryReader>&& aMaybeEntryReader) {
+                MOZ_RELEASE_ASSERT(aMaybeEntryReader.isNothing());
+                ++ran;
+              });
+    MOZ_RELEASE_ASSERT(ran == 1);
+    ran = 0;
+    rb.ReadAt(bi,
+              [&](Maybe<BlocksRingBuffer::EntryReader>&& aMaybeEntryReader) {
+                MOZ_RELEASE_ASSERT(aMaybeEntryReader.isNothing() == !bi);
+                ++ran;
+              });
+    MOZ_RELEASE_ASSERT(ran == 1);
+  };
+
+  testInSession(EMPTY);
+  testInSession(NOT_EMPTY);
+
+  rb.Set(MakePowerOfTwo<BlocksRingBuffer::Length, 32>());
+  MOZ_RELEASE_ASSERT(rb.BufferLength().isSome());
+  rb.ReadEach([](auto&&) { MOZ_RELEASE_ASSERT(false); });
+
+  testInSession(EMPTY);
+  testInSession(NOT_EMPTY);
+
+  rb.Reset();
+  testOutOfSession();
+  testOutOfSession();
+
+  uint8_t buffer[MBSize * 3];
+  for (size_t i = 0; i < MBSize * 3; ++i) {
+    buffer[i] = uint8_t('A' + i);
+  }
+
+  rb.Set(&buffer[MBSize], MakePowerOfTwo<BlocksRingBuffer::Length, MBSize>());
+  MOZ_RELEASE_ASSERT(rb.BufferLength().isSome());
+  rb.ReadEach([](auto&&) { MOZ_RELEASE_ASSERT(false); });
+
+  testInSession(EMPTY);
+  testInSession(NOT_EMPTY);
+
+  rb.Reset();
+  testOutOfSession();
+  testOutOfSession();
+
+  int cleared = 0;
+  rb.Set(&buffer[MBSize], MakePowerOfTwo<BlocksRingBuffer::Length, MBSize>(),
+         [&](auto&&) { ++cleared; });
+  MOZ_RELEASE_ASSERT(rb.BufferLength().isSome());
+  rb.ReadEach([](auto&&) { MOZ_RELEASE_ASSERT(false); });
+
+  testInSession(EMPTY);
+  testInSession(NOT_EMPTY);
+
+  // Remove the current underlying buffer, this should clear all entries.
+  rb.Reset();
+  // The above should clear all entries (2 tests, three entries each).
+  MOZ_RELEASE_ASSERT(cleared == 2 * 3);
+
+  // Check that only the provided stack-based sub-buffer was modified.
+  uint32_t changed = 0;
+  for (size_t i = MBSize; i < MBSize * 2; ++i) {
+    changed += (buffer[i] == uint8_t('A' + i)) ? 0 : 1;
+  }
+  // Expect at least 75% changes.
+  MOZ_RELEASE_ASSERT(changed >= MBSize * 6 / 8);
+
+  // Everything around the sub-buffer should be unchanged.
+  for (size_t i = 0; i < MBSize; ++i) {
+    MOZ_RELEASE_ASSERT(buffer[i] == uint8_t('A' + i));
+  }
+  for (size_t i = MBSize * 2; i < MBSize * 3; ++i) {
+    MOZ_RELEASE_ASSERT(buffer[i] == uint8_t('A' + i));
+  }
+
+  testOutOfSession();
+  testOutOfSession();
+
+  printf("TestBlocksRingBufferUnderlyingBufferChanges done\n");
+}
+
 void TestBlocksRingBufferThreading() {
   printf("TestBlocksRingBufferThreading...\n");
 
@@ -827,9 +1102,10 @@ void TestBlocksRingBufferThreading() {
             // Reserve as many bytes as the thread number (but at least enough
             // to store an int), and write an increasing int.
             rb.Put(std::max(aThreadNo, int(sizeof(push))),
-                   [&](BlocksRingBuffer::EntryWriter aEW) {
-                     aEW.WriteObject(aThreadNo * 1000000 + push);
-                     aEW += aEW.RemainingBytes();
+                   [&](BlocksRingBuffer::EntryWriter* aEW) {
+                     MOZ_RELEASE_ASSERT(!!aEW);
+                     aEW->WriteObject(aThreadNo * 1000000 + push);
+                     *aEW += aEW->RemainingBytes();
                    });
           }
         },
@@ -864,11 +1140,232 @@ void TestBlocksRingBufferThreading() {
   printf("TestBlocksRingBufferThreading done\n");
 }
 
+void TestBlocksRingBufferSerialization() {
+  printf("TestBlocksRingBufferSerialization...\n");
+
+  constexpr uint32_t MBSize = 64;
+  uint8_t buffer[MBSize * 3];
+  for (size_t i = 0; i < MBSize * 3; ++i) {
+    buffer[i] = uint8_t('A' + i);
+  }
+  BlocksRingBuffer rb(&buffer[MBSize], MakePowerOfTwo32<MBSize>());
+
+  // Will expect literal string to always have the same address.
+#  define THE_ANSWER "The answer is "
+  const char* theAnswer = THE_ANSWER;
+
+  rb.PutObjects('0', WrapBlocksRingBufferLiteralCStringPointer(THE_ANSWER), 42,
+                std::string(" but pi="), 3.14);
+  rb.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    char c0;
+    const char* answer;
+    int integer;
+    std::string str;
+    double pi;
+    aER.ReadIntoObjects(c0, answer, integer, str, pi);
+    MOZ_RELEASE_ASSERT(c0 == '0');
+    MOZ_RELEASE_ASSERT(answer == theAnswer);
+    MOZ_RELEASE_ASSERT(integer == 42);
+    MOZ_RELEASE_ASSERT(str == " but pi=");
+    MOZ_RELEASE_ASSERT(pi == 3.14);
+  });
+  rb.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    char c0 = aER.ReadObject<char>();
+    MOZ_RELEASE_ASSERT(c0 == '0');
+    const char* answer = aER.ReadObject<const char*>();
+    MOZ_RELEASE_ASSERT(answer == theAnswer);
+    int integer = aER.ReadObject<int>();
+    MOZ_RELEASE_ASSERT(integer == 42);
+    std::string str = aER.ReadObject<std::string>();
+    MOZ_RELEASE_ASSERT(str == " but pi=");
+    double pi = aER.ReadObject<double>();
+    MOZ_RELEASE_ASSERT(pi == 3.14);
+  });
+
+  rb.Clear();
+  // Write an int and store its BlockIndex.
+  BlocksRingBuffer::BlockIndex blockIndex = rb.PutObject(123);
+  // It should be non-0.
+  MOZ_RELEASE_ASSERT(blockIndex != BlocksRingBuffer::BlockIndex{});
+  // Write that BlockIndex.
+  rb.PutObject(blockIndex);
+  rb.Read([&](BlocksRingBuffer::Reader* aR) {
+    BlocksRingBuffer::BlockIterator it = aR->begin();
+    const BlocksRingBuffer::BlockIterator itEnd = aR->end();
+    MOZ_RELEASE_ASSERT(it != itEnd);
+    MOZ_RELEASE_ASSERT((*it).ReadObject<int>() == 123);
+    ++it;
+    MOZ_RELEASE_ASSERT(it != itEnd);
+    MOZ_RELEASE_ASSERT((*it).ReadObject<BlocksRingBuffer::BlockIndex>() ==
+                       blockIndex);
+    ++it;
+    MOZ_RELEASE_ASSERT(it == itEnd);
+  });
+
+  rb.Clear();
+  rb.PutObjects(std::make_tuple(
+      '0', WrapBlocksRingBufferLiteralCStringPointer(THE_ANSWER), 42,
+      std::string(" but pi="), 3.14));
+  rb.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    MOZ_RELEASE_ASSERT(aER.ReadObject<char>() == '0');
+    MOZ_RELEASE_ASSERT(aER.ReadObject<const char*>() == theAnswer);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<int>() == 42);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<std::string>() == " but pi=");
+    MOZ_RELEASE_ASSERT(aER.ReadObject<double>() == 3.14);
+  });
+
+  rb.Clear();
+  rb.PutObjects(MakeTuple('0',
+                          WrapBlocksRingBufferLiteralCStringPointer(THE_ANSWER),
+                          42, std::string(" but pi="), 3.14));
+  rb.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    MOZ_RELEASE_ASSERT(aER.ReadObject<char>() == '0');
+    MOZ_RELEASE_ASSERT(aER.ReadObject<const char*>() == theAnswer);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<int>() == 42);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<std::string>() == " but pi=");
+    MOZ_RELEASE_ASSERT(aER.ReadObject<double>() == 3.14);
+  });
+
+  rb.Clear();
+  {
+    UniqueFreePtr<char> ufps(strdup(THE_ANSWER));
+    rb.PutObjects(ufps);
+  }
+  rb.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    auto ufps = aER.ReadObject<UniqueFreePtr<char>>();
+    MOZ_RELEASE_ASSERT(!!ufps);
+    MOZ_RELEASE_ASSERT(std::string(THE_ANSWER) == ufps.get());
+  });
+
+  rb.Clear();
+  int intArray[] = {1, 2, 3, 4, 5};
+  rb.PutObjects(MakeSpan(intArray));
+  rb.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    int intArrayOut[sizeof(intArray) / sizeof(intArray[0])] = {0};
+    auto outSpan = MakeSpan(intArrayOut);
+    aER.ReadIntoObject(outSpan);
+    for (size_t i = 0; i < sizeof(intArray) / sizeof(intArray[0]); ++i) {
+      MOZ_RELEASE_ASSERT(intArrayOut[i] == intArray[i]);
+    }
+  });
+
+  rb.Clear();
+  rb.PutObjects(Maybe<int>(Nothing{}), Maybe<int>(Some(123)));
+  rb.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    Maybe<int> mi0, mi1;
+    aER.ReadIntoObjects(mi0, mi1);
+    MOZ_RELEASE_ASSERT(mi0.isNothing());
+    MOZ_RELEASE_ASSERT(mi1.isSome());
+    MOZ_RELEASE_ASSERT(*mi1 == 123);
+  });
+
+  rb.Clear();
+  using V = Variant<int, double, int>;
+  V v0(VariantIndex<0>{}, 123);
+  V v1(3.14);
+  V v2(VariantIndex<2>{}, 456);
+  rb.PutObjects(v0, v1, v2);
+  rb.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    MOZ_RELEASE_ASSERT(aER.ReadObject<V>() == v0);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<V>() == v1);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<V>() == v2);
+  });
+
+  // 2nd BlocksRingBuffer to contain the 1st one. It has be be more than twice
+  // the size.
+  constexpr uint32_t MBSize2 = MBSize * 4;
+  uint8_t buffer2[MBSize2 * 3];
+  for (size_t i = 0; i < MBSize2 * 3; ++i) {
+    buffer2[i] = uint8_t('B' + i);
+  }
+  BlocksRingBuffer rb2(&buffer2[MBSize2], MakePowerOfTwo32<MBSize2>());
+  rb2.PutObject(rb);
+
+  // 3rd BlocksRingBuffer deserialized from the 2nd one.
+  uint8_t buffer3[MBSize * 3];
+  for (size_t i = 0; i < MBSize * 3; ++i) {
+    buffer3[i] = uint8_t('C' + i);
+  }
+  BlocksRingBuffer rb3(&buffer3[MBSize], MakePowerOfTwo32<MBSize>());
+  rb2.ReadEach(
+      [&](BlocksRingBuffer::EntryReader& aER) { aER.ReadIntoObject(rb3); });
+
+  // And a 4th heap-allocated one.
+  UniquePtr<BlocksRingBuffer> rb4up;
+  rb2.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    rb4up = aER.ReadObject<UniquePtr<BlocksRingBuffer>>();
+  });
+  MOZ_RELEASE_ASSERT(!!rb4up);
+
+  // Clear 1st and 2nd BlocksRingBuffers, to ensure we have made a deep copy
+  // into the 3rd&4th ones.
+  rb.Clear();
+  rb2.Clear();
+
+  // And now the 3rd one should have the same contents as the 1st one had.
+  rb3.ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    MOZ_RELEASE_ASSERT(aER.ReadObject<V>() == v0);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<V>() == v1);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<V>() == v2);
+  });
+
+  // And 4th.
+  rb4up->ReadEach([&](BlocksRingBuffer::EntryReader& aER) {
+    MOZ_RELEASE_ASSERT(aER.ReadObject<V>() == v0);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<V>() == v1);
+    MOZ_RELEASE_ASSERT(aER.ReadObject<V>() == v2);
+  });
+
+  // In fact, the 3rd and 4th ones should have the same state, because they were
+  // created the same way.
+  MOZ_RELEASE_ASSERT(rb3.GetState().mRangeStart ==
+                     rb4up->GetState().mRangeStart);
+  MOZ_RELEASE_ASSERT(rb3.GetState().mRangeEnd == rb4up->GetState().mRangeEnd);
+  MOZ_RELEASE_ASSERT(rb3.GetState().mPushedBlockCount ==
+                     rb4up->GetState().mPushedBlockCount);
+  MOZ_RELEASE_ASSERT(rb3.GetState().mClearedBlockCount ==
+                     rb4up->GetState().mClearedBlockCount);
+
+  // Check that only the provided stack-based sub-buffer was modified.
+  uint32_t changed = 0;
+  for (size_t i = MBSize; i < MBSize * 2; ++i) {
+    changed += (buffer[i] == uint8_t('A' + i)) ? 0 : 1;
+  }
+  // Expect at least 75% changes.
+  MOZ_RELEASE_ASSERT(changed >= MBSize * 6 / 8);
+
+  // Everything around the sub-buffers should be unchanged.
+  for (size_t i = 0; i < MBSize; ++i) {
+    MOZ_RELEASE_ASSERT(buffer[i] == uint8_t('A' + i));
+  }
+  for (size_t i = MBSize * 2; i < MBSize * 3; ++i) {
+    MOZ_RELEASE_ASSERT(buffer[i] == uint8_t('A' + i));
+  }
+
+  for (size_t i = 0; i < MBSize2; ++i) {
+    MOZ_RELEASE_ASSERT(buffer2[i] == uint8_t('B' + i));
+  }
+  for (size_t i = MBSize2 * 2; i < MBSize2 * 3; ++i) {
+    MOZ_RELEASE_ASSERT(buffer2[i] == uint8_t('B' + i));
+  }
+
+  for (size_t i = 0; i < MBSize; ++i) {
+    MOZ_RELEASE_ASSERT(buffer3[i] == uint8_t('C' + i));
+  }
+  for (size_t i = MBSize * 2; i < MBSize * 3; ++i) {
+    MOZ_RELEASE_ASSERT(buffer3[i] == uint8_t('C' + i));
+  }
+
+  printf("TestBlocksRingBufferSerialization done\n");
+}
+
 // Increase the depth, to a maximum (to avoid too-deep recursion).
 static constexpr size_t NextDepth(size_t aDepth) {
   constexpr size_t MAX_DEPTH = 128;
   return (aDepth < MAX_DEPTH) ? (aDepth + 1) : aDepth;
 }
+
+Atomic<bool, Relaxed, recordreplay::Behavior::DontPreserve> sStopFibonacci;
 
 // Compute fibonacci the hard way (recursively: `f(n)=f(n-1)+f(n-2)`), and
 // prevent inlining.
@@ -876,17 +1373,29 @@ static constexpr size_t NextDepth(size_t aDepth) {
 // distinguish them in the profiler output.
 template <size_t DEPTH = 0>
 MOZ_NEVER_INLINE unsigned long long Fibonacci(unsigned long long n) {
+  AUTO_BASE_PROFILER_LABEL_DYNAMIC_STRING("fib", OTHER, std::to_string(DEPTH));
   if (n == 0) {
     return 0;
   }
   if (n == 1) {
     return 1;
   }
+  if (DEPTH < 5 && sStopFibonacci) {
+    return 1'000'000'000;
+  }
+  TimeStamp start = TimeStamp::NowUnfuzzed();
+  static constexpr size_t MAX_MARKER_DEPTH = 10;
   unsigned long long f2 = Fibonacci<NextDepth(DEPTH)>(n - 2);
   if (DEPTH == 0) {
     BASE_PROFILER_ADD_MARKER("Half-way through Fibonacci", OTHER);
   }
   unsigned long long f1 = Fibonacci<NextDepth(DEPTH)>(n - 1);
+  if (DEPTH < MAX_MARKER_DEPTH) {
+    baseprofiler::profiler_add_text_marker(
+        "fib", std::to_string(DEPTH),
+        baseprofiler::ProfilingCategoryPair::OTHER, start,
+        TimeStamp::NowUnfuzzed());
+  }
   return f2 + f1;
 }
 
@@ -902,7 +1411,9 @@ void TestProfiler() {
   TestLEB128();
   TestModuloBuffer();
   TestBlocksRingBufferAPI();
+  TestBlocksRingBufferUnderlyingBufferChanges();
   TestBlocksRingBufferThreading();
+  TestBlocksRingBufferSerialization();
 
   {
     printf("profiler_init()...\n");
@@ -927,14 +1438,53 @@ void TestProfiler() {
     MOZ_RELEASE_ASSERT(baseprofiler::profiler_thread_is_being_profiled());
     MOZ_RELEASE_ASSERT(!baseprofiler::profiler_thread_is_sleeping());
 
-    {
+    sStopFibonacci = false;
+
+    std::thread threadFib([]() {
+      AUTO_BASE_PROFILER_REGISTER_THREAD("fibonacci");
+      SleepMilli(5);
       AUTO_BASE_PROFILER_TEXT_MARKER_CAUSE("fibonacci", "First leaf call",
                                            OTHER, nullptr);
-      static const unsigned long long fibStart = 40;
+      static const unsigned long long fibStart = 37;
       printf("Fibonacci(%llu)...\n", fibStart);
       AUTO_BASE_PROFILER_LABEL("Label around Fibonacci", OTHER);
       unsigned long long f = Fibonacci(fibStart);
       printf("Fibonacci(%llu) = %llu\n", fibStart, f);
+    });
+
+    std::thread threadCancelFib([]() {
+      AUTO_BASE_PROFILER_REGISTER_THREAD("fibonacci canceller");
+      SleepMilli(5);
+      AUTO_BASE_PROFILER_TEXT_MARKER_CAUSE("fibonacci", "Canceller", OTHER,
+                                           nullptr);
+      static const int waitMaxSeconds = 10;
+      for (int i = 0; i < waitMaxSeconds; ++i) {
+        if (sStopFibonacci) {
+          AUTO_BASE_PROFILER_LABEL_DYNAMIC_STRING("fibCancel", OTHER,
+                                                  std::to_string(i));
+          return;
+        }
+        AUTO_BASE_PROFILER_THREAD_SLEEP;
+        SleepMilli(1000);
+      }
+      AUTO_BASE_PROFILER_LABEL_DYNAMIC_STRING("fibCancel", OTHER,
+                                              "Cancelling!");
+      sStopFibonacci = true;
+    });
+
+    {
+      AUTO_BASE_PROFILER_TEXT_MARKER_CAUSE(
+          "main thread", "joining fibonacci thread", OTHER, nullptr);
+      AUTO_BASE_PROFILER_THREAD_SLEEP;
+      threadFib.join();
+    }
+
+    {
+      AUTO_BASE_PROFILER_TEXT_MARKER_CAUSE(
+          "main thread", "joining fibonacci-canceller thread", OTHER, nullptr);
+      sStopFibonacci = true;
+      AUTO_BASE_PROFILER_THREAD_SLEEP;
+      threadCancelFib.join();
     }
 
     printf("Sleep 1s...\n");

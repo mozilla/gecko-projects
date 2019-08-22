@@ -33,7 +33,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   DownloadUtils: "resource://gre/modules/DownloadUtils.jsm",
   E10SUtils: "resource://gre/modules/E10SUtils.jsm",
   ExtensionsUI: "resource:///modules/ExtensionsUI.jsm",
-  FormValidationHandler: "resource:///modules/FormValidationHandler.jsm",
   HomePage: "resource:///modules/HomePage.jsm",
   LightweightThemeConsumer:
     "resource://gre/modules/LightweightThemeConsumer.jsm",
@@ -48,6 +47,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PanelMultiView: "resource:///modules/PanelMultiView.jsm",
   PanelView: "resource:///modules/PanelMultiView.jsm",
   PermitUnloader: "resource://gre/actors/BrowserElementParent.jsm",
+  PictureInPicture: "resource://gre/modules/PictureInPicture.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
   PlacesTransactions: "resource://gre/modules/PlacesTransactions.jsm",
@@ -3402,6 +3402,7 @@ function losslessDecodeURI(aURI) {
   // This includes all bidirectional formatting characters.
   // (RFC 3987 sections 3.2 and 4.1 paragraph 6)
   value = value.replace(
+    // eslint-disable-next-line no-misleading-character-class
     /[\u00ad\u034f\u061c\u115f-\u1160\u17b4-\u17b5\u180b-\u180d\u200b\u200e-\u200f\u202a-\u202e\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8]|\ud834[\udd73-\udd7a]|[\udb40-\udb43][\udc00-\udfff]/g,
     encodeURIComponent
   );
@@ -3483,10 +3484,7 @@ function SetPageProxyState(aState, updatePopupNotifications) {
   }
 
   let oldPageProxyState = gURLBar.getAttribute("pageproxystate");
-  // The "browser_urlbar_stop_pending.js" test uses a MutationObserver to do
-  // some verifications at this point, and it breaks if we don't write the
-  // attribute, even if it hasn't changed (bug 1338115).
-  gURLBar.setAttribute("pageproxystate", aState);
+  gURLBar.setPageProxyState(aState);
 
   // the page proxy state is set to valid via OnLocationChange, which
   // gets called when we switch tabs.
@@ -6526,16 +6524,12 @@ nsBrowserAccess.prototype = {
 
     let referrerInfo;
     if (aFlags & Ci.nsIBrowserDOMWindow.OPEN_NO_REFERRER) {
-      referrerInfo = new ReferrerInfo(
-        Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
-        false,
-        null
-      );
+      referrerInfo = new ReferrerInfo(Ci.nsIReferrerInfo.EMPTY, false, null);
     } else {
       referrerInfo = new ReferrerInfo(
         aOpener && aOpener.document
-          ? aOpener.document.referrerPolicy
-          : Ci.nsIHttpChannel.REFERRER_POLICY_UNSET,
+          ? aOpener.document.referrerInfo.referrerPolicy
+          : Ci.nsIReferrerInfo.EMPTY,
         true,
         aOpener ? makeURI(aOpener.location.href) : null
       );

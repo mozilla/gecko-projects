@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -549,6 +547,7 @@ class MarkupContextMenu {
 
     menu.append(
       new MenuItem({
+        id: "node-menu-mutation-breakpoint-attribute",
         checked: mutationBreakpoints.attribute,
         click: () => this.markup.toggleMutationBreakpoint("attribute"),
         disabled: !isSelectionElement,
@@ -814,6 +813,7 @@ class MarkupContextMenu {
         new MenuItem({
           label: INSPECTOR_L10N.getStr("inspectorBreakpointSubmenu.label"),
           submenu: this._getDOMBreakpointSubmenu(isSelectionElement),
+          id: "node-menu-mutation-breakpoint",
         })
       );
     }

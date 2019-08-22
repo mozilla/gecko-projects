@@ -56,7 +56,7 @@ static bool exn_toSource(JSContext* cx, unsigned argc, Value* vp);
         &ErrorObject::classSpecs[JSProto_##name - JSProto_Error] \
   }
 
-const Class ErrorObject::protoClasses[JSEXN_ERROR_LIMIT] = {
+const JSClass ErrorObject::protoClasses[JSEXN_ERROR_LIMIT] = {
     IMPLEMENT_ERROR_PROTO_CLASS(Error),
 
     IMPLEMENT_ERROR_PROTO_CLASS(InternalError),
@@ -141,7 +141,7 @@ const ClassSpec ErrorObject::classSpecs[JSEXN_ERROR_LIMIT] = {
         &ErrorObject::classSpecs[JSProto_##name - JSProto_Error]      \
   }
 
-static const ClassOps ErrorObjectClassOps = {
+static const JSClassOps ErrorObjectClassOps = {
     nullptr,               /* addProperty */
     nullptr,               /* delProperty */
     nullptr,               /* enumerate */
@@ -154,7 +154,7 @@ static const ClassOps ErrorObjectClassOps = {
     nullptr,               /* trace       */
 };
 
-const Class ErrorObject::classes[JSEXN_ERROR_LIMIT] = {
+const JSClass ErrorObject::classes[JSEXN_ERROR_LIMIT] = {
     IMPLEMENT_ERROR_CLASS(Error), IMPLEMENT_ERROR_CLASS(InternalError),
     IMPLEMENT_ERROR_CLASS(EvalError), IMPLEMENT_ERROR_CLASS(RangeError),
     IMPLEMENT_ERROR_CLASS(ReferenceError), IMPLEMENT_ERROR_CLASS(SyntaxError),

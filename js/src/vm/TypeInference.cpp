@@ -650,7 +650,7 @@ void TypeSet::addType(Type type, LifoAlloc* alloc) {
       // the normal object limit.
       if (objectCount == TYPE_FLAG_OBJECT_COUNT_LIMIT) {
         for (unsigned i = 0; i < objectCount; i++) {
-          const Class* clasp = getObjectClass(i);
+          const JSClass* clasp = getObjectClass(i);
           if (clasp && !clasp->isDOMClass()) {
             goto unknownObject;
           }
@@ -1319,7 +1319,7 @@ bool CompilerConstraintInstance<T>::generateTypeConstraint(
 
 } /* anonymous namespace */
 
-const Class* TypeSet::ObjectKey::clasp() {
+const JSClass* TypeSet::ObjectKey::clasp() {
   return isGroup() ? group()->clasp() : singleton()->getClass();
 }
 
@@ -1510,12 +1510,6 @@ bool js::FinishCompilation(JSContext* cx, HandleScript script,
   for (size_t i = 0; i < constraints->numFrozenScripts(); i++) {
     const CompilerConstraintList::FrozenScript& entry =
         constraints->frozenScript(i);
-    JitScript* jitScript = entry.script->jitScript();
-    if (!jitScript) {
-      succeeded = false;
-      break;
-    }
-
     // It could happen that one of the compiled scripts was made a
     // debuggee mid-compilation (e.g., via setting a breakpoint). If so,
     // throw away the compilation.
@@ -1524,6 +1518,7 @@ bool js::FinishCompilation(JSContext* cx, HandleScript script,
       break;
     }
 
+    JitScript* jitScript = entry.script->jitScript();
     AutoSweepJitScript sweep(entry.script);
     if (!CheckFrozenTypeSet(sweep, cx, entry.thisTypes,
                             jitScript->thisTypes(sweep, entry.script))) {
@@ -1616,7 +1611,6 @@ void js::FinishDefinitePropertiesAnalysis(JSContext* cx,
         constraints->frozenScript(i);
     JSScript* script = entry.script;
     JitScript* jitScript = script->jitScript();
-    MOZ_ASSERT(jitScript);
 
     AutoSweepJitScript sweep(script);
     MOZ_ASSERT(jitScript->thisTypes(sweep, script)->isSubset(entry.thisTypes));
@@ -1630,8 +1624,8 @@ void js::FinishDefinitePropertiesAnalysis(JSContext* cx,
     }
 
     for (size_t j = 0; j < script->numBytecodeTypeSets(); j++) {
-      MOZ_ASSERT(script->jitScript()->typeArray(sweep)[j].isSubset(
-          &entry.bytecodeTypes[j]));
+      MOZ_ASSERT(
+          jitScript->typeArray(sweep)[j].isSubset(&entry.bytecodeTypes[j]));
     }
   }
 #endif
@@ -1641,9 +1635,6 @@ void js::FinishDefinitePropertiesAnalysis(JSContext* cx,
         constraints->frozenScript(i);
     JSScript* script = entry.script;
     JitScript* jitScript = script->jitScript();
-    if (!jitScript) {
-      MOZ_CRASH();
-    }
 
     AutoSweepJitScript sweep(script);
     CheckDefinitePropertiesTypeSet(sweep, cx, entry.thisTypes,
@@ -2343,17 +2334,17 @@ TemporaryTypeSet::DoubleConversion TemporaryTypeSet::convertDoubleElements(
   return DontConvertToDoubles;
 }
 
-const Class* TemporaryTypeSet::getKnownClass(
+const JSClass* TemporaryTypeSet::getKnownClass(
     CompilerConstraintList* constraints) {
   if (unknownObject()) {
     return nullptr;
   }
 
-  const Class* clasp = nullptr;
+  const JSClass* clasp = nullptr;
   unsigned count = getObjectCount();
 
   for (unsigned i = 0; i < count; i++) {
-    const Class* nclasp = getObjectClass(i);
+    const JSClass* nclasp = getObjectClass(i);
     if (!nclasp) {
       continue;
     }
@@ -2389,7 +2380,7 @@ Realm* TemporaryTypeSet::getKnownRealm(CompilerConstraintList* constraints) {
   unsigned count = getObjectCount();
 
   for (unsigned i = 0; i < count; i++) {
-    const Class* clasp = getObjectClass(i);
+    const JSClass* clasp = getObjectClass(i);
     if (!clasp) {
       continue;
     }
@@ -2435,7 +2426,7 @@ void TemporaryTypeSet::getTypedArraySharedness(
 }
 
 TemporaryTypeSet::ForAllResult TemporaryTypeSet::forAllClasses(
-    CompilerConstraintList* constraints, bool (*func)(const Class* clasp)) {
+    CompilerConstraintList* constraints, bool (*func)(const JSClass* clasp)) {
   if (unknownObject()) {
     return ForAllResult::MIXED;
   }
@@ -2448,7 +2439,7 @@ TemporaryTypeSet::ForAllResult TemporaryTypeSet::forAllClasses(
   bool true_results = false;
   bool false_results = false;
   for (unsigned i = 0; i < count; i++) {
-    const Class* clasp = getObjectClass(i);
+    const JSClass* clasp = getObjectClass(i);
     if (!clasp) {
       continue;
     }
@@ -2475,7 +2466,7 @@ TemporaryTypeSet::ForAllResult TemporaryTypeSet::forAllClasses(
 
 Scalar::Type TemporaryTypeSet::getTypedArrayType(
     CompilerConstraintList* constraints, TypedArraySharedness* sharedness) {
-  const Class* clasp = getKnownClass(constraints);
+  const JSClass* clasp = getKnownClass(constraints);
 
   if (clasp && IsTypedArrayClass(clasp)) {
     if (sharedness) {
@@ -2497,7 +2488,7 @@ bool TemporaryTypeSet::isDOMClass(CompilerConstraintList* constraints,
 
   unsigned count = getObjectCount();
   for (unsigned i = 0; i < count; i++) {
-    const Class* clasp = getObjectClass(i);
+    const JSClass* clasp = getObjectClass(i);
     if (!clasp) {
       continue;
     }
@@ -2532,7 +2523,7 @@ bool TemporaryTypeSet::maybeCallable(CompilerConstraintList* constraints) {
 
   unsigned count = getObjectCount();
   for (unsigned i = 0; i < count; i++) {
-    const Class* clasp = getObjectClass(i);
+    const JSClass* clasp = getObjectClass(i);
     if (!clasp) {
       continue;
     }
@@ -2562,7 +2553,7 @@ bool TemporaryTypeSet::maybeEmulatesUndefined(
     // The object emulates undefined if clasp->emulatesUndefined() or if
     // it's a WrapperObject, see EmulatesUndefined. Since all wrappers are
     // proxies, we can just check for that.
-    const Class* clasp = getObjectClass(i);
+    const JSClass* clasp = getObjectClass(i);
     if (!clasp) {
       continue;
     }
@@ -2646,7 +2637,7 @@ bool TemporaryTypeSet::propertyNeedsBarrier(CompilerConstraintList* constraints,
   return false;
 }
 
-bool js::ClassCanHaveExtraProperties(const Class* clasp) {
+bool js::ClassCanHaveExtraProperties(const JSClass* clasp) {
   return clasp->getResolve() || clasp->getOpsLookupProperty() ||
          clasp->getOpsGetProperty() || IsTypedArrayClass(clasp);
 }
@@ -2690,13 +2681,14 @@ void TypeZone::addPendingRecompile(JSContext* cx, JSScript* script) {
   // Let the script warm up again before attempting another compile.
   script->resetWarmUpCounterToDelayIonCompilation();
 
-  if (script->hasIonScript()) {
-    addPendingRecompile(
-        cx, RecompileInfo(script, script->ionScript()->compilationId()));
-  }
+  if (JitScript* jitScript = script->maybeJitScript()) {
+    // Trigger recompilation of the IonScript.
+    if (jitScript->hasIonScript()) {
+      addPendingRecompile(
+          cx, RecompileInfo(script, jitScript->ionScript()->compilationId()));
+    }
 
-  // Trigger recompilation of any callers inlining this script.
-  if (JitScript* jitScript = script->jitScript()) {
+    // Trigger recompilation of any callers inlining this script.
     AutoSweepJitScript sweep(script);
     RecompileInfoVector* inlinedCompilations =
         jitScript->maybeInlinedCompilations(sweep);
@@ -2737,7 +2729,7 @@ void js::PrintTypes(JSContext* cx, Compartment* comp, bool force) {
   RootedScript script(cx);
   for (auto iter = zone->cellIter<JSScript>(); !iter.done(); iter.next()) {
     script = iter;
-    if (JitScript* jitScript = script->jitScript()) {
+    if (JitScript* jitScript = script->maybeJitScript()) {
       jitScript->printTypes(cx, script);
     }
   }
@@ -3256,41 +3248,44 @@ class TypeConstraintClearDefiniteGetterSetter : public TypeConstraint {
   Compartment* maybeCompartment() override { return group->compartment(); }
 };
 
-bool js::AddClearDefiniteGetterSetterForPrototypeChain(JSContext* cx,
-                                                       ObjectGroup* group,
-                                                       HandleId id) {
+bool js::AddClearDefiniteGetterSetterForPrototypeChain(
+    JSContext* cx, DPAConstraintInfo& constraintInfo, ObjectGroup* group,
+    HandleId id, bool* added) {
   /*
    * Ensure that if the properties named here could have a getter, setter or
    * a permanent property in any transitive prototype, the definite
    * properties get cleared from the group.
    */
+
+  *added = false;
+
   RootedObject proto(cx, group->proto().toObjectOrNull());
   while (proto) {
     if (!proto->hasStaticPrototype()) {
-      return false;
+      return true;
     }
     ObjectGroup* protoGroup = JSObject::getGroup(cx, proto);
     if (!protoGroup) {
-      cx->recoverFromOutOfMemory();
       return false;
     }
     AutoSweepObjectGroup sweep(protoGroup);
     if (protoGroup->unknownProperties(sweep)) {
-      return false;
+      return true;
     }
     HeapTypeSet* protoTypes = protoGroup->getProperty(sweep, cx, proto, id);
-    if (!protoTypes || protoTypes->nonDataProperty() ||
-        protoTypes->nonWritableProperty()) {
+    if (!protoTypes) {
       return false;
     }
-    if (!protoTypes->addConstraint(
-            cx,
-            cx->typeLifoAlloc().new_<TypeConstraintClearDefiniteGetterSetter>(
-                group))) {
+    if (protoTypes->nonDataProperty() || protoTypes->nonWritableProperty()) {
+      return true;
+    }
+    if (!constraintInfo.addProtoConstraint(proto, id)) {
       return false;
     }
     proto = proto->staticPrototype();
   }
+
+  *added = true;
   return true;
 }
 
@@ -3445,7 +3440,7 @@ void JitScript::MonitorBytecodeType(JSContext* cx, JSScript* script,
                                     jsbytecode* pc, const js::Value& rval) {
   MOZ_ASSERT(BytecodeOpHasTypeSet(JSOp(*pc)));
 
-  if (!script->jitScript()) {
+  if (!script->hasJitScript()) {
     return;
   }
 
@@ -3727,6 +3722,44 @@ static bool ChangeObjectFixedSlotCount(JSContext* cx, PlainObject* obj,
   return true;
 }
 
+bool DPAConstraintInfo::finishConstraints(JSContext* cx, ObjectGroup* group) {
+  for (const ProtoConstraint& constraint : protoConstraints_) {
+    ObjectGroup* protoGroup = constraint.proto->group();
+
+    // Note: we rely on the group's type information being unchanged since
+    // AddClearDefiniteGetterSetterForPrototypeChain.
+
+    AutoSweepObjectGroup sweep(protoGroup);
+    bool unknownProperties = protoGroup->unknownProperties(sweep);
+    MOZ_RELEASE_ASSERT(!unknownProperties);
+
+    HeapTypeSet* protoTypes =
+        protoGroup->getProperty(sweep, cx, constraint.proto, constraint.id);
+    MOZ_RELEASE_ASSERT(protoTypes);
+
+    MOZ_ASSERT(!protoTypes->nonDataProperty());
+    MOZ_ASSERT(!protoTypes->nonWritableProperty());
+
+    if (!protoTypes->addConstraint(
+            cx,
+            cx->typeLifoAlloc().new_<TypeConstraintClearDefiniteGetterSetter>(
+                group))) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+  }
+
+  for (const InliningConstraint& constraint : inliningConstraints_) {
+    if (!AddClearDefiniteFunctionUsesInScript(cx, group, constraint.caller,
+                                              constraint.callee)) {
+      ReportOutOfMemory(cx);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group,
                                  bool* regenerate, bool force) {
   // Perform the new script properties analysis if necessary, returning
@@ -3845,10 +3878,12 @@ bool TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group,
 
   Vector<TypeNewScriptInitializer> initializerVector(cx);
 
+  DPAConstraintInfo constraintInfo(cx);
+
   RootedPlainObject templateRoot(cx, templateObject());
   RootedFunction fun(cx, function());
-  if (!jit::AnalyzeNewScriptDefiniteProperties(cx, fun, group, templateRoot,
-                                               &initializerVector)) {
+  if (!jit::AnalyzeNewScriptDefiniteProperties(
+          cx, constraintInfo, fun, group, templateRoot, &initializerVector)) {
     return false;
   }
 
@@ -3916,6 +3951,14 @@ bool TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group,
     // The definite properties analysis found exactly the properties that
     // are held in common by the preliminary objects. No further analysis
     // is needed.
+
+    if (!constraintInfo.finishConstraints(cx, group)) {
+      return false;
+    }
+    if (!group->newScript(sweep)) {
+      return true;
+    }
+
     group->addDefiniteProperties(cx, templateObject()->lastProperty());
 
     destroyNewScript.release();
@@ -3937,6 +3980,16 @@ bool TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group,
       cx, group->realm(), group->clasp(), protoRoot, initialFlags);
   if (!initialGroup) {
     return false;
+  }
+
+  // Add the constraints. Use the initialGroup as group referenced by the
+  // constraints because that's the group that will have the TypeNewScript
+  // associated with it. See the detachNewScript and setNewScript calls below.
+  if (!constraintInfo.finishConstraints(cx, initialGroup)) {
+    return false;
+  }
+  if (!group->newScript(sweep)) {
+    return true;
   }
 
   initialGroup->addDefiniteProperties(cx, templateObject()->lastProperty());

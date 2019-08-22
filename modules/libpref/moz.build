@@ -28,6 +28,7 @@ pref_groups = [
     'accessibility',
     'apz',
     'beacon',
+    'bidi',
     'browser',
     'canvas',
     'channelclassifier',
@@ -39,6 +40,7 @@ pref_groups = [
     'editor',
     'extensions',
     'fission',
+    'font',
     'full_screen_api',
     'general',
     'geo',
@@ -52,6 +54,7 @@ pref_groups = [
     'keyword',
     'layers',
     'layout',
+    'mathml',
     'media',
     'mousewheel',
     'network',
@@ -74,6 +77,7 @@ pref_groups = [
     'webgl',
     'widget',
     'xul',
+    'zoom',
 ]
 if CONFIG['OS_TARGET'] == 'Android':
     pref_groups += [

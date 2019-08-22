@@ -77,6 +77,7 @@
 #include "vm/TraceLogging.h"
 #include "wasm/AsmJS.h"
 #include "wasm/WasmBaselineCompile.h"
+#include "wasm/WasmInstance.h"
 #include "wasm/WasmJS.h"
 #include "wasm/WasmModule.h"
 #include "wasm/WasmSignalHandlers.h"
@@ -460,7 +461,7 @@ static bool GC(JSContext* cx, unsigned argc, Value* vp) {
   }
 
 #ifndef JS_MORE_DETERMINISTIC
-  size_t preBytes = cx->runtime()->gc.heapSize.gcBytes();
+  size_t preBytes = cx->runtime()->gc.heapSize.bytes();
 #endif
 
   if (zone) {
@@ -475,7 +476,7 @@ static bool GC(JSContext* cx, unsigned argc, Value* vp) {
   char buf[256] = {'\0'};
 #ifndef JS_MORE_DETERMINISTIC
   SprintfLiteral(buf, "before %zu, after %zu\n", preBytes,
-                 cx->runtime()->gc.heapSize.gcBytes());
+                 cx->runtime()->gc.heapSize.bytes());
 #endif
   return ReturnStringCopy(cx, args, buf);
 }
@@ -873,6 +874,42 @@ static bool WasmTextToBinary(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool ConvertToTier(JSContext* cx, HandleValue value,
+                          const wasm::Code& code, wasm::Tier* tier) {
+  RootedString option(cx, JS::ToString(cx, value));
+
+  if (!option) {
+    return false;
+  }
+
+  bool stableTier = false;
+  bool bestTier = false;
+  bool baselineTier = false;
+  bool ionTier = false;
+
+  if (!JS_StringEqualsAscii(cx, option, "stable", &stableTier) ||
+      !JS_StringEqualsAscii(cx, option, "best", &bestTier) ||
+      !JS_StringEqualsAscii(cx, option, "baseline", &baselineTier) ||
+      !JS_StringEqualsAscii(cx, option, "ion", &ionTier)) {
+    return false;
+  }
+
+  if (stableTier) {
+    *tier = code.stableTier();
+  } else if (bestTier) {
+    *tier = code.bestTier();
+  } else if (baselineTier) {
+    *tier = wasm::Tier::Baseline;
+  } else if (ionTier) {
+    *tier = wasm::Tier::Optimized;
+  } else {
+    // You can omit the argument but you can't pass just anything you like
+    return false;
+  }
+
+  return true;
+}
+
 static bool WasmExtractCode(JSContext* cx, unsigned argc, Value* vp) {
   if (!cx->options().wasm()) {
     JS_ReportErrorASCII(cx, "wasm support unavailable");
@@ -893,39 +930,12 @@ static bool WasmExtractCode(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  bool stableTier = false;
-  bool bestTier = false;
-  bool baselineTier = false;
-  bool ionTier = false;
-  if (args.length() > 1) {
-    JSString* opt = JS::ToString(cx, args[1]);
-    if (!opt) {
-      return false;
-    }
-    if (!JS_StringEqualsAscii(cx, opt, "stable", &stableTier) ||
-        !JS_StringEqualsAscii(cx, opt, "best", &bestTier) ||
-        !JS_StringEqualsAscii(cx, opt, "baseline", &baselineTier) ||
-        !JS_StringEqualsAscii(cx, opt, "ion", &ionTier)) {
-      return false;
-    }
-    // You can omit the argument but you can't pass just anything you like
-    if (!(stableTier || bestTier || baselineTier || ionTier)) {
-      args.rval().setNull();
-      return true;
-    }
-  } else {
-    stableTier = true;
-  }
-
-  wasm::Tier tier;
-  if (stableTier) {
-    tier = module->module().code().stableTier();
-  } else if (bestTier) {
-    tier = module->module().code().bestTier();
-  } else if (baselineTier) {
-    tier = wasm::Tier::Baseline;
-  } else {
-    tier = wasm::Tier::Optimized;
+  wasm::Tier tier = module->module().code().stableTier();
+  ;
+  if (args.length() > 1 &&
+      !ConvertToTier(cx, args[1], module->module().code(), &tier)) {
+    args.rval().setNull();
+    return false;
   }
 
   RootedValue result(cx);
@@ -934,6 +944,51 @@ static bool WasmExtractCode(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   args.rval().set(result);
+  return true;
+}
+
+static bool WasmDisassemble(JSContext* cx, unsigned argc, Value* vp) {
+  if (!cx->options().wasm()) {
+    JS_ReportErrorASCII(cx, "wasm support unavailable");
+    return false;
+  }
+
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  args.rval().set(UndefinedValue());
+
+  if (!args.get(0).isObject()) {
+    JS_ReportErrorASCII(cx, "argument is not an object");
+    return false;
+  }
+
+  RootedFunction func(cx, args[0].toObject().maybeUnwrapIf<JSFunction>());
+
+  if (!func || !wasm::IsWasmExportedFunction(func)) {
+    JS_ReportErrorASCII(cx, "argument is not an exported wasm function");
+    return false;
+  }
+
+  wasm::Instance& instance = wasm::ExportedFunctionToInstance(func);
+  uint32_t funcIndex = wasm::ExportedFunctionToFuncIndex(func);
+
+  wasm::Tier tier = instance.code().stableTier();
+
+  if (args.length() > 1 &&
+      !ConvertToTier(cx, args[1], instance.code(), &tier)) {
+    JS_ReportErrorASCII(cx, "invalid tier");
+    return false;
+  }
+
+  if (!instance.code().hasTier(tier)) {
+    JS_ReportErrorASCII(cx, "function missing selected tier");
+    return false;
+  }
+
+  instance.disassembleExport(cx, funcIndex, tier, [](const char* text) {
+    fprintf(stderr, "%s\n", text);
+  });
+
   return true;
 }
 
@@ -2851,6 +2906,8 @@ static bool testingFunc_inIon(JSContext* cx, unsigned argc, Value* vp) {
     // succeeds. Note: This script may have be inlined into its caller.
     if (iter.isIon()) {
       iter.script()->resetWarmUpResetCounter();
+    } else if (!iter.script()->canIonCompile()) {
+      return ReturnStringCopy(cx, args, "Unable to Ion-compile this script.");
     } else if (iter.script()->getWarmUpResetCount() >= JitWarmupResetLimit) {
       return ReturnStringCopy(
           cx, args, "Compilation is being repeatedly prevented. Giving up.");
@@ -2937,10 +2994,10 @@ class CloneBufferObject : public NativeObject {
   static const size_t NUM_SLOTS = 2;
 
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   static CloneBufferObject* Create(JSContext* cx) {
-    RootedObject obj(cx, JS_NewObject(cx, Jsvalify(&class_)));
+    RootedObject obj(cx, JS_NewObject(cx, &class_));
     if (!obj) {
       return nullptr;
     }
@@ -3152,15 +3209,16 @@ class CloneBufferObject : public NativeObject {
   }
 };
 
-static const ClassOps CloneBufferObjectClassOps = {nullptr, /* addProperty */
-                                                   nullptr, /* delProperty */
-                                                   nullptr, /* enumerate */
-                                                   nullptr, /* newEnumerate */
-                                                   nullptr, /* resolve */
-                                                   nullptr, /* mayResolve */
-                                                   CloneBufferObject::Finalize};
+static const JSClassOps CloneBufferObjectClassOps = {
+    nullptr, /* addProperty */
+    nullptr, /* delProperty */
+    nullptr, /* enumerate */
+    nullptr, /* newEnumerate */
+    nullptr, /* resolve */
+    nullptr, /* mayResolve */
+    CloneBufferObject::Finalize};
 
-const Class CloneBufferObject::class_ = {
+const JSClass CloneBufferObject::class_ = {
     "CloneBuffer",
     JSCLASS_HAS_RESERVED_SLOTS(CloneBufferObject::NUM_SLOTS) |
         JSCLASS_FOREGROUND_FINALIZE,
@@ -4342,7 +4400,7 @@ static bool AllocationMarker(JSContext* cx, unsigned argc, Value* vp) {
     allocateInsideNursery = ToBoolean(nurseryVal);
   }
 
-  static const Class cls = {"AllocationMarker"};
+  static const JSClass cls = {"AllocationMarker"};
 
   auto newKind = allocateInsideNursery ? GenericObject : TenuredObject;
   RootedObject obj(cx, NewObjectWithGivenProto(cx, &cls, nullptr, newKind));
@@ -4398,6 +4456,10 @@ static void minorGC(JSContext* cx, JSGCStatus status, void* data) {
 // Process global, should really be runtime-local.
 static MajorGC majorGCInfo;
 static MinorGC minorGCInfo;
+
+static void enterNullRealm(JSContext* cx, JSGCStatus status, void* data) {
+  JSAutoNullableRealm enterRealm(cx, nullptr);
+}
 
 } /* namespace gcCallback */
 
@@ -4486,6 +4548,8 @@ static bool SetGCCallback(JSContext* cx, unsigned argc, Value* vp) {
     gcCallback::majorGCInfo.phases = phases;
     gcCallback::majorGCInfo.depth = depth;
     JS_SetGCCallback(cx, gcCallback::majorGC, &gcCallback::majorGCInfo);
+  } else if (StringEqualsAscii(action, "enterNullRealm")) {
+    JS_SetGCCallback(cx, gcCallback::enterNullRealm, nullptr);
   } else {
     JS_ReportErrorASCII(cx, "Unknown GC callback action");
     return false;
@@ -5687,6 +5751,28 @@ static bool MonitorType(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool MarkObjectPropertiesUnknown(JSContext* cx, unsigned argc,
+                                        Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  RootedObject callee(cx, &args.callee());
+
+  if (!args.get(0).isObject()) {
+    ReportUsageErrorASCII(cx, callee, "Argument must be an object");
+    return false;
+  }
+
+  RootedObject obj(cx, &args[0].toObject());
+  RootedObjectGroup group(cx, JSObject::getGroup(cx, obj));
+  if (!group) {
+    return false;
+  }
+
+  MarkObjectGroupUnknownProperties(cx, group);
+
+  args.rval().setUndefined();
+  return true;
+}
+
 JSScript* js::TestingFunctionArgumentToScript(
     JSContext* cx, HandleValue v, JSFunction** funp /* = nullptr */) {
   if (v.isString()) {
@@ -6311,6 +6397,12 @@ gc::ZealModeHelpText),
 "  cannot be satisfied then null is returned.  If the request is 'ion' then block\n"
 "  until background compilation is complete."),
 
+    JS_FN_HELP("wasmDis", WasmDisassemble, 1, 0,
+"wasmDis(function[, tier])",
+"  Disassembles generated machine code from an exported WebAssembly function.\n"
+"  The tier is a string, 'stable', 'best', 'baseline', or 'ion'; the default is\n"
+"  'stable'."),
+
     JS_FN_HELP("wasmHasTier2CompilationCompleted", WasmHasTier2CompilationCompleted, 1, 0,
 "wasmHasTier2CompilationCompleted(module)",
 "  Returns a boolean indicating whether a given module has finished compiled code for tier2. \n"
@@ -6699,6 +6791,10 @@ gc::ZealModeHelpText),
 "    baselineCompile();  for (var i=0; i<1; i++) {} ...\n"
 "  The interpreter will enter the new jitcode at the loop header unless\n"
 "  baselineCompile returned a string or threw an error.\n"),
+
+    JS_FN_HELP("markObjectPropertiesUnknown", MarkObjectPropertiesUnknown, 1, 0,
+"markObjectPropertiesUnknown(obj)",
+"  Mark all objects in obj's object group as having unknown properties.\n"),
 
     JS_FS_HELP_END
 };

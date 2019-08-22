@@ -23,12 +23,13 @@
 //! That is why `translate_function_body` takes an object having the `WasmRuntime` trait as
 //! argument.
 use super::{hash_map, HashMap};
-use crate::environ::{FuncEnvironment, GlobalVariable, ReturnMode, WasmError, WasmResult};
+use crate::environ::{FuncEnvironment, GlobalVariable, ReturnMode, WasmResult};
 use crate::state::{ControlStackFrame, TranslationState};
 use crate::translation_utils::{
     blocktype_to_type, f32_translation, f64_translation, num_return_values,
 };
 use crate::translation_utils::{FuncIndex, MemoryIndex, SignatureIndex, TableIndex};
+use crate::wasm_unsupported;
 use core::{i32, u32};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
 use cranelift_codegen::ir::types::*;
@@ -833,6 +834,12 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         Operator::F32Le | Operator::F64Le => {
             translate_fcmp(FloatCC::LessThanOrEqual, builder, state)
         }
+        Operator::RefNull => state.push1(builder.ins().null(environ.reference_type())),
+        Operator::RefIsNull => {
+            let arg = state.pop1();
+            let val = builder.ins().is_null(arg);
+            state.push1(val);
+        }
         Operator::Wake { .. }
         | Operator::I32Wait { .. }
         | Operator::I64Wait { .. }
@@ -899,10 +906,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         | Operator::I64AtomicRmw8UCmpxchg { .. }
         | Operator::I64AtomicRmw16UCmpxchg { .. }
         | Operator::I64AtomicRmw32UCmpxchg { .. } => {
-            return Err(WasmError::Unsupported("proposed thread operators"));
-        }
-        Operator::RefNull | Operator::RefIsNull { .. } => {
-            return Err(WasmError::Unsupported("proposed reference-type operators"));
+            wasm_unsupported!("proposed thread operator {:?}", op);
         }
         Operator::MemoryInit { .. }
         | Operator::DataDrop { .. }
@@ -915,7 +919,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         | Operator::TableSet { .. }
         | Operator::TableGrow { .. }
         | Operator::TableSize { .. } => {
-            return Err(WasmError::Unsupported("proposed bulk memory operators"));
+            wasm_unsupported!("proposed bulk memory operator {:?}", op);
         }
         Operator::V128Load { .. }
         | Operator::V128Store { .. }
@@ -1059,7 +1063,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         | Operator::F64x2ConvertUI64x2
         | Operator::V8x16Shuffle1
         | Operator::V8x16Shuffle2Imm { .. } => {
-            return Err(WasmError::Unsupported("proposed SIMD operators"));
+            wasm_unsupported!("proposed SIMD operator {:?}", op);
         }
     };
     Ok(())

@@ -61,6 +61,22 @@ let ACTORS = {
     allFrames: true,
   },
 
+  FormValidation: {
+    parent: {
+      moduleURI: "resource:///actors/FormValidationParent.jsm",
+    },
+
+    child: {
+      moduleURI: "resource:///actors/FormValidationChild.jsm",
+      events: {
+        MozInvalidForm: {},
+      },
+      messages: ["FormValidation:ShowPopup", "FormValidation:HidePopup"],
+    },
+
+    allFrames: true,
+  },
+
   Plugin: {
     parent: {
       moduleURI: "resource:///actors/PluginParent.jsm",
@@ -135,6 +151,8 @@ let LEGACY_ACTORS = {
         AboutLoginsCopyLoginDetail: { wantUntrusted: true },
         AboutLoginsCreateLogin: { wantUntrusted: true },
         AboutLoginsDeleteLogin: { wantUntrusted: true },
+        AboutLoginsDismissBreachAlert: { wantUntrusted: true },
+        AboutLoginsHideFooter: { wantUntrusted: true },
         AboutLoginsImport: { wantUntrusted: true },
         AboutLoginsInit: { wantUntrusted: true },
         AboutLoginsOpenFAQ: { wantUntrusted: true },
@@ -150,6 +168,7 @@ let LEGACY_ACTORS = {
       },
       messages: [
         "AboutLogins:AllLogins",
+        "AboutLogins:LocalizeBadges",
         "AboutLogins:LoginAdded",
         "AboutLogins:LoginModified",
         "AboutLogins:LoginRemoved",
@@ -238,15 +257,6 @@ let LEGACY_ACTORS = {
         "MozDOMFullscreen:Exited": {},
       },
       messages: ["DOMFullscreen:Entered", "DOMFullscreen:CleanUp"],
-    },
-  },
-
-  FormValidation: {
-    child: {
-      module: "resource:///actors/FormValidationChild.jsm",
-      events: {
-        MozInvalidForm: {},
-      },
     },
   },
 
@@ -382,7 +392,10 @@ let LEGACY_ACTORS = {
 };
 
 (function earlyBlankFirstPaint() {
-  if (!Services.prefs.getBoolPref("browser.startup.blankWindow", false)) {
+  if (
+    AppConstants.platform == "macosx" ||
+    !Services.prefs.getBoolPref("browser.startup.blankWindow", false)
+  ) {
     return;
   }
 
@@ -544,15 +557,11 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AboutLoginsParent: "resource:///modules/AboutLoginsParent.jsm",
   AsyncPrefs: "resource://gre/modules/AsyncPrefs.jsm",
   ContentClick: "resource:///modules/ContentClick.jsm",
-  FormValidationHandler: "resource:///modules/FormValidationHandler.jsm",
   LoginManagerParent: "resource://gre/modules/LoginManagerParent.jsm",
   PluginManager: "resource:///actors/PluginParent.jsm",
   PictureInPicture: "resource://gre/modules/PictureInPicture.jsm",
   ReaderParent: "resource:///modules/ReaderParent.jsm",
 });
-
-/* global ContentPrefServiceParent:false, ContentSearch:false,
-          UpdateListener:false, webrtcUI:false */
 
 /**
  * IF YOU ADD OR REMOVE FROM THIS LIST, PLEASE UPDATE THE LIST ABOVE AS WELL.
@@ -633,6 +642,8 @@ const listeners = {
   mm: {
     "AboutLogins:CreateLogin": ["AboutLoginsParent"],
     "AboutLogins:DeleteLogin": ["AboutLoginsParent"],
+    "AboutLogins:DismissBreachAlert": ["AboutLoginsParent"],
+    "AboutLogins:HideFooter": ["AboutLoginsParent"],
     "AboutLogins:Import": ["AboutLoginsParent"],
     "AboutLogins:MasterPasswordRequest": ["AboutLoginsParent"],
     "AboutLogins:OpenFAQ": ["AboutLoginsParent"],
@@ -647,12 +658,11 @@ const listeners = {
     "AboutLogins:UpdateLogin": ["AboutLoginsParent"],
     "Content:Click": ["ContentClick"],
     ContentSearch: ["ContentSearch"],
-    "FormValidation:ShowPopup": ["FormValidationHandler"],
-    "FormValidation:HidePopup": ["FormValidationHandler"],
     "PictureInPicture:Request": ["PictureInPicture"],
     "PictureInPicture:Close": ["PictureInPicture"],
     "PictureInPicture:Playing": ["PictureInPicture"],
     "PictureInPicture:Paused": ["PictureInPicture"],
+    "PictureInPicture:OpenToggleContextMenu": ["PictureInPicture"],
     "Reader:FaviconRequest": ["ReaderParent"],
     "Reader:UpdateReaderButton": ["ReaderParent"],
     // PLEASE KEEP THIS LIST IN SYNC WITH THE MOBILE LISTENERS IN BrowserCLH.js
@@ -1750,6 +1760,13 @@ BrowserGlue.prototype = {
       recordIdentityPopupEvents
     );
 
+    Services.telemetry.setEventRecordingEnabled(
+      "security.ui.protectionspopup",
+      Services.prefs.getBoolPref(
+        "security.protectionspopup.recordEventTelemetry"
+      )
+    );
+
     let tpEnabled = Services.prefs.getBoolPref(
       "privacy.trackingprotection.enabled"
     );
@@ -1975,10 +1992,6 @@ BrowserGlue.prototype = {
     this._monitorScreenshotsPref();
     this._monitorWebcompatReporterPref();
 
-    if (Services.prefs.getBoolPref("corroborator.enabled", true)) {
-      Corroborate.init().catch(Cu.reportError);
-    }
-
     let pService = Cc["@mozilla.org/toolkit/profile-service;1"].getService(
       Ci.nsIToolkitProfileService
     );
@@ -2129,6 +2142,12 @@ BrowserGlue.prototype = {
 
     Services.tm.idleDispatchToMainThread(() => {
       TabUnloader.init();
+    });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      if (Services.prefs.getBoolPref("corroborator.enabled", false)) {
+        Corroborate.init().catch(Cu.reportError);
+      }
     });
 
     // Marionette needs to be initialized as very last step
@@ -2695,7 +2714,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 86;
+    const UI_VERSION = 87;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -3076,16 +3095,11 @@ BrowserGlue.prototype = {
       flashPermissions.forEach(p => Services.perms.removePermission(p));
     }
 
-    if (currentUIVersion < 85) {
-      const TRACKING_TABLE_PREF = "urlclassifier.trackingTable";
-      const CUSTOM_BLOCKING_PREF =
-        "browser.contentblocking.customBlockList.preferences.ui.enabled";
-      // Check if user has set custom tables pref, and show custom block list UI
-      // in the about:preferences#privacy custom panel.
-      if (Services.prefs.prefHasUserValue(TRACKING_TABLE_PREF)) {
-        Services.prefs.setBoolPref(CUSTOM_BLOCKING_PREF, true);
-      }
-    }
+    // currentUIVersion < 85 is missing due to the following:
+    // Origianlly, Bug #1568900 added currentUIVersion 85 but was targeting FF70 release.
+    // In between it landing in FF70, Bug #1562601 (currentUIVersion 86) landed and
+    // was uplifted to Beta. To make sure the migration doesn't get skipped, the
+    // code block that was at 85 has been moved/bumped to currentUIVersion 87.
 
     if (currentUIVersion < 86) {
       // If the user has set "media.autoplay.allow-muted" to false
@@ -3103,6 +3117,17 @@ BrowserGlue.prototype = {
         );
       }
       Services.prefs.clearUserPref("media.autoplay.allow-muted");
+    }
+
+    if (currentUIVersion < 87) {
+      const TRACKING_TABLE_PREF = "urlclassifier.trackingTable";
+      const CUSTOM_BLOCKING_PREF =
+        "browser.contentblocking.customBlockList.preferences.ui.enabled";
+      // Check if user has set custom tables pref, and show custom block list UI
+      // in the about:preferences#privacy custom panel.
+      if (Services.prefs.prefHasUserValue(TRACKING_TABLE_PREF)) {
+        Services.prefs.setBoolPref(CUSTOM_BLOCKING_PREF, true);
+      }
     }
 
     // Update the migration version.

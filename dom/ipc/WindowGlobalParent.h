@@ -139,6 +139,8 @@ class WindowGlobalParent final : public WindowGlobalActor,
   JSWindowActor::Type GetSide() override { return JSWindowActor::Type::Parent; }
 
   // IPC messages
+  mozilla::ipc::IPCResult RecvLoadURI(dom::BrowsingContext* aTargetBC,
+                                      nsDocShellLoadState* aLoadState);
   mozilla::ipc::IPCResult RecvUpdateDocumentURI(nsIURI* aURI);
   mozilla::ipc::IPCResult RecvSetIsInitialDocument(bool aIsInitialDocument) {
     mIsInitialDocument = aIsInitialDocument;
@@ -156,7 +158,7 @@ class WindowGlobalParent final : public WindowGlobalActor,
 
   void DrawSnapshotInternal(gfx::CrossProcessPaint* aPaint,
                             const Maybe<IntRect>& aRect, float aScale,
-                            nscolor aBackgroundColor);
+                            nscolor aBackgroundColor, uint32_t aFlags);
 
  private:
   ~WindowGlobalParent();

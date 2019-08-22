@@ -843,17 +843,16 @@ nsBrowserContentHandler.prototype = {
 
   /* nsICommandLineValidator */
   validate: function bch_validate(cmdLine) {
-    // Other handlers may use osint so only handle the osint flag if the url
-    // flag is also present and the command line is valid.
-    var osintFlagIdx = cmdLine.findFlag("osint", false);
     var urlFlagIdx = cmdLine.findFlag("url", false);
     if (
       urlFlagIdx > -1 &&
-      (osintFlagIdx > -1 ||
-        cmdLine.state == Ci.nsICommandLine.STATE_REMOTE_EXPLICIT)
+      cmdLine.state == Ci.nsICommandLine.STATE_REMOTE_EXPLICIT
     ) {
       var urlParam = cmdLine.getArgument(urlFlagIdx + 1);
-      if (cmdLine.length != urlFlagIdx + 2 || /firefoxurl:/i.test(urlParam)) {
+      if (
+        cmdLine.length != urlFlagIdx + 2 ||
+        /firefoxurl(-[a-f0-9]+)?:/i.test(urlParam)
+      ) {
         throw Cr.NS_ERROR_ABORT;
       }
       var isDefault = false;
@@ -870,7 +869,6 @@ nsBrowserContentHandler.prototype = {
         // We don't have to show the instruction page.
         throw Cr.NS_ERROR_ABORT;
       }
-      cmdLine.handleFlag("osint", false);
     }
   },
 };
@@ -1034,6 +1032,19 @@ nsDefaultCommandLineHandler.prototype = {
       if (win) {
         win.close();
       }
+      // If this is a silent run where we do not open any window, we must
+      // notify shutdown so that the quit-application-granted notification
+      // will happen.  This is required in the AddonManager to properly
+      // handle shutdown blockers for Telemetry and XPIDatabase.
+      // Some command handlers open a window asynchronously, so lets give
+      // that time and then verify that a window was not opened before
+      // quiting.
+      Services.tm.idleDispatchToMainThread(() => {
+        win = Services.wm.getMostRecentWindow(null);
+        if (!win) {
+          Services.startup.quit(Services.startup.eForceQuit);
+        }
+      }, 1);
     }
   },
 

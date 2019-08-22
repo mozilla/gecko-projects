@@ -22,8 +22,8 @@
 #include <string>
 #include <type_traits>
 
+#include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
-#include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "ds/Sort.h"
 #include "gc/FreeOp.h"
@@ -33,6 +33,14 @@
 #include "js/StableStringChars.h"
 #include "js/TypeDecls.h"
 #include "js/Vector.h"
+#include "unicode/udata.h"
+#include "unicode/ufieldpositer.h"
+#include "unicode/uformattedvalue.h"
+#include "unicode/unum.h"
+#include "unicode/unumberformatter.h"
+#include "unicode/unumsys.h"
+#include "unicode/ures.h"
+#include "unicode/utypes.h"
 #include "vm/BigIntType.h"
 #include "vm/JSContext.h"
 #include "vm/SelfHosting.h"
@@ -57,15 +65,15 @@ using js::intl::IcuLocale;
 
 using JS::AutoStableStringChars;
 
-const ClassOps NumberFormatObject::classOps_ = {nullptr, /* addProperty */
-                                                nullptr, /* delProperty */
-                                                nullptr, /* enumerate */
-                                                nullptr, /* newEnumerate */
-                                                nullptr, /* resolve */
-                                                nullptr, /* mayResolve */
-                                                NumberFormatObject::finalize};
+const JSClassOps NumberFormatObject::classOps_ = {nullptr, /* addProperty */
+                                                  nullptr, /* delProperty */
+                                                  nullptr, /* enumerate */
+                                                  nullptr, /* newEnumerate */
+                                                  nullptr, /* resolve */
+                                                  nullptr, /* mayResolve */
+                                                  NumberFormatObject::finalize};
 
-const Class NumberFormatObject::class_ = {
+const JSClass NumberFormatObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(NumberFormatObject::SLOT_COUNT) |
         JSCLASS_FOREGROUND_FINALIZE,
@@ -118,10 +126,6 @@ static bool NumberFormat(JSContext* cx, const CallArgs& args, bool construct) {
   if (!numberFormat) {
     return false;
   }
-
-  numberFormat->setFixedSlot(NumberFormatObject::INTERNALS_SLOT, NullValue());
-  numberFormat->setNumberFormatter(nullptr);
-  numberFormat->setFormattedNumber(nullptr);
 
   RootedValue thisValue(cx,
                         construct ? ObjectValue(*numberFormat) : args.thisv());
@@ -1342,7 +1346,6 @@ ArrayObject* NumberFormatFields::toArray(JSContext* cx,
 
   // Finally, generate the result array.
   size_t lastEndIndex = 0;
-  uint32_t partIndex = 0;
   RootedObject singlePart(cx);
   RootedValue propVal(cx);
 
@@ -1396,13 +1399,11 @@ ArrayObject* NumberFormatFields::toArray(JSContext* cx,
       }
     }
 
-    propVal.setObject(*singlePart);
-    if (!DefineDataElement(cx, partsArray, partIndex, propVal)) {
+    if (!NewbornArrayPush(cx, partsArray, ObjectValue(*singlePart))) {
       return nullptr;
     }
 
     lastEndIndex = endIndex;
-    partIndex++;
   } while (true);
 
   MOZ_ASSERT(lastEndIndex == overallResult->length(),

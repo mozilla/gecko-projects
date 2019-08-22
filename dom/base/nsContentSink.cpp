@@ -702,8 +702,8 @@ nsresult nsContentSink::ProcessStyleLinkFromHeader(
 
   // Link header is working like a <link> node, so referrerPolicy attr should
   // have higher priority than referrer policy from document.
-  net::ReferrerPolicy policy =
-      net::AttributeReferrerPolicyFromString(aReferrerPolicy);
+  ReferrerPolicy policy =
+      ReferrerInfo::ReferrerPolicyAttributeFromString(aReferrerPolicy);
   nsCOMPtr<nsIReferrerInfo> referrerInfo =
       ReferrerInfo::CreateFromDocumentAndPolicyOverride(mDocument, policy);
 
@@ -800,8 +800,8 @@ void nsContentSink::PrefetchPreloadHref(const nsAString& aHref,
 
       if (preload) {
         nsAttrValue asAttr;
-        Link::ParseAsValue(aAs, asAttr);
-        policyType = Link::AsValueToContentPolicy(asAttr);
+        HTMLLinkElement::ParseAsValue(aAs, asAttr);
+        policyType = HTMLLinkElement::AsValueToContentPolicy(asAttr);
 
         if (policyType == nsIContentPolicy::TYPE_INVALID) {
           // Ignore preload with a wrong or empty as attribute.

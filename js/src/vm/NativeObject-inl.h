@@ -140,7 +140,7 @@ inline void NativeObject::copyDenseElements(uint32_t dstStart, const Value* src,
   if (count == 0) {
     return;
   }
-  if (JS::shadow::Zone::asShadowZone(zone())->needsIncrementalBarrier()) {
+  if (zone()->needsIncrementalBarrier()) {
     uint32_t numShifted = getElementsHeader()->numShiftedElements();
     for (uint32_t i = 0; i < count; ++i) {
       elements_[dstStart + i].set(this, HeapSlot::Element,
@@ -233,7 +233,7 @@ inline void NativeObject::moveDenseElements(uint32_t dstStart,
    * write barrier is invoked here on B, despite the fact that it exists in
    * the array before and after the move.
    */
-  if (JS::shadow::Zone::asShadowZone(zone())->needsIncrementalBarrier()) {
+  if (zone()->needsIncrementalBarrier()) {
     uint32_t numShifted = getElementsHeader()->numShiftedElements();
     if (dstStart < srcStart) {
       HeapSlot* dst = elements_ + dstStart;
@@ -258,7 +258,7 @@ inline void NativeObject::moveDenseElements(uint32_t dstStart,
 inline void NativeObject::moveDenseElementsNoPreBarrier(uint32_t dstStart,
                                                         uint32_t srcStart,
                                                         uint32_t count) {
-  MOZ_ASSERT(!shadowZone()->needsIncrementalBarrier());
+  MOZ_ASSERT(!zone()->needsIncrementalBarrier());
 
   MOZ_ASSERT(dstStart + count <= getDenseCapacity());
   MOZ_ASSERT(srcStart + count <= getDenseCapacity());
@@ -270,7 +270,7 @@ inline void NativeObject::moveDenseElementsNoPreBarrier(uint32_t dstStart,
 }
 
 inline void NativeObject::reverseDenseElementsNoPreBarrier(uint32_t length) {
-  MOZ_ASSERT(!shadowZone()->needsIncrementalBarrier());
+  MOZ_ASSERT(!zone()->needsIncrementalBarrier());
 
   MOZ_ASSERT(!denseElementsAreCopyOnWrite());
   MOZ_ASSERT(isExtensible());
@@ -479,7 +479,7 @@ inline bool NativeObject::isInWholeCellBuffer() const {
     js::HandleShape shape, js::HandleObjectGroup group) {
   debugCheckNewObject(group, shape, kind, heap);
 
-  const js::Class* clasp = group->clasp();
+  const JSClass* clasp = group->clasp();
   MOZ_ASSERT(clasp->isNative());
   MOZ_ASSERT(!clasp->isJSFunction(), "should use JSFunction::create");
 
@@ -634,21 +634,21 @@ static inline PlainObject* CopyInitializerObject(
 }
 
 inline NativeObject* NewNativeObjectWithGivenTaggedProto(
-    JSContext* cx, const Class* clasp, Handle<TaggedProto> proto,
+    JSContext* cx, const JSClass* clasp, Handle<TaggedProto> proto,
     gc::AllocKind allocKind, NewObjectKind newKind) {
   return MaybeNativeObject(
       NewObjectWithGivenTaggedProto(cx, clasp, proto, allocKind, newKind));
 }
 
 inline NativeObject* NewNativeObjectWithGivenTaggedProto(
-    JSContext* cx, const Class* clasp, Handle<TaggedProto> proto,
+    JSContext* cx, const JSClass* clasp, Handle<TaggedProto> proto,
     NewObjectKind newKind = GenericObject) {
   return MaybeNativeObject(
       NewObjectWithGivenTaggedProto(cx, clasp, proto, newKind));
 }
 
 inline NativeObject* NewNativeObjectWithGivenProto(JSContext* cx,
-                                                   const Class* clasp,
+                                                   const JSClass* clasp,
                                                    HandleObject proto,
                                                    gc::AllocKind allocKind,
                                                    NewObjectKind newKind) {
@@ -657,20 +657,20 @@ inline NativeObject* NewNativeObjectWithGivenProto(JSContext* cx,
 }
 
 inline NativeObject* NewNativeObjectWithGivenProto(
-    JSContext* cx, const Class* clasp, HandleObject proto,
+    JSContext* cx, const JSClass* clasp, HandleObject proto,
     NewObjectKind newKind = GenericObject) {
   return MaybeNativeObject(NewObjectWithGivenProto(cx, clasp, proto, newKind));
 }
 
 inline NativeObject* NewNativeObjectWithClassProto(
-    JSContext* cx, const Class* clasp, HandleObject proto,
+    JSContext* cx, const JSClass* clasp, HandleObject proto,
     gc::AllocKind allocKind, NewObjectKind newKind = GenericObject) {
   return MaybeNativeObject(
       NewObjectWithClassProto(cx, clasp, proto, allocKind, newKind));
 }
 
 inline NativeObject* NewNativeObjectWithClassProto(
-    JSContext* cx, const Class* clasp, HandleObject proto,
+    JSContext* cx, const JSClass* clasp, HandleObject proto,
     NewObjectKind newKind = GenericObject) {
   return MaybeNativeObject(NewObjectWithClassProto(cx, clasp, proto, newKind));
 }

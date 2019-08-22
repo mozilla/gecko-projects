@@ -987,6 +987,11 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
       }
 #endif
 #ifdef ENABLE_WASM_REFTYPES
+      case uint16_t(Op::RefFunc): {
+        uint32_t unusedIndex;
+        CHECK(iter.readRefFunc(&unusedIndex));
+        break;
+      }
       case uint16_t(Op::RefNull): {
         if (!env.refTypesEnabled()) {
           return iter.unrecognizedOpcode(&op);
@@ -1668,7 +1673,7 @@ static bool DecodeTableTypeAndLimits(Decoder& d, bool refTypesEnabled,
   return tables->emplaceBack(tableKind, limits);
 }
 
-static bool GlobalIsJSCompatible(Decoder& d, ValType type, bool isMutable) {
+static bool GlobalIsJSCompatible(Decoder& d, ValType type) {
   switch (type.code()) {
     case ValType::I32:
     case ValType::F32:
@@ -1824,7 +1829,7 @@ static bool DecodeImport(Decoder& d, ModuleEnvironment* env) {
                             env->gcTypesEnabled(), &type, &isMutable)) {
         return false;
       }
-      if (!GlobalIsJSCompatible(d, type, isMutable)) {
+      if (!GlobalIsJSCompatible(d, type)) {
         return false;
       }
       if (!env->globals.append(
@@ -2200,7 +2205,7 @@ static bool DecodeExport(Decoder& d, ModuleEnvironment* env,
 
       GlobalDesc* global = &env->globals[globalIndex];
       global->setIsExport();
-      if (!GlobalIsJSCompatible(d, global->type(), global->isMutable())) {
+      if (!GlobalIsJSCompatible(d, global->type())) {
         return false;
       }
 
@@ -2275,6 +2280,23 @@ static bool DecodeStartSection(Decoder& d, ModuleEnvironment* env) {
   return d.finishSection(*range, "start");
 }
 
+static inline ElemSegment::Kind NormalizeElemSegmentKind(
+    ElemSegmentKind decodedKind) {
+  switch (decodedKind) {
+    case ElemSegmentKind::Active:
+    case ElemSegmentKind::ActiveWithIndex: {
+      return ElemSegment::Kind::Active;
+    }
+    case ElemSegmentKind::Passive: {
+      return ElemSegment::Kind::Passive;
+    }
+    case ElemSegmentKind::Declared: {
+      return ElemSegment::Kind::Declared;
+    }
+  }
+  MOZ_CRASH("unexpected elem segment kind");
+}
+
 static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
   MaybeSectionRange range;
   if (!d.startSection(SectionId::Elem, env, &range, "elem")) {
@@ -2314,24 +2336,7 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
     }
 
     ElemSegmentKind kind = flags->kind();
-
-    switch (kind) {
-      case ElemSegmentKind::Active:
-      case ElemSegmentKind::ActiveWithIndex: {
-        seg->kind = ElemSegment::Kind::Active;
-        break;
-      }
-      case ElemSegmentKind::Passive: {
-        seg->kind = ElemSegment::Kind::Passive;
-        break;
-      }
-      case ElemSegmentKind::Declared: {
-        seg->kind = ElemSegment::Kind::Declared;
-        break;
-      }
-      default:
-        MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE();
-    }
+    seg->kind = NormalizeElemSegmentKind(kind);
 
     if (kind == ElemSegmentKind::Active ||
         kind == ElemSegmentKind::ActiveWithIndex) {
@@ -2470,6 +2475,9 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
       }
 
       seg->elemFuncIndices.infallibleAppend(funcIndex);
+      if (funcIndex != NullFuncIndex) {
+        env->validForRefFunc.setBit(funcIndex);
+      }
     }
 
     env->elemSegments.infallibleAppend(std::move(seg));

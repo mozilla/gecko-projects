@@ -31,7 +31,9 @@
 #include "mozilla/dom/WheelEventBinding.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_mousewheel.h"
 #include "mozilla/StaticPrefs_ui.h"
+#include "mozilla/StaticPrefs_zoom.h"
 
 #include "ContentEventHandler.h"
 #include "IMEContentObserver.h"
@@ -250,7 +252,6 @@ EventStateManager::EventStateManager()
     UpdateUserActivityTimer();
   }
   ++sESMInstanceCount;
-  WheelTransaction::InitializeStatics();
 }
 
 nsresult EventStateManager::UpdateUserActivityTimer() {
@@ -1289,10 +1290,13 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
       uint32_t dropEffect = nsIDragService::DRAGDROP_ACTION_NONE;
       uint32_t action = nsIDragService::DRAGDROP_ACTION_NONE;
       nsCOMPtr<nsIPrincipal> principal;
+      nsCOMPtr<nsIContentSecurityPolicy> csp;
+
       if (dragSession) {
         dragSession->DragEventDispatchedToChildProcess();
         dragSession->GetDragAction(&action);
         dragSession->GetTriggeringPrincipal(getter_AddRefs(principal));
+        dragSession->GetCsp(getter_AddRefs(csp));
         RefPtr<DataTransfer> initialDataTransfer =
             dragSession->GetDataTransfer();
         if (initialDataTransfer) {
@@ -1301,7 +1305,8 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
       }
 
       browserParent->SendRealDragEvent(*aEvent->AsDragEvent(), action,
-                                       dropEffect, IPC::Principal(principal));
+                                       dropEffect, IPC::Principal(principal),
+                                       csp);
       return;
     }
     case ePluginEventClass: {
@@ -1793,6 +1798,7 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       RefPtr<RemoteDragStartData> remoteDragStartData;
       nsCOMPtr<nsIContent> eventContent, targetContent;
       nsCOMPtr<nsIPrincipal> principal;
+      nsCOMPtr<nsIContentSecurityPolicy> csp;
       mCurrentTarget->GetContentForEvent(aEvent, getter_AddRefs(eventContent));
       if (eventContent) {
         // If the content is a text node in a password field, we shouldn't
@@ -1816,7 +1822,7 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
         DetermineDragTargetAndDefaultData(
             window, eventContent, dataTransfer, getter_AddRefs(selection),
             getter_AddRefs(remoteDragStartData), getter_AddRefs(targetContent),
-            getter_AddRefs(principal));
+            getter_AddRefs(principal), getter_AddRefs(csp));
       }
 
       // Stop tracking the drag gesture now. This should stop us from
@@ -1871,7 +1877,8 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
 
       nsCOMPtr<nsIObserverService> observerService =
           mozilla::services::GetObserverService();
-      // Emit observer event to allow addons to modify the DataTransfer object.
+      // Emit observer event to allow addons to modify the DataTransfer
+      // object.
       if (observerService) {
         observerService->NotifyObservers(dataTransfer,
                                          "on-datatransfer-available", nullptr);
@@ -1880,7 +1887,7 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       if (status != nsEventStatus_eConsumeNoDefault) {
         bool dragStarted =
             DoDefaultDragStart(aPresContext, event, dataTransfer, targetContent,
-                               selection, remoteDragStartData, principal);
+                               selection, remoteDragStartData, principal, csp);
         if (dragStarted) {
           sActiveESM = nullptr;
           MaybeFirePointerCancel(aEvent);
@@ -1902,7 +1909,7 @@ void EventStateManager::DetermineDragTargetAndDefaultData(
     nsPIDOMWindowOuter* aWindow, nsIContent* aSelectionTarget,
     DataTransfer* aDataTransfer, Selection** aSelection,
     RemoteDragStartData** aRemoteDragStartData, nsIContent** aTargetNode,
-    nsIPrincipal** aPrincipal) {
+    nsIPrincipal** aPrincipal, nsIContentSecurityPolicy** aCsp) {
   *aTargetNode = nullptr;
 
   nsCOMPtr<nsIContent> dragDataNode;
@@ -1917,7 +1924,8 @@ void EventStateManager::DetermineDragTargetAndDefaultData(
     if (mGestureDownDragStartData) {
       // A child process started a drag so use any data it assigned for the dnd
       // session.
-      mGestureDownDragStartData->AddInitialDnDDataTo(aDataTransfer, aPrincipal);
+      mGestureDownDragStartData->AddInitialDnDDataTo(aDataTransfer, aPrincipal,
+                                                     aCsp);
       mGestureDownDragStartData.forget(aRemoteDragStartData);
     }
   } else {
@@ -1933,7 +1941,7 @@ void EventStateManager::DetermineDragTargetAndDefaultData(
     bool wasAlt = (mGestureModifiers & MODIFIER_ALT) != 0;
     nsresult rv = nsContentAreaDragDrop::GetDragData(
         aWindow, mGestureDownContent, aSelectionTarget, wasAlt, aDataTransfer,
-        &canDrag, aSelection, getter_AddRefs(dragDataNode), aPrincipal);
+        &canDrag, aSelection, getter_AddRefs(dragDataNode), aPrincipal, aCsp);
     if (NS_FAILED(rv) || !canDrag) {
       return;
     }
@@ -1995,7 +2003,8 @@ void EventStateManager::DetermineDragTargetAndDefaultData(
 bool EventStateManager::DoDefaultDragStart(
     nsPresContext* aPresContext, WidgetDragEvent* aDragEvent,
     DataTransfer* aDataTransfer, nsIContent* aDragTarget, Selection* aSelection,
-    RemoteDragStartData* aDragStartData, nsIPrincipal* aPrincipal) {
+    RemoteDragStartData* aDragStartData, nsIPrincipal* aPrincipal,
+    nsIContentSecurityPolicy* aCsp) {
   nsCOMPtr<nsIDragService> dragService =
       do_GetService("@mozilla.org/widget/dragservice;1");
   if (!dragService) return false;
@@ -2068,16 +2077,16 @@ bool EventStateManager::DoDefaultDragStart(
   // other than a selection is being dragged.
   if (!dragImage && aSelection) {
     dragService->InvokeDragSessionWithSelection(
-        aSelection, aPrincipal, transArray, action, event, dataTransfer);
+        aSelection, aPrincipal, aCsp, transArray, action, event, dataTransfer);
   } else if (aDragStartData) {
     MOZ_ASSERT(XRE_IsParentProcess());
     dragService->InvokeDragSessionWithRemoteImage(
-        dragTarget, aPrincipal, transArray, action, aDragStartData, event,
+        dragTarget, aPrincipal, aCsp, transArray, action, aDragStartData, event,
         dataTransfer);
   } else {
-    dragService->InvokeDragSessionWithImage(dragTarget, aPrincipal, transArray,
-                                            action, dragImage, imageX, imageY,
-                                            event, dataTransfer);
+    dragService->InvokeDragSessionWithImage(
+        dragTarget, aPrincipal, aCsp, transArray, action, dragImage, imageX,
+        imageY, event, dataTransfer);
   }
 
   return true;
@@ -2127,8 +2136,8 @@ nsresult EventStateManager::ChangeTextSize(int32_t change) {
 
   if (cv) {
     float textzoom;
-    float zoomMin = ((float)Preferences::GetInt("zoom.minPercent", 50)) / 100;
-    float zoomMax = ((float)Preferences::GetInt("zoom.maxPercent", 300)) / 100;
+    float zoomMin = ((float)StaticPrefs::zoom_minPercent()) / 100;
+    float zoomMax = ((float)StaticPrefs::zoom_maxPercent()) / 100;
     cv->GetTextZoom(&textzoom);
     textzoom += ((float)change) / 10;
     if (textzoom < zoomMin)
@@ -2148,8 +2157,8 @@ nsresult EventStateManager::ChangeFullZoom(int32_t change) {
 
   if (cv) {
     float fullzoom;
-    float zoomMin = ((float)Preferences::GetInt("zoom.minPercent", 50)) / 100;
-    float zoomMax = ((float)Preferences::GetInt("zoom.maxPercent", 300)) / 100;
+    float zoomMin = ((float)StaticPrefs::zoom_minPercent()) / 100;
+    float zoomMax = ((float)StaticPrefs::zoom_maxPercent()) / 100;
     cv->GetFullZoom(&fullzoom);
     fullzoom += ((float)change) / 10;
     if (fullzoom < zoomMin)
@@ -5840,7 +5849,8 @@ void EventStateManager::DeltaAccumulator::InitLineOrPageDelta(
   // Reset if the previous wheel event is too old.
   if (!mLastTime.IsNull()) {
     TimeDuration duration = TimeStamp::Now() - mLastTime;
-    if (duration.ToMilliseconds() > WheelTransaction::GetTimeoutTime()) {
+    if (duration.ToMilliseconds() >
+        StaticPrefs::mousewheel_transaction_timeout()) {
       Reset();
     }
   }

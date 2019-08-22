@@ -172,6 +172,8 @@ pref("devtools.application.enabled", false);
 // The default Network Monitor UI settings
 pref("devtools.netmonitor.panes-network-details-width", 550);
 pref("devtools.netmonitor.panes-network-details-height", 450);
+pref("devtools.netmonitor.panes-search-width", 550);
+pref("devtools.netmonitor.panes-search-height", 450);
 pref("devtools.netmonitor.filters", "[\"all\"]");
 pref("devtools.netmonitor.visibleColumns",
   "[\"status\",\"method\",\"domain\",\"file\",\"cause\",\"type\",\"transferred\",\"contentSize\",\"waterfall\"]"
@@ -182,6 +184,7 @@ pref("devtools.netmonitor.ws.payload-preview-height", 128);
 pref("devtools.netmonitor.ws.visibleColumns",
   '["data", "time"]'
 );
+pref("devtools.netmonitor.ws.displayed-frames.limit", 500);
 
 pref("devtools.netmonitor.response.ui.limit", 10240);
 
@@ -405,3 +408,10 @@ pref("devtools.debugger.features.map-await-expression", true);
 // This is currently not exposed by any UI to avoid making
 // about:devtools-toolbox tabs unusable by mistake.
 pref("devtools.popup.disable_autohide", false);
+
+// Load the DevTools toolbox in a frame with type=content instead of type=chrome
+// See Bug 1539979 for more details.
+// We keep the option of running devtools in a chrome frame while we fix racy
+// tests that started failing when using type=content, but this ultimately should
+// be removed.
+pref("devtools.toolbox.content-frame", true);

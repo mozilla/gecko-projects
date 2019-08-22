@@ -43,34 +43,6 @@ NS_IMPL_ISUPPORTS(nsContentSecurityManager, nsIContentSecurityManager,
 
 static mozilla::LazyLogModule sCSMLog("CSMLog");
 
-// This allowlist contains files that are permanently allowed to use eval()-like
-// functions. It is supposed to be restricted to files that are exclusively used
-// in testing contexts.
-static nsLiteralCString evalAllowlist[] = {
-    // Test-only third-party library
-    NS_LITERAL_CSTRING("resource://testing-common/sinon-7.2.7.js"),
-    // Test-only third-party library
-    NS_LITERAL_CSTRING("resource://testing-common/ajv-4.1.1.js"),
-    // Test-only utility
-    NS_LITERAL_CSTRING("resource://testing-common/content-task.js"),
-
-    // The Browser Toolbox/Console
-    NS_LITERAL_CSTRING("debugger"),
-
-    // The following files are NOT supposed to stay on this whitelist.
-    // Bug numbers indicate planned removal of each file.
-
-    // Bug 1498560
-    NS_LITERAL_CSTRING("chrome://global/content/bindings/autocomplete.xml"),
-};
-
-// We also permit two specific idioms in eval()-like contexts. We'd like to
-// elminate these too; but there are in-the-wild Mozilla privileged extensions
-// that use them.
-static NS_NAMED_LITERAL_STRING(sAllowedEval1, "this");
-static NS_NAMED_LITERAL_STRING(sAllowedEval2,
-                               "function anonymous(\n) {\nreturn this\n}");
-
 static Atomic<bool, mozilla::Relaxed> sTelemetryEventEnabled(false);
 
 /* static */
@@ -388,6 +360,34 @@ FilenameType nsContentSecurityManager::FilenameToEvalType(
 /* static */
 void nsContentSecurityManager::AssertEvalNotRestricted(
     JSContext* cx, nsIPrincipal* aSubjectPrincipal, const nsAString& aScript) {
+  // This allowlist contains files that are permanently allowed to use
+  // eval()-like functions. It is supposed to be restricted to files that are
+  // exclusively used in testing contexts.
+  static nsLiteralCString evalAllowlist[] = {
+      // Test-only third-party library
+      NS_LITERAL_CSTRING("resource://testing-common/sinon-7.2.7.js"),
+      // Test-only third-party library
+      NS_LITERAL_CSTRING("resource://testing-common/ajv-4.1.1.js"),
+      // Test-only utility
+      NS_LITERAL_CSTRING("resource://testing-common/content-task.js"),
+
+      // The Browser Toolbox/Console
+      NS_LITERAL_CSTRING("debugger"),
+
+      // The following files are NOT supposed to stay on this whitelist.
+      // Bug numbers indicate planned removal of each file.
+
+      // Bug 1498560
+      NS_LITERAL_CSTRING("chrome://global/content/bindings/autocomplete.xml"),
+  };
+
+  // We also permit two specific idioms in eval()-like contexts. We'd like to
+  // elminate these too; but there are in-the-wild Mozilla privileged extensions
+  // that use them.
+  static NS_NAMED_LITERAL_STRING(sAllowedEval1, "this");
+  static NS_NAMED_LITERAL_STRING(sAllowedEval2,
+                                 "function anonymous(\n) {\nreturn this\n}");
+
   bool systemPrincipal = aSubjectPrincipal->IsSystemPrincipal();
   if (systemPrincipal &&
       StaticPrefs::security_allow_eval_with_system_principal()) {
@@ -412,17 +412,33 @@ void nsContentSecurityManager::AssertEvalNotRestricted(
     return;
   }
 
-  // This preferences is a file used for autoconfiguration of Firefox
+  // This preference is a file used for autoconfiguration of Firefox
   // by administrators. It has also been (ab)used by the userChromeJS
   // project to run legacy-style 'extensions', some of which use eval,
   // all of which run in the System Principal context.
-  nsAutoString configPref;
-  Preferences::GetString("general.config.filename", configPref);
-  if (!configPref.IsEmpty()) {
+  nsAutoString jsConfigPref;
+  Preferences::GetString("general.config.filename", jsConfigPref);
+  if (!jsConfigPref.IsEmpty()) {
     MOZ_LOG(
         sCSMLog, LogLevel::Debug,
         ("Allowing eval() %s because of "
          "general.config.filename",
+         (systemPrincipal ? "with System Principal" : "in parent process")));
+    return;
+  }
+
+  // This preference is better known as userchrome.css which allows
+  // customization of the Firefox UI. Believe it or not, you can also
+  // use XBL bindings to get it to run Javascript in the same manner
+  // as userChromeJS above, so even though 99.9% of people using
+  // userchrome.css aren't doing that, we're still going to need to
+  // disable the eval() assertion for them.
+  if (Preferences::GetBool(
+          "toolkit.legacyUserProfileCustomizations.stylesheets")) {
+    MOZ_LOG(
+        sCSMLog, LogLevel::Debug,
+        ("Allowing eval() %s because of "
+         "toolkit.legacyUserProfileCustomizations.stylesheets",
          (systemPrincipal ? "with System Principal" : "in parent process")));
     return;
   }
@@ -514,12 +530,9 @@ void nsContentSecurityManager::AssertEvalNotRestricted(
 /* static */
 nsresult nsContentSecurityManager::CheckFTPSubresourceLoad(
     nsIChannel* aChannel) {
-  // We dissallow using FTP resources as a subresource almost everywhere.
+  // We dissallow using FTP resources as a subresource everywhere.
   // The only valid way to use FTP resources is loading it as
   // a top level document.
-  if (!mozilla::net::nsIOService::BlockFTPSubresources()) {
-    return NS_OK;
-  }
 
   nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
   nsContentPolicyType type = loadInfo->GetExternalContentPolicyType();
@@ -547,13 +560,6 @@ nsresult nsContentSecurityManager::CheckFTPSubresourceLoad(
 
   bool isFtpURI = uri->SchemeIs("ftp");
   if (!isFtpURI) {
-    return NS_OK;
-  }
-
-  // Allow loading FTP subresources in FTP documents, like XML.
-  nsCOMPtr<nsIURI> triggeringURI;
-  triggeringPrincipal->GetURI(getter_AddRefs(triggeringURI));
-  if (triggeringURI && nsContentUtils::SchemeIs(triggeringURI, "ftp")) {
     return NS_OK;
   }
 

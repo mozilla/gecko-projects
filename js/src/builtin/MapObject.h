@@ -105,8 +105,8 @@ class MapObject : public NativeObject {
       "IteratorKind Entries must match self-hosting define for item kind "
       "key-and-value.");
 
-  static const Class class_;
-  static const Class protoClass_;
+  static const JSClass class_;
+  static const JSClass protoClass_;
 
   enum { NurseryKeysSlot, HasNurseryMemorySlot, SlotCount };
 
@@ -143,7 +143,7 @@ class MapObject : public NativeObject {
 
  private:
   static const ClassSpec classSpec_;
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static const JSPropertySpec properties[];
   static const JSFunctionSpec methods[];
@@ -181,7 +181,7 @@ class MapObject : public NativeObject {
 
 class MapIteratorObject : public NativeObject {
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   enum { TargetSlot, RangeSlot, KindSlot, SlotCount };
 
@@ -225,8 +225,8 @@ class SetObject : public NativeObject {
       "IteratorKind Entries must match self-hosting define for item kind "
       "key-and-value.");
 
-  static const Class class_;
-  static const Class protoClass_;
+  static const JSClass class_;
+  static const JSClass protoClass_;
 
   enum { NurseryKeysSlot, HasNurseryMemorySlot, SlotCount };
 
@@ -257,7 +257,7 @@ class SetObject : public NativeObject {
 
  private:
   static const ClassSpec classSpec_;
-  static const ClassOps classOps_;
+  static const JSClassOps classOps_;
 
   static const JSPropertySpec properties[];
   static const JSFunctionSpec methods[];
@@ -294,7 +294,7 @@ class SetObject : public NativeObject {
 
 class SetIteratorObject : public NativeObject {
  public:
-  static const Class class_;
+  static const JSClass class_;
 
   enum { TargetSlot, RangeSlot, KindSlot, SlotCount };
 

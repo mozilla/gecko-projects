@@ -798,7 +798,10 @@ static nsIFrame* StyleFrame(nsIFrame* aOuterFrame) {
 }
 
 static bool IsNonReplacedInline(nsIFrame* aFrame) {
-  return aFrame->StyleDisplay()->mDisplay == StyleDisplay::Inline &&
+  // FIXME: this should be IsInlineInsideStyle() since width/height
+  // doesn't apply to ruby boxes.
+  return aFrame->StyleDisplay()->DisplayInside() ==
+             StyleDisplayInside::Inline &&
          !aFrame->IsFrameOfType(nsIFrame::eReplaced);
 }
 

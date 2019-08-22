@@ -267,14 +267,14 @@ class GCRuntime {
   // Check whether to trigger a zone GC after malloc memory.
   void maybeMallocTriggerZoneGC(Zone* zone);
   bool maybeMallocTriggerZoneGC(Zone* zone, const HeapSize& heap,
-                                const ZoneThreshold& threshold,
+                                const HeapThreshold& threshold,
                                 JS::GCReason reason);
   // The return value indicates if we were able to do the GC.
   bool triggerZoneGC(Zone* zone, JS::GCReason reason, size_t usedBytes,
                      size_t thresholdBytes);
   void maybeGC();
   bool checkEagerAllocTrigger(const HeapSize& size,
-                              const ZoneThreshold& threshold);
+                              const HeapThreshold& threshold);
   // The return value indicates whether a major GC was performed.
   bool gcIfRequested();
   void gc(JSGCInvocationKind gckind, JS::GCReason reason);
@@ -324,10 +324,6 @@ class GCRuntime {
 
   void setLowMemoryState(bool newState) { lowMemoryState = newState; }
   bool systemHasLowMemory() const { return lowMemoryState; }
-
-#ifdef DEBUG
-  bool shutdownCollectedEverything() const { return arenasEmptyAtShutdown; }
-#endif
 
  public:
   // Internal public interface
@@ -413,6 +409,9 @@ class GCRuntime {
   uint64_t majorGCCount() const { return majorGCNumber; }
   void incMajorGcNumber() { ++majorGCNumber; }
 
+  uint64_t gcSliceCount() const { return sliceNumber; }
+  void incGcSliceNumber() { ++sliceNumber; }
+
   int64_t defaultSliceBudgetMS() const { return defaultTimeBudgetMS_; }
 
   bool isIncrementalGc() const { return isIncremental; }
@@ -493,7 +492,7 @@ class GCRuntime {
   MOZ_MUST_USE bool checkAllocatorState(JSContext* cx, AllocKind kind);
   template <AllowGC allowGC>
   JSObject* tryNewNurseryObject(JSContext* cx, size_t thingSize,
-                                size_t nDynamicSlots, const Class* clasp);
+                                size_t nDynamicSlots, const JSClass* clasp);
   template <AllowGC allowGC>
   static JSObject* tryNewTenuredObject(JSContext* cx, AllocKind kind,
                                        size_t thingSize, size_t nDynamicSlots);
@@ -836,6 +835,9 @@ class GCRuntime {
   /* Incremented on every GC slice or minor collection. */
   MainThreadData<uint64_t> number;
 
+  /* Incremented on every GC slice. */
+  MainThreadData<uint64_t> sliceNumber;
+
   /* Whether the currently running GC can finish in multiple slices. */
   MainThreadData<bool> isIncremental;
 
@@ -1011,10 +1013,6 @@ class GCRuntime {
   MainThreadData<bool> alwaysPreserveCode;
 
   MainThreadData<bool> lowMemoryState;
-
-#ifdef DEBUG
-  MainThreadData<bool> arenasEmptyAtShutdown;
-#endif
 
   /* Synchronize GC heap access among GC helper threads and the main thread. */
   friend class js::AutoLockGC;

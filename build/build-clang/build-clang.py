@@ -23,8 +23,6 @@ from distutils.dir_util import copy_tree
 
 from shutil import which
 
-URL_REPO = "https://github.com/llvm/llvm-project"
-
 
 def symlink(source, link_name):
     os_symlink = getattr(os, "symlink", None)
@@ -182,16 +180,16 @@ def install_libgcc(gcc_dir, clang_dir, is_final_stage):
                                  "x86_64-unknown-linux-gnu",
                                  os.path.basename(libgcc_dir))
     mkdir_p(clang_lib_dir)
-    copy_tree(libgcc_dir, clang_lib_dir)
+    copy_tree(libgcc_dir, clang_lib_dir, preserve_symlinks=True)
     libgcc_dir = os.path.join(gcc_dir, "lib64")
     clang_lib_dir = os.path.join(clang_dir, "lib")
-    copy_tree(libgcc_dir, clang_lib_dir)
+    copy_tree(libgcc_dir, clang_lib_dir, preserve_symlinks=True)
     libgcc_dir = os.path.join(gcc_dir, "lib32")
     clang_lib_dir = os.path.join(clang_dir, "lib32")
-    copy_tree(libgcc_dir, clang_lib_dir)
+    copy_tree(libgcc_dir, clang_lib_dir, preserve_symlinks=True)
     include_dir = os.path.join(gcc_dir, "include")
     clang_include_dir = os.path.join(clang_dir, "include")
-    copy_tree(include_dir, clang_include_dir)
+    copy_tree(include_dir, clang_include_dir, preserve_symlinks=True)
 
 
 def install_import_library(build_dir, clang_dir):
@@ -346,12 +344,13 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
         android_link_flags = "-fuse-ld=lld"
 
         for target, cfg in android_targets.items():
-            sysroot_dir = cfg["ndk_sysroot"]
-            android_gcc_dir = cfg["ndk_toolchain"]
+            sysroot_dir = cfg["ndk_sysroot"].format(**os.environ)
+            android_gcc_dir = cfg["ndk_toolchain"].format(**os.environ)
             android_include_dirs = cfg["ndk_includes"]
             api_level = cfg["api_level"]
 
-            android_flags = ["-isystem %s" % d for d in android_include_dirs]
+            android_flags = ["-isystem %s" % d.format(**os.environ)
+                             for d in android_include_dirs]
             android_flags += ["--gcc-toolchain=%s" % android_gcc_dir]
             android_flags += ["-D__ANDROID_API__=%s" % api_level]
 
@@ -439,7 +438,7 @@ def build_one_stage(cc, cxx, asm, ld, ar, ranlib, libtool,
 def get_tool(config, key):
     f = None
     if key in config:
-        f = config[key]
+        f = config[key].format(**os.environ)
         if os.path.isabs(f):
             if not os.path.exists(f):
                 raise ValueError("%s must point to an existing path" % key)
@@ -626,7 +625,7 @@ if __name__ == "__main__":
     python_path = config["python_path"]
     gcc_dir = None
     if "gcc_dir" in config:
-        gcc_dir = config["gcc_dir"]
+        gcc_dir = config["gcc_dir"].format(**os.environ)
         if not os.path.exists(gcc_dir):
             raise ValueError("gcc_dir must point to an existing path")
     ndk_dir = None

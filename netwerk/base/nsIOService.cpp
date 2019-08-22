@@ -39,6 +39,7 @@
 #include "MainThreadUtils.h"
 #include "nsINode.h"
 #include "nsIWidget.h"
+#include "nsIHttpChannel.h"
 #include "nsThreadUtils.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/net/NeckoCommon.h"
@@ -57,7 +58,6 @@
 #include "mozilla/net/SocketProcessParent.h"
 #include "mozilla/net/SSLTokensCache.h"
 #include "mozilla/Unused.h"
-#include "ReferrerPolicy.h"
 #include "nsContentSecurityManager.h"
 #include "nsContentUtils.h"
 #include "nsExceptionHandler.h"
@@ -186,7 +186,6 @@ uint32_t nsIOService::gDefaultSegmentCount = 24;
 
 bool nsIOService::sIsDataURIUniqueOpaqueOrigin = false;
 bool nsIOService::sBlockToplevelDataUriNavigations = false;
-bool nsIOService::sBlockFTPSubresources = false;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -267,8 +266,6 @@ nsresult nsIOService::Init() {
   Preferences::AddBoolVarCache(
       &sBlockToplevelDataUriNavigations,
       "security.data_uri.block_toplevel_data_uri_navigations", false);
-  Preferences::AddBoolVarCache(&sBlockFTPSubresources,
-                               "security.block_ftp_subresources", true);
   Preferences::AddBoolVarCache(&mOfflineMirrorsConnectivity,
                                OFFLINE_MIRRORS_CONNECTIVITY, true);
 
@@ -1643,27 +1640,6 @@ nsIOService::ExtractCharsetFromContentType(const nsACString& aTypeHeader,
   return NS_OK;
 }
 
-// parse policyString to policy enum value (see ReferrerPolicy.h)
-NS_IMETHODIMP
-nsIOService::ParseAttributePolicyString(const nsAString& policyString,
-                                        uint32_t* outPolicyEnum) {
-  NS_ENSURE_ARG(outPolicyEnum);
-  *outPolicyEnum = (uint32_t)AttributeReferrerPolicyFromString(policyString);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsIOService::GetReferrerPolicyString(uint32_t aPolicy, nsACString& aResult) {
-  if (aPolicy >= ArrayLength(kReferrerPolicyString)) {
-    aResult.AssignLiteral("unknown");
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  aResult.AssignASCII(
-      ReferrerPolicyToString(static_cast<ReferrerPolicy>(aPolicy)));
-  return NS_OK;
-}
-
 // nsISpeculativeConnect
 class IOServiceProxyCallback final : public nsIProtocolProxyCallback {
   ~IOServiceProxyCallback() = default;
@@ -1817,9 +1793,6 @@ bool nsIOService::IsDataURIUniqueOpaqueOrigin() {
 bool nsIOService::BlockToplevelDataUriNavigations() {
   return sBlockToplevelDataUriNavigations;
 }
-
-/*static*/
-bool nsIOService::BlockFTPSubresources() { return sBlockFTPSubresources; }
 
 NS_IMETHODIMP
 nsIOService::NotImplemented() { return NS_ERROR_NOT_IMPLEMENTED; }

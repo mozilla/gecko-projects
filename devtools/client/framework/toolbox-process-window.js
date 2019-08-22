@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,6 +20,11 @@ const KeyShortcuts = require("devtools/client/shared/key-shortcuts");
 const { LocalizationHelper } = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper(
   "devtools/client/locales/toolbox.properties"
+);
+loader.lazyImporter(
+  this,
+  "BrowserToolboxProcess",
+  "resource://devtools/client/framework/ToolboxProcess.jsm"
 );
 
 // Timeout to wait before we assume that a connect() timed out without an error.
@@ -129,6 +132,7 @@ window.addEventListener(
   async function() {
     gShortcuts = new KeyShortcuts({ window });
     gShortcuts.on("CmdOrCtrl+W", onCloseCommand);
+    gShortcuts.on("CmdOrCtrl+Alt+Shift+I", onDebugBrowserToolbox);
 
     const statusMessageContainer = document.getElementById(
       "status-message-title"
@@ -160,6 +164,16 @@ window.addEventListener(
 
 function onCloseCommand(event) {
   window.close();
+}
+
+/**
+ * Open a Browser toolbox debugging the current browser toolbox
+ *
+ * This helps debugging the browser toolbox code, especially the code
+ * running in the parent process. i.e. frontend code.
+ */
+function onDebugBrowserToolbox() {
+  BrowserToolboxProcess.init();
 }
 
 async function openToolbox(target) {

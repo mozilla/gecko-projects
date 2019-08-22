@@ -5179,12 +5179,12 @@ void nsTextFrame::GetTextDecorations(
       }
     }
 
-    // In all modes, if we're on an inline-block or inline-table (or
-    // inline-stack, inline-box, inline-grid), we're done.
+    // In all modes, if we're on an inline-block/table/grid/flex (or
+    // -moz-inline-box), we're done.
     // If we're on a ruby frame other than ruby text container, we
     // should continue.
     mozilla::StyleDisplay display = f->GetDisplay();
-    if (display != mozilla::StyleDisplay::Inline &&
+    if (nsStyleDisplay::DisplayInside(display) != StyleDisplayInside::Inline &&
         (!nsStyleDisplay::IsRubyDisplayType(display) ||
          display == mozilla::StyleDisplay::RubyTextContainer) &&
         nsStyleDisplay::IsDisplayTypeInlineOutside(display)) {
@@ -5353,9 +5353,11 @@ nsRect nsTextFrame::UpdateTextEmphasis(WritingMode aWM,
 
 // helper function for implementing text-decoration-thickness
 // https://drafts.csswg.org/css-text-decor-4/#text-decoration-width-property
-static void SetWidthIfLength(const LengthOrAuto& aDecorationThickness,
-                             Float* aLineThickness,
-                             const gfxFloat aAppUnitsPerDevPixel) {
+static void SetWidthIfLength(
+    const StyleTextDecorationLength& aDecorationThickness,
+    Float* aLineThickness, const gfxFloat aAppUnitsPerDevPixel) {
+  // auto is from-font (the automatic thickness is derived from font metrics) so
+  // we only change the value if it is a length
   if (aDecorationThickness.IsLength()) {
     *aLineThickness =
         aDecorationThickness.AsLength().ToAppUnits() / aAppUnitsPerDevPixel;
@@ -5366,10 +5368,12 @@ static void SetWidthIfLength(const LengthOrAuto& aDecorationThickness,
 // https://drafts.csswg.org/css-text-decor-4/#underline-offset
 // params.defaultLineThickness should be set before calling
 // this function
-static void SetOffsetIfLength(const LengthOrAuto& aOffset,
+static void SetOffsetIfLength(const StyleTextDecorationLength& aOffset,
                               nsCSSRendering::DecorationRectParams& aParams,
                               const gfxFloat aAppUnitsPerDevPixel,
                               bool aIsSideways, bool aRightUnderline) {
+  // auto is from-font (the automatic offset is derived from font metrics) so we
+  // don't change the value unless it is a length
   if (!aOffset.IsLength()) {
     return;
   }
@@ -5420,10 +5424,10 @@ void nsTextFrame::UnionAdditionalOverflow(nsPresContext* aPresContext,
     nscoord underlineOffset, underlineSize;
     fontMetrics->GetUnderline(underlineOffset, underlineSize);
 
-    const LengthOrAuto& textUnderlineOffset =
+    const StyleTextDecorationLength& textUnderlineOffset =
         aBlock->Style()->StyleText()->mTextUnderlineOffset;
 
-    const LengthOrAuto& textDecorationThickness =
+    const StyleTextDecorationLength& textDecorationThickness =
         aBlock->Style()->StyleTextReset()->mTextDecorationThickness;
 
     if (textUnderlineOffset.IsLength()) {
@@ -5724,7 +5728,7 @@ void nsTextFrame::DrawSelectionDecorations(
       aTextPaintStyle.PresContext(), aFontMetrics);
 
   float relativeSize;
-  const LengthOrAuto& decThickness = StyleTextReset()->mTextDecorationThickness;
+  const auto& decThickness = StyleTextReset()->mTextDecorationThickness;
   const gfxFloat appUnitsPerDevPixel =
       aTextPaintStyle.PresContext()->AppUnitsPerDevPixel();
 
@@ -6871,22 +6875,24 @@ static void DrawTextRun(const gfxTextRun* aTextRun,
       // Check the paint-order property; if we find stroke before fill,
       // then change mode to GLYPH_STROKE_UNDERNEATH.
       uint32_t paintOrder = aFrame->StyleSVG()->mPaintOrder;
-      if (paintOrder != NS_STYLE_PAINT_ORDER_NORMAL) {
-        while (paintOrder) {
-          uint32_t component =
-              paintOrder & ((1 << NS_STYLE_PAINT_ORDER_BITWIDTH) - 1);
-          switch (component) {
-            case NS_STYLE_PAINT_ORDER_FILL:
-              // Just break the loop, no need to check further
-              paintOrder = 0;
-              break;
-            case NS_STYLE_PAINT_ORDER_STROKE:
-              params.drawMode |= DrawMode::GLYPH_STROKE_UNDERNEATH;
-              paintOrder = 0;
-              break;
-          }
-          paintOrder >>= NS_STYLE_PAINT_ORDER_BITWIDTH;
+      while (paintOrder) {
+        auto component = StylePaintOrder(paintOrder & kPaintOrderMask);
+        switch (component) {
+          case StylePaintOrder::Fill:
+            // Just break the loop, no need to check further
+            paintOrder = 0;
+            break;
+          case StylePaintOrder::Stroke:
+            params.drawMode |= DrawMode::GLYPH_STROKE_UNDERNEATH;
+            paintOrder = 0;
+            break;
+          default:
+            MOZ_FALLTHROUGH_ASSERT("Unknown paint-order variant, how?");
+          case StylePaintOrder::Markers:
+          case StylePaintOrder::Normal:
+            break;
         }
+        paintOrder >>= kPaintOrderShift;
       }
 
       // Use ROUND joins as they are less likely to produce ugly artifacts
@@ -7377,8 +7383,7 @@ bool nsTextFrame::CombineSelectionUnderlineRect(nsPresContext* aPresContext,
     }
     nsRect decorationArea;
 
-    const LengthOrAuto& decThickness =
-        StyleTextReset()->mTextDecorationThickness;
+    const auto& decThickness = StyleTextReset()->mTextDecorationThickness;
     params.lineSize.width = aPresContext->AppUnitsToGfxUnits(aRect.width);
     params.defaultLineThickness = ComputeSelectionUnderlineHeight(
         aPresContext, metrics, sd->mSelectionType);

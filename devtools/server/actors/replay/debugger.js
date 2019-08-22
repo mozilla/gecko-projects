@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -287,6 +285,14 @@ ReplayDebugger.prototype = {
           }
         }
       }
+
+      if (
+        this._control.isPausedAtDebuggerStatement() &&
+        this.onDebuggerStatement
+      ) {
+        this._capturePauseData();
+        this.onDebuggerStatement(this.getNewestFrame());
+      }
     }
 
     // If no handlers entered a thread-wide pause (resetting this._direction)
@@ -408,7 +414,7 @@ ReplayDebugger.prototype = {
       if (!this._objects[data.id]) {
         this._addObject(data);
       }
-      this._getObject(data.id)._names = names;
+      this._getObject(data.id)._setNames(names);
     }
 
     for (const frame of pauseData.frames) {
@@ -1297,6 +1303,13 @@ ReplayDebuggerEnvironment.prototype = {
     return this._data.optimizedOut;
   },
 
+  _setNames(names) {
+    this._names = {};
+    names.forEach(({ name, value }) => {
+      this._names[name] = this._dbg._convertValue(value);
+    });
+  },
+
   _ensureNames() {
     if (!this._names) {
       const names = this._dbg._sendRequestAllowDiverge(
@@ -1306,10 +1319,7 @@ ReplayDebuggerEnvironment.prototype = {
         },
         []
       );
-      this._names = {};
-      names.forEach(({ name, value }) => {
-        this._names[name] = this._dbg._convertValue(value);
-      });
+      this._setNames(names);
     }
   },
 

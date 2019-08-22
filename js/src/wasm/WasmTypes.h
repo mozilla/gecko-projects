@@ -1899,6 +1899,7 @@ enum class SymbolicAddress {
   TableInit,
   TableSet,
   TableSize,
+  FuncRef,
   PostBarrier,
   PostBarrierFiltering,
   StructNew,
@@ -2520,6 +2521,8 @@ bool IsCodegenDebugEnabled(DebugChannel channel);
 
 void DebugCodegen(DebugChannel channel, const char* fmt, ...)
     MOZ_FORMAT_PRINTF(2, 3);
+
+typedef void (*PrintCallback)(const char* text);
 
 }  // namespace wasm
 }  // namespace js

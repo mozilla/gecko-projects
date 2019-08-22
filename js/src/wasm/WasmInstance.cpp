@@ -19,6 +19,7 @@
 #include "wasm/WasmInstance.h"
 
 #include "jit/AtomicOperations.h"
+#include "jit/Disassemble.h"
 #include "jit/InlinableNatives.h"
 #include "jit/JitCommon.h"
 #include "jit/JitRealm.h"
@@ -945,8 +946,7 @@ void Instance::initElems(uint32_t tableIndex, const ElemSegment& seg,
   RootedAnyRef ref(TlsContext.get(), AnyRef::fromCompiledCode(initValue));
   Table& table = *instance->tables()[tableIndex];
 
-  JSContext* cx = TlsContext.get();
-  uint32_t oldSize = table.grow(delta, cx);
+  uint32_t oldSize = table.grow(delta);
 
   if (oldSize != uint32_t(-1) && initValue != nullptr) {
     switch (table.kind()) {
@@ -954,7 +954,7 @@ void Instance::initElems(uint32_t tableIndex, const ElemSegment& seg,
         table.fillAnyRef(oldSize, delta, ref);
         break;
       case TableKind::FuncRef:
-        table.fillFuncRef(oldSize, delta, ref, cx);
+        table.fillFuncRef(oldSize, delta, ref, TlsContext.get());
         break;
       case TableKind::AsmJS:
         MOZ_CRASH("not asm.js");
@@ -996,6 +996,36 @@ void Instance::initElems(uint32_t tableIndex, const ElemSegment& seg,
   MOZ_ASSERT(SASigTableSize.failureMode == FailureMode::Infallible);
   Table& table = *instance->tables()[tableIndex];
   return table.length();
+}
+
+/* static */ void* Instance::funcRef(Instance* instance, uint32_t funcIndex) {
+  MOZ_ASSERT(SASigFuncRef.failureMode == FailureMode::FailOnInvalidRef);
+  JSContext* cx = TlsContext.get();
+
+  Tier tier = instance->code().bestTier();
+  const MetadataTier& metadataTier = instance->metadata(tier);
+  const FuncImportVector& funcImports = metadataTier.funcImports;
+
+  // If this is an import, we need to recover the original wrapper function to
+  // maintain referential equality between a re-exported function and
+  // 'ref.func'. The imported function object is stable across tiers, which is
+  // what we want.
+  if (funcIndex < funcImports.length()) {
+    FuncImportTls& import = instance->funcImportTls(funcImports[funcIndex]);
+    return AnyRef::fromJSObject(import.fun).forCompiledCode();
+  }
+
+  RootedFunction fun(cx);
+  RootedWasmInstanceObject instanceObj(cx, instance->object());
+  if (!WasmInstanceObject::getExportedFunction(cx, instanceObj, funcIndex,
+                                               &fun)) {
+    // Validation ensures that we always have a valid funcIndex, so we must
+    // have OOM'ed
+    ReportOutOfMemory(cx);
+    return AnyRef::invalid().forCompiledCode();
+  }
+
+  return AnyRef::fromJSObject(fun).forCompiledCode();
 }
 
 /* static */ void Instance::postBarrier(Instance* instance,
@@ -1859,7 +1889,7 @@ void Instance::ensureProfilingLabels(bool profilingEnabled) const {
   return code_->ensureProfilingLabels(profilingEnabled);
 }
 
-void Instance::onMovingGrowMemory(uint8_t* prevMemoryBase) {
+void Instance::onMovingGrowMemory() {
   MOZ_ASSERT(!isAsmJS());
   MOZ_ASSERT(!memory_->isShared());
 
@@ -1971,9 +2001,23 @@ void Instance::destroyBreakpointSite(JSFreeOp* fop, uint32_t offset) {
   return debug().destroyBreakpointSite(fop, this, offset);
 }
 
+void Instance::disassembleExport(JSContext* cx, uint32_t funcIndex, Tier tier,
+                                 PrintCallback callback) const {
+  const MetadataTier& metadataTier = metadata(tier);
+  const FuncExport& funcExport = metadataTier.lookupFuncExport(funcIndex);
+  const CodeRange& range = metadataTier.codeRange(funcExport);
+  const CodeTier& codeTier = code(tier);
+  const ModuleSegment& segment = codeTier.segment();
+
+  MOZ_ASSERT(range.begin() < segment.length());
+  MOZ_ASSERT(range.end() < segment.length());
+
+  uint8_t* functionCode = segment.base() + range.begin();
+  jit::Disassemble(functionCode, range.end() - range.begin(), callback);
+}
+
 void Instance::addSizeOfMisc(MallocSizeOf mallocSizeOf,
                              Metadata::SeenSet* seenMetadata,
-                             ShareableBytes::SeenSet* seenBytes,
                              Code::SeenSet* seenCode,
                              Table::SeenSet* seenTables, size_t* code,
                              size_t* data) const {
@@ -1984,8 +2028,8 @@ void Instance::addSizeOfMisc(MallocSizeOf mallocSizeOf,
   }
 
   if (maybeDebug_) {
-    maybeDebug_->addSizeOfMisc(mallocSizeOf, seenMetadata, seenBytes, seenCode,
-                               code, data);
+    maybeDebug_->addSizeOfMisc(mallocSizeOf, seenMetadata, seenCode, code,
+                               data);
   }
 
   code_->addSizeOfMiscIfNotSeen(mallocSizeOf, seenMetadata, seenCode, code,

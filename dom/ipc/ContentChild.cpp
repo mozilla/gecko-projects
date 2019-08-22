@@ -800,8 +800,7 @@ static nsresult GetCreateWindowParams(mozIDOMWindowProxy* aParent,
 
   nsCOMPtr<nsIReferrerInfo> referrerInfo;
   if (aForceNoReferrer) {
-    referrerInfo = new ReferrerInfo(
-        nullptr, mozilla::net::ReferrerPolicy::RP_Unset, false);
+    referrerInfo = new ReferrerInfo(nullptr, ReferrerPolicy::_empty, false);
   }
   if (aLoadState && !referrerInfo) {
     referrerInfo = aLoadState->GetReferrerInfo();
@@ -812,8 +811,7 @@ static nsresult GetCreateWindowParams(mozIDOMWindowProxy* aParent,
     nsCOMPtr<nsIPrincipal> nullPrincipal =
         NullPrincipal::CreateWithoutOriginAttributes();
     if (!referrerInfo) {
-      referrerInfo =
-          new ReferrerInfo(nullptr, mozilla::net::ReferrerPolicy::RP_Unset);
+      referrerInfo = new ReferrerInfo(nullptr, ReferrerPolicy::_empty);
     }
 
     referrerInfo.swap(*aReferrerInfo);
@@ -3682,16 +3680,6 @@ mozilla::ipc::IPCResult ContentChild::RecvStartDelayedAutoplayMediaComponents(
     BrowsingContext* aContext) {
   MOZ_ASSERT(aContext);
   aContext->StartDelayedAutoplayMediaComponents();
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult ContentChild::RecvSetMediaMuted(
-    BrowsingContext* aContext, bool aMuted) {
-  MOZ_ASSERT(aContext);
-  nsCOMPtr<nsPIDOMWindowOuter> window = aContext->GetDOMWindow();
-  if (window) {
-    window->SetAudioMuted(aMuted);
-  }
   return IPC_OK();
 }
 

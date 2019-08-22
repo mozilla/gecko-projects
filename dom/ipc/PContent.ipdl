@@ -808,11 +808,6 @@ child:
     async StartDelayedAutoplayMediaComponents(BrowsingContext aContext);
 
     /**
-    * This method is used to notifty content process to mute or unmute media.
-    */
-    async SetMediaMuted(BrowsingContext aContext, bool aMuted);
-
-    /**
      * This method is used to apply the media action to outer window in the
      * content process, such as play, pause, stop ..e.t.c.
      */
@@ -1377,6 +1372,13 @@ parent:
     async BHRThreadHang(HangDetails aHangDetails);
 
     async AddPerformanceMetrics(nsID aID, PerformanceInfo[] aMetrics);
+
+    /*
+     * Determines whether storage access can be granted automatically by the
+     * storage access API without showing a user prompt.
+     */
+    async AutomaticStorageAccessCanBeGranted(Principal aPrincipal)
+          returns (bool success);
 
     /*
      * A 3rd party tracking origin (aTrackingOrigin) has received the permission

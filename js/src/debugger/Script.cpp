@@ -57,44 +57,45 @@ using namespace js;
 using mozilla::Maybe;
 using mozilla::Some;
 
-const ClassOps DebuggerScript::classOps_ = {nullptr, /* addProperty */
-                                            nullptr, /* delProperty */
-                                            nullptr, /* enumerate   */
-                                            nullptr, /* newEnumerate */
-                                            nullptr, /* resolve     */
-                                            nullptr, /* mayResolve  */
-                                            nullptr, /* finalize    */
-                                            nullptr, /* call        */
-                                            nullptr, /* hasInstance */
-                                            nullptr, /* construct   */
-                                            trace};
+const JSClassOps DebuggerScript::classOps_ = {
+    nullptr,                         /* addProperty */
+    nullptr,                         /* delProperty */
+    nullptr,                         /* enumerate   */
+    nullptr,                         /* newEnumerate */
+    nullptr,                         /* resolve     */
+    nullptr,                         /* mayResolve  */
+    nullptr,                         /* finalize    */
+    nullptr,                         /* call        */
+    nullptr,                         /* hasInstance */
+    nullptr,                         /* construct   */
+    CallTraceMethod<DebuggerScript>, /* trace */
+};
 
-const Class DebuggerScript::class_ = {
+const JSClass DebuggerScript::class_ = {
     "Script", JSCLASS_HAS_PRIVATE | JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS),
     &classOps_};
 
-/* static */
-void DebuggerScript::trace(JSTracer* trc, JSObject* obj) {
-  DebuggerScript* self = &obj->as<DebuggerScript>();
+void DebuggerScript::trace(JSTracer* trc) {
+  JSObject* upcast = this;
   // This comes from a private pointer, so no barrier needed.
-  gc::Cell* cell = self->getReferentCell();
+  gc::Cell* cell = getReferentCell();
   if (cell) {
     if (cell->is<JSScript>()) {
       JSScript* script = cell->as<JSScript>();
       TraceManuallyBarrieredCrossCompartmentEdge(
-          trc, self, &script, "Debugger.Script script referent");
-      self->setPrivateUnbarriered(script);
+          trc, upcast, &script, "Debugger.Script script referent");
+      setPrivateUnbarriered(script);
     } else if (cell->is<LazyScript>()) {
       LazyScript* lazyScript = cell->as<LazyScript>();
       TraceManuallyBarrieredCrossCompartmentEdge(
-          trc, self, &lazyScript, "Debugger.Script lazy script referent");
-      self->setPrivateUnbarriered(lazyScript);
+          trc, upcast, &lazyScript, "Debugger.Script lazy script referent");
+      setPrivateUnbarriered(lazyScript);
     } else {
       JSObject* wasm = cell->as<JSObject>();
       TraceManuallyBarrieredCrossCompartmentEdge(
-          trc, self, &wasm, "Debugger.Script wasm referent");
+          trc, upcast, &wasm, "Debugger.Script wasm referent");
       MOZ_ASSERT(wasm->is<WasmInstanceObject>());
-      self->setPrivateUnbarriered(wasm);
+      setPrivateUnbarriered(wasm);
     }
   }
 }
@@ -255,6 +256,7 @@ Result CallScriptMethod(HandleDebuggerScript obj,
     return (script->*ifJSScript)();
   }
 
+  MOZ_ASSERT(obj->getReferent().is<LazyScript*>());
   LazyScript* lazyScript = obj->getReferent().as<LazyScript*>();
   return (lazyScript->*ifLazyScript)();
 }
@@ -264,8 +266,7 @@ bool DebuggerScript::getIsGeneratorFunction(JSContext* cx, unsigned argc,
                                             Value* vp) {
   THIS_DEBUGSCRIPT_SCRIPT_MAYBE_LAZY(cx, argc, vp, "(get isGeneratorFunction)",
                                      args, obj);
-  args.rval().setBoolean(
-      CallScriptMethod(obj, &JSScript::isGenerator, &LazyScript::isGenerator));
+  args.rval().setBoolean(obj->getReferentScript()->isGenerator());
   return true;
 }
 
@@ -274,8 +275,19 @@ bool DebuggerScript::getIsAsyncFunction(JSContext* cx, unsigned argc,
                                         Value* vp) {
   THIS_DEBUGSCRIPT_SCRIPT_MAYBE_LAZY(cx, argc, vp, "(get isAsyncFunction)",
                                      args, obj);
-  args.rval().setBoolean(
-      CallScriptMethod(obj, &JSScript::isAsync, &LazyScript::isAsync));
+  args.rval().setBoolean(obj->getReferentScript()->isAsync());
+  return true;
+}
+
+/* static */
+bool DebuggerScript::getIsFunction(JSContext* cx, unsigned argc, Value* vp) {
+  THIS_DEBUGSCRIPT_SCRIPT_MAYBE_LAZY(cx, argc, vp, "(get isFunction)",
+                                     args, obj);
+  DebuggerScriptReferent referent = obj->getReferent();
+
+  // Note: LazyScripts always have functions.
+  args.rval().setBoolean(!referent.is<JSScript*>() ||
+                         referent.as<JSScript*>()->functionNonDelazifying());
   return true;
 }
 
@@ -882,7 +894,7 @@ class DebuggerScript::GetPossibleBreakpointsMatcher {
 
     Vector<wasm::ExprLoc> offsets(cx_);
     if (instance.debugEnabled() &&
-        !instance.debug().getAllColumnOffsets(cx_, &offsets)) {
+        !instance.debug().getAllColumnOffsets(&offsets)) {
       return false;
     }
 
@@ -1631,7 +1643,7 @@ class DebuggerScript::GetAllColumnOffsetsMatcher {
 
     Vector<wasm::ExprLoc> offsets(cx_);
     if (instance.debugEnabled() &&
-        !instance.debug().getAllColumnOffsets(cx_, &offsets)) {
+        !instance.debug().getAllColumnOffsets(&offsets)) {
       return false;
     }
 
@@ -1722,7 +1734,7 @@ class DebuggerScript::GetLineOffsetsMatcher {
 
     Vector<uint32_t> offsets(cx_);
     if (instance.debugEnabled() &&
-        !instance.debug().getLineOffsets(cx_, lineno_, &offsets)) {
+        !instance.debug().getLineOffsets(lineno_, &offsets)) {
       return false;
     }
 
@@ -2172,6 +2184,7 @@ bool DebuggerScript::construct(JSContext* cx, unsigned argc, Value* vp) {
 const JSPropertySpec DebuggerScript::properties_[] = {
     JS_PSG("isGeneratorFunction", getIsGeneratorFunction, 0),
     JS_PSG("isAsyncFunction", getIsAsyncFunction, 0),
+    JS_PSG("isFunction",  getIsFunction, 0),
     JS_PSG("isModule", getIsModule, 0),
     JS_PSG("displayName", getDisplayName, 0),
     JS_PSG("url", getUrl, 0),
