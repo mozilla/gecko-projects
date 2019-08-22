@@ -21,7 +21,9 @@ BOOL IsUnpromptedElevation(BOOL& isUnpromptedElevation);
 #define BASE_SERVICE_REG_KEY L"SOFTWARE\\Mozilla\\MaintenanceService"
 
 // Disable impersonation on release (Bug 1514898)
-#define DISABLE_USER_IMPERSONATION
+#ifndef EARLY_BETA_OR_EARLIER
+#  define DISABLE_USER_IMPERSONATION
+#endif
 
 // Environment variable used to pass impersonation token to child
 #define USER_TOKEN_VAR_NAME "MOZ_USER_TOKEN"
