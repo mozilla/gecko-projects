@@ -27,6 +27,8 @@ inline bool operator==(const gfxFontFeature& a, const gfxFontFeature& b) {
   return (a.mTag == b.mTag) && (a.mValue == b.mValue);
 }
 
+class nsAtom;
+
 class gfxFontFeatureValueSet final {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(gfxFontFeatureValueSet)
@@ -45,16 +47,14 @@ class gfxFontFeatureValueSet final {
     nsTArray<ValueList> valuelist;
   };
 
-  // returns true if found, false otherwise
-  bool GetFontFeatureValuesFor(const nsACString& aFamily,
-                               uint32_t aVariantProperty,
-                               const nsAString& aName,
-                               nsTArray<uint32_t>& aValues);
+  mozilla::Span<const uint32_t> GetFontFeatureValuesFor(
+      const nsACString& aFamily, uint32_t aVariantProperty,
+      nsAtom* aName) const;
 
   // Appends a new hash entry with given key values and returns a pointer to
   // mValues array to fill. This should be filled first.
   nsTArray<uint32_t>* AppendFeatureValueHashEntry(const nsACString& aFamily,
-                                                  const nsAString& aName,
+                                                  nsAtom* aName,
                                                   uint32_t aAlternate);
 
  private:
@@ -64,11 +64,11 @@ class gfxFontFeatureValueSet final {
   struct FeatureValueHashKey {
     nsCString mFamily;
     uint32_t mPropVal;
-    nsString mName;
+    RefPtr<nsAtom> mName;
 
     FeatureValueHashKey() : mPropVal(0) {}
     FeatureValueHashKey(const nsACString& aFamily, uint32_t aPropVal,
-                        const nsAString& aName)
+                        nsAtom* aName)
         : mFamily(aFamily), mPropVal(aPropVal), mName(aName) {}
     FeatureValueHashKey(const FeatureValueHashKey& aKey)
         : mFamily(aKey.mFamily), mPropVal(aKey.mPropVal), mName(aKey.mName) {}
