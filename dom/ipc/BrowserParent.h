@@ -159,6 +159,12 @@ class BrowserParent final : public PBrowserParent,
   // Returns the top-level widget for our frameloader's document.
   already_AddRefed<nsIWidget> GetDocWidget() const;
 
+  /**
+   * Returns the widget which may have native focus and handles text input
+   * like keyboard input, IME, etc.
+   */
+  already_AddRefed<nsIWidget> GetTextInputHandlingWidget() const;
+
   nsIXULBrowserWindow* GetXULBrowserWindow();
 
   static uint32_t GetMaxTouchPoints(Element* aElement);
@@ -571,7 +577,8 @@ class BrowserParent final : public PBrowserParent,
   void SendRealMouseEvent(WidgetMouseEvent& aEvent);
 
   void SendRealDragEvent(WidgetDragEvent& aEvent, uint32_t aDragAction,
-                         uint32_t aDropEffect, nsIPrincipal* aPrincipal);
+                         uint32_t aDropEffect, nsIPrincipal* aPrincipal,
+                         nsIContentSecurityPolicy* aCsp);
 
   void SendMouseWheelEvent(WidgetWheelEvent& aEvent);
 
@@ -643,7 +650,7 @@ class BrowserParent final : public PBrowserParent,
   LayoutDeviceToLayoutDeviceMatrix4x4 GetChildToParentConversionMatrix();
 
   void SetChildToParentConversionMatrix(
-      const LayoutDeviceToLayoutDeviceMatrix4x4& aMatrix);
+      const Maybe<LayoutDeviceToLayoutDeviceMatrix4x4>& aMatrix);
 
   // Returns the offset from the origin of our frameloader's nearest widget to
   // the origin of its layout frame. This offset is used to translate event
@@ -681,7 +688,7 @@ class BrowserParent final : public PBrowserParent,
       nsTArray<IPCDataTransfer>&& aTransfers, const uint32_t& aAction,
       Maybe<Shmem>&& aVisualDnDData, const uint32_t& aStride,
       const gfx::SurfaceFormat& aFormat, const LayoutDeviceIntRect& aDragRect,
-      nsIPrincipal* aPrincipal);
+      nsIPrincipal* aPrincipal, nsIContentSecurityPolicy* aCsp);
 
   void AddInitialDnDDataTo(DataTransfer* aDataTransfer,
                            nsIPrincipal** aPrincipal);

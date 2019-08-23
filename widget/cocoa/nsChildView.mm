@@ -338,6 +338,7 @@ nsChildView::nsChildView()
       mIsDispatchPaint(false),
       mPluginFocused{false},
       mCompositingState("nsChildView::mCompositingState"),
+      mOpaqueRegion("nsChildView::mOpaqueRegion"),
       mCurrentPanGestureBelongsToSwipe{false} {}
 
 nsChildView::~nsChildView() {
@@ -612,6 +613,8 @@ void nsChildView::SetTransparencyMode(nsTransparencyMode aMode) {
   if (windowWidget) {
     windowWidget->SetTransparencyMode(aMode);
   }
+
+  UpdateInternalOpaqueRegion();
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -1501,6 +1504,10 @@ bool nsChildView::PaintWindowInIOSurface(CFTypeRefPtr<IOSurfaceRef> aSurface,
 
 void nsChildView::PaintWindowInContentLayer() {
   mContentLayer->SetRect(GetBounds().ToUnknownRect());
+  {
+    auto opaqueRegion = mOpaqueRegion.Lock();
+    mContentLayer->SetOpaqueRegion(opaqueRegion->ToUnknownRegion());
+  }
   mContentLayer->SetSurfaceIsFlipped(false);
   CFTypeRefPtr<IOSurfaceRef> surf = mContentLayer->NextSurface();
   if (!surf) {
@@ -1513,7 +1520,6 @@ void nsChildView::PaintWindowInContentLayer() {
 }
 
 void nsChildView::HandleMainThreadCATransaction() {
-  MaybeScheduleUnsuspendAsyncCATransactions();
   WillPaintWindow();
 
   if (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
@@ -1531,9 +1537,13 @@ void nsChildView::HandleMainThreadCATransaction() {
   // Apply the changes from mContentLayer to its underlying CALayer. Now is a
   // good time to call this because we know we're currently inside a main thread
   // CATransaction.
-  auto compositingState = mCompositingState.Lock();
-  mNativeLayerRoot->ApplyChanges();
-  compositingState->mNativeLayerChangesPending = false;
+  {
+    auto compositingState = mCompositingState.Lock();
+    mNativeLayerRoot->ApplyChanges();
+    compositingState->mNativeLayerChangesPending = false;
+  }
+
+  MaybeScheduleUnsuspendAsyncCATransactions();
 }
 
 #pragma mark -
@@ -1991,6 +2001,10 @@ bool nsChildView::PreRenderImpl(WidgetRenderingContext* aContext) {
     if (gl) {
       auto glContextCGL = GLContextCGL::Cast(gl);
       mContentLayer->SetRect(GetBounds().ToUnknownRect());
+      {
+        auto opaqueRegion = mOpaqueRegion.Lock();
+        mContentLayer->SetOpaqueRegion(opaqueRegion->ToUnknownRegion());
+      }
       mContentLayer->SetSurfaceIsFlipped(true);
       RefPtr<layers::IOSurfaceRegistry> currentRegistry = mContentLayer->GetSurfaceRegistry();
       if (!currentRegistry) {
@@ -2011,6 +2025,10 @@ bool nsChildView::PreRenderImpl(WidgetRenderingContext* aContext) {
     // We're using BasicCompositor.
     MOZ_RELEASE_ASSERT(!mBasicCompositorIOSurface);
     mContentLayer->SetRect(GetBounds().ToUnknownRect());
+    {
+      auto opaqueRegion = mOpaqueRegion.Lock();
+      mContentLayer->SetOpaqueRegion(opaqueRegion->ToUnknownRegion());
+    }
     mContentLayer->SetSurfaceIsFlipped(false);
     CFTypeRefPtr<IOSurfaceRef> surf = mContentLayer->NextSurface();
     if (!surf) {
@@ -2492,6 +2510,8 @@ void nsChildView::UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries
   changed |= vm.UpdateVibrantRegion(VibrancyType::ACTIVE_SOURCE_LIST_SELECTION,
                                     activeSourceListSelectionRegion);
 
+  UpdateInternalOpaqueRegion();
+
   if (changed) {
     SuspendAsyncCATransactions();
   }
@@ -2513,6 +2533,19 @@ mozilla::VibrancyManager& nsChildView::EnsureVibrancyManager() {
     mVibrancyManager = MakeUnique<VibrancyManager>(*this, [mView vibrancyViewsContainer]);
   }
   return *mVibrancyManager;
+}
+
+void nsChildView::UpdateInternalOpaqueRegion() {
+  MOZ_RELEASE_ASSERT(NS_IsMainThread(), "This should only be called on the main thread.");
+  auto opaqueRegion = mOpaqueRegion.Lock();
+  bool widgetIsOpaque = GetTransparencyMode() == eTransparencyOpaque;
+  if (!widgetIsOpaque) {
+    opaqueRegion->SetEmpty();
+  } else if (VibrancyManager::SystemSupportsVibrancy()) {
+    opaqueRegion->Sub(mBounds, EnsureVibrancyManager().GetUnionOfVibrantRegions());
+  } else {
+    *opaqueRegion = mBounds;
+  }
 }
 
 nsChildView::SwipeInfo nsChildView::SendMayStartSwipe(
@@ -3133,6 +3166,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
     mCumulativeRotation = 0.0;
 
     mNeedsGLUpdate = NO;
+    mIsUpdatingLayer = NO;
 
     [self setFocusRingType:NSFocusRingTypeNone];
 
@@ -3727,7 +3761,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 - (void)markLayerForDisplay {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
-  if (StaticPrefs::gfx_core_animation_enabled_AtStartup()) {
+  if (StaticPrefs::gfx_core_animation_enabled_AtStartup() && !mIsUpdatingLayer) {
     // This call will cause updateRootCALayer to be called during the upcoming
     // main thread CoreAnimation transaction. It will also trigger a transaction
     // if no transaction is currently pending.
@@ -3744,7 +3778,10 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 - (void)updateRootCALayer {
   if (NS_IsMainThread() && mGeckoChild) {
+    MOZ_RELEASE_ASSERT(!mIsUpdatingLayer, "Re-entrant layer display?");
+    mIsUpdatingLayer = YES;
     mGeckoChild->HandleMainThreadCATransaction();
+    mIsUpdatingLayer = NO;
   }
 }
 

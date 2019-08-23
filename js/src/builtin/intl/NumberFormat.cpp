@@ -24,7 +24,6 @@
 
 #include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
-#include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "ds/Sort.h"
 #include "gc/FreeOp.h"
@@ -34,6 +33,14 @@
 #include "js/StableStringChars.h"
 #include "js/TypeDecls.h"
 #include "js/Vector.h"
+#include "unicode/udata.h"
+#include "unicode/ufieldpositer.h"
+#include "unicode/uformattedvalue.h"
+#include "unicode/unum.h"
+#include "unicode/unumberformatter.h"
+#include "unicode/unumsys.h"
+#include "unicode/ures.h"
+#include "unicode/utypes.h"
 #include "vm/BigIntType.h"
 #include "vm/JSContext.h"
 #include "vm/SelfHosting.h"
@@ -119,10 +126,6 @@ static bool NumberFormat(JSContext* cx, const CallArgs& args, bool construct) {
   if (!numberFormat) {
     return false;
   }
-
-  numberFormat->setFixedSlot(NumberFormatObject::INTERNALS_SLOT, NullValue());
-  numberFormat->setNumberFormatter(nullptr);
-  numberFormat->setFormattedNumber(nullptr);
 
   RootedValue thisValue(cx,
                         construct ? ObjectValue(*numberFormat) : args.thisv());

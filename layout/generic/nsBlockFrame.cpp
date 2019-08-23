@@ -1772,10 +1772,7 @@ void nsBlockFrame::ComputeFinalSize(const ReflowInput& aReflowInput,
     blockEndEdgeOfChildren = std::max(blockEndEdgeOfChildren, floatHeight);
   }
 
-  if (NS_UNCONSTRAINEDSIZE != aReflowInput.ComputedBSize() &&
-      (!GetParent()->IsColumnSetFrame() ||
-       aReflowInput.mParentReflowInput->AvailableBSize() ==
-           NS_UNCONSTRAINEDSIZE)) {
+  if (NS_UNCONSTRAINEDSIZE != aReflowInput.ComputedBSize()) {
     finalSize.BSize(wm) =
         ComputeFinalBSize(aReflowInput, aState.mReflowStatus,
                           aState.mBCoord + nonCarriedOutBDirMargin,
@@ -4079,7 +4076,7 @@ void nsBlockFrame::DoReflowInlineFrames(
   nscoord iStart = lineRect.IStart(lineWM);
   nscoord availISize = lineRect.ISize(lineWM);
   nscoord availBSize;
-  if (aState.mFlags.mHasUnconstrainedBSize) {
+  if (aState.mReflowInput.AvailableBSize() == NS_UNCONSTRAINEDSIZE) {
     availBSize = NS_UNCONSTRAINEDSIZE;
   } else {
     /* XXX get the height right! */

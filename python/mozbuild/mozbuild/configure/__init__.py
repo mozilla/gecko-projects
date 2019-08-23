@@ -4,6 +4,7 @@
 
 from __future__ import absolute_import, print_function, unicode_literals
 
+import codecs
 import inspect
 import logging
 import os
@@ -29,12 +30,12 @@ from mozbuild.configure.util import (
     LineIO,
 )
 from mozbuild.util import (
-    encode,
     exec_,
     memoize,
     memoized_property,
     ReadOnlyDict,
     ReadOnlyNamespace,
+    system_encoding,
 )
 
 import mozpack.path as mozpath
@@ -883,7 +884,18 @@ class ConfigureSandbox(dict):
         def wrap(function):
             def wrapper(*args, **kwargs):
                 if 'env' not in kwargs:
-                    kwargs['env'] = encode(self._environ)
+                    kwargs['env'] = dict(self._environ)
+                # subprocess on older Pythons can't handle unicode keys or
+                # values in environment dicts. Normalize automagically so
+                # callers don't have to deal with this.
+                env = {}
+                for k, v in six.iteritems(kwargs['env']):
+                    if isinstance(k, six.text_type):
+                        k = k.encode(system_encoding)
+                    if isinstance(v, six.text_type):
+                        v = v.encode(system_encoding)
+                    env[k] = v
+                kwargs['env'] = env
                 return function(*args, **kwargs)
             return wrapper
 
@@ -899,9 +911,21 @@ class ConfigureSandbox(dict):
             return self
         # Special case for the open() builtin, because otherwise, using it
         # fails with "IOError: file() constructor not accessible in
-        # restricted mode"
+        # restricted mode". We also make open() look more like python 3's,
+        # decoding to unicode strings unless the mode says otherwise.
         if what == '__builtin__.open':
-            return lambda *args, **kwargs: open(*args, **kwargs)
+            def wrapped_open(name, mode=None, buffering=None):
+                args = (name,)
+                kwargs = {}
+                if buffering is not None:
+                    kwargs['buffering'] = buffering
+                if mode is not None:
+                    args += (mode,)
+                    if 'b' in mode:
+                        return open(*args, **kwargs)
+                kwargs['encoding'] = system_encoding
+                return codecs.open(*args, **kwargs)
+            return wrapped_open
         # Special case os and os.environ so that os.environ is our copy of
         # the environment.
         if what == 'os.environ':

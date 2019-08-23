@@ -14,7 +14,6 @@
 
 #include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
-#include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "builtin/intl/SharedIntlData.h"
 #include "gc/FreeOp.h"
@@ -22,6 +21,10 @@
 #include "js/PropertySpec.h"
 #include "js/StableStringChars.h"
 #include "js/TypeDecls.h"
+#include "unicode/ucol.h"
+#include "unicode/uenum.h"
+#include "unicode/uloc.h"
+#include "unicode/utypes.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
 #include "vm/Runtime.h"
@@ -98,9 +101,6 @@ static bool Collator(JSContext* cx, const CallArgs& args) {
   if (!collator) {
     return false;
   }
-
-  collator->setFixedSlot(CollatorObject::INTERNALS_SLOT, NullValue());
-  collator->setCollator(nullptr);
 
   HandleValue locales = args.get(0);
   HandleValue options = args.get(1);

@@ -44,6 +44,10 @@ exclude: true
   ([bug 1567268]({{bugzilla}}1567268))
 - Added API for controlling Gecko logging [`GeckoRuntimeSettings.debugLogging`][70.14]
   ([bug 1573304]({{bugzilla}}1573304))
+- Added [`WebNotification`][70.15] and [`WebNotificationDelegate`][70.16] for handling Web Notifications.
+  ([bug 1533057]({{bugzilla}}1533057))
+- Added Social Tracking Protection support to [`ContentBlocking`][70.17].
+  ([bug 1568295]({{bugzilla}}1568295))
 
 [70.1]: {{javadoc_uri}}/GeckoSessionSettings.Builder.html#contextId-java.lang.String-
 [70.2]: {{javadoc_uri}}/StorageController.html#clearDataForSessionContext-java.lang.String-
@@ -59,6 +63,9 @@ exclude: true
 [70.12]: {{javadoc_uri}}/RuntimeTelemetry.Delegate.html
 [70.13]: {{javadoc_uri}}/ContentBlocking.html
 [70.14]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#debugLogging-boolean-
+[70.15]: {{javadoc_uri}}/WebNotification.html
+[70.16]: {{javadoc_uri}}/WebNotificationDelegate.html
+[70.17]: {{javadoc_uri}}/ContentBlocking.html
 
 ## v69
 - Modified behavior of ['setAutomaticFontSizeAdjustment'][69.1] so that it no 
@@ -311,4 +318,4 @@ exclude: true
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 99204a5c93667e6d440e55d5d330d01cf4e8783f
+[api-version]: 3dc92af421d9e7e2393619f7a17c57422aa51699

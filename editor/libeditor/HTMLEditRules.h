@@ -10,6 +10,7 @@
 #include "mozilla/EditorDOMPoint.h"  // for EditorDOMPoint
 #include "mozilla/SelectionState.h"
 #include "mozilla/TextEditRules.h"
+#include "mozilla/TypeInState.h"  // for AutoStyleCacheArray
 #include "nsCOMPtr.h"
 #include "nsIEditor.h"
 #include "nsIHTMLEditor.h"
@@ -18,7 +19,6 @@
 #include "nscore.h"
 
 class nsAtom;
-class nsIEditor;
 class nsINode;
 class nsRange;
 
@@ -36,24 +36,6 @@ class Element;
 class Selection;
 }  // namespace dom
 
-struct StyleCache final : public PropItem {
-  bool mPresent;
-
-  StyleCache() : PropItem(), mPresent(false) { MOZ_COUNT_CTOR(StyleCache); }
-
-  StyleCache(nsAtom* aTag, nsAtom* aAttr, const nsAString& aValue)
-      : PropItem(aTag, aAttr, aValue), mPresent(false) {
-    MOZ_COUNT_CTOR(StyleCache);
-  }
-
-  StyleCache(nsAtom* aTag, nsAtom* aAttr)
-      : PropItem(aTag, aAttr, EmptyString()), mPresent(false) {
-    MOZ_COUNT_CTOR(StyleCache);
-  }
-
-  ~StyleCache() { MOZ_COUNT_DTOR(StyleCache); }
-};
-
 /**
  * Same as TextEditRules, any methods which may modify the DOM tree or
  * Selection should be marked as MOZ_MUST_USE and return nsresult directly
@@ -68,8 +50,6 @@ struct StyleCache final : public PropItem {
  * NS_ERROR_EDITOR_DESTROYED.
  */
 
-#define SIZE_STYLE_TABLE 19
-
 class HTMLEditRules : public TextEditRules {
  public:
   HTMLEditRules();
@@ -78,7 +58,7 @@ class HTMLEditRules : public TextEditRules {
   MOZ_CAN_RUN_SCRIPT
   virtual nsresult Init(TextEditor* aTextEditor) override;
   virtual nsresult DetachEditor() override;
-  virtual nsresult BeforeEdit() override;
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY virtual nsresult BeforeEdit() override;
   MOZ_CAN_RUN_SCRIPT virtual nsresult AfterEdit() override;
   // NOTE: Don't mark WillDoAction() nor DidDoAction() as MOZ_CAN_RUN_SCRIPT
   //       because they are too generic and doing it makes a lot of public
@@ -130,9 +110,6 @@ class HTMLEditRules : public TextEditRules {
   void DidDeleteText(nsINode& aTextNode, int32_t aOffset, int32_t aLength);
   void WillDeleteSelection();
 
-  void StartToListenToEditSubActions() { mListenerEnabled = true; }
-  void EndListeningToEditSubActions() { mListenerEnabled = false; }
-
  protected:
   virtual ~HTMLEditRules() = default;
 
@@ -141,45 +118,7 @@ class HTMLEditRules : public TextEditRules {
     return mData->HTMLEditorRef();
   }
 
-  static bool IsBlockNode(const nsINode& aNode) {
-    return HTMLEditor::NodeIsBlockStatic(&aNode);
-  }
-  static bool IsInlineNode(const nsINode& aNode) { return !IsBlockNode(aNode); }
-
   enum RulesEndpoint { kStart, kEnd };
-
-  void InitFields();
-
-  /**
-   * Called before inserting something into the editor.
-   * This method may removes mBougsNode if there is.  Therefore, this method
-   * might cause destroying the editor.
-   *
-   * @param aCancel             Returns true if the operation is canceled.
-   *                            This can be nullptr.
-   */
-  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult WillInsert(bool* aCancel = nullptr);
-
-  /**
-   * Called before inserting text.
-   * This method may actually inserts text into the editor.  Therefore, this
-   * might cause destroying the editor.
-   *
-   * @param aEditSubAction      Must be EditSubAction::eInsertTextComingFromIME
-   *                            or EditSubAction::eInsertText.
-   * @param aCancel             Returns true if the operation is canceled.
-   * @param aHandled            Returns true if the edit action is handled.
-   * @param inString            String to be inserted.
-   * @param outString           String actually inserted.
-   * @param aMaxLength          The maximum string length which the editor
-   *                            allows to set.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult WillInsertText(EditSubAction aEditSubAction,
-                                       bool* aCancel, bool* aHandled,
-                                       const nsAString* inString,
-                                       nsAString* outString,
-                                       int32_t aMaxLength);
 
   /**
    * WillInsertParagraphSeparator() is called when insertParagraph command is
@@ -199,24 +138,6 @@ class HTMLEditRules : public TextEditRules {
    */
   MOZ_CAN_RUN_SCRIPT
   MOZ_MUST_USE nsresult DeleteNodeIfCollapsedText(nsINode& aNode);
-
-  /**
-   * InsertBRElement() inserts a <br> element into aInsertToBreak.
-   *
-   * @param aInsertToBreak      The point where new <br> element will be
-   *                            inserted before.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult InsertBRElement(const EditorDOMPoint& aInsertToBreak);
-
-  /**
-   * SplitMailCites() splits mail-cite elements at start of Selection if
-   * Selection starts from inside a mail-cite element.  Of course, if it's
-   * necessary, this inserts <br> node to new left nodes or existing right
-   * nodes.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE EditActionResult SplitMailCites();
 
   /**
    * Called before deleting selected contents.  This method actually removes
@@ -245,12 +166,6 @@ class HTMLEditRules : public TextEditRules {
    * call with collapsed selection.
    */
   MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult InsertBRIfNeeded();
-
-  /**
-   * CanContainParagraph() returns true if aElement can have a <p> element as
-   * its child or its descendant.
-   */
-  bool CanContainParagraph(Element& aElement) const;
 
   /**
    * Insert normal <br> element into aNode when aNode is a block and it has
@@ -530,8 +445,9 @@ class HTMLEditRules : public TextEditRules {
   /**
    * Called before changing an element to absolute positioned.
    * This method only prepares the operation since DidAbsolutePosition() will
-   * change it actually later.  mNewBlock is set to the target element and
-   * if necessary, some ancestor nodes of selection may be split.
+   * change it actually later.  mNewBlockElement of TopLevelEditSubActionData
+   * is set to the target element and if necessary, some ancestor nodes of
+   * selection may be split.
    *
    * @param aCancel             Returns true if the operation is canceled.
    * @param aHandled            Returns true if the edit action is handled.
@@ -830,15 +746,6 @@ class HTMLEditRules : public TextEditRules {
                                                    nsAtom& aItemType);
 
   /**
-   * CreateStyleForInsertText() sets CSS properties which are stored in
-   * TypeInState to proper element node.
-   *
-   * @param aDocument           The document of the editor.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult CreateStyleForInsertText(dom::Document& aDocument);
-
-  /**
    * IsEmptyBlockElement() returns true if aElement is a block level element
    * and it doesn't have any visible content.
    */
@@ -967,20 +874,6 @@ class HTMLEditRules : public TextEditRules {
       nsTArray<OwningNonNull<nsINode>>& aNodeArray) const;
 
   /**
-   * BustUpInlinesAtRangeEndpoints() splits nodes at both start and end of
-   * aRangeItem.  If this splits at every point, this modifies aRangeItem
-   * to point each split point (typically, right node).  Note that this splits
-   * nodes only in highest inline element at every point.
-   *
-   * @param aRangeItem          One or two DOM points where should be split.
-   *                            Will be modified to split point if they're
-   *                            split.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult
-  BustUpInlinesAtRangeEndpoints(RangeItem& aRangeItem) const;
-
-  /**
    * BustUpInlinesAtBRs() splits before all <br> elements in aNode.  All <br>
    * nodes will be moved before right node at splitting its parent.  Finally,
    * this returns all <br> elements, every left node and aNode with
@@ -995,13 +888,6 @@ class HTMLEditRules : public TextEditRules {
   MOZ_MUST_USE nsresult
   BustUpInlinesAtBRs(nsIContent& aNode,
                      nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes) const;
-
-  /**
-   * GetHiestInlineParent() returns the highest inline node parent between
-   * aNode and the editing host.  Even if the editing host is an inline
-   * element, this method never returns the editing host as the result.
-   */
-  nsIContent* GetHighestInlineParent(nsINode& aNode) const;
 
   /**
    * MakeTransitionList() detects all the transitions in the array, where a
@@ -1102,8 +988,6 @@ class HTMLEditRules : public TextEditRules {
       nsIContent& aLeftNode, nsIContent& aRightNode,
       EditorDOMPoint* aNewFirstChildOfRightNode);
 
-  Element* GetTopEnclosingMailCite(nsINode& aNode);
-
   /**
    * PopListItem() tries to move aListItem outside its parent.  If it's
    * in a middle of a list element, the parent list element is split before
@@ -1139,27 +1023,13 @@ class HTMLEditRules : public TextEditRules {
   MOZ_MUST_USE nsresult RemoveListStructure(Element& aListElement);
 
   /**
-   * CacheInlineStyles() caches style of aNode into mCachedStyles.
-   * This may cause flushing layout at retrieving computed value of CSS
-   * properties.
-   */
-  MOZ_MUST_USE nsresult CacheInlineStyles(nsINode* aNode);
-
-  /**
-   * ReapplyCachedStyles() restores some styles which are disappeared during
-   * handling edit action and it should be restored.  This may cause flushing
-   * layout at retrieving computed value of CSS properties.
-   */
-  MOZ_MUST_USE nsresult ReapplyCachedStyles();
-
-  void ClearCachedStyles();
-
-  /**
-   * InsertBRElementToEmptyListItemsAndTableCellsInChangedRange() inserts
-   * <br> element into empty list item or table cell elements.
+   * InsertBRElementToEmptyListItemsAndTableCellsInRange() inserts
+   * <br> element into empty list item or table cell elements between
+   * aStartRef and aEndRef.
    */
   MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
-  InsertBRElementToEmptyListItemsAndTableCellsInChangedRange();
+  InsertBRElementToEmptyListItemsAndTableCellsInRange(
+      const RawRangeBoundary& aStartRef, const RawRangeBoundary& aEndRef);
 
   /**
    * PinSelectionToNewBlock() may collapse Selection around mNewNode if it's
@@ -1206,19 +1076,18 @@ class HTMLEditRules : public TextEditRules {
 
   /**
    * RemoveEmptyNodesInChangedRange() removes all empty nodes in
-   * mDocChangeRange.  However, if mail-cite node has only a <br> element,
-   * the node will be removed but <br> element is moved to where the
-   * mail-cite node was.
-   * XXX This method is expensive if mDocChangeRange is too wide and may
-   *     remove unexpected empty element, e.g., it was created by JS, but
-   *     we haven't touched it.  Cannot we remove this method and make
-   *     guarantee that empty nodes won't be created?
+   * TopLevelEditSubActionData::mChangedRange.  However, if mail-cite node has
+   * only a <br> element, the node will be removed but <br> element is moved
+   * to where the mail-cite node was.
+   * XXX This method is expensive if TopLevelEditSubActionData::mChangedRange
+   *     is too wide and may remove unexpected empty element, e.g., it was
+   *     created by JS, but we haven't touched it.  Cannot we remove this
+   *     method and make guarantee that empty nodes won't be created?
    */
   MOZ_CAN_RUN_SCRIPT
   MOZ_MUST_USE nsresult RemoveEmptyNodesInChangedRange();
 
   nsresult SelectionEndpointInNode(nsINode* aNode, bool* aResult);
-  nsresult UpdateDocChangeRange(nsRange* aRange);
 
   /**
    * ConfirmSelectionInBody() makes sure that Selection is in editor root
@@ -1331,44 +1200,9 @@ class HTMLEditRules : public TextEditRules {
    */
   MOZ_CAN_RUN_SCRIPT void DocumentModifiedWorker();
 
-  /**
-   * InitStyleCacheArray() initializes aStyleCache for usable with
-   * GetInlineStyles().
-   */
-  void InitStyleCacheArray(StyleCache aStyleCache[SIZE_STYLE_TABLE]);
-
-  /**
-   * GetInlineStyles() retrieves the style of aNode and modifies each item of
-   * aStyleCache.  This might cause flushing layout at retrieving computed
-   * values of CSS properties.
-   */
-  MOZ_MUST_USE nsresult
-  GetInlineStyles(nsINode* aNode, StyleCache aStyleCache[SIZE_STYLE_TABLE]);
-
  protected:
   HTMLEditor* mHTMLEditor;
-  RefPtr<nsRange> mDocChangeRange;
   bool mInitialized;
-  bool mListenerEnabled;
-  bool mReturnInEmptyLIKillsList;
-  bool mDidDeleteSelection;
-  bool mDidExplicitlySetInterline;
-  bool mDidRangedDelete;
-  bool mDidEmptyParentBlocksRemoved;
-  bool mRestoreContentEditableCount;
-  RefPtr<nsRange> mUtilRange;
-  // Need to remember an int across willJoin/didJoin...
-  uint32_t mJoinOffset;
-  RefPtr<Element> mNewBlock;
-  RefPtr<RangeItem> mRangeItem;
-
-  // XXX In strict speaking, mCachedStyles isn't enough to cache inline styles
-  //     because inline style can be specified with "style" attribute and/or
-  //     CSS in <style> elements or CSS files.  So, we need to look for better
-  //     implementation about this.
-  StyleCache mCachedStyles[SIZE_STYLE_TABLE];
-
-  friend class NS_CYCLE_COLLECTION_CLASSNAME(TextEditRules);
 };
 
 }  // namespace mozilla

@@ -27,6 +27,8 @@ const Actions = require("../../actions/index");
 
 const { getSelectedFrame } = require("../../selectors/index");
 
+// Components
+const FrameListContextMenu = require("devtools/client/netmonitor/src/components/websockets/FrameListContextMenu");
 loader.lazyGetter(this, "FrameListHeader", function() {
   return createFactory(require("./FrameListHeader"));
 });
@@ -48,12 +50,14 @@ class FrameListContent extends Component {
       selectedFrame: PropTypes.object,
       selectFrame: PropTypes.func.isRequired,
       columns: PropTypes.object.isRequired,
+      channelId: PropTypes.number,
     };
   }
 
   constructor(props) {
     super(props);
 
+    this.onContextMenu = this.onContextMenu.bind(this);
     this.framesLimit = Services.prefs.getIntPref(
       "devtools.netmonitor.ws.displayed-frames.limit"
     );
@@ -63,10 +67,23 @@ class FrameListContent extends Component {
     };
     this.pinnedToBottom = false;
     this.initIntersectionObserver = false;
+    this.intersectionObserver = null;
+    this.toggleTruncationCheckBox = this.toggleTruncationCheckBox.bind(this);
   }
 
-  componentDidUpdate() {
+  componentDidMount() {
     const { startPanelContainer } = this.props;
+    const scrollAnchor = this.refs.scrollAnchor;
+
+    if (scrollAnchor) {
+      // Always scroll to anchor when FrameListContent component first mounts.
+      scrollAnchor.scrollIntoView();
+    }
+    this.setupScrollToBottom(startPanelContainer, scrollAnchor);
+  }
+
+  componentDidUpdate(prevProps) {
+    const { startPanelContainer, channelId } = this.props;
     const scrollAnchor = this.refs.scrollAnchor;
 
     // When frames are cleared, the previous scrollAnchor would be destroyed, so we need to reset this boolean.
@@ -74,10 +91,27 @@ class FrameListContent extends Component {
       this.initIntersectionObserver = false;
     }
 
+    // If a new WebSocket connection is selected, scroll to anchor.
+    if (channelId !== prevProps.channelId && scrollAnchor) {
+      scrollAnchor.scrollIntoView();
+    }
+
+    this.setupScrollToBottom(startPanelContainer, scrollAnchor);
+  }
+
+  componentWillUnmount() {
+    // Reset observables and boolean values.
+    const scrollAnchor = this.refs.scrollAnchor;
+    this.intersectionObserver.unobserve(scrollAnchor);
+    this.initIntersectionObserver = false;
+    this.pinnedToBottom = false;
+  }
+
+  setupScrollToBottom(startPanelContainer, scrollAnchor) {
     if (startPanelContainer && scrollAnchor) {
       // Initialize intersection observer.
       if (!this.initIntersectionObserver) {
-        const observer = new IntersectionObserver(
+        this.intersectionObserver = new IntersectionObserver(
           () => {
             // When scrollAnchor first comes into view, this.pinnedToBottom is set to true.
             // When the anchor goes out of view, this callback function triggers again and toggles this.pinnedToBottom.
@@ -89,7 +123,7 @@ class FrameListContent extends Component {
             threshold: 0.1,
           }
         );
-        observer.observe(scrollAnchor);
+        this.intersectionObserver.observe(scrollAnchor);
         this.initIntersectionObserver = true;
       }
 
@@ -99,10 +133,25 @@ class FrameListContent extends Component {
     }
   }
 
+  toggleTruncationCheckBox() {
+    this.setState({
+      checked: !this.state.checked,
+    });
+  }
+
   onMouseDown(evt, item) {
     if (evt.button === LEFT_MOUSE_BUTTON) {
       this.props.selectFrame(item);
     }
+  }
+
+  onContextMenu(evt, item) {
+    evt.preventDefault();
+    const { connector } = this.props;
+    this.contextMenu = new FrameListContextMenu({
+      connector,
+    });
+    this.contextMenu.open(evt, item);
   }
 
   render() {
@@ -143,60 +192,56 @@ class FrameListContent extends Component {
       table(
         { className: "ws-frames-list-table" },
         FrameListHeader(),
-        tr(
-          {
-            tabIndex: 0,
-          },
-          td(
-            {
-              className: "truncated-messages-cell",
-              colSpan: visibleColumns.length,
-            },
-            shouldTruncate &&
-              div(
-                {
-                  className: "truncated-messages-header",
-                },
-                div(
-                  {
-                    className: "truncated-messages-container",
-                  },
-                  div({
-                    className: "truncated-messages-warning-icon",
-                  }),
-                  div(
-                    {
-                      className: "truncated-message",
-                      title: MESSAGES_TRUNCATED,
-                    },
-                    MESSAGES_TRUNCATED
-                  )
-                ),
-                label(
-                  {
-                    className: "truncated-messages-checkbox-label",
-                    title: TOGGLE_MESSAGES_TRUNCATION_TITLE,
-                  },
-                  input({
-                    type: "checkbox",
-                    className: "truncation-checkbox",
-                    title: TOGGLE_MESSAGES_TRUNCATION_TITLE,
-                    checked: this.state.checked,
-                    onClick: () => {
-                      this.setState({
-                        checked: !this.state.checked,
-                      });
-                    },
-                  }),
-                  TOGGLE_MESSAGES_TRUNCATION
-                )
-              )
-          )
-        ),
         tbody(
           {
             className: "ws-frames-list-body",
           },
+          tr(
+            {
+              tabIndex: 0,
+            },
+            td(
+              {
+                className: "truncated-messages-cell",
+                colSpan: visibleColumns.length,
+              },
+              shouldTruncate &&
+                div(
+                  {
+                    className: "truncated-messages-header",
+                  },
+                  div(
+                    {
+                      className: "truncated-messages-container",
+                    },
+                    div({
+                      className: "truncated-messages-warning-icon",
+                    }),
+                    div(
+                      {
+                        className: "truncated-message",
+                        title: MESSAGES_TRUNCATED,
+                      },
+                      MESSAGES_TRUNCATED
+                    )
+                  ),
+                  label(
+                    {
+                      className: "truncated-messages-checkbox-label",
+                      title: TOGGLE_MESSAGES_TRUNCATION_TITLE,
+                    },
+                    input({
+                      type: "checkbox",
+                      className: "truncation-checkbox",
+                      title: TOGGLE_MESSAGES_TRUNCATION_TITLE,
+                      checked: this.state.checked,
+                      onChange: this.toggleTruncationCheckBox,
+                    }),
+                    TOGGLE_MESSAGES_TRUNCATION
+                  )
+                )
+            )
+          ),
           displayedFrames.map((item, index) =>
             FrameListItem({
               key: "ws-frame-list-item-" + index,
@@ -204,6 +249,7 @@ class FrameListContent extends Component {
               index,
               isSelected: item === selectedFrame,
               onMouseDown: evt => this.onMouseDown(evt, item),
+              onContextMenu: evt => this.onContextMenu(evt, item),
               connector,
               visibleColumns,
             })

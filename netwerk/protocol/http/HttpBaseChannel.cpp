@@ -298,6 +298,7 @@ void HttpBaseChannel::ReleaseMainThreadOnlyReferences() {
   arrayToRelease.AppendElement(mProxyURI.forget());
   arrayToRelease.AppendElement(mPrincipal.forget());
   arrayToRelease.AppendElement(mTopWindowURI.forget());
+  arrayToRelease.AppendElement(mContentBlockingAllowListPrincipal.forget());
   arrayToRelease.AppendElement(mListener.forget());
   arrayToRelease.AppendElement(mCompressListener.forget());
 
@@ -2052,6 +2053,12 @@ nsresult HttpBaseChannel::GetTopWindowURI(nsIURI* aURIBeingLoaded,
         }
       }
 #endif
+
+      if (!mContentBlockingAllowListPrincipal) {
+        Unused << util->GetContentBlockingAllowListPrincipalFromWindow(
+            win, aURIBeingLoaded,
+            getter_AddRefs(mContentBlockingAllowListPrincipal));
+      }
     }
   }
   NS_IF_ADDREF(*aTopWindowURI = mTopWindowURI);
@@ -2063,6 +2070,27 @@ HttpBaseChannel::GetDocumentURI(nsIURI** aDocumentURI) {
   NS_ENSURE_ARG_POINTER(aDocumentURI);
   *aDocumentURI = mDocumentURI;
   NS_IF_ADDREF(*aDocumentURI);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetContentBlockingAllowListPrincipal(
+    nsIPrincipal** aPrincipal) {
+  NS_ENSURE_ARG_POINTER(aPrincipal);
+  if (!mContentBlockingAllowListPrincipal) {
+    if (!mTopWindowURI) {
+      // If mTopWindowURI is null, it's possible that these two fields haven't
+      // been initialized yet.  GetTopWindowURI will lazily initilize both
+      // fields for us.
+      nsCOMPtr<nsIURI> throwAway;
+      Unused << GetTopWindowURI(getter_AddRefs(throwAway));
+    } else {
+      // Otherwise, the content blocking allow list principal is null (which is
+      // possible), so just return what we have...
+    }
+  }
+  nsCOMPtr<nsIPrincipal> copy = mContentBlockingAllowListPrincipal;
+  copy.forget(aPrincipal);
   return NS_OK;
 }
 
@@ -3218,7 +3246,7 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
   }
 
   if (mReferrerInfo) {
-    ReferrerPolicy referrerPolicy = RP_Unset;
+    dom::ReferrerPolicy referrerPolicy = dom::ReferrerPolicy::_empty;
     nsAutoCString tRPHeaderCValue;
     Unused << GetResponseHeader(NS_LITERAL_CSTRING("referrer-policy"),
                                 tRPHeaderCValue);
@@ -3226,11 +3254,11 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
 
     if (!tRPHeaderValue.IsEmpty()) {
       referrerPolicy =
-          nsContentUtils::GetReferrerPolicyFromHeader(tRPHeaderValue);
+          dom::ReferrerInfo::ReferrerPolicyFromHeaderString(tRPHeaderValue);
     }
 
     DebugOnly<nsresult> success;
-    if (referrerPolicy != RP_Unset) {
+    if (referrerPolicy != dom::ReferrerPolicy::_empty) {
       // We may reuse computed referrer in redirect, so if referrerPolicy
       // changes, we must not use the old computed value, and have to compute
       // again.
@@ -4371,7 +4399,7 @@ NS_IMETHODIMP HttpBaseChannel::GetCrossOriginOpenerPolicy(
     // The return value will be true if we find any whitespace. If there is
     // whitespace, then it must be followed by "unsafe-allow-outgoing" otherwise
     // this is a malformed header value.
-    bool unsafeAllowOutgoing =
+    unsafeAllowOutgoing =
         t.ReadUntil(Tokenizer::Token::Whitespace(), samenessString);
     if (unsafeAllowOutgoing) {
       t.SkipWhites();

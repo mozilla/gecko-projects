@@ -21,7 +21,9 @@
 use std::fmt;
 use std::mem;
 
-use cranelift_codegen::binemit::{Addend, CodeInfo, CodeOffset, NullTrapSink, Reloc, RelocSink};
+use cranelift_codegen::binemit::{
+    Addend, CodeInfo, CodeOffset, NullStackmapSink, NullTrapSink, Reloc, RelocSink,
+};
 use cranelift_codegen::entity::EntityRef;
 use cranelift_codegen::ir;
 use cranelift_codegen::ir::stackslot::StackSize;
@@ -115,19 +117,18 @@ impl<'a, 'b> BatchCompiler<'a, 'b> {
     }
 
     /// Translate the WebAssembly code to Cranelift IR.
-    pub fn translate_wasm(
-        &mut self,
-        func: &bindings::FuncCompileInput,
-    ) -> WasmResult<bindings::FuncTypeWithId> {
+    pub fn translate_wasm(&mut self, func: &bindings::FuncCompileInput) -> WasmResult<()> {
         self.context.clear();
+
+        let tenv = &mut TransEnv::new(&*self.isa, &self.environ, self.static_environ);
 
         // Set up the signature before translating the WebAssembly byte code.
         // The translator refers to it.
         let index = FuncIndex::new(func.index as usize);
-        let wsig = init_sig(&mut self.context.func.signature, &self.environ, index)?;
+        self.context.func.signature =
+            init_sig(&self.environ, self.static_environ.call_conv(), index)?;
         self.context.func.name = wasm_function_name(index);
 
-        let tenv = &mut TransEnv::new(&*self.isa, &self.environ, self.static_environ);
         self.trans.translate(
             func.bytecode(),
             func.offset_in_module as usize,
@@ -137,7 +138,7 @@ impl<'a, 'b> BatchCompiler<'a, 'b> {
 
         info!("Translated wasm function {}.", func.index);
         debug!("Translated wasm function IR: {}", self);
-        Ok(wsig)
+        Ok(())
     }
 
     /// Emit binary machine code to `emitter`.
@@ -179,6 +180,10 @@ impl<'a, 'b> BatchCompiler<'a, 'b> {
                 &mut self.current_func.rodata_relocs,
             );
             let mut trap_sink = NullTrapSink {};
+
+            // TODO (bug 1574865) Support reference types and stackmaps in Baldrdash.
+            let mut stackmap_sink = NullStackmapSink {};
+
             unsafe {
                 let code_buffer = &mut self.current_func.code_buffer;
                 self.context.emit_to_memory(
@@ -186,6 +191,7 @@ impl<'a, 'b> BatchCompiler<'a, 'b> {
                     code_buffer.as_mut_ptr(),
                     emit_env,
                     &mut trap_sink,
+                    &mut stackmap_sink,
                 )
             };
         }

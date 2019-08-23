@@ -260,7 +260,7 @@
  *
  *          Assumptions:
  *            -> Common web scripts will return to the event loop before using
- *               10% of the current gcTriggerBytes worth of GC memory.
+ *               10% of the current triggerBytes worth of GC memory.
  *
  *      ALLOC_TRIGGER (incremental)
  *      ---------------------------
@@ -313,6 +313,7 @@
 
 #include "gc/GCEnum.h"
 #include "js/HashTable.h"
+#include "js/SliceBudget.h"
 #include "threading/ProtectedData.h"
 
 namespace js {
@@ -323,6 +324,99 @@ class ZoneAllocPolicy;
 namespace gc {
 
 struct Cell;
+
+/*
+ * Default settings for tuning the GC.  Some of these can be set at runtime,
+ * This list is not complete, some tuning parameters are not listed here.
+ *
+ * If you change the values here, please also consider changing them in
+ * modules/libpref/init/all.js where they are duplicated for the Firefox
+ * preferences.
+ */
+namespace TuningDefaults {
+
+/* JSGC_ALLOCATION_THRESHOLD */
+static const size_t GCZoneAllocThresholdBase = 27 * 1024 * 1024;
+
+/*
+ * JSGC_MIN_NURSERY_BYTES
+ *
+ * With some testing (Bug 1532838) we increased this to 256K from 192K
+ * which improves performance.  We should try to reduce this for background
+ * tabs.
+ */
+static const size_t GCMinNurseryBytes = 256 * 1024;
+
+/* JSGC_NON_INCREMENTAL_FACTOR */
+static const float NonIncrementalFactor = 1.12f;
+
+/* JSGC_AVOID_INTERRUPT_FACTOR */
+static const float AvoidInterruptFactor = 1.0f;
+
+/* JSGC_ZONE_ALLOC_DELAY_KB */
+static const size_t ZoneAllocDelayBytes = 1024 * 1024;
+
+/* JSGC_DYNAMIC_HEAP_GROWTH */
+static const bool DynamicHeapGrowthEnabled = false;
+
+/* JSGC_HIGH_FREQUENCY_TIME_LIMIT */
+static const auto HighFrequencyThreshold = 1;  // in seconds
+
+/* JSGC_HIGH_FREQUENCY_LOW_LIMIT */
+static const size_t HighFrequencyLowLimitBytes = 100 * 1024 * 1024;
+
+/* JSGC_HIGH_FREQUENCY_HIGH_LIMIT */
+static const size_t HighFrequencyHighLimitBytes = 500 * 1024 * 1024;
+
+/* JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MAX */
+static const float HighFrequencyHeapGrowthMax = 3.0f;
+
+/* JSGC_HIGH_FREQUENCY_HEAP_GROWTH_MIN */
+static const float HighFrequencyHeapGrowthMin = 1.5f;
+
+/* JSGC_LOW_FREQUENCY_HEAP_GROWTH */
+static const float LowFrequencyHeapGrowth = 1.5f;
+
+/* JSGC_DYNAMIC_MARK_SLICE */
+static const bool DynamicMarkSliceEnabled = false;
+
+/* JSGC_MIN_EMPTY_CHUNK_COUNT */
+static const uint32_t MinEmptyChunkCount = 1;
+
+/* JSGC_MAX_EMPTY_CHUNK_COUNT */
+static const uint32_t MaxEmptyChunkCount = 30;
+
+/* JSGC_SLICE_TIME_BUDGET_MS */
+static const int64_t DefaultTimeBudgetMS = SliceBudget::UnlimitedTimeBudget;
+
+/* JSGC_MODE */
+static const JSGCMode Mode = JSGC_MODE_ZONE_INCREMENTAL;
+
+/* JSGC_COMPACTING_ENABLED */
+static const bool CompactingEnabled = true;
+
+/* JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION */
+static const uint32_t NurseryFreeThresholdForIdleCollection = ChunkSize / 4;
+
+/* JSGC_NURSERY_FREE_THRESHOLD_FOR_IDLE_COLLECTION_PERCENT */
+static const float NurseryFreeThresholdForIdleCollectionFraction = 0.25f;
+
+/* JSGC_PRETENURE_THRESHOLD */
+static const float PretenureThreshold = 0.6f;
+
+/* JSGC_PRETENURE_GROUP_THRESHOLD */
+static const float PretenureGroupThreshold = 3000;
+
+/* JSGC_MIN_LAST_DITCH_GC_PERIOD */
+static const auto MinLastDitchGCPeriod = 60;  // in seconds
+
+/* JSGC_MALLOC_THRESHOLD_BASE */
+static const size_t MallocThresholdBase = 38 * 1024 * 1024;
+
+/* JSGC_MALLOC_GROWTH_FACTOR */
+static const float MallocGrowthFactor = 1.5f;
+
+}  // namespace TuningDefaults
 
 /*
  * Encapsulates all of the GC tunables. These are effectively constant and
@@ -348,30 +442,30 @@ class GCSchedulingTunables {
   /*
    * JSGC_ALLOCATION_THRESHOLD
    *
-   * The base value used to compute zone->threshold.gcTriggerBytes(). When
-   * usage.gcBytes() surpasses threshold.gcTriggerBytes() for a zone, the
-   * zone may be scheduled for a GC, depending on the exact circumstances.
+   * The base value used to compute zone->threshold.bytes(). When
+   * gcHeapSize.bytes() exceeds threshold.bytes() for a zone, the zone may be
+   * scheduled for a GC, depending on the exact circumstances.
    */
   MainThreadOrGCTaskData<size_t> gcZoneAllocThresholdBase_;
 
   /*
    * JSGC_NON_INCREMENTAL_FACTOR
    *
-   * Multiple of threshold.gcBytes() which triggers a non-incremental GC.
+   * Multiple of threshold.bytes() which triggers a non-incremental GC.
    */
   UnprotectedData<float> nonIncrementalFactor_;
 
   /*
    * JSGC_AVOID_INTERRUPT_FACTOR
    *
-   * Multiple of threshold.gcBytes() which triggers a new incremental GC when
+   * Multiple of threshold.bytes() which triggers a new incremental GC when
    * doing so would interrupt an ongoing incremental GC.
    */
   UnprotectedData<float> avoidInterruptFactor_;
 
   /*
-   * Number of bytes to allocate between incremental slices in GCs triggered
-   * by the zone allocation threshold.
+   * Number of bytes to allocate between incremental slices in GCs triggered by
+   * the zone allocation threshold.
    *
    * This value does not have a JSGCParamKey parameter yet.
    */
@@ -569,44 +663,43 @@ class GCSchedulingState {
   }
 };
 
+using AtomicByteCount =
+    mozilla::Atomic<size_t, mozilla::ReleaseAcquire,
+                    mozilla::recordreplay::Behavior::DontPreserve>;
+
 /*
- * Tracks the used sizes for owned heap data and automatically maintains the
- * memory usage relationship between GCRuntime and Zones.
+ * Tracks the size of allocated data. This is used for both GC and malloc data.
+ * It automatically maintains the memory usage relationship between parent and
+ * child instances, i.e. between those in a GCRuntime and its Zones.
  */
 class HeapSize {
   /*
-   * A heap usage that contains our parent's heap usage, or null if this is
-   * the top-level usage container.
+   * An instance that contains our parent's heap usage, or null if this is the
+   * top-level usage container.
    */
   HeapSize* const parent_;
 
   /*
-   * The approximate number of bytes in use on the GC heap, to the nearest
-   * ArenaSize. This does not include any malloc data. It also does not
-   * include not-actively-used addresses that are still reserved at the OS
-   * level for GC usage. It is atomic because it is updated by both the active
-   * and GC helper threads.
+   * The number of bytes in use. For GC heaps this is approximate to the nearest
+   * ArenaSize. It is atomic because it is updated by both the active and GC
+   * helper threads.
    */
-  mozilla::Atomic<size_t, mozilla::ReleaseAcquire,
-                  mozilla::recordreplay::Behavior::DontPreserve>
-      gcBytes_;
+  AtomicByteCount bytes_;
 
   /*
    * The number of bytes retained after the last collection. This is updated
    * dynamically during incremental GC. It does not include allocations that
    * happen during a GC.
    */
-  mozilla::Atomic<size_t, mozilla::ReleaseAcquire,
-                  mozilla::recordreplay::Behavior::DontPreserve>
-      retainedBytes_;
+  AtomicByteCount retainedBytes_;
 
  public:
-  explicit HeapSize(HeapSize* parent) : parent_(parent), gcBytes_(0) {}
+  explicit HeapSize(HeapSize* parent) : parent_(parent), bytes_(0) {}
 
-  size_t gcBytes() const { return gcBytes_; }
+  size_t bytes() const { return bytes_; }
   size_t retainedBytes() const { return retainedBytes_; }
 
-  void updateOnGCStart() { retainedBytes_ = size_t(gcBytes_); }
+  void updateOnGCStart() { retainedBytes_ = size_t(bytes_); }
 
   void addGCArena() { addBytes(ArenaSize); }
   void removeGCArena() {
@@ -615,9 +708,9 @@ class HeapSize {
   }
 
   void addBytes(size_t nbytes) {
-    mozilla::DebugOnly<size_t> initialBytes(gcBytes_);
+    mozilla::DebugOnly<size_t> initialBytes(bytes_);
     MOZ_ASSERT(initialBytes + nbytes > initialBytes);
-    gcBytes_ += nbytes;
+    bytes_ += nbytes;
     if (parent_) {
       parent_->addBytes(nbytes);
     }
@@ -628,8 +721,8 @@ class HeapSize {
       // we can't do that yet, so clamp the result to zero.
       retainedBytes_ = nbytes <= retainedBytes_ ? retainedBytes_ - nbytes : 0;
     }
-    MOZ_ASSERT(gcBytes_ >= nbytes);
-    gcBytes_ -= nbytes;
+    MOZ_ASSERT(bytes_ >= nbytes);
+    bytes_ -= nbytes;
     if (parent_) {
       parent_->removeBytes(nbytes, wasSwept);
     }
@@ -639,31 +732,33 @@ class HeapSize {
   void adopt(HeapSize& source) {
     // Skip retainedBytes_: we never adopt zones that are currently being
     // collected.
-    gcBytes_ += source.gcBytes_;
+    bytes_ += source.bytes_;
     source.retainedBytes_ = 0;
-    source.gcBytes_ = 0;
+    source.bytes_ = 0;
   }
 };
 
-// Base class for GC heap and malloc thresholds.
-class ZoneThreshold {
+// A heap size threshold used to trigger GC. This is an abstract base class for
+// GC heap and malloc thresholds defined below.
+class HeapThreshold {
  protected:
+  HeapThreshold() = default;
+
   // GC trigger threshold.
-  mozilla::Atomic<size_t, mozilla::Relaxed,
-                  mozilla::recordreplay::Behavior::DontPreserve>
-      gcTriggerBytes_;
+  AtomicByteCount bytes_;
 
  public:
-  size_t gcTriggerBytes() const { return gcTriggerBytes_; }
+  size_t bytes() const { return bytes_; }
   size_t nonIncrementalTriggerBytes(GCSchedulingTunables& tunables) const {
-    return gcTriggerBytes_ * tunables.nonIncrementalFactor();
+    return bytes_ * tunables.nonIncrementalFactor();
   }
   float eagerAllocTrigger(bool highFrequencyGC) const;
 };
 
-// This class encapsulates the data that determines when we need to do a zone GC
-// base on GC heap size.
-class ZoneHeapThreshold : public ZoneThreshold {
+// A heap threshold that is based on a multiple of the retained size after the
+// last collection adjusted based on collection frequency and retained
+// size. This is used to determine when to do a zone GC based on GC heap size.
+class GCHeapThreshold : public HeapThreshold {
  public:
   void updateAfterGC(size_t lastBytes, JSGCInvocationKind gckind,
                      const GCSchedulingTunables& tunables,
@@ -679,9 +774,10 @@ class ZoneHeapThreshold : public ZoneThreshold {
                                         const AutoLockGC& lock);
 };
 
-// This class encapsulates the data that determines when we need to do a zone
+// A heap threshold that is calculated as a constant multiple of the retained
+// size after the last collection. This is used to determines when to do a zone
 // GC based on malloc data.
-class ZoneMallocThreshold : public ZoneThreshold {
+class MallocHeapThreshold : public HeapThreshold {
  public:
   void updateAfterGC(size_t lastBytes, size_t baseBytes, float growthFactor,
                      const AutoLockGC& lock);
@@ -692,11 +788,11 @@ class ZoneMallocThreshold : public ZoneThreshold {
                                         const AutoLockGC& lock);
 };
 
-// A fixed threshold that determines when we need to do a zone GC based on
-// allocated JIT code.
-class ZoneFixedThreshold : public ZoneThreshold {
+// A fixed threshold that's used to determine when we need to do a zone GC based
+// on allocated JIT code.
+class JitHeapThreshold : public HeapThreshold {
  public:
-  explicit ZoneFixedThreshold(size_t bytes) { gcTriggerBytes_ = bytes; }
+  explicit JitHeapThreshold(size_t bytes) { bytes_ = bytes; }
 };
 
 #ifdef DEBUG

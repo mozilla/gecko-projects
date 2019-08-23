@@ -78,6 +78,9 @@ pref("extensions.langpacks.signatures.required", true);
 pref("xpinstall.signatures.required", true);
 pref("xpinstall.signatures.devInfoURL", "https://wiki.mozilla.org/Addons/Extension_Signing");
 
+// Disable extensionStorage storage actor by default
+pref("devtools.storage.extensionStorage.enabled", false);
+
 // Dictionary download preference
 pref("browser.dictionaries.download.url", "https://addons.mozilla.org/%LOCALE%/firefox/language-tools/");
 
@@ -396,6 +399,8 @@ pref("permissions.default.shortcuts", 0);
 #else
   pref("permissions.desktop-notification.postPrompt.enabled", false);
 #endif
+
+pref("permissions.desktop-notification.notNow.enabled", false);
 
 pref("permissions.fullscreen.allowed", false);
 
@@ -986,7 +991,11 @@ pref("security.certerrors.permanentOverride", true);
 pref("security.certerrors.mitm.priming.enabled", true);
 pref("security.certerrors.mitm.priming.endpoint", "https://mitmdetection.services.mozilla.com/");
 pref("security.certerrors.mitm.auto_enable_enterprise_roots", true);
+#ifdef NIGHTLY_BUILD
+pref("security.aboutcertificate.enabled", true);
+#else
 pref("security.aboutcertificate.enabled", false);
+#endif
 
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
@@ -1298,6 +1307,7 @@ pref("browser.newtabpage.activity-stream.improvesearch.topSiteSearchShortcuts", 
 
 // ASRouter provider configuration
 pref("browser.newtabpage.activity-stream.asrouter.providers.cfr", "{\"id\":\"cfr\",\"enabled\":true,\"type\":\"remote-settings\",\"bucket\":\"cfr\",\"frequency\":{\"custom\":[{\"period\":\"daily\",\"cap\":1}]},\"categories\":[\"cfrAddons\",\"cfrFeatures\"],\"updateCycleInMs\":3600000}");
+pref("browser.newtabpage.activity-stream.asrouter.providers.whats-new-panel", "{\"id\":\"whats-new-panel\",\"enabled\":true,\"type\":\"remote-settings\",\"bucket\":\"whats-new-panel\",\"updateCycleInMs\":3600000}");
 // This url, if changed, MUST continue to point to an https url. Pulling arbitrary content to inject into
 // this page over http opens us up to a man-in-the-middle attack that we'd rather not face. If you are a downstream
 // repackager of this code using an alternate snippet url, please keep your users safe
@@ -1356,6 +1366,7 @@ pref("pdfjs.previousHandler.alwaysAskBeforeHandling", false);
 pref("sidebar.position_start", true);
 
 pref("security.identitypopup.recordEventTelemetry", true);
+pref("security.protectionspopup.recordEventTelemetry", true);
 
 // Block insecure active content on https pages
 pref("security.mixed_content.block_active_content", true);
@@ -1918,7 +1929,7 @@ pref("identity.fxaccounts.toolbar.accessed", false);
 pref("identity.fxaccounts.service.sendLoginUrl", "https://send.firefox.com/login/");
 pref("identity.fxaccounts.service.monitorLoginUrl", "https://monitor.firefox.com/");
 
-// Check bundled JAR and XPI files for corruption.
+// Check bundled omni JARs for corruption.
 #ifdef RELEASE_OR_BETA
   pref("corroborator.enabled", false);
 #else

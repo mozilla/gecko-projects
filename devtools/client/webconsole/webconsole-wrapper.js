@@ -1,4 +1,3 @@
-/* -*- js-indent-level: 2; indent-tabs-mode: nil -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -35,6 +34,8 @@ const EventEmitter = require("devtools/shared/event-emitter");
 const App = createFactory(require("devtools/client/webconsole/components/App"));
 const ObjectClient = require("devtools/shared/client/object-client");
 const LongStringClient = require("devtools/shared/client/long-string-client");
+const DataProvider = require("devtools/client/netmonitor/src/connector/firefox-data-provider");
+
 loader.lazyRequireGetter(
   this,
   "Constants",
@@ -74,17 +75,26 @@ class WebConsoleWrapper {
     this.queuedMessageUpdates = [];
     this.queuedRequestUpdates = [];
     this.throttledDispatchPromise = null;
-
     this.telemetry = new Telemetry();
   }
 
   init() {
-    return new Promise(resolve => {
+    return new Promise(async resolve => {
       const attachRefToWebConsoleUI = (id, node) => {
         this.webConsoleUI[id] = node;
       };
       const { webConsoleUI } = this;
-      const debuggerClient = this.hud.target.client;
+      const debuggerClient = this.hud.currentTarget.client;
+
+      const webConsoleClient = await this.hud.currentTarget.getFront("console");
+      this.networkDataProvider = new DataProvider({
+        actions: {
+          updateRequest: (id, data) => {
+            return this.batchedRequestUpdates({ id, data });
+          },
+        },
+        webConsoleClient,
+      });
 
       const serviceContainer = {
         attachRefToWebConsoleUI,
@@ -104,23 +114,15 @@ class WebConsoleWrapper {
           webConsoleUI.hud.openLink(url, e);
         },
         canRewind: () => {
-          if (
-            !(
-              webConsoleUI.hud &&
-              webConsoleUI.hud.target &&
-              webConsoleUI.hud.target.traits
-            )
-          ) {
-            return false;
-          }
-
-          return webConsoleUI.hud.target.traits.canRewind;
+          const target = webConsoleUI.hud && webConsoleUI.hud.currentTarget;
+          const traits = target && target.traits;
+          return traits && traits.canRewind;
         },
         createElement: nodename => {
           return this.document.createElement(nodename);
         },
         fetchObjectProperties: async (grip, ignoreNonIndexedProperties) => {
-          const client = new ObjectClient(this.hud.target.client, grip);
+          const client = new ObjectClient(this.hud.currentTarget.client, grip);
           const { iterator } = await client.enumProperties({
             ignoreNonIndexedProperties,
           });
@@ -128,7 +130,7 @@ class WebConsoleWrapper {
           return ownProperties;
         },
         fetchObjectEntries: async grip => {
-          const client = new ObjectClient(this.hud.target.client, grip);
+          const client = new ObjectClient(this.hud.currentTarget.client, grip);
           const { iterator } = await client.enumEntries();
           const { ownProperties } = await iterator.slice(0, iterator.count);
           return ownProperties;
@@ -137,9 +139,8 @@ class WebConsoleWrapper {
           const proxy = webConsoleUI.getProxy();
           return proxy.webConsoleClient.getString(grip);
         },
-        requestData(id, type) {
-          const proxy = webConsoleUI.getProxy();
-          return proxy.networkDataProvider.requestData(id, type);
+        requestData: (id, type) => {
+          return this.networkDataProvider.requestData(id, type);
         },
         onViewSource(frame) {
           if (webConsoleUI && webConsoleUI.hud && webConsoleUI.hud.viewSource) {
@@ -583,10 +584,6 @@ class WebConsoleWrapper {
     if (res.networkInfo.updates.length === expectedLength) {
       this.batchedMessageUpdates({ res, message });
     }
-  }
-
-  dispatchRequestUpdate(id, data) {
-    return this.batchedRequestUpdates({ id, data });
   }
 
   dispatchSidebarClose() {

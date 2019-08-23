@@ -11,8 +11,7 @@
 
 // This file uses ContentTask & frame scripts, where these are available.
 /* global addEventListener, removeEventListener, sendAsyncMessage,
-          addMessageListener, removeMessageListener,
-          privateNoteIntentionalCrash, ContentTaskUtils */
+          addMessageListener, removeMessageListener, ContentTaskUtils */
 
 "use strict";
 
@@ -1809,7 +1808,7 @@ var BrowserTestUtils = {
     return new Promise(resolve => {
       let mut = new MutationObserver(mutations => {
         if (
-          (!value && element.getAttribute(attr)) ||
+          (!value && element.hasAttribute(attr)) ||
           (value && element.getAttribute(attr) === value)
         ) {
           resolve();

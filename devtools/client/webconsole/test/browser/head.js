@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 /* eslint no-unused-vars: [2, {"vars": "local"}] */
@@ -352,7 +350,7 @@ function hideContextMenu(hud) {
 }
 
 function _getContextMenu(hud) {
-  const toolbox = gDevTools.getToolbox(hud.target);
+  const toolbox = hud.toolbox;
   const doc = toolbox ? toolbox.topWindow.document : hud.chromeWindow.document;
   return doc.getElementById("webconsole-menu");
 }
@@ -1521,4 +1519,15 @@ function toggleLayout(hud) {
     [isMacOS ? "metaKey" : "ctrlKey"]: true,
   });
   return waitFor(() => isEditorModeEnabled(hud) === !enabled);
+}
+
+/**
+ * Wait until all lazily fetch requests in netmonitor get finished.
+ * Otherwise test will be shutdown too early and cause failure.
+ */
+async function waitForLazyRequests(toolbox) {
+  const { wrapper } = toolbox.getCurrentPanel().hud.ui;
+  return waitUntil(() => {
+    return !wrapper.networkDataProvider.lazyRequestData.size;
+  });
 }

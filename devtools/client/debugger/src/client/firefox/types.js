@@ -21,7 +21,6 @@ import type {
   Frame,
   SourceId,
   QueuedSourceData,
-  Worker,
   Range,
 } from "../../types";
 
@@ -186,7 +185,7 @@ export type Actions = {
   resumed: ActorId => void,
   newQueuedSources: (QueuedSourceData[]) => void,
   fetchEventListeners: () => void,
-  updateWorkers: () => void,
+  updateThreads: () => void,
 };
 
 type ConsoleClient = {
@@ -226,8 +225,10 @@ export type Target = {
   threadFront: ThreadFront,
   activeConsole: ConsoleClient,
 
+  name: string,
   isBrowsingContext: boolean,
   isContentProcess: boolean,
+  isWorkerTarget: boolean,
   traits: Object,
   chrome: Boolean,
   url: string,
@@ -381,7 +382,6 @@ export type ThreadFront = {
 export type Panel = {|
   emit: (eventName: string) => void,
   openLink: (url: string) => void,
-  openWorkerToolbox: (worker: Worker) => void,
   openElementInInspector: (grip: Object) => void,
   openConsoleAndEvaluate: (input: string) => void,
   highlightDomElement: (grip: Object) => void,

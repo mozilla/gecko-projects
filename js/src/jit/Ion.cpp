@@ -700,12 +700,6 @@ void JitCode::traceChildren(JSTracer* trc) {
     MacroAssembler::TraceJumpRelocations(trc, this, reader);
   }
   if (dataRelocTableBytes_) {
-    // If we're moving objects, we need writable JIT code.
-    bool movingObjects =
-        JS::RuntimeHeapIsMinorCollecting() || zone()->isGCCompacting();
-    MaybeAutoWritableJitCode awjc(this,
-                                  movingObjects ? Reprotect : DontReprotect);
-
     uint8_t* start = code_ + dataRelocTableOffset();
     CompactBufferReader reader(start, start + dataRelocTableBytes_);
     MacroAssembler::TraceDataRelocations(trc, this, reader);
@@ -2897,7 +2891,7 @@ void AutoFlushICache::flush(uintptr_t start, size_t len) {
   AutoFlushICache* afc = cx ? cx->autoFlushICache() : nullptr;
   if (!afc) {
     JitSpewCont(JitSpew_CacheFlush, "#");
-    ExecutableAllocator::cacheFlush((void*)start, len);
+    jit::FlushICache((void*)start, len);
     MOZ_ASSERT(len <= 32);
     return;
   }
@@ -2911,7 +2905,7 @@ void AutoFlushICache::flush(uintptr_t start, size_t len) {
   }
 
   JitSpewCont(JitSpew_CacheFlush, afc->inhibit_ ? "x" : "*");
-  ExecutableAllocator::cacheFlush((void*)start, len);
+  jit::FlushICache((void*)start, len);
 #else
   MOZ_CRASH("Unresolved porting API - AutoFlushICache::flush");
 #endif
@@ -2988,7 +2982,7 @@ AutoFlushICache::~AutoFlushICache() {
   MOZ_ASSERT(cx->autoFlushICache() == this);
 
   if (!inhibit_ && start_) {
-    ExecutableAllocator::cacheFlush((void*)start_, size_t(stop_ - start_));
+    jit::FlushICache((void*)start_, size_t(stop_ - start_));
   }
 
   JitSpewCont(JitSpew_CacheFlush, "%s%s>", name_, start_ ? "" : " U");

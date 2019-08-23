@@ -426,7 +426,7 @@ var PermissionPromptPrototype = {
     } else if (this.permissionKey) {
       // If we're reading a permission which already has a temporary value,
       // see if we can use the temporary value.
-      let { state } = SitePermissions.get(
+      let { state } = SitePermissions.getForPrincipal(
         null,
         this.permissionKey,
         this.browser
@@ -514,7 +514,7 @@ var PermissionPromptPrototype = {
               // Temporarily store BLOCK permissions.
               // We don't consider subframes when storing temporary
               // permissions on a tab, thus storing ALLOW could be exploited.
-              SitePermissions.set(
+              SitePermissions.setForPrincipal(
                 null,
                 this.permissionKey,
                 promptAction.action,
@@ -872,6 +872,11 @@ function DesktopNotificationPermissionPrompt(request) {
     "postPromptEnabled",
     "permissions.desktop-notification.postPrompt.enabled"
   );
+  XPCOMUtils.defineLazyPreferenceGetter(
+    this,
+    "notNowEnabled",
+    "permissions.desktop-notification.notNow.enabled"
+  );
 }
 
 DesktopNotificationPermissionPrompt.prototype = {
@@ -921,24 +926,26 @@ DesktopNotificationPermissionPrompt.prototype = {
         action: SitePermissions.ALLOW,
         scope: SitePermissions.SCOPE_PERSISTENT,
       },
-      {
+    ];
+    if (this.notNowEnabled) {
+      actions.push({
         label: gBrowserBundle.GetStringFromName("webNotifications.notNow"),
         accessKey: gBrowserBundle.GetStringFromName(
           "webNotifications.notNow.accesskey"
         ),
         action: SitePermissions.BLOCK,
-      },
-    ];
-    if (!PrivateBrowsingUtils.isBrowserPrivate(this.browser)) {
-      actions.push({
-        label: gBrowserBundle.GetStringFromName("webNotifications.never"),
-        accessKey: gBrowserBundle.GetStringFromName(
-          "webNotifications.never.accesskey"
-        ),
-        action: SitePermissions.BLOCK,
-        scope: SitePermissions.SCOPE_PERSISTENT,
       });
     }
+    actions.push({
+      label: gBrowserBundle.GetStringFromName("webNotifications.never"),
+      accessKey: gBrowserBundle.GetStringFromName(
+        "webNotifications.never.accesskey"
+      ),
+      action: SitePermissions.BLOCK,
+      scope: PrivateBrowsingUtils.isBrowserPrivate(this.browser)
+        ? SitePermissions.SCOPE_SESSION
+        : SitePermissions.SCOPE_PERSISTENT,
+    });
     return actions;
   },
 

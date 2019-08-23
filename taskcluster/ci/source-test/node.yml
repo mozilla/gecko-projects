@@ -22,6 +22,8 @@ debugger-tests:
             cd devtools/client/debugger/ &&
             yarn &&
             node bin/try-runner.js
+    attributes:
+        code-review: true
     when:
         files-changed:
             - 'devtools/client/debugger/**'
@@ -44,7 +46,7 @@ devtools-tests:
         command: >
             npm install &&
             cd devtools/client/bin/ &&
-            node devtools-node-test-runner.js --suite=aboutdebugging-new &&
+            node devtools-node-test-runner.js --suite=aboutdebugging &&
             node devtools-node-test-runner.js --suite=accessibility &&
             node devtools-node-test-runner.js --suite=application &&
             node devtools-node-test-runner.js --suite=framework &&

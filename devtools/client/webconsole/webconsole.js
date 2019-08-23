@@ -51,8 +51,8 @@ const isMacOS = Services.appinfo.OS === "Darwin";
 class WebConsole {
   /*
    * @constructor
-   * @param object target
-   *        The target that the web console will connect to.
+   * @param object toolbox
+   *        The toolbox where the web console is displayed.
    * @param nsIDOMWindow iframeWindow
    *        The window where the web console UI is already loaded.
    * @param nsIDOMWindow chromeWindow
@@ -60,16 +60,16 @@ class WebConsole {
    * @param bool isBrowserConsole
    */
   constructor(
-    target,
+    toolbox,
     iframeWindow,
     chromeWindow,
     isBrowserConsole = false,
     fissionSupport = false
   ) {
+    this.toolbox = toolbox;
     this.iframeWindow = iframeWindow;
     this.chromeWindow = chromeWindow;
     this.hudId = "hud_" + ++gHudId;
-    this.target = target;
     this.browserWindow = this.chromeWindow.top;
     this.isBrowserConsole = isBrowserConsole;
     this.fissionSupport = fissionSupport;
@@ -84,6 +84,10 @@ class WebConsole {
     this._destroyer = null;
 
     EventEmitter.decorate(this);
+  }
+
+  get currentTarget() {
+    return this.toolbox.target;
   }
 
   /**
@@ -150,14 +154,6 @@ class WebConsole {
   }
 
   /**
-   * Alias for the WebConsoleUI.setFilterState() method.
-   * @see webconsole.js::WebConsoleUI.setFilterState()
-   */
-  setFilterState() {
-    this.ui && this.ui.setFilterState.apply(this.ui, arguments);
-  }
-
-  /**
    * Open a link in a new tab.
    *
    * @param string link
@@ -201,7 +197,7 @@ class WebConsole {
    *        The line number which you want to place the caret.
    */
   viewSourceInStyleEditor(sourceURL, sourceLine) {
-    const toolbox = gDevTools.getToolbox(this.target);
+    const toolbox = this.toolbox;
     if (!toolbox) {
       this.viewSource(sourceURL, sourceLine);
       return;
@@ -224,7 +220,7 @@ class WebConsole {
    *        The column number which you want to place the caret.
    */
   viewSourceInDebugger(sourceURL, sourceLine, sourceColumn) {
-    const toolbox = gDevTools.getToolbox(this.target);
+    const toolbox = this.toolbox;
     if (!toolbox) {
       this.viewSource(sourceURL, sourceLine, sourceColumn);
       return;
@@ -261,7 +257,7 @@ class WebConsole {
    *         returned.
    */
   getDebuggerFrames() {
-    const toolbox = gDevTools.getToolbox(this.target);
+    const toolbox = this.toolbox;
     if (!toolbox) {
       return null;
     }
@@ -290,7 +286,7 @@ class WebConsole {
    *                               `originalExpression`.
    */
   getMappedExpression(expression) {
-    const toolbox = gDevTools.getToolbox(this.target);
+    const toolbox = this.toolbox;
 
     // We need to check if the debugger is open, since it may perform a variable name
     // substitution for sourcemapped script (i.e. evaluated `myVar.trim()` might need to
@@ -345,7 +341,7 @@ class WebConsole {
    *         then |null| is returned.
    */
   getInspectorSelection() {
-    const toolbox = gDevTools.getToolbox(this.target);
+    const toolbox = this.toolbox;
     if (!toolbox) {
       return null;
     }

@@ -23,8 +23,6 @@ var EXPORTED_SYMBOLS = [
   "verifyBundleSignedState",
 ];
 
-/* globals DownloadAddonInstall, LocalAddonInstall */
-
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
@@ -1479,6 +1477,7 @@ class AddonInstall {
         `removeTemporaryFile: ${this.sourceURI.spec} removing temp file ` +
           this.file.path
       );
+      flushJarCache(this.file);
       this.file.remove(true);
       this.ownsTempFile = false;
     } catch (e) {

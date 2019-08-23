@@ -42,6 +42,7 @@ class nsRange;
 namespace mozilla {
 class AutoSelectionSetterAfterTableEdit;
 class AutoSetTemporaryAncestorLimiter;
+class EditActionResult;
 class EmptyEditableFunctor;
 class ResizerSelectionListener;
 enum class EditSubAction : int32_t;
@@ -49,6 +50,7 @@ struct PropItem;
 template <class T>
 class OwningNonNull;
 namespace dom {
+class AbstractRange;
 class Blob;
 class DocumentFragment;
 class Event;
@@ -798,9 +800,19 @@ class HTMLEditor final : public TextEditor,
                                          int32_t* outOffset = 0);
 
   /**
-   * @param aElement        Must not be null.
+   * NodeIsBlockStatic() returns true if aElement is an element node and
+   * should be treated as a block.
    */
-  static bool NodeIsBlockStatic(const nsINode* aElement);
+  static bool NodeIsBlockStatic(const nsINode& aElement);
+
+  /**
+   * NodeIsInlineStatic() returns true if aElement is an element node but
+   * shouldn't be treated as a block or aElement is not an element.
+   * XXX This looks odd.  For example, how about a comment node?
+   */
+  static bool NodeIsInlineStatic(const nsINode& aElement) {
+    return !NodeIsBlockStatic(aElement);
+  }
 
   /**
    * extracts an element from the normal flow of the document and
@@ -1093,6 +1105,126 @@ class HTMLEditor final : public TextEditor,
    * instance.
    */
   MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult OnModifyDocument();
+
+ protected:  // edit sub-action handler
+  /**
+   * Called before inserting something into the editor.
+   * This method may removes mPaddingBRElementForEmptyEditor if there is.
+   * Therefore, this method might cause destroying the editor.
+   *
+   * @param aCancel             Returns true if the operation is canceled.
+   *                            This can be nullptr.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult WillInsert(bool* aCancel = nullptr);
+
+  /**
+   * Called before inserting text.
+   * This method may actually inserts text into the editor.  Therefore, this
+   * might cause destroying the editor.
+   *
+   * @param aEditSubAction      Must be EditSubAction::eInsertTextComingFromIME
+   *                            or EditSubAction::eInsertText.
+   * @param aCancel             Returns true if the operation is canceled.
+   * @param aHandled            Returns true if the edit action is handled.
+   * @param inString            String to be inserted.
+   * @param outString           String actually inserted.
+   * @param aMaxLength          The maximum string length which the editor
+   *                            allows to set.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult WillInsertText(
+      EditSubAction aEditSubAction, bool* aCancel, bool* aHandled,
+      const nsAString* inString, nsAString* outString, int32_t aMaxLength);
+
+  /**
+   * GetInlineStyles() retrieves the style of aNode and modifies each item of
+   * aStyleCacheArray.  This might cause flushing layout at retrieving computed
+   * values of CSS properties.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  GetInlineStyles(nsINode& aNode, AutoStyleCacheArray& aStyleCacheArray);
+
+  /**
+   * CacheInlineStyles() caches style of aNode into mCachedInlineStyles of
+   * TopLevelEditSubAction.  This may cause flushing layout at retrieving
+   * computed value of CSS properties.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult CacheInlineStyles(nsINode& aNode);
+
+  /**
+   * ReapplyCachedStyles() restores some styles which are disappeared during
+   * handling edit action and it should be restored.  This may cause flushing
+   * layout at retrieving computed value of CSS properties.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult ReapplyCachedStyles();
+
+  /**
+   * CreateStyleForInsertText() sets CSS properties which are stored in
+   * TypeInState to proper element node.
+   * XXX This modifies Selection, but should return insertion point instead.
+   *
+   * @param aAbstractRange      Set current selection range where new text
+   *                            should be inserted.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  CreateStyleForInsertText(dom::AbstractRange& aAbstractRange);
+
+  /**
+   * GetMostAncestorMailCiteElement() returns most-ancestor mail cite element.
+   * "mail cite element" is <pre> element when it's in plaintext editor mode
+   * or an element with which calling HTMLEditUtils::IsMailCite() returns true.
+   *
+   * @param aNode       The start node to look for parent mail cite elements.
+   */
+  Element* GetMostAncestorMailCiteElement(nsINode& aNode) const;
+
+  /**
+   * SplitMailCiteElements() splits mail-cite elements at start of Selection if
+   * Selection starts from inside a mail-cite element.  Of course, if it's
+   * necessary, this inserts <br> node to new left nodes or existing right
+   * nodes.
+   * XXX This modifies Selection, but should return SplitNodeResult() instead.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE EditActionResult
+  SplitMailCiteElements(const EditorDOMPoint& aPointToSplit);
+
+  /**
+   * CanContainParagraph() returns true if aElement can have a <p> element as
+   * its child or its descendant.
+   */
+  bool CanContainParagraph(Element& aElement) const;
+
+  /**
+   * InsertBRElement() inserts a <br> element into aInsertToBreak.
+   * This may split container elements at the point and/or may move following
+   * <br> element to immediately after the new <br> element if necessary.
+   * XXX This method name is too generic and unclear whether such complicated
+   *     things will be done automatically or not.
+   * XXX This modifies Selection, but should return CreateElementResult instead.
+   *
+   * @param aInsertToBreak      The point where new <br> element will be
+   *                            inserted before.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  InsertBRElement(const EditorDOMPoint& aInsertToBreak);
+
+  /**
+   * GetMostAncestorInlineElement() returns the most ancestor inline element
+   * between aNode and the editing host.  Even if the editing host is an inline
+   * element, this method never returns the editing host as the result.
+   */
+  nsIContent* GetMostAncestorInlineElement(nsINode& aNode) const;
+
+  /**
+   * SplitParentInlineElementsAtRangeEdges() splits parent inline nodes at both
+   * start and end of aRangeItem.  If this splits at every point, this modifies
+   * aRangeItem to point each split point (typically, right node).
+   *
+   * @param aRangeItem          [in/out] One or two DOM points where should be
+   *                            split.  Will be modified to split point if
+   *                            they're split.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  SplitParentInlineElementsAtRangeEdges(RangeItem& aRangeItem);
 
  protected:  // Called by helper classes.
   virtual void OnStartToHandleTopLevelEditSubAction(
@@ -2543,9 +2675,45 @@ class HTMLEditor final : public TextEditor,
    */
   MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult OnModifyDocumentInternal();
 
+  /**
+   * For saving allocation cost in the constructor of
+   * EditorBase::TopLevelEditSubActionData, we should reuse same RangeItem
+   * instance with all top level edit sub actions.
+   * The instance is always cleared when TopLevelEditSubActionData is
+   * destructed and the class is stack only class so that we don't need
+   * to (and also should not) add the RangeItem into the cycle collection.
+   */
+  already_AddRefed<RangeItem> GetSelectedRangeItemForTopLevelEditSubAction()
+      const {
+    if (!mSelectedRangeForTopLevelEditSubAction) {
+      mSelectedRangeForTopLevelEditSubAction = new RangeItem();
+    }
+    return do_AddRef(mSelectedRangeForTopLevelEditSubAction);
+  }
+
+  /**
+   * For saving allocation cost in the constructor of
+   * EditorBase::TopLevelEditSubActionData, we should reuse same nsRange
+   * instance with all top level edit sub actions.
+   * The instance is always cleared when TopLevelEditSubActionData is
+   * destructed, but AbstractRange::mOwner keeps grabbing the owner document
+   * so that we need to make it in the cycle collection.
+   */
+  already_AddRefed<nsRange> GetChangedRangeForTopLevelEditSubAction() const {
+    if (!mChangedRangeForTopLevelEditSubAction) {
+      mChangedRangeForTopLevelEditSubAction = new nsRange(GetDocument());
+    }
+    return do_AddRef(mChangedRangeForTopLevelEditSubAction);
+  }
+
  protected:
   RefPtr<TypeInState> mTypeInState;
   RefPtr<ComposerCommandsUpdater> mComposerCommandsUpdater;
+
+  // Used by TopLevelEditSubActionData::mSelectedRange.
+  mutable RefPtr<RangeItem> mSelectedRangeForTopLevelEditSubAction;
+  // Used by TopLevelEditSubActionData::mChangedRange.
+  mutable RefPtr<nsRange> mChangedRangeForTopLevelEditSubAction;
 
   bool mCRInParagraphCreatesParagraph;
 

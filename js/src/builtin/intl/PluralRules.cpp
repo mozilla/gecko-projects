@@ -13,12 +13,16 @@
 
 #include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
-#include "builtin/intl/ICUStubs.h"
 #include "builtin/intl/NumberFormat.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "gc/FreeOp.h"
 #include "js/CharacterEncoding.h"
 #include "js/PropertySpec.h"
+#include "unicode/uenum.h"
+#include "unicode/uloc.h"
+#include "unicode/unumberformatter.h"
+#include "unicode/upluralrules.h"
+#include "unicode/utypes.h"
 #include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
 #include "vm/StringType.h"
@@ -95,11 +99,6 @@ static bool PluralRules(JSContext* cx, unsigned argc, Value* vp) {
   if (!pluralRules) {
     return false;
   }
-
-  pluralRules->setFixedSlot(PluralRulesObject::INTERNALS_SLOT, NullValue());
-  pluralRules->setPluralRules(nullptr);
-  pluralRules->setNumberFormatter(nullptr);
-  pluralRules->setFormattedNumber(nullptr);
 
   HandleValue locales = args.get(0);
   HandleValue options = args.get(1);

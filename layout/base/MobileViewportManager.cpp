@@ -147,7 +147,23 @@ MobileViewportManager::HandleEvent(dom::Event* event) {
 
 void MobileViewportManager::HandleDOMMetaAdded() {
   MVM_LOG("%p: got a dom-meta-added event\n", this);
-  RefreshViewportSize(mPainted);
+  if (mPainted && mContext->IsDocumentLoading()) {
+    // It's possible that we get a DOMMetaAdded event after the page
+    // has already been painted, but before the document finishes loading.
+    // In such a case, we've already run SetInitialViewport() on
+    // "before-first-paint", and won't run it again on "load" (because
+    // mPainted=true). But that SetInitialViewport() call didn't know the
+    // "initial-scale" from this meta viewport tag. To ensure we respect
+    // the "initial-scale", call SetInitialViewport() again.
+    // Note: It's important that we only do this if mPainted=true. In the
+    // usual case, we get the DOMMetaAdded before the first paint, sometimes
+    // even before we have a frame tree, and calling SetInitialViewport()
+    // before we have a frame tree will skip some important steps (e.g.
+    // updating display port margins).
+    SetInitialViewport();
+  } else {
+    RefreshViewportSize(mPainted);
+  }
 }
 
 NS_IMETHODIMP
@@ -598,10 +614,13 @@ void MobileViewportManager::ShrinkToDisplaySizeIfNeeded(
     return;
   }
 
-  if (!mContext->AllowZoomingForDocument()) {
+  if (!mContext->AllowZoomingForDocument() || mContext->IsInReaderMode()) {
     // If zoom is disabled, we don't scale down wider contents to fit them
     // into device screen because users won't be able to zoom out the tiny
     // contents.
+    // We special-case reader mode, because it doesn't allow zooming, but
+    // the restriction is often not yet in place at the time this logic
+    // runs.
     return;
   }
 

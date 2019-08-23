@@ -551,7 +551,7 @@ class JSFunction : public js::NativeObject {
   JSAtom* infallibleGetUnresolvedName(JSContext* cx);
 
   static bool getUnresolvedName(JSContext* cx, js::HandleFunction fun,
-                                js::MutableHandleString v);
+                                js::MutableHandleValue v);
 
   static JSLinearString* getBoundFunctionName(JSContext* cx,
                                               js::HandleFunction fun);
@@ -1097,6 +1097,9 @@ extern bool fun_toString(JSContext* cx, unsigned argc, Value* vp);
 
 struct WellKnownSymbols;
 
+// Assumes that fun.__proto__ === Function.__proto__, i.e., does not check for
+// the case where a function with a non-default __proto__ has an overridden
+// @@hasInstance handler. Will assert if not.
 extern bool FunctionHasDefaultHasInstance(JSFunction* fun,
                                           const WellKnownSymbols& symbols);
 

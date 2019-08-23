@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -287,6 +285,14 @@ ReplayDebugger.prototype = {
           }
         }
       }
+
+      if (
+        this._control.isPausedAtDebuggerStatement() &&
+        this.onDebuggerStatement
+      ) {
+        this._capturePauseData();
+        this.onDebuggerStatement(this.getNewestFrame());
+      }
     }
 
     // If no handlers entered a thread-wide pause (resetting this._direction)
@@ -553,6 +559,10 @@ ReplayDebugger.prototype = {
   findSources() {
     const data = this._sendRequestMainChild({ type: "findSources" });
     return data.map(source => this._addSource(source));
+  },
+
+  findSourceURLs() {
+    return this.findSources().map(source => source.url);
   },
 
   adoptSource(source) {

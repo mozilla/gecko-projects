@@ -1277,9 +1277,9 @@ mozilla::ipc::IPCResult BrowserChild::RecvSizeModeChanged(
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvChildToParentMatrix(
-    const mozilla::gfx::Matrix4x4& aMatrix) {
+    const mozilla::Maybe<mozilla::gfx::Matrix4x4>& aMatrix) {
   mChildToParentConversionMatrix =
-      Some(LayoutDeviceToLayoutDeviceMatrix4x4::FromUnknownMatrix(aMatrix));
+      LayoutDeviceToLayoutDeviceMatrix4x4::FromUnknownMatrix(aMatrix);
   return IPC_OK();
 }
 
@@ -1862,7 +1862,8 @@ mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityRealTouchMoveEvent(
 
 mozilla::ipc::IPCResult BrowserChild::RecvRealDragEvent(
     const WidgetDragEvent& aEvent, const uint32_t& aDragAction,
-    const uint32_t& aDropEffect, nsIPrincipal* aPrincipal) {
+    const uint32_t& aDropEffect, nsIPrincipal* aPrincipal,
+    nsIContentSecurityPolicy* aCsp) {
   WidgetDragEvent localEvent(aEvent);
   localEvent.mWidget = mPuppetWidget;
 
@@ -1870,6 +1871,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealDragEvent(
   if (dragSession) {
     dragSession->SetDragAction(aDragAction);
     dragSession->SetTriggeringPrincipal(aPrincipal);
+    dragSession->SetCsp(aCsp);
     RefPtr<DataTransfer> initialDataTransfer = dragSession->GetDataTransfer();
     if (initialDataTransfer) {
       initialDataTransfer->SetDropEffectInt(aDropEffect);
@@ -3599,6 +3601,18 @@ NS_IMETHODIMP BrowserChild::OnLocationChange(nsIWebProgress* aWebProgress,
     MOZ_TRY(PrincipalToPrincipalInfo(document->NodePrincipal(),
                                      &locationChangeData->contentPrincipal(),
                                      false));
+
+    nsIPrincipal* contentBlockingAllowListPrincipal =
+
+        document->GetContentBlockingAllowListPrincipal();
+    if (contentBlockingAllowListPrincipal) {
+      PrincipalInfo principalInfo;
+      MOZ_TRY(PrincipalToPrincipalInfo(contentBlockingAllowListPrincipal,
+                                       &principalInfo, false));
+      locationChangeData->contentBlockingAllowListPrincipal() = principalInfo;
+    } else {
+      locationChangeData->contentBlockingAllowListPrincipal() = void_t();
+    }
 
     if (const nsCOMPtr<nsIContentSecurityPolicy> csp = document->GetCsp()) {
       locationChangeData->csp().emplace();

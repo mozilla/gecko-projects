@@ -147,51 +147,13 @@ nsresult GetIPCInternalRequest(nsIInterceptedChannel* aChannel,
   RequestCredentials requestCredentials =
       InternalRequest::MapChannelToRequestCredentials(underlyingChannel);
 
-  nsCString referrer = EmptyCString();
-  uint32_t referrerPolicyInt = 0;
+  nsAutoString referrer;
+  ReferrerPolicy referrerPolicy = ReferrerPolicy::_empty;
 
   nsCOMPtr<nsIReferrerInfo> referrerInfo = httpChannel->GetReferrerInfo();
   if (referrerInfo) {
-    referrerPolicyInt = referrerInfo->GetReferrerPolicy();
-    nsCOMPtr<nsIURI> computedReferrer = referrerInfo->GetComputedReferrer();
-    if (computedReferrer) {
-      rv = computedReferrer->GetSpec(referrer);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-  }
-
-  ReferrerPolicy referrerPolicy;
-  switch (referrerPolicyInt) {
-    case nsIHttpChannel::REFERRER_POLICY_UNSET:
-      referrerPolicy = ReferrerPolicy::_empty;
-      break;
-    case nsIHttpChannel::REFERRER_POLICY_NO_REFERRER:
-      referrerPolicy = ReferrerPolicy::No_referrer;
-      break;
-    case nsIHttpChannel::REFERRER_POLICY_ORIGIN:
-      referrerPolicy = ReferrerPolicy::Origin;
-      break;
-    case nsIHttpChannel::REFERRER_POLICY_NO_REFERRER_WHEN_DOWNGRADE:
-      referrerPolicy = ReferrerPolicy::No_referrer_when_downgrade;
-      break;
-    case nsIHttpChannel::REFERRER_POLICY_ORIGIN_WHEN_XORIGIN:
-      referrerPolicy = ReferrerPolicy::Origin_when_cross_origin;
-      break;
-    case nsIHttpChannel::REFERRER_POLICY_UNSAFE_URL:
-      referrerPolicy = ReferrerPolicy::Unsafe_url;
-      break;
-    case nsIHttpChannel::REFERRER_POLICY_SAME_ORIGIN:
-      referrerPolicy = ReferrerPolicy::Same_origin;
-      break;
-    case nsIHttpChannel::REFERRER_POLICY_STRICT_ORIGIN_WHEN_XORIGIN:
-      referrerPolicy = ReferrerPolicy::Strict_origin_when_cross_origin;
-      break;
-    case nsIHttpChannel::REFERRER_POLICY_STRICT_ORIGIN:
-      referrerPolicy = ReferrerPolicy::Strict_origin;
-      break;
-    default:
-      MOZ_ASSERT_UNREACHABLE("Invalid Referrer Policy enum value?");
-      break;
+    referrerPolicy = referrerInfo->ReferrerPolicy();
+    Unused << referrerInfo->GetComputedReferrerSpec(referrer);
   }
 
   uint32_t loadFlags;
@@ -233,8 +195,8 @@ nsresult GetIPCInternalRequest(nsIInterceptedChannel* aChannel,
 
   RefPtr<InternalRequest> internalRequest = new InternalRequest(
       spec, fragment, method, internalHeaders.forget(), cacheMode, requestMode,
-      requestRedirect, requestCredentials, NS_ConvertUTF8toUTF16(referrer),
-      referrerPolicy, contentPolicyType, integrity);
+      requestRedirect, requestCredentials, referrer, referrerPolicy,
+      contentPolicyType, integrity);
   internalRequest->SetBody(uploadStream, uploadStreamContentLength);
   internalRequest->SetCreatedByFetchEvent();
 
@@ -326,6 +288,13 @@ nsresult ServiceWorkerPrivateImpl::Initialize() {
   URIParams baseScriptURL;
   SerializeURI(uri, baseScriptURL);
 
+  nsString id;
+  rv = mOuter->mInfo->GetId(id);
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
   PrincipalInfo principalInfo;
   rv = PrincipalToPrincipalInfo(principal, &principalInfo);
 
@@ -358,6 +327,7 @@ nsresult ServiceWorkerPrivateImpl::Initialize() {
   serviceWorkerData.loadFlags() =
       static_cast<uint32_t>(mOuter->mInfo->GetImportsLoadFlags() |
                             nsIChannel::LOAD_BYPASS_SERVICE_WORKER);
+  serviceWorkerData.id() = std::move(id);
 
   mRemoteWorkerData.originalScriptURL() =
       NS_ConvertUTF8toUTF16(mOuter->mInfo->ScriptSpec());

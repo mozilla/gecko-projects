@@ -423,9 +423,9 @@ function assertPausedAtSourceAndLine(dbg, expectedSourceId, expectedLine) {
 }
 
 // Get any workers associated with the debugger.
-async function getWorkers(dbg) {
-  await dbg.actions.updateWorkers();
-  return dbg.selectors.getWorkers();
+async function getThreads(dbg) {
+  await dbg.actions.updateThreads();
+  return dbg.selectors.getThreads();
 }
 
 async function waitForLoadedScopes(dbg) {
@@ -1194,6 +1194,7 @@ function assertBreakpointSnippet(dbg, index, snippet) {
 const selectors = {
   callStackHeader: ".call-stack-pane ._header",
   callStackBody: ".call-stack-pane .pane",
+  domMutationItem: ".dom-mutation-list li",
   expressionNode: i =>
     `.expressions-list .expression-container:nth-child(${i}) .object-label`,
   expressionValue: i =>
@@ -1281,8 +1282,8 @@ const selectors = {
   blackbox: ".action.black-box",
   projectSearchCollapsed: ".project-text-search .arrow:not(.expanded)",
   projectSerchExpandedResults: ".project-text-search .result",
-  threadsPaneItems: ".workers-pane .worker",
-  threadsPaneItem: i => `.workers-pane .worker:nth-child(${i})`,
+  threadsPaneItems: ".threads-pane .thread",
+  threadsPaneItem: i => `.threads-pane .thread:nth-child(${i})`,
   threadsPaneItemPause: i => `${selectors.threadsPaneItem(i)} .pause-badge`,
   CodeMirrorLines: ".CodeMirror-lines",
   inlinePreviewLables: ".CodeMirror-linewidget .inline-preview-label",

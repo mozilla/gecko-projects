@@ -10,9 +10,9 @@
 
 #  include <stdio.h>
 #  include "mozilla/UniquePtr.h"
-#  include "nsWindowsHelpers.h"
 #  include "pathhash.h"
 #  include "shlobj.h"
+#  include "registrycertificates.h"
 #  include "uachelper.h"
 #  include "updatehelper.h"
 #  include "updateutils_win.h"
@@ -120,6 +120,14 @@ BOOL StartServiceUpdate(LPCWSTR installDir) {
   // Copy the temp file in alongside the maintenace service.
   // This is a requirement for maintenance service upgrades.
   if (!CopyFileW(newMaintServicePath, tmpService, FALSE)) {
+    return FALSE;
+  }
+
+  // Check that the copied file's certificate matches the expected name and
+  // issuer stored in the registry for this installation and that the
+  // certificate is trusted by the system's certificate store.
+  if (!DoesBinaryMatchAllowedCertificates(installDir, tmpService)) {
+    DeleteFileW(tmpService);
     return FALSE;
   }
 
@@ -237,17 +245,10 @@ LaunchServiceSoftwareUpdateCommand(int argc, LPCWSTR* argv) {
  *
  * @param  updateDirPath   The path of the update directory
  * @param  errorCode       Error code to set
- * @param  userToken       Impersonation token to use
  *
  * @return TRUE if successful
  */
-BOOL WriteStatusFailure(LPCWSTR updateDirPath, int errorCode,
-                        nsAutoHandle& userToken) {
-  ImpersonationScope impersonated(userToken);
-  if (userToken && !impersonated) {
-    return FALSE;
-  }
-
+BOOL WriteStatusFailure(LPCWSTR updateDirPath, int errorCode) {
   // The temp file is not removed on failure since there is client code that
   // will remove it.
   WCHAR tmpUpdateStatusFilePath[MAX_PATH + 1] = {L'\0'};

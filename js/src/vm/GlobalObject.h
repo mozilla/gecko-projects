@@ -108,6 +108,7 @@ class GlobalObject : public NativeObject {
     WINDOW_PROXY,
     GLOBAL_THIS_RESOLVED,
     INSTRUMENTATION,
+    SOURCE_URLS,
 
     /* Total reserved-slot count for global objects. */
     RESERVED_SLOTS
@@ -475,11 +476,13 @@ class GlobalObject : public NativeObject {
     return &global->getPrototype(JSProto_WeakSet).toObject().as<NativeObject>();
   }
 
+#if ENABLE_INTL_API
   static JSObject* getOrCreateIntlObject(JSContext* cx,
                                          Handle<GlobalObject*> global) {
     return getOrCreateObject(cx, global, APPLICATION_SLOTS + JSProto_Intl,
                              initIntlObject);
   }
+#endif
 
   static JSObject* getOrCreateTypedObjectModule(JSContext* cx,
                                                 Handle<GlobalObject*> global) {
@@ -498,6 +501,7 @@ class GlobalObject : public NativeObject {
 
   TypedObjectModuleObject& getTypedObjectModule() const;
 
+#if ENABLE_INTL_API
   static JSObject* getOrCreateCollatorPrototype(JSContext* cx,
                                                 Handle<GlobalObject*> global) {
     return getOrCreateObject(cx, global, COLLATOR_PROTO, initIntlObject);
@@ -543,6 +547,7 @@ class GlobalObject : public NativeObject {
                                               Handle<GlobalObject*> global) {
     return getOrCreateObject(cx, global, LOCALE_PROTO, initIntlObject);
   }
+#endif  // ENABLE_INTL_API
 
   static bool ensureModulePrototypesCreated(JSContext* cx,
                                             Handle<GlobalObject*> global);
@@ -843,11 +848,13 @@ class GlobalObject : public NativeObject {
   static bool initMapIteratorProto(JSContext* cx, Handle<GlobalObject*> global);
   static bool initSetIteratorProto(JSContext* cx, Handle<GlobalObject*> global);
 
+#ifdef ENABLE_INTL_API
   // Implemented in builtin/intl/IntlObject.cpp.
   static bool initIntlObject(JSContext* cx, Handle<GlobalObject*> global);
 
   // Implemented in builtin/intl/Locale.cpp.
   static bool addLocaleConstructor(JSContext* cx, HandleObject intl);
+#endif
 
   // Implemented in builtin/ModuleObject.cpp
   static bool initModuleProto(JSContext* cx, Handle<GlobalObject*> global);
@@ -909,6 +916,19 @@ class GlobalObject : public NativeObject {
   }
   void setInstrumentationHolder(JSObject* instrumentation) {
     setReservedSlot(INSTRUMENTATION, ObjectValue(*instrumentation));
+  }
+
+  JSObject* getSourceURLsHolder() const {
+    Value v = getReservedSlot(SOURCE_URLS);
+    MOZ_ASSERT(v.isObject() || v.isUndefined());
+    return v.isObject() ? &v.toObject() : nullptr;
+  }
+  void setSourceURLsHolder(JSObject* holder) {
+    setReservedSlot(SOURCE_URLS, ObjectValue(*holder));
+  }
+  void clearSourceURLSHolder() {
+    // This is called at the start of shrinking GCs, so avoids barriers.
+    getSlotRef(SOURCE_URLS).unsafeSet(UndefinedValue());
   }
 
   // A class used in place of a prototype during off-thread parsing.

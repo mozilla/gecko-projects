@@ -57,7 +57,7 @@ var UrlbarTestUtils = {
       // This is necessary to get the urlbar to set gBrowser.userTypedValue.
       this.fireInputEvent(window);
     } else {
-      window.gURLBar.setAttribute("pageproxystate", "invalid");
+      window.gURLBar.setPageProxyState("invalid");
     }
     // An input event will start a new search, with a couple of exceptions, so
     // be careful not to call _startSearch if we fired an input event since that
@@ -112,7 +112,7 @@ var UrlbarTestUtils = {
       urlbar.selectionEnd = selectionEnd;
       urlbar.selectionStart = selectionStart;
     }
-    urlbar.setAttribute("pageproxystate", "invalid");
+    urlbar.setPageProxyState("invalid");
     urlbar.startQuery();
   },
 
@@ -246,7 +246,7 @@ var UrlbarTestUtils = {
   },
 
   /**
-   * Waits for the popup to be hidden.
+   * Waits for the popup to be shown.
    * @param {object} win The window containing the urlbar
    * @param {function} openFn Function to be used to open the popup.
    * @returns {Promise} resolved once the popup is closed

@@ -244,11 +244,11 @@ partial interface Document {
   readonly attribute URI? documentURIObject;
 
   /**
-   * Current referrer policy - one of the REFERRER_POLICY_* constants
-   * from nsIHttpChannel.
+   * Current referrer policy - one of the referrer policy value from
+   * ReferrerPolicy.webidl.
    */
   [ChromeOnly]
-  readonly attribute unsigned long referrerPolicy;
+  readonly attribute ReferrerPolicy referrerPolicy;
 
     /**
    * Current referrer info, which holds all referrer related information
@@ -392,6 +392,10 @@ partial interface Document {
   // The principal to use for the storage area of this document
   [ChromeOnly]
   readonly attribute Principal effectiveStoragePrincipal;
+
+  // The principal to use for the content blocking allow list
+  [ChromeOnly]
+  readonly attribute Principal? contentBlockingAllowListPrincipal;
 
   // Touch bits
   // XXXbz I can't find the sane spec for this stuff, so just cribbing

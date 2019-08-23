@@ -1028,14 +1028,12 @@ gfxFontFeatureValueSet* Gecko_ConstructFontFeatureValueSet() {
   return new gfxFontFeatureValueSet();
 }
 
-nsTArray<unsigned int>* Gecko_AppendFeatureValueHashEntry(
+nsTArray<uint32_t>* Gecko_AppendFeatureValueHashEntry(
     gfxFontFeatureValueSet* aFontFeatureValues, nsAtom* aFamily,
     uint32_t aAlternate, nsAtom* aName) {
   MOZ_ASSERT(NS_IsMainThread());
-  static_assert(sizeof(unsigned int) == sizeof(uint32_t),
-                "sizeof unsigned int and uint32_t must be the same");
   return aFontFeatureValues->AppendFeatureValueHashEntry(
-      nsAtomCString(aFamily), nsDependentAtomString(aName), aAlternate);
+      nsAtomCString(aFamily), aName, aAlternate);
 }
 
 float Gecko_FontStretch_ToFloat(FontStretch aStretch) {
@@ -1077,22 +1075,6 @@ float Gecko_FontWeight_ToFloat(FontWeight aWeight) { return aWeight.ToFloat(); }
 
 void Gecko_FontWeight_SetFloat(FontWeight* aWeight, float aFloat) {
   *aWeight = FontWeight(aFloat);
-}
-
-void Gecko_ClearAlternateValues(nsFont* aFont, size_t aLength) {
-  aFont->alternateValues.Clear();
-  aFont->alternateValues.SetCapacity(aLength);
-}
-
-void Gecko_AppendAlternateValues(nsFont* aFont, uint32_t aAlternateName,
-                                 nsAtom* aAtom) {
-  aFont->alternateValues.AppendElement(
-      gfxAlternateValue{aAlternateName, nsDependentAtomString(aAtom)});
-}
-
-void Gecko_CopyAlternateValuesFrom(nsFont* aDest, const nsFont* aSrc) {
-  aDest->alternateValues.Clear();
-  aDest->alternateValues.AppendElements(aSrc->alternateValues);
 }
 
 void Gecko_SetCounterStyleToName(CounterStylePtr* aPtr, nsAtom* aName) {
@@ -1521,8 +1503,9 @@ void Gecko_ReleasensIReferrerInfoArbitraryThread(nsIReferrerInfo* aPtr) {
 void Gecko_nsIReferrerInfo_Debug(nsIReferrerInfo* aReferrerInfo,
                                  nsCString* aOut) {
   if (aReferrerInfo) {
-    nsCOMPtr<nsIURI> referrer = aReferrerInfo->GetComputedReferrer();
-    *aOut = referrer->GetSpecOrDefault();
+    if (nsCOMPtr<nsIURI> referrer = aReferrerInfo->GetComputedReferrer()) {
+      *aOut = referrer->GetSpecOrDefault();
+    }
   }
 }
 

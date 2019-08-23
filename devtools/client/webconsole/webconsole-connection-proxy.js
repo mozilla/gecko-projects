@@ -23,19 +23,10 @@ class WebConsoleConnectionProxy {
    * @param RemoteTarget target
    *        The target that the console will connect to.
    */
-  constructor(webConsoleUI, target, isBrowserConsole, fissionSupport) {
+  constructor(webConsoleUI, target) {
     this.webConsoleUI = webConsoleUI;
     this.target = target;
-    this.isBrowserConsole = isBrowserConsole;
-    this.fissionSupport = fissionSupport;
-
-    /**
-     * The DebuggerClient object.
-     *
-     * @see DebuggerClient
-     * @type object
-     */
-    this.client = target.client;
+    this.fissionSupport = this.webConsoleUI.fissionSupport;
 
     this._connecter = null;
 
@@ -68,6 +59,7 @@ class WebConsoleConnectionProxy {
     this.target.on("navigate", this._onTabNavigated);
 
     const connection = (async () => {
+      this.client = this.target.client;
       this.webConsoleClient = await this.target.getFront("console");
       this._addWebConsoleClientEventListeners();
       await this._attachConsole();
@@ -355,15 +347,6 @@ class WebConsoleConnectionProxy {
     this.webConsoleUI.wrapper.dispatchMessageUpdate(networkInfo, response);
   }
 
-  dispatchRequestUpdate(id, data) {
-    // Some request might try to update while we are closing the toolbox.
-    if (!this.webConsoleUI) {
-      return Promise.resolve();
-    }
-
-    return this.webConsoleUI.wrapper.dispatchRequestUpdate(id, data);
-  }
-
   /**
    * Release an object actor.
    *
@@ -393,7 +376,6 @@ class WebConsoleConnectionProxy {
 
     this.client = null;
     this.webConsoleClient = null;
-    this.target = null;
     this.webConsoleUI = null;
   }
 }

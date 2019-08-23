@@ -188,10 +188,19 @@ endif
 
 # Interdependencies that moz.build world don't know about yet for compilation.
 # Note some others are hardcoded or "guessed" in recursivemake.py and emitter.py
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk3)
+ifeq ($(MOZ_WIDGET_TOOLKIT),gtk)
 toolkit/library/target: widget/gtk/mozgtk/gtk3/target
 endif
 endif
 # Most things are built during compile (target/host), but some things happen during export
 # Those need to depend on config/export for system wrappers.
 $(addprefix build/unix/stdc++compat/,target host) build/clang-plugin/host: config/export
+
+# When building gtest as part of the build (LINK_GTEST_DURING_COMPILE),
+# force the build system to get to it first, so that it can be linked
+# quickly without LTO, allowing the build system to go ahead with
+# plain gkrust and libxul while libxul-gtest is being linked and
+# dump-sym'ed.
+ifneq (,$(filter toolkit/library/gtest/rust/target,$(compile_targets)))
+toolkit/library/rust/target: toolkit/library/gtest/rust/target
+endif

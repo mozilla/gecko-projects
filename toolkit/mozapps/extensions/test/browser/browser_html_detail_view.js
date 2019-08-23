@@ -10,6 +10,10 @@ const { ExtensionPermissions } = ChromeUtils.import(
   {}
 );
 
+const SUPPORT_URL = Services.urlFormatter.formatURL(
+  Services.prefs.getStringPref("app.support.baseURL")
+);
+const PB_SUMO_URL = SUPPORT_URL + "extensions-pb";
 const DEFAULT_THEME_ID = "default-theme@mozilla.org";
 const DARK_THEME_ID = "firefox-compact-dark@mozilla.org";
 
@@ -83,18 +87,20 @@ function checkOptions(doc, options, expectedOptions) {
 
 function assertDeckHeadingHidden(group) {
   ok(group.hidden, "The tab group is hidden");
-  for (let button of group.children) {
+  let buttons = group.querySelectorAll("named-deck-button");
+  for (let button of buttons) {
     ok(button.offsetHeight == 0, `The ${button.name} is hidden`);
   }
 }
 
 function assertDeckHeadingButtons(group, visibleButtons) {
   ok(!group.hidden, "The tab group is shown");
+  let buttons = group.querySelectorAll("named-deck-button");
   ok(
-    group.children.length >= visibleButtons.length,
+    buttons.length >= visibleButtons.length,
     `There should be at least ${visibleButtons.length} buttons`
   );
-  for (let button of group.children) {
+  for (let button of buttons) {
     if (visibleButtons.includes(button.name)) {
       ok(!button.hidden, `The ${button.name} is shown`);
     } else {
@@ -300,7 +306,7 @@ add_task(async function testDetailOperations() {
   ok(expandButton.hidden, "The expand button is hidden");
 
   // Check toggling disabled.
-  let name = card.querySelector(".addon-name");
+  let name = card.addonNameEl;
   is(name.textContent, "Test", "The name is set when enabled");
   is(doc.l10n.getAttributes(name).id, null, "There is no l10n name");
 
@@ -795,6 +801,12 @@ add_task(async function testPrivateBrowsingExtension() {
     null,
     "The disabled message is not shown for the add-on"
   );
+
+  info("Verify the badge links to the support page");
+  let tabOpened = BrowserTestUtils.waitForNewTab(gBrowser, PB_SUMO_URL);
+  EventUtils.synthesizeMouseAtCenter(badge, {}, win);
+  let tab = await tabOpened;
+  BrowserTestUtils.removeTab(tab);
 
   // Disable the add-on and change the value.
   updated = BrowserTestUtils.waitForEvent(card, "update");

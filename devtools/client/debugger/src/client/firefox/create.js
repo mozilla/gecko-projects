@@ -5,7 +5,7 @@
 // @flow
 // This module converts Firefox specific types to the generic types
 
-import type { Frame, ThreadId, GeneratedSourceData, Worker } from "../../types";
+import type { Frame, ThreadId, GeneratedSourceData, Thread } from "../../types";
 import type {
   PausedPacket,
   FramesResponse,
@@ -73,12 +73,23 @@ export function createPause(
   };
 }
 
-export function createTarget(actor: string, target: Target): Worker {
+function getTargetType(target: Target) {
+  if (target.isWorkerTarget) {
+    return "worker";
+  }
+
+  if (target.isContentProcess) {
+    return "content-process";
+  }
+
+  return "main-thread";
+}
+
+export function createThread(actor: string, target: Target): Thread {
   return {
     actor,
-    url: target.url || "",
-    // Ci.nsIWorkerDebugger.TYPE_DEDICATED
-    type: actor.includes("process") ? 1 : 0,
-    name: "",
+    url: target.url,
+    type: getTargetType(target),
+    name: target.name,
   };
 }

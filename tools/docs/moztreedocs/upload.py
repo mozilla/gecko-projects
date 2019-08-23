@@ -77,20 +77,25 @@ def get_s3_keys(s3, bucket):
 def s3_set_redirects(redirects):
 
     s3, bucket = create_aws_session()
+
     configuration = {
         'IndexDocument': {"Suffix": "index.html"},
         'RoutingRules': []
     }
 
     for path, redirect in redirects.items():
-        configuration['RoutingRules'].append({
+        rule = {
             'Condition': {
                 "KeyPrefixEquals": path
             },
             'Redirect': {
                 "ReplaceKeyPrefixWith": redirect
-            }
-        })
+            },
+        }
+        if os.environ.get('MOZ_SCM_LEVEL') == '3':
+            rule['Redirect']['HostName'] = 'firefox-source-docs.mozilla.org'
+
+        configuration['RoutingRules'].append(rule)
 
     s3.put_bucket_website(
         Bucket=bucket,
@@ -132,7 +137,6 @@ def s3_upload(files, key_prefix=None):
     defined, key names will be ``<key_prefix>/<path>``.
     """
     s3, bucket = create_aws_session()
-    s3_delete_missing(files, key_prefix)
 
     def upload(f, path, bucket, key, extra_args):
         # Need to flush to avoid buffering/interleaving from multiple threads.
@@ -160,6 +164,7 @@ def s3_upload(files, key_prefix=None):
             fs.append(e.submit(upload, io.BytesIO(f.read()), path, bucket, key,
                                extra_args))
 
+    s3_delete_missing(files, key_prefix)
     # Need to do this to catch any exceptions.
     for f in fs:
         f.result()

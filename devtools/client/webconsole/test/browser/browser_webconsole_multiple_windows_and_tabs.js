@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
@@ -39,7 +37,7 @@ add_task(async function() {
   for (const tab of tabs) {
     // Open the console in tab${i}.
     const hud = await openConsole(tab);
-    const browser = hud.target.tab.linkedBrowser;
+    const browser = hud.currentTarget.tab.linkedBrowser;
     const message = "message for tab " + tabs.indexOf(tab);
 
     // Log a message in the newly opened console.

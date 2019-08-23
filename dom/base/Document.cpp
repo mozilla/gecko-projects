@@ -34,6 +34,7 @@
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_full_screen_api.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StaticPrefs_page_load.h"
 #include "mozilla/StaticPrefs_plugins.h"
 #include "mozilla/StaticPrefs_privacy.h"
@@ -350,8 +351,6 @@
 #define XML_DECLARATION_BITS_STANDALONE_YES (1 << 3)
 
 #define NS_MAX_DOCUMENT_WRITE_DEPTH 20
-
-extern bool sDisablePrefetchHTTPSPref;
 
 mozilla::LazyLogModule gPageCacheLog("PageCache");
 
@@ -1761,8 +1760,6 @@ Document::~Document() {
       }
     }
   }
-
-  ReportUseCounters();
 
   mInDestructor = true;
   mInUnlinkOrDeletion = true;
@@ -3337,7 +3334,7 @@ nsresult Document::InitReferrerInfo(nsIChannel* aChannel) {
   }
 
   // Override policy if we get one from Referrerr-Policy header
-  mozilla::net::ReferrerPolicy policy =
+  mozilla::dom::ReferrerPolicy policy =
       nsContentUtils::GetReferrerPolicyFromChannel(aChannel);
   mReferrerInfo = static_cast<dom::ReferrerInfo*>(mReferrerInfo.get())
                       ->CloneWithNewPolicy(policy);
@@ -3495,7 +3492,8 @@ void Document::RemoveFromIdTable(Element* aElement, nsAtom* aId) {
 void Document::SetPrincipals(nsIPrincipal* aNewPrincipal,
                              nsIPrincipal* aNewStoragePrincipal) {
   MOZ_ASSERT(!!aNewPrincipal == !!aNewStoragePrincipal);
-  if (aNewPrincipal && mAllowDNSPrefetch && sDisablePrefetchHTTPSPref) {
+  if (aNewPrincipal && mAllowDNSPrefetch &&
+      StaticPrefs::network_dns_disablePrefetchFromHTTPS()) {
     nsCOMPtr<nsIURI> uri;
     aNewPrincipal->GetURI(getter_AddRefs(uri));
     if (!uri || uri->SchemeIs("https")) {
@@ -3504,6 +3502,9 @@ void Document::SetPrincipals(nsIPrincipal* aNewPrincipal,
   }
   mNodeInfoManager->SetDocumentPrincipal(aNewPrincipal);
   mIntrinsicStoragePrincipal = aNewStoragePrincipal;
+
+  AntiTrackingCommon::ComputeContentBlockingAllowListPrincipal(
+      aNewPrincipal, getter_AddRefs(mContentBlockingAllowListPrincipal));
 
 #ifdef DEBUG
   // Validate that the docgroup is set correctly by calling its getter and
@@ -3570,8 +3571,14 @@ void Document::NoteScriptTrackingStatus(const nsACString& aURL,
   }
 }
 
-bool Document::IsScriptTracking(const nsACString& aURL) const {
-  return mTrackingScripts.Contains(aURL);
+bool Document::IsScriptTracking(JSContext* aCx) const {
+  JS::AutoFilename filename;
+  uint32_t line = 0;
+  uint32_t column = 0;
+  if (!JS::DescribeScriptedCaller(aCx, &filename, &line, &column)) {
+    return false;
+  }
+  return mTrackingScripts.Contains(nsDependentCString(filename.get()));
 }
 
 NS_IMETHODIMP
@@ -5561,13 +5568,9 @@ already_AddRefed<nsIChannel> Document::CreateDummyChannelForCookies(
   return channel.forget();
 }
 
-mozilla::net::ReferrerPolicy Document::GetReferrerPolicy() const {
-  if (!mReferrerInfo) {
-    return mozilla::net::RP_Unset;
-  }
-
-  return static_cast<mozilla::net::ReferrerPolicy>(
-      mReferrerInfo->GetReferrerPolicy());
+ReferrerPolicy Document::GetReferrerPolicy() const {
+  return mReferrerInfo ? mReferrerInfo->ReferrerPolicy()
+                       : ReferrerPolicy::_empty;
 }
 
 void Document::GetAlinkColor(nsAString& aAlinkColor) {
@@ -10452,6 +10455,8 @@ void Document::Destroy() {
     }
   }
 
+  ReportUseCounters();
+
   mIsGoingAway = true;
 
   ScriptLoader()->Destroy();
@@ -11297,9 +11302,9 @@ already_AddRefed<nsIURI> Document::ResolvePreloadImage(
   return uri.forget();
 }
 
-void Document::MaybePreLoadImage(
-    nsIURI* uri, const nsAString& aCrossOriginAttr,
-    enum mozilla::net::ReferrerPolicy aReferrerPolicy, bool aIsImgSet) {
+void Document::MaybePreLoadImage(nsIURI* uri, const nsAString& aCrossOriginAttr,
+                                 enum ReferrerPolicy aReferrerPolicy,
+                                 bool aIsImgSet) {
   // Early exit if the img is already present in the img-cache
   // which indicates that the "real" load has already started and
   // that we shouldn't preload it.
@@ -11435,10 +11440,10 @@ NS_IMPL_ISUPPORTS(StubCSSLoaderObserver, nsICSSLoaderObserver)
 
 }  // namespace
 
-void Document::PreloadStyle(
-    nsIURI* uri, const Encoding* aEncoding, const nsAString& aCrossOriginAttr,
-    const enum mozilla::net::ReferrerPolicy aReferrerPolicy,
-    const nsAString& aIntegrity) {
+void Document::PreloadStyle(nsIURI* uri, const Encoding* aEncoding,
+                            const nsAString& aCrossOriginAttr,
+                            const enum ReferrerPolicy aReferrerPolicy,
+                            const nsAString& aIntegrity) {
   // The CSSLoader will retain this object after we return.
   nsCOMPtr<nsICSSLoaderObserver> obs = new StubCSSLoaderObserver();
 
@@ -14392,25 +14397,13 @@ bool Document::InlineScriptAllowedByCSP() {
   return allowsInlineScript;
 }
 
-static bool ReportExternalResourceUseCounters(Document* aDocument,
-                                              void* aData) {
-  const auto reportKind =
-      Document::UseCounterReportKind::eIncludeExternalResources;
-  aDocument->ReportUseCounters(reportKind);
-  return true;
-}
-
-void Document::ReportUseCounters(UseCounterReportKind aKind) {
+void Document::ReportUseCounters() {
   static const bool sDebugUseCounters = false;
   if (mReportedUseCounters) {
     return;
   }
 
   mReportedUseCounters = true;
-
-  if (aKind == UseCounterReportKind::eIncludeExternalResources) {
-    EnumerateExternalResources(ReportExternalResourceUseCounters, nullptr);
-  }
 
   if (Telemetry::HistogramUseCounterCount > 0 &&
       (IsContentDocument() || IsResourceDoc())) {
@@ -15456,7 +15449,8 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
       DebugOnly<bool> isOnAllowList = false;
       MOZ_ASSERT_IF(
           NS_SUCCEEDED(AntiTrackingCommon::IsOnContentBlockingAllowList(
-              parent->GetDocumentURI(), false, isOnAllowList)),
+              parent->GetContentBlockingAllowListPrincipal(), false,
+              isOnAllowList)),
           !isOnAllowList);
 
       RefPtr<Document> self(this);
@@ -15965,6 +15959,17 @@ bool Document::HasRecentlyStartedForegroundLoads() {
   delete sLoadingForegroundTopLevelContentDocument;
   sLoadingForegroundTopLevelContentDocument = nullptr;
   return false;
+}
+
+already_AddRefed<nsIPrincipal>
+Document::RecomputeContentBlockingAllowListPrincipal(
+    nsIURI* aURIBeingLoaded, const OriginAttributes& aAttrs) {
+  AntiTrackingCommon::RecomputeContentBlockingAllowListPrincipal(
+      aURIBeingLoaded, aAttrs,
+      getter_AddRefs(mContentBlockingAllowListPrincipal));
+
+  nsCOMPtr<nsIPrincipal> copy = mContentBlockingAllowListPrincipal;
+  return copy.forget();
 }
 
 }  // namespace dom

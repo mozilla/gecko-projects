@@ -2013,7 +2013,7 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest* request) {
 
     // the spec requires the response document.referrer to be the empty string
     nsCOMPtr<nsIReferrerInfo> referrerInfo =
-        new ReferrerInfo(nullptr, true, mResponseXML->GetReferrerPolicy());
+        new ReferrerInfo(nullptr, mResponseXML->ReferrerPolicy());
     mResponseXML->SetReferrerInfo(referrerInfo);
 
     mXMLParserStreamListener = listener;
@@ -2426,12 +2426,8 @@ void XMLHttpRequestMainThread::MaybeLowerChannelPriority() {
   }
 
   JSContext* cx = jsapi.cx();
-  nsAutoCString fileNameString;
-  if (!nsJSUtils::GetCallingLocation(cx, fileNameString)) {
-    return;
-  }
 
-  if (!doc->IsScriptTracking(fileNameString)) {
+  if (!doc->IsScriptTracking(cx)) {
     return;
   }
 

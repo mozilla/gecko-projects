@@ -168,6 +168,9 @@ include = [
   "SVGPaintKind",
   "GridTemplateComponent",
   "TextEmphasisStyle",
+  "VariantAlternatesList",
+  "PaintOrder",
+  "SVGPaintOrder",
 ]
 item_types = ["enums", "structs", "typedefs", "functions", "constants"]
 renaming_overrides_prefixing = true
@@ -672,6 +675,10 @@ renaming_overrides_prefixing = true
 """
 
 "GenericGridTemplateComponent" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
   StyleGenericGridTemplateComponent() {}
  public:
   inline Maybe<size_t> RepeatAutoIndex() const;
@@ -687,5 +694,14 @@ renaming_overrides_prefixing = true
   // constructor functions still work as expected. They take care of
   // initializing the fields properly.
   StyleTextEmphasisStyle() {}
+ public:
+"""
+
+"VariantAlternates" = """
+ private:
+  // Private default constructor without initialization so that the helper
+  // constructor functions still work as expected. They take care of
+  // initializing the fields properly.
+  StyleVariantAlternates() {}
  public:
 """

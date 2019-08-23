@@ -321,18 +321,6 @@ impl ${style_struct.gecko_struct_name} {
     }
 </%def>
 
-<%def name="impl_coord_copy(ident, gecko_ffi_name)">
-    #[allow(non_snake_case)]
-    pub fn copy_${ident}_from(&mut self, other: &Self) {
-        self.gecko.${gecko_ffi_name}.copy_from(&other.gecko.${gecko_ffi_name});
-    }
-
-    #[allow(non_snake_case)]
-    pub fn reset_${ident}(&mut self, other: &Self) {
-        self.copy_${ident}_from(other)
-    }
-</%def>
-
 <%!
 def get_gecko_property(ffi_name, self_param = "self"):
     return "%s.gecko.%s" % (self_param, ffi_name)
@@ -1146,7 +1134,7 @@ fn static_assert() {
     }
 
     pub fn set_font_size(&mut self, v: FontSize) {
-        use crate::values::generics::font::KeywordSize;
+        use crate::values::specified::font::KeywordSize;
 
         let size = v.size();
         self.gecko.mScriptUnconstrainedSize = size.0;
@@ -1167,7 +1155,7 @@ fn static_assert() {
                 KeywordSize::XXXLarge => structs::NS_STYLE_FONT_SIZE_XXXLARGE,
             } as u8;
             self.gecko.mFontSizeFactor = info.factor;
-            self.gecko.mFontSizeOffset = info.offset.0.to_i32_au();
+            self.gecko.mFontSizeOffset = info.offset.to_i32_au();
         } else {
             self.gecko.mFontSizeKeyword = structs::NS_STYLE_FONT_SIZE_NO_KEYWORD as u8;
             self.gecko.mFontSizeFactor = 1.;
@@ -1176,7 +1164,7 @@ fn static_assert() {
     }
 
     pub fn clone_font_size(&self) -> FontSize {
-        use crate::values::generics::font::{KeywordInfo, KeywordSize};
+        use crate::values::specified::font::{KeywordInfo, KeywordSize};
         let size = Au(self.gecko.mSize).into();
         let kw = match self.gecko.mFontSizeKeyword as u32 {
             structs::NS_STYLE_FONT_SIZE_XXSMALL => KeywordSize::XXSmall,
@@ -1259,6 +1247,8 @@ fn static_assert() {
 
     ${impl_simple_type_with_conversion("font_synthesis", "mFont.synthesis")}
 
+    ${impl_simple("font_variant_alternates", "mFont.variantAlternates")}
+
     pub fn set_font_size_adjust(&mut self, v: longhands::font_size_adjust::computed_value::T) {
         use crate::properties::longhands::font_size_adjust::computed_value::T;
         match v {
@@ -1330,122 +1320,6 @@ fn static_assert() {
 
     ${impl_simple("_moz_script_level", "mScriptLevel")}
     <% impl_simple_type_with_conversion("font_language_override", "mFont.languageOverride") %>
-
-    pub fn set_font_variant_alternates(
-        &mut self,
-        v: values::computed::font::FontVariantAlternates,
-    ) {
-        use crate::gecko_bindings::bindings::{Gecko_ClearAlternateValues, Gecko_AppendAlternateValues};
-        % for value in "normal swash stylistic ornaments annotation styleset character_variant historical".split():
-            use crate::gecko_bindings::structs::NS_FONT_VARIANT_ALTERNATES_${value.upper()};
-        % endfor
-        use crate::values::specified::font::VariantAlternates;
-
-        unsafe {
-            Gecko_ClearAlternateValues(&mut self.gecko.mFont, v.len());
-        }
-
-        if v.0.is_empty() {
-            self.gecko.mFont.variantAlternates = NS_FONT_VARIANT_ALTERNATES_NORMAL as u16;
-            return;
-        }
-
-        for val in v.0.iter() {
-            match *val {
-                % for value in "Swash Stylistic Ornaments Annotation".split():
-                    VariantAlternates::${value}(ref ident) => {
-                        self.gecko.mFont.variantAlternates |= NS_FONT_VARIANT_ALTERNATES_${value.upper()} as u16;
-                        unsafe {
-                            Gecko_AppendAlternateValues(&mut self.gecko.mFont,
-                                                        NS_FONT_VARIANT_ALTERNATES_${value.upper()},
-                                                        ident.0.as_ptr());
-                        }
-                    },
-                % endfor
-                % for value in "styleset character_variant".split():
-                    VariantAlternates::${to_camel_case(value)}(ref slice) => {
-                        self.gecko.mFont.variantAlternates |= NS_FONT_VARIANT_ALTERNATES_${value.upper()} as u16;
-                        for ident in slice.iter() {
-                            unsafe {
-                                Gecko_AppendAlternateValues(&mut self.gecko.mFont,
-                                                            NS_FONT_VARIANT_ALTERNATES_${value.upper()},
-                                                            ident.0.as_ptr());
-                            }
-                        }
-                    },
-                % endfor
-                VariantAlternates::HistoricalForms => {
-                    self.gecko.mFont.variantAlternates |= NS_FONT_VARIANT_ALTERNATES_HISTORICAL as u16;
-                }
-            }
-        }
-    }
-
-    #[allow(non_snake_case)]
-    pub fn copy_font_variant_alternates_from(&mut self, other: &Self) {
-        use crate::gecko_bindings::bindings::Gecko_CopyAlternateValuesFrom;
-
-        self.gecko.mFont.variantAlternates = other.gecko.mFont.variantAlternates;
-        unsafe {
-            Gecko_CopyAlternateValuesFrom(&mut self.gecko.mFont, &other.gecko.mFont);
-        }
-    }
-
-    pub fn reset_font_variant_alternates(&mut self, other: &Self) {
-        self.copy_font_variant_alternates_from(other)
-    }
-
-    pub fn clone_font_variant_alternates(&self) -> values::computed::font::FontVariantAlternates {
-        % for value in "normal swash stylistic ornaments annotation styleset character_variant historical".split():
-            use crate::gecko_bindings::structs::NS_FONT_VARIANT_ALTERNATES_${value.upper()};
-        % endfor
-        use crate::values::specified::font::VariantAlternates;
-        use crate::values::specified::font::VariantAlternatesList;
-        use crate::values::CustomIdent;
-
-        if self.gecko.mFont.variantAlternates == NS_FONT_VARIANT_ALTERNATES_NORMAL as u16 {
-            return VariantAlternatesList(vec![].into_boxed_slice());
-        }
-
-        let mut alternates = Vec::with_capacity(self.gecko.mFont.alternateValues.len());
-        if self.gecko.mFont.variantAlternates & (NS_FONT_VARIANT_ALTERNATES_HISTORICAL as u16) != 0 {
-            alternates.push(VariantAlternates::HistoricalForms);
-        }
-
-        <%
-            property_need_ident_list = "styleset character_variant".split()
-        %>
-        % for value in property_need_ident_list:
-            let mut ${value}_list = Vec::new();
-        % endfor
-
-        for gecko_alternate_value in self.gecko.mFont.alternateValues.iter() {
-            let ident = Atom::from(gecko_alternate_value.value.to_string());
-            match gecko_alternate_value.alternate {
-                % for value in "Swash Stylistic Ornaments Annotation".split():
-                    NS_FONT_VARIANT_ALTERNATES_${value.upper()} => {
-                        alternates.push(VariantAlternates::${value}(CustomIdent(ident)));
-                    },
-                % endfor
-                % for value in property_need_ident_list:
-                    NS_FONT_VARIANT_ALTERNATES_${value.upper()} => {
-                        ${value}_list.push(CustomIdent(ident));
-                    },
-                % endfor
-                _ => {
-                    panic!("Found unexpected value for font-variant-alternates");
-                }
-            }
-        }
-
-        % for value in property_need_ident_list:
-            if !${value}_list.is_empty() {
-                alternates.push(VariantAlternates::${to_camel_case(value)}(${value}_list.into_boxed_slice()));
-            }
-        % endfor
-
-        VariantAlternatesList(alternates.into_boxed_slice())
-    }
 
     ${impl_simple_type_with_conversion("font_variant_ligatures", "mFont.variantLigatures")}
     ${impl_simple_type_with_conversion("font_variant_east_asian", "mFont.variantEastAsian")}
@@ -2422,20 +2296,7 @@ fn static_assert() {
 
 </%self:impl_trait>
 
-<%self:impl_trait style_struct_name="Table" skip_longhands="-x-span">
-    #[allow(non_snake_case)]
-    pub fn set__x_span(&mut self, v: longhands::_x_span::computed_value::T) {
-        self.gecko.mSpan = v.0
-    }
-
-    #[allow(non_snake_case)]
-    pub fn clone__x_span(&self) -> longhands::_x_span::computed_value::T {
-        longhands::_x_span::computed_value::T(
-            self.gecko.mSpan
-        )
-    }
-
-    ${impl_simple_copy('_x_span', 'mSpan')}
+<%self:impl_trait style_struct_name="Table">
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="Effects" skip_longhands="clip">
@@ -2725,18 +2586,7 @@ clip-path
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="InheritedSVG"
-                  skip_longhands="paint-order stroke-dasharray">
-    pub fn set_paint_order(&mut self, v: longhands::paint_order::computed_value::T) {
-        self.gecko.mPaintOrder = v.0;
-    }
-
-    ${impl_simple_copy('paint_order', 'mPaintOrder')}
-
-    pub fn clone_paint_order(&self) -> longhands::paint_order::computed_value::T {
-        use crate::properties::longhands::paint_order::computed_value::T;
-        T(self.gecko.mPaintOrder)
-    }
-
+                  skip_longhands="stroke-dasharray">
     pub fn set_stroke_dasharray(&mut self, v: longhands::stroke_dasharray::computed_value::T) {
         use crate::gecko_bindings::structs::nsStyleSVG_STROKE_DASHARRAY_CONTEXT as CONTEXT_VALUE;
         use crate::values::generics::svg::SVGStrokeDashArray;
@@ -3166,19 +3016,7 @@ clip-path
     ${impl_simple_type_with_conversion("_moz_force_broken_image_icon", "mForceBrokenImageIcon")}
 </%self:impl_trait>
 
-<%self:impl_trait style_struct_name="XUL"
-                  skip_longhands="-moz-box-ordinal-group">
-    #[allow(non_snake_case)]
-    pub fn set__moz_box_ordinal_group(&mut self, v: i32) {
-        self.gecko.mBoxOrdinal = v as u32;
-    }
-
-    ${impl_simple_copy("_moz_box_ordinal_group", "mBoxOrdinal")}
-
-    #[allow(non_snake_case)]
-    pub fn clone__moz_box_ordinal_group(&self) -> i32 {
-        self.gecko.mBoxOrdinal as i32
-    }
+<%self:impl_trait style_struct_name="XUL">
 </%self:impl_trait>
 
 % for style_struct in data.style_structs:

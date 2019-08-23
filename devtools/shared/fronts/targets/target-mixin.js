@@ -257,7 +257,7 @@ function TargetMixin(parentClass) {
     }
 
     get name() {
-      if (this.isAddon) {
+      if (this.isAddon || this.isContentProcess) {
         return this.targetForm.name;
       }
       return this.title;
@@ -417,6 +417,7 @@ function TargetMixin(parentClass) {
         this.threadFront = new ThreadClient(this._client, this._threadActor);
         this.fronts.set("thread", this.threadFront);
         this.threadFront.actorID = this._threadActor;
+        this.threadFront.targetFront = this;
         this.manage(this.threadFront);
       }
       const result = await this.threadFront.attach(options);

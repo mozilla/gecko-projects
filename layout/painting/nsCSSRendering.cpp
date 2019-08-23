@@ -4100,9 +4100,20 @@ void nsCSSRendering::PaintDecorationLine(
 
   while (iter.NextRun()) {
     if (iter.GetGlyphRun()->mOrientation ==
-        mozilla::gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_UPRIGHT) {
-      // we don't support upright text in vertical modes currently
-      // see Bug 1572294 (https://bugzilla.mozilla.org/show_bug.cgi?id=1572294)
+            mozilla::gfx::ShapedTextFlags::TEXT_ORIENT_VERTICAL_UPRIGHT ||
+        iter.GetGlyphRun()->mIsCJK) {
+      // We don't support upright text in vertical modes currently
+      // (see https://bugzilla.mozilla.org/show_bug.cgi?id=1572294),
+      // but we do need to update textPos so that following runs will be
+      // correctly positioned.
+      // We also don't apply skip-ink to CJK text runs because many fonts
+      // have an underline that looks really bad if this is done
+      // (see https://bugzilla.mozilla.org/show_bug.cgi?id=1573249).
+      textPos.fX +=
+          textRun->GetAdvanceWidth(
+              gfxTextRun::Range(iter.GetStringStart(), iter.GetStringEnd()),
+              aParams.provider) /
+          appUnitsPerDevPixel;
       continue;
     }
 
@@ -4113,7 +4124,8 @@ void nsCSSRendering::PaintDecorationLine(
       return;
     }
 
-    // create a text blob with correctly positioned glyphs
+    // Create a text blob with correctly positioned glyphs. This also updates
+    // textPos.fX with the advance of the glyphs.
     sk_sp<const SkTextBlob> textBlob =
         CreateTextBlob(textRun, characterGlyphs, font, spacing.Elements(),
                        iter.GetStringStart(), iter.GetStringEnd(),

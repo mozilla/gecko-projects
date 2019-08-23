@@ -520,15 +520,7 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
 
       NS_IMETHOD Run() override {
         MOZ_ASSERT(NS_IsMainThread());
-        static bool sCacheInitialized = false;
-        static bool sHighPriorityPrefValue = false;
-        if (!sCacheInitialized) {
-          sCacheInitialized = true;
-          Preferences::AddBoolVarCache(&sHighPriorityPrefValue,
-                                       "vsync.parentProcess.highPriority",
-                                       mozilla::BrowserTabsRemoteAutostart());
-        }
-        sHighPriorityEnabled = sHighPriorityPrefValue;
+        sHighPriorityEnabled = mozilla::BrowserTabsRemoteAutostart();
 
         mObserver->TickRefreshDriver(mId, mVsyncTimestamp);
         return NS_OK;
@@ -1494,6 +1486,7 @@ nsRefreshDriver::ObserverArray& nsRefreshDriver::ArrayFor(
     case FlushType::Event:
       return mObservers[0];
     case FlushType::Style:
+    case FlushType::Frames:
       return mObservers[1];
     case FlushType::Layout:
       return mObservers[2];
@@ -1797,14 +1790,6 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
     return;
   }
 
-#if defined(MOZ_WIDGET_ANDROID)
-  gfx::VRManager* vm = gfx::VRManager::Get();
-  if (vm->IsPresenting()) {
-    RunFrameRequestCallbacks(aNowTime);
-    return;
-  }
-#endif  // defined(MOZ_WIDGET_ANDROID)
-
   AUTO_PROFILER_LABEL("nsRefreshDriver::Tick", LAYOUT);
 
   // We're either frozen or we were disconnected (likely in the middle
@@ -1994,6 +1979,10 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
           // a layout flush).
           presShell->NotifyFontFaceSetOnRefresh();
           mNeedToRecomputeVisibility = true;
+
+          // Record the telemetry for the # of flushes that occurred between
+          // ticks.
+          presShell->PingFlushPerTickTelemetry(FlushType::Style);
         }
       }
     } else if (i == 2) {
@@ -2019,6 +2008,10 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
         // ready promise if it needs to.
         presShell->NotifyFontFaceSetOnRefresh();
         mNeedToRecomputeVisibility = true;
+
+        // Record the telemetry for the # of flushes that occured between
+        // ticks.
+        presShell->PingFlushPerTickTelemetry(FlushType::Layout);
       }
     }
 
@@ -2132,7 +2125,12 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime) {
 
     mViewManagerFlushIsPending = false;
     RefPtr<nsViewManager> vm = mPresContext->GetPresShell()->GetViewManager();
-    {
+    bool skipPaint = false;
+#if defined(MOZ_WIDGET_ANDROID)
+    gfx::VRManager* vrm = gfx::VRManager::Get();
+    skipPaint = vrm->IsPresenting();
+#endif // defined(MOZ_WIDGET_ANDROID)
+    if (!skipPaint) {
       PaintTelemetry::AutoRecordPaint record;
       vm->ProcessPendingUpdates();
     }

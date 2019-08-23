@@ -7,7 +7,7 @@
 import { clearDocuments } from "../utils/editor";
 import sourceQueue from "../utils/source-queue";
 
-import { updateWorkers } from "./debuggee";
+import { updateThreads } from "./threads";
 
 import { clearWasmStates } from "../utils/wasm";
 import { getMainThread } from "../selectors";
@@ -52,11 +52,16 @@ export function connect(
   isWebExtension: boolean
 ) {
   return async function({ dispatch }: ThunkArgs) {
-    await dispatch(updateWorkers());
+    await dispatch(updateThreads());
     dispatch(
       ({
         type: "CONNECT",
-        mainThread: { url, actor, type: -1, name: "" },
+        mainThread: {
+          url,
+          actor,
+          type: "main-thread",
+          name: L10N.getStr("mainThread"),
+        },
         canRewind,
         isWebExtension,
       }: Action)

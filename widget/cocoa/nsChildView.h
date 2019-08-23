@@ -167,6 +167,9 @@ class WidgetRenderingContext;
   // Always NO if StaticPrefs::gfx_core_animation_enabled_AtStartup() is true.
   BOOL mNeedsGLUpdate;
 
+  // Whether we're inside updateRootCALayer at the moment.
+  BOOL mIsUpdatingLayer;
+
   // Holds our drag service across multiple drag calls. The reference to the
   // service is obtained when the mouse enters the view and is released when
   // the mouse exits or there is a drop. This prevents us from having to
@@ -621,6 +624,8 @@ class nsChildView final : public nsBaseWidget {
   void UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries);
   mozilla::VibrancyManager& EnsureVibrancyManager();
 
+  void UpdateInternalOpaqueRegion();
+
   nsIWidget* GetWidgetForListenerEvents();
 
   struct SwipeInfo {
@@ -735,6 +740,9 @@ class nsChildView final : public nsBaseWidget {
   mozilla::DataMutex<WidgetCompositingState> mCompositingState;
 
   RefPtr<mozilla::CancelableRunnable> mUnsuspendAsyncCATransactionsRunnable;
+
+  // The widget's opaque region. Written on the main thread, read on any thread.
+  mozilla::DataMutex<mozilla::LayoutDeviceIntRegion> mOpaqueRegion;
 
   // This flag is only used when APZ is off. It indicates that the current pan
   // gesture was processed as a swipe. Sometimes the swipe animation can finish

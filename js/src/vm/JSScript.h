@@ -66,6 +66,7 @@ class GCParallelTask;
 class LazyScript;
 class ModuleObject;
 class RegExpObject;
+class ScriptSourceHolder;
 class SourceCompressionTask;
 class Shape;
 class DebugAPI;
@@ -435,16 +436,30 @@ struct SourceTypeTraits<char16_t> {
 extern MOZ_MUST_USE bool SynchronouslyCompressSource(
     JSContext* cx, JS::Handle<JSScript*> script);
 
-class ScriptSourceHolder;
-
 // Retrievable source can be retrieved using the source hook (and therefore
 // need not be XDR'd, can be discarded if desired because it can always be
 // reconstituted later, etc.).
 enum class SourceRetrievable { Yes, No };
 
+// [SMDOC] ScriptSource
+//
+// This class abstracts over the source we used to compile from. The current
+// representation may transition to different modes in order to save memory.
+// Abstractly the source may be one of UTF-8, UTF-16, or BinAST. The data
+// itself may be unavailable, retrieveable-using-source-hook, compressed, or
+// uncompressed. If source is retrieved or decompressed for use, we may update
+// the ScriptSource to hold the result.
 class ScriptSource {
-  friend class SourceCompressionTask;
+  // NOTE: While ScriptSources may be compressed off thread, they are only
+  // modified by the main thread, and all members are always safe to access
+  // on the main thread.
 
+  friend class SourceCompressionTask;
+  friend bool SynchronouslyCompressSource(JSContext* cx,
+                                          JS::Handle<JSScript*> script);
+
+ private:
+  // Common base class of the templated variants of PinnedUnits<T>.
   class PinnedUnitsBase {
    protected:
     PinnedUnitsBase** stack_ = nullptr;
@@ -480,16 +495,25 @@ class ScriptSource {
   };
 
  private:
-  mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire,
-                  mozilla::recordreplay::Behavior::DontPreserve>
-      refs;
+  // Missing source text that isn't retrievable using the source hook.  (All
+  // ScriptSources initially begin in this state.  Users that are compiling
+  // source text will overwrite |data| to store a different state.)
+  struct Missing {};
 
-  // Note: while ScriptSources may be compressed off thread, they are only
-  // modified by the main thread, and all members are always safe to access
-  // on the main thread.
+  // Source that can be retrieved using the registered source hook.  |Unit|
+  // records the source type so that source-text coordinates in functions and
+  // scripts that depend on this |ScriptSource| are correct.
+  template <typename Unit>
+  struct Retrievable {
+    // The source hook and script URL required to retrieve source are stored
+    // elsewhere, so nothing is needed here.  It'd be better hygiene to store
+    // something source-hook-like in each |ScriptSource| that needs it, but that
+    // requires reimagining a source-hook API that currently depends on source
+    // hooks being uniquely-owned pointers...
+  };
 
-  // Indicate which field in the |data| union is active.
-
+  // Uncompressed source text. Templates distinguish if we are interconvertable
+  // to |Retrievable| or not.
   template <typename Unit>
   class UncompressedData {
     typename SourceTypeTraits<Unit>::SharedImmutableString string_;
@@ -504,7 +528,6 @@ class ScriptSource {
     size_t length() const { return string_.length(); }
   };
 
-  // Uncompressed source text.
   template <typename Unit, SourceRetrievable CanRetrieve>
   class Uncompressed : public UncompressedData<Unit> {
     using Base = UncompressedData<Unit>;
@@ -513,6 +536,8 @@ class ScriptSource {
     using Base::Base;
   };
 
+  // Compressed source text. Templates distinguish if we are interconvertable
+  // to |Retrievable| or not.
   template <typename Unit>
   struct CompressedData {
     // Single-byte compressed text, regardless whether the original text
@@ -524,7 +549,6 @@ class ScriptSource {
         : raw(std::move(raw)), uncompressedLength(uncompressedLength) {}
   };
 
-  // Compressed source text.
   template <typename Unit, SourceRetrievable CanRetrieve>
   struct Compressed : public CompressedData<Unit> {
     using Base = CompressedData<Unit>;
@@ -532,23 +556,6 @@ class ScriptSource {
    public:
     using Base::Base;
   };
-
-  // Source that can be retrieved using the registered source hook.  |Unit|
-  // records the source type so that source-text coordinates in functions and
-  // scripts that depend on this |ScriptSource| are correct.
-  template <typename Unit>
-  struct Retrievable {
-    // The source hook and script URL required to retrieve source are stored
-    // elsewhere, so nothing is needed here.  It'd be better hygiene to store
-    // something source-hook-like in each |ScriptSource| that needs it, but that
-    // requires reimagining a source-hook API that currently depends on source
-    // hooks being uniquely-owned pointers...
-  };
-
-  // Missing source text that isn't retrievable using the source hook.  (All
-  // ScriptSources initially begin in this state.  Users that are compiling
-  // source text will overwrite |data| to store a different state.)
-  struct Missing {};
 
   // BinAST source.
   struct BinAST {
@@ -560,6 +567,7 @@ class ScriptSource {
         : string(std::move(str)), metadata(std::move(metadata)) {}
   };
 
+  // The set of currently allowed encoding modes.
   using SourceType =
       mozilla::Variant<Compressed<mozilla::Utf8Unit, SourceRetrievable::Yes>,
                        Uncompressed<mozilla::Utf8Unit, SourceRetrievable::Yes>,
@@ -571,10 +579,25 @@ class ScriptSource {
                        Uncompressed<char16_t, SourceRetrievable::No>,
                        Retrievable<mozilla::Utf8Unit>, Retrievable<char16_t>,
                        Missing, BinAST>;
-  SourceType data;
 
-  friend bool SynchronouslyCompressSource(JSContext* cx,
-                                          JS::Handle<JSScript*> script);
+  //
+  // Start of fields.
+  //
+
+  mozilla::Atomic<uint32_t, mozilla::ReleaseAcquire,
+                  mozilla::recordreplay::Behavior::DontPreserve>
+      refs = {};
+
+  // An id for this source that is unique across the process. This can be used
+  // to refer to this source from places that don't want to hold a strong
+  // reference on the source itself.
+  //
+  // This is a 32 bit ID and could overflow, in which case the ID will not be
+  // unique anymore.
+  uint32_t id_ = 0;
+
+  // Source data (as a mozilla::Variant).
+  SourceType data = SourceType(Missing());
 
   // If the GC calls triggerConvertToCompressedSource with PinnedUnits present,
   // the first PinnedUnits (that is, bottom of the stack) will install the
@@ -582,27 +605,13 @@ class ScriptSource {
   //
   // Retrievability isn't part of the type here because uncompressed->compressed
   // transitions must preserve existing retrievability.
-  PinnedUnitsBase* pinnedUnitsStack_;
+  PinnedUnitsBase* pinnedUnitsStack_ = nullptr;
   mozilla::MaybeOneOf<CompressedData<mozilla::Utf8Unit>,
                       CompressedData<char16_t>>
       pendingCompressed_;
 
   // The filename of this script.
-  UniqueChars filename_;
-
-  UniqueTwoByteChars displayURL_;
-  UniqueTwoByteChars sourceMapURL_;
-  bool mutedErrors_;
-
-  // bytecode offset in caller script that generated this code.
-  // This is present for eval-ed code, as well as "new Function(...)"-introduced
-  // scripts.
-  uint32_t introductionOffset_;
-
-  // If this source is for Function constructor, the position of ")" after
-  // parameter list in the source.  This is used to get function body.
-  // 0 for other cases.
-  uint32_t parameterListEnd_;
+  UniqueChars filename_ = nullptr;
 
   // If this ScriptSource was generated by a code-introduction mechanism such
   // as |eval| or |new Function|, the debugger needs access to the "raw"
@@ -614,27 +623,15 @@ class ScriptSource {
   //
   // In the case described above, this field will be non-null and will be the
   // original raw filename from above.  Otherwise this field will be null.
-  UniqueChars introducerFilename_;
+  UniqueChars introducerFilename_ = nullptr;
 
-  // A string indicating how this source code was introduced into the system.
-  // This accessor returns one of the following values:
-  //      "eval" for code passed to |eval|.
-  //      "Function" for code passed to the |Function| constructor.
-  //      "Worker" for code loaded by calling the Web worker
-  //      constructor&mdash;the worker's main script. "importScripts" for code
-  //      by calling |importScripts| in a web worker. "handler" for code
-  //      assigned to DOM elements' event handler IDL attributes.
-  //      "scriptElement" for code belonging to <script> elements.
-  //      undefined if the implementation doesn't know how the code was
-  //      introduced.
-  // This is a constant, statically allocated C string, so does not need
-  // memory management.
-  const char* introductionType_;
+  UniqueTwoByteChars displayURL_ = nullptr;
+  UniqueTwoByteChars sourceMapURL_ = nullptr;
 
   // The bytecode cache encoder is used to encode only the content of function
   // which are delazified.  If this value is not nullptr, then each delazified
   // function should be recorded before their first execution.
-  UniquePtr<XDRIncrementalEncoder> xdrEncoder_;
+  UniquePtr<XDRIncrementalEncoder> xdrEncoder_ = nullptr;
 
   // Instant at which the first parse of this source ended, or null
   // if the source hasn't been parsed yet.
@@ -644,21 +641,38 @@ class ScriptSource {
   // our syntax parse vs. full parse heuristics are correct.
   mozilla::TimeStamp parseEnded_;
 
-  // An id for this source that is unique across the process. This can be used
-  // to refer to this source from places that don't want to hold a strong
-  // reference on the source itself.
+  // A string indicating how this source code was introduced into the system.
+  // This is a constant, statically allocated C string, so does not need memory
+  // management.
+  const char* introductionType_ = nullptr;
+
+  // Bytecode offset in caller script that generated this code.  This is
+  // present for eval-ed code, as well as "new Function(...)"-introduced
+  // scripts.
+  mozilla::Maybe<uint32_t> introductionOffset_;
+
+  // If this source is for Function constructor, the position of ")" after
+  // parameter list in the source.  This is used to get function body.
+  // 0 for other cases.
+  uint32_t parameterListEnd_ = 0;
+
+  // Line number within the file where this source starts.
+  uint32_t startLine_ = 0;
+
+  // See: CompileOptions::mutedErrors.
+  bool mutedErrors_ = false;
+
+  // Set to true if parser saw  asmjs directives.
+  bool containsAsmJS_ = false;
+
   //
-  // This is a 32 bit ID and could overflow, in which case the ID will not be
-  // unique anymore.
-  uint32_t id_;
+  // End of fields.
+  //
 
   // How many ids have been handed out to sources.
   static mozilla::Atomic<uint32_t, mozilla::SequentiallyConsistent,
                          mozilla::recordreplay::Behavior::DontPreserve>
       idCount_;
-
-  bool hasIntroductionOffset_ : 1;
-  bool containsAsmJS_ : 1;
 
   template <typename Unit>
   const Unit* chunkUnits(JSContext* cx,
@@ -679,22 +693,7 @@ class ScriptSource {
   // to deflate to Latin1 for longer strings, because this can be slow.
   static const size_t SourceDeflateLimit = 100;
 
-  explicit ScriptSource()
-      : refs(0),
-        data(SourceType(Missing())),
-        pinnedUnitsStack_(nullptr),
-        filename_(nullptr),
-        displayURL_(nullptr),
-        sourceMapURL_(nullptr),
-        mutedErrors_(false),
-        introductionOffset_(0),
-        parameterListEnd_(0),
-        introducerFilename_(nullptr),
-        introductionType_(nullptr),
-        xdrEncoder_(nullptr),
-        id_(++idCount_),
-        hasIntroductionOffset_(false),
-        containsAsmJS_(false) {}
+  explicit ScriptSource() : id_(++idCount_) {}
 
   ~ScriptSource() { MOZ_ASSERT(refs == 0); }
 
@@ -1134,16 +1133,14 @@ class ScriptSource {
 
   bool mutedErrors() const { return mutedErrors_; }
 
-  bool hasIntroductionOffset() const { return hasIntroductionOffset_; }
-  uint32_t introductionOffset() const {
-    MOZ_ASSERT(hasIntroductionOffset());
-    return introductionOffset_;
-  }
+  uint32_t startLine() const { return startLine_; }
+
+  bool hasIntroductionOffset() const { return introductionOffset_.isSome(); }
+  uint32_t introductionOffset() const { return introductionOffset_.value(); }
   void setIntroductionOffset(uint32_t offset) {
     MOZ_ASSERT(!hasIntroductionOffset());
     MOZ_ASSERT(offset <= (uint32_t)INT32_MAX);
-    introductionOffset_ = offset;
-    hasIntroductionOffset_ = true;
+    introductionOffset_.emplace(offset);
   }
 
   bool containsAsmJS() const { return containsAsmJS_; }

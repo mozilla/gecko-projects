@@ -5179,8 +5179,8 @@ void nsTextFrame::GetTextDecorations(
       }
     }
 
-    // In all modes, if we're on an inline-block or inline-table (or
-    // inline-stack, inline-box, inline-grid), we're done.
+    // In all modes, if we're on an inline-block/table/grid/flex (or
+    // -moz-inline-box), we're done.
     // If we're on a ruby frame other than ruby text container, we
     // should continue.
     mozilla::StyleDisplay display = f->GetDisplay();
@@ -6875,22 +6875,24 @@ static void DrawTextRun(const gfxTextRun* aTextRun,
       // Check the paint-order property; if we find stroke before fill,
       // then change mode to GLYPH_STROKE_UNDERNEATH.
       uint32_t paintOrder = aFrame->StyleSVG()->mPaintOrder;
-      if (paintOrder != NS_STYLE_PAINT_ORDER_NORMAL) {
-        while (paintOrder) {
-          uint32_t component =
-              paintOrder & ((1 << NS_STYLE_PAINT_ORDER_BITWIDTH) - 1);
-          switch (component) {
-            case NS_STYLE_PAINT_ORDER_FILL:
-              // Just break the loop, no need to check further
-              paintOrder = 0;
-              break;
-            case NS_STYLE_PAINT_ORDER_STROKE:
-              params.drawMode |= DrawMode::GLYPH_STROKE_UNDERNEATH;
-              paintOrder = 0;
-              break;
-          }
-          paintOrder >>= NS_STYLE_PAINT_ORDER_BITWIDTH;
+      while (paintOrder) {
+        auto component = StylePaintOrder(paintOrder & kPaintOrderMask);
+        switch (component) {
+          case StylePaintOrder::Fill:
+            // Just break the loop, no need to check further
+            paintOrder = 0;
+            break;
+          case StylePaintOrder::Stroke:
+            params.drawMode |= DrawMode::GLYPH_STROKE_UNDERNEATH;
+            paintOrder = 0;
+            break;
+          default:
+            MOZ_FALLTHROUGH_ASSERT("Unknown paint-order variant, how?");
+          case StylePaintOrder::Markers:
+          case StylePaintOrder::Normal:
+            break;
         }
+        paintOrder >>= kPaintOrderShift;
       }
 
       // Use ROUND joins as they are less likely to produce ugly artifacts

@@ -9,6 +9,7 @@
 #include "mozilla/dom/BindContext.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/FontPropertyTypes.h"
+#include "mozilla/StaticPrefs_mathml.h"
 #include "mozilla/TextUtils.h"
 #include "nsGkAtoms.h"
 #include "nsITableCellLayout.h"  // for MAX_COLSPAN / MAX_ROWSPAN
@@ -186,7 +187,11 @@ nsMapRuleToAttributesFunc nsMathMLElement::GetAttributeMappingFunction() const {
 /* static */
 bool nsMathMLElement::ParseNamedSpaceValue(const nsString& aString,
                                            nsCSSValue& aCSSValue,
-                                           uint32_t aFlags) {
+                                           uint32_t aFlags,
+                                           const Document& aDocument) {
+  if (StaticPrefs::mathml_mathspace_names_disabled()) {
+    return false;
+  }
   int32_t i = 0;
   // See if it is one of the 'namedspace' (ranging -7/18em, -6/18, ... 7/18em)
   if (aString.EqualsLiteral("veryverythinmathspace")) {
@@ -221,6 +226,7 @@ bool nsMathMLElement::ParseNamedSpaceValue(const nsString& aString,
     }
   }
   if (0 != i) {
+    aDocument.WarnOnceAbout(dom::Document::eMathML_DeprecatedMathSpaceValue);
     aCSSValue.SetFloatValue(float(i) / float(18), eCSSUnit_EM);
     return true;
   }
@@ -281,7 +287,7 @@ bool nsMathMLElement::ParseNumericValue(const nsString& aString,
     return false;
   }
 
-  if (ParseNamedSpaceValue(str, aCSSValue, aFlags)) {
+  if (aDocument && ParseNamedSpaceValue(str, aCSSValue, aFlags, *aDocument)) {
     return true;
   }
 
@@ -314,6 +320,13 @@ bool nsMathMLElement::ParseNumericValue(const nsString& aString,
     }
     number.Append(c);
   }
+  if (StaticPrefs::mathml_legacy_number_syntax_disabled() &&
+      gotDot && str[i - 1] == '.') {
+    if (!(aFlags & PARSE_SUPPRESS_WARNINGS)) {
+      ReportLengthParseError(aString, aDocument);
+    }
+    return false; // Number ending with a dot.
+  }
 
   // Convert number to floating point
   nsresult errorCode;
@@ -333,7 +346,8 @@ bool nsMathMLElement::ParseNumericValue(const nsString& aString,
 
   nsCSSUnit cssUnit;
   if (unit.IsEmpty()) {
-    if (aFlags & PARSE_ALLOW_UNITLESS) {
+    if (!StaticPrefs::mathml_nonzero_unitless_lengths_disabled() &&
+        (aFlags & PARSE_ALLOW_UNITLESS)) {
       // no explicit unit, this is a number that will act as a multiplier
       if (!(aFlags & PARSE_SUPPRESS_WARNINGS)) {
         nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
@@ -506,7 +520,7 @@ void nsMathMLElement::MapMathMLAttributesInto(
   // In both cases, we don't allow negative values.
   // Unitless values give a multiple of the default value.
   //
-  bool parseSizeKeywords = true;
+  bool parseSizeKeywords = !StaticPrefs::mathml_mathsize_names_disabled();
   value = aAttributes->GetAttr(nsGkAtoms::mathsize_);
   if (!value) {
     parseSizeKeywords = false;
@@ -520,10 +534,12 @@ void nsMathMLElement::MapMathMLAttributesInto(
       !aDecls.PropertyIsSet(eCSSProperty_font_size)) {
     nsAutoString str(value->GetStringValue());
     nsCSSValue fontSize;
-    if (!ParseNumericValue(str, fontSize,
-                           PARSE_SUPPRESS_WARNINGS | PARSE_ALLOW_UNITLESS |
-                               CONVERT_UNITLESS_TO_PERCENT,
-                           nullptr) &&
+    uint32_t flags = PARSE_ALLOW_UNITLESS | CONVERT_UNITLESS_TO_PERCENT;
+    if (parseSizeKeywords) {
+      // Do not warn for invalid value if mathsize keywords are accepted.
+      flags |= PARSE_SUPPRESS_WARNINGS;
+    }
+    if (!ParseNumericValue(str, fontSize, flags, nullptr) &&
         parseSizeKeywords) {
       static const char sizes[3][7] = {"small", "normal", "big"};
       static const int32_t values[MOZ_ARRAY_LENGTH(sizes)] = {
@@ -532,6 +548,8 @@ void nsMathMLElement::MapMathMLAttributesInto(
       str.CompressWhitespace();
       for (uint32_t i = 0; i < ArrayLength(sizes); ++i) {
         if (str.EqualsASCII(sizes[i])) {
+          aDecls.Document()->WarnOnceAbout(
+              dom::Document::eMathML_DeprecatedMathSizeValue);
           aDecls.SetKeywordValue(eCSSProperty_font_size, values[i]);
           break;
         }

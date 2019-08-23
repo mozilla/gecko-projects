@@ -46,6 +46,7 @@ class PrincipalInfo;
 
 BEGIN_QUOTA_NAMESPACE
 
+class ClientUsageArray;
 class DirectoryLockImpl;
 class GroupInfo;
 class GroupInfoPair;
@@ -153,6 +154,7 @@ class QuotaManager final : public BackgroundThreadObject {
    */
   void InitQuotaForOrigin(PersistenceType aPersistenceType,
                           const nsACString& aGroup, const nsACString& aOrigin,
+                          const ClientUsageArray& aClientUsages,
                           uint64_t aUsageBytes, int64_t aAccessTime,
                           bool aPersisted);
 
@@ -181,9 +183,19 @@ class QuotaManager final : public BackgroundThreadObject {
                                   const nsACString& aOrigin, bool aPersisted,
                                   int64_t& aTimestamp);
 
+  // XXX clients can use QuotaObject instead of calling this method directly.
   void DecreaseUsageForOrigin(PersistenceType aPersistenceType,
                               const nsACString& aGroup,
-                              const nsACString& aOrigin, int64_t aSize);
+                              const nsACString& aOrigin,
+                              Client::Type aClientType, int64_t aSize);
+
+  void ResetUsageForClient(PersistenceType aPersistenceType,
+                           const nsACString& aGroup, const nsACString& aOrigin,
+                           Client::Type aClientType);
+
+  bool GetUsageForClient(PersistenceType aPersistenceType,
+                         const nsACString& aGroup, const nsACString& aOrigin,
+                         Client::Type aClientType, uint64_t& aUsage);
 
   void UpdateOriginAccessTime(PersistenceType aPersistenceType,
                               const nsACString& aGroup,
@@ -198,16 +210,15 @@ class QuotaManager final : public BackgroundThreadObject {
     LockedRemoveQuotaForOrigin(aPersistenceType, aGroup, aOrigin);
   }
 
-  already_AddRefed<QuotaObject> GetQuotaObject(PersistenceType aPersistenceType,
-                                               const nsACString& aGroup,
-                                               const nsACString& aOrigin,
-                                               nsIFile* aFile,
-                                               int64_t aFileSize = -1,
-                                               int64_t* aFileSizeOut = nullptr);
+  already_AddRefed<QuotaObject> GetQuotaObject(
+      PersistenceType aPersistenceType, const nsACString& aGroup,
+      const nsACString& aOrigin, Client::Type aClientType, nsIFile* aFile,
+      int64_t aFileSize = -1, int64_t* aFileSizeOut = nullptr);
 
   already_AddRefed<QuotaObject> GetQuotaObject(PersistenceType aPersistenceType,
                                                const nsACString& aGroup,
                                                const nsACString& aOrigin,
+                                               Client::Type aClientType,
                                                const nsAString& aPath,
                                                int64_t aFileSize = -1,
                                                int64_t* aFileSizeOut = nullptr);
@@ -357,6 +368,8 @@ class QuotaManager final : public BackgroundThreadObject {
 
   Client* GetClient(Client::Type aClientType);
 
+  const AutoTArray<Client::Type, Client::TYPE_MAX>& AllClientTypes();
+
   const nsString& GetBasePath() const { return mBasePath; }
 
   const nsString& GetStoragePath() const { return mStoragePath; }
@@ -377,7 +390,9 @@ class QuotaManager final : public BackgroundThreadObject {
 
   uint64_t GetGroupLimit() const;
 
-  void GetGroupUsageAndLimit(const nsACString& aGroup, UsageInfo* aUsageInfo);
+  uint64_t GetGroupUsage(const nsACString& aGroup);
+
+  uint64_t GetOriginUsage(const nsACString& aGroup, const nsACString& aOrigin);
 
   void NotifyStoragePressure(uint64_t aUsage);
 
@@ -508,8 +523,8 @@ class QuotaManager final : public BackgroundThreadObject {
   void ReleaseIOThreadObjects() {
     AssertIsOnIOThread();
 
-    for (uint32_t index = 0; index < uint32_t(Client::TypeMax()); index++) {
-      mClients[index]->ReleaseIOThreadObjects();
+    for (Client::Type type : AllClientTypes()) {
+      mClients[type]->ReleaseIOThreadObjects();
     }
   }
 
@@ -551,6 +566,9 @@ class QuotaManager final : public BackgroundThreadObject {
   // This array is populated at initialization time and then never modified, so
   // it can be iterated on any thread.
   AutoTArray<RefPtr<Client>, Client::TYPE_MAX> mClients;
+
+  AutoTArray<Client::Type, Client::TYPE_MAX> mAllClientTypes;
+  AutoTArray<Client::Type, Client::TYPE_MAX> mAllClientTypesExceptLS;
 
   nsString mBasePath;
   nsString mIndexedDBPath;

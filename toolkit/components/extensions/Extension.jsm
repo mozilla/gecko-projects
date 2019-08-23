@@ -14,7 +14,6 @@ var EXPORTED_SYMBOLS = [
 ];
 
 /* exported Extension, ExtensionData */
-/* globals Extension ExtensionData */
 
 /*
  * This file is the main entry point for extensions. When an extension
@@ -319,7 +318,7 @@ var UninstallObserver = {
         let storage = Services.domStorageManager.getStorage(
           null,
           principal,
-          storagePrincipal
+          principal
         );
         if (storage) {
           storage.clear();

@@ -42,7 +42,6 @@
 #include "nsStubMutationObserver.h"
 #include "nsTHashtable.h"  // for member
 #include "nsURIHashKey.h"
-#include "mozilla/net/ReferrerPolicy.h"  // for member
 #include "mozilla/UseCounter.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/StaticPresData.h"
@@ -478,7 +477,7 @@ class Document : public nsINode,
 
  public:
   typedef dom::ExternalResourceMap::ExternalResourceLoad ExternalResourceLoad;
-  typedef net::ReferrerPolicy ReferrerPolicyEnum;
+  typedef dom::ReferrerPolicy ReferrerPolicyEnum;
 
   /**
    * Called when XPCOM shutdown.
@@ -569,6 +568,13 @@ class Document : public nsINode,
   nsIPrincipal* IntrinsicStoragePrincipal() const {
     return mIntrinsicStoragePrincipal;
   }
+
+  nsIPrincipal* GetContentBlockingAllowListPrincipal() const {
+    return mContentBlockingAllowListPrincipal;
+  }
+
+  already_AddRefed<nsIPrincipal> RecomputeContentBlockingAllowListPrincipal(
+      nsIURI* aURIBeingLoaded, const OriginAttributes& aAttrs);
 
   // EventTarget
   void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
@@ -768,7 +774,7 @@ class Document : public nsINode,
   /**
    * GetReferrerPolicy() for Document.webidl.
    */
-  uint32_t ReferrerPolicy() const { return GetReferrerPolicy(); }
+  ReferrerPolicyEnum ReferrerPolicy() const { return GetReferrerPolicy(); }
 
   /**
    * If true, this flag indicates that all mixed content subresource
@@ -807,11 +813,11 @@ class Document : public nsINode,
    */
   void UpdateReferrerInfoFromMeta(const nsAString& aMetaReferrer,
                                   bool aPreload) {
-    net::ReferrerPolicy policy =
-        mozilla::net::ReferrerPolicyFromString(aMetaReferrer);
+    ReferrerPolicyEnum policy =
+        ReferrerInfo::ReferrerPolicyFromMetaString(aMetaReferrer);
     // The empty string "" corresponds to no referrer policy, causing a fallback
     // to a referrer policy defined elsewhere.
-    if (policy == mozilla::net::RP_Unset) {
+    if (policy == ReferrerPolicy::_empty) {
       return;
     }
 
@@ -3764,20 +3770,7 @@ class Document : public nsINode,
 
   bool IsSynthesized();
 
-  enum class UseCounterReportKind {
-    // Flush the document's use counters only; the use counters for any
-    // external resource documents will be flushed when the external
-    // resource documents themselves are destroyed.
-    eDefault,
-
-    // Flush use counters for the document and for its external resource
-    // documents. (Should only be necessary for tests, where we need
-    // flushing to happen synchronously and deterministically.)
-    eIncludeExternalResources,
-  };
-
-  void ReportUseCounters(
-      UseCounterReportKind aKind = UseCounterReportKind::eDefault);
+  void ReportUseCounters();
 
   void SetDocumentUseCounter(UseCounter aUseCounter) {
     if (!mUseCounters[aUseCounter]) {
@@ -3897,11 +3890,13 @@ class Document : public nsINode,
   virtual AbstractThread* AbstractMainThreadFor(
       TaskCategory aCategory) override;
 
-  // The URLs passed to these functions should match what
-  // JS::DescribeScriptedCaller() returns, since these APIs are used to
+  // The URLs passed to this function should match what
+  // JS::DescribeScriptedCaller() returns, since this API is used to
   // determine whether some code is being called from a tracking script.
   void NoteScriptTrackingStatus(const nsACString& aURL, bool isTracking);
-  bool IsScriptTracking(const nsACString& aURL) const;
+  // The JSContext passed to this method represents the context that we want to
+  // determine if it belongs to a tracker.
+  bool IsScriptTracking(JSContext* aCx) const;
 
   // For more information on Flash classification, see
   // toolkit/components/url-classifier/flash-block-lists.rst
@@ -5288,6 +5283,9 @@ class Document : public nsINode,
 
   // The principal to use for the storage area of this document.
   nsCOMPtr<nsIPrincipal> mIntrinsicStoragePrincipal;
+
+  // The principal to use for the content blocking allow list.
+  nsCOMPtr<nsIPrincipal> mContentBlockingAllowListPrincipal;
 
   // See GetNextFormNumber and GetNextControlNumber.
   int32_t mNextFormNumber;

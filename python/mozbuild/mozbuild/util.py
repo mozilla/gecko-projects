@@ -35,6 +35,9 @@ from io import (
 if sys.platform == 'win32':
     _kernel32 = ctypes.windll.kernel32
     _FILE_ATTRIBUTE_NOT_CONTENT_INDEXED = 0x2000
+    system_encoding = 'mbcs'
+else:
+    system_encoding = 'utf-8'
 
 
 def exec_(object, globals=None, locals=None):
@@ -1294,6 +1297,8 @@ def indented_repr(o, indent=4):
     return ''.join(recurse_indented_repr(o, 0))
 
 
+# Please do not use this function. It's only kept for backwards compatibility
+# with older config.status files that may lay around before a CLOBBER.
 def encode(obj, encoding='utf-8'):
     '''Recursively encode unicode strings with the given encoding.'''
     if isinstance(obj, dict):

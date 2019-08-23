@@ -3895,6 +3895,9 @@ nsresult GetDatabaseFileURL(nsIFile* aDatabaseFile,
   nsAutoCString type;
   PersistenceTypeToText(aPersistenceType, type);
 
+  nsAutoCString clientType;
+  Client::TypeToText(Client::IDB, clientType);
+
   nsAutoCString telemetryFilenameClause;
   if (aTelemetryId) {
     telemetryFilenameClause.AssignLiteral("&telemetryFilename=indexedDB-");
@@ -3906,6 +3909,7 @@ nsresult GetDatabaseFileURL(nsIFile* aDatabaseFile,
            .SetQuery(NS_LITERAL_CSTRING("persistenceType=") + type +
                      NS_LITERAL_CSTRING("&group=") + aGroup +
                      NS_LITERAL_CSTRING("&origin=") + aOrigin +
+                     NS_LITERAL_CSTRING("&clientType=") + clientType +
                      NS_LITERAL_CSTRING("&cache=private") +
                      telemetryFilenameClause)
            .Finalize(fileUrl);
@@ -8709,7 +8713,7 @@ nsresult DeleteFile(nsIFile* aDirectory, const nsAString& aFilename,
 
   if (aQuotaManager && fileSize > 0) {
     aQuotaManager->DecreaseUsageForOrigin(aPersistenceType, aGroup, aOrigin,
-                                          fileSize);
+                                          Client::IDB, fileSize);
   }
 
   return NS_OK;
@@ -8906,10 +8910,10 @@ nsresult RemoveDatabaseFilesAndDirectory(nsIFile* aBaseDirectory,
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
 
-    uint64_t usage = 0;
+    uint64_t usage;
 
     if (aQuotaManager) {
-      rv = FileManager::GetUsage(fmDirectory, &usage);
+      rv = FileManager::GetUsage(fmDirectory, usage);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -8921,7 +8925,7 @@ nsresult RemoveDatabaseFilesAndDirectory(nsIFile* aBaseDirectory,
       // information before returning the error.
       if (aQuotaManager) {
         uint64_t newUsage;
-        if (NS_SUCCEEDED(FileManager::GetUsage(fmDirectory, &newUsage))) {
+        if (NS_SUCCEEDED(FileManager::GetUsage(fmDirectory, newUsage))) {
           MOZ_ASSERT(newUsage <= usage);
           usage = usage - newUsage;
         }
@@ -8930,7 +8934,7 @@ nsresult RemoveDatabaseFilesAndDirectory(nsIFile* aBaseDirectory,
 
     if (aQuotaManager && usage) {
       aQuotaManager->DecreaseUsageForOrigin(aPersistenceType, aGroup, aOrigin,
-                                            usage);
+                                            Client::IDB, usage);
     }
 
     if (NS_FAILED(rv)) {
@@ -10271,9 +10275,9 @@ void DatabaseConnection::UpdateRefcountFunction::Reset() {
         QuotaManager* quotaManager = QuotaManager::Get();
         MOZ_ASSERT(quotaManager);
 
-        quotaManager->DecreaseUsageForOrigin(aFileManager->Type(),
-                                             aFileManager->Group(),
-                                             aFileManager->Origin(), fileSize);
+        quotaManager->DecreaseUsageForOrigin(
+            aFileManager->Type(), aFileManager->Group(), aFileManager->Origin(),
+            Client::IDB, fileSize);
       }
 
       file = FileManager::GetFileForId(mJournalDirectory, aId);
@@ -15640,10 +15644,9 @@ nsresult FileManager::InitDirectory(nsIFile* aDirectory, nsIFile* aDatabaseFile,
 }
 
 // static
-nsresult FileManager::GetUsage(nsIFile* aDirectory, uint64_t* aUsage) {
+nsresult FileManager::GetUsage(nsIFile* aDirectory, Maybe<uint64_t>& aUsage) {
   AssertIsOnIOThread();
   MOZ_ASSERT(aDirectory);
-  MOZ_ASSERT(aUsage);
 
   bool exists;
   nsresult rv = aDirectory->Exists(&exists);
@@ -15652,7 +15655,7 @@ nsresult FileManager::GetUsage(nsIFile* aDirectory, uint64_t* aUsage) {
   }
 
   if (!exists) {
-    *aUsage = 0;
+    aUsage.reset();
     return NS_OK;
   }
 
@@ -15662,7 +15665,7 @@ nsresult FileManager::GetUsage(nsIFile* aDirectory, uint64_t* aUsage) {
     return rv;
   }
 
-  uint64_t usage = 0;
+  Maybe<uint64_t> usage;
 
   nsCOMPtr<nsIFile> file;
   while (NS_SUCCEEDED((rv = entries->GetNextFile(getter_AddRefs(file)))) &&
@@ -15683,14 +15686,29 @@ nsresult FileManager::GetUsage(nsIFile* aDirectory, uint64_t* aUsage) {
       return rv;
     }
 
-    UsageInfo::IncrementUsage(&usage, uint64_t(fileSize));
+    UsageInfo::IncrementUsage(usage, Some(uint64_t(fileSize)));
   }
 
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
-  *aUsage = usage;
+  aUsage = usage;
+  return NS_OK;
+}
+
+// static
+nsresult FileManager::GetUsage(nsIFile* aDirectory, uint64_t& aUsage) {
+  AssertIsOnIOThread();
+  MOZ_ASSERT(aDirectory);
+
+  Maybe<uint64_t> usage;
+  nsresult rv = GetUsage(aDirectory, usage);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  aUsage = usage.valueOr(0);
   return NS_OK;
 }
 
@@ -16096,20 +16114,20 @@ nsresult QuotaClient::InitOrigin(PersistenceType aPersistenceType,
 
       MOZ_ASSERT(fileSize >= 0);
 
-      aUsageInfo->AppendToDatabaseUsage(uint64_t(fileSize));
+      aUsageInfo->AppendToDatabaseUsage(Some(uint64_t(fileSize)));
 
       rv = walFile->GetFileSize(&fileSize);
       if (NS_SUCCEEDED(rv)) {
         MOZ_ASSERT(fileSize >= 0);
-        aUsageInfo->AppendToDatabaseUsage(uint64_t(fileSize));
+        aUsageInfo->AppendToDatabaseUsage(Some(uint64_t(fileSize)));
       } else if (NS_WARN_IF(rv != NS_ERROR_FILE_NOT_FOUND &&
                             rv != NS_ERROR_FILE_TARGET_DOES_NOT_EXIST)) {
         REPORT_TELEMETRY_INIT_ERR(kQuotaExternalError, IDB_GetWalFileSize);
         return rv;
       }
 
-      uint64_t usage;
-      rv = FileManager::GetUsage(fmDirectory, &usage);
+      Maybe<uint64_t> usage;
+      rv = FileManager::GetUsage(fmDirectory, usage);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         REPORT_TELEMETRY_INIT_ERR(kQuotaExternalError, IDB_GetUsage);
         return rv;
@@ -16605,9 +16623,9 @@ nsresult QuotaClient::GetUsageForDirectoryInternal(nsIFile* aDirectory,
     MOZ_ASSERT(fileSize >= 0);
 
     if (aDatabaseFiles) {
-      aUsageInfo->AppendToDatabaseUsage(uint64_t(fileSize));
+      aUsageInfo->AppendToDatabaseUsage(Some(uint64_t(fileSize)));
     } else {
-      aUsageInfo->AppendToFileUsage(uint64_t(fileSize));
+      aUsageInfo->AppendToFileUsage(Some(uint64_t(fileSize)));
     }
   }
 
@@ -16690,9 +16708,9 @@ nsresult DeleteFilesRunnable::DeleteFile(int64_t aFileId) {
     QuotaManager* quotaManager = QuotaManager::Get();
     NS_ASSERTION(quotaManager, "Shouldn't be null!");
 
-    quotaManager->DecreaseUsageForOrigin(mFileManager->Type(),
-                                         mFileManager->Group(),
-                                         mFileManager->Origin(), fileSize);
+    quotaManager->DecreaseUsageForOrigin(
+        mFileManager->Type(), mFileManager->Group(), mFileManager->Origin(),
+        Client::IDB, fileSize);
   }
 
   file = mFileManager->GetFileForId(mJournalDirectory, aFileId);
@@ -19024,13 +19042,13 @@ already_AddRefed<nsISupports> MutableFile::CreateStream(bool aReadOnly) {
 
   if (aReadOnly) {
     RefPtr<FileInputStream> stream =
-        CreateFileInputStream(persistenceType, group, origin, mFile, -1, -1,
-                              nsIFileInputStream::DEFER_OPEN);
+        CreateFileInputStream(persistenceType, group, origin, Client::IDB,
+                              mFile, -1, -1, nsIFileInputStream::DEFER_OPEN);
     result = NS_ISUPPORTS_CAST(nsIFileInputStream*, stream);
   } else {
     RefPtr<FileStream> stream =
-        CreateFileStream(persistenceType, group, origin, mFile, -1, -1,
-                         nsIFileStream::DEFER_OPEN);
+        CreateFileStream(persistenceType, group, origin, Client::IDB, mFile, -1,
+                         -1, nsIFileStream::DEFER_OPEN);
     result = NS_ISUPPORTS_CAST(nsIFileStream*, stream);
   }
   if (NS_WARN_IF(!result)) {
@@ -20034,7 +20052,7 @@ nsresult OpenDatabaseOp::DoDatabaseWork() {
     return rv;
   }
 
-  markerFile->Exists(&exists);
+  rv = markerFile->Exists(&exists);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -26005,48 +26023,26 @@ nsresult Cursor::OpenOp::DoObjectStoreKeyDatabaseWork(
   keyRangeClause.Truncate();
   nsAutoCString continueToKeyRangeClause;
 
+  const bool isUpperBound = mCursor->mDirection == IDBCursor::NEXT ||
+                            mCursor->mDirection == IDBCursor::NEXT_UNIQUE;
+
+  Key bound;
+  bool open;
+  GetRangeKeyInfo(!isUpperBound, &bound, &open);
+
   NS_NAMED_LITERAL_CSTRING(currentKey, "current_key");
-  NS_NAMED_LITERAL_CSTRING(rangeKey, "range_key");
+  AppendConditionClause(keyString, currentKey, !isUpperBound, false,
+                        keyRangeClause);
+  AppendConditionClause(keyString, currentKey, !isUpperBound, true,
+                        continueToKeyRangeClause);
+  if (usingKeyRange && !bound.IsUnset()) {
+    NS_NAMED_LITERAL_CSTRING(rangeKey, "range_key");
 
-  switch (mCursor->mDirection) {
-    case IDBCursor::NEXT:
-    case IDBCursor::NEXT_UNIQUE: {
-      Key upper;
-      bool open;
-      GetRangeKeyInfo(false, &upper, &open);
-      AppendConditionClause(keyString, currentKey, false, false,
-                            keyRangeClause);
-      AppendConditionClause(keyString, currentKey, false, true,
-                            continueToKeyRangeClause);
-      if (usingKeyRange && !upper.IsUnset()) {
-        AppendConditionClause(keyString, rangeKey, true, !open, keyRangeClause);
-        AppendConditionClause(keyString, rangeKey, true, !open,
-                              continueToKeyRangeClause);
-        mCursor->mRangeKey = upper;
-      }
-      break;
-    }
-
-    case IDBCursor::PREV:
-    case IDBCursor::PREV_UNIQUE: {
-      Key lower;
-      bool open;
-      GetRangeKeyInfo(true, &lower, &open);
-      AppendConditionClause(keyString, currentKey, true, false, keyRangeClause);
-      AppendConditionClause(keyString, currentKey, true, true,
-                            continueToKeyRangeClause);
-      if (usingKeyRange && !lower.IsUnset()) {
-        AppendConditionClause(keyString, rangeKey, false, !open,
-                              keyRangeClause);
-        AppendConditionClause(keyString, rangeKey, false, !open,
-                              continueToKeyRangeClause);
-        mCursor->mRangeKey = lower;
-      }
-      break;
-    }
-
-    default:
-      MOZ_CRASH("Should never get here!");
+    AppendConditionClause(keyString, rangeKey, isUpperBound, !open,
+                          keyRangeClause);
+    AppendConditionClause(keyString, rangeKey, isUpperBound, !open,
+                          continueToKeyRangeClause);
+    mCursor->mRangeKey = bound;
   }
 
   mCursor->mContinueQuery =
@@ -27044,7 +27040,7 @@ nsresult FileHelper::CreateFileFromStream(nsIFile* aFile, nsIFile* aJournalFile,
   // Now try to copy the stream.
   RefPtr<FileOutputStream> fileOutputStream =
       CreateFileOutputStream(mFileManager->Type(), mFileManager->Group(),
-                             mFileManager->Origin(), aFile);
+                             mFileManager->Origin(), Client::IDB, aFile);
   if (NS_WARN_IF(!fileOutputStream)) {
     return NS_ERROR_FAILURE;
   }
@@ -27090,9 +27086,9 @@ nsresult FileHelper::RemoveFile(nsIFile* aFile, nsIFile* aJournalFile) {
     QuotaManager* quotaManager = QuotaManager::Get();
     MOZ_ASSERT(quotaManager);
 
-    quotaManager->DecreaseUsageForOrigin(mFileManager->Type(),
-                                         mFileManager->Group(),
-                                         mFileManager->Origin(), fileSize);
+    quotaManager->DecreaseUsageForOrigin(
+        mFileManager->Type(), mFileManager->Group(), mFileManager->Origin(),
+        Client::IDB, fileSize);
   }
 
   rv = aJournalFile->Remove(false);

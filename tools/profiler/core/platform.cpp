@@ -2093,9 +2093,18 @@ static UniquePtr<ProfileBuffer> CollectJavaThreadProfileData() {
 }
 #endif
 
+UniquePtr<ProfilerCodeAddressService>
+profiler_code_address_service_for_presymbolication() {
+  static const bool preSymbolicate = []() {
+    const char* symbolicate = getenv("MOZ_PROFILER_SYMBOLICATE");
+    return symbolicate && symbolicate[0] != '\0';
+  }();
+  return preSymbolicate ? MakeUnique<ProfilerCodeAddressService>() : nullptr;
+}
+
 static void locked_profiler_stream_json_for_this_process(
     PSLockRef aLock, SpliceableJSONWriter& aWriter, double aSinceTime,
-    bool aIsShuttingDown) {
+    bool aIsShuttingDown, ProfilerCodeAddressService* aService) {
   LOG("locked_profiler_stream_json_for_this_process");
 
   MOZ_RELEASE_ASSERT(CorePS::Exists() && ActivePS::Exists(aLock));
@@ -2141,10 +2150,10 @@ static void locked_profiler_stream_json_for_this_process(
       JSContext* cx =
           registeredThread ? registeredThread->GetJSContext() : nullptr;
       ProfiledThreadData* profiledThreadData = thread.second();
-      profiledThreadData->StreamJSON(buffer, cx, aWriter,
-                                     CorePS::ProcessName(aLock),
-                                     CorePS::ProcessStartTime(), aSinceTime,
-                                     ActivePS::FeatureJSTracer(aLock));
+      profiledThreadData->StreamJSON(
+          buffer, cx, aWriter, CorePS::ProcessName(aLock),
+          CorePS::ProcessStartTime(), aSinceTime,
+          ActivePS::FeatureJSTracer(aLock), aService);
     }
 
 #if defined(GP_OS_android)
@@ -2162,7 +2171,7 @@ static void locked_profiler_stream_json_for_this_process(
       profiledThreadData.StreamJSON(*javaBuffer.get(), nullptr, aWriter,
                                     CorePS::ProcessName(aLock),
                                     CorePS::ProcessStartTime(), aSinceTime,
-                                    ActivePS::FeatureJSTracer(aLock));
+                                    ActivePS::FeatureJSTracer(aLock), nullptr);
 
       java::GeckoJavaSampler::Unpause();
     }
@@ -2206,9 +2215,9 @@ static void locked_profiler_stream_json_for_this_process(
   buffer.AddEntry(ProfileBufferEntry::CollectionEnd(collectionEnd));
 }
 
-bool profiler_stream_json_for_this_process(SpliceableJSONWriter& aWriter,
-                                           double aSinceTime,
-                                           bool aIsShuttingDown) {
+bool profiler_stream_json_for_this_process(
+    SpliceableJSONWriter& aWriter, double aSinceTime, bool aIsShuttingDown,
+    ProfilerCodeAddressService* aService) {
   LOG("profiler_stream_json_for_this_process");
 
   MOZ_RELEASE_ASSERT(CorePS::Exists());
@@ -2224,7 +2233,7 @@ bool profiler_stream_json_for_this_process(SpliceableJSONWriter& aWriter,
 #endif
 
   locked_profiler_stream_json_for_this_process(lock, aWriter, aSinceTime,
-                                               aIsShuttingDown);
+                                               aIsShuttingDown, aService);
 #if !defined(RELEASE_OR_BETA)
   ActivePS::ResumeIOInterposer(lock);
 #endif
@@ -2274,7 +2283,8 @@ static void PrintUsageThenExit(int aExitCode) {
       "  'prof:3' (least verbose), 'prof:4', 'prof:5' (most verbose).\n"
       "\n"
       "  MOZ_PROFILER_STARTUP\n"
-      "  If set to any value, starts the profiler immediately on start-up.\n"
+      "  If set to any value other than '' or '0'/'N'/'n', starts the\n"
+      "  profiler immediately on start-up.\n"
       "  Useful if you want profile code that runs very early.\n"
       "\n"
       "  MOZ_PROFILER_STARTUP_ENTRIES=<1..>\n"
@@ -2558,6 +2568,8 @@ void SamplerThread::Run() {
           if (resp) {
             resp->Update();
           }
+
+          AUTO_PROFILER_STATS(gecko_SamplerThread_Run_DoPeriodicSample);
 
           now = TimeStamp::NowUnfuzzed();
           mSampler.SuspendAndSampleAndResumeThread(
@@ -2907,7 +2919,10 @@ void profiler_init(void* aStackTop) {
     // created on demand at the first call to PlatformStart().
 
     const char* startupEnv = getenv("MOZ_PROFILER_STARTUP");
-    if (!startupEnv || startupEnv[0] == '\0') {
+    if (!startupEnv || startupEnv[0] == '\0' ||
+        ((startupEnv[0] == '0' || startupEnv[0] == 'N' ||
+          startupEnv[0] == 'n') &&
+         startupEnv[1] == '\0')) {
       return;
     }
 
@@ -3072,7 +3087,8 @@ void profiler_shutdown() {
 }
 
 static bool WriteProfileToJSONWriter(SpliceableChunkedJSONWriter& aWriter,
-                                     double aSinceTime, bool aIsShuttingDown) {
+                                     double aSinceTime, bool aIsShuttingDown,
+                                     ProfilerCodeAddressService* aService) {
   LOG("WriteProfileToJSONWriter");
 
   MOZ_RELEASE_ASSERT(CorePS::Exists());
@@ -3080,7 +3096,7 @@ static bool WriteProfileToJSONWriter(SpliceableChunkedJSONWriter& aWriter,
   aWriter.Start();
   {
     if (!profiler_stream_json_for_this_process(aWriter, aSinceTime,
-                                               aIsShuttingDown)) {
+                                               aIsShuttingDown, aService)) {
       return false;
     }
 
@@ -3103,8 +3119,12 @@ UniquePtr<char[]> profiler_get_profile(double aSinceTime,
                                        bool aIsShuttingDown) {
   LOG("profiler_get_profile");
 
+  UniquePtr<ProfilerCodeAddressService> service =
+      profiler_code_address_service_for_presymbolication();
+
   SpliceableChunkedJSONWriter b;
-  if (!WriteProfileToJSONWriter(b, aSinceTime, aIsShuttingDown)) {
+  if (!WriteProfileToJSONWriter(b, aSinceTime, aIsShuttingDown,
+                                service.get())) {
     return nullptr;
   }
   return b.WriteFunc()->CopyData();
@@ -3115,8 +3135,12 @@ void profiler_get_profile_json_into_lazily_allocated_buffer(
     bool aIsShuttingDown) {
   LOG("profiler_get_profile_json_into_lazily_allocated_buffer");
 
+  UniquePtr<ProfilerCodeAddressService> service =
+      profiler_code_address_service_for_presymbolication();
+
   SpliceableChunkedJSONWriter b;
-  if (!WriteProfileToJSONWriter(b, aSinceTime, aIsShuttingDown)) {
+  if (!WriteProfileToJSONWriter(b, aSinceTime, aIsShuttingDown,
+                                service.get())) {
     return;
   }
 
@@ -3250,7 +3274,7 @@ static void locked_profiler_save_profile_to_file(PSLockRef aLock,
     w.Start();
     {
       locked_profiler_stream_json_for_this_process(aLock, w, /* sinceTime */ 0,
-                                                   aIsShuttingDown);
+                                                   aIsShuttingDown, nullptr);
 
       w.StartArrayProperty("processes");
       Vector<nsCString> exitProfiles = ActivePS::MoveExitProfiles(aLock);
@@ -3922,6 +3946,11 @@ double profiler_time() {
 UniqueProfilerBacktrace profiler_get_backtrace() {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
+  // Fast racy early return.
+  if (!profiler_is_active()) {
+    return nullptr;
+  }
+
   PSAutoLock lock(gPSMutex);
 
   if (!ActivePS::Exists(lock) || ActivePS::FeaturePrivacy(lock)) {
@@ -3976,6 +4005,8 @@ static void racy_profiler_add_marker(
   if (!racyRegisteredThread || !racyRegisteredThread->IsBeingProfiled()) {
     return;
   }
+
+  AUTO_PROFILER_STATS(gecko_racy_profiler_add_marker);
 
   TimeStamp origin = (aPayload && !aPayload->GetStartTime().IsNull())
                          ? aPayload->GetStartTime()

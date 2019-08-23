@@ -145,10 +145,6 @@ HTMLEditor::HTMLEditor()
 }
 
 HTMLEditor::~HTMLEditor() {
-  if (mRules && mRules->AsHTMLEditRules()) {
-    mRules->AsHTMLEditRules()->EndListeningToEditSubActions();
-  }
-
   mTypeInState = nullptr;
 
   if (mDisabledLinkHandling) {
@@ -167,6 +163,7 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLEditor)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLEditor, TextEditor)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTypeInState)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mComposerCommandsUpdater)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mChangedRangeForTopLevelEditSubAction)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mStyleSheets)
 
   tmp->HideAnonymousEditingUIs();
@@ -175,6 +172,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLEditor, TextEditor)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTypeInState)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mComposerCommandsUpdater)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChangedRangeForTopLevelEditSubAction)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStyleSheets)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTopLeftHandle)
@@ -297,7 +295,20 @@ void HTMLEditor::PreDestroy(bool aDestroyingFrames) {
 
   // Clean up after our anonymous content -- we don't want these nodes to
   // stay around (which they would, since the frames have an owning reference).
-  HideAnonymousEditingUIs();
+  PresShell* presShell = GetPresShell();
+  if (presShell && presShell->IsDestroying()) {
+    // Just destroying PresShell now.
+    // We have to keep UI elements of anonymous content until PresShell
+    // is destroyed.
+    RefPtr<HTMLEditor> self = this;
+    nsContentUtils::AddScriptRunner(
+        NS_NewRunnableFunction("HTMLEditor::PreDestroy", [self]() {
+          self->HideAnonymousEditingUIs();
+        }));
+  } else {
+    // PresShell is alive or already gone.
+    HideAnonymousEditingUIs();
+  }
 
   EditorBase::PreDestroy(aDestroyingFrames);
 }
@@ -741,12 +752,10 @@ nsresult HTMLEditor::HandleKeyPressEvent(WidgetKeyboardEvent* aKeyboardEvent) {
  * Returns true if the id represents an element of block type.
  * Can be used to determine if a new paragraph should be started.
  */
-bool HTMLEditor::NodeIsBlockStatic(const nsINode* aElement) {
-  MOZ_ASSERT(aElement);
-
+bool HTMLEditor::NodeIsBlockStatic(const nsINode& aElement) {
   // We want to treat these as block nodes even though nsHTMLElement says
   // they're not.
-  if (aElement->IsAnyOfHTMLElements(
+  if (aElement.IsAnyOfHTMLElements(
           nsGkAtoms::body, nsGkAtoms::head, nsGkAtoms::tbody, nsGkAtoms::thead,
           nsGkAtoms::tfoot, nsGkAtoms::tr, nsGkAtoms::th, nsGkAtoms::td,
           nsGkAtoms::dt, nsGkAtoms::dd)) {
@@ -754,7 +763,7 @@ bool HTMLEditor::NodeIsBlockStatic(const nsINode* aElement) {
   }
 
   return nsHTMLElement::IsBlock(
-      nsHTMLTags::AtomTagToId(aElement->NodeInfo()->NameAtom()));
+      nsHTMLTags::AtomTagToId(aElement.NodeInfo()->NameAtom()));
 }
 
 NS_IMETHODIMP
@@ -764,7 +773,7 @@ HTMLEditor::NodeIsBlock(nsINode* aNode, bool* aIsBlock) {
 }
 
 bool HTMLEditor::IsBlockNode(nsINode* aNode) const {
-  return aNode && NodeIsBlockStatic(aNode);
+  return aNode && HTMLEditor::NodeIsBlockStatic(*aNode);
 }
 
 /**
@@ -785,7 +794,7 @@ Element* HTMLEditor::GetBlockNodeParent(nsINode* aNode,
   nsCOMPtr<nsINode> p = aNode->GetParentNode();
 
   while (p) {
-    if (NodeIsBlockStatic(p)) {
+    if (HTMLEditor::NodeIsBlockStatic(*p)) {
       return p->AsElement();
     }
     // Now, we have reached the limiter, there is no block in its ancestors.
@@ -806,7 +815,7 @@ Element* HTMLEditor::GetBlock(nsINode& aNode, nsINode* aAncestorLimiter) {
                  EditorUtils::IsDescendantOf(aNode, *aAncestorLimiter),
              "aNode isn't in aAncestorLimiter");
 
-  if (NodeIsBlockStatic(&aNode)) {
+  if (HTMLEditor::NodeIsBlockStatic(aNode)) {
     return aNode.AsElement();
   }
   return GetBlockNodeParent(&aNode, aAncestorLimiter);
@@ -1010,7 +1019,7 @@ nsresult HTMLEditor::InsertParagraphSeparatorAsSubAction() {
   // Protect the edit rules object from dying
   RefPtr<TextEditRules> rules(mRules);
 
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eInsertParagraphSeparator, nsIEditor::eNext);
 
   EditSubActionInfo subActionInfo(EditSubAction::eInsertParagraphSeparator);
@@ -1132,7 +1141,7 @@ nsresult HTMLEditor::InsertBrElementAtSelectionWithTransaction() {
   // XXX Why do we use EditSubAction::eInsertText here?  Looks like
   //     EditSubAction::eInsertLineBreak or EditSubAction::eInsertNode
   //     is better.
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eInsertText, nsIEditor::eNext);
 
   if (!SelectionRefPtr()->IsCollapsed()) {
@@ -1182,7 +1191,7 @@ nsresult HTMLEditor::ReplaceHeadContentsWithSourceWithTransaction(
   MOZ_ASSERT(IsEditActionDataAvailable());
 
   // don't do any post processing, rules get confused
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eReplaceHeadWithHTMLSource, nsIEditor::eNone);
 
   CommitComposition();
@@ -1533,7 +1542,7 @@ nsresult HTMLEditor::InsertElementAtSelectionAsAction(
 
   CommitComposition();
   AutoPlaceholderBatch treatAsOneTransaction(*this);
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eInsertElement, nsIEditor::eNext);
 
   // hand off to the rules system, see if it has anything to say about this
@@ -1932,7 +1941,7 @@ nsresult HTMLEditor::GetCSSBackgroundColorState(bool* aMixed,
     }
     do {
       // is the node to examine a block ?
-      if (NodeIsBlockStatic(nodeToExamine)) {
+      if (HTMLEditor::NodeIsBlockStatic(*nodeToExamine)) {
         // yes it is a block; in that case, the text background color is
         // transparent
         aOutColor.AssignLiteral("transparent");
@@ -2089,7 +2098,7 @@ nsresult HTMLEditor::MakeOrChangeListAsAction(const nsAString& aListType,
   bool cancel, handled;
 
   AutoPlaceholderBatch treatAsOneTransaction(*this);
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eCreateOrChangeList, nsIEditor::eNext);
 
   EditSubActionInfo subActionInfo(EditSubAction::eCreateOrChangeList);
@@ -2201,7 +2210,7 @@ nsresult HTMLEditor::RemoveListAsAction(const nsAString& aListType,
   RefPtr<TextEditRules> rules(mRules);
 
   AutoPlaceholderBatch treatAsOneTransaction(*this);
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eRemoveList, nsIEditor::eNext);
 
   EditSubActionInfo subActionInfo(EditSubAction::eRemoveList);
@@ -2235,7 +2244,7 @@ nsresult HTMLEditor::MakeDefinitionListItemWithTransaction(nsAtom& aTagName) {
   bool cancel, handled;
 
   AutoPlaceholderBatch treatAsOneTransaction(*this);
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eCreateOrChangeDefinitionList, nsIEditor::eNext);
 
   nsDependentAtomString tagName(&aTagName);
@@ -2272,7 +2281,7 @@ nsresult HTMLEditor::InsertBasicBlockWithTransaction(nsAtom& aTagName) {
   bool cancel, handled;
 
   AutoPlaceholderBatch treatAsOneTransaction(*this);
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eCreateOrRemoveBlock, nsIEditor::eNext);
 
   nsDependentAtomString tagName(&aTagName);
@@ -2411,8 +2420,8 @@ nsresult HTMLEditor::IndentOrOutdentAsSubAction(
   RefPtr<TextEditRules> rules(mRules);
 
   bool cancel, handled;
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
-      *this, aIndentOrOutdent, nsIEditor::eNext);
+  AutoEditSubActionNotifier startToHandleEditSubAction(*this, aIndentOrOutdent,
+                                                       nsIEditor::eNext);
 
   EditSubActionInfo subActionInfo(aIndentOrOutdent);
   nsresult rv = rules->WillDoAction(subActionInfo, &cancel, &handled);
@@ -2517,7 +2526,7 @@ nsresult HTMLEditor::AlignAsAction(const nsAString& aAlignType,
   RefPtr<TextEditRules> rules(mRules);
 
   AutoPlaceholderBatch treatAsOneTransaction(*this);
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eSetOrClearAlignment, nsIEditor::eNext);
 
   bool cancel, handled;
@@ -3377,7 +3386,7 @@ nsresult HTMLEditor::DeleteAllChildrenWithTransaction(Element& aElement) {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
   // Prevent rules testing until we're done
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eDeleteNode, nsIEditor::eNext);
 
   while (nsCOMPtr<nsINode> child = aElement.GetLastChild()) {
@@ -4516,7 +4525,7 @@ nsresult HTMLEditor::SetCSSBackgroundColorWithTransaction(
   bool isCollapsed = SelectionRefPtr()->IsCollapsed();
 
   AutoPlaceholderBatch treatAsOneTransaction(*this);
-  AutoTopLevelEditSubActionNotifier maybeTopLevelEditSubAction(
+  AutoEditSubActionNotifier startToHandleEditSubAction(
       *this, EditSubAction::eInsertElement, nsIEditor::eNext);
   AutoSelectionRestorer restoreSelectionLater(*this);
   AutoTransactionsConserveSelection dontChangeMySelection(*this);

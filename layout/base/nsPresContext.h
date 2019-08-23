@@ -203,9 +203,17 @@ class nsPresContext : public nsISupports,
 
   /**
    * Returns the root widget for this.
-   * Note that the widget is a mediater with IME.
    */
-  nsIWidget* GetRootWidget();
+  nsIWidget* GetRootWidget() const;
+
+  /**
+   * Returns the widget which may have native focus and handles text input
+   * like keyboard input, IME, etc.
+   */
+  nsIWidget* GetTextInputHandlingWidget() const {
+    // Currently, root widget for each PresContext handles text input.
+    return GetRootWidget();
+  }
 
   /**
    * Return the presentation context for the root of the view manager
@@ -798,7 +806,6 @@ class nsPresContext : public nsISupports,
 
   // Is this presentation in a chrome docshell?
   bool IsChrome() const;
-  bool IsChromeOriginImage() const;
 
   // Public API for native theme code to get style internals.
   bool HasAuthorSpecifiedRules(const nsIFrame* aFrame,
@@ -1033,7 +1040,6 @@ class nsPresContext : public nsISupports,
   void SetImgAnimations(nsIContent* aParent, uint16_t aMode);
   void SetSMILAnimations(mozilla::dom::Document* aDoc, uint16_t aNewMode,
                          uint16_t aOldMode);
-  void GetDocumentColorPreferences();
 
   void PreferenceChanged(const char* aPrefName);
 

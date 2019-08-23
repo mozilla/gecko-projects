@@ -1647,8 +1647,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
       return false;
     }
     return mozilla::StyleDisplay::MozInlineBox == aDisplay ||
-           mozilla::StyleDisplay::MozInlineGrid == aDisplay ||
-           mozilla::StyleDisplay::MozInlineStack == aDisplay ||
            mozilla::StyleDisplay::RubyBase == aDisplay ||
            mozilla::StyleDisplay::RubyBaseContainer == aDisplay ||
            mozilla::StyleDisplay::RubyText == aDisplay ||
@@ -1746,7 +1744,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
     // exemption as necessary.
     return (mContain & mozilla::StyleContain_SIZE) &&
            !IsInternalRubyDisplayType() &&
-           (mozilla::StyleDisplay::Table != mDisplay) && !IsInnerTableStyle();
+           DisplayInside() != mozilla::StyleDisplayInside::Table &&
+           !IsInnerTableStyle();
   }
 
   /* Returns whether the element has the transform property or a related
@@ -1880,7 +1879,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTable {
   nsChangeHint CalcDifference(const nsStyleTable& aNewData) const;
 
   uint8_t mLayoutStrategy;  // NS_STYLE_TABLE_LAYOUT_*
-  int32_t mSpan;  // -x-span; the number of columns spanned by a colgroup or col
+  int32_t mXSpan;  // The number of columns spanned by a colgroup or col
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleTableBorder {
@@ -2168,7 +2167,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleXUL {
   nsChangeHint CalcDifference(const nsStyleXUL& aNewData) const;
 
   float mBoxFlex;
-  uint32_t mBoxOrdinal;
+  int32_t mBoxOrdinal;
   mozilla::StyleBoxAlign mBoxAlign;
   mozilla::StyleBoxDirection mBoxDirection;
   mozilla::StyleBoxOrient mBoxOrient;
@@ -2251,7 +2250,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
   uint8_t mColorInterpolation;         // NS_STYLE_COLOR_INTERPOLATION_*
   uint8_t mColorInterpolationFilters;  // NS_STYLE_COLOR_INTERPOLATION_*
   mozilla::StyleFillRule mFillRule;
-  uint8_t mPaintOrder;        // bitfield of NS_STYLE_PAINT_ORDER_* values
+  mozilla::StyleSVGPaintOrder mPaintOrder;
   uint8_t mShapeRendering;    // NS_STYLE_SHAPE_RENDERING_*
   uint8_t mStrokeLinecap;     // NS_STYLE_STROKE_LINECAP_*
   uint8_t mStrokeLinejoin;    // NS_STYLE_STROKE_LINEJOIN_*

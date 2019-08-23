@@ -99,16 +99,12 @@ enum class StyleDisplay : uint16_t {
                                   StyleDisplayInside::MozInlineBox),
   MozGrid =
       StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozGrid),
-  MozInlineGrid = StyleDisplayFrom(StyleDisplayOutside::XUL,
-                                   StyleDisplayInside::MozInlineGrid),
   MozGridGroup = StyleDisplayFrom(StyleDisplayOutside::XUL,
                                   StyleDisplayInside::MozGridGroup),
   MozGridLine = StyleDisplayFrom(StyleDisplayOutside::XUL,
                                  StyleDisplayInside::MozGridLine),
   MozStack =
       StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozStack),
-  MozInlineStack = StyleDisplayFrom(StyleDisplayOutside::XUL,
-                                    StyleDisplayInside::MozInlineStack),
   MozDeck =
       StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozDeck),
   MozGroupbox = StyleDisplayFrom(StyleDisplayOutside::XUL,
@@ -496,10 +492,6 @@ enum class StyleGridTrackBreadth : uint8_t {
   MinContent = 2,
 };
 
-// CSS Grid keywords for <auto-repeat>
-#define NS_STYLE_GRID_REPEAT_AUTO_FILL 0
-#define NS_STYLE_GRID_REPEAT_AUTO_FIT 1
-
 // defaults per MathML spec
 #define NS_MATHML_DEFAULT_SCRIPT_SIZE_MULTIPLIER 0.71f
 #define NS_MATHML_DEFAULT_SCRIPT_MIN_SIZE_PT 8
@@ -786,16 +778,6 @@ enum class StyleWhiteSpace : uint8_t {
 // mask-type
 #define NS_STYLE_MASK_TYPE_LUMINANCE 0
 #define NS_STYLE_MASK_TYPE_ALPHA 1
-
-// paint-order
-#define NS_STYLE_PAINT_ORDER_NORMAL 0
-#define NS_STYLE_PAINT_ORDER_FILL 1
-#define NS_STYLE_PAINT_ORDER_STROKE 2
-#define NS_STYLE_PAINT_ORDER_MARKERS 3
-#define NS_STYLE_PAINT_ORDER_LAST_VALUE NS_STYLE_PAINT_ORDER_MARKERS
-// NS_STYLE_PAINT_ORDER_BITWIDTH is the number of bits required to store
-// a single paint-order component value.
-#define NS_STYLE_PAINT_ORDER_BITWIDTH 2
 
 // shape-rendering
 #define NS_STYLE_SHAPE_RENDERING_AUTO 0

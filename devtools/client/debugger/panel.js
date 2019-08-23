@@ -3,9 +3,6 @@
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 const { LocalizationHelper } = require("devtools/shared/l10n");
-const {
-  gDevToolsBrowser,
-} = require("devtools/client/framework/devtools-browser");
 loader.lazyRequireGetter(
   this,
   "openContentLink",
@@ -20,6 +17,15 @@ function DebuggerPanel(iframeWindow, toolbox) {
   this.panelWin = iframeWindow;
   this.panelWin.L10N = L10N;
   this.toolbox = toolbox;
+}
+
+async function getNodeFront(gripOrFront, toolbox) {
+  // Given a NodeFront
+  if ("actorID" in gripOrFront) {
+    return new Promise(resolve => resolve(gripOrFront));
+  }
+  // Given a grip
+  return toolbox.walker.gripToNodeFront(gripOrFront);
 }
 
 DebuggerPanel.prototype = {
@@ -79,19 +85,16 @@ DebuggerPanel.prototype = {
     openContentLink(url);
   },
 
-  openWorkerToolbox: function(workerTargetFront) {
-    return gDevToolsBrowser.openWorkerToolbox(workerTargetFront, "jsdebugger");
-  },
-
   openConsoleAndEvaluate: async function(input) {
     const { hud } = await this.toolbox.selectTool("webconsole");
     hud.ui.wrapper.dispatchEvaluateExpression(input);
   },
 
-  openElementInInspector: async function(grip) {
+  openElementInInspector: async function(gripOrFront) {
     await this.toolbox.initInspector();
     const onSelectInspector = this.toolbox.selectTool("inspector");
-    const onGripNodeToFront = this.toolbox.walker.gripToNodeFront(grip);
+    const onGripNodeToFront = getNodeFront(gripOrFront, this.toolbox);
+
     const [front, inspector] = await Promise.all([
       onGripNodeToFront,
       onSelectInspector,
@@ -105,13 +108,13 @@ DebuggerPanel.prototype = {
     return Promise.all([onNodeFrontSet, onInspectorUpdated]);
   },
 
-  highlightDomElement: async function(grip) {
+  highlightDomElement: async function(gripOrFront) {
     await this.toolbox.initInspector();
     if (!this.toolbox.highlighter) {
       return null;
     }
-    const nodeFront = await this.toolbox.walker.gripToNodeFront(grip);
-    return this.toolbox.highlighter.highlight(nodeFront);
+    const front = await getNodeFront(gripOrFront, this.toolbox);
+    return this.toolbox.highlighter.highlight(front);
   },
 
   unHighlightDomElement: function() {

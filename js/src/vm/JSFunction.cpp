@@ -493,17 +493,9 @@ static bool fun_resolve(JSContext* cx, HandleObject obj, HandleId id,
         return true;
       }
 
-      RootedString name(cx);
-      if (!JSFunction::getUnresolvedName(cx, fun, &name)) {
+      if (!JSFunction::getUnresolvedName(cx, fun, &v)) {
         return false;
       }
-
-      // Don't define an own .name property for unnamed functions.
-      if (!name) {
-        return true;
-      }
-
-      v.setString(name);
     }
 
     if (!NativeDefineDataProperty(cx, fun, id, v,
@@ -1034,6 +1026,14 @@ bool js::FunctionHasDefaultHasInstance(JSFunction* fun,
     const Value hasInstance = fun->as<NativeObject>().getSlot(shape->slot());
     return IsNativeFunction(hasInstance, fun_symbolHasInstance);
   }
+
+#ifdef DEBUG
+  // The proto must be Function.__proto__. It has an immutable @@hasInstance
+  // property. (Callers should check this first.)
+  Value funProto = fun->global().getPrototype(JSProto_Function);
+  MOZ_ASSERT(fun->staticPrototype() == &funProto.toObject());
+#endif
+
   return true;
 }
 
@@ -1280,28 +1280,23 @@ JSAtom* JSFunction::infallibleGetUnresolvedName(JSContext* cx) {
     return name;
   }
 
-  // Unnamed class expressions should not get a .name property at all.
-  if (isClassConstructor()) {
-    return nullptr;
-  }
-
   return cx->names().empty;
 }
 
 /* static */
 bool JSFunction::getUnresolvedName(JSContext* cx, HandleFunction fun,
-                                   MutableHandleString v) {
+                                   MutableHandleValue v) {
   if (fun->isBoundFunction()) {
     JSLinearString* name = JSFunction::getBoundFunctionName(cx, fun);
     if (!name) {
       return false;
     }
 
-    v.set(name);
+    v.setString(name);
     return true;
   }
 
-  v.set(fun->infallibleGetUnresolvedName(cx));
+  v.setString(fun->infallibleGetUnresolvedName(cx));
   return true;
 }
 
@@ -1496,9 +1491,9 @@ bool JSFunction::finishBoundFunctionInit(JSContext* cx, HandleFunction bound,
       bound->setPrefixedBoundFunctionName(name);
     } else {
       name = targetFn->infallibleGetUnresolvedName(cx);
-      if (name) {
-        bound->setAtom(name);
-      }
+      MOZ_ASSERT(name);
+
+      bound->setAtom(name);
     }
   }
 
