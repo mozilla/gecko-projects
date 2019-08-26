@@ -166,7 +166,8 @@ public class GeckoViewActivity extends AppCompatActivity {
                     .remoteDebuggingEnabled(mEnableRemoteDebugging)
                     .consoleOutput(true)
                     .contentBlocking(new ContentBlocking.Settings.Builder()
-                        .antiTracking(ContentBlocking.AntiTracking.DEFAULT)
+                        .antiTracking(ContentBlocking.AntiTracking.DEFAULT |
+                                      ContentBlocking.AntiTracking.STP)
                         .safeBrowsing(ContentBlocking.SafeBrowsing.DEFAULT)
                         .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_NON_TRACKERS)
                         .build())
@@ -255,16 +256,15 @@ public class GeckoViewActivity extends AppCompatActivity {
                 mUseMultiprocess = session.getSettings().getUseMultiprocess();
                 mFullAccessibilityTree = session.getSettings().getFullAccessibilityTree();
 
-                mTabSessionManager.setCurrentSession(session);
-                mGeckoView.setSession(session);
+                mTabSessionManager.addSession(session);
+                setGeckoViewSession(session);
             } else {
                 session = createSession();
                 session.open(sGeckoRuntime);
                 mTabSessionManager.setCurrentSession(session);
                 mGeckoView.setSession(session);
-
-                loadFromIntent(getIntent());
             }
+            loadFromIntent(getIntent());
         }
 
         mToolbarView.getLocationView().setCommitListener(mCommitListener);
@@ -368,6 +368,8 @@ public class GeckoViewActivity extends AppCompatActivity {
 
     private void updateTrackingProtection(GeckoSession session) {
         session.getSettings().setUseTrackingProtection(mUseTrackingProtection);
+        sGeckoRuntime.getSettings().getContentBlocking()
+                .setStrictSocialTrackingProtection(mUseTrackingProtection);
     }
 
     @Override
@@ -1144,6 +1146,7 @@ public class GeckoViewActivity extends AppCompatActivity {
         private int mBlockedSocial = 0;
         private int mBlockedContent = 0;
         private int mBlockedTest = 0;
+        private int mBlockedStp = 0;
 
         private void clearCounters() {
             mBlockedAds = 0;
@@ -1151,6 +1154,7 @@ public class GeckoViewActivity extends AppCompatActivity {
             mBlockedSocial = 0;
             mBlockedContent = 0;
             mBlockedTest = 0;
+            mBlockedStp = 0;
         }
 
         private void logCounters() {
@@ -1158,7 +1162,8 @@ public class GeckoViewActivity extends AppCompatActivity {
                   mBlockedAnalytics + " analytics, " +
                   mBlockedSocial + " social, " +
                   mBlockedContent + " content, " +
-                  mBlockedTest + " test");
+                  mBlockedTest + " test, " +
+                  mBlockedStp + "stp");
         }
 
         @Override
@@ -1188,6 +1193,10 @@ public class GeckoViewActivity extends AppCompatActivity {
             if ((event.getAntiTrackingCategory() &
                   ContentBlocking.AntiTracking.CONTENT) != 0) {
                 mBlockedContent++;
+            }
+            if ((event.getAntiTrackingCategory() &
+                  ContentBlocking.AntiTracking.STP) != 0) {
+                mBlockedStp++;
             }
         }
 

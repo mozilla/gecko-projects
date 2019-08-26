@@ -48,11 +48,7 @@ login-item {
 }
 
 login-item {
-  max-width: 800px;
-}
-
-login-footer {
-  grid-area: login;
+  max-width: 700px;
 }
 
 #branding-logo {

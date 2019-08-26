@@ -645,6 +645,12 @@
   value: true
   mirror: always
 
+# Enable/Disable Origin based cache isolation
+- name: browser.cache.cache_isolation
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # -1 = determine dynamically, 0 = none, n = memory capacity in kilobytes.
 - name: browser.cache.memory.capacity
   type: RelaxedAtomicInt32
@@ -1833,6 +1839,14 @@
 - name: dom.push.enabled
   type: RelaxedAtomicBool
   value: false
+  mirror: always
+
+
+# Should we try to load origin information from the cache?
+# See bug 1563023 for more details.
+- name: dom.quotaManager.loadQuotaFromCache
+  type: RelaxedAtomicBool
+  value: true
   mirror: always
 
 # Preference that users can set to override temporary storage smart limit

@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsICaptivePortalService.h"
+#include "nsIParentalControlsService.h"
 #include "nsIObserverService.h"
 #include "nsIURIMutator.h"
 #include "nsNetUtil.h"
@@ -50,7 +51,8 @@ TRRService::TRRService()
       mClearTRRBLStorage(false),
       mConfirmationState(CONFIRM_INIT),
       mRetryConfirmInterval(1000),
-      mTRRFailures(0) {
+      mTRRFailures(0),
+      mParentalControlEnabled(false) {
   MOZ_ASSERT(NS_IsMainThread(), "wrong thread");
 }
 
@@ -90,12 +92,24 @@ nsresult TRRService::Init() {
          captiveState, (int)mCaptiveIsPassed));
   }
 
+  GetParentalControlEnabledInternal();
+
   ReadPrefs(nullptr);
 
   gTRRService = this;
 
   LOG(("Initialized TRRService\n"));
   return NS_OK;
+}
+
+void TRRService::GetParentalControlEnabledInternal() {
+  nsCOMPtr<nsIParentalControlsService> pc =
+      do_CreateInstance("@mozilla.org/parental-controls-service;1");
+  if (pc) {
+    pc->GetParentalControlsEnabled(&mParentalControlEnabled);
+    LOG(("TRRService::GetParentalControlEnabledInternal=%d\n",
+         mParentalControlEnabled));
+  }
 }
 
 bool TRRService::Enabled() {
@@ -291,6 +305,16 @@ nsresult TRRService::ReadPrefs(const char* name) {
       !strcmp(name, kCaptivedetectCanonicalURL)) {
     nsAutoCString excludedDomains;
     Preferences::GetCString(TRR_PREF("excluded-domains"), excludedDomains);
+
+    mExcludedDomains.Clear();
+    nsCCharSeparatedTokenizer tokenizer(
+        excludedDomains, ',', nsCCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
+    while (tokenizer.hasMoreTokens()) {
+      nsAutoCString token(tokenizer.nextToken());
+      LOG(("TRRService::ReadPrefs excluded-domains host:[%s]\n", token.get()));
+      mExcludedDomains.PutEntry(token);
+    }
+
     nsAutoCString canonicalSiteURL;
     Preferences::GetCString(kCaptivedetectCanonicalURL, canonicalSiteURL);
 
@@ -300,20 +324,9 @@ nsresult TRRService::ReadPrefs(const char* name) {
     if (NS_SUCCEEDED(rv)) {
       nsAutoCString host;
       uri->GetHost(host);
-
-      if (!excludedDomains.IsEmpty() && excludedDomains.Last() != ',') {
-        excludedDomains.AppendLiteral(",");
-      }
-      excludedDomains.Append(host);
-    }
-
-    mExcludedDomains.Clear();
-    nsCCharSeparatedTokenizer tokenizer(
-        excludedDomains, ',', nsCCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
-    while (tokenizer.hasMoreTokens()) {
-      nsAutoCString token(tokenizer.nextToken());
-      LOG(("TRRService::ReadPrefs excluded-domains host:[%s]\n", token.get()));
-      mExcludedDomains.PutEntry(token);
+      LOG(("TRRService::ReadPrefs excluded-domains captive portal URL:[%s]\n",
+           host.get()));
+      mExcludedDomains.PutEntry(host);
     }
   }
 

@@ -70,17 +70,10 @@ const convertSubjectToLogin = subject => {
   return augmentVanillaLoginObject(login);
 };
 
-const SCHEME_REGEX = new RegExp(/^http(s)?:\/\//);
 const SUBDOMAIN_REGEX = new RegExp(/^www\d*\./);
 const augmentVanillaLoginObject = login => {
-  let title;
-  try {
-    // file:// URIs don't have a host property
-    title = new URL(login.origin).host || login.origin;
-  } catch (ex) {
-    title = login.origin.replace(SCHEME_REGEX, "");
-  }
-  title = title.replace(SUBDOMAIN_REGEX, "");
+  // Note that `displayOrigin` can also include a httpRealm.
+  let title = login.displayOrigin.replace(SUBDOMAIN_REGEX, "");
   return Object.assign({}, login, {
     title,
   });
@@ -733,10 +726,17 @@ var AboutLoginsParent = {
     // authenticated. More diagnostics and error states can be handled
     // by other more Sync-specific pages.
     const loggedIn = state.status != UIState.STATUS_NOT_CONFIGURED;
+
+    // Pass the pref set if user has dismissed mobile promo footer
+    const dismissedMobileFooter = Services.prefs.getBoolPref(
+      HIDE_MOBILE_FOOTER_PREF
+    );
+
     return {
       loggedIn,
       email: state.email,
       avatarURL: state.avatarURL,
+      hideMobileFooter: !loggedIn || dismissedMobileFooter,
     };
   },
 

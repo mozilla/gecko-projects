@@ -18,10 +18,15 @@
   fill: currentColor;
   --horizontal-padding: 2.1rem;
   --vertical-section-padding: 0.9em;
+  --height-offset: 0;
 }
 
 #protections-popup[toast] {
   --popup-width: 32rem;
+}
+
+#protections-popoup[infoMessageShowing] {
+  --height-offset: 260px;
 }
 
 /* This is used by screenshots tests to hide intermittently different
@@ -277,12 +282,18 @@
   -moz-outline-radius: var(--toolbarbutton-border-radius);
 }
 
+#protections-popup-info-button > image {
+  fill-opacity: 1;
+}
+
 #protections-popup-info-button:hover {
-  outline-color: var(--toolbarbutton-hover-background);
+  outline-color: rgba(12, 12, 13, 0.2);
+  background-color: rgba(12, 12, 13, 0.2);
 }
 
 #protections-popup-info-button:not(:hover)[checked] {
-  outline-color: var(--toolbarbutton-active-background);
+  outline-color: rgba(12, 12, 13, 0.3);
+  background-color: rgba(12, 12, 13, 0.3);
 }
 
 #identity-popup-permissions-content > description,
@@ -481,7 +492,7 @@ description#identity-popup-content-verifier,
 #protections-popup-socialblockView,
 #protections-popup-cookiesView,
 #protections-popup-trackersView {
-  max-height: 600px;
+  max-height: calc(600px + var(--height-offset));
 }
 
 #protections-popup-trackersView-list.empty {
@@ -683,9 +694,10 @@ description#identity-popup-content-verifier,
   grid-row: 1;
 }
 
-#protections-popup:not([hasException]) .protections-popup-category.blocked:not([hidden]) ~ #protections-popup-blocking-section-header,
+#protections-popup:not([hasException]) .protections-popup-category.blocked:not(.notFound) ~ #protections-popup-blocking-section-header,
 .protections-popup-category.notFound ~ #protections-popup-not-found-section-header,
-.protections-popup-category:not(.blocked):not(.notFound) ~ #protections-popup-not-blocking-section-header {
+.protections-popup-category:not(.blocked):not(.notFound) ~ #protections-popup-not-blocking-section-header,
+#protections-popup[hasException] .protections-popup-category:not(.notFound) ~ #protections-popup-not-blocking-section-header {
   display: flex;
 }
 
@@ -1049,8 +1061,8 @@ description#identity-popup-content-verifier,
   box-sizing: border-box;
   min-width: 26px;
   border-radius: 10px;
-  background-color: var(--arrowpanel-dimmed-even-further);
-  border: 1px solid transparent;
+  background-color: #f9f9fa;
+  border: 1px solid var(--panel-separator-color);
   margin-top: 4px;
   margin-bottom: 4px;
   margin-inline-start: 1px;
@@ -1067,6 +1079,8 @@ description#identity-popup-content-verifier,
   height: 10px;
   border-radius: 10px;
   background: white;
+  outline: 1px solid var(--panel-separator-color);
+  -moz-outline-radius: 11px;
 }
 
 .protections-popup-tp-switch[enabled] {

@@ -2,8 +2,7 @@
 
 In addition to mochitests and xpcshell tests, some panels in DevTools are using node test libraries to run unit tests. For instance, several panels are using [Jest](https://jestjs.io/) to run React component unit tests.
 
-## DevTools node tests on Try
-### Find the node tests on Try
+## Find the node tests on Try
 
 The DevTools node tests are split in two different test suites on try:
 - `node(devtools)`: all the DevTools node tests, except the ones for the debugger
@@ -11,7 +10,7 @@ The DevTools node tests are split in two different test suites on try:
 
 They are running on the `Linux 64 opt` platform. They are both tier 1 jobs, which means that any failure will lead to a backout.
 
-### On Try
+## Run Tests On Try
 
 To run the DevTools node tests on try, you can use `./mach try fuzzy` and look for the jobs named `source-test-node-debugger-tests` and `source-test-node-devtools-tests`.
 
@@ -23,7 +22,11 @@ The definition of those try jobs can be found at [taskcluster/ci/source-test/nod
 
 The definition also contains the list of files that will trigger the node test jobs. Currently the debugger tests run when any file is modified under `devtools/client/debugger`, the devtools tests run when any file is modified under `devtools/client` or `devtools/shared`.
 
-## Locally
+## Run Tests Locally
+
+### Prerequisite: yarn
+
+You will need yarn to be installed in order to run both the debugger and the DevTools tests. See https://yarnpkg.com/docs/install/.
 
 ### Debugger
 
@@ -43,7 +46,7 @@ To run the other (non-debugger) DevTools tests, the easiest is to rely on the sa
 > node devtools/client/bin/devtools-node-test-runner.js --suite={suitename}
 ```
 
-At the moment of writing, the supported suites for this script are: `aboutdebugging-new`, `accessibility`, `application`, `framework`, `netmonitor`, `webconsole`.
+At the moment of writing, the supported suites for this script are: `aboutdebugging`, `accessibility`, `application`, `framework`, `netmonitor`, `webconsole`.
 
 Alternatively, you can also locate the `package.json` corresponding to a given suite, and run `yarn && yarn test`.
 

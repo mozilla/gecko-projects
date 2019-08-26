@@ -387,6 +387,7 @@ var Policies = {
     onBeforeAddons(manager, param) {
       if (param) {
         setAndLockPref("identity.fxaccounts.enabled", false);
+        setAndLockPref("trailhead.firstrun.branches", "nofirstrun");
       }
     },
   },
@@ -609,6 +610,20 @@ var Policies = {
       } else {
         setAndLockPref("privacy.trackingprotection.enabled", false);
         setAndLockPref("privacy.trackingprotection.pbmode.enabled", false);
+      }
+      if ("Cryptomining" in param) {
+        setDefaultPref(
+          "privacy.trackingprotection.cryptomining.enabled",
+          param.Cryptomining,
+          param.Locked
+        );
+      }
+      if ("Fingerprinting" in param) {
+        setDefaultPref(
+          "privacy.trackingprotection.fingerprinting.enabled",
+          param.Fingerprinting,
+          param.Locked
+        );
       }
     },
   },
@@ -967,6 +982,7 @@ var Policies = {
     onProfileAfterChange(manager, param) {
       let url = param ? param.href : "";
       setAndLockPref("startup.homepage_welcome_url", url);
+      setAndLockPref("trailhead.firstrun.branches", "nofirstrun");
     },
   },
 

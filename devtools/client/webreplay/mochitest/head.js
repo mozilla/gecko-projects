@@ -27,8 +27,12 @@ async function attachDebugger(tab) {
 
 async function attachRecordingDebugger(
   url,
-  { waitForRecording } = { waitForRecording: false }
+  { waitForRecording, disableLogging } = {}
 ) {
+  if (!disableLogging) {
+    await pushPref("devtools.recordreplay.logging", true);
+  }
+
   const tab = BrowserTestUtils.addTab(gBrowser, null, { recordExecution: "*" });
   gBrowser.selectedTab = tab;
   openTrustedLinkIn(EXAMPLE_URL + url, "current");
@@ -142,7 +146,7 @@ async function warpToMessage(hud, dbg, text) {
   ok(messages.length == 1, "Found one message");
   const message = messages.pop();
 
-  const menuPopup = await openConsoleContextMenu(hud, message);
+  const menuPopup = await openConsoleContextMenu(message);
   console.log(`.>> menu`, menuPopup);
 
   const timeWarpItem = menuPopup.querySelector("#console-menu-time-warp");
@@ -150,7 +154,7 @@ async function warpToMessage(hud, dbg, text) {
 
   timeWarpItem.click();
 
-  await hideConsoleContextMenu(hud);
+  await hideConsoleContextMenu();
   await once(Services.ppmm, "TimeWarpFinished");
   await waitForPaused(dbg);
 
@@ -158,6 +162,24 @@ async function warpToMessage(hud, dbg, text) {
   ok(messages.length == 1, "Found one paused message");
 
   return message;
+
+  async function openConsoleContextMenu(element) {
+    const onConsoleMenuOpened = hud.ui.wrapper.once("menu-open");
+    synthesizeContextMenuEvent(element);
+    await onConsoleMenuOpened;
+    return dbg.toolbox.topDoc.getElementById("webconsole-menu");
+  }
+
+  function hideConsoleContextMenu() {
+    const popup = dbg.toolbox.topDoc.getElementById("webconsole-menu");
+    if (!popup) {
+      return Promise.resolve();
+    }
+
+    const onPopupHidden = once(popup, "popuphidden");
+    popup.hidePopup();
+    return onPopupHidden;
+  }
 }
 
 const { PromiseTestUtils } = ChromeUtils.import(

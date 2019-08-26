@@ -245,7 +245,7 @@ class Output(object):
             browser_cycle = next_suite['details']['browser_cycle']
             LOG.info("combining results from browser cycle %d for %s"
                      % (browser_cycle, suite_name))
-            if browser_cycle == 1:
+            if suite_name not in combined_suites:
                 # first browser cycle so just take entire entry to start with
                 combined_suites[suite_name] = next_suite['details']
                 LOG.info("created new combined result with intial cycle replicates")
@@ -878,6 +878,11 @@ class Output(object):
                 }
 
             _subtests[name]['replicates'].append(value)
+            if self.subtest_alert_on is not None:
+                if name in self.subtest_alert_on:
+                    LOG.info("turning on subtest alerting for measurement type: %s"
+                             % name)
+                    _subtests[name]['shouldAlert'] = True
 
         for pagecycle in data:
             for _sub, _value in pagecycle[0].iteritems():

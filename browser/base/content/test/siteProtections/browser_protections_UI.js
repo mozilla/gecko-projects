@@ -23,6 +23,36 @@ function checkClickTelemetry(objectName, value) {
   is(buttonEvents.length, 1, `recorded ${objectName} telemetry event`);
 }
 
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "TrackingDBService",
+  "@mozilla.org/tracking-db-service;1",
+  "nsITrackingDBService"
+);
+
+XPCOMUtils.defineLazyGetter(this, "TRACK_DB_PATH", function() {
+  return OS.Path.join(OS.Constants.Path.profileDir, "protections.sqlite");
+});
+
+const { Sqlite } = ChromeUtils.import("resource://gre/modules/Sqlite.jsm");
+
+async function addTrackerDataIntoDB(count) {
+  const insertSQL =
+    "INSERT INTO events (type, count, timestamp)" +
+    "VALUES (:type, :count, date(:timestamp));";
+
+  let db = await Sqlite.openConnection({ path: TRACK_DB_PATH });
+  let date = new Date().toISOString();
+
+  await db.execute(insertSQL, {
+    type: TrackingDBService.TRACKERS_ID,
+    count,
+    timestamp: date,
+  });
+
+  await db.close();
+}
+
 add_task(async function setup() {
   await SpecialPowers.pushPrefEnv({
     set: [
@@ -405,6 +435,102 @@ add_task(async function testTrackingProtectionIcon() {
   BrowserTestUtils.removeTab(tab);
 });
 
+/**
+ * A test for ensuring the number of blocked trackers is displayed properly.
+ */
+add_task(async function testNumberOfBlockedTrackers() {
+  // First, clear the tracking database.
+  await TrackingDBService.clearAll();
+
+  // Open a tab.
+  let tab = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    "https://example.com"
+  );
+  await openProtectionsPanel();
+
+  let trackerCounterBox = document.getElementById(
+    "protections-popup-trackers-blocked-counter-box"
+  );
+  let trackerCounterDesc = document.getElementById(
+    "protections-popup-trackers-blocked-counter-description"
+  );
+
+  // Check that whether the counter is not shown if the number of blocked
+  // trackers is zero.
+  ok(
+    BrowserTestUtils.is_hidden(trackerCounterBox),
+    "The blocked tracker counter is hidden if there is no blocked tracker."
+  );
+
+  await closeProtectionsPanel();
+
+  // Add one tracker into the database and check that the tracker counter is
+  // properly shown.
+  await addTrackerDataIntoDB(1);
+
+  // A promise for waiting the `showing` attributes has been set to the counter
+  // box. This means the database access is finished.
+  let counterShownPromise = BrowserTestUtils.waitForAttribute(
+    "showing",
+    trackerCounterBox
+  );
+
+  await openProtectionsPanel();
+  await counterShownPromise;
+
+  // Check that the number of blocked trackers is shown.
+  ok(
+    BrowserTestUtils.is_visible(trackerCounterBox),
+    "The blocked tracker counter is shown if there is one blocked tracker."
+  );
+  is(
+    trackerCounterDesc.textContent,
+    "1 Blocked",
+    "The blocked tracker counter is correct."
+  );
+
+  await closeProtectionsPanel();
+  await TrackingDBService.clearAll();
+
+  // Add trackers into the database and check that the tracker counter is
+  // properly shown as well as whether the pre-fetch is triggered by the
+  // keyboard navigation.
+  await addTrackerDataIntoDB(10);
+
+  // We cannot wait for the change of "showing" attribute here since this
+  // attribute will only be set if the previous counter is zero. Instead, we
+  // wait for the change of the text content of the counter.
+  let updateCounterPromise = new Promise(resolve => {
+    let mut = new MutationObserver(mutations => {
+      resolve();
+      mut.disconnect();
+    });
+
+    mut.observe(trackerCounterDesc, {
+      childList: true,
+    });
+  });
+
+  await openProtectionsPanelWithKeyNav();
+  await updateCounterPromise;
+
+  // Check that the number of blocked trackers is shown.
+  ok(
+    BrowserTestUtils.is_visible(trackerCounterBox),
+    "The blocked tracker counter is shown if there are more than one blocked tracker."
+  );
+  is(
+    trackerCounterDesc.textContent,
+    "10 Blocked",
+    "The blocked tracker counter is correct."
+  );
+
+  await closeProtectionsPanel();
+  await TrackingDBService.clearAll();
+  BrowserTestUtils.removeTab(tab);
+});
+
 add_task(async function testSubViewTelemetry() {
   let items = [
     ["protections-popup-category-tracking-protection", "trackers"],
@@ -435,4 +561,62 @@ add_task(async function testSubViewTelemetry() {
       checkClickTelemetry("subview_settings", telemetryId);
     });
   }
+});
+
+/**
+ * A test to make sure the TP state won't apply incorrectly if we quickly switch
+ * tab after toggling the TP switch.
+ */
+add_task(async function testQuickSwitchTabAfterTogglingTPSwitch() {
+  const FIRST_TEST_SITE = "https://example.com/";
+  const SECOND_TEST_SITE = "https://example.org/";
+
+  // First, clear the tracking database.
+  await TrackingDBService.clearAll();
+
+  // Open two tabs with different origins.
+  let tabOne = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    FIRST_TEST_SITE
+  );
+  let tabTwo = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    SECOND_TEST_SITE
+  );
+
+  // Open the protection panel of the second tab.
+  await openProtectionsPanel();
+
+  // A promise to check the reload happens on the second tab.
+  let browserLoadedPromise = BrowserTestUtils.browserLoaded(
+    tabTwo.linkedBrowser,
+    false,
+    SECOND_TEST_SITE
+  );
+
+  // Toggle the TP state and switch tab without waiting it to be finished.
+  gProtectionsHandler._protectionsPopupTPSwitch.click();
+  gBrowser.selectedTab = tabOne;
+
+  // Wait for the second tab to be reloaded.
+  await browserLoadedPromise;
+
+  // Check that the first tab is still with ETP enabled.
+  ok(
+    !ContentBlockingAllowList.includes(gBrowser.selectedBrowser),
+    "The tracking protection icon state is still enabled."
+  );
+
+  // Check the ETP is disabled on the second origin.
+  gBrowser.selectedTab = tabTwo;
+  ok(
+    ContentBlockingAllowList.includes(gBrowser.selectedBrowser),
+    "The tracking protection icon state has been changed to disabled."
+  );
+
+  BrowserTestUtils.removeTab(tabOne);
+  BrowserTestUtils.removeTab(tabTwo);
+
+  // Finally, clear the tracking database.
+  await TrackingDBService.clearAll();
 });

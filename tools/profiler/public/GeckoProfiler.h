@@ -91,6 +91,7 @@
 #  include <stdint.h>
 
 class ProfilerBacktrace;
+class ProfilerCodeAddressService;
 class ProfilerMarkerPayload;
 class SpliceableJSONWriter;
 namespace mozilla {
@@ -159,7 +160,10 @@ class Vector;
     MACRO(12, "jstracer", JSTracer, "Enable tracing of the JavaScript engine") \
                                                                                \
     MACRO(13, "jsallocations", JSAllocations,                                  \
-          "Have the JavaScript engine track allocations")
+          "Have the JavaScript engine track allocations")                      \
+                                                                               \
+    MACRO(15, "preferencereads", PreferenceReads,                              \
+          "Track when preferences are read")
 
 struct ProfilerFeature {
 #  define DECLARE(n_, str_, Name_, desc_)                     \
@@ -847,9 +851,10 @@ mozilla::UniquePtr<char[]> profiler_get_profile(double aSinceTime = 0,
 
 // Write the profile for this process (excluding subprocesses) into aWriter.
 // Returns false if the profiler is inactive.
-bool profiler_stream_json_for_this_process(SpliceableJSONWriter& aWriter,
-                                           double aSinceTime = 0,
-                                           bool aIsShuttingDown = false);
+bool profiler_stream_json_for_this_process(
+    SpliceableJSONWriter& aWriter, double aSinceTime = 0,
+    bool aIsShuttingDown = false,
+    ProfilerCodeAddressService* aService = nullptr);
 
 // Get the profile and write it into a file. A no-op if the profile is
 // inactive.

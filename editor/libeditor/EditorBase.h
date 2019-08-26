@@ -818,6 +818,7 @@ class EditorBase : public nsIEditor,
         case EditSubAction::eOutdent:
         case EditSubAction::eSetOrClearAlignment:
         case EditSubAction::eCreateOrRemoveBlock:
+        case EditSubAction::eMergeBlockContents:
         case EditSubAction::eRemoveList:
         case EditSubAction::eCreateOrChangeDefinitionList:
         case EditSubAction::eInsertElement:
@@ -969,6 +970,10 @@ class EditorBase : public nsIEditor,
 
   bool IsEditActionDataAvailable() const {
     return mEditActionData && mEditActionData->CanHandle();
+  }
+
+  bool IsTopLevelEditSubActionDataAvailable() const {
+    return mEditActionData && !!GetTopLevelEditSubAction();
   }
 
   /**

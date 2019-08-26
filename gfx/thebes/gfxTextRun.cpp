@@ -1332,9 +1332,8 @@ void gfxTextRun::SortGlyphRuns() {
     // A GlyphRun with the same font and orientation as the previous can
     // just be skipped; the last GlyphRun will cover its character range.
     MOZ_ASSERT(run.mFont != nullptr);
-    if (!prevRun ||
-        !prevRun->Matches(run.mFont, run.mOrientation, run.mIsCJK,
-                          run.mMatchType)) {
+    if (!prevRun || !prevRun->Matches(run.mFont, run.mOrientation, run.mIsCJK,
+                                      run.mMatchType)) {
       // If two font runs have the same character offset, Sort() will have
       // randomized their order!
       MOZ_ASSERT(prevRun == nullptr ||
@@ -2974,10 +2973,13 @@ gfxFont* gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh,
     }
   }
 
-  // if character is in Private Use Area, don't do matching against pref or
-  // system fonts
-  if ((aCh >= 0xE000 && aCh <= 0xF8FF) || (aCh >= 0xF0000 && aCh <= 0x10FFFD))
+  // If character is in Private Use Area, don't do matching against pref or
+  // system fonts.
+  // Also don't attempt any fallback for control characters and noncharacters,
+  // or codepoints where global fallback has already noted a failure.
+  if (gfxPlatformFontList::PlatformFontList()->SkipFontFallbackForChar(aCh)) {
     return nullptr;
+  }
 
   // 2. search pref fonts
   gfxFont* font = WhichPrefFontSupportsChar(aCh, aNextCh);
