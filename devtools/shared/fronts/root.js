@@ -9,7 +9,6 @@ const {
   FrontClassWithSpec,
   registerFront,
 } = require("devtools/shared/protocol");
-const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 
 loader.lazyRequireGetter(this, "getFront", "devtools/shared/protocol", true);
 loader.lazyRequireGetter(
@@ -30,12 +29,11 @@ loader.lazyRequireGetter(
   "devtools/shared/fronts/targets/content-process",
   true
 );
-
-XPCOMUtils.defineLazyServiceGetter(
+loader.lazyRequireGetter(
   this,
-  "swm",
-  "@mozilla.org/serviceworkers/manager;1",
-  "nsIServiceWorkerManager"
+  "LocalTabTargetFront",
+  "devtools/shared/fronts/targets/local-tab",
+  true
 );
 
 class RootFront extends FrontClassWithSpec(rootSpec) {
@@ -135,16 +133,6 @@ class RootFront extends FrontClassWithSpec(rootSpec) {
       });
     });
 
-    /**
-     * FIXME (bug 1557170): Make this compatible with remote debugging.
-     *
-     * Getting the value from `ServiceWorkerManager.isParentInterceptEnabled`
-     * may not return the same value as what exists on a remote server.
-     * Unfortunately, calling `DeviceFront.getDescription()` here to read the
-     * dom.serviceWorkers.parent_intercept pref causes test failures.
-     */
-    const isParentInterceptEnabled = swm.isParentInterceptEnabled();
-
     workers.forEach(front => {
       const worker = {
         id: front.id,
@@ -165,6 +153,7 @@ class RootFront extends FrontClassWithSpec(rootSpec) {
              * >= FF69 _and_ parent-intercept is stable (which definitely won't
              * happen when the release channel is < FF69).
              */
+            const { isParentInterceptEnabled } = r.registrationFront.traits;
             if (!r.newestWorkerId || !isParentInterceptEnabled) {
               return r.scope === front.scope;
             }
@@ -337,7 +326,29 @@ class RootFront extends FrontClassWithSpec(rootSpec) {
       }
     }
 
-    return super.getTab(packet);
+    const form = await super.getTab(packet);
+    let front = this.actor(form.actor);
+    if (front) {
+      front.form(form);
+      return front;
+    }
+    // Instanciate a specialized class for a local tab as it needs some more
+    // client side integration with the Firefox frontend.
+    // But ignore the fake `tab` object we receive, where there is only a
+    // `linkedBrowser` attribute, but this isn't a real <tab> element.
+    // devtools/client/framework/test/browser_toolbox_target.js is passing such
+    // a fake tab.
+    if (filter && filter.tab && filter.tab.tagName == "tab") {
+      front = new LocalTabTargetFront(this._client, filter.tab);
+    } else {
+      front = new BrowsingContextTargetFront(this._client);
+    }
+    // As these fronts aren't instantiated by protocol.js, we have to set their actor ID
+    // manually like that:
+    front.actorID = form.actor;
+    front.form(form);
+    this.manage(front);
+    return front;
   }
 
   /**
@@ -350,8 +361,8 @@ class RootFront extends FrontClassWithSpec(rootSpec) {
    */
   async getAddon({ id }) {
     const addons = await this.listAddons();
-    const addonTargetFront = addons.find(addon => addon.id === id);
-    return addonTargetFront;
+    const webextensionDescriptorFront = addons.find(addon => addon.id === id);
+    return webextensionDescriptorFront;
   }
 
   /**

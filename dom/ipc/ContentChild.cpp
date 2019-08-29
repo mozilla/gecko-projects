@@ -107,6 +107,7 @@
 #include "nsIWorkerDebuggerManager.h"
 #include "nsGeolocation.h"
 #include "audio_thread_priority.h"
+#include "nsIConsoleService.h"
 
 #if !defined(XP_WIN)
 #  include "mozilla/Omnijar.h"
@@ -512,7 +513,7 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage) {
     }
 
     mChild->SendScriptError(msg, sourceName, sourceLine, lineNum, colNum, flags,
-                            category, fromPrivateWindow, fromChromeContext);
+                            category, fromPrivateWindow, 0, fromChromeContext);
     return NS_OK;
   }
 
@@ -2094,10 +2095,6 @@ already_AddRefed<RemoteBrowser> ContentChild::CreateBrowser(
   TabId tabId(nsContentUtils::GenerateTabId());
   RefPtr<BrowserBridgeChild> browserBridge =
       new BrowserBridgeChild(aFrameLoader, aBrowsingContext, tabId);
-  // XXX bug 1576296: Figure out why we intermittently we don't have a docShell
-  if (auto docShell = owner->OwnerDoc()->GetDocShell()) {
-    nsDocShell::Cast(docShell)->OOPChildLoadStarted(browserBridge);
-  }
   browserChild->SendPBrowserBridgeConstructor(
       browserBridge, PromiseFlatString(aContext.PresentationURL()), aRemoteType,
       aBrowsingContext, chromeFlags, tabId);
@@ -2918,21 +2915,6 @@ mozilla::ipc::IPCResult ContentChild::RecvUnregisterSheet(
   }
 
   return IPC_OK();
-}
-
-POfflineCacheUpdateChild* ContentChild::AllocPOfflineCacheUpdateChild(
-    const URIParams& manifestURI, const URIParams& documentURI,
-    const PrincipalInfo& aLoadingPrincipalInfo, const bool& stickDocument) {
-  MOZ_CRASH("unused");
-  return nullptr;
-}
-
-bool ContentChild::DeallocPOfflineCacheUpdateChild(
-    POfflineCacheUpdateChild* actor) {
-  OfflineCacheUpdateChild* offlineCacheUpdate =
-      static_cast<OfflineCacheUpdateChild*>(actor);
-  NS_RELEASE(offlineCacheUpdate);
-  return true;
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvDomainSetChanged(
@@ -4024,6 +4006,31 @@ void ContentChild::HoldBrowsingContextGroup(BrowsingContextGroup* aBCG) {
 
 void ContentChild::ReleaseBrowsingContextGroup(BrowsingContextGroup* aBCG) {
   mBrowsingContextGroupHolder.RemoveElement(aBCG);
+}
+
+mozilla::ipc::IPCResult ContentChild::RecvScriptError(
+    const nsString& aMessage, const nsString& aSourceName,
+    const nsString& aSourceLine, const uint32_t& aLineNumber,
+    const uint32_t& aColNumber, const uint32_t& aFlags,
+    const nsCString& aCategory, const bool& aFromPrivateWindow,
+    const uint64_t& aInnerWindowId, const bool& aFromChromeContext) {
+  nsresult rv = NS_OK;
+  nsCOMPtr<nsIConsoleService> consoleService =
+      do_GetService(NS_CONSOLESERVICE_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, IPC_FAIL(this, "Failed to get console service"));
+
+  nsCOMPtr<nsIScriptError> scriptError(
+      do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
+  NS_ENSURE_TRUE(scriptError,
+                 IPC_FAIL(this, "Failed to construct nsIScriptError"));
+
+  scriptError->InitWithWindowID(aMessage, aSourceName, aSourceLine, aLineNumber,
+                                aColNumber, aFlags, aCategory, aInnerWindowId,
+                                aFromChromeContext);
+  rv = consoleService->LogMessage(scriptError);
+  NS_ENSURE_SUCCESS(rv, IPC_FAIL(this, "Failed to log script error"));
+
+  return IPC_OK();
 }
 
 }  // namespace dom

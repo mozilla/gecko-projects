@@ -31,7 +31,7 @@
 }
 
 .worker:not(:last-child) {
-  border-bottom: 1px solid var(--theme-text-color-alt);
+  border-bottom: 1px solid var(--separator-color);
 }
 
 .worker__header {
@@ -51,7 +51,7 @@
 
 .worker__scope,
 .worker__source-url {
-  -moz-user-select: text;
+  user-select: text;
 }
 
 .worker__meta-name {

@@ -76,6 +76,7 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/Unused.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_ui.h"
 #include "mozilla/dom/CanvasRenderingContext2D.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
@@ -249,7 +250,7 @@ KeyBinding Accessible::AccessKey() const {
   if (!key) return KeyBinding();
 
   // Get modifier mask. Use ui.key.generalAccessKey (unless it is -1).
-  switch (Preferences::GetInt("ui.key.generalAccessKey", -1)) {
+  switch (StaticPrefs::ui_key_generalAccessKey()) {
     case -1:
       break;
     case dom::KeyboardEvent_Binding::DOM_VK_SHIFT:
@@ -275,10 +276,12 @@ KeyBinding Accessible::AccessKey() const {
   int32_t modifierMask = 0;
   switch (treeItem->ItemType()) {
     case nsIDocShellTreeItem::typeChrome:
-      rv = Preferences::GetInt("ui.key.chromeAccess", &modifierMask);
+      modifierMask = StaticPrefs::ui_key_chromeAccess();
+      rv = NS_OK;
       break;
     case nsIDocShellTreeItem::typeContent:
-      rv = Preferences::GetInt("ui.key.contentAccess", &modifierMask);
+      modifierMask = StaticPrefs::ui_key_contentAccess();
+      rv = NS_OK;
       break;
   }
 
@@ -1374,8 +1377,12 @@ void Accessible::Value(nsString& aValue) const {
 
     if (!mContent->AsElement()->GetAttr(kNameSpaceID_None,
                                         nsGkAtoms::aria_valuetext, aValue)) {
-      mContent->AsElement()->GetAttr(kNameSpaceID_None,
-                                     nsGkAtoms::aria_valuenow, aValue);
+      if (!NativeHasNumericValue()) {
+        double checkValue = CurValue();
+        if (!IsNaN(checkValue)) {
+          aValue.AppendFloat(checkValue);
+        }
+      }
     }
     return;
   }
@@ -1409,11 +1416,13 @@ void Accessible::Value(nsString& aValue) const {
 }
 
 double Accessible::MaxValue() const {
-  return AttrNumericValue(nsGkAtoms::aria_valuemax);
+  double checkValue = AttrNumericValue(nsGkAtoms::aria_valuemax);
+  return IsNaN(checkValue) && !NativeHasNumericValue() ? 100 : checkValue;
 }
 
 double Accessible::MinValue() const {
-  return AttrNumericValue(nsGkAtoms::aria_valuemin);
+  double checkValue = AttrNumericValue(nsGkAtoms::aria_valuemin);
+  return IsNaN(checkValue) && !NativeHasNumericValue() ? 0 : checkValue;
 }
 
 double Accessible::Step() const {
@@ -1421,7 +1430,13 @@ double Accessible::Step() const {
 }
 
 double Accessible::CurValue() const {
-  return AttrNumericValue(nsGkAtoms::aria_valuenow);
+  double checkValue = AttrNumericValue(nsGkAtoms::aria_valuenow);
+  if (IsNaN(checkValue) && !NativeHasNumericValue()) {
+    double minValue = MinValue();
+    return minValue + ((MaxValue() - minValue) / 2);
+  }
+
+  return checkValue;
 }
 
 bool Accessible::SetCurValue(double aValue) {
@@ -1504,6 +1519,18 @@ role Accessible::ARIATransformRole(role aRole) const {
                                            nsGkAtoms::aria_haspopup,
                                            nsGkAtoms::_true, eCaseMatters)) {
       return roles::PARENT_MENUITEM;
+    }
+
+  } else if (aRole == roles::CELL) {
+    // A cell inside an ancestor table element that has a grid role needs a
+    // gridcell role
+    // (https://www.w3.org/TR/html-aam-1.0/#html-element-role-mappings).
+    const TableCellAccessible* cell = AsTableCell();
+    if (cell) {
+      TableAccessible* table = cell->Table();
+      if (table && table->AsAccessible()->IsARIARole(nsGkAtoms::grid)) {
+        return roles::GRID_CELL;
+      }
     }
   }
 
