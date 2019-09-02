@@ -26,19 +26,15 @@ let haveComponents =
   typeof Components.Constructor === "function";
 
 let CC = (haveComponents
-  ? Components
-  : SpecialPowers.wrap(SpecialPowers.Components)
-).Constructor;
+            ? Components
+            : SpecialPowers.wrap(SpecialPowers.Components)).Constructor;
 
-let ConverterOutputStream = CC(
-  "@mozilla.org/intl/converter-output-stream;1",
-  "nsIConverterOutputStream",
-  "init"
-);
+let ConverterOutputStream = CC("@mozilla.org/intl/converter-output-stream;1",
+                               "nsIConverterOutputStream", "init");
 
 class MozillaLogger {
   get logCallback() {
-    return msg => {
+    return (msg) => {
       this.log(formatLogMessage(msg));
     };
   }
@@ -49,6 +45,7 @@ class MozillaLogger {
 
   close() {}
 }
+
 
 /**
  * MozillaFileLogger, a log listener that can write to a local file.
@@ -61,19 +58,18 @@ class MozillaFileLogger extends MozillaLogger {
   constructor(aPath) {
     super();
 
-    const { FileUtils } = importJSM("resource://gre/modules/FileUtils.jsm");
+    const {FileUtils} = importJSM("resource://gre/modules/FileUtils.jsm");
 
     this._file = FileUtils.File(aPath);
     this._foStream = FileUtils.openFileOutputStream(
-      this._file,
-      FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE | FileUtils.MODE_APPEND
-    );
+        this._file, (FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE |
+                     FileUtils.MODE_APPEND));
 
     this._converter = ConverterOutputStream(this._foStream, "UTF-8");
   }
 
   get logCallback() {
-    return msg => {
+    return (msg) => {
       if (this._converter) {
         var data = formatLogMessage(msg);
         this.log(data);
