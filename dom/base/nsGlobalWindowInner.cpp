@@ -1573,14 +1573,6 @@ void nsGlobalWindowInner::TraceGlobalJSObject(JSTracer* aTrc) {
   TraceWrapper(aTrc, "active window global");
 }
 
-bool nsGlobalWindowInner::ShouldResetBrowsingContextUserGestureActivation() {
-  // Reset user gesture activation flag only when the top level document changes
-  // and its corresponding browsing context has been activated by user gesture.
-  return mWindowGlobalChild && GetOuterWindowInternal() &&
-         GetOuterWindowInternal()->IsTopLevelWindow() && Window() &&
-         Window()->GetUserGestureActivation();
-}
-
 void nsGlobalWindowInner::InnerSetNewDocument(JSContext* aCx,
                                               Document* aDocument) {
   MOZ_ASSERT(aDocument);
@@ -1611,7 +1603,7 @@ void nsGlobalWindowInner::InnerSetNewDocument(JSContext* aCx,
     mWindowGlobalChild = WindowGlobalChild::Create(this);
   }
 
-  if (ShouldResetBrowsingContextUserGestureActivation()) {
+  if (mWindowGlobalChild && Window()) {
     Window()->NotifyResetUserGestureActivation();
   }
 
@@ -3034,27 +3026,33 @@ nsresult nsGlobalWindowInner::GetControllers(nsIControllers** aResult) {
   return rv.StealNSResult();
 }
 
-nsPIDOMWindowOuter* nsGlobalWindowInner::GetOpenerWindow(ErrorResult& aError) {
+Nullable<WindowProxyHolder> nsGlobalWindowInner::GetOpenerWindow(
+    ErrorResult& aError) {
   FORWARD_TO_OUTER_OR_THROW(GetOpenerWindowOuter, (), aError, nullptr);
 }
 
 void nsGlobalWindowInner::GetOpener(JSContext* aCx,
                                     JS::MutableHandle<JS::Value> aRetval,
                                     ErrorResult& aError) {
-  nsCOMPtr<nsPIDOMWindowOuter> opener = GetOpenerWindow(aError);
-  if (aError.Failed() || !opener) {
+  Nullable<WindowProxyHolder> opener = GetOpenerWindow(aError);
+  if (aError.Failed() || opener.IsNull()) {
     aRetval.setNull();
     return;
   }
 
-  aError = nsContentUtils::WrapNative(aCx, opener, aRetval);
+  if (!ToJSValue(aCx, opener.Value(), aRetval)) {
+    aError.NoteJSContextException(aCx);
+  }
 }
 
 void nsGlobalWindowInner::SetOpener(JSContext* aCx,
                                     JS::Handle<JS::Value> aOpener,
                                     ErrorResult& aError) {
   if (aOpener.isNull()) {
-    FORWARD_TO_OUTER_VOID(SetOpenerWindow, (nullptr, false));
+    RefPtr<BrowsingContext> bc(GetBrowsingContext());
+    if (!bc->IsDiscarded()) {
+      bc->SetOpener(nullptr);
+    }
     return;
   }
 
@@ -4510,13 +4508,7 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
   }
 
   if (access == StorageAccess::eDeny) {
-    if (mDoc && (mDoc->GetSandboxFlags() & SANDBOXED_ORIGIN) != 0) {
-      // Only raise the exception if we are denying storage access due to
-      // sandbox restrictions.  If we're denying storage access due to other
-      // reasons (e.g. cookie policy enforcement), withhold raising the
-      // exception in an effort to achieve more web compatibility.
-      aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
-    }
+    aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
     return nullptr;
   }
 

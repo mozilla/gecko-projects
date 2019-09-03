@@ -40,8 +40,7 @@ menu-menuitem-preferences =
       [windows] Options
      *[other] Preferences
   }
-menu-menuitem-feedback = Send Feedback
-menu-menuitem-faq = Frequently Asked Questions
+about-logins-menu-menuitem-help = Help
 menu-menuitem-android-app = { -lockwise-brand-short-name } for Android
 menu-menuitem-iphone-app = { -lockwise-brand-short-name } for iPhone and iPad
 
@@ -61,6 +60,8 @@ login-list-last-changed-option = Last Modified
 login-list-last-used-option = Last Used
 login-list-intro-title = No logins found
 login-list-intro-description = When you save a password in { -brand-product-name }, it will show up here.
+about-logins-login-list-empty-search-title = No logins found
+about-logins-login-list-empty-search-description = There are no results matching your search.
 login-list-item-title-new-login = New Login
 login-list-item-subtitle-new-login = Enter your login credentials
 login-list-item-subtitle-missing-username = (no username)
@@ -71,7 +72,7 @@ login-intro-heading = Looking for your saved logins? Set up { -sync-brand-short-
 login-intro-description = If you saved your logins to { -brand-product-name } on a different device, here’s how to get them here:
 login-intro-instruction-fxa = Create or sign in to your { -fxaccount-brand-name } on the device where your logins are saved
 login-intro-instruction-fxa-settings = Make sure you’ve selected the Logins checkbox in { -sync-brand-short-name } Settings
-login-intro-instruction-faq = Visit { -lockwise-brand-short-name } <a data-l10n-name="faq">frequently asked questions</a> for more help
+about-logins-intro-instruction-help = Visit <a data-l10n-name="help-link">{ -lockwise-brand-short-name } Support</a> for more help
 
 ## Login
 
@@ -82,8 +83,8 @@ login-item-origin-label = Website Address
 login-item-origin =
   .placeholder = https://www.example.com
 login-item-username-label = Username
-login-item-username =
-  .placeholder = name@example.com
+about-logins-login-item-username =
+  .placeholder = (no username)
 login-item-copy-username-button-text = Copy
 login-item-copied-username-button-text = Copied!
 login-item-password-label = Password
@@ -140,3 +141,14 @@ breach-alert-text = Passwords were leaked or stolen from this website since you 
 breach-alert-link = Learn more about this breach.
 breach-alert-dismiss =
     .title = Close this alert
+
+## Error Messages
+
+# This is an error message that appears when a user attempts to save
+# a new login that is identical to an existing saved login.
+# Variables:
+#   $loginTitle (String) - The title of the website associated with the login.
+about-logins-error-message-duplicate-login = An entry for { $loginTitle } with that username already exists.
+
+# This is a generic error message.
+about-logins-error-message-default = An error occurred while trying to save this password.

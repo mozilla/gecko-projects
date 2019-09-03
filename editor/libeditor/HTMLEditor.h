@@ -45,6 +45,7 @@ class AutoSetTemporaryAncestorLimiter;
 class EditActionResult;
 class EmptyEditableFunctor;
 class ResizerSelectionListener;
+class SplitRangeOffFromNodeResult;
 enum class EditSubAction : int32_t;
 struct PropItem;
 template <class T>
@@ -1280,28 +1281,35 @@ class HTMLEditor final : public TextEditor,
    *                                    and list-item elements recursively.
    * @param aCollectTableChildren       If Yes, will collect children of table
    *                                    related elements recursively.
+   * @param aCollectNonEditableNodes    If Yes, will collect found children
+   *                                    even if they are not editable.
    * @return                    Number of found children.
    */
   enum class CollectListChildren { No, Yes };
   enum class CollectTableChildren { No, Yes };
+  enum class CollectNonEditableNodes { No, Yes };
   size_t CollectChildren(
       nsINode& aNode, nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
-      size_t aIndexToInsertChildren,
-      CollectListChildren aCollectListChildren = CollectListChildren::Yes,
-      CollectTableChildren aCollectTableChildren =
-          CollectTableChildren::Yes) const;
+      size_t aIndexToInsertChildren, CollectListChildren aCollectListChildren,
+      CollectTableChildren aCollectTableChildren,
+      CollectNonEditableNodes aCollectNonEditableNodes) const;
 
   /**
    * SplitInlinessAndCollectEditTargetNodes() splits text nodes and inline
    * elements around aArrayOfRanges.  Then, collects edit target nodes to
    * aOutArrayOfNodes.  Finally, each edit target nodes is split at every
    * <br> element in it.
+   * FYI: You can use SplitInlinesAndCollectEditTargetNodesInOneHardLine()
+   *      or SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges()
+   *      instead if you want to call this with a hard line including
+   *      specific DOM point or extended selection ranges.
    */
   MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
   SplitInlinesAndCollectEditTargetNodes(
       nsTArray<RefPtr<nsRange>>& aArrayOfRanges,
       nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
-      EditSubAction aEditSubAction);
+      EditSubAction aEditSubAction,
+      CollectNonEditableNodes aCollectNonEditableNodes);
 
   /**
    * SplitTextNodesAtRangeEnd() splits text nodes if each range end is in
@@ -1314,11 +1322,14 @@ class HTMLEditor final : public TextEditor,
    * CollectEditTargetNodes() collects edit target nodes in aArrayOfRanges.
    * First, this collects all nodes in given ranges, then, modifies the
    * result for specific edit sub-actions.
+   * FYI: You can use CollectEditTargetNodesInExtendedSelectionRanges() instead
+   *      if you want to call this with extended selection ranges.
    */
   nsresult CollectEditTargetNodes(
       nsTArray<RefPtr<nsRange>>& aArrayOfRanges,
       nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
-      EditSubAction aEditSubAction) const;
+      EditSubAction aEditSubAction,
+      CollectNonEditableNodes aCollectNonEditableNodes);
 
   /**
    * GetWhiteSpaceEndPoint() returns point at first or last ASCII whitespace
@@ -1327,8 +1338,9 @@ class HTMLEditor final : public TextEditor,
    * non-brekable space.
    */
   enum class ScanDirection { Backward, Forward };
-  static EditorDOMPoint GetWhiteSpaceEndPoint(const RangeBoundary& aPoint,
-                                              ScanDirection aScanDirection);
+  template <typename PT, typename RT>
+  static EditorDOMPoint GetWhiteSpaceEndPoint(
+      const RangeBoundaryBase<PT, RT>& aPoint, ScanDirection aScanDirection);
 
   /**
    * GetCurrentHardLineStartPoint() returns start point of hard line
@@ -1338,8 +1350,9 @@ class HTMLEditor final : public TextEditor,
    * NOTE: The result may be point of editing host.  I.e., the container may
    *       be outside of editing host.
    */
-  EditorDOMPoint GetCurrentHardLineStartPoint(const RangeBoundary& aPoint,
-                                              EditSubAction aEditSubAction);
+  template <typename PT, typename RT>
+  EditorDOMPoint GetCurrentHardLineStartPoint(
+      const RangeBoundaryBase<PT, RT>& aPoint, EditSubAction aEditSubAction);
 
   /**
    * GetCurrentHardLineEndPoint() returns end point of hard line including
@@ -1351,7 +1364,377 @@ class HTMLEditor final : public TextEditor,
    * NOTE: This result may be point of editing host.  I.e., the container
    *       may be outside of editing host.
    */
-  EditorDOMPoint GetCurrentHardLineEndPoint(const RangeBoundary& aPoint);
+  template <typename PT, typename RT>
+  EditorDOMPoint GetCurrentHardLineEndPoint(
+      const RangeBoundaryBase<PT, RT>& aPoint);
+
+  /**
+   * CreateRangeIncludingAdjuscentWhiteSpaces() creates an nsRange instance
+   * which may be expanded from the given range to include adjuscent
+   * whitespaces.  If this fails handling something, returns nullptr.
+   */
+  already_AddRefed<nsRange> CreateRangeIncludingAdjuscentWhiteSpaces(
+      const dom::AbstractRange& aAbstractRange);
+  template <typename SPT, typename SRT, typename EPT, typename ERT>
+  already_AddRefed<nsRange> CreateRangeIncludingAdjuscentWhiteSpaces(
+      const RangeBoundaryBase<SPT, SRT>& aStartRef,
+      const RangeBoundaryBase<EPT, ERT>& aEndRef);
+
+  /**
+   * GetSelectionRangesExtendedToIncludeAdjuscentWhiteSpaces() collects
+   * selection ranges with extending to include adjuscent whitespaces
+   * of each range start and end.
+   *
+   * @param aOutArrayOfRanges   [out] Always appended same number of ranges
+   *                            as Selection::RangeCount().  Must be empty
+   *                            when you call this.
+   */
+  void GetSelectionRangesExtendedToIncludeAdjuscentWhiteSpaces(
+      nsTArray<RefPtr<nsRange>>& aOutArrayOfRanges);
+
+  /**
+   * CreateRangeExtendedToHardLineStartAndEnd() creates an nsRange instance
+   * which may be expanded to start/end of hard line at both edges of the given
+   * range.  If this fails handling something, returns nullptr.
+   */
+  already_AddRefed<nsRange> CreateRangeExtendedToHardLineStartAndEnd(
+      const dom::AbstractRange& aAbstractRange, EditSubAction aEditSubAction);
+  template <typename SPT, typename SRT, typename EPT, typename ERT>
+  already_AddRefed<nsRange> CreateRangeExtendedToHardLineStartAndEnd(
+      const RangeBoundaryBase<SPT, SRT>& aStartRef,
+      const RangeBoundaryBase<EPT, ERT>& aEndRef, EditSubAction aEditSubAction);
+
+  /**
+   * GetSelectionRangesExtendedToHardLineStartAndEnd() collects selection ranges
+   * with extending to start/end of hard line from each range start and end.
+   * XXX This means that same range may be included in the result.
+   *
+   * @param aOutArrayOfRanges   [out] Always appended same number of ranges
+   *                            as Selection::RangeCount().  Must be empty
+   *                            when you call this.
+   */
+  void GetSelectionRangesExtendedToHardLineStartAndEnd(
+      nsTArray<RefPtr<nsRange>>& aOutArrayOfRanges,
+      EditSubAction aEditSubAction);
+
+  /**
+   * SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges() calls
+   * SplitInlinesAndCollectEditTargetNodes() with result of
+   * GetSelectionRangesExtendedToHardLineStartAndEnd().  See comments for these
+   * methods for the detail.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges(
+      nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
+      EditSubAction aEditSubAction,
+      CollectNonEditableNodes aCollectNonEditableNodes) {
+    AutoTArray<RefPtr<nsRange>, 4> extendedSelectionRanges;
+    GetSelectionRangesExtendedToHardLineStartAndEnd(extendedSelectionRanges,
+                                                    aEditSubAction);
+    nsresult rv = SplitInlinesAndCollectEditTargetNodes(
+        extendedSelectionRanges, aOutArrayOfNodes, aEditSubAction,
+        aCollectNonEditableNodes);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                         "SplitInlinesAndCollectEditTargetNodes() failed");
+    return rv;
+  }
+
+  /**
+   * SplitInlinesAndCollectEditTargetNodesInOneHardLine() just calls
+   * SplitInlinesAndCollectEditTargetNodes() with result of calling
+   * CreateRangeExtendedToHardLineStartAndEnd() with aPointInOneHardLine.
+   * In other words, returns nodes in the hard line including
+   * `aPointInOneHardLine`.  See the comments for these methods for the
+   * detail.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  SplitInlinesAndCollectEditTargetNodesInOneHardLine(
+      const EditorDOMPoint& aPointInOneHardLine,
+      nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
+      EditSubAction aEditSubAction,
+      CollectNonEditableNodes aCollectNonEditableNodes) {
+    if (NS_WARN_IF(!aPointInOneHardLine.IsSet())) {
+      return NS_ERROR_INVALID_ARG;
+    }
+    RefPtr<nsRange> oneLineRange = CreateRangeExtendedToHardLineStartAndEnd(
+        aPointInOneHardLine.ToRawRangeBoundary(),
+        aPointInOneHardLine.ToRawRangeBoundary(), aEditSubAction);
+    if (!oneLineRange) {
+      // XXX It seems odd to create collapsed range for one line range...
+      ErrorResult error;
+      oneLineRange =
+          nsRange::Create(aPointInOneHardLine.ToRawRangeBoundary(),
+                          aPointInOneHardLine.ToRawRangeBoundary(), error);
+      if (NS_WARN_IF(error.Failed())) {
+        return error.StealNSResult();
+      }
+    }
+    AutoTArray<RefPtr<nsRange>, 1> arrayOfLineRanges;
+    arrayOfLineRanges.AppendElement(oneLineRange);
+    nsresult rv = SplitInlinesAndCollectEditTargetNodes(
+        arrayOfLineRanges, aOutArrayOfNodes, aEditSubAction,
+        aCollectNonEditableNodes);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                         "SplitInlinesAndCollectEditTargetNodes() failed");
+    return rv;
+  }
+
+  /**
+   * CollectEditTargetNodesInExtendedSelectionRanges() calls
+   * CollectEditTargetNodes() with result of
+   * GetSelectionRangesExtendedToHardLineStartAndEnd().  See comments for these
+   * methods for the detail.
+   */
+  nsresult CollectEditTargetNodesInExtendedSelectionRanges(
+      nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
+      EditSubAction aEditSubAction,
+      CollectNonEditableNodes aCollectNonEditableNodes) {
+    AutoTArray<RefPtr<nsRange>, 4> extendedSelectionRanges;
+    GetSelectionRangesExtendedToHardLineStartAndEnd(extendedSelectionRanges,
+                                                    aEditSubAction);
+    nsresult rv =
+        CollectEditTargetNodes(extendedSelectionRanges, aOutArrayOfNodes,
+                               aEditSubAction, aCollectNonEditableNodes);
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "CollectEditTargetNodes() failed");
+    return rv;
+  }
+
+  /**
+   * SelectBRElementIfCollapsedInEmptyBlock() helper method for
+   * CreateRangeIncludingAdjuscentWhiteSpaces() and
+   * CreateRangeExtendedToLineStartAndEnd().  If the given range is collapsed
+   * in a block and the block has only one `<br>` element, this makes
+   * aStartRef and aEndRef select the `<br>` element.
+   */
+  template <typename SPT, typename SRT, typename EPT, typename ERT>
+  void SelectBRElementIfCollapsedInEmptyBlock(
+      RangeBoundaryBase<SPT, SRT>& aStartRef,
+      RangeBoundaryBase<EPT, ERT>& aEndRef);
+
+  /**
+   * GetChildNodesOf() returns all child nodes of aParent with an array.
+   */
+  static void GetChildNodesOf(nsINode& aParentNode,
+                              nsTArray<OwningNonNull<nsINode>>& aChildNodes) {
+    MOZ_ASSERT(aChildNodes.IsEmpty());
+    aChildNodes.SetCapacity(aParentNode.GetChildCount());
+    for (nsIContent* childContent = aParentNode.GetFirstChild(); childContent;
+         childContent = childContent->GetNextSibling()) {
+      aChildNodes.AppendElement(*childContent);
+    }
+  }
+
+  /**
+   * GetDeepestEditableOnlyChildDivBlockquoteOrListElement() returns a `<div>`,
+   * `<blockquote>` or one of list elements.  This method climbs down from
+   * aContent while there is only one editable children and the editable child
+   * is `<div>`, `<blockquote>` or a list element.  When it reaches different
+   * kind of node, returns the last found element.
+   */
+  Element* GetDeepestEditableOnlyChildDivBlockquoteOrListElement(
+      nsINode& aNode);
+
+  /**
+   * Try to get parent list element at `Selection`.  This returns first find
+   * parent list element of common ancestor of ranges (looking for it from
+   * first range to last range).
+   */
+  Element* GetParentListElementAtSelection() const;
+
+  /**
+   * MaybeExtendSelectionToHardLineEdgesForBlockEditAction() adjust Selection if
+   * there is only one range.  If range start and/or end point is <br> node or
+   * something non-editable point, they should be moved to nearest text node or
+   * something where the other methods easier to handle edit action.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  MaybeExtendSelectionToHardLineEdgesForBlockEditAction();
+
+  /**
+   * IsEmptyInline() returns true if aNode is an inline node and it does not
+   * have meaningful content.
+   */
+  bool IsEmptyInineNode(nsINode& aNode) const {
+    MOZ_ASSERT(IsEditActionDataAvailable());
+
+    if (!HTMLEditor::NodeIsInlineStatic(aNode) || !IsContainer(&aNode)) {
+      return false;
+    }
+    bool isEmpty = true;
+    IsEmptyNode(&aNode, &isEmpty);
+    return isEmpty;
+  }
+
+  /**
+   * IsEmptyOneHardLine() returns true if aArrayOfNodes does not represent
+   * 2 or more lines and have meaningful content.
+   */
+  bool IsEmptyOneHardLine(
+      nsTArray<OwningNonNull<nsINode>>& aArrayOfNodes) const {
+    if (NS_WARN_IF(!aArrayOfNodes.Length())) {
+      return true;
+    }
+
+    bool brElementHasFound = false;
+    for (auto& node : aArrayOfNodes) {
+      if (!IsEditable(node)) {
+        continue;
+      }
+      if (node->IsHTMLElement(nsGkAtoms::br)) {
+        // If there are 2 or more `<br>` elements, it's not empty line since
+        // there may be only one `<br>` element in a hard line.
+        if (brElementHasFound) {
+          return false;
+        }
+        brElementHasFound = true;
+        continue;
+      }
+      if (!IsEmptyInineNode(node)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * MaybeSplitAncestorsForInsertWithTransaction() does nothing if container of
+   * aStartOfDeepestRightNode can have an element whose tag name is aTag.
+   * Otherwise, looks for an ancestor node which is or is in active editing
+   * host and can have an element whose name is aTag.  If there is such
+   * ancestor, its descendants are split.
+   *
+   * Note that this may create empty elements while splitting ancestors.
+   *
+   * @param aTag                        The name of element to be inserted
+   *                                    after calling this method.
+   * @param aStartOfDeepestRightNode    The start point of deepest right node.
+   *                                    This point must be descendant of
+   *                                    active editing host.
+   * @return                            When succeeded, SplitPoint() returns
+   *                                    the point to insert the element.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE SplitNodeResult
+  MaybeSplitAncestorsForInsertWithTransaction(
+      nsAtom& aTag, const EditorDOMPoint& aStartOfDeepestRightNode);
+
+  /**
+   * SplitRangeOffFromBlock() splits aBlockElement at two points, before
+   * aStartOfMiddleElement and after aEndOfMiddleElement.  If they are very
+   * start or very end of aBlcok, this won't create empty block.
+   *
+   * @param aBlockElement           A block element which will be split.
+   * @param aStartOfMiddleElement   Start node of middle block element.
+   * @param aEndOfMiddleElement     End node of middle block element.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE SplitRangeOffFromNodeResult
+  SplitRangeOffFromBlock(Element& aBlockElement,
+                         nsIContent& aStartOfMiddleElement,
+                         nsIContent& aEndOfMiddleElement);
+
+  /**
+   * SplitRangeOffFromBlockAndRemoveMiddleContainer() splits the nodes
+   * between aStartOfRange and aEndOfRange, then, removes the middle element
+   * and moves its content to where the middle element was.
+   *
+   * @param aBlockElement           The node which will be split.
+   * @param aStartOfRange           The first node which will be unwrapped
+   *                                from aBlockElement.
+   * @param aEndOfRange             The last node which will be unwrapped from
+   *                                aBlockElement.
+   * @return                        The left content is new created left
+   *                                element of aBlockElement.
+   *                                The right content is split element,
+   *                                i.e., must be aBlockElement.
+   *                                The middle content is nullptr since
+   *                                removing it is the job of this method.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE SplitRangeOffFromNodeResult
+  SplitRangeOffFromBlockAndRemoveMiddleContainer(Element& aBlockElement,
+                                                 nsIContent& aStartOfRange,
+                                                 nsIContent& aEndOfRange);
+
+  /**
+   * MoveNodesIntoNewBlockquoteElement() inserts at least one <blockquote>
+   * element and moves nodes in aNodeArray into new <blockquote> elements.
+   * If aNodeArray includes a table related element except <table>, this
+   * calls itself recursively to insert <blockquote> into the cell.
+   *
+   * @param aNodeArray          Nodes which will be moved into created
+   *                            <blockquote> elements.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult MoveNodesIntoNewBlockquoteElement(
+      nsTArray<OwningNonNull<nsINode>>& aNodeArray);
+
+  /**
+   * RemoveBlockContainerElements() removes all format blocks, table related
+   * element, etc in aNodeArray from the DOM tree.
+   * If aNodeArray has a format node, it will be removed and its contents
+   * will be moved to where it was.
+   * If aNodeArray has a table related element, <li>, <blockquote> or <div>,
+   * it will be removed and its contents will be moved to where it was.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  RemoveBlockContainerElements(nsTArray<OwningNonNull<nsINode>>& aNodeArray);
+
+  /**
+   * CreateOrChangeBlockContainerElement() formats all nodes in aNodeArray
+   * with block elements whose name is aBlockTag.
+   * If aNodeArray has an inline element, a block element is created and the
+   * inline element and following inline elements are moved into the new block
+   * element.
+   * If aNodeArray has <br> elements, they'll be removed from the DOM tree and
+   * new block element will be created when there are some remaining inline
+   * elements.
+   * If aNodeArray has a block element, this calls itself with children of
+   * the block element.  Then, new block element will be created when there
+   * are some remaining inline elements.
+   *
+   * @param aNodeArray      Must be descendants of a node.
+   * @param aBlockTag       The element name of new block elements.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult CreateOrChangeBlockContainerElement(
+      nsTArray<OwningNonNull<nsINode>>& aNodeArray, nsAtom& aBlockTag);
+
+  /**
+   * FormatBlockContainer() is implementation of "formatBlock" command of
+   * `Document.execCommand()`.  This applies block style or removes it.
+   * NOTE: This creates AutoSelectionRestorer.  Therefore, even when this
+   *       return NS_OK, editor may have been destroyed.
+   *
+   * @param aBlockType          New block tag name.
+   *                            If nsGkAtoms::normal or nsGkAtoms::_empty,
+   *                            RemoveBlockContainerElements() will be called.
+   *                            If nsGkAtoms::blockquote,
+   *                            MoveNodesIntoNewBlockquoteElement() will be
+   *                            called.  Otherwise,
+   *                            CreateOrChangeBlockContainerElement() will be
+   *                            called.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  FormatBlockContainer(nsAtom& aBlockType);
+
+  /**
+   * InsertBRElementIfHardLineIsEmptyAndEndsWithBlockBoundary() determines if
+   * aPointToInsert is start of a hard line and end of the line (i.e, the
+   * line is empty) and the line ends with block boundary, inserts a `<br>`
+   * element.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  InsertBRElementIfHardLineIsEmptyAndEndsWithBlockBoundary(
+      const EditorDOMPoint& aPointToInsert);
+
+  /**
+   * Insert a `<br>` element if aElement is a block element and empty.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  InsertBRElementIfEmptyBlockElement(Element& aElement);
+
+  /**
+   * Insert padding `<br>` element for empty last line into aElement if
+   * aElement is a block element and empty.
+   */
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
+  InsertPaddingBRElementForEmptyLastLineIfNeeded(Element& aElement);
 
  protected:  // Called by helper classes.
   virtual void OnStartToHandleTopLevelEditSubAction(

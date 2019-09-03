@@ -682,6 +682,25 @@ sandbox:
     operating_systems:
       - "windows"
 
+os.environment:
+  is_admin_without_uac:
+    bug_numbers:
+      - 1567219
+    description: >
+      Indicates that the process is lauched with Admin privileges but without
+      UAC.
+    expires: never
+    kind: boolean
+    notification_emails:
+      - tkikuchi@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - main
+    operating_systems:
+      - "windows"
+
 pictureinpicture:
   opened_method:
     bug_numbers:
@@ -2064,6 +2083,28 @@ devtools.accessibility:
     notification_emails:
       - dev-developer-tools@lists.mozilla.org
       - yzenevich@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+      - 'fennec'
+      - 'geckoview'
+    record_in_processes:
+      - 'main'
+
+  simulation_activated:
+    bug_numbers:
+      - 1567200
+    description: >
+      Number of times accessibility simulation was activated (with mouse or keyboard)
+      from the accessibility panel's toolbar. Keyed by the simulation type
+      (e.g. "DEUTERANOMALY").
+    expires: "74"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - dev-developer-tools@lists.mozilla.org
+      - yzenevich@mozilla.com
+      - mislam@mozilla.com
     release_channel_collection: opt-out
     products:
       - 'firefox'
@@ -4542,6 +4583,22 @@ blocklist:
     products:
       - 'firefox'
       - 'fennec'
+    record_in_processes:
+      - main
+
+firstStartup:
+  statusCode:
+    bug_numbers:
+      - 1515712
+    description: >-
+      Status of the FirstRun service, which runs post-install/early-startup in Firefox.
+    expires: "75"
+    kind: uint
+    notification_emails:
+      - rhelmer@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
     record_in_processes:
       - main
 

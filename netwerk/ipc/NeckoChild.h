@@ -25,11 +25,6 @@ class NeckoChild : public PNeckoChild {
   static void InitNeckoChild();
 
  protected:
-  PHttpChannelChild* AllocPHttpChannelChild(
-      const PBrowserOrId&, const SerializedLoadContext&,
-      const HttpChannelCreationArgs& aOpenArgs);
-  bool DeallocPHttpChannelChild(PHttpChannelChild*);
-
   PStunAddrsRequestChild* AllocPStunAddrsRequestChild();
   bool DeallocPStunAddrsRequestChild(PStunAddrsRequestChild* aActor);
 
@@ -40,6 +35,10 @@ class NeckoChild : public PNeckoChild {
       const nsCString& type, const int64_t& predictedSize,
       PHttpChannelChild* channel);
   bool DeallocPAltDataOutputStreamChild(PAltDataOutputStreamChild* aActor);
+
+  already_AddRefed<PDocumentChannelChild> AllocPDocumentChannelChild(
+      const PBrowserOrId& aBrowser, const SerializedLoadContext& aSerialized,
+      const DocumentChannelCreationArgs& args);
 
   PCookieServiceChild* AllocPCookieServiceChild();
   bool DeallocPCookieServiceChild(PCookieServiceChild*);
@@ -65,10 +64,6 @@ class NeckoChild : public PNeckoChild {
       const nsCString& aHost, const OriginAttributes& aOriginAttributes,
       const uint32_t& aFlags);
   bool DeallocPDNSRequestChild(PDNSRequestChild*);
-  PDataChannelChild* AllocPDataChannelChild(const uint32_t& channelId);
-  bool DeallocPDataChannelChild(PDataChannelChild* child);
-  PFileChannelChild* AllocPFileChannelChild(const uint32_t& channelId);
-  bool DeallocPFileChannelChild(PFileChannelChild* child);
   PSimpleChannelChild* AllocPSimpleChannelChild(const uint32_t& channelId);
   bool DeallocPSimpleChannelChild(PSimpleChannelChild* child);
   PChannelDiverterChild* AllocPChannelDiverterChild(

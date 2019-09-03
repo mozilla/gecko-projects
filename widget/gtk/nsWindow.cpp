@@ -14,6 +14,7 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/StaticPrefs_apz.h"
+#include "mozilla/StaticPrefs_ui.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/TouchEvents.h"
@@ -820,7 +821,6 @@ void nsWindow::SetParent(nsIWidget* aNewParent) {
   if (mParent) {
     mParent->RemoveChild(this);
   }
-
   mParent = aNewParent;
 
   GtkWidget* oldContainer = GetMozContainerWidget();
@@ -832,18 +832,47 @@ void nsWindow::SetParent(nsIWidget* aNewParent) {
     return;
   }
 
+  nsWindow* newParent = static_cast<nsWindow*>(aNewParent);
+  GdkWindow* newParentWindow = nullptr;
+  GtkWidget* newContainer = nullptr;
   if (aNewParent) {
     aNewParent->AddChild(this);
-    ReparentNativeWidget(aNewParent);
+    newParentWindow = newParent->mGdkWindow;
+    newContainer = newParent->GetMozContainerWidget();
   } else {
     // aNewParent is nullptr, but reparent to a hidden window to avoid
     // destroying the GdkWindow and its descendants.
     // An invisible container widget is needed to hold descendant
     // GtkWidgets.
-    GtkWidget* newContainer = EnsureInvisibleContainer();
-    GdkWindow* newParentWindow = gtk_widget_get_window(newContainer);
-    ReparentNativeWidgetInternal(aNewParent, newContainer, newParentWindow,
-                                 oldContainer);
+    newContainer = EnsureInvisibleContainer();
+    newParentWindow = gtk_widget_get_window(newContainer);
+  }
+
+  if (!newContainer) {
+    // The new parent GdkWindow has been destroyed.
+    MOZ_ASSERT(!newParentWindow || gdk_window_is_destroyed(newParentWindow),
+               "live GdkWindow with no widget");
+    Destroy();
+  } else {
+    if (newContainer != oldContainer) {
+      MOZ_ASSERT(!gdk_window_is_destroyed(newParentWindow),
+                 "destroyed GdkWindow with widget");
+      SetWidgetForHierarchy(mGdkWindow, oldContainer, newContainer);
+
+      if (oldContainer == gInvisibleContainer) {
+        CheckDestroyInvisibleContainer();
+      }
+    }
+
+    gdk_window_reparent(mGdkWindow, newParentWindow,
+                        DevicePixelsToGdkCoordRoundDown(mBounds.x),
+                        DevicePixelsToGdkCoordRoundDown(mBounds.y));
+    mToplevelParentWindow = GTK_WINDOW(gtk_widget_get_toplevel(newContainer));
+  }
+
+  bool parentHasMappedToplevel = newParent && newParent->mHasMappedToplevel;
+  if (mHasMappedToplevel != parentHasMappedToplevel) {
+    SetHasMappedToplevel(parentHasMappedToplevel);
   }
 }
 
@@ -851,66 +880,22 @@ bool nsWindow::WidgetTypeSupportsAcceleration() { return !IsSmallPopup(); }
 
 void nsWindow::ReparentNativeWidget(nsIWidget* aNewParent) {
   MOZ_ASSERT(aNewParent, "null widget");
-  NS_ASSERTION(!mIsDestroyed, "");
-  NS_ASSERTION(!static_cast<nsWindow*>(aNewParent)->mIsDestroyed, "");
-
-  GtkWidget* oldContainer = GetMozContainerWidget();
-  if (!oldContainer) {
-    // The GdkWindows have been destroyed so there is nothing else to
-    // reparent.
-    MOZ_ASSERT(gdk_window_is_destroyed(mGdkWindow),
-               "live GdkWindow with no widget");
-    return;
-  }
+  MOZ_ASSERT(!mIsDestroyed, "");
+  MOZ_ASSERT(!static_cast<nsWindow*>(aNewParent)->mIsDestroyed, "");
   MOZ_ASSERT(!gdk_window_is_destroyed(mGdkWindow),
              "destroyed GdkWindow with widget");
 
+  MOZ_ASSERT(
+      !mParent,
+      "nsWindow::ReparentNativeWidget() works on toplevel windows only.");
+
   auto* newParent = static_cast<nsWindow*>(aNewParent);
-  GdkWindow* newParentWindow = newParent->mGdkWindow;
-  GtkWidget* newContainer = newParent->GetMozContainerWidget();
+  GtkWindow* newParentWidget = GTK_WINDOW(newParent->GetGtkWidget());
   GtkWindow* shell = GTK_WINDOW(mShell);
 
   if (shell && gtk_window_get_transient_for(shell)) {
-    GtkWindow* topLevelParent =
-        GTK_WINDOW(gtk_widget_get_toplevel(newContainer));
-    gtk_window_set_transient_for(shell, topLevelParent);
-  }
-
-  ReparentNativeWidgetInternal(aNewParent, newContainer, newParentWindow,
-                               oldContainer);
-}
-
-void nsWindow::ReparentNativeWidgetInternal(nsIWidget* aNewParent,
-                                            GtkWidget* aNewContainer,
-                                            GdkWindow* aNewParentWindow,
-                                            GtkWidget* aOldContainer) {
-  if (!aNewContainer) {
-    // The new parent GdkWindow has been destroyed.
-    MOZ_ASSERT(!aNewParentWindow || gdk_window_is_destroyed(aNewParentWindow),
-               "live GdkWindow with no widget");
-    Destroy();
-  } else {
-    if (aNewContainer != aOldContainer) {
-      MOZ_ASSERT(!gdk_window_is_destroyed(aNewParentWindow),
-                 "destroyed GdkWindow with widget");
-      SetWidgetForHierarchy(mGdkWindow, aOldContainer, aNewContainer);
-
-      if (aOldContainer == gInvisibleContainer) {
-        CheckDestroyInvisibleContainer();
-      }
-    }
-
-    if (!mIsTopLevel) {
-      gdk_window_reparent(mGdkWindow, aNewParentWindow,
-                          DevicePixelsToGdkCoordRoundDown(mBounds.x),
-                          DevicePixelsToGdkCoordRoundDown(mBounds.y));
-    }
-  }
-
-  auto* newParent = static_cast<nsWindow*>(aNewParent);
-  bool parentHasMappedToplevel = newParent && newParent->mHasMappedToplevel;
-  if (mHasMappedToplevel != parentHasMappedToplevel) {
-    SetHasMappedToplevel(parentHasMappedToplevel);
+    gtk_window_set_transient_for(shell, newParentWidget);
+    mToplevelParentWindow = newParentWidget;
   }
 }
 
@@ -2885,7 +2870,7 @@ void nsWindow::OnButtonPressEvent(GdkEventButton* aEvent) {
   }
 
   // right menu click on linux should also pop up a context menu
-  if (!nsBaseWidget::ShowContextMenuAfterMouseUp()) {
+  if (!StaticPrefs::ui_context_menus_after_mouseup()) {
     DispatchContextMenuEventFromMouseEvent(domButton, aEvent);
   }
 }
@@ -2942,7 +2927,7 @@ void nsWindow::OnButtonReleaseEvent(GdkEventButton* aEvent) {
   mLastMotionPressure = pressure;
 
   // right menu click on linux should also pop up a context menu
-  if (nsBaseWidget::ShowContextMenuAfterMouseUp()) {
+  if (StaticPrefs::ui_context_menus_after_mouseup()) {
     DispatchContextMenuEventFromMouseEvent(domButton, aEvent);
   }
 }

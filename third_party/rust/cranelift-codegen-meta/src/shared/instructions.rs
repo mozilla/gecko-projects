@@ -30,6 +30,7 @@ pub fn define(
     let uimm8 = immediates.by_name("uimm8");
     let uimm32 = immediates.by_name("uimm32");
     let imm64 = immediates.by_name("imm64");
+    let uimm128 = immediates.by_name("uimm128");
     let offset32 = immediates.by_name("offset32");
     let memflags = immediates.by_name("memflags");
     let ieee32 = immediates.by_name("ieee32");
@@ -1088,6 +1089,22 @@ pub fn define(
         .operands_out(vec![a]),
     );
 
+    let N = &operand_doc("N", uimm128, "The 16 immediate bytes of a 128-bit vector");
+    let a = &operand_doc("a", TxN, "A constant vector value");
+
+    ig.push(
+        Inst::new(
+            "vconst",
+            r#"
+        SIMD vector constant.
+
+        Construct a vector with the given immediate bytes.
+        "#,
+        )
+        .operands_in(vec![N])
+        .operands_out(vec![a]),
+    );
+
     let a = &operand_doc("a", Ref, "A constant reference null value");
 
     ig.push(
@@ -1194,6 +1211,22 @@ pub fn define(
         .can_load(true),
     );
 
+    ig.push(
+        Inst::new(
+            "fill_nop",
+            r#"
+        This is identical to `fill`, except it has no encoding, since it is a no-op.
+
+        This instruction is created only during late-stage redundant-reload removal, after all
+        registers and stack slots have been assigned.  It is used to replace `fill`s that have
+        been identified as redundant.
+        "#,
+        )
+        .operands_in(vec![x])
+        .operands_out(vec![a])
+        .can_load(true),
+    );
+
     let src = &operand("src", regunit);
     let dst = &operand("dst", regunit);
 
@@ -1230,6 +1263,23 @@ pub fn define(
         "#,
         )
         .operands_in(vec![src, dst])
+        .other_side_effects(true),
+    );
+
+    ig.push(
+        Inst::new(
+            "copy_to_ssa",
+            r#"
+        Copies the contents of ''src'' register to ''a'' SSA name.
+
+        This instruction copies the contents of one register, regardless of its SSA name, to
+        another register, creating a new SSA name.  In that sense it is a one-sided version
+        of ''copy_special''.  This instruction is internal and should not be created by
+        Cranelift users.
+        "#,
+        )
+        .operands_in(vec![src])
+        .operands_out(vec![a])
         .other_side_effects(true),
     );
 

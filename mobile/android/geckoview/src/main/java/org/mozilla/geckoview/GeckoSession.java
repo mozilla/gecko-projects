@@ -638,6 +638,46 @@ public class GeckoSession implements Parcelable {
             }
         };
 
+    private final GeckoSessionHandler<ContentDelegate> mProcessHangHandler =
+        new GeckoSessionHandler<ContentDelegate>(
+                "GeckoViewProcessHangMonitor", this,
+                new String[]{"GeckoView:HangReport"}) {
+
+
+            @Override
+            protected void handleMessage(final ContentDelegate delegate,
+                                         final String event,
+                                         final GeckoBundle message,
+                                         final EventCallback eventCallback) {
+                Log.d(LOGTAG, "handleMessage " + event + " uri=" + message.getString("uri"));
+
+                GeckoResult<SlowScriptResponse> result = delegate.onSlowScript(GeckoSession.this,
+                        message.getString("scriptFileName"));
+                if (result != null) {
+                    final int mReportId = message.getInt("hangId");
+                    result.accept(stopOrContinue -> {
+                        if (stopOrContinue != null) {
+                            final GeckoBundle bundle = new GeckoBundle();
+                            bundle.putInt("hangId", mReportId);
+                            switch (stopOrContinue) {
+                                case STOP:
+                                    mEventDispatcher.dispatch("GeckoView:HangReportStop", bundle);
+                                    break;
+                                case CONTINUE:
+                                    mEventDispatcher.dispatch("GeckoView:HangReportWait", bundle);
+                                    break;
+                            }
+                        }
+                    });
+                } else {
+                    // default to stopping the script
+                    final GeckoBundle bundle = new GeckoBundle();
+                    bundle.putInt("hangId", message.getInt("hangId"));
+                    mEventDispatcher.dispatch("GeckoView:HangReportStop", bundle);
+                }
+            }
+        };
+
     private final GeckoSessionHandler<ProgressDelegate> mProgressHandler =
         new GeckoSessionHandler<ProgressDelegate>(
             "GeckoViewProgress", this,
@@ -929,8 +969,8 @@ public class GeckoSession implements Parcelable {
 
     private final GeckoSessionHandler<?>[] mSessionHandlers = new GeckoSessionHandler<?>[] {
         mContentHandler, mHistoryHandler, mMediaHandler, mNavigationHandler,
-        mPermissionHandler, mProgressHandler, mScrollHandler, mSelectionActionDelegate,
-        mContentBlockingHandler
+        mPermissionHandler, mProcessHangHandler, mProgressHandler, mScrollHandler,
+        mSelectionActionDelegate, mContentBlockingHandler
     };
 
     private static class PermissionCallback implements
@@ -1065,7 +1105,7 @@ public class GeckoSession implements Parcelable {
                                        Compositor compositor, EventDispatcher dispatcher,
                                        SessionAccessibility.NativeProvider sessionAccessibility,
                                        GeckoBundle initData, String id, String chromeUri,
-                                       int screenId, boolean privateMode);
+                                       int screenId, boolean privateMode, boolean isRemote);
 
         @Override // JNIObject
         public void disposeNative() {
@@ -1386,6 +1426,7 @@ public class GeckoSession implements Parcelable {
         final String chromeUri = mSettings.getChromeUri();
         final int screenId = mSettings.getScreenId();
         final boolean isPrivate = mSettings.getUsePrivateMode();
+        final boolean isRemote = mSettings.getUseMultiprocess();
 
         mWindow = new Window(runtime, this, mNativeQueue);
 
@@ -1394,7 +1435,7 @@ public class GeckoSession implements Parcelable {
         if (GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
             Window.open(mWindow, mNativeQueue, mCompositor, mEventDispatcher,
                         mAccessibility != null ? mAccessibility.nativeProvider : null,
-                        createInitData(), mId, chromeUri, screenId, isPrivate);
+                        createInitData(), mId, chromeUri, screenId, isPrivate, isRemote);
         } else {
             GeckoThread.queueNativeCallUntil(
                 GeckoThread.State.PROFILE_READY,
@@ -1408,7 +1449,7 @@ public class GeckoSession implements Parcelable {
                 GeckoBundle.class, createInitData(),
                 String.class, mId,
                 String.class, chromeUri,
-                screenId, isPrivate);
+                screenId, isPrivate, isRemote);
         }
 
         onWindowChanged(WINDOW_OPEN, /* inProgress */ false);
@@ -2261,6 +2302,7 @@ public class GeckoSession implements Parcelable {
     public void setContentDelegate(final @Nullable ContentDelegate delegate) {
         ThreadUtils.assertOnUiThread();
         mContentHandler.setDelegate(delegate, this);
+        mProcessHangHandler.setDelegate(delegate, this);
     }
 
     /**
@@ -2976,6 +3018,20 @@ public class GeckoSession implements Parcelable {
          */
         @UiThread
         default void onWebAppManifest(@NonNull GeckoSession session, @NonNull JSONObject manifest) {}
+
+        /**
+         * A script has exceeded it's execution timeout value
+         * @param geckoSession GeckoSession that initiated the callback.
+         * @param scriptFileName Filename of the slow script
+         * @return A {@link GeckoResult} with a SlowScriptResponse value which indicates whether to
+         *         allow the Slow Script to continue processing. Stop will halt the slow script.
+         *         Continue will pause notifications for a period of time before resuming.
+         */
+        @UiThread
+        default @Nullable GeckoResult<SlowScriptResponse> onSlowScript(@NonNull GeckoSession geckoSession,
+                                                                       @NonNull String scriptFileName) {
+            return null;
+        }
     }
 
     public interface SelectionActionDelegate {

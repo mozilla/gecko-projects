@@ -834,6 +834,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       if (completion.await || completion.yield) {
         thread.suspendedFrame = this;
         this.waitingOnStep = true;
+        thread.dbg.onEnterFrame = undefined;
         return undefined;
       }
 
@@ -1625,6 +1626,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     const actor = new PauseScopedObjectActor(
       value,
       {
+        thread: this,
         getGripDepth: () => this._gripDepth,
         incrementGripDepth: () => this._gripDepth++,
         decrementGripDepth: () => this._gripDepth--,
@@ -2124,6 +2126,10 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   logLocation: function(prefix, frame) {
     const loc = this.sources.getFrameLocation(frame);
     dump(`${prefix} (${loc.line}, ${loc.column})\n`);
+  },
+
+  debuggerRequests() {
+    return this.dbg.replayDebuggerRequests();
   },
 });
 

@@ -47,15 +47,25 @@ for stlfile in ['jsdate.*', 'jsnum.*']:
 with Files('builtin/intl/*'):
     BUG_COMPONENT = component_intl
 
+if CONFIG['ENABLE_WASM_CRANELIFT']:
+    CONFIGURE_SUBST_FILES += ['rust/extra-bindgen-flags']
+
 if not CONFIG['JS_DISABLE_SHELL']:
-    DIRS += ['shell']
-
-TEST_DIRS += ['jsapi-tests', 'tests', 'gdb']
-
-if CONFIG['FUZZING_INTERFACES']:
-    TEST_DIRS += [
-        'fuzz-tests',
+    DIRS += [
+        'rust',
+        'shell',
     ]
+
+    TEST_DIRS += [
+        'gdb',
+        'jsapi-tests',
+        'tests',
+    ]
+
+    if CONFIG['FUZZING_INTERFACES']:
+        TEST_DIRS += [
+            'fuzz-tests',
+        ]
 
 if CONFIG['FUZZING_INTERFACES'] and CONFIG['LIBFUZZER']:
     # In addition to regular coverage provided by trace-pc-guard,
@@ -214,6 +224,19 @@ UNIFIED_SOURCES += [
     'builtin/Reflect.cpp',
     'builtin/ReflectParse.cpp',
     'builtin/Stream.cpp',
+    'builtin/streams/MiscellaneousOperations.cpp',
+    'builtin/streams/PullIntoDescriptor.cpp',
+    'builtin/streams/QueueingStrategies.cpp',
+    'builtin/streams/QueueWithSizes.cpp',
+    'builtin/streams/ReadableStream.cpp',
+    'builtin/streams/ReadableStreamDefaultController.cpp',
+    'builtin/streams/ReadableStreamDefaultControllerOperations.cpp',
+    'builtin/streams/ReadableStreamDefaultReader.cpp',
+    'builtin/streams/ReadableStreamInternals.cpp',
+    'builtin/streams/ReadableStreamOperations.cpp',
+    'builtin/streams/ReadableStreamReader.cpp',
+    'builtin/streams/StreamAPI.cpp',
+    'builtin/streams/TeeState.cpp',
     'builtin/String.cpp',
     'builtin/Symbol.cpp',
     'builtin/TestingFunctions.cpp',
@@ -408,7 +431,6 @@ DIRS += [
     'frontend',
     'gc',
     'jit',
-    'rust',
     'wasm',
     'zydis',
 ]

@@ -55,19 +55,36 @@ RenderCompositorOGL::~RenderCompositorOGL() {
   }
 }
 
-bool RenderCompositorOGL::BeginFrame() {
+bool RenderCompositorOGL::BeginFrame(layers::NativeLayer* aNativeLayer) {
   if (!mGL->MakeCurrent()) {
     gfxCriticalNote << "Failed to make render context current, can't draw.";
     return false;
   }
 
-  mGL->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, mGL->GetDefaultFramebuffer());
+  if (aNativeLayer) {
+    aNativeLayer->SetSurfaceIsFlipped(true);
+    aNativeLayer->SetGLContext(mGL);
+    Maybe<GLuint> fbo = aNativeLayer->NextSurfaceAsFramebuffer(true);
+    if (!fbo) {
+      return false;
+    }
+    mGL->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, *fbo);
+    mCurrentNativeLayer = aNativeLayer;
+  } else {
+    mGL->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, mGL->GetDefaultFramebuffer());
+  }
+
   return true;
 }
 
 void RenderCompositorOGL::EndFrame() {
   InsertFrameDoneSync();
   mGL->SwapBuffers();
+
+  if (mCurrentNativeLayer) {
+    mCurrentNativeLayer->NotifySurfaceReady();
+    mCurrentNativeLayer = nullptr;
+  }
 }
 
 void RenderCompositorOGL::InsertFrameDoneSync() {

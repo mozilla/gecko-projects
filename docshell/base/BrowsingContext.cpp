@@ -132,7 +132,10 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
   // The name and opener fields need to be explicitly initialized. Don't bother
   // using transactions to set them, as we haven't been attached yet.
   context->mName = aName;
-  context->mOpenerId = aOpener ? aOpener->Id() : 0;
+  if (aOpener) {
+    context->mOpenerId = aOpener->Id();
+    context->mHadOriginalOpener = true;
+  }
   context->mEmbedderPolicy = nsILoadInfo::EMBEDDER_POLICY_NULL;
 
   BrowsingContext* inherit = aParent ? aParent : aOpener;
@@ -694,28 +697,15 @@ JSObject* BrowsingContext::ReadStructuredClone(JSContext* aCx,
 }
 
 void BrowsingContext::NotifyUserGestureActivation() {
-  // We would set the user gesture activation flag on the top level browsing
-  // context, which would automatically be sync to other top level browsing
-  // contexts which are in the different process.
-  RefPtr<BrowsingContext> topLevelBC = Top();
-  USER_ACTIVATION_LOG("Get top level browsing context 0x%08" PRIx64,
-                      topLevelBC->Id());
-  topLevelBC->SetIsActivatedByUserGesture(true);
+  SetIsActivatedByUserGesture(true);
+
+  // TODO: Bug 1577499 - Implement transient activation flag
 }
 
 void BrowsingContext::NotifyResetUserGestureActivation() {
-  // We would reset the user gesture activation flag on the top level browsing
-  // context, which would automatically be sync to other top level browsing
-  // contexts which are in the different process.
-  RefPtr<BrowsingContext> topLevelBC = Top();
-  USER_ACTIVATION_LOG("Get top level browsing context 0x%08" PRIx64,
-                      topLevelBC->Id());
-  topLevelBC->SetIsActivatedByUserGesture(false);
-}
+  SetIsActivatedByUserGesture(false);
 
-bool BrowsingContext::GetUserGestureActivation() {
-  RefPtr<BrowsingContext> topLevelBC = Top();
-  return topLevelBC->GetIsActivatedByUserGesture();
+  // TODO: Bug 1577499 - Implement transient activation flag
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(BrowsingContext)
@@ -785,14 +775,16 @@ void BrowsingContext::Location(JSContext* aCx,
   }
 }
 
-void BrowsingContext::LoadURI(BrowsingContext* aAccessor,
-                              nsDocShellLoadState* aLoadState) {
+nsresult BrowsingContext::LoadURI(BrowsingContext* aAccessor,
+                                  nsDocShellLoadState* aLoadState) {
   MOZ_DIAGNOSTIC_ASSERT(!IsDiscarded());
   MOZ_DIAGNOSTIC_ASSERT(!aAccessor || !aAccessor->IsDiscarded());
 
   if (mDocShell) {
-    mDocShell->LoadURI(aLoadState);
-  } else if (!aAccessor && XRE_IsParentProcess()) {
+    return mDocShell->LoadURI(aLoadState);
+  }
+
+  if (!aAccessor && XRE_IsParentProcess()) {
     Unused << Canonical()->GetCurrentWindowGlobal()->SendLoadURIInChild(
         aLoadState);
   } else {
@@ -806,6 +798,7 @@ void BrowsingContext::LoadURI(BrowsingContext* aAccessor,
       wgc->SendLoadURI(this, aLoadState);
     }
   }
+  return NS_OK;
 }
 
 void BrowsingContext::Close(CallerType aCallerType, ErrorResult& aError) {
@@ -1039,28 +1032,6 @@ already_AddRefed<BrowsingContext> BrowsingContext::IPCInitializer::GetOpener() {
   return opener.forget();
 }
 
-void BrowsingContext::LocationProxy::SetHref(const nsAString& aHref,
-                                             nsIPrincipal& aSubjectPrincipal,
-                                             ErrorResult& aError) {
-  nsPIDOMWindowOuter* win = GetBrowsingContext()->GetDOMWindow();
-  if (!win || !win->GetLocation()) {
-    aError.Throw(NS_ERROR_FAILURE);
-    return;
-  }
-  win->GetLocation()->SetHref(aHref, aSubjectPrincipal, aError);
-}
-
-void BrowsingContext::LocationProxy::Replace(const nsAString& aUrl,
-                                             nsIPrincipal& aSubjectPrincipal,
-                                             ErrorResult& aError) {
-  nsPIDOMWindowOuter* win = GetBrowsingContext()->GetDOMWindow();
-  if (!win || !win->GetLocation()) {
-    aError.Throw(NS_ERROR_FAILURE);
-    return;
-  }
-  win->GetLocation()->Replace(aUrl, aSubjectPrincipal, aError);
-}
-
 void BrowsingContext::StartDelayedAutoplayMediaComponents() {
   if (!mDocShell) {
     return;
@@ -1071,7 +1042,6 @@ void BrowsingContext::StartDelayedAutoplayMediaComponents() {
 }
 
 void BrowsingContext::DidSetIsActivatedByUserGesture() {
-  MOZ_ASSERT(!mParent, "Set user activation flag on non top-level context!");
   USER_ACTIVATION_LOG(
       "Set user gesture activation %d for %s browsing context 0x%08" PRIx64,
       mIsActivatedByUserGesture, XRE_IsParentProcess() ? "Parent" : "Child",

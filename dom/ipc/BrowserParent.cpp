@@ -719,6 +719,10 @@ void BrowserParent::ActorDestroy(ActorDestroyReason why) {
     // If this was a crash, tell our nsFrameLoader to fire crash events.
     if (why == AbnormalShutdown) {
       frameLoader->MaybeNotifyCrashed(mBrowsingContext, GetIPCChannel());
+
+      if (!mBrowsingContext->IsTopContent()) {
+        OnSubFrameCrashed();
+      }
     }
   }
 
@@ -2497,33 +2501,17 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnLocationChange(
                                                           aCanGoForward);
 
   if (aWebProgressData && aWebProgressData->isTopLevel()) {
-    nsCOMPtr<nsIContentSecurityPolicy> csp;
-    if (aLocationChangeData->csp().isSome()) {
-      csp = CSPInfoToCSP(aLocationChangeData->csp().ref(), nullptr, nullptr);
-    }
-
-    nsCOMPtr<nsIPrincipal> contentPrincipal =
-        PrincipalInfoToPrincipal(aLocationChangeData->contentPrincipal());
-    nsCOMPtr<nsIPrincipal> contentStoragePrincipal = PrincipalInfoToPrincipal(
-        aLocationChangeData->contentStoragePrincipal());
     nsCOMPtr<nsIPrincipal> contentBlockingAllowListPrincipal;
-    if (aLocationChangeData->contentBlockingAllowListPrincipal().type() ==
-        OptionalPrincipalInfo::TPrincipalInfo) {
-      contentBlockingAllowListPrincipal = PrincipalInfoToPrincipal(
-          aLocationChangeData->contentBlockingAllowListPrincipal()
-              .get_PrincipalInfo());
-    }
-    nsCOMPtr<nsIReferrerInfo> referrerInfo =
-        aLocationChangeData->referrerInfo();
-
     Unused << browser->SetIsNavigating(aLocationChangeData->isNavigating());
     Unused << browser->UpdateForLocationChange(
         aLocation, aLocationChangeData->charset(),
         aLocationChangeData->mayEnableCharacterEncodingMenu(),
         aLocationChangeData->charsetAutodetected(),
         aLocationChangeData->documentURI(), aLocationChangeData->title(),
-        contentPrincipal, contentStoragePrincipal,
-        contentBlockingAllowListPrincipal, csp, referrerInfo,
+        aLocationChangeData->contentPrincipal(),
+        aLocationChangeData->contentStoragePrincipal(),
+        aLocationChangeData->contentBlockingAllowListPrincipal(),
+        aLocationChangeData->csp(), aLocationChangeData->referrerInfo(),
         aLocationChangeData->isSyntheticDocument(),
         aWebProgressData->innerDOMWindowID(),
         aLocationChangeData->requestContextID().isSome(),
@@ -2557,6 +2545,35 @@ mozilla::ipc::IPCResult BrowserParent::RecvOnStatusChange(
 
   Unused << managerAsListener->OnStatusChange(webProgress, request, aStatus,
                                               aMessage.get());
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BrowserParent::RecvOnSecurityChange(
+    const Maybe<WebProgressData>& aWebProgressData,
+    const RequestData& aRequestData, const uint32_t aState,
+    const Maybe<WebProgressSecurityChangeData>& aSecurityChangeData) {
+  nsCOMPtr<nsIBrowser> browser;
+  nsCOMPtr<nsIWebProgress> manager;
+  nsCOMPtr<nsIWebProgressListener> managerAsListener;
+  if (!GetWebProgressListener(getter_AddRefs(browser), getter_AddRefs(manager),
+                              getter_AddRefs(managerAsListener))) {
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIWebProgress> webProgress;
+  nsCOMPtr<nsIRequest> request;
+  ReconstructWebProgressAndRequest(manager, aWebProgressData, aRequestData,
+                                   getter_AddRefs(webProgress),
+                                   getter_AddRefs(request));
+
+  if (aWebProgressData && aWebProgressData->isTopLevel()) {
+    Unused << browser->UpdateSecurityUIForSecurityChange(
+        aSecurityChangeData->securityInfo(), aState,
+        aSecurityChangeData->isSecureContext());
+  }
+
+  Unused << managerAsListener->OnSecurityChange(webProgress, request, aState);
 
   return IPC_OK();
 }
@@ -2673,11 +2690,13 @@ void BrowserParent::ReconstructWebProgressAndRequest(
 
 mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
     const Maybe<nsCString>& aDocShellCaps, const Maybe<bool>& aPrivatedMode,
-    const nsTArray<nsCString>&& aPositions,
-    const nsTArray<int32_t>&& aPositionDescendants,
+    nsTArray<nsCString>&& aPositions,
+    nsTArray<int32_t>&& aPositionDescendants,
     const nsTArray<InputFormData>& aInputs,
     const nsTArray<CollectedInputDataValue>& aIdVals,
     const nsTArray<CollectedInputDataValue>& aXPathVals,
+    nsTArray<nsCString>&& aOrigins, nsTArray<nsString>&& aKeys,
+    nsTArray<nsString>&& aValues, const bool aIsFullStorage,
     const uint32_t& aFlushId, const bool& aIsFinal, const uint32_t& aEpoch) {
   UpdateSessionStoreData data;
   if (aDocShellCaps.isSome()) {
@@ -2714,6 +2733,16 @@ mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
     data.mNumXPath.Construct().Assign(std::move(numXPath));
     data.mInnerHTML.Construct().Assign(std::move(innerHTML));
     data.mUrl.Construct().Assign(std::move(url));
+  }
+  // In normal case, we only update the storage when needed.
+  // However, we need to reset the session storage(aOrigins.Length() will be 0)
+  //   if the usage is over the "browser_sessionstore_dom_storage_limit".
+  // In this case, aIsFullStorage is true.
+  if (aOrigins.Length() != 0 || aIsFullStorage) {
+    data.mStorageOrigins.Construct().Assign(std::move(aOrigins));
+    data.mStorageKeys.Construct().Assign(std::move(aKeys));
+    data.mStorageValues.Construct().Assign(std::move(aValues));
+    data.mIsFullStorage.Construct() = aIsFullStorage;
   }
 
   nsCOMPtr<nsISessionStoreFunctions> funcs =
@@ -3870,6 +3899,61 @@ FakeChannel::OnAuthCancelled(nsISupports* aContext, bool userCancel) {
     return NS_ERROR_FAILURE;
   }
   return NS_OK;
+}
+
+void BrowserParent::OnSubFrameCrashed() {
+  if (mBrowsingContext->IsDiscarded()) {
+    return;
+  }
+
+  auto processId = Manager()->ChildID();
+  BrowsingContext* parent = mBrowsingContext->GetParent();
+  ContentParent* embedderProcess = parent->Canonical()->GetContentParent();
+  if (!embedderProcess) {
+    return;
+  }
+
+  ContentParent* manager = Manager();
+  // Set the owner process of a browsing context belonging to a
+  // crashed process to the parent context's process, since
+  // we'll be showing the crashed page in that process.
+  mBrowsingContext->SetOwnerProcessId(embedderProcess->ChildID());
+
+  // Find all same process sub tree nodes and detach them, cache all
+  // other nodes in the sub tree.
+  mBrowsingContext->PostOrderWalk([&](auto* aContext) {
+    // Post-order means bottom up in our case, which means that all
+    // same-process, i.e. crashing process have already been detached, and
+    // all others should only be cached and torn down regulalarly.
+
+    aContext->Group()->EachOtherParent(manager, [&](auto* aParent) {
+      Unused << aParent->SendCacheBrowsingContextChildren(aContext);
+    });
+    aContext->CacheChildren(/* aFromIPC */ true);
+
+    // We will never detach the root node of the subtree since
+    // we've changed the owner process to be different from
+    // processId.
+    if (aContext->Canonical()->IsOwnedByProcess(processId)) {
+      // Hold a reference to `context` until the response comes back to
+      // ensure it doesn't die while messages relating to this context are
+      // in-flight.
+      RefPtr<BrowsingContext> context = aContext;
+      auto resolve = [context](bool) {};
+      auto reject = [context](ResponseRejectReason) {};
+      aContext->Group()->EachOtherParent(manager, [&](auto* aParent) {
+        aParent->SendDetachBrowsingContext(aContext->Id(), resolve, reject);
+      });
+
+      aContext->Detach(/* aFromIPC */ true);
+    }
+  });
+
+  MOZ_DIAGNOSTIC_ASSERT(!mBrowsingContext->GetChildren().Length());
+  // Tell the browser bridge to show the subframe crashed page.
+  if (GetBrowserBridgeParent()) {
+    Unused << GetBrowserBridgeParent()->SendSubFrameCrashed(mBrowsingContext);
+  }
 }
 
 }  // namespace dom

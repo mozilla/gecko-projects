@@ -12,6 +12,7 @@
 #include "mozilla/Tuple.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/LocationBase.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsID.h"
@@ -184,7 +185,7 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // Triggers a load in the process which currently owns this BrowsingContext.
   // aAccessor is the context which initiated the load, and may be null only for
   // in-process BrowsingContexts.
-  void LoadURI(BrowsingContext* aAccessor, nsDocShellLoadState* aLoadState);
+  nsresult LoadURI(BrowsingContext* aAccessor, nsDocShellLoadState* aLoadState);
 
   // Determine if the current BrowsingContext was 'cached' by the logic in
   // CacheChildren.
@@ -209,12 +210,21 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
 
   BrowsingContext* Top();
 
-  already_AddRefed<BrowsingContext> GetOpener() const { return Get(mOpenerId); }
+  already_AddRefed<BrowsingContext> GetOpener() const {
+    RefPtr<BrowsingContext> opener(Get(mOpenerId));
+    if (!mIsDiscarded && opener && !opener->mIsDiscarded) {
+      return opener.forget();
+    }
+    return nullptr;
+  }
   void SetOpener(BrowsingContext* aOpener) {
+    MOZ_DIAGNOSTIC_ASSERT(!aOpener || aOpener->Group() == Group());
     SetOpenerId(aOpener ? aOpener->Id() : 0);
   }
 
   bool HasOpener() const;
+
+  bool HadOriginalOpener() const { return mHadOriginalOpener; }
 
   /**
    * When a new browsing context is opened by a sandboxed document, it needs to
@@ -250,14 +260,12 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   BrowsingContext* FindWithName(const nsAString& aName,
                                 BrowsingContext& aRequestingContext);
 
-
   // Find a browsing context in this context's list of
   // children. Doesn't consider the special names, '_self', '_parent',
   // '_top', or '_blank'. Performs access control with regard to
   // 'this'.
   BrowsingContext* FindChildWithName(const nsAString& aName,
                                      BrowsingContext& aRequestingContext);
-
 
   nsISupports* GetParentObject() const;
   JSObject* WrapObject(JSContext* aCx,
@@ -271,9 +279,6 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // This function would be called when we want to reset the user gesture
   // activation flag of the top level browsing context.
   void NotifyResetUserGestureActivation();
-
-  // Return true if it corresponding document is activated by user gesture.
-  bool GetUserGestureActivation();
 
   // Return the window proxy object that corresponds to this browsing context.
   inline JSObject* GetWindowProxy() const { return mWindowProxy; }
@@ -289,12 +294,20 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   const Children& GetChildren() { return mChildren; }
 
   // Perform a pre-order walk of this BrowsingContext subtree.
-  template <typename Func>
-  void PreOrderWalk(Func&& aCallback) {
+  void PreOrderWalk(const std::function<void(BrowsingContext*)>& aCallback) {
     aCallback(this);
     for (auto& child : GetChildren()) {
       child->PreOrderWalk(aCallback);
     }
+  }
+
+  // Perform an post-order walk of this BrowsingContext subtree.
+  void PostOrderWalk(const std::function<void(BrowsingContext*)>& aCallback) {
+    for (auto& child : GetChildren()) {
+      child->PostOrderWalk(aCallback);
+    }
+
+    aCallback(this);
   }
 
   // Window APIs that are cross-origin-accessible (from the HTML spec).
@@ -461,24 +474,21 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
    * process. It forwards all operations to its BrowsingContext and aggregates
    * its refcount to that BrowsingContext.
    */
-  class LocationProxy {
+  class LocationProxy final : public LocationBase {
    public:
     MozExternalRefCountType AddRef() { return GetBrowsingContext()->AddRef(); }
     MozExternalRefCountType Release() {
       return GetBrowsingContext()->Release();
     }
 
-    void SetHref(const nsAString& aHref, nsIPrincipal& aSubjectPrincipal,
-                 ErrorResult& aError);
-    void Replace(const nsAString& aUrl, nsIPrincipal& aSubjectPrincipal,
-                 ErrorResult& aError);
-
-   private:
+   protected:
     friend class RemoteLocationProxy;
-    BrowsingContext* GetBrowsingContext() {
+    BrowsingContext* GetBrowsingContext() override {
       return reinterpret_cast<BrowsingContext*>(
           uintptr_t(this) - offsetof(BrowsingContext, mLocation));
     }
+
+    already_AddRefed<nsIDocShell> GetDocShell() override { return nullptr; }
   };
 
   // Ensure that opener is in the same BrowsingContextGroup.

@@ -47,7 +47,7 @@ class MainFrame extends Component {
       dispatch: PropTypes.func.isRequired,
       auditing: PropTypes.array.isRequired,
       supports: PropTypes.object,
-      getDOMWalker: PropTypes.func.isRequired,
+      simulator: PropTypes.object,
     };
   }
 
@@ -113,10 +113,10 @@ class MainFrame extends Component {
     const {
       accessibility,
       accessibilityWalker,
-      getDOMWalker,
       fluentBundles,
       enabled,
       auditing,
+      simulator,
     } = this.props;
 
     if (!enabled) {
@@ -130,7 +130,7 @@ class MainFrame extends Component {
       { bundles: fluentBundles },
       div(
         { className: "mainFrame", role: "presentation" },
-        Toolbar({ accessibility, accessibilityWalker }),
+        Toolbar({ accessibility, accessibilityWalker, simulator }),
         isAuditing && AuditProgressOverlay(),
         span(
           {
@@ -150,9 +150,9 @@ class MainFrame extends Component {
                 className: "main-panel",
                 role: "presentation",
               },
-              AccessibilityTree({ accessibilityWalker, getDOMWalker })
+              AccessibilityTree({ accessibilityWalker })
             ),
-            endPanel: RightSidebar({ accessibilityWalker, getDOMWalker }),
+            endPanel: RightSidebar({ accessibilityWalker }),
             vert: this.useLandscapeMode,
           })
         )

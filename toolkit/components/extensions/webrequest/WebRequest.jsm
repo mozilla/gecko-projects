@@ -152,9 +152,9 @@ class HeaderChanger {
 
 const checkRestrictedHeaderValue = (value, opts = {}) => {
   let uri = Services.io.newURI(`https://${value}/`);
-  let { extension } = opts;
+  let { policy } = opts;
 
-  if (extension && !extension.allowedOrigins.matches(uri)) {
+  if (policy && !policy.allowedOrigins.matches(uri)) {
     throw new Error(`Unable to set host header, url missing from permissions.`);
   }
 
@@ -300,8 +300,8 @@ var ContentPolicyManager = {
       return false;
     }
 
-    let { extension } = opts;
-    if (extension && !extension.allowedOrigins.matches(url)) {
+    let { policy } = opts;
+    if (policy && !policy.allowedOrigins.matches(url)) {
       return false;
     }
 
@@ -757,7 +757,7 @@ HttpObserverManager = {
     }
   },
 
-  getRequestData(channel, extraData, policy) {
+  getRequestData(channel, extraData) {
     let originAttributes =
       channel.loadInfo && channel.loadInfo.originAttributes;
     let data = {
@@ -783,12 +783,6 @@ HttpObserverManager = {
 
       serialize: serializeRequestData,
     };
-
-    // We're limiting access to
-    // urlClassification while the feature is further fleshed out.
-    if (policy && policy.extension.isPrivileged) {
-      data.urlClassification = channel.urlClassification;
-    }
 
     return Object.assign(data, extraData);
   },
@@ -840,12 +834,12 @@ HttpObserverManager = {
       let commonData = null;
       let requestBody;
       this.listeners[kind].forEach((opts, callback) => {
-        if (!channel.matches(opts.filter, opts.extension, extraData)) {
+        if (!channel.matches(opts.filter, opts.policy, extraData)) {
           return;
         }
 
         if (!commonData) {
-          commonData = this.getRequestData(channel, extraData, opts.extension);
+          commonData = this.getRequestData(channel, extraData);
           if (this.STATUS_TYPES.has(kind)) {
             commonData.statusCode = channel.statusCode;
             commonData.statusLine = channel.statusLine;
@@ -853,8 +847,15 @@ HttpObserverManager = {
         }
         let data = Object.create(commonData);
 
-        if (registerFilter && opts.blocking && opts.extension) {
-          data.registerTraceableChannel = (extension, remoteTab) => {
+        // We're limiting access to urlClassification while the feature is
+        // further fleshed out.
+        let { policy } = opts;
+        if (policy && policy.extension.isPrivileged) {
+          data.urlClassification = channel.urlClassification;
+        }
+
+        if (registerFilter && opts.blocking && opts.policy) {
+          data.registerTraceableChannel = (policy, remoteTab) => {
             // `channel` is a ChannelWrapper, which contains the actual
             // underlying nsIChannel in `channel.channel`.  For startup events
             // that are held until the extension background page is started,
@@ -862,7 +863,7 @@ HttpObserverManager = {
             // cleaned up between the time the event occurred and the time
             // we reach this code.
             if (channel.channel) {
-              channel.registerTraceableChannel(extension, remoteTab);
+              channel.registerTraceableChannel(policy, remoteTab);
             }
           };
         }
@@ -1041,7 +1042,7 @@ HttpObserverManager = {
     }
 
     for (let opts of listener.values()) {
-      if (channel.matches(opts.filter, opts.extension, extraData)) {
+      if (channel.matches(opts.filter, opts.policy, extraData)) {
         return true;
       }
     }
@@ -1165,7 +1166,7 @@ var WebRequest = {
   getSecurityInfo: details => {
     let channel = ChannelWrapper.getRegisteredChannel(
       details.id,
-      details.extension,
+      details.policy,
       details.remoteTab
     );
     if (channel) {

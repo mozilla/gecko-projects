@@ -622,7 +622,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   void InitWasOffline();
 
  public:
-  nsPIDOMWindowOuter* GetOpenerWindow(mozilla::ErrorResult& aError);
+  mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> GetOpenerWindow(
+      mozilla::ErrorResult& aError);
   void GetOpener(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval,
                  mozilla::ErrorResult& aError);
   void SetOpener(JSContext* aCx, JS::Handle<JS::Value> aOpener,
@@ -1221,10 +1222,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   void CallDocumentFlushedResolvers();
   void CancelDocumentFlushedResolvers();
-
-  // Return true if we need to notify browsing context to reset its user gesture
-  // activation flag.
-  bool ShouldResetBrowsingContextUserGestureActivation();
 
   // Try to fire the "load" event on our content embedder if we're an iframe.
   void FireFrameLoadEvent(bool aIsTrusted);

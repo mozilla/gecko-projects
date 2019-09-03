@@ -4,6 +4,8 @@
 
 :host {
   padding: 40px;
+  display: flex;
+  flex-direction: column;
 
   --reveal-checkbox-opacity: .8;
   --reveal-checkbox-opacity-hover: .6;
@@ -11,11 +13,18 @@
   --success-color: #00c100;
 }
 
+form {
+  flex-grow: 1;
+}
+
 :host([data-editing]) .edit-button,
 :host([data-editing]) .copy-button,
+:host([data-editing]) login-footer,
+:host([data-is-new-login].no-logins) .cancel-button,
 :host([data-is-new-login]) .delete-button,
 :host([data-is-new-login]) .origin-saved-value,
 :host([data-is-new-login]) .meta-info,
+:host([data-is-new-login]) login-footer,
 :host([data-is-new-login]) .login-item-title,
 :host(:not([data-is-new-login])) .new-login-title,
 :host(:not([data-editing])) .form-actions-row {
@@ -32,6 +41,7 @@ input[type="url"][readOnly] {
   background-color: transparent !important; /* override common.inc.css */
   text-overflow: ellipsis;
   overflow: hidden;
+  text-align: match-parent !important;
 }
 
 .detail-cell input:not([type="checkbox"]),
@@ -52,6 +62,7 @@ input[type="url"][readOnly] {
   flex-grow: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .delete-button,
@@ -69,12 +80,12 @@ input[type="url"][readOnly] {
 }
 
 .delete-button {
-  background-image: url("chrome://browser/content/aboutlogins/icons/delete.svg");
+  background-image: url("chrome://global/skin/icons/delete.svg");
   padding-inline-start: 30px; /* 8px on each side, and 14px for icon width */
 }
 
 .edit-button {
-  background-image: url("chrome://browser/content/aboutlogins/icons/edit.svg");
+  background-image: url("chrome://browser/skin/edit.svg");
   padding-inline-start: 32px; /* 8px on each side, and 16px for icon width */
 }
 
@@ -104,7 +115,7 @@ input[type="url"][readOnly]:hover:active {
 .detail-row-contents {
   display: flex;
   align-items: end;
-  flex-basis: calc(100% - 360px); /* Adds a 360px flexible spacer to the right */
+  flex-basis: 340px; /* Allows for 360px of flex on the end (700px (the default 100% width) - 340px) */
   max-width: 100%;
 }
 
@@ -131,6 +142,7 @@ input[type="url"][readOnly]:hover:active {
 
 .copy-button {
   margin-bottom: 0; /* Align button at the bottom of the row */
+  margin-inline-start: 20px;
 }
 
 .copy-button:not([data-copied]) .copied-button-text,
@@ -157,6 +169,10 @@ input[type="url"][readOnly]:hover:active {
   padding-inline-start: 22px;
 }
 
+.copied-button-text:dir(rtl) {
+  background-position-x: right;
+}
+
 .meta-info {
   font-size: smaller;
   color: var(--in-content-deemphasized-text);
@@ -179,7 +195,7 @@ input[type="url"][readOnly]:hover:active {
   background-color: transparent !important;
   border-width: 0 !important;
   background-image: url("chrome://browser/content/aboutlogins/icons/show-password.svg") !important;
-  margin-inline-start: 8px !important;
+  margin-inline: 10px 0 !important;
   cursor: pointer;
   -moz-context-properties: fill;
   fill: currentColor !important;
@@ -221,7 +237,9 @@ input[type="url"][readOnly]:hover:active {
   background-image: url("chrome://mozapps/skin/places/defaultFavicon.svg");
   background-repeat: no-repeat;
   background-size: contain;
-  -moz-context-properties: fill;
+  -moz-context-properties: fill, fill-opacity;
+  fill: currentColor;
+  fill-opacity: 0.8;
 }
 
 .login-item-favicon-wrapper.hide-default-favicon {
@@ -235,6 +253,7 @@ input[type="url"][readOnly]:hover:active {
   background-image: url("chrome://global/skin/icons/warning.svg");
   background-repeat: no-repeat;
   background-position: left 10px top 10px;
+  color: #0C0C0D;
   -moz-context-properties: fill;
   fill: var(--red-90);
   box-shadow: 0 2px 8px 0 rgba(12,12,13,0.1);
@@ -270,14 +289,34 @@ a.breach-alert-link {
   min-width: 16px;
   -moz-context-properties: fill, fill-opacity;
   fill-opacity: 0;
-  fill: var(--grey-90);
+  fill: currentColor;
   inset-inline-end: 12px;
-  inset-block-start: 12px
+  inset-block-start: 12px;
 }
 
 .dismiss-breach-alert,
 .dismiss-breach-alert:hover {
   background-color: transparent;
+}
+
+.error-message {
+  color: #fff;
+  background-color: var(--red-60);
+  border: 1px solid transparent;
+  padding-block: 6px;
+  display: inline-block;
+  padding-inline-start: 32px;
+  padding-inline-end: 16px;
+  background-image: url("chrome://global/skin/icons/warning.svg");
+  background-repeat: no-repeat;
+  background-position: left 10px center;
+  -moz-context-properties: fill;
+  fill: currentColor;
+  margin-bottom: 38px;
+}
+
+.error-message:dir(rtl) {
+  background-position-x: right 10px;
 }
 
 @supports -moz-bool-pref("browser.in-content.dark-mode") {
@@ -291,11 +330,6 @@ a.breach-alert-link {
 
     .breach-alert {
       box-shadow: 0 2px 8px 0 rgba(249,249,250,0.1);
-      color: #0C0C0D;
-    }
-
-    .login-item-favicon-wrapper {
-      fill: var(--in-content-border-hover);
     }
   }
 }

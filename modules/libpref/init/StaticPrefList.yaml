@@ -178,6 +178,19 @@
   value: false
   mirror: always
 
+#ifdef ANDROID
+  #---------------------------------------------------------------------------
+  # Prefs starting with "android."
+  #---------------------------------------------------------------------------
+
+  # On Android, we want an opaque background to be visible under the page,
+  # so layout should not force a default background.
+-   name: android.widget_paints_background
+    type: bool
+    value: true
+    mirror: always
+#endif
+
 #---------------------------------------------------------------------------
 # Prefs starting with "apz."
 # The apz prefs are explained in AsyncPanZoomController.cpp
@@ -195,12 +208,12 @@
 
 - name: apz.allow_zooming
   type: RelaxedAtomicBool
-  value: false
+  value: @IS_ANDROID@
   mirror: always
 
 - name: apz.android.chrome_fling_physics.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 - name: apz.android.chrome_fling_physics.friction
@@ -220,7 +233,7 @@
 
 - name: apz.autoscroll.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 - name: apz.axis_lock.breakout_angle
@@ -246,6 +259,10 @@
   mirror: always
   include: <cmath>
 
+# Whether to lock touch scrolling to one axis at a time.
+# 0 = FREE (No locking at all)
+# 1 = STANDARD (Once locked, remain locked until scrolling ends)
+# 2 = STICKY (Allow lock to be broken, with hysteresis)
 - name: apz.axis_lock.mode
   type: RelaxedAtomicInt32
   value: 0
@@ -278,34 +295,37 @@
 
 - name: apz.drag.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 - name: apz.drag.initial.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 - name: apz.drag.touch.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 - name: apz.enlarge_displayport_when_clipped
   type: RelaxedAtomicBool
-  value: false
+  value: @IS_ANDROID@
   mirror: always
 
+# Test only.
 - name: apz.fixed-margin-override.enabled
   type: RelaxedAtomicBool
   value: false
   mirror: always
 
+# Test only.
 - name: apz.fixed-margin-override.bottom
   type: RelaxedAtomicInt32
   value: 0
   mirror: always
 
+# Test only.
 - name: apz.fixed-margin-override.top
   type: RelaxedAtomicInt32
   value: 0
@@ -378,7 +398,7 @@
 
 - name: apz.frame_delay.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 #ifdef MOZ_WIDGET_GTK
@@ -399,7 +419,11 @@
 
 - name: apz.keyboard.passive-listeners
   type: RelaxedAtomicBool
+#ifdef MOZ_WIDGET_ANDROID
   value: false
+#else
+  value: true
+#endif
   mirror: always
 
 - name: apz.max_tap_time
@@ -457,6 +481,7 @@
   value: true
   mirror: always
 
+# Fetch displayport updates early from the message queue.
 - name: apz.pinch_lock.mode
   type: RelaxedAtomicInt32
   value: 1
@@ -464,17 +489,17 @@
 
 - name: apz.pinch_lock.scroll_lock_threshold
   type: AtomicFloat
-  value: 1.0f / 32.0f
+  value: 1.0f / 32.0f   # 1/32 inches
   mirror: always
 
 - name: apz.pinch_lock.span_breakout_threshold
   type: AtomicFloat
-  value: 1.0f / 32.0f
+  value: 1.0f / 32.0f   # 1/32 inches
   mirror: always
 
 - name: apz.pinch_lock.span_lock_threshold
   type: AtomicFloat
-  value: 1.0f / 32.0f
+  value: 1.0f / 32.0f   # 1/32 inches
   mirror: always
 
 - name: apz.pinch_lock.buffer_max_age
@@ -487,6 +512,7 @@
   value: false
   mirror: always
 
+# Whether to print the APZC tree for debugging.
 - name: apz.printtree
   type: RelaxedAtomicBool
   value: false
@@ -494,7 +520,7 @@
 
 - name: apz.record_checkerboarding
   type: RelaxedAtomicBool
-  value: false
+  value: @IS_NIGHTLY_BUILD@
   mirror: always
 
 - name: apz.second_tap_tolerance
@@ -519,7 +545,7 @@
 
 - name: apz.touch_start_tolerance
   type: AtomicFloat
-  value: 1.0f/4.5f
+  value: 0.1f
   mirror: always
 
 - name: apz.velocity_bias
@@ -539,12 +565,12 @@
 
 - name: apz.x_skate_size_multiplier
   type: AtomicFloat
-  value: 1.5f
+  value: 1.25f
   mirror: always
 
 - name: apz.x_stationary_size_multiplier
   type: AtomicFloat
-  value: 3.0f
+  value: 1.5f
   mirror: always
 
 - name: apz.y_skate_highmem_adjust
@@ -554,12 +580,20 @@
 
 - name: apz.y_skate_size_multiplier
   type: AtomicFloat
-  value: 2.5f
+#if defined(MOZ_WIDGET_ANDROID)
+  value: 1.5f
+#else
+  value: 3.5f
+#endif
   mirror: always
 
 - name: apz.y_stationary_size_multiplier
   type: AtomicFloat
+#if defined(MOZ_WIDGET_ANDROID)
+  value: 1.5f
+#else
   value: 3.5f
+#endif
   mirror: always
 
 - name: apz.zoom_animation_duration_ms
@@ -574,7 +608,7 @@
 
 - name: apz.relative-update.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 #---------------------------------------------------------------------------
@@ -605,11 +639,11 @@
 
 - name: browser.active_color
   type: String
-  value: ""
+  value: "#EE0000"
   mirror: never
 - name: browser.anchor_color
   type: String
-  value: ""
+  value: "#0000EE"
   mirror: never
 
 # See http://dev.w3.org/html5/spec/forms.html#attr-fe-autofocus
@@ -737,7 +771,7 @@
 
 - name: browser.display.background_color
   type: String
-  value: ""
+  value: "#FFFFFF"
   mirror: never
 
 # 0 = default: always, except in high contrast mode
@@ -761,10 +795,11 @@
 
 - name: browser.display.focus_background_color
   type: String
-  value: ""
+  value: "#117722"
   mirror: never
 
-# 0=solid, 1=dotted
+# Focus ring border style.
+# 0 = solid border, 1 = dotted border
 - name: browser.display.focus_ring_style
   type: uint32_t
   value: 1
@@ -772,11 +807,11 @@
 
 - name: browser.display.focus_text_color
   type: String
-  value: ""
+  value: "#ffffff"
   mirror: never
 - name: browser.display.foreground_color
   type: String
-  value: ""
+  value: "#000000"
   mirror: never
 
 - name: browser.display.show_focus_rings
@@ -804,7 +839,7 @@
 
 - name: browser.display.use_system_colors
   type: bool
-  value: true
+  value: false
   mirror: always
 
 - name: browser.dom.window.dump.enabled
@@ -866,6 +901,17 @@
   value: 2048
   mirror: always
 
+# If set, use DocumentChannel with nsDocShell in place of HttpChannel.
+- name: browser.tabs.documentchannel
+  type: bool
+  value: false
+  mirror: always
+
+- name: browser.tabs.remote.desktopbehavior
+  type: bool
+  value: false
+  mirror: always
+
 - name: browser.tabs.remote.force-paint
   type: bool
   value: true
@@ -916,7 +962,7 @@
 
 - name: browser.visited_color
   type: String
-  value: ""
+  value: "#551A8B"
   mirror: never
 
 # Enable xul error pages.
@@ -977,6 +1023,7 @@
 # Prefs starting with "clipboard."
 #---------------------------------------------------------------------------
 
+# Clipboard behavior.
 - name: clipboard.autocopy
   type: bool
 #if !defined(ANDROID) && !defined(XP_MACOSX) && defined(XP_UNIX)
@@ -1135,9 +1182,12 @@
 # Prefs starting with "devtools."
 #---------------------------------------------------------------------------
 
+# Tells if DevTools have been explicitely enabled by the user. This pref
+# allows to disable all features related to DevTools for users that never use
+# them. Until bug 1361080 lands, we always consider them enabled.
 - name: devtools.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 - name: devtools.console.stdout.chrome
@@ -1148,6 +1198,11 @@
 - name: devtools.console.stdout.content
   type: RelaxedAtomicBool
   value: false
+  mirror: always
+
+- name: devtools.toolbox.force-chrome-prefs
+  type: RelaxedAtomicBool
+  value: true
   mirror: always
 
 #---------------------------------------------------------------------------
@@ -1391,6 +1446,12 @@
   value: false
   mirror: always
 
+# User interaction timer interval, in ms
+- name: dom.events.user_interaction_interval
+  type: uint32_t
+  value: 5000
+  mirror: always
+
 # Whether to expose test interfaces of various sorts
 - name: dom.expose_test_interfaces
   type: bool
@@ -1500,9 +1561,10 @@
   value: true
   mirror: always
 
+# Allow Flash async drawing mode in 64-bit release builds.
 - name: dom.ipc.plugins.asyncdrawing.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 - name: dom.ipc.tabs.disabled
@@ -1612,6 +1674,21 @@
 #endif
   mirror: always
 
+# If this is true, TextEventDispatcher dispatches keydown and keyup events
+# even during composition (keypress events are never fired during composition
+# even if this is true).
+- name: dom.keyboardevent.dispatch_during_composition
+  type: bool
+  value: true
+  mirror: always
+
+# If this is true, keypress events for non-printable keys are dispatched only
+# for event listeners of the system event group in web content.
+- name: dom.keyboardevent.keypress.dispatch_non_printable_keys_only_system_group_in_content
+  type: bool
+  value: true
+  mirror: always
+
 # If this is true, "keypress" event's keyCode value and charCode value always
 # become same if the event is not created/initialized by JS.
 - name: dom.keyboardevent.keypress.set_keycode_and_charcode_to_same_value
@@ -1660,6 +1737,7 @@
   value: false
   mirror: always
 
+# Enable meta-viewport support in remote APZ-enabled frames.
 - name: dom.meta-viewport.enabled
   type: RelaxedAtomicBool
   value: false
@@ -1850,6 +1928,14 @@
 - name: dom.push.enabled
   type: RelaxedAtomicBool
   value: false
+  mirror: always
+
+
+# Should we try to load origin information from the cache?
+# See bug 1563023 for more details.
+- name: dom.quotaManager.loadQuotaFromCache
+  type: RelaxedAtomicBool
+  value: true
   mirror: always
 
 # Preference that users can set to override temporary storage smart limit
@@ -2236,49 +2322,84 @@
 #endif
   mirror: always
 
+# It is often desirable to automatically start vr presentation when
+# a user puts on the VR headset.  This is done by emitting the
+# Window.vrdisplayactivate event when the headset's sensors detect it
+# being worn.  This can result in WebVR content taking over the headset
+# when the user is using it outside the browser or inadvertent start of
+# presentation due to the high sensitivity of the proximity sensor in some
+# headsets, so it is off by default.
 - name: dom.vr.autoactivate.enabled
   type: RelaxedAtomicBool
   value: false
   mirror: always
 
+# Minimum number of milliseconds that the browser will wait before
+# attempting to poll again for connected VR controllers.  The browser
+# will not attempt to poll for VR controllers until it needs to use them.
 - name: dom.vr.controller.enumerate.interval
   type: RelaxedAtomicInt32
   value: 1000
   mirror: always
 
+# The threshold value of trigger inputs for VR controllers.
 - name: dom.vr.controller_trigger_threshold
   type: AtomicFloat
   value: 0.1f
   mirror: always
 
+# Minimum number of milliseconds that the browser will wait before
+# attempting to poll again for connected VR displays.  The browser
+# will not attempt to poll for VR displays until it needs to use
+# them, such as when detecting a WebVR site.
 - name: dom.vr.display.enumerate.interval
   type: RelaxedAtomicInt32
   value: 5000
   mirror: always
 
+# The number of milliseconds since last frame start before triggering a new
+# frame. When content is failing to submit frames on time or the lower level
+# VR platform APIs are rejecting frames, it determines the rate at which RAF
+# callbacks will be called.
 - name: dom.vr.display.rafMaxDuration
   type: RelaxedAtomicUint32
   value: 50
   mirror: always
 
+# Minimum number of milliseconds the browser will wait before attempting
+# to re-start the VR service after an enumeration returned no devices.
 - name: dom.vr.external.notdetected.timeout
   type: RelaxedAtomicInt32
   value: 60000
   mirror: always
 
+# Minimum number of milliseconds the browser will wait before attempting
+# to re-start the VR service after a VR API (eg, OpenVR or Oculus)
+# requests that we shutdown and unload its libraries.
+# To ensure that we don't interfere with VR runtime software auto-updates,
+# we will not attempt to re-load the service until this timeout has elapsed.
 - name: dom.vr.external.quit.timeout
   type: RelaxedAtomicInt32
   value: 10000
   mirror: always
 
+# Minimum number of milliseconds that the VR session will be kept
+# alive after the browser and content no longer are using the
+# hardware.  If a VR multitasking environment, this should be set
+# very low or set to 0.
 - name: dom.vr.inactive.timeout
   type: RelaxedAtomicInt32
   value: 5000
   mirror: always
 
+# Maximum number of milliseconds the browser will wait for content to call
+# VRDisplay.requestPresent after emitting vrdisplayactivate during VR
+# link traversal.  This prevents a long running event handler for
+# vrdisplayactivate from later calling VRDisplay.requestPresent, which would
+# result in a non-responsive browser in the VR headset.
 - name: dom.vr.navigation.timeout
   type: RelaxedAtomicInt32
-  value: 1000
+  value: 5000
   mirror: always
 
 # Oculus device
@@ -2293,11 +2414,25 @@
 #endif
   mirror: once
 
+# When enabled, Oculus sessions may be created with the ovrInit_Invisible
+# flag if a page is using tracking but not presenting.  When a page
+# begins presenting VR frames, the session will be re-initialized without
+# the flag.  This eliminates the "Firefox not responding" warnings in
+# the headset, but might not be compatible with all versions of the Oculus
+# runtime.
 - name: dom.vr.oculus.invisible.enabled
   type: RelaxedAtomicBool
   value: true
   mirror: always
 
+# Minimum number of milliseconds after content has stopped VR presentation
+# before the Oculus session is re-initialized to an invisible / tracking
+# only mode.  If this value is too high, users will need to wait longer
+# after stopping WebVR presentation before automatically returning to the
+# Oculus home interface.  (They can immediately return to the Oculus Home
+# interface through the Oculus HUD without waiting this duration)
+# If this value is too low, the Oculus Home interface may be visible
+# momentarily during VR link navigation.
 - name: dom.vr.oculus.present.timeout
   type: RelaxedAtomicInt32
   value: 500
@@ -2329,6 +2464,9 @@
   value: false
   mirror: once
 
+# Pose prediction reduces latency effects by returning future predicted HMD
+# poses to callers of the WebVR API.  This currently only has an effect for
+# Oculus Rift on SDK 0.8 or greater.
 - name: dom.vr.poseprediction.enabled
   type: RelaxedAtomicBool
   value: true
@@ -2349,11 +2487,16 @@
   value: 5000
   mirror: once
 
+# Puppet device, used for simulating VR hardware within tests and dev tools.
 - name: dom.vr.puppet.enabled
   type: RelaxedAtomicBool
   value: false
   mirror: always
 
+# Starting VR presentation is only allowed within a user gesture or event such
+# as VRDisplayActivate triggered by the system. dom.vr.require-gesture allows
+# this requirement to be disabled for special cases such as during automated
+# tests or in a headless kiosk system.
 - name: dom.vr.require-gesture
   type: RelaxedAtomicBool
   value: true
@@ -2368,6 +2511,15 @@
   value: true
 #endif
   mirror: always
+
+#ifdef XP_WIN
+  # Control firing WidgetMouseEvent by handling Windows pointer messages or
+  # mouse messages.
+-   name: dom.w3c_pointer_events.dispatch_by_pointer_messages
+    type: bool
+    value: false
+    mirror: always
+#endif
 
 # If the value is >= 0, it will be used for max touch points in child processes.
 - name: dom.maxtouchpoints.testing.value
@@ -2609,6 +2761,15 @@
   mirror: always
 
 #---------------------------------------------------------------------------
+# Prefs starting with "findbar."
+#---------------------------------------------------------------------------
+
+- name: findbar.modalHighlight
+  type: bool
+  value: false
+  mirror: always
+
+#---------------------------------------------------------------------------
 # Prefs starting with "fission."
 #---------------------------------------------------------------------------
 
@@ -2620,7 +2781,8 @@
   mirror: always
 
 # This pref has no effect within fission windows, it only controls the
-# behaviour within non-fission windows.
+# behaviour within non-fission windows. If true, preserve browsing contexts
+# between process swaps. Should be set to true in bug 1550571.
 - name: fission.preserve_browsing_contexts
   type: bool
   value: false
@@ -2808,11 +2970,19 @@
   value: true
   mirror: always
 
+# This pref and general.smoothScroll.stopDecelerationWeighting determine
+# the timing function.
 - name: general.smoothScroll.currentVelocityWeighting
   type: AtomicFloat
   value: 0.25
   mirror: always
 
+# To connect consecutive scroll events into a continuous flow, the animation's
+# duration should be longer than scroll events intervals (or else the scroll
+# will stop before the next event arrives - we're guessing the next interval
+# by averaging recent intervals).
+# This defines how much longer the duration is compared to the events
+# interval (percentage).
 - name: general.smoothScroll.durationToIntervalRatio
   type: RelaxedAtomicInt32
   value: 200
@@ -2878,12 +3048,14 @@
   value: 150
   mirror: always
 
+# This pref and general.smoothScroll.currentVelocityWeighting determine
+# the timing function.
 - name: general.smoothScroll.stopDecelerationWeighting
   type: AtomicFloat
   value: 0.4f
   mirror: always
 
-
+# Alternative smooth scroll physics. ("MSD" = Mass-Spring-Damper)
 - name: general.smoothScroll.msdPhysics.enabled
   type: RelaxedAtomicBool
   value: false
@@ -2976,9 +3148,11 @@
   value: false
   mirror: always
 
+# 0 = Off, 1 = Full, 2 = Tagged Images Only.
+# See eCMSMode in gfx/thebes/gfxPlatform.h.
 - name: gfx.color_management.mode
   type: RelaxedAtomicInt32
-  value: -1
+  value: 2
   mirror: always
 
 # The zero default here should match QCMS_INTENT_DEFAULT from qcms.h
@@ -3065,6 +3239,8 @@
   value: false
   mirror: once
 
+# Whether to defer destruction of Direct2D DrawTargets to the paint thread
+# when using OMTP.
 - name: gfx.direct2d.destroy-dt-on-paintthread
   type: RelaxedAtomicBool
   value: true
@@ -3082,7 +3258,13 @@
 
 - name: gfx.direct3d11.use-double-buffering
   type: RelaxedAtomicBool
+#ifdef XP_WIN
+  # Prefer flipping between two buffers over copying from our back buffer
+  # to the OS.
+  value: @IS_NIGHTLY_BUILD@
+#else
   value: false
+#endif
   mirror: always
 
 - name: gfx.direct3d11.enable-debug-layer
@@ -3100,6 +3282,9 @@
   value: 0
   mirror: once
 
+# Whether to preserve color bitmap tables in fonts (bypassing OTS).
+# Currently these are supported only on platforms where we use Freetype
+# to render fonts (Linux/Gtk and Android).
 - name: gfx.downloadable_fonts.keep_color_bitmaps
   type: RelaxedAtomicBool
   value: false
@@ -3111,14 +3296,16 @@
   value: true
   mirror: always
 
+# Whether to validate OpenType variation tables in fonts.
 - name: gfx.downloadable_fonts.validate_variation_tables
   type: RelaxedAtomicBool
   value: true
   mirror: always
 
+# Whether OTS validation should be applied to OpenType Layout (OTL) tables.
 - name: gfx.downloadable_fonts.otl_validation
   type: RelaxedAtomicBool
-  value: true
+  value: @IS_NOT_RELEASE_OR_BETA@
   mirror: always
 
 - name: gfx.draw-color-bars
@@ -3136,12 +3323,15 @@
   value: false
   mirror: once
 
+# Disable antialiasing of Ahem, for use in tests.
 - name: gfx.font_rendering.ahem_antialias_none
   type: RelaxedAtomicBool
   value: false
   mirror: always
 
 #if defined(XP_MACOSX)
+  # Set to true to revert from HarfBuzz AAT shaping to the old Core Text
+  # backend.
 -   name: gfx.font_rendering.coretext.enabled
     type: RelaxedAtomicBool
     value: false
@@ -3154,6 +3344,7 @@
   mirror: always
   rust: true
 
+#  Whether to enable LayerScope tool and default listening port.
 - name: gfx.layerscope.enabled
   type: RelaxedAtomicBool
   value: false
@@ -3232,6 +3423,8 @@
   value: 0
   mirror: always
 
+# Log severe performance warnings to the error console and profiles.
+# This should be use to quickly find which slow paths are used by test cases.
 - name: gfx.perf-warnings.enabled
   type: RelaxedAtomicBool
   value: false
@@ -3348,7 +3541,7 @@
 
 - name: gfx.webrender.picture-caching
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 - name: gfx.webrender.split-render-roots
@@ -3356,10 +3549,14 @@
   value: false
   mirror: once
 
-- name: gfx.webrender.start-debug-server
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
+#ifdef NIGHTLY_BUILD
+  # Keep this pref hidden on non-nightly builds to avoid people accidentally
+  # turning it on.
+-   name: gfx.webrender.start-debug-server
+    type: RelaxedAtomicBool
+    value: false
+    mirror: always
+#endif
 
 # Use vsync events generated by hardware
 - name: gfx.work-around-driver-bugs
@@ -3617,6 +3814,17 @@
   value: true
   mirror: always
 
+# If true, dispatch the keydown and keyup events on any web apps even during
+# composition.
+- name: intl.ime.hack.on_any_apps.fire_key_events_for_composition
+  type: bool
+#ifdef MOZ_WIDGET_ANDROID
+  value: @IS_EARLY_BETA_OR_EARLIER@
+#else
+  value: false
+#endif
+  mirror: always
+
 #---------------------------------------------------------------------------
 # Prefs starting with "javascript."
 #---------------------------------------------------------------------------
@@ -3645,6 +3853,30 @@
 - name: javascript.options.experimental.await_fix
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+# The amount of time we wait between a request to GC (due to leaving a page) and doing the actual GC, in ms.
+- name: javascript.options.gc_delay
+  type: uint32_t
+  value: 4000
+  mirror: always
+
+# The amount of time we wait from the first request to GC to actually doing the first GC, in ms.
+- name: javascript.options.gc_delay.first
+  type: uint32_t
+  value: 10000
+  mirror: always
+
+# Duration of the dom events full gc delay, in ms.
+- name: javascript.options.gc_delay.full
+  type: uint32_t
+  value: 60000
+  mirror: always
+
+# Maximum amount of time that should elapse between incremental GC slices, in ms.
+- name: javascript.options.gc_delay.interslice
+  type: uint32_t
+  value: 100
   mirror: always
 
 # nsJSEnvironmentObserver observes the memory-pressure notifications and
@@ -3835,6 +4067,16 @@
 - name: layers.dump-host-layers
   type: RelaxedAtomicBool
   value: false
+  mirror: always
+
+- name: layers.compositing-tiles.width
+  type: RelaxedAtomicInt32
+  value: 1024
+  mirror: always
+
+- name: layers.compositing-tiles.height
+  type: RelaxedAtomicInt32
+  value: 1024
   mirror: always
 
 # 0 is "no change" for contrast, positive values increase it, negative values
@@ -4306,6 +4548,14 @@
   value: 4096
   mirror: always
 
+# Allow <number> and <number>/<number> both for <aspect-ratio>
+# https://github.com/w3c/csswg-drafts/issues/3757
+- name: layout.css.aspect-ratio-number.enabled
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+  rust: true
+
 # Is the codepath for using cached scrollbar styles enabled?
 - name: layout.css.cached-scrollbar-styles.enabled
   type: bool
@@ -4318,6 +4568,15 @@
   value: false
   mirror: always
   rust: true
+
+# Set the number of device pixels per CSS pixel. A value <= 0 means choose
+# automatically based on user settings for the platform (e.g., "UI scale factor"
+# on Mac). A positive value is used as-is. This effectively controls the size
+# of a CSS "px". This is only used for windows on the screen, not for printing.
+- name: layout.css.devPixelsPerPx
+  type: AtomicFloat
+  value: -1.0f
+  mirror: always
 
 # text underline offset
 - name: layout.css.text-underline-offset.enabled
@@ -4661,6 +4920,13 @@
   value: @IS_NOT_RELEASE_OR_BETA@
   mirror: always
 
+# Are counters for unimplemented CSS properties enabled?
+- name: layout.css.use-counters-unimplemented.enabled
+  type: RelaxedAtomicBool
+  value: @IS_NOT_RELEASE_OR_BETA@
+  mirror: always
+  rust: true
+
 # Should the :visited selector ever match (otherwise :link matches instead)?
 - name: layout.css.visited_links_enabled
   type: bool
@@ -4940,6 +5206,13 @@
 #---------------------------------------------------------------------------
 # Prefs starting with "mathml."
 #---------------------------------------------------------------------------
+
+# Whether to disable deprecated style attributes background, color, fontfamily,
+# fontsize, fontstyle and fontweight.
+- name: mathml.deprecated_style_attributes.disabled
+  type: bool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: always
 
 # Whether to disable legacy MathML number values that are not valid CSS numbers
 # (e.g. "1234.")
@@ -6074,6 +6347,49 @@
   value: true
   mirror: always
 
+# Single TRR request timeout, in milliseconds
+- name: network.trr.request_timeout_ms
+  type: uint32_t
+  value: 1500
+  mirror: always
+
+# Single TRR request timeout, in milliseconds for mode 3
+- name: network.trr.request_timeout_mode_trronly_ms
+  type: uint32_t
+  value: 30000
+  mirror: always
+
+# Allow the network changed event to get sent when a network topology or setup
+# change is noticed while running.
+- name: network.notify.changed
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+# Allow network detection of IPv6 related changes (bug 1245059)
+- name: network.notify.IPv6
+  type: RelaxedAtomicBool
+# ifdef XP_WIN
+  value: false
+# else
+  value: true
+# endif
+  mirror: always
+
+# IP addresses that are used by netlink service to check whether default route
+# is used for outgoing traffic. They are used just to check routing rules,
+# no packets are sent to those hosts. Initially, addresses of host
+# detectportal.firefox.com were used but they don't necessarily need to be
+# updated when addresses of this host change.
+- name: network.netlink.route.check.IPv4
+  type: String
+  value: "23.219.91.27"
+  mirror: never
+- name: network.netlink.route.check.IPv6
+  type: String
+  value: "2a02:26f0:40::17db:5b1b"
+  mirror: never
+
 #---------------------------------------------------------------------------
 # Prefs starting with "nglayout."
 #---------------------------------------------------------------------------
@@ -6345,6 +6661,12 @@
   value: 2592000   # 30 days (in seconds)
   mirror: always
 
+# Report Anti-tracking warnings to console lazily
+- name: privacy.restrict3rdpartystorage.console.lazy
+  type: bool
+  value: true
+  mirror: always
+
 # Anti-tracking user-interaction expiration.
 - name: privacy.userInteraction.expiration
   type: uint32_t
@@ -6610,7 +6932,7 @@
   mirror: always
 
 - name: toolkit.telemetry.geckoview.batchDurationMS
-  type: uint32_t
+  type: RelaxedAtomicUint32
   value: 5000
   mirror: always
 
@@ -6622,6 +6944,44 @@
 #---------------------------------------------------------------------------
 # Prefs starting with "ui."
 #---------------------------------------------------------------------------
+
+- name: ui.key.generalAccessKey
+  type: int32_t
+  value: -1
+  mirror: always
+
+# Only used if generalAccessKey is -1.
+- name: ui.key.chromeAccess
+  type: int32_t
+#ifdef XP_MACOSX
+  # 0 = disabled, 1 = Shift, 2 = Ctrl, 4 = Alt, 3 =  ctrl+shift, 8 = Meta
+  value: 2
+#else
+  # 0 = disabled, 1 = Shift, 2 = Ctrl, 4 = Alt, 5 =  Alt+Shift,
+  # 8 = Meta, 16 = Win
+  value: 4
+#endif
+  mirror: always
+
+# Only used if generalAccessKey is -1.
+- name: ui.key.contentAccess
+  type: int32_t
+#ifdef XP_MACOSX
+  # 0 = disabled, 1 = Shift, 2 = Ctrl, 4 = Alt, 3 = ctrl+shift, 8 = Meta
+  value: 6
+#else
+  # 0 = disabled, 1 = Shift, 2 = Ctrl, 4 = Alt, 5 =  Alt+Shift,
+  # 8 = Meta, 16 = Win
+  value: 5
+#endif
+  mirror: always
+
+# Negate scroll, true will make the mouse scroll wheel move the screen the
+# same direction as with most desktops or laptops.
+- name: ui.scrolling.negate_wheel_scroll
+  type: bool
+  value: @IS_ANDROID@
+  mirror: always
 
 # If the user puts a finger down on an element and we think the user might be
 # executing a pan gesture, how long do we wait before tentatively deciding the
@@ -6639,6 +6999,11 @@
   value: 10
   mirror: always
 
+- name: ui.use_native_colors
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 # Prevent system colors from being exposed to CSS or canvas.
 - name: ui.use_standins_for_native_colors
   type: RelaxedAtomicBool
@@ -6647,6 +7012,14 @@
 
 # Disable page loading activity cursor by default.
 - name: ui.use_activity_cursor
+  type: bool
+  value: false
+  mirror: always
+
+# Whether context menus should only appear on mouseup instead of mousedown,
+# on OSes where they normally appear on mousedown (macOS, *nix).
+# Note: ignored on Windows (context menus always use mouseup).
+- name: ui.context_menus.after_mouseup
   type: bool
   value: false
   mirror: always

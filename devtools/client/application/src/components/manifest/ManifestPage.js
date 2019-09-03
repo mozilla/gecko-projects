@@ -4,6 +4,7 @@
 
 "use strict";
 
+const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
 const {
   createFactory,
   PureComponent,
@@ -12,50 +13,38 @@ const {
   section,
 } = require("devtools/client/shared/vendor/react-dom-factories");
 
+const { connect } = require("devtools/client/shared/vendor/react-redux");
+
 const ManifestLoader = createFactory(require("../manifest/ManifestLoader"));
 
-const ManifestView = createFactory(require("./ManifestView"));
-const ManifestViewEmpty = createFactory(require("./ManifestViewEmpty"));
-
-const { MANIFEST_DATA } = require("../../constants");
+const Manifest = createFactory(require("./Manifest"));
+const ManifestEmpty = createFactory(require("./ManifestEmpty"));
 
 class ManifestPage extends PureComponent {
-  render() {
-    const isManifestViewEmpty = !MANIFEST_DATA;
-
-    // needs to be replaced with data from ManifestLoader
-    const data = {
-      warnings: MANIFEST_DATA.moz_validation,
-      icons: MANIFEST_DATA.icons,
-      identity: {
-        name: MANIFEST_DATA.name,
-        short_name: MANIFEST_DATA.short_name,
-      },
-      presentation: {
-        display: MANIFEST_DATA.display,
-        orientation: MANIFEST_DATA.orientation,
-        start_url: MANIFEST_DATA.start_url,
-        theme_color: MANIFEST_DATA.theme_color,
-        background_color: MANIFEST_DATA.background_color,
-      },
+  // TODO: Use well-defined types
+  //       See https://bugzilla.mozilla.org/show_bug.cgi?id=1576881
+  static get propTypes() {
+    return {
+      manifest: PropTypes.object,
     };
+  }
+
+  render() {
+    const { manifest } = this.props;
 
     return section(
       {
-        className: `app-page ${isManifestViewEmpty ? "app-page--empty" : ""}`,
+        className: `app-page ${!manifest ? "app-page--empty" : ""}`,
       },
       ManifestLoader({}),
-      isManifestViewEmpty
-        ? ManifestViewEmpty({})
-        : ManifestView({
-            identity: data.identity,
-            warnings: data.warnings,
-            icons: data.icons,
-            presentation: data.presentation,
-          })
+      manifest ? Manifest({ ...manifest }) : ManifestEmpty({})
     );
   }
 }
-
+function mapStateToProps(state) {
+  return {
+    manifest: state.manifest.manifest,
+  };
+}
 // Exports
-module.exports = ManifestPage;
+module.exports = connect(mapStateToProps)(ManifestPage);

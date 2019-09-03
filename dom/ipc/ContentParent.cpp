@@ -4140,7 +4140,7 @@ mozilla::ipc::IPCResult ContentParent::RecvScriptError(
     const nsString& aSourceLine, const uint32_t& aLineNumber,
     const uint32_t& aColNumber, const uint32_t& aFlags,
     const nsCString& aCategory, const bool& aFromPrivateWindow,
-    const bool& aFromChromeContext) {
+    const uint64_t& aInnerWindowId, const bool& aFromChromeContext) {
   return RecvScriptErrorInternal(aMessage, aSourceName, aSourceLine,
                                  aLineNumber, aColNumber, aFlags, aCategory,
                                  aFromPrivateWindow, aFromChromeContext);
@@ -4540,14 +4540,13 @@ mozilla::ipc::IPCResult ContentParent::RecvNotifyTabDestroying(
   return IPC_OK();
 }
 
-mozilla::docshell::POfflineCacheUpdateParent*
+already_AddRefed<mozilla::docshell::POfflineCacheUpdateParent>
 ContentParent::AllocPOfflineCacheUpdateParent(
     const URIParams& aManifestURI, const URIParams& aDocumentURI,
     const PrincipalInfo& aLoadingPrincipalInfo, const bool& aStickDocument) {
   RefPtr<mozilla::docshell::OfflineCacheUpdateParent> update =
       new mozilla::docshell::OfflineCacheUpdateParent();
-  // Use this reference as the IPDL reference.
-  return update.forget().take();
+  return update.forget();
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvPOfflineCacheUpdateConstructor(
@@ -4567,14 +4566,6 @@ mozilla::ipc::IPCResult ContentParent::RecvPOfflineCacheUpdateConstructor(
   }
 
   return IPC_OK();
-}
-
-bool ContentParent::DeallocPOfflineCacheUpdateParent(
-    POfflineCacheUpdateParent* aActor) {
-  // Reclaim the IPDL reference.
-  RefPtr<mozilla::docshell::OfflineCacheUpdateParent> update = dont_AddRef(
-      static_cast<mozilla::docshell::OfflineCacheUpdateParent*>(aActor));
-  return true;
 }
 
 PWebrtcGlobalParent* ContentParent::AllocPWebrtcGlobalParent() {
@@ -4722,13 +4713,10 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   if (thisBrowserHost) {
     nsCOMPtr<nsILoadContext> context = thisBrowserHost->GetLoadContext();
 
-    // TODO: This failure condition is more relaxed than it should be, since
-    // there are some cases where the child process still fails to set the
-    // correct chrome flags. See bug 1576204.
-    if (((aChromeFlags & nsIWebBrowserChrome::CHROME_REMOTE_WINDOW) &&
-         !context->UseRemoteTabs()) ||
-        ((aChromeFlags & nsIWebBrowserChrome::CHROME_FISSION_WINDOW) &&
-         !context->UseRemoteSubframes())) {
+    if ((!!(aChromeFlags & nsIWebBrowserChrome::CHROME_REMOTE_WINDOW) !=
+         context->UseRemoteTabs()) ||
+        (!!(aChromeFlags & nsIWebBrowserChrome::CHROME_FISSION_WINDOW) !=
+         context->UseRemoteSubframes())) {
       return IPC_FAIL(this, "Unexpected aChromeFlags passed");
     }
   }

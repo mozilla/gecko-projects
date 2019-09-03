@@ -170,7 +170,7 @@ void MediaStreamGraphImpl::UpdateCurrentTimeForStreams(
             if (listener.mTrackID == track->GetID()) {
               listener.mListener->NotifyOutput(
                   this, track->GetEnd() - track->GetStart());
-              listener.mListener->NotifyEnded();
+              listener.mListener->NotifyEnded(this);
             }
           }
         }
@@ -1434,13 +1434,11 @@ void MediaStreamGraphImpl::ApplyStreamUpdate(StreamUpdate* aUpdate) {
   }
 }
 
-void MediaStreamGraphImpl::ForceShutDown(
-    media::ShutdownTicket* aShutdownTicket) {
+void MediaStreamGraphImpl::ForceShutDown() {
   MOZ_ASSERT(NS_IsMainThread(), "Must be called on main thread");
   LOG(LogLevel::Debug, ("%p: MediaStreamGraph::ForceShutdown", this));
 
-  if (aShutdownTicket) {
-    MOZ_ASSERT(!mForceShutdownTicket);
+  if (mShutdownBlocker) {
     // Avoid waiting forever for a graph to shut down
     // synchronously.  Reports are that some 3rd-party audio drivers
     // occasionally hang in shutdown (both for us and Chrome).
@@ -1449,7 +1447,6 @@ void MediaStreamGraphImpl::ForceShutDown(
         MediaStreamGraph::AUDIO_CALLBACK_DRIVER_SHUTDOWN_TIMEOUT,
         nsITimer::TYPE_ONE_SHOT);
   }
-  mForceShutdownTicket = aShutdownTicket;
 
   class Message final : public ControlMessage {
    public:
@@ -1460,18 +1457,58 @@ void MediaStreamGraphImpl::ForceShutDown(
     MediaStreamGraphImpl* MOZ_NON_OWNING_REF mGraph;
   };
 
-  AppendMessage(MakeUnique<Message>(this));
+  if (mMainThreadStreamCount > 0 || mMainThreadPortCount > 0) {
+    // If both the stream and port counts are zero, the regular shutdown
+    // sequence will progress shortly to shutdown threads and destroy the graph.
+    AppendMessage(MakeUnique<Message>(this));
+  }
 }
 
 NS_IMETHODIMP
 MediaStreamGraphImpl::Notify(nsITimer* aTimer) {
   MOZ_ASSERT(NS_IsMainThread());
-  NS_ASSERTION(!mForceShutdownTicket,
+  NS_ASSERTION(!mShutdownBlocker,
                "MediaStreamGraph took too long to shut down!");
   // Sigh, graph took too long to shut down.  Stop blocking system
   // shutdown and hope all is well.
-  mForceShutdownTicket = nullptr;
+  RemoveShutdownBlocker();
   return NS_OK;
+}
+
+void MediaStreamGraphImpl::AddShutdownBlocker() {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!mShutdownBlocker);
+
+  class Blocker : public media::ShutdownBlocker {
+    const RefPtr<MediaStreamGraphImpl> mGraph;
+
+   public:
+    Blocker(MediaStreamGraphImpl* aGraph, const nsString& aName)
+        : media::ShutdownBlocker(aName), mGraph(aGraph) {}
+
+    NS_IMETHOD
+    BlockShutdown(nsIAsyncShutdownClient* aProfileBeforeChange) override {
+      mGraph->ForceShutDown();
+      return NS_OK;
+    }
+  };
+
+  // Blocker names must be distinct.
+  nsString blockerName;
+  blockerName.AppendPrintf("MediaStreamGraph %p shutdown", this);
+  mShutdownBlocker = MakeAndAddRef<Blocker>(this, blockerName);
+  nsresult rv = media::GetShutdownBarrier()->AddBlocker(
+      mShutdownBlocker, NS_LITERAL_STRING(__FILE__), __LINE__,
+      NS_LITERAL_STRING("MediaStreamGraph shutdown"));
+  MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
+}
+
+void MediaStreamGraphImpl::RemoveShutdownBlocker() {
+  if (!mShutdownBlocker) {
+    return;
+  }
+  media::GetShutdownBarrier()->RemoveBlocker(mShutdownBlocker);
+  mShutdownBlocker = nullptr;
 }
 
 NS_IMETHODIMP
@@ -1479,9 +1516,6 @@ MediaStreamGraphImpl::GetName(nsACString& aName) {
   aName.AssignLiteral("MediaStreamGraphImpl");
   return NS_OK;
 }
-
-/* static */ StaticRefPtr<nsIAsyncShutdownBlocker>
-    gMediaStreamGraphShutdownBlocker;
 
 namespace {
 
@@ -1530,7 +1564,7 @@ class MediaStreamGraphShutDownRunnable : public Runnable {
     // Safe to access these without the monitor since the graph isn't running.
     // We may be one of several graphs. Drop ticket to eventually unblock
     // shutdown.
-    if (mGraph->mShutdownTimer && !mGraph->mForceShutdownTicket) {
+    if (mGraph->mShutdownTimer && !mGraph->mShutdownBlocker) {
       MOZ_ASSERT(
           false,
           "AudioCallbackDriver took too long to shut down and we let shutdown"
@@ -1557,7 +1591,7 @@ class MediaStreamGraphShutDownRunnable : public Runnable {
     MOZ_ASSERT(mGraph->mUpdateRunnables.IsEmpty());
     mGraph->mPendingUpdateRunnables.Clear();
 
-    mGraph->mForceShutdownTicket = nullptr;
+    mGraph->RemoveShutdownBlocker();
 
     // We can't block past the final LIFECYCLE_WAITING_FOR_STREAM_DESTRUCTION
     // stage, since completion of that stage requires all streams to be freed,
@@ -1674,16 +1708,6 @@ void MediaStreamGraphImpl::RunInStableState(bool aSourceIsMSG) {
         nsCOMPtr<nsIRunnable> event =
             new MediaStreamGraphShutDownRunnable(this);
         mAbstractMainThread->Dispatch(event.forget());
-
-        LOG(LogLevel::Debug, ("%p: Disconnecting MediaStreamGraph", this));
-
-        // Find the graph in the hash table and remove it.
-        for (auto iter = gGraphs.Iter(); !iter.Done(); iter.Next()) {
-          if (iter.UserData() == this) {
-            iter.Remove();
-            break;
-          }
-        }
       }
     } else {
       if (LifecycleStateRef() <= LIFECYCLE_WAITING_FOR_MAIN_THREAD_CLEANUP) {
@@ -1692,26 +1716,12 @@ void MediaStreamGraphImpl::RunInStableState(bool aSourceIsMSG) {
         EnsureNextIterationLocked();
       }
 
-      // If the MediaStreamGraph has more messages going to it, try to revive
-      // it to process those messages. Don't do this if we're in a forced
-      // shutdown or it's a non-realtime graph that has already terminated
-      // processing.
-      if (LifecycleStateRef() == LIFECYCLE_WAITING_FOR_MAIN_THREAD_CLEANUP &&
-          mRealtime && !mForceShutDown) {
-        LifecycleStateRef() = LIFECYCLE_RUNNING;
-        // Revive the MediaStreamGraph since we have more messages going to it.
-        // Note that we need to put messages into its queue before reviving it,
-        // or it might exit immediately.
-        {
-          LOG(LogLevel::Debug,
-              ("%p: Reviving this graph! %s", this,
-               CurrentDriver()->AsAudioCallbackDriver() ? "AudioCallbackDriver"
-                                                        : "SystemClockDriver"));
-          RefPtr<GraphDriver> driver = CurrentDriver();
-          MonitorAutoUnlock unlock(mMonitor);
-          driver->Revive();
-        }
-      }
+      // If this MediaStreamGraph has entered regular (non-forced) shutdown it
+      // is not able to process any more messages. Those messages being added to
+      // the graph in the first place is an error.
+      MOZ_DIAGNOSTIC_ASSERT(mForceShutDown ||
+                            LifecycleStateRef() <
+                                LIFECYCLE_WAITING_FOR_MAIN_THREAD_CLEANUP);
     }
 
     if (LifecycleStateRef() == LIFECYCLE_THREAD_NOT_STARTED) {
@@ -1749,8 +1759,7 @@ void MediaStreamGraphImpl::RunInStableState(bool aSourceIsMSG) {
       }
       mBackMessageQueue.Clear();
       MOZ_ASSERT(mCurrentTaskMessageQueue.IsEmpty());
-      // Stop MediaStreamGraph threads. Do not clear gGraph since
-      // we have outstanding DOM objects that may need it.
+      // Stop MediaStreamGraph threads.
       LifecycleStateRef() = LIFECYCLE_WAITING_FOR_THREAD_SHUTDOWN;
       nsCOMPtr<nsIRunnable> event = new MediaStreamGraphShutDownRunnable(this);
       mAbstractMainThread->Dispatch(event.forget());
@@ -1817,8 +1826,8 @@ void MediaStreamGraphImpl::SignalMainThreadCleanup() {
 
 void MediaStreamGraphImpl::AppendMessage(UniquePtr<ControlMessage> aMessage) {
   MOZ_ASSERT(NS_IsMainThread(), "main thread only");
-  MOZ_ASSERT(!aMessage->GetStream() || !aMessage->GetStream()->IsDestroyed(),
-             "Stream already destroyed");
+  MOZ_ASSERT_IF(aMessage->GetStream(), !aMessage->GetStream()->IsDestroyed());
+  MOZ_DIAGNOSTIC_ASSERT(mMainThreadStreamCount > 0 || mMainThreadPortCount > 0);
 
   if (mDetectedNotRunning &&
       LifecycleStateRef() > LIFECYCLE_WAITING_FOR_MAIN_THREAD_CLEANUP) {
@@ -1837,14 +1846,6 @@ void MediaStreamGraphImpl::AppendMessage(UniquePtr<ControlMessage> aMessage) {
 #endif
     if (IsEmpty() &&
         LifecycleStateRef() >= LIFECYCLE_WAITING_FOR_STREAM_DESTRUCTION) {
-      // Find the graph in the hash table and remove it.
-      for (auto iter = gGraphs.Iter(); !iter.Done(); iter.Next()) {
-        if (iter.UserData() == this) {
-          iter.Remove();
-          break;
-        }
-      }
-
       Destroy();
     }
     return;
@@ -2003,7 +2004,7 @@ void MediaStream::RemoveAllListenersImpl() {
 
   auto trackListeners(mTrackListeners);
   for (auto& l : trackListeners) {
-    l.mListener->NotifyRemoved();
+    l.mListener->NotifyRemoved(Graph());
   }
   mTrackListeners.Clear();
 
@@ -2033,7 +2034,11 @@ void MediaStream::Destroy() {
     }
     void RunDuringShutdown() override { Run(); }
   };
-  GraphImpl()->AppendMessage(MakeUnique<Message>(this));
+  // Keep a reference to the graph, since Message might RunDuringShutdown()
+  // synchronously and make GraphImpl() invalid.
+  RefPtr<MediaStreamGraphImpl> graph = GraphImpl();
+  graph->AppendMessage(MakeUnique<Message>(this));
+  graph->RemoveStream(this);
   // Message::RunDuringShutdown may have removed this stream from the graph,
   // but our kungFuDeathGrip above will have kept this stream alive if
   // necessary.
@@ -2152,10 +2157,10 @@ void MediaStream::AddTrackListenerImpl(
   if (track->IsEnded() &&
       track->GetEnd() <=
           GraphTimeToStreamTime(GraphImpl()->mStateComputedTime)) {
-    l->mListener->NotifyEnded();
+    l->mListener->NotifyEnded(Graph());
   }
   if (GetDisabledTrackMode(aTrackID) == DisabledTrackMode::SILENCE_BLACK) {
-    l->mListener->NotifyEnabledStateChanged(false);
+    l->mListener->NotifyEnabledStateChanged(Graph(), false);
   }
 }
 
@@ -2180,7 +2185,7 @@ void MediaStream::RemoveTrackListenerImpl(MediaStreamTrackListener* aListener,
   for (size_t i = 0; i < mTrackListeners.Length(); ++i) {
     if (mTrackListeners[i].mListener == aListener &&
         mTrackListeners[i].mTrackID == aTrackID) {
-      mTrackListeners[i].mListener->NotifyRemoved();
+      mTrackListeners[i].mListener->NotifyRemoved(Graph());
       mTrackListeners.RemoveElementAt(i);
       return;
     }
@@ -2296,7 +2301,7 @@ void MediaStream::SetTrackEnabledImpl(TrackID aTrackID,
         mDisabledTracks.RemoveElementAt(i);
         for (TrackBound<MediaStreamTrackListener>& l : mTrackListeners) {
           if (l.mTrackID == aTrackID) {
-            l.mListener->NotifyEnabledStateChanged(true);
+            l.mListener->NotifyEnabledStateChanged(Graph(), true);
           }
         }
         return;
@@ -2313,7 +2318,7 @@ void MediaStream::SetTrackEnabledImpl(TrackID aTrackID,
     if (aMode == DisabledTrackMode::SILENCE_BLACK) {
       for (TrackBound<MediaStreamTrackListener>& l : mTrackListeners) {
         if (l.mTrackID == aTrackID) {
-          l.mListener->NotifyEnabledStateChanged(false);
+          l.mListener->NotifyEnabledStateChanged(Graph(), false);
         }
       }
     }
@@ -2965,7 +2970,7 @@ void MediaInputPort::Init() {
     mDest->AddInput(this);
   }
   // mPortCount decremented via MediaInputPort::Destroy's message
-  ++mDest->GraphImpl()->mPortCount;
+  ++mGraph->mPortCount;
 }
 
 void MediaInputPort::Disconnect() {
@@ -3015,7 +3020,11 @@ void MediaInputPort::Destroy() {
     void RunDuringShutdown() override { Run(); }
     MediaInputPort* mPort;
   };
-  GraphImpl()->AppendMessage(MakeUnique<Message>(this));
+  // Keep a reference to the graph, since Message might RunDuringShutdown()
+  // synchronously and make GraphImpl() invalid.
+  RefPtr<MediaStreamGraphImpl> graph = GraphImpl();
+  graph->AppendMessage(MakeUnique<Message>(this));
+  --graph->mMainThreadPortCount;
 }
 
 MediaStreamGraphImpl* MediaInputPort::GraphImpl() { return mGraph; }
@@ -3133,6 +3142,7 @@ already_AddRefed<MediaInputPort> ProcessedMediaStream::AllocateInputPort(
     }
   }
   port->SetGraphImpl(GraphImpl());
+  ++GraphImpl()->mMainThreadPortCount;
   GraphImpl()->AppendMessage(MakeUnique<Message>(port));
   return port.forget();
 }
@@ -3281,35 +3291,6 @@ MediaStreamGraph* MediaStreamGraph::GetInstance(
       GetInstanceIfExists(aWindow, sampleRate));
 
   if (!graph) {
-    if (!gMediaStreamGraphShutdownBlocker) {
-      class Blocker : public media::ShutdownBlocker {
-       public:
-        Blocker()
-            : media::ShutdownBlocker(NS_LITERAL_STRING(
-                  "MediaStreamGraph shutdown: blocking on msg thread")) {}
-
-        NS_IMETHOD
-        BlockShutdown(nsIAsyncShutdownClient* aProfileBeforeChange) override {
-          // Distribute the global async shutdown blocker in a ticket. If there
-          // are zero graphs then shutdown is unblocked when we go out of scope.
-          auto ticket = MakeRefPtr<media::ShutdownTicket>(
-              gMediaStreamGraphShutdownBlocker.get());
-          gMediaStreamGraphShutdownBlocker = nullptr;
-
-          for (auto iter = gGraphs.Iter(); !iter.Done(); iter.Next()) {
-            iter.UserData()->ForceShutDown(ticket);
-          }
-          return NS_OK;
-        }
-      };
-
-      gMediaStreamGraphShutdownBlocker = new Blocker();
-      nsresult rv = media::GetShutdownBarrier()->AddBlocker(
-          gMediaStreamGraphShutdownBlocker, NS_LITERAL_STRING(__FILE__),
-          __LINE__, NS_LITERAL_STRING("MediaStreamGraph shutdown"));
-      MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
-    }
-
     AbstractThread* mainThread;
     if (aWindow) {
       mainThread =
@@ -3334,6 +3315,10 @@ MediaStreamGraph* MediaStreamGraph::GetInstance(
         std::min<uint32_t>(8, CubebUtils::MaxNumberOfChannels());
     graph = new MediaStreamGraphImpl(aGraphDriverRequested, runType, sampleRate,
                                      channelCount, mainThread);
+
+    if (!graph->IsNonRealtime()) {
+      graph->AddShutdownBlocker();
+    }
 
     uint32_t hashkey = WindowToHash(aWindow, sampleRate);
     gGraphs.Put(hashkey, graph);
@@ -3374,7 +3359,7 @@ void MediaStreamGraph::DestroyNonRealtimeInstance(MediaStreamGraph* aGraph) {
 
   MediaStreamGraphImpl* graph = static_cast<MediaStreamGraphImpl*>(aGraph);
 
-  graph->ForceShutDown(nullptr);
+  graph->ForceShutDown();
 }
 
 NS_IMPL_ISUPPORTS(MediaStreamGraphImpl, nsIMemoryReporter, nsITimerCallback,
@@ -3384,13 +3369,10 @@ NS_IMETHODIMP
 MediaStreamGraphImpl::CollectReports(nsIHandleReportCallback* aHandleReport,
                                      nsISupports* aData, bool aAnonymize) {
   MOZ_ASSERT(NS_IsMainThread());
-  {
-    MonitorAutoLock mon(mMonitor);
-    if (LifecycleStateRef() >= LIFECYCLE_WAITING_FOR_THREAD_SHUTDOWN) {
-      // Shutting down, nothing to report.
-      FinishCollectReports(aHandleReport, aData, nsTArray<AudioNodeSizes>());
-      return NS_OK;
-    }
+  if (mMainThreadStreamCount == 0) {
+    // No streams to report.
+    FinishCollectReports(aHandleReport, aData, nsTArray<AudioNodeSizes>());
+    return NS_OK;
   }
 
   class Message final : public ControlMessage {
@@ -3529,11 +3511,40 @@ AudioCaptureStream* MediaStreamGraph::CreateAudioCaptureStream(
 }
 
 void MediaStreamGraph::AddStream(MediaStream* aStream) {
-  MOZ_DIAGNOSTIC_ASSERT(!Destroyed(), "Can't add stream to destroyed graph");
-  NS_ADDREF(aStream);
   MediaStreamGraphImpl* graph = static_cast<MediaStreamGraphImpl*>(this);
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  if (graph->mRealtime) {
+    bool found = false;
+    for (auto iter = gGraphs.ConstIter(); !iter.Done(); iter.Next()) {
+      if (iter.UserData() == graph) {
+        found = true;
+        break;
+      }
+    }
+    MOZ_DIAGNOSTIC_ASSERT(found, "Graph must not be shutting down");
+  }
+#endif
+  NS_ADDREF(aStream);
   aStream->SetGraphImpl(graph);
+  ++graph->mMainThreadStreamCount;
   graph->AppendMessage(MakeUnique<CreateMessage>(aStream));
+}
+
+void MediaStreamGraphImpl::RemoveStream(MediaStream* aStream) {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_DIAGNOSTIC_ASSERT(mMainThreadStreamCount > 0);
+  if (--mMainThreadStreamCount == 0) {
+    LOG(LogLevel::Info, ("MediaStreamGraph %p, last stream %p removed from "
+                         "main thread. Graph will shut down.",
+                         this, aStream));
+    // Find the graph in the hash table and remove it.
+    for (auto iter = gGraphs.Iter(); !iter.Done(); iter.Next()) {
+      if (iter.UserData() == this) {
+        iter.Remove();
+        break;
+      }
+    }
+  }
 }
 
 class GraphStartedRunnable final : public Runnable {

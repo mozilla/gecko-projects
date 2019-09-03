@@ -14,7 +14,9 @@
 
 #include "base/basictypes.h"
 #include "GeckoProfiler.h"
-#include "ProfilerMarkerPayload.h"
+#ifdef MOZ_GECKO_PROFILER
+#  include "ProfilerMarkerPayload.h"
+#endif
 #include "MainThreadUtils.h"
 #include "mozilla/ArenaAllocatorExtensions.h"
 #include "mozilla/ArenaAllocator.h"
@@ -4325,21 +4327,21 @@ static nsresult pref_ReadDefaultPrefs(const RefPtr<nsZipArchive> jarReader,
   return NS_OK;
 }
 
-static void PrefValueToString(const bool* b, nsCString& value) {
-  value = nsCString(*b ? "true" : "false");
+#ifdef MOZ_GECKO_PROFILER
+static nsCString PrefValueToString(const bool* b) {
+  return nsCString(*b ? "true" : "false");
 }
-static void PrefValueToString(const int* i, nsCString& value) {
-  value = nsPrintfCString("%d", *i);
+static nsCString PrefValueToString(const int* i) {
+  return nsPrintfCString("%d", *i);
 }
-static void PrefValueToString(const uint32_t* u, nsCString& value) {
-  value = nsPrintfCString("%d", *u);
+static nsCString PrefValueToString(const uint32_t* u) {
+  return nsPrintfCString("%d", *u);
 }
-static void PrefValueToString(const float* f, nsCString& value) {
-  value = nsPrintfCString("%f", *f);
+static nsCString PrefValueToString(const float* f) {
+  return nsPrintfCString("%f", *f);
 }
-static void PrefValueToString(const nsACString& s, nsCString& value) {
-  value = s;
-}
+static nsCString PrefValueToString(const nsACString& s) { return nsCString(s); }
+#endif
 
 // These preference getter wrappers allow us to look up the value for static
 // preferences based on their native types, rather than manually mapping them to
@@ -4353,24 +4355,20 @@ struct Internals {
     nsresult rv = NS_ERROR_UNEXPECTED;
     NS_ENSURE_TRUE(Preferences::InitStaticMembers(), NS_ERROR_NOT_AVAILABLE);
 
-    TimeStamp prefAccessTime = TimeStamp::Now();
-    Maybe<PrefType> prefType = Nothing();
-    nsCString prefValue{""};
-
     if (Maybe<PrefWrapper> pref = pref_Lookup(aPrefName)) {
       rv = pref->GetValue(aKind, std::forward<T>(aResult));
 
+#ifdef MOZ_GECKO_PROFILER
       if (profiler_feature_active(ProfilerFeature::PreferenceReads)) {
-        prefType = Some(pref->Type());
-        PrefValueToString(aResult, prefValue);
+        profiler_add_marker("PreferenceRead",
+                            JS::ProfilingCategoryPair::OTHER_PreferenceRead,
+                            MakeUnique<PrefMarkerPayload>(
+                                aPrefName, Some(aKind), Some(pref->Type()),
+                                PrefValueToString(aResult), TimeStamp::Now()));
       }
+#endif
     }
-    if (profiler_feature_active(ProfilerFeature::PreferenceReads)) {
-      profiler_add_marker(
-          "PreferenceRead", JS::ProfilingCategoryPair::OTHER_PreferenceRead,
-          MakeUnique<PrefMarkerPayload>(aPrefName, Some(aKind), prefType,
-                                        prefValue, prefAccessTime));
-    }
+
     return rv;
   }
 
@@ -4378,25 +4376,20 @@ struct Internals {
   static nsresult GetSharedPrefValue(const char* aName, T* aResult) {
     nsresult rv = NS_ERROR_UNEXPECTED;
 
-    TimeStamp prefAccessTime = TimeStamp::Now();
-    Maybe<PrefType> prefType = Nothing();
-    nsCString prefValue{""};
-
     if (Maybe<PrefWrapper> pref = pref_SharedLookup(aName)) {
       rv = pref->GetValue(PrefValueKind::User, aResult);
 
+#ifdef MOZ_GECKO_PROFILER
       if (profiler_feature_active(ProfilerFeature::PreferenceReads)) {
-        prefType = Some(pref->Type());
-        PrefValueToString(aResult, prefValue);
+        profiler_add_marker(
+            "PreferenceRead", JS::ProfilingCategoryPair::OTHER_PreferenceRead,
+            MakeUnique<PrefMarkerPayload>(
+                aName, Nothing() /* indicates Shared */, Some(pref->Type()),
+                PrefValueToString(aResult), TimeStamp::Now()));
       }
+#endif
     }
 
-    if (profiler_feature_active(ProfilerFeature::PreferenceReads)) {
-      profiler_add_marker(
-          "PreferenceRead", JS::ProfilingCategoryPair::OTHER_PreferenceRead,
-          MakeUnique<PrefMarkerPayload>(aName, Nothing() /* indicates Shared */,
-                                        prefType, prefValue, prefAccessTime));
-    }
     return rv;
   }
 
@@ -5492,20 +5485,40 @@ static void InitStaticPrefsFromShared() {
   MOZ_DIAGNOSTIC_ASSERT(gSharedMap,
                         "Must be called once gSharedMap has been created");
 
-  // For mirrored prefs we generate some initialization code.
+  // For mirrored static prefs we generate some initialization code. Each
+  // mirror variable is already initialized in the binary with the default
+  // value. If the pref value hasn't changed from the default in the main
+  // process (the common case) then the overwriting here won't change the
+  // mirror variable's value.
+  //
+  // Note that the MOZ_ALWAYS_TRUE calls below can fail in one obscure case:
+  // when a Firefox update occurs and we get a main process from the old binary
+  // (with static prefs {A,B,C,D}) plus a new content process from the new
+  // binary (with static prefs {A,B,C,D,E}). The content process' call to
+  // GetSharedPrefValue() for pref E will fail because the shared pref map was
+  // created by the main process, which doesn't have pref E. (This failure will
+  // be silent because MOZ_ALWAYS_TRUE is a no-op in non-debug builds.)
+  //
+  // This silent failure is safe. The mirror variable for pref E is already
+  // initialized to the default value in the content process, and the main
+  // process cannot have changed pref E because it doesn't know about it!
+  //
+  // Nonetheless, it's useful to have the MOZ_ALWAYS_TRUE here for testing of
+  // debug builds, where this scenario involving inconsistent binaries should
+  // not occur.
 #define NEVER_PREF(name, cpp_type, value)
 #define ALWAYS_PREF(name, base_id, full_id, cpp_type, value) \
   {                                                          \
     StripAtomic<cpp_type> val;                               \
     nsresult rv = Internals::GetSharedPrefValue(name, &val); \
-    MOZ_DIAGNOSTIC_ALWAYS_TRUE(NS_SUCCEEDED(rv));            \
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));                       \
     StaticPrefs::sMirror_##full_id = val;                    \
   }
 #define ONCE_PREF(name, base_id, full_id, cpp_type, value)                   \
   {                                                                          \
     cpp_type val;                                                            \
     nsresult rv = Internals::GetSharedPrefValue(ONCE_PREF_NAME(name), &val); \
-    MOZ_DIAGNOSTIC_ALWAYS_TRUE(NS_SUCCEEDED(rv));                            \
+    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(rv));                                       \
     StaticPrefs::sMirror_##full_id = val;                                    \
   }
 #include "mozilla/StaticPrefListAll.h"

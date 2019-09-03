@@ -62,11 +62,13 @@ const INITIAL_STATE = {
     },
     spocs: {
       spocs_endpoint: "",
+      spocs_per_domain: 1,
       lastUpdated: null,
       data: {}, // {spocs: []}
       loaded: false,
       frequency_caps: [],
       blocked: [],
+      placements: [],
     },
   },
   Search: {
@@ -520,15 +522,27 @@ function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
   const isNotReady = () =>
     !action.data || !prevState.spocs.loaded || !prevState.feeds.loaded;
 
+  const handlePlacements = handleSites => {
+    const { data, placements } = prevState.spocs;
+    const result = {};
+
+    placements.forEach(placement => {
+      const placementSpocs = data[placement.name];
+
+      if (!placementSpocs || !placementSpocs.length) {
+        return;
+      }
+
+      result[placement.name] = handleSites(placementSpocs);
+    });
+    return result;
+  };
+
   const nextState = handleSites => ({
     ...prevState,
     spocs: {
       ...prevState.spocs,
-      data: prevState.spocs.data.spocs
-        ? {
-            spocs: handleSites(prevState.spocs.data.spocs),
-          }
-        : {},
+      data: handlePlacements(handleSites),
     },
     feeds: {
       ...prevState.feeds,
@@ -597,7 +611,21 @@ function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
         spocs: {
           ...INITIAL_STATE.DiscoveryStream.spocs,
           spocs_endpoint:
-            action.data || INITIAL_STATE.DiscoveryStream.spocs.spocs_endpoint,
+            action.data.url ||
+            INITIAL_STATE.DiscoveryStream.spocs.spocs_endpoint,
+          spocs_per_domain:
+            action.data.spocs_per_domain ||
+            INITIAL_STATE.DiscoveryStream.spocs.spocs_per_domain,
+        },
+      };
+    case at.DISCOVERY_STREAM_SPOCS_PLACEMENTS:
+      return {
+        ...prevState,
+        spocs: {
+          ...prevState.spocs,
+          placements:
+            action.data.placements ||
+            INITIAL_STATE.DiscoveryStream.spocs.placements,
         },
       };
     case at.DISCOVERY_STREAM_SPOCS_UPDATE:

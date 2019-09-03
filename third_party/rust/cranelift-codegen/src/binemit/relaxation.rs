@@ -31,21 +31,25 @@ use crate::binemit::{CodeInfo, CodeOffset};
 use crate::cursor::{Cursor, FuncCursor};
 use crate::dominator_tree::DominatorTree;
 use crate::flowgraph::ControlFlowGraph;
-use crate::ir::{Ebb, Function, Inst, InstructionData, Opcode, Value, ValueList};
+use crate::ir::{Function, InstructionData, Opcode};
 use crate::isa::{EncInfo, TargetIsa};
 use crate::iterators::IteratorExtras;
 use crate::regalloc::RegDiversions;
 use crate::timing;
 use crate::CodegenResult;
+use core::convert::TryFrom;
 use log::debug;
+
+#[cfg(feature = "basic-blocks")]
+use crate::ir::{Ebb, Inst, Value, ValueList};
 
 /// Relax branches and compute the final layout of EBB headers in `func`.
 ///
 /// Fill in the `func.offsets` table so the function is ready for binary emission.
 pub fn relax_branches(
     func: &mut Function,
-    cfg: &mut ControlFlowGraph,
-    domtree: &mut DominatorTree,
+    _cfg: &mut ControlFlowGraph,
+    _domtree: &mut DominatorTree,
     isa: &dyn TargetIsa,
 ) -> CodegenResult<CodeInfo> {
     let _tt = timing::relax_branches();
@@ -57,7 +61,8 @@ pub fn relax_branches(
     func.offsets.resize(func.dfg.num_ebbs());
 
     // Start by removing redundant jumps.
-    fold_redundant_jumps(func, cfg, domtree);
+    #[cfg(feature = "basic-blocks")]
+    fold_redundant_jumps(func, _cfg, _domtree);
 
     // Convert jumps to fallthrough instructions where possible.
     fallthroughs(func);
@@ -131,7 +136,11 @@ pub fn relax_branches(
     let jumptables_size = offset - jumptables;
     let rodata = offset;
 
-    // TODO: Once we have constant pools we'll do some processing here to update offset.
+    for constant in func.dfg.constants.entries_mut() {
+        constant.set_offset(offset);
+        offset +=
+            u32::try_from(constant.len()).expect("Constants must have a length that fits in a u32")
+    }
 
     let rodata_size = offset - rodata;
 
@@ -145,6 +154,7 @@ pub fn relax_branches(
 
 /// Folds an instruction if it is a redundant jump.
 /// Returns whether folding was performed (which invalidates the CFG).
+#[cfg(feature = "basic-blocks")]
 fn try_fold_redundant_jump(
     func: &mut Function,
     cfg: &mut ControlFlowGraph,
@@ -242,6 +252,7 @@ fn try_fold_redundant_jump(
 
 /// Redirects `jump` instructions that point to other `jump` instructions to the final destination.
 /// This transformation may orphan some blocks.
+#[cfg(feature = "basic-blocks")]
 fn fold_redundant_jumps(
     func: &mut Function,
     cfg: &mut ControlFlowGraph,

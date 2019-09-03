@@ -46,10 +46,10 @@
         },
         "arrow": {
             "hashes": [
-                "sha256:0186026cfd94ca4fb773f30cc5398289a3027480d335e0e5c0d2772643763137",
-                "sha256:a12de0124d812d15061ed36c7eb4a421fa1b95026a502a0b2062e9ea00fc4446"
+                "sha256:8c53fad4e723a56c02d8df75fd7a879800148d6e51df4713f91502e70a65e1be",
+                "sha256:9f1503d359011a74cd41169652f0eb0232822f58c67c414229f4174a15ae71f9"
             ],
-            "version": "==0.14.5"
+            "version": "==0.14.6"
         },
         "asn1crypto": {
             "hashes": [
@@ -74,11 +74,11 @@
         },
         "awscli": {
             "hashes": [
-                "sha256:07d6651259438aa3f0a5efdaac2a333443bae43c6e2470f1aee1ebde9bf2888c",
-                "sha256:ed36aab89b8b70dce0bf8e6ade87b0d1a53d8cc44976d1a150f1f3cd3ad975a1"
+                "sha256:2ac5d76c637946b381875920bfe0e0f33b5b47ec81cfa3d0a5ea91b8d9cb8d23",
+                "sha256:839cd18a752c333d9b1347b99eafa408cb41f301ffc95e96c7a54519d05fe996"
             ],
             "index": "pypi",
-            "version": "==1.16.220"
+            "version": "==1.16.230"
         },
         "backports.lzma": {
             "hashes": [
@@ -88,10 +88,10 @@
         },
         "botocore": {
             "hashes": [
-                "sha256:0db52327f8d2891cca4c86dfc5cb3b4821d37b84c34804c26b82e775668490f5",
-                "sha256:7983b7624b3f71648a7101fbcb437e3d599b4f79b754e89220e574482a2f8298"
+                "sha256:748fe4ee5cc8b10ef09e52c740b488402d6f6d4d1f0dde0c936da232b42b1bdd",
+                "sha256:9ffd9264e4ad999d2929cfe1c7e413d4cdf76a8bd92f011dce31874f056d2e18"
             ],
-            "version": "==1.12.210"
+            "version": "==1.12.220"
         },
         "certifi": {
             "hashes": [
@@ -190,11 +190,11 @@
         },
         "docutils": {
             "hashes": [
-                "sha256:02aec4bd92ab067f6ff27a38a38a41173bf01bed8f89157768c1573f53e474a6",
-                "sha256:51e64ef2ebfb29cae1faa133b3710143496eca21c530f3f71424d77687764274",
-                "sha256:7a4bd47eaf6596e1295ecb11361139febe29b084a87bf005bf899f9a42edc3c6"
+                "sha256:6c4f696463b79f1fb8ba0c594b63840ebd41f059e92b31957c46b74a4599b6d0",
+                "sha256:9e4d7ecfc600058e07ba661411a2b7de2fd0fafa17d1a7f7361cd47b1175c827",
+                "sha256:a2aeea129088da402665e92e0b25b04b073c04b2dce4ab65caaa38b7ce2e1a99"
             ],
-            "version": "==0.14"
+            "version": "==0.15.2"
         },
         "frozendict": {
             "hashes": [
@@ -301,10 +301,10 @@
         },
         "pyasn1": {
             "hashes": [
-                "sha256:3bb81821d47b17146049e7574ab4bf1e315eb7aead30efe5d6a9ca422c9710be",
-                "sha256:b773d5c9196ffbc3a1e13bdf909d446cad80a039aa3340bcad72f395b76ebc86"
+                "sha256:62cdade8b5530f0b185e09855dd422bc05c0bbff6b72ff61381c09dac7befd8c",
+                "sha256:a9495356ca1d66ed197a0f72b41eb1823cf7ea8b5bd07191673e8147aecf8604"
             ],
-            "version": "==0.4.6"
+            "version": "==0.4.7"
         },
         "pycparser": {
             "hashes": [
@@ -377,11 +377,11 @@
         },
         "scriptworker": {
             "hashes": [
-                "sha256:8043fab593b7ce53649c8b765fa6a37f43f1650ced58e110c9c1db1f7244482d",
-                "sha256:b8aef7bdda37e0a868d951d03feb46246e5c096f60049b6cf38c5e99d0bf27be"
+                "sha256:7f026147f17ce13194d1fe69af243ea1bcb4dc54852cc594e5256dc3417ab8db",
+                "sha256:819ed87aeb53fbd906501a22d2ca77d2ea7b276bd08169d245a1e1b5c51f86d5"
             ],
             "index": "pypi",
-            "version": "==26.0.0"
+            "version": "==26.0.2"
         },
         "sh": {
             "hashes": [
@@ -407,11 +407,11 @@
         },
         "taskcluster": {
             "hashes": [
-                "sha256:079c90de5ebb397816f46453ae5d529ee147c6efe49e69574e0885f29ecdc9c3",
-                "sha256:4bfde00e4edf81454ff1c2988df1f7f3c4df5527a2d0f70e098c56d576b2b2c9",
-                "sha256:b24701e7e43e19f2c82850b445ab00634bb08d4ae786f3f19f8970d7a8ffecd8"
+                "sha256:8242d215a03036c4c5ed3b6b3eed8324e09588c778347405bd7475274a159396",
+                "sha256:826953853e606a80f078250f2459de49f6b75bde89745184c1e5d4e012993e9e",
+                "sha256:c382b8edd78443e9c2c756c62bdec38a59833d6cf34313e430e044e1e3a25da9"
             ],
-            "version": "==16.1.0"
+            "version": "==16.2.0"
         },
         "taskcluster-urls": {
             "hashes": [

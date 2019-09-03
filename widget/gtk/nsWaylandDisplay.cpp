@@ -13,10 +13,15 @@ namespace widget {
 #define GBMLIB_NAME "libgbm.so.1"
 #define DRMLIB_NAME "libdrm.so.2"
 
+#define DMABUF_PREF "widget.wayland_dmabuf_backend.enabled"
+// See WindowSurfaceWayland::RenderingCacheMode for details.
+#define CACHE_MODE_PREF "widget.wayland_cache_mode"
+
 bool nsWaylandDisplay::mIsDMABufEnabled = false;
 // -1 mean the pref was not loaded yet
 int nsWaylandDisplay::mIsDMABufPrefState = -1;
 bool nsWaylandDisplay::mIsDMABufConfigured = false;
+int nsWaylandDisplay::mRenderingCacheModePref = -1;
 
 wl_display* WaylandDisplayGetWLDisplay(GdkDisplay* aGdkDisplay) {
   if (!aGdkDisplay) {
@@ -136,6 +141,16 @@ GbmFormat* nsWaylandDisplay::GetGbmFormat(bool aHasAlpha) {
   return format->mIsSupported ? format : nullptr;
 }
 
+GbmFormat* nsWaylandDisplay::GetExactGbmFormat(int aFormat) {
+  if (aFormat == mARGBFormat.mFormat) {
+    return &mARGBFormat;
+  } else if (aFormat == mXRGBFormat.mFormat) {
+    return &mXRGBFormat;
+  }
+
+  return nullptr;
+}
+
 void nsWaylandDisplay::AddFormatModifier(bool aHasAlpha, int aFormat,
                                          uint32_t mModifierHi,
                                          uint32_t mModifierLo) {
@@ -157,10 +172,10 @@ static void dmabuf_modifiers(void* data,
                              uint32_t modifier_lo) {
   auto display = reinterpret_cast<nsWaylandDisplay*>(data);
   switch (format) {
-    case DRM_FORMAT_ARGB8888:
+    case GBM_FORMAT_ARGB8888:
       display->AddFormatModifier(true, format, modifier_hi, modifier_lo);
       break;
-    case DRM_FORMAT_XRGB8888:
+    case GBM_FORMAT_XRGB8888:
       display->AddFormatModifier(false, format, modifier_hi, modifier_lo);
       break;
     default:
@@ -307,14 +322,15 @@ nsWaylandDisplay::nsWaylandDisplay(wl_display* aDisplay)
   wl_registry_add_listener(mRegistry, &registry_listener, this);
 
   if (NS_IsMainThread()) {
-    // We can't load the preference from compositor/render thread,
-    // only from main one. So we can't call it directly from
-    // nsWaylandDisplay::IsDMABufEnabled() as it can be called from various
-    // threads.
+    // We can't load the preference from compositor/render thread
+    // so load all Wayland prefs here.
     if (mIsDMABufPrefState == -1) {
-      mIsDMABufPrefState =
-          Preferences::GetBool("widget.wayland_dmabuf_backend.enabled", false);
+      mIsDMABufPrefState = Preferences::GetBool(DMABUF_PREF, false);
     }
+    if (mRenderingCacheModePref == -1) {
+      mRenderingCacheModePref = Preferences::GetInt(CACHE_MODE_PREF, 0);
+    }
+
     // Use default event queue in main thread operated by Gtk+.
     mEventQueue = nullptr;
     wl_display_roundtrip(mDisplay);
@@ -388,6 +404,7 @@ void* nsGbmLib::sXf86DrmLibHandle = nullptr;
 bool nsGbmLib::sLibLoaded = false;
 CreateDeviceFunc nsGbmLib::sCreateDevice;
 CreateFunc nsGbmLib::sCreate;
+ImportFunc nsGbmLib::sImport;
 CreateWithModifiersFunc nsGbmLib::sCreateWithModifiers;
 GetModifierFunc nsGbmLib::sGetModifier;
 GetStrideFunc nsGbmLib::sGetStride;
@@ -399,6 +416,7 @@ GetPlaneCountFunc nsGbmLib::sGetPlaneCount;
 GetHandleForPlaneFunc nsGbmLib::sGetHandleForPlane;
 GetStrideForPlaneFunc nsGbmLib::sGetStrideForPlane;
 GetOffsetFunc nsGbmLib::sGetOffset;
+DeviceIsFormatSupportedFunc nsGbmLib::sDeviceIsFormatSupported;
 DrmPrimeHandleToFDFunc nsGbmLib::sDrmPrimeHandleToFD;
 
 bool nsGbmLib::IsAvailable() {
@@ -406,16 +424,19 @@ bool nsGbmLib::IsAvailable() {
     return false;
   }
   return sCreateDevice != nullptr && sCreate != nullptr &&
-         sCreateWithModifiers != nullptr && sGetModifier != nullptr &&
-         sGetStride != nullptr && sGetFd != nullptr && sDestroy != nullptr &&
-         sMap != nullptr && sUnmap != nullptr;
+         sCreateWithModifiers != nullptr && sImport != nullptr &&
+         sGetModifier != nullptr && sGetStride != nullptr &&
+         sGetFd != nullptr && sDestroy != nullptr && sMap != nullptr &&
+         sUnmap != nullptr && sGetPlaneCount != nullptr &&
+         sGetHandleForPlane != nullptr && sGetStrideForPlane != nullptr &&
+         sGetOffset != nullptr && sDeviceIsFormatSupported != nullptr &&
+         sDrmPrimeHandleToFD != nullptr;
 }
 
 bool nsGbmLib::IsModifierAvailable() {
-  if (!Load()) {
-    return false;
-  }
-  return sDrmPrimeHandleToFD != nullptr;
+  // Disable the modifiers for now. We may use modifiers for 3D rendering
+  // only but not for cairo/skia backends which are used now.
+  return false;
 }
 
 bool nsGbmLib::Load() {
@@ -434,6 +455,7 @@ bool nsGbmLib::Load() {
     sCreate = (CreateFunc)dlsym(sGbmLibHandle, "gbm_bo_create");
     sCreateWithModifiers = (CreateWithModifiersFunc)dlsym(
         sGbmLibHandle, "gbm_bo_create_with_modifiers");
+    sImport = (ImportFunc)dlsym(sGbmLibHandle, "gbm_bo_import");
     sGetModifier = (GetModifierFunc)dlsym(sGbmLibHandle, "gbm_bo_get_modifier");
     sGetStride = (GetStrideFunc)dlsym(sGbmLibHandle, "gbm_bo_get_stride");
     sGetFd = (GetFdFunc)dlsym(sGbmLibHandle, "gbm_bo_get_fd");
@@ -447,6 +469,8 @@ bool nsGbmLib::Load() {
     sGetStrideForPlane = (GetStrideForPlaneFunc)dlsym(
         sGbmLibHandle, "gbm_bo_get_stride_for_plane");
     sGetOffset = (GetOffsetFunc)dlsym(sGbmLibHandle, "gbm_bo_get_offset");
+    sDeviceIsFormatSupported = (DeviceIsFormatSupportedFunc)dlsym(
+        sGbmLibHandle, "gbm_device_is_format_supported");
 
     sXf86DrmLibHandle = dlopen(DRMLIB_NAME, RTLD_LAZY | RTLD_LOCAL);
     if (sXf86DrmLibHandle) {

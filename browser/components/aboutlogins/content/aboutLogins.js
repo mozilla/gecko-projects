@@ -28,6 +28,7 @@ gElements.loginFilter.focus();
 function updateNoLogins() {
   document.documentElement.classList.toggle("no-logins", numberOfLogins == 0);
   gElements.loginList.classList.toggle("no-logins", numberOfLogins == 0);
+  gElements.loginItem.classList.toggle("no-logins", numberOfLogins == 0);
 }
 
 window.addEventListener("AboutLoginsChromeToContent", event => {
@@ -36,10 +37,6 @@ window.addEventListener("AboutLoginsChromeToContent", event => {
       gElements.loginList.setLogins(event.detail.value);
       numberOfLogins = event.detail.value.length;
       updateNoLogins();
-      break;
-    }
-    case "InitialInfo": {
-      gElements.loginFooter.hidden = event.detail.value.hideMobileFooter;
       break;
     }
     case "LocalizeBadges": {
@@ -69,8 +66,13 @@ window.addEventListener("AboutLoginsChromeToContent", event => {
       gElements.loginList.addFavicons(event.detail.value);
       break;
     }
+    case "ShowLoginItemError": {
+      gElements.loginItem.showLoginItemError(event.detail.value);
+      break;
+    }
     case "SyncState": {
       gElements.fxAccountsButton.updateState(event.detail.value);
+      gElements.loginFooter.hidden = event.detail.value.hideMobileFooter;
       break;
     }
     case "UpdateBreaches": {

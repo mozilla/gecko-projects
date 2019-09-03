@@ -54,6 +54,28 @@ class UrlbarInput {
     this.window = this.textbox.ownerGlobal;
     this.document = this.window.document;
     this.window.addEventListener("unload", this);
+
+    // Create the panel to contain results.
+    this.textbox.appendChild(
+      this.window.MozXULElement.parseXULToFragment(`
+        <vbox class="urlbarView"
+              role="group"
+              tooltip="aHTMLTooltip"
+              hidden="true">
+          <html:div class="urlbarView-body-outer">
+            <html:div class="urlbarView-body-inner">
+              <html:div id="urlbar-results"
+                        class="urlbarView-results"
+                        role="listbox"/>
+            </html:div>
+          </html:div>
+          <hbox class="search-one-offs"
+                compact="true"
+                includecurrentengine="true"
+                disabletab="true"/>
+        </vbox>
+      `)
+    );
     this.panel = this.textbox.querySelector(".urlbarView");
 
     this.megabar = UrlbarPrefs.get("megabar");
@@ -209,6 +231,7 @@ class UrlbarInput {
     }
     this.dropmarker.removeEventListener("mousedown", this);
 
+    this.view.panel.remove();
     this.endLayoutBreakout(true);
 
     // When uninit is called due to exiting the browser's customize mode,
@@ -866,6 +889,7 @@ class UrlbarInput {
     }
 
     this.textbox.style.setProperty("--urlbar-width", px(inputRect.width));
+    this.textbox.style.setProperty("--urlbar-height", px(inputRect.height));
 
     let toolbarHeight = getBoundsWithoutFlushing(
       this.textbox.closest("toolbar")
@@ -884,16 +908,18 @@ class UrlbarInput {
     );
     this._layoutBreakoutPlaceholder.style.height = px(inputRect.height);
     this.textbox.before(this._layoutBreakoutPlaceholder);
+    this.setAttribute("breakout", "true");
   }
 
   endLayoutBreakout(force) {
     if (
       !force &&
-      (this.isOpen ||
+      (this.view.isOpen ||
         (this.focused && !this.textbox.classList.contains("hidden-focus")))
     ) {
       return;
     }
+    this.removeAttribute("breakout");
     if (this._layoutBreakoutPlaceholder) {
       this._layoutBreakoutPlaceholder.remove();
       this._layoutBreakoutPlaceholder = null;

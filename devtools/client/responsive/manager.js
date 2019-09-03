@@ -58,12 +58,6 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(this, "l10n", "devtools/client/responsive/utils/l10n");
 loader.lazyRequireGetter(
   this,
-  "EmulationFront",
-  "devtools/shared/fronts/emulation",
-  true
-);
-loader.lazyRequireGetter(
-  this,
   "PriorityLevels",
   "devtools/client/shared/components/NotificationBox",
   true
@@ -423,11 +417,18 @@ ResponsiveUI.prototype = {
     // our Zoom UI update event would be overwritten. After this function, future
     // changes to zoom levels will send Zoom UI update events in an order that
     // keeps the Zoom UI synchronized with the RDM content zoom levels.
-    const fullZoom = this.tab.linkedBrowser.fullZoom;
-    const textZoom = this.tab.linkedBrowser.textZoom;
+    const rdmContent = this.tab.linkedBrowser;
+    const rdmViewport = ui.toolWindow;
 
-    ui.toolWindow.docShell.contentViewer.fullZoom = 1;
-    ui.toolWindow.docShell.contentViewer.textZoom = 1;
+    const fullZoom = rdmContent.fullZoom;
+    const textZoom = rdmContent.textZoom;
+
+    rdmViewport.docShell.contentViewer.fullZoom = 1;
+    rdmViewport.docShell.contentViewer.textZoom = 1;
+
+    // Listen to FullZoomChange events coming from the linkedBrowser,
+    // so that we can zoom the size of the viewport by the same amount.
+    rdmContent.addEventListener("FullZoomChange", this);
 
     this.tab.addEventListener("BeforeTabRemotenessChange", this);
 
@@ -445,14 +446,14 @@ ResponsiveUI.prototype = {
     // Show the settings onboarding tooltip
     if (Services.prefs.getBoolPref(SHOW_SETTING_TOOLTIP_PREF)) {
       this.settingOnboardingTooltip = new SettingOnboardingTooltip(
-        ui.toolWindow.document
+        rdmViewport.document
       );
     }
 
     // Re-apply our cached zoom levels. Other Zoom UI update events have finished
     // by now.
-    this.tab.linkedBrowser.fullZoom = fullZoom;
-    this.tab.linkedBrowser.textZoom = textZoom;
+    rdmContent.fullZoom = fullZoom;
+    rdmContent.textZoom = textZoom;
 
     // Non-blocking message to tool UI to start any delayed init activities
     message.post(this.toolWindow, "post-init");
@@ -492,6 +493,7 @@ ResponsiveUI.prototype = {
       await this.inited;
     }
 
+    this.tab.linkedBrowser.removeEventListener("FullZoomChange", this);
     this.tab.removeEventListener("TabClose", this);
     this.tab.removeEventListener("BeforeTabRemotenessChange", this);
     this.browserWindow.removeEventListener("unload", this);
@@ -552,22 +554,13 @@ ResponsiveUI.prototype = {
 
   async connectToServer() {
     // The client being instantiated here is separate from the toolbox. It is being used
-    // separately and has a life cycle that doesn't correspond to the toolbox. As a
-    // result, it does not have a target, so we are not using `target.getFront` here. See
-    // also the implementation for about:debugging
+    // separately and has a life cycle that doesn't correspond to the toolbox.
     DebuggerServer.init();
     DebuggerServer.registerAllActors();
     this.client = new DebuggerClient(DebuggerServer.connectPipe());
     await this.client.connect();
     const targetFront = await this.client.mainRoot.getTab();
-    this.emulationFront = new EmulationFront(this.client);
-    // Because we are not using getFront (see previous comment), we have to do what it
-    // does and manually set the front's actor ID here.
-    // Once bug 1465635 is resolved, we will be able to use getFront from here and remove
-    // this.
-    this.emulationFront.actorID =
-      targetFront.targetForm[this.emulationFront.formAttributeName];
-    this.emulationFront.manage(this.emulationFront);
+    this.emulationFront = await targetFront.getFront("emulation");
   },
 
   /**
@@ -589,11 +582,15 @@ ResponsiveUI.prototype = {
   },
 
   handleEvent(event) {
-    const { browserWindow, tab } = this;
+    const { browserWindow, tab, toolWindow } = this;
 
     switch (event.type) {
       case "message":
         this.handleMessage(event);
+        break;
+      case "FullZoomChange":
+        const zoom = tab.linkedBrowser.fullZoom;
+        toolWindow.setViewportZoom(zoom);
         break;
       case "BeforeTabRemotenessChange":
       case "TabClose":

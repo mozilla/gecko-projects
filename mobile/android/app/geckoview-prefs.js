@@ -2,6 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+// Non-static prefs that are specific to GeckoView belong in this file (unless
+// there is a compelling and documented reason for them to belong in another
+// file). Note that non-static prefs that are shared by GeckoView and Firefox
+// for Android are in mobile.js, which this file includes.
+//
 // Please indent all prefs defined within #ifdef/#ifndef conditions. This
 // improves readability, particular for conditional blocks that exceed a single
 // screen.
@@ -16,6 +21,9 @@ pref("dom.ipc.keepProcessesAlive.web", 1);
 pref("dom.ipc.processCount", 1);
 pref("dom.ipc.processHangMonitor", true);
 pref("dom.ipc.processPrelaunch.enabled", false);
+
+// Enable hang reports
+pref("dom.ipc.reportProcessHangs", true);
 
 // Tell Telemetry that we're in GeckoView mode.
 pref("toolkit.telemetry.isGeckoViewMode", true);

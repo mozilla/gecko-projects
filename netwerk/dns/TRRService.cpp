@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsICaptivePortalService.h"
+#include "nsIParentalControlsService.h"
 #include "nsIObserverService.h"
 #include "nsIURIMutator.h"
 #include "nsNetUtil.h"
@@ -12,6 +13,7 @@
 #include "TRRService.h"
 
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_network.h"
 #include "mozilla/Tokenizer.h"
 
 static const char kOpenCaptivePortalLoginEvent[] = "captive-portal-login";
@@ -38,7 +40,6 @@ TRRService::TRRService()
     : mInitialized(false),
       mMode(0),
       mTRRBlacklistExpireTime(72 * 3600),
-      mTRRTimeout(3000),
       mLock("trrservice"),
       mConfirmationNS(NS_LITERAL_CSTRING("example.com")),
       mWaitForCaptive(true),
@@ -50,7 +51,8 @@ TRRService::TRRService()
       mClearTRRBLStorage(false),
       mConfirmationState(CONFIRM_INIT),
       mRetryConfirmInterval(1000),
-      mTRRFailures(0) {
+      mTRRFailures(0),
+      mParentalControlEnabled(false) {
   MOZ_ASSERT(NS_IsMainThread(), "wrong thread");
 }
 
@@ -90,12 +92,24 @@ nsresult TRRService::Init() {
          captiveState, (int)mCaptiveIsPassed));
   }
 
+  GetParentalControlEnabledInternal();
+
   ReadPrefs(nullptr);
 
   gTRRService = this;
 
   LOG(("Initialized TRRService\n"));
   return NS_OK;
+}
+
+void TRRService::GetParentalControlEnabledInternal() {
+  nsCOMPtr<nsIParentalControlsService> pc =
+      do_CreateInstance("@mozilla.org/parental-controls-service;1");
+  if (pc) {
+    pc->GetParentalControlsEnabled(&mParentalControlEnabled);
+    LOG(("TRRService::GetParentalControlEnabledInternal=%d\n",
+         mParentalControlEnabled));
+  }
 }
 
 bool TRRService::Enabled() {
@@ -241,13 +255,6 @@ nsresult TRRService::ReadPrefs(const char* name) {
       mTRRBlacklistExpireTime = secs;
     }
   }
-  if (!name || !strcmp(name, TRR_PREF("request-timeout"))) {
-    // number of milliseconds
-    uint32_t ms;
-    if (NS_SUCCEEDED(Preferences::GetUint(TRR_PREF("request-timeout"), &ms))) {
-      mTRRTimeout = ms;
-    }
-  }
   if (!name || !strcmp(name, TRR_PREF("early-AAAA"))) {
     bool tmp;
     if (NS_SUCCEEDED(Preferences::GetBool(TRR_PREF("early-AAAA"), &tmp))) {
@@ -291,6 +298,16 @@ nsresult TRRService::ReadPrefs(const char* name) {
       !strcmp(name, kCaptivedetectCanonicalURL)) {
     nsAutoCString excludedDomains;
     Preferences::GetCString(TRR_PREF("excluded-domains"), excludedDomains);
+
+    mExcludedDomains.Clear();
+    nsCCharSeparatedTokenizer tokenizer(
+        excludedDomains, ',', nsCCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
+    while (tokenizer.hasMoreTokens()) {
+      nsAutoCString token(tokenizer.nextToken());
+      LOG(("TRRService::ReadPrefs excluded-domains host:[%s]\n", token.get()));
+      mExcludedDomains.PutEntry(token);
+    }
+
     nsAutoCString canonicalSiteURL;
     Preferences::GetCString(kCaptivedetectCanonicalURL, canonicalSiteURL);
 
@@ -300,20 +317,9 @@ nsresult TRRService::ReadPrefs(const char* name) {
     if (NS_SUCCEEDED(rv)) {
       nsAutoCString host;
       uri->GetHost(host);
-
-      if (!excludedDomains.IsEmpty() && excludedDomains.Last() != ',') {
-        excludedDomains.AppendLiteral(",");
-      }
-      excludedDomains.Append(host);
-    }
-
-    mExcludedDomains.Clear();
-    nsCCharSeparatedTokenizer tokenizer(
-        excludedDomains, ',', nsCCharSeparatedTokenizer::SEPARATOR_OPTIONAL);
-    while (tokenizer.hasMoreTokens()) {
-      nsAutoCString token(tokenizer.nextToken());
-      LOG(("TRRService::ReadPrefs excluded-domains host:[%s]\n", token.get()));
-      mExcludedDomains.PutEntry(token);
+      LOG(("TRRService::ReadPrefs excluded-domains captive portal URL:[%s]\n",
+           host.get()));
+      mExcludedDomains.PutEntry(host);
     }
   }
 
@@ -330,6 +336,14 @@ nsresult TRRService::GetCredentials(nsCString& result) {
   MutexAutoLock lock(mLock);
   result = mPrivateCred;
   return NS_OK;
+}
+
+uint32_t TRRService::GetRequestTimeout() {
+  if (mMode == MODE_TRRONLY) {
+    return StaticPrefs::network_trr_request_timeout_mode_trronly_ms();
+  }
+
+  return StaticPrefs::network_trr_request_timeout_ms();
 }
 
 nsresult TRRService::Start() {

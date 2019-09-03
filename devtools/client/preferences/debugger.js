@@ -2,6 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
+// Most devtools prefs are found in browser/app/profile/firefox.js. The
+// debugger prefs are separate so they can be easily mirrored to the debugger
+// project on GitHub, here:
+// https://github.com/firefox-devtools/debugger/blob/master/assets/panel/prefs.js
+
 // Enable the Debugger
 pref("devtools.debugger.enabled", true);
 pref("devtools.debugger.chrome-debugging-host", "localhost");
@@ -31,13 +36,13 @@ pref("devtools.debugger.ui.framework-grouping-on", true);
 pref("devtools.debugger.ui.editor-wrapping", false);
 pref("devtools.debugger.call-stack-visible", true);
 pref("devtools.debugger.scopes-visible", true);
-pref("devtools.debugger.component-visible", true);
-pref("devtools.debugger.workers-visible", true);
+pref("devtools.debugger.component-visible", false);
+pref("devtools.debugger.workers-visible", false);
 pref("devtools.debugger.breakpoints-visible", true);
-pref("devtools.debugger.expressions-visible", true);
-pref("devtools.debugger.dom-mutation-breakpoints-visible", true);
-pref("devtools.debugger.xhr-breakpoints-visible", true);
-pref("devtools.debugger.event-listeners-visible", true);
+pref("devtools.debugger.expressions-visible", false);
+pref("devtools.debugger.dom-mutation-breakpoints-visible", false);
+pref("devtools.debugger.xhr-breakpoints-visible", false);
+pref("devtools.debugger.event-listeners-visible", false);
 pref("devtools.debugger.start-panel-collapsed", false);
 pref("devtools.debugger.end-panel-collapsed", false);
 pref("devtools.debugger.start-panel-size", 300);
@@ -75,7 +80,7 @@ pref("devtools.debugger.features.map-expression-bindings", true);
 pref("devtools.debugger.features.xhr-breakpoints", true);
 pref("devtools.debugger.features.original-blackbox", true);
 pref("devtools.debugger.features.event-listeners-breakpoints", true);
-pref("devtools.debugger.features.dom-mutation-breakpoints", false);
+pref("devtools.debugger.features.dom-mutation-breakpoints", true);
 pref("devtools.debugger.features.log-points", true);
 pref("devtools.debugger.features.overlay-step-buttons", false);
-pref("devtools.debugger.features.inline-preview", false);
+pref("devtools.debugger.features.inline-preview", true);

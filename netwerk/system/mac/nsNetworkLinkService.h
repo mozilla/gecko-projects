@@ -8,6 +8,7 @@
 #include "nsINetworkLinkService.h"
 #include "nsIObserver.h"
 #include "mozilla/Mutex.h"
+#include "mozilla/TimeStamp.h"
 
 #include <SystemConfiguration/SCNetworkReachability.h>
 #include <SystemConfiguration/SystemConfiguration.h>
@@ -30,9 +31,6 @@ class nsNetworkLinkService : public nsINetworkLinkService, public nsIObserver {
   bool mLinkUp;
   bool mStatusKnown;
 
-  // Toggles allowing the sending of network-changed event.
-  bool mAllowChangedEvent;
-
   SCNetworkReachabilityRef mReachability;
   CFRunLoopRef mCFRunLoop;
   CFRunLoopSourceRef mRunLoopSource;
@@ -49,6 +47,9 @@ class nsNetworkLinkService : public nsINetworkLinkService, public nsIObserver {
 
   mozilla::Mutex mMutex;
   nsCString mNetworkId;
+
+  // Time stamp of last NS_NETWORK_LINK_DATA_CHANGED event
+  mozilla::TimeStamp mNetworkChangeTime;
 };
 
 #endif /* NSNETWORKLINKSERVICEMAC_H_ */

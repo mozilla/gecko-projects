@@ -6,7 +6,8 @@
 
 %define fieldBorderColor hsla(240,5%,5%,.25)
 %define fieldHoverBorderColor hsla(240,5%,5%,.35)
-%define urlbarBreakoutExtend 4px
+%define urlbarBreakoutVerticalExtend 4px
+%define urlbarBreakoutHorizontalExtend 55px
 
 :root {
   --toolbar-field-focus-border-color: Highlight;
@@ -84,25 +85,23 @@
   border-color: var(--toolbar-field-focus-border-color);
 }
 
-#urlbar.megabar:not(.hidden-focus)[focused="true"],
-#urlbar.megabar[open="true"] {
+#urlbar[breakout] {
   position: absolute;
-  z-index: 2;
+  /* The z-index needs to be big enough to trump other positioned UI pieces
+     that we want to overlay. 3 is used in the tab bar. */
+  z-index: 3;
   top: 0;
-  margin-top: -@urlbarBreakoutExtend@;
-  margin-inline-start: -@urlbarBreakoutExtend@;
-  width: calc(var(--urlbar-width) + 2 * @urlbarBreakoutExtend@);
-  min-height: calc(var(--urlbar-toolbar-height) + 2 * @urlbarBreakoutExtend@);
-  padding: calc(3px + @urlbarBreakoutExtend@) 0;
+  margin-top: -@urlbarBreakoutVerticalExtend@;
+  margin-inline-start: -@urlbarBreakoutHorizontalExtend@;
+  width: calc(var(--urlbar-width) + 2 * @urlbarBreakoutHorizontalExtend@);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
 }
 
-#urlbar.megabar[open="true"] {
-  padding-bottom: 0 !important;
-}
-
-#urlbar.megabar:not(.hidden-focus)[focused="true"] > #urlbar-input-container,
-#urlbar.megabar[open="true"] > #urlbar-input-container {
+#urlbar[breakout] > #urlbar-input-container {
+  height: calc(var(--urlbar-toolbar-height) + 2 * @urlbarBreakoutVerticalExtend@ - 2px /* urlbar border */);
   width: 100%;
+  padding-block: calc(@urlbarBreakoutVerticalExtend@ + (var(--urlbar-toolbar-height) - var(--urlbar-height)) / 2);
+  padding-inline: @urlbarBreakoutHorizontalExtend@;
 }
 
 #urlbar:not(.hidden-focus):-moz-lwtheme[focused="true"],

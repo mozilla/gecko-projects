@@ -297,6 +297,33 @@ def using_ccache(ccache, ccache_is_sccache):
 def using_sccache(ccache, ccache_is_sccache):
     return ccache and ccache_is_sccache
 
+js_option(env='RUSTC_WRAPPER', nargs=1,
+          help='Wrap rust compilation with given tool')
+
+@depends(ccache, ccache_is_sccache, 'RUSTC_WRAPPER')
+@imports(_from='textwrap', _import='dedent')
+@imports('os')
+def check_sccache_version(ccache, ccache_is_sccache, rustc_wrapper):
+    sccache_min_version = Version('0.2.10')
+
+    def check_version(path):
+        out = check_cmd_output(path, '--version')
+        version = Version(out.rstrip().split()[-1])
+        if version < sccache_min_version:
+            die(dedent('''\
+            sccache %s or later is required. sccache in use at %s has
+            version %s.
+
+            Please upgrade or acquire a new version with |./mach bootstrap|.
+            '''), sccache_min_version, path, version)
+
+    if ccache and ccache_is_sccache:
+        check_version(ccache)
+
+    if (rustc_wrapper and
+        (os.path.splitext(os.path.basename(rustc_wrapper[0]))[0].lower() ==
+         'sccache')):
+        check_version(rustc_wrapper[0])
 
 set_config('MOZ_USING_CCACHE', using_ccache)
 set_config('MOZ_USING_SCCACHE', using_sccache)
@@ -1886,8 +1913,6 @@ def rust_compile_flags(opt_level, debug_rust, debug_symbols, frame_pointers):
 # Rust incremental compilation
 # ==============================================================
 
-js_option(env='RUSTC_WRAPPER', nargs=1,
-          help='Wrap rust compilation with given tool')
 
 js_option('--disable-cargo-incremental',
           help='Disable incremental rust compilation.')
@@ -1958,8 +1983,17 @@ option('--enable-gold',
 
 imply_option('--enable-linker', 'gold', when='--enable-gold')
 
+@depends(target, developer_options)
+def enable_linker_default(target, developer_options):
+    # x86-64 gold has bugs in how it lays out .note.* sections. See bug 1573820.
+    # lld is faster, so prefer that for developer builds.
+    if target.os == 'Android' and target.cpu == 'x86_64':
+        return 'lld' if developer_options else 'bfd'
+
+
 js_option('--enable-linker', nargs=1,
-          help='Select the linker {bfd, gold, ld64, lld, lld-*}',
+          help='Select the linker {bfd, gold, ld64, lld, lld-*}{|}',
+          default=enable_linker_default,
           when=is_linker_option_enabled)
 
 
@@ -2016,22 +2050,20 @@ def select_linker(linker, c_compiler, developer_options, enable_gold,
         env = dict(os.environ)
         env['LD_PRINT_OPTIONS'] = '1'
         retcode, stdout, stderr = get_cmd_output(*cmd, env=env)
-        cmd_output = stdout.decode('utf-8')
-        stderr = stderr.decode('utf-8')
         if retcode == 1 and 'Logging ld64 options' in stderr:
             kind = 'ld64'
 
         elif retcode != 0:
             return None
 
-        elif 'GNU ld' in cmd_output:
+        elif 'GNU ld' in stdout:
             # We are using the normal linker
             kind = 'bfd'
 
-        elif 'GNU gold' in cmd_output:
+        elif 'GNU gold' in stdout:
             kind = 'gold'
 
-        elif 'LLD' in cmd_output:
+        elif 'LLD' in stdout:
             kind = 'lld'
 
         else:

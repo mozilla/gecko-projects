@@ -23,7 +23,6 @@ import sys
 import time
 
 from collections import (
-    Iterable,
     OrderedDict,
 )
 from io import (
@@ -1297,24 +1296,6 @@ def indented_repr(o, indent=4):
     return ''.join(recurse_indented_repr(o, 0))
 
 
-# Please do not use this function. It's only kept for backwards compatibility
-# with older config.status files that may lay around before a CLOBBER.
-def encode(obj, encoding='utf-8'):
-    '''Recursively encode unicode strings with the given encoding.'''
-    if isinstance(obj, dict):
-        return {
-            encode(k, encoding): encode(v, encoding)
-            for k, v in six.iteritems(obj)
-        }
-    if isinstance(obj, bytes):
-        return obj
-    if isinstance(obj, six.text_type):
-        return obj.encode(encoding)
-    if isinstance(obj, Iterable):
-        return [encode(i, encoding) for i in obj]
-    return obj
-
-
 def patch_main():
     '''This is a hack to work around the fact that Windows multiprocessing needs
     to import the original main module, and assumes that it corresponds to a file
@@ -1334,7 +1315,12 @@ def patch_main():
     See also: http://bugs.python.org/issue19946
     And: https://bugzilla.mozilla.org/show_bug.cgi?id=914563
     '''
-    if sys.platform == 'win32':
+    # XXX In Python 3.4 the multiprocessing module was re-written and the below
+    # code is no longer valid. The Python issue19946 also claims to be fixed in
+    # this version. It's not clear whether this hack is still needed in 3.4+ or
+    # not, but at least some basic mach commands appear to work without it. So
+    # skip it in 3.4+ until we determine it's still needed.
+    if sys.platform == 'win32' and sys.version_info < (3, 4):
         import inspect
         import os
         from multiprocessing import forking

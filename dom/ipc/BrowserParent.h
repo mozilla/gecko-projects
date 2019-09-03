@@ -311,6 +311,11 @@ class BrowserParent final : public PBrowserParent,
       const RequestData& aRequestData, const nsresult aStatus,
       const nsString& aMessage);
 
+  mozilla::ipc::IPCResult RecvOnSecurityChange(
+      const Maybe<WebProgressData>& aWebProgressData,
+      const RequestData& aRequestData, const uint32_t aState,
+      const Maybe<WebProgressSecurityChangeData>& aSecurityChangeData);
+
   mozilla::ipc::IPCResult RecvOnContentBlockingEvent(
       const Maybe<WebProgressData>& aWebProgressData,
       const RequestData& aRequestData, const uint32_t& aEvent);
@@ -328,11 +333,13 @@ class BrowserParent final : public PBrowserParent,
 
   mozilla::ipc::IPCResult RecvSessionStoreUpdate(
       const Maybe<nsCString>& aDocShellCaps, const Maybe<bool>& aPrivatedMode,
-      const nsTArray<nsCString>&& aPositions,
-      const nsTArray<int32_t>&& aPositionDescendants,
+      nsTArray<nsCString>&& aPositions,
+      nsTArray<int32_t>&& aPositionDescendants,
       const nsTArray<InputFormData>& aInputs,
       const nsTArray<CollectedInputDataValue>& aIdVals,
       const nsTArray<CollectedInputDataValue>& aXPathVals,
+      nsTArray<nsCString>&& aOrigins, nsTArray<nsString>&& aKeys,
+      nsTArray<nsString>&& aValues, const bool aIsFullStorage,
       const uint32_t& aFlushId, const bool& aIsFinal, const uint32_t& aEpoch);
 
   mozilla::ipc::IPCResult RecvBrowserFrameOpenWindow(
@@ -825,6 +832,8 @@ class BrowserParent final : public PBrowserParent,
   static void PushFocus(BrowserParent* aBrowserParent);
 
   static void PopFocus(BrowserParent* aBrowserParent);
+
+  void OnSubFrameCrashed();
 
  public:
   static void PopFocusAll();

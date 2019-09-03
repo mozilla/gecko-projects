@@ -320,8 +320,6 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   using DebuggerVector = js::Vector<js::Debugger*, 0, js::SystemAllocPolicy>;
 
  private:
-  js::ZoneData<DebuggerVector*> debuggers;
-
   js::jit::JitZone* createJitZone(JSContext* cx);
 
   bool isQueuedForBackgroundSweep() { return isOnList(); }
@@ -332,10 +330,6 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   js::gc::UniqueIdMap& uniqueIds() { return uniqueIds_.ref(); }
 
  public:
-  bool hasDebuggers() const { return debuggers && debuggers->length(); }
-  DebuggerVector* getDebuggers() const { return debuggers; }
-  DebuggerVector* getOrCreateDebuggers(JSContext* cx);
-
   void notifyObservingDebuggers();
 
   void clearTables();
@@ -454,6 +448,9 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   // sweep groups.
   NodeSet& gcSweepGroupEdges() {
     return gcGraphEdges;  // Defined in GraphNodeBase base class.
+  }
+  bool hasSweepGroupEdgeTo(Zone* otherZone) const {
+    return gcGraphEdges.has(otherZone);
   }
   MOZ_MUST_USE bool addSweepGroupEdgeTo(Zone* otherZone) {
     MOZ_ASSERT(otherZone->isGCMarking());

@@ -60,13 +60,12 @@ AntiTracking.runTest(
     /* import-globals-from storageAccessAPIHelpers.js */
     await noStorageAccessInitially();
 
-    is(window.localStorage, null, "LocalStorage is null");
     try {
       localStorage.foo = 42;
       ok(false, "LocalStorage cannot be used!");
     } catch (e) {
       ok(true, "LocalStorage cannot be used!");
-      is(e.name, "TypeError", "We want a type error message.");
+      is(e.name, "SecurityError", "We want a security error message.");
     }
   },
 
@@ -75,7 +74,7 @@ AntiTracking.runTest(
   [["dom.storage_access.enabled", true]], // extra prefs
   false, // no window open test
   false, // no user-interaction test
-  false, // no blocking notifications
+  Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER, // expect blocking notifications
   false, // run in normal window
   "allow-scripts allow-same-origin allow-popups"
 );
@@ -98,7 +97,7 @@ AntiTracking.runTest(
   [["dom.storage_access.enabled", true]], // extra prefs
   false, // no window open test
   false, // no user-interaction test
-  false, // no blocking notifications
+  0, // no blocking notifications
   false, // run in normal window
   "allow-scripts allow-same-origin allow-popups allow-storage-access-by-user-activation"
 );
@@ -110,13 +109,12 @@ AntiTracking.runTest(
     /* import-globals-from storageAccessAPIHelpers.js */
     await noStorageAccessInitially();
 
-    is(window.localStorage, null, "LocalStorage is null");
     try {
       localStorage.foo = 42;
       ok(false, "LocalStorage cannot be used!");
     } catch (e) {
       ok(true, "LocalStorage cannot be used!");
-      is(e.name, "TypeError", "We want a type error message.");
+      is(e.name, "SecurityError", "We want a security error message.");
     }
   },
 
@@ -125,7 +123,7 @@ AntiTracking.runTest(
   [["dom.storage_access.enabled", true]], // extra prefs
   false, // no window open test
   false, // no user-interaction test
-  0, // no blocking notifications
+  Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER, // expect blocking notifications
   true, // run in private window
   null // iframe sandbox
 );

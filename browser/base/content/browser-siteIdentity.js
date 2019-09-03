@@ -159,6 +159,12 @@ var gIdentityHandler = {
       "identity-popup-mainView-panel-header-span"
     ));
   },
+  get _identityPopupSecurityView() {
+    delete this._identityPopupSecurityView;
+    return (this._identityPopupSecurityView = document.getElementById(
+      "identity-popup-securityView"
+    ));
+  },
   get _identityPopupSecurityEVContentOwner() {
     delete this._identityPopupSecurityEVContentOwner;
     return (this._identityPopupSecurityEVContentOwner = document.getElementById(
@@ -267,12 +273,6 @@ var gIdentityHandler = {
       permissionAnchors[anchor.getAttribute("data-permission-id")] = anchor;
     }
     return (this._permissionAnchors = permissionAnchors);
-  },
-  get _permissionGrantedIndicator() {
-    delete this._permissionGrantedIndicator;
-    return (this._permissionGrantedIndicator = document.getElementById(
-      "identity-popup-permissions-granted-indicator"
-    ));
   },
   get _trackingProtectionIconContainer() {
     delete this._trackingProtectionIconContainer;
@@ -770,6 +770,7 @@ var gIdentityHandler = {
         "identity.extension.label",
         [extensionName]
       );
+      icon_labels_dir = "";
     } else if (this._uriHasHost && this._isSecureConnection) {
       // This is a secure connection.
       this._identityBox.className = "verifiedDomain";
@@ -932,14 +933,8 @@ var gIdentityHandler = {
     // "Clear Site Data" button if the site is storing local data.
     this._clearSiteDataFooter.hidden = true;
     if (this._uriHasHost) {
-      let host = this._uri.host;
-      SiteDataManager.updateSites().then(async () => {
-        let baseDomain = SiteDataManager.getBaseDomainFromHost(host);
-        let siteData = await SiteDataManager.getSites(baseDomain);
-
-        if (siteData && siteData.length) {
-          this._clearSiteDataFooter.hidden = false;
-        }
+      SiteDataManager.hasSiteData(this._uri.asciiHost).then(hasData => {
+        this._clearSiteDataFooter.hidden = !hasData;
       });
     }
 
@@ -1072,8 +1067,15 @@ var gIdentityHandler = {
       [host]
     );
 
+    this._identityPopupSecurityView.setAttribute(
+      "title",
+      gNavigatorBundle.getFormattedString("identity.headerSecurityWithHost", [
+        host,
+      ])
+    );
+
     this._identityPopupSecurityEVContentOwner.textContent = gNavigatorBundle.getFormattedString(
-      "identity.ev.contentOwner",
+      "identity.ev.contentOwner2",
       [owner]
     );
 
@@ -1255,7 +1257,6 @@ var gIdentityHandler = {
       )
     ) {
       this.refreshIdentityBlock();
-      this.updateSitePermissionsGrantedIndicator();
     }
   },
 
@@ -1412,31 +1413,6 @@ var gIdentityHandler = {
     } else {
       this._permissionEmptyHint.setAttribute("hidden", "true");
     }
-
-    this.updateSitePermissionsGrantedIndicator();
-  },
-
-  updateSitePermissionsGrantedIndicator() {
-    let hasGrantedPermissions = false;
-
-    let permissions = SitePermissions.getAllPermissionDetailsForBrowser(
-      gBrowser.selectedBrowser
-    );
-
-    for (let permission of permissions) {
-      if (
-        permission.state === SitePermissions.ALLOW ||
-        permission.state === SitePermissions.ALLOW_COOKIES_FOR_SESSION
-      ) {
-        hasGrantedPermissions = true;
-      }
-    }
-
-    // Display the permission granted indicator if necessary.
-    this._permissionGrantedIndicator.toggleAttribute(
-      "show",
-      hasGrantedPermissions
-    );
   },
 
   _createPermissionItem(aPermission) {

@@ -309,7 +309,7 @@
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["jld@mozilla.com", "jimm@mozilla.com", "mconley@mozilla.com"],
-    "expires_in_version": "70",
+    "expires_in_version": "never",
     "bug_numbers": [1474991],
     "kind": "exponential",
     "high": 64000,
@@ -343,7 +343,7 @@
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["jld@mozilla.com", "jimm@mozilla.com", "mconley@mozilla.com"],
-    "expires_in_version": "70",
+    "expires_in_version": "never",
     "bug_numbers": [1474991],
     "kind": "exponential",
     "high": 64000,
@@ -355,7 +355,7 @@
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["jld@mozilla.com", "jimm@mozilla.com", "mconley@mozilla.com"],
-    "expires_in_version": "70",
+    "expires_in_version": "never",
     "bug_numbers": [1474991],
     "kind": "exponential",
     "high": 64000,
@@ -367,7 +367,7 @@
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["jld@mozilla.com", "jimm@mozilla.com", "mconley@mozilla.com"],
-    "expires_in_version": "67",
+    "expires_in_version": "never",
     "bug_numbers": [1474991],
     "kind": "exponential",
     "high": 64000,
@@ -379,7 +379,7 @@
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["jld@mozilla.com", "jimm@mozilla.com", "mconley@mozilla.com"],
-    "expires_in_version": "67",
+    "expires_in_version": "never",
     "bug_numbers": [1474991],
     "kind": "boolean",
     "releaseChannelCollection": "opt-out",
@@ -3300,15 +3300,6 @@
     "n_buckets": 50,
     "description": "Time spent waiting on the cache service lock on the main thread (ms)"
   },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSSETDISKSMARTSIZECALLBACK_NOTIFY": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSSETDISKSMARTSIZECALLBACK_NOTIFY"
-  },
   "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSPROCESSREQUESTEVENT_RUN": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec", "geckoview"],
@@ -3417,60 +3408,6 @@
     "n_buckets": 50,
     "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSCACHESERVICE_SETOFFLINECACHECAPACITY"
   },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_SETMEMORYCACHE": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSCACHESERVICE_SETMEMORYCACHE"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_SETDISKSMARTSIZE": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSCACHESERVICE_SETDISKSMARTSIZE"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_SETDISKCACHEMAXENTRYSIZE": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSCACHESERVICE_SETDISKCACHEMAXENTRYSIZE"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_SETMEMORYCACHEMAXENTRYSIZE": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSCACHESERVICE_SETMEMORYCACHEMAXENTRYSIZE"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_SETDISKCACHEENABLED": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSCACHESERVICE_SETDISKCACHEENABLED"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_SETDISKCACHECAPACITY": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSCACHESERVICE_SETDISKCACHECAPACITY"
-  },
   "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_OPENCACHEENTRY": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec", "geckoview"],
@@ -3524,15 +3461,6 @@
     "high": 10000,
     "n_buckets": 50,
     "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSCACHESERVICE_EVICTENTRIESFORCLIENT"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_DISKDEVICEHEAPSIZE": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSCACHESERVICE_DISKDEVICEHEAPSIZE"
   },
   "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_CLOSEALLSTREAMS": {
     "record_in_processes": ["main", "content"],
@@ -4011,6 +3939,7 @@
     "kind": "categorical",
     "labels": ["BothWorked", "NativeWorked", "TRRWorked", "BothFailed"],
     "bug_numbers": [1460589],
+    "releaseChannelCollection": "opt-out",
     "description": "DNS: success distribution when both native and TRR were used"
   },
   "DNS_TRR_FIRST2": {
@@ -4021,6 +3950,7 @@
     "kind": "categorical",
     "labels": ["TRR", "NativeAfterTRR", "Native", "BothFailed"],
     "bug_numbers": [1497252],
+    "releaseChannelCollection": "opt-out",
     "description": "TRR-first mode distribution. 0=Worked, 1=fell back fine after TRR fail, 2=native worked, 3=both failed"
   },
   "DNS_TRR_DISABLED": {
@@ -4030,6 +3960,7 @@
     "kind": "boolean",
     "description": "Resolve success rate when in TRR-first and called TRR-disabled (fall-back mode)",
     "bug_numbers": [1472659],
+    "releaseChannelCollection": "opt-out",
     "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
   },
   "DNS_TRR_BLACKLISTED": {
@@ -4069,6 +4000,7 @@
     "labels": ["Fine", "Timeout", "Bad"],
     "description": "How often TRR (Trusted Recursive Resolver) requests are fine, time-out or error.",
     "bug_numbers": [1497438],
+    "releaseChannelCollection": "opt-out",
     "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
   },
   "DNS_LOOKUP_ALGORITHM": {
@@ -4090,6 +4022,7 @@
     "labels": ["trrOK", "trrFail", "trrAOK", "trrAFail",
 	       "trrAAAAOK", "trrAAAAFail", "osOK", "osFail"],
     "bug_numbers": [1434852],
+    "releaseChannelCollection": "opt-out",
     "description": "DNS: lookup algorithm"
   },
   "DNS_RENEWAL_TIME": {
@@ -5372,6 +5305,18 @@
     "kind": "enumerated",
     "n_values": 6,
     "description": "Network identification (0=None, 1=New Ipv4, 2=Same, 3=New IPv6, 4=New dual)"
+  },
+  "NETWORK_TIME_BETWEEN_NETWORK_CHANGE_EVENTS": {
+    "record_in_processes": ["main"],
+    "products": ["firefox", "fennec", "geckoview"],
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
+    "bug_numbers": [1570932],
+    "expires_in_version": "76",
+    "kind": "exponential",
+    "low": 1000,
+    "high": 600000,
+    "n_buckets": 50,
+    "description": "Time in ms between two NS_NETWORK_LINK_DATA_CHANGED events sent"
   },
   "IDLE_NOTIFY_IDLE_MS": {
     "record_in_processes": ["main", "content"],
@@ -8917,6 +8862,19 @@
     "record_into_store": ["main", "sync"]
   },
   "TELEMETRY_TEST_STREAMING": {
+    "record_in_processes": ["main"],
+    "products": ["geckoview_streaming"],
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "low": 1,
+    "high": 2147483646,
+    "n_buckets": 10,
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1566366],
+    "description": "a testing histogram; not meant to be touched"
+  },
+  "TELEMETRY_TEST_STREAMING_2": {
     "record_in_processes": ["main"],
     "products": ["geckoview_streaming"],
     "alert_emails": ["telemetry-client-dev@mozilla.com"],
@@ -13683,6 +13641,30 @@
     "bug_numbers": [1430145],
     "labels": ["Used", "RejectedByPolicy", "RequestMismatch", "LoadError", "NotUsed"],
     "description": "Whether a preloaded script was used or the reason it was not used."
+  },
+  "DOM_SCRIPT_LOAD_INCREMENTAL_RATIO": {
+    "record_in_processes": ["main", "content"],
+    "products": ["firefox", "fennec", "geckoview"],
+    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
+    "expires_in_version": "75",
+    "kind": "linear",
+    "low": 2,
+    "high": 100,
+    "n_buckets": 99,
+    "bug_numbers": [1573904],
+    "description": "Ratio of JavaScript-text bytes transferred incrementally compared to the total number of bytes transferred."
+  },
+  "DOM_SCRIPT_LOAD_INCREMENTAL_AVG_TRANSFER_RATE": {
+    "record_in_processes": ["main", "content"],
+    "products": ["firefox", "fennec", "geckoview"],
+    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
+    "expires_in_version": "75",
+    "kind": "exponential",
+    "low": 1,
+    "high": 1000000,
+    "n_buckets": 60,
+    "bug_numbers": [1573904],
+    "description": "Speed at which JavaScript-text bytes are transferred incrementally, measured between the first onIncremantalData call and the onStreamComplete call (in character/ms)."
   },
   "VIDEO_DROPPED_FRAMES_PROPORTION" : {
     "record_in_processes": ["content"],

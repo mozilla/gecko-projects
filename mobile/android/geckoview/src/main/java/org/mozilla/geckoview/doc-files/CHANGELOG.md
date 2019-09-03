@@ -48,6 +48,14 @@ exclude: true
   ([bug 1533057]({{bugzilla}}1533057))
 - Added Social Tracking Protection support to [`ContentBlocking`][70.17].
   ([bug 1568295]({{bugzilla}}1568295))
+- Added [`WebExtensionController`][70.18] and [`WebExtensionController.TabDelegate`][70.19] to handle
+  [`browser.tabs.create`][70.20] calls by WebExtensions.
+  ([bug 1539144]({{bugzilla}}1539144))
+- Added [`onCloseTab`][70.21] to [`WebExtensionController.TabDelegate`][70.19] to handle
+  [`browser.tabs.remove`][70.22] calls by WebExtensions.
+  ([bug 1565782]({{bugzilla}}1565782))
+- Added onSlowScript to [`ContentDelegate`][70.23] which allows handling of slow and hung scripts.
+  ([bug 1621094]({{bugzilla}}1621094))
 
 [70.1]: {{javadoc_uri}}/GeckoSessionSettings.Builder.html#contextId-java.lang.String-
 [70.2]: {{javadoc_uri}}/StorageController.html#clearDataForSessionContext-java.lang.String-
@@ -66,6 +74,12 @@ exclude: true
 [70.15]: {{javadoc_uri}}/WebNotification.html
 [70.16]: {{javadoc_uri}}/WebNotificationDelegate.html
 [70.17]: {{javadoc_uri}}/ContentBlocking.html
+[70.18]: {{javadoc_uri}}/WebExtensionController.html
+[70.19]: {{javadoc_uri}}/WebExtensionController.TabDelegate.html
+[70.20]: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/create
+[70.21]: {{javadoc_uri}}/WebExtensionController.TabDelegate.html#onCloseTab-org.mozilla.geckoview.WebExtension-org.mozilla.geckoview.GeckoSession-
+[70.22]: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/remove
+[70.23]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html
 
 ## v69
 - Modified behavior of ['setAutomaticFontSizeAdjustment'][69.1] so that it no 
@@ -76,24 +90,15 @@ exclude: true
 - [`GeckoSession.setMessageDelegate`][69.13] callers must now specify the
   [`WebExtension`][69.5] that the [`MessageDelegate`][69.4] will receive
   messages from.
-- Added [`WebExtensionController`][69.9] and [`TabDelegate`][69.10] to handle
-  [`browser.tabs.create`][69.6] calls by WebExtensions.
 - Created [`onKill`][69.7] to [`ContentDelegate`][69.11] to differentiate from crashes.
-- Added [`onCloseTab`][69.12] to [`WebExtensionController.TabDelegate`][69.10] to handle
-  [`browser.tabs.remove`][69.8] calls by WebExtensions.
 
 [69.1]: {{javadoc_uri}}/GeckoRuntimeSettings.html#setAutomaticFontSizeAdjustment-boolean-
 [69.2]: {{javadoc_uri}}/GeckoRuntimeSettings.html#setFontInflationEnabled-boolean-
 [69.3]: {{javadoc_uri}}/GeckoResult.html#accept-org.mozilla.geckoview.GeckoResult.Consumer-
 [69.4]: {{javadoc_uri}}/WebExtension.MessageDelegate.html
 [69.5]: {{javadoc_uri}}/WebExtension.html
-[69.6]: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/create
 [69.7]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html#onKill-org.mozilla.geckoview.GeckoSession-
-[69.8]: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/remove
-[69.9]: {{javadoc_uri}}/WebExtensionController.html
-[69.10]:{{javadoc_uri}}/WebExtensionController.TabDelegate.html
 [69.11]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html
-[69.12]: {{javadoc_uri}}/WebExtensionController.TabDelegate.html#onCloseTab-org.mozilla.geckoview.WebExtension-org.mozilla.geckoview.GeckoSession-
 [69.13]: {{javadoc_uri}}/GeckoSession.html#setMessageDelegate-org.mozilla.geckoview.WebExtension-org.mozilla.geckoview.WebExtension.MessageDelegate-java.lang.String-
 [69.14]: {{javadoc_uri}}/GeckoSession.html#LOAD_FLAGS_FORCE_ALLOW_DATA_URI
 
@@ -318,4 +323,4 @@ exclude: true
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 3dc92af421d9e7e2393619f7a17c57422aa51699
+[api-version]: 4199a7a889674d4402926366a7f4fb2f93de5c46

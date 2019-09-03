@@ -7,12 +7,13 @@
 "use strict";
 requestLongerTimeout(2);
 
-const TEST_FILE =
-  "browser/devtools/client/webconsole/test/browser/" +
-  "test-trackingprotection-securityerrors.html";
+const TEST_PATH = "browser/devtools/client/webconsole/test/browser/";
+const TEST_FILE = TEST_PATH + "test-trackingprotection-securityerrors.html";
 const TEST_URI = "http://example.com/" + TEST_FILE;
 const TRACKER_URL = "http://tracking.example.org/";
-const BLOCKED_URL = `\u201c${TRACKER_URL}\u201d`;
+const BLOCKED_URL = `\u201c${TRACKER_URL +
+  TEST_PATH +
+  "cookieSetter.html"}\u201d`;
 
 const COOKIE_BEHAVIOR_PREF = "network.cookie.cookieBehavior";
 const COOKIE_BEHAVIORS = {
@@ -91,13 +92,19 @@ add_task(async function testLimitForeignCookieBlockedMessage() {
   await pushPref(COOKIE_BEHAVIOR_PREF, COOKIE_BEHAVIORS.LIMIT_FOREIGN);
   const { hud, win } = await openNewWindowAndConsole(TEST_URI);
 
-  const message = await waitFor(() =>
-    findMessage(
-      hud,
-      `Request to access cookie or storage on ${BLOCKED_URL} was blocked because we are ` +
-        `blocking all third-party storage access requests and content blocking is enabled`
-    )
+  const message = await waitFor(
+    () =>
+      findMessage(
+        hud,
+        `Request to access cookie or storage on ${BLOCKED_URL} was blocked because we are ` +
+          `blocking all third-party storage access requests and content blocking is enabled`
+      ),
+    "Wait for 'blocking all third-party storage access' message",
+    100
   );
+  ok(true, "Third-party storage access blocked message was displayed");
+
+  info("Check that clicking on the Learn More link works as expected");
   await testLearnMoreClickOpenNewTab(
     message,
     getStorageErrorUrl("CookieBlockedForeign")

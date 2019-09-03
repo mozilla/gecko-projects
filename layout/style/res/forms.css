@@ -138,6 +138,7 @@ input, textarea, select, button {
   text-transform: initial;
   word-spacing: initial;
   letter-spacing: initial;
+  /* Note that line-height is also reset for all these, via the font shorthand */
 }
 
 textarea > scrollbar {
@@ -917,9 +918,14 @@ input[type=range]::-moz-range-track {
   position: static !important;
   writing-mode: unset !important;
   direction: unset !important;
-  block-size: 0.2em;
+  block-size: 0.2em; /* same as inline-size below */
   /* Prevent nsFrame::HandlePress setting mouse capture to this element. */
   user-select: none !important;
+}
+
+input[type=range][orient=vertical]::-moz-range-track {
+  inline-size: 0.2em; /* same as block-size above */
+  block-size: 100%;
 }
 
 /**
