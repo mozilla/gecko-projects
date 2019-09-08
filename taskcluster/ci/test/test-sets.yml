@@ -272,13 +272,16 @@ windows-tests:
 
 mingwclang-tests-debug:
     - cppunit
+    - firefox-ui-functional-local
     - firefox-ui-functional-remote
+    - mochitest-a11y
     - mochitest-gpu
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
     - mochitest-webgl2-ext
     - reftest
+    - telemetry-tests-client
 
 mingwclang-tests-opt:
     - cppunit
@@ -394,26 +397,11 @@ desktop-screenshot-capture:
 desktop-instrumentation:
     - browser-instrumentation
 
-android-common-tests:
-    - crashtest
-    - mochitest
-    - mochitest-chrome
-    - mochitest-gpu
-    - mochitest-media
-    - reftest
-    - test-verify
-    - xpcshell
-
-android-opt-tests:
-    # Robocop tests often fail on Debug builds
-    - robocop
-
 android-x86_64-tests:
     - cppunit
     - crashtest
     - geckoview-junit
     - gtest
-    - marionette
     - mochitest
     - mochitest-gpu
     - reftest
@@ -421,10 +409,6 @@ android-x86_64-tests:
     - web-platform-tests
     - web-platform-tests-reftests
     - xpcshell
-
-android-ccov-tests:
-    - geckoview-junit
-    - robocop
 
 devtools-tests:
     - mochitest-devtools-chrome

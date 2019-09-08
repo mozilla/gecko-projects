@@ -36,6 +36,15 @@ enum NAL_TYPES {
   H264_NAL_SLICE_EXT_DVC = 21,
 };
 
+// According to ITU-T Rec H.264 (2017/04) Table 7.6.
+enum SLICE_TYPES {
+  P_SLICE = 0,
+  B_SLICE = 1,
+  I_SLICE = 2,
+  SP_SLICE = 3,
+  SI_SLICE = 4,
+};
+
 struct SPSData {
   bool operator==(const SPSData& aOther) const;
   bool operator!=(const SPSData& aOther) const;
@@ -501,6 +510,9 @@ class H264 {
   // point.
   static bool DecodeRecoverySEI(const mozilla::MediaByteBuffer* aSEI,
                                 SEIRecoveryData& aDest);
+  // Decode NAL Slice payload and return true if its slice type is I slice or SI
+  // slice.
+  static bool DecodeISlice(const mozilla::MediaByteBuffer* aSlice);
 };
 
 }  // namespace mozilla

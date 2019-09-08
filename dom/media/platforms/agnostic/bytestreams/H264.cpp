@@ -984,6 +984,11 @@ uint32_t H264::ComputeMaxRefFrames(const mozilla::MediaByteBuffer* aExtraData) {
       if (DecodeRecoverySEI(decodedNAL, data)) {
         return FrameType::I_FRAME;
       }
+    } else if (nalType == H264_NAL_SLICE) {
+      RefPtr<mozilla::MediaByteBuffer> decodedNAL = DecodeNALUnit(p, nalLen);
+      if (DecodeISlice(decodedNAL)) {
+        return FrameType::I_FRAME;
+      }
     }
   }
 
@@ -1172,6 +1177,23 @@ static inline Result<Ok, nsresult> ReadSEIInt(BufferReader& aBr,
   }
   aOutput += tmpByte;  // this is the last byte
   return Ok();
+}
+
+/* static */
+bool H264::DecodeISlice(const mozilla::MediaByteBuffer* aSlice) {
+  if (!aSlice) {
+    return false;
+  }
+
+  // According to ITU-T Rec H.264 Table 7.3.3, read the slice type from
+  // slice_header, and the slice type 2 and 7 are representing I slice.
+  BitReader br(aSlice);
+  // Skip `first_mb_in_slice`
+  br.ReadUE();
+  // The value of slice type can go from 0 to 9, but the value between 5 to
+  // 9 are actually equal to 0 to 4.
+  const uint32_t sliceType = br.ReadUE() % 5;
+  return sliceType == SLICE_TYPES::I_SLICE || sliceType == SI_SLICE;
 }
 
 /* static */

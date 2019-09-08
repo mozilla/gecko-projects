@@ -179,6 +179,7 @@
 
 #include "nsBindingManager.h"
 #include "nsXBLService.h"
+#include "mozilla/GlobalKeyListener.h"
 
 #include "nsIDragService.h"
 #include "mozilla/dom/Element.h"
@@ -1924,7 +1925,7 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
     nsPIDOMWindowOuter* privateRoot = GetPrivateRoot();
 
     if (privateRoot == this) {
-      nsXBLService::AttachGlobalKeyHandler(mChromeEventHandler);
+      RootWindowGlobalKeyListener::AttachKeyHandler(mChromeEventHandler);
     }
   }
 
@@ -5511,6 +5512,32 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
           doc->SetHasCookiesLoaded(blockedValue, origin);
           if (!aBlocked) {
             unblocked = !doc->GetHasCookiesLoaded();
+          }
+        } else if (aEvent ==
+                   nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER) {
+          MOZ_ASSERT(
+              !aBlocked,
+              "We don't expected to see blocked STATE_COOKIES_LOADED_TRACKER");
+          // Note that the logic in this branch is the logical negation of the
+          // logic in other branches, since the Document API we have is phrased
+          // in "loaded" terms as opposed to "blocked" terms.
+          blockedValue = !aBlocked;
+          doc->SetHasTrackerCookiesLoaded(blockedValue, origin);
+          if (!aBlocked) {
+            unblocked = !doc->GetHasTrackerCookiesLoaded();
+          }
+        } else if (aEvent ==
+                   nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER) {
+          MOZ_ASSERT(!aBlocked,
+                     "We don't expected to see blocked "
+                     "STATE_COOKIES_LOADED_SOCIALTRACKER");
+          // Note that the logic in this branch is the logical negation of
+          // the logic in other branches, since the Document API we have is
+          // phrased in "loaded" terms as opposed to "blocked" terms.
+          blockedValue = !aBlocked;
+          doc->SetHasSocialTrackerCookiesLoaded(blockedValue, origin);
+          if (!aBlocked) {
+            unblocked = !doc->GetHasSocialTrackerCookiesLoaded();
           }
         } else {
           // Ignore nsIWebProgressListener::STATE_BLOCKED_UNSAFE_CONTENT;

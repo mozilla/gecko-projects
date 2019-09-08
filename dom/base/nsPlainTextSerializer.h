@@ -15,6 +15,7 @@
 #define nsPlainTextSerializer_h__
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/intl/LineBreaker.h"
 #include "nsCOMPtr.h"
 #include "nsAtom.h"
@@ -89,8 +90,6 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
   void AddToLine(const char16_t* aStringToAdd, int32_t aLength);
   void EndLine(bool softlinebreak, bool aBreakBySpace = false);
   void EnsureVerticalSpace(int32_t noOfRows);
-  void FlushLine();
-  void OutputQuotesAndIndent(bool stripTrailingSpaces = false);
 
   void Output(nsString& aString);
   void Write(const nsAString& aString);
@@ -150,7 +149,6 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
 
  private:
   uint32_t mHeadLevel;
-  bool mAtFirstColumn;
 
   class Settings {
    public:
@@ -195,40 +193,100 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
 
   Settings mSettings;
 
+  struct Indentation {
+    // The number of space characters to be inserted including the number of
+    // characters in mHeader.
+    int32_t mWidth = 0;
+
+    // The header that has to be written in the indent.
+    // That could be, for instance, the bullet in a bulleted list.
+    nsString mHeader;
+  };
+
   // Excludes indentation and quotes.
   class CurrentLineContent {
    public:
     // @param aFlags As defined in nsIDocumentEncoder.idl.
-    explicit CurrentLineContent(int32_t aFlags);
-
-    void MaybeReplaceNbsps();
-
-    void AppendLineBreak();
+    void MaybeReplaceNbsps(int32_t aFlags);
 
     nsString mValue;
 
     // The width of the line as it will appear on the screen (approx.).
     uint32_t mWidth = 0;
+  };
+
+  class CurrentLine {
+   public:
+    void ResetContentAndIndentationHeader();
+
+    void CreateQuotesAndIndent(nsAString& aResult) const;
+
+    bool HasContentOrIndentationHeader() const {
+      return !mContent.mValue.IsEmpty() || !mIndentation.mHeader.IsEmpty();
+    }
+
+    Indentation mIndentation;
+
+    // The number of '>' characters.
+    int32_t mCiteQuoteLevel = 0;
+
+    CurrentLineContent mContent;
+  };
+
+  CurrentLine mCurrentLine;
+
+  class OutputManager {
+   public:
+    /**
+     *  @param aFlags As defined in nsIDocumentEncoder.idl.
+     *  @param aOutput An empty string.
+     */
+    OutputManager(int32_t aFlags, nsAString& aOutput);
+
+    enum class StripTrailingWhitespaces { kMaybe, kNo };
+
+    void Append(const CurrentLine& aCurrentLine,
+                StripTrailingWhitespaces aStripTrailingWhitespaces);
+
+    void AppendLineBreak();
+
+    /**
+     * This empties the current line cache without adding a NEWLINE.
+     * Should not be used if line wrapping is of importance since
+     * this function destroys the cache information.
+     *
+     * It will also write indentation and quotes if we believe us to be
+     * at the start of the line.
+     */
+    void Flush(CurrentLine& aCurrentLine);
+
+    bool IsAtFirstColumn() const { return mAtFirstColumn; }
+
+    uint32_t GetOutputLength() const;
 
    private:
+    /**
+     * @param aString Last character is expected to not be a line break.
+     */
+    void Append(const nsAString& aString);
+
     // As defined in nsIDocumentEncoder.idl.
-    int32_t mFlags;
+    const int32_t mFlags;
+
+    nsAString& mOutput;
+
+    bool mAtFirstColumn;
 
     nsString mLineBreak;
   };
 
-  CurrentLineContent mCurrentLineContent;
+  mozilla::Maybe<OutputManager> mOutputManager;
 
   // If we've just written out a cite blockquote, we need to remember it
   // so we don't duplicate spaces before a <pre wrap> (which mail uses to quote
   // old messages).
   bool mHasWrittenCiteBlockquote;
 
-  int32_t mIndent;
-  // mInIndentString keeps a header that has to be written in the indent.
-  // That could be, for instance, the bullet in a bulleted list.
-  nsString mInIndentString;
-  int32_t mCiteQuoteLevel;
   int32_t mFloatingLines;  // To store the number of lazy line breaks
 
   // The wrap column is how many standard sized chars (western languages)

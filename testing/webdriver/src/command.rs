@@ -525,9 +525,11 @@ pub struct TimeoutsParameters {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_to_nullable_u64"
     )]
+    #[allow(clippy::option_option)]
     pub script: Option<Option<u64>>,
 }
 
+#[allow(clippy::option_option)]
 fn deserialize_to_nullable_u64<'de, D>(deserializer: D) -> Result<Option<Option<u64>>, D::Error>
 where
     D: Deserializer<'de>,
@@ -627,7 +629,7 @@ where
     let opt = Option::deserialize(deserializer)?.map(|value: f64| value as i64);
     let value = match opt {
         Some(n) => {
-            if n < i32::min_value() as i64 || n > i32::max_value() as i64 {
+            if n < i64::from(i32::min_value()) || n > i64::from(i32::max_value()) {
                 return Err(de::Error::custom(format!("'{}' is larger than i32", n)));
             }
             Some(n as i32)
@@ -645,7 +647,7 @@ where
     let opt = Option::deserialize(deserializer)?.map(|value: f64| value as i64);
     let value = match opt {
         Some(n) => {
-            if n < 0 || n > i32::max_value() as i64 {
+            if n < 0 || n > i64::from(i32::max_value()) {
                 return Err(de::Error::custom(format!("'{}' is outside of i32", n)));
             }
             Some(n as i32)
@@ -1252,7 +1254,7 @@ mod tests {
         let data = TimeoutsParameters {
             implicit: Some(0u64),
             page_load: Some(2u64),
-            script: Some(Some(9007199254740991u64)),
+            script: Some(Some(9_007_199_254_740_991u64)),
         };
 
         check_deserialize(&json, &data);

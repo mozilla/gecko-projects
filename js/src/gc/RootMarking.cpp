@@ -276,7 +276,15 @@ void js::gc::GCRuntime::traceRuntimeForMajorGC(JSTracer* trc,
     traceRuntimeAtoms(trc, session.checkAtomsAccess());
   }
   traceKeptAtoms(trc);
-  Compartment::traceIncomingCrossCompartmentEdgesForZoneGC(trc);
+
+  {
+    // Trace incoming cross compartment edges from uncollected compartments,
+    // skipping gray edges which are traced later.
+    gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::MARK_CCWS);
+    Compartment::traceIncomingCrossCompartmentEdgesForZoneGC(
+        trc, Compartment::NonGrayEdges);
+  }
+
   traceRuntimeCommon(trc, MarkRuntime);
 }
 
@@ -378,6 +386,16 @@ void js::gc::GCRuntime::traceRuntimeCommon(JSTracer* trc,
   // parent pointer if traceRoots actually traces anything.
   for (RealmsIter r(rt); !r.done(); r.next()) {
     r->traceRoots(trc, traceOrMark);
+  }
+
+  // Trace zone script-table roots. See comment in
+  // Zone::traceScriptTableRoots() for justification re: calling this only
+  // during major (non-nursery) collections.
+  if (!JS::RuntimeHeapIsMinorCollecting()) {
+    for (ZonesIter zone(rt, ZoneSelector::SkipAtoms); !zone.done();
+         zone.next()) {
+      zone->traceScriptTableRoots(trc);
+    }
   }
 
   // Trace helper thread roots.
@@ -514,9 +532,9 @@ void js::gc::GCRuntime::bufferGrayRoots() {
   }
 
   BufferGrayRootsTracer grayBufferer(rt);
-  if (JSTraceDataOp op = grayRootTracer.op) {
-    (*op)(&grayBufferer, grayRootTracer.data);
-  }
+  traceEmbeddingGrayRoots(&grayBufferer);
+  Compartment::traceIncomingCrossCompartmentEdgesForZoneGC(
+      &grayBufferer, Compartment::GrayEdges);
 
   // Propagate the failure flag from the marker to the runtime.
   if (grayBufferer.failed()) {

@@ -904,7 +904,7 @@ class UrlbarView {
     if (enable && UrlbarPrefs.get("oneOffSearches")) {
       this.oneOffSearchButtons.telemetryOrigin = "urlbar";
       this.oneOffSearchButtons.style.display = "";
-      this.oneOffSearchButtons.textbox = this.input.textbox;
+      this.oneOffSearchButtons.textbox = this.input.inputField;
       this.oneOffSearchButtons.view = this;
     } else {
       this.oneOffSearchButtons.telemetryOrigin = null;
@@ -1045,6 +1045,10 @@ class UrlbarView {
   }
 
   _on_resize() {
+    if (this.megabar) {
+      return;
+    }
+
     if (this._windowOuterWidth == this.window.outerWidth) {
       // Sometimes a resize event is fired when the window's size doesn't
       // actually change; at least, browser_tabMatchesInAwesomebar.js triggers

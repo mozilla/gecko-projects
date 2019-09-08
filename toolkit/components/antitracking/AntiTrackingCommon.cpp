@@ -900,6 +900,45 @@ bool CheckAntiTrackingPermission(nsIPrincipal* aPrincipal,
   return true;
 }
 
+void NotifyBlockingDecisionInternal(
+    nsIChannel* aReportingChannel, nsIChannel* aTrackingChannel,
+    AntiTrackingCommon::BlockingDecision aDecision, uint32_t aRejectedReason,
+    nsIURI* aURI, nsPIDOMWindowOuter* aWindow) {
+  if (aDecision == AntiTrackingCommon::BlockingDecision::eBlock) {
+    aWindow->NotifyContentBlockingEvent(aRejectedReason, aReportingChannel,
+                                        true, aURI, aTrackingChannel);
+
+    ReportBlockingToConsole(aWindow, aURI, aRejectedReason);
+  }
+
+  // Now send the generic "cookies loaded" notifications, from the most generic
+  // to the most specific.
+  aWindow->NotifyContentBlockingEvent(
+      nsIWebProgressListener::STATE_COOKIES_LOADED, aReportingChannel, false,
+      aURI, aTrackingChannel);
+
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aTrackingChannel);
+  if (!httpChannel) {
+    return;
+  }
+
+  uint32_t classificationFlags =
+      httpChannel->GetThirdPartyClassificationFlags();
+  if (classificationFlags &
+      nsIHttpChannel::ClassificationFlags::CLASSIFIED_TRACKING) {
+    aWindow->NotifyContentBlockingEvent(
+        nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER, aReportingChannel,
+        false, aURI, aTrackingChannel);
+  }
+
+  if (classificationFlags &
+      nsIHttpChannel::ClassificationFlags::CLASSIFIED_SOCIALTRACKING) {
+    aWindow->NotifyContentBlockingEvent(
+        nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER,
+        aReportingChannel, false, aURI, aTrackingChannel);
+  }
+}
+
 }  // namespace
 
 /* static */ RefPtr<AntiTrackingCommon::StorageAccessGrantPromise>
@@ -1160,6 +1199,12 @@ AntiTrackingCommon::SaveFirstPartyStorageAccessGrantedForOriginOnParentProcess(
   MOZ_ASSERT(aAllowMode == eAllow || aAllowMode == eAllowAutoGrant ||
              aAllowMode == eAllowOnAnySite);
 
+  if (!aParentPrincipal || !aTrackingPrincipal) {
+    LOG(("Invalid input arguments passed"));
+    return FirstPartyStorageAccessGrantPromise::CreateAndReject(false,
+                                                                __func__);
+  };
+
   nsCOMPtr<nsIURI> parentPrincipalURI;
   Unused << aParentPrincipal->GetURI(getter_AddRefs(parentPrincipalURI));
   LOG_SPEC(("Saving a first-party storage permission on %s for "
@@ -1249,7 +1294,9 @@ AntiTrackingCommon::SaveFirstPartyStorageAccessGrantedForOriginOnParentProcess(
 // static
 bool AntiTrackingCommon::CreateStoragePermissionKey(nsIPrincipal* aPrincipal,
                                                     nsACString& aKey) {
-  MOZ_ASSERT(aPrincipal);
+  if (!aPrincipal) {
+    return false;
+  }
 
   nsAutoCString origin;
   nsresult rv = aPrincipal->GetOriginNoSuffix(origin);
@@ -2057,15 +2104,8 @@ void AntiTrackingCommon::NotifyBlockingDecision(nsIChannel* aChannel,
   nsCOMPtr<nsIURI> uri;
   aChannel->GetURI(getter_AddRefs(uri));
 
-  if (aDecision == BlockingDecision::eBlock) {
-    pwin->NotifyContentBlockingEvent(aRejectedReason, aChannel, true, uri,
-                                     aChannel);
-
-    ReportBlockingToConsole(pwin, uri, aRejectedReason);
-  }
-
-  pwin->NotifyContentBlockingEvent(nsIWebProgressListener::STATE_COOKIES_LOADED,
-                                   aChannel, false, uri, aChannel);
+  NotifyBlockingDecisionInternal(aChannel, aChannel, aDecision, aRejectedReason,
+                                 uri, pwin);
 }
 
 /* static */
@@ -2111,15 +2151,8 @@ void AntiTrackingCommon::NotifyBlockingDecision(nsPIDOMWindowInner* aWindow,
   nsIURI* uri = document->GetDocumentURI();
   nsIChannel* trackingChannel = document->GetChannel();
 
-  if (aDecision == BlockingDecision::eBlock) {
-    pwin->NotifyContentBlockingEvent(aRejectedReason, channel, true, uri,
-                                     trackingChannel);
-
-    ReportBlockingToConsole(pwin, uri, aRejectedReason);
-  }
-
-  pwin->NotifyContentBlockingEvent(nsIWebProgressListener::STATE_COOKIES_LOADED,
-                                   channel, false, uri, trackingChannel);
+  NotifyBlockingDecisionInternal(channel, trackingChannel, aDecision,
+                                 aRejectedReason, uri, pwin);
 }
 
 /* static */

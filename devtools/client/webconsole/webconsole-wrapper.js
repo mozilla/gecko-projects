@@ -242,7 +242,13 @@ class WebConsoleWrapper {
         },
         getMappedExpression: this.hud.getMappedExpression.bind(this.hud),
         getPanelWindow: () => webConsoleUI.window,
-        inspectObjectActor: webConsoleUI.inspectObjectActor.bind(webConsoleUI),
+        inspectObjectActor: objectActor => {
+          if (this.toolbox) {
+            this.toolbox.inspectObjectActor(objectActor);
+          } else {
+            webConsoleUI.inspectObjectActor(objectActor);
+          }
+        },
       };
 
       // Set `openContextMenu` this way so, `serviceContainer` variable
@@ -449,7 +455,11 @@ class WebConsoleWrapper {
         closeSplitConsole: this.closeSplitConsole.bind(this),
         autocomplete,
         editorFeatureEnabled,
-        hideShowContentMessagesCheckbox: !webConsoleUI.isBrowserConsole,
+        hidePersistLogsCheckbox:
+          webConsoleUI.isBrowserConsole || webConsoleUI.isBrowserToolboxConsole,
+        hideShowContentMessagesCheckbox:
+          !webConsoleUI.isBrowserConsole &&
+          !webConsoleUI.isBrowserToolboxConsole,
       });
 
       // Render the root Application component.

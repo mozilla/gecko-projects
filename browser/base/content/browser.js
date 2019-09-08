@@ -2013,6 +2013,10 @@ var gBrowserInit = {
     Services.obs.addObserver(gXPInstallObserver, "addon-install-blocked");
     Services.obs.addObserver(
       gXPInstallObserver,
+      "addon-install-fullscreen-blocked"
+    );
+    Services.obs.addObserver(
+      gXPInstallObserver,
       "addon-install-origin-blocked"
     );
     Services.obs.addObserver(gXPInstallObserver, "addon-install-failed");
@@ -2530,6 +2534,10 @@ var gBrowserInit = {
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-disabled");
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-started");
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-blocked");
+      Services.obs.removeObserver(
+        gXPInstallObserver,
+        "addon-install-fullscreen-blocked"
+      );
       Services.obs.removeObserver(
         gXPInstallObserver,
         "addon-install-origin-blocked"
@@ -3239,13 +3247,13 @@ function BrowserViewSource(browser) {
 // documentURL - URL of the document to view, or null for this window's document
 // initialTab - name of the initial tab to display, or null for the first tab
 // imageElement - image to load in the Media Tab of the Page Info window; can be null/omitted
-// frameOuterWindowID - the id of the frame that the context menu opened in; can be null/omitted
+// browsingContext - the browsingContext of the frame that we want to view information about; can be null/omitted
 // browser - the browser containing the document we're interested in inspecting; can be null/omitted
 function BrowserPageInfo(
   documentURL,
   initialTab,
   imageElement,
-  frameOuterWindowID,
+  browsingContext,
   browser
 ) {
   if (documentURL instanceof HTMLDocument) {
@@ -3257,7 +3265,7 @@ function BrowserPageInfo(
     documentURL = documentURL.location;
   }
 
-  let args = { initialTab, imageElement, frameOuterWindowID, browser };
+  let args = { initialTab, imageElement, browsingContext, browser };
 
   documentURL = documentURL || window.gBrowser.selectedBrowser.currentURI.spec;
 
@@ -3541,22 +3549,18 @@ var BrowserOnClick = {
     let mm = window.messageManager;
     mm.addMessageListener("Browser:CertExceptionError", this);
     mm.addMessageListener("Browser:SiteBlockedError", this);
-    mm.addMessageListener("Browser:EnableOnlineMode", this);
     mm.addMessageListener("Browser:SetSSLErrorReportAuto", this);
     mm.addMessageListener("Browser:ResetSSLPreferences", this);
     mm.addMessageListener("Browser:SSLErrorReportTelemetry", this);
-    mm.addMessageListener("Browser:SSLErrorGoBack", this);
   },
 
   uninit() {
     let mm = window.messageManager;
     mm.removeMessageListener("Browser:CertExceptionError", this);
     mm.removeMessageListener("Browser:SiteBlockedError", this);
-    mm.removeMessageListener("Browser:EnableOnlineMode", this);
     mm.removeMessageListener("Browser:SetSSLErrorReportAuto", this);
     mm.removeMessageListener("Browser:ResetSSLPreferences", this);
     mm.removeMessageListener("Browser:SSLErrorReportTelemetry", this);
-    mm.removeMessageListener("Browser:SSLErrorGoBack", this);
   },
 
   receiveMessage(msg) {
@@ -3565,10 +3569,8 @@ var BrowserOnClick = {
         this.onCertError(
           msg.target,
           msg.data.elementId,
-          msg.data.isTopFrame,
           msg.data.location,
-          msg.data.securityInfoAsString,
-          msg.data.frameId
+          msg.data.securityInfoAsString
         );
         break;
       case "Browser:SiteBlockedError":
@@ -3579,13 +3581,6 @@ var BrowserOnClick = {
           msg.data.location,
           msg.data.blockedInfo
         );
-        break;
-      case "Browser:EnableOnlineMode":
-        if (Services.io.offline) {
-          // Reset network state and refresh the page.
-          Services.io.offline = false;
-          msg.target.reload();
-        }
         break;
       case "Browser:ResetSSLPreferences":
         let prefSSLImpact = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
@@ -3613,20 +3608,10 @@ var BrowserOnClick = {
           .getHistogramById("TLS_ERROR_REPORT_UI")
           .add(reportStatus);
         break;
-      case "Browser:SSLErrorGoBack":
-        goBackFromErrorPage();
-        break;
     }
   },
 
-  onCertError(
-    browser,
-    elementId,
-    isTopFrame,
-    location,
-    securityInfoAsString,
-    frameId
-  ) {
+  onCertError(browser, elementId, location, securityInfoAsString) {
     let securityInfo;
     let cert;
 
@@ -3683,14 +3668,6 @@ var BrowserOnClick = {
           !permanentOverride
         );
         browser.reload();
-        break;
-
-      case "returnButton":
-        goBackFromErrorPage();
-        break;
-
-      case "advancedPanelReturnButton":
-        goBackFromErrorPage();
         break;
     }
   },
@@ -3833,27 +3810,6 @@ function getMeOutOfHere() {
   gBrowser.loadURI(getDefaultHomePage(), {
     triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(), // Also needs to load homepage
   });
-}
-
-/**
- * Re-direct the browser to the previous page or a known-safe page if no
- * previous page is found in history.  This function is used when the user
- * browses to a secure page with certificate issues and is presented with
- * about:certerror.  The "Go Back" button should take the user to the previous
- * or a default start page so that even when their own homepage is on a server
- * that has certificate errors, we can get them somewhere safe.
- */
-function goBackFromErrorPage() {
-  let state = JSON.parse(SessionStore.getTabState(gBrowser.selectedTab));
-  if (state.index == 1) {
-    // If the unsafe page is the first or the only one in history, go to the
-    // start page.
-    gBrowser.loadURI(getDefaultHomePage(), {
-      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-    });
-  } else {
-    BrowserBack();
-  }
 }
 
 /**

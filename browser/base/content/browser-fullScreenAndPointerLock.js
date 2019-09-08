@@ -410,6 +410,26 @@ var FullScreen = {
     }
   },
 
+  _logWarningPermissionPromptFS(actionStringKey) {
+    let consoleMsg = Cc["@mozilla.org/scripterror;1"].createInstance(
+      Ci.nsIScriptError
+    );
+    let message = gBrowserBundle.GetStringFromName(
+      `permissions.fullscreen.${actionStringKey}`
+    );
+    consoleMsg.initWithWindowID(
+      message,
+      gBrowser.currentURI.spec,
+      null,
+      0,
+      0,
+      Ci.nsIScriptError.warningFlag,
+      "FullScreen",
+      gBrowser.selectedBrowser.innerWindowID
+    );
+    Services.console.logMessage(consoleMsg);
+  },
+
   _handlePermPromptShow() {
     if (
       !FullScreen.permissionsFullScreenAllowed &&
@@ -419,6 +439,7 @@ var FullScreen = {
       ).filter(n => !n.dismissed).length > 0
     ) {
       this.exitDomFullScreen();
+      this._logWarningPermissionPromptFS("fullScreenCanceled");
     }
   },
 
@@ -492,6 +513,9 @@ var FullScreen = {
         this._permissionNotificationIDs
       ).filter(n => !n.dismissed);
       PopupNotifications.remove(notifications, true);
+      if (notifications.length > 0) {
+        this._logWarningPermissionPromptFS("promptCanceled");
+      }
     }
 
     document.documentElement.setAttribute("inDOMFullscreen", true);
@@ -511,7 +535,10 @@ var FullScreen = {
     // Addon installation should be cancelled when entering fullscreen for security and usability reasons.
     // Installation prompts in fullscreen can trick the user into installing unwanted addons.
     // In fullscreen the notification box does not have a clear visual association with its parent anymore.
-    gXPInstallObserver.removeAllNotifications(aBrowser);
+    if (gXPInstallObserver.removeAllNotifications(aBrowser)) {
+      // If notifications have been removed, log a warning to the website console
+      gXPInstallObserver.logWarningFullScreenInstallBlocked();
+    }
 
     PopupNotifications.panel.addEventListener(
       "popupshowing",

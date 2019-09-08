@@ -105,7 +105,7 @@ bool JSContext::init(ContextKind kind) {
   // Skip most of the initialization if this thread will not be running JS.
   if (kind == ContextKind::MainThread) {
     TlsContext.set(this);
-    currentThread_ = ThisThread::GetId();
+    currentThread_ = ThreadId::ThisThreadId();
     if (!regexpStack.ref().init()) {
       return false;
     }
@@ -1294,11 +1294,11 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       internalJobQueue(this),
       canSkipEnqueuingJobs(this, false),
       promiseRejectionTrackerCallback(this, nullptr),
-      promiseRejectionTrackerCallbackData(this, nullptr)
+      promiseRejectionTrackerCallbackData(this, nullptr),
 #ifdef JS_STRUCTURED_SPEW
-      ,
-      structuredSpewer_()
+      structuredSpewer_(),
 #endif
+      insideDebuggerEvaluationWithOnNativeCallHook(this, nullptr)
 {
   MOZ_ASSERT(static_cast<JS::RootingContext*>(this) ==
              JS::RootingContext::get(this));
@@ -1337,11 +1337,11 @@ JSContext::~JSContext() {
 void JSContext::setHelperThread(AutoLockHelperThreadState& locked) {
   MOZ_ASSERT_IF(!JSRuntime::hasLiveRuntimes(), !TlsContext.get());
   TlsContext.set(this);
-  currentThread_ = ThisThread::GetId();
+  currentThread_ = ThreadId::ThisThreadId();
 }
 
 void JSContext::clearHelperThread(AutoLockHelperThreadState& locked) {
-  currentThread_ = Thread::Id();
+  currentThread_ = ThreadId();
   TlsContext.set(nullptr);
 }
 

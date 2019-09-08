@@ -48,9 +48,40 @@ class GeckoTelemetryDelegate final
       samples->AppendElement(static_cast<int64_t>(aSamples[i]));
     }
 
-    mProxy->DispatchTelemetry(
+    mProxy->DispatchHistogram(
         aName,
         mozilla::jni::LongArray::New(samples->Elements(), samples->Length()));
+  }
+
+  void ReceiveCategoricalHistogramSamples(
+      const nsCString& aName, const nsTArray<uint32_t>& aSamples) override {
+    MOZ_ASSERT_UNREACHABLE("ReceiveCategoricalHistogramSamples unimplemented");
+  }
+
+  void ReceiveBoolScalarValue(const nsCString& aName, bool aValue) override {
+    if (!mozilla::jni::IsAvailable() || !mProxy) {
+      return;
+    }
+
+    mProxy->DispatchBooleanScalar(aName, aValue);
+  }
+
+  void ReceiveStringScalarValue(const nsCString& aName,
+                                const nsCString& aValue) override {
+    if (!mozilla::jni::IsAvailable() || !mProxy) {
+      return;
+    }
+
+    mProxy->DispatchStringScalar(aName, aValue);
+  }
+
+  void ReceiveUintScalarValue(const nsCString& aName,
+                              uint32_t aValue) override {
+    if (!mozilla::jni::IsAvailable() || !mProxy) {
+      return;
+    }
+
+    mProxy->DispatchLongScalar(aName, static_cast<int64_t>(aValue));
   }
 
   mozilla::java::RuntimeTelemetry::Proxy::GlobalRef mProxy;

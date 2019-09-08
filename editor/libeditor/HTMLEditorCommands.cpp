@@ -284,8 +284,9 @@ nsresult ListCommand::ToggleState(nsAtom* aTagName, HTMLEditor* aHTMLEditor,
     return rv;
   }
 
-  rv = aHTMLEditor->MakeOrChangeListAsAction(listType, false, EmptyString(),
-                                             aPrincipal);
+  rv = aHTMLEditor->MakeOrChangeListAsAction(
+      *aTagName, EmptyString(), HTMLEditor::SelectAllOfCurrentList::No,
+      aPrincipal);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "MakeOrChangeListAsAction() failed");
   return rv;
 }
@@ -403,7 +404,8 @@ nsresult RemoveListCommand::DoCommand(Command aCommand, TextEditor& aTextEditor,
     return NS_OK;
   }
   // This removes any list type
-  nsresult rv = htmlEditor->RemoveListAsAction(EmptyString(), aPrincipal);
+  nsresult rv =
+      MOZ_KnownLive(htmlEditor)->RemoveListAsAction(EmptyString(), aPrincipal);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "RemoveListAsAction() failed");
   return rv;
 }

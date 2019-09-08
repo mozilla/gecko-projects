@@ -793,7 +793,7 @@
 
     <toolbar id="nav-bar"
              class="browser-toolbar"
-             aria-label="&navbarCmd.label;"
+             aria-label="&navbar.accessibleLabel;"
              fullscreentoolbar="true" mode="icons" customizable="true"
              customizationtarget="nav-bar-customization-target"
              overflowable="true"
@@ -1181,6 +1181,7 @@
              class="browser-toolbar chromeclass-directories"
              context="toolbar-context-menu"
              toolbarname="&personalbarCmd.label;" accesskey="&personalbarCmd.accesskey;"
+             aria-label="&personalbar.accessibleLabel;"
              collapsed="true"
              customizable="true">
       <toolbartabstop skipintoolbarset="true"/>
@@ -1302,6 +1303,7 @@
             <menupopup id="BMB_bookmarksToolbarPopup"
                        is="places-popup"
                        placespopup="true"
+                       nofooterpopup="true"
                        context="placesContext"
                        onpopupshowing="if (!this.parentNode._placesView)
                                          new PlacesMenu(event, `place:parent=${PlacesUtils.bookmarks.toolbarGuid}`,
@@ -1322,6 +1324,7 @@
             <menupopup id="BMB_unsortedBookmarksPopup"
                        is="places-popup"
                        placespopup="true"
+                       nofooterpopup="true"
                        context="placesContext"
                        onpopupshowing="if (!this.parentNode._placesView)
                                          new PlacesMenu(event, `place:parent=${PlacesUtils.bookmarks.unfiledGuid}`,
@@ -1335,6 +1338,7 @@
             <menupopup id="BMB_mobileBookmarksPopup"
                        is="places-popup"
                        placespopup="true"
+                       nofooterpopup="true"
                        context="placesContext"
                        onpopupshowing="if (!this.parentNode._placesView)
                                          new PlacesMenu(event, `place:parent=${PlacesUtils.bookmarks.mobileGuid}`,

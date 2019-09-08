@@ -764,7 +764,12 @@ static bool CreateSpecificWasmBuffer(
   RawbufT* buffer = RawbufT::Allocate(initialSize, clampedMaxSize, mappedSize);
   if (!buffer) {
     if (useHugeMemory) {
-      wasm::Log(cx, "huge Memory allocation failed");
+      JS_ReportErrorFlagsAndNumberASCII(cx, JSREPORT_WARNING, GetErrorMessage,
+                                        nullptr, JSMSG_WASM_HUGE_MEMORY_FAILED);
+      if (cx->isExceptionPending()) {
+        cx->clearPendingException();
+      }
+
       ReportOutOfMemory(cx);
       return false;
     }
@@ -1153,6 +1158,19 @@ static MOZ_MUST_USE bool CheckArrayBufferTooLarge(JSContext* cx,
   return true;
 }
 
+static inline js::gc::AllocKind GetArrayBufferGCObjectKind(size_t numSlots) {
+  if (numSlots <= 4) {
+    return js::gc::AllocKind::ARRAYBUFFER4;
+  }
+  if (numSlots <= 8) {
+    return js::gc::AllocKind::ARRAYBUFFER8;
+  }
+  if (numSlots <= 12) {
+    return js::gc::AllocKind::ARRAYBUFFER12;
+  }
+  return js::gc::AllocKind::ARRAYBUFFER16;
+}
+
 ArrayBufferObject* ArrayBufferObject::createForContents(
     JSContext* cx, uint32_t nbytes, BufferContents contents) {
   MOZ_ASSERT(contents);
@@ -1193,7 +1211,7 @@ ArrayBufferObject* ArrayBufferObject::createForContents(
   }
 
   MOZ_ASSERT(!(class_.flags & JSCLASS_HAS_PRIVATE));
-  gc::AllocKind allocKind = gc::GetGCObjectKind(nslots);
+  gc::AllocKind allocKind = GetArrayBufferGCObjectKind(nslots);
 
   AutoSetNewObjectMetadata metadata(cx);
   Rooted<ArrayBufferObject*> buffer(
@@ -1242,7 +1260,7 @@ ArrayBufferObject* ArrayBufferObject::createZeroed(
   }
 
   MOZ_ASSERT(!(class_.flags & JSCLASS_HAS_PRIVATE));
-  gc::AllocKind allocKind = gc::GetGCObjectKind(nslots);
+  gc::AllocKind allocKind = GetArrayBufferGCObjectKind(nslots);
 
   AutoSetNewObjectMetadata metadata(cx);
   Rooted<ArrayBufferObject*> buffer(

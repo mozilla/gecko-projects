@@ -203,6 +203,13 @@ static const double MAX_TIMEOUT_SECONDS = 1800.0;
 // Not necessarily in sync with the browser
 #define SHARED_MEMORY_DEFAULT 1
 
+// Fuzzing support for JS runtime fuzzing
+#ifdef FUZZING_INTERFACES
+#  include "shell/jsrtfuzzing/jsrtfuzzing.h"
+static bool fuzzDoDebug = !!getenv("MOZ_FUZZ_DEBUG");
+static bool fuzzHaveModule = !!getenv("FUZZER");
+#endif  // FUZZING_INTERFACES
+
 // Code to support GCOV code coverage measurements on standalone shell
 #ifdef MOZ_CODE_COVERAGE
 #  if defined(__GNUC__) && !defined(__clang__)
@@ -2694,6 +2701,15 @@ static bool PrintInternal(JSContext* cx, const CallArgs& args, RCFile* file) {
 
 static bool Print(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef FUZZING_INTERFACES
+  if (fuzzHaveModule && !fuzzDoDebug) {
+    // When fuzzing and not debugging, suppress any print() output,
+    // as it slows down fuzzing and makes libFuzzer's output hard
+    // to read.
+    args.rval().setUndefined();
+    return true;
+  }
+#endif  // FUZZING_INTERFACES
   return PrintInternal(cx, args, gOutFile);
 }
 
@@ -3986,8 +4002,6 @@ static bool ShellBuildId(JS::BuildIdCharVector* buildId);
 static void WorkerMain(WorkerInput* input) {
   MOZ_ASSERT(input->parentRuntime);
 
-  auto mutexShutdown = mozilla::MakeScopeExit([] { Mutex::ShutDown(); });
-
   JSContext* cx = JS_NewContext(8L * 1024L * 1024L, 2L * 1024L * 1024L,
                                 input->parentRuntime);
   if (!cx) {
@@ -4287,8 +4301,6 @@ static void WatchdogMain(JSContext* cx) {
       }
     }
   }
-
-  Mutex::ShutDown();
 }
 
 static bool ScheduleWatchdog(JSContext* cx, double t) {
@@ -4529,6 +4541,20 @@ static bool SetJitCompilerOption(JSContext* cx, unsigned argc, Value* vp) {
   int32_t number = args[1].toInt32();
   if (number < 0) {
     number = -1;
+  }
+
+  // Disallow enabling or disabling the Baseline Interpreter at runtime.
+  // Enabling is a problem because the Baseline Interpreter code is only
+  // present if the interpreter was enabled when the JitRuntime was created.
+  // To support disabling we would have to discard all JitScripts. Furthermore,
+  // we really want JitOptions to be immutable after startup so it's better to
+  // use shell flags.
+  if (opt == JSJITCOMPILER_BASELINE_INTERPRETER_ENABLE &&
+      bool(number) != jit::IsBaselineInterpreterEnabled()) {
+    JS_ReportErrorASCII(cx,
+                        "Enabling or disabling the Baseline Interpreter at "
+                        "runtime is not supported.");
+    return false;
   }
 
   // Throw if disabling the JITs and there's JIT code on the stack, to avoid
@@ -6311,6 +6337,44 @@ static bool RecomputeWrappers(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool DumpObjectWrappers(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  bool printedHeader = false;
+  for (ZonesIter zone(cx->runtime(), WithAtoms); !zone.done(); zone.next()) {
+    bool printedZoneInfo = false;
+    for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
+      bool printedCompartmentInfo = false;
+      for (Compartment::ObjectWrapperEnum e(comp); !e.empty(); e.popFront()) {
+        JSObject* wrapper = e.front().value().unbarrieredGet();
+        JSObject* wrapped = e.front().key();
+        if (!printedHeader) {
+          fprintf(stderr, "Cross-compartment object wrappers:\n");
+          printedHeader = true;
+        }
+        if (!printedZoneInfo) {
+          fprintf(stderr, "  Zone %p:\n", zone.get());
+          printedZoneInfo = true;
+        }
+        if (!printedCompartmentInfo) {
+          fprintf(stderr, "    Compartment %p:\n", comp.get());
+          printedCompartmentInfo = true;
+        }
+        fprintf(stderr,
+                "      Object wrapper %p -> %p in zone %p compartment %p\n",
+                wrapper, wrapped, wrapped->zone(), wrapped->compartment());
+      }
+    }
+  }
+
+  if (!printedHeader) {
+    fprintf(stderr, "No cross-compartment object wrappers.\n");
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
 static bool GetMaxArgs(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   args.rval().setInt32(ARGS_LENGTH_MAX);
@@ -7113,8 +7177,6 @@ struct BufferStreamState {
 static ExclusiveWaitableData<BufferStreamState>* bufferStreamState;
 
 static void BufferStreamMain(BufferStreamJob* job) {
-  auto mutexShutdown = MakeScopeExit([] { Mutex::ShutDown(); });
-
   const uint8_t* bytes;
   size_t byteLength;
   JS::OptimizedEncodingListener* listener;
@@ -8825,6 +8887,10 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "  Recompute all cross-compartment wrappers. src and target are both optional\n"
 "  and can be used to filter source or target compartments: the unwrapped\n"
 "  object's compartment is used as CompartmentFilter.\n"),
+
+    JS_FN_HELP("dumpObjectWrappers", DumpObjectWrappers, 2, 0,
+"dumpObjectWrappers()",
+"  Print information about cross-compartment object wrappers.\n"),
 
     JS_FN_HELP("wrapWithProto", WrapWithProto, 2, 0,
 "wrapWithProto(obj)",
@@ -10731,6 +10797,12 @@ static int Shell(JSContext* cx, OptionParser* op, char** envp) {
   }
 
   JSAutoRealm ar(cx, glob);
+
+#ifdef FUZZING_INTERFACES
+  if (fuzzHaveModule) {
+    return FuzzJSRuntimeStart(cx, &sArgc, &sArgv);
+  }
+#endif
 
   ShellContext* sc = GetShellContext(cx);
   int result = EXIT_SUCCESS;

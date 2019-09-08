@@ -607,6 +607,24 @@ security:
     record_in_processes:
       - main
 
+pwmgr:
+  potentially_breached_passwords:
+    bug_numbers:
+      - 1577808
+    description: >
+      The number of potentially breached passwords, as determined by
+      LoginBreaches.getPotentialBreachesByLoginGUID.
+    expires: never
+    kind: uint
+    notification_emails:
+      - seceng-telemetry@mozilla.com
+      - passwords-dev@mozilla.org
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - main
+
 contentblocking:
   cryptomining_blocking_enabled:
     bug_numbers:
@@ -657,6 +675,21 @@ contentblocking:
       - 'firefox'
       - 'fennec'
       - 'geckoview'
+    record_in_processes:
+      - main
+  trackers_blocked_count:
+    bug_numbers:
+      - 1577030
+    description: >
+      A count of the number of tracking events blocked.
+    expires: "75"
+    kind: uint
+    notification_emails:
+      - chsiang@mozilla.com
+      - seceng-telemetry@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
     record_in_processes:
       - main
 
@@ -907,284 +940,6 @@ preferences:
       - 'geckoview'
     record_in_processes:
       - 'main'
-
-# The following section contains WebRTC JS API scalars
-# For more information on WebRTC, see https://www.w3.org/TR/webrtc/
-# For more info on ICE, see https://tools.ietf.org/html/rfc5245
-webrtc.peerconnection:
-  connected:
-    bug_numbers:
-      - 1455724
-    description: >
-      The number of RTCPeerConnection objects that established connections.
-      This is incremented the first time a RTCPeerConnection object's
-      iceConnectionState becomes "connected" or "complete".
-      For more information on WebRTC, see https://www.w3.org/TR/webrtc/
-    expires: "65"
-    kind: uint
-    notification_emails:
-      - ngrunbaum@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  legacy_callback_stats_used:
-    bug_numbers:
-      - 1455724
-    description: >
-      The number of RTCPeerConnections in which the current statistics
-      API is called. Recorded the first time getStats is called using the
-      deprecated callback based API on a RTCPeerConnection that has an
-      iceConnectionState of "complete" or "connected".
-    expires: "65"
-    kind: uint
-    notification_emails:
-      - ngrunbaum@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  promise_stats_used:
-    bug_numbers:
-      - 1455724
-    description: >
-      The number of RTCPeerConnection objects in which the current statistics
-      API is called. This is recorded the first time getStats is called using
-      the promise based API on a RTCPeerConnection that has an
-      iceConnectionState of "complete" or "connected".
-    expires: "65"
-    kind: uint
-    notification_emails:
-      - ngrunbaum@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  promise_and_callback_stats_used:
-    bug_numbers:
-      - 1455724
-    description: >
-      The number of RTCPeerConnection objects in which both the legacy callback
-      statistics API and the modern promise statistics API are used. This is
-      recorded once for each RTCPeerConnection after the callback and promise
-      getStats API has been called on a RTCPeerConnection that has an
-      iceConnectionState of "complete" or "connected".
-    expires: "65"
-    kind: uint
-    notification_emails:
-      - ngrunbaum@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-  datachannel_created:
-    bug_numbers:
-      - 1518609
-    description: >
-      The number of RTCPeerConnection objects in which a RTCDataChannel was
-      created. This is recorded once for each RTCPeerConnection after the first
-      RTCDataChannel is created.
-    expires: "70"
-    kind: uint
-    notification_emails:
-      - ngrunbaum@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-  datachannel_max_retx_used:
-    bug_numbers:
-      - 1518609
-    description: >
-      The number of RTCPeerConnection objects in which one or more
-      RTCDataChannels were created with the legacy maxRetransmitTime option
-      instead of the new, synonymous maxPacketLifeTime option. This is recorded
-      once for each RTCPeerConnection after a RTCDataChannel is created with
-      the maxRetransmitTime option.
-    expires: "70"
-    kind: uint
-    notification_emails:
-      - ngrunbaum@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-  datachannel_max_life_used:
-    bug_numbers:
-      - 1518609
-    description: >
-      The number of RTCPeerConnection objects in which one or more RTCDataChannels
-      were created with the maxPacketLifeTime option instead of the deprecated,
-      synonymous maxRetransmitTime option. This is recorded once for each
-      RTCPeerConnection after a RTCDataChannel is created with the
-      maxPacketLifeTime option.
-    expires: "70"
-    kind: uint
-    notification_emails:
-      - ngrunbaum@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-  datachannel_max_retx_and_life_used:
-    bug_numbers:
-      - 1518609
-    description: >
-      The number of RTCPeerConnection objects in which one or more RTCDataChannels
-      were created with both maxPacketLifeTime and the deprecated, synonymous
-      maxRetransmitTime option. This is recorded once for each
-      RTCPeerConnection after RTCDataChannels have been created with the
-      maxPacketLifeTime and the maxRetransmitTime options, either together
-      or in seperate invocations.
-    expires: "70"
-    kind: uint
-    notification_emails:
-      - ngrunbaum@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-# The following section contains WebRTC nICEr scalars
-# For more info on ICE, see https://tools.ietf.org/html/rfc5245
-# For more info on STUN, see https://tools.ietf.org/html/rfc5389
-# For more info on TURN, see https://tools.ietf.org/html/rfc5766
-webrtc.nicer:
-  stun_retransmits:
-    bug_numbers:
-      - 1325536
-    description: >
-      The count of STUN message retransmissions during a WebRTC call.
-      When sending STUN request messages over UDP, messages may be
-      dropped by the network. Retransmissions are the mechanism used to
-      accomplish reliability of the STUN request/response transaction.
-      This can happen during both successful and unsuccessful WebRTC
-      calls.
-      For more info on ICE, see https://tools.ietf.org/html/rfc5245
-      For more info on STUN, see https://tools.ietf.org/html/rfc5389
-      For more info on TURN, see https://tools.ietf.org/html/rfc5766
-    expires: "62"
-    kind: uint
-    notification_emails:
-      - webrtc-ice-telemetry-alerts@mozilla.com
-      - nohlmeier@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  turn_401s:
-    bug_numbers:
-      - 1325536
-    description: >
-      The count of TURN 401 (Unauthorized) responses to allocation
-      requests. Only 401 responses beyond the first, expected 401 are
-      counted. More than one 401 repsonse indicates the client is
-      experiencing difficulty authenticating with the TURN server. This
-      can happen during both successful and unsuccessful WebRTC calls.
-      For more info on ICE, see https://tools.ietf.org/html/rfc5245
-      For more info on STUN, see https://tools.ietf.org/html/rfc5389
-      For more info on TURN, see https://tools.ietf.org/html/rfc5766
-    expires: "62"
-    kind: uint
-    notification_emails:
-      - webrtc-ice-telemetry-alerts@mozilla.com
-      - nohlmeier@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  turn_403s:
-    bug_numbers:
-      - 1325536
-    description: >
-      The count of TURN 403 (Forbidden) responses to CreatePermission or
-      ChannelBind requests.  This indicates that the TURN server is
-      refusing the request for an IP address or IP address/port
-      combination, likely due to administrative restrictions.
-      For more info on ICE, see https://tools.ietf.org/html/rfc5245
-      For more info on STUN, see https://tools.ietf.org/html/rfc5389
-      For more info on TURN, see https://tools.ietf.org/html/rfc5766
-    expires: "62"
-    kind: uint
-    notification_emails:
-      - webrtc-ice-telemetry-alerts@mozilla.com
-      - nohlmeier@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
-
-  turn_438s:
-    bug_numbers:
-      - 1325536
-    description: >
-      The count of TURN 438 (Stale Nonce) responses to allocation
-      requests. This can happen during both successful and unsuccessful
-      WebRTC calls.
-      For more info on ICE, see https://tools.ietf.org/html/rfc5245
-      For more info on STUN, see https://tools.ietf.org/html/rfc5389
-      For more info on TURN, see https://tools.ietf.org/html/rfc5766
-    expires: "62"
-    kind: uint
-    notification_emails:
-      - webrtc-ice-telemetry-alerts@mozilla.com
-      - nohlmeier@mozilla.com
-    release_channel_collection: opt-in
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-      - 'content'
 
 webrtc.video:
   recv_codec_used:
@@ -3302,11 +3057,12 @@ update.startup:
   from_app_version:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the previous application version that the update was applied to
       when the update makes it to the last phase where the application has
       exited and started.
-    expires: "72"
+    expires: "76"
     kind: string
     keyed: false
     notification_emails:
@@ -3323,11 +3079,12 @@ update.startup:
   mar_partial_size_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes of a partial update MAR file when
       the update makes it to the last phase where the application has exited and
       started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3344,11 +3101,12 @@ update.startup:
   mar_complete_size_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes of a complete update MAR file when
       the update makes it to the last phase where the application has exited and
       started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3366,11 +3124,12 @@ update.startup.intervals:
   check:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the check phase of the update process
       when an update makes it to the last phase where the application has exited
       and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3387,12 +3146,13 @@ update.startup.intervals:
   download_bits_partial:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the download phase of the update
       process using the BITS downloader for a partial update MAR file when the
       update makes it to the last phase where the application has exited and
       and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3411,12 +3171,13 @@ update.startup.intervals:
   download_bits_complete:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the download phase of the update
       process using the BITS downloader for a complete update MAR file when the
       update makes it to the last phase where the application has exited and
       started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3435,12 +3196,13 @@ update.startup.intervals:
   download_internal_partial:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the download phase of the update
       process using the internal application downloader for a partial update MAR
       file when the update makes it to the last phase where the application has
       exited and and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3457,12 +3219,13 @@ update.startup.intervals:
   download_internal_complete:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the download phase of the update
       process using the internal application downloader for a complete update
       MAR file when the update makes it to the last phase where the application
       has exited and and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3479,11 +3242,12 @@ update.startup.intervals:
   stage_partial:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the stage phase of the update process
       for a partial update MAR file when the update makes it to the last phase
       where the application has exited and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3500,11 +3264,12 @@ update.startup.intervals:
   stage_complete:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the stage phase of the update process
       for a complete update MAR file when the update makes it to the last phase
       where the application has exited and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3521,11 +3286,12 @@ update.startup.intervals:
   apply_partial:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the apply phase of the update process
       for a partial update MAR file when the update makes it to the last phase
       where the application has exited and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3542,11 +3308,12 @@ update.startup.intervals:
   apply_complete:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the apply phase of the update process
       for a complete update MAR file when the update makes it to the last phase
       where the application has exited and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3564,6 +3331,7 @@ update.startup.downloads:
   bits_partial_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes downloaded using the BITS downloader for
       a partial update MAR file when the update makes it to the last phase where
@@ -3571,7 +3339,7 @@ update.startup.downloads:
       the size of the update MAR file because the value is only monitored
       during the initial download while the application is running and not if
       the download is resumed.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3590,6 +3358,7 @@ update.startup.downloads:
   bits_partial_seconds:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of seconds spent downloading during the initial
       download without exiting the application using the BITS downloader for a
@@ -3597,7 +3366,7 @@ update.startup.downloads:
       the application has exited and started. This value can be used with the
       value of update.startup.downloads.bits_partial_bytes to estimate the bytes
       per second for the download.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3616,6 +3385,7 @@ update.startup.downloads:
   bits_complete_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes downloaded using the BITS downloader for
       a complete update MAR file when the update makes it to the last phase
@@ -3623,7 +3393,7 @@ update.startup.downloads:
       than the size of the update MAR file because the value is only monitored
       during the initial download while the application is running and not if
       the download is resumed.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3642,6 +3412,7 @@ update.startup.downloads:
   bits_complete_seconds:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of seconds spent downloading during the initial
       download without exiting the application using the BITS downloader for a
@@ -3649,7 +3420,7 @@ update.startup.downloads:
       the application has exited and started. This value can be used with the
       value of update.startup.downloads.bits_complete_bytes to estimate the
       bytes per second for the download.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3668,6 +3439,7 @@ update.startup.downloads:
   internal_partial_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes downloaded using the internal application
       downloader for a partial update MAR file when the update makes it to the
@@ -3675,7 +3447,7 @@ update.startup.downloads:
       different than the size of the update MAR file because the value is only
       monitored during the initial download while the application is running and
       not if the download is resumed.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3692,6 +3464,7 @@ update.startup.downloads:
   internal_partial_seconds:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of seconds spent downloading during the initial
       download without exiting the application using the internal application
@@ -3699,7 +3472,7 @@ update.startup.downloads:
       last phase where the application has exited and started. This value can be
       used with the value of update.startup.downloads.internal_partial_bytes to
       estimate the bytes per second for the download.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3716,6 +3489,7 @@ update.startup.downloads:
   internal_complete_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes downloaded by the internal
       application downloader for a complete update MAR file when an update makes
@@ -3723,7 +3497,7 @@ update.startup.downloads:
       value can be different than the size of the update MAR file because the
       value is only monitored during the initial download while the
       application is running and not if the download is resumed.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3740,6 +3514,7 @@ update.startup.downloads:
   internal_complete_seconds:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of seconds spent downloading during the initial
       download without exiting the application using the internal application
@@ -3747,7 +3522,7 @@ update.startup.downloads:
       last phase where the application has exited and started. This value can be
       used with the value of update.startup.downloads.internal_complete_bytes to
       estimate the bytes per second for the download.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3765,11 +3540,12 @@ update.session:
   from_app_version:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the previous application version that the update was applied to
       when the update has finished due to a failure before the application has
       exited and started.
-    expires: "72"
+    expires: "76"
     kind: string
     keyed: false
     notification_emails:
@@ -3786,11 +3562,12 @@ update.session:
   mar_partial_size_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes of a partial update MAR file when
       the update has finished due to a failure before the application has exited
       and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3807,11 +3584,12 @@ update.session:
   mar_complete_size_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes of a complete update MAR file when
       the update has finished due to a failure before the application has exited
       and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3829,11 +3607,12 @@ update.session.intervals:
   check:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the check phase of the update process
       when an update has finished due to a failure before the application has
       exited and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3850,12 +3629,13 @@ update.session.intervals:
   download_bits_partial:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the download phase of the update
       process using the BITS downloader for a partial update MAR file when the
       update has finished due to a failure before the application has exited
       and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3874,12 +3654,13 @@ update.session.intervals:
   download_bits_complete:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the download phase of the update
       process using the BITS downloader for a complete update MAR file when the
       update has finished due to a failure before the application has exited and
       started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3898,12 +3679,13 @@ update.session.intervals:
   download_internal_partial:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the download phase of the update
       process using the internal application downloader for a partial update MAR
       file when the update has finished due to a failure before the application
       has exited and and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3920,12 +3702,13 @@ update.session.intervals:
   download_internal_complete:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the download phase of the update
       process using the internal application downloader for a complete update
       MAR file when the update has finished due to a failure before the
       application has exited and and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3942,11 +3725,12 @@ update.session.intervals:
   stage_partial:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the stage phase of the update process
       for a partial update MAR file when the update has finished due to a
       failure before the application has exited and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3963,11 +3747,12 @@ update.session.intervals:
   stage_complete:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the stage phase of the update process
       for a complete update MAR file when the update has finished due to a
       failure before the application has exited and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -3984,11 +3769,12 @@ update.session.intervals:
   apply_partial:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the apply phase of the update process
       for a partial update MAR file when the update has finished due to a
       failure before the application has exited and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4005,11 +3791,12 @@ update.session.intervals:
   apply_complete:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the interval in seconds of the apply phase of the update process
       for a complete update MAR file when the update has finished due to a
       failure before the application has exited and started.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4027,6 +3814,7 @@ update.session.downloads:
   bits_partial_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes downloaded using the BITS downloader for
       a partial update MAR file when the update has finished due to a failure
@@ -4034,7 +3822,7 @@ update.session.downloads:
       different than the size of the update MAR file because the value is only
       monitored during the initial download while the application is running and
       not if the download is resumed.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4053,6 +3841,7 @@ update.session.downloads:
   bits_partial_seconds:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of seconds spent downloading during the initial
       download without exiting the application using the BITS downloader for a
@@ -4060,7 +3849,7 @@ update.session.downloads:
       before the application has exited and started. This value can be used with
       the value of update.session.downloads.bits_partial_bytes to estimate the
       bytes per second for the download.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4079,6 +3868,7 @@ update.session.downloads:
   bits_complete_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes downloaded using the BITS downloader for
       a complete update MAR file when the update has finished due to a failure
@@ -4086,7 +3876,7 @@ update.session.downloads:
       than the size of the update MAR file because the value is only monitored
       during the initial download while the application is running and not if
       the download is resumed.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4105,6 +3895,7 @@ update.session.downloads:
   bits_complete_seconds:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of seconds spent downloading during the initial
       download without exiting the application using the BITS downloader for a
@@ -4112,7 +3903,7 @@ update.session.downloads:
       before the application has exited and started. This value can be used with
       the value of update.session.downloads.bits_complete_bytes to estimate the
       bytes per second for the download.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4131,6 +3922,7 @@ update.session.downloads:
   internal_partial_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes downloaded using the internal
       application downloader for a partial update MAR file when the update has
@@ -4138,7 +3930,7 @@ update.session.downloads:
       This value can be different than the size of the update MAR file because
       the value is only monitored during the initial download while the
       application is running and not if the download is resumed.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4155,6 +3947,7 @@ update.session.downloads:
   internal_partial_seconds:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of seconds spent downloading during the initial
       download without exiting the application using the internal application
@@ -4162,7 +3955,7 @@ update.session.downloads:
       to a failure before the application has exited and started. This value can
       be used with the value of update.session.downloads.internal_partial_bytes
       to estimate the bytes per second for the download.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4179,6 +3972,7 @@ update.session.downloads:
   internal_complete_bytes:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of bytes downloaded by the internal
       application downloader for a complete update MAR file when an update has
@@ -4186,7 +3980,7 @@ update.session.downloads:
       This value can be different than the size of the update MAR file because
       the value is only monitored during the initial download while the
       application is running and not if the download is resumed.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4203,6 +3997,7 @@ update.session.downloads:
   internal_complete_seconds:
     bug_numbers:
       - 1539154
+      - 1578262
     description: >
       Records the total number of seconds spent downloading during the initial
       download without exiting the application using the internal application
@@ -4210,7 +4005,7 @@ update.session.downloads:
       to a failure before the application has exited and started. This value can
       be used with the value of update.session.downloads.internal_complete_bytes
       to estimate the bytes per second for the download.
-    expires: "72"
+    expires: "76"
     kind: uint
     keyed: false
     notification_emails:
@@ -4615,10 +4410,12 @@ telemetry.test:
     kind: uint
     notification_emails:
       - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
     products:
       - 'firefox'
       - 'fennec'
       - 'geckoview'
+      - 'geckoview_streaming'
     record_in_processes:
       - 'main'
 
@@ -4630,10 +4427,12 @@ telemetry.test:
     kind: string
     notification_emails:
       - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
     products:
       - 'firefox'
       - 'fennec'
       - 'geckoview'
+      - 'geckoview_streaming'
     record_in_processes:
       - 'main'
 
@@ -4645,10 +4444,12 @@ telemetry.test:
     kind: boolean
     notification_emails:
       - telemetry-client-dev@mozilla.com
+    release_channel_collection: opt-out
     products:
       - 'firefox'
       - 'fennec'
       - 'geckoview'
+      - 'geckoview_streaming'
     record_in_processes:
       - 'main'
 

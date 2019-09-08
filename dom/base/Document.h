@@ -1279,11 +1279,48 @@ class Document : public nsINode,
   }
 
   /**
-   * Get cookies loaded flag for this document.
+   * Get the cookies loaded flag for this document.
    */
   bool GetHasCookiesLoaded() {
     return mContentBlockingLog.HasBlockedAnyOfType(
         nsIWebProgressListener::STATE_COOKIES_LOADED);
+  }
+
+  /**
+   * Set the tracker cookies loaded flag for this document.
+   */
+  void SetHasTrackerCookiesLoaded(bool aHasTrackerCookiesLoaded,
+                                  const nsACString& aOriginLoaded) {
+    RecordContentBlockingLog(
+        aOriginLoaded, nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER,
+        aHasTrackerCookiesLoaded);
+  }
+
+  /**
+   * Get the tracker cookies loaded flag for this document.
+   */
+  bool GetHasTrackerCookiesLoaded() {
+    return mContentBlockingLog.HasBlockedAnyOfType(
+        nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER);
+  }
+
+  /**
+   * Set the social tracker cookies loaded flag for this document.
+   */
+  void SetHasSocialTrackerCookiesLoaded(bool aHasSocialTrackerCookiesLoaded,
+                                        const nsACString& aOriginLoaded) {
+    RecordContentBlockingLog(
+        aOriginLoaded,
+        nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER,
+        aHasSocialTrackerCookiesLoaded);
+  }
+
+  /**
+   * Get the social tracker cookies loaded flag for this document.
+   */
+  bool GetHasSocialTrackerCookiesLoaded() {
+    return mContentBlockingLog.HasBlockedAnyOfType(
+        nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER);
   }
 
   /**
@@ -3786,23 +3823,15 @@ class Document : public nsINode,
 
   void ReportUseCounters();
 
-  void SetDocumentUseCounter(UseCounter aUseCounter) {
-    if (!mUseCounters[aUseCounter]) {
-      mUseCounters[aUseCounter] = true;
-    }
+  void SetUseCounter(UseCounter aUseCounter) {
+    mUseCounters[aUseCounter] = true;
   }
 
   const StyleUseCounters* GetStyleUseCounters() {
     return mStyleUseCounters.get();
   }
 
-  void SetPageUseCounter(UseCounter aUseCounter);
-
-  void SetDocumentAndPageUseCounter(UseCounter aUseCounter) {
-    SetDocumentUseCounter(aUseCounter);
-    SetPageUseCounter(aUseCounter);
-  }
-
+  void PropagateUseCountersToPage();
   void PropagateUseCounters(Document* aParentDocument);
 
   void AddToVisibleContentHeuristic(uint32_t aNumber) {
@@ -3837,6 +3866,10 @@ class Document : public nsINode,
   // Return true if NotifyUserGestureActivation() has been called on any
   // document in the document tree.
   bool HasBeenUserGestureActivated();
+
+  // Return true if there is transient user gesture activation and it hasn't yet
+  // timed out.
+  bool HasValidTransientUserGestureActivation();
 
   BrowsingContext* GetBrowsingContext() const;
 
@@ -5040,9 +5073,6 @@ class Document : public nsINode,
   std::bitset<eUseCounter_Count> mUseCounters;
   // Flags for use counters used by any child documents of this document.
   std::bitset<eUseCounter_Count> mChildDocumentUseCounters;
-  // Flags for whether we've notified our top-level "page" of a use counter
-  // for this child document.
-  std::bitset<eUseCounter_Count> mNotifiedPageForUseCounter;
 
   // The CSS property use counters.
   UniquePtr<StyleUseCounters> mStyleUseCounters;

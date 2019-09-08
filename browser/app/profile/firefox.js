@@ -2112,8 +2112,12 @@ pref("devtools.serviceWorkers.testing.enabled", false);
 // Enable the Network Monitor
 pref("devtools.netmonitor.enabled", true);
 
-// Enable Network Search
-pref("devtools.netmonitor.features.search", false);
+// Enable Network Search in Nightly builds.
+#if defined(NIGHTLY_BUILD)
+  pref("devtools.netmonitor.features.search", true);
+#else
+  pref("devtools.netmonitor.features.search", false);
+#endif
 
 // Enable the Application panel
 pref("devtools.application.enabled", false);
@@ -2252,6 +2256,7 @@ pref("devtools.webconsole.timestampMessages", false);
 
 // Saved editor mode state in the console.
 pref("devtools.webconsole.input.editor", false);
+pref("devtools.browserconsole.input.editor", false);
 
 // Editor width for webconsole and browserconsole.
 pref("devtools.webconsole.input.editorWidth", 0);
@@ -2314,13 +2319,6 @@ pref("devtools.responsive.metaViewport.enabled", false);
 // The user agent of the viewport.
 pref("devtools.responsive.userAgent", "");
 
-// Whether to show the settings onboarding tooltip only in release or beta
-// builds.
-#if defined(RELEASE_OR_BETA)
-  pref("devtools.responsive.show-setting-tooltip", true);
-#else
-  pref("devtools.responsive.show-setting-tooltip", false);
-#endif
 // Show the custom user agent input in Nightly builds.
 #if defined(NIGHTLY_BUILD)
   pref("devtools.responsive.showUserAgentInput", true);

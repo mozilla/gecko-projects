@@ -119,157 +119,11 @@ class HTMLEditRules : public TextEditRules {
   }
 
   /**
-   * WillInsertParagraphSeparator() is called when insertParagraph command is
-   * executed or something equivalent.  This method actually tries to insert
-   * new paragraph or <br> element, etc.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE EditActionResult WillInsertParagraphSeparator();
-
-  /**
-   * If aNode is a text node that contains only collapsed whitespace, delete
-   * it.  It doesn't serve any useful purpose, and we don't want it to confuse
-   * code that doesn't correctly skip over it.
-   *
-   * If deleting the node fails (like if it's not editable), the caller should
-   * proceed as usual, so don't return any errors.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult DeleteNodeIfCollapsedText(nsINode& aNode);
-
-  /**
-   * Called before deleting selected contents.  This method actually removes
-   * selected contents.
-   *
-   * @param aAction             Direction of the deletion.
-   * @param aStripWrappers      Must be eStrip or eNoStrip.
-   * @param aCancel             Returns true if the operation is canceled.
-   * @param aHandled            Returns true if the edit action is handled.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult WillDeleteSelection(
-      nsIEditor::EDirection aAction, nsIEditor::EStripWrappers aStripWrappers,
-      bool* aCancel, bool* aHandled);
-
-  /**
    * Called after deleting selected content.
    * This method removes unnecessary empty nodes and/or inserts <br> if
    * necessary.
    */
   MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult DidDeleteSelection();
-
-  /**
-   * GetGoodSelPointForNode() finds where at a node you would want to set the
-   * selection if you were trying to have a caret next to it.  Always returns a
-   * valid value (unless mHTMLEditor has gone away).
-   *
-   * @param aNode         The node
-   * @param aAction       Which edge to find:
-   *                        eNext/eNextWord/eToEndOfLine indicates beginning,
-   *                        ePrevious/PreviousWord/eToBeginningOfLine ending.
-   */
-  EditorDOMPoint GetGoodSelPointForNode(nsINode& aNode,
-                                        nsIEditor::EDirection aAction);
-
-  /**
-   * TryToJoinBlocksWithTransaction() tries to join two block elements.  The
-   * right element is always joined to the left element.  If the elements are
-   * the same type and not nested within each other,
-   * JoinEditableNodesWithTransaction() is called (example, joining two list
-   * items together into one).  If the elements are not the same type, or one
-   * is a descendant of the other, we instead destroy the right block placing
-   * its children into leftblock.  DTD containment rules are followed
-   * throughout.
-   *
-   * @return            Sets canceled to true if the operation should do
-   *                    nothing anymore even if this doesn't join the blocks.
-   *                    Sets handled to true if this actually handles the
-   *                    request.  Note that this may set it to true even if this
-   *                    does not join the block.  E.g., if the blocks shouldn't
-   *                    be joined or it's impossible to join them but it's not
-   *                    unexpected case, this returns true with this.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE EditActionResult
-  TryToJoinBlocksWithTransaction(nsIContent& aLeftNode, nsIContent& aRightNode);
-
-  /**
-   * MoveBlock() moves the content from aRightBlock starting from aRightOffset
-   * into aLeftBlock at aLeftOffset. Note that the "block" can be inline nodes
-   * between <br>s, or between blocks, etc.  DTD containment rules are followed
-   * throughout.
-   *
-   * @return            Sets handled to true if this actually joins the nodes.
-   *                    canceled is always false.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE EditActionResult MoveBlock(Element& aLeftBlock,
-                                          Element& aRightBlock,
-                                          int32_t aLeftOffset,
-                                          int32_t aRightOffset);
-
-  /**
-   * MoveNodeSmart() moves aNode to (aDestElement, aInOutDestOffset).
-   * DTD containment rules are followed throughout.
-   *
-   * @param aOffset                 returns the point after inserted content.
-   * @return                        Sets true to handled if this actually moves
-   *                                the nodes.
-   *                                canceled is always false.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE EditActionResult MoveNodeSmart(nsIContent& aNode,
-                                              Element& aDestElement,
-                                              int32_t* aInOutDestOffset);
-
-  /**
-   * MoveContents() moves the contents of aElement to (aDestElement,
-   * aInOutDestOffset).  DTD containment rules are followed throughout.
-   *
-   * @param aInOutDestOffset        updated to point after inserted content.
-   * @return                        Sets true to handled if this actually moves
-   *                                the nodes.
-   *                                canceled is always false.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE EditActionResult MoveContents(Element& aElement,
-                                             Element& aDestElement,
-                                             int32_t* aInOutDestOffset);
-
-  /**
-   * DeleteElementsExceptTableRelatedElements() removes elements except
-   * table related elements (except <table> itself) and their contents
-   * from the DOM tree.
-   *
-   * @param aNode               If this is not a table related element, this
-   *                            node will be removed from the DOM tree.
-   *                            Otherwise, this method calls itself recursively
-   *                            with its children.
-   *
-   */
-  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult
-  DeleteElementsExceptTableRelatedElements(nsINode& aNode);
-
-  /**
-   * XXX Should document what this does.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult WillMakeList(const nsAString* aListType,
-                                     bool aEntireList,
-                                     const nsAString* aBulletType,
-                                     bool* aCancel, bool* aHandled,
-                                     const nsAString* aItemType = nullptr);
-
-  /**
-   * Called before removing a list element.  This method actually removes
-   * list elements and list item elements at Selection.  And move contents
-   * in them where the removed list was.
-   *
-   * @param aCancel             Returns true if the operation is canceled.
-   * @param aHandled            Returns true if the edit action is handled.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult WillRemoveList(bool* aCancel, bool* aHandled);
 
   /**
    * Called before indenting around Selection.  This method actually tries to
@@ -350,40 +204,6 @@ class HTMLEditRules : public TextEditRules {
   MOZ_CAN_RUN_SCRIPT
   MOZ_MUST_USE nsresult WillRelativeChangeZIndex(int32_t aChange, bool* aCancel,
                                                  bool* aHandled);
-
-  /**
-   * Called before creating aDefinitionListItemTag around Selection.  This
-   * method just calls WillMakeList() with "dl" as aListType and
-   * aDefinitionListItemTag as aItemType.
-   *
-   * @param aDefinitionListItemTag  Should be "dt" or "dd".
-   * @param aEntireList             XXX not sure
-   * @param aCancel                 Returns true if the operation is canceled.
-   * @param aHandled                Returns true if the edit action is handled.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult WillMakeDefListItem(const nsAString* aBlockType,
-                                            bool aEntireList, bool* aCancel,
-                                            bool* aHandled);
-
-  /**
-   * WillMakeBasicBlock() called before changing block style around Selection.
-   * This method actually does something with calling FormatBlockContainer().
-   *
-   * @param aBlockType          Necessary block style as string.
-   * @param aCancel             Returns true if the operation is canceled.
-   * @param aHandled            Returns true if the edit action is handled.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult WillMakeBasicBlock(const nsAString& aBlockType,
-                                           bool* aCancel, bool* aHandled);
-
-  /**
-   * Called after creating a basic block, indenting, outdenting or aligning
-   * contents.  This method inserts a padding <br> element for empty last line
-   * if start container of Selection needs it.
-   */
-  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult DidMakeBasicBlock();
 
   /**
    * Called before changing an element to absolute positioned.
@@ -469,90 +289,10 @@ class HTMLEditRules : public TextEditRules {
   nsresult GetFormatString(nsINode* aNode, nsAString& outFormat);
 
   /**
-   * If aNode is the descendant of a listitem, return that li.  But table
-   * element boundaries are stoppers on the search.  Also stops on the active
-   * editor host (contenteditable).  Also test if aNode is an li itself.
-   */
-  Element* IsInListItem(nsINode* aNode);
-
-  nsAtom& DefaultParagraphSeparator();
-
-  /**
-   * ReturnInHeader() handles insertParagraph command (i.e., handling Enter
-   * key press) in a heading element.  This splits aHeader element at
-   * aOffset in aNode.  Then, if right heading element is empty, it'll be
-   * removed and new paragraph is created (its type is decided with default
-   * paragraph separator).
-   *
-   * @param aHeader             The heading element to be split.
-   * @param aNode               Typically, Selection start container,
-   *                            where to be split.
-   * @param aOffset             Typically, Selection start offset in the
-   *                            start container, where to be split.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult ReturnInHeader(Element& aHeader, nsINode& aNode,
-                                       int32_t aOffset);
-
-  /**
-   * ReturnInParagraph() does the right thing for Enter key press or
-   * 'insertParagraph' command in aParentDivOrP.  aParentDivOrP will be
-   * split at start of first selection range.
-   *
-   * @param aParentDivOrP   The parent block.  This must be <p> or <div>
-   *                        element.
-   * @return                Returns with NS_OK if this doesn't meat any
-   *                        unexpected situation.  If this method tries to
-   *                        split the paragraph, marked as handled.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE EditActionResult ReturnInParagraph(Element& aParentDivOrP);
-
-  /**
-   * SplitParagraph() splits the parent block, aPara, at aSelNode - aOffset.
-   *
-   * @param aParentDivOrP       The parent block to be split.  This must be <p>
-   *                            or <div> element.
-   * @param aStartOfRightNode   The point to be start of right node after
-   *                            split.  This must be descendant of
-   *                            aParentDivOrP.
-   * @param aNextBRNode         Next <br> node if there is.  Otherwise, nullptr.
-   *                            If this is not nullptr, the <br> node may be
-   *                            removed.
-   */
-  template <typename PT, typename CT>
-  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult SplitParagraph(
-      Element& aParentDivOrP,
-      const EditorDOMPointBase<PT, CT>& aStartOfRightNode, nsIContent* aBRNode);
-
-  /**
-   * ReturnInListItem() handles insertParagraph command (i.e., handling
-   * Enter key press) in a list item element.
-   *
-   * @param aListItem           The list item which has the following point.
-   * @param aNode               Typically, Selection start container, where to
-   *                            insert a break.
-   * @param aOffset             Typically, Selection start offset in the
-   *                            start container, where to insert a break.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult ReturnInListItem(Element& aListItem, nsINode& aNode,
-                                         int32_t aOffset);
-
-  /**
    * Called after handling edit action.  This may adjust Selection, remove
    * unnecessary empty nodes, create <br> elements if needed, etc.
    */
   MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult AfterEditInner();
-
-  /**
-   * IndentAroundSelectionWithCSS() indents around Selection with CSS.
-   * This method creates AutoSelectionRestorer.  Therefore, each caller
-   * need to check if the editor is still available even if this returns
-   * NS_OK.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult IndentAroundSelectionWithCSS();
 
   /**
    * IndentAroundSelectionWithHTML() indents around Selection with HTML.
@@ -607,86 +347,6 @@ class HTMLEditRules : public TextEditRules {
   OutdentPartOfBlock(Element& aBlockElement, nsIContent& aStartOfOutdent,
                      nsIContent& aEndOutdent, bool aIsBlockIndentedWithCSS);
 
-  /**
-   * XXX Should document what this does.
-   * This method creates AutoSelectionRestorer.  Therefore, each caller
-   * need to check if the editor is still available even if this returns
-   * NS_OK.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult MakeList(nsAtom& aListType, bool aEntireList,
-                                 const nsAString* aBulletType, bool* aCancel,
-                                 nsAtom& aItemType);
-
-  /**
-   * ConvertListType() replaces child list items of aListElement with
-   * new list item element whose tag name is aNewListItemTag.
-   * Note that if there are other list elements as children of aListElement,
-   * this calls itself recursively even though it's invalid structure.
-   *
-   * @param aListElement        The list element whose list items will be
-   *                            replaced.
-   * @param aNewListTag         New list tag name.
-   * @param aNewListItemTag     New list item tag name.
-   * @return                    New list element or an error code if it fails.
-   *                            New list element may be aListElement if its
-   *                            tag name is same as aNewListTag.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE CreateElementResult ConvertListType(Element& aListElement,
-                                                   nsAtom& aListType,
-                                                   nsAtom& aItemType);
-
-  /**
-   * IsEmptyBlockElement() returns true if aElement is a block level element
-   * and it doesn't have any visible content.
-   */
-  enum class IgnoreSingleBR { eYes, eNo };
-  bool IsEmptyBlockElement(Element& aElement, IgnoreSingleBR aIgnoreSingleBR);
-
-  /**
-   * MaybeDeleteTopMostEmptyAncestor() looks for top most empty block ancestor
-   * of aStartNode in aEditingHostElement.
-   * If found empty ancestor is a list item element, inserts a <br> element
-   * before its parent element if grand parent is a list element.  Then,
-   * collapse Selection to after the empty block.
-   * If found empty ancestor is not a list item element, collapse Selection to
-   * somewhere depending on aAction.
-   * Finally, removes the empty block ancestor.
-   *
-   * @param aStartNode          Start node to look for empty ancestors.
-   * @param aEditingHostElement Current editing host.
-   * @param aAction             If found empty ancestor block is a list item
-   *                            element, this is ignored.  Otherwise:
-   *                            - If eNext, eNextWord or eToEndOfLine, collapse
-   *                              Selection to after found empty ancestor.
-   *                            - If ePrevious, ePreviousWord or
-   *                              eToBeginningOfLine, collapse Selection to
-   *                              end of previous editable node.
-   *                            Otherwise, eNone is allowed but does nothing.
-   * @param aHandled            Returns true if this method removes an empty
-   *                            block ancestor of aStartNode.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult MaybeDeleteTopMostEmptyAncestor(
-      nsINode& aStartNode, Element& aEditingHostElement,
-      nsIEditor::EDirection aAction, bool* aHandled);
-
-  enum class BRLocation { beforeBlock, blockEnd };
-  Element* CheckForInvisibleBR(Element& aBlock, BRLocation aWhere,
-                               int32_t aOffset = 0);
-
-  /**
-   * ExpandSelectionForDeletion() may expand Selection range if it's not
-   * collapsed and there is only one range.  This may expand to include
-   * invisible <br> element for preventing delete action handler to keep
-   * unexpected nodes.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult ExpandSelectionForDeletion();
-
-  void GetDefinitionListItemTypes(Element* aElement, bool* aDT,
-                                  bool* aDD) const;
   MOZ_CAN_RUN_SCRIPT
   nsresult GetParagraphFormatNodes(
       nsTArray<OwningNonNull<nsINode>>& outArrayOfNodes);
@@ -698,66 +358,6 @@ class HTMLEditRules : public TextEditRules {
    */
   void MakeTransitionList(nsTArray<OwningNonNull<nsINode>>& aNodeArray,
                           nsTArray<bool>& aTransitionArray);
-
-  /**
-   * JoinNearestEditableNodesWithTransaction() joins two editable nodes which
-   * are themselves or the nearest editable node of aLeftNode and aRightNode.
-   * XXX This method's behavior is odd.  For example, if user types Backspace
-   *     key at the second editable paragraph in this case:
-   *     <div contenteditable>
-   *       <p>first editable paragraph</p>
-   *       <p contenteditable="false">non-editable paragraph</p>
-   *       <p>second editable paragraph</p>
-   *     </div>
-   *     The first editable paragraph's content will be moved into the second
-   *     editable paragraph and the non-editable paragraph becomes the first
-   *     paragraph of the editor.  I don't think that it's expected behavior of
-   *     any users...
-   *
-   * @param aLeftNode   The node which will be removed.
-   * @param aRightNode  The node which will be inserted the content of
-   *                    aLeftNode.
-   * @param aNewFirstChildOfRightNode
-   *                    The point at the first child of aRightNode.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult JoinNearestEditableNodesWithTransaction(
-      nsIContent& aLeftNode, nsIContent& aRightNode,
-      EditorDOMPoint* aNewFirstChildOfRightNode);
-
-  /**
-   * PopListItem() tries to move aListItem outside its parent.  If it's
-   * in a middle of a list element, the parent list element is split before
-   * aListItem.  Then, moves aListItem to before its parent list element.
-   * I.e., moves aListItem between the 2 list elements if original parent
-   * was split.  Then, if new parent is not a list element, the list item
-   * element is removed and its contents are moved to where the list item
-   * element was.
-   *
-   * @param aListItem           Should be a <li>, <dt> or <dd> element.
-   *                            If it's not so, returns NS_ERROR_FAILURE.
-   * @param aOutOfList          Returns true if the list item element is
-   *                            removed (i.e., unwrapped contents of
-   *                            aListItem).  Otherwise, false.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult PopListItem(nsIContent& aListItem,
-                                    bool* aOutOfList = nullptr);
-
-  /**
-   * RemoveListStructure() destroys the list structure of aListElement.
-   * If aListElement has <li>, <dl> or <dt> as a child, the element is removed
-   * but its descendants are moved to where the list item element was.
-   * If aListElement has another <ul>, <ol> or <dl> as a child, this method
-   * is called recursively.
-   * If aListElement has other nodes as its child, they are just removed.
-   * Finally, aListElement is removed. and its all children are moved to
-   * where the aListElement was.
-   *
-   * @param aListElement        A <ul>, <ol> or <dl> element.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult RemoveListStructure(Element& aListElement);
 
   /**
    * InsertBRElementToEmptyListItemsAndTableCellsInRange() inserts
@@ -802,14 +402,6 @@ class HTMLEditRules : public TextEditRules {
   template <typename PT, typename CT>
   nsIContent* FindNearEditableNode(const EditorDOMPointBase<PT, CT>& aPoint,
                                    nsIEditor::EDirection aDirection);
-  /**
-   * Returns true if aNode1 or aNode2 or both is the descendant of some type of
-   * table element, but their nearest table element ancestors differ.  "Table
-   * element" here includes not just <table> but also <td>, <tbody>, <tr>, etc.
-   * The nodes count as being their own descendants for this purpose, so a
-   * table element is its own nearest table element ancestor.
-   */
-  bool InDifferentTableElements(nsINode* aNode1, nsINode* aNode2);
 
   /**
    * RemoveEmptyNodesInChangedRange() removes all empty nodes in
@@ -893,43 +485,6 @@ class HTMLEditRules : public TextEditRules {
   MOZ_MUST_USE nsresult AlignBlock(Element& aElement,
                                    const nsAString& aAlignType,
                                    ResetAlignOf aResetAlignOf);
-
-  /**
-   * IncreaseMarginToIndent() increases the margin of aElement.  See the
-   * document of ChangeMarginStart() for the detail.
-   * XXX This is not aware of vertical writing-mode.
-   *
-   * @param aElement            The element to be indented.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult IncreaseMarginToIndent(Element& aElement) {
-    return ChangeMarginStart(aElement, true);
-  }
-
-  /**
-   * DecreaseMarginToOutdent() decreases the margin of aElement.  See the
-   * document of ChangeMarginStart() for the detail.
-   * XXX This is not aware of vertical writing-mode.
-   *
-   * @param aElement            The element to be outdented.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult DecreaseMarginToOutdent(Element& aElement) {
-    return ChangeMarginStart(aElement, false);
-  }
-
-  /**
-   * ChangeMarginStart() changes margin of aElement to indent or outdent.
-   * However, use IncreaseMarginToIndent() and DecreaseMarginToOutdent()
-   * instead.  If it's rtl text, margin-right will be changed.  Otherwise,
-   * margin-left.
-   * XXX This is not aware of vertical writing-mode.
-   *
-   * @param aElement            The element to be indented or outdented.
-   * @param aIncrease           true for indent, false for outdent.
-   */
-  MOZ_CAN_RUN_SCRIPT
-  MOZ_MUST_USE nsresult ChangeMarginStart(Element& aElement, bool aIncrease);
 
   /**
    * DocumentModifiedWorker() is called by DocumentModified() either

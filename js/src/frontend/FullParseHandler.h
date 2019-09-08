@@ -102,7 +102,7 @@ class FullParseHandler {
         lazyOuterFunction_(cx, lazyOuterFunction),
         lazyInnerFunctionIndex(0),
         lazyClosedOverBindingIndex(0),
-        sourceKind_(SourceKind::Text) {}
+        sourceKind_(kind) {}
 
   static NullNode null() { return NullNode(); }
 
@@ -658,6 +658,10 @@ class FullParseHandler {
                            TokenPos(expr->pn_pos.begin, end), expr);
   }
 
+  UnaryNodeType newExprStatement(Node expr) {
+    return newExprStatement(expr, expr->pn_pos.end);
+  }
+
   TernaryNodeType newIfStatement(uint32_t begin, Node cond, Node thenBranch,
                                  Node elseBranch) {
     TernaryNode* node =
@@ -718,7 +722,8 @@ class FullParseHandler {
   }
 
   UnaryNodeType newReturnStatement(Node expr, const TokenPos& pos) {
-    MOZ_ASSERT_IF(expr, pos.encloses(expr->pn_pos));
+    MOZ_ASSERT_IF(expr && sourceKind() == SourceKind::Text,
+                  pos.encloses(expr->pn_pos));
     return new_<UnaryNode>(ParseNodeKind::ReturnStmt, pos, expr);
   }
 

@@ -1427,17 +1427,17 @@ async function findLogpointHits(
   const hits = await findHits(checkpoint, position);
   for (const point of hits) {
     if (!condition) {
-      callback(point, { return: "Loading..." });
+      callback(point, ["Loading..."]);
     }
     sendAsyncManifest({
       shouldSkip: () => false,
       contents() {
         return { kind: "hitLogpoint", text, condition };
       },
-      onFinished(child, { data, result }) {
+      onFinished(child, { pauseData, result, resultData }) {
         if (result) {
-          addPauseData(point, data, /* trackCached */ true);
-          callback(point, gDebugger._convertCompletionValue(result));
+          addPauseData(point, pauseData, /* trackCached */ true);
+          callback(point, result, resultData);
         }
         child.divergedFromRecording = true;
       },

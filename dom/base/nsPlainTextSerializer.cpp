@@ -102,35 +102,72 @@ static void DetermineLineBreak(const int32_t aFlags, nsAString& aLineBreak) {
   }
 }
 
-nsPlainTextSerializer::CurrentLineContent::CurrentLineContent(
-    const int32_t aFlags)
-    : mFlags(aFlags) {
-  DetermineLineBreak(mFlags, mLineBreak);
-}
-
-void nsPlainTextSerializer::CurrentLineContent::MaybeReplaceNbsps() {
-  if (!(mFlags & nsIDocumentEncoder::OutputPersistNBSP)) {
+void nsPlainTextSerializer::CurrentLineContent::MaybeReplaceNbsps(
+    const int32_t aFlags) {
+  if (!(aFlags & nsIDocumentEncoder::OutputPersistNBSP)) {
     // First, replace all nbsp characters with spaces,
     // which the unicode encoder won't do for us.
     mValue.ReplaceChar(kNBSP, kSPACE);
   }
 }
 
-void nsPlainTextSerializer::CurrentLineContent::AppendLineBreak() {
-  mValue.Append(mLineBreak);
+void nsPlainTextSerializer::CurrentLine::ResetContentAndIndentationHeader() {
+  mContent.mValue.Truncate();
+  mContent.mWidth = 0;
+
+  mIndentation.mHeader.Truncate();
+}
+
+nsPlainTextSerializer::OutputManager::OutputManager(const int32_t aFlags,
+                                                    nsAString& aOutput)
+    : mFlags{aFlags}, mOutput{aOutput}, mAtFirstColumn{true} {
+  MOZ_ASSERT(aOutput.IsEmpty());
+
+  DetermineLineBreak(mFlags, mLineBreak);
+}
+
+void nsPlainTextSerializer::OutputManager::Append(
+    const CurrentLine& aCurrentLine,
+    const StripTrailingWhitespaces aStripTrailingWhitespaces) {
+  if (IsAtFirstColumn()) {
+    nsAutoString quotesAndIndent;
+    aCurrentLine.CreateQuotesAndIndent(quotesAndIndent);
+
+    if ((aStripTrailingWhitespaces == StripTrailingWhitespaces::kMaybe)) {
+      const bool stripTrailingSpaces = aCurrentLine.mContent.mValue.IsEmpty();
+      if (stripTrailingSpaces) {
+        quotesAndIndent.Trim(" ", false, true, false);
+      }
+    }
+
+    Append(quotesAndIndent);
+  }
+
+  Append(aCurrentLine.mContent.mValue);
+}
+
+void nsPlainTextSerializer::OutputManager::Append(const nsAString& aString) {
+  if (!aString.IsEmpty()) {
+    mOutput.Append(aString);
+    mAtFirstColumn = false;
+  }
+}
+
+void nsPlainTextSerializer::OutputManager::AppendLineBreak() {
+  mOutput.Append(mLineBreak);
+  mAtFirstColumn = true;
+}
+
+uint32_t nsPlainTextSerializer::OutputManager::GetOutputLength() const {
+  return mOutput.Length();
 }
 
 nsPlainTextSerializer::nsPlainTextSerializer()
-    : mCurrentLineContent{kNoFlags},
-      mFloatingLines(-1),
+    : mFloatingLines(-1),
       mLineBreakDue(false),
       kSpace(NS_LITERAL_STRING(" "))  // Init of "constant"
 {
-  mOutput = nullptr;
   mHeadLevel = 0;
-  mAtFirstColumn = true;
-  mIndent = 0;
-  mCiteQuoteLevel = 0;
   mHasWrittenCiteBlockquote = false;
   mSpanLevel = 0;
   for (int32_t i = 0; i <= 6; i++) {
@@ -215,9 +252,9 @@ nsPlainTextSerializer::Init(const uint32_t aFlags, uint32_t aWrapColumn,
         "Can't do formatted and preformatted output at the same time!");
   }
 #endif
-  mOutput = &aOutput;
   *aNeedsPreformatScanning = true;
   mSettings.Init(aFlags);
+  mOutputManager.emplace(mSettings.GetFlags(), aOutput);
   mWrapColumn = aWrapColumn;
 
   if (MayWrap() && MayBreakLines()) {
@@ -228,8 +265,6 @@ nsPlainTextSerializer::Init(const uint32_t aFlags, uint32_t aWrapColumn,
   mFloatingLines = -1;
 
   mPreformattedBlockBoundary = false;
-
-  mCurrentLineContent = CurrentLineContent{mSettings.GetFlags()};
 
   return NS_OK;
 }
@@ -290,8 +325,6 @@ static bool IsIgnorableScriptOrStyle(Element* aElement) {
 NS_IMETHODIMP
 nsPlainTextSerializer::AppendText(nsIContent* aText, int32_t aStartOffset,
                                   int32_t aEndOffset) {
-  NS_ENSURE_STATE(mOutput);
-
   if (mIgnoreAboveIndex != (uint32_t)kNotFound) {
     return NS_OK;
   }
@@ -388,7 +421,6 @@ NS_IMETHODIMP
 nsPlainTextSerializer::AppendElementStart(Element* aElement,
                                           Element* aOriginalElement) {
   NS_ENSURE_ARG(aElement);
-  NS_ENSURE_STATE(mOutput);
 
   mElement = aElement;
 
@@ -416,7 +448,6 @@ NS_IMETHODIMP
 nsPlainTextSerializer::AppendElementEnd(Element* aElement,
                                         Element* aOriginalElement) {
   NS_ENSURE_ARG(aElement);
-  NS_ENSURE_STATE(mOutput);
 
   mElement = aElement;
 
@@ -442,24 +473,24 @@ nsPlainTextSerializer::AppendElementEnd(Element* aElement,
 
 NS_IMETHODIMP
 nsPlainTextSerializer::FlushAndFinish() {
-  FlushLine();
+  MOZ_ASSERT(mOutputManager);
+
+  mOutputManager->Flush(mCurrentLine);
   return Finish();
 }
 
 NS_IMETHODIMP
 nsPlainTextSerializer::Finish() {
-  NS_ENSURE_STATE(mOutput);
-
-  mOutput = nullptr;
+  mOutputManager.reset();
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsPlainTextSerializer::GetOutputLength(uint32_t& aLength) const {
-  NS_ENSURE_STATE(mOutput);
+  MOZ_ASSERT(mOutputManager);
 
-  aLength = mOutput->Length();
+  aLength = mOutputManager->GetOutputLength();
 
   return NS_OK;
 }
@@ -494,7 +525,7 @@ nsresult nsPlainTextSerializer::DoOpenContainer(nsAtom* aTag) {
     // Raw means raw.  Don't even think about doing anything fancy
     // here like indenting, adding line breaks or any other
     // characters such as list item bullets, quote characters
-    // around <q>, etc.  I mean it!  Don't make me smack you!
+    // around <q>, etc.
 
     return NS_OK;
   }
@@ -614,14 +645,14 @@ nsresult nsPlainTextSerializer::DoOpenContainer(nsAtom* aTag) {
 
     // To make the separation between cells most obvious and
     // importable, we use a TAB.
-    if (GetLastBool(mHasWrittenCellsForRow)) {
-      // Bypass |Write| so that the TAB isn't compressed away.
-      AddToLine(u"\t", 1);
-      mInWhitespace = true;
-    } else if (mHasWrittenCellsForRow.IsEmpty()) {
+    if (mHasWrittenCellsForRow.IsEmpty()) {
       // We don't always see a <tr> (nor a <table>) before the <td> if we're
       // copying part of a table
       PushBool(mHasWrittenCellsForRow, true);  // will never be popped
+    } else if (GetLastBool(mHasWrittenCellsForRow)) {
+      // Bypass |Write| so that the TAB isn't compressed away.
+      AddToLine(u"\t", 1);
+      mInWhitespace = true;
     } else {
       SetLastBool(mHasWrittenCellsForRow, true);
     }
@@ -629,7 +660,7 @@ nsresult nsPlainTextSerializer::DoOpenContainer(nsAtom* aTag) {
     // Indent here to support nested lists, which aren't included in li :-(
     EnsureVerticalSpace(mULCount + mOLStackIndex == 0 ? 1 : 0);
     // Must end the current line before we change indention
-    mIndent += kIndentSizeList;
+    mCurrentLine.mIndentation.mWidth += kIndentSizeList;
     mULCount++;
   } else if (aTag == nsGkAtoms::ol) {
     EnsureVerticalSpace(mULCount + mOLStackIndex == 0 ? 1 : 0);
@@ -648,7 +679,7 @@ nsresult nsPlainTextSerializer::DoOpenContainer(nsAtom* aTag) {
     } else {
       mOLStackIndex++;
     }
-    mIndent += kIndentSizeList;  // see ul
+    mCurrentLine.mIndentation.mWidth += kIndentSizeList;  // see ul
   } else if (aTag == nsGkAtoms::li &&
              mSettings.HasFlag(nsIDocumentEncoder::OutputFormatted)) {
     if (mTagStackIndex > 1 && IsInOL()) {
@@ -660,28 +691,28 @@ nsresult nsPlainTextSerializer::DoOpenContainer(nsAtom* aTag) {
           if (NS_SUCCEEDED(rv)) mOLStack[mOLStackIndex - 1] = valueAttrVal;
         }
         // This is what nsBulletFrame does for OLs:
-        mInIndentString.AppendInt(mOLStack[mOLStackIndex - 1]++, 10);
+        mCurrentLine.mIndentation.mHeader.AppendInt(mOLStack[mOLStackIndex - 1]++, 10);
       } else {
-        mInIndentString.Append(char16_t('#'));
+        mCurrentLine.mIndentation.mHeader.Append(char16_t('#'));
       }
 
-      mInIndentString.Append(char16_t('.'));
+      mCurrentLine.mIndentation.mHeader.Append(char16_t('.'));
 
     } else {
       static const char bulletCharArray[] = "*o+#";
       uint32_t index = mULCount > 0 ? (mULCount - 1) : 3;
       char bulletChar = bulletCharArray[index % 4];
-      mInIndentString.Append(char16_t(bulletChar));
+      mCurrentLine.mIndentation.mHeader.Append(char16_t(bulletChar));
     }
 
-    mInIndentString.Append(char16_t(' '));
+    mCurrentLine.mIndentation.mHeader.Append(char16_t(' '));
   } else if (aTag == nsGkAtoms::dl) {
     EnsureVerticalSpace(1);
   } else if (aTag == nsGkAtoms::dt) {
     EnsureVerticalSpace(0);
   } else if (aTag == nsGkAtoms::dd) {
     EnsureVerticalSpace(0);
-    mIndent += kIndentSizeDD;
+    mCurrentLine.mIndentation.mWidth += kIndentSizeDD;
   } else if (aTag == nsGkAtoms::span) {
     ++mSpanLevel;
   } else if (aTag == nsGkAtoms::blockquote) {
@@ -689,10 +720,11 @@ nsresult nsPlainTextSerializer::DoOpenContainer(nsAtom* aTag) {
     PushBool(mIsInCiteBlockquote, isInCiteBlockquote);
     if (isInCiteBlockquote) {
       EnsureVerticalSpace(0);
-      mCiteQuoteLevel++;
+      mCurrentLine.mCiteQuoteLevel++;
     } else {
       EnsureVerticalSpace(1);
-      mIndent += kTabSize;  // Check for some maximum value?
+      mCurrentLine.mIndentation.mWidth +=
+          kTabSize;  // Check for some maximum value?
     }
   } else if (aTag == nsGkAtoms::q) {
     Write(NS_LITERAL_STRING("\""));
@@ -720,7 +752,7 @@ nsresult nsPlainTextSerializer::DoOpenContainer(nsAtom* aTag) {
       aTag == nsGkAtoms::h4 || aTag == nsGkAtoms::h5 || aTag == nsGkAtoms::h6) {
     EnsureVerticalSpace(2);
     if (mSettings.GetHeaderStrategy() == 2) {  // numbered
-      mIndent += kIndentSizeHeaders;
+      mCurrentLine.mIndentation.mWidth += kIndentSizeHeaders;
       // Caching
       int32_t level = HeaderLevel(aTag);
       // Increase counter for current level
@@ -741,10 +773,10 @@ nsresult nsPlainTextSerializer::DoOpenContainer(nsAtom* aTag) {
       leadup.Append(char16_t(' '));
       Write(leadup);
     } else if (mSettings.GetHeaderStrategy() == 1) {  // indent increasingly
-      mIndent += kIndentSizeHeaders;
+      mCurrentLine.mIndentation.mWidth += kIndentSizeHeaders;
       for (int32_t i = HeaderLevel(aTag); i > 1; i--) {
         // for h(x), run x-1 times
-        mIndent += kIndentIncrementHeaders;
+        mCurrentLine.mIndentation.mWidth += kIndentIncrementHeaders;
       }
     }
   } else if (aTag == nsGkAtoms::a && !currentNodeIsConverted) {
@@ -806,7 +838,7 @@ nsresult nsPlainTextSerializer::DoCloseContainer(nsAtom* aTag) {
     // Raw means raw.  Don't even think about doing anything fancy
     // here like indenting, adding line breaks or any other
     // characters such as list item bullets, quote characters
-    // around <q>, etc.  I mean it!  Don't make me smack you!
+    // around <q>, etc.
 
     return NS_OK;
   }
@@ -825,6 +857,8 @@ nsresult nsPlainTextSerializer::DoCloseContainer(nsAtom* aTag) {
     return NS_OK;
   }
 
+  MOZ_ASSERT(mOutputManager);
+
   // End current line if we're ending a block level tag
   if ((aTag == nsGkAtoms::body) || (aTag == nsGkAtoms::html)) {
     // We want the output to end with a new line,
@@ -834,7 +868,7 @@ nsresult nsPlainTextSerializer::DoCloseContainer(nsAtom* aTag) {
     if (mSettings.HasFlag(nsIDocumentEncoder::OutputFormatted)) {
       EnsureVerticalSpace(0);
     } else {
-      FlushLine();
+      mOutputManager->Flush(mCurrentLine);
     }
     // We won't want to do anything with these in formatted mode either,
     // so just return now:
@@ -860,15 +894,16 @@ nsresult nsPlainTextSerializer::DoCloseContainer(nsAtom* aTag) {
     mFloatingLines = GetLastBool(mIsInCiteBlockquote) ? 0 : 1;
     mLineBreakDue = true;
   } else if (aTag == nsGkAtoms::ul) {
-    FlushLine();
-    mIndent -= kIndentSizeList;
+    mOutputManager->Flush(mCurrentLine);
+    mCurrentLine.mIndentation.mWidth -= kIndentSizeList;
     if (--mULCount + mOLStackIndex == 0) {
       mFloatingLines = 1;
       mLineBreakDue = true;
     }
   } else if (aTag == nsGkAtoms::ol) {
-    FlushLine();  // Doing this after decreasing OLStackIndex would be wrong.
-    mIndent -= kIndentSizeList;
+    mOutputManager->Flush(mCurrentLine);  // Doing this after decreasing
+                                          // OLStackIndex would be wrong.
+    mCurrentLine.mIndentation.mWidth -= kIndentSizeList;
     NS_ASSERTION(mOLStackIndex, "Wrong OLStack level!");
     mOLStackIndex--;
     if (mULCount + mOLStackIndex == 0) {
@@ -879,8 +914,8 @@ nsresult nsPlainTextSerializer::DoCloseContainer(nsAtom* aTag) {
     mFloatingLines = 1;
     mLineBreakDue = true;
   } else if (aTag == nsGkAtoms::dd) {
-    FlushLine();
-    mIndent -= kIndentSizeDD;
+    mOutputManager->Flush(mCurrentLine);
+    mCurrentLine.mIndentation.mWidth -= kIndentSizeDD;
   } else if (aTag == nsGkAtoms::span) {
     NS_ASSERTION(mSpanLevel, "Span level will be negative!");
     --mSpanLevel;
@@ -888,18 +923,18 @@ nsresult nsPlainTextSerializer::DoCloseContainer(nsAtom* aTag) {
     if (mFloatingLines < 0) mFloatingLines = 0;
     mLineBreakDue = true;
   } else if (aTag == nsGkAtoms::blockquote) {
-    FlushLine();  // Is this needed?
+    mOutputManager->Flush(mCurrentLine);  // Is this needed?
 
     // Pop
     bool isInCiteBlockquote = PopBool(mIsInCiteBlockquote);
 
     if (isInCiteBlockquote) {
-      NS_ASSERTION(mCiteQuoteLevel, "CiteQuote level will be negative!");
-      mCiteQuoteLevel--;
+      NS_ASSERTION(mCurrentLine.mCiteQuoteLevel, "CiteQuote level will be negative!");
+      mCurrentLine.mCiteQuoteLevel--;
       mFloatingLines = 0;
       mHasWrittenCiteBlockquote = true;
     } else {
-      mIndent -= kTabSize;
+      mCurrentLine.mIndentation.mWidth -= kTabSize;
       mFloatingLines = 1;
     }
     mLineBreakDue = true;
@@ -933,12 +968,12 @@ nsresult nsPlainTextSerializer::DoCloseContainer(nsAtom* aTag) {
   if (aTag == nsGkAtoms::h1 || aTag == nsGkAtoms::h2 || aTag == nsGkAtoms::h3 ||
       aTag == nsGkAtoms::h4 || aTag == nsGkAtoms::h5 || aTag == nsGkAtoms::h6) {
     if (mSettings.GetHeaderStrategy()) { /*numbered or indent increasingly*/
-      mIndent -= kIndentSizeHeaders;
+      mCurrentLine.mIndentation.mWidth -= kIndentSizeHeaders;
     }
     if (mSettings.GetHeaderStrategy() == 1 /*indent increasingly*/) {
       for (int32_t i = HeaderLevel(aTag); i > 1; i--) {
         // for h(x), run x-1 times
-        mIndent -= kIndentIncrementHeaders;
+        mCurrentLine.mIndentation.mWidth -= kIndentIncrementHeaders;
       }
     }
     EnsureVerticalSpace(1);
@@ -1034,10 +1069,18 @@ void nsPlainTextSerializer::DoAddText(bool aIsLineBreak,
   Write(aText);
 }
 
+void CreateLineOfDashes(nsAString& aResult, const uint32_t aWrapColumn) {
+  MOZ_ASSERT(aResult.IsEmpty());
+
+  const uint32_t width = (aWrapColumn > 0 ? aWrapColumn : 25);
+  while (aResult.Length() < width) {
+    aResult.Append(char16_t('-'));
+  }
+}
+
 nsresult nsPlainTextSerializer::DoAddLeaf(nsAtom* aTag) {
   mPreformattedBlockBoundary = false;
 
-  // If we don't want any output, just return
   if (!DoOutput()) {
     return NS_OK;
   }
@@ -1066,10 +1109,7 @@ nsresult nsPlainTextSerializer::DoAddLeaf(nsAtom* aTag) {
     // Make a line of dashes as wide as the wrap width
     // XXX honoring percentage would be nice
     nsAutoString line;
-    uint32_t width = (mWrapColumn > 0 ? mWrapColumn : 25);
-    while (line.Length() < width) {
-      line.Append(char16_t('-'));
-    }
+    CreateLineOfDashes(line, mWrapColumn);
     Write(line);
 
     EnsureVerticalSpace(0);
@@ -1104,7 +1144,7 @@ void nsPlainTextSerializer::EnsureVerticalSpace(int32_t noOfRows) {
   // If we have something in the indent we probably want to output
   // it and it's not included in the count for empty lines so we don't
   // realize that we should start a new line.
-  if (noOfRows >= 0 && !mInIndentString.IsEmpty()) {
+  if (noOfRows >= 0 && !mCurrentLine.mIndentation.mHeader.IsEmpty()) {
     EndLine(false);
     mInWhitespace = true;
   }
@@ -1117,32 +1157,14 @@ void nsPlainTextSerializer::EnsureVerticalSpace(int32_t noOfRows) {
   mFloatingLines = -1;
 }
 
-/**
- * This empties the current line cache without adding a NEWLINE.
- * Should not be used if line wrapping is of importance since
- * this function destroys the cache information.
- *
- * It will also write indentation and quotes if we believe us to be
- * at the start of the line.
- */
-void nsPlainTextSerializer::FlushLine() {
-  if (!mCurrentLineContent.mValue.IsEmpty()) {
-    if (mAtFirstColumn) {
-      OutputQuotesAndIndent();  // XXX: Should we always do this? Bug?
-    }
+void nsPlainTextSerializer::OutputManager::Flush(CurrentLine& aCurrentLine) {
+  if (!aCurrentLine.mContent.mValue.IsEmpty()) {
+    aCurrentLine.mContent.MaybeReplaceNbsps(mFlags);
 
-    mCurrentLineContent.MaybeReplaceNbsps();
-    Output(mCurrentLineContent.mValue);
-    mAtFirstColumn = false;
-    mCurrentLineContent.mValue.Truncate();
-    mCurrentLineContent.mWidth = 0;
+    Append(aCurrentLine, StripTrailingWhitespaces::kNo);
+
+    aCurrentLine.ResetContentAndIndentationHeader();
   }
-}
-
-void nsPlainTextSerializer::Output(nsString& aString) {
-  MOZ_ASSERT(mOutput);
-
-  mOutput->Append(aString);
 }
 
 static bool IsSpaceStuffable(const char16_t* s) {
@@ -1162,11 +1184,13 @@ static bool IsSpaceStuffable(const char16_t* s) {
 void nsPlainTextSerializer::AddToLine(const char16_t* aLineFragment,
                                       int32_t aLineFragmentLength) {
   const uint32_t prefixwidth =
-      (mCiteQuoteLevel > 0 ? mCiteQuoteLevel + 1 : 0) + mIndent;
+      (mCurrentLine.mCiteQuoteLevel > 0 ? mCurrentLine.mCiteQuoteLevel + 1
+                                        : 0) +
+      mCurrentLine.mIndentation.mWidth;
 
   if (mLineBreakDue) EnsureVerticalSpace(mFloatingLines);
 
-  int32_t linelength = mCurrentLineContent.mValue.Length();
+  int32_t linelength = mCurrentLine.mContent.mValue.Length();
   if (0 == linelength) {
     if (0 == aLineFragmentLength) {
       // Nothing at all. Are you kidding me?
@@ -1175,19 +1199,20 @@ void nsPlainTextSerializer::AddToLine(const char16_t* aLineFragment,
 
     if (mSettings.HasFlag(nsIDocumentEncoder::OutputFormatFlowed)) {
       if (IsSpaceStuffable(aLineFragment) &&
-          mCiteQuoteLevel == 0  // We space-stuff quoted lines anyway
+          mCurrentLine.mCiteQuoteLevel ==
+              0  // We space-stuff quoted lines anyway
       ) {
         // Space stuffing a la RFC 2646 (format=flowed).
-        mCurrentLineContent.mValue.Append(char16_t(' '));
+        mCurrentLine.mContent.mValue.Append(char16_t(' '));
 
         if (MayWrap()) {
-          mCurrentLineContent.mWidth += GetUnicharWidth(' ');
+          mCurrentLine.mContent.mWidth += GetUnicharWidth(' ');
 #ifdef DEBUG_wrapping
           NS_ASSERTION(
-              GetUnicharStringWidth(mCurrentLineContent.mValue.get(),
-                                    mCurrentLineContent.mValue.Length()) ==
-                  (int32_t)mCurrentLineContent.mWidth,
-              "mCurrentLineContent.mWidth and reality out of sync!");
+              GetUnicharStringWidth(mCurrentLine.mContent.mValue.get(),
+                                    mCurrentLine.mContent.mValue.Length()) ==
+                  (int32_t)mCurrentLine.mContent.mWidth,
+              "mCurrentLine.mContent.mWidth and reality out of sync!");
 #endif
         }
       }
@@ -1195,19 +1220,19 @@ void nsPlainTextSerializer::AddToLine(const char16_t* aLineFragment,
     mEmptyLines = -1;
   }
 
-  mCurrentLineContent.mValue.Append(aLineFragment, aLineFragmentLength);
+  mCurrentLine.mContent.mValue.Append(aLineFragment, aLineFragmentLength);
 
   if (MayWrap()) {
-    mCurrentLineContent.mWidth +=
+    mCurrentLine.mContent.mWidth +=
         GetUnicharStringWidth(aLineFragment, aLineFragmentLength);
 #ifdef DEBUG_wrapping
-    NS_ASSERTION(GetUnicharstringWidth(mCurrentLineContent.mValue.get(),
-                                       mCurrentLineContent.mValue.Length()) ==
-                     (int32_t)mCurrentLineContent.mWidth,
-                 "mCurrentLineContent.mWidth and reality out of sync!");
+    NS_ASSERTION(GetUnicharstringWidth(mCurrentLine.mContent.mValue.get(),
+                                       mCurrentLine.mContent.mValue.Length()) ==
+                     (int32_t)mCurrentLine.mContent.mWidth,
+                 "mCurrentLine.mContent.mWidth and reality out of sync!");
 #endif
 
-    linelength = mCurrentLineContent.mValue.Length();
+    linelength = mCurrentLine.mContent.mValue.Length();
 
     // Yes, wrap!
     // The "+4" is to avoid wrap lines that only would be a couple
@@ -1216,26 +1241,26 @@ void nsPlainTextSerializer::AddToLine(const char16_t* aLineFragment,
     uint32_t bonuswidth = (mWrapColumn > 20) ? 4 : 0;
 
     // XXX: Should calculate prefixwidth with GetUnicharStringWidth
-    while (mCurrentLineContent.mWidth + prefixwidth >
+    while (mCurrentLine.mContent.mWidth + prefixwidth >
            mWrapColumn + bonuswidth) {
       // We go from the end removing one letter at a time until
       // we have a reasonable width
-      int32_t goodSpace = mCurrentLineContent.mValue.Length();
-      uint32_t width = mCurrentLineContent.mWidth;
+      int32_t goodSpace = mCurrentLine.mContent.mValue.Length();
+      uint32_t width = mCurrentLine.mContent.mWidth;
       while (goodSpace > 0 && (width + prefixwidth > mWrapColumn)) {
         goodSpace--;
-        width -= GetUnicharWidth(mCurrentLineContent.mValue[goodSpace]);
+        width -= GetUnicharWidth(mCurrentLine.mContent.mValue[goodSpace]);
       }
 
       goodSpace++;
 
       if (mLineBreaker) {
-        goodSpace =
-            mLineBreaker->Prev(mCurrentLineContent.mValue.get(),
-                               mCurrentLineContent.mValue.Length(), goodSpace);
+        goodSpace = mLineBreaker->Prev(mCurrentLine.mContent.mValue.get(),
+                                       mCurrentLine.mContent.mValue.Length(),
+                                       goodSpace);
         if (goodSpace != NS_LINEBREAKER_NEED_MORE_TEXT &&
             nsCRT::IsAsciiSpace(
-                mCurrentLineContent.mValue.CharAt(goodSpace - 1))) {
+                mCurrentLine.mContent.mValue.CharAt(goodSpace - 1))) {
           --goodSpace;  // adjust the position since line breaker returns a
                         // position next to space
         }
@@ -1245,14 +1270,15 @@ void nsPlainTextSerializer::AddToLine(const char16_t* aLineFragment,
         // https://bugzilla.mozilla.org/show_bug.cgi?id=333064 for more
         // information.
 
-        if (mCurrentLineContent.mValue.IsEmpty() || mWrapColumn < prefixwidth) {
+        if (mCurrentLine.mContent.mValue.IsEmpty() ||
+            mWrapColumn < prefixwidth) {
           goodSpace = NS_LINEBREAKER_NEED_MORE_TEXT;
         } else {
           goodSpace = std::min(mWrapColumn - prefixwidth,
-                               mCurrentLineContent.mValue.Length() - 1);
+                               mCurrentLine.mContent.mValue.Length() - 1);
           while (goodSpace >= 0 &&
                  !nsCRT::IsAsciiSpace(
-                     mCurrentLineContent.mValue.CharAt(goodSpace))) {
+                     mCurrentLine.mContent.mValue.CharAt(goodSpace))) {
             goodSpace--;
           }
         }
@@ -1265,12 +1291,12 @@ void nsPlainTextSerializer::AddToLine(const char16_t* aLineFragment,
         goodSpace =
             (prefixwidth > mWrapColumn + 1) ? 1 : mWrapColumn - prefixwidth + 1;
         if (mLineBreaker) {
-          if ((uint32_t)goodSpace < mCurrentLineContent.mValue.Length())
-            goodSpace = mLineBreaker->Next(mCurrentLineContent.mValue.get(),
-                                           mCurrentLineContent.mValue.Length(),
-                                           goodSpace);
+          if ((uint32_t)goodSpace < mCurrentLine.mContent.mValue.Length())
+            goodSpace = mLineBreaker->Next(
+                mCurrentLine.mContent.mValue.get(),
+                mCurrentLine.mContent.mValue.Length(), goodSpace);
           if (goodSpace == NS_LINEBREAKER_NEED_MORE_TEXT)
-            goodSpace = mCurrentLineContent.mValue.Length();
+            goodSpace = mCurrentLine.mContent.mValue.Length();
         } else {
           // In this case we don't want strings, especially CJK-ones, to be
           // split. See
@@ -1280,7 +1306,7 @@ void nsPlainTextSerializer::AddToLine(const char16_t* aLineFragment,
               (prefixwidth > mWrapColumn) ? 1 : mWrapColumn - prefixwidth;
           while (goodSpace < linelength &&
                  !nsCRT::IsAsciiSpace(
-                     mCurrentLineContent.mValue.CharAt(goodSpace))) {
+                     mCurrentLine.mContent.mValue.CharAt(goodSpace))) {
             goodSpace++;
           }
         }
@@ -1291,33 +1317,36 @@ void nsPlainTextSerializer::AddToLine(const char16_t* aLineFragment,
 
         // -1 (trim a char at the break position)
         // only if the line break was a space.
-        if (nsCRT::IsAsciiSpace(mCurrentLineContent.mValue.CharAt(goodSpace))) {
-          mCurrentLineContent.mValue.Right(restOfLine,
-                                           linelength - goodSpace - 1);
+        if (nsCRT::IsAsciiSpace(
+                mCurrentLine.mContent.mValue.CharAt(goodSpace))) {
+          mCurrentLine.mContent.mValue.Right(restOfLine,
+                                             linelength - goodSpace - 1);
         } else {
-          mCurrentLineContent.mValue.Right(restOfLine, linelength - goodSpace);
+          mCurrentLine.mContent.mValue.Right(restOfLine,
+                                             linelength - goodSpace);
         }
         // if breaker was U+0020, it has to consider for delsp=yes support
         const bool breakBySpace =
-            mCurrentLineContent.mValue.CharAt(goodSpace) == ' ';
-        mCurrentLineContent.mValue.Truncate(goodSpace);
+            mCurrentLine.mContent.mValue.CharAt(goodSpace) == ' ';
+        mCurrentLine.mContent.mValue.Truncate(goodSpace);
         EndLine(true, breakBySpace);
-        mCurrentLineContent.mValue.Truncate();
+        mCurrentLine.mContent.mValue.Truncate();
         // Space stuff new line?
         if (mSettings.HasFlag(nsIDocumentEncoder::OutputFormatFlowed)) {
           if (!restOfLine.IsEmpty() && IsSpaceStuffable(restOfLine.get()) &&
-              mCiteQuoteLevel == 0  // We space-stuff quoted lines anyway
+              mCurrentLine.mCiteQuoteLevel ==
+                  0  // We space-stuff quoted lines anyway
           ) {
             // Space stuffing a la RFC 2646 (format=flowed).
-            mCurrentLineContent.mValue.Append(char16_t(' '));
+            mCurrentLine.mContent.mValue.Append(char16_t(' '));
             // XXX doesn't seem to work correctly for ' '
           }
         }
-        mCurrentLineContent.mValue.Append(restOfLine);
-        mCurrentLineContent.mWidth =
-            GetUnicharStringWidth(mCurrentLineContent.mValue.get(),
-                                  mCurrentLineContent.mValue.Length());
-        linelength = mCurrentLineContent.mValue.Length();
+        mCurrentLine.mContent.mValue.Append(restOfLine);
+        mCurrentLine.mContent.mWidth =
+            GetUnicharStringWidth(mCurrentLine.mContent.mValue.get(),
+                                  mCurrentLine.mContent.mValue.Length());
+        linelength = mCurrentLine.mContent.mValue.Length();
         mEmptyLines = -1;
       } else {
         // Nothing to do. Hopefully we get more data later
@@ -1328,14 +1357,25 @@ void nsPlainTextSerializer::AddToLine(const char16_t* aLineFragment,
   }
 }
 
+// The signature separator (RFC 2646).
+const char kSignatureSeparator[] = "-- ";
+
+// The OpenPGP dash-escaped signature separator in inline
+// signed messages according to the OpenPGP standard (RFC 2440).
+const char kDashEscapedSignatureSeparator[] = "- -- ";
+
+static bool IsSignatureSeparator(const nsAString& aString) {
+  return aString.EqualsLiteral(kSignatureSeparator) ||
+         aString.EqualsLiteral(kDashEscapedSignatureSeparator);
+}
+
 /**
- * Outputs the contents of mCurrentLineContent.mValue, and resets line specific
- * variables. Also adds an indentation and prefix if there is
- * one specified. Strips ending spaces from the line if it isn't
- * preformatted.
+ * Outputs the contents of mCurrentLine.mContent.mValue, and resets line
+ * specific variables. Also adds an indentation and prefix if there is one
+ * specified. Strips ending spaces from the line if it isn't preformatted.
  */
 void nsPlainTextSerializer::EndLine(bool aSoftlinebreak, bool aBreakBySpace) {
-  uint32_t currentlinelength = mCurrentLineContent.mValue.Length();
+  uint32_t currentlinelength = mCurrentLine.mContent.mValue.Length();
 
   if (aSoftlinebreak && 0 == currentlinelength) {
     // No meaning
@@ -1349,20 +1389,13 @@ void nsPlainTextSerializer::EndLine(bool aSoftlinebreak, bool aBreakBySpace) {
    * signed messages according to the OpenPGP standard (RFC 2440).
    */
   if (!mSettings.HasFlag(nsIDocumentEncoder::OutputPreformatted) &&
-      (aSoftlinebreak ||
-       !(mCurrentLineContent.mValue.EqualsLiteral("-- ") ||
-         mCurrentLineContent.mValue.EqualsLiteral("- -- ")))) {
-    // Remove spaces from the end of the line.
-    while (currentlinelength > 0 &&
-           mCurrentLineContent.mValue[currentlinelength - 1] == ' ') {
-      --currentlinelength;
-    }
-    mCurrentLineContent.mValue.SetLength(currentlinelength);
+      (aSoftlinebreak || !IsSignatureSeparator(mCurrentLine.mContent.mValue))) {
+    mCurrentLine.mContent.mValue.Trim(" ", false, true, false);
   }
 
   if (aSoftlinebreak &&
       mSettings.HasFlag(nsIDocumentEncoder::OutputFormatFlowed) &&
-      (mIndent == 0)) {
+      (mCurrentLine.mIndentation.mWidth == 0)) {
     // Add the soft part of the soft linebreak (RFC 2646 4.1)
     // We only do this when there is no indentation since format=flowed
     // lines and indentation doesn't work well together.
@@ -1371,57 +1404,51 @@ void nsPlainTextSerializer::EndLine(bool aSoftlinebreak, bool aBreakBySpace) {
     // add twice space.
     if (mSettings.HasFlag(nsIDocumentEncoder::OutputFormatDelSp) &&
         aBreakBySpace)
-      mCurrentLineContent.mValue.AppendLiteral("  ");
+      mCurrentLine.mContent.mValue.AppendLiteral("  ");
     else
-      mCurrentLineContent.mValue.Append(char16_t(' '));
+      mCurrentLine.mContent.mValue.Append(char16_t(' '));
   }
 
   if (aSoftlinebreak) {
     mEmptyLines = 0;
   } else {
     // Hard break
-    if (!mCurrentLineContent.mValue.IsEmpty() || !mInIndentString.IsEmpty()) {
+    if (mCurrentLine.HasContentOrIndentationHeader()) {
       mEmptyLines = -1;
     }
 
     mEmptyLines++;
   }
 
-  if (mAtFirstColumn) {
-    // If we don't have anything "real" to output we have to
-    // make sure the indent doesn't end in a space since that
-    // would trick a format=flowed-aware receiver.
-    bool stripTrailingSpaces = mCurrentLineContent.mValue.IsEmpty();
-    OutputQuotesAndIndent(stripTrailingSpaces);
-  }
+  MOZ_ASSERT(mOutputManager);
 
-  mCurrentLineContent.MaybeReplaceNbsps();
-  mCurrentLineContent.AppendLineBreak();
-  Output(mCurrentLineContent.mValue);
-  mCurrentLineContent.mValue.Truncate();
-  mCurrentLineContent.mWidth = 0;
-  mAtFirstColumn = true;
+  mCurrentLine.mContent.MaybeReplaceNbsps(mSettings.GetFlags());
+
+  // If we don't have anything "real" to output we have to
+  // make sure the indent doesn't end in a space since that
+  // would trick a format=flowed-aware receiver.
+  mOutputManager->Append(mCurrentLine,
+                         OutputManager::StripTrailingWhitespaces::kMaybe);
+  mOutputManager->AppendLineBreak();
+  mCurrentLine.ResetContentAndIndentationHeader();
   mInWhitespace = true;
   mLineBreakDue = false;
   mFloatingLines = -1;
 }
 
 /**
- * Outputs the calculated and stored indent and text in the indentation. That is
- * quote chars and numbers for numbered lists and such. It will also reset any
- * stored text to put in the indentation after using it.
+ * Creates the calculated and stored indent and text in the indentation. That is
+ * quote chars and numbers for numbered lists and such.
  */
-void nsPlainTextSerializer::OutputQuotesAndIndent(
-    bool stripTrailingSpaces /* = false */) {
-  nsAutoString stringToOutput;
-
+void nsPlainTextSerializer::CurrentLine::CreateQuotesAndIndent(
+    nsAString& aResult) const {
   // Put the mail quote "> " chars in, if appropriate:
   if (mCiteQuoteLevel > 0) {
     nsAutoString quotes;
     for (int i = 0; i < mCiteQuoteLevel; i++) {
       quotes.Append(char16_t('>'));
     }
-    if (!mCurrentLineContent.mValue.IsEmpty()) {
+    if (!mContent.mValue.IsEmpty()) {
       /* Better don't output a space here, if the line is empty,
          in case a receiving f=f-aware UA thinks, this were a flowed line,
          which it isn't - it's just empty.
@@ -1429,36 +1456,21 @@ void nsPlainTextSerializer::OutputQuotesAndIndent(
          so the empty line may be lost completely.) */
       quotes.Append(char16_t(' '));
     }
-    stringToOutput = quotes;
+    aResult = quotes;
   }
 
   // Indent if necessary
-  int32_t indentwidth = mIndent - mInIndentString.Length();
-  if (indentwidth > 0 &&
-      (!mCurrentLineContent.mValue.IsEmpty() || !mInIndentString.IsEmpty())
+  int32_t indentwidth = mIndentation.mWidth - mIndentation.mHeader.Length();
+  if (indentwidth > 0 && HasContentOrIndentationHeader()
       // Don't make empty lines look flowed
   ) {
     nsAutoString spaces;
     for (int i = 0; i < indentwidth; ++i) spaces.Append(char16_t(' '));
-    stringToOutput += spaces;
+    aResult += spaces;
   }
 
-  if (!mInIndentString.IsEmpty()) {
-    stringToOutput += mInIndentString;
-    mInIndentString.Truncate();
-  }
-
-  if (stripTrailingSpaces) {
-    int32_t lineLength = stringToOutput.Length();
-    while (lineLength > 0 && ' ' == stringToOutput[lineLength - 1]) {
-      --lineLength;
-    }
-    stringToOutput.SetLength(lineLength);
-  }
-
-  if (!stringToOutput.IsEmpty()) {
-    Output(stringToOutput);
-    mAtFirstColumn = false;
+  if (!mIndentation.mHeader.IsEmpty()) {
+    aResult += mIndentation.mHeader;
   }
 }
 
@@ -1496,9 +1508,6 @@ void nsPlainTextSerializer::Write(const nsAString& aStr) {
          mWrapColumn);
 #endif
 
-  int32_t bol = 0;
-  int32_t newline;
-
   const int32_t totLen = str.Length();
 
   // If the string is empty, do nothing:
@@ -1519,18 +1528,22 @@ void nsPlainTextSerializer::Write(const nsAString& aStr) {
     // No intelligent wrapping.
 
     // This mustn't be mixed with intelligent wrapping without clearing
-    // the mCurrentLineContent.mValue buffer before!!!
-    NS_ASSERTION(mCurrentLineContent.mValue.IsEmpty() ||
+    // the mCurrentLine.mContent.mValue buffer before!!!
+    NS_ASSERTION(mCurrentLine.mContent.mValue.IsEmpty() ||
                      (IsElementPreformatted() && !mPreFormattedMail),
                  "Mixed wrapping data and nonwrapping data on the same line");
-    if (!mCurrentLineContent.mValue.IsEmpty()) {
-      FlushLine();
+    MOZ_ASSERT(mOutputManager);
+
+    if (!mCurrentLine.mContent.mValue.IsEmpty()) {
+      mOutputManager->Flush(mCurrentLine);
     }
+
+    int32_t newline{0};
 
     // Put the mail quote "> " chars in, if appropriate.
     // Have to put it in before every line.
+    int32_t bol = 0;
     while (bol < totLen) {
-      const bool outputQuotes = mAtFirstColumn;
       bool outputLineBreak = false;
       bool spacesOnly = true;
 
@@ -1548,7 +1561,9 @@ void nsPlainTextSerializer::Write(const nsAString& aStr) {
           newline = new_newline;
           break;
         }
-        if (' ' != *iter) spacesOnly = false;
+        if (' ' != *iter) {
+          spacesOnly = false;
+        }
         ++new_newline;
         ++iter;
       }
@@ -1559,12 +1574,8 @@ void nsPlainTextSerializer::Write(const nsAString& aStr) {
         // No new lines.
         stringpart.Assign(Substring(str, bol, totLen - bol));
         if (!stringpart.IsEmpty()) {
-          char16_t lastchar = stringpart[stringpart.Length() - 1];
-          if (IsLineFeedCarriageReturnBlankOrTab(lastchar)) {
-            mInWhitespace = true;
-          } else {
-            mInWhitespace = false;
-          }
+          char16_t lastchar = stringpart.Last();
+          mInWhitespace = IsLineFeedCarriageReturnBlankOrTab(lastchar);
         }
         mEmptyLines = -1;
         bol = totLen;
@@ -1583,33 +1594,27 @@ void nsPlainTextSerializer::Write(const nsAString& aStr) {
         }
       }
 
-      mCurrentLineContent.mValue.Truncate();
       if (mSettings.HasFlag(nsIDocumentEncoder::OutputFormatFlowed)) {
         if ((outputLineBreak || !spacesOnly) &&  // bugs 261467,125928
-            !IsQuotedLine(stringpart) && !stringpart.EqualsLiteral("-- ") &&
-            !stringpart.EqualsLiteral("- -- "))
+            !IsQuotedLine(stringpart) && !IsSignatureSeparator(stringpart)) {
           stringpart.Trim(" ", false, true, true);
-        if (IsSpaceStuffable(stringpart.get()) && !IsQuotedLine(stringpart))
-          mCurrentLineContent.mValue.Append(char16_t(' '));
+        }
+        if (IsSpaceStuffable(stringpart.get()) && !IsQuotedLine(stringpart)) {
+          mCurrentLine.mContent.mValue.Append(char16_t(' '));
+        }
       }
-      mCurrentLineContent.mValue.Append(stringpart);
+      mCurrentLine.mContent.mValue.Append(stringpart);
 
-      if (outputQuotes) {
-        // Note: this call messes with mAtFirstColumn
-        OutputQuotesAndIndent();
-      }
+      mCurrentLine.mContent.MaybeReplaceNbsps(mSettings.GetFlags());
 
-      mCurrentLineContent.MaybeReplaceNbsps();
+      mOutputManager->Append(mCurrentLine,
+                             OutputManager::StripTrailingWhitespaces::kNo);
       if (outputLineBreak) {
-        mCurrentLineContent.AppendLineBreak();
+        mOutputManager->AppendLineBreak();
       }
-      Output(mCurrentLineContent.mValue);
 
-      mAtFirstColumn = outputLineBreak;
+      mCurrentLine.ResetContentAndIndentationHeader();
     }
-
-    // Reset mCurrentLineContent.mValue.
-    mCurrentLineContent.mValue.Truncate();
 
 #ifdef DEBUG_wrapping
     printf("No wrapping: newline is %d, totLen is %d\n", newline, totLen);
@@ -1623,6 +1628,7 @@ void nsPlainTextSerializer::Write(const nsAString& aStr) {
   int32_t nextpos;
   const char16_t* offsetIntoBuffer = nullptr;
 
+  int32_t bol = 0;
   while (bol < totLen) {  // Loop over lines
     // Find a place where we may have to do whitespace compression
     nextpos = str.FindCharInSet(" \t\n\r", bol);

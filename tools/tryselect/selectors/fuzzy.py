@@ -125,11 +125,13 @@ class FuzzyParser(BaseTryParser):
         'artifact',
         'browsertime',
         'chemspill-prio',
+        'debian-buster',
         'disable-pgo',
         'env',
         'gecko-profile',
         'path',
         'rebuild',
+        'visual-metrics-jobs',
     ]
 
 

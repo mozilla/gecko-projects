@@ -85,6 +85,7 @@ class App extends Component {
       reverseSearchInitialValue: PropTypes.string,
       editorMode: PropTypes.bool,
       editorWidth: PropTypes.number,
+      hidePersistLogsCheckbox: PropTypes.bool,
       hideShowContentMessagesCheckbox: PropTypes.bool,
       sidebarVisible: PropTypes.bool.isRequired,
       filterBarDisplayMode: PropTypes.oneOf([
@@ -245,15 +246,15 @@ class App extends Component {
 
   renderFilterBar() {
     const {
-      webConsoleUI,
       closeSplitConsole,
       filterBarDisplayMode,
+      hidePersistLogsCheckbox,
       hideShowContentMessagesCheckbox,
     } = this.props;
 
     return FilterBar({
       key: "filterbar",
-      hidePersistLogsCheckbox: webConsoleUI.isBrowserConsole,
+      hidePersistLogsCheckbox,
       hideShowContentMessagesCheckbox,
       closeSplitConsole,
       displayMode: filterBarDisplayMode,
@@ -352,7 +353,7 @@ class App extends Component {
           this.node = node;
         },
       },
-      ...children
+      children
     );
   }
 
@@ -376,18 +377,20 @@ class App extends Component {
       filterBar,
       editorFeatureEnabled && editorMode
         ? EditorToolbar({
+            key: "editor-toolbar",
             dispatch,
             editorMode,
             webConsoleUI,
           })
         : null,
       dom.div(
-        { className: "flexible-output-input" },
+        { className: "flexible-output-input", key: "in-out-container" },
         consoleOutput,
         notificationBox,
         jsterm
       ),
       GridElementWidthResizer({
+        key: "editor-resizer",
         enabled: editorFeatureEnabled && editorMode,
         position: "end",
         className: "editor-resizer",

@@ -497,6 +497,7 @@ void BackgroundHangThread::ReportHang(TimeDuration aHangTime) {
   if (profiler_is_active()) {
     TimeStamp endTime = TimeStamp::Now();
     TimeStamp startTime = endTime - aHangTime;
+    AUTO_PROFILER_STATS(add_marker_with_HangMarkerPayload);
     profiler_add_marker_for_thread(
         mStackHelper.GetThreadId(), JS::ProfilingCategoryPair::OTHER,
         "BHR-detected hang", MakeUnique<HangMarkerPayload>(startTime, endTime));
@@ -612,7 +613,7 @@ void BackgroundHangMonitor::Startup() {
     return;
   }
 
-  if (!strcmp(NS_STRINGIFY(MOZ_UPDATE_CHANNEL), "beta")) {
+  if (!strcmp(MOZ_STRINGIFY(MOZ_UPDATE_CHANNEL), "beta")) {
     if (XRE_IsParentProcess()) {  // cached ClientID hasn't been read yet
       BackgroundHangThread::Startup();
       BackgroundHangManager::sInstance = new BackgroundHangManager();

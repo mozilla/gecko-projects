@@ -72,6 +72,14 @@ class AboutLoginsChild extends ActorChild {
             cloneFunctions: true,
           }
         );
+
+        const SUPPORT_URL =
+          Services.urlFormatter.formatURLPref("app.support.baseURL") +
+          "firefox-lockwise";
+        let loginIntro = Cu.waiveXrays(
+          this.content.document.querySelector("login-intro")
+        );
+        loginIntro.supportURL = SUPPORT_URL;
         break;
       }
       case "AboutLoginsCopyLoginDetail": {
@@ -131,12 +139,14 @@ class AboutLoginsChild extends ActorChild {
         break;
       }
       case "AboutLoginsRecordTelemetryEvent": {
-        let { method, object } = event.detail;
+        let { method, object, extra = {} } = event.detail;
         try {
           Services.telemetry.recordEvent(
             TELEMETRY_EVENT_CATEGORY,
             method,
-            object
+            object,
+            null,
+            extra
           );
         } catch (ex) {
           Cu.reportError(

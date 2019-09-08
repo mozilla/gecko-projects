@@ -44,7 +44,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
 import android.os.SystemClock;
+import android.security.keystore.KeyProperties;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
@@ -65,6 +67,11 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECGenParameterSpec;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -426,6 +433,18 @@ public class GeckoViewActivity extends AppCompatActivity {
                 mUseTrackingProtection = !mUseTrackingProtection;
                 updateTrackingProtection(session);
                 session.reload();
+                break;
+            case R.id.action_tpe:
+                sGeckoRuntime.getContentBlockingController().checkException(session).accept(value -> {
+                    if (value.booleanValue()) {
+                        sGeckoRuntime.getContentBlockingController().removeException(session);
+                        item.setTitle(R.string.tracking_protection_ex);
+                    } else {
+                        sGeckoRuntime.getContentBlockingController().addException(session);
+                        item.setTitle(R.string.tracking_protection_ex2);
+                    }
+                    session.reload();
+                });
                 break;
             case R.id.desktop_mode:
                 mDesktopMode = !mDesktopMode;
@@ -1301,8 +1320,20 @@ public class GeckoViewActivity extends AppCompatActivity {
     private final class ExampleTelemetryDelegate
             implements RuntimeTelemetry.Delegate {
         @Override
-        public void onTelemetryReceived(final @NonNull RuntimeTelemetry.Metric metric) {
-            Log.d(LOGTAG, "onTelemetryReceived " + metric);
+        public void onHistogram(final @NonNull RuntimeTelemetry.Metric<long[]> histogram) {
+            Log.d(LOGTAG, "onHistogram " + histogram);
+        }
+        @Override
+        public void onBooleanScalar(final @NonNull RuntimeTelemetry.Metric<Boolean> scalar) {
+            Log.d(LOGTAG, "onBooleanScalar " + scalar);
+        }
+        @Override
+        public void onLongScalar(final @NonNull RuntimeTelemetry.Metric<Long> scalar) {
+            Log.d(LOGTAG, "onLongScalar " + scalar);
+        }
+        @Override
+        public void onStringScalar(final @NonNull RuntimeTelemetry.Metric<String> scalar) {
+            Log.d(LOGTAG, "onStringScalar " + scalar);
         }
     }
 }

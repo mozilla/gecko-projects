@@ -160,11 +160,22 @@ dictionary FocusOptions {
   boolean preventScroll = false;
 };
 
-// TODO(mbrodesser): once https://bugzilla.mozilla.org/show_bug.cgi?id=1414372
-// is fixed, mixin should be used.
-[NoInterfaceObject] interface HTMLOrSVGOrXULElementMixin {
-  [Throws]
-  void focus(optional FocusOptions options = {});
+interface mixin HTMLOrForeignElement {
+  [SameObject] readonly attribute DOMStringMap dataset;
+  // See bug 1389421
+  // attribute DOMString nonce; // intentionally no [CEReactions]
+
+  // See bug 1575154
+  // [CEReactions] attribute boolean autofocus;
+  [CEReactions, SetterThrows, Pure] attribute long tabIndex;
+  [Throws] void focus(optional FocusOptions options = {});
+  [Throws] void blur();
+};
+
+// https://drafts.csswg.org/cssom/#the-elementcssinlinestyle-mixin
+interface mixin ElementCSSInlineStyle {
+  [SameObject, PutForwards=cssText]
+  readonly attribute CSSStyleDeclaration style;
 };
 
 // http://dev.w3.org/csswg/cssom-view/

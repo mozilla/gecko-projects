@@ -508,6 +508,7 @@ impl GlobalRules {
 }
 
 /// The inforamtion used to generate a list parser.
+#[derive(Clone, Debug)]
 struct ListParserData {
     /// Name of the node.
     name: NodeName,
@@ -574,6 +575,13 @@ struct CPPExporter {
     /// All parsers of options.
     option_parsers_to_generate: Vec<OptionParserData>,
 
+    /// A subset of `list_parsers_to_generate` guaranteed to have
+    /// a single representative for each list type, regardless
+    /// of typedefs.
+    ///
+    /// Indexed by the contents of the list.
+    canonical_list_parsers: HashMap<NodeName, ListParserData>,
+
     /// A mapping from symbol (e.g. `+`, `-`, `instanceof`, ...) to the
     /// name of the symbol as part of `enum class BinASTVariant`
     /// (e.g. `UnaryOperatorDelete`).
@@ -587,6 +595,7 @@ impl CPPExporter {
     fn new(syntax: Spec, rules: GlobalRules) -> Self {
         let mut list_parsers_to_generate = vec![];
         let mut option_parsers_to_generate = vec![];
+        let mut canonical_list_parsers = HashMap::new();
         for (parser_node_name, typedef) in syntax.typedefs_by_name() {
             if typedef.is_optional() {
                 let content_name = TypeName::type_spec(typedef.spec());
@@ -602,6 +611,7 @@ impl CPPExporter {
                     elements: content_node_name
                 });
             } else if let TypeSpec::Array { ref contents, ref supports_empty } = *typedef.spec() {
+                use std::collections::hash_map::Entry::*;
                 let content_name = TypeName::type_(&**contents);
                 let content_node_name = syntax.get_node_name(&content_name)
                     .unwrap_or_else(|| panic!("While generating an array parser, could not find node name {}", content_name))
@@ -610,11 +620,30 @@ impl CPPExporter {
                     parser_node_name,
                     content_name,
                     content_node_name);
-                list_parsers_to_generate.push(ListParserData {
+                let data = ListParserData {
                     name: parser_node_name.clone(),
                     supports_empty: *supports_empty,
                     elements: content_node_name
-                });
+                };
+
+                match canonical_list_parsers.entry(data.elements.clone()) {
+                    Occupied(mut entry) => {
+                        debug!(target: "generate_spidermonkey", "lists: Comparing existing entry {existing:?} and {new:?}",
+                            existing = entry.get(),
+                            new = data);
+                        // HACK: We assume that a parser with name `ListXXX` is more canonical than doesn't start with `List`.
+                        if data.name.to_str().starts_with("List") {
+                            entry.insert(data.clone());
+                        }
+                    }
+                    Vacant(entry) => {
+                        debug!(target: "generate_spidermonkey", "lists: Inserting {new:?}",
+                            new = data);
+                        entry.insert(data.clone());
+                    }
+                }
+
+                list_parsers_to_generate.push(data);
             }
         }
         list_parsers_to_generate.sort_by(|a, b| str::cmp(a.name.to_str(), b.name.to_str()));
@@ -662,6 +691,7 @@ impl CPPExporter {
             refgraph,
             list_parsers_to_generate,
             option_parsers_to_generate,
+            canonical_list_parsers,
             variants_by_symbol,
             enum_types,
         }
@@ -854,7 +884,8 @@ impl CPPExporter {
                 "".to_string()
             }
         };
-        format!("    JS::Result<{type_ok}> parse{prefix}{kind}({args}{extra}{before_context}{context});\n",
+        format!("    JS::Result<{type_ok}> parse{prefix}{kind}({args}{extra}{before_context}{context});
+",
             prefix = prefix,
             type_ok = type_ok,
             kind = kind,
@@ -887,7 +918,8 @@ impl CPPExporter {
                 "".to_string()
             }
         };
-        format!("{parser_class_template}JS::Result<{type_ok}>\n{parser_class_name}::parse{prefix}{kind}({args}{extra}{before_context}{context})",
+        format!("{parser_class_template}JS::Result<{type_ok}>
+{parser_class_name}::parse{prefix}{kind}({args}{extra}{before_context}{context})",
             parser_class_template = self.rules.parser_class_template,
             prefix = prefix,
             type_ok = type_ok,
@@ -963,7 +995,7 @@ impl CPPExporter {
     }
 
     /// Auxiliary function: get a name for a field type.
-    fn get_field_type_name(typedef: Option<&str>, spec: &Spec, type_: &Type, make_optional: bool) -> Cow<'static, str> {
+    fn get_field_type_name(canonical_list_parsers: &HashMap<NodeName, ListParserData>, _typedef: Option<&str>, spec: &Spec, type_: &Type, make_optional: bool) -> Cow<'static, str> {
         let optional = make_optional || type_.is_optional();
         match *type_.spec() {
             TypeSpec::Boolean if optional => Cow::from("PRIMITIVE(MaybeBoolean)"),
@@ -982,15 +1014,17 @@ impl CPPExporter {
             TypeSpec::IdentifierName => Cow::from("PRIMITIVE(IdentifierName)"),
             TypeSpec::PropertyKey if optional => Cow::from("PRIMITIVE(MaybePropertyKey)"),
             TypeSpec::PropertyKey => Cow::from("PRIMITIVE(PropertyKey)"),
-            TypeSpec::Array { ref contents, .. } => Cow::from(
-                format!("LIST({name}, {contents})",
-                    name = if let Some(name) = typedef {
-                        name.to_string()
-                    } else {
-                        TypeName::type_(type_)
-                    },
-                    contents = Self::get_field_type_name(None, spec, contents, false)
-            )),
+            TypeSpec::Array { ref contents, .. } => {
+                let typename = TypeName::type_(contents);
+                let node_name = spec.get_node_name(&typename).unwrap();
+                let ref name = canonical_list_parsers.get(node_name).unwrap().name;
+                let contents = Self::get_field_type_name(canonical_list_parsers, None, spec, contents, false);
+                debug!(target: "generate_spidermonkey", "get_field_type_name for LIST {name}",
+                    name = name);
+                Cow::from(format!("LIST({name}, {contents})",
+                    name = name,
+                    contents = contents))
+            },
             TypeSpec::NamedType(ref name) => {
                 debug!(target: "generate_spidermonkey", "get_field_type_name for named type {name} ({optional})",
                     name = name,
@@ -998,7 +1032,7 @@ impl CPPExporter {
                 match spec.get_type_by_name(name).expect("By now, all types MUST exist") {
                     NamedType::Typedef(alias_type) => {
                         if alias_type.is_optional() {
-                            return Self::get_field_type_name(Some(name.to_str()), spec, alias_type.as_ref(), true)
+                            return Self::get_field_type_name(canonical_list_parsers, Some(name.to_str()), spec, alias_type.as_ref(), true)
                         }
                         // Keep the simple name of sums and lists if there is one.
                         match *alias_type.spec() {
@@ -1011,7 +1045,12 @@ impl CPPExporter {
                             }
                             TypeSpec::Array { ref contents, .. } => {
                                 debug!(target: "generate_spidermonkey", "It's an array {:?}", contents);
-                                let contents = TypeName::type_(contents);
+                                let typename = TypeName::type_(contents);
+                                let node_name = spec.get_node_name(&typename).unwrap();
+                                let ref name = canonical_list_parsers.get(node_name).unwrap().name;
+                                let contents = Self::get_field_type_name(canonical_list_parsers, None, spec, contents, false);
+                                debug!(target: "generate_spidermonkey", "get_field_type_name for typedefed LIST {name}",
+                                    name = name);
                                 if optional {
                                     Cow::from(format!("OPTIONAL_LIST({name}, {contents})",
                                         name = name.to_cpp_enum_case(),
@@ -1023,7 +1062,7 @@ impl CPPExporter {
                                 }
                             }
                             _ => {
-                                Self::get_field_type_name(Some(name.to_str()), spec, alias_type.as_ref(), optional)
+                                Self::get_field_type_name(canonical_list_parsers, Some(name.to_str()), spec, alias_type.as_ref(), optional)
                             }
                         }
                     }
@@ -1068,7 +1107,10 @@ impl CPPExporter {
             .sorted()
             .collect_vec();
         let kind_limit = node_names.len();
-        buffer.push_str(&format!("\n#define FOR_EACH_BIN_KIND(F) \\\n{nodes}\n",
+        buffer.push_str(&format!("
+#define FOR_EACH_BIN_KIND(F) \\
+{nodes}
+",
             nodes = node_names.iter()
                 .map(|name| format!("    F({enum_name}, \"{spec_name}\", {macro_name})",
                     enum_name = name.to_cpp_enum_case(),
@@ -1083,8 +1125,11 @@ enum class BinASTKind: uint16_t {
 };
 ");
 
-        buffer.push_str(&format!("\n// The number of distinct values of BinASTKind.\nconst size_t BINASTKIND_LIMIT = {};\n\n\n", kind_limit));
-        buffer.push_str("\n\n");
+        buffer.push_str(&format!("
+// The number of distinct values of BinASTKind.
+const size_t BINASTKIND_LIMIT = {};
+
+", kind_limit));
         if self.rules.hpp_tokens_field_doc.is_some() {
             buffer.push_str(&self.rules.hpp_tokens_field_doc.reindent(""));
         }
@@ -1094,7 +1139,10 @@ enum class BinASTKind: uint16_t {
             .sorted()
             .collect_vec();
         let field_limit = field_names.len();
-        buffer.push_str(&format!("\n#define FOR_EACH_BIN_FIELD(F) \\\n{nodes}\n",
+        buffer.push_str(&format!("
+#define FOR_EACH_BIN_FIELD(F) \\
+{nodes}
+",
             nodes = field_names.iter()
                 .map(|name| format!("    F({enum_name}, \"{spec_name}\")",
                     spec_name = name,
@@ -1107,9 +1155,17 @@ enum class BinASTField: uint16_t {
 #undef EMIT_ENUM
 };
 ");
-        buffer.push_str(&format!("\n// The number of distinct values of BinASTField.\nconst size_t BINASTFIELD_LIMIT = {};\n", field_limit));
+        buffer.push_str(&format!("
+// The number of distinct values of BinASTField.
+const size_t BINASTFIELD_LIMIT = {};
 
-        buffer.push_str(&format!("\n#define FOR_EACH_BIN_INTERFACE_AND_FIELD(F) \\\n{nodes}\n",
+", field_limit));
+
+        buffer.push_str(&format!("
+
+#define FOR_EACH_BIN_INTERFACE_AND_FIELD(F) \\
+{nodes}
+",
             nodes = self.syntax.interfaces_by_name()
                 .iter()
                 .sorted_by_key(|a| a.0)
@@ -1196,16 +1252,19 @@ const size_t BINAST_SUM_{sum_macro_name}_LIMIT = {limit};
             let interface_enum_name = interface_name.to_cpp_enum_case();
             let interface_spec_name = interface_name.clone();
             let interface_macro_name = interface.name().to_cpp_macro_case();
-            buffer.push_str(&format!("\n\n
+            buffer.push_str(&format!("
+
 // Strongly typed iteration through the fields of interface {interface_enum_name}.
-#define FOR_EACH_BIN_FIELD_IN_INTERFACE_{interface_macro_name}(F, PRIMITIVE, INTERFACE, OPTIONAL_INTERFACE, LIST, SUM, OPTIONAL_SUM, STRING_ENUM, OPTIONAL_STRING_ENUM) \\\n{nodes}\n",
+#define FOR_EACH_BIN_FIELD_IN_INTERFACE_{interface_macro_name}(F, PRIMITIVE, INTERFACE, OPTIONAL_INTERFACE, LIST, SUM, OPTIONAL_SUM, STRING_ENUM, OPTIONAL_STRING_ENUM) \\
+{nodes}
+",
                 interface_macro_name = interface_macro_name,
                 interface_enum_name = interface_enum_name.clone(),
                 nodes = interface.contents().fields()
                     .iter()
                     .enumerate()
                     .map(|(i, field)| {
-                        let field_type_name = Self::get_field_type_name(None, &self.syntax, field.type_(), false);
+                        let field_type_name = Self::get_field_type_name(&self.canonical_list_parsers, None, &self.syntax, field.type_(), false);
                         format!("    F({interface_enum_name}, {field_enum_name}, {field_index}, {field_type}, \"{interface_spec_name}::{field_spec_name}\")",
                             interface_enum_name = interface_enum_name,
                             field_enum_name = field.name().to_cpp_enum_case(),
@@ -1228,7 +1287,17 @@ const size_t BINAST_NUMBER_OF_FIELDS_IN_INTERFACE_{interface_macro_name} = {len}
             .values()
             .map(|interface| interface.contents().fields().len())
             .sum();
-        buffer.push_str(&format!("\n// The total number of fields across all interfaces. Used typically to maintain a probability table per field.\nconst size_t BINAST_INTERFACE_AND_FIELD_LIMIT = {};\n\n\n", total_number_of_fields));
+        buffer.push_str(&format!("
+// The total number of fields across all interfaces. Used typically to maintain a probability table per field.
+const size_t BINAST_INTERFACE_AND_FIELD_LIMIT = {number};
+
+// Create parameters list to pass mozilla::Array constructor.
+// The number of parameters equals to BINAST_INTERFACE_AND_FIELD_LIMIT.
+#define BINAST_PARAM_NUMBER_OF_INTERFACE_AND_FIELD(X) {param}
+
+", number=total_number_of_fields, param=(0..total_number_of_fields)
+                                 .map(|_| "(X)")
+                                 .format(",")));
 
         if self.rules.hpp_tokens_variants_doc.is_some() {
             buffer.push_str(&self.rules.hpp_tokens_variants_doc.reindent(""));
@@ -1242,7 +1311,10 @@ const size_t BINAST_NUMBER_OF_FIELDS_IN_INTERFACE_{interface_macro_name} = {len}
             .collect_vec();
         let variants_limit = enum_variants.len();
 
-        buffer.push_str(&format!("\n#define FOR_EACH_BIN_VARIANT(F) \\\n{nodes}\n",
+        buffer.push_str(&format!("
+#define FOR_EACH_BIN_VARIANT(F) \\
+{nodes}
+",
             nodes = enum_variants.into_iter()
                 .map(|(symbol, name)| format!("    F({variant_name}, \"{spec_name}\")",
                     spec_name = symbol,
@@ -1256,10 +1328,17 @@ enum class BinASTVariant: uint16_t {
 #undef EMIT_ENUM
 };
 ");
-        buffer.push_str(&format!("\n// The number of distinct values of BinASTVariant.\nconst size_t BINASTVARIANT_LIMIT = {};\n\n\n",
+        buffer.push_str(&format!("
+// The number of distinct values of BinASTVariant.
+const size_t BINASTVARIANT_LIMIT = {};
+
+",
             variants_limit));
 
-        buffer.push_str(&format!("\n#define FOR_EACH_BIN_STRING_ENUM(F) \\\n{nodes}\n",
+        buffer.push_str(&format!("
+#define FOR_EACH_BIN_STRING_ENUM(F) \\
+{nodes}
+",
             nodes = self.syntax.string_enums_by_name()
                 .keys()
                 .sorted()
@@ -1277,7 +1356,11 @@ enum class BinASTStringEnum: uint16_t {
 #undef EMIT_ENUM
 };
 ");
-        buffer.push_str(&format!("\n// The number of distinct values of BinASTStringEnum.\nconst size_t BINASTSTRINGENUM_LIMIT = {};\n\n\n",
+        buffer.push_str(&format!("
+// The number of distinct values of BinASTStringEnum.
+const size_t BINASTSTRINGENUM_LIMIT = {};
+
+",
             self.syntax.string_enums_by_name().len()));
 
         for (name, enum_) in self.syntax.string_enums_by_name()
@@ -1287,7 +1370,10 @@ enum class BinASTStringEnum: uint16_t {
         {
             let enum_name = name.to_str().to_class_cases();
             let enum_macro_name = name.to_cpp_macro_case();
-            buffer.push_str(&format!("\n#define FOR_EACH_BIN_VARIANT_IN_STRING_ENUM_{enum_macro_name}_BY_STRING_ORDER(F) \\\n {variants}\n",
+            buffer.push_str(&format!("
+#define FOR_EACH_BIN_VARIANT_IN_STRING_ENUM_{enum_macro_name}_BY_STRING_ORDER(F) \\
+ {variants}
+",
                 enum_macro_name = enum_macro_name,
                 variants = enum_.strings()
                     .iter()
@@ -1302,14 +1388,32 @@ enum class BinASTStringEnum: uint16_t {
                     })
                     .format("\\\n")
             ));
-            buffer.push_str(&format!("\nconst size_t BIN_AST_STRING_ENUM_{enum_macro_name}_LIMIT = {len};\n\n\n",
+            buffer.push_str(&format!("
+#define FOR_EACH_BIN_VARIANT_IN_STRING_ENUM_{enum_macro_name}_BY_WEBIDL_ORDER(F) \\
+ {variants}
+",
+                enum_macro_name = enum_macro_name,
+                variants = enum_.strings()
+                    .iter()
+                    .map(|variant_string| {
+                        format!("   F({enum_name}, {variant_name}, \"{variant_string}\")",
+                            enum_name = enum_name,
+                            variant_name = self.variants_by_symbol.get(variant_string).unwrap(),
+                            variant_string = variant_string
+                        )
+                    })
+                    .format("\\\n")
+            ));
+            buffer.push_str(&format!("
+
+const size_t BIN_AST_STRING_ENUM_{enum_macro_name}_LIMIT = {len};
+",
                 enum_macro_name = enum_macro_name,
                 len = enum_.strings().len(),
             ));
         }
 
-
-       buffer.push_str(&format!("
+        buffer.push_str(&format!("
 // This macro accepts the following arguments:
 // - F: callback
 // - PRIMITIVE: wrapper for primitive type names - called as `PRIMITIVE(typename)`
@@ -1323,17 +1427,21 @@ enum class BinASTStringEnum: uint16_t {
 // - STRING_ENUM: wrapper for non-optional string enum types - called as `STRING_ENUNM(typename)`
 // - OPTIONAL_STRING_ENUM: wrapper for optional string enum type names - called as `OPTIONAL_STRING_ENUM(typename)` where
 //      `typename` is the name of the string enum (e.g. no `Maybe` prefix)
-#define FOR_EACH_BIN_LIST(F, PRIMITIVE, INTERFACE, OPTIONAL_INTERFACE, LIST, SUM, OPTIONAL_SUM, STRING_ENUM, OPTIONAL_STRING_ENUM) \\\n{nodes}\n",
-            nodes = self.list_parsers_to_generate.iter()
+#define FOR_EACH_BIN_LIST(F, PRIMITIVE, INTERFACE, OPTIONAL_INTERFACE, LIST, SUM, OPTIONAL_SUM, STRING_ENUM, OPTIONAL_STRING_ENUM) \\
+{nodes}
+",
+            nodes = self.canonical_list_parsers.values()
                 .sorted_by_key(|data| &data.name)
                 .into_iter()
                 .map(|data| {
-                    debug!(target: "generate_spidermonkey", "Generating FOR_EACH_BIN_LIST case {list_name}", list_name = data.name);
+                    debug!(target: "generate_spidermonkey", "Generating FOR_EACH_BIN_LIST case {list_name} => {type_name:?}",
+                        list_name = data.name,
+                        type_name = self.syntax.typedefs_by_name().get(&data.name).unwrap());
                     format!("    F({list_name}, {content_name}, \"{spec_name}\", {type_name})",
                         list_name = data.name.to_cpp_enum_case(),
                         content_name = data.elements.to_cpp_enum_case(),
                         spec_name = data.name.to_str(),
-                        type_name = Self::get_field_type_name(Some(data.name.to_str()), &self.syntax, self.syntax.typedefs_by_name().get(&data.name).unwrap(), false))
+                        type_name = Self::get_field_type_name(&self.canonical_list_parsers, Some(data.name.to_str()), &self.syntax, self.syntax.typedefs_by_name().get(&data.name).unwrap(), false))
                 })
                 .format(" \\\n")));
         buffer.push_str("
@@ -1345,9 +1453,25 @@ enum class BinASTList: uint16_t {
 #undef NOTHING
 };
 ");
-        buffer.push_str(&format!("\n// The number of distinct list types in the grammar. Used typically to maintain a probability table per list type.\nconst size_t BINAST_NUMBER_OF_LIST_TYPES = {};\n\n\n", self.list_parsers_to_generate.len()));
 
-        buffer.push_str(&format!("\n#define FOR_EACH_BIN_SUM(F) \\\n{nodes}\n",
+        let number_of_lists = self.list_parsers_to_generate.len();
+
+        buffer.push_str(&format!("
+// The number of distinct list types in the grammar. Used typically to maintain a probability table per list type.
+const size_t BINAST_NUMBER_OF_LIST_TYPES = {number};
+
+// Create parameters list to pass mozilla::Array constructor.
+// The number of parameters equals to BINAST_NUMBER_OF_LIST_TYPES.
+#define BINAST_PARAM_NUMBER_OF_LIST_TYPES(X) {param}
+
+", number=number_of_lists, param=(0..number_of_lists)
+                                 .map(|_| "(X)")
+                                 .format(",")));
+
+        buffer.push_str(&format!("
+#define FOR_EACH_BIN_SUM(F) \\
+{nodes}
+",
             nodes = self.syntax.resolved_sums_of_interfaces_by_name()
                 .iter()
                 .sorted_by_key(|a| a.0)
@@ -1356,7 +1480,7 @@ enum class BinASTList: uint16_t {
                     name = name.to_cpp_enum_case(),
                     spec_name = name.to_str(),
                     macro_name = name.to_cpp_macro_case(),
-                    type_name = Self::get_field_type_name(Some(name.to_str()), &self.syntax, self.syntax.typedefs_by_name().get(name).unwrap(), false)))
+                    type_name = Self::get_field_type_name(&self.canonical_list_parsers, Some(name.to_str()), &self.syntax, self.syntax.typedefs_by_name().get(name).unwrap(), false)))
                 .format(" \\\n")));
         buffer.push_str("
 enum class BinASTSum: uint16_t {
@@ -1365,7 +1489,11 @@ enum class BinASTSum: uint16_t {
 #undef EMIT_ENUM
 };
 ");
-        buffer.push_str(&format!("\n// The number of distinct sum types in the grammar. Used typically to maintain a probability table per sum type.\nconst size_t BINAST_NUMBER_OF_SUM_TYPES = {};\n\n\n",
+        buffer.push_str(&format!("
+// The number of distinct sum types in the grammar. Used typically to maintain a probability table per sum type.
+const size_t BINAST_NUMBER_OF_SUM_TYPES = {};
+
+",
             self.syntax.resolved_sums_of_interfaces_by_name().len()));
 
         buffer.push_str(&self.rules.hpp_tokens_footer.reindent(""));
@@ -1602,7 +1730,9 @@ impl CPPExporter {
         let kind = name.to_class_cases();
 
         if self.refgraph.is_used(name.to_rc_string().clone()) {
-            let rendered_bnf = format!("/*\n{name} ::= {nodes}\n*/",
+            let rendered_bnf = format!("/*
+{name} ::= {nodes}
+*/",
                 nodes = nodes.iter()
                     .format("\n    "),
                 name = name.to_str());
@@ -1622,7 +1752,8 @@ impl CPPExporter {
 
     MOZ_TRY(guard.done());
     return result;
-}}\n",
+}}
+",
                 bnf = rendered_bnf,
                 call = self.get_method_call("result", name,
                                             "Sum", INTERFACE_ARGS,
@@ -1669,7 +1800,9 @@ impl CPPExporter {
                 arm_after = rule_for_this_arm.after_arm.reindent("        ")
                     .newline_if_not_empty()));
         }
-        buffer.push_str(&format!("\n{first_line}
+        buffer.push_str(&format!("
+
+{first_line}
 {{
     {type_ok} result;
     switch (kind) {{{cases}
@@ -1723,7 +1856,8 @@ impl CPPExporter {
 {first_line}
 {{
     return raiseError(\"FIXME: Not implemented yet in this preview release ({kind})\");
-}}\n",
+}}
+",
                     first_line = first_line,
                     kind = kind,
                 );
@@ -1742,25 +1876,30 @@ impl CPPExporter {
         };
 
 
-        let rendered = format!("\n{first_line}
+        let rendered = format!("
+
+{first_line}
 {{
     uint32_t length;
     AutoList guard(*tokenizer_);
 
     const auto start = tokenizer_->offset();
-    MOZ_TRY(tokenizer_->enterList(length, context, guard));{empty_check}
+    const Context childContext(Context(ListContext(context.as<FieldContext>().position, BinASTList::{content_kind})));
+    MOZ_TRY(tokenizer_->enterList(length, childContext, guard));{empty_check}
 {init}
 
     for (uint32_t i = 0; i < length; ++i) {{
-        const Context childContext(Context(ListContext(context.as<FieldContext>().position, BinASTList::{content_kind})));
 {call}
 {append}    }}
 
     MOZ_TRY(guard.done());
     return result;
-}}\n",
+}}
+",
             first_line = first_line,
-            content_kind = parser.name.to_class_cases(),
+            content_kind =
+                self.canonical_list_parsers.get(&parser.elements).unwrap() // Each list parser has a deduplicated representative
+                    .name.to_class_cases(),
             empty_check =
                 if parser.supports_empty {
                     "".to_string()
@@ -2030,7 +2169,10 @@ impl CPPExporter {
 
         if self.refgraph.is_used(name.to_rc_string().clone()) {
             // Generate comments
-            let comment = format!("\n/*\n{}*/\n", ToWebidl::interface(interface, "", "    "));
+            let comment = format!("
+/*
+{}*/
+", ToWebidl::interface(interface, "", "    "));
             buffer.push_str(&comment);
 
             // Generate public method
@@ -2314,8 +2456,12 @@ impl CPPExporter {
         buffer.push_str("\n");
 
         // 1. Typesums
-        buffer.push_str("\n\n// ----- Sums of interfaces (autogenerated, by lexicographical order)\n");
-        buffer.push_str("// Sums of sums are flattened.\n");
+        buffer.push_str("
+
+// ----- Sums of interfaces (autogenerated, by lexicographical order)
+");
+        buffer.push_str("// Sums of sums are flattened.
+");
 
         let sums_of_interfaces = self.syntax.resolved_sums_of_interfaces_by_name()
             .iter()
@@ -2326,8 +2472,12 @@ impl CPPExporter {
         }
 
         // 2. Single interfaces
-        buffer.push_str("\n\n// ----- Interfaces (autogenerated, by lexicographical order)\n");
-        buffer.push_str("// When fields have a non-trivial type, implementation is deanonymized and delegated to another parser.\n");
+        buffer.push_str("
+
+// ----- Interfaces (autogenerated, by lexicographical order)
+");
+        buffer.push_str("// When fields have a non-trivial type, implementation is deanonymized and delegated to another parser.
+");
         let interfaces_by_name = self.syntax.interfaces_by_name()
             .iter()
             .sorted_by(|a, b| str::cmp(a.0.to_str(), b.0.to_str()));
@@ -2337,7 +2487,10 @@ impl CPPExporter {
         }
 
         // 3. String Enums
-        buffer.push_str("\n\n// ----- String enums (autogenerated, by lexicographical order)\n");
+        buffer.push_str("
+
+// ----- String enums (autogenerated, by lexicographical order)
+");
         {
             let string_enums_by_name = self.syntax.string_enums_by_name()
                 .iter()
@@ -2367,7 +2520,12 @@ impl CPPExporter {
                         .format("\n")
                 );
 
-                let rendered_doc = format!("/*\nenum {kind} {{\n{cases}\n}};\n*/\n",
+                let rendered_doc = format!("/*
+enum {kind} {{
+{cases}
+}};
+*/
+",
                     kind = kind,
                     cases = enum_.strings()
                             .iter()
@@ -2391,13 +2549,19 @@ impl CPPExporter {
         }
 
         // 4. Lists
-        buffer.push_str("\n\n// ----- Lists (autogenerated, by lexicographical order)\n");
+        buffer.push_str("
+
+// ----- Lists (autogenerated, by lexicographical order)
+");
         for parser in &self.list_parsers_to_generate {
             self.generate_implement_list(&mut buffer, parser);
         }
 
         // 5. Optional values
-        buffer.push_str("\n\n    // ----- Default values (by lexicographical order)\n");
+        buffer.push_str("
+
+    // ----- Default values (by lexicographical order)
+");
         for parser in &self.option_parsers_to_generate {
             self.generate_implement_option(&mut buffer, parser);
         }

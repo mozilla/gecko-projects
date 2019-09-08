@@ -298,6 +298,7 @@ let LEGACY_ACTORS = {
         "PictureInPicture:SetupPlayer",
         "PictureInPicture:Play",
         "PictureInPicture:Pause",
+        "PictureInPicture:KeyToggle",
       ],
     },
   },
@@ -307,7 +308,7 @@ let LEGACY_ACTORS = {
       allFrames: true,
       module: "resource://gre/actors/PictureInPictureChild.jsm",
       events: {
-        canplay: { capture: true, mozSystemGroup: true },
+        UAWidgetSetupOrChange: {},
         contextmenu: { capture: true },
       },
     },

@@ -44,6 +44,7 @@ import java.lang.Class;
 import java.lang.Exception;
 import java.lang.Float;
 import java.lang.Integer;
+import java.lang.Long;
 import java.lang.Object;
 import java.lang.Runnable;
 import java.lang.RuntimeException;
@@ -59,6 +60,7 @@ import org.json.JSONObject;
 import org.mozilla.geckoview.AllowOrDeny;
 import org.mozilla.geckoview.CompositorController;
 import org.mozilla.geckoview.ContentBlocking;
+import org.mozilla.geckoview.ContentBlockingController;
 import org.mozilla.geckoview.DynamicToolbarAnimator;
 import org.mozilla.geckoview.GeckoDisplay;
 import org.mozilla.geckoview.GeckoResponse;
@@ -85,6 +87,9 @@ import org.mozilla.geckoview.WebExtensionEventDispatcher;
 import org.mozilla.geckoview.WebMessage;
 import org.mozilla.geckoview.WebNotification;
 import org.mozilla.geckoview.WebNotificationDelegate;
+import org.mozilla.geckoview.WebPushController;
+import org.mozilla.geckoview.WebPushDelegate;
+import org.mozilla.geckoview.WebPushSubscription;
 import org.mozilla.geckoview.WebRequest;
 import org.mozilla.geckoview.WebRequestError;
 import org.mozilla.geckoview.WebResponse;
@@ -212,6 +217,23 @@ package org.mozilla.geckoview {
     method @NonNull protected ContentBlocking.Settings newSettings(@Nullable ContentBlocking.Settings);
   }
 
+  @AnyThread public class ContentBlockingController {
+    ctor public ContentBlockingController();
+    method @UiThread public void addException(@NonNull GeckoSession);
+    method @UiThread @NonNull public GeckoResult<Boolean> checkException(@NonNull GeckoSession);
+    method @UiThread public void clearExceptionList();
+    method @UiThread public void removeException(@NonNull GeckoSession);
+    method @UiThread public void restoreExceptionList(@NonNull ContentBlockingController.ExceptionList);
+    method @UiThread @NonNull public GeckoResult<ContentBlockingController.ExceptionList> saveExceptionList();
+  }
+
+  @AnyThread public class ContentBlockingController.ExceptionList {
+    ctor public ExceptionList(@NonNull String);
+    ctor public ExceptionList(@NonNull JSONObject);
+    method @NonNull public String[] getUris();
+    method @NonNull public JSONObject toJson();
+  }
+
   public class CrashReporter {
     ctor public CrashReporter();
     method @AnyThread @NonNull public static GeckoResult<String> sendCrashReport(@NonNull Context, @NonNull Intent, @NonNull String);
@@ -307,6 +329,7 @@ package org.mozilla.geckoview {
     method @UiThread public void configurationChanged(@NonNull Configuration);
     method @UiThread @NonNull public static GeckoRuntime create(@NonNull Context);
     method @UiThread @NonNull public static GeckoRuntime create(@NonNull Context, @NonNull GeckoRuntimeSettings);
+    method @UiThread @NonNull public ContentBlockingController getContentBlockingController();
     method @UiThread @NonNull public static synchronized GeckoRuntime getDefault(@NonNull Context);
     method @UiThread @Nullable public GeckoRuntime.Delegate getDelegate();
     method @UiThread @Nullable public File getProfileDir();
@@ -315,6 +338,7 @@ package org.mozilla.geckoview {
     method @UiThread @NonNull public RuntimeTelemetry getTelemetry();
     method @UiThread @NonNull public WebExtensionController getWebExtensionController();
     method @UiThread @Nullable public WebNotificationDelegate getWebNotificationDelegate();
+    method @UiThread @NonNull public WebPushController getWebPushController();
     method @UiThread public void orientationChanged();
     method @UiThread public void orientationChanged(int);
     method @AnyThread public void readFromParcel(@NonNull Parcel);
@@ -1106,13 +1130,16 @@ package org.mozilla.geckoview {
   }
 
   public static interface RuntimeTelemetry.Delegate {
-    method @AnyThread default public void onTelemetryReceived(@NonNull RuntimeTelemetry.Metric);
+    method @AnyThread default public void onBooleanScalar(@NonNull RuntimeTelemetry.Metric<Boolean>);
+    method @AnyThread default public void onHistogram(@NonNull RuntimeTelemetry.Metric<long[]>);
+    method @AnyThread default public void onLongScalar(@NonNull RuntimeTelemetry.Metric<Long>);
+    method @AnyThread default public void onStringScalar(@NonNull RuntimeTelemetry.Metric<String>);
   }
 
-  public static class RuntimeTelemetry.Metric {
+  public static class RuntimeTelemetry.Metric<T> {
     ctor protected Metric();
     field @NonNull public final String name;
-    field @NonNull public final long[] values;
+    field @NonNull public final T value;
   }
 
   public class ScreenLength {
@@ -1271,6 +1298,29 @@ package org.mozilla.geckoview {
   public interface WebNotificationDelegate {
     method @AnyThread default public void onCloseNotification(@NonNull WebNotification);
     method @AnyThread default public void onShowNotification(@NonNull WebNotification);
+  }
+
+  public class WebPushController {
+    method @UiThread public void onPushEvent(@NonNull WebPushSubscription);
+    method @UiThread public void onPushEvent(@NonNull WebPushSubscription, @Nullable byte[]);
+    method @UiThread public void onSubscriptionChanged(@NonNull WebPushSubscription);
+    method @UiThread public void setDelegate(@Nullable WebPushDelegate);
+  }
+
+  public interface WebPushDelegate {
+    method @UiThread @Nullable default public GeckoResult<WebPushSubscription> onGetSubscription(@NonNull String);
+    method @UiThread @Nullable default public GeckoResult<WebPushSubscription> onSubscribe(@NonNull String, @Nullable byte[]);
+    method @UiThread @Nullable default public GeckoResult<Void> onUnsubscribe(@NonNull String);
+  }
+
+  public class WebPushSubscription implements Parcelable {
+    ctor public WebPushSubscription(@NonNull String, @NonNull String, @Nullable byte[], @NonNull byte[], @NonNull byte[]);
+    field public static final Parcelable.Creator<WebPushSubscription> CREATOR;
+    field @Nullable public final byte[] appServerKey;
+    field @NonNull public final byte[] authSecret;
+    field @NonNull public final byte[] browserPublicKey;
+    field @NonNull public final String endpoint;
+    field @NonNull public final String scope;
   }
 
   @AnyThread public class WebRequest extends WebMessage {

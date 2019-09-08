@@ -482,8 +482,13 @@ bool WebGLContext::CreateAndInitGL(
 
   if (IsWebGL2()) {
     flags |= gl::CreateContextFlags::PREFER_ES3;
-  } else if (!StaticPrefs::webgl_1_allow_core_profiles()) {
-    flags |= gl::CreateContextFlags::REQUIRE_COMPAT_PROFILE;
+  } else {
+    // Request and prefer ES2 context for WebGL1.
+    flags |= gl::CreateContextFlags::PREFER_EXACT_VERSION;
+
+    if (!StaticPrefs::webgl_1_allow_core_profiles()) {
+      flags |= gl::CreateContextFlags::REQUIRE_COMPAT_PROFILE;
+    }
   }
 
   {
@@ -2162,7 +2167,9 @@ WebGLContext::GetVRFrame() {
   if (IsContextLost()) return nullptr;
 
   RefPtr<SharedSurfaceTextureClient> sharedSurface = mVRScreen->Front();
-  if (!sharedSurface || !sharedSurface->Surf()) return nullptr;
+  if (!sharedSurface || !sharedSurface->Surf() ||
+      !sharedSurface->Surf()->IsBufferAvailable())
+    return nullptr;
 
   // Make sure that the WebGL buffer is committed to the attached SurfaceTexture
   // on Android.
