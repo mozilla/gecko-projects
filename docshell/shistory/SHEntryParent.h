@@ -129,9 +129,9 @@ class SHEntryParent final : public PSHEntryParent {
   bool RecvGetPrincipalToInherit(RefPtr<nsIPrincipal>* aPrincipalToInherit);
   bool RecvSetPrincipalToInherit(nsIPrincipal* aPrincipalToInherit);
   bool RecvGetStoragePrincipalToInherit(
-    RefPtr<nsIPrincipal>* aStoragePrincipalToInherit);
+      RefPtr<nsIPrincipal>* aStoragePrincipalToInherit);
   bool RecvSetStoragePrincipalToInherit(
-    nsIPrincipal* aStoragePrincipalToInherit);
+      nsIPrincipal* aStoragePrincipalToInherit);
   bool RecvGetCsp(RefPtr<nsIContentSecurityPolicy>* aCsp);
   bool RecvSetCsp(nsIContentSecurityPolicy* aCsp);
   bool RecvGetStateData(ClonedMessageData* aData);

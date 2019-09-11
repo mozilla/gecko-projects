@@ -11290,10 +11290,10 @@ nsresult nsDocShell::UpdateURLAndHistory(Document* aDocument, nsIURI* aNewURI,
 
     // Since we're not changing which page we have loaded, pass
     // true for aCloneChildren.
-    rv = AddToSessionHistory(
-        aNewURI, nullptr,
-        aDocument->NodePrincipal(),  // triggeringPrincipal
-        nullptr, nullptr, csp, true, getter_AddRefs(newSHEntry));
+    rv = AddToSessionHistory(aNewURI, nullptr,
+                             aDocument->NodePrincipal(),  // triggeringPrincipal
+                             nullptr, nullptr, csp, true,
+                             getter_AddRefs(newSHEntry));
     NS_ENSURE_SUCCESS(rv, rv);
 
     NS_ENSURE_TRUE(newSHEntry, NS_ERROR_FAILURE);
@@ -11642,9 +11642,9 @@ nsresult nsDocShell::AddToSessionHistory(
                 mContentTypeHint,     // Content-type
                 triggeringPrincipal,  // Channel or provided principal
                 principalToInherit, storagePrincipalToInherit, csp, HistoryID(),
-                mDynamicallyCreated, originalURI, resultPrincipalURI, loadReplace,
-                referrerInfo, srcdoc, srcdocEntry, baseURI, saveLayoutState,
-                expired);
+                mDynamicallyCreated, originalURI, resultPrincipalURI,
+                loadReplace, referrerInfo, srcdoc, srcdocEntry, baseURI,
+                saveLayoutState, expired);
 
   if (root == static_cast<nsIDocShellTreeItem*>(this) && mSessionHistory) {
     // If we need to clone our children onto the new session
@@ -11751,7 +11751,8 @@ nsresult nsDocShell::LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType) {
       // Ensure that we have a triggeringPrincipal.  Otherwise javascript:
       // URIs will pick it up from the about:blank page we just loaded,
       // and we don't really want even that in this case.
-      nsCOMPtr<nsIPrincipal> principal = NullPrincipal::CreateWithInheritedAttributes(this);
+      nsCOMPtr<nsIPrincipal> principal =
+          NullPrincipal::CreateWithInheritedAttributes(this);
       loadState->SetTriggeringPrincipal(principal);
     }
   }

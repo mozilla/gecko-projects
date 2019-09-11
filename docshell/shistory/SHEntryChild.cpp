@@ -682,8 +682,9 @@ SHEntryChild::GetStoragePrincipalToInherit(
 NS_IMETHODIMP
 SHEntryChild::SetStoragePrincipalToInherit(
     nsIPrincipal* aStoragePrincipalToInherit) {
-  return SendSetStoragePrincipalToInherit(aStoragePrincipalToInherit) ? NS_OK
-                                                               : NS_ERROR_FAILURE;
+  return SendSetStoragePrincipalToInherit(aStoragePrincipalToInherit)
+             ? NS_OK
+             : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP

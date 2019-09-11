@@ -272,7 +272,7 @@ bool SHEntryParent::RecvGetStoragePrincipalToInherit(
 bool SHEntryParent::RecvSetStoragePrincipalToInherit(
     nsIPrincipal* aStoragePrincipalToInherit) {
   DebugOnly<nsresult> rv =
-    mEntry->SetStoragePrincipalToInherit(aStoragePrincipalToInherit);
+      mEntry->SetStoragePrincipalToInherit(aStoragePrincipalToInherit);
   MOZ_ASSERT(NS_SUCCEEDED(rv), "Didn't expect this to fail.");
   return true;
 }

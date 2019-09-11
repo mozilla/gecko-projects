@@ -106,7 +106,7 @@ class nsLegacySHEntry final : public nsSHEntry {
       nsIURI* aURI, const nsAString& aTitle, nsIInputStream* aInputStream,
       uint32_t aCacheKey, const nsACString& aContentType,
       nsIPrincipal* aTriggeringPrincipal, nsIPrincipal* aPrincipalToInherit,
-      nsIPrincipal *aStoragePrincipalToInherit, nsIContentSecurityPolicy* aCsp,
+      nsIPrincipal* aStoragePrincipalToInherit, nsIContentSecurityPolicy* aCsp,
       const nsID& aDocshellID, bool aDynamicCreation, nsIURI* aOriginalURI,
       nsIURI* aResultPrincipalURI, bool aLoadReplace,
       nsIReferrerInfo* aReferrerInfo, const nsAString& aSrcdocData,
