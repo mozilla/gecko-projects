@@ -53,6 +53,88 @@ BOOL PathGetSiblingFilePath(LPWSTR destinationBuffer, LPCWSTR siblingFilePath,
 }
 
 /**
+ * Obtains the path of the directory used to write the status and log files
+ * when the elevated.
+ *
+ * @param  destBuf
+ *         A buffer of size MAX_PATH + 1 to store the result.
+ * @return TRUE if successful
+ */
+BOOL GetSecureLogDirPath(LPWSTR destBuf) {
+  PWSTR progFilesX86;
+  if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX86, KF_FLAG_CREATE,
+                                  nullptr, &progFilesX86))) {
+    return FALSE;
+  }
+  if (wcslen(progFilesX86) > MAX_PATH) {
+    CoTaskMemFree(progFilesX86);
+    return FALSE;
+  }
+  wcsncpy(destBuf, progFilesX86, MAX_PATH);
+  CoTaskMemFree(progFilesX86);
+
+  if (!PathAppendSafe(destBuf, SERVICE_INSTALL_DIR)) {
+    return FALSE;
+  }
+
+  // Create the Maintenance Service directory in case it doesn't exist.
+  int rv = _wmkdir(destBuf);
+  if (rv && errno != EEXIST) {
+    return FALSE;
+  }
+
+  if (!PathAppendSafe(destBuf, SECURE_UPDATE_LOG_DIR)) {
+    return FALSE;
+  }
+
+  // Create the secure update logs directory in case it doesn't exist.
+  rv = _wmkdir(destBuf);
+  if (rv && errno != EEXIST) {
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+/**
+ * Obtains the update directory name.
+ *
+ * @param  destBuf
+ *         A buffer of size MAX_PATH + 1 to store the result.
+ * @param  patchDirPath
+ *         The path to the update patch directory.
+ * @return TRUE if successful
+ */
+BOOL GetUpdateDirectoryName(LPWSTR destBuf, LPCWSTR patchDirPath) {
+  // The patch directory path must end with updates\0 for updates applied when
+  // the updater is elevated or when the updater is launched using the
+  // maintenance service.
+  size_t fullPathLen = wcslen(patchDirPath);
+  size_t relPathLen = wcslen(PATCH_DIR_PATH);
+  if (relPathLen > fullPathLen) {
+    return FALSE;
+  }
+
+  if (_wcsnicmp(patchDirPath + fullPathLen - relPathLen, PATCH_DIR_PATH,
+                relPathLen) != 0) {
+    return FALSE;
+  }
+
+  wcsncpy(destBuf, patchDirPath, MAX_PATH);
+  if (!PathRemoveFileSpecW(destBuf)) {
+    return FALSE;
+  }
+
+  if (!PathRemoveFileSpecW(destBuf)) {
+    return FALSE;
+  }
+
+  PathStripPathW(destBuf);
+
+  return TRUE;
+}
+
+/**
  * Starts the upgrade process for update of the service if it is
  * already installed.
  *
@@ -241,18 +323,39 @@ LaunchServiceSoftwareUpdateCommand(int argc, LPCWSTR* argv) {
 }
 
 /**
- * Sets update.status to a specific failure code
+ * Writes a specific failure code for the update status to a file in the Windows
+ * system Temp directory. The file name is based off of the update directory
+ * name.
  *
- * @param  updateDirPath   The path of the update directory
- * @param  errorCode       Error code to set
+ * @param  patchDirPath
+ *         The path of the update patch directory.
+ * @param  errorCode
+ *         Error code to set
  *
  * @return TRUE if successful
  */
-BOOL WriteStatusFailure(LPCWSTR updateDirPath, int errorCode) {
+BOOL WriteStatusFailure(LPCWSTR patchDirPath, int errorCode) {
+  WCHAR secureLogDirPath[MAX_PATH + 1] = {L'\0'};
+  if (!GetSecureLogDirPath(secureLogDirPath)) {
+    return FALSE;
+  }
+
+  WCHAR updateDirName[MAX_PATH + 1] = {L'\0'};
+  if (!GetUpdateDirectoryName(updateDirName, patchDirPath)) {
+    return FALSE;
+  }
+
+  WCHAR filename[MAX_PATH + 1] = {L'\0'};
+  int len = swprintf(filename, sizeof(filename) / sizeof(filename[0]),
+                     SECURE_STATUS_FILE_FMT, updateDirName);
+  if (len == -1 || len > MAX_PATH) {
+    return FALSE;
+  }
+
   // The temp file is not removed on failure since there is client code that
   // will remove it.
   WCHAR tmpUpdateStatusFilePath[MAX_PATH + 1] = {L'\0'};
-  if (!GetUUIDTempFilePath(updateDirPath, L"svc", tmpUpdateStatusFilePath)) {
+  if (!GetUUIDTempFilePath(secureLogDirPath, L"svc", tmpUpdateStatusFilePath)) {
     return FALSE;
   }
 
@@ -274,8 +377,8 @@ BOOL WriteStatusFailure(LPCWSTR updateDirPath, int errorCode) {
   }
 
   WCHAR updateStatusFilePath[MAX_PATH + 1] = {L'\0'};
-  wcsncpy(updateStatusFilePath, updateDirPath, MAX_PATH);
-  if (!PathAppendSafe(updateStatusFilePath, L"update.status")) {
+  wcsncpy(updateStatusFilePath, secureLogDirPath, MAX_PATH);
+  if (!PathAppendSafe(updateStatusFilePath, filename)) {
     return FALSE;
   }
 

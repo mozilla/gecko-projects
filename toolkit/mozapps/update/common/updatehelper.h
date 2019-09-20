@@ -5,6 +5,7 @@
 BOOL StartServiceUpdate(LPCWSTR installDir);
 DWORD LaunchServiceSoftwareUpdateCommand(int argc, LPCWSTR* argv);
 BOOL WriteStatusFailure(LPCWSTR updateDirPath, int errorCode);
+BOOL WriteStatusFailure(LPCWSTR updateDirPath, LPCWSTR fileName, int errorCode);
 DWORD WaitForServiceStop(LPCWSTR serviceName, DWORD maxWaitSeconds);
 DWORD WaitForProcessExit(LPCWSTR filename, DWORD maxSeconds);
 DWORD IsProcessRunning(LPCWSTR filename);
@@ -12,6 +13,18 @@ BOOL DoesFallbackKeyExist();
 BOOL IsLocalFile(LPCWSTR file, BOOL& isLocal);
 DWORD StartServiceCommand(int argc, LPCWSTR* argv);
 BOOL IsUnpromptedElevation(BOOL& isUnpromptedElevation);
+BOOL GetSecureLogDirPath(LPWSTR destBuf);
+BOOL GetUpdateDirectoryName(LPWSTR destBuf, LPCWSTR patchDirPath);
+
+#define SERVICE_INSTALL_DIR L"Mozilla Maintenance Service"
+#define SECURE_UPDATE_LOG_DIR L"UpdateLogs"
+#define PATCH_DIR_PATH L"\\updates\\0"
+// The following format is used when writing the update status and update log
+// files to the Windows system Temp directory so they will appear in one group
+// and the files associated with a specific installation will appear next to
+// each other.
+#define SECURE_STATUS_FILE_FMT L"%s.status"
+#define SECURE_LOG_FILE_FMT L"%s.log"
 
 #define SVC_NAME L"MozillaMaintenance"
 
