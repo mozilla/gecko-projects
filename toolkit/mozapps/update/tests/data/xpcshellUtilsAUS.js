@@ -1505,6 +1505,29 @@ function getMaintSvcDir() {
 }
 
 /**
+ * Reads the current update operation/state in the status file in the patch
+ * directory including the error code if it is present.
+ *
+ * @return The status value.
+ */
+function readWinTempStatusFile() {
+  if (AppConstants.platform != "win") {
+    throw new Error("Windows only function called by a different platform!");
+  }
+
+  const CSIDL_WINDOWS = 0x24;
+  let file = getSpecialFolderDir(CSIDL_WINDOWS);
+  file.append("MozTemp");
+  file.append("moz-" + gTestID + ".status");
+
+  if (!file.exists()) {
+    debugDump("update status file does not exists! Path: " + file.path);
+    return STATE_NONE;
+  }
+  return readFile(file).split("\n")[0];
+}
+
+/**
  * Get the nsIFile for a Windows special folder determined by the CSIDL
  * passed.
  *
@@ -1967,7 +1990,7 @@ function runUpdate(
   let status = readStatusFile();
   if (
     (!gIsServiceTest && process.exitValue != aExpectedExitValue) ||
-    status != aExpectedStatus
+    (status != aExpectedStatus && !gIsServiceTest && !isInvalidArgTest)
   ) {
     if (process.exitValue != aExpectedExitValue) {
       logTestInfo(
@@ -1986,6 +2009,12 @@ function runUpdate(
       );
     }
     logUpdateLog(FILE_LAST_UPDATE_LOG);
+  }
+
+  if (gIsServiceTest && isInvalidArgTest) {
+    if (readWinTempStatusFile() != STATE_NONE) {
+      status = readWinTempStatusFile();
+    }
   }
 
   if (!gIsServiceTest) {

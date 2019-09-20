@@ -53,6 +53,72 @@ BOOL PathGetSiblingFilePath(LPWSTR destinationBuffer, LPCWSTR siblingFilePath,
 }
 
 /**
+ * Obtains the path of the MozTemp directory in the Windows directory. The
+ * Windows Temp directory isn't used because Users don't have read access.
+ *
+ * @param  destBuf
+ *         A buffer of size MAX_PATH + 1 to store the result.
+ * @return TRUE if successful
+ */
+BOOL GetWindowsTempFilePath(LPWSTR destBuf) {
+  uint32_t len = GetSystemWindowsDirectoryW(destBuf, MAX_PATH);
+  if (len == 0 || len > MAX_PATH) {
+    return FALSE;
+  }
+
+  if (!PathAppendSafe(destBuf, L"MozTemp")) {
+    return FALSE;
+  }
+
+  // Create the Windows Temp directory in case it doesn't exist so updates
+  // don't fail.
+  int rv = _wmkdir(destBuf);
+  if (rv && errno != EEXIST) {
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+/**
+ * Obtains the update directory name.
+ *
+ * @param  destBuf
+ *         A buffer of size MAX_PATH + 1 to store the result.
+ * @param  patchDirPath
+ *         The path to the update patch directory.
+ * @return TRUE if successful
+ */
+BOOL GetUpdateDirectoryName(LPWSTR destBuf, LPCWSTR patchDirPath) {
+  // The patch directory path must end with updates\0 for updates applied when
+  // the updater is elevated or when the updater is launched using the
+  // maintenance service.
+  size_t fullPathLen = wcslen(patchDirPath);
+  size_t relPathLen = wcslen(PATCH_DIR_PATH);
+  if (relPathLen > fullPathLen) {
+    return FALSE;
+  }
+
+  if (_wcsnicmp(patchDirPath + fullPathLen - relPathLen, PATCH_DIR_PATH,
+                relPathLen) != 0) {
+    return FALSE;
+  }
+
+  wcsncpy(destBuf, patchDirPath, MAX_PATH);
+  if (!PathRemoveFileSpecW(destBuf)) {
+    return FALSE;
+  }
+
+  if (!PathRemoveFileSpecW(destBuf)) {
+    return FALSE;
+  }
+
+  PathStripPathW(destBuf);
+
+  return TRUE;
+}
+
+/**
  * Starts the upgrade process for update of the service if it is
  * already installed.
  *
@@ -241,18 +307,39 @@ LaunchServiceSoftwareUpdateCommand(int argc, LPCWSTR* argv) {
 }
 
 /**
- * Sets update.status to a specific failure code
+ * Writes a specific failure code for the update status to a file in the Windows
+ * system Temp directory. The file name is based off of the update directory
+ * name.
  *
- * @param  updateDirPath   The path of the update directory
- * @param  errorCode       Error code to set
+ * @param  patchDirPath
+ *         The path of the update patch directory.
+ * @param  errorCode
+ *         Error code to set
  *
  * @return TRUE if successful
  */
-BOOL WriteStatusFailure(LPCWSTR updateDirPath, int errorCode) {
+BOOL WriteStatusFailure(LPCWSTR patchDirPath, int errorCode) {
+  WCHAR winTempDirPath[MAX_PATH + 1] = {L'\0'};
+  if (!GetWindowsTempFilePath(winTempDirPath)) {
+    return FALSE;
+  }
+
+  WCHAR updateDirName[MAX_PATH + 1] = {L'\0'};
+  if (!GetUpdateDirectoryName(updateDirName, patchDirPath)) {
+    return FALSE;
+  }
+
+  WCHAR filename[MAX_PATH + 1] = {L'\0'};
+  int len = swprintf(filename, sizeof(filename) / sizeof(filename[0]),
+                     SECURE_STATUS_FILE_FMT, updateDirName);
+  if (len == -1 || len > MAX_PATH) {
+    return FALSE;
+  }
+
   // The temp file is not removed on failure since there is client code that
   // will remove it.
   WCHAR tmpUpdateStatusFilePath[MAX_PATH + 1] = {L'\0'};
-  if (!GetUUIDTempFilePath(updateDirPath, L"svc", tmpUpdateStatusFilePath)) {
+  if (!GetUUIDTempFilePath(winTempDirPath, L"svc", tmpUpdateStatusFilePath)) {
     return FALSE;
   }
 
@@ -274,8 +361,8 @@ BOOL WriteStatusFailure(LPCWSTR updateDirPath, int errorCode) {
   }
 
   WCHAR updateStatusFilePath[MAX_PATH + 1] = {L'\0'};
-  wcsncpy(updateStatusFilePath, updateDirPath, MAX_PATH);
-  if (!PathAppendSafe(updateStatusFilePath, L"update.status")) {
+  wcsncpy(updateStatusFilePath, winTempDirPath, MAX_PATH);
+  if (!PathAppendSafe(updateStatusFilePath, filename)) {
     return FALSE;
   }
 
