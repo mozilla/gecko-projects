@@ -30,10 +30,15 @@ async function run_test() {
   checkPostUpdateRunningFile(false);
   checkFilesAfterUpdateFailure(getApplyDirFile);
   await waitForUpdateXMLFiles();
-  // The service test doesn't check the update manager since the service is
-  // launched directly because the updater would catch this failure. This test
-  // verifies that launching the service directly won't try to apply an update.
-  if (!gIsServiceTest) {
+  if (gIsServiceTest) {
+    checkUpdateManager(
+      STATE_NONE,
+      false,
+      STATE_FAILED,
+      SERVICE_INVALID_INSTALL_DIR_PATH_ERROR,
+      1
+    );
+  } else {
     checkUpdateManager(
       STATE_NONE,
       false,
