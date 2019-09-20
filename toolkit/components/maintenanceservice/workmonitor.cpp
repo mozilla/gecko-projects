@@ -32,6 +32,8 @@ using mozilla::UniquePtr;
 #include "updatererrors.h"
 #include "commonupdatedir.h"
 
+#define PATCH_DIR_PATH L"\\updates\\0"
+
 // Wait 15 minutes for an update operation to run at most.
 // Updates usually take less than a minute so this seems like a
 // significantly large and safe amount of time to wait.
