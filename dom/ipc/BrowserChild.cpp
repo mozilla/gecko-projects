@@ -598,7 +598,7 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent,
     mPuppetWidget->CreateCompositor();
   }
 
-#if !defined(MOZ_WIDGET_ANDROID)
+#if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_THUNDERBIRD) && !defined(MOZ_SUITE)
   mSessionStoreListener = new TabListener(docShell, nullptr);
   rv = mSessionStoreListener->Init();
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1057,14 +1057,13 @@ BrowserChild::~BrowserChild() {
   mozilla::DropJSObjects(this);
 }
 
-mozilla::ipc::IPCResult BrowserChild::RecvSkipBrowsingContextDetach() {
-  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
-  if (!docShell) {
-    return IPC_OK();
+mozilla::ipc::IPCResult BrowserChild::RecvSkipBrowsingContextDetach(
+    SkipBrowsingContextDetachResolver&& aResolve) {
+  if (nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation())) {
+    RefPtr<nsDocShell> docshell = nsDocShell::Cast(docShell);
+    docshell->SkipBrowsingContextDetach();
   }
-  RefPtr<nsDocShell> docshell = nsDocShell::Cast(docShell);
-  MOZ_ASSERT(docshell);
-  docshell->SkipBrowsingContextDetach();
+  aResolve(true);
   return IPC_OK();
 }
 
@@ -1277,9 +1276,11 @@ mozilla::ipc::IPCResult BrowserChild::RecvSizeModeChanged(
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvChildToParentMatrix(
-    const mozilla::Maybe<mozilla::gfx::Matrix4x4>& aMatrix) {
+    const mozilla::Maybe<mozilla::gfx::Matrix4x4>& aMatrix,
+    const mozilla::ScreenRect& aRemoteDocumentRect) {
   mChildToParentConversionMatrix =
       LayoutDeviceToLayoutDeviceMatrix4x4::FromUnknownMatrix(aMatrix);
+  mRemoteDocumentRect = aRemoteDocumentRect;
   return IPC_OK();
 }
 
@@ -1535,6 +1536,10 @@ BrowserChild::GetChildToParentConversionMatrix() const {
   }
   LayoutDevicePoint offset(GetChromeOffset());
   return LayoutDeviceToLayoutDeviceMatrix4x4::Translation(offset);
+}
+
+ScreenRect BrowserChild::GetRemoteDocumentRect() const {
+  return mRemoteDocumentRect;
 }
 
 void BrowserChild::FlushAllCoalescedMouseData() {
@@ -3857,9 +3862,17 @@ bool BrowserChild::UpdateSessionStore(uint32_t aFlushId, bool aIsFinal) {
     inputs = store->GetInputs(idVals, xPathVals);
   }
 
+  nsTArray<nsCString> origins;
+  nsTArray<nsString> keys, values;
+  bool isFullStorage = false;
+  if (store->IsStorageUpdated()) {
+    isFullStorage = store->GetAndClearStorageChanges(origins, keys, values);
+  }
+
   Unused << SendSessionStoreUpdate(
       docShellCaps, privatedMode, positions, positionDescendants, inputs,
-      idVals, xPathVals, aFlushId, aIsFinal, mSessionStoreListener->GetEpoch());
+      idVals, xPathVals, origins, keys, values, isFullStorage, aFlushId,
+      aIsFinal, mSessionStoreListener->GetEpoch());
   return true;
 }
 

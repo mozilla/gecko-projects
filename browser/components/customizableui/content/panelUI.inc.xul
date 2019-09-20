@@ -251,9 +251,13 @@
         <toolbaritem>
           <toolbarbutton id="appMenu-protection-report-button"
                class="subviewbutton subviewbutton-iconic"
-               oncommand="gProtectionsHandler.openProtections();">
+               oncommand="gProtectionsHandler.openProtections();"
+               data-l10n-id="appmenuitem-protection-report-tooltip">
             <image id="appMenu-protection-report-icon" class="toolbarbutton-icon"/>
-            <label id="appMenu-protection-report-text" class="toolbarbutton-text">Privacy Protections</label>
+            <label id="appMenu-protection-report-text"
+                   class="toolbarbutton-text"
+                   data-l10n-id="appmenuitem-protection-report-title">
+            </label>
           </toolbarbutton>
         </toolbaritem>
         <toolbarseparator id="appMenu-tp-separator"/>
@@ -543,9 +547,21 @@
                 class="PanelUI-remotetabs-instruction-box"
                 hidden="true">
             <image class="fxaSyncIllustration"/>
-            <label class="PanelUI-remotetabs-instruction-label">&appMenuRemoteTabs.notsignedin.label;</label>
+            <label class="PanelUI-remotetabs-instruction-label">&appMenuRemoteTabs.welcome.label;</label>
             <toolbarbutton class="PanelUI-remotetabs-button"
-                           label="&appMenuRemoteTabs.signin.label;"
+                           label="&appMenuRemoteTabs.signintosync.label;"
+                           oncommand="gSync.openPrefs('synced-tabs');"/>
+          </vbox>
+          <!-- When Sync is not enabled -->
+          <vbox id="PanelUI-remotetabs-syncdisabled"
+                flex="1"
+                align="center"
+                class="PanelUI-remotetabs-instruction-box"
+                hidden="true">
+            <image class="fxaSyncIllustration"/>
+            <label class="PanelUI-remotetabs-instruction-label">&appMenuRemoteTabs.welcome.label;</label>
+            <toolbarbutton class="PanelUI-remotetabs-button"
+                           label="&appMenuRemoteTabs.turnonsync.label;"
                            oncommand="gSync.openPrefs('synced-tabs');"/>
           </vbox>
           <!-- When Sync needs re-authentication -->
@@ -555,9 +571,9 @@
                 class="PanelUI-remotetabs-instruction-box"
                 hidden="true">
             <image class="fxaSyncIllustrationIssue"/>
-            <label class="PanelUI-remotetabs-instruction-label">&appMenuRemoteTabs.notsignedin.label;</label>
+            <label class="PanelUI-remotetabs-instruction-label">&appMenuRemoteTabs.welcome.label;</label>
             <toolbarbutton class="PanelUI-remotetabs-button"
-                           label="&appMenuRemoteTabs.signin.label;"
+                           label="&appMenuRemoteTabs.signintosync.label;"
                            oncommand="gSync.openPrefs('synced-tabs');"/>
           </vbox>
           <!-- When Sync needs verification -->
@@ -660,7 +676,7 @@
                        oncommand="PanelUI.showSubView('PanelUI-characterEncodingView', this)"/>
         <toolbarbutton id="appMenu-workoffline-button"
                        class="subviewbutton"
-                       label="&goOfflineCmd.label;"
+                       data-l10n-id="menu-file-go-offline"
                        type="checkbox"
                        command="cmd_toggleOfflineStatus"/>
       </vbox>
@@ -785,7 +801,7 @@
         <toolbarbutton id="PanelUI-fxa-menu-sendtab-not-configured-button"
                        class="PanelUI-fxa-signin-button"
                        label="&fxa.menu.signin.label;"
-                       oncommand="gSync.openFxAEmailFirstPageFromFxaMenu(this);"/>
+                       oncommand="gSync.openPrefsFromFxaMenu('send_tab', this);"/>
       </vbox>
     </panelview>
     <panelview id="PanelUI-fxa-menu-sendtab-no-devices" flex="1" class="PanelUI-subView">
@@ -856,7 +872,7 @@
 </panel>
 
 <panel id="extension-notification-panel"
-       class="panel-no-padding"
+       class="popup-notification-panel panel-no-padding"
        role="group"
        type="arrow"
        hidden="true"

@@ -33,9 +33,11 @@ using namespace js;
 using namespace js::jit;
 using namespace js::wasm;
 
+using mozilla::AsChars;
 using mozilla::CheckedInt;
 using mozilla::CheckedInt32;
-using mozilla::IsValidUtf8;
+using mozilla::IsUtf8;
+using mozilla::MakeSpan;
 using mozilla::Unused;
 
 // Decoder implementation.
@@ -1544,7 +1546,7 @@ static UniqueChars DecodeName(Decoder& d) {
     return nullptr;
   }
 
-  if (!IsValidUtf8(bytes, numBytes)) {
+  if (!IsUtf8(AsChars(MakeSpan(bytes, numBytes)))) {
     return nullptr;
   }
 
@@ -2901,10 +2903,11 @@ bool wasm::Validate(JSContext* cx, const ShareableBytes& bytecode,
 
   bool gcTypesConfigured = HasGcSupport(cx);
   bool refTypesConfigured = HasReftypesSupport(cx);
+  bool hugeMemory = false;
 
-  CompilerEnvironment compilerEnv(CompileMode::Once, Tier::Optimized,
-                                  OptimizedBackend::Ion, DebugEnabled::False,
-                                  refTypesConfigured, gcTypesConfigured);
+  CompilerEnvironment compilerEnv(
+      CompileMode::Once, Tier::Optimized, OptimizedBackend::Ion,
+      DebugEnabled::False, refTypesConfigured, gcTypesConfigured, hugeMemory);
   ModuleEnvironment env(
       &compilerEnv,
       cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled()

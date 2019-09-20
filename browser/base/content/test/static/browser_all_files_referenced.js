@@ -224,12 +224,6 @@ var whitelist = [
   { file: "chrome://browser/content/aboutlogins/aboutLoginsUtils.js" },
 ];
 
-if (!AppConstants.MOZ_NEW_NOTIFICATION_STORE) {
-  // kvstore.jsm wraps the API in nsIKeyValue.idl in a more ergonomic API
-  // It landed in bug 1490496, and we expect to start using it shortly.
-  whitelist.push({ file: "resource://gre/modules/kvstore.jsm" });
-}
-
 whitelist = new Set(
   whitelist
     .filter(
@@ -277,6 +271,11 @@ if (!isDevtools) {
   ]) {
     whitelist.add("resource://services-sync/engines/" + module);
   }
+}
+
+if (!AppConstants.NIGHTLY_BUILD && !isDevtools) {
+  // Bug 1532703 - only used in HTML-based about:config
+  whitelist.add("chrome://browser/skin/toggle.svg");
 }
 
 if (AppConstants.MOZ_CODE_COVERAGE) {

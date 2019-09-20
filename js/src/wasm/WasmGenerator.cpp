@@ -1075,6 +1075,7 @@ SharedMetadata ModuleGenerator::finishMetadata(const Bytes& bytecode) {
   metadata_->nameCustomSectionIndex = env_->nameCustomSectionIndex;
   metadata_->moduleName = env_->moduleName;
   metadata_->funcNames = std::move(env_->funcNames);
+  metadata_->omitsBoundsChecks = env_->hugeMemoryEnabled();
 
   // Copy over additional debug information.
 
@@ -1209,7 +1210,7 @@ SharedModule ModuleGenerator::finishModule(
       return nullptr;
     }
 
-    masm_.executableCopy(debugUnlinkedCode->begin(), /* flushICache = */ false);
+    masm_.executableCopy(debugUnlinkedCode->begin());
 
     debugLinkData = std::move(linkData_);
     debugBytecode = &bytecode;

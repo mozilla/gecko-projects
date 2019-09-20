@@ -2808,29 +2808,14 @@ void js::gc::StoreBuffer::MonoTypeBuffer<T>::trace(TenuringTracer& mover) {
   }
 }
 
-template <typename T>
-template <typename CellType>
-void js::gc::StoreBuffer::MonoTypeBuffer<T>::traceTyped(TenuringTracer& mover) {
-  mozilla::ReentrancyGuard g(*owner_);
-  MOZ_ASSERT(owner_->isEnabled());
-  if (last_) {
-    last_.template traceTyped<CellType>(mover);
-  }
-  for (typename StoreSet::Range r = stores_.all(); !r.empty(); r.popFront()) {
-    r.front().template traceTyped<CellType>(mover);
-  }
-}
-
 namespace js {
 namespace gc {
 template void StoreBuffer::MonoTypeBuffer<StoreBuffer::ValueEdge>::trace(
     TenuringTracer&);
 template void StoreBuffer::MonoTypeBuffer<StoreBuffer::SlotsEdge>::trace(
     TenuringTracer&);
-template void StoreBuffer::MonoTypeBuffer<StoreBuffer::CellPtrEdge>::traceTyped<
-    JSString>(TenuringTracer&);
-template void StoreBuffer::MonoTypeBuffer<StoreBuffer::CellPtrEdge>::traceTyped<
-    JSObject>(TenuringTracer&);
+template struct StoreBuffer::MonoTypeBuffer<StoreBuffer::StringPtrEdge>;
+template struct StoreBuffer::MonoTypeBuffer<StoreBuffer::ObjectPtrEdge>;
 }  // namespace gc
 }  // namespace js
 
@@ -2930,23 +2915,20 @@ void js::gc::StoreBuffer::WholeCellBuffer::trace(TenuringTracer& mover) {
   head_ = nullptr;
 }
 
-template <typename CellType>
-void js::gc::StoreBuffer::CellPtrEdge::traceTyped(TenuringTracer& mover) const {
+template <typename T>
+void js::gc::StoreBuffer::CellPtrEdge<T>::trace(TenuringTracer& mover) const {
+  static_assert(std::is_base_of<Cell, T>::value, "T must be a Cell type");
+  static_assert(!std::is_base_of<TenuredCell, T>::value,
+                "T must not be a tenured Cell type");
+
   if (!*edge) {
     return;
   }
 
   MOZ_ASSERT(IsCellPointerValid(*edge));
+  MOZ_ASSERT((*edge)->getTraceKind() == JS::MapTypeToTraceKind<T>::kind);
 
-#ifdef DEBUG
-  auto traceKind = (*edge)->getTraceKind();
-  MOZ_ASSERT(traceKind == JS::TraceKind::Object ||
-             traceKind == JS::TraceKind::String);
-  MOZ_ASSERT(traceKind == JS::MapTypeToTraceKind<CellType>::kind,
-             "traceKind mismatch.");
-#endif
-
-  mover.traverse(reinterpret_cast<CellType**>(edge));
+  mover.traverse(edge);
 }
 
 void js::gc::StoreBuffer::ValueEdge::trace(TenuringTracer& mover) const {
@@ -3631,16 +3613,16 @@ bool UnmarkGrayTracer::onChild(const JS::GCCellPtr& thing) {
 
   TenuredCell& tenured = cell->asTenured();
 
-  // If the cell is in a zone that we're currently marking gray, then it's
-  // possible that it is currently white but will end up gray. To handle this
-  // case, push any cells in zones that are currently being marked onto the
-  // mark stack and they will eventually get marked black.
+  // If the cell is in a zone that we're currently marking, then it's possible
+  // that it is currently white but will end up gray. To handle this case, push
+  // any cells in zones that are currently being marked onto the mark stack and
+  // they will eventually get marked black.
   Zone* zone = tenured.zone();
-  if (zone->isGCMarkingBlackAndGray()) {
+  if (zone->isGCMarking()) {
     if (!cell->isMarkedBlack()) {
       Cell* tmp = cell;
-      TraceManuallyBarrieredGenericPointerEdge(zone->barrierTracer(), &tmp,
-                                               "read barrier");
+      JSTracer* trc = &runtime()->gc.marker;
+      TraceManuallyBarrieredGenericPointerEdge(trc, &tmp, "read barrier");
       MOZ_ASSERT(tmp == cell);
       unmarkedAny = true;
     }

@@ -12,6 +12,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/EndianUtils.h"
 #include "mozilla/MathAlgorithms.h"
+#include "mozilla/Utf8.h"
 #include "mozilla/net/WebSocketEventService.h"
 
 #include "nsIURI.h"
@@ -1654,7 +1655,7 @@ nsresult WebSocketChannel::ProcessInput(uint8_t* buffer, uint32_t count) {
         }
 
         // Section 8.1 says to fail connection if invalid utf-8 in text message
-        if (!IsUTF8(utf8Data)) {
+        if (!IsUtf8(utf8Data)) {
           LOG(("WebSocketChannel:: text frame invalid utf-8\n"));
           return NS_ERROR_CANNOT_CONVERT_DATA;
         }
@@ -1703,7 +1704,7 @@ nsresult WebSocketChannel::ProcessInput(uint8_t* buffer, uint32_t count) {
             // (which are non-conformant to send) with u+fffd,
             // but secteam feels that silently rewriting messages is
             // inappropriate - so we will fail the connection instead.
-            if (!IsUTF8(mServerCloseReason)) {
+            if (!IsUtf8(mServerCloseReason)) {
               LOG(("WebSocketChannel:: close frame invalid utf-8\n"));
               return NS_ERROR_CANNOT_CONVERT_DATA;
             }
@@ -3658,6 +3659,24 @@ WebSocketChannel::OnTransportAvailable(nsISocketTransport* aTransport,
   return NS_OK;
 }
 
+NS_IMETHODIMP
+WebSocketChannel::OnUpgradeFailed(nsresult aErrorCode) {
+  MOZ_ASSERT(OnSocketThread(), "not on socket thread");
+
+  LOG(("WebSocketChannel::OnUpgradeFailed() %p [aErrorCode %" PRIx32 "]", this,
+       static_cast<uint32_t>(aErrorCode)));
+
+  if (mStopped) {
+    LOG(("WebSocketChannel::OnUpgradeFailed: Already stopped"));
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(!mRecvdHttpUpgradeTransport, "OTA already called");
+
+  AbortSession(aErrorCode);
+  return NS_OK;
+}
+
 // nsIRequestObserver (from nsIStreamListener)
 
 NS_IMETHODIMP
@@ -3777,8 +3796,14 @@ WebSocketChannel::OnStartRequest(nsIRequest* aRequest) {
            "HTTP response header Sec-WebSocket-Accept check failed\n"));
       LOG(("WebSocketChannel::OnStartRequest: Expected %s received %s\n",
            mHashedSecret.get(), respAccept.get()));
-      AbortSession(NS_ERROR_ILLEGAL_VALUE);
-      return NS_ERROR_ILLEGAL_VALUE;
+#ifdef FUZZING
+      if (NS_FAILED(rv) || respAccept.IsEmpty()) {
+#endif
+        AbortSession(NS_ERROR_ILLEGAL_VALUE);
+        return NS_ERROR_ILLEGAL_VALUE;
+#ifdef FUZZING
+      }
+#endif
     }
   }
 

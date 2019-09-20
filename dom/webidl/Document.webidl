@@ -36,8 +36,10 @@ dictionary ElementCreationOptions {
 };
 
 /* https://dom.spec.whatwg.org/#interface-document */
-[Constructor]
 interface Document : Node {
+  [Throws]
+  constructor();
+
   [Throws]
   readonly attribute DOMImplementation implementation;
   [Pure, Throws, BinaryName="documentURIFromJS", NeedsCallerType]
@@ -320,6 +322,11 @@ partial interface Document {
   FailedCertSecurityInfo getFailedCertSecurityInfo();
 };
 
+partial interface Document {
+  [Func="Document::CallerIsTrustedAboutNetError", Throws]
+  NetErrorInfo getNetErrorInfo();
+};
+
 // https://w3c.github.io/page-visibility/#extensions-to-the-document-interface
 partial interface Document {
   readonly attribute boolean hidden;
@@ -555,7 +562,7 @@ partial interface Document {
   [ChromeOnly] readonly attribute boolean userHasInteracted;
 };
 
-// Extension to give chrome JS the ability to simulate activate the docuement
+// Extension to give chrome JS the ability to simulate activate the document
 // by user gesture.
 partial interface Document {
   [ChromeOnly]
@@ -563,6 +570,10 @@ partial interface Document {
   // For testing only.
   [ChromeOnly]
   void clearUserGestureActivation();
+  [ChromeOnly]
+  readonly attribute boolean hasBeenUserGestureActivated;
+  [ChromeOnly]
+  readonly attribute boolean hasValidTransientUserGestureActivation;
 };
 
 // Extension to give chrome JS the ability to set an event handler which is
@@ -606,8 +617,8 @@ partial interface Document {
 };
 
 Document implements XPathEvaluator;
-Document implements GlobalEventHandlers;
-Document implements DocumentAndElementEventHandlers;
+Document includes GlobalEventHandlers;
+Document includes DocumentAndElementEventHandlers;
 Document implements TouchEventHandlers;
 Document implements ParentNode;
 Document implements OnErrorEventHandlerForNodes;

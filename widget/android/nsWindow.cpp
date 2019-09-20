@@ -517,18 +517,15 @@ class nsWindow::NPZCSupport final
         // to do?
         WheelDeltaAdjustmentStrategy::eNone);
 
-    ScrollableLayerGuid guid;
-    uint64_t blockId;
-    nsEventStatus status =
-        controller->InputBridge()->ReceiveInputEvent(input, &guid, &blockId);
+    APZEventResult result = controller->InputBridge()->ReceiveInputEvent(input);
 
-    if (status == nsEventStatus_eConsumeNoDefault) {
+    if (result.mStatus == nsEventStatus_eConsumeNoDefault) {
       return true;
     }
 
-    PostInputEvent([input, guid, blockId, status](nsWindow* window) {
+    PostInputEvent([input, result](nsWindow* window) {
       WidgetWheelEvent wheelEvent = input.ToWidgetWheelEvent(window);
-      window->ProcessUntransformedAPZEvent(&wheelEvent, guid, blockId, status);
+      window->ProcessUntransformedAPZEvent(&wheelEvent, result);
     });
 
     return true;
@@ -632,18 +629,15 @@ class nsWindow::NPZCSupport final
                      ConvertButtons(buttons), origin, aTime,
                      GetEventTimeStamp(aTime), GetModifiers(aMetaState));
 
-    ScrollableLayerGuid guid;
-    uint64_t blockId;
-    nsEventStatus status =
-        controller->InputBridge()->ReceiveInputEvent(input, &guid, &blockId);
+    APZEventResult result = controller->InputBridge()->ReceiveInputEvent(input);
 
-    if (status == nsEventStatus_eConsumeNoDefault) {
+    if (result.mStatus == nsEventStatus_eConsumeNoDefault) {
       return true;
     }
 
-    PostInputEvent([input, guid, blockId, status](nsWindow* window) {
+    PostInputEvent([input, result](nsWindow* window) {
       WidgetMouseEvent mouseEvent = input.ToWidgetMouseEvent(window);
-      window->ProcessUntransformedAPZEvent(&mouseEvent, guid, blockId, status);
+      window->ProcessUntransformedAPZEvent(&mouseEvent, result);
     });
 
     return true;
@@ -750,19 +744,16 @@ class nsWindow::NPZCSupport final
           ScreenSize::FromUnknownSize(radius), orien, pressure[i]));
     }
 
-    ScrollableLayerGuid guid;
-    uint64_t blockId;
-    nsEventStatus status =
-        controller->InputBridge()->ReceiveInputEvent(input, &guid, &blockId);
+    APZEventResult result = controller->InputBridge()->ReceiveInputEvent(input);
 
-    if (status == nsEventStatus_eConsumeNoDefault) {
+    if (result.mStatus == nsEventStatus_eConsumeNoDefault) {
       return true;
     }
 
     // Dispatch APZ input event on Gecko thread.
-    PostInputEvent([input, guid, blockId, status](nsWindow* window) {
+    PostInputEvent([input, result](nsWindow* window) {
       WidgetTouchEvent touchEvent = input.ToWidgetTouchEvent(window);
-      window->ProcessUntransformedAPZEvent(&touchEvent, guid, blockId, status);
+      window->ProcessUntransformedAPZEvent(&touchEvent, result);
       window->DispatchHitTest(touchEvent);
     });
     return true;
@@ -856,27 +847,25 @@ class nsWindow::LayerViewSupport final
         return;
       }
 
-      if (LockedWindowPtr window{mWindow}) {
-        uiThread->Dispatch(NS_NewRunnableFunction(
-            "LayerViewSupport::OnDetach",
-            [compositor, disposer = RefPtr<Runnable>(aDisposer),
-             results = &mCapturePixelsResults, lock = &window] {
-              if (lock) {
-                while (!results->empty()) {
-                  auto aResult = java::GeckoResult::LocalRef(results->front());
-                  if (aResult) {
-                    aResult->CompleteExceptionally(
-                        java::sdk::IllegalStateException::New(
-                            "The compositor has detached from the session")
-                            .Cast<jni::Throwable>());
-                    results->pop();
-                  }
+      uiThread->Dispatch(NS_NewRunnableFunction(
+          "LayerViewSupport::OnDetach",
+          [compositor, disposer = RefPtr<Runnable>(aDisposer),
+           results = &mCapturePixelsResults, window = &mWindow] {
+            if (LockedWindowPtr lock{*window}) {
+              while (!results->empty()) {
+                auto aResult = java::GeckoResult::LocalRef(results->front());
+                if (aResult) {
+                  aResult->CompleteExceptionally(
+                      java::sdk::IllegalStateException::New(
+                          "The compositor has detached from the session")
+                          .Cast<jni::Throwable>());
+                  results->pop();
                 }
-                compositor->OnCompositorDetached();
-                disposer->Run();
               }
-            }));
-      }
+              compositor->OnCompositorDetached();
+              disposer->Run();
+            }
+          }));
     }
   }
 
@@ -1147,6 +1136,9 @@ class nsWindow::LayerViewSupport final
     java::GeckoResult::LocalRef aResult = nullptr;
     if (LockedWindowPtr window{mWindow}) {
       aResult = java::GeckoResult::LocalRef(mCapturePixelsResults.front());
+      if (aResult) {
+        mCapturePixelsResults.pop();
+      }
     }
     if (aResult) {
       auto pixels = mozilla::jni::ByteBuffer::New(FlipScreenPixels(aMem, aSize),
@@ -1155,10 +1147,6 @@ class nsWindow::LayerViewSupport final
           aSize.width, aSize.height, java::sdk::Config::ARGB_8888());
       bitmap->CopyPixelsFromBuffer(pixels);
       aResult->Complete(bitmap);
-
-      if (LockedWindowPtr window{mWindow}) {
-        mCapturePixelsResults.pop();
-      }
     }
 
     // Pixels have been copied, so Dealloc Shmem

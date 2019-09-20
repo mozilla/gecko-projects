@@ -14,10 +14,12 @@ XPCOMUtils.defineLazyGlobalGetters(this, ["fetch"]);
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   SearchUtils: "resource://gre/modules/SearchUtils.jsm",
+  Services: "resource://gre/modules/Services.jsm",
 });
 
 const EXT_SEARCH_PREFIX = "resource://search-extensions/";
 const ENGINE_CONFIG_URL = `${EXT_SEARCH_PREFIX}engines.json`;
+const USER_LOCALE = "$USER_LOCALE";
 
 function log(str) {
   SearchUtils.log("SearchEngineSelector " + str + "\n");
@@ -45,17 +47,15 @@ class SearchEngineSelector {
   }
 
   /**
-   * @param {string} region - Users region.
    * @param {string} locale - Users locale.
+   * @param {string} region - Users region.
    * @returns {object} result - An object with "engines" field, a sorted
    *   list of engines and optionally "privateDefault" indicating the
    *   name of the engine which should be the default in private.
    */
-  fetchEngineConfiguration(region, locale) {
-    if (!region || !locale) {
-      throw new Error("region and locale parameters required");
-    }
+  fetchEngineConfiguration(locale, region = "default") {
     log(`fetchEngineConfiguration ${region}:${locale}`);
+    let cohort = Services.prefs.getCharPref("browser.search.cohort", null);
     let engines = [];
     for (let config of this.configuration) {
       const appliesTo = config.appliesTo || [];
@@ -66,6 +66,9 @@ class SearchEngineSelector {
         let excluded =
           "excluded" in section &&
           this._isInSection(region, locale, section.excluded);
+        if ("cohort" in section && cohort != section.cohort) {
+          return false;
+        }
         return included && !excluded;
       });
 
@@ -77,18 +80,54 @@ class SearchEngineSelector {
         for (let section of applies) {
           this._copyObject(baseConfig, section);
         }
+
+        if ("webExtensionLocales" in baseConfig) {
+          baseConfig.webExtensionLocales = baseConfig.webExtensionLocales.map(
+            val => (val == USER_LOCALE ? locale : val)
+          );
+        }
+
         engines.push(baseConfig);
       }
     }
 
-    engines.sort(this._sort.bind(this));
+    let defaultEngine;
+    let privateEngine;
 
-    let privateEngine = engines.find(engine => {
-      return (
+    function shouldPrefer(setting, hasCurrentDefault, currentDefaultSetting) {
+      if (
+        setting == "yes" &&
+        (!hasCurrentDefault || currentDefaultSetting == "yes-if-no-other")
+      ) {
+        return true;
+      }
+      return setting == "yes-if-no-other" && !hasCurrentDefault;
+    }
+
+    for (const engine of engines) {
+      if (
+        "default" in engine &&
+        shouldPrefer(
+          engine.default,
+          !!defaultEngine,
+          defaultEngine && defaultEngine.default
+        )
+      ) {
+        defaultEngine = engine;
+      }
+      if (
         "defaultPrivate" in engine &&
-        ["yes", "yes-if-no-other"].includes(engine.defaultPrivate)
-      );
-    });
+        shouldPrefer(
+          engine.defaultPrivate,
+          !!privateEngine,
+          privateEngine && privateEngine.defaultPrivate
+        )
+      ) {
+        privateEngine = engine;
+      }
+    }
+
+    engines.sort(this._sort.bind(this, defaultEngine, privateEngine));
 
     let result = { engines };
 
@@ -96,11 +135,17 @@ class SearchEngineSelector {
       result.privateDefault = privateEngine.engineName;
     }
 
+    if (SearchUtils.loggingEnabled) {
+      log("fetchEngineConfiguration: " + JSON.stringify(result));
+    }
     return result;
   }
 
-  _sort(a, b) {
-    return this._sortIndex(b) - this._sortIndex(a);
+  _sort(defaultEngine, privateEngine, a, b) {
+    return (
+      this._sortIndex(b, defaultEngine, privateEngine) -
+      this._sortIndex(a, defaultEngine, privateEngine)
+    );
   }
 
   /**
@@ -108,24 +153,21 @@ class SearchEngineSelector {
    * engines are ordered correctly.
    * @param {object} obj
    *   Object representing the engine configation.
+   * @param {object} defaultEngine
+   *   The default engine, for comparison to obj.
+   * @param {object} privateEngine
+   *   The private engine, for comparison to obj.
    * @returns {integer}
    *  Number indicating how this engine should be sorted.
    */
-  _sortIndex(obj) {
-    let orderHint = obj.orderHint || 0;
-    if (this._isDefault(obj)) {
-      orderHint += 50000;
+  _sortIndex(obj, defaultEngine, privateEngine) {
+    if (obj == defaultEngine) {
+      return Number.MAX_SAFE_INTEGER;
     }
-    if ("privateDefault" in obj && obj.default === "yes") {
-      orderHint += 40000;
+    if (obj == privateEngine) {
+      return Number.MAX_SAFE_INTEGER - 1;
     }
-    if ("default" in obj && obj.default === "yes-if-no-other") {
-      orderHint += 20000;
-    }
-    if ("privateDefault" in obj && obj.default === "yes-if-no-other") {
-      orderHint += 10000;
-    }
-    return orderHint;
+    return obj.orderHint || 0;
   }
 
   /**

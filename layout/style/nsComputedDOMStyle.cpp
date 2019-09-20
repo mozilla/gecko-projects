@@ -44,6 +44,7 @@
 #include "mozilla/IntegerRange.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/RestyleManager.h"
+#include "mozilla/ViewportFrame.h"
 #include "imgIRequest.h"
 #include "nsLayoutUtils.h"
 #include "nsCSSKeywords.h"
@@ -899,17 +900,10 @@ bool nsComputedDOMStyle::NeedsToFlushLayout(nsCSSPropertyID aPropID) const {
     case eCSSProperty_margin_right:
     case eCSSProperty_margin_bottom:
     case eCSSProperty_margin_left: {
-      // NOTE(emilio): We could do the commented out thing below, but it is not
-      // clear whether it's correct. It does change behavior and cause a new
-      // test to _pass_. But it's unclear whether it is the right thing, see:
-      //
-      // https://github.com/w3c/csswg-drafts/issues/2328
-      //
-      // Bug 1570759 tracks maybe changing the behavior here.
-      //
-      // Side side = SideForPaddingOrMarginOrInsetProperty(aPropID);
-      // return !style->StyleMargin()->mMargin.Get(side).ConvertsToLength();
-      return true;
+      // NOTE(emilio): This is dubious, but matches other browsers.
+      // See https://github.com/w3c/csswg-drafts/issues/2328
+      Side side = SideForPaddingOrMarginOrInsetProperty(aPropID);
+      return !style->StyleMargin()->mMargin.Get(side).ConvertsToLength();
     }
     default:
       return false;
@@ -1849,52 +1843,38 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetLineHeight() {
 }
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetTextDecoration() {
+  auto getPropertyValue = [&](nsCSSPropertyID aID) {
+    RefPtr<nsROCSSPrimitiveValue> value = new nsROCSSPrimitiveValue;
+    nsAutoString string;
+    Servo_GetPropertyValue(mComputedStyle, aID, &string);
+    value->SetString(string);
+    return value.forget();
+  };
+
   const nsStyleTextReset* textReset = StyleTextReset();
-
-  bool isInitialStyle =
-      textReset->mTextDecorationStyle == NS_STYLE_TEXT_DECORATION_STYLE_SOLID;
-  const mozilla::StyleColor& color = textReset->mTextDecorationColor;
-
-  RefPtr<nsROCSSPrimitiveValue> textDecorationLine = new nsROCSSPrimitiveValue;
-
-  {
-    nsAutoString decorationLine;
-    Servo_GetPropertyValue(mComputedStyle, eCSSProperty_text_decoration_line,
-                           &decorationLine);
-    textDecorationLine->SetString(decorationLine);
-  }
-
-  if (isInitialStyle && color.IsCurrentColor()) {
-    return textDecorationLine.forget();
-  }
-
   RefPtr<nsDOMCSSValueList> valueList = GetROCSSValueList(false);
 
-  valueList->AppendCSSValue(textDecorationLine.forget());
-  if (!isInitialStyle) {
-    valueList->AppendCSSValue(DoGetTextDecorationStyle());
+  if (textReset->mTextDecorationLine != StyleTextDecorationLine_NONE) {
+    valueList->AppendCSSValue(
+        getPropertyValue(eCSSProperty_text_decoration_line));
   }
-  if (!color.IsCurrentColor()) {
-    valueList->AppendCSSValue(DoGetTextDecorationColor());
+
+  if (textReset->mTextDecorationStyle != NS_STYLE_TEXT_DECORATION_STYLE_SOLID) {
+    valueList->AppendCSSValue(
+        getPropertyValue(eCSSProperty_text_decoration_style));
+  }
+
+  // The resolved color shouldn't be currentColor, so we always serialize it.
+  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+  SetValueFromComplexColor(val, StyleTextReset()->mTextDecorationColor);
+  valueList->AppendCSSValue(val.forget());
+
+  if (!textReset->mTextDecorationThickness.IsAuto()) {
+    valueList->AppendCSSValue(
+        getPropertyValue(eCSSProperty_text_decoration_thickness));
   }
 
   return valueList.forget();
-}
-
-already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetTextDecorationColor() {
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  SetValueFromComplexColor(val, StyleTextReset()->mTextDecorationColor);
-  return val.forget();
-}
-
-already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetTextDecorationStyle() {
-  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-
-  val->SetIdent(
-      nsCSSProps::ValueToKeywordEnum(StyleTextReset()->mTextDecorationStyle,
-                                     nsCSSProps::kTextDecorationStyleKTable));
-
-  return val.forget();
 }
 
 already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetHeight() {
@@ -2095,6 +2075,13 @@ nscoord nsComputedDOMStyle::GetUsedAbsoluteOffset(mozilla::Side aSide) {
     if (scrollFrame) {
       scrollbarSizes = scrollFrame->GetActualScrollbarSizes();
     }
+
+    // The viewport size might have been expanded by the visual viewport or
+    // the minimum-scale size.
+    const ViewportFrame* viewportFrame = do_QueryFrame(container);
+    MOZ_ASSERT(viewportFrame);
+    containerRect.SizeTo(
+        viewportFrame->AdjustViewportSizeForFixedPosition(containerRect));
   } else if (container->IsGridContainerFrame() &&
              (mOuterFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW))) {
     containerRect = nsGridContainerFrame::GridItemCB(mOuterFrame);
@@ -2226,7 +2213,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetMarginWidthFor(
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
 
   auto& margin = StyleMargin()->mMargin.Get(aSide);
-  if (!mInnerFrame) {
+  if (!mInnerFrame || margin.ConvertsToLength()) {
     SetValueToLengthPercentageOrAuto(val, margin, false);
   } else {
     AssertFlushedPendingReflows();
@@ -2346,8 +2333,6 @@ nscoord nsComputedDOMStyle::StyleCoordToNSCoord(
                            "percentage base value overflowed to become "
                            "negative for a property "
                            "that disallows negative values");
-      MOZ_ASSERT(aCoord.was_calc || (aCoord.HasPercent() && percentageBase < 0),
-                 "parser should have rejected value");
       result = 0;
     }
     return result;

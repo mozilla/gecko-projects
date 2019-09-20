@@ -105,7 +105,7 @@ bool JSContext::init(ContextKind kind) {
   // Skip most of the initialization if this thread will not be running JS.
   if (kind == ContextKind::MainThread) {
     TlsContext.set(this);
-    currentThread_ = ThisThread::GetId();
+    currentThread_ = ThreadId::ThisThreadId();
     if (!regexpStack.ref().init()) {
       return false;
     }
@@ -1244,7 +1244,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
 #ifdef JS_TRACE_LOGGING
       traceLogger(nullptr),
 #endif
-      autoFlushICache_(this, nullptr),
       dtoaState(this, nullptr),
       suppressGC(this, 0),
       gcSweeping(this, false),
@@ -1294,12 +1293,11 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       internalJobQueue(this),
       canSkipEnqueuingJobs(this, false),
       promiseRejectionTrackerCallback(this, nullptr),
-      promiseRejectionTrackerCallbackData(this, nullptr)
+      promiseRejectionTrackerCallbackData(this, nullptr),
 #ifdef JS_STRUCTURED_SPEW
-      ,
-      structuredSpewer_()
+      structuredSpewer_(),
 #endif
-{
+      insideDebuggerEvaluationWithOnNativeCallHook(this, nullptr) {
   MOZ_ASSERT(static_cast<JS::RootingContext*>(this) ==
              JS::RootingContext::get(this));
 }
@@ -1337,11 +1335,11 @@ JSContext::~JSContext() {
 void JSContext::setHelperThread(AutoLockHelperThreadState& locked) {
   MOZ_ASSERT_IF(!JSRuntime::hasLiveRuntimes(), !TlsContext.get());
   TlsContext.set(this);
-  currentThread_ = ThisThread::GetId();
+  currentThread_ = ThreadId::ThisThreadId();
 }
 
 void JSContext::clearHelperThread(AutoLockHelperThreadState& locked) {
-  currentThread_ = Thread::Id();
+  currentThread_ = ThreadId();
   TlsContext.set(nullptr);
 }
 
@@ -1354,6 +1352,54 @@ void JSContext::setRuntime(JSRuntime* rt) {
   MOZ_ASSERT(!asyncStackForNewActivations_.ref().initialized());
 
   runtime_ = rt;
+}
+
+static bool IsOutOfMemoryException(JSContext* cx, const Value& v) {
+  return v == StringValue(cx->names().outOfMemory);
+}
+
+void JSContext::setPendingException(HandleValue v, HandleSavedFrame stack) {
+#if defined(NIGHTLY_BUILD)
+  do {
+    // Do not intercept exceptions if we are already
+    // in the exception interceptor. That would lead
+    // to infinite recursion.
+    if (this->runtime()->errorInterception.isExecuting) {
+      break;
+    }
+
+    // Check whether we have an interceptor at all.
+    if (!this->runtime()->errorInterception.interceptor) {
+      break;
+    }
+
+    // Don't report OOM exceptions. The interceptor isn't interested in those
+    // and they can confuse the interceptor because OOM can be thrown when we
+    // are not in a realm (atom allocation, for example).
+    if (IsOutOfMemoryException(this, v)) {
+      break;
+    }
+
+    // Make sure that we do not call the interceptor from within
+    // the interceptor.
+    this->runtime()->errorInterception.isExecuting = true;
+
+    // The interceptor must be infallible.
+    const mozilla::DebugOnly<bool> wasExceptionPending =
+        this->isExceptionPending();
+    this->runtime()->errorInterception.interceptor->interceptError(this, v);
+    MOZ_ASSERT(wasExceptionPending == this->isExceptionPending());
+
+    this->runtime()->errorInterception.isExecuting = false;
+  } while (false);
+#endif  // defined(NIGHTLY_BUILD)
+
+  // overRecursed_ is set after the fact by ReportOverRecursed.
+  this->overRecursed_ = false;
+  this->throwing = true;
+  this->unwrappedException() = v;
+  this->unwrappedExceptionStack() = stack;
+  check(v);
 }
 
 static const size_t MAX_REPORTED_STACK_DEPTH = 1u << 7;
@@ -1396,7 +1442,7 @@ SavedFrame* JSContext::getPendingExceptionStack() {
 }
 
 bool JSContext::isThrowingOutOfMemory() {
-  return throwing && unwrappedException() == StringValue(names().outOfMemory);
+  return throwing && IsOutOfMemoryException(this, unwrappedException());
 }
 
 bool JSContext::isClosingGenerator() {

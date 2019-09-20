@@ -15,10 +15,16 @@ class Document;
 }  // namespace dom
 }  // namespace mozilla
 
+typedef mozilla::Pair<nsCString, mozilla::Maybe<nsString>> FilenameType;
+
 class nsContentSecurityUtils {
  public:
-#if defined(DEBUG) && !defined(ANDROID)
-  static void AssertAboutPageHasCSP(Document* aDocument);
+  static FilenameType FilenameToEvalType(const nsString& fileName);
+  static bool IsEvalAllowed(JSContext* cx, nsIPrincipal* aSubjectPrincipal,
+                            const nsAString& aScript);
+
+#if defined(DEBUG)
+  static void AssertAboutPageHasCSP(mozilla::dom::Document* aDocument);
 #endif
 };
 

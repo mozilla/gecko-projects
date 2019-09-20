@@ -27,10 +27,8 @@ class InactivePropertyHelper {
    * This file contains "rules" in the form of objects with the following
    * properties:
    * {
-   *   invalidProperties (see note):
+   *   invalidProperties:
    *     Array of CSS property names that are inactive if the rule matches.
-   *   validProperties (see note):
-   *     Array of CSS property names that are active if the rule matches.
    *   when:
    *     The rule itself, a JS function used to identify the conditions
    *     indicating whether a property is valid or not.
@@ -43,8 +41,6 @@ class InactivePropertyHelper {
    *   numFixProps:
    *     The number of properties we suggest in the fixId string.
    * }
-   *
-   * NOTE: validProperties and invalidProperties are mutually exclusive.
    *
    * If you add a new rule, also add a test for it in:
    * server/tests/mochitest/test_inspector-inactive-property-helper.html
@@ -244,8 +240,6 @@ class InactivePropertyHelper {
         isRuleConcerned =
           validator.invalidProperties === "*" ||
           validator.invalidProperties.includes(property);
-      } else if (validator.validProperties) {
-        isRuleConcerned = !validator.validProperties.includes(property);
       }
 
       if (!isRuleConcerned) {
@@ -455,10 +449,22 @@ class InactivePropertyHelper {
   }
 
   /**
-   * Check if the current node is a non-replaced inline box.
+   * Returns whether this element uses CSS layout.
+   */
+  get hasCssLayout() {
+    return !this.isSvg && !this.isMathMl;
+  }
+
+  /**
+   * Check if the current node is a non-replaced CSS inline box.
    */
   get nonReplacedInlineBox() {
-    return this.nonReplaced && this.style && this.style.display === "inline";
+    return (
+      this.hasCssLayout &&
+      this.nonReplaced &&
+      this.style &&
+      this.style.display === "inline"
+    );
   }
 
   /**
@@ -524,6 +530,20 @@ class InactivePropertyHelper {
   }
 
   /**
+   * Return whether the node is a MathML element.
+   */
+  get isMathMl() {
+    return this.node.namespaceURI === "http://www.w3.org/1998/Math/MathML";
+  }
+
+  /**
+   * Return whether the node is an SVG element.
+   */
+  get isSvg() {
+    return this.node.namespaceURI === "http://www.w3.org/2000/svg";
+  }
+
+  /**
    * Check if the current node's nodeName matches a value inside the value array.
    *
    * @param {Array} values
@@ -575,6 +595,11 @@ class InactivePropertyHelper {
   }
 
   getParentGridElement(node) {
+    // The documentElement can't be a grid item, only a container, so bail out.
+    if (node.flattenedTreeParentNode === node.ownerDocument) {
+      return null;
+    }
+
     if (node.nodeType === node.ELEMENT_NODE) {
       const display = this.style ? this.style.display : null;
 

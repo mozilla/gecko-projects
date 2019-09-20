@@ -126,6 +126,7 @@ Preferences.addAll([
   { id: "signon.rememberSignons", type: "bool" },
   { id: "signon.generation.enabled", type: "bool" },
   { id: "signon.autofillForms", type: "bool" },
+  { id: "signon.management.page.breach-alerts.enabled", type: "bool" },
 
   // Buttons
   { id: "pref.privacy.disable_button.view_passwords", type: "bool" },
@@ -418,6 +419,10 @@ var gPrivacyPane = {
       gPrivacyPane.networkCookieBehaviorReadPrefs.bind(gPrivacyPane)
     );
 
+    setEventListener("a11yPrivacyCheckbox", "command", function() {
+      return gPrivacyPane.updateA11yPrefs(this.checked);
+    });
+
     setEventListener(
       "trackingProtectionExceptions",
       "command",
@@ -501,6 +506,14 @@ var gPrivacyPane = {
 
     this._initPasswordGenerationUI();
     this._initMasterPasswordUI();
+    // set up the breach alerts Learn More link with the correct URL
+    const breachAlertsLearnMoreLink = document.getElementById(
+      "breachAlertsLearnMoreLink"
+    );
+    const breachAlertsLearnMoreUrl =
+      Services.urlFormatter.formatURLPref("app.support.baseURL") +
+      "lockwise-alerts";
+    breachAlertsLearnMoreLink.setAttribute("href", breachAlertsLearnMoreUrl);
 
     this._initSafeBrowsing();
 

@@ -121,15 +121,13 @@ bool APZSampler::SampleAnimations(const LayerMetricsWrapper& aLayer,
 LayerToParentLayerMatrix4x4 APZSampler::ComputeTransformForScrollThumb(
     const LayerToParentLayerMatrix4x4& aCurrentTransform,
     const LayerMetricsWrapper& aContent, const ScrollbarData& aThumbData,
-    bool aScrollbarIsDescendant,
     AsyncTransformComponentMatrix* aOutClipTransform) {
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   AssertOnSamplerThread();
 
   return mApz->ComputeTransformForScrollThumb(
       aCurrentTransform, aContent.GetTransform(), aContent.GetApzc(),
-      aContent.Metrics(), aThumbData, aScrollbarIsDescendant,
-      aOutClipTransform);
+      aContent.Metrics(), aThumbData, aOutClipTransform);
 }
 
 CSSRect APZSampler::GetCurrentAsyncLayoutViewport(
@@ -160,16 +158,6 @@ AsyncTransform APZSampler::GetCurrentAsyncTransform(
   MOZ_ASSERT(aLayer.GetApzc());
   return aLayer.GetApzc()->GetCurrentAsyncTransform(
       AsyncPanZoomController::eForCompositing, aComponents);
-}
-
-AsyncTransform APZSampler::GetCurrentAsyncTransformForFixedAdjustment(
-    const LayerMetricsWrapper& aLayer) {
-  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
-  AssertOnSamplerThread();
-
-  MOZ_ASSERT(aLayer.GetApzc());
-  return aLayer.GetApzc()->GetCurrentAsyncTransformForFixedAdjustment(
-      AsyncPanZoomController::eForCompositing);
 }
 
 AsyncTransformComponentMatrix APZSampler::GetOverscrollTransform(

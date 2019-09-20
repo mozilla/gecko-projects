@@ -33,6 +33,7 @@ const {
         FOCUSABLE_POSITIVE_TABINDEX,
         INTERACTIVE_NO_ACTION,
         INTERACTIVE_NOT_FOCUSABLE,
+        MOUSE_INTERACTIVE_ONLY,
         NO_FOCUS_VISIBLE,
       },
     },
@@ -43,6 +44,9 @@ const {
 // Specified by the author CSS rule type.
 const STYLE_RULE = 1;
 
+// Accessible action for showing long description.
+const CLICK_ACTION = "click";
+
 /**
  * Focus specific pseudo classes that the keyboard audit simulates to determine
  * focus styling.
@@ -50,29 +54,37 @@ const STYLE_RULE = 1;
 const FOCUS_PSEUDO_CLASS = ":focus";
 const MOZ_FOCUSRING_PSEUDO_CLASS = ":-moz-focusring";
 
-const INTERACTIVE_ROLES = new Set([
+const KEYBOARD_FOCUSABLE_ROLES = new Set([
   Ci.nsIAccessibleRole.ROLE_BUTTONMENU,
   Ci.nsIAccessibleRole.ROLE_CHECKBUTTON,
-  Ci.nsIAccessibleRole.ROLE_CHECK_MENU_ITEM,
-  Ci.nsIAccessibleRole.ROLE_CHECK_RICH_OPTION,
   Ci.nsIAccessibleRole.ROLE_COMBOBOX,
-  Ci.nsIAccessibleRole.ROLE_COMBOBOX_OPTION,
   Ci.nsIAccessibleRole.ROLE_EDITCOMBOBOX,
   Ci.nsIAccessibleRole.ROLE_ENTRY,
   Ci.nsIAccessibleRole.ROLE_LINK,
   Ci.nsIAccessibleRole.ROLE_LISTBOX,
-  Ci.nsIAccessibleRole.ROLE_MENUITEM,
-  Ci.nsIAccessibleRole.ROLE_OPTION,
-  Ci.nsIAccessibleRole.ROLE_PAGETAB,
   Ci.nsIAccessibleRole.ROLE_PASSWORD_TEXT,
   Ci.nsIAccessibleRole.ROLE_PUSHBUTTON,
   Ci.nsIAccessibleRole.ROLE_RADIOBUTTON,
-  Ci.nsIAccessibleRole.ROLE_RADIO_MENU_ITEM,
-  Ci.nsIAccessibleRole.ROLE_RICH_OPTION,
   Ci.nsIAccessibleRole.ROLE_SLIDER,
   Ci.nsIAccessibleRole.ROLE_SPINBUTTON,
+  Ci.nsIAccessibleRole.ROLE_SUMMARY,
   Ci.nsIAccessibleRole.ROLE_SWITCH,
   Ci.nsIAccessibleRole.ROLE_TOGGLE_BUTTON,
+]);
+
+const INTERACTIVE_ROLES = new Set([
+  ...KEYBOARD_FOCUSABLE_ROLES,
+  Ci.nsIAccessibleRole.ROLE_CHECK_MENU_ITEM,
+  Ci.nsIAccessibleRole.ROLE_CHECK_RICH_OPTION,
+  Ci.nsIAccessibleRole.ROLE_COMBOBOX_OPTION,
+  Ci.nsIAccessibleRole.ROLE_MENUITEM,
+  Ci.nsIAccessibleRole.ROLE_OPTION,
+  Ci.nsIAccessibleRole.ROLE_OUTLINE,
+  Ci.nsIAccessibleRole.ROLE_OUTLINEITEM,
+  Ci.nsIAccessibleRole.ROLE_PAGETAB,
+  Ci.nsIAccessibleRole.ROLE_PARENT_MENUITEM,
+  Ci.nsIAccessibleRole.ROLE_RADIO_MENU_ITEM,
+  Ci.nsIAccessibleRole.ROLE_RICH_OPTION,
 ]);
 
 /**
@@ -290,7 +302,7 @@ function interactiveRule(accessible) {
  *         when enabled, audit report object otherwise.
  */
 function focusableRule(accessible) {
-  if (!INTERACTIVE_ROLES.has(accessible.role)) {
+  if (!KEYBOARD_FOCUSABLE_ROLES.has(accessible.role)) {
     return null;
   }
 
@@ -310,6 +322,21 @@ function focusableRule(accessible) {
     return null;
   }
 
+  let ariaRoles;
+  try {
+    ariaRoles = accessible.attributes.getStringProperty("xml-roles");
+  } catch (e) {
+    // No xml-roles. nsPersistentProperties throws if the attribute for a key
+    // is not found.
+  }
+  if (
+    ariaRoles &&
+    (ariaRoles.includes("combobox") || ariaRoles.includes("listbox"))
+  ) {
+    // Do not force ARIA combobox or listbox to be focusable.
+    return null;
+  }
+
   return { score: FAIL, issue: INTERACTIVE_NOT_FOCUSABLE };
 }
 
@@ -326,7 +353,11 @@ function focusableRule(accessible) {
  *         interactive role, audit report object otherwise.
  */
 function semanticsRule(accessible) {
-  if (INTERACTIVE_ROLES.has(accessible.role)) {
+  if (
+    INTERACTIVE_ROLES.has(accessible.role) ||
+    // Visible listboxes will have focusable state when inside comboboxes.
+    accessible.role === Ci.nsIAccessibleRole.ROLE_COMBOBOX_LIST
+  ) {
     return null;
   }
 
@@ -334,6 +365,30 @@ function semanticsRule(accessible) {
   accessible.getState(state, {});
   if (state.value & Ci.nsIAccessibleStates.STATE_FOCUSABLE) {
     return { score: WARNING, issue: FOCUSABLE_NO_SEMANTICS };
+  }
+
+  if (
+    // Ignore text leafs.
+    accessible.role === Ci.nsIAccessibleRole.ROLE_TEXT_LEAF ||
+    // Ignore accessibles with no accessible actions.
+    accessible.actionCount === 0 ||
+    // Ignore labels that have a label for relation with their target because
+    // they are clickable.
+    (accessible.role === Ci.nsIAccessibleRole.ROLE_LABEL &&
+      accessible.getRelationByType(Ci.nsIAccessibleRelation.RELATION_LABEL_FOR)
+        .targetsCount > 0) ||
+    // Ignore images that are inside an anchor (have linked state).
+    (accessible.role === Ci.nsIAccessibleRole.ROLE_GRAPHIC &&
+      state.value & Ci.nsIAccessibleStates.STATE_LINKED)
+  ) {
+    return null;
+  }
+
+  // Ignore anything but a click action in the list of actions.
+  for (let i = 0; i < accessible.actionCount; i++) {
+    if (accessible.getActionName(i) === CLICK_ACTION) {
+      return { score: FAIL, issue: MOUSE_INTERACTIVE_ONLY };
+    }
   }
 
   return null;

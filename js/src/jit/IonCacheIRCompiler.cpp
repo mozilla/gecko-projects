@@ -551,16 +551,12 @@ JitCode* IonCacheIRCompiler::compile() {
     }
   }
 
-  Linker linker(masm, "getStubCode");
+  Linker linker(masm);
   Rooted<JitCode*> newStubCode(cx_, linker.newCode(cx_, CodeKind::Ion));
   if (!newStubCode) {
     cx_->recoverFromOutOfMemory();
     return nullptr;
   }
-
-  rejoinOffset_.fixup(&masm);
-  CodeLocationJump rejoinJump(newStubCode, rejoinOffset_);
-  PatchJump(rejoinJump, ic_->rejoinLabel());
 
   for (CodeOffset offset : nextCodeOffsets_) {
     Assembler::PatchDataWithValueCheck(CodeLocationLabel(newStubCode, offset),
@@ -2171,9 +2167,8 @@ bool IonCacheIRCompiler::emitReturnFromIC() {
     allocator.restoreInputState(masm);
   }
 
-  RepatchLabel rejoin;
-  rejoinOffset_ = masm.jumpWithPatch(&rejoin);
-  masm.bind(&rejoin);
+  uint8_t* rejoinAddr = ic_->rejoinAddr(ionScript_);
+  masm.jump(ImmPtr(rejoinAddr));
   return true;
 }
 
@@ -2377,7 +2372,7 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
   }
 
   IonICStub* newStub =
-      new (newStubMem) IonICStub(fallbackLabel_.raw(), stubInfo);
+      new (newStubMem) IonICStub(fallbackAddr(ionScript), stubInfo);
   writer.copyStubData(newStub->stubDataStart());
 
   JitContext jctx(cx, nullptr);

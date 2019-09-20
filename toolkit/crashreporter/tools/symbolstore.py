@@ -840,19 +840,52 @@ class Dumper_Mac(Dumper):
             shutil.rmtree(dsymbundle)
         dsymutil = buildconfig.substs['DSYMUTIL']
         # dsymutil takes --arch=foo instead of -a foo like everything else
-        try:
-            cmd = ([dsymutil] +
-                   [a.replace('-a ', '--arch=') for a in self.archs if a] +
-                   [file])
-            print(' '.join(cmd), file=sys.stderr)
-            subprocess.check_call(cmd, stdout=open(os.devnull, 'w'))
-        except subprocess.CalledProcessError as e:
-            print('Error running dsymutil: %s' % str(e), file=sys.stderr)
-            raise
+        cmd = ([dsymutil] +
+               [a.replace('-a ', '--arch=') for a in self.archs if a] +
+               [file])
+        print(' '.join(cmd), file=sys.stderr)
 
+        dsymutil_proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE)
+        dsymout, dsymerr = dsymutil_proc.communicate()
+        if dsymutil_proc.returncode != 0:
+            raise RuntimeError('Error running dsymutil: %s' % dsymerr)
+
+        # Regular dsymutil won't produce a .dSYM for files without symbols.
         if not os.path.exists(dsymbundle):
-            # dsymutil won't produce a .dSYM for files without symbols
             print("No symbols found in file: %s" % (file,), file=sys.stderr)
+            return False
+
+        # llvm-dsymutil will produce a .dSYM for files without symbols or
+        # debug information, but only sometimes will it warn you about this.
+        # We don't want to run dump_syms on such bundles, because asserts
+        # will fire in debug mode and who knows what will happen in release.
+        #
+        # So we check for the error message and bail if it appears.  If it
+        # doesn't, we carefully check the bundled DWARF to see if dump_syms
+        # will be OK with it.
+        if 'warning: no debug symbols in' in dsymerr:
+            print(dsymerr, file=sys.stderr)
+            return False
+
+        contents_dir = os.path.join(dsymbundle, 'Contents', 'Resources', 'DWARF')
+        if not os.path.exists(contents_dir):
+            print("No DWARF information in .dSYM bundle %s" % (dsymbundle,),
+                  file=sys.stderr)
+            return False
+
+        files = os.listdir(contents_dir)
+        if len(files) != 1:
+            print("Unexpected files in .dSYM bundle %s" % (files,),
+                  file=sys.stderr)
+            return False
+
+        otool_out = subprocess.check_output([buildconfig.substs['OTOOL'],
+                                             '-l',
+                                             os.path.join(contents_dir, files[0])])
+        if 'sectname __debug_info' not in otool_out:
+            print("No symbols in .dSYM bundle %s" % (dsymbundle,),
+                  file=sys.stderr)
             return False
 
         elapsed = time.time() - t_start

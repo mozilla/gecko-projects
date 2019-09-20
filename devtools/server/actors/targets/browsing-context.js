@@ -33,10 +33,6 @@ const InspectorUtils = require("InspectorUtils");
 
 const EXTENSION_CONTENT_JSM = "resource://gre/modules/ExtensionContent.jsm";
 
-const { LocalizationHelper } = require("devtools/shared/l10n");
-const STRINGS_URI = "devtools/shared/locales/browsing-context.properties";
-const L10N = new LocalizationHelper(STRINGS_URI);
-
 const { ActorClassWithSpec, Actor, Pool } = require("devtools/shared/protocol");
 const {
   LazyPool,
@@ -286,6 +282,8 @@ const browsingContextTargetPrototype = {
       logInPage: true,
       // Supports requests related to rewinding.
       canRewind,
+      // Supports watchpoints in the server for Fx71+
+      watchpoints: true,
     };
 
     this._workerTargetActorList = null;
@@ -314,6 +312,16 @@ const browsingContextTargetPrototype = {
 
   get attached() {
     return !!this._attached;
+  },
+
+  /*
+   * Return a Debugger instance or create one if there is none yet
+   */
+  get dbg() {
+    if (!this._dbg) {
+      this._dbg = this.makeDebugger();
+    }
+    return this._dbg;
   },
 
   /**
@@ -1020,6 +1028,11 @@ const browsingContextTargetPrototype = {
       this._frameDescriptorActorPool = null;
     }
 
+    if (this._dbg) {
+      this._dbg.disable();
+      this._dbg = null;
+    }
+
     this._attached = false;
 
     this.emit("tabDetached");
@@ -1137,26 +1150,15 @@ const browsingContextTargetPrototype = {
         docShell.document,
         /* documentOnly = */ true
       );
-      const promises = [];
       for (const sheet of sheets) {
         if (InspectorUtils.hasRulesModifiedByCSSOM(sheet)) {
           continue;
         }
         // Reparse the sheet so that we see the existing errors.
-        promises.push(
-          getSheetText(sheet, this._consoleActor).then(text => {
-            InspectorUtils.parseStyleSheet(sheet, text, /* aUpdate = */ false);
-          })
-        );
-      }
-
-      Promise.all(promises).then(() => {
-        this.logInPage({
-          text: L10N.getStr("cssSheetsReparsedWarning"),
-          category: "CSS Parser",
-          flags: Ci.nsIScriptError.warningFlag,
+        getSheetText(sheet, this._consoleActor).then(text => {
+          InspectorUtils.parseStyleSheet(sheet, text, /* aUpdate = */ false);
         });
-      });
+      }
     }
 
     return {};

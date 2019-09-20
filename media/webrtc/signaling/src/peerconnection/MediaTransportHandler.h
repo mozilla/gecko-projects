@@ -71,7 +71,7 @@ class MediaTransportHandler {
 
   // We will probably be able to move the proxy lookup stuff into
   // this class once we move mtransport to its own process.
-  virtual void SetProxyServer(NrSocketProxyConfig&& aProxyConfig) = 0;
+  virtual void SetProxyConfig(NrSocketProxyConfig&& aProxyConfig) = 0;
 
   virtual void EnsureProvisionalTransport(const std::string& aTransportId,
                                           const std::string& aLocalUfrag,
@@ -86,6 +86,7 @@ class MediaTransportHandler {
   // change between Init (ie; when the PC is created) and StartIceGathering
   // (ie; when we set the local description).
   virtual void StartIceGathering(bool aDefaultRouteOnly,
+                                 bool aObfuscateHostAddresses,
                                  // TODO: It probably makes sense to look
                                  // this up internally
                                  const nsTArray<NrIceStunAddr>& aStunAddrs) = 0;

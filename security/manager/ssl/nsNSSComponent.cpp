@@ -683,9 +683,16 @@ nsNSSComponent::HasActiveSmartCards(bool* result) {
   AutoSECMODListReadLock secmodLock;
   SECMODModuleList* list = SECMOD_GetDefaultModuleList();
   while (list) {
-    if (SECMOD_HasRemovableSlots(list->module)) {
+    SECMODModule* module = list->module;
+    if (SECMOD_HasRemovableSlots(module)) {
       *result = true;
       return NS_OK;
+    }
+    for (int i = 0; i < module->slotCount; i++) {
+      if (!PK11_IsFriendly(module->slots[i])) {
+        *result = true;
+        return NS_OK;
+      }
     }
     list = list->next;
   }
@@ -2157,8 +2164,12 @@ already_AddRefed<SharedCertVerifier> GetDefaultCertVerifier() {
   if (!nssComponent) {
     return nullptr;
   }
+  nsresult rv = nssComponent->BlockUntilLoadableRootsLoaded();
+  if (NS_FAILED(rv)) {
+    return nullptr;
+  }
   RefPtr<SharedCertVerifier> result;
-  nsresult rv = nssComponent->GetDefaultCertVerifier(getter_AddRefs(result));
+  rv = nssComponent->GetDefaultCertVerifier(getter_AddRefs(result));
   if (NS_FAILED(rv)) {
     return nullptr;
   }

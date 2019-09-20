@@ -1,22 +1,17 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/**
- * This is a temporary workaround to
- * be resolved in bug 1539000.
- */
-ChromeUtils.import("resource://testing-common/PromiseTestUtils.jsm", this);
-PromiseTestUtils.whitelistRejectionsGlobally(
-  /Too many characters in placeable/
-);
+const PREF_MODIFY_BOOLEAN = "test.aboutconfig.modify.boolean";
+const PREF_MODIFY_NUMBER = "test.aboutconfig.modify.number";
+const PREF_MODIFY_STRING = "test.aboutconfig.modify.string";
 
 add_task(async function setup() {
   await SpecialPowers.pushPrefEnv({
     set: [
-      ["test.aboutconfig.modify.boolean", true],
-      ["test.aboutconfig.modify.number", 1337],
+      [PREF_MODIFY_BOOLEAN, true],
+      [PREF_MODIFY_NUMBER, 1337],
       [
-        "test.aboutconfig.modify.string",
+        PREF_MODIFY_STRING,
         "the answer to the life the universe and everything",
       ],
     ],
@@ -99,6 +94,49 @@ add_task(async function test_delete_user_pref() {
   }
 });
 
+add_task(async function test_click_type_label_multiple_forms() {
+  // This test displays the row to add a preference while other preferences are
+  // also displayed, and tries to select the type of the new preference by
+  // clicking the label next to the radio button. This should work even if the
+  // user has deleted a different preference, and multiple forms are displayed.
+  const PREF_TO_DELETE = "test.aboutconfig.modify.boolean";
+  const PREF_NEW_WHILE_DELETED = "test.aboutconfig.modify.";
+
+  await AboutConfigTest.withNewTab(async function() {
+    this.search(PREF_NEW_WHILE_DELETED);
+
+    // This preference will remain deleted during the test.
+    let existingRow = this.getRow(PREF_TO_DELETE);
+    existingRow.resetColumnButton.click();
+
+    let newRow = this.getRow(PREF_NEW_WHILE_DELETED);
+
+    for (let [radioIndex, expectedValue] of [[0, true], [1, 0], [2, ""]]) {
+      let radioLabels = newRow.element.querySelectorAll("label > span");
+      await this.document.l10n.translateElements(radioLabels);
+
+      // Even if this is the second form on the page, the click should select
+      // the radio button next to the label, not the one on the first form.
+      await BrowserTestUtils.synthesizeMouseAtCenter(
+        radioLabels[radioIndex],
+        {},
+        this.browser
+      );
+
+      // Adding the preference should set the default for the data type.
+      newRow.editColumnButton.click();
+      Assert.ok(Preferences.get(PREF_NEW_WHILE_DELETED) === expectedValue);
+
+      // Reset the preference, then continue by adding a different type.
+      newRow.resetColumnButton.click();
+    }
+
+    // Re-adding the deleted preference should restore the value.
+    existingRow.editColumnButton.click();
+    Assert.ok(Preferences.get(PREF_TO_DELETE) === true);
+  });
+});
+
 add_task(async function test_reset_user_pref() {
   await SpecialPowers.pushPrefEnv({
     set: [
@@ -140,7 +178,7 @@ add_task(async function test_modify() {
   await AboutConfigTest.withNewTab(async function() {
     // Test toggle for boolean prefs.
     for (let nameOfBoolPref of [
-      "test.aboutconfig.modify.boolean",
+      PREF_MODIFY_BOOLEAN,
       PREF_BOOLEAN_DEFAULT_TRUE,
     ]) {
       let row = this.getRow(nameOfBoolPref);
@@ -159,17 +197,14 @@ add_task(async function test_modify() {
     }
 
     // Test abort of edit by starting with string and continuing with editing Int pref.
-    let row = this.getRow("test.aboutconfig.modify.string");
+    let row = this.getRow(PREF_MODIFY_STRING);
     row.editColumnButton.click();
     row.valueInput.value = "test";
-    let intRow = this.getRow("test.aboutconfig.modify.number");
+    let intRow = this.getRow(PREF_MODIFY_NUMBER);
     intRow.editColumnButton.click();
-    Assert.equal(
-      intRow.valueInput.value,
-      Preferences.get("test.aboutconfig.modify.number")
-    );
+    Assert.equal(intRow.valueInput.value, Preferences.get(PREF_MODIFY_NUMBER));
     Assert.ok(!row.valueInput);
-    Assert.equal(row.value, Preferences.get("test.aboutconfig.modify.string"));
+    Assert.equal(row.value, Preferences.get(PREF_MODIFY_STRING));
 
     // Test validation of integer values.
     for (let invalidValue of [
@@ -188,8 +223,8 @@ add_task(async function test_modify() {
 
     // Test correct saving and DOM-update.
     for (let [prefName, willDelete] of [
-      ["test.aboutconfig.modify.string", true],
-      ["test.aboutconfig.modify.number", true],
+      [PREF_MODIFY_STRING, true],
+      [PREF_MODIFY_NUMBER, true],
       [PREF_NUMBER_DEFAULT_ZERO, false],
       [PREF_STRING_DEFAULT_EMPTY, false],
     ]) {
@@ -209,6 +244,60 @@ add_task(async function test_modify() {
       row.resetColumnButton.click();
       Assert.ok(!row.hasClass("has-user-value"));
       Assert.equal(row.hasClass("deleted"), willDelete);
+    }
+  });
+});
+
+add_task(async function test_edit_field_selected() {
+  let prefsToCheck = [
+    [PREF_MODIFY_STRING, "A string", "A new string"],
+    [PREF_MODIFY_NUMBER, "100", "500"],
+  ];
+  await AboutConfigTest.withNewTab(async function() {
+    for (let [prefName, startValue, endValue] of prefsToCheck) {
+      Preferences.set(prefName, startValue);
+      let row = this.getRow(prefName);
+
+      Assert.equal(row.value, startValue);
+      row.editColumnButton.click();
+      Assert.equal(row.valueInput.value, startValue);
+
+      EventUtils.sendString(endValue, this.window);
+
+      row.editColumnButton.click();
+      Assert.equal(row.value, endValue);
+      Assert.equal(Preferences.get(prefName), endValue);
+    }
+  });
+});
+
+add_task(async function test_escape_cancels_edit() {
+  await AboutConfigTest.withNewTab(async function() {
+    let row = this.getRow(PREF_MODIFY_STRING);
+    Preferences.set(PREF_MODIFY_STRING, "Edit me, maybe");
+
+    for (let blurInput of [false, true]) {
+      Assert.ok(!row.valueInput);
+      row.editColumnButton.click();
+
+      Assert.ok(row.valueInput);
+
+      Assert.equal(row.valueInput.value, "Edit me, maybe");
+      row.valueInput.value = "Edited";
+
+      // Test both cases of the input being focused and not being focused.
+      if (blurInput) {
+        row.valueInput.blur();
+        Assert.notEqual(this.document.activeElement, row.valueInput);
+      } else {
+        Assert.equal(this.document.activeElement, row.valueInput);
+      }
+
+      EventUtils.synthesizeKey("KEY_Escape", {}, this.window);
+
+      Assert.ok(!row.valueInput);
+      Assert.equal(row.value, "Edit me, maybe");
+      Assert.equal(row.value, Preferences.get(PREF_MODIFY_STRING));
     }
   });
 });

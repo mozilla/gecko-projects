@@ -254,7 +254,7 @@ linux64-base-toolchains/opt:
         toolchain:
             - linux64-clang-4.0
             - linux64-gcc-6
-            - linux64-rust-1.36
+            - linux64-rust-1.37
             - linux64-cbindgen
             - linux64-sccache
             - linux64-nasm-2.13.02
@@ -271,7 +271,7 @@ linux64-base-toolchains/debug:
     worker-type: b-linux
     worker:
         docker-image: {in-tree: debian7-amd64-build-base}
-        max-run-time: 5400
+        max-run-time: 7200
         env:
             PERFHERDER_EXTRA_OPTIONS: base-toolchains
             FORCE_GCC: '1'
@@ -291,7 +291,7 @@ linux64-base-toolchains/debug:
         toolchain:
             - linux64-clang-4.0
             - linux64-gcc-6
-            - linux64-rust-1.36
+            - linux64-rust-1.37
             - linux64-cbindgen
             - linux64-sccache
             - linux64-nasm-2.13.02
@@ -325,7 +325,7 @@ linux64-base-toolchains-clang/opt:
         toolchain:
             - linux64-binutils
             - linux64-clang-4.0
-            - linux64-rust-1.36
+            - linux64-rust-1.37
             - linux64-cbindgen
             - linux64-nasm-2.13.02
             - linux64-node
@@ -341,7 +341,7 @@ linux64-base-toolchains-clang/debug:
     worker-type: b-linux
     worker:
         docker-image: {in-tree: debian7-amd64-build-base}
-        max-run-time: 3600
+        max-run-time: 5400
         env:
             PERFHERDER_EXTRA_OPTIONS: base-toolchains-clang
     run:
@@ -360,7 +360,7 @@ linux64-base-toolchains-clang/debug:
         toolchain:
             - linux64-binutils
             - linux64-clang-4.0
-            - linux64-rust-1.36
+            - linux64-rust-1.37
             - linux64-cbindgen
             - linux64-nasm-2.13.02
             - linux64-node
@@ -1171,7 +1171,7 @@ linux64-aarch64/opt:
     fetches:
         toolchain:
             - linux64-binutils
-            - linux64-clang
+            - linux64-clang-aarch64-cross
             - linux64-rust
             - linux64-rust-size
             - linux64-cbindgen

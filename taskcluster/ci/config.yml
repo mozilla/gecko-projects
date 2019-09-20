@@ -128,9 +128,17 @@ treeherder:
         'pipfu': 'pipfile update'
         'WR': 'WebRender standalone'
         'Gd': 'Geckodriver'
-        'clang': 'Clang Tidy & Format'
-        'coverity': 'Coverity Static Analysis'
+        'cpp': 'C/C++ checks'
+        'pedantic': 'pedantic checks'
+        'text': 'Check on texts'
+        'misc': 'Misc checks'
+        'js': 'JavaScript checks'
+        'py': 'Python checks'
+        'java': 'Java checks'
         'SS': 'Shadow scheduler'
+        'test-info': 'Test manifest skip/fail information'
+        'vismet': 'Visual Metrics Analsyis'
+        'condprof': 'Conditioned Profile Builder'
 
 index:
     products:
@@ -241,12 +249,12 @@ scriptworker:
             - 'project:releng:signing:cert:nightly-signing'
         'linux-depsigning':
             - 'project:releng:signing:cert:dep-signing'
-        'scriptworker-prov-v1/beetmoverworker-v1':
+        'scriptworker-k8s/gecko-3-beetmover':
             - 'project:releng:beetmover:bucket:release'
             - 'project:releng:beetmover:bucket:nightly'
             - 'project:releng:beetmover:bucket:partner'
             - 'project:releng:beetmover:bucket:maven-production'
-        'scriptworker-prov-v1/beetmoverworker-dev':
+        'scriptworker-k8s/gecko-1-beetmover':
             - 'project:releng:beetmover:bucket:dep'
             - 'project:releng:beetmover:bucket:dep-partner'
             - 'project:releng:beetmover:bucket:maven-staging'
@@ -392,7 +400,7 @@ workers:
                 by-level:
                     '3': 'gecko-{level}-t-osx-1014'
                     default: 'gecko-t-osx-1014'
-        t-win10-64(|-gpu):
+        t-win10-64(|-gpu-s):
             provisioner: aws-provisioner-v1
             implementation: generic-worker
             os: windows

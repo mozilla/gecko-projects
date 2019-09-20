@@ -88,10 +88,13 @@ AccessibilityPanel.prototype = {
     this.shouldRefresh = true;
     this.panelWin.gToolbox = this._toolbox;
 
-    await this._toolbox.initInspector();
     await this.startup.initAccessibility();
     if (this.supports.enableDisable) {
       this.picker = new Picker(this);
+    }
+
+    if (this.supports.simulation) {
+      this.simulator = await this.front.getSimulator();
     }
 
     this.fluentBundles = await this.createFluentBundles();
@@ -168,13 +171,13 @@ AccessibilityPanel.prototype = {
     }
     // Alright reset the flag we are about to refresh the panel.
     this.shouldRefresh = false;
-    this.postContentMessage(
-      "initialize",
-      this.front,
-      this.walker,
-      this.supports,
-      this.fluentBundles
-    );
+    this.postContentMessage("initialize", {
+      front: this.front,
+      walker: this.walker,
+      supports: this.supports,
+      fluentBundles: this.fluentBundles,
+      simulator: this.simulator,
+    });
   },
 
   updateA11YServiceDurationTimer() {

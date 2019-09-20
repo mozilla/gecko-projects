@@ -2708,9 +2708,7 @@ void nsChildView::ReportSwipeStarted(uint64_t aInputBlockId, bool aStartSwipe) {
 
 nsEventStatus nsChildView::DispatchAPZInputEvent(InputData& aEvent) {
   if (mAPZC) {
-    uint64_t inputBlockId = 0;
-    ScrollableLayerGuid guid;
-    return mAPZC->InputBridge()->ReceiveInputEvent(aEvent, &guid, &inputBlockId);
+    return mAPZC->InputBridge()->ReceiveInputEvent(aEvent).mStatus;
   }
   return nsEventStatus_eIgnore;
 }
@@ -2729,14 +2727,12 @@ void nsChildView::DispatchAPZWheelInputEvent(InputData& aEvent, bool aCanTrigger
   WidgetWheelEvent event(true, eWheel, this);
 
   if (mAPZC) {
-    uint64_t inputBlockId = 0;
-    ScrollableLayerGuid guid;
-    nsEventStatus result = nsEventStatus_eIgnore;
+    APZEventResult result;
 
     switch (aEvent.mInputType) {
       case PANGESTURE_INPUT: {
-        result = mAPZC->InputBridge()->ReceiveInputEvent(aEvent, &guid, &inputBlockId);
-        if (result == nsEventStatus_eConsumeNoDefault) {
+        result = mAPZC->InputBridge()->ReceiveInputEvent(aEvent);
+        if (result.mStatus == nsEventStatus_eConsumeNoDefault) {
           return;
         }
 
@@ -2747,7 +2743,7 @@ void nsChildView::DispatchAPZWheelInputEvent(InputData& aEvent, bool aCanTrigger
           SwipeInfo swipeInfo = SendMayStartSwipe(panInput);
           event.mCanTriggerSwipe = swipeInfo.wantsSwipe;
           if (swipeInfo.wantsSwipe) {
-            if (result == nsEventStatus_eIgnore) {
+            if (result.mStatus == nsEventStatus_eIgnore) {
               // APZ has determined and that scrolling horizontally in the
               // requested direction is impossible, so it didn't do any
               // scrolling for the event.
@@ -2762,12 +2758,12 @@ void nsChildView::DispatchAPZWheelInputEvent(InputData& aEvent, bool aCanTrigger
               // we'll still get a call to ReportSwipeStarted, and we will
               // discard the queued events at that point.
               mSwipeEventQueue =
-                  MakeUnique<SwipeEventQueue>(swipeInfo.allowedDirections, inputBlockId);
+                  MakeUnique<SwipeEventQueue>(swipeInfo.allowedDirections, result.mInputBlockId);
             }
           }
         }
 
-        if (mSwipeEventQueue && mSwipeEventQueue->inputBlockId == inputBlockId) {
+        if (mSwipeEventQueue && mSwipeEventQueue->inputBlockId == result.mInputBlockId) {
           mSwipeEventQueue->queuedEvents.AppendElement(panInput);
         }
         break;
@@ -2779,8 +2775,8 @@ void nsChildView::DispatchAPZWheelInputEvent(InputData& aEvent, bool aCanTrigger
         // we need to run. Using the InputData variant would bypass that and
         // go straight to the APZCTreeManager subclass.
         event = aEvent.AsScrollWheelInput().ToWidgetWheelEvent(this);
-        result = mAPZC->InputBridge()->ReceiveInputEvent(event, &guid, &inputBlockId);
-        if (result == nsEventStatus_eConsumeNoDefault) {
+        result = mAPZC->InputBridge()->ReceiveInputEvent(event);
+        if (result.mStatus == nsEventStatus_eConsumeNoDefault) {
           return;
         }
         break;
@@ -2790,7 +2786,7 @@ void nsChildView::DispatchAPZWheelInputEvent(InputData& aEvent, bool aCanTrigger
         return;
     }
     if (event.mMessage == eWheel && (event.mDeltaX != 0 || event.mDeltaY != 0)) {
-      ProcessUntransformedAPZEvent(&event, guid, inputBlockId, result);
+      ProcessUntransformedAPZEvent(&event, result);
     }
     return;
   }
@@ -3078,9 +3074,10 @@ NSPasteboard* globalDragPboard = nil;
 
 // gLastDragView and gLastDragMouseDownEvent are used to communicate information
 // to the drag service during drag invocation (starting a drag in from the view).
-// gLastDragView is only non-null while mouseDragged is on the call stack.
-NSView* gLastDragView = nil;
-NSEvent* gLastDragMouseDownEvent = nil;
+// gLastDragView is only non-null while a mouse button is pressed, so between
+// mouseDown and mouseUp.
+NSView* gLastDragView = nil;             // [weak]
+NSEvent* gLastDragMouseDownEvent = nil;  // [strong]
 
 + (void)initialize {
   static BOOL initialized = NO;
@@ -3320,6 +3317,10 @@ NSEvent* gLastDragMouseDownEvent = nil;
   [mNonDraggableViewsContainer release];
   [mPixelHostingView removeFromSuperview];
   [mPixelHostingView release];
+
+  if (gLastDragView == self) {
+    gLastDragView = nil;
+  }
 
   [super dealloc];
 
@@ -4235,6 +4236,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   [gLastDragMouseDownEvent release];
   gLastDragMouseDownEvent = [theEvent retain];
+  gLastDragView = self;
 
   // We need isClickThrough because at this point the window we're in might
   // already have become main, so the check for isMainWindow in
@@ -4286,6 +4288,8 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 - (void)mouseUp:(NSEvent*)theEvent {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  gLastDragView = nil;
 
   if (!mGeckoChild || mBlockedLastMouseDown) return;
   if (mTextInputHandler->OnHandleEvent(theEvent)) {
@@ -4369,8 +4373,6 @@ NSEvent* gLastDragMouseDownEvent = nil;
     return;
   }
 
-  gLastDragView = self;
-
   WidgetMouseEvent geckoEvent(true, eMouseMove, mGeckoChild, WidgetMouseEvent::eReal);
   [self convertCocoaMouseEvent:theEvent toGeckoEvent:&geckoEvent];
 
@@ -4378,7 +4380,6 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   // Note, sending the above event might have destroyed our widget since we didn't retain.
   // Fine so long as we don't access any local variables from here on.
-  gLastDragView = nil;
 
   // XXX maybe call markedTextSelectionChanged:client: here?
 
@@ -4871,11 +4872,23 @@ static gfx::IntPoint GetIntegerDeltaForEvent(NSEvent* aEvent) {
 }
 
 - (BOOL)shouldMinimizeOnTitlebarDoubleClick {
-  NSString* MDAppleMiniaturizeOnDoubleClickKey = @"AppleMiniaturizeOnDoubleClick";
+  // Check the system preferences.
+  // We could also check -[NSWindow _shouldMiniaturizeOnDoubleClick]. It's not clear to me which
+  // approach would be preferable; neither is public API.
   NSUserDefaults* userDefaults = [NSUserDefaults standardUserDefaults];
-  bool shouldMinimize = [[userDefaults objectForKey:MDAppleMiniaturizeOnDoubleClickKey] boolValue];
 
-  return shouldMinimize;
+  // Pre-10.11:
+  NSString* kAppleMiniaturizeOnDoubleClickKey = @"AppleMiniaturizeOnDoubleClick";
+  id value1 = [userDefaults objectForKey:kAppleMiniaturizeOnDoubleClickKey];
+  if ([value1 isKindOfClass:[NSValue class]] && [value1 boolValue]) {
+    return YES;
+  }
+
+  // 10.11+:
+  NSString* kAppleActionOnDoubleClickKey = @"AppleActionOnDoubleClick";
+  NSString* kMinimizeValue = @"Minimize";
+  id value2 = [userDefaults objectForKey:kAppleActionOnDoubleClickKey];
+  return ([value2 isKindOfClass:[NSString class]] && [value2 isEqualToString:kMinimizeValue]);
 }
 
 #pragma mark -

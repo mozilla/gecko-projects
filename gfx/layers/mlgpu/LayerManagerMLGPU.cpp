@@ -32,8 +32,6 @@
 #  include "mozilla/gfx/DeviceManagerDx.h"
 #endif
 
-using namespace std;
-
 namespace mozilla {
 namespace layers {
 
@@ -437,9 +435,8 @@ void LayerManagerMLGPU::DrawDebugOverlay() {
   stats.mScreenPixels = windowSize.width * windowSize.height;
 
   std::string text = mDiagnostics->GetFrameOverlayString(stats);
-  RefPtr<TextureSource> texture =
-      mTextRenderer->RenderText(mTextureSourceProvider, text, 30, 600,
-                                TextRenderer::FontType::FixedWidth);
+  RefPtr<TextureSource> texture = mTextRenderer->RenderText(
+      mTextureSourceProvider, text, 600, TextRenderer::FontType::FixedWidth);
   if (!texture) {
     return;
   }

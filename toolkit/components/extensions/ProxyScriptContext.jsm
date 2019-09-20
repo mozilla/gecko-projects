@@ -343,7 +343,7 @@ const ProxyInfoData = {
         proxyData = proxyRules;
       // fall through
       case "object":
-        if (Array.isArray(proxyData) && proxyData.length > 0) {
+        if (Array.isArray(proxyData) && proxyData.length) {
           return ProxyInfoData.createProxyInfoFromData(
             proxyData,
             defaultProxyInfo
@@ -417,6 +417,16 @@ class ProxyChannelFilter {
     }
     if (this.extraInfoSpec.includes("requestHeaders")) {
       data.requestHeaders = channel.getRequestHeaders();
+    }
+    if (this.extension.isPrivileged) {
+      data.urlClassification = {
+        firstParty: channel.urlClassification.firstParty.filter(
+          c => !c.startsWith("socialtracking")
+        ),
+        thirdParty: channel.urlClassification.thirdParty.filter(
+          c => !c.startsWith("socialtracking")
+        ),
+      };
     }
     return data;
   }

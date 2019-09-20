@@ -43,34 +43,19 @@ module.exports = {
     "mozilla"
   ],
   "overrides": [{
-      "files": [
-        "*.html",
-        "*.xhtml",
-        "*.xul",
-        "*.xml",
-        "js/src/builtin/**/*.js",
-        "js/src/shell/**/*.js"
-      ],
-      "rules": {
-        // Curly brackets are required for all the tree via recommended.js,
-        // however these files aren't auto-fixable at the moment.
-        "curly": "off"
-      },
-    }, {
-    // These xbl bindings are assumed to be in the browser-window environment,
-    // we would mark it in the files, but ESLint made this more difficult with
-    // our xml processor, so we list them here. Bug 1397874 & co are working
-    // towards removing these files completely.
     "files": [
-      "browser/base/content/tabbrowser.xml",
-      "browser/base/content/urlbarBindings.xml",
-      "browser/components/search/content/search.xml",
-      "browser/components/translation/translation-infobar.xml",
-      "toolkit/components/prompts/content/tabprompts.xml"
+      "*.html",
+      "*.xhtml",
+      "*.xul",
+      "*.xml",
+      "js/src/builtin/**/*.js",
+      "js/src/shell/**/*.js"
     ],
-    "env": {
-      "mozilla/browser-window": true
-    }
+    "rules": {
+      // Curly brackets are required for all the tree via recommended.js,
+      // however these files aren't auto-fixable at the moment.
+      "curly": "off"
+    },
   }, {
     // TODO: Bug 1515949. Enable no-undef for gfx/
     "files": "gfx/layers/apz/test/mochitest/**",
@@ -137,23 +122,6 @@ module.exports = {
       "no-unused-vars": "off",
       "no-redeclare": "off",
       "no-global-assign": "off",
-    }
-  }, {
-    "files": [
-      "image/**",
-    ],
-    "rules": {
-      "mozilla/consistent-if-bracing": "off",
-      "mozilla/use-chromeutils-generateqi": "off",
-      "mozilla/use-services": "off",
-      "no-array-constructor": "off",
-      "no-implied-eval": "off",
-      "no-redeclare": "off",
-      "no-self-assign": "off",
-      "no-throw-literal": "off",
-      "no-undef": "off",
-      "no-unneeded-ternary": "off",
-      "no-unused-vars": "off",
     }
   }, {
     "files": [
@@ -275,15 +243,11 @@ module.exports = {
     ],
     "rules": {
       "consistent-return": "off",
-      "dot-notation": "off",
-      "object-shorthand": "off",
       "mozilla/avoid-removeChild": "off",
       "mozilla/consistent-if-bracing": "off",
       "mozilla/no-arbitrary-setTimeout": "off",
       "mozilla/no-compare-against-boolean-literals": "off",
       "mozilla/no-define-cc-etc": "off",
-      "mozilla/no-useless-parameters": "off",
-      "mozilla/no-useless-run-test": "off",
       "mozilla/reject-importGlobalProperties": "off",
       "mozilla/use-cc-etc": "off",
       "mozilla/use-chromeutils-generateqi": "off",
@@ -299,7 +263,6 @@ module.exports = {
       "no-else-return": "off",
       "no-empty": "off",
       "no-eval": "off",
-      "no-extra-boolean-cast": "off",
       "no-func-assign": "off",
       "no-global-assign": "off",
       "no-implied-eval": "off",
@@ -319,7 +282,6 @@ module.exports = {
       "no-shadow-restricted-names": "off",
       "no-sparse-arrays": "off",
       "no-throw-literal": "off",
-      "no-unneeded-ternary": "off",
       "no-unreachable": "off",
       "no-unsanitized/method": "off",
       "no-unsanitized/property": "off",
@@ -332,23 +294,6 @@ module.exports = {
     }
   }, {
     "files": [
-      "browser/components/extensions/ExtensionControlledPopup.jsm",
-      "browser/components/extensions/test/browser/browser_ext_devtools_network.js",
-      "browser/components/extensions/test/browser/browser_ext_tabs_zoom.js",
-      "browser/components/places/tests/browser/browser_bookmarksProperties.js",
-      "browser/components/preferences/in-content/tests/browser_extension_controlled.js",
-      "browser/extensions/formautofill/FormAutofillParent.jsm",
-      "browser/tools/mozscreenshots/head.js",
-      "devtools/client/aboutdebugging/test/browser/helper-addons.js",
-      "devtools/client/inspector/animation/animation.js",
-      "devtools/client/inspector/changes/ChangesView.js",
-      "devtools/client/inspector/markup/test/helper_screenshot_node.js",
-      "devtools/client/performance/modules/widgets/graphs.js",
-      "devtools/client/scratchpad/scratchpad.js",
-      "devtools/client/webconsole/webconsole-wrapper.js",
-      "devtools/server/tests/unit/test_breakpoint-17.js",
-      "devtools/shared/adb/adb-process.js",
-      "devtools/shared/fronts/webconsole.js",
       "dom/l10n/tests/mochitest/document_l10n/non-system-principal/test.html",
       "dom/payments/test/test_basiccard.html",
       "dom/payments/test/test_bug1478740.html",
@@ -358,21 +303,17 @@ module.exports = {
       "dom/tests/browser/browser_persist_cookies.js",
       "dom/tests/browser/browser_persist_mixed_content_image.js",
       "netwerk/test/unit/test_http2-proxy.js",
-      "toolkit/components/contentprefs/ContentPrefService2.jsm",
-      "toolkit/components/extensions/ExtensionShortcuts.jsm",
-      "toolkit/components/extensions/ExtensionTestCommon.jsm",
-      "toolkit/components/extensions/test/browser/browser_ext_themes_dynamic_getCurrent.js",
-      "toolkit/components/extensions/test/browser/browser_ext_themes_warnings.js",
-      "toolkit/components/passwordmgr/test/browser/browser_autocomplete_footer.js",
-      "toolkit/components/remotebrowserutils/tests/browser/browser_httpResponseProcessSelection.js",
-      "toolkit/components/satchel/FormHistory.jsm",
-      "toolkit/content/tests/browser/browser_findbar.js",
-      "toolkit/modules/NewTabUtils.jsm",
-      "toolkit/mozapps/extensions/test/browser/browser_CTP_plugins.js",
-      "toolkit/mozapps/extensions/test/browser/head.js",
     ],
     "rules": {
       "no-async-promise-executor": "off",
+    }
+  },{
+    "files": [
+      "toolkit/**",
+      "browser/**",
+    ],
+    "rules": {
+      "mozilla/prefer-boolean-length-check": "error",
     }
   }]
 };

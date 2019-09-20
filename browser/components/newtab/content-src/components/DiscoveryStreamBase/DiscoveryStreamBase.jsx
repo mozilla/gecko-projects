@@ -143,6 +143,7 @@ export class _DiscoveryStreamBase extends React.PureComponent {
         const [spoc] = component.data.spocs;
         const {
           image_src,
+          raw_image_src,
           alt_text,
           title,
           url,
@@ -162,10 +163,12 @@ export class _DiscoveryStreamBase extends React.PureComponent {
             }}
             dispatch={this.props.dispatch}
             shouldSendImpressionStats={true}
+            extraClasses={`ds-dismiss-ds-text-promo`}
           >
             <DSTextPromo
               dispatch={this.props.dispatch}
               image={image_src}
+              raw_image_src={raw_image_src}
               alt_text={alt_text || title}
               header={title}
               cta_text={cta}
@@ -332,7 +335,7 @@ export class _DiscoveryStreamBase extends React.PureComponent {
               components: [topSites],
             },
           ])}
-        {layoutRender.length > 0 && (
+        {!!layoutRender.length && (
           <CollapsibleSection
             className="ds-layout"
             collapsed={topStories.pref.collapsed}

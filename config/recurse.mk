@@ -181,9 +181,19 @@ xpcom/xpidl/export: xpcom/idl-parser/xpidl/export
 # CSS2Properties.webidl needs ServoCSSPropList.py from layout/style
 dom/bindings/export: layout/style/export
 
+# Various telemetry histogram files need ServoCSSPropList.py from layout/style
+toolkit/components/telemetry/export: layout/style/export
+
 ifdef ENABLE_CLANG_PLUGIN
 $(filter-out config/host build/unix/stdc++compat/% build/clang-plugin/%,$(compile_targets)): build/clang-plugin/host build/clang-plugin/tests/target-objects
 build/clang-plugin/tests/target-objects: build/clang-plugin/host
+# clang-plugin tests require js-confdefs.h on js standalone builds and mozilla-config.h on
+# other builds, because they are -include'd.
+ifdef JS_STANDALONE
+build/clang-plugin/tests/target-objects: js/src/export
+else
+build/clang-plugin/tests/target-objects: mozilla-config.h
+endif
 endif
 
 # Interdependencies that moz.build world don't know about yet for compilation.
@@ -191,12 +201,21 @@ endif
 ifeq ($(MOZ_WIDGET_TOOLKIT),gtk)
 toolkit/library/target: widget/gtk/mozgtk/gtk3/target
 endif
-endif
+
 # Most things are built during compile (target/host), but some things happen during export
 # Those need to depend on config/export for system wrappers.
 $(addprefix build/unix/stdc++compat/,target host) build/clang-plugin/host: config/export
 
+# Rust targets need $topobjdir/.cargo/config to be preprocessed first. Ideally,
+# we'd only set it as a dependency of the rust targets, but unfortunately, that
+# pushes Make to execute them much later than we'd like them to be when the file
+# doesn't exist prior to Make running. So we also set it as a dependency of
+# export, which ensures it exists before recursing the rust targets, tricking
+# Make into keeping them early.
 $(rust_targets): $(DEPTH)/.cargo/config
+ifndef TEST_MOZBUILD
+export:: $(DEPTH)/.cargo/config
+endif
 
 # When building gtest as part of the build (LINK_GTEST_DURING_COMPILE),
 # force the build system to get to it first, so that it can be linked
@@ -205,4 +224,5 @@ $(rust_targets): $(DEPTH)/.cargo/config
 # dump-sym'ed.
 ifneq (,$(filter toolkit/library/gtest/rust/target,$(compile_targets)))
 toolkit/library/rust/target: toolkit/library/gtest/rust/target
+endif
 endif

@@ -36,13 +36,6 @@ let ACTORS = {
         "MozDOMPointerLock:Entered": {},
         "MozDOMPointerLock:Exited": {},
       },
-      messages: [
-        "Browser:Reload",
-        "Browser:AppTab",
-        "Browser:HasSiblings",
-        "MixedContent:ReenableProtection",
-        "UpdateCharacterSet",
-      ],
     },
   },
 
@@ -71,7 +64,14 @@ let ACTORS = {
       events: {
         MozInvalidForm: {},
       },
-      messages: ["FormValidation:ShowPopup", "FormValidation:HidePopup"],
+    },
+
+    allFrames: true,
+  },
+
+  PageInfo: {
+    child: {
+      moduleURI: "resource:///actors/PageInfoChild.jsm",
     },
 
     allFrames: true,
@@ -80,14 +80,6 @@ let ACTORS = {
   Plugin: {
     parent: {
       moduleURI: "resource:///actors/PluginParent.jsm",
-      messages: [
-        "PluginContent:ShowClickToPlayNotification",
-        "PluginContent:RemoveNotification",
-        "PluginContent:ShowPluginCrashedNotification",
-        "PluginContent:SubmitReport",
-        "PluginContent:LinkClickCallback",
-        "PluginContent:GetCrashData",
-      ],
     },
     child: {
       moduleURI: "resource:///actors/PluginChild.jsm",
@@ -99,11 +91,6 @@ let ACTORS = {
         PluginRemoved: { capture: true },
         HiddenPlugin: { capture: true },
       },
-
-      messages: [
-        "PluginParent:ActivatePlugins",
-        "PluginParent:Test:ClearCrashData",
-      ],
 
       observers: ["decoder-doctor-notification"],
     },
@@ -119,11 +106,23 @@ let ACTORS = {
     allFrames: true,
   },
 
+  RFPHelper: {
+    parent: {
+      moduleURI: "resource:///actors/RFPHelperParent.jsm",
+    },
+    child: {
+      moduleURI: "resource:///actors/RFPHelperChild.jsm",
+      events: {
+        resize: {},
+      },
+    },
+
+    allFrames: true,
+  },
+
   SwitchDocumentDirection: {
     child: {
       moduleURI: "resource:///actors/SwitchDocumentDirectionChild.jsm",
-
-      messages: ["SwitchDocumentDirection"],
     },
 
     allFrames: true,
@@ -155,12 +154,13 @@ let LEGACY_ACTORS = {
       },
       messages: [
         "AboutLogins:AllLogins",
-        "AboutLogins:LocalizeBadges",
         "AboutLogins:LoginAdded",
         "AboutLogins:LoginModified",
         "AboutLogins:LoginRemoved",
         "AboutLogins:MasterPasswordResponse",
         "AboutLogins:SendFavicons",
+        "AboutLogins:Setup",
+        "AboutLogins:ShowLoginItemError",
         "AboutLogins:SyncState",
         "AboutLogins:UpdateBreaches",
       ],
@@ -274,7 +274,6 @@ let LEGACY_ACTORS = {
     child: {
       module: "resource:///actors/NetErrorChild.jsm",
       events: {
-        AboutNetErrorLoad: { wantUntrusted: true },
         AboutNetErrorSetAutomatic: { wantUntrusted: true },
         AboutNetErrorResetPreferences: { wantUntrusted: true },
         click: {},
@@ -294,13 +293,6 @@ let LEGACY_ACTORS = {
     },
   },
 
-  PageInfo: {
-    child: {
-      module: "resource:///actors/PageInfoChild.jsm",
-      messages: ["PageInfo:getData"],
-    },
-  },
-
   PageStyle: {
     child: {
       module: "resource:///actors/PageStyleChild.jsm",
@@ -312,17 +304,6 @@ let LEGACY_ACTORS = {
       // Only matching web pages, as opposed to internal about:, chrome: or
       // resource: pages. See https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns
       matches: ["*://*/*"],
-    },
-  },
-
-  RFPHelper: {
-    child: {
-      module: "resource:///actors/RFPHelperChild.jsm",
-      group: "browsers",
-      events: {
-        resize: {},
-      },
-      messages: ["Finder:FindbarOpen", "Finder:FindbarClose"],
     },
   },
 
@@ -2023,17 +2004,6 @@ BrowserGlue.prototype = {
     });
 
     Services.tm.idleDispatchToMainThread(() => {
-      let enableCertErrorUITelemetry = Services.prefs.getBoolPref(
-        "security.certerrors.recordEventTelemetry",
-        false
-      );
-      Services.telemetry.setEventRecordingEnabled(
-        "security.ui.certerror",
-        enableCertErrorUITelemetry
-      );
-    });
-
-    Services.tm.idleDispatchToMainThread(() => {
       Services.prefs.addObserver(
         "permissions.eventTelemetry.enabled",
         this._togglePermissionPromptTelemetry
@@ -2056,6 +2026,11 @@ BrowserGlue.prototype = {
         Cu.reportError(ex);
       }
     }, 3000);
+
+    // Add breach alerts pref observer reasonably early so the pref flip works
+    Services.tm.idleDispatchToMainThread(() => {
+      this._addBreachAlertsPrefObserver();
+    });
 
     // It's important that SafeBrowsing is initialized reasonably
     // early, so we use a maximum timeout for it.
@@ -2220,6 +2195,20 @@ BrowserGlue.prototype = {
         }
       );
     }
+  },
+
+  _addBreachAlertsPrefObserver() {
+    const BREACH_ALERTS_PREF = "signon.management.page.breach-alerts.enabled";
+    const clearVulnerablePasswordsIfBreachAlertsDisabled = async function() {
+      if (!Services.prefs.getBoolPref(BREACH_ALERTS_PREF)) {
+        await LoginBreaches.clearAllPotentiallyVulnerablePasswords();
+      }
+    };
+    clearVulnerablePasswordsIfBreachAlertsDisabled();
+    Services.prefs.addObserver(
+      BREACH_ALERTS_PREF,
+      clearVulnerablePasswordsIfBreachAlertsDisabled
+    );
   },
 
   _onQuitRequest: function BG__onQuitRequest(aCancelQuit, aQuitType) {

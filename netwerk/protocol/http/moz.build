@@ -51,6 +51,7 @@ EXPORTS.mozilla.net += [
     'HttpInfo.h',
     'nsServerTiming.h',
     'NullHttpChannel.h',
+    'ParentChannelListener.h',
     'PHttpChannelParams.h',
     'PSpdyPush.h',
     'TimingStruct.h',
@@ -122,11 +123,6 @@ IPDL_SOURCES += [
     'PHttpChannel.ipdl',
 ]
 
-EXTRA_JS_MODULES += [
-    'UserAgentOverrides.jsm',
-    'UserAgentUpdates.jsm',
-]
-
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
@@ -140,7 +136,6 @@ LOCAL_INCLUDES += [
 ]
 
 EXTRA_JS_MODULES += [
-    'UAOverridesBootstrapper.jsm',
     'WellKnownOpportunisticUtils.jsm',
 ]
 

@@ -136,7 +136,6 @@ nsNSSSocketInfo::nsNSSSocketInfo(SharedSSLState& aState, uint32_t providerFlags,
       mKEAKeyBits(0),
       mSSLVersionUsed(nsISSLSocketControl::SSL_VERSION_UNKNOWN),
       mMACAlgorithmUsed(nsISSLSocketControl::SSL_MAC_UNKNOWN),
-      mBypassAuthentication(false),
       mProviderFlags(providerFlags),
       mProviderTlsFlags(providerTlsFlags),
       mSocketCreationTimestamp(TimeStamp::Now()),
@@ -210,12 +209,6 @@ nsNSSSocketInfo::SetClientCert(nsIX509Cert* aClientCert) {
 NS_IMETHODIMP
 nsNSSSocketInfo::GetClientCertSent(bool* arg) {
   *arg = mSentClientCert;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNSSSocketInfo::GetBypassAuthentication(bool* arg) {
-  *arg = mBypassAuthentication;
   return NS_OK;
 }
 
@@ -464,15 +457,15 @@ nsNSSSocketInfo::IsAcceptableForHost(const nsACString& hostname,
   }
   CertVerifier::Flags flags = CertVerifier::FLAG_LOCAL_ONLY;
   UniqueCERTCertList unusedBuiltChain;
-  mozilla::pkix::Result result =
-      certVerifier->VerifySSLServerCert(nssCert,
-                                        nullptr,  // stapledOCSPResponse
-                                        nullptr,  // sctsFromTLSExtension
-                                        mozilla::pkix::Now(),
-                                        nullptr,  // pinarg
-                                        hostname, unusedBuiltChain,
-                                        false,  // save intermediates
-                                        flags);
+  mozilla::pkix::Result result = certVerifier->VerifySSLServerCert(
+      nssCert,
+      Maybe<nsTArray<uint8_t>>(),  // stapledOCSPResponse
+      Maybe<nsTArray<uint8_t>>(),  // sctsFromTLSExtension
+      mozilla::pkix::Now(),
+      nullptr,  // pinarg
+      hostname, unusedBuiltChain,
+      false,  // save intermediates
+      flags);
   if (result != mozilla::pkix::Success) {
     return NS_OK;
   }
@@ -493,12 +486,6 @@ nsNSSSocketInfo::TestJoinConnection(const nsACString& npnProtocol,
 
   // Make sure NPN has been completed and matches requested npnProtocol
   if (!mNPNCompleted || !mNegotiatedNPN.Equals(npnProtocol)) return NS_OK;
-
-  if (mBypassAuthentication) {
-    // An unauthenticated connection does not know whether or not it
-    // is acceptable for a particular hostname
-    return NS_OK;
-  }
 
   IsAcceptableForHost(hostname, _retval);  // sets _retval
   return NS_OK;
@@ -898,33 +885,6 @@ nsNSSSocketInfo::SetEsniTxt(const nsACString& aEsniTxt) {
   }
 
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsNSSSocketInfo::GetServerRootCertIsBuiltInRoot(bool* aIsBuiltInRoot) {
-  *aIsBuiltInRoot = false;
-
-  if (!HasServerCert()) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  nsCOMPtr<nsIX509CertList> certList;
-  nsresult rv = GetSucceededCertChain(getter_AddRefs(certList));
-  if (NS_SUCCEEDED(rv)) {
-    if (!certList) {
-      return NS_ERROR_NOT_AVAILABLE;
-    }
-    RefPtr<nsNSSCertList> nssCertList = certList->GetCertList();
-    nsCOMPtr<nsIX509Cert> cert;
-    rv = nssCertList->GetRootCertificate(cert);
-    if (NS_SUCCEEDED(rv)) {
-      if (!cert) {
-        return NS_ERROR_NOT_AVAILABLE;
-      }
-      rv = cert->GetIsBuiltInRoot(aIsBuiltInRoot);
-    }
-  }
-  return rv;
 }
 
 #if defined(DEBUG_SSL_VERBOSE) && defined(DUMP_BUFFER)
@@ -1932,6 +1892,74 @@ SECStatus nsNSS_SSLGetClientAuthData(void* arg, PRFileDesc* socket,
   return runnable->mRV;
 }
 
+// Lists all private keys on all modules and returns a list of any corresponding
+// certificates. Returns null if no such certificates can be found. Also returns
+// null if an error is encountered, because this is called as part of the client
+// auth data callback, and NSS ignores any errors returned by the callback.
+UniqueCERTCertList FindNonCACertificatesWithPrivateKeys() {
+  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+          ("FindNonCACertificatesWithPrivateKeys"));
+  UniqueCERTCertList certsWithPrivateKeys(CERT_NewCertList());
+  if (!certsWithPrivateKeys) {
+    return nullptr;
+  }
+
+  AutoSECMODListReadLock secmodLock;
+  SECMODModuleList* list = SECMOD_GetDefaultModuleList();
+  while (list) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+            ("  module '%s'", list->module->commonName));
+    for (int i = 0; i < list->module->slotCount; i++) {
+      PK11SlotInfo* slot = list->module->slots[i];
+      MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+              ("    slot '%s'", PK11_GetSlotName(slot)));
+      // We may need to log in to be able to find private keys.
+      if (PK11_Authenticate(slot, true, nullptr) != SECSuccess) {
+        MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("    (couldn't authenticate)"));
+        continue;
+      }
+      UniqueSECKEYPrivateKeyList privateKeys(
+          PK11_ListPrivKeysInSlot(slot, nullptr, nullptr));
+      if (!privateKeys) {
+        MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("      (no private keys)"));
+        continue;
+      }
+      for (SECKEYPrivateKeyListNode* node = PRIVKEY_LIST_HEAD(privateKeys);
+           !PRIVKEY_LIST_END(node, privateKeys);
+           node = PRIVKEY_LIST_NEXT(node)) {
+        UniqueCERTCertList certs(PK11_GetCertsMatchingPrivateKey(node->key));
+        if (!certs) {
+          MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                  ("      PK11_GetCertsMatchingPrivateKey encountered an error "
+                   "- returning"));
+          return nullptr;
+        }
+        if (CERT_LIST_EMPTY(certs)) {
+          MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("      (no certs for key)"));
+          continue;
+        }
+        for (CERTCertListNode* n = CERT_LIST_HEAD(certs);
+             !CERT_LIST_END(n, certs); n = CERT_LIST_NEXT(n)) {
+          if (!CERT_IsCACert(n->cert, nullptr)) {
+            MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                    ("      found '%s'", n->cert->subjectName));
+            UniqueCERTCertificate cert(CERT_DupCertificate(n->cert));
+            if (CERT_AddCertToListTail(certsWithPrivateKeys.get(),
+                                       cert.get()) == SECSuccess) {
+              Unused << cert.release();
+            }
+          }
+        }
+      }
+    }
+    list = list->next;
+  }
+  if (CERT_LIST_EMPTY(certsWithPrivateKeys)) {
+    return nullptr;
+  }
+  return certsWithPrivateKeys;
+}
+
 void ClientAuthDataRunnable::RunOnTargetThread() {
   // We check the value of a pref in this runnable, so this runnable should only
   // be run on the main thread.
@@ -1940,13 +1968,13 @@ void ClientAuthDataRunnable::RunOnTargetThread() {
   UniqueCERTCertificate cert;
   UniqueSECKEYPrivateKey privKey;
   void* wincx = mSocketInfo;
-  nsresult rv;
+
+  mRV = SECFailure;
+  *mPRetCert = nullptr;
+  *mPRetKey = nullptr;
+  mErrorCodeToReport = SEC_ERROR_LIBRARY_FAILURE;
 
   if (NS_FAILED(CheckForSmartCardChanges())) {
-    mRV = SECFailure;
-    *mPRetCert = nullptr;
-    *mPRetKey = nullptr;
-    mErrorCodeToReport = SEC_ERROR_LIBRARY_FAILURE;
     return;
   }
 
@@ -1958,13 +1986,13 @@ void ClientAuthDataRunnable::RunOnTargetThread() {
   if (socketClientCert) {
     cert.reset(socketClientCert->GetCert());
     if (!cert) {
-      goto loser;
+      return;
     }
 
     // Get the private key
     privKey.reset(PK11_FindKeyByAnyCert(cert.get(), wincx));
     if (!privKey) {
-      goto loser;
+      return;
     }
 
     *mPRetCert = cert.release();
@@ -1973,26 +2001,17 @@ void ClientAuthDataRunnable::RunOnTargetThread() {
     return;
   }
 
+  UniqueCERTCertList certList(FindNonCACertificatesWithPrivateKeys());
+  if (!certList) {
+    return;
+  }
+
   mRV = SECSuccess;
 
   // find valid user cert and key pair
   if (nsGetUserCertChoice() == UserCertChoice::Auto) {
     // automatically find the right cert
-
-    // find all user certs that are valid and for SSL
-    UniqueCERTCertList certList(CERT_FindUserCertsByUsage(
-        CERT_GetDefaultCertDB(), certUsageSSLClient, false, true, wincx));
-    if (!certList) {
-      goto loser;
-    }
-
-    // make sure the list is not empty
-    if (CERT_LIST_END(CERT_LIST_HEAD(certList), certList)) {
-      goto loser;
-    }
-
     UniqueCERTCertificate lowPrioNonrepCert;
-
     // loop through the list until we find a cert with a key
     for (CERTCertListNode* node = CERT_LIST_HEAD(certList);
          !CERT_LIST_END(node, certList); node = CERT_LIST_NEXT(node)) {
@@ -2038,9 +2057,9 @@ void ClientAuthDataRunnable::RunOnTargetThread() {
     nsCString rememberedDBKey;
     if (cars) {
       bool found;
-      rv = cars->HasRememberedDecision(hostname,
-                                       mSocketInfo->GetOriginAttributes(),
-                                       mServerCert, rememberedDBKey, &found);
+      nsresult rv = cars->HasRememberedDecision(
+          hostname, mSocketInfo->GetOriginAttributes(), mServerCert,
+          rememberedDBKey, &found);
       if (NS_SUCCEEDED(rv) && found) {
         hasRemembered = true;
       }
@@ -2050,7 +2069,7 @@ void ClientAuthDataRunnable::RunOnTargetThread() {
       nsCOMPtr<nsIX509CertDB> certdb = do_GetService(NS_X509CERTDB_CONTRACTID);
       if (certdb) {
         nsCOMPtr<nsIX509Cert> foundCert;
-        rv =
+        nsresult rv =
             certdb->FindCertByDBKey(rememberedDBKey, getter_AddRefs(foundCert));
         if (NS_SUCCEEDED(rv) && foundCert) {
           nsNSSCertificate* objCert =
@@ -2069,20 +2088,6 @@ void ClientAuthDataRunnable::RunOnTargetThread() {
     if (!hasRemembered) {
       // user selects a cert to present
       nsCOMPtr<nsIClientAuthDialogs> dialogs;
-
-      // find all user certs that are for SSL
-      // note that we are allowing expired certs in this list
-      UniqueCERTCertList certList(CERT_FindUserCertsByUsage(
-          CERT_GetDefaultCertDB(), certUsageSSLClient, false, false, wincx));
-      if (!certList) {
-        goto loser;
-      }
-
-      if (CERT_LIST_END(CERT_LIST_HEAD(certList), certList)) {
-        // list is empty - no matching certs
-        goto loser;
-      }
-
       UniquePORTString corg(CERT_GetOrgName(&mServerCert->subject));
       nsAutoCString org(corg.get());
 
@@ -2101,7 +2106,7 @@ void ClientAuthDataRunnable::RunOnTargetThread() {
           goto loser;
         }
 
-        rv = certArray->AppendElement(tempCert);
+        nsresult rv = certArray->AppendElement(tempCert);
         if (NS_FAILED(rv)) {
           goto loser;
         }
@@ -2109,9 +2114,9 @@ void ClientAuthDataRunnable::RunOnTargetThread() {
 
       // Throw up the client auth dialog and get back the index of the selected
       // cert
-      rv = getNSSDialogs(getter_AddRefs(dialogs),
-                         NS_GET_IID(nsIClientAuthDialogs),
-                         NS_CLIENTAUTHDIALOGS_CONTRACTID);
+      nsresult rv = getNSSDialogs(getter_AddRefs(dialogs),
+                                  NS_GET_IID(nsIClientAuthDialogs),
+                                  NS_CLIENTAUTHDIALOGS_CONTRACTID);
 
       if (NS_FAILED(rv)) {
         goto loser;
@@ -2194,11 +2199,7 @@ static PRFileDesc* nsSSLIOLayerImportFD(PRFileDesc* fd,
     SSL_GetClientAuthDataHook(
         sslSock, (SSLGetClientAuthData)nsNSS_SSLGetClientAuthData, infoObject);
   }
-  if (flags & nsISocketProvider::MITM_OK) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-            ("[%p] nsSSLIOLayerImportFD: bypass authentication flag\n", fd));
-    infoObject->SetBypassAuthentication(true);
-  }
+
   if (SECSuccess !=
       SSL_AuthCertificateHook(sslSock, AuthCertificateHook, infoObject)) {
     MOZ_ASSERT_UNREACHABLE("Failed to configure AuthCertificateHook");
@@ -2367,9 +2368,6 @@ static nsresult nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
   }
   if (flags & nsISocketProvider::NO_PERMANENT_STORAGE) {
     peerId.AppendLiteral("private:");
-  }
-  if (flags & nsISocketProvider::MITM_OK) {
-    peerId.AppendLiteral("bypassAuth:");
   }
   if (flags & nsISocketProvider::BE_CONSERVATIVE) {
     peerId.AppendLiteral("beConservative:");

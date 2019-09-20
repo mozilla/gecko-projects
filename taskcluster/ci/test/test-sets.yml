@@ -73,6 +73,7 @@ talos:
     - talos-perf-reftest
     - talos-perf-reftest-singletons
     - talos-tabswitch
+    - talos-realworld-webextensions
     # - talos-h1 Bug 1487031 - Disabled for not finding actionable regressions
     # - talos-h2 Bug 1487031 - Disabled for not finding actionable regressions
 
@@ -271,13 +272,16 @@ windows-tests:
 
 mingwclang-tests-debug:
     - cppunit
+    - firefox-ui-functional-local
     - firefox-ui-functional-remote
+    - mochitest-a11y
     - mochitest-gpu
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
     - mochitest-webgl2-ext
     - reftest
+    - telemetry-tests-client
 
 mingwclang-tests-opt:
     - cppunit
@@ -321,6 +325,7 @@ windows-talos:
     - talos-tp5o
     - talos-xperf
     - talos-tabswitch
+    - talos-realworld-webextensions
     # - talos-h1 Bug 1487031 - Disabled for not finding actionable regressions
 
 marionette-gpu-tests:
@@ -379,6 +384,7 @@ macosx64-talos:
     - talos-tp5o
     - talos-perf-reftest
     - talos-perf-reftest-singletons
+    - talos-realworld-webextensions
     # - talos-tabswitch # Bug 1453007 times out
     # - talos-h1 # too long to unpack profile- Bug 1442893
 
@@ -391,26 +397,11 @@ desktop-screenshot-capture:
 desktop-instrumentation:
     - browser-instrumentation
 
-android-common-tests:
-    - crashtest
-    - mochitest
-    - mochitest-chrome
-    - mochitest-gpu
-    - mochitest-media
-    - reftest
-    - test-verify
-    - xpcshell
-
-android-opt-tests:
-    # Robocop tests often fail on Debug builds
-    - robocop
-
 android-x86_64-tests:
     - cppunit
     - crashtest
     - geckoview-junit
     - gtest
-    - marionette
     - mochitest
     - mochitest-gpu
     - reftest
@@ -418,10 +409,6 @@ android-x86_64-tests:
     - web-platform-tests
     - web-platform-tests-reftests
     - xpcshell
-
-android-ccov-tests:
-    - geckoview-junit
-    - robocop
 
 devtools-tests:
     - mochitest-devtools-chrome
@@ -514,6 +501,7 @@ android-hw-arm7-raptor:
     - raptor-tp6m-25-fenix-cold
     - raptor-tp6m-26-fenix-cold
     - raptor-tp6m-27-fenix-cold
+    - raptor-tp6m-28-fenix-cold
     - raptor-tp6m-1-geckoview-cold
     - raptor-tp6m-2-geckoview-cold
     - raptor-tp6m-3-geckoview-cold
@@ -541,6 +529,7 @@ android-hw-arm7-raptor:
     - raptor-tp6m-25-geckoview-cold
     - raptor-tp6m-26-geckoview-cold
     - raptor-tp6m-27-geckoview-cold
+    - raptor-tp6m-28-geckoview-cold
     - raptor-tp6m-1-fennec64
     - raptor-tp6m-2-fennec64
     - raptor-tp6m-3-fennec64
@@ -551,6 +540,16 @@ android-hw-arm7-raptor:
     - raptor-tp6m-8-fennec64
     - raptor-tp6m-9-fennec64
     - raptor-tp6m-10-fennec64
+    - raptor-tp6m-1-fennec68
+    - raptor-tp6m-2-fennec68
+    - raptor-tp6m-3-fennec68
+    - raptor-tp6m-4-fennec68
+    - raptor-tp6m-5-fennec68
+    - raptor-tp6m-6-fennec68
+    - raptor-tp6m-7-fennec68
+    - raptor-tp6m-8-fennec68
+    - raptor-tp6m-9-fennec68
+    - raptor-tp6m-10-fennec68
     - raptor-tp6m-1-fennec-cold
     - raptor-tp6m-2-fennec-cold
     - raptor-tp6m-3-fennec-cold
@@ -578,6 +577,7 @@ android-hw-arm7-raptor:
     - raptor-tp6m-25-fennec-cold
     - raptor-tp6m-26-fennec-cold
     - raptor-tp6m-27-fennec-cold
+    - raptor-tp6m-28-fennec-cold
     - raptor-tp6m-1-fennec64-cold
     - raptor-tp6m-2-fennec64-cold
     - raptor-tp6m-3-fennec64-cold
@@ -592,6 +592,20 @@ android-hw-arm7-raptor:
     - raptor-tp6m-12-fennec64-cold
     - raptor-tp6m-13-fennec64-cold
     - raptor-tp6m-14-fennec64-cold
+    - raptor-tp6m-1-fennec68-cold
+    - raptor-tp6m-2-fennec68-cold
+    - raptor-tp6m-3-fennec68-cold
+    - raptor-tp6m-4-fennec68-cold
+    - raptor-tp6m-5-fennec68-cold
+    - raptor-tp6m-6-fennec68-cold
+    - raptor-tp6m-7-fennec68-cold
+    - raptor-tp6m-8-fennec68-cold
+    - raptor-tp6m-9-fennec68-cold
+    - raptor-tp6m-10-fennec68-cold
+    - raptor-tp6m-11-fennec68-cold
+    - raptor-tp6m-12-fennec68-cold
+    - raptor-tp6m-13-fennec68-cold
+    - raptor-tp6m-14-fennec68-cold
     - raptor-tp6m-1-refbrow-cold
     - raptor-tp6m-2-refbrow-cold
     - raptor-tp6m-3-refbrow-cold
@@ -619,6 +633,7 @@ android-hw-arm7-raptor:
     - raptor-tp6m-25-refbrow-cold
     - raptor-tp6m-26-refbrow-cold
     - raptor-tp6m-27-refbrow-cold
+    - raptor-tp6m-28-refbrow-cold
 
 android-hw-aarch64-raptor:
     - raptor-speedometer-geckoview
@@ -682,6 +697,7 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-25-fenix-cold
     - raptor-tp6m-26-fenix-cold
     - raptor-tp6m-27-fenix-cold
+    - raptor-tp6m-28-fenix-cold
     - raptor-tp6m-1-geckoview-cold
     - raptor-tp6m-2-geckoview-cold
     - raptor-tp6m-3-geckoview-cold
@@ -709,6 +725,7 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-25-geckoview-cold
     - raptor-tp6m-26-geckoview-cold
     - raptor-tp6m-27-geckoview-cold
+    - raptor-tp6m-28-geckoview-cold
     - raptor-tp6m-1-fennec-cold
     - raptor-tp6m-2-fennec-cold
     - raptor-tp6m-3-fennec-cold
@@ -736,6 +753,7 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-25-fennec-cold
     - raptor-tp6m-26-fennec-cold
     - raptor-tp6m-27-fennec-cold
+    - raptor-tp6m-28-fennec-cold
     - raptor-tp6m-1-fennec64-cold
     - raptor-tp6m-2-fennec64-cold
     - raptor-tp6m-3-fennec64-cold
@@ -750,6 +768,20 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-12-fennec64-cold
     - raptor-tp6m-13-fennec64-cold
     - raptor-tp6m-14-fennec64-cold
+    - raptor-tp6m-1-fennec68-cold
+    - raptor-tp6m-2-fennec68-cold
+    - raptor-tp6m-3-fennec68-cold
+    - raptor-tp6m-4-fennec68-cold
+    - raptor-tp6m-5-fennec68-cold
+    - raptor-tp6m-6-fennec68-cold
+    - raptor-tp6m-7-fennec68-cold
+    - raptor-tp6m-8-fennec68-cold
+    - raptor-tp6m-9-fennec68-cold
+    - raptor-tp6m-10-fennec68-cold
+    - raptor-tp6m-11-fennec68-cold
+    - raptor-tp6m-12-fennec68-cold
+    - raptor-tp6m-13-fennec68-cold
+    - raptor-tp6m-14-fennec68-cold
     - raptor-tp6m-1-refbrow-cold
     - raptor-tp6m-2-refbrow-cold
     - raptor-tp6m-3-refbrow-cold
@@ -777,6 +809,7 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-25-refbrow-cold
     - raptor-tp6m-26-refbrow-cold
     - raptor-tp6m-27-refbrow-cold
+    - raptor-tp6m-28-refbrow-cold
 
 android-hw-arm7-raptor-power:
     - raptor-speedometer-geckoview-power
@@ -880,6 +913,16 @@ android-hw-arm7-raptor-nightly:
     - raptor-tp6m-8-fennec64
     - raptor-tp6m-9-fennec64
     - raptor-tp6m-10-fennec64
+    - raptor-tp6m-1-fennec68
+    - raptor-tp6m-2-fennec68
+    - raptor-tp6m-3-fennec68
+    - raptor-tp6m-4-fennec68
+    - raptor-tp6m-5-fennec68
+    - raptor-tp6m-6-fennec68
+    - raptor-tp6m-7-fennec68
+    - raptor-tp6m-8-fennec68
+    - raptor-tp6m-9-fennec68
+    - raptor-tp6m-10-fennec68
 
 android-hw-aarch64-raptor-nightly:
     - raptor-speedometer-fennec

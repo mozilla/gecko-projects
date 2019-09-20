@@ -837,6 +837,11 @@ class nsIWidget : public nsISupports {
   virtual nsSizeMode SizeMode() = 0;
 
   /**
+   * Ask whether the window is tiled.
+   */
+  virtual bool IsTiled() const = 0;
+
+  /**
    * Ask wether the widget is fully occluded
    */
   virtual bool IsFullyOccluded() const = 0;
@@ -2066,6 +2071,10 @@ class nsIWidget : public nsISupports {
       const nsAString& aText,
       const nsTArray<mozilla::FontRange>& aFontRangeArray,
       const bool aIsVertical, const LayoutDeviceIntPoint& aPoint) {}
+
+  virtual void RequestFxrOutput() {
+    MOZ_ASSERT(false, "This function should only execute in Windows");
+  }
 
 #if defined(MOZ_WIDGET_ANDROID)
   /**

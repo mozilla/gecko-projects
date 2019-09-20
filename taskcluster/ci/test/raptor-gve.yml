@@ -6,7 +6,10 @@ job-defaults:
     max-run-time: 1800
     suite: raptor
     workdir: /builds/worker
-    run-on-projects: ['mozilla-central']
+    run-on-projects:
+        by-test-platform:
+            .*: ['mozilla-central']
+            default: ['mozilla-central']
     target: geckoview_example.apk
     tier: 2
     virtualization: hardware
@@ -895,6 +898,26 @@ raptor-tp6m-27-geckoview-cold:
     mozharness:
         extra-options:
             - --test=raptor-tp6m-cold-27
+            - --app=geckoview
+            - --binary=org.mozilla.geckoview_example
+            - --activity=org.mozilla.geckoview_example.GeckoViewActivity
+
+raptor-tp6m-28-geckoview-cold:
+    description: "Raptor tp6m-28 cold page-load on GeckoView Example"
+    max-run-time: 2700
+    try-name: raptor-tp6m-28-geckoview-cold
+    treeherder-symbol: Rap(tp6m-c-28)
+    run-on-projects:
+        by-test-platform:
+            android-hw-.*/opt: ['mozilla-central']
+            android-hw-p2-.*-api-16/pgo: ['trunk']
+            android-hw-p2-.*aarch64.*/pgo: ['trunk', 'mozilla-beta']
+            android-hw-g5.*/pgo: ['mozilla-central']
+            default: ['trunk', 'mozilla-beta']
+    e10s: true
+    mozharness:
+        extra-options:
+            - --test=raptor-tp6m-cold-28
             - --app=geckoview
             - --binary=org.mozilla.geckoview_example
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity

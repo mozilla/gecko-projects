@@ -59,6 +59,10 @@ open class BaseSessionTest(noErrorCollector: Boolean = false) {
         const val COLORS_HTML_PATH = "/assets/www/colors.html"
         const val FIXED_BOTTOM = "/assets/www/fixedbottom.html"
         const val STORAGE_TITLE_HTML_PATH = "/assets/www/reflect_local_storage_into_title.html"
+        const val HUNG_SCRIPT = "/assets/www/hungScript.html"
+        const val PUSH_HTML_PATH = "/assets/www/push/push.html"
+        const val OPEN_WINDOW_PATH = "/assets/www/worker/open_window.html"
+        const val OPEN_WINDOW_TARGET_PATH = "/assets/www/worker/open_window_target.html"
     }
 
     @get:Rule val sessionRule = GeckoSessionTestRule()

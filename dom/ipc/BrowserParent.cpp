@@ -652,7 +652,7 @@ void BrowserParent::Destroy() {
 
   mIsDestroyed = true;
 
-  ContentParent::NotifyTabDestroying(this->GetTabId(), Manager()->ChildID());
+  Manager()->NotifyTabDestroying();
 
   mMarkedDestroying = true;
 }
@@ -1304,6 +1304,24 @@ void BrowserParent::SendMouseEvent(const nsAString& aType, float aX, float aY,
                                              aClickCount, aModifiers,
                                              aIgnoreRootScrollFrame);
   }
+}
+
+void BrowserParent::MouseEnterIntoWidget() {
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (widget) {
+    // When we mouseenter the tab, the tab's cursor should
+    // become the current cursor.  When we mouseexit, we stop.
+    mTabSetsCursor = true;
+    if (mCursor != eCursorInvalid) {
+      widget->SetCursor(mCursor, mCustomCursor, mCustomCursorHotspotX,
+                        mCustomCursorHotspotY);
+    }
+  }
+
+  // Mark that we have missed a mouse enter event, so that
+  // the next mouse event will create a replacement mouse
+  // enter event and send it to the child.
+  mIsMouseEnterIntoWidgetEventSuppressed = true;
 }
 
 void BrowserParent::SendRealMouseEvent(WidgetMouseEvent& aEvent) {
@@ -2246,12 +2264,14 @@ BrowserParent::GetChildToParentConversionMatrix() {
 }
 
 void BrowserParent::SetChildToParentConversionMatrix(
-    const Maybe<LayoutDeviceToLayoutDeviceMatrix4x4>& aMatrix) {
+    const Maybe<LayoutDeviceToLayoutDeviceMatrix4x4>& aMatrix,
+    const ScreenRect& aRemoteDocumentRect) {
   mChildToParentConversionMatrix = aMatrix;
   if (mIsDestroyed) {
     return;
   }
-  mozilla::Unused << SendChildToParentMatrix(ToUnknownMatrix(aMatrix));
+  mozilla::Unused << SendChildToParentMatrix(ToUnknownMatrix(aMatrix),
+                                             aRemoteDocumentRect);
 }
 
 LayoutDeviceIntPoint BrowserParent::GetChildProcessOffset() {
@@ -2690,11 +2710,12 @@ void BrowserParent::ReconstructWebProgressAndRequest(
 
 mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
     const Maybe<nsCString>& aDocShellCaps, const Maybe<bool>& aPrivatedMode,
-    const nsTArray<nsCString>&& aPositions,
-    const nsTArray<int32_t>&& aPositionDescendants,
+    nsTArray<nsCString>&& aPositions, nsTArray<int32_t>&& aPositionDescendants,
     const nsTArray<InputFormData>& aInputs,
     const nsTArray<CollectedInputDataValue>& aIdVals,
     const nsTArray<CollectedInputDataValue>& aXPathVals,
+    nsTArray<nsCString>&& aOrigins, nsTArray<nsString>&& aKeys,
+    nsTArray<nsString>&& aValues, const bool aIsFullStorage,
     const uint32_t& aFlushId, const bool& aIsFinal, const uint32_t& aEpoch) {
   UpdateSessionStoreData data;
   if (aDocShellCaps.isSome()) {
@@ -2731,6 +2752,16 @@ mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
     data.mNumXPath.Construct().Assign(std::move(numXPath));
     data.mInnerHTML.Construct().Assign(std::move(innerHTML));
     data.mUrl.Construct().Assign(std::move(url));
+  }
+  // In normal case, we only update the storage when needed.
+  // However, we need to reset the session storage(aOrigins.Length() will be 0)
+  //   if the usage is over the "browser_sessionstore_dom_storage_limit".
+  // In this case, aIsFullStorage is true.
+  if (aOrigins.Length() != 0 || aIsFullStorage) {
+    data.mStorageOrigins.Construct().Assign(std::move(aOrigins));
+    data.mStorageKeys.Construct().Assign(std::move(aKeys));
+    data.mStorageValues.Construct().Assign(std::move(aValues));
+    data.mIsFullStorage.Construct() = aIsFullStorage;
   }
 
   nsCOMPtr<nsISessionStoreFunctions> funcs =
@@ -3843,14 +3874,16 @@ mozilla::ipc::IPCResult BrowserParent::RecvGetSystemFont(nsCString* aFontName) {
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult BrowserParent::RecvFireFrameLoadEvent(bool aIsTrusted) {
+mozilla::ipc::IPCResult BrowserParent::RecvMaybeFireEmbedderLoadEvents(
+    bool aIsTrusted, bool aFireLoadAtEmbeddingElement) {
   BrowserBridgeParent* bridge = GetBrowserBridgeParent();
   if (!bridge) {
     NS_WARNING("Received `load` event on unbridged BrowserParent!");
     return IPC_OK();
   }
 
-  Unused << bridge->SendFireFrameLoadEvent(aIsTrusted);
+  Unused << bridge->SendMaybeFireEmbedderLoadEvents(
+      aIsTrusted, aFireLoadAtEmbeddingElement);
   return IPC_OK();
 }
 
@@ -3910,31 +3943,32 @@ void BrowserParent::OnSubFrameCrashed() {
   // Find all same process sub tree nodes and detach them, cache all
   // other nodes in the sub tree.
   mBrowsingContext->PostOrderWalk([&](auto* aContext) {
-    // Post-order means bottom up in our case, which means that all
-    // same-process, i.e. crashing process have already been detached, and
-    // all others should only be cached and torn down regulalarly.
+    // By iterating in reverse we can deal with detach removing the child that
+    // we're currently on
+    for (auto it = aContext->GetChildren().rbegin();
+         it != aContext->GetChildren().rend(); it++) {
+      RefPtr<BrowsingContext> context = *it;
+      if (context->Canonical()->IsOwnedByProcess(processId)) {
+        // Hold a reference to `context` until the response comes back to
+        // ensure it doesn't die while messages relating to this context are
+        // in-flight.
+        auto resolve = [context](bool) {};
+        auto reject = [context](ResponseRejectReason) {};
+        context->Group()->EachOtherParent(manager, [&](auto* aParent) {
+          aParent->SendDetachBrowsingContext(context->Id(), resolve, reject);
+        });
 
+        context->Detach(/* aFromIPC */ true);
+      }
+    }
+
+    // Cache all the children not owned by crashing process. Note that
+    // all remaining children are out of process, which makes it ok to
+    // just cache.
     aContext->Group()->EachOtherParent(manager, [&](auto* aParent) {
       Unused << aParent->SendCacheBrowsingContextChildren(aContext);
     });
     aContext->CacheChildren(/* aFromIPC */ true);
-
-    // We will never detach the root node of the subtree since
-    // we've changed the owner process to be different from
-    // processId.
-    if (aContext->Canonical()->IsOwnedByProcess(processId)) {
-      // Hold a reference to `context` until the response comes back to
-      // ensure it doesn't die while messages relating to this context are
-      // in-flight.
-      RefPtr<BrowsingContext> context = aContext;
-      auto resolve = [context](bool) {};
-      auto reject = [context](ResponseRejectReason) {};
-      aContext->Group()->EachOtherParent(manager, [&](auto* aParent) {
-        aParent->SendDetachBrowsingContext(aContext->Id(), resolve, reject);
-      });
-
-      aContext->Detach(/* aFromIPC */ true);
-    }
   });
 
   MOZ_DIAGNOSTIC_ASSERT(!mBrowsingContext->GetChildren().Length());

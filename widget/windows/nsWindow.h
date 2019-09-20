@@ -533,6 +533,9 @@ class nsWindow final : public nsWindowBase {
   already_AddRefed<SourceSurface> GetFallbackScrollSnapshot(
       const RECT& aRequiredClip);
 
+  void CreateCompositor() override;
+  void RequestFxrOutput();
+
  protected:
   nsCOMPtr<nsIWidget> mParent;
   nsIntSize mLastSize;
@@ -687,11 +690,16 @@ class nsWindow final : public nsWindowBase {
   static void InitMouseWheelScrollData();
 
   double mSizeConstraintsScale;  // scale in effect when setting constraints
+  int32_t mMaxTextureSize;
 
   // Pointer events processing and management
   WinPointerEvents mPointerEvents;
 
   ScreenPoint mLastPanGestureFocus;
+
+  // When true, used to indicate an async call to RequestFxrOutput to the GPU
+  // process after the Compositor is created
+  bool mRequestFxrOutputPending;
 };
 
 #endif  // Window_h__

@@ -34,6 +34,7 @@ export default class MonitorClass {
     let monitorReportLink = this.doc.getElementById("full-report-link");
     monitorReportLink.addEventListener("click", () => {
       this.doc.sendTelemetryEvent("click", "mtr_report_link");
+      RPMSendAsyncMessage("ClearMonitorCache");
     });
 
     let monitorAboutLink = this.doc.getElementById("monitor-link");
@@ -75,7 +76,7 @@ export default class MonitorClass {
       monitorCard.classList.add("has-logins");
       headerContent.setAttribute(
         "data-l10n-id",
-        "monitor-header-content-logged-in"
+        "monitor-header-content-signed-in"
       );
       this.renderContentForUserWithLogins(monitorData);
     } else {
@@ -85,7 +86,10 @@ export default class MonitorClass {
       );
       signUpForMonitorLink.href = this.buildMonitorUrl(monitorData.userEmail);
       signUpForMonitorLink.setAttribute("data-l10n-id", "monitor-sign-up");
-      headerContent.setAttribute("data-l10n-id", "monitor-header-content");
+      headerContent.setAttribute(
+        "data-l10n-id",
+        "monitor-header-content-no-account"
+      );
       signUpForMonitorLink.addEventListener("click", () => {
         this.doc.sendTelemetryEvent("click", "mtr_signup_button");
       });
@@ -138,7 +142,7 @@ export default class MonitorClass {
     );
     infoMonitoredAddresses.setAttribute(
       "data-l10n-id",
-      "info-monitored-addresses"
+      "info-monitored-emails"
     );
 
     const infoKnownBreaches = this.doc.getElementById("info-known-breaches");
@@ -146,7 +150,7 @@ export default class MonitorClass {
       "data-l10n-args",
       JSON.stringify({ count: monitorData.numBreaches })
     );
-    infoKnownBreaches.setAttribute("data-l10n-id", "info-known-breaches");
+    infoKnownBreaches.setAttribute("data-l10n-id", "info-known-breaches-found");
 
     const infoExposedPasswords = this.doc.getElementById(
       "info-exposed-passwords"
@@ -155,7 +159,10 @@ export default class MonitorClass {
       "data-l10n-args",
       JSON.stringify({ count: monitorData.passwords })
     );
-    infoExposedPasswords.setAttribute("data-l10n-id", "info-exposed-passwords");
+    infoExposedPasswords.setAttribute(
+      "data-l10n-id",
+      "info-exposed-passwords-found"
+    );
 
     // Display Lockwise section if there are any potential breached logins to report.
     if (monitorData.potentiallyBreachedLogins > 0) {

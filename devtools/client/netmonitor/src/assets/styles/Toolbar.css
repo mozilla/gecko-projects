@@ -33,7 +33,6 @@
 }
 
 /* Search button */
-
 .devtools-button.devtools-search-icon::before {
   background-image: url("chrome://devtools/skin/images/search.svg");
   background-size: 13px;

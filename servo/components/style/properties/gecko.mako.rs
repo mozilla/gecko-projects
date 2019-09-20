@@ -2199,10 +2199,15 @@ fn static_assert() {
     }
 
     pub fn set_list_style_type(&mut self, v: longhands::list_style_type::computed_value::T) {
+        use crate::gecko_bindings::bindings::Gecko_SetCounterStyleToName;
         use crate::gecko_bindings::bindings::Gecko_SetCounterStyleToString;
         use nsstring::{nsACString, nsCStr};
         use self::longhands::list_style_type::computed_value::T;
         match v {
+            T::None => unsafe {
+                Gecko_SetCounterStyleToName(&mut self.gecko.mCounterStyle,
+                                            atom!("none").into_addrefed());
+            }
             T::CounterStyle(s) => s.to_gecko_value(&mut self.gecko.mCounterStyle),
             T::String(s) => unsafe {
                 Gecko_SetCounterStyleToString(&mut self.gecko.mCounterStyle,
@@ -2224,9 +2229,19 @@ fn static_assert() {
     pub fn clone_list_style_type(&self) -> longhands::list_style_type::computed_value::T {
         use self::longhands::list_style_type::computed_value::T;
         use crate::values::Either;
-        use crate::values::generics::CounterStyleOrNone;
+        use crate::values::generics::CounterStyle;
+        use crate::gecko_bindings::bindings;
 
-        let result = CounterStyleOrNone::from_gecko_value(&self.gecko.mCounterStyle);
+        let name = unsafe {
+            bindings::Gecko_CounterStyle_GetName(&self.gecko.mCounterStyle)
+        };
+        if !name.is_null() {
+            let name = unsafe { Atom::from_raw(name) };
+            if name == atom!("none") {
+                return T::None;
+            }
+        }
+        let result = CounterStyle::from_gecko_value(&self.gecko.mCounterStyle);
         match result {
             Either::First(counter_style) => T::CounterStyle(counter_style),
             Either::Second(string) => T::String(string),
@@ -2564,8 +2579,7 @@ clip-path
     ${impl_simple('column_rule_style', 'mColumnRuleStyle')}
 </%self:impl_trait>
 
-<%self:impl_trait style_struct_name="Counters"
-                  skip_longhands="content counter-increment counter-reset counter-set">
+<%self:impl_trait style_struct_name="Counters" skip_longhands="content">
     pub fn ineffective_content_property(&self) -> bool {
         self.gecko.mContents.is_empty()
     }
@@ -2573,7 +2587,7 @@ clip-path
     pub fn set_content(&mut self, v: longhands::content::computed_value::T) {
         use crate::values::CustomIdent;
         use crate::values::generics::counters::{Content, ContentItem};
-        use crate::values::generics::CounterStyleOrNone;
+        use crate::values::generics::CounterStyle;
         use crate::gecko_bindings::structs::nsStyleContentData;
         use crate::gecko_bindings::structs::nsStyleContentAttr;
         use crate::gecko_bindings::structs::StyleContentType;
@@ -2594,7 +2608,7 @@ clip-path
             content_type: StyleContentType,
             name: CustomIdent,
             sep: &str,
-            style: CounterStyleOrNone,
+            style: CounterStyle,
         ) {
             debug_assert!(content_type == StyleContentType::Counter ||
                           content_type == StyleContentType::Counters);
@@ -2724,7 +2738,7 @@ clip-path
         use crate::gecko_bindings::structs::StyleContentType;
         use crate::values::generics::counters::{Content, ContentItem};
         use crate::values::{CustomIdent, Either};
-        use crate::values::generics::CounterStyleOrNone;
+        use crate::values::generics::CounterStyle;
         use crate::values::specified::Attr;
 
         if self.gecko.mContents.is_empty() {
@@ -2769,7 +2783,7 @@ clip-path
                             Atom::from_raw(gecko_function.mIdent.mRawPtr)
                         });
                         let style =
-                            CounterStyleOrNone::from_gecko_value(&gecko_function.mCounterStyle);
+                            CounterStyle::from_gecko_value(&gecko_function.mCounterStyle);
                         let style = match style {
                             Either::First(counter_style) => counter_style,
                             Either::Second(_) =>
@@ -2796,51 +2810,6 @@ clip-path
             }).collect::<Vec<_>>().into_boxed_slice()
         )
     }
-
-    % for counter_property in ["Increment", "Reset", "Set"]:
-        pub fn set_counter_${counter_property.lower()}(
-            &mut self,
-            v: longhands::counter_${counter_property.lower()}::computed_value::T
-        ) {
-            unsafe {
-                bindings::Gecko_ClearAndResizeCounter${counter_property}s(&mut *self.gecko, v.len() as u32);
-                for (i, pair) in v.0.into_vec().into_iter().enumerate() {
-                    self.gecko.m${counter_property}s[i].mCounter.set_move(
-                        RefPtr::from_addrefed(pair.name.0.into_addrefed())
-                    );
-                    self.gecko.m${counter_property}s[i].mValue = pair.value;
-                }
-            }
-        }
-
-        pub fn copy_counter_${counter_property.lower()}_from(&mut self, other: &Self) {
-            unsafe {
-                bindings::Gecko_CopyCounter${counter_property}sFrom(&mut *self.gecko, &*other.gecko)
-            }
-        }
-
-        pub fn reset_counter_${counter_property.lower()}(&mut self, other: &Self) {
-            self.copy_counter_${counter_property.lower()}_from(other)
-        }
-
-        pub fn clone_counter_${counter_property.lower()}(
-            &self
-        ) -> longhands::counter_${counter_property.lower()}::computed_value::T {
-            use crate::values::generics::counters::CounterPair;
-            use crate::values::CustomIdent;
-
-            longhands::counter_${counter_property.lower()}::computed_value::T::new(
-                self.gecko.m${counter_property}s.iter().map(|ref gecko_counter| {
-                    CounterPair {
-                        name: CustomIdent(unsafe {
-                            Atom::from_raw(gecko_counter.mCounter.mRawPtr)
-                        }),
-                        value: gecko_counter.mValue,
-                    }
-                }).collect()
-            )
-        }
-    % endfor
 </%self:impl_trait>
 
 <%self:impl_trait style_struct_name="UI" skip_longhands="-moz-force-broken-image-icon">

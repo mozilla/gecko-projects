@@ -333,8 +333,8 @@ sccache:
     fetch:
         type: git
         repo: https://github.com/mozilla/sccache
-        # 0.2.10 release
-        revision: bf4158875d5690294f4d4b2b190097b18c8d0a21
+        # 0.2.11 release
+        revision: d5b98e7e4b6d75c98d1e275c75922e22e28cf829
 
 openssl-1.1.0g:
     description: openssl 1.1.0g source code
@@ -356,7 +356,7 @@ mingw-w64:
     fetch:
         type: git
         repo: git://git.code.sf.net/p/mingw-w64/mingw-w64
-        revision: 2d52c4b3433e55b1c454f9567c0ae9adc4b83b41
+        revision: 0a1d495478d8ed1a94fc77b9dbb428b7e0372588
 
 libunwind:
     description: libunwind source code

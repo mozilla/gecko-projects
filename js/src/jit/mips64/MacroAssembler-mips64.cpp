@@ -1422,18 +1422,6 @@ Register MacroAssemblerMIPS64Compat::extractTag(const BaseIndex& address,
   return extractTag(Address(scratch, address.offset), scratch);
 }
 
-CodeOffsetJump MacroAssemblerMIPS64Compat::jumpWithPatch(RepatchLabel* label) {
-  // Only one branch per label.
-  MOZ_ASSERT(!label->used());
-
-  BufferOffset bo = nextOffset();
-  label->use(bo.getOffset());
-  ma_liPatchable(ScratchRegister, ImmWord(LabelBase::INVALID_OFFSET));
-  as_jr(ScratchRegister);
-  as_nop();
-  return CodeOffsetJump(bo.getOffset());
-}
-
 /////////////////////////////////////////////////////////////////
 // X86/X64-common/ARM/MIPS interface.
 /////////////////////////////////////////////////////////////////
@@ -2251,7 +2239,7 @@ void MacroAssemblerMIPS64Compat::wasmLoadI64Impl(
     const wasm::MemoryAccessDesc& access, Register memoryBase, Register ptr,
     Register ptrScratch, Register64 output, Register tmp) {
   uint32_t offset = access.offset();
-  MOZ_ASSERT(offset < wasm::OffsetGuardLimit);
+  MOZ_ASSERT(offset < wasm::MaxOffsetGuardLimit);
   MOZ_ASSERT_IF(offset, ptrScratch != InvalidReg);
 
   // Maybe add the offset.
@@ -2310,7 +2298,7 @@ void MacroAssemblerMIPS64Compat::wasmStoreI64Impl(
     const wasm::MemoryAccessDesc& access, Register64 value, Register memoryBase,
     Register ptr, Register ptrScratch, Register tmp) {
   uint32_t offset = access.offset();
-  MOZ_ASSERT(offset < wasm::OffsetGuardLimit);
+  MOZ_ASSERT(offset < wasm::MaxOffsetGuardLimit);
   MOZ_ASSERT_IF(offset, ptrScratch != InvalidReg);
 
   // Maybe add the offset.

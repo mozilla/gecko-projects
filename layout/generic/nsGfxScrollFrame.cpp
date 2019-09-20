@@ -2103,7 +2103,6 @@ ScrollFrameHelper::ScrollFrameHelper(nsContainerFrame* aOuter, bool aIsRoot)
       mCollapsedResizer(false),
       mWillBuildScrollableLayer(false),
       mIsScrollParent(false),
-      mIsScrollableLayerInRootContainer(false),
       mAddClipRectToLayer(false),
       mHasBeenScrolled(false),
       mIgnoreMomentumScroll(false),
@@ -3435,9 +3434,6 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   nsIScrollableFrame* sf = do_QueryFrame(mOuter);
   MOZ_ASSERT(sf);
 
-  // Are we the root content document's root scroll frame?
-  bool isRcdRsf = mIsRoot && mOuter->PresContext()->IsRootContentDocument();
-
   if (ignoringThisScrollFrame) {
     // Root scrollframes have FrameMetrics and clipping on their container
     // layers, so don't apply clipping again.
@@ -3455,17 +3451,6 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     }
 
     {
-      nsDisplayListBuilder::AutoCurrentActiveScrolledRootSetter asrSetter(
-          aBuilder);
-      if (aBuilder->IsPaintingToWindow() &&
-          StaticPrefs::layout_scroll_root_frame_containers() && mIsRoot) {
-        asrSetter.EnterScrollFrame(sf);
-        if (isRcdRsf) {
-          aBuilder->SetActiveScrolledRootForRootScrollframe(
-              aBuilder->CurrentActiveScrolledRoot());
-        }
-      }
-
       nsDisplayListBuilder::AutoBuildingDisplayList building(
           aBuilder, mOuter, visibleRect, dirtyRect);
 
@@ -3501,14 +3486,7 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       couldBuildLayer = true;
     } else {
       couldBuildLayer =
-          nsLayoutUtils::AsyncPanZoomEnabled(mOuter) && WantAsyncScroll() &&
-          // If we are using containers for root frames, and we are the root
-          // scroll frame for the display root, then we don't need a scroll
-          // info layer. nsDisplayList::PaintForFrame already calls
-          // ComputeFrameMetrics for us.
-          (!(StaticPrefs::layout_scroll_root_frame_containers() && mIsRoot) ||
-           (aBuilder->RootReferenceFrame()->PresContext() !=
-            mOuter->PresContext()));
+          nsLayoutUtils::AsyncPanZoomEnabled(mOuter) && WantAsyncScroll();
     }
   }
 
@@ -3596,8 +3574,7 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   bool haveRadii = mOuter->GetPaddingBoxBorderRadii(radii);
   if (mIsRoot) {
     clipRect.SizeTo(nsLayoutUtils::CalculateCompositionSizeForFrame(mOuter));
-    if ((StaticPrefs::layout_scroll_root_frame_containers() ||
-         !aBuilder->IsPaintingToWindow()) &&
+    if (!aBuilder->IsPaintingToWindow() &&
         mOuter->PresContext()->IsRootContentDocument()) {
       double res = mOuter->PresShell()->GetResolution();
       clipRect.width = NSToCoordRound(clipRect.width / res);
@@ -3646,11 +3623,6 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
         aBuilder);
     if (mWillBuildScrollableLayer && aBuilder->IsPaintingToWindow()) {
       asrSetter.EnterScrollFrame(sf);
-    }
-
-    if (mIsScrollableLayerInRootContainer && isRcdRsf) {
-      aBuilder->SetActiveScrolledRootForRootScrollframe(
-          aBuilder->CurrentActiveScrolledRoot());
     }
 
     if (mWillBuildScrollableLayer && aBuilder->BuildCompositorHitTestInfo()) {
@@ -3733,13 +3705,10 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     if (aBuilder->IsPaintingToWindow()) {
       mIsScrollParent = idSetter.ShouldForceLayerForScrollParent();
     }
-    if (idSetter.ShouldForceLayerForScrollParent() &&
-        !StaticPrefs::layout_scroll_root_frame_containers()) {
+    if (idSetter.ShouldForceLayerForScrollParent()) {
       // Note that forcing layerization of scroll parents follows the scroll
       // handoff chain which is subject to the out-of-flow-frames caveat noted
       // above (where the idSetter variable is created).
-      //
-      // This is not compatible when using containes for root scrollframes.
       MOZ_ASSERT(couldBuildLayer && mScrolledFrame->GetContent() &&
                  aBuilder->IsPaintingToWindow());
       if (!mWillBuildScrollableLayer) {
@@ -4042,9 +4011,6 @@ bool ScrollFrameHelper::DecideScrollableLayer(
     aBuilder->RecomputeCurrentAnimatedGeometryRoot();
   }
 
-  mIsScrollableLayerInRootContainer =
-      StaticPrefs::layout_scroll_root_frame_containers() &&
-      mWillBuildScrollableLayer && mIsRoot;
   return mWillBuildScrollableLayer;
 }
 
@@ -4052,7 +4018,7 @@ Maybe<ScrollMetadata> ScrollFrameHelper::ComputeScrollMetadata(
     LayerManager* aLayerManager, const nsIFrame* aContainerReferenceFrame,
     const Maybe<ContainerLayerParameters>& aParameters,
     const DisplayItemClip* aClip) const {
-  if (!mWillBuildScrollableLayer || mIsScrollableLayerInRootContainer) {
+  if (!mWillBuildScrollableLayer) {
     return Nothing();
   }
 
@@ -4089,9 +4055,7 @@ void ScrollFrameHelper::ClipLayerToDisplayPort(
   // in the compositor.
   if (!nsLayoutUtils::UsesAsyncScrolling(mOuter)) {
     Maybe<nsRect> parentLayerClip;
-    // For containerful frames, the clip is on the container layer.
-    if (aClip && (!StaticPrefs::layout_scroll_root_frame_containers() ||
-                  mAddClipRectToLayer)) {
+    if (aClip) {
       parentLayerClip = Some(aClip->GetClipRect());
     }
 
@@ -6999,13 +6963,6 @@ bool ScrollFrameHelper::GetSnapPointForDestination(
   if (snapPoint) {
     aDestination = snapPoint.ref();
     return true;
-  }
-  return false;
-}
-
-bool ScrollFrameHelper::UsesContainerScrolling() const {
-  if (StaticPrefs::layout_scroll_root_frame_containers()) {
-    return mIsRoot;
   }
   return false;
 }

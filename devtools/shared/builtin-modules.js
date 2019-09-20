@@ -22,6 +22,7 @@ const systemPrincipal = Services.scriptSecurityManager.getSystemPrincipal();
 
 // Steal various globals only available in JSM scope (and not Sandbox one)
 const {
+  BrowsingContext,
   console,
   DebuggerNotificationObserver,
   DOMPoint,
@@ -313,6 +314,7 @@ exports.globals = {
   atob,
   Blob,
   btoa,
+  BrowsingContext,
   console,
   CSS,
   // Make sure `define` function exists.  This allows defining some modules
@@ -338,7 +340,6 @@ exports.globals = {
   NodeFilter,
   DOMRect,
   Element,
-  Event,
   FileReader,
   FormData,
   isWorker: false,
@@ -400,10 +401,19 @@ lazyGlobal("indexedDB", () => {
 lazyGlobal("isReplaying", () => {
   return exports.modules.Debugger.recordReplayProcessKind() == "Middleman";
 });
-lazyGlobal("CSSRule", () => {
-  if (exports.modules.Debugger.recordReplayProcessKind() == "Middleman") {
-    const ReplayInspector = require("devtools/server/actors/replay/inspector");
-    return ReplayInspector.createCSSRule(CSSRule);
-  }
-  return CSSRule;
-});
+
+// Globals which the ReplayInspector provides an alternate implementation for.
+const inspectorGlobals = {
+  CSSRule,
+  Event,
+};
+
+for (const [name, value] of Object.entries(inspectorGlobals)) {
+  lazyGlobal(name, () => {
+    if (exports.modules.Debugger.recordReplayProcessKind() == "Middleman") {
+      const ReplayInspector = require("devtools/server/actors/replay/inspector");
+      return ReplayInspector[`create${name}`](value);
+    }
+    return value;
+  });
+}

@@ -237,6 +237,15 @@ panelview {
   padding: 0;
 }
 
+/* Remove padding on xul:arrowscrollbox to avoid extra padding on footer */
+#BMB_bookmarksPopup menupopup::part(popupbox) {
+  padding-bottom: 0px;
+}
+
+#BMB_bookmarksPopup menupopup[nofooterpopup=true]::part(popupbox) {
+  padding-bottom: 4px;
+}
+
 #confirmation-hint {
   --arrowpanel-background: #0060df;
   --arrowpanel-border-color: #0060df;
@@ -916,6 +925,7 @@ panelmultiview[mainViewId="PanelUI-fxa"] #PanelUI-remotetabs-syncnow {
    the panel is anchored to a toolbar button.
 */
 #PanelUI-remotetabs[mainview] #PanelUI-remotetabs-setupsync,
+#PanelUI-remotetabs[mainview] #PanelUI-remotetabs-syncdisabled,
 #PanelUI-remotetabs[mainview] #PanelUI-remotetabs-reauthsync,
 #PanelUI-remotetabs[mainview] #PanelUI-remotetabs-unverified,
 #PanelUI-remotetabs[mainview] #PanelUI-remotetabs-nodevicespane,
@@ -1862,6 +1872,10 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
   display: block;
   height: 1px;
   background: var(--panel-separator-color);
+}
+
+#PanelUI-whatsNew .whatsNew-message:last-child {
+  border-bottom: none;
 }
 
 #PanelUI-whatsNew .whatsNew-message-date {

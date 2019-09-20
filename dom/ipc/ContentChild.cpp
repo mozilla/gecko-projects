@@ -962,16 +962,17 @@ nsresult ContentChild::ProvideWindowCommon(
   // parent. Otherwise, the parent could send messages to us before we have a
   // proper TabGroup for that actor.
   RefPtr<TabGroup> tabGroup;
+  RefPtr<BrowsingContext> openerBC;
   if (aTabOpener && !aForceNoOpener) {
     // The new actor will use the same tab group as the opener.
     tabGroup = aTabOpener->TabGroup();
+    if (aParent) {
+      openerBC = nsPIDOMWindowOuter::From(aParent)->GetBrowsingContext();
+    }
   } else {
     tabGroup = new TabGroup();
   }
 
-  RefPtr<BrowsingContext> openerBC =
-      aParent ? nsPIDOMWindowOuter::From(aParent)->GetBrowsingContext()
-              : nullptr;
   RefPtr<BrowsingContext> browsingContext = BrowsingContext::Create(
       nullptr, openerBC, aName, BrowsingContext::Type::Content);
 
@@ -1099,17 +1100,25 @@ nsresult ContentChild::ProvideWindowCommon(
     newChild->SetMaxTouchPoints(maxTouchPoints);
     newChild->SetHasSiblings(hasSiblings);
 
-    // Set the opener window for this window before we start loading the
-    // document inside of it. We have to do this before loading the remote
-    // scripts, because they can poke at the document and cause the Document
-    // to be created before the openerwindow
-    nsCOMPtr<mozIDOMWindowProxy> windowProxy =
-        do_GetInterface(newChild->WebNavigation());
-    if (!aForceNoOpener && windowProxy && aParent) {
-      nsPIDOMWindowOuter* outer = nsPIDOMWindowOuter::From(windowProxy);
-      nsPIDOMWindowOuter* parent = nsPIDOMWindowOuter::From(aParent);
-      outer->SetOpenerWindow(parent, *aWindowIsNew);
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    if (nsCOMPtr<nsPIDOMWindowOuter> outer =
+            do_GetInterface(newChild->WebNavigation())) {
+      BrowsingContext* bc = outer->GetBrowsingContext();
+      auto parentBC =
+          aParent
+              ? nsPIDOMWindowOuter::From(aParent)->GetBrowsingContext()->Id()
+              : 0;
+
+      if (aForceNoOpener) {
+        MOZ_DIAGNOSTIC_ASSERT(!*aWindowIsNew || !bc->HadOriginalOpener());
+        MOZ_DIAGNOSTIC_ASSERT(bc->GetOpenerId() == 0);
+      } else {
+        MOZ_DIAGNOSTIC_ASSERT(!*aWindowIsNew ||
+                              bc->HadOriginalOpener() == !!parentBC);
+        MOZ_DIAGNOSTIC_ASSERT(bc->GetOpenerId() == parentBC);
+      }
     }
+#endif
 
     // Unfortunately we don't get a window unless we've shown the frame.  That's
     // pretty bogus; see bug 763602.
@@ -1127,6 +1136,15 @@ nsresult ContentChild::ProvideWindowCommon(
 
     if (!urlToLoad.IsEmpty()) {
       newChild->RecvLoadURL(urlToLoad, showInfo);
+    }
+
+    if (xpc::IsInAutomation()) {
+      if (nsCOMPtr<nsPIDOMWindowOuter> outer =
+              do_GetInterface(newChild->WebNavigation())) {
+        nsCOMPtr<nsIObserverService> obs(services::GetObserverService());
+        obs->NotifyObservers(
+            outer, "dangerous:test-only:new-browser-child-ready", nullptr);
+      }
     }
 
     browsingContext.forget(aReturn);
@@ -1226,6 +1244,14 @@ nsresult ContentChild::ProvideWindowCommon(
   // =====================
   // End Nested Event Loop
   // =====================
+
+  // It's possible for our new BrowsingContext to become discarded during the
+  // nested event loop, in which case we shouldn't return it, since our callers
+  // will generally not be prepared to deal with that.
+  if (*aReturn && (*aReturn)->IsDiscarded()) {
+    NS_RELEASE(*aReturn);
+    return NS_ERROR_ABORT;
+  }
 
   // We should have the results already set by the callbacks.
   MOZ_ASSERT_IF(NS_SUCCEEDED(rv), *aReturn);
@@ -3603,7 +3629,8 @@ mozilla::ipc::IPCResult ContentChild::RecvSaveRecording(
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvCrossProcessRedirect(
-    const uint32_t& aRegistrarId, nsIURI* aURI, const uint32_t& aNewLoadFlags,
+    const uint32_t& aRegistrarId, nsIURI* aURI,
+    const ReplacementChannelConfigInit& aConfig,
     const Maybe<LoadInfoArgs>& aLoadInfo, const uint64_t& aChannelId,
     nsIURI* aOriginalURI, const uint64_t& aIdentifier,
     const uint32_t& aRedirectMode) {
@@ -3616,11 +3643,7 @@ mozilla::ipc::IPCResult ContentChild::RecvCrossProcessRedirect(
   }
 
   nsCOMPtr<nsIChannel> newChannel;
-  rv = NS_NewChannelInternal(getter_AddRefs(newChannel), aURI, loadInfo,
-                             nullptr,  // PerformanceStorage
-                             nullptr,  // aLoadGroup
-                             nullptr,  // aCallbacks
-                             aNewLoadFlags);
+  rv = NS_NewChannelInternal(getter_AddRefs(newChannel), aURI, loadInfo);
 
   // We are sure this is a HttpChannelChild because the parent
   // is always a HTTP channel.
@@ -3649,6 +3672,11 @@ mozilla::ipc::IPCResult ContentChild::RecvCrossProcessRedirect(
   if (NS_FAILED(rv)) {
     return IPC_OK();
   }
+
+  HttpBaseChannel::ReplacementChannelConfig config(aConfig);
+  HttpBaseChannel::ConfigureReplacementChannel(
+      newChannel, config,
+      HttpBaseChannel::ConfigureReason::DocumentChannelReplacement);
 
   // connect parent.
   rv = httpChild->ConnectParent(aRegistrarId);  // creates parent channel

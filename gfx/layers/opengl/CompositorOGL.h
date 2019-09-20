@@ -37,14 +37,6 @@
 #include "nsXULAppAPI.h"      // for XRE_GetProcessType
 #include "nscore.h"           // for NS_IMETHOD
 
-#ifdef XP_MACOSX
-// This file uses IOSurfacePtr instead of IOSurfaceRef because IOSurfaceRef is
-// hard to forward declare, and including <IOSurface/IOSurface.h> brings in
-// MacTypes.h which defines Point and Rect which cause name lookup trouble.
-struct DummyIOSurface;
-typedef DummyIOSurface* IOSurfacePtr;
-#endif
-
 class nsIWidget;
 
 namespace mozilla {
@@ -195,6 +187,8 @@ class CompositorOGL final : public Compositor {
 
   bool SupportsLayerGeometry() const override;
 
+  void NormalDrawingDone() override;
+
   void EndFrame() override;
 
   void WaitForGPU() override;
@@ -282,11 +276,6 @@ class CompositorOGL final : public Compositor {
   void RegisterTextureSource(TextureSource* aTextureSource);
   void UnregisterTextureSource(TextureSource* aTextureSource);
 
-#ifdef XP_MACOSX
-  void RegisterIOSurface(IOSurfacePtr aSurface);
-  void UnregisterIOSurface(IOSurfacePtr aSurface);
-#endif
-
  private:
   template <typename Geometry>
   void DrawGeometry(const Geometry& aGeometry, const gfx::Rect& aRect,
@@ -300,6 +289,8 @@ class CompositorOGL final : public Compositor {
   bool SupportsTextureDirectMapping();
 
   void InsertFrameDoneSync();
+
+  bool NeedToRecreateFullWindowRenderTarget() const;
 
   /** Widget associated with this compositor */
   LayoutDeviceIntSize mWidgetSize;
@@ -328,7 +319,20 @@ class CompositorOGL final : public Compositor {
   /** Currently bound render target */
   RefPtr<CompositingRenderTargetOGL> mCurrentRenderTarget;
 
-  CompositingRenderTargetOGL* mWindowRenderTarget;
+  // The 1x1 dummy render target that's the "current" render target between
+  // BeginFrameForNativeLayers and EndFrame but outside pairs of
+  // Begin/EndRenderingToNativeLayer. Created on demand.
+  RefPtr<CompositingRenderTarget> mNativeLayersReferenceRT;
+
+  // The render target that profiler screenshots / frame recording read from.
+  // This will be the actual window framebuffer when rendering to a window, and
+  // it will be mFullWindowRenderTarget when rendering to native layers.
+  RefPtr<CompositingRenderTargetOGL> mWindowRenderTarget;
+
+  // Non-null when using native layers and frame recording is requested.
+  // EndNormalDrawing() maintains a copy of the entire window contents in this
+  // render target, by copying from the native layer render targets.
+  RefPtr<CompositingRenderTargetOGL> mFullWindowRenderTarget;
 
   /**
    * VBO that has some basics in it for a textured quad, including vertex
@@ -359,6 +363,10 @@ class CompositorOGL final : public Compositor {
    */
   bool mFrameInProgress;
 
+  // Only true between BeginFromeForNativeLayers and EndFrame, and only if the
+  // full window render target needed to be recreated in the current frame.
+  bool mShouldInvalidateWindow = false;
+
   /*
    * Clear aRect on current render target.
    */
@@ -366,11 +374,28 @@ class CompositorOGL final : public Compositor {
 
   /* Start a new frame.
    */
+  Maybe<gfx::IntRect> BeginFrameForWindow(
+      const nsIntRegion& aInvalidRegion, const Maybe<gfx::IntRect>& aClipRect,
+      const gfx::IntRect& aRenderBounds,
+      const nsIntRegion& aOpaqueRegion) override;
+
+  Maybe<gfx::IntRect> BeginFrameForTarget(
+      const nsIntRegion& aInvalidRegion, const Maybe<gfx::IntRect>& aClipRect,
+      const gfx::IntRect& aRenderBounds, const nsIntRegion& aOpaqueRegion,
+      gfx::DrawTarget* aTarget, const gfx::IntRect& aTargetBounds) override;
+
+  void BeginFrameForNativeLayers() override;
+
+  Maybe<gfx::IntRect> BeginRenderingToNativeLayer(
+      const nsIntRegion& aInvalidRegion, const Maybe<gfx::IntRect>& aClipRect,
+      const nsIntRegion& aOpaqueRegion, NativeLayer* aNativeLayer) override;
+
+  void EndRenderingToNativeLayer() override;
+
   Maybe<gfx::IntRect> BeginFrame(const nsIntRegion& aInvalidRegion,
                                  const Maybe<gfx::IntRect>& aClipRect,
                                  const gfx::IntRect& aRenderBounds,
-                                 const nsIntRegion& aOpaqueRegion,
-                                 NativeLayer* aNativeLayer) override;
+                                 const nsIntRegion& aOpaqueRegion);
 
   ShaderConfigOGL GetShaderConfigFor(
       Effect* aEffect, TextureSourceOGL* aSourceMask = nullptr,
@@ -471,6 +496,12 @@ class CompositorOGL final : public Compositor {
    */
   GLint FlipY(GLint y) const { return mViewportSize.height - y; }
 
+  // The DrawTarget from BeginFrameForTarget, which EndFrame needs to copy the
+  // window contents into.
+  // Only non-null between BeginFrameForTarget and EndFrame.
+  RefPtr<gfx::DrawTarget> mTarget;
+  gfx::IntRect mTargetBounds;
+
   RefPtr<CompositorTexturePoolOGL> mTexturePool;
 
   // The native layer that we're currently rendering to, if any.
@@ -493,18 +524,6 @@ class CompositorOGL final : public Compositor {
   gfx::IntSize mViewportSize;
 
   ShaderProgramOGL* mCurrentProgram;
-
-#ifdef XP_MACOSX
-  struct IOSurfaceRefHasher {
-    std::size_t operator()(const IOSurfacePtr& aSurface) const {
-      return HashGeneric(reinterpret_cast<uintptr_t>(aSurface));
-    }
-  };
-
-  std::unordered_map<IOSurfacePtr, RefPtr<CompositingRenderTargetOGL>,
-                     IOSurfaceRefHasher>
-      mRegisteredIOSurfaceRenderTargets;
-#endif
 };
 
 }  // namespace layers

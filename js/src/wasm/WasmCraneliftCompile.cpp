@@ -96,13 +96,6 @@ static bool GenerateCraneliftCode(WasmMacroAssembler& masm,
   uint32_t codeEnd = masm.currentOffset();
 #endif
 
-  // Cranelift isn't aware of pinned registers in general, so we need to reload
-  // both TLS and pinned regs from the stack.
-  // TODO(bug 1507820): We should teach Cranelift to reload this register
-  // itself, so we don't have to do it manually.
-  masm.loadWasmTlsRegFromFrame();
-  masm.loadWasmPinnedRegsFromTls();
-
   wasm::GenerateFunctionEpilogue(masm, func.framePushed, offsets);
 
   if (func.numRodataRelocs > 0) {
@@ -227,7 +220,20 @@ class AutoCranelift {
 
  public:
   explicit AutoCranelift(const ModuleEnvironment& env)
-      : env_(env), compiler_(nullptr) {}
+      : env_(env), compiler_(nullptr) {
+#ifdef WASM_SUPPORTS_HUGE_MEMORY
+    if (env.hugeMemoryEnabled()) {
+      // In the huge memory configuration, we always reserve the full 4 GB
+      // index space for a heap.
+      staticEnv_.staticMemoryBound = HugeIndexRange;
+      staticEnv_.memoryGuardSize = HugeOffsetGuardLimit;
+    } else {
+      staticEnv_.memoryGuardSize = OffsetGuardLimit;
+    }
+#endif
+    // Otherwise, heap bounds are stored in the `boundsCheckLimit` field
+    // of TlsData.
+  }
   bool init() {
     compiler_ = cranelift_compiler_create(&staticEnv_, &env_);
     return !!compiler_;
@@ -247,10 +253,8 @@ CraneliftFuncCompileInput::CraneliftFuncCompileInput(
       index(func.index),
       offset_in_module(func.lineOrBytecode) {}
 
-#ifndef WASM_HUGE_MEMORY
 static_assert(offsetof(TlsData, boundsCheckLimit) == sizeof(size_t),
               "fix make_heap() in wasm2clif.rs");
-#endif
 
 CraneliftStaticEnvironment::CraneliftStaticEnvironment()
     :
@@ -280,18 +284,9 @@ CraneliftStaticEnvironment::CraneliftStaticEnvironment()
 #else
       platformIsWindows(false),
 #endif
-      staticMemoryBound(
-#ifdef WASM_HUGE_MEMORY
-          // In the huge memory configuration, we always reserve the full 4 GB
-          // index space for a heap.
-          IndexRange
-#else
-          // Otherwise, heap bounds are stored in the `boundsCheckLimit` field
-          // of TlsData.
-          0
-#endif
-          ),
-      memoryGuardSize(OffsetGuardLimit),
+      staticMemoryBound(0),
+      memoryGuardSize(0),
+      memoryBaseTlsOffset(offsetof(TlsData, memoryBase)),
       instanceTlsOffset(offsetof(TlsData, instance)),
       interruptTlsOffset(offsetof(TlsData, interrupt)),
       cxTlsOffset(offsetof(TlsData, cx)),
@@ -432,7 +427,7 @@ bool wasm::CraneliftCompileFunctions(const ModuleEnvironment& env,
     uint32_t totalCodeSize = masm.currentOffset();
     uint8_t* codeBuf = (uint8_t*)js_malloc(totalCodeSize);
     if (codeBuf) {
-      masm.executableCopy(codeBuf, totalCodeSize);
+      masm.executableCopy(codeBuf);
 
       const CodeRangeVector& codeRanges = code->codeRanges;
       MOZ_ASSERT(codeRanges.length() >= inputs.length());

@@ -64,6 +64,8 @@ class AboutLoginsChild extends ActorChild {
               "AboutLogins:MasterPasswordRequest"
             );
           },
+          // Default to enabled just in case a search is attempted before we get a response.
+          masterPasswordEnabled: true,
         };
         waivedContent.AboutLoginsUtils = Cu.cloneInto(
           AboutLoginsUtils,
@@ -72,6 +74,14 @@ class AboutLoginsChild extends ActorChild {
             cloneFunctions: true,
           }
         );
+
+        const SUPPORT_URL =
+          Services.urlFormatter.formatURLPref("app.support.baseURL") +
+          "firefox-lockwise";
+        let loginIntro = Cu.waiveXrays(
+          this.content.document.querySelector("login-intro")
+        );
+        loginIntro.supportURL = SUPPORT_URL;
         break;
       }
       case "AboutLoginsCopyLoginDetail": {
@@ -131,12 +141,14 @@ class AboutLoginsChild extends ActorChild {
         break;
       }
       case "AboutLoginsRecordTelemetryEvent": {
-        let { method, object } = event.detail;
+        let { method, object, extra = {} } = event.detail;
         try {
           Services.telemetry.recordEvent(
             TELEMETRY_EVENT_CATEGORY,
             method,
-            object
+            object,
+            null,
+            extra
           );
         } catch (ex) {
           Cu.reportError(
@@ -167,9 +179,6 @@ class AboutLoginsChild extends ActorChild {
       case "AboutLogins:AllLogins":
         this.sendToContent("AllLogins", message.data);
         break;
-      case "AboutLogins:LocalizeBadges":
-        this.sendToContent("LocalizeBadges", message.data);
-        break;
       case "AboutLogins:LoginAdded":
         this.sendToContent("LoginAdded", message.data);
         break;
@@ -186,6 +195,14 @@ class AboutLoginsChild extends ActorChild {
         break;
       case "AboutLogins:SendFavicons":
         this.sendToContent("SendFavicons", message.data);
+        break;
+      case "AboutLogins:Setup":
+        this.sendToContent("Setup", message.data);
+        Cu.waiveXrays(this.content).AboutLoginsUtils.masterPasswordEnabled =
+          message.data.masterPasswordEnabled;
+        break;
+      case "AboutLogins:ShowLoginItemError":
+        this.sendToContent("ShowLoginItemError", message.data);
         break;
       case "AboutLogins:SyncState":
         this.sendToContent("SyncState", message.data);

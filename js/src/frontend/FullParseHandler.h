@@ -102,7 +102,7 @@ class FullParseHandler {
         lazyOuterFunction_(cx, lazyOuterFunction),
         lazyInnerFunctionIndex(0),
         lazyClosedOverBindingIndex(0),
-        sourceKind_(SourceKind::Text) {}
+        sourceKind_(kind) {}
 
   static NullNode null() { return NullNode(); }
 
@@ -653,9 +653,13 @@ class FullParseHandler {
   }
 
   UnaryNodeType newExprStatement(Node expr, uint32_t end) {
-    MOZ_ASSERT(expr->pn_pos.end <= end);
+    MOZ_ASSERT_IF(sourceKind() == SourceKind::Text, expr->pn_pos.end <= end);
     return new_<UnaryNode>(ParseNodeKind::ExpressionStmt,
                            TokenPos(expr->pn_pos.begin, end), expr);
+  }
+
+  UnaryNodeType newExprStatement(Node expr) {
+    return newExprStatement(expr, expr->pn_pos.end);
   }
 
   TernaryNodeType newIfStatement(uint32_t begin, Node cond, Node thenBranch,
@@ -718,7 +722,8 @@ class FullParseHandler {
   }
 
   UnaryNodeType newReturnStatement(Node expr, const TokenPos& pos) {
-    MOZ_ASSERT_IF(expr, pos.encloses(expr->pn_pos));
+    MOZ_ASSERT_IF(expr && sourceKind() == SourceKind::Text,
+                  pos.encloses(expr->pn_pos));
     return new_<UnaryNode>(ParseNodeKind::ReturnStmt, pos, expr);
   }
 
@@ -737,7 +742,7 @@ class FullParseHandler {
   }
 
   UnaryNodeType newThrowStatement(Node expr, const TokenPos& pos) {
-    MOZ_ASSERT(pos.encloses(expr->pn_pos));
+    MOZ_ASSERT_IF(sourceKind() == SourceKind::Text, pos.encloses(expr->pn_pos));
     return new_<UnaryNode>(ParseNodeKind::ThrowStmt, pos, expr);
   }
 
@@ -909,7 +914,8 @@ class FullParseHandler {
   }
   void setBeginPosition(Node pn, uint32_t begin) {
     pn->pn_pos.begin = begin;
-    MOZ_ASSERT(pn->pn_pos.begin <= pn->pn_pos.end);
+    MOZ_ASSERT_IF(sourceKind() == SourceKind::Text,
+                  pn->pn_pos.begin <= pn->pn_pos.end);
   }
 
   void setEndPosition(Node pn, Node oth) {
@@ -917,7 +923,8 @@ class FullParseHandler {
   }
   void setEndPosition(Node pn, uint32_t end) {
     pn->pn_pos.end = end;
-    MOZ_ASSERT(pn->pn_pos.begin <= pn->pn_pos.end);
+    MOZ_ASSERT_IF(sourceKind() == SourceKind::Text,
+                  pn->pn_pos.begin <= pn->pn_pos.end);
   }
 
   uint32_t getFunctionNameOffset(Node func, TokenStreamAnyChars& ts) {

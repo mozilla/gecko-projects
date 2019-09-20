@@ -5,8 +5,8 @@
 use std::{collections::HashMap, convert::TryFrom, fmt, time::SystemTime};
 
 use dogear::{
-    debug, AbortSignal, CompletionOps, Content, Deletion, Guid, Item, Kind, MergedRoot, Tree,
-    Upload, Validity,
+    debug, AbortSignal, CompletionOps, Content, DeleteLocalItem, Guid, Item, Kind, MergedRoot,
+    Tree, UploadItem, UploadTombstone, Validity,
 };
 use nsstring::nsString;
 use storage::{Conn, Step};
@@ -370,6 +370,12 @@ impl<'s> dogear::Store for Store<'s> {
 
             let is_deleted: i64 = step.get_by_name("isDeleted")?;
             if is_deleted == 1 {
+                let needs_merge: i32 = step.get_by_name("needsMerge")?;
+                if needs_merge == 0 {
+                    // Ignore already-merged tombstones. These aren't persisted
+                    // locally, so merging them is a no-op.
+                    continue;
+                }
                 let raw_guid: nsString = step.get_by_name("guid")?;
                 let guid = Guid::from_utf16(&*raw_guid)?;
                 builder.deletion(guid);
@@ -408,13 +414,9 @@ impl<'s> dogear::Store for Store<'s> {
     }
 
     fn apply<'t>(&mut self, root: MergedRoot<'t>) -> Result<ApplyStatus> {
-        self.controller.err_if_aborted()?;
-        let ops = root.completion_ops();
+        let ops = root.completion_ops_with_signal(self.controller)?;
 
-        self.controller.err_if_aborted()?;
-        let deletions = root.deletions().collect::<Vec<_>>();
-
-        if ops.is_empty() && deletions.is_empty() && self.weak_uploads.is_empty() {
+        if ops.is_empty() && self.weak_uploads.is_empty() {
             // If we don't have any items to apply, upload, or delete,
             // no need to open a transaction at all.
             return Ok(ApplyStatus::Skipped);
@@ -428,13 +430,18 @@ impl<'s> dogear::Store for Store<'s> {
             return Err(Error::MergeConflict);
         }
 
-        self.controller.err_if_aborted()?;
         debug!(self.driver, "Updating local items in Places");
-        update_local_items_in_places(&tx, &self.driver, &ops, deletions)?;
+        update_local_items_in_places(&tx, &self.driver, &self.controller, &ops)?;
 
-        self.controller.err_if_aborted()?;
         debug!(self.driver, "Staging items to upload");
-        stage_items_to_upload(&tx, &ops.upload, &self.weak_uploads)?;
+        stage_items_to_upload(
+            &tx,
+            &self.driver,
+            &self.controller,
+            &ops.upload_items,
+            &ops.upload_tombstones,
+            &self.weak_uploads,
+        )?;
 
         cleanup(&tx)?;
         tx.commit()?;
@@ -458,10 +465,14 @@ impl<'s> dogear::Store for Store<'s> {
 fn update_local_items_in_places<'t>(
     db: &Conn,
     driver: &Driver,
+    controller: &AbortController,
     ops: &CompletionOps<'t>,
-    deletions: Vec<Deletion>,
 ) -> Result<()> {
-    // Clean up any observer notifications left over from the last sync.
+    debug!(
+        driver,
+        "Cleaning up observer notifications left from last sync"
+    );
+    controller.err_if_aborted()?;
     db.exec(
         "DELETE FROM itemsAdded;
          DELETE FROM guidsChanged;
@@ -492,6 +503,7 @@ fn update_local_items_in_places<'t>(
             repeat_sql_vars(chunk.len()),
         ))?;
         for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
             let remote_guid = nsString::from(&*op.remote_node().guid);
             statement.bind_by_index(index as u32, remote_guid)?;
         }
@@ -500,6 +512,7 @@ fn update_local_items_in_places<'t>(
 
     // Trigger frecency updates for all new origins.
     debug!(driver, "Updating origins for new URLs");
+    controller.err_if_aborted()?;
     db.exec("DELETE FROM moz_updateoriginsinsert_temp")?;
 
     // Build a table of new and updated items.
@@ -556,6 +569,8 @@ fn update_local_items_in_places<'t>(
             now,
         ))?;
         for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
+
             let offset = (index * 3) as u32;
 
             // In most cases, the merged and remote GUIDs are the same for new
@@ -605,6 +620,8 @@ fn update_local_items_in_places<'t>(
             })
         ))?;
         for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
+
             let offset = (index * 2) as u32;
 
             let local_guid = nsString::from(&*op.local_node().guid);
@@ -632,6 +649,8 @@ fn update_local_items_in_places<'t>(
             })
         ))?;
         for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
+
             let offset = (index * 2) as u32;
 
             let merged_guid = nsString::from(&*op.merged_node.guid);
@@ -643,63 +662,74 @@ fn update_local_items_in_places<'t>(
         statement.execute()?;
     }
 
-    debug!(driver, "Staging deletions");
-    for chunk in deletions.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
-        // Inserting into `itemsToRemove` fires the `noteItemRemoved` trigger,
-        // which records info for deleted item observer notifications. It's
-        // important we do this before updating the structure, so that the
-        // trigger captures the old parent and position.
+    debug!(driver, "Removing tombstones for revived items");
+    for chunk in ops
+        .delete_local_tombstones
+        .chunks(SQLITE_MAX_VARIABLE_NUMBER)
+    {
         let mut statement = db.prepare(format!(
-            "INSERT INTO itemsToRemove(guid, localLevel, shouldUploadTombstone,
-                                       dateRemovedMicroseconds)
-             VALUES {}",
-            repeat_display(chunk.len(), ",", |index, f| {
-                let d = &chunk[index];
-                write!(
-                    f,
-                    "(?, {}, {}, {})",
-                    d.local_level, d.should_upload_tombstone as i8, now,
-                )
-            })
+            "DELETE FROM moz_bookmarks_deleted
+             WHERE guid IN ({})",
+            repeat_sql_vars(chunk.len()),
         ))?;
-        for (index, d) in chunk.iter().enumerate() {
-            statement.bind_by_index(index as u32, nsString::from(d.guid.as_str()))?;
+        for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
+            statement.bind_by_index(index as u32, nsString::from(&*op.guid().as_str()))?;
         }
         statement.execute()?;
     }
 
-    // Remove tombstones for revived items. We intentionally use three `IN`
-    // subqueries instead of one with `UNION ALL`s because SQLite's query
-    // planner can't unroll the latter into a multi-index OR.
-    debug!(driver, "Removing tombstones for revived items");
-    db.exec(
-        "DELETE FROM moz_bookmarks_deleted
-         WHERE guid IN (SELECT mergedGuid FROM itemsToApply) OR
-               guid IN (SELECT remoteGuid FROM itemsToApply) OR
-               guid IN (SELECT localGuid FROM changeGuidOps)",
-    )?;
+    debug!(
+        driver,
+        "Inserting new tombstones for non-syncable and invalid items"
+    );
+    for chunk in ops
+        .insert_local_tombstones
+        .chunks(SQLITE_MAX_VARIABLE_NUMBER)
+    {
+        let mut statement = db.prepare(format!(
+            "INSERT INTO moz_bookmarks_deleted(guid, dateRemoved)
+             VALUES {}",
+            repeat_display(chunk.len(), ",", |_, f| write!(f, "(?, {})", now)),
+        ))?;
+        for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
+            statement.bind_by_index(
+                index as u32,
+                nsString::from(&*op.remote_node().guid.as_str()),
+            )?;
+        }
+        statement.execute()?;
+    }
 
     debug!(driver, "Removing local items");
-    remove_local_items(&db)?;
+    for chunk in ops.delete_local_items.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
+        remove_local_items(&db, driver, controller, chunk)?;
+    }
 
     // Fires the `changeGuids` trigger.
     debug!(driver, "Changing GUIDs");
+    controller.err_if_aborted()?;
     db.exec("DELETE FROM changeGuidOps")?;
 
     debug!(driver, "Applying remote items");
-    apply_remote_items(&db)?;
+    apply_remote_items(db, driver, controller)?;
 
     // Trigger frecency updates for all affected origins.
     debug!(driver, "Updating origins for changed URLs");
+    controller.err_if_aborted()?;
     db.exec("DELETE FROM moz_updateoriginsupdate_temp")?;
 
     // Fires the `applyNewLocalStructure` trigger.
     debug!(driver, "Applying new local structure");
+    controller.err_if_aborted()?;
     db.exec("DELETE FROM applyNewLocalStructureOps")?;
 
-    // Reset the change counter for items that we don't need to upload.
-    debug!(driver, "Applying skip upload ops");
-    for chunk in ops.skip_upload.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
+    debug!(
+        driver,
+        "Resetting change counters for items that shouldn't be uploaded"
+    );
+    for chunk in ops.set_local_merged.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
         let mut statement = db.prepare(format!(
             "UPDATE moz_bookmarks SET
                syncChangeCounter = 0
@@ -707,14 +737,17 @@ fn update_local_items_in_places<'t>(
             repeat_sql_vars(chunk.len()),
         ))?;
         for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
             statement.bind_by_index(index as u32, nsString::from(&*op.merged_node.guid))?;
         }
         statement.execute()?;
     }
 
-    // Bump the counter for items that we should upload.
-    debug!(driver, "Applying flag for upload ops");
-    for chunk in ops.flag_for_upload.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
+    debug!(
+        driver,
+        "Bumping change counters for items that should be uploaded"
+    );
+    for chunk in ops.set_local_unmerged.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
         let mut statement = db.prepare(format!(
             "UPDATE moz_bookmarks SET
                syncChangeCounter = 1
@@ -722,14 +755,14 @@ fn update_local_items_in_places<'t>(
             repeat_sql_vars(chunk.len()),
         ))?;
         for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
             statement.bind_by_index(index as u32, nsString::from(&*op.merged_node.guid))?;
         }
         statement.execute()?;
     }
 
-    // Flag applied remote items as merged in the mirror.
-    debug!(driver, "Applying flag as merged ops");
-    for chunk in ops.flag_as_merged.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
+    debug!(driver, "Flagging applied remote items as merged");
+    for chunk in ops.set_remote_merged.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
         let mut statement = db.prepare(format!(
             "UPDATE items SET
                needsMerge = 0
@@ -737,6 +770,7 @@ fn update_local_items_in_places<'t>(
             repeat_sql_vars(chunk.len()),
         ))?;
         for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
             statement.bind_by_index(index as u32, nsString::from(op.guid().as_str()))?;
         }
         statement.execute()?;
@@ -746,8 +780,9 @@ fn update_local_items_in_places<'t>(
 }
 
 /// Upserts all new and updated items from the `itemsToApply` table into Places.
-fn apply_remote_items(db: &Conn) -> Result<()> {
-    // Record item added notifications for new items.
+fn apply_remote_items(db: &Conn, driver: &Driver, controller: &AbortController) -> Result<()> {
+    debug!(driver, "Recording item added notifications for new items");
+    controller.err_if_aborted()?;
     db.exec(
         "INSERT INTO itemsAdded(guid, keywordChanged, level)
          SELECT n.mergedGuid, n.newKeyword NOT NULL OR
@@ -759,7 +794,11 @@ fn apply_remote_items(db: &Conn) -> Result<()> {
          WHERE n.localId IS NULL",
     )?;
 
-    // Record item changed notifications for existing items.
+    debug!(
+        driver,
+        "Recording item changed notifications for existing items"
+    );
+    controller.err_if_aborted()?;
     db.exec(
         "INSERT INTO itemsChanged(itemId, oldTitle, oldPlaceId, keywordChanged,
                                  level)
@@ -777,6 +816,8 @@ fn apply_remote_items(db: &Conn) -> Result<()> {
     // Remove all keywords from old and new URLs, and remove new keywords from
     // all existing URLs. The `NOT NULL` conditions are important; they ensure
     // that SQLite uses our partial indexes, instead of a table scan.
+    debug!(driver, "Removing old keywords");
+    controller.err_if_aborted()?;
     db.exec(
         "DELETE FROM moz_keywords
          WHERE place_id IN (SELECT oldPlaceId FROM itemsToApply
@@ -788,7 +829,8 @@ fn apply_remote_items(db: &Conn) -> Result<()> {
     ",
     )?;
 
-    // Remove existing tags.
+    debug!(driver, "Removing old tags");
+    controller.err_if_aborted()?;
     db.exec(
         "DELETE FROM localTags
          WHERE placeId IN (SELECT oldPlaceId FROM itemsToApply
@@ -797,10 +839,12 @@ fn apply_remote_items(db: &Conn) -> Result<()> {
                            WHERE newPlaceId NOT NULL)",
     )?;
 
-    // Insert new items, using -1 as a placeholder for the parent ID and
-    // position. We'll update these later, when we apply the new local
+    // Insert and update items, using -1 for new items' parent IDs and
+    // positions. We'll update these later, when we apply the new local
     // structure. This is a full table scan on `itemsToApply`. The no-op
     // `WHERE` clause is necessary to avoid a parsing ambiguity.
+    debug!(driver, "Upserting new items");
+    controller.err_if_aborted()?;
     db.exec(format!(
         "INSERT INTO moz_bookmarks(id, guid, parent, position, type, fk, title,
                                    dateAdded,
@@ -835,6 +879,8 @@ fn apply_remote_items(db: &Conn) -> Result<()> {
     // would scan `itemsToApply` twice. The `oldPlaceId <> newPlaceId` and
     // `newPlaceId <> oldPlaceId` checks exclude items where the URL didn't
     // change; we don't need to recalculate their frecencies.
+    debug!(driver, "Flagging frecencies for recalculation");
+    controller.err_if_aborted()?;
     db.exec(
         "UPDATE moz_places SET
            frecency = -frecency
@@ -849,7 +895,8 @@ fn apply_remote_items(db: &Conn) -> Result<()> {
          )",
     )?;
 
-    // Insert new keywords for new URLs.
+    debug!(driver, "Inserting new keywords for new URLs");
+    controller.err_if_aborted()?;
     db.exec(
         "INSERT OR IGNORE INTO moz_keywords(keyword, place_id, post_data)
          SELECT newKeyword, newPlaceId, ''
@@ -857,7 +904,8 @@ fn apply_remote_items(db: &Conn) -> Result<()> {
          WHERE newKeyword NOT NULL",
     )?;
 
-    // Insert new tags for new URLs.
+    debug!(driver, "Inserting new tags for new URLs");
+    controller.err_if_aborted()?;
     db.exec(
         "INSERT INTO localTags(tag, placeId, lastModifiedMicroseconds)
          SELECT t.tag, n.newPlaceId, n.lastModifiedMicroseconds
@@ -868,59 +916,87 @@ fn apply_remote_items(db: &Conn) -> Result<()> {
     Ok(())
 }
 
-/// Removes items that are deleted on one or both sides from Places, and inserts
-/// new tombstones for non-syncable items to delete remotely.
-fn remove_local_items(db: &Conn) -> Result<()> {
-    // Record observer notifications for removed items.
-    db.exec(
-        "INSERT INTO itemsRemoved(itemId, parentId, position, type, placeId,
+/// Removes deleted local items from Places.
+fn remove_local_items(
+    db: &Conn,
+    driver: &Driver,
+    controller: &AbortController,
+    ops: &[DeleteLocalItem],
+) -> Result<()> {
+    debug!(driver, "Recording observer notifications for removed items");
+    let mut observer_statement = db.prepare(format!(
+        "WITH
+         ops(guid, level) AS (VALUES {})
+         INSERT INTO itemsRemoved(itemId, parentId, position, type, placeId,
                                   guid, parentGuid, level)
          SELECT b.id, b.parent, b.position, b.type, b.fk,
-                b.guid, p.guid, d.localLevel
-         FROM itemsToRemove d
-         JOIN moz_bookmarks b ON b.guid = d.guid
+                b.guid, p.guid, n.level
+         FROM ops n
+         JOIN moz_bookmarks b ON b.guid = n.guid
          JOIN moz_bookmarks p ON p.id = b.parent",
-    )?;
+        repeat_display(ops.len(), ",", |index, f| {
+            let op = &ops[index];
+            write!(f, "(?, {})", op.local_node().level())
+        }),
+    ))?;
+    for (index, op) in ops.iter().enumerate() {
+        controller.err_if_aborted()?;
+        observer_statement.bind_by_index(
+            index as u32,
+            nsString::from(&*op.local_node().guid.as_str()),
+        )?;
+    }
+    observer_statement.execute()?;
 
-    // Flag URL frecency for recalculation.
-    db.exec(
+    debug!(driver, "Recalculating frecencies for removed bookmark URLs");
+    let mut frecency_statement = db.prepare(format!(
         "UPDATE moz_places SET
            frecency = -frecency
          WHERE id IN (SELECT b.fk FROM moz_bookmarks b
-                      JOIN itemsToRemove d ON d.guid = b.guid) AND
+                      WHERE b.guid IN ({})) AND
                frecency > 0",
-    )?;
+        repeat_sql_vars(ops.len())
+    ))?;
+    for (index, op) in ops.iter().enumerate() {
+        controller.err_if_aborted()?;
+        frecency_statement.bind_by_index(
+            index as u32,
+            nsString::from(&*op.local_node().guid.as_str()),
+        )?;
+    }
+    frecency_statement.execute()?;
 
-    // Remove annos for the deleted items. This can be removed in bug 1460577.
-    db.exec(
+    // This can be removed in bug 1460577.
+    debug!(driver, "Removing annos for deleted items");
+    let mut annos_statement = db.prepare(format!(
         "DELETE FROM moz_items_annos
          WHERE item_id = (SELECT b.id FROM moz_bookmarks b
-                          JOIN itemsToRemove d ON d.guid = b.guid)",
-    )?;
+                          WHERE b.guid IN ({}))",
+        repeat_sql_vars(ops.len()),
+    ))?;
+    for (index, op) in ops.iter().enumerate() {
+        controller.err_if_aborted()?;
+        annos_statement.bind_by_index(
+            index as u32,
+            nsString::from(&*op.local_node().guid.as_str()),
+        )?;
+    }
+    annos_statement.execute()?;
 
-    // Don't reupload tombstones for items that are already deleted on the
-    // server.
-    db.exec(
-        "DELETE FROM moz_bookmarks_deleted
-         WHERE guid IN (SELECT guid FROM itemsToRemove
-                        WHERE NOT shouldUploadTombstone)",
-    )?;
-
-    // Upload tombstones for non-syncable items. We can remove the
-    // `shouldUploadTombstone` check and persist tombstones unconditionally in
-    // bug 1343103.
-    db.exec(
-        "INSERT OR IGNORE INTO moz_bookmarks_deleted(guid, dateRemoved)
-         SELECT guid, dateRemovedMicroseconds
-         FROM itemsToRemove
-         WHERE shouldUploadTombstone",
-    )?;
-
-    // Remove the item from Places.
-    db.exec(
+    debug!(driver, "Removing deleted items from Places");
+    let mut delete_statement = db.prepare(format!(
         "DELETE FROM moz_bookmarks
-         WHERE guid IN (SELECT guid FROM itemsToRemove)",
-    )?;
+         WHERE guid IN ({})",
+        repeat_sql_vars(ops.len()),
+    ))?;
+    for (index, op) in ops.iter().enumerate() {
+        controller.err_if_aborted()?;
+        delete_statement.bind_by_index(
+            index as u32,
+            nsString::from(&*op.local_node().guid.as_str()),
+        )?;
+    }
+    delete_statement.execute()?;
 
     Ok(())
 }
@@ -943,11 +1019,19 @@ fn remove_local_items(db: &Conn) -> Result<()> {
 /// items. The change counter in Places is the persistent record of items that
 /// we need to upload, so, if upload is interrupted or fails, we'll stage the
 /// items again on the next sync.
-fn stage_items_to_upload(db: &Conn, upload: &[Upload], weak_upload: &[nsString]) -> Result<()> {
-    // Clean up staged items left over from the last sync.
+fn stage_items_to_upload(
+    db: &Conn,
+    driver: &Driver,
+    controller: &AbortController,
+    upload_items: &[UploadItem],
+    upload_tombstones: &[UploadTombstone],
+    weak_upload: &[nsString],
+) -> Result<()> {
+    debug!(driver, "Cleaning up staged items left from last sync");
+    controller.err_if_aborted()?;
     db.exec("DELETE FROM itemsToUpload")?;
 
-    // Stage explicit weak uploads such as repair responses.
+    debug!(driver, "Staging weak uploads");
     for chunk in weak_upload.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
         let mut statement = db.prepare(format!(
             "INSERT INTO itemsToUpload(id, guid, syncChangeCounter, parentGuid,
@@ -960,6 +1044,7 @@ fn stage_items_to_upload(db: &Conn, upload: &[Upload], weak_upload: &[nsString])
             repeat_sql_vars(chunk.len()),
         ))?;
         for (index, guid) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
             statement.bind_by_index(index as u32, nsString::from(guid.as_ref()))?;
         }
         statement.execute()?;
@@ -968,6 +1053,8 @@ fn stage_items_to_upload(db: &Conn, upload: &[Upload], weak_upload: &[nsString])
     // Stage remotely changed items with older local creation dates. These are
     // tracked "weakly": if the upload is interrupted or fails, we won't
     // reupload the record on the next sync.
+    debug!(driver, "Staging items with older local dates added");
+    controller.err_if_aborted()?;
     db.exec(format!(
         "INSERT OR IGNORE INTO itemsToUpload(id, guid, syncChangeCounter,
                                              parentGuid, parentTitle, dateAdded,
@@ -979,8 +1066,8 @@ fn stage_items_to_upload(db: &Conn, upload: &[Upload], weak_upload: &[nsString])
         UploadItemsFragment("b"),
     ))?;
 
-    // Stage remaining locally changed items for upload.
-    for chunk in upload.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
+    debug!(driver, "Staging remaining locally changed items for upload");
+    for chunk in upload_items.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
         let mut statement = db.prepare(format!(
             "INSERT OR IGNORE INTO itemsToUpload(id, guid, syncChangeCounter,
                                                  parentGuid, parentTitle,
@@ -993,6 +1080,7 @@ fn stage_items_to_upload(db: &Conn, upload: &[Upload], weak_upload: &[nsString])
             repeat_sql_vars(chunk.len()),
         ))?;
         for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
             statement.bind_by_index(index as u32, nsString::from(&*op.merged_node.guid))?;
         }
         statement.execute()?;
@@ -1000,6 +1088,8 @@ fn stage_items_to_upload(db: &Conn, upload: &[Upload], weak_upload: &[nsString])
 
     // Record the child GUIDs of locally changed folders, which we use to
     // populate the `children` array in the record.
+    debug!(driver, "Staging structure to upload");
+    controller.err_if_aborted()?;
     db.exec(
         "
         INSERT INTO structureToUpload(guid, parentId, position)
@@ -1009,6 +1099,8 @@ fn stage_items_to_upload(db: &Conn, upload: &[Upload], weak_upload: &[nsString])
     )?;
 
     // Stage tags for outgoing bookmarks.
+    debug!(driver, "Staging tags to upload");
+    controller.err_if_aborted()?;
     db.exec(
         "
         INSERT INTO tagsToUpload(id, tag)
@@ -1019,20 +1111,25 @@ fn stage_items_to_upload(db: &Conn, upload: &[Upload], weak_upload: &[nsString])
 
     // Finally, stage tombstones for deleted items. Ignore conflicts if we have
     // tombstones for undeleted items; Places Maintenance should clean these up.
-    db.exec(
-        "
-        INSERT OR IGNORE INTO itemsToUpload(guid, syncChangeCounter, isDeleted)
-        SELECT guid, 1, 1 FROM moz_bookmarks_deleted",
-    )?;
+    debug!(driver, "Staging tombstones to upload");
+    for chunk in upload_tombstones.chunks(SQLITE_MAX_VARIABLE_NUMBER) {
+        let mut statement = db.prepare(format!(
+            "INSERT OR IGNORE INTO itemsToUpload(guid, syncChangeCounter, isDeleted)
+             VALUES {}",
+            repeat_display(chunk.len(), ",", |_, f| write!(f, "(?, 1, 1)"))
+        ))?;
+        for (index, op) in chunk.iter().enumerate() {
+            controller.err_if_aborted()?;
+            statement.bind_by_index(index as u32, nsString::from(op.guid().as_str()))?;
+        }
+        statement.execute()?;
+    }
 
     Ok(())
 }
 
 fn cleanup(db: &Conn) -> Result<()> {
-    db.exec(
-        "DELETE FROM itemsToApply;
-         DELETE FROM itemsToRemove;",
-    )?;
+    db.exec("DELETE FROM itemsToApply")?;
     Ok(())
 }
 

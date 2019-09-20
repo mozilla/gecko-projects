@@ -17,6 +17,7 @@
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/StaticPrefs_editor.h"
 #include "mozilla/StaticPrefs_findbar.h"
+#include "mozilla/StaticPrefs_fission.h"
 #include "mozilla/StaticPrefs_ui.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/widget/WidgetMessageUtils.h"
@@ -847,7 +848,8 @@ nsresult nsXPLookAndFeel::GetColorImpl(ColorID aID,
 #endif
 
   if (aID == ColorID::TextSelectBackgroundAttention) {
-    if (StaticPrefs::findbar_modalHighlight()) {
+    if (StaticPrefs::findbar_modalHighlight() &&
+        !StaticPrefs::fission_autostart()) {
       aResult = NS_RGBA(0, 0, 0, 0);
       return NS_OK;
     }
@@ -885,12 +887,13 @@ nsresult nsXPLookAndFeel::GetColorImpl(ColorID aID,
           !IsSpecialColor(aID, aResult)) {
         qcms_transform* transform = gfxPlatform::GetCMSInverseRGBTransform();
         if (transform) {
-          uint8_t color[3];
+          uint8_t color[4];
           color[0] = NS_GET_R(aResult);
           color[1] = NS_GET_G(aResult);
           color[2] = NS_GET_B(aResult);
+          color[3] = NS_GET_A(aResult);
           qcms_transform_data(transform, color, color, 1);
-          aResult = NS_RGB(color[0], color[1], color[2]);
+          aResult = NS_RGBA(color[0], color[1], color[2], color[3]);
         }
       }
 

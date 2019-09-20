@@ -19,7 +19,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   ObjectUtils: "resource://gre/modules/ObjectUtils.jsm",
   OS: "resource://gre/modules/osfile.jsm",
   SearchEngine: "resource://gre/modules/SearchEngine.jsm",
-  SearchEngineSelector: "resource://testing-common/SearchEngineSelector.jsm",
+  SearchEngineSelector: "resource://gre/modules/SearchEngineSelector.jsm",
   SearchTestUtils: "resource://testing-common/SearchTestUtils.jsm",
   SearchUtils: "resource://gre/modules/SearchUtils.jsm",
   Services: "resource://gre/modules/Services.jsm",
@@ -163,8 +163,8 @@ class SearchConfigTest {
     if (useEngineSelector) {
       let engines = [];
       let configs = await engineSelector.fetchEngineConfiguration(
-        region,
-        locale
+        locale,
+        region
       );
       for (let config of configs.engines) {
         let engine = await this._getExtensionEngine(config);
@@ -188,7 +188,13 @@ class SearchConfigTest {
       code: config.searchUrlGetExtraCodes,
     };
 
-    let locale = config.webExtensionLocale || "default";
+    // Currently wikipedia is the only engine that uses multiple
+    // locales and that isn't a tested engine so for now pick
+    // the first (only) locale.
+    let locale =
+      "webExtensionLocales" in config
+        ? config.webExtensionLocales[0]
+        : "default";
     // On startup the extension may have not finished parsing the
     // manifest, wait for that here.
     await policy.readyPromise;

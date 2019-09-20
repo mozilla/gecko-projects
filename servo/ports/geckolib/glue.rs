@@ -8,7 +8,7 @@ use cssparser::ToCss as ParserToCss;
 use cssparser::{ParseErrorKind, Parser, ParserInput, SourceLocation, UnicodeRange};
 use malloc_size_of::MallocSizeOfOps;
 use nsstring::{nsCString, nsString};
-use selectors::matching::{matches_selector, MatchingContext, MatchingMode};
+use selectors::matching::{matches_selector, MatchingContext, MatchingMode, VisitedHandlingMode};
 use selectors::{NthIndexCache, SelectorList};
 use servo_arc::{Arc, ArcBorrow, RawOffsetArc};
 use smallvec::SmallVec;
@@ -96,14 +96,14 @@ use style::gecko_bindings::sugar::ownership::{
     HasBoxFFI, HasSimpleFFI, Owned, OwnedOrNull, Strong,
 };
 use style::gecko_bindings::sugar::refptr::RefPtr;
-use style::global_style_data::{GlobalStyleData, GLOBAL_STYLE_DATA, STYLE_THREAD_POOL};
+use style::global_style_data::{GlobalStyleData, GLOBAL_STYLE_DATA, StyleThreadPool, STYLE_THREAD_POOL};
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::media_queries::MediaList;
 use style::parser::{self, Parse, ParserContext};
 use style::profiler_label;
 use style::properties::animated_properties::{AnimationValue, AnimationValueMap};
 use style::properties::{parse_one_declaration_into, parse_style_attribute};
-use style::properties::{ComputedValues, Importance, NonCustomPropertyId};
+use style::properties::{ComputedValues, CountedUnknownProperty, Importance, NonCustomPropertyId};
 use style::properties::{LonghandId, LonghandIdSet, PropertyDeclarationBlock, PropertyId};
 use style::properties::{PropertyDeclarationId, ShorthandId};
 use style::properties::{SourcePropertyDeclaration, StyleBuilder, UnparsedValue};
@@ -183,12 +183,6 @@ pub unsafe extern "C" fn Servo_Initialize(dummy_url_data: *mut URLExtraData) {
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_InitializeCooperativeThread() {
-    // Pretend that we're a Servo Layout thread to make some assertions happy.
-    thread_state::initialize(thread_state::ThreadState::LAYOUT);
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn Servo_Shutdown() {
     DUMMY_URL_DATA = ptr::null_mut();
     Stylist::shutdown();
@@ -253,8 +247,10 @@ fn traverse_subtree(
     debug!("Traversing subtree from {:?}", element);
 
     let thread_pool_holder = &*STYLE_THREAD_POOL;
+    let pool;
     let thread_pool = if traversal_flags.contains(TraversalFlags::ParallelTraversal) {
-        thread_pool_holder.style_thread_pool.as_ref()
+        pool = thread_pool_holder.pool();
+        pool.as_ref()
     } else {
         None
     };
@@ -1207,11 +1203,6 @@ pub extern "C" fn Servo_Property_IsDiscreteAnimatable(property: nsCSSPropertyID)
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_StyleWorkerThreadCount() -> u32 {
-    STYLE_THREAD_POOL.num_threads as u32
-}
-
-#[no_mangle]
 pub extern "C" fn Servo_Element_ClearData(element: &RawGeckoElement) {
     unsafe { GeckoElement(element).clear_data() };
 }
@@ -1415,7 +1406,7 @@ pub unsafe extern "C" fn Servo_StyleSheet_FromUTF8BytesAsync(
         should_record_use_counters,
     );
 
-    if let Some(thread_pool) = STYLE_THREAD_POOL.style_thread_pool.as_ref() {
+    if let Some(thread_pool) = STYLE_THREAD_POOL.pool().as_ref() {
         thread_pool.spawn(|| {
             profiler_label!(Parse);
             async_parser.parse();
@@ -1423,6 +1414,12 @@ pub unsafe extern "C" fn Servo_StyleSheet_FromUTF8BytesAsync(
     } else {
         async_parser.parse();
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_ShutdownThreadPool() {
+    debug_assert!(is_main_thread() && !is_in_servo_traversal());
+    StyleThreadPool::shutdown();
 }
 
 #[no_mangle]
@@ -2163,6 +2160,7 @@ pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(
     element: &RawGeckoElement,
     index: u32,
     pseudo_type: PseudoStyleType,
+    relevant_link_visited: bool,
 ) -> bool {
     read_locked_arc(rule, |rule: &StyleRule| {
         let index = index as usize;
@@ -2195,7 +2193,14 @@ pub extern "C" fn Servo_StyleRule_SelectorMatchesElement(
 
         let element = GeckoElement(element);
         let quirks_mode = element.as_node().owner_doc().quirks_mode();
-        let mut ctx = MatchingContext::new(matching_mode, None, None, quirks_mode);
+        let visited_mode =
+            if relevant_link_visited {
+                VisitedHandlingMode::RelevantLinkVisited
+            } else {
+                VisitedHandlingMode::AllLinksUnvisited
+            };
+        let mut ctx =
+            MatchingContext::new_for_visited(matching_mode, None, None, visited_mode, quirks_mode);
         matches_selector(selector, 0, None, &element, &mut ctx, &mut |_, _| {})
     })
 }
@@ -6548,18 +6553,46 @@ pub unsafe extern "C" fn Servo_UseCounters_Merge(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn Servo_IsPropertyIdRecordedInUseCounter(
+    use_counters: &UseCounters,
+    id: nsCSSPropertyID,
+) -> bool {
+    let id = NonCustomPropertyId::from_nscsspropertyid(id).unwrap();
+    use_counters.non_custom_properties.recorded(id)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_IsUnknownPropertyRecordedInUseCounter(
+    use_counters: &UseCounters,
+    p: CountedUnknownProperty,
+) -> bool {
+    use_counters.counted_unknown_properties.recorded(p)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn Servo_IsCssPropertyRecordedInUseCounter(
     use_counters: &UseCounters,
     property: *const nsACString,
     known_prop: *mut bool,
 ) -> bool {
-    let prop_id = parse_enabled_property_name!(property, known_prop, false);
-    let non_custom_id = match prop_id.non_custom_id() {
-        Some(id) => id,
-        None => return false,
+    *known_prop = false;
+    let prop_name = property.as_ref().unwrap().as_str_unchecked();
+    let non_custom_id = match PropertyId::parse_enabled_for_all_content(prop_name) {
+        Ok(p) => {
+            *known_prop = true;
+            p.non_custom_id()
+        }
+        Err(..) => None,
     };
 
-    use_counters.non_custom_properties.recorded(non_custom_id)
+    if let Some(id) = non_custom_id {
+        return use_counters.non_custom_properties.recorded(id);
+    }
+
+    CountedUnknownProperty::parse_for_test(prop_name).map_or(false, |p| {
+        *known_prop = true;
+        use_counters.counted_unknown_properties.recorded(p)
+    })
 }
 
 #[no_mangle]

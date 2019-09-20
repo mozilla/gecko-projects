@@ -333,11 +333,13 @@ class BrowserParent final : public PBrowserParent,
 
   mozilla::ipc::IPCResult RecvSessionStoreUpdate(
       const Maybe<nsCString>& aDocShellCaps, const Maybe<bool>& aPrivatedMode,
-      const nsTArray<nsCString>&& aPositions,
-      const nsTArray<int32_t>&& aPositionDescendants,
+      nsTArray<nsCString>&& aPositions,
+      nsTArray<int32_t>&& aPositionDescendants,
       const nsTArray<InputFormData>& aInputs,
       const nsTArray<CollectedInputDataValue>& aIdVals,
       const nsTArray<CollectedInputDataValue>& aXPathVals,
+      nsTArray<nsCString>&& aOrigins, nsTArray<nsString>&& aKeys,
+      nsTArray<nsString>&& aValues, const bool aIsFullStorage,
       const uint32_t& aFlushId, const bool& aIsFinal, const uint32_t& aEpoch);
 
   mozilla::ipc::IPCResult RecvBrowserFrameOpenWindow(
@@ -525,6 +527,8 @@ class BrowserParent final : public PBrowserParent,
 
   void Deactivate(bool aWindowLowering);
 
+  void MouseEnterIntoWidget();
+
   bool MapEventCoordinatesForChildProcess(mozilla::WidgetEvent* aEvent);
 
   void MapEventCoordinatesForChildProcess(const LayoutDeviceIntPoint& aOffset,
@@ -655,7 +659,8 @@ class BrowserParent final : public PBrowserParent,
   LayoutDeviceToLayoutDeviceMatrix4x4 GetChildToParentConversionMatrix();
 
   void SetChildToParentConversionMatrix(
-      const Maybe<LayoutDeviceToLayoutDeviceMatrix4x4>& aMatrix);
+      const Maybe<LayoutDeviceToLayoutDeviceMatrix4x4>& aMatrix,
+      const ScreenRect& aRemoteDocumentRect);
 
   // Returns the offset from the origin of our frameloader's nearest widget to
   // the origin of its layout frame. This offset is used to translate event
@@ -779,7 +784,8 @@ class BrowserParent final : public PBrowserParent,
 
   mozilla::ipc::IPCResult RecvQueryVisitedState(nsTArray<URIParams>&& aURIs);
 
-  mozilla::ipc::IPCResult RecvFireFrameLoadEvent(bool aIsTrusted);
+  mozilla::ipc::IPCResult RecvMaybeFireEmbedderLoadEvents(
+      bool aIsTrusted, bool aFireLoadAtEmbeddingElement);
 
  private:
   void SuppressDisplayport(bool aEnabled);

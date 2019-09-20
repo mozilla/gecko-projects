@@ -1728,7 +1728,8 @@ nsresult Element::BindToTree(BindContext& aContext, nsINode& aParent) {
     // XXXbz if we already have a style attr parsed, this won't do
     // anything... need to fix that.
     // If MayHaveStyle() is true, we must be an nsStyledElement
-    static_cast<nsStyledElement*>(this)->ReparseStyleAttribute(false, false);
+    static_cast<nsStyledElement*>(this)->ReparseStyleAttribute(
+        /* aForceInDataDoc = */ false);
   }
 
   // FIXME(emilio): Why is this needed? The element shouldn't even be styled in
@@ -3226,19 +3227,39 @@ nsDOMTokenList* Element::GetTokenList(
   return list;
 }
 
-nsresult Element::CopyInnerTo(Element* aDst) {
+nsresult Element::CopyInnerTo(Element* aDst, ReparseAttributes aReparse) {
   nsresult rv = aDst->mAttrs.EnsureCapacityToClone(mAttrs);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  uint32_t i, count = mAttrs.AttrCount();
-  for (i = 0; i < count; ++i) {
-    const nsAttrName* name = mAttrs.AttrNameAt(i);
-    const nsAttrValue* value = mAttrs.AttrAt(i);
-    nsAutoString valStr;
-    value->ToString(valStr);
-    rv = aDst->SetAttr(name->NamespaceID(), name->LocalName(),
-                       name->GetPrefix(), valStr, false);
-    NS_ENSURE_SUCCESS(rv, rv);
+  const bool reparse = aReparse == ReparseAttributes::Yes;
+
+  uint32_t count = mAttrs.AttrCount();
+  for (uint32_t i = 0; i < count; ++i) {
+    BorrowedAttrInfo info = mAttrs.AttrInfoAt(i);
+    const nsAttrName* name = info.mName;
+    const nsAttrValue* value = info.mValue;
+    if (value->Type() == nsAttrValue::eCSSDeclaration) {
+      MOZ_ASSERT(name->Equals(nsGkAtoms::style, kNameSpaceID_None));
+      // We still clone CSS attributes, even in the `reparse` (cross-document)
+      // case.  https://github.com/w3c/webappsec-csp/issues/212
+      nsAttrValue valueCopy(*value);
+      rv = aDst->SetParsedAttr(name->NamespaceID(), name->LocalName(),
+                               name->GetPrefix(), valueCopy, false);
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      value->GetCSSDeclarationValue()->SetImmutable();
+    } else if (reparse) {
+      nsAutoString valStr;
+      value->ToString(valStr);
+      rv = aDst->SetAttr(name->NamespaceID(), name->LocalName(),
+                         name->GetPrefix(), valStr, false);
+      NS_ENSURE_SUCCESS(rv, rv);
+    } else {
+      nsAttrValue valueCopy(*value);
+      rv = aDst->SetParsedAttr(name->NamespaceID(), name->LocalName(),
+                               name->GetPrefix(), valueCopy, false);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
   }
 
   return NS_OK;

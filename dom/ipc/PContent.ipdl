@@ -97,7 +97,6 @@ using mozilla::Telemetry::DynamicScalarDefinition from "mozilla/TelemetryComms.h
 using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::DiscardedData from "mozilla/TelemetryComms.h";
 using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
-using refcounted class nsIInputStream from "mozilla/ipc/IPCStreamUtils.h";
 using refcounted class mozilla::dom::BrowsingContext from "mozilla/dom/BrowsingContext.h";
 using mozilla::dom::BrowsingContextTransaction from "mozilla/dom/BrowsingContext.h";
 using mozilla::dom::BrowsingContextInitializer from "mozilla/dom/BrowsingContext.h";
@@ -794,7 +793,7 @@ child:
     // This is on PContent not PNecko, as PNecko may not be initialized yet.
     async CrossProcessRedirect(uint32_t aRegistrarId,
                                nsIURI aURI,
-                               uint32_t aNewLoadFlags,
+                               ReplacementChannelConfigInit config,
                                LoadInfoArgs? aLoadInfo,
                                uint64_t aChannelId,
                                nsIURI aOriginalURI,
@@ -1053,11 +1052,6 @@ parent:
     async RequestAnonymousTemporaryFile(uint64_t aID);
 
     /**
-     * Tell the chrome process there is a destruction of PBrowser(Tab)
-     */
-    async NotifyTabDestroying(TabId tabId,
-                              ContentParentId cpId);
-    /**
      * Starts an offline application cache update.
      * @param manifestURI
      *   URI of the manifest to fetch, the application cache group ID
@@ -1088,8 +1082,7 @@ parent:
 
     /**
      * Sets "offline-app" permission for the principal.  Called when we hit
-     * a web app with the manifest attribute in <html> and
-     * offline-apps.allow_by_default is set to true.
+     * a web app with the manifest attribute in <html>
      */
     async SetOfflinePermission(Principal principal);
 

@@ -324,6 +324,8 @@ static const struct mechanismList mechanisms[] = {
     { CKM_AES_CBC, { 16, 32, CKF_EN_DE_WR_UN }, PR_TRUE },
     { CKM_AES_MAC, { 16, 32, CKF_SN_VR }, PR_TRUE },
     { CKM_AES_MAC_GENERAL, { 16, 32, CKF_SN_VR }, PR_TRUE },
+    { CKM_AES_CMAC, { 16, 32, CKF_SN_VR }, PR_TRUE },
+    { CKM_AES_CMAC_GENERAL, { 16, 32, CKF_SN_VR }, PR_TRUE },
     { CKM_AES_CBC_PAD, { 16, 32, CKF_EN_DE_WR_UN }, PR_TRUE },
     { CKM_AES_CTS, { 16, 32, CKF_EN_DE }, PR_TRUE },
     { CKM_AES_CTR, { 16, 32, CKF_EN_DE }, PR_TRUE },
@@ -2283,14 +2285,19 @@ sftk_PutPubKey(SFTKObject *publicKey, SFTKObject *privateKey, CK_KEY_TYPE keyTyp
         default:
             return CKR_KEY_TYPE_INCONSISTENT;
     }
+    if (crv != CKR_OK) {
+        return crv;
+    }
     crv = sftk_AddAttributeType(publicKey, CKA_CLASS, &classType,
                                 sizeof(CK_OBJECT_CLASS));
-    if (crv != CKR_OK)
+    if (crv != CKR_OK) {
         return crv;
+    }
     crv = sftk_AddAttributeType(publicKey, CKA_KEY_TYPE, &keyType,
                                 sizeof(CK_KEY_TYPE));
-    if (crv != CKR_OK)
+    if (crv != CKR_OK) {
         return crv;
+    }
     /* now handle the operator attributes */
     if (sftk_isTrue(privateKey, CKA_DECRYPT)) {
         crv = sftk_forceAttribute(publicKey, CKA_ENCRYPT, &cktrue, sizeof(CK_BBOOL));

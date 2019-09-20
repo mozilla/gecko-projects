@@ -11,6 +11,40 @@ exclude: true
 
 # GeckoView API Changelog.
 
+⚠️  breaking change
+
+## v71
+- Added [`onBooleanScalar`][71.1], [`onLongScalar`][71.2],
+  [`onStringScalar`][71.3] to [`RuntimeTelemetry.Delegate`][70.12] to support
+  scalars in streaming telemetry. ⚠️  As part of this change,
+  `onTelemetryReceived` has been renamed to [`onHistogram`][71.4], and
+  [`Metric`][71.5] now takes a type parameter.
+  ([bug 1576730]({{bugzilla}}1576730))
+- Added overloads of [`GeckoSession.loadUri()`][71.6] that accept a map of
+  additional HTTP request headers.
+- Added support for exposing the content blocking log in [`ContentBlockingController`][71.7].({{bugzilla}}1580201)
+- ⚠️  Added `nativeApp` to [`WebExtension.MessageDelegate.onMessage`][71.8] which
+  exposes the native application identifier that was used to send the message.
+  ({{bugzilla}}1546445)
+- Added [`GeckoRuntime.ServiceWorkerDelegate`][71.9] set via
+  ['setServiceWorkerDelegate'][71.10] to support ServiceWorkerClients.openWindow()
+  ([bug 1511033]({{bugzilla}}1511033))
+- Added ['GeckoRuntimeSettings.Builder#aboutConfigEnabled'][71.11] to control whether or
+  not `about:config` should be available.
+- Added [`GeckoSession.ContentDelegate.onFirstContentfulPaint()`][71.12]
+[71.1]: {{javadoc_uri}}/RuntimeTelemetry.Delegate.html#onBooleanScalar-org.mozilla.geckoview.RuntimeTelemetry.Metric-
+[71.2]: {{javadoc_uri}}/RuntimeTelemetry.Delegate.html#onLongScalar-org.mozilla.geckoview.RuntimeTelemetry.Metric-
+[71.3]: {{javadoc_uri}}/RuntimeTelemetry.Delegate.html#onStringScalar-org.mozilla.geckoview.RuntimeTelemetry.Metric-
+[71.4]: {{javadoc_uri}}/RuntimeTelemetry.Delegate.html#onHistogram-org.mozilla.geckoview.RuntimeTelemetry.Metric-
+[71.5]: {{javadoc_uri}}/RuntimeTelemetry.Metric.html
+[71.6]: {{javadoc_uri}}/GeckoSession.html#loadUri-java.lang.String-java.io.File-java.util.Map-
+[71.7]: {{javadoc_uri}}/ContentBlockingController.html
+[71.8]: {{javadoc_uri}}/WebExtension.MessageDelegate.html#onMessage-java.lang.String-java.lang.Object-org.mozilla.geckoview.WebExtension.MessageSender-
+[71.9]: {{javadoc_uri}}/GeckoRuntime.ServiceWorkerDelegate.html
+[71.10]: {{javadoc_uri}}/GeckoRuntime#setServiceWorkerDelegate-org.mozilla.geckoview.GeckoRuntime.ServiceWorkerDelegate-
+[71.11]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#aboutConfigEnabled-boolean-
+[71.12]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html#onFirstContentfulPaint-org.mozilla.geckoview.GeckoSession-
+
 ## v70
 - Added API for session context assignment
   [`GeckoSessionSettings.Builder.contextId`][70.1] and deletion of data related
@@ -54,6 +88,12 @@ exclude: true
 - Added [`onCloseTab`][70.21] to [`WebExtensionController.TabDelegate`][70.19] to handle
   [`browser.tabs.remove`][70.22] calls by WebExtensions.
   ([bug 1565782]({{bugzilla}}1565782))
+- Added onSlowScript to [`ContentDelegate`][70.23] which allows handling of slow and hung scripts.
+  ([bug 1621094]({{bugzilla}}1621094))
+- Added support for Web Push via [`WebPushController`][70.24], [`WebPushDelegate`][70.25], and
+  [`WebPushSubscription`][70.26].
+- Added [`ContentBlockingController`][70.27], accessible via [`GeckoRuntime.getContentBlockingController`][70.28]
+  to allow modification and inspection of a content blocking exception list.
 
 [70.1]: {{javadoc_uri}}/GeckoSessionSettings.Builder.html#contextId-java.lang.String-
 [70.2]: {{javadoc_uri}}/StorageController.html#clearDataForSessionContext-java.lang.String-
@@ -77,6 +117,12 @@ exclude: true
 [70.20]: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/create
 [70.21]: {{javadoc_uri}}/WebExtensionController.TabDelegate.html#onCloseTab-org.mozilla.geckoview.WebExtension-org.mozilla.geckoview.GeckoSession-
 [70.22]: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/remove
+[70.23]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html
+[70.24]: {{javadoc_uri}}/WebPushController.html
+[70.25]: {{javadoc_uri}}/WebPushDelegate.html
+[70.26]: {{javadoc_uri}}/WebPushSubscription.html
+[70.27]: {{javadoc_uri}}/ContentBlockingController.html
+[70.28]: {{javadoc_uri}}/GeckoRuntime.html#getContentBlockingController--
 
 ## v69
 - Modified behavior of ['setAutomaticFontSizeAdjustment'][69.1] so that it no 
@@ -320,4 +366,4 @@ exclude: true
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 3dc92af421d9e7e2393619f7a17c57422aa51699
+[api-version]: 40441c6fcd77218d1d32b468894558141d8ccad9

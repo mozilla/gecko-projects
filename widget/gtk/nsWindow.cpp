@@ -177,6 +177,10 @@ typedef enum {
 } GdkAnchorHints;
 #endif
 
+#if !GTK_CHECK_VERSION(3, 10, 0)
+#  define GDK_WINDOW_STATE_TILED (1 << 8)
+#endif
+
 /* utility functions */
 static bool is_mouse_in_window(GdkWindow* aWindow, gdouble aMouseX,
                                gdouble aMouseY);
@@ -821,7 +825,6 @@ void nsWindow::SetParent(nsIWidget* aNewParent) {
   if (mParent) {
     mParent->RemoveChild(this);
   }
-
   mParent = aNewParent;
 
   GtkWidget* oldContainer = GetMozContainerWidget();
@@ -833,18 +836,47 @@ void nsWindow::SetParent(nsIWidget* aNewParent) {
     return;
   }
 
+  nsWindow* newParent = static_cast<nsWindow*>(aNewParent);
+  GdkWindow* newParentWindow = nullptr;
+  GtkWidget* newContainer = nullptr;
   if (aNewParent) {
     aNewParent->AddChild(this);
-    ReparentNativeWidget(aNewParent);
+    newParentWindow = newParent->mGdkWindow;
+    newContainer = newParent->GetMozContainerWidget();
   } else {
     // aNewParent is nullptr, but reparent to a hidden window to avoid
     // destroying the GdkWindow and its descendants.
     // An invisible container widget is needed to hold descendant
     // GtkWidgets.
-    GtkWidget* newContainer = EnsureInvisibleContainer();
-    GdkWindow* newParentWindow = gtk_widget_get_window(newContainer);
-    ReparentNativeWidgetInternal(aNewParent, newContainer, newParentWindow,
-                                 oldContainer);
+    newContainer = EnsureInvisibleContainer();
+    newParentWindow = gtk_widget_get_window(newContainer);
+  }
+
+  if (!newContainer) {
+    // The new parent GdkWindow has been destroyed.
+    MOZ_ASSERT(!newParentWindow || gdk_window_is_destroyed(newParentWindow),
+               "live GdkWindow with no widget");
+    Destroy();
+  } else {
+    if (newContainer != oldContainer) {
+      MOZ_ASSERT(!gdk_window_is_destroyed(newParentWindow),
+                 "destroyed GdkWindow with widget");
+      SetWidgetForHierarchy(mGdkWindow, oldContainer, newContainer);
+
+      if (oldContainer == gInvisibleContainer) {
+        CheckDestroyInvisibleContainer();
+      }
+    }
+
+    gdk_window_reparent(mGdkWindow, newParentWindow,
+                        DevicePixelsToGdkCoordRoundDown(mBounds.x),
+                        DevicePixelsToGdkCoordRoundDown(mBounds.y));
+    mToplevelParentWindow = GTK_WINDOW(gtk_widget_get_toplevel(newContainer));
+  }
+
+  bool parentHasMappedToplevel = newParent && newParent->mHasMappedToplevel;
+  if (mHasMappedToplevel != parentHasMappedToplevel) {
+    SetHasMappedToplevel(parentHasMappedToplevel);
   }
 }
 
@@ -852,66 +884,22 @@ bool nsWindow::WidgetTypeSupportsAcceleration() { return !IsSmallPopup(); }
 
 void nsWindow::ReparentNativeWidget(nsIWidget* aNewParent) {
   MOZ_ASSERT(aNewParent, "null widget");
-  NS_ASSERTION(!mIsDestroyed, "");
-  NS_ASSERTION(!static_cast<nsWindow*>(aNewParent)->mIsDestroyed, "");
-
-  GtkWidget* oldContainer = GetMozContainerWidget();
-  if (!oldContainer) {
-    // The GdkWindows have been destroyed so there is nothing else to
-    // reparent.
-    MOZ_ASSERT(gdk_window_is_destroyed(mGdkWindow),
-               "live GdkWindow with no widget");
-    return;
-  }
+  MOZ_ASSERT(!mIsDestroyed, "");
+  MOZ_ASSERT(!static_cast<nsWindow*>(aNewParent)->mIsDestroyed, "");
   MOZ_ASSERT(!gdk_window_is_destroyed(mGdkWindow),
              "destroyed GdkWindow with widget");
 
+  MOZ_ASSERT(
+      !mParent,
+      "nsWindow::ReparentNativeWidget() works on toplevel windows only.");
+
   auto* newParent = static_cast<nsWindow*>(aNewParent);
-  GdkWindow* newParentWindow = newParent->mGdkWindow;
-  GtkWidget* newContainer = newParent->GetMozContainerWidget();
+  GtkWindow* newParentWidget = GTK_WINDOW(newParent->GetGtkWidget());
   GtkWindow* shell = GTK_WINDOW(mShell);
 
   if (shell && gtk_window_get_transient_for(shell)) {
-    GtkWindow* topLevelParent =
-        GTK_WINDOW(gtk_widget_get_toplevel(newContainer));
-    gtk_window_set_transient_for(shell, topLevelParent);
-  }
-
-  ReparentNativeWidgetInternal(aNewParent, newContainer, newParentWindow,
-                               oldContainer);
-}
-
-void nsWindow::ReparentNativeWidgetInternal(nsIWidget* aNewParent,
-                                            GtkWidget* aNewContainer,
-                                            GdkWindow* aNewParentWindow,
-                                            GtkWidget* aOldContainer) {
-  if (!aNewContainer) {
-    // The new parent GdkWindow has been destroyed.
-    MOZ_ASSERT(!aNewParentWindow || gdk_window_is_destroyed(aNewParentWindow),
-               "live GdkWindow with no widget");
-    Destroy();
-  } else {
-    if (aNewContainer != aOldContainer) {
-      MOZ_ASSERT(!gdk_window_is_destroyed(aNewParentWindow),
-                 "destroyed GdkWindow with widget");
-      SetWidgetForHierarchy(mGdkWindow, aOldContainer, aNewContainer);
-
-      if (aOldContainer == gInvisibleContainer) {
-        CheckDestroyInvisibleContainer();
-      }
-    }
-
-    if (!mIsTopLevel) {
-      gdk_window_reparent(mGdkWindow, aNewParentWindow,
-                          DevicePixelsToGdkCoordRoundDown(mBounds.x),
-                          DevicePixelsToGdkCoordRoundDown(mBounds.y));
-    }
-  }
-
-  auto* newParent = static_cast<nsWindow*>(aNewParent);
-  bool parentHasMappedToplevel = newParent && newParent->mHasMappedToplevel;
-  if (mHasMappedToplevel != parentHasMappedToplevel) {
-    SetHasMappedToplevel(parentHasMappedToplevel);
+    gtk_window_set_transient_for(shell, newParentWidget);
+    mToplevelParentWindow = newParentWidget;
   }
 }
 
@@ -1171,6 +1159,28 @@ void nsWindow::HideWaylandPopupAndAllChildren() {
   }
 }
 
+bool IsPopupWithoutToplevelParent(nsMenuPopupFrame* aMenuPopupFrame) {
+  // Check if the popup is autocomplete (like tags autocomplete
+  // in the bookmark edit popup).
+  nsAtom* popupId = aMenuPopupFrame->GetContent()->GetID();
+  if (popupId && popupId->Equals(NS_LITERAL_STRING("PopupAutoComplete"))) {
+    return true;
+  }
+
+  // Check if the popup is in popupnotificationcontent (like choosing capture
+  // device when starting webrtc session).
+  nsIFrame* parentFrame = aMenuPopupFrame->GetParent();
+  if (!parentFrame) {
+    return false;
+  }
+  parentFrame = parentFrame->GetParent();
+  if (parentFrame && parentFrame->GetContent()->NodeName().EqualsLiteral(
+                         "popupnotificationcontent")) {
+    return true;
+  }
+  return false;
+}
+
 // Wayland keeps strong popup window hierarchy. We need to track active
 // (visible) popup windows and make sure we hide popup on the same level
 // before we open another one on that level. It means that every open
@@ -1227,10 +1237,14 @@ GtkWidget* nsWindow::ConfigureWaylandPopupWindows() {
       LOG(("...[%p] GetParentMenuWidget() = %p\n", (void*)this, parentWindow));
 
       // If the popup is a regular menu but GetParentMenuWidget() returns
-      // nullptr which means it's connected non-menu parent
-      // (bookmark toolbar for instance).
+      // nullptr which means is not a submenu of any other menu.
       // In this case use a parent given at nsWindow::Create().
-      if (!parentWindow && !menuPopupFrame->IsContextMenu()) {
+      // But we have to avoid using mToplevelParentWindow in case the popup
+      // is in 'popupnotificationcontent' element or autocomplete popup,
+      //  otherwise the popupnotification would disappear when for
+      // example opening a popup with microphone selection.
+      if (!parentWindow && !menuPopupFrame->IsContextMenu() &&
+          !IsPopupWithoutToplevelParent(menuPopupFrame)) {
         parentWindow =
             get_window_for_gtk_widget(GTK_WIDGET(mToplevelParentWindow));
       }
@@ -3217,8 +3231,10 @@ void nsWindow::OnVisibilityNotifyEvent(GdkEventVisibility* aEvent) {
 
 void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
                                   GdkEventWindowState* aEvent) {
-  LOG(("nsWindow::OnWindowStateEvent [%p] changed %d new_window_state %d\n",
-       (void*)this, aEvent->changed_mask, aEvent->new_window_state));
+  LOG(
+      ("nsWindow::OnWindowStateEvent [%p] for %p changed 0x%x new_window_state "
+       "0x%x\n",
+       (void*)this, aWidget, aEvent->changed_mask, aEvent->new_window_state));
 
   if (IS_MOZ_CONTAINER(aWidget)) {
     // This event is notifying the container widget of changes to the
@@ -3236,6 +3252,7 @@ void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
     if (mHasMappedToplevel != mapped) {
       SetHasMappedToplevel(mapped);
     }
+    LOG(("\tquick return because IS_MOZ_CONTAINER(aWidget) is true\n"));
     return;
   }
   // else the widget is a shell widget.
@@ -3258,6 +3275,8 @@ void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
   //
   // We instead notify gtk_window_state_event() of the maximized state change
   // once the window is shown.
+  //
+  // See https://gitlab.gnome.org/GNOME/gtk/issues/1044
   if (!mIsShown) {
     aEvent->changed_mask = static_cast<GdkWindowState>(
         aEvent->changed_mask & ~GDK_WINDOW_STATE_MAXIMIZED);
@@ -3294,7 +3313,8 @@ void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
   if (!waylandWasIconified &&
       (aEvent->changed_mask &
        (GDK_WINDOW_STATE_ICONIFIED | GDK_WINDOW_STATE_MAXIMIZED |
-        GDK_WINDOW_STATE_FULLSCREEN)) == 0) {
+        GDK_WINDOW_STATE_TILED | GDK_WINDOW_STATE_FULLSCREEN)) == 0) {
+    LOG(("\tearly return because no interesting bits changed\n"));
     return;
   }
 
@@ -3319,6 +3339,14 @@ void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
 #ifdef ACCESSIBILITY
     DispatchRestoreEventAccessible();
 #endif  // ACCESSIBILITY
+  }
+
+  if (aEvent->new_window_state & GDK_WINDOW_STATE_TILED) {
+    LOG(("\tTiled\n"));
+    mIsTiled = true;
+  } else {
+    LOG(("\tNot tiled\n"));
+    mIsTiled = false;
   }
 
   if (mWidgetListener) {

@@ -119,16 +119,11 @@ const previewers = {
         grip.userDisplayName = hooks.createValueGrip(userDisplayName.value);
       }
 
-      const dbgGlobal = hooks.getGlobalDebugObject();
-      if (dbgGlobal) {
-        const script = dbgGlobal.makeDebuggeeValue(obj.unsafeDereference())
-          .script;
-        if (script) {
-          grip.location = {
-            url: script.url,
-            line: script.startLine,
-          };
-        }
+      if (obj.script) {
+        grip.location = {
+          url: obj.script.url,
+          line: obj.script.startLine,
+        };
       }
 
       return true;
@@ -228,7 +223,7 @@ const previewers = {
       }
 
       const items = (grip.preview.items = []);
-      for (const item of PropertyIterators.enumSetEntries(objectActor)) {
+      for (const item of PropertyIterators.enumSetEntries(objectActor, /* forPreview */ true)) {
         items.push(item);
         if (items.length == OBJECT_PREVIEW_MAX_ITEMS) {
           break;
@@ -241,7 +236,7 @@ const previewers = {
 
   WeakSet: [
     function(objectActor, grip) {
-      const enumEntries = PropertyIterators.enumWeakSetEntries(objectActor);
+      const enumEntries = PropertyIterators.enumWeakSetEntries(objectActor, /* forPreview */ true);
 
       grip.preview = {
         kind: "ArrayLike",
@@ -282,7 +277,7 @@ const previewers = {
       }
 
       const entries = (grip.preview.entries = []);
-      for (const entry of PropertyIterators.enumMapEntries(objectActor)) {
+      for (const entry of PropertyIterators.enumMapEntries(objectActor, /* forPreview */ true)) {
         entries.push(entry);
         if (entries.length == OBJECT_PREVIEW_MAX_ITEMS) {
           break;
@@ -295,7 +290,7 @@ const previewers = {
 
   WeakMap: [
     function(objectActor, grip) {
-      const enumEntries = PropertyIterators.enumWeakMapEntries(objectActor);
+      const enumEntries = PropertyIterators.enumWeakMapEntries(objectActor, /* forPreview */ true);
 
       grip.preview = {
         kind: "MapLike",
@@ -521,7 +516,10 @@ function GenericObject(
     }
   }
 
-  if (i < OBJECT_PREVIEW_MAX_ITEMS) {
+  // Do not search for safe getters when generating previews while replaying.
+  // This involves a lot of back-and-forth communication which we don't want to
+  // incur while previewing objects.
+  if (i < OBJECT_PREVIEW_MAX_ITEMS && !isReplaying) {
     preview.safeGetterValues = objectActor._findSafeGetterValues(
       Object.keys(preview.ownProperties),
       OBJECT_PREVIEW_MAX_ITEMS - i
@@ -548,24 +546,14 @@ previewers.Object = [
       return true;
     }
 
-    const raw = obj.unsafeDereference();
-
-    // The raw object will be null/unavailable when interacting with a
-    // replaying execution, and Cu is unavailable in workers. In either case we
-    // do not need to worry about xrays.
-    if (raw && !isWorker) {
-      const global = Cu.getGlobalForObject(DebuggerServer);
-      const classProto = global[obj.class].prototype;
-      // The Xray machinery for TypedArrays denies indexed access on the grounds
-      // that it's slow, and advises callers to do a structured clone instead.
-      const safeView = Cu.cloneInto(
-        classProto.subarray.call(raw, 0, OBJECT_PREVIEW_MAX_ITEMS),
-        global
-      );
-      const items = (grip.preview.items = []);
-      for (let i = 0; i < safeView.length; i++) {
-        items.push(safeView[i]);
+    const previewLength = Math.min(OBJECT_PREVIEW_MAX_ITEMS, grip.preview.length);
+    grip.preview.items = [];
+    for (let i = 0; i < previewLength; i++) {
+      const desc = obj.getOwnPropertyDescriptor(i);
+      if (!desc) {
+        break;
       }
+      grip.preview.items.push(desc.value);
     }
 
     return true;

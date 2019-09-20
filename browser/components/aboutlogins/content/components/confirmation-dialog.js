@@ -17,17 +17,26 @@ export default class ConfirmationDialog extends HTMLElement {
     document.l10n.connectRoot(shadowRoot);
     shadowRoot.appendChild(template.content.cloneNode(true));
 
+    this._buttons = this.shadowRoot.querySelector(".buttons");
     this._cancelButton = this.shadowRoot.querySelector(".cancel-button");
     this._confirmButton = this.shadowRoot.querySelector(".confirm-button");
     this._dismissButton = this.shadowRoot.querySelector(".dismiss-button");
     this._message = this.shadowRoot.querySelector(".message");
     this._overlay = this.shadowRoot.querySelector(".overlay");
     this._title = this.shadowRoot.querySelector(".title");
+
+    this._buttons.classList.toggle("macosx", navigator.platform == "MacIntel");
   }
 
   handleEvent(event) {
     switch (event.type) {
       case "keydown":
+        if (event.repeat) {
+          // Prevent repeat keypresses from accidentally confirming the
+          // dialog since the confirmation button is focused by default.
+          event.preventDefault();
+          return;
+        }
         if (event.key === "Escape" && !event.defaultPrevented) {
           this.onCancel();
         }
@@ -45,7 +54,28 @@ export default class ConfirmationDialog extends HTMLElement {
     }
   }
 
+  setKeyboardAccessForElementsExternalToDialog(enableTabbingOutsideDialog) {
+    const pageElements = document.querySelectorAll(
+      "login-item, login-list, menu-button, login-filter, fxaccounts-button, [tabindex]"
+    );
+
+    pageElements.forEach(el => {
+      if (!enableTabbingOutsideDialog) {
+        if (el.tabIndex > -1) {
+          el.dataset.oldTabIndex = el.tabIndex;
+        }
+        el.tabIndex = "-1";
+      } else if (el.dataset.oldTabIndex) {
+        el.tabIndex = el.dataset.oldTabIndex;
+        delete el.dataset.oldTabIndex;
+      } else {
+        el.removeAttribute("tabindex");
+      }
+    });
+  }
+
   hide() {
+    this.setKeyboardAccessForElementsExternalToDialog(true);
     this._cancelButton.removeEventListener("click", this);
     this._confirmButton.removeEventListener("click", this);
     this._dismissButton.removeEventListener("click", this);
@@ -56,6 +86,7 @@ export default class ConfirmationDialog extends HTMLElement {
   }
 
   show({ title, message, confirmButtonLabel }) {
+    this.setKeyboardAccessForElementsExternalToDialog(false);
     this.hidden = false;
 
     document.l10n.setAttributes(this._title, title);
@@ -68,9 +99,10 @@ export default class ConfirmationDialog extends HTMLElement {
     this._overlay.addEventListener("click", this);
     window.addEventListener("keydown", this);
 
-    // For accessibility, focus the least destructive action button when the
-    // dialog loads.
-    this._cancelButton.focus();
+    // For speed-of-use, focus the confirm button when the
+    // dialog loads. Showing the dialog itself provides enough
+    // of a buffer for accidental deletions.
+    this._confirmButton.focus();
 
     this._promise = new Promise((resolve, reject) => {
       this._resolve = resolve;

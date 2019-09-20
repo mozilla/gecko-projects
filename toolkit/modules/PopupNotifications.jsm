@@ -404,6 +404,8 @@ PopupNotifications.prototype = {
    *                - "menucommand" if a menu was activated.
    *          - [optional] dismiss (boolean): If this is true, the notification
    *            will be dismissed instead of removed after running the callback.
+   *          - [optional] disabled (boolean): If this is true, the button
+   *            will be disabled.
    *          - [optional] disableHighlight (boolean): If this is true, the button
    *            will not apply the default highlight style.
    *        If null, the notification will have a default "OK" action button
@@ -1028,12 +1030,16 @@ PopupNotifications.prototype = {
         popupnotification.removeAttribute("menucommand");
       }
 
+      let classes = "popup-notification-icon";
       if (n.options.popupIconClass) {
-        let classes = "popup-notification-icon " + n.options.popupIconClass;
-        popupnotification.setAttribute("iconclass", classes);
+        classes += " " + n.options.popupIconClass;
       }
+      popupnotification.setAttribute("iconclass", classes);
+
       if (n.options.popupIconURL) {
         popupnotification.setAttribute("icon", n.options.popupIconURL);
+      } else {
+        popupnotification.removeAttribute("icon");
       }
 
       if (n.options.learnMoreURL) {
@@ -1070,7 +1076,7 @@ PopupNotifications.prototype = {
       popupnotification.notification = n;
       let menuitems = [];
 
-      if (n.mainAction && n.secondaryActions && n.secondaryActions.length > 0) {
+      if (n.mainAction && n.secondaryActions && n.secondaryActions.length) {
         let telemetryStatId = TELEMETRY_STAT_ACTION_2;
 
         let secondaryAction = n.secondaryActions[0];
@@ -1104,14 +1110,13 @@ PopupNotifications.prototype = {
             telemetryStatId++;
           }
         }
-
-        if (n.secondaryActions.length < 2) {
-          popupnotification.setAttribute("dropmarkerhidden", "true");
-        }
       } else {
         popupnotification.setAttribute("secondarybuttonhidden", "true");
-        popupnotification.setAttribute("dropmarkerhidden", "true");
       }
+      popupnotification.setAttribute(
+        "dropmarkerhidden",
+        n.secondaryActions.length < 2 ? "true" : "false"
+      );
 
       let checkbox = n.options.checkbox;
       if (checkbox && checkbox.label) {
@@ -1135,7 +1140,8 @@ PopupNotifications.prototype = {
         }
       } else {
         popupnotification.checkboxState = null;
-        popupnotification.setAttribute("warninghidden", "true");
+        // Reset the UI state to avoid previous state bleeding into this prompt.
+        this._setNotificationUIState(popupnotification);
       }
 
       this.panel.appendChild(popupnotification);
@@ -1150,7 +1156,9 @@ PopupNotifications.prototype = {
   },
 
   _setNotificationUIState(notification, state = {}) {
+    let mainAction = notification.notification.mainAction;
     if (
+      (mainAction && mainAction.disabled) ||
       state.disableMainAction ||
       notification.hasAttribute("invalidselection")
     ) {
@@ -1331,7 +1339,7 @@ PopupNotifications.prototype = {
       notifications = this._currentNotifications;
     }
 
-    let haveNotifications = notifications.length > 0;
+    let haveNotifications = !!notifications.length;
     if (!anchors.size && haveNotifications) {
       anchors = this._getAnchorsForNotifications(notifications);
     }
@@ -1378,7 +1386,7 @@ PopupNotifications.prototype = {
       }
     }
 
-    if (notificationsToShow.length > 0) {
+    if (notificationsToShow.length) {
       let anchorElement = anchors.values().next().value;
       if (anchorElement) {
         this._showPanel(notificationsToShow, anchorElement);
@@ -1440,7 +1448,7 @@ PopupNotifications.prototype = {
           /([-\w]+-notification-icon\s?)/g,
           ""
         );
-        if (notifications.length > 0) {
+        if (notifications.length) {
           // Find the first notification this anchor used for.
           let notification = notifications[0];
           for (let n of notifications) {
@@ -1552,7 +1560,7 @@ PopupNotifications.prototype = {
       return;
     }
 
-    if (this._currentNotifications.length == 0) {
+    if (!this._currentNotifications.length) {
       return;
     }
 
@@ -1624,7 +1632,7 @@ PopupNotifications.prototype = {
     let ourNotifications = this._getNotificationsForBrowser(ourBrowser);
     let other = otherBrowser.ownerGlobal.PopupNotifications;
     if (!other) {
-      if (ourNotifications.length > 0) {
+      if (ourNotifications.length) {
         Cu.reportError(
           "unable to swap notifications: otherBrowser doesn't support notifications"
         );
@@ -1664,10 +1672,10 @@ PopupNotifications.prototype = {
     this._setNotificationsForBrowser(otherBrowser, ourNotifications);
     other._setNotificationsForBrowser(ourBrowser, otherNotifications);
 
-    if (otherNotifications.length > 0) {
+    if (otherNotifications.length) {
       this._update(otherNotifications);
     }
-    if (ourNotifications.length > 0) {
+    if (ourNotifications.length) {
       other._update(ourNotifications);
     }
   },

@@ -419,7 +419,7 @@ function assertPausedAtSourceAndLine(dbg, expectedSourceId, expectedLine) {
   ok(frames.length >= 1, "Got at least one frame");
   const { sourceId, line } = frames[0].location;
   ok(sourceId == expectedSourceId, "Frame has correct source");
-  ok(line == expectedLine, "Frame has correct line");
+  ok(line == expectedLine, `Frame paused at ${line}, but expected ${expectedLine}`);
 }
 
 // Get any workers associated with the debugger.
@@ -1036,6 +1036,17 @@ function invokeInTab(fnc, ...args) {
   });
 }
 
+
+function clickElementInTab(selector) {
+  info(`click element ${selector} in tab`);
+
+  return ContentTask.spawn(gBrowser.selectedBrowser, { selector }, function*({
+    selector
+  }) {
+    content.wrappedJSObject.document.querySelector(selector).click();
+  });
+}
+
 const isLinux = Services.appinfo.OS === "Linux";
 const isMac = Services.appinfo.OS === "Darwin";
 const cmdOrCtrl = isLinux ? { ctrlKey: true } : { metaKey: true };
@@ -1215,6 +1226,8 @@ const selectors = {
     disableOthers: "#node-menu-disable-others",
     enableSelf: "#node-menu-enable-self",
     enableOthers: "#node-menu-enable-others",
+    disableDbgStatement: "#node-menu-disable-dbgStatement",
+    enableDbgStatement: "#node-menu-enable-dbgStatement",
     remove: "#node-menu-delete-self",
     removeOthers: "#node-menu-delete-other",
     removeCondition: "#node-menu-remove-condition",
@@ -1289,6 +1302,10 @@ const selectors = {
   inlinePreviewLables: ".CodeMirror-linewidget .inline-preview-label",
   inlinePreviewValues: ".CodeMirror-linewidget .inline-preview-value",
   inlinePreviewOpenInspector: ".inline-preview-value button.open-inspector",
+  addGetWatchpoint: "#node-menu-add-get-watchpoint",
+  addSetWatchpoint: "#node-menu-add-set-watchpoint",
+  removeWatchpoint: "#node-menu-remove-watchpoint",
+  logEventsCheckbox: ".events-header input",
 };
 
 function getSelector(elementName, ...args) {
@@ -1389,6 +1406,7 @@ function rightClickElement(dbg, elementName, ...args) {
 
 function rightClickEl(dbg, el) {
   const doc = dbg.win.document;
+  el.scrollIntoView();
   EventUtils.synthesizeMouseAtCenter(el, { type: "contextmenu" }, dbg.win);
 }
 
@@ -1441,6 +1459,10 @@ function toggleScopeNode(dbg, index) {
   return toggleObjectInspectorNode(findElement(dbg, "scopeNode", index));
 }
 
+function rightClickScopeNode(dbg, index) {
+  rightClickObjectInspectorNode(dbg, findElement(dbg, "scopeNode", index));
+}
+
 function getScopeLabel(dbg, index) {
   return findElement(dbg, "scopeNode", index).innerText;
 }
@@ -1455,6 +1477,18 @@ function toggleObjectInspectorNode(node) {
 
   log(`Toggling node ${node.innerText}`);
   node.click();
+  return waitUntil(
+    () => objectInspector.querySelectorAll(".node").length !== properties
+  );
+}
+
+function rightClickObjectInspectorNode(dbg, node) {
+  const objectInspector = node.closest(".object-inspector");
+  const properties = objectInspector.querySelectorAll(".node").length;
+
+  log(`Right clicking node ${node.innerText}`);
+  rightClickEl(dbg, node);
+
   return waitUntil(
     () => objectInspector.querySelectorAll(".node").length !== properties
   );
@@ -1739,9 +1773,9 @@ async function getDebuggerSplitConsole(dbg) {
 
 // Return a promise that resolves with the result of a thread evaluating a
 // string in the topmost frame.
-async function evaluateInTopFrame(target, text) {
-  const threadFront = target.threadFront;
-  const consoleFront = await target.getFront("console");
+async function evaluateInTopFrame(dbg, text) {
+  const threadFront = dbg.toolbox.target.threadFront;
+  const consoleFront = await dbg.toolbox.target.getFront("console");
   const { frames } = await threadFront.getFrames(0, 1);
   ok(frames.length == 1, "Got one frame");
   const options = { thread: threadFront.actor, frameActor: frames[0].actor };
@@ -1751,8 +1785,8 @@ async function evaluateInTopFrame(target, text) {
 
 // Return a promise that resolves when a thread evaluates a string in the
 // topmost frame, ensuring the result matches the expected value.
-async function checkEvaluateInTopFrame(target, text, expected) {
-  const rval = await evaluateInTopFrame(target, text);
+async function checkEvaluateInTopFrame(dbg, text, expected) {
+  const rval = await evaluateInTopFrame(dbg, text);
   ok(rval == expected, `Eval returned ${expected}`);
 }
 

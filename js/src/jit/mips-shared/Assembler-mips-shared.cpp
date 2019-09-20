@@ -98,13 +98,6 @@ bool AssemblerMIPSShared::swapBuffer(wasm::Bytes& bytes) {
   return true;
 }
 
-uint32_t AssemblerMIPSShared::actualIndex(uint32_t idx_) const { return idx_; }
-
-uint8_t* AssemblerMIPSShared::PatchableJumpAddress(JitCode* code,
-                                                   uint32_t pe_) {
-  return code->raw() + pe_;
-}
-
 void AssemblerMIPSShared::copyJumpRelocationTable(uint8_t* dest) {
   if (jumpRelocations_.length()) {
     memcpy(dest, jumpRelocations_.buffer(), jumpRelocations_.length());
@@ -1747,8 +1740,6 @@ void AssemblerMIPSShared::ToggleToJmp(CodeLocationLabel inst_) {
   MOZ_ASSERT(inst->extractOpcode() == ((uint32_t)op_andi >> OpcodeShift));
   // We converted beq to andi, so now we restore it.
   inst->setOpcode(op_beq);
-
-  AutoFlushICache::flush(uintptr_t(inst), 4);
 }
 
 void AssemblerMIPSShared::ToggleToCmp(CodeLocationLabel inst_) {
@@ -1758,8 +1749,6 @@ void AssemblerMIPSShared::ToggleToCmp(CodeLocationLabel inst_) {
   MOZ_ASSERT(inst->extractOpcode() == ((uint32_t)op_beq >> OpcodeShift));
   // Replace "beq $zero, $zero, offset" with "andi $zero, $zero, offset"
   inst->setOpcode(op_andi);
-
-  AutoFlushICache::flush(uintptr_t(inst), 4);
 }
 
 void AssemblerMIPSShared::UpdateLuiOriValue(Instruction* inst0,

@@ -351,8 +351,7 @@ class ContentParent final : public PContentParent,
                                       nsIPrincipal* aPrincipal) override;
 
   /** Notify that a tab is beginning its destruction sequence. */
-  static void NotifyTabDestroying(const TabId& aTabId,
-                                  const ContentParentId& aCpId);
+  void NotifyTabDestroying();
 
   /** Notify that a tab was destroyed during normal operation. */
   void NotifyTabDestroyed(const TabId& aTabId, bool aNotifiedDestroying);
@@ -640,6 +639,9 @@ class ContentParent final : public PContentParent,
   FORWARD_SHMEM_ALLOCATOR_TO(PContentParent)
 
  protected:
+  bool CheckBrowsingContextOwnership(BrowsingContext* aBC,
+                                     const char* aOperation) const;
+
   void OnChannelConnected(int32_t pid) override;
 
   void ActorDestroy(ActorDestroyReason why) override;
@@ -1370,6 +1372,7 @@ class ContentParent final : public PContentParent,
 
 NS_DEFINE_STATIC_IID_ACCESSOR(ContentParent, NS_CONTENTPARENT_IID)
 
+// This is the C++ version of remoteTypePrefix in E10SUtils.jsm.
 const nsDependentSubstring RemoteTypePrefix(
     const nsAString& aContentProcessType);
 }  // namespace dom

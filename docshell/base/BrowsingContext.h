@@ -209,12 +209,21 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
 
   BrowsingContext* Top();
 
-  already_AddRefed<BrowsingContext> GetOpener() const { return Get(mOpenerId); }
+  already_AddRefed<BrowsingContext> GetOpener() const {
+    RefPtr<BrowsingContext> opener(Get(mOpenerId));
+    if (!mIsDiscarded && opener && !opener->mIsDiscarded) {
+      return opener.forget();
+    }
+    return nullptr;
+  }
   void SetOpener(BrowsingContext* aOpener) {
+    MOZ_DIAGNOSTIC_ASSERT(!aOpener || aOpener->Group() == Group());
     SetOpenerId(aOpener ? aOpener->Id() : 0);
   }
 
   bool HasOpener() const;
+
+  bool HadOriginalOpener() const { return mHadOriginalOpener; }
 
   /**
    * When a new browsing context is opened by a sandboxed document, it needs to
@@ -270,8 +279,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // activation flag of the top level browsing context.
   void NotifyResetUserGestureActivation();
 
-  // Return true if it corresponding document is activated by user gesture.
-  bool GetUserGestureActivation();
+  // Return true if its corresponding document has transient user gesture
+  // activation and the transient user gesture activation haven't yet timed
+  // out.
+  bool HasValidTransientUserGestureActivation();
 
   // Return the window proxy object that corresponds to this browsing context.
   inline JSObject* GetWindowProxy() const { return mWindowProxy; }
@@ -346,8 +357,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
     // in all processes. This method will call the correct `MaySet` and
     // `DidSet` methods, as well as move the value.
     //
+    // If the target has been discarded, changes will be ignored.
+    //
     // NOTE: This method mutates `this`, resetting all members to `Nothing()`
-    void Commit(BrowsingContext* aOwner);
+    nsresult Commit(BrowsingContext* aOwner);
 
     // This method should be called before invoking `Apply` on this transaction
     // object.
@@ -440,9 +453,6 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   BrowsingContext* FindWithNameInSubtree(const nsAString& aName,
                                          BrowsingContext& aRequestingContext);
 
-  // Removes the context from its group and sets mIsDetached to true.
-  void Unregister();
-
   friend class ::nsOuterWindowProxy;
   friend class ::nsGlobalWindowOuter;
   // Update the window proxy object that corresponds to this browsing context.
@@ -481,9 +491,7 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
           uintptr_t(this) - offsetof(BrowsingContext, mLocation));
     }
 
-    already_AddRefed<nsIDocShell> GetDocShell() override {
-      return nullptr;
-    }
+    already_AddRefed<nsIDocShell> GetDocShell() override { return nullptr; }
   };
 
   // Ensure that opener is in the same BrowsingContextGroup.
@@ -547,6 +555,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // This is true if the BrowsingContext was out of process, but is now in
   // process, and might have remote window proxies that need to be cleaned up.
   bool mDanglingRemoteOuterProxies : 1;
+
+  // The start time of user gesture, this is only available if the browsing
+  // context is in process.
+  TimeStamp mUserGestureStart;
 };
 
 /**

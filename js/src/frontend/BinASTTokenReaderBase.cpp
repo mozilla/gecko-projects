@@ -85,7 +85,6 @@ void BinASTTokenReaderBase::seek(size_t offset) {
 
 JS::Result<Ok> BinASTTokenReaderBase::readBuf(uint8_t* bytes, uint32_t len) {
   MOZ_ASSERT(!hasRaisedError());
-  MOZ_ASSERT(len > 0);
 
   if (stop_ < current_ + len) {
     return raiseError("Buffer exceeds length");
@@ -99,9 +98,13 @@ JS::Result<Ok> BinASTTokenReaderBase::readBuf(uint8_t* bytes, uint32_t len) {
 }
 
 JS::Result<uint8_t> BinASTTokenReaderBase::readByte() {
-  uint8_t byte;
-  MOZ_TRY(readBuf(&byte, 1));
-  return byte;
+  MOZ_ASSERT(!hasRaisedError());
+
+  if (MOZ_UNLIKELY(stop_ == current_)) {
+    return raiseError("Buffer exceeds length");
+  }
+
+  return *current_++;
 }
 
 }  // namespace frontend

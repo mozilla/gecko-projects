@@ -2309,10 +2309,9 @@ bool nsDisplaySelectionOverlay::CreateWebRenderCommands(
     const StackingContextHelper& aSc,
     mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
-  wr::LayoutRect bounds =
-      wr::ToRoundedLayoutRect(LayoutDeviceRect::FromAppUnits(
-          nsRect(ToReferenceFrame(), Frame()->GetSize()),
-          mFrame->PresContext()->AppUnitsPerDevPixel()));
+  wr::LayoutRect bounds = wr::ToLayoutRect(LayoutDeviceRect::FromAppUnits(
+      nsRect(ToReferenceFrame(), Frame()->GetSize()),
+      mFrame->PresContext()->AppUnitsPerDevPixel()));
   aBuilder.PushRect(bounds, bounds, !BackfaceIsHidden(),
                     wr::ToColorF(ComputeColor()));
   return true;
@@ -3171,7 +3170,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
         nsSVGIntegrationUtils::GetRequiredSourceForInvalidArea(this, dirtyRect);
     visibleRect = nsSVGIntegrationUtils::GetRequiredSourceForInvalidArea(
         this, visibleRect);
-    aBuilder->EnterSVGEffectsContents(&hoistedScrollInfoItemsStorage);
+    aBuilder->EnterSVGEffectsContents(this, &hoistedScrollInfoItemsStorage);
   }
 
   bool useStickyPosition =
@@ -9711,7 +9710,6 @@ void nsFrame::ConsiderChildOverflow(nsOverflowAreas& aOverflowAreas,
     // Note: scrollable overflow is a subset of visual overflow,
     // so this has the same affect as unioning the child's visual and
     // scrollable overflow with the parent's visual overflow.
-    // XXX doesn't work correctly for floats - bug 1481951
     nsRect childVisual = aChildFrame->GetVisualOverflowRect();
     nsOverflowAreas combined = nsOverflowAreas(childVisual, nsRect());
     aOverflowAreas.UnionWith(combined + aChildFrame->GetPosition());
@@ -10895,7 +10893,11 @@ static bool IsFrameScrolledOutOfView(const nsIFrame* aTarget,
           nsLayoutUtils::SCROLLABLE_FIXEDPOS_FINDS_ROOT |
               nsLayoutUtils::SCROLLABLE_INCLUDE_HIDDEN);
   if (!scrollableFrame) {
-    return false;
+    // Even if we couldn't find the nearest scrollable frame, it might mean we
+    // are in an out-of-process iframe, try to see if |aTarget| frame is
+    // scrolled out of view in an scrollable frame in a cross-process ancestor
+    // document.
+    return nsLayoutUtils::FrameIsScrolledOutOfViewInCrossProcess(aTarget);
   }
 
   nsIFrame* scrollableParent = do_QueryFrame(scrollableFrame);

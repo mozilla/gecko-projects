@@ -869,7 +869,7 @@ var Policies = {
       // (and therefore what the pref |browser.startup.homepage|) accepts.
       if (param.URL) {
         let homepages = param.URL.href;
-        if (param.Additional && param.Additional.length > 0) {
+        if (param.Additional && param.Additional.length) {
           homepages += "|" + param.Additional.map(url => url.href).join("|");
         }
         setDefaultPref("browser.startup.homepage", homepages, param.Locked);
@@ -1000,6 +1000,17 @@ var Policies = {
       // as a fallback when the update.xml file hasn't provided
       // a specific post-update URL.
       manager.disallowFeature("postUpdateCustomPage");
+    },
+  },
+
+  PasswordManagerEnabled: {
+    onBeforeUIStartup(manager, param) {
+      if (!param) {
+        blockAboutPage(manager, "about:logins", true);
+        gBlockedChromePages.push("passwordManager.xul");
+        setAndLockPref("pref.privacy.disable_button.view_passwords", true);
+      }
+      setAndLockPref("signon.rememberSignons", param);
     },
   },
 

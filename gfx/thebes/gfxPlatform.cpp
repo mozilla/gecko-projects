@@ -1013,10 +1013,6 @@ void gfxPlatform::Init() {
 
   gPlatform->ComputeTileSize();
 
-#ifdef MOZ_ENABLE_FREETYPE
-  Factory::SetFTLibrary(gPlatform->GetFTLibrary());
-#endif
-
   gPlatform->mHasVariationFontSupport = gPlatform->CheckVariationFontSupport();
 
   nsresult rv;
@@ -2625,6 +2621,7 @@ static bool CalculateWrQualifiedPrefValue() {
   return Preferences::GetBool(WR_ROLLOUT_PREF, WR_ROLLOUT_PREF_DEFAULTVALUE);
 }
 
+#ifndef MOZ_WIDGET_ANDROID
 static void HardwareTooOldForWR(FeatureState& aFeature) {
   aFeature.Disable(FeatureStatus::BlockedDeviceTooOld, "Device too old",
                    NS_LITERAL_CSTRING("FEATURE_FAILURE_DEVICE_TOO_OLD"));
@@ -2840,6 +2837,7 @@ static void UpdateWRQualificationForIntel(FeatureState& aFeature,
                    NS_LITERAL_CSTRING("FEATURE_FAILURE_RELEASE_CHANNEL_INTEL"));
 #endif
 }
+#endif // !MOZ_WIDGET_ANDROID
 
 static FeatureState& WebRenderHardwareQualificationStatus(
     const IntSize& aScreenSize, bool aHasBattery,
@@ -2875,6 +2873,7 @@ static FeatureState& WebRenderHardwareQualificationStatus(
     return featureWebRenderQualified;
   }
 
+#ifndef MOZ_WIDGET_ANDROID
   nsAutoString adapterVendorID;
   gfxInfo->GetAdapterVendorID(adapterVendorID);
 
@@ -2941,6 +2940,14 @@ static FeatureState& WebRenderHardwareQualificationStatus(
           NS_LITERAL_CSTRING("FEATURE_FAILURE_WR_HAS_BATTERY"));
     }
   }
+#else // !MOZ_WIDGET_ANDROID
+#ifndef NIGHTLY_BUILD
+  featureWebRenderQualified.Disable(
+    FeatureStatus::BlockedReleaseChannelAndroid,
+    "Release channel and Android",
+    NS_LITERAL_CSTRING("FEATURE_FAILURE_RELEASE_CHANNEL_ANDROID"));
+#endif
+#endif
   return featureWebRenderQualified;
 }
 
@@ -3113,22 +3120,6 @@ void gfxPlatform::InitWebRenderConfig() {
     if (gfxVars::UseWebRenderDCompWin() ||
         gfxVars::UseWebRenderFlipSequentialWin()) {
       gfxVars::SetUseWebRenderTripleBufferingWin(true);
-    }
-  }
-
-  // When Windows version is mort than 1903 and GPU is intel GPU, it could cause
-  // flickering with DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL. See Bug 1556634.
-  // As a workaround, use DXGI_ALPHA_MODE_PREMULTIPLIED instead of
-  // DXGI_ALPHA_MODE_IGNORE at SwapChain.
-  // XXX remove this workaround.
-  if (IsWin10May2019UpdateOrLater() && UseWebRender() &&
-      gfxVars::UseWebRenderDCompWin()) {
-    nsAutoString adapterVendorID;
-    nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
-    gfxInfo->GetAdapterVendorID(adapterVendorID);
-    if (adapterVendorID == u"0x8086") {  // Intel
-      gfxVars::SetWorkaroundWebRenderIntelBug1556634(true);
-      gfxCriticalNote << "Use Premul SwapChain for Intel GPU";
     }
   }
 #endif

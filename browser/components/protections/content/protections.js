@@ -6,6 +6,7 @@
 
 import LockwiseCard from "./lockwise-card.js";
 import MonitorCard from "./monitor-card.js";
+import ProxyCard from "./proxy-card.js";
 
 // We need to send the close telemetry before unload while we still have a connection to RPM.
 window.addEventListener("beforeunload", () => {
@@ -14,7 +15,7 @@ window.addEventListener("beforeunload", () => {
 
 document.addEventListener("DOMContentLoaded", e => {
   let todayInMs = Date.now();
-  let weekAgoInMs = todayInMs - 7 * 24 * 60 * 60 * 1000;
+  let weekAgoInMs = todayInMs - 6 * 24 * 60 * 60 * 1000;
   RPMSendAsyncMessage("FetchContentBlockingEvents", {
     from: weekAgoInMs,
     to: todayInMs,
@@ -40,17 +41,17 @@ document.addEventListener("DOMContentLoaded", e => {
   if (cbCategory == "custom") {
     protectionDetails.setAttribute(
       "data-l10n-id",
-      "protection-header-details-custom"
+      "protection-report-header-details-custom"
     );
   } else if (cbCategory == "strict") {
     protectionDetails.setAttribute(
       "data-l10n-id",
-      "protection-header-details-strict"
+      "protection-report-header-details-strict"
     );
   } else {
     protectionDetails.setAttribute(
       "data-l10n-id",
-      "protection-header-details-standard"
+      "protection-report-header-details-standard"
     );
   }
 
@@ -69,19 +70,14 @@ document.addEventListener("DOMContentLoaded", e => {
   document.sendTelemetryEvent("show", "protection_report");
 
   let createGraph = data => {
-    // All of our dates are recorded as 00:00 GMT, add 12 hours to the timestamp
-    // to ensure we display the correct date no matter the user's location.
-    let hoursInMS12 = 12 * 60 * 60 * 1000;
-    let dateInMS = data.earliestDate
-      ? new Date(data.earliestDate).getTime() + hoursInMS12
-      : Date.now();
+    let earliestDate = data.earliestDate || Date.now();
 
     let summary = document.getElementById("graph-total-summary");
     summary.setAttribute(
       "data-l10n-args",
-      JSON.stringify({ count: data.sumEvents, earliestDate: dateInMS })
+      JSON.stringify({ count: data.sumEvents, earliestDate })
     );
-    summary.setAttribute("data-l10n-id", "graph-total-summary");
+    summary.setAttribute("data-l10n-id", "graph-total-tracker-summary");
 
     // Set a default top size for the height of the graph bars so that small
     // numbers don't fill the whole graph.
@@ -192,7 +188,7 @@ document.addEventListener("DOMContentLoaded", e => {
     // Set the total number of each type of tracker on the tabs as well as their
     // "Learn More" links
     for (let type of dataTypes) {
-      document.querySelector(`label[data-type=${type}]`).textContent =
+      document.querySelector(`label[data-type=${type}] span`).textContent =
         weekTypeCounts[type];
       const learnMoreLink = document.getElementById(`${type}-link`);
       learnMoreLink.href = RPMGetFormatURLPref(
@@ -313,6 +309,20 @@ document.addEventListener("DOMContentLoaded", e => {
   // For tests
   const monitorUI = document.querySelector(".monitor-card");
   monitorUI.dataset.enabled = monitorEnabled;
+
+  const proxyEnabled = RPMGetBoolPref(
+    "browser.contentblocking.report.proxy.enabled",
+    true
+  );
+
+  if (proxyEnabled) {
+    const proxyCard = new ProxyCard(document);
+    proxyCard.init();
+  }
+
+  // For tests
+  const proxyUI = document.querySelector(".proxy-card");
+  proxyUI.dataset.enabled = proxyEnabled;
 
   // Dispatch messages to retrieve data for the Lockwise & Monitor
   // cards.

@@ -2461,6 +2461,11 @@ bool InterfaceHasInstance(JSContext* cx, unsigned argc, JS::Value* vp) {
     return true;
   }
 
+  if (IsRemoteObjectProxy(instance, clasp->mPrototypeID)) {
+    args.rval().setBoolean(true);
+    return true;
+  }
+
   return CallOrdinaryHasInstance(cx, args);
 }
 
@@ -2649,7 +2654,7 @@ bool NonVoidByteStringToJsval(JSContext* cx, const nsACString& str,
 void NormalizeUSVString(nsAString& aString) { EnsureUTF16Validity(aString); }
 
 void NormalizeUSVString(binding_detail::FakeString& aString) {
-  EnsureUTF16ValiditySpan(aString);
+  EnsureUtf16ValiditySpan(aString);
 }
 
 bool ConvertJSValueToByteString(JSContext* cx, JS::Handle<JS::Value> v,
@@ -3866,11 +3871,11 @@ void AssertReflectorHasGivenProto(JSContext* aCx, JSObject* aReflector,
 }  // namespace binding_detail
 #endif  // DEBUG
 
-void SetDocumentAndPageUseCounter(JSObject* aObject, UseCounter aUseCounter) {
+void SetUseCounter(JSObject* aObject, UseCounter aUseCounter) {
   nsGlobalWindowInner* win =
       xpc::WindowGlobalOrNull(js::UncheckedUnwrap(aObject));
   if (win && win->GetDocument()) {
-    win->GetDocument()->SetDocumentAndPageUseCounter(aUseCounter);
+    win->GetDocument()->SetUseCounter(aUseCounter);
   }
 }
 
@@ -4004,6 +4009,13 @@ void DeprecationWarning(JSContext* aCx, JSObject* aObject,
 void DeprecationWarning(const GlobalObject& aGlobal,
                         Document::DeprecatedOperations aOperation) {
   if (NS_IsMainThread()) {
+    // After diverging from the recording, a replaying process is not able to
+    // report warnings and will be forced to rewind. Avoid reporting warnings
+    // in this case so that the debugger can access deprecated properties.
+    if (recordreplay::HasDivergedFromRecording()) {
+      return;
+    }
+
     nsCOMPtr<nsPIDOMWindowInner> window =
         do_QueryInterface(aGlobal.GetAsSupports());
     if (window && window->GetExtantDoc()) {

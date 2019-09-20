@@ -19,9 +19,9 @@ DevToolsModules(
     'index.js',
     'manager.js',
     'reducers.js',
-    'setting-onboarding-tooltip.js',
     'store.js',
     'types.js',
+    'ui.js',
 )
 
 XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']

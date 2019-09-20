@@ -66,6 +66,7 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/FailedCertSecurityInfoBinding.h"
+#include "mozilla/dom/NetErrorInfoBinding.h"
 #include <bitset>  // for member
 
 // windows.h #defines CreateEvent
@@ -1279,11 +1280,48 @@ class Document : public nsINode,
   }
 
   /**
-   * Get cookies loaded flag for this document.
+   * Get the cookies loaded flag for this document.
    */
   bool GetHasCookiesLoaded() {
     return mContentBlockingLog.HasBlockedAnyOfType(
         nsIWebProgressListener::STATE_COOKIES_LOADED);
+  }
+
+  /**
+   * Set the tracker cookies loaded flag for this document.
+   */
+  void SetHasTrackerCookiesLoaded(bool aHasTrackerCookiesLoaded,
+                                  const nsACString& aOriginLoaded) {
+    RecordContentBlockingLog(
+        aOriginLoaded, nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER,
+        aHasTrackerCookiesLoaded);
+  }
+
+  /**
+   * Get the tracker cookies loaded flag for this document.
+   */
+  bool GetHasTrackerCookiesLoaded() {
+    return mContentBlockingLog.HasBlockedAnyOfType(
+        nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER);
+  }
+
+  /**
+   * Set the social tracker cookies loaded flag for this document.
+   */
+  void SetHasSocialTrackerCookiesLoaded(bool aHasSocialTrackerCookiesLoaded,
+                                        const nsACString& aOriginLoaded) {
+    RecordContentBlockingLog(
+        aOriginLoaded,
+        nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER,
+        aHasSocialTrackerCookiesLoaded);
+  }
+
+  /**
+   * Get the social tracker cookies loaded flag for this document.
+   */
+  bool GetHasSocialTrackerCookiesLoaded() {
+    return mContentBlockingLog.HasBlockedAnyOfType(
+        nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER);
   }
 
   /**
@@ -2465,6 +2503,18 @@ class Document : public nsINode,
 
   /**
    * This function checks if the document that is trying to access
+   * GetNetErrorInfo is a trusted about net error page or not.
+   */
+  static bool CallerIsTrustedAboutNetError(JSContext* aCx, JSObject* aObject);
+
+  /**
+   * Get security info like error code for a failed channel. This
+   * property is only exposed to about:neterror documents.
+   */
+  void GetNetErrorInfo(mozilla::dom::NetErrorInfo& aInfo, ErrorResult& aRv);
+
+  /**
+   * This function checks if the document that is trying to access
    * GetFailedCertSecurityInfo is a trusted cert error page or not.
    */
   static bool CallerIsTrustedAboutCertError(JSContext* aCx, JSObject* aObject);
@@ -3631,10 +3681,9 @@ class Document : public nsINode,
   // Checks that the caller is either chrome or some addon.
   static bool IsCallerChromeOrAddon(JSContext* aCx, JSObject* aObject);
 
-#ifdef MOZILLA_INTERNAL_API
   bool Hidden() const { return mVisibilityState != VisibilityState::Visible; }
   dom::VisibilityState VisibilityState() const { return mVisibilityState; }
-#endif
+
   void GetSelectedStyleSheetSet(nsAString& aSheetSet);
   void SetSelectedStyleSheetSet(const nsAString& aSheetSet);
   void GetLastStyleSheetSet(nsAString& aSheetSet) {
@@ -3786,23 +3835,15 @@ class Document : public nsINode,
 
   void ReportUseCounters();
 
-  void SetDocumentUseCounter(UseCounter aUseCounter) {
-    if (!mUseCounters[aUseCounter]) {
-      mUseCounters[aUseCounter] = true;
-    }
+  void SetUseCounter(UseCounter aUseCounter) {
+    mUseCounters[aUseCounter] = true;
   }
 
   const StyleUseCounters* GetStyleUseCounters() {
     return mStyleUseCounters.get();
   }
 
-  void SetPageUseCounter(UseCounter aUseCounter);
-
-  void SetDocumentAndPageUseCounter(UseCounter aUseCounter) {
-    SetDocumentUseCounter(aUseCounter);
-    SetPageUseCounter(aUseCounter);
-  }
-
+  void PropagateUseCountersToPage();
   void PropagateUseCounters(Document* aParentDocument);
 
   void AddToVisibleContentHeuristic(uint32_t aNumber) {
@@ -3837,6 +3878,10 @@ class Document : public nsINode,
   // Return true if NotifyUserGestureActivation() has been called on any
   // document in the document tree.
   bool HasBeenUserGestureActivated();
+
+  // Return true if there is transient user gesture activation and it hasn't yet
+  // timed out.
+  bool HasValidTransientUserGestureActivation();
 
   BrowsingContext* GetBrowsingContext() const;
 
@@ -3993,6 +4038,10 @@ class Document : public nsINode,
 
  private:
   void InitializeLocalization(nsTArray<nsString>& aResourceIds);
+
+  // Takes the bits from mStyleUseCounters if appropriate, and sets them in
+  // mUseCounters.
+  void SetCssUseCounterBits();
 
   // Returns true if there is any valid value in the viewport meta tag.
   bool ParseWidthAndHeightInMetaViewport(const nsAString& aWidthString,
@@ -5040,9 +5089,6 @@ class Document : public nsINode,
   std::bitset<eUseCounter_Count> mUseCounters;
   // Flags for use counters used by any child documents of this document.
   std::bitset<eUseCounter_Count> mChildDocumentUseCounters;
-  // Flags for whether we've notified our top-level "page" of a use counter
-  // for this child document.
-  std::bitset<eUseCounter_Count> mNotifiedPageForUseCounter;
 
   // The CSS property use counters.
   UniquePtr<StyleUseCounters> mStyleUseCounters;

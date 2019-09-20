@@ -206,7 +206,7 @@ class ChainedIter {
 typedef HashMap<Value*, const char*, DefaultHasher<Value*>, SystemAllocPolicy>
     RootedValueMap;
 
-using AllocKinds = mozilla::EnumSet<AllocKind, uint32_t>;
+using AllocKinds = mozilla::EnumSet<AllocKind, uint64_t>;
 
 // A singly linked list of zones.
 class ZoneList {
@@ -421,7 +421,8 @@ class GCRuntime {
   bool areGrayBitsValid() const { return grayBitsValid; }
   void setGrayBitsInvalid() { grayBitsValid = false; }
 
-  mozilla::TimeStamp lastGCTime() const { return lastGCTime_; }
+  mozilla::TimeStamp lastGCStartTime() const { return lastGCStartTime_; }
+  mozilla::TimeStamp lastGCEndTime() const { return lastGCEndTime_; }
 
   bool majorGCRequested() const {
     return majorGCTriggerReason != JS::GCReason::NO_REASON;
@@ -520,6 +521,10 @@ class GCRuntime {
  private:
   enum IncrementalResult { ResetIncremental = 0, Ok };
 
+  TriggerResult checkHeapThreshold(const HeapSize& heapSize,
+                                   const HeapThreshold& heapThreshold,
+                                   bool isCollecting);
+
   // Delete an empty zone after its contents have been merged.
   void deleteEmptyZone(Zone* zone);
 
@@ -616,7 +621,7 @@ class GCRuntime {
   void traceEmbeddingGrayRoots(JSTracer* trc);
   void checkNoRuntimeRoots(AutoGCSession& session);
   void maybeDoCycleCollection();
-  void markCompartments();
+  void findDeadCompartments();
   IncrementalProgress markUntilBudgetExhausted(SliceBudget& sliceBudget,
                                                gcstats::PhaseKind phase);
   void drainMarkStack();
@@ -775,7 +780,9 @@ class GCRuntime {
 
  private:
   UnprotectedData<bool> chunkAllocationSinceLastGC;
-  MainThreadData<mozilla::TimeStamp> lastGCTime_;
+
+  MainThreadData<mozilla::TimeStamp> lastGCStartTime_;
+  MainThreadData<mozilla::TimeStamp> lastGCEndTime_;
 
   /*
    * JSGC_MODE

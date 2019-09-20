@@ -92,6 +92,10 @@ DebuggerPanel.prototype = {
     hud.ui.wrapper.dispatchEvaluateExpression(input);
   },
 
+  openInspector: async function() {
+    this.toolbox.selectTool("inspector");
+  },
+
   openElementInInspector: async function(gripOrFront) {
     const onSelectInspector = this.toolbox.selectTool("inspector");
     const onGripNodeToFront = getNodeFront(gripOrFront, this.toolbox);

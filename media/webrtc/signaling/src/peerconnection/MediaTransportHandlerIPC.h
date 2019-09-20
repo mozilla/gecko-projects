@@ -29,7 +29,7 @@ class MediaTransportHandlerIPC : public MediaTransportHandler {
 
   // We will probably be able to move the proxy lookup stuff into
   // this class once we move mtransport to its own process.
-  void SetProxyServer(NrSocketProxyConfig&& aProxyConfig) override;
+  void SetProxyConfig(NrSocketProxyConfig&& aProxyConfig) override;
 
   void EnsureProvisionalTransport(const std::string& aTransportId,
                                   const std::string& aLocalUfrag,
@@ -43,7 +43,7 @@ class MediaTransportHandlerIPC : public MediaTransportHandler {
   // capture permissions have been granted on the window, which could easily
   // change between Init (ie; when the PC is created) and StartIceGathering
   // (ie; when we set the local description).
-  void StartIceGathering(bool aDefaultRouteOnly,
+  void StartIceGathering(bool aDefaultRouteOnly, bool aObfuscateHostAddresses,
                          // TODO: It probably makes sense to look
                          // this up internally
                          const nsTArray<NrIceStunAddr>& aStunAddrs) override;

@@ -20,7 +20,7 @@ namespace mozilla {
 namespace wr {
 
 wr::WrExternalImage wr_renderer_lock_external_image(
-    void* aObj, wr::WrExternalImageId aId, uint8_t aChannelIndex,
+    void* aObj, wr::ExternalImageId aId, uint8_t aChannelIndex,
     wr::ImageRendering aRendering) {
   RendererOGL* renderer = reinterpret_cast<RendererOGL*>(aObj);
   RenderTextureHost* texture = renderer->GetRenderTexture(aId);
@@ -33,7 +33,7 @@ wr::WrExternalImage wr_renderer_lock_external_image(
   return texture->Lock(aChannelIndex, renderer->gl(), aRendering);
 }
 
-void wr_renderer_unlock_external_image(void* aObj, wr::WrExternalImageId aId,
+void wr_renderer_unlock_external_image(void* aObj, wr::ExternalImageId aId,
                                        uint8_t aChannelIndex) {
   RendererOGL* renderer = reinterpret_cast<RendererOGL*>(aObj);
   RenderTextureHost* texture = renderer->GetRenderTexture(aId);
@@ -120,10 +120,8 @@ bool RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize,
   }
   // XXX set clear color if MOZ_WIDGET_ANDROID is defined.
 
-  auto size = mCompositor->GetBufferSize();
-
   if (mNativeLayerForEntireWindow) {
-    gfx::IntRect bounds(gfx::IntPoint(0, 0), size.ToUnknownSize());
+    gfx::IntRect bounds({}, mCompositor->GetBufferSize().ToUnknownSize());
     mNativeLayerForEntireWindow->SetRect(bounds);
 #ifdef XP_MACOSX
     mNativeLayerForEntireWindow->SetOpaqueRegion(
@@ -140,6 +138,8 @@ bool RendererOGL::UpdateAndRender(const Maybe<gfx::IntSize>& aReadbackSize,
   }
 
   wr_renderer_update(mRenderer);
+
+  auto size = mCompositor->GetBufferSize();
 
   if (!wr_renderer_render(mRenderer, size.width, size.height, aHadSlowFrame,
                           aOutStats)) {
@@ -230,7 +230,7 @@ RefPtr<WebRenderPipelineInfo> RendererOGL::FlushPipelineInfo() {
 }
 
 RenderTextureHost* RendererOGL::GetRenderTexture(
-    wr::WrExternalImageId aExternalImageId) {
+    wr::ExternalImageId aExternalImageId) {
   return mThread->GetRenderTexture(aExternalImageId);
 }
 

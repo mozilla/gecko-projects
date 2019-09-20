@@ -2386,6 +2386,7 @@ struct StackMapGenerator {
 
     // Add the completed map to the running collection thereof.
     if (!stackMaps_->add((uint8_t*)(uintptr_t)assemblerOffset, stackMap)) {
+      stackMap->destroy();
       return false;
     }
 
@@ -5245,8 +5246,10 @@ class BaseCompiler final : public BaseCompilerInterface {
       return;
     }
 
+    uint32_t offsetGuardLimit = GetOffsetGuardLimit(env_.hugeMemoryEnabled());
+
     if ((bceSafe_ & (BCESet(1) << local)) &&
-        access->offset() < wasm::OffsetGuardLimit) {
+        access->offset() < offsetGuardLimit) {
       check->omitBoundsCheck = true;
     }
 
@@ -5264,9 +5267,10 @@ class BaseCompiler final : public BaseCompilerInterface {
 
   void prepareMemoryAccess(MemoryAccessDesc* access, AccessCheck* check,
                            RegI32 tls, RegI32 ptr) {
-    // Fold offset if necessary for further computations.
+    uint32_t offsetGuardLimit = GetOffsetGuardLimit(env_.hugeMemoryEnabled());
 
-    if (access->offset() >= OffsetGuardLimit ||
+    // Fold offset if necessary for further computations.
+    if (access->offset() >= offsetGuardLimit ||
         (access->isAtomic() && !check->omitAlignmentCheck &&
          !check->onlyPointerAlignment)) {
       Label ok;
@@ -5292,11 +5296,11 @@ class BaseCompiler final : public BaseCompilerInterface {
 
     // Ensure no tls if we don't need it.
 
-#ifdef WASM_HUGE_MEMORY
-    // We have HeapReg and no bounds checking and need load neither
-    // memoryBase nor boundsCheckLimit from tls.
-    MOZ_ASSERT_IF(check->omitBoundsCheck, tls.isInvalid());
-#endif
+    if (env_.hugeMemoryEnabled()) {
+      // We have HeapReg and no bounds checking and need load neither
+      // memoryBase nor boundsCheckLimit from tls.
+      MOZ_ASSERT_IF(check->omitBoundsCheck, tls.isInvalid());
+    }
 #ifdef JS_CODEGEN_ARM
     // We have HeapReg on ARM and don't need to load the memoryBase from tls.
     MOZ_ASSERT_IF(check->omitBoundsCheck, tls.isInvalid());
@@ -5304,8 +5308,7 @@ class BaseCompiler final : public BaseCompilerInterface {
 
     // Bounds check if required.
 
-#ifndef WASM_HUGE_MEMORY
-    if (!check->omitBoundsCheck) {
+    if (!env_.hugeMemoryEnabled() && !check->omitBoundsCheck) {
       Label ok;
       masm.wasmBoundsCheck(Assembler::Below, ptr,
                            Address(tls, offsetof(TlsData, boundsCheckLimit)),
@@ -5313,7 +5316,6 @@ class BaseCompiler final : public BaseCompilerInterface {
       masm.wasmTrap(Trap::OutOfBounds, bytecodeOffset());
       masm.bind(&ok);
     }
-#endif
   }
 
 #if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM) ||      \
@@ -5368,13 +5370,11 @@ class BaseCompiler final : public BaseCompilerInterface {
   }
 
   MOZ_MUST_USE bool needTlsForAccess(const AccessCheck& check) {
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || \
-    defined(JS_CODEGEN_MIPS64)
-    return !check.omitBoundsCheck;
-#elif defined(JS_CODEGEN_X86)
+#if defined(JS_CODEGEN_X86)
+    // x86 requires Tls for memory base
     return true;
 #else
-    return false;
+    return !env_.hugeMemoryEnabled() && !check.omitBoundsCheck;
 #endif
   }
 
@@ -6713,7 +6713,6 @@ class BaseCompiler final : public BaseCompilerInterface {
   MOZ_MUST_USE bool emitSetOrTeeLocal(uint32_t slot);
 
   void endBlock(ExprType type);
-  void endLoop(ExprType type);
   void endIfThen();
   void endIfThenElse(ExprType type);
 
@@ -8182,28 +8181,6 @@ bool BaseCompiler::emitLoop() {
   return true;
 }
 
-void BaseCompiler::endLoop(ExprType type) {
-  Control& block = controlItem();
-
-  Maybe<AnyReg> r;
-  if (!deadCode_) {
-    r = popJoinRegUnlessVoid(type);
-    // block.bceSafeOnExit need not be updated because it won't be used for
-    // the fallthrough path.
-  }
-
-  fr.popStackOnBlockExit(block.stackHeight, deadCode_);
-  popValueStackTo(block.stackSize);
-
-  // bceSafe_ stays the same along the fallthrough path because branches to
-  // loops branch to the top.
-
-  // Retain the value stored in joinReg by all paths.
-  if (!deadCode_) {
-    pushJoinRegUnlessVoid(r);
-  }
-}
-
 // The bodies of the "then" and "else" arms can be arbitrary sequences
 // of expressions, they push control and increment the nesting and can
 // even be targeted by jumps.  A branch to the "if" block branches to
@@ -8370,7 +8347,8 @@ bool BaseCompiler::emitEnd() {
       endBlock(type);
       break;
     case LabelKind::Loop:
-      endLoop(type);
+      // The end of a loop isn't a branch target, so we can just leave its
+      // results on the stack to be consumed by the outer block.
       break;
     case LabelKind::Then:
       endIfThen();
@@ -9340,9 +9318,10 @@ RegI32 BaseCompiler::popMemoryAccess(MemoryAccessDesc* access,
   if (popConstI32(&addrTemp)) {
     uint32_t addr = addrTemp;
 
+    uint32_t offsetGuardLimit = GetOffsetGuardLimit(env_.hugeMemoryEnabled());
+
     uint64_t ea = uint64_t(addr) + uint64_t(access->offset());
-    uint64_t limit =
-        uint64_t(env_.minMemoryLength) + uint64_t(wasm::OffsetGuardLimit);
+    uint64_t limit = uint64_t(env_.minMemoryLength) + offsetGuardLimit;
 
     check->omitBoundsCheck = ea < limit;
     check->omitAlignmentCheck = (ea & (access->byteSize() - 1)) == 0;

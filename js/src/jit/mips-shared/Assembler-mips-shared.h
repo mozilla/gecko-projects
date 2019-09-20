@@ -645,8 +645,6 @@ inline Imm32 Imm64::firstHalf() const { return low(); }
 
 inline Imm32 Imm64::secondHalf() const { return hi(); }
 
-void PatchJump(CodeLocationJump& jump_, CodeLocationLabel label);
-
 static constexpr int32_t SliceSize = 1024;
 typedef js::jit::AssemblerBuffer<SliceSize, Instruction> MIPSBuffer;
 
@@ -748,11 +746,6 @@ class AssemblerMIPSShared : public AssemblerShared {
  protected:
   Instruction* editSrc(BufferOffset bo) { return m_buffer.getInst(bo); }
 
- public:
-  uint32_t actualIndex(uint32_t) const;
-  static uint8_t* PatchableJumpAddress(JitCode* code, uint32_t index);
-
- protected:
   // structure for fixing up pc-relative loads/jumps when a the machine code
   // gets moved (executable copy, gc, etc.)
   struct RelativePatch {
@@ -866,7 +859,7 @@ class AssemblerMIPSShared : public AssemblerShared {
   bool appendRawCode(const uint8_t* code, size_t numBytes);
   bool reserve(size_t size);
   bool swapBuffer(wasm::Bytes& bytes);
-  void executableCopy(void* buffer, bool flushICache = true);
+  void executableCopy(void* buffer);
   void copyJumpRelocationTable(uint8_t* dest);
   void copyDataRelocationTable(uint8_t* dest);
 

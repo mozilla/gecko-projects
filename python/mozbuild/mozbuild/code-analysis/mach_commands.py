@@ -120,23 +120,22 @@ class StaticAnalysisMonitor(object):
             self._processed = self._processed + 1
             return (warning, False)
         if warning is not None:
-            def get_reliability(checker_name):
+            def get_check_config(checker_name):
                 # get the matcher from self._clang_tidy_config that is the 'name' field
-                reliability = None
                 for item in self._clang_tidy_config:
                     if item['name'] == checker_name:
-                        reliability = item.get('reliability', 'low')
-                        break
-                    else:
-                        # We are using a regex in order to also match 'mozilla-.* like checkers'
-                        matcher = re.match(item['name'], checker_name)
-                        if matcher is not None and matcher.group(0) == checker_name:
-                            reliability = item.get('reliability', 'low')
-                            break
-                return reliability
-            reliability = get_reliability(warning['flag'])
-            if reliability is not None:
-                warning['reliability'] = reliability
+                        return item
+
+                    # We are using a regex in order to also match 'mozilla-.* like checkers'
+                    matcher = re.match(item['name'], checker_name)
+                    if matcher is not None and matcher.group(0) == checker_name:
+                        return item
+
+            check_config = get_check_config(warning['flag'])
+            if check_config is not None:
+                warning['reliability'] = check_config.get('reliability', 'low')
+                warning['reason'] = check_config.get('reason')
+                warning['publish'] = check_config.get('publish', True)
         return (warning, True)
 
 
@@ -237,7 +236,10 @@ class StaticAnalysis(MachCommandBase):
                 if name_re.search(f['file']):
                     total = total + 1
 
-        if not total:
+        # Filter source to remove excluded files
+        source = self._generate_path_list(source, verbose=verbose)
+
+        if not total or not source:
             self.log(logging.INFO, 'static-analysis', {},
                      "There are no files eligible for analysis. Please note that 'header' files "
                      "cannot be used for analysis since they do not consist compilation units.")
@@ -692,10 +694,11 @@ class StaticAnalysis(MachCommandBase):
                      'This command is only available for linux64!')
             return rc
         # which checkers to use, and which folders to exclude
-        all_checkers, third_party_path = self._get_infer_config()
+        all_checkers, third_party_path, generated_path = self._get_infer_config()
         checkers, excludes = self._get_infer_args(
             checks=checks or all_checkers,
-            third_party_path=third_party_path
+            third_party_path=third_party_path,
+            generated_path=generated_path
         )
         rc = rc or self._gradle(['clean'])  # clean so that we can recompile
         # infer capture command
@@ -756,23 +759,25 @@ class StaticAnalysis(MachCommandBase):
                     if item['publish']:
                         checkers.append(item['name'])
                 tp_path = mozpath.join(self.topsrcdir, config['third_party'])
+                generated_path = mozpath.join(self.topsrcdir, config['generated'])
             except Exception:
                 print('Looks like config.yaml is not valid, so we are unable '
                       'to determine default checkers, and which folder to '
                       'exclude, using defaults provided by infer')
-        return checkers, tp_path
+        return checkers, tp_path, generated_path
 
-    def _get_infer_args(self, checks, third_party_path):
+    def _get_infer_args(self, checks, *input_paths):
         '''Return the arguments which include the checkers <checks>, and
         excludes all folder in <third_party_path>.'''
         checkers = ['-a', 'checkers']
         excludes = []
         for checker in checks:
             checkers.append('--' + checker)
-        with open(third_party_path) as f:
-            for line in f:
-                excludes.append('--skip-analysis-in-path')
-                excludes.append(line.strip('\n'))
+        for path in input_paths:
+            with open(path) as f:
+                for line in f:
+                    excludes.append('--skip-analysis-in-path')
+                    excludes.append(line.strip('\n'))
         return checkers, excludes
 
     def _get_clang_tidy_config(self):
@@ -1256,7 +1261,7 @@ class StaticAnalysis(MachCommandBase):
             )
             return self.TOOLS_CHECKER_RETURNED_NO_ISSUES
         if self._dump_results:
-            self._build_autotest_result(test_file_path_json, issues)
+            self._build_autotest_result(test_file_path_json, json.dumps(issues))
         else:
             if not os.path.exists(test_file_path_json):
                 # Result file for test not found maybe regenerate it?
@@ -1906,7 +1911,7 @@ class StaticAnalysis(MachCommandBase):
             if self._is_ignored_path(ignored_dir_re, f):
                 # Early exit if we have provided an ignored directory
                 if verbose:
-                    print("clang-format: Ignored third party code '{0}'".format(f))
+                    print("static-analysis: Ignored third party code '{0}'".format(f))
                 continue
 
             if os.path.isdir(f):

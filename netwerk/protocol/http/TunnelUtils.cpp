@@ -29,6 +29,11 @@
 #include "mozilla/AutoRestore.h"
 #include "mozilla/Mutex.h"
 
+#if defined(FUZZING)
+#  include "FuzzySecurityInfo.h"
+#  include "mozilla/StaticPrefs_fuzzing.h"
+#endif
+
 namespace mozilla {
 namespace net {
 
@@ -84,11 +89,25 @@ TLSFilterTransaction::TLSFilterTransaction(nsAHttpTransaction* aWrapped,
 
   mFD = PR_CreateIOLayerStub(sLayerIdentity, &sLayerMethods);
 
+  bool addTLSLayer = true;
+#ifdef FUZZING
+  addTLSLayer = !StaticPrefs::fuzzing_necko_enabled();
+  if (!addTLSLayer) {
+    SOCKET_LOG(("Skipping TLS layer in TLSFilterTransaction for fuzzing.\n"));
+
+    mSecInfo = static_cast<nsISupports*>(
+        static_cast<nsISSLSocketControl*>(new FuzzySecurityInfo()));
+  }
+#endif
+
   if (provider && mFD) {
     mFD->secret = reinterpret_cast<PRFilePrivate*>(this);
-    provider->AddToSocket(PR_AF_INET, aTLSHost, aTLSPort, nullptr,
-                          OriginAttributes(), 0, 0, mFD,
-                          getter_AddRefs(mSecInfo));
+
+    if (addTLSLayer) {
+      provider->AddToSocket(PR_AF_INET, aTLSHost, aTLSPort, nullptr,
+                            OriginAttributes(), 0, 0, mFD,
+                            getter_AddRefs(mSecInfo));
+    }
   }
 
   if (mTransaction) {
@@ -112,6 +131,8 @@ TLSFilterTransaction::~TLSFilterTransaction() {
 }
 
 void TLSFilterTransaction::Cleanup() {
+  LOG(("TLSFilterTransaction::Cleanup %p", this));
+
   if (mTransaction) {
     mTransaction->Close(NS_ERROR_ABORT);
     mTransaction = nullptr;
@@ -129,6 +150,9 @@ void TLSFilterTransaction::Cleanup() {
 }
 
 void TLSFilterTransaction::Close(nsresult aReason) {
+  LOG(("TLSFilterTransaction::Close %p %" PRIx32, this,
+       static_cast<uint32_t>(aReason)));
+
   if (!mTransaction) {
     return;
   }
@@ -251,7 +275,11 @@ nsresult TLSFilterTransaction::OnReadSegment(const char* aData, uint32_t aCount,
 
     if (rv == NS_BASE_STREAM_WOULD_BLOCK) {
       // return OK because all the data was consumed and stored in this buffer
-      Connection()->TransactionHasDataToWrite(this);
+      // It is fine if the connection is null.  We are likely a websocket and
+      // thus writing push is ensured by the caller.
+      if (Connection()) {
+        Connection()->TransactionHasDataToWrite(this);
+      }
       return NS_OK;
     }
     if (NS_FAILED(rv)) {
@@ -408,7 +436,9 @@ nsresult TLSFilterTransaction::ReadSegments(nsAHttpSegmentReader* aReader,
       (mReadSegmentReturnValue == NS_BASE_STREAM_WOULD_BLOCK)) {
     LOG(("TLSFilterTransaction %p read segment blocked found rv=%" PRIx32 "\n",
          this, static_cast<uint32_t>(rv)));
-    Unused << Connection()->ForceSend();
+    if (Connection()) {
+      Unused << Connection()->ForceSend();
+    }
   }
 
   return NS_SUCCEEDED(rv) ? mReadSegmentReturnValue : rv;
@@ -1114,6 +1144,8 @@ SpdyConnectTransaction::SpdyConnectTransaction(
 SpdyConnectTransaction::~SpdyConnectTransaction() {
   LOG(("SpdyConnectTransaction dtor %p\n", this));
 
+  MOZ_ASSERT(OnSocketThread());
+
   if (mDrivingTransaction) {
     // requeue it I guess. This should be gone.
     mDrivingTransaction->SetH2WSTransaction(nullptr);
@@ -1135,6 +1167,8 @@ void SpdyConnectTransaction::ForcePlainText() {
 void SpdyConnectTransaction::MapStreamToHttpConnection(
     nsISocketTransport* aTransport, nsHttpConnectionInfo* aConnInfo,
     int32_t httpResponseCode) {
+  MOZ_ASSERT(OnSocketThread());
+
   mConnInfo = aConnInfo;
 
   mTunnelTransport = new SocketTransportShim(this, aTransport, mIsWebsocket);
@@ -1429,6 +1463,7 @@ nsresult SpdyConnectTransaction::WriteSegments(nsAHttpSegmentWriter* writer,
 
 nsresult SpdyConnectTransaction::WebsocketWriteSegments(
     nsAHttpSegmentWriter* writer, uint32_t count, uint32_t* countWritten) {
+  MOZ_ASSERT(OnSocketThread());
   MOZ_ASSERT(mIsWebsocket);
   if (mDrivingTransaction && !mDrivingTransaction->IsDone()) {
     // Transaction hasn't received end of headers yet, so keep passing data to
@@ -1471,6 +1506,8 @@ void SpdyConnectTransaction::Close(nsresult code) {
   LOG(("SpdyConnectTransaction close %p %" PRIx32 "\n", this,
        static_cast<uint32_t>(code)));
 
+  MOZ_ASSERT(OnSocketThread());
+
   if (mIsWebsocket && mDrivingTransaction) {
     mDrivingTransaction->SetH2WSTransaction(nullptr);
     if (!mConnRefTaken) {
@@ -1489,6 +1526,8 @@ void SpdyConnectTransaction::Close(nsresult code) {
 }
 
 void SpdyConnectTransaction::SetConnRefTaken() {
+  MOZ_ASSERT(OnSocketThread());
+
   mConnRefTaken = true;
   mDrivingTransaction = nullptr;  // Just in case
 }

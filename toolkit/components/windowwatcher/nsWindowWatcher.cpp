@@ -646,6 +646,19 @@ nsresult nsWindowWatcher::OpenWindowInternal(
   RefPtr<BrowsingContext> parentBC(
       parentWindow ? parentWindow->GetBrowsingContext() : nullptr);
 
+  // Return null for any attempt to trigger a load from a discarded browsing
+  // context. The spec is non-normative, and doesn't specify what should happen
+  // when window.open is called on a window with a null browsing context, but it
+  // does give us broad discretion over when we can decide to ignore an open
+  // request and return null.
+  //
+  // Regardless, we cannot trigger a cross-process load from a discarded
+  // browsing context, and ideally we should behave consistently whether a load
+  // is same-process or cross-process.
+  if (parentBC && parentBC->IsDiscarded()) {
+    return NS_ERROR_ABORT;
+  }
+
   // try to find an extant browsing context with the given name
   newBC = GetBrowsingContextByName(name, aForceNoOpener, parentBC);
 
@@ -937,10 +950,10 @@ nsresult nsWindowWatcher::OpenWindowInternal(
 
   // As required by spec, new windows always start out same-process, even if the
   // URL being loaded will eventually load in a new process.
-  MOZ_ASSERT_IF(windowIsNew, newDocShell);
+  MOZ_DIAGNOSTIC_ASSERT(!windowIsNew || newDocShell);
   // New top-level windows are only opened in the parent process and are, by
   // definition, always in-process.
-  MOZ_ASSERT_IF(isNewToplevelWindow, newDocShell);
+  MOZ_DIAGNOSTIC_ASSERT(!isNewToplevelWindow || newDocShell);
 
   // Copy sandbox flags to the new window if activeDocsSandboxFlags says to do
   // so.  Note that it's only nonzero if the window is new, so clobbering
@@ -951,10 +964,19 @@ nsresult nsWindowWatcher::OpenWindowInternal(
     newDocShell->SetSandboxFlags(activeDocsSandboxFlags);
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> win(newBC->GetDOMWindow());
+  RefPtr<nsGlobalWindowOuter> win(
+      nsGlobalWindowOuter::Cast(newBC->GetDOMWindow()));
   if (win) {
     if (!aForceNoOpener) {
-      win->SetOpenerWindow(parentWindow, windowIsNew);
+      if (windowIsNew) {
+        // If this is a new window, its opener should have been set when its
+        // BrowsingContext was created. If not, we need to set it ourselves.
+        MOZ_DIAGNOSTIC_ASSERT(newBC->GetOpenerId() ==
+                              (parentBC ? parentBC->Id() : 0));
+        MOZ_DIAGNOSTIC_ASSERT(!!parentBC == newBC->HadOriginalOpener());
+      } else {
+        newBC->SetOpener(parentBC);
+      }
     } else if (parentWindow && parentWindow != win) {
       MOZ_ASSERT(
           win->TabGroup() != parentWindow->TabGroup(),
@@ -1069,7 +1091,7 @@ nsresult nsWindowWatcher::OpenWindowInternal(
     // SetInitialPrincipalToSubject is safe to call multiple times.
     if (win) {
       nsCOMPtr<nsIContentSecurityPolicy> cspToInheritForAboutBlank;
-      nsCOMPtr<mozIDOMWindowProxy> targetOpener = win->GetOpener();
+      nsCOMPtr<mozIDOMWindowProxy> targetOpener = win->GetSameProcessOpener();
       nsCOMPtr<nsIDocShell> openerDocShell(do_GetInterface(targetOpener));
       if (openerDocShell) {
         RefPtr<Document> openerDoc =
@@ -1079,13 +1101,12 @@ nsresult nsWindowWatcher::OpenWindowInternal(
       win->SetInitialPrincipalToSubject(cspToInheritForAboutBlank);
 
       if (aIsPopupSpam) {
-        auto* globalWin = nsGlobalWindowOuter::Cast(win);
-        MOZ_ASSERT(!globalWin->IsPopupSpamWindow(),
+        MOZ_ASSERT(!win->IsPopupSpamWindow(),
                    "Who marked it as popup spam already???");
-        if (!globalWin->IsPopupSpamWindow()) {  // Make sure we don't mess up
-                                                // our counter even if the above
-                                                // assert fails.
-          globalWin->SetIsPopupSpamWindow(true);
+        if (!win->IsPopupSpamWindow()) {  // Make sure we don't mess up
+                                          // our counter even if the above
+                                          // assert fails.
+          win->SetIsPopupSpamWindow(true);
         }
       }
     }
@@ -1162,7 +1183,8 @@ nsresult nsWindowWatcher::OpenWindowInternal(
     nsCOMPtr<nsIObserverService> obsSvc =
         mozilla::services::GetObserverService();
     if (obsSvc) {
-      obsSvc->NotifyObservers(win, "toplevel-window-ready", nullptr);
+      obsSvc->NotifyObservers(ToSupports(win), "toplevel-window-ready",
+                              nullptr);
     }
   }
 

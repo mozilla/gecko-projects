@@ -818,7 +818,7 @@ void EventStateManager::NotifyTargetUserActivation(WidgetEvent* aEvent,
   }
 
   Document* doc = node->OwnerDoc();
-  if (!doc || doc->HasBeenUserGestureActivated()) {
+  if (!doc) {
     return;
   }
 
@@ -4378,6 +4378,18 @@ void EventStateManager::NotifyMouseOut(WidgetMouseEvent* aMouseEvent,
 
   // Turn recursion protection back off
   wrapper->mFirstOutEventElement = nullptr;
+}
+
+void EventStateManager::RecomputeMouseEnterStateForRemoteFrame(
+    Element& aElement) {
+  if (!mMouseEnterLeaveHelper ||
+      mMouseEnterLeaveHelper->mLastOverElement != &aElement) {
+    return;
+  }
+
+  if (BrowserParent* remote = BrowserParent::GetFrom(&aElement)) {
+    remote->MouseEnterIntoWidget();
+  }
 }
 
 void EventStateManager::NotifyMouseOver(WidgetMouseEvent* aMouseEvent,

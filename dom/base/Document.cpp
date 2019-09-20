@@ -397,11 +397,7 @@ static nsresult GetHttpChannelHelper(nsIChannel* aChannel,
 #define NAME_NOT_VALID ((nsSimpleContentList*)1)
 
 IdentifierMapEntry::IdentifierMapEntry(
-    const IdentifierMapEntry::AtomOrString& aKey)
-    : mKey(aKey) {}
-
-IdentifierMapEntry::IdentifierMapEntry(
-    const IdentifierMapEntry::AtomOrString* aKey)
+    const IdentifierMapEntry::DependentAtomOrString* aKey)
     : mKey(aKey ? *aKey : nullptr) {}
 
 IdentifierMapEntry::~IdentifierMapEntry() {}
@@ -516,6 +512,19 @@ void IdentifierMapEntry::SetImageElement(Element* aElement) {
   if (oldElement != newElement) {
     FireChangeCallbacks(oldElement, newElement, true);
   }
+}
+
+void IdentifierMapEntry::ClearAndNotify() {
+  Element* currentElement = mIdContentList->SafeElementAt(0);
+  mIdContentList.Clear();
+  if (currentElement) {
+    FireChangeCallbacks(currentElement, nullptr);
+  }
+  mNameContentList = nullptr;
+  if (mImageElement) {
+    SetImageElement(nullptr);
+  }
+  mChangeCallbacks = nullptr;
 }
 
 namespace dom {
@@ -1303,11 +1312,7 @@ Document::Document(const char* aContentType)
       mCompatMode(eCompatibility_FullStandards),
       mReadyState(ReadyState::READYSTATE_UNINITIALIZED),
       mAncestorIsLoading(false),
-#ifdef MOZILLA_INTERNAL_API
       mVisibilityState(dom::VisibilityState::Hidden),
-#else
-      mDummy(0),
-#endif
       mType(eUnknown),
       mDefaultElementType(0),
       mAllowXULXBL(eTriUnset),
@@ -1329,7 +1334,6 @@ Document::Document(const char* aContentType)
       mBlockDOMContentLoaded(0),
       mUseCounters(0),
       mChildDocumentUseCounters(0),
-      mNotifiedPageForUseCounter(0),
       mUserHasInteracted(false),
       mHasUserInteractionTimerScheduled(false),
       mStackRefCnt(0),
@@ -1374,6 +1378,64 @@ Document::Document(const char* aContentType)
 
   mPreloadReferrerInfo = new dom::ReferrerInfo(nullptr);
   mReferrerInfo = new dom::ReferrerInfo(nullptr);
+}
+
+bool Document::CallerIsTrustedAboutNetError(JSContext* aCx, JSObject* aObject) {
+  nsIPrincipal* principal = nsContentUtils::SubjectPrincipal(aCx);
+  if (NS_WARN_IF(!principal)) {
+    return false;
+  }
+
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = NS_OK;
+  rv = principal->GetURI(getter_AddRefs(uri));
+  NS_ENSURE_SUCCESS(rv, false);
+
+  if (!uri) {
+    return false;
+  }
+
+  // getSpec is an expensive operation, hence we first check the scheme
+  // to see if the caller is actually an about: page.
+  if (!uri->SchemeIs("about")) {
+    return false;
+  }
+
+  nsAutoCString aboutSpec;
+  rv = uri->GetSpec(aboutSpec);
+  NS_ENSURE_SUCCESS(rv, false);
+
+  return StringBeginsWith(aboutSpec, NS_LITERAL_CSTRING("about:neterror"));
+}
+
+void Document::GetNetErrorInfo(mozilla::dom::NetErrorInfo& aInfo,
+                               ErrorResult& aRv) {
+  nsCOMPtr<nsISupports> info;
+  nsCOMPtr<nsITransportSecurityInfo> tsi;
+  nsresult rv = NS_OK;
+  if (NS_WARN_IF(!mFailedChannel)) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  rv = mFailedChannel->GetSecurityInfo(getter_AddRefs(info));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return;
+  }
+  tsi = do_QueryInterface(info);
+  if (NS_WARN_IF(!tsi)) {
+    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    return;
+  }
+
+  nsAutoString errorCodeString;
+  rv = tsi->GetErrorCodeString(errorCodeString);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    aRv.Throw(rv);
+    return;
+  }
+  aInfo.mErrorCodeString.Assign(errorCodeString);
 }
 
 bool Document::CallerIsTrustedAboutCertError(JSContext* aCx,
@@ -2995,6 +3057,25 @@ nsresult Document::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
 
   nsresult rv = InitReferrerInfo(aChannel);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // Check CSP navigate-to
+  // We need to enforce the CSP of the document that initiated the load,
+  // which is the CSP to inherit.
+  nsCOMPtr<nsIContentSecurityPolicy> cspToInherit = loadInfo->GetCspToInherit();
+  if (cspToInherit) {
+    bool allowsNavigateTo = false;
+    rv = cspToInherit->GetAllowsNavigateTo(
+        mDocumentURI, loadInfo,
+        !loadInfo->RedirectChain().IsEmpty(), /* aWasRedirected */
+        true,                                 /* aEnforceWhitelist */
+        &allowsNavigateTo);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (!allowsNavigateTo) {
+      aChannel->Cancel(NS_ERROR_CSP_NAVIGATE_TO_VIOLATION);
+      return NS_OK;
+    }
+  }
 
   rv = InitCSP(aChannel);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -6150,8 +6231,7 @@ nsresult Document::SetSubDocumentFor(Element* aElement, Document* aSubDoc) {
     // aSubDoc is nullptr, remove the mapping
 
     if (mSubDocuments) {
-      Document* subDoc = GetSubDocumentFor(aElement);
-      if (subDoc) {
+      if (Document* subDoc = GetSubDocumentFor(aElement)) {
         subDoc->SetAllowPaymentRequest(false);
       }
       mSubDocuments->Remove(aElement);
@@ -7181,7 +7261,7 @@ void Document::EndLoad() {
   bool turnOnEditing =
       mParser && (HasFlag(NODE_IS_EDITABLE) || mContentEditableCount > 0);
 
-#if defined(DEBUG) && !defined(ANDROID)
+#if defined(DEBUG)
   // only assert if nothing stopped the load on purpose
   if (!mParserAborted) {
     nsContentSecurityUtils::AssertAboutPageHasCSP(this);
@@ -8742,7 +8822,7 @@ Document* Document::Open(const Optional<nsAString>& /* unused */,
 
   // At this point we know this is a valid-enough document.open() call
   // and not a no-op.  Increment our use counter.
-  SetDocumentAndPageUseCounter(eUseCounter_custom_DocumentOpen);
+  SetUseCounter(eUseCounter_custom_DocumentOpen);
 
   // Step 7 -- stop existing navigation of our browsing context (and all other
   // loads it's doing) if we're the active document of our browsing context.
@@ -10486,6 +10566,7 @@ void Document::Destroy() {
     MOZ_ASSERT(child->GetParentNode() == this);
   }
   MOZ_ASSERT(oldChildCount == GetChildCount());
+  MOZ_ASSERT(!mSubDocuments || mSubDocuments->EntryCount() == 0);
 
   mInUnlinkOrDeletion = oldVal;
 
@@ -10991,6 +11072,10 @@ void Document::DestroyElementMaps() {
   mStyledLinksCleared = true;
 #endif
   mStyledLinks.Clear();
+  // Notify ID change listeners before clearing the identifier map.
+  for (auto iter = mIdentifierMap.Iter(); !iter.Done(); iter.Next()) {
+    iter.Get()->ClearAndNotify();
+  }
   mIdentifierMap.Clear();
   mComposedShadowRoots.Clear();
   mResponsiveContent.Clear();
@@ -11065,13 +11150,11 @@ nsresult Document::CloneDocHelper(Document* clone) const {
       GetScriptHandlingObject(hasHadScriptObject);
   NS_ENSURE_STATE(scriptObject || !hasHadScriptObject);
   if (mCreatingStaticClone) {
-    // If we're doing a static clone (print, print preview), then immediately
-    // embed this newly created document into our container. This will set our
-    // script handling object for us.
-    nsCOMPtr<nsIContentViewer> contentViewer;
-    mDocumentContainer->GetContentViewer(getter_AddRefs(contentViewer));
-    MOZ_ASSERT(contentViewer);
-    contentViewer->SetDocument(clone);
+    // If we're doing a static clone (print, print preview), then we're going to
+    // be setting a scope object after the clone. It's better to set it only
+    // once, so we don't do that here. However, we do want to act as if there is
+    // a script handling object. So we set mHasHadScriptHandlingObject.
+    clone->mHasHadScriptHandlingObject = true;
   } else if (scriptObject) {
     clone->SetScriptHandlingObject(scriptObject);
   } else {
@@ -12137,7 +12220,7 @@ void Document::WarnOnceAbout(DeprecatedOperations aOperation,
   // are almost in our control, and we always need to remove uses there
   // before we remove the operation itself anyway.
   if (!IsAboutPage()) {
-    const_cast<Document*>(this)->SetDocumentAndPageUseCounter(
+    const_cast<Document*>(this)->SetUseCounter(
         OperationToUseCounter(aOperation));
   }
   uint32_t flags =
@@ -14333,54 +14416,13 @@ void Document::PropagateUseCounters(Document* aParentDocument) {
   // document, and propagate our use counters into its
   // mChildDocumentUseCounters.
   Document* contentParent = aParentDocument->GetTopLevelContentDocument();
-
   if (!contentParent) {
     return;
   }
 
+  SetCssUseCounterBits();
   contentParent->mChildDocumentUseCounters |= mUseCounters;
   contentParent->mChildDocumentUseCounters |= mChildDocumentUseCounters;
-}
-
-void Document::SetPageUseCounter(UseCounter aUseCounter) {
-  // We want to set the use counter on the "page" that owns us; the definition
-  // of "page" depends on what kind of document we are.  See the comments below
-  // for details.  In any event, checking all the conditions below is
-  // reasonably expensive, so we cache whether we've notified our owning page.
-  if (mNotifiedPageForUseCounter[aUseCounter]) {
-    return;
-  }
-  mNotifiedPageForUseCounter[aUseCounter] = true;
-
-  if (mDisplayDocument) {
-    // If we are a resource document, we won't have a docshell and so we won't
-    // record any page use counters on this document.  Instead, we should
-    // forward it up to the document that loaded us.
-    MOZ_ASSERT(!mDocumentContainer);
-    mDisplayDocument->SetChildDocumentUseCounter(aUseCounter);
-    return;
-  }
-
-  if (IsBeingUsedAsImage()) {
-    // If this is an SVG image document, we also won't have a docshell.
-    MOZ_ASSERT(!mDocumentContainer);
-    return;
-  }
-
-  // We only care about use counters in content.  If we're already a toplevel
-  // content document, then we should have already set the use counter on
-  // ourselves, and we are done.
-  Document* contentParent = GetTopLevelContentDocument();
-  if (!contentParent) {
-    return;
-  }
-
-  if (this == contentParent) {
-    MOZ_ASSERT(GetUseCounter(aUseCounter));
-    return;
-  }
-
-  contentParent->SetChildDocumentUseCounter(aUseCounter);
 }
 
 bool Document::HasScriptsBlockedBySandbox() {
@@ -14407,13 +14449,136 @@ bool Document::InlineScriptAllowedByCSP() {
   return allowsInlineScript;
 }
 
+// Some use-counter sanity-checking.
+static_assert(size_t(eUseCounter_EndCSSProperties) -
+                      size_t(eUseCounter_FirstCSSProperty) ==
+                  size_t(eCSSProperty_COUNT_with_aliases),
+              "We should have the right amount of CSS property use counters");
+static_assert(size_t(eUseCounter_Count) -
+                      size_t(eUseCounter_FirstCountedUnknownProperty) ==
+                  size_t(CountedUnknownProperty::Count),
+              "We should have the right amount of counted unknown properties"
+              " use counters");
+static_assert(size_t(eUseCounter_Count) * 2 ==
+                  size_t(Telemetry::HistogramUseCounterCount),
+              "There should be two histograms (document and page)"
+              " for each use counter");
+
+#define ASSERT_CSS_COUNTER(id_, method_)                        \
+  static_assert(size_t(eUseCounter_property_##method_) -        \
+                        size_t(eUseCounter_FirstCSSProperty) == \
+                    size_t(id_),                                \
+                "Order for CSS counters and CSS property id should match");
+#define CSS_PROP_PUBLIC_OR_PRIVATE(publicname_, privatename_) privatename_
+#define CSS_PROP_LONGHAND(name_, id_, method_, ...) \
+  ASSERT_CSS_COUNTER(eCSSProperty_##id_, method_)
+#define CSS_PROP_SHORTHAND(name_, id_, method_, ...) \
+  ASSERT_CSS_COUNTER(eCSSProperty_##id_, method_)
+#define CSS_PROP_ALIAS(name_, aliasid_, id_, method_, ...) \
+  ASSERT_CSS_COUNTER(eCSSPropertyAlias_##aliasid_, method_)
+#include "mozilla/ServoCSSPropList.h"
+#undef CSS_PROP_ALIAS
+#undef CSS_PROP_SHORTHAND
+#undef CSS_PROP_LONGHAND
+#undef CSS_PROP_PUBLIC_OR_PRIVATE
+#undef ASSERT_CSS_COUNTER
+
+void Document::SetCssUseCounterBits() {
+  if (!mStyleUseCounters) {
+    return;
+  }
+
+  for (size_t i = 0; i < eCSSProperty_COUNT_with_aliases; ++i) {
+    auto id = nsCSSPropertyID(i);
+    if (Servo_IsPropertyIdRecordedInUseCounter(mStyleUseCounters.get(), id)) {
+      SetUseCounter(nsCSSProps::UseCounterFor(id));
+    }
+  }
+
+  for (size_t i = 0; i < size_t(CountedUnknownProperty::Count); ++i) {
+    if (Servo_IsUnknownPropertyRecordedInUseCounter(
+          mStyleUseCounters.get(), CountedUnknownProperty(i))) {
+      SetUseCounter(UseCounter(eUseCounter_FirstCountedUnknownProperty + i));
+    }
+  }
+}
+
+
+void Document::PropagateUseCountersToPage() {
+  if (mDisplayDocument) {
+    // If we are a resource document, we won't have a docshell and so we won't
+    // record any page use counters on this document.  Instead, we should
+    // forward it up to the document that loaded us.
+    MOZ_ASSERT(!mDocumentContainer);
+    return PropagateUseCounters(mDisplayDocument);
+  }
+
+  if (IsBeingUsedAsImage()) {
+    // If this is an SVG image document, we also won't have a docshell.
+    //
+    // But we do report the use counters via PropagateUseCounters() from the
+    // image code.
+    MOZ_ASSERT(!mDocumentContainer);
+    return;
+  }
+
+  // We only care about use counters in content.  If we're already a toplevel
+  // content document, then we should have already set the use counter on
+  // ourselves, and we are done.
+  Document* contentParent = GetTopLevelContentDocument();
+  if (!contentParent || this == contentParent) {
+    return;
+  }
+
+  PropagateUseCounters(contentParent);
+}
+
 void Document::ReportUseCounters() {
-  static const bool sDebugUseCounters = false;
+  static const bool kDebugUseCounters = false;
+
   if (mReportedUseCounters) {
     return;
   }
 
   mReportedUseCounters = true;
+  SetCssUseCounterBits();
+
+  // Call ReportUseCounters in all our outstanding subdocuments and resources
+  // and such. This needs to be here so that all our sub documents propagate our
+  // counters to us if needed.
+  //
+  // We need to do this explicitly (rather than, e.g., moving the
+  // ReportUseCounters() call after DestroyContent(), which destroys the frame
+  // loaders) because subdocument destruction may be (and is generally) async
+  // (why?), and thus we have no guarantee of Document::Destroy being called on
+  // children before us. Children will just early-return above.
+  //
+  // This is a bit racy in the sense that we may miss some of the children use
+  // counters that happen in between, but that isn't probably a huge deal at
+  // this point where we're destroying the parent document already.
+  //
+  // An alternative would be to move the ReportUseCounters() call to a script
+  // runner or something after calling DestroyContent(), but that looks a bit
+  // fishy as well.
+  {
+    if (mSubDocuments) {
+      for (auto iter = mSubDocuments->ConstIter(); !iter.Done(); iter.Next()) {
+        auto* entry = static_cast<SubDocMapEntry*>(iter.Get());
+        entry->mSubDocument->ReportUseCounters();
+      }
+    }
+    if (Document* doc = GetLatestStaticClone()) {
+      doc->ReportUseCounters();
+    }
+    EnumerateExternalResources(
+        [](Document* aDoc, void*) -> bool {
+          aDoc->ReportUseCounters();
+          return true;
+        },
+        nullptr);
+  }
+
+  PropagateUseCountersToPage();
 
   if (Telemetry::HistogramUseCounterCount > 0 &&
       (IsContentDocument() || IsResourceDoc())) {
@@ -14424,7 +14589,7 @@ void Document::ReportUseCounters() {
       return;
     }
 
-    if (sDebugUseCounters) {
+    if (kDebugUseCounters) {
       nsCString spec = uri->GetSpecOrDefault();
 
       // URIs can be rather long for data documents, so truncate them to
@@ -14470,7 +14635,7 @@ void Document::ReportUseCounters() {
       bool value = GetUseCounter(uc);
 
       if (value) {
-        if (sDebugUseCounters) {
+        if (kDebugUseCounters) {
           const char* name = Telemetry::GetHistogramName(id);
           if (name) {
             printf("  %s", name);
@@ -14489,7 +14654,7 @@ void Document::ReportUseCounters() {
         value = GetUseCounter(uc) || GetChildDocumentUseCounter(uc);
 
         if (value) {
-          if (sDebugUseCounters) {
+          if (kDebugUseCounters) {
             const char* name = Telemetry::GetHistogramName(id);
             if (name) {
               printf("  %s", name);
@@ -14803,34 +14968,29 @@ BrowsingContext* Document::GetBrowsingContext() const {
 }
 
 void Document::NotifyUserGestureActivation() {
-  if (HasBeenUserGestureActivated()) {
-    return;
+  for (RefPtr<BrowsingContext> bc = GetBrowsingContext(); bc;
+       bc = bc->GetParent()) {
+    bc->NotifyUserGestureActivation();
   }
-
-  RefPtr<BrowsingContext> bc = GetBrowsingContext();
-  if (!bc) {
-    return;
-  }
-  bc->NotifyUserGestureActivation();
 }
 
 bool Document::HasBeenUserGestureActivated() {
   RefPtr<BrowsingContext> bc = GetBrowsingContext();
-  if (!bc) {
-    return false;
-  }
-  return bc->GetUserGestureActivation();
+  return bc ? bc->GetIsActivatedByUserGesture() : false;
 }
 
 void Document::ClearUserGestureActivation() {
-  if (!HasBeenUserGestureActivated()) {
-    return;
+  if (RefPtr<BrowsingContext> bc = GetBrowsingContext()) {
+    bc = bc->Top();
+    bc->PreOrderWalk([&](BrowsingContext* aContext) {
+      aContext->NotifyResetUserGestureActivation();
+    });
   }
+}
+
+bool Document::HasValidTransientUserGestureActivation() {
   RefPtr<BrowsingContext> bc = GetBrowsingContext();
-  if (!bc) {
-    return;
-  }
-  bc->NotifyResetUserGestureActivation();
+  return bc && bc->HasValidTransientUserGestureActivation();
 }
 
 void Document::SetDocTreeHadAudibleMedia() {
@@ -14867,12 +15027,12 @@ void Document::MaybeAllowStorageForOpenerAfterUserInteraction() {
     return;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> outer = inner->GetOuterWindow();
+  auto* outer = nsGlobalWindowOuter::Cast(inner->GetOuterWindow());
   if (NS_WARN_IF(!outer)) {
     return;
   }
 
-  nsCOMPtr<nsPIDOMWindowOuter> outerOpener = outer->GetOpener();
+  nsCOMPtr<nsPIDOMWindowOuter> outerOpener = outer->GetSameProcessOpener();
   if (!outerOpener) {
     return;
   }

@@ -208,6 +208,7 @@ ReflowInput::ReflowInput(nsPresContext* aPresContext,
   mFlags.mIsColumnBalancing = false;
   mFlags.mColumnSetWrapperHasNoBSizeLeft = false;
   mFlags.mIsFlexContainerMeasuringBSize = false;
+  mFlags.mTreatBSizeAsIndefinite = false;
   mFlags.mDummyParentReflowInput = false;
   mFlags.mShrinkWrap = !!(aFlags & COMPUTE_SIZE_SHRINK_WRAP);
   mFlags.mUseAutoBSize = !!(aFlags & COMPUTE_SIZE_USE_AUTO_BSIZE);
@@ -1409,7 +1410,7 @@ void ReflowInput::CalculateHypotheticalPosition(
       // would have been inline-level or block-level
       LogicalRect lineBounds = lineBox->GetBounds().ConvertTo(
           wm, lineBox->mWritingMode, lineBox->mContainerSize);
-      if (mStyleDisplay->IsOriginalDisplayInlineOutsideStyle()) {
+      if (mStyleDisplay->IsOriginalDisplayInlineOutside()) {
         // Use the block-start of the inline box which the placeholder lives in
         // as the hypothetical box's block-start.
         aHypotheticalPos.mBStart = lineBounds.BStart(wm) + blockOffset.B(wm);
@@ -1476,7 +1477,7 @@ void ReflowInput::CalculateHypotheticalPosition(
   // Second, determine the hypothetical box's mIStart.
   // How we determine the hypothetical box depends on whether the element
   // would have been inline-level or block-level
-  if (mStyleDisplay->IsOriginalDisplayInlineOutsideStyle() ||
+  if (mStyleDisplay->IsOriginalDisplayInlineOutside() ||
       mFlags.mIOffsetsNeedCSSAlign) {
     // The placeholder represents the IStart edge of the hypothetical box.
     // (Or if mFlags.mIOffsetsNeedCSSAlign is set, it represents the IStart
@@ -2091,6 +2092,10 @@ LogicalSize ReflowInput::ComputeContainingBlockRectangle(
 
   WritingMode wm = aContainingBlockRI->GetWritingMode();
 
+  if (aContainingBlockRI->mFlags.mTreatBSizeAsIndefinite) {
+    cbSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
+  }
+
   // mFrameType for abs-pos tables is NS_CSS_FRAME_TYPE_BLOCK, so we need to
   // special case them here.
   if (NS_FRAME_GET_TYPE(mFrameType) == NS_CSS_FRAME_TYPE_ABSOLUTE ||
@@ -2125,9 +2130,8 @@ LogicalSize ReflowInput::ComputeContainingBlockRectangle(
           aContainingBlockRI->ComputedLogicalPadding().BStartEnd(wm);
     }
   } else {
-    auto IsQuirky = [&](const StyleSize& aSize) -> bool {
-      return aSize.ConvertsToPercentage() &&
-             !aSize.AsLengthPercentage().was_calc;
+    auto IsQuirky = [](const StyleSize& aSize) -> bool {
+      return aSize.ConvertsToPercentage();
     };
     // an element in quirks mode gets a containing block based on looking for a
     // parent with a non-auto height if the element has a percent height
@@ -2178,6 +2182,11 @@ void ReflowInput::InitConstraints(
     nsPresContext* aPresContext, const Maybe<LogicalSize>& aContainingBlockSize,
     const nsMargin* aBorder, const nsMargin* aPadding,
     LayoutFrameType aFrameType) {
+  MOZ_DIAGNOSTIC_ASSERT(
+      !IsFloating() || (mStyleDisplay->mDisplay != StyleDisplay::MozBox &&
+                        mStyleDisplay->mDisplay != StyleDisplay::MozInlineBox),
+      "Please don't try to float a -moz-box or a -moz-inline-box");
+
   WritingMode wm = GetWritingMode();
   LogicalSize cbSize = aContainingBlockSize.valueOr(
       LogicalSize(mWritingMode, NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE));
@@ -2648,8 +2657,9 @@ void ReflowInput::CalculateBlockSideMargins(LayoutFrameType aFrameType) {
   nscoord computedISizeCBWM = ComputedSize(cbWM).ISize(cbWM);
   if (computedISizeCBWM == NS_UNCONSTRAINEDSIZE) {
     // For orthogonal flows, where we found a parent orthogonal-limit
-    // for AvailableISize() in Init(), we'll use the same here as well.
-    computedISizeCBWM = availISizeCBWM;
+    // for AvailableISize() in Init(), we don't have meaningful sizes to
+    // adjust.  Act like the sum is already correct (below).
+    return;
   }
 
   LAYOUT_WARN_IF_FALSE(NS_UNCONSTRAINEDSIZE != computedISizeCBWM &&

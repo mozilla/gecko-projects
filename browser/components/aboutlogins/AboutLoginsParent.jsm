@@ -46,6 +46,123 @@ const HIDE_MOBILE_FOOTER_PREF = "signon.management.page.hideMobileFooter";
 // even if it is disabled for other consumers such as about:newtab.
 const EXPECTED_ABOUTLOGINS_REMOTE_TYPE = E10SUtils.PRIVILEGEDABOUT_REMOTE_TYPE;
 
+// App store badges sourced from https://developer.apple.com/app-store/marketing/guidelines/#section-badges.
+// This array mirrors the file names from the App store directory (./content/third-party/app-store)
+const APP_STORE_LOCALES = [
+  "az",
+  "ar",
+  "bg",
+  "cs",
+  "da",
+  "de",
+  "el",
+  "en",
+  "es-mx",
+  "es",
+  "et",
+  "fi",
+  "fr",
+  "he",
+  "hu",
+  "id",
+  "it",
+  "ja",
+  "ko",
+  "lt",
+  "lv",
+  "my",
+  "nb",
+  "nl",
+  "nn",
+  "pl",
+  "pt-br",
+  "pt-pt",
+  "ro",
+  "ru",
+  "si",
+  "sk",
+  "sv",
+  "th",
+  "tl",
+  "tr",
+  "vi",
+  "zh-hans",
+  "zh-hant",
+];
+
+// Google play badges sourced from https://play.google.com/intl/en_us/badges/
+// This array mirrors the file names from the play store directory (./content/third-party/play-store)
+const PLAY_STORE_LOCALES = [
+  "af",
+  "ar",
+  "az",
+  "be",
+  "bg",
+  "bn",
+  "bs",
+  "ca",
+  "cs",
+  "da",
+  "de",
+  "el",
+  "en",
+  "es",
+  "et",
+  "eu",
+  "fa",
+  "fr",
+  "gl",
+  "gu",
+  "he",
+  "hi",
+  "hr",
+  "hu",
+  "hy",
+  "id",
+  "is",
+  "it",
+  "ja",
+  "ka",
+  "kk",
+  "km",
+  "kn",
+  "ko",
+  "lo",
+  "lt",
+  "lv",
+  "mk",
+  "mr",
+  "ms",
+  "my",
+  "nb",
+  "ne",
+  "nl",
+  "nn",
+  "pa",
+  "pl",
+  "pt-br",
+  "pt",
+  "ro",
+  "ru",
+  "si",
+  "sk",
+  "sl",
+  "sq",
+  "sr",
+  "sv",
+  "ta",
+  "te",
+  "th",
+  "tl",
+  "tr",
+  "uk",
+  "ur",
+  "uz",
+  "vi",
+  "zh-cn",
+  "zh-tw",
+];
+
 const convertSubjectToLogin = subject => {
   subject.QueryInterface(Ci.nsILoginMetaInfo).QueryInterface(Ci.nsILoginInfo);
   const login = LoginHelper.loginToVanillaObject(subject);
@@ -67,6 +184,7 @@ const augmentVanillaLoginObject = login => {
 var AboutLoginsParent = {
   _l10n: null,
   _subscribers: new WeakSet(),
+  _observersAdded: false,
 
   // Listeners are added in BrowserGlue.jsm
   async receiveMessage(message) {
@@ -83,6 +201,7 @@ var AboutLoginsParent = {
       );
     }
 
+    this._subscribers.add(message.target);
     switch (message.name) {
       case "AboutLogins:CreateLogin": {
         let newLogin = message.data.login;
@@ -100,7 +219,12 @@ var AboutLoginsParent = {
           usernameField: "",
           passwordField: "",
         });
-        Services.logins.addLogin(LoginHelper.vanillaObjectToLogin(newLogin));
+        newLogin = LoginHelper.vanillaObjectToLogin(newLogin);
+        try {
+          Services.logins.addLogin(newLogin);
+        } catch (error) {
+          this.handleLoginStorageErrors(newLogin, error, message);
+        }
         break;
       }
       case "AboutLogins:DeleteLogin": {
@@ -203,7 +327,7 @@ var AboutLoginsParent = {
         break;
       }
       case "AboutLogins:MasterPasswordRequest": {
-        // This doesn't harm if passwords are not encrypted
+        // This does no harm if master password isn't set.
         let tokendb = Cc["@mozilla.org/security/pk11tokendb;1"].createInstance(
           Ci.nsIPK11TokenDB
         );
@@ -247,183 +371,50 @@ var AboutLoginsParent = {
         break;
       }
       case "AboutLogins:Subscribe": {
-        if (
-          !ChromeUtils.nondeterministicGetWeakSetKeys(this._subscribers).length
-        ) {
+        if (!this._observersAdded) {
           Services.obs.addObserver(this, "passwordmgr-crypto-login");
           Services.obs.addObserver(this, "passwordmgr-crypto-loginCanceled");
           Services.obs.addObserver(this, "passwordmgr-storage-changed");
           Services.obs.addObserver(this, UIState.ON_UPDATE);
+          this._observersAdded = true;
         }
-        this._subscribers.add(message.target);
-
         let messageManager = message.target.messageManager;
 
         const logins = await this.getAllLogins();
         try {
-          messageManager.sendAsyncMessage("AboutLogins:AllLogins", logins);
-
+          let syncState;
           if (FXA_ENABLED) {
-            let syncState = this.getSyncState();
-            messageManager.sendAsyncMessage("AboutLogins:SyncState", syncState);
+            syncState = this.getSyncState();
             this.updatePasswordSyncNotificationState();
           }
 
-          // App store badges sourced from https://developer.apple.com/app-store/marketing/guidelines/#section-badges.
-          // This array mirrors the file names from the App store directory (./content/third-party/app-store)
-          const appStoreLocales = [
-            "az",
-            "ar",
-            "bg",
-            "cs",
-            "da",
-            "de",
-            "el",
-            "en",
-            "es-mx",
-            "es",
-            "et",
-            "fi",
-            "fr",
-            "he",
-            "hu",
-            "id",
-            "it",
-            "ja",
-            "ko",
-            "lt",
-            "lv",
-            "my",
-            "nb",
-            "nl",
-            "nn",
-            "pl",
-            "pt-br",
-            "pt-pt",
-            "ro",
-            "ru",
-            "si",
-            "sk",
-            "sv",
-            "th",
-            "tl",
-            "tr",
-            "vi",
-            "zh-hans",
-            "zh-hant",
-          ];
-
-          // Google play badges sourced from https://play.google.com/intl/en_us/badges/
-          // This array mirrors the file names from the play store directory (./content/third-party/play-store)
-          const playStoreLocales = [
-            "af",
-            "ar",
-            "az",
-            "be",
-            "bg",
-            "bn",
-            "bs",
-            "ca",
-            "cs",
-            "da",
-            "de",
-            "el",
-            "en",
-            "es",
-            "et",
-            "eu",
-            "fa",
-            "fr",
-            "gl",
-            "gu",
-            "he",
-            "hi",
-            "hr",
-            "hu",
-            "hy",
-            "id",
-            "is",
-            "it",
-            "ja",
-            "ka",
-            "kk",
-            "km",
-            "kn",
-            "ko",
-            "lo",
-            "lt",
-            "lv",
-            "mk",
-            "mr",
-            "ms",
-            "my",
-            "nb",
-            "ne",
-            "nl",
-            "nn",
-            "pa",
-            "pl",
-            "pt-br",
-            "pt",
-            "ro",
-            "ru",
-            "si",
-            "sk",
-            "sl",
-            "sq",
-            "sr",
-            "sv",
-            "ta",
-            "te",
-            "th",
-            "tl",
-            "tr",
-            "uk",
-            "ur",
-            "uz",
-            "vi",
-            "zh-cn",
-            "zh-tw",
-          ];
-
           const playStoreBadgeLanguage = Services.locale.negotiateLanguages(
             Services.locale.appLocalesAsBCP47,
-            playStoreLocales,
-            "en-US",
+            PLAY_STORE_LOCALES,
+            "en-us",
             Services.locale.langNegStrategyLookup
-          );
+          )[0];
 
           const appStoreBadgeLanguage = Services.locale.negotiateLanguages(
             Services.locale.appLocalesAsBCP47,
-            appStoreLocales,
-            "en-US",
+            APP_STORE_LOCALES,
+            "en-us",
             Services.locale.langNegStrategyLookup
-          );
+          )[0];
 
           const selectedBadgeLanguages = {
-            appStoreBadge: appStoreBadgeLanguage,
-            playStoreBadge: playStoreBadgeLanguage,
+            appStoreBadgeLanguage,
+            playStoreBadgeLanguage,
           };
 
-          messageManager.sendAsyncMessage(
-            "AboutLogins:LocalizeBadges",
-            selectedBadgeLanguages
-          );
+          messageManager.sendAsyncMessage("AboutLogins:Setup", {
+            logins,
+            syncState,
+            selectedBadgeLanguages,
+            masterPasswordEnabled: LoginHelper.isMasterPasswordSet(),
+          });
 
-          if (BREACH_ALERTS_ENABLED) {
-            const breachesByLoginGUID = await LoginBreaches.getPotentialBreachesByLoginGUID(
-              logins
-            );
-            messageManager.sendAsyncMessage(
-              "AboutLogins:UpdateBreaches",
-              breachesByLoginGUID
-            );
-          }
-
-          messageManager.sendAsyncMessage(
-            "AboutLogins:SendFavicons",
-            await this.getAllFavicons(logins)
-          );
+          await this._sendAllLoginRelatedObjects(logins, messageManager);
         } catch (ex) {
           if (ex.result != Cr.NS_ERROR_NOT_INITIALIZED) {
             throw ex;
@@ -435,7 +426,6 @@ var AboutLoginsParent = {
             ex
           );
         }
-
         break;
       }
       case "AboutLogins:UpdateLogin": {
@@ -459,11 +449,23 @@ var AboutLoginsParent = {
         if (loginUpdates.hasOwnProperty("password")) {
           modifiedLogin.password = loginUpdates.password;
         }
-
-        Services.logins.modifyLogin(logins[0], modifiedLogin);
+        try {
+          Services.logins.modifyLogin(logins[0], modifiedLogin);
+        } catch (error) {
+          this.handleLoginStorageErrors(modifiedLogin, error, message);
+        }
         break;
       }
     }
+  },
+
+  handleLoginStorageErrors(login, error, message) {
+    const messageManager = message.target.messageManager;
+    const errorMessage = error.message;
+    messageManager.sendAsyncMessage("AboutLogins:ShowLoginItemError", {
+      login: augmentVanillaLoginObject(LoginHelper.loginToVanillaObject(login)),
+      errorMessage,
+    });
   },
 
   async observe(subject, topic, type) {
@@ -472,15 +474,15 @@ var AboutLoginsParent = {
       Services.obs.removeObserver(this, "passwordmgr-crypto-loginCanceled");
       Services.obs.removeObserver(this, "passwordmgr-storage-changed");
       Services.obs.removeObserver(this, UIState.ON_UPDATE);
+      this._observersAdded = false;
       return;
     }
 
     if (topic == "passwordmgr-crypto-login") {
       this.removeNotifications(MASTER_PASSWORD_NOTIFICATION_ID);
-      this.messageSubscribers(
-        "AboutLogins:AllLogins",
-        await this.getAllLogins()
-      );
+      let logins = await this.getAllLogins();
+      this.messageSubscribers("AboutLogins:AllLogins", logins);
+      await this._sendAllLoginRelatedObjects(logins);
       return;
     }
 
@@ -701,6 +703,27 @@ var AboutLoginsParent = {
       }
       throw e;
     }
+  },
+
+  async _sendAllLoginRelatedObjects(logins, messageManager) {
+    let sendMessageFn = (name, details) => {
+      if (messageManager) {
+        messageManager.sendAsyncMessage(name, details);
+      } else {
+        this.messageSubscribers(name, details);
+      }
+    };
+    if (BREACH_ALERTS_ENABLED) {
+      sendMessageFn(
+        "AboutLogins:UpdateBreaches",
+        await LoginBreaches.getPotentialBreachesByLoginGUID(logins)
+      );
+    }
+
+    sendMessageFn(
+      "AboutLogins:SendFavicons",
+      await this.getAllFavicons(logins)
+    );
   },
 
   getSyncState() {

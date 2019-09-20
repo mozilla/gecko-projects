@@ -2,24 +2,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-html {
-  height: 100%;
-}
-
 .hidden {
   display: none;
 }
 
-body.config-background {
-  min-height: 100%;
+.table-shown > #show-all,
+.table-shown > .config-background-wrapper {
+  display: none;
+}
+
+.config-background {
   background-image: url("chrome://browser/content/aboutconfig/background.svg");
   background-repeat: no-repeat;
   background-position: center center;
-  background-size: 450px;
+  background-size: 400px;
+  height: 350px;
 }
 
-body.config-warning {
-  background-image: url("chrome://browser/content/aboutconfig/background.svg#warning");
+.config-help-text {
+  text-align: center;
 }
 
 .title {
@@ -50,27 +51,26 @@ body.config-warning {
   background-size: 12px 12px;
   padding-inline-start: 30px;
   z-index: 1;
+  /* Set horizontal margin to 0 to ensure alignment with table. */
+  margin-right: 0;
+  margin-left: 0;
 }
 
 #about-config-search:dir(rtl) {
   background-position-x: right 9px;
 }
 
-#show-all:not(.hidden) {
+#show-all {
   display: block;
   margin: 10px auto;
-}
-
-/* Ghost the button when it's not selected. */
-#show-all:not(:focus):not(:hover):not(:active) {
-  background-color: transparent;
-  opacity: .7;
 }
 
 #prefs {
   background-color: var(--in-content-box-background);
   color: var(--in-content-text-color);
   margin: 10px;
+  table-layout: fixed;
+  width: calc(100% - 20px);
   min-width: 644px;
   /* To stay consistent with about:preferences (664px - 20px margin). */
   border: 1px solid var(--in-content-box-border-color);
@@ -107,7 +107,6 @@ body.config-warning {
 #prefs > tr > td,
 #prefs > tr > th {
   padding: 4px;
-  width: 50%;
   font-weight: inherit;
 }
 
@@ -123,6 +122,7 @@ body.config-warning {
 
 #prefs > tr > td.cell-edit,
 #prefs > tr > td.cell-reset {
+  width: 40px;
   padding: 0;
 }
 
@@ -135,6 +135,50 @@ body.config-warning {
 td.cell-value > form > input[type="text"],
 td.cell-value > form > input[type="number"] {
   -moz-appearance: textfield;
+  margin: 0;
   width: 100%;
   box-sizing: border-box;
+}
+
+.button-add,
+.button-save,
+.button-edit,
+.button-toggle,
+.button-delete,
+.button-reset {
+  -moz-context-properties: fill;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 16px;
+  fill: currentColor;
+  min-width: auto;
+  width: 32px;
+}
+
+.button-add {
+  background-image: url("chrome://browser/skin/add.svg");
+}
+
+.button-save {
+  background-image: url("chrome://global/skin/icons/check.svg");
+}
+
+.button-edit {
+  background-image: url("chrome://browser/skin/edit.svg");
+}
+
+.button-toggle {
+  background-image: url("chrome://browser/skin/toggle.svg");
+}
+
+.button-delete {
+  background-image: url("chrome://global/skin/icons/delete.svg");
+}
+
+.button-reset {
+  background-image: url("chrome://browser/skin/undo.svg");
+}
+
+.button-reset:dir(rtl) {
+  transform: scaleX(-1);
 }

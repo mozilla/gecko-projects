@@ -258,12 +258,6 @@ struct TrackBound {
  * to handle this.
  */
 
-// GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
-// GetTickCount() and conflicts with MediaStream::GetCurrentTime.
-#ifdef GetCurrentTime
-#  undef GetCurrentTime
-#endif
-
 class MediaStream : public mozilla::LinkedListElement<MediaStream> {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaStream)
@@ -823,6 +817,25 @@ class SourceMediaStream : public MediaStream {
   nsTArray<TrackData> mPendingTracks;
   nsTArray<TrackBound<DirectMediaStreamTrackListener>> mDirectTrackListeners;
   bool mFinishPending;
+};
+
+/**
+ * A ref-counted wrapper of a MediaStream that allows multiple users to share a
+ * reference to the same MediaStream with the purpose of being guaranteed that
+ * the graph it is in is kept alive.
+ *
+ * Automatically suspended on creation and destroyed on destruction. Main thread
+ * only.
+ */
+struct SharedDummyStream {
+  NS_INLINE_DECL_REFCOUNTING(SharedDummyStream)
+  explicit SharedDummyStream(MediaStream* aStream) : mStream(aStream) {
+    mStream->Suspend();
+  }
+  const RefPtr<MediaStream> mStream;
+
+ private:
+  ~SharedDummyStream() { mStream->Destroy(); }
 };
 
 /**

@@ -1126,11 +1126,9 @@ void NS_GetReferrerFromChannel(nsIChannel* channel, nsIURI** referrer) {
     nsresult rv = props->GetPropertyAsInterface(
         NS_LITERAL_STRING("docshell.internalReferrer"), NS_GET_IID(nsIURI),
         reinterpret_cast<void**>(referrer));
-    if (NS_FAILED(rv)) *referrer = nullptr;
-  }
-
-  if (*referrer) {
-    return;
+    if (NS_SUCCEEDED(rv)) {
+      return;
+    }
   }
 
   // if that didn't work, we can still try to get the referrer from the
@@ -2125,7 +2123,7 @@ bool NS_ShouldCheckAppCache(nsIPrincipal* aPrincipal) {
   }
 
   bool allowed;
-  rv = offlineService->OfflineAppAllowed(aPrincipal, nullptr, &allowed);
+  rv = offlineService->OfflineAppAllowed(aPrincipal, &allowed);
   return NS_SUCCEEDED(rv) && allowed;
 }
 

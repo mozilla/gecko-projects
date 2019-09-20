@@ -1652,8 +1652,7 @@ bool nsContentUtils::OfflineAppAllowed(nsIURI* aURI) {
   }
 
   bool allowed;
-  nsresult rv = updateService->OfflineAppAllowedForURI(
-      aURI, Preferences::GetRootBranch(), &allowed);
+  nsresult rv = updateService->OfflineAppAllowedForURI(aURI, &allowed);
   return NS_SUCCEEDED(rv) && allowed;
 }
 
@@ -1666,8 +1665,7 @@ bool nsContentUtils::OfflineAppAllowed(nsIPrincipal* aPrincipal) {
   }
 
   bool allowed;
-  nsresult rv = updateService->OfflineAppAllowed(
-      aPrincipal, Preferences::GetRootBranch(), &allowed);
+  nsresult rv = updateService->OfflineAppAllowed(aPrincipal, &allowed);
   return NS_SUCCEEDED(rv) && allowed;
 }
 
@@ -1697,28 +1695,6 @@ bool nsContentUtils::PrincipalAllowsL10n(nsIPrincipal* aPrincipal) {
                            &hasFlags);
   NS_ENSURE_SUCCESS(rv, false);
   return hasFlags;
-}
-
-bool nsContentUtils::MaybeAllowOfflineAppByDefault(nsIPrincipal* aPrincipal) {
-  if (!Preferences::GetRootBranch()) return false;
-
-  nsresult rv;
-
-  bool allowedByDefault;
-  rv = Preferences::GetRootBranch()->GetBoolPref(
-      "offline-apps.allow_by_default", &allowedByDefault);
-  if (NS_FAILED(rv)) return false;
-
-  if (!allowedByDefault) return false;
-
-  nsCOMPtr<nsIOfflineCacheUpdateService> updateService =
-      components::OfflineCacheUpdate::Service();
-  if (!updateService) {
-    return false;
-  }
-
-  rv = updateService->AllowOfflineApp(aPrincipal);
-  return NS_SUCCEEDED(rv);
 }
 
 // static
@@ -3808,7 +3784,11 @@ nsIContentPolicy* nsContentUtils::GetContentPolicy() {
 // static
 bool nsContentUtils::IsEventAttributeName(nsAtom* aName, int32_t aType) {
   const char16_t* name = aName->GetUTF16String();
-  if (name[0] != 'o' || name[1] != 'n') return false;
+  if (name[0] != 'o' || name[1] != 'n' ||
+      (aName == nsGkAtoms::onformdata &&
+       !mozilla::StaticPrefs::dom_formdata_event_enabled())) {
+    return false;
+  }
 
   EventNameMapping mapping;
   return (sAtomEventTable->Get(aName, &mapping) && mapping.mType & aType);
@@ -6306,8 +6286,9 @@ static void ReportPatternCompileFailure(nsAString& aPattern,
 }
 
 // static
-bool nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
-                                       const Document* aDocument) {
+Maybe<bool> nsContentUtils::IsPatternMatching(nsAString& aValue,
+                                              nsAString& aPattern,
+                                              const Document* aDocument) {
   NS_ASSERTION(aDocument, "aDocument should be a valid pointer (not null)");
 
   // The fact that we're using a JS regexp under the hood should not be visible
@@ -6335,7 +6316,7 @@ bool nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
     aPattern.Cut(0, 4);
     aPattern.Cut(aPattern.Length() - 2, 2);
     ReportPatternCompileFailure(aPattern, aDocument, cx);
-    return true;
+    return Some(true);
   }
 
   JS::Rooted<JS::Value> rval(cx, JS::NullValue());
@@ -6343,10 +6324,10 @@ bool nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
   if (!JS::ExecuteRegExpNoStatics(cx, re,
                                   static_cast<char16_t*>(aValue.BeginWriting()),
                                   aValue.Length(), &idx, true, &rval)) {
-    return true;
+    return Nothing();
   }
 
-  return !rval.isNull();
+  return Some(!rval.isNull());
 }
 
 // static
@@ -7379,7 +7360,8 @@ void nsContentUtils::TransferableToIPCTransferable(
       } else if (nsCOMPtr<imgIContainer> image = do_QueryInterface(data)) {
         // Images to be placed on the clipboard are imgIContainers.
         RefPtr<mozilla::gfx::SourceSurface> surface = image->GetFrame(
-            imgIContainer::FRAME_CURRENT, imgIContainer::FLAG_SYNC_DECODE);
+            imgIContainer::FRAME_CURRENT,
+            imgIContainer::FLAG_SYNC_DECODE | imgIContainer::FLAG_ASYNC_NOTIFY);
         if (!surface) {
           continue;
         }
@@ -8056,7 +8038,7 @@ class BulkAppender {
   void Append(Span<const char> aStr) {
     size_t len = aStr.Length();
     MOZ_ASSERT(mPosition + len <= mHandle.Length());
-    ConvertLatin1toUTF16(aStr, mHandle.AsSpan().From(mPosition));
+    ConvertLatin1toUtf16(aStr, mHandle.AsSpan().From(mPosition));
     mPosition += len;
   }
 

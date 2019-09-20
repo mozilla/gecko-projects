@@ -19,6 +19,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   fxAccounts: "resource://gre/modules/FxAccounts.jsm",
   FXA_PWDMGR_HOST: "resource://gre/modules/FxAccountsCommon.js",
   FXA_PWDMGR_REALM: "resource://gre/modules/FxAccountsCommon.js",
+  AddonManager: "resource://gre/modules/AddonManager.jsm",
   LoginBreaches: "resource:///modules/LoginBreaches.jsm",
   LoginHelper: "resource://gre/modules/LoginHelper.jsm",
 });
@@ -40,6 +41,8 @@ let idToTextMap = new Map([
 
 const MONITOR_API_ENDPOINT = "https://monitor.firefox.com/user/breach-stats";
 
+const SECURE_PROXY_ADDON_ID = "secure-proxy@mozilla.com";
+
 // TODO: there will be a monitor-specific scope for FxA access tokens, which we should be
 // using once it's implemented. See: https://github.com/mozilla/blurts-server/issues/1128
 const SCOPE_MONITOR = [
@@ -59,7 +62,9 @@ const MONITOR_RESPONSE_PROPS = ["monitoredEmails", "numBreaches", "passwords"];
 
 var AboutProtectionsHandler = {
   _inited: false,
+  monitorResponse: null,
   _topics: [
+    "ClearMonitorCache",
     // Opening about:* pages
     "OpenAboutLogins",
     "OpenContentBlockingPreferences",
@@ -68,6 +73,7 @@ var AboutProtectionsHandler = {
     "FetchContentBlockingEvents",
     "FetchMonitorData",
     "FetchUserLoginsData",
+    "GetShowProxyCard",
   ],
 
   init() {
@@ -100,7 +106,15 @@ var AboutProtectionsHandler = {
    * @return valid data from endpoint.
    */
   async fetchUserBreachStats(token) {
-    let monitorResponse = null;
+    if (this.monitorResponse && this.monitorResponse.timestamp) {
+      var timeDiff = Date.now() - this.monitorResponse.timestamp;
+      let oneDayInMS = 24 * 60 * 60 * 1000;
+      if (timeDiff >= oneDayInMS) {
+        this.monitorResponse = null;
+      } else {
+        return this.monitorResponse;
+      }
+    }
 
     // Make the request
     const headers = new Headers();
@@ -122,31 +136,33 @@ var AboutProtectionsHandler = {
         }
       }
 
-      monitorResponse = isValid ? json : new Error(UNEXPECTED_RESPONSE);
+      this.monitorResponse = isValid ? json : new Error(UNEXPECTED_RESPONSE);
+      if (isValid) {
+        this.monitorResponse.timestamp = Date.now();
+      }
     } else {
       // Check the reason for the error
       switch (response.status) {
         case 400:
         case 401:
-          monitorResponse = new Error(INVALID_OAUTH_TOKEN);
+          this.monitorResponse = new Error(INVALID_OAUTH_TOKEN);
           break;
         case 404:
-          monitorResponse = new Error(USER_UNSUBSCRIBED_TO_MONITOR);
+          this.monitorResponse = new Error(USER_UNSUBSCRIBED_TO_MONITOR);
           break;
         case 503:
-          monitorResponse = new Error(SERVICE_UNAVAILABLE);
+          this.monitorResponse = new Error(SERVICE_UNAVAILABLE);
           break;
         default:
-          monitorResponse = new Error(UNKNOWN_ERROR);
+          this.monitorResponse = new Error(UNKNOWN_ERROR);
           break;
       }
     }
 
-    if (monitorResponse instanceof Error) {
-      throw monitorResponse;
+    if (this.monitorResponse instanceof Error) {
+      throw this.monitorResponse;
     }
-
-    return monitorResponse;
+    return this.monitorResponse;
   },
 
   /**
@@ -267,6 +283,27 @@ var AboutProtectionsHandler = {
   },
 
   /**
+   * The proxy card will only show if the user is in the US, has the browser language in "en-US",
+   * and does not yet have Proxy installed.
+   */
+  async shouldShowProxyCard() {
+    const region = Services.prefs.getCharPref("browser.search.region");
+    const languages = Services.prefs.getComplexValue(
+      "intl.accept_languages",
+      Ci.nsIPrefLocalizedString
+    );
+    const alreadyInstalled = await AddonManager.getAddonByID(
+      SECURE_PROXY_ADDON_ID
+    );
+
+    return (
+      region.toLowerCase() === "us" &&
+      !alreadyInstalled &&
+      languages.data.toLowerCase().includes("en-us")
+    );
+  },
+
+  /**
    * Sends a response from message target.
    *
    * @param {Object}  target
@@ -360,6 +397,13 @@ var AboutProtectionsHandler = {
           await this.getLoginData()
         );
         break;
+      case "ClearMonitorCache":
+        this.monitorResponse = null;
+        break;
+      case "GetShowProxyCard":
+        if (await this.shouldShowProxyCard()) {
+          this.sendMessage(aMessage.target, "SendShowProxyCard");
+        }
     }
   },
 };

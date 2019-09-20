@@ -458,7 +458,7 @@ class AddonInternal {
   }
 
   get isPlatformCompatible() {
-    if (this.targetPlatforms.length == 0) {
+    if (!this.targetPlatforms.length) {
       return true;
     }
 
@@ -901,7 +901,7 @@ AddonWrapper = class {
     let repositoryAddon = addon._repositoryAddon;
     if (repositoryAddon && "screenshots" in repositoryAddon) {
       let repositoryScreenshots = repositoryAddon.screenshots;
-      if (repositoryScreenshots && repositoryScreenshots.length > 0) {
+      if (repositoryScreenshots && repositoryScreenshots.length) {
         return repositoryScreenshots;
       }
     }
@@ -3091,8 +3091,6 @@ this.XPIDatabaseReconcile = {
       return (aManifests[loc.name] && aManifests[loc.name][id]) || null;
     };
 
-    let addonExists = addon => addon._sourceBundle.exists();
-
     let previousAddons = new ExtensionUtils.DefaultMap(() => new Map());
     let currentAddons = new ExtensionUtils.DefaultMap(() => new Map());
 
@@ -3214,9 +3212,7 @@ this.XPIDatabaseReconcile = {
         if (addon.location.name == KEY_APP_BUILTINS) {
           continue;
         }
-        if (addonExists(addon)) {
-          XPIInternal.BootstrapScope.get(addon).uninstall();
-        }
+        XPIInternal.BootstrapScope.get(addon).uninstall();
         addon.location.removeAddon(id);
         addon.visible = false;
         addon.active = false;

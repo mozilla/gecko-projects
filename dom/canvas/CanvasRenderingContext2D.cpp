@@ -359,6 +359,14 @@ class AdjustedTargetForFilter {
       mSourceGraphicRect.SizeTo(1, 1);
     }
 
+    if (!mFinalTarget->CanCreateSimilarDrawTarget(mSourceGraphicRect.Size(),
+                                                  SurfaceFormat::B8G8R8A8)) {
+      mTarget = mFinalTarget;
+      mCtx = nullptr;
+      mFinalTarget = nullptr;
+      return;
+    }
+
     mTarget = mFinalTarget->CreateSimilarDrawTarget(mSourceGraphicRect.Size(),
                                                     SurfaceFormat::B8G8R8A8);
 
@@ -480,6 +488,14 @@ class AdjustedTargetForShadow {
     bounds.Inflate(blurRadius);
     bounds.RoundOut();
     bounds.ToIntRect(&mTempRect);
+
+    if (!mFinalTarget->CanCreateSimilarDrawTarget(mTempRect.Size(),
+                                                  SurfaceFormat::B8G8R8A8)) {
+      mTarget = mFinalTarget;
+      mCtx = nullptr;
+      mFinalTarget = nullptr;
+      return;
+    }
 
     mTarget = mFinalTarget->CreateShadowDrawTarget(
         mTempRect.Size(), SurfaceFormat::B8G8R8A8, mSigma);
@@ -5444,13 +5460,13 @@ JSObject* CanvasPath::WrapObject(JSContext* aCx,
 }
 
 already_AddRefed<CanvasPath> CanvasPath::Constructor(
-    const GlobalObject& aGlobal, ErrorResult& aRv) {
+    const GlobalObject& aGlobal) {
   RefPtr<CanvasPath> path = new CanvasPath(aGlobal.GetAsSupports());
   return path.forget();
 }
 
 already_AddRefed<CanvasPath> CanvasPath::Constructor(
-    const GlobalObject& aGlobal, CanvasPath& aCanvasPath, ErrorResult& aRv) {
+    const GlobalObject& aGlobal, CanvasPath& aCanvasPath) {
   RefPtr<gfx::Path> tempPath = aCanvasPath.GetPath(
       CanvasWindingRule::Nonzero,
       gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget().get());
@@ -5461,11 +5477,10 @@ already_AddRefed<CanvasPath> CanvasPath::Constructor(
 }
 
 already_AddRefed<CanvasPath> CanvasPath::Constructor(
-    const GlobalObject& aGlobal, const nsAString& aPathString,
-    ErrorResult& aRv) {
+    const GlobalObject& aGlobal, const nsAString& aPathString) {
   RefPtr<gfx::Path> tempPath = SVGContentUtils::GetPath(aPathString);
   if (!tempPath) {
-    return Constructor(aGlobal, aRv);
+    return Constructor(aGlobal);
   }
 
   RefPtr<CanvasPath> path =

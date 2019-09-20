@@ -7,11 +7,14 @@
 #include "builtin/TestingFunctions.h"
 
 #include "mozilla/Atomics.h"
+#include "mozilla/Casting.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
+#include "mozilla/Span.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/TextUtils.h"
+#include "mozilla/Tuple.h"
 #include "mozilla/Unused.h"
 
 #include <algorithm>
@@ -38,6 +41,7 @@
 #  include "irregexp/RegExpParser.h"
 #endif
 #include "gc/Heap.h"
+#include "gc/Zone.h"
 #include "jit/BaselineJIT.h"
 #include "jit/InlinableNatives.h"
 #include "jit/JitRealm.h"
@@ -95,7 +99,12 @@
 using namespace js;
 
 using mozilla::ArrayLength;
+using mozilla::AssertedCast;
+using mozilla::AsWritableChars;
+using mozilla::MakeSpan;
 using mozilla::Maybe;
+using mozilla::Tie;
+using mozilla::Tuple;
 
 using JS::AutoStableStringChars;
 using JS::CompileOptions;
@@ -697,6 +706,16 @@ static bool WasmCachingIsSupported(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool WasmHugeMemoryIsSupported(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef WASM_SUPPORTS_HUGE_MEMORY
+  args.rval().setBoolean(true);
+#else
+  args.rval().setBoolean(false);
+#endif
+  return true;
+}
+
 static bool WasmUsesCranelift(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef ENABLE_WASM_CRANELIFT
@@ -1181,23 +1200,9 @@ static bool ScheduleGC(JSContext* cx, unsigned argc, Value* vp) {
   } else if (args[0].isNumber()) {
     /* Schedule a GC to happen after |arg| allocations. */
     JS_ScheduleGC(cx, std::max(int(args[0].toNumber()), 0));
-  } else if (args[0].isObject()) {
-    /* Ensure that |zone| is collected during the next GC. */
-    Zone* zone = UncheckedUnwrap(&args[0].toObject())->zone();
-    PrepareZoneForGC(zone);
-  } else if (args[0].isString()) {
-    /* This allows us to schedule the atoms zone for GC. */
-    Zone* zone = args[0].toString()->zoneFromAnyThread();
-    if (!CurrentThreadCanAccessZone(zone)) {
-      RootedObject callee(cx, &args.callee());
-      ReportUsageErrorASCII(cx, callee, "Specified zone not accessible for GC");
-      return false;
-    }
-    PrepareZoneForGC(zone);
   } else {
     RootedObject callee(cx, &args.callee());
-    ReportUsageErrorASCII(cx, callee,
-                          "Bad argument - expecting number, object or string");
+    ReportUsageErrorASCII(cx, callee, "Bad argument - expecting number");
     return false;
   }
 
@@ -1255,19 +1260,6 @@ static bool VerifyPostBarriers(JSContext* cx, unsigned argc, Value* vp) {
   }
   args.rval().setUndefined();
   return true;
-}
-
-static bool GCState(JSContext* cx, unsigned argc, Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-
-  if (args.length() != 0) {
-    RootedObject callee(cx, &args.callee());
-    ReportUsageErrorASCII(cx, callee, "Too many arguments");
-    return false;
-  }
-
-  const char* state = StateName(cx->runtime()->gc.state());
-  return ReturnStringCopy(cx, args, state);
 }
 
 static bool CurrentGC(JSContext* cx, unsigned argc, Value* vp) {
@@ -1367,6 +1359,66 @@ static bool DumpGCArenaInfo(JSContext* cx, unsigned argc, Value* vp) {
 }
 
 #endif /* JS_GC_ZEAL */
+
+static bool GCState(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  if (args.length() > 1) {
+    RootedObject callee(cx, &args.callee());
+    ReportUsageErrorASCII(cx, callee, "Too many arguments");
+    return false;
+  }
+
+  const char* state;
+
+  if (args.length() == 1) {
+    if (!args[0].isObject()) {
+      RootedObject callee(cx, &args.callee());
+      ReportUsageErrorASCII(cx, callee, "Expected object");
+      return false;
+    }
+
+    JSObject* obj = UncheckedUnwrap(&args[0].toObject());
+    state = gc::StateName(obj->zone()->gcState());
+  } else {
+    state = gc::StateName(cx->runtime()->gc.state());
+  }
+
+  return ReturnStringCopy(cx, args, state);
+}
+
+static bool ScheduleZoneForGC(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  if (args.length() != 1) {
+    RootedObject callee(cx, &args.callee());
+    ReportUsageErrorASCII(cx, callee, "Expecting a single argument");
+    return false;
+  }
+
+  if (args[0].isObject()) {
+    // Ensure that |zone| is collected during the next GC.
+    Zone* zone = UncheckedUnwrap(&args[0].toObject())->zone();
+    PrepareZoneForGC(zone);
+  } else if (args[0].isString()) {
+    // This allows us to schedule the atoms zone for GC.
+    Zone* zone = args[0].toString()->zoneFromAnyThread();
+    if (!CurrentThreadCanAccessZone(zone)) {
+      RootedObject callee(cx, &args.callee());
+      ReportUsageErrorASCII(cx, callee, "Specified zone not accessible for GC");
+      return false;
+    }
+    PrepareZoneForGC(zone);
+  } else {
+    RootedObject callee(cx, &args.callee());
+    ReportUsageErrorASCII(cx, callee,
+                          "Bad argument - expecting object or string");
+    return false;
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
 
 static bool StartGC(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
@@ -2360,9 +2412,9 @@ static bool SettlePromiseNow(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   Rooted<PromiseObject*> promise(cx, &args[0].toObject().as<PromiseObject>());
-  if (IsPromiseForAsync(promise)) {
+  if (IsPromiseForAsyncFunctionOrGenerator(promise)) {
     JS_ReportErrorASCII(
-        cx, "async function's promise shouldn't be manually settled");
+        cx, "async function/generator's promise shouldn't be manually settled");
     return false;
   }
 
@@ -2440,9 +2492,10 @@ static bool ResolvePromise(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  if (IsPromiseForAsync(promise)) {
+  if (IsPromiseForAsyncFunctionOrGenerator(promise)) {
     JS_ReportErrorASCII(
-        cx, "async function's promise shouldn't be manually resolved");
+        cx,
+        "async function/generator's promise shouldn't be manually resolved");
     return false;
   }
 
@@ -2476,9 +2529,10 @@ static bool RejectPromise(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  if (IsPromiseForAsync(promise)) {
+  if (IsPromiseForAsyncFunctionOrGenerator(promise)) {
     JS_ReportErrorASCII(
-        cx, "async function's promise shouldn't be manually rejected");
+        cx,
+        "async function/generator's promise shouldn't be manually rejected");
     return false;
   }
 
@@ -5773,6 +5827,56 @@ static bool MarkObjectPropertiesUnknown(JSContext* cx, unsigned argc,
   return true;
 }
 
+static bool EncodeAsUtf8InBuffer(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  if (!args.requireAtLeast(cx, "encodeAsUtf8InBuffer", 2)) {
+    return false;
+  }
+
+  RootedObject callee(cx, &args.callee());
+
+  if (!args[0].isString()) {
+    ReportUsageErrorASCII(cx, callee, "First argument must be a String");
+    return false;
+  }
+
+  // Create the amounts array early so that the raw pointer into Uint8Array
+  // data has as short a lifetime as possible
+  RootedArrayObject array(cx, NewDenseFullyAllocatedArray(cx, 2));
+  if (!array) {
+    return false;
+  }
+  array->ensureDenseInitializedLength(cx, 0, 2);
+
+  uint32_t length;
+  bool isSharedMemory;
+  uint8_t* data;
+  if (!args[1].isObject() ||
+      !JS_GetObjectAsUint8Array(&args[1].toObject(), &length, &isSharedMemory,
+                                &data) ||
+      isSharedMemory ||  // excluded views of SharedArrayBuffers
+      !data) {           // exclude views of detached ArrayBuffers
+    ReportUsageErrorASCII(cx, callee, "Second argument must be a Uint8Array");
+    return false;
+  }
+
+  Maybe<Tuple<size_t, size_t>> amounts = JS_EncodeStringToUTF8BufferPartial(
+      cx, args[0].toString(), AsWritableChars(MakeSpan(data, length)));
+  if (!amounts) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+
+  size_t unitsRead, bytesWritten;
+  Tie(unitsRead, bytesWritten) = *amounts;
+
+  array->initDenseElement(0, Int32Value(AssertedCast<int32_t>(unitsRead)));
+  array->initDenseElement(1, Int32Value(AssertedCast<int32_t>(bytesWritten)));
+
+  args.rval().setObject(*array);
+  return true;
+}
+
 JSScript* js::TestingFunctionArgumentToScript(
     JSContext* cx, HandleValue v, JSFunction** funp /* = nullptr */) {
   if (v.isString()) {
@@ -6227,10 +6331,8 @@ gc::ZealModeHelpText),
 "  collection that may be happening."),
 
     JS_FN_HELP("schedulegc", ScheduleGC, 1, 0,
-"schedulegc([num | obj | string])",
+"schedulegc([num])",
 "  If num is given, schedule a GC after num allocations.\n"
-"  If obj is given, schedule a GC of obj's zone.\n"
-"  If string is given, schedule a GC of the string's zone if possible.\n"
 "  Returns the number of allocations before the next trigger."),
 
     JS_FN_HELP("selectforgc", SelectForGC, 0, 0,
@@ -6244,10 +6346,6 @@ gc::ZealModeHelpText),
     JS_FN_HELP("verifypostbarriers", VerifyPostBarriers, 0, 0,
 "verifypostbarriers()",
 "  Does nothing (the post-write barrier verifier has been remove)."),
-
-    JS_FN_HELP("gcstate", GCState, 0, 0,
-"gcstate()",
-"  Report the global GC state."),
 
     JS_FN_HELP("currentgc", CurrentGC, 0, 0,
 "currentgc()",
@@ -6264,11 +6362,21 @@ gc::ZealModeHelpText),
 "  in arenas.\n"),
 #endif
 
+    JS_FN_HELP("gcstate", GCState, 0, 0,
+"gcstate([obj])",
+"  Report the global GC state, or the GC state for the zone containing |obj|."),
+
+    JS_FN_HELP("schedulezone", ScheduleZoneForGC, 1, 0,
+"schedulezone([obj | string])",
+"  If obj is given, schedule a GC of obj's zone.\n"
+"  If string is given, schedule a GC of the string's zone if possible."),
+
     JS_FN_HELP("startgc", StartGC, 1, 0,
 "startgc([n [, 'shrinking']])",
 "  Start an incremental GC and run a slice that processes about n objects.\n"
 "  If 'shrinking' is passesd as the optional second argument, perform a\n"
-"  shrinking GC rather than a normal GC."),
+"  shrinking GC rather than a normal GC. If no zones have been selected with\n"
+"  schedulegc(), a full GC will be performed."),
 
     JS_FN_HELP("finishgc", FinishGC, 0, 0,
 "finishgc()",
@@ -6364,6 +6472,11 @@ gc::ZealModeHelpText),
     JS_FN_HELP("wasmCachingIsSupported", WasmCachingIsSupported, 0, 0,
 "wasmCachingIsSupported()",
 "  Returns a boolean indicating whether WebAssembly caching is supported by the runtime."),
+
+    JS_FN_HELP("wasmHugeMemoryIsSupported", WasmHugeMemoryIsSupported, 0, 0,
+"wasmHugeMemoryIsSupported()",
+"  Returns a boolean indicating whether WebAssembly supports using a large"
+"  virtual memory reservation in order to elide bounds checks on this platform."),
 
     JS_FN_HELP("wasmUsesCranelift", WasmUsesCranelift, 0, 0,
 "wasmUsesCranelift()",
@@ -6795,6 +6908,14 @@ gc::ZealModeHelpText),
     JS_FN_HELP("markObjectPropertiesUnknown", MarkObjectPropertiesUnknown, 1, 0,
 "markObjectPropertiesUnknown(obj)",
 "  Mark all objects in obj's object group as having unknown properties.\n"),
+
+    JS_FN_HELP("encodeAsUtf8InBuffer", EncodeAsUtf8InBuffer, 2, 0,
+"encodeAsUtf8InBuffer(str, uint8Array)",
+"  Encode as many whole code points from the string str into the provided\n"
+"  Uint8Array as will completely fit in it, converting lone surrogates to\n"
+"  REPLACEMENT CHARACTER.  Return an array [r, w] where |r| is the\n"
+"  number of 16-bit units read and |w| is the number of bytes of UTF-8\n"
+"  written."),
 
     JS_FS_HELP_END
 };

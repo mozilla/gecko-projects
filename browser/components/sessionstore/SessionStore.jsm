@@ -2069,7 +2069,7 @@ var SessionStoreInternal = {
           }
         }
       }
-      if (openTabs.length == 0) {
+      if (!openTabs.length) {
         this._closedWindows.splice(ix, 1);
       } else if (openTabs.length != openTabCount) {
         // Adjust the window's title if we removed an open tab
@@ -2614,6 +2614,8 @@ var SessionStoreInternal = {
     ) {
       return;
     }
+
+    aChannel.QueryInterface(Ci.nsIHttpChannel);
 
     if (!aChannel.isDocument || !aChannel.loadInfo) {
       return; // Not a document load.
@@ -3822,7 +3824,7 @@ var SessionStoreInternal = {
     var hidden = WINDOW_HIDEABLE_FEATURES.filter(function(aItem) {
       return aWindow[aItem] && !aWindow[aItem].visible;
     });
-    if (hidden.length != 0) {
+    if (hidden.length) {
       winData.hidden = hidden.join(",");
     } else if (winData.hidden) {
       delete winData.hidden;
@@ -3913,14 +3915,14 @@ var SessionStoreInternal = {
       //        its own check for popups. c.f. bug 597619
       if (
         nonPopupCount == 0 &&
-        lastClosedWindowsCopy.length > 0 &&
+        !!lastClosedWindowsCopy.length &&
         RunState.isQuitting
       ) {
         // prepend the last non-popup browser window, so that if the user loads more tabs
         // at startup we don't accidentally add them to a popup window
         do {
           total.unshift(lastClosedWindowsCopy.shift());
-        } while (total[0].isPopup && lastClosedWindowsCopy.length > 0);
+        } while (total[0].isPopup && lastClosedWindowsCopy.length);
       }
     }
 
@@ -4085,7 +4087,7 @@ var SessionStoreInternal = {
       firstWindow &&
       !overwriteTabs &&
       winData.tabs.length == 1 &&
-      (!winData.tabs[0].entries || winData.tabs[0].entries.length == 0)
+      (!winData.tabs[0].entries || !winData.tabs[0].entries.length)
     ) {
       winData.tabs = [];
     }
@@ -5299,7 +5301,7 @@ var SessionStoreInternal = {
 
     // don't display the page when there's nothing to restore
     let winData = aState.windows || null;
-    if (!winData || winData.length == 0) {
+    if (!winData || !winData.length) {
       return false;
     }
 

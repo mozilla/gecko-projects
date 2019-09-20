@@ -23,7 +23,7 @@
       <image id="trackingProtectionShield"/>
       <vbox flex="1">
         <description class="description-with-side-element">
-          <html:span id="contentBlockingDescription" class="tail-with-learn-more" data-l10n-id="content-blocking-section-description"></html:span>
+          <html:span id="contentBlockingDescription" class="tail-with-learn-more" data-l10n-id="content-blocking-section-top-level-description"></html:span>
           <label id="contentBlockingLearnMore" class="learnMore" data-l10n-id="content-blocking-learn-more" is="text-link"/>
         </description>
       </vbox>
@@ -55,7 +55,7 @@
             <hbox>
               <radio id="standardRadio"
                      value="standard"
-                     data-l10n-id="content-blocking-setting-standard"
+                     data-l10n-id="enhanced-tracking-protection-setting-standard"
                      flex="1"/>
               <button id="standardArrow"
                       is="highlightable-button"
@@ -136,7 +136,7 @@
             <hbox>
               <radio id="strictRadio"
                      value="strict"
-                     data-l10n-id="content-blocking-setting-strict"
+                     data-l10n-id="enhanced-tracking-protection-setting-strict"
                      flex="1"/>
               <button id="strictArrow"
                       is="highlightable-button"
@@ -232,7 +232,7 @@
           <hbox>
             <radio id="customRadio"
                    value="custom"
-                   data-l10n-id="content-blocking-setting-custom"
+                   data-l10n-id="enhanced-tracking-protection-setting-custom"
                    flex="1"/>
             <button id="customArrow"
                     is="highlightable-button"
@@ -451,6 +451,15 @@
                     search-l10n-ids="forms-generate-passwords.label"
                     preference="signon.generation.enabled"
                     flex="1" />
+        </hbox>
+        <hbox class="indent" id="breachAlertsBox" flex="1" align="center">
+          <checkbox id="breachAlerts"
+                    class="tail-with-learn-more"
+                    data-l10n-id="forms-breach-alerts"
+                    search-l10n-ids="breach-alerts.label"
+                    preference="signon.management.page.breach-alerts.enabled"/>
+          <label id="breachAlertsLearnMoreLink" class="learnMore" is="text-link"
+              data-l10n-id="forms-breach-alerts-learn-more-link"/>
         </hbox>
       </vbox>
       <vbox>
@@ -808,8 +817,7 @@
   <vbox id="a11yPermissionsBox">
     <hbox flex="1" align="center">
       <checkbox id="a11yPrivacyCheckbox" class="tail-with-learn-more"
-                data-l10n-id="permissions-a11y-privacy-checkbox"
-                oncommand="return gPrivacyPane.updateA11yPrefs(this.checked)"/>
+                data-l10n-id="permissions-a11y-privacy-checkbox"/>
       <label id="a11yLearnMoreLink" class="learnMore" is="text-link"
              data-l10n-id="permissions-a11y-privacy-link"/>
     </hbox>

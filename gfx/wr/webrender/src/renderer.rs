@@ -56,7 +56,7 @@ use crate::device::{ShaderError, TextureFilter, TextureFlags,
 use crate::device::ProgramCache;
 use crate::device::query::GpuTimer;
 use euclid::{rect, Transform3D, Scale, default};
-use crate::frame_builder::{ChasePrimitive, FrameBuilderConfig};
+use crate::frame_builder::{Frame, ChasePrimitive, FrameBuilderConfig};
 use gleam::gl;
 use crate::glyph_cache::GlyphCache;
 use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
@@ -77,16 +77,18 @@ use crate::device::query::{GpuProfiler, GpuDebugMethod};
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use crate::record::ApiRecordingReceiver;
 use crate::render_backend::{FrameId, RenderBackend};
-use crate::render_task::{RenderTargetKind, RenderTask, RenderTaskData, RenderTaskKind, RenderTaskGraph};
+use crate::render_task_graph::RenderTaskGraph;
+use crate::render_task::{RenderTask, RenderTaskData, RenderTaskKind};
 use crate::resource_cache::ResourceCache;
-use crate::scene_builder::{SceneBuilder, LowPrioritySceneBuilder};
+use crate::scene_builder_thread::{SceneBuilderThread, LowPrioritySceneBuilderThread};
 use crate::screen_capture::AsyncScreenshotGrabber;
 use crate::shade::{Shaders, WrShaders};
 use smallvec::SmallVec;
 use crate::texture_cache::TextureCache;
-use crate::tiling::{AlphaRenderTarget, ColorRenderTarget, PictureCacheTarget};
-use crate::tiling::{BlitJob, BlitJobSource, RenderPassKind, RenderTargetList};
-use crate::tiling::{Frame, RenderTarget, TextureCacheRenderTarget};
+use crate::render_target::{AlphaRenderTarget, ColorRenderTarget, PictureCacheTarget};
+use crate::render_target::{RenderTarget, TextureCacheRenderTarget, RenderTargetList};
+use crate::render_target::{RenderTargetKind, BlitJob, BlitJobSource};
+use crate::render_task_graph::RenderPassKind;
 use crate::util::drain_filter;
 
 use std;
@@ -615,11 +617,6 @@ pub(crate) mod desc {
             },
             VertexAttribute {
                 name: "aClipDeviceArea",
-                count: 4,
-                kind: VertexAttributeKind::F32,
-            },
-            VertexAttribute {
-                name: "aClipSnapOffsets",
                 count: 4,
                 kind: VertexAttributeKind::F32,
             },
@@ -2099,7 +2096,7 @@ impl Renderer {
         let lp_scene_thread_name = format!("WRSceneBuilderLP#{}", options.renderer_id.unwrap_or(0));
         let glyph_rasterizer = GlyphRasterizer::new(workers)?;
 
-        let (scene_builder, scene_tx, scene_rx) = SceneBuilder::new(
+        let (scene_builder, scene_tx, scene_rx) = SceneBuilderThread::new(
             config,
             api_tx.clone(),
             scene_builder_hooks,
@@ -2121,7 +2118,7 @@ impl Renderer {
 
         let low_priority_scene_tx = if options.support_low_priority_transactions {
             let (low_priority_scene_tx, low_priority_scene_rx) = channel();
-            let lp_builder = LowPrioritySceneBuilder {
+            let lp_builder = LowPrioritySceneBuilderThread {
                 rx: low_priority_scene_rx,
                 tx: scene_tx.clone(),
                 simulate_slow_ms: 0,
@@ -2861,7 +2858,7 @@ impl Renderer {
                     "Received frame depends on a later GPU cache epoch ({:?}) than one we received last via `UpdateGpuCache` ({:?})",
                     frame.gpu_cache_frame_id, self.gpu_cache_frame_id);
 
-                self.draw_tile_frame(
+                self.draw_frame(
                     frame,
                     device_size,
                     cpu_frame_id,
@@ -2879,10 +2876,12 @@ impl Renderer {
                 let dirty_regions =
                     mem::replace(&mut frame.recorded_dirty_regions, Vec::new());
                 results.recorded_dirty_regions.extend(dirty_regions);
+                let dirty_rects = mem::replace(&mut frame.dirty_rects, Vec::new());
+                results.dirty_rects.extend(dirty_rects);
 
                 // If we're the last document, don't call end_pass here, because we'll
                 // be moving on to drawing the debug overlays. See the comment above
-                // the end_pass call in draw_tile_frame about debug draw overlays
+                // the end_pass call in draw_frame about debug draw overlays
                 // for a bit more context.
                 if doc_index != last_document_index {
                     self.texture_resolver.end_pass(&mut self.device, None, None);
@@ -3534,10 +3533,19 @@ impl Renderer {
             self.device.enable_depth_write();
             self.set_blend(false, framebuffer_kind);
 
+            // If updating only a dirty rect within a picture cache target, the
+            // clear must also be scissored to that dirty region.
+            let scissor_rect = target.alpha_batch_container.task_scissor_rect.map(|rect| {
+                draw_target.build_scissor_rect(
+                    Some(rect),
+                    content_origin,
+                )
+            });
+
             self.device.clear_target(
                 target.clear_color.map(|c| c.to_array()),
                 Some(1.0),
-                None,
+                scissor_rect,
             );
 
             self.device.disable_depth_write();
@@ -4508,7 +4516,7 @@ impl Renderer {
         debug_assert!(self.texture_resolver.prev_pass_color.is_none());
     }
 
-    fn draw_tile_frame(
+    fn draw_frame(
         &mut self,
         frame: &mut Frame,
         device_size: Option<DeviceIntSize>,
@@ -4518,7 +4526,7 @@ impl Renderer {
     ) {
         // These markers seem to crash a lot on Android, see bug 1559834
         #[cfg(not(target_os = "android"))]
-        let _gm = self.gpu_profile.start_marker("tile frame draw");
+        let _gm = self.gpu_profile.start_marker("draw frame");
 
         if frame.passes.is_empty() {
             frame.has_been_rendered = true;
@@ -5641,8 +5649,23 @@ pub struct RendererStats {
 /// some non-repr(C) data.
 #[derive(Debug, Default)]
 pub struct RenderResults {
+    /// Statistics about the frame that was rendered.
     pub stats: RendererStats,
+
+    /// A list of dirty world rects. This is only currently
+    /// useful to test infrastructure.
+    /// TODO(gw): This needs to be refactored / removed.
     pub recorded_dirty_regions: Vec<RecordedDirtyRegion>,
+
+    /// A list of the device dirty rects that were updated
+    /// this frame.
+    /// TODO(gw): This is an initial interface, likely to change in future.
+    /// TODO(gw): The dirty rects here are currently only useful when scrolling
+    ///           is not occurring. They are still correct in the case of
+    ///           scrolling, but will be very large (until we expose proper
+    ///           OS compositor support where the dirty rects apply to a
+    ///           specific picture cache slice / OS compositor surface).
+    pub dirty_rects: Vec<DeviceIntRect>,
 }
 
 #[cfg(any(feature = "capture", feature = "replay"))]
@@ -5937,6 +5960,7 @@ impl Renderer {
         let mut image_handler = DummyExternalImageHandler {
             data: FastHashMap::default(),
         };
+
         // Note: this is a `SCENE` level population of the external image handlers
         // It would put both external buffers and texture into the map.
         // But latter are going to be overwritten later in this function

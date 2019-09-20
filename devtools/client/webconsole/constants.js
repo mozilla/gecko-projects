@@ -44,7 +44,7 @@ const actionTypes = {
   REVERSE_SEARCH_INPUT_CHANGE: "REVERSE_SEARCH_INPUT_CHANGE",
   REVERSE_SEARCH_NEXT: "REVERSE_SEARCH_NEXT",
   REVERSE_SEARCH_BACK: "REVERSE_SEARCH_BACK",
-  PAUSED_EXCECUTION_POINT: "PAUSED_EXCECUTION_POINT",
+  PAUSED_EXECUTION_POINT: "PAUSED_EXECUTION_POINT",
   WARNING_GROUPS_TOGGLE: "WARNING_GROUPS_TOGGLE",
   WILL_NAVIGATE: "WILL_NAVIGATE",
   EDITOR_SET_WIDTH: "EDITOR_SET_WIDTH",
@@ -70,7 +70,7 @@ const prefs = {
       // Max number of entries in history list.
       INPUT_HISTORY_COUNT: "devtools.webconsole.inputHistoryCount",
       // Is editor mode enabled.
-      EDITOR: "devtools.webconsole.input.editor",
+      EDITOR: "input.editor",
       // Display content messages in the browser console.
       CONTENT_MESSAGES: "devtools.browserconsole.contentMessages",
       // Display timestamp in messages.

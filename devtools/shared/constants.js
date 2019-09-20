@@ -28,6 +28,8 @@ const ISSUE_TYPE = {
     INTERACTIVE_NO_ACTION: "INTERACTIVE_NO_ACTION",
     // Interative accessible objcets are not focusable.
     INTERACTIVE_NOT_FOCUSABLE: "INTERACTIVE_NOT_FOCUSABLE",
+    // Accessible objects can only be interacted with a mouse.
+    MOUSE_INTERACTIVE_ONLY: "MOUSE_INTERACTIVE_ONLY",
     // Focusable accessible objects have no focus styling.
     NO_FOCUS_VISIBLE: "NO_FOCUS_VISIBLE",
   },
@@ -85,8 +87,27 @@ const SCORES = {
   WARNING: "WARNING",
 };
 
+// List of simulation types.
+const SIMULATION_TYPE = {
+  // Low red color blindness
+  PROTANOMALY: "PROTANOMALY",
+  // Low green color blindness
+  DEUTERANOMALY: "DEUTERANOMALY",
+  // Low blue color blindness
+  TRITANOMALY: "TRITANOMALY",
+  // No red color blindness
+  PROTANOPIA: "PROTANOPIA",
+  // No green color blindness
+  DEUTERANOPIA: "DEUTERANOPIA",
+  // No blue color blindness
+  TRITANOPIA: "TRITANOPIA",
+  // Low contrast
+  CONTRAST_LOSS: "CONTRAST_LOSS",
+};
+
 exports.accessibility = {
   AUDIT_TYPE,
   ISSUE_TYPE,
   SCORES,
+  SIMULATION_TYPE,
 };

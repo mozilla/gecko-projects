@@ -17,6 +17,7 @@ import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoSessionSettings;
 import org.mozilla.geckoview.GeckoView;
 import org.mozilla.geckoview.GeckoWebExecutor;
+import org.mozilla.geckoview.SlowScriptResponse;
 import org.mozilla.geckoview.WebExtension;
 import org.mozilla.geckoview.WebExtensionController;
 import org.mozilla.geckoview.WebNotification;
@@ -43,8 +44,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
 import android.os.SystemClock;
+import android.security.keystore.KeyProperties;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
@@ -63,6 +67,11 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECGenParameterSpec;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -172,7 +181,8 @@ public class GeckoViewActivity extends AppCompatActivity {
                         .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_NON_TRACKERS)
                         .build())
                     .crashHandler(ExampleCrashHandler.class)
-                    .telemetryDelegate(new ExampleTelemetryDelegate());
+                    .telemetryDelegate(new ExampleTelemetryDelegate())
+                    .aboutConfigEnabled(true);
 
             sGeckoRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
 
@@ -242,6 +252,11 @@ public class GeckoViewActivity extends AppCompatActivity {
 
 
             }
+
+            sGeckoRuntime.setDelegate(() -> {
+                mKillProcessOnDestroy = true;
+                finish();
+            });
         }
 
         if(savedInstanceState == null) {
@@ -286,7 +301,7 @@ public class GeckoViewActivity extends AppCompatActivity {
             notificationManager.createNotificationChannel(channel);
         }
     }
-    
+
     private TabSession createSession() {
         TabSession session = mTabSessionManager.newSession(new GeckoSessionSettings.Builder()
                 .useMultiprocess(mUseMultiprocess)
@@ -424,6 +439,18 @@ public class GeckoViewActivity extends AppCompatActivity {
                 mUseTrackingProtection = !mUseTrackingProtection;
                 updateTrackingProtection(session);
                 session.reload();
+                break;
+            case R.id.action_tpe:
+                sGeckoRuntime.getContentBlockingController().checkException(session).accept(value -> {
+                    if (value.booleanValue()) {
+                        sGeckoRuntime.getContentBlockingController().removeException(session);
+                        item.setTitle(R.string.tracking_protection_ex);
+                    } else {
+                        sGeckoRuntime.getContentBlockingController().addException(session);
+                        item.setTitle(R.string.tracking_protection_ex2);
+                    }
+                    session.reload();
+                });
                 break;
             case R.id.desktop_mode:
                 mDesktopMode = !mDesktopMode;
@@ -750,6 +777,26 @@ public class GeckoViewActivity extends AppCompatActivity {
         public void onWebAppManifest(final GeckoSession session, JSONObject manifest) {
             Log.d(LOGTAG, "onWebAppManifest: " + manifest);
         }
+
+        private boolean activeAlert = false;
+
+        @Override
+        public GeckoResult<SlowScriptResponse> onSlowScript(final GeckoSession geckoSession,
+                                                            final String scriptFileName) {
+            BasicGeckoViewPrompt prompt = (BasicGeckoViewPrompt) mTabSessionManager.getCurrentSession().getPromptDelegate();
+            if (prompt != null) {
+                GeckoResult<SlowScriptResponse> result = new GeckoResult<SlowScriptResponse>();
+                if (!activeAlert) {
+                    activeAlert = true;
+                    prompt.onSlowScriptPrompt(geckoSession, getString(R.string.slow_script), result);
+                }
+                return result.then(value -> {
+                    activeAlert = false;
+                    return GeckoResult.fromValue(value);
+                });
+            }
+            return null;
+        }
     }
 
     private class ExampleProgressDelegate implements GeckoSession.ProgressDelegate {
@@ -1004,6 +1051,8 @@ public class GeckoViewActivity extends AppCompatActivity {
         public GeckoResult<GeckoSession> onNewSession(final GeckoSession session, final String uri) {
             final TabSession newSession = createSession();
             mToolbarView.updateTabCount();
+            // A reference to newSession is stored by mTabSessionManager,
+            // which prevents the session from being garbage-collected.
             return GeckoResult.fromValue(newSession);
         }
 
@@ -1279,8 +1328,20 @@ public class GeckoViewActivity extends AppCompatActivity {
     private final class ExampleTelemetryDelegate
             implements RuntimeTelemetry.Delegate {
         @Override
-        public void onTelemetryReceived(final @NonNull RuntimeTelemetry.Metric metric) {
-            Log.d(LOGTAG, "onTelemetryReceived " + metric);
+        public void onHistogram(final @NonNull RuntimeTelemetry.Histogram histogram) {
+            Log.d(LOGTAG, "onHistogram " + histogram);
+        }
+        @Override
+        public void onBooleanScalar(final @NonNull RuntimeTelemetry.Metric<Boolean> scalar) {
+            Log.d(LOGTAG, "onBooleanScalar " + scalar);
+        }
+        @Override
+        public void onLongScalar(final @NonNull RuntimeTelemetry.Metric<Long> scalar) {
+            Log.d(LOGTAG, "onLongScalar " + scalar);
+        }
+        @Override
+        public void onStringScalar(final @NonNull RuntimeTelemetry.Metric<String> scalar) {
+            Log.d(LOGTAG, "onStringScalar " + scalar);
         }
     }
 }

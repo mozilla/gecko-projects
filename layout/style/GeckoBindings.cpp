@@ -153,6 +153,10 @@ const Element* Gecko_GetMarkerPseudo(const Element* aElement) {
   return nsLayoutUtils::GetMarkerPseudo(aElement);
 }
 
+bool Gecko_IsInAnonymousSubtree(const Element* aElement) {
+  return aElement->IsInAnonymousSubtree();
+}
+
 nsTArray<nsIContent*>* Gecko_GetAnonymousContentForElement(
     const Element* aElement) {
   nsIAnonymousContentCreator* ac = do_QueryFrame(aElement->GetPrimaryFrame());
@@ -1259,57 +1263,6 @@ void Gecko_CopyStyleContentsFrom(nsStyleContent* aContent,
 
   for (uint32_t i = 0; i < count; ++i) {
     aContent->ContentAt(i) = aOther->ContentAt(i);
-  }
-}
-
-void Gecko_ClearAndResizeCounterIncrements(nsStyleContent* aContent,
-                                           uint32_t aHowMany) {
-  aContent->AllocateCounterIncrements(aHowMany);
-}
-
-void Gecko_CopyCounterIncrementsFrom(nsStyleContent* aContent,
-                                     const nsStyleContent* aOther) {
-  uint32_t count = aOther->CounterIncrementCount();
-
-  aContent->AllocateCounterIncrements(count);
-
-  for (uint32_t i = 0; i < count; ++i) {
-    const nsStyleCounterData& data = aOther->CounterIncrementAt(i);
-    aContent->SetCounterIncrementAt(i, data.mCounter, data.mValue);
-  }
-}
-
-void Gecko_ClearAndResizeCounterResets(nsStyleContent* aContent,
-                                       uint32_t aHowMany) {
-  aContent->AllocateCounterResets(aHowMany);
-}
-
-void Gecko_CopyCounterResetsFrom(nsStyleContent* aContent,
-                                 const nsStyleContent* aOther) {
-  uint32_t count = aOther->CounterResetCount();
-
-  aContent->AllocateCounterResets(count);
-
-  for (uint32_t i = 0; i < count; ++i) {
-    const nsStyleCounterData& data = aOther->CounterResetAt(i);
-    aContent->SetCounterResetAt(i, data.mCounter, data.mValue);
-  }
-}
-
-void Gecko_ClearAndResizeCounterSets(nsStyleContent* aContent,
-                                     uint32_t aHowMany) {
-  aContent->AllocateCounterSets(aHowMany);
-}
-
-void Gecko_CopyCounterSetsFrom(nsStyleContent* aContent,
-                               const nsStyleContent* aOther) {
-  uint32_t count = aOther->CounterSetCount();
-
-  aContent->AllocateCounterSets(count);
-
-  for (uint32_t i = 0; i < count; ++i) {
-    const nsStyleCounterData& data = aOther->CounterSetAt(i);
-    aContent->SetCounterSetAt(i, data.mCounter, data.mValue);
   }
 }
 

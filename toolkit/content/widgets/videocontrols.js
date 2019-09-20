@@ -221,12 +221,7 @@ this.VideoControlsImplWidget = class {
       set isAudioOnly(val) {
         this._isAudioOnly = val;
         this.setFullscreenButtonState();
-
-        if (val) {
-          this.pictureInPictureToggleButton.setAttribute("hidden", true);
-        } else {
-          this.pictureInPictureToggleButton.removeAttribute("hidden");
-        }
+        this.updatePictureInPictureToggleDisplay();
 
         if (!this.isTopLevelSyntheticDocument) {
           return;
@@ -509,6 +504,7 @@ this.VideoControlsImplWidget = class {
 
       updatePictureInPictureToggleDisplay() {
         if (this.isAudioOnly) {
+          this.pictureInPictureToggleButton.setAttribute("hidden", true);
           return;
         }
 
@@ -834,9 +830,6 @@ this.VideoControlsImplWidget = class {
               case this.videocontrols:
                 // Prevent any click event within media controls from dispatching through to video.
                 aEvent.stopPropagation();
-                break;
-              case this.pictureInPictureToggleButton:
-                this.video.togglePictureInPicture();
                 break;
             }
             break;
@@ -2372,8 +2365,6 @@ this.VideoControlsImplWidget = class {
           { el: this.video.textTracks, type: "change" },
 
           { el: this.video, type: "media-videoCasting", touchOnly: true },
-
-          { el: this.pictureInPictureToggleButton, type: "click" },
         ];
 
         for (let {

@@ -108,7 +108,6 @@ static mozilla::LazyLogModule sLogModule("ipc");
 
 using namespace mozilla;
 using namespace mozilla::ipc;
-using namespace std;
 
 using mozilla::MonitorAutoLock;
 using mozilla::MonitorAutoUnlock;
@@ -2068,6 +2067,8 @@ MessageChannel::MessageTask::GetType(uint32_t* aType) {
     // has been.
     return NS_ERROR_FAILURE;
   }
+
+  *aType = Msg().type();
   return NS_OK;
 }
 

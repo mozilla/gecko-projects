@@ -577,7 +577,7 @@ void CodeGeneratorShared::addIC(LInstruction* lir, size_t cacheIndex) {
   addOutOfLineCode(ool, mir);
 
   masm.bind(ool->rejoin());
-  cache->setRejoinLabel(CodeOffset(ool->rejoin()->offset()));
+  cache->setRejoinOffset(CodeOffset(ool->rejoin()->offset()));
 }
 
 void CodeGenerator::visitOutOfLineICFallback(OutOfLineICFallback* ool) {
@@ -588,7 +588,7 @@ void CodeGenerator::visitOutOfLineICFallback(OutOfLineICFallback* ool) {
   DataPtr<IonIC> ic(this, cacheIndex);
 
   // Register the location of the OOL path in the IC.
-  ic->setFallbackLabel(masm.labelForPatch());
+  ic->setFallbackOffset(CodeOffset(masm.currentOffset()));
 
   switch (ic->kind()) {
     case CacheKind::GetProp:
@@ -2697,7 +2697,7 @@ JitCode* JitRealm::generateRegExpMatcherStub(JSContext* cx) {
   masm.moveValue(UndefinedValue(), result);
   masm.ret();
 
-  Linker linker(masm, "RegExpMatcherStub");
+  Linker linker(masm);
   JitCode* code = linker.newCode(cx, CodeKind::Other);
   if (!code) {
     return nullptr;
@@ -2878,7 +2878,7 @@ JitCode* JitRealm::generateRegExpSearcherStub(JSContext* cx) {
   masm.move32(Imm32(RegExpSearcherResultFailed), result);
   masm.ret();
 
-  Linker linker(masm, "RegExpSearcherStub");
+  Linker linker(masm);
   JitCode* code = linker.newCode(cx, CodeKind::Other);
   if (!code) {
     return nullptr;
@@ -3016,7 +3016,7 @@ JitCode* JitRealm::generateRegExpTesterStub(JSContext* cx) {
   masm.freeStack(sizeof(irregexp::InputOutputData));
   masm.ret();
 
-  Linker linker(masm, "RegExpTesterStub");
+  Linker linker(masm);
   JitCode* code = linker.newCode(cx, CodeKind::Other);
   if (!code) {
     return nullptr;
@@ -8868,7 +8868,7 @@ JitCode* JitRealm::generateStringConcatStub(JSContext* cx) {
   masm.movePtr(ImmPtr(nullptr), output);
   masm.ret();
 
-  Linker linker(masm, "StringConcatStub");
+  Linker linker(masm);
   JitCode* code = linker.newCode(cx, CodeKind::Other);
 
 #ifdef JS_ION_PERF
@@ -10763,7 +10763,7 @@ bool CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints) {
     js_free(ionScript);
   });
 
-  Linker linker(masm, "IonLink");
+  Linker linker(masm);
   JitCode* code = linker.newCode(cx, CodeKind::Ion);
   if (!code) {
     return false;
@@ -13286,9 +13286,6 @@ void CodeGenerator::visitWasmTrap(LWasmTrap* lir) {
 }
 
 void CodeGenerator::visitWasmBoundsCheck(LWasmBoundsCheck* ins) {
-#ifdef WASM_HUGE_MEMORY
-  MOZ_CRASH("No wasm bounds check for huge memory");
-#else
   const MWasmBoundsCheck* mir = ins->mir();
   Register ptr = ToRegister(ins->ptr());
   Register boundsCheckLimit = ToRegister(ins->boundsCheckLimit());
@@ -13296,7 +13293,6 @@ void CodeGenerator::visitWasmBoundsCheck(LWasmBoundsCheck* ins) {
   masm.wasmBoundsCheck(Assembler::Below, ptr, boundsCheckLimit, &ok);
   masm.wasmTrap(wasm::Trap::OutOfBounds, mir->bytecodeOffset());
   masm.bind(&ok);
-#endif
 }
 
 void CodeGenerator::visitWasmAlignmentCheck(LWasmAlignmentCheck* ins) {

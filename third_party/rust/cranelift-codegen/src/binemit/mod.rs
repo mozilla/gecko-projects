@@ -16,7 +16,7 @@ pub use self::relaxation::relax_branches;
 pub use self::shrink::shrink_instructions;
 pub use self::stackmap::Stackmap;
 use crate::ir::entities::Value;
-use crate::ir::{ExternalName, Function, Inst, JumpTable, SourceLoc, TrapCode};
+use crate::ir::{ConstantOffset, ExternalName, Function, Inst, JumpTable, SourceLoc, TrapCode};
 use crate::isa::TargetIsa;
 pub use crate::regalloc::RegDiversions;
 use core::fmt;
@@ -133,6 +133,9 @@ pub trait CodeSink {
     /// Add a relocation referencing an external symbol plus the addend at the current offset.
     fn reloc_external(&mut self, _: Reloc, _: &ExternalName, _: Addend);
 
+    /// Add a relocation referencing a constant.
+    fn reloc_constant(&mut self, _: Reloc, _: ConstantOffset);
+
     /// Add a relocation referencing a jump table.
     fn reloc_jt(&mut self, _: Reloc, _: JumpTable);
 
@@ -173,7 +176,7 @@ where
 {
     let mut divert = RegDiversions::new();
     for ebb in func.layout.ebbs() {
-        divert.clear();
+        divert.at_ebb(&func.entry_diversions, ebb);
         debug_assert_eq!(func.offsets[ebb], sink.offset());
         for inst in func.layout.ebb_insts(ebb) {
             emit_inst(func, inst, &mut divert, sink, isa);
@@ -182,7 +185,7 @@ where
 
     sink.begin_jumptables();
 
-    // output jump tables
+    // Output jump tables.
     for (jt, jt_data) in func.jump_tables.iter() {
         let jt_offset = func.jt_offsets[jt];
         for ebb in jt_data.iter() {
@@ -192,7 +195,13 @@ where
     }
 
     sink.begin_rodata();
-    // TODO: No read-only data (constant pools) at this time.
+
+    // Output constants.
+    for (_, constant_data) in func.dfg.constants.iter() {
+        for byte in constant_data.iter() {
+            sink.put1(*byte)
+        }
+    }
 
     sink.end_codegen();
 }

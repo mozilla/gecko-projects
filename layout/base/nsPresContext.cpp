@@ -10,6 +10,9 @@
 #include "nsPresContextInlines.h"
 
 #include "mozilla/ArrayUtils.h"
+#if defined(MOZ_WIDGET_ANDROID)
+#  include "mozilla/AsyncEventDispatcher.h"
+#endif
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/EventDispatcher.h"
@@ -131,6 +134,10 @@ bool nsPresContext::IsDOMPaintEventPending() {
 }
 
 void nsPresContext::ForceReflowForFontInfoUpdate() {
+  // Flush the device context's font cache, so that we won't risk getting
+  // stale nsFontMetrics objects from it.
+  DeviceContext()->FlushFontCache();
+
   // We can trigger reflow by pretending a font.* preference has changed;
   // this is the same mechanism as gfxPlatform::ForceGlobalReflow() uses
   // if new fonts are installed during the session, for example.
@@ -2357,6 +2364,11 @@ void nsPresContext::NotifyContentfulPaint() {
       if (nsRootPresContext* rootPresContext = GetRootPresContext()) {
         mFirstContentfulPaintTransactionId =
             Some(rootPresContext->mRefreshDriver->LastTransactionId().Next());
+#if defined(MOZ_WIDGET_ANDROID)
+        (new AsyncEventDispatcher(mDocument,
+            NS_LITERAL_STRING("MozFirstContentfulPaint"), CanBubble::eYes,
+            ChromeOnlyDispatch::eYes))->PostDOMEvent();
+#endif
       }
     }
   }

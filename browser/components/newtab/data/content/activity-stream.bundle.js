@@ -202,7 +202,7 @@ for (const type of ["ADDONS_INFO_REQUEST", "ADDONS_INFO_RESPONSE", "ARCHIVE_FROM
 
 const ASRouterActions = {};
 
-for (const type of ["INSTALL_ADDON_FROM_URL", "OPEN_APPLICATIONS_MENU", "OPEN_PRIVATE_BROWSER_WINDOW", "OPEN_URL", "OPEN_ABOUT_PAGE", "OPEN_PREFERENCES_PAGE", "SHOW_FIREFOX_ACCOUNTS", "PIN_CURRENT_TAB", "ENABLE_FIREFOX_MONITOR"]) {
+for (const type of ["INSTALL_ADDON_FROM_URL", "OPEN_APPLICATIONS_MENU", "OPEN_PRIVATE_BROWSER_WINDOW", "OPEN_URL", "OPEN_ABOUT_PAGE", "OPEN_PREFERENCES_PAGE", "SHOW_FIREFOX_ACCOUNTS", "PIN_CURRENT_TAB", "ENABLE_FIREFOX_MONITOR", "OPEN_PROTECTION_PANEL"]) {
   ASRouterActions[type] = type;
 } // Helper function for creating routed actions between content and main
 // Not intended to be used by consumers
@@ -2690,19 +2690,19 @@ module.exports = {"title":"SimpleSnippet","description":"A simple template with 
 /* 17 */
 /***/ (function(module) {
 
-module.exports = {"title":"FXASignupSnippet","description":"A snippet template for FxA sign up/sign in","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_email_placeholder_text":{"type":"string","description":"Value to show while input is empty.","default":"Your email here"},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Sign me up"},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"action":{"type":"string","enum":["email"]},"context":{"type":"string","enum":["fx_desktop_v3"]},"entrypoint":{"type":"string","enum":["snippets"]},"service":{"type":"string","enum":["sync"]},"utm_content":{"type":"number","description":"Firefox version number"},"utm_source":{"type":"string","enum":["snippet"]},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"additionalProperties":false}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
+module.exports = {"title":"FXASignupSnippet","description":"A snippet template for FxA sign up/sign in","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_email_placeholder_text":{"type":"string","description":"Value to show while input is empty.","default":"Your email here"},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Sign me up"},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"action":{"type":"string","enum":["email"]},"context":{"type":"string","enum":["fx_desktop_v3"]},"entrypoint":{"type":"string","enum":["snippets"]},"service":{"type":"string","enum":["sync"]},"utm_content":{"type":"number","description":"Firefox version number"},"utm_source":{"type":"string","enum":["snippet"]},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"additionalProperties":false}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"retry_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for the button in the event of a submission error/failure."}],"default":"Try again"},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
 
 /***/ }),
 /* 18 */
 /***/ (function(module) {
 
-module.exports = {"title":"NewsletterSnippet","description":"A snippet template for send to device mobile download","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"locale":{"type":"string","description":"Two to five character string for the locale code","default":"en-US"},"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_email_placeholder_text":{"type":"string","description":"Value to show while input is empty.","default":"Your email here"},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Sign me up"},"scene2_privacy_html":{"type":"string","description":"(send to device) Html for disclaimer and link underneath input box."},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"fmt":{"type":"string","description":"","default":"H"}}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"success_text":{"type":"string","description":"Message shown on successful registration."},"error_text":{"type":"string","description":"Message shown if registration failed."},"scene2_newsletter":{"type":"string","description":"Newsletter/basket id user is subscribing to.","default":"mozilla-foundation"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
+module.exports = {"title":"NewsletterSnippet","description":"A snippet template for send to device mobile download","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"locale":{"type":"string","description":"Two to five character string for the locale code","default":"en-US"},"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_email_placeholder_text":{"type":"string","description":"Value to show while input is empty.","default":"Your email here"},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Sign me up"},"scene2_privacy_html":{"type":"string","description":"(send to device) Html for disclaimer and link underneath input box."},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"fmt":{"type":"string","description":"","default":"H"}}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"retry_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for the button in the event of a submission error/failure."}],"default":"Try again"},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"success_text":{"type":"string","description":"Message shown on successful registration."},"error_text":{"type":"string","description":"Message shown if registration failed."},"scene2_newsletter":{"type":"string","description":"Newsletter/basket id user is subscribing to.","default":"mozilla-foundation"},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
 
 /***/ }),
 /* 19 */
 /***/ (function(module) {
 
-module.exports = {"title":"SendToDeviceSnippet","description":"A snippet template for send to device mobile download","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"locale":{"type":"string","description":"Two to five character string for the locale code","default":"en-US"},"country":{"type":"string","description":"Two character string for the country code (used for SMS)","default":"us"},"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene2_icon":{"type":"string","description":"(send to device) Image to display above the form. Dark theme variant. 98x98px. SVG or PNG preferred."},"scene2_icon_dark_theme":{"type":"string","description":"(send to device) Image to display above the form. 98x98px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Send"},"scene2_input_placeholder":{"type":"string","description":"(send to device) Value to show while input is empty.","default":"Your email here"},"scene2_disclaimer_html":{"type":"string","description":"(send to device) Html for disclaimer and link underneath input box."},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"action":{"type":"string","enum":["email"]},"context":{"type":"string","enum":["fx_desktop_v3"]},"entrypoint":{"type":"string","enum":["snippets"]},"service":{"type":"string","enum":["sync"]},"utm_content":{"type":"string","description":"Firefox version number"},"utm_source":{"type":"string","enum":["snippet"]},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"additionalProperties":false}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"success_title":{"type":"string","description":"(send to device) Title shown before text on successful registration."},"success_text":{"type":"string","description":"Message shown on successful registration."},"error_text":{"type":"string","description":"Message shown if registration failed."},"include_sms":{"type":"boolean","description":"(send to device) Allow users to send an SMS message with the form?","default":false},"message_id_sms":{"type":"string","description":"(send to device) Newsletter/basket id representing the SMS message to be sent."},"message_id_email":{"type":"string","description":"(send to device) Newsletter/basket id representing the email message to be sent. Must be a value from the 'Slug' column here: https://basket.mozilla.org/news/."},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
+module.exports = {"title":"SendToDeviceSnippet","description":"A snippet template for send to device mobile download","version":"1.1.0","type":"object","definitions":{"plainText":{"description":"Plain text (no HTML allowed)","type":"string"},"richText":{"description":"Text with HTML subset allowed: i, b, u, strong, em, br","type":"string"},"link_url":{"description":"Target for links or buttons","type":"string","format":"uri"}},"properties":{"locale":{"type":"string","description":"Two to five character string for the locale code","default":"en-US"},"country":{"type":"string","description":"Two character string for the country code (used for SMS)","default":"us"},"scene1_title":{"allof":[{"$ref":"#/definitions/plainText"},{"description":"snippet title displayed before snippet text"}]},"scene1_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene2_title":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Title displayed before text in scene 2. Should be plain text."}]},"scene2_text":{"allOf":[{"$ref":"#/definitions/richText"},{"description":"Main body text of snippet. HTML subset allowed: i, b, u, strong, em, br"}]},"scene1_icon":{"type":"string","description":"Snippet icon. 64x64px. SVG or PNG preferred."},"scene1_icon_dark_theme":{"type":"string","description":"Snippet icon. Dark theme variant. 64x64px. SVG or PNG preferred."},"scene2_icon":{"type":"string","description":"(send to device) Image to display above the form. Dark theme variant. 98x98px. SVG or PNG preferred."},"scene2_icon_dark_theme":{"type":"string","description":"(send to device) Image to display above the form. 98x98px. SVG or PNG preferred."},"scene1_title_icon":{"type":"string","description":"Small icon that shows up before the title / text. 16x16px. SVG or PNG preferred. Grayscale."},"scene1_title_icon_dark_theme":{"type":"string","description":"Small icon that shows up before the title / text. Dark theme variant. 16x16px. SVG or PNG preferred. Grayscale."},"scene2_button_label":{"type":"string","description":"Label for form submit button","default":"Send"},"scene2_input_placeholder":{"type":"string","description":"(send to device) Value to show while input is empty.","default":"Your email here"},"scene2_disclaimer_html":{"type":"string","description":"(send to device) Html for disclaimer and link underneath input box."},"scene2_dismiss_button_text":{"type":"string","description":"Label for the dismiss button when the sign-up form is expanded.","default":"Dismiss"},"hidden_inputs":{"type":"object","description":"Each entry represents a hidden input, key is used as value for the name property.","properties":{"action":{"type":"string","enum":["email"]},"context":{"type":"string","enum":["fx_desktop_v3"]},"entrypoint":{"type":"string","enum":["snippets"]},"service":{"type":"string","enum":["sync"]},"utm_content":{"type":"string","description":"Firefox version number"},"utm_source":{"type":"string","enum":["snippet"]},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"additionalProperties":false}},"scene1_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for a button next to main snippet text that links to button_url. Requires button_url."}],"default":"Learn more"},"scene1_button_color":{"type":"string","description":"The text color of the button. Valid CSS color."},"scene1_button_background_color":{"type":"string","description":"The background color of the button. Valid CSS color."},"retry_button_label":{"allOf":[{"$ref":"#/definitions/plainText"},{"description":"Text for the button in the event of a submission error/failure."}],"default":"Try again"},"do_not_autoblock":{"type":"boolean","description":"Used to prevent blocking the snippet after the CTA (link or button) has been clicked","default":false},"success_title":{"type":"string","description":"(send to device) Title shown before text on successful registration."},"success_text":{"type":"string","description":"Message shown on successful registration."},"error_text":{"type":"string","description":"Message shown if registration failed."},"include_sms":{"type":"boolean","description":"(send to device) Allow users to send an SMS message with the form?","default":false},"message_id_sms":{"type":"string","description":"(send to device) Newsletter/basket id representing the SMS message to be sent."},"message_id_email":{"type":"string","description":"(send to device) Newsletter/basket id representing the email message to be sent. Must be a value from the 'Slug' column here: https://basket.mozilla.org/news/."},"utm_campaign":{"type":"string","description":"(fxa) Value to pass through to GA as utm_campaign."},"utm_term":{"type":"string","description":"(fxa) Value to pass through to GA as utm_term."},"links":{"additionalProperties":{"url":{"allOf":[{"$ref":"#/definitions/link_url"},{"description":"The url where the link points to."}]},"metric":{"type":"string","description":"Custom event name sent with telemetry event."}}}},"additionalProperties":false,"required":["scene1_text","scene2_text","scene1_button_label"],"dependencies":{"scene1_button_color":["scene1_button_label"],"scene1_button_background_color":["scene1_button_label"]}};
 
 /***/ }),
 /* 20 */
@@ -2866,7 +2866,7 @@ class Trailhead extends react__WEBPACK_IMPORTED_MODULE_3___default.a.PureCompone
     }, content.benefits.map(item => react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("li", {
       key: item.id,
       className: item.id
-    }, react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("h3", {
+    }, react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("h2", {
       "data-l10n-id": item.title.string_id
     }), react__WEBPACK_IMPORTED_MODULE_3___default.a.createElement("p", {
       "data-l10n-id": item.text.string_id
@@ -3600,7 +3600,7 @@ class OnboardingCard extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureCo
       className: `onboardingMessageImage ${content.icon}`
     }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
       className: "onboardingContent"
-    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("span", null, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("h3", {
+    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("span", null, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("h2", {
       className: "onboardingTitle",
       "data-l10n-id": content.title.string_id
     }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("p", {
@@ -4465,8 +4465,9 @@ const INTERSECTION_RATIO = 0.5;
  * only when the component is visible on the page.
  *
  * Note:
- *   * This wrapper could be used either at the individual card level,
- *     or by the card container components
+ *   * This wrapper used to be used either at the individual card level,
+ *     or by the card container components.
+ *     It is now only used for individual card level.
  *   * Each impression will be sent only once as soon as the desired
  *     visibility is detected
  *   * Batching is not yet implemented, hence it might send multiple
@@ -4624,12 +4625,6 @@ class ImpressionStats extends react__WEBPACK_IMPORTED_MODULE_1___default.a.PureC
 
   componentDidMount() {
     if (this.props.rows.length) {
-      this.setImpressionObserverOrAddListener();
-    }
-  }
-
-  componentDidUpdate(prevProps) {
-    if (this.props.rows.length && this.props.rows !== prevProps.rows) {
       this.setImpressionObserverOrAddListener();
     }
   }
@@ -8025,7 +8020,8 @@ class DSImage_DSImage extends external_React_default.a.PureComponent {
     this.onNonOptimizedImageError = this.onNonOptimizedImageError.bind(this);
     this.state = {
       isSeen: false,
-      optimizedImageFailed: false
+      optimizedImageFailed: false,
+      useTransition: false
     };
   }
 
@@ -8036,8 +8032,9 @@ class DSImage_DSImage extends external_React_default.a.PureComponent {
       if (entry) {
         if (this.props.optimize) {
           this.setState({
-            containerWidth: entry.boundingClientRect.width,
-            containerHeight: entry.boundingClientRect.height
+            // Thumbor doesn't handle subpixels and just errors out, so rounding...
+            containerWidth: Math.round(entry.boundingClientRect.width),
+            containerHeight: Math.round(entry.boundingClientRect.height)
           });
         }
 
@@ -8050,6 +8047,14 @@ class DSImage_DSImage extends external_React_default.a.PureComponent {
     }
   }
 
+  onIdleCallback() {
+    if (!this.state.isSeen) {
+      this.setState({
+        useTransition: true
+      });
+    }
+  }
+
   reformatImageURL(url, width, height) {
     // Change the image URL to request a size tailored for the parent container width
     // Also: force JPEG, quality 60, no upscaling, no EXIF data
@@ -8058,7 +8063,13 @@ class DSImage_DSImage extends external_React_default.a.PureComponent {
   }
 
   componentDidMount() {
-    this.observer = new IntersectionObserver(this.onSeen.bind(this));
+    this.idleCallbackId = window.requestIdleCallback(this.onIdleCallback.bind(this));
+    this.observer = new IntersectionObserver(this.onSeen.bind(this), {
+      // Assume an image will be eventually seen if it is within
+      // half the average Desktop vertical screen size:
+      // http://gs.statcounter.com/screen-resolution-stats/desktop/north-america
+      rootMargin: `540px`
+    });
     this.observer.observe(external_ReactDOM_default.a.findDOMNode(this));
   }
 
@@ -8070,7 +8081,11 @@ class DSImage_DSImage extends external_React_default.a.PureComponent {
   }
 
   render() {
-    const classNames = `ds-image${this.props.extraClassNames ? ` ${this.props.extraClassNames}` : ``}`;
+    let classNames = `ds-image
+      ${this.props.extraClassNames ? ` ${this.props.extraClassNames}` : ``}
+      ${this.state && this.state.useTransition ? ` use-transition` : ``}
+      ${this.state && this.state.isSeen ? ` loaded` : ``}
+    `;
     let img;
 
     if (this.state && this.state.isSeen) {
@@ -8083,7 +8098,7 @@ class DSImage_DSImage extends external_React_default.a.PureComponent {
           source = this.reformatImageURL(baseSource, this.state.containerWidth, this.state.containerHeight);
           source2x = this.reformatImageURL(baseSource, this.state.containerWidth * 2, this.state.containerHeight * 2);
           img = external_React_default.a.createElement("img", {
-            alt: "",
+            alt: this.props.alt_text,
             crossOrigin: "anonymous",
             onError: this.onOptimizedImageError,
             src: source,
@@ -8092,7 +8107,7 @@ class DSImage_DSImage extends external_React_default.a.PureComponent {
         }
       } else if (!this.state.nonOptimizedImageFailed) {
         img = external_React_default.a.createElement("img", {
-          alt: "",
+          alt: this.props.alt_text,
           crossOrigin: "anonymous",
           onError: this.onNonOptimizedImageError,
           src: this.props.source
@@ -8131,8 +8146,9 @@ DSImage_DSImage.defaultProps = {
   // Unadulterated image URL to filter through Thumbor
   extraClassNames: null,
   // Additional classnames to append to component
-  optimize: true // Measure parent container to request exact sizes
-
+  optimize: true,
+  // Measure parent container to request exact sizes
+  alt_text: null
 };
 // EXTERNAL MODULE: ./content-src/components/LinkMenu/LinkMenu.jsx
 var LinkMenu = __webpack_require__(30);
@@ -8150,8 +8166,6 @@ var ContextMenuButton = __webpack_require__(33);
 class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
   constructor(props) {
     super(props);
-    this.windowObj = this.props.windowObj || window; // Added to support unit tests
-
     this.onMenuUpdate = this.onMenuUpdate.bind(this);
     this.onMenuShow = this.onMenuShow.bind(this);
     this.contextMenuButtonRef = external_React_default.a.createRef();
@@ -8165,7 +8179,7 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
   }
 
   nextAnimationFrame() {
-    return new Promise(resolve => requestAnimationFrame(resolve));
+    return new Promise(resolve => this.props.windowObj.requestAnimationFrame(resolve));
   }
 
   async onMenuShow() {
@@ -8173,7 +8187,7 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
 
     await this.nextAnimationFrame();
 
-    if (this.windowObj.scrollMaxX > 0) {
+    if (this.props.windowObj.scrollMaxX > 0) {
       dsLinkMenuHostDiv.parentElement.classList.add("last-item");
     }
 
@@ -8216,6 +8230,10 @@ class DSLinkMenu_DSLinkMenu extends external_React_default.a.PureComponent {
   }
 
 }
+DSLinkMenu_DSLinkMenu.defaultProps = {
+  windowObj: window // Added to support unit tests
+
+};
 // EXTERNAL MODULE: ./content-src/components/DiscoveryStreamImpressionStats/ImpressionStats.jsx
 var ImpressionStats = __webpack_require__(34);
 
@@ -8427,7 +8445,7 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
     this.onLinkClick = this.onLinkClick.bind(this);
 
     this.setPlaceholderRef = element => {
-      this.placholderElement = element;
+      this.placeholderElement = element;
     };
 
     this.state = {
@@ -8461,8 +8479,8 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
       const entry = entries.find(e => e.isIntersecting);
 
       if (entry) {
-        if (this.placholderElement) {
-          this.observer.unobserve(this.placholderElement);
+        if (this.placeholderElement) {
+          this.observer.unobserve(this.placeholderElement);
         } // Stop observing since element has been seen
 
 
@@ -8473,17 +8491,35 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
     }
   }
 
+  onIdleCallback() {
+    if (!this.state.isSeen) {
+      if (this.observer && this.placeholderElement) {
+        this.observer.unobserve(this.placeholderElement);
+      }
+
+      this.setState({
+        isSeen: true
+      });
+    }
+  }
+
   componentDidMount() {
-    if (this.placholderElement) {
+    this.idleCallbackId = this.props.windowObj.requestIdleCallback(this.onIdleCallback.bind(this));
+
+    if (this.placeholderElement) {
       this.observer = new IntersectionObserver(this.onSeen.bind(this));
-      this.observer.observe(this.placholderElement);
+      this.observer.observe(this.placeholderElement);
     }
   }
 
   componentWillUnmount() {
     // Remove observer on unmount
-    if (this.observer && this.placholderElement) {
-      this.observer.unobserve(this.placholderElement);
+    if (this.observer && this.placeholderElement) {
+      this.observer.unobserve(this.placeholderElement);
+    }
+
+    if (this.idleCallbackId) {
+      this.props.windowObj.cancelIdleCallback(this.idleCallbackId);
     }
   }
 
@@ -8553,6 +8589,10 @@ class DSCard_DSCard extends external_React_default.a.PureComponent {
   }
 
 }
+DSCard_DSCard.defaultProps = {
+  windowObj: window // Added to support unit tests
+
+};
 const PlaceholderDSCard = props => external_React_default.a.createElement(DSCard_DSCard, {
   placeholder: true
 });
@@ -8715,7 +8755,7 @@ class CardGrid_CardGrid extends external_React_default.a.PureComponent {
 
 
     const isEmpty = data.recommendations.length === 0;
-    return external_React_default.a.createElement("div", null, external_React_default.a.createElement("div", {
+    return external_React_default.a.createElement("div", null, this.props.title && external_React_default.a.createElement("div", {
       className: "ds-header"
     }, this.props.title), isEmpty ? external_React_default.a.createElement("div", {
       className: "ds-card-grid empty"
@@ -8794,12 +8834,9 @@ class DSDismiss_DSDismiss extends external_React_default.a.PureComponent {
   }
 
   render() {
-    let className = "ds-dismiss";
-
-    if (this.state.hovering) {
-      className += " hovering";
-    }
-
+    let className = `ds-dismiss
+      ${this.state.hovering ? ` hovering` : ``}
+      ${this.props.extraClasses ? ` ${this.props.extraClasses}` : ``}`;
     return external_React_default.a.createElement("div", {
       className: className
     }, this.props.children, external_React_default.a.createElement("button", {
@@ -8848,6 +8885,7 @@ class DSMessage_DSMessage extends external_React_default.a.PureComponent {
 
 
 
+
 class DSTextPromo_DSTextPromo extends external_React_default.a.PureComponent {
   constructor(props) {
     super(props);
@@ -8878,9 +8916,10 @@ class DSTextPromo_DSTextPromo extends external_React_default.a.PureComponent {
   render() {
     return external_React_default.a.createElement("div", {
       className: "ds-text-promo"
-    }, external_React_default.a.createElement("img", {
-      src: this.props.image,
-      alt: this.props.alt_text
+    }, external_React_default.a.createElement(DSImage_DSImage, {
+      alt_text: this.props.alt_text,
+      source: this.props.image,
+      rawSource: this.props.raw_image_src
     }), external_React_default.a.createElement("div", {
       className: "text"
     }, external_React_default.a.createElement("h3", null, `${this.props.header}\u2003`, external_React_default.a.createElement(SafeAnchor_SafeAnchor, {
@@ -9867,6 +9906,7 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
         const [spoc] = component.data.spocs;
         const {
           image_src,
+          raw_image_src,
           alt_text,
           title,
           url,
@@ -9883,10 +9923,12 @@ class DiscoveryStreamBase_DiscoveryStreamBase extends external_React_default.a.P
             shim: spoc.shim
           },
           dispatch: this.props.dispatch,
-          shouldSendImpressionStats: true
+          shouldSendImpressionStats: true,
+          extraClasses: `ds-dismiss-ds-text-promo`
         }, external_React_default.a.createElement(DSTextPromo_DSTextPromo, {
           dispatch: this.props.dispatch,
           image: image_src,
+          raw_image_src: raw_image_src,
           alt_text: alt_text || title,
           header: title,
           cta_text: cta,
@@ -11624,7 +11666,7 @@ class SubmitFormSnippet_SubmitFormSnippet extends external_React_default.a.PureC
     } : {
       error_text: content.error_text
     };
-    const retryButtonText = content.scene1_button_label;
+    const retryButtonText = content.retry_button_label;
     return external_React_default.a.createElement(SnippetBase_SnippetBase, this.props, external_React_default.a.createElement("div", {
       className: "submissionStatus"
     }, successTitle ? external_React_default.a.createElement("h2", {
@@ -11737,6 +11779,7 @@ const FXASignupSnippet = props => {
   const firefox_version = userAgent ? parseInt(userAgent[1], 10) : 0;
   const extendedContent = {
     scene1_button_label: FXASignupSnippet_schema.properties.scene1_button_label.default,
+    retry_button_label: FXASignupSnippet_schema.properties.retry_button_label.default,
     scene2_email_placeholder_text: FXASignupSnippet_schema.properties.scene2_email_placeholder_text.default,
     scene2_button_label: FXASignupSnippet_schema.properties.scene2_button_label.default,
     scene2_dismiss_button_text: FXASignupSnippet_schema.properties.scene2_dismiss_button_text.default,
@@ -11774,6 +11817,7 @@ function NewsletterSnippet_extends() { NewsletterSnippet_extends = Object.assign
 const NewsletterSnippet = props => {
   const extendedContent = {
     scene1_button_label: NewsletterSnippet_schema.properties.scene1_button_label.default,
+    retry_button_label: NewsletterSnippet_schema.properties.retry_button_label.default,
     scene2_email_placeholder_text: NewsletterSnippet_schema.properties.scene2_email_placeholder_text.default,
     scene2_button_label: NewsletterSnippet_schema.properties.scene2_button_label.default,
     scene2_dismiss_button_text: NewsletterSnippet_schema.properties.scene2_dismiss_button_text.default,
@@ -11889,6 +11933,7 @@ function addDefaultValues(props) {
   return { ...props,
     content: {
       scene1_button_label: SendToDeviceSnippet_schema.properties.scene1_button_label.default,
+      retry_button_label: SendToDeviceSnippet_schema.properties.retry_button_label.default,
       scene2_dismiss_button_text: SendToDeviceSnippet_schema.properties.scene2_dismiss_button_text.default,
       scene2_button_label: SendToDeviceSnippet_schema.properties.scene2_button_label.default,
       scene2_input_placeholder: SendToDeviceSnippet_schema.properties.scene2_input_placeholder.default,

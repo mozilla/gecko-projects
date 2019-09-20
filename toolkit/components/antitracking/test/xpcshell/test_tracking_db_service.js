@@ -66,12 +66,20 @@ const LOG = {
   "https://7.example.com": [
     [Ci.nsIWebProgressListener.STATE_COOKIES_LOADED, true, 1],
   ],
-  // Cookie blocked for other reason (not a tracker)
+  // Tracker cookie loaded but not blocked.
   "https://8.example.com": [
+    [Ci.nsIWebProgressListener.STATE_COOKIES_LOADED_TRACKER, true, 1],
+  ],
+  // Social tracker cookie loaded but not blocked.
+  "https://9.example.com": [
+    [Ci.nsIWebProgressListener.STATE_COOKIES_LOADED_SOCIALTRACKER, true, 1],
+  ],
+  // Cookie blocked for other reason (not a tracker)
+  "https://10.example.com": [
     [Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_BY_PERMISSION, true, 2],
   ],
   // Fingerprinters set to block, but this one has an exception
-  "https://9.example.com": [
+  "https://11.example.com": [
     [Ci.nsIWebProgressListener.STATE_BLOCKED_FINGERPRINTING_CONTENT, false, 1],
   ],
 };
@@ -384,8 +392,8 @@ add_task(async function test_getEarliestRecordedDate() {
   await TrackingDBService.saveEvents(JSON.stringify({}));
   let db = await Sqlite.openConnection({ path: DB_PATH });
 
-  let date = await TrackingDBService.getEarliestRecordedDate();
-  equal(date, null, "There is no earliest recorded date");
+  let timestamp = await TrackingDBService.getEarliestRecordedDate();
+  equal(timestamp, null, "There is no earliest recorded date");
 
   // populate the database
   await addEventsToDB(db);
@@ -394,7 +402,8 @@ add_task(async function test_getEarliestRecordedDate() {
     .toISOString()
     .split("T")[0];
 
-  date = await TrackingDBService.getEarliestRecordedDate();
+  timestamp = await TrackingDBService.getEarliestRecordedDate();
+  let date = new Date(timestamp).toISOString().split("T")[0];
   equal(date, daysBefore9, "The earliest recorded event is nine days before.");
 
   await TrackingDBService.clearAll();

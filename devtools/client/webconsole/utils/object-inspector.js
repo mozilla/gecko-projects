@@ -64,6 +64,7 @@ function getObjectInspector(grip, serviceContainer, override = {}) {
     openLink: serviceContainer.openLink,
     renderStacktrace: stacktrace =>
       createElement(SmartTrace, {
+        key: "stacktrace",
         stacktrace,
         onViewSourceInDebugger: serviceContainer
           ? serviceContainer.onViewSourceInDebugger ||
@@ -102,7 +103,7 @@ function getObjectInspector(grip, serviceContainer, override = {}) {
 function createRootsFromGrip(grip) {
   return [
     {
-      path: Symbol((grip && grip.actor) || JSON.stringify(grip)),
+      path: (grip && grip.actor) || JSON.stringify(grip),
       contents: { value: grip },
     },
   ];

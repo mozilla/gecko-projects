@@ -120,6 +120,10 @@ this.LoginBreaches = {
         breachesByLoginGUID.set(login.guid, breach);
       }
     }
+    Services.telemetry.scalarSet(
+      "pwmgr.potentially_breached_passwords",
+      breachesByLoginGUID.size
+    );
     return breachesByLoginGUID;
   },
 
@@ -142,6 +146,13 @@ this.LoginBreaches = {
       }
     }
     return vulnerablePasswordsByLoginGUID;
+  },
+
+  async clearAllPotentiallyVulnerablePasswords() {
+    await Services.logins.initializationPromise;
+    const storageJSON =
+      Services.logins.wrappedJSObject._storage.wrappedJSObject;
+    storageJSON.clearAllPotentiallyVulnerablePasswords();
   },
 
   _breachAlertIsDismissed(login, breach, dismissedBreachAlerts) {

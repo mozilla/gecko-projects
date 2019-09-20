@@ -112,7 +112,7 @@ class MediaEncoder::AudioTrackListener : public DirectMediaStreamTrackListener {
     Unused << rv;
   }
 
-  void NotifyEnded() override {
+  void NotifyEnded(MediaStreamGraph* aGraph) override {
     MOZ_ASSERT(mEncoder);
     MOZ_ASSERT(mEncoderThread);
 
@@ -127,7 +127,7 @@ class MediaEncoder::AudioTrackListener : public DirectMediaStreamTrackListener {
     Unused << rv;
   }
 
-  void NotifyRemoved() override {
+  void NotifyRemoved(MediaStreamGraph* aGraph) override {
     if (!mShutdown) {
       nsresult rv = mEncoderThread->Dispatch(
           NewRunnableMethod("mozilla::AudioTrackEncoder::NotifyEndOfStream",
@@ -246,7 +246,8 @@ class MediaEncoder::VideoTrackListener : public DirectMediaStreamTrackListener {
     Unused << rv;
   }
 
-  void NotifyEnabledStateChanged(bool aEnabled) override {
+  void NotifyEnabledStateChanged(MediaStreamGraph* aGraph,
+                                 bool aEnabled) override {
     MOZ_ASSERT(mEncoder);
     MOZ_ASSERT(mEncoderThread);
 
@@ -268,7 +269,7 @@ class MediaEncoder::VideoTrackListener : public DirectMediaStreamTrackListener {
     Unused << rv;
   }
 
-  void NotifyEnded() override {
+  void NotifyEnded(MediaStreamGraph* aGraph) override {
     MOZ_ASSERT(mEncoder);
     MOZ_ASSERT(mEncoderThread);
 
@@ -283,7 +284,7 @@ class MediaEncoder::VideoTrackListener : public DirectMediaStreamTrackListener {
     Unused << rv;
   }
 
-  void NotifyRemoved() override {
+  void NotifyRemoved(MediaStreamGraph* aGraph) override {
     if (!mShutdown) {
       nsresult rv = mEncoderThread->Dispatch(
           NewRunnableMethod("mozilla::VideoTrackEncoder::NotifyEndOfStream",
@@ -437,17 +438,17 @@ MediaEncoder::~MediaEncoder() {
   MOZ_ASSERT(!mPipeStream);
 }
 
-void MediaEncoder::RunOnGraph(already_AddRefed<Runnable> aRunnable) {
-  MediaStreamGraphImpl* graph;
-  if (mAudioTrack) {
-    graph = mAudioTrack->GraphImpl();
-  } else if (mVideoTrack) {
-    graph = mVideoTrack->GraphImpl();
-  } else if (mPipeStream) {
-    graph = mPipeStream->GraphImpl();
-  } else {
-    MOZ_CRASH("No graph");
+void MediaEncoder::EnsureGraphStreamFrom(MediaStream* aStream) {
+  if (mGraphStream) {
+    return;
   }
+  MOZ_DIAGNOSTIC_ASSERT(!aStream->IsDestroyed());
+  mGraphStream = MakeAndAddRef<SharedDummyStream>(
+      aStream->GraphImpl()->CreateSourceStream());
+}
+
+void MediaEncoder::RunOnGraph(already_AddRefed<Runnable> aRunnable) {
+  MOZ_ASSERT(mGraphStream);
   class Message : public ControlMessage {
    public:
     explicit Message(already_AddRefed<Runnable> aRunnable)
@@ -455,7 +456,8 @@ void MediaEncoder::RunOnGraph(already_AddRefed<Runnable> aRunnable) {
     void Run() override { mRunnable->Run(); }
     const RefPtr<Runnable> mRunnable;
   };
-  graph->AppendMessage(MakeUnique<Message>(std::move(aRunnable)));
+  mGraphStream->mStream->GraphImpl()->AppendMessage(
+      MakeUnique<Message>(std::move(aRunnable)));
 }
 
 void MediaEncoder::Suspend() {
@@ -529,9 +531,11 @@ void MediaEncoder::ConnectAudioNode(AudioNode* aNode, uint32_t aOutput) {
 
   if (mPipeStream) {
     mPipeStream->AddTrackListener(mAudioListener, AudioNodeStream::AUDIO_TRACK);
+    EnsureGraphStreamFrom(mPipeStream);
   } else {
     mAudioNode->GetStream()->AddTrackListener(mAudioListener,
                                               AudioNodeStream::AUDIO_TRACK);
+    EnsureGraphStreamFrom(mAudioNode->GetStream());
   }
 }
 
@@ -539,9 +543,11 @@ void MediaEncoder::ConnectMediaStreamTrack(MediaStreamTrack* aTrack) {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (aTrack->Ended()) {
-    NS_ASSERTION(false, "Cannot connect ended track");
+    MOZ_ASSERT_UNREACHABLE("Cannot connect ended track");
     return;
   }
+
+  EnsureGraphStreamFrom(aTrack->GetStream());
 
   if (AudioStreamTrack* audio = aTrack->AsAudioStreamTrack()) {
     if (!mAudioEncoder) {

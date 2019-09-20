@@ -29,6 +29,7 @@ pub mod font;
 pub mod grid;
 pub mod image;
 pub mod length;
+pub mod motion;
 pub mod position;
 pub mod rect;
 pub mod size;
@@ -92,13 +93,10 @@ impl SymbolsType {
 
 /// <https://drafts.csswg.org/css-counter-styles/#typedef-counter-style>
 ///
-/// Since wherever <counter-style> is used, 'none' is a valid value as
-/// well, we combine them into one type to make code simpler.
+/// Note that 'none' is not a valid name.
 #[cfg_attr(feature = "gecko", derive(MallocSizeOf))]
 #[derive(Clone, Debug, Eq, PartialEq, ToComputedValue, ToCss, ToResolvedValue, ToShmem)]
-pub enum CounterStyleOrNone {
-    /// `none`
-    None,
+pub enum CounterStyle {
     /// `<counter-style-name>`
     Name(CustomIdent),
     /// `symbols()`
@@ -111,28 +109,25 @@ fn is_symbolic(symbols_type: &SymbolsType) -> bool {
     *symbols_type == SymbolsType::Symbolic
 }
 
-impl CounterStyleOrNone {
+impl CounterStyle {
     /// disc value
     pub fn disc() -> Self {
-        CounterStyleOrNone::Name(CustomIdent(atom!("disc")))
+        CounterStyle::Name(CustomIdent(atom!("disc")))
     }
 
     /// decimal value
     pub fn decimal() -> Self {
-        CounterStyleOrNone::Name(CustomIdent(atom!("decimal")))
+        CounterStyle::Name(CustomIdent(atom!("decimal")))
     }
 }
 
-impl Parse for CounterStyleOrNone {
+impl Parse for CounterStyle {
     fn parse<'i, 't>(
         context: &ParserContext,
         input: &mut Parser<'i, 't>,
     ) -> Result<Self, ParseError<'i>> {
         if let Ok(name) = input.try(|i| parse_counter_style_name(i)) {
-            return Ok(CounterStyleOrNone::Name(name));
-        }
-        if input.try(|i| i.expect_ident_matching("none")).is_ok() {
-            return Ok(CounterStyleOrNone::None);
+            return Ok(CounterStyle::Name(name));
         }
         input.expect_function_matching("symbols")?;
         input.parse_nested_block(|input| {
@@ -151,12 +146,12 @@ impl Parse for CounterStyleOrNone {
             if symbols.0.iter().any(|sym| !sym.is_allowed_in_symbols()) {
                 return Err(input.new_custom_error(StyleParseErrorKind::UnspecifiedError));
             }
-            Ok(CounterStyleOrNone::Symbols(symbols_type, symbols))
+            Ok(CounterStyle::Symbols(symbols_type, symbols))
         })
     }
 }
 
-impl SpecifiedValueInfo for CounterStyleOrNone {
+impl SpecifiedValueInfo for CounterStyle {
     fn collect_completion_keywords(f: KeywordsCollectFn) {
         // XXX The best approach for implementing this is probably
         // having a CounterStyleName type wrapping CustomIdent, and
@@ -165,7 +160,7 @@ impl SpecifiedValueInfo for CounterStyleOrNone {
         // approach here.
         macro_rules! predefined {
             ($($name:expr,)+) => {
-                f(&["none", "symbols", $($name,)+]);
+                f(&["symbols", $($name,)+]);
             }
         }
         include!("../../counter_style/predefined.rs");
@@ -314,5 +309,11 @@ impl<L> ClipRectOrAuto<L> {
     #[inline]
     pub fn auto() -> Self {
         ClipRectOrAuto::Auto
+    }
+
+    /// Returns whether this value is the `auto` value.
+    #[inline]
+    pub fn is_auto(&self) -> bool {
+        matches!(*self, ClipRectOrAuto::Auto)
     }
 }

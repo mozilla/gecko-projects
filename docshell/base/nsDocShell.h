@@ -71,6 +71,9 @@ class ClientInfo;
 class ClientSource;
 class EventTarget;
 }  // namespace dom
+namespace net {
+class LoadInfo;
+}  // namespace net
 }  // namespace mozilla
 
 class nsIContentViewer;
@@ -328,12 +331,7 @@ class nsDocShell final : public nsDocLoader,
   // set. As soon as the current DocShell knows itself can be treated as
   // background loading, it triggers the parent docshell to see if the parent
   // document can fire load event earlier.
-  void TriggerParentCheckDocShellIsEmpty() {
-    RefPtr<nsDocShell> parent = GetInProcessParentDocshell();
-    if (parent) {
-      parent->DocLoaderIsEmpty(true);
-    }
-  }
+  void TriggerParentCheckDocShellIsEmpty();
 
   nsresult HistoryEntryRemoved(int32_t aIndex);
 
@@ -475,6 +473,18 @@ class nsDocShell final : public nsDocLoader,
   // `WindowGlobalChild` actor.
   nsresult CreateContentViewerForActor(
       mozilla::dom::WindowGlobalChild* aWindowActor);
+
+  static bool CreateChannelForLoadState(
+      nsDocShellLoadState* aLoadState, mozilla::net::LoadInfo* aLoadInfo,
+      nsIInterfaceRequestor* aCallbacks, nsDocShell* aDocShell,
+      const nsString* aInitiatorType, nsLoadFlags aLoadFlags,
+      uint32_t aLoadType, uint32_t aCacheKey, bool aIsActive,
+      bool aIsTopLevelDoc, nsresult& rv, nsIChannel** aChannel);
+
+  static nsresult ConfigureChannel(nsIChannel* aChannel,
+                                   nsDocShellLoadState* aLoadState,
+                                   const nsString* aInitiatorType,
+                                   uint32_t aLoadType, uint32_t aCacheKey);
 
  private:  // member functions
   friend class nsDSURIContentListener;
@@ -630,8 +640,8 @@ class nsDocShell final : public nsDocLoader,
   nsresult DoURILoad(nsDocShellLoadState* aLoadState, bool aLoadFromExternal,
                      nsIDocShell** aDocShell, nsIRequest** aRequest);
 
-  nsresult AddHeadersToChannel(nsIInputStream* aHeadersData,
-                               nsIChannel* aChannel);
+  static nsresult AddHeadersToChannel(nsIInputStream* aHeadersData,
+                                      nsIChannel* aChannel);
 
   nsresult DoChannelLoad(nsIChannel* aChannel, nsIURILoader* aURILoader,
                          bool aBypassClassifier);

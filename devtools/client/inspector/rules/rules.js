@@ -77,7 +77,7 @@ const PREF_UA_STYLES = "devtools.inspector.showUserAgentStyles";
 const PREF_DEFAULT_COLOR_UNIT = "devtools.defaultColorUnit";
 const FILTER_CHANGED_TIMEOUT = 150;
 // Removes the flash-out class from an element after 1 second.
-const REMOVE_FLASH_OUT_CLASS_TIMER = 1000;
+const PROPERTY_FLASHING_DURATION = 1000;
 
 // This is used to parse user input when filtering.
 const FILTER_PROP_RE = /\s*([^:\s]*)\s*:\s*(.*?)\s*;?$/;
@@ -299,7 +299,7 @@ CssRuleView.prototype = {
     return this._elementStyle ? this._elementStyle.rules : [];
   },
 
-  get target() {
+  get currentTarget() {
     return this.inspector.toolbox.target;
   },
 
@@ -388,17 +388,17 @@ CssRuleView.prototype = {
     // In order to query if the emulation actor's print simulation methods are supported,
     // we have to call the emulation front so that the actor is lazily loaded. This allows
     // us to use `actorHasMethod`. Please see `getActorDescription` for more information.
-    this._emulationFront = await this.target.getFront("emulation");
+    this._emulationFront = await this.currentTarget.getFront("emulation");
 
     // Show the toggle button if:
     // - Print simulation is supported for the current target.
     // - Not debugging content document.
     if (
-      (await this.target.actorHasMethod(
+      (await this.currentTarget.actorHasMethod(
         "emulation",
         "getIsPrintSimulationEnabled"
       )) &&
-      !this.target.chrome
+      !this.currentTarget.chrome
     ) {
       this.printSimulationButton.removeAttribute("hidden");
 
@@ -1716,24 +1716,22 @@ CssRuleView.prototype = {
    */
   _flashElement(element) {
     flashElementOn(element, {
-      backgroundClass: "ruleview-property-highlight-background-color",
-    });
-    flashElementOff(element, {
-      backgroundClass: "ruleview-property-highlight-background-color",
+      backgroundClass: "theme-bg-yellow-contrast",
     });
 
-    if (this._removeFlashOutTimer) {
+    if (this._flashMutationTimer) {
       clearTimeout(this._removeFlashOutTimer);
-      this._removeFlashOutTimer = null;
+      this._flashMutationTimer = null;
     }
 
-    // Remove the flash-out class to prevent the element from re-flashing when the view
-    // is resized.
-    this._removeFlashOutTimer = setTimeout(() => {
-      element.classList.remove("flash-out");
+    this._flashMutationTimer = setTimeout(() => {
+      flashElementOff(element, {
+        backgroundClass: "theme-bg-yellow-contrast",
+      });
+
       // Emit "scrolled-to-property" for use by tests.
       this.emit("scrolled-to-element");
-    }, REMOVE_FLASH_OUT_CLASS_TIMER);
+    }, PROPERTY_FLASHING_DURATION);
   },
 
   /**
@@ -2046,7 +2044,7 @@ function RuleViewTool(inspector, window) {
   this.inspector.selection.on("detached-front", this.onDetachedFront);
   this.inspector.selection.on("new-node-front", this.onSelected);
   this.inspector.selection.on("pseudoclass", this.refresh);
-  this.inspector.target.on("navigate", this.clearUserProperties);
+  this.inspector.currentTarget.on("navigate", this.clearUserProperties);
   this.inspector.ruleViewSideBar.on("ruleview-selected", this.onPanelSelected);
   this.inspector.sidebar.on("ruleview-selected", this.onPanelSelected);
   this.inspector.pageStyle.on("stylesheet-updated", this.refresh);
@@ -2132,7 +2130,7 @@ RuleViewTool.prototype = {
     this.inspector.selection.off("detached-front", this.onDetachedFront);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node-front", this.onSelected);
-    this.inspector.target.off("navigate", this.clearUserProperties);
+    this.inspector.currentTarget.off("navigate", this.clearUserProperties);
     this.inspector.sidebar.off("ruleview-selected", this.onPanelSelected);
     if (this.inspector.pageStyle) {
       this.inspector.pageStyle.off("stylesheet-updated", this.refresh);

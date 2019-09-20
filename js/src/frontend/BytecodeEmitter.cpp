@@ -5754,12 +5754,9 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
       fieldInitializers = setupFieldInitializers(classContentsIfConstructor);
     }
 
-    uint32_t innerScriptLine, innerScriptColumn;
-    parser->errorReporter().lineAndColumnAt(
-        funNode->pn_pos.begin, &innerScriptLine, &innerScriptColumn);
     BytecodeEmitter bce2(this, parser, funbox, innerScript,
-                         /* lazyScript = */ nullptr, innerScriptLine,
-                         innerScriptColumn, nestedMode, fieldInitializers);
+                         /* lazyScript = */ nullptr, funbox->startLine,
+                         funbox->startColumn, nestedMode, fieldInitializers);
     if (!bce2.init(funNode->pn_pos)) {
       return false;
     }
@@ -7481,11 +7478,13 @@ bool BytecodeEmitter::emitCallOrNew(
         break;
       case ParseNodeKind::Name: {
         // Use the start of callee name unless it is at a separator
+        // or has no args.
         //
         // 2 + obj()   // expression
         //     ^       // column coord
         //
-        if (!bytecodeSection().atSeparator(calleeNode->pn_pos.begin)) {
+        if (argsList->empty() ||
+            !bytecodeSection().atSeparator(calleeNode->pn_pos.begin)) {
           // Use the start of callee names.
           coordNode = calleeNode;
         }

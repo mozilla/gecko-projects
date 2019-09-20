@@ -260,7 +260,7 @@ export type DebuggerClient = {
   connect: () => Promise<*>,
   request: (packet: Object) => Promise<*>,
   attachConsole: (actor: String, listeners: Array<*>) => Promise<*>,
-  createObjectClient: (grip: Grip) => {},
+  createObjectClient: (grip: Grip) => ObjectClient,
   release: (actor: String) => {},
 };
 
@@ -338,6 +338,12 @@ export type SourceClient = {
  */
 export type ObjectClient = {
   getPrototypeAndProperties: () => any,
+  addWatchpoint: (
+    property: string,
+    label: string,
+    watchpointType: string
+  ) => {},
+  removeWatchpoint: (property: string) => {},
 };
 
 /**
@@ -383,6 +389,7 @@ export type ThreadFront = {
 export type Panel = {|
   emit: (eventName: string) => void,
   openLink: (url: string) => void,
+  openInspector: () => void,
   openElementInInspector: (grip: Object) => void,
   openConsoleAndEvaluate: (input: string) => void,
   highlightDomElement: (grip: Object) => void,

@@ -317,9 +317,7 @@ void RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(
   // DXGI_SCALING_NONE caused swap chain creation failure.
   desc.Scaling = DXGI_SCALING_STRETCH;
   desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-  desc.AlphaMode = gfx::gfxVars::WorkaroundWebRenderIntelBug1556634()
-                       ? DXGI_ALPHA_MODE_PREMULTIPLIED
-                       : DXGI_ALPHA_MODE_IGNORE;
+  desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
   desc.Flags = 0;
 
   hr = aDXGIFactory2->CreateSwapChainForComposition(mDevice, &desc, nullptr,
@@ -331,6 +329,7 @@ void RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(
     mVisual->SetContent(swapChain1);
     mCompositionTarget->SetRoot(mVisual);
     mCompositionDevice = dCompDevice;
+    mCompositionDevice->Commit();
     mUseTripleBuffering = useTripleBuffering;
   }
 }
@@ -362,10 +361,6 @@ void RenderCompositorANGLE::EndFrame() {
   InsertPresentWaitQuery();
 
   mSwapChain->Present(0, 0);
-
-  if (mCompositionDevice) {
-    mCompositionDevice->Commit();
-  }
 }
 
 bool RenderCompositorANGLE::WaitForGPU() {
@@ -400,14 +395,32 @@ bool RenderCompositorANGLE::ResizeBufferIfNeeded() {
     return true;
   }
 
-  HRESULT hr;
-  RefPtr<ID3D11Texture2D> backBuf;
-
   // Release EGLSurface of back buffer before calling ResizeBuffers().
   DestroyEGLSurface();
 
-  // Reset buffer size
-  mBufferSize.reset();
+  mBufferSize = Some(size);
+
+  if (!CreateEGLSurface()) {
+    mBufferSize.reset();
+    return false;
+  }
+
+  return true;
+}
+
+bool RenderCompositorANGLE::CreateEGLSurface() {
+  MOZ_ASSERT(mBufferSize.isSome());
+  MOZ_ASSERT(mEGLSurface == EGL_NO_SURFACE);
+
+  HRESULT hr;
+  RefPtr<ID3D11Texture2D> backBuf;
+
+  if (mBufferSize.isNothing()) {
+    gfxCriticalNote << "Buffer size is invalid";
+    return false;
+  }
+
+  const LayoutDeviceIntSize& size = mBufferSize.ref();
 
   // Resize swap chain
   DXGI_SWAP_CHAIN_DESC desc;
@@ -462,7 +475,6 @@ bool RenderCompositorANGLE::ResizeBufferIfNeeded() {
   }
 
   mEGLSurface = surface;
-  mBufferSize = Some(size);
 
   return true;
 }

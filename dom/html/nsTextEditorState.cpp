@@ -27,7 +27,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsServiceManagerUtils.h"
 #include "mozilla/dom/Selection.h"
-#include "mozilla/TextEditRules.h"
 #include "mozilla/EventListenerManager.h"
 #include "nsContentUtils.h"
 #include "mozilla/Preferences.h"
@@ -47,7 +46,7 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/ShortcutKeys.h"
-#include "nsXBLPrototypeHandler.h"
+#include "mozilla/KeyEventHandler.h"
 #include "mozilla/dom/KeyboardEvent.h"
 
 using namespace mozilla;
@@ -888,17 +887,17 @@ TextInputListener::HandleEvent(Event* aEvent) {
 
   WidgetKeyboardEvent* widgetKeyEvent =
       aEvent->WidgetEventPtr()->AsKeyboardEvent();
-  if (!keyEvent) {
+  if (!widgetKeyEvent) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  nsXBLPrototypeHandler* keyHandlers = ShortcutKeys::GetHandlers(
+  KeyEventHandler* keyHandlers = ShortcutKeys::GetHandlers(
       mTxtCtrlElement->IsTextArea() ? HandlerType::eTextArea
                                     : HandlerType::eInput);
 
   RefPtr<nsAtom> eventTypeAtom =
       ShortcutKeys::ConvertEventToDOMEventType(widgetKeyEvent);
-  for (nsXBLPrototypeHandler* handler = keyHandlers; handler;
+  for (KeyEventHandler* handler = keyHandlers; handler;
        handler = handler->GetNextHandler()) {
     if (!handler->EventTypeEquals(eventTypeAtom)) {
       continue;
@@ -2510,13 +2509,11 @@ bool nsTextEditorState::SetValue(const nsAString& aValue,
 }
 
 bool nsTextEditorState::HasNonEmptyValue() {
+  // If the frame for editor is alive, we can compute it with mTextEditor.
+  // Otherwise, we need to check cached value via GetValue().
   if (mTextEditor && mBoundFrame && mEditorInitialized &&
       !mIsCommittingComposition) {
-    bool empty;
-    nsresult rv = mTextEditor->IsEmpty(&empty);
-    if (NS_SUCCEEDED(rv)) {
-      return !empty;
-    }
+    return !mTextEditor->IsEmpty();
   }
 
   nsAutoString value;

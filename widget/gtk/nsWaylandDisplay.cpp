@@ -13,10 +13,15 @@ namespace widget {
 #define GBMLIB_NAME "libgbm.so.1"
 #define DRMLIB_NAME "libdrm.so.2"
 
+#define DMABUF_PREF "widget.wayland_dmabuf_backend.enabled"
+// See WindowSurfaceWayland::RenderingCacheMode for details.
+#define CACHE_MODE_PREF "widget.wayland_cache_mode"
+
 bool nsWaylandDisplay::mIsDMABufEnabled = false;
 // -1 mean the pref was not loaded yet
 int nsWaylandDisplay::mIsDMABufPrefState = -1;
 bool nsWaylandDisplay::mIsDMABufConfigured = false;
+int nsWaylandDisplay::mRenderingCacheModePref = -1;
 
 wl_display* WaylandDisplayGetWLDisplay(GdkDisplay* aGdkDisplay) {
   if (!aGdkDisplay) {
@@ -110,6 +115,10 @@ nsWaylandDisplay* WaylandDisplayGet(GdkDisplay* aGdkDisplay) {
 }
 
 void nsWaylandDisplay::SetShm(wl_shm* aShm) { mShm = aShm; }
+
+void nsWaylandDisplay::SetCompositor(wl_compositor* aCompositor) {
+  mCompositor = aCompositor;
+}
 
 void nsWaylandDisplay::SetSubcompositor(wl_subcompositor* aSubcompositor) {
   mSubcompositor = aSubcompositor;
@@ -218,6 +227,12 @@ static void global_registry_handler(void* data, wl_registry* registry,
     wl_proxy_set_queue((struct wl_proxy*)primary_selection_device_manager,
                        display->GetEventQueue());
     display->SetPrimarySelectionDeviceManager(primary_selection_device_manager);
+  } else if (strcmp(interface, "wl_compositor") == 0) {
+    // Requested wl_compositor version 4 as we need wl_surface_damage_buffer().
+    auto compositor = static_cast<wl_compositor*>(
+        wl_registry_bind(registry, id, &wl_compositor_interface, 4));
+    wl_proxy_set_queue((struct wl_proxy*)compositor, display->GetEventQueue());
+    display->SetCompositor(compositor);
   } else if (strcmp(interface, "wl_subcompositor") == 0) {
     auto subcompositor = static_cast<wl_subcompositor*>(
         wl_registry_bind(registry, id, &wl_subcompositor_interface, 1));
@@ -241,6 +256,61 @@ static const struct wl_registry_listener registry_listener = {
 bool nsWaylandDisplay::DispatchEventQueue() {
   wl_display_dispatch_queue_pending(mDisplay, mEventQueue);
   return true;
+}
+
+void nsWaylandDisplay::SyncEnd() {
+  wl_callback_destroy(mSyncCallback);
+  mSyncCallback = nullptr;
+}
+
+static void wayland_sync_callback(void* data, struct wl_callback* callback,
+                                  uint32_t time) {
+  auto display = static_cast<nsWaylandDisplay*>(data);
+  display->SyncEnd();
+}
+
+static const struct wl_callback_listener sync_callback_listener = {
+    .done = wayland_sync_callback};
+
+void nsWaylandDisplay::SyncBegin() {
+  WaitForSyncEnd();
+
+  // Use wl_display_sync() to synchronize wayland events.
+  // See dri2_wl_swap_buffers_with_damage() from MESA
+  // or wl_display_roundtrip_queue() from wayland-client.
+  struct wl_display* displayWrapper =
+      static_cast<wl_display*>(wl_proxy_create_wrapper((void*)mDisplay));
+  if (!displayWrapper) {
+    NS_WARNING("Failed to create wl_proxy wrapper!");
+    return;
+  }
+
+  wl_proxy_set_queue((struct wl_proxy*)displayWrapper, mEventQueue);
+  mSyncCallback = wl_display_sync(displayWrapper);
+  wl_proxy_wrapper_destroy((void*)displayWrapper);
+
+  if (!mSyncCallback) {
+    NS_WARNING("Failed to create wl_display_sync callback!");
+    return;
+  }
+
+  wl_callback_add_listener(mSyncCallback, &sync_callback_listener, this);
+  wl_display_flush(mDisplay);
+}
+
+void nsWaylandDisplay::WaitForSyncEnd() {
+  // We're done here
+  if (!mSyncCallback) {
+    return;
+  }
+
+  while (mSyncCallback != nullptr) {
+    if (wl_display_dispatch_queue(mDisplay, mEventQueue) == -1) {
+      NS_WARNING("wl_display_dispatch_queue failed!");
+      SyncEnd();
+      return;
+    }
+  }
 }
 
 bool nsWaylandDisplay::Matches(wl_display* aDisplay) {
@@ -301,9 +371,11 @@ nsWaylandDisplay::nsWaylandDisplay(wl_display* aDisplay)
       mDisplay(aDisplay),
       mEventQueue(nullptr),
       mDataDeviceManager(nullptr),
+      mCompositor(nullptr),
       mSubcompositor(nullptr),
       mSeat(nullptr),
       mShm(nullptr),
+      mSyncCallback(nullptr),
       mPrimarySelectionDeviceManager(nullptr),
       mRegistry(nullptr),
       mDmabuf(nullptr),
@@ -317,14 +389,15 @@ nsWaylandDisplay::nsWaylandDisplay(wl_display* aDisplay)
   wl_registry_add_listener(mRegistry, &registry_listener, this);
 
   if (NS_IsMainThread()) {
-    // We can't load the preference from compositor/render thread,
-    // only from main one. So we can't call it directly from
-    // nsWaylandDisplay::IsDMABufEnabled() as it can be called from various
-    // threads.
+    // We can't load the preference from compositor/render thread
+    // so load all Wayland prefs here.
     if (mIsDMABufPrefState == -1) {
-      mIsDMABufPrefState =
-          Preferences::GetBool("widget.wayland_dmabuf_backend.enabled", false);
+      mIsDMABufPrefState = Preferences::GetBool(DMABUF_PREF, false);
     }
+    if (mRenderingCacheModePref == -1) {
+      mRenderingCacheModePref = Preferences::GetInt(CACHE_MODE_PREF, 0);
+    }
+
     // Use default event queue in main thread operated by Gtk+.
     mEventQueue = nullptr;
     wl_display_roundtrip(mDisplay);

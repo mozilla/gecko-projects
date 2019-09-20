@@ -23,9 +23,11 @@
 // #included wherever Base Profiler may be used.
 
 #ifdef MOZ_GECKO_PROFILER
-// Enable Base Profiler on Mac and Non-Android Linux, which are supported.
-// (Android not implemented yet. Windows not working yet when packaged.)
-#  if defined(XP_MACOSX) || (defined(XP_LINUX) && !defined(ANDROID))
+// Enable Base Profiler on Windows, Mac and Non-Android Linux, which are
+// supported.
+// (Android not implemented yet, mingw not supported.)
+#  if defined(XP_MACOSX) || (defined(XP_LINUX) && !defined(ANDROID)) || \
+      (defined(XP_WIN) && !defined(__MINGW32__))
 #    define MOZ_BASE_PROFILER
 #  else
 // Other platforms are currently not supported. But you may uncomment the
@@ -63,6 +65,8 @@
                                                 categoryPair, ctx, flags)
 
 #  define BASE_PROFILER_ADD_MARKER(markerName, categoryPair)
+#  define BASE_PROFILER_ADD_MARKER_WITH_PAYLOAD( \
+      markerName, categoryPair, PayloadType, parenthesizedPayloadArgs)
 
 #  define MOZDECLARE_DOCSHELL_AND_HISTORY_ID(docShell)
 #  define BASE_PROFILER_TRACING(categoryString, markerName, categoryPair, kind)
@@ -196,18 +200,25 @@ class RacyFeatures {
 
   MFBT_API static void SetInactive();
 
+  MFBT_API static void SetPaused();
+
+  MFBT_API static void SetUnpaused();
+
   MFBT_API static bool IsActive();
 
   MFBT_API static bool IsActiveWithFeature(uint32_t aFeature);
 
   MFBT_API static bool IsActiveWithoutPrivacy();
 
- private:
-  static const uint32_t Active = 1u << 31;
+  MFBT_API static bool IsActiveAndUnpausedWithoutPrivacy();
 
-// Ensure Active doesn't overlap with any of the feature bits.
+ private:
+  static constexpr uint32_t Active = 1u << 31;
+  static constexpr uint32_t Paused = 1u << 30;
+
+// Ensure Active/Paused don't overlap with any of the feature bits.
 #  define NO_OVERLAP(n_, str_, Name_, desc_) \
-    static_assert(ProfilerFeature::Name_ != Active, "bad Active value");
+    static_assert(ProfilerFeature::Name_ != Paused, "bad feature value");
 
   BASE_PROFILER_FOR_EACH_FEATURE(NO_OVERLAP);
 
@@ -232,18 +243,18 @@ MFBT_API bool IsThreadBeingProfiled();
 
 static constexpr PowerOfTwo32 BASE_PROFILER_DEFAULT_ENTRIES =
 #  if !defined(ARCH_ARMV6)
-    MakePowerOfTwo32<1u << 20>();  // 1'048'576
+    MakePowerOfTwo32<1u << 20>();  // 1'048'576 entries = 8MB
 #  else
-    MakePowerOfTwo32<1u << 17>();  // 131'072
+    MakePowerOfTwo32<1u << 17>();  // 131'072 entries = 1MB
 #  endif
 
 // Startup profiling usually need to capture more data, especially on slow
 // systems.
 static constexpr PowerOfTwo32 BASE_PROFILER_DEFAULT_STARTUP_ENTRIES =
 #  if !defined(ARCH_ARMV6)
-    MakePowerOfTwo32<1u << 22>();  // 4'194'304
+    MakePowerOfTwo32<1u << 22>();  // 4'194'304 entries = 32MB
 #  else
-    MakePowerOfTwo32<1u << 17>();  // 131'072
+    MakePowerOfTwo32<1u << 17>();  // 131'072 = 1MB
 #  endif
 
 #  define BASE_PROFILER_DEFAULT_DURATION 20
@@ -267,8 +278,8 @@ MFBT_API void profiler_shutdown();
 // selected options. Stops and restarts the profiler if it is already active.
 // After starting the profiler is "active". The samples will be recorded in a
 // circular buffer.
-//   "aCapacity" is the maximum number of entries in the profiler's circular
-//               buffer.
+//   "aCapacity" is the maximum number of 8-byte entries in the profiler's
+//               circular buffer.
 //   "aInterval" the sampling interval, measured in millseconds.
 //   "aFeatures" is the feature set. Features unsupported by this
 //               platform/configuration are ignored.
@@ -399,6 +410,19 @@ inline bool profiler_is_active() {
   return baseprofiler::detail::RacyFeatures::IsActive();
 }
 
+// Same as profiler_is_active(), but with the same extra checks that determine
+// if the profiler would currently store markers. So this should be used before
+// doing some potentially-expensive work that's used in a marker. E.g.:
+//
+//   if (profiler_can_accept_markers()) {
+//     ExpensiveMarkerPayload expensivePayload = CreateExpensivePayload();
+//     BASE_PROFILER_ADD_MARKER_WITH_PAYLOAD(name, OTHER, expensivePayload);
+//   }
+inline bool profiler_can_accept_markers() {
+  return baseprofiler::detail::RacyFeatures::
+      IsActiveAndUnpausedWithoutPrivacy();
+}
+
 // Is the profiler active, and is the current thread being profiled?
 // (Same caveats and recommented usage as profiler_is_active().)
 inline bool profiler_thread_is_being_profiled() {
@@ -506,7 +530,7 @@ struct ProfilerBufferInfo {
   uint64_t mRangeStart;
   // Index of the newest entry.
   uint64_t mRangeEnd;
-  // Buffer capacity in number of entries.
+  // Buffer capacity in number of 8-byte entries.
   uint32_t mEntryCount;
   // Sampling stats: Interval (ns) between successive samplings.
   ProfilerStats mIntervalsNs;
@@ -686,16 +710,35 @@ class MOZ_RAII AutoProfilerStats {
 // certain length of time. A no-op if the profiler is inactive or in privacy
 // mode.
 
-#  define BASE_PROFILER_ADD_MARKER(markerName, categoryPair) \
-    ::mozilla::baseprofiler::profiler_add_marker(            \
-        markerName,                                          \
-        ::mozilla::baseprofiler::ProfilingCategoryPair::categoryPair)
+#  define BASE_PROFILER_ADD_MARKER(markerName, categoryPair)             \
+    do {                                                                 \
+      AUTO_PROFILER_STATS(base_add_marker);                              \
+      ::mozilla::baseprofiler::profiler_add_marker(                      \
+          markerName,                                                    \
+          ::mozilla::baseprofiler::ProfilingCategoryPair::categoryPair); \
+    } while (false)
 
 MFBT_API void profiler_add_marker(const char* aMarkerName,
                                   ProfilingCategoryPair aCategoryPair);
+
+// `PayloadType` is a sub-class of BaseMarkerPayload, `parenthesizedPayloadArgs`
+// is the argument list used to construct that `PayloadType`. E.g.:
+// `BASE_PROFILER_ADD_MARKER_WITH_PAYLOAD("Load", DOM, TextMarkerPayload,
+//                                        ("text", start, end, ds, dsh))`
+#  define BASE_PROFILER_ADD_MARKER_WITH_PAYLOAD(                        \
+      markerName, categoryPair, PayloadType, parenthesizedPayloadArgs)  \
+    do {                                                                \
+      AUTO_PROFILER_STATS(base_add_marker_with_##PayloadType);          \
+      ::mozilla::baseprofiler::profiler_add_marker(                     \
+          markerName,                                                   \
+          ::mozilla::baseprofiler::ProfilingCategoryPair::categoryPair, \
+          PayloadType parenthesizedPayloadArgs);                        \
+    } while (false)
+
 MFBT_API void profiler_add_marker(const char* aMarkerName,
                                   ProfilingCategoryPair aCategoryPair,
-                                  UniquePtr<ProfilerMarkerPayload> aPayload);
+                                  const ProfilerMarkerPayload& aPayload);
+
 MFBT_API void profiler_add_js_marker(const char* aMarkerName);
 
 // Insert a marker in the profile timeline for a specified thread.

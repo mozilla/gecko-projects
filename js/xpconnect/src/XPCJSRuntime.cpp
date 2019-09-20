@@ -1496,6 +1496,10 @@ static void ReportZoneStats(const JS::ZoneStats& zStats,
                  zStats.cachedCFG,
                  "The cached CFG to construct Ion code out of it.");
 
+  ZRREPORT_BYTES(pathPrefix + NS_LITERAL_CSTRING("script-counts-map"),
+                 zStats.scriptCountsMap,
+                 "Profiling-related information for scripts.");
+
   size_t stringsNotableAboutMemoryGCHeap = 0;
   size_t stringsNotableAboutMemoryMallocHeap = 0;
 
@@ -1887,10 +1891,6 @@ static void ReportRealmStats(const JS::RealmStats& realmStats,
 
   ZRREPORT_BYTES(realmJSPathPrefix + NS_LITERAL_CSTRING("jit-realm"),
                  realmStats.jitRealm, "The JIT realm.");
-
-  ZRREPORT_BYTES(realmJSPathPrefix + NS_LITERAL_CSTRING("script-counts-map"),
-                 realmStats.scriptCountsMap,
-                 "Profiling-related information for scripts.");
 
   if (sundriesGCHeap > 0) {
     // We deliberately don't use ZRREPORT_GC_BYTES here.
@@ -2780,10 +2780,10 @@ static void AccumulateTelemetryCallback(int id, uint32_t sample,
 static void SetUseCounterCallback(JSObject* obj, JSUseCounter counter) {
   switch (counter) {
     case JSUseCounter::ASMJS:
-      SetDocumentAndPageUseCounter(obj, eUseCounter_custom_JS_asmjs);
+      SetUseCounter(obj, eUseCounter_custom_JS_asmjs);
       break;
     case JSUseCounter::WASM:
-      SetDocumentAndPageUseCounter(obj, eUseCounter_custom_JS_wasm);
+      SetUseCounter(obj, eUseCounter_custom_JS_wasm);
       break;
     default:
       MOZ_ASSERT_UNREACHABLE("Unexpected JSUseCounter id");

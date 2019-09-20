@@ -42,13 +42,6 @@ using namespace mozilla::media;
 
 namespace mozilla {
 
-// GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
-// GetTickCount() and conflicts with MediaDecoder::GetCurrentTime
-// implementation.
-#ifdef GetCurrentTime
-#  undef GetCurrentTime
-#endif
-
 // avoid redefined macro in unified build
 #undef LOG
 #undef DUMP
@@ -239,11 +232,11 @@ RefPtr<GenericPromise> MediaDecoder::SetSink(AudioDeviceInfo* aSink) {
 }
 
 void MediaDecoder::AddOutputStream(DOMMediaStream* aStream,
-                                   MediaStreamGraphImpl* aGraph) {
+                                   SharedDummyStream* aDummyStream) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mDecoderStateMachine, "Must be called after Load().");
   AbstractThread::AutoEnter context(AbstractMainThread());
-  mDecoderStateMachine->EnsureOutputStreamManager(aGraph);
+  mDecoderStateMachine->EnsureOutputStreamManager(aDummyStream);
   if (mInfo) {
     mDecoderStateMachine->EnsureOutputStreamManagerHasTracks(*mInfo);
   }
@@ -627,7 +620,6 @@ void MediaDecoder::DiscardOngoingSeekIfExists() {
   MOZ_ASSERT(NS_IsMainThread());
   AbstractThread::AutoEnter context(AbstractMainThread());
   mSeekRequest.DisconnectIfExists();
-  GetOwner()->AsyncRejectSeekDOMPromiseIfExists();
 }
 
 void MediaDecoder::CallSeek(const SeekTarget& aTarget) {
@@ -836,14 +828,14 @@ void MediaDecoder::OnSeekResolved() {
   mSeekRequest.Complete();
 
   GetOwner()->SeekCompleted();
-  GetOwner()->AsyncResolveSeekDOMPromiseIfExists();
 }
 
 void MediaDecoder::OnSeekRejected() {
   MOZ_ASSERT(NS_IsMainThread());
   mSeekRequest.Complete();
   mLogicallySeeking = false;
-  GetOwner()->AsyncRejectSeekDOMPromiseIfExists();
+
+  GetOwner()->SeekAborted();
 }
 
 void MediaDecoder::SeekingStarted() {

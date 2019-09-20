@@ -9,7 +9,7 @@ var EXPORTED_SYMBOLS = ["PictureInPicture"];
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 const PLAYER_URI = "chrome://global/content/pictureinpicture/player.xhtml";
-const PLAYER_FEATURES = `chrome,titlebar=no,alwaysontop,lockaspectratio,resizable`;
+const PLAYER_FEATURES = `chrome,titlebar=no,alwaysontop,lockaspectratio,resizable,dialog`;
 const WINDOW_TYPE = "Toolkit:PictureInPicture";
 const TOGGLE_ENABLED_PREF =
   "media.videocontrols.picture-in-picture.video-toggle.enabled";
@@ -72,6 +72,16 @@ var PictureInPicture = {
         break;
       }
     }
+  },
+
+  /**
+   * Called when the browser UI handles the View:PictureInPicture command via
+   * the keyboard.
+   */
+  onCommand(event) {
+    let win = event.target.ownerGlobal;
+    let browser = win.gBrowser.selectedBrowser;
+    browser.messageManager.sendAsyncMessage("PictureInPicture:KeyToggle");
   },
 
   async focusTabAndClosePip() {

@@ -15,7 +15,6 @@ XPCOMUtils.defineLazyGetter(this, "FxAccountsCommon", function() {
 });
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  SyncDisconnect: "resource://services-sync/SyncDisconnect.jsm",
   UIState: "resource://services-sync/UIState.jsm",
 });
 
@@ -260,6 +259,16 @@ var gSyncPane = {
         .getElementById(aId)
         .addEventListener(aEventType, aCallback.bind(gSyncPane));
     }
+
+    setEventListener("openChangeProfileImage", "click", function(event) {
+      gSyncPane.openChangeProfileImage(event);
+    });
+    setEventListener("openChangeProfileImage", "keypress", function(event) {
+      gSyncPane.openChangeProfileImage(event);
+    });
+    setEventListener("verifiedManage", "keypress", function(event) {
+      gSyncPane.openManageFirefoxAccount(event);
+    });
 
     setEventListener("fxaChangeDeviceName", "command", function() {
       this._toggleComputerNameControls(true);
@@ -527,23 +536,7 @@ var gSyncPane = {
   },
 
   unlinkFirefoxAccount(confirm) {
-    if (confirm) {
-      gSubDialog.open(
-        "chrome://browser/content/preferences/in-content/syncDisconnect.xul",
-        "resizable=no" /* aFeatures */,
-        null /* aParams */,
-        event => {
-          /* aClosingCallback */
-          if (event.detail.button == "accept") {
-            this.updateWeavePrefs();
-          }
-        }
-      );
-    } else {
-      // no confirmation implies no data removal, so just disconnect - but
-      // we still disconnect via the SyncDisconnect module for consistency.
-      SyncDisconnect.disconnect().finally(() => this.updateWeavePrefs());
-    }
+    window.docShell.rootTreeItem.domWindow.gSync.disconnect({ confirm });
   },
 
   pairAnotherDevice() {
@@ -558,7 +551,10 @@ var gSyncPane = {
   _populateComputerName(value) {
     let textbox = document.getElementById("fxaSyncComputerName");
     if (!textbox.hasAttribute("placeholder")) {
-      textbox.setAttribute("placeholder", Weave.Utils.getDefaultDeviceName());
+      textbox.setAttribute(
+        "placeholder",
+        fxAccounts.device.getDefaultLocalName()
+      );
     }
     textbox.value = value;
   },

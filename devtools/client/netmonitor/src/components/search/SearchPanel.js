@@ -23,7 +23,7 @@ const LabelCell = createFactory(
 );
 const { SearchProvider } = require("./search-provider");
 const Toolbar = createFactory(require("./Toolbar"));
-
+const StatusBar = createFactory(require("./StatusBar"));
 // There are two levels in the search panel tree hierarchy:
 // 0: Resource - represents the source request object
 // 1: Search Result - represents a match coming from the parent resource
@@ -41,10 +41,12 @@ class SearchPanel extends Component {
       openSearch: PropTypes.func.isRequired,
       closeSearch: PropTypes.func.isRequired,
       search: PropTypes.func.isRequired,
+      caseSensitive: PropTypes.bool,
       connector: PropTypes.object.isRequired,
       addSearchQuery: PropTypes.func.isRequired,
       query: PropTypes.string.isRequired,
       results: PropTypes.array,
+      navigate: PropTypes.func.isRequired,
     };
   }
 
@@ -54,13 +56,19 @@ class SearchPanel extends Component {
     this.searchboxRef = createRef();
     this.renderValue = this.renderValue.bind(this);
     this.renderLabel = this.renderLabel.bind(this);
-
+    this.onClickTreeRow = this.onClickTreeRow.bind(this);
     this.provider = SearchProvider;
   }
 
   componentDidMount() {
     if (this.searchboxRef) {
       this.searchboxRef.current.focus();
+    }
+  }
+
+  onClickTreeRow(path, event, member) {
+    if (member.object.parentResource) {
+      this.props.navigate(member.object);
     }
   }
 
@@ -103,6 +111,7 @@ class SearchPanel extends Component {
       expandableStrings: false,
       renderLabelCell: this.renderLabel,
       columns: [],
+      onClickRow: this.onClickTreeRow,
     });
   }
 
@@ -113,7 +122,7 @@ class SearchPanel extends Component {
    */
   renderValue(props) {
     const { member } = props;
-    const { query } = this.props;
+    const { query, caseSensitive } = this.props;
 
     // Handle only second level (zero based) that displays
     // the search result. Find the query string inside the
@@ -153,11 +162,13 @@ class SearchPanel extends Component {
         return span({ title: object.value }, allMatches);
       }
 
-      const indexStart = object.value.indexOf(query);
+      const indexStart = caseSensitive
+        ? object.value.indexOf(query)
+        : object.value.toLowerCase().indexOf(query.toLowerCase());
       const indexEnd = indexStart + query.length;
 
       // Handles a match in a string
-      if (indexStart > 0) {
+      if (indexStart >= 0) {
         return span(
           { title: object.value },
           span({}, object.value.substring(0, indexStart)),
@@ -200,7 +211,8 @@ class SearchPanel extends Component {
       div(
         { className: "search-panel-content", style: { width: "100%" } },
         this.renderTree()
-      )
+      ),
+      StatusBar()
     );
   }
 }
@@ -208,6 +220,7 @@ class SearchPanel extends Component {
 module.exports = connect(
   state => ({
     query: state.search.query,
+    caseSensitive: state.search.caseSensitive,
     results: state.search.results,
     ongoingSearch: state.search.ongoingSearch,
     status: state.search.status,
@@ -218,5 +231,6 @@ module.exports = connect(
     search: () => dispatch(Actions.search()),
     clearSearchResults: () => dispatch(Actions.clearSearchResults()),
     addSearchQuery: query => dispatch(Actions.addSearchQuery(query)),
+    navigate: searchResult => dispatch(Actions.navigate(searchResult)),
   })
 )(SearchPanel);

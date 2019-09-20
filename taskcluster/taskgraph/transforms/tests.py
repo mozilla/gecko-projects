@@ -21,6 +21,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.attributes import match_run_on_projects
+from taskgraph.util.keyed_by import evaluate_keyed_by
 from taskgraph.util.schema import resolve_keyed_by, OptimizationSchema
 from taskgraph.util.templates import merge
 from taskgraph.util.treeherder import split_symbol, join_symbol, add_suffix
@@ -61,16 +62,6 @@ WINDOWS_WORKER_TYPES = {
       'virtual-with-gpu': 't-win7-32-gpu',
       'hardware': 't-win10-64-hw',
     },
-    'windows7-32-pgo': {
-      'virtual': 't-win7-32',
-      'virtual-with-gpu': 't-win7-32-gpu',
-      'hardware': 't-win10-64-hw',
-    },
-    'windows7-32-nightly': {
-      'virtual': 't-win7-32',
-      'virtual-with-gpu': 't-win7-32-gpu',
-      'hardware': 't-win10-64-hw',
-    },
     'windows7-32-shippable': {
       'virtual': 't-win7-32',
       'virtual-with-gpu': 't-win7-32-gpu',
@@ -88,7 +79,7 @@ WINDOWS_WORKER_TYPES = {
     },
     'windows10-64': {
       'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
+      'virtual-with-gpu': 't-win10-64-gpu-s',
       'hardware': 't-win10-64-hw',
     },
     'windows10-aarch64': {
@@ -98,57 +89,42 @@ WINDOWS_WORKER_TYPES = {
     },
     'windows10-64-ccov': {
       'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
-      'hardware': 't-win10-64-hw',
-    },
-    'windows10-64-pgo': {
-      'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
+      'virtual-with-gpu': 't-win10-64-gpu-s',
       'hardware': 't-win10-64-hw',
     },
     'windows10-64-devedition': {
       'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
-      'hardware': 't-win10-64-hw',
-    },
-    'windows10-64-nightly': {
-      'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
+      'virtual-with-gpu': 't-win10-64-gpu-s',
       'hardware': 't-win10-64-hw',
     },
     'windows10-64-shippable': {
       'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
+      'virtual-with-gpu': 't-win10-64-gpu-s',
       'hardware': 't-win10-64-hw',
     },
     'windows10-64-asan': {
       'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
+      'virtual-with-gpu': 't-win10-64-gpu-s',
       'hardware': 't-win10-64-hw',
     },
     'windows10-64-qr': {
       'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
-      'hardware': 't-win10-64-hw',
-    },
-    'windows10-64-pgo-qr': {
-      'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
+      'virtual-with-gpu': 't-win10-64-gpu-s',
       'hardware': 't-win10-64-hw',
     },
     'windows10-64-shippable-qr': {
       'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
+      'virtual-with-gpu': 't-win10-64-gpu-s',
       'hardware': 't-win10-64-hw',
     },
     'windows10-64-mingwclang': {
       'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
+      'virtual-with-gpu': 't-win10-64-gpu-s',
       'hardware': 't-win10-64-hw',
     },
     'windows10-64-ref-hw-2017': {
       'virtual': 't-win10-64',
-      'virtual-with-gpu': 't-win10-64-gpu',
+      'virtual-with-gpu': 't-win10-64-gpu-s',
       'hardware': 't-win10-64-ref-hw',
     },
 }
@@ -575,7 +551,10 @@ def set_defaults(config, tests):
         test.setdefault('virtualization', 'virtual')
         test.setdefault('loopback-audio', False)
         test.setdefault('loopback-video', False)
-        test.setdefault('docker-image', {'in-tree': 'desktop1604-test'})
+        if config.params['try_task_config'].get('debian-tests'):
+            test.setdefault('docker-image', {'in-tree': 'debian10-test'})
+        else:
+            test.setdefault('docker-image', {'in-tree': 'desktop1604-test'})
         test.setdefault('checkout', False)
         test.setdefault('require-signed-extensions', False)
         test.setdefault('variants', [])
@@ -790,13 +769,6 @@ def set_treeherder_machine_platform(config, tests):
         'win64-aarch64/opt': 'windows10-aarch64/opt',
         'win32-pgo/opt': 'windows7-32/pgo',
         'win64-pgo/opt': 'windows10-64/pgo',
-        # The build names for Android platforms have partially evolved over the
-        # years and need to be translated.
-        'android-api-16/debug': 'android-em-4-3-armv7-api16/debug',
-        'android-api-16-ccov/debug': 'android-em-4-3-armv7-api16-ccov/debug',
-        'android-api-16/opt': 'android-em-4-3-armv7-api16/opt',
-        'android-api-16-pgo/opt': 'android-em-4-3-armv7-api16/pgo',
-        'android-x86/opt': 'android-em-4-2-x86/opt',
     }
     for test in tests:
         # For most desktop platforms, the above table is not used for "regular"
@@ -877,10 +849,6 @@ def set_tier(config, tests):
                                          'macosx1014-64-qr/opt',
                                          'macosx1014-64-shippable-qr/opt',
                                          'macosx1014-64-qr/debug',
-                                         'android-em-4.3-arm7-api-16/opt',
-                                         'android-em-4.3-arm7-api-16/debug',
-                                         'android-em-4.3-arm7-api-16/pgo',
-                                         'android-em-4.2-x86/opt',
                                          'android-em-7.0-x86_64/opt',
                                          'android-em-7.0-x86_64/debug',
                                          'android-em-7.0-x86/opt']:
@@ -946,6 +914,97 @@ def handle_keyed_by(config, tests):
         for field in fields:
             resolve_keyed_by(test, field, item_name=test['test-name'],
                              project=config.params['project'])
+        yield test
+
+
+@transforms.add
+def setup_browsertime(config, tests):
+    """Configure browsertime dependencies for Raptor pageload tests that have
+`--browsertime` extra option."""
+
+    for test in tests:
+        # We need to make non-trivial changes to various fetches, and our
+        # `by-test-platform` may not be "compatible" with existing
+        # `by-test-platform` filters.  Therefore we do everything after
+        # `handle_keyed_by` so that existing fields have been resolved down to
+        # simple lists.  But we use the `by-test-platform` machinery to express
+        # filters so that when the time comes to move browsertime into YAML
+        # files, the transition is straight-forward.
+        extra_options = test.get('mozharness', {}).get('extra-options', [])
+
+        if test['suite'] != 'raptor' or '--browsertime' not in extra_options:
+            yield test
+            continue
+
+        # This is appropriate as the browsertime task variants mature.
+        test['tier'] = 2
+
+        ts = {
+            'by-test-platform': {
+                'android.*': ['browsertime', 'linux64-geckodriver', 'linux64-node'],
+                'linux.*': ['browsertime', 'linux64-geckodriver', 'linux64-node'],
+                'macosx.*': ['browsertime', 'macosx64-geckodriver', 'macosx64-node'],
+                'windows.*32.*': ['browsertime', 'win32-geckodriver', 'win32-node'],
+                'windows.*64.*': ['browsertime', 'win64-geckodriver', 'win64-node'],
+            },
+        }
+
+        test.setdefault('fetches', {}).setdefault('toolchain', []).extend(
+            evaluate_keyed_by(ts, 'fetches.toolchain', test))
+
+        fs = {
+            'by-test-platform': {
+                'android.*': ['linux64-chromedriver', 'linux64-ffmpeg-4.1.4'],
+                'linux.*': ['linux64-chromedriver', 'linux64-ffmpeg-4.1.4'],
+                'macosx.*': ['mac64-chromedriver', 'mac64-ffmpeg-4.1.1'],
+                'windows.*32.*': ['win32-chromedriver', 'win64-ffmpeg-4.1.1'],
+                'windows.*64.*': ['win32-chromedriver', 'win64-ffmpeg-4.1.1'],
+            },
+        }
+
+        test.setdefault('fetches', {}).setdefault('fetch', []).extend(
+            evaluate_keyed_by(fs, 'fetches.fetch', test))
+
+        extra_options.extend(('--browsertime-browsertimejs',
+                              '$MOZ_FETCHES_DIR/browsertime/node_modules/browsertime/bin/browsertime.js'))  # noqa: E501
+
+        eos = {
+            'by-test-platform': {
+                'windows.*':
+                ['--browsertime-node',
+                 '$MOZ_FETCHES_DIR/node/node.exe',
+                 '--browsertime-geckodriver',
+                 '$MOZ_FETCHES_DIR/geckodriver.exe',
+                 '--browsertime-chromedriver',
+                 '$MOZ_FETCHES_DIR/chromedriver.exe',
+                 '--browsertime-ffmpeg',
+                 '$MOZ_FETCHES_DIR/ffmpeg-4.1.1-win64-static/bin/ffmpeg.exe',
+                 ],
+                'macosx.*':
+                ['--browsertime-node',
+                 '$MOZ_FETCHES_DIR/node/bin/node',
+                 '--browsertime-geckodriver',
+                 '$MOZ_FETCHES_DIR/geckodriver',
+                 '--browsertime-chromedriver',
+                 '$MOZ_FETCHES_DIR/chromedriver',
+                 '--browsertime-ffmpeg',
+                 '$MOZ_FETCHES_DIR/ffmpeg-4.1.1-macos64-static/bin/ffmpeg',
+                 ],
+                'default':
+                ['--browsertime-node',
+                 '$MOZ_FETCHES_DIR/node/bin/node',
+                 '--browsertime-geckodriver',
+                 '$MOZ_FETCHES_DIR/geckodriver',
+                 '--browsertime-chromedriver',
+                 '$MOZ_FETCHES_DIR/chromedriver',
+                 '--browsertime-ffmpeg',
+                 '$MOZ_FETCHES_DIR/ffmpeg-4.1.4-i686-static/ffmpeg',
+                 ],
+            }
+        }
+
+        extra_options.extend(evaluate_keyed_by(eos, 'mozharness.extra-options', test))
+
         yield test
 
 

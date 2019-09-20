@@ -85,6 +85,7 @@ class App extends Component {
       reverseSearchInitialValue: PropTypes.string,
       editorMode: PropTypes.bool,
       editorWidth: PropTypes.number,
+      hidePersistLogsCheckbox: PropTypes.bool,
       hideShowContentMessagesCheckbox: PropTypes.bool,
       sidebarVisible: PropTypes.bool.isRequired,
       filterBarDisplayMode: PropTypes.oneOf([
@@ -245,19 +246,41 @@ class App extends Component {
 
   renderFilterBar() {
     const {
-      webConsoleUI,
       closeSplitConsole,
       filterBarDisplayMode,
+      hidePersistLogsCheckbox,
       hideShowContentMessagesCheckbox,
     } = this.props;
 
     return FilterBar({
       key: "filterbar",
-      hidePersistLogsCheckbox: webConsoleUI.isBrowserConsole,
+      hidePersistLogsCheckbox,
       hideShowContentMessagesCheckbox,
       closeSplitConsole,
       displayMode: filterBarDisplayMode,
     });
+  }
+
+  renderEditorToolbar() {
+    const {
+      editorMode,
+      editorFeatureEnabled,
+      dispatch,
+      reverseSearchInputVisible,
+      serviceContainer,
+      webConsoleUI,
+    } = this.props;
+
+    return editorFeatureEnabled && editorMode
+      ? EditorToolbar({
+          key: "editor-toolbar",
+          editorMode,
+          dispatch,
+          reverseSearchInputVisible,
+          serviceContainer,
+          webConsoleUI,
+        })
+      : null;
   }
 
   renderConsoleOutput() {
@@ -352,7 +375,7 @@ class App extends Component {
           this.node = node;
         },
       },
-      ...children
+      children
     );
   }
 
@@ -365,6 +388,7 @@ class App extends Component {
     } = this.props;
 
     const filterBar = this.renderFilterBar();
+    const editorToolbar = this.renderEditorToolbar();
     const consoleOutput = this.renderConsoleOutput();
     const notificationBox = this.renderNotificationBox();
     const jsterm = this.renderJsTerm();
@@ -374,20 +398,15 @@ class App extends Component {
 
     return this.renderRootElement([
       filterBar,
-      editorFeatureEnabled && editorMode
-        ? EditorToolbar({
-            dispatch,
-            editorMode,
-            webConsoleUI,
-          })
-        : null,
+      editorToolbar,
       dom.div(
-        { className: "flexible-output-input" },
+        { className: "flexible-output-input", key: "in-out-container" },
         consoleOutput,
         notificationBox,
         jsterm
       ),
       GridElementWidthResizer({
+        key: "editor-resizer",
         enabled: editorFeatureEnabled && editorMode,
         position: "end",
         className: "editor-resizer",

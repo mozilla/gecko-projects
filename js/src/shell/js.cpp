@@ -203,6 +203,13 @@ static const double MAX_TIMEOUT_SECONDS = 1800.0;
 // Not necessarily in sync with the browser
 #define SHARED_MEMORY_DEFAULT 1
 
+// Fuzzing support for JS runtime fuzzing
+#ifdef FUZZING_INTERFACES
+#  include "shell/jsrtfuzzing/jsrtfuzzing.h"
+static bool fuzzDoDebug = !!getenv("MOZ_FUZZ_DEBUG");
+static bool fuzzHaveModule = !!getenv("FUZZER");
+#endif  // FUZZING_INTERFACES
+
 // Code to support GCOV code coverage measurements on standalone shell
 #ifdef MOZ_CODE_COVERAGE
 #  if defined(__GNUC__) && !defined(__clang__)
@@ -860,11 +867,9 @@ static MOZ_MUST_USE bool RunFile(JSContext* cx, const char* filename,
         .setNoScriptRval(true);
 
     if (compileMethod == CompileUtf8::DontInflate) {
-      fprintf(stderr, "(compiling '%s' as UTF-8 without inflating)\n",
-              filename);
-
       script = JS::CompileUtf8FileDontInflate(cx, options, file);
     } else {
+      fprintf(stderr, "(compiling '%s' after inflating to UTF-16)\n", filename);
       script = JS::CompileUtf8File(cx, options, file);
     }
 
@@ -942,9 +947,9 @@ static bool InitModuleLoader(JSContext* cx) {
   options.setIntroductionType("shell module loader");
   options.setFileAndLine("shell/ModuleLoader.js", 1);
   options.setSelfHostingMode(false);
-  options.setCanLazilyParse(false);
+  options.setForceFullParse();
   options.werrorOption = true;
-  options.strictOption = true;
+  options.setForceStrictMode();
 
   JS::SourceText<Utf8Unit> srcBuf;
   if (!srcBuf.init(cx, std::move(src), srcLen)) {
@@ -1399,8 +1404,8 @@ static MOZ_MUST_USE bool ReadEvalPrintLoop(JSContext* cx, FILE* in,
 }
 
 enum FileKind {
-  FileScript,
-  FileScriptUtf8,  // FileScript, but don't inflate to UTF-16 before parsing
+  FileScript,       // UTF-8, directly parsed as such
+  FileScriptUtf16,  // FileScript, but inflate to UTF-16 before parsing
   FileModule,
   FileBinAST
 };
@@ -1439,13 +1444,13 @@ static MOZ_MUST_USE bool Process(JSContext* cx, const char* filename,
     // It's not interactive - just execute it.
     switch (kind) {
       case FileScript:
-        if (!RunFile(cx, filename, file, CompileUtf8::InflateToUtf16,
+        if (!RunFile(cx, filename, file, CompileUtf8::DontInflate,
                      compileOnly)) {
           return false;
         }
         break;
-      case FileScriptUtf8:
-        if (!RunFile(cx, filename, file, CompileUtf8::DontInflate,
+      case FileScriptUtf16:
+        if (!RunFile(cx, filename, file, CompileUtf8::InflateToUtf16,
                      compileOnly)) {
           return false;
         }
@@ -2694,6 +2699,15 @@ static bool PrintInternal(JSContext* cx, const CallArgs& args, RCFile* file) {
 
 static bool Print(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
+#ifdef FUZZING_INTERFACES
+  if (fuzzHaveModule && !fuzzDoDebug) {
+    // When fuzzing and not debugging, suppress any print() output,
+    // as it slows down fuzzing and makes libFuzzer's output hard
+    // to read.
+    args.rval().setUndefined();
+    return true;
+  }
+#endif  // FUZZING_INTERFACES
   return PrintInternal(cx, args, gOutFile);
 }
 
@@ -3986,8 +4000,6 @@ static bool ShellBuildId(JS::BuildIdCharVector* buildId);
 static void WorkerMain(WorkerInput* input) {
   MOZ_ASSERT(input->parentRuntime);
 
-  auto mutexShutdown = mozilla::MakeScopeExit([] { Mutex::ShutDown(); });
-
   JSContext* cx = JS_NewContext(8L * 1024L * 1024L, 2L * 1024L * 1024L,
                                 input->parentRuntime);
   if (!cx) {
@@ -4287,8 +4299,6 @@ static void WatchdogMain(JSContext* cx) {
       }
     }
   }
-
-  Mutex::ShutDown();
 }
 
 static bool ScheduleWatchdog(JSContext* cx, double t) {
@@ -4529,6 +4539,20 @@ static bool SetJitCompilerOption(JSContext* cx, unsigned argc, Value* vp) {
   int32_t number = args[1].toInt32();
   if (number < 0) {
     number = -1;
+  }
+
+  // Disallow enabling or disabling the Baseline Interpreter at runtime.
+  // Enabling is a problem because the Baseline Interpreter code is only
+  // present if the interpreter was enabled when the JitRuntime was created.
+  // To support disabling we would have to discard all JitScripts. Furthermore,
+  // we really want JitOptions to be immutable after startup so it's better to
+  // use shell flags.
+  if (opt == JSJITCOMPILER_BASELINE_INTERPRETER_ENABLE &&
+      bool(number) != jit::IsBaselineInterpreterEnabled()) {
+    JS_ReportErrorASCII(cx,
+                        "Enabling or disabling the Baseline Interpreter at "
+                        "runtime is not supported.");
+    return false;
   }
 
   // Throw if disabling the JITs and there's JIT code on the stack, to avoid
@@ -5019,20 +5043,19 @@ static bool GetModuleLoadPath(JSContext* cx, unsigned argc, Value* vp) {
 using js::frontend::BinASTParser;
 using js::frontend::Directives;
 using js::frontend::GlobalSharedContext;
+using js::frontend::ParseInfo;
 using js::frontend::ParseNode;
-using js::frontend::UsedNameTracker;
 
 template <typename Tok>
 static bool ParseBinASTData(JSContext* cx, uint8_t* buf_data,
                             uint32_t buf_length, GlobalSharedContext* globalsc,
-                            UsedNameTracker& usedNames,
+                            ParseInfo& pci,
                             const JS::ReadOnlyCompileOptions& options,
                             HandleScriptSourceObject sourceObj) {
   MOZ_ASSERT(globalsc);
 
   // Note: We need to keep `reader` alive as long as we can use `parsed`.
-  BinASTParser<Tok> reader(cx, cx->tempLifoAlloc(), usedNames, options,
-                           sourceObj);
+  BinASTParser<Tok> reader(cx, pci, options, sourceObj);
 
   JS::Result<ParseNode*> parsed = reader.parse(globalsc, buf_data, buf_length);
 
@@ -5135,7 +5158,8 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
   options.setIntroductionType("js shell bin parse")
       .setFileAndLine("<ArrayBuffer>", 1);
 
-  UsedNameTracker usedNames(cx);
+  LifoAllocScope allocScope(&cx->tempLifoAlloc());
+  ParseInfo parseInfo(cx, allocScope);
 
   RootedScriptSourceObject sourceObj(
       cx, frontend::CreateScriptSourceObject(cx, options, Nothing()));
@@ -5149,7 +5173,7 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
   auto parseFunc = mode == Multipart
                        ? ParseBinASTData<frontend::BinASTTokenReaderMultipart>
                        : ParseBinASTData<frontend::BinASTTokenReaderContext>;
-  if (!parseFunc(cx, buf_data, buf_length, &globalsc, usedNames, options,
+  if (!parseFunc(cx, buf_data, buf_length, &globalsc, parseInfo, options,
                  sourceObj)) {
     return false;
   }
@@ -5219,11 +5243,12 @@ static bool Parse(JSContext* cx, unsigned argc, Value* vp) {
   options.setIntroductionType("js shell parse").setFileAndLine("<string>", 1);
   if (goal == frontend::ParseGoal::Module) {
     // See frontend::CompileModule.
-    options.maybeMakeStrictMode(true);
+    options.setForceStrictMode();
     options.allowHTMLComments = false;
   }
 
-  UsedNameTracker usedNames(cx);
+  LifoAllocScope allocScope(&cx->tempLifoAlloc());
+  ParseInfo parseInfo(cx, allocScope);
 
   RootedScriptSourceObject sourceObject(
       cx, frontend::CreateScriptSourceObject(cx, options, Nothing()));
@@ -5231,10 +5256,10 @@ static bool Parse(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  Parser<FullParseHandler, char16_t> parser(
-      cx, cx->tempLifoAlloc(), options, chars, length,
-      /* foldConstants = */ false, usedNames, nullptr, nullptr, sourceObject,
-      goal);
+  Parser<FullParseHandler, char16_t> parser(cx, options, chars, length,
+                                            /* foldConstants = */ false,
+                                            parseInfo, nullptr, nullptr,
+                                            sourceObject, goal);
   if (!parser.checkOptions()) {
     return false;
   }
@@ -5297,7 +5322,9 @@ static bool SyntaxParse(JSContext* cx, unsigned argc, Value* vp) {
 
   const char16_t* chars = stableChars.twoByteRange().begin().get();
   size_t length = scriptContents->length();
-  UsedNameTracker usedNames(cx);
+
+  LifoAllocScope allocScope(&cx->tempLifoAlloc());
+  ParseInfo parseInfo(cx, allocScope);
 
   RootedScriptSourceObject sourceObject(
       cx, frontend::CreateScriptSourceObject(cx, options, Nothing()));
@@ -5306,8 +5333,8 @@ static bool SyntaxParse(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   Parser<frontend::SyntaxParseHandler, char16_t> parser(
-      cx, cx->tempLifoAlloc(), options, chars, length, false, usedNames,
-      nullptr, nullptr, sourceObject, frontend::ParseGoal::Script);
+      cx, options, chars, length, false, parseInfo, nullptr, nullptr,
+      sourceObject, frontend::ParseGoal::Script);
   if (!parser.checkOptions()) {
     return false;
   }
@@ -5818,7 +5845,7 @@ static int sArgc;
 static char** sArgv;
 static const char sWasmCompileAndSerializeFlag[] =
     "--wasm-compile-and-serialize";
-static Vector<const char*, 4, js::SystemAllocPolicy> sCompilerProcessFlags;
+static Vector<const char*, 5, js::SystemAllocPolicy> sCompilerProcessFlags;
 
 static bool CompileAndSerializeInSeparateProcess(JSContext* cx,
                                                  const uint8_t* bytecode,
@@ -6305,6 +6332,44 @@ static bool RecomputeWrappers(JSContext* cx, unsigned argc, Value* vp) {
   if (!js::RecomputeWrappers(cx, SingleOrAllCompartments(sourceComp),
                              SingleOrAllCompartments(targetComp))) {
     return false;
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
+static bool DumpObjectWrappers(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  bool printedHeader = false;
+  for (ZonesIter zone(cx->runtime(), WithAtoms); !zone.done(); zone.next()) {
+    bool printedZoneInfo = false;
+    for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next()) {
+      bool printedCompartmentInfo = false;
+      for (Compartment::ObjectWrapperEnum e(comp); !e.empty(); e.popFront()) {
+        JSObject* wrapper = e.front().value().unbarrieredGet();
+        JSObject* wrapped = e.front().key();
+        if (!printedHeader) {
+          fprintf(stderr, "Cross-compartment object wrappers:\n");
+          printedHeader = true;
+        }
+        if (!printedZoneInfo) {
+          fprintf(stderr, "  Zone %p:\n", zone.get());
+          printedZoneInfo = true;
+        }
+        if (!printedCompartmentInfo) {
+          fprintf(stderr, "    Compartment %p:\n", comp.get());
+          printedCompartmentInfo = true;
+        }
+        fprintf(stderr,
+                "      Object wrapper %p -> %p in zone %p compartment %p\n",
+                wrapper, wrapped, wrapped->zone(), wrapped->compartment());
+      }
+    }
+  }
+
+  if (!printedHeader) {
+    fprintf(stderr, "No cross-compartment object wrappers.\n");
   }
 
   args.rval().setUndefined();
@@ -7113,8 +7178,6 @@ struct BufferStreamState {
 static ExclusiveWaitableData<BufferStreamState>* bufferStreamState;
 
 static void BufferStreamMain(BufferStreamJob* job) {
-  auto mutexShutdown = MakeScopeExit([] { Mutex::ShutDown(); });
-
   const uint8_t* bytes;
   size_t byteLength;
   JS::OptimizedEncodingListener* listener;
@@ -8826,6 +8889,10 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "  and can be used to filter source or target compartments: the unwrapped\n"
 "  object's compartment is used as CompartmentFilter.\n"),
 
+    JS_FN_HELP("dumpObjectWrappers", DumpObjectWrappers, 2, 0,
+"dumpObjectWrappers()",
+"  Print information about cross-compartment object wrappers.\n"),
+
     JS_FN_HELP("wrapWithProto", WrapWithProto, 2, 0,
 "wrapWithProto(obj)",
 "  Wrap an object into a noop wrapper with prototype semantics."),
@@ -10031,7 +10098,7 @@ static MOZ_MUST_USE bool ProcessArgs(JSContext* cx, OptionParser* op) {
   }
 
   MultiStringRange filePaths = op->getMultiStringOption('f');
-  MultiStringRange utf8FilePaths = op->getMultiStringOption('u');
+  MultiStringRange utf16FilePaths = op->getMultiStringOption('u');
   MultiStringRange codeChunks = op->getMultiStringOption('e');
   MultiStringRange modulePaths = op->getMultiStringOption('m');
   MultiStringRange binASTPaths(nullptr, nullptr);
@@ -10039,7 +10106,7 @@ static MOZ_MUST_USE bool ProcessArgs(JSContext* cx, OptionParser* op) {
   binASTPaths = op->getMultiStringOption('B');
 #endif  // JS_BUILD_BINAST
 
-  if (filePaths.empty() && utf8FilePaths.empty() && codeChunks.empty() &&
+  if (filePaths.empty() && utf16FilePaths.empty() && codeChunks.empty() &&
       modulePaths.empty() && binASTPaths.empty() &&
       !op->getStringArg("script")) {
     return Process(cx, nullptr, true, FileScript); /* Interactive. */
@@ -10069,10 +10136,11 @@ static MOZ_MUST_USE bool ProcessArgs(JSContext* cx, OptionParser* op) {
     return false;
   }
 
-  while (!filePaths.empty() || !utf8FilePaths.empty() || !codeChunks.empty() ||
+  while (!filePaths.empty() || !utf16FilePaths.empty() || !codeChunks.empty() ||
          !modulePaths.empty() || !binASTPaths.empty()) {
     size_t fpArgno = filePaths.empty() ? SIZE_MAX : filePaths.argno();
-    size_t ufpArgno = utf8FilePaths.empty() ? SIZE_MAX : utf8FilePaths.argno();
+    size_t ufpArgno =
+        utf16FilePaths.empty() ? SIZE_MAX : utf16FilePaths.argno();
     size_t ccArgno = codeChunks.empty() ? SIZE_MAX : codeChunks.argno();
     size_t mpArgno = modulePaths.empty() ? SIZE_MAX : modulePaths.argno();
     size_t baArgno = binASTPaths.empty() ? SIZE_MAX : binASTPaths.argno();
@@ -10090,12 +10158,12 @@ static MOZ_MUST_USE bool ProcessArgs(JSContext* cx, OptionParser* op) {
 
     if (ufpArgno < fpArgno && ufpArgno < ccArgno && ufpArgno < mpArgno &&
         ufpArgno < baArgno) {
-      char* path = utf8FilePaths.front();
-      if (!Process(cx, path, false, FileScriptUtf8)) {
+      char* path = utf16FilePaths.front();
+      if (!Process(cx, path, false, FileScriptUtf16)) {
         return false;
       }
 
-      utf8FilePaths.popFront();
+      utf16FilePaths.popFront();
       continue;
     }
 
@@ -10732,6 +10800,12 @@ static int Shell(JSContext* cx, OptionParser* op, char** envp) {
 
   JSAutoRealm ar(cx, glob);
 
+#ifdef FUZZING_INTERFACES
+  if (fuzzHaveModule) {
+    return FuzzJSRuntimeStart(cx, &sArgc, &sArgv);
+  }
+#endif
+
   ShellContext* sc = GetShellContext(cx);
   int result = EXIT_SUCCESS;
   {
@@ -10888,11 +10962,13 @@ int main(int argc, char** argv, char** envp) {
   op.setHelpWidth(80);
   op.setVersion(JS_GetImplementationVersion());
 
-  if (!op.addMultiStringOption('f', "file", "PATH", "File path to run") ||
+  if (!op.addMultiStringOption(
+          'f', "file", "PATH",
+          "File path to run, parsing file contents as UTF-8") ||
       !op.addMultiStringOption(
-          'u', "utf8-file", "PATH",
-          "File path to run, directly parsing file contents as UTF-8 "
-          "without first inflating to UTF-16") ||
+          'u', "utf16-file", "PATH",
+          "File path to run, inflating the file's UTF-8 contents to UTF-16 and "
+          "then parsing that") ||
       !op.addMultiStringOption('m', "module", "PATH", "Module path to run") ||
 #if defined(JS_BUILD_BINAST)
       !op.addMultiStringOption('B', "binast", "PATH", "BinAST path to run") ||
@@ -10939,6 +11015,8 @@ int main(int argc, char** argv, char** envp) {
           "none/baseline/ion/cranelift/baseline+ion/baseline+cranelift)") ||
       !op.addBoolOption('\0', "wasm-verbose",
                         "Enable WebAssembly verbose logging") ||
+      !op.addBoolOption('\0', "disable-wasm-huge-memory",
+                        "Disable WebAssembly huge memory") ||
       !op.addBoolOption('\0', "test-wasm-await-tier2",
                         "Forcibly activate tiering and block "
                         "instantiation on completion of tier2") ||
@@ -11359,6 +11437,14 @@ int main(int argc, char** argv, char** envp) {
   JS::SetModuleResolveHook(cx->runtime(), ShellModuleResolveHook);
   JS::SetModuleDynamicImportHook(cx->runtime(), ShellModuleDynamicImportHook);
   JS::SetModuleMetadataHook(cx->runtime(), CallModuleMetadataHook);
+
+  if (op.getBoolOption("disable-wasm-huge-memory")) {
+    if (!sCompilerProcessFlags.append("--disable-wasm-huge-memory")) {
+      return EXIT_FAILURE;
+    }
+    bool disabledHugeMemory = JS::DisableWasmHugeMemory();
+    MOZ_RELEASE_ASSERT(disabledHugeMemory);
+  }
 
   result = Shell(cx, &op, envp);
 

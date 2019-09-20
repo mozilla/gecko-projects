@@ -83,14 +83,14 @@ using UsedNamePtr = UsedNameTracker::UsedNameMap::Ptr;
 
 template <typename Tok>
 BinASTParserPerTokenizer<Tok>::BinASTParserPerTokenizer(
-    JSContext* cx, LifoAlloc& alloc, UsedNameTracker& usedNames,
+    JSContext* cx, ParseInfo& parseInfo,
     const JS::ReadOnlyCompileOptions& options,
     HandleScriptSourceObject sourceObject,
     Handle<LazyScript*> lazyScript /* = nullptr */)
-    : BinASTParserBase(cx, alloc, usedNames, sourceObject),
+    : BinASTParserBase(cx, parseInfo, sourceObject),
       options_(options),
       lazyScript_(cx, lazyScript),
-      handler_(cx, alloc, nullptr, SourceKind::Binary),
+      handler_(cx, parseInfo.allocScope.alloc(), nullptr, SourceKind::Binary),
       variableDeclarationKind_(VariableDeclarationKind::Var),
       treeHolder_(cx, FunctionTreeHolder::Mode::Eager) {
   MOZ_ASSERT_IF(lazyScript_, lazyScript_->isBinAST());
@@ -333,6 +333,8 @@ JS::Result<FunctionNode*> BinASTParserPerTokenizer<Tok>::makeEmptyFunctionNode(
 
   BINJS_TRY_DECL(result, handler_.newFunction(syntaxKind, pos));
 
+  funbox->setStart(start, 0, pos.begin);
+  funbox->setEnd(pos.end);
   handler_.setFunctionBox(result, funbox);
 
   return result;

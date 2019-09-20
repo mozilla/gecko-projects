@@ -5,7 +5,7 @@ use crate::ir;
 use crate::ir::builder::ReplaceBuilder;
 use crate::ir::extfunc::ExtFuncData;
 use crate::ir::instructions::{BranchInfo, CallInfo, InstructionData};
-use crate::ir::types;
+use crate::ir::{types, ConstantPool};
 use crate::ir::{
     Ebb, FuncRef, Inst, SigRef, Signature, Type, Value, ValueLabelAssignments, ValueList,
     ValueListPool,
@@ -67,6 +67,9 @@ pub struct DataFlowGraph {
 
     /// Saves Value labels.
     pub values_labels: Option<HashMap<Value, ValueLabelAssignments>>,
+
+    /// Constants used within the function
+    pub constants: ConstantPool,
 }
 
 impl DataFlowGraph {
@@ -81,6 +84,7 @@ impl DataFlowGraph {
             signatures: PrimaryMap::new(),
             ext_funcs: PrimaryMap::new(),
             values_labels: None,
+            constants: ConstantPool::new(),
         }
     }
 
@@ -94,6 +98,7 @@ impl DataFlowGraph {
         self.signatures.clear();
         self.ext_funcs.clear();
         self.values_labels = None;
+        self.constants.clear()
     }
 
     /// Get the total number of instructions created in this function, whether they are currently
@@ -1234,7 +1239,6 @@ mod tests {
 
     #[test]
     fn aliases() {
-        use crate::ir::condcodes::IntCC;
         use crate::ir::InstBuilder;
 
         let mut func = Function::new();
@@ -1249,7 +1253,7 @@ mod tests {
         assert_eq!(pos.func.dfg.resolve_aliases(v1), v1);
 
         let arg0 = pos.func.dfg.append_ebb_param(ebb0, types::I32);
-        let (s, c) = pos.ins().iadd_cout(v1, arg0);
+        let (s, c) = pos.ins().iadd_ifcout(v1, arg0);
         let iadd = match pos.func.dfg.value_def(s) {
             ValueDef::Result(i, 0) => i,
             _ => panic!(),
@@ -1259,9 +1263,9 @@ mod tests {
         pos.func.dfg.clear_results(iadd);
         pos.func.dfg.attach_result(iadd, s);
 
-        // Replace `iadd_cout` with a normal `iadd` and an `icmp`.
+        // Replace `iadd_ifcout` with a normal `iadd` and an `ifcmp`.
         pos.func.dfg.replace(iadd).iadd(v1, arg0);
-        let c2 = pos.ins().icmp(IntCC::UnsignedLessThan, s, v1);
+        let c2 = pos.ins().ifcmp(s, v1);
         pos.func.dfg.change_to_alias(c, c2);
 
         assert_eq!(pos.func.dfg.resolve_aliases(c2), c2);

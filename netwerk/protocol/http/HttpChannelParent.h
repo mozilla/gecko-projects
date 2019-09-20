@@ -14,6 +14,7 @@
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/net/NeckoParent.h"
 #include "mozilla/MozPromise.h"
+#include "nsICrossProcessSwitchChannel.h"
 #include "nsIObserver.h"
 #include "nsIParentRedirectingChannel.h"
 #include "nsIProgressEventSink.h"
@@ -60,7 +61,8 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
                                 public HttpChannelSecurityWarningReporter,
                                 public nsIAsyncVerifyRedirectReadyCallback,
                                 public nsIChannelEventSink,
-                                public nsIRedirectResultListener {
+                                public nsIRedirectResultListener,
+                                public nsICrossProcessSwitchChannel {
   virtual ~HttpChannelParent();
 
  public:
@@ -76,6 +78,7 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
   NS_DECL_NSIASYNCVERIFYREDIRECTREADYCALLBACK
   NS_DECL_NSICHANNELEVENTSINK
   NS_DECL_NSIREDIRECTRESULTLISTENER
+  NS_DECL_NSICROSSPROCESSSWITCHCHANNEL
 
   NS_DECLARE_STATIC_IID_ACCESSOR(HTTP_CHANNEL_PARENT_IID)
 
@@ -135,12 +138,6 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
   // child channel.
   void CancelChildCrossProcessRedirect();
 
-  already_AddRefed<ParentChannelListener> GetParentListener();
-
-  nsresult TriggerCrossProcessRedirect(nsIChannel* oldChannel,
-                                       nsILoadInfo* aLoadInfo,
-                                       uint64_t aIdentifier);
-
  protected:
   // used to connect redirected-to channel in parent with just created
   // ChildChannel.  Used during redirects.
@@ -152,7 +149,7 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
       const Maybe<URIParams>& docUri, nsIReferrerInfo* aReferrerInfo,
       const Maybe<URIParams>& internalRedirectUri,
       const Maybe<URIParams>& topWindowUri,
-      const PrincipalInfo& aContentBlockingAllowListPrincipal,
+      nsIPrincipal* aContentBlockingAllowListPrincipal,
       const uint32_t& loadFlags, const RequestHeaderTuples& requestHeaders,
       const nsCString& requestMethod, const Maybe<IPCStream>& uploadStream,
       const bool& uploadStreamHasHeaders, const int16_t& priority,
@@ -169,7 +166,8 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
       const Maybe<CorsPreflightArgs>& aCorsPreflightArgs,
       const uint32_t& aInitialRwin, const bool& aBlockAuthPrompt,
       const bool& aSuspendAfterSynthesizeResponse,
-      const bool& aAllowStaleCacheContent, const nsCString& aContentTypeHint,
+      const bool& aAllowStaleCacheContent,
+      const bool& aPreferCacheLoadOverBypass, const nsCString& aContentTypeHint,
       const uint32_t& aCorsMode, const uint32_t& aRedirectMode,
       const uint64_t& aChannelId, const nsString& aIntegrityMetadata,
       const uint64_t& aContentWindowId,

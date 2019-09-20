@@ -361,6 +361,10 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
     NotifyObservers(chan, NS_HTTP_ON_OPENING_REQUEST_TOPIC);
   }
 
+  void OnOpeningDocumentRequest(nsIIdentChannel* chan) {
+    NotifyObservers(chan, NS_DOCUMENT_ON_OPENING_REQUEST_TOPIC);
+  }
+
   // Called by the channel before writing a request
   void OnModifyRequest(nsIHttpChannel* chan) {
     NotifyObservers(chan, NS_HTTP_ON_MODIFY_REQUEST_TOPIC);
@@ -369,11 +373,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   // Called by the channel before writing a request
   void OnStopRequest(nsIHttpChannel* chan) {
     NotifyObservers(chan, NS_HTTP_ON_STOP_REQUEST_TOPIC);
-  }
-
-  // Called by the channel and cached in the loadGroup
-  void OnUserAgentRequest(nsIHttpChannel* chan) {
-    NotifyObservers(chan, NS_HTTP_ON_USERAGENT_REQUEST_TOPIC);
   }
 
   // Called by the channel before setting up the transaction
@@ -479,11 +478,9 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   MOZ_MUST_USE nsresult InitConnectionMgr();
 
-  void NotifyObservers(nsIHttpChannel* chan, const char* event);
+  void NotifyObservers(nsIChannel* chan, const char* event);
 
   void SetFastOpenOSSupport();
-
-  void EnsureUAOverridesInit();
 
   // Checks if there are any user certs or active smart cards on a different
   // thread. Updates mSpeculativeConnectEnabled when done.

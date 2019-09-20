@@ -3980,15 +3980,6 @@ void MacroAssemblerARMCompat::truncf(FloatRegister input, Register output,
   bind(&fin);
 }
 
-CodeOffsetJump MacroAssemblerARMCompat::jumpWithPatch(RepatchLabel* label) {
-  ARMBuffer::PoolEntry pe;
-  BufferOffset bo = as_BranchPool(0xdeadbeef, label, LabelDoc(), &pe);
-  // Fill in a new CodeOffset with both the load and the pool entry that the
-  // instruction loads from.
-  CodeOffsetJump ret(bo.getOffset(), pe.index());
-  return ret;
-}
-
 void MacroAssemblerARMCompat::profilerEnterFrame(Register framePtr,
                                                  Register scratch) {
   asMasm().loadJSContext(scratch);
@@ -5926,7 +5917,7 @@ void MacroAssemblerARM::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
   MOZ_ASSERT(ptr == ptrScratch);
 
   uint32_t offset = access.offset();
-  MOZ_ASSERT(offset < wasm::OffsetGuardLimit);
+  MOZ_ASSERT(offset < wasm::MaxOffsetGuardLimit);
 
   Scalar::Type type = access.type();
 
@@ -5997,7 +5988,7 @@ void MacroAssemblerARM::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
   MOZ_ASSERT(ptr == ptrScratch);
 
   uint32_t offset = access.offset();
-  MOZ_ASSERT(offset < wasm::OffsetGuardLimit);
+  MOZ_ASSERT(offset < wasm::MaxOffsetGuardLimit);
 
   unsigned byteSize = access.byteSize();
   Scalar::Type type = access.type();
@@ -6058,7 +6049,7 @@ void MacroAssemblerARM::wasmUnalignedLoadImpl(
   MOZ_ASSERT(tmp != ptr);
 
   uint32_t offset = access.offset();
-  MOZ_ASSERT(offset < wasm::OffsetGuardLimit);
+  MOZ_ASSERT(offset < wasm::MaxOffsetGuardLimit);
 
   if (offset) {
     ScratchRegisterScope scratch(asMasm());
@@ -6150,7 +6141,7 @@ void MacroAssemblerARM::wasmUnalignedStoreImpl(
                 valOrTmp != val64.high && valOrTmp != val64.low);
 
   uint32_t offset = access.offset();
-  MOZ_ASSERT(offset < wasm::OffsetGuardLimit);
+  MOZ_ASSERT(offset < wasm::MaxOffsetGuardLimit);
 
   unsigned byteSize = access.byteSize();
   MOZ_ASSERT(byteSize == 8 || byteSize == 4 || byteSize == 2);

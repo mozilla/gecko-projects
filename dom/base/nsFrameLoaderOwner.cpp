@@ -15,6 +15,7 @@
 #include "mozilla/dom/HTMLIFrameElement.h"
 #include "mozilla/dom/MozFrameLoaderOwnerBinding.h"
 #include "mozilla/StaticPrefs_fission.h"
+#include "mozilla/EventStateManager.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -53,8 +54,7 @@ bool nsFrameLoaderOwner::ShouldPreserveBrowsingContext(
 
   // Don't preserve contexts if this is a chrome (parent process) window
   // that is changing from remote to local.
-  if (XRE_IsParentProcess() && (!aOptions.mRemoteType.WasPassed() ||
-                                aOptions.mRemoteType.Value().IsVoid())) {
+  if (XRE_IsParentProcess() && aOptions.mRemoteType.IsVoid()) {
     return false;
   }
 
@@ -67,6 +67,7 @@ bool nsFrameLoaderOwner::ShouldPreserveBrowsingContext(
 void nsFrameLoaderOwner::ChangeRemoteness(
     const mozilla::dom::RemotenessOptions& aOptions, mozilla::ErrorResult& rv) {
   RefPtr<mozilla::dom::BrowsingContext> bc;
+  bool networkCreated = false;
 
   // If we already have a Frameloader, destroy it, possibly preserving its
   // browsing context.
@@ -76,6 +77,9 @@ void nsFrameLoaderOwner::ChangeRemoteness(
       mFrameLoader->SkipBrowsingContextDetach();
     }
 
+    // Preserve the networkCreated status, as nsDocShells created after a
+    // process swap may shouldn't change their dynamically-created status.
+    networkCreated = mFrameLoader->IsNetworkCreated();
     mFrameLoader->Destroy();
     mFrameLoader = nullptr;
   }
@@ -85,7 +89,8 @@ void nsFrameLoaderOwner::ChangeRemoteness(
   // owner.
   RefPtr<Element> owner = do_QueryObject(this);
   MOZ_ASSERT(owner);
-  mFrameLoader = nsFrameLoader::Create(owner, bc, aOptions);
+  mFrameLoader =
+      nsFrameLoader::Recreate(owner, bc, aOptions.mRemoteType, networkCreated);
 
   if (NS_WARN_IF(!mFrameLoader)) {
     return;
@@ -118,10 +123,18 @@ void nsFrameLoaderOwner::ChangeRemoteness(
     ourFrame->ResetFrameLoader();
   }
 
+  // If the element is focused, or the current mouse over target then
+  // we need to update that state for the new BrowserParent too.
   if (nsFocusManager* fm = nsFocusManager::GetFocusManager()) {
     if (fm->GetFocusedElement() == owner) {
       fm->ActivateRemoteFrameIfNeeded(*owner);
     }
+  }
+
+  if (owner->GetPrimaryFrame()) {
+    EventStateManager* eventManager =
+        owner->GetPrimaryFrame()->PresContext()->EventStateManager();
+    eventManager->RecomputeMouseEnterStateForRemoteFrame(*owner);
   }
 
   // Assuming this element is a XULFrameElement, once we've reset our

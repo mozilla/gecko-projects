@@ -7062,7 +7062,7 @@ org.zw
 
 // newGTLDs
 
-// List of new gTLDs imported from https://www.icann.org/resources/registries/gtlds/v2/gtlds.json on 2019-08-23T16:26:02Z
+// List of new gTLDs imported from https://www.icann.org/resources/registries/gtlds/v2/gtlds.json on 2019-09-10T15:21:14Z
 // This list is auto-generated, don't edit it manually.
 // aaa : 2015-02-26 American Automobile Association, Inc.
 aaa
@@ -7967,9 +7967,6 @@ duck
 // dunlop : 2015-07-02 The Goodyear Tire & Rubber Company
 dunlop
 
-// duns : 2015-08-06 The Dun & Bradstreet Corporation
-duns
-
 // dupont : 2015-06-25 E. I. du Pont de Nemours and Company
 dupont
 
@@ -8858,6 +8855,9 @@ lixil
 // llc : 2017-12-14 Afilias Limited
 llc
 
+// llp : 2019-08-26 Dot Registry LLC
+llp
+
 // loan : 2014-11-20 dot Loan Limited
 loan
 
@@ -9025,9 +9025,6 @@ mma
 
 // mobile : 2016-06-02 Dish DBS Corporation
 mobile
-
-// mobily : 2014-12-18 GreenTech Consultancy Company W.L.L.
-mobily
 
 // moda : 2013-11-07 Dog Beach, LLC
 moda
@@ -10519,9 +10516,6 @@ xin
 
 // xn--mgbab2bd : 2013-10-31 CORE Association
 بازار
-
-// xn--mgbb9fbpob : 2014-12-18 GreenTech Consultancy Company W.L.L.
-موبايلي
 
 // xn--mgbca7dzdo : 2015-07-30 Abu Dhabi Systems and Information Centre
 ابوظبي
@@ -12778,6 +12772,7 @@ i234.me
 myds.me
 synology.me
 vpnplus.to
+direct.quickconnect.to
 
 // TAIFUN Software AG : http://taifun-software.de
 // Submitted by Bjoern Henke <dev-server@taifun-software.de>
@@ -12993,9 +12988,5 @@ basicserver.io
 virtualserver.io
 site.builder.nu
 enterprisecloud.nu
-
-// Zone.id : https://zone.id/
-// Submitted by Su Hendro <admin@zone.id>
-zone.id
 
 // ===END PRIVATE DOMAINS===

@@ -204,20 +204,53 @@ struct RepeatTrackSizingInput {
                          const LogicalSize& aMax)
       : mMin(aMin), mSize(aSize), mMax(aMax) {}
 
-  void SetDefiniteSizes(LogicalAxis aAxis, WritingMode aWM,
-                        const StyleSize& aMinCoord, const StyleSize& aSizeCoord,
-                        const StyleMaxSize& aMaxCoord) {
+  // This should be used in intrinsic sizing (i.e. when we can't initialize
+  // the sizes directly from ReflowInput values).
+  void InitFromStyle(LogicalAxis aAxis, WritingMode aWM,
+                     const ComputedStyle* aStyle) {
+    const auto& pos = aStyle->StylePosition();
+    const bool borderBoxSizing = pos->mBoxSizing == StyleBoxSizing::Border;
+    nscoord bp = NS_UNCONSTRAINEDSIZE; // a sentinel to calculate it only once
+    auto adjustForBoxSizing =
+        [borderBoxSizing, aWM, aAxis, aStyle, &bp](nscoord aSize) {
+      if (!borderBoxSizing) {
+        return aSize;
+      }
+      if (bp == NS_UNCONSTRAINEDSIZE) {
+        const auto& padding = aStyle->StylePadding()->mPadding;
+        LogicalMargin border(aWM, aStyle->StyleBorder()->GetComputedBorder());
+        // We can use zero percentage basis since this is only called from
+        // intrinsic sizing code.
+        const nscoord percentageBasis = 0;
+        if (aAxis == eLogicalAxisInline) {
+          bp = std::max(padding.GetIStart(aWM).Resolve(percentageBasis), 0) +
+               std::max(padding.GetIEnd(aWM).Resolve(percentageBasis), 0) +
+               border.IStartEnd(aWM);
+        } else {
+          bp = std::max(padding.GetBStart(aWM).Resolve(percentageBasis), 0) +
+               std::max(padding.GetBEnd(aWM).Resolve(percentageBasis), 0) +
+               border.BStartEnd(aWM);
+        }
+      }
+      return std::max(aSize - bp, 0);
+    };
     nscoord& min = mMin.Size(aAxis, aWM);
     nscoord& size = mSize.Size(aAxis, aWM);
     nscoord& max = mMax.Size(aAxis, aWM);
-    if (aMinCoord.ConvertsToLength()) {
-      min = aMinCoord.ToLength();
+    const auto& minCoord = aAxis == eLogicalAxisInline ? pos->MinISize(aWM)
+                                                       : pos->MinBSize(aWM);
+    if (minCoord.ConvertsToLength()) {
+      min = adjustForBoxSizing(minCoord.ToLength());
     }
-    if (aMaxCoord.ConvertsToLength()) {
-      max = std::max(min, aMaxCoord.ToLength());
+    const auto& maxCoord = aAxis == eLogicalAxisInline ? pos->MaxISize(aWM)
+                                                       : pos->MaxBSize(aWM);
+    if (maxCoord.ConvertsToLength()) {
+      max = std::max(min, adjustForBoxSizing(maxCoord.ToLength()));
     }
-    if (aSizeCoord.ConvertsToLength()) {
-      size = Clamp(aSizeCoord.ToLength(), min, max);
+    const auto& sizeCoord = aAxis == eLogicalAxisInline ? pos->ISize(aWM)
+                                                        : pos->BSize(aWM);
+    if (sizeCoord.ConvertsToLength()) {
+      size = Clamp(adjustForBoxSizing(sizeCoord.ToLength()), min, max);
     }
   }
 
@@ -1241,6 +1274,10 @@ struct nsGridContainerFrame::TrackSizingFunctions {
     }
     if (MOZ_UNLIKELY(mExpandedTracks.Length() > kMaxLine - 1)) {
       mExpandedTracks.TruncateLength(kMaxLine - 1);
+      if (mHasRepeatAuto && mRepeatAutoStart > kMaxLine - 1) {
+        // The `repeat(auto-fill/fit)` track is outside the clamped grid.
+        mHasRepeatAuto = false;
+      }
     }
   }
 
@@ -1272,7 +1309,7 @@ struct nsGridContainerFrame::TrackSizingFunctions {
   // The difference between mExplicitGridEnd and mSizingFunctions.Length().
   int32_t mRepeatEndDelta;
   // True if there is a specified repeat(auto-fill/fit) track.
-  const bool mHasRepeatAuto;
+  bool mHasRepeatAuto;
   // True if this track (relative to mRepeatAutoStart) is a removed auto-fit.
   // Indexed relative to mExplicitGridOffset + mRepeatAutoStart.
   nsTArray<bool> mRemovedRepeatTracks;
@@ -1322,8 +1359,9 @@ class MOZ_STACK_CLASS nsGridContainerFrame::LineNameMap {
         mIsSameDirection(aIsSameDirection),
         mHasRepeatAuto(aTracks.mHasRepeatAuto) {
     MOZ_ASSERT(mHasRepeatAuto || mRepeatEndDelta == 0);
-    MOZ_ASSERT(mRepeatAutoStart <= mTracks.mExpandedLineNames.Length());
-    MOZ_ASSERT(!mHasRepeatAuto || mTracks.mExpandedLineNames.Length() >= 2);
+    MOZ_ASSERT(!mHasRepeatAuto ||
+               (mTracks.mExpandedLineNames.Length() >= 2 &&
+                mRepeatAutoStart <= mTracks.mExpandedLineNames.Length()));
   }
 
   /**
@@ -3994,16 +4032,12 @@ void nsGridContainerFrame::Grid::SubgridPlaceGridItems(
   // computing them otherwise.
   RepeatTrackSizingInput repeatSizing(state.mWM);
   if (!childGrid->IsColSubgrid() && state.mColFunctions.mHasRepeatAuto) {
-    repeatSizing.SetDefiniteSizes(eLogicalAxisInline, state.mWM,
-                                  state.mGridStyle->MinISize(state.mWM),
-                                  state.mGridStyle->ISize(state.mWM),
-                                  state.mGridStyle->MaxISize(state.mWM));
+    repeatSizing.InitFromStyle(eLogicalAxisInline, state.mWM,
+                               state.mFrame->Style());
   }
   if (!childGrid->IsRowSubgrid() && state.mRowFunctions.mHasRepeatAuto) {
-    repeatSizing.SetDefiniteSizes(eLogicalAxisBlock, state.mWM,
-                                  state.mGridStyle->MinBSize(state.mWM),
-                                  state.mGridStyle->BSize(state.mWM),
-                                  state.mGridStyle->MaxBSize(state.mWM));
+    repeatSizing.InitFromStyle(eLogicalAxisBlock, state.mWM,
+                               state.mFrame->Style());
   }
 
   PlaceGridItems(state, repeatSizing);
@@ -4489,8 +4523,6 @@ void nsGridContainerFrame::Tracks::Initialize(
     const TrackSizingFunctions& aFunctions,
     const NonNegativeLengthPercentageOrNormal& aGridGap, uint32_t aNumTracks,
     nscoord aContentBoxSize) {
-  MOZ_ASSERT(aNumTracks >=
-             aFunctions.mExplicitGridOffset + aFunctions.NumExplicitTracks());
   mSizes.SetLength(aNumTracks);
   PodZero(mSizes.Elements(), mSizes.Length());
   for (uint32_t i = 0, len = mSizes.Length(); i < len; ++i) {
@@ -7723,19 +7755,15 @@ nscoord nsGridContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
   // They're only used for auto-repeat so we skip computing them otherwise.
   RepeatTrackSizingInput repeatSizing(state.mWM);
   if (!IsColSubgrid() && state.mColFunctions.mHasRepeatAuto) {
-    repeatSizing.SetDefiniteSizes(eLogicalAxisInline, state.mWM,
-                                  state.mGridStyle->MinISize(state.mWM),
-                                  state.mGridStyle->ISize(state.mWM),
-                                  state.mGridStyle->MaxISize(state.mWM));
+    repeatSizing.InitFromStyle(eLogicalAxisInline, state.mWM,
+                               state.mFrame->Style());
   }
   if (!IsRowSubgrid() && state.mRowFunctions.mHasRepeatAuto &&
       !(state.mGridStyle->mGridAutoFlow & NS_STYLE_GRID_AUTO_FLOW_ROW)) {
     // Only 'grid-auto-flow:column' can create new implicit columns, so that's
     // the only case where our block-size can affect the number of columns.
-    repeatSizing.SetDefiniteSizes(eLogicalAxisBlock, state.mWM,
-                                  state.mGridStyle->MinBSize(state.mWM),
-                                  state.mGridStyle->BSize(state.mWM),
-                                  state.mGridStyle->MaxBSize(state.mWM));
+    repeatSizing.InitFromStyle(eLogicalAxisBlock, state.mWM,
+                               state.mFrame->Style());
   }
 
   Grid grid;

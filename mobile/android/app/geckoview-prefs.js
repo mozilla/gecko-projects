@@ -22,6 +22,9 @@ pref("dom.ipc.processCount", 1);
 pref("dom.ipc.processHangMonitor", true);
 pref("dom.ipc.processPrelaunch.enabled", false);
 
+// Enable hang reports
+pref("dom.ipc.reportProcessHangs", true);
+
 // Tell Telemetry that we're in GeckoView mode.
 pref("toolkit.telemetry.isGeckoViewMode", true);
 // Disable the Telemetry Event Ping
@@ -39,16 +42,13 @@ pref("geckoview.console.enabled", false);
 pref("dom.capture.enabled", true);
 
 // Disable Web Push until we get it working
-pref("dom.push.enabled", false);
+pref("dom.push.enabled", true);
 
 // enable external storage API
 pref("dom.storageManager.enabled", true);
 
 // enable Visual Viewport API
 pref("dom.visualviewport.enabled", true);
-
-// Use containerless scrolling.
-pref("layout.scroll.root-frame-containers", false);
 
 // Inherit locale from the OS, used for multi-locale builds
 pref("intl.locale.requested", "");

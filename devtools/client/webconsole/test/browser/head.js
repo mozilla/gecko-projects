@@ -62,7 +62,7 @@ registerCleanupFunction(async function() {
   });
   const browserConsole = BrowserConsoleManager.getBrowserConsole();
   if (browserConsole) {
-    browserConsole.ui.clearOutput(true);
+    await clearOutput(browserConsole);
     await BrowserConsoleManager.toggleBrowserConsole();
   }
 });
@@ -247,6 +247,34 @@ function executeAndWaitForMessage(
 ) {
   const onMessage = waitForMessage(hud, matchingText, selector);
   execute(hud, input);
+  return onMessage;
+}
+
+/**
+ * Set the input value, simulates the right keyboard event to evaluate it, depending on
+ * if the console is in editor mode or not, and wait for a message with the expected text
+ * (and an optional selector) to be displayed in the output.
+ *
+ * @param {Object} hud : The webconsole.
+ * @param {String} input : The input expression to execute.
+ * @param {String} matchingText : A string that should match the message body content.
+ * @param {String} selector : A selector that should match the message node.
+ */
+function keyboardExecuteAndWaitForMessage(
+  hud,
+  input,
+  matchingText,
+  selector = ".message"
+) {
+  setInputValue(hud, input);
+  const onMessage = waitForMessage(hud, matchingText, selector);
+  if (isEditorModeEnabled(hud)) {
+    EventUtils.synthesizeKey("KEY_Enter", {
+      [Services.appinfo.OS === "Darwin" ? "metaKey" : "ctrlKey"]: true,
+    });
+  } else {
+    EventUtils.synthesizeKey("VK_RETURN");
+  }
   return onMessage;
 }
 
@@ -1022,10 +1050,11 @@ async function setFilterState(hud, settings) {
       const filterInput = getFilterInput(hud);
       filterInput.focus();
       filterInput.select();
+      const win = outputNode.ownerDocument.defaultView;
       if (!value) {
-        EventUtils.synthesizeKey("KEY_Delete");
+        EventUtils.synthesizeKey("KEY_Delete", {}, win);
       } else {
-        EventUtils.sendString(value);
+        EventUtils.sendString(value, win);
       }
       await waitFor(() => filterInput.value === value);
       continue;
@@ -1448,7 +1477,7 @@ function checkConsoleOutputForWarningGroup(hud, expectedMessages) {
 
 /**
  * Check that there is a message with the specified text that has the specified
- * stack information.
+ * stack information.  Self-hosted frames are ignored.
  * @param {WebConsole} hud
  * @param {string} text
  *        message substring to look for
@@ -1464,16 +1493,19 @@ async function checkMessageStack(hud, text, frameLines) {
 
   const framesNode = await waitFor(() => msgNode.querySelector(".frames"));
   const frameNodes = framesNode.querySelectorAll(".frame");
-  ok(
-    frameNodes.length == frameLines.length,
-    `Found ${frameLines.length} frames`
-  );
-  for (let i = 0; i < frameLines.length; i++) {
+  let frameLinesIndex = 0;
+  for (let i = 0; i < frameNodes.length; i++) {
+    if (frameNodes[i].querySelector(".filename").textContent == "self-hosted") {
+      continue;
+    }
     ok(
-      frameNodes[i].querySelector(".line").textContent == "" + frameLines[i],
-      `Found line ${frameLines[i]} for frame #${i}`
+      frameNodes[i].querySelector(".line").textContent ==
+        "" + frameLines[frameLinesIndex],
+      `Found line ${frameLines[frameLinesIndex]} for frame #${i}`
     );
+    frameLinesIndex++;
   }
+  is(frameLines.length, frameLinesIndex, `Found ${frameLines.length} frames`);
 }
 
 /**
@@ -1530,4 +1562,10 @@ async function waitForLazyRequests(toolbox) {
   return waitUntil(() => {
     return !wrapper.networkDataProvider.lazyRequestData.size;
   });
+}
+
+async function clearOutput(hud, clearStorage = true) {
+  const onMessagesCleared = hud.ui.once("messages-cleared");
+  hud.ui.clearOutput(clearStorage);
+  await onMessagesCleared;
 }

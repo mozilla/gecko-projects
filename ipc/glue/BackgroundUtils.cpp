@@ -193,6 +193,7 @@ already_AddRefed<nsIContentSecurityPolicy> CSPInfoToCSP(
       return nullptr;
     }
   }
+  csp->SetSkipAllowInlineStyleCheck(aCSPInfo.skipAllowInlineStyleCheck());
 
   for (uint32_t i = 0; i < aCSPInfo.policyInfos().Length(); i++) {
     const PolicyInfo& policyInfo = aCSPInfo.policyInfos()[i];
@@ -239,6 +240,7 @@ nsresult CSPToCSPInfo(nsIContentSecurityPolicy* aCSP, CSPInfo* aCSPInfo) {
   aCSP->GetReferrer(referrer);
 
   uint64_t windowID = aCSP->GetInnerWindowID();
+  bool skipAllowInlineStyleCheck = aCSP->GetSkipAllowInlineStyleCheck();
 
   nsTArray<PolicyInfo> policyInfos;
   for (uint32_t i = 0; i < count; ++i) {
@@ -251,8 +253,9 @@ nsresult CSPToCSPInfo(nsIContentSecurityPolicy* aCSP, CSPInfo* aCSPInfo) {
                                          policy->getReportOnlyFlag(),
                                          policy->getDeliveredViaMetaTagFlag()));
   }
-  *aCSPInfo = CSPInfo(std::move(policyInfos), requestingPrincipalInfo,
-                      selfURISpec, referrer, windowID);
+  *aCSPInfo =
+      CSPInfo(std::move(policyInfos), requestingPrincipalInfo, selfURISpec,
+              referrer, windowID, skipAllowInlineStyleCheck);
   return NS_OK;
 }
 
@@ -594,6 +597,27 @@ nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
 nsresult LoadInfoArgsToLoadInfo(
     const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs,
     nsILoadInfo** outLoadInfo) {
+  return LoadInfoArgsToLoadInfo(aOptionalLoadInfoArgs, nullptr, outLoadInfo);
+}
+nsresult LoadInfoArgsToLoadInfo(
+    const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs, nsINode* aLoadingContext,
+    nsILoadInfo** outLoadInfo) {
+  RefPtr<LoadInfo> loadInfo;
+  nsresult rv = LoadInfoArgsToLoadInfo(aOptionalLoadInfoArgs, aLoadingContext,
+                                       getter_AddRefs(loadInfo));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  loadInfo.forget(outLoadInfo);
+  return NS_OK;
+}
+
+nsresult LoadInfoArgsToLoadInfo(
+    const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs, LoadInfo** outLoadInfo) {
+  return LoadInfoArgsToLoadInfo(aOptionalLoadInfoArgs, nullptr, outLoadInfo);
+}
+nsresult LoadInfoArgsToLoadInfo(
+    const Maybe<LoadInfoArgs>& aOptionalLoadInfoArgs, nsINode* aLoadingContext,
+    LoadInfo** outLoadInfo) {
   if (aOptionalLoadInfoArgs.isNothing()) {
     *outLoadInfo = nullptr;
     return NS_OK;
@@ -747,7 +771,8 @@ nsresult LoadInfoArgsToLoadInfo(
       loadInfoArgs.serviceWorkerTaintingSynthesized(),
       loadInfoArgs.documentHasUserInteracted(),
       loadInfoArgs.documentHasLoaded(), loadInfoArgs.cspNonce(),
-      loadInfoArgs.skipContentSniffing(), loadInfoArgs.requestBlockingReason());
+      loadInfoArgs.skipContentSniffing(), loadInfoArgs.requestBlockingReason(),
+      aLoadingContext);
 
   if (loadInfoArgs.isFromProcessingFrameAttributes()) {
     loadInfo->SetIsFromProcessingFrameAttributes();

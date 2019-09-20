@@ -1117,17 +1117,6 @@ class nsDisplayListBuilder {
   const DisplayItemClipChain* FuseClipChainUpTo(
       const DisplayItemClipChain* aClipChain, const ActiveScrolledRoot* aASR);
 
-  /**
-   * Only used for containerful root scrolling. This is a workaround.
-   */
-  void SetActiveScrolledRootForRootScrollframe(const ActiveScrolledRoot* aASR) {
-    mActiveScrolledRootForRootScrollframe = aASR;
-  }
-
-  const ActiveScrolledRoot* ActiveScrolledRootForRootScrollframe() const {
-    return mActiveScrolledRootForRootScrollframe;
-  }
-
   const ActiveScrolledRoot* GetFilterASR() const { return mFilterASR; }
 
   /**
@@ -1688,7 +1677,8 @@ class nsDisplayListBuilder {
 
   void ClearWillChangeBudget();
 
-  void EnterSVGEffectsContents(nsDisplayList* aHoistedItemsStorage);
+  void EnterSVGEffectsContents(nsIFrame* aEffectsFrame,
+                               nsDisplayList* aHoistedItemsStorage);
   void ExitSVGEffectsContents();
 
   bool ShouldBuildScrollInfoItemsForHoisting() const;
@@ -1982,14 +1972,13 @@ class nsDisplayListBuilder {
       mClipDeduplicator;
   DisplayItemClipChain* mFirstClipChainToDestroy;
   nsTArray<nsDisplayItem*> mTemporaryItems;
-  const ActiveScrolledRoot* mActiveScrolledRootForRootScrollframe;
   nsDisplayListBuilderMode mMode;
   nsDisplayTableBackgroundSet* mTableBackgroundSet;
   ViewID mCurrentScrollParentId;
   ViewID mCurrentScrollbarTarget;
   MaybeScrollDirection mCurrentScrollbarDirection;
   Preserves3DContext mPreserves3DCtx;
-  int32_t mSVGEffectsBuildingDepth;
+  nsTArray<nsIFrame*> mSVGEffectsFrames;
   // When we are inside a filter, the current ASR at the time we entered the
   // filter. Otherwise nullptr.
   const ActiveScrolledRoot* mFilterASR;
@@ -6856,7 +6845,7 @@ class nsDisplayFilters : public nsDisplayEffectsBase {
       const StackingContextHelper& aSc,
       mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
-  bool CanCreateWebRenderCommands(nsDisplayListBuilder* aBuilder);
+  bool CanCreateWebRenderCommands();
 
  private:
   NS_DISPLAY_ALLOW_CLONING()

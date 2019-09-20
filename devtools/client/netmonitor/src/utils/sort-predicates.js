@@ -107,10 +107,32 @@ function latency(first, second) {
 }
 
 function compareHeader(header, first, second) {
-  const result = compareValues(
-    getResponseHeader(first, header) || "",
-    getResponseHeader(second, header) || ""
-  );
+  const firstValue = getResponseHeader(first, header) || "";
+  const secondValue = getResponseHeader(second, header) || "";
+
+  let result;
+
+  switch (header) {
+    case "Content-Length": {
+      result = compareValues(
+        parseInt(firstValue, 10) || 0,
+        parseInt(secondValue, 10) || 0
+      );
+      break;
+    }
+    case "Last-Modified": {
+      result = compareValues(
+        new Date(firstValue).valueOf() || -1,
+        new Date(secondValue).valueOf() || -1
+      );
+      break;
+    }
+    default: {
+      result = compareValues(firstValue, secondValue);
+      break;
+    }
+  }
+
   return result || waterfall(first, second);
 }
 
@@ -175,8 +197,31 @@ function type(first, second) {
   return result || waterfall(first, second);
 }
 
+function getTransferedSizeValue(item) {
+  let value;
+  if (item.blockedReason) {
+    // Also properly group/sort various blocked reasons.
+    value = typeof item.blockedReason == "number" ? -item.blockedReason : -1000;
+  } else if (item.fromCache || item.status === "304") {
+    value = -2;
+  } else if (item.fromServiceWorker) {
+    value = -3;
+  } else if (typeof item.transferredSize == "number") {
+    value = item.transferredSize;
+    if (item.isRacing && typeof item.isRacing == "boolean") {
+      value = -4;
+    }
+  } else if (item.transferredSize === null) {
+    value = -5;
+  }
+  return value;
+}
+
 function transferred(first, second) {
-  const result = compareValues(first.transferredSize, second.transferredSize);
+  const result = compareValues(
+    getTransferedSizeValue(first),
+    getTransferedSizeValue(second)
+  );
   return result || waterfall(first, second);
 }
 

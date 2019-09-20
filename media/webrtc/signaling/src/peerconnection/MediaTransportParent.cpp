@@ -135,10 +135,9 @@ mozilla::ipc::IPCResult MediaTransportParent::RecvCreateIceCtx(
   return ipc::IPCResult::Ok();
 }
 
-mozilla::ipc::IPCResult MediaTransportParent::RecvSetProxyServer(
-    const dom::TabId& tabId, const net::LoadInfoArgs& args,
-    const nsCString& alpn) {
-  mImpl->mHandler->SetProxyServer(NrSocketProxyConfig(tabId, alpn, args));
+mozilla::ipc::IPCResult MediaTransportParent::RecvSetProxyConfig(
+    const net::WebrtcProxyConfig& aProxyConfig) {
+  mImpl->mHandler->SetProxyConfig(NrSocketProxyConfig(aProxyConfig));
   return ipc::IPCResult::Ok();
 }
 
@@ -158,8 +157,10 @@ MediaTransportParent::RecvSetTargetForDefaultLocalAddressLookup(
 }
 
 mozilla::ipc::IPCResult MediaTransportParent::RecvStartIceGathering(
-    const bool& defaultRouteOnly, const net::NrIceStunAddrArray& stunAddrs) {
-  mImpl->mHandler->StartIceGathering(defaultRouteOnly, stunAddrs);
+    const bool& defaultRouteOnly, const bool& obfuscateHostAddresses,
+    const net::NrIceStunAddrArray& stunAddrs) {
+  mImpl->mHandler->StartIceGathering(defaultRouteOnly, obfuscateHostAddresses,
+                                     stunAddrs);
   return ipc::IPCResult::Ok();
 }
 

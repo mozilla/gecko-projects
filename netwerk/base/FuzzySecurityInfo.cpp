@@ -136,6 +136,13 @@ FuzzySecurityInfo::GetIsExtendedValidation(bool* aIsEV) {
 }
 
 NS_IMETHODIMP
+FuzzySecurityInfo::GetIsDelegatedCredential(bool* aIsDelegCred) {
+  NS_ENSURE_ARG_POINTER(aIsDelegCred);
+  *aIsDelegCred = false;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 FuzzySecurityInfo::GetInterface(const nsIID& uuid, void** result) {
   if (!NS_IsMainThread()) {
     MOZ_CRASH("FuzzySecurityInfo::GetInterface called off the main thread");
@@ -235,12 +242,6 @@ FuzzySecurityInfo::GetClientCertSent(bool* arg) {
 }
 
 NS_IMETHODIMP
-FuzzySecurityInfo::GetBypassAuthentication(bool* arg) {
-  *arg = false;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 FuzzySecurityInfo::GetFailedVerification(bool* arg) {
   *arg = false;
   return NS_OK;
@@ -314,12 +315,6 @@ FuzzySecurityInfo::GetEsniTxt(nsACString& aEsniTxt) { return NS_OK; }
 NS_IMETHODIMP
 FuzzySecurityInfo::SetEsniTxt(const nsACString& aEsniTxt) {
   MOZ_CRASH("Unused");
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-FuzzySecurityInfo::GetServerRootCertIsBuiltInRoot(bool* aIsBuiltInRoot) {
-  *aIsBuiltInRoot = true;
   return NS_OK;
 }
 

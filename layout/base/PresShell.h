@@ -351,6 +351,15 @@ class PresShell final : public nsStubDocumentObserver,
       nscoord aWidth, nscoord aHeight, nscoord aOldWidth, nscoord aOldHeight,
       ResizeReflowOptions aOptions = ResizeReflowOptions::NoOption);
 
+ private:
+  /**
+   * This is what ResizeReflowIgnoreOverride does when not shrink-wrapping (that
+   * is, when ResizeReflowOptions::BSizeLimit is not specified).
+   */
+  void SimpleResizeReflow(nscoord aWidth, nscoord aHeight, nscoord aOldWidth,
+                          nscoord aOldHeight);
+
+ public:
   /**
    * Returns true if this document has a potentially zoomable viewport,
    * allowing for its layout and visual viewports to diverge.
@@ -957,7 +966,6 @@ class PresShell final : public nsStubDocumentObserver,
    * of painting.  If we are ignoring, then layers aren't clipped to
    * the CSS viewport and scrollbars aren't drawn.
    */
-  void SetIgnoreViewportScrolling(bool aIgnore);
   bool IgnoringViewportScrolling() const {
     return !!(mRenderingStateFlags &
               RenderingStateFlags::IgnoringViewportScrolling);

@@ -188,6 +188,25 @@ function removeXHRBreakpoint(path: string, method: string) {
   return currentThreadFront.removeXHRBreakpoint(path, method);
 }
 
+function addWatchpoint(
+  object: Grip,
+  property: string,
+  label: string,
+  watchpointType: string
+) {
+  if (currentTarget.traits.watchpoints) {
+    const objectClient = createObjectClient(object);
+    return objectClient.addWatchpoint(property, label, watchpointType);
+  }
+}
+
+function removeWatchpoint(object: Grip, property: string) {
+  if (currentTarget.traits.watchpoints) {
+    const objectClient = createObjectClient(object);
+    return objectClient.removeWatchpoint(property);
+  }
+}
+
 // Get the string key to use for a breakpoint location.
 // See also duplicate code in breakpoint-actor-map.js :(
 function locationKey(location: BreakpointLocation) {
@@ -400,6 +419,12 @@ async function getSources(
   return sources.map(source => prepareSourcePayload(client, source));
 }
 
+async function toggleEventLogging(logEventBreakpoints: boolean) {
+  return forEachThread(thread =>
+    thread.toggleEventLogging(logEventBreakpoints)
+  );
+}
+
 async function fetchSources(): Promise<Array<GeneratedSourceData>> {
   return getSources(currentThreadFront);
 }
@@ -514,6 +539,8 @@ const clientCommands = {
   setBreakpoint,
   setXHRBreakpoint,
   removeXHRBreakpoint,
+  addWatchpoint,
+  removeWatchpoint,
   removeBreakpoint,
   evaluate,
   evaluateInFrame,
@@ -523,6 +550,7 @@ const clientCommands = {
   getProperties,
   getFrameScopes,
   pauseOnExceptions,
+  toggleEventLogging,
   fetchSources,
   registerSourceActor,
   fetchThreads,

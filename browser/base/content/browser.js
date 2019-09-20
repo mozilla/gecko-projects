@@ -1100,7 +1100,10 @@ var gPopupBlockerObserver = {
       blockedPopupAllowSite.removeAttribute("hidden");
       let uriHost = uri.asciiHost ? uri.host : uri.spec;
       var pm = Services.perms;
-      if (pm.testPermission(uri, "popup") == pm.ALLOW_ACTION) {
+      if (
+        pm.testPermissionFromPrincipal(browser.contentPrincipal, "popup") ==
+        pm.ALLOW_ACTION
+      ) {
         // Offer an item to block popups for this site, if a whitelist entry exists
         // already for it.
         let blockString = gNavigatorBundle.getFormattedString("popupBlock", [
@@ -1253,7 +1256,12 @@ XPCOMUtils.defineLazyPreferenceGetter(
 );
 
 function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
-  let deserializeURI = spec => (spec ? makeURI(spec) : null);
+  let deserializeURI = url => {
+    if (url instanceof Ci.nsIURI) {
+      return url;
+    }
+    return url ? makeURI(url) : null;
+  };
 
   // We get called irrespective of whether we did a keyword search, or
   // whether the original input would be vaguely interpretable as a URL,
@@ -1971,10 +1979,6 @@ var gBrowserInit = {
     // until all of its dependencies are handled.
     Services.appShell.hiddenDOMWindow;
 
-    // We need to set the OfflineApps message listeners up before we
-    // load homepages, which might need them.
-    OfflineApps.init();
-
     gBrowser.addEventListener(
       "InsecureLoginFormsStateChange",
       function() {
@@ -2011,6 +2015,10 @@ var gBrowserInit = {
     Services.obs.addObserver(gXPInstallObserver, "addon-install-disabled");
     Services.obs.addObserver(gXPInstallObserver, "addon-install-started");
     Services.obs.addObserver(gXPInstallObserver, "addon-install-blocked");
+    Services.obs.addObserver(
+      gXPInstallObserver,
+      "addon-install-fullscreen-blocked"
+    );
     Services.obs.addObserver(
       gXPInstallObserver,
       "addon-install-origin-blocked"
@@ -2108,7 +2116,7 @@ var gBrowserInit = {
     window.addEventListener("dragover", MousePosTracker);
 
     gNavToolbox.addEventListener("customizationstarting", CustomizationHandler);
-    gNavToolbox.addEventListener("customizationending", CustomizationHandler);
+    gNavToolbox.addEventListener("aftercustomization", CustomizationHandler);
 
     SessionStore.promiseInitialized.then(() => {
       // Bail out if the window has been closed in the meantime.
@@ -2530,6 +2538,10 @@ var gBrowserInit = {
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-disabled");
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-started");
       Services.obs.removeObserver(gXPInstallObserver, "addon-install-blocked");
+      Services.obs.removeObserver(
+        gXPInstallObserver,
+        "addon-install-fullscreen-blocked"
+      );
       Services.obs.removeObserver(
         gXPInstallObserver,
         "addon-install-origin-blocked"
@@ -3239,13 +3251,13 @@ function BrowserViewSource(browser) {
 // documentURL - URL of the document to view, or null for this window's document
 // initialTab - name of the initial tab to display, or null for the first tab
 // imageElement - image to load in the Media Tab of the Page Info window; can be null/omitted
-// frameOuterWindowID - the id of the frame that the context menu opened in; can be null/omitted
+// browsingContext - the browsingContext of the frame that we want to view information about; can be null/omitted
 // browser - the browser containing the document we're interested in inspecting; can be null/omitted
 function BrowserPageInfo(
   documentURL,
   initialTab,
   imageElement,
-  frameOuterWindowID,
+  browsingContext,
   browser
 ) {
   if (documentURL instanceof HTMLDocument) {
@@ -3257,7 +3269,7 @@ function BrowserPageInfo(
     documentURL = documentURL.location;
   }
 
-  let args = { initialTab, imageElement, frameOuterWindowID, browser };
+  let args = { initialTab, imageElement, browsingContext, browser };
 
   documentURL = documentURL || window.gBrowser.selectedBrowser.currentURI.spec;
 
@@ -3541,22 +3553,16 @@ var BrowserOnClick = {
     let mm = window.messageManager;
     mm.addMessageListener("Browser:CertExceptionError", this);
     mm.addMessageListener("Browser:SiteBlockedError", this);
-    mm.addMessageListener("Browser:EnableOnlineMode", this);
     mm.addMessageListener("Browser:SetSSLErrorReportAuto", this);
     mm.addMessageListener("Browser:ResetSSLPreferences", this);
-    mm.addMessageListener("Browser:SSLErrorReportTelemetry", this);
-    mm.addMessageListener("Browser:SSLErrorGoBack", this);
   },
 
   uninit() {
     let mm = window.messageManager;
     mm.removeMessageListener("Browser:CertExceptionError", this);
     mm.removeMessageListener("Browser:SiteBlockedError", this);
-    mm.removeMessageListener("Browser:EnableOnlineMode", this);
     mm.removeMessageListener("Browser:SetSSLErrorReportAuto", this);
     mm.removeMessageListener("Browser:ResetSSLPreferences", this);
-    mm.removeMessageListener("Browser:SSLErrorReportTelemetry", this);
-    mm.removeMessageListener("Browser:SSLErrorGoBack", this);
   },
 
   receiveMessage(msg) {
@@ -3565,10 +3571,8 @@ var BrowserOnClick = {
         this.onCertError(
           msg.target,
           msg.data.elementId,
-          msg.data.isTopFrame,
           msg.data.location,
-          msg.data.securityInfoAsString,
-          msg.data.frameId
+          msg.data.securityInfoAsString
         );
         break;
       case "Browser:SiteBlockedError":
@@ -3579,13 +3583,6 @@ var BrowserOnClick = {
           msg.data.location,
           msg.data.blockedInfo
         );
-        break;
-      case "Browser:EnableOnlineMode":
-        if (Services.io.offline) {
-          // Reset network state and refresh the page.
-          Services.io.offline = false;
-          msg.target.reload();
-        }
         break;
       case "Browser:ResetSSLPreferences":
         let prefSSLImpact = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
@@ -3607,26 +3604,10 @@ var BrowserOnClick = {
         }
         Services.telemetry.getHistogramById("TLS_ERROR_REPORT_UI").add(bin);
         break;
-      case "Browser:SSLErrorReportTelemetry":
-        let reportStatus = msg.data.reportStatus;
-        Services.telemetry
-          .getHistogramById("TLS_ERROR_REPORT_UI")
-          .add(reportStatus);
-        break;
-      case "Browser:SSLErrorGoBack":
-        goBackFromErrorPage();
-        break;
     }
   },
 
-  onCertError(
-    browser,
-    elementId,
-    isTopFrame,
-    location,
-    securityInfoAsString,
-    frameId
-  ) {
+  onCertError(browser, elementId, location, securityInfoAsString) {
     let securityInfo;
     let cert;
 
@@ -3642,9 +3623,7 @@ var BrowserOnClick = {
           let certsStringURL = certs.map(elem => `cert=${elem}`);
           certsStringURL = certsStringURL.join("&");
           let url = `about:certificate?${certsStringURL}`;
-          openTrustedLinkIn(url, "tab", {
-            triggeringPrincipal: browser.contentPrincipal,
-          });
+          openTrustedLinkIn(url, "tab");
         } else {
           Services.ww.openWindow(
             window,
@@ -3683,14 +3662,6 @@ var BrowserOnClick = {
           !permanentOverride
         );
         browser.reload();
-        break;
-
-      case "returnButton":
-        goBackFromErrorPage();
-        break;
-
-      case "advancedPanelReturnButton":
-        goBackFromErrorPage();
         break;
     }
   },
@@ -3750,8 +3721,14 @@ var BrowserOnClick = {
       flags: Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CLASSIFIER,
     });
 
-    Services.perms.add(
+    // We can't use gBrowser.contentPrincipal which is principal of about:blocked
+    // Create one from uri with current principal origin attributes
+    let principal = Services.scriptSecurityManager.createContentPrincipal(
       gBrowser.currentURI,
+      gBrowser.contentPrincipal.originAttributes
+    );
+    Services.perms.addFromPrincipal(
+      principal,
       "safe-browsing",
       Ci.nsIPermissionManager.ALLOW_ACTION,
       Ci.nsIPermissionManager.EXPIRE_SESSION
@@ -3836,27 +3813,6 @@ function getMeOutOfHere() {
 }
 
 /**
- * Re-direct the browser to the previous page or a known-safe page if no
- * previous page is found in history.  This function is used when the user
- * browses to a secure page with certificate issues and is presented with
- * about:certerror.  The "Go Back" button should take the user to the previous
- * or a default start page so that even when their own homepage is on a server
- * that has certificate errors, we can get them somewhere safe.
- */
-function goBackFromErrorPage() {
-  let state = JSON.parse(SessionStore.getTabState(gBrowser.selectedTab));
-  if (state.index == 1) {
-    // If the unsafe page is the first or the only one in history, go to the
-    // start page.
-    gBrowser.loadURI(getDefaultHomePage(), {
-      triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-    });
-  } else {
-    BrowserBack();
-  }
-}
-
-/**
  * Return the default start page for the cases when the user's own homepage is
  * infected, so we can get them somewhere safe.
  */
@@ -3917,7 +3873,7 @@ function BrowserReloadWithFlags(reloadFlags) {
     }
   }
 
-  if (unchangedRemoteness.length == 0) {
+  if (!unchangedRemoteness.length) {
     return;
   }
 
@@ -4435,10 +4391,12 @@ const BrowserSearch = {
   delayedStartupInit() {
     // Asynchronously initialize the search service if necessary, to get the
     // current engine for working out the placeholder.
-    Services.search.getDefault().then(defaultEngine => {
+    this._updateURLBarPlaceholderFromDefaultEngine(
+      this._usePrivateSettings,
       // Delay the update for this until so that we don't change it while
       // the user is looking at it / isn't expecting it.
-      this._updateURLBarPlaceholder(defaultEngine.name, true);
+      true
+    ).then(() => {
       this._searchInitComplete = true;
     });
   },
@@ -4470,11 +4428,29 @@ const BrowserSearch = {
         this._removeMaybeOfferedEngine(engineName);
         break;
       case "engine-default":
-        if (this._searchInitComplete) {
-          this._updateURLBarPlaceholder(engineName);
+        if (this._searchInitComplete && !this._usePrivateSettings) {
+          this._updateURLBarPlaceholder(engineName, false);
+        }
+        break;
+      case "engine-default-private":
+        if (this._searchInitComplete && this._usePrivateSettings) {
+          this._updateURLBarPlaceholder(engineName, true);
         }
         break;
     }
+  },
+
+  /**
+   * @returns True if we are using a separate default private engine, and
+   *          we are in a private window.
+   */
+  get _usePrivateSettings() {
+    return (
+      Services.prefs.getBoolPref(
+        "browser.search.separatePrivateDefault",
+        true
+      ) && PrivateBrowsingUtils.isWindowPrivate(window)
+    );
   },
 
   _addMaybeOfferedEngine(engineName) {
@@ -4532,14 +4508,34 @@ const BrowserSearch = {
    * placeholder is a string which doesn't have the engine name.
    */
   initPlaceHolder() {
-    let engineName = Services.prefs.getStringPref(
-      "browser.urlbar.placeholderName",
-      ""
-    );
+    const prefName =
+      "browser.urlbar.placeholderName" +
+      (this._usePrivateSettings ? ".private" : "");
+    let engineName = Services.prefs.getStringPref(prefName, "");
     if (engineName) {
       // We can do this directly, since we know we're at DOMContentLoaded.
       this._setURLBarPlaceholder(engineName);
     }
+  },
+
+  /**
+   * This is a wrapper around '_updateURLBarPlaceholder' that uses the
+   * appropraite default engine to get the engine name.
+   *
+   * @param {Boolean} isPrivate      Set to true if this is a private window.
+   * @param {Boolean} [delayUpdate]  Set to true, to delay update until the
+   *                                 placeholder is not displayed.
+   */
+  async _updateURLBarPlaceholderFromDefaultEngine(
+    isPrivate,
+    delayUpdate = false
+  ) {
+    const getDefault = isPrivate
+      ? Services.search.getDefaultPrivate
+      : Services.search.getDefault;
+    let defaultEngine = await getDefault();
+
+    this._updateURLBarPlaceholder(defaultEngine.name, isPrivate, delayUpdate);
   },
 
   /**
@@ -4551,24 +4547,24 @@ const BrowserSearch = {
    * know they should have short names.
    *
    * @param {String}  engineName     The search engine name to use for the update.
-   * @param {Boolean} delayUpdate    Set to true, to delay update until the
+   * @param {Boolean} isPrivate      Set to true if this is a private window.
+   * @param {Boolean} [delayUpdate]  Set to true, to delay update until the
    *                                 placeholder is not displayed.
    */
-  async _updateURLBarPlaceholder(engineName, delayUpdate = false) {
+  async _updateURLBarPlaceholder(engineName, isPrivate, delayUpdate = false) {
     if (!engineName) {
       throw new Error("Expected an engineName to be specified");
     }
 
     let defaultEngines = await Services.search.getDefaultEngines();
+    const prefName =
+      "browser.urlbar.placeholderName" + (isPrivate ? ".private" : "");
     if (
       defaultEngines.some(defaultEngine => defaultEngine.name == engineName)
     ) {
-      Services.prefs.setStringPref(
-        "browser.urlbar.placeholderName",
-        engineName
-      );
+      Services.prefs.setStringPref(prefName, engineName);
     } else {
-      Services.prefs.clearUserPref("browser.urlbar.placeholderName");
+      Services.prefs.clearUserPref(prefName);
       // Set the engine name to an empty string for non-default engines, which'll
       // make sure we display the default placeholder string.
       engineName = "";
@@ -4582,7 +4578,11 @@ const BrowserSearch = {
       // a tab switch to a tab which has a url loaded.
       let placeholderUpdateListener = () => {
         if (gURLBar.value) {
-          this._setURLBarPlaceholder(engineName);
+          // By the time the user has switched, they may have changed the engine
+          // again, so we need to call this function again but with the
+          // new engine name.
+          // No need to await for this to finish, we're in a listener here anyway.
+          this._updateURLBarPlaceholderFromDefaultEngine(isPrivate, false);
           gURLBar.removeEventListener("input", placeholderUpdateListener);
           gBrowser.tabContainer.removeEventListener(
             "TabSelect",
@@ -4678,7 +4678,7 @@ const BrowserSearch = {
     }
 
     var engines = gBrowser.selectedBrowser.engines;
-    if (engines && engines.length > 0) {
+    if (engines && engines.length) {
       searchBar.setAttribute("addengines", "true");
     } else {
       searchBar.removeAttribute("addengines");
@@ -4723,10 +4723,7 @@ const BrowserSearch = {
     }
 
     let focusUrlBarIfSearchFieldIsNotActive = function(aSearchBar) {
-      if (
-        !aSearchBar ||
-        document.activeElement != aSearchBar.textbox.inputField
-      ) {
+      if (!aSearchBar || document.activeElement != aSearchBar.textbox) {
         // Limit the results to search suggestions, like the search bar.
         gURLBar.search(UrlbarTokenizer.RESTRICT.SEARCH);
       }
@@ -4778,14 +4775,22 @@ const BrowserSearch = {
    * @return engine The search engine used to perform a search, or null if no
    *                search was performed.
    */
-  _loadSearch(searchText, useNewTab, purpose, triggeringPrincipal, csp) {
+  _loadSearch(
+    searchText,
+    useNewTab,
+    usePrivate,
+    purpose,
+    triggeringPrincipal,
+    csp
+  ) {
     if (!triggeringPrincipal) {
       throw new Error(
         "Required argument triggeringPrincipal missing within _loadSearch"
       );
     }
 
-    let engine = Services.search.defaultEngine;
+    let engine =
+      Services.search[usePrivate ? "defaultPrivateEngine" : "defaultEngine"];
 
     let submission = engine.getSubmission(searchText, null, purpose); // HTML response
 
@@ -4817,10 +4822,11 @@ const BrowserSearch = {
    * This should only be called from the context menu. See
    * BrowserSearch.loadSearch for the preferred API.
    */
-  loadSearchFromContext(terms, triggeringPrincipal, csp) {
+  loadSearchFromContext(terms, usePrivate, triggeringPrincipal, csp) {
     let engine = BrowserSearch._loadSearch(
       terms,
       true,
+      usePrivate,
       "contextmenu",
       triggeringPrincipal,
       csp
@@ -7059,6 +7065,7 @@ var gUIDensity = {
     }
 
     gBrowser.tabContainer.uiDensityChanged();
+    gURLBar.updateLayoutBreakout();
   },
 };
 
@@ -7919,176 +7926,6 @@ var BrowserOffline = {
     }
 
     this._uiElement.setAttribute("checked", aOffline);
-  },
-};
-
-var OfflineApps = {
-  warnUsage(browser, uri) {
-    if (!browser) {
-      return;
-    }
-
-    let mainAction = {
-      label: gNavigatorBundle.getString("offlineApps.manageUsage"),
-      accessKey: gNavigatorBundle.getString("offlineApps.manageUsageAccessKey"),
-      callback: this.manage,
-    };
-
-    let warnQuotaKB = Services.prefs.getIntPref("offline-apps.quota.warn");
-    // This message shows the quota in MB, and so we divide the quota (in kb) by 1024.
-    let message = gNavigatorBundle.getFormattedString("offlineApps.usage", [
-      uri.host,
-      warnQuotaKB / 1024,
-    ]);
-
-    let anchorID = "indexedDB-notification-icon";
-    let options = {
-      persistent: true,
-      hideClose: true,
-    };
-    PopupNotifications.show(
-      browser,
-      "offline-app-usage",
-      message,
-      anchorID,
-      mainAction,
-      null,
-      options
-    );
-
-    // Now that we've warned once, prevent the warning from showing up
-    // again.
-    Services.perms.add(
-      uri,
-      "offline-app",
-      Ci.nsIOfflineCacheUpdateService.ALLOW_NO_WARN
-    );
-  },
-
-  _usedMoreThanWarnQuota(uri) {
-    // if the user has already allowed excessive usage, don't bother checking
-    if (
-      Services.perms.testExactPermission(uri, "offline-app") !=
-      Ci.nsIOfflineCacheUpdateService.ALLOW_NO_WARN
-    ) {
-      let usageBytes = SiteDataManager.getAppCacheUsageByHost(uri.asciiHost);
-      let warnQuotaKB = Services.prefs.getIntPref("offline-apps.quota.warn");
-      // The pref is in kb, the usage we get is in bytes, so multiply the quota
-      // to compare correctly:
-      if (usageBytes >= warnQuotaKB * 1024) {
-        return true;
-      }
-    }
-
-    return false;
-  },
-
-  requestPermission(browser, docId, uri) {
-    let host = uri.asciiHost;
-    let notificationID = "offline-app-requested-" + host;
-    let notification = PopupNotifications.getNotification(
-      notificationID,
-      browser
-    );
-
-    if (notification) {
-      notification.options.controlledItems.push([
-        Cu.getWeakReference(browser),
-        docId,
-        uri,
-      ]);
-    } else {
-      let mainAction = {
-        label: gNavigatorBundle.getString("offlineApps.allowStoring.label"),
-        accessKey: gNavigatorBundle.getString(
-          "offlineApps.allowStoring.accesskey"
-        ),
-        callback() {
-          for (let [ciBrowser, ciDocId, ciUri] of notification.options
-            .controlledItems) {
-            OfflineApps.allowSite(ciBrowser, ciDocId, ciUri);
-          }
-        },
-      };
-      let secondaryActions = [
-        {
-          label: gNavigatorBundle.getString("offlineApps.dontAllow.label"),
-          accessKey: gNavigatorBundle.getString(
-            "offlineApps.dontAllow.accesskey"
-          ),
-          callback() {
-            for (let [, , ciUri] of notification.options.controlledItems) {
-              OfflineApps.disallowSite(ciUri);
-            }
-          },
-        },
-      ];
-      let message = gNavigatorBundle.getFormattedString(
-        "offlineApps.available2",
-        [host]
-      );
-      let anchorID = "indexedDB-notification-icon";
-      let options = {
-        persistent: true,
-        hideClose: true,
-        controlledItems: [[Cu.getWeakReference(browser), docId, uri]],
-      };
-      notification = PopupNotifications.show(
-        browser,
-        notificationID,
-        message,
-        anchorID,
-        mainAction,
-        secondaryActions,
-        options
-      );
-    }
-  },
-
-  disallowSite(uri) {
-    Services.perms.add(uri, "offline-app", Services.perms.DENY_ACTION);
-  },
-
-  allowSite(browserRef, docId, uri) {
-    Services.perms.add(uri, "offline-app", Services.perms.ALLOW_ACTION);
-
-    // When a site is enabled while loading, manifest resources will
-    // start fetching immediately.  This one time we need to do it
-    // ourselves.
-    let browser = browserRef.get();
-    if (browser && browser.messageManager) {
-      browser.messageManager.sendAsyncMessage("OfflineApps:StartFetching", {
-        docId,
-      });
-    }
-  },
-
-  manage() {
-    openPreferences("panePrivacy");
-  },
-
-  receiveMessage(msg) {
-    switch (msg.name) {
-      case "OfflineApps:CheckUsage":
-        let uri = makeURI(msg.data.uri);
-        if (this._usedMoreThanWarnQuota(uri)) {
-          this.warnUsage(msg.target, uri);
-        }
-        break;
-      case "OfflineApps:RequestPermission":
-        this.requestPermission(
-          msg.target,
-          msg.data.docId,
-          makeURI(msg.data.uri)
-        );
-        break;
-    }
-  },
-
-  init() {
-    let mm = window.messageManager;
-    mm.addMessageListener("OfflineApps:CheckUsage", this);
-    mm.addMessageListener("OfflineApps:RequestPermission", this);
   },
 };
 

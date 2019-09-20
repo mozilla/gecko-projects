@@ -160,9 +160,11 @@ static uint32_t sRCWNMinWaitMs = 0;
 static uint32_t sRCWNMaxWaitMs = 500;
 
 // True if the local cache should be bypassed when processing a request.
-#define BYPASS_LOCAL_CACHE(loadFlags)           \
-  (loadFlags & (nsIRequest::LOAD_BYPASS_CACHE | \
-                nsICachingChannel::LOAD_BYPASS_LOCAL_CACHE))
+#define BYPASS_LOCAL_CACHE(loadFlags, isPreferCacheLoadOverBypass) \
+  (loadFlags & (nsIRequest::LOAD_BYPASS_CACHE |                    \
+                nsICachingChannel::LOAD_BYPASS_LOCAL_CACHE) &&     \
+   !((loadFlags & nsIRequest::LOAD_FROM_CACHE) &&                  \
+     isPreferCacheLoadOverBypass))
 
 #define RECOVER_FROM_CACHE_FILE_ERROR(result) \
   ((result) == NS_ERROR_FILE_NOT_FOUND ||     \
@@ -442,9 +444,6 @@ nsresult nsHttpChannel::PrepareToConnect() {
   // notify "http-on-modify-request" observers
   CallOnModifyRequestObservers();
 
-  SetLoadGroupUserAgentOverride();
-
-  // Check if request was cancelled during on-modify-request or on-useragent.
   if (mCanceled) {
     return mStatus;
   }
@@ -510,8 +509,7 @@ void nsHttpChannel::HandleOnBeforeConnect() {
 nsresult nsHttpChannel::OnBeforeConnect() {
   nsresult rv;
 
-  // Check if request was cancelled during suspend AFTER on-modify-request or
-  // on-useragent.
+  // Check if request was cancelled during suspend AFTER on-modify-request
   if (mCanceled) {
     return mStatus;
   }
@@ -4005,12 +4003,14 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
   }
 
   if (offline || (mLoadFlags & INHIBIT_CACHING)) {
-    if (BYPASS_LOCAL_CACHE(mLoadFlags) && !offline) {
+    if (BYPASS_LOCAL_CACHE(mLoadFlags, mPreferCacheLoadOverBypass) &&
+        !offline) {
       goto bypassCacheEntryOpen;
     }
     cacheEntryOpenFlags = nsICacheStorage::OPEN_READONLY;
     mCacheEntryIsReadOnly = true;
-  } else if (BYPASS_LOCAL_CACHE(mLoadFlags) && !applicationCache) {
+  } else if (BYPASS_LOCAL_CACHE(mLoadFlags, mPreferCacheLoadOverBypass) &&
+             !applicationCache) {
     cacheEntryOpenFlags = nsICacheStorage::OPEN_TRUNCATE;
   } else {
     cacheEntryOpenFlags =
@@ -5916,7 +5916,7 @@ nsresult nsHttpChannel::ContinueProcessRedirectionAfterFallback(nsresult rv) {
   }
 
 #ifdef MOZ_GECKO_PROFILER
-  if (profiler_is_active()) {
+  if (profiler_can_accept_markers()) {
     int32_t priority = PRIORITY_NORMAL;
     GetPriority(&priority);
 
@@ -5928,7 +5928,7 @@ nsresult nsHttpChannel::ContinueProcessRedirectionAfterFallback(nsresult rv) {
     profiler_add_network_marker(
         mURI, priority, mChannelId, NetworkLoadType::LOAD_REDIRECT,
         mLastStatusReported, TimeStamp::Now(), mLogicalOffset,
-        mCacheDisposition, &timings, mRedirectURI);
+        mCacheDisposition, &timings, mRedirectURI, std::move(mSource));
   }
 #endif
 
@@ -6193,9 +6193,7 @@ nsHttpChannel::CancelByURLClassifier(nsresult aErrorCode) {
   // notify "http-on-modify-request" observers
   CallOnModifyRequestObservers();
 
-  SetLoadGroupUserAgentOverride();
-
-  // Check if request was cancelled during on-modify-request or on-useragent.
+  // Check if request was cancelled during on-modify-request
   if (mCanceled) {
     return mStatus;
   }
@@ -6356,10 +6354,11 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
 #ifdef MOZ_GECKO_PROFILER
   mLastStatusReported =
       TimeStamp::Now();  // in case we enable the profiler after AsyncOpen()
-  if (profiler_is_active()) {
-    profiler_add_network_marker(
-        mURI, mPriority, mChannelId, NetworkLoadType::LOAD_START,
-        mChannelCreationTimestamp, mLastStatusReported, 0, mCacheDisposition);
+  if (profiler_can_accept_markers()) {
+    profiler_add_network_marker(mURI, mPriority, mChannelId,
+                                NetworkLoadType::LOAD_START,
+                                mChannelCreationTimestamp, mLastStatusReported,
+                                0, mCacheDisposition, nullptr, nullptr);
   }
 #endif
 
@@ -6474,8 +6473,6 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
 
 nsresult nsHttpChannel::AsyncOpenFinal(TimeStamp aTimeStamp) {
   // Added due to PauseTask/DelayHttpChannel
-  nsresult rv;
-
   if (mLoadGroup) mLoadGroup->AddRequest(this, nullptr);
 
   // record asyncopen time unconditionally and clear it if we
@@ -6489,6 +6486,41 @@ nsresult nsHttpChannel::AsyncOpenFinal(TimeStamp aTimeStamp) {
   // Remember we have Authorization header set here.  We need to check on it
   // just once and early, AsyncOpen is the best place.
   mCustomAuthHeader = mRequestHead.HasHeader(nsHttp::Authorization);
+
+  if (!NS_ShouldClassifyChannel(this)) {
+    return MaybeResolveProxyAndBeginConnect();
+  }
+
+  // We are about to do an async lookup to check if the URI is a tracker. If
+  // yes, this channel will be canceled by channel classifier.  Chances are the
+  // lookup is not needed so CheckIsTrackerWithLocalTable() will return an
+  // error and then we can MaybeResolveProxyAndBeginConnect() right away.
+  RefPtr<nsHttpChannel> self = this;
+  bool willCallback = NS_SUCCEEDED(
+      AsyncUrlChannelClassifier::CheckChannel(this, [self]() -> void {
+        nsresult rv = self->MaybeResolveProxyAndBeginConnect();
+        if (NS_FAILED(rv)) {
+          // Since this error is thrown asynchronously so that the caller
+          // of BeginConnect() will not do clean up for us. We have to do
+          // it on our own.
+          self->CloseCacheEntry(false);
+          Unused << self->AsyncAbort(rv);
+        }
+      }));
+
+  if (!willCallback) {
+    // We can do MaybeResolveProxyAndBeginConnect immediately if
+    // CheckIsTrackerWithLocalTable is failed. Note that we don't need to
+    // handle the failure because BeginConnect() will return synchronously and
+    // the caller will be responsible for handling it.
+    return MaybeResolveProxyAndBeginConnect();
+  }
+
+  return NS_OK;
+}
+
+nsresult nsHttpChannel::MaybeResolveProxyAndBeginConnect() {
+  nsresult rv;
 
   // The common case for HTTP channels is to begin proxy resolution and return
   // at this point. The only time we know mProxyInfo already is if we're
@@ -6526,8 +6558,9 @@ nsHttpChannel::GetOrCreateChannelClassifier() {
 }
 
 // BeginConnect() SHOULD NOT call AsyncAbort(). AsyncAbort will be called by
-// functions that called BeginConnect if needed. Only AsyncOpen and
-// OnProxyAvailable ever call BeginConnect.
+// functions that called BeginConnect if needed. Only AsyncOpenFinal,
+// MaybeResolveProxyAndBeginConnect and OnProxyAvailable ever call
+// BeginConnect.
 nsresult nsHttpChannel::BeginConnect() {
   LOG(("nsHttpChannel::BeginConnect [this=%p]\n", this));
   nsresult rv;
@@ -6672,7 +6705,8 @@ nsresult nsHttpChannel::BeginConnect() {
   // if this somehow fails we can go on without it
   Unused << gHttpHandler->AddConnectionHeader(&mRequestHead, mCaps);
 
-  if (mLoadFlags & VALIDATE_ALWAYS || BYPASS_LOCAL_CACHE(mLoadFlags))
+  if (mLoadFlags & VALIDATE_ALWAYS ||
+      BYPASS_LOCAL_CACHE(mLoadFlags, mPreferCacheLoadOverBypass))
     mCaps |= NS_HTTP_REFRESH_DNS;
 
   // Adjust mCaps according to our request headers:
@@ -6718,55 +6752,34 @@ nsresult nsHttpChannel::BeginConnect() {
     return mStatus;
   }
 
-  if (!NS_ShouldClassifyChannel(this)) {
-    MaybeStartDNSPrefetch();
-    return ContinueBeginConnectWithResult();
+  bool shouldBeClassified = NS_ShouldClassifyChannel(this);
+
+  if (shouldBeClassified) {
+    if (mChannelClassifierCancellationPending) {
+      LOG(
+          ("Waiting for safe-browsing protection cancellation in BeginConnect "
+           "[this=%p]\n",
+           this));
+      return NS_OK;
+    }
+
+    ReEvaluateReferrerAfterTrackingStatusIsKnown();
   }
 
-  // We are about to do an async lookup to check if the URI is a
-  // tracker. If yes, this channel will be canceled by channel classifier.
-  // Chances are the lookup is not needed so CheckIsTrackerWithLocalTable()
-  // will return an error and then we can BeginConnectActual() right away.
-  RefPtr<nsHttpChannel> self = this;
-  bool willCallback = NS_SUCCEEDED(
-      AsyncUrlChannelClassifier::CheckChannel(this, [self]() -> void {
-        auto nextFunc = [self]() -> void {
-          nsresult rv = self->BeginConnectActual();
-          if (NS_FAILED(rv)) {
-            // Since this error is thrown asynchronously so that the caller
-            // of BeginConnect() will not do clean up for us. We have to do
-            // it on our own.
-            self->CloseCacheEntry(false);
-            Unused << self->AsyncAbort(rv);
-          }
-        };
+  MaybeStartDNSPrefetch();
 
-        uint32_t delayMillisec = StaticPrefs::network_delay_tracking_load();
-        if (self->IsThirdPartyTrackingResource() && delayMillisec) {
-          nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableFunction(
-              "nsHttpChannel::BeginConnect-delayed", nextFunc);
-          nsresult rv = NS_DelayedDispatchToCurrentThread(runnable.forget(),
-                                                          delayMillisec);
-          if (NS_SUCCEEDED(rv)) {
-            LOG(
-                ("nsHttpChannel::BeginConnect delaying 3rd-party tracking "
-                 "resource for %u ms [this=%p]",
-                 delayMillisec, self.get()));
-            return;
-          }
-          LOG(("nsHttpChannel::BeginConnect unable to delay loading. [this=%p]",
-               self.get()));
-        }
+  rv = ContinueBeginConnectWithResult();
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
 
-        nextFunc();
-      }));
-
-  if (!willCallback) {
-    // We can do BeginConnectActual immediately if CheckIsTrackerWithLocalTable
-    // is failed. Note that we don't need to handle the failure because
-    // BeginConnect() will return synchronously and the caller will be
-    // responsible for handling it.
-    return BeginConnectActual();
+  if (shouldBeClassified) {
+    // Start nsChannelClassifier to catch phishing and malware URIs.
+    RefPtr<nsChannelClassifier> channelClassifier =
+        GetOrCreateChannelClassifier();
+    LOG(("nsHttpChannel::Starting nsChannelClassifier %p [this=%p]",
+         channelClassifier.get(), this));
+    channelClassifier->Start();
   }
 
   return NS_OK;
@@ -6796,40 +6809,6 @@ void nsHttpChannel::MaybeStartDNSPrefetch() {
         new nsDNSPrefetch(mURI, originAttributes, this, mTimingEnabled);
     mDNSPrefetch->PrefetchHigh(mCaps & NS_HTTP_REFRESH_DNS);
   }
-}
-
-nsresult nsHttpChannel::BeginConnectActual() {
-  if (mCanceled) {
-    return mStatus;
-  }
-
-  AUTO_PROFILER_LABEL("nsHttpChannel::BeginConnectActual", NETWORK);
-
-  if (mChannelClassifierCancellationPending) {
-    LOG(
-        ("Waiting for safe-browsing protection cancellation in "
-         "BeginConnectActual [this=%p]\n",
-         this));
-    return NS_OK;
-  }
-
-  ReEvaluateReferrerAfterTrackingStatusIsKnown();
-
-  MaybeStartDNSPrefetch();
-
-  nsresult rv = ContinueBeginConnectWithResult();
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  // Start nsChannelClassifier to catch phishing and malware URIs.
-  RefPtr<nsChannelClassifier> channelClassifier =
-      GetOrCreateChannelClassifier();
-  LOG(("nsHttpChannel::Starting nsChannelClassifier %p [this=%p]",
-       channelClassifier.get(), this));
-  channelClassifier->Start();
-
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -7324,16 +7303,12 @@ nsresult nsHttpChannel::StartCrossProcessRedirect() {
 
   nsCOMPtr<nsIParentChannel> parentChannel;
   NS_QueryNotificationCallbacks(this, parentChannel);
-  RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
+  nsCOMPtr<nsICrossProcessSwitchChannel> httpParent =
+      do_QueryInterface(parentChannel);
   MOZ_ASSERT(httpParent);
   NS_ENSURE_TRUE(httpParent, NS_ERROR_UNEXPECTED);
 
-  nsCOMPtr<nsILoadInfo> redirectLoadInfo =
-      CloneLoadInfoForRedirect(mURI, nsIChannelEventSink::REDIRECT_INTERNAL);
-  redirectLoadInfo->SetResultPrincipalURI(mURI);
-
-  httpParent->TriggerCrossProcessRedirect(this, redirectLoadInfo,
-                                          mCrossProcessRedirectIdentifier);
+  httpParent->TriggerCrossProcessSwitch(this, mCrossProcessRedirectIdentifier);
 
   // This will suspend the channel
   rv = WaitForRedirectCallback();
@@ -8096,7 +8071,12 @@ nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
     nsresult rv = gHttpHandler->ConnMgr()->CompleteUpgrade(
         aTransWithStickyConn, mUpgradeProtocolCallback);
     if (NS_FAILED(rv)) {
-      LOG(("  CompleteUpgrade failed with %08x", static_cast<uint32_t>(rv)));
+      LOG(("  CompleteUpgrade failed with %" PRIx32,
+           static_cast<uint32_t>(rv)));
+
+      // This ensures that WebSocketChannel::OnStopRequest will be
+      // called with an error so the session is properly aborted.
+      aStatus = rv;
     }
   }
 
@@ -8250,7 +8230,7 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
   MaybeReportTimingData();
 
 #ifdef MOZ_GECKO_PROFILER
-  if (profiler_is_active() && !mRedirectURI) {
+  if (profiler_can_accept_markers() && !mRedirectURI) {
     // Don't include this if we already redirected
     // These do allocations/frees/etc; avoid if not active
     nsCOMPtr<nsIURI> uri;
@@ -8260,7 +8240,7 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
     profiler_add_network_marker(
         uri, priority, mChannelId, NetworkLoadType::LOAD_STOP,
         mLastStatusReported, TimeStamp::Now(), mLogicalOffset,
-        mCacheDisposition, &mTransactionTimings, nullptr);
+        mCacheDisposition, &mTransactionTimings, nullptr, std::move(mSource));
   }
 #endif
 
@@ -8678,6 +8658,18 @@ NS_IMETHODIMP
 nsHttpChannel::GetAllowStaleCacheContent(bool* aAllowStaleCacheContent) {
   NS_ENSURE_ARG(aAllowStaleCacheContent);
   *aAllowStaleCacheContent = mAllowStaleCacheContent;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHttpChannel::SetPreferCacheLoadOverBypass(bool aPreferCacheLoadOverBypass) {
+  mPreferCacheLoadOverBypass = aPreferCacheLoadOverBypass;
+  return NS_OK;
+}
+NS_IMETHODIMP
+nsHttpChannel::GetPreferCacheLoadOverBypass(bool* aPreferCacheLoadOverBypass) {
+  NS_ENSURE_ARG(aPreferCacheLoadOverBypass);
+  *aPreferCacheLoadOverBypass = mPreferCacheLoadOverBypass;
   return NS_OK;
 }
 
@@ -9646,48 +9638,6 @@ void nsHttpChannel::MaybeWarnAboutAppCache() {
   }
 }
 
-void nsHttpChannel::SetLoadGroupUserAgentOverride() {
-  nsCOMPtr<nsIURI> uri;
-  GetURI(getter_AddRefs(uri));
-  nsAutoCString uriScheme;
-  if (uri) {
-    uri->GetScheme(uriScheme);
-  }
-
-  // We don't need a UA for file: protocols.
-  if (uriScheme.EqualsLiteral("file")) {
-    gHttpHandler->OnUserAgentRequest(this);
-    return;
-  }
-
-  nsIRequestContextService* rcsvc = gHttpHandler->GetRequestContextService();
-  nsCOMPtr<nsIRequestContext> rc;
-  if (rcsvc) {
-    rcsvc->GetRequestContext(mRequestContextID, getter_AddRefs(rc));
-  }
-
-  nsAutoCString ua;
-  if (nsContentUtils::IsNonSubresourceRequest(this)) {
-    gHttpHandler->OnUserAgentRequest(this);
-    if (rc) {
-      GetRequestHeader(NS_LITERAL_CSTRING("User-Agent"), ua);
-      rc->SetUserAgentOverride(ua);
-    }
-  } else {
-    GetRequestHeader(NS_LITERAL_CSTRING("User-Agent"), ua);
-    // Don't overwrite the UA if it is already set (eg by an XHR with explicit
-    // UA).
-    if (ua.IsEmpty()) {
-      if (rc) {
-        SetRequestHeader(NS_LITERAL_CSTRING("User-Agent"),
-                         rc->GetUserAgentOverride(), false);
-      } else {
-        gHttpHandler->OnUserAgentRequest(this);
-      }
-    }
-  }
-}
-
 // Step 10 of HTTP-network-or-cache fetch
 void nsHttpChannel::SetOriginHeader() {
   if (mRequestHead.IsGet() || mRequestHead.IsHead()) {
@@ -10378,7 +10328,9 @@ void nsHttpChannel::ReEvaluateReferrerAfterTrackingStatusIsKnown() {
                                                      isPrivate)) {
         nsCOMPtr<nsIReferrerInfo> newReferrerInfo =
             referrerInfo->CloneWithNewPolicy(ReferrerPolicy::_empty);
-        SetReferrerInfo(newReferrerInfo, false, true);
+        // Pass false for the 3rd bool to not overwrite the original
+        // referrer for these referrer policy mutations.
+        SetReferrerInfo(newReferrerInfo, false, true, false);
       }
     }
   }

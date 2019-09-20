@@ -111,49 +111,9 @@ nsresult nsGenericHTMLElement::CopyInnerTo(Element* aDst) {
   MOZ_ASSERT(!aDst->GetUncomposedDoc(),
              "Should not CopyInnerTo an Element in a document");
 
-  bool reparse = (aDst->OwnerDoc() != OwnerDoc());
-
-  nsresult rv =
-      static_cast<nsGenericHTMLElement*>(aDst)->mAttrs.EnsureCapacityToClone(
-          mAttrs);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  int32_t i, count = GetAttrCount();
-  for (i = 0; i < count; ++i) {
-    const nsAttrName* name = mAttrs.AttrNameAt(i);
-    const nsAttrValue* value = mAttrs.AttrAt(i);
-
-    if (name->Equals(nsGkAtoms::style, kNameSpaceID_None) &&
-        value->Type() == nsAttrValue::eCSSDeclaration) {
-      // We still clone CSS attributes, even in the cross-document case.
-      // https://github.com/w3c/webappsec-csp/issues/212
-
-      // We can't just set this as a string, because that will fail
-      // to reparse the string into style data until the node is
-      // inserted into the document.  Clone the Rule instead.
-      nsAttrValue valueCopy(*value);
-      rv = aDst->SetParsedAttr(name->NamespaceID(), name->LocalName(),
-                               name->GetPrefix(), valueCopy, false);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      DeclarationBlock* cssDeclaration = value->GetCSSDeclarationValue();
-      cssDeclaration->SetImmutable();
-    } else if (reparse) {
-      nsAutoString valStr;
-      value->ToString(valStr);
-
-      rv = aDst->SetAttr(name->NamespaceID(), name->LocalName(),
-                         name->GetPrefix(), valStr, false);
-      NS_ENSURE_SUCCESS(rv, rv);
-    } else {
-      nsAttrValue valueCopy(*value);
-      rv = aDst->SetParsedAttr(name->NamespaceID(), name->LocalName(),
-                               name->GetPrefix(), valueCopy, false);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
-  }
-
-  return NS_OK;
+  auto reparse = aDst->OwnerDoc() == OwnerDoc() ? ReparseAttributes::No
+                                                : ReparseAttributes::Yes;
+  return Element::CopyInnerTo(aDst, reparse);
 }
 
 static const nsAttrValue::EnumTable kDirTable[] = {
@@ -276,15 +236,12 @@ static OffsetResult GetUnretargetedOffsetsFor(const Element& aElement) {
     }
   }
 
-  // Subtract the parent border unless it uses border-box sizing.
-  if (parent && parent->StylePosition()->mBoxSizing != StyleBoxSizing::Border) {
+  // Make the position relative to the padding edge.
+  if (parent) {
     const nsStyleBorder* border = parent->StyleBorder();
     origin.x -= border->GetComputedBorderWidth(eSideLeft);
     origin.y -= border->GetComputedBorderWidth(eSideTop);
   }
-
-  // XXX We should really consider subtracting out padding for
-  // content-box sizing, but we should see what IE does....
 
   // Get the union of all rectangles in this and continuation frames.
   // It doesn't really matter what we use as aRelativeTo here, since
@@ -1631,17 +1588,44 @@ nsIContent::IMEState nsGenericHTMLFormElement::GetDesiredIMEState() {
   return state;
 }
 
+static bool IsSameOriginAsTop(const BindContext& aContext,
+                              const nsGenericHTMLFormElement* aElement) {
+  MOZ_ASSERT(aElement);
+
+  BrowsingContext* browsingContext = aContext.OwnerDoc().GetBrowsingContext();
+  if (!browsingContext) {
+    return false;
+  }
+
+  nsPIDOMWindowOuter* topWindow = browsingContext->Top()->GetDOMWindow();
+  if (!topWindow) {
+    // If we don't have a DOMWindow, We are not in same origin.
+    return false;
+  }
+
+  Document* topLevelDocument = topWindow->GetExtantDoc();
+  if (!topLevelDocument) {
+    return false;
+  }
+
+  return NS_SUCCEEDED(
+      nsContentUtils::CheckSameOrigin(topLevelDocument, aElement));
+}
+
 nsresult nsGenericHTMLFormElement::BindToTree(BindContext& aContext,
                                               nsINode& aParent) {
   nsresult rv = nsGenericHTMLElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // An autofocus event has to be launched if the autofocus attribute is
-  // specified and the element accept the autofocus attribute. In addition,
-  // the document should not be already loaded and the "browser.autofocus"
-  // preference should be 'true'.
+  // specified and the element accepts the autofocus attribute and only if the
+  // target document is in the same origin as the top level document.
+  // https://html.spec.whatwg.org/multipage/interaction.html#the-autofocus-attribute:same-origin
+  // In addition, the document should not be already loaded and the
+  // "browser.autofocus" preference should be 'true'.
   if (IsAutofocusable() && HasAttr(kNameSpaceID_None, nsGkAtoms::autofocus) &&
-      StaticPrefs::browser_autofocus() && IsInUncomposedDoc()) {
+      StaticPrefs::browser_autofocus() && IsInUncomposedDoc() &&
+      IsSameOriginAsTop(aContext, this)) {
     aContext.OwnerDoc().SetAutoFocusElement(this);
   }
 

@@ -162,16 +162,14 @@ void MediaTransportHandlerIPC::Destroy() {
 
 // We will probably be able to move the proxy lookup stuff into
 // this class once we move mtransport to its own process.
-void MediaTransportHandlerIPC::SetProxyServer(
+void MediaTransportHandlerIPC::SetProxyConfig(
     NrSocketProxyConfig&& aProxyConfig) {
   mInitPromise->Then(
       mCallbackThread, __func__,
       [aProxyConfig = std::move(aProxyConfig), this,
        self = RefPtr<MediaTransportHandlerIPC>(this)](bool /*dummy*/) mutable {
         if (mChild) {
-          mChild->SendSetProxyServer(dom::TabId(aProxyConfig.GetTabId()),
-                                     aProxyConfig.GetLoadInfoArgs(),
-                                     aProxyConfig.GetAlpn());
+          mChild->SendSetProxyConfig(aProxyConfig.GetConfig());
         }
       },
       [](const nsCString& aError) {});
@@ -209,14 +207,15 @@ void MediaTransportHandlerIPC::SetTargetForDefaultLocalAddressLookup(
 // change between Init (ie; when the PC is created) and StartIceGathering
 // (ie; when we set the local description).
 void MediaTransportHandlerIPC::StartIceGathering(
-    bool aDefaultRouteOnly,
+    bool aDefaultRouteOnly, bool aObfuscateHostAddresses,
     // TODO(bug 1522205): It probably makes sense to look this up internally
     const nsTArray<NrIceStunAddr>& aStunAddrs) {
   mInitPromise->Then(
       mCallbackThread, __func__,
       [=, self = RefPtr<MediaTransportHandlerIPC>(this)](bool /*dummy*/) {
         if (mChild) {
-          mChild->SendStartIceGathering(aDefaultRouteOnly, aStunAddrs);
+          mChild->SendStartIceGathering(aDefaultRouteOnly,
+                                        aObfuscateHostAddresses, aStunAddrs);
         }
       },
       [](const nsCString& aError) {});

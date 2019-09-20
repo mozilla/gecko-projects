@@ -40,6 +40,7 @@
 #include "mozilla/DataStorage.h"
 #include "mozilla/devtools/HeapSnapshotTempFileHelperParent.h"
 #include "mozilla/docshell/OfflineCacheUpdateParent.h"
+#include "mozilla/dom/BrowserHost.h"
 #include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
 #include "mozilla/dom/CancelContentJSOptionsBinding.h"
@@ -72,6 +73,7 @@
 #include "mozilla/dom/quota/QuotaManagerService.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/dom/URLClassifierParent.h"
+#include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/dom/ipc/SharedMap.h"
 #include "mozilla/embedding/printingui/PrintingParent.h"
 #include "mozilla/extensions/StreamFilterParent.h"
@@ -1808,40 +1810,31 @@ bool ContentParent::ShouldKeepProcessAlive() {
   return numberOfAliveProcesses <= processesToKeepAlive;
 }
 
-void ContentParent::NotifyTabDestroying(const TabId& aTabId,
-                                        const ContentParentId& aCpId) {
-  if (XRE_IsParentProcess()) {
-    // There can be more than one PBrowser for a given app process
-    // because of popup windows.  PBrowsers can also destroy
-    // concurrently.  When all the PBrowsers are destroying, kick off
-    // another task to ensure the child process *really* shuts down,
-    // even if the PBrowsers themselves never finish destroying.
-    ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
-    ContentParent* cp = cpm->GetContentProcessById(aCpId);
-    if (!cp) {
-      return;
-    }
-    ++cp->mNumDestroyingTabs;
-    uint32_t tabCount = cpm->GetBrowserParentCountByProcessId(aCpId);
-    if (uint32_t(cp->mNumDestroyingTabs) != tabCount) {
-      return;
-    }
+void ContentParent::NotifyTabDestroying() {
+  // There can be more than one PBrowser for a given app process
+  // because of popup windows.  PBrowsers can also destroy
+  // concurrently.  When all the PBrowsers are destroying, kick off
+  // another task to ensure the child process *really* shuts down,
+  // even if the PBrowsers themselves never finish destroying.
+  ++mNumDestroyingTabs;
 
-    if (cp->ShouldKeepProcessAlive()) {
-      return;
-    }
-
-    if (cp->TryToRecycle()) {
-      return;
-    }
-
-    // We're dying now, so prevent this content process from being
-    // recycled during its shutdown procedure.
-    cp->MarkAsDead();
-    cp->StartForceKillTimer();
-  } else {
-    ContentChild::GetSingleton()->SendNotifyTabDestroying(aTabId, aCpId);
+  uint32_t tabCount = ManagedPBrowserParent().Count();
+  if (uint32_t(mNumDestroyingTabs) != tabCount) {
+    return;
   }
+
+  if (ShouldKeepProcessAlive()) {
+    return;
+  }
+
+  if (TryToRecycle()) {
+    return;
+  }
+
+  // We're dying now, so prevent this content process from being
+  // recycled during its shutdown procedure.
+  MarkAsDead();
+  StartForceKillTimer();
 }
 
 void ContentParent::StartForceKillTimer() {
@@ -4532,12 +4525,6 @@ void ContentParent::NotifyRebuildFontList() {
   }
 }
 
-mozilla::ipc::IPCResult ContentParent::RecvNotifyTabDestroying(
-    const TabId& aTabId, const ContentParentId& aCpId) {
-  NotifyTabDestroying(aTabId, aCpId);
-  return IPC_OK();
-}
-
 already_AddRefed<mozilla::docshell::POfflineCacheUpdateParent>
 ContentParent::AllocPOfflineCacheUpdateParent(
     const URIParams& aManifestURI, const URIParams& aDocumentURI,
@@ -4585,8 +4572,14 @@ bool ContentParent::DeallocPWebrtcGlobalParent(PWebrtcGlobalParent* aActor) {
 
 mozilla::ipc::IPCResult ContentParent::RecvSetOfflinePermission(
     const Principal& aPrincipal) {
-  nsIPrincipal* principal = aPrincipal;
-  nsContentUtils::MaybeAllowOfflineAppByDefault(principal);
+  nsCOMPtr<nsIOfflineCacheUpdateService> updateService =
+      components::OfflineCacheUpdate::Service();
+  if (!updateService) {
+    return IPC_FAIL_NO_REASON(this);
+  }
+  nsresult rv = updateService->AllowOfflineApp(aPrincipal);
+  NS_ENSURE_SUCCESS(rv, IPC_FAIL_NO_REASON(this));
+
   return IPC_OK();
 }
 
@@ -4701,10 +4694,13 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
     return IPC_FAIL(this, "Forbidden aChromeFlags passed");
   }
 
-  BrowserParent* thisBrowserParent = BrowserParent::GetFrom(aThisTab);
+  RefPtr<BrowserParent> topParent = BrowserParent::GetFrom(aThisTab);
+  while (topParent && topParent->GetBrowserBridgeParent()) {
+    topParent = topParent->GetBrowserBridgeParent()->Manager();
+  }
   BrowserHost* thisBrowserHost =
-      thisBrowserParent ? thisBrowserParent->GetBrowserHost() : nullptr;
-  MOZ_ASSERT(!thisBrowserParent == !thisBrowserHost);
+      topParent ? topParent->GetBrowserHost() : nullptr;
+  MOZ_ASSERT_IF(topParent, thisBrowserHost);
 
   // The content process should not have set its remote or fission flags if the
   // parent doesn't also have these set.
@@ -4720,10 +4716,10 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   }
 
   nsCOMPtr<nsIContent> frame;
-  if (thisBrowserParent) {
-    frame = thisBrowserParent->GetOwnerElement();
+  if (topParent) {
+    frame = topParent->GetOwnerElement();
 
-    if (NS_WARN_IF(thisBrowserParent->IsMozBrowser())) {
+    if (NS_WARN_IF(topParent->IsMozBrowser())) {
       return IPC_FAIL(this, "aThisTab is not a MozBrowser");
     }
   }
@@ -4740,8 +4736,8 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   }
 
   nsCOMPtr<nsIBrowserDOMWindow> browserDOMWin;
-  if (thisBrowserParent) {
-    browserDOMWin = thisBrowserParent->GetBrowserDOMWindow();
+  if (topParent) {
+    browserDOMWin = topParent->GetBrowserDOMWindow();
   }
 
   // If we haven't found a chrome window to open in, just use the most recently
@@ -4880,8 +4876,8 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
 
   if (aURIToLoad && aLoadURI) {
     nsCOMPtr<mozIDOMWindowProxy> openerWindow;
-    if (aSetOpener && thisBrowserParent) {
-      openerWindow = thisBrowserParent->GetParentWindowOuter();
+    if (aSetOpener && topParent) {
+      openerWindow = topParent->GetParentWindowOuter();
     }
     nsCOMPtr<nsIBrowserDOMWindow> newBrowserDOMWin =
         newBrowserParent->GetBrowserDOMWindow();
@@ -5062,38 +5058,43 @@ mozilla::ipc::IPCResult ContentParent::RecvGetGraphicsDeviceInitData(
 mozilla::ipc::IPCResult ContentParent::RecvGetFontListShmBlock(
     const uint32_t& aGeneration, const uint32_t& aIndex,
     mozilla::ipc::SharedMemoryBasic::Handle* aOut) {
-  gfxPlatformFontList::PlatformFontList()->ShareFontListShmBlockToProcess(
-      aGeneration, aIndex, Pid(), aOut);
+  auto fontList = gfxPlatformFontList::PlatformFontList();
+  MOZ_RELEASE_ASSERT(fontList, "gfxPlatformFontList not initialized?");
+  fontList->ShareFontListShmBlockToProcess(aGeneration, aIndex, Pid(), aOut);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvInitializeFamily(
     const uint32_t& aGeneration, const uint32_t& aFamilyIndex) {
-  gfxPlatformFontList::PlatformFontList()->InitializeFamily(aGeneration,
-                                                            aFamilyIndex);
+  auto fontList = gfxPlatformFontList::PlatformFontList();
+  MOZ_RELEASE_ASSERT(fontList, "gfxPlatformFontList not initialized?");
+  fontList->InitializeFamily(aGeneration, aFamilyIndex);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvSetCharacterMap(
     const uint32_t& aGeneration, const mozilla::fontlist::Pointer& aFacePtr,
     const gfxSparseBitSet& aMap) {
-  gfxPlatformFontList::PlatformFontList()->SetCharacterMap(aGeneration,
-                                                           aFacePtr, aMap);
+  auto fontList = gfxPlatformFontList::PlatformFontList();
+  MOZ_RELEASE_ASSERT(fontList, "gfxPlatformFontList not initialized?");
+  fontList->SetCharacterMap(aGeneration, aFacePtr, aMap);
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvInitOtherFamilyNames(
     const uint32_t& aGeneration, const bool& aDefer, bool* aLoaded) {
-  gfxPlatformFontList::PlatformFontList()->InitOtherFamilyNames(aGeneration,
-                                                                aDefer);
+  auto fontList = gfxPlatformFontList::PlatformFontList();
+  MOZ_RELEASE_ASSERT(fontList, "gfxPlatformFontList not initialized?");
+  fontList->InitOtherFamilyNames(aGeneration, aDefer);
   *aLoaded = true;
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvSetupFamilyCharMap(
     const uint32_t& aGeneration, const mozilla::fontlist::Pointer& aFamilyPtr) {
-  gfxPlatformFontList::PlatformFontList()->SetupFamilyCharMap(aGeneration,
-                                                              aFamilyPtr);
+  auto fontList = gfxPlatformFontList::PlatformFontList();
+  MOZ_RELEASE_ASSERT(fontList, "gfxPlatformFontList not initialized?");
+  fontList->SetupFamilyCharMap(aGeneration, aFamilyPtr);
   return IPC_OK();
 }
 
@@ -5850,6 +5851,21 @@ mozilla::ipc::IPCResult ContentParent::RecvAttachBrowsingContext(
   return IPC_OK();
 }
 
+bool ContentParent::CheckBrowsingContextOwnership(
+    BrowsingContext* aBC, const char* aOperation) const {
+  if (!aBC->Canonical()->IsOwnedByProcess(ChildID())) {
+    MOZ_DIAGNOSTIC_ASSERT(ChildID() == aBC->Canonical()->GetInFlightProcessId(),
+                          "Attempt to modify a BrowsingContext from a child "
+                          "which doesn't own it");
+
+    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
+            ("ParentIPC: Trying to %s out of process context 0x%08" PRIx64,
+             aOperation, aBC->Id()));
+    return false;
+  }
+  return true;
+}
+
 mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
     uint64_t aContextId, DetachBrowsingContextResolver&& aResolve) {
   // NOTE: Immediately resolve the promise, as we've received the message. This
@@ -5865,16 +5881,11 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
     return IPC_OK();
   }
 
-  if (!context->Canonical()->IsOwnedByProcess(ChildID())) {
+  if (!CheckBrowsingContextOwnership(context, "detach")) {
     // We're trying to detach a child BrowsingContext in another child
     // process. This is illegal since the owner of the BrowsingContext
     // is the proccess with the in-process docshell, which is tracked
     // by OwnerProcessId.
-    MOZ_DIAGNOSTIC_ASSERT(false, "Trying to detach out of process context");
-
-    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
-            ("ParentIPC: Trying to detach out of process context 0x%08" PRIx64,
-             context->Id()));
     return IPC_OK();
   }
 
@@ -5899,16 +5910,11 @@ mozilla::ipc::IPCResult ContentParent::RecvCacheBrowsingContextChildren(
     return IPC_OK();
   }
 
-  if (!aContext->Canonical()->IsOwnedByProcess(ChildID())) {
+  if (!CheckBrowsingContextOwnership(aContext, "cache")) {
     // We're trying to cache a child BrowsingContext in another child
     // process. This is illegal since the owner of the BrowsingContext
     // is the proccess with the in-process docshell, which is tracked
     // by OwnerProcessId.
-    MOZ_DIAGNOSTIC_ASSERT(false, "Trying to cache out of process context");
-
-    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
-            ("ParentIPC: Trying to cache out of process context 0x%08" PRIx64,
-             aContext->Id()));
     return IPC_OK();
   }
 
@@ -5929,16 +5935,11 @@ mozilla::ipc::IPCResult ContentParent::RecvRestoreBrowsingContextChildren(
     return IPC_OK();
   }
 
-  if (!aContext->Canonical()->IsOwnedByProcess(ChildID())) {
+  if (!CheckBrowsingContextOwnership(aContext, "restore")) {
     // We're trying to cache a child BrowsingContext in another child
     // process. This is illegal since the owner of the BrowsingContext
     // is the proccess with the in-process docshell, which is tracked
     // by OwnerProcessId.
-    MOZ_DIAGNOSTIC_ASSERT(false, "Trying to restore out of process context");
-
-    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
-            ("ParentIPC: Trying to restore out of process context 0x%08" PRIx64,
-             aContext->Id()));
     return IPC_OK();
   }
 

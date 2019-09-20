@@ -40,7 +40,7 @@ const clientAuthDialogs = {
         expectingChooseCertificate ? "" : "not "
       }expecting chooseCertificate to be called`
     );
-    ok(certList.length > 0, "Should have at least one certificate");
+    ok(!!certList.length, "Should have at least one certificate");
     selectedIndex.value = 0;
     rememberClientAuthCertificate.value = false;
     chooseCertificateCalled = true;
@@ -194,7 +194,7 @@ add_task(
     expectingChooseCertificate = false;
     EventUtils.synthesizeMouseAtCenter(listitem, { type: "mousedown" }, window);
     is(
-      UrlbarTestUtils.getSelectedElement(window),
+      UrlbarTestUtils.getSelectedRow(window),
       listitem,
       "The second item is selected"
     );

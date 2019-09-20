@@ -416,7 +416,7 @@ var UITour = {
             }
 
             let buttons = [];
-            if (Array.isArray(data.buttons) && data.buttons.length > 0) {
+            if (Array.isArray(data.buttons) && data.buttons.length) {
               for (let buttonData of data.buttons) {
                 if (
                   typeof buttonData == "object" &&
@@ -709,6 +709,11 @@ var UITour = {
         }
         break;
       }
+
+      case "showProtectionReport": {
+        this.showProtectionReport(window, browser);
+        break;
+      }
     }
 
     // For performance reasons, only call initForBrowser if we did something
@@ -843,7 +848,7 @@ var UITour = {
           typeof name != "string" ||
           typeof value != "string" ||
           !name.startsWith("utm_") ||
-          value.length == 0 ||
+          !value.length ||
           !reSimpleString.test(name)
         ) {
           log.warn("_populateCampaignParams: invalid campaign param specified");
@@ -1545,6 +1550,17 @@ var UITour = {
   showNewTab(aWindow, aBrowser) {
     aWindow.gURLBar.focus();
     let url = "about:newtab";
+    aWindow.openLinkIn(url, "current", {
+      targetBrowser: aBrowser,
+      triggeringPrincipal: Services.scriptSecurityManager.createContentPrincipal(
+        Services.io.newURI(url),
+        {}
+      ),
+    });
+  },
+
+  showProtectionReport(aWindow, aBrowser) {
+    let url = "about:protections";
     aWindow.openLinkIn(url, "current", {
       targetBrowser: aBrowser,
       triggeringPrincipal: Services.scriptSecurityManager.createContentPrincipal(
