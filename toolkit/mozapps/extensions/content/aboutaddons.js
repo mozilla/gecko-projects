@@ -852,7 +852,7 @@ customElements.define("panel-item", PanelItem);
 
 class AddonOptions extends HTMLElement {
   connectedCallback() {
-    if (this.children.length == 0) {
+    if (!this.children.length) {
       this.render();
     }
   }
@@ -1035,7 +1035,7 @@ customElements.define("five-star-rating", FiveStarRating);
 
 class ContentSelectDropdown extends HTMLElement {
   connectedCallback() {
-    if (this.children.length > 0) {
+    if (this.children.length) {
       return;
     }
     // This creates the menulist and menupopup elements needed for the inline
@@ -1332,7 +1332,7 @@ class AddonPermissionsList extends HTMLElement {
 
     this.textContent = "";
 
-    if (msgs.length > 0) {
+    if (msgs.length) {
       // Add a row for each permission message.
       for (let msg of msgs) {
         let row = document.createElement("div");
@@ -1363,7 +1363,7 @@ customElements.define("addon-permissions-list", AddonPermissionsList);
 
 class AddonDetails extends HTMLElement {
   connectedCallback() {
-    if (this.children.length == 0) {
+    if (!this.children.length) {
       this.render();
     }
     this.deck.addEventListener("view-changed", this);
@@ -1396,6 +1396,11 @@ class AddonDetails extends HTMLElement {
           }
           break;
       }
+
+      // When a details view is rendered again, the default details view is
+      // unconditionally shown. So if any other tab is selected, do not save
+      // the current scroll offset, but start at the top of the page instead.
+      ScrollOffsets.canRestore = this.deck.selectedViewName === "details";
     }
   }
 
@@ -1623,7 +1628,7 @@ customElements.define("addon-details", AddonDetails);
 class AddonCard extends HTMLElement {
   connectedCallback() {
     // If we've already rendered we can just update, otherwise render.
-    if (this.children.length > 0) {
+    if (this.children.length) {
       this.update();
     } else {
       this.render();
@@ -1653,7 +1658,7 @@ class AddonCard extends HTMLElement {
 
   set updateInstall(install) {
     this._updateInstall = install;
-    if (this.children.length > 0) {
+    if (this.children.length) {
       this.update();
     }
   }
@@ -1678,7 +1683,7 @@ class AddonCard extends HTMLElement {
     if (install && install.state == AddonManager.STATE_AVAILABLE) {
       this.updateInstall = install;
     }
-    if (this.children.length > 0) {
+    if (this.children.length) {
       this.render();
     }
   }
@@ -2062,7 +2067,7 @@ class AddonCard extends HTMLElement {
   }
 
   expand() {
-    if (this.children.length == 0) {
+    if (!this.children.length) {
       this.expanded = true;
     } else {
       throw new Error("expand() is only supported before render()");
@@ -2374,7 +2379,7 @@ class AddonList extends HTMLElement {
     // happpen as close to each other as possible.
     this.registerListener();
     // Don't render again if we were rendered prior to being inserted.
-    if (this.children.length == 0) {
+    if (!this.children.length) {
       // Render the initial view.
       this.render();
     }
@@ -2540,7 +2545,7 @@ class AddonList extends HTMLElement {
     let sectionCards = this.getCards(section);
 
     // If this is the first card in the section, create the heading.
-    if (sectionCards.length == 0) {
+    if (!sectionCards.length) {
       section.appendChild(this.createSectionHeading(sectionIndex));
     }
 
@@ -2616,7 +2621,7 @@ class AddonList extends HTMLElement {
     section.setAttribute("section", index);
 
     // Render the heading and add-ons if there are any.
-    if (addons.length > 0) {
+    if (addons.length) {
       section.appendChild(this.createSectionHeading(index));
 
       for (let addon of addons) {
@@ -3168,6 +3173,40 @@ function getTelemetryViewName(el) {
 }
 
 /**
+ * Helper for saving and restoring the scroll offsets when a previously loaded
+ * view is accessed again.
+ */
+var ScrollOffsets = {
+  _key: null,
+  _offsets: new Map(),
+  canRestore: true,
+
+  setView(historyEntryId) {
+    this._key = historyEntryId;
+    this.canRestore = true;
+  },
+
+  getPosition() {
+    if (!this.canRestore) {
+      return { top: 0, left: 0 };
+    }
+    let { scrollTop: top, scrollLeft: left } = document.documentElement;
+    return { top, left };
+  },
+
+  save() {
+    if (this._key) {
+      this._offsets.set(this._key, this.getPosition());
+    }
+  },
+
+  restore() {
+    let { top = 0, left = 0 } = this._offsets.get(this._key) || {};
+    window.scrollTo({ top, left, behavior: "auto" });
+  },
+};
+
+/**
  * Called from extensions.js once, when about:addons is loading.
  */
 function initialize(opts) {
@@ -3193,7 +3232,7 @@ function initialize(opts) {
  * resolve once the view has been updated to conform with other about:addons
  * views.
  */
-async function show(type, param, { isKeyboardNavigation }) {
+async function show(type, param, { isKeyboardNavigation, historyEntryId }) {
   let container = document.createElement("div");
   container.setAttribute("current-view", type);
   if (type == "list") {
@@ -3222,10 +3261,26 @@ async function show(type, param, { isKeyboardNavigation }) {
   } else {
     throw new Error(`Unknown view type: ${type}`);
   }
+
+  ScrollOffsets.save();
+  ScrollOffsets.setView(historyEntryId);
   mainEl.textContent = "";
   mainEl.appendChild(container);
+
+  // Most content has been rendered at this point. The only exception are
+  // recommendations in the discovery pane and extension/theme list, because
+  // they rely on remote data. If loaded before, then these may be rendered
+  // within one tick, so wait a frame before restoring scroll offsets.
+  return new Promise(resolve => {
+    window.requestAnimationFrame(() => {
+      ScrollOffsets.restore();
+      resolve();
+    });
+  });
 }
 
 function hide() {
+  ScrollOffsets.save();
+  ScrollOffsets.setView(null);
   mainEl.textContent = "";
 }

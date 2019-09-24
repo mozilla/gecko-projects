@@ -20,22 +20,20 @@ function loginList() {
   ];
 }
 
-function openPopup(popup, browser) {
-  return new Promise(async resolve => {
-    let promiseShown = BrowserTestUtils.waitForEvent(popup, "popupshown");
+async function openPopup(popup, browser) {
+  let promiseShown = BrowserTestUtils.waitForEvent(popup, "popupshown");
 
-    await SimpleTest.promiseFocus(browser);
-    info("content window focused");
+  await SimpleTest.promiseFocus(browser);
+  info("content window focused");
 
-    // Focus the username field to open the popup.
-    await ContentTask.spawn(browser, null, function openAutocomplete() {
-      content.document.getElementById("form-basic-username").focus();
-    });
-
-    let shown = await promiseShown;
-    ok(shown, "autocomplete popup shown");
-    resolve(shown);
+  // Focus the username field to open the popup.
+  await ContentTask.spawn(browser, null, function openAutocomplete() {
+    content.document.getElementById("form-basic-username").focus();
   });
+
+  let shown = await promiseShown;
+  ok(shown, "autocomplete popup shown");
+  return shown;
 }
 
 /**
@@ -83,10 +81,14 @@ add_task(async function test_autocomplete_footer_onclick() {
         "Search string should be set to filter logins"
       );
 
+      // open_management + filter
+      await LoginTestUtils.telemetry.waitForEventCount(2);
+
       // Check event telemetry recorded when opening management UI
       TelemetryTestUtils.assertEvents(
         [["pwmgr", "open_management", "autocomplete"]],
-        { category: "pwmgr", method: "open_management" }
+        { category: "pwmgr", method: "open_management" },
+        { clear: true, process: "content" }
       );
 
       await passwordManager.close();
@@ -132,7 +134,8 @@ add_task(async function test_autocomplete_footer_keydown() {
       // Check event telemetry recorded when opening management UI
       TelemetryTestUtils.assertEvents(
         [["pwmgr", "open_management", "autocomplete"]],
-        { category: "pwmgr", method: "open_management" }
+        { category: "pwmgr", method: "open_management" },
+        { clear: true, process: "content" }
       );
 
       await passwordManager.close();

@@ -416,7 +416,7 @@ var TrackingProtection = {
     // not detect trackers on the page using the basic list, we currently
     // still show the panel. To reduce the confusion, tell the user that we have
     // not detected any tracker.
-    if (fragment.childNodes.length == 0) {
+    if (!fragment.childNodes.length) {
       let emptyBox = document.createXULElement("vbox");
       let emptyImage = document.createXULElement("image");
       emptyImage.classList.add("protections-popup-trackersView-empty-image");
@@ -945,13 +945,6 @@ var ThirdPartyCookies = {
 
 var SocialTracking = {
   PREF_ENABLED: "privacy.socialtracking.block_cookies.enabled",
-  PREF_NOTIFICATION_UI_ENABLED: "privacy.socialtracking.notification.enabled",
-  PREF_SESSION_PAGELOAD_MIN:
-    "privacy.socialtracking.notification.session.pageload.min",
-  PREF_LAST_SHOWN: "privacy.socialtracking.notification.lastShown",
-  PREF_PERIOD_MIN: "privacy.socialtracking.notification.period.min",
-  PREF_COUNTER: "privacy.socialtracking.notification.counter",
-  PREF_MAX: "privacy.socialtracking.notification.max",
 
   strings: {
     get subViewBlocked() {
@@ -976,12 +969,6 @@ var SocialTracking = {
     },
   },
 
-  sessionPageLoad: 0,
-
-  // points to the object of current showing popup, this is used to avoid
-  // another popup from showing when it's still visible.
-  currentPopup: null,
-
   init() {
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
@@ -991,39 +978,6 @@ var SocialTracking = {
       this.updateCategoryItem.bind(this)
     );
     this.updateCategoryItem();
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "uiEnabled",
-      this.PREF_NOTIFICATION_UI_ENABLED
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "sessionPageLoadMin",
-      this.PREF_SESSION_PAGELOAD_MIN
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "lastShownMillisec",
-      this.PREF_LAST_SHOWN,
-      null,
-      str => parseInt(str)
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "periodMinMillisec",
-      this.PREF_PERIOD_MIN
-    );
-
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "numNotifications",
-      this.PREF_COUNTER
-    );
-    XPCOMUtils.defineLazyPreferenceGetter(
-      this,
-      "maxNotifications",
-      this.PREF_MAX
-    );
   },
 
   updateCategoryItem() {
@@ -1127,106 +1081,6 @@ var SocialTracking = {
 
     return listItem;
   },
-
-  onBlocked() {
-    let nowMillisec = Date.now();
-    // The heuristics to show the pop-up are:
-    //   0. a social media tracker is blocked
-    //   1. user didn't disable notification UI by:
-    //      - check "don't show again"
-    //      - press "See Protections" button
-    //   2. only after the 4th page load
-    //   3. at most 1 time every 2 days
-    //   4. at most 5 times per profile
-    //   5. no other popup is showing
-    if (
-      !this.uiEnabled ||
-      this.sessionPageLoad <= this.sessionPageLoadMin ||
-      nowMillisec - this.lastShownMillisec < this.periodMinMillisec ||
-      this.numNotifications >= this.maxNotifications ||
-      this.currentPopup
-    ) {
-      return;
-    }
-
-    Services.prefs.setCharPref(this.PREF_LAST_SHOWN, nowMillisec.toString());
-    Services.prefs.setIntPref(this.PREF_COUNTER, this.numNotifications + 1);
-
-    let browser = gBrowser.selectedBrowser;
-    let learnMoreURL =
-      Services.urlFormatter.formatURLPref("app.support.baseURL") +
-      "social-media-tracking-report";
-
-    let mainAction = {
-      label: gNavigatorBundle.getString(
-        "contentBlocking.socialblock.primaryButton.label"
-      ),
-      accessKey: gNavigatorBundle.getString(
-        "contentBlocking.socialblock.primaryButton.accesskey"
-      ),
-      callback: arg => {
-        let { event } = arg;
-
-        Services.prefs.setBoolPref(this.PREF_NOTIFICATION_UI_ENABLED, false);
-
-        gProtectionsHandler.showProtectionsPopup({ event });
-      },
-    };
-
-    let secondaryAction = {
-      label: gNavigatorBundle.getString(
-        "contentBlocking.socialblock.secondaryButton.label"
-      ),
-      accessKey: gNavigatorBundle.getString(
-        "contentBlocking.socialblock.secondaryButton.accessKey"
-      ),
-      callback: arg => {
-        Services.prefs.setBoolPref(this.PREF_NOTIFICATION_UI_ENABLED, false);
-      },
-    };
-
-    let brandBundle = document.getElementById("bundle_brand");
-    let brandShortName = brandBundle.getString("brandShortName");
-    let options = {
-      hideClose: true,
-      removeOnDismissal: true,
-      learnMoreURL,
-      name: gNavigatorBundle.getFormattedString(
-        "contentBlocking.socialblock.title",
-        [brandShortName]
-      ),
-
-      eventCallback: state => {
-        switch (state) {
-          case "showing":
-            let doc = browser.ownerDocument;
-            let message = doc.getElementById("socialblock-message");
-            message.textContent = gNavigatorBundle.getFormattedString(
-              "contentBlocking.socialblock.prompt",
-              [brandShortName]
-            );
-            break;
-          case "removed":
-            this.currentPopup = null;
-            break;
-        }
-      },
-    };
-
-    // Make gIdentityHandler._trackingProtectionIconContainer as anchor object.
-    let anchorId = "stp";
-    browser[anchorId + "popupnotificationanchor"] = gProtectionsHandler.iconBox;
-
-    this.currentPopup = PopupNotifications.show(
-      browser,
-      "socialblock",
-      "",
-      anchorId,
-      mainAction,
-      [secondaryAction],
-      options
-    );
-  },
 };
 
 /**
@@ -1254,12 +1108,6 @@ var gProtectionsHandler = {
     delete this.animatedIcon;
     return (this.animatedIcon = document.getElementById(
       "tracking-protection-icon-animatable-image"
-    ));
-  },
-  get appMenuLabel() {
-    delete this.appMenuLabel;
-    return (this.appMenuLabel = document.getElementById(
-      "appMenu-protection-report-text"
     ));
   },
   get _protectionsIconBox() {
@@ -1370,16 +1218,6 @@ var gProtectionsHandler = {
       "tracking-protection-icon-tooltip-label"
     ));
   },
-  get _socialblockPopupNotification() {
-    delete this._socialblockPopupNotification;
-    return (this._socialblockPopupNotification = document.getElementById(
-      "socialblock-notification"
-    ));
-  },
-
-  get _socialTrackingSessionPageLoad() {
-    return SocialTracking.sessionPageLoad;
-  },
 
   get noTrackersDetectedDescription() {
     delete this.noTrackersDetectedDescription;
@@ -1400,20 +1238,6 @@ var gProtectionsHandler = {
   },
 
   strings: {
-    get appMenuTitle() {
-      delete this.appMenuTitle;
-      return (this.appMenuTitle = gNavigatorBundle.getString(
-        "protectionReport.title"
-      ));
-    },
-
-    get appMenuTooltip() {
-      delete this.appMenuTooltip;
-      return (this.appMenuTooltip = gNavigatorBundle.getString(
-        "protectionReport.tooltip"
-      ));
-    },
-
     get activeTooltipText() {
       delete this.activeTooltipText;
       return (this.activeTooltipText = gNavigatorBundle.getString(
@@ -1483,9 +1307,6 @@ var gProtectionsHandler = {
     let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
     gProtectionsHandler._protectionsPopupSendReportLearnMore.href =
       baseURL + "blocking-breakage";
-
-    this.appMenuLabel.setAttribute("value", this.strings.appMenuTitle);
-    this.appMenuLabel.setAttribute("tooltiptext", this.strings.appMenuTooltip);
 
     // Add an observer to observe that the history has been cleared.
     Services.obs.addObserver(this, "browser:purge-session-history");
@@ -1612,8 +1433,6 @@ var gProtectionsHandler = {
       // remain collapsed.
       ToolbarPanelHub.insertProtectionPanelMessage(event);
 
-      this.reorderCategoryItems();
-
       if (!event.target.hasAttribute("toast")) {
         Services.telemetry.recordEvent(
           "security.ui.protectionspopup",
@@ -1663,10 +1482,6 @@ var gProtectionsHandler = {
 
   // This triggers from top level location changes.
   onLocationChange() {
-    if (["http", "https"].includes(gBrowser.currentURI.scheme)) {
-      SocialTracking.sessionPageLoad += 1;
-    }
-
     if (this._showToastAfterRefresh) {
       this._showToastAfterRefresh = false;
 
@@ -1736,7 +1551,7 @@ var gProtectionsHandler = {
     }
 
     this._categoryItemOrderInvalidated = true;
-    if (this._protectionsPopup.state == "open") {
+    if (["showing", "open"].includes(this._protectionsPopup.state)) {
       this.reorderCategoryItems();
     }
 
@@ -1803,8 +1618,23 @@ var gProtectionsHandler = {
       );
     }
 
-    if (SocialTracking.isBlocking(event)) {
-      SocialTracking.onBlocked();
+    if (
+      Cryptomining.isBlocking(event) ||
+      Fingerprinting.isBlocking(event) ||
+      SocialTracking.isBlocking(event)
+    ) {
+      let uri = gBrowser.currentURI;
+      let uriHost = uri.asciiHost ? uri.host : uri.spec;
+      Services.obs.notifyObservers(
+        {
+          wrappedJSObject: {
+            browser: gBrowser.selectedBrowser,
+            host: uriHost,
+            event,
+          },
+        },
+        "SiteProtection:ContentBlockingEvent"
+      );
     }
 
     // We report up to one instance of fingerprinting and cryptomining
@@ -1897,14 +1727,6 @@ var gProtectionsHandler = {
     // here.
     this._protectionsPopupTPSwitchSection.toggleAttribute(
       "short",
-      !currentlyEnabled
-    );
-
-    // Show the blue dot indicator if the protection is disabled. We need this
-    // in addition to the 'enabled' attribute of the TP switch section due to
-    // the blue dot won't be shown in the case that TP switch to off from on.
-    this._protectionsPopupTPSwitch.toggleAttribute(
-      "showdotindicator",
       !currentlyEnabled
     );
 

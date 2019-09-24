@@ -279,6 +279,10 @@ struct ReplacementChannelConfigInit
   nsCString? method;
   nsIReferrerInfo referrerInfo;
   TimedChannelInfo? timedChannel;
+  nsIInputStream uploadStream;
+  bool uploadStreamHasHeaders;
+  nsCString? contentType;
+  nsCString? contentLength;
 };
 
 } // namespace dom

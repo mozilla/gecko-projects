@@ -96,13 +96,6 @@ static bool GenerateCraneliftCode(WasmMacroAssembler& masm,
   uint32_t codeEnd = masm.currentOffset();
 #endif
 
-  // Cranelift isn't aware of pinned registers in general, so we need to reload
-  // both TLS and pinned regs from the stack.
-  // TODO(bug 1507820): We should teach Cranelift to reload this register
-  // itself, so we don't have to do it manually.
-  masm.loadWasmTlsRegFromFrame();
-  masm.loadWasmPinnedRegsFromTls();
-
   wasm::GenerateFunctionEpilogue(masm, func.framePushed, offsets);
 
   if (func.numRodataRelocs > 0) {
@@ -293,6 +286,7 @@ CraneliftStaticEnvironment::CraneliftStaticEnvironment()
 #endif
       staticMemoryBound(0),
       memoryGuardSize(0),
+      memoryBaseTlsOffset(offsetof(TlsData, memoryBase)),
       instanceTlsOffset(offsetof(TlsData, instance)),
       interruptTlsOffset(offsetof(TlsData, interrupt)),
       cxTlsOffset(offsetof(TlsData, cx)),
@@ -433,7 +427,7 @@ bool wasm::CraneliftCompileFunctions(const ModuleEnvironment& env,
     uint32_t totalCodeSize = masm.currentOffset();
     uint8_t* codeBuf = (uint8_t*)js_malloc(totalCodeSize);
     if (codeBuf) {
-      masm.executableCopy(codeBuf, totalCodeSize);
+      masm.executableCopy(codeBuf);
 
       const CodeRangeVector& codeRanges = code->codeRanges;
       MOZ_ASSERT(codeRanges.length() >= inputs.length());

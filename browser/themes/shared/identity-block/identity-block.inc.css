@@ -169,7 +169,8 @@
 #identity-box[pageproxystate="valid"].weakCipher > #identity-icon,
 #identity-box[pageproxystate="valid"].mixedDisplayContent > #identity-icon,
 #identity-box[pageproxystate="valid"].mixedDisplayContentLoadedActiveBlocked > #identity-icon,
-#identity-box[pageproxystate="valid"].certUserOverridden > #identity-icon {
+#identity-box[pageproxystate="valid"].certUserOverridden > #identity-icon,
+#identity-box[pageproxystate="valid"].certErrorPage > #identity-icon {
   list-style-image: url(chrome://browser/skin/connection-mixed-passive-loaded.svg);
   fill: unset;
 }
@@ -250,6 +251,7 @@
 }
 
 #tracking-protection-icon-box > #tracking-protection-icon-animatable-box {
+  display: block;
   position: absolute;
   overflow: hidden;
   width: 16px;
@@ -264,16 +266,6 @@
   height: 16px;
   min-height: 16px;
   -moz-context-properties: fill, fill-opacity;
-}
-
-#tracking-protection-icon-box[hasException]::before {
-  background: url(chrome://browser/skin/badge-blue.svg);
-  content: "";
-  position: absolute;
-  bottom: 15px;
-  right: 0;
-  height: 14px;
-  width: 14px;
 }
 
 #tracking-protection-icon-box[hasException]:-moz-locale-dir(rtl)::before {

@@ -13,6 +13,7 @@
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/LocationBase.h"
+#include "mozilla/dom/UserActivation.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsID.h"
@@ -213,12 +214,14 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   already_AddRefed<BrowsingContext> GetOpener() const {
     RefPtr<BrowsingContext> opener(Get(mOpenerId));
     if (!mIsDiscarded && opener && !opener->mIsDiscarded) {
+      MOZ_DIAGNOSTIC_ASSERT(opener->mType == mType);
       return opener.forget();
     }
     return nullptr;
   }
   void SetOpener(BrowsingContext* aOpener) {
     MOZ_DIAGNOSTIC_ASSERT(!aOpener || aOpener->Group() == Group());
+    MOZ_DIAGNOSTIC_ASSERT(!aOpener || aOpener->mType == mType);
     SetOpenerId(aOpener ? aOpener->Id() : 0);
   }
 
@@ -280,10 +283,19 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // activation flag of the top level browsing context.
   void NotifyResetUserGestureActivation();
 
+  // Return true if its corresponding document has been activated by user
+  // gesture.
+  bool HasBeenUserGestureActivated();
+
   // Return true if its corresponding document has transient user gesture
   // activation and the transient user gesture activation haven't yet timed
   // out.
   bool HasValidTransientUserGestureActivation();
+
+  // Return true if the corresponding document has valid transient user gesture
+  // activation and the transient user gesture activation had been consumed
+  // successfully.
+  bool ConsumeTransientUserGestureActivation();
 
   // Return the window proxy object that corresponds to this browsing context.
   inline JSObject* GetWindowProxy() const { return mWindowProxy; }
@@ -358,8 +370,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
     // in all processes. This method will call the correct `MaySet` and
     // `DidSet` methods, as well as move the value.
     //
+    // If the target has been discarded, changes will be ignored.
+    //
     // NOTE: This method mutates `this`, resetting all members to `Nothing()`
-    void Commit(BrowsingContext* aOwner);
+    nsresult Commit(BrowsingContext* aOwner);
 
     // This method should be called before invoking `Apply` on this transaction
     // object.
@@ -452,9 +466,6 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   BrowsingContext* FindWithNameInSubtree(const nsAString& aName,
                                          BrowsingContext& aRequestingContext);
 
-  // Removes the context from its group and sets mIsDetached to true.
-  void Unregister();
-
   friend class ::nsOuterWindowProxy;
   friend class ::nsGlobalWindowOuter;
   // Update the window proxy object that corresponds to this browsing context.
@@ -505,8 +516,7 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
     return true;
   }
 
-  // Ensure that we only set the flag on the top level browsing context.
-  void DidSetIsActivatedByUserGesture();
+  void DidSetUserActivationState();
 
   // Ensure that we only set the flag on the top level browsingContext.
   // And then, we do a pre-order walk in the tree to refresh the

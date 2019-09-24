@@ -353,15 +353,14 @@ void nsGenericHTMLFrameElement::AfterMaybeChangeAttr(
         LoadSrc();
       }
     } else if (aName == nsGkAtoms::name) {
-      // Propagate "name" to the docshell to make browsing context names live,
-      // per HTML5.
-      nsIDocShell* docShell =
-          mFrameLoader ? mFrameLoader->GetExistingDocShell() : nullptr;
-      if (docShell) {
+      // Propagate "name" to the browsing context per HTML5.
+      RefPtr<BrowsingContext> bc =
+          mFrameLoader ? mFrameLoader->GetBrowsingContext() : nullptr;
+      if (bc) {
         if (aValue) {
-          docShell->SetName(aValue->String());
+          bc->SetName(aValue->String());
         } else {
-          docShell->SetName(EmptyString());
+          bc->SetName(EmptyString());
         }
       }
     }
@@ -385,7 +384,7 @@ nsresult nsGenericHTMLFrameElement::CopyInnerTo(Element* aDest) {
   if (doc->IsStaticDocument() && mFrameLoader) {
     nsGenericHTMLFrameElement* dest =
         static_cast<nsGenericHTMLFrameElement*>(aDest);
-    nsFrameLoader* fl = nsFrameLoader::Create(dest, nullptr, false);
+    RefPtr<nsFrameLoader> fl = nsFrameLoader::Create(dest, nullptr, false);
     NS_ENSURE_STATE(fl);
     dest->mFrameLoader = fl;
     mFrameLoader->CreateStaticClone(fl);

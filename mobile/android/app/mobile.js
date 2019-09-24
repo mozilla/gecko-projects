@@ -80,7 +80,6 @@ pref("image.cache.size", 1048576); // bytes
 /* offline cache prefs */
 pref("browser.offline-apps.notify", true);
 pref("browser.cache.offline.capacity", 5120); // kilobytes
-pref("offline-apps.quota.warn", 1024); // kilobytes
 
 // Automatically shrink-to-fit image documents.
 pref("browser.enable_automatic_image_resizing", true);
@@ -135,6 +134,7 @@ pref("urlclassifier.downloadAllowTable", "");
 pref("urlclassifier.downloadBlockTable", "");
 
 /* these should help performance */
+pref("layout.reflow.synthMouseMove", false); // Keep false until bug 1582363 is fixed
 pref("layout.css.report_errors", false);
 
 /* download manager (don't show the window or alert) */
@@ -513,9 +513,6 @@ pref("layers.low-precision-opacity", "1.0");
 // work harder keep scrolling smooth and memory low.
 pref("layers.max-active", 20);
 
-// Use containerless scrolling on Fennec.
-pref("layout.scroll.root-frame-containers", false);
-
 pref("notification.feature.enabled", true);
 pref("dom.webnotifications.enabled", true);
 
@@ -695,12 +692,6 @@ pref("dom.phonenumber.substringmatching.CO", 10);
 pref("dom.phonenumber.substringmatching.VE", 7);
 
 pref("gfx.canvas.azure.backends", "skia");
-
-// See ua-update.json.in for the packaged UA override list
-pref("general.useragent.updates.enabled", true);
-pref("general.useragent.updates.url", "https://dynamicua.cdn.mozilla.net/0/%APP_ID%");
-pref("general.useragent.updates.interval", 604800); // 1 week
-pref("general.useragent.updates.retry", 86400); // 1 day
 
 // When true, phone number linkification is enabled.
 pref("browser.ui.linkify.phone", false);

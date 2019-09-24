@@ -219,9 +219,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD GetResponseStatusText(nsACString& aValue) override;
   NS_IMETHOD GetRequestSucceeded(bool* aValue) override;
   NS_IMETHOD RedirectTo(nsIURI* newURI) override;
-  NS_IMETHOD SwitchProcessTo(mozilla::dom::Promise* aBrowserParent,
-                             uint64_t aIdentifier) override;
-  NS_IMETHOD HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) override;
   NS_IMETHOD UpgradeToSecure() override;
   NS_IMETHOD GetRequestContextID(uint64_t* aRCID) override;
   NS_IMETHOD GetTransferSize(uint64_t* aTransferSize) override;
@@ -248,6 +245,10 @@ class HttpBaseChannel : public nsHashPropertyBag,
       nsIHttpChannel::FlashPluginState* aState) override;
 
   using nsIHttpChannel::IsThirdPartyTrackingResource;
+
+  virtual void SetSource(UniqueProfilerBacktrace aSource) override {
+    mSource = std::move(aSource);
+  }
 
   // nsIHttpChannelInternal
   NS_IMETHOD GetDocumentURI(nsIURI** aDocumentURI) override;
@@ -490,6 +491,10 @@ class HttpBaseChannel : public nsHashPropertyBag,
     Maybe<nsCString> method;
     nsCOMPtr<nsIReferrerInfo> referrerInfo;
     Maybe<dom::TimedChannelInfo> timedChannel;
+    nsCOMPtr<nsIInputStream> uploadStream;
+    bool uploadStreamHasHeaders;
+    Maybe<nsCString> contentType;
+    Maybe<nsCString> contentLength;
 
     dom::ReplacementChannelConfigInit Serialize();
   };
@@ -500,8 +505,15 @@ class HttpBaseChannel : public nsHashPropertyBag,
       bool aPreserveMethod, uint32_t aRedirectFlags,
       uint32_t aExtraLoadFlags = 0);
 
+  enum class ConfigureReason {
+    Redirect,
+    InternalRedirect,
+    DocumentChannelReplacement,
+  };
+
   static void ConfigureReplacementChannel(nsIChannel*,
-                                          const ReplacementChannelConfig&);
+                                          const ReplacementChannelConfig&,
+                                          ConfigureReason);
 
   // Called before we create the redirect target channel.
   already_AddRefed<nsILoadInfo> CloneLoadInfoForRedirect(
@@ -721,6 +733,8 @@ class HttpBaseChannel : public nsHashPropertyBag,
   Atomic<uint32_t, ReleaseAcquire> mThirdPartyClassificationFlags;
   Atomic<uint32_t, ReleaseAcquire> mFlashPluginState;
 
+  UniqueProfilerBacktrace mSource;
+
   uint32_t mLoadFlags;
   uint32_t mCaps;
   uint32_t mClassOfService;
@@ -772,6 +786,10 @@ class HttpBaseChannel : public nsHashPropertyBag,
   // If true, we behave as if the LOAD_FROM_CACHE flag has been set.
   // Used to enforce that flag's behavior but not expose it externally.
   uint32_t mAllowStaleCacheContent : 1;
+
+  // If true, we prefer the LOAD_FROM_CACHE flag over LOAD_BYPASS_CACHE or
+  // LOAD_BYPASS_LOCAL_CACHE.
+  uint32_t mPreferCacheLoadOverBypass : 1;
 
   // True iff this request has been calculated in its request context as
   // a non tail request.  We must remove it again when this channel is done.

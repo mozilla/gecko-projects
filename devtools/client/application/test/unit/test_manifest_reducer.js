@@ -7,7 +7,11 @@ const {
   FETCH_MANIFEST_FAILURE,
   FETCH_MANIFEST_START,
   FETCH_MANIFEST_SUCCESS,
+  RESET_MANIFEST,
+  MANIFEST_MEMBER_VALUE_TYPES,
 } = require("devtools/client/application/src/constants.js");
+
+const { STRING, COLOR } = MANIFEST_MEMBER_VALUE_TYPES;
 
 const {
   manifestReducer,
@@ -24,7 +28,7 @@ const MANIFEST_PROCESSING = [
   {
     source: { name: "Foo" },
     processed: {
-      identity: [{ key: "name", value: "Foo" }],
+      identity: [{ key: "name", value: "Foo", type: STRING }],
     },
   },
   // manifest with two members from the same category
@@ -35,8 +39,8 @@ const MANIFEST_PROCESSING = [
     },
     processed: {
       identity: [
-        { key: "short_name", value: "Short Foo" },
-        { key: "name", value: "Long Foo" },
+        { key: "short_name", value: "Short Foo", type: STRING },
+        { key: "name", value: "Long Foo", type: STRING },
       ],
     },
   },
@@ -47,8 +51,10 @@ const MANIFEST_PROCESSING = [
       background_color: "#FF0000",
     },
     processed: {
-      identity: [{ key: "name", value: "Foo" }],
-      presentation: [{ key: "background_color", value: "#FF0000" }],
+      identity: [{ key: "name", value: "Foo", type: STRING }],
+      presentation: [
+        { key: "background_color", value: "#FF0000", type: COLOR },
+      ],
     },
   },
   // manifest with icons
@@ -131,6 +137,20 @@ add_task(async function() {
   MANIFEST_PROCESSING.forEach(({ source, processed }) => {
     test_manifest_processing(source, processed);
   });
+});
+
+add_task(async function() {
+  info("Test manifest reducer: RESET_MANIFEST action");
+
+  const state = Object.assign(ManifestState(), {
+    isLoading: true,
+    manifest: { identity: [{ key: "name", value: "Foo" }] },
+    errorMessage: "some error",
+  });
+  const action = { type: RESET_MANIFEST };
+  const newState = manifestReducer(state, action);
+
+  deepEqual(newState, ManifestState(), "Manifest has been reset to defaults");
 });
 
 function test_manifest_processing(source, processed) {

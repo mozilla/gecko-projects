@@ -642,7 +642,7 @@ var snapshotFormatters = {
         trs.push(buildRow(key, value));
       }
 
-      if (trs.length == 0) {
+      if (!trs.length) {
         $("graphics-" + id + "-tbody").style.display = "none";
         return;
       }
@@ -686,7 +686,7 @@ var snapshotFormatters = {
           }
 
           let contents;
-          if (entry.message.length > 0 && entry.message[0] == "#") {
+          if (entry.message.length && entry.message[0] == "#") {
             // This is a failure ID. See nsIGfxInfo.idl.
             let m = /#BLOCKLIST_FEATURE_FAILURE_BUG_(\d+)/.exec(entry.message);
             if (m) {
@@ -872,7 +872,8 @@ var snapshotFormatters = {
             "resource://gre/modules/kvstore.jsm"
           );
           let currProfDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
-          let path = currProfDir.path + "/mediacapabilities";
+          currProfDir.append("mediacapabilities");
+          let path = currProfDir.path;
 
           function enumerateDatabase(name) {
             KeyValueService.getOrCreate(path, name)
@@ -888,6 +889,9 @@ var snapshotFormatters = {
                 }
                 $("enumerate-database-result").textContent +=
                   logs.join("\n") + "\n";
+              })
+              .catch(err => {
+                $("enumerate-database-result").textContent += `${name}:\n`;
               });
           }
 
@@ -1323,7 +1327,7 @@ Serializer.prototype = {
         colHeadings[i] = this._nodeText(col).trim();
       }
     }
-    let hasColHeadings = Object.keys(colHeadings).length > 0;
+    let hasColHeadings = !!Object.keys(colHeadings).length;
     if (!hasColHeadings) {
       tableHeadingElem = null;
     }

@@ -1951,7 +1951,8 @@ void nsGlobalWindowInner::FireFrameLoadEvent(bool aIsTrusted) {
       return;
     }
 
-    mozilla::Unused << browserChild->SendFireFrameLoadEvent(aIsTrusted);
+    mozilla::Unused << browserChild->SendMaybeFireEmbedderLoadEvents(
+        aIsTrusted, /*aFireLoadAtEmbeddingElement*/ true);
   }
 }
 
@@ -4001,7 +4002,7 @@ nsGlobalWindowInner::GetExistingDebuggerNotificationManager() {
 
 Location* nsGlobalWindowInner::Location() {
   if (!mLocation) {
-    mLocation = new dom::Location(this, GetDocShell());
+    mLocation = new dom::Location(this, GetBrowsingContext());
   }
 
   return mLocation;
@@ -5865,9 +5866,9 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
   const char* reason = GetTimeoutReasonString(timeout);
 
 #ifdef MOZ_GECKO_PROFILER
-  nsCOMPtr<nsIDocShell> docShell = GetDocShell();
-  nsCString str;
-  if (profiler_is_active()) {
+  if (profiler_can_accept_markers()) {
+    nsCOMPtr<nsIDocShell> docShell = GetDocShell();
+    nsCString str;
     TimeDuration originalInterval = timeout->When() - timeout->SubmitTime();
     str.Append(reason);
     str.Append(" with interval ");
@@ -5876,10 +5877,10 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
     nsCString handlerDescription;
     timeout->mScriptHandler->GetDescription(handlerDescription);
     str.Append(handlerDescription);
+    AUTO_PROFILER_TEXT_MARKER_DOCSHELL_CAUSE("setTimeout callback", str, JS,
+                                             docShell,
+                                             timeout->TakeProfilerBacktrace());
   }
-  AUTO_PROFILER_TEXT_MARKER_DOCSHELL_CAUSE("setTimeout callback", str, JS,
-                                           docShell,
-                                           timeout->TakeProfilerBacktrace());
 #endif
 
   bool abortIntervalHandler;

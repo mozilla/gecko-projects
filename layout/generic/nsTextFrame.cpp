@@ -5368,15 +5368,31 @@ static void SetWidthIfLength(
 // https://drafts.csswg.org/css-text-decor-4/#underline-offset
 // params.defaultLineThickness should be set before calling
 // this function
+// On entry, aParams.offset is already initialized with the underlineOffset
+// from the font; this function may adjust it as appropriate.
 static void SetOffsetIfLength(const StyleTextDecorationLength& aOffset,
                               nsCSSRendering::DecorationRectParams& aParams,
+                              const gfxFont::Metrics& aFontMetrics,
                               const gfxFloat aAppUnitsPerDevPixel,
                               bool aIsSideways, bool aRightUnderline) {
-  // auto is from-font (the automatic offset is derived from font metrics) so we
-  // don't change the value unless it is a length
-  if (!aOffset.IsLength()) {
+  // `auto` is treated like `from-font`, except that (for horizontal/sideways
+  // text) we clamp the offset to a minimum of 1/16 em (equivalent to 1px at
+  // font-size 16px) to mitigate skip-ink issues with fonts that leave the
+  // underlineOffset field as zero.
+  if (aOffset.IsAuto()) {
+    if (!aParams.vertical || aIsSideways) {
+      aParams.offset =
+          std::min(aParams.offset, gfx::Float(-aFontMetrics.emHeight / 16.0));
+    }
     return;
   }
+
+  // If the value is `from-font`, just leave the font's value untouched.
+  if (aOffset.IsFromFont()) {
+    return;
+  }
+
+  MOZ_ASSERT(aOffset.IsLength(), "unexpected value type!");
 
   if (aParams.vertical && !aIsSideways &&
       aParams.decoration == StyleTextDecorationLine_UNDERLINE) {
@@ -5535,7 +5551,7 @@ void nsTextFrame::UnionAdditionalOverflow(nsPresContext* aPresContext,
             bool swapUnderline = verticalDec && IsUnderlineRight(this);
             if (swapUnderline ? lineType == StyleTextDecorationLine_OVERLINE
                               : lineType == StyleTextDecorationLine_UNDERLINE) {
-              SetOffsetIfLength(dec.mTextUnderlineOffset, params,
+              SetOffsetIfLength(dec.mTextUnderlineOffset, params, metrics,
                                 appUnitsPerDevUnit, parentWM.IsSideways(),
                                 swapUnderline);
             }
@@ -5754,7 +5770,8 @@ void nsTextFrame::DrawSelectionDecorations(
         WritingMode wm = GetWritingMode();
         params.offset = aFontMetrics.underlineOffset;
         SetOffsetIfLength(StyleText()->mTextUnderlineOffset, params,
-                          appUnitsPerDevPixel, wm.IsSideways(), swapUnderline);
+                          aFontMetrics, appUnitsPerDevPixel, wm.IsSideways(),
+                          swapUnderline);
       } else {
         params.offset = aFontMetrics.maxAscent;
       }
@@ -7038,7 +7055,7 @@ void nsTextFrame::DrawTextRunAndDecorations(
     bool swapUnderline = verticalDec && IsUnderlineRight(this);
     if (swapUnderline ? lineType == StyleTextDecorationLine_OVERLINE
                       : lineType == StyleTextDecorationLine_UNDERLINE) {
-      SetOffsetIfLength(dec.mTextUnderlineOffset, params,
+      SetOffsetIfLength(dec.mTextUnderlineOffset, params, metrics,
                         PresContext()->AppUnitsPerDevPixel(), wm.IsSideways(),
                         swapUnderline);
     }
@@ -7391,7 +7408,7 @@ bool nsTextFrame::CombineSelectionUnderlineRect(nsPresContext* aPresContext,
 
     bool swapUnderline = verticalRun && IsUnderlineRight(this);
     if (swapUnderline ? textDecs.HasOverline() : textDecs.HasUnderline()) {
-      SetOffsetIfLength(StyleText()->mTextUnderlineOffset, params,
+      SetOffsetIfLength(StyleText()->mTextUnderlineOffset, params, metrics,
                         aPresContext->AppUnitsPerDevPixel(), wm.IsSideways(),
                         swapUnderline);
     }
@@ -7576,7 +7593,8 @@ nsresult nsTextFrame::GetCharacterRectsInRange(int32_t aInOffset,
       gfxSkipCharsIterator nextIter(iter);
       nextIter.AdvanceOriginal(1);
       if (!nextIter.IsOriginalCharSkipped() &&
-          !mTextRun->IsClusterStart(nextIter.GetSkippedOffset())) {
+          !mTextRun->IsClusterStart(nextIter.GetSkippedOffset()) &&
+          nextIter.GetOriginalOffset() < kContentEnd) {
         FindClusterEnd(mTextRun, kContentEnd, &nextIter);
       }
 
@@ -9740,15 +9758,25 @@ static void TransformChars(nsTextFrame* aFrame, const nsStyleText* aStyle,
   }
 }
 
-static bool LineEndsInHardLineBreak(nsTextFrame* aFrame,
-                                    nsBlockFrame* aLineContainer) {
+static void LineStartsOrEndsAtHardLineBreak(nsTextFrame* aFrame,
+                                            nsBlockFrame* aLineContainer,
+                                            bool* aStartsAtHardBreak,
+                                            bool* aEndsAtHardBreak) {
   bool foundValidLine;
   nsBlockInFlowLineIterator iter(aLineContainer, aFrame, &foundValidLine);
   if (!foundValidLine) {
     NS_ERROR("Invalid line!");
-    return true;
+    *aStartsAtHardBreak = *aEndsAtHardBreak = true;
+    return;
   }
-  return !iter.GetLine()->IsLineWrapped();
+
+  *aEndsAtHardBreak = !iter.GetLine()->IsLineWrapped();
+  if (iter.Prev()) {
+    *aStartsAtHardBreak = !iter.GetLine()->IsLineWrapped();
+  } else {
+    // Hit block boundary
+    *aStartsAtHardBreak = true;
+  }
 }
 
 nsIFrame::RenderedText nsTextFrame::GetRenderedText(
@@ -9786,11 +9814,11 @@ nsIFrame::RenderedText nsTextFrame::GetRenderedText(
     }
     gfxSkipCharsIterator tmpIter = iter;
 
-    // Whether we need to trim whitespaces after the text frame.
-    bool trimAfter;
-    if (!textFrame->IsAtEndOfLine() ||
-        aTrimTrailingWhitespace != TrailingWhitespace::Trim) {
-      trimAfter = false;
+    // Check if the frame starts/ends at a hard line break, to determine
+    // whether whitespace should be trimmed.
+    bool startsAtHardBreak, endsAtHardBreak;
+    if (!(GetStateBits() & (TEXT_START_OF_LINE | TEXT_END_OF_LINE))) {
+      startsAtHardBreak = endsAtHardBreak = false;
     } else if (nsBlockFrame* thisLc =
                    do_QueryFrame(FindLineContainer(textFrame))) {
       if (thisLc != lineContainer) {
@@ -9799,17 +9827,31 @@ nsIFrame::RenderedText nsTextFrame::GetRenderedText(
         autoLineCursor.reset();
         autoLineCursor.emplace(lineContainer);
       }
-      trimAfter = LineEndsInHardLineBreak(textFrame, lineContainer);
+      LineStartsOrEndsAtHardLineBreak(textFrame, lineContainer,
+                                      &startsAtHardBreak, &endsAtHardBreak);
     } else {
       // Weird situation where we have a line layout without a block.
       // No soft breaks occur in this situation.
-      trimAfter = true;
+      startsAtHardBreak = endsAtHardBreak = true;
     }
 
-    // Skip to the start of the text run, past ignored chars at start of line
-    TrimmedOffsets trimmedOffsets = textFrame->GetTrimmedOffsets(
-        textFrag, (trimAfter ? TrimmedOffsetFlags::Default
-                             : TrimmedOffsetFlags::NoTrimAfter));
+    // Whether we need to trim whitespaces after the text frame.
+    // TrimmedOffsetFlags::Default will allow trimming; we set NoTrim* flags
+    // in the cases where this should not occur.
+    TrimmedOffsetFlags trimFlags = TrimmedOffsetFlags::Default;
+    if (!textFrame->IsAtEndOfLine() ||
+        aTrimTrailingWhitespace != TrailingWhitespace::Trim ||
+        !endsAtHardBreak) {
+      trimFlags |= TrimmedOffsetFlags::NoTrimAfter;
+    }
+
+    // Whether to trim whitespaces before the text frame.
+    if (!startsAtHardBreak) {
+      trimFlags |= TrimmedOffsetFlags::NoTrimBefore;
+    }
+
+    TrimmedOffsets trimmedOffsets =
+        textFrame->GetTrimmedOffsets(textFrag, trimFlags);
     bool trimmedSignificantNewline =
         trimmedOffsets.GetEnd() < GetContentEnd() &&
         HasSignificantTerminalNewline();

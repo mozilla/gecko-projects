@@ -47,6 +47,7 @@ gfxGDIFont::gfxGDIFont(GDIFontEntry* aFontEntry, const gfxFontStyle* aFontStyle,
       mFontFace(nullptr),
       mMetrics(nullptr),
       mSpaceGlyph(0),
+      mIsBitmap(false),
       mScriptCache(nullptr) {
   mNeedsSyntheticBold = aFontStyle->NeedsSyntheticBold(aFontEntry);
 
@@ -88,14 +89,6 @@ bool gfxGDIFont::ShapeText(DrawTarget* aDrawTarget, const char16_t* aText,
     return false;
   }
 
-  // Ensure the cairo font is set up, so there's no risk it'll fall back to
-  // creating a "toy" font internally (see bug 544617).
-  // We must check that this succeeded, otherwise we risk cairo creating the
-  // wrong kind of font internally as a fallback (bug 744480).
-  if (!SetupCairoFont(aDrawTarget)) {
-    return false;
-  }
-
   return gfxFont::ShapeText(aDrawTarget, aText, aOffset, aLength, aScript,
                             aVertical, aRounding, aShapedText);
 }
@@ -103,17 +96,6 @@ bool gfxGDIFont::ShapeText(DrawTarget* aDrawTarget, const char16_t* aText,
 const gfxFont::Metrics& gfxGDIFont::GetHorizontalMetrics() { return *mMetrics; }
 
 uint32_t gfxGDIFont::GetSpaceGlyph() { return mSpaceGlyph; }
-
-bool gfxGDIFont::SetupCairoFont(DrawTarget* aDrawTarget) {
-  if (!mScaledFont ||
-      cairo_scaled_font_status(mScaledFont) != CAIRO_STATUS_SUCCESS) {
-    // Don't cairo_set_scaled_font as that would propagate the error to
-    // the cairo_t, precluding any further drawing.
-    return false;
-  }
-  cairo_set_scaled_font(gfxFont::RefCairo(aDrawTarget), mScaledFont);
-  return true;
-}
 
 already_AddRefed<ScaledFont> gfxGDIFont::GetScaledFont(DrawTarget* aTarget) {
   if (!mAzureScaledFont) {
@@ -293,6 +275,8 @@ void gfxGDIFont::Initialize() {
     if (!(metrics.tmPitchAndFamily & TMPF_FIXED_PITCH)) {
       mMetrics->maxAdvance = mMetrics->aveCharWidth;
     }
+
+    mIsBitmap = !(metrics.tmPitchAndFamily & TMPF_VECTOR);
 
     // For fonts with USE_TYPO_METRICS set in the fsSelection field,
     // let the OS/2 sTypo* metrics override the previous values.
@@ -506,6 +490,50 @@ int32_t gfxGDIFont::GetGlyphWidth(uint16_t aGID) {
   }
 
   return -1;
+}
+
+bool gfxGDIFont::GetGlyphBounds(uint16_t aGID, gfxRect* aBounds, bool aTight) {
+  DCForMetrics dc;
+  AutoSelectFont fs(dc, GetHFONT());
+
+  if (mIsBitmap) {
+    int devWidth;
+    if (!GetCharWidthI(dc, aGID, 1, nullptr, &devWidth)) {
+      return false;
+    }
+    devWidth = std::min(std::max(0, devWidth), 0x7fff);
+
+    *aBounds = gfxRect(0, -mMetrics->maxAscent, devWidth,
+                       mMetrics->maxAscent + mMetrics->maxDescent);
+    return true;
+  }
+
+  const MAT2 kIdentityMatrix = {{0, 1}, {0, 0}, {0, 0}, {0, 1}};
+  GLYPHMETRICS gm;
+  if (GetGlyphOutlineW(dc, aGID, GGO_METRICS | GGO_GLYPH_INDEX, &gm, 0, nullptr,
+                       &kIdentityMatrix) == GDI_ERROR) {
+    return false;
+  }
+
+  if (gm.gmBlackBoxX == 1 && gm.gmBlackBoxY == 1 &&
+      !GetGlyphOutlineW(dc, aGID, GGO_NATIVE | GGO_GLYPH_INDEX, &gm, 0, nullptr,
+                        &kIdentityMatrix)) {
+    // Workaround for GetGlyphOutline returning 1x1 bounding box
+    // for <space> glyph that is in fact empty.
+    gm.gmBlackBoxX = 0;
+    gm.gmBlackBoxY = 0;
+  } else if (gm.gmBlackBoxX > 0 && !aTight) {
+    // The bounding box reported by Windows supposedly contains the glyph's
+    // "black" area; however, antialiasing (especially with ClearType) means
+    // that the actual image that needs to be rendered may "bleed" into the
+    // adjacent pixels, mainly on the right side.
+    gm.gmptGlyphOrigin.x -= 1;
+    gm.gmBlackBoxX += 3;
+  }
+
+  *aBounds = gfxRect(gm.gmptGlyphOrigin.x, -gm.gmptGlyphOrigin.y,
+                     gm.gmBlackBoxX, gm.gmBlackBoxY);
+  return true;
 }
 
 void gfxGDIFont::AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,

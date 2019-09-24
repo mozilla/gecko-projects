@@ -53,6 +53,14 @@ let RPMAccessManager = {
       getAppBuildID: ["yes"],
       recordTelemetryEvent: ["yes"],
     },
+    "about:neterror": {
+      getFormatURLPref: ["app.support.baseURL"],
+      getBoolPref: [
+        "security.ssl.errorReporting.enabled",
+        "security.ssl.errorReporting.automatic",
+        "security.certerror.hideAddException",
+      ],
+    },
     "about:privatebrowsing": {
       // "sendAsyncMessage": handled within AboutPrivateBrowsingHandler.jsm
       getFormatURLPref: ["app.support.baseURL"],
@@ -63,6 +71,7 @@ let RPMAccessManager = {
         "browser.contentblocking.report.lockwise.enabled",
         "browser.contentblocking.report.monitor.enabled",
         "privacy.socialtracking.block_cookies.enabled",
+        "browser.contentblocking.report.proxy.enabled",
       ],
       getStringPref: [
         "browser.contentblocking.category",
@@ -70,6 +79,7 @@ let RPMAccessManager = {
         "browser.contentblocking.report.monitor.url",
         "browser.contentblocking.report.monitor.sign_in_url",
         "browser.contentblocking.report.manage_devices.url",
+        "browser.contentblocking.report.proxy_extension.url",
       ],
       getFormatURLPref: [
         "browser.contentblocking.report.monitor.how_it_works.url",
@@ -97,6 +107,9 @@ let RPMAccessManager = {
     let uri = aPrincipal.URI.asciiSpec;
     if (uri.startsWith("about:certerror")) {
       uri = "about:certerror";
+    }
+    if (uri.startsWith("about:neterror")) {
+      uri = "about:neterror";
     }
 
     // check if there is an entry for that requestying URI in the accessMap;

@@ -361,17 +361,37 @@ void ContentCompositorBridgeParent::ShadowLayersUpdated(
 
   auto endTime = TimeStamp::Now();
 #ifdef MOZ_GECKO_PROFILER
-  if (profiler_is_active()) {
+  if (profiler_can_accept_markers()) {
     class ContentBuildPayload : public ProfilerMarkerPayload {
      public:
       ContentBuildPayload(const mozilla::TimeStamp& aStartTime,
                           const mozilla::TimeStamp& aEndTime)
           : ProfilerMarkerPayload(aStartTime, aEndTime) {}
-      virtual void StreamPayload(SpliceableJSONWriter& aWriter,
-                                 const TimeStamp& aProcessStartTime,
-                                 UniqueStacks& aUniqueStacks) override {
+      mozilla::BlocksRingBuffer::Length TagAndSerializationBytes()
+          const override {
+        return CommonPropsTagAndSerializationBytes();
+      }
+      void SerializeTagAndPayload(
+          mozilla::BlocksRingBuffer::EntryWriter& aEntryWriter) const override {
+        static const DeserializerTag tag = TagForDeserializer(Deserialize);
+        SerializeTagAndCommonProps(tag, aEntryWriter);
+      }
+      void StreamPayload(SpliceableJSONWriter& aWriter,
+                         const TimeStamp& aProcessStartTime,
+                         UniqueStacks& aUniqueStacks) const override {
         StreamCommonProps("CONTENT_FULL_PAINT_TIME", aWriter, aProcessStartTime,
                           aUniqueStacks);
+      }
+
+     private:
+      explicit ContentBuildPayload(CommonProps&& aCommonProps)
+          : ProfilerMarkerPayload(std::move(aCommonProps)) {}
+      static mozilla::UniquePtr<ProfilerMarkerPayload> Deserialize(
+          mozilla::BlocksRingBuffer::EntryReader& aEntryReader) {
+        ProfilerMarkerPayload::CommonProps props =
+            DeserializeCommonProps(aEntryReader);
+        return UniquePtr<ProfilerMarkerPayload>(
+            new ContentBuildPayload(std::move(props)));
       }
     };
     AUTO_PROFILER_STATS(add_marker_with_ContentBuildPayload);
@@ -607,10 +627,18 @@ bool ContentCompositorBridgeParent::DeallocPTextureParent(
 mozilla::ipc::IPCResult ContentCompositorBridgeParent::RecvInitPCanvasParent(
     Endpoint<PCanvasParent>&& aEndpoint) {
   MOZ_RELEASE_ASSERT(!mCanvasParent,
-                     "Canvas Parent should only be created once per "
-                     "CrossProcessCompositorBridgeParent.");
+                     "Canvas Parent must be released before recreating.");
 
   mCanvasParent = CanvasParent::Create(std::move(aEndpoint));
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult
+ContentCompositorBridgeParent::RecvReleasePCanvasParent() {
+  MOZ_RELEASE_ASSERT(mCanvasParent,
+                     "Canvas Parent hasn't been created.");
+
+  mCanvasParent = nullptr;
   return IPC_OK();
 }
 

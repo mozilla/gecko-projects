@@ -391,7 +391,7 @@ void IDBCursor::Continue(JSContext* aCx, JS::Handle<JS::Value> aKey,
 
   if (IsLocaleAware() && !key.IsUnset()) {
     Key tmp;
-    result = key.ToLocaleBasedKey(tmp, mSourceIndex->Locale(), aRv);
+    result = key.ToLocaleAwareKey(tmp, mSourceIndex->Locale(), aRv);
     if (!result.Is(Ok, aRv)) {
       if (result.Is(Invalid, aRv)) {
         aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
@@ -495,7 +495,7 @@ void IDBCursor::ContinuePrimaryKey(JSContext* aCx, JS::Handle<JS::Value> aKey,
 
   if (IsLocaleAware() && !key.IsUnset()) {
     Key tmp;
-    result = key.ToLocaleBasedKey(tmp, mSourceIndex->Locale(), aRv);
+    result = key.ToLocaleAwareKey(tmp, mSourceIndex->Locale(), aRv);
     if (!result.Is(Ok, aRv)) {
       if (result.Is(Invalid, aRv)) {
         aRv.Throw(NS_ERROR_DOM_INDEXEDDB_DATA_ERR);
@@ -570,7 +570,7 @@ void IDBCursor::Advance(uint32_t aCount, ErrorResult& aRv) {
   AssertIsOnOwningThread();
 
   if (!aCount) {
-    aRv.ThrowTypeError<MSG_INVALID_ADVANCE_COUNT>();
+    aRv.ThrowTypeError(u"0 (Zero) is not a valid advance count.");
     return;
   }
 

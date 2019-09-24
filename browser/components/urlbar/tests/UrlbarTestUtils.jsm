@@ -141,8 +141,8 @@ var UrlbarTestUtils = {
     let typeIconStyle = win.getComputedStyle(typeIcon);
     details.displayed = {
       title: element.getElementsByClassName("urlbarView-title")[0].textContent,
-      action: actions.length > 0 ? actions[0].textContent : null,
-      url: urls.length > 0 ? urls[0].textContent : null,
+      action: actions.length ? actions[0].textContent : null,
+      url: urls.length ? urls[0].textContent : null,
       typeIcon: typeIconStyle["background-image"],
     };
     details.element = {
@@ -169,29 +169,39 @@ var UrlbarTestUtils = {
 
   /**
    * Gets the currently selected element.
-   * @param {object} win The window containing the urlbar
-   * @returns {HtmlElement|XulElement} the selected element.
+   * @param {object} win The window containing the urlbar.
+   * @returns {HtmlElement|XulElement} The selected element.
    */
   getSelectedElement(win) {
-    return win.gURLBar.view._selected || null;
+    return win.gURLBar.view._selectedElement || null;
   },
 
   /**
-   * Gets the index of the currently selected item.
+   * Gets the currently selected row. If the selected element is a descendant of
+   * a row, this will return the ancestor row.
+   * @param {object} win The window containing the urlbar.
+   * @returns {HTMLElement|XulElement} The selected row.
+   */
+  getSelectedRow(win) {
+    return win.gURLBar.view._getSelectedRow() || null;
+  },
+
+  /**
+   * Gets the index of the currently selected element.
    * @param {object} win The window containing the urlbar.
    * @returns {number} The selected index.
    */
-  getSelectedIndex(win) {
-    return win.gURLBar.view.selectedIndex;
+  getSelectedRowIndex(win) {
+    return win.gURLBar.view.selectedRowIndex;
   },
 
   /**
-   * Selects the item at the index specified.
+   * Selects the element at the index specified.
    * @param {object} win The window containing the urlbar.
    * @param {index} index The index to select.
    */
-  setSelectedIndex(win, index) {
-    win.gURLBar.view.selectedIndex = index;
+  setSelectedRowIndex(win, index) {
+    win.gURLBar.view.selectedRowIndex = index;
   },
 
   /**

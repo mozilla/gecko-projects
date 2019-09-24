@@ -39,9 +39,7 @@ var security = {
       let certsStringURL = certs.map(elem => `cert=${elem}`);
       certsStringURL = certsStringURL.join("&");
       let url = `about:certificate?${certsStringURL}`;
-      openTrustedLinkIn(url, "tab", {
-        triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-      });
+      openTrustedLinkIn(url, "tab");
     } else {
       Services.ww.openWindow(
         window,
@@ -183,7 +181,7 @@ var security = {
     let usage = this.siteData.reduce((acc, site) => acc + site.usage, 0);
     if (usage > 0) {
       let size = DownloadUtils.convertByteUnits(usage);
-      let hasCookies = this.siteData.some(site => site.cookies.length > 0);
+      let hasCookies = this.siteData.some(site => !!site.cookies.length);
       if (hasCookies) {
         document.l10n.setAttributes(
           siteDataLabel,

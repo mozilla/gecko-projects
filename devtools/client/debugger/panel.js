@@ -93,7 +93,6 @@ DebuggerPanel.prototype = {
   },
 
   openInspector: async function() {
-    await this.toolbox.initInspector();
     this.toolbox.selectTool("inspector");
   },
 
@@ -167,6 +166,14 @@ DebuggerPanel.prototype = {
   selectSourceURL(url, line, column) {
     const cx = this._selectors.getContext(this._getState());
     return this._actions.selectSourceURL(cx, url, { line, column });
+  },
+
+  previewPausedLocation(location) {
+    return this._actions.previewPausedLocation(location);
+  },
+
+  clearPreviewPausedLocation() {
+    return this._actions.clearPreviewPausedLocation();
   },
 
   async selectSource(sourceId, line, column) {

@@ -48,6 +48,8 @@ if (isDevelopment()) {
   pref("devtools.debugger.map-scopes-enabled", false);
   pref("devtools.debugger.prefs-schema-version", prefsSchemaVersion);
   pref("devtools.debugger.skip-pausing", false);
+  pref("devtools.debugger.log-actions", true);
+  pref("devtools.debugger.log-event-breakpoints", false);
   pref("devtools.debugger.features.workers", true);
   pref("devtools.debugger.features.async-stepping", false);
   pref("devtools.debugger.features.wasm", true);
@@ -69,8 +71,8 @@ if (isDevelopment()) {
   pref("devtools.debugger.features.dom-mutation-breakpoints", true);
   pref("devtools.debugger.features.log-points", true);
   pref("devtools.debugger.features.inline-preview", true);
-  pref("devtools.debugger.log-actions", true);
   pref("devtools.debugger.features.overlay-step-buttons", true);
+  pref("devtools.debugger.features.watchpoints", false);
 }
 
 export const prefs = new PrefsHelper("devtools", {
@@ -112,6 +114,7 @@ export const prefs = new PrefsHelper("devtools", {
   skipPausing: ["Bool", "debugger.skip-pausing"],
   mapScopes: ["Bool", "debugger.map-scopes-enabled"],
   logActions: ["Bool", "debugger.log-actions"],
+  logEventBreakpoints: ["Bool", "debugger.log-event-breakpoints"],
 });
 
 export const features = new PrefsHelper("devtools.debugger.features", {
@@ -136,8 +139,9 @@ export const features = new PrefsHelper("devtools.debugger.features", {
   eventListenersBreakpoints: ["Bool", "event-listeners-breakpoints"],
   domMutationBreakpoints: ["Bool", "dom-mutation-breakpoints"],
   logPoints: ["Bool", "log-points"],
-  showOverlayStepButtons: ["Bool", "debugger.features.overlay-step-buttons"],
+  showOverlay: ["Bool", "overlay"],
   inlinePreview: ["Bool", "inline-preview"],
+  watchpoints: ["Bool", "watchpoints"],
 });
 
 export const asyncStore = asyncStoreHelper("debugger", {

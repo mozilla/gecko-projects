@@ -1346,7 +1346,6 @@ class Layer {
     return mScrollMetadata;
   }
   bool HasScrollableFrameMetrics() const;
-  bool HasRootScrollableFrameMetrics() const;
   bool IsScrollableWithoutContent() const;
   const EventRegions& GetEventRegions() const { return mEventRegions; }
   ContainerLayer* GetParent() { return mParent; }
@@ -2676,6 +2675,22 @@ class RefLayer : public ContainerLayer {
   }
 
   /**
+   * CONSTRUCTION PHASE ONLY
+   * Set remote subdocument iframe size.
+   */
+  void SetRemoteDocumentRect(const LayerIntRect& aRemoteDocumentRect) {
+    if (mRemoteDocumentRect.IsEqualEdges(aRemoteDocumentRect)) {
+      return;
+    }
+    mRemoteDocumentRect = aRemoteDocumentRect;
+    Mutated();
+  }
+
+  const LayerIntRect& GetRemoteDocumentRect() const {
+    return mRemoteDocumentRect;
+  }
+
+  /**
    * DRAWING PHASE ONLY
    * |aLayer| is the same as the argument to ConnectReferentLayer().
    */
@@ -2710,6 +2725,7 @@ class RefLayer : public ContainerLayer {
   // 0 is a special value that means "no ID".
   LayersId mId;
   EventRegionsOverride mEventRegionsOverride;
+  LayerIntRect mRemoteDocumentRect;
 };
 
 void SetAntialiasingFlags(Layer* aLayer, gfx::DrawTarget* aTarget);

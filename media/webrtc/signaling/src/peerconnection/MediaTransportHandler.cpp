@@ -72,7 +72,7 @@ class MediaTransportHandlerSTS : public MediaTransportHandler,
 
   // We will probably be able to move the proxy lookup stuff into
   // this class once we move mtransport to its own process.
-  void SetProxyServer(NrSocketProxyConfig&& aProxyConfig) override;
+  void SetProxyConfig(NrSocketProxyConfig&& aProxyConfig) override;
 
   void EnsureProvisionalTransport(const std::string& aTransportId,
                                   const std::string& aUfrag,
@@ -163,8 +163,6 @@ class MediaTransportHandlerSTS : public MediaTransportHandler,
   RefPtr<NrIceCtx> mIceCtx;
   RefPtr<NrIceResolver> mDNSResolver;
   std::map<std::string, Transport> mTransports;
-  bool mProxyOnlyIfBehindProxy = false;
-  bool mProxyOnly = false;
   bool mObfuscateHostAddresses = false;
 
   // mDNS Support
@@ -233,6 +231,9 @@ MediaTransportHandlerSTS::MediaTransportHandlerSTS(
   if (!mStsThread) {
     MOZ_CRASH();
   }
+
+  RLogConnector::CreateInstance();
+
   CSFLogDebug(LOGTAG, "%s done", __func__);
 
   // We do not set up mDNSService here, because we are not running on main (we
@@ -427,11 +428,6 @@ nsresult MediaTransportHandlerSTS::CreateIceCtx(
                                               __func__);
         }
 
-        mProxyOnlyIfBehindProxy = Preferences::GetBool(
-            "media.peerconnection.ice.proxy_only_if_behind_proxy", false);
-        mProxyOnly =
-            Preferences::GetBool("media.peerconnection.ice.proxy_only", false);
-
         mIceCtx->SignalGatheringStateChange.connect(
             this, &MediaTransportHandlerSTS::OnGatheringStateChange);
         mIceCtx->SignalConnectionStateChange.connect(
@@ -507,13 +503,13 @@ void MediaTransportHandlerSTS::Destroy() {
       [](const std::string& aError) {});
 }
 
-void MediaTransportHandlerSTS::SetProxyServer(
+void MediaTransportHandlerSTS::SetProxyConfig(
     NrSocketProxyConfig&& aProxyConfig) {
   mInitPromise->Then(
       mStsThread, __func__,
       [this, self = RefPtr<MediaTransportHandlerSTS>(this),
        aProxyConfig = std::move(aProxyConfig)]() mutable {
-        mIceCtx->SetProxyServer(std::move(aProxyConfig));
+        mIceCtx->SetProxyConfig(std::move(aProxyConfig));
       },
       [](const std::string& aError) {});
 }
@@ -654,17 +650,13 @@ void MediaTransportHandlerSTS::StartIceGathering(
   mInitPromise->Then(
       mStsThread, __func__,
       [=, self = RefPtr<MediaTransportHandlerSTS>(this)]() {
-        if (mIceCtx->GetProxyConfig() && mProxyOnlyIfBehindProxy) {
-          mProxyOnly = true;
-        }
-
         mObfuscateHostAddresses = aObfuscateHostAddresses;
 
         // Belt and suspenders - in e10s mode, the call below to SetStunAddrs
         // needs to have the proper flags set on ice ctx.  For non-e10s,
         // setting those flags happens in StartGathering.  We could probably
         // just set them here, and only do it here.
-        mIceCtx->SetCtxFlags(aDefaultRouteOnly, mProxyOnly);
+        mIceCtx->SetCtxFlags(aDefaultRouteOnly);
 
         if (aStunAddrs.Length()) {
           mIceCtx->SetStunAddrs(aStunAddrs);
@@ -672,8 +664,7 @@ void MediaTransportHandlerSTS::StartIceGathering(
 
         // Start gathering, but only if there are streams
         if (!mIceCtx->GetStreams().empty()) {
-          mIceCtx->StartGathering(aDefaultRouteOnly, mProxyOnly,
-                                  aObfuscateHostAddresses);
+          mIceCtx->StartGathering(aDefaultRouteOnly, aObfuscateHostAddresses);
           return;
         }
 
@@ -1080,9 +1071,6 @@ void MediaTransportHandlerSTS::ClearIceLog() {
 }
 
 void MediaTransportHandlerSTS::EnterPrivateMode() {
-  // Do this from calling thread, because that's what we do in CreateIceCtx...
-  RLogConnector::CreateInstance();
-
   if (!mStsThread->IsOnCurrentThread()) {
     mStsThread->Dispatch(
         WrapRunnable(RefPtr<MediaTransportHandlerSTS>(this),
@@ -1095,9 +1083,6 @@ void MediaTransportHandlerSTS::EnterPrivateMode() {
 }
 
 void MediaTransportHandlerSTS::ExitPrivateMode() {
-  // Do this from calling thread, because that's what we do in CreateIceCtx...
-  RLogConnector::CreateInstance();
-
   if (!mStsThread->IsOnCurrentThread()) {
     mStsThread->Dispatch(
         WrapRunnable(RefPtr<MediaTransportHandlerSTS>(this),

@@ -23,6 +23,7 @@
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefLocalizedString.h"
+#include "nsIProcessSwitchRequestor.h"
 #include "nsSocketProviderService.h"
 #include "nsISocketProvider.h"
 #include "nsPrintfCString.h"
@@ -381,24 +382,6 @@ void nsHttpHandler::SetFastOpenOSSupport() {
 #endif
   LOG(("nsHttpHandler::SetFastOpenOSSupport %s supported.\n",
        mFastOpenSupported ? "" : "not"));
-}
-
-void nsHttpHandler::EnsureUAOverridesInit() {
-  MOZ_ASSERT(XRE_IsParentProcess());
-  MOZ_ASSERT(NS_IsMainThread());
-
-  static bool initDone = false;
-
-  if (initDone) {
-    return;
-  }
-
-  nsresult rv;
-  nsCOMPtr<nsISupports> bootstrapper =
-      do_GetService("@mozilla.org/network/ua-overrides-bootstrapper;1", &rv);
-  MOZ_ASSERT(bootstrapper);
-  MOZ_ASSERT(NS_SUCCEEDED(rv));
-  initDone = true;
 }
 
 nsHttpHandler::~nsHttpHandler() {
@@ -822,6 +805,14 @@ void nsHttpHandler::NotifyObservers(nsIChannel* chan, const char* event) {
   LOG(("nsHttpHandler::NotifyObservers [chan=%p event=\"%s\"]\n", chan, event));
   nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
   if (obsService) obsService->NotifyObservers(chan, event, nullptr);
+}
+
+void nsHttpHandler::NotifyObservers(nsIProcessSwitchRequestor* request,
+                                    const char* event) {
+  LOG(("nsHttpHandler::NotifyObservers [request=%p event=\"%s\"]\n", request,
+       event));
+  nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
+  if (obsService) obsService->NotifyObservers(request, event, nullptr);
 }
 
 nsresult nsHttpHandler::AsyncOnChannelRedirect(
@@ -2062,11 +2053,6 @@ nsHttpHandler::NewProxiedChannel(nsIURI* uri, nsIProxyInfo* givenProxyInfo,
   if (!IsNeckoChild()) {
     // HACK: make sure PSM gets initialized on the main thread.
     net_EnsurePSMInit();
-  }
-
-  if (XRE_IsParentProcess()) {
-    // Load UserAgentOverrides.jsm before any HTTP request is issued.
-    EnsureUAOverridesInit();
   }
 
   uint64_t channelId;

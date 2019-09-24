@@ -318,6 +318,75 @@ applications-action-column =
     .label = Action
     .accesskey = A
 
+# Variables:
+#   $extension (String) - file extension (e.g .TXT)
+applications-file-ending = { $extension } file
+applications-action-save =
+    .label = Save File
+
+# Variables:
+#   $app-name (String) - Name of an application (e.g Adobe Acrobat)
+applications-use-app =
+    .label = Use { $app-name }
+
+# Variables:
+#   $app-name (String) - Name of an application (e.g Adobe Acrobat)
+applications-use-app-default =
+    .label = Use { $app-name } (default)
+
+applications-use-other =
+    .label = Use other…
+applications-select-helper = Select Helper Application
+
+applications-manage-app =
+    .label = Application Details…
+applications-always-ask =
+    .label = Always ask
+applications-type-pdf = Portable Document Format (PDF)
+
+# Variables:
+#   $type (String) - the MIME type (e.g application/binary)
+applications-type-pdf-with-type = { applications-type-pdf } ({ $type })
+
+# Variables:
+#   $type-description (String) - Description of the type (e.g "Portable Document Format")
+#   $type (String) - the MIME type (e.g application/binary)
+applications-type-description-with-type = { $type-description } ({ $type })
+
+# Variables:
+#   $plugin-name (String) - Name of a plugin (e.g Adobe Flash)
+applications-use-plugin-in =
+    .label = Use { $plugin-name } (in { -brand-short-name })
+applications-preview-inapp =
+    .label = Preview in { -brand-short-name }
+
+## The strings in this group are used to populate
+## selected label element based on the string from
+## the selected menu item.
+
+applications-use-plugin-in-label =
+    .value = { applications-use-plugin-in.label }
+
+applications-action-save-label =
+    .value = { applications-action-save.label }
+
+applications-use-app-label =
+    .value = { applications-use-app.label }
+
+applications-preview-inapp-label =
+    .value = { applications-preview-inapp.label }
+
+applications-always-ask-label =
+    .value = { applications-always-ask.label }
+
+applications-use-app-default-label =
+    .value = { applications-use-app-default.label }
+
+applications-use-other-label =
+    .value = { applications-use-other.label }
+
+##
+
 drm-content-header = Digital Rights Management (DRM) Content
 
 play-drm-content =
@@ -771,6 +840,9 @@ forms-master-pw-change =
     .label = Change Master Password…
     .accesskey = M
 
+forms-master-pw-fips-title = You are currently in FIPS mode. FIPS requires a non-empty Master Password.
+forms-master-pw-fips-desc = Password Change Failed
+
 ## Privacy Section - History
 
 history-header = History
@@ -902,17 +974,20 @@ content-blocking-section-top-level-description = Trackers follow you around onli
 
 content-blocking-learn-more = Learn more
 
-# The terminology used to refer to categories of Content Blocking is also used in chrome/browser/browser.properties and should be translated consistently.
+## These strings are used to define the different levels of
+## Enhanced Tracking Protection.
+
 # "Standard" in this case is an adjective, meaning "default" or "normal".
-content-blocking-setting-standard =
+enhanced-tracking-protection-setting-standard =
   .label = Standard
   .accesskey = d
-content-blocking-setting-strict =
+enhanced-tracking-protection-setting-strict =
   .label = Strict
   .accesskey = r
-content-blocking-setting-custom =
+enhanced-tracking-protection-setting-custom =
   .label = Custom
   .accesskey = C
+##
 
 content-blocking-etp-standard-desc = Balanced for protection and performance. Pages will load normally.
 content-blocking-etp-strict-desc = Stronger protection, but may cause some sites or content to break.

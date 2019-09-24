@@ -10,7 +10,6 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
-#include "mozilla/EventStateManager.h"
 #include "mozilla/Move.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Sprintf.h"
@@ -28,6 +27,7 @@
 #include "mozilla/dom/PromiseRejectionEvent.h"
 #include "mozilla/dom/PromiseRejectionEventBinding.h"
 #include "mozilla/dom/ScriptSettings.h"
+#include "mozilla/dom/UserActivation.h"
 #include "jsapi.h"
 #include "js/Debug.h"
 #include "js/GCAPI.h"
@@ -102,6 +102,9 @@ CycleCollectedJSContext::~CycleCollectedJSContext() {
 
   mUncaughtRejections.reset();
   mConsumedRejections.reset();
+
+  mAboutToBeNotifiedRejectedPromises.Clear();
+  mPendingUnhandledRejections.Clear();
 
   JS_DestroyContext(mJSContext);
   mJSContext = nullptr;

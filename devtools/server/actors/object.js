@@ -78,7 +78,6 @@ const proto = {
       getGripDepth,
       incrementGripDepth,
       decrementGripDepth,
-      getGlobalDebugObject,
     },
     conn
   ) {
@@ -98,7 +97,6 @@ const proto = {
       getGripDepth,
       incrementGripDepth,
       decrementGripDepth,
-      getGlobalDebugObject,
     };
     this._originalDescriptors = new Map();
   },
@@ -117,16 +115,16 @@ const proto = {
     }
     const desc = this.obj.getOwnPropertyDescriptor(property);
 
-    if (desc.set || desc.get) {
+    if (desc.set || desc.get || !desc.configurable) {
       return;
     }
 
     this._originalDescriptors.set(property, { desc, watchpointType });
 
-    const pauseAndRespond = () => {
+    const pauseAndRespond = type => {
       const frame = this.thread.dbg.getNewestFrame();
       this.thread._pauseAndRespond(frame, {
-        type: "watchpoint",
+        type: type,
         message: label,
       });
     };
@@ -139,7 +137,7 @@ const proto = {
           desc.value = v;
         }),
         get: this.obj.makeDebuggeeValue(() => {
-          pauseAndRespond();
+          pauseAndRespond("getWatchpoint");
           return desc.value;
         }),
       });
@@ -150,7 +148,7 @@ const proto = {
         configurable: desc.configurable,
         enumerable: desc.enumerable,
         set: this.obj.makeDebuggeeValue(v => {
-          pauseAndRespond();
+          pauseAndRespond("setWatchpoint");
           desc.value = v;
         }),
         get: this.obj.makeDebuggeeValue(v => {

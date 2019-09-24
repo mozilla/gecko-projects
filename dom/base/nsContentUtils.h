@@ -1958,12 +1958,6 @@ class nsContentUtils {
   static bool PrincipalAllowsL10n(nsIPrincipal* aPrincipal);
 
   /**
-   * If offline-apps.allow_by_default is true, we set offline-app permission
-   * for the principal and return true.  Otherwise false.
-   */
-  static bool MaybeAllowOfflineAppByDefault(nsIPrincipal* aPrincipal);
-
-  /**
    * Increases the count of blockers preventing scripts from running.
    * NOTE: You might want to use nsAutoScriptBlocker rather than calling
    * this directly
@@ -2465,10 +2459,12 @@ class nsContentUtils {
    * @param aValue    the string to check.
    * @param aPattern  the string defining the pattern.
    * @param aDocument the owner document of the element.
-   * @result          whether the given string is matches the pattern.
+   * @result          whether the given string is matches the pattern, or
+   *                  Nothing() if the pattern couldn't be evaluated.
    */
-  static bool IsPatternMatching(nsAString& aValue, nsAString& aPattern,
-                                const Document* aDocument);
+  static mozilla::Maybe<bool> IsPatternMatching(nsAString& aValue,
+                                                nsAString& aPattern,
+                                                const Document* aDocument);
 
   /**
    * Calling this adds support for
@@ -2820,14 +2816,15 @@ class nsContentUtils {
       bool* aPreventDefault, bool aIsDOMEventSynthesized,
       bool aIsWidgetEventSynthesized);
 
-  static void FirePageShowEvent(nsIDocShellTreeItem* aItem,
-                                mozilla::dom::EventTarget* aChromeEventHandler,
-                                bool aFireIfShowing,
-                                bool aOnlySystemGroup = false);
+  static void FirePageShowEventForFrameLoaderSwap(
+      nsIDocShellTreeItem* aItem,
+      mozilla::dom::EventTarget* aChromeEventHandler, bool aFireIfShowing,
+      bool aOnlySystemGroup = false);
 
-  static void FirePageHideEvent(nsIDocShellTreeItem* aItem,
-                                mozilla::dom::EventTarget* aChromeEventHandler,
-                                bool aOnlySystemGroup = false);
+  static void FirePageHideEventForFrameLoaderSwap(
+      nsIDocShellTreeItem* aItem,
+      mozilla::dom::EventTarget* aChromeEventHandler,
+      bool aOnlySystemGroup = false);
 
   static already_AddRefed<nsPIWindowRoot> GetWindowRoot(Document* aDoc);
 

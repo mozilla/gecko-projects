@@ -142,6 +142,7 @@ addonsManager:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     bug_numbers: [1433335, 1515697, 1523641, 1549770]
     release_channel_collection: opt-out
@@ -166,6 +167,7 @@ addonsManager:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     bug_numbers: [1433335, 1515697, 1523641, 1549770]
     release_channel_collection: opt-out
@@ -264,6 +266,7 @@ addonsManager:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     bug_numbers: [1544927]
     release_channel_collection: opt-out
@@ -284,6 +287,7 @@ addonsManager:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     bug_numbers: [1572711]
     release_channel_collection: opt-out
@@ -557,17 +561,17 @@ normandy:
 
 pwmgr:
   open_management:
-    objects: ["autocomplete", "capturedoorhanger", "contextmenu", "pageinfo", "preferences", "mainmenu", "fxamenu"]
+    objects: ["aboutprotections", "autocomplete", "capturedoorhanger", "contextmenu", "direct", "fxamenu", "mainmenu", "pageinfo", "preferences"]
     methods: ["open_management"]
     description: >
       Sent when opening the password management UI.
-    bug_numbers: [1543499, 1454733, 1545172]
+    bug_numbers: [1543499, 1454733, 1545172, 1550631]
     notification_emails: ["loines@mozilla.com", "passwords-dev@mozilla.org", "sfoster@mozilla.com"]
     products:
       - "firefox"
       - "fennec"
       - "geckoview"
-    record_in_processes: [main]
+    record_in_processes: [main, content]
     release_channel_collection: opt-out
     expiry_version: never
   mgmt_interaction:
@@ -577,6 +581,7 @@ pwmgr:
     extra_keys:
       breached: >
         Whether the login is marked as breached or not.
+      sort_key: The key that is used for sorting the login-list
     objects: [
       "existing_login",
       "list",
@@ -633,6 +638,7 @@ pwmgr:
     notification_emails: ["loines@mozilla.com", "passwords-dev@mozilla.org"]
     products:
       - "firefox"
+      - "thunderbird"
     record_in_processes: ["main"]
     release_channel_collection: opt-out
     expiry_version: never
@@ -715,6 +721,7 @@ telemetry.test:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     description: This is a test entry for Telemetry.
     expiry_version: never
@@ -730,6 +737,7 @@ telemetry.test:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     description: This is an opt-out test entry.
     expiry_version: never
@@ -743,6 +751,7 @@ telemetry.test:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     description: This is a test entry with an expired version.
     expiry_version: "3"
@@ -756,6 +765,7 @@ telemetry.test:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     expiry_version: "999"
   main_only:
@@ -766,6 +776,7 @@ telemetry.test:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     description: This event is used to test main-process only recording.
     expiry_version: never
@@ -777,6 +788,7 @@ telemetry.test:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["content"]
     description: This event is used to test content-process only recording.
     expiry_version: never
@@ -791,6 +803,7 @@ telemetry.test:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main", "content"]
     description: This event is used to test main and content process recording.
     expiry_version: never
@@ -802,6 +815,7 @@ telemetry.test:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     description: This event is used to test default products main recording.
     expiry_version: never
@@ -812,7 +826,7 @@ telemetry.test:
     record_in_processes: ["main"]
     description: This event is used to test desktop-only main recording.
     expiry_version: never
-    products: ["firefox"]
+    products: ["firefox","thunderbird"]
   multiproduct:
     objects: ["object1"]
     bug_numbers: [1452552]
@@ -820,7 +834,7 @@ telemetry.test:
     record_in_processes: ["main"]
     description: This event is used to test multiproduct main recording.
     expiry_version: never
-    products: ["firefox", "fennec", "geckoview"]
+    products: ["firefox", "fennec", "geckoview","thunderbird"]
   mobile_only:
     objects: ["object1"]
     bug_numbers: [1452552]
@@ -841,6 +855,7 @@ telemetry.test.second:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     description: This is a test entry for Telemetry.
     expiry_version: never
@@ -1483,67 +1498,6 @@ devtools.main:
       tool_id: The id of the panel the user was using
       session_id: The start time of the session in milliseconds since epoch (Unix Timestamp) e.g. 1396381378123.
 
-security.ui.certerror:
-  load:
-    objects: ["aboutcerterror"]
-    bug_numbers:
-      - 1484255
-      - 1505310
-      - 1553181
-    description: >
-      The about:certerror page is loaded, keyed by error code, see https://searchfox.org/mozilla-central/source/security/nss/lib/mozpkix/include/pkix/Result.h
-    expiry_version: "72"
-    notification_emails:
-      - jhofmann@mozilla.com
-      - rtestard@mozilla.com
-      - seceng-telemetry@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - "firefox"
-      - "fennec"
-      - "geckoview"
-    record_in_processes: ["content"]
-    products:
-      - firefox
-    extra_keys:
-      is_frame: If the error page is loaded in an iframe.
-      has_sts: If the error page is for a site with HSTS headers or with a pinned key.
-  click:
-    objects: [
-      "advanced_button",
-      "exception_button",
-      "return_button_top",
-      "return_button_adv",
-      "learn_more_link",
-      "auto_report_cb",
-      "error_code_link",
-      "clipboard_button_top",
-      "clipboard_button_bot",
-    ]
-    bug_numbers:
-      - 1484255
-      - 1505310
-      - 1553181
-    description: >
-      User interaction by click events on the cert error page. Keyed by error code, see https://searchfox.org/mozilla-central/source/security/nss/lib/mozpkix/include/pkix/Result.h
-    expiry_version: "72"
-    notification_emails:
-      - jhofmann@mozilla.com
-      - rtestard@mozilla.com
-      - seceng-telemetry@mozilla.com
-    release_channel_collection: opt-out
-    products:
-      - "firefox"
-      - "fennec"
-      - "geckoview"
-    record_in_processes: ["content"]
-    products:
-      - firefox
-    extra_keys:
-      is_frame: If the error page is loaded in an iframe.
-      has_sts: If the error page is for a site with HSTS headers or with a pinned key.
-      panel_open: If the advanced panel was open at the time of the interaction.
-
 security.ui.protections:
   show:
     objects: [
@@ -1608,50 +1562,6 @@ security.ui.protections:
       - firefox
     extra_keys:
       category: The category of protections the user is in, standard, strict or custom.
-
-security.ui.identitypopup:
-  open:
-    objects: ["identity_popup"]
-    bug_numbers:
-      - 1484251
-      - 1522256
-      - 1522919
-      - 1553181
-      - 1562575
-    description: >
-      How many times the control center was opened.
-    expiry_version: "72"
-    notification_emails:
-      - jhofmann@mozilla.com
-      - pdol@mozilla.com
-      - seceng-telemetry@mozilla.com
-    release_channel_collection: opt-in
-    record_in_processes:
-      - main
-    products:
-      - firefox
-  click:
-    objects: [
-      "permission_prefs_btn",
-      "clear_sitedata",
-      "security_subview_btn",
-    ]
-    bug_numbers:
-      - 1484251
-      - 1553181
-      - 1562575
-    description: >
-      User interaction by click events in the identity popup.
-    expiry_version: "72"
-    notification_emails:
-      - jhofmann@mozilla.com
-      - pdol@mozilla.com
-      - seceng-telemetry@mozilla.com
-    release_channel_collection: opt-in
-    record_in_processes:
-      - main
-    products:
-      - firefox
 
 security.ui.protectionspopup:
   open:
@@ -1733,6 +1643,7 @@ uptake.remotecontent.result:
       - "firefox"
       - "fennec"
       - "geckoview"
+      - "thunderbird"
     record_in_processes: ["main"]
     release_channel_collection: opt-out
     expiry_version: never
@@ -1820,9 +1731,10 @@ security.ui.permissionprompt:
     ]
     bug_numbers:
       - 1536454
+      - 1578266
     description: >
       When a permission prompt was shown.
-    expiry_version: "72"
+    expiry_version: "74"
     notification_emails:
       - jhofmann@mozilla.com
       - ehsan@mozilla.com
@@ -1856,9 +1768,10 @@ security.ui.permissionprompt:
     ]
     bug_numbers:
       - 1536454
+      - 1578266
     description: >
       When a permission prompt was removed, with the reasons being represented in the method field.
-    expiry_version: "72"
+    expiry_version: "74"
     notification_emails:
       - jhofmann@mozilla.com
       - ehsan@mozilla.com

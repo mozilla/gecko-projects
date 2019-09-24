@@ -1413,20 +1413,9 @@ static inline ScriptCountsMap::Ptr GetScriptCountsMapEntry(JSScript* script) {
   return p;
 }
 
-static inline ScriptNameMap::Ptr GetScriptNameMapEntry(JSScript* script) {
-  auto p = script->zone()->scriptNameMap->lookup(script);
-  MOZ_ASSERT(p);
-  return p;
-}
-
 ScriptCounts& JSScript::getScriptCounts() {
   ScriptCountsMap::Ptr p = GetScriptCountsMapEntry(this);
   return *p->value();
-}
-
-const char* JSScript::getScriptName() {
-  auto p = GetScriptNameMapEntry(this);
-  return p->value().get();
 }
 
 js::PCCounts* ScriptCounts::maybeGetPCCounts(size_t offset) {
@@ -1602,11 +1591,6 @@ void JSScript::destroyScriptCounts() {
   }
 }
 
-void JSScript::destroyScriptName() {
-  auto p = GetScriptNameMapEntry(this);
-  zone()->scriptNameMap->remove(p);
-}
-
 void JSScript::resetScriptCounts() {
   if (!hasScriptCounts()) {
     return;
@@ -1621,15 +1605,6 @@ void JSScript::resetScriptCounts() {
   for (PCCounts& elem : sc.throwCounts_) {
     elem.numExec() = 0;
   }
-}
-
-bool JSScript::hasScriptName() {
-  if (!zone()->scriptNameMap) {
-    return false;
-  }
-
-  auto p = zone()->scriptNameMap->lookup(this);
-  return p.found();
 }
 
 void ScriptSourceObject::finalize(JSFreeOp* fop, JSObject* obj) {
@@ -1721,6 +1696,32 @@ ScriptSourceObject* ScriptSourceObject::unwrappedCanonical() const {
   return &UncheckedUnwrap(obj)->as<ScriptSourceObject>();
 }
 
+static MOZ_MUST_USE bool MaybeValidateFilename(
+    JSContext* cx, HandleScriptSourceObject sso,
+    const ReadOnlyCompileOptions& options) {
+  // When parsing off-thread we want to do filename validation on the main
+  // thread. This makes off-thread parsing more pure and is simpler because we
+  // can't easily throw exceptions off-thread.
+  MOZ_ASSERT(!cx->isHelperThreadContext());
+
+  if (!gFilenameValidationCallback) {
+    return true;
+  }
+
+  const char* filename = sso->source()->filename();
+  if (!filename || options.skipFilenameValidation()) {
+    return true;
+  }
+
+  if (gFilenameValidationCallback(filename, cx->realm()->isSystem())) {
+    return true;
+  }
+
+  JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_UNSAFE_FILENAME,
+                           filename);
+  return false;
+}
+
 /* static */
 bool ScriptSourceObject::initFromOptions(
     JSContext* cx, HandleScriptSourceObject source,
@@ -1732,6 +1733,10 @@ bool ScriptSourceObject::initFromOptions(
       source->getReservedSlot(ELEMENT_PROPERTY_SLOT).isMagic(JS_GENERIC_MAGIC));
   MOZ_ASSERT(source->getReservedSlot(INTRODUCTION_SCRIPT_SLOT)
                  .isMagic(JS_GENERIC_MAGIC));
+
+  if (!MaybeValidateFilename(cx, source, options)) {
+    return false;
+  }
 
   RootedObject element(cx, options.element());
   RootedString elementAttributeName(cx, options.elementAttributeName());
@@ -3801,15 +3806,12 @@ void PrivateScriptData::trace(JSTracer* trc) {
   }
 }
 
-JSScript::JSScript(JS::Realm* realm, uint8_t* stubEntry,
+JSScript::JSScript(HandleObject global, uint8_t* stubEntry,
                    HandleScriptSourceObject sourceObject, uint32_t sourceStart,
                    uint32_t sourceEnd, uint32_t toStringStart,
                    uint32_t toStringEnd)
-    : js::BaseScript(stubEntry, sourceObject, sourceStart, sourceEnd,
-                     toStringStart, toStringEnd),
-      realm_(realm) {
-  MOZ_ASSERT(JS::GetCompartmentForRealm(realm) == sourceObject->compartment());
-}
+    : js::BaseScript(stubEntry, global, sourceObject, sourceStart, sourceEnd,
+                     toStringStart, toStringEnd) {}
 
 /* static */
 JSScript* JSScript::New(JSContext* cx, HandleScriptSourceObject sourceObject,
@@ -3827,7 +3829,7 @@ JSScript* JSScript::New(JSContext* cx, HandleScriptSourceObject sourceObject,
 #endif
 
   return new (script)
-      JSScript(cx->realm(), stubEntry, sourceObject, sourceStart, sourceEnd,
+      JSScript(cx->global(), stubEntry, sourceObject, sourceStart, sourceEnd,
                toStringStart, toStringEnd);
 }
 
@@ -3864,7 +3866,7 @@ JSScript* JSScript::Create(JSContext* cx, const ReadOnlyCompileOptions& options,
                   ShouldTrackRecordReplayProgress(script));
 
   if (coverage::IsLCovEnabled()) {
-    if (!script->initScriptName(cx)) {
+    if (!coverage::InitScriptCoverage(cx, script)) {
       return nullptr;
     }
   }
@@ -3887,7 +3889,7 @@ JSScript* JSScript::Create(JSContext* cx, const ReadOnlyCompileOptions& options,
                   ShouldTrackRecordReplayProgress(script));
 
   if (coverage::IsLCovEnabled()) {
-    if (!script->initScriptName(cx)) {
+    if (!coverage::InitScriptCoverage(cx, script)) {
       return nullptr;
     }
   }
@@ -3919,38 +3921,6 @@ uint32_t JSScript::vtuneMethodID() {
   return id;
 }
 #endif
-
-bool JSScript::initScriptName(JSContext* cx) {
-  MOZ_ASSERT(!hasScriptName());
-
-  if (!filename()) {
-    return true;
-  }
-
-  // Create zone's scriptNameMap if necessary.
-  if (!zone()->scriptNameMap) {
-    auto map = cx->make_unique<ScriptNameMap>();
-    if (!map) {
-      return false;
-    }
-
-    zone()->scriptNameMap = std::move(map);
-  }
-
-  UniqueChars name = DuplicateString(filename());
-  if (!name) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  // Register the script name in the zone's map.
-  if (!zone()->scriptNameMap->putNew(this, std::move(name))) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  return true;
-}
 
 /* static */
 bool JSScript::createPrivateScriptData(JSContext* cx, HandleScript script,
@@ -4200,12 +4170,8 @@ void JSScript::finalize(JSFreeOp* fop) {
   // JSScript::Create(), but not yet finished initializing it with
   // fullyInitFromEmitter().
 
-  // Collect code coverage information for this script and all its inner
-  // scripts, and store the aggregated information on the realm.
-  MOZ_ASSERT_IF(hasScriptName(), coverage::IsLCovEnabled());
-  if (coverage::IsLCovEnabled() && hasScriptName()) {
-    realm()->lcovOutput.collectCodeCoverageInfo(realm(), this, getScriptName());
-    destroyScriptName();
+  if (coverage::IsLCovEnabled()) {
+    coverage::CollectScriptCoverage(this);
   }
 
   fop->runtime()->geckoProfiler().onScriptFinalized(this);
@@ -4875,10 +4841,6 @@ void JSScript::traceChildren(JSTracer* trc) {
     TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");
   }
 
-  JSObject* global = realm()->unsafeUnbarrieredMaybeGlobal();
-  MOZ_ASSERT(global);
-  TraceManuallyBarrieredEdge(trc, &global, "script_global");
-
   if (trc->isMarkingTracer()) {
     GCMarker::fromTracer(trc)->markImplicitEdges(this);
   }
@@ -5202,15 +5164,10 @@ LazyScript::LazyScript(JSFunction* fun, uint8_t* stubEntry,
                        uint32_t immutableFlags, uint32_t sourceStart,
                        uint32_t sourceEnd, uint32_t toStringStart,
                        uint32_t toStringEnd, uint32_t lineno, uint32_t column)
-    : BaseScript(stubEntry, &sourceObject, sourceStart, sourceEnd,
+    : BaseScript(stubEntry, fun, &sourceObject, sourceStart, sourceEnd,
                  toStringStart, toStringEnd),
       script_(nullptr),
-      function_(fun),
       lazyData_(data) {
-  MOZ_ASSERT(function_);
-  MOZ_ASSERT(sourceObject_);
-  MOZ_ASSERT(function_->compartment() == sourceObject_->compartment());
-
   lineno_ = lineno;
   column_ = column;
 
@@ -5226,12 +5183,6 @@ void LazyScript::initScript(JSScript* script) {
   MOZ_ASSERT(!script_.unbarrieredGet());
   script_.set(script);
 }
-
-JS::Compartment* LazyScript::compartment() const {
-  return function_->compartment();
-}
-
-Realm* LazyScript::realm() const { return function_->realm(); }
 
 void LazyScript::setEnclosingLazyScript(LazyScript* enclosingLazyScript) {
   MOZ_ASSERT(enclosingLazyScript);

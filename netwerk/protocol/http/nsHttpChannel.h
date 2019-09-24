@@ -33,6 +33,7 @@
 #include "nsIRaceCacheWithNetwork.h"
 #include "mozilla/extensions/PStreamFilterParent.h"
 #include "mozilla/Mutex.h"
+#include "nsIProcessSwitchRequestor.h"
 #include "nsIRemoteTab.h"
 
 class nsDNSPrefetch;
@@ -78,7 +79,8 @@ class nsHttpChannel final : public HttpBaseChannel,
                             public nsIChannelWithDivertableParentListener,
                             public nsIRaceCacheWithNetwork,
                             public nsIRequestTailUnblockCallback,
-                            public nsITimerCallback {
+                            public nsITimerCallback,
+                            public nsIProcessSwitchRequestor {
  public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIREQUESTOBSERVER
@@ -100,6 +102,7 @@ class nsHttpChannel final : public HttpBaseChannel,
   NS_DECL_NSIRACECACHEWITHNETWORK
   NS_DECL_NSITIMERCALLBACK
   NS_DECL_NSIREQUESTTAILUNBLOCKCALLBACK
+  NS_DECL_NSIPROCESSSWITCHREQUESTOR
 
   // nsIHttpAuthenticableChannel. We can't use
   // NS_DECL_NSIHTTPAUTHENTICABLECHANNEL because it duplicates cancel() and
@@ -150,9 +153,6 @@ class nsHttpChannel final : public HttpBaseChannel,
   NS_IMETHOD AsyncOpen(nsIStreamListener* aListener) override;
   // nsIHttpChannel
   NS_IMETHOD GetEncodedBodySize(uint64_t* aEncodedBodySize) override;
-  NS_IMETHOD SwitchProcessTo(mozilla::dom::Promise* aBrowserParent,
-                             uint64_t aIdentifier) override;
-  NS_IMETHOD HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) override;
   // nsIHttpChannelInternal
   NS_IMETHOD SetupFallbackChannel(const char* aFallbackKey) override;
   NS_IMETHOD SetChannelIsForDownload(bool aChannelIsForDownload) override;
@@ -276,7 +276,8 @@ class nsHttpChannel final : public HttpBaseChannel,
   }
   TransactionObserver* GetTransactionObserver() { return mTransactionObserver; }
 
-  typedef MozPromise<uint64_t, nsresult, false> ContentProcessIdPromise;
+  typedef MozPromise<uint64_t, nsresult, true /* exclusive */>
+      ContentProcessIdPromise;
   already_AddRefed<ContentProcessIdPromise>
   TakeRedirectContentProcessIdPromise() {
     return mRedirectContentProcessIdPromise.forget();
@@ -532,8 +533,6 @@ class nsHttpChannel final : public HttpBaseChannel,
   void SetPushedStream(Http2PushedStreamWrapper* stream);
 
   void MaybeWarnAboutAppCache();
-
-  void SetLoadGroupUserAgentOverride();
 
   void SetOriginHeader();
   void SetDoNotTrack();

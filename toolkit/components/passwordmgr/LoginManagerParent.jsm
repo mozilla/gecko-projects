@@ -603,11 +603,15 @@ this.LoginManagerParent = {
     let generatedPW = this._generatedPasswordsByPrincipalOrigin.get(
       framePrincipalOrigin
     );
+    let autoSavedStorageGUID = "";
+    if (generatedPW && generatedPW.storageGUID) {
+      autoSavedStorageGUID = generatedPW.storageGUID;
+    }
 
     // If we didn't find a username field, but seem to be changing a
     // password, allow the user to select from a list of applicable
     // logins to update the password for.
-    if (!usernameField && oldPasswordField && logins.length > 0) {
+    if (!usernameField && oldPasswordField && logins.length) {
       let prompter = this._getPrompter(browser, openerTopWindowID);
 
       if (logins.length == 1) {
@@ -622,15 +626,6 @@ this.LoginManagerParent = {
           return;
         }
 
-        let autoSavedStorageGUID = "";
-        if (
-          generatedPW &&
-          generatedPW.storageGUID == oldLogin.guid &&
-          generatedPW.value == formLogin.password
-        ) {
-          // this login has a generated password, auto-saved in this session
-          autoSavedStorageGUID = generatedPW.storageGUID;
-        }
         formLogin.username = oldLogin.username;
         formLogin.usernameField = oldLogin.usernameField;
 
@@ -690,15 +685,6 @@ this.LoginManagerParent = {
 
     if (existingLogin) {
       log("Found an existing login matching this form submission");
-      let autoSavedStorageGUID = "";
-      if (
-        generatedPW &&
-        generatedPW.storageGUID == existingLogin.guid &&
-        generatedPW.value == formLogin.password
-      ) {
-        // this login has a generated password, auto-saved in this session
-        autoSavedStorageGUID = generatedPW.storageGUID;
-      }
 
       // Change password if needed.
       if (existingLogin.password != formLogin.password) {
@@ -777,8 +763,9 @@ this.LoginManagerParent = {
       framePrincipalOrigin
     );
 
-    let autoSaveLogin = true;
+    let shouldAutoSaveLogin = true;
     let loginToChange = null;
+    let autoSavedLogin = null;
 
     if (password != generatedPW.value) {
       // The user edited the field after generation to a non-empty value.
@@ -803,7 +790,11 @@ this.LoginManagerParent = {
         });
 
         if (existingLogins.length) {
+          log(
+            "_onGeneratedPasswordFilledOrEdited: login to change is the auto-saved login"
+          );
           loginToChange = existingLogins[0];
+          autoSavedLogin = loginToChange;
         }
         // The generated password login may have been deleted in the meantime.
         // Proceed to maybe save a new login below.
@@ -859,7 +850,7 @@ this.LoginManagerParent = {
         formLoginWithoutUsername.matches(login, true)
       );
       if (matchedLogin) {
-        autoSaveLogin = false;
+        shouldAutoSaveLogin = false;
         if (matchedLogin.password == formLoginWithoutUsername.password) {
           // This login is already saved so show no new UI.
           log(
@@ -880,10 +871,10 @@ this.LoginManagerParent = {
       }
     }
 
-    if (autoSaveLogin) {
-      if (loginToChange) {
+    if (shouldAutoSaveLogin) {
+      if (loginToChange && loginToChange == autoSavedLogin) {
         log(
-          "_onGeneratedPasswordFilledOrEdited: auto-updating login with generated password"
+          "_onGeneratedPasswordFilledOrEdited: updating auto-saved login with changed password"
         );
 
         Services.logins.modifyLogin(
@@ -931,7 +922,7 @@ this.LoginManagerParent = {
         loginToChange,
         formLogin,
         true, // dismissed prompt
-        autoSaveLogin, // notifySaved
+        shouldAutoSaveLogin, // notifySaved
         autoSavedStorageGUID // autoSavedLoginGuid
       );
       return;
@@ -940,7 +931,7 @@ this.LoginManagerParent = {
     prompter.promptToSavePassword(
       formLogin,
       true, // dismissed prompt
-      autoSaveLogin // notifySaved
+      shouldAutoSaveLogin // notifySaved
     );
   },
 

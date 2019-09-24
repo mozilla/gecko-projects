@@ -134,6 +134,18 @@ class JS_PUBLIC_API RealmCreationOptions {
     return *this;
   }
 
+  bool getReadableByteStreamsEnabled() const { return readableByteStreams_; }
+  RealmCreationOptions& setReadableByteStreamsEnabled(bool flag) {
+    readableByteStreams_ = flag;
+    return *this;
+  }
+
+  bool getBYOBStreamReadersEnabled() const { return byobStreamReaders_; }
+  RealmCreationOptions& setBYOBStreamReadersEnabled(bool enabled) {
+    byobStreamReaders_ = enabled;
+    return *this;
+  }
+
   bool getFieldsEnabled() const { return fields_; }
   RealmCreationOptions& setFieldsEnabled(bool flag) {
     fields_ = flag;
@@ -175,6 +187,8 @@ class JS_PUBLIC_API RealmCreationOptions {
   bool cloneSingletons_ = false;
   bool sharedMemoryAndAtomics_ = false;
   bool streams_ = false;
+  bool readableByteStreams_ = false;
+  bool byobStreamReaders_ = false;
   bool fields_ = false;
   bool awaitFix_ = false;
   bool secureContext_ = false;
@@ -200,6 +214,12 @@ class JS_PUBLIC_API RealmBehaviors {
   bool disableLazyParsing() const { return disableLazyParsing_; }
   RealmBehaviors& setDisableLazyParsing(bool flag) {
     disableLazyParsing_ = flag;
+    return *this;
+  }
+
+  bool deferredParserAlloc() const { return deferredParserAlloc_; }
+  RealmBehaviors& setDeferredParserAlloc(bool flag) {
+    deferredParserAlloc_ = flag;
     return *this;
   }
 
@@ -254,6 +274,7 @@ class JS_PUBLIC_API RealmBehaviors {
   // singleton, instead of returning the value which is baked in the JSScript.
   bool singletonsAsTemplates_ = true;
   bool isNonLive_ = false;
+  bool deferredParserAlloc_ = false;
 };
 
 /**

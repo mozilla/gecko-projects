@@ -109,11 +109,7 @@ struct HuffmanKey {
   // For instance, if the Huffman code is `0100`,
   // - `bits = 0b0000_0000__0000_0000__0000_0000__0000_0100`;
   // - `bitLength = 4`.
-  HuffmanKey(const uint32_t bits, const uint8_t bitLength)
-      : bits(bits), bitLength(bitLength) {
-    MOZ_ASSERT(bitLength <= 32);
-    MOZ_ASSERT_IF(bitLength != 32 /* >> 32 is UB */, bits >> bitLength == 0);
-  }
+  HuffmanKey(const uint32_t bits, const uint8_t bitLength);
 
   // The buffer holding the bits.
   //
@@ -132,6 +128,33 @@ struct HuffmanKey {
   const uint8_t bitLength;
 };
 
+// A Huffman key represented as a single `uint32_t`.
+struct FlatHuffmanKey {
+  explicit FlatHuffmanKey(HuffmanKey key);
+  explicit FlatHuffmanKey(const HuffmanKey* key);
+
+  // 0b0000000L_LLLLCCCC_CCCCCCCC_CCCCCCCC
+  // Where:
+  // - `LLLLL` store `key.bitLength`
+  // - `CCCC_CCCCCCCC_CCCCCCCC` store `key.bits`
+  //
+  // While `key.bits` is nominally 32 bits, it is in fact
+  // `MAX_CODE_BIT_LENGTH` bits, padded with 0s in the
+  // highest bits.
+  const uint32_t representation;
+
+  // -- Implementing HashPolicy
+  using Lookup = FlatHuffmanKey;
+  using Key = Lookup;
+  static HashNumber hash(const Lookup& lookup) {
+    return mozilla::DefaultHasher<uint32_t>::hash(lookup.representation);
+  }
+  static bool match(const Key& key, const Lookup& lookup) {
+    return mozilla::DefaultHasher<uint32_t>::match(key.representation,
+                                                   lookup.representation);
+  }
+};
+
 // An entry in a Huffman table.
 template <typename T>
 struct HuffmanEntry {
@@ -143,7 +166,7 @@ struct HuffmanEntry {
   const T value;
 };
 
-// The default inline buffer length for instances of HuffmanTable.
+// The default inline buffer length for instances of HuffmanTableValue.
 // Specific type (e.g. booleans) will override this to provide something
 // more suited to their type.
 const size_t HUFFMAN_TABLE_DEFAULT_INLINE_BUFFER_LENGTH = 8;
@@ -155,11 +178,14 @@ enum class Nullable {
   NonNull,
 };
 
+// An implementation of Huffman Tables as a vector, with `O(entries)`
+// lookup. Performance-wise, this implementation only makes sense for
+// very short tables.
 template <typename T, int N = HUFFMAN_TABLE_DEFAULT_INLINE_BUFFER_LENGTH>
-class HuffmanTableImpl {
+class HuffmanTableImplementationNaive {
  public:
-  explicit HuffmanTableImpl(JSContext* cx) : values(cx) {}
-  HuffmanTableImpl(HuffmanTableImpl&& other) noexcept
+  explicit HuffmanTableImplementationNaive(JSContext* cx) : values(cx) {}
+  HuffmanTableImplementationNaive(HuffmanTableImplementationNaive&& other)
       : values(std::move(other.values)) {}
 
   // Initialize a Huffman table containing a single value.
@@ -167,22 +193,27 @@ class HuffmanTableImpl {
 
   // Initialize a Huffman table containing `numberOfSymbols`.
   // Symbols must be added with `addSymbol`.
-  JS::Result<Ok> init(JSContext* cx, size_t numberOfSymbols);
+  JS::Result<Ok> init(JSContext* cx, size_t numberOfSymbols,
+                      uint8_t largestBitLength);
 
   // Add a symbol to a value.
   JS::Result<Ok> addSymbol(uint32_t bits, uint8_t bits_length, T&& value);
 
-  HuffmanTableImpl() = delete;
-  HuffmanTableImpl(HuffmanTableImpl&) = delete;
+  HuffmanTableImplementationNaive() = delete;
+  HuffmanTableImplementationNaive(HuffmanTableImplementationNaive&) = delete;
+
+#ifdef DEBUG
+  void selfCheck();
+#endif  // DEBUG
 
   // Lookup a value in the table.
   //
   // Return an entry with a value of `nullptr` if the value is not in the table.
   //
-  // The lookup may consume `[0, key.bitLength]` bits of `key`. Typically, in a
-  // table with a single instance, or if the value is not in the table, 0 bits
-  // will be consumed. The caller is responsible for advancing its bitstream by
-  // `result.key.bitLength` bits.
+  // The lookup may advance `key` by `[0, key.bitLength]` bits. Typically, in a
+  // table with a single instance, or if the value is not in the table, it
+  // will advance by 0 bits. The caller is responsible for advancing its
+  // bitstream by `result.key.bitLength` bits.
   HuffmanEntry<const T*> lookup(HuffmanLookup key) const;
 
   // The number of values in the table.
@@ -200,12 +231,326 @@ class HuffmanTableImpl {
   friend class HuffmanPreludeReader;
 };
 
-// An empty Huffman table. Attempting to get a value from this table is a syntax
-// error. This is the default value for `HuffmanTable` and represents all states
-// that may not be reached.
+// An implementation of Huffman Tables as a hash map. Space-Efficient,
+// faster than HuffmanTableImplementationNaive for large tables but not terribly
+// fast, either.
 //
-// Part of variants `HuffmanTable` and `HuffmanTableListLength`.
+// Complexity:
+//
+// - We assume that hashing is sufficient to guarantee `O(1)` lookups
+//   inside the hashmap.
+// - On a well-formed file, all lookups are successful and a Huffman
+//   lookup will take exactly `bitLen` Hashmap lookups. This makes it
+//   `O(MAX_CODE_BIT_LENGTH)` worst case. This also makes it
+//   `O(ln(N))` in the best case (perfectly balanced Huffman table)
+//   and `O(N)` in the worst case (perfectly linear Huffman table),
+//   where `N` is the number of entries.
+// - On an invalid file, the number of lookups is also bounded by
+//   `MAX_CODE_BIT_LENGTH`.
+template <typename T>
+class HuffmanTableImplementationMap {
+ public:
+  explicit HuffmanTableImplementationMap(JSContext* cx)
+      : values(cx), keys(cx) {}
+  HuffmanTableImplementationMap(HuffmanTableImplementationMap&& other) noexcept
+      : values(std::move(other.values)), keys(std::move(other.keys)) {}
+
+  // Initialize a Huffman table containing a single value.
+  JS::Result<Ok> initWithSingleValue(JSContext* cx, T&& value);
+
+  // Initialize a Huffman table containing `numberOfSymbols`.
+  // Symbols must be added with `addSymbol`.
+  JS::Result<Ok> init(JSContext* cx, size_t numberOfSymbols,
+                      uint8_t largestBitLength);
+
+  // Add a `(bit, bits_length) => value` mapping.
+  JS::Result<Ok> addSymbol(uint32_t bits, uint8_t bits_length, T&& value);
+
+#ifdef DEBUG
+  void selfCheck();
+#endif  // DEBUG
+
+  HuffmanTableImplementationMap() = delete;
+  HuffmanTableImplementationMap(HuffmanTableImplementationMap&) = delete;
+
+  // Lookup a value in the table.
+  //
+  // Return an entry with a value of `nullptr` if the value is not in the table.
+  //
+  // The lookup may advance `key` by `[0, key.bitLength]` bits. Typically, in a
+  // table with a single instance, or if the value is not in the table, it
+  // will advance by 0 bits. The caller is responsible for advancing its
+  // bitstream by `result.key.bitLength` bits.
+  HuffmanEntry<const T*> lookup(HuffmanLookup key) const;
+
+  // The number of values in the table.
+  size_t length() const { return values.length(); }
+
+  // Iterating in the order of insertion.
+  struct Iterator {
+    Iterator(const js::HashMap<FlatHuffmanKey, T, FlatHuffmanKey>& values,
+             const HuffmanKey* position)
+        : values(values), position(position) {}
+    void operator++() { ++position; }
+    const T* operator*() const {
+      const FlatHuffmanKey key(position);
+      if (const auto ptr = values.lookup(key)) {
+        return &ptr->value();
+      }
+      MOZ_CRASH();
+    }
+    bool operator==(const Iterator& other) const {
+      MOZ_ASSERT(&values == &other.values);
+      return position == other.position;
+    }
+    bool operator!=(const Iterator& other) const {
+      MOZ_ASSERT(&values == &other.values);
+      return position != other.position;
+    }
+
+   private:
+    const js::HashMap<FlatHuffmanKey, T, FlatHuffmanKey>& values;
+    const HuffmanKey* position;
+  };
+  Iterator begin() const { return Iterator(values, keys.begin()); }
+  Iterator end() const { return Iterator(values, keys.end()); }
+
+ private:
+  // The entries in this Huffman table, prepared for lookup.
+  js::HashMap<FlatHuffmanKey, T, FlatHuffmanKey> values;
+
+  // The entries in this Huffman Table, sorted in the order of insertion.
+  Vector<HuffmanKey> keys;
+
+  friend class HuffmanPreludeReader;
+};
+
+// An implementation of Huffman Tables as a vector designed to allow
+// constant-time lookups at the expense of high space complexity.
+//
+// # Time complexity
+//
+// Lookups take constant time, which essentially consists in two
+// simple vector lookups.
+//
+// # Space complexity
+//
+// After initialization, a `HuffmanTableImplementationSaturated`
+// requires O(2 ^ max bit length in the table) space:
+//
+// - A vector `values` containing one entry per symbol.
+// - A vector `saturated` containing exactly 2 ^ (max bit length in the
+//   table) entries, which we use to map any combination of `maxBitLength`
+//   bits onto the only `HuffmanEntry` that may be reached by a prefix
+//   of these `maxBitLength` bits. See below for more details.
+//
+// # Algorithm
+//
+// Consider the following Huffman table
+//
+// Symbol | Binary Code  | Int value of Code | Bit Length
+// ------ | ------------ | ----------------- | ----------
+// A      | 11000        | 24                | 5
+// B      | 11001        | 25                | 5
+// C      | 1101         | 13                | 4
+// D      | 100          | 4                 | 3
+// E      | 101          | 5                 | 3
+// F      | 111          | 7                 | 3
+// G      | 00           | 0                 | 2
+// H      | 01           | 1                 | 2
+//
+// By definition of a Huffman Table, the Binary Codes represent
+// paths in a Huffman Tree. Consequently, padding these codes
+// to the end would not change the result.
+//
+// Symbol | Binary Code  | Int value of Code | Bit Length
+// ------ | ------------ | ----------------- | ----------
+// A      | 11000        | 24                | 5
+// B      | 11001        | 25                | 5
+// C      | 1101?        | [26...27]         | 4
+// D      | 100??        | [16...19]         | 3
+// E      | 101??        | [20..23]          | 3
+// F      | 111??        | [28..31]          | 3
+// G      | 00???        | [0...7]           | 2
+// H      | 01???        | [8...15]          | 2
+//
+// Row "Int value of Code" now contains all possible values
+// that may be expressed in 5 bits. By using these values
+// as array indices, we may therefore represent the
+// Huffman table as an array:
+//
+// Index     |   Symbol   |   Bit Length
+// --------- | ---------- | -------------
+// [0...7]   |  G         | 2
+// [8...15]  |  H         | 2
+// [16...19] |  D         | 3
+// [20...23] |  E         | 3
+// 24        |  A         | 5
+// 25        |  B         | 5
+// [26...27] |  C         | 4
+// [28...31] |  F         | 3
+//
+// By using the next 5 bits in the bit buffer, we may, in
+// a single lookup, determine the symbol and the bit length.
+//
+// In the current implementation, to save some space, we have
+// two distinct arrays, one (`values`) with a single instance of each
+// symbols bit length, and one (`saturated`) with indices into that
+// array.
+template <typename T>
+class HuffmanTableImplementationSaturated {
+ public:
+  explicit HuffmanTableImplementationSaturated(JSContext* cx)
+      : values(cx), saturated(cx), maxBitLength(-1) {}
+  HuffmanTableImplementationSaturated(
+      HuffmanTableImplementationSaturated&& other) = default;
+
+  // Initialize a Huffman table containing a single value.
+  JS::Result<Ok> initWithSingleValue(JSContext* cx, T&& value);
+
+  // Initialize a Huffman table containing `numberOfSymbols`.
+  // Symbols must be added with `addSymbol`.
+  JS::Result<Ok> init(JSContext* cx, size_t numberOfSymbols,
+                      uint8_t largestBitLength);
+
+#ifdef DEBUG
+  void selfCheck();
+#endif  // DEBUG
+
+  // Add a `(bit, bits_length) => value` mapping.
+  JS::Result<Ok> addSymbol(uint32_t bits, uint8_t bits_length, T&& value);
+
+  HuffmanTableImplementationSaturated() = delete;
+  HuffmanTableImplementationSaturated(HuffmanTableImplementationSaturated&) =
+      delete;
+
+  // Lookup a value in the table.
+  //
+  // Return an entry with a value of `nullptr` if the value is not in the table.
+  //
+  // The lookup may advance `key` by `[0, key.bitLength]` bits. Typically, in a
+  // table with a single instance, or if the value is not in the table, it
+  // will advance by 0 bits. The caller is responsible for advancing its
+  // bitstream by `result.key.bitLength` bits.
+  HuffmanEntry<const T*> lookup(HuffmanLookup key) const;
+
+  // The number of values in the table.
+  size_t length() const { return values.length(); }
+
+  // Iterating in the order of insertion.
+  struct Iterator {
+    explicit Iterator(const HuffmanEntry<T>* position);
+    void operator++();
+    const T* operator*() const;
+    bool operator==(const Iterator& other) const;
+    bool operator!=(const Iterator& other) const;
+
+   private:
+    const HuffmanEntry<T>* position;
+  };
+  Iterator begin() const { return Iterator(values.begin()); }
+  Iterator end() const { return Iterator(values.end()); }
+
+ public:
+  // An index into table `values`.
+  // We use `uint8_t` instead of `size_t` to limit the space
+  // used by the table.
+  using InternalIndex = uint8_t;
+
+ private:
+  // The entries in this Huffman Table, sorted in the order of insertion.
+  //
+  // Invariant (once `init*` has been called):
+  // - Length is the number of values inserted in the table.
+  // - for all i, `values[i].bitLength <= maxBitLength`.
+  Vector<HuffmanEntry<T>> values;
+
+  // The entries in this Huffman table, prepared for lookup.
+  //
+  // Invariant (once `init*` has been called):
+  // - Length is `1 << maxBitLength`.
+  // - for all i, `saturated[i] < values.length()`
+  Vector<InternalIndex> saturated;
+
+  // The maximal bitlength of a value in this table.
+  //
+  // Invariant (once `init*` has been called):
+  // - `maxBitLength <= MAX_CODE_BIT_LENGTH`
+  uint8_t maxBitLength;
+
+  friend class HuffmanPreludeReader;
+};
+
+// An empty Huffman table. Attempting to get a value from this table is a syntax
+// error. This is the default value for `HuffmanTableValue` and represents all
+// states that may not be reached.
+//
+// Part of variants `HuffmanTableValue`, `HuffmanTableListLength` and
+// `HuffmanTableImplementationGeneric::implementation`.
 struct HuffmanTableUnreachable {};
+
+// Generic implementation of Huffman tables.
+//
+//
+template <typename T>
+struct HuffmanTableImplementationGeneric {
+  explicit HuffmanTableImplementationGeneric(JSContext* cx);
+  explicit HuffmanTableImplementationGeneric() = delete;
+
+  // Initialize a Huffman table containing a single value.
+  JS::Result<Ok> initWithSingleValue(JSContext* cx, T&& value);
+
+  // Initialize a Huffman table containing `numberOfSymbols`.
+  // Symbols must be added with `addSymbol`.
+  JS::Result<Ok> init(JSContext* cx, size_t numberOfSymbols,
+                      uint8_t largestBitLength);
+
+#ifdef DEBUG
+  void selfCheck();
+#endif  // DEBUG
+
+  // Add a `(bit, bits_length) => value` mapping.
+  JS::Result<Ok> addSymbol(uint32_t bits, uint8_t bits_length, T&& value);
+
+  // The number of values in the table.
+  size_t length() const;
+
+  struct Iterator {
+    explicit Iterator(
+        typename HuffmanTableImplementationSaturated<T>::Iterator&&);
+    explicit Iterator(typename HuffmanTableImplementationMap<T>::Iterator&&);
+    Iterator(Iterator&&) = default;
+    Iterator(const Iterator&) = default;
+    void operator++();
+    const T* operator*() const;
+    bool operator==(const Iterator& other) const;
+    bool operator!=(const Iterator& other) const;
+
+   private:
+    mozilla::Variant<typename HuffmanTableImplementationSaturated<T>::Iterator,
+                     typename HuffmanTableImplementationMap<T>::Iterator>
+        implementation;
+  };
+
+  // Iterating in the order of insertion.
+  Iterator begin() const;
+  Iterator end() const;
+
+  // Lookup a value in the table.
+  //
+  // Return an entry with a value of `nullptr` if the value is not in the table.
+  //
+  // The lookup may advance `key` by `[0, key.bitLength]` bits. Typically, in a
+  // table with a single instance, or if the value is not in the table, it
+  // will advance by 0 bits. The caller is responsible for advancing its
+  // bitstream by `result.key.bitLength` bits.
+  HuffmanEntry<const T*> lookup(HuffmanLookup key) const;
+
+ private:
+  mozilla::Variant<HuffmanTableImplementationSaturated<T>,
+                   HuffmanTableImplementationMap<T>, HuffmanTableUnreachable>
+      implementation;
+};
 
 // While reading the Huffman prelude, whenever we first encounter a
 // `HuffmanTableUnreachable`, we replace it with a `HuffmanTableInitializing`
@@ -213,78 +558,84 @@ struct HuffmanTableUnreachable {};
 //
 // Attempting to get a value from this table is an internal error.
 //
-// Part of variants `HuffmanTable` and `HuffmanTableListLength`.
+// Part of variants `HuffmanTableValue` and `HuffmanTableListLength`.
 struct HuffmanTableInitializing {};
 
-// --- Explicit instantiations of `HuffmanTableImpl`.
-// These classes are all parts of variant `HuffmanTable`.
+// These classes are all parts of variant `HuffmanTableValue`.
 
-struct HuffmanTableExplicitSymbolsF64 {
+struct HuffmanTableExplicitSymbolsF64
+    : HuffmanTableImplementationGeneric<double> {
   using Contents = double;
-  HuffmanTableImpl<double> impl;
-  explicit HuffmanTableExplicitSymbolsF64(JSContext* cx) : impl(cx) {}
+  explicit HuffmanTableExplicitSymbolsF64(JSContext* cx)
+      : HuffmanTableImplementationGeneric(cx) {}
 };
 
-struct HuffmanTableExplicitSymbolsU32 {
+struct HuffmanTableExplicitSymbolsU32
+    : HuffmanTableImplementationGeneric<uint32_t> {
   using Contents = uint32_t;
-  HuffmanTableImpl<uint32_t> impl;
-  explicit HuffmanTableExplicitSymbolsU32(JSContext* cx) : impl(cx) {}
+  explicit HuffmanTableExplicitSymbolsU32(JSContext* cx)
+      : HuffmanTableImplementationGeneric(cx) {}
 };
 
-struct HuffmanTableIndexedSymbolsSum {
+struct HuffmanTableIndexedSymbolsSum
+    : HuffmanTableImplementationGeneric<BinASTKind> {
   using Contents = BinASTKind;
-  HuffmanTableImpl<BinASTKind> impl;
-  explicit HuffmanTableIndexedSymbolsSum(JSContext* cx) : impl(cx) {}
+  explicit HuffmanTableIndexedSymbolsSum(JSContext* cx)
+      : HuffmanTableImplementationGeneric(cx) {}
 };
 
-struct HuffmanTableIndexedSymbolsBool {
+struct HuffmanTableIndexedSymbolsBool
+    : HuffmanTableImplementationNaive<bool, 2> {
   using Contents = bool;
-  HuffmanTableImpl<bool, 2> impl;
-  explicit HuffmanTableIndexedSymbolsBool(JSContext* cx) : impl(cx) {}
+  explicit HuffmanTableIndexedSymbolsBool(JSContext* cx)
+      : HuffmanTableImplementationNaive(cx) {}
 };
 
 // A Huffman table that may only ever contain two values:
 // `BinASTKind::_Null` and another `BinASTKind`.
-struct HuffmanTableIndexedSymbolsMaybeInterface {
+struct HuffmanTableIndexedSymbolsMaybeInterface
+    : HuffmanTableImplementationNaive<BinASTKind, 2> {
   using Contents = BinASTKind;
-  HuffmanTableImpl<BinASTKind, 2> impl;
-  explicit HuffmanTableIndexedSymbolsMaybeInterface(JSContext* cx) : impl(cx) {}
+  explicit HuffmanTableIndexedSymbolsMaybeInterface(JSContext* cx)
+      : HuffmanTableImplementationNaive(cx) {}
 
   // `true` if this table only contains values for `null`.
   bool isAlwaysNull() const {
-    MOZ_ASSERT(impl.length() > 0);
+    MOZ_ASSERT(length() > 0);
 
     // By definition, we have either 1 or 2 values.
     // By definition, if we have 2 values, one of them is not null.
-    if (impl.length() != 1) {
+    if (length() != 1) {
       return false;
     }
     // Otherwise, check the single value.
-    return impl.begin()->value == BinASTKind::_Null;
+    return begin()->value == BinASTKind::_Null;
   }
 };
 
-struct HuffmanTableIndexedSymbolsStringEnum {
+struct HuffmanTableIndexedSymbolsStringEnum
+    : HuffmanTableImplementationGeneric<BinASTVariant> {
   using Contents = BinASTVariant;
-  HuffmanTableImpl<BinASTVariant> impl;
-  explicit HuffmanTableIndexedSymbolsStringEnum(JSContext* cx) : impl(cx) {}
+  explicit HuffmanTableIndexedSymbolsStringEnum(JSContext* cx)
+      : HuffmanTableImplementationGeneric(cx) {}
 };
 
-struct HuffmanTableIndexedSymbolsLiteralString {
+struct HuffmanTableIndexedSymbolsLiteralString
+    : HuffmanTableImplementationGeneric<JSAtom*> {
   using Contents = JSAtom*;
-  HuffmanTableImpl<JSAtom*> impl;
-  explicit HuffmanTableIndexedSymbolsLiteralString(JSContext* cx) : impl(cx) {}
+  explicit HuffmanTableIndexedSymbolsLiteralString(JSContext* cx)
+      : HuffmanTableImplementationGeneric(cx) {}
 };
 
-struct HuffmanTableIndexedSymbolsOptionalLiteralString {
+struct HuffmanTableIndexedSymbolsOptionalLiteralString
+    : HuffmanTableImplementationGeneric<JSAtom*> {
   using Contents = JSAtom*;
-  HuffmanTableImpl<JSAtom*> impl;
   explicit HuffmanTableIndexedSymbolsOptionalLiteralString(JSContext* cx)
-      : impl(cx) {}
+      : HuffmanTableImplementationGeneric(cx) {}
 };
 
-// A single Huffman table.
-using HuffmanTable = mozilla::Variant<
+// A single Huffman table, used for values.
+using HuffmanTableValue = mozilla::Variant<
     HuffmanTableUnreachable,  // Default value.
     HuffmanTableInitializing, HuffmanTableExplicitSymbolsF64,
     HuffmanTableExplicitSymbolsU32, HuffmanTableIndexedSymbolsSum,
@@ -293,10 +644,11 @@ using HuffmanTable = mozilla::Variant<
     HuffmanTableIndexedSymbolsLiteralString,
     HuffmanTableIndexedSymbolsOptionalLiteralString>;
 
-struct HuffmanTableExplicitSymbolsListLength {
+struct HuffmanTableExplicitSymbolsListLength
+    : HuffmanTableImplementationGeneric<uint32_t> {
   using Contents = uint32_t;
-  HuffmanTableImpl<uint32_t> impl;
-  explicit HuffmanTableExplicitSymbolsListLength(JSContext* cx) : impl(cx) {}
+  explicit HuffmanTableExplicitSymbolsListLength(JSContext* cx)
+      : HuffmanTableImplementationGeneric(cx) {}
 };
 
 // A single Huffman table, specialized for list lengths.
@@ -314,7 +666,7 @@ class HuffmanDictionary {
  public:
   explicit HuffmanDictionary(JSContext* cx);
 
-  HuffmanTable& tableForField(NormalizedInterfaceAndField index);
+  HuffmanTableValue& tableForField(NormalizedInterfaceAndField index);
   HuffmanTableListLength& tableForListLength(BinASTList list);
 
  private:
@@ -325,7 +677,7 @@ class HuffmanDictionary {
   //
   // The mapping from `(Interface, Field) -> index` is extracted statically from
   // the webidl specs.
-  mozilla::Array<HuffmanTable, BINAST_INTERFACE_AND_FIELD_LIMIT> fields;
+  mozilla::Array<HuffmanTableValue, BINAST_INTERFACE_AND_FIELD_LIMIT> fields;
 
   // Huffman tables for list lengths. Some tables may be
   // `HuffmanTableUnreacheable` if they represent lists that actually do not
@@ -638,7 +990,7 @@ class MOZ_STACK_CLASS BinASTTokenReaderContext : public BinASTTokenReaderBase {
  private:
   // A mapping string index => BinASTVariant as extracted from the [STRINGS]
   // section of the file. Populated lazily.
-  js::HashMap<uint32_t, BinASTVariant, DefaultHasher<uint32_t>,
+  js::HashMap<FlatHuffmanKey, BinASTVariant, DefaultHasher<uint32_t>,
               SystemAllocPolicy>
       variantsTable_;
 

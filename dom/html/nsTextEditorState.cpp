@@ -27,7 +27,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsServiceManagerUtils.h"
 #include "mozilla/dom/Selection.h"
-#include "mozilla/TextEditRules.h"
 #include "mozilla/EventListenerManager.h"
 #include "nsContentUtils.h"
 #include "mozilla/Preferences.h"
@@ -1402,8 +1401,9 @@ nsresult nsTextEditorState::PrepareEditor(const nsAString* aValue) {
 
   // Initialize the plaintext editor
   if (shouldInitializeEditor) {
-    // Set up wrapping
-    newTextEditor->SetWrapColumn(GetWrapCols());
+    const int32_t wrapCols = GetWrapCols();
+    MOZ_ASSERT(wrapCols >= 0);
+    newTextEditor->SetWrapColumn(wrapCols);
   }
 
   // Set max text field length
@@ -2510,13 +2510,11 @@ bool nsTextEditorState::SetValue(const nsAString& aValue,
 }
 
 bool nsTextEditorState::HasNonEmptyValue() {
+  // If the frame for editor is alive, we can compute it with mTextEditor.
+  // Otherwise, we need to check cached value via GetValue().
   if (mTextEditor && mBoundFrame && mEditorInitialized &&
       !mIsCommittingComposition) {
-    bool empty;
-    nsresult rv = mTextEditor->IsEmpty(&empty);
-    if (NS_SUCCEEDED(rv)) {
-      return !empty;
-    }
+    return !mTextEditor->IsEmpty();
   }
 
   nsAutoString value;

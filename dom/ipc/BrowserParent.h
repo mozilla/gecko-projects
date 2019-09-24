@@ -527,6 +527,8 @@ class BrowserParent final : public PBrowserParent,
 
   void Deactivate(bool aWindowLowering);
 
+  void MouseEnterIntoWidget();
+
   bool MapEventCoordinatesForChildProcess(mozilla::WidgetEvent* aEvent);
 
   void MapEventCoordinatesForChildProcess(const LayoutDeviceIntPoint& aOffset,
@@ -657,7 +659,8 @@ class BrowserParent final : public PBrowserParent,
   LayoutDeviceToLayoutDeviceMatrix4x4 GetChildToParentConversionMatrix();
 
   void SetChildToParentConversionMatrix(
-      const Maybe<LayoutDeviceToLayoutDeviceMatrix4x4>& aMatrix);
+      const Maybe<LayoutDeviceToLayoutDeviceMatrix4x4>& aMatrix,
+      const ScreenRect& aRemoteDocumentRect);
 
   // Returns the offset from the origin of our frameloader's nearest widget to
   // the origin of its layout frame. This offset is used to translate event
@@ -781,7 +784,8 @@ class BrowserParent final : public PBrowserParent,
 
   mozilla::ipc::IPCResult RecvQueryVisitedState(nsTArray<URIParams>&& aURIs);
 
-  mozilla::ipc::IPCResult RecvFireFrameLoadEvent(bool aIsTrusted);
+  mozilla::ipc::IPCResult RecvMaybeFireEmbedderLoadEvents(
+      bool aIsTrusted, bool aFireLoadAtEmbeddingElement);
 
  private:
   void SuppressDisplayport(bool aEnabled);

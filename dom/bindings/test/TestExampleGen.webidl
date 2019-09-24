@@ -3,16 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
-[Constructor,
- Constructor(DOMString str),
- Constructor(unsigned long num, boolean? boolArg),
- Constructor(TestInterface? iface),
- Constructor(unsigned long arg1, IndirectlyImplementedInterface iface),
- Constructor(Date arg1),
- Constructor(ArrayBuffer arrayBuf),
- Constructor(Uint8Array typedArr),
- // Constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3),
- NamedConstructor=Example,
+[NamedConstructor=Example,
  NamedConstructor=Example(DOMString str),
  NamedConstructor=Example2(DictForConstructor dict, any any1, object obj1,
                            object? obj2, sequence<Dict> seq, optional any any2,
@@ -20,6 +11,16 @@
  NamedConstructor=Example2((long or record<DOMString, any>) arg1)
  ]
 interface TestExampleInterface {
+  constructor();
+  constructor(DOMString str);
+  constructor(unsigned long num, boolean? boolArg);
+  constructor(TestInterface? iface);
+  constructor(unsigned long arg1, IndirectlyImplementedInterface iface);
+  constructor(Date arg1);
+  constructor(ArrayBuffer arrayBuf);
+  constructor(Uint8Array typedArr);
+  // constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3);
+
   // Integer types
   // XXXbz add tests for throwing versions of all the integer stuff
   readonly attribute byte readonlyByte;
@@ -361,6 +362,24 @@ interface TestExampleInterface {
   void passVariadicSVS(USVString... arg);
   USVString receiveSVS();
 
+  // JSString types
+  void passJSString(JSString arg);
+  // void passNullableJSString(JSString? arg); // NOT SUPPORTED YET
+  // void passOptionalJSString(optional JSString arg); // NOT SUPPORTED YET
+  void passOptionalJSStringWithDefaultValue(optional JSString arg = "abc");
+  // void passOptionalNullableJSString(optional JSString? arg); // NOT SUPPORTED YET
+  // void passOptionalNullableJSStringWithDefaultValue(optional JSString? arg = null); // NOT SUPPORTED YET
+  // void passVariadicJSString(JSString... arg); // NOT SUPPORTED YET
+  // void passRecordOfJSString(record<DOMString, JSString> arg); // NOT SUPPORTED YET
+  // void passSequenceOfJSString(sequence<JSString> arg); // NOT SUPPORTED YET
+  // void passUnionJSString((JSString or long) arg); // NOT SUPPORTED YET
+  JSString receiveJSString();
+  // sequence<JSString> receiveJSStringSequence(); // NOT SUPPORTED YET
+  // (JSString or long) receiveJSStringUnion(); // NOT SUPPORTED YET
+  // record<DOMString, JSString> receiveJSStringRecord(); // NOT SUPPORTED YET
+  readonly attribute JSString readonlyJSStringAttr;
+  attribute JSString jsStringAttr;
+
   // Enumerated types
   void passEnum(TestEnum arg);
   void passNullableEnum(TestEnum? arg);
@@ -580,14 +599,14 @@ interface TestExampleInterface {
   Promise<any> receiveAddrefedPromise();
 
   // binaryNames tests
+  [BinaryName="methodRenamedTo"]
   void methodRenamedFrom();
-  [BinaryName="otherMethodRenamedTo"]
-  void otherMethodRenamedFrom();
+  [BinaryName="methodRenamedTo"]
   void methodRenamedFrom(byte argument);
+  [BinaryName="attributeGetterRenamedTo"]
   readonly attribute byte attributeGetterRenamedFrom;
+  [BinaryName="attributeRenamedTo"]
   attribute byte attributeRenamedFrom;
-  [BinaryName="otherAttributeRenamedTo"]
-  attribute byte otherAttributeRenamedFrom;
 
   void passDictionary(optional Dict x = {});
   void passDictionary2(Dict x);
@@ -837,4 +856,24 @@ interface TestExampleWorkerInterface {
   [NeedsCallerType] attribute boolean needsCallerTypeAttr;
   [NeedsSubjectPrincipal=NonSystem] void needsNonSystemSubjectPrincipalMethod();
   [NeedsSubjectPrincipal=NonSystem] attribute boolean needsNonSystemSubjectPrincipalAttr;
+};
+
+interface TestExampleThrowingConstructorInterface {
+  [Throws]
+  constructor();
+  [Throws]
+  constructor(DOMString str);
+  [Throws]
+  constructor(unsigned long num, boolean? boolArg);
+  [Throws]
+  constructor(TestInterface? iface);
+  [Throws]
+  constructor(unsigned long arg1, IndirectlyImplementedInterface iface);
+  [Throws]
+  constructor(Date arg1);
+  [Throws]
+  constructor(ArrayBuffer arrayBuf);
+  [Throws]
+  constructor(Uint8Array typedArr);
+  // [Throws] constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3);
 };

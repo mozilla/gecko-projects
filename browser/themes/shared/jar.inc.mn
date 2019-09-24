@@ -93,8 +93,10 @@
   skin/classic/browser/notification-icons/update.svg                        (../shared/notification-icons/update.svg)
   skin/classic/browser/notification-icons/midi.svg                          (../shared/notification-icons/midi.svg)
   skin/classic/browser/notification-icons/webauthn.svg                      (../shared/notification-icons/webauthn.svg)
-  skin/classic/browser/notification-icons/images.svg                        (../shared/notification-icons/images.svg)
-  skin/classic/browser/notification-icons/images-blocked.svg                (../shared/notification-icons/images-blocked.svg)
+  skin/classic/browser/notification-icons/block-cryptominer-dark.svg        (../shared/notification-icons/block-cryptominer-dark.svg)
+  skin/classic/browser/notification-icons/block-cryptominer.svg             (../shared/notification-icons/block-cryptominer.svg)
+  skin/classic/browser/notification-icons/block-fingerprinter-dark.svg      (../shared/notification-icons/block-fingerprinter-dark.svg)
+  skin/classic/browser/notification-icons/block-fingerprinter.svg           (../shared/notification-icons/block-fingerprinter.svg)
   skin/classic/browser/notification-icons/block-social-dark.svg             (../shared/notification-icons/block-social-dark.svg)
   skin/classic/browser/notification-icons/block-social.svg                  (../shared/notification-icons/block-social.svg)
 
@@ -128,7 +130,6 @@
   skin/classic/browser/preferences/in-content/search.svg       (../shared/incontentprefs/search.svg)
   skin/classic/browser/preferences/in-content/siteDataSettings.css (../shared/incontentprefs/siteDataSettings.css)
   skin/classic/browser/preferences/in-content/sync.svg         (../shared/incontentprefs/sync.svg)
-  skin/classic/browser/preferences/in-content/syncDisconnect.css (../shared/incontentprefs/syncDisconnect.css)
 * skin/classic/browser/preferences/in-content/containers.css   (../shared/incontentprefs/containers.css)
 * skin/classic/browser/preferences/containers.css              (../shared/preferences/containers.css)
   skin/classic/browser/fxa/fxa-spinner.svg                     (../shared/fxa/fxa-spinner.svg)
@@ -211,6 +212,7 @@
   skin/classic/browser/settings.svg                   (../shared/icons/settings.svg)
   skin/classic/browser/sidebars.svg                   (../shared/icons/sidebars.svg)
   skin/classic/browser/sidebars-right.svg             (../shared/icons/sidebars-right.svg)
+  skin/classic/browser/sign-out.svg                   (../shared/icons/sign-out.svg)
 #ifndef XP_LINUX
   skin/classic/browser/sort.svg                       (../shared/icons/sort.svg)
 #endif
@@ -218,6 +220,7 @@
   skin/classic/browser/stop-to-reload.svg             (../shared/icons/stop-to-reload.svg)
   skin/classic/browser/sync.svg                       (../shared/icons/sync.svg)
   skin/classic/browser/tab.svg                        (../shared/icons/tab.svg)
+  skin/classic/browser/tip.svg                        (../shared/icons/tip.svg)
   skin/classic/browser/toggle.svg                     (../shared/icons/toggle.svg)
   skin/classic/browser/undo.svg                       (../shared/icons/undo.svg)
   skin/classic/browser/unpin-tab.svg                  (../shared/icons/unpin-tab.svg)

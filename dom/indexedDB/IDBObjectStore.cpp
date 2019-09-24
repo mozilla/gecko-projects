@@ -73,7 +73,7 @@ IndexUpdateInfo MakeIndexUpdateInfo(const int64_t aIndexID, const Key& aKey,
   indexUpdateInfo.value() = aKey;
   if (!aLocale.IsEmpty()) {
     const auto result =
-        aKey.ToLocaleBasedKey(indexUpdateInfo.localizedValue(), aLocale, *aRv);
+        aKey.ToLocaleAwareKey(indexUpdateInfo.localizedValue(), aLocale, *aRv);
     if (result.Is(Invalid, *aRv)) {
       aRv->Throw(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
     }
@@ -2270,22 +2270,14 @@ already_AddRefed<IDBRequest> IDBObjectStore::OpenCursorInternal(
 
   IDBCursor::Direction direction = IDBCursor::ConvertDirection(aDirection);
 
-  OpenCursorParams params;
-  if (aKeysOnly) {
-    ObjectStoreOpenKeyCursorParams openParams;
-    openParams.objectStoreId() = objectStoreId;
-    openParams.optionalKeyRange() = std::move(optionalKeyRange);
-    openParams.direction() = direction;
+  const CommonOpenCursorParams commonParams = {
+      objectStoreId, std::move(optionalKeyRange), direction};
 
-    params = std::move(openParams);
-  } else {
-    ObjectStoreOpenCursorParams openParams;
-    openParams.objectStoreId() = objectStoreId;
-    openParams.optionalKeyRange() = std::move(optionalKeyRange);
-    openParams.direction() = direction;
-
-    params = std::move(openParams);
-  }
+  // TODO: It would be great if the IPDL generator created a constructor
+  // accepting a CommonOpenCursorParams by value or rvalue reference.
+  const auto params =
+      aKeysOnly ? OpenCursorParams{ObjectStoreOpenKeyCursorParams{commonParams}}
+                : OpenCursorParams{ObjectStoreOpenCursorParams{commonParams}};
 
   RefPtr<IDBRequest> request = GenerateRequest(aCx, this);
   MOZ_ASSERT(request);

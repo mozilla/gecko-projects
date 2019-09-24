@@ -48,9 +48,6 @@ class ScaledFontDWrite final : public ScaledFontBase {
   void CopyGlyphsToSink(const GlyphBuffer& aBuffer,
                         ID2D1SimplifiedGeometrySink* aSink);
 
-  void GetGlyphDesignMetrics(const uint16_t* aGlyphIndices, uint32_t aNumGlyphs,
-                             GlyphMetrics* aGlyphMetrics) override;
-
   bool CanSerialize() override { return true; }
 
   bool GetFontInstanceData(FontInstanceDataOutput aCb, void* aBaton) override;
@@ -68,8 +65,13 @@ class ScaledFontDWrite final : public ScaledFontBase {
   }
   DWRITE_RENDERING_MODE GetRenderingMode() const { return mRenderingMode; }
 
+  bool HasSyntheticBold() const {
+    return (mFontFace->GetSimulations() & DWRITE_FONT_SIMULATIONS_BOLD) != 0;
+  }
+
 #ifdef USE_SKIA
   SkTypeface* CreateSkTypeface() override;
+  void SetupSkFontDrawOptions(SkFont& aFont) override;
   SkFontStyle mStyle;
 #endif
 
@@ -98,6 +100,7 @@ class ScaledFontDWrite final : public ScaledFontBase {
   struct InstanceData {
     explicit InstanceData(ScaledFontDWrite* aScaledFont)
         : mUseEmbeddedBitmap(aScaledFont->mUseEmbeddedBitmap),
+          mApplySyntheticBold(aScaledFont->HasSyntheticBold()),
           mRenderingMode(aScaledFont->mRenderingMode),
           mGamma(aScaledFont->mGamma),
           mContrast(aScaledFont->mContrast) {}
@@ -106,6 +109,7 @@ class ScaledFontDWrite final : public ScaledFontBase {
                  const wr::FontInstancePlatformOptions* aPlatformOptions);
 
     bool mUseEmbeddedBitmap;
+    bool mApplySyntheticBold;
     DWRITE_RENDERING_MODE mRenderingMode;
     Float mGamma;
     Float mContrast;

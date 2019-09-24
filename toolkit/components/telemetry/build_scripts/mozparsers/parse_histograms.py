@@ -8,6 +8,7 @@ import json
 import math
 import os
 import re
+import runpy
 import sys
 import atexit
 import shared_telemetry_utils as utils
@@ -691,13 +692,13 @@ def load_histograms_into_dict(ordered_pairs, strict_type_checks):
 # just Histograms.json.  For each file's basename, we have a specific
 # routine to parse that file, and return a dictionary mapping histogram
 # names to histogram parameters.
-def from_Histograms_json(filename, strict_type_checks):
+def from_json(filename, strict_type_checks):
     with open(filename, 'r') as f:
         try:
             def hook(ps):
                 return load_histograms_into_dict(ps, strict_type_checks)
             histograms = json.load(f, object_pairs_hook=hook)
-        except ValueError, e:
+        except ValueError as e:
             ParserError("error parsing histograms in %s: %s" % (filename, e.message)).handle_now()
     return histograms
 
@@ -731,17 +732,84 @@ def from_nsDeprecatedOperationList(filename, strict_type_checks):
     return histograms
 
 
-FILENAME_PARSERS = {
-    'Histograms.json': from_Histograms_json,
-    'nsDeprecatedOperationList.h': from_nsDeprecatedOperationList,
-}
+def to_camel_case(property_name):
+    return re.sub("(^|_|-)([a-z0-9])",
+                  lambda m: m.group(2).upper(),
+                  property_name.strip("_").strip("-"))
+
+
+def add_css_property_counters(histograms, property_name):
+    def add_counter(context):
+        name = 'USE_COUNTER2_CSS_PROPERTY_%s_%s' % (to_camel_case(property_name), context.upper())
+        histograms[name] = {
+            'expires_in_version': 'never',
+            'kind': 'boolean',
+            'description': 'Whether a %s used the CSS property %s' % (context, property_name)
+        }
+
+    add_counter('document')
+    add_counter('page')
+
+
+def from_ServoCSSPropList(filename, strict_type_checks):
+    histograms = collections.OrderedDict()
+    properties = runpy.run_path(filename)["data"]
+    for prop in properties:
+        add_css_property_counters(histograms, prop.name)
+    return histograms
+
+
+def from_counted_unknown_properties(filename, strict_type_checks):
+    histograms = collections.OrderedDict()
+    properties = runpy.run_path(filename)["COUNTED_UNKNOWN_PROPERTIES"]
+
+    # NOTE(emilio): Unlike ServoCSSProperties, `prop` here is just the property
+    # name.
+    #
+    # We use the same naming as CSS properties so that we don't get
+    # discontinuity when we implement or prototype them.
+    for prop in properties:
+        add_css_property_counters(histograms, prop)
+    return histograms
+
+
+# This is only used for probe-scraper.
+def from_properties_db(filename, strict_type_checks):
+    histograms = collections.OrderedDict()
+    with open(filename, 'r') as f:
+        in_css_properties = False
+
+        for line in f:
+            if not in_css_properties:
+                if line.startswith("exports.CSS_PROPERTIES = {"):
+                    in_css_properties = True
+                continue
+
+            if line.startswith("};"):
+                break
+
+            if not line.startswith("  \""):
+                continue
+
+            name = line.split("\"")[1]
+            add_css_property_counters(histograms, name)
+    return histograms
+
+
+FILENAME_PARSERS = [
+    (lambda x: from_json if x.endswith('.json') else None),
+    (lambda x: from_nsDeprecatedOperationList if x == 'nsDeprecatedOperationList.h' else None),
+    (lambda x: from_ServoCSSPropList if x == 'ServoCSSPropList.py' else None),
+    (lambda x: from_counted_unknown_properties if x == 'counted_unknown_properties.py' else None),
+    (lambda x: from_properties_db if x == 'properties-db.js' else None),
+]
 
 # Similarly to the dance above with buildconfig, usecounters may not be
 # available, so handle that gracefully.
 try:
     import usecounters
 
-    FILENAME_PARSERS['UseCounters.conf'] = from_UseCounters_conf
+    FILENAME_PARSERS.append(lambda x: from_UseCounters_conf if x == 'UseCounters.conf' else None)
 except ImportError:
     pass
 
@@ -755,7 +823,15 @@ the histograms defined in filenames.
 
     all_histograms = OrderedDict()
     for filename in filenames:
-        parser = FILENAME_PARSERS[os.path.basename(filename)]
+        parser = None
+        for checkFn in FILENAME_PARSERS:
+            parser = checkFn(os.path.basename(filename))
+            if parser is not None:
+                break
+
+        if parser is None:
+            ParserError("Don't know how to parse %s." % filename).handle_now()
+
         histograms = parser(filename, strict_type_checks)
 
         # OrderedDicts are important, because then the iteration order over

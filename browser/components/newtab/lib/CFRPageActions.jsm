@@ -14,6 +14,17 @@ ChromeUtils.defineModuleGetter(
   "PrivateBrowsingUtils",
   "resource://gre/modules/PrivateBrowsingUtils.jsm"
 );
+ChromeUtils.defineModuleGetter(
+  this,
+  "L10nRegistry",
+  "resource://gre/modules/L10nRegistry.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
+  "FileSource",
+  "resource://gre/modules/L10nRegistry.jsm"
+);
+ChromeUtils.defineModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
 const POPUP_NOTIFICATION_ID = "contextual-feature-recommendation";
 const ANIMATION_BUTTON_ID = "cfr-notification-footer-animation-button";
@@ -30,6 +41,12 @@ const CATEGORY_ICONS = {
   cfrAddons: "webextensions-icon",
   cfrFeatures: "recommendations-icon",
 };
+
+/**
+ * The downloaded Fluent file is located in this sub-directory of the local
+ * profile directory.
+ */
+const RS_DOWNLOADED_FILE_SUBDIR = "settings/main/ms-language-packs";
 
 /**
  * A WeakMap from browsers to {host, recommendation} pairs. Recommendations are
@@ -68,15 +85,81 @@ class PageAction {
     this._showPopupOnClick = this._showPopupOnClick.bind(this);
     this.dispatchUserAction = this.dispatchUserAction.bind(this);
 
-    this._l10n = new DOMLocalization([
-      "browser/newtab/asrouter.ftl",
-      "browser/branding/brandings.ftl",
-      "browser/branding/sync-brand.ftl",
-      "branding/brand.ftl",
-    ]);
+    this._l10n = this._createDOML10n();
 
     // Saved timeout IDs for scheduled state changes, so they can be cancelled
     this.stateTransitionTimeoutIDs = [];
+
+    XPCOMUtils.defineLazyGetter(this, "isDarkTheme", () => {
+      try {
+        return this.window.document.documentElement.hasAttribute(
+          "lwt-toolbar-field-brighttext"
+        );
+      } catch (e) {
+        return false;
+      }
+    });
+  }
+
+  addImpression(recommendation) {
+    this._dispatchImpression(recommendation);
+    // Only send an impression ping upon the first expansion.
+    // Note that when the user clicks on the "show" button on the asrouter admin
+    // page (both `bucket_id` and `id` will be set as null), we don't want to send
+    // the impression ping in that case.
+    if (!!recommendation.id && !!recommendation.content.bucket_id) {
+      this._sendTelemetry({
+        message_id: recommendation.id,
+        bucket_id: recommendation.content.bucket_id,
+        event: "IMPRESSION",
+      });
+    }
+  }
+
+  /**
+   * Creates a new DOMLocalization instance with the Fluent file from Remote Settings.
+   * Note that it still uses the packaged Fluent file as the fallback if the remote one
+   * is not available.
+   */
+  _createDOML10n() {
+    async function* generateBundles(resourceIds) {
+      const appLocale = Services.locale.appLocaleAsBCP47;
+      const appLocales = Services.locale.appLocalesAsBCP47;
+      const l10nFluentDir = OS.Path.join(
+        OS.Constants.Path.localProfileDir,
+        RS_DOWNLOADED_FILE_SUBDIR
+      );
+      const fs = new FileSource("cfr", [appLocale], `file://${l10nFluentDir}/`);
+      // In the case that the Fluent file has not been downloaded from Remote Settings,
+      // `fetchFile` will return `false` and fall back to the packaged Fluent file.
+      const resource = await fs.fetchFile(appLocale, "asrouter.ftl");
+      if (resource) {
+        // Skip the local `asrouter.ftl` (i.e. the first resource) to favor the remote one.
+        // Other resources such as `branding.ftl`, `sync-brand.ftl`, and `branding/brand.ftl`
+        // still need to be packed into this bundle because, otherwise, we can't reference
+        // them across different Fluent bundles.
+        for await (let bundle of L10nRegistry.generateBundles(
+          [appLocale],
+          resourceIds.slice(1)
+        )) {
+          // Override the old string ID if any as it's the last resource.
+          bundle.addResource(resource, true);
+          yield bundle;
+        }
+      } else {
+        yield* L10nRegistry.generateBundles(appLocales, resourceIds);
+      }
+    }
+
+    return new DOMLocalization(
+      [
+        "browser/newtab/asrouter.ftl",
+        "browser/branding/brandings.ftl",
+        "browser/branding/sync-brand.ftl",
+        "branding/brand.ftl",
+      ],
+      generateBundles
+    );
   }
 
   async showAddressBarNotifier(recommendation, shouldExpand = false) {
@@ -114,18 +197,7 @@ class PageAction {
       // After one second, expand
       this._expand(DELAY_BEFORE_EXPAND_MS);
 
-      this._dispatchImpression(recommendation);
-      // Only send an impression ping upon the first expansion.
-      // Note that when the user clicks on the "show" button on the asrouter admin
-      // page (both `bucket_id` and `id` will be set as null), we don't want to send
-      // the impression ping in that case.
-      if (!!recommendation.id && !!recommendation.content.bucket_id) {
-        this._sendTelemetry({
-          message_id: recommendation.id,
-          bucket_id: recommendation.content.bucket_id,
-          event: "IMPRESSION",
-        });
-      }
+      this.addImpression(recommendation);
     }
   }
 
@@ -185,7 +257,7 @@ class PageAction {
   }
 
   _clearScheduledStateChanges() {
-    while (this.stateTransitionTimeoutIDs.length > 0) {
+    while (this.stateTransitionTimeoutIDs.length) {
       // clearTimeout is safe even with invalid/expired IDs
       this.window.clearTimeout(this.stateTransitionTimeoutIDs.pop());
     }
@@ -473,6 +545,9 @@ class PageAction {
     this.window.document
       .getElementById("contextual-feature-recommendation-notification")
       .setAttribute("data-notification-category", content.layout);
+    this.window.document
+      .getElementById("contextual-feature-recommendation-notification")
+      .setAttribute("data-notification-bucket", content.bucket_id);
 
     switch (content.layout) {
       case "icon_and_message":
@@ -491,10 +566,23 @@ class PageAction {
           });
           RecommendationMap.delete(browser);
         };
+
+        let getIcon = () => {
+          if (content.icon_dark_theme && this.isDarkTheme) {
+            return content.icon_dark_theme;
+          }
+          return content.icon;
+        };
+
+        let learnMoreURL = content.learn_more
+          ? SUMO_BASE_URL + content.learn_more
+          : null;
+
         panelTitle = await this.getStrings(content.heading_text);
         options = {
-          popupIconURL: content.icon,
-          popupIconClass: "cfr-doorhanger-large-icon",
+          popupIconURL: getIcon(),
+          popupIconClass: content.icon_class,
+          learnMoreURL,
         };
         break;
       case "message_and_animation":
@@ -579,52 +667,41 @@ class PageAction {
       callback: primaryActionCallback,
     };
 
-    // For each secondary action, get the strings and attributes
-    const secondaryBtnStrings = [];
-    for (let button of secondary) {
+    let _renderSecondaryButtonAction = async (event, button) => {
       let label = await this.getStrings(button.label);
-      secondaryBtnStrings.push({ label, attributes: label.attributes });
-    }
-    const secondaryActions = [
-      {
-        label: secondaryBtnStrings[0].label,
-        accessKey: secondaryBtnStrings[0].attributes.accesskey,
+      let { attributes } = label;
+
+      return {
+        label,
+        accessKey: attributes.accesskey,
         callback: () => {
-          this.dispatchUserAction(secondary[0].action);
+          if (button.action) {
+            this.dispatchUserAction(button.action);
+          } else {
+            this._blockMessage(id);
+            this.hideAddressBarNotifier();
+            RecommendationMap.delete(browser);
+          }
+
           this._sendTelemetry({
             message_id: id,
             bucket_id: content.bucket_id,
-            event: "DISMISS",
+            event,
           });
         },
-      },
-      {
-        label: secondaryBtnStrings[1].label,
-        accessKey: secondaryBtnStrings[1].attributes.accesskey,
-        callback: () => {
-          this._blockMessage(id);
-          this.hideAddressBarNotifier();
-          this._sendTelemetry({
-            message_id: id,
-            bucket_id: content.bucket_id,
-            event: "BLOCK",
-          });
-          RecommendationMap.delete(browser);
-        },
-      },
-      {
-        label: secondaryBtnStrings[2].label,
-        accessKey: secondaryBtnStrings[2].attributes.accesskey,
-        callback: () => {
-          this.dispatchUserAction(secondary[2].action);
-          this._sendTelemetry({
-            message_id: id,
-            bucket_id: content.bucket_id,
-            event: "MANAGE",
-          });
-        },
-      },
-    ];
+      };
+    };
+
+    // For each secondary action, define default telemetry event
+    const defaultSecondaryEvent = ["DISMISS", "BLOCK", "MANAGE"];
+    const secondaryActions = await Promise.all(
+      secondary.map((button, i) => {
+        return _renderSecondaryButtonAction(
+          button.event || defaultSecondaryEvent[i],
+          button
+        );
+      })
+    );
 
     // Actually show the notification
     this.currentNotification = this.window.PopupNotifications.show(
@@ -655,15 +732,23 @@ class PageAction {
       return;
     }
     const message = RecommendationMap.get(browser);
-    const { id, content } = message;
 
     // The recommendation should remain either collapsed or expanded while the
     // doorhanger is showing
     this._clearScheduledStateChanges(browser, message);
 
+    await this.showPopup();
+  }
+
+  async showPopup() {
+    const browser = this.window.gBrowser.selectedBrowser;
+    const message = RecommendationMap.get(browser);
+    const { id, content } = message;
+
     // A hacky way of setting the popup anchor outside the usual url bar icon box
     // See https://searchfox.org/mozilla-central/rev/847b64cc28b74b44c379f9bff4f415b97da1c6d7/toolkit/modules/PopupNotifications.jsm#42
-    browser.cfrpopupnotificationanchor = this.container;
+    browser.cfrpopupnotificationanchor =
+      this.window.document.getElementById(content.anchor_id) || this.container;
 
     this._sendTelemetry({
       message_id: id,
@@ -699,10 +784,11 @@ const CFRPageActions = {
     if (RecommendationMap.has(browser)) {
       const recommendation = RecommendationMap.get(browser);
       if (
-        isHostMatch(browser, recommendation.host) ||
-        // If there is no host associated we assume we're back on a tab
-        // that had a CFR message so we should show it again
-        !recommendation.host
+        !recommendation.content.skip_address_bar_notifier &&
+        (isHostMatch(browser, recommendation.host) ||
+          // If there is no host associated we assume we're back on a tab
+          // that had a CFR message so we should show it again
+          !recommendation.host)
       ) {
         // The browser has a recommendation specified with this host, so show
         // the page action
@@ -762,7 +848,13 @@ const CFRPageActions = {
     if (!PageActionMap.has(win)) {
       PageActionMap.set(win, new PageAction(win, dispatchToASRouter));
     }
-    await PageActionMap.get(win).showAddressBarNotifier(recommendation, true);
+
+    if (content.skip_address_bar_notifier) {
+      await PageActionMap.get(win).showPopup();
+      PageActionMap.get(win).addImpression(recommendation);
+    } else {
+      await PageActionMap.get(win).showAddressBarNotifier(recommendation, true);
+    }
     return true;
   },
 
@@ -795,7 +887,13 @@ const CFRPageActions = {
     if (!PageActionMap.has(win)) {
       PageActionMap.set(win, new PageAction(win, dispatchToASRouter));
     }
-    await PageActionMap.get(win).showAddressBarNotifier(recommendation, true);
+
+    if (content.skip_address_bar_notifier) {
+      await PageActionMap.get(win).showPopup();
+      PageActionMap.get(win).addImpression(recommendation);
+    } else {
+      await PageActionMap.get(win).showAddressBarNotifier(recommendation, true);
+    }
     return true;
   },
 

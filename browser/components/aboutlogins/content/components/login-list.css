@@ -35,6 +35,12 @@
   font-weight: normal;
 }
 
+#login-sort:-moz-focusring { /* This is a workaround due to Bug 1580935 */
+  color: transparent !important;
+  fill: var(--in-content-text-color);
+  text-shadow: 0 0 0 var(--in-content-text-color);
+}
+
 .count {
   flex-grow: 1;
   text-align: end;
@@ -76,11 +82,16 @@ ol {
   padding-inline-start: 0;
   overflow: hidden auto;
   flex-grow: 1;
-  box-shadow: inset 0 -1px var(--in-content-box-border-color);
 }
 
 .create-login-button {
   margin: 16px;
+}
+
+.create-login-button-container {
+  box-shadow: 0 -1px var(--in-content-box-border-color);
+  display: flex;
+  flex-direction: column;
 }
 
 .login-list-item {
@@ -119,6 +130,10 @@ ol {
 .labels {
   flex-grow: 1;
   overflow: hidden;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .title,
@@ -153,22 +168,20 @@ ol {
   color: var(--in-content-deemphasized-text);
 }
 
-.login-list-item.breached {
-  padding-inline-end: 48px;
-  background-image: url("chrome://global/skin/icons/warning.svg");
-  background-position: right 24px center;
-  background-repeat: no-repeat;
-  -moz-context-properties: fill;
-  fill: var(--red-90);
+:not(.breached) > .list-item-warning-icon {
+  display: none;
 }
 
-.login-list-item.breached:dir(rtl) {
-  background-position: left 24px center;
+.breached > .list-item-warning-icon {
+  -moz-context-properties: fill;
+  fill: var(--red-90);
+  min-width: 16px;
+  margin-inline-start: 12px;
 }
 
 @supports -moz-bool-pref("browser.in-content.dark-mode") {
   @media (prefers-color-scheme: dark) {
-    .login-list-item.breached {
+    .breached > .list-item-warning-icon {
       fill: var(--red-60);
     }
   }

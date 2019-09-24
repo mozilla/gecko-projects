@@ -6,9 +6,6 @@
 
 #ifdef XP_WIN
 #  include "objbase.h"
-// Some Windows header defines this, so undef it as it conflicts with our
-// function of the same name.
-#  undef GetCurrentTime
 #endif
 
 #include "mozilla/dom/HTMLMediaElement.h"
@@ -53,7 +50,6 @@
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/EMEUtils.h"
 #include "mozilla/EventDispatcher.h"
-#include "mozilla/EventStateManager.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/NotNull.h"
@@ -77,6 +73,7 @@
 #include "mozilla/dom/PlayPromise.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/TextTrack.h"
+#include "mozilla/dom/UserActivation.h"
 #include "mozilla/dom/VideoPlaybackQuality.h"
 #include "mozilla/dom/VideoTrack.h"
 #include "mozilla/dom/VideoTrackList.h"
@@ -146,6 +143,10 @@ using namespace mozilla::dom::HTMLMediaElement_Binding;
 
 namespace mozilla {
 namespace dom {
+
+extern void NotifyMediaStarted(uint64_t aWindowID);
+extern void NotifyMediaStopped(uint64_t aWindowID);
+extern void NotifyMediaAudibleChanged(uint64_t aWindowID, bool aAudible);
 
 // Number of milliseconds between progress events as defined by spec
 static const uint32_t PROGRESS_MS = 350;
@@ -855,10 +856,7 @@ HTMLMediaElement::MediaLoadListener::OnStartRequest(nsIRequest* aRequest) {
       // array of blocked tracking nodes under its parent document.
       if (net::UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(
               status)) {
-        Document* ownerDoc = element->OwnerDoc();
-        if (ownerDoc) {
-          ownerDoc->AddBlockedNodeByClassifier(element);
-        }
+        element->OwnerDoc()->AddBlockedNodeByClassifier(element);
       }
       element->NotifyLoadError(
           nsPrintfCString("%u: %s", uint32_t(status), "Request failed"));
@@ -1005,7 +1003,11 @@ class HTMLMediaElement::AudioChannelAgentCallback final
       }
 
       mPlayingThroughTheAudioChannel = playingThroughTheAudioChannel;
-      NotifyAudioChannelAgent(mPlayingThroughTheAudioChannel);
+      if (mPlayingThroughTheAudioChannel) {
+        StartAudioChannelAgent();
+      } else {
+        StopAudioChanelAgent();
+      }
     }
   }
 
@@ -1126,6 +1128,9 @@ class HTMLMediaElement::AudioChannelAgentCallback final
 
     mIsOwnerAudible = newAudibleState;
     mAudioChannelAgent->NotifyStartedAudible(mIsOwnerAudible, aReason);
+    NotifyMediaAudibleChanged(
+        mAudioChannelAgent->WindowID(),
+        mIsOwnerAudible == AudioChannelService::AudibleState::eAudible);
   }
 
   bool IsPlaybackBlocked() {
@@ -1145,10 +1150,10 @@ class HTMLMediaElement::AudioChannelAgentCallback final
 
   void Shutdown() {
     MOZ_ASSERT(!mIsShutDown);
-    if (mAudioChannelAgent) {
-      mAudioChannelAgent->NotifyStoppedPlaying();
-      mAudioChannelAgent = nullptr;
+    if (mAudioChannelAgent && mAudioChannelAgent->IsPlayingStarted()) {
+      StopAudioChanelAgent();
     }
+    mAudioChannelAgent = nullptr;
     mIsShutDown = true;
   }
 
@@ -1186,22 +1191,25 @@ class HTMLMediaElement::AudioChannelAgentCallback final
     return true;
   }
 
-  void NotifyAudioChannelAgent(bool aPlaying) {
+  void StartAudioChannelAgent() {
     MOZ_ASSERT(mAudioChannelAgent);
-
-    if (aPlaying) {
-      AudioPlaybackConfig config;
-      nsresult rv =
-          mAudioChannelAgent->NotifyStartedPlaying(&config, IsOwnerAudible());
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-      }
-
-      WindowVolumeChanged(config.mVolume, config.mMuted);
-      WindowSuspendChanged(config.mSuspend);
-    } else {
-      mAudioChannelAgent->NotifyStoppedPlaying();
+    MOZ_ASSERT(!mAudioChannelAgent->IsPlayingStarted());
+    AudioPlaybackConfig config;
+    if (NS_WARN_IF(NS_FAILED(mAudioChannelAgent->NotifyStartedPlaying(
+            &config, IsOwnerAudible())))) {
+      return;
     }
+
+    NotifyMediaStarted(mAudioChannelAgent->WindowID());
+    WindowVolumeChanged(config.mVolume, config.mMuted);
+    WindowSuspendChanged(config.mSuspend);
+  }
+
+  void StopAudioChanelAgent() {
+    MOZ_ASSERT(mAudioChannelAgent);
+    MOZ_ASSERT(mAudioChannelAgent->IsPlayingStarted());
+    mAudioChannelAgent->NotifyStoppedPlaying();
+    NotifyMediaStopped(mAudioChannelAgent->WindowID());
   }
 
   void SetSuspended(SuspendTypes aSuspend) {
@@ -2163,11 +2171,11 @@ void HTMLMediaElement::Load() {
        "ownerDoc=%p (%s) ownerDocUserActivated=%d "
        "muted=%d volume=%f",
        this, !!mSrcAttrStream, HasAttr(kNameSpaceID_None, nsGkAtoms::src),
-       HasSourceChildren(this), EventStateManager::IsHandlingUserInput(),
+       HasSourceChildren(this), UserActivation::IsHandlingUserInput(),
        HasAttr(kNameSpaceID_None, nsGkAtoms::autoplay),
        AutoplayPolicy::IsAllowedToPlay(*this), OwnerDoc(),
        DocumentOrigin(OwnerDoc()).get(),
-       OwnerDoc() ? OwnerDoc()->HasBeenUserGestureActivated() : 0, mMuted,
+       OwnerDoc()->HasBeenUserGestureActivated(), mMuted,
        mVolume));
 
   if (mIsRunningLoadMethod) {
@@ -2190,7 +2198,7 @@ void HTMLMediaElement::DoLoad() {
     return;
   }
 
-  if (EventStateManager::IsHandlingUserInput()) {
+  if (UserActivation::IsHandlingUserInput()) {
     // Detect if user has interacted with element so that play will not be
     // blocked when initiated by a script. This enables sites to capture user
     // intent to play by calling load() in the click handler of a "catalog
@@ -2521,7 +2529,8 @@ void HTMLMediaElement::LoadFromSourceChildren() {
 
     // If we have a type attribute, it must be a supported type.
     nsAutoString type;
-    if (child->GetAttr(kNameSpaceID_None, nsGkAtoms::type, type)) {
+    if (child->GetAttr(kNameSpaceID_None, nsGkAtoms::type, type) &&
+        !type.IsEmpty()) {
       DecoderDoctorDiagnostics diagnostics;
       CanPlayStatus canPlay = GetCanPlay(type, &diagnostics);
       diagnostics.StoreFormatDiagnostics(OwnerDoc(), type,
@@ -2534,7 +2543,8 @@ void HTMLMediaElement::LoadFromSourceChildren() {
 
         while (nextChild) {
           if (nextChild && nextChild->IsHTMLElement(nsGkAtoms::source)) {
-            ReportLoadError("MediaLoadUnsupportedTypeAttributeLoadingNextChild", params);
+            ReportLoadError("MediaLoadUnsupportedTypeAttributeLoadingNextChild",
+                            params);
             break;
           }
 
@@ -2898,7 +2908,7 @@ void HTMLMediaElement::Seek(double aTime, SeekTarget::Type aSeekType,
 
   // Detect if user has interacted with element by seeking so that
   // play will not be blocked when initiated by a script.
-  if (EventStateManager::IsHandlingUserInput()) {
+  if (UserActivation::IsHandlingUserInput()) {
     mIsBlessed = true;
   }
 
@@ -3867,7 +3877,7 @@ already_AddRefed<Promise> HTMLMediaElement::Play(ErrorResult& aRv) {
 
   UpdateHadAudibleAutoplayState();
 
-  const bool handlingUserInput = EventStateManager::IsHandlingUserInput();
+  const bool handlingUserInput = UserActivation::IsHandlingUserInput();
   mPendingPlayPromises.AppendElement(promise);
 
   if (AutoplayPolicy::IsAllowedToPlay(*this)) {
@@ -4255,9 +4265,7 @@ nsresult HTMLMediaElement::BindToTree(BindContext& aContext, nsINode& aParent) {
     // Construct Shadow Root so web content can be hidden in the DOM.
     AttachAndSetUAShadowRoot();
     NotifyUAWidgetSetupOrChange();
-  }
 
-  if (IsInUncomposedDoc()) {
     // The preload action depends on the value of the autoplay attribute.
     // It's value may have changed, so update it.
     UpdatePreloadAction();
@@ -4439,21 +4447,25 @@ void HTMLMediaElement::UnbindFromTree(bool aNullParent) {
   MOZ_ASSERT(IsHidden());
   NotifyDecoderActivityChanges();
 
+  // https://html.spec.whatwg.org/#playing-the-media-resource:remove-an-element-from-a-document
+  //
   // Dispatch a task to run once we're in a stable state which ensures we're
-  // paused if we're no longer in a document. Note we set a flag here to
-  // ensure we don't dispatch redundant tasks.
-  if (!mDispatchedTaskToPauseIfNotInDocument) {
-    mDispatchedTaskToPauseIfNotInDocument = true;
-    nsCOMPtr<nsIRunnable> task = NS_NewRunnableFunction(
-        "dom::HTMLMediaElement::UnbindFromTree",
-        [self = RefPtr<HTMLMediaElement>(this)]() {
-          self->mDispatchedTaskToPauseIfNotInDocument = false;
-          if (!self->IsInComposedDoc()) {
-            self->Pause();
-          }
-        });
-    RunInStableState(task);
-  }
+  // paused if we're no longer in a document. Note that we need to dispatch this
+  // even if there are other tasks in flight for this because these can be
+  // cancelled if there's a new load.
+  //
+  // FIXME(emilio): Per that spec section, we should only do this if we used to
+  // be connected, though other browsers match our current behavior...
+  //
+  // Also, https://github.com/whatwg/html/issues/4928
+  nsCOMPtr<nsIRunnable> task = NS_NewRunnableFunction(
+      "dom::HTMLMediaElement::UnbindFromTree",
+      [self = RefPtr<HTMLMediaElement>(this)]() {
+        if (!self->IsInComposedDoc()) {
+          self->Pause();
+        }
+      });
+  RunInStableState(task);
 }
 
 /* static */
@@ -5874,7 +5886,7 @@ void HTMLMediaElement::CheckAutoplayDataReady() {
 
 bool HTMLMediaElement::IsActive() const {
   Document* ownerDoc = OwnerDoc();
-  return ownerDoc && ownerDoc->IsActive() && ownerDoc->IsVisible();
+  return ownerDoc->IsActive() && ownerDoc->IsVisible();
 }
 
 bool HTMLMediaElement::IsHidden() const {
@@ -6194,8 +6206,7 @@ void HTMLMediaElement::SuspendOrResumeElement(bool aPauseElement,
 }
 
 bool HTMLMediaElement::IsBeingDestroyed() {
-  Document* ownerDoc = OwnerDoc();
-  nsIDocShell* docShell = ownerDoc ? ownerDoc->GetDocShell() : nullptr;
+  nsIDocShell* docShell = OwnerDoc()->GetDocShell();
   bool isBeingDestroyed = false;
   if (docShell) {
     docShell->IsBeingDestroyed(&isBeingDestroyed);
@@ -7410,11 +7421,9 @@ already_AddRefed<Promise> HTMLMediaElement::SetSinkId(const nsAString& aSinkId,
                   promise->MaybeReject(NS_ERROR_DOM_ABORT_ERR);
                   break;
                 case NS_ERROR_NOT_AVAILABLE: {
-                  ErrorResult notFoundError;
-                  notFoundError.ThrowDOMException(
+                  promise->MaybeRejectWithDOMException(
                       NS_ERROR_DOM_NOT_FOUND_ERR,
-                      NS_LITERAL_CSTRING("The object can not be found here."));
-                  promise->MaybeReject(notFoundError);
+                      "The object can not be found here.");
                   break;
                 }
                 case NS_ERROR_DOM_MEDIA_NOT_ALLOWED_ERR:

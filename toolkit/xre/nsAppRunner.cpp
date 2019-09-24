@@ -24,6 +24,7 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/Utf8.h"
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/recordreplay/ParentIPC.h"
 #include "mozilla/JSONWriter.h"
@@ -2985,6 +2986,21 @@ int XREMain::XRE_mainInit(bool* aExitFlag) {
   DisableAppNap();
 #endif
 
+#ifndef ANDROID
+  if (PR_GetEnv("MOZ_RUN_GTEST")
+#  ifdef FUZZING
+      || PR_GetEnv("FUZZER")
+#  endif
+  ) {
+    // Enable headless mode and assert that it worked, since gfxPlatform
+    // uses a static bool set after the first call to `IsHeadless`.
+    // Note: Android gtests seem to require an Activity and fail to start
+    // with headless mode enabled.
+    PR_SetEnv("MOZ_HEADLESS=1");
+    MOZ_ASSERT(gfxPlatform::IsHeadless());
+  }
+#endif  // ANDROID
+
   if (PR_GetEnv("MOZ_CHAOSMODE")) {
     ChaosFeature feature = ChaosFeature::Any;
     long featureInt = strtol(PR_GetEnv("MOZ_CHAOSMODE"), nullptr, 16);
@@ -4376,7 +4392,7 @@ nsresult XREMain::XRE_mainRun() {
   nsAutoCString path;
   rv = mDirProvider.GetProfileStartupDir(getter_AddRefs(profileDir));
   if (NS_SUCCEEDED(rv) && NS_SUCCEEDED(profileDir->GetNativePath(path)) &&
-      !IsUTF8(path)) {
+      !IsUtf8(path)) {
     PR_fprintf(
         PR_STDERR,
         "Error: The profile path is not valid UTF-8. Unable to continue.\n");

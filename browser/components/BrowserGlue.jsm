@@ -106,6 +106,20 @@ let ACTORS = {
     allFrames: true,
   },
 
+  RFPHelper: {
+    parent: {
+      moduleURI: "resource:///actors/RFPHelperParent.jsm",
+    },
+    child: {
+      moduleURI: "resource:///actors/RFPHelperChild.jsm",
+      events: {
+        resize: {},
+      },
+    },
+
+    allFrames: true,
+  },
+
   SwitchDocumentDirection: {
     child: {
       moduleURI: "resource:///actors/SwitchDocumentDirectionChild.jsm",
@@ -140,12 +154,12 @@ let LEGACY_ACTORS = {
       },
       messages: [
         "AboutLogins:AllLogins",
-        "AboutLogins:LocalizeBadges",
         "AboutLogins:LoginAdded",
         "AboutLogins:LoginModified",
         "AboutLogins:LoginRemoved",
         "AboutLogins:MasterPasswordResponse",
         "AboutLogins:SendFavicons",
+        "AboutLogins:Setup",
         "AboutLogins:ShowLoginItemError",
         "AboutLogins:SyncState",
         "AboutLogins:UpdateBreaches",
@@ -260,7 +274,6 @@ let LEGACY_ACTORS = {
     child: {
       module: "resource:///actors/NetErrorChild.jsm",
       events: {
-        AboutNetErrorLoad: { wantUntrusted: true },
         AboutNetErrorSetAutomatic: { wantUntrusted: true },
         AboutNetErrorResetPreferences: { wantUntrusted: true },
         click: {},
@@ -291,17 +304,6 @@ let LEGACY_ACTORS = {
       // Only matching web pages, as opposed to internal about:, chrome: or
       // resource: pages. See https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns
       matches: ["*://*/*"],
-    },
-  },
-
-  RFPHelper: {
-    child: {
-      module: "resource:///actors/RFPHelperChild.jsm",
-      group: "browsers",
-      events: {
-        resize: {},
-      },
-      messages: ["Finder:FindbarOpen", "Finder:FindbarClose"],
     },
   },
 
@@ -1720,19 +1722,6 @@ BrowserGlue.prototype = {
   },
 
   _recordContentBlockingTelemetry() {
-    let recordIdentityPopupEvents = Services.prefs.prefHasUserValue(
-      "security.identitypopup.recordEventElemetry"
-    )
-      ? Services.prefs.getBoolPref("security.identitypopup.recordEventElemetry")
-      : Services.prefs.getBoolPref(
-          "security.identitypopup.recordEventTelemetry"
-        );
-
-    Services.telemetry.setEventRecordingEnabled(
-      "security.ui.identitypopup",
-      recordIdentityPopupEvents
-    );
-
     Services.telemetry.setEventRecordingEnabled(
       "security.ui.protectionspopup",
       Services.prefs.getBoolPref(
@@ -1999,17 +1988,6 @@ BrowserGlue.prototype = {
     Services.tm.idleDispatchToMainThread(async () => {
       await ContextualIdentityService.load();
       Discovery.update();
-    });
-
-    Services.tm.idleDispatchToMainThread(() => {
-      let enableCertErrorUITelemetry = Services.prefs.getBoolPref(
-        "security.certerrors.recordEventTelemetry",
-        false
-      );
-      Services.telemetry.setEventRecordingEnabled(
-        "security.ui.certerror",
-        enableCertErrorUITelemetry
-      );
     });
 
     Services.tm.idleDispatchToMainThread(() => {

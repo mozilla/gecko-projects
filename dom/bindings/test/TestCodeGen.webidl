@@ -66,7 +66,9 @@ callback interface TestSingleOperationCallbackInterface {
 enum TestEnum {
   "1",
   "a",
-  "b"
+  "b",
+  "1-2",
+  "2d-array"
 };
 
 callback TestCallback = void();
@@ -143,16 +145,7 @@ TestInterface implements ImplementedInterface;
 interface OnlyForUseInConstructor {
 };
 
-[Constructor,
- Constructor(DOMString str),
- Constructor(unsigned long num, boolean? boolArg),
- Constructor(TestInterface? iface),
- Constructor(unsigned long arg1, IndirectlyImplementedInterface iface),
- Constructor(Date arg1),
- Constructor(ArrayBuffer arrayBuf),
- Constructor(Uint8Array typedArr),
- // Constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3),
- NamedConstructor=Test,
+[NamedConstructor=Test,
  NamedConstructor=Test(DOMString str),
  NamedConstructor=Test2(DictForConstructor dict, any any1, object obj1,
                         object? obj2, sequence<Dict> seq, optional any any2,
@@ -163,6 +156,16 @@ interface OnlyForUseInConstructor {
  NamedConstructor=Test6(sequence<record<ByteString, sequence<sequence<record<ByteString, record<USVString, any>>>>>> arg1),
  ]
 interface TestInterface {
+  constructor();
+  constructor(DOMString str);
+  constructor(unsigned long num, boolean? boolArg);
+  constructor(TestInterface? iface);
+  constructor(unsigned long arg1, IndirectlyImplementedInterface iface);
+  constructor(Date arg1);
+  constructor(ArrayBuffer arrayBuf);
+  constructor(Uint8Array typedArr);
+  // constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3);
+
   // Integer types
   // XXXbz add tests for throwing versions of all the integer stuff
   readonly attribute byte readonlyByte;
@@ -511,6 +514,24 @@ interface TestInterface {
   void passVariadicUSVS(USVString... arg);
   USVString receiveUSVS();
 
+  // JSString types
+  void passJSString(JSString arg);
+  // void passNullableJSString(JSString? arg); // NOT SUPPORTED YET
+  // void passOptionalJSString(optional JSString arg); // NOT SUPPORTED YET
+  void passOptionalJSStringWithDefaultValue(optional JSString arg = "abc");
+  // void passOptionalNullableJSString(optional JSString? arg); // NOT SUPPORTED YET
+  // void passOptionalNullableJSStringWithDefaultValue(optional JSString? arg = null); // NOT SUPPORTED YET
+  // void passVariadicJSString(JSString... arg); // NOT SUPPORTED YET
+  // void passRecordOfJSString(record<DOMString, JSString> arg); // NOT SUPPORTED YET
+  // void passSequenceOfJSString(sequence<JSString> arg); // NOT SUPPORTED YET
+  // void passUnionJSString((JSString or long) arg); // NOT SUPPORTED YET
+  JSString receiveJSString();
+  // sequence<JSString> receiveJSStringSequence(); // NOT SUPPORTED YET
+  // (JSString or long) receiveJSStringUnion(); // NOT SUPPORTED YET
+  // record<DOMString, JSString> receiveJSStringRecord(); // NOT SUPPORTED YET
+  readonly attribute JSString readonlyJSStringAttr;
+  attribute JSString jsStringAttr;
+
   // Enumerated types
   void passEnum(TestEnum arg);
   void passNullableEnum(TestEnum? arg);
@@ -771,14 +792,14 @@ interface TestInterface {
   Promise<any> receiveAddrefedPromise();
 
   // binaryNames tests
+  [BinaryName="methodRenamedTo"]
   void methodRenamedFrom();
-  [BinaryName="otherMethodRenamedTo"]
-  void otherMethodRenamedFrom();
+  [BinaryName="methodRenamedTo"]
   void methodRenamedFrom(byte argument);
+  [BinaryName="attributeGetterRenamedTo"]
   readonly attribute byte attributeGetterRenamedFrom;
+  [BinaryName="attributeRenamedTo"]
   attribute byte attributeRenamedFrom;
-  [BinaryName="otherAttributeRenamedTo"]
-  attribute byte otherAttributeRenamedFrom;
 
   void passDictionary(optional Dict x = {});
   void passDictionary2(Dict x);
@@ -1091,6 +1112,7 @@ dictionary Dict : ParentDict {
   ByteString byteStr;
   ByteString emptyByteStr = "";
   ByteString otherByteStr = "def";
+  // JSString jsStr; // NOT SUPPORTED YET
   object someObj;
   boolean prototype;
   object? anotherObj = null;
@@ -1296,14 +1318,16 @@ interface TestCppKeywordNamedMethodsInterface {
   long volatile();
 };
 
-[Deprecated="EnablePrivilege", Constructor()]
+[Deprecated="EnablePrivilege"]
 interface TestDeprecatedInterface {
+  constructor();
+
   static void alsoDeprecated();
 };
 
 
-[Constructor(Promise<void> promise)]
 interface TestInterfaceWithPromiseConstructorArg {
+  constructor(Promise<void> promise);
 };
 
 namespace TestNamespace {
@@ -1342,6 +1366,26 @@ interface TestWorkerExposedInterface {
 interface TestHTMLConstructorInterface {
 };
 
+interface TestThrowingConstructorInterface {
+  [Throws]
+  constructor();
+  [Throws]
+  constructor(DOMString str);
+  [Throws]
+  constructor(unsigned long num, boolean? boolArg);
+  [Throws]
+  constructor(TestInterface? iface);
+  [Throws]
+  constructor(unsigned long arg1, IndirectlyImplementedInterface iface);
+  [Throws]
+  constructor(Date arg1);
+  [Throws]
+  constructor(ArrayBuffer arrayBuf);
+  [Throws]
+  constructor(Uint8Array typedArr);
+  // [Throws] constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3);
+};
+
 interface TestCEReactionsInterface {
   [CEReactions] setter void (unsigned long index, long item);
   [CEReactions] setter void (DOMString name, DOMString item);
@@ -1354,6 +1398,7 @@ interface TestCEReactionsInterface {
 typedef [EnforceRange] octet OctetRange;
 typedef [Clamp] octet OctetClamp;
 typedef [TreatNullAs=EmptyString] DOMString NullEmptyString;
+// typedef [TreatNullAs=EmptyString] JSString NullEmptyJSString;
 
 dictionary TestAttributesOnDictionaryMembers {
   [Clamp] octet a;
@@ -1368,6 +1413,7 @@ interface TestAttributesOnTypes {
   void foo(OctetClamp thingy);
   void bar(OctetRange thingy);
   void baz(NullEmptyString thingy);
+  // void qux(NullEmptyJSString thingy);
   attribute [Clamp] octet someAttr;
   void argWithAttr([Clamp] octet arg0, optional [Clamp] octet arg1);
   // There aren't any argument-only attributes that we can test here,

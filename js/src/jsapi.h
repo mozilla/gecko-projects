@@ -11,6 +11,7 @@
 
 #include "mozilla/AlreadyAddRefed.h"
 #include "mozilla/FloatingPoint.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Range.h"
 #include "mozilla/RangedPtr.h"
@@ -394,6 +395,20 @@ JS_PUBLIC_API bool InitSelfHostedCode(JSContext* cx);
  * thread's context.
  */
 JS_PUBLIC_API void AssertObjectBelongsToCurrentThread(JSObject* obj);
+
+/**
+ * Install a process-wide callback to validate script filenames. The JS engine
+ * will invoke this callback for each JS script it parses or XDR decodes.
+ *
+ * If the callback returns |false|, an exception is thrown and parsing/decoding
+ * will be aborted.
+ *
+ * See also CompileOptions::setSkipFilenameValidation to opt-out of the callback
+ * for specific parse jobs.
+ */
+using FilenameValidationCallback = bool (*)(const char* filename,
+                                            bool isSystemRealm);
+JS_PUBLIC_API void SetFilenameValidationCallback(FilenameValidationCallback cb);
 
 } /* namespace JS */
 
@@ -2435,6 +2450,34 @@ MOZ_MUST_USE JS_PUBLIC_API bool JS_EncodeStringToBuffer(JSContext* cx,
                                                         char* buffer,
                                                         size_t length);
 
+/**
+ * Encode as many scalar values of the string as UTF-8 as can fit
+ * into the caller-provided buffer replacing unpaired surrogates
+ * with the REPLACEMENT CHARACTER.
+ *
+ * If JS_StringHasLatin1Chars(str) returns true, the function
+ * is guaranteed to convert the entire string if
+ * buffer.Length() >= 2 * JS_GetStringLength(str). Otherwise,
+ * the function is guaranteed to convert the entire string if
+ * buffer.Length() >= 3 * JS_GetStringLength(str).
+ *
+ * This function does not alter the representation of |str| or
+ * any |JSString*| substring that is a constituent part of it.
+ * Returns mozilla::Nothing() on OOM, without reporting an error;
+ * some data may have been written to |buffer| when this happens.
+ *
+ * If there's no OOM, returns the number of code units read and
+ * the number of code units written.
+ *
+ * The semantics of this method match the semantics of
+ * TextEncoder.encodeInto().
+ *
+ * The function does not store an additional zero byte.
+ */
+JS_PUBLIC_API mozilla::Maybe<mozilla::Tuple<size_t, size_t> >
+JS_EncodeStringToUTF8BufferPartial(JSContext* cx, JSString* str,
+                                   mozilla::Span<char> buffer);
+
 namespace JS {
 
 JS_PUBLIC_API bool PropertySpecNameEqualsId(JSPropertySpec::Name name,
@@ -2868,7 +2911,10 @@ extern JS_PUBLIC_API void JS_SetOffthreadIonCompilationEnabled(JSContext* cx,
   Register(SPECTRE_VALUE_MASKING, "spectre.value-masking") \
   Register(SPECTRE_JIT_TO_CXX_CALLS, "spectre.jit-to-C++-calls") \
   Register(WASM_FOLD_OFFSETS, "wasm.fold-offsets") \
-  Register(WASM_DELAY_TIER2, "wasm.delay-tier2")
+  Register(WASM_DELAY_TIER2, "wasm.delay-tier2") \
+  Register(WASM_JIT_BASELINE, "wasm.baseline") \
+  Register(WASM_JIT_CRANELIFT, "wasm.cranelift") \
+  Register(WASM_JIT_ION, "wasm.ion")
 // clang-format on
 
 typedef enum JSJitCompilerOption {

@@ -4,7 +4,6 @@ py2:
     include: ['.']
     exclude:
         - build
-        - client.py
         - dom
         - editor
         - gfx
@@ -20,6 +19,7 @@ py2:
         - servo
         - taskcluster/docker/funsize-update-generator
         - taskcluster/docker/visual-metrics
+        - testing/condprofile
         - testing/gtest
         - testing/mochitest
         - testing/mozharness
@@ -27,7 +27,6 @@ py2:
         - testing/tools
         - testing/web-platform
         - toolkit
-        - tools/profiler
         - tools/rb
         - tools/update-packaging
         - xpcom

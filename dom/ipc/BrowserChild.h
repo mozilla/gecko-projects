@@ -284,7 +284,8 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   mozilla::ipc::IPCResult RecvSizeModeChanged(const nsSizeMode& aSizeMode);
 
   mozilla::ipc::IPCResult RecvChildToParentMatrix(
-      const mozilla::Maybe<mozilla::gfx::Matrix4x4>& aMatrix);
+      const mozilla::Maybe<mozilla::gfx::Matrix4x4>& aMatrix,
+      const mozilla::ScreenRect& aRemoteDocumentRect);
 
   mozilla::ipc::IPCResult RecvActivate();
 
@@ -519,7 +520,8 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   mozilla::ipc::IPCResult RecvUpdateNativeWindowHandle(
       const uintptr_t& aNewHandle);
 
-  mozilla::ipc::IPCResult RecvSkipBrowsingContextDetach();
+  mozilla::ipc::IPCResult RecvSkipBrowsingContextDetach(
+      SkipBrowsingContextDetachResolver&& aResolve);
   /**
    * Native widget remoting protocol for use with windowed plugins with e10s.
    */
@@ -626,6 +628,8 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   // coordinate space of the native window its BrowserParent is in.
   mozilla::LayoutDeviceToLayoutDeviceMatrix4x4
   GetChildToParentConversionMatrix() const;
+
+  mozilla::ScreenRect GetRemoteDocumentRect() const;
 
   // Prepare to dispatch all coalesced mousemove events. We'll move all data
   // in mCoalescedMouseData to a nsDeque; then we start processing them. We
@@ -780,6 +784,7 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
                                        nsIRequest* aRequest,
                                        Maybe<WebProgressData>& aWebProgressData,
                                        RequestData& aRequestData);
+  already_AddRefed<nsIWebBrowserChrome3> GetWebBrowserChromeActor();
 
   class DelayedDeleteRunnable;
 
@@ -903,6 +908,7 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   WindowsHandle mWidgetNativeData;
 
   Maybe<LayoutDeviceToLayoutDeviceMatrix4x4> mChildToParentConversionMatrix;
+  ScreenRect mRemoteDocumentRect;
 
   // This state is used to keep track of the current visible tabs (the ones
   // rendering layers). There may be more than one if there are multiple browser

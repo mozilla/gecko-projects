@@ -54,6 +54,7 @@
 #include "mozilla/dom/PopupBlocker.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
+#include "mozilla/dom/UserActivation.h"
 #include "nsAnimationManager.h"
 #include "nsNameSpaceManager.h"  // for Pref-related rule management (bugs 22963,20760,31816)
 #include "nsFrame.h"
@@ -1002,6 +1003,7 @@ void PresShell::Init(Document* aDocument, nsPresContext* aPresContext,
         os->AddObserver(this, "sessionstore-one-or-no-tab-restored", false);
       }
       os->AddObserver(this, "font-info-updated", false);
+      os->AddObserver(this, "look-and-feel-pref-changed", false);
     }
   }
 
@@ -1246,6 +1248,7 @@ void PresShell::Destroy() {
         os->RemoveObserver(this, "sessionstore-one-or-no-tab-restored");
       }
       os->RemoveObserver(this, "font-info-updated");
+      os->RemoveObserver(this, "look-and-feel-pref-changed");
     }
   }
 
@@ -1857,6 +1860,31 @@ nsresult PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight,
                                     aOptions);
 }
 
+void PresShell::SimpleResizeReflow(nscoord aWidth, nscoord aHeight,
+                                   nscoord aOldWidth, nscoord aOldHeight) {
+  MOZ_ASSERT(aWidth != NS_UNCONSTRAINEDSIZE);
+  MOZ_ASSERT(aHeight != NS_UNCONSTRAINEDSIZE);
+  mPresContext->SetVisibleArea(nsRect(0, 0, aWidth, aHeight));
+  nsIFrame* rootFrame = GetRootFrame();
+  if (!rootFrame) {
+    return;
+  }
+  WritingMode wm = rootFrame->GetWritingMode();
+  bool isBSizeChanging =
+      wm.IsVertical() ? aOldWidth != aWidth : aOldHeight != aHeight;
+  if (isBSizeChanging) {
+    nsLayoutUtils::MarkIntrinsicISizesDirtyIfDependentOnBSize(rootFrame);
+  }
+  FrameNeedsReflow(rootFrame, IntrinsicDirty::Resize,
+                   NS_FRAME_HAS_DIRTY_CHILDREN);
+
+  // For compat with the old code path which always reflowed as long as there
+  // was a root frame.
+  if (!mPresContext->SuppressingResizeReflow()) {
+    mDocument->FlushPendingNotifications(FlushType::InterruptibleLayout);
+  }
+}
+
 nsresult PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
                                                nscoord aOldWidth,
                                                nscoord aOldHeight,
@@ -1867,8 +1895,40 @@ nsresult PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
     return NS_OK;
   }
 
-  nsIFrame* rootFrame = mFrameConstructor->GetRootFrame();
-  if (!rootFrame) {
+  // Historically we never fired resize events if there was no root frame by the
+  // time this function got called.
+  const bool initialized = mDidInitialize;
+  RefPtr<PresShell> kungFuDeathGrip(this);
+
+  auto postResizeEventIfNeeded = [this, initialized, aOptions]() {
+    if (initialized && !mIsDestroying && !mResizeEventPending &&
+        !(aOptions & ResizeReflowOptions::SuppressResizeEvent)) {
+      mResizeEventPending = true;
+      if (MOZ_LIKELY(!mDocument->GetBFCacheEntry())) {
+        mPresContext->RefreshDriver()->AddResizeEventFlushObserver(this);
+      }
+    }
+  };
+
+  if (!(aOptions & ResizeReflowOptions::BSizeLimit)) {
+    SimpleResizeReflow(aWidth, aHeight, aOldWidth, aOldHeight);
+    postResizeEventIfNeeded();
+    return NS_OK;
+  }
+
+  MOZ_ASSERT(!mPresContext->SuppressingResizeReflow(),
+             "Can't suppress resize reflow and shrink-wrap at the same time");
+
+  // Make sure that style is flushed before setting the pres context
+  // VisibleArea.
+  //
+  // Otherwise we may end up with bogus viewport units resolved against the
+  // unconstrained bsize, or restyling the whole document resolving viewport
+  // units against targetWidth, which may end up doing wasteful work.
+  mDocument->FlushPendingNotifications(FlushType::Frames);
+
+  nsIFrame* rootFrame = GetRootFrame();
+  if (mIsDestroying || !rootFrame) {
     // If we don't have a root frame yet, that means we haven't had our initial
     // reflow... If that's the case, and aWidth or aHeight is unconstrained,
     // ignore them altogether.
@@ -1885,134 +1945,59 @@ nsresult PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
   }
 
   WritingMode wm = rootFrame->GetWritingMode();
-  const bool shrinkToFit = !!(aOptions & ResizeReflowOptions::BSizeLimit);
-  MOZ_ASSERT(shrinkToFit ||
-                 (wm.IsVertical() ? aWidth : aHeight) != NS_UNCONSTRAINEDSIZE,
-             "unconstrained bsize only usable with eBSizeLimit");
   MOZ_ASSERT((wm.IsVertical() ? aHeight : aWidth) != NS_UNCONSTRAINEDSIZE,
              "unconstrained isize not allowed");
-  bool isBSizeChanging =
-      wm.IsVertical() ? aOldWidth != aWidth : aOldHeight != aHeight;
+
   nscoord targetWidth = aWidth;
   nscoord targetHeight = aHeight;
-
-  if (shrinkToFit) {
-    if (wm.IsVertical()) {
-      targetWidth = NS_UNCONSTRAINEDSIZE;
-    } else {
-      targetHeight = NS_UNCONSTRAINEDSIZE;
-    }
-    isBSizeChanging = true;
+  if (wm.IsVertical()) {
+    targetWidth = NS_UNCONSTRAINEDSIZE;
+  } else {
+    targetHeight = NS_UNCONSTRAINEDSIZE;
   }
 
-  const bool suppressingResizeReflow =
-      GetPresContext()->SuppressingResizeReflow();
+  mPresContext->SetVisibleArea(nsRect(0, 0, targetWidth, targetHeight));
+  // XXX Do a full invalidate at the beginning so that invalidates along
+  // the way don't have region accumulation issues?
 
-  RefPtr<nsViewManager> viewManager = mViewManager;
-  RefPtr<PresShell> kungFuDeathGrip(this);
+  // For height:auto BSizes (i.e. layout-controlled), descendant
+  // intrinsic sizes can't depend on them. So the only other case is
+  // viewport-controlled BSizes which we handle here.
+  nsLayoutUtils::MarkIntrinsicISizesDirtyIfDependentOnBSize(rootFrame);
 
-  if (!suppressingResizeReflow && shrinkToFit) {
-    // Make sure that style is flushed before setting the pres context
-    // VisibleArea if we're shrinking to fit.
-    //
-    // Otherwise we may end up with bogus viewport units resolved against the
-    // unconstrained bsize, or restyling the whole document resolving viewport
-    // units against targetWidth, which may end up doing wasteful work.
-    mDocument->FlushPendingNotifications(FlushType::Frames);
-  }
+  {
+    nsAutoCauseReflowNotifier crNotifier(this);
+    WillDoReflow();
 
-  if (!mIsDestroying) {
-    mPresContext->SetVisibleArea(nsRect(0, 0, targetWidth, targetHeight));
-  }
+    // Kick off a top-down reflow
+    AUTO_LAYOUT_PHASE_ENTRY_POINT(GetPresContext(), Reflow);
+    nsViewManager::AutoDisableRefresh refreshBlocker(mViewManager);
 
-  if (!mIsDestroying && !suppressingResizeReflow) {
-    if (!shrinkToFit) {
-      // Flush styles _now_ (with the correct visible area) if not computing the
-      // shrink-to-fit size.
-      //
-      // We've asserted above that sizes are not unconstrained, so this is going
-      // to be the final size, which means that we'll get the (correct) final
-      // styles now, and avoid a further potentially-wasteful full recascade on
-      // the next flush.
-      mDocument->FlushPendingNotifications(FlushType::Frames);
-    }
+    mDirtyRoots.Remove(rootFrame);
+    DoReflow(rootFrame, true, nullptr);
 
-    rootFrame = mFrameConstructor->GetRootFrame();
-    if (!mIsDestroying && rootFrame) {
-      // XXX Do a full invalidate at the beginning so that invalidates along
-      // the way don't have region accumulation issues?
+    const bool reflowAgain =
+        wm.IsVertical() ? mPresContext->GetVisibleArea().width > aWidth
+                        : mPresContext->GetVisibleArea().height > aHeight;
 
-      if (isBSizeChanging) {
-        // For BSize changes driven by style, RestyleManager handles this.
-        // For height:auto BSizes (i.e. layout-controlled), descendant
-        // intrinsic sizes can't depend on them. So the only other case is
-        // viewport-controlled BSizes which we handle here.
-        nsLayoutUtils::MarkIntrinsicISizesDirtyIfDependentOnBSize(rootFrame);
-      }
-
-      {
-        nsAutoCauseReflowNotifier crNotifier(this);
-        WillDoReflow();
-
-        // Kick off a top-down reflow
-        AUTO_LAYOUT_PHASE_ENTRY_POINT(GetPresContext(), Reflow);
-        nsViewManager::AutoDisableRefresh refreshBlocker(viewManager);
-
-        mDirtyRoots.Remove(rootFrame);
-        DoReflow(rootFrame, true, nullptr);
-
-        if (shrinkToFit) {
-          const bool reflowAgain =
-              wm.IsVertical() ? mPresContext->GetVisibleArea().width > aWidth
-                              : mPresContext->GetVisibleArea().height > aHeight;
-
-          if (reflowAgain) {
-            mPresContext->SetVisibleArea(nsRect(0, 0, aWidth, aHeight));
-            DoReflow(rootFrame, true, nullptr);
-          }
-        }
-      }
-
-      // the first DoReflow above should've set our bsize if it was
-      // NS_UNCONSTRAINEDSIZE, and the isize shouldn't be NS_UNCONSTRAINEDSIZE
-      // anyway
-      NS_ASSERTION(mPresContext->GetVisibleArea().width != NS_UNCONSTRAINEDSIZE,
-                   "width should not be NS_UNCONSTRAINEDSIZE after reflow");
-      NS_ASSERTION(
-          mPresContext->GetVisibleArea().height != NS_UNCONSTRAINEDSIZE,
-          "height should not be NS_UNCONSTRAINEDSIZE after reflow");
-
-      DidDoReflow(true);
+    if (reflowAgain) {
+      mPresContext->SetVisibleArea(nsRect(0, 0, aWidth, aHeight));
+      DoReflow(rootFrame, true, nullptr);
     }
   }
 
-  rootFrame = mFrameConstructor->GetRootFrame();
-  if (rootFrame) {
-    wm = rootFrame->GetWritingMode();
-    // reflow did not happen; if the reflow happened, our bsize should not be
-    // NS_UNCONSTRAINEDSIZE because DoReflow will fix it up to the same values
-    // as below
-    if (wm.IsVertical()) {
-      if (mPresContext->GetVisibleArea().width == NS_UNCONSTRAINEDSIZE) {
-        mPresContext->SetVisibleArea(
-            nsRect(0, 0, rootFrame->GetRect().width, aHeight));
-      }
-    } else {
-      if (mPresContext->GetVisibleArea().height == NS_UNCONSTRAINEDSIZE) {
-        mPresContext->SetVisibleArea(
-            nsRect(0, 0, aWidth, rootFrame->GetRect().height));
-      }
-    }
-  }
+  DidDoReflow(true);
 
-  if (!mIsDestroying && !mResizeEventPending &&
-      !(aOptions & ResizeReflowOptions::SuppressResizeEvent)) {
-    mResizeEventPending = true;
-    if (MOZ_LIKELY(!mDocument->GetBFCacheEntry())) {
-      mPresContext->RefreshDriver()->AddResizeEventFlushObserver(this);
-    }
-  }
+  // the reflow above should've set our bsize if it was NS_UNCONSTRAINEDSIZE,
+  // and the isize shouldn't be NS_UNCONSTRAINEDSIZE anyway.
+  MOZ_DIAGNOSTIC_ASSERT(
+      mPresContext->GetVisibleArea().width != NS_UNCONSTRAINEDSIZE,
+      "width should not be NS_UNCONSTRAINEDSIZE after reflow");
+  MOZ_DIAGNOSTIC_ASSERT(
+      mPresContext->GetVisibleArea().height != NS_UNCONSTRAINEDSIZE,
+      "height should not be NS_UNCONSTRAINEDSIZE after reflow");
 
+  postResizeEventIfNeeded();
   return NS_OK;  // XXX this needs to be real. MMP
 }
 
@@ -5070,13 +5055,6 @@ void PresShell::AddCanvasBackgroundColorItem(
   // We can only do that if the color is opaque.
   bool forceUnscrolledItem =
       nsLayoutUtils::UsesAsyncScrolling(aFrame) && NS_GET_A(bgcolor) == 255;
-  if ((aFlags & AddCanvasBackgroundColorFlags::AddForSubDocument) &&
-      StaticPrefs::layout_scroll_root_frame_containers()) {
-    // If we're using ContainerLayers for a subdoc, then any items we add here
-    // will still be scrolled (since we're inside the container at this point),
-    // so don't bother and we will do it manually later.
-    forceUnscrolledItem = false;
-  }
 
   if (!addedScrollingBackgroundColor || forceUnscrolledItem) {
     aList->AppendNewToBottom<nsDisplaySolidColor>(aBuilder, aFrame, aBounds,
@@ -5187,21 +5165,6 @@ bool PresShell::AsyncPanZoomEnabled() {
     }
   }
   return gfxPlatform::AsyncPanZoomEnabled();
-}
-
-void PresShell::SetIgnoreViewportScrolling(bool aIgnore) {
-  if (IgnoringViewportScrolling() == aIgnore) {
-    return;
-  }
-  RenderingState state(this);
-  if (aIgnore) {
-    state.mRenderingStateFlags |=
-        RenderingStateFlags::IgnoringViewportScrolling;
-  } else {
-    state.mRenderingStateFlags &=
-        ~RenderingStateFlags::IgnoringViewportScrolling;
-  }
-  SetRenderingState(state);
 }
 
 nsresult PresShell::SetResolutionAndScaleTo(float aResolution,
@@ -7795,7 +7758,7 @@ nsresult PresShell::EventHandler::HandleEventWithCurrentEventInfo(
   RecordEventPreparationPerformance(aEvent);
 
   AutoHandlingUserInputStatePusher userInpStatePusher(
-      EventStateManager::IsUserInteractionEvent(aEvent), aEvent);
+      UserActivation::IsUserInteractionEvent(aEvent), aEvent);
   AutoEventHandler eventHandler(aEvent, GetDocument());
   AutoPopupStatePusher popupStatePusher(
       PopupBlocker::GetEventPopupControlState(aEvent));
@@ -9532,6 +9495,11 @@ PresShell::Observe(nsISupports* aSubject, const char* aTopic,
 
   if (!nsCRT::strcmp(aTopic, "font-info-updated")) {
     mPresContext->ForceReflowForFontInfoUpdate();
+    return NS_OK;
+  }
+
+  if (!nsCRT::strcmp(aTopic, "look-and-feel-pref-changed")) {
+    ThemeChanged();
     return NS_OK;
   }
 

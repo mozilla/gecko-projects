@@ -17,6 +17,7 @@
 #include "mozilla/dom/Location.h"
 #include "mozilla/dom/LocationBinding.h"
 #include "mozilla/dom/StructuredCloneTags.h"
+#include "mozilla/dom/UserActivationIPCUtils.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WindowGlobalParent.h"
@@ -61,16 +62,6 @@ static void Register(BrowsingContext* aBrowsingContext) {
   aBrowsingContext->Group()->Register(aBrowsingContext);
 }
 
-void BrowsingContext::Unregister() {
-  MOZ_DIAGNOSTIC_ASSERT(mGroup);
-  mGroup->Unregister(this);
-  mIsDiscarded = true;
-
-  // NOTE: Doesn't use SetClosed, as it will be set in all processes
-  // automatically by calls to Detach()
-  mClosed = true;
-}
-
 BrowsingContext* BrowsingContext::Top() {
   BrowsingContext* bc = this;
   while (bc->mParent) {
@@ -111,6 +102,8 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
     Type aType) {
   MOZ_DIAGNOSTIC_ASSERT(!aParent || aParent->mType == aType);
 
+  MOZ_DIAGNOSTIC_ASSERT(aType != Type::Chrome || XRE_IsParentProcess());
+
   uint64_t id = nsContentUtils::GenerateBrowsingContextId();
 
   MOZ_LOG(GetLog(), LogLevel::Debug,
@@ -133,6 +126,8 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
   // using transactions to set them, as we haven't been attached yet.
   context->mName = aName;
   if (aOpener) {
+    MOZ_DIAGNOSTIC_ASSERT(aOpener->Group() == context->Group());
+    MOZ_DIAGNOSTIC_ASSERT(aOpener->mType == context->mType);
     context->mOpenerId = aOpener->Id();
     context->mHadOriginalOpener = true;
   }
@@ -140,7 +135,7 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
 
   BrowsingContext* inherit = aParent ? aParent : aOpener;
   if (inherit) {
-    context->mOpenerPolicy = inherit->mOpenerPolicy;
+    context->mOpenerPolicy = inherit->Top()->mOpenerPolicy;
     // CORPP 3.1.3 https://mikewest.github.io/corpp/#integration-html
     context->mEmbedderPolicy = inherit->mEmbedderPolicy;
   }
@@ -363,7 +358,17 @@ void BrowsingContext::Detach(bool aFromIPC) {
     children->RemoveElement(this);
   }
 
-  Unregister();
+  if (!mChildren.IsEmpty()) {
+    mGroup->CacheContexts(mChildren);
+    mChildren.Clear();
+  }
+
+  mGroup->Unregister(this);
+  mIsDiscarded = true;
+
+  // NOTE: Doesn't use SetClosed, as it will be set in all processes
+  // automatically by calls to Detach()
+  mClosed = true;
 
   if (!aFromIPC && XRE_IsContentProcess()) {
     auto cc = ContentChild::GetSingleton();
@@ -698,17 +703,21 @@ JSObject* BrowsingContext::ReadStructuredClone(JSContext* aCx,
 }
 
 void BrowsingContext::NotifyUserGestureActivation() {
-  SetIsActivatedByUserGesture(true);
+  SetUserActivationState(UserActivation::State::FullActivated);
 }
 
 void BrowsingContext::NotifyResetUserGestureActivation() {
-  SetIsActivatedByUserGesture(false);
+  SetUserActivationState(UserActivation::State::None);
+}
+
+bool BrowsingContext::HasBeenUserGestureActivated() {
+  return mUserActivationState != UserActivation::State::None;
 }
 
 bool BrowsingContext::HasValidTransientUserGestureActivation() {
   MOZ_ASSERT(mIsInProcess);
 
-  if (!mIsActivatedByUserGesture) {
+  if (mUserActivationState != UserActivation::State::FullActivated) {
     MOZ_ASSERT(mUserGestureStart.IsNull(),
                "mUserGestureStart should be null if the document hasn't ever "
                "been activated by user gesture");
@@ -723,6 +732,24 @@ bool BrowsingContext::HasValidTransientUserGestureActivation() {
 
   return timeout <= TimeDuration() ||
          (TimeStamp::Now() - mUserGestureStart) <= timeout;
+}
+
+bool BrowsingContext::ConsumeTransientUserGestureActivation() {
+  MOZ_ASSERT(mIsInProcess);
+
+  if (!HasValidTransientUserGestureActivation()) {
+    return false;
+  }
+
+  BrowsingContext* top = Top();
+  top->PreOrderWalk([&](BrowsingContext* aContext) {
+    if (aContext->GetUserActivationState() ==
+        UserActivation::State::FullActivated) {
+      aContext->SetUserActivationState(UserActivation::State::HasBeenActivated);
+    }
+  });
+
+  return true;
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(BrowsingContext)
@@ -794,8 +821,13 @@ void BrowsingContext::Location(JSContext* aCx,
 
 nsresult BrowsingContext::LoadURI(BrowsingContext* aAccessor,
                                   nsDocShellLoadState* aLoadState) {
-  MOZ_DIAGNOSTIC_ASSERT(!IsDiscarded());
-  MOZ_DIAGNOSTIC_ASSERT(!aAccessor || !aAccessor->IsDiscarded());
+  // Per spec, most load attempts are silently ignored when a BrowsingContext is
+  // null (which in our code corresponds to discarded), so we simply fail
+  // silently in those cases. Regardless, we cannot trigger loads in/from
+  // discarded BrowsingContexts via IPC, so we need to abort in any case.
+  if (IsDiscarded() || (aAccessor && aAccessor->IsDiscarded())) {
+    return NS_OK;
+  }
 
   if (mDocShell) {
     return mDocShell->LoadURI(aLoadState);
@@ -947,7 +979,12 @@ void BrowsingContext::PostMessageMoz(JSContext* aCx,
                  aSubjectPrincipal, aError);
 }
 
-void BrowsingContext::Transaction::Commit(BrowsingContext* aBrowsingContext) {
+nsresult BrowsingContext::Transaction::Commit(
+    BrowsingContext* aBrowsingContext) {
+  if (NS_WARN_IF(aBrowsingContext->IsDiscarded())) {
+    return NS_ERROR_FAILURE;
+  }
+
   if (!Validate(aBrowsingContext, nullptr)) {
     MOZ_CRASH("Cannot commit invalid BrowsingContext transaction");
   }
@@ -975,7 +1012,9 @@ void BrowsingContext::Transaction::Commit(BrowsingContext* aBrowsingContext) {
   }
 
   Apply(aBrowsingContext);
+  return NS_OK;
 }
+
 bool BrowsingContext::Transaction::Validate(BrowsingContext* aBrowsingContext,
                                             ContentParent* aSource) {
 #define MOZ_BC_FIELD(name, ...)                                        \
@@ -1019,7 +1058,7 @@ void BrowsingContext::Transaction::Apply(BrowsingContext* aBrowsingContext) {
 }
 
 BrowsingContext::IPCInitializer BrowsingContext::GetIPCInitializer() {
-  // FIXME: We should assert that we're loaded in-content here. (bug 1553804)
+  MOZ_DIAGNOSTIC_ASSERT(mType == Type::Content);
 
   IPCInitializer init;
   init.mId = Id();
@@ -1058,18 +1097,20 @@ void BrowsingContext::StartDelayedAutoplayMediaComponents() {
   mDocShell->StartDelayedAutoplayMediaComponents();
 }
 
-void BrowsingContext::DidSetIsActivatedByUserGesture() {
+void BrowsingContext::DidSetUserActivationState() {
   MOZ_ASSERT_IF(!mIsInProcess, mUserGestureStart.IsNull());
-  USER_ACTIVATION_LOG(
-      "Set user gesture activation %d for %s browsing context 0x%08" PRIx64,
-      mIsActivatedByUserGesture, XRE_IsParentProcess() ? "Parent" : "Child",
-      Id());
+  USER_ACTIVATION_LOG("Set user gesture activation %" PRIu8
+                      " for %s browsing context 0x%08" PRIx64,
+                      static_cast<uint8_t>(mUserActivationState),
+                      XRE_IsParentProcess() ? "Parent" : "Child", Id());
   if (mIsInProcess) {
     USER_ACTIVATION_LOG(
         "Set user gesture start time for %s browsing context 0x%08" PRIx64,
         XRE_IsParentProcess() ? "Parent" : "Child", Id());
     mUserGestureStart =
-        mIsActivatedByUserGesture ? TimeStamp::Now() : TimeStamp();
+        (mUserActivationState == UserActivation::State::FullActivated)
+            ? TimeStamp::Now()
+            : TimeStamp();
   }
 }
 

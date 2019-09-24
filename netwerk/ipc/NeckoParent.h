@@ -102,9 +102,9 @@ class NeckoParent : public PNeckoParent {
   PStunAddrsRequestParent* AllocPStunAddrsRequestParent();
   bool DeallocPStunAddrsRequestParent(PStunAddrsRequestParent* aActor);
 
-  PWebrtcProxyChannelParent* AllocPWebrtcProxyChannelParent(
-      const TabId& aTabId);
-  bool DeallocPWebrtcProxyChannelParent(PWebrtcProxyChannelParent* aActor);
+  PWebrtcTCPSocketParent* AllocPWebrtcTCPSocketParent(
+      const Maybe<TabId>& aTabId);
+  bool DeallocPWebrtcTCPSocketParent(PWebrtcTCPSocketParent* aActor);
 
   PAltDataOutputStreamParent* AllocPAltDataOutputStreamParent(
       const nsCString& type, const int64_t& predictedSize,
@@ -251,13 +251,6 @@ class NeckoParent : public PNeckoParent {
 
   mozilla::ipc::IPCResult RecvEnsureHSTSData(
       EnsureHSTSDataResolver&& aResolver);
-
-  PProxyConfigLookupParent* AllocPProxyConfigLookupParent();
-
-  virtual mozilla::ipc::IPCResult RecvPProxyConfigLookupConstructor(
-      PProxyConfigLookupParent* aActor) override;
-
-  bool DeallocPProxyConfigLookupParent(PProxyConfigLookupParent* aActor);
 };
 
 }  // namespace net

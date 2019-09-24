@@ -735,7 +735,7 @@ void CreateInterfaceObjects(
 /**
  * Define the properties (regular and chrome-only) on obj.
  *
- * obj the object to instal the properties on. This should be the interface
+ * obj the object to install the properties on. This should be the interface
  *     prototype object for regular interfaces and the instance object for
  *     interfaces marked with Global.
  * properties contains the methods, attributes and constants to be defined on
@@ -1799,6 +1799,14 @@ bool AppendNamedPropertyIds(JSContext* cx, JS::Handle<JSObject*> proxy,
                             JS::MutableHandleVector<jsid> props);
 
 enum StringificationBehavior { eStringify, eEmpty, eNull };
+
+static inline JSString* ConvertJSValueToJSString(JSContext* cx,
+                                                 JS::Handle<JS::Value> v) {
+  if (MOZ_LIKELY(v.isString())) {
+    return v.toString();
+  }
+  return JS::ToString(cx, v);
+}
 
 template <typename T>
 static inline bool ConvertJSValueToString(

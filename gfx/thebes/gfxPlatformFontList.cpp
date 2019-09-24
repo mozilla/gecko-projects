@@ -36,6 +36,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/ResultExtensions.h"
+#include "mozilla/TextUtils.h"
 #include "mozilla/Unused.h"
 
 #include "base/eintr_wrapper.h"
@@ -400,6 +401,13 @@ nsresult gfxPlatformFontList::InitFontList() {
 
   gfxPlatform::PurgeSkiaFontCache();
 
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    // Notify any current presContexts that fonts are being updated, so existing
+    // caches will no longer be valid.
+    obs->NotifyObservers(nullptr, "font-info-updated", nullptr);
+  }
+
   mAliasTable.Clear();
   mLocalNameTable.Clear();
 
@@ -428,6 +436,8 @@ nsresult gfxPlatformFontList::InitFontList() {
   for (unsigned i = 0; i <= 0x100000; i += 0x10000) {
     mCodepointsWithNoFonts.SetRange(i + 0xfffe, i + 0xffff);  // noncharacters
   }
+  // Forget any font family we previously chose for U+FFFD.
+  mReplacementCharFallbackFamily = FontFamily();
 
   sPlatformFontList = this;
 
@@ -935,7 +945,7 @@ bool gfxPlatformFontList::FindAndAddFamilies(
     // since reading name table entries is expensive.
     // Although ASCII localized family names are possible they don't occur
     // in practice, so avoid pulling in names at startup.
-    if (!mOtherFamilyNamesInitialized && !IsASCII(aFamily)) {
+    if (!mOtherFamilyNamesInitialized && !IsAscii(aFamily)) {
       InitOtherFamilyNames(
           !(aFlags & FindFamiliesFlags::eForceOtherFamilyNamesLoading));
       family = SharedFontList()->FindFamily(key);
@@ -972,7 +982,7 @@ bool gfxPlatformFontList::FindAndAddFamilies(
   // since reading name table entries is expensive.
   // although ASCII localized family names are possible they don't occur
   // in practice so avoid pulling in names at startup
-  if (!familyEntry && !mOtherFamilyNamesInitialized && !IsASCII(aFamily)) {
+  if (!familyEntry && !mOtherFamilyNamesInitialized && !IsAscii(aFamily)) {
     InitOtherFamilyNames(
         !(aFlags & FindFamiliesFlags::eForceOtherFamilyNamesLoading));
     familyEntry = mOtherFamilyNames.GetWeak(key);

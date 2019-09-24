@@ -84,7 +84,7 @@ class UrlbarView {
 
     // Disable one off search buttons from appearing if
     // the contextual tip is the only item in the urlbar view.
-    if (this.visibleItemCount == 0) {
+    if (this.visibleRowCount == 0) {
       this._enableOrDisableOneOffSearches(false);
     }
 
@@ -101,7 +101,7 @@ class UrlbarView {
       // When the pending query has finished and there's 0 results then
       // close the urlbar view.
       this.input.lastQueryContextPromise.then(() => {
-        if (this.visibleItemCount == 0) {
+        if (this.visibleRowCount == 0) {
           this.close();
         }
       });
@@ -148,14 +148,21 @@ class UrlbarView {
     );
   }
 
-  get selectedIndex() {
-    if (!this.isOpen || !this._selected) {
+  get selectedRowIndex() {
+    if (!this.isOpen) {
       return -1;
     }
-    return this._selected.result.uiIndex;
+
+    let selectedRow = this._getSelectedRow();
+
+    if (!selectedRow) {
+      return -1;
+    }
+
+    return selectedRow.result.uiIndex;
   }
 
-  set selectedIndex(val) {
+  set selectedRowIndex(val) {
     if (!this.isOpen) {
       throw new Error(
         "UrlbarView: Cannot select an item if the view isn't open."
@@ -163,17 +170,17 @@ class UrlbarView {
     }
 
     if (val < 0) {
-      this._selectItem(null);
+      this._selectElement(null);
       return val;
     }
 
     let items = Array.from(this._rows.children).filter(r =>
-      this._isRowVisible(r)
+      this._isElementVisible(r)
     );
     if (val >= items.length) {
       throw new Error(`UrlbarView: Index ${val} is out of bounds.`);
     }
-    this._selectItem(items[val]);
+    this._selectElement(items[val]);
     return val;
   }
 
@@ -182,10 +189,17 @@ class UrlbarView {
    *   The currently selected result.
    */
   get selectedResult() {
-    if (!this.isOpen || !this._selected) {
+    if (!this.isOpen) {
       return null;
     }
-    return this._selected.result;
+
+    let selectedRow = this._getSelectedRow();
+
+    if (!selectedRow) {
+      return null;
+    }
+
+    return selectedRow.result;
   }
 
   /**
@@ -194,10 +208,10 @@ class UrlbarView {
    *   than the number of results in the current query context since the view
    *   may be showing stale results.
    */
-  get visibleItemCount() {
+  get visibleRowCount() {
     let sum = 0;
     for (let row of this._rows.children) {
-      sum += Number(this._isRowVisible(row));
+      sum += Number(this._isElementVisible(row));
     }
     return sum;
   }
@@ -221,45 +235,49 @@ class UrlbarView {
     // Freeze results as the user is interacting with them.
     this.controller.cancelQuery();
 
-    let row = this._selected;
+    let selectedElement = this._selectedElement;
 
-    // Results over maxResults may be hidden and should not be selectable.
-    let lastElementChild = this._rows.lastElementChild;
-    while (lastElementChild && !this._isRowVisible(lastElementChild)) {
-      lastElementChild = lastElementChild.previousElementSibling;
-    }
+    // We cache the first and last rows since they will not change while
+    // selectBy is running.
+    let firstSelectableElement = this._getFirstSelectableElement();
+    // _getLastSelectableElement will not return an element that is over
+    // maxResults and thus may be hidden and not selectable.
+    let lastSelectableElement = this._getLastSelectableElement();
 
-    if (!row) {
-      this._selectItem(
-        reverse ? lastElementChild : this._rows.firstElementChild
+    if (!selectedElement) {
+      this._selectElement(
+        reverse ? lastSelectableElement : firstSelectableElement
       );
       return;
     }
-
     let endReached = reverse
-      ? row == this._rows.firstElementChild
-      : row == lastElementChild;
+      ? selectedElement == firstSelectableElement
+      : selectedElement == lastSelectableElement;
     if (endReached) {
       if (this.allowEmptySelection) {
-        row = null;
+        selectedElement = null;
       } else {
-        row = reverse ? lastElementChild : this._rows.firstElementChild;
+        selectedElement = reverse
+          ? lastSelectableElement
+          : firstSelectableElement;
       }
-      this._selectItem(row);
+      this._selectElement(selectedElement);
       return;
     }
 
     while (amount-- > 0) {
-      let next = reverse ? row.previousElementSibling : row.nextElementSibling;
+      let next = reverse
+        ? this._getPreviousSelectableElement(selectedElement)
+        : this._getNextSelectableElement(selectedElement);
       if (!next) {
         break;
       }
-      if (!this._isRowVisible(next)) {
+      if (!this._isElementVisible(next)) {
         continue;
       }
-      row = next;
+      selectedElement = next;
     }
-    this._selectItem(row);
+    this._selectElement(selectedElement);
   }
 
   removeAccessibleFocus() {
@@ -282,7 +300,7 @@ class UrlbarView {
     this.input.dropmarker.removeAttribute("open");
 
     this.input.removeAttribute("open");
-    this.input.endLayoutBreakout();
+    this.input.endLayoutExtend();
 
     this._rows.textContent = "";
 
@@ -326,13 +344,13 @@ class UrlbarView {
     if (queryContext.lastResultCount == 0) {
       if (queryContext.preselected) {
         isFirstPreselectedResult = true;
-        this._selectItem(this._rows.firstElementChild, {
+        this._selectElement(this._getFirstSelectableElement(), {
           updateInput: false,
           setAccessibleFocus: this.controller._userSelectionBehavior == "arrow",
         });
       } else {
         // Clear the selection when we get a new set of results.
-        this._selectItem(null, {
+        this._selectElement(null, {
           updateInput: false,
         });
       }
@@ -372,7 +390,7 @@ class UrlbarView {
 
     this._updateIndices();
 
-    if (rowToRemove != this._selected) {
+    if (rowToRemove != this._getSelectedRow()) {
       return;
     }
 
@@ -382,7 +400,7 @@ class UrlbarView {
       newSelectionIndex = this._queryContext.results.length - 1;
     }
     if (newSelectionIndex >= 0) {
-      this.selectedIndex = newSelectionIndex;
+      this.selectedRowIndex = newSelectionIndex;
     }
   }
 
@@ -496,7 +514,7 @@ class UrlbarView {
     this.input.dropmarker.setAttribute("open", "true");
 
     this.input.setAttribute("open", "true");
-    this.input.startLayoutBreakout();
+    this.input.startLayoutExtend();
 
     this.window.addEventListener("mousedown", this);
     this.panel.addEventListener("mousedown", this);
@@ -610,7 +628,7 @@ class UrlbarView {
     }
     // Add remaining results, if we have fewer rows than results.
     for (; resultIndex < results.length; ++resultIndex) {
-      let row = this._createRow();
+      let row = this._createRow(results[resultIndex].type);
       this._updateRow(row, results[resultIndex]);
       // Due to stale rows, we may have more rows than maxResults, thus we must
       // hide them, and we'll revert this when stale rows are removed.
@@ -623,7 +641,7 @@ class UrlbarView {
     this._updateIndices();
   }
 
-  _createRow() {
+  _createRow(type) {
     let item = this._createElement("div");
     item.className = "urlbarView-row";
     item.setAttribute("role", "option");
@@ -647,26 +665,40 @@ class UrlbarView {
     content.appendChild(title);
     item._elements.set("title", title);
 
-    let tagsContainer = this._createElement("span");
-    tagsContainer.className = "urlbarView-tags";
-    content.appendChild(tagsContainer);
-    item._elements.set("tagsContainer", tagsContainer);
+    if (type == UrlbarUtils.RESULT_TYPE.TIP) {
+      let buttonSpacer = this._createElement("span");
+      buttonSpacer.className = "urlbarView-tip-button-spacer";
+      content.appendChild(buttonSpacer);
 
-    let titleSeparator = this._createElement("span");
-    titleSeparator.className = "urlbarView-title-separator";
-    content.appendChild(titleSeparator);
-    item._elements.set("titleSeparator", titleSeparator);
+      let tipButton = this._createElement("button");
+      tipButton.className = "urlbarView-tip-button";
+      content.appendChild(tipButton);
+      item._elements.set("tipButton", tipButton);
 
-    let action = this._createElement("span");
-    action.className = "urlbarView-secondary urlbarView-action";
-    content.appendChild(action);
-    item._elements.set("action", action);
+      let helpIcon = this._createElement("span");
+      helpIcon.className = "urlbarView-tip-help";
+      content.appendChild(helpIcon);
+    } else {
+      let tagsContainer = this._createElement("span");
+      tagsContainer.className = "urlbarView-tags";
+      content.appendChild(tagsContainer);
+      item._elements.set("tagsContainer", tagsContainer);
 
-    let url = this._createElement("span");
-    url.className = "urlbarView-secondary urlbarView-url";
-    content.appendChild(url);
-    item._elements.set("url", url);
+      let titleSeparator = this._createElement("span");
+      titleSeparator.className = "urlbarView-title-separator";
+      content.appendChild(titleSeparator);
+      item._elements.set("titleSeparator", titleSeparator);
 
+      let action = this._createElement("span");
+      action.className = "urlbarView-secondary urlbarView-action";
+      content.appendChild(action);
+      item._elements.set("action", action);
+
+      let url = this._createElement("span");
+      url.className = "urlbarView-secondary urlbarView-url";
+      content.appendChild(url);
+      item._elements.set("url", url);
+    }
     return item;
   }
 
@@ -683,6 +715,8 @@ class UrlbarView {
       item.setAttribute("type", "remotetab");
     } else if (result.type == UrlbarUtils.RESULT_TYPE.TAB_SWITCH) {
       item.setAttribute("type", "switchtab");
+    } else if (result.type == UrlbarUtils.RESULT_TYPE.TIP) {
+      item.setAttribute("type", "tip");
     } else if (result.source == UrlbarUtils.RESULT_SOURCE.BOOKMARKS) {
       item.setAttribute("type", "bookmark");
     } else {
@@ -695,11 +729,27 @@ class UrlbarView {
       result.type == UrlbarUtils.RESULT_TYPE.KEYWORD
     ) {
       favicon.src = result.payload.icon || UrlbarUtils.ICON.SEARCH_GLASS;
+    } else if (result.type == UrlbarUtils.RESULT_TYPE.TIP) {
+      favicon.src = result.payload.icon || UrlbarUtils.ICON.TIP;
     } else {
       favicon.src = result.payload.icon || UrlbarUtils.ICON.DEFAULT;
     }
 
     let title = item._elements.get("title");
+
+    if (result.type == UrlbarUtils.RESULT_TYPE.TIP) {
+      this._addTextContentWithHighlights(title, result.payload.text, []);
+      let tipButton = item._elements.get("tipButton");
+      this._addTextContentWithHighlights(
+        tipButton,
+        result.payload.buttonText,
+        []
+      );
+      // Tips are dissimilar to other types of results and don't need the rest
+      // of this markup. We return early.
+      return;
+    }
+
     this._addTextContentWithHighlights(
       title,
       result.title,
@@ -712,7 +762,7 @@ class UrlbarView {
 
     let tagsContainer = item._elements.get("tagsContainer");
     tagsContainer.textContent = "";
-    if (result.payload.tags && result.payload.tags.length > 0) {
+    if (result.payload.tags && result.payload.tags.length) {
       tagsContainer.append(
         ...result.payload.tags.map((tag, i) => {
           const element = this._createElement("span");
@@ -805,8 +855,24 @@ class UrlbarView {
     }
   }
 
-  _isRowVisible(row) {
-    return row.style.display != "none";
+  /**
+   * Returns true if a row or a descendant in the view is visible.
+   *
+   * @param {Element} element
+   *   A row in the view or a descendant of the row.
+   * @returns {boolean}
+   *   True if `element` or `element`'s ancestor row is visible in the view.
+   */
+  _isElementVisible(element) {
+    if (!element.classList.contains("urlbarView-row")) {
+      element = element.closest(".urlbarView-row");
+    }
+
+    if (!element) {
+      return false;
+    }
+
+    return element.style.display != "none";
   }
 
   _removeStaleRows() {
@@ -837,21 +903,143 @@ class UrlbarView {
     }
   }
 
-  _selectItem(item, { updateInput = true, setAccessibleFocus = true } = {}) {
-    if (this._selected) {
-      this._selected.toggleAttribute("selected", false);
-      this._selected.removeAttribute("aria-selected");
+  _selectElement(item, { updateInput = true, setAccessibleFocus = true } = {}) {
+    if (this._selectedElement) {
+      this._selectedElement.toggleAttribute("selected", false);
+      this._selectedElement.removeAttribute("aria-selected");
     }
     if (item) {
       item.toggleAttribute("selected", true);
       item.setAttribute("aria-selected", "true");
     }
     this._setAccessibleFocus(setAccessibleFocus && item);
-    this._selected = item;
+    this._selectedElement = item;
 
     if (updateInput) {
       this.input.setValueFromResult(item && item.result);
     }
+  }
+
+  /**
+   * Returns the first selectable element in the view.
+   *
+   * @returns {Element} The first selectable element in the view.
+   */
+  _getFirstSelectableElement() {
+    let firstElementChild = this._rows.firstElementChild;
+    if (
+      firstElementChild.result &&
+      firstElementChild.result.type == UrlbarUtils.RESULT_TYPE.TIP
+    ) {
+      firstElementChild = firstElementChild.querySelector(
+        ".urlbarView-tip-button"
+      );
+    }
+    return firstElementChild;
+  }
+
+  /**
+   * Returns the last selectable element in the view.
+   *
+   * @returns {Element} The last selectable element in the view.
+   */
+  _getLastSelectableElement() {
+    let lastElementChild = this._rows.lastElementChild;
+
+    // We are only interested in visible elements.
+    while (lastElementChild && !this._isElementVisible(lastElementChild)) {
+      lastElementChild = this._getPreviousSelectableElement(lastElementChild);
+    }
+
+    if (
+      lastElementChild.result &&
+      lastElementChild.result.type == UrlbarUtils.RESULT_TYPE.TIP
+    ) {
+      lastElementChild = lastElementChild.querySelector(".urlbarView-tip-help");
+    }
+
+    return lastElementChild;
+  }
+
+  /**
+   * Returns the next selectable element after the parameter `element`.
+   * @param {Element} element A selectable element in the view.
+   * @returns {Element} The next selectable element after the parameter `element`.
+   */
+  _getNextSelectableElement(element) {
+    let next;
+    if (element.classList.contains("urlbarView-tip-button")) {
+      next = element
+        .closest(".urlbarView-row")
+        .querySelector(".urlbarView-tip-help");
+    } else if (element.classList.contains("urlbarView-tip-help")) {
+      next = element.closest(".urlbarView-row").nextElementSibling;
+    } else {
+      next = element.nextElementSibling;
+    }
+
+    if (!next) {
+      return null;
+    }
+
+    if (next.result && next.result.type == UrlbarUtils.RESULT_TYPE.TIP) {
+      next = next.querySelector(".urlbarView-tip-button");
+    }
+
+    return next;
+  }
+
+  /**
+   * Returns the previous selectable element before the parameter `element`.
+   * @param {Element} element A selectable element in the view.
+   * @returns {Element} The previous selectable element before the parameter `element`.
+   */
+  _getPreviousSelectableElement(element) {
+    let previous;
+    if (element.classList.contains("urlbarView-tip-button")) {
+      previous = element.closest(".urlbarView-row").previousElementSibling;
+    } else if (element.classList.contains("urlbarView-tip-help")) {
+      previous = element
+        .closest(".urlbarView-row")
+        .querySelector(".urlbarView-tip-button");
+    } else {
+      previous = element.previousElementSibling;
+    }
+
+    if (!previous) {
+      return null;
+    }
+
+    if (
+      previous.result &&
+      previous.result.type == UrlbarUtils.RESULT_TYPE.TIP
+    ) {
+      previous = previous.querySelector(".urlbarView-tip-help");
+    }
+
+    return previous;
+  }
+
+  /**
+   * Returns the currently selected row. Useful when this._selectedElement may be a
+   * non-row element, such as a descendant element of RESULT_TYPE.TIP.
+   *
+   * @returns {Element}
+   *   The currently selected row, or ancestor row of the currently selected item.
+   *
+   */
+  _getSelectedRow() {
+    if (!this.isOpen || !this._selectedElement) {
+      return null;
+    }
+    let selected = this._selectedElement;
+
+    if (!selected.classList.contains("urlbarView-row")) {
+      // selected may be an element in a result group, like RESULT_TYPE.TIP.
+      selected = selected.closest(".urlbarView-row");
+    }
+
+    return selected;
   }
 
   _setAccessibleFocus(item) {
@@ -1001,7 +1189,7 @@ class UrlbarView {
         while (!row.classList.contains("urlbarView-row")) {
           row = row.parentNode;
         }
-        this._selectItem(row, { updateInput: false });
+        this._selectElement(row, { updateInput: false });
         this.controller.speculativeConnect(
           this.selectedResult,
           this._queryContext,
@@ -1045,7 +1233,7 @@ class UrlbarView {
   }
 
   _on_resize() {
-    if (this.megabar) {
+    if (this.input.megabar) {
       return;
     }
 

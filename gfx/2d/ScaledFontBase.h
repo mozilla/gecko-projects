@@ -15,6 +15,7 @@
 #endif
 
 #ifdef USE_SKIA
+#  include "skia/include/core/SkFont.h"
 #  include "skia/include/core/SkPath.h"
 #  include "skia/include/core/SkTypeface.h"
 #endif
@@ -39,14 +40,11 @@ class ScaledFontBase : public ScaledFont {
                                    PathBuilder* aBuilder,
                                    const Matrix* aTransformHint) override;
 
-  virtual void GetGlyphDesignMetrics(const uint16_t* aGlyphIndices,
-                                     uint32_t aNumGlyphs,
-                                     GlyphMetrics* aGlyphMetrics) override;
-
   virtual Float GetSize() const override { return mSize; }
 
 #ifdef USE_SKIA
   SkTypeface* GetSkTypeface();
+  virtual void SetupSkFontDrawOptions(SkFont& aFont) {}
 #endif
 
 #ifdef USE_CAIRO_SCALED_FONT

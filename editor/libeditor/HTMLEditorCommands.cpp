@@ -29,7 +29,6 @@ namespace mozilla {
 using dom::Element;
 
 // prototype
-MOZ_CAN_RUN_SCRIPT
 static nsresult GetListState(HTMLEditor* aHTMLEditor, bool* aMixed,
                              nsAString& aLocalName);
 
@@ -304,24 +303,28 @@ nsresult ListItemCommand::GetCurrentState(nsAtom* aTagName,
     return NS_ERROR_INVALID_ARG;
   }
 
-  bool bMixed, bLI, bDT, bDD;
-  nsresult rv = aHTMLEditor->GetListItemState(&bMixed, &bLI, &bDT, &bDD);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  bool inList = false;
-  if (!bMixed) {
-    if (bLI) {
-      inList = aTagName == nsGkAtoms::li;
-    } else if (bDT) {
-      inList = aTagName == nsGkAtoms::dt;
-    } else if (bDD) {
-      inList = aTagName == nsGkAtoms::dd;
-    }
+  ErrorResult error;
+  ListItemElementSelectionState state(*aHTMLEditor, error);
+  if (NS_WARN_IF(error.Failed())) {
+    return error.StealNSResult();
   }
 
-  aParams.SetBool(STATE_ALL, !bMixed && inList);
-  aParams.SetBool(STATE_MIXED, bMixed);
+  if (state.IsNotOneTypeDefinitionListItemElementSelected()) {
+    aParams.SetBool(STATE_ALL, false);
+    aParams.SetBool(STATE_MIXED, true);
+    return NS_OK;
+  }
 
+  nsStaticAtom* selectedListItemTagName = nullptr;
+  if (state.IsLIElementSelected()) {
+    selectedListItemTagName = nsGkAtoms::li;
+  } else if (state.IsDTElementSelected()) {
+    selectedListItemTagName = nsGkAtoms::dt;
+  } else if (state.IsDDElementSelected()) {
+    selectedListItemTagName = nsGkAtoms::dd;
+  }
+  aParams.SetBool(STATE_ALL, aTagName == selectedListItemTagName);
+  aParams.SetBool(STATE_MIXED, false);
   return NS_OK;
 }
 
@@ -555,16 +558,21 @@ nsresult ParagraphStateCommand::GetCurrentState(
     return NS_ERROR_INVALID_ARG;
   }
 
-  bool outMixed;
-  nsAutoString outStateString;
-  nsresult rv = aHTMLEditor->GetParagraphState(&outMixed, outStateString);
-  if (NS_SUCCEEDED(rv)) {
-    nsAutoCString tOutStateString;
-    LossyCopyUTF16toASCII(outStateString, tOutStateString);
-    aParams.SetBool(STATE_MIXED, outMixed);
-    aParams.SetCString(STATE_ATTRIBUTE, tOutStateString);
+  ErrorResult error;
+  ParagraphStateAtSelection state(*aHTMLEditor, error);
+  if (NS_WARN_IF(error.Failed())) {
+    return error.StealNSResult();
   }
-  return rv;
+  aParams.SetBool(STATE_MIXED, state.IsMixed());
+  if (NS_WARN_IF(!state.GetFirstParagraphStateAtSelection())) {
+    // XXX This is odd behavior, we should fix this later.
+    aParams.SetCString(STATE_ATTRIBUTE, NS_LITERAL_CSTRING("x"));
+  } else {
+    nsCString paragraphState;  // Don't use `nsAutoCString` for avoiding copy.
+    state.GetFirstParagraphStateAtSelection()->ToUTF8String(paragraphState);
+    aParams.SetCString(STATE_ATTRIBUTE, paragraphState);
+  }
+  return NS_OK;
 }
 
 nsresult ParagraphStateCommand::SetState(HTMLEditor* aHTMLEditor,
@@ -856,35 +864,29 @@ nsresult AlignCommand::GetCurrentState(HTMLEditor* aHTMLEditor,
     return NS_ERROR_INVALID_ARG;
   }
 
-  nsIHTMLEditor::EAlignment firstAlign;
-  bool outMixed;
-  nsresult rv = aHTMLEditor->GetAlignment(&outMixed, &firstAlign);
-
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsAutoString outStateString;
-  switch (firstAlign) {
+  ErrorResult error;
+  AlignStateAtSelection state(*aHTMLEditor, error);
+  if (NS_WARN_IF(error.Failed())) {
+    return error.StealNSResult();
+  }
+  nsCString alignment;  // Don't use `nsAutoCString` to avoid copying string.
+  switch (state.AlignmentAtSelectionStart()) {
     default:
     case nsIHTMLEditor::eLeft:
-      outStateString.AssignLiteral("left");
+      alignment.AssignLiteral("left");
       break;
-
     case nsIHTMLEditor::eCenter:
-      outStateString.AssignLiteral("center");
+      alignment.AssignLiteral("center");
       break;
-
     case nsIHTMLEditor::eRight:
-      outStateString.AssignLiteral("right");
+      alignment.AssignLiteral("right");
       break;
-
     case nsIHTMLEditor::eJustify:
-      outStateString.AssignLiteral("justify");
+      alignment.AssignLiteral("justify");
       break;
   }
-  nsAutoCString tOutStateString;
-  LossyCopyUTF16toASCII(outStateString, tOutStateString);
-  aParams.SetBool(STATE_MIXED, outMixed);
-  aParams.SetCString(STATE_ATTRIBUTE, tOutStateString);
+  aParams.SetBool(STATE_MIXED, false);
+  aParams.SetCString(STATE_ATTRIBUTE, alignment);
   return NS_OK;
 }
 
@@ -972,7 +974,7 @@ nsresult DecreaseZIndexCommand::DoCommand(Command aCommand,
   if (NS_WARN_IF(!htmlEditor)) {
     return NS_ERROR_FAILURE;
   }
-  nsresult rv = htmlEditor->AddZIndexAsAction(-1, aPrincipal);
+  nsresult rv = MOZ_KnownLive(htmlEditor)->AddZIndexAsAction(-1, aPrincipal);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "AddZIndexAsAction() failed");
   return rv;
 }
@@ -1012,7 +1014,7 @@ nsresult IncreaseZIndexCommand::DoCommand(Command aCommand,
   if (NS_WARN_IF(!htmlEditor)) {
     return NS_ERROR_FAILURE;
   }
-  nsresult rv = htmlEditor->AddZIndexAsAction(1, aPrincipal);
+  nsresult rv = MOZ_KnownLive(htmlEditor)->AddZIndexAsAction(1, aPrincipal);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "AddZIndexAsAction() failed");
   return rv;
 }
@@ -1315,27 +1317,28 @@ nsresult InsertTagCommand::GetCommandStateParams(
  *****************************************************************************/
 
 static nsresult GetListState(HTMLEditor* aHTMLEditor, bool* aMixed,
-                             nsAString& aLocalName)
-    MOZ_CAN_RUN_SCRIPT_FOR_DEFINITION {
+                             nsAString& aLocalName) {
   MOZ_ASSERT(aHTMLEditor);
   MOZ_ASSERT(aMixed);
 
   *aMixed = false;
   aLocalName.Truncate();
 
-  bool bOL, bUL, bDL;
-  nsresult rv = aHTMLEditor->GetListState(aMixed, &bOL, &bUL, &bDL);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (*aMixed) {
+  ErrorResult error;
+  ListElementSelectionState state(*aHTMLEditor, error);
+  if (NS_WARN_IF(error.Failed())) {
+    return error.StealNSResult();
+  }
+  if (state.IsNotOneTypeListElementSelected()) {
+    *aMixed = true;
     return NS_OK;
   }
 
-  if (bOL) {
+  if (state.IsOLElementSelected()) {
     aLocalName.AssignLiteral("ol");
-  } else if (bUL) {
+  } else if (state.IsULElementSelected()) {
     aLocalName.AssignLiteral("ul");
-  } else if (bDL) {
+  } else if (state.IsDLElementSelected()) {
     aLocalName.AssignLiteral("dl");
   }
   return NS_OK;

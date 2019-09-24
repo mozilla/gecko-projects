@@ -179,9 +179,11 @@ public class GeckoViewActivity extends AppCompatActivity {
                                       ContentBlocking.AntiTracking.STP)
                         .safeBrowsing(ContentBlocking.SafeBrowsing.DEFAULT)
                         .cookieBehavior(ContentBlocking.CookieBehavior.ACCEPT_NON_TRACKERS)
+                        .enhancedTrackingProtectionLevel(ContentBlocking.EtpLevel.DEFAULT)
                         .build())
                     .crashHandler(ExampleCrashHandler.class)
-                    .telemetryDelegate(new ExampleTelemetryDelegate());
+                    .telemetryDelegate(new ExampleTelemetryDelegate())
+                    .aboutConfigEnabled(true);
 
             sGeckoRuntime = GeckoRuntime.create(this, runtimeSettingsBuilder.build());
 
@@ -251,6 +253,11 @@ public class GeckoViewActivity extends AppCompatActivity {
 
 
             }
+
+            sGeckoRuntime.setDelegate(() -> {
+                mKillProcessOnDestroy = true;
+                finish();
+            });
         }
 
         if(savedInstanceState == null) {
@@ -295,7 +302,7 @@ public class GeckoViewActivity extends AppCompatActivity {
             notificationManager.createNotificationChannel(channel);
         }
     }
-    
+
     private TabSession createSession() {
         TabSession session = mTabSessionManager.newSession(new GeckoSessionSettings.Builder()
                 .useMultiprocess(mUseMultiprocess)
@@ -1045,6 +1052,8 @@ public class GeckoViewActivity extends AppCompatActivity {
         public GeckoResult<GeckoSession> onNewSession(final GeckoSession session, final String uri) {
             final TabSession newSession = createSession();
             mToolbarView.updateTabCount();
+            // A reference to newSession is stored by mTabSessionManager,
+            // which prevents the session from being garbage-collected.
             return GeckoResult.fromValue(newSession);
         }
 
@@ -1320,7 +1329,7 @@ public class GeckoViewActivity extends AppCompatActivity {
     private final class ExampleTelemetryDelegate
             implements RuntimeTelemetry.Delegate {
         @Override
-        public void onHistogram(final @NonNull RuntimeTelemetry.Metric<long[]> histogram) {
+        public void onHistogram(final @NonNull RuntimeTelemetry.Histogram histogram) {
             Log.d(LOGTAG, "onHistogram " + histogram);
         }
         @Override

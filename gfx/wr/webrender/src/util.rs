@@ -166,6 +166,13 @@ impl ScaleOffset {
         })
     }
 
+    pub fn from_offset(offset: default::Vector2D<f32>) -> Self {
+        ScaleOffset {
+            scale: Vector2D::new(1.0, 1.0),
+            offset,
+        }
+    }
+
     pub fn inverse(&self) -> Self {
         ScaleOffset {
             scale: Vector2D::new(
@@ -184,6 +191,15 @@ impl ScaleOffset {
             &ScaleOffset {
                 scale: Vector2D::new(1.0, 1.0),
                 offset,
+            }
+        )
+    }
+
+    pub fn scale(&self, scale: f32) -> Self {
+        self.accumulate(
+            &ScaleOffset {
+                scale: Vector2D::new(scale, scale),
+                offset: Vector2D::zero(),
             }
         )
     }
@@ -405,12 +421,29 @@ impl<Src, Dst> MatrixHelpers<Src, Dst> for Transform3D<f32, Src, Dst> {
     }
 }
 
+pub trait PointHelpers<U>
+where
+    Self: Sized,
+{
+    fn snap(&self) -> Self;
+}
+
+impl<U> PointHelpers<U> for Point2D<f32, U> {
+    fn snap(&self) -> Self {
+        Point2D::new(
+            (self.x + 0.5).floor(),
+            (self.y + 0.5).floor(),
+        )
+    }
+}
+
 pub trait RectHelpers<U>
 where
     Self: Sized,
 {
     fn from_floats(x0: f32, y0: f32, x1: f32, y1: f32) -> Self;
     fn is_well_formed_and_nonempty(&self) -> bool;
+    fn snap(&self) -> Self;
 }
 
 impl<U> RectHelpers<U> for Rect<f32, U> {
@@ -423,6 +456,36 @@ impl<U> RectHelpers<U> for Rect<f32, U> {
 
     fn is_well_formed_and_nonempty(&self) -> bool {
         self.size.width > 0.0 && self.size.height > 0.0
+    }
+
+    fn snap(&self) -> Self {
+        let origin = Point2D::new(
+            (self.origin.x + 0.5).floor(),
+            (self.origin.y + 0.5).floor(),
+        );
+        Rect::new(
+            origin,
+            Size2D::new(
+                (self.origin.x + self.size.width + 0.5).floor() - origin.x,
+                (self.origin.y + self.size.height + 0.5).floor() - origin.y,
+            ),
+        )
+    }
+}
+
+pub trait VectorHelpers<U>
+where
+    Self: Sized,
+{
+    fn snap(&self) -> Self;
+}
+
+impl<U> VectorHelpers<U> for Vector2D<f32, U> {
+    fn snap(&self) -> Self {
+        Vector2D::new(
+            (self.x + 0.5).floor(),
+            (self.y + 0.5).floor(),
+        )
     }
 }
 
@@ -829,7 +892,7 @@ pub fn project_rect<F, T>(
         let mut clipper = Clipper::new();
         let polygon = Polygon::from_rect(*rect, 1);
 
-        let planes = match Clipper::frustum_planes(
+        let planes = match Clipper::<_, _, usize>::frustum_planes(
             transform,
             Some(*bounds),
         ) {
@@ -1098,5 +1161,57 @@ pub fn round_up_to_multiple(val: usize, mul: NonZeroUsize) -> usize {
     match val % mul.get() {
         0 => val,
         rem => val - rem + mul.get(),
+    }
+}
+
+/// A helper function to construct a rect from a (x0,y0) and (x1,y1) pair
+#[inline]
+fn rect_from_points_f<U>(x0: f32,
+                         y0: f32,
+                         x1: f32,
+                         y1: f32) -> Rect<f32, U> {
+    Rect::new(Point2D::new(x0, y0),
+              Size2D::new(x1 - x0, y1 - y0))
+}
+
+/// Subtract `other` from `rect`, and write the outputs into `results`.
+pub fn subtract_rect<U>(rect: &Rect<f32, U>,
+                        other: &Rect<f32, U>,
+                        results: &mut Vec<Rect<f32, U>>) {
+    results.clear();
+
+    let int = rect.intersection(other);
+    match int {
+        Some(int) => {
+            let rx0 = rect.origin.x;
+            let ry0 = rect.origin.y;
+            let rx1 = rx0 + rect.size.width;
+            let ry1 = ry0 + rect.size.height;
+
+            let ox0 = int.origin.x;
+            let oy0 = int.origin.y;
+            let ox1 = ox0 + int.size.width;
+            let oy1 = oy0 + int.size.height;
+
+            let r = rect_from_points_f(rx0, ry0, ox0, ry1);
+            if r.size.width > 0.0 && r.size.height > 0.0 {
+                results.push(r);
+            }
+            let r = rect_from_points_f(ox0, ry0, ox1, oy0);
+            if r.size.width > 0.0 && r.size.height > 0.0 {
+                results.push(r);
+            }
+            let r = rect_from_points_f(ox0, oy1, ox1, ry1);
+            if r.size.width > 0.0 && r.size.height > 0.0 {
+                results.push(r);
+            }
+            let r = rect_from_points_f(ox1, ry0, rx1, ry1);
+            if r.size.width > 0.0 && r.size.height > 0.0 {
+                results.push(r);
+            }
+        }
+        None => {
+            results.push(*rect);
+        }
     }
 }

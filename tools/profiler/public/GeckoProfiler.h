@@ -22,6 +22,8 @@
 
 #ifndef MOZ_GECKO_PROFILER
 
+#  include "mozilla/UniquePtr.h"
+
 // This file can be #included unconditionally. However, everything within this
 // file must be guarded by a #ifdef MOZ_GECKO_PROFILER, *except* for the
 // following macros, which encapsulate the most common operations and thus
@@ -54,7 +56,7 @@
 #  define PROFILER_ADD_MARKER_WITH_PAYLOAD(markerName, categoryPair, \
                                            PayloadType, payloadArgs)
 #  define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end, \
-                                      count, cache, timings, redirect)
+                                      count, cache, timings, redirect, ...)
 
 #  define DECLARE_DOCSHELL_AND_HISTORY_ID(docShell)
 #  define PROFILER_TRACING(categoryString, markerName, categoryPair, kind)
@@ -68,6 +70,12 @@
                                              docShell)
 #  define AUTO_PROFILER_TEXT_MARKER_DOCSHELL_CAUSE( \
       markerName, text, categoryPair, docShell, cause)
+
+using UniqueProfilerBacktrace = mozilla::UniquePtr<int>;
+static inline UniqueProfilerBacktrace profiler_get_backtrace()
+{
+  return nullptr;
+}
 
 #else  // !MOZ_GECKO_PROFILER
 
@@ -166,7 +174,10 @@ class Vector;
           "Have the JavaScript engine track allocations")                      \
                                                                                \
     MACRO(15, "preferencereads", PreferenceReads,                              \
-          "Track when preferences are read")
+          "Track when preferences are read")                                   \
+    MACRO(16, "nativeallocations", NativeAllocations,                          \
+          "Collect the stacks from a smaller subset of all native "            \
+          "allocations, biasing towards collecting larger allocations")
 
 struct ProfilerFeature {
 #  define DECLARE(n_, str_, Name_, desc_)                     \
@@ -207,6 +218,10 @@ class RacyFeatures {
 
   static void SetInactive() { sActiveAndFeatures = 0; }
 
+  static void SetPaused() { sActiveAndFeatures |= Paused; }
+
+  static void SetUnpaused() { sActiveAndFeatures &= ~Paused; }
+
   static bool IsActive() { return uint32_t(sActiveAndFeatures) & Active; }
 
   static bool IsActiveWithFeature(uint32_t aFeature) {
@@ -219,12 +234,18 @@ class RacyFeatures {
     return (af & Active) && !(af & ProfilerFeature::Privacy);
   }
 
- private:
-  static const uint32_t Active = 1u << 31;
+  static bool IsActiveAndUnpausedWithoutPrivacy() {
+    uint32_t af = sActiveAndFeatures;  // copy it first
+    return (af & Active) && !(af & (Paused | ProfilerFeature::Privacy));
+  }
 
-// Ensure Active doesn't overlap with any of the feature bits.
+ private:
+  static constexpr uint32_t Active = 1u << 31;
+  static constexpr uint32_t Paused = 1u << 30;
+
+// Ensure Active/Paused don't overlap with any of the feature bits.
 #  define NO_OVERLAP(n_, str_, Name_, desc_) \
-    static_assert(ProfilerFeature::Name_ != Active, "bad Active value");
+    static_assert(ProfilerFeature::Name_ != Paused, "bad feature value");
 
   PROFILER_FOR_EACH_FEATURE(NO_OVERLAP);
 
@@ -250,18 +271,18 @@ bool IsThreadBeingProfiled();
 
 static constexpr mozilla::PowerOfTwo32 PROFILER_DEFAULT_ENTRIES =
 #  if !defined(ARCH_ARMV6)
-    mozilla::MakePowerOfTwo32<1u << 20>();  // 1'048'576
+    mozilla::MakePowerOfTwo32<1u << 20>();  // 1'048'576 entries = 8MB
 #  else
-    mozilla::MakePowerOfTwo32<1u << 17>();  // 131'072
+    mozilla::MakePowerOfTwo32<1u << 17>();  // 131'072 entries = 1MB
 #  endif
 
 // Startup profiling usually need to capture more data, especially on slow
 // systems.
 static constexpr mozilla::PowerOfTwo32 PROFILER_DEFAULT_STARTUP_ENTRIES =
 #  if !defined(ARCH_ARMV6)
-    mozilla::MakePowerOfTwo32<1u << 22>();  // 4'194'304
+    mozilla::MakePowerOfTwo32<1u << 22>();  // 4'194'304 entries = 32MB
 #  else
-    mozilla::MakePowerOfTwo32<1u << 17>();  // 131'072
+    mozilla::MakePowerOfTwo32<1u << 17>();  // 131'072 entries = 1MB
 #  endif
 
 #  define PROFILER_DEFAULT_DURATION 20
@@ -284,8 +305,8 @@ void profiler_shutdown();
 // selected options. Stops and restarts the profiler if it is already active.
 // After starting the profiler is "active". The samples will be recorded in a
 // circular buffer.
-//   "aCapacity" is the maximum number of entries in the profiler's circular
-//               buffer.
+//   "aCapacity" is the maximum number of 8-bytes entries in the profiler's
+//               circular buffer.
 //   "aInterval" the sampling interval, measured in millseconds.
 //   "aFeatures" is the feature set. Features unsupported by this
 //               platform/configuration are ignored.
@@ -424,6 +445,19 @@ inline bool profiler_is_active() {
   return mozilla::profiler::detail::RacyFeatures::IsActive();
 }
 
+// Same as profiler_is_active(), but with the same extra checks that determine
+// if the profiler would currently store markers. So this should be used before
+// doing some potentially-expensive work that's used in a marker. E.g.:
+//
+//   if (profiler_can_accept_markers()) {
+//     ExpensiveMarkerPayload expensivePayload = CreateExpensivePayload();
+//     BASE_PROFILER_ADD_MARKER_WITH_PAYLOAD(name, OTHER, expensivePayload);
+//   }
+inline bool profiler_can_accept_markers() {
+  return mozilla::profiler::detail::RacyFeatures::
+      IsActiveAndUnpausedWithoutPrivacy();
+}
+
 // Is the profiler active, and is the current thread being profiled?
 // (Same caveats and recommented usage as profiler_is_active().)
 inline bool profiler_thread_is_being_profiled() {
@@ -541,7 +575,7 @@ struct ProfilerBufferInfo {
   uint64_t mRangeStart;
   // Index of the newest entry.
   uint64_t mRangeEnd;
-  // Buffer capacity in number of entries.
+  // Buffer capacity in number of 8-byte entries.
   uint32_t mEntryCount;
   // Sampling stats: Interval between successive samplings.
   ProfilerStats mIntervalsNs;
@@ -691,20 +725,23 @@ void profiler_add_marker(const char* aMarkerName,
 // the argument list used to construct that `PayloadType`. E.g.:
 // `PROFILER_ADD_MARKER_WITH_PAYLOAD("Load", DOM, TextMarkerPayload,
 //                                   ("text", start, end, ds, dsh))`
-#  define PROFILER_ADD_MARKER_WITH_PAYLOAD(                             \
-      markerName, categoryPair, PayloadType, parenthesizedPayloadArgs)  \
-    do {                                                                \
-      AUTO_PROFILER_STATS(add_marker_with_##PayloadType);               \
-      ::profiler_add_marker(                                            \
-          markerName, ::JS::ProfilingCategoryPair::categoryPair,        \
-          ::mozilla::MakeUnique<PayloadType> parenthesizedPayloadArgs); \
+#  define PROFILER_ADD_MARKER_WITH_PAYLOAD(                            \
+      markerName, categoryPair, PayloadType, parenthesizedPayloadArgs) \
+    do {                                                               \
+      AUTO_PROFILER_STATS(add_marker_with_##PayloadType);              \
+      ::profiler_add_marker(markerName,                                \
+                            ::JS::ProfilingCategoryPair::categoryPair, \
+                            PayloadType parenthesizedPayloadArgs);     \
     } while (false)
 
 void profiler_add_marker(const char* aMarkerName,
                          JS::ProfilingCategoryPair aCategoryPair,
-                         mozilla::UniquePtr<ProfilerMarkerPayload> aPayload);
+                         const ProfilerMarkerPayload& aPayload);
+
 void profiler_add_js_marker(const char* aMarkerName);
 void profiler_add_js_allocation_marker(JS::RecordAllocationInfo&& info);
+void profiler_add_native_allocation_marker(int64_t aSize);
+bool profiler_could_be_locked_on_current_thread();
 
 // Insert a marker in the profile timeline for a specified thread.
 void profiler_add_marker_for_thread(
@@ -715,16 +752,16 @@ void profiler_add_marker_for_thread(
 enum class NetworkLoadType { LOAD_START, LOAD_STOP, LOAD_REDIRECT };
 
 #  define PROFILER_ADD_NETWORK_MARKER(uri, pri, channel, type, start, end,  \
-                                      count, cache, timings, redirect)      \
+                                      count, cache, timings, redirect, ...) \
     profiler_add_network_marker(uri, pri, channel, type, start, end, count, \
-                                cache, timings, redirect)
+                                cache, timings, redirect, ##__VA_ARGS__)
 
 void profiler_add_network_marker(
     nsIURI* aURI, int32_t aPriority, uint64_t aChannelId, NetworkLoadType aType,
     mozilla::TimeStamp aStart, mozilla::TimeStamp aEnd, int64_t aCount,
     mozilla::net::CacheDisposition aCacheDisposition,
     const mozilla::net::TimingStruct* aTimings = nullptr,
-    nsIURI* aRedirectURI = nullptr);
+    nsIURI* aRedirectURI = nullptr, UniqueProfilerBacktrace aSource = nullptr);
 
 enum TracingKind {
   TRACING_EVENT,

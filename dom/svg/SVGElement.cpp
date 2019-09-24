@@ -22,6 +22,7 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/RestyleManager.h"
 #include "mozilla/SMILAnimationController.h"
+#include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/SVGContentUtils.h"
 #include "mozilla/Unused.h"
 
@@ -1127,23 +1128,13 @@ void MappedAttrParser::ParseMappedAttrValue(nsAtom* aMappedAttrName,
         ParsingMode::AllowUnitlessLength,
         mElement->OwnerDoc()->GetCompatibilityMode(), mLoader, {});
 
-    if (changed) {
-      // The normal reporting of use counters by the nsCSSParser won't happen
-      // since it doesn't have a sheet.
-      if (nsCSSProps::IsShorthand(propertyID)) {
-        CSSPROPS_FOR_SHORTHAND_SUBPROPERTIES(subprop, propertyID,
-                                             CSSEnabledState::ForAllContent) {
-          UseCounter useCounter = nsCSSProps::UseCounterFor(*subprop);
-          if (useCounter != eUseCounter_UNKNOWN) {
-            mElement->OwnerDoc()->SetUseCounter(useCounter);
-          }
-        }
-      } else {
-        UseCounter useCounter = nsCSSProps::UseCounterFor(propertyID);
-        if (useCounter != eUseCounter_UNKNOWN) {
-          mElement->OwnerDoc()->SetUseCounter(useCounter);
-        }
-      }
+    // TODO(emilio): If we want to record these from CSSOM more generally, we
+    // can pass the document use counters down the FFI call. For now manually
+    // count them.
+    if (changed && StaticPrefs::layout_css_use_counters_enabled()) {
+      UseCounter useCounter = nsCSSProps::UseCounterFor(propertyID);
+      MOZ_ASSERT(useCounter != eUseCounter_UNKNOWN);
+      mElement->OwnerDoc()->SetUseCounter(useCounter);
     }
     return;
   }

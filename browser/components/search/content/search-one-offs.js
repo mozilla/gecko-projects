@@ -19,17 +19,19 @@ class SearchOneOffs {
       MozXULElement.parseXULToFragment(
         `
       <hbox class="search-panel-one-offs-header search-panel-header search-panel-current-input">
-        <label class="searchbar-oneoffheader-search" value="&searchWithDesc.label;"/>
+        <label class="search-panel-one-offs-header-label" value="&searchWithDesc.label;"/>
       </hbox>
-      <hbox class="search-panel-one-offs"/>
+      <hbox class="search-panel-one-offs" role="group"/>
       <vbox class="search-add-engines"/>
       <hbox class="search-one-offs-spacer"/>
       <button class="searchbar-engine-one-off-item search-setting-button-compact" tooltiptext="&changeSearchSettings.tooltip;"/>
       <button class="search-setting-button" label="&changeSearchSettings.button;"/>
-      <menupopup class="search-one-offs-context-menu">
-        <menuitem class="search-one-offs-context-open-in-new-tab" label="&searchInNewTab.label;" accesskey="&searchInNewTab.accesskey;"/>
-        <menuitem class="search-one-offs-context-set-default" label="&searchSetAsDefault.label;" accesskey="&searchSetAsDefault.accesskey;"/>
-      </menupopup>
+      <box style="visibiltiy:collapse">
+        <menupopup class="search-one-offs-context-menu">
+          <menuitem class="search-one-offs-context-open-in-new-tab" label="&searchInNewTab.label;" accesskey="&searchInNewTab.accesskey;"/>
+          <menuitem class="search-one-offs-context-set-default" label="&searchSetAsDefault.label;" accesskey="&searchSetAsDefault.accesskey;"/>
+        </menupopup>
+      </box>
       `,
         ["chrome://browser/locale/browser.dtd"]
       )
@@ -299,6 +301,12 @@ class SearchOneOffs {
     }
     if (val) {
       val.setAttribute("selected", "true");
+      if (!val.engine) {
+        // If the button doesn't have an engine, then clear the popup's
+        // selection to indicate that pressing Return while the button is
+        // selected will do the button's command, not search.
+        this.selectedAutocompleteIndex = -1;
+      }
     }
     this._selectedButton = val;
 
@@ -313,12 +321,6 @@ class SearchOneOffs {
       }
     }
 
-    if (val && !val.engine) {
-      // If the button doesn't have an engine, then clear the popup's
-      // selection to indicate that pressing Return while the button is
-      // selected will do the button's command, not search.
-      this.selectedAutocompleteIndex = -1;
-    }
     let event = new CustomEvent("SelectedOneOffButtonChanged", {
       previousSelectedButton: previousButton,
     });
@@ -354,11 +356,17 @@ class SearchOneOffs {
   }
 
   get selectedAutocompleteIndex() {
-    return (this._view || this.popup).selectedIndex;
+    if (!this.compact) {
+      return this.popup.selectedIndex;
+    }
+    return this._view.selectedRowIndex;
   }
 
   set selectedAutocompleteIndex(val) {
-    return ((this._view || this.popup).selectedIndex = val);
+    if (!this.compact) {
+      return (this.popup.selectedIndex = val);
+    }
+    return (this._view.selectedRowIndex = val);
   }
 
   get compact() {
@@ -379,7 +387,12 @@ class SearchOneOffs {
     }
     let currentEngineNameToIgnore;
     if (!this.getAttribute("includecurrentengine")) {
-      currentEngineNameToIgnore = (await Services.search.getDefault()).name;
+      if (PrivateBrowsingUtils.isWindowPrivate(window)) {
+        currentEngineNameToIgnore = (await Services.search.getDefaultPrivate())
+          .name;
+      } else {
+        currentEngineNameToIgnore = (await Services.search.getDefault()).name;
+      }
     }
 
     let pref = Services.prefs.getStringPref("browser.search.hiddenOneOffs");
@@ -454,12 +467,14 @@ class SearchOneOffs {
     }
 
     let headerText = this.header.querySelector(
-      ".searchbar-oneoffheader-search"
+      ".search-panel-one-offs-header-label"
     );
     this.buttons.setAttribute("aria-label", headerText.value);
 
     let engines = await this.getEngines();
-    let defaultEngine = await Services.search.getDefault();
+    let defaultEngine = PrivateBrowsingUtils.isWindowPrivate(window)
+      ? await Services.search.getDefaultPrivate()
+      : await Services.search.getDefault();
     let oneOffCount = engines.length;
     let hideOneOffs =
       !oneOffCount ||
@@ -924,16 +939,18 @@ class SearchOneOffs {
       }
       if (this.selectedAutocompleteIndex == numListItems - 1) {
         // Moving down from the last item in the list to the buttons.
+        if (!allowEmptySelection) {
+          this.selectedAutocompleteIndex = -1;
+          if (this.textbox && typeof textboxUserValue == "string") {
+            this.textbox.value = textboxUserValue;
+          }
+        }
         this.selectedButtonIndex = 0;
         if (allowEmptySelection) {
           // Let the autocomplete controller remove selection in the list
           // and revert the typed text in the textbox.
           return false;
         }
-        if (this.textbox && typeof textboxUserValue == "string") {
-          this.textbox.value = textboxUserValue;
-        }
-        this.selectedAutocompleteIndex = -1;
         return true;
       }
       if (this.selectedButton) {
@@ -1161,7 +1178,10 @@ class SearchOneOffs {
     }
 
     if (target.classList.contains("search-one-offs-context-set-default")) {
-      let currentEngine = Services.search.defaultEngine;
+      const engineType = PrivateBrowsingUtils.isWindowPrivate(window)
+        ? "defaultPrivateEngine"
+        : "defaultEngine";
+      let currentEngine = Services.search[engineType];
 
       if (!this.getAttribute("includecurrentengine")) {
         // Make the target button of the context menu reflect the current
@@ -1178,7 +1198,7 @@ class SearchOneOffs {
         button.engine = currentEngine;
       }
 
-      Services.search.defaultEngine = this._contextEngine;
+      Services.search[engineType] = this._contextEngine;
     }
   }
 
@@ -1192,10 +1212,9 @@ class SearchOneOffs {
       event.preventDefault();
       return;
     }
-    this.querySelector(".search-one-offs-context-set-default").setAttribute(
-      "disabled",
-      target.engine == Services.search.defaultEngine
-    );
+    this.contextMenuPopup
+      .querySelector(".search-one-offs-context-set-default")
+      .setAttribute("disabled", target.engine == Services.search.defaultEngine);
 
     this.contextMenuPopup.openPopupAtScreen(event.screenX, event.screenY, true);
     event.preventDefault();

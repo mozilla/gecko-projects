@@ -1823,9 +1823,11 @@ Completion Completion::fromJSResult(JSContext* cx, bool ok, const Value& rv) {
 
   RootedValue exception(cx);
   RootedSavedFrame stack(cx, cx->getPendingExceptionStack());
-  MOZ_ALWAYS_TRUE(cx->getPendingException(&exception));
-
+  bool getSucceeded = cx->getPendingException(&exception);
   cx->clearPendingException();
+  if (!getSucceeded) {
+    return Completion(Terminate());
+  }
 
   return Completion(Throw(exception, stack));
 }
@@ -3644,59 +3646,6 @@ void DebugAPI::traceCrossCompartmentEdges(JSTracer* trc) {
   }
 }
 
-/*
- * Before performing a collection, the GC tries to find whether any collected
- * compartments are expected to die. To do this is needs to know about any cross
- * compartment pointers the debugger has that may keep compartments alive. This
- * is done by calling findCrossCompartmentTargets for compartments it suspects
- * are live.
- */
-
-bool DebugAPI::findCrossCompartmentTargets(JSRuntime* rt,
-                                           JS::Compartment* source,
-                                           CompartmentSet& targets) {
-  for (Debugger* dbg : rt->debuggerList()) {
-    if (dbg->compartment() == source) {
-      if (!dbg->findCrossCompartmentTargets(targets)) {
-        return false;
-      }
-    }
-  }
-
-  return true;
-}
-
-bool Debugger::findCrossCompartmentTargets(CompartmentSet& targets) {
-  for (WeakGlobalObjectSet::Enum e(debuggees); !e.empty(); e.popFront()) {
-    Compartment* comp = e.front().unbarrieredGet()->compartment();
-    if (!targets.put(comp)) {
-      return false;
-    }
-  }
-
-  bool ok = true;
-  forEachWeakMap([&](auto& weakMap) {
-    if (ok && !weakMap.findCrossCompartmentTargets(targets)) {
-      ok = false;
-    }
-  });
-  return ok;
-}
-
-template <class Referent, class Wrapper, bool InvisibleKeysOk>
-bool DebuggerWeakMap<Referent, Wrapper, InvisibleKeysOk>::
-    findCrossCompartmentTargets(CompartmentSet& targets) {
-  for (Enum e(*this); !e.empty(); e.popFront()) {
-    Key key = e.front().key();
-    JS::Compartment* comp = key->compartment();
-    if (!targets.put(comp)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 #ifdef DEBUG
 
 static bool RuntimeHasDebugger(JSRuntime* rt, Debugger* dbg) {
@@ -3985,22 +3934,19 @@ bool DebugAPI::findSweepGroupEdges(JSRuntime* rt) {
         continue;
       }
 
-      if (SweepZonesInSameGroup(debuggerZone, debuggeeZone)) {
+      if (!SweepZonesInSameGroup(debuggerZone, debuggeeZone)) {
         return false;
       }
     }
-
-    dbg->forEachWeakMap([debuggerZone](auto& weakMap) {
-      weakMap.findSweepGroupEdges(debuggerZone);
-    });
   }
 
   return true;
 }
 
 template <class UnbarrieredKey, class Wrapper, bool InvisibleKeysOk>
-bool DebuggerWeakMap<UnbarrieredKey, Wrapper, InvisibleKeysOk>::
-    findSweepGroupEdges(JS::Zone* debuggerZone) {
+bool DebuggerWeakMap<UnbarrieredKey, Wrapper,
+                     InvisibleKeysOk>::findSweepGroupEdges() {
+  Zone* debuggerZone = zone();
   MOZ_ASSERT(debuggerZone->isGCMarking());
   for (Enum e(*this); !e.empty(); e.popFront()) {
     MOZ_ASSERT(e.front().value()->zone() == debuggerZone);
@@ -6003,7 +5949,8 @@ bool Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp) {
   bool result = true;
 
   CompileOptions options(cx);
-  frontend::UsedNameTracker usedNames(cx);
+  LifoAllocScope allocScope(&cx->tempLifoAlloc());
+  frontend::ParseInfo parseInfo(cx, allocScope);
 
   RootedScriptSourceObject sourceObject(
       cx, frontend::CreateScriptSourceObject(cx, options, Nothing()));
@@ -6013,8 +5960,8 @@ bool Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp) {
 
   JS::AutoSuppressWarningReporter suppressWarnings(cx);
   frontend::Parser<frontend::FullParseHandler, char16_t> parser(
-      cx, cx->tempLifoAlloc(), options, chars.twoByteChars(), length,
-      /* foldConstants = */ true, usedNames, nullptr, nullptr, sourceObject,
+      cx, options, chars.twoByteChars(), length,
+      /* foldConstants = */ true, parseInfo, nullptr, nullptr, sourceObject,
       frontend::ParseGoal::Script);
   if (!parser.checkOptions() || !parser.parse()) {
     // We ran into an error. If it was because we ran out of memory we report

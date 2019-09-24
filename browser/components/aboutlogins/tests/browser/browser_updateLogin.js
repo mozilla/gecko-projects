@@ -63,6 +63,10 @@ add_task(async function test_login_item() {
 
       async function test_discard_dialog(exitPoint) {
         editButton.click();
+        await ContentTaskUtils.waitForCondition(
+          () => loginItem.dataset.editing,
+          "Entering edit mode"
+        );
         await Promise.resolve();
 
         usernameInput.value += "-undome";
@@ -105,6 +109,10 @@ add_task(async function test_login_item() {
           login.password,
           "Password change should be reverted"
         );
+        ok(
+          !passwordInput.hasAttribute("value"),
+          "Password shouldn't be exposed in @value"
+        );
         is(
           passwordInput.style.width,
           login.password.length + "ch",
@@ -118,6 +126,10 @@ add_task(async function test_login_item() {
       await test_discard_dialog(cancelButton);
 
       editButton.click();
+      await ContentTaskUtils.waitForCondition(
+        () => loginItem.dataset.editing,
+        "Entering edit mode"
+      );
       await Promise.resolve();
 
       let revealCheckbox = loginItem.shadowRoot.querySelector(
@@ -164,6 +176,10 @@ add_task(async function test_login_item() {
       );
 
       editButton.click();
+      await ContentTaskUtils.waitForCondition(
+        () => loginItem.dataset.editing,
+        "Entering edit mode"
+      );
       await Promise.resolve();
 
       ok(loginItem.dataset.editing, "LoginItem should be in 'edit' mode");

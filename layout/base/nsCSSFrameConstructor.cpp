@@ -10775,7 +10775,8 @@ nsContainerFrame* nsCSSFrameConstructor::BeginBuildingColumns(
           PseudoStyleType::columnContent, columnSetStyle);
   aColumnContent->SetComputedStyleWithoutNotification(blockStyle);
   InitAndRestoreFrame(aState, aContent, columnSet, aColumnContent);
-  aColumnContent->AddStateBits(NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR);
+  aColumnContent->AddStateBits(NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR |
+                               NS_BLOCK_FORMATTING_CONTEXT_STATE_BITS);
 
   // Set up the parent-child chain.
   SetInitialSingleChild(columnSetWrapper, columnSet);
@@ -11357,9 +11358,10 @@ bool nsCSSFrameConstructor::WipeInsertionParent(nsContainerFrame* aFrame) {
   // elements into <details>, we reframe the <details> and let frame constructor
   // move the main <summary> to the front when constructing the frame
   // construction items.
-  if (aFrame->IsDetailsFrame()) {
+  if (auto* details =
+          HTMLDetailsElement::FromNodeOrNull(aFrame->GetContent())) {
     TRACE("Details / Summary");
-    RecreateFramesForContent(aFrame->GetContent(), InsertionKind::Async);
+    RecreateFramesForContent(details, InsertionKind::Async);
     return true;
   }
 

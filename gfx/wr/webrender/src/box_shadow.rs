@@ -6,11 +6,11 @@ use api::{BorderRadius, BoxShadowClipMode, ClipMode, ColorF, PrimitiveKeyKind};
 use api::MAX_BLUR_RADIUS;
 use api::units::*;
 use crate::clip::{ClipItemKey, ClipItemKeyKind};
-use crate::display_list_flattener::DisplayListFlattener;
+use crate::scene_building::SceneBuilder;
 use crate::gpu_cache::GpuCacheHandle;
 use crate::gpu_types::BoxShadowStretchMode;
 use crate::prim_store::ScrollNodeAndClipChain;
-use crate::render_task::RenderTaskCacheEntryHandle;
+use crate::render_task_cache::RenderTaskCacheEntryHandle;
 use crate::util::RectHelpers;
 use crate::internal_types::LayoutPrimitiveInfo;
 
@@ -68,7 +68,7 @@ pub struct BoxShadowCacheKey {
     pub br_bottom_left: DeviceIntSize,
 }
 
-impl<'a> DisplayListFlattener<'a> {
+impl<'a> SceneBuilder<'a> {
     pub fn add_box_shadow(
         &mut self,
         clip_and_scroll: ScrollNodeAndClipChain,
@@ -98,10 +98,13 @@ impl<'a> DisplayListFlattener<'a> {
 
         // Apply parameters that affect where the shadow rect
         // exists in the local space of the primitive.
-        let shadow_rect = prim_info
-            .rect
-            .translate(*box_offset)
-            .inflate(spread_amount, spread_amount);
+        let shadow_rect = self.snap_rect(
+            &prim_info
+                .rect
+                .translate(*box_offset)
+                .inflate(spread_amount, spread_amount),
+            clip_and_scroll.spatial_node_index,
+        );
 
         // If blur radius is zero, we can use a fast path with
         // no blur applied.

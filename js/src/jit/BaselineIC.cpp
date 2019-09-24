@@ -1198,7 +1198,7 @@ JitCode* ICStubCompiler::getStubCode() {
   if (!generateStubCode(masm)) {
     return nullptr;
   }
-  Linker linker(masm, "getStubCode");
+  Linker linker(masm);
   Rooted<JitCode*> newStubCode(cx, linker.newCode(cx, CodeKind::Baseline));
   if (!newStubCode) {
     return nullptr;
@@ -3391,14 +3391,13 @@ void ICStubCompilerBase::pushCallArguments(MacroAssembler& masm,
 
   // Push all values, starting at the last one.
   Label loop, done;
-  masm.bind(&loop);
   masm.branchTest32(Assembler::Zero, count, count, &done);
+  masm.bind(&loop);
   {
     masm.pushValue(Address(argPtr, 0));
     masm.addPtr(Imm32(sizeof(Value)), argPtr);
 
-    masm.sub32(Imm32(1), count);
-    masm.jump(&loop);
+    masm.branchSub32(Assembler::NonZero, Imm32(1), count, &loop);
   }
   masm.bind(&done);
 }
@@ -4150,7 +4149,7 @@ bool JitRuntime::generateBaselineICFallbackCode(JSContext* cx) {
   IC_BASELINE_FALLBACK_CODE_KIND_LIST(EMIT_CODE)
 #undef EMIT_CODE
 
-  Linker linker(masm, "BaselineICFallback");
+  Linker linker(masm);
   JitCode* code = linker.newCode(cx, CodeKind::Other);
   if (!code) {
     return false;

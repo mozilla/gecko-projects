@@ -123,24 +123,24 @@ return /******/ (function(modules) { // webpackBootstrap
 "use strict";
 
 
-var pdfjsVersion = '2.3.146';
-var pdfjsBuild = '7e37eb42';
+var pdfjsVersion = '2.3.183';
+var pdfjsBuild = 'c289f3a9';
 
 var pdfjsSharedUtil = __w_pdfjs_require__(1);
 
-var pdfjsDisplayAPI = __w_pdfjs_require__(6);
+var pdfjsDisplayAPI = __w_pdfjs_require__(5);
 
-var pdfjsDisplayTextLayer = __w_pdfjs_require__(18);
+var pdfjsDisplayTextLayer = __w_pdfjs_require__(17);
 
-var pdfjsDisplayAnnotationLayer = __w_pdfjs_require__(19);
+var pdfjsDisplayAnnotationLayer = __w_pdfjs_require__(18);
 
-var pdfjsDisplayDisplayUtils = __w_pdfjs_require__(7);
+var pdfjsDisplayDisplayUtils = __w_pdfjs_require__(6);
 
-var pdfjsDisplaySVG = __w_pdfjs_require__(20);
+var pdfjsDisplaySVG = __w_pdfjs_require__(19);
 
-let pdfjsDisplayWorkerOptions = __w_pdfjs_require__(12);
+let pdfjsDisplayWorkerOptions = __w_pdfjs_require__(11);
 
-let pdfjsDisplayAPICompatibility = __w_pdfjs_require__(9);
+let pdfjsDisplayAPICompatibility = __w_pdfjs_require__(8);
 
 ;
 exports.build = pdfjsDisplayAPI.build;
@@ -169,7 +169,6 @@ exports.removeNullCharacters = pdfjsSharedUtil.removeNullCharacters;
 exports.shadow = pdfjsSharedUtil.shadow;
 exports.Util = pdfjsSharedUtil.Util;
 exports.ReadableStream = pdfjsSharedUtil.ReadableStream;
-exports.URL = pdfjsSharedUtil.URL;
 exports.RenderingCancelledException = pdfjsDisplayDisplayUtils.RenderingCancelledException;
 exports.getFilenameFromUrl = pdfjsDisplayDisplayUtils.getFilenameFromUrl;
 exports.LinkTarget = pdfjsDisplayDisplayUtils.LinkTarget;
@@ -227,19 +226,11 @@ Object.defineProperty(exports, "ReadableStream", {
     return _streams_polyfill.ReadableStream;
   }
 });
-Object.defineProperty(exports, "URL", {
-  enumerable: true,
-  get: function () {
-    return _url_polyfill.URL;
-  }
-});
 exports.createObjectURL = exports.FormatError = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.PermissionFlag = exports.PasswordResponses = exports.PasswordException = exports.NativeImageDecoding = exports.MissingPDFException = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationStateModelType = exports.AnnotationReviewState = exports.AnnotationReplyType = exports.AnnotationMarkedState = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VerbosityLevel = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = void 0;
 
 __w_pdfjs_require__(2);
 
 var _streams_polyfill = __w_pdfjs_require__(4);
-
-var _url_polyfill = __w_pdfjs_require__(5);
 
 const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0];
 exports.IDENTITY_MATRIX = IDENTITY_MATRIX;
@@ -561,7 +552,7 @@ function isSameOrigin(baseUrl, otherUrl) {
   let base;
 
   try {
-    base = new _url_polyfill.URL(baseUrl);
+    base = new URL(baseUrl);
 
     if (!base.origin || base.origin === 'null') {
       return false;
@@ -570,7 +561,7 @@ function isSameOrigin(baseUrl, otherUrl) {
     return false;
   }
 
-  const other = new _url_polyfill.URL(otherUrl, base);
+  const other = new URL(otherUrl, base);
   return base.origin === other.origin;
 }
 
@@ -598,7 +589,7 @@ function createValidAbsoluteUrl(url, baseUrl) {
   }
 
   try {
-    const absoluteUrl = baseUrl ? new _url_polyfill.URL(url, baseUrl) : new _url_polyfill.URL(url);
+    const absoluteUrl = baseUrl ? new URL(url, baseUrl) : new URL(url);
 
     if (_isValidProtocol(absoluteUrl)) {
       return absoluteUrl;
@@ -1034,11 +1025,11 @@ function createPromiseCapability() {
 const createObjectURL = function createObjectURLClosure() {
   const digits = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
   return function createObjectURL(data, contentType, forceDataSchema = false) {
-    if (!forceDataSchema && _url_polyfill.URL.createObjectURL) {
+    if (!forceDataSchema && URL.createObjectURL) {
       const blob = new Blob([data], {
         type: contentType
       });
-      return _url_polyfill.URL.createObjectURL(blob);
+      return URL.createObjectURL(blob);
     }
 
     let buffer = `data:${contentType};base64,`;
@@ -1102,17 +1093,6 @@ module.exports = typeof window !== 'undefined' && window.Math === Math ? window 
 "use strict";
 
 
-{
-  exports.URL = URL;
-}
-
-/***/ }),
-/* 6 */
-/***/ (function(module, exports, __w_pdfjs_require__) {
-
-"use strict";
-
-
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
@@ -1122,29 +1102,30 @@ exports.build = exports.version = exports.PDFPageProxy = exports.PDFDocumentProx
 
 var _util = __w_pdfjs_require__(1);
 
-var _display_utils = __w_pdfjs_require__(7);
+var _display_utils = __w_pdfjs_require__(6);
 
-var _font_loader = __w_pdfjs_require__(8);
+var _font_loader = __w_pdfjs_require__(7);
 
-var _api_compatibility = __w_pdfjs_require__(9);
+var _api_compatibility = __w_pdfjs_require__(8);
 
-var _canvas = __w_pdfjs_require__(10);
+var _canvas = __w_pdfjs_require__(9);
 
 var _global_scope = _interopRequireDefault(__w_pdfjs_require__(3));
 
-var _worker_options = __w_pdfjs_require__(12);
+var _worker_options = __w_pdfjs_require__(11);
 
-var _message_handler = __w_pdfjs_require__(13);
+var _message_handler = __w_pdfjs_require__(12);
 
-var _metadata = __w_pdfjs_require__(14);
+var _metadata = __w_pdfjs_require__(13);
 
-var _transport_stream = __w_pdfjs_require__(16);
+var _transport_stream = __w_pdfjs_require__(15);
 
-var _webgl = __w_pdfjs_require__(17);
+var _webgl = __w_pdfjs_require__(16);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 const DEFAULT_RANGE_CHUNK_SIZE = 65536;
+const RENDERING_CANCELLED_TIMEOUT = 100;
 let isWorkerDisabled = false;
 let fallbackWorkerSrc;
 let fakeWorkerFilesLoader = null;
@@ -1189,7 +1170,7 @@ function getDocument(src) {
 
   for (const key in source) {
     if (key === 'url' && typeof window !== 'undefined') {
-      params[key] = new _util.URL(source[key], window.location).href;
+      params[key] = new URL(source[key], window.location).href;
       continue;
     } else if (key === 'range') {
       rangeTransport = source[key];
@@ -1258,7 +1239,6 @@ function getDocument(src) {
 
   if (!worker) {
     const workerParams = {
-      postMessageTransfers: params.postMessageTransfers,
       verbosity: params.verbosity,
       port: _worker_options.GlobalWorkerOptions.workerPort
     };
@@ -1322,7 +1302,7 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
 
   return worker.messageHandler.sendWithPromise('GetDocRequest', {
     docId,
-    apiVersion: '2.3.146',
+    apiVersion: '2.3.183',
     source: {
       data: source.data,
       url: source.url,
@@ -1637,18 +1617,24 @@ class PDFPageProxy {
   }) {
     const stats = this._stats;
     stats.time('Overall');
-    this.pendingCleanup = false;
     const renderingIntent = intent === 'print' ? 'print' : 'display';
-    const canvasFactoryInstance = canvasFactory || new _display_utils.DOMCanvasFactory();
-    const webGLContext = new _webgl.WebGLContext({
-      enable: enableWebGL
-    });
+    this.pendingCleanup = false;
 
     if (!this.intentStates[renderingIntent]) {
       this.intentStates[renderingIntent] = Object.create(null);
     }
 
     const intentState = this.intentStates[renderingIntent];
+
+    if (intentState.streamReaderCancelTimeout) {
+      clearTimeout(intentState.streamReaderCancelTimeout);
+      intentState.streamReaderCancelTimeout = null;
+    }
+
+    const canvasFactoryInstance = canvasFactory || new _display_utils.DOMCanvasFactory();
+    const webGLContext = new _webgl.WebGLContext({
+      enable: enableWebGL
+    });
 
     if (!intentState.displayReadyCapability) {
       intentState.displayReadyCapability = (0, _util.createPromiseCapability)();
@@ -1882,6 +1868,12 @@ class PDFPageProxy {
   _startRenderPage(transparency, intent) {
     const intentState = this.intentStates[intent];
 
+    if (!intentState) {
+      return;
+    }
+
+    this._stats.timeEnd('Page Request');
+
     if (intentState.displayReadyCapability) {
       intentState.displayReadyCapability.resolve(transparency);
     }
@@ -1927,7 +1919,7 @@ class PDFPageProxy {
           return;
         }
 
-        this._renderPageChunk(value.operatorList, intentState);
+        this._renderPageChunk(value, intentState);
 
         pump();
       }, reason => {
@@ -1971,16 +1963,41 @@ class PDFPageProxy {
       return;
     }
 
-    if (!force && intentState.renderTasks.length !== 0) {
-      return;
-    }
+    if (!force) {
+      if (intentState.renderTasks.length !== 0) {
+        return;
+      }
 
-    if (reason instanceof _display_utils.RenderingCancelledException) {
-      return;
+      if (reason instanceof _display_utils.RenderingCancelledException) {
+        intentState.streamReaderCancelTimeout = setTimeout(() => {
+          this._abortOperatorList({
+            intentState,
+            reason,
+            force: true
+          });
+
+          intentState.streamReaderCancelTimeout = null;
+        }, RENDERING_CANCELLED_TIMEOUT);
+        return;
+      }
     }
 
     intentState.streamReader.cancel(new _util.AbortException(reason && reason.message));
     intentState.streamReader = null;
+
+    if (this._transport.destroyed) {
+      return;
+    }
+
+    Object.keys(this.intentStates).some(intent => {
+      if (this.intentStates[intent] === intentState) {
+        delete this.intentStates[intent];
+        return true;
+      }
+
+      return false;
+    });
+    this.cleanup();
   }
 
   get stats() {
@@ -2138,14 +2155,13 @@ const PDFWorker = function PDFWorkerClosure() {
 
   function createCDNWrapper(url) {
     const wrapper = 'importScripts(\'' + url + '\');';
-    return _util.URL.createObjectURL(new Blob([wrapper]));
+    return URL.createObjectURL(new Blob([wrapper]));
   }
 
   class PDFWorker {
     constructor({
       name = null,
       port = null,
-      postMessageTransfers = true,
       verbosity = (0, _util.getVerbosityLevel)()
     } = {}) {
       if (port && pdfWorkerPorts.has(port)) {
@@ -2154,7 +2170,7 @@ const PDFWorker = function PDFWorkerClosure() {
 
       this.name = name;
       this.destroyed = false;
-      this.postMessageTransfers = postMessageTransfers !== false;
+      this.postMessageTransfers = true;
       this.verbosity = verbosity;
       this._readyCapability = (0, _util.createPromiseCapability)();
       this._port = null;
@@ -2228,7 +2244,7 @@ const PDFWorker = function PDFWorkerClosure() {
               return;
             }
 
-            if (data && data.supportTypedArray) {
+            if (data) {
               this._messageHandler = messageHandler;
               this._port = worker;
               this._webWorker = worker;
@@ -2270,7 +2286,7 @@ const PDFWorker = function PDFWorkerClosure() {
             try {
               messageHandler.send('test', testObj, [testObj.buffer]);
             } catch (ex) {
-              (0, _util.info)('Cannot use postMessage transfers');
+              (0, _util.warn)('Cannot use postMessage transfers.');
               testObj[0] = 0;
               messageHandler.send('test', testObj);
             }
@@ -2575,8 +2591,6 @@ class WorkerTransport {
 
       const page = this.pageCache[data.pageIndex];
 
-      page._stats.timeEnd('Page Request');
-
       page._startRenderPage(data.transparency, data.intent);
     });
     messageHandler.on('commonobj', data => {
@@ -2764,12 +2778,27 @@ class WorkerTransport {
         img.src = imageUrl;
       });
     });
-    messageHandler.on('FetchBuiltInCMap', data => {
+    messageHandler.on('FetchBuiltInCMap', (data, sink) => {
       if (this.destroyed) {
-        return Promise.reject(new Error('Worker was destroyed'));
+        sink.error(new Error('Worker was destroyed'));
+        return;
       }
 
-      return this.CMapReaderFactory.fetch(data);
+      let fetched = false;
+
+      sink.onPull = () => {
+        if (fetched) {
+          sink.close();
+          return;
+        }
+
+        fetched = true;
+        this.CMapReaderFactory.fetch(data).then(function (builtInCMap) {
+          sink.enqueue(builtInCMap, 1, [builtInCMap.cMapData.buffer]);
+        }).catch(function (reason) {
+          sink.error(reason);
+        });
+      };
     });
   }
 
@@ -3170,13 +3199,13 @@ const InternalRenderTask = function InternalRenderTaskClosure() {
   return InternalRenderTask;
 }();
 
-const version = '2.3.146';
+const version = '2.3.183';
 exports.version = version;
-const build = '7e37eb42';
+const build = 'c289f3a9';
 exports.build = build;
 
 /***/ }),
-/* 7 */
+/* 6 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -3452,7 +3481,8 @@ function addLinkAttributes(link, {
   rel,
   enabled = true
 } = {}) {
-  const urlNullRemoved = url ? (0, _util.removeNullCharacters)(url) : '';
+  (0, _util.assert)(url && typeof url === 'string', 'addLinkAttributes: A valid "url" parameter must provided.');
+  const urlNullRemoved = (0, _util.removeNullCharacters)(url);
 
   if (enabled) {
     link.href = link.title = urlNullRemoved;
@@ -3465,12 +3495,10 @@ function addLinkAttributes(link, {
     };
   }
 
-  if (url) {
-    const LinkTargetValues = Object.values(LinkTarget);
-    const targetIndex = LinkTargetValues.includes(target) ? target : LinkTarget.NONE;
-    link.target = LinkTargetStringMap[targetIndex];
-    link.rel = typeof rel === 'string' ? rel : DEFAULT_LINK_REL;
-  }
+  const LinkTargetValues = Object.values(LinkTarget);
+  const targetIndex = LinkTargetValues.includes(target) ? target : LinkTarget.NONE;
+  link.target = LinkTargetStringMap[targetIndex];
+  link.rel = typeof rel === 'string' ? rel : DEFAULT_LINK_REL;
 }
 
 function getFilenameFromUrl(url) {
@@ -3565,7 +3593,7 @@ function isValidFetchUrl(url, baseUrl) {
   try {
     const {
       protocol
-    } = baseUrl ? new _util.URL(url, baseUrl) : new _util.URL(url);
+    } = baseUrl ? new URL(url, baseUrl) : new URL(url);
     return protocol === 'http:' || protocol === 'https:';
   } catch (ex) {
     return false;
@@ -3594,8 +3622,8 @@ function releaseImageResources(img) {
   (0, _util.assert)(img instanceof Image, 'Invalid `img` parameter.');
   const url = img.src;
 
-  if (typeof url === 'string' && url.startsWith('blob:') && _util.URL.revokeObjectURL) {
-    _util.URL.revokeObjectURL(url);
+  if (typeof url === 'string' && url.startsWith('blob:') && URL.revokeObjectURL) {
+    URL.revokeObjectURL(url);
   }
 
   img.removeAttribute('src');
@@ -3652,7 +3680,7 @@ class PDFDateString {
 exports.PDFDateString = PDFDateString;
 
 /***/ }),
-/* 8 */
+/* 7 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -3913,7 +3941,7 @@ class FontFaceObject {
 exports.FontFaceObject = FontFaceObject;
 
 /***/ }),
-/* 9 */
+/* 8 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -3924,7 +3952,7 @@ let compatibilityParams = Object.create(null);
 exports.apiCompatibilityParams = Object.freeze(compatibilityParams);
 
 /***/ }),
-/* 10 */
+/* 9 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -3937,7 +3965,7 @@ exports.CanvasGraphics = void 0;
 
 var _util = __w_pdfjs_require__(1);
 
-var _pattern_helper = __w_pdfjs_require__(11);
+var _pattern_helper = __w_pdfjs_require__(10);
 
 var MIN_FONT_SIZE = 16;
 var MAX_FONT_SIZE = 100;
@@ -5982,7 +6010,7 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
 exports.CanvasGraphics = CanvasGraphics;
 
 /***/ }),
-/* 11 */
+/* 10 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -6431,7 +6459,7 @@ var TilingPattern = function TilingPatternClosure() {
 exports.TilingPattern = TilingPattern;
 
 /***/ }),
-/* 12 */
+/* 11 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -6447,7 +6475,7 @@ GlobalWorkerOptions.workerPort = GlobalWorkerOptions.workerPort === undefined ? 
 GlobalWorkerOptions.workerSrc = GlobalWorkerOptions.workerSrc === undefined ? '' : GlobalWorkerOptions.workerSrc;
 
 /***/ }),
-/* 13 */
+/* 12 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -6495,14 +6523,6 @@ function wrapReason(reason) {
   }
 }
 
-function resolveOrReject(capability, data) {
-  if (data.success) {
-    capability.resolve();
-  } else {
-    capability.reject(wrapReason(data.reason));
-  }
-}
-
 function MessageHandler(sourceName, targetName, comObj) {
   this.sourceName = sourceName;
   this.targetName = targetName;
@@ -6531,8 +6551,8 @@ function MessageHandler(sourceName, targetName, comObj) {
         let callback = callbacksCapabilities[callbackId];
         delete callbacksCapabilities[callbackId];
 
-        if ('error' in data) {
-          callback.reject(wrapReason(data.error));
+        if ('reason' in data) {
+          callback.reject(wrapReason(data.reason));
         } else {
           callback.resolve(data.data);
         }
@@ -6561,7 +6581,7 @@ function MessageHandler(sourceName, targetName, comObj) {
             targetName,
             isReply: true,
             callbackId: data.callbackId,
-            error: wrapReason(reason)
+            reason: wrapReason(reason)
           });
         });
       } else if (data.streamId) {
@@ -6628,6 +6648,8 @@ MessageHandler.prototype = {
         this.streamControllers[streamId] = {
           controller,
           startCall: startCapability,
+          pullCall: null,
+          cancelCall: null,
           isClosed: false
         };
         this.postMessage({
@@ -6767,28 +6789,38 @@ MessageHandler.prototype = {
   _processStreamMessage(data) {
     let sourceName = this.sourceName;
     let targetName = data.sourceName;
-    let streamId = data.streamId;
+    const streamId = data.streamId;
     const comObj = this.comObj;
 
     let deleteStreamController = () => {
-      Promise.all([this.streamControllers[data.streamId].startCall, this.streamControllers[data.streamId].pullCall, this.streamControllers[data.streamId].cancelCall].map(function (capability) {
+      Promise.all([this.streamControllers[streamId].startCall, this.streamControllers[streamId].pullCall, this.streamControllers[streamId].cancelCall].map(function (capability) {
         return capability && capability.promise.catch(function () {});
       })).then(() => {
-        delete this.streamControllers[data.streamId];
+        delete this.streamControllers[streamId];
       });
     };
 
     switch (data.stream) {
       case StreamKind.START_COMPLETE:
-        resolveOrReject(this.streamControllers[data.streamId].startCall, data);
+        if (data.success) {
+          this.streamControllers[streamId].startCall.resolve();
+        } else {
+          this.streamControllers[streamId].startCall.reject(wrapReason(data.reason));
+        }
+
         break;
 
       case StreamKind.PULL_COMPLETE:
-        resolveOrReject(this.streamControllers[data.streamId].pullCall, data);
+        if (data.success) {
+          this.streamControllers[streamId].pullCall.resolve();
+        } else {
+          this.streamControllers[streamId].pullCall.reject(wrapReason(data.reason));
+        }
+
         break;
 
       case StreamKind.PULL:
-        if (!this.streamSinks[data.streamId]) {
+        if (!this.streamSinks[streamId]) {
           comObj.postMessage({
             sourceName,
             targetName,
@@ -6799,11 +6831,11 @@ MessageHandler.prototype = {
           break;
         }
 
-        if (this.streamSinks[data.streamId].desiredSize <= 0 && data.desiredSize > 0) {
-          this.streamSinks[data.streamId].sinkCapability.resolve();
+        if (this.streamSinks[streamId].desiredSize <= 0 && data.desiredSize > 0) {
+          this.streamSinks[streamId].sinkCapability.resolve();
         }
 
-        this.streamSinks[data.streamId].desiredSize = data.desiredSize;
+        this.streamSinks[streamId].desiredSize = data.desiredSize;
         const {
           onPull
         } = this.streamSinks[data.streamId];
@@ -6829,39 +6861,45 @@ MessageHandler.prototype = {
         break;
 
       case StreamKind.ENQUEUE:
-        (0, _util.assert)(this.streamControllers[data.streamId], 'enqueue should have stream controller');
+        (0, _util.assert)(this.streamControllers[streamId], 'enqueue should have stream controller');
 
-        if (!this.streamControllers[data.streamId].isClosed) {
-          this.streamControllers[data.streamId].controller.enqueue(data.chunk);
-        }
-
-        break;
-
-      case StreamKind.CLOSE:
-        (0, _util.assert)(this.streamControllers[data.streamId], 'close should have stream controller');
-
-        if (this.streamControllers[data.streamId].isClosed) {
+        if (this.streamControllers[streamId].isClosed) {
           break;
         }
 
-        this.streamControllers[data.streamId].isClosed = true;
-        this.streamControllers[data.streamId].controller.close();
+        this.streamControllers[streamId].controller.enqueue(data.chunk);
+        break;
+
+      case StreamKind.CLOSE:
+        (0, _util.assert)(this.streamControllers[streamId], 'close should have stream controller');
+
+        if (this.streamControllers[streamId].isClosed) {
+          break;
+        }
+
+        this.streamControllers[streamId].isClosed = true;
+        this.streamControllers[streamId].controller.close();
         deleteStreamController();
         break;
 
       case StreamKind.ERROR:
-        (0, _util.assert)(this.streamControllers[data.streamId], 'error should have stream controller');
-        this.streamControllers[data.streamId].controller.error(wrapReason(data.reason));
+        (0, _util.assert)(this.streamControllers[streamId], 'error should have stream controller');
+        this.streamControllers[streamId].controller.error(wrapReason(data.reason));
         deleteStreamController();
         break;
 
       case StreamKind.CANCEL_COMPLETE:
-        resolveOrReject(this.streamControllers[data.streamId].cancelCall, data);
+        if (data.success) {
+          this.streamControllers[streamId].cancelCall.resolve();
+        } else {
+          this.streamControllers[streamId].cancelCall.reject(wrapReason(data.reason));
+        }
+
         deleteStreamController();
         break;
 
       case StreamKind.CANCEL:
-        if (!this.streamSinks[data.streamId]) {
+        if (!this.streamSinks[streamId]) {
           break;
         }
 
@@ -6887,9 +6925,9 @@ MessageHandler.prototype = {
             reason: wrapReason(reason)
           });
         });
-        this.streamSinks[data.streamId].sinkCapability.reject(wrapReason(data.reason));
-        this.streamSinks[data.streamId].isCancelled = true;
-        delete this.streamSinks[data.streamId];
+        this.streamSinks[streamId].sinkCapability.reject(wrapReason(data.reason));
+        this.streamSinks[streamId].isCancelled = true;
+        delete this.streamSinks[streamId];
         break;
 
       default:
@@ -6912,7 +6950,7 @@ MessageHandler.prototype = {
 };
 
 /***/ }),
-/* 14 */
+/* 13 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -6925,7 +6963,7 @@ exports.Metadata = void 0;
 
 var _util = __w_pdfjs_require__(1);
 
-var _xml_parser = __w_pdfjs_require__(15);
+var _xml_parser = __w_pdfjs_require__(14);
 
 class Metadata {
   constructor(data) {
@@ -7034,7 +7072,7 @@ class Metadata {
 exports.Metadata = Metadata;
 
 /***/ }),
-/* 15 */
+/* 14 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -7480,7 +7518,7 @@ class SimpleXMLParser extends XMLParserBase {
 exports.SimpleXMLParser = SimpleXMLParser;
 
 /***/ }),
-/* 16 */
+/* 15 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -7835,7 +7873,7 @@ class PDFDataTransportStreamRangeReader {
 }
 
 /***/ }),
-/* 17 */
+/* 16 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -8282,7 +8320,7 @@ var WebGLUtils = function WebGLUtilsClosure() {
 }();
 
 /***/ }),
-/* 18 */
+/* 17 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -8974,7 +9012,7 @@ var renderTextLayer = function renderTextLayerClosure() {
 exports.renderTextLayer = renderTextLayer;
 
 /***/ }),
-/* 19 */
+/* 18 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -8985,7 +9023,7 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.AnnotationLayer = void 0;
 
-var _display_utils = __w_pdfjs_require__(7);
+var _display_utils = __w_pdfjs_require__(6);
 
 var _util = __w_pdfjs_require__(1);
 
@@ -9202,19 +9240,18 @@ class LinkAnnotationElement extends AnnotationElement {
       linkService
     } = this;
     const link = document.createElement('a');
-    (0, _display_utils.addLinkAttributes)(link, {
-      url: data.url,
-      target: data.newWindow ? _display_utils.LinkTarget.BLANK : linkService.externalLinkTarget,
-      rel: linkService.externalLinkRel,
-      enabled: linkService.externalLinkEnabled
-    });
 
-    if (!data.url) {
-      if (data.action) {
-        this._bindNamedAction(link, data.action);
-      } else {
-        this._bindLink(link, data.dest);
-      }
+    if (data.url) {
+      (0, _display_utils.addLinkAttributes)(link, {
+        url: data.url,
+        target: data.newWindow ? _display_utils.LinkTarget.BLANK : linkService.externalLinkTarget,
+        rel: linkService.externalLinkRel,
+        enabled: linkService.externalLinkEnabled
+      });
+    } else if (data.action) {
+      this._bindNamedAction(link, data.action);
+    } else {
+      this._bindLink(link, data.dest);
     }
 
     this.container.appendChild(link);
@@ -9984,7 +10021,7 @@ class AnnotationLayer {
 exports.AnnotationLayer = AnnotationLayer;
 
 /***/ }),
-/* 20 */
+/* 19 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";
@@ -9997,9 +10034,9 @@ exports.SVGGraphics = void 0;
 
 var _util = __w_pdfjs_require__(1);
 
-var _display_utils = __w_pdfjs_require__(7);
+var _display_utils = __w_pdfjs_require__(6);
 
-var _is_node = _interopRequireDefault(__w_pdfjs_require__(21));
+var _is_node = _interopRequireDefault(__w_pdfjs_require__(20));
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -10011,7 +10048,7 @@ exports.SVGGraphics = SVGGraphics;
 ;
 
 /***/ }),
-/* 21 */
+/* 20 */
 /***/ (function(module, exports, __w_pdfjs_require__) {
 
 "use strict";

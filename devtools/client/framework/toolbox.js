@@ -131,8 +131,7 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(
   this,
   "ResponsiveUIManager",
-  "devtools/client/responsive/manager",
-  true
+  "devtools/client/responsive/manager"
 );
 loader.lazyRequireGetter(
   this,
@@ -217,8 +216,6 @@ function Toolbox(
   this._toolStartups = new Map();
   this._inspectorExtensionSidebars = new Map();
 
-  this._initInspector = null;
-  this._inspector = null;
   this._netMonitorAPI = null;
 
   // Map of frames (id => frame-info) and currently selected frame id.
@@ -299,6 +296,10 @@ function Toolbox(
   this._target.on("navigate", this._refreshHostTitle);
   this._target.on("frame-update", this._updateFrames);
   this._target.on("inspect-object", this._onInspectObject);
+
+  this._target.onFront("inspector", async inspectorFront => {
+    registerWalkerListeners(this.store, inspectorFront.walker);
+  });
 
   this.on("host-changed", this._refreshHostTitle);
   this.on("select", this._onToolSelected);
@@ -524,14 +525,6 @@ Toolbox.prototype = {
   },
 
   /**
-   * Get the toolbox's inspector front. Note that it may not always have been
-   * initialized first. Use `initInspector()` if needed.
-   */
-  get inspectorFront() {
-    return this._inspector;
-  },
-
-  /**
    * Get the toggled state of the split console
    */
   get splitConsole() {
@@ -598,11 +591,14 @@ Toolbox.prototype = {
       ignoreCaughtExceptions: Services.prefs.getBoolPref(
         "devtools.debugger.ignore-caught-exceptions"
       ),
-      showOverlayStepButtons: Services.prefs.getBoolPref(
-        "devtools.debugger.features.overlay-step-buttons"
+      shouldShowOverlay: Services.prefs.getBoolPref(
+        "devtools.debugger.features.overlay"
       ),
       skipBreakpoints: Services.prefs.getBoolPref(
         "devtools.debugger.skip-pausing"
+      ),
+      logEventBreakpoints: Services.prefs.getBoolPref(
+        "devtools.debugger.log-event-breakpoints"
       ),
     });
 
@@ -1673,19 +1669,30 @@ Toolbox.prototype = {
     }
 
     let newTarget;
+    const firstTabIndex = 0;
+    const lastTabIndex = buttons.length - 1;
+    const nextOrLastTabIndex = Math.min(lastTabIndex, curIndex + 1);
+    const previousOrFirstTabIndex = Math.max(firstTabIndex, curIndex - 1);
+    const ltr = this.direction === "ltr";
 
     if (key === "ArrowLeft") {
       // Do nothing if already at the beginning.
-      if (curIndex === 0) {
+      if (
+        (ltr && curIndex === firstTabIndex) ||
+        (!ltr && curIndex === lastTabIndex)
+      ) {
         return;
       }
-      newTarget = buttons[curIndex - 1];
+      newTarget = buttons[ltr ? previousOrFirstTabIndex : nextOrLastTabIndex];
     } else if (key === "ArrowRight") {
       // Do nothing if already at the end.
-      if (curIndex === buttons.length - 1) {
+      if (
+        (ltr && curIndex === lastTabIndex) ||
+        (!ltr && curIndex === firstTabIndex)
+      ) {
         return;
       }
-      newTarget = buttons[curIndex + 1];
+      newTarget = buttons[ltr ? nextOrLastTabIndex : previousOrFirstTabIndex];
     } else {
       return;
     }
@@ -1917,19 +1924,19 @@ Toolbox.prototype = {
    * Update the buttons.
    */
   updateToolboxButtons() {
-    const inspector = this.inspectorFront;
+    const inspectorFront = this.target.getCachedFront("inspectorFront");
     // two of the buttons have highlighters that need to be cleared
     // on will-navigate, otherwise we hold on to the stale highlighter
     const hasHighlighters =
-      inspector &&
-      (inspector.hasHighlighter("RulersHighlighter") ||
-        inspector.hasHighlighter("MeasuringToolHighlighter"));
+      inspectorFront &&
+      (inspectorFront.hasHighlighter("RulersHighlighter") ||
+        inspectorFront.hasHighlighter("MeasuringToolHighlighter"));
     if (hasHighlighters || this.isPaintFlashing) {
       if (this.isPaintFlashing) {
         this.togglePaintFlashing();
       }
       if (hasHighlighters) {
-        inspector.destroyHighlighters();
+        inspectorFront.destroyHighlighters();
       }
       this.component.setToolboxButtons(this.toolbarButtons);
     }
@@ -2007,7 +2014,12 @@ Toolbox.prototype = {
   _commandIsVisible: function(button) {
     const { isTargetSupported, isCurrentlyVisible, visibilityswitch } = button;
 
-    if (!Services.prefs.getBoolPref(visibilityswitch, true)) {
+    const defaultValue =
+      button.id !== "command-button-replay"
+        ? true
+        : Services.prefs.getBoolPref("devtools.recordreplay.mvp.enabled");
+
+    if (!Services.prefs.getBoolPref(visibilityswitch, defaultValue)) {
       return false;
     }
 
@@ -2165,7 +2177,7 @@ Toolbox.prototype = {
     // Defer the extension sidebar creation if the inspector
     // has not been created yet (and do not create the inspector
     // only to register an extension sidebar).
-    if (!this._inspector) {
+    if (!this.target.getCachedFront("inspector")) {
       return;
     }
 
@@ -2196,7 +2208,7 @@ Toolbox.prototype = {
 
     // Remove the created sidebar instance if the inspector panel
     // has been already created.
-    if (!this._inspector) {
+    if (!this.target.getCachedFront("inspector")) {
       return;
     }
 
@@ -2236,10 +2248,6 @@ Toolbox.prototype = {
    *        The id of the tool to load.
    */
   loadTool: function(id) {
-    if (id === "inspector" && !this._inspector) {
-      this.initInspector();
-    }
-
     let iframe = this.doc.getElementById("toolbox-panel-iframe-" + id);
     if (iframe) {
       const panel = this._toolPanels.get(id);
@@ -2282,18 +2290,6 @@ Toolbox.prototype = {
       }
 
       const onLoad = async () => {
-        if (id === "inspector") {
-          await this._initInspector;
-
-          // Stop loading the inspector if the toolbox is already being destroyed. This
-          // can happen in unit tests where the tests are rapidly opening and closing the
-          // toolbox and we encounter the scenario where the toolbox is closing as
-          // the inspector is still loading.
-          if (!this._inspector || !iframe.contentWindow) {
-            return;
-          }
-        }
-
         // Prevent flicker while loading by waiting to make visible until now.
         iframe.style.visibility = "visible";
 
@@ -3299,24 +3295,6 @@ Toolbox.prototype = {
   },
 
   /**
-   * Initialize the inspector/walker/selection/highlighter fronts.
-   * Returns a promise that resolves when the fronts are initialized
-   */
-  initInspector: function() {
-    if (!this._initInspector) {
-      this._initInspector = async function() {
-        // Temporary fix for bug #1493131 - inspector has a different life cycle
-        // than most other fronts because it is closely related to the toolbox.
-        // TODO: replace with getFront once inspector is separated from the toolbox
-        // TODO: remove these bindings
-        this._inspector = await this.target.getFront("inspector");
-        registerWalkerListeners(this.store, this._inspector.walker);
-      }.bind(this)();
-    }
-    return this._initInspector;
-  },
-
-  /**
    * An helper function that returns an object contain a highlighter and unhighlighter
    * function.
    *
@@ -3408,23 +3386,6 @@ Toolbox.prototype = {
       const panel = this.getPanel("webconsole");
       panel.hud.ui.inspectObjectActor(objectActor);
     }
-  },
-
-  /**
-   * Destroy the inspector/walker/selection fronts
-   * Returns a promise that resolves when the fronts are destroyed
-   * TODO: move to the inspector front once we can have listener hooks into fronts
-   */
-  destroyInspector: function() {
-    if (!this._inspector) {
-      return;
-    }
-
-    // Temporary fix for bug #1493131 - inspector has a different life cycle
-    // than most other fronts because it is closely related to the toolbox.
-    this._inspector.destroy();
-
-    this._inspector = null;
   },
 
   /**
@@ -3590,9 +3551,6 @@ Toolbox.prototype = {
         settleAll(outstanding)
           .catch(console.error)
           .then(async () => {
-            // Destroying the walker and inspector fronts
-            this.destroyInspector();
-
             this.selection.destroy();
             this.selection = null;
 

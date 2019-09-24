@@ -103,7 +103,6 @@ namespace jit {
 class JitRuntime;
 class JitActivation;
 struct PcScriptCache;
-struct AutoFlushICache;
 class CompileRuntime;
 
 #ifdef JS_SIMULATOR_ARM64
@@ -1104,6 +1103,8 @@ extern mozilla::Atomic<JS::LargeAllocationFailureCallback>
 // This callback is set by JS::SetBuildIdOp and may be null. See comment in
 // jsapi.h.
 extern mozilla::Atomic<JS::BuildIdOp> GetBuildId;
+
+extern JS::FilenameValidationCallback gFilenameValidationCallback;
 
 // This callback is set by js::SetHelperThreadTaskCallback and may be null.
 // See comment in jsapi.h.

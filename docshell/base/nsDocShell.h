@@ -331,12 +331,7 @@ class nsDocShell final : public nsDocLoader,
   // set. As soon as the current DocShell knows itself can be treated as
   // background loading, it triggers the parent docshell to see if the parent
   // document can fire load event earlier.
-  void TriggerParentCheckDocShellIsEmpty() {
-    RefPtr<nsDocShell> parent = GetInProcessParentDocshell();
-    if (parent) {
-      parent->DocLoaderIsEmpty(true);
-    }
-  }
+  void TriggerParentCheckDocShellIsEmpty();
 
   nsresult HistoryEntryRemoved(int32_t aIndex);
 
@@ -584,6 +579,8 @@ class nsDocShell final : public nsDocLoader,
                                nsIRequest* aRequest, nsILoadGroup* aLoadGroup,
                                nsIStreamListener** aContentHandler,
                                nsIContentViewer** aViewer);
+
+  already_AddRefed<nsILoadURIDelegate> GetLoadURIDelegate();
 
   nsresult SetupNewViewer(
       nsIContentViewer* aNewViewer,
@@ -1092,7 +1089,6 @@ class nsDocShell final : public nsDocLoader,
   RefPtr<nsDSURIContentListener> mContentListener;
   RefPtr<nsGlobalWindowOuter> mScriptGlobal;
   nsCOMPtr<nsIPrincipal> mParentCharsetPrincipal;
-  nsCOMPtr<nsILoadURIDelegate> mLoadURIDelegate;
   nsCOMPtr<nsIMutableArray> mRefreshURIList;
   nsCOMPtr<nsIMutableArray> mSavedRefreshURIList;
   nsCOMPtr<nsIDOMStorageManager> mSessionStorageManager;

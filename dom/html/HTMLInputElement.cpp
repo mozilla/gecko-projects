@@ -15,9 +15,11 @@
 #include "mozilla/dom/HTMLFormSubmission.h"
 #include "mozilla/dom/FileSystemUtils.h"
 #include "mozilla/dom/GetFilesHelper.h"
+#include "mozilla/dom/UserActivation.h"
 #include "mozilla/dom/WheelEventBinding.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/StaticPrefs_dom.h"
+#include "mozilla/TextUtils.h"
 #include "nsAttrValueInlines.h"
 #include "nsCRTGlue.h"
 #include "nsQueryObject.h"
@@ -1197,7 +1199,7 @@ nsresult HTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
         if (aValue) {
           // Mark channel as urgent-start before load image if the image load is
           // initiated by a user interaction.
-          mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
+          mUseUrgentStartForChannel = UserActivation::IsHandlingUserInput();
 
           LoadImage(aValue->GetStringValue(), true, aNotify,
                     eImageLoadType_Normal, mSrcTriggeringPrincipal);
@@ -1540,7 +1542,7 @@ int32_t HTMLInputElement::MonthsSinceJan1970(uint32_t aYear,
 
 /* static */
 Decimal HTMLInputElement::StringToDecimal(const nsAString& aValue) {
-  if (!IsASCII(aValue)) {
+  if (!IsAscii(aValue)) {
     return Decimal::nan();
   }
   NS_LossyConvertUTF16toASCII asciiString(aValue);
@@ -4323,7 +4325,7 @@ nsresult HTMLInputElement::BindToTree(BindContext& aContext, nsINode& aParent) {
     if (HasAttr(kNameSpaceID_None, nsGkAtoms::src)) {
       // Mark channel as urgent-start before load image if the image load is
       // initaiated by a user interaction.
-      mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
+      mUseUrgentStartForChannel = UserActivation::IsHandlingUserInput();
 
       nsContentUtils::AddScriptRunner(
           NewRunnableMethod("dom::HTMLInputElement::MaybeLoadImage", this,
@@ -4595,7 +4597,7 @@ void HTMLInputElement::HandleTypeChange(uint8_t aNewType, bool aNotify) {
       if (GetAttr(kNameSpaceID_None, nsGkAtoms::src, src)) {
         // Mark channel as urgent-start before load image if the image load is
         // initaiated by a user interaction.
-        mUseUrgentStartForChannel = EventStateManager::IsHandlingUserInput();
+        mUseUrgentStartForChannel = UserActivation::IsHandlingUserInput();
 
         LoadImage(src, false, aNotify, eImageLoadType_Normal,
                   mSrcTriggeringPrincipal);
@@ -6588,7 +6590,7 @@ bool HTMLInputElement::HasTypeMismatch() const {
   return mInputType->HasTypeMismatch();
 }
 
-bool HTMLInputElement::HasPatternMismatch() const {
+Maybe<bool> HTMLInputElement::HasPatternMismatch() const {
   return mInputType->HasPatternMismatch();
 }
 
@@ -6678,7 +6680,11 @@ void HTMLInputElement::UpdateTypeMismatchValidityState() {
 }
 
 void HTMLInputElement::UpdatePatternMismatchValidityState() {
-  SetValidityState(VALIDITY_STATE_PATTERN_MISMATCH, HasPatternMismatch());
+  Maybe<bool> hasMismatch = HasPatternMismatch();
+  // Don't update if the JS engine failed to evaluate it.
+  if (hasMismatch.isSome()) {
+    SetValidityState(VALIDITY_STATE_PATTERN_MISMATCH, hasMismatch.value());
+  }
 }
 
 void HTMLInputElement::UpdateRangeOverflowValidityState() {

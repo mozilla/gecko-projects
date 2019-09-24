@@ -1140,6 +1140,15 @@ nsresult ContentChild::ProvideWindowCommon(
       newChild->RecvLoadURL(urlToLoad, showInfo);
     }
 
+    if (xpc::IsInAutomation()) {
+      if (nsCOMPtr<nsPIDOMWindowOuter> outer =
+              do_GetInterface(newChild->WebNavigation())) {
+        nsCOMPtr<nsIObserverService> obs(services::GetObserverService());
+        obs->NotifyObservers(
+            outer, "dangerous:test-only:new-browser-child-ready", nullptr);
+      }
+    }
+
     browsingContext.forget(aReturn);
   };
 
@@ -1237,6 +1246,14 @@ nsresult ContentChild::ProvideWindowCommon(
   // =====================
   // End Nested Event Loop
   // =====================
+
+  // It's possible for our new BrowsingContext to become discarded during the
+  // nested event loop, in which case we shouldn't return it, since our callers
+  // will generally not be prepared to deal with that.
+  if (*aReturn && (*aReturn)->IsDiscarded()) {
+    NS_RELEASE(*aReturn);
+    return NS_ERROR_ABORT;
+  }
 
   // We should have the results already set by the callbacks.
   MOZ_ASSERT_IF(NS_SUCCEEDED(rv), *aReturn);
@@ -2106,6 +2123,9 @@ already_AddRefed<RemoteBrowser> ContentChild::CreateBrowser(
   TabId tabId(nsContentUtils::GenerateTabId());
   RefPtr<BrowserBridgeChild> browserBridge =
       new BrowserBridgeChild(aFrameLoader, aBrowsingContext, tabId);
+
+  nsDocShell::Cast(docShell)->OOPChildLoadStarted(browserBridge);
+
   browserChild->SendPBrowserBridgeConstructor(
       browserBridge, PromiseFlatString(aContext.PresentationURL()), aRemoteType,
       aBrowsingContext, chromeFlags, tabId);
@@ -3652,7 +3672,7 @@ mozilla::ipc::IPCResult ContentChild::RecvCrossProcessRedirect(
     const ReplacementChannelConfigInit& aConfig,
     const Maybe<LoadInfoArgs>& aLoadInfo, const uint64_t& aChannelId,
     nsIURI* aOriginalURI, const uint64_t& aIdentifier,
-    const uint32_t& aRedirectMode) {
+    const uint32_t& aRedirectMode, CrossProcessRedirectResolver&& aResolve) {
   nsCOMPtr<nsILoadInfo> loadInfo;
   nsresult rv =
       mozilla::ipc::LoadInfoArgsToLoadInfo(aLoadInfo, getter_AddRefs(loadInfo));
@@ -3674,8 +3694,16 @@ mozilla::ipc::IPCResult ContentChild::RecvCrossProcessRedirect(
 
   // This is used to report any errors back to the parent by calling
   // CrossProcessRedirectFinished.
-  auto scopeExit =
-      MakeScopeExit([&]() { httpChild->CrossProcessRedirectFinished(rv); });
+  auto scopeExit = MakeScopeExit([&]() {
+    rv = httpChild->CrossProcessRedirectFinished(rv);
+    nsCOMPtr<nsILoadInfo> loadInfo;
+    MOZ_ALWAYS_SUCCEEDS(newChannel->GetLoadInfo(getter_AddRefs(loadInfo)));
+    Maybe<LoadInfoArgs> loadInfoArgs;
+    MOZ_ALWAYS_SUCCEEDS(
+        mozilla::ipc::LoadInfoToLoadInfoArgs(loadInfo, &loadInfoArgs));
+    aResolve(
+        Tuple<const nsresult&, const Maybe<LoadInfoArgs>&>(rv, loadInfoArgs));
+  });
 
   rv = httpChild->SetChannelId(aChannelId);
   if (NS_FAILED(rv)) {
@@ -3693,7 +3721,9 @@ mozilla::ipc::IPCResult ContentChild::RecvCrossProcessRedirect(
   }
 
   HttpBaseChannel::ReplacementChannelConfig config(aConfig);
-  HttpBaseChannel::ConfigureReplacementChannel(newChannel, config);
+  HttpBaseChannel::ConfigureReplacementChannel(
+      newChannel, config,
+      HttpBaseChannel::ConfigureReason::DocumentChannelReplacement);
 
   // connect parent.
   rv = httpChild->ConnectParent(aRegistrarId);  // creates parent channel

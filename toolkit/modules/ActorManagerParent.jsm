@@ -163,6 +163,62 @@ let ACTORS = {
     allFrames: true,
   },
 
+  ExtFind: {
+    child: {
+      moduleURI: "resource://gre/actors/ExtFindChild.jsm",
+      messages: [
+        "ext-Finder:CollectResults",
+        "ext-Finder:HighlightResults",
+        "ext-Finder:ClearHighlighting",
+      ],
+    },
+
+    allFrames: true,
+  },
+
+  FindBar: {
+    parent: {
+      moduleURI: "resource://gre/actors/FindBarParent.jsm",
+      messages: ["Findbar:Keypress", "Findbar:Mouseup"],
+    },
+    child: {
+      moduleURI: "resource://gre/actors/FindBarChild.jsm",
+      events: {
+        keypress: { mozSystemGroup: true },
+      },
+    },
+
+    allFrames: true,
+  },
+
+  // This is the actor that responds to requests from the find toolbar and
+  // searches for matches and highlights them.
+  Finder: {
+    child: {
+      moduleURI: "resource://gre/actors/FinderChild.jsm",
+      messages: [
+        "Finder:CaseSensitive",
+        "Finder:EntireWord",
+        "Finder:Find",
+        "Finder:SetSearchStringToSelection",
+        "Finder:GetInitialSelection",
+        "Finder:Highlight",
+        "Finder:UpdateHighlightAndMatchCount",
+        "Finder:HighlightAllChange",
+        "Finder:EnableSelection",
+        "Finder:RemoveSelection",
+        "Finder:FocusContent",
+        "Finder:FindbarClose",
+        "Finder:FindbarOpen",
+        "Finder:KeyPress",
+        "Finder:MatchesCount",
+        "Finder:ModalHighlightChange",
+      ],
+    },
+
+    allFrames: true,
+  },
+
   InlineSpellChecker: {
     parent: {
       moduleURI: "resource://gre/actors/InlineSpellCheckerParent.jsm",
@@ -226,33 +282,6 @@ let LEGACY_ACTORS = {
     child: {
       module: "resource://gre/actors/ControllersChild.jsm",
       messages: ["ControllerCommands:Do", "ControllerCommands:DoWithParams"],
-    },
-  },
-
-  ExtFind: {
-    child: {
-      module: "resource://gre/actors/ExtFindChild.jsm",
-      messages: [
-        "ext-Finder:CollectResults",
-        "ext-Finder:HighlightResults",
-        "ext-Finder:clearHighlighting",
-      ],
-    },
-  },
-
-  FindBar: {
-    child: {
-      module: "resource://gre/actors/FindBarChild.jsm",
-      events: {
-        keypress: { mozSystemGroup: true },
-      },
-    },
-  },
-
-  Finder: {
-    child: {
-      module: "resource://gre/actors/FinderChild.jsm",
-      messages: ["Finder:Initialize"],
     },
   },
 

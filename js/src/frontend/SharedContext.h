@@ -525,6 +525,16 @@ class FunctionBox : public ObjectBox, public SharedContext {
   void setEnclosingScopeForInnerLazyFunction(Scope* enclosingScope);
   void finish();
 
+  // Free non-LifoAlloc memory which would otherwise be leaked when
+  // the FunctionBox is LifoAlloc destroyed (without calling destructor)
+  void cleanupMemory() { clearDeferredAllocationInfo(); }
+
+  // Clear any deferred allocation info which will no longer be used.
+  void clearDeferredAllocationInfo() {
+    lazyScriptData().reset();
+    functionCreationData().reset();
+  }
+
   JSFunction* function() const { return &object()->as<JSFunction>(); }
 
   // Initialize FunctionBox with a deferred allocation Function

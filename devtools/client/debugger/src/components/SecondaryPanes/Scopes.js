@@ -4,9 +4,11 @@
 
 // @flow
 import React, { PureComponent } from "react";
+import { showMenu } from "devtools-contextmenu";
 import { connect } from "../../utils/connect";
 import actions from "../../actions";
 import { createObjectClient } from "../../client/firefox";
+import { features } from "../../utils/prefs";
 
 import {
   getSelectedSource,
@@ -45,6 +47,8 @@ type Props = {
   unHighlightDomElement: typeof actions.unHighlightDomElement,
   toggleMapScopes: typeof actions.toggleMapScopes,
   setExpandedScope: typeof actions.setExpandedScope,
+  addWatchpoint: typeof actions.addWatchpoint,
+  removeWatchpoint: typeof actions.removeWatchpoint,
   expandedScopes: string[],
 };
 
@@ -111,6 +115,62 @@ class Scopes extends PureComponent<Props, State> {
     this.props.toggleMapScopes();
   };
 
+  onContextMenu = (event, item) => {
+    const { addWatchpoint, removeWatchpoint } = this.props;
+
+    if (
+      !features.watchpoints ||
+      !item.parent ||
+      !item.parent.contents ||
+      !item.contents.configurable
+    ) {
+      return;
+    }
+
+    if (!item.contents || item.contents.watchpoint) {
+      const removeWatchpointLabel = L10N.getStr("watchpoints.removeWatchpoint");
+
+      const removeWatchpointItem = {
+        id: "node-menu-remove-watchpoint",
+        label: removeWatchpointLabel,
+        disabled: false,
+        click: () => removeWatchpoint(item),
+      };
+
+      const menuItems = [removeWatchpointItem];
+      return showMenu(event, menuItems);
+    }
+
+    const addSetWatchpointLabel = L10N.getStr("watchpoints.setWatchpoint");
+    const addGetWatchpointLabel = L10N.getStr("watchpoints.getWatchpoint");
+    const watchpointsSubmenuLabel = L10N.getStr("watchpoints.submenu");
+
+    const addSetWatchpointItem = {
+      id: "node-menu-add-set-watchpoint",
+      label: addSetWatchpointLabel,
+      disabled: false,
+      click: () => addWatchpoint(item, "set"),
+    };
+
+    const addGetWatchpointItem = {
+      id: "node-menu-add-get-watchpoint",
+      label: addGetWatchpointLabel,
+      disabled: false,
+      click: () => addWatchpoint(item, "get"),
+    };
+
+    const watchpointsSubmenuItem = {
+      id: "node-menu-watchpoints",
+      label: watchpointsSubmenuLabel,
+      disabled: false,
+      click: () => addWatchpoint(item, "set"),
+      submenu: [addSetWatchpointItem, addGetWatchpointItem],
+    };
+
+    const menuItems = [watchpointsSubmenuItem];
+    showMenu(event, menuItems);
+  };
+
   renderScopesList() {
     const {
       cx,
@@ -147,6 +207,7 @@ class Scopes extends PureComponent<Props, State> {
             onInspectIconClick={grip => openElementInInspector(grip)}
             onDOMNodeMouseOver={grip => highlightDomElement(grip)}
             onDOMNodeMouseOut={grip => unHighlightDomElement(grip)}
+            onContextMenu={this.onContextMenu}
             setExpanded={(path, expand) => setExpandedScope(cx, path, expand)}
             initiallyExpanded={initiallyExpanded}
           />
@@ -223,5 +284,7 @@ export default connect(
     unHighlightDomElement: actions.unHighlightDomElement,
     toggleMapScopes: actions.toggleMapScopes,
     setExpandedScope: actions.setExpandedScope,
+    addWatchpoint: actions.addWatchpoint,
+    removeWatchpoint: actions.removeWatchpoint,
   }
 )(Scopes);

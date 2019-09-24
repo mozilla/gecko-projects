@@ -485,9 +485,15 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::Open(
     }
   }
 
-  const auto principalType = IdentifyPrincipalType(*mPrincipalInfo);
-
-  Telemetry::AccumulateCategorical(principalType);
+  // Ignore calls with empty options for telemetry of usage count.
+  // Unfortunately, we cannot distinguish between the use of the method with
+  // only a single argument (which actually is a standard overload we don't want
+  // to count) an empty dictionary passed explicitly (which is the custom
+  // overload we would like to count). However, we assume that the latter is so
+  // rare that it can be neglected.
+  if (aOptions.IsAnyMemberPresent()) {
+    Telemetry::AccumulateCategorical(IdentifyPrincipalType(*mPrincipalInfo));
+  }
 
   return OpenInternal(aCx,
                       /* aPrincipal */ nullptr, aName, aOptions.mVersion,
@@ -625,7 +631,7 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenInternal(
   uint64_t version = 0;
   if (!aDeleting && aVersion.WasPassed()) {
     if (aVersion.Value() < 1) {
-      aRv.ThrowTypeError<MSG_INVALID_VERSION>();
+      aRv.ThrowTypeError(u"0 (Zero) is not a valid database version.");
       return nullptr;
     }
     version = aVersion.Value();

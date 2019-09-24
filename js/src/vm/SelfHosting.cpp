@@ -2625,11 +2625,12 @@ void js::FillSelfHostingCompileOptions(CompileOptions& options) {
    */
   options.setIntroductionType("self-hosted");
   options.setFileAndLine("self-hosted", 1);
+  options.setSkipFilenameValidation(true);
   options.setSelfHostingMode(true);
-  options.setCanLazilyParse(false);
+  options.setForceFullParse();
   options.werrorOption = true;
-  options.strictOption = true;
   options.extraWarningsOption = true;
+  options.setForceStrictMode();
 }
 
 GlobalObject* JSRuntime::createSelfHostingGlobal(JSContext* cx) {

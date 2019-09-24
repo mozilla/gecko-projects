@@ -66,9 +66,11 @@
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/TabGroup.h"
 #include "mozilla/dom/ToJSValue.h"
+#include "mozilla/dom/UserActivation.h"
 #include "mozilla/dom/ChildSHistory.h"
 #include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/dom/LoadURIOptionsBinding.h"
+#include "mozilla/dom/JSWindowActorChild.h"
 
 #include "mozilla/net/DocumentChannelChild.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
@@ -197,6 +199,7 @@
 #include "nsPingListener.h"
 #include "nsPoint.h"
 #include "nsQueryObject.h"
+#include "nsQueryActor.h"
 #include "nsRect.h"
 #include "nsRefreshTimer.h"
 #include "nsSandboxFlags.h"
@@ -1052,13 +1055,6 @@ nsDOMNavigationTiming* nsDocShell::GetNavigationTiming() const {
 /* static */
 bool nsDocShell::ValidateOrigin(nsIDocShellTreeItem* aOriginTreeItem,
                                 nsIDocShellTreeItem* aTargetTreeItem) {
-  // We want to bypass this check for chrome callers, but only if there's
-  // JS on the stack. System callers still need to do it.
-  if (nsContentUtils::GetCurrentJSContext() &&
-      nsContentUtils::IsCallerChrome()) {
-    return true;
-  }
-
   MOZ_ASSERT(aOriginTreeItem && aTargetTreeItem, "need two docshells");
 
   // Get origin document principal
@@ -2065,14 +2061,18 @@ nsDocShell::SetSecurityUI(nsISecureBrowserUI* aSecurityUI) {
 
 NS_IMETHODIMP
 nsDocShell::GetLoadURIDelegate(nsILoadURIDelegate** aLoadURIDelegate) {
-  NS_IF_ADDREF(*aLoadURIDelegate = mLoadURIDelegate);
+  nsCOMPtr<nsILoadURIDelegate> delegate = GetLoadURIDelegate();
+  delegate.forget(aLoadURIDelegate);
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsDocShell::SetLoadURIDelegate(nsILoadURIDelegate* aLoadURIDelegate) {
-  mLoadURIDelegate = aLoadURIDelegate;
-  return NS_OK;
+already_AddRefed<nsILoadURIDelegate> nsDocShell::GetLoadURIDelegate() {
+  if (nsCOMPtr<nsILoadURIDelegate> result =
+          do_QueryActor(u"LoadURIDelegate", GetWindow())) {
+    return result.forget();
+  }
+
+  return nullptr;
 }
 
 NS_IMETHODIMP
@@ -2123,6 +2123,16 @@ nsDocShell::HistoryPurged(int32_t aNumEntries) {
   }
 
   return NS_OK;
+}
+
+void nsDocShell::TriggerParentCheckDocShellIsEmpty() {
+  if (RefPtr<nsDocShell> parent = GetInProcessParentDocshell()) {
+    parent->DocLoaderIsEmpty(true);
+  } else if (BrowserChild* browserChild = BrowserChild::GetFrom(this)) {
+    // OOP parent
+    mozilla::Unused << browserChild->SendMaybeFireEmbedderLoadEvents(
+        /*aIsTrusted*/ true, /*aFireLoadAtEmbeddingElement*/ false);
+  }
 }
 
 nsresult nsDocShell::HistoryEntryRemoved(int32_t aIndex) {
@@ -3575,19 +3585,20 @@ NS_IMETHODIMP
 nsDocShell::GetContentBlockingLog(Promise** aPromise) {
   NS_ENSURE_ARG_POINTER(aPromise);
 
-  if (!mContentViewer) {
-    *aPromise = nullptr;
-    return NS_ERROR_FAILURE;
-  }
-
   Document* doc = mContentViewer->GetDocument();
   ErrorResult rv;
   RefPtr<Promise> promise = Promise::Create(doc->GetOwnerGlobal(), rv);
   if (NS_WARN_IF(rv.Failed())) {
     return rv.StealNSResult();
   }
-  promise->MaybeResolve(
-      NS_ConvertUTF8toUTF16(doc->GetContentBlockingLog()->Stringify()));
+
+  if (mContentViewer) {
+    promise->MaybeResolve(
+        NS_ConvertUTF8toUTF16(doc->GetContentBlockingLog()->Stringify()));
+  } else {
+    promise->MaybeRejectWithUndefined();
+  }
+
   promise.forget(aPromise);
   return NS_OK;
 }
@@ -3887,6 +3898,16 @@ NS_IMETHODIMP
 nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
                              const char16_t* aURL, nsIChannel* aFailedChannel,
                              bool* aDisplayedErrorPage) {
+  // If we have a cross-process parent document, we must notify it that we no
+  // longer block its load event.  This is necessary for OOP sub-documents
+  // because error documents do not result in a call to
+  // SendMaybeFireEmbedderLoadEvents via any of the normal call paths.
+  // (Obviously, we must do this before any of the returns below.)
+  if (BrowserChild* browserChild = BrowserChild::GetFrom(this)) {
+    mozilla::Unused << browserChild->SendMaybeFireEmbedderLoadEvents(
+        /*aIsTrusted*/ true, /*aFireLoadAtEmbeddingElement*/ false);
+  }
+
   *aDisplayedErrorPage = false;
   // Get prompt and string bundle services
   nsCOMPtr<nsIPrompt> prompter;
@@ -3964,7 +3985,8 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     CopyUTF8toUTF16(host, *formatStrs.AppendElement());
     error = "netTimeout";
   } else if (NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION == aError ||
-             NS_ERROR_CSP_FORM_ACTION_VIOLATION == aError) {
+             NS_ERROR_CSP_FORM_ACTION_VIOLATION == aError ||
+             NS_ERROR_CSP_NAVIGATE_TO_VIOLATION == aError) {
     // CSP error
     cssClass.AssignLiteral("neterror");
     error = "cspBlocked";
@@ -4225,12 +4247,13 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     }
   }
 
-  if (mLoadURIDelegate) {
+  if (nsCOMPtr<nsILoadURIDelegate> loadURIDelegate = GetLoadURIDelegate()) {
     nsCOMPtr<nsIURI> errorPageURI;
-    rv = mLoadURIDelegate->HandleLoadError(aURI, aError,
-                                           NS_ERROR_GET_MODULE(aError),
-                                           getter_AddRefs(errorPageURI));
-    if (NS_FAILED(rv)) {
+    rv = loadURIDelegate->HandleLoadError(aURI, aError,
+                                          NS_ERROR_GET_MODULE(aError),
+                                          getter_AddRefs(errorPageURI));
+    // If the docshell is going away there's no point in showing an error page.
+    if (NS_FAILED(rv) || mIsBeingDestroyed) {
       *aDisplayedErrorPage = false;
       return NS_OK;
     }
@@ -8563,9 +8586,11 @@ nsresult nsDocShell::MaybeHandleLoadDelegate(nsDocShellLoadState* aLoadState,
              aWindowType == nsIBrowserDOMWindow::OPEN_CURRENTWINDOW);
 
   *aDidHandleLoad = false;
+
+  nsCOMPtr<nsILoadURIDelegate> loadURIDelegate = GetLoadURIDelegate();
   // If we don't have a delegate or we're trying to load the error page, we
   // shouldn't be trying to do sandbox loads.
-  if (!mLoadURIDelegate || aLoadState->LoadType() == LOAD_ERROR_PAGE) {
+  if (!loadURIDelegate || aLoadState->LoadType() == LOAD_ERROR_PAGE) {
     return NS_OK;
   }
 
@@ -8584,7 +8609,7 @@ nsresult nsDocShell::MaybeHandleLoadDelegate(nsDocShellLoadState* aLoadState,
     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
 
-  return mLoadURIDelegate->LoadURI(
+  return loadURIDelegate->LoadURI(
       aLoadState->URI(), aWindowType, aLoadState->LoadFlags(),
       aLoadState->TriggeringPrincipal(), aDidHandleLoad);
 }
@@ -10062,6 +10087,22 @@ static bool HasHttpScheme(nsIURI* aURI) {
     }
   }
 
+  nsCOMPtr<nsIContentSecurityPolicy> csp = aLoadState->Csp();
+  if (csp) {
+    nsCOMPtr<nsILoadInfo> loadInfo;
+    MOZ_ALWAYS_SUCCEEDS(aChannel->GetLoadInfo(getter_AddRefs(loadInfo)));
+    // Check CSP navigate-to
+    bool allowsNavigateTo = false;
+    rv = csp->GetAllowsNavigateTo(aLoadState->URI(), loadInfo,
+                                  false, /* aWasRedirected */
+                                  false, /* aEnforceWhitelist */
+                                  &allowsNavigateTo);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (!allowsNavigateTo) {
+      return NS_ERROR_CSP_NAVIGATE_TO_VIOLATION;
+    }
+  }
   return rv;
 }
 
@@ -12893,7 +12934,7 @@ nsresult nsDocShell::OnLeaveLink() {
 
 bool nsDocShell::ShouldBlockLoadingForBackButton() {
   if (!(mLoadType & LOAD_CMD_HISTORY) ||
-      EventStateManager::IsHandlingUserInput() ||
+      UserActivation::IsHandlingUserInput() ||
       !Preferences::GetBool("accessibility.blockjsredirection")) {
     return false;
   }

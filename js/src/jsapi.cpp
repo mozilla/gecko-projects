@@ -1842,6 +1842,11 @@ JS_PUBLIC_API void SetHelperThreadTaskCallback(
   HelperThreadTaskCallback = callback;
 }
 
+JS_PUBLIC_API void JS::SetFilenameValidationCallback(
+    JS::FilenameValidationCallback cb) {
+  js::gFilenameValidationCallback = cb;
+}
+
 /*** Standard internal methods **********************************************/
 
 JS_PUBLIC_API bool JS_GetPrototype(JSContext* cx, HandleObject obj,
@@ -3526,9 +3531,8 @@ void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
     const TransitiveCompileOptions& rhs) {
   mutedErrors_ = rhs.mutedErrors_;
   forceFullParse_ = rhs.forceFullParse_;
+  forceStrictMode_ = rhs.forceStrictMode_;
   selfHostingMode = rhs.selfHostingMode;
-  canLazilyParse = rhs.canLazilyParse;
-  strictOption = rhs.strictOption;
   extraWarningsOption = rhs.extraWarningsOption;
   werrorOption = rhs.werrorOption;
   asmJSOption = rhs.asmJSOption;
@@ -3544,15 +3548,15 @@ void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
   fieldsEnabledOption = rhs.fieldsEnabledOption;
 };
 
-void JS::ReadOnlyCompileOptions::copyPODOptions(
+void JS::ReadOnlyCompileOptions::copyPODNonTransitiveOptions(
     const ReadOnlyCompileOptions& rhs) {
-  copyPODTransitiveOptions(rhs);
   lineno = rhs.lineno;
   column = rhs.column;
   scriptSourceOffset = rhs.scriptSourceOffset;
   isRunOnce = rhs.isRunOnce;
   noScriptRval = rhs.noScriptRval;
   nonSyntacticScope = rhs.nonSyntacticScope;
+  skipFilenameValidation_ = rhs.skipFilenameValidation_;
 }
 
 JS::OwningCompileOptions::OwningCompileOptions(JSContext* cx)
@@ -3586,7 +3590,8 @@ bool JS::OwningCompileOptions::copy(JSContext* cx,
   // Release existing string allocations.
   release();
 
-  copyPODOptions(rhs);
+  copyPODTransitiveOptions(rhs);
+  copyPODNonTransitiveOptions(rhs);
 
   elementRoot = rhs.element();
   elementAttributeNameRoot = rhs.elementAttributeName();
@@ -3624,7 +3629,6 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
       elementAttributeNameRoot(cx),
       introductionScriptRoot(cx),
       scriptOrModuleRoot(cx) {
-  strictOption = cx->options().strictMode();
   extraWarningsOption = cx->realm()->behaviors().extraWarnings(cx);
   discardSource = cx->realm()->behaviors().discardSource();
   werrorOption = cx->options().werror();
@@ -3638,6 +3642,9 @@ JS::CompileOptions::CompileOptions(JSContext* cx)
   throwOnAsmJSValidationFailureOption =
       cx->options().throwOnAsmJSValidationFailure();
   fieldsEnabledOption = cx->realm()->creationOptions().getFieldsEnabled();
+
+  // Certain modes of operation force strict-mode in general.
+  forceStrictMode_ = cx->options().strictMode();
 
   // Certain modes of operation disallow syntax parsing in general.
   forceFullParse_ = cx->realm()->behaviors().disableLazyParsing() ||
@@ -3674,8 +3681,7 @@ JSScript* JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
 
-  return frontend::CompileGlobalBinASTScript(cx, cx->tempLifoAlloc(), options,
-                                             buf, length);
+  return frontend::CompileGlobalBinASTScript(cx, options, buf, length);
 }
 
 JSScript* JS::DecodeBinAST(JSContext* cx, const ReadOnlyCompileOptions& options,
@@ -4568,6 +4574,15 @@ JS_PUBLIC_API bool JS_EncodeStringToBuffer(JSContext* cx, JSString* str,
   return true;
 }
 
+JS_PUBLIC_API mozilla::Maybe<mozilla::Tuple<size_t, size_t> >
+JS_EncodeStringToUTF8BufferPartial(JSContext* cx, JSString* str,
+                                   mozilla::Span<char> buffer) {
+  AssertHeapIsIdle();
+  CHECK_THREAD(cx);
+  JS::AutoCheckCannotGC nogc;
+  return str->encodeUTF8Partial(nogc, buffer);
+}
+
 JS_PUBLIC_API JS::Symbol* JS::NewSymbol(JSContext* cx,
                                         HandleString description) {
   AssertHeapIsIdle();
@@ -5432,6 +5447,25 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
     case JSJITCOMPILER_WASM_DELAY_TIER2:
       jit::JitOptions.wasmDelayTier2 = !!value;
       break;
+    case JSJITCOMPILER_WASM_JIT_BASELINE:
+      JS::ContextOptionsRef(cx).setWasmBaseline(!!value);
+      break;
+#ifdef ENABLE_WASM_CRANELIFT
+    case JSJITCOMPILER_WASM_JIT_CRANELIFT:
+      JS::ContextOptionsRef(cx).setWasmCranelift(!!value);
+      if (!!value) {
+        JS::ContextOptionsRef(cx).setWasmIon(false);
+      }
+      break;
+#endif
+    case JSJITCOMPILER_WASM_JIT_ION:
+      JS::ContextOptionsRef(cx).setWasmIon(!!value);
+#ifdef ENABLE_WASM_CRANELIFT
+      if (!!value) {
+        JS::ContextOptionsRef(cx).setWasmCranelift(false);
+      }
+#endif
+      break;
 #ifdef DEBUG
     case JSJITCOMPILER_FULL_DEBUG_CHECKS:
       jit::JitOptions.fullDebugChecks = !!value;
@@ -5487,6 +5521,17 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
       break;
     case JSJITCOMPILER_WASM_FOLD_OFFSETS:
       *valueOut = jit::JitOptions.wasmFoldOffsets ? 1 : 0;
+      break;
+    case JSJITCOMPILER_WASM_JIT_BASELINE:
+      *valueOut = JS::ContextOptionsRef(cx).wasmBaseline() ? 1 : 0;
+      break;
+#ifdef ENABLE_WASM_CRANELIFT
+    case JSJITCOMPILER_WASM_JIT_CRANELIFT:
+      *valueOut = JS::ContextOptionsRef(cx).wasmCranelift() ? 1 : 0;
+      break;
+#endif
+    case JSJITCOMPILER_WASM_JIT_ION:
+      *valueOut = JS::ContextOptionsRef(cx).wasmIon() ? 1 : 0;
       break;
 #  ifdef DEBUG
     case JSJITCOMPILER_FULL_DEBUG_CHECKS:

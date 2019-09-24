@@ -10,10 +10,12 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.ref.WeakReference;
 import java.util.AbstractSequentialList;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 
@@ -451,6 +453,7 @@ public class GeckoSession implements Parcelable {
                 "GeckoView:FullScreenEnter",
                 "GeckoView:FullScreenExit",
                 "GeckoView:WebAppManifest",
+                "GeckoView:FirstContentfulPaint",
             }
         ) {
             @Override
@@ -503,6 +506,8 @@ public class GeckoSession implements Parcelable {
                     } catch (JSONException e) {
                         Log.e(LOGTAG, "Failed to convert web app manifest to JSON", e);
                     }
+                } else if ("GeckoView:FirstContentfulPaint".equals(event)) {
+                    delegate.onFirstContentfulPaint(GeckoSession.this);
                 }
             }
         };
@@ -512,9 +517,11 @@ public class GeckoSession implements Parcelable {
             "GeckoViewNavigation", this,
             new String[]{
                 "GeckoView:LocationChange",
+                "GeckoView:OnNewSession"
+            },
+            new String[] {
                 "GeckoView:OnLoadError",
                 "GeckoView:OnLoadRequest",
-                "GeckoView:OnNewSession"
             }
         ) {
             // This needs to match nsIBrowserDOMWindow.idl
@@ -525,6 +532,20 @@ public class GeckoSession implements Parcelable {
                         return NavigationDelegate.TARGET_WINDOW_CURRENT;
                     default: // OPEN_NEWWINDOW, OPEN_NEWTAB, OPEN_SWITCHTAB
                         return NavigationDelegate.TARGET_WINDOW_NEW;
+                }
+            }
+
+            @Override
+            public void handleDefaultMessage(final String event,
+                                             final GeckoBundle message,
+                                             final EventCallback callback) {
+
+                if ("GeckoView:OnLoadRequest".equals(event)) {
+                    callback.sendSuccess(false);
+                } else if ("GeckoView:OnLoadError".equals(event)) {
+                    callback.sendSuccess(null);
+                } else {
+                    super.handleDefaultMessage(event, message, callback);
                 }
             }
 
@@ -1587,12 +1608,44 @@ public class GeckoSession implements Parcelable {
     public static final int LOAD_FLAGS_REPLACE_HISTORY = 1 << 6;
 
     /**
+     * Formats the map of additional request headers into an ArrayList
+     * @param additionalHeaders Request headers to be formatted
+     * @return Correctly formatted request headers as a ArrayList
+     */
+    private ArrayList<String> additionalHeadersToStringArray(final @NonNull Map<String, String> additionalHeaders) {
+        ArrayList<String> headers = new ArrayList<String>();
+        for (String key : additionalHeaders.keySet()) {
+            // skip null key if one exists
+            if (key == null)
+                continue;
+
+            String value = additionalHeaders.get(key);
+
+            // As per RFC7230 headers must contain a field value
+            if (value != null && !value.equals("")) {
+                headers.add( String.format("%s:%s", key, additionalHeaders.get(key)) );
+            }
+        }
+        return headers;
+    }
+
+    /**
      * Load the given URI.
      * @param uri The URI of the resource to load.
      */
     @AnyThread
     public void loadUri(final @NonNull String uri) {
-        loadUri(uri, (GeckoSession)null, LOAD_FLAGS_NONE);
+        loadUri(uri, (GeckoSession)null, LOAD_FLAGS_NONE, (Map<String, String>) null);
+    }
+
+    /**
+     * Load the given URI with specified HTTP request headers.
+     * @param uri The URI of the resource to load.
+     * @param additionalHeaders any additional request headers used with the load
+     */
+    @AnyThread
+    public void loadUri(final @NonNull String uri, final @Nullable Map<String, String> additionalHeaders) {
+        loadUri(uri, (GeckoSession)null, LOAD_FLAGS_NONE, additionalHeaders);
     }
 
     /**
@@ -1603,7 +1656,7 @@ public class GeckoSession implements Parcelable {
      */
     @AnyThread
     public void loadUri(final @NonNull String uri, final @LoadFlags int flags) {
-        loadUri(uri, (GeckoSession)null, flags);
+        loadUri(uri, (GeckoSession)null, flags, (Map<String, String>) null);
     }
 
     /**
@@ -1616,12 +1669,30 @@ public class GeckoSession implements Parcelable {
     @AnyThread
     public void loadUri(final @NonNull String uri, final @Nullable String referrer,
                         final @LoadFlags int flags) {
+        loadUri(uri, referrer, flags, (Map<String, String>) null);
+    }
+
+    /**
+     * Load the given URI with the specified referrer, load type and HTTP request headers.
+     *
+     * @param uri the URI to load
+     * @param referrer the referrer, may be null
+     * @param flags the load flags to use, an OR-ed value of {@link #LOAD_FLAGS_NONE LOAD_FLAGS_*}
+     * @param additionalHeaders any additional request headers used with the load
+     */
+    @AnyThread
+    public void loadUri(final @NonNull String uri, final @Nullable String referrer,
+                        final @LoadFlags int flags, final @Nullable Map<String, String> additionalHeaders) {
         final GeckoBundle msg = new GeckoBundle();
         msg.putString("uri", uri);
         msg.putInt("flags", flags);
 
         if (referrer != null) {
             msg.putString("referrerUri", referrer);
+        }
+
+        if (additionalHeaders != null) {
+            msg.putStringArray("headers", additionalHeadersToStringArray(additionalHeaders));
         }
         mEventDispatcher.dispatch("GeckoView:LoadUri", msg);
     }
@@ -1638,12 +1709,32 @@ public class GeckoSession implements Parcelable {
     @AnyThread
     public void loadUri(final @NonNull String uri, final @Nullable GeckoSession referrer,
                         final @LoadFlags int flags) {
+        loadUri(uri, referrer, flags, (Map<String, String>) null);
+    }
+
+    /**
+     * Load the given URI with the specified referrer, load type and HTTP request headers. This
+     * method will also do any applicable checks to ensure that the specified URI is both safe and
+     * allowable according to the referring GeckoSession.
+     *
+     * @param uri the URI to load
+     * @param referrer the referring GeckoSession, may be null
+     * @param flags the load flags to use, an OR-ed value of {@link #LOAD_FLAGS_NONE LOAD_FLAGS_*}
+     * @param additionalHeaders any additional request headers used with the load
+     */
+    @AnyThread
+    public void loadUri(final @NonNull String uri, final @Nullable GeckoSession referrer,
+                        final @LoadFlags int flags, final @Nullable Map<String, String> additionalHeaders) {
         final GeckoBundle msg = new GeckoBundle();
         msg.putString("uri", uri);
         msg.putInt("flags", flags);
 
         if (referrer != null) {
             msg.putString("referrerSessionId", referrer.mId);
+        }
+
+        if (additionalHeaders != null) {
+            msg.putStringArray("headers", additionalHeadersToStringArray(additionalHeaders));
         }
         mEventDispatcher.dispatch("GeckoView:LoadUri", msg);
     }
@@ -1654,7 +1745,17 @@ public class GeckoSession implements Parcelable {
      */
     @AnyThread
     public void loadUri(final @NonNull Uri uri) {
-        loadUri(uri, null, LOAD_FLAGS_NONE);
+        loadUri(uri.toString(), (GeckoSession)null, LOAD_FLAGS_NONE, (Map<String, String>) null);
+    }
+
+    /**
+     * Load the given URI with specified HTTP request headers.
+     * @param uri The URI of the resource to load.
+     * @param additionalHeaders any additional request headers used with the load
+     */
+    @AnyThread
+    public void loadUri(final @NonNull Uri uri, final @Nullable Map<String, String> additionalHeaders) {
+        loadUri(uri.toString(), (GeckoSession)null, LOAD_FLAGS_NONE, additionalHeaders);
     }
 
     /**
@@ -1664,7 +1765,7 @@ public class GeckoSession implements Parcelable {
      */
     @AnyThread
     public void loadUri(final @NonNull Uri uri, final @LoadFlags int flags) {
-        loadUri(uri.toString(), (GeckoSession)null, flags);
+        loadUri(uri.toString(), (GeckoSession)null, flags, (Map<String, String>) null);
     }
 
     /**
@@ -1676,7 +1777,20 @@ public class GeckoSession implements Parcelable {
     @AnyThread
     public void loadUri(final @NonNull Uri uri, final @Nullable Uri referrer,
                         final @LoadFlags int flags) {
-        loadUri(uri.toString(), referrer != null ? referrer.toString() : null, flags);
+        loadUri(uri.toString(), referrer != null ? referrer.toString() : null, flags, (Map<String, String>) null);
+    }
+
+    /**
+     * Load the given URI with the specified referrer, load type and HTTP request headers.
+     * @param uri the URI to load
+     * @param referrer the Uri to use as the referrer
+     * @param flags the load flags to use, an OR-ed value of {@link #LOAD_FLAGS_NONE LOAD_FLAGS_*}
+     * @param additionalHeaders any additional request headers used with the load
+     */
+    @AnyThread
+    public void loadUri(final @NonNull Uri uri, final @Nullable Uri referrer,
+                        final @LoadFlags int flags, final @Nullable Map<String, String> additionalHeaders) {
+        loadUri(uri.toString(), referrer != null ? referrer.toString() : null, flags, additionalHeaders);
     }
 
     /**
@@ -3015,6 +3129,20 @@ public class GeckoSession implements Parcelable {
         default void onFirstComposite(@NonNull GeckoSession session) {}
 
         /**
+         * Notification that the first content paint has occurred.
+         * This callback is invoked for the first content paint after
+         * a page has been loaded. The function {@link #onFirstComposite(GeckoSession)}
+         * will be called once the compositor has started rendering. However, it is
+         * possible for the compositor to start rendering before there is any content to render.
+         * onFirstContentfulPaint() is called once some content has been rendered. It may be nothing
+         * more than the page background color. It is not an indication that the whole page has
+         * been rendered.
+         * @param session The GeckoSession that had a first paint event.
+         */
+        @UiThread
+        default void onFirstContentfulPaint(@NonNull GeckoSession session) {}
+
+        /**
          * This is fired when the loaded document has a valid Web App Manifest present.
          *
          * @param session The GeckoSession that contains the Web App Manifest
@@ -3369,6 +3497,8 @@ public class GeckoSession implements Parcelable {
         * @return A {@link GeckoResult} which holds the returned GeckoSession. May be null, in
          *        which case the request for a new window by web content will fail. e.g.,
          *        <code>window.open()</code> will return null.
+         *        The implementation of onNewSession is responsible for maintaining a reference
+         *        to the returned object, to prevent it from being garbage collected.
         */
         @UiThread
         default @Nullable GeckoResult<GeckoSession> onNewSession(@NonNull GeckoSession session,

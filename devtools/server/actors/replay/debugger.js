@@ -26,6 +26,12 @@ ChromeUtils.defineModuleGetter(
   "resource://devtools/shared/execution-point-utils.js"
 );
 
+loader.lazyRequireGetter(
+  this,
+  "ReplayInspector",
+  "devtools/server/actors/replay/inspector"
+);
+
 ///////////////////////////////////////////////////////////////////////////////
 // ReplayDebugger
 ///////////////////////////////////////////////////////////////////////////////
@@ -119,7 +125,8 @@ ReplayPool.prototype = {
       }
       this.getObject(data.id)._preview = {
         ...preview,
-        enumerableOwnProperties: mapify(preview.enumerableOwnProperties),
+        properties: mapify(preview.properties),
+        callResults: mapify(preview.callResults),
       };
     }
 
@@ -134,6 +141,12 @@ ReplayPool.prototype = {
       for (const frame of pauseData.frames) {
         this.frames[frame.index] = new ReplayDebuggerFrame(this, frame);
       }
+    }
+
+    if (pauseData.popFrameResult) {
+      this.popFrameResult = this.convertCompletionValue(
+        pauseData.popFrameResult
+      );
     }
   },
 
@@ -261,9 +274,6 @@ ReplayDebugger.prototype = {
 
   _processResponse(request, response, divergeResponse) {
     dumpv(`SendRequest: ${stringify(request)} -> ${stringify(response)}`);
-    if (response.exception) {
-      ThrowError(response.exception);
-    }
     if (response.unhandledDivergence) {
       if (divergeResponse) {
         return divergeResponse;
@@ -297,6 +307,14 @@ ReplayDebugger.prototype = {
 
   getDebuggees() {
     return [];
+  },
+
+  replayGetExecutionPointPosition({ position }) {
+    const script = this._getScript(position.script);
+    if (position.kind == "EnterFrame") {
+      return { script, offset: script.mainOffset };
+    }
+    return { script, offset: position.offset };
   },
 
   /////////////////////////////////////////////////////////
@@ -340,13 +358,13 @@ ReplayDebugger.prototype = {
       this._direction = forward ? Direction.FORWARD : Direction.BACKWARD;
       dumpv("Resuming " + this._direction);
       this._control.resume(forward);
-      if (this._paused) {
-        // If we resume and immediately pause, we are at an endpoint of the
-        // recording. Force the thread to pause.
-        this._capturePauseData();
-        this.replayingOnForcedPause(this.getNewestFrame());
-      }
     });
+  },
+
+  // Called when replaying and hitting the beginning or end of recording.
+  _hitRecordingBoundary() {
+    this._capturePauseData();
+    this.replayingOnForcedPause(this.getNewestFrame());
   },
 
   replayTimeWarp(target) {
@@ -461,9 +479,6 @@ ReplayDebugger.prototype = {
       // There is no preferred direction of travel after an explicit pause.
       this._direction = Direction.NONE;
 
-      // Update graphics according to the current state of the child.
-      this._control.repaint();
-
       // If breakpoint handlers for the pause haven't been called yet, don't
       // call them at all.
       this._cancelPerformPause = true;
@@ -503,19 +518,33 @@ ReplayDebugger.prototype = {
     }
   },
 
-  // Reset the per-pause pool when the child unpauses.
+  replayPaint(data) {
+    this._control.paint(data);
+  },
+
+  replayPaintCurrentPoint() {
+    if (this.replayIsRecording()) {
+      return RecordReplayControl.restoreMainGraphics();
+    }
+
+    const point = this._control.lastPausePoint();
+    return this._control.paint(point);
+  },
+
+  // Clear out all data that becomes invalid when the child unpauses.
   _invalidateAfterUnpause() {
     this._pool = new ReplayPool(this);
   },
 
   // Fill in the debugger with (hopefully) all data the client/server need to
-  // pause at the current location.
+  // pause at the current location. This also updates graphics to match the
+  // current location.
   _capturePauseData() {
     if (this._pool.frames.length) {
       return;
     }
 
-    const pauseData = this._control.getPauseData();
+    const pauseData = this._control.getPauseDataAndRepaint();
     if (!pauseData.frames) {
       return;
     }
@@ -607,7 +636,9 @@ ReplayDebugger.prototype = {
     if (rv) {
       return rv;
     }
-    return this._addScript(this._sendRequest({ type: "getScript", id }));
+    return this._addScript(
+      this._sendRequestMainChild({ type: "getScript", id })
+    );
   },
 
   _addScript(data) {
@@ -730,11 +761,32 @@ ReplayDebugger.prototype = {
     return message;
   },
 
+  _newConsoleMessage(message) {
+    if (this.onConsoleMessage) {
+      this.onConsoleMessage(this._convertConsoleMessage(message));
+    }
+  },
+
   findAllConsoleMessages() {
     const messages = this._sendRequestMainChild({
       type: "findConsoleMessages",
     });
     return messages.map(this._convertConsoleMessage.bind(this));
+  },
+
+  /////////////////////////////////////////////////////////
+  // Event Breakpoint methods
+  /////////////////////////////////////////////////////////
+
+  replaySetActiveEventBreakpoints(events, callback) {
+    this._control.setActiveEventBreakpoints(
+      events,
+      (point, result, resultData) => {
+        const pool = new ReplayPool(this, resultData);
+        const converted = result.map(v => pool.convertValue(v));
+        callback(point, converted);
+      }
+    );
   },
 
   /////////////////////////////////////////////////////////
@@ -789,6 +841,9 @@ ReplayDebuggerScript.prototype = {
   get format() {
     return this._data.format;
   },
+  get mainOffset() {
+    return this._data.mainOffset;
+  },
 
   _forward(type, value) {
     return this._dbg._sendRequestMainChild({ type, id: this._data.id, value });
@@ -798,6 +853,7 @@ ReplayDebuggerScript.prototype = {
     return this._forward("getLineOffsets", line);
   },
   getOffsetLocation(pc) {
+    assert(pc !== undefined);
     return this._forward("getOffsetLocation", pc);
   },
   getSuccessorOffsets(pc) {
@@ -1022,10 +1078,9 @@ ReplayDebuggerFrame.prototype = {
       this._dbg._setBreakpoint(
         () => {
           this._dbg._capturePauseData();
-          const result = this._dbg._sendRequest({ type: "popFrameResult" });
           handler.call(
             this._dbg.getNewestFrame(),
-            this._pool.convertCompletionValue(result)
+            this._dbg._pool.popFrameResult
           );
         },
         {
@@ -1058,6 +1113,12 @@ ReplayDebuggerFrame.prototype = {
 ///////////////////////////////////////////////////////////////////////////////
 // ReplayDebuggerObject
 ///////////////////////////////////////////////////////////////////////////////
+
+// See replay.js
+const PropertyLevels = {
+  BASIC: 1,
+  FULL: 2,
+};
 
 function ReplayDebuggerObject(pool, data) {
   this._dbg = pool.dbg;
@@ -1125,18 +1186,30 @@ ReplayDebuggerObject.prototype = {
   },
 
   unsafeDereference() {
-    // Direct access to the referent is not currently available.
-    return null;
+    if (this.class == "Array") {
+      // ReplayInspector converts arrays to objects in this process, which we
+      // don't want to happen.
+      return null;
+    }
+
+    return ReplayInspector.wrapObject(this);
   },
 
   getOwnPropertyNames() {
+    if (this._preview && this._preview.level >= PropertyLevels.FULL) {
+      // The preview will include all properties of the object.
+      return this.getEnumerableOwnPropertyNamesForPreview();
+    }
     this._ensureProperties();
     return [...this._properties.keys()];
   },
 
   getEnumerableOwnPropertyNamesForPreview() {
-    if (this._preview && this._preview.enumerableOwnProperties) {
-      return [...this._preview.enumerableOwnProperties.keys()];
+    if (this._preview && this._preview.level >= PropertyLevels.BASIC) {
+      if (!this._preview.properties) {
+        return [];
+      }
+      return [...this._preview.properties.keys()];
     }
     return this.getOwnPropertyNames();
   },
@@ -1155,20 +1228,10 @@ ReplayDebuggerObject.prototype = {
 
   getOwnPropertyDescriptor(name) {
     name = name.toString();
-    if (this._preview) {
-      if (this._preview.enumerableOwnProperties) {
-        const desc = this._preview.enumerableOwnProperties.get(name);
-        if (desc) {
-          return this._convertPropertyDescriptor(desc);
-        }
-      }
-      if (name == "length") {
-        return this._convertPropertyDescriptor(this._preview.lengthProperty);
-      }
-      if (name == "displayName") {
-        return this._convertPropertyDescriptor(
-          this._preview.displayNameProperty
-        );
+    if (this._preview && this._preview.properties) {
+      const desc = this._preview.properties.get(name);
+      if (desc || this._preview.level == PropertyLevels.FULL) {
+        return this._convertPropertyDescriptor(desc);
       }
     }
     this._ensureProperties();
@@ -1182,7 +1245,7 @@ ReplayDebuggerObject.prototype = {
         return;
       }
       const id = this._data.id;
-      const properties = this._dbg._sendRequestAllowDiverge(
+      const { properties } = this._dbg._sendRequestAllowDiverge(
         { type: "getObjectProperties", id },
         []
       );
@@ -1231,6 +1294,19 @@ ReplayDebuggerObject.prototype = {
     });
   },
 
+  replayHasCallResult(name) {
+    return (
+      this._preview &&
+      this._preview.callResults &&
+      this._preview.callResults.has(name)
+    );
+  },
+
+  replayCallResult(name) {
+    const value = this._preview.callResults.get(name);
+    return this._pool.convertValue(value);
+  },
+
   unwrap() {
     if (!this.isProxy) {
       return this;
@@ -1272,7 +1348,10 @@ ReplayDebuggerObject.prototype = {
   },
 
   apply(thisv, args) {
-    assert(this._pool == this._dbg._pool);
+    if (this._pool != this._dbg._pool) {
+      return undefined;
+    }
+
     thisv = this._dbg._convertValueForChild(thisv);
     args = (args || []).map(v => this._dbg._convertValueForChild(v));
 
@@ -1314,25 +1393,20 @@ ReplayDebuggerObject.prototype = {
     return this._data.typedArrayLength;
   },
 
-  getContainerSize() {
-    return this._data.containerSize;
-  },
-
-  getRegExpString() {
-    return this._data.regExpString;
-  },
-
-  getDateTime() {
-    return this._data.dateTime;
-  },
-
-  getErrorProperties() {
-    return this._data.errorProperties;
-  },
-
   makeDebuggeeValue(obj) {
-    assert(obj instanceof ReplayDebuggerObject);
-    return obj;
+    if (obj instanceof ReplayDebuggerObject) {
+      return obj;
+    }
+    const rv = ReplayInspector.unwrapObject(obj);
+    if (rv) {
+      return rv;
+    }
+    ThrowError("Can't make debuggee value");
+    return null; // For eslint
+  },
+
+  replayIsInstance(name) {
+    return this._data.isInstance == name;
   },
 
   preventExtensions: NotAllowed,

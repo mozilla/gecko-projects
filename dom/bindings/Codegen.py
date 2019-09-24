@@ -5075,7 +5075,9 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         })
 
         keyType = recordKeyType(recordType)
-        if recordType.keyType.isByteString():
+        if recordType.keyType.isJSString():
+            raise TypeError("Have do deal with JSString record type, but don't know how")
+        elif recordType.keyType.isByteString():
             keyConversionFunction = "ConvertJSValueToByteString"
             hashKeyType = "nsCStringHashKey"
         else:
@@ -5652,7 +5654,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
               nsCOMPtr<nsIGlobalObject> global =
                 do_QueryInterface(promiseGlobal.GetAsSupports());
               if (!global) {
-                promiseRv.ThrowWithCustomCleanup(NS_ERROR_UNEXPECTED);
+                promiseRv.Throw(NS_ERROR_UNEXPECTED);
                 MOZ_ALWAYS_TRUE(promiseRv.MaybeSetPendingException(cx));
                 $*{exceptionCode}
               }
@@ -5875,6 +5877,45 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                                         dealWithOptional=isOptional,
                                         declArgs=declArgs,
                                         holderArgs=holderArgs)
+
+    if type.isJSString():
+        assert not isEnforceRange and not isClamp
+        if type.nullable():
+            raise TypeError("Nullable JSString not supported");
+
+        declArgs = "cx"
+        if isMember:
+            raise TypeError("JSString not supported as member")
+        else:
+            declType = "JS::Rooted<JSString*>"
+
+        if isOptional:
+            raise TypeError("JSString not supported as optional");
+        templateBody = fill("""
+                if (!($${declName} = ConvertJSValueToJSString(cx, $${val}))) {
+                  $*{exceptionCode}
+                }
+                """
+                ,
+                exceptionCode=exceptionCode)
+
+        if defaultValue is not None:
+            assert not isinstance(defaultValue, IDLNullValue)
+            defaultCode = fill("""
+                static const char data[] = { ${data} };
+                $${declName} = JS_NewStringCopyN(cx, data, ArrayLength(data) - 1);
+                if (!$${declName}) {
+                    $*{exceptionCode}
+                }
+                """,
+                data=", ".join(["'" + char + "'" for char in
+                                       defaultValue.value] + ["0"]),
+                exceptionCode=exceptionCode)
+
+            templateBody = handleDefault(templateBody, defaultCode)
+        return JSToNativeConversionInfo(templateBody,
+                                        declType=CGGeneric(declType),
+                                        declArgs=declArgs)
 
     if type.isDOMString() or type.isUSVString():
         assert not isEnforceRange and not isClamp
@@ -6619,6 +6660,8 @@ class CGArgumentConverter(CGThing):
 
 
 def getMaybeWrapValueFuncForType(type):
+    if type.isJSString():
+        return "MaybeWrapStringValue"
     # Callbacks might actually be DOM objects; nothing prevents a page from
     # doing that.
     if type.isCallback() or type.isCallbackInterface() or type.isObject():
@@ -6687,7 +6730,7 @@ def getWrapTemplateForType(type, descriptorProvider, result, successCode,
         return _setValue(value, setter="setInt32")
 
     def setString(value):
-        return _setValue(value, setter="setString")
+        return _setValue(value, wrapAsType=type, setter="setString")
 
     def setObject(value, wrapAsType=None):
         return _setValue(value, wrapAsType=wrapAsType, setter="setObject")
@@ -6949,6 +6992,9 @@ def getWrapTemplateForType(type, descriptorProvider, result, successCode,
         wrappingCode += wrapAndSetPtr(wrap, failed)
         return (wrappingCode, False)
 
+    if type.isJSString():
+        return (setString(result), False)
+
     if type.isDOMString() or type.isUSVString():
         if type.nullable():
             return (wrapAndSetPtr("xpc::StringToJsval(cx, %s, ${jsvalHandle})" % result), False)
@@ -7147,7 +7193,7 @@ def infallibleForMember(member, type, descriptorProvider):
 
 
 def leafTypeNeedsCx(type, retVal):
-    return (type.isAny() or type.isObject() or
+    return (type.isAny() or type.isObject() or type.isJSString() or
             (retVal and type.isSpiderMonkeyInterface()))
 
 
@@ -7226,6 +7272,10 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
         if returnType.nullable():
             result = CGTemplatedType("Nullable", result)
         return result, None, None, None, None
+    if returnType.isJSString():
+        if isMember:
+            raise TypeError("JSString not supported as return type member")
+        return CGGeneric("JS::Rooted<JSString*>"), "ptr", None, "cx", None
     if returnType.isDOMString() or returnType.isUSVString():
         if isMember:
             return CGGeneric("nsString"), "ref", None, None, None
@@ -10027,7 +10077,7 @@ def getEnumValueName(value):
     if re.match("[^\x20-\x7E]", value):
         raise SyntaxError('Enum value "' + value + '" contains non-ASCII characters')
     if re.match("^[0-9]", value):
-        return '_' + value
+        value = '_' + value
     value = re.sub(r'[^0-9A-Za-z_]', '_', value)
     if re.match("^_[A-Z]|__", value):
         raise SyntaxError('Enum value "' + value + '" is reserved by the C++ spec')
@@ -10177,6 +10227,9 @@ def getUnionAccessorSignatureType(type, descriptorProvider):
     if type.isSpiderMonkeyInterface():
         typeName = CGGeneric(type.name)
         return CGWrapper(typeName, post=" const &")
+
+    if type.isJSString():
+        raise TypeError("JSString not supported in unions")
 
     if type.isDOMString() or type.isUSVString():
         return CGGeneric("const nsAString&")
@@ -10781,7 +10834,7 @@ class ClassMethod(ClassItem):
         if declaring:
             if self.static:
                 decorators.append('static')
-            if self.virtual:
+            if self.virtual and not self.override:
                 decorators.append('virtual')
         if decorators:
             return ' '.join(decorators) + ' '
@@ -12229,7 +12282,7 @@ class CGDOMJSProxyHandler_ownPropNames(ClassMethod):
             }
             """,
             xrayCheck=xrayCheck)
-            
+
         if self.descriptor.isMaybeCrossOriginObject():
             # We need to enter our compartment (which we might not be
             # in right now) to get the expando props.
@@ -12617,7 +12670,7 @@ class CGDOMJSProxyHandler_className(ClassMethod):
                 if (!IsPlatformObjectSameOrigin(cx, proxy)) {
                   return "Object";
                 }
-                
+
                 """)
         else:
             crossOrigin = ""
@@ -12789,7 +12842,7 @@ class CGDOMJSProxyHandler_canNurseryAllocate(ClassMethod):
 class CGDOMJSProxyHandler_getOwnPropertyDescriptor(ClassMethod):
     """
     Implementation of getOwnPropertyDescriptor.  We only use this for
-    cross-origin objects. 
+    cross-origin objects.
     """
     def __init__(self, descriptor):
         assert descriptor.isMaybeCrossOriginObject()
@@ -12846,7 +12899,7 @@ class CGDOMJSProxyHandler_getOwnPropertyDescriptor(ClassMethod):
 class CGDOMJSProxyHandler_getSameOriginPrototype(ClassMethod):
     """
     Implementation of getSameOriginPrototype.  We only use this for
-    cross-origin objects. 
+    cross-origin objects.
     """
     def __init__(self, descriptor):
         assert descriptor.isMaybeCrossOriginObject()
@@ -12866,7 +12919,7 @@ class CGDOMJSProxyHandler_getSameOriginPrototype(ClassMethod):
 class CGDOMJSProxyHandler_definePropertySameOrigin(ClassMethod):
     """
     Implementation of definePropertySameOrigin.  We only use this for
-    cross-origin objects. 
+    cross-origin objects.
     """
     def __init__(self, descriptor):
         assert descriptor.isMaybeCrossOriginObject()
@@ -12889,7 +12942,7 @@ class CGDOMJSProxyHandler_definePropertySameOrigin(ClassMethod):
 
 class CGDOMJSProxyHandler_set(ClassMethod):
     """
-    Implementation of set().  We only use this for cross-origin objects. 
+    Implementation of set().  We only use this for cross-origin objects.
     """
     def __init__(self, descriptor):
         assert descriptor.isMaybeCrossOriginObject()
@@ -14978,6 +15031,11 @@ class CGNativeMember(ClassMethod):
             return (result.define(),
                     "%s(%s)" % (result.define(), defaultReturnArg),
                     "return ${declName};\n")
+        if type.isJSString():
+            if isMember:
+                raise TypeError("JSString not supported as return type member")
+            # Outparam
+            return "void", "", "aRetVal.set(${declName});\n"
         if type.isDOMString() or type.isUSVString():
             if isMember:
                 # No need for a third element in the isMember case
@@ -15101,7 +15159,9 @@ class CGNativeMember(ClassMethod):
     def getArgs(self, returnType, argList):
         args = [self.getArg(arg) for arg in argList]
         # Now the outparams
-        if returnType.isDOMString() or returnType.isUSVString():
+        if returnType.isJSString():
+            args.append(Argument("JS::MutableHandle<JSString*>", "aRetVal"))
+        elif returnType.isDOMString() or returnType.isUSVString():
             args.append(Argument("nsString&", "aRetVal"))
         elif returnType.isByteString():
             args.append(Argument("nsCString&", "aRetVal"))
@@ -15251,6 +15311,11 @@ class CGNativeMember(ClassMethod):
 
             # Unroll for the name, in case we're nullable.
             return type.unroll().name, True, True
+
+        if type.isJSString():
+            if isMember:
+                raise TypeError("JSString not supported as member")
+            return "JS::Handle<JSString*>", False, False
 
         if type.isDOMString() or type.isUSVString():
             if isMember:
@@ -18178,6 +18243,9 @@ class CGEventGetter(CGNativeMember):
             type.isPromise() or
             type.isGeckoInterface()):
             return "return " + memberName + ";\n"
+        if type.isJSString():
+            # https://bugzilla.mozilla.org/show_bug.cgi?id=1580167
+            raise TypeError("JSString not supported as member of a generated event")
         if type.isDOMString() or type.isByteString() or type.isUSVString():
             return "aRetVal = " + memberName + ";\n"
         if type.isSpiderMonkeyInterface() or type.isObject():
@@ -18280,7 +18348,7 @@ class CGEventMethod(CGNativeMember):
             self.args.insert(0, Argument("JSContext*", "aCx"))
         if not self.isInit:
             self.args.insert(0, Argument("const GlobalObject&", "aGlobal"))
-            self.args.append(Argument('ErrorResult&', 'aRv'))
+
         return constructorForNativeCaller + CGNativeMember.declare(self, cgClass)
 
     def defineInit(self, cgClass):
@@ -18402,7 +18470,6 @@ class CGEventMethod(CGNativeMember):
         if needCx(None, self.arguments(), [], considerTypes=True, static=True):
             self.args.insert(0, Argument("JSContext*", "aCx"))
         self.args.insert(0, Argument("const GlobalObject&", "aGlobal"))
-        self.args.append(Argument('ErrorResult&', 'aRv'))
         return constructorForNativeCaller + CGNativeMember.define(self, cgClass)
 
 
@@ -18624,6 +18691,8 @@ class CGEventClass(CGBindingImplClass):
             nativeType = CGGeneric(type.unroll().inner.identifier.name)
             if type.nullable():
                 nativeType = CGTemplatedType("Nullable", nativeType)
+        elif type.isJSString():
+            nativeType = CGGeneric("JS::Heap<JSString*>")
         elif type.isDOMString() or type.isUSVString():
             nativeType = CGGeneric("nsString")
         elif type.isByteString():

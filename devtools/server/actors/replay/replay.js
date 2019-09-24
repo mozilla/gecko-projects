@@ -23,7 +23,7 @@
 
 const CC = Components.Constructor;
 
-// Create a sandbox with the resources we need. require() doesn't work here.
+// Create a sandbox with the resources we need.
 const sandbox = Cu.Sandbox(
   CC("@mozilla.org/systemprincipal;1", "nsIPrincipal")(),
   {
@@ -45,17 +45,17 @@ const {
   CSSRule,
   pointPrecedes,
   pointEquals,
+  pointArrayIncludes,
   findClosestPoint,
 } = sandbox;
 
-function formatDisplayName(frame) {
-  if (frame.type === "call") {
-    const callee = frame.callee;
-    return callee.name || callee.userDisplayName || callee.displayName;
-  }
+const { require } = ChromeUtils.import("resource://devtools/shared/Loader.jsm");
+const jsmScope = require("resource://devtools/shared/Loader.jsm");
+const { DebuggerNotificationObserver } = Cu.getGlobalForObject(jsmScope);
 
-  return `(${frame.type})`;
-}
+const {
+  eventBreakpointForNotification,
+} = require("devtools/server/actors/utils/event-breakpoints");
 
 const dbg = new Debugger();
 const gFirstGlobal = dbg.makeGlobalObjectReference(sandbox);
@@ -68,6 +68,7 @@ dbg.onNewGlobalObject = function(global) {
     gAllGlobals.push(global);
 
     scanningOnNewGlobal(global);
+    eventListenerOnNewGlobal(global);
   } catch (e) {
     // Ignore errors related to adding a same-compartment debuggee.
     // See bug 1523755.
@@ -358,15 +359,13 @@ Services.obs.addObserver(
       // Message arguments are preserved as debuggee values.
       if (apiMessage.arguments) {
         contents.arguments = apiMessage.arguments.map(v => {
-          return convertValue(makeDebuggeeValue(v));
+          return makeConvertedDebuggeeValue(v);
         });
 
         contents.argumentsData = new PreviewedObjects();
         contents.arguments.forEach(v =>
-          contents.argumentsData.addValue(v, true)
+          contents.argumentsData.addValue(v, PropertyLevels.FULL)
         );
-
-        ClearPausedState();
       }
 
       newConsoleMessage(contents);
@@ -381,6 +380,40 @@ function NewTimeWarpTarget() {
   // location if we want to warp here later.
   gWarpTargetPoints.push(currentScriptedExecutionPoint());
   return gWarpTargetPoints.length - 1;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Event State
+///////////////////////////////////////////////////////////////////////////////
+
+const gNewEvents = [];
+
+const gDebuggerNotificationObserver = new DebuggerNotificationObserver();
+gDebuggerNotificationObserver.addListener(eventBreakpointListener);
+
+function eventListenerOnNewGlobal(global) {
+  try {
+    gDebuggerNotificationObserver.connect(global.unsafeDereference());
+  } catch (e) {}
+}
+
+function eventBreakpointListener(notification) {
+  const event = eventBreakpointForNotification(dbg, notification);
+  if (!event) {
+    return;
+  }
+
+  // Advance the progress counter before and after each event, so that we can
+  // determine later if any JS ran between the two points.
+  RecordReplayControl.advanceProgressCounter();
+
+  if (notification.phase == "pre") {
+    const progress = RecordReplayControl.progressCounter();
+
+    if (gManifest.kind == "resume") {
+      gNewEvents.push({ event, checkpoint: gLastCheckpoint, progress });
+    }
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -514,26 +547,25 @@ function findAllScriptHits(script, frameIndex, offsets, startpoint, endpoint) {
   return allHits;
 }
 
-function findChangeFrames(checkpoint, which, kind, frameIndex, maybeScript) {
+function findChangeFrames(checkpoint, which, kind) {
   const hits = RecordReplayControl.findChangeFrames(checkpoint, which);
-  return hits
-    .filter(
-      hit =>
-        hit.frameIndex == frameIndex &&
-        (!maybeScript || hit.script == maybeScript)
-    )
-    .map(({ script, progress }) => ({
-      checkpoint,
-      progress,
-      position: { kind, script, frameIndex },
-    }));
+  return hits.map(({ script, progress, frameIndex }) => ({
+    checkpoint,
+    progress,
+    position: { kind, script, frameIndex },
+  }));
 }
 
 function findFrameSteps({ targetPoint, breakpointOffsets }) {
   const {
     checkpoint,
-    position: { script, frameIndex: targetIndex },
+    position: { script: targetScript, frameIndex: targetIndex },
   } = targetPoint;
+
+  const potentialStepsFilter = point => {
+    const { frameIndex, script } = point.position;
+    return frameIndex == targetIndex && script == targetScript;
+  };
 
   // Find the entry point of the frame whose steps contain |targetPoint|.
   let entryPoint;
@@ -541,9 +573,9 @@ function findFrameSteps({ targetPoint, breakpointOffsets }) {
     entryPoint = targetPoint;
   } else {
     const entryHits = [
-      ...findChangeFrames(checkpoint, 0, "EnterFrame", targetIndex, script),
-      ...findChangeFrames(checkpoint, 2, "EnterFrame", targetIndex, script),
-    ];
+      ...findChangeFrames(checkpoint, 0, "EnterFrame"),
+      ...findChangeFrames(checkpoint, 2, "EnterFrame"),
+    ].filter(potentialStepsFilter);
 
     // Find the last frame entry or resume for the frame's script preceding the
     // target point. Since frames do not span checkpoints the hit must be in the
@@ -558,12 +590,8 @@ function findFrameSteps({ targetPoint, breakpointOffsets }) {
   }
 
   // Find the exit point of the frame.
-  const exitHits = findChangeFrames(
-    checkpoint,
-    1,
-    "OnPop",
-    targetIndex,
-    script
+  const exitHits = findChangeFrames(checkpoint, 1, "OnPop").filter(
+    potentialStepsFilter
   );
   const exitPoint = findClosestPoint(
     exitHits,
@@ -576,17 +604,14 @@ function findFrameSteps({ targetPoint, breakpointOffsets }) {
   // frame index and happen between the entry and exit points. Any EnterFrame
   // points for immediate callees of the frame are also included.
   const breakpointHits = findAllScriptHits(
-    script,
+    targetScript,
     targetIndex,
     breakpointOffsets,
     checkpoint,
     checkpoint + 1
   );
-  const enterFrameHits = findChangeFrames(
-    checkpoint,
-    0,
-    "EnterFrame",
-    targetIndex + 1
+  const enterFrameHits = findChangeFrames(checkpoint, 0, "EnterFrame").filter(
+    point => point.position.frameIndex == targetIndex + 1
   );
   const steps = breakpointHits.concat(enterFrameHits).filter(point => {
     return pointPrecedes(entryPoint, point) && pointPrecedes(point, exitPoint);
@@ -598,6 +623,25 @@ function findFrameSteps({ targetPoint, breakpointOffsets }) {
   });
 
   return steps;
+}
+
+function findParentFrameEntryPoint(point) {
+  const hits = findChangeFrames(point.checkpoint, 0, "EnterFrame").filter(p => {
+    return p.position.frameIndex == point.position.frameIndex - 1;
+  });
+  const parentPoint = findClosestPoint(
+    hits,
+    point,
+    /* before */ true,
+    /* inclusive */ false
+  );
+  return { parentPoint };
+}
+
+function findEventFrameEntry({ checkpoint, progress }) {
+  return findChangeFrames(checkpoint, 0, "EnterFrame").filter(point => {
+    return point.progress == progress + 1;
+  })[0];
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -866,6 +910,10 @@ function makeDebuggeeValue(value) {
   return value;
 }
 
+function makeConvertedDebuggeeValue(value) {
+  return convertValue(makeDebuggeeValue(value));
+}
+
 function getDebuggeeValue(value) {
   if (value && typeof value == "object") {
     assert(value instanceof Debugger.Object);
@@ -874,18 +922,12 @@ function getDebuggeeValue(value) {
   return value;
 }
 
-// eslint-disable-next-line no-unused-vars
-function ClearPausedState() {
-  gPausedObjects = new IdMap();
-  gDereferencedObjects = new Map();
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // Manifest Management
 ///////////////////////////////////////////////////////////////////////////////
 
 // The manifest that is currently being processed.
-let gManifest;
+let gManifest = { kind: "primordial" };
 
 // When processing certain manifests this tracks the execution time when the
 // manifest started executing.
@@ -897,33 +939,41 @@ const gNewDebuggerStatements = [];
 // Whether to pause on debugger statements when running forward.
 let gPauseOnDebuggerStatement = false;
 
+function ensureRunToPointPositionHandlers({ endpoint, snapshotPoints }) {
+  if (gLastCheckpoint == endpoint.checkpoint) {
+    assert(endpoint.position);
+    ensurePositionHandler(endpoint.position);
+  }
+  snapshotPoints.forEach(snapshot => {
+    if (gLastCheckpoint == snapshot.checkpoint && snapshot.position) {
+      ensurePositionHandler(snapshot.position);
+    }
+  });
+}
+
 // Handlers that run when a manifest is first received. This must be specified
 // for all manifests.
 const gManifestStartHandlers = {
   resume({ breakpoints, pauseOnDebuggerStatement }) {
     RecordReplayControl.resumeExecution();
-    gManifestStartTime = RecordReplayControl.currentExecutionTime();
     breakpoints.forEach(ensurePositionHandler);
 
     gPauseOnDebuggerStatement = pauseOnDebuggerStatement;
     dbg.onDebuggerStatement = debuggerStatementHit;
   },
 
-  restoreCheckpoint({ target }) {
-    RecordReplayControl.restoreCheckpoint(target);
+  restoreSnapshot({ numSnapshots }) {
+    RecordReplayControl.restoreSnapshot(numSnapshots);
     throwError("Unreachable!");
   },
 
-  runToPoint({ needSaveCheckpoints }) {
-    for (const checkpoint of needSaveCheckpoints) {
-      RecordReplayControl.saveCheckpoint(checkpoint);
-    }
+  runToPoint(manifest) {
+    ensureRunToPointPositionHandlers(manifest);
     RecordReplayControl.resumeExecution();
   },
 
-  scanRecording(manifest) {
-    gManifestStartTime = RecordReplayControl.currentExecutionTime();
-    gManifestStartHandlers.runToPoint(manifest);
+  scanRecording() {
+    RecordReplayControl.resumeExecution();
   },
 
   findHits({ position, startpoint, endpoint }) {
@@ -934,6 +984,14 @@ const gManifestStartHandlers = {
 
   findFrameSteps(info) {
     RecordReplayControl.manifestFinished(findFrameSteps(info));
+  },
+
+  findParentFrameEntryPoint({ point }) {
+    RecordReplayControl.manifestFinished(findParentFrameEntryPoint(point));
+  },
+
+  findEventFrameEntry(progress) {
+    RecordReplayControl.manifestFinished({ rv: findEventFrameEntry(progress) });
   },
 
   flushRecording() {
@@ -958,17 +1016,18 @@ const gManifestStartHandlers = {
     for (const request of requests) {
       processRequest(request);
     }
-    RecordReplayControl.manifestFinished();
+    RecordReplayControl.manifestFinished({
+      divergedFromRecording: gDivergedFromRecording,
+    });
   },
 
   getPauseData() {
     divergeFromRecording();
     const data = getPauseData();
-    data.paintData = RecordReplayControl.repaint();
     RecordReplayControl.manifestFinished(data);
   },
 
-  hitLogpoint({ text, condition }) {
+  hitLogpoint({ text, condition, skipPauseData }) {
     divergeFromRecording();
 
     const frame = scriptFrameForIndex(countScriptFrames() - 1);
@@ -983,9 +1042,7 @@ const gManifestStartHandlers = {
     const displayName = formatDisplayName(frame);
     const rv = frame.evalWithBindings(`[${text}]`, { displayName });
 
-    const pauseData = getPauseData();
-    pauseData.paintData = RecordReplayControl.repaint();
-    ClearPausedState();
+    const pauseData = skipPauseData ? undefined : getPauseData();
 
     let result;
     if (rv.return) {
@@ -993,10 +1050,10 @@ const gManifestStartHandlers = {
     } else {
       result = [getDebuggeeValue(rv.throw)];
     }
-    result = result.map(v => convertValue(makeDebuggeeValue(v)));
+    result = result.map(v => makeConvertedDebuggeeValue(v));
 
     const resultData = new PreviewedObjects();
-    result.forEach(v => resultData.addValue(v, true));
+    result.forEach(v => resultData.addValue(v, PropertyLevels.FULL));
 
     RecordReplayControl.manifestFinished({ result, resultData, pauseData });
   },
@@ -1006,6 +1063,7 @@ const gManifestStartHandlers = {
 function ManifestStart(manifest) {
   try {
     gManifest = manifest;
+    gManifestStartTime = RecordReplayControl.currentExecutionTime();
 
     if (gManifestStartHandlers[manifest.kind]) {
       gManifestStartHandlers[manifest.kind](manifest);
@@ -1013,14 +1071,11 @@ function ManifestStart(manifest) {
       dump(`Unknown manifest: ${JSON.stringify(manifest)}\n`);
     }
   } catch (e) {
-    printError("ManifestStart", e);
+    const msg = printError("ManifestStart", e);
+    RecordReplayControl.manifestFinished({
+      exception: `ManifestStart failed: ${msg}`,
+    });
   }
-}
-
-// eslint-disable-next-line no-unused-vars
-function BeforeCheckpoint() {
-  clearPositionHandlers();
-  stopScanningAllScripts();
 }
 
 const FirstCheckpointId = 1;
@@ -1057,28 +1112,48 @@ function finishResume(point) {
     consoleMessages: gNewConsoleMessages,
     scripts: gNewScripts,
     debuggerStatements: gNewDebuggerStatements,
+    events: gNewEvents,
   });
   gNewConsoleMessages.length = 0;
   gNewScripts.length = 0;
   gNewDebuggerStatements.length = 0;
+  gNewEvents.length = 0;
 }
 
 // Handlers that run after a checkpoint is reached to see if the manifest has
 // finished. This does not need to be specified for all manifests.
 const gManifestFinishedAfterCheckpointHandlers = {
+  primordial(_, point) {
+    // The primordial manifest runs forward to the first checkpoint, saves it,
+    // and then finishes.
+    assert(point.checkpoint == FirstCheckpointId);
+    if (!newSnapshot(point)) {
+      return;
+    }
+    RecordReplayControl.manifestFinished({ point });
+  },
+
   resume(_, point) {
+    clearPositionHandlers();
     finishResume(point);
   },
 
-  runToPoint({ endpoint }, point) {
+  runToPoint({ endpoint, snapshotPoints }, point) {
     assert(endpoint.checkpoint >= point.checkpoint);
+    if (pointArrayIncludes(snapshotPoints, point) && !newSnapshot(point)) {
+      return;
+    }
     if (!endpoint.position && point.checkpoint == endpoint.checkpoint) {
       RecordReplayControl.manifestFinished({ point });
     }
   },
 
-  scanRecording({ endpoint }, point) {
-    if (point.checkpoint == endpoint) {
+  scanRecording({ endpoint, snapshotPoints }, point) {
+    stopScanningAllScripts();
+    if (pointArrayIncludes(snapshotPoints, point) && !newSnapshot(point)) {
+      return;
+    }
+    if (point.checkpoint == endpoint.checkpoint) {
       const duration =
         RecordReplayControl.currentExecutionTime() - gManifestStartTime;
       RecordReplayControl.manifestFinished({
@@ -1097,32 +1172,16 @@ const gManifestFinishedAfterCheckpointHandlers = {
 // one is able to prepare to execute. These handlers must therefore not finish
 // the current manifest.
 const gManifestPrepareAfterCheckpointHandlers = {
-  runToPoint({ endpoint }, point) {
-    if (point.checkpoint == endpoint.checkpoint) {
-      assert(endpoint.position);
-      ensurePositionHandler(endpoint.position);
-    }
-  },
+  runToPoint: ensureRunToPointPositionHandlers,
 
-  scanRecording() {
+  scanRecording({ endpoint }) {
+    assert(!endpoint.position);
     startScanningAllScripts();
   },
 };
 
-function processManifestAfterCheckpoint(point, restoredCheckpoint) {
-  // After rewinding gManifest won't be correct, so we always mark the current
-  // manifest as finished and rely on the middleman to give us a new one.
-  if (restoredCheckpoint) {
-    RecordReplayControl.manifestFinished({ restoredCheckpoint, point });
-  }
-
-  if (!gManifest) {
-    // The process is considered to have an initial manifest to run forward to
-    // the first checkpoint.
-    assert(point.checkpoint == FirstCheckpointId);
-    RecordReplayControl.manifestFinished({ point });
-    assert(gManifest);
-  } else if (gManifestFinishedAfterCheckpointHandlers[gManifest.kind]) {
+function processManifestAfterCheckpoint(point, restoredSnapshot) {
+  if (gManifestFinishedAfterCheckpointHandlers[gManifest.kind]) {
     gManifestFinishedAfterCheckpointHandlers[gManifest.kind](gManifest, point);
   }
 
@@ -1132,14 +1191,23 @@ function processManifestAfterCheckpoint(point, restoredCheckpoint) {
 }
 
 // eslint-disable-next-line no-unused-vars
-function AfterCheckpoint(id, restoredCheckpoint) {
+function HitCheckpoint(id) {
   gLastCheckpoint = id;
   const point = currentExecutionPoint();
 
+  // Reset paused state at each checkpoint. In order to reach the checkpoint we
+  // must have unpaused, and resetting the state allows these objects to be
+  // collected by the GC.
+  gPausedObjects = new IdMap();
+  gDereferencedObjects = new Map();
+
   try {
-    processManifestAfterCheckpoint(point, restoredCheckpoint);
+    processManifestAfterCheckpoint(point);
   } catch (e) {
-    printError("AfterCheckpoint", e);
+    const msg = printError("AfterCheckpoint", e);
+    RecordReplayControl.manifestFinished({
+      exception: `AfterCheckpoint failed: ${msg}`,
+    });
   }
 }
 
@@ -1151,7 +1219,13 @@ const gManifestPositionHandlers = {
     finishResume(point);
   },
 
-  runToPoint({ endpoint }, point) {
+  runToPoint({ endpoint, snapshotPoints }, point) {
+    if (pointArrayIncludes(snapshotPoints, point)) {
+      clearPositionHandlers();
+      if (newSnapshot(point)) {
+        ensureRunToPointPositionHandlers({ endpoint, snapshotPoints });
+      }
+    }
     if (pointEquals(point, endpoint)) {
       clearPositionHandlers();
       RecordReplayControl.manifestFinished({ point });
@@ -1180,6 +1254,18 @@ function debuggerStatementHit() {
   }
 }
 
+function newSnapshot(point) {
+  if (RecordReplayControl.newSnapshot()) {
+    return true;
+  }
+
+  // After rewinding gManifest won't be correct, so we always mark the current
+  // manifest as finished and rely on the middleman to give us a new one.
+  RecordReplayControl.manifestFinished({ restoredSnapshot: true, point });
+
+  return false;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Handler Helpers
 ///////////////////////////////////////////////////////////////////////////////
@@ -1196,6 +1282,7 @@ function getScriptData(id) {
     displayName: script.displayName,
     url: script.url,
     format: script.format,
+    mainOffset: script.mainOffset,
   };
 }
 
@@ -1259,7 +1346,6 @@ function unknownObjectProperties(why) {
   ];
 }
 
-// eslint-disable-next-line complexity
 function getObjectData(id) {
   const object = gPausedObjects.getObject(id);
   if (object instanceof Debugger.Object) {
@@ -1293,67 +1379,26 @@ function getObjectData(id) {
       rv.proxyTarget = convertValue(object.proxyTarget);
       rv.proxyHandler = convertValue(object.proxyHandler);
     }
-    if (object.errorMessageName) {
-      rv.errorMessageName = object.errorMessageName;
-    }
-    if (object.errorNotes) {
-      rv.errorNotes = object.errorNotes;
-    }
-    if (object.errorLineNumber) {
-      rv.errorLineNumber = object.errorLineNumber;
-    }
-    if (object.errorColumnNumber) {
-      rv.errorColumnNumber = object.errorColumnNumber;
-    }
-
-    const raw = object.unsafeDereference();
-    switch (object.class) {
-      case "Uint8Array":
-      case "Uint8ClampedArray":
-      case "Uint16Array":
-      case "Uint32Array":
-      case "Int8Array":
-      case "Int16Array":
-      case "Int32Array":
-      case "Float32Array":
-      case "Float64Array": {
-        const typedProto = Object.getPrototypeOf(Uint8Array.prototype);
-        const { get } = Object.getOwnPropertyDescriptor(typedProto, "length");
-        rv.typedArrayLength = get.call(raw);
-        break;
+    try {
+      if (object.errorMessageName) {
+        rv.errorMessageName = object.errorMessageName;
       }
-      case "Set": {
-        const { get } = Object.getOwnPropertyDescriptor(Set.prototype, "size");
-        rv.containerSize = get.call(raw);
-        break;
+      if (object.errorNotes) {
+        rv.errorNotes = object.errorNotes;
       }
-      case "Map": {
-        const { get } = Object.getOwnPropertyDescriptor(Map.prototype, "size");
-        rv.containerSize = get.call(raw);
-        break;
+      if (object.errorLineNumber) {
+        rv.errorLineNumber = object.errorLineNumber;
       }
-      case "RegExp":
-        rv.regExpString = RegExp.prototype.toString.call(raw);
-        break;
-      case "Date":
-        rv.dateTime = Date.prototype.getTime.call(raw);
-        break;
-      case "Error":
-      case "EvalError":
-      case "RangeError":
-      case "ReferenceError":
-      case "SyntaxError":
-      case "TypeError":
-      case "URIError":
-        rv.errorProperties = {
-          name: raw.name,
-          message: raw.message,
-          stack: raw.stack,
-          fileName: raw.fileName,
-          lineNumber: raw.lineNumber,
-          columnNumber: raw.columnNumber,
-        };
-        break;
+      if (object.errorColumnNumber) {
+        rv.errorColumnNumber = object.errorColumnNumber;
+      }
+    } catch (e) {
+      // Error getters can throw access denied errors.
+    }
+    if (CSSRule.isInstance(object.unsafeDereference())) {
+      rv.isInstance = "CSSRule";
+    } else if (Event.isInstance(object.unsafeDereference())) {
+      rv.isInstance = "Event";
     }
     return rv;
   }
@@ -1371,7 +1416,21 @@ function getObjectData(id) {
   throwError(`Unknown object kind: ${object}`);
 }
 
+// Return whether to avoid operating on an object due to the likelihood of a
+// recording divergence or other bad behavior.
+function isBlacklisted(object) {
+  // Enumerate a Storage object's properties requires the content process to
+  // synchronously communicate with the UI process, which it can't do.
+  return object.class == "Storage";
+}
+
 function getObjectProperties(object) {
+  const rv = Object.create(null);
+
+  if (isBlacklisted(object)) {
+    return rv;
+  }
+
   let names;
   try {
     names = object.getOwnPropertyNames();
@@ -1379,11 +1438,24 @@ function getObjectProperties(object) {
     return unknownObjectProperties(e.toString());
   }
 
-  const rv = Object.create(null);
   names.forEach(name => {
+    // Workaround this test-only getter not reporting exceptions properly.
+    if (name == "SpecialPowers_wrappedObject") {
+      return;
+    }
+
     let desc;
     try {
       desc = object.getOwnPropertyDescriptor(name);
+      if (!desc) {
+        desc = {
+          name,
+          desc: {
+            value: `Unexpected missing property ${name}`,
+            enumerable: true,
+          },
+        };
+      }
     } catch (e) {
       desc = { name, desc: { value: "Unknown: " + e, enumerable: true } };
     }
@@ -1406,24 +1478,24 @@ function getObjectContainerContents(object) {
   switch (object.class) {
     case "Set": {
       const iter = Cu.waiveXrays(Set.prototype.values.call(raw));
-      return [...iter].map(v => convertValue(makeDebuggeeValue(v)));
+      return [...iter].map(v => makeConvertedDebuggeeValue(v));
     }
     case "Map": {
       const iter = Cu.waiveXrays(Map.prototype.entries.call(raw));
       return [...iter].map(([k, v]) => [
-        convertValue(makeDebuggeeValue(k)),
-        convertValue(makeDebuggeeValue(v)),
+        makeConvertedDebuggeeValue(k),
+        makeConvertedDebuggeeValue(v),
       ]);
     }
     case "WeakSet": {
       const keys = ChromeUtils.nondeterministicGetWeakSetKeys(raw);
-      return keys.map(k => convertValue(makeDebuggeeValue(Cu.waiveXrays(k))));
+      return keys.map(k => makeConvertedDebuggeeValue(Cu.waiveXrays(k)));
     }
     case "WeakMap": {
       const keys = ChromeUtils.nondeterministicGetWeakMapKeys(raw);
       return keys.map(k => [
-        convertValue(makeDebuggeeValue(k)),
-        convertValue(makeDebuggeeValue(WeakMap.prototype.get.call(raw, k))),
+        makeConvertedDebuggeeValue(k),
+        makeConvertedDebuggeeValue(WeakMap.prototype.get.call(raw, k)),
       ]);
     }
     default:
@@ -1460,6 +1532,13 @@ function getWindow() {
 // object.
 const OBJECT_PREVIEW_MAX_ITEMS = 10;
 
+// Levels at which property information can be included in previews.
+// If not specified, minimal properties are included.
+const PropertyLevels = {
+  BASIC: 1, // Include enough properties to show an inline preview.
+  FULL: 2, // Include enough properties to allow the object to be expanded.
+};
+
 // A collection of objects which we can send up to the server, along with
 // property information so that the server can show a preview for the object.
 function PreviewedObjects() {
@@ -1468,96 +1547,211 @@ function PreviewedObjects() {
 }
 
 PreviewedObjects.prototype = {
-  addValue(value, includeProperties) {
+  addValue(value, level) {
     if (value && typeof value == "object" && value.object) {
-      this.addObject(value.object, includeProperties);
+      this.addObject(value.object, level);
     }
   },
 
-  addObject(id, includeProperties) {
+  // eslint-disable-next-line complexity
+  addObject(id, level) {
     if (!id) {
-      return;
-    }
-
-    // If includeProperties is set then previewing the object requires knowledge
-    // of its enumerable properties.
-    const needObject = !this.objects[id];
-    const needProperties =
-      includeProperties &&
-      (needObject || !this.objects[id].preview.enumerableOwnProperties);
-
-    if (!needObject && !needProperties) {
       return;
     }
 
     const object = gPausedObjects.getObject(id);
     assert(object instanceof Debugger.Object);
 
-    const properties = getObjectProperties(object);
-    const propertyEntries = Object.entries(properties);
+    if (!this.objects[id]) {
+      let ownPropertyNamesCount = 0;
+      try {
+        ownPropertyNamesCount = object.getOwnPropertyNames().length;
+      } catch (e) {}
 
-    if (needObject) {
       this.objects[id] = {
         data: getObjectData(id),
-        preview: {
-          ownPropertyNamesCount: propertyEntries.length,
-        },
+        preview: { ownPropertyNamesCount, level },
       };
-
+    } else {
       const preview = this.objects[id].preview;
-
-      // Add some properties (if present) which the server might ask for
-      // even when it isn't interested in the rest of the properties.
-      if (properties.length) {
-        preview.lengthProperty = properties.length;
+      if ((preview.level | 0) >= (level | 0)) {
+        return;
       }
-      if (properties.displayName) {
-        preview.displayNameProperty = properties.displayName;
-      }
+      preview.level = level;
     }
 
-    if (needProperties) {
-      const preview = this.objects[id].preview;
+    const { data, preview } = this.objects[id];
 
-      // The server is only interested in enumerable properties, and at most
-      // OBJECT_PREVIEW_MAX_ITEMS of them. Limiting the properties we send to
-      // only those the server needs avoids having to send the contents of huge
-      // objects like Windows, most of which will not be used.
-      const enumerableOwnProperties = Object.create(null);
-      let enumerablePropertyCount = 0;
-      for (const [name, desc] of propertyEntries) {
-        if (desc.enumerable) {
-          enumerableOwnProperties[name] = desc;
-          this.addPropertyDescriptor(desc, false);
+    // If this is a DOM object identified with isInstance, the previewer might
+    // need additional properties.
+    if (level == PropertyLevels.BASIC && data.isInstance) {
+      preview.level = level = PropertyLevels.FULL;
+    }
+
+    // Add intrinsic properties that are always included.
+    switch (object.class) {
+      case "Array":
+      case "Uint8Array":
+      case "Uint8ClampedArray":
+      case "Uint16Array":
+      case "Uint32Array":
+      case "Int8Array":
+      case "Int16Array":
+      case "Int32Array":
+      case "Float32Array":
+      case "Float64Array":
+        this.addObjectPropertyValue(object, "length");
+        break;
+      case "Function":
+        this.addObjectPropertyValue(object, "displayName");
+        break;
+    }
+
+    if (!level) {
+      return;
+    }
+
+    const properties = Object.entries(getObjectProperties(object));
+
+    // For an inline preview the server is only interested in enumerable
+    // properties, and at most OBJECT_PREVIEW_MAX_ITEMS of them. Limiting the
+    // properties we send to only those the server needs avoids having to send
+    // the contents of huge objects like Windows, most of which will not be
+    // used. When doing a full property enumeration, include all properties.
+    let enumerablePropertyCount = 0;
+    for (const [name, desc] of properties) {
+      if (level == PropertyLevels.FULL || desc.enumerable) {
+        this.addObjectProperty(object, name, desc);
+        if (level == PropertyLevels.BASIC) {
           if (++enumerablePropertyCount == OBJECT_PREVIEW_MAX_ITEMS) {
             break;
           }
         }
       }
-      preview.enumerableOwnProperties = enumerableOwnProperties;
+    }
 
-      // The server is interested in at most OBJECT_PREVIEW_MAX_ITEMS items in
-      // set and map containers.
-      const containerContents = getObjectContainerContents(object);
-      if (containerContents) {
-        preview.containerContents = containerContents.slice(
+    // The server is interested in at most OBJECT_PREVIEW_MAX_ITEMS items in
+    // set and map containers.
+    let containerContents = getObjectContainerContents(object);
+    if (containerContents) {
+      if (level == PropertyLevels.BASIC) {
+        containerContents = containerContents.slice(
           0,
           OBJECT_PREVIEW_MAX_ITEMS
         );
-        preview.containerContents.forEach(v => this.addContainerValue(v));
+      }
+      preview.containerContents = containerContents;
+      preview.containerContents.forEach(v => this.addContainerValue(v));
+    }
+
+    switch (object.class) {
+      case "RegExp":
+        this.addObjectCall(object, "toString");
+        break;
+      case "Date":
+        this.addObjectCall(object, "getTime");
+        break;
+      case "Set":
+      case "Map":
+        this.addObjectPropertyValue(object, "size");
+        break;
+      case "Error":
+      case "EvalError":
+      case "RangeError":
+      case "ReferenceError":
+      case "SyntaxError":
+      case "TypeError":
+      case "URIError":
+        this.addObjectPropertyValue(object, "name");
+        this.addObjectPropertyValue(object, "message");
+        this.addObjectPropertyValue(object, "stack");
+        this.addObjectPropertyValue(object, "fileName");
+        this.addObjectPropertyValue(object, "lineNumber");
+        this.addObjectPropertyValue(object, "columnNumber");
+        break;
+    }
+
+    // Search the prototype chain for getter properties and fill in their values
+    // if we are getting all properties of the object.
+    if (level == PropertyLevels.FULL) {
+      let { proto } = object;
+      while (proto) {
+        let names = [];
+        try {
+          names = proto.getOwnPropertyNames();
+        } catch (e) {}
+
+        for (const name of names) {
+          let desc = null;
+          try {
+            desc = proto.getOwnPropertyDescriptor(name);
+          } catch (e) {}
+
+          if (desc && desc.get) {
+            this.addObjectPropertyValue(object, name);
+          }
+        }
+
+        proto = proto.proto;
       }
     }
   },
 
-  addPropertyDescriptor(desc, includeProperties) {
+  addObjectPropertyValue(object, name) {
+    try {
+      const value = makeConvertedDebuggeeValue(
+        object.unsafeDereference()[name]
+      );
+
+      this.addObjectProperty(object, name, { value, enumerable: true });
+    } catch (e) {}
+  },
+
+  addObjectProperty(object, name, desc) {
+    const id = gPausedObjects.getId(object);
+    const preview = this.objects[id].preview;
+
+    if (!preview.properties) {
+      preview.properties = Object.create(null);
+    }
+    if (name in preview.properties) {
+      return;
+    }
+
+    this.addPropertyDescriptor(desc);
+    preview.properties[name] = desc;
+  },
+
+  addObjectCall(object, name) {
+    const id = gPausedObjects.getId(object);
+    const preview = this.objects[id].preview;
+
+    if (!preview.callResults) {
+      preview.callResults = Object.create(null);
+    }
+    if (name in preview.callResults) {
+      return;
+    }
+
+    try {
+      const value = makeConvertedDebuggeeValue(
+        object.unsafeDereference()[name]()
+      );
+
+      this.addValue(value);
+      preview.callResults[name] = value;
+    } catch (e) {}
+  },
+
+  addPropertyDescriptor(desc, level) {
     if (desc.value) {
-      this.addValue(desc.value, includeProperties);
+      this.addValue(desc.value, level);
     }
     if (desc.get) {
-      this.addObject(desc.get, includeProperties);
+      this.addObject(desc.get, level);
     }
     if (desc.set) {
-      this.addObject(desc.set, includeProperties);
+      this.addObject(desc.set, level);
     }
   },
 
@@ -1582,10 +1776,22 @@ PreviewedObjects.prototype = {
     const names = getEnvironmentNames(env);
     this.environments[id] = { data, names };
 
-    names.forEach(({ value }) => this.addValue(value, true));
+    names.forEach(({ value }) => this.addValue(value, PropertyLevels.BASIC));
+
+    if (data.type != "declarative") {
+      this.addObject(data.object, PropertyLevels.BASIC);
+    }
 
     this.addObject(data.callee);
     this.addEnvironment(data.parent);
+  },
+
+  addCompletionValue(v) {
+    if (v.return) {
+      this.addValue(v.return);
+    } else if (v.throw) {
+      this.addValue(v.throw);
+    }
   },
 };
 
@@ -1603,13 +1809,16 @@ PreviewedObjects.prototype = {
 // as the server will end up needing to make more requests before the client can
 // finish pausing.
 function getPauseData() {
+  const paintData = RecordReplayControl.repaint();
+
   const numFrames = countScriptFrames();
   if (!numFrames) {
-    return {};
+    return { paintData };
   }
 
   const rv = new PreviewedObjects();
 
+  rv.paintData = paintData;
   rv.frames = [];
   rv.scripts = {};
   rv.offsetMetadata = [];
@@ -1632,17 +1841,31 @@ function getPauseData() {
       metadata: script.getOffsetMetadata(dbgFrame.offset),
     });
     addScript(frame.script);
-    rv.addValue(frame.this, true);
+    rv.addValue(frame.this, PropertyLevels.BASIC);
     if (frame.arguments) {
       for (const arg of frame.arguments) {
-        rv.addValue(arg, true);
+        rv.addValue(arg, PropertyLevels.BASIC);
       }
     }
-    rv.addObject(frame.callee, false);
-    rv.addEnvironment(frame.environment, true);
+    rv.addObject(frame.callee, PropertyLevels.NONE);
+    rv.addEnvironment(frame.environment, PropertyLevels.BASIC);
+  }
+
+  if (gPopFrameResult) {
+    rv.popFrameResult = convertCompletionValue(gPopFrameResult);
+    rv.addCompletionValue(gPopFrameResult);
   }
 
   return rv;
+}
+
+function formatDisplayName(frame) {
+  if (frame.type === "call") {
+    const callee = frame.callee;
+    return callee.name || callee.userDisplayName || callee.displayName;
+  }
+
+  return `(${frame.type})`;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1719,7 +1942,7 @@ const gRequestHandlers = {
   getObjectProperties(request) {
     divergeFromRecording();
     const object = gPausedObjects.getObject(request.id);
-    return getObjectProperties(object);
+    return { properties: getObjectProperties(object) };
   },
 
   getObjectContainerContents(request) {
@@ -1731,6 +1954,11 @@ const gRequestHandlers = {
     divergeFromRecording();
     const obj = gPausedObjects.getObject(request.id);
     const thisv = convertValueFromParent(request.thisv);
+
+    if (thisv instanceof Debugger.Object && isBlacklisted(thisv)) {
+      return { return: "Can't call method on blacklisted object" };
+    }
+
     const args = request.args.map(v => convertValueFromParent(v));
     const rv = obj.apply(thisv, args);
     return convertCompletionValue(rv);
@@ -1784,10 +2012,6 @@ const gRequestHandlers = {
     return convertCompletionValue(rv);
   },
 
-  popFrameResult(request) {
-    return gPopFrameResult ? convertCompletionValue(gPopFrameResult) : {};
-  },
-
   findConsoleMessages(request) {
     return gConsoleMessages;
   },
@@ -1804,7 +2028,6 @@ const gRequestHandlers = {
       document: getObjectId(makeDebuggeeValue(window.document)),
       Services: getObjectId(makeDebuggeeValue(Services)),
       InspectorUtils: getObjectId(makeDebuggeeValue(InspectorUtils)),
-      CSSRule: getObjectId(makeDebuggeeValue(CSSRule)),
     };
   },
 
@@ -1820,9 +2043,13 @@ const gRequestHandlers = {
     divergeFromRecording();
     const object = gPausedObjects.getObject(request.id);
 
+    if (isBlacklisted(object)) {
+      return { return: "Can't get blacklisted object property" };
+    }
+
     try {
       const rv = object.unsafeDereference()[request.name];
-      return { return: convertValue(makeDebuggeeValue(rv)) };
+      return { return: makeConvertedDebuggeeValue(rv) };
     } catch (e) {
       return { throw: "" + e };
     }
@@ -1861,15 +2088,10 @@ const gRequestHandlers = {
 };
 
 function processRequest(request) {
-  try {
-    if (gRequestHandlers[request.type]) {
-      return gRequestHandlers[request.type](request);
-    }
-    return { exception: "No handler for " + request.type };
-  } catch (e) {
-    printError("processRequest", e);
-    return { exception: `Request failed: ${request.type}` };
+  if (gRequestHandlers[request.type]) {
+    return gRequestHandlers[request.type](request);
   }
+  throwError(`"No handler for ${request.type}`);
 }
 
 function printError(why, e) {
@@ -1880,13 +2102,13 @@ function printError(why, e) {
     msg = "Unknown";
   }
   dump(`Record/Replay Error: ${why}: ${msg}\n`);
+  return msg;
 }
 
 // eslint-disable-next-line no-unused-vars
 var EXPORTED_SYMBOLS = [
   "ManifestStart",
-  "BeforeCheckpoint",
-  "AfterCheckpoint",
+  "HitCheckpoint",
   "NewTimeWarpTarget",
   "ScriptResumeFrame",
 ];

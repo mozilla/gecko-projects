@@ -120,23 +120,22 @@ class StaticAnalysisMonitor(object):
             self._processed = self._processed + 1
             return (warning, False)
         if warning is not None:
-            def get_reliability(checker_name):
+            def get_check_config(checker_name):
                 # get the matcher from self._clang_tidy_config that is the 'name' field
-                reliability = None
                 for item in self._clang_tidy_config:
                     if item['name'] == checker_name:
-                        reliability = item.get('reliability', 'low')
-                        break
-                    else:
-                        # We are using a regex in order to also match 'mozilla-.* like checkers'
-                        matcher = re.match(item['name'], checker_name)
-                        if matcher is not None and matcher.group(0) == checker_name:
-                            reliability = item.get('reliability', 'low')
-                            break
-                return reliability
-            reliability = get_reliability(warning['flag'])
-            if reliability is not None:
-                warning['reliability'] = reliability
+                        return item
+
+                    # We are using a regex in order to also match 'mozilla-.* like checkers'
+                    matcher = re.match(item['name'], checker_name)
+                    if matcher is not None and matcher.group(0) == checker_name:
+                        return item
+
+            check_config = get_check_config(warning['flag'])
+            if check_config is not None:
+                warning['reliability'] = check_config.get('reliability', 'low')
+                warning['reason'] = check_config.get('reason')
+                warning['publish'] = check_config.get('publish', True)
         return (warning, True)
 
 
@@ -237,7 +236,10 @@ class StaticAnalysis(MachCommandBase):
                 if name_re.search(f['file']):
                     total = total + 1
 
-        if not total:
+        # Filter source to remove excluded files
+        source = self._generate_path_list(source, verbose=verbose)
+
+        if not total or not source:
             self.log(logging.INFO, 'static-analysis', {},
                      "There are no files eligible for analysis. Please note that 'header' files "
                      "cannot be used for analysis since they do not consist compilation units.")
@@ -289,8 +291,10 @@ class StaticAnalysis(MachCommandBase):
                      'directory, ~./mozbuild/coverity is used.')
     @CommandArgument('--outgoing', default=False, action='store_true',
                      help='Run coverity on outgoing files from mercurial or git repository')
+    @CommandArgument('--full-build', default=False, action='store_true',
+                     help='Run a full build for coverity analisys.')
     def check_coverity(self, source=[], output=None, coverity_output_path=None,
-                       outgoing=False, verbose=False):
+                       outgoing=False, full_build=False, verbose=False):
         self._set_log_level(verbose)
         self.log_manager.enable_all_structured_loggers()
 
@@ -299,15 +303,118 @@ class StaticAnalysis(MachCommandBase):
                      'Coverity based static-analysis cannot be ran outside automation.')
             return
 
+        if full_build and outgoing:
+            self.log(logging.INFO, 'static-analysis', {},
+                     'Coverity full build cannot be associated with outgoing.')
+            return
+
         # Use outgoing files instead of source files
         if outgoing:
             repo = get_repository_object(self.topsrcdir)
             files = repo.get_outgoing_files()
             source = map(os.path.abspath, files)
 
-        if len(source) == 0:
+        # Verify that we have source files or we are dealing with a full-build
+        if len(source) == 0 and not full_build:
             self.log(logging.ERROR, 'static-analysis', {},
                      'There are no files that coverity can use to scan.')
+            return 0
+
+        # Load the configuration file for coverity static-analysis
+        # For the moment we store only the reliability index for each checker
+        # as the rest is managed on the https://github.com/mozilla/release-services side.
+        self._cov_config = self._get_cov_config()
+
+        rc = self.setup_coverity()
+        if rc != 0:
+            return rc
+
+        # First run cov-run-desktop --setup in order to setup the analysis env
+        # We need this in both cases, per patch analysis or full tree build
+        cmd = [self.cov_run_desktop, '--setup']
+        if self.run_cov_command(cmd, self.cov_path):
+            return 1
+
+        # Run cov-configure for clang, javascript and python
+        langs = ["clang", "javascript", "python"]
+        for lang in langs:
+            cmd = [self.cov_configure, '--{}'.format(lang)]
+
+            if self.run_cov_command(cmd):
+                return 1
+
+        if full_build:
+            # 1. Build the model file that is going to be used for analysis
+            model_path = mozpath.join("tools", "coverity", "model.cpp")
+            cmd = [self.cov_make_library, "-sf", self.cov_lic_path, model_path]
+
+            if self.run_cov_command(cmd):
+                return 1
+
+            # 2. Run cov-build
+
+            # Add cov_build command
+            cmd = [
+                self.cov_build,
+                '--dir',
+                'cov-int'
+            ]
+            # Add fs capture search paths for languages that are not nuilt
+            cmd += [
+                "--fs-capture-search={}".format(path)
+                for path in self.cov_capture_search
+            ]
+
+            # Add the exclude criteria for test cases
+            cmd += [
+                '--fs-capture-search-exclude-regex',
+                '.*/test',
+                './mach', '--log-no-times', 'build'
+            ]
+            if self.run_cov_command(cmd):
+                return 1
+
+            # 3. Run cov-analyze and exclude disabled checkers
+            cmd = [
+                self.cov_analyze,
+                '--dir',
+                'cov-int',
+                '--all',
+                '--enable-virtual',
+                '--strip-path={}'.format(self.topsrcdir),
+                '-sf',
+                self.cov_lic_path
+            ]
+
+            cmd += [
+                "--disable={}".format(key)
+                for key, checker in self._cov_config['coverity_checkers'].items()
+                if checker.get("publish", True) is False
+            ]
+
+            if self.run_cov_command(cmd):
+                return 1
+
+            # 4. Run cov-commit-defects
+            protocol = "https" if self.cov_server_ssl else "http"
+            server_url = "{0}://{1}:{2}".format(protocol, self.cov_url, self.cov_port)
+            cmd = [
+                self.cov_commit_defects,
+                "--auth-key-file",
+                self.cov_auth_path,
+                "--stream",
+                self.cov_stream,
+                "--dir",
+                "cov-int",
+                "--url",
+                server_url,
+                "-sf",
+                self.cov_lic_path
+            ]
+
+            if self.run_cov_command(cmd):
+                return 1
+
             return 0
 
         rc = self._build_compile_db(verbose=verbose)
@@ -322,49 +429,13 @@ class StaticAnalysis(MachCommandBase):
                      'There are no files that need to be analyzed.')
             return 0
 
-        # Load the configuration file for coverity static-analysis
-        # For the moment we store only the reliability index for each checker
-        # as the rest is managed on the https://github.com/mozilla/release-services side.
-        self._cov_config = self._get_cov_config()
-
-        rc = self.setup_coverity()
-        if rc != 0:
-            return rc
-
-        # First run cov-run-desktop --setup in order to setup the analysis env
-        cmd = [self.cov_run_desktop, '--setup']
-        self.log(logging.INFO, 'static-analysis', {},
-                 'Running {} --setup'.format(self.cov_run_desktop))
-
-        rc = self.run_process(args=cmd, cwd=self.cov_path, pass_thru=True)
-
-        if rc != 0:
-            self.log(logging.ERROR, 'static-analysis', {},
-                     'Running {} --setup failed!'.format(self.cov_run_desktop))
-            return rc
-
-        # Run cov-configure for clang
-        cmd = [self.cov_configure, '--clang']
-        self.log(logging.INFO, 'static-analysis', {},
-                 'Running {} --clang'.format(self.cov_configure))
-
-        rc = self.run_process(args=cmd, cwd=self.cov_path, pass_thru=True)
-
-        if rc != 0:
-            self.log(logging.ERROR, 'static-analysis', {},
-                     'Running {} --clang failed!'.format(self.cov_configure))
-            return rc
-
         # For each element in commands_list run `cov-translate`
         for element in commands_list:
-            cmd = [self.cov_translate, '--dir', self.cov_idir_path] + element['command'].split(' ')
-            self.log(logging.INFO, 'static-analysis', {},
-                     'Running Coverity Tranlate for {}'.format(cmd))
-            rc = self.run_process(args=cmd, cwd=element['directory'], pass_thru=True)
-            if rc != 0:
-                self.log(logging.ERROR, 'static-analysis', {},
-                         'Running Coverity Tranlate failed for {}'.format(cmd))
-                return cmd
+            cmd = [self.cov_translate, '--dir', self.cov_idir_path] + \
+                element['command'].split(' ')
+
+            if self.run_cov_command(cmd, element['directory']):
+                return 1
 
         if coverity_output_path is None:
             cov_result = mozpath.join(self.cov_state_path, 'cov-results.json')
@@ -372,15 +443,28 @@ class StaticAnalysis(MachCommandBase):
             cov_result = mozpath.join(coverity_output_path, 'cov-results.json')
 
         # Once the capture is performed we need to do the actual Coverity Desktop analysis
-        cmd = [self.cov_run_desktop, '--json-output-v6', cov_result, '--analyze-captured-source']
-        self.log(logging.INFO, 'static-analysis', {},
-                 'Running Coverity Analysis for {}'.format(cmd))
-        rc = self.run_process(cmd, cwd=self.cov_state_path, pass_thru=True)
-        if rc != 0:
-            self.log(logging.ERROR, 'static-analysis', {}, 'Coverity Analysis failed!')
+        cmd = [self.cov_run_desktop, '--json-output-v6',
+               cov_result, '--analyze-captured-source']
+
+        if self.run_cov_command(cmd, self.cov_state_path):
+            return 1
 
         if output is not None:
             self.dump_cov_artifact(cov_result, source, output)
+
+    def run_cov_command(self, cmd, path=None):
+        if path is None:
+            # We want to run it in topsrcdir
+            path = self.topsrcdir
+
+        self.log(logging.INFO, 'static-analysis', {}, 'Running '+' '.join(cmd))
+
+        rc = self.run_process(args=cmd, cwd=path, pass_thru=True)
+
+        if rc != 0:
+            self.log(logging.ERROR, 'static-analysis', {}, 'Running ' + ' '.join(cmd) + ' failed!')
+            return rc
+        return 0
 
     def get_reliability_index_for_cov_checker(self, checker_name):
         if self._cov_config is None:
@@ -498,12 +582,16 @@ class StaticAnalysis(MachCommandBase):
         self.cov_analysis_url = cov_config.get('package_url')
         self.cov_package_name = cov_config.get('package_name')
         self.cov_url = cov_config.get('server_url')
+        self.cov_server_ssl = cov_config.get('server_ssl', True)
         # In case we don't have a port in the secret we use the default one,
         # for a default coverity deployment.
         self.cov_port = cov_config.get('server_port', 8443)
         self.cov_auth = cov_config.get('auth_key')
         self.cov_package_ver = cov_config.get('package_ver')
+        self.cov_lic_name = cov_config.get('lic_name')
+        self.cov_capture_search = cov_config.get('fs_capture_search', None)
         self.cov_full_stack = cov_config.get('full_stack', False)
+        self.cov_stream = cov_config.get('stream', False)
 
         return 0
 
@@ -535,9 +623,9 @@ class StaticAnalysis(MachCommandBase):
         }
         '''
         # Generate the coverity.conf and auth files
-        cov_auth_path = mozpath.join(self.cov_state_path, 'auth')
+        self.cov_auth_path = mozpath.join(self.cov_state_path, 'auth')
         cov_setup_path = mozpath.join(self.cov_state_path, 'coverity.conf')
-        cov_conf = COVERITY_CONFIG % (self.cov_url, self.cov_port, cov_auth_path)
+        cov_conf = COVERITY_CONFIG % (self.cov_url, self.cov_port, self.cov_auth_path)
 
         def download(artifact_url, target):
             import requests
@@ -550,11 +638,11 @@ class StaticAnalysis(MachCommandBase):
 
         download(self.cov_analysis_url, self.cov_state_path)
 
-        with open(cov_auth_path, 'w') as f:
+        with open(self.cov_auth_path, 'w') as f:
             f.write(self.cov_auth)
 
         # Modify it's permission to 600
-        os.chmod(cov_auth_path, 0o600)
+        os.chmod(self.cov_auth_path, 0o600)
 
         with open(cov_setup_path, 'a') as f:
             f.write(cov_conf)
@@ -579,10 +667,17 @@ class StaticAnalysis(MachCommandBase):
 
         self.cov_path = mozpath.join(self.cov_state_path, self.cov_package_name)
         self.cov_run_desktop = mozpath.join(self.cov_path, 'bin', 'cov-run-desktop')
+        self.cov_configure = mozpath.join(self.cov_path, 'bin', 'cov-configure')
+        self.cov_make_library = mozpath.join(self.cov_path, 'bin', 'cov-make-library')
+        self.cov_build = mozpath.join(self.cov_path, 'bin', 'cov-build')
+        self.cov_analyze = mozpath.join(self.cov_path, 'bin', 'cov-analyze')
+        self.cov_commit_defects = mozpath.join(self.cov_path, 'bin', 'cov-commit-defects')
         self.cov_translate = mozpath.join(self.cov_path, 'bin', 'cov-translate')
         self.cov_configure = mozpath.join(self.cov_path, 'bin', 'cov-configure')
         self.cov_work_path = mozpath.join(self.cov_state_path, 'data-coverity')
         self.cov_idir_path = mozpath.join(self.cov_work_path, self.cov_package_ver, 'idir')
+        self.cov_lic_path = mozpath.join(
+            self.cov_work_path, self.cov_package_ver, 'lic', self.cov_lic_name)
 
         if not os.path.exists(self.cov_path):
             self.log(logging.ERROR, 'static-analysis', {},
@@ -1259,7 +1354,7 @@ class StaticAnalysis(MachCommandBase):
             )
             return self.TOOLS_CHECKER_RETURNED_NO_ISSUES
         if self._dump_results:
-            self._build_autotest_result(test_file_path_json, issues)
+            self._build_autotest_result(test_file_path_json, json.dumps(issues))
         else:
             if not os.path.exists(test_file_path_json):
                 # Result file for test not found maybe regenerate it?
@@ -1909,7 +2004,7 @@ class StaticAnalysis(MachCommandBase):
             if self._is_ignored_path(ignored_dir_re, f):
                 # Early exit if we have provided an ignored directory
                 if verbose:
-                    print("clang-format: Ignored third party code '{0}'".format(f))
+                    print("static-analysis: Ignored third party code '{0}'".format(f))
                 continue
 
             if os.path.isdir(f):

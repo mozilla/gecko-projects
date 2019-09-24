@@ -66,6 +66,7 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/FailedCertSecurityInfoBinding.h"
+#include "mozilla/dom/NetErrorInfoBinding.h"
 #include <bitset>  // for member
 
 // windows.h #defines CreateEvent
@@ -133,6 +134,7 @@ class nsIGlobalObject;
 class nsIXULWindow;
 class nsXULPrototypeDocument;
 class nsXULPrototypeElement;
+class PermissionDelegateHandler;
 struct nsFont;
 
 namespace mozilla {
@@ -1804,8 +1806,10 @@ class Document : public nsINode,
   void DispatchContentLoadedEvents();
 
   void DispatchPageTransition(EventTarget* aDispatchTarget,
-                              const nsAString& aType, bool aPersisted,
-                              bool aOnlySystemGroup = false);
+                              const nsAString& aType,
+                              bool aInFrameSwap,
+                              bool aPersisted,
+                              bool aOnlySystemGroup);
 
   // Call this before the document does something that will unbind all content.
   // That will stop us from doing a lot of work as each element is removed.
@@ -2262,7 +2266,8 @@ class Document : public nsINode,
   OrientationType CurrentOrientationType() const {
     return mCurrentOrientationType;
   }
-  void SetOrientationPendingPromise(Promise* aPromise);
+  void ClearOrientationPendingPromise();
+  bool SetOrientationPendingPromise(Promise* aPromise);
   Promise* GetOrientationPendingPromise() const {
     return mOrientationPendingPromise;
   }
@@ -2308,12 +2313,11 @@ class Document : public nsINode,
     READYSTATE_INTERACTIVE = 3,
     READYSTATE_COMPLETE = 4
   };
-  // Set the readystate of the document.  If updateTimingInformation is true,
+  // Set the readystate of the document.  If aUpdateTimingInformation is true,
   // this will record relevant timestamps in the document's performance timing.
   // Some consumers (document.open is the only one right now, actually) don't
   // want to do that, though.
-  void SetReadyStateInternal(ReadyState rs,
-                             bool updateTimingInformation = true);
+  void SetReadyStateInternal(ReadyState, bool aUpdateTimingInformation = true);
   ReadyState GetReadyStateEnum() { return mReadyState; }
 
   void SetAncestorLoading(bool aAncestorIsLoading);
@@ -2499,6 +2503,18 @@ class Document : public nsINode,
    * exists. This is only relevant to error pages.
    */
   nsIChannel* GetFailedChannel() const { return mFailedChannel; }
+
+  /**
+   * This function checks if the document that is trying to access
+   * GetNetErrorInfo is a trusted about net error page or not.
+   */
+  static bool CallerIsTrustedAboutNetError(JSContext* aCx, JSObject* aObject);
+
+  /**
+   * Get security info like error code for a failed channel. This
+   * property is only exposed to about:neterror documents.
+   */
+  void GetNetErrorInfo(mozilla::dom::NetErrorInfo& aInfo, ErrorResult& aRv);
 
   /**
    * This function checks if the document that is trying to access
@@ -3441,7 +3457,11 @@ class Document : public nsINode,
       DocumentWarnings aWarning, bool asError = false,
       const nsTArray<nsString>& aParams = nsTArray<nsString>()) const;
 
-  // Posts an event to call UpdateVisibilityState
+  // This method may fire a DOM event; if it does so it will happen
+  // synchronously.
+  void UpdateVisibilityState();
+
+  // Posts an event to call UpdateVisibilityState.
   void PostVisibilityUpdateEvent();
 
   bool IsSyntheticDocument() const { return mIsSyntheticDocument; }
@@ -3668,10 +3688,9 @@ class Document : public nsINode,
   // Checks that the caller is either chrome or some addon.
   static bool IsCallerChromeOrAddon(JSContext* aCx, JSObject* aObject);
 
-#ifdef MOZILLA_INTERNAL_API
   bool Hidden() const { return mVisibilityState != VisibilityState::Visible; }
   dom::VisibilityState VisibilityState() const { return mVisibilityState; }
-#endif
+
   void GetSelectedStyleSheetSet(nsAString& aSheetSet);
   void SetSelectedStyleSheetSet(const nsAString& aSheetSet);
   void GetLastStyleSheetSet(nsAString& aSheetSet) {
@@ -3776,6 +3795,8 @@ class Document : public nsINode,
         aDontWarnAboutMutationEventsAndAllowSlowDOMMutations;
   }
 
+  void MaybeWarnAboutZoom();
+
   // ParentNode
   nsIHTMLCollection* Children();
   uint32_t ChildElementCount();
@@ -3871,6 +3892,9 @@ class Document : public nsINode,
   // timed out.
   bool HasValidTransientUserGestureActivation();
 
+  // Return true.
+  bool ConsumeTransientUserGestureActivation();
+
   BrowsingContext* GetBrowsingContext() const;
 
   // This document is a WebExtension page, it might be a background page, a
@@ -3953,6 +3977,9 @@ class Document : public nsINode,
   void AddResizeObserver(ResizeObserver* aResizeObserver);
   void ScheduleResizeObserversNotification() const;
 
+  // Getter for PermissionDelegateHandler. Performs lazy initialization.
+  PermissionDelegateHandler* GetPermissionDelegateHandler();
+
   /**
    * Localization
    *
@@ -4026,6 +4053,10 @@ class Document : public nsINode,
 
  private:
   void InitializeLocalization(nsTArray<nsString>& aResourceIds);
+
+  // Takes the bits from mStyleUseCounters if appropriate, and sets them in
+  // mUseCounters.
+  void SetCssUseCounterBits();
 
   // Returns true if there is any valid value in the viewport meta tag.
   bool ParseWidthAndHeightInMetaViewport(const nsAString& aWidthString,
@@ -4201,10 +4232,6 @@ class Document : public nsINode,
   Element* GetTitleElement();
 
   void RecordNavigationTiming(ReadyState aReadyState);
-
-  // This method may fire a DOM event; if it does so it will happen
-  // synchronously.
-  void UpdateVisibilityState();
 
   // Recomputes the visibility state but doesn't set the new value.
   dom::VisibilityState ComputeVisibilityState() const;
@@ -4575,6 +4602,10 @@ class Document : public nsINode,
 
   UniquePtr<ResizeObserverController> mResizeObserverController;
 
+  // Permission Delegate Handler, lazily-initialized in
+  // PermissionDelegateHandler
+  RefPtr<PermissionDelegateHandler> mPermissionDelegateHandler;
+
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
   // True if we may need to recompute the language prefs for this document.
@@ -4870,6 +4901,12 @@ class Document : public nsINode,
   // mHasBeenEditable is set to true when mEditingState is firstly set to
   // eDesignMode or eContentEditable.
   bool mHasBeenEditable : 1;
+
+  // Whether we've warned about the CSS zoom property.
+  //
+  // We don't use the general deprecated operation mechanism for this because we
+  // also record this as a `CountedUnknownProperty`.
+  bool mHasWarnedAboutZoom : 1;
 
   uint8_t mPendingFullscreenRequests;
 

@@ -104,7 +104,11 @@ export default class LoginItem extends HTMLElement {
       this._editButton.focus();
       return;
     }
-    this._deleteButton.focus();
+    if (!this._deleteButton.disabled) {
+      this._deleteButton.focus();
+      return;
+    }
+    this._originInput.focus();
   }
 
   async render() {
@@ -130,15 +134,17 @@ export default class LoginItem extends HTMLElement {
       timeUsed: this._login.timeLastUsed || "",
     });
 
+    document.l10n.setAttributes(this._favicon, "login-favicon", {
+      title: this._login.title,
+    });
+
     if (this._login.faviconDataURI) {
       this._faviconWrapper.classList.add("hide-default-favicon");
       this._favicon.src = this._login.faviconDataURI;
-      document.l10n.setAttributes(this._favicon, "login-favicon", {
-        title: this._login.title,
-      });
       this._favicon.hidden = false;
     } else {
       // reset the src and alt attributes if the currently selected favicon doesn't have a favicon
+      this._favicon.src = "";
       this._favicon.hidden = true;
       this._faviconWrapper.classList.remove("hide-default-favicon");
     }
@@ -146,7 +152,16 @@ export default class LoginItem extends HTMLElement {
     this._title.textContent = this._login.title;
     this._originInput.defaultValue = this._login.origin || "";
     this._usernameInput.defaultValue = this._login.username || "";
-    this._passwordInput.defaultValue = this._login.password || "";
+    if (this._login.password) {
+      // We use .value instead of .defaultValue since the latter updates the
+      // content attribute making the password easily viewable with Inspect
+      // Element even when Master Password is enabled. This is only run when
+      // the password is non-empty since setting the field to an empty value
+      // would mark the field as 'dirty' for form validation and thus trigger
+      // the error styling since the password field is 'required'.
+      this._passwordInput.value = this._login.password;
+    }
+
     if (this.dataset.editing) {
       this._usernameInput.removeAttribute("data-l10n-id");
       this._usernameInput.placeholder = "";
@@ -246,7 +261,7 @@ export default class LoginItem extends HTMLElement {
       case "click": {
         let classList = event.currentTarget.classList;
         if (classList.contains("reveal-password-checkbox")) {
-          if (this._revealCheckbox.checked) {
+          if (this._revealCheckbox.checked && !this.dataset.isNewLogin) {
             let masterPasswordAuth = await new Promise(resolve => {
               window.AboutLoginsUtils.promptForMasterPassword(resolve);
             });
@@ -292,6 +307,10 @@ export default class LoginItem extends HTMLElement {
           classList.contains("copy-username-button")
         ) {
           let copyButton = event.currentTarget;
+          let otherCopyButton =
+            copyButton == this._copyPasswordButton
+              ? this._copyUsernameButton
+              : this._copyPasswordButton;
           if (copyButton.dataset.copyLoginProperty == "password") {
             let masterPasswordAuth = await new Promise(resolve => {
               window.AboutLoginsUtils.promptForMasterPassword(resolve);
@@ -312,6 +331,10 @@ export default class LoginItem extends HTMLElement {
               detail: propertyToCopy,
             })
           );
+          otherCopyButton.disabled = false;
+          delete otherCopyButton.dataset.copied;
+          clearTimeout(this._copyUsernameTimeoutId);
+          clearTimeout(this._copyPasswordTimeoutId);
           let timeoutId = setTimeout(() => {
             copyButton.disabled = false;
             delete copyButton.dataset.copied;
@@ -368,6 +391,10 @@ export default class LoginItem extends HTMLElement {
         // Prevent page navigation form submit behavior.
         event.preventDefault();
         if (!this._isFormValid({ reportErrors: true })) {
+          return;
+        }
+        if (!this.hasPendingChanges()) {
+          this._toggleEditing(false);
           return;
         }
         let loginUpdates = this._loginFromForm();
@@ -468,10 +495,8 @@ export default class LoginItem extends HTMLElement {
   }
 
   hasPendingChanges() {
-    let { origin = "", username = "", password = "" } = this._login || {};
-
     let valuesChanged = !window.AboutLoginsUtils.doLoginsMatch(
-      { origin, username, password },
+      Object.assign({ username: "", password: "", origin: "" }, this._login),
       this._loginFromForm()
     );
 
@@ -553,8 +578,21 @@ export default class LoginItem extends HTMLElement {
       return;
     }
 
-    this.setLogin(login);
-    this._toggleEditing(false);
+    // Restore faviconDataURI on modified login
+    if (this._login.faviconDataURI && this._login.origin == login.origin) {
+      login.faviconDataURI = this._login.faviconDataURI;
+    }
+
+    let valuesChanged =
+      this.dataset.editing &&
+      !window.AboutLoginsUtils.doLoginsMatch(login, this._loginFromForm());
+    if (valuesChanged) {
+      this.showConfirmationDialog("discard-changes", () => {
+        this.setLogin(login);
+      });
+    } else {
+      this.setLogin(login);
+    }
   }
 
   /**
@@ -569,9 +607,8 @@ export default class LoginItem extends HTMLElement {
       return;
     }
 
-    this._login = {};
+    this.setLogin({}, { skipFocusChange: true });
     this._toggleEditing(false);
-    this.render();
   }
 
   _handleOriginClick() {
@@ -614,12 +651,12 @@ export default class LoginItem extends HTMLElement {
   }
 
   _loginFromForm() {
-    return {
+    return Object.assign({}, this._login, {
       username: this._usernameInput.value.trim(),
       password: this._passwordInput.value,
       origin:
         window.AboutLoginsUtils.getLoginOrigin(this._originInput.value) || "",
-    };
+    });
   }
 
   _recordTelemetryEvent(eventObject) {
@@ -680,7 +717,7 @@ export default class LoginItem extends HTMLElement {
 
     let { checked } = this._revealCheckbox;
     let inputType = checked ? "text" : "password";
-    this._passwordInput.setAttribute("type", inputType);
+    this._passwordInput.type = inputType;
   }
 }
 customElements.define("login-item", LoginItem);

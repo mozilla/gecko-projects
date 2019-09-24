@@ -30,8 +30,6 @@ class gfxGDIFont : public gfxFont {
   /* overrides for the pure virtual methods in gfxFont */
   uint32_t GetSpaceGlyph() override;
 
-  bool SetupCairoFont(DrawTarget* aDrawTarget) override;
-
   already_AddRefed<mozilla::gfx::ScaledFont> GetScaledFont(
       DrawTarget* aTarget) override;
 
@@ -56,6 +54,8 @@ class gfxGDIFont : public gfxFont {
 
   // get hinted glyph width in pixels as 16.16 fixed-point value
   int32_t GetGlyphWidth(uint16_t aGID) override;
+
+  bool GetGlyphBounds(uint16_t aGID, gfxRect* aBounds, bool aTight) override;
 
   void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                               FontCacheSizes* aSizes) const;
@@ -86,6 +86,7 @@ class gfxGDIFont : public gfxFont {
 
   Metrics* mMetrics;
   uint32_t mSpaceGlyph;
+  bool mIsBitmap;
 
   bool mNeedsSyntheticBold;
 

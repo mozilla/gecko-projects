@@ -190,7 +190,7 @@ JitCode* BaselineCacheIRCompiler::compile() {
     EmitStubGuardFailure(masm);
   }
 
-  Linker linker(masm, "getStubCode");
+  Linker linker(masm);
   Rooted<JitCode*> newStubCode(cx_, linker.newCode(cx_, CodeKind::Baseline));
   if (!newStubCode) {
     cx_->recoverFromOutOfMemory();
@@ -777,11 +777,6 @@ bool BaselineCacheIRCompiler::emitCompareStringResult() {
   JSOp op = reader.jsop();
 
   AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
-
-  FailurePath* failure;
-  if (!addFailurePath(&failure)) {
-    return false;
-  }
 
   allocator.discardStack(masm);
 
@@ -2466,14 +2461,13 @@ void BaselineCacheIRCompiler::pushStandardArguments(Register argcReg,
 
   // Push all values, starting at the last one.
   Label loop, done;
-  masm.bind(&loop);
   masm.branchTest32(Assembler::Zero, countReg, countReg, &done);
+  masm.bind(&loop);
   {
     masm.pushValue(Address(argPtr, 0));
     masm.addPtr(Imm32(sizeof(Value)), argPtr);
 
-    masm.sub32(Imm32(1), countReg);
-    masm.jump(&loop);
+    masm.branchSub32(Assembler::NonZero, Imm32(1), countReg, &loop);
   }
   masm.bind(&done);
 }

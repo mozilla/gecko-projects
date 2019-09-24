@@ -66,8 +66,7 @@ class BinASTParserPerTokenizer : public BinASTParserBase,
   using VariableDeclarationKind = binast::VariableDeclarationKind;
 
  public:
-  BinASTParserPerTokenizer(JSContext* cx, LifoAlloc& alloc,
-                           UsedNameTracker& usedNames,
+  BinASTParserPerTokenizer(JSContext* cx, ParseInfo& parseInfo,
                            const JS::ReadOnlyCompileOptions& options,
                            HandleScriptSourceObject sourceObject,
                            Handle<LazyScript*> lazyScript = nullptr);
@@ -368,9 +367,8 @@ class BinASTParseContext : public ParseContext {
   template <typename Tok>
   BinASTParseContext(JSContext* cx, BinASTParserPerTokenizer<Tok>* parser,
                      SharedContext* sc, Directives* newDirectives)
-      : ParseContext(cx, parser->pc_, sc, *parser, parser->usedNames_,
-                     parser->treeHolder_, newDirectives,
-                     /* isFull = */ true) {}
+      : ParseContext(cx, parser->pc_, sc, *parser, parser->getParseInfo(),
+                     newDirectives, /* isFull = */ true) {}
 };
 
 void TraceBinASTParser(JSTracer* trc, JS::AutoGCRooter* parser);

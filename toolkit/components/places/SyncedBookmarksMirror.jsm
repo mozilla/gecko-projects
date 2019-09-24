@@ -482,51 +482,61 @@ class SyncedBookmarksMirror {
    *        and should be merged into the local tree. This option is set to
    *        `true` for incoming records, and `false` for successfully uploaded
    *        records. Tests can also pass `false` to set up an existing mirror.
+   * @param {AbortSignal} [options.signal]
+   *        An abort signal that can be used to interrupt the operation. If
+   *        omitted, storing incoming items can still be interrupted when the
+   *        mirror is finalized.
    */
-  async store(records, { needsMerge = true } = {}) {
-    let options = { needsMerge };
+  async store(records, { needsMerge = true, signal = null } = {}) {
+    let options = {
+      needsMerge,
+      signal: anyAborted(this.finalizeController.signal, signal),
+    };
     await this.db.executeBeforeShutdown("SyncedBookmarksMirror: store", db =>
       db.executeTransaction(async () => {
-        await Async.yieldingForEach(
-          records,
-          async record => {
-            let guid = PlacesSyncUtils.bookmarks.recordIdToGuid(record.id);
-            if (guid == PlacesUtils.bookmarks.rootGuid) {
-              // The engine should hard DELETE Places roots from the server.
-              throw new TypeError("Can't store Places root");
-            }
+        for (let record of records) {
+          if (options.signal.aborted) {
+            throw new SyncedBookmarksMirror.InterruptedError(
+              "Interrupted while storing incoming items"
+            );
+          }
+          let guid = PlacesSyncUtils.bookmarks.recordIdToGuid(record.id);
+          if (guid == PlacesUtils.bookmarks.rootGuid) {
+            // The engine should hard DELETE Places roots from the server.
+            throw new TypeError("Can't store Places root");
+          }
+          if (MirrorLog.level <= Log.Level.Trace) {
             MirrorLog.trace(`Storing in mirror: ${record.cleartextToString()}`);
-            switch (record.type) {
-              case "bookmark":
-                await this.storeRemoteBookmark(record, options);
-                return;
+          }
+          switch (record.type) {
+            case "bookmark":
+              await this.storeRemoteBookmark(record, options);
+              continue;
 
-              case "query":
-                await this.storeRemoteQuery(record, options);
-                return;
+            case "query":
+              await this.storeRemoteQuery(record, options);
+              continue;
 
-              case "folder":
-                await this.storeRemoteFolder(record, options);
-                return;
+            case "folder":
+              await this.storeRemoteFolder(record, options);
+              continue;
 
-              case "livemark":
-                await this.storeRemoteLivemark(record, options);
-                return;
+            case "livemark":
+              await this.storeRemoteLivemark(record, options);
+              continue;
 
-              case "separator":
-                await this.storeRemoteSeparator(record, options);
-                return;
+            case "separator":
+              await this.storeRemoteSeparator(record, options);
+              continue;
 
-              default:
-                if (record.deleted) {
-                  await this.storeRemoteTombstone(record, options);
-                  return;
-                }
-            }
-            MirrorLog.warn("Ignoring record with unknown type", record.type);
-          },
-          yieldState
-        );
+            default:
+              if (record.deleted) {
+                await this.storeRemoteTombstone(record, options);
+                continue;
+              }
+          }
+          MirrorLog.warn("Ignoring record with unknown type", record.type);
+        }
       })
     );
   }
@@ -703,19 +713,39 @@ class SyncedBookmarksMirror {
           Ci.mozISyncedBookmarksMirrorCallback,
         ]),
         // `mozISyncedBookmarksMirrorProgressListener` methods.
-        onFetchLocalTree: (took, count, problems) => {
-          this.progress.stepWithItemCount(
+        onFetchLocalTree: (took, itemCount, deleteCount, problemsBag) => {
+          let counts = [
+            {
+              name: "items",
+              count: itemCount,
+            },
+            {
+              name: "deletions",
+              count: deleteCount,
+            },
+          ];
+          this.progress.stepWithTelemetry(
             ProgressTracker.STEPS.FETCH_LOCAL_TREE,
             took,
-            count
+            counts
           );
           // We don't record local tree problems in validation telemetry.
         },
-        onFetchRemoteTree: (took, count, problemsBag) => {
-          this.progress.stepWithItemCount(
+        onFetchRemoteTree: (took, itemCount, deleteCount, problemsBag) => {
+          let counts = [
+            {
+              name: "items",
+              count: itemCount,
+            },
+            {
+              name: "deletions",
+              count: deleteCount,
+            },
+          ];
+          this.progress.stepWithTelemetry(
             ProgressTracker.STEPS.FETCH_REMOTE_TREE,
             took,
-            count
+            counts
           );
           // Record validation telemetry for problems in the remote tree.
           let problems = bagToNamedCounts(problemsBag, [
@@ -726,12 +756,12 @@ class SyncedBookmarksMirror {
             "parentChildDisagreements",
             "missingChildren",
           ]);
-          this.recordValidationTelemetry(took, count, problems);
+          let checked = itemCount + deleteCount;
+          this.recordValidationTelemetry(took, checked, problems);
         },
         onMerge: (took, countsBag) => {
           let counts = bagToNamedCounts(countsBag, [
             "items",
-            "deletes",
             "dupes",
             "remoteRevives",
             "localDeletes",
@@ -811,7 +841,7 @@ class SyncedBookmarksMirror {
     return rows.map(row => row.getResultByName("guid"));
   }
 
-  async storeRemoteBookmark(record, { needsMerge }) {
+  async storeRemoteBookmark(record, { needsMerge, signal }) {
     let guid = PlacesSyncUtils.bookmarks.recordIdToGuid(record.id);
 
     let url = validateURL(record.bmkUri);
@@ -855,6 +885,11 @@ class SyncedBookmarksMirror {
     let tags = record.tags;
     if (tags && Array.isArray(tags)) {
       for (let rawTag of tags) {
+        if (signal.aborted) {
+          throw new SyncedBookmarksMirror.InterruptedError(
+            "Interrupted while storing tags for incoming bookmark"
+          );
+        }
         let tag = validateTag(rawTag);
         if (!tag) {
           continue;
@@ -879,7 +914,7 @@ class SyncedBookmarksMirror {
     if (url) {
       // The query has a valid URL. Determine if we need to rewrite and reupload
       // it.
-      let params = new URLSearchParams(url.pathname);
+      let params = new URLSearchParams(url.href.slice(url.protocol.length));
       let type = +params.get("type");
       if (type == Ci.nsINavHistoryQueryOptions.RESULTS_AS_TAG_CONTENTS) {
         // Legacy tag queries with this type use a `place:` URL with a `folder`
@@ -888,13 +923,20 @@ class SyncedBookmarksMirror {
         // query for reupload.
         let tagFolderName = validateTag(record.folderName);
         if (tagFolderName) {
-          url.href = `place:tag=${tagFolderName}`;
-          validity = Ci.mozISyncedBookmarksMerger.VALIDITY_REUPLOAD;
+          try {
+            url.href = `place:tag=${tagFolderName}`;
+            validity = Ci.mozISyncedBookmarksMerger.VALIDITY_REUPLOAD;
+          } catch (ex) {
+            // The tag folder name isn't URL-encoded (bug 1449939), so we might
+            // produce an invalid URL. However, invalid URLs are already likely
+            // to cause other issues, and it's better to replace or delete the
+            // query than break syncing or the Firefox UI.
+            url = null;
+          }
         } else {
           // The tag folder name is invalid, so replace or delete the remote
           // copy.
           url = null;
-          validity = Ci.mozISyncedBookmarksMerger.VALIDITY_REPLACE;
         }
       } else {
         let folder = params.get("folder");
@@ -904,14 +946,20 @@ class SyncedBookmarksMirror {
           // causes the query to return all items in the database, so we add
           // `excludeItems=1` to stop it from doing so. We also flag the
           // rewritten query for reupload.
-          url.href = `${url.href}&excludeItems=1`;
-          validity = Ci.mozISyncedBookmarksMerger.VALIDITY_REUPLOAD;
+          try {
+            url.href = `${url.href}&excludeItems=1`;
+            validity = Ci.mozISyncedBookmarksMerger.VALIDITY_REUPLOAD;
+          } catch (ex) {
+            url = null;
+          }
         }
       }
 
       // Other queries are implicitly valid, and don't need to be reuploaded
       // or replaced.
+    }
 
+    if (url) {
       await this.maybeStoreRemoteURL(url);
     } else {
       // If the query doesn't have a valid URL, we must replace the remote copy
@@ -951,7 +999,7 @@ class SyncedBookmarksMirror {
     );
   }
 
-  async storeRemoteFolder(record, { needsMerge }) {
+  async storeRemoteFolder(record, { needsMerge, signal }) {
     let guid = PlacesSyncUtils.bookmarks.recordIdToGuid(record.id);
     let parentGuid = PlacesSyncUtils.bookmarks.recordIdToGuid(record.parentid);
     let serverModified = determineServerModified(record);
@@ -981,6 +1029,11 @@ class SyncedBookmarksMirror {
         children,
         SQLITE_MAX_VARIABLE_NUMBER - 1
       )) {
+        if (signal.aborted) {
+          throw new SyncedBookmarksMirror.InterruptedError(
+            "Interrupted while storing children for incoming folder"
+          );
+        }
         // Builds a fragment like `(?2, ?1, 0), (?3, ?1, 1), ...`, where ?1 is
         // the folder's GUID, [?2, ?3] are the first and second child GUIDs
         // (SQLite binding parameters index from 1), and [0, 1] are the
@@ -1477,12 +1530,13 @@ async function migrateMirrorSchema(db, currentSchemaVersion) {
     );
   }
   if (currentSchemaVersion < 6) {
-    await db.execute(`CREATE INDEX mirror.itemURLs ON items(urlId)`);
-    await db.execute(`CREATE INDEX mirror.itemKeywords ON items(keyword)
-                      WHERE keyword NOT NULL`);
+    await db.execute(`CREATE INDEX IF NOT EXISTS mirror.itemURLs ON
+                      items(urlId)`);
+    await db.execute(`CREATE INDEX IF NOT EXISTS mirror.itemKeywords ON
+                      items(keyword) WHERE keyword NOT NULL`);
   }
   if (currentSchemaVersion < 7) {
-    await db.execute(`CREATE INDEX mirror.structurePositions ON
+    await db.execute(`CREATE INDEX IF NOT EXISTS mirror.structurePositions ON
                       structure(parentGuid, position)`);
   }
 }
@@ -1578,7 +1632,6 @@ async function cleanupMirrorDatabase(db) {
     await db.execute(`DROP TABLE changeGuidOps`);
     await db.execute(`DROP TABLE itemsToApply`);
     await db.execute(`DROP TABLE applyNewLocalStructureOps`);
-    await db.execute(`DROP TABLE itemsToRemove`);
     await db.execute(`DROP VIEW localTags`);
     await db.execute(`DROP TABLE itemsAdded`);
     await db.execute(`DROP TABLE guidsChanged`);
@@ -1730,17 +1783,6 @@ async function initializeTempMirrorEntities(db) {
       WHERE guid = OLD.mergedGuid;
     END`);
 
-  // Stages all items to delete locally and remotely. Items to delete locally
-  // don't need tombstones: since we took the remote deletion, the tombstone
-  // already exists on the server. Items to delete remotely, or non-syncable
-  // items to delete on both sides, need tombstones.
-  await db.execute(`CREATE TEMP TABLE itemsToRemove(
-    guid TEXT PRIMARY KEY,
-    localLevel INTEGER NOT NULL,
-    shouldUploadTombstone BOOLEAN NOT NULL,
-    dateRemovedMicroseconds INTEGER NOT NULL
-  ) WITHOUT ROWID`);
-
   // A view of local bookmark tags. Tags, like keywords, are associated with
   // URLs, so two bookmarks with the same URL should have the same tags. Unlike
   // keywords, one tag may be associated with many different URLs. Tags are also
@@ -1809,7 +1851,8 @@ async function initializeTempMirrorEntities(db) {
          "CHANGES()" returns the number of rows affected by the INSERT above:
          1 if we created the folder, or 0 if the folder already existed. */
       INSERT INTO itemsAdded(guid, isTagging)
-      SELECT b.guid, 1 FROM moz_bookmarks b
+      SELECT b.guid, 1
+      FROM moz_bookmarks b
       JOIN moz_bookmarks p ON p.id = b.parent
       WHERE CHANGES() > 0 AND
             b.title = NEW.tag AND
@@ -1819,7 +1862,15 @@ async function initializeTempMirrorEntities(db) {
          ID creates a tag folder without tagging the URL. */
       INSERT OR IGNORE INTO moz_bookmarks(guid, parent, position, type, fk,
                                           dateAdded, lastModified)
-      SELECT GENERATE_GUID(),
+      SELECT IFNULL((SELECT b.guid FROM moz_bookmarks b
+                     JOIN moz_bookmarks p ON p.id = b.parent
+                     WHERE b.fk = NEW.placeId AND
+                           p.title = NEW.tag AND
+                           p.parent = (SELECT id FROM moz_bookmarks
+                                       WHERE guid = '${
+                                         PlacesUtils.bookmarks.tagsGuid
+                                       }')),
+                    GENERATE_GUID()),
              (SELECT b.id FROM moz_bookmarks b
               JOIN moz_bookmarks p ON p.id = b.parent
               WHERE p.guid = '${PlacesUtils.bookmarks.tagsGuid}' AND
@@ -1838,9 +1889,11 @@ async function initializeTempMirrorEntities(db) {
 
       /* Record an item added notification for the tag entry. */
       INSERT INTO itemsAdded(guid, isTagging)
-      SELECT b.guid, 1 FROM moz_bookmarks b
+      SELECT b.guid, 1
+      FROM moz_bookmarks b
       JOIN moz_bookmarks p ON p.id = b.parent
-      WHERE b.fk = NEW.placeId AND
+      WHERE CHANGES() > 0 AND
+            b.fk = NEW.placeId AND
             p.title = NEW.tag AND
             p.parent = (SELECT id FROM moz_bookmarks
                         WHERE guid = '${PlacesUtils.bookmarks.tagsGuid}');

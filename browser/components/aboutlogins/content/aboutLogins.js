@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+import { recordTelemetryEvent } from "./aboutLoginsUtils.js";
+
 // The init code isn't wrapped in a DOMContentLoaded/load event listener so the
 // page works properly when restored from session restore.
 const gElements = {
@@ -18,8 +20,42 @@ const gElements = {
 
 let numberOfLogins = 0;
 
-let { searchParams } = new URL(document.location);
-if (searchParams.get("filter")) {
+let searchParamsChanged = false;
+let { protocol, pathname, searchParams } = new URL(document.location);
+
+recordTelemetryEvent({
+  method: "open_management",
+  object: searchParams.get("entryPoint") || "direct",
+});
+
+if (searchParams.has("entryPoint")) {
+  // Remove this parameter from the URL (after recording above) to make it
+  // cleaner for bookmarking and switch-to-tab and so that bookmarked values
+  // don't skew telemetry.
+  searchParams.delete("entryPoint");
+  searchParamsChanged = true;
+}
+
+if (searchParams.has("filter")) {
+  let filter = searchParams.get("filter");
+  if (!filter) {
+    // Remove empty `filter` params to give a cleaner URL for bookmarking and
+    // switch-to-tab
+    searchParams.delete("filter");
+    searchParamsChanged = true;
+  }
+}
+
+if (searchParamsChanged) {
+  let newURL = protocol + pathname;
+  let params = searchParams.toString();
+  if (params) {
+    newURL += "?" + params;
+  }
+  window.location.replace(newURL);
+} else if (searchParams.has("filter")) {
+  // This must be after the `location.replace` so it doesn't cause telemetry to
+  // record a filter event before the navigation to clean the URL.
   gElements.loginFilter.value = searchParams.get("filter");
 }
 
@@ -31,16 +67,21 @@ function updateNoLogins() {
   gElements.loginItem.classList.toggle("no-logins", numberOfLogins == 0);
 }
 
+function handleAllLogins(logins) {
+  gElements.loginList.setLogins(logins);
+  numberOfLogins = logins.length;
+  updateNoLogins();
+}
+
+function handleSyncState(syncState) {
+  gElements.fxAccountsButton.updateState(syncState);
+  gElements.loginFooter.hidden = syncState.hideMobileFooter;
+}
+
 window.addEventListener("AboutLoginsChromeToContent", event => {
   switch (event.detail.messageType) {
     case "AllLogins": {
-      gElements.loginList.setLogins(event.detail.value);
-      numberOfLogins = event.detail.value.length;
-      updateNoLogins();
-      break;
-    }
-    case "LocalizeBadges": {
-      gElements.loginFooter.showStoreIconsForLocales(event.detail.value);
+      handleAllLogins(event.detail.value);
       break;
     }
     case "LoginAdded": {
@@ -56,8 +97,11 @@ window.addEventListener("AboutLoginsChromeToContent", event => {
       break;
     }
     case "LoginRemoved": {
-      gElements.loginList.loginRemoved(event.detail.value);
+      // The loginRemoved function of loginItem needs to be called before
+      // the one in loginList since it will remove the editing. So that the
+      // discard dialog won't show up if we delete a login after edit it.
       gElements.loginItem.loginRemoved(event.detail.value);
+      gElements.loginList.loginRemoved(event.detail.value);
       numberOfLogins--;
       updateNoLogins();
       break;
@@ -66,13 +110,21 @@ window.addEventListener("AboutLoginsChromeToContent", event => {
       gElements.loginList.addFavicons(event.detail.value);
       break;
     }
+    case "Setup": {
+      handleAllLogins(event.detail.value.logins);
+      gElements.loginFooter.showStoreIconsForLocales(
+        event.detail.value.selectedBadgeLanguages
+      );
+      handleSyncState(event.detail.value.syncState);
+      document.documentElement.classList.add("initialized");
+      break;
+    }
     case "ShowLoginItemError": {
       gElements.loginItem.showLoginItemError(event.detail.value);
       break;
     }
     case "SyncState": {
-      gElements.fxAccountsButton.updateState(event.detail.value);
-      gElements.loginFooter.hidden = event.detail.value.hideMobileFooter;
+      handleSyncState(event.detail.value);
       break;
     }
     case "UpdateBreaches": {

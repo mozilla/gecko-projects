@@ -119,17 +119,10 @@ const previewers = {
         grip.userDisplayName = hooks.createValueGrip(userDisplayName.value);
       }
 
-      let script;
-      const dbgGlobal = hooks.getGlobalDebugObject();
-      if (dbgGlobal) {
-        script = dbgGlobal.makeDebuggeeValue(obj.unsafeDereference()).script;
-      } else {
-        script = obj.script;
-      }
-      if (script) {
+      if (obj.script) {
         grip.location = {
-          url: script.url,
-          line: script.startLine,
+          url: obj.script.url,
+          line: obj.script.startLine,
         };
       }
 
@@ -139,7 +132,10 @@ const previewers = {
 
   RegExp: [
     function({ obj, hooks }, grip) {
-      const str = ObjectUtils.getRegExpString(obj);
+      const str = DevToolsUtils.callPropertyOnObject(obj, "toString");
+      if (typeof str != "string") {
+        return false;
+      }
 
       grip.displayString = hooks.createValueGrip(str);
       return true;
@@ -148,7 +144,7 @@ const previewers = {
 
   Date: [
     function({ obj, hooks }, grip) {
-      const time = ObjectUtils.getDateTime(obj);
+      const time = DevToolsUtils.callPropertyOnObject(obj, "getTime");
       if (typeof time != "number") {
         return false;
       }
@@ -211,7 +207,10 @@ const previewers = {
 
   Set: [
     function(objectActor, grip) {
-      const size = ObjectUtils.getContainerSize(objectActor.obj);
+      const size = DevToolsUtils.getProperty(objectActor.obj, "size");
+      if (typeof size != "number") {
+        return false;
+      }
 
       grip.preview = {
         kind: "ArrayLike",
@@ -263,7 +262,10 @@ const previewers = {
 
   Map: [
     function(objectActor, grip) {
-      const size = ObjectUtils.getContainerSize(objectActor.obj);
+      const size = DevToolsUtils.getProperty(objectActor.obj, "size");
+      if (typeof size != "number") {
+        return false;
+      }
 
       grip.preview = {
         kind: "MapLike",
@@ -566,11 +568,21 @@ previewers.Object = [
       case "SyntaxError":
       case "TypeError":
       case "URIError":
-        grip.preview = { kind: "Error" };
-        const properties = ObjectUtils.getErrorProperties(obj);
-        Object.keys(properties).forEach(p => {
-          grip.preview[p] = hooks.createValueGrip(properties[p]);
-        });
+        const name = DevToolsUtils.getProperty(obj, "name");
+        const msg = DevToolsUtils.getProperty(obj, "message");
+        const stack = DevToolsUtils.getProperty(obj, "stack");
+        const fileName = DevToolsUtils.getProperty(obj, "fileName");
+        const lineNumber = DevToolsUtils.getProperty(obj, "lineNumber");
+        const columnNumber = DevToolsUtils.getProperty(obj, "columnNumber");
+        grip.preview = {
+          kind: "Error",
+          name: hooks.createValueGrip(name),
+          message: hooks.createValueGrip(msg),
+          stack: hooks.createValueGrip(stack),
+          fileName: hooks.createValueGrip(fileName),
+          lineNumber: hooks.createValueGrip(lineNumber),
+          columnNumber: hooks.createValueGrip(columnNumber),
+        };
         return true;
       default:
         return false;

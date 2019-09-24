@@ -11,6 +11,7 @@ var EXPORTED_SYMBOLS = [
   "ExtensionData",
   "Langpack",
   "Management",
+  "UninstallObserver",
 ];
 
 /* exported Extension, ExtensionData */
@@ -153,6 +154,7 @@ const PRIVILEGED_PERMS = new Set([
   "urlbar",
   "normandyAddonStudy",
   "networkStatus",
+  "memory",
 ]);
 
 /**
@@ -266,6 +268,14 @@ var UninstallObserver = {
     if (!this.initialized) {
       AddonManager.addAddonListener(this);
       this.initialized = true;
+    }
+  },
+
+  // AddonTestUtils will call this as necessary.
+  uninit() {
+    if (this.initialized) {
+      AddonManager.removeAddonListener(this);
+      this.initialized = false;
     }
   },
 
@@ -929,7 +939,7 @@ class ExtensionData {
       // Check if there's a root directory `/localization` in the langpack.
       // If there is one, add it with the name `toolkit` as a FileSource.
       const entries = await this.readDirectory("localization");
-      if (entries.length > 0) {
+      if (entries.length) {
         l10nRegistrySources.toolkit = "";
       }
 
@@ -1394,10 +1404,9 @@ class ExtensionData {
         "webextPerms.sideloadHeader",
         ["<>"]
       );
-      let key =
-        result.msgs.length == 0
-          ? "webextPerms.sideloadTextNoPerms"
-          : "webextPerms.sideloadText2";
+      let key = !result.msgs.length
+        ? "webextPerms.sideloadTextNoPerms"
+        : "webextPerms.sideloadText2";
       result.text = bundle.GetStringFromName(key);
       result.acceptText = bundle.GetStringFromName(
         "webextPerms.sideloadEnable.label"
@@ -1642,7 +1651,7 @@ class Extension extends ExtensionData {
         this.permissions.add(perm);
       }
 
-      if (permissions.origins.length > 0) {
+      if (permissions.origins.length) {
         let patterns = this.whiteListedHosts.patterns.map(host => host.pattern);
 
         this.whiteListedHosts = new MatchPatternSet(
@@ -2488,7 +2497,7 @@ class Langpack extends ExtensionData {
 
   async startup(reason) {
     this.chromeRegistryHandle = null;
-    if (this.startupData.chromeEntries.length > 0) {
+    if (this.startupData.chromeEntries.length) {
       const manifestURI = Services.io.newURI(
         "manifest.json",
         null,

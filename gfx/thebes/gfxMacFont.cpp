@@ -230,16 +230,6 @@ bool gfxMacFont::ShapeText(DrawTarget* aDrawTarget, const char16_t* aText,
                             aVertical, aRounding, aShapedText);
 }
 
-bool gfxMacFont::SetupCairoFont(DrawTarget* aDrawTarget) {
-  if (cairo_scaled_font_status(mScaledFont) != CAIRO_STATUS_SUCCESS) {
-    // Don't cairo_set_scaled_font as that would propagate the error to
-    // the cairo_t, precluding any further drawing.
-    return false;
-  }
-  cairo_set_scaled_font(gfxFont::RefCairo(aDrawTarget), mScaledFont);
-  return true;
-}
-
 gfxFont::RunMetrics gfxMacFont::Measure(const gfxTextRun* aTextRun,
                                         uint32_t aStart, uint32_t aEnd,
                                         BoundingBoxType aBoundingBoxType,
@@ -522,6 +512,27 @@ int32_t gfxMacFont::GetGlyphWidth(uint16_t aGID) {
   return advance.width * 0x10000;
 }
 
+bool gfxMacFont::GetGlyphBounds(uint16_t aGID, gfxRect* aBounds, bool aTight) {
+  CGRect bb;
+  if (!::CGFontGetGlyphBBoxes(mCGFont, &aGID, 1, &bb)) {
+    return false;
+  }
+
+  // broken fonts can return incorrect bounds for some null characters,
+  // see https://bugzilla.mozilla.org/show_bug.cgi?id=534260
+  if (bb.origin.x == -32767 && bb.origin.y == -32767 &&
+      bb.size.width == 65534 && bb.size.height == 65534) {
+    *aBounds = gfxRect(0, 0, 0, 0);
+    return true;
+  }
+
+  gfxRect bounds(bb.origin.x, -(bb.origin.y + bb.size.height), bb.size.width,
+                 bb.size.height);
+  bounds.Scale(mFUnitsConvFactor);
+  *aBounds = bounds;
+  return true;
+}
+
 // Try to initialize font metrics via platform APIs (CG/CT),
 // and set mIsValid = TRUE on success.
 // We ONLY call this for local (platform) fonts that are not sfnt format;
@@ -579,6 +590,12 @@ already_AddRefed<ScaledFont> gfxMacFont::GetScaledFont(DrawTarget* aTarget) {
 
   RefPtr<ScaledFont> scaledFont(mAzureScaledFont);
   return scaledFont.forget();
+}
+
+bool gfxMacFont::ShouldRoundXOffset(cairo_t* aCairo) const {
+  // Quartz surfaces implement show_glyphs for Quartz fonts
+  return aCairo && cairo_surface_get_type(cairo_get_target(aCairo)) !=
+                       CAIRO_SURFACE_TYPE_QUARTZ;
 }
 
 void gfxMacFont::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,

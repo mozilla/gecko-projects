@@ -332,6 +332,7 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<Referent*>, HeapPtr<Wrapper*>> {
 
   // Expose WeakMap public interface.
 
+  using Base::zone;
   using Base::all;
   using Base::has;
   using Base::lookup;
@@ -371,8 +372,7 @@ class DebuggerWeakMap : private WeakMap<HeapPtr<Referent*>, HeapPtr<Wrapper*>> {
     }
   }
 
-  bool findCrossCompartmentTargets(CompartmentSet& targets);
-  bool findSweepGroupEdges(JS::Zone* debuggerZone);
+  bool findSweepGroupEdges() override;
 
  private:
 #ifdef JS_GC_ZEAL
@@ -830,8 +830,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
   void traceForMovingGC(JSTracer* trc);
   void traceCrossCompartmentEdges(JSTracer* tracer);
 
-  bool findCrossCompartmentTargets(CompartmentSet& targets);
-
   static const JSClassOps classOps_;
 
  public:
@@ -1011,7 +1009,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger> {
   static Debugger* fromChildJSObject(JSObject* obj);
 
   Zone* zone() const { return toJSObject()->zone(); }
-  JS::Compartment* compartment() const { return toJSObject()->compartment(); }
 
   bool hasMemory() const;
   DebuggerMemory& memory() const;

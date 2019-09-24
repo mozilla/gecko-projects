@@ -28,6 +28,7 @@ add_task(async function test_ui_state_signedin() {
   const relativeDateAnchor = new Date();
   let state = {
     status: UIState.STATUS_SIGNED_IN,
+    syncEnabled: true,
     email: "foo@bar.com",
     displayName: "Foo Bar",
     avatarURL: "https://foo.bar",
@@ -64,6 +65,9 @@ add_task(async function test_ui_state_signedin() {
       "PanelUI-fxa-menu-monitor-button",
       "PanelUI-fxa-menu-send-button",
       "PanelUI-fxa-menu-syncnow-button",
+      "PanelUI-fxa-menu-account-settings-button",
+      "PanelUI-fxa-menu-account-devices-button",
+      "PanelUI-fxa-menu-account-signout-button",
     ],
     disabledItems: [],
   });
@@ -76,6 +80,7 @@ add_task(async function test_ui_state_signedin() {
 add_task(async function test_ui_state_syncing() {
   let state = {
     status: UIState.STATUS_SIGNED_IN,
+    syncEnabled: true,
     email: "foo@bar.com",
     displayName: "Foo Bar",
     avatarURL: "https://foo.bar",
@@ -90,6 +95,7 @@ add_task(async function test_ui_state_syncing() {
   // Be good citizens and remove the "syncing" state.
   gSync.updateAllUI({
     status: UIState.STATUS_SIGNED_IN,
+    syncEnabled: true,
     email: "foo@bar.com",
     lastSync: new Date(),
     syncing: false,
@@ -132,6 +138,47 @@ add_task(async function test_ui_state_unconfigured() {
   });
   if (!msBadgeEnabled) {
     checkFxAAvatar("not_configured");
+  }
+});
+
+add_task(async function test_ui_state_syncdisabled() {
+  const msBadgeEnabled = Services.prefs.getBoolPref(
+    "browser.messaging-system.fxatoolbarbadge.enabled"
+  );
+  let state = {
+    status: UIState.STATUS_SIGNED_IN,
+    syncEnabled: false,
+    email: "foo@bar.com",
+    displayName: "Foo Bar",
+    avatarURL: "https://foo.bar",
+  };
+
+  gSync.updateAllUI(state);
+  checkPanelUIStatusBar({
+    label: "foo@bar.com",
+    fxastatus: "signedin",
+    syncing: false,
+  });
+  checkRemoteTabsPanel("PanelUI-remotetabs-syncdisabled", false);
+  checkMenuBarItem("sync-enable");
+  checkFxaToolbarButtonPanel({
+    headerTitle: "foo@bar.com",
+    headerDescription: "Manage Account",
+    enabledItems: [
+      "PanelUI-fxa-menu-sendtab-button",
+      "PanelUI-fxa-menu-remotetabs-button",
+      "PanelUI-fxa-menu-connect-device-button",
+      "PanelUI-fxa-menu-sync-prefs-button",
+      "PanelUI-fxa-menu-logins-button",
+      "PanelUI-fxa-menu-monitor-button",
+      "PanelUI-fxa-menu-send-button",
+      // This one will move to `disabledItems` in subsequent patches!
+      "PanelUI-fxa-menu-syncnow-button",
+    ],
+    disabledItems: [],
+  });
+  if (!msBadgeEnabled) {
+    checkFxAAvatar("signedin");
   }
 });
 
@@ -238,6 +285,7 @@ function checkMenuBarItem(expectedShownItemId) {
   checkItemsVisibilities(
     [
       "sync-setup",
+      "sync-enable",
       "sync-syncnowitem",
       "sync-reauthitem",
       "sync-unverifieditem",

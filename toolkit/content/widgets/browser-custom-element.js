@@ -47,11 +47,12 @@
       //
       // Only do this when the rebuild frameloaders pref is off. This update isn't
       // required when we rebuild the frameloaders in the backend.
+      let rebuildFrameLoaders =
+        Services.prefs.getBoolPref(
+          "fission.rebuild_frameloaders_on_remoteness_change"
+        ) || this.ownerGlobal.docShell.nsILoadContext.useRemoteSubframes;
       if (
-        !Services.prefs.getBoolPref(
-          "fission.rebuild_frameloaders_on_remoteness_change",
-          false
-        ) &&
+        !rebuildFrameLoaders &&
         name === "remote" &&
         oldValue != newValue &&
         this.isConnectedAndReady
@@ -607,12 +608,6 @@
     get finder() {
       if (this.isRemoteBrowser) {
         if (!this._remoteFinder) {
-          // Don't attempt to create the remote finder if the
-          // messageManager has already gone away
-          if (!this.messageManager) {
-            return null;
-          }
-
           let jsm = "resource://gre/modules/FinderParent.jsm";
           let { FinderParent } = ChromeUtils.import(jsm, {});
           this._remoteFinder = new FinderParent(this);

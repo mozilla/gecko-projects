@@ -62,6 +62,7 @@ add_task(async function test_queries() {
           "queryFFFFFFF",
           "queryGGGGGGG",
           "queryHHHHHHH",
+          "queryIIIIIII",
         ],
       },
       {
@@ -99,15 +100,41 @@ add_task(async function test_queries() {
         title: "H",
         bmkUri: "place:folder=1",
       },
+      {
+        // Legacy tag query with invalid tag folder name.
+        id: "queryIIIIIII",
+        parentid: "toolbar",
+        type: "query",
+        title: "I",
+        bmkUri: "place:type=7&folder=222",
+        folderName: "    ",
+      },
     ])
   );
 
   info("Create records to upload");
   let changes = await buf.apply();
+  deepEqual(
+    Object.keys(changes),
+    [
+      "menu",
+      "toolbar",
+      "queryAAAAAAA",
+      "queryBBBBBBB",
+      "queryCCCCCCC",
+      "queryDDDDDDD",
+      "queryEEEEEEE",
+      "queryGGGGGGG",
+      "queryHHHHHHH",
+      "queryIIIIIII",
+    ],
+    "Should upload roots, new queries, and rewritten queries"
+  );
   Assert.strictEqual(changes.queryAAAAAAA.cleartext.folderName, tag.title);
   Assert.strictEqual(changes.queryBBBBBBB.cleartext.folderName, "b-tag");
   Assert.strictEqual(changes.queryCCCCCCC.cleartext.folderName, undefined);
   Assert.strictEqual(changes.queryDDDDDDD.cleartext.folderName, tag.title);
+  Assert.strictEqual(changes.queryIIIIIII.tombstone, true);
 
   await assertLocalTree(
     PlacesUtils.bookmarks.toolbarGuid,
@@ -225,10 +252,12 @@ add_task(async function test_mismatched_folder_types() {
 
   info("Apply remote");
   let changesToUpload = await buf.apply();
+  // We leave livemarks unmerged because we're about to upload tombstones for
+  // them, anyway.
   deepEqual(
     await buf.fetchUnmergedGuids(),
-    [PlacesUtils.bookmarks.toolbarGuid],
-    "Should leave toolbar with new remote structure unmerged"
+    ["l1nZZXfB8nC7", "livemarkBBBB", PlacesUtils.bookmarks.toolbarGuid],
+    "Should leave livemarks and toolbar with new remote structure unmerged"
   );
 
   let idsToUpload = inspectChangeRecords(changesToUpload);
@@ -250,6 +279,13 @@ add_task(async function test_mismatched_folder_types() {
       title: BookmarksToolbarTitle,
     },
     "Should delete livemarks locally"
+  );
+
+  let tombstones = await PlacesTestUtils.fetchSyncTombstones();
+  deepEqual(
+    tombstones.map(({ guid }) => guid),
+    ["l1nZZXfB8nC7", "livemarkBBBB"],
+    "Should store local tombstones for livemarks"
   );
 
   await storeChangesInMirror(buf, changesToUpload);

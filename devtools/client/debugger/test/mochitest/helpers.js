@@ -419,7 +419,7 @@ function assertPausedAtSourceAndLine(dbg, expectedSourceId, expectedLine) {
   ok(frames.length >= 1, "Got at least one frame");
   const { sourceId, line } = frames[0].location;
   ok(sourceId == expectedSourceId, "Frame has correct source");
-  ok(line == expectedLine, "Frame has correct line");
+  ok(line == expectedLine, `Frame paused at ${line}, but expected ${expectedLine}`);
 }
 
 // Get any workers associated with the debugger.
@@ -1036,6 +1036,17 @@ function invokeInTab(fnc, ...args) {
   });
 }
 
+
+function clickElementInTab(selector) {
+  info(`click element ${selector} in tab`);
+
+  return ContentTask.spawn(gBrowser.selectedBrowser, { selector }, function*({
+    selector
+  }) {
+    content.wrappedJSObject.document.querySelector(selector).click();
+  });
+}
+
 const isLinux = Services.appinfo.OS === "Linux";
 const isMac = Services.appinfo.OS === "Darwin";
 const cmdOrCtrl = isLinux ? { ctrlKey: true } : { metaKey: true };
@@ -1291,6 +1302,11 @@ const selectors = {
   inlinePreviewLables: ".CodeMirror-linewidget .inline-preview-label",
   inlinePreviewValues: ".CodeMirror-linewidget .inline-preview-value",
   inlinePreviewOpenInspector: ".inline-preview-value button.open-inspector",
+  watchpointsSubmenu: "#node-menu-watchpoints",
+  addGetWatchpoint: "#node-menu-add-get-watchpoint",
+  addSetWatchpoint: "#node-menu-add-set-watchpoint",
+  removeWatchpoint: "#node-menu-remove-watchpoint",
+  logEventsCheckbox: ".events-header input",
 };
 
 function getSelector(elementName, ...args) {
@@ -1391,6 +1407,7 @@ function rightClickElement(dbg, elementName, ...args) {
 
 function rightClickEl(dbg, el) {
   const doc = dbg.win.document;
+  el.scrollIntoView();
   EventUtils.synthesizeMouseAtCenter(el, { type: "contextmenu" }, dbg.win);
 }
 
@@ -1443,6 +1460,10 @@ function toggleScopeNode(dbg, index) {
   return toggleObjectInspectorNode(findElement(dbg, "scopeNode", index));
 }
 
+function rightClickScopeNode(dbg, index) {
+  rightClickObjectInspectorNode(dbg, findElement(dbg, "scopeNode", index));
+}
+
 function getScopeLabel(dbg, index) {
   return findElement(dbg, "scopeNode", index).innerText;
 }
@@ -1457,6 +1478,18 @@ function toggleObjectInspectorNode(node) {
 
   log(`Toggling node ${node.innerText}`);
   node.click();
+  return waitUntil(
+    () => objectInspector.querySelectorAll(".node").length !== properties
+  );
+}
+
+function rightClickObjectInspectorNode(dbg, node) {
+  const objectInspector = node.closest(".object-inspector");
+  const properties = objectInspector.querySelectorAll(".node").length;
+
+  log(`Right clicking node ${node.innerText}`);
+  rightClickEl(dbg, node);
+
   return waitUntil(
     () => objectInspector.querySelectorAll(".node").length !== properties
   );
@@ -1800,3 +1833,16 @@ function evaluateExpressionInConsole(hud, expression) {
 function waitForInspectorPanelChange(dbg) {
   return dbg.toolbox.getPanelWhenReady("inspector");
 }
+
+const { PromiseTestUtils } = ChromeUtils.import(
+  "resource://testing-common/PromiseTestUtils.jsm"
+);
+
+// Debugger operations that are canceled because they were rendered obsolete by
+// a navigation or pause/resume end up as uncaught rejections. These never
+// indicate errors and are whitelisted in all debugger tests.
+PromiseTestUtils.whitelistRejectionsGlobally(/Page has navigated/);
+PromiseTestUtils.whitelistRejectionsGlobally(/Current thread has changed/);
+PromiseTestUtils.whitelistRejectionsGlobally(
+  /Current thread has paused or resumed/
+);

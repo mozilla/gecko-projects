@@ -8,7 +8,6 @@ from __future__ import absolute_import, print_function
 
 import json
 import os
-import platform
 import sys
 
 from mozprocess import ProcessHandler
@@ -19,6 +18,7 @@ results = []
 
 
 def lint(files, config, **kwargs):
+    log = kwargs['log']
     tests_dir = os.path.join(kwargs['root'], 'testing', 'web-platform', 'tests')
 
     def process_line(line):
@@ -36,9 +36,8 @@ def lint(files, config, **kwargs):
         print("No specific files specified, running the full wpt lint"
               " (this is slow)", file=sys.stderr)
         files = ["--all"]
-    cmd = [os.path.join(tests_dir, 'wpt'), 'lint', '--json'] + files
-    if platform.system() == 'Windows':
-        cmd.insert(0, sys.executable)
+    cmd = ['python2', os.path.join(tests_dir, 'wpt'), 'lint', '--json'] + files
+    log.debug("Command: {}".format(' '.join(cmd)))
 
     proc = ProcessHandler(cmd, env=os.environ, processOutputLine=process_line)
     proc.run()

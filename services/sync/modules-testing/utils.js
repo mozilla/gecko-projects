@@ -17,7 +17,6 @@ var EXPORTED_SYMBOLS = [
   "MockFxaStorageManager",
   "AccountState", // from a module import
   "sumHistogram",
-  "getLoginTelemetryScalar",
   "syncTestLogging",
 ];
 
@@ -206,7 +205,7 @@ var configureFxAccountIdentity = function(
     },
   };
   let mockFxAClient = new MockFxAccountsClient();
-  fxa.internal._fxAccountsClient = mockFxAClient;
+  fxa._internal._fxAccountsClient = mockFxAClient;
 
   let mockTSC = {
     // TokenServerClient
@@ -308,11 +307,4 @@ var sumHistogram = function(name, options = {}) {
   }
   histogram.clear();
   return sum;
-};
-
-var getLoginTelemetryScalar = function() {
-  let snapshot = Services.telemetry.getSnapshotForKeyedScalars("main", true);
-  return snapshot.parent
-    ? snapshot.parent["services.sync.sync_login_state_transitions"]
-    : {};
 };

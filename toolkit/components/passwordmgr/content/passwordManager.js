@@ -316,7 +316,7 @@ function LoadSignons() {
   SignonColumnSort(lastSignonSortColumn);
 
   // disable "remove all signons" button if there are no signons
-  if (signons.length == 0) {
+  if (!signons.length) {
     removeAllButton.setAttribute("disabled", "true");
     togglePasswordsButton.setAttribute("disabled", "true");
   } else {
@@ -362,7 +362,7 @@ function SignonSelected() {
 }
 
 function DeleteSignon() {
-  let syncNeeded = signonsTreeView._filterSet.length != 0;
+  let syncNeeded = !!signonsTreeView._filterSet.length;
   let tree = signonsTree;
   let view = signonsTreeView;
   let table = GetVisibleLogins();
@@ -426,7 +426,7 @@ async function DeleteAllSignons() {
     return;
   }
 
-  let syncNeeded = signonsTreeView._filterSet.length != 0;
+  let syncNeeded = !!signonsTreeView._filterSet.length;
   let view = signonsTreeView;
   let table = GetVisibleLogins();
 
@@ -799,7 +799,7 @@ function UpdateContextMenu() {
 }
 
 async function masterPasswordLogin(noPasswordCallback) {
-  // This doesn't harm if passwords are not encrypted
+  // This does no harm if master password isn't set.
   let tokendb = Cc["@mozilla.org/security/pk11tokendb;1"].createInstance(
     Ci.nsIPK11TokenDB
   );

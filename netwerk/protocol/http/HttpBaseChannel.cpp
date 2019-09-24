@@ -206,6 +206,7 @@ HttpBaseChannel::HttpBaseChannel()
       mResponseCouldBeSynthesized(false),
       mBlockAuthPrompt(false),
       mAllowStaleCacheContent(false),
+      mPreferCacheLoadOverBypass(false),
       mAddedAsNonTailRequest(false),
       mAsyncOpenWaitingForStreamLength(false),
       mUpgradableToSecure(true),
@@ -484,8 +485,7 @@ HttpBaseChannel::SetLoadFlags(nsLoadFlags aLoadFlags) {
 
 NS_IMETHODIMP
 HttpBaseChannel::SetDocshellUserAgentOverride() {
-  // This sets the docshell specific user agent override, it will be overwritten
-  // by UserAgentOverrides.jsm if site-specific user agent overrides are set.
+  // This sets the docshell specific user agent override
   nsresult rv;
   nsCOMPtr<nsILoadContext> loadContext;
   NS_QueryNotificationCallbacks(this, loadContext);
@@ -1927,17 +1927,6 @@ HttpBaseChannel::RedirectTo(nsIURI* targetURI) {
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::SwitchProcessTo(mozilla::dom::Promise* aBrowserParent,
-                                 uint64_t aIdentifier) {
-  return NS_ERROR_NOT_AVAILABLE;
-}
-
-NS_IMETHODIMP
-HttpBaseChannel::HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) {
-  return NS_ERROR_NOT_AVAILABLE;
-}
-
-NS_IMETHODIMP
 HttpBaseChannel::UpgradeToSecure() {
   // Upgrades are handled internally between http-on-modify-request and
   // http-on-before-connect, which means upgrades are only possible during
@@ -3225,13 +3214,29 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
     nsAutoCString method;
     mRequestHead.Method(method);
     config.method = Some(method);
+
+    config.uploadStream = mUploadStream;
+    config.uploadStreamHasHeaders = mUploadStreamHasHeaders;
+
+    nsAutoCString contentType;
+    nsresult rv = mRequestHead.GetHeader(nsHttp::Content_Type, contentType);
+    if (NS_SUCCEEDED(rv)) {
+      config.contentType = Some(contentType);
+    }
+
+    nsAutoCString contentLength;
+    rv = mRequestHead.GetHeader(nsHttp::Content_Length, contentLength);
+    if (NS_SUCCEEDED(rv)) {
+      config.contentLength = Some(contentLength);
+    }
   }
 
   return config;
 }
 
 /* static */ void HttpBaseChannel::ConfigureReplacementChannel(
-    nsIChannel* newChannel, const ReplacementChannelConfig& config) {
+    nsIChannel* newChannel, const ReplacementChannelConfig& config,
+    ConfigureReason aReason) {
   newChannel->SetLoadFlags(config.loadFlags);
 
   nsCOMPtr<nsIClassOfService> cos(do_QueryInterface(newChannel));
@@ -3253,8 +3258,11 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
   if (config.timedChannel && newTimedChannel) {
     newTimedChannel->SetTimingEnabled(config.timedChannel->timingEnabled());
 
-    uint32_t redirectFlags = config.redirectFlags;
-    if (redirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL) {
+    // If we're an internal redirect, or a document channel replacement,
+    // then we shouldn't record any new timing for this and just copy
+    // over the existing values.
+    bool shouldHideTiming = aReason != ConfigureReason::Redirect;
+    if (shouldHideTiming) {
       newTimedChannel->SetRedirectCount(config.timedChannel->redirectCount());
       int8_t newCount = config.timedChannel->internalRedirectCount() + 1;
       newTimedChannel->SetInternalRedirectCount(
@@ -3267,7 +3275,7 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
           config.timedChannel->internalRedirectCount());
     }
 
-    if (redirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL) {
+    if (shouldHideTiming) {
       if (!config.timedChannel->channelCreation().IsNull()) {
         newTimedChannel->SetChannelCreation(
             config.timedChannel->channelCreation());
@@ -3282,7 +3290,7 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
     // previous channel (this is the first redirect in the redirects chain).
     if (config.timedChannel->redirectStart().IsNull()) {
       // Only do this for real redirects.  Internal redirects should be hidden.
-      if (!(redirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL)) {
+      if (!shouldHideTiming) {
         newTimedChannel->SetRedirectStart(config.timedChannel->asyncOpen());
       }
     } else {
@@ -3293,7 +3301,7 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
     // forward.  Otherwise the new redirect end time is the last response
     // end time.
     TimeStamp newRedirectEnd;
-    if (redirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL) {
+    if (shouldHideTiming) {
       newRedirectEnd = config.timedChannel->redirectEnd();
     } else {
       newRedirectEnd = config.timedChannel->responseEnd();
@@ -3336,6 +3344,56 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
     return;  // no other options to set
   }
 
+  if (config.uploadStream) {
+    nsCOMPtr<nsIUploadChannel> uploadChannel = do_QueryInterface(httpChannel);
+    nsCOMPtr<nsIUploadChannel2> uploadChannel2 = do_QueryInterface(httpChannel);
+    if (uploadChannel2 || uploadChannel) {
+      // rewind upload stream
+      nsCOMPtr<nsISeekableStream> seekable =
+          do_QueryInterface(config.uploadStream);
+      if (seekable) {
+        seekable->Seek(nsISeekableStream::NS_SEEK_SET, 0);
+      }
+
+      // replicate original call to SetUploadStream...
+      if (uploadChannel2) {
+        const nsACString& ctype =
+            config.contentType ? *config.contentType : VoidCString();
+        // If header is not present mRequestHead.HasHeaderValue will truncated
+        // it.  But we want to end up with a void string, not an empty string,
+        // because ExplicitSetUploadStream treats the former as "no header" and
+        // the latter as "header with empty string value".
+
+        const nsACString& method =
+            config.method ? *config.method : VoidCString();
+
+        int64_t len = (!config.contentLength || config.contentLength->IsEmpty())
+                          ? -1
+                          : nsCRT::atoll(config.contentLength->get());
+        uploadChannel2->ExplicitSetUploadStream(config.uploadStream, ctype, len,
+                                                method,
+                                                config.uploadStreamHasHeaders);
+      } else {
+        if (config.uploadStreamHasHeaders) {
+          uploadChannel->SetUploadStream(config.uploadStream, EmptyCString(),
+                                         -1);
+        } else {
+          nsAutoCString ctype;
+          if (config.contentType) {
+            ctype = *config.contentType;
+          } else {
+            ctype = NS_LITERAL_CSTRING("application/octet-stream");
+          }
+          if (config.contentLength && !config.contentLength->IsEmpty()) {
+            uploadChannel->SetUploadStream(
+                config.uploadStream, ctype,
+                nsCRT::atoll(config.contentLength->get()));
+          }
+        }
+      }
+    }
+  }
+
   if (config.referrerInfo) {
     DebugOnly<nsresult> success;
     success = httpChannel->SetReferrerInfo(config.referrerInfo);
@@ -3357,6 +3415,10 @@ HttpBaseChannel::ReplacementChannelConfig::ReplacementChannelConfig(
   method = aInit.method();
   referrerInfo = aInit.referrerInfo();
   timedChannel = aInit.timedChannel();
+  uploadStream = aInit.uploadStream();
+  uploadStreamHasHeaders = aInit.uploadStreamHasHeaders();
+  contentType = aInit.contentType();
+  contentLength = aInit.contentLength();
 }
 
 dom::ReplacementChannelConfigInit
@@ -3369,6 +3431,10 @@ HttpBaseChannel::ReplacementChannelConfig::Serialize() {
   config.method() = method;
   config.referrerInfo() = referrerInfo;
   config.timedChannel() = timedChannel;
+  config.uploadStream() = uploadStream;
+  config.uploadStreamHasHeaders() = uploadStreamHasHeaders;
+  config.contentType() = contentType;
+  config.contentLength() = contentLength;
 
   return config;
 }
@@ -3403,57 +3469,14 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
   }
 
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(newChannel);
-  if (preserveMethod && httpChannel) {
-    nsCOMPtr<nsIUploadChannel> uploadChannel = do_QueryInterface(httpChannel);
-    nsCOMPtr<nsIUploadChannel2> uploadChannel2 = do_QueryInterface(httpChannel);
-    if (mUploadStream && (uploadChannel2 || uploadChannel)) {
-      // rewind upload stream
-      nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mUploadStream);
-      MOZ_ASSERT(seekable);
-
-      seekable->Seek(nsISeekableStream::NS_SEEK_SET, 0);
-
-      // replicate original call to SetUploadStream...
-      if (uploadChannel2) {
-        nsAutoCString ctype;
-        // If header is not present mRequestHead.HasHeaderValue will truncated
-        // it.  But we want to end up with a void string, not an empty string,
-        // because ExplicitSetUploadStream treats the former as "no header" and
-        // the latter as "header with empty string value".
-        nsresult ctypeOK = mRequestHead.GetHeader(nsHttp::Content_Type, ctype);
-        if (NS_FAILED(ctypeOK)) {
-          ctype.SetIsVoid(true);
-        }
-        nsAutoCString clen;
-        Unused << mRequestHead.GetHeader(nsHttp::Content_Length, clen);
-        nsAutoCString method;
-        mRequestHead.Method(method);
-        int64_t len = clen.IsEmpty() ? -1 : nsCRT::atoll(clen.get());
-        uploadChannel2->ExplicitSetUploadStream(
-            mUploadStream, ctype, len, method, mUploadStreamHasHeaders);
-      } else {
-        if (mUploadStreamHasHeaders) {
-          uploadChannel->SetUploadStream(mUploadStream, EmptyCString(), -1);
-        } else {
-          nsAutoCString ctype;
-          if (NS_FAILED(mRequestHead.GetHeader(nsHttp::Content_Type, ctype))) {
-            ctype = NS_LITERAL_CSTRING("application/octet-stream");
-          }
-          nsAutoCString clen;
-          if (NS_SUCCEEDED(
-                  mRequestHead.GetHeader(nsHttp::Content_Length, clen)) &&
-              !clen.IsEmpty()) {
-            uploadChannel->SetUploadStream(mUploadStream, ctype,
-                                           nsCRT::atoll(clen.get()));
-          }
-        }
-      }
-    }
-  }
 
   ReplacementChannelConfig config = CloneReplacementChannelConfig(
       preserveMethod, redirectFlags, LOAD_REPLACE);
-  ConfigureReplacementChannel(newChannel, config);
+  ConfigureReason redirectType =
+      (redirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL)
+          ? ConfigureReason::InternalRedirect
+          : ConfigureReason::Redirect;
+  ConfigureReplacementChannel(newChannel, config, redirectType);
 
   // Check whether or not this was a cross-domain redirect.
   nsCOMPtr<nsITimedChannel> newTimedChannel(do_QueryInterface(newChannel));

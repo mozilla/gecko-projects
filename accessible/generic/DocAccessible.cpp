@@ -39,7 +39,6 @@
 #include "nsFocusManager.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Assertions.h"
-#include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/PresShell.h"
@@ -48,6 +47,8 @@
 #include "mozilla/dom/DocumentType.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/MutationEventBinding.h"
+#include "mozilla/dom/UserActivation.h"
+#include "HTMLElementAccessibles.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -130,7 +131,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(DocAccessible, Accessible)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnchorJumpElm)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mInvalidationList)
   for (auto it = tmp->mARIAOwnsHash.ConstIter(); !it.Done(); it.Next()) {
-    nsTArray<RefPtr<Accessible> >* ar = it.UserData();
+    nsTArray<RefPtr<Accessible>>* ar = it.UserData();
     for (uint32_t i = 0; i < ar->Length(); i++) {
       NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mARIAOwnsHash entry item");
       cb.NoteXPCOMChild(ar->ElementAt(i));
@@ -286,7 +287,7 @@ void DocAccessible::TakeFocus() const {
   // Focus the document.
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   RefPtr<dom::Element> newFocus;
-  AutoHandlingUserInputStatePusher inputStatePusher(true);
+  dom::AutoHandlingUserInputStatePusher inputStatePusher(true);
   fm->MoveFocus(mDocumentNode->GetWindow(), nullptr,
                 nsFocusManager::MOVEFOCUS_ROOT, 0, getter_AddRefs(newFocus));
 }
@@ -783,6 +784,22 @@ void DocAccessible::AttributeChangedImpl(Accessible* aAccessible,
     return;
   }
 
+  // When a details object has its open attribute changed
+  // we should fire a state-change event on the accessible of
+  // its main summary
+  if (aAttribute == nsGkAtoms::open) {
+    // FromDetails checks if the given accessible belongs to
+    // a details frame and also locates the accessible of its
+    // main summary.
+    if (HTMLSummaryAccessible* summaryAccessible =
+            HTMLSummaryAccessible::FromDetails(aAccessible)) {
+      RefPtr<AccEvent> expandedChangeEvent =
+          new AccStateChangeEvent(summaryAccessible, states::EXPANDED);
+      FireDelayedEvent(expandedChangeEvent);
+      return;
+    }
+  }
+
   // Check for namespaced ARIA attribute
   if (aNameSpaceID == kNameSpaceID_None) {
     // Check for hyphenated aria-foo property?
@@ -1189,6 +1206,11 @@ Accessible* DocAccessible::GetAccessibleOrDescendant(nsINode* aNode) const {
   if (acc) return acc;
 
   acc = GetContainerAccessible(aNode);
+  if (acc == this && aNode == mContent) {
+    // The body node is the doc's content node.
+    return acc;
+  }
+
   if (acc) {
     uint32_t childCnt = acc->ChildCount();
     for (uint32_t idx = 0; idx < childCnt; idx++) {
@@ -1526,6 +1548,9 @@ void DocAccessible::DoInitialUpdate() {
 #endif
           browserChild->SendPDocAccessibleConstructor(ipcDoc, nullptr, 0,
                                                       childID, holder);
+#if !defined(XP_WIN)
+          ipcDoc->SendPDocAccessiblePlatformExtConstructor();
+#endif
         }
 
         if (IsRoot()) {
@@ -1764,7 +1789,7 @@ void DocAccessible::UpdateRootElIfNeeded() {
 class InsertIterator final {
  public:
   InsertIterator(Accessible* aContext,
-                 const nsTArray<nsCOMPtr<nsIContent> >* aNodes)
+                 const nsTArray<nsCOMPtr<nsIContent>>* aNodes)
       : mChild(nullptr),
         mChildBefore(nullptr),
         mWalker(aContext),
@@ -1796,7 +1821,7 @@ class InsertIterator final {
   Accessible* mChildBefore;
   TreeWalker mWalker;
 
-  const nsTArray<nsCOMPtr<nsIContent> >* mNodes;
+  const nsTArray<nsCOMPtr<nsIContent>>* mNodes;
   nsTHashtable<nsPtrHashKey<const nsIContent>> mProcessedNodes;
   uint32_t mNodesIdx;
 };
@@ -1876,7 +1901,7 @@ bool InsertIterator::Next() {
 }
 
 void DocAccessible::ProcessContentInserted(
-    Accessible* aContainer, const nsTArray<nsCOMPtr<nsIContent> >* aNodes) {
+    Accessible* aContainer, const nsTArray<nsCOMPtr<nsIContent>>* aNodes) {
   // Process insertions if the container accessible is still in tree.
   if (!aContainer->IsInDocument()) {
     return;
@@ -2016,7 +2041,7 @@ void DocAccessible::ContentRemoved(Accessible* aChild) {
   MOZ_DIAGNOSTIC_ASSERT(aChild->Parent(), "Alive but unparented #1");
 
   if (aChild->IsRelocated()) {
-    nsTArray<RefPtr<Accessible> >* owned = mARIAOwnsHash.Get(parent);
+    nsTArray<RefPtr<Accessible>>* owned = mARIAOwnsHash.Get(parent);
     MOZ_ASSERT(owned, "IsRelocated flag is out of sync with mARIAOwnsHash");
     owned->RemoveElement(aChild);
     if (owned->Length() == 0) {
@@ -2086,7 +2111,7 @@ void DocAccessible::DoARIAOwnsRelocation(Accessible* aOwner) {
   logging::TreeInfo("aria owns relocation", logging::eVerbose, aOwner);
 #endif
 
-  nsTArray<RefPtr<Accessible> >* owned = mARIAOwnsHash.LookupOrAdd(aOwner);
+  nsTArray<RefPtr<Accessible>>* owned = mARIAOwnsHash.LookupOrAdd(aOwner);
 
   IDRefsIterator iter(this, aOwner->Elm(), nsGkAtoms::aria_owns);
   uint32_t idx = 0;
@@ -2196,7 +2221,7 @@ void DocAccessible::DoARIAOwnsRelocation(Accessible* aOwner) {
   }
 }
 
-void DocAccessible::PutChildrenBack(nsTArray<RefPtr<Accessible> >* aChildren,
+void DocAccessible::PutChildrenBack(nsTArray<RefPtr<Accessible>>* aChildren,
                                     uint32_t aStartIdx) {
   MOZ_ASSERT(aStartIdx <= aChildren->Length(), "Wrong removal index");
 
@@ -2287,7 +2312,7 @@ bool DocAccessible::MoveChild(Accessible* aChild, Accessible* aNewParent,
   // to update it if needed.
   if (aChild->IsRelocated()) {
     aChild->SetRelocated(false);
-    nsTArray<RefPtr<Accessible> >* owned = mARIAOwnsHash.Get(curParent);
+    nsTArray<RefPtr<Accessible>>* owned = mARIAOwnsHash.Get(curParent);
     MOZ_ASSERT(owned, "IsRelocated flag is out of sync with mARIAOwnsHash");
     owned->RemoveElement(aChild);
     if (owned->Length() == 0) {
@@ -2299,7 +2324,7 @@ bool DocAccessible::MoveChild(Accessible* aChild, Accessible* aNewParent,
 
   if (curParent == aNewParent) {
     MOZ_ASSERT(aChild->IndexInParent() != aIdxInParent, "No move case");
-    curParent->MoveChild(aIdxInParent, aChild);
+    curParent->RelocateChild(aIdxInParent, aChild);
 
 #ifdef A11Y_LOG
     logging::TreeInfo("move child: parent tree after", logging::eVerbose,
@@ -2383,7 +2408,7 @@ void DocAccessible::UncacheChildrenInSubtree(Accessible* aRoot) {
   aRoot->mStateFlags |= eIsNotInDocument;
   RemoveDependentIDsFor(aRoot);
 
-  nsTArray<RefPtr<Accessible> >* owned = mARIAOwnsHash.Get(aRoot);
+  nsTArray<RefPtr<Accessible>>* owned = mARIAOwnsHash.Get(aRoot);
   uint32_t count = aRoot->ContentChildCount();
   for (uint32_t idx = 0; idx < count; idx++) {
     Accessible* child = aRoot->ContentChildAt(idx);

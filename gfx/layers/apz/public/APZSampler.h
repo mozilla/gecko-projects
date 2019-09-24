@@ -83,7 +83,6 @@ class APZSampler {
   LayerToParentLayerMatrix4x4 ComputeTransformForScrollThumb(
       const LayerToParentLayerMatrix4x4& aCurrentTransform,
       const LayerMetricsWrapper& aContent, const ScrollbarData& aThumbData,
-      bool aScrollbarIsDescendant,
       AsyncTransformComponentMatrix* aOutClipTransform);
 
   CSSRect GetCurrentAsyncLayoutViewport(const LayerMetricsWrapper& aLayer);
@@ -91,8 +90,6 @@ class APZSampler {
       const LayerMetricsWrapper& aLayer);
   AsyncTransform GetCurrentAsyncTransform(const LayerMetricsWrapper& aLayer,
                                           AsyncTransformComponents aComponents);
-  AsyncTransform GetCurrentAsyncTransformForFixedAdjustment(
-      const LayerMetricsWrapper& aLayer);
   AsyncTransformComponentMatrix GetOverscrollTransform(
       const LayerMetricsWrapper& aLayer);
   AsyncTransformComponentMatrix GetCurrentAsyncTransformWithOverscroll(

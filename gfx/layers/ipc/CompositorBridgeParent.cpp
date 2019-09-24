@@ -322,6 +322,7 @@ CompositorBridgeParent::CompositorBridgeParent(
       mPendingTransaction{0},
       mPaused(false),
       mHaveCompositionRecorder(false),
+      mIsForcedFirstPaint(false),
       mUseExternalSurfaceSize(aUseExternalSurfaceSize),
       mEGLSurfaceSize(aSurfaceSize),
       mOptions(aOptions),
@@ -418,7 +419,7 @@ CompositorBridgeParent::~CompositorBridgeParent() {
 
 void CompositorBridgeParent::ForceIsFirstPaint() {
   if (mWrBridge) {
-    mWrBridge->ForceIsFirstPaint();
+    mIsForcedFirstPaint = true;
   } else {
     mCompositionManager->ForceIsFirstPaint();
   }
@@ -1775,7 +1776,7 @@ mozilla::ipc::IPCResult CompositorBridgeParent::RecvAdoptChild(
 
       // Clear the current transforms.
       nsTArray<MatrixMessage> clear;
-      clear.AppendElement(MatrixMessage(Nothing(), child));
+      clear.AppendElement(MatrixMessage(Nothing(), ScreenRect(), child));
       oldRootController->NotifyLayerTransforms(clear);
     }
   }
@@ -2138,6 +2139,11 @@ void CompositorBridgeParent::NotifyPipelineRendered(
     mWrBridge->RemoveEpochDataPriorTo(aEpoch);
 
     if (!mPaused) {
+      if (mIsForcedFirstPaint) {
+        uiController->NotifyFirstPaint();
+        mIsForcedFirstPaint = false;
+      }
+
       TransactionId transactionId = mWrBridge->FlushTransactionIdsForEpoch(
           aEpoch, aCompositeStartId, aCompositeStart, aRenderStart,
           aCompositeEnd, uiController);
@@ -2317,6 +2323,10 @@ bool CompositorBridgeParent::DeallocPTextureParent(PTextureParent* actor) {
 mozilla::ipc::IPCResult CompositorBridgeParent::RecvInitPCanvasParent(
     Endpoint<PCanvasParent>&& aEndpoint) {
   MOZ_CRASH("PCanvasParent shouldn't be created via CompositorBridgeParent.");
+}
+
+mozilla::ipc::IPCResult CompositorBridgeParent::RecvReleasePCanvasParent() {
+  MOZ_CRASH("PCanvasParent shouldn't be released via CompositorBridgeParent.");
 }
 
 bool CompositorBridgeParent::IsSameProcess() const {
@@ -2524,17 +2534,37 @@ int32_t RecordContentFrameTime(
   int32_t fracLatencyNorm = lround(latencyNorm * 100.0);
 
 #ifdef MOZ_GECKO_PROFILER
-  if (profiler_is_active()) {
+  if (profiler_can_accept_markers()) {
     class ContentFramePayload : public ProfilerMarkerPayload {
      public:
       ContentFramePayload(const mozilla::TimeStamp& aStartTime,
                           const mozilla::TimeStamp& aEndTime)
           : ProfilerMarkerPayload(aStartTime, aEndTime) {}
-      virtual void StreamPayload(SpliceableJSONWriter& aWriter,
-                                 const TimeStamp& aProcessStartTime,
-                                 UniqueStacks& aUniqueStacks) override {
+      mozilla::BlocksRingBuffer::Length TagAndSerializationBytes()
+          const override {
+        return CommonPropsTagAndSerializationBytes();
+      }
+      void SerializeTagAndPayload(
+          mozilla::BlocksRingBuffer::EntryWriter& aEntryWriter) const override {
+        static const DeserializerTag tag = TagForDeserializer(Deserialize);
+        SerializeTagAndCommonProps(tag, aEntryWriter);
+      }
+      void StreamPayload(SpliceableJSONWriter& aWriter,
+                         const TimeStamp& aProcessStartTime,
+                         UniqueStacks& aUniqueStacks) const override {
         StreamCommonProps("CONTENT_FRAME_TIME", aWriter, aProcessStartTime,
                           aUniqueStacks);
+      }
+
+     private:
+      explicit ContentFramePayload(CommonProps&& aCommonProps)
+          : ProfilerMarkerPayload(std::move(aCommonProps)) {}
+      static mozilla::UniquePtr<ProfilerMarkerPayload> Deserialize(
+          mozilla::BlocksRingBuffer::EntryReader& aEntryReader) {
+        ProfilerMarkerPayload::CommonProps props =
+            DeserializeCommonProps(aEntryReader);
+        return UniquePtr<ProfilerMarkerPayload>(
+            new ContentFramePayload(std::move(props)));
       }
     };
     AUTO_PROFILER_STATS(add_marker_with_ContentFramePayload);

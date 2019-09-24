@@ -39,6 +39,7 @@ using mozilla::LayoutDeviceIntPoint from "Units.h";
 using mozilla::LayoutDevicePoint from "Units.h";
 using mozilla::ScreenIntPoint from "Units.h";
 using ScreenIntSize from "Units.h";
+using ScreenRect from "Units.h";
 using struct mozilla::layers::ScrollableLayerGuid from "mozilla/layers/ScrollableLayerGuid.h";
 using struct mozilla::layers::ZoomConstraints from "mozilla/layers/ZoomConstraints.h";
 using mozilla::layers::LayersId from "mozilla/layers/LayersTypes.h";
@@ -704,9 +705,11 @@ parent:
     sync ResetPrefersReducedMotionOverrideForTest();
 
     /**
-     * Fire a `load` event on this PBrowser's embedding frame element.
+     * Called once this PBrowser's OOP subdoc no longer blocks its
+     * embedding element's and embedding doc's 'load' events.
      */
-    async FireFrameLoadEvent(bool aIsTrusted);
+    async MaybeFireEmbedderLoadEvents(bool aIsTrusted,
+                                      bool aFireLoadAtEmbeddingElement);
 
     async ScrollRectIntoView(nsRect aRect, ScrollAxis aVertical,
                              ScrollAxis aHorizontal, ScrollFlags aScrollFlags,
@@ -740,7 +743,8 @@ child:
 
     async SizeModeChanged(nsSizeMode sizeMode);
 
-    async ChildToParentMatrix(MaybeMatrix4x4 aMatrix);
+    async ChildToParentMatrix(MaybeMatrix4x4 aMatrix,
+                              ScreenRect aRemoteDocumentRect);
 
     async SetIsUnderHiddenEmbedderElement(bool aIsUnderHiddenEmbedderElement);
 
@@ -1026,7 +1030,7 @@ child:
      */
     async GetContentBlockingLog() returns(IPCStream ipcStream, bool success);
 
-    async SkipBrowsingContextDetach();
+    async SkipBrowsingContextDetach() returns (bool success);
 parent:
     /** Records a history visit. */
     async VisitURI(URIParams aURI, URIParams? aLastVisitedURI,

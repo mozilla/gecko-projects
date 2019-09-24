@@ -646,6 +646,19 @@ nsresult nsWindowWatcher::OpenWindowInternal(
   RefPtr<BrowsingContext> parentBC(
       parentWindow ? parentWindow->GetBrowsingContext() : nullptr);
 
+  // Return null for any attempt to trigger a load from a discarded browsing
+  // context. The spec is non-normative, and doesn't specify what should happen
+  // when window.open is called on a window with a null browsing context, but it
+  // does give us broad discretion over when we can decide to ignore an open
+  // request and return null.
+  //
+  // Regardless, we cannot trigger a cross-process load from a discarded
+  // browsing context, and ideally we should behave consistently whether a load
+  // is same-process or cross-process.
+  if (parentBC && parentBC->IsDiscarded()) {
+    return NS_ERROR_ABORT;
+  }
+
   // try to find an extant browsing context with the given name
   newBC = GetBrowsingContextByName(name, aForceNoOpener, parentBC);
 
@@ -715,8 +728,24 @@ nsresult nsWindowWatcher::OpenWindowInternal(
   // GetSubjectPrincipal()?
   dom::AutoJSAPI jsapiChromeGuard;
 
+  nsCOMPtr<nsIDOMChromeWindow> chromeWin = do_QueryInterface(aParent);
+
   bool windowTypeIsChrome =
       chromeFlags & nsIWebBrowserChrome::CHROME_OPENAS_CHROME;
+
+  if (!aForceNoOpener) {
+    if (chromeWin && !windowTypeIsChrome) {
+      NS_WARNING(
+          "Content windows may never have chrome windows as their openers.");
+      return NS_ERROR_INVALID_ARG;
+    }
+    if (aParent && !chromeWin && windowTypeIsChrome) {
+      NS_WARNING(
+          "Chrome windows may never have content windows as their openers.");
+      return NS_ERROR_INVALID_ARG;
+    }
+  }
+
   if (isCallerChrome && !hasChromeParent && !windowTypeIsChrome) {
     // open() is called from chrome on a non-chrome window, initialize an
     // AutoJSAPI with the callee to prevent the caller's privileges from leaking
@@ -763,7 +792,6 @@ nsresult nsWindowWatcher::OpenWindowInternal(
     // Now check whether it's ok to ask a window provider for a window.  Don't
     // do it if we're opening a dialog or if our parent is a chrome window or
     // if we're opening something that has modal, dialog, or chrome flags set.
-    nsCOMPtr<nsIDOMChromeWindow> chromeWin = do_QueryInterface(aParent);
     if (!aDialog && !chromeWin &&
         !(chromeFlags & (nsIWebBrowserChrome::CHROME_MODAL |
                          nsIWebBrowserChrome::CHROME_OPENAS_DIALOG |
@@ -937,10 +965,10 @@ nsresult nsWindowWatcher::OpenWindowInternal(
 
   // As required by spec, new windows always start out same-process, even if the
   // URL being loaded will eventually load in a new process.
-  MOZ_ASSERT_IF(windowIsNew, newDocShell);
+  MOZ_DIAGNOSTIC_ASSERT(!windowIsNew || newDocShell);
   // New top-level windows are only opened in the parent process and are, by
   // definition, always in-process.
-  MOZ_ASSERT_IF(isNewToplevelWindow, newDocShell);
+  MOZ_DIAGNOSTIC_ASSERT(!isNewToplevelWindow || newDocShell);
 
   // Copy sandbox flags to the new window if activeDocsSandboxFlags says to do
   // so.  Note that it's only nonzero if the window is new, so clobbering

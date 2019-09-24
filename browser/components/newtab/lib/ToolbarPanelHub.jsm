@@ -27,6 +27,7 @@ const APPMENU_BUTTON_ID = "appMenu-whatsnew-button";
 const PANEL_HEADER_SELECTOR = "#PanelUI-whatsNew-title > label";
 
 const BUTTON_STRING_ID = "cfr-whatsnew-button";
+const WHATS_NEW_PANEL_SELECTOR = "PanelUI-whatsNew-message-container";
 
 class _ToolbarPanelHub {
   constructor() {
@@ -154,8 +155,10 @@ class _ToolbarPanelHub {
   }
 
   // Render what's new messages into the panel.
-  async renderMessages(win, doc, containerId) {
-    const messages = (await this.messages).sort(this._sortWhatsNewMessages);
+  async renderMessages(win, doc, containerId, options = {}) {
+    const messages =
+      (options.force && options.messages) ||
+      (await this.messages).sort(this._sortWhatsNewMessages);
     const container = doc.getElementById(containerId);
 
     if (messages && !container.querySelector(".whatsNew-message")) {
@@ -188,6 +191,16 @@ class _ToolbarPanelHub {
     this.sendUserEventTelemetry(win, "IMPRESSION", eventId, {
       value: { view: mainview ? "toolbar_dropdown" : "application_menu" },
     });
+  }
+
+  removeMessages(win, containerId) {
+    const doc = win.document;
+    const messageNodes = doc
+      .getElementById(containerId)
+      .querySelectorAll(".whatsNew-message");
+    for (const messageNode of messageNodes) {
+      messageNode.remove();
+    }
   }
 
   /**
@@ -250,12 +263,13 @@ class _ToolbarPanelHub {
     wrapperEl.appendChild(this._createMessageContent(win, doc, content));
 
     if (content.link_text) {
-      wrapperEl.appendChild(
-        this._createElement(doc, "a", {
-          classList: "text-link",
-          content: content.link_text,
-        })
-      );
+      const anchorEl = this._createElement(doc, "a", {
+        classList: "text-link",
+        content: content.link_text,
+      });
+      // istanbul ignore next
+      anchorEl.doCommand = () => {};
+      wrapperEl.appendChild(anchorEl);
     }
 
     // Attach event listener on entire message container
@@ -375,7 +389,7 @@ class _ToolbarPanelHub {
   // If `string_id` is present it means we are relying on fluent for translations.
   // Otherwise, we have a vanilla string.
   _setString(doc, el, stringObj) {
-    if (stringObj.string_id) {
+    if (stringObj && stringObj.string_id) {
       doc.l10n.setAttributes(
         el,
         stringObj.string_id,
@@ -390,7 +404,7 @@ class _ToolbarPanelHub {
   // If `string_id` is present it means we are relying on fluent for translations.
   // Otherwise, we have a vanilla string.
   _setTextAttribute(doc, el, attr, stringObj) {
-    if (stringObj.string_id) {
+    if (stringObj && stringObj.string_id) {
       doc.l10n.setAttributes(el, stringObj.string_id);
     } else {
       el.setAttribute(attr, stringObj);
@@ -519,6 +533,23 @@ class _ToolbarPanelHub {
       {
         once: true,
       }
+    );
+  }
+
+  /**
+   * @param {object} browser MessageChannel target argument as a response to a user action
+   * @param {object} message Message selected from devtools page
+   */
+  forceShowMessage(browser, message) {
+    const win = browser.browser.ownerGlobal;
+    const doc = browser.browser.ownerDocument;
+    this.removeMessages(win, WHATS_NEW_PANEL_SELECTOR);
+    this.renderMessages(win, doc, WHATS_NEW_PANEL_SELECTOR, {
+      force: true,
+      messages: [message],
+    });
+    win.PanelUI.panel.addEventListener("popuphidden", event =>
+      this.removeMessages(event.target.ownerGlobal, WHATS_NEW_PANEL_SELECTOR)
     );
   }
 }

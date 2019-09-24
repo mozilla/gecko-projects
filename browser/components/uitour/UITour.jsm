@@ -156,6 +156,7 @@ var UITour = {
     ["help", { query: "#appMenu-help-button" }],
     ["home", { query: "#home-button" }],
     ["library", { query: "#appMenu-library-button" }],
+    ["logins", { query: "#appMenu-logins-button" }],
     [
       "pocket",
       {
@@ -416,7 +417,7 @@ var UITour = {
             }
 
             let buttons = [];
-            if (Array.isArray(data.buttons) && data.buttons.length > 0) {
+            if (Array.isArray(data.buttons) && data.buttons.length) {
               for (let buttonData of data.buttons) {
                 if (
                   typeof buttonData == "object" &&
@@ -848,7 +849,7 @@ var UITour = {
           typeof name != "string" ||
           typeof value != "string" ||
           !name.startsWith("utm_") ||
-          value.length == 0 ||
+          !value.length ||
           !reSimpleString.test(name)
         ) {
           log.warn("_populateCampaignParams: invalid campaign param specified");

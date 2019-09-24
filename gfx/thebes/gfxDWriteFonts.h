@@ -40,8 +40,6 @@ class gfxDWriteFont : public gfxFont {
 
   uint32_t GetSpaceGlyph() override;
 
-  bool SetupCairoFont(DrawTarget* aDrawTarget) override;
-
   bool AllowSubpixelAA() override { return mAllowManualShowGlyphs; }
 
   bool IsValid() const;
@@ -59,6 +57,8 @@ class gfxDWriteFont : public gfxFont {
 
   int32_t GetGlyphWidth(uint16_t aGID) override;
 
+  bool GetGlyphBounds(uint16_t aGID, gfxRect* aBounds, bool aTight) override;
+
   void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                               FontCacheSizes* aSizes) const override;
   void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
@@ -68,6 +68,8 @@ class gfxDWriteFont : public gfxFont {
 
   already_AddRefed<mozilla::gfx::ScaledFont> GetScaledFont(
       mozilla::gfx::DrawTarget* aTarget) override;
+
+  bool ShouldRoundXOffset(cairo_t* aCairo) const override;
 
  protected:
   cairo_scaled_font_t* InitCairoScaledFont();
@@ -84,8 +86,8 @@ class gfxDWriteFont : public gfxFont {
 
   gfxFloat MeasureGlyphWidth(uint16_t aGlyph);
 
-  DWRITE_MEASURING_MODE GetMeasuringMode();
-  bool GetForceGDIClassic();
+  DWRITE_MEASURING_MODE GetMeasuringMode() const;
+  bool GetForceGDIClassic() const;
 
   RefPtr<IDWriteFontFace> mFontFace;
   RefPtr<IDWriteFontFace1> mFontFace1;  // may be unavailable on older DWrite

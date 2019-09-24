@@ -69,7 +69,6 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/BasicEvents.h"
 #include "mozilla/ErrorResult.h"
-#include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/MouseEvents.h"
@@ -83,6 +82,7 @@
 #include "mozilla/dom/HTMLBodyElement.h"
 #include "mozilla/dom/KeyboardEventBinding.h"
 #include "mozilla/dom/TreeWalker.h"
+#include "mozilla/dom/UserActivation.h"
 
 using namespace mozilla;
 using namespace mozilla::a11y;
@@ -362,12 +362,12 @@ uint64_t Accessible::VisibilityState() const {
     // If contained by scrollable frame then check that at least 12 pixels
     // around the object is visible, otherwise the object is offscreen.
     nsIScrollableFrame* scrollableFrame = do_QueryFrame(parentFrame);
+    const nscoord kMinPixels = nsPresContext::CSSPixelsToAppUnits(12);
     if (scrollableFrame) {
       nsRect scrollPortRect = scrollableFrame->GetScrollPortRect();
       nsRect frameRect = nsLayoutUtils::TransformFrameRectToAncestor(
           frame, frame->GetRectRelativeToSelf(), parentFrame);
       if (!scrollPortRect.Contains(frameRect)) {
-        const nscoord kMinPixels = nsPresContext::CSSPixelsToAppUnits(12);
         scrollPortRect.Deflate(kMinPixels, kMinPixels);
         if (!scrollPortRect.Intersects(frameRect)) return states::OFFSCREEN;
       }
@@ -375,6 +375,14 @@ uint64_t Accessible::VisibilityState() const {
 
     if (!parentFrame) {
       parentFrame = nsLayoutUtils::GetCrossDocParentFrame(curFrame);
+      // Even if we couldn't find the parent frame, it might mean we are in an
+      // out-of-process iframe, try to see if |frame| is scrolled out in an
+      // scrollable frame in a cross-process ancestor document.
+      if (!parentFrame &&
+          nsLayoutUtils::FrameIsMostlyScrolledOutOfViewInCrossProcess(
+              frame, kMinPixels)) {
+        return states::OFFSCREEN;
+      }
     }
 
     curFrame = parentFrame;
@@ -745,7 +753,7 @@ void Accessible::TakeFocus() const {
 
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   if (fm) {
-    AutoHandlingUserInputStatePusher inputStatePusher(true);
+    dom::AutoHandlingUserInputStatePusher inputStatePusher(true);
     // XXXbz: Can we actually have a non-element content here?
     RefPtr<Element> element =
         focusContent->IsElement() ? focusContent->AsElement() : nullptr;
@@ -2195,7 +2203,7 @@ bool Accessible::RemoveChild(Accessible* aChild) {
   return true;
 }
 
-void Accessible::MoveChild(uint32_t aNewIndex, Accessible* aChild) {
+void Accessible::RelocateChild(uint32_t aNewIndex, Accessible* aChild) {
   MOZ_DIAGNOSTIC_ASSERT(aChild, "No child was given");
   MOZ_DIAGNOSTIC_ASSERT(aChild->mParent == this,
                         "A child from different subtree was given");

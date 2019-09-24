@@ -578,16 +578,12 @@ struct wl_surface* moz_container_get_wl_surface(MozContainer* container) {
       return nullptr;
     }
     GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(container));
+    nsWaylandDisplay* waylandDisplay = WaylandDisplayGet(display);
 
     // Available as of GTK 3.8+
-    static auto sGdkWaylandDisplayGetWlCompositor =
-        (wl_compositor * (*)(GdkDisplay*))
-            dlsym(RTLD_DEFAULT, "gdk_wayland_display_get_wl_compositor");
-    struct wl_compositor* compositor =
-        sGdkWaylandDisplayGetWlCompositor(display);
+    struct wl_compositor* compositor = waylandDisplay->GetCompositor();
     container->surface = wl_compositor_create_surface(compositor);
 
-    nsWaylandDisplay* waylandDisplay = WaylandDisplayGet(display);
     container->subsurface = wl_subcompositor_get_subsurface(
         waylandDisplay->GetSubcompositor(), container->surface,
         moz_container_get_gtk_container_surface(container));
@@ -649,6 +645,40 @@ gboolean moz_container_surface_needs_clear(MozContainer* container) {
   int ret = container->surface_needs_clear;
   container->surface_needs_clear = false;
   return ret;
+}
+
+// Taken from gdk/gdkwindow-wayland.c
+static struct wl_region* wl_region_from_cairo_region(MozContainer* container,
+                                                     cairo_region_t* region) {
+  GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(container));
+  nsWaylandDisplay* waylandDisplay = WaylandDisplayGet(display);
+  struct wl_compositor* compositor = waylandDisplay->GetCompositor();
+
+  struct wl_region* wl_region = wl_compositor_create_region(compositor);
+  if (!wl_region) {
+    return nullptr;
+  }
+
+  int rects = cairo_region_num_rectangles(region);
+  for (int i = 0; i < rects; i++) {
+    cairo_rectangle_int_t rect;
+    cairo_region_get_rectangle(region, i, &rect);
+    wl_region_add(wl_region, rect.x, rect.y, rect.width, rect.height);
+  }
+
+  return wl_region;
+}
+
+void moz_container_set_opaque_region(MozContainer* container,
+                                     cairo_region_t* region) {
+  if (!container->surface) {
+    NS_WARNING("Failed to set wl_surface opaque region!");
+    return;
+  }
+
+  struct wl_region* wl_region = wl_region_from_cairo_region(container, region);
+  wl_surface_set_opaque_region(container->surface, wl_region);
+  wl_region_destroy(wl_region);
 }
 #endif
 

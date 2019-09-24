@@ -317,7 +317,11 @@ this.AntiTracking = {
     });
 
     info("Let's interact with the tracker");
-    window.open(TEST_3RD_PARTY_DOMAIN + TEST_PATH + "3rdPartyOpenUI.html");
+    window.open(
+      TEST_3RD_PARTY_DOMAIN + TEST_PATH + "3rdPartyOpenUI.html",
+      "",
+      "noopener"
+    );
     await windowClosed;
   },
 
@@ -354,10 +358,14 @@ this.AntiTracking = {
             "@mozilla.org/url-classifier/dbservice;1"
           ].getService(Ci.nsIURIClassifier);
           let feature = classifier.getFeatureByName("tracking-annotation");
-          await TestUtils.waitForCondition(
-            () => feature.skipHostList == item[1].toLowerCase(),
-            "Skip list service initialized"
-          );
+          await TestUtils.waitForCondition(() => {
+            for (let x of item[1].toLowerCase().split(",")) {
+              if (feature.skipHostList.split(",").includes(x)) {
+                return true;
+              }
+            }
+            return false;
+          }, "Skip list service initialized");
           break;
         }
       }
@@ -671,7 +679,7 @@ this.AntiTracking = {
       if (expectedCategory == "") {
         is(allMessages.length, 0, "No console messages should be generated");
       } else {
-        ok(allMessages.length != 0, "Some console message should be generated");
+        ok(!!allMessages.length, "Some console message should be generated");
       }
       for (let msg of allMessages) {
         is(

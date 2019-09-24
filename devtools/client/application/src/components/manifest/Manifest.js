@@ -20,9 +20,13 @@ const FluentReact = require("devtools/client/shared/vendor/fluent-react");
 const Localized = createFactory(FluentReact.Localized);
 const { l10n } = require("../../modules/l10n");
 
+const ManifestColorItem = createFactory(require("./ManifestColorItem"));
 const ManifestItem = createFactory(require("./ManifestItem"));
 const ManifestIssueList = createFactory(require("./ManifestIssueList"));
 const ManifestSection = createFactory(require("./ManifestSection"));
+const ManifestJsonLink = createFactory(require("./ManifestJsonLink"));
+
+const { MANIFEST_MEMBER_VALUE_TYPES } = require("../../constants");
 
 /**
  * A canonical manifest, splitted in different sections
@@ -36,6 +40,7 @@ class Manifest extends PureComponent {
       identity: PropTypes.array.isRequired,
       presentation: PropTypes.array.isRequired,
       validation: PropTypes.array.isRequired,
+      url: PropTypes.string.isRequired,
     };
   }
 
@@ -52,6 +57,16 @@ class Manifest extends PureComponent {
           ManifestIssueList({ issues: validation })
         )
       : null;
+  }
+
+  renderMember({ key, value, type }) {
+    switch (type) {
+      case MANIFEST_MEMBER_VALUE_TYPES.COLOR:
+        return ManifestColorItem({ label: key, key, value });
+      case MANIFEST_MEMBER_VALUE_TYPES.STRING:
+      default:
+        return ManifestItem({ label: key, key }, value);
+    }
   }
 
   renderItemSections() {
@@ -72,23 +87,14 @@ class Manifest extends PureComponent {
         // NOTE: this table should probably be its own component, to keep
         //       the same level of abstraction as with the validation issues
         // Bug https://bugzilla.mozilla.org/show_bug.cgi?id=1577138
-        table(
-          {},
-          tbody(
-            {},
-            // TODO: handle different data types for values (colors, images…)
-            //       See https://bugzilla.mozilla.org/show_bug.cgi?id=1575529
-            items.map(item => {
-              const { key, value } = item;
-              return ManifestItem({ label: key, key: key }, value);
-            })
-          )
-        )
+        table({}, tbody({}, items.map(this.renderMember)))
       );
     });
   }
 
   render() {
+    const { url } = this.props;
+
     return article(
       { className: "js-manifest" },
       Localized(
@@ -97,6 +103,7 @@ class Manifest extends PureComponent {
         },
         h1({ className: "app-page__title" })
       ),
+      ManifestJsonLink({ url }),
       this.renderIssueSection(),
       this.renderItemSections()
     );

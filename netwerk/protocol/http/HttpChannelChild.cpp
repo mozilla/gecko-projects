@@ -1114,13 +1114,13 @@ void HttpChannelChild::OnStopRequest(
   mCacheReadEnd = timing.cacheReadEnd;
 
 #ifdef MOZ_GECKO_PROFILER
-  if (profiler_is_active()) {
+  if (profiler_can_accept_markers()) {
     int32_t priority = PRIORITY_NORMAL;
     GetPriority(&priority);
-    profiler_add_network_marker(mURI, priority, mChannelId,
-                                NetworkLoadType::LOAD_STOP, mLastStatusReported,
-                                TimeStamp::Now(), mTransferSize, kCacheUnknown,
-                                &mTransactionTimings);
+    profiler_add_network_marker(
+        mURI, priority, mChannelId, NetworkLoadType::LOAD_STOP,
+        mLastStatusReported, TimeStamp::Now(), mTransferSize, kCacheUnknown,
+        &mTransactionTimings, nullptr, std::move(mSource));
   }
 #endif
 
@@ -1785,10 +1785,10 @@ void HttpChannelChild::Redirect1Begin(
   nsCOMPtr<nsIURI> uri = DeserializeURI(newOriginalURI);
 
   mTransactionTimings = timing;
-  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, mChannelId,
-                              NetworkLoadType::LOAD_REDIRECT,
-                              mLastStatusReported, TimeStamp::Now(), 0,
-                              kCacheUnknown, &mTransactionTimings, uri);
+  PROFILER_ADD_NETWORK_MARKER(
+      mURI, mPriority, mChannelId, NetworkLoadType::LOAD_REDIRECT,
+      mLastStatusReported, TimeStamp::Now(), 0, kCacheUnknown,
+      &mTransactionTimings, uri, std::move(mSource));
 
   if (!securityInfoSerialization.IsEmpty()) {
     rv = NS_DeserializeObject(securityInfoSerialization,
@@ -2843,17 +2843,10 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
 
   SerializeURI(mTopWindowURI, openArgs.topWindowURI());
 
-  if (mContentBlockingAllowListPrincipal) {
-    PrincipalInfo principalInfo;
-    rv = PrincipalToPrincipalInfo(mContentBlockingAllowListPrincipal,
-                                  &principalInfo);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-    openArgs.contentBlockingAllowListPrincipal() = principalInfo;
-  } else {
-    openArgs.contentBlockingAllowListPrincipal() = void_t();
-  }
+  openArgs.contentBlockingAllowListPrincipal() =
+      mContentBlockingAllowListPrincipal
+          ? Some(RefPtr<nsIPrincipal>(mContentBlockingAllowListPrincipal))
+          : Nothing();
 
   openArgs.preflightArgs() = optionalCorsPreflightArgs;
 
@@ -2879,6 +2872,7 @@ nsresult HttpChannelChild::ContinueAsyncOpen() {
   openArgs.blockAuthPrompt() = mBlockAuthPrompt;
 
   openArgs.allowStaleCacheContent() = mAllowStaleCacheContent;
+  openArgs.preferCacheLoadOverBypass() = mPreferCacheLoadOverBypass;
 
   openArgs.contentTypeHint() = mContentTypeHint;
 
@@ -3184,6 +3178,30 @@ HttpChannelChild::GetAllowStaleCacheContent(bool* aAllowStaleCacheContent) {
 
   NS_ENSURE_ARG(aAllowStaleCacheContent);
   *aAllowStaleCacheContent = mAllowStaleCacheContent;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpChannelChild::SetPreferCacheLoadOverBypass(
+    bool aPreferCacheLoadOverBypass) {
+  if (mSynthesizedCacheInfo) {
+    return mSynthesizedCacheInfo->SetPreferCacheLoadOverBypass(
+        aPreferCacheLoadOverBypass);
+  }
+
+  mPreferCacheLoadOverBypass = aPreferCacheLoadOverBypass;
+  return NS_OK;
+}
+NS_IMETHODIMP
+HttpChannelChild::GetPreferCacheLoadOverBypass(
+    bool* aPreferCacheLoadOverBypass) {
+  if (mSynthesizedCacheInfo) {
+    return mSynthesizedCacheInfo->GetPreferCacheLoadOverBypass(
+        aPreferCacheLoadOverBypass);
+  }
+
+  NS_ENSURE_ARG(aPreferCacheLoadOverBypass);
+  *aPreferCacheLoadOverBypass = mPreferCacheLoadOverBypass;
   return NS_OK;
 }
 
@@ -4067,16 +4085,7 @@ nsresult HttpChannelChild::CrossProcessRedirectFinished(nsresult aStatus) {
     mStatus = aStatus;
   }
 
-  // The loadInfo is updated in nsDocShell::OpenInitializedChannel to have the
-  // correct attributes (such as browsingContextID).
-  // We need to send it to the parent channel so the two match, which is done
-  nsCOMPtr<nsILoadInfo> loadInfo;
-  MOZ_ALWAYS_SUCCEEDS(GetLoadInfo(getter_AddRefs(loadInfo)));
-  Maybe<LoadInfoArgs> loadInfoArgs;
-  MOZ_ALWAYS_SUCCEEDS(
-      mozilla::ipc::LoadInfoToLoadInfoArgs(loadInfo, &loadInfoArgs));
-  Unused << SendCrossProcessRedirectDone(mStatus, loadInfoArgs);
-  return NS_OK;
+  return mStatus;
 }
 
 }  // namespace net

@@ -1162,10 +1162,7 @@ BrowserPageActions.sendToDevice = {
   },
 
   onShowingSubview(panelViewNode) {
-    gSync.populateSendTabToDevicesView(
-      panelViewNode,
-      this.onShowingSubview.bind(this)
-    );
+    gSync.populateSendTabToDevicesView(panelViewNode);
   },
 };
 
@@ -1312,7 +1309,7 @@ BrowserPageActions.shareURL = {
 
     // We cache the providers + the UI if the user selects the share
     // panel multiple times while the panel is open.
-    if (this._cached && bodyNode.children.length > 0) {
+    if (this._cached && bodyNode.children.length) {
       return;
     }
 

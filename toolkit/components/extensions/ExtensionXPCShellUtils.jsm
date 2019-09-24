@@ -905,6 +905,19 @@ var ExtensionTestUtils = {
         )
       );
     });
+
+    Services.prefs.setStringPref(
+      "services.settings.server",
+      "http://localhost:7777/remote-settings-dummy/v1"
+    );
+    // Make sure that loading the default settings for url-classifier-skip-urls
+    // doesn't interfere with running our tests while IDB operations are in
+    // flight by overriding the default remote settings bucket pref name to
+    // ensure that the IDB database isn't created in the first place.
+    Services.prefs.setStringPref(
+      "services.settings.default_bucket",
+      "nonexistent-bucket-foo"
+    );
   },
 
   addonManagerStarted: false,
@@ -953,6 +966,16 @@ var ExtensionTestUtils = {
   // by some external process (e.g., Normandy)
   expectExtension(id) {
     return new ExternallyInstalledWrapper(this.currentScope, id);
+  },
+
+  failOnSchemaWarnings(warningsAsErrors = true) {
+    let prefName = "extensions.webextensions.warnings-as-errors";
+    Services.prefs.setBoolPref(prefName, warningsAsErrors);
+    if (!warningsAsErrors) {
+      this.currentScope.registerCleanupFunction(() => {
+        Services.prefs.setBoolPref(prefName, true);
+      });
+    }
   },
 
   get remoteContentScripts() {

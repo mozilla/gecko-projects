@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{ColorF, DebugCommand, DocumentId, ExternalImageData, ExternalImageId};
+use api::{ColorF, DebugCommand, DocumentId, ExternalImageData, ExternalImageId, PrimitiveFlags};
 use api::{ImageFormat, ItemTag, NotificationRequest, Shadow, FilterOp, MAX_BLUR_RADIUS};
 use api::units::*;
 use api;
@@ -29,8 +29,34 @@ use crate::capture::PlainExternalImage;
 pub type FastHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FxHasher>>;
 pub type FastHashSet<K> = HashSet<K, BuildHasherDefault<FxHasher>>;
 
+/// Custom field embedded inside the Polygon struct of the plane-split crate.
+#[derive(Copy, Clone, Debug)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+pub struct PlaneSplitAnchor {
+    pub cluster_index: usize,
+    pub instance_index: usize,
+}
+
+impl PlaneSplitAnchor {
+    pub fn new(cluster_index: usize, instance_index: usize) -> Self {
+        PlaneSplitAnchor {
+            cluster_index,
+            instance_index,
+        }
+    }
+}
+
+impl Default for PlaneSplitAnchor {
+    fn default() -> Self {
+        PlaneSplitAnchor {
+            cluster_index: 0,
+            instance_index: 0,
+        }
+    }
+}
+
 /// A concrete plane splitter type used in WebRender.
-pub type PlaneSplitter = BspSplitter<f64, WorldPixel>;
+pub type PlaneSplitter = BspSplitter<f64, WorldPixel, PlaneSplitAnchor>;
 
 /// An arbitrary number which we assume opacity is invisible below.
 const OPACITY_EPSILON: f32 = 0.001;
@@ -528,7 +554,7 @@ pub struct LayoutPrimitiveInfo {
     /// but that's an ongoing project, so for now it exists and is used :(
     pub rect: LayoutRect,
     pub clip_rect: LayoutRect,
-    pub is_backface_visible: bool,
+    pub flags: PrimitiveFlags,
     pub hit_info: Option<ItemTag>,
 }
 
@@ -537,7 +563,7 @@ impl LayoutPrimitiveInfo {
         Self {
             rect,
             clip_rect,
-            is_backface_visible: true,
+            flags: PrimitiveFlags::default(),
             hit_info: None,
         }
     }

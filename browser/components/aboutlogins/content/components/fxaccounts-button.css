@@ -10,14 +10,23 @@
 
 .fxaccounts-extra-text {
   color: var(--in-content-deemphasized-text);
-  font-size: smaller;
-  max-width: 20ch;
   text-align: end;
+}
+
+.fxaccounts-extra-text,
+.fxaccount-email,
+.fxaccounts-enable-button {
+  font-size: 13px;
 }
 
 .fxaccount-avatar,
 .fxaccounts-enable-button {
   margin-inline-start: 9px;
+}
+
+.fxaccounts-enable-button {
+  min-width: 120px;
+  padding-inline: 16px;
 }
 
 .fxaccounts-avatar-button {
@@ -28,8 +37,6 @@
 }
 
 .fxaccount-email {
-  font-weight: 600;
-  font-size: .9em;
   vertical-align: middle;
 }
 
@@ -53,4 +60,12 @@
 
 .fxaccounts-avatar-button:hover:active .fxaccount-avatar {
   border-color: var(--in-content-border-active);
+}
+
+.fxaccounts-avatar-button:hover {
+  background-color: transparent !important;
+}
+
+.fxaccounts-avatar-button:hover > .fxaccount-email {
+  text-decoration: underline;
 }

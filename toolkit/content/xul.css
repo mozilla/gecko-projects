@@ -125,7 +125,6 @@ toolbar[mode="text"] .toolbarbutton-icon,
 .toolbarbutton-multiline-text:not([wrap="true"]),
 .toolbarbutton-text[wrap="true"] {
   display: none;
-  -moz-binding: none;
 }
 
 /******** browser, editor, iframe ********/
@@ -229,7 +228,6 @@ menubar > menu:empty {
 /********* menupopup, panel, & tooltip ***********/
 
 menupopup {
-  -moz-binding: url("chrome://global/content/bindings/popup.xml#popup");
   -moz-box-orient: vertical;
 }
 
@@ -363,7 +361,6 @@ treechildren {
 }
 
 tree {
-  -moz-binding: none;
   -moz-box-orient: vertical;
   width: 10px;
   height: 10px;
@@ -475,10 +472,6 @@ textbox[is="search-textbox"] {
 /* SeaMonkey uses its own autocomplete and the toolkit's autocomplete widget */
 %ifndef MOZ_SUITE
 
-textbox[type="autocomplete"] {
-  -moz-binding: url("chrome://global/content/bindings/autocomplete.xml#autocomplete");
-}
-
 panel[type="autocomplete-richlistbox"] {
   -moz-binding: none;
 }
@@ -489,7 +482,6 @@ panel[type="autocomplete-richlistbox"] {
 }
 
 .autocomplete-richlistitem {
-  -moz-binding: none;
   -moz-box-orient: vertical;
   -moz-box-align: center;
   overflow: -moz-hidden-unscrollable;
@@ -517,17 +509,6 @@ menulist[popuponly="true"] {
   height: 0 !important;
   min-height: 0 !important;
   border: 0 !important;
-}
-
-menulist > menupopup > .popup-internal-box > .scrollbutton-up,
-menulist > menupopup > .popup-internal-box > .arrowscrollbox-overflow-start-indicator,
-menulist > menupopup > .popup-internal-box > .arrowscrollbox-overflow-end-indicator,
-menulist > menupopup > .popup-internal-box > .scrollbutton-down {
-  display: none;
-}
-
-menulist > menupopup > .popup-internal-box > .arrowscrollbox-scrollbox {
-  overflow: auto;
 }
 
 /********** splitter **********/

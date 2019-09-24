@@ -494,10 +494,10 @@ def target_tasks_ship_geckoview(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
-@_target_task('fennec_v64')
-def target_tasks_fennec_v64(full_task_graph, parameters, graph_config):
+@_target_task('fennec_v68')
+def target_tasks_fennec_v68(full_task_graph, parameters, graph_config):
     """
-    Select tasks required for running tp6m fennec v64 tests
+    Select tasks required for running tp6m fennec v68 tests
     """
     def filter(task):
         platform = task.attributes.get('build_platform')
@@ -507,7 +507,7 @@ def target_tasks_fennec_v64(full_task_graph, parameters, graph_config):
             return False
         if attributes.get('unittest_suite') != 'raptor':
             return False
-        if '-fennec64-' in attributes.get('raptor_try_name'):
+        if '-fennec68-' in attributes.get('raptor_try_name'):
             return True
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
@@ -798,3 +798,13 @@ def target_tasks_raptor_tp6m(full_task_graph, parameters, graph_config):
                 return True
 
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
+@_target_task('condprof')
+def target_tasks_condprof(full_task_graph, parameters, graph_config):
+    """
+    Select tasks required for building conditioned profiles.
+    """
+    for name, task in full_task_graph.tasks.iteritems():
+        if task.kind == "condprof":
+            yield name

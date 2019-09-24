@@ -408,14 +408,14 @@ nsColumnSetFrame::ReflowConfig nsColumnSetFrame::ChooseColumnStrategy(
     // No balancing, so don't limit the column count
     numColumns = INT32_MAX;
 
-    // XXX_jwir3: If a page's height is set to 0, we could continually
-    //            create continuations, resulting in an infinite loop, since
-    //            no progress is ever made. This is an issue with the spec
-    //            (css3-multicol, css3-page, and css3-break) that is
-    //            unresolved as of 27 Feb 2013. For the time being, we set this
-    //            to have a minimum of 1 css px. Once a resolution is made
-    //            on what minimum to have for a page height, we may need to
-    //            change this value to match the appropriate spec(s).
+    // CSS Fragmentation spec says, "To guarantee progress, fragmentainers are
+    // assumed to have a minimum block size of 1px regardless of their used
+    // size." https://drafts.csswg.org/css-break/#breaking-rules
+    //
+    // Note: we don't enforce the minimum block-size during balancing because
+    // this affects the result. If a balancing column container or its
+    // next-in-flows has zero block-size, it eventually gives up balancing, and
+    // ends up here.
     colBSize = std::max(colBSize, nsPresContext::CSSPixelsToAppUnits(1));
   }
 
@@ -589,8 +589,13 @@ nsColumnSetFrame::ColumnBalanceData nsColumnSetFrame::ReflowChildren(
   }
 
   // get our border and padding
+  // Bug 1499281: Remove borderPadding since only our parent ColumnSetWrapper
+  // can have border and padding.
   LogicalMargin borderPadding = aReflowInput.ComputedLogicalBorderPadding();
   borderPadding.ApplySkipSides(GetLogicalSkipSides(&aReflowInput));
+  MOZ_ASSERT(!StaticPrefs::layout_css_column_span_enabled() ||
+                 borderPadding.IsAllZero(),
+             "Only our parent ColumnSetWrapper can have border and padding!");
 
   nsRect contentRect(0, 0, 0, 0);
   nsOverflowAreas overflowRects;
@@ -602,6 +607,10 @@ nsColumnSetFrame::ColumnBalanceData nsColumnSetFrame::ReflowChildren(
   // reflowInput's ComputedWidth() is UNCONSTRAINED (in which case we'll get
   // a containerSize.width of zero here). In that case, the column positions
   // will be adjusted later, after our correct contentSize is known.
+  //
+  // When column-span is enabled, containerSize.width is always constrained.
+  // However, for RTL, we need to adjust the column positions as well after our
+  // correct containerSize is known.
   nsSize containerSize = aReflowInput.ComputedSizeAsContainerIfConstrained();
 
   const nscoord computedBSize =
@@ -609,23 +618,29 @@ nsColumnSetFrame::ColumnBalanceData nsColumnSetFrame::ReflowChildren(
           ? aReflowInput.mParentReflowInput->ComputedBSize()
           : aReflowInput.ComputedBSize();
 
-  // For RTL, since the columns might not fill the frame exactly, we
-  // need to account for the slop. Otherwise we'll waste time moving the
-  // columns by some tiny amount
+  if (!StaticPrefs::layout_css_column_span_enabled()) {
+    // For RTL, since the columns might not fill the frame exactly, we
+    // need to account for the slop. Otherwise we'll waste time moving the
+    // columns by some tiny amount
 
-  // XXX when all of layout is converted to logical coordinates, we
-  //     probably won't need to do this hack any more. For now, we
-  //     confine it to the legacy horizontal-rl case
-  if (!wm.IsVertical() && isRTL) {
-    nscoord availISize = aReflowInput.AvailableISize();
-    if (aReflowInput.ComputedISize() != NS_UNCONSTRAINEDSIZE) {
-      availISize = aReflowInput.ComputedISize();
-    }
-    if (availISize != NS_UNCONSTRAINEDSIZE) {
-      childOrigin.I(wm) =
-          containerSize.width - borderPadding.Left(wm) - availISize;
+    // XXX when all of layout is converted to logical coordinates, we
+    //     probably won't need to do this hack any more. For now, we
+    //     confine it to the legacy horizontal-rl case
+    //
+    // XXX When column-span is enabled, our available inline-size has been
+    //     constrained by ColumnSetWrapperFrame.
+    if (!wm.IsVertical() && isRTL) {
+      nscoord availISize = aReflowInput.AvailableISize();
+      if (aReflowInput.ComputedISize() != NS_UNCONSTRAINEDSIZE) {
+        availISize = aReflowInput.ComputedISize();
+      }
+      if (availISize != NS_UNCONSTRAINEDSIZE) {
+        childOrigin.I(wm) =
+            containerSize.width - borderPadding.Left(wm) - availISize;
 
-      COLUMN_SET_LOG("%s: childOrigin.iCoord=%d", __func__, childOrigin.I(wm));
+        COLUMN_SET_LOG("%s: childOrigin.iCoord=%d", __func__,
+                       childOrigin.I(wm));
+      }
     }
   }
 
@@ -935,9 +950,6 @@ nsColumnSetFrame::ColumnBalanceData nsColumnSetFrame::ReflowChildren(
   mLastFrameStatus = aStatus;
 
   if (StaticPrefs::layout_css_column_span_enabled()) {
-    MOZ_ASSERT(borderPadding.IsAllZero(),
-               "Only our parent ColumnSetWrapper can have border and padding!");
-
     if (computedBSize != NS_UNCONSTRAINEDSIZE && !HasColumnSpanSiblings()) {
       NS_ASSERTION(aReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE,
                    "Available block-size should be constrained because it's "
@@ -996,14 +1008,23 @@ nsColumnSetFrame::ColumnBalanceData nsColumnSetFrame::ReflowChildren(
   // columns with the correct container width. (In other writing modes,
   // correct containerSize was not required for column positioning so we don't
   // need this fixup.)
-  if (wm.IsVerticalRL() && containerSize.width != contentSize.Width(wm)) {
+  //
+  // When column-span is enabled, RTL column positions also depend on
+  // ColumnSet's actual contentSize. We need this fixup, too.
+  if ((wm.IsVerticalRL() ||
+       (StaticPrefs::layout_css_column_span_enabled() && isRTL)) &&
+      containerSize.width != contentSize.Width(wm)) {
     const nsSize finalContainerSize = aDesiredSize.PhysicalSize();
+    nsOverflowAreas overflowRects;
     for (nsIFrame* child : mFrames) {
       // Get the logical position as set previously using a provisional or
       // dummy containerSize, and reset with the correct container size.
       child->SetPosition(wm, child->GetLogicalPosition(wm, containerSize),
                          finalContainerSize);
+      ConsiderChildOverflow(overflowRects, child);
     }
+    aDesiredSize.mOverflowAreas = overflowRects;
+    aDesiredSize.UnionOverflowAreasWithDesiredBounds();
   }
 
   colData.mFeasible =

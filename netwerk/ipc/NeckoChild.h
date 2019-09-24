@@ -28,8 +28,8 @@ class NeckoChild : public PNeckoChild {
   PStunAddrsRequestChild* AllocPStunAddrsRequestChild();
   bool DeallocPStunAddrsRequestChild(PStunAddrsRequestChild* aActor);
 
-  PWebrtcProxyChannelChild* AllocPWebrtcProxyChannelChild(const TabId& tabId);
-  bool DeallocPWebrtcProxyChannelChild(PWebrtcProxyChannelChild* aActor);
+  PWebrtcTCPSocketChild* AllocPWebrtcTCPSocketChild(const Maybe<TabId>& tabId);
+  bool DeallocPWebrtcTCPSocketChild(PWebrtcTCPSocketChild* aActor);
 
   PAltDataOutputStreamChild* AllocPAltDataOutputStreamChild(
       const nsCString& type, const int64_t& predictedSize,
@@ -95,9 +95,6 @@ class NeckoChild : public PNeckoChild {
 
   bool DeallocPClassifierDummyChannelChild(
       PClassifierDummyChannelChild* aChannel);
-
-  PProxyConfigLookupChild* AllocPProxyConfigLookupChild();
-  bool DeallocPProxyConfigLookupChild(PProxyConfigLookupChild* aActor);
 };
 
 /**

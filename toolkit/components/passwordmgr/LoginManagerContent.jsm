@@ -360,6 +360,46 @@ this.LoginManagerContent = {
     return deferred.promise;
   },
 
+  _compareAndUpdatePreviouslySentValues(
+    formLikeRoot,
+    usernameValue,
+    passwordValue,
+    dismissed = false
+  ) {
+    let state = this.stateForDocument(formLikeRoot.ownerDocument);
+    const lastSentValues = state.lastSubmittedValuesByRootElement.get(
+      formLikeRoot
+    );
+    if (lastSentValues) {
+      if (dismissed && !lastSentValues.dismissed) {
+        // preserve previous dismissed value if it was false (i.e. shown/open)
+        dismissed = false;
+      }
+      if (
+        lastSentValues.username == usernameValue &&
+        lastSentValues.password == passwordValue &&
+        lastSentValues.dismissed == dismissed
+      ) {
+        log(
+          "_compareAndUpdatePreviouslySentValues: values are equivalent, returning true"
+        );
+        return true;
+      }
+    }
+
+    // Save the last submitted values so we don't prompt twice for the same values using
+    // different capture methods e.g. a form submit event and upon navigation.
+    state.lastSubmittedValuesByRootElement.set(formLikeRoot, {
+      username: usernameValue,
+      password: passwordValue,
+      dismissed,
+    });
+    log(
+      "_compareAndUpdatePreviouslySentValues: values not equivalent, returning false"
+    );
+    return false;
+  },
+
   _onKeyDown(event) {
     let focusedElement = LoginManagerContent._formFillService.focusedInput;
     if (
@@ -835,10 +875,9 @@ this.LoginManagerContent = {
       let rootElsWeakSet = LoginFormFactory.getRootElementsWeakSetForDocument(
         doc
       );
-      let hasLoginForm =
-        ChromeUtils.nondeterministicGetWeakSetKeys(rootElsWeakSet).filter(
-          el => el.isConnected
-        ).length > 0;
+      let hasLoginForm = !!ChromeUtils.nondeterministicGetWeakSetKeys(
+        rootElsWeakSet
+      ).filter(el => el.isConnected).length;
       return (
         (hasLoginForm && !thisWindow.isSecureContext) ||
         Array.prototype.some.call(thisWindow.frames, frame =>
@@ -1117,7 +1156,7 @@ this.LoginManagerContent = {
     }
 
     // If too few or too many fields, bail out.
-    if (pwFields.length == 0) {
+    if (!pwFields.length) {
       log("(form ignored -- no password fields.)");
       return null;
     } else if (pwFields.length > 3) {
@@ -1469,35 +1508,6 @@ this.LoginManagerContent = {
 
     let usernameValue = usernameField ? usernameField.value : null;
     let formLikeRoot = FormLikeFactory.findRootForField(newPasswordField);
-    let state = this.stateForDocument(doc);
-    let lastSubmittedValues = state.lastSubmittedValuesByRootElement.get(
-      formLikeRoot
-    );
-    if (lastSubmittedValues) {
-      if (
-        lastSubmittedValues.username == usernameValue &&
-        lastSubmittedValues.password == newPasswordField.value
-      ) {
-        log(
-          "(form submission ignored -- already submitted with the same username and password)"
-        );
-        return;
-      }
-    }
-
-    // Save the last submitted values so we don't prompt twice for the same values using
-    // different capture methods e.g. a form submit event and upon navigation.
-    state.lastSubmittedValuesByRootElement.set(formLikeRoot, {
-      username: usernameValue,
-      password: newPasswordField.value,
-    });
-
-    // Make sure to pass the opener's top ID in case it was in a frame.
-    let openerTopWindowID = null;
-    if (win.opener) {
-      openerTopWindowID = win.opener.top.windowUtils.outerWindowID;
-    }
-
     // Dismiss prompt if the username field is a credit card number AND
     // if the password field is a three digit number. Also dismiss prompt if
     // the password is a credit card number and the password field has attribute
@@ -1511,6 +1521,26 @@ this.LoginManagerContent = {
         newPasswordField.getAutocompleteInfo().fieldName == "cc-number")
     ) {
       dismissedPrompt = true;
+    }
+
+    if (
+      this._compareAndUpdatePreviouslySentValues(
+        formLikeRoot,
+        usernameValue,
+        newPasswordField.value,
+        dismissedPrompt
+      )
+    ) {
+      log(
+        "(form submission ignored -- already submitted with the same username and password)"
+      );
+      return;
+    }
+
+    // Make sure to pass the opener's top ID in case it was in a frame.
+    let openerTopWindowID = null;
+    if (win.opener) {
+      openerTopWindowID = win.opener.top.windowUtils.outerWindowID;
     }
 
     let autoFilledLogin = this.stateForDocument(doc).fillsByRootElement.get(
@@ -1569,6 +1599,7 @@ this.LoginManagerContent = {
     }
 
     let win = passwordField.ownerGlobal;
+    let formLikeRoot = FormLikeFactory.findRootForField(passwordField);
 
     this._highlightFilledField(passwordField);
 
@@ -1597,6 +1628,23 @@ this.LoginManagerContent = {
     );
     let recipes = LoginRecipesContent.getRecipes(origin, win);
     let [usernameField] = this._getFormFields(loginForm, false, recipes);
+    let username = (usernameField && usernameField.value) || "";
+    // Avoid prompting twice for the same value,
+    // e.g. context menu fill followed by change (blur) event
+    if (
+      this._compareAndUpdatePreviouslySentValues(
+        formLikeRoot,
+        username,
+        passwordField.value,
+        true // dismissed
+      )
+    ) {
+      log(
+        "(generatedPasswordFilledOrEdited ignored -- already messaged with the same password value)"
+      );
+      return;
+    }
+
     let openerTopWindowID = null;
     if (win.opener) {
       openerTopWindowID = win.opener.top.windowUtils.outerWindowID;
@@ -1609,7 +1657,7 @@ this.LoginManagerContent = {
         formActionOrigin,
         openerTopWindowID,
         password: passwordField.value,
-        username: (usernameField && usernameField.value) || "",
+        username,
       }
     );
   },
@@ -1728,7 +1776,7 @@ this.LoginManagerContent = {
       // checks) logins available, and there isn't a need to show
       // the insecure form warning.
       if (
-        foundLogins.length == 0 &&
+        !foundLogins.length &&
         (InsecurePasswordUtils.isFormSecure(form) ||
           !LoginHelper.showInsecureFieldWarning)
       ) {
@@ -1831,7 +1879,7 @@ this.LoginManagerContent = {
       // Nothing to do if we have no matching logins available.
       // Only insecure pages reach this block and logs the same
       // telemetry flag.
-      if (foundLogins.length == 0) {
+      if (!foundLogins.length) {
         // We don't log() here since this is a very common case.
         autofillResult = AUTOFILL_RESULT.NO_SAVED_LOGINS;
         return;
@@ -1874,7 +1922,7 @@ this.LoginManagerContent = {
         return fit;
       }, this);
 
-      if (logins.length == 0) {
+      if (!logins.length) {
         log("form not filled, none of the logins fit in the field");
         autofillResult = AUTOFILL_RESULT.NO_LOGINS_FIT;
         return;
@@ -1915,7 +1963,7 @@ this.LoginManagerContent = {
         let matchingLogins = logins.filter(
           l => l.username.toLowerCase() == username
         );
-        if (matchingLogins.length == 0) {
+        if (!matchingLogins.length) {
           log(
             "Password not filled. None of the stored logins match the username already present."
           );

@@ -25,6 +25,9 @@ const STRINGS_ADD_BY_TYPE = {
   String: "about-config-pref-add-type-string",
 };
 
+// Fluent limits the maximum length of placeables.
+const MAX_PLACEABLE_LENGTH = 2500;
+
 let gDefaultBranch = Services.prefs.getDefaultBranch("");
 let gFilterPrefsTask = new DeferredTask(
   () => filterPrefs(),
@@ -198,12 +201,20 @@ class PrefRow {
       // the state to screen readers without affecting the visual presentation.
       span.setAttribute("aria-hidden", "true");
       let outerSpan = document.createElement("span");
-      let spanL10nId = this.hasUserValue
-        ? "about-config-pref-accessible-value-custom"
-        : "about-config-pref-accessible-value-default";
-      document.l10n.setAttributes(outerSpan, spanL10nId, {
-        value: "" + this.value,
-      });
+      if (this.type == "String" && this.value.length > MAX_PLACEABLE_LENGTH) {
+        // If the value is too long for localization, don't include the state.
+        // Since the preferences system is designed to store short values, this
+        // case happens very rarely, thus we keep the same DOM structure for
+        // consistency even though we could avoid the extra "span" element.
+        outerSpan.setAttribute("aria-label", this.value);
+      } else {
+        let spanL10nId = this.hasUserValue
+          ? "about-config-pref-accessible-value-custom"
+          : "about-config-pref-accessible-value-default";
+        document.l10n.setAttributes(outerSpan, spanL10nId, {
+          value: "" + this.value,
+        });
+      }
       outerSpan.appendChild(span);
       this.valueCell.textContent = "";
       this.valueCell.append(outerSpan);
@@ -295,13 +306,13 @@ class PrefRow {
           this.resetButton,
           "about-config-pref-delete-button"
         );
-        this.resetButton.className = "button-delete";
+        this.resetButton.className = "button-delete ghost-button";
       } else {
         document.l10n.setAttributes(
           this.resetButton,
           "about-config-pref-reset-button"
         );
-        this.resetButton.className = "button-reset";
+        this.resetButton.className = "button-reset ghost-button";
       }
     } else if (this.resetButton) {
       this.resetButton.remove();
@@ -340,7 +351,9 @@ class PrefRow {
     gPrefInEdit = this;
     this.editing = true;
     this.refreshElement();
+    // The type=number input isn't selected unless it's focused first.
     this.inputField.focus();
+    this.inputField.select();
   }
 
   save() {
@@ -413,7 +426,6 @@ function onWarningButtonClick() {
 }
 
 function loadPrefs() {
-  document.body.className = "config-background";
   [...document.styleSheets].find(s => s.title == "infop").disabled = true;
 
   let { content } = document.getElementById("main");
@@ -484,6 +496,12 @@ function loadPrefs() {
       pref.editButton.focus();
     }
   });
+
+  window.addEventListener("keypress", event => {
+    if (event.target != search && event.key == "Escape" && gPrefInEdit) {
+      gPrefInEdit.endEdit();
+    }
+  });
 }
 
 function filterPrefs(options = {}) {
@@ -507,7 +525,7 @@ function filterPrefs(options = {}) {
   }
 
   let showResults = gFilterString || gFilterPattern || gFilterShowAll;
-  document.getElementById("show-all").classList.toggle("hidden", showResults);
+  document.body.classList.toggle("table-shown", showResults);
 
   let prefArray = [];
   if (showResults) {
@@ -581,7 +599,9 @@ function filterPrefs(options = {}) {
   }
 
   if (searchName && !gExistingPrefs.has(searchName)) {
-    gPrefsTable.appendChild(new PrefRow(searchName).getElement());
+    let addPrefRow = new PrefRow(searchName);
+    addPrefRow.odd = odd;
+    gPrefsTable.appendChild(addPrefRow.getElement());
   }
 
   // We only start observing preference changes after the first search is done,
@@ -597,9 +617,4 @@ function filterPrefs(options = {}) {
       { once: true }
     );
   }
-
-  document.body.classList.toggle(
-    "config-warning",
-    location.href.split(":").every(l => gFilterString.includes(l))
-  );
 }

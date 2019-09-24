@@ -36,8 +36,10 @@ dictionary ElementCreationOptions {
 };
 
 /* https://dom.spec.whatwg.org/#interface-document */
-[Constructor]
 interface Document : Node {
+  [Throws]
+  constructor();
+
   [Throws]
   readonly attribute DOMImplementation implementation;
   [Pure, Throws, BinaryName="documentURIFromJS", NeedsCallerType]
@@ -320,6 +322,11 @@ partial interface Document {
   FailedCertSecurityInfo getFailedCertSecurityInfo();
 };
 
+partial interface Document {
+  [Func="Document::CallerIsTrustedAboutNetError", Throws]
+  NetErrorInfo getNetErrorInfo();
+};
+
 // https://w3c.github.io/page-visibility/#extensions-to-the-document-interface
 partial interface Document {
   readonly attribute boolean hidden;
@@ -567,6 +574,8 @@ partial interface Document {
   readonly attribute boolean hasBeenUserGestureActivated;
   [ChromeOnly]
   readonly attribute boolean hasValidTransientUserGestureActivation;
+  [ChromeOnly]
+  boolean consumeTransientUserGestureActivation();
 };
 
 // Extension to give chrome JS the ability to set an event handler which is

@@ -180,15 +180,6 @@ HitTestingTreeNode* HitTestingTreeNode::GetPrevSibling() const {
 
 HitTestingTreeNode* HitTestingTreeNode::GetParent() const { return mParent; }
 
-bool HitTestingTreeNode::IsAncestorOf(const HitTestingTreeNode* aOther) const {
-  for (const HitTestingTreeNode* cur = aOther; cur; cur = cur->GetParent()) {
-    if (cur == this) {
-      return true;
-    }
-  }
-  return false;
-}
-
 AsyncPanZoomController* HitTestingTreeNode::GetApzc() const { return mApzc; }
 
 AsyncPanZoomController* HitTestingTreeNode::GetNearestContainingApzc() const {
@@ -208,12 +199,14 @@ LayersId HitTestingTreeNode::GetLayersId() const { return mLayersId; }
 
 void HitTestingTreeNode::SetHitTestData(
     const EventRegions& aRegions, const LayerIntRegion& aVisibleRegion,
+    const LayerIntRect& aRemoteDocumentRect,
     const CSSTransformMatrix& aTransform,
     const Maybe<ParentLayerIntRegion>& aClipRegion,
     const EventRegionsOverride& aOverride, bool aIsBackfaceHidden,
     bool aIsAsyncZoomContainer) {
   mEventRegions = aRegions;
   mVisibleRegion = aVisibleRegion;
+  mRemoteDocumentRect = aRemoteDocumentRect;
   mTransform = aTransform;
   mClipRegion = aClipRegion;
   mOverride = aOverride;
@@ -340,6 +333,37 @@ LayerToScreenMatrix4x4 HitTestingTreeNode::GetTransformToGecko() const {
 
 const LayerIntRegion& HitTestingTreeNode::GetVisibleRegion() const {
   return mVisibleRegion;
+}
+
+ScreenRect HitTestingTreeNode::GetRemoteDocumentScreenRect() const {
+  ScreenRect result =
+      TransformBy(GetTransformToGecko(), IntRectToRect(mRemoteDocumentRect));
+
+  for (const HitTestingTreeNode* node = this; node; node = node->GetParent()) {
+    if (!node->GetApzc()) {
+      continue;
+    }
+
+    ParentLayerRect compositionBounds = node->GetApzc()->GetCompositionBounds();
+    if (compositionBounds.IsEmpty()) {
+      return ScreenRect();
+    }
+
+    ScreenRect scrollPortOnScreenCoordinate = TransformBy(
+        node->GetParent() ? node->GetParent()->GetTransformToGecko()
+                          : LayerToScreenMatrix4x4(),
+        ViewAs<LayerPixel>(compositionBounds,
+                           PixelCastJustification::MovingDownToChildren));
+    if (scrollPortOnScreenCoordinate.IsEmpty()) {
+      return ScreenRect();
+    }
+
+    result = result.Intersect(scrollPortOnScreenCoordinate);
+    if (result.IsEmpty()) {
+      return ScreenRect();
+    }
+  }
+  return result;
 }
 
 bool HitTestingTreeNode::IsAsyncZoomContainer() const {

@@ -10,17 +10,18 @@ interface nsISupports;
 interface JSWindowActor {
   [Throws]
   void sendAsyncMessage(DOMString messageName,
-                        optional any obj,
-                        optional any transfers);
+                        optional any obj);
 
   [Throws]
   Promise<any> sendQuery(DOMString messageName,
-                         optional any obj,
-                         optional any transfers);
+                         optional any obj);
 };
 
-[ChromeOnly, ChromeConstructor]
+[ChromeOnly]
 interface JSWindowActorParent {
+  [ChromeOnly]
+  constructor();
+
   /**
    * Actor initialization occurs after the constructor is called but before the
    * first message is delivered. Until the actor is initialized, accesses to
@@ -33,8 +34,11 @@ interface JSWindowActorParent {
 };
 JSWindowActorParent implements JSWindowActor;
 
-[ChromeOnly, ChromeConstructor]
+[ChromeOnly]
 interface JSWindowActorChild {
+  [ChromeOnly]
+  constructor();
+  
   /**
    * Actor initialization occurs after the constructor is called but before the
    * first message is delivered. Until the actor is initialized, accesses to
@@ -124,9 +128,12 @@ dictionary WindowActorOptions {
   sequence<DOMString> matches;
 
   /**
-   * Optional list of regular expressions for remoteTypes which are
-   * allowed to instantiate this actor. If not passed, all content
-   * processes are allowed to instantiate the actor.
+   * An array of remote type which restricts the actor is allowed to instantiate
+   * in specific process type. If this is defined, the prefix of process type
+   * matches the remote type by prefix match is allowed to instantiate, ex: if
+   * Fission is enabled, the prefix of process type will be `webIsolated`, it
+   * can prefix match remote type either `web` or `webIsolated`. If not passed,
+   * all content processes are allowed to instantiate the actor.
    */
   sequence<DOMString> remoteTypes;
 

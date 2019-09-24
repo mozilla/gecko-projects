@@ -177,6 +177,10 @@ typedef enum {
 } GdkAnchorHints;
 #endif
 
+#if !GTK_CHECK_VERSION(3, 10, 0)
+#  define GDK_WINDOW_STATE_TILED (1 << 8)
+#endif
+
 /* utility functions */
 static bool is_mouse_in_window(GdkWindow* aWindow, gdouble aMouseX,
                                gdouble aMouseY);
@@ -1155,6 +1159,37 @@ void nsWindow::HideWaylandPopupAndAllChildren() {
   }
 }
 
+bool IsPopupWithoutToplevelParent(nsMenuPopupFrame* aMenuPopupFrame) {
+  // Check if the popup is autocomplete (like tags autocomplete
+  // in the bookmark edit popup).
+  nsAtom* popupId = aMenuPopupFrame->GetContent()->GetID();
+  if (popupId &&
+      popupId->Equals(NS_LITERAL_STRING("editBMPanel_tagsAutocomplete"))) {
+    return true;
+  }
+
+  nsIFrame* parentFrame = aMenuPopupFrame->GetParent();
+  if (!parentFrame) {
+    return false;
+  }
+
+  // Check if the popup is in the folder menu list
+  nsAtom* parentId = parentFrame->GetContent()->GetID();
+  if (parentId &&
+      parentId->Equals(NS_LITERAL_STRING("editBMPanel_folderMenuList"))) {
+    return true;
+  }
+
+  // Check if the popup is in popupnotificationcontent (like choosing capture
+  // device when starting webrtc session).
+  parentFrame = parentFrame->GetParent();
+  if (parentFrame && parentFrame->GetContent()->NodeName().EqualsLiteral(
+                         "popupnotificationcontent")) {
+    return true;
+  }
+  return false;
+}
+
 // Wayland keeps strong popup window hierarchy. We need to track active
 // (visible) popup windows and make sure we hide popup on the same level
 // before we open another one on that level. It means that every open
@@ -1211,10 +1246,14 @@ GtkWidget* nsWindow::ConfigureWaylandPopupWindows() {
       LOG(("...[%p] GetParentMenuWidget() = %p\n", (void*)this, parentWindow));
 
       // If the popup is a regular menu but GetParentMenuWidget() returns
-      // nullptr which means it's connected non-menu parent
-      // (bookmark toolbar for instance).
+      // nullptr which means is not a submenu of any other menu.
       // In this case use a parent given at nsWindow::Create().
-      if (!parentWindow && !menuPopupFrame->IsContextMenu()) {
+      // But we have to avoid using mToplevelParentWindow in case the popup
+      // is in 'popupnotificationcontent' element or autocomplete popup,
+      //  otherwise the popupnotification would disappear when for
+      // example opening a popup with microphone selection.
+      if (!parentWindow && !menuPopupFrame->IsContextMenu() &&
+          !IsPopupWithoutToplevelParent(menuPopupFrame)) {
         parentWindow =
             get_window_for_gtk_widget(GTK_WIDGET(mToplevelParentWindow));
       }
@@ -3201,8 +3240,10 @@ void nsWindow::OnVisibilityNotifyEvent(GdkEventVisibility* aEvent) {
 
 void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
                                   GdkEventWindowState* aEvent) {
-  LOG(("nsWindow::OnWindowStateEvent [%p] changed %d new_window_state %d\n",
-       (void*)this, aEvent->changed_mask, aEvent->new_window_state));
+  LOG(
+      ("nsWindow::OnWindowStateEvent [%p] for %p changed 0x%x new_window_state "
+       "0x%x\n",
+       (void*)this, aWidget, aEvent->changed_mask, aEvent->new_window_state));
 
   if (IS_MOZ_CONTAINER(aWidget)) {
     // This event is notifying the container widget of changes to the
@@ -3220,6 +3261,7 @@ void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
     if (mHasMappedToplevel != mapped) {
       SetHasMappedToplevel(mapped);
     }
+    LOG(("\tquick return because IS_MOZ_CONTAINER(aWidget) is true\n"));
     return;
   }
   // else the widget is a shell widget.
@@ -3280,7 +3322,8 @@ void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
   if (!waylandWasIconified &&
       (aEvent->changed_mask &
        (GDK_WINDOW_STATE_ICONIFIED | GDK_WINDOW_STATE_MAXIMIZED |
-        GDK_WINDOW_STATE_FULLSCREEN)) == 0) {
+        GDK_WINDOW_STATE_TILED | GDK_WINDOW_STATE_FULLSCREEN)) == 0) {
+    LOG(("\tearly return because no interesting bits changed\n"));
     return;
   }
 
@@ -3305,6 +3348,14 @@ void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
 #ifdef ACCESSIBILITY
     DispatchRestoreEventAccessible();
 #endif  // ACCESSIBILITY
+  }
+
+  if (aEvent->new_window_state & GDK_WINDOW_STATE_TILED) {
+    LOG(("\tTiled\n"));
+    mIsTiled = true;
+  } else {
+    LOG(("\tNot tiled\n"));
+    mIsTiled = false;
   }
 
   if (mWidgetListener) {
@@ -4502,6 +4553,11 @@ void nsWindow::UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion) {
         cairo_region_union_rectangle(region, &rect);
       }
       (*sGdkWindowSetOpaqueRegion)(mGdkWindow, region);
+#ifdef MOZ_WAYLAND
+      if (!mIsX11Display) {
+        moz_container_set_opaque_region(MOZ_CONTAINER(mContainer), region);
+      }
+#endif
       cairo_region_destroy(region);
     }
   }

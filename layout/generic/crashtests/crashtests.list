@@ -37,7 +37,7 @@ load 331292.html
 load 334105-1.xhtml
 load 334107-1.xhtml
 load 334147-1.xhtml
-asserts(1-18) load 334148-1.xhtml # XBL interacts poorly with CSS counters.
+load 334148-1.xhtml
 load 334602-1.html
 load 337412-1.html
 load 337883-1.html
@@ -522,7 +522,7 @@ load 810726.html
 load 812822-1.html
 load 812879-1.html
 load 812879-2.html
-load 812893.html
+pref(layout.css.column-span.enabled,true) asserts(4-13) load 812893.html # bug 1581653
 load 814995.html
 load 822910.xhtml
 load 824297-1.html
@@ -653,6 +653,7 @@ load 1233191.html
 load 1233607.html
 load 1234701-1.html
 load 1234701-2.html
+load 1248227.html
 load 1271765.html
 pref(layout.css.xul-box-display-values.content.enabled,true) asserts(2) asserts-if(Android,1) load 1272983-1.html # bug 586628
 pref(layout.css.xul-box-display-values.content.enabled,true) asserts(2) asserts-if(Android,1) load 1272983-2.html # bug 586628
@@ -728,6 +729,7 @@ pref(layout.css.column-span.enabled,true) load 1517033.html
 pref(layout.css.column-span.enabled,true) load 1517297.html
 load chrome://reftest/content/crashtests/layout/generic/crashtests/1520798-1.xul
 load 1520798-2.html
+load 1528771.html
 load 1539656.html
 load 1544060-1.html
 load 1544060-2.html
@@ -735,10 +737,14 @@ load 1542441.html
 pref(layout.css.grid-template-subgrid-value.enabled,true) load 1553824.html
 pref(layout.css.column-span.enabled,true) load 1554824.html
 load 1555142.html
+load 1560349.html
+load 1560397.html
+load 1560397-2.html
 load 1562105.html
 pref(layout.css.column-span.enabled,true) load 1563131.html
 pref(layout.css.column-span.enabled,true) load 1568001-1.html
 pref(layout.css.column-span.enabled,true) load 1568001-2.html
+load 1569639.html
 pref(layout.css.column-span.enabled,true) load 1571239.html
 load 1571460.html
 pref(layout.css.column-span.enabled,true) load 1571598.html

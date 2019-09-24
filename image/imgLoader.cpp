@@ -722,7 +722,7 @@ static bool ValidateSecurityInfo(imgRequest* request, bool forcePrincipalCheck,
   // If the referrer policy doesn't match, we can't use this request.
   // XXX: Note that we only validate referrer policy, not referrerInfo object.
   // We should do with referrerInfo object, but it will cause us to use more
-  // resources in the common case (the same policies but diferrent original
+  // resources in the common case (the same policies but different original
   // referrers).
   // XXX: this will return false if an image has different referrer attributes,
   // i.e. we currently don't use the cached image but reload the image with
@@ -1664,11 +1664,11 @@ bool imgLoader::ValidateRequestWithNewChannel(
     imgRequest* request, nsIURI* aURI, nsIURI* aInitialDocumentURI,
     nsIReferrerInfo* aReferrerInfo, nsILoadGroup* aLoadGroup,
     imgINotificationObserver* aObserver, nsISupports* aCX,
-    Document* aLoadingDocument, nsLoadFlags aLoadFlags,
+    Document* aLoadingDocument, uint64_t aInnerWindowId, nsLoadFlags aLoadFlags,
     nsContentPolicyType aLoadPolicyType, imgRequestProxy** aProxyRequest,
     nsIPrincipal* aTriggeringPrincipal, int32_t aCORSMode,
     bool* aNewChannelCreated) {
-  // now we need to insert a new channel request object inbetween the real
+  // now we need to insert a new channel request object in between the real
   // request and the proxy that basically delays loading the image until it
   // gets a 304 or figures out that this needs to be a new request
 
@@ -1730,7 +1730,7 @@ bool imgLoader::ValidateRequestWithNewChannel(
   }
 
   RefPtr<imgCacheValidator> hvc = new imgCacheValidator(
-      progressproxy, this, request, aCX, forcePrincipalCheck);
+      progressproxy, this, request, aCX, aInnerWindowId, forcePrincipalCheck);
 
   // Casting needed here to get past multiple inheritance.
   nsCOMPtr<nsIStreamListener> listener =
@@ -1890,8 +1890,9 @@ bool imgLoader::ValidateEntry(
 
     return ValidateRequestWithNewChannel(
         request, aURI, aInitialDocumentURI, aReferrerInfo, aLoadGroup,
-        aObserver, aCX, aLoadingDocument, aLoadFlags, aLoadPolicyType,
-        aProxyRequest, aTriggeringPrincipal, aCORSMode, aNewChannelCreated);
+        aObserver, aCX, aLoadingDocument, innerWindowID, aLoadFlags,
+        aLoadPolicyType, aProxyRequest, aTriggeringPrincipal, aCORSMode,
+        aNewChannelCreated);
   }
 
   return !validateRequest;
@@ -2513,7 +2514,7 @@ nsresult imgLoader::LoadImageWithChannel(nsIChannel* channel,
 
     // No principal specified here, because we're not passed one.
     // In LoadImageWithChannel, the redirects that may have been
-    // assoicated with this load would have gone through necko.
+    // associated with this load would have gone through necko.
     // We only have the final URI in ImageLib and hence don't know
     // if the request went through insecure redirects.  But if it did,
     // the necko cache should have handled that (since all necko cache hits
@@ -2759,10 +2760,12 @@ NS_IMPL_ISUPPORTS(imgCacheValidator, nsIStreamListener, nsIRequestObserver,
 imgCacheValidator::imgCacheValidator(nsProgressNotificationProxy* progress,
                                      imgLoader* loader, imgRequest* request,
                                      nsISupports* aContext,
+                                     uint64_t aInnerWindowId,
                                      bool forcePrincipalCheckForCacheEntry)
     : mProgressProxy(progress),
       mRequest(request),
       mContext(aContext),
+      mInnerWindowId(aInnerWindowId),
       mImgLoader(loader),
       mHadInsecureRedirect(false) {
   NewRequestAndEntry(forcePrincipalCheckForCacheEntry, loader,
@@ -2888,6 +2891,7 @@ imgCacheValidator::OnStartRequest(nsIRequest* aRequest) {
       // Clear the validator before updating the proxies. The notifications may
       // clone an existing request, and its state could be inconsistent.
       mRequest->SetLoadId(context);
+      mRequest->SetInnerWindowID(mInnerWindowId);
       UpdateProxies(/* aCancelRequest */ false, /* aSyncNotify */ true);
       return NS_OK;
     }

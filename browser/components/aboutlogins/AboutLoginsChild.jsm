@@ -31,7 +31,10 @@ XPCOMUtils.defineLazyServiceGetter(
 );
 
 const TELEMETRY_EVENT_CATEGORY = "pwmgr";
+const TELEMETRY_MIN_MS_BETWEEN_OPEN_MANAGEMENT = 5000;
 
+let lastOpenManagementOuterWindowID = null;
+let lastOpenManagementEventTime = Number.NEGATIVE_INFINITY;
 let masterPasswordPromise;
 
 class AboutLoginsChild extends ActorChild {
@@ -64,6 +67,8 @@ class AboutLoginsChild extends ActorChild {
               "AboutLogins:MasterPasswordRequest"
             );
           },
+          // Default to enabled just in case a search is attempted before we get a response.
+          masterPasswordEnabled: true,
         };
         waivedContent.AboutLoginsUtils = Cu.cloneInto(
           AboutLoginsUtils,
@@ -140,6 +145,26 @@ class AboutLoginsChild extends ActorChild {
       }
       case "AboutLoginsRecordTelemetryEvent": {
         let { method, object, extra = {} } = event.detail;
+
+        if (method == "open_management") {
+          let { docShell } = event.target.ownerGlobal;
+          // Compare to the last time open_management was recorded for the same
+          // outerWindowID to not double-count them due to a redirect to remove
+          // the entryPoint query param (since replaceState isn't allowed for
+          // about:). Don't use performance.now for the tab since you can't
+          // compare that number between different tabs and this JSM is shared.
+          let now = docShell.now();
+          if (
+            docShell.outerWindowID == lastOpenManagementOuterWindowID &&
+            now - lastOpenManagementEventTime <
+              TELEMETRY_MIN_MS_BETWEEN_OPEN_MANAGEMENT
+          ) {
+            return;
+          }
+          lastOpenManagementEventTime = now;
+          lastOpenManagementOuterWindowID = docShell.outerWindowID;
+        }
+
         try {
           Services.telemetry.recordEvent(
             TELEMETRY_EVENT_CATEGORY,
@@ -177,9 +202,6 @@ class AboutLoginsChild extends ActorChild {
       case "AboutLogins:AllLogins":
         this.sendToContent("AllLogins", message.data);
         break;
-      case "AboutLogins:LocalizeBadges":
-        this.sendToContent("LocalizeBadges", message.data);
-        break;
       case "AboutLogins:LoginAdded":
         this.sendToContent("LoginAdded", message.data);
         break;
@@ -196,6 +218,11 @@ class AboutLoginsChild extends ActorChild {
         break;
       case "AboutLogins:SendFavicons":
         this.sendToContent("SendFavicons", message.data);
+        break;
+      case "AboutLogins:Setup":
+        this.sendToContent("Setup", message.data);
+        Cu.waiveXrays(this.content).AboutLoginsUtils.masterPasswordEnabled =
+          message.data.masterPasswordEnabled;
         break;
       case "AboutLogins:ShowLoginItemError":
         this.sendToContent("ShowLoginItemError", message.data);

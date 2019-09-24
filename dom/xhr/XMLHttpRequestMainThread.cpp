@@ -24,13 +24,13 @@
 #include "mozilla/dom/MutableBlobStorage.h"
 #include "mozilla/dom/XMLDocument.h"
 #include "mozilla/dom/URLSearchParams.h"
+#include "mozilla/dom/UserActivation.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/WorkerError.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
-#include "mozilla/EventStateManager.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/LoadContext.h"
 #include "mozilla/MemoryReporting.h"
@@ -2404,6 +2404,8 @@ nsresult XMLHttpRequestMainThread::CreateChannel() {
     rv = httpChannel->SetRequestMethod(mRequestMethod);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    httpChannel->SetSource(profiler_get_backtrace());
+
     // Set the initiator type
     nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(httpChannel));
     if (timedChannel) {
@@ -2557,7 +2559,7 @@ nsresult XMLHttpRequestMainThread::InitiateFetch(
 
     // Mark channel as urgent-start if the XHR is triggered by user input
     // events.
-    if (EventStateManager::IsHandlingUserInput()) {
+    if (UserActivation::IsHandlingUserInput()) {
       cos->AddClassFlags(nsIClassOfService::UrgentStart);
     }
   }
@@ -3118,6 +3120,17 @@ void XMLHttpRequestMainThread::SetMozBackgroundRequest(
 void XMLHttpRequestMainThread::SetOriginStack(
     UniquePtr<SerializedStackHolder> aOriginStack) {
   mOriginStack = std::move(aOriginStack);
+}
+
+void XMLHttpRequestMainThread::SetSource(UniqueProfilerBacktrace aSource) {
+  if (!mChannel) {
+    return;
+  }
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(mChannel);
+
+  if (httpChannel) {
+    httpChannel->SetSource(std::move(aSource));
+  }
 }
 
 bool XMLHttpRequestMainThread::WithCredentials() const {

@@ -66,6 +66,11 @@ loader.lazyRequireGetter(
   "saveScreenshot",
   "devtools/shared/screenshot/save"
 );
+loader.lazyRequireGetter(
+  this,
+  "ObjectClient",
+  "devtools/shared/client/object-client"
+);
 
 loader.lazyImporter(
   this,
@@ -145,7 +150,17 @@ function Inspector(toolbox) {
   this.panelWin = window;
   this.panelWin.inspector = this;
   this.telemetry = toolbox.telemetry;
-  this.store = Store();
+  this.store = Store({
+    createObjectClient: object => {
+      return new ObjectClient(toolbox.target.client, object);
+    },
+    releaseActor: actor => {
+      if (!actor) {
+        return;
+      }
+      toolbox.target.client.release(actor);
+    },
+  });
 
   // Map [panel id => panel instance]
   // Stores all the instances of sidebar panels like rule view, computed view, ...
@@ -1679,12 +1694,14 @@ Inspector.prototype = {
   },
 
   startEyeDropperListeners: function() {
+    this.toolbox.tellRDMAboutPickerState(true);
     this.inspectorFront.once("color-pick-canceled", this.onEyeDropperDone);
     this.inspectorFront.once("color-picked", this.onEyeDropperDone);
     this.walker.once("new-root", this.onEyeDropperDone);
   },
 
   stopEyeDropperListeners: function() {
+    this.toolbox.tellRDMAboutPickerState(false);
     this.inspectorFront.off("color-pick-canceled", this.onEyeDropperDone);
     this.inspectorFront.off("color-picked", this.onEyeDropperDone);
     this.walker.off("new-root", this.onEyeDropperDone);
