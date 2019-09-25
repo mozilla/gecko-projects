@@ -7770,13 +7770,6 @@ void GCRuntime::mergeRealms(Realm* source, Realm* target) {
   // Fixup realm pointers in source to refer to target, and make sure
   // type information generations are in sync.
 
-  for (auto script = source->zone()->cellIterUnsafe<JSScript>(); !script.done();
-       script.next()) {
-    MOZ_ASSERT(script->realm() == source);
-    script->realm_ = target;
-    MOZ_ASSERT(!script->hasJitScript());
-  }
-
   GlobalObject* global = target->maybeGlobal();
   MOZ_ASSERT(global);
 
@@ -7847,34 +7840,15 @@ void GCRuntime::mergeRealms(Realm* source, Realm* target) {
   // Atoms which are marked in source's zone are now marked in target's zone.
   atomMarking.adoptMarkedAtoms(target->zone(), source->zone());
 
-  // Merge script name map entries from the source zone that come from the
-  // source realm into the target zone's map. Note that the zones will always
-  // differ.
+  // The source Realm is a parse-only realm and should not have collected any
+  // zone-tracked metadata.
   Zone* sourceZone = source->zone();
-  Zone* targetZone = target->zone();
-  MOZ_ASSERT(sourceZone != targetZone);
-  if (sourceZone->scriptNameMap) {
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-
-    if (!targetZone->scriptNameMap) {
-      targetZone->scriptNameMap = cx->make_unique<ScriptNameMap>();
-
-      if (!targetZone->scriptNameMap) {
-        oomUnsafe.crash("Failed to create a script name map.");
-      }
-    }
-
-    for (auto i = sourceZone->scriptNameMap->modIter(); !i.done(); i.next()) {
-      JSScript* key = i.get().key();
-      if (key->realm() == source) {
-        auto value = std::move(i.get().value());
-        if (!targetZone->scriptNameMap->putNew(key, std::move(value))) {
-          oomUnsafe.crash("Failed to add an entry in the script name map.");
-        }
-        i.remove();
-      }
-    }
-  }
+  MOZ_ASSERT(!sourceZone->scriptLCovMap);
+  MOZ_ASSERT(!sourceZone->scriptCountsMap);
+  MOZ_ASSERT(!sourceZone->debugScriptMap);
+#ifdef MOZ_VTUNE
+  MOZ_ASSERT(!sourceZone->scriptVTuneIdMap);
+#endif
 
   // The source realm is now completely empty, and is the only realm in its
   // compartment, which is the only compartment in its zone. Delete realm,

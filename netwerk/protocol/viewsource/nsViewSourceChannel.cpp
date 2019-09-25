@@ -5,17 +5,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsViewSourceChannel.h"
-#include "nsIIOService.h"
-#include "nsMimeTypes.h"
-#include "nsNetUtil.h"
-#include "nsContentUtils.h"
-#include "nsIHttpHeaderVisitor.h"
-#include "nsContentSecurityManager.h"
-#include "nsServiceManagerUtils.h"
-#include "nsIInputStreamChannel.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/NullPrincipal.h"
+#include "nsContentSecurityManager.h"
+#include "nsContentUtils.h"
+#include "nsHttpChannel.h"
+#include "nsIHttpHeaderVisitor.h"
+#include "nsIIOService.h"
+#include "nsIInputStreamChannel.h"
 #include "nsIReferrerInfo.h"
+#include "nsMimeTypes.h"
+#include "nsNetUtil.h"
+#include "nsServiceManagerUtils.h"
 
 NS_IMPL_ADDREF(nsViewSourceChannel)
 NS_IMPL_RELEASE(nsViewSourceChannel)
@@ -940,24 +941,6 @@ nsViewSourceChannel::IsPrivateResponse(bool* _retval) {
 NS_IMETHODIMP
 nsViewSourceChannel::RedirectTo(nsIURI* uri) {
   return !mHttpChannel ? NS_ERROR_NULL_POINTER : mHttpChannel->RedirectTo(uri);
-}
-
-NS_IMETHODIMP
-nsViewSourceChannel::SwitchProcessTo(mozilla::dom::Promise* aBrowserParent,
-                                     uint64_t aIdentifier) {
-  return !mHttpChannel
-             ? NS_ERROR_NULL_POINTER
-             : mHttpChannel->SwitchProcessTo(aBrowserParent, aIdentifier);
-}
-
-NS_IMETHODIMP
-nsViewSourceChannel::HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) {
-  MOZ_ASSERT(aMismatch);
-  if (!aMismatch) {
-    return NS_ERROR_INVALID_ARG;
-  }
-  *aMismatch = false;
-  return NS_OK;
 }
 
 NS_IMETHODIMP

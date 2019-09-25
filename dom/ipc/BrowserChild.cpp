@@ -19,17 +19,18 @@
 #include "mozilla/BrowserElementParent.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/EventListenerManager.h"
+#include "mozilla/dom/BrowserBridgeChild.h"
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/JSWindowActorChild.h"
 #include "mozilla/dom/LoadURIOptionsBinding.h"
 #include "mozilla/dom/MessageManagerBinding.h"
 #include "mozilla/dom/MouseEventBinding.h"
 #include "mozilla/dom/Nullable.h"
-#include "mozilla/dom/PaymentRequestChild.h"
 #include "mozilla/dom/PBrowser.h"
-#include "mozilla/dom/WindowProxyHolder.h"
-#include "mozilla/dom/BrowserBridgeChild.h"
+#include "mozilla/dom/PaymentRequestChild.h"
 #include "mozilla/dom/SessionStoreListener.h"
+#include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/gfx/CrossProcessPaint.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/IMEStateManager.h"
@@ -68,6 +69,7 @@
 #include "Units.h"
 #include "nsBrowserStatusFilter.h"
 #include "nsContentUtils.h"
+#include "nsQueryActor.h"
 #include "nsDocShell.h"
 #include "nsEmbedCID.h"
 #include "nsGlobalWindow.h"
@@ -890,8 +892,7 @@ BrowserChild::FocusPrevElement(bool aForDocumentNavigation) {
 NS_IMETHODIMP
 BrowserChild::GetInterface(const nsIID& aIID, void** aSink) {
   if (aIID.Equals(NS_GET_IID(nsIWebBrowserChrome3))) {
-    NS_IF_ADDREF(((nsISupports*)(*aSink = mWebBrowserChrome)));
-    return NS_OK;
+    return GetWebBrowserChrome(reinterpret_cast<nsIWebBrowserChrome3**>(aSink));
   }
 
   // XXXbz should we restrict the set of interfaces we hand out here?
@@ -2250,8 +2251,10 @@ mozilla::ipc::IPCResult BrowserChild::RecvSwappedWithOtherRemoteLoader(
 
   docShell->SetInFrameSwap(true);
 
-  nsContentUtils::FirePageShowEvent(ourDocShell, ourEventTarget, false, true);
-  nsContentUtils::FirePageHideEvent(ourDocShell, ourEventTarget, true);
+  nsContentUtils::FirePageShowEventForFrameLoaderSwap(
+      ourDocShell, ourEventTarget, false, true);
+  nsContentUtils::FirePageHideEventForFrameLoaderSwap(ourDocShell,
+                                                      ourEventTarget, true);
 
   // Owner content type may have changed, so store the possibly updated context
   // and notify others.
@@ -2280,9 +2283,16 @@ mozilla::ipc::IPCResult BrowserChild::RecvSwappedWithOtherRemoteLoader(
     RecvLoadRemoteScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
   }
 
-  nsContentUtils::FirePageShowEvent(ourDocShell, ourEventTarget, true, true);
+  nsContentUtils::FirePageShowEventForFrameLoaderSwap(
+      ourDocShell, ourEventTarget, true, true);
 
   docShell->SetInFrameSwap(false);
+
+  // This is needed to get visibility state right in cases when we swapped a
+  // visible tab (foreground in visible window) with a non-visible tab.
+  if (RefPtr<Document> doc = docShell->GetDocument()) {
+    doc->UpdateVisibilityState();
+  }
 
   return IPC_OK();
 }
@@ -2870,7 +2880,15 @@ BrowserChild::GetMessageManager(ContentFrameMessageManager** aResult) {
 
 NS_IMETHODIMP
 BrowserChild::GetWebBrowserChrome(nsIWebBrowserChrome3** aWebBrowserChrome) {
-  NS_IF_ADDREF(*aWebBrowserChrome = mWebBrowserChrome);
+  nsCOMPtr<nsPIDOMWindowOuter> outer = do_GetInterface(WebNavigation());
+  if (nsCOMPtr<nsIWebBrowserChrome3> chrome =
+          do_QueryActor(u"WebBrowserChrome", outer)) {
+    chrome.forget(aWebBrowserChrome);
+  } else {
+    // TODO: remove fallback
+    NS_IF_ADDREF(*aWebBrowserChrome = mWebBrowserChrome);
+  }
+
   return NS_OK;
 }
 

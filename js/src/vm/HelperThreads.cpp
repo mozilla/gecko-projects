@@ -73,13 +73,17 @@ bool js::CreateHelperThreadsState() {
   gHelperThreadState = helperThreadState.release();
   if (!gHelperThreadState->ensureContextListForThreadCount()) {
     js_delete(gHelperThreadState);
+    gHelperThreadState = nullptr;
     return false;
   }
   return true;
 }
 
 void js::DestroyHelperThreadsState() {
-  MOZ_ASSERT(gHelperThreadState);
+  if (!gHelperThreadState) {
+    return;
+  }
+
   gHelperThreadState->finish();
   js_delete(gHelperThreadState);
   gHelperThreadState = nullptr;
@@ -1123,38 +1127,43 @@ bool GlobalHelperThreadState::ensureInitialized() {
   MOZ_ASSERT(CanUseExtraThreads());
 
   MOZ_ASSERT(this == &HelperThreadState());
-  AutoLockHelperThreadState lock;
 
-  if (threads) {
-    return true;
-  }
+  {
+    // We must not hold this lock during the error handling code below.
+    AutoLockHelperThreadState lock;
 
-  threads = js::MakeUnique<HelperThreadVector>();
-  if (!threads || !threads->initCapacity(threadCount)) {
-    return false;
-  }
+    if (threads) {
+      return true;
+    }
 
-  for (size_t i = 0; i < threadCount; i++) {
-    threads->infallibleEmplaceBack();
-    HelperThread& helper = (*threads)[i];
-
-    helper.thread = mozilla::Some(
-        Thread(Thread::Options().setStackSize(HELPER_STACK_SIZE)));
-    if (!helper.thread->init(HelperThread::ThreadMain, &helper)) {
+    threads = js::MakeUnique<HelperThreadVector>();
+    if (!threads) {
+      return false;
+    }
+    if (!threads->initCapacity(threadCount)) {
       goto error;
     }
 
-    continue;
+    for (size_t i = 0; i < threadCount; i++) {
+      threads->infallibleEmplaceBack();
+      HelperThread& helper = (*threads)[i];
 
-  error:
-    // Ensure that we do not leave uninitialized threads in the `threads`
-    // vector.
-    threads->popBack();
-    finishThreads();
-    return false;
+      helper.thread = mozilla::Some(
+          Thread(Thread::Options().setStackSize(HELPER_STACK_SIZE)));
+      if (!helper.thread->init(HelperThread::ThreadMain, &helper)) {
+        // Ensure that we do not leave uninitialized threads in the `threads`
+        // vector.
+        threads->popBack();
+        goto error;
+      }
+    }
   }
 
   return true;
+
+error:
+  finishThreads();
+  return false;
 }
 
 GlobalHelperThreadState::GlobalHelperThreadState()
@@ -1210,6 +1219,10 @@ bool GlobalHelperThreadState::ensureContextListForThreadCount() {
   while (helperContexts_.length() < threadCount) {
     UniquePtr<JSContext> cx =
         js::MakeUnique<JSContext>(nullptr, JS::ContextOptions());
+    if (!cx) {
+      return false;
+    }
+
     // To initialize context-specific protected data, the context must
     // temporarily set itself to the main thread. After initialization,
     // cx can clear itself from the thread.
@@ -1883,6 +1896,43 @@ UniquePtr<ParseTask> GlobalHelperThreadState::finishParseTaskCommon(
   }
   if (cx->isExceptionPending()) {
     return nullptr;
+  }
+
+  // Generate initial LCovSources for generated inner functions.
+  if (coverage::IsLCovEnabled()) {
+    Rooted<GCVector<JSScript*>> workList(cx, GCVector<JSScript*>(cx));
+
+    if (!workList.appendAll(parseTask->scripts)) {
+      return nullptr;
+    }
+
+    RootedScript elem(cx);
+    while (!workList.empty()) {
+      elem = workList.popCopy();
+
+      // Initialize LCov data for the script.
+      if (!coverage::InitScriptCoverage(cx, elem)) {
+        return nullptr;
+      }
+
+      // Add inner-function scripts to the work-list.
+      for (JS::GCCellPtr gcThing : elem->gcthings()) {
+        if (!gcThing.is<JSObject>()) {
+          continue;
+        }
+        JSObject* obj = &gcThing.as<JSObject>();
+        if (!obj->is<JSFunction>()) {
+          continue;
+        }
+        JSFunction* fun = &obj->as<JSFunction>();
+        if (!fun->hasScript()) {
+          continue;
+        }
+        if (!workList.append(fun->nonLazyScript())) {
+          return nullptr;
+        }
+      }
+    }
   }
 
   return std::move(parseTask.get());

@@ -134,6 +134,7 @@ class nsIGlobalObject;
 class nsIXULWindow;
 class nsXULPrototypeDocument;
 class nsXULPrototypeElement;
+class PermissionDelegateHandler;
 struct nsFont;
 
 namespace mozilla {
@@ -1805,8 +1806,10 @@ class Document : public nsINode,
   void DispatchContentLoadedEvents();
 
   void DispatchPageTransition(EventTarget* aDispatchTarget,
-                              const nsAString& aType, bool aPersisted,
-                              bool aOnlySystemGroup = false);
+                              const nsAString& aType,
+                              bool aInFrameSwap,
+                              bool aPersisted,
+                              bool aOnlySystemGroup);
 
   // Call this before the document does something that will unbind all content.
   // That will stop us from doing a lot of work as each element is removed.
@@ -2263,7 +2266,8 @@ class Document : public nsINode,
   OrientationType CurrentOrientationType() const {
     return mCurrentOrientationType;
   }
-  void SetOrientationPendingPromise(Promise* aPromise);
+  void ClearOrientationPendingPromise();
+  bool SetOrientationPendingPromise(Promise* aPromise);
   Promise* GetOrientationPendingPromise() const {
     return mOrientationPendingPromise;
   }
@@ -3453,7 +3457,11 @@ class Document : public nsINode,
       DocumentWarnings aWarning, bool asError = false,
       const nsTArray<nsString>& aParams = nsTArray<nsString>()) const;
 
-  // Posts an event to call UpdateVisibilityState
+  // This method may fire a DOM event; if it does so it will happen
+  // synchronously.
+  void UpdateVisibilityState();
+
+  // Posts an event to call UpdateVisibilityState.
   void PostVisibilityUpdateEvent();
 
   bool IsSyntheticDocument() const { return mIsSyntheticDocument; }
@@ -3884,6 +3892,9 @@ class Document : public nsINode,
   // timed out.
   bool HasValidTransientUserGestureActivation();
 
+  // Return true.
+  bool ConsumeTransientUserGestureActivation();
+
   BrowsingContext* GetBrowsingContext() const;
 
   // This document is a WebExtension page, it might be a background page, a
@@ -3965,6 +3976,9 @@ class Document : public nsINode,
   // ResizeObserver usage.
   void AddResizeObserver(ResizeObserver* aResizeObserver);
   void ScheduleResizeObserversNotification() const;
+
+  // Getter for PermissionDelegateHandler. Performs lazy initialization.
+  PermissionDelegateHandler* GetPermissionDelegateHandler();
 
   /**
    * Localization
@@ -4218,10 +4232,6 @@ class Document : public nsINode,
   Element* GetTitleElement();
 
   void RecordNavigationTiming(ReadyState aReadyState);
-
-  // This method may fire a DOM event; if it does so it will happen
-  // synchronously.
-  void UpdateVisibilityState();
 
   // Recomputes the visibility state but doesn't set the new value.
   dom::VisibilityState ComputeVisibilityState() const;
@@ -4591,6 +4601,10 @@ class Document : public nsINode,
   RefPtr<mozilla::dom::FeaturePolicy> mFeaturePolicy;
 
   UniquePtr<ResizeObserverController> mResizeObserverController;
+
+  // Permission Delegate Handler, lazily-initialized in
+  // PermissionDelegateHandler
+  RefPtr<PermissionDelegateHandler> mPermissionDelegateHandler;
 
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;

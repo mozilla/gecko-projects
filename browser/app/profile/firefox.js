@@ -503,11 +503,12 @@ pref("browser.tabs.delayHidingAudioPlayingIconMS", 3000);
   pref("browser.tabs.remote.enforceRemoteTypeRestrictions", true);
 #endif
 
+// allow_eval_* is enabled on Firefox Desktop only at this
+// point in time
+pref("security.allow_eval_with_system_principal", false);
+pref("security.allow_eval_in_parent_process", false);
+
 #ifdef NIGHTLY_BUILD
-  // allow_eval_* is enabled on Firefox Desktop only at this
-  // point in time
-  pref("security.allow_eval_with_system_principal", false);
-  pref("security.allow_eval_in_parent_process", false);
   pref("browser.tabs.remote.useHTTPResponseProcessSelection", true);
 #else
   // Disabled outside of nightly due to bug 1554217
@@ -2097,7 +2098,7 @@ pref("devtools.serviceWorkers.testing.enabled", false);
 // Enable the Network Monitor
 pref("devtools.netmonitor.enabled", true);
 
-// Enable Network Search in Nightly and DevEdition/Beta builds.
+// Enable Network Search in Nightly builds.
 #if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
   pref("devtools.netmonitor.features.search", true);
 #else
@@ -2365,3 +2366,6 @@ pref("devtools.webide.lastConnectedRuntime", "");
 pref("devtools.webide.lastSelectedProject", "");
 pref("devtools.webide.zoom", "1");
 pref("devtools.webide.busyTimeout", 10000);
+
+// FirstStartup service time-out in ms
+pref("first-startup.timeout", 30000);

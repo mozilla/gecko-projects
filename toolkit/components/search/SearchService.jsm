@@ -53,12 +53,6 @@ XPCOMUtils.defineLazyPreferenceGetter(
   false
 );
 
-// Can't use defineLazyPreferenceGetter because we want the value
-// from the default branch
-XPCOMUtils.defineLazyGetter(this, "distroID", () => {
-  return Services.prefs.getDefaultBranch("distribution.").getCharPref("id", "");
-});
-
 // A text encoder to UTF8, used whenever we commit the cache to disk.
 XPCOMUtils.defineLazyGetter(this, "gEncoder", function() {
   return new TextEncoder();
@@ -119,11 +113,6 @@ const MULTI_LOCALE_ENGINES = [
 
 // A tag to denote when we are using the "default_locale" of an engine
 const DEFAULT_TAG = "default";
-
-function isPartnerBuild() {
-  // Mozilla-provided builds (i.e. funnelcakes) are not partner builds
-  return distroID && !distroID.startsWith("mozilla");
-}
 
 // A method that tries to determine if this user is in a US geography.
 function isUSTimezone() {
@@ -924,7 +913,7 @@ SearchService.prototype = {
       // We only allow the old defaultenginename pref for distributions
       // We can't use isPartnerBuild because we need to allow reading
       // of the defaultengine name pref for funnelcakes.
-      if (distroID && !privateMode) {
+      if (SearchUtils.distroID && !privateMode) {
         let defaultPrefB = Services.prefs.getDefaultBranch(
           SearchUtils.BROWSER_SEARCH_PREF
         );
@@ -1137,7 +1126,8 @@ SearchService.prototype = {
       enginesFromURLs.forEach(this._addEngineToStore, this);
     } else {
       if (gModernConfig) {
-        await this._loadEnginesFromConfig(engines);
+        let newEngines = await this._loadEnginesFromConfig(engines, isReload);
+        newEngines.forEach(this._addEngineToStore, this);
       } else {
         let engineList = this._enginesToLocales(engines);
         for (let [id, locales] of engineList) {
@@ -1164,15 +1154,14 @@ SearchService.prototype = {
     SearchUtils.log("_loadEngines: done using rebuilt cache");
   },
 
-  async _loadEnginesFromConfig(engineConfigs) {
+  async _loadEnginesFromConfig(engineConfigs, isReload = false) {
+    SearchUtils.log("_loadEnginesFromConfig");
+    let engines = [];
     for (let config of engineConfigs) {
-      SearchUtils.log("_loadEnginesFromConfig: " + JSON.stringify(config));
-      let locales =
-        "webExtensionLocales" in config
-          ? config.webExtensionLocales
-          : [DEFAULT_TAG];
-      await this.ensureBuiltinExtension(config.webExtensionId, locales);
+      let newEngines = await this.makeEnginesFromConfig(config, isReload);
+      engines = engines.concat(newEngines);
     }
+    return engines;
   },
 
   /**
@@ -1840,7 +1829,7 @@ SearchService.prototype = {
       SearchUtils.BROWSER_SEARCH_PREF
     );
     if (
-      isPartnerBuild() &&
+      SearchUtils.isPartnerBuild() &&
       branch.getPrefType("ignoredJAREngines") == branch.PREF_STRING
     ) {
       let ignoredJAREngines = branch
@@ -2015,7 +2004,7 @@ SearchService.prototype = {
         addedEngines[originalPrivateDefault.name] = originalPrivateDefault;
       }
 
-      if (distroID) {
+      if (SearchUtils.distroID) {
         try {
           var extras = Services.prefs.getChildList(
             SearchUtils.BROWSER_SEARCH_PREF + "order.extra."
@@ -2169,7 +2158,7 @@ SearchService.prototype = {
     // We're rebuilding the list here because _sortedEngines contain the
     // current order, but we want the original order.
 
-    if (distroID) {
+    if (SearchUtils.distroID) {
       // First, look at the "browser.search.order.extra" branch.
       try {
         var extras = Services.prefs.getChildList(
@@ -2338,6 +2327,92 @@ SearchService.prototype = {
     return this._installExtensionEngine(extension, [DEFAULT_TAG]);
   },
 
+  /**
+   * Create an engine object from the search configuration details.
+   *
+   * @param {object} config
+   *   The configuration object that defines the details of the engine
+   *   webExtensionId etc.
+   * @param {boolean} isReload (optional)
+   *   Is being called as part of maybeReloadEngines.
+   * @returns {Array}
+   *   Returns an array of nsISearchEngine objects.
+   */
+  async makeEnginesFromConfig(config, isReload = false) {
+    if (SearchUtils.loggingEnabled) {
+      SearchUtils.log("makeEnginesFromConfig: " + JSON.stringify(config));
+    }
+    let id = config.webExtensionId;
+    let policy = WebExtensionPolicy.getByID(id);
+    if (!policy) {
+      let idPrefix = id.split("@")[0];
+      let path = `resource://search-extensions/${idPrefix}/`;
+      await AddonManager.installBuiltinAddon(path);
+      policy = WebExtensionPolicy.getByID(id);
+    }
+    // On startup the extension may have not finished parsing the
+    // manifest, wait for that here.
+    await policy.readyPromise;
+
+    let params = {
+      extraParams: config.extraParams,
+      telemetryId: config.telemetryId,
+    };
+
+    // Modern Config encodes params as objects whereas they are
+    // strings in webExtensions, stringify them here.
+    [
+      "searchUrlGetParams",
+      "searchUrlPostParams",
+      "suggestUrlGetParams",
+      "suggestUrlPostParams",
+    ].forEach(key => {
+      if (key in config) {
+        params[key] = new URLSearchParams(config[key]).toString();
+      }
+    });
+
+    if ("telemetryId" in config) {
+      params.telemetryId = config.telemetryId;
+    }
+
+    let locales =
+      "webExtensionLocales" in config
+        ? config.webExtensionLocales
+        : [DEFAULT_TAG];
+
+    let engines = [];
+    for (let locale of locales) {
+      let manifest = policy.extension.manifest;
+      if (locale != "default") {
+        manifest = await policy.extension.getLocalizedManifest(locale);
+      }
+
+      let engineParams = await Services.search.getEngineParams(
+        policy.extension,
+        manifest,
+        locale,
+        params
+      );
+
+      let engine = new SearchEngine({
+        name: engineParams.name,
+        readOnly: engineParams.isBuiltin,
+        sanitizeName: true,
+      });
+      engine._initFromMetadata(engineParams.name, engineParams);
+      engine._loadPath = "[other]addEngineWithDetails";
+      if (engineParams.extensionID) {
+        engine._loadPath += ":" + engineParams.extensionID;
+      }
+      if (isReload && this._engines.has(engine.name)) {
+        engine._engineToUpdate = this._engines.get(engine.name);
+      }
+      engines.push(engine);
+    }
+    return engines;
+  },
+
   async _installExtensionEngine(extension, locales, initEngine, isReload) {
     SearchUtils.log("installExtensionEngine: " + extension.id);
 
@@ -2381,7 +2456,7 @@ SearchService.prototype = {
     return this.addEngineWithDetails(params.name, params, isReload);
   },
 
-  getEngineParams(extension, manifest, locale, extraParams = {}) {
+  getEngineParams(extension, manifest, locale, engineParams = {}) {
     let { IconDetails } = ExtensionParent;
 
     // General set of icons for an engine.
@@ -2414,11 +2489,27 @@ SearchService.prototype = {
     if (locale != DEFAULT_TAG) {
       shortName += "-" + locale;
     }
-
-    let searchUrlGetParams = searchProvider.search_url_get_params;
-    if (extraParams.code) {
-      searchUrlGetParams = "?" + extraParams.code;
+    if ("telemetryId" in engineParams) {
+      shortName = engineParams.telemetryId;
     }
+
+    let searchUrlGetParams =
+      engineParams.searchUrlGetParams ||
+      searchProvider.search_url_get_params ||
+      "";
+    let searchUrlPostParams =
+      engineParams.searchUrlPostParams ||
+      searchProvider.search_url_post_params ||
+      "";
+    let suggestUrlGetParams =
+      engineParams.suggestUrlGetParams ||
+      searchProvider.suggest_url_get_params ||
+      "";
+    let suggestUrlPostParams =
+      engineParams.suggestUrlPostParams ||
+      searchProvider.suggest_url_post_params ||
+      "";
+    let mozParams = engineParams.extraParams || searchProvider.params || [];
 
     let params = {
       name: searchProvider.name.trim(),
@@ -2429,7 +2520,7 @@ SearchService.prototype = {
       // to ensure we're always dealing with decoded urls.
       template: decodeURI(searchProvider.search_url),
       searchGetParams: searchUrlGetParams,
-      searchPostParams: searchProvider.search_url_post_params,
+      searchPostParams: searchUrlPostParams,
       iconURL: searchProvider.favicon_url || preferredIconUrl,
       icons: iconList,
       alias: searchProvider.keyword,
@@ -2437,11 +2528,11 @@ SearchService.prototype = {
       isBuiltin: extension.addonData.builtIn,
       // suggest_url doesn't currently get encoded.
       suggestURL: searchProvider.suggest_url,
-      suggestPostParams: searchProvider.suggest_url_post_params,
-      suggestGetParams: searchProvider.suggest_url_get_params,
+      suggestGetParams: suggestUrlGetParams,
+      suggestPostParams: suggestUrlPostParams,
       queryCharset: searchProvider.encoding || "UTF-8",
-      mozParams: searchProvider.params,
-      initEngine: extraParams.initEngine || false,
+      mozParams,
+      initEngine: engineParams.initEngine || false,
     };
 
     return params;

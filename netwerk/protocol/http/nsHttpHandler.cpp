@@ -23,6 +23,7 @@
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefLocalizedString.h"
+#include "nsIProcessSwitchRequestor.h"
 #include "nsSocketProviderService.h"
 #include "nsISocketProvider.h"
 #include "nsPrintfCString.h"
@@ -804,6 +805,14 @@ void nsHttpHandler::NotifyObservers(nsIChannel* chan, const char* event) {
   LOG(("nsHttpHandler::NotifyObservers [chan=%p event=\"%s\"]\n", chan, event));
   nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
   if (obsService) obsService->NotifyObservers(chan, event, nullptr);
+}
+
+void nsHttpHandler::NotifyObservers(nsIProcessSwitchRequestor* request,
+                                    const char* event) {
+  LOG(("nsHttpHandler::NotifyObservers [request=%p event=\"%s\"]\n", request,
+       event));
+  nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
+  if (obsService) obsService->NotifyObservers(request, event, nullptr);
 }
 
 nsresult nsHttpHandler::AsyncOnChannelRedirect(

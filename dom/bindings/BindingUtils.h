@@ -72,12 +72,6 @@ inline nsresult UnwrapArg(JSContext* cx, JS::Handle<JSObject*> src,
 nsresult UnwrapWindowProxyArg(JSContext* cx, JS::Handle<JSObject*> src,
                               WindowProxyHolder& ppArg);
 
-bool ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
-                      bool aSecurityError, const char* aInterfaceName);
-
-bool ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
-                      bool aSecurityError, prototypes::ID aProtoId);
-
 // Returns true if the JSClass is used for DOM objects.
 inline bool IsDOMClass(const JSClass* clasp) {
   return clasp->flags & JSCLASS_IS_DOMJSCLASS;
@@ -2968,6 +2962,15 @@ struct LenientThisPolicy;
 
 // A this-extraction policy for cross-origin getters/setters/methods.
 struct CrossOriginThisPolicy;
+
+// A this-extraction policy for getters/setters/methods that should
+// not be allowed to be called cross-origin but expect objects that
+// _can_ be cross-origin.
+struct MaybeCrossOriginObjectThisPolicy;
+
+// A this-extraction policy which is just like
+// MaybeCrossOriginObjectThisPolicy but has lenient-this behavior.
+struct MaybeCrossOriginObjectLenientThisPolicy;
 
 // An exception-reporting policy for normal getters/setters/methods.
 struct ThrowExceptions;

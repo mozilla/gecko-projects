@@ -612,7 +612,7 @@ void ShadowRoot::MaybeUnslotHostChild(nsIContent& aChild) {
                         "How did aChild end up assigned to a slot?");
   // If the slot is going to start showing fallback content, we need to tell
   // layout about it.
-  if (slot->AssignedNodes().Length() == 1) {
+  if (slot->AssignedNodes().Length() == 1 && slot->HasChildren()) {
     InvalidateStyleAndLayoutOnSubtree(slot);
   }
 
@@ -638,7 +638,8 @@ void ShadowRoot::MaybeSlotHostChild(nsIContent& aChild) {
   }
 
   // Fallback content will go away, let layout know.
-  if (assignment.mSlot->AssignedNodes().IsEmpty()) {
+  if (assignment.mSlot->AssignedNodes().IsEmpty() &&
+      assignment.mSlot->HasChildren()) {
     InvalidateStyleAndLayoutOnSubtree(assignment.mSlot);
   }
 

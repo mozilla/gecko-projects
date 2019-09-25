@@ -76,6 +76,7 @@
 #  include "frontend/BinASTParser.h"
 #endif  // defined(JS_BUILD_BINAST)
 #include "frontend/ModuleSharedContext.h"
+#include "frontend/ParseInfo.h"
 #include "frontend/Parser.h"
 #include "gc/PublicIterators.h"
 #include "jit/arm/Simulator-arm.h"
@@ -470,6 +471,7 @@ struct MOZ_STACK_CLASS EnvironmentPreparer
 };
 
 // Shell state set once at startup.
+static bool enableDeferredMode = false;
 static bool enableCodeCoverage = false;
 static bool enableDisassemblyDumps = false;
 static bool offthreadCompilation = false;
@@ -488,6 +490,7 @@ static bool enableAsyncStacks = false;
 static bool enableStreams = false;
 static bool enableReadableByteStreams = false;
 static bool enableBYOBStreamReaders = false;
+static bool enableWritableStreams = false;
 static bool enableFields = false;
 static bool enableAwaitFix = false;
 #ifdef JS_GC_ZEAL
@@ -1808,6 +1811,13 @@ static bool ParseCompileOptions(JSContext* cx, CompileOptions& options,
       return false;
     }
     options.setFile(fileNameBytes.get());
+  }
+
+  if (!JS_GetProperty(cx, opts, "skipFileNameValidation", &v)) {
+    return false;
+  }
+  if (!v.isUndefined()) {
+    options.setSkipFilenameValidation(ToBoolean(v));
   }
 
   if (!JS_GetProperty(cx, opts, "element", &v)) {
@@ -3801,8 +3811,10 @@ static void SetStandardRealmOptions(JS::RealmOptions& options) {
       .setStreamsEnabled(enableStreams)
       .setReadableByteStreamsEnabled(enableReadableByteStreams)
       .setBYOBStreamReadersEnabled(enableBYOBStreamReaders)
+      .setWritableStreamsEnabled(enableWritableStreams)
       .setFieldsEnabled(enableFields)
       .setAwaitFixEnabled(enableAwaitFix);
+  options.behaviors().setDeferredParserAlloc(enableDeferredMode);
 }
 
 static MOZ_MUST_USE bool CheckRealmOptions(JSContext* cx,
@@ -6235,11 +6247,25 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
                            : ShellGlobalKind::GlobalObject;
     }
 
+    if (!JS_GetProperty(cx, opts, "enableWritableStreams", &v)) {
+      return false;
+    }
+    if (v.isBoolean()) {
+      creationOptions.setWritableStreamsEnabled(v.toBoolean());
+    }
+
     if (!JS_GetProperty(cx, opts, "systemPrincipal", &v)) {
       return false;
     }
     if (v.isBoolean()) {
       principals.reset(&ShellPrincipals::fullyTrusted);
+    }
+
+    if (!JS_GetProperty(cx, opts, "deferredParserAlloc", &v)) {
+      return false;
+    }
+    if (v.isBoolean()) {
+      behaviors.setDeferredParserAlloc(v.toBoolean());
     }
 
     if (!JS_GetProperty(cx, opts, "principal", &v)) {
@@ -8473,6 +8499,7 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "      isRunOnce: use the isRunOnce compiler option (default: false)\n"
 "      noScriptRval: use the no-script-rval compiler option (default: false)\n"
 "      fileName: filename for error messages and debug info\n"
+"      skipFileNameValidation: skip the filename-validation callback\n"
 "      lineNumber: starting line number for error messages and debug info\n"
 "      columnNumber: starting column number for error messages and debug info\n"
 "      global: global in which to execute the code\n"
@@ -10278,6 +10305,7 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   enableStreams = !op.getBoolOption("no-streams");
   enableReadableByteStreams = op.getBoolOption("enable-readable-byte-streams");
   enableBYOBStreamReaders = op.getBoolOption("enable-byob-stream-readers");
+  enableWritableStreams = op.getBoolOption("enable-writable-streams");
   enableFields = !op.getBoolOption("disable-experimental-fields");
   enableAwaitFix = op.getBoolOption("enable-experimental-await-fix");
 
@@ -10994,6 +11022,8 @@ int main(int argc, char** argv, char** envp) {
                         "Print sub-ms runtime for each file that's run") ||
       !op.addBoolOption('\0', "code-coverage",
                         "Enable code coverage instrumentation.") ||
+      !op.addBoolOption('\0', "parser-deferred-alloc",
+                        "Defer allocation of GC objects until after parser") ||
 #ifdef DEBUG
       !op.addBoolOption('O', "print-alloc",
                         "Print the number of allocations at exit") ||
@@ -11045,6 +11075,8 @@ int main(int argc, char** argv, char** envp) {
       !op.addBoolOption('\0', "enable-byob-stream-readers",
                         "Enable support for getting BYOB readers for WHATWG "
                         "ReadableStreams of type \"bytes\"") ||
+      !op.addBoolOption('\0', "enable-writable-streams",
+                        "Enable support for WHATWG WritableStreams") ||
       !op.addBoolOption('\0', "disable-experimental-fields",
                         "Disable public fields in classes") ||
       !op.addBoolOption('\0', "enable-experimental-await-fix",
@@ -11300,6 +11332,9 @@ int main(int argc, char** argv, char** envp) {
   if (enableCodeCoverage) {
     coverage::EnableLCov();
   }
+
+  enableDeferredMode = op.getBoolOption("parser-deferred-alloc") ||
+                       getenv("PARSER_DEFERRED_ALLOC") != nullptr;
 
 #ifdef JS_WITHOUT_NSPR
   if (!op.getMultiStringOption("dll").empty()) {

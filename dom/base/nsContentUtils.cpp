@@ -78,6 +78,7 @@
 #include "mozilla/dom/TouchEvent.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/XULCommandEvent.h"
+#include "mozilla/dom/UserActivation.h"
 #include "mozilla/dom/WorkerCommon.h"
 #include "mozilla/dom/WorkerPrivate.h"
 #include "mozilla/net/CookieSettings.h"
@@ -5073,7 +5074,7 @@ void nsContentUtils::TriggerLink(nsIContent* aContent, nsIURI* aLinkURI,
 
     nsDocShell::Cast(docShell)->OnLinkClick(
         aContent, aLinkURI, fileName.IsVoid() ? aTargetSpec : EmptyString(),
-        fileName, nullptr, nullptr, EventStateManager::IsHandlingUserInput(),
+        fileName, nullptr, nullptr, UserActivation::IsHandlingUserInput(),
         aIsTrusted, triggeringPrincipal, csp);
   }
 }
@@ -6393,7 +6394,7 @@ const char* nsContentUtils::CheckRequestFullscreenAllowed(
     return nullptr;
   }
 
-  if (!EventStateManager::IsHandlingUserInput()) {
+  if (!UserActivation::IsHandlingUserInput()) {
     return "FullscreenDeniedNotInputDriven";
   }
 
@@ -6402,8 +6403,7 @@ const char* nsContentUtils::CheckRequestFullscreenAllowed(
   // disallow fullscreen
   TimeDuration timeout = HandlingUserInputTimeout();
   if (timeout > TimeDuration(nullptr) &&
-      (TimeStamp::Now() - EventStateManager::GetHandlingInputStart()) >
-          timeout) {
+      (TimeStamp::Now() - UserActivation::GetHandlingInputStart()) > timeout) {
     return "FullscreenDeniedNotInputDriven";
   }
 
@@ -6421,7 +6421,7 @@ const char* nsContentUtils::CheckRequestFullscreenAllowed(
 /* static */
 bool nsContentUtils::IsCutCopyAllowed(nsIPrincipal* aSubjectPrincipal) {
   if (StaticPrefs::dom_allow_cut_copy() &&
-      EventStateManager::IsHandlingUserInput()) {
+      UserActivation::IsHandlingUserInput()) {
     return true;
   }
 
@@ -7784,9 +7784,12 @@ nsresult nsContentUtils::SendMouseEvent(
 }
 
 /* static */
-void nsContentUtils::FirePageHideEvent(nsIDocShellTreeItem* aItem,
-                                       EventTarget* aChromeEventHandler,
-                                       bool aOnlySystemGroup) {
+void nsContentUtils::FirePageHideEventForFrameLoaderSwap(
+    nsIDocShellTreeItem* aItem, EventTarget* aChromeEventHandler,
+    bool aOnlySystemGroup) {
+  MOZ_DIAGNOSTIC_ASSERT(aItem);
+  MOZ_DIAGNOSTIC_ASSERT(aChromeEventHandler);
+
   RefPtr<Document> doc = aItem->GetDocument();
   NS_ASSERTION(doc, "What happened here?");
   doc->OnPageHide(true, aChromeEventHandler, aOnlySystemGroup);
@@ -7801,7 +7804,8 @@ void nsContentUtils::FirePageHideEvent(nsIDocShellTreeItem* aItem,
 
   for (uint32_t i = 0; i < kids.Length(); ++i) {
     if (kids[i]) {
-      FirePageHideEvent(kids[i], aChromeEventHandler, aOnlySystemGroup);
+      FirePageHideEventForFrameLoaderSwap(kids[i], aChromeEventHandler,
+                                          aOnlySystemGroup);
     }
   }
 }
@@ -7811,10 +7815,9 @@ void nsContentUtils::FirePageHideEvent(nsIDocShellTreeItem* aItem,
 // on documents that are still loading or only on documents that are already
 // loaded.
 /* static */
-void nsContentUtils::FirePageShowEvent(nsIDocShellTreeItem* aItem,
-                                       EventTarget* aChromeEventHandler,
-                                       bool aFireIfShowing,
-                                       bool aOnlySystemGroup) {
+void nsContentUtils::FirePageShowEventForFrameLoaderSwap(
+    nsIDocShellTreeItem* aItem, EventTarget* aChromeEventHandler,
+    bool aFireIfShowing, bool aOnlySystemGroup) {
   int32_t childCount = 0;
   aItem->GetInProcessChildCount(&childCount);
   AutoTArray<nsCOMPtr<nsIDocShellTreeItem>, 8> kids;
@@ -7825,8 +7828,8 @@ void nsContentUtils::FirePageShowEvent(nsIDocShellTreeItem* aItem,
 
   for (uint32_t i = 0; i < kids.Length(); ++i) {
     if (kids[i]) {
-      FirePageShowEvent(kids[i], aChromeEventHandler, aFireIfShowing,
-                        aOnlySystemGroup);
+      FirePageShowEventForFrameLoaderSwap(kids[i], aChromeEventHandler,
+                                          aFireIfShowing, aOnlySystemGroup);
     }
   }
 

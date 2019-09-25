@@ -8,6 +8,7 @@
 #include "DocumentChannelParent.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/LoadInfo.h"
+#include "mozilla/MozPromiseInlines.h"  // For MozPromise::FromDomPromise
 #include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/ClientChannelHelper.h"
 #include "mozilla/dom/ContentParent.h"
@@ -38,8 +39,8 @@ NS_INTERFACE_MAP_BEGIN(DocumentChannelParent)
   NS_INTERFACE_MAP_ENTRY(nsIStreamListener)
   NS_INTERFACE_MAP_ENTRY(nsIParentChannel)
   NS_INTERFACE_MAP_ENTRY(nsIAsyncVerifyRedirectReadyCallback)
-  NS_INTERFACE_MAP_ENTRY(nsICrossProcessSwitchChannel)
   NS_INTERFACE_MAP_ENTRY(nsIChannelEventSink)
+  NS_INTERFACE_MAP_ENTRY(nsIProcessSwitchRequestor)
   NS_INTERFACE_MAP_ENTRY_CONCRETE(DocumentChannelParent)
 NS_INTERFACE_MAP_END
 
@@ -239,7 +240,7 @@ void DocumentChannelParent::FinishReplacementChannelSetup(bool aSucceeded) {
         newChannel->Cancel(NS_BINDING_ABORTED);
       }
     }
-    // Release all previously registered channels, they are no longer need to be
+    // Release all previously registered channels, they are no longer needed to be
     // kept in the registrar from this moment.
     registrar->DeregisterChannels(mRedirectChannelId);
 
@@ -357,46 +358,21 @@ void DocumentChannelParent::FinishReplacementChannelSetup(bool aSucceeded) {
   }
 }
 
-NS_IMETHODIMP
-DocumentChannelParent::FinishCrossProcessSwitch(
-    nsIAsyncVerifyRedirectCallback* aCallback, nsresult aStatusCode) {
-  // We only manually Suspend mChannel when we initiate the redirect
-  // from OnStartRequest, which is currently only in the same-process
-  // case.
-  MOZ_ASSERT(!mSuspendedChannel);
-
-  if (NS_SUCCEEDED(aStatusCode)) {
-    // This updates ParentChannelListener to point to this parent and at
-    // the same time cancels the old channel.
-    FinishReplacementChannelSetup(true);
-  }
-
-  aCallback->OnRedirectVerifyCallback(aStatusCode);
-  return NS_OK;
-}
-
-nsresult DocumentChannelParent::TriggerCrossProcessSwitch(
-    nsIHttpChannel* aChannel, uint64_t aIdentifier) {
+void DocumentChannelParent::TriggerCrossProcessSwitch() {
+  MOZ_ASSERT(mRedirectContentProcessIdPromise);
   CancelChildForProcessSwitch();
-
-  RefPtr<nsHttpChannel> httpChannel = do_QueryObject(aChannel);
-  MOZ_DIAGNOSTIC_ASSERT(httpChannel,
-                        "Must be called with nsHttpChannel object");
-  RefPtr<nsHttpChannel::ContentProcessIdPromise> p =
-      httpChannel->TakeRedirectContentProcessIdPromise();
-
-  p->Then(
+  RefPtr<DocumentChannelParent> self = this;
+  mRedirectContentProcessIdPromise->Then(
       GetMainThreadSerialEventTarget(), __func__,
-      [self = RefPtr<DocumentChannelParent>(this),
-       channel = nsCOMPtr<nsIChannel>(aChannel), aIdentifier](uint64_t aCpId) {
-        self->TriggerRedirectToRealChannel(channel, Some(aCpId), aIdentifier);
+      [self, this](uint64_t aCpId) {
+        MOZ_ASSERT(mChannel, "Something went wrong, channel got cancelled");
+        TriggerRedirectToRealChannel(mChannel, Some(aCpId),
+                                     mCrossProcessRedirectIdentifier);
       },
-      [httpChannel](nsresult aStatusCode) {
+      [self](nsresult aStatusCode) {
         MOZ_ASSERT(NS_FAILED(aStatusCode), "Status should be error");
-        httpChannel->OnRedirectVerifyCallback(aStatusCode);
+        self->RedirectToRealChannelFinished(aStatusCode);
       });
-
-  return NS_OK;
 }
 
 void DocumentChannelParent::TriggerRedirectToRealChannel(
@@ -539,6 +515,7 @@ void DocumentChannelParent::TriggerRedirectToRealChannel(
     contentDispositionFilename = Some(contentDispositionFilenameTemp);
   }
 
+  RefPtr<DocumentChannelParent> self = this;
   if (aDestinationProcess) {
     dom::ContentParent* cp =
         dom::ContentProcessManager::GetSingleton()->GetContentProcessById(
@@ -549,24 +526,36 @@ void DocumentChannelParent::TriggerRedirectToRealChannel(
 
     MOZ_ASSERT(config);
 
-    auto result = cp->SendCrossProcessRedirect(
-        mRedirectChannelId, uri, *config, loadInfoArgs, channelId, originalURI,
-        aIdentifier, redirectMode);
-    MOZ_ASSERT(result, "SendCrossProcessRedirect failed");
-    Unused << result;
+    cp->SendCrossProcessRedirect(mRedirectChannelId, uri, *config, loadInfoArgs,
+                                 channelId, originalURI, aIdentifier,
+                                 redirectMode)
+        ->Then(
+            GetCurrentThreadSerialEventTarget(), __func__,
+            [self](Tuple<nsresult, Maybe<LoadInfoArgs>>&& aResponse) {
+              if (NS_SUCCEEDED(Get<0>(aResponse))) {
+                nsCOMPtr<nsILoadInfo> newLoadInfo;
+                MOZ_ALWAYS_SUCCEEDS(LoadInfoArgsToLoadInfo(
+                    Get<1>(aResponse), getter_AddRefs(newLoadInfo)));
+
+                if (newLoadInfo) {
+                  self->mChannel->SetLoadInfo(newLoadInfo);
+                }
+              }
+              self->RedirectToRealChannelFinished(Get<0>(aResponse));
+            },
+            [self](const mozilla::ipc::ResponseRejectReason) {
+              self->RedirectToRealChannelFinished(NS_ERROR_FAILURE);
+            });
   } else {
-    RefPtr<DocumentChannelParent> channel = this;
     SendRedirectToRealChannel(mRedirectChannelId, uri, newLoadFlags, config,
                               loadInfoArgs, mRedirects, channelId, originalURI,
                               redirectMode, redirectFlags, contentDisposition,
                               contentDispositionFilename)
         ->Then(
             GetCurrentThreadSerialEventTarget(), __func__,
-            [channel](nsresult aRv) {
-              channel->RedirectToRealChannelFinished(aRv);
-            },
-            [channel](const mozilla::ipc::ResponseRejectReason) {
-              channel->RedirectToRealChannelFinished(NS_ERROR_FAILURE);
+            [self](nsresult aRv) { self->RedirectToRealChannelFinished(aRv); },
+            [self](const mozilla::ipc::ResponseRejectReason) {
+              self->RedirectToRealChannelFinished(NS_ERROR_FAILURE);
             });
   }
 }
@@ -606,6 +595,16 @@ DocumentChannelParent::OnStartRequest(nsIRequest* aRequest) {
   if (channel) {
     Unused << channel->GetApplyConversion(&mOldApplyConversion);
     channel->SetApplyConversion(false);
+
+    // notify "http-on-may-change-process" observers which is typically
+    // SessionStore.jsm. This will determine if a new process needs to be
+    // spawned and if so SwitchProcessTo() will be called which will set a
+    // ContentProcessIdPromise.
+    gHttpHandler->OnMayChangeProcess(this);
+    if (mRedirectContentProcessIdPromise) {
+      TriggerCrossProcessSwitch();
+      return NS_OK;
+    }
   }
 
   TriggerRedirectToRealChannel(mChannel);
@@ -827,6 +826,48 @@ DocumentChannelParent::AsyncOnChannelRedirect(
   // the new URI and set these again.
   mIParentChannelFunctions.Clear();
   return NS_OK;
+}
+
+//-----------------------------------------------------------------------------
+// DocumentChannelParent::nsIProcessSwitchRequestor
+//-----------------------------------------------------------------------------
+
+NS_IMETHODIMP DocumentChannelParent::GetChannel(nsIChannel** aChannel) {
+  MOZ_ASSERT(mChannel);
+  nsCOMPtr<nsIChannel> channel(mChannel);
+  channel.forget(aChannel);
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelParent::SwitchProcessTo(
+    dom::Promise* aContentProcessIdPromise, uint64_t aIdentifier) {
+  MOZ_ASSERT(NS_IsMainThread());
+  NS_ENSURE_ARG(aContentProcessIdPromise);
+
+  mRedirectContentProcessIdPromise =
+      ContentProcessIdPromise::FromDomPromise(aContentProcessIdPromise);
+  mCrossProcessRedirectIdentifier = aIdentifier;
+  return NS_OK;
+}
+
+// This method returns the cached result of running the Cross-Origin-Opener
+// policy compare algorithm by calling ComputeCrossOriginOpenerPolicyMismatch
+NS_IMETHODIMP
+DocumentChannelParent::HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) {
+  MOZ_ASSERT(aMismatch);
+
+  if (!aMismatch) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  nsCOMPtr<nsHttpChannel> channel = do_QueryInterface(mChannel);
+  if (!channel) {
+    // Not an nsHttpChannel assume it's okay to switch.
+    *aMismatch = false;
+    return NS_OK;
+  }
+
+  return channel->HasCrossOriginOpenerPolicyMismatch(aMismatch);
 }
 
 }  // namespace net

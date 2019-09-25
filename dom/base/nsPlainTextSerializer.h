@@ -124,16 +124,6 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
   // @param aText Ignored if aIsLineBreak is true.
   void DoAddText(bool aIsLineBreak, const nsAString& aText);
 
-  // Inlined functions
-  inline bool MayWrap() const {
-    return mWrapColumn &&
-           mSettings.HasFlag(nsIDocumentEncoder::OutputFormatted |
-                             nsIDocumentEncoder::OutputWrap);
-  }
-  inline bool MayBreakLines() const {
-    return !mSettings.HasFlag(nsIDocumentEncoder::OutputDisallowLineBreaking);
-  }
-
   inline bool DoOutput() const { return mHeadLevel == 0; }
 
   static inline bool IsQuotedLine(const nsAString& aLine) {
@@ -170,7 +160,7 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
     // May adapt the flags.
     //
     // @param aFlags As defined in nsIDocumentEncoder.idl.
-    void Init(int32_t aFlags);
+    void Init(int32_t aFlags, uint32_t aWrapColumn);
 
     // Pref: converter.html2txt.structs.
     bool GetStructs() const { return mStructs; }
@@ -188,6 +178,17 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
     // Whether the output should include ruby annotations.
     bool GetWithRubyAnnotation() const { return mWithRubyAnnotation; }
 
+    uint32_t GetWrapColumn() const { return mWrapColumn; }
+
+    bool MayWrap() const {
+      return GetWrapColumn() && HasFlag(nsIDocumentEncoder::OutputFormatted |
+                                        nsIDocumentEncoder::OutputWrap);
+    }
+
+    bool MayBreakLines() const {
+      return !HasFlag(nsIDocumentEncoder::OutputDisallowLineBreaking);
+    }
+
    private:
     // @param aPrefHeaderStrategy Pref: converter.html2txt.header_strategy.
     static HeaderStrategy Convert(int32_t aPrefHeaderStrategy);
@@ -204,6 +205,12 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
 
     // Whether the output should include ruby annotations.
     bool mWithRubyAnnotation = false;
+
+    // The wrap column is how many fixed-pitch narrow
+    // (https://unicode.org/reports/tr11/) (e.g. Latin) characters
+    // should be allowed on a line. There could be less chars if the chars
+    // are wider than latin chars of more if the chars are more narrow.
+    uint32_t mWrapColumn = 0;
   };
 
   Settings mSettings;
@@ -308,11 +315,6 @@ class nsPlainTextSerializer final : public nsIContentSerializer {
   bool mHasWrittenCiteBlockquote;
 
   int32_t mFloatingLines;  // To store the number of lazy line breaks
-
-  // The wrap column is how many standard sized chars (western languages)
-  // should be allowed on a line. There could be less chars if the chars
-  // are wider than latin chars of more if the chars are more narrow.
-  uint32_t mWrapColumn;
 
   // Treat quoted text as though it's preformatted -- don't wrap it.
   // Having it on a pref is a temporary measure, See bug 69638.

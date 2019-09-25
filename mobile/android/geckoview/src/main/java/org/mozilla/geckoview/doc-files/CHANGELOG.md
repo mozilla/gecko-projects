@@ -36,6 +36,11 @@ exclude: true
   ([bug 1540065]({{bugzilla}}1540065))
 - Added [`GeckoSession.ContentDelegate.onFirstContentfulPaint`][71.13]
   ([bug 1578947]({{bugzilla}}1578947))
+- Added `setEnhancedTrackingProtectionLevel` to [`ContentBlocking.Settings`][71.14].
+  ([bug 1580854]({{bugzilla}}1580854))
+- ⚠️ Added [`GeckoView.onTouchEventForResult`][71.15] and modified
+  [`PanZoomController.onTouchEvent`][71.16] to return how the touch event was handled. This
+  allows apps to know if an event is handled by touch event listeners in web content. The methods in `PanZoomController` now return `int` instead of `boolean`.
 
 [71.1]: {{javadoc_uri}}/RuntimeTelemetry.Delegate.html#onBooleanScalar-org.mozilla.geckoview.RuntimeTelemetry.Metric-
 [71.2]: {{javadoc_uri}}/RuntimeTelemetry.Delegate.html#onLongScalar-org.mozilla.geckoview.RuntimeTelemetry.Metric-
@@ -50,6 +55,8 @@ exclude: true
 [71.11]: https://developer.mozilla.org/en-US/docs/Web/API/Clients/openWindow
 [71.12]: {{javadoc_uri}}/GeckoRuntimeSettings.Builder.html#aboutConfigEnabled-boolean-
 [71.13]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html#onFirstContentfulPaint-org.mozilla.geckoview.GeckoSession-
+[71.15]: {{javadoc_uri}}/GeckoView.html#onTouchEventForResult-android.view.MotionEvent-
+[71.16]: {{javadoc_uri}}/PanZoomController.html#onTouchEvent-android.view.MotionEvent-
 
 ## v70
 - Added API for session context assignment
@@ -372,4 +379,4 @@ exclude: true
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 40441c6fcd77218d1d32b468894558141d8ccad9
+[api-version]: 68710f52723909eea09a02b94b618a527cc9dfc8

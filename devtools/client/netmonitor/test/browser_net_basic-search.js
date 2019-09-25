@@ -9,6 +9,8 @@
  */
 
 add_task(async function() {
+  await pushPref("devtools.netmonitor.features.search", true);
+
   const { tab, monitor } = await initNetMonitor(CUSTOM_GET_URL);
   info("Starting test... ");
 
@@ -43,7 +45,11 @@ add_task(async function() {
   EventUtils.synthesizeKey("KEY_Enter");
 
   // Wait till there are two resources rendered in the results.
-  await waitForDOM(document, ".search-panel-content .treeRow.resourceRow", 2);
+  await waitForDOMIfNeeded(
+    document,
+    ".search-panel-content .treeRow.resourceRow",
+    2
+  );
 
   // Click on the first resource to expand it
   EventUtils.sendMouseEvent(

@@ -250,9 +250,6 @@ nsPlainTextSerializer::nsPlainTextSerializer()
     mHeaderCounter[i] = 0;
   }
 
-  // Line breaker
-  mWrapColumn = 72;  // XXX magic number, we expect someone to reset this
-
   // Flow
   mEmptyLines = 1;  // The start of the document is an "empty line" in itself,
   mInWhitespace = false;
@@ -318,7 +315,8 @@ nsPlainTextSerializer::Settings::Convert(const int32_t aPrefHeaderStrategy) {
 
 const int32_t kDefaultHeaderStrategy = 1;
 
-void nsPlainTextSerializer::Settings::Init(const int32_t aFlags) {
+void nsPlainTextSerializer::Settings::Init(const int32_t aFlags,
+                                           const uint32_t aWrapColumn) {
   mFlags = aFlags;
 
   if (mFlags & nsIDocumentEncoder::OutputFormatted) {
@@ -338,6 +336,8 @@ void nsPlainTextSerializer::Settings::Init(const int32_t aFlags) {
 
   // XXX We should let the caller decide whether to do this or not
   mFlags &= ~nsIDocumentEncoder::OutputNoFramesContent;
+
+  mWrapColumn = aWrapColumn;
 }
 
 NS_IMETHODIMP
@@ -363,11 +363,10 @@ nsPlainTextSerializer::Init(const uint32_t aFlags, uint32_t aWrapColumn,
              (aFlags & nsIDocumentEncoder::OutputFormatFlowed));
 
   *aNeedsPreformatScanning = true;
-  mSettings.Init(aFlags);
+  mSettings.Init(aFlags, aWrapColumn);
   mOutputManager.emplace(mSettings.GetFlags(), aOutput);
-  mWrapColumn = aWrapColumn;
 
-  if (MayWrap() && MayBreakLines()) {
+  if (mSettings.MayWrap() && mSettings.MayBreakLines()) {
     mLineBreaker = nsContentUtils::LineBreaker();
   }
 
@@ -684,8 +683,6 @@ nsresult nsPlainTextSerializer::DoOpenContainer(const nsAtom* aTag) {
     // Trigger on the presence of a "pre-wrap" in the
     // style attribute. That's a very simplistic way to do
     // it, but better than nothing.
-    // Also set mWrapColumn to the value given there
-    // (which arguably we should only do if told to do so).
     nsAutoString style;
     int32_t whitespace;
     if (NS_SUCCEEDED(GetAttributeValue(nsGkAtoms::style, style)) &&
@@ -695,34 +692,11 @@ nsresult nsPlainTextSerializer::DoOpenContainer(const nsAtom* aTag) {
         printf("Set mPreFormattedMail based on style pre-wrap\n");
 #endif
         mPreFormattedMail = true;
-        int32_t widthOffset = style.Find("width:");
-        if (widthOffset >= 0) {
-          // We have to search for the ch before the semicolon,
-          // not for the semicolon itself, because nsString::ToInteger()
-          // considers 'c' to be a valid numeric char (even if radix=10)
-          // but then gets confused if it sees it next to the number
-          // when the radix specified was 10, and returns an error code.
-          int32_t semiOffset = style.Find("ch", false, widthOffset + 6);
-          int32_t length = (semiOffset > 0 ? semiOffset - widthOffset - 6
-                                           : style.Length() - widthOffset);
-          nsAutoString widthstr;
-          style.Mid(widthstr, widthOffset + 6, length);
-          nsresult err;
-          int32_t col = widthstr.ToInteger(&err);
-
-          if (NS_SUCCEEDED(err)) {
-            mWrapColumn = (uint32_t)col;
-#ifdef DEBUG_preformatted
-            printf("Set wrap column to %d based on style\n", mWrapColumn);
-#endif
-          }
-        }
       } else if (kNotFound != style.Find("pre", true, whitespace)) {
 #ifdef DEBUG_preformatted
         printf("Set mPreFormattedMail based on style pre\n");
 #endif
         mPreFormattedMail = true;
-        mWrapColumn = 0;
       }
     } else {
       /* See comment at end of function. */
@@ -1158,7 +1132,8 @@ void nsPlainTextSerializer::DoAddText(bool aIsLineBreak,
     // prettyprinting to mimic the html format, and in neither case
     // does the formatting of the html source help us.
     if (mSettings.HasFlag(nsIDocumentEncoder::OutputPreformatted) ||
-        (mPreFormattedMail && !mWrapColumn) || IsElementPreformatted()) {
+        (mPreFormattedMail && !mSettings.GetWrapColumn()) ||
+        IsElementPreformatted()) {
       EnsureVerticalSpace(mEmptyLines + 1);
     } else if (!mInWhitespace) {
       Write(kSpace);
@@ -1210,7 +1185,7 @@ nsresult nsPlainTextSerializer::DoAddLeaf(const nsAtom* aTag) {
     // Make a line of dashes as wide as the wrap width
     // XXX honoring percentage would be nice
     nsAutoString line;
-    CreateLineOfDashes(line, mWrapColumn);
+    CreateLineOfDashes(line, mSettings.GetWrapColumn());
     Write(line);
 
     EnsureVerticalSpace(0);
@@ -1274,7 +1249,7 @@ static bool IsSpaceStuffable(const char16_t* s) {
 }
 
 void nsPlainTextSerializer::MaybeWrapAndOutputCompleteLines() {
-  if (!MayWrap()) {
+  if (!mSettings.MayWrap()) {
     return;
   }
 
@@ -1288,11 +1263,12 @@ void nsPlainTextSerializer::MaybeWrapAndOutputCompleteLines() {
   // The "+4" is to avoid wrap lines that only would be a couple
   // of letters too long. We give this bonus only if the
   // wrapcolumn is more than 20.
-  uint32_t bonuswidth = (mWrapColumn > 20) ? 4 : 0;
+  const uint32_t wrapColumn = mSettings.GetWrapColumn();
+  uint32_t bonuswidth = (wrapColumn > 20) ? 4 : 0;
 
-  while (currentLineContentWidth + prefixwidth > mWrapColumn + bonuswidth) {
+  while (currentLineContentWidth + prefixwidth > wrapColumn + bonuswidth) {
     const int32_t goodSpace = mCurrentLine.FindWrapIndexForContent(
-        mWrapColumn, currentLineContentWidth, mLineBreaker);
+        wrapColumn, currentLineContentWidth, mLineBreaker);
 
     const int32_t contentLength = mCurrentLine.mContent.Length();
     if ((goodSpace < contentLength) && (goodSpace > 0)) {
@@ -1597,7 +1573,7 @@ void nsPlainTextSerializer::Write(const nsAString& aStr) {
 
 #ifdef DEBUG_wrapping
   printf("Write(%s): wrap col = %d\n", NS_ConvertUTF16toUTF8(str).get(),
-         mWrapColumn);
+         mSettings.GetWrapColumn());
 #endif
 
   const int32_t totLen = str.Length();
@@ -1614,7 +1590,7 @@ void nsPlainTextSerializer::Write(const nsAString& aStr) {
   // We have two major codepaths here. One that does preformatted text and one
   // that does normal formatted text. The one for preformatted text calls
   // Output directly while the other code path goes through AddToLine.
-  if ((mPreFormattedMail && !mWrapColumn) ||
+  if ((mPreFormattedMail && !mSettings.GetWrapColumn()) ||
       (IsElementPreformatted() && !mPreFormattedMail) ||
       (mSpanLevel > 0 && mEmptyLines >= 0 && IsQuotedLine(str))) {
     // No intelligent wrapping.

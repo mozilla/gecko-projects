@@ -17,6 +17,7 @@
 #include "mozilla/dom/Location.h"
 #include "mozilla/dom/LocationBinding.h"
 #include "mozilla/dom/StructuredCloneTags.h"
+#include "mozilla/dom/UserActivationIPCUtils.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/WindowGlobalParent.h"
@@ -101,6 +102,8 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
     Type aType) {
   MOZ_DIAGNOSTIC_ASSERT(!aParent || aParent->mType == aType);
 
+  MOZ_DIAGNOSTIC_ASSERT(aType != Type::Chrome || XRE_IsParentProcess());
+
   uint64_t id = nsContentUtils::GenerateBrowsingContextId();
 
   MOZ_LOG(GetLog(), LogLevel::Debug,
@@ -123,6 +126,8 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
   // using transactions to set them, as we haven't been attached yet.
   context->mName = aName;
   if (aOpener) {
+    MOZ_DIAGNOSTIC_ASSERT(aOpener->Group() == context->Group());
+    MOZ_DIAGNOSTIC_ASSERT(aOpener->mType == context->mType);
     context->mOpenerId = aOpener->Id();
     context->mHadOriginalOpener = true;
   }
@@ -696,17 +701,21 @@ JSObject* BrowsingContext::ReadStructuredClone(JSContext* aCx,
 }
 
 void BrowsingContext::NotifyUserGestureActivation() {
-  SetIsActivatedByUserGesture(true);
+  SetUserActivationState(UserActivation::State::FullActivated);
 }
 
 void BrowsingContext::NotifyResetUserGestureActivation() {
-  SetIsActivatedByUserGesture(false);
+  SetUserActivationState(UserActivation::State::None);
+}
+
+bool BrowsingContext::HasBeenUserGestureActivated() {
+  return mUserActivationState != UserActivation::State::None;
 }
 
 bool BrowsingContext::HasValidTransientUserGestureActivation() {
   MOZ_ASSERT(mIsInProcess);
 
-  if (!mIsActivatedByUserGesture) {
+  if (mUserActivationState != UserActivation::State::FullActivated) {
     MOZ_ASSERT(mUserGestureStart.IsNull(),
                "mUserGestureStart should be null if the document hasn't ever "
                "been activated by user gesture");
@@ -721,6 +730,24 @@ bool BrowsingContext::HasValidTransientUserGestureActivation() {
 
   return timeout <= TimeDuration() ||
          (TimeStamp::Now() - mUserGestureStart) <= timeout;
+}
+
+bool BrowsingContext::ConsumeTransientUserGestureActivation() {
+  MOZ_ASSERT(mIsInProcess);
+
+  if (!HasValidTransientUserGestureActivation()) {
+    return false;
+  }
+
+  BrowsingContext* top = Top();
+  top->PreOrderWalk([&](BrowsingContext* aContext) {
+    if (aContext->GetUserActivationState() ==
+        UserActivation::State::FullActivated) {
+      aContext->SetUserActivationState(UserActivation::State::HasBeenActivated);
+    }
+  });
+
+  return true;
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(BrowsingContext)
@@ -1029,7 +1056,7 @@ void BrowsingContext::Transaction::Apply(BrowsingContext* aBrowsingContext) {
 }
 
 BrowsingContext::IPCInitializer BrowsingContext::GetIPCInitializer() {
-  // FIXME: We should assert that we're loaded in-content here. (bug 1553804)
+  MOZ_DIAGNOSTIC_ASSERT(mType == Type::Content);
 
   IPCInitializer init;
   init.mId = Id();
@@ -1068,18 +1095,20 @@ void BrowsingContext::StartDelayedAutoplayMediaComponents() {
   mDocShell->StartDelayedAutoplayMediaComponents();
 }
 
-void BrowsingContext::DidSetIsActivatedByUserGesture() {
+void BrowsingContext::DidSetUserActivationState() {
   MOZ_ASSERT_IF(!mIsInProcess, mUserGestureStart.IsNull());
-  USER_ACTIVATION_LOG(
-      "Set user gesture activation %d for %s browsing context 0x%08" PRIx64,
-      mIsActivatedByUserGesture, XRE_IsParentProcess() ? "Parent" : "Child",
-      Id());
+  USER_ACTIVATION_LOG("Set user gesture activation %" PRIu8
+                      " for %s browsing context 0x%08" PRIx64,
+                      static_cast<uint8_t>(mUserActivationState),
+                      XRE_IsParentProcess() ? "Parent" : "Child", Id());
   if (mIsInProcess) {
     USER_ACTIVATION_LOG(
         "Set user gesture start time for %s browsing context 0x%08" PRIx64,
         XRE_IsParentProcess() ? "Parent" : "Child", Id());
     mUserGestureStart =
-        mIsActivatedByUserGesture ? TimeStamp::Now() : TimeStamp();
+        (mUserActivationState == UserActivation::State::FullActivated)
+            ? TimeStamp::Now()
+            : TimeStamp();
   }
 }
 
