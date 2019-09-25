@@ -1505,23 +1505,6 @@ function getMaintSvcDir() {
 }
 
 /**
- * Reads the current update operation/state in the status file in the secure
- * update log directory.
- *
- * @return The status value.
- */
-function readSecureStatusFile() {
-  let file = getMaintSvcDir();
-  file.append("UpdateLogs");
-  file.append(gTestID + ".status");
-  if (!file.exists()) {
-    debugDump("update status file does not exists! Path: " + file.path);
-    return STATE_NONE;
-  }
-  return readFile(file).split("\n")[0];
-}
-
-/**
  * Get the nsIFile for a Windows special folder determined by the CSIDL
  * passed.
  *
@@ -1984,7 +1967,7 @@ function runUpdate(
   let status = readStatusFile();
   if (
     (!gIsServiceTest && process.exitValue != aExpectedExitValue) ||
-    (status != aExpectedStatus && !gIsServiceTest && !isInvalidArgTest)
+    status != aExpectedStatus
   ) {
     if (process.exitValue != aExpectedExitValue) {
       logTestInfo(
@@ -2003,13 +1986,6 @@ function runUpdate(
       );
     }
     logUpdateLog(FILE_LAST_UPDATE_LOG);
-  }
-
-  if (gIsServiceTest && isInvalidArgTest) {
-    let secureStatus = readSecureStatusFile();
-    if (secureStatus != STATE_NONE) {
-      status = secureStatus;
-    }
   }
 
   if (!gIsServiceTest) {
