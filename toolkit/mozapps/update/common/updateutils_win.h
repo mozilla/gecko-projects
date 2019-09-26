@@ -37,6 +37,7 @@ int closedir(DIR* dir);
 dirent* readdir(DIR* dir);
 
 BOOL PathAppendSafe(LPWSTR base, LPCWSTR extra);
+BOOL GetUUIDString(LPWSTR outBuf);
 BOOL GetUUIDTempFilePath(LPCWSTR basePath, LPCWSTR prefix, LPWSTR tmpPath);
 
 #endif  // WINDIRENT_H__
