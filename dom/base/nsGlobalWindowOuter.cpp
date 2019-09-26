@@ -2891,7 +2891,7 @@ nsresult nsPIDOMWindowOuter::SetAudioVolume(float aVolume) {
 void nsPIDOMWindowOuter::RefreshMediaElementsVolume() {
   RefPtr<AudioChannelService> service = AudioChannelService::GetOrCreate();
   if (service) {
-    service->RefreshAgentsVolume(this);
+    service->RefreshAgentsVolume(this, GetAudioVolume(), GetAudioMuted());
   }
 }
 
@@ -3852,6 +3852,11 @@ void nsGlobalWindowOuter::SetCSSViewportWidthAndHeight(nscoord aInnerWidth,
   shellArea.SetHeight(aInnerHeight);
   shellArea.SetWidth(aInnerWidth);
 
+  // FIXME(emilio): This doesn't seem to be ok, this doesn't reflow or
+  // anything... Should go through PresShell::ResizeReflow.
+  //
+  // But I don't think this can be reached by content, as we don't allow to set
+  // inner{Width,Height}.
   presContext->SetVisibleArea(shellArea);
 }
 
@@ -7906,10 +7911,9 @@ nsPIDOMWindowOuter::nsPIDOMWindowOuter(uint64_t aWindowID)
       mModalStateDepth(0),
       mIsActive(false),
       mIsBackground(false),
-      mMediaSuspend(
-          Preferences::GetBool("media.block-autoplay-until-in-foreground", true)
-              ? nsISuspendedTypes::SUSPENDED_BLOCK
-              : nsISuspendedTypes::NONE_SUSPENDED),
+      mMediaSuspend(StaticPrefs::media_block_autoplay_until_in_foreground()
+                        ? nsISuspendedTypes::SUSPENDED_BLOCK
+                        : nsISuspendedTypes::NONE_SUSPENDED),
       mAudioVolume(1.0),
       mDesktopModeViewport(false),
       mIsRootOuterWindow(false),

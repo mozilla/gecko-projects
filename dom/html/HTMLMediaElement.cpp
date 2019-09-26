@@ -9,7 +9,6 @@
 #endif
 
 #include "mozilla/dom/HTMLMediaElement.h"
-#include "AudioChannelService.h"
 #include "AudioDeviceInfo.h"
 #include "AudioStreamTrack.h"
 #include "AutoplayPolicy.h"
@@ -147,6 +146,8 @@ namespace dom {
 extern void NotifyMediaStarted(uint64_t aWindowID);
 extern void NotifyMediaStopped(uint64_t aWindowID);
 extern void NotifyMediaAudibleChanged(uint64_t aWindowID, bool aAudible);
+
+using AudibleState = AudioChannelService::AudibleState;
 
 // Number of milliseconds between progress events as defined by spec
 static const uint32_t PROGRESS_MS = 350;
@@ -984,7 +985,6 @@ class HTMLMediaElement::AudioChannelAgentCallback final
       : mOwner(aOwner),
         mAudioChannelVolume(1.0),
         mPlayingThroughTheAudioChannel(false),
-        mAudioCapturedByWindow(false),
         mSuspended(nsISuspendedTypes::NONE_SUSPENDED),
         mIsOwnerAudible(IsOwnerAudible()),
         mIsShutDown(false) {
@@ -992,10 +992,9 @@ class HTMLMediaElement::AudioChannelAgentCallback final
     MaybeCreateAudioChannelAgent();
   }
 
-  void UpdateAudioChannelPlayingState(bool aForcePlaying = false) {
+  void UpdateAudioChannelPlayingState() {
     MOZ_ASSERT(!mIsShutDown);
-    bool playingThroughTheAudioChannel =
-        aForcePlaying || IsPlayingThroughTheAudioChannel();
+    bool playingThroughTheAudioChannel = IsPlayingThroughTheAudioChannel();
 
     if (playingThroughTheAudioChannel != mPlayingThroughTheAudioChannel) {
       if (!MaybeCreateAudioChannelAgent()) {
@@ -1013,18 +1012,8 @@ class HTMLMediaElement::AudioChannelAgentCallback final
 
   bool ShouldResetSuspend() const {
     // The disposable-pause should be clear after media starts playing.
-    if (!mOwner->Paused() &&
-        mSuspended == nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE) {
-      return true;
-    }
-
-    // If the blocked media is paused, we don't need to resume it. We reset the
-    // mSuspended in order to unregister the agent.
-    if (mOwner->Paused() && mSuspended == nsISuspendedTypes::SUSPENDED_BLOCK) {
-      return true;
-    }
-
-    return false;
+    return !mOwner->Paused() &&
+           mSuspended == nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE;
   }
 
   void NotifyPlayStateChanged() {
@@ -1076,7 +1065,6 @@ class HTMLMediaElement::AudioChannelAgentCallback final
         break;
       case nsISuspendedTypes::SUSPENDED_PAUSE:
       case nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE:
-      case nsISuspendedTypes::SUSPENDED_BLOCK:
         Suspend(aSuspend);
         break;
       case nsISuspendedTypes::SUSPENDED_STOP_DISPOSABLE:
@@ -1094,11 +1082,7 @@ class HTMLMediaElement::AudioChannelAgentCallback final
 
   NS_IMETHODIMP WindowAudioCaptureChanged(bool aCapture) override {
     MOZ_ASSERT(mAudioChannelAgent);
-
-    if (mAudioCapturedByWindow != aCapture) {
-      mAudioCapturedByWindow = aCapture;
-      AudioCaptureStreamChangeIfNeeded();
-    }
+    AudioCaptureStreamChangeIfNeeded();
     return NS_OK;
   }
 
@@ -1108,11 +1092,9 @@ class HTMLMediaElement::AudioChannelAgentCallback final
       return;
     }
 
-    if (!mOwner->HasAudio()) {
-      return;
-    }
-
-    mOwner->AudioCaptureStreamChange(mAudioCapturedByWindow);
+    MOZ_ASSERT(mAudioChannelAgent);
+    bool isCapturing = mAudioChannelAgent->IsWindowAudioCapturingEnabled();
+    mOwner->AudioCaptureStreamChange(isCapturing);
   }
 
   void NotifyAudioPlaybackChanged(AudibleChangedReasons aReason) {
@@ -1131,21 +1113,6 @@ class HTMLMediaElement::AudioChannelAgentCallback final
     NotifyMediaAudibleChanged(
         mAudioChannelAgent->WindowID(),
         mIsOwnerAudible == AudioChannelService::AudibleState::eAudible);
-  }
-
-  bool IsPlaybackBlocked() {
-    MOZ_ASSERT(!mIsShutDown);
-    // If the tab hasn't been activated yet, the media element in that tab can't
-    // be playback now until the tab goes to foreground first time or user
-    // clicks the unblocking tab icon.
-    if (!IsTabActivated()) {
-      // Even we haven't start playing yet, we still need to notify the audio
-      // channe system because we need to receive the resume notification later.
-      UpdateAudioChannelPlayingState(true /* force to start */);
-      return true;
-    }
-
-    return false;
   }
 
   void Shutdown() {
@@ -1194,15 +1161,13 @@ class HTMLMediaElement::AudioChannelAgentCallback final
   void StartAudioChannelAgent() {
     MOZ_ASSERT(mAudioChannelAgent);
     MOZ_ASSERT(!mAudioChannelAgent->IsPlayingStarted());
-    AudioPlaybackConfig config;
-    if (NS_WARN_IF(NS_FAILED(mAudioChannelAgent->NotifyStartedPlaying(
-            &config, IsOwnerAudible())))) {
+    if (NS_WARN_IF(NS_FAILED(
+            mAudioChannelAgent->NotifyStartedPlaying(IsOwnerAudible())))) {
       return;
     }
 
     NotifyMediaStarted(mAudioChannelAgent->WindowID());
-    WindowVolumeChanged(config.mVolume, config.mMuted);
-    WindowSuspendChanged(config.mSuspend);
+    mAudioChannelAgent->PullInitialUpdate();
   }
 
   void StopAudioChanelAgent() {
@@ -1210,6 +1175,9 @@ class HTMLMediaElement::AudioChannelAgentCallback final
     MOZ_ASSERT(mAudioChannelAgent->IsPlayingStarted());
     mAudioChannelAgent->NotifyStoppedPlaying();
     NotifyMediaStopped(mAudioChannelAgent->WindowID());
+    // If we have started audio capturing before, we have to tell media element
+    // to clear the output capturing stream.
+    mOwner->AudioCaptureStreamChange(false);
   }
 
   void SetSuspended(SuspendTypes aSuspend) {
@@ -1315,43 +1283,18 @@ class HTMLMediaElement::AudioChannelAgentCallback final
         }));
   }
 
-  bool IsTabActivated() {
-    if (MaybeCreateAudioChannelAgent()) {
-      return !mAudioChannelAgent->ShouldBlockMedia();
-    }
-    return false;
-  }
-
   bool IsSuspended() const {
     return (mSuspended == nsISuspendedTypes::SUSPENDED_PAUSE ||
-            mSuspended == nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE ||
-            mSuspended == nsISuspendedTypes::SUSPENDED_BLOCK);
+            mSuspended == nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE);
   }
 
   AudibleState IsOwnerAudible() const {
-    // Muted or the volume should not be ~0
-    if (mOwner->mMuted || (std::fabs(mOwner->Volume()) <= 1e-7)) {
-      return mOwner->HasAudio()
-                 ? AudioChannelService::AudibleState::eMaybeAudible
-                 : AudioChannelService::AudibleState::eNotAudible;
-    }
-
-    // No audio track.
-    if (!mOwner->HasAudio()) {
-      return AudioChannelService::AudibleState::eNotAudible;
-    }
-
-    // Might be audible but not yet.
-    if (mOwner->HasAudio() && !mOwner->mIsAudioTrackAudible) {
-      return AudioChannelService::AudibleState::eMaybeAudible;
-    }
-
     // Suspended or paused media doesn't produce any sound.
     if (mSuspended != nsISuspendedTypes::NONE_SUSPENDED || mOwner->mPaused) {
-      return AudioChannelService::AudibleState::eNotAudible;
+      return AudibleState::eNotAudible;
     }
-
-    return AudioChannelService::AudibleState::eAudible;
+    return mOwner->IsAudible() ? AudibleState::eAudible
+                               : AudibleState::eNotAudible;
   }
 
   bool IsPlayingThroughTheAudioChannel() const {
@@ -1405,8 +1348,6 @@ class HTMLMediaElement::AudioChannelAgentCallback final
   float mAudioChannelVolume;
   // Is this media element playing?
   bool mPlayingThroughTheAudioChannel;
-  // True if the sound is being captured by the window.
-  bool mAudioCapturedByWindow;
   // We have different kinds of suspended cases,
   // - SUSPENDED_PAUSE
   // It's used when we temporary lost platform audio focus. MediaElement can
@@ -1414,10 +1355,6 @@ class HTMLMediaElement::AudioChannelAgentCallback final
   // - SUSPENDED_PAUSE_DISPOSABLE
   // It's used when user press the pause button on the remote media-control.
   // MediaElement can be resumed by remote media-control or via play().
-  // - SUSPENDED_BLOCK
-  // It's used to reduce the power consumption, we won't play the auto-play
-  // audio/video in the page we have never visited before. MediaElement would
-  // be resumed when the page is active. See bug647429 for more details.
   // - SUSPENDED_STOP_DISPOSABLE
   // When we permanently lost platform audio focus, we should stop playing
   // and stop the audio channel agent. MediaElement can only be restarted by
@@ -2051,6 +1988,10 @@ void HTMLMediaElement::AbortExistingLoads() {
     Maybe<nsIntSize> size = Some(nsIntSize(0, 0));
     Invalidate(true, size, false);
   }
+
+  // As aborting current load would stop current playback, so we have no need to
+  // resume a paused media element.
+  ClearResumeDelayedMediaPlaybackAgentIfNeeded();
 
   // We may have changed mPaused, mAutoplaying, and other
   // things which can affect AddRemoveSelfReference
@@ -3085,6 +3026,9 @@ void HTMLMediaElement::Pause(ErrorResult& aRv) {
     mAudioChannelWrapper->NotifyPlayStateChanged();
   }
 
+  // We don't need to resume media which is paused explicitly by user.
+  ClearResumeDelayedMediaPlaybackAgentIfNeeded();
+
   if (!oldPaused) {
     FireTimeUpdate(false);
     DispatchAsyncEvent(NS_LITERAL_STRING("pause"));
@@ -3770,6 +3714,11 @@ HTMLMediaElement::~HTMLMediaElement() {
     mAudioChannelWrapper = nullptr;
   }
 
+  if (mResumeDelayedPlaybackAgent) {
+    mResumePlaybackRequest.DisconnectIfExists();
+    mResumeDelayedPlaybackAgent = nullptr;
+  }
+
   WakeLockRelease();
   ReportPlayedTimeAfterBlockedTelemetry();
 
@@ -3802,10 +3751,6 @@ void HTMLMediaElement::SetPlayedOrSeeked(bool aValue) {
 }
 
 void HTMLMediaElement::NotifyXPCOMShutdown() { ShutdownDecoder(); }
-
-bool HTMLMediaElement::AudioChannelAgentDelayingPlayback() {
-  return mAudioChannelWrapper && mAudioChannelWrapper->IsPlaybackBlocked();
-}
 
 void HTMLMediaElement::UpdateHadAudibleAutoplayState() {
   // If we're audible, and autoplaying...
@@ -3856,15 +3801,15 @@ already_AddRefed<Promise> HTMLMediaElement::Play(ErrorResult& aRv) {
   // play promises.
   // Note: Promise appended to list of pending promises as needed below.
 
-  if (AudioChannelAgentDelayingPlayback()) {
-    // The audio channel agent may delay starting playback of a media resource
-    // until the tab the media element is in has been in the foreground.
-    // Save a reference to the promise, and return it. The AudioChannelAgent
-    // will call Play() again if the tab is brought to the foreground, or the
-    // audio tab indicator is clicked, which will resolve the promise if we end
-    // up playing.
-    LOG(LogLevel::Debug, ("%p Play() call delayed by AudioChannelAgent", this));
+  // We may delay starting playback of a media resource for an unvisited tab
+  // until it's going to foreground or being resumed by the play tab icon.
+  if (MediaPlaybackDelayPolicy::ShouldDelayPlayback(this)) {
+    CreateResumeDelayedMediaPlaybackAgentIfNeeded();
+    LOG(LogLevel::Debug, ("%p delay Play() call", this));
     MaybeDoLoad();
+    // When play is delayed, save a reference to the promise, and return it.
+    // The promise will be resolved when we resume play by either the tab is
+    // brought to the foreground, or the audio tab indicator is clicked.
     mPendingPlayPromises.AppendElement(promise);
     return promise.forget();
   }
@@ -5826,16 +5771,15 @@ bool HTMLMediaElement::CanActivateAutoplay() {
     return false;
   }
 
-  if (mAudioChannelWrapper) {
-    // Note: SUSPENDED_PAUSE and SUSPENDED_BLOCK will be merged into one single
-    // state.
-    if (mAudioChannelWrapper->GetSuspendType() ==
-            nsISuspendedTypes::SUSPENDED_PAUSE ||
-        mAudioChannelWrapper->GetSuspendType() ==
-            nsISuspendedTypes::SUSPENDED_BLOCK ||
-        mAudioChannelWrapper->IsPlaybackBlocked()) {
-      return false;
-    }
+  if (MediaPlaybackDelayPolicy::ShouldDelayPlayback(this)) {
+    CreateResumeDelayedMediaPlaybackAgentIfNeeded();
+    LOG(LogLevel::Debug, ("%p delay playing from autoplay", this));
+    return false;
+  }
+
+  if (mAudioChannelWrapper && mAudioChannelWrapper->GetSuspendType() ==
+                                  nsISuspendedTypes::SUSPENDED_PAUSE) {
+    return false;
   }
 
   return mReadyState >= HAVE_ENOUGH_DATA;
@@ -6179,6 +6123,8 @@ void HTMLMediaElement::SuspendOrResumeElement(bool aPauseElement,
         mDecoder->Suspend();
       }
       mEventDeliveryPaused = aSuspendEvents;
+      // We won't want to resume media element from the bfcache.
+      ClearResumeDelayedMediaPlaybackAgentIfNeeded();
     } else {
       if (!mPaused) {
         mCurrentLoadPlayTime.Start();
@@ -6528,9 +6474,9 @@ ImageContainer* HTMLMediaElement::GetImageContainer() {
   return container ? container->GetImageContainer() : nullptr;
 }
 
-void HTMLMediaElement::UpdateAudioChannelPlayingState(bool aForcePlaying) {
+void HTMLMediaElement::UpdateAudioChannelPlayingState() {
   if (mAudioChannelWrapper) {
-    mAudioChannelWrapper->UpdateAudioChannelPlayingState(aForcePlaying);
+    mAudioChannelWrapper->UpdateAudioChannelPlayingState();
   }
 }
 
@@ -6544,11 +6490,8 @@ bool HTMLMediaElement::AudioChannelAgentBlockedPlay() {
     return true;
   }
 
-  // Note: SUSPENDED_PAUSE and SUSPENDED_BLOCK will be merged into one single
-  // state.
   const auto suspendType = mAudioChannelWrapper->GetSuspendType();
-  return suspendType == nsISuspendedTypes::SUSPENDED_PAUSE ||
-         suspendType == nsISuspendedTypes::SUSPENDED_BLOCK;
+  return suspendType == nsISuspendedTypes::SUSPENDED_PAUSE;
 }
 
 static const char* VisibilityString(Visibility aVisibility) {
@@ -7079,10 +7022,8 @@ bool HTMLMediaElement::ShouldElementBePaused() {
 void HTMLMediaElement::SetMediaInfo(const MediaInfo& aInfo) {
   const bool oldHasAudio = mMediaInfo.HasAudio();
   mMediaInfo = aInfo;
-  if (aInfo.HasAudio() != oldHasAudio) {
-    UpdateAudioChannelPlayingState();
-    NotifyAudioPlaybackChanged(
-        AudioChannelService::AudibleChangedReasons::eDataAudibleChanged);
+  if ((aInfo.HasAudio() != oldHasAudio) && mResumeDelayedPlaybackAgent) {
+    mResumeDelayedPlaybackAgent->UpdateAudibleState(this, IsAudible());
   }
   if (mAudioChannelWrapper) {
     mAudioChannelWrapper->AudioCaptureStreamChangeIfNeeded();
@@ -7243,6 +7184,20 @@ void HTMLMediaElement::NotifyDecoderActivityChanges() const {
 }
 
 Document* HTMLMediaElement::GetDocument() const { return OwnerDoc(); }
+
+bool HTMLMediaElement::IsAudible() const {
+  // No audio track.
+  if (!HasAudio()) {
+    return false;
+  }
+
+  // Muted or the volume should not be ~0
+  if (mMuted || (std::fabs(Volume()) <= 1e-7)) {
+    return false;
+  }
+
+  return mIsAudioTrackAudible;
+}
 
 void HTMLMediaElement::ConstructMediaTracks(const MediaInfo* aInfo) {
   if (mMediaTracksConstructed || !aInfo) {
@@ -7457,6 +7412,44 @@ void HTMLMediaElement::NotifyTextTrackModeChanged() {
                                  mTextTrackManager->TimeMarchesOn();
                                }
                              }));
+}
+
+void HTMLMediaElement::CreateResumeDelayedMediaPlaybackAgentIfNeeded() {
+  if (mResumeDelayedPlaybackAgent) {
+    return;
+  }
+  mResumeDelayedPlaybackAgent =
+      MediaPlaybackDelayPolicy::CreateResumeDelayedPlaybackAgent(this,
+                                                                 IsAudible());
+  if (!mResumeDelayedPlaybackAgent) {
+    LOG(LogLevel::Debug,
+        ("%p Failed to create a delayed playback agant", this));
+    return;
+  }
+  mResumeDelayedPlaybackAgent->GetResumePromise()
+      ->Then(
+          mAbstractMainThread, __func__,
+          [self = RefPtr<HTMLMediaElement>(this)]() {
+            LOG(LogLevel::Debug, ("%p Resume delayed Play() call", self.get()));
+            IgnoredErrorResult dummy;
+            RefPtr<Promise> toBeIgnored = self->Play(dummy);
+            self->mResumePlaybackRequest.Complete();
+            self->mResumeDelayedPlaybackAgent = nullptr;
+          },
+          [self = RefPtr<HTMLMediaElement>(this)]() {
+            LOG(LogLevel::Debug,
+                ("%p Can not resume delayed Play() call", self.get()));
+            self->mResumePlaybackRequest.Complete();
+            self->mResumeDelayedPlaybackAgent = nullptr;
+          })
+      ->Track(mResumePlaybackRequest);
+}
+
+void HTMLMediaElement::ClearResumeDelayedMediaPlaybackAgentIfNeeded() {
+  if (mResumeDelayedPlaybackAgent) {
+    mResumePlaybackRequest.DisconnectIfExists();
+    mResumeDelayedPlaybackAgent = nullptr;
+  }
 }
 
 }  // namespace dom

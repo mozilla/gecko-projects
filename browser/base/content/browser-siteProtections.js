@@ -558,6 +558,13 @@ var ThirdPartyCookies = {
       ));
     },
 
+    get subViewBlocked() {
+      delete this.subViewAllowed;
+      return (this.subViewAllowed = gNavigatorBundle.getString(
+        "contentBlocking.cookiesView.blocked.label"
+      ));
+    },
+
     get subViewTitleNotBlocking() {
       delete this.subViewTitleNotBlocking;
       return (this.subViewTitleNotBlocking = gNavigatorBundle.getString(
@@ -689,18 +696,17 @@ var ThirdPartyCookies = {
 
     this.subViewList.textContent = "";
 
-    for (let category of ["firstParty", "trackers", "thirdParty"]) {
-      let itemsToShow;
-      if (
-        category == "trackers" &&
-        (gProtectionsHandler.hasException || !this.enabled)
-      ) {
-        itemsToShow = categories[category];
-      } else {
-        itemsToShow = categories[category].filter(
-          info => !info.isAllowed || info.hasException
-        );
-      }
+    let categoryNames = ["trackers"];
+    switch (this.behaviorPref) {
+      case Ci.nsICookieService.BEHAVIOR_REJECT:
+        categoryNames.push("firstParty");
+      // eslint-disable-next-line no-fallthrough
+      case Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN:
+        categoryNames.push("thirdParty");
+    }
+
+    for (let category of categoryNames) {
+      let itemsToShow = categories[category];
 
       if (!itemsToShow.length) {
         continue;
@@ -759,7 +765,7 @@ var ThirdPartyCookies = {
     this.subView.setAttribute("title", gNavigatorBundle.getString(title));
   },
 
-  _hasException(origin) {
+  _getExceptionState(origin) {
     for (let perm of Services.perms.getAllForPrincipal(
       gBrowser.contentPrincipal
     )) {
@@ -767,7 +773,7 @@ var ThirdPartyCookies = {
         perm.type == "3rdPartyStorage^" + origin ||
         perm.type.startsWith("3rdPartyStorage^" + origin + "^")
       ) {
-        return true;
+        return perm.capability;
       }
     }
 
@@ -775,11 +781,8 @@ var ThirdPartyCookies = {
       origin
     );
     // Cookie exceptions get "inherited" from parent- to sub-domain, so we need to
-    // make sure to include parent domains in the permission check for "cookies".
-    return (
-      Services.perms.testPermissionFromPrincipal(principal, "cookie") !=
-      Services.perms.UNKNOWN_ACTION
-    );
+    // make sure to include parent domains in the permission check for "cookie".
+    return Services.perms.testPermissionFromPrincipal(principal, "cookie");
   },
 
   _clearException(origin) {
@@ -840,7 +843,7 @@ var ThirdPartyCookies = {
       let info = {
         origin,
         isAllowed: true,
-        hasException: this._hasException(origin),
+        exceptionState: this._getExceptionState(origin),
       };
       let hasCookie = false;
       let isTracker = false;
@@ -893,7 +896,7 @@ var ThirdPartyCookies = {
     return newLog;
   },
 
-  _createListItem({ origin, isAllowed, hasException }) {
+  _createListItem({ origin, isAllowed, exceptionState }) {
     let listItem = document.createXULElement("hbox");
     listItem.className = "protections-popup-list-item";
     // Repeat the origin in the tooltip in case it's too long
@@ -906,7 +909,10 @@ var ThirdPartyCookies = {
     label.setAttribute("crop", "end");
     listItem.append(label);
 
-    if (hasException) {
+    if (
+      (isAllowed && exceptionState == Services.perms.ALLOW_ACTION) ||
+      (!isAllowed && exceptionState == Services.perms.DENY_ACTION)
+    ) {
       let stateLabel;
       if (isAllowed) {
         stateLabel = document.createXULElement("label");
@@ -927,15 +933,16 @@ var ThirdPartyCookies = {
         "contentBlocking.cookiesView.removeButton.tooltip",
         [origin]
       );
-      removeException.addEventListener("click", () => {
-        this._clearException(origin);
-        // Just flip the display based on what state we had previously.
-        stateLabel.value = isAllowed
-          ? this.strings.subViewBlocked
-          : this.strings.subViewAllowed;
-        listItem.classList.toggle("allowed", !isAllowed);
-        removeException.hidden = true;
-      });
+      removeException.addEventListener(
+        "click",
+        () => {
+          this._clearException(origin);
+          stateLabel.remove();
+          removeException.remove();
+          listItem.classList.toggle("allowed", !isAllowed);
+        },
+        { once: true }
+      );
       listItem.append(removeException);
     }
 
@@ -944,7 +951,10 @@ var ThirdPartyCookies = {
 };
 
 var SocialTracking = {
-  PREF_ENABLED: "privacy.socialtracking.block_cookies.enabled",
+  PREF_STP_TP_ENABLED: "privacy.trackingprotection.socialtracking.enabled",
+  PREF_STP_COOKIE_ENABLED: "privacy.socialtracking.block_cookies.enabled",
+  PREF_COOKIE_BEHAVIOR: "network.cookie.cookieBehavior",
+  reportBreakageLabel: "socialtracking",
 
   strings: {
     get subViewBlocked() {
@@ -972,16 +982,43 @@ var SocialTracking = {
   init() {
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
-      "enabled",
-      this.PREF_ENABLED,
+      "socialTrackingProtectionEnabled",
+      this.PREF_STP_TP_ENABLED,
+      false,
+      this.updateCategoryItem.bind(this)
+    );
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "rejectTrackingCookies",
+      this.PREF_COOKIE_BEHAVIOR,
+      false,
+      this.updateCategoryItem.bind(this),
+      val => val == Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER
+    );
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "blockSocialTrackingCookies",
+      this.PREF_STP_COOKIE_ENABLED,
       false,
       this.updateCategoryItem.bind(this)
     );
     this.updateCategoryItem();
   },
 
+  get enabled() {
+    return this.blockSocialTrackingCookies;
+  },
+
+  get blockingEnabled() {
+    return (
+      (this.socialTrackingProtectionEnabled || this.rejectTrackingCookies) &&
+      this.blockSocialTrackingCookies
+    );
+  },
+
   updateCategoryItem() {
-    this.categoryItem.classList.toggle("blocked", this.enabled);
+    this.categoryItem.hidden = !this.enabled;
+    this.categoryItem.classList.toggle("blocked", this.blockingEnabled);
   },
 
   isBlocking(state) {
@@ -995,17 +1032,15 @@ var SocialTracking = {
       (state & Ci.nsIWebProgressListener.STATE_LOADED_SOCIALTRACKING_CONTENT) !=
       0;
     return (
-      this.enabled &&
-      ((socialtrackingContentLoaded && cookieTrackerBlocked) ||
-        socialtrackingContentBlocked)
+      (socialtrackingContentLoaded && cookieTrackerBlocked) ||
+      socialtrackingContentBlocked
     );
   },
 
   isAllowing(state) {
     return (
-      this.enabled &&
       (state & Ci.nsIWebProgressListener.STATE_LOADED_SOCIALTRACKING_CONTENT) !=
-        0
+      0
     );
   },
 
@@ -1050,7 +1085,7 @@ var SocialTracking = {
     this.subViewList.append(fragment);
     this.subView.setAttribute(
       "title",
-      this.enabled && !gProtectionsHandler.hasException
+      this.blockingEnabled && !gProtectionsHandler.hasException
         ? this.strings.subViewTitleBlocking
         : this.strings.subViewTitleNotBlocking
     );
@@ -1069,6 +1104,7 @@ var SocialTracking = {
 
     let listItem = document.createXULElement("hbox");
     listItem.className = "protections-popup-list-item";
+    listItem.classList.toggle("allowed", isAllowed);
     // Repeat the host in the tooltip in case it's too long
     // and overflows in our panel.
     listItem.tooltipText = uri.host;

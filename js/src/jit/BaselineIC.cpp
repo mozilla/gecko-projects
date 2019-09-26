@@ -3350,27 +3350,9 @@ bool DoSpreadCallFallback(JSContext* cx, BaselineFrame* frame,
 
 void ICStubCompilerBase::pushCallArguments(MacroAssembler& masm,
                                            AllocatableGeneralRegisterSet regs,
-                                           Register argcReg, bool isJitCall,
+                                           Register argcReg,
                                            bool isConstructing) {
   MOZ_ASSERT(!regs.has(argcReg));
-
-  // Account for new.target
-  Register count = regs.takeAny();
-
-  masm.move32(argcReg, count);
-
-  // If we are setting up for a jitcall, we have to align the stack taking
-  // into account the args and newTarget. We could also count callee and |this|,
-  // but it's a waste of stack space. Because we want to keep argcReg unchanged,
-  // just account for newTarget initially, and add the other 2 after assuring
-  // allignment.
-  if (isJitCall) {
-    if (isConstructing) {
-      masm.add32(Imm32(1), count);
-    }
-  } else {
-    masm.add32(Imm32(2 + isConstructing), count);
-  }
 
   // argPtr initially points to the last argument.
   Register argPtr = regs.takeAny();
@@ -3378,20 +3360,26 @@ void ICStubCompilerBase::pushCallArguments(MacroAssembler& masm,
 
   // Skip 4 pointers pushed on top of the arguments: the frame descriptor,
   // return address, old frame pointer and stub reg.
-  masm.addPtr(Imm32(STUB_FRAME_SIZE), argPtr);
+  size_t valueOffset = STUB_FRAME_SIZE;
 
-  // Align the stack such that the JitFrameLayout is aligned on the
-  // JitStackAlignment.
-  if (isJitCall) {
-    masm.alignJitStackBasedOnNArgs(count, /*countIncludesThis =*/false);
+  // We have to push |this|, callee, new.target (if constructing) and argc
+  // arguments. Handle the number of Values we know statically first.
 
-    // Account for callee and |this|, skipped earlier
-    masm.add32(Imm32(2), count);
+  size_t numNonArgValues = 2 + isConstructing;
+  for (size_t i = 0; i < numNonArgValues; i++) {
+    masm.pushValue(Address(argPtr, valueOffset));
+    valueOffset += sizeof(Value);
   }
 
-  // Push all values, starting at the last one.
-  Label loop, done;
-  masm.branchTest32(Assembler::Zero, count, count, &done);
+  // If there are no arguments we're done.
+  Label done;
+  masm.branchTest32(Assembler::Zero, argcReg, argcReg, &done);
+
+  // Push argc Values.
+  Label loop;
+  Register count = regs.takeAny();
+  masm.addPtr(Imm32(valueOffset), argPtr);
+  masm.move32(argcReg, count);
   masm.bind(&loop);
   {
     masm.pushValue(Address(argPtr, 0));
@@ -3465,8 +3453,7 @@ bool FallbackICCodeCompiler::emitCall(bool isSpread, bool isConstructing) {
 
   regs.take(R0.scratchReg());  // argc.
 
-  pushCallArguments(masm, regs, R0.scratchReg(), /* isJitCall = */ false,
-                    isConstructing);
+  pushCallArguments(masm, regs, R0.scratchReg(), isConstructing);
 
   masm.push(masm.getStackPointer());
   masm.push(R0.scratchReg());

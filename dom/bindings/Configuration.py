@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from WebIDL import IDLImplementsStatement
+from WebIDL import IDLIncludesStatement
 import os
 from collections import defaultdict
 
@@ -46,30 +46,29 @@ class Configuration(DescriptorProvider):
         self.descriptors = []
         self.interfaces = {}
         self.descriptorsByName = {}
-        self.optimizedOutDescriptorNames = set()
         self.generatedEvents = generatedEvents
         self.maxProtoChainLength = 0
         for thing in parseData:
-            if isinstance(thing, IDLImplementsStatement):
+            if isinstance(thing, IDLIncludesStatement):
                 # Our build system doesn't support dep build involving
-                # addition/removal of "implements" statements that appear in a
+                # addition/removal of "includes" statements that appear in a
                 # different .webidl file than their LHS interface.  Make sure we
                 # don't have any of those.  See similar block below for partial
                 # interfaces!
                 #
                 # But whitelist a RHS that is LegacyQueryInterface,
                 # since people shouldn't be adding any of those.
-                if (thing.implementor.filename() != thing.filename() and
-                    thing.implementee.identifier.name != "LegacyQueryInterface"):
+                if (thing.interface.filename() != thing.filename() and
+                    thing.mixin.identifier.name != "LegacyQueryInterface"):
                     raise TypeError(
                         "The binding build system doesn't really support "
-                        "'implements' statements which don't appear in the "
+                        "'includes' statements which don't appear in the "
                         "file in which the left-hand side of the statement is "
                         "defined.  Don't do this unless your right-hand side "
                         "is LegacyQueryInterface.\n"
                         "%s\n"
                         "%s" %
-                        (thing.location, thing.implementor.location))
+                        (thing.location, thing.interface.location))
 
             assert not thing.isType()
 
@@ -105,17 +104,10 @@ class Configuration(DescriptorProvider):
                         "%s" %
                         (webRoots, iface.location))
             self.interfaces[iface.identifier.name] = iface
-            if iface.identifier.name not in config:
-                # Completely skip consequential interfaces with no descriptor
-                # if they have no interface object because chances are we
-                # don't need to do anything interesting with them.
-                if iface.isConsequential() and not iface.hasInterfaceObject():
-                    self.optimizedOutDescriptorNames.add(iface.identifier.name)
-                    continue
-                entry = {}
-            else:
-                entry = config[iface.identifier.name]
+
+            entry = config.get(iface.identifier.name, {})
             assert not isinstance(entry, list)
+
             desc = Descriptor(self, iface, entry)
             self.descriptors.append(desc)
             # Setting up descriptorsByName while iterating through interfaces
@@ -270,12 +262,6 @@ class Configuration(DescriptorProvider):
         if d:
             return d
 
-        if interfaceName in self.optimizedOutDescriptorNames:
-            raise NoSuchDescriptorError(
-                "No descriptor for '%s', which is a mixin ([NoInterfaceObject] "
-                "and a consequential interface) without an explicit "
-                "Bindings.conf annotation." % interfaceName)
-
         raise NoSuchDescriptorError("For " + interfaceName + " found no matches")
 
 
@@ -286,8 +272,6 @@ class NoSuchDescriptorError(TypeError):
 
 def methodReturnsJSObject(method):
     assert method.isMethod()
-    if method.returnsPromise():
-        return True
 
     for signature in method.signatures():
         returnType = signature[0]
@@ -391,10 +375,6 @@ class Descriptor(DescriptorProvider):
         # them as having a concrete descendant.
         concreteDefault = (not self.interface.isExternal() and
                            not self.interface.isCallback() and
-                           # Exclude interfaces that are used as the RHS of
-                           # "implements", because those would typically not be
-                           # concrete.
-                           not self.interface.isConsequential() and
                            not self.interface.isNamespace() and
                            # We're going to assume that leaf interfaces are
                            # concrete; otherwise what's the point?  Also
@@ -441,7 +421,6 @@ class Descriptor(DescriptorProvider):
 
         if self.concrete:
             self.proxy = False
-            self.hasCrossOriginMembers = False
             iface = self.interface
             for m in iface.members:
                 # Don't worry about inheriting legacycallers either: in
@@ -456,16 +435,8 @@ class Descriptor(DescriptorProvider):
                     addOperation('LegacyCaller', m)
             while iface:
                 for m in iface.members:
-                    if (m.isAttr() and
-                        (m.getExtendedAttribute("CrossOriginReadable") or
-                         m.getExtendedAttribute("CrossOriginWritable"))):
-                        self.hasCrossOriginMembers = True
-
                     if not m.isMethod():
                         continue
-
-                    if m.getExtendedAttribute("CrossOriginCallable"):
-                        self.hasCrossOriginMembers = True
 
                     def addIndexedOrNamedOperation(operation, m):
                         if m.isIndexed():
@@ -665,9 +636,11 @@ class Descriptor(DescriptorProvider):
         if member.isMethod():
             # JSObject-returning [NewObject] methods must be fallible,
             # since they have to (fallibly) allocate the new JSObject.
-            if (member.getExtendedAttribute("NewObject") and
-                methodReturnsJSObject(member)):
-                throws = True
+            if member.getExtendedAttribute("NewObject"):
+                if member.returnsPromise():
+                    throws = True
+                elif methodReturnsJSObject(member):
+                    canOOM = True
             attrs = self.extendedAttributes['all'].get(name, [])
             maybeAppendInfallibleToAttrs(attrs, throws)
             maybeAppendCanOOMToAttrs(attrs, canOOM)
@@ -725,7 +698,7 @@ class Descriptor(DescriptorProvider):
     def isMaybeCrossOriginObject(self):
         # If we're isGlobal and have cross-origin members, we're a Window, and
         # that's not a cross-origin object.  The WindowProxy is.
-        return self.concrete and self.hasCrossOriginMembers and not self.isGlobal()
+        return self.concrete and self.interface.hasCrossOriginMembers and not self.isGlobal()
 
     def needsHeaderInclude(self):
         """

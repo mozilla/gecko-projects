@@ -286,7 +286,7 @@ class UrlbarController {
       let { queryContext } = this._lastQueryContextWrapper;
       let handled = this.view.oneOffSearchButtons.handleKeyPress(
         event,
-        this.view.visibleRowCount,
+        this.view.visibleElementCount,
         this.view.allowEmptySelection,
         queryContext.searchString
       );
@@ -463,7 +463,7 @@ class UrlbarController {
    *   The selected result.
    */
   recordSelectedResult(event, result) {
-    let resultIndex = result ? result.uiIndex : -1;
+    let resultIndex = result ? result.rowIndex : -1;
     let selectedResult = -1;
     if (resultIndex >= 0) {
       // Except for the history popup, the urlbar always has a selection.  The
@@ -782,25 +782,29 @@ class TelemetryEvent {
   }
 
   /**
-   * Extracts a type from a result, to be used in the telemetry event.
-   * @param {UrlbarResult} result The result to analyze.
+   * Extracts a type from an element, to be used in the telemetry event.
+   * @param {Element} element The element to analyze.
    * @returns {string} a string type for the telemetry event.
    */
-  typeFromResult(result) {
-    if (result) {
-      switch (result.type) {
+  typeFromElement(element) {
+    if (!element) {
+      return "none";
+    }
+    let row = element.closest(".urlbarView-row");
+    if (row.result) {
+      switch (row.result.type) {
         case UrlbarUtils.RESULT_TYPE.TAB_SWITCH:
           return "switchtab";
         case UrlbarUtils.RESULT_TYPE.SEARCH:
-          return result.payload.suggestion ? "searchsuggestion" : "search";
+          return row.result.payload.suggestion ? "searchsuggestion" : "search";
         case UrlbarUtils.RESULT_TYPE.URL:
-          if (result.autofill) {
+          if (row.result.autofill) {
             return "autofill";
           }
-          if (result.heuristic) {
+          if (row.result.heuristic) {
             return "visit";
           }
-          return result.source == UrlbarUtils.RESULT_SOURCE.BOOKMARKS
+          return row.result.source == UrlbarUtils.RESULT_SOURCE.BOOKMARKS
             ? "bookmark"
             : "history";
         case UrlbarUtils.RESULT_TYPE.KEYWORD:
@@ -810,6 +814,9 @@ class TelemetryEvent {
         case UrlbarUtils.RESULT_TYPE.REMOTE_TAB:
           return "remotetab";
         case UrlbarUtils.RESULT_TYPE.TIP:
+          if (element.classList.contains("urlbarView-tip-help")) {
+            return "tiphelp";
+          }
           return "tip";
       }
     }

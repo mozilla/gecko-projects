@@ -668,6 +668,7 @@ pref("gfx.webrender.debug.slow-frame-indicator", false);
 pref("gfx.webrender.debug.picture-caching", false);
 pref("gfx.webrender.debug.primitives", false);
 pref("gfx.webrender.debug.small-screen", false);
+pref("gfx.webrender.debug.obscure-images", false);
 
 pref("accessibility.warn_on_browsewithcaret", true);
 
@@ -4574,8 +4575,6 @@ pref("dom.maxHardwareConcurrency", 16);
   pref("osfile.reset_worker_delay", 30000);
 #endif
 
-pref("media.block-autoplay-until-in-foreground", true);
-
 // TODO: Bug 1324406: Treat 'data:' documents as unique, opaque origins
 // If true, data: URIs will be treated as unique opaque origins, hence will use
 // a NullPrincipal as the security context.
@@ -4662,7 +4661,9 @@ pref("dom.events.testing.asyncClipboard", false);
 // Disable moz* APIs in DataTransfer
 pref("dom.datatransfer.mozAtAPIs", false);
 
-pref("fission.rebuild_frameloaders_on_remoteness_change", true);
+// Bug 1583614: This is on by default for Fission windows, but still
+// causes enough issues to prevent us from turning it on everywhere.
+pref("fission.rebuild_frameloaders_on_remoteness_change", false);
 
 // Move session history to parent process (child processes access it over IPC).
 pref("fission.sessionHistoryInParent", true);

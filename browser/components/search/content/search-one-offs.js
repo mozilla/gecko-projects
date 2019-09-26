@@ -359,14 +359,14 @@ class SearchOneOffs {
     if (!this.compact) {
       return this.popup.selectedIndex;
     }
-    return this._view.selectedRowIndex;
+    return this._view.selectedElementIndex;
   }
 
   set selectedAutocompleteIndex(val) {
     if (!this.compact) {
       return (this.popup.selectedIndex = val);
     }
-    return (this._view.selectedRowIndex = val);
+    return (this._view.selectedElementIndex = val);
   }
 
   get compact() {
@@ -1214,7 +1214,10 @@ class SearchOneOffs {
     }
     this.contextMenuPopup
       .querySelector(".search-one-offs-context-set-default")
-      .setAttribute("disabled", target.engine == Services.search.defaultEngine);
+      .setAttribute(
+        "disabled",
+        target.engine == Services.search.defaultEngine.wrappedJSObject
+      );
 
     this.contextMenuPopup.openPopupAtScreen(event.screenX, event.screenY, true);
     event.preventDefault();

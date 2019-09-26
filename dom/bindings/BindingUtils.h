@@ -25,6 +25,7 @@
 #include "mozilla/dom/NonRefcountedDOMObject.h"
 #include "mozilla/dom/Nullable.h"
 #include "mozilla/dom/PrototypeList.h"
+#include "mozilla/dom/RemoteObjectProxy.h"
 #include "mozilla/dom/RootedDictionary.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/SegmentedVector.h"
@@ -71,12 +72,6 @@ inline nsresult UnwrapArg(JSContext* cx, JS::Handle<JSObject*> src,
 
 nsresult UnwrapWindowProxyArg(JSContext* cx, JS::Handle<JSObject*> src,
                               WindowProxyHolder& ppArg);
-
-bool ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
-                      bool aSecurityError, const char* aInterfaceName);
-
-bool ThrowInvalidThis(JSContext* aCx, const JS::CallArgs& aArgs,
-                      bool aSecurityError, prototypes::ID aProtoId);
 
 // Returns true if the JSClass is used for DOM objects.
 inline bool IsDOMClass(const JSClass* clasp) {
@@ -227,6 +222,12 @@ MOZ_ALWAYS_INLINE nsresult UnwrapObjectInternal(V& obj, U& value,
 
   /* Maybe we have a security wrapper or outer window? */
   if (!mayBeWrapper || !js::IsWrapper(obj)) {
+    // For non-cross-origin-accessible methods and properties, remote object
+    // proxies should behave the same as opaque wrappers.
+    if (IsRemoteObjectProxy(obj)) {
+      return NS_ERROR_XPC_SECURITY_MANAGER_VETO;
+    }
+
     /* Not a DOM object, not a wrapper, just bail */
     return NS_ERROR_XPC_BAD_CONVERT_JS;
   }
@@ -2968,6 +2969,15 @@ struct LenientThisPolicy;
 
 // A this-extraction policy for cross-origin getters/setters/methods.
 struct CrossOriginThisPolicy;
+
+// A this-extraction policy for getters/setters/methods that should
+// not be allowed to be called cross-origin but expect objects that
+// _can_ be cross-origin.
+struct MaybeCrossOriginObjectThisPolicy;
+
+// A this-extraction policy which is just like
+// MaybeCrossOriginObjectThisPolicy but has lenient-this behavior.
+struct MaybeCrossOriginObjectLenientThisPolicy;
 
 // An exception-reporting policy for normal getters/setters/methods.
 struct ThrowExceptions;

@@ -120,6 +120,7 @@
 #include "mozilla/dom/CDATASection.h"
 #include "mozilla/dom/ProcessingInstruction.h"
 #include "mozilla/dom/PostMessageEvent.h"
+#include "mozilla/ipc/IdleSchedulerChild.h"
 #include "nsDOMString.h"
 #include "nsNodeUtils.h"
 #include "nsLayoutUtils.h"  // for GetFrameForPoint
@@ -3742,11 +3743,13 @@ DocumentL10n* Document::GetL10n() { return mDocumentL10n; }
 bool Document::DocumentSupportsL10n(JSContext* aCx, JSObject* aObject) {
   nsCOMPtr<nsIPrincipal> callerPrincipal =
       nsContentUtils::SubjectPrincipal(aCx);
-  return nsContentUtils::PrincipalAllowsL10n(callerPrincipal);
+  nsGlobalWindowInner* win = xpc::WindowOrNull(aObject);
+  return nsContentUtils::PrincipalAllowsL10n(
+      callerPrincipal, win ? win->GetDocumentURI() : nullptr);
 }
 
 void Document::LocalizationLinkAdded(Element* aLinkElement) {
-  if (!nsContentUtils::PrincipalAllowsL10n(NodePrincipal())) {
+  if (!nsContentUtils::PrincipalAllowsL10n(NodePrincipal(), GetDocumentURI())) {
     return;
   }
 
@@ -3784,7 +3787,7 @@ void Document::LocalizationLinkAdded(Element* aLinkElement) {
 }
 
 void Document::LocalizationLinkRemoved(Element* aLinkElement) {
-  if (!nsContentUtils::PrincipalAllowsL10n(NodePrincipal())) {
+  if (!nsContentUtils::PrincipalAllowsL10n(NodePrincipal(), GetDocumentURI())) {
     return;
   }
 
@@ -16138,6 +16141,11 @@ void Document::AddToplevelLoadingDocument(Document* aDoc) {
 
   if (!sLoadingForegroundTopLevelContentDocument) {
     sLoadingForegroundTopLevelContentDocument = new AutoTArray<Document*, 8>();
+    mozilla::ipc::IdleSchedulerChild* idleScheduler =
+        mozilla::ipc::IdleSchedulerChild::GetMainThreadIdleScheduler();
+    if (idleScheduler) {
+      idleScheduler->SendRunningPrioritizedOperation();
+    }
   }
   if (!sLoadingForegroundTopLevelContentDocument->Contains(aDoc)) {
     sLoadingForegroundTopLevelContentDocument->AppendElement(aDoc);
@@ -16151,6 +16159,12 @@ void Document::RemoveToplevelLoadingDocument(Document* aDoc) {
     if (sLoadingForegroundTopLevelContentDocument->IsEmpty()) {
       delete sLoadingForegroundTopLevelContentDocument;
       sLoadingForegroundTopLevelContentDocument = nullptr;
+
+      mozilla::ipc::IdleSchedulerChild* idleScheduler =
+          mozilla::ipc::IdleSchedulerChild::GetMainThreadIdleScheduler();
+      if (idleScheduler) {
+        idleScheduler->SendPrioritizedOperationDone();
+      }
     }
   }
 }
@@ -16185,6 +16199,12 @@ bool Document::HasRecentlyStartedForegroundLoads() {
   // Didn't find any loading foreground documents, just clear the array.
   delete sLoadingForegroundTopLevelContentDocument;
   sLoadingForegroundTopLevelContentDocument = nullptr;
+
+  mozilla::ipc::IdleSchedulerChild* idleScheduler =
+      mozilla::ipc::IdleSchedulerChild::GetMainThreadIdleScheduler();
+  if (idleScheduler) {
+    idleScheduler->SendPrioritizedOperationDone();
+  }
   return false;
 }
 

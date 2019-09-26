@@ -4832,7 +4832,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             ''',
             resolvetype=resolvetype)
 
-        args = [p.var() for p in md.params] + [resolve, reject]
+        args = [ExprMove(p.var()) for p in md.params] + [resolve, reject]
         stmt = StmtCode(
             '''
             RefPtr<${promise}> promise__ = new ${promise}(__func__);
