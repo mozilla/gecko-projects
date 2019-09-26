@@ -129,6 +129,7 @@ BOOL PathGetSiblingFilePath(LPWSTR destinationBuffer, LPCWSTR siblingFilePath,
         CloseHandle(handle);                        \
       }                                             \
       if (NS_tremove(path) && errno != ENOENT) {    \
+        LogFinish();                                \
         return retCode;                             \
       }                                             \
     }
@@ -282,12 +283,6 @@ static bool sUsingService = false;
 static NS_tchar gCallbackRelPath[MAXPATHLEN];
 static NS_tchar gCallbackBackupPath[MAXPATHLEN];
 static NS_tchar gDeleteDirPath[MAXPATHLEN];
-
-// Whether to copy the update.log and update.status file to the update patch
-// directory from a secure directory.
-static bool sCopyOutputFiles = false;
-// Whether to write the update.log and update.status file to a secure directory.
-static bool sUseSecureOutputPath = false;
 #endif
 
 static const NS_tchar kWhitespace[] = NS_T(" \t");
@@ -347,71 +342,6 @@ static bool EnvHasValue(const char* name) {
   return (val && *val);
 }
 #endif
-
-#ifdef XP_WIN
-/**
- * Obtains the FILETIME for the secure update status file.
- *
- * @param  fileTime
- *         A FILETIME structure to store the result.
- * @return true if successful
- */
-bool GetSecureStatusFileCreationTime(FILETIME fileTime) {
-  NS_tchar statusFilePath[MAX_PATH + 1] = {L'\0'};
-  if (!GetSecureOutputFilePath(gPatchDirPath, L".status", statusFilePath)) {
-    return false;
-  }
-
-  HANDLE hStatusFile =
-      CreateFileW(statusFilePath, GENERIC_READ, 0, nullptr, OPEN_EXISTING,
-                  FILE_ATTRIBUTE_NORMAL, nullptr);
-  if (hStatusFile == INVALID_HANDLE_VALUE) {
-    return false;
-  }
-
-  if (!GetFileTime(hStatusFile, &fileTime, nullptr, nullptr)) {
-    CloseHandle(hStatusFile);
-    return false;
-  }
-
-  CloseHandle(hStatusFile);
-  return true;
-}
-#endif
-
-/**
- * Calls LogFinish for the update log. On Windows, the unelevated updater copies
- * the update status file and the update log file that were written by the
- * elevated updater from the secure directory to the update patch directory.
- *
- * NOTE: All calls to WriteStatusFile MUST happen before calling output_finish
- *       because this function copies the update status file for the elevated
- *       updater and writing the status file after calling output_finish will
- *       overwrite it.
- */
-static void output_finish() {
-  LogFinish();
-#ifdef XP_WIN
-  if (sCopyOutputFiles) {
-    NS_tchar srcStatusPath[MAXPATHLEN + 1] = {NS_T('\0')};
-    if (GetSecureOutputFilePath(gPatchDirPath, L".status", srcStatusPath)) {
-      NS_tchar dstStatusPath[MAXPATHLEN + 1] = {NS_T('\0')};
-      NS_tsnprintf(dstStatusPath,
-                   sizeof(dstStatusPath) / sizeof(dstStatusPath[0]),
-                   NS_T("%s\\update.status"), gPatchDirPath);
-      CopyFileW(srcStatusPath, dstStatusPath, false);
-    }
-
-    NS_tchar srcLogPath[MAXPATHLEN + 1] = {NS_T('\0')};
-    if (GetSecureOutputFilePath(gPatchDirPath, L".log", srcLogPath)) {
-      NS_tchar dstLogPath[MAXPATHLEN + 1] = {NS_T('\0')};
-      NS_tsnprintf(dstLogPath, sizeof(dstLogPath) / sizeof(dstLogPath[0]),
-                   NS_T("%s\\update.log"), gPatchDirPath);
-      CopyFileW(srcLogPath, dstLogPath, false);
-    }
-  }
-#endif
-}
 
 /**
  * Coverts a relative update path to a full path.
@@ -2112,30 +2042,27 @@ static void LaunchCallbackApp(const NS_tchar* workingDir, int argc,
 }
 
 static bool WriteToFile(const NS_tchar* aFilename, const char* aStatus) {
-  NS_tchar filePath[MAXPATHLEN] = {NS_T('\0')};
+  NS_tchar filename[MAXPATHLEN] = {NS_T('\0')};
 #if defined(XP_WIN)
-  if (sUseSecureOutputPath) {
-    if (!GetSecureOutputFilePath(gPatchDirPath, L".status", filePath)) {
-      return false;
-    }
-  } else {
-    NS_tsnprintf(filePath, sizeof(filePath) / sizeof(filePath[0]),
-                 NS_T("%s\\%s"), gPatchDirPath, aFilename);
+  // The temp file is not removed on failure since there is client code that
+  // will remove it.
+  if (!GetUUIDTempFilePath(gPatchDirPath, L"sta", filename)) {
+    return false;
   }
 #else
-  NS_tsnprintf(filePath, sizeof(filePath) / sizeof(filePath[0]), NS_T("%s/%s"),
+  NS_tsnprintf(filename, sizeof(filename) / sizeof(filename[0]), NS_T("%s/%s"),
                gPatchDirPath, aFilename);
 #endif
 
   // Make sure that the directory for the update status file exists
-  if (ensure_parent_dir(filePath)) {
+  if (ensure_parent_dir(filename)) {
     return false;
   }
 
   // This is scoped to make the AutoFile close the file so it is possible to
   // move the temp file to the update.status file on Windows.
   {
-    AutoFile file(NS_tfopen(filePath, NS_T("wb+")));
+    AutoFile file(NS_tfopen(filename, NS_T("wb+")));
     if (file == nullptr) {
       return false;
     }
@@ -2145,37 +2072,22 @@ static bool WriteToFile(const NS_tchar* aFilename, const char* aStatus) {
     }
   }
 
+#if defined(XP_WIN)
+  NS_tchar dstfilename[MAXPATHLEN] = {NS_T('\0')};
+  NS_tsnprintf(dstfilename, sizeof(dstfilename) / sizeof(dstfilename[0]),
+               NS_T("%s\\%s"), gPatchDirPath, aFilename);
+  if (MoveFileExW(filename, dstfilename, MOVEFILE_REPLACE_EXISTING) == 0) {
+    return false;
+  }
+#endif
+
   return true;
 }
 
-/**
- * Writes a string to the update.status file.
- *
- * NOTE: All calls to WriteStatusFile MUST happen before calling output_finish
- *       because the output_finish function copies the update status file for
- *       the elevated updater and writing the status file after calling
- *       output_finish will overwrite it.
- *
- * @param  aStatus
- *         The string to write to the update.status file.
- * @return true on success.
- */
 static bool WriteStatusFile(const char* aStatus) {
   return WriteToFile(NS_T("update.status"), aStatus);
 }
 
-/**
- * Writes a string to the update.status file based on the status param.
- *
- * NOTE: All calls to WriteStatusFile MUST happen before calling output_finish
- *       because the output_finish function copies the update status file for
- *       the elevated updater and writing the status file after calling
- *       output_finish will overwrite it.
- *
- * @param  status
- *         A status code used to determine what string to write to the
- *         update.status file (see code).
- */
 static void WriteStatusFile(int status) {
   const char* text;
 
@@ -2227,21 +2139,20 @@ static bool IsUpdateStatusPendingService() {
 
 #ifdef XP_WIN
 /*
- * Reads the secure update status file and sets isSucceeded to true if the
- * status is set to succeeded.
+ * Read the update.status file and sets isSuccess to true if
+ * the status is set to succeeded.
  *
  * @param  isSucceeded Out parameter for specifying if the status
  *         is set to succeeded or not.
  * @return true if the information was retrieved and it is succeeded.
  */
-static bool IsSecureUpdateStatusSucceeded(bool& isSucceeded) {
+static bool IsUpdateStatusSucceeded(bool& isSucceeded) {
   isSucceeded = false;
-  NS_tchar statusFilePath[MAX_PATH + 1] = {L'\0'};
-  if (!GetSecureOutputFilePath(gPatchDirPath, L".status", statusFilePath)) {
-    return FALSE;
-  }
+  NS_tchar filename[MAXPATHLEN];
+  NS_tsnprintf(filename, sizeof(filename) / sizeof(filename[0]),
+               NS_T("%s/update.status"), gPatchDirPath);
 
-  AutoFile file(NS_tfopen(statusFilePath, NS_T("rb")));
+  AutoFile file(NS_tfopen(filename, NS_T("rb")));
   if (file == nullptr) {
     return false;
   }
@@ -2940,28 +2851,7 @@ int NS_main(int argc, NS_tchar** argv) {
   }
 #endif
 
-  NS_tchar logFilePath[MAXPATHLEN + 1] = {L'\0'};
-#ifdef XP_WIN
-  NS_tchar elevatedLockFilePath[MAXPATHLEN] = {NS_T('\0')};
-  NS_tsnprintf(elevatedLockFilePath,
-               sizeof(elevatedLockFilePath) / sizeof(elevatedLockFilePath[0]),
-               NS_T("%s\\update_elevated.lock"), gPatchDirPath);
-  sUseSecureOutputPath =
-      sUsingService || (NS_tremove(elevatedLockFilePath) && errno != ENOENT);
-  if (sUseSecureOutputPath) {
-    // Remove the secure output files so the creation timestamp will change.
-    RemoveSecureOutputFiles(gPatchDirPath);
-
-    (void)GetSecureOutputFilePath(gPatchDirPath, L".log", logFilePath);
-  } else {
-    NS_tsnprintf(logFilePath, sizeof(logFilePath) / sizeof(logFilePath[0]),
-                 NS_T("%s\\update.log"), gPatchDirPath);
-  }
-#else
-  NS_tsnprintf(logFilePath, sizeof(logFilePath) / sizeof(logFilePath[0]),
-               NS_T("%s/update.log"), gPatchDirPath);
-#endif
-  LogInit(logFilePath);
+  LogInit(gPatchDirPath, NS_T("update.log"));
 
   if (!WriteStatusFile("applying")) {
     LOG(("failed setting status to 'applying'"));
@@ -2971,7 +2861,6 @@ int NS_main(int argc, NS_tchar** argv) {
       CleanupElevatedMacUpdate(true);
     }
 #endif
-    output_finish();
     return 1;
   }
 
@@ -2994,7 +2883,7 @@ int NS_main(int argc, NS_tchar** argv) {
       LOG(
           ("Installation directory and working directory must be the same "
            "for non-staged updates. Exiting."));
-      output_finish();
+      LogFinish();
       return 1;
     }
 
@@ -3005,7 +2894,7 @@ int NS_main(int argc, NS_tchar** argv) {
     if (!PathRemoveFileSpecW(workingDirParent)) {
       WriteStatusFile(REMOVE_FILE_SPEC_ERROR);
       LOG(("Error calling PathRemoveFileSpecW: %d", GetLastError()));
-      output_finish();
+      LogFinish();
       return 1;
     }
 
@@ -3014,7 +2903,7 @@ int NS_main(int argc, NS_tchar** argv) {
       LOG(
           ("The apply-to directory must be the same as or "
            "a child of the installation directory! Exiting."));
-      output_finish();
+      LogFinish();
       return 1;
     }
   }
@@ -3067,6 +2956,7 @@ int NS_main(int argc, NS_tchar** argv) {
   // when write access is denied to the installation directory and the update
   // isn't being staged.
   HANDLE updateLockFileHandle = INVALID_HANDLE_VALUE;
+  NS_tchar elevatedLockFilePath[MAXPATHLEN] = {NS_T('\0')};
   if (!sUsingService &&
       (argc > callbackIndex || sStagedUpdate || sReplaceRequest)) {
     NS_tchar updateLockFilePath[MAXPATHLEN];
@@ -3108,13 +2998,16 @@ int NS_main(int argc, NS_tchar** argv) {
         WriteStatusFile(DELETE_ERROR_STAGING_LOCK_FILE);
       }
       LOG(("Update already in progress! Exiting"));
-      output_finish();
       return 1;
     }
 
     updateLockFileHandle =
         CreateFileW(updateLockFilePath, GENERIC_READ | GENERIC_WRITE, 0,
                     nullptr, OPEN_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+
+    NS_tsnprintf(elevatedLockFilePath,
+                 sizeof(elevatedLockFilePath) / sizeof(elevatedLockFilePath[0]),
+                 NS_T("%s/update_elevated.lock"), gPatchDirPath);
 
     // Even if a file has no sharing access, you can still get its attributes
     bool startedFromUnelevatedUpdater =
@@ -3136,8 +3029,7 @@ int NS_main(int argc, NS_tchar** argv) {
         (useService && testOnlyFallbackKeyExists && noServiceFallback)) {
       HANDLE elevatedFileHandle;
       if (NS_tremove(elevatedLockFilePath) && errno != ENOENT) {
-        LOG(("Unable to create elevated lock file! Exiting"));
-        output_finish();
+        fprintf(stderr, "Unable to create elevated lock file! Exiting\n");
         return 1;
       }
 
@@ -3146,14 +3038,12 @@ int NS_main(int argc, NS_tchar** argv) {
                       nullptr, OPEN_ALWAYS, FILE_FLAG_DELETE_ON_CLOSE, nullptr);
       if (elevatedFileHandle == INVALID_HANDLE_VALUE) {
         LOG(("Unable to create elevated lock file! Exiting"));
-        output_finish();
         return 1;
       }
 
       auto cmdLine = mozilla::MakeCommandLine(argc - 1, argv + 1);
       if (!cmdLine) {
         CloseHandle(elevatedFileHandle);
-        output_finish();
         return 1;
       }
 
@@ -3212,13 +3102,6 @@ int NS_main(int argc, NS_tchar** argv) {
       // If we still want to use the service try to launch the service
       // comamnd for the update.
       if (useService) {
-        // Get the secure status file's timestamp before trying to update so it
-        // is possible to determine if the updater or the maintenance service
-        // has created a new one.
-        FILETIME ftCreateBefore;
-        bool checkStatusFileTime =
-            GetSecureStatusFileCreationTime(ftCreateBefore);
-
         // Write a catchall service failure status in case it fails without
         // changing the status.
         WriteStatusFile(SERVICE_UPDATE_STATUS_UNCHANGED);
@@ -3256,19 +3139,6 @@ int NS_main(int argc, NS_tchar** argv) {
             // something seriously wrong.
             lastFallbackError = FALLBACKKEY_SERVICE_NO_STOP_ERROR;
             useService = false;
-          } else {
-            // Copy the secure output files if the secure status file's
-            // timestamp has changed.
-            sCopyOutputFiles = true;
-            FILETIME ftCreateAfter;
-            if (checkStatusFileTime &&
-                GetSecureStatusFileCreationTime(ftCreateAfter) &&
-                CompareFileTime(&ftCreateBefore, &ftCreateAfter) == 0) {
-              LOG(
-                  ("The secure update status file's timestamp hasn't changed "
-                   "after launching the updater using the service"));
-              sCopyOutputFiles = false;
-            }
           }
         } else {
           lastFallbackError = FALLBACKKEY_LAUNCH_ERROR;
@@ -3286,7 +3156,6 @@ int NS_main(int argc, NS_tchar** argv) {
         LOG(
             ("Non-critical update staging error! Falling back to non-staged "
              "updates and exiting"));
-        output_finish();
         return 0;
       }
 
@@ -3299,7 +3168,7 @@ int NS_main(int argc, NS_tchar** argv) {
       // as the PostUpdate step runs when performing the replacing in that case.
       if (useService && !sStagedUpdate) {
         bool updateStatusSucceeded = false;
-        if (IsSecureUpdateStatusSucceeded(updateStatusSucceeded) &&
+        if (IsUpdateStatusSucceeded(updateStatusSucceeded) &&
             updateStatusSucceeded) {
           if (!LaunchWinPostProcess(gInstallDirPath, gPatchDirPath)) {
             fprintf(stderr,
@@ -3317,12 +3186,6 @@ int NS_main(int argc, NS_tchar** argv) {
       // using the service is because we are testing.
       if (!useService && !noServiceFallback &&
           updateLockFileHandle == INVALID_HANDLE_VALUE) {
-        // Get the secure status file's timestamp before trying to update so it
-        // is possible to determine if the updater has created a new one.
-        FILETIME ftCreateBefore;
-        bool checkStatusFileTime =
-            GetSecureStatusFileCreationTime(ftCreateBefore);
-
         SHELLEXECUTEINFO sinfo;
         memset(&sinfo, 0, sizeof(SHELLEXECUTEINFO));
         sinfo.cbSize = sizeof(SHELLEXECUTEINFO);
@@ -3339,24 +3202,7 @@ int NS_main(int argc, NS_tchar** argv) {
         if (result) {
           WaitForSingleObject(sinfo.hProcess, INFINITE);
           CloseHandle(sinfo.hProcess);
-
-          // Copy the secure output files if the secure status file's timestamp
-          // has changed.
-          sCopyOutputFiles = true;
-          FILETIME ftCreateAfter;
-          if (checkStatusFileTime &&
-              GetSecureStatusFileCreationTime(ftCreateAfter) &&
-              CompareFileTime(&ftCreateBefore, &ftCreateAfter) == 0) {
-            LOG(
-                ("The secure update status file's timestamp hasn't changed "
-                 "after launching the updater using runas"));
-            sCopyOutputFiles = false;
-          }
         } else {
-          // Don't copy the secure output files if the elevation request was
-          // canceled since the status file written below is in the patch
-          // directory.
-          sCopyOutputFiles = false;
           WriteStatusFile(ELEVATION_CANCELED);
         }
       }
@@ -3373,7 +3219,6 @@ int NS_main(int argc, NS_tchar** argv) {
         // We didn't use the service and we did run the elevated updater.exe.
         // The elevated updater.exe is responsible for writing out the
         // update.status file.
-        output_finish();
         return 0;
       } else if (useService) {
         // The service command was launched. The service is responsible for
@@ -3381,7 +3226,6 @@ int NS_main(int argc, NS_tchar** argv) {
         if (updateLockFileHandle != INVALID_HANDLE_VALUE) {
           CloseHandle(updateLockFileHandle);
         }
-        output_finish();
         return 0;
       } else {
         // Otherwise the service command was not launched at all.
@@ -3391,7 +3235,6 @@ int NS_main(int argc, NS_tchar** argv) {
         // We only currently use this env var from XPCShell tests.
         CloseHandle(updateLockFileHandle);
         WriteStatusFile(lastFallbackError);
-        output_finish();
         return 0;
       }
     }
@@ -3413,7 +3256,6 @@ int NS_main(int argc, NS_tchar** argv) {
       // WRITE_ERROR is one of the cases where the staging failure falls back to
       // applying the update on startup.
       WriteStatusFile(WRITE_ERROR);
-      output_finish();
       return 0;
     }
 #endif
@@ -3431,7 +3273,6 @@ int NS_main(int argc, NS_tchar** argv) {
         CleanupElevatedMacUpdate(true);
       }
 #endif
-      output_finish();
       return 1;
     }
   }
@@ -3441,9 +3282,9 @@ int NS_main(int argc, NS_tchar** argv) {
   if (!GetLongPathNameW(
           gWorkingDirPath, applyDirLongPath,
           sizeof(applyDirLongPath) / sizeof(applyDirLongPath[0]))) {
-    WriteStatusFile(WRITE_ERROR_APPLY_DIR_PATH);
     LOG(("NS_main: unable to find apply to dir: " LOG_S, gWorkingDirPath));
-    output_finish();
+    LogFinish();
+    WriteStatusFile(WRITE_ERROR_APPLY_DIR_PATH);
     EXIT_WHEN_ELEVATED(elevatedLockFilePath, updateLockFileHandle, 1);
     if (argc > callbackIndex) {
       LaunchCallbackApp(argv[5], argc - callbackIndex, argv + callbackIndex,
@@ -3495,9 +3336,9 @@ int NS_main(int argc, NS_tchar** argv) {
     if (!GetLongPathNameW(
             targetPath, callbackLongPath,
             sizeof(callbackLongPath) / sizeof(callbackLongPath[0]))) {
-      WriteStatusFile(WRITE_ERROR_CALLBACK_PATH);
       LOG(("NS_main: unable to find callback file: " LOG_S, targetPath));
-      output_finish();
+      LogFinish();
+      WriteStatusFile(WRITE_ERROR_CALLBACK_PATH);
       EXIT_WHEN_ELEVATED(elevatedLockFilePath, updateLockFileHandle, 1);
       if (argc > callbackIndex) {
         LaunchCallbackApp(argv[5], argc - callbackIndex, argv + callbackIndex,
@@ -3541,9 +3382,9 @@ int NS_main(int argc, NS_tchar** argv) {
       if (callbackBackupPathLen < 0 ||
           callbackBackupPathLen >=
               static_cast<int>(callbackBackupPathBufSize)) {
-        WriteStatusFile(USAGE_ERROR);
         LOG(("NS_main: callback backup path truncated"));
-        output_finish();
+        LogFinish();
+        WriteStatusFile(USAGE_ERROR);
 
         // Don't attempt to launch the callback when the callback path is
         // longer than expected.
@@ -3554,15 +3395,16 @@ int NS_main(int argc, NS_tchar** argv) {
       // Make a copy of the callback executable so it can be read when patching.
       if (!CopyFileW(argv[callbackIndex], gCallbackBackupPath, false)) {
         DWORD copyFileError = GetLastError();
+        LOG(("NS_main: failed to copy callback file " LOG_S
+             " into place at " LOG_S,
+             argv[callbackIndex], gCallbackBackupPath));
+        LogFinish();
         if (copyFileError == ERROR_ACCESS_DENIED) {
           WriteStatusFile(WRITE_ERROR_ACCESS_DENIED);
         } else {
           WriteStatusFile(WRITE_ERROR_CALLBACK_APP);
         }
-        LOG(("NS_main: failed to copy callback file " LOG_S
-             " into place at " LOG_S,
-             argv[callbackIndex], gCallbackBackupPath));
-        output_finish();
+
         EXIT_WHEN_ELEVATED(elevatedLockFilePath, updateLockFileHandle, 1);
         LaunchCallbackApp(argv[callbackIndex], argc - callbackIndex,
                           argv + callbackIndex, sUsingService);
@@ -3605,6 +3447,7 @@ int NS_main(int argc, NS_tchar** argv) {
               ("NS_main: callback app file in use, failed to exclusively open "
                "executable file: " LOG_S,
                argv[callbackIndex]));
+          LogFinish();
           if (lastWriteError == ERROR_ACCESS_DENIED) {
             WriteStatusFile(WRITE_ERROR_ACCESS_DENIED);
           } else {
@@ -3617,7 +3460,6 @@ int NS_main(int argc, NS_tchar** argv) {
                  "path: " LOG_S,
                  gCallbackBackupPath));
           }
-          output_finish();
           EXIT_WHEN_ELEVATED(elevatedLockFilePath, updateLockFileHandle, 1);
           LaunchCallbackApp(argv[5], argc - callbackIndex, argv + callbackIndex,
                             sUsingService);
@@ -3720,7 +3562,7 @@ int NS_main(int argc, NS_tchar** argv) {
   }
 #endif /* XP_MACOSX */
 
-  output_finish();
+  LogFinish();
 
   int retVal = LaunchCallbackAndPostProcessApps(argc, argv, callbackIndex
 #ifdef XP_WIN
