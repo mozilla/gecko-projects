@@ -32,18 +32,18 @@ export class InfoItem extends HTMLElement {
 
   render() {
     let label = this.shadowRoot.querySelector("label");
-    let labelText = normalizeToKebabCase(this.item.label);
+    let labelId = this.item.labelId;
 
     // Map specific elements to a different message ID, to allow updates to
     // existing labels and avoid duplicates.
     let stringMapping = {
       signaturealgorithm: "signature-algorithm",
     };
-    let fluentID = stringMapping[labelText] || labelText;
+    let fluentID = stringMapping[labelId] || labelId;
 
     label.setAttribute("data-l10n-id", "certificate-viewer-" + fluentID);
 
-    this.classList.add(labelText);
+    this.classList.add(labelId);
 
     let info = this.shadowRoot.querySelector(".info");
     if (this.item.info.hasOwnProperty("utc")) {
@@ -60,10 +60,9 @@ export class InfoItem extends HTMLElement {
         : this.item.info;
     }
 
-    this.classList.add(labelText);
+    this.classList.add(labelId);
 
-    // TODO: Use Fluent-friendly condition.
-    if (this.item.label === "Modulus") {
+    if (this.item.label === "modulus") {
       info.classList.add("long-hex");
       this.addEventListener("click", () => {
         info.classList.toggle("long-hex-open");
@@ -90,6 +89,59 @@ export class InfoItem extends HTMLElement {
       info.textContent = "";
       info.appendChild(link);
     }
+
+    if (labelId === "download") {
+      this.setDownloadLinkInformation(info);
+    }
+  }
+
+  setDownloadLinkInformation(info) {
+    let link = document.createElement("a");
+    link.setAttribute("href", "data:," + this.item.info);
+    link.classList.add("download-link");
+
+    let url = new URL(document.URL);
+    let certArray = url.searchParams.getAll("cert");
+    let encodedCertArray = [];
+    for (let i = 0; i < certArray.length; i++) {
+      encodedCertArray.push(
+        encodeURI(
+          `-----BEGIN CERTIFICATE-----\r\n${
+            certArray[i]
+          }\r\n-----END CERTIFICATE-----\r\n`
+        )
+      );
+    }
+    encodedCertArray = encodedCertArray.join("");
+
+    let chainLink = document.createElement("a");
+    chainLink.setAttribute("href", "data:," + encodedCertArray);
+    chainLink.classList.add("download-link");
+    chainLink.classList.add("download-link-chain");
+
+    info.textContent = "";
+    info.appendChild(link);
+    info.appendChild(chainLink);
+
+    let commonName = document
+      .querySelector("certificate-section")
+      .shadowRoot.querySelector(".subject-name")
+      .shadowRoot.querySelector(".common-name")
+      .shadowRoot.querySelector(".info");
+
+    let fileName = normalizeToKebabCase(commonName.textContent);
+
+    document.l10n.setAttributes(link, "certificate-viewer-download-pem", {
+      fileName,
+    });
+
+    document.l10n.setAttributes(
+      chainLink,
+      "certificate-viewer-download-pem-chain",
+      {
+        fileName,
+      }
+    );
   }
 }
 

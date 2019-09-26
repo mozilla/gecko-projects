@@ -257,6 +257,7 @@
 #include "nsThreadManager.h"
 #include "nsIBidiKeyboard.h"
 #include "ReferrerInfo.h"
+#include "nsAboutProtocolUtils.h"
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
@@ -1670,8 +1671,30 @@ bool nsContentUtils::OfflineAppAllowed(nsIPrincipal* aPrincipal) {
   return NS_SUCCEEDED(rv) && allowed;
 }
 
+static bool IsErrorPage(nsIURI* aURI) {
+  if (!aURI) {
+    return false;
+  }
+
+  if (!aURI->SchemeIs("about")) {
+    return false;
+  }
+
+  nsAutoCString name;
+  nsresult rv = NS_GetAboutModuleName(aURI, name);
+  NS_ENSURE_SUCCESS(rv, false);
+
+  return name.EqualsLiteral("certerror") || name.EqualsLiteral("neterror") ||
+         name.EqualsLiteral("blocked");
+}
+
 /* static */
-bool nsContentUtils::PrincipalAllowsL10n(nsIPrincipal* aPrincipal) {
+bool nsContentUtils::PrincipalAllowsL10n(nsIPrincipal* aPrincipal,
+                                         nsIURI* aDocumentURI) {
+  if (IsErrorPage(aDocumentURI)) {
+    return true;
+  }
+
   // The system principal is always allowed.
   if (IsSystemPrincipal(aPrincipal)) {
     return true;
@@ -8855,6 +8878,44 @@ bool nsContentUtils::HttpsStateIsModern(Document* aDocument) {
   }
 
   return false;
+}
+
+/* static */
+bool nsContentUtils::ComputeIsSecureContext(nsIChannel* aChannel) {
+  MOZ_ASSERT(aChannel);
+
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+  // The assertion would be relaxed due to COEP support.
+  MOZ_ASSERT(loadInfo->GetExternalContentPolicyType() ==
+             nsIContentPolicy::TYPE_DOCUMENT);
+
+  nsCOMPtr<nsIScriptSecurityManager> ssm = nsContentUtils::GetSecurityManager();
+  nsCOMPtr<nsIPrincipal> principal;
+  nsresult rv = ssm->GetChannelResultPrincipalIfNotSandboxed(
+      aChannel, getter_AddRefs(principal));
+  if (NS_FAILED(rv)) {
+    return false;
+  }
+
+  if (principal->IsSystemPrincipal()) {
+    // If the load would've been sandboxed, treat this load as an untrusted
+    // load, as system code considers sandboxed resources insecure.
+    return !loadInfo->GetLoadingSandboxed();
+  }
+
+  if (principal->GetIsNullPrincipal()) {
+    return false;
+  }
+
+  nsCOMPtr<nsIContentSecurityManager> csm =
+      do_GetService(NS_CONTENTSECURITYMANAGER_CONTRACTID);
+  NS_WARNING_ASSERTION(csm, "csm is null");
+  if (csm) {
+    bool isTrustworthyOrigin = false;
+    csm->IsOriginPotentiallyTrustworthy(principal, &isTrustworthyOrigin);
+    return isTrustworthyOrigin;
+  }
+  return true;
 }
 
 /* static */

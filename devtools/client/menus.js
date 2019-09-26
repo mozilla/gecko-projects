@@ -97,14 +97,6 @@ exports.menuitems = [
     },
   },
   {
-    id: "menu_webide",
-    l10nKey: "webide",
-    oncommand() {
-      gDevToolsBrowser.openWebIDE();
-    },
-    keyId: "webide",
-  },
-  {
     id: "menu_browserToolbox",
     l10nKey: "browserToolboxMenu",
     oncommand() {
@@ -189,14 +181,6 @@ exports.menuitems = [
       ScratchpadManager.openScratchpad();
     },
     keyId: "scratchpad",
-  },
-  {
-    id: "menu_devtools_connect",
-    l10nKey: "devtoolsConnect",
-    oncommand(event) {
-      const window = event.target.ownerDocument.defaultView;
-      gDevToolsBrowser.openConnectScreen(window.gBrowser);
-    },
   },
   { separator: true, id: "devToolsEndSeparator" },
   {

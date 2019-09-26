@@ -377,6 +377,13 @@ function denyRequestNoPermission(aBrowser, aRequest) {
 // the permission state has not yet been determined.
 //
 async function checkOSPermission(camNeeded, micNeeded) {
+  // Don't trigger OS permission requests for fake devices. Fake devices don't
+  // require OS permission and the dialogs are problematic in automated testing
+  // (where fake devices are used) because they require user interaction.
+  if (Services.prefs.getBoolPref("media.navigator.streams.fake", false)) {
+    return true;
+  }
+
   let camStatus = {},
     micStatus = {};
   OSPermissions.getMediaCapturePermissionState(camStatus, micStatus);
@@ -552,9 +559,7 @@ function checkRequestAllowed(aRequest, aPrincipal, aBrowser) {
     // other way for the stop sharing code to know the hostnames of frames
     // using devices until bug 1066082 is fixed.
     let browser = aBrowser;
-    browser._devicePermissionPrincipals =
-      browser._devicePermissionPrincipals || [];
-    browser._devicePermissionPrincipals.push(aPrincipal);
+    browser.getDevicePermissionOrigins("webrtc").add(aPrincipal.origin);
 
     let camNeeded = !!videoDevices.length;
     let micNeeded = !!audioDevices.length;
@@ -1108,9 +1113,7 @@ function prompt(aBrowser, aRequest) {
         if (remember) {
           // Remember on which URIs we set persistent permissions so that we
           // can remove them if the user clicks 'Stop Sharing'.
-          aBrowser._devicePermissionPrincipals =
-            aBrowser._devicePermissionPrincipals || [];
-          aBrowser._devicePermissionPrincipals.push(principal);
+          aBrowser.getDevicePermissionOrigins("webrtc").add(principal.origin);
         }
 
         let camNeeded = !!videoDevices.length;

@@ -1,3 +1,4 @@
+use crate::android::{AndroidHandler};
 use crate::command::{
     AddonInstallParameters, AddonUninstallParameters, GeckoContextParameters,
     GeckoExtensionCommand, GeckoExtensionRoute, XblLocatorParameters, CHROME_ELEMENT_KEY,
@@ -18,7 +19,6 @@ use mozrunner::runner::{FirefoxProcess, FirefoxRunner, Runner, RunnerProcess};
 use serde::de::{self, Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 use serde_json::{self, Map, Value};
-use std::error::Error;
 use std::io::prelude::*;
 use std::io::Error as IoError;
 use std::io::ErrorKind;
@@ -63,6 +63,16 @@ use crate::capabilities::{FirefoxCapabilities, FirefoxOptions};
 use crate::logging;
 use crate::prefs;
 
+/// A running Gecko instance.
+#[derive(Debug)]
+pub enum Browser {
+    /// A local Firefox process, running on this (host) device.
+    Host(FirefoxProcess),
+
+    /// A remote instance, running on a (target) Android device.
+    Target(AndroidHandler),
+}
+
 #[derive(Debug, PartialEq, Deserialize)]
 pub struct MarionetteHandshake {
     #[serde(rename = "marionetteProtocol")]
@@ -87,7 +97,7 @@ pub struct MarionetteSettings {
 pub struct MarionetteHandler {
     pub connection: Mutex<Option<MarionetteConnection>>,
     pub settings: MarionetteSettings,
-    pub browser: Option<FirefoxProcess>,
+    pub browser: Option<Browser>,
 }
 
 impl MarionetteHandler {
@@ -126,19 +136,88 @@ impl MarionetteHandler {
 
         let host = self.settings.host.to_owned();
         let port = self.settings.port.unwrap_or(get_free_port(&host)?);
-        if !self.settings.connect_existing {
-            self.start_browser(port, options)?;
+
+        match options.android {
+            Some(_) => {
+                // TODO: support connecting to running Apps.  There's no real obstruction here,
+                // just some details about port forwarding to work through.  We can't follow
+                // `chromedriver` here since it uses an abstract socket rather than a TCP socket:
+                // see bug 1240830 for thoughts on doing that for Marionette.
+                if self.settings.connect_existing {
+                    return Err(WebDriverError::new(
+                        ErrorStatus::SessionNotCreated,
+                        "Cannot connect to an existing Android App yet",
+                   ));
+                }
+
+                self.start_android(port, options)?;
+            },
+            None => {
+                if !self.settings.connect_existing {
+                    self.start_browser(port, options)?;
+                }
+            }
         }
 
         let mut connection = MarionetteConnection::new(host, port, session_id.clone());
         connection.connect(&mut self.browser).or_else(|e| {
-            if let Some(ref mut runner) = self.browser {
-                runner.kill()?;
+            match self.browser {
+                Some(Browser::Host(ref mut runner)) => {
+                    runner.kill()?;
+                },
+                Some(Browser::Target(ref mut handler)) => {
+                    handler.force_stop().map_err(|e| WebDriverError::new(
+                        ErrorStatus::UnknownError,
+                        e.to_string()
+                    ))?;
+                },
+                _ => {}
             }
+
             Err(e)
         })?;
         self.connection = Mutex::new(Some(connection));
         Ok(capabilities)
+    }
+
+    fn start_android(&mut self, port: u16, options: FirefoxOptions) -> WebDriverResult<()> {
+        let android_options = options.android.unwrap();
+
+        let mut handler = AndroidHandler::new(&android_options);
+        handler.connect(port).map_err(|e| WebDriverError::new(
+            ErrorStatus::UnknownError,
+            e.to_string()
+        ))?;
+
+        // Profile management.
+        let is_custom_profile = options.profile.is_some();
+
+        let mut profile = options.profile
+            .unwrap_or(Profile::new()?);
+
+        self.set_prefs(
+            handler.target_port,
+            &mut profile,
+            is_custom_profile,
+            options.prefs
+        ).map_err(|e| WebDriverError::new(
+            ErrorStatus::SessionNotCreated,
+            format!("Failed to set preferences: {}", e),
+        ))?;
+
+        handler.prepare(&profile).map_err(|e| WebDriverError::new(
+            ErrorStatus::UnknownError,
+            e.to_string()
+        ))?;
+
+        handler.launch().map_err(|e| WebDriverError::new(
+            ErrorStatus::UnknownError,
+            e.to_string()
+        ))?;
+
+        self.browser = Some(Browser::Target(handler));
+
+        Ok(())
     }
 
     fn start_browser(&mut self, port: u16, options: FirefoxOptions) -> WebDriverResult<()> {
@@ -188,7 +267,7 @@ impl MarionetteHandler {
                 format!("Failed to start browser {}: {}", binary.display(), e),
             )
         })?;
-        self.browser = Some(browser_proc);
+        self.browser = Some(Browser::Host(browser_proc));
 
         Ok(())
     }
@@ -333,13 +412,23 @@ impl WebDriverHandler<GeckoExtensionRoute> for MarionetteHandler {
             }
         }
 
-        if let Some(ref mut runner) = self.browser {
-            // TODO(https://bugzil.la/1443922):
-            // Use toolkit.asyncshutdown.crash_timout pref
-            match runner.wait(time::Duration::from_secs(70)) {
-                Ok(x) => debug!("Browser process stopped: {}", x),
-                Err(e) => error!("Failed to stop browser process: {}", e),
+        match self.browser {
+            Some(Browser::Host(ref mut runner)) => {
+                // TODO(https://bugzil.la/1443922):
+                // Use toolkit.asyncshutdown.crash_timout pref
+                match runner.wait(time::Duration::from_secs(70)) {
+                    Ok(x) => debug!("Browser process stopped: {}", x),
+                    Err(e) => error!("Failed to stop browser process: {}", e),
+                }
+            },
+            Some(Browser::Target(ref mut handler)) => {
+                // Try to force-stop the process on the target device
+                match handler.force_stop() {
+                    Ok(_) => debug!("Android package force-stopped"),
+                    Err(e) => error!("Failed to force-stop Android package: {}", e),
+                }
             }
+            None => {},
         }
 
         self.connection = Mutex::new(None);
@@ -1172,7 +1261,7 @@ impl MarionetteConnection {
         }
     }
 
-    pub fn connect(&mut self, browser: &mut Option<FirefoxProcess>) -> WebDriverResult<()> {
+    pub fn connect(&mut self, browser: &mut Option<Browser>) -> WebDriverResult<()> {
         let timeout = time::Duration::from_secs(60);
         let poll_interval = time::Duration::from_millis(100);
         let now = time::Instant::now();
@@ -1183,9 +1272,10 @@ impl MarionetteConnection {
             self.host,
             self.port
         );
+
         loop {
             // immediately abort connection attempts if process disappears
-            if let Some(ref mut runner) = *browser {
+            if let Some(Browser::Host(ref mut runner)) = *browser {
                 let exit_status = match runner.try_wait() {
                     Ok(Some(status)) => Some(
                         status
@@ -1204,9 +1294,23 @@ impl MarionetteConnection {
                 }
             }
 
-            match TcpStream::connect((&self.host[..], self.port)) {
-                Ok(stream) => {
+            let try_connect = || -> WebDriverResult<(TcpStream, MarionetteHandshake)> {
+                let mut stream = TcpStream::connect((&self.host[..], self.port))?;
+                let data = MarionetteConnection::handshake(&mut stream)?;
+
+                Ok((stream, data))
+            };
+
+            match try_connect() {
+                Ok((stream, data)) => {
+                    debug!(
+                        "Connection to Marionette established on {}:{}.",
+                        self.host, self.port,
+                    );
+
                     self.stream = Some(stream);
+                    self.session.application_type = Some(data.application_type);
+                    self.session.protocol = Some(data.protocol);
                     break;
                 }
                 Err(e) => {
@@ -1214,50 +1318,36 @@ impl MarionetteConnection {
                         thread::sleep(poll_interval);
                     } else {
                         return Err(WebDriverError::new(
-                            ErrorStatus::UnknownError,
-                            e.description().to_owned(),
+                            ErrorStatus::Timeout,
+                            e.to_string(),
                         ));
                     }
                 }
             }
         }
 
-        debug!(
-            "Connection established on {}:{}. Waiting for Marionette handshake",
-            self.host, self.port,
-        );
-
-        let data = self.handshake()?;
-        self.session.application_type = Some(data.application_type);
-        self.session.protocol = Some(data.protocol);
-
-        debug!("Connected to Marionette");
         Ok(())
     }
 
-    fn handshake(&mut self) -> WebDriverResult<MarionetteHandshake> {
-        let resp = (match self.stream.as_mut().unwrap().read_timeout() {
+    fn handshake(stream: &mut TcpStream) -> WebDriverResult<MarionetteHandshake> {
+        let resp = (match stream.read_timeout() {
             Ok(timeout) => {
                 // If platform supports changing the read timeout of the stream,
                 // use a short one only for the handshake with Marionette.
-                self.stream
-                    .as_mut()
-                    .unwrap()
-                    .set_read_timeout(Some(time::Duration::from_secs(10)))
+                stream
+                    .set_read_timeout(Some(time::Duration::from_millis(100)))
                     .ok();
-                let data = self.read_resp();
-                self.stream.as_mut().unwrap().set_read_timeout(timeout).ok();
+                let data = MarionetteConnection::read_resp(stream);
+                stream.set_read_timeout(timeout).ok();
 
                 data
             }
-            _ => self.read_resp(),
+            _ => MarionetteConnection::read_resp(stream),
         })
-        .or_else(|e| {
-            Err(WebDriverError::new(
-                ErrorStatus::UnknownError,
-                format!("Socket timeout reading Marionette handshake data: {}", e),
-            ))
-        })?;
+        .map_err(|e| WebDriverError::new(
+            ErrorStatus::UnknownError,
+            format!("Socket timeout reading Marionette handshake data: {}", e),
+        ))?;
 
         let data = serde_json::from_str::<MarionetteHandshake>(&resp)?;
 
@@ -1297,16 +1387,18 @@ impl MarionetteConnection {
     }
 
     fn send(&mut self, data: String) -> WebDriverResult<String> {
-        match self.stream {
+        let stream = match self.stream {
             Some(ref mut stream) => {
                 if stream.write(&*data.as_bytes()).is_err() {
                     let mut err = WebDriverError::new(
                         ErrorStatus::UnknownError,
-                        "Failed to write response to stream",
+                        "Failed to write request to stream",
                     );
                     err.delete_session = true;
                     return Err(err);
                 }
+
+                stream
             }
             None => {
                 let mut err = WebDriverError::new(
@@ -1316,9 +1408,9 @@ impl MarionetteConnection {
                 err.delete_session = true;
                 return Err(err);
             }
-        }
+        };
 
-        match self.read_resp() {
+        match MarionetteConnection::read_resp(stream) {
             Ok(resp) => Ok(resp),
             Err(_) => {
                 let mut err = WebDriverError::new(
@@ -1331,11 +1423,9 @@ impl MarionetteConnection {
         }
     }
 
-    fn read_resp(&mut self) -> IoResult<String> {
+    fn read_resp(stream: &mut TcpStream) -> IoResult<String> {
         let mut bytes = 0usize;
 
-        // TODO(jgraham): Check before we unwrap?
-        let stream = self.stream.as_mut().unwrap();
         loop {
             let buf = &mut [0 as u8];
             let num_read = stream.read(buf)?;

@@ -69,7 +69,7 @@ class StackType {
     Ref = uint8_t(ValType::Ref),
     NullRef = uint8_t(ValType::NullRef),
 
-    TVar = uint8_t(TypeCode::Limit),
+    Bottom = uint8_t(TypeCode::Limit),
   };
 
   StackType() : tc_(InvalidPackedTypeCode()) {}
@@ -83,6 +83,19 @@ class StackType {
   PackedTypeCode packed() const { return tc_; }
 
   Code code() const { return Code(UnpackTypeCodeType(tc_)); }
+
+  bool isNumeric() const {
+    switch (code()) {
+      case Code::Bottom:
+      case Code::I32:
+      case Code::I64:
+      case Code::F32:
+      case Code::F64:
+        return true;
+      default:
+        return false;
+    }
+  }
 
   uint32_t refTypeIndex() const { return UnpackTypeCodeIndex(tc_); }
   bool isRef() const { return UnpackTypeCodeType(tc_) == TypeCode::Ref; }
@@ -98,8 +111,8 @@ class StackType {
   bool operator!=(Code that) const { return !(*this == that); }
 };
 
-static inline ValType NonTVarToValType(StackType type) {
-  MOZ_ASSERT(type != StackType::TVar);
+static inline ValType NonBottomToValType(StackType type) {
+  MOZ_ASSERT(type != StackType::Bottom);
   return ValType(type.packed());
 }
 
@@ -233,7 +246,7 @@ class TypeAndValue {
   mozilla::Pair<StackType, Value> tv_;
 
  public:
-  TypeAndValue() : tv_(StackType::TVar, Value()) {}
+  TypeAndValue() : tv_(StackType::Bottom, Value()) {}
   explicit TypeAndValue(StackType type) : tv_(type, Value()) {}
   explicit TypeAndValue(ValType type) : tv_(StackType(type), Value()) {}
   TypeAndValue(StackType type, Value value) : tv_(type, value) {}
@@ -294,6 +307,8 @@ class MOZ_STACK_CLASS OpIter : private Policy {
   MOZ_MUST_USE bool popWithType(ExprType expectedType, Value* value);
   MOZ_MUST_USE bool topWithType(ExprType expectedType, Value* value);
   MOZ_MUST_USE bool topWithType(ValType valType, Value* value);
+  MOZ_MUST_USE bool topIsType(ValType expectedType, StackType* actualType,
+                              Value* value);
 
   MOZ_MUST_USE bool pushControl(LabelKind kind, ExprType type);
   MOZ_MUST_USE bool checkStackAtEndOfBlock(ExprType* type, Value* value);
@@ -302,6 +317,7 @@ class MOZ_STACK_CLASS OpIter : private Policy {
   MOZ_MUST_USE bool checkBranchValue(uint32_t relativeDepth, ExprType* type,
                                      Value* value);
   MOZ_MUST_USE bool checkBrTableEntry(uint32_t* relativeDepth,
+                                      uint32_t* branchValueArity,
                                       ExprType* branchValueType,
                                       Value* branchValue);
 
@@ -326,7 +342,11 @@ class MOZ_STACK_CLASS OpIter : private Policy {
     controlStack_.back().setPolymorphicBase();
   }
 
-  inline bool Join(StackType one, StackType two, StackType* result) const;
+  // Compute a type that is a supertype of one and two. This type is not
+  // guaranteed to be minimal; there may be a more specific supertype of one
+  // and two that this type is a supertype of.
+  inline bool weakMeet(ExprType one, ExprType two, ExprType* result) const;
+
   inline bool checkIsSubtypeOf(ValType lhs, ValType rhs);
 
  public:
@@ -415,7 +435,7 @@ class MOZ_STACK_CLASS OpIter : private Policy {
   MOZ_MUST_USE bool readNop();
   MOZ_MUST_USE bool readMemorySize();
   MOZ_MUST_USE bool readMemoryGrow(Value* input);
-  MOZ_MUST_USE bool readSelect(StackType* type, Value* trueValue,
+  MOZ_MUST_USE bool readSelect(bool typed, StackType* type, Value* trueValue,
                                Value* falseValue, Value* condition);
   MOZ_MUST_USE bool readGetLocal(const ValTypeVector& locals, uint32_t* id);
   MOZ_MUST_USE bool readSetLocal(const ValTypeVector& locals, uint32_t* id,
@@ -514,36 +534,15 @@ class MOZ_STACK_CLASS OpIter : private Policy {
 };
 
 template <typename Policy>
-inline bool OpIter<Policy>::Join(StackType one, StackType two,
-                                 StackType* result) const {
+inline bool OpIter<Policy>::weakMeet(ExprType one, ExprType two,
+                                     ExprType* result) const {
   if (MOZ_LIKELY(one == two)) {
     *result = one;
     return true;
   }
 
-  if (one == StackType::TVar) {
-    *result = two;
-    return true;
-  }
-
-  if (two == StackType::TVar) {
-    *result = one;
-    return true;
-  }
-
   if (one.isReference() && two.isReference()) {
-    if (env_.isRefSubtypeOf(NonTVarToValType(two), NonTVarToValType(one))) {
-      *result = one;
-      return true;
-    }
-
-    if (env_.isRefSubtypeOf(NonTVarToValType(one), NonTVarToValType(two))) {
-      *result = two;
-      return true;
-    }
-
-    // No subtyping relations between the two types.
-    *result = StackType::AnyRef;
+    *result = ExprType::AnyRef;
     return true;
   }
 
@@ -602,9 +601,9 @@ inline bool OpIter<Policy>::failEmptyStack() {
                              : fail("popping value from outside block");
 }
 
-// This function pops exactly one value from the stack, yielding TVar types in
+// This function pops exactly one value from the stack, yielding Bottom types in
 // various cases and therefore making it the caller's responsibility to do the
-// right thing for StackType::TVar. Prefer (pop|top)WithType.
+// right thing for StackType::Bottom. Prefer (pop|top)WithType.
 template <typename Policy>
 inline bool OpIter<Policy>::popStackType(StackType* type, Value* value) {
   ControlStackEntry<ControlItem>& block = controlStack_.back();
@@ -615,7 +614,7 @@ inline bool OpIter<Policy>::popStackType(StackType* type, Value* value) {
     // dummy value of any type; it won't be used since we're in unreachable
     // code.
     if (block.polymorphicBase()) {
-      *type = StackType::TVar;
+      *type = StackType::Bottom;
       *value = Value();
 
       // Maintain the invariant that, after a pop, there is always memory
@@ -642,8 +641,8 @@ inline bool OpIter<Policy>::popWithType(ValType expectedType, Value* value) {
     return false;
   }
 
-  return stackType == StackType::TVar ||
-         checkIsSubtypeOf(NonTVarToValType(stackType), expectedType);
+  return stackType == StackType::Bottom ||
+         checkIsSubtypeOf(NonBottomToValType(stackType), expectedType);
 }
 
 // This function pops as many types from the stack as determined by the given
@@ -660,7 +659,8 @@ inline bool OpIter<Policy>::popWithType(ExprType expectedType, Value* value) {
   return popWithType(NonVoidToValType(expectedType), value);
 }
 
-// This function is just an optimization of popWithType + push.
+// This function is equivalent to: popWithType(expectedType);
+// push(expectedType);
 template <typename Policy>
 inline bool OpIter<Policy>::topWithType(ValType expectedType, Value* value) {
   ControlStackEntry<ControlItem>& block = controlStack_.back();
@@ -686,13 +686,13 @@ inline bool OpIter<Policy>::topWithType(ValType expectedType, Value* value) {
 
   TypeAndValue<Value>& observed = valueStack_.back();
 
-  if (observed.type() == StackType::TVar) {
+  if (observed.type() == StackType::Bottom) {
     observed.typeRef() = StackType(expectedType);
     *value = Value();
     return true;
   }
 
-  if (!checkIsSubtypeOf(NonTVarToValType(observed.type()), expectedType)) {
+  if (!checkIsSubtypeOf(NonBottomToValType(observed.type()), expectedType)) {
     return false;
   }
 
@@ -708,6 +708,44 @@ inline bool OpIter<Policy>::topWithType(ExprType expectedType, Value* value) {
   }
 
   return topWithType(NonVoidToValType(expectedType), value);
+}
+
+// This function checks that the top of the stack is a subtype of expectedType
+// and returns the value if so.
+template <typename Policy>
+inline bool OpIter<Policy>::topIsType(ValType expectedType,
+                                      StackType* actualType, Value* value) {
+  ControlStackEntry<ControlItem>& block = controlStack_.back();
+
+  MOZ_ASSERT(valueStack_.length() >= block.valueStackStart());
+  if (valueStack_.length() == block.valueStackStart()) {
+    // If the base of this block's stack is polymorphic, then we can just
+    // pull out a dummy value of the expected type; it won't be used since
+    // we're in unreachable code.
+    if (block.polymorphicBase()) {
+      *actualType = StackType::Bottom;
+      *value = Value();
+      return true;
+    }
+
+    return failEmptyStack();
+  }
+
+  TypeAndValue<Value>& observed = valueStack_.back();
+
+  if (observed.type() == StackType::Bottom) {
+    *actualType = StackType::Bottom;
+    *value = Value();
+    return true;
+  }
+
+  if (!checkIsSubtypeOf(NonBottomToValType(observed.type()), expectedType)) {
+    return false;
+  }
+
+  *actualType = observed.type();
+  *value = observed.value();
+  return true;
 }
 
 template <typename Policy>
@@ -994,32 +1032,66 @@ inline bool OpIter<Policy>::readBrIf(uint32_t* relativeDepth, ExprType* type,
   return checkBranchValue(*relativeDepth, type, value);
 }
 
+#define UNKNOWN_ARITY UINT32_MAX
+
 template <typename Policy>
 inline bool OpIter<Policy>::checkBrTableEntry(uint32_t* relativeDepth,
+                                              uint32_t* branchValueArity,
                                               ExprType* branchValueType,
                                               Value* branchValue) {
   if (!readVarU32(relativeDepth)) {
     return false;
   }
 
+  ControlStackEntry<ControlItem>* block = nullptr;
+  if (!getControl(*relativeDepth, &block)) {
+    return false;
+  }
+
   // For the first encountered branch target, do a normal branch value type
-  // check which will change *branchValueType to a non-sentinel value. For all
-  // subsequent branch targets, check that the branch target matches the
-  // now-known branch value type.
+  // check which will change *branchValueArity and *branchValueType to a
+  // non-sentinel value. For all subsequent branch targets, check that the
+  // branch target arity and type matches the now-known branch value arity
+  // and type. This will need to change with multi-value.
+  uint32_t labelTypeArity = IsVoid(block->branchTargetType()) ? 0 : 1;
+
+  if (*branchValueArity == UNKNOWN_ARITY) {
+    *branchValueArity = labelTypeArity;
+  } else if (*branchValueArity != labelTypeArity) {
+    return fail("br_table operand must be subtype of all target types");
+  }
+
+  // If the label types are void, no need to check type on the stack
+  if (labelTypeArity == 0) {
+    *branchValueType = ExprType::Void;
+    *branchValue = Value();
+    return true;
+  }
+
+  // Check that the value on the stack is a subtype of the label
+  StackType actualBranchValueType;
+  if (!topIsType(NonVoidToValType(block->branchTargetType()),
+                 &actualBranchValueType, branchValue)) {
+    return false;
+  }
+
+  // If the value on the stack is the bottom type, it will by definition be a
+  // subtype of every possible label type. This also implies that the label
+  // types may not have a subtype relation, and so we cannot report a branch
+  // value type. Fortunately this only happens in unreachable code, where we
+  // don't use the branch value type.
+  if (actualBranchValueType == StackType::Bottom) {
+    *branchValueType = ExprType::Limit;
+    return true;
+  }
+
+  // Compute the branch value type in all other cases
 
   if (*branchValueType == ExprType::Limit) {
-    if (!checkBranchValue(*relativeDepth, branchValueType, branchValue)) {
-      return false;
-    }
-  } else {
-    ControlStackEntry<ControlItem>* block = nullptr;
-    if (!getControl(*relativeDepth, &block)) {
-      return false;
-    }
-
-    if (*branchValueType != block->branchTargetType()) {
-      return fail("br_table targets must all have the same value type");
-    }
+    *branchValueType = block->branchTargetType();
+  } else if (!weakMeet(*branchValueType, block->branchTargetType(),
+                       branchValueType)) {
+    return fail("br_table operand must be subtype of all target types");
   }
 
   return true;
@@ -1049,23 +1121,28 @@ inline bool OpIter<Policy>::readBrTable(Uint32Vector* depths,
     return false;
   }
 
+  uint32_t branchValueArity = UNKNOWN_ARITY;
   *branchValueType = ExprType::Limit;
 
   for (uint32_t i = 0; i < tableLength; i++) {
-    if (!checkBrTableEntry(&(*depths)[i], branchValueType, branchValue)) {
+    if (!checkBrTableEntry(&(*depths)[i], &branchValueArity, branchValueType,
+                           branchValue)) {
       return false;
     }
   }
 
-  if (!checkBrTableEntry(defaultDepth, branchValueType, branchValue)) {
+  if (!checkBrTableEntry(defaultDepth, &branchValueArity, branchValueType,
+                         branchValue)) {
     return false;
   }
 
-  MOZ_ASSERT(*branchValueType != ExprType::Limit);
+  MOZ_ASSERT(branchValueArity != UNKNOWN_ARITY);
 
   afterUnconditionalBranch();
   return true;
 }
+
+#undef UNKNOWN_ARITY
 
 template <typename Policy>
 inline bool OpIter<Policy>::readUnreachable() {
@@ -1318,9 +1395,38 @@ inline bool OpIter<Policy>::readMemoryGrow(Value* input) {
 }
 
 template <typename Policy>
-inline bool OpIter<Policy>::readSelect(StackType* type, Value* trueValue,
-                                       Value* falseValue, Value* condition) {
+inline bool OpIter<Policy>::readSelect(bool typed, StackType* type,
+                                       Value* trueValue, Value* falseValue,
+                                       Value* condition) {
   MOZ_ASSERT(Classify(op_) == OpKind::Select);
+
+  if (typed) {
+    uint32_t length;
+    if (!readVarU32(&length)) {
+      return fail("unable to read select result length");
+    }
+    if (length != 1) {
+      return fail("bad number of results");
+    }
+    ValType result;
+    if (!readValType(&result)) {
+      return fail("invalid result type for select");
+    }
+
+    if (!popWithType(ValType::I32, condition)) {
+      return false;
+    }
+    if (!popWithType(result, falseValue)) {
+      return false;
+    }
+    if (!popWithType(result, trueValue)) {
+      return false;
+    }
+
+    *type = StackType(result);
+    infalliblePush(*type);
+    return true;
+  }
 
   if (!popWithType(ValType::I32, condition)) {
     return false;
@@ -1336,7 +1442,15 @@ inline bool OpIter<Policy>::readSelect(StackType* type, Value* trueValue,
     return false;
   }
 
-  if (!Join(falseType, trueType, type)) {
+  if (!falseType.isNumeric() || !trueType.isNumeric()) {
+    return fail("select operand types must be numeric");
+  }
+
+  if (falseType.code() == StackType::Bottom) {
+    *type = trueType;
+  } else if (trueType.code() == StackType::Bottom || falseType == trueType) {
+    *type = falseType;
+  } else {
     return fail("select operand types must match");
   }
 

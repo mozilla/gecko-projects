@@ -668,6 +668,7 @@ pref("gfx.webrender.debug.slow-frame-indicator", false);
 pref("gfx.webrender.debug.picture-caching", false);
 pref("gfx.webrender.debug.primitives", false);
 pref("gfx.webrender.debug.small-screen", false);
+pref("gfx.webrender.debug.obscure-images", false);
 
 pref("accessibility.warn_on_browsewithcaret", true);
 
@@ -4662,7 +4663,9 @@ pref("dom.events.testing.asyncClipboard", false);
 // Disable moz* APIs in DataTransfer
 pref("dom.datatransfer.mozAtAPIs", false);
 
-pref("fission.rebuild_frameloaders_on_remoteness_change", true);
+// Bug 1583614: This is on by default for Fission windows, but still
+// causes enough issues to prevent us from turning it on everywhere.
+pref("fission.rebuild_frameloaders_on_remoteness_change", false);
 
 // Support for legacy customizations that rely on checking the
 // user profile directory for these stylesheets:

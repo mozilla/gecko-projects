@@ -173,7 +173,16 @@ var UrlbarTestUtils = {
    * @returns {HtmlElement|XulElement} The selected element.
    */
   getSelectedElement(win) {
-    return win.gURLBar.view._selectedElement || null;
+    return win.gURLBar.view.selectedElement || null;
+  },
+
+  /**
+   * Gets the index of the currently selected element.
+   * @param {object} win The window containing the urlbar.
+   * @returns {number} The selected index.
+   */
+  getSelectedElementIndex(win) {
+    return win.gURLBar.view.selectedElementIndex;
   },
 
   /**
@@ -189,7 +198,7 @@ var UrlbarTestUtils = {
   /**
    * Gets the index of the currently selected element.
    * @param {object} win The window containing the urlbar.
-   * @returns {number} The selected index.
+   * @returns {number} The selected row index.
    */
   getSelectedRowIndex(win) {
     return win.gURLBar.view.selectedRowIndex;

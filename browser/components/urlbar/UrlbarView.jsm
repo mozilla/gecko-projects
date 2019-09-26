@@ -159,7 +159,7 @@ class UrlbarView {
       return -1;
     }
 
-    return selectedRow.result.uiIndex;
+    return selectedRow.result.rowIndex;
   }
 
   set selectedRowIndex(val) {
@@ -184,6 +184,39 @@ class UrlbarView {
     return val;
   }
 
+  get selectedElementIndex() {
+    if (!this.isOpen || !this._selectedElement) {
+      return -1;
+    }
+
+    return this._selectedElement.elementIndex;
+  }
+
+  set selectedElementIndex(val) {
+    if (!this.isOpen) {
+      throw new Error(
+        "UrlbarView: Cannot select an item if the view isn't open."
+      );
+    }
+
+    if (val < 0) {
+      this._selectElement(null);
+      return val;
+    }
+
+    let selectableElement = this._getFirstSelectableElement();
+    while (selectableElement && selectableElement.elementIndex != val) {
+      selectableElement = this._getNextSelectableElement(selectableElement);
+    }
+
+    if (!selectableElement) {
+      throw new Error(`UrlbarView: Index ${val} is out of bounds.`);
+    }
+
+    this._selectElement(selectableElement);
+    return val;
+  }
+
   /**
    * @returns {UrlbarResult}
    *   The currently selected result.
@@ -203,6 +236,18 @@ class UrlbarView {
   }
 
   /**
+   * @returns {Element}
+   *   The currently selected element.
+   */
+  get selectedElement() {
+    if (!this.isOpen) {
+      return null;
+    }
+
+    return this._selectedElement;
+  }
+
+  /**
    * @returns {number}
    *   The number of visible results in the view.  Note that this may be larger
    *   than the number of results in the current query context since the view
@@ -214,6 +259,43 @@ class UrlbarView {
       sum += Number(this._isElementVisible(row));
     }
     return sum;
+  }
+
+  /**
+   * @returns {number}
+   *   The number of selectable elements in the view.
+   */
+  get visibleElementCount() {
+    let sum = 0;
+    let element = this._getFirstSelectableElement();
+    while (element) {
+      if (this._isElementVisible(element)) {
+        sum++;
+      }
+      element = this._getNextSelectableElement(element);
+    }
+    return sum;
+  }
+
+  /**
+   * @param {Element} element
+   *   An element in the view.
+   * @returns {UrlbarResult}
+   *   The result attached to parameter `element`, if `element` is a row or a
+   *   decendant of a row.
+   */
+  getResultFromElement(element) {
+    if (!this.isOpen) {
+      return null;
+    }
+
+    let row = this._getRowFromElement(element);
+
+    if (!row) {
+      return null;
+    }
+
+    return row.result;
   }
 
   /**
@@ -508,7 +590,6 @@ class UrlbarView {
 
       this._mainContainer.style.maxWidth = px(width);
     }
-
     this.panel.removeAttribute("hidden");
     this.input.inputField.setAttribute("aria-expanded", "true");
     this.input.dropmarker.setAttribute("open", "true");
@@ -670,7 +751,7 @@ class UrlbarView {
       buttonSpacer.className = "urlbarView-tip-button-spacer";
       content.appendChild(buttonSpacer);
 
-      let tipButton = this._createElement("button");
+      let tipButton = this._createElement("span");
       tipButton.className = "urlbarView-tip-button";
       content.appendChild(tipButton);
       item._elements.set("tipButton", tipButton);
@@ -839,8 +920,14 @@ class UrlbarView {
   _updateIndices() {
     for (let i = 0; i < this._rows.children.length; i++) {
       let item = this._rows.children[i];
-      item.result.uiIndex = i;
+      item.result.rowIndex = i;
       item.id = "urlbarView-row-" + i;
+    }
+    let selectableElement = this._getFirstSelectableElement();
+    let uiIndex = 0;
+    while (selectableElement) {
+      selectableElement.elementIndex = uiIndex++;
+      selectableElement = this._getNextSelectableElement(selectableElement);
     }
   }
 
@@ -1042,6 +1129,24 @@ class UrlbarView {
     return selected;
   }
 
+  /**
+   * @param {Element} element
+   *   An element that is potentially a row or descendant of a row.
+   * @returns {Element}
+   *   The row containing `element`, or `element` itself if it is a row.
+   */
+  _getRowFromElement(element) {
+    if (!this.isOpen || !element) {
+      return null;
+    }
+
+    if (!element.classList.contains("urlbarView-row")) {
+      element = element.closest(".urlbarView-row");
+    }
+
+    return element;
+  }
+
   _setAccessibleFocus(item) {
     if (item) {
       this.input.inputField.setAttribute("aria-activedescendant", item.id);
@@ -1204,12 +1309,7 @@ class UrlbarView {
       // Ignore right clicks.
       return;
     }
-
-    let row = event.target;
-    while (!row.classList.contains("urlbarView-row")) {
-      row = row.parentNode;
-    }
-    this.input.pickResult(row.result, event);
+    this.input.pickElement(event.target, event);
   }
 
   _on_overflow(event) {
