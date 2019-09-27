@@ -314,8 +314,6 @@ pref("ui.android.mouse_as_touch", 1);
 
 // Duration of timeout of incremental search in menus (ms).  0 means infinite.
 pref("ui.menu.incremental_search.timeout", 1000);
-// If true, all popups won't hide automatically on blur
-pref("ui.popup.disable_autohide", false);
 
 pref("browser.display.force_inline_alttext", false); // true = force ALT text for missing images to be layed out inline
 // 0 = no external leading,
@@ -669,6 +667,7 @@ pref("gfx.webrender.debug.picture-caching", false);
 pref("gfx.webrender.debug.primitives", false);
 pref("gfx.webrender.debug.small-screen", false);
 pref("gfx.webrender.debug.obscure-images", false);
+pref("gfx.webrender.debug.log-transactions", false);
 
 pref("accessibility.warn_on_browsewithcaret", true);
 
@@ -4765,9 +4764,6 @@ pref("services.common.log.logger.tokenserverclient", "Debug");
   // that engine.
   pref("services.sync.log.logger.engine", "Debug");
   pref("services.sync.log.cryptoDebug", false);
-
-  pref("services.sync.fxa.termsURL", "https://accounts.firefox.com/legal/terms");
-  pref("services.sync.fxa.privacyURL", "https://accounts.firefox.com/legal/privacy");
 
   pref("services.sync.telemetry.submissionInterval", 43200); // 12 hours in seconds
   pref("services.sync.telemetry.maxPayloadCount", 500);

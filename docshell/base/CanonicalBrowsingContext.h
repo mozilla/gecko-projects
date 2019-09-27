@@ -57,10 +57,7 @@ class CanonicalBrowsingContext final : public BrowsingContext {
   }
   void SetCurrentWindowGlobal(WindowGlobalParent* aGlobal);
 
-  WindowGlobalParent* GetEmbedderWindowGlobal() const {
-    return mEmbedderWindowGlobal;
-  }
-  void SetEmbedderWindowGlobal(WindowGlobalParent* aGlobal);
+  already_AddRefed<WindowGlobalParent> GetEmbedderWindowGlobal() const;
 
   nsISHistory* GetSessionHistory() { return mSessionHistory; }
   void SetSessionHistory(nsISHistory* aSHistory) {
@@ -108,7 +105,6 @@ class CanonicalBrowsingContext final : public BrowsingContext {
   // All live window globals within this browsing context.
   nsTHashtable<nsRefPtrHashKey<WindowGlobalParent>> mWindowGlobals;
   RefPtr<WindowGlobalParent> mCurrentWindowGlobal;
-  RefPtr<WindowGlobalParent> mEmbedderWindowGlobal;
 
   nsCOMPtr<nsISHistory> mSessionHistory;
 };

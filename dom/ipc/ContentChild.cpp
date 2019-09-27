@@ -4079,7 +4079,7 @@ mozilla::ipc::IPCResult ContentChild::RecvCommitBrowsingContextTransaction(
     return IPC_OK();
   }
 
-  if (!aTransaction.Validate(aContext, nullptr, aEpoch)) {
+  if (!aTransaction.ValidateEpochs(aContext, aEpoch)) {
     return IPC_FAIL(this, "Invalid BrowsingContext transaction from Parent");
   }
 

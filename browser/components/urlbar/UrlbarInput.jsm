@@ -20,6 +20,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   UrlbarController: "resource:///modules/UrlbarController.jsm",
   UrlbarEventBufferer: "resource:///modules/UrlbarEventBufferer.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.jsm",
   UrlbarQueryContext: "resource:///modules/UrlbarUtils.jsm",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
@@ -268,6 +269,8 @@ class UrlbarInput {
     }
 
     Services.prefs.removeObserver("browser.urlbar.openViewOnFocus", this);
+
+    this.controller.uninit();
 
     delete this.document;
     delete this.window;
@@ -653,10 +656,10 @@ class UrlbarInput {
         break;
       }
       case UrlbarUtils.RESULT_TYPE.TIP: {
-        if (element.classList.contains("urlbarView-tip-help")) {
+        let helpPicked = element.classList.contains("urlbarView-tip-help");
+        if (helpPicked) {
           url = result.payload.helpUrl;
         }
-
         if (!url) {
           this.handleRevert();
           this.controller.engagementEvent.record(event, {
@@ -664,11 +667,16 @@ class UrlbarInput {
             selIndex,
             selType: "tip",
           });
-
-          // TODO: Call out to UrlbarProvider.pickElement as part of bug 1578584.
+          let provider = UrlbarProvidersManager.getProvider(
+            result.providerName
+          );
+          if (!provider) {
+            Cu.reportError(`Provider not found: ${result.providerName}`);
+            return;
+          }
+          provider.pickResult(result, { helpPicked });
           return;
         }
-
         break;
       }
       case UrlbarUtils.RESULT_TYPE.OMNIBOX: {
@@ -950,11 +958,12 @@ class UrlbarInput {
 
   get openViewOnFocusForCurrentTab() {
     return (
-      this._openViewOnFocus &&
-      !["about:newtab", "about:home"].includes(
-        this.window.gBrowser.currentURI.spec
-      ) &&
-      !this.isPrivate
+      this._openViewOnFocusAndSearchString ||
+      (this._openViewOnFocus &&
+        !["about:newtab", "about:home"].includes(
+          this.window.gBrowser.currentURI.spec
+        ) &&
+        !this.isPrivate)
     );
   }
 
@@ -1009,6 +1018,14 @@ class UrlbarInput {
   }
 
   // Private methods below.
+
+  get _openViewOnFocusAndSearchString() {
+    return (
+      this.megabar &&
+      this.value &&
+      this.getAttribute("pageproxystate") != "valid"
+    );
+  }
 
   async _updateLayoutBreakoutDimensions() {
     // When this method gets called a second time before the first call
@@ -1762,14 +1779,25 @@ class UrlbarInput {
         break;
       case this.textbox:
         this._mousedownOnUrlbarDescendant = true;
+        if (event.target == this._inputContainer) {
+          this.focus();
+        }
         break;
       case this.window:
-        // We collapse the Urlbar for any mousedowns outside of it.
         if (this._mousedownOnUrlbarDescendant) {
           this._mousedownOnUrlbarDescendant = false;
           break;
         }
 
+        // Close the view when clicking on toolbars and other UI pieces that might
+        // not automatically remove focus from the input.
+        // Respect the autohide preference for easier inspecting/debugging via
+        // the browser toolbox.
+        if (!UrlbarPrefs.get("ui.popup.disable_autohide")) {
+          this.view.close();
+        }
+
+        // We collapse the urlbar for any clicks outside of it.
         this.endLayoutExtend(true);
     }
   }

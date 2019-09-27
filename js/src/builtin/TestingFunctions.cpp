@@ -2955,7 +2955,13 @@ static bool testingFunc_inJit(JSContext* cx, unsigned argc, Value* vp) {
 
   // Use frame iterator to inspect caller.
   FrameIter iter(cx);
-  MOZ_ASSERT(!iter.done());
+
+  // We may be invoked directly, not in a JS context, e.g. if inJit is added as
+  // a callback on the event queue.
+  if (iter.done()) {
+    args.rval().setBoolean(false);
+    return true;
+  }
 
   if (iter.hasScript()) {
     // Detect repeated attempts to compile, resetting the counter if inJit
@@ -3363,9 +3369,9 @@ bool js::testingFunc_serialize(JSContext* cx, unsigned argc, Value* vp) {
       }
 
       if (StringEqualsAscii(poli, "allow")) {
-        // default
+        policy.allowSharedMemory();
       } else if (StringEqualsAscii(poli, "deny")) {
-        policy.denySharedArrayBuffer();
+        // default
       } else {
         JS_ReportErrorASCII(cx, "Invalid policy value for 'SharedArrayBuffer'");
         return false;
@@ -6627,7 +6633,7 @@ gc::ZealModeHelpText),
 "serialize(data, [transferables, [policy]])",
 "  Serialize 'data' using JS_WriteStructuredClone. Returns a structured\n"
 "  clone buffer object. 'policy' may be an options hash. Valid keys:\n"
-"    'SharedArrayBuffer' - either 'allow' (the default) or 'deny'\n"
+"    'SharedArrayBuffer' - either 'allow' or 'deny' (the default)\n"
 "      to specify whether SharedArrayBuffers may be serialized.\n"
 "    'scope' - SameProcessSameThread, SameProcessDifferentThread,\n"
 "      DifferentProcess, or DifferentProcessForIndexedDB. Determines how some\n"
