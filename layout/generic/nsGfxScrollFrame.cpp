@@ -1710,8 +1710,6 @@ NS_QUERYFRAME_TAIL_INHERITING(nsBoxFrame)
 
   //-------------------- Helper ----------------------
 
-#define SMOOTH_SCROLL_PREF_NAME "general.smoothScroll"
-
 // AsyncSmoothMSDScroll has ref counting.
 class ScrollFrameHelper::AsyncSmoothMSDScroll final
     : public nsARefreshObserver {
@@ -2029,7 +2027,7 @@ void ScrollFrameHelper::AsyncScroll::InitSmoothScroll(
 }
 
 bool ScrollFrameHelper::IsSmoothScrollingEnabled() {
-  return Preferences::GetBool(SMOOTH_SCROLL_PREF_NAME, false);
+  return StaticPrefs::general_smoothScroll();
 }
 
 class ScrollFrameActivityTracker final
@@ -2349,7 +2347,7 @@ void ScrollFrameHelper::ScrollToWithOrigin(
           ? presContext->RefreshDriver()->MostRecentRefresh()
           : TimeStamp::Now();
   bool isSmoothScroll =
-      (aMode == ScrollMode::Smooth) && IsSmoothScrollingEnabled();
+      aMode == ScrollMode::Smooth && IsSmoothScrollingEnabled();
 
   nsSize currentVelocity(0, 0);
 
@@ -3002,6 +3000,8 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
 
   ScheduleSyntheticMouseMove();
 
+  PresShell::AutoAssertNoFlush noFlush(*mOuter->PresShell());
+
   {  // scope the AutoScrollbarRepaintSuppression
     AutoScrollbarRepaintSuppression repaintSuppression(this, !schedulePaint);
     AutoWeakFrame weakFrame(mOuter);
@@ -3031,8 +3031,7 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
     mListeners[i]->ScrollPositionDidChange(pt.x, pt.y);
   }
 
-  nsCOMPtr<nsIDocShell> docShell = presContext->GetDocShell();
-  if (docShell) {
+  if (nsCOMPtr<nsIDocShell> docShell = presContext->GetDocShell()) {
     docShell->NotifyScrollObservers();
   }
 }
@@ -3091,7 +3090,7 @@ static void AppendToTop(nsDisplayListBuilder* aBuilder,
 
     newItem = MakeDisplayItem<nsDisplayOwnLayer>(
         aBuilder, aSourceFrame, aSource, asr, nsDisplayOwnLayerFlags::None,
-        scrollbarData);
+        scrollbarData, true, false, nsDisplayOwnLayer::OwnLayerForScrollbar);
   } else {
     // Build the wrap list with an index of 1, since the scrollbar frame itself
     // might have already built an nsDisplayWrapList.
@@ -4164,11 +4163,20 @@ nsRect ScrollFrameHelper::GetVisualOptimalViewingRect() const {
   PresShell* presShell = mOuter->PresShell();
   if (mIsRoot && presShell->IsVisualViewportSizeSet() &&
       presShell->IsVisualViewportOffsetSet()) {
+    // FIXME(emilio): Account for scroll-padding here? If so we should probably
+    // resolve scroll-padding percentages against it rather than the scrollport.
+    //
+    // It's unclear whether we should use the scrollport here or the visual
+    // viewport, see:
+    //
+    // https://github.com/w3c/csswg-drafts/issues/4393
     return nsRect(mScrollPort.TopLeft() - GetScrollPosition() +
                       presShell->GetVisualViewportOffset(),
                   presShell->GetVisualViewportSize());
   }
-  return mScrollPort;
+  nsRect rect = mScrollPort;
+  rect.Deflate(GetScrollPadding());
+  return rect;
 }
 
 static void AdjustForWholeDelta(int32_t aDelta, nscoord* aCoord) {
@@ -4908,20 +4916,21 @@ nsresult ScrollFrameHelper::CreateAnonymousContent(
         break;
       case StyleResize::Vertical:
         dir.AssignLiteral("bottom");
-        key |= AnonymousContentKey::Flag_Resizer_Bottom;
         if (!IsScrollbarOnRight()) {
           mResizerContent->SetAttr(kNameSpaceID_None, nsGkAtoms::flip,
                                    EmptyString(), false);
-          key |= AnonymousContentKey::Flag_Resizer_Flip;
+          key |= AnonymousContentKey::Flag_Resizer_Bottom_Flip;
+        } else {
+          key |= AnonymousContentKey::Flag_Resizer_Bottom;
         }
         break;
       case StyleResize::Both:
-        key |= AnonymousContentKey::Flag_Resizer_Bottom;
         if (IsScrollbarOnRight()) {
           dir.AssignLiteral("bottomright");
-          key |= AnonymousContentKey::Flag_Resizer_Right;
+          key |= AnonymousContentKey::Flag_Resizer_BottomRight;
         } else {
           dir.AssignLiteral("bottomleft");
+          key |= AnonymousContentKey::Flag_Resizer_BottomLeft;
         }
         break;
       default:

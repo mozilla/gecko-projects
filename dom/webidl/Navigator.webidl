@@ -26,7 +26,8 @@
 interface URI;
 
 // http://www.whatwg.org/specs/web-apps/current-work/#the-navigator-object
-[HeaderFile="Navigator.h"]
+[HeaderFile="Navigator.h",
+ Exposed=Window]
 interface Navigator {
   // objects implementing this interface also implement the interfaces given below
 };
@@ -38,6 +39,7 @@ Navigator includes NavigatorStorageUtils;
 Navigator includes NavigatorConcurrentHardware;
 Navigator includes NavigatorStorage;
 Navigator includes NavigatorAutomationInformation;
+Navigator includes GPUProvider;
 
 interface mixin NavigatorID {
   // WebKit/Blink/Trident/Presto support this (hardcoded "Mozilla").

@@ -66,37 +66,13 @@ struct ScrollThumbData;
 /**
  * ****************** NOTE ON LOCK ORDERING IN APZ **************************
  *
- * There are two main kinds of locks used by APZ: APZCTreeManager::mTreeLock
- * ("the tree lock") and AsyncPanZoomController::mRecursiveMutex ("APZC locks").
- * There is also the APZCTreeManager::mTestDataLock ("test lock") and
- * APZCTreeManager::mMapLock ("map lock").
+ * To avoid deadlock, APZ imposes and respects a global ordering on threads
+ * and locks relevant to APZ.
  *
- * To avoid deadlock, we impose a lock ordering between these locks, which is:
- *
- *      tree lock -> map lock -> APZC locks -> test lock
- *
- * The interpretation of the lock ordering is that if lock A precedes lock B
- * in the ordering sequence, then you must NOT wait on A while holding B.
- *
- * In addition, the WR hit-testing codepath acquires the tree lock and then
- * blocks on the render backend thread to do the hit-test. Similar operations
- * elsewhere mean that we need to be careful with which threads are allowed
- * to acquire which locks and the order they do so. At the time of this writing,
- * https://bug1391318.bmoattachments.org/attachment.cgi?id=8965040 contains
- * the most complete description we have of the situation. The total dependency
- * ordering including both threads and locks is as follows:
- *
- * UI main thread
- *  -> GPU main thread          // only if GPU enabled
- *  -> Compositor thread
- *  -> SceneBuilder thread      // only if WR enabled
- *  -> APZ tree lock
- *  -> RenderBackend thread     // only if WR enabled
- *  -> APZC map lock
- *  -> APZC instance lock
- *  -> APZC test lock
- *
- * where the -> annotation means the same as described above.
+ * Please see the "Threading / Locking Overview" section of
+ * gfx/docs/AsyncPanZoom.rst (hosted in rendered form at
+ * https://firefox-source-docs.mozilla.org/gfx/gfx/AsyncPanZoom.html#threading-locking-overview)
+ * for what the ordering is, and what are the rules for respecting it.
  * **************************************************************************
  */
 
@@ -493,6 +469,8 @@ class APZCTreeManager : public IAPZCTreeManager, public APZInputBridge {
    *    NOT reflect async scrolling, i.e. they should be the layer tree's
    *    copy of the metrics, or APZC's last-content-paint metrics.
    * @param aScrollbarData The scrollbar data for the the scroll thumb layer.
+   * @param aScrollbarIsDescendant True iff. the scroll thumb layer is a
+   *    descendant of the layer bearing the scroll frame's metrics.
    * @param aOutClipTransform If not null, and |aScrollbarIsDescendant| is true,
    *    this will be populated with a transform that should be applied to the
    *    clip rects of all layers between the scroll thumb layer and the ancestor
@@ -504,7 +482,7 @@ class APZCTreeManager : public IAPZCTreeManager, public APZInputBridge {
       const LayerToParentLayerMatrix4x4& aCurrentTransform,
       const gfx::Matrix4x4& aScrollableContentTransform,
       AsyncPanZoomController* aApzc, const FrameMetrics& aMetrics,
-      const ScrollbarData& aScrollbarData,
+      const ScrollbarData& aScrollbarData, bool aScrollbarIsDescendant,
       AsyncTransformComponentMatrix* aOutClipTransform);
 
   /**
@@ -811,17 +789,20 @@ class APZCTreeManager : public IAPZCTreeManager, public APZInputBridge {
     ScrollbarData mThumbData;
     ScrollableLayerGuid mTargetGuid;
     CSSTransformMatrix mTargetTransform;
+    bool mTargetIsAncestor;
 
     ScrollThumbInfo(const uint64_t& aThumbAnimationId,
                     const CSSTransformMatrix& aThumbTransform,
                     const ScrollbarData& aThumbData,
                     const ScrollableLayerGuid& aTargetGuid,
-                    const CSSTransformMatrix& aTargetTransform)
+                    const CSSTransformMatrix& aTargetTransform,
+                    bool aTargetIsAncestor)
         : mThumbAnimationId(aThumbAnimationId),
           mThumbTransform(aThumbTransform),
           mThumbData(aThumbData),
           mTargetGuid(aTargetGuid),
-          mTargetTransform(aTargetTransform) {
+          mTargetTransform(aTargetTransform),
+          mTargetIsAncestor(aTargetIsAncestor) {
       MOZ_ASSERT(mTargetGuid.mScrollId == mThumbData.mTargetViewId);
     }
   };

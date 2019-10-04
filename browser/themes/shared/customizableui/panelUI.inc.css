@@ -1804,7 +1804,6 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
 
 /* What's New panel */
 #customizationui-widget-multiview #PanelUI-whatsNew {
-  min-width: @menuPanelWidth@;
   max-width: @menuPanelWidth@;
 }
 
@@ -1817,6 +1816,7 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
   height: 260px;
   overflow: hidden;
   transition: height .25s;
+  border-top: 1px solid var(--panel-separator-color);
 }
 
 #protections-popup #messaging-system-message-container[disabled] {
@@ -1836,37 +1836,19 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
 
 #protections-popup-message.whatsNew-hero-message {
   background-image: url(chrome://browser/skin/controlcenter/hero-message-background.svg);
-  background-color: #0250BB;
   background-repeat: no-repeat;
-  background-position: right;
+  background-position: top right;
   height: calc(100% - 20px);
   margin: 10px;
-  border-radius: 4px;
   color: white;
 }
 
-#customizationui-widget-multiview #PanelUI-whatsNew-content {
-  height: 586px;
+panelview[mainview] #PanelUI-whatsNew-content {
+  height: 43em;
 }
 
-#PanelUI-whatsNew-title {
-  display: none;
-}
-
-/**
- * The Applications Menu container has some extra padding that does not
- * exist when the What's New dropdown is shown directly from the toolbar
- */
-#PanelUI-whatsNew-content {
-  margin-top: -6px;
-}
-
-#customizationui-widget-multiview #PanelUI-whatsNew-content {
-  margin: 0;
-}
-
-#customizationui-widget-multiview #PanelUI-whatsNew-title {
-  display: flex;
+#PanelUI-whatsNew .panel-subview-body {
+  padding-top: 0;
 }
 
 #PanelUI-whatsNew .whatsNew-message {
@@ -1905,7 +1887,9 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
 }
 
 #protections-popup-message .whatsNew-message-body {
-  margin: 0 10px 20px;
+  /* -10px to compensate for the margin on the container. We can't get rid of that
+     because it helps position the background image. */
+  margin: 0 calc(-10px + var(--horizontal-padding)) var(--vertical-section-padding);
 }
 
 #PanelUI-whatsNew .whatsNew-message-body.has-icon {
@@ -1948,14 +1932,22 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
   line-height: 18px;
 }
 
-#PanelUI-whatsNew .text-link,
-#protections-popup-message .text-link {
+#PanelUI-whatsNew .text-link {
   background: none;
   border: 0;
   color: #45a1ff;
   cursor: pointer;
   font-size: 12px;
   margin-top: 16px;
+}
+
+#protections-popup-message .text-link {
+  color: white;
+}
+
+#protections-popup-message .text-link:hover {
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 #PanelUI-whatsNew .text-link:hover {

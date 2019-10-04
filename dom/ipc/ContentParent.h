@@ -585,7 +585,6 @@ class ContentParent final : public PContentParent,
 
   // Use the PHangMonitor channel to ask the child to repaint a tab.
   void PaintTabWhileInterruptingJS(BrowserParent* aBrowserParent,
-                                   bool aForceRepaint,
                                    const layers::LayersObserverEpoch& aEpoch);
 
   void CancelContentJSExecutionIfRunning(
@@ -1375,6 +1374,10 @@ NS_DEFINE_STATIC_IID_ACCESSOR(ContentParent, NS_CONTENTPARENT_IID)
 // This is the C++ version of remoteTypePrefix in E10SUtils.jsm.
 const nsDependentSubstring RemoteTypePrefix(
     const nsAString& aContentProcessType);
+
+// This is based on isWebRemoteType in E10SUtils.jsm.
+bool IsWebRemoteType(const nsAString& aContentProcessType);
+
 }  // namespace dom
 }  // namespace mozilla
 

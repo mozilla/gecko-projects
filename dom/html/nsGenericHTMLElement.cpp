@@ -30,7 +30,6 @@
 #include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/Document.h"
 #include "nsIDocumentEncoder.h"
-#include "nsIDOMWindow.h"
 #include "nsMappedAttributes.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsPIDOMWindow.h"
@@ -1220,7 +1219,8 @@ void nsGenericHTMLElement::MapHeightAttributeInto(
 }
 
 void nsGenericHTMLElement::MapImageSizeAttributesInto(
-    const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls) {
+    const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls,
+    MapAspectRatio aMapAspectRatio) {
   auto* width = aAttributes->GetAttr(nsGkAtoms::width);
   auto* height = aAttributes->GetAttr(nsGkAtoms::height);
   if (width) {
@@ -1229,11 +1229,8 @@ void nsGenericHTMLElement::MapImageSizeAttributesInto(
   if (height) {
     MapDimensionAttributeInto(aDecls, eCSSProperty_height, *height);
   }
-  // NOTE(emilio): If we implement the unrestricted aspect-ratio proposal, we
-  // probably need to make this attribute mapping not apply to things like
-  // <marquee> and <table>, which right now can go through this path.
   if (StaticPrefs::layout_css_width_and_height_map_to_aspect_ratio_enabled() &&
-      width && height) {
+      aMapAspectRatio == MapAspectRatio::Yes && width && height) {
     Maybe<double> w;
     if (width->Type() == nsAttrValue::eInteger) {
       w.emplace(width->GetIntegerValue());

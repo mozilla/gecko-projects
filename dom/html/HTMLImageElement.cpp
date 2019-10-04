@@ -23,7 +23,6 @@
 #include "nsNodeInfoManager.h"
 #include "mozilla/MouseEvents.h"
 #include "nsContentPolicyUtils.h"
-#include "nsIDOMWindow.h"
 #include "nsFocusManager.h"
 #include "mozilla/dom/HTMLFormElement.h"
 #include "mozilla/dom/MutationEventBinding.h"
@@ -234,11 +233,11 @@ bool HTMLImageElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
 
 void HTMLImageElement::MapAttributesIntoRule(
     const nsMappedAttributes* aAttributes, MappedDeclarations& aDecls) {
-  nsGenericHTMLElement::MapImageAlignAttributeInto(aAttributes, aDecls);
-  nsGenericHTMLElement::MapImageBorderAttributeInto(aAttributes, aDecls);
-  nsGenericHTMLElement::MapImageMarginAttributeInto(aAttributes, aDecls);
-  nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aDecls);
-  nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aDecls);
+  MapImageAlignAttributeInto(aAttributes, aDecls);
+  MapImageBorderAttributeInto(aAttributes, aDecls);
+  MapImageMarginAttributeInto(aAttributes, aDecls);
+  MapImageSizeAttributesInto(aAttributes, aDecls, MapAspectRatio::Yes);
+  MapCommonAttributesInto(aAttributes, aDecls);
 }
 
 nsChangeHint HTMLImageElement::GetAttributeChangeHint(const nsAtom* aAttribute,

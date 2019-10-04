@@ -416,7 +416,8 @@ void nsContentSecurityUtils::AssertAboutPageHasCSP(Document* aDocument) {
   // which allows us to apply a strong CSP omitting 'unsafe-inline'. Ideally,
   // the CSP allows precisely the resources that need to be loaded; but it
   // should at least be as strong as:
-  // <meta http-equiv="Content-Security-Policy" content="default-src chrome:"/>
+  // <meta http-equiv="Content-Security-Policy" content="default-src chrome:;
+  // object-src 'none'"/>
 
   // Check if we should skip the assertion
   if (Preferences::GetBool("csp.skip_about_page_has_csp_assert")) {
@@ -431,6 +432,9 @@ void nsContentSecurityUtils::AssertAboutPageHasCSP(Document* aDocument) {
 
   nsCOMPtr<nsIContentSecurityPolicy> csp = aDocument->GetCsp();
   bool foundDefaultSrc = false;
+  bool foundObjectSrc = false;
+  bool foundUnsafeEval = false;
+  bool foundUnsafeInline = false;
   if (csp) {
     uint32_t policyCount = 0;
     csp->GetPolicyCount(&policyCount);
@@ -439,7 +443,15 @@ void nsContentSecurityUtils::AssertAboutPageHasCSP(Document* aDocument) {
       csp->GetPolicyString(i, parsedPolicyStr);
       if (parsedPolicyStr.Find("default-src") >= 0) {
         foundDefaultSrc = true;
-        break;
+      }
+      if (parsedPolicyStr.Find("object-src 'none'") >= 0) {
+        foundObjectSrc = true;
+      }
+      if (parsedPolicyStr.Find("'unsafe-eval'") >= 0) {
+        foundUnsafeEval = true;
+      }
+      if (parsedPolicyStr.Find("'unsafe-inline'") >= 0) {
+        foundUnsafeInline = true;
       }
     }
   }
@@ -482,5 +494,44 @@ void nsContentSecurityUtils::AssertAboutPageHasCSP(Document* aDocument) {
 
   MOZ_ASSERT(foundDefaultSrc,
              "about: page must contain a CSP including default-src");
+  MOZ_ASSERT(foundObjectSrc,
+             "about: page must contain a CSP denying object-src");
+
+  if (aDocument->IsExtensionPage()) {
+    // Extensions have two CSP policies applied where the baseline CSP
+    // includes 'unsafe-eval' and 'unsafe-inline', hence we have to skip
+    // the 'unsafe-eval' and 'unsafe-inline' assertions for extension
+    // pages.
+    return;
+  }
+
+  MOZ_ASSERT(!foundUnsafeEval,
+             "about: page must not contain a CSP including 'unsafe-eval'");
+
+  static nsLiteralCString sLegacyUnsafeInlineAllowList[] = {
+    // Bug 1579160: Remove 'unsafe-inline' from style-src within about:preferences
+    NS_LITERAL_CSTRING("about:preferences"),
+    // Bug 1571346: Remove 'unsafe-inline' from style-src within about:addons
+    NS_LITERAL_CSTRING("about:addons"),
+    // Bug 1584485: Remove 'unsafe-inline' from style-src within:
+    // * about:newtab
+    // * about:welcome
+    // * about:home
+    NS_LITERAL_CSTRING("about:newtab"),
+    NS_LITERAL_CSTRING("about:welcome"),
+    NS_LITERAL_CSTRING("about:home"),
+  };
+
+  for (const nsLiteralCString& aUnsafeInlineEntry : sLegacyUnsafeInlineAllowList) {
+    // please note that we perform a substring match here on purpose,
+    // so we don't have to deal and parse out all the query arguments
+    // the various about pages rely on.
+    if (StringBeginsWith(aboutSpec, aUnsafeInlineEntry)) {
+      return;
+    }
+  }
+
+  MOZ_ASSERT(!foundUnsafeInline,
+             "about: page must not contain a CSP including 'unsafe-inline'");
 }
 #endif

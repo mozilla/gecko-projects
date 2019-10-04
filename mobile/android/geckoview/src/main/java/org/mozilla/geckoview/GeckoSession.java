@@ -732,11 +732,20 @@ public class GeckoSession implements Parcelable {
                     final HistoryDelegate historyDelegate = getHistoryDelegate();
                     final GeckoBundle update = message.getBundle("data");
                     if (update != null) {
+                        final int previousHistorySize = mStateCache.size();
                         mStateCache.updateSessionState(update);
                         final SessionState state = new SessionState(mStateCache);
                         delegate.onSessionStateChange(GeckoSession.this, state);
-                        if (historyDelegate != null && update.getBundle("historychange") != null) {
-                            historyDelegate.onHistoryStateChange(GeckoSession.this, state);
+                        if (update.getBundle("historychange") != null) {
+                            if (historyDelegate != null) {
+                                historyDelegate.onHistoryStateChange(GeckoSession.this, state);
+                            }
+                            // If the previous history was larger than one entry and the new size is one, it means the
+                            // History has been purged and the navigation delegate needs to be update.
+                            if ((previousHistorySize > 1) && (state.size() == 1) && mNavigationHandler.getDelegate() != null) {
+                                mNavigationHandler.getDelegate().onCanGoForward(GeckoSession.this, false);
+                                mNavigationHandler.getDelegate().onCanGoBack(GeckoSession.this, false);
+                            }
                         }
                     }
                 }
@@ -1619,12 +1628,7 @@ public class GeckoSession implements Parcelable {
             if (key == null)
                 continue;
 
-            String value = additionalHeaders.get(key);
-
-            // As per RFC7230 headers must contain a field value
-            if (value != null && !value.equals("")) {
-                headers.add( String.format("%s:%s", key, additionalHeaders.get(key)) );
-            }
+            headers.add( String.format("%s:%s", key, additionalHeaders.get(key)) );
         }
         return headers;
     }
@@ -1896,6 +1900,17 @@ public class GeckoSession implements Parcelable {
         final GeckoBundle msg = new GeckoBundle(1);
         msg.putInt("index", index);
         mEventDispatcher.dispatch("GeckoView:GotoHistoryIndex", msg);
+    }
+
+    /**
+     * Purge history for the session.
+     * The session history is used for back and forward history.
+     * Purging the session history means {@link NavigationDelegate#onCanGoBack(GeckoSession, boolean)}
+     * and {@link NavigationDelegate#onCanGoForward(GeckoSession, boolean)} will be false.
+     */
+    @AnyThread
+    public void purgeHistory() {
+        mEventDispatcher.dispatch("GeckoView:PurgeHistory", null);
     }
 
     @Retention(RetentionPolicy.SOURCE)

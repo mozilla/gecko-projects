@@ -19,7 +19,7 @@
 
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head>
-    <meta http-equiv="Content-Security-Policy" content="default-src chrome:" />
+    <meta http-equiv="Content-Security-Policy" content="default-src chrome:; object-src 'none'" />
     <title>&loadError.label;</title>
     <link rel="stylesheet" href="chrome://browser/skin/aboutNetError.css" type="text/css" media="all" />
     <!-- If the location of the favicon is changed here, the FAVICON_ERRORPAGE_URL symbol in
@@ -179,6 +179,14 @@
           <div id="learnMoreContainer">
             <p><a id="learnMoreLink" target="new">&errorReporting.learnMore;</a></p>
           </div>
+        </div>
+
+        <!-- UI to temporarily re-enable TLS 1.0 and 1.1.
+             This should be removed after March 2020, see bug 1579285.  -->
+        <div id="enableTls10Container" class="button-container">
+          <p>&enableTls10.longDesc;</p>
+          <p>&enableTls10.note;</p>
+          <button id="enableTls10Button" class="primary">&enableTls10.label;</button>
         </div>
 
         <!-- UI for option to report certificate errors to Mozilla. Removed on

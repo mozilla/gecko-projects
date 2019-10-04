@@ -375,7 +375,7 @@ nsresult IDBFactory::AllowedForWindowInternal(nsPIDOMWindowInner* aWindow,
   MOZ_ALWAYS_SUCCEEDS(principal->GetURI(getter_AddRefs(uri)));
   MOZ_ASSERT(uri);
 
-  if (uri->SchemeIs("about")) {
+  if (principal->SchemeIs("about")) {
     nsCOMPtr<nsIAboutModule> module;
     if (NS_SUCCEEDED(NS_GetAboutModule(uri, getter_AddRefs(module)))) {
       uint32_t flags;
@@ -760,17 +760,12 @@ already_AddRefed<IDBOpenDBRequest> IDBFactory::OpenInternal(
   MOZ_ASSERT(request);
 
   if (aDeleting) {
-    IDB_LOG_MARK(
-        "IndexedDB %s: Child  Request[%llu]: "
-        "indexedDB.deleteDatabase(\"%s\")",
-        "IndexedDB %s: C R[%llu]: IDBFactory.deleteDatabase()",
-        IDB_LOG_ID_STRING(), request->LoggingSerialNumber(),
-        NS_ConvertUTF16toUTF8(aName).get());
+    IDB_LOG_MARK_CHILD_REQUEST(
+        "indexedDB.deleteDatabase(\"%s\")", "IDBFactory.deleteDatabase()",
+        request->LoggingSerialNumber(), NS_ConvertUTF16toUTF8(aName).get());
   } else {
-    IDB_LOG_MARK(
-        "IndexedDB %s: Child  Request[%llu]: "
-        "indexedDB.open(\"%s\", %s)",
-        "IndexedDB %s: C R[%llu]: IDBFactory.open()", IDB_LOG_ID_STRING(),
+    IDB_LOG_MARK_CHILD_REQUEST(
+        "indexedDB.open(\"%s\", %s)", "IDBFactory.open()",
         request->LoggingSerialNumber(), NS_ConvertUTF16toUTF8(aName).get(),
         IDB_LOG_STRINGIFY(aVersion));
   }

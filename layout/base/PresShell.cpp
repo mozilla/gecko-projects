@@ -4155,12 +4155,7 @@ void PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
         !mIsDestroying) {
       didLayoutFlush = true;
       mFrameConstructor->RecalcQuotesAndCounters();
-      viewManager->FlushDelayedResize(true);
       if (ProcessReflowCommands(flushType < FlushType::Layout)) {
-        // We didn't get interrupted. Go ahead and perform scroll anchor
-        // adjustments and scroll content into view
-        FlushPendingScrollAnchorAdjustments();
-
         if (mContentToScrollTo) {
           DoScrollContentIntoView();
           if (mContentToScrollTo) {
@@ -9034,8 +9029,8 @@ void PresShell::WillDoReflow() {
 void PresShell::DidDoReflow(bool aInterruptible) {
   HandlePostedReflowCallbacks(aInterruptible);
 
-  nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell();
-  if (docShell) {
+  AutoAssertNoFlush noReentrantFlush(*this);
+  if (nsCOMPtr<nsIDocShell> docShell = mPresContext->GetDocShell()) {
     DOMHighResTimeStamp now = GetPerformanceNowUnclamped();
     docShell->NotifyReflowObservers(aInterruptible, mLastReflowStart, now);
   }
@@ -9401,6 +9396,12 @@ bool PresShell::ProcessReflowCommands(bool aInterruptible) {
       interrupted = !mDirtyRoots.IsEmpty();
 
       overflowTracker.Flush();
+
+      if (!interrupted) {
+        // We didn't get interrupted. Go ahead and perform scroll anchor
+        // adjustments.
+        FlushPendingScrollAnchorAdjustments();
+      }
     }
 
     // Exiting the scriptblocker might have killed us

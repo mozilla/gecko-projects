@@ -171,7 +171,6 @@
 #include "ExpandedPrincipal.h"
 #include "mozilla/NullPrincipal.h"
 
-#include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
 #include "nsFocusManager.h"
 #include "nsICookiePermission.h"
@@ -1248,7 +1247,6 @@ Document::Document(const char* aContentType)
       mHasMixedActiveContentBlocked(false),
       mHasMixedDisplayContentLoaded(false),
       mHasMixedDisplayContentBlocked(false),
-      mHasMixedContentObjectSubrequest(false),
       mHasCSP(false),
       mHasUnsafeEvalCSP(false),
       mHasUnsafeInlineCSP(false),
@@ -1384,21 +1382,15 @@ Document::Document(const char* aContentType)
   mReferrerInfo = new dom::ReferrerInfo(nullptr);
 }
 
-bool Document::CallerIsTrustedAboutNetError(JSContext* aCx, JSObject* aObject) {
-  nsIPrincipal* principal = nsContentUtils::SubjectPrincipal(aCx);
-  if (NS_WARN_IF(!principal)) {
+static bool IsAboutErrorPage(nsGlobalWindowInner* aWin, const char* aSpec) {
+  if (NS_WARN_IF(!aWin)) {
     return false;
   }
 
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_OK;
-  rv = principal->GetURI(getter_AddRefs(uri));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  if (!uri) {
+  nsIURI* uri = aWin->GetDocumentURI();
+  if (NS_WARN_IF(!uri)) {
     return false;
   }
-
   // getSpec is an expensive operation, hence we first check the scheme
   // to see if the caller is actually an about: page.
   if (!uri->SchemeIs("about")) {
@@ -1406,10 +1398,15 @@ bool Document::CallerIsTrustedAboutNetError(JSContext* aCx, JSObject* aObject) {
   }
 
   nsAutoCString aboutSpec;
-  rv = uri->GetSpec(aboutSpec);
+  nsresult rv = NS_GetAboutModuleName(uri, aboutSpec);
   NS_ENSURE_SUCCESS(rv, false);
 
-  return StringBeginsWith(aboutSpec, NS_LITERAL_CSTRING("about:neterror"));
+  return aboutSpec.EqualsASCII(aSpec);
+}
+
+bool Document::CallerIsTrustedAboutNetError(JSContext* aCx, JSObject* aObject) {
+  nsGlobalWindowInner* win = xpc::WindowOrNull(aObject);
+  return IsAboutErrorPage(win, "neterror");
 }
 
 void Document::GetNetErrorInfo(mozilla::dom::NetErrorInfo& aInfo,
@@ -1444,31 +1441,8 @@ void Document::GetNetErrorInfo(mozilla::dom::NetErrorInfo& aInfo,
 
 bool Document::CallerIsTrustedAboutCertError(JSContext* aCx,
                                              JSObject* aObject) {
-  nsIPrincipal* principal = nsContentUtils::SubjectPrincipal(aCx);
-  if (NS_WARN_IF(!principal)) {
-    return false;
-  }
-
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_OK;
-  rv = principal->GetURI(getter_AddRefs(uri));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  if (!uri) {
-    return false;
-  }
-
-  // getSpec is an expensive operation, hence we first check the scheme
-  // to see if the caller is actually an about: page.
-  if (!uri->SchemeIs("about")) {
-    return false;
-  }
-
-  nsAutoCString aboutSpec;
-  rv = uri->GetSpec(aboutSpec);
-  NS_ENSURE_SUCCESS(rv, false);
-
-  return StringBeginsWith(aboutSpec, NS_LITERAL_CSTRING("about:certerror"));
+  nsGlobalWindowInner* win = xpc::WindowOrNull(aObject);
+  return IsAboutErrorPage(win, "certerror");
 }
 
 void Document::GetFailedCertSecurityInfo(
@@ -1723,9 +1697,7 @@ void Document::GetFailedCertSecurityInfo(
 
 bool Document::IsAboutPage() const {
   nsCOMPtr<nsIPrincipal> principal = NodePrincipal();
-  nsCOMPtr<nsIURI> uri;
-  principal->GetURI(getter_AddRefs(uri));
-  return !uri || uri->SchemeIs("about");
+  return principal->SchemeIs("about");
 }
 
 void Document::ConstructUbiNode(void* storage) {
@@ -1777,15 +1749,6 @@ Document::~Document() {
         mixedContentLevel = MIXED_DISPLAY_CONTENT;
       }
       Accumulate(Telemetry::MIXED_CONTENT_PAGE_LOAD, mixedContentLevel);
-
-      // record mixed object subrequest telemetry
-      if (mHasMixedContentObjectSubrequest) {
-        /* mixed object subrequest loaded on page*/
-        Accumulate(Telemetry::MIXED_CONTENT_OBJECT_SUBREQUEST, 1);
-      } else {
-        /* no mixed object subrequests loaded on page*/
-        Accumulate(Telemetry::MIXED_CONTENT_OBJECT_SUBREQUEST, 0);
-      }
 
       // record CSP telemetry on this document
       if (mHasCSP) {
@@ -3040,28 +3003,17 @@ nsresult Document::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
     WarnIfSandboxIneffective(docShell, mSandboxFlags, GetChannel());
   }
 
-  // The CSP directive upgrade-insecure-requests not only applies to the
-  // toplevel document, but also to nested documents. Let's propagate that
-  // flag from the parent to the nested document.
-  nsCOMPtr<nsIDocShellTreeItem> treeItem = this->GetDocShell();
-  if (treeItem) {
-    nsCOMPtr<nsIDocShellTreeItem> sameTypeParent;
-    treeItem->GetInProcessSameTypeParent(getter_AddRefs(sameTypeParent));
-    if (sameTypeParent) {
-      Document* doc = sameTypeParent->GetDocument();
-      mBlockAllMixedContent = doc->GetBlockAllMixedContent(false);
-      // if the parent document makes use of block-all-mixed-content
-      // then subdocument preloads should always be blocked.
-      mBlockAllMixedContentPreloads =
-          mBlockAllMixedContent || doc->GetBlockAllMixedContent(true);
-
-      mUpgradeInsecureRequests = doc->GetUpgradeInsecureRequests(false);
-      // if the parent document makes use of upgrade-insecure-requests
-      // then subdocument preloads should always be upgraded.
-      mUpgradeInsecurePreloads =
-          mUpgradeInsecureRequests || doc->GetUpgradeInsecureRequests(true);
-    }
-  }
+  // The CSP directives upgrade-insecure-requests as well as
+  // block-all-mixed-content not only apply to the toplevel document,
+  // but also to nested documents. The loadInfo of a subdocument
+  // load already holds the correct flag, so let's just set it here
+  // on the document. Please note that we set the appropriate preload
+  // bits just for the sake of completeness here, because the preloader
+  // does not reach into subdocuments.
+  mUpgradeInsecureRequests = loadInfo->GetUpgradeInsecureRequests();
+  mUpgradeInsecurePreloads = mUpgradeInsecureRequests;
+  mBlockAllMixedContent = loadInfo->GetBlockAllMixedContent();
+  mBlockAllMixedContentPreloads = mBlockAllMixedContent;
 
   nsresult rv = InitReferrerInfo(aChannel);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -3593,9 +3545,7 @@ void Document::SetPrincipals(nsIPrincipal* aNewPrincipal,
   MOZ_ASSERT(!!aNewPrincipal == !!aNewStoragePrincipal);
   if (aNewPrincipal && mAllowDNSPrefetch &&
       StaticPrefs::network_dns_disablePrefetchFromHTTPS()) {
-    nsCOMPtr<nsIURI> uri;
-    aNewPrincipal->GetURI(getter_AddRefs(uri));
-    if (!uri || uri->SchemeIs("https")) {
+    if (aNewPrincipal->SchemeIs("https")) {
       mAllowDNSPrefetch = false;
     }
   }
@@ -10801,10 +10751,8 @@ nsIContent* Document::GetContentInThisDocument(nsIFrame* aFrame) const {
 }
 
 void Document::DispatchPageTransition(EventTarget* aDispatchTarget,
-                                      const nsAString& aType,
-                                      bool aInFrameSwap,
-                                      bool aPersisted,
-                                      bool aOnlySystemGroup) {
+                                      const nsAString& aType, bool aInFrameSwap,
+                                      bool aPersisted, bool aOnlySystemGroup) {
   if (!aDispatchTarget) {
     return;
   }
@@ -14461,9 +14409,7 @@ void Document::PropagateUseCounters(Document* aParentDocument) {
   MOZ_ASSERT(this != aParentDocument);
 
   // Don't count chrome resources, even in the web content.
-  nsCOMPtr<nsIURI> uri;
-  NodePrincipal()->GetURI(getter_AddRefs(uri));
-  if (!uri || uri->SchemeIs("chrome")) {
+  if (NodePrincipal()->SchemeIs("chrome")) {
     return;
   }
 
@@ -15343,13 +15289,7 @@ FlashClassification Document::DocumentFlashClassification() {
     return FlashClassification::Unknown;
   }
 
-  if (NodePrincipal()->GetIsNullPrincipal()) {
-    return FlashClassification::Denied;
-  }
-
-  nsCOMPtr<nsIURI> classificationURI;
-  nsresult rv = NodePrincipal()->GetURI(getter_AddRefs(classificationURI));
-  if (NS_FAILED(rv) || !classificationURI) {
+  if (!NodePrincipal()->GetIsContentPrincipal()) {
     return FlashClassification::Denied;
   }
 
@@ -15359,10 +15299,9 @@ FlashClassification Document::DocumentFlashClassification() {
     // * chrome documents
     // * "bare" data: loads
     // * FTP/gopher/file
-    nsAutoCString scheme;
-    rv = classificationURI->GetScheme(scheme);
-    if (NS_WARN_IF(NS_FAILED(rv)) ||
-        !(scheme.EqualsLiteral("http") || scheme.EqualsLiteral("https"))) {
+
+    if (!(NodePrincipal()->SchemeIs("http") ||
+          NodePrincipal()->SchemeIs("https"))) {
       return FlashClassification::Denied;
     }
   }

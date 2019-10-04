@@ -500,6 +500,10 @@ class BrowserParent final : public PBrowserParent,
       const nsString& aRemoteType, BrowsingContext* aBrowsingContext,
       const uint32_t& aChromeFlags, const TabId& aTabId) override;
 
+  mozilla::ipc::IPCResult RecvIsWindowSupportingProtectedMedia(
+      const uint64_t& aOuterWindowID,
+      IsWindowSupportingProtectedMediaResolver&& aResolve);
+
   void LoadURL(nsIURI* aURI);
 
   void ResumeLoad(uint64_t aPendingSwitchID);
@@ -726,7 +730,6 @@ class BrowserParent final : public PBrowserParent,
   bool GetRenderLayers();
   void SetRenderLayers(bool aRenderLayers);
   void PreserveLayers(bool aPreserveLayers);
-  void ForceRepaint();
   void NotifyResolutionChanged();
 
   void Deprioritize();
@@ -792,7 +795,7 @@ class BrowserParent final : public PBrowserParent,
 
   void DestroyInternal();
 
-  void SetRenderLayersInternal(bool aEnabled, bool aForceRepaint);
+  void SetRenderLayersInternal(bool aEnabled);
 
   already_AddRefed<nsFrameLoader> GetFrameLoader(
       bool aUseCachedFrameLoaderAfterDestroy = false) const;

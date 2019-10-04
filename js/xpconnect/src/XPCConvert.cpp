@@ -50,6 +50,9 @@ using namespace JS;
 static JSObject* UnwrapNativeCPOW(nsISupports* wrapper) {
   nsCOMPtr<nsIXPConnectWrappedJS> underware = do_QueryInterface(wrapper);
   if (underware) {
+    // The analysis falsely believes that ~nsCOMPtr can GC because it could
+    // drop the refcount to zero, but that can't happen here.
+    JS::AutoSuppressGCAnalysis nogc;
     JSObject* mainObj = underware->GetJSObject();
     if (mainObj && mozilla::jsipc::IsWrappedCPOW(mainObj)) {
       return mainObj;
@@ -714,8 +717,9 @@ bool XPCConvert::JSData2Native(JSContext* cx, void* d, HandleValue s,
       size_t utf8Length = JS::GetDeflatedUTF8StringLength(flat);
       rs->SetLength(utf8Length);
 
-      JS::DeflateStringToUTF8Buffer(
-          flat, mozilla::RangedPtr<char>(rs->BeginWriting(), utf8Length));
+      mozilla::DebugOnly<size_t> written = JS::DeflateStringToUTF8Buffer(
+          flat, mozilla::MakeSpan(rs->BeginWriting(), utf8Length));
+      MOZ_ASSERT(written == utf8Length);
 
       return true;
     }

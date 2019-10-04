@@ -29,7 +29,6 @@
 #include "mozilla/LoadInfo.h"
 #include "nsGlobalWindow.h"
 #include "nsIScriptGlobalObject.h"
-#include "nsIDOMWindow.h"
 #include "mozilla/dom/Document.h"
 #include "nsXPCOM.h"
 #include "nsIXPConnect.h"
@@ -1615,12 +1614,7 @@ nsresult WebSocketImpl::Init(JSContext* aCx, nsIPrincipal* aLoadingPrincipal,
                             false) &&
       !nsMixedContentBlocker::IsPotentiallyTrustworthyLoopbackHost(
           mAsciiHost)) {
-    nsCOMPtr<nsIURI> originURI;
-    if (aLoadingPrincipal) {
-      aLoadingPrincipal->GetURI(getter_AddRefs(originURI));
-    }
-
-    if (originURI && originURI->SchemeIs("https")) {
+    if (aLoadingPrincipal->SchemeIs("https")) {
       return NS_ERROR_DOM_SECURITY_ERR;
     }
   }

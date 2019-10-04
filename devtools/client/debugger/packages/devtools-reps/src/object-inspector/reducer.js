@@ -2,8 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-import type { ReduxAction, State } from "./types";
-
 function initialState(overrides) {
   return {
     expandedPaths: new Set(),
@@ -15,10 +13,7 @@ function initialState(overrides) {
   };
 }
 
-function reducer(
-  state: State = initialState(),
-  action: ReduxAction = {}
-): State {
+function reducer(state = initialState(), action = {}) {
   const { type, data } = action;
 
   const cloneState = overrides => ({ ...state, ...overrides });
@@ -75,6 +70,10 @@ function reducer(
     });
   }
 
+  if (type === "RELEASED_ACTORS") {
+    return onReleasedActorsAction(state, action);
+  }
+
   if (type === "ROOTS_CHANGED") {
     return cloneState();
   }
@@ -100,6 +99,26 @@ function reducer(
   }
 
   return state;
+}
+
+/**
+ * Reducer function for the "RELEASED_ACTORS" action.
+ */
+function onReleasedActorsAction(state, action) {
+  const { data } = action;
+
+  if (state.actors && state.actors.size > 0 && data.actors.length > 0) {
+    return state;
+  }
+
+  for (const actor of data.actors) {
+    state.actors.delete(actor);
+  }
+
+  return {
+    ...state,
+    actors: new Set(state.actors || []),
+  };
 }
 
 function updateObject(obj, property, watchpoint) {

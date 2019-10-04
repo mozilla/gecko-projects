@@ -154,6 +154,9 @@ class IDLObject(object):
     def isNamespace(self):
         return False
 
+    def isInterfaceMixin(self):
+        return False
+
     def isEnum(self):
         return False
 
@@ -233,8 +236,6 @@ class IDLScope(IDLObject):
         # A mapping from global name to the set of global interfaces
         # that have that global name.
         self.globalNameMapping = defaultdict(set)
-        self.primaryGlobalAttr = None
-        self.primaryGlobalName = None
 
     def __str__(self):
         return self.QName()
@@ -462,8 +463,17 @@ class IDLExposureMixins():
                 raise WebIDLError("Unknown [Exposed] value %s" % globalName,
                                   [self._location])
 
-        if len(self._exposureGlobalNames) == 0:
-            self._exposureGlobalNames.add(scope.primaryGlobalName)
+        # Verify that we are exposed _somwhere_ if we have some place to be
+        # exposed.  We don't want to assert that we're definitely exposed
+        # because a lot of our parser tests have small-enough IDL snippets that
+        # they don't include any globals, and we don't really want to go through
+        # and add global interfaces and [Exposed] annotations to all those
+        # tests.
+        if len(scope.globalNames) != 0:
+            if (len(self._exposureGlobalNames) == 0):
+                raise WebIDLError(("'%s' is not exposed anywhere even though we have "
+                                   "globals to be exposed to") % self,
+                                  [self.location])
 
         globalNameSetToExposureSet(scope, self._exposureGlobalNames,
                                    self.exposureSet)
@@ -508,17 +518,15 @@ class IDLExposureMixins():
         return workerDebuggerScopes.intersection(self.exposureSet)
 
 
-class IDLExternalInterface(IDLObjectWithIdentifier, IDLExposureMixins):
+class IDLExternalInterface(IDLObjectWithIdentifier):
     def __init__(self, location, parentScope, identifier):
         assert isinstance(identifier, IDLUnresolvedIdentifier)
         assert isinstance(parentScope, IDLScope)
         self.parent = None
         IDLObjectWithIdentifier.__init__(self, location, parentScope, identifier)
-        IDLExposureMixins.__init__(self, location)
         IDLObjectWithIdentifier.resolve(self, parentScope)
 
     def finish(self, scope):
-        IDLExposureMixins.finish(self, scope)
         pass
 
     def validate(self):
@@ -549,9 +557,6 @@ class IDLExternalInterface(IDLObjectWithIdentifier, IDLExposureMixins):
         return False
 
     def hasProbablyShortLivingWrapper(self):
-        return False
-
-    def isSerializable(self):
         return False
 
     def _getDependentObjects(self):
@@ -715,6 +720,7 @@ class IDLInterfaceOrInterfaceMixinOrNamespace(IDLObjectWithScope, IDLExposureMix
             return "interface"
         if self.isNamespace():
             return "namespace"
+        assert self.isInterfaceMixin()
         return "interface mixin"
 
     def getExtendedAttribute(self, name):
@@ -771,6 +777,9 @@ class IDLInterfaceOrInterfaceMixinOrNamespace(IDLObjectWithScope, IDLExposureMix
                                   "larger exposure set than its container",
                                   [member.location, self.location])
 
+    def isExternal(self):
+        return False
+
 
 class IDLInterfaceMixin(IDLInterfaceOrInterfaceMixinOrNamespace):
     def __init__(self, location, parentScope, name, members, isKnownNonPartial):
@@ -785,6 +794,9 @@ class IDLInterfaceMixin(IDLInterfaceOrInterfaceMixinOrNamespace):
     def __str__(self):
         return "Interface mixin '%s'" % self.identifier.name
 
+    def isInterfaceMixin(self):
+        return True
+
     def finish(self, scope):
         if self._finished:
             return
@@ -793,8 +805,10 @@ class IDLInterfaceMixin(IDLInterfaceOrInterfaceMixinOrNamespace):
         # Expose to the globals of interfaces that includes this mixin if this
         # mixin has no explicit [Exposed] so that its members can be exposed
         # based on the base interface exposure set.
-        # Make sure this is done before IDLExposureMixins.finish call to
-        # prevent exposing to PrimaryGlobal by default.
+        #
+        # Make sure this is done before IDLExposureMixins.finish call, since
+        # that converts our set of exposure global names to an actual exposure
+        # set.
         hasImplicitExposure = len(self._exposureGlobalNames) == 0
         if hasImplicitExposure:
             self._exposureGlobalNames.update(self.actualExposureGlobalNames)
@@ -992,10 +1006,8 @@ class IDLInterfaceOrNamespace(IDLInterfaceOrInterfaceMixinOrNamespace):
 
             self.totalMembersInSlots = self.parent.totalMembersInSlots
 
-            # Interfaces with [Global] or [PrimaryGlobal] must not
-            # have anything inherit from them
-            if (self.parent.getExtendedAttribute("Global") or
-                self.parent.getExtendedAttribute("PrimaryGlobal")):
+            # Interfaces with [Global] must not have anything inherit from them
+            if self.parent.getExtendedAttribute("Global"):
                 # Note: This is not a self.parent.isOnGlobalProtoChain() check
                 # because ancestors of a [Global] interface can have other
                 # descendants.
@@ -1089,7 +1101,7 @@ class IDLInterfaceOrNamespace(IDLInterfaceOrInterfaceMixinOrNamespace):
             if self.globalNames:
                 raise WebIDLError(
                     "Can't have both a named constructor and [Global]",
-                    [self.location, self.namedConstructors.location])
+                    [self.location, ctor.location])
             assert len(ctor._exposureGlobalNames) == 0
             ctor._exposureGlobalNames.update(self._exposureGlobalNames)
             ctor.finish(scope)
@@ -1101,6 +1113,13 @@ class IDLInterfaceOrNamespace(IDLInterfaceOrInterfaceMixinOrNamespace):
 
         for mixin in sorted(self.includedMixins,
                             key=lambda x: x.identifier.name):
+            for mixinMember in mixin.members:
+                for member in self.members:
+                    if mixinMember.identifier.name == member.identifier.name:
+                        raise WebIDLError(
+                            "Multiple definitions of %s on %s coming from 'includes' statements" %
+                            (member.identifier.name, self),
+                            [mixinMember.location, member.location])
             self.members.extend(mixin.members)
 
         for ancestor in self.getInheritedInterfaces():
@@ -1480,9 +1499,6 @@ class IDLInterfaceOrNamespace(IDLInterfaceOrInterfaceMixinOrNamespace):
                               'an integer-typed "length" attribute',
                               [self.location, indexedGetter.location])
 
-    def isExternal(self):
-        return False
-
     def setCallback(self, value):
         self._callback = value
 
@@ -1708,20 +1724,6 @@ class IDLInterface(IDLInterfaceOrNamespace):
                     self.globalNames = [self.identifier.name]
                 self.parentScope.addIfaceGlobalNames(self.identifier.name,
                                                      self.globalNames)
-                self._isOnGlobalProtoChain = True
-            elif identifier == "PrimaryGlobal":
-                if not attr.noArguments():
-                    raise WebIDLError("[PrimaryGlobal] must take no arguments",
-                                      [attr.location])
-                if self.parentScope.primaryGlobalAttr is not None:
-                    raise WebIDLError(
-                        "[PrimaryGlobal] specified twice",
-                        [attr.location,
-                         self.parentScope.primaryGlobalAttr.location])
-                self.parentScope.primaryGlobalAttr = attr
-                self.parentScope.primaryGlobalName = self.identifier.name
-                self.parentScope.addIfaceGlobalNames(self.identifier.name,
-                                                     [self.identifier.name])
                 self._isOnGlobalProtoChain = True
             elif identifier == "LegacyWindowAlias":
                 if attr.hasValue():
@@ -2986,8 +2988,9 @@ class IDLWrapperType(IDLType):
             return True
         iface = self.inner
         if iface.isExternal():
-            # Let's say true, though ideally we'd only do this when
-            # exposureSet contains the primary global's name.
+            # Let's say true, so we don't have to implement exposure mixins on
+            # external interfaces and sprinkle [Exposed=Window] on every single
+            # external interface declaration.
             return True
         return iface.exposureSet.issuperset(exposureSet)
 
@@ -3770,10 +3773,6 @@ class IDLInterfaceMember(IDLObjectWithIdentifier, IDLExposureMixins):
         return self._extendedAttrDict.get(name, None)
 
     def finish(self, scope):
-        # We better be exposed _somewhere_.
-        if (len(self._exposureGlobalNames) == 0):
-            print(self.identifier.name)
-        assert len(self._exposureGlobalNames) != 0
         IDLExposureMixins.finish(self, scope)
 
     def validate(self):
@@ -5474,10 +5473,8 @@ class IDLIncludesStatement(IDLObject):
             raise WebIDLError("Right-hand side of 'includes' is not an "
                               "interface mixin",
                               [self.mixin.location, mixin.location])
-        if len(interface._exposureGlobalNames) != 0:
-            mixin.actualExposureGlobalNames.update(interface._exposureGlobalNames)
-        else:
-            mixin.actualExposureGlobalNames.add(scope.primaryGlobalName);
+
+        mixin.actualExposureGlobalNames.update(interface._exposureGlobalNames)
 
         interface.addIncludedMixin(mixin)
         self.interface = interface
@@ -5584,7 +5581,6 @@ class Tokenizer(object):
         return t
 
     keywords = {
-        "module": "MODULE",
         "interface": "INTERFACE",
         "partial": "PARTIAL",
         "mixin": "MIXIN",
@@ -6878,7 +6874,6 @@ class Parser(Tokenizer):
                   | INHERIT
                   | INTERFACE
                   | LONG
-                  | MODULE
                   | NULL
                   | OBJECT
                   | OCTET
@@ -7326,12 +7321,6 @@ class Parser(Tokenizer):
             logger.reportGrammarErrors()
 
         self._globalScope = IDLScope(BuiltinLocation("<Global Scope>"), None, None)
-
-        # To make our test harness work, pretend like we have a primary global already.
-        # Note that we _don't_ set _globalScope.primaryGlobalAttr,
-        # so we'll still be able to detect multiple PrimaryGlobal extended attributes.
-        self._globalScope.primaryGlobalName = "FakeTestPrimaryGlobal"
-        self._globalScope.addIfaceGlobalNames("FakeTestPrimaryGlobal", ["FakeTestPrimaryGlobal"])
 
         self._installBuiltins(self._globalScope)
         self._productions = []

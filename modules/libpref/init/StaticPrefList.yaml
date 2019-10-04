@@ -136,9 +136,11 @@
 #endif
 
 #ifdef NIGHTLY_BUILD
-#define IS_NIGHTLY_BUILD  true
+#define IS_NIGHTLY_BUILD      true
+#define IS_NOT_NIGHTLY_BUILD  false
 #else
-#define IS_NIGHTLY_BUILD  false
+#define IS_NIGHTLY_BUILD      false
+#define IS_NOT_NIGHTLY_BUILD  true
 #endif
 
 #ifdef MOZILLA_OFFICIAL
@@ -649,6 +651,15 @@
 - name: browser.cache.offline.enable
   type: bool
   value: true
+  mirror: always
+
+- name: browser.cache.offline.storage.enable
+  type: bool
+#ifdef EARLY_BETA_OR_EARLIER
+  value: false
+#else
+  value: true
+#endif
   mirror: always
 
 - name: browser.cache.disk.enable
@@ -1859,6 +1870,12 @@
   value: true
   mirror: always
 
+# re-SAB; Whether allow postMessage a sharedArrayBuffer
+- name: dom.postMessage.sharedArrayBuffer.withCOOP_COEP
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # Presentation API
 - name: dom.presentation.enabled
   type: bool
@@ -2547,7 +2564,7 @@
 
 # Is support for the Web GPU API enabled?
 - name: dom.webgpu.enable
-  type: bool
+  type: RelaxedAtomicBool
   value: false
   mirror: always
 
@@ -5005,7 +5022,7 @@
 # "blockified" to "-moz-box" (rather than to "block")
 - name: layout.css.xul-box-display-values.survive-blockification.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
   rust: true
 
@@ -5178,6 +5195,16 @@
   value: true
   mirror: always
 
+# Pref to control disabling scroll anchoring suppression triggers, see
+#
+# https://drafts.csswg.org/css-scroll-anchoring/#suppression-triggers
+#
+# Those triggers should be unnecessary after bug 1561450.
+- name: layout.css.scroll-anchoring.suppressions.enabled
+  type: bool
+  value: true
+  mirror: always
+
 - name: layout.css.scroll-anchoring.highlight
   type: bool
   value: false
@@ -5239,7 +5266,7 @@
 # internal-for-now aspect-ratio property?
 - name: layout.css.width-and-height-map-to-aspect-ratio.enabled
   type: bool
-  value: @IS_EARLY_BETA_OR_EARLIER@
+  value: true
   mirror: always
 
 # The fraction of the scrollport we allow to horizontally scroll by before we
@@ -5306,6 +5333,12 @@
 - name: mathml.nonzero_unitless_lengths.disabled
   type: bool
   value: true
+  mirror: always
+
+# Whether to disable deprecated numalign/denomalign/align attributes
+- name: mathml.deprecated_alignment_attributes.disabled
+  type: bool
+  value: @IS_NIGHTLY_BUILD@
   mirror: always
 
 #---------------------------------------------------------------------------
@@ -5609,6 +5642,11 @@
 
 #ifdef MOZ_FFVPX
 -   name: media.ffvpx.enabled
+    type: RelaxedAtomicBool
+    value: true
+    mirror: always
+
+-   name: media.ffvpx.mp3.enabled
     type: RelaxedAtomicBool
     value: true
     mirror: always
@@ -7085,6 +7123,12 @@
   # 8 = Meta, 16 = Win
   value: 5
 #endif
+  mirror: always
+
+# If true, all popups won't hide automatically on blur
+- name: ui.popup.disable_autohide
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 # Negate scroll, true will make the mouse scroll wheel move the screen the

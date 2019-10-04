@@ -1255,7 +1255,8 @@ void nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
       }
     }
 
-    if (mInScrollAnchorChain && needAnchorSuppression) {
+    if (mInScrollAnchorChain && needAnchorSuppression &&
+        StaticPrefs::layout_css_scroll_anchoring_suppressions_enabled()) {
       ScrollAnchorContainer::FindFor(this)->SuppressAdjustments();
     }
   }
@@ -3611,7 +3612,8 @@ void nsIFrame::BuildDisplayListForStackingContext(
     resultList.AppendNewToTop<nsDisplayOwnLayer>(
         aBuilder, this, &resultList, aBuilder->CurrentActiveScrolledRoot(),
         nsDisplayOwnLayerFlags::None, ScrollbarData{},
-        /* aForceActive = */ false);
+        /* aForceActive = */ false, false,
+        nsDisplayOwnLayer::OwnLayerForTransformWithRoundedClip);
     ct.TrackContainer(resultList.GetTop());
   }
 
@@ -3677,7 +3679,9 @@ void nsIFrame::BuildDisplayListForStackingContext(
   }
 
   bool createdOwnLayer = false;
-  CreateOwnLayerIfNeeded(aBuilder, &resultList, &createdOwnLayer);
+  CreateOwnLayerIfNeeded(aBuilder, &resultList,
+                         nsDisplayOwnLayer::OwnLayerForStackingContext,
+                         &createdOwnLayer);
   if (createdOwnLayer) {
     ct.TrackContainer(resultList.GetTop());
   }
@@ -10838,7 +10842,7 @@ void nsIFrame::SetParent(nsContainerFrame* aParent) {
 }
 
 void nsIFrame::CreateOwnLayerIfNeeded(nsDisplayListBuilder* aBuilder,
-                                      nsDisplayList* aList,
+                                      nsDisplayList* aList, uint16_t aType,
                                       bool* aCreatedContainerItem) {
   wr::RenderRoot renderRoot =
       gfxUtils::GetRenderRootForFrame(this).valueOr(wr::RenderRoot::Default);
@@ -10854,7 +10858,8 @@ void nsIFrame::CreateOwnLayerIfNeeded(nsDisplayListBuilder* aBuilder,
              GetContent()->AsElement()->HasAttr(kNameSpaceID_None,
                                                 nsGkAtoms::layer)) {
     aList->AppendNewToTop<nsDisplayOwnLayer>(
-        aBuilder, this, aList, aBuilder->CurrentActiveScrolledRoot());
+        aBuilder, this, aList, aBuilder->CurrentActiveScrolledRoot(),
+        nsDisplayOwnLayerFlags::None, ScrollbarData{}, true, false, aType);
     if (aCreatedContainerItem) {
       *aCreatedContainerItem = true;
     }

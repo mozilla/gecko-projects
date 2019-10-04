@@ -275,6 +275,12 @@ let ACTORS = {
 
     allFrames: true,
   },
+  PurgeSessionHistory: {
+    child: {
+      moduleURI: "resource://gre/actors/PurgeSessionHistoryChild.jsm",
+    },
+    allFrames: true,
+  },
 };
 
 let LEGACY_ACTORS = {
@@ -321,6 +327,7 @@ let LEGACY_ACTORS = {
       module: "resource://gre/actors/PictureInPictureChild.jsm",
       events: {
         MozTogglePictureInPicture: { capture: true },
+        MozStopPictureInPicture: { capture: true },
       },
 
       messages: [
@@ -366,13 +373,6 @@ let LEGACY_ACTORS = {
         "Printing:Preview:ParseDocument",
         "Printing:Print",
       ],
-    },
-  },
-
-  PurgeSessionHistory: {
-    child: {
-      module: "resource://gre/actors/PurgeSessionHistoryChild.jsm",
-      messages: ["Browser:PurgeSessionHistory"],
     },
   },
 

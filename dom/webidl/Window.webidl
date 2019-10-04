@@ -26,7 +26,8 @@ interface nsIDOMWindowUtils;
 typedef OfflineResourceList ApplicationCache;
 
 // http://www.whatwg.org/specs/web-apps/current-work/
-[PrimaryGlobal, LegacyUnenumerableNamedProperties, NeedResolve]
+[Global, LegacyUnenumerableNamedProperties, NeedResolve,
+ Exposed=Window]
 /*sealed*/ interface Window : EventTarget {
   // the current browsing context
   [Unforgeable, Constant, StoreInSlot,
@@ -600,8 +601,6 @@ partial interface Window {
   [Throws, Func="IsChromeOrXBLOrUAWidget"]
   readonly attribute IntlUtils intlUtils;
 };
-
-Window includes WebGPUProvider;
 
 partial interface Window {
   [SameObject, Pref="dom.visualviewport.enabled", Replaceable]

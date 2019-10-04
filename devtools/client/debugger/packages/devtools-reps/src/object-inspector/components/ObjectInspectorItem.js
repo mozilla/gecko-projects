@@ -177,13 +177,24 @@ class ObjectInspectorItem extends Component<Props> {
         const targetGrip = getParentGripValue(item);
         const receiverGrip = getNonPrototypeParentGripValue(item);
         if (targetGrip && receiverGrip) {
+          let propertyName = item.name;
+          // If we're dealing with a property that can't be accessed
+          // with the dot notation, for example: x["hello-world"]
+          if (propertyName.startsWith(`"`) && propertyName.endsWith(`"`)) {
+            // We remove the quotes wrapping the property name, and we replace any
+            // "double" escaped quotes (\\\") by simple escaped ones (\").
+            propertyName = propertyName
+              .substring(1, propertyName.length - 1)
+              .replace(/\\\"/g, `\"`);
+          }
+
           Object.assign(repProps, {
             onInvokeGetterButtonClick: () =>
               this.props.invokeGetter(
                 item,
                 targetGrip,
                 receiverGrip.actor,
-                item.name
+                propertyName
               ),
           });
         }
@@ -246,8 +257,9 @@ class ObjectInspectorItem extends Component<Props> {
         // image, clicking on it does not remove any existing text selection.
         // So we need to also check if the arrow was clicked.
         if (
-          Utils.selection.documentHasSelection() &&
-          !(e.target && e.target.matches && e.target.matches(".arrow"))
+          e.target &&
+          Utils.selection.documentHasSelection(e.target.ownerDocument) &&
+          !(e.target.matches && e.target.matches(".arrow"))
         ) {
           e.stopPropagation();
         }
@@ -283,7 +295,9 @@ class ObjectInspectorItem extends Component<Props> {
               event.stopPropagation();
 
               // If the user selected text, bail out.
-              if (Utils.selection.documentHasSelection()) {
+              if (
+                Utils.selection.documentHasSelection(event.target.ownerDocument)
+              ) {
                 return;
               }
 

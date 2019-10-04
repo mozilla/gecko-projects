@@ -36,6 +36,7 @@
 #if defined(MALLOC_H)
 #  include MALLOC_H /* for malloc_usable_size, malloc_size, _msize */
 #endif
+#include <ctime>
 #include <math.h>
 #include <signal.h>
 #include <stdio.h>
@@ -1655,9 +1656,9 @@ static bool Options(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
 
-    if (StringEqualsAscii(opt, "strict")) {
+    if (StringEqualsLiteral(opt, "strict")) {
       JS::ContextOptionsRef(cx).toggleExtraWarnings();
-    } else if (StringEqualsAscii(opt, "werror")) {
+    } else if (StringEqualsLiteral(opt, "werror")) {
       // Disallow toggling werror when there are off-thread jobs, to avoid
       // confusing CompileError::throwError.
       ShellContext* sc = GetShellContext(cx);
@@ -1667,9 +1668,9 @@ static bool Options(JSContext* cx, unsigned argc, Value* vp) {
         return false;
       }
       JS::ContextOptionsRef(cx).toggleWerror();
-    } else if (StringEqualsAscii(opt, "throw_on_asmjs_validation_failure")) {
+    } else if (StringEqualsLiteral(opt, "throw_on_asmjs_validation_failure")) {
       JS::ContextOptionsRef(cx).toggleThrowOnAsmJSValidationFailure();
-    } else if (StringEqualsAscii(opt, "strict_mode")) {
+    } else if (StringEqualsLiteral(opt, "strict_mode")) {
       JS::ContextOptionsRef(cx).toggleStrictMode();
     } else {
       UniqueChars optChars = JS_EncodeStringToUTF8(cx, opt);
@@ -2684,6 +2685,13 @@ static bool Now(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool CpuNow(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  double now = double(std::clock()) / double(CLOCKS_PER_SEC);
+  args.rval().setDouble(now);
+  return true;
+}
+
 static bool PrintInternal(JSContext* cx, const CallArgs& args, RCFile* file) {
   if (!file->isOpen()) {
     JS_ReportErrorASCII(cx, "output file is closed");
@@ -3352,11 +3360,11 @@ struct DisassembleOptionParser {
       if (!flatStr) {
         return false;
       }
-      if (JS_FlatStringEqualsAscii(flatStr, "-l")) {
+      if (JS_FlatStringEqualsLiteral(flatStr, "-l")) {
         lines = true;
-      } else if (JS_FlatStringEqualsAscii(flatStr, "-r")) {
+      } else if (JS_FlatStringEqualsLiteral(flatStr, "-r")) {
         recursive = true;
-      } else if (JS_FlatStringEqualsAscii(flatStr, "-S")) {
+      } else if (JS_FlatStringEqualsLiteral(flatStr, "-S")) {
         sourceNotes = false;
       } else {
         break;
@@ -4536,8 +4544,9 @@ static bool SetJitCompilerOption(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#define JIT_COMPILER_MATCH(key, string) \
-  else if (JS_FlatStringEqualsAscii(strArg, string)) opt = JSJITCOMPILER_##key;
+#define JIT_COMPILER_MATCH(key, string)                      \
+  else if (JS_FlatStringEqualsLiteral(strArg, string)) opt = \
+      JSJITCOMPILER_##key;
 
   JSJitCompilerOption opt = JSJITCOMPILER_NOT_AN_OPTION;
   if (false) {
@@ -5146,9 +5155,9 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
         return false;
       }
       // Currently not used, reserved for future.
-      if (StringEqualsAscii(linearFormat, "multipart")) {
+      if (StringEqualsLiteral(linearFormat, "multipart")) {
         mode = Multipart;
-      } else if (StringEqualsAscii(linearFormat, "context")) {
+      } else if (StringEqualsLiteral(linearFormat, "context")) {
         mode = Context;
       } else {
         UniqueChars printable = JS_EncodeStringToUTF8(cx, linearFormat);
@@ -6519,9 +6528,8 @@ class ShellSourceHook : public SourceHook {
         return false;
       }
 
-      size_t dstLen = *length;
-      JS::DeflateStringToUTF8Buffer(
-          flat, mozilla::RangedPtr<char>(*utf8Source, *length), &dstLen);
+      mozilla::DebugOnly<size_t> dstLen = JS::DeflateStringToUTF8Buffer(
+          flat, mozilla::MakeSpan(*utf8Source, *length));
       MOZ_ASSERT(dstLen == *length);
     }
 
@@ -9131,6 +9139,12 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "    proxy: Create a DOM Proxy object instead of a plain DOM object.\n"
 "    object: Don't create a new DOM object, but instead use the supplied\n"
 "            FakeDOMObject."),
+
+    JS_FN_HELP("cpuNow", CpuNow, /* nargs= */ 0, /* flags = */ 0,
+"cpuNow()",
+" Returns the approximate processor time used by the process since an arbitrary epoch, in seconds.\n"
+" Only the difference between two calls to `cpuNow()` is meaningful."),
+
 
     JS_FS_HELP_END
 };

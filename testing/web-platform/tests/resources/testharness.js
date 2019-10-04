@@ -1294,8 +1294,11 @@ policies and contribution forms [3].
     expose(assert_regexp_match, "assert_regexp_match");
 
     function assert_class_string(object, class_string, description) {
-        assert_equals({}.toString.call(object), "[object " + class_string + "]",
-                      description);
+        var actual = {}.toString.call(object);
+        var expected = "[object " + class_string + "]";
+        assert(same_value(actual, expected), "assert_class_string", description,
+                                             "expected ${expected} but got ${actual}",
+                                             {expected:expected, actual:actual});
     }
     expose(assert_class_string, "assert_class_string");
 
@@ -2488,6 +2491,7 @@ policies and contribution forms [3].
                 this.status.status = this.status.ERROR;
                 this.status.message = String(e);
                 this.status.stack = e.stack ? e.stack : null;
+                this.complete();
             }
         }
         this.set_timeout();

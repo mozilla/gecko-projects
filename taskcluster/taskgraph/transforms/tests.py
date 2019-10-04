@@ -132,6 +132,7 @@ WINDOWS_WORKER_TYPES = {
 # os x worker types keyed by test-platform
 MACOSX_WORKER_TYPES = {
     'macosx1014-64': 'releng-hardware/gecko-t-osx-1014',
+    'macosx1014-64-power': 'releng-hardware/gecko-t-osx-1014-power'
 }
 
 
@@ -159,7 +160,9 @@ TEST_VARIANTS = {
         'merge': {
             'tier': 2,
             'mozharness': {
-                'extra-options': ['--setpref="fission.autostart=true"'],
+                'extra-options': ['--setpref="fission.autostart=true"',
+                                  '--setpref="dom.serviceWorkers.parent_intercept=true"',
+                                  '--setpref="browser.tabs.documentchannel=true"'],
             },
         },
     },
@@ -937,15 +940,16 @@ def setup_browsertime(config, tests):
             continue
 
         # This is appropriate as the browsertime task variants mature.
-        test['tier'] = 2
+        test['tier'] = max(test['tier'], 2)
 
         ts = {
             'by-test-platform': {
                 'android.*': ['browsertime', 'linux64-geckodriver', 'linux64-node'],
                 'linux.*': ['browsertime', 'linux64-geckodriver', 'linux64-node'],
                 'macosx.*': ['browsertime', 'macosx64-geckodriver', 'macosx64-node'],
-                'windows.*32.*': ['browsertime', 'win32-geckodriver', 'win32-node'],
-                'windows.*64.*': ['browsertime', 'win64-geckodriver', 'win64-node'],
+                'windows.*aarch64.*': ['browsertime', 'win32-geckodriver', 'win32-node'],
+                'windows.*-32.*': ['browsertime', 'win32-geckodriver', 'win32-node'],
+                'windows.*-64.*': ['browsertime', 'win64-geckodriver', 'win64-node'],
             },
         }
 
@@ -957,8 +961,9 @@ def setup_browsertime(config, tests):
                 'android.*': ['linux64-chromedriver', 'linux64-ffmpeg-4.1.4'],
                 'linux.*': ['linux64-chromedriver', 'linux64-ffmpeg-4.1.4'],
                 'macosx.*': ['mac64-chromedriver', 'mac64-ffmpeg-4.1.1'],
-                'windows.*32.*': ['win32-chromedriver', 'win64-ffmpeg-4.1.1'],
-                'windows.*64.*': ['win32-chromedriver', 'win64-ffmpeg-4.1.1'],
+                'windows.*aarch64.*': ['win32-chromedriver', 'win64-ffmpeg-4.1.1'],
+                'windows.*-32.*': ['win32-chromedriver', 'win64-ffmpeg-4.1.1'],
+                'windows.*-64.*': ['win32-chromedriver', 'win64-ffmpeg-4.1.1'],
             },
         }
 
@@ -1176,6 +1181,12 @@ def enable_fission_on_central(config, tests):
 
         if not runs_on_central(test):
             test['run-on-projects'].append('mozilla-central')
+
+        # Promote select fission tests to tier 1 and ensure they run on trunk
+        if platform == 'linux64' and btype == 'debug' and (test['webrender'] or
+           'mochitest-browser-chrome' in test['attributes']['unittest_suite']):
+            test['tier'] = 1
+            test['run-on-projects'] = ['ash', 'try', 'trunk']
         yield test
 
 
@@ -1377,7 +1388,10 @@ def set_worker_type(config, tests):
             # This test already has its worker type defined, so just use that (yields below)
             pass
         elif test_platform.startswith('macosx1014-64'):
-            test['worker-type'] = MACOSX_WORKER_TYPES['macosx1014-64']
+            if '--power-test' in test['mozharness']['extra-options']:
+                test['worker-type'] = MACOSX_WORKER_TYPES['macosx1014-64-power']
+            else:
+                test['worker-type'] = MACOSX_WORKER_TYPES['macosx1014-64']
         elif test_platform.startswith('win'):
             # figure out what platform the job needs to run on
             if test['virtualization'] == 'hardware':

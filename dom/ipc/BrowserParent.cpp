@@ -62,8 +62,6 @@
 #include "nsIContent.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
-#include "nsIDOMWindow.h"
-#include "nsIDOMWindowUtils.h"
 #include "nsImportModule.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsILoadInfo.h"
@@ -118,6 +116,7 @@
 
 #ifdef XP_WIN
 #  include "mozilla/plugins/PluginWidgetParent.h"
+#  include "FxRWindowManager.h"
 #endif
 
 #if defined(XP_WIN) && defined(ACCESSIBILITY)
@@ -3293,38 +3292,25 @@ void BrowserParent::SetRenderLayers(bool aEnabled) {
 
   mRenderLayers = aEnabled;
 
-  SetRenderLayersInternal(aEnabled, false /* aForceRepaint */);
+  SetRenderLayersInternal(aEnabled);
 }
 
-void BrowserParent::SetRenderLayersInternal(bool aEnabled, bool aForceRepaint) {
+void BrowserParent::SetRenderLayersInternal(bool aEnabled) {
   // Increment the epoch so that layer tree updates from previous
   // RenderLayers requests are ignored.
   mLayerTreeEpoch = mLayerTreeEpoch.Next();
 
-  Unused << SendRenderLayers(aEnabled, aForceRepaint, mLayerTreeEpoch);
+  Unused << SendRenderLayers(aEnabled, mLayerTreeEpoch);
 
   // Ask the child to repaint using the PHangMonitor channel/thread (which may
   // be less congested).
   if (aEnabled) {
-    Manager()->PaintTabWhileInterruptingJS(this, aForceRepaint,
-                                           mLayerTreeEpoch);
+    Manager()->PaintTabWhileInterruptingJS(this, mLayerTreeEpoch);
   }
 }
 
 void BrowserParent::PreserveLayers(bool aPreserveLayers) {
   mPreserveLayers = aPreserveLayers;
-}
-
-void BrowserParent::ForceRepaint() {
-  if (!mActiveInPriorityManager) {
-    // If a tab is left and then returned to very rapidly, it can be
-    // deprioritized without losing its loaded status. In this case we won't
-    // go through SetRenderLayers.
-    mActiveInPriorityManager = true;
-    ProcessPriorityManager::TabActivityChanged(this, true);
-  }
-
-  SetRenderLayersInternal(true /* aEnabled */, true /* aForceRepaint */);
 }
 
 void BrowserParent::NotifyResolutionChanged() {
@@ -3977,6 +3963,20 @@ void BrowserParent::OnSubFrameCrashed() {
   if (GetBrowserBridgeParent()) {
     Unused << GetBrowserBridgeParent()->SendSubFrameCrashed(mBrowsingContext);
   }
+}
+
+mozilla::ipc::IPCResult BrowserParent::RecvIsWindowSupportingProtectedMedia(
+    const uint64_t& aOuterWindowID,
+    IsWindowSupportingProtectedMediaResolver&& aResolve) {
+#ifdef XP_WIN
+  bool isFxrWindow =
+      FxRWindowManager::GetInstance()->IsFxRWindow(aOuterWindowID);
+  aResolve(!isFxrWindow);
+#else
+  MOZ_CRASH("Should only be called on Windows");
+#endif
+
+  return IPC_OK();
 }
 
 }  // namespace dom

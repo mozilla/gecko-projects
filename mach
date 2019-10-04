@@ -37,7 +37,6 @@ py2commands="
     doctor
     empty-makefiles
     environment
-    eslint
     file-info
     firefox-ui-functional
     fluent-migration-test
@@ -49,13 +48,10 @@ py2commands="
     ide
     import-pr
     install
-    install-android
-    install-desktop
     jsapi-tests
     jsshell-bench
     jstestbrowser
     jstests
-    lint
     marionette-test
     mochitest
     mozbuild-reference
@@ -80,8 +76,6 @@ py2commands="
     resource-usage
     robocop
     run
-    run-android
-    run-desktop
     rusttests
     show-log
     static-analysis

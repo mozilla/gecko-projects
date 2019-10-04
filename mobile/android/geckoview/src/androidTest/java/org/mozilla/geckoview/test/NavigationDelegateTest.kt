@@ -1223,15 +1223,30 @@ class NavigationDelegateTest : BaseSessionTest() {
                 .getString("Header2"), equalTo("Value1, Value2"))
     }
 
+    @Ignore("HttpBin incorrectly filters empty field values")
+    @Test fun loadUriHeaderEmptyFieldValue() {
+        val headers = mapOf<String?, String?>(
+                "ValueLess1" to "",
+                "ValueLess2" to null)
+
+        sessionRule.session.loadUri("$TEST_ENDPOINT/anything", headers)
+        sessionRule.session.waitForPageStop()
+
+        val content = sessionRule.session.evaluateJS("document.body.children[0].innerHTML") as String
+        val body = JSONObject(content)
+        val headersJSON = body.getJSONObject("headers")
+
+        MatcherAssert.assertThat("Header with no field value should be included",
+                headersJSON.has("ValueLess1"))
+        MatcherAssert.assertThat("Header with no field value should be included",
+                headersJSON.has("ValueLess2"))
+    }
+
     @Test fun loadUriHeaderBadOverrides() {
         val headers = mapOf<String?, String?>(
                 null to "BadNull",
                 "Connection" to "BadConnection",
-                "Host" to "BadHost",
-                "ValueLess1" to "",
-                "ValueLess2" to null,
-                "ValueLess3" to " ",
-                "ValueLess4" to "\t")
+                "Host" to "BadHost")
 
         sessionRule.session.loadUri("$TEST_ENDPOINT/anything", headers)
         sessionRule.session.waitForPageStop()
@@ -1254,16 +1269,6 @@ class NavigationDelegateTest : BaseSessionTest() {
         MatcherAssert.assertThat("Headers should not match", headersJSON
                 .getString("Host"), not("BadHost"))
 
-        // As per RFC7230 all request headers must have a field value (Except Host, which we filter)
-        // RFC7230 makes RFC2616 obsolete but 2616 allowed empty field values.
-        MatcherAssert.assertThat("Header with no field value should not be included",
-                !headersJSON.has("ValueLess1"))
-        MatcherAssert.assertThat("Header with no field value should not be included",
-                !headersJSON.has("ValueLess2"))
-        MatcherAssert.assertThat("Header with no field value should not be included",
-                !headersJSON.has("ValueLess3"))
-        MatcherAssert.assertThat("Header with no field value should not be included",
-                !headersJSON.has("ValueLess4"))
     }
 
     @Test(expected = GeckoResult.UncaughtException::class)
@@ -1332,6 +1337,58 @@ class NavigationDelegateTest : BaseSessionTest() {
             @AssertCalled(count = 1)
             override fun onLocationChange(session: GeckoSession, url: String?) {
                 assertThat("URI should match", url, endsWith("#test2"))
+            }
+        })
+    }
+
+    @Test fun purgeHistory() {
+        sessionRule.session.loadUri("$TEST_ENDPOINT$HELLO_HTML_PATH")
+        sessionRule.waitUntilCalled(object : Callbacks.NavigationDelegate {
+            @AssertCalled(count = 1)
+            override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
+                assertThat("Session should not be null", session, notNullValue())
+                assertThat("Cannot go back", canGoBack, equalTo(false))
+            }
+
+            @AssertCalled(count = 1)
+            override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) {
+                assertThat("Session should not be null", session, notNullValue())
+                assertThat("Cannot go forward", canGoForward, equalTo(false))
+            }
+        })
+        sessionRule.session.loadUri("$TEST_ENDPOINT$HELLO2_HTML_PATH")
+        sessionRule.waitUntilCalled(object : Callbacks.All {
+            @AssertCalled(count = 1)
+            override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
+                assertThat("Session should not be null", session, notNullValue())
+                assertThat("Cannot go back", canGoBack, equalTo(true))
+            }
+            @AssertCalled(count = 1)
+            override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) {
+                assertThat("Session should not be null", session, notNullValue())
+                assertThat("Cannot go forward", canGoForward, equalTo(false))
+            }
+            @AssertCalled(count = 1)
+            override fun onHistoryStateChange(session: GeckoSession, state: GeckoSession.HistoryDelegate.HistoryList) {
+                assertThat("History should have two entries", state.size, equalTo(2))
+            }
+        })
+        sessionRule.session.purgeHistory()
+        sessionRule.waitUntilCalled(object : Callbacks.All {
+            @AssertCalled(count = 1)
+            override fun onHistoryStateChange(session: GeckoSession, state: GeckoSession.HistoryDelegate.HistoryList) {
+                assertThat("History should have one entry", state.size, equalTo(1))
+            }
+            @AssertCalled(count = 1)
+            override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
+                assertThat("Session should not be null", session, notNullValue())
+                assertThat("Cannot go back", canGoBack, equalTo(false))
+            }
+
+            @AssertCalled(count = 1)
+            override fun onCanGoForward(session: GeckoSession, canGoForward: Boolean) {
+                assertThat("Session should not be null", session, notNullValue())
+                assertThat("Cannot go forward", canGoForward, equalTo(false))
             }
         })
     }

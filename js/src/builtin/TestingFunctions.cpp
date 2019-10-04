@@ -459,7 +459,7 @@ static bool GC(JSContext* cx, unsigned argc, Value* vp) {
   if (args.length() >= 1) {
     Value arg = args[0];
     if (arg.isString()) {
-      if (!JS_StringEqualsAscii(cx, arg.toString(), "zone", &zone)) {
+      if (!JS_StringEqualsLiteral(cx, arg.toString(), "zone", &zone)) {
         return false;
       }
     } else if (arg.isObject()) {
@@ -472,7 +472,8 @@ static bool GC(JSContext* cx, unsigned argc, Value* vp) {
   if (args.length() >= 2) {
     Value arg = args[1];
     if (arg.isString()) {
-      if (!JS_StringEqualsAscii(cx, arg.toString(), "shrinking", &shrinking)) {
+      if (!JS_StringEqualsLiteral(cx, arg.toString(), "shrinking",
+                                  &shrinking)) {
         return false;
       }
     }
@@ -777,6 +778,12 @@ static bool WasmGcEnabled(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool WasmMultiValueEnabled(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  args.rval().setBoolean(wasm::HasMultiValueSupport(cx));
+  return true;
+}
+
 static bool WasmDebugSupport(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   args.rval().setBoolean(cx->options().wasmBaseline() &&
@@ -915,10 +922,10 @@ static bool ConvertToTier(JSContext* cx, HandleValue value,
   bool baselineTier = false;
   bool ionTier = false;
 
-  if (!JS_StringEqualsAscii(cx, option, "stable", &stableTier) ||
-      !JS_StringEqualsAscii(cx, option, "best", &bestTier) ||
-      !JS_StringEqualsAscii(cx, option, "baseline", &baselineTier) ||
-      !JS_StringEqualsAscii(cx, option, "ion", &ionTier)) {
+  if (!JS_StringEqualsLiteral(cx, option, "stable", &stableTier) ||
+      !JS_StringEqualsLiteral(cx, option, "best", &bestTier) ||
+      !JS_StringEqualsLiteral(cx, option, "baseline", &baselineTier) ||
+      !JS_StringEqualsLiteral(cx, option, "ion", &ionTier)) {
     return false;
   }
 
@@ -1108,7 +1115,8 @@ static bool InternalConst(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  if (JS_FlatStringEqualsAscii(flat, "INCREMENTAL_MARK_STACK_BASE_CAPACITY")) {
+  if (JS_FlatStringEqualsLiteral(flat,
+                                 "INCREMENTAL_MARK_STACK_BASE_CAPACITY")) {
     args.rval().setNumber(uint32_t(js::INCREMENTAL_MARK_STACK_BASE_CAPACITY));
   } else {
     JS_ReportErrorASCII(cx, "unknown const name");
@@ -1451,7 +1459,8 @@ static bool StartGC(JSContext* cx, unsigned argc, Value* vp) {
   if (args.length() >= 2) {
     Value arg = args[1];
     if (arg.isString()) {
-      if (!JS_StringEqualsAscii(cx, arg.toString(), "shrinking", &shrinking)) {
+      if (!JS_StringEqualsLiteral(cx, arg.toString(), "shrinking",
+                                  &shrinking)) {
         return false;
       }
     }
@@ -2955,7 +2964,13 @@ static bool testingFunc_inJit(JSContext* cx, unsigned argc, Value* vp) {
 
   // Use frame iterator to inspect caller.
   FrameIter iter(cx);
-  MOZ_ASSERT(!iter.done());
+
+  // We may be invoked directly, not in a JS context, e.g. if inJit is added as
+  // a callback on the event queue.
+  if (iter.done()) {
+    args.rval().setBoolean(false);
+    return true;
+  }
 
   if (iter.hasScript()) {
     // Detect repeated attempts to compile, resetting the counter if inJit
@@ -2983,7 +2998,13 @@ static bool testingFunc_inIon(JSContext* cx, unsigned argc, Value* vp) {
 
   // Use frame iterator to inspect caller.
   FrameIter iter(cx);
-  MOZ_ASSERT(!iter.done());
+
+  // We may be invoked directly, not in a JS context, e.g. if inJson is added as
+  // a callback on the event queue.
+  if (iter.done()) {
+    args.rval().setBoolean(false);
+    return true;
+  }
 
   if (iter.hasScript()) {
     // Detect repeated attempts to compile, resetting the counter if inIon
@@ -3322,13 +3343,13 @@ static mozilla::Maybe<JS::StructuredCloneScope> ParseCloneScope(
     return scope;
   }
 
-  if (StringEqualsAscii(scopeStr, "SameProcessSameThread")) {
+  if (StringEqualsLiteral(scopeStr, "SameProcessSameThread")) {
     scope.emplace(JS::StructuredCloneScope::SameProcessSameThread);
-  } else if (StringEqualsAscii(scopeStr, "SameProcessDifferentThread")) {
+  } else if (StringEqualsLiteral(scopeStr, "SameProcessDifferentThread")) {
     scope.emplace(JS::StructuredCloneScope::SameProcessDifferentThread);
-  } else if (StringEqualsAscii(scopeStr, "DifferentProcess")) {
+  } else if (StringEqualsLiteral(scopeStr, "DifferentProcess")) {
     scope.emplace(JS::StructuredCloneScope::DifferentProcess);
-  } else if (StringEqualsAscii(scopeStr, "DifferentProcessForIndexedDB")) {
+  } else if (StringEqualsLiteral(scopeStr, "DifferentProcessForIndexedDB")) {
     scope.emplace(JS::StructuredCloneScope::DifferentProcessForIndexedDB);
   }
 
@@ -3362,10 +3383,10 @@ bool js::testingFunc_serialize(JSContext* cx, unsigned argc, Value* vp) {
         return false;
       }
 
-      if (StringEqualsAscii(poli, "allow")) {
+      if (StringEqualsLiteral(poli, "allow")) {
+        policy.allowSharedMemory();
+      } else if (StringEqualsLiteral(poli, "deny")) {
         // default
-      } else if (StringEqualsAscii(poli, "deny")) {
-        policy.denySharedArrayBuffer();
       } else {
         JS_ReportErrorASCII(cx, "Invalid policy value for 'SharedArrayBuffer'");
         return false;
@@ -4575,8 +4596,8 @@ static bool SetGCCallback(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   int32_t phases = 0;
-  if (StringEqualsAscii(action, "minorGC") ||
-      StringEqualsAscii(action, "majorGC")) {
+  if (StringEqualsLiteral(action, "minorGC") ||
+      StringEqualsLiteral(action, "majorGC")) {
     if (!JS_GetProperty(cx, opts, "phases", &v)) {
       return false;
     }
@@ -4592,11 +4613,11 @@ static bool SetGCCallback(JSContext* cx, unsigned argc, Value* vp) {
         return false;
       }
 
-      if (StringEqualsAscii(phasesStr, "begin")) {
+      if (StringEqualsLiteral(phasesStr, "begin")) {
         phases = (1 << JSGC_BEGIN);
-      } else if (StringEqualsAscii(phasesStr, "end")) {
+      } else if (StringEqualsLiteral(phasesStr, "end")) {
         phases = (1 << JSGC_END);
-      } else if (StringEqualsAscii(phasesStr, "both")) {
+      } else if (StringEqualsLiteral(phasesStr, "both")) {
         phases = (1 << JSGC_BEGIN) | (1 << JSGC_END);
       } else {
         JS_ReportErrorASCII(cx, "Invalid callback phase");
@@ -4605,11 +4626,11 @@ static bool SetGCCallback(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  if (StringEqualsAscii(action, "minorGC")) {
+  if (StringEqualsLiteral(action, "minorGC")) {
     gcCallback::minorGCInfo.phases = phases;
     gcCallback::minorGCInfo.active = true;
     JS_SetGCCallback(cx, gcCallback::minorGC, &gcCallback::minorGCInfo);
-  } else if (StringEqualsAscii(action, "majorGC")) {
+  } else if (StringEqualsLiteral(action, "majorGC")) {
     if (!JS_GetProperty(cx, opts, "depth", &v)) {
       return false;
     }
@@ -4632,7 +4653,7 @@ static bool SetGCCallback(JSContext* cx, unsigned argc, Value* vp) {
     gcCallback::majorGCInfo.phases = phases;
     gcCallback::majorGCInfo.depth = depth;
     JS_SetGCCallback(cx, gcCallback::majorGC, &gcCallback::majorGCInfo);
-  } else if (StringEqualsAscii(action, "enterNullRealm")) {
+  } else if (StringEqualsLiteral(action, "enterNullRealm")) {
     JS_SetGCCallback(cx, gcCallback::enterNullRealm, nullptr);
   } else {
     JS_ReportErrorASCII(cx, "Unknown GC callback action");
@@ -5792,11 +5813,11 @@ static bool MonitorType(JSContext* cx, unsigned argc, Value* vp) {
   bool unknown = false;
   bool unknownObject = false;
   if (val.isString()) {
-    if (!JS_StringEqualsAscii(cx, val.toString(), "unknown", &unknown)) {
+    if (!JS_StringEqualsLiteral(cx, val.toString(), "unknown", &unknown)) {
       return false;
     }
-    if (!JS_StringEqualsAscii(cx, val.toString(), "unknownObject",
-                              &unknownObject)) {
+    if (!JS_StringEqualsLiteral(cx, val.toString(), "unknownObject",
+                                &unknownObject)) {
       return false;
     }
   }
@@ -6569,6 +6590,10 @@ gc::ZealModeHelpText),
 "wasmGcEnabled()",
 "  Returns a boolean indicating whether the WebAssembly GC types proposal is enabled."),
 
+    JS_FN_HELP("wasmMultiValueEnabled", WasmMultiValueEnabled, 1, 0,
+"wasmMultiValueEnabled()",
+"  Returns a boolean indicating whether the WebAssembly multi-value proposal is enabled."),
+
     JS_FN_HELP("wasmDebugSupport", WasmDebugSupport, 1, 0,
 "wasmDebugSupport()",
 "  Returns a boolean indicating whether the WebAssembly compilers support debugging."),
@@ -6627,7 +6652,7 @@ gc::ZealModeHelpText),
 "serialize(data, [transferables, [policy]])",
 "  Serialize 'data' using JS_WriteStructuredClone. Returns a structured\n"
 "  clone buffer object. 'policy' may be an options hash. Valid keys:\n"
-"    'SharedArrayBuffer' - either 'allow' (the default) or 'deny'\n"
+"    'SharedArrayBuffer' - either 'allow' or 'deny' (the default)\n"
 "      to specify whether SharedArrayBuffers may be serialized.\n"
 "    'scope' - SameProcessSameThread, SameProcessDifferentThread,\n"
 "      DifferentProcess, or DifferentProcessForIndexedDB. Determines how some\n"

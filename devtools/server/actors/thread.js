@@ -167,16 +167,6 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
   get dbg() {
     if (!this._dbg) {
       this._dbg = this._parent.dbg;
-      this._dbg.uncaughtExceptionHook = this.uncaughtExceptionHook;
-      this._dbg.onDebuggerStatement = this.onDebuggerStatement;
-      this._dbg.onNewScript = this.onNewScript;
-      this._dbg.onNewDebuggee = this._onNewDebuggee;
-      if (this._dbg.replaying) {
-        this._dbg.replayingOnForcedPause = this.replayingOnForcedPause.bind(
-          this
-        );
-        this._dbg.replayingOnPositionChange = this._makeReplayingOnPositionChange();
-      }
       // Keep the debugger disabled until a client attaches.
       this._dbg.enabled = this._state != "detached";
     }
@@ -209,6 +199,14 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       this._threadLifetimePool.objectActors = new WeakMap();
     }
     return this._threadLifetimePool;
+  },
+
+  getThreadLifetimeObject(raw) {
+    return this.threadLifetimePool.objectActors.get(raw);
+  },
+
+  createValueGrip(value) {
+    return createValueGrip(value, this.threadLifetimePool, this.objectGrip);
   },
 
   get sources() {
@@ -342,6 +340,15 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     }
 
     this._state = "attached";
+    this.dbg.uncaughtExceptionHook = this.uncaughtExceptionHook;
+    this.dbg.onDebuggerStatement = this.onDebuggerStatement;
+    this.dbg.onNewScript = this.onNewScript;
+    this.dbg.onNewDebuggee = this._onNewDebuggee;
+    if (this.dbg.replaying) {
+      this.dbg.replayingOnForcedPause = this.replayingOnForcedPause.bind(this);
+      this.dbg.replayingOnPositionChange = this._makeReplayingOnPositionChange();
+    }
+
     this._debuggerSourcesSeen = new WeakSet();
 
     Object.assign(this._options, options || {});
@@ -723,9 +730,11 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
   _makeEventBreakpointEnterFrame(eventBreakpoint) {
     return frame => {
-      const { sourceActor } = this.sources.getFrameLocation(frame);
+      const location = this.sources.getFrameLocation(frame);
+      const { sourceActor, line, column } = location;
       const url = sourceActor.url;
-      if (this.sources.isBlackBoxed(url)) {
+
+      if (this.sources.isBlackBoxed(url, line, column)) {
         return undefined;
       }
 
@@ -1884,7 +1893,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // NS_ERROR_NO_INTERFACE exceptions are a special case in browser code,
     // since they're almost always thrown by QueryInterface functions, and
     // handled cleanly by native code.
-    if (value == Cr.NS_ERROR_NO_INTERFACE) {
+    if (!isWorker && value == Cr.NS_ERROR_NO_INTERFACE) {
       return undefined;
     }
 

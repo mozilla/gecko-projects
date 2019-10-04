@@ -17,7 +17,7 @@
 #include "nsIURIWithSpecialOrigin.h"
 #include "nsScriptSecurityManager.h"
 #include "nsServiceManagerUtils.h"
-
+#include "ThirdPartyUtil.h"
 #include "mozilla/ContentPrincipal.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
@@ -381,6 +381,30 @@ BasePrincipal::CheckMayLoad(nsIURI* aURI, bool aReport,
 }
 
 NS_IMETHODIMP
+BasePrincipal::IsThirdPartyURI(nsIURI* aURI, bool* aRes) {
+  *aRes = true;
+  // If we do not have a URI its always 3rd party.
+  nsCOMPtr<nsIURI> prinURI;
+  nsresult rv = GetURI(getter_AddRefs(prinURI));
+  if (NS_FAILED(rv) || !prinURI) {
+    return NS_OK;
+  }
+  ThirdPartyUtil* thirdPartyUtil = ThirdPartyUtil::GetInstance();
+  return thirdPartyUtil->IsThirdPartyURI(prinURI, aURI, aRes);
+}
+
+NS_IMETHODIMP
+BasePrincipal::IsThirdPartyPrincipal(nsIPrincipal* aPrin, bool* aRes) {
+  *aRes = true;
+  nsCOMPtr<nsIURI> prinURI;
+  nsresult rv = GetURI(getter_AddRefs(prinURI));
+  if (NS_FAILED(rv) || !prinURI) {
+    return NS_OK;
+  }
+  return aPrin->IsThirdPartyURI(prinURI, aRes);
+}
+
+NS_IMETHODIMP
 BasePrincipal::GetIsNullPrincipal(bool* aResult) {
   *aResult = Kind() == eNullPrincipal;
   return NS_OK;
@@ -407,6 +431,18 @@ BasePrincipal::GetIsSystemPrincipal(bool* aResult) {
 NS_IMETHODIMP
 BasePrincipal::GetIsAddonOrExpandedAddonPrincipal(bool* aResult) {
   *aResult = AddonPolicy() || ContentScriptAddonPolicy();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+BasePrincipal::SchemeIs(const char* aScheme, bool* aResult) {
+  *aResult = false;
+  nsCOMPtr<nsIURI> prinURI;
+  nsresult rv = GetURI(getter_AddRefs(prinURI));
+  if (NS_FAILED(rv) || !prinURI) {
+    return NS_OK;
+  }
+  *aResult = prinURI->SchemeIs(aScheme);
   return NS_OK;
 }
 

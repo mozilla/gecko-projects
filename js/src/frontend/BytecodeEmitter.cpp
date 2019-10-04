@@ -5683,7 +5683,6 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
     FunctionNode* funNode, bool needsProto /* = false */,
     ListNode* classContentsIfConstructor /* = nullptr */) {
   FunctionBox* funbox = funNode->funbox();
-  RootedFunction fun(cx, funbox->function());
 
   MOZ_ASSERT((classContentsIfConstructor != nullptr) ==
              (funbox->kind() == FunctionFlags::FunctionKind::ClassConstructor));
@@ -5707,15 +5706,15 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
     return true;
   }
 
-  if (fun->isInterpreted()) {
-    if (fun->isInterpretedLazy()) {
+  if (funbox->isInterpreted()) {
+    if (funbox->isInterpretedLazy()) {
       if (!fe.emitLazy()) {
         //          [stack] FUN?
         return false;
       }
 
       if (classContentsIfConstructor) {
-        fun->lazyScript()->setFieldInitializers(
+        funbox->setFieldInitializers(
             setupFieldInitializers(classContentsIfConstructor));
       }
 
@@ -5735,8 +5734,9 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
     JS::CompileOptions options(cx, transitiveOptions);
 
     Rooted<ScriptSourceObject*> sourceObject(cx, script->sourceObject());
-    Rooted<JSScript*> innerScript(
-        cx, JSScript::Create(cx, options, sourceObject, funbox->bufStart,
+    RootedFunction fun(cx, funbox->function());
+    RootedScript innerScript(
+        cx, JSScript::Create(cx, fun, options, sourceObject, funbox->bufStart,
                              funbox->bufEnd, funbox->toStringStart,
                              funbox->toStringEnd));
     if (!innerScript) {

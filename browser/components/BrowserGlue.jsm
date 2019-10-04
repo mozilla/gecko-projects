@@ -166,6 +166,7 @@ let LEGACY_ACTORS = {
         "AboutLogins:LoginRemoved",
         "AboutLogins:MasterPasswordResponse",
         "AboutLogins:SendFavicons",
+        "AboutLogins:SetBreaches",
         "AboutLogins:Setup",
         "AboutLogins:ShowLoginItemError",
         "AboutLogins:SyncState",
@@ -903,7 +904,7 @@ BrowserGlue.prototype = {
         this._setSyncAutoconnectDelay();
         break;
       case "fxaccounts:onverified":
-        this._showSyncStartedDoorhanger();
+        this._onThisDeviceConnected();
         break;
       case "fxaccounts:device_connected":
         this._onDeviceConnected(data);
@@ -1755,6 +1756,14 @@ BrowserGlue.prototype = {
     );
     Services.telemetry.getHistogramById("COOKIE_BEHAVIOR").add(cookieBehavior);
 
+    let exceptions = 0;
+    for (let permission of Services.perms.enumerator) {
+      if (permission.type == "trackingprotection") {
+        exceptions++;
+      }
+    }
+    Services.telemetry.scalarSet("contentblocking.exceptions", exceptions);
+
     let fpEnabled = Services.prefs.getBoolPref(
       "privacy.trackingprotection.fingerprinting.enabled"
     );
@@ -1789,6 +1798,41 @@ BrowserGlue.prototype = {
       cmEnabled
     );
     Services.telemetry.scalarSet("contentblocking.category", categoryPref);
+  },
+
+  _recordContentBlockerTelemetry() {
+    [
+      "other",
+      "script",
+      "image",
+      "stylesheet",
+      "object",
+      "document",
+      "subdocument",
+      "refresh",
+      "xbl",
+      "ping",
+      "xmlhttprequest",
+      "objectsubrequest",
+      "dtd",
+      "font",
+      "media",
+      "websocket",
+      "csp_report",
+      "xslt",
+      "beacon",
+      "fetch",
+      "image",
+      "manifest",
+      "saveas_download",
+      "speculative",
+    ].forEach(type => {
+      Services.telemetry.keyedScalarAdd(
+        "security.contentblocker_permissions",
+        type,
+        Services.perms.getAllWithTypePrefix(type).length
+      );
+    });
   },
 
   _sendMediaTelemetry() {
@@ -2012,6 +2056,10 @@ BrowserGlue.prototype = {
 
     Services.tm.idleDispatchToMainThread(() => {
       this._recordContentBlockingTelemetry();
+    });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      this._recordContentBlockerTelemetry();
     });
 
     // Load the Login Manager data from disk off the main thread, some time
@@ -2635,15 +2683,12 @@ BrowserGlue.prototype = {
     notification.persistence = -1; // Until user closes it
   },
 
-  _showSyncStartedDoorhanger() {
+  _onThisDeviceConnected() {
     let bundle = Services.strings.createBundle(
       "chrome://browser/locale/accounts.properties"
     );
-    let productName = gBrandBundle.GetStringFromName("brandShortName");
-    let title = bundle.GetStringFromName("syncStartNotification.title");
-    let body = bundle.formatStringFromName("syncStartNotification.body2", [
-      productName,
-    ]);
+    let title = bundle.GetStringFromName("deviceConnDisconnTitle");
+    let body = bundle.GetStringFromName("thisDeviceConnectedBody");
 
     let clickCallback = (subject, topic, data) => {
       if (topic != "alertclickcallback") {
@@ -3500,9 +3545,9 @@ BrowserGlue.prototype = {
     let accountsBundle = Services.strings.createBundle(
       "chrome://browser/locale/accounts.properties"
     );
-    let title = accountsBundle.GetStringFromName("deviceConnectedTitle");
+    let title = accountsBundle.GetStringFromName("deviceConnDisconnTitle");
     let body = accountsBundle.formatStringFromName(
-      "deviceConnectedBody" + (deviceName ? "" : ".noDeviceName"),
+      "otherDeviceConnectedBody" + (deviceName ? "" : ".noDeviceName"),
       [deviceName]
     );
 
@@ -3539,10 +3584,8 @@ BrowserGlue.prototype = {
     let bundle = Services.strings.createBundle(
       "chrome://browser/locale/accounts.properties"
     );
-    let title = bundle.GetStringFromName(
-      "deviceDisconnectedNotification.title"
-    );
-    let body = bundle.GetStringFromName("deviceDisconnectedNotification.body");
+    let title = bundle.GetStringFromName("deviceConnDisconnTitle");
+    let body = bundle.GetStringFromName("thisDeviceDisconnectedBody");
 
     let clickCallback = (subject, topic, data) => {
       if (topic != "alertclickcallback") {
@@ -3973,16 +4016,10 @@ ContentPermissionPrompt.prototype = {
     );
     let scheme = 0;
     try {
-      // URI is null for system principals.
-      if (request.principal.URI) {
-        switch (request.principal.URI.scheme) {
-          case "http":
-            scheme = 1;
-            break;
-          case "https":
-            scheme = 2;
-            break;
-        }
+      if (request.principal.schemeIs("http")) {
+        scheme = 1;
+      } else if (request.principal.schemeIs("https")) {
+        scheme = 2;
       }
     } catch (ex) {
       // If the request principal is not available at this point,

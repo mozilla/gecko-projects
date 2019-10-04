@@ -1645,8 +1645,20 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       return;
     }
 
-    const parsedDOM = new DOMParser().parseFromString(value, "text/html");
     const rawNode = node.rawNode;
+    const doc = nodeDocument(rawNode);
+    const win = doc.defaultView;
+    let parser;
+    if (!win) {
+      throw new Error("The window object shouldn't be null");
+    } else {
+      // We create DOMParser under window object because we want a content
+      // DOMParser, which means all the DOM objects created by this DOMParser
+      // will be in the same DocGroup as rawNode.parentNode. Then the newly
+      // created nodes can be adopted into rawNode.parentNode.
+      parser = new win.DOMParser();
+    }
+    const parsedDOM = parser.parseFromString(value, "text/html");
     const parentNode = rawNode.parentNode;
 
     // Special case for head and body.  Setting document.body.outerHTML
@@ -2760,6 +2772,22 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     }
 
     return acc && acc.indexInParent > -1;
+  },
+
+  getEmbedderElement(browsingContextID) {
+    const browsingContext = BrowsingContext.get(browsingContextID);
+    let rawNode = browsingContext.embedderElement;
+    if (!this._isInDOMTree(rawNode)) {
+      return null;
+    }
+
+    // This is a special case for the document object whereby it is considered
+    // as document.documentElement (the <html> node)
+    if (rawNode.defaultView && rawNode === rawNode.defaultView.document) {
+      rawNode = rawNode.documentElement;
+    }
+
+    return this.attachElement(rawNode);
   },
 });
 

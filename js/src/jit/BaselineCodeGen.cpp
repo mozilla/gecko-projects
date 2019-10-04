@@ -585,6 +585,21 @@ bool BaselineInterpreterCodeGen::emitNextIC() {
   return true;
 }
 
+template <>
+void BaselineCompilerCodeGen::computeFrameSize(Register dest) {
+  MOZ_ASSERT(!inCall_, "must not be called in the middle of a VM call");
+  masm.move32(Imm32(frame.frameSize()), dest);
+}
+
+template <>
+void BaselineInterpreterCodeGen::computeFrameSize(Register dest) {
+  // dest = FramePointer + BaselineFrame::FramePointerOffset - StackPointer.
+  MOZ_ASSERT(!inCall_, "must not be called in the middle of a VM call");
+  masm.computeEffectiveAddress(
+      Address(BaselineFrameReg, BaselineFrame::FramePointerOffset), dest);
+  masm.subStackPtrFrom(dest);
+}
+
 template <typename Handler>
 void BaselineCodeGen<Handler>::prepareVMCall() {
   pushedBeforeCall_ = masm.framePushed();
@@ -594,19 +609,16 @@ void BaselineCodeGen<Handler>::prepareVMCall() {
 
   // Ensure everything is synced.
   frame.syncStack(0);
-
-  // Save the frame pointer.
-  masm.Push(BaselineFrameReg);
 }
 
 template <>
 void BaselineCompilerCodeGen::storeFrameSizeAndPushDescriptor(
-    uint32_t frameBaseSize, uint32_t argSize, const Address& frameSizeAddr,
-    Register scratch1, Register scratch2) {
-  uint32_t frameVals = frame.nlocals() + frame.stackDepth();
+    uint32_t argSize, Register scratch1, Register scratch2) {
+  uint32_t frameFullSize = frame.frameSize();
 
-  uint32_t frameFullSize = frameBaseSize + (frameVals * sizeof(Value));
-  masm.store32(Imm32(frameFullSize), frameSizeAddr);
+#ifdef DEBUG
+  masm.store32(Imm32(frameFullSize), frame.addressOfDebugFrameSize());
+#endif
 
   uint32_t descriptor = MakeFrameDescriptor(
       frameFullSize + argSize, FrameType::BaselineJS, ExitFrameLayout::Size());
@@ -615,17 +627,17 @@ void BaselineCompilerCodeGen::storeFrameSizeAndPushDescriptor(
 
 template <>
 void BaselineInterpreterCodeGen::storeFrameSizeAndPushDescriptor(
-    uint32_t frameBaseSize, uint32_t argSize, const Address& frameSizeAddr,
-    Register scratch1, Register scratch2) {
+    uint32_t argSize, Register scratch1, Register scratch2) {
   // scratch1 = FramePointer + BaselineFrame::FramePointerOffset - StackPointer.
   masm.computeEffectiveAddress(
       Address(BaselineFrameReg, BaselineFrame::FramePointerOffset), scratch1);
   masm.subStackPtrFrom(scratch1);
 
-  // Store the frame size without VMFunction arguments. Use
-  // computeEffectiveAddress instead of sub32 to avoid an extra move.
+#ifdef DEBUG
+  // Store the frame size without VMFunction arguments in debug builds.
   masm.computeEffectiveAddress(Address(scratch1, -int32_t(argSize)), scratch2);
-  masm.store32(scratch2, frameSizeAddr);
+  masm.store32(scratch2, frame.addressOfDebugFrameSize());
+#endif
 
   // Push frame descriptor based on the full frame size.
   masm.makeFrameDescriptor(scratch1, FrameType::BaselineJS,
@@ -634,9 +646,7 @@ void BaselineInterpreterCodeGen::storeFrameSizeAndPushDescriptor(
 }
 
 static uint32_t GetVMFunctionArgSize(const VMFunctionData& fun) {
-  // Note that this includes the size of the frame pointer pushed by
-  // prepareVMCall.
-  return fun.explicitStackSlots() * sizeof(void*) + sizeof(void*);
+  return fun.explicitStackSlots() * sizeof(void*);
 }
 
 template <typename Handler>
@@ -659,16 +669,14 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
 
   saveInterpreterPCReg();
 
-  Address frameSizeAddress(BaselineFrameReg,
-                           BaselineFrame::reverseOffsetOfFrameSize());
-  uint32_t frameBaseSize =
-      BaselineFrame::FramePointerOffset + BaselineFrame::Size();
   if (phase == CallVMPhase::AfterPushingLocals) {
-    storeFrameSizeAndPushDescriptor(frameBaseSize, argSize, frameSizeAddress,
-                                    R0.scratchReg(), R1.scratchReg());
+    storeFrameSizeAndPushDescriptor(argSize, R0.scratchReg(), R1.scratchReg());
   } else {
     MOZ_ASSERT(phase == CallVMPhase::BeforePushingLocals);
-    masm.store32(Imm32(frameBaseSize), frameSizeAddress);
+    uint32_t frameBaseSize = BaselineFrame::frameSizeForNumValueSlots(0);
+#ifdef DEBUG
+    masm.store32(Imm32(frameBaseSize), frame.addressOfDebugFrameSize());
+#endif
     uint32_t descriptor =
         MakeFrameDescriptor(frameBaseSize + argSize, FrameType::BaselineJS,
                             ExitFrameLayout::Size());
@@ -678,11 +686,9 @@ bool BaselineCodeGen<Handler>::callVMInternal(VMFunctionId id,
   // Perform the call.
   masm.call(code);
   uint32_t callOffset = masm.currentOffset();
-  masm.Pop(BaselineFrameReg);
 
-  // Pop arguments from framePushed. Subtract size of the frame pointer because
-  // we popped it explicitly.
-  masm.implicitPop(argSize - sizeof(void*));
+  // Pop arguments from framePushed.
+  masm.implicitPop(argSize);
 
   restoreInterpreterPCReg();
 
@@ -731,12 +737,10 @@ bool BaselineCodeGen<Handler>::emitStackCheck() {
 }
 
 static void EmitCallFrameIsDebuggeeCheck(MacroAssembler& masm) {
-  masm.Push(BaselineFrameReg);
   masm.setupUnalignedABICall(R0.scratchReg());
   masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
   masm.passABIArg(R0.scratchReg());
   masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, jit::FrameIsDebuggeeCheck));
-  masm.Pop(BaselineFrameReg);
 }
 
 template <>
@@ -1319,8 +1323,9 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
 
   // Try to compile and/or finish a compilation.
   if (JSOp(*pc) == JSOP_LOOPENTRY) {
-    // During the loop entry we can try to OSR into ion.
-    // The ic has logic for this.
+    // During the loop entry we can try to OSR into ion. The IC for this expects
+    // the frame size in R0.scratchReg().
+    computeFrameSize(R0.scratchReg());
     if (!emitNextIC()) {
       return false;
     }
@@ -1330,13 +1335,12 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     // annotated vm call.
     prepareVMCall();
 
-    pushBytecodePCArg();
     masm.PushBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
 
     const RetAddrEntry::Kind kind = RetAddrEntry::Kind::WarmupCounter;
 
-    using Fn = bool (*)(JSContext*, BaselineFrame*, jsbytecode*);
-    if (!callVM<Fn, IonCompileScriptForBaseline>(kind)) {
+    using Fn = bool (*)(JSContext*, BaselineFrame*);
+    if (!callVM<Fn, IonCompileScriptForBaselineAtEntry>(kind)) {
       return false;
     }
   }
@@ -5819,13 +5823,16 @@ bool BaselineCodeGen<Handler>::emit_JSOP_YIELD() {
     masm.bind(&skipBarrier);
   } else {
     masm.loadBaselineFramePtr(BaselineFrameReg, R1.scratchReg());
+    computeFrameSize(R0.scratchReg());
 
     prepareVMCall();
     pushBytecodePCArg();
+    pushArg(R0.scratchReg());
     pushArg(R1.scratchReg());
     pushArg(genObj);
 
-    using Fn = bool (*)(JSContext*, HandleObject, BaselineFrame*, jsbytecode*);
+    using Fn = bool (*)(JSContext*, HandleObject, BaselineFrame*, uint32_t,
+                        jsbytecode*);
     if (!callVM<Fn, jit::NormalSuspend>()) {
       return false;
     }
@@ -6073,8 +6080,9 @@ bool BaselineCodeGen<Handler>::emitGeneratorResume(
   masm.computeEffectiveAddress(
       Address(BaselineFrameReg, BaselineFrame::FramePointerOffset), scratch2);
   masm.subStackPtrFrom(scratch2);
-  masm.store32(scratch2, Address(BaselineFrameReg,
-                                 BaselineFrame::reverseOffsetOfFrameSize()));
+#ifdef DEBUG
+  masm.store32(scratch2, frame.addressOfDebugFrameSize());
+#endif
   masm.makeFrameDescriptor(scratch2, FrameType::BaselineJS,
                            JitFrameLayout::Size());
 
@@ -7023,13 +7031,11 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 
   saveInterpreterPCReg();
 
-  masm.Push(BaselineFrameReg);
   masm.setupUnalignedABICall(R0.scratchReg());
   masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
   masm.passABIArg(R0.scratchReg());
   masm.callWithABI(
       JS_FUNC_TO_DATA_PTR(void*, jit::HandleCodeCoverageAtPrologue));
-  masm.Pop(BaselineFrameReg);
 
   restoreInterpreterPCReg();
   masm.ret();
@@ -7041,14 +7047,12 @@ void BaselineInterpreterGenerator::emitOutOfLineCodeCoverageInstrumentation() {
 
   saveInterpreterPCReg();
 
-  masm.Push(BaselineFrameReg);
   masm.setupUnalignedABICall(R0.scratchReg());
   masm.loadBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
   masm.passABIArg(R0.scratchReg());
   Register pcReg = LoadBytecodePC(masm, R2.scratchReg());
   masm.passABIArg(pcReg);
   masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, jit::HandleCodeCoverageAtPC));
-  masm.Pop(BaselineFrameReg);
 
   restoreInterpreterPCReg();
   masm.ret();

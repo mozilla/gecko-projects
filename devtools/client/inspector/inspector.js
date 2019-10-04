@@ -935,6 +935,13 @@ Inspector.prototype = {
   },
 
   /**
+   * Returns a boolean indicating whether a sidebar panel instance exists.
+   */
+  hasPanel: function(id) {
+    return this._panels.has(id);
+  },
+
+  /**
    * Lazily get and create panel instances displayed in the sidebar
    */
   getPanel: function(id) {
@@ -1722,7 +1729,8 @@ Inspector.prototype = {
     if (!this.eyeDropperButton) {
       return null;
     }
-
+    // turn off node picker when color picker is starting
+    this.toolbox.nodePicker.stop().catch(console.error);
     this.telemetry.scalarSet(TELEMETRY_EYEDROPPER_OPENED, 1);
     this.eyeDropperButton.classList.add("checked");
     this.startEyeDropperListeners();
@@ -1754,6 +1762,12 @@ Inspector.prototype = {
     if (!this.canAddHTMLChild()) {
       return;
     }
+
+    // turn off node picker when add node is triggered
+    this.toolbox.nodePicker.stop();
+
+    // turn off color picker when add node is triggered
+    this.hideEyeDropper();
 
     const html = "<div></div>";
 

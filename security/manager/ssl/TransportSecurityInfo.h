@@ -84,6 +84,14 @@ class TransportSecurityInfo : public nsITransportSecurityInfo,
   void SetCertificateTransparencyInfo(
       const mozilla::psm::CertificateTransparencyInfo& info);
 
+  // Use errorCode == 0 to indicate success;
+  virtual void SetCertVerificationResult(PRErrorCode errorCode){};
+
+  void SetCertificateTransparencyStatus(
+      uint16_t aCertificateTransparencyStatus) {
+    mCertificateTransparencyStatus = aCertificateTransparencyStatus;
+  }
+
   uint16_t mCipherSuite;
   uint16_t mProtocolVersion;
   uint16_t mCertificateTransparencyStatus;
@@ -113,6 +121,7 @@ class TransportSecurityInfo : public nsITransportSecurityInfo,
 
  protected:
   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
+  nsCOMPtr<nsIX509CertList> mSucceededCertChain;
 
  private:
   uint32_t mSecurityState;
@@ -124,7 +133,6 @@ class TransportSecurityInfo : public nsITransportSecurityInfo,
   OriginAttributes mOriginAttributes;
 
   nsCOMPtr<nsIX509Cert> mServerCert;
-  nsCOMPtr<nsIX509CertList> mSucceededCertChain;
 
   /* Peer cert chain for failed connections (for error reporting) */
   nsCOMPtr<nsIX509CertList> mFailedCertChain;

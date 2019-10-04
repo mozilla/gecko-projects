@@ -2720,20 +2720,19 @@ void NS_SniffContent(const char* aSnifferType, nsIRequest* aRequest,
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(aRequest);
   if (channel) {
     nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
-    nsAutoCString currentContentType;
-    channel->GetContentType(currentContentType);
-    /* Bug 1571742
-     * We cannot skip snffing if the current MIME-Type is a JSON file.
-     * The JSON-Viewer relies on its own sniffer to determine, if it can render
-     * the page, so we need to make an exception if the Server provides a valid
-     * JSON-MIME.
-     */
-    if (loadInfo->GetSkipContentSniffing() &&
-        !currentContentType.Equals(APPLICATION_JSON) &&
-        !currentContentType.Equals(APPLICATION_WEB_MANIFEST) &&
-        !currentContentType.Equals(TEXT_JSON)) {
-      aSniffedType.Truncate();
-      return;
+    if (loadInfo->GetSkipContentSniffing()) {
+      /* Bug 1571742
+       * We cannot skip snffing if the current MIME-Type might be a JSON.
+       * The JSON-Viewer relies on its own sniffer to determine, if it can
+       * render the page, so we need to make an exception if the Server provides
+       * a application/ mime, as it might be json.
+       */
+      nsAutoCString currentContentType;
+      channel->GetContentType(currentContentType);
+      if (!StringBeginsWith(currentContentType,
+                            NS_LITERAL_CSTRING("application/"))) {
+        return;
+      }
     }
   }
   nsCOMArray<nsIContentSniffer> sniffers;
@@ -2747,35 +2746,6 @@ void NS_SniffContent(const char* aSnifferType, nsIRequest* aRequest,
   }
 
   aSniffedType.Truncate();
-
-  // If the Sniffers did not hit and NoSniff is set
-  // Check if we have any MIME Type at all or report an
-  // Error to the Console
-  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aRequest);
-  if (httpChannel) {
-    nsCOMPtr<nsILoadInfo> loadInfo = httpChannel->LoadInfo();
-
-    if (loadInfo->GetSkipContentSniffing()) {
-      nsAutoCString type;
-      httpChannel->GetContentType(type);
-
-      if (type.Equals(nsCString("application/x-unknown-content-type"))) {
-        nsCOMPtr<nsIURI> requestUri;
-        httpChannel->GetURI(getter_AddRefs(requestUri));
-        nsAutoCString spec;
-        requestUri->GetSpec(spec);
-        if (spec.Length() > 50) {
-          spec.Truncate(50);
-          spec.AppendLiteral("...");
-        }
-        httpChannel->LogMimeTypeMismatch(
-            nsCString("XTCOWithMIMEValueMissing"), false,
-            NS_ConvertUTF8toUTF16(spec),
-            // Type is not used in the Error Message but required
-            NS_ConvertUTF8toUTF16(type));
-      }
-    }
-  }
 }
 
 bool NS_IsSrcdocChannel(nsIChannel* aChannel) {

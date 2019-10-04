@@ -27,6 +27,7 @@ struct JSContext;
 namespace js {
 
 class WritableStreamDefaultController;
+class WritableStreamDefaultWriter;
 
 class WritableStream : public NativeObject {
  public:
@@ -182,9 +183,14 @@ class WritableStream : public NativeObject {
 
  public:
   bool writable() const { return state() == Writable; }
+
   bool closed() const { return state() == Closed; }
+
   bool erroring() const { return state() == Erroring; }
+  void setErroring() { setState(Erroring); }
+
   bool errored() const { return state() == Errored; }
+  void setErrored() { setState(Errored); }
 
   bool backpressure() const { return flags() & Backpressure; }
 
@@ -205,9 +211,8 @@ class WritableStream : public NativeObject {
   }
 
   bool hasWriter() const { return !getFixedSlot(Slot_Writer).isUndefined(); }
-  void setWriter(JSObject* writer) {
-    setFixedSlot(Slot_Writer, JS::ObjectValue(*writer));
-  }
+  inline WritableStreamDefaultWriter* writer() const;
+  inline void setWriter(WritableStreamDefaultWriter* writer);
   void clearWriter() { setFixedSlot(Slot_Writer, JS::UndefinedValue()); }
 
   JS::Value storedError() const { return getFixedSlot(Slot_StoredError); }

@@ -1238,7 +1238,7 @@ class CGHeaders(CGWrapper):
             # If this is an iterator interface generated for a separate
             # iterable interface, skip generating type includes, as we have
             # what we need in IterableIterator.h
-            if desc.interface.isExternal() or desc.interface.isIteratorInterface():
+            if desc.interface.isIteratorInterface():
                 continue
 
             for m in desc.interface.members:
@@ -13492,20 +13492,25 @@ class CGDictionary(CGThing):
                  sourceDescription=self.getMemberSourceDescription(member)))
             for member in dictionary.members]
 
-        # If we have a union member containing something in the same
-        # file as us, bail: the C++ includes won't work out.
+        # If we have a union member which is going to be declared in a different
+        # header but contains something that will be declared in the same header
+        # as us, bail: the C++ includes won't work out.
         for member in dictionary.members:
             type = member.type.unroll()
-            if type.isUnion():
+            if (type.isUnion() and
+                CGHeaders.getUnionDeclarationFilename(descriptorProvider.getConfig(),
+                                                      type) !=
+                CGHeaders.getDeclarationFilename(dictionary)):
                 for t in type.flatMemberTypes:
                     if (t.isDictionary() and
                         CGHeaders.getDeclarationFilename(t.inner) ==
                         CGHeaders.getDeclarationFilename(dictionary)):
                         raise TypeError(
-                            "Dictionary contains a union that contains a "
-                            "dictionary in the same WebIDL file.  This won't "
-                            "compile.  Move the inner dictionary to a "
-                            "different file.\n%s\n%s" %
+                            "Dictionary contains a union that will live in a different "
+                            "header that contains a dictionary from the same header as "
+                            "the original dictionary.  This won't compile.  Move the "
+                            "inner dictionary to a different Web IDL file to move it "
+                            "to a different header.\n%s\n%s" %
                             (t.location, t.inner.location))
         self.structs = self.getStructs()
 
@@ -14395,10 +14400,8 @@ class CGGlobalNames(CGGeneric):
         getter = phfCodegen.gen_jsflatstr_getter(
             name='WebIDLGlobalNameHash::GetEntry',
             return_type='const WebIDLNameTableEntry*',
-            # XXX(nika): It would be nice to have a length overload for
-            # JS_FlatStringEqualsAscii.
             return_entry=dedent("""
-                if (JS_FlatStringEqualsAscii(aKey, sNames + entry.mNameOffset)) {
+                if (JS_FlatStringEqualsAscii(aKey, sNames + entry.mNameOffset, entry.mNameLength)) {
                   return &entry;
                 }
                 return nullptr;

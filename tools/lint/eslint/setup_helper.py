@@ -4,8 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import, print_function
-
 import json
 import os
 import platform
@@ -183,7 +181,7 @@ def call_process(name, cmd, cwd=None, append_env={}):
 def expected_eslint_modules():
     # Read the expected version of ESLint and external modules
     expected_modules_path = os.path.join(get_project_root(), "package.json")
-    with open(expected_modules_path, "r") as f:
+    with open(expected_modules_path, "r", encoding="utf-8") as f:
         sections = json.load(f)
         expected_modules = sections["dependencies"]
         expected_modules.update(sections["devDependencies"])
@@ -192,14 +190,14 @@ def expected_eslint_modules():
     # dependencies are up to date.
     mozilla_json_path = os.path.join(get_eslint_module_path(),
                                      "eslint-plugin-mozilla", "package.json")
-    with open(mozilla_json_path, "r") as f:
+    with open(mozilla_json_path, "r", encoding="utf-8") as f:
         expected_modules.update(json.load(f)["dependencies"])
 
     # Also read the in-tree ESLint plugin spidermonkey information, to ensure the
     # dependencies are up to date.
     mozilla_json_path = os.path.join(get_eslint_module_path(),
                                      "eslint-plugin-spidermonkey-js", "package.json")
-    with open(mozilla_json_path, "r") as f:
+    with open(mozilla_json_path, "r", encoding="utf-8") as f:
         expected_modules.update(json.load(f)["dependencies"])
 
     return expected_modules
@@ -248,8 +246,7 @@ def eslint_module_needs_setup():
             print("%s v%s needs to be installed locally." % (name, version_range))
             has_issues = True
             continue
-
-        data = json.load(open(path))
+        data = json.load(open(path, encoding="utf-8"))
 
         if version_range.startswith("file:"):
             # We don't need to check local file installations for versions, as

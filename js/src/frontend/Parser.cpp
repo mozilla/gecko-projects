@@ -1781,6 +1781,20 @@ bool PerHandlerParser<SyntaxParseHandler>::finishFunction(
   return EmitLazyScript(cx_, funbox, sourceObject_, parseGoal());
 }
 
+bool ParserBase::publishDeferredAllocations() {
+  for (ParseInfo::DeferredAllocationType deferredAllocation :
+       deferredAllocations()) {
+    if (deferredAllocation.is<BigIntLiteral*>()) {
+      BigIntLiteral* lit = deferredAllocation.as<BigIntLiteral*>();
+      if (!lit->publish(this->cx_, this)) {
+        return false;
+      }
+    }
+  }
+  deferredAllocations().clearAndFree();
+  return true;
+}
+
 bool ParserBase::publishLazyScripts(FunctionTree* root) {
   if (root) {
     auto visitor = [](ParserBase* parser, FunctionTree* tree) {
@@ -1877,6 +1891,10 @@ static bool EmitLazyScript(JSContext* cx, FunctionBox* funbox,
 
   function->initLazyScript(lazy);
   funbox->setIsInterpretedLazy(true);
+
+  if (data.fieldInitializers) {
+    lazy->setFieldInitializers(*data.fieldInitializers);
+  }
 
   // In order to allow asserting that we published all lazy script data,
   // reset the lazyScriptData here, now that it's no longer needed.
@@ -9624,6 +9642,29 @@ BigIntLiteral* Parser<FullParseHandler, Unit>::newBigInt() {
   // BigIntLiteralSuffix (the trailing "n").  Note that NumericLiteralBase
   // productions may start with 0[bBoOxX], indicating binary/octal/hex.
   const auto& chars = tokenStream.getCharBuffer();
+
+  if (this->getTreeHolder().isDeferred()) {
+    BigIntCreationData data;
+    if (!data.init(this->cx_, chars)) {
+      return null();
+    }
+
+    // Should the operations below fail, the buffer held by data will
+    // be cleaned up by the destructor.
+    BigIntLiteral* lit = handler_.newBigInt(pos());
+    if (!lit) {
+      return null();
+    }
+    if (!this->deferredAllocations().append(AsVariant(lit))) {
+      return null();
+    }
+    // Now that possible OOMs are done, move data into Lit. After this
+    // point responsibility for cleanup lies with the cleanup of the
+    // ParseInfo's deferred allocations list.
+    lit->init(std::move(data));
+    return lit;
+  }
+
   mozilla::Range<const char16_t> source(chars.begin(), chars.length());
 
   BigInt* b = js::ParseBigIntLiteral(cx_, source);

@@ -6,19 +6,37 @@
 #ifndef GFX_FT2FONTBASE_H
 #define GFX_FT2FONTBASE_H
 
-#include "cairo.h"
 #include "gfxContext.h"
 #include "gfxFont.h"
+#include "gfxFontEntry.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/UnscaledFontFreeType.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
 
+class gfxFT2FontEntryBase : public gfxFontEntry {
+ public:
+  explicit gfxFT2FontEntryBase(const nsACString& aName) : gfxFontEntry(aName) {}
+
+  struct CmapCacheSlot {
+    CmapCacheSlot() : mCharCode(0), mGlyphIndex(0) {}
+
+    uint32_t mCharCode;
+    uint32_t mGlyphIndex;
+  };
+
+  CmapCacheSlot* GetCmapCacheSlot(uint32_t aCharCode);
+
+ private:
+  enum { kNumCmapCacheSlots = 256 };
+
+  mozilla::UniquePtr<CmapCacheSlot[]> mCmapCache;
+};
+
 class gfxFT2FontBase : public gfxFont {
  public:
   gfxFT2FontBase(
       const RefPtr<mozilla::gfx::UnscaledFontFreeType>& aUnscaledFont,
-      cairo_scaled_font_t* aScaledFont,
       RefPtr<mozilla::gfx::SharedFTFace>&& aFTFace, gfxFontEntry* aFontEntry,
       const gfxFontStyle* aFontStyle, int aLoadFlags, bool aEmbolden);
   virtual ~gfxFT2FontBase();
@@ -33,6 +51,8 @@ class gfxFT2FontBase : public gfxFont {
   bool GetGlyphBounds(uint16_t aGID, gfxRect* aBounds, bool aTight) override;
 
   FontType GetType() const override { return FONT_TYPE_FT2; }
+
+  bool ShouldRoundXOffset(cairo_t* aCairo) const override;
 
   static void SetupVarCoords(FT_MM_Var* aMMVar,
                              const nsTArray<gfxFontVariation>& aVariations,

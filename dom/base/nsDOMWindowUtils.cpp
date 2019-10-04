@@ -3409,11 +3409,6 @@ nsDOMWindowUtils::GetOMTAStyle(Element* aElement, const nsAString& aProperty,
 
   RefPtr<nsROCSSPrimitiveValue> cssValue = nullptr;
   if (frame && nsLayoutUtils::AreAsyncAnimationsEnabled()) {
-    RefPtr<LayerManager> widgetLayerManager;
-    if (nsIWidget* widget = GetWidget()) {
-      widgetLayerManager = widget->GetLayerManager();
-    }
-
     if (aProperty.EqualsLiteral("opacity")) {
       OMTAValue value = GetOMTAValue(frame, DisplayItemType::TYPE_OPACITY,
                                      GetWebRenderBridge());
@@ -4066,6 +4061,12 @@ nsDOMWindowUtils::SetCompositionRecording(bool aValue) {
     }
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::SetTransactionLogging(bool aValue) {
+  Preferences::SetBool("gfx.webrender.debug.log-transactions", aValue);
   return NS_OK;
 }
 

@@ -779,9 +779,7 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
                 this
               );
             }
-            this.consoleProgressListener.startMonitor(
-              this.consoleProgressListener.MONITOR_FILE_ACTIVITY
-            );
+            this.consoleProgressListener.startMonitor();
             startedListeners.push(event);
           }
           break;
@@ -889,9 +887,7 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
           break;
         case "FileActivity":
           if (this.consoleProgressListener) {
-            this.consoleProgressListener.stopMonitor(
-              this.consoleProgressListener.MONITOR_FILE_ACTIVITY
-            );
+            this.consoleProgressListener.stopMonitor();
             this.consoleProgressListener = null;
           }
           stoppedListeners.push(event);
@@ -1289,7 +1285,14 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
     let resultGrip;
     if (!awaitResult) {
       try {
-        resultGrip = this.createValueGrip(result);
+        const objectActor = this.parentActor.threadActor.getThreadLifetimeObject(
+          result
+        );
+        if (objectActor) {
+          resultGrip = this.parentActor.threadActor.createValueGrip(result);
+        } else {
+          resultGrip = this.createValueGrip(result);
+        }
       } catch (e) {
         errorMessage = e;
       }

@@ -51,8 +51,7 @@ function nodeLoadProperties(node: Node, actor) {
     try {
       const properties = await loadItemProperties(
         node,
-        client.createObjectClient,
-        client.createLongStringClient,
+        client,
         loadedProperties
       );
 
@@ -119,9 +118,8 @@ function removeWatchpoint(item) {
 }
 
 function closeObjectInspector() {
-  return async ({ getState, client }: ThunkArg) => {
-    releaseActors(getState(), client);
-  };
+  return ({ dispatch, getState, client }: ThunkArg) =>
+    releaseActors(getState(), client, dispatch);
 }
 
 /*
@@ -133,8 +131,8 @@ function closeObjectInspector() {
  * consumer.
  */
 function rootsChanged(props: Props) {
-  return async ({ dispatch, client, getState }: ThunkArg) => {
-    releaseActors(getState(), client);
+  return ({ dispatch, client, getState }: ThunkArg) => {
+    releaseActors(getState(), client, dispatch);
     dispatch({
       type: "ROOTS_CHANGED",
       data: props,
@@ -142,16 +140,28 @@ function rootsChanged(props: Props) {
   };
 }
 
-function releaseActors(state, client) {
+async function releaseActors(state, client, dispatch) {
   const actors = getActors(state);
-  const watchpoints = getWatchpoints(state);
+  if (actors.size === 0) {
+    return;
+  }
 
+  const watchpoints = getWatchpoints(state);
+  let released = false;
   for (const actor of actors) {
     // Watchpoints are stored in object actors.
     // If we release the actor we lose the watchpoint.
     if (!watchpoints.has(actor)) {
-      client.releaseActor(actor);
+      await client.releaseActor(actor);
+      released = true;
     }
+  }
+
+  if (released) {
+    dispatch({
+      type: "RELEASED_ACTORS",
+      data: { actors },
+    });
   }
 }
 

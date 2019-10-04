@@ -29,7 +29,6 @@
 #include "nsAutoPtr.h"
 #include "nsQueryObject.h"
 
-#include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
 #include "nsGlobalWindow.h"
 
@@ -54,6 +53,7 @@ using mozilla::EventDispatcher;
 using mozilla::LogLevel;
 using mozilla::WidgetEvent;
 using mozilla::dom::BrowserChild;
+using mozilla::dom::BrowsingContext;
 using mozilla::dom::Document;
 
 //
@@ -803,11 +803,17 @@ void nsDocLoader::NotifyDoneWithOnload(nsDocLoader* aParent) {
   if (aParent) {
     // In-process parent:
     aParent->ChildDoneWithOnload(this);
-  } else if (BrowserChild* browserChild =
-                 BrowserChild::GetFrom(static_cast<nsDocShell*>(this))) {
-    // OOP parent:
-    mozilla::Unused << browserChild->SendMaybeFireEmbedderLoadEvents(
-        /*aIsTrusted*/ true, /*aFireLoadAtEmbeddingElement*/ false);
+  }
+  nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(this);
+  if (!docShell) {
+    return;
+  }
+  BrowsingContext* bc = nsDocShell::Cast(docShell)->GetBrowsingContext();
+  if (bc->IsContentSubframe() && !bc->GetParent()->IsInProcess()) {
+    if (BrowserChild* browserChild = BrowserChild::GetFrom(docShell)) {
+      mozilla::Unused << browserChild->SendMaybeFireEmbedderLoadEvents(
+          /*aIsTrusted*/ true, /*aFireLoadAtEmbeddingElement*/ false);
+    }
   }
 }
 

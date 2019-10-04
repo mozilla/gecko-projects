@@ -17,8 +17,8 @@ WORKER_TYPES = {
     'releng-hardware/gecko-1-b-win2012-gamma': ('generic-worker', 'windows'),
     'invalid/invalid': ('invalid', None),
     'invalid/always-optimized': ('always-optimized', None),
-    'scriptworker-prov-v1/balrog-dev': ('balrog', None),
-    'scriptworker-prov-v1/balrogworker-v1': ('balrog', None),
+    'scriptworker-k8s/gecko-1-balrog': ('balrog', None),
+    'scriptworker-k8s/gecko-3-balrog': ('balrog', None),
     'scriptworker-k8s/gecko-3-beetmover': ('beetmover', None),
     'scriptworker-prov-v1/pushapk-v1': ('push-apk', None),
     "scriptworker-prov-v1/signing-linux-v1": ('scriptworker-signing', None),
@@ -27,6 +27,7 @@ WORKER_TYPES = {
     "scriptworker-prov-v1/treescript-v1": ('treescript', None),
     'terraform-packet/gecko-t-linux': ('docker-worker', 'linux'),
     'releng-hardware/gecko-t-osx-1014': ('generic-worker', 'macosx'),
+    'releng-hardware/gecko-t-osx-1014-power': ('generic-worker', 'macosx'),
 }
 
 
