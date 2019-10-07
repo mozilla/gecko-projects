@@ -71,12 +71,13 @@ let gFilterPattern = null;
 let gFilterShowAll = false;
 
 class PrefRow {
-  constructor(name) {
+  constructor(name, opts) {
     this.name = name;
     this.value = true;
     this.hidden = false;
     this.odd = false;
     this.editing = false;
+    this.isAddRow = opts && opts.isAddRow;
     this.refreshValue();
   }
 
@@ -336,6 +337,7 @@ class PrefRow {
         (this.hasUserValue ? "has-user-value " : "") +
         (this.isLocked ? "locked " : "") +
         (this.exists ? "" : "deleted ") +
+        (this.isAddRow ? "add " : "") +
         (this.odd ? "odd " : "");
     }
 
@@ -354,6 +356,18 @@ class PrefRow {
     // The type=number input isn't selected unless it's focused first.
     this.inputField.focus();
     this.inputField.select();
+  }
+
+  toggle() {
+    Services.prefs.setBoolPref(this.name, !this.value);
+  }
+
+  editOrToggle() {
+    if (this.type == "Boolean") {
+      this.toggle();
+    } else {
+      this.edit();
+    }
   }
 
   save() {
@@ -472,21 +486,50 @@ function loadPrefs() {
     filterPrefs({ showAll: true });
   });
 
+  function shouldBeginEdit(event) {
+    if (
+      event.target.localName != "button" &&
+      event.target.localName != "input"
+    ) {
+      let row = event.target.closest("tr");
+      return row && row._pref.exists;
+    }
+    return false;
+  }
+
+  // Disable double/triple-click text selection since that triggers edit/toggle.
+  prefs.addEventListener("mousedown", event => {
+    if (event.detail > 1 && shouldBeginEdit(event)) {
+      event.preventDefault();
+    }
+  });
+
   prefs.addEventListener("click", event => {
+    if (event.detail == 2 && shouldBeginEdit(event)) {
+      event.target.closest("tr")._pref.editOrToggle();
+      return;
+    }
+
     if (event.target.localName != "button") {
       return;
     }
+
     let pref = event.target.closest("tr")._pref;
     let button = event.target.closest("button");
+
     if (button.classList.contains("button-add")) {
+      pref.isAddRow = false;
       Preferences.set(pref.name, pref.value);
-      if (pref.type != "Boolean") {
+      if (pref.type == "Boolean") {
+        pref.refreshClass();
+      } else {
         pref.edit();
       }
-    } else if (button.classList.contains("button-toggle")) {
-      Services.prefs.setBoolPref(pref.name, !pref.value);
-    } else if (button.classList.contains("button-edit")) {
-      pref.edit();
+    } else if (
+      button.classList.contains("button-toggle") ||
+      button.classList.contains("button-edit")
+    ) {
+      pref.editOrToggle();
     } else if (button.classList.contains("button-save")) {
       pref.save();
     } else {
@@ -545,6 +588,7 @@ function filterPrefs(options = {}) {
   let indexInArray = 0;
   let elementInTable = gPrefsTable.firstElementChild;
   let odd = false;
+  let hasVisiblePrefs = false;
   while (indexInArray < prefArray.length || elementInTable) {
     // For efficiency, filter the array while we are iterating.
     let prefInArray = prefArray[indexInArray];
@@ -592,14 +636,17 @@ function filterPrefs(options = {}) {
     prefInArray.refreshClass();
     odd = !odd;
     indexInArray++;
+    hasVisiblePrefs = true;
   }
 
   if (fragment) {
     gPrefsTable.appendChild(fragment);
   }
 
+  gPrefsTable.toggleAttribute("has-visible-prefs", hasVisiblePrefs);
+
   if (searchName && !gExistingPrefs.has(searchName)) {
-    let addPrefRow = new PrefRow(searchName);
+    let addPrefRow = new PrefRow(searchName, { isAddRow: true });
     addPrefRow.odd = odd;
     gPrefsTable.appendChild(addPrefRow.getElement());
   }

@@ -730,7 +730,6 @@ class BrowserParent final : public PBrowserParent,
   bool GetRenderLayers();
   void SetRenderLayers(bool aRenderLayers);
   void PreserveLayers(bool aPreserveLayers);
-  void ForceRepaint();
   void NotifyResolutionChanged();
 
   void Deprioritize();
@@ -796,7 +795,7 @@ class BrowserParent final : public PBrowserParent,
 
   void DestroyInternal();
 
-  void SetRenderLayersInternal(bool aEnabled, bool aForceRepaint);
+  void SetRenderLayersInternal(bool aEnabled);
 
   already_AddRefed<nsFrameLoader> GetFrameLoader(
       bool aUseCachedFrameLoaderAfterDestroy = false) const;

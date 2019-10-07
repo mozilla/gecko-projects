@@ -810,14 +810,12 @@ var E10SUtils = {
   },
 
   /**
-   * If Fission is enabled, the remote type for a standard content process will
-   * start with webIsolated=.
+   * There are various types of remote types that are for web content processes, but
+   * they all start with "web". The C++ version of this method is
+   * mozilla::dom::IsWebRemoteType().
    */
-  isWebRemoteType(aBrowser) {
-    if (aBrowser.ownerGlobal.docShell.nsILoadContext.useRemoteSubframes) {
-      return aBrowser.remoteType.startsWith(FISSION_WEB_REMOTE_TYPE_PREFIX);
-    }
-    return aBrowser.remoteType == WEB_REMOTE_TYPE;
+  isWebRemoteType(aRemoteType) {
+    return aRemoteType.startsWith(WEB_REMOTE_TYPE);
   },
 };
 

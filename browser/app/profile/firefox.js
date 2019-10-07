@@ -201,7 +201,6 @@ pref("browser.uitour.surveyDuration", 7200);
 pref("keyword.enabled", true);
 pref("browser.fixup.domainwhitelist.localhost", true);
 
-pref("general.smoothScroll", true);
 #ifdef UNIX_BUT_NOT_MAC
   pref("general.autoScroll", false);
 #else
@@ -331,7 +330,11 @@ pref("browser.urlbar.usepreloadedtopurls.enabled", false);
 pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 
 // Whether the quantum bar displays the major design update.
-pref("browser.urlbar.megabar", false);
+#ifdef NIGHTLY_BUILD
+  pref("browser.urlbar.megabar", true);
+#else
+  pref("browser.urlbar.megabar", false);
+#endif
 
 pref("browser.urlbar.openViewOnFocus", false);
 pref("browser.urlbar.eventTelemetry.enabled", false);
@@ -385,6 +388,10 @@ pref("browser.search.hiddenOneOffs", "");
 
 // Mirrors whether the search-container widget is in the navigation toolbar.
 pref("browser.search.widget.inNavBar", false);
+
+// Enables display of the options for the user using a separate default search
+// engine in private browsing mode.
+pref("browser.search.separatePrivateDefault.ui.enabled", false);
 
 pref("browser.sessionhistory.max_entries", 50);
 

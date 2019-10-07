@@ -969,7 +969,7 @@ LoginManagerPrompter.prototype = {
    * @param {string} [options.messageStringID = undefined]
    *        An optional string ID to override the default message.
    * @param {string} [options.autoSavedLoginGuid = ""]
-   *        A string guid value for the old login to be removed if the changes
+   *        A string guid value for the auto-saved login to be removed if the changes
    *        match it to an different login
    */
   _showLoginCaptureDoorhanger(
@@ -1086,15 +1086,10 @@ LoginManagerPrompter.prototype = {
     };
 
     let writeDataToUI = () => {
-      // setAttribute is used in addition to setting the property since the
-      // <textbox> binding may not be attached yet.
-      chromeDoc
-        .getElementById("password-notification-username")
-        .setAttribute("placeholder", usernamePlaceholder);
       let nameField = chromeDoc.getElementById(
         "password-notification-username"
       );
-      nameField.setAttribute("value", login.username);
+      nameField.placeholder = usernamePlaceholder;
       nameField.value = login.username;
 
       let toggleCheckbox = chromeDoc.getElementById(
@@ -1105,8 +1100,7 @@ LoginManagerPrompter.prototype = {
         "password-notification-password"
       );
       // Ensure the type is reset so the field is masked.
-      passwordField.setAttribute("type", "password");
-      passwordField.setAttribute("value", login.password);
+      passwordField.type = "password";
       passwordField.value = login.password;
       updateButtonLabel();
     };

@@ -49,9 +49,6 @@ class UrlbarInput {
    *   The initial options for UrlbarInput.
    * @param {object} options.textbox
    *   The <textbox> element.
-   * @param {UrlbarController} [options.controller]
-   *   Optional fake controller to override the built-in UrlbarController.
-   *   Intended for use in unit tests only.
    */
   constructor(options = {}) {
     this.textbox = options.textbox;
@@ -89,12 +86,10 @@ class UrlbarInput {
       this.textbox.parentNode.classList.add("megabar");
     }
 
-    this.controller =
-      options.controller ||
-      new UrlbarController({
-        browserWindow: this.window,
-        eventTelemetryCategory: options.eventTelemetryCategory,
-      });
+    this.controller = new UrlbarController({
+      browserWindow: this.window,
+      eventTelemetryCategory: options.eventTelemetryCategory,
+    });
     this.controller.setInput(this);
     this.view = new UrlbarView(this);
     this.valueIsTyped = false;
@@ -181,7 +176,6 @@ class UrlbarInput {
     this.eventBufferer = new UrlbarEventBufferer(this);
 
     this._inputFieldEvents = [
-      "click",
       "compositionstart",
       "compositionend",
       "contextmenu",
@@ -193,7 +187,6 @@ class UrlbarInput {
       "input",
       "keydown",
       "keyup",
-      "mousedown",
       "mouseover",
       "overflow",
       "underflow",
@@ -206,9 +199,9 @@ class UrlbarInput {
     }
 
     this.dropmarker.addEventListener("mousedown", this);
-
     this.window.addEventListener("mousedown", this);
     this.textbox.addEventListener("mousedown", this);
+    this._inputContainer.addEventListener("click", this);
 
     // This is used to detect commands launched from the panel, to avoid
     // recording abandonment events when the command causes a blur event.
@@ -243,6 +236,7 @@ class UrlbarInput {
     this.dropmarker.removeEventListener("mousedown", this);
     this.window.removeEventListener("mousedown", this);
     this.textbox.removeEventListener("mousedown", this);
+    this._inputContainer.removeEventListener("click", this);
 
     this.view.panel.remove();
     this.endLayoutExtend(true);
@@ -281,6 +275,7 @@ class UrlbarInput {
     delete this.controller;
     delete this.textbox;
     delete this.inputField;
+    delete this._layoutBreakoutUpdateKey;
   }
 
   /**
@@ -972,6 +967,11 @@ class UrlbarInput {
       return;
     }
     await this._updateLayoutBreakoutDimensions();
+    if (!this.textbox) {
+      // We may have been uninitialized while waiting for
+      // _updateLayoutBreakoutDimensions.
+      return;
+    }
     this.startLayoutExtend();
   }
 
@@ -979,20 +979,35 @@ class UrlbarInput {
     if (
       !this.hasAttribute("breakout") ||
       this.hasAttribute("breakout-extend") ||
+      this.selectionStart != this.selectionEnd ||
       !(
-        (this.focused && !this.textbox.classList.contains("hidden-focus")) ||
+        (this.getAttribute("focused") == "true" &&
+          !this.textbox.classList.contains("hidden-focus")) ||
         this.view.isOpen
       )
     ) {
       return;
     }
+
+    if (UrlbarPrefs.get("disableExtendForTests")) {
+      this.setAttribute("breakout-extend-disabled", "true");
+      return;
+    }
+    this.removeAttribute("breakout-extend-disabled");
+
     this.setAttribute("breakout-extend", "true");
 
     // Enable the animation only after the first extend call to ensure it
     // doesn't run when opening a new window.
     if (!this.hasAttribute("breakout-extend-animate")) {
       this.window.promiseDocumentFlushed(() => {
+        if (!this.window) {
+          return;
+        }
         this.window.requestAnimationFrame(() => {
+          if (!this.textbox) {
+            return;
+          }
           this.setAttribute("breakout-extend-animate", "true");
         });
       });
@@ -1004,7 +1019,8 @@ class UrlbarInput {
       !this.hasAttribute("breakout-extend") ||
       (!force &&
         (this.view.isOpen ||
-          (this.focused && !this.textbox.classList.contains("hidden-focus"))))
+          (this.getAttribute("focused") == "true" &&
+            !this.textbox.classList.contains("hidden-focus"))))
     ) {
       return;
     }
@@ -1038,6 +1054,11 @@ class UrlbarInput {
 
     await this.window.promiseDocumentFlushed(() => {});
     await new Promise(resolve => {
+      if (!this.window) {
+        // We may have been uninitialized while waiting for layout.
+        resolve();
+        return;
+      }
       this.window.requestAnimationFrame(() => {
         if (this._layoutBreakoutUpdateKey != updateKey) {
           return;
@@ -1709,7 +1730,13 @@ class UrlbarInput {
   }
 
   _on_click(event) {
-    this._maybeSelectAll();
+    if (
+      event.target == this.inputField ||
+      event.target == this._inputContainer
+    ) {
+      this.startLayoutExtend();
+      this._maybeSelectAll();
+    }
   }
 
   _on_contextmenu(event) {
@@ -1725,7 +1752,13 @@ class UrlbarInput {
 
   _on_focus(event) {
     this.setAttribute("focused", "true");
-    this.startLayoutExtend();
+
+    // We handle mouse-based expansion events separately in _on_click.
+    if (this._focusedViaMousedown) {
+      this._focusedViaMousedown = false;
+    } else {
+      this.startLayoutExtend();
+    }
 
     this._updateUrlTooltip();
     this.formatValue();
@@ -1742,9 +1775,22 @@ class UrlbarInput {
 
   _on_mousedown(event) {
     switch (event.currentTarget) {
-      case this.inputField:
-        this.startLayoutExtend();
+      case this.textbox:
+        this._mousedownOnUrlbarDescendant = true;
+
+        if (
+          event.target != this.inputField &&
+          event.target != this._inputContainer
+        ) {
+          break;
+        }
+
+        this._focusedViaMousedown = !this.focused;
         this._preventClickSelectsAll = this.focused;
+
+        if (event.target == this._inputContainer) {
+          this.focus();
+        }
 
         // The rest of this case only cares about left clicks.
         if (event.button != 0) {
@@ -1775,12 +1821,6 @@ class UrlbarInput {
             event,
           });
           this._maybeSelectAll();
-        }
-        break;
-      case this.textbox:
-        this._mousedownOnUrlbarDescendant = true;
-        if (event.target == this._inputContainer) {
-          this.focus();
         }
         break;
       case this.window:
@@ -2024,7 +2064,11 @@ class UrlbarInput {
       return;
     }
 
-    // Drag only if the entire value is selected and it's a loaded URI.
+    // Make sure we don't cover the tab bar or other potential drop targets.
+    this.endLayoutExtend(true);
+
+    // Only customize the drag data if the entire value is selected and it's a
+    // loaded URI. Use default behavior otherwise.
     if (
       this.selectionStart != 0 ||
       this.selectionEnd != this.inputField.textLength ||

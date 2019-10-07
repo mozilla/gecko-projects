@@ -111,11 +111,6 @@ struct NativeSurface {
   void* mSurface;
 };
 
-struct NativeFont {
-  NativeFontType mType;
-  void* mFont;
-};
-
 /**
  * This structure is used to send draw options that are universal to all drawing
  * operations.
@@ -776,30 +771,37 @@ class SharedFTFace : public external::AtomicRefCounted<SharedFTFace> {
   FT_Face GetFace() const { return mFace; }
   SharedFTFaceData* GetData() const { return mData; }
 
-  /** Locks the face for exclusive access by a given owner. Returns true if
-   * the given owner is acquiring the lock for the first time, and false if
+  /** Locks the face for exclusive access by a given owner. Returns false if
+   * the given owner is acquiring the lock for the first time, and true if
    * the owner was the prior owner of the lock. Thus the return value can be
    * used to do owner-specific initialization of the FT face such as setting
    * a size or transform that may have been invalidated by a previous owner.
-   * If no owner is given, then the user should avoid modify any state on
+   * If no owner is given, then the user should avoid modifying any state on
    * the face so as not to invalidate the prior owner's modification.
    */
   bool Lock(void* aOwner = nullptr) {
     mLock.Lock();
-    if (mLockOwner == aOwner || !aOwner) {
-      return true;
-    } else {
-      mLockOwner = aOwner;
-      return false;
-    }
+    return !aOwner || mLastLockOwner.exchange(aOwner) == aOwner;
   }
   void Unlock() { mLock.Unlock(); }
+
+  /** Should be called when a lock owner is destroyed so that we don't have
+   * a dangling pointer to a destroyed owner.
+   */
+  void ForgetLockOwner(void* aOwner) {
+    if (aOwner) {
+      mLastLockOwner.compareExchange(aOwner, nullptr);
+    }
+  }
 
  private:
   FT_Face mFace;
   SharedFTFaceData* mData;
   Mutex mLock;
-  void* mLockOwner;
+  // Remember the last owner of the lock, even after unlocking, to allow users
+  // to avoid reinitializing state on the FT face if the last owner hasn't
+  // changed by the next time it is locked with the same owner.
+  Atomic<void*> mLastLockOwner;
 };
 #endif
 
@@ -920,7 +922,6 @@ class ScaledFont : public SupportsThreadSafeWeakPtr<ScaledFont> {
   const RefPtr<UnscaledFont>& GetUnscaledFont() const { return mUnscaledFont; }
 
   virtual cairo_scaled_font_t* GetCairoScaledFont() { return nullptr; }
-  virtual void SetCairoScaledFont(cairo_scaled_font_t* font) {}
 
   Float GetSyntheticObliqueAngle() const { return mSyntheticObliqueAngle; }
   void SetSyntheticObliqueAngle(Float aAngle) {
@@ -1697,15 +1698,13 @@ class GFX2D_API Factory {
 #ifdef MOZ_WIDGET_GTK
   static already_AddRefed<ScaledFont> CreateScaledFontForFontconfigFont(
       const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
-      cairo_scaled_font_t* aScaledFont, RefPtr<SharedFTFace> aFace,
-      FcPattern* aPattern);
+      RefPtr<SharedFTFace> aFace, FcPattern* aPattern);
 #endif
 
 #ifdef MOZ_WIDGET_ANDROID
   static already_AddRefed<ScaledFont> CreateScaledFontForFreeTypeFont(
       const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
-      cairo_scaled_font_t* aScaledFont, RefPtr<SharedFTFace> aFace,
-      bool aApplySyntheticBold = false);
+      RefPtr<SharedFTFace> aFace, bool aApplySyntheticBold = false);
 #endif
 
   /**
@@ -1713,16 +1712,14 @@ class GFX2D_API Factory {
    *
    * @param aData Pointer to the data
    * @param aSize Size of the TrueType data
-   * @param aBackendType Type of the reference DrawTarget the font should be
-   *                     created for.
    * @param aFontType Type of NativeFontResource that should be created.
    * @param aFontContext Optional native font context to be used to create the
    *                              NativeFontResource.
    * @return a NativeFontResource of nullptr if failed.
    */
   static already_AddRefed<NativeFontResource> CreateNativeFontResource(
-      uint8_t* aData, uint32_t aSize, BackendType aBackendType,
-      FontType aFontType, void* aFontContext = nullptr);
+      uint8_t* aData, uint32_t aSize, FontType aFontType,
+      void* aFontContext = nullptr);
 
   /**
    * This creates an unscaled font of the given type based on font descriptor
@@ -1731,17 +1728,6 @@ class GFX2D_API Factory {
   static already_AddRefed<UnscaledFont> CreateUnscaledFontFromFontDescriptor(
       FontType aType, const uint8_t* aData, uint32_t aDataLength,
       uint32_t aIndex);
-
-  /**
-   * Creates a ScaledFont from the supplied NativeFont.
-   *
-   * If aScaledFont is supplied, this creates a scaled font with an associated
-   * cairo_scaled_font_t. The NativeFont and cairo_scaled_font_t* parameters
-   * must correspond to the same font.
-   */
-  static already_AddRefed<ScaledFont> CreateScaledFontForNativeFont(
-      const NativeFont& aNativeFont, const RefPtr<UnscaledFont>& aUnscaledFont,
-      Float aSize, cairo_scaled_font_t* aScaledFont = nullptr);
 
   /**
    * This creates a simple data source surface for a certain size. It allocates
@@ -1893,6 +1879,10 @@ class GFX2D_API Factory {
       const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
       bool aUseEmbeddedBitmap, int aRenderingMode,
       IDWriteRenderingParams* aParams, Float aGamma, Float aContrast);
+
+  static already_AddRefed<ScaledFont> CreateScaledFontForGDIFont(
+      const void* aLogFont, const RefPtr<UnscaledFont>& aUnscaledFont,
+      Float aSize);
 
   static void SetSystemTextQuality(uint8_t aQuality);
 

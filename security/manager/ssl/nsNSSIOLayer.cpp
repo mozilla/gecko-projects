@@ -7,6 +7,7 @@
 #include "nsNSSIOLayer.h"
 
 #include <algorithm>
+#include <vector>
 
 #include "NSSCertDBTrustDomain.h"
 #include "NSSErrorsService.h"
@@ -707,6 +708,37 @@ nsNSSSocketInfo::SetEsniTxt(const nsACString& aEsniTxt) {
     }
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsNSSSocketInfo::GetPeerId(nsACString& aResult) {
+  if (!mPeerId.IsEmpty()) {
+    aResult.Assign(mPeerId);
+    return NS_OK;
+  }
+
+  if (mProviderFlags &
+      nsISocketProvider::ANONYMOUS_CONNECT) {  // See bug 466080
+    mPeerId.AppendLiteral("anon:");
+  }
+  if (mProviderFlags & nsISocketProvider::NO_PERMANENT_STORAGE) {
+    mPeerId.AppendLiteral("private:");
+  }
+  if (mProviderFlags & nsISocketProvider::BE_CONSERVATIVE) {
+    mPeerId.AppendLiteral("beConservative:");
+  }
+
+  mPeerId.AppendPrintf("tlsflags0x%08x:", mProviderTlsFlags);
+
+  mPeerId.Append(GetHostName());
+  mPeerId.Append(':');
+  mPeerId.AppendInt(GetPort());
+  nsAutoCString suffix;
+  GetOriginAttributes().CreateSuffix(suffix);
+  mPeerId.Append(suffix);
+
+  aResult.Assign(mPeerId);
   return NS_OK;
 }
 
@@ -2114,32 +2146,44 @@ static nsresult nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
     return NS_ERROR_FAILURE;
   }
 
+#ifdef __arm__
+  unsigned int enabledCiphers = 0;
+  std::vector<uint16_t> ciphers(SSL_GetNumImplementedCiphers());
+
+  // Returns only the enabled (reflecting prefs) ciphers, ordered
+  // by their occurence in
+  // https://hg.mozilla.org/projects/nss/file/a75ea4cdacd95282c6c245ebb849c25e84ccd908/lib/ssl/ssl3con.c#l87
+  if (SSL_CipherSuiteOrderGet(fd, ciphers.data(), &enabledCiphers) !=
+      SECSuccess) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // On ARM, prefer (TLS_CHACHA20_POLY1305_SHA256) over AES. However,
+  // it may be disabled. If enabled, it will either be element [0] or [1]*.
+  // If [0], we're done. If [1], swap it with [0] (TLS_AES_128_GCM_SHA256).
+  // * (assuming the compile-time order remains unchanged)
+  if (enabledCiphers > 1) {
+    if (ciphers[0] != TLS_CHACHA20_POLY1305_SHA256 &&
+        ciphers[1] == TLS_CHACHA20_POLY1305_SHA256) {
+      std::swap(ciphers[0], ciphers[1]);
+
+      if (SSL_CipherSuiteOrderSet(fd, ciphers.data(), enabledCiphers) !=
+          SECSuccess) {
+        return NS_ERROR_FAILURE;
+      }
+    }
+  }
+#endif
+
   // Set the Peer ID so that SSL proxy connections work properly and to
   // separate anonymous and/or private browsing connections.
-  uint32_t flags = infoObject->GetProviderFlags();
   nsAutoCString peerId;
-  if (flags & nsISocketProvider::ANONYMOUS_CONNECT) {  // See bug 466080
-    peerId.AppendLiteral("anon:");
-  }
-  if (flags & nsISocketProvider::NO_PERMANENT_STORAGE) {
-    peerId.AppendLiteral("private:");
-  }
-  if (flags & nsISocketProvider::BE_CONSERVATIVE) {
-    peerId.AppendLiteral("beConservative:");
-  }
-
-  peerId.AppendPrintf("tlsflags0x%08x:", infoObject->GetProviderTlsFlags());
-
-  peerId.Append(host);
-  peerId.Append(':');
-  peerId.AppendInt(port);
-  nsAutoCString suffix;
-  infoObject->GetOriginAttributes().CreateSuffix(suffix);
-  peerId.Append(suffix);
+  infoObject->GetPeerId(peerId);
   if (SECSuccess != SSL_SetSockPeerID(fd, peerId.get())) {
     return NS_ERROR_FAILURE;
   }
 
+  uint32_t flags = infoObject->GetProviderFlags();
   if (flags & nsISocketProvider::NO_PERMANENT_STORAGE) {
     if (SECSuccess != SSL_OptionSet(fd, SSL_ENABLE_SESSION_TICKETS, false) ||
         SECSuccess != SSL_OptionSet(fd, SSL_NO_CACHE, true)) {

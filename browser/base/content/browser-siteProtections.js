@@ -672,20 +672,22 @@ var ThirdPartyCookies = {
   },
 
   isDetected(state) {
-    if (this.behaviorPref == Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER) {
-      // We don't have a state that specifically represents loaded tracker cookies,
-      // so use loaded tracking content as a proxy - it's not perfect but it
-      // yields fewer false-positives than the generic loaded cookies state.
+    if (this.isBlocking(state)) {
+      return true;
+    }
+
+    if (
+      this.behaviorPref == Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER ||
+      this.behaviorPref == Ci.nsICookieService.BEHAVIOR_ACCEPT
+    ) {
       return (
-        (state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) != 0
+        (state & Ci.nsIWebProgressListener.STATE_COOKIES_LOADED_TRACKER) != 0
       );
     }
 
-    // We don't have any proxies for the other cookie behaviors unfortunately.
-    return (
-      this.isBlocking(state) ||
-      (state & Ci.nsIWebProgressListener.STATE_COOKIES_LOADED) != 0
-    );
+    // We don't have specific flags for the other cookie behaviors so just
+    // fall back to STATE_COOKIES_LOADED.
+    return (state & Ci.nsIWebProgressListener.STATE_COOKIES_LOADED) != 0;
   },
 
   async updateSubView() {
@@ -1287,6 +1289,14 @@ var gProtectionsHandler = {
         "trackingProtection.icon.disabledTooltip2"
       ));
     },
+
+    get noTrackerTooltipText() {
+      delete this.noTrackerTooltipText;
+      return (this.noTrackerTooltipText = gNavigatorBundle.getFormattedString(
+        "trackingProtection.icon.noTrackersDetectedTooltip",
+        [gBrandBundle.GetStringFromName("brandShortName")]
+      ));
+    },
   },
 
   // A list of blockers that will be displayed in the categories list
@@ -1586,15 +1596,6 @@ var gProtectionsHandler = {
       anyBlocking = anyBlocking || blocker.activated;
     }
 
-    this._categoryItemOrderInvalidated = true;
-    if (["showing", "open"].includes(this._protectionsPopup.state)) {
-      this.reorderCategoryItems();
-    }
-
-    if (anyDetected) {
-      this.noTrackersDetectedDescription.hidden = true;
-    }
-
     // Check whether the user has added an exception for this site.
     let hasException = ContentBlockingAllowList.includes(
       gBrowser.selectedBrowser
@@ -1619,39 +1620,41 @@ var gProtectionsHandler = {
     this._protectionsPopup.toggleAttribute("blocking", anyBlocking);
     this._protectionsPopup.toggleAttribute("hasException", hasException);
 
+    this._categoryItemOrderInvalidated = true;
+
+    if (anyDetected) {
+      this.noTrackersDetectedDescription.hidden = true;
+
+      if (["showing", "open"].includes(this._protectionsPopup.state)) {
+        this.reorderCategoryItems();
+
+        // Until we encounter a site that triggers them, category elements might
+        // be invisible when descriptionHeightWorkaround gets called, i.e. they
+        // are omitted from the workaround and the content overflows the panel.
+        // Solution: call it manually here.
+        PanelMultiView.forNode(
+          this._protectionsPopupMainView
+        ).descriptionHeightWorkaround();
+      }
+    }
+
     this.iconBox.toggleAttribute("active", anyBlocking);
     this.iconBox.toggleAttribute("hasException", hasException);
 
     if (hasException) {
-      this._trackingProtectionIconTooltipLabel.textContent = this.strings.disabledTooltipText;
-      gIdentityHandler._trackingProtectionIconContainer.setAttribute(
-        "aria-label",
-        this.strings.disabledTooltipText
-      );
+      this.showDisabledTooltipForTPIcon();
       if (!this.hadShieldState && !isSimulated) {
         this.hadShieldState = true;
         this.shieldHistogramAdd(1);
       }
     } else if (anyBlocking) {
-      this._trackingProtectionIconTooltipLabel.textContent = this.strings.activeTooltipText;
-      gIdentityHandler._trackingProtectionIconContainer.setAttribute(
-        "aria-label",
-        this.strings.activeTooltipText
-      );
+      this.showActiveTooltipForTPIcon();
       if (!this.hadShieldState && !isSimulated) {
         this.hadShieldState = true;
         this.shieldHistogramAdd(2);
       }
     } else {
-      let noTrackerTooltipStr = gNavigatorBundle.getFormattedString(
-        "trackingProtection.icon.noTrackersDetectedTooltip",
-        [gBrandBundle.GetStringFromName("brandShortName")]
-      );
-      this._trackingProtectionIconTooltipLabel.textContent = noTrackerTooltipStr;
-      gIdentityHandler._trackingProtectionIconContainer.setAttribute(
-        "aria-label",
-        noTrackerTooltipStr
-      );
+      this.showNoTrackerTooltipForTPIcon();
     }
 
     if (
@@ -1887,6 +1890,13 @@ var gProtectionsHandler = {
     // Toggle the breakage link if needed.
     this.toggleBreakageLink();
 
+    // Change the tooltip of the tracking protection icon.
+    if (newExceptionState) {
+      this.showDisabledTooltipForTPIcon();
+    } else {
+      this.showNoTrackerTooltipForTPIcon();
+    }
+
     // Change the state of the tracking protection icon.
     this.iconBox.toggleAttribute("hasException", newExceptionState);
 
@@ -1939,6 +1949,30 @@ var gProtectionsHandler = {
     this._protectionsPopupTrackersCounterBox.toggleAttribute(
       "showing",
       trackerCount != 0
+    );
+  },
+
+  showDisabledTooltipForTPIcon() {
+    this._trackingProtectionIconTooltipLabel.textContent = this.strings.disabledTooltipText;
+    gIdentityHandler._trackingProtectionIconContainer.setAttribute(
+      "aria-label",
+      this.strings.disabledTooltipText
+    );
+  },
+
+  showActiveTooltipForTPIcon() {
+    this._trackingProtectionIconTooltipLabel.textContent = this.strings.activeTooltipText;
+    gIdentityHandler._trackingProtectionIconContainer.setAttribute(
+      "aria-label",
+      this.strings.activeTooltipText
+    );
+  },
+
+  showNoTrackerTooltipForTPIcon() {
+    this._trackingProtectionIconTooltipLabel.textContent = this.strings.noTrackerTooltipText;
+    gIdentityHandler._trackingProtectionIconContainer.setAttribute(
+      "aria-label",
+      this.strings.noTrackerTooltipText
     );
   },
 

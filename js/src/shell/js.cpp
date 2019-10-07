@@ -36,6 +36,7 @@
 #if defined(MALLOC_H)
 #  include MALLOC_H /* for malloc_usable_size, malloc_size, _msize */
 #endif
+#include <ctime>
 #include <math.h>
 #include <signal.h>
 #include <stdio.h>
@@ -583,6 +584,8 @@ class ShellPrincipals final : public JSPrincipals {
     // fuzzer is happy.
     return JS_WriteUint32Pair(writer, bits, 0);
   }
+
+  bool isSystemOrAddonPrincipal() override { return true; }
 
   static void destroy(JSPrincipals* principals) {
     MOZ_ASSERT(principals != &fullyTrusted);
@@ -1655,9 +1658,9 @@ static bool Options(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
 
-    if (StringEqualsAscii(opt, "strict")) {
+    if (StringEqualsLiteral(opt, "strict")) {
       JS::ContextOptionsRef(cx).toggleExtraWarnings();
-    } else if (StringEqualsAscii(opt, "werror")) {
+    } else if (StringEqualsLiteral(opt, "werror")) {
       // Disallow toggling werror when there are off-thread jobs, to avoid
       // confusing CompileError::throwError.
       ShellContext* sc = GetShellContext(cx);
@@ -1667,9 +1670,9 @@ static bool Options(JSContext* cx, unsigned argc, Value* vp) {
         return false;
       }
       JS::ContextOptionsRef(cx).toggleWerror();
-    } else if (StringEqualsAscii(opt, "throw_on_asmjs_validation_failure")) {
+    } else if (StringEqualsLiteral(opt, "throw_on_asmjs_validation_failure")) {
       JS::ContextOptionsRef(cx).toggleThrowOnAsmJSValidationFailure();
-    } else if (StringEqualsAscii(opt, "strict_mode")) {
+    } else if (StringEqualsLiteral(opt, "strict_mode")) {
       JS::ContextOptionsRef(cx).toggleStrictMode();
     } else {
       UniqueChars optChars = JS_EncodeStringToUTF8(cx, opt);
@@ -2684,6 +2687,13 @@ static bool Now(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool CpuNow(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  double now = double(std::clock()) / double(CLOCKS_PER_SEC);
+  args.rval().setDouble(now);
+  return true;
+}
+
 static bool PrintInternal(JSContext* cx, const CallArgs& args, RCFile* file) {
   if (!file->isOpen()) {
     JS_ReportErrorASCII(cx, "output file is closed");
@@ -3352,11 +3362,11 @@ struct DisassembleOptionParser {
       if (!flatStr) {
         return false;
       }
-      if (JS_FlatStringEqualsAscii(flatStr, "-l")) {
+      if (JS_FlatStringEqualsLiteral(flatStr, "-l")) {
         lines = true;
-      } else if (JS_FlatStringEqualsAscii(flatStr, "-r")) {
+      } else if (JS_FlatStringEqualsLiteral(flatStr, "-r")) {
         recursive = true;
-      } else if (JS_FlatStringEqualsAscii(flatStr, "-S")) {
+      } else if (JS_FlatStringEqualsLiteral(flatStr, "-S")) {
         sourceNotes = false;
       } else {
         break;
@@ -4016,11 +4026,12 @@ static bool ShellBuildId(JS::BuildIdCharVector* buildId);
 static void WorkerMain(WorkerInput* input) {
   MOZ_ASSERT(input->parentRuntime);
 
-  JSContext* cx = JS_NewContext(8L * 1024L * 1024L, 2L * 1024L * 1024L,
-                                input->parentRuntime);
+  JSContext* cx = JS_NewContext(8L * 1024L * 1024L, input->parentRuntime);
   if (!cx) {
     return;
   }
+
+  JS_SetGCParameter(cx, JSGC_MAX_NURSERY_BYTES, 2L * 1024L * 1024L);
 
   ShellContext* sc = js_new<ShellContext>(cx);
   if (!sc) {
@@ -4536,8 +4547,9 @@ static bool SetJitCompilerOption(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#define JIT_COMPILER_MATCH(key, string) \
-  else if (JS_FlatStringEqualsAscii(strArg, string)) opt = JSJITCOMPILER_##key;
+#define JIT_COMPILER_MATCH(key, string)                      \
+  else if (JS_FlatStringEqualsLiteral(strArg, string)) opt = \
+      JSJITCOMPILER_##key;
 
   JSJitCompilerOption opt = JSJITCOMPILER_NOT_AN_OPTION;
   if (false) {
@@ -5146,9 +5158,9 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
         return false;
       }
       // Currently not used, reserved for future.
-      if (StringEqualsAscii(linearFormat, "multipart")) {
+      if (StringEqualsLiteral(linearFormat, "multipart")) {
         mode = Multipart;
-      } else if (StringEqualsAscii(linearFormat, "context")) {
+      } else if (StringEqualsLiteral(linearFormat, "context")) {
         mode = Context;
       } else {
         UniqueChars printable = JS_EncodeStringToUTF8(cx, linearFormat);
@@ -9131,6 +9143,12 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "    object: Don't create a new DOM object, but instead use the supplied\n"
 "            FakeDOMObject."),
 
+    JS_FN_HELP("cpuNow", CpuNow, /* nargs= */ 0, /* flags = */ 0,
+"cpuNow()",
+" Returns the approximate processor time used by the process since an arbitrary epoch, in seconds.\n"
+" Only the difference between two calls to `cpuNow()` is meaningful."),
+
+
     JS_FS_HELP_END
 };
 // clang-format on
@@ -10311,6 +10329,7 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   JS::ContextOptionsRef(cx)
       .setAsmJS(enableAsmJS)
       .setWasm(enableWasm)
+      .setWasmForTrustedPrinciples(enableWasm)
       .setWasmBaseline(enableWasmBaseline)
       .setWasmIon(enableWasmIon)
 #ifdef ENABLE_WASM_CRANELIFT
@@ -11244,7 +11263,8 @@ int main(int argc, char** argv, char** envp) {
                        "NUMBER of instructions.",
                        -1) ||
       !op.addIntOption('\0', "nursery-size", "SIZE-MB",
-                       "Set the maximum nursery size in MB", 16) ||
+                       "Set the maximum nursery size in MB",
+                       JS::DefaultNurseryMaxBytes / 1024 / 1024) ||
 #ifdef JS_GC_ZEAL
       !op.addStringOption('z', "gc-zeal", "LEVEL(;LEVEL)*[,N]",
                           gc::ZealModeHelpText) ||
@@ -11370,14 +11390,15 @@ int main(int argc, char** argv, char** envp) {
     return 1;
   }
 
-  size_t nurseryBytes = JS::DefaultNurseryBytes;
-  nurseryBytes = op.getIntOption("nursery-size") * 1024L * 1024L;
-
   /* Use the same parameters as the browser in xpcjsruntime.cpp. */
-  JSContext* const cx = JS_NewContext(JS::DefaultHeapMaxBytes, nurseryBytes);
+  JSContext* const cx = JS_NewContext(JS::DefaultHeapMaxBytes);
   if (!cx) {
     return 1;
   }
+
+  size_t nurseryBytes = op.getIntOption("nursery-size") * 1024L * 1024L;
+  JS_SetGCParameter(cx, JSGC_MAX_NURSERY_BYTES, nurseryBytes);
+
   auto destroyCx = MakeScopeExit([cx] { JS_DestroyContext(cx); });
 
   UniquePtr<ShellContext> sc = MakeUnique<ShellContext>(cx);

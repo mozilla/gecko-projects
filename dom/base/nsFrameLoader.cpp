@@ -15,7 +15,6 @@
 
 #include "nsDocShell.h"
 #include "nsIDOMMozBrowserFrame.h"
-#include "nsIDOMWindow.h"
 #include "nsIContentInlines.h"
 #include "nsIContentViewer.h"
 #include "mozilla/dom/Document.h"
@@ -2130,12 +2129,8 @@ nsresult nsFrameLoader::MaybeCreateDocShell() {
 
   if (OwnerIsMozBrowserFrame()) {
     docShell->SetFrameType(nsIDocShell::FRAME_TYPE_BROWSER);
-  } else {
-    nsCOMPtr<nsIDocShellTreeItem> parentCheck;
-    docShell->GetInProcessSameTypeParent(getter_AddRefs(parentCheck));
-    if (!!parentCheck) {
-      docShell->SetIsFrame();
-    }
+  } else if (mBrowsingContext->GetParent()) {
+    docShell->SetIsFrame();
   }
 
   // Apply sandbox flags even if our owner is not an iframe, as this copies
@@ -2583,7 +2578,8 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
     // as its opener. There are likely other mismatches that it does not handle,
     // but those will all be fixed by the removal of TabGroups.
     if (RefPtr<BrowsingContext> openerBC = mBrowsingContext->GetOpener()) {
-      sameTabGroupAs = openerBC->Canonical()->GetCurrentWindowGlobal()->GetBrowserParent();
+      sameTabGroupAs =
+          openerBC->Canonical()->GetCurrentWindowGlobal()->GetBrowserParent();
     }
   }
 
@@ -2980,7 +2976,8 @@ nsresult nsFrameLoader::EnsureMessageManager() {
         GetDocShell(), mOwnerContent, mMessageManager);
     NS_ENSURE_TRUE(mChildMessageManager, NS_ERROR_UNEXPECTED);
 
-#if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_THUNDERBIRD) && !defined(MOZ_SUITE)
+#if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_THUNDERBIRD) && \
+    !defined(MOZ_SUITE)
     // Set up a TabListener for sessionStore
     if (XRE_IsParentProcess()) {
       mSessionStoreListener = new TabListener(GetDocShell(), mOwnerContent);

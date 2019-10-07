@@ -214,7 +214,9 @@ class TreeNode extends Component {
     const elms = this.getFocusableElements();
 
     if (this.props.active) {
-      if (elms.length > 0 && !elms.includes(document.activeElement)) {
+      const doc = this.treeNodeRef.current.ownerDocument;
+
+      if (elms.length > 0 && !elms.includes(doc.activeElement)) {
         elms[0].focus();
       }
     } else {
@@ -345,10 +347,15 @@ const TreeNodeFactory = createFactory(TreeNode);
  * frame.
  *
  * @param {Function} fn
+ * @param {Object} options: object that contains the following properties:
+ *                      - {Function} getDocument: A function that return the document
+ *                                                the component is rendered in.
  * @returns {Function}
  */
 
-function oncePerAnimationFrame(fn) {
+function oncePerAnimationFrame(fn, {
+  getDocument
+}) {
   let animationId = null;
   let argsToPass = null;
   return function (...args) {
@@ -358,7 +365,13 @@ function oncePerAnimationFrame(fn) {
       return;
     }
 
-    animationId = requestAnimationFrame(() => {
+    const doc = getDocument();
+
+    if (!doc) {
+      return;
+    }
+
+    animationId = doc.defaultView.requestAnimationFrame(() => {
       fn.call(this, ...argsToPass);
       animationId = null;
       argsToPass = null;
@@ -592,13 +605,18 @@ class Tree extends Component {
       autoExpanded: new Set()
     };
     this.treeRef = _react.default.createRef();
-    this._onExpand = oncePerAnimationFrame(this._onExpand).bind(this);
-    this._onCollapse = oncePerAnimationFrame(this._onCollapse).bind(this);
-    this._focusPrevNode = oncePerAnimationFrame(this._focusPrevNode).bind(this);
-    this._focusNextNode = oncePerAnimationFrame(this._focusNextNode).bind(this);
-    this._focusParentNode = oncePerAnimationFrame(this._focusParentNode).bind(this);
-    this._focusFirstNode = oncePerAnimationFrame(this._focusFirstNode).bind(this);
-    this._focusLastNode = oncePerAnimationFrame(this._focusLastNode).bind(this);
+
+    const opaf = fn => oncePerAnimationFrame(fn, {
+      getDocument: () => this.treeRef.current && this.treeRef.current.ownerDocument
+    });
+
+    this._onExpand = opaf(this._onExpand).bind(this);
+    this._onCollapse = opaf(this._onCollapse).bind(this);
+    this._focusPrevNode = opaf(this._focusPrevNode).bind(this);
+    this._focusNextNode = opaf(this._focusNextNode).bind(this);
+    this._focusParentNode = opaf(this._focusParentNode).bind(this);
+    this._focusFirstNode = opaf(this._focusFirstNode).bind(this);
+    this._focusLastNode = opaf(this._focusLastNode).bind(this);
     this._autoExpand = this._autoExpand.bind(this);
     this._preventArrowKeyScrolling = this._preventArrowKeyScrolling.bind(this);
     this._preventEvent = this._preventEvent.bind(this);
@@ -823,7 +841,9 @@ class Tree extends Component {
     if (this.props.active != undefined) {
       this._activate(undefined);
 
-      if (this.treeRef.current !== document.activeElement) {
+      const doc = this.treeRef.current && this.treeRef.current.ownerDocument;
+
+      if (this.treeRef.current !== doc.activeElement) {
         this.treeRef.current.focus();
       }
     }
@@ -862,7 +882,8 @@ class Tree extends Component {
   _scrollNodeIntoView(item, options = {}) {
     if (item !== undefined) {
       const treeElement = this.treeRef.current;
-      const element = document.getElementById(this.props.getKey(item));
+      const doc = treeElement && treeElement.ownerDocument;
+      const element = doc.getElementById(this.props.getKey(item));
 
       if (element) {
         const {
@@ -934,6 +955,8 @@ class Tree extends Component {
 
     this._preventArrowKeyScrolling(e);
 
+    const doc = this.treeRef.current && this.treeRef.current.ownerDocument;
+
     switch (e.key) {
       case "ArrowUp":
         this._focusPrevNode();
@@ -975,7 +998,7 @@ class Tree extends Component {
 
       case "Enter":
       case " ":
-        if (this.treeRef.current === document.activeElement) {
+        if (this.treeRef.current === doc.activeElement) {
           this._preventEvent(e);
 
           if (this.props.active !== this.props.focused) {
@@ -992,7 +1015,7 @@ class Tree extends Component {
           this._activate(undefined);
         }
 
-        if (this.treeRef.current !== document.activeElement) {
+        if (this.treeRef.current !== doc.activeElement) {
           this.treeRef.current.focus();
         }
 
@@ -2030,6 +2053,7 @@ function makeDefaultPropsBucket(propertiesNames, parent, ownProperties) {
     const defaultNodes = defaultProperties.map((name, index) => createNode({
       parent: defaultPropertiesNode,
       name: maybeEscapePropertyName(name),
+      propertyName: name,
       path: createPath(index, name),
       contents: ownProperties[name]
     }));
@@ -2043,6 +2067,7 @@ function makeNodesForOwnProps(propertiesNames, parent, ownProperties) {
   return propertiesNames.map(name => createNode({
     parent,
     name: maybeEscapePropertyName(name),
+    propertyName: name,
     contents: ownProperties[name]
   }));
 }
@@ -2164,6 +2189,7 @@ function createNode(options) {
   const {
     parent,
     name,
+    propertyName,
     path,
     contents,
     type = NODE_TYPES.GRIP,
@@ -2180,6 +2206,8 @@ function createNode(options) {
   return {
     parent,
     name,
+    // `name` can be escaped; propertyName contains the original property name.
+    propertyName,
     path: createPath(parent && parent.path, path || name),
     contents,
     type,
@@ -2565,6 +2593,10 @@ function reducer(state = initialState(), action = {}) {
     });
   }
 
+  if (type === "RELEASED_ACTORS") {
+    return onReleasedActorsAction(state, action);
+  }
+
   if (type === "ROOTS_CHANGED") {
     return cloneState();
   }
@@ -2587,6 +2619,28 @@ function reducer(state = initialState(), action = {}) {
   }
 
   return state;
+}
+/**
+ * Reducer function for the "RELEASED_ACTORS" action.
+ */
+
+
+function onReleasedActorsAction(state, action) {
+  const {
+    data
+  } = action;
+
+  if (state.actors && state.actors.size > 0 && data.actors.length > 0) {
+    return state;
+  }
+
+  for (const actor of data.actors) {
+    state.actors.delete(actor);
+  }
+
+  return { ...state,
+    actors: new Set(state.actors || [])
+  };
 }
 
 function updateObject(obj, property, watchpoint) {
@@ -3865,14 +3919,14 @@ const {
   nodeIsLongString
 } = __webpack_require__(114);
 
-function loadItemProperties(item, createObjectClient, createLongStringClient, loadedProperties) {
+function loadItemProperties(item, client, loadedProperties) {
   const gripItem = getClosestGripNode(item);
   const value = getValue(gripItem);
   const [start, end] = item.meta ? [item.meta.startIndex, item.meta.endIndex] : [];
   const promises = [];
   let objectClient;
 
-  const getObjectClient = () => objectClient || createObjectClient(value);
+  const getObjectClient = () => objectClient || client.createObjectClient(value);
 
   if (shouldLoadItemIndexedProperties(item, loadedProperties)) {
     promises.push(enumIndexedProperties(getObjectClient(), start, end));
@@ -3895,7 +3949,7 @@ function loadItemProperties(item, createObjectClient, createLongStringClient, lo
   }
 
   if (shouldLoadItemFullText(item, loadedProperties)) {
-    promises.push(getFullText(createLongStringClient(value), item));
+    promises.push(getFullText(client.createLongStringClient(value), item));
   }
 
   if (shouldLoadItemProxySlots(item, loadedProperties)) {
@@ -7876,7 +7930,7 @@ function nodeLoadProperties(node, actor) {
     }
 
     try {
-      const properties = await loadItemProperties(node, client.createObjectClient, client.createLongStringClient, loadedProperties);
+      const properties = await loadItemProperties(node, client, loadedProperties);
       dispatch(nodePropertiesLoaded(node, actor, properties));
     } catch (e) {
       console.error(e);
@@ -7957,12 +8011,11 @@ function removeWatchpoint(item) {
 }
 
 function closeObjectInspector() {
-  return async ({
+  return ({
+    dispatch,
     getState,
     client
-  }) => {
-    releaseActors(getState(), client);
-  };
+  }) => releaseActors(getState(), client, dispatch);
 }
 /*
  * This action is dispatched when the `roots` prop, provided by a consumer of
@@ -7975,12 +8028,12 @@ function closeObjectInspector() {
 
 
 function rootsChanged(props) {
-  return async ({
+  return ({
     dispatch,
     client,
     getState
   }) => {
-    releaseActors(getState(), client);
+    releaseActors(getState(), client, dispatch);
     dispatch({
       type: "ROOTS_CHANGED",
       data: props
@@ -7988,16 +8041,32 @@ function rootsChanged(props) {
   };
 }
 
-function releaseActors(state, client) {
+async function releaseActors(state, client, dispatch) {
   const actors = getActors(state);
+
+  if (actors.size === 0) {
+    return;
+  }
+
   const watchpoints = getWatchpoints(state);
+  let released = false;
 
   for (const actor of actors) {
     // Watchpoints are stored in object actors.
     // If we release the actor we lose the watchpoint.
     if (!watchpoints.has(actor)) {
-      client.releaseActor(actor);
+      await client.releaseActor(actor);
+      released = true;
     }
+  }
+
+  if (released) {
+    dispatch({
+      type: "RELEASED_ACTORS",
+      data: {
+        actors
+      }
+    });
   }
 }
 
@@ -8199,7 +8268,7 @@ class ObjectInspectorItem extends Component {
 
         if (targetGrip && receiverGrip) {
           Object.assign(repProps, {
-            onInvokeGetterButtonClick: () => this.props.invokeGetter(item, targetGrip, receiverGrip.actor, item.name)
+            onInvokeGetterButtonClick: () => this.props.invokeGetter(item, targetGrip, receiverGrip.actor, item.propertyName || item.name)
           });
         }
       }
@@ -8250,7 +8319,7 @@ class ObjectInspectorItem extends Component {
         // So we need to also check if the arrow was clicked.
 
 
-        if (Utils.selection.documentHasSelection() && !(e.target && e.target.matches && e.target.matches(".arrow"))) {
+        if (e.target && Utils.selection.documentHasSelection(e.target.ownerDocument) && !(e.target.matches && e.target.matches(".arrow"))) {
           e.stopPropagation();
         }
       },
@@ -8288,7 +8357,7 @@ class ObjectInspectorItem extends Component {
       onClick: onLabelClick ? event => {
         event.stopPropagation(); // If the user selected text, bail out.
 
-        if (Utils.selection.documentHasSelection()) {
+        if (Utils.selection.documentHasSelection(event.target.ownerDocument)) {
           return;
         }
 
@@ -8347,8 +8416,8 @@ module.exports = ObjectInspectorItem;
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
-function documentHasSelection() {
-  const selection = getSelection();
+function documentHasSelection(doc = document) {
+  const selection = doc.defaultView.getSelection();
 
   if (!selection) {
     return false;

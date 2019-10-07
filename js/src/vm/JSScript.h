@@ -91,6 +91,7 @@ namespace detail {
 // Do not call this directly! It is exposed for the friend declarations in
 // this file.
 JSScript* CopyScript(JSContext* cx, HandleScript src,
+                     HandleObject functionOrGlobal,
                      HandleScriptSourceObject sourceObject,
                      MutableHandle<GCVector<Scope*>> scopes);
 
@@ -651,6 +652,8 @@ class ScriptSource {
   // The bytecode cache encoder is used to encode only the content of function
   // which are delazified.  If this value is not nullptr, then each delazified
   // function should be recorded before their first execution.
+  // This value is logically owned by the canonical ScriptSourceObject, and
+  // will be released in the canonical SSO's finalizer.
   UniquePtr<XDRIncrementalEncoder> xdrEncoder_ = nullptr;
 
   // Instant at which the first parse of this source started, or null
@@ -728,7 +731,8 @@ class ScriptSource {
 
   explicit ScriptSource() : id_(++idCount_) {}
 
-  ~ScriptSource() { MOZ_ASSERT(refs == 0); }
+  void finalizeGCData();
+  ~ScriptSource();
 
   void incref() { refs++; }
   void decref() {
@@ -2406,21 +2410,22 @@ class JSScript : public js::BaseScript {
       js::frontend::BytecodeEmitter* bce);
 
   friend JSScript* js::detail::CopyScript(
-      JSContext* cx, js::HandleScript src,
+      JSContext* cx, js::HandleScript src, js::HandleObject functionOrGlobal,
       js::HandleScriptSourceObject sourceObject,
       js::MutableHandle<JS::GCVector<js::Scope*>> scopes);
 
  private:
-  JSScript(js::HandleObject global, uint8_t* stubEntry,
+  JSScript(js::HandleObject functionOrGlobal, uint8_t* stubEntry,
            js::HandleScriptSourceObject sourceObject, uint32_t sourceStart,
            uint32_t sourceEnd, uint32_t toStringStart, uint32_t toStringend);
 
-  static JSScript* New(JSContext* cx, js::HandleScriptSourceObject sourceObject,
+  static JSScript* New(JSContext* cx, js::HandleObject functionOrGlobal,
+                       js::HandleScriptSourceObject sourceObject,
                        uint32_t sourceStart, uint32_t sourceEnd,
                        uint32_t toStringStart, uint32_t toStringEnd);
 
  public:
-  static JSScript* Create(JSContext* cx,
+  static JSScript* Create(JSContext* cx, js::HandleObject functionOrGlobal,
                           const JS::ReadOnlyCompileOptions& options,
                           js::HandleScriptSourceObject sourceObject,
                           uint32_t sourceStart, uint32_t sourceEnd,

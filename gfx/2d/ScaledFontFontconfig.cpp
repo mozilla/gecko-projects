@@ -23,27 +23,23 @@
 namespace mozilla {
 namespace gfx {
 
-// On Linux and Android our "platform" font is a cairo_scaled_font_t and we use
-// an SkFontHost implementation that allows Skia to render using this.
-// This is mainly because FT_Face is not good for sharing between libraries,
-// which is a requirement when we consider runtime switchable backends and so on
 ScaledFontFontconfig::ScaledFontFontconfig(
-    cairo_scaled_font_t* aScaledFont, RefPtr<SharedFTFace>&& aFace,
-    FcPattern* aPattern, const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize)
-    : ScaledFontBase(aUnscaledFont, aSize),
-      mFace(std::move(aFace)),
-      mInstanceData(aScaledFont, aPattern) {
-  SetCairoScaledFont(aScaledFont);
-}
-
-ScaledFontFontconfig::ScaledFontFontconfig(
-    cairo_scaled_font_t* aScaledFont, RefPtr<SharedFTFace>&& aFace,
-    const InstanceData& aInstanceData,
+    RefPtr<SharedFTFace>&& aFace, FcPattern* aPattern,
     const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize)
     : ScaledFontBase(aUnscaledFont, aSize),
       mFace(std::move(aFace)),
-      mInstanceData(aInstanceData) {
-  SetCairoScaledFont(aScaledFont);
+      mInstanceData(aPattern) {}
+
+ScaledFontFontconfig::ScaledFontFontconfig(
+    RefPtr<SharedFTFace>&& aFace, const InstanceData& aInstanceData,
+    const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize)
+    : ScaledFontBase(aUnscaledFont, aSize),
+      mFace(std::move(aFace)),
+      mInstanceData(aInstanceData) {}
+
+bool ScaledFontFontconfig::UseSubpixelPosition() const {
+  return mInstanceData.mAntialias != AntialiasMode::NONE &&
+         FT_IS_SCALABLE(mFace->GetFace());
 }
 
 #ifdef USE_SKIA
@@ -60,8 +56,7 @@ SkTypeface* ScaledFontFontconfig::CreateSkTypeface() {
 }
 
 void ScaledFontFontconfig::SetupSkFontDrawOptions(SkFont& aFont) {
-  // SkFontHost_cairo does not support subpixel text positioning
-  aFont.setSubpixel(false);
+  aFont.setSubpixel(UseSubpixelPosition());
 
   if (mInstanceData.mFlags & InstanceData::AUTOHINT) {
     aFont.setForceAutoHinting(true);
@@ -77,12 +72,23 @@ void ScaledFontFontconfig::SetupSkFontDrawOptions(SkFont& aFont) {
 }
 #endif
 
+#ifdef USE_CAIRO_SCALED_FONT
+cairo_font_face_t* ScaledFontFontconfig::CreateCairoFontFace(
+    cairo_font_options_t* aFontOptions) {
+  int loadFlags;
+  unsigned int synthFlags;
+  mInstanceData.SetupFontOptions(aFontOptions, &loadFlags, &synthFlags);
+
+  return cairo_ft_font_face_create_for_ft_face(mFace->GetFace(), loadFlags,
+                                               synthFlags, mFace.get());
+}
+#endif
+
 AntialiasMode ScaledFontFontconfig::GetDefaultAAMode() {
   return mInstanceData.mAntialias;
 }
 
-ScaledFontFontconfig::InstanceData::InstanceData(
-    cairo_scaled_font_t* aScaledFont, FcPattern* aPattern)
+ScaledFontFontconfig::InstanceData::InstanceData(FcPattern* aPattern)
     : mFlags(0),
       mAntialias(AntialiasMode::NONE),
       mHinting(FontHinting::NONE),
@@ -99,12 +105,12 @@ ScaledFontFontconfig::InstanceData::InstanceData(
     mFlags |= EMBOLDEN;
   }
 
-  cairo_font_options_t* fontOptions = cairo_font_options_create();
-  cairo_scaled_font_get_font_options(aScaledFont, fontOptions);
   // For printer fonts, Cairo hint metrics and hinting will be disabled.
   // For other fonts, allow hint metrics and hinting.
-  if (cairo_font_options_get_hint_metrics(fontOptions) !=
-      CAIRO_HINT_METRICS_OFF) {
+  FcBool printing;
+  if (FcPatternGetBool(aPattern, "gfx.printing", 0, &printing) !=
+          FcResultMatch ||
+      !printing) {
     mFlags |= HINT_METRICS;
 
     FcBool hinting;
@@ -131,7 +137,6 @@ ScaledFontFontconfig::InstanceData::InstanceData(
       }
     }
   }
-  cairo_font_options_destroy(fontOptions);
 
   FcBool antialias;
   if (FcPatternGetBool(aPattern, FC_ANTIALIAS, 0, &antialias) ==
@@ -179,7 +184,7 @@ ScaledFontFontconfig::InstanceData::InstanceData(
     int filter;
     if (mAntialias == AntialiasMode::SUBPIXEL &&
         FcPatternGetInteger(aPattern, FC_LCD_FILTER, 0, &filter) ==
-        FcResultMatch) {
+            FcResultMatch) {
       switch (filter) {
         case FC_LCD_NONE:
           mLcdFilter = FT_LCD_FILTER_NONE;
@@ -262,7 +267,9 @@ void ScaledFontFontconfig::InstanceData::SetupFontOptions(
     unsigned int* aOutSynthFlags) const {
   // For regular (non-printer) fonts, enable hint metrics as well as hinting
   // and (possibly subpixel) antialiasing.
-  cairo_font_options_set_hint_metrics(aFontOptions, mFlags & HINT_METRICS ? CAIRO_HINT_METRICS_ON : CAIRO_HINT_METRICS_OFF);
+  cairo_font_options_set_hint_metrics(
+      aFontOptions,
+      mFlags & HINT_METRICS ? CAIRO_HINT_METRICS_ON : CAIRO_HINT_METRICS_OFF);
 
   cairo_hint_style_t hinting;
   switch (mHinting) {
@@ -290,8 +297,7 @@ void ScaledFontFontconfig::InstanceData::SetupFontOptions(
       cairo_font_options_set_antialias(aFontOptions, CAIRO_ANTIALIAS_GRAY);
       break;
     case AntialiasMode::SUBPIXEL: {
-      cairo_font_options_set_antialias(aFontOptions,
-                                       CAIRO_ANTIALIAS_SUBPIXEL);
+      cairo_font_options_set_antialias(aFontOptions, CAIRO_ANTIALIAS_SUBPIXEL);
       cairo_font_options_set_subpixel_order(
           aFontOptions,
           mFlags & SUBPIXEL_BGR
@@ -301,16 +307,16 @@ void ScaledFontFontconfig::InstanceData::SetupFontOptions(
                                        : CAIRO_SUBPIXEL_ORDER_RGB));
       cairo_lcd_filter_t lcdFilter = CAIRO_LCD_FILTER_DEFAULT;
       switch (mLcdFilter) {
-      case FT_LCD_FILTER_NONE:
+        case FT_LCD_FILTER_NONE:
           lcdFilter = CAIRO_LCD_FILTER_NONE;
           break;
-      case FT_LCD_FILTER_DEFAULT:
+        case FT_LCD_FILTER_DEFAULT:
           lcdFilter = CAIRO_LCD_FILTER_FIR5;
           break;
-      case FT_LCD_FILTER_LIGHT:
+        case FT_LCD_FILTER_LIGHT:
           lcdFilter = CAIRO_LCD_FILTER_FIR3;
           break;
-      case FT_LCD_FILTER_LEGACY:
+        case FT_LCD_FILTER_LEGACY:
           lcdFilter = CAIRO_LCD_FILTER_INTRA_PIXEL;
           break;
       }
@@ -357,9 +363,10 @@ bool ScaledFontFontconfig::GetWRFontInstanceOptions(
     std::vector<FontVariation>* aOutVariations) {
   wr::FontInstanceOptions options;
   options.render_mode = wr::FontRenderMode::Alpha;
-  // FIXME: Cairo-FT metrics are not compatible with subpixel positioning.
-  // options.flags = wr::FontInstanceFlags_SUBPIXEL_POSITION;
   options.flags = wr::FontInstanceFlags{0};
+  if (UseSubpixelPosition()) {
+    options.flags |= wr::FontInstanceFlags_SUBPIXEL_POSITION;
+  }
   options.bg_color = wr::ToColorU(Color());
   options.synthetic_italics =
       wr::DegreesToSyntheticItalics(GetSyntheticObliqueAngle());
@@ -465,45 +472,13 @@ already_AddRefed<ScaledFont> UnscaledFontFontconfig::CreateScaledFont(
     }
   }
 
-  cairo_font_options_t* fontOptions = cairo_font_options_create();
-  int loadFlags;
-  unsigned int synthFlags;
-  instanceData.SetupFontOptions(fontOptions, &loadFlags, &synthFlags);
-
-  cairo_font_face_t* font = cairo_ft_font_face_create_for_ft_face(
-      face->GetFace(), loadFlags, synthFlags, face.get());
-  if (cairo_font_face_status(font) != CAIRO_STATUS_SUCCESS) {
-    gfxWarning() << "Failed creating Cairo font face for Fontconfig pattern";
-    cairo_font_options_destroy(fontOptions);
-    return nullptr;
-  }
-
-  cairo_matrix_t sizeMatrix;
-  cairo_matrix_init(&sizeMatrix, aSize, 0, 0, aSize, 0, 0);
-
-  cairo_matrix_t identityMatrix;
-  cairo_matrix_init_identity(&identityMatrix);
-
-  cairo_scaled_font_t* cairoScaledFont =
-      cairo_scaled_font_create(font, &sizeMatrix, &identityMatrix, fontOptions);
-
-  cairo_font_options_destroy(fontOptions);
-  cairo_font_face_destroy(font);
-
-  if (cairo_scaled_font_status(cairoScaledFont) != CAIRO_STATUS_SUCCESS) {
-    gfxWarning() << "Failed creating Cairo scaled font for font face";
-    return nullptr;
-  }
-
   // Only apply variations if we have an explicitly cloned face.
   if (aNumVariations > 0 && face != GetFace()) {
     ApplyVariationsToFace(aVariations, aNumVariations, face->GetFace());
   }
 
-  RefPtr<ScaledFontFontconfig> scaledFont = new ScaledFontFontconfig(
-      cairoScaledFont, std::move(face), instanceData, this, aSize);
-
-  cairo_scaled_font_destroy(cairoScaledFont);
+  RefPtr<ScaledFontFontconfig> scaledFont =
+      new ScaledFontFontconfig(std::move(face), instanceData, this, aSize);
 
   return scaledFont.forget();
 }

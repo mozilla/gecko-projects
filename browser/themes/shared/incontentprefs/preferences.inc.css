@@ -54,7 +54,7 @@ html|h2 {
 }
 
 description.indent,
-.indent > description {
+.indent:not(#browserPrivateEngineSelection) > description {
   color: var(--in-content-deemphasized-text);
 }
 
@@ -275,10 +275,6 @@ button > hbox > label {
   margin: 0;
 }
 
-#activeLanguages {
-  height: 16em;
-}
-
 #activeLanguages > richlistitem {
   padding: 0.3em;
 }
@@ -365,20 +361,20 @@ button > hbox > label {
 /* Home Pane */
 
 #homepageGroup menulist,
-#homepageGroup textbox {
+#homepageGroup html|input {
   margin: 5px 0;
 }
 
-#homepageGroup textbox {
+#homepageGroup html|input {
   text-align: match-parent;
+}
+
+#homepageGroup:-moz-locale-dir(rtl) html|input {
+  unicode-bidi: plaintext;
 }
 
 #homepageAndNewWindowsOption {
   margin-top: 20px;
-}
-
-#homepageGroup:-moz-locale-dir(rtl) input {
-  unicode-bidi: plaintext;
 }
 
 #homepageGroup:-moz-locale-dir(rtl) panel[type="autocomplete-richlistbox"] {
@@ -967,10 +963,6 @@ menulist[indicator=true] > menupopup menuitem[indicator=true]:not([image]) > .me
 #defaultBrowserLanguage {
   margin-inline-start: 0;
   min-width: 20em;
-}
-
-#selectedLocales {
-  height: 150px;
 }
 
 #selectedLocales > richlistitem {

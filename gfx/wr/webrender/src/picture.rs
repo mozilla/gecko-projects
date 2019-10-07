@@ -34,7 +34,7 @@ use crate::render_task::{RenderTask, RenderTaskLocation, BlurTaskCache, ClearMod
 use crate::resource_cache::ResourceCache;
 use crate::scene::SceneProperties;
 use smallvec::SmallVec;
-use std::{mem, u8};
+use std::{mem, u8, marker};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::texture_cache::TextureCacheHandle;
 use crate::util::{TransformedRectKind, MatrixHelpers, MaxRect, scale_factors, VecHelper, subtract_rect};
@@ -141,6 +141,8 @@ pub struct PictureCacheState {
     opacity_bindings: FastHashMap<PropertyBindingId, OpacityBindingInfo>,
     /// The current transform of the picture cache root spatial node
     root_transform: TransformKey,
+    /// The current tile size in device pixels
+    current_tile_size: DeviceIntSize,
 }
 
 /// Stores a list of cached picture tiles that are retained
@@ -177,15 +179,19 @@ pub type TileOffset = Point2D<i32, TileCoordinate>;
 pub type TileSize = Size2D<i32, TileCoordinate>;
 pub type TileRect = Rect<i32, TileCoordinate>;
 
-/// The size in device pixels of a cached tile. The currently chosen
-/// size is arbitrary. We should do some profiling to find the best
-/// size for real world pages.
-///
-/// Note that we use a separate, smaller size during wrench testing, so that
-/// we get tighter dirty rects and can do more meaningful invalidation
-/// tests.
-pub const TILE_SIZE_WIDTH: i32 = 2048;
-pub const TILE_SIZE_HEIGHT: i32 = 512;
+/// The size in device pixels of a normal cached tile.
+pub const TILE_SIZE_LARGE: DeviceIntSize = DeviceIntSize {
+    width: 2048,
+    height: 512,
+    _unit: marker::PhantomData,
+};
+
+/// The size in device pixels of a tile for small picture caches.
+pub const TILE_SIZE_SMALL: DeviceIntSize = DeviceIntSize {
+    width: 128,
+    height: 128,
+    _unit: marker::PhantomData,
+};
 
 /// The maximum size per axis of a surface,
 ///  in WorldPixel coordinates.
@@ -286,6 +292,9 @@ struct TilePostUpdateContext<'a> {
 
     /// Helper to map picture coordinates to world space
     pic_to_world_mapper: SpaceMapper<PicturePixel, WorldPixel>,
+
+    /// Current size in device pixels of tiles for this cache
+    current_tile_size: DeviceIntSize,
 }
 
 // Mutable state passed to picture cache tiles during post_update
@@ -370,6 +379,7 @@ pub enum TileSurface {
     Color {
         color: ColorF,
     },
+    Clear,
 }
 
 impl TileSurface {
@@ -377,6 +387,7 @@ impl TileSurface {
         match *self {
             TileSurface::Color { .. } => "Color",
             TileSurface::Texture { .. } => "Texture",
+            TileSurface::Clear => "Clear",
         }
     }
 }
@@ -628,23 +639,40 @@ impl Tile {
             return false;
         }
 
+        // For small tiles, only allow splitting once, since otherwise we
+        // end up splitting into tiny dirty rects that aren't saving much
+        // in the way of pixel work.
+        let max_split_level = if ctx.current_tile_size == TILE_SIZE_LARGE {
+            3
+        } else {
+            1
+        };
+
         // Consider splitting / merging dirty regions
         self.root.maybe_merge_or_split(
             0,
             &self.current_descriptor.prims,
+            max_split_level,
         );
 
         // See if this tile is a simple color, in which case we can just draw
         // it as a rect, and avoid allocating a texture surface and drawing it.
-        let is_solid_color = self.current_descriptor.prims.len() == 1 && self.is_opaque;
+        let is_simple_prim = self.current_descriptor.prims.len() == 1 && self.is_opaque;
 
         // Set up the backing surface for this tile.
-        let mut surface = if is_solid_color {
+        let mut surface = if is_simple_prim {
             // If we determine the tile can be represented by a color, set the
             // surface unconditionally (this will drop any previously used
             // texture cache backing surface).
-            TileSurface::Color {
-                color: ctx.backdrop.color,
+            match ctx.backdrop.kind {
+                BackdropKind::Color { color } => {
+                    TileSurface::Color {
+                        color,
+                    }
+                }
+                BackdropKind::Clear => {
+                    TileSurface::Clear
+                }
             }
         } else {
             // If this tile will be backed by a surface, we want to retain
@@ -655,7 +683,7 @@ impl Tile {
                 Some(old_surface @ TileSurface::Texture { .. }) => {
                     old_surface
                 }
-                Some(TileSurface::Color { .. }) | None => {
+                Some(TileSurface::Color { .. }) | Some(TileSurface::Clear) | None => {
                     TileSurface::Texture {
                         handle: TextureCacheHandle::invalid(),
                         visibility_mask: PrimitiveVisibilityMask::empty(),
@@ -715,12 +743,8 @@ impl Tile {
             // Ensure that this texture is allocated.
             if let TileSurface::Texture { ref mut handle, ref mut visibility_mask } = surface {
                 if !state.resource_cache.texture_cache.is_allocated(handle) {
-                    let tile_size = DeviceIntSize::new(
-                        TILE_SIZE_WIDTH,
-                        TILE_SIZE_HEIGHT,
-                    );
                     state.resource_cache.texture_cache.update_picture_cache(
-                        tile_size,
+                        ctx.current_tile_size,
                         handle,
                         state.gpu_cache,
                     );
@@ -1052,6 +1076,14 @@ impl ::std::fmt::Debug for RecordedDirtyRegion {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+enum BackdropKind {
+    Color {
+        color: ColorF,
+    },
+    Clear,
+}
+
 /// Stores information about the calculated opaque backdrop of this slice.
 #[derive(Debug, Copy, Clone)]
 struct BackdropInfo {
@@ -1059,15 +1091,17 @@ struct BackdropInfo {
     /// to determine where subpixel AA can be used, and where alpha blending
     /// can be disabled.
     rect: PictureRect,
-    /// Color of the backdrop.
-    color: ColorF,
+    /// Kind of the backdrop
+    kind: BackdropKind,
 }
 
 impl BackdropInfo {
     fn empty() -> Self {
         BackdropInfo {
             rect: PictureRect::zero(),
-            color: ColorF::BLACK,
+            kind: BackdropKind::Color {
+                color: ColorF::BLACK,
+            },
         }
     }
 }
@@ -1081,6 +1115,8 @@ pub struct TileCacheInstance {
     /// between display lists - this seems very unlikely to occur on most pages, but
     /// can be revisited if we ever notice that.
     pub slice: usize,
+    /// The currently selected tile size to use for this cache
+    pub current_tile_size: DeviceIntSize,
     /// The positioning node for this tile cache.
     pub spatial_node_index: SpatialNodeIndex,
     /// Hash of tiles present in this picture.
@@ -1175,6 +1211,7 @@ impl TileCacheInstance {
             root_transform: TransformKey::Local,
             shared_clips,
             shared_clip_chain,
+            current_tile_size: DeviceIntSize::zero(),
         }
     }
 
@@ -1221,8 +1258,6 @@ impl TileCacheInstance {
         frame_context: &FrameVisibilityContext,
         frame_state: &mut FrameVisibilityState,
     ) -> WorldRect {
-        let tile_width = TILE_SIZE_WIDTH;
-        let tile_height = TILE_SIZE_HEIGHT;
         self.surface_index = surface_index;
         self.local_rect = pic_rect;
         self.local_clip_rect = PictureRect::max_rect();
@@ -1292,6 +1327,26 @@ impl TileCacheInstance {
             self.root_transform = prev_state.root_transform;
             self.spatial_nodes = prev_state.spatial_nodes;
             self.opacity_bindings = prev_state.opacity_bindings;
+            self.current_tile_size = prev_state.current_tile_size;
+        }
+
+        // Work out what size tile is appropriate for this picture cache.
+        let desired_tile_size = if pic_rect.size.width < 2.0 * TILE_SIZE_SMALL.width as f32 ||
+           pic_rect.size.height < 2.0 * TILE_SIZE_SMALL.height as f32 {
+            TILE_SIZE_SMALL
+        } else {
+            TILE_SIZE_LARGE
+        };
+
+        // If the desired tile size has changed, then invalidate and drop any
+        // existing tiles.
+        // TODO(gw): This could in theory result in invalidating every frame if the
+        //           size of a picture is dynamically changing, just around the
+        //           threshold above. If we ever see this happening we can improve
+        //           the theshold logic above.
+        if desired_tile_size != self.current_tile_size {
+            self.tiles.clear();
+            self.current_tile_size = desired_tile_size;
         }
 
         // Map an arbitrary point in picture space to world space, to work out
@@ -1352,8 +1407,8 @@ impl TileCacheInstance {
         }
 
         let world_tile_size = WorldSize::new(
-            tile_width as f32 / frame_context.global_device_pixel_scale.0,
-            tile_height as f32 / frame_context.global_device_pixel_scale.0,
+            self.current_tile_size.width as f32 / frame_context.global_device_pixel_scale.0,
+            self.current_tile_size.height as f32 / frame_context.global_device_pixel_scale.0,
         );
 
         // We know that this is an exact rectangle, since we (for now) only support tile
@@ -1583,7 +1638,9 @@ impl TileCacheInstance {
                             if clip_chain.pic_clip_rect.contains_rect(&self.backdrop.rect) {
                                 self.backdrop = BackdropInfo {
                                     rect: clip_chain.pic_clip_rect,
-                                    color,
+                                    kind: BackdropKind::Color {
+                                        color,
+                                    },
                                 };
                             }
                         }
@@ -1649,8 +1706,15 @@ impl TileCacheInstance {
                     }
                 }
             }
+            PrimitiveInstanceKind::Clear { .. } => {
+                if let Some(ref clip_chain) = prim_clip_chain {
+                    self.backdrop = BackdropInfo {
+                        rect: clip_chain.pic_clip_rect,
+                        kind: BackdropKind::Clear,
+                    };
+                }
+            }
             PrimitiveInstanceKind::LineDecoration { .. } |
-            PrimitiveInstanceKind::Clear { .. } |
             PrimitiveInstanceKind::NormalBorder { .. } |
             PrimitiveInstanceKind::LinearGradient { .. } |
             PrimitiveInstanceKind::RadialGradient { .. } |
@@ -1760,6 +1824,7 @@ impl TileCacheInstance {
             spatial_nodes: &self.spatial_nodes,
             opacity_bindings: &self.opacity_bindings,
             pic_to_world_mapper,
+            current_tile_size: self.current_tile_size,
         };
 
         let mut state = TilePostUpdateState {
@@ -2248,6 +2313,10 @@ bitflags! {
         const CREATE_PICTURE_CACHE_PRE = 16;
         /// Force creation of a picture caching slice after this cluster.
         const CREATE_PICTURE_CACHE_POST = 32;
+        /// If set, this cluster represents a scroll bar container.
+        const SCROLLBAR_CONTAINER = 64;
+        /// If set, this cluster contains clear rectangle primitives.
+        const IS_CLEAR_PRIMITIVE = 128;
     }
 }
 
@@ -2361,11 +2430,18 @@ impl PrimitiveList {
             PrimitiveInstanceKind::Backdrop { .. } => {
                 flags.insert(ClusterFlags::IS_BACKDROP_FILTER);
             }
+            PrimitiveInstanceKind::Clear { .. } => {
+                flags.insert(ClusterFlags::IS_CLEAR_PRIMITIVE);
+            }
             _ => {}
         }
 
         if prim_flags.contains(PrimitiveFlags::IS_BACKFACE_VISIBLE) {
             flags.insert(ClusterFlags::IS_BACKFACE_VISIBLE);
+        }
+
+        if prim_flags.contains(PrimitiveFlags::IS_SCROLLBAR_CONTAINER) {
+            flags.insert(ClusterFlags::SCROLLBAR_CONTAINER);
         }
 
         // Insert the primitive into the first or last cluster as required
@@ -2628,6 +2704,7 @@ impl PicturePrimitive {
                         opacity_bindings: tile_cache.opacity_bindings,
                         fract_offset: tile_cache.fract_offset,
                         root_transform: tile_cache.root_transform,
+                        current_tile_size: tile_cache.current_tile_size,
                     },
                 );
             }
@@ -3034,11 +3111,6 @@ impl PicturePrimitive {
                         let tile_cache = self.tile_cache.as_mut().unwrap();
                         let mut first = true;
 
-                        let tile_size = DeviceSize::new(
-                            TILE_SIZE_WIDTH as f32,
-                            TILE_SIZE_HEIGHT as f32,
-                        );
-
                         for key in &tile_cache.tiles_to_draw {
                             let tile = tile_cache.tiles.get_mut(key).expect("bug: no tile found!");
 
@@ -3080,9 +3152,9 @@ impl PicturePrimitive {
                                     RenderTaskLocation::PictureCache {
                                         texture: cache_item.texture_id,
                                         layer: cache_item.texture_layer,
-                                        size: tile_size.to_i32(),
+                                        size: tile_cache.current_tile_size,
                                     },
-                                    tile_size,
+                                    tile_cache.current_tile_size.to_f32(),
                                     pic_index,
                                     content_origin.to_i32(),
                                     UvRectKind::Rect,
@@ -4168,7 +4240,7 @@ impl TileNode {
                 let world_rect = pic_to_world_mapper.map(&self.rect).unwrap();
                 let device_rect = world_rect * global_device_pixel_scale;
 
-                let outer_color = color.scale_alpha(0.6);
+                let outer_color = color.scale_alpha(0.3);
                 let inner_color = outer_color.scale_alpha(0.5);
                 scratch.push_debug_rect(
                     device_rect.inflate(-3.0, -3.0),
@@ -4268,6 +4340,7 @@ impl TileNode {
         &self,
         level: i32,
         can_merge: bool,
+        max_split_levels: i32,
     ) -> Option<TileModification> {
         match self.kind {
             TileNodeKind::Leaf { dirty_tracker, frames_since_modified, .. } => {
@@ -4275,7 +4348,7 @@ impl TileNode {
                 if frames_since_modified > 64 {
                     let dirty_frames = dirty_tracker.count_ones();
                     // If the tree isn't too deep, and has been regularly invalidating, split
-                    if level < 3 && dirty_frames > 32 {
+                    if level < max_split_levels && dirty_frames > 32 {
                         Some(TileModification::Split)
                     } else if can_merge && (dirty_tracker == 0 || dirty_frames == 64) && level > 0 {
                         // If allowed to merge, and nothing has changed for 64 frames, merge
@@ -4298,15 +4371,16 @@ impl TileNode {
         &mut self,
         level: i32,
         curr_prims: &[PrimitiveDescriptor],
+        max_split_levels: i32,
     ) {
         // Determine if this tile wants to split or merge
         let tile_mod = match self.kind {
             TileNodeKind::Leaf { .. } => {
-                self.get_preference(level, false)
+                self.get_preference(level, false, max_split_levels)
             }
             TileNodeKind::Node { ref children, .. } => {
                 // Only merge if all children want to merge
-                if children.iter().all(|c| c.get_preference(level+1, true) == Some(TileModification::Merge)) {
+                if children.iter().all(|c| c.get_preference(level+1, true, max_split_levels) == Some(TileModification::Merge)) {
                     Some(TileModification::Merge)
                 } else {
                     None
@@ -4396,6 +4470,7 @@ impl TileNode {
                         child.maybe_merge_or_split(
                             level+1,
                             curr_prims,
+                            max_split_levels,
                         );
                     }
                 }

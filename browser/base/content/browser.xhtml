@@ -484,12 +484,10 @@
 
     <menupopup id="autohide-context"
            onpopupshowing="FullScreen.getAutohide(this.firstChild);">
-      <menuitem type="checkbox" label="&fullScreenAutohide.label;"
-                accesskey="&fullScreenAutohide.accesskey;"
+      <menuitem type="checkbox" data-l10n-id="full-screen-autohide"
                 oncommand="FullScreen.setAutohide();"/>
       <menuseparator/>
-      <menuitem label="&fullScreenExit.label;"
-                accesskey="&fullScreenExit.accesskey;"
+      <menuitem data-l10n-id="full-screen-exit"
                 oncommand="BrowserFullScreen();"/>
     </menupopup>
 
@@ -863,6 +861,7 @@
                 defaultPlaceholder="&urlbar.placeholder2;"
                 focused="true"
                 pageproxystate="invalid">
+            <hbox id="urlbar-background"/>
             <hbox id="urlbar-input-container"
                   flex="1"
                   pageproxystate="invalid">
@@ -1415,4 +1414,6 @@
   <vbox id="browser-bottombox" layer="true" renderroot="content">
     <!-- gNotificationBox will be added here lazily. -->
   </vbox>
+
+  <html:div id="a11y-announcement" role="alert"/>
 </window>

@@ -4379,8 +4379,10 @@ class nsDisplaySolidColor : public nsDisplaySolidColorBase {
  public:
   nsDisplaySolidColor(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                       const nsRect& aBounds, nscolor aColor,
-                      bool aCanBeReused = true)
-      : nsDisplaySolidColorBase(aBuilder, aFrame, aColor), mBounds(aBounds) {
+                      uint16_t aIndex = 0, bool aCanBeReused = true)
+      : nsDisplaySolidColorBase(aBuilder, aFrame, aColor),
+        mBounds(aBounds),
+        mIndex(aIndex) {
     NS_ASSERTION(NS_GET_A(aColor) > 0,
                  "Don't create invisible nsDisplaySolidColors!");
     MOZ_COUNT_CTOR(nsDisplaySolidColor);
@@ -4421,10 +4423,18 @@ class nsDisplaySolidColor : public nsDisplaySolidColorBase {
   void SetOverrideZIndex(int32_t aZIndex) {
     mOverrideZIndex = mozilla::Some(aZIndex);
   }
+  /**
+   * If we have multiple SolidColor items in a single frame's
+   * display list, mIndex should be used as their unique
+   * identifier. Note this mapping remains stable even if the
+   * dirty rect changes.
+   */
+  uint16_t CalculatePerFrameKey() const override { return mIndex; }
 
  private:
   nsRect mBounds;
   mozilla::Maybe<int32_t> mOverrideZIndex;
+  const uint16_t mIndex;
 };
 
 /**
@@ -6025,6 +6035,16 @@ class nsDisplayOwnLayer : public nsDisplayWrapList {
  public:
   typedef mozilla::layers::ScrollbarData ScrollbarData;
 
+  enum OwnLayerType {
+    OwnLayerForTransformWithRoundedClip,
+    OwnLayerForStackingContext,
+    OwnLayerForImageBoxFrame,
+    OwnLayerForScrollbar,
+    OwnLayerForScrollThumb,
+    OwnLayerForSubdoc,
+    OwnLayerForBoxFrame
+  };
+
   /**
    * @param aFlags eGenerateSubdocInvalidations :
    * Add UserData to the created ContainerLayer, so that invalidations
@@ -6041,7 +6061,8 @@ class nsDisplayOwnLayer : public nsDisplayWrapList {
       const ActiveScrolledRoot* aActiveScrolledRoot,
       nsDisplayOwnLayerFlags aFlags = nsDisplayOwnLayerFlags::None,
       const ScrollbarData& aScrollbarData = ScrollbarData{},
-      bool aForceActive = true, bool aClearClipChain = false);
+      bool aForceActive = true, bool aClearClipChain = false,
+      uint16_t aIndex = 0);
 
   nsDisplayOwnLayer(nsDisplayListBuilder* aBuilder,
                     const nsDisplayOwnLayer& aOther)
@@ -6049,7 +6070,8 @@ class nsDisplayOwnLayer : public nsDisplayWrapList {
         mFlags(aOther.mFlags),
         mScrollbarData(aOther.mScrollbarData),
         mForceActive(aOther.mForceActive),
-        mWrAnimationId(aOther.mWrAnimationId) {
+        mWrAnimationId(aOther.mWrAnimationId),
+        mIndex(aOther.mIndex) {
     MOZ_COUNT_CTOR(nsDisplayOwnLayer);
   }
 
@@ -6080,6 +6102,8 @@ class nsDisplayOwnLayer : public nsDisplayWrapList {
     return false;
   }
 
+  uint16_t CalculatePerFrameKey() const override { return mIndex; }
+
   bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override {
     return false;
   }
@@ -6103,6 +6127,7 @@ class nsDisplayOwnLayer : public nsDisplayWrapList {
   ScrollbarData mScrollbarData;
   bool mForceActive;
   uint64_t mWrAnimationId;
+  uint16_t mIndex;
 };
 
 class nsDisplayRenderRoot : public nsDisplayWrapList {

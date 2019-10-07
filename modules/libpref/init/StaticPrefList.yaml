@@ -653,6 +653,15 @@
   value: true
   mirror: always
 
+- name: browser.cache.offline.storage.enable
+  type: bool
+#ifdef EARLY_BETA_OR_EARLIER
+  value: false
+#else
+  value: true
+#endif
+  mirror: always
+
 - name: browser.cache.disk.enable
   type: RelaxedAtomicBool
   value: true
@@ -776,6 +785,22 @@
 - name: browser.display.document_color_use
   type: RelaxedAtomicUint32
   value: 0
+  mirror: always
+  rust: true
+
+# This pref dictates whether or not backplates and background images
+# are to be drawn, when in high-contrast mode:
+#   false: do not draw backplates or render background images
+#   true: render background images and draw backplates
+# This condition is only considered when high-contrast mode is enabled
+# in Firefox, ie. when the user has:
+#   (1) mUseAccessibilityMode set to true (Widows high-contrast mode is on)
+#       AND browser.display.document_color_use set to 0
+#       (only with high-contrast themes) OR
+#   (2) browser.display.document_color_use set to 2 (always)
+- name: browser.display.permit_backplate
+  type: RelaxedAtomicBool
+  value: @EARLY_BETA_OR_EARLIER@
   mirror: always
   rust: true
 
@@ -2566,7 +2591,7 @@
 
 # Is support for the Web GPU API enabled?
 - name: dom.webgpu.enable
-  type: bool
+  type: RelaxedAtomicBool
   value: false
   mirror: always
 
@@ -5031,7 +5056,7 @@
 # "blockified" to "-moz-box" (rather than to "block")
 - name: layout.css.xul-box-display-values.survive-blockification.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
   rust: true
 
@@ -5211,7 +5236,7 @@
 # Those triggers should be unnecessary after bug 1561450.
 - name: layout.css.scroll-anchoring.suppressions.enabled
   type: bool
-  value: @IS_NOT_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 - name: layout.css.scroll-anchoring.highlight
@@ -5275,7 +5300,7 @@
 # internal-for-now aspect-ratio property?
 - name: layout.css.width-and-height-map-to-aspect-ratio.enabled
   type: bool
-  value: @IS_EARLY_BETA_OR_EARLIER@
+  value: true
   mirror: always
 
 # The fraction of the scrollport we allow to horizontally scroll by before we
@@ -5306,6 +5331,12 @@
 # Whether to disable deprecated style attributes background, color, fontfamily,
 # fontsize, fontstyle and fontweight.
 - name: mathml.deprecated_style_attributes.disabled
+  type: bool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: always
+
+# Whether to disable deprecated "radical" notation for the menclose element.
+- name: mathml.deprecated_menclose_notation_radical.disabled
   type: bool
   value: @IS_NIGHTLY_BUILD@
   mirror: always
@@ -5346,6 +5377,12 @@
 
 # Whether to disable deprecated numalign/denomalign/align attributes
 - name: mathml.deprecated_alignment_attributes.disabled
+  type: bool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: always
+
+# Whether to disable support for XLink on MathML elements.
+- name: mathml.xlink.disabled
   type: bool
   value: @IS_NIGHTLY_BUILD@
   mirror: always
@@ -5651,6 +5688,11 @@
 
 #ifdef MOZ_FFVPX
 -   name: media.ffvpx.enabled
+    type: RelaxedAtomicBool
+    value: true
+    mirror: always
+
+-   name: media.ffvpx.mp3.enabled
     type: RelaxedAtomicBool
     value: true
     mirror: always

@@ -20,8 +20,7 @@ class UnscaledFontFontconfig;
 class ScaledFontFontconfig : public ScaledFontBase {
  public:
   MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(ScaledFontFontconfig, override)
-  ScaledFontFontconfig(cairo_scaled_font_t* aScaledFont,
-                       RefPtr<SharedFTFace>&& aFace, FcPattern* aPattern,
+  ScaledFontFontconfig(RefPtr<SharedFTFace>&& aFace, FcPattern* aPattern,
                        const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize);
 
   FontType GetType() const override { return FontType::FONTCONFIG; }
@@ -33,6 +32,8 @@ class ScaledFontFontconfig : public ScaledFontBase {
 
   AntialiasMode GetDefaultAAMode() override;
 
+  bool UseSubpixelPosition() const;
+
   bool CanSerialize() override { return true; }
 
   bool GetFontInstanceData(FontInstanceDataOutput aCb, void* aBaton) override;
@@ -43,6 +44,12 @@ class ScaledFontFontconfig : public ScaledFontBase {
       std::vector<FontVariation>* aOutVariations) override;
 
   bool HasVariationSettings() override;
+
+ protected:
+#ifdef USE_CAIRO_SCALED_FONT
+  cairo_font_face_t* CreateCairoFontFace(
+      cairo_font_options_t* aFontOptions) override;
+#endif
 
  private:
   friend class NativeFontResourceFontconfig;
@@ -58,7 +65,7 @@ class ScaledFontFontconfig : public ScaledFontBase {
       SUBPIXEL_BGR = 1 << 5,
     };
 
-    InstanceData(cairo_scaled_font_t* aScaledFont, FcPattern* aPattern);
+    explicit InstanceData(FcPattern* aPattern);
     InstanceData(const wr::FontInstanceOptions* aOptions,
                  const wr::FontInstancePlatformOptions* aPlatformOptions);
 
@@ -72,8 +79,7 @@ class ScaledFontFontconfig : public ScaledFontBase {
     uint8_t mLcdFilter;
   };
 
-  ScaledFontFontconfig(cairo_scaled_font_t* aScaledFont,
-                       RefPtr<SharedFTFace>&& aFace,
+  ScaledFontFontconfig(RefPtr<SharedFTFace>&& aFace,
                        const InstanceData& aInstanceData,
                        const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize);
 

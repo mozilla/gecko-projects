@@ -7,6 +7,25 @@
 
 # The following section contains the accessibility scalars.
 a11y:
+  backplate:
+    bug_numbers:
+      - 1539212
+    description: >
+      Boolean tracking if the user has the backplate preference enabled or disabled.
+    expires: "73"
+    kind: boolean
+    notification_emails:
+      - accessibility@mozilla.com
+      - mreschenberg@mozilla.com
+    products:
+      - 'firefox'
+      - 'fennec'
+      - 'geckoview'
+    record_in_processes:
+      - 'main'
+    release_channel_collection: opt-out
+    keyed: false
+
   instantiators:
     bug_numbers:
       - 1323069
@@ -545,6 +564,23 @@ identity.fxaccounts:
       - main
 
 security:
+  contentblocker_permissions:
+    bug_numbers:
+      - 1581056
+    description: >
+      Amount of set nsContentBlocker permissions at startup, keyed by permission type.
+    expires: "75"
+    kind: uint
+    keyed: true
+    notification_emails:
+      - pbz@mozilla.com
+      - jhofmann@mozilla.com
+      - seceng-telemetry@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - main
   webauthn_used:
     bug_numbers:
       - 1265472
@@ -4389,25 +4425,6 @@ networking:
     kind: uint
     notification_emails:
       - ddamjanovic@mozilla.com
-    products:
-      - 'firefox'
-      - 'fennec'
-      - 'geckoview'
-    record_in_processes:
-      - 'main'
-
-# The following section is for quotaManager
-qm:
-  origin_directory_unexpected_filename:
-    bug_numbers:
-      - 1529016
-    description: >
-      Keys are the filenames of unexpected files in the profile's origin directories.
-    expires: "70"
-    keyed: true
-    kind: uint
-    notification_emails:
-      - ttung@mozilla.com
     products:
       - 'firefox'
       - 'fennec'

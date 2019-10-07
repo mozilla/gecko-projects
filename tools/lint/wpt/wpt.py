@@ -4,8 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import, print_function
-
 import json
 import os
 import sys
@@ -39,7 +37,8 @@ def lint(files, config, **kwargs):
     cmd = ['python2', os.path.join(tests_dir, 'wpt'), 'lint', '--json'] + files
     log.debug("Command: {}".format(' '.join(cmd)))
 
-    proc = ProcessHandler(cmd, env=os.environ, processOutputLine=process_line)
+    proc = ProcessHandler(cmd, env=os.environ, processOutputLine=process_line,
+                          universal_newlines=True)
     proc.run()
     try:
         proc.wait()

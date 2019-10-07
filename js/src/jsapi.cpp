@@ -365,7 +365,6 @@ JS_PUBLIC_API JSObject* JS_GetBoundFunctionTarget(JSFunction* fun) {
 /************************************************************************/
 
 JS_PUBLIC_API JSContext* JS_NewContext(uint32_t maxbytes,
-                                       uint32_t maxNurseryBytes,
                                        JSRuntime* parentRuntime) {
   MOZ_ASSERT(JS::detail::libraryInitState == JS::detail::InitState::Running,
              "must call JS_Init prior to creating any JSContexts");
@@ -375,7 +374,7 @@ JS_PUBLIC_API JSContext* JS_NewContext(uint32_t maxbytes,
     parentRuntime = parentRuntime->parentRuntime;
   }
 
-  return NewContext(maxbytes, maxNurseryBytes, parentRuntime);
+  return NewContext(maxbytes, parentRuntime);
 }
 
 JS_PUBLIC_API JSContext* JS_NewCooperativeContext(JSContext* siblingContext) {
@@ -1338,20 +1337,15 @@ JS_PUBLIC_API void JS_UpdateWeakPointerAfterGCUnbarriered(JSObject** objp) {
 
 JS_PUBLIC_API void JS_SetGCParameter(JSContext* cx, JSGCParamKey key,
                                      uint32_t value) {
-  cx->runtime()->gc.waitBackgroundSweepEnd();
-  AutoLockGC lock(cx->runtime());
-  MOZ_ALWAYS_TRUE(cx->runtime()->gc.setParameter(key, value, lock));
+  MOZ_ALWAYS_TRUE(cx->runtime()->gc.setParameter(key, value));
 }
 
 JS_PUBLIC_API void JS_ResetGCParameter(JSContext* cx, JSGCParamKey key) {
-  cx->runtime()->gc.waitBackgroundSweepEnd();
-  AutoLockGC lock(cx->runtime());
-  cx->runtime()->gc.resetParameter(key, lock);
+  cx->runtime()->gc.resetParameter(key);
 }
 
 JS_PUBLIC_API uint32_t JS_GetGCParameter(JSContext* cx, JSGCParamKey key) {
-  AutoLockGC lock(cx->runtime());
-  return cx->runtime()->gc.getParameter(key, lock);
+  return cx->runtime()->gc.getParameter(key);
 }
 
 JS_PUBLIC_API void JS_SetGCParametersBasedOnAvailableMemory(JSContext* cx,
@@ -4455,9 +4449,29 @@ JS_PUBLIC_API bool JS_StringEqualsAscii(JSContext* cx, JSString* str,
   return true;
 }
 
+JS_PUBLIC_API bool JS_StringEqualsAscii(JSContext* cx, JSString* str,
+                                        const char* asciiBytes, size_t length,
+                                        bool* match) {
+  AssertHeapIsIdle();
+  CHECK_THREAD(cx);
+
+  JSLinearString* linearStr = str->ensureLinear(cx);
+  if (!linearStr) {
+    return false;
+  }
+  *match = StringEqualsAscii(linearStr, asciiBytes, length);
+  return true;
+}
+
 JS_PUBLIC_API bool JS_FlatStringEqualsAscii(JSFlatString* str,
                                             const char* asciiBytes) {
   return StringEqualsAscii(str, asciiBytes);
+}
+
+JS_PUBLIC_API bool JS_FlatStringEqualsAscii(JSFlatString* str,
+                                            const char* asciiBytes,
+                                            size_t length) {
+  return StringEqualsAscii(str, asciiBytes, length);
 }
 
 JS_PUBLIC_API size_t JS_PutEscapedFlatString(char* buffer, size_t size,
@@ -5852,8 +5866,12 @@ JS_PUBLIC_API JS::TranscodeResult JS::EncodeInterpretedFunction(
 JS_PUBLIC_API JS::TranscodeResult JS::DecodeScript(
     JSContext* cx, TranscodeBuffer& buffer, JS::MutableHandleScript scriptp,
     size_t cursorIndex) {
-  XDRDecoder decoder(cx, buffer, cursorIndex);
-  XDRResult res = decoder.codeScript(scriptp);
+  auto decoder = js::MakeUnique<XDRDecoder>(cx, buffer, cursorIndex);
+  if (!decoder) {
+    ReportOutOfMemory(cx);
+    return JS::TranscodeResult_Throw;
+  }
+  XDRResult res = decoder->codeScript(scriptp);
   MOZ_ASSERT(bool(scriptp) == res.isOk());
   if (res.isErr()) {
     return res.unwrapErr();
@@ -5864,8 +5882,12 @@ JS_PUBLIC_API JS::TranscodeResult JS::DecodeScript(
 JS_PUBLIC_API JS::TranscodeResult JS::DecodeScript(
     JSContext* cx, const TranscodeRange& range,
     JS::MutableHandleScript scriptp) {
-  XDRDecoder decoder(cx, range);
-  XDRResult res = decoder.codeScript(scriptp);
+  auto decoder = js::MakeUnique<XDRDecoder>(cx, range);
+  if (!decoder) {
+    ReportOutOfMemory(cx);
+    return JS::TranscodeResult_Throw;
+  }
+  XDRResult res = decoder->codeScript(scriptp);
   MOZ_ASSERT(bool(scriptp) == res.isOk());
   if (res.isErr()) {
     return res.unwrapErr();
@@ -5876,8 +5898,12 @@ JS_PUBLIC_API JS::TranscodeResult JS::DecodeScript(
 JS_PUBLIC_API JS::TranscodeResult JS::DecodeInterpretedFunction(
     JSContext* cx, TranscodeBuffer& buffer, JS::MutableHandleFunction funp,
     size_t cursorIndex) {
-  XDRDecoder decoder(cx, buffer, cursorIndex);
-  XDRResult res = decoder.codeFunction(funp);
+  auto decoder = js::MakeUnique<XDRDecoder>(cx, buffer, cursorIndex);
+  if (!decoder) {
+    ReportOutOfMemory(cx);
+    return JS::TranscodeResult_Throw;
+  }
+  XDRResult res = decoder->codeFunction(funp);
   MOZ_ASSERT(bool(funp) == res.isOk());
   if (res.isErr()) {
     return res.unwrapErr();

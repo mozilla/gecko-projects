@@ -157,8 +157,29 @@ registerCleanupFunction(() => {
 });
 
 registerCleanupFunction(async function cleanup() {
+  // Close any tab opened by the test.
+  // There should be only one tab opened by default when firefox starts the test.
   while (gBrowser.tabs.length > 1) {
     await closeTabAndToolbox(gBrowser.selectedTab);
+  }
+
+  // Note that this will run before cleanup functions registered by tests or other head.js files.
+  // So all connections must be cleaned up by the test when the test ends,
+  // before the harness starts invoking the cleanup functions
+  await waitForTick();
+
+  // All connections must be cleaned up by the test when the test ends.
+  const { DebuggerServer } = require("devtools/server/debugger-server");
+  ok(
+    !DebuggerServer.hasConnection(),
+    "The main process DebuggerServer has no pending connection when the test ends"
+  );
+  // If there is still open connection, close all of them so that following tests
+  // could pass.
+  if (DebuggerServer.hasConnection()) {
+    for (const conn of Object.values(DebuggerServer._connections)) {
+      conn.close();
+    }
   }
 });
 
@@ -423,7 +444,7 @@ function loadHelperScript(filePath) {
  * @return {Promise}
  */
 function waitForTick() {
-  return new Promise(resolve => executeSoon(resolve));
+  return new Promise(resolve => DevToolsUtils.executeSoon(resolve));
 }
 
 /**
@@ -599,7 +620,7 @@ function waitForContextMenu(popup, button, onShown, onHidden) {
 
       // Use executeSoon() to get out of the popupshown event.
       popup.addEventListener("popuphidden", onPopupHidden);
-      executeSoon(() => popup.hidePopup());
+      DevToolsUtils.executeSoon(() => popup.hidePopup());
     }
     function onPopupHidden() {
       info("onPopupHidden");

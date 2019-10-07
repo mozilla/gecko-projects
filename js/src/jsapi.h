@@ -338,8 +338,7 @@ extern JS_PUBLIC_API bool JS_IsBuiltinFunctionConstructor(JSFunction* fun);
 
 // Create a new context (and runtime) for this thread.
 extern JS_PUBLIC_API JSContext* JS_NewContext(
-    uint32_t maxbytes, uint32_t maxNurseryBytes = JS::DefaultNurseryBytes,
-    JSRuntime* parentRuntime = nullptr);
+    uint32_t maxbytes, JSRuntime* parentRuntime = nullptr);
 
 // The methods below for controlling the active context in a cooperatively
 // multithreaded runtime are not threadsafe, and the caller must ensure they
@@ -2285,9 +2284,22 @@ extern JS_PUBLIC_API JSString* JS_AtomizeAndPinUCString(JSContext* cx,
 extern JS_PUBLIC_API bool JS_CompareStrings(JSContext* cx, JSString* str1,
                                             JSString* str2, int32_t* result);
 
-extern JS_PUBLIC_API bool JS_StringEqualsAscii(JSContext* cx, JSString* str,
-                                               const char* asciiBytes,
-                                               bool* match);
+extern JS_PUBLIC_API MOZ_MUST_USE bool JS_StringEqualsAscii(
+    JSContext* cx, JSString* str, const char* asciiBytes, bool* match);
+
+// Same as above, but when the length of asciiBytes (excluding the
+// trailing null, if any) is known.
+extern JS_PUBLIC_API MOZ_MUST_USE bool JS_StringEqualsAscii(
+    JSContext* cx, JSString* str, const char* asciiBytes, size_t length,
+    bool* match);
+
+template <size_t N>
+MOZ_MUST_USE bool JS_StringEqualsLiteral(JSContext* cx, JSString* str,
+                                         const char (&asciiBytes)[N],
+                                         bool* match) {
+  MOZ_ASSERT(asciiBytes[N - 1] == '\0');
+  return JS_StringEqualsAscii(cx, str, asciiBytes, N - 1, match);
+}
 
 extern JS_PUBLIC_API size_t JS_PutEscapedString(JSContext* cx, char* buffer,
                                                 size_t size, JSString* str,
@@ -2391,6 +2403,16 @@ static MOZ_ALWAYS_INLINE JSString* JS_FORGET_STRING_FLATNESS(
 
 extern JS_PUBLIC_API bool JS_FlatStringEqualsAscii(JSFlatString* str,
                                                    const char* asciiBytes);
+extern JS_PUBLIC_API bool JS_FlatStringEqualsAscii(JSFlatString* str,
+                                                   const char* asciiBytes,
+                                                   size_t length);
+
+template <size_t N>
+bool JS_FlatStringEqualsLiteral(JSFlatString* str,
+                                const char (&asciiBytes)[N]) {
+  MOZ_ASSERT(asciiBytes[N - 1] == '\0');
+  return JS_FlatStringEqualsAscii(str, asciiBytes, N - 1);
+}
 
 extern JS_PUBLIC_API size_t JS_PutEscapedFlatString(char* buffer, size_t size,
                                                     JSFlatString* str,

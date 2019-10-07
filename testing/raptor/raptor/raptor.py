@@ -397,30 +397,65 @@ class Browsertime(Perftest):
         return ['--browser', 'firefox', '--firefox.binaryPath', binary_path]
 
     def run_test(self, test, timeout):
-
         self.run_test_setup(test)
 
-        cmd = ([self.browsertime_node, self.browsertime_browsertimejs] +
-               self.driver_paths +
-               self.browsertime_args +
-               ['--skipHar',
-                '--video', 'true',
-                '--visualMetrics', 'false',
-                '-vv',
-                '--resultDir', self.results_handler.result_dir_for_test(test),
-                '-n', str(test.get('browser_cycles', 1)), test['test_url']])
+        browsertime_script = [os.path.join(os.path.dirname(__file__), "..",
+                              "browsertime", "browsertime_pageload.js")]
 
-        # timeout is a single page-load timeout value in ms from the test INI
-        # convert timeout to seconds and account for browser cycles
-        timeout = int(timeout / 1000) * int(test.get('browser_cycles', 1))
+        browsertime_script.extend(self.browsertime_args)
+
+        # timeout is a single page-load timeout value (ms) from the test INI
+        # this will be used for btime --timeouts.pageLoad
+
+        # bt_timeout will be the overall browsertime cmd/session timeout (seconds)
+        # browsertime deals with page cycles internally, so we need to give it a timeout
+        # value that includes all page cycles
+        bt_timeout = int(timeout / 1000) * int(test.get("page_cycles", 1))
+
+        # the post-startup-delay is a delay after the browser has started, to let it settle
+        # it's handled within browsertime itself by loading a 'preUrl' (about:blank) and having a
+        # delay after that ('preURLDelay') as the post-startup-delay, so we must add that in sec
+        bt_timeout += int(self.post_startup_delay / 1000)
 
         # add some time for browser startup, time for the browsertime measurement code
         # to be injected/invoked, and for exceptions to bubble up; be generous
-        timeout += (20 * int(test.get('browser_cycles', 1)))
+        bt_timeout += 20
+
+        # browsertime also handles restarting the browser/running all of the browser cycles;
+        # so we need to multiply our bt_timeout by the number of browser cycles
+        bt_timeout = bt_timeout * int(test.get('browser_cycles', 1))
 
         # if geckoProfile enabled, give browser more time for profiling
         if self.config['gecko_profile'] is True:
-            timeout += 5 * 60
+            bt_timeout += 5 * 60
+
+        # pass a few extra options to the browsertime script
+        # XXX maybe these should be in the browsertime_args() func
+        browsertime_script.extend(["--browsertime.page_cycles",
+                                  str(test.get("page_cycles", 1))])
+        browsertime_script.extend(["--browsertime.url", test["test_url"]])
+
+        # Raptor's `pageCycleDelay` delay (ms) between pageload cycles
+        browsertime_script.extend(["--browsertime.page_cycle_delay", "1000"])
+        # Raptor's `foregroundDelay` delay (ms) for foregrounding app
+        browsertime_script.extend(["--browsertime.foreground_delay", "5000"])
+
+        # Raptor's `post startup delay` is settle time after the browser has started
+        browsertime_script.extend(["--browsertime.post_startup_delay",
+                                  str(self.post_startup_delay)])
+
+        # the browser time script cannot restart the browser itself,
+        # so we have to keep -n option here.
+        cmd = ([self.browsertime_node, self.browsertime_browsertimejs] +
+               self.driver_paths +
+               browsertime_script +
+               ['--skipHar',
+                '--video', 'false',
+                '--visualMetrics', 'false',
+                '--timeouts.pageLoad', str(timeout),
+                '-vv',
+                '--resultDir', self.results_handler.result_dir_for_test(test),
+                '-n', str(test.get('browser_cycles', 1))])
 
         LOG.info('timeout (s): {}'.format(timeout))
         LOG.info('browsertime cwd: {}'.format(os.getcwd()))
@@ -443,7 +478,7 @@ class Browsertime(Perftest):
 
         try:
             proc = mozprocess.ProcessHandler(cmd, env=env)
-            proc.run(timeout=timeout,
+            proc.run(timeout=bt_timeout,
                      outputTimeout=2*60)
             proc.wait()
 
@@ -1315,7 +1350,6 @@ class RaptorAndroid(Raptor):
         # in debug mode, and running locally, leave the browser running
         if self.debug_mode and self.config['run_local']:
             LOG.info("* debug-mode enabled - please shutdown the browser manually...")
-            self.runner.wait(timeout=None)
 
     def check_for_crashes(self):
         super(RaptorAndroid, self).check_for_crashes()

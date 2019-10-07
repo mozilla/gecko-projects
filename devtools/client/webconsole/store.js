@@ -22,10 +22,12 @@ const { getPrefsService } = require("devtools/client/webconsole/utils/prefs");
 // Reducers
 const { reducers } = require("./reducers/index");
 
-// Middleware
+// Middlewares
 const eventTelemetry = require("./middleware/event-telemetry");
 const historyPersistence = require("./middleware/history-persistence");
-const thunk = require("./middleware/thunk");
+const {
+  thunkWithOptions,
+} = require("devtools/client/shared/redux/middleware/thunk-with-options");
 
 // Enhancers
 const enableBatching = require("./enhancers/batching");
@@ -82,19 +84,10 @@ function configureStore(webConsoleUI, options = {}) {
     }),
   };
 
-  // Prepare middleware.
-  const services = options.services || {};
-
   const middleware = applyMiddleware(
-    thunk.bind(null, {
+    thunkWithOptions.bind(null, {
       prefsService,
-      services,
-      // Needed for the ObjectInspector
-      client: {
-        createObjectClient: services.createObjectClient,
-        createLongStringClient: services.createLongStringClient,
-        releaseActor: services.releaseActor,
-      },
+      ...options.thunkArgs,
     }),
     historyPersistence,
     eventTelemetry.bind(null, options.telemetry, options.sessionId)

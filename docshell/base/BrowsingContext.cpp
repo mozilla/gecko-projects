@@ -284,11 +284,10 @@ void BrowsingContext::SetEmbedderElement(Element* aEmbedder) {
       mParent = newParent;
     }
 
-    nsCOMPtr<nsPIDOMWindowInner> inner =
-        do_QueryInterface(aEmbedder->GetOwnerGlobal());
-    SetEmbedderInnerWindowId(inner ? inner->WindowID() : 0);
-  } else {
-    SetEmbedderInnerWindowId(0);
+    if (nsCOMPtr<nsPIDOMWindowInner> inner =
+            do_QueryInterface(aEmbedder->GetOwnerGlobal())) {
+      SetEmbedderInnerWindowId(inner->WindowID());
+    }
   }
 
   mEmbedderElement = aEmbedder;
@@ -865,6 +864,13 @@ void BrowsingContext::Blur(ErrorResult& aError) {
   } else if (ContentParent* cp = Canonical()->GetContentParent()) {
     Unused << cp->SendWindowBlur(this);
   }
+}
+
+Nullable<WindowProxyHolder> BrowsingContext::GetWindow() {
+  if (XRE_IsParentProcess() && !IsInProcess()) {
+    return nullptr;
+  }
+  return WindowProxyHolder(this);
 }
 
 Nullable<WindowProxyHolder> BrowsingContext::GetTop(ErrorResult& aError) {

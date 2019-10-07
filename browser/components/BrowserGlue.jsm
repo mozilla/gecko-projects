@@ -166,6 +166,7 @@ let LEGACY_ACTORS = {
         "AboutLogins:LoginRemoved",
         "AboutLogins:MasterPasswordResponse",
         "AboutLogins:SendFavicons",
+        "AboutLogins:SetBreaches",
         "AboutLogins:Setup",
         "AboutLogins:ShowLoginItemError",
         "AboutLogins:SyncState",
@@ -903,7 +904,7 @@ BrowserGlue.prototype = {
         this._setSyncAutoconnectDelay();
         break;
       case "fxaccounts:onverified":
-        this._showSyncStartedDoorhanger();
+        this._onThisDeviceConnected();
         break;
       case "fxaccounts:device_connected":
         this._onDeviceConnected(data);
@@ -1799,6 +1800,41 @@ BrowserGlue.prototype = {
     Services.telemetry.scalarSet("contentblocking.category", categoryPref);
   },
 
+  _recordContentBlockerTelemetry() {
+    [
+      "other",
+      "script",
+      "image",
+      "stylesheet",
+      "object",
+      "document",
+      "subdocument",
+      "refresh",
+      "xbl",
+      "ping",
+      "xmlhttprequest",
+      "objectsubrequest",
+      "dtd",
+      "font",
+      "media",
+      "websocket",
+      "csp_report",
+      "xslt",
+      "beacon",
+      "fetch",
+      "image",
+      "manifest",
+      "saveas_download",
+      "speculative",
+    ].forEach(type => {
+      Services.telemetry.keyedScalarAdd(
+        "security.contentblocker_permissions",
+        type,
+        Services.perms.getAllWithTypePrefix(type).length
+      );
+    });
+  },
+
   _sendMediaTelemetry() {
     let win = Services.wm.getMostRecentWindow("navigator:browser");
     if (win) {
@@ -2020,6 +2056,10 @@ BrowserGlue.prototype = {
 
     Services.tm.idleDispatchToMainThread(() => {
       this._recordContentBlockingTelemetry();
+    });
+
+    Services.tm.idleDispatchToMainThread(() => {
+      this._recordContentBlockerTelemetry();
     });
 
     // Load the Login Manager data from disk off the main thread, some time
@@ -2643,15 +2683,12 @@ BrowserGlue.prototype = {
     notification.persistence = -1; // Until user closes it
   },
 
-  _showSyncStartedDoorhanger() {
+  _onThisDeviceConnected() {
     let bundle = Services.strings.createBundle(
       "chrome://browser/locale/accounts.properties"
     );
-    let productName = gBrandBundle.GetStringFromName("brandShortName");
-    let title = bundle.GetStringFromName("syncStartNotification.title");
-    let body = bundle.formatStringFromName("syncStartNotification.body2", [
-      productName,
-    ]);
+    let title = bundle.GetStringFromName("deviceConnDisconnTitle");
+    let body = bundle.GetStringFromName("thisDeviceConnectedBody");
 
     let clickCallback = (subject, topic, data) => {
       if (topic != "alertclickcallback") {
@@ -3508,9 +3545,9 @@ BrowserGlue.prototype = {
     let accountsBundle = Services.strings.createBundle(
       "chrome://browser/locale/accounts.properties"
     );
-    let title = accountsBundle.GetStringFromName("deviceConnectedTitle");
+    let title = accountsBundle.GetStringFromName("deviceConnDisconnTitle");
     let body = accountsBundle.formatStringFromName(
-      "deviceConnectedBody" + (deviceName ? "" : ".noDeviceName"),
+      "otherDeviceConnectedBody" + (deviceName ? "" : ".noDeviceName"),
       [deviceName]
     );
 
@@ -3547,10 +3584,8 @@ BrowserGlue.prototype = {
     let bundle = Services.strings.createBundle(
       "chrome://browser/locale/accounts.properties"
     );
-    let title = bundle.GetStringFromName(
-      "deviceDisconnectedNotification.title"
-    );
-    let body = bundle.GetStringFromName("deviceDisconnectedNotification.body");
+    let title = bundle.GetStringFromName("deviceConnDisconnTitle");
+    let body = bundle.GetStringFromName("thisDeviceDisconnectedBody");
 
     let clickCallback = (subject, topic, data) => {
       if (topic != "alertclickcallback") {

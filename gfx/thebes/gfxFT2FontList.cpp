@@ -48,6 +48,7 @@
 #include "nsIMemory.h"
 #include "gfxFontConstants.h"
 
+#include "mozilla/EndianUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/scache/StartupCache.h"
 #include <fcntl.h>
@@ -144,55 +145,6 @@ FTUserFontData* FT2FontEntry::GetUserFontData() {
  * then create a Cairo font_face and scaled_font for drawing.
  */
 
-cairo_scaled_font_t* FT2FontEntry::CreateScaledFont(
-    const gfxFontStyle* aStyle, RefPtr<SharedFTFace> aFace, int* aOutLoadFlags,
-    unsigned int* aOutSynthFlags) {
-  int loadFlags = gfxPlatform::GetPlatform()->FontHintingEnabled()
-                      ? FT_LOAD_DEFAULT
-                      : (FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING);
-  if (aFace->GetFace()->face_flags & FT_FACE_FLAG_TRICKY) {
-    loadFlags &= ~FT_LOAD_NO_AUTOHINT;
-  }
-
-  unsigned int synthFlags = 0;
-  if (aStyle->NeedsSyntheticBold(this)) {
-    synthFlags |= CAIRO_FT_SYNTHESIZE_BOLD;
-  }
-
-  *aOutLoadFlags = loadFlags;
-  *aOutSynthFlags = synthFlags;
-
-  cairo_font_face_t* cairoFace = cairo_ft_font_face_create_for_ft_face(
-      aFace->GetFace(), loadFlags, synthFlags, aFace.get());
-  if (!cairoFace) {
-    return nullptr;
-  }
-
-  cairo_scaled_font_t* scaledFont = nullptr;
-
-  cairo_matrix_t sizeMatrix;
-  cairo_matrix_t identityMatrix;
-
-  // XXX deal with adjusted size
-  cairo_matrix_init_scale(&sizeMatrix, aStyle->size, aStyle->size);
-  cairo_matrix_init_identity(&identityMatrix);
-
-  cairo_font_options_t* fontOptions = cairo_font_options_create();
-
-  if (gfxPlatform::GetPlatform()->RequiresLinearZoom()) {
-    cairo_font_options_set_hint_metrics(fontOptions, CAIRO_HINT_METRICS_OFF);
-  }
-
-  scaledFont = cairo_scaled_font_create(cairoFace, &sizeMatrix, &identityMatrix,
-                                        fontOptions);
-  cairo_font_options_destroy(fontOptions);
-
-  NS_ASSERTION(cairo_scaled_font_status(scaledFont) == CAIRO_STATUS_SUCCESS,
-               "Failed to make scaled font");
-
-  return scaledFont;
-}
-
 FT2FontEntry::~FT2FontEntry() {
   if (mMMVar) {
     FT_Done_MM_Var(mFTFace->GetFace()->glyph->library, mMMVar);
@@ -240,12 +192,11 @@ gfxFont* FT2FontEntry::CreateFontInstance(const gfxFontStyle* aStyle) {
     }
   }
 
-  int loadFlags;
-  unsigned int synthFlags;
-  cairo_scaled_font_t* scaledFont =
-      CreateScaledFont(aStyle, face, &loadFlags, &synthFlags);
-  if (!scaledFont) {
-    return nullptr;
+  int loadFlags = gfxPlatform::GetPlatform()->FontHintingEnabled()
+                      ? FT_LOAD_DEFAULT
+                      : (FT_LOAD_NO_AUTOHINT | FT_LOAD_NO_HINTING);
+  if (face->GetFace()->face_flags & FT_FACE_FLAG_TRICKY) {
+    loadFlags &= ~FT_LOAD_NO_AUTOHINT;
   }
 
   RefPtr<UnscaledFontFreeType> unscaledFont(mUnscaledFont);
@@ -258,9 +209,7 @@ gfxFont* FT2FontEntry::CreateFontInstance(const gfxFontStyle* aStyle) {
   }
 
   gfxFont* font =
-      new gfxFT2Font(unscaledFont, scaledFont, std::move(face), this, aStyle,
-                     loadFlags, (synthFlags & CAIRO_FT_SYNTHESIZE_BOLD) != 0);
-  cairo_scaled_font_destroy(scaledFont);
+      new gfxFT2Font(unscaledFont, std::move(face), this, aStyle, loadFlags);
   return font;
 }
 
@@ -699,8 +648,8 @@ class FontNameCache {
     }
 
     uint32_t size;
-    UniquePtr<char[]> buf;
-    if (NS_FAILED(mCache->GetBuffer(CACHE_KEY, &buf, &size))) {
+    const char* cur;
+    if (NS_FAILED(mCache->GetBuffer(CACHE_KEY, &cur, &size))) {
       LOG(("no cache of " CACHE_KEY));
       return;
     }
@@ -709,8 +658,6 @@ class FontNameCache {
 
     mMap.Clear();
     mWriteNeeded = false;
-
-    const char* cur = buf.get();
 
     while (const char* fileEnd = strchr(cur, kFileSep)) {
       // The cached record for one file is at [cur, fileEnd].
@@ -1117,7 +1064,7 @@ void gfxFT2FontList::FindFontsInOmnijar(FontNameCache* aCache) {
 
   mozilla::scache::StartupCache* cache =
       mozilla::scache::StartupCache::GetSingleton();
-  UniquePtr<char[]> cachedModifiedTimeBuf;
+  const char* cachedModifiedTimeBuf;
   uint32_t longSize;
   if (cache &&
       NS_SUCCEEDED(cache->GetBuffer(JAR_LAST_MODIFED_TIME,
@@ -1125,7 +1072,7 @@ void gfxFT2FontList::FindFontsInOmnijar(FontNameCache* aCache) {
       longSize == sizeof(int64_t)) {
     nsCOMPtr<nsIFile> jarFile = Omnijar::GetPath(Omnijar::Type::GRE);
     jarFile->GetLastModifiedTime(&mJarModifiedTime);
-    if (mJarModifiedTime > *(int64_t*)cachedModifiedTimeBuf.get()) {
+    if (mJarModifiedTime > LittleEndian::readInt64(cachedModifiedTimeBuf)) {
       jarChanged = true;
     }
   }
@@ -1384,7 +1331,7 @@ void gfxFT2FontList::WriteCache() {
   if (cache && mJarModifiedTime > 0) {
     const size_t bufSize = sizeof(mJarModifiedTime);
     auto buf = MakeUnique<char[]>(bufSize);
-    memcpy(buf.get(), &mJarModifiedTime, bufSize);
+    LittleEndian::writeInt64(buf.get(), mJarModifiedTime);
 
     LOG(("WriteCache: putting Jar, length %zu", bufSize));
     cache->PutBuffer(JAR_LAST_MODIFED_TIME, std::move(buf), bufSize);

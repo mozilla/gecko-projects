@@ -276,6 +276,7 @@ class nsWindow final : public nsBaseWidget {
   nsIFrame* GetFrame();
   bool IsDestroyed() { return mIsDestroyed; }
   bool IsWaylandPopup();
+  bool IsPIPWindow() { return mIsPIPWindow; };
 
   void DispatchDragEvent(mozilla::EventMessage aMsg,
                          const LayoutDeviceIntPoint& aRefPoint, guint aTime);
@@ -482,7 +483,6 @@ class nsWindow final : public nsBaseWidget {
   GtkWidget* mShell;
   MozContainer* mContainer;
   GdkWindow* mGdkWindow;
-  GtkWindow* mToplevelParentWindow;
   bool mWindowShouldStartDragging = false;
   PlatformCompositorWidgetDelegate* mCompositorWidgetDelegate;
 
@@ -523,6 +523,8 @@ class nsWindow final : public nsBaseWidget {
   bool mTitlebarBackdropState;
   // Draggable titlebar region maintained by UpdateWindowDraggingRegion
   LayoutDeviceIntRegion mDraggableRegion;
+  // It's PictureInPicture window.
+  bool mIsPIPWindow;
 
 #ifdef ACCESSIBILITY
   RefPtr<mozilla::a11y::Accessible> mRootAccessible;
@@ -618,10 +620,12 @@ class nsWindow final : public nsBaseWidget {
 
   void SetPopupWindowDecoration(bool aShowOnTaskbar);
 
+  bool IsMainMenuWindow();
   GtkWidget* ConfigureWaylandPopupWindows();
   void HideWaylandWindow();
   void HideWaylandTooltips();
   void HideWaylandPopupAndAllChildren();
+  void CleanupWaylandPopups();
 
   /**
    * |mIMContext| takes all IME related stuff.

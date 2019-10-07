@@ -888,13 +888,6 @@ struct JSContext : public JS::RootingContext,
   // object.
   js::FutexThread fx;
 
-  // Buffer for OSR from baseline to Ion. To avoid holding on to this for
-  // too long, it's also freed in EnterBaseline (after returning from JIT code).
-  js::ContextData<uint8_t*> osrTempData_;
-
-  uint8_t* allocateOsrTempData(size_t size);
-  void freeOsrTempData();
-
   // In certain cases, we want to optimize certain opcodes to typed
   // instructions, to avoid carrying an extra register to feed into an unbox.
   // Unfortunately, that's not always possible. For example, a GetPropertyCacheT
@@ -1049,8 +1042,7 @@ struct MOZ_RAII AutoResolving {
  * Create and destroy functions for JSContext, which is manually allocated
  * and exclusively owned.
  */
-extern JSContext* NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes,
-                             JSRuntime* parentRuntime);
+extern JSContext* NewContext(uint32_t maxBytes, JSRuntime* parentRuntime);
 
 extern void DestroyContext(JSContext* cx);
 

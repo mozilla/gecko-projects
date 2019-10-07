@@ -87,6 +87,19 @@ bool wasm::HasGcSupport(JSContext* cx) {
 #endif
 }
 
+bool wasm::HasMultiValueSupport(JSContext* cx) {
+#ifdef ENABLE_WASM_CRANELIFT
+  if (cx->options().wasmCranelift()) {
+    return false;
+  }
+#endif
+#ifdef ENABLE_WASM_MULTI_VALUE
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool wasm::HasCompilerSupport(JSContext* cx) {
 #if !MOZ_LITTLE_ENDIAN || defined(JS_CODEGEN_NONE)
   return false;
@@ -138,8 +151,15 @@ static bool HasAvailableCompilerTier(JSContext* cx) {
 }
 
 bool wasm::HasSupport(JSContext* cx) {
-  return cx->options().wasm() && HasCompilerSupport(cx) &&
-         HasAvailableCompilerTier(cx);
+  // If the general wasm pref is on, it's on for everything.
+  bool prefEnabled = cx->options().wasm();
+  // If the general pref is off, check trusted principals.
+  if (MOZ_UNLIKELY(!prefEnabled)) {
+    prefEnabled = cx->options().wasmForTrustedPrinciples() && cx->realm() &&
+                  cx->realm()->principals() &&
+                  cx->realm()->principals()->isSystemOrAddonPrincipal();
+  }
+  return prefEnabled && HasCompilerSupport(cx) && HasAvailableCompilerTier(cx);
 }
 
 bool wasm::HasStreamingSupport(JSContext* cx) {
@@ -802,11 +822,18 @@ static JSString* FuncTypeToString(JSContext* cx, const FuncType& funcType) {
     return nullptr;
   }
 
-  if (funcType.ret() != ExprType::Void) {
-    const char* retStr = ToCString(funcType.ret());
-    if (!buf.append(retStr, strlen(retStr))) {
+  first = true;
+  for (ValType result : funcType.results()) {
+    if (!first && !buf.append(", ", strlen(", "))) {
       return nullptr;
     }
+
+    const char* resultStr = ToCString(result);
+    if (!buf.append(resultStr, strlen(resultStr))) {
+      return nullptr;
+    }
+
+    first = false;
   }
 
   if (!buf.append(')')) {
@@ -2072,11 +2099,11 @@ bool WasmTableObject::construct(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   TableKind tableKind;
-  if (StringEqualsAscii(elementLinearStr, "anyfunc") ||
-      StringEqualsAscii(elementLinearStr, "funcref")) {
+  if (StringEqualsLiteral(elementLinearStr, "anyfunc") ||
+      StringEqualsLiteral(elementLinearStr, "funcref")) {
     tableKind = TableKind::FuncRef;
 #ifdef ENABLE_WASM_REFTYPES
-  } else if (StringEqualsAscii(elementLinearStr, "anyref")) {
+  } else if (StringEqualsLiteral(elementLinearStr, "anyref")) {
     if (!HasReftypesSupport(cx)) {
       JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
                                JSMSG_WASM_BAD_ELEMENT);
@@ -2502,22 +2529,22 @@ bool WasmGlobalObject::construct(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   ValType globalType;
-  if (StringEqualsAscii(typeLinearStr, "i32")) {
+  if (StringEqualsLiteral(typeLinearStr, "i32")) {
     globalType = ValType::I32;
-  } else if (args.length() == 1 && StringEqualsAscii(typeLinearStr, "i64")) {
+  } else if (args.length() == 1 && StringEqualsLiteral(typeLinearStr, "i64")) {
     // For the time being, i64 is allowed only if there is not an
     // initializing value.
     globalType = ValType::I64;
-  } else if (StringEqualsAscii(typeLinearStr, "f32")) {
+  } else if (StringEqualsLiteral(typeLinearStr, "f32")) {
     globalType = ValType::F32;
-  } else if (StringEqualsAscii(typeLinearStr, "f64")) {
+  } else if (StringEqualsLiteral(typeLinearStr, "f64")) {
     globalType = ValType::F64;
 #ifdef ENABLE_WASM_REFTYPES
   } else if (HasReftypesSupport(cx) &&
-             StringEqualsAscii(typeLinearStr, "funcref")) {
+             StringEqualsLiteral(typeLinearStr, "funcref")) {
     globalType = ValType::FuncRef;
   } else if (HasReftypesSupport(cx) &&
-             StringEqualsAscii(typeLinearStr, "anyref")) {
+             StringEqualsLiteral(typeLinearStr, "anyref")) {
     globalType = ValType::AnyRef;
 #endif
   } else {

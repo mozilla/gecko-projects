@@ -11,7 +11,8 @@
  * and create derivative works of this document.
  */
 
-[HTMLConstructor]
+[HTMLConstructor,
+ Exposed=Window]
 interface HTMLVideoElement : HTMLMediaElement {
   [CEReactions, SetterThrows]
            attribute unsigned long width;
@@ -69,12 +70,6 @@ partial interface HTMLVideoElement {
   // <video> element (see cloneElementVisually).
   [Func="IsChromeOrXBLOrUAWidget"]
     readonly attribute boolean isCloningElementVisually;
-
-  // Fires the privileged MozTogglePictureInPicture event to enter
-  // Picture-in-Picture. Call this when triggering Picture-in-Picture
-  // from the video controls UAWidget.
-  [Throws, Func="IsChromeOrXBLOrUAWidget"]
-    void togglePictureInPicture();
 };
 
 // https://dvcs.w3.org/hg/html-media/raw-file/default/media-source/media-source.html#idl-def-HTMLVideoElement

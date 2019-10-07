@@ -45,6 +45,11 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(this, "l10n", "devtools/client/responsive/utils/l10n");
 loader.lazyRequireGetter(this, "asyncStorage", "devtools/shared/async-storage");
+loader.lazyRequireGetter(
+  this,
+  "saveScreenshot",
+  "devtools/shared/screenshot/save"
+);
 
 const TOOL_URL = "chrome://devtools/content/responsive/index.xhtml";
 
@@ -229,10 +234,13 @@ class ResponsiveUI {
     rdmFrame.style.height = rdmFrame.style.minHeight = "30px";
     rdmFrame.style.borderStyle = "none";
 
+    this.browserContainerEl = gBrowser.getBrowserContainer(
+      gBrowser.getBrowserForTab(this.tab)
+    );
+    this.browserContainerEl.classList.add("responsive-mode");
+
     // Prepend the RDM iframe inside of the current tab's browser container.
-    gBrowser
-      .getBrowserContainer(gBrowser.getBrowserForTab(this.tab))
-      .prepend(rdmFrame);
+    this.browserContainerEl.prepend(rdmFrame);
 
     // Wait for the frame script to be loaded.
     message.wait(rdmFrame.contentWindow, "script-init").then(async () => {
@@ -294,6 +302,8 @@ class ResponsiveUI {
     } else {
       this.rdmFrame.contentWindow.removeEventListener("message", this);
       this.rdmFrame.remove();
+
+      this.browserContainerEl.classList.remove("responsive-mode");
     }
 
     if (!this.isBrowserUIEnabled && !isTabContentDestroying) {
@@ -319,6 +329,7 @@ class ResponsiveUI {
 
     // Destroy local state
     const swap = this.swap;
+    this.browserContainerEl = null;
     this.browserWindow = null;
     this.tab = null;
     this.inited = null;
@@ -431,6 +442,8 @@ class ResponsiveUI {
       case "viewport-resize":
         this.onResizeViewport(event);
         break;
+      case "screenshot":
+        this.onScreenshot();
     }
   }
 
@@ -531,6 +544,21 @@ class ResponsiveUI {
   async onRotateViewport(event) {
     const { orientationType: type, angle, isViewportRotated } = event.data;
     await this.updateScreenOrientation(type, angle, isViewportRotated);
+  }
+
+  async onScreenshot() {
+    const targetFront = await this.client.mainRoot.getTab();
+    const captureScreenshotSupported = await targetFront.actorHasMethod(
+      "emulation",
+      "captureScreenshot"
+    );
+
+    if (captureScreenshotSupported) {
+      const data = await this.emulationFront.captureScreenshot();
+      await saveScreenshot(this.browserWindow, {}, data);
+
+      message.post(this.rdmFrame.contentWindow, "screenshot-captured");
+    }
   }
 
   /**

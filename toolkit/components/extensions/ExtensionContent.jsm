@@ -399,19 +399,24 @@ class Script {
 
         for (let url of this.css) {
           this.cssCache.deleteDocument(url, window.document);
-          runSafeSyncWithoutClone(
-            winUtils.removeSheetUsingURIString,
-            url,
-            type
-          );
+
+          if (!window.closed) {
+            runSafeSyncWithoutClone(
+              winUtils.removeSheetUsingURIString,
+              url,
+              type
+            );
+          }
         }
 
         const { cssCodeHash } = this;
 
         if (cssCodeHash && this.cssCodeCache.has(cssCodeHash)) {
-          this.cssCodeCache.get(cssCodeHash).then(({ uri }) => {
-            runSafeSyncWithoutClone(winUtils.removeSheet, uri, type);
-          });
+          if (!window.closed) {
+            this.cssCodeCache.get(cssCodeHash).then(({ uri }) => {
+              runSafeSyncWithoutClone(winUtils.removeSheet, uri, type);
+            });
+          }
           this.cssCodeCache.deleteDocument(cssCodeHash, window.document);
         }
       }
@@ -544,6 +549,9 @@ class Script {
       scripts = await scripts;
     }
 
+    // Make sure we've injected any related CSS before we run content scripts.
+    await cssPromise;
+
     let result;
 
     const { extension } = context;
@@ -575,7 +583,6 @@ class Script {
       );
     }
 
-    await cssPromise;
     return result;
   }
 

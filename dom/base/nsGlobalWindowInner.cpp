@@ -46,6 +46,7 @@
 #  include "mozilla/dom/WindowOrientationObserver.h"
 #endif
 #include "nsDOMOfflineResourceList.h"
+#include "nsICookieService.h"
 #include "nsError.h"
 #include "nsISizeOfEventTarget.h"
 #include "nsDOMJSUtils.h"
@@ -2962,8 +2963,7 @@ bool nsGlobalWindowInner::IsPrivilegedChromeWindow(JSContext* aCx,
 /* static */
 bool nsGlobalWindowInner::OfflineCacheAllowedForContext(JSContext* aCx,
                                                         JSObject* aObj) {
-  return IsSecureContextOrObjectIsFromSecureContext(aCx, aObj) ||
-         Preferences::GetBool("browser.cache.offline.insecure.enable");
+  return IsSecureContextOrObjectIsFromSecureContext(aCx, aObj);
 }
 
 /* static */
@@ -5605,7 +5605,10 @@ nsIPrincipal* nsGlobalWindowInner::GetTopLevelPrincipal() {
     return nullptr;
   }
 
-  if (topLevelOuterWindow == outerWindow) {
+  bool stopAtOurLevel = mDoc && mDoc->CookieSettings()->GetCookieBehavior() ==
+                                    nsICookieService::BEHAVIOR_REJECT_TRACKER;
+
+  if (stopAtOurLevel && topLevelOuterWindow == outerWindow) {
     return nullptr;
   }
 

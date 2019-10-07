@@ -564,6 +564,7 @@ nsresult LoadInfoToLoadInfoArgs(nsILoadInfo* aLoadInfo,
       topLevelStorageAreaPrincipalInfo, optionalResultPrincipalURI,
       aLoadInfo->GetSecurityFlags(), aLoadInfo->InternalContentPolicyType(),
       static_cast<uint32_t>(aLoadInfo->GetTainting()),
+      aLoadInfo->GetBlockAllMixedContent(),
       aLoadInfo->GetUpgradeInsecureRequests(),
       aLoadInfo->GetBrowserUpgradeInsecureRequests(),
       aLoadInfo->GetBrowserWouldUpgradeInsecureRequests(),
@@ -750,6 +751,7 @@ nsresult LoadInfoArgsToLoadInfo(
       controller, loadInfoArgs.securityFlags(),
       loadInfoArgs.contentPolicyType(),
       static_cast<LoadTainting>(loadInfoArgs.tainting()),
+      loadInfoArgs.blockAllMixedContent(),
       loadInfoArgs.upgradeInsecureRequests(),
       loadInfoArgs.browserUpgradeInsecureRequests(),
       loadInfoArgs.browserWouldUpgradeInsecureRequests(),
@@ -883,7 +885,7 @@ void LoadInfoToChildLoadInfoForwarder(
     nsILoadInfo* aLoadInfo, ChildLoadInfoForwarderArgs* aForwarderArgsOut) {
   if (!aLoadInfo) {
     *aForwarderArgsOut =
-        ChildLoadInfoForwarderArgs(Nothing(), Nothing(), Nothing());
+        ChildLoadInfoForwarderArgs(Nothing(), Nothing(), Nothing(), 0);
     return;
   }
 
@@ -906,7 +908,8 @@ void LoadInfoToChildLoadInfoForwarder(
   }
 
   *aForwarderArgsOut =
-      ChildLoadInfoForwarderArgs(ipcReserved, ipcInitial, ipcController);
+      ChildLoadInfoForwarderArgs(ipcReserved, ipcInitial, ipcController,
+                                 aLoadInfo->GetRequestBlockingReason());
 }
 
 nsresult MergeChildLoadInfoForwarder(
@@ -956,6 +959,13 @@ nsresult MergeChildLoadInfoForwarder(
   auto& controller = aForwarderArgs.controller();
   if (controller.isSome()) {
     aLoadInfo->SetController(ServiceWorkerDescriptor(controller.ref()));
+  }
+
+  uint32_t blockingReason = aForwarderArgs.requestBlockingReason();
+  if (blockingReason) {
+    // We only want to override when non-null, so that any earlier set non-null
+    // value is not reverted to 0.
+    aLoadInfo->SetRequestBlockingReason(blockingReason);
   }
 
   return NS_OK;

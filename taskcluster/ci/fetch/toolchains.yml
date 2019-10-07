@@ -114,6 +114,13 @@ gmp-6.1.0:
         strip-components: 1
         add-prefix: gmp-source/
 
+iris-2.0:
+    description: Iris_Firefox source code
+    fetch:
+        type: git
+        repo: https://github.com/mozilla/iris_firefox
+        revision: db45d30941a6f0a81ba369b89cf66ebd9a6ba393
+
 isl-0.15:
     description: ISL 0.15 source code
     fetch:
@@ -376,8 +383,8 @@ android-rs-glue:
     description: android-rs-glue source code
     fetch:
         type: git
-        repo: https://github.com/staktrace/android-rs-glue
-        revision: 486491e81819c3346d364a93fc1f3c0206d3ece0
+        repo: https://github.com/rust-windowing/android-rs-glue
+        revision: e3ac6edea5814e1faca0c31ea8fac6877cb929ea
 
 clang-4.0:
     description: clang 4.0 source code

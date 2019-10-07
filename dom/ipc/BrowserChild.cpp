@@ -84,8 +84,6 @@
 #include "DocumentInlines.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDOMChromeWindow.h"
-#include "nsIDOMWindow.h"
-#include "nsIDOMWindowUtils.h"
 #include "nsFocusManager.h"
 #include "EventStateManager.h"
 #include "nsIDocShell.h"
@@ -1219,7 +1217,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvShow(const ScreenIntSize& aSize,
     recordreplay::child::CreateCheckpoint();
   }
 
-  UpdateVisibility(false);
+  UpdateVisibility();
 
   return IPC_OK();
 }
@@ -2439,15 +2437,12 @@ void BrowserChild::RemovePendingDocShellBlocker() {
   }
   if (!mPendingDocShellBlockers && mPendingRenderLayersReceivedMessage) {
     mPendingRenderLayersReceivedMessage = false;
-    RecvRenderLayers(mPendingRenderLayers, false /* aForceRepaint */,
-                     mPendingLayersObserverEpoch);
+    RecvRenderLayers(mPendingRenderLayers, mPendingLayersObserverEpoch);
   }
 }
 
 void BrowserChild::InternalSetDocShellIsActive(bool aIsActive) {
-  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
-
-  if (docShell) {
+  if (nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation())) {
     docShell->SetIsActive(aIsActive);
   }
 }
@@ -2468,8 +2463,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvSetDocShellIsActive(
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvRenderLayers(
-    const bool& aEnabled, const bool& aForceRepaint,
-    const layers::LayersObserverEpoch& aEpoch) {
+    const bool& aEnabled, const layers::LayersObserverEpoch& aEpoch) {
   if (mPendingDocShellBlockers > 0) {
     mPendingRenderLayersReceivedMessage = true;
     mPendingRenderLayers = aEnabled;
@@ -2514,21 +2508,60 @@ mozilla::ipc::IPCResult BrowserChild::RecvRenderLayers(
 
   mRenderLayers = aEnabled;
 
-  if (aEnabled) {
-    if (!aForceRepaint && IsVisible()) {
-      // This request is a no-op. In this case, we still want a
-      // MozLayerTreeReady notification to fire in the parent (so that it knows
-      // that the child has updated its epoch). PaintWhileInterruptingJSNoOp
-      // does that.
-      if (IPCOpen()) {
-        Unused << SendPaintWhileInterruptingJSNoOp(mLayersObserverEpoch);
-        return IPC_OK();
-      }
+  if (aEnabled && IsVisible()) {
+    // This request is a no-op.
+    // In this case, we still want a MozLayerTreeReady notification to fire
+    // in the parent (so that it knows that the child has updated its epoch).
+    // PaintWhileInterruptingJSNoOp does that.
+    if (IPCOpen()) {
+      Unused << SendPaintWhileInterruptingJSNoOp(mLayersObserverEpoch);
     }
+    return IPC_OK();
   }
 
-  UpdateVisibility(true);
+  // FIXME(emilio): Probably / maybe this shouldn't be needed? See the comment
+  // in MakeVisible(), having the two separate states is not great.
+  UpdateVisibility();
 
+  if (!aEnabled) {
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
+  if (!docShell) {
+    return IPC_OK();
+  }
+
+  // We don't use BrowserChildBase::GetPresShell() here because that would
+  // create a content viewer if one doesn't exist yet. Creating a content
+  // viewer can cause JS to run, which we want to avoid.
+  // nsIDocShell::GetPresShell returns null if no content viewer exists yet.
+  RefPtr<PresShell> presShell = docShell->GetPresShell();
+  if (!presShell) {
+    return IPC_OK();
+  }
+
+  if (nsIFrame* root = presShell->GetRootFrame()) {
+    FrameLayerBuilder::InvalidateAllLayersForFrame(
+        nsLayoutUtils::GetDisplayRootFrame(root));
+    root->SchedulePaint();
+  }
+
+  Telemetry::AutoTimer<Telemetry::TABCHILD_PAINT_TIME> timer;
+  // If we need to repaint, let's do that right away. No sense waiting until
+  // we get back to the event loop again. We suppress the display port so
+  // that we only paint what's visible. This ensures that the tab we're
+  // switching to paints as quickly as possible.
+  presShell->SuppressDisplayport(true);
+  if (nsContentUtils::IsSafeToRunScript()) {
+    WebWidget()->PaintNowIfNeeded();
+  } else {
+    RefPtr<nsViewManager> vm = presShell->GetViewManager();
+    if (nsView* view = vm->GetRootView()) {
+      presShell->Paint(view, view->GetBounds(), PaintFlags::PaintLayers);
+    }
+  }
+  presShell->SuppressDisplayport(false);
   return IPC_OK();
 }
 
@@ -2753,7 +2786,7 @@ void BrowserChild::NotifyPainted() {
 
 IPCResult BrowserChild::RecvUpdateEffects(const EffectsInfo& aEffects) {
   mEffectsInfo = aEffects;
-  UpdateVisibility(false);
+  UpdateVisibility();
   return IPC_OK();
 }
 
@@ -2761,20 +2794,20 @@ bool BrowserChild::IsVisible() {
   return mPuppetWidget && mPuppetWidget->IsVisible();
 }
 
-void BrowserChild::UpdateVisibility(bool aForceRepaint) {
+void BrowserChild::UpdateVisibility() {
   bool shouldBeVisible = mIsTopLevel ? mRenderLayers : mEffectsInfo.IsVisible();
   bool isVisible = IsVisible();
 
   if (shouldBeVisible != isVisible) {
     if (shouldBeVisible) {
-      MakeVisible(aForceRepaint);
+      MakeVisible();
     } else {
       MakeHidden();
     }
   }
 }
 
-void BrowserChild::MakeVisible(bool aForceRepaint) {
+void BrowserChild::MakeVisible() {
   if (IsVisible()) {
     return;
   }
@@ -2793,44 +2826,26 @@ void BrowserChild::MakeVisible(bool aForceRepaint) {
     return;
   }
 
-  // We don't use BrowserChildBase::GetPresShell() here because that would
-  // create a content viewer if one doesn't exist yet. Creating a content
-  // viewer can cause JS to run, which we want to avoid.
-  // nsIDocShell::GetPresShell returns null if no content viewer exists yet.
-  if (RefPtr<PresShell> presShell = docShell->GetPresShell()) {
-    presShell->SetIsActive(true);
-  }
-
-  if (!aForceRepaint) {
-    return;
-  }
-
-  // We don't use BrowserChildBase::GetPresShell() here because that would
-  // create a content viewer if one doesn't exist yet. Creating a content
-  // viewer can cause JS to run, which we want to avoid.
-  // nsIDocShell::GetPresShell returns null if no content viewer exists yet.
-  if (RefPtr<PresShell> presShell = docShell->GetPresShell()) {
-    if (nsIFrame* root = presShell->GetRootFrame()) {
-      FrameLayerBuilder::InvalidateAllLayersForFrame(
-          nsLayoutUtils::GetDisplayRootFrame(root));
-      root->SchedulePaint();
+  // For top level stuff, the browser / tab-switcher is responsible of fixing
+  // the docshell state up explicitly via SetDocShellIsActive.
+  //
+  // We need it not to be observable, as this used via RecvRenderLayers and co.,
+  // for stuff like async tab warming.
+  //
+  // We don't want to go through the docshell because we don't want to change
+  // the visibility state of the document, which has side effects like firing
+  // events to content and unblocking media playback.
+  //
+  // FIXME(emilio): This feels a bit sketchy. Ideally we'd be able to just not
+  // update visibility of stuff in the tab warming case (we just want to paint
+  // once so that stuff is there already, really...), and use the docshell here
+  // all the time, but that makes some of the devtools tests fail (??).
+  if (mIsTopLevel) {
+    if (RefPtr<PresShell> presShell = docShell->GetPresShell()) {
+      presShell->SetIsActive(true);
     }
-
-    Telemetry::AutoTimer<Telemetry::TABCHILD_PAINT_TIME> timer;
-    // If we need to repaint, let's do that right away. No sense waiting until
-    // we get back to the event loop again. We suppress the display port so
-    // that we only paint what's visible. This ensures that the tab we're
-    // switching to paints as quickly as possible.
-    presShell->SuppressDisplayport(true);
-    if (nsContentUtils::IsSafeToRunScript()) {
-      WebWidget()->PaintNowIfNeeded();
-    } else {
-      RefPtr<nsViewManager> vm = presShell->GetViewManager();
-      if (nsView* view = vm->GetRootView()) {
-        presShell->Paint(view, view->GetBounds(), PaintFlags::PaintLayers);
-      }
-    }
-    presShell->SuppressDisplayport(false);
+  } else {
+    docShell->SetIsActive(true);
   }
 }
 
@@ -2854,8 +2869,7 @@ void BrowserChild::MakeHidden() {
     ClearCachedResources();
   }
 
-  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
-  if (docShell) {
+  if (nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation())) {
     // Hide all plugins in this tab. We don't use
     // BrowserChildBase::GetPresShell() here because that would create a content
     // viewer if one doesn't exist yet. Creating a content viewer can cause JS
@@ -2869,8 +2883,8 @@ void BrowserChild::MakeHidden() {
                                                       nullptr);
         rootPresContext->ApplyPluginGeometryUpdates();
       }
-      presShell->SetIsActive(false);
     }
+    docShell->SetIsActive(false);
   }
 
   if (mPuppetWidget) {
@@ -3364,7 +3378,7 @@ ScreenIntRect BrowserChild::GetOuterRect() {
 }
 
 void BrowserChild::PaintWhileInterruptingJS(
-    const layers::LayersObserverEpoch& aEpoch, bool aForceRepaint) {
+    const layers::LayersObserverEpoch& aEpoch) {
   if (!IPCOpen() || !mPuppetWidget || !mPuppetWidget->HasLayerManager()) {
     // Don't bother doing anything now. Better to wait until we receive the
     // message on the PContent channel.
@@ -3373,7 +3387,7 @@ void BrowserChild::PaintWhileInterruptingJS(
 
   MOZ_DIAGNOSTIC_ASSERT(nsContentUtils::IsSafeToRunScript());
   nsAutoScriptBlocker scriptBlocker;
-  RecvRenderLayers(true /* aEnabled */, aForceRepaint, aEpoch);
+  RecvRenderLayers(true /* aEnabled */, aEpoch);
 }
 
 nsresult BrowserChild::CanCancelContentJS(

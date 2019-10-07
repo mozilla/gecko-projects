@@ -150,9 +150,7 @@
 }
 }
 
-html|html,
-xul|page,
-xul|window {
+:root {
   font: message-box;
   -moz-appearance: none;
   background-color: var(--in-content-page-background);
@@ -685,6 +683,7 @@ xul|*.radio-label-box {
   margin: 70px 0 0;
   border-width: 0;
   width: 240px;
+  box-shadow: none;
 }
 
 *|*#categories > *|*.category {
@@ -837,6 +836,12 @@ xul|treechildren::-moz-tree-row(hover) {
 
 xul|treechildren::-moz-tree-row(selected) {
   background-color: var(--in-content-item-selected);
+}
+
+xul|panel[type="autocomplete-richlistbox"] {
+  background-color: var(--in-content-box-background);
+  border: 1px solid var(--in-content-box-border-color);
+  color: var(--in-content-text-color);
 }
 
 /* Trees */

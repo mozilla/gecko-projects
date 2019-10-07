@@ -139,6 +139,14 @@ let HomePage = {
   },
 
   /**
+   * @returns {string}
+   *   Returns the original application homepage URL (not from prefs).
+   */
+  getOriginalDefault() {
+    return kDefaultHomePage;
+  },
+
+  /**
    * @returns {boolean}
    *   Returns true if the homepage has been changed.
    */
@@ -229,7 +237,7 @@ let HomePage = {
     await this.init();
 
     const lowerURL = url.toLowerCase();
-    return this._ignoreList.some(code => lowerURL.includes(code));
+    return this._ignoreList.some(code => lowerURL.includes(code.toLowerCase()));
   },
 
   /**

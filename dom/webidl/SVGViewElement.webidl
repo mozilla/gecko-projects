@@ -10,9 +10,10 @@
  * liability, trademark and document use rules apply.
  */
 
+[Exposed=Window]
 interface SVGViewElement : SVGElement {
 };
 
 SVGViewElement includes SVGFitToViewBox;
-SVGViewElement includes SVGZoomAndPanValues;
+SVGViewElement includes SVGZoomAndPan;
 

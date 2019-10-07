@@ -4,12 +4,16 @@
 
 // @flow
 import { sortBy } from "lodash";
-import { getOriginalFrameScope, getGeneratedFrameScope } from "../../selectors";
+import {
+  getOriginalFrameScope,
+  getGeneratedFrameScope,
+  getInlinePreviews,
+} from "../../selectors";
 import { features } from "../../utils/prefs";
 import { validateThreadContext } from "../../utils/context";
 
 import type { OriginalScope } from "../../utils/pause/mapScopes";
-import type { ThreadContext, Frame, Scope, Previews } from "../../types";
+import type { ThreadContext, Frame, Scope, Preview } from "../../types";
 import type { ThunkArgs } from "../types";
 
 // We need to display all variables in the current functional scope so
@@ -32,6 +36,12 @@ export function generateInlinePreview(cx: ThreadContext, frame: ?Frame) {
     }
 
     const { thread } = cx;
+
+    // Avoid regenerating inline previews when we already have preview data
+    if (getInlinePreviews(getState(), thread, frame.id)) {
+      return;
+    }
+
     const originalFrameScopes = getOriginalFrameScope(
       getState(),
       thread,
@@ -59,7 +69,7 @@ export function generateInlinePreview(cx: ThreadContext, frame: ?Frame) {
       return;
     }
 
-    const previews: Previews = {};
+    const allPreviews = [];
     const pausedOnLine: number = frame.location.line;
     const levels: number = getLocalScopeLevels(originalAstScopes);
 
@@ -80,15 +90,14 @@ export function generateInlinePreview(cx: ThreadContext, frame: ?Frame) {
         // function calls on other data types like someArr.forEach etc..
         let properties = null;
         if (bindings[name].value.class === "Object") {
-          const root = {
+          properties = await client.loadObjectProperties({
             name,
             path: name,
             contents: { value: bindings[name].value },
-          };
-          properties = await client.loadObjectProperties(root);
+          });
         }
 
-        const preview: Previews = getBindingValues(
+        const previewsFromBindings: Array<Preview> = getBindingValues(
           originalAstScopes,
           pausedOnLine,
           name,
@@ -97,17 +106,23 @@ export function generateInlinePreview(cx: ThreadContext, frame: ?Frame) {
           properties
         );
 
-        Object.keys(preview).forEach(line => {
-          previews[line] = (previews[line] || []).concat(preview[line]);
-        });
+        allPreviews.push(...previewsFromBindings);
       });
       await Promise.all(previewBindings);
 
       scopes = scopes.parent;
     }
 
-    Object.keys(previews).forEach(line => {
-      previews[line] = sortBy(previews[line], ["column"]);
+    const previews = {};
+    const sortedPreviews = sortBy(allPreviews, ["line", "column"]);
+
+    sortedPreviews.forEach(preview => {
+      const { line } = preview;
+      if (!previews[line]) {
+        previews[line] = [preview];
+      } else {
+        previews[line].push(preview);
+      }
     });
 
     return dispatch({
@@ -126,8 +141,8 @@ function getBindingValues(
   value: any,
   curLevel: number,
   properties: Array<Object> | null
-): Previews {
-  const previews: Previews = {};
+): Array<Preview> {
+  const previews = [];
 
   const binding =
     originalAstScopes[curLevel] && originalAstScopes[curLevel].bindings[name];
@@ -144,16 +159,12 @@ function getBindingValues(
   for (let i = binding.refs.length - 1; i >= 0; i--) {
     const ref = binding.refs[i];
     // Subtracting 1 from line as codemirror lines are 0 indexed
-    let line = ref.start.line - 1;
+    const line = ref.start.line - 1;
     const column: number = ref.start.column;
     // We don't want to render inline preview below the paused line
     if (line >= pausedOnLine - 1) {
       continue;
     }
-
-    // Converting to string as all iterators on object keys ( eg: Object.keys,
-    // for..in ) will return string
-    line = line.toString();
 
     const { displayName, displayValue } = getExpressionNameAndValue(
       name,
@@ -167,17 +178,13 @@ function getBindingValues(
     if (identifiers.has(displayName)) {
       continue;
     }
-
-    if (!previews[line]) {
-      previews[line] = [];
-    }
-
     identifiers.add(displayName);
 
-    previews[line].push({
+    previews.push({
+      line,
+      column,
       name: displayName,
       value: displayValue,
-      column,
     });
   }
   return previews;
@@ -206,7 +213,11 @@ function getExpressionNameAndValue(
         );
         displayValue = property && property.contents.value;
         displayName += `.${meta.property}`;
-      } else if (displayValue && displayValue.preview) {
+      } else if (
+        displayValue &&
+        displayValue.preview &&
+        displayValue.preview.ownProperties
+      ) {
         const { ownProperties } = displayValue.preview;
         Object.keys(ownProperties).forEach(prop => {
           if (prop === meta.property) {

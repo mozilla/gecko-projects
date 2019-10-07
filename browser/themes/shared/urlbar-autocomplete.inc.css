@@ -8,8 +8,8 @@
 %define urlbarViewPadding 4px
 %define urlbarViewIconMarginEnd 8px
 %define urlbarViewFaviconOffset (@urlbarViewPadding@ + 16px /* type icon width */ + @urlbarViewIconMarginEnd@)
-%define urlbarViewInlineStartPadding (@urlbarBreakoutHorizontalExtend@ - 16px /* type icon width */ - @urlbarViewIconMarginEnd@ - 2px /* border */)
-%define urlbarViewHorizontalMargin 8px
+%define urlbarViewInlineStartPadding (@urlbarBreakoutHorizontalExtend@ - 16px /* type icon width */ - @urlbarViewIconMarginEnd@)
+%define urlbarViewHorizontalMargin 5px
 
 :root {
   --autocomplete-popup-background: var(--arrowpanel-background);
@@ -49,6 +49,8 @@
 .urlbarView.megabar {
   margin-inline: @urlbarViewHorizontalMargin@;
   width: calc(100% - 2 * @urlbarViewHorizontalMargin@);
+  /* Match urlbar-background's border. */
+  border-inline: 1px solid transparent;
 }
 
 .urlbarView:not([hidden]) {
@@ -68,6 +70,7 @@
   background: var(--autocomplete-popup-background);
   color: var(--autocomplete-popup-color);
   border-block: 1px solid var(--chrome-content-separator-color);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .2);
 }
 
 #urlbar-contextual-tip {

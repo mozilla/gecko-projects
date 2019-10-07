@@ -237,6 +237,11 @@ XPCOMUtils.defineLazyScriptGetter(
   "ToolbarKeyboardNavigator",
   "chrome://browser/content/browser-toolbarKeyNav.js"
 );
+XPCOMUtils.defineLazyScriptGetter(
+  this,
+  "A11yUtils",
+  "chrome://browser/content/browser-a11yUtils.js"
+);
 
 // lazy service getters
 
@@ -261,6 +266,7 @@ XPCOMUtils.defineLazyServiceGetters(this, {
   ],
   Marionette: ["@mozilla.org/remote/marionette;1", "nsIMarionette"],
   WindowsUIUtils: ["@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils"],
+  BrowserHandler: ["@mozilla.org/browser/clh;1", "nsIBrowserHandler"],
 });
 
 if (AppConstants.MOZ_CRASHREPORTER) {
@@ -695,8 +701,10 @@ function updateFxaToolbarMenu(enable, isInitialUpdate = false) {
     document.getElementById(
       "PanelUI-fxa-menu-monitor-button"
     ).hidden = !gFxaMonitorLoginUrl;
-    document.getElementById("fxa-menu-service-separator").hidden =
-      !gFxaSendLoginUrl && !gFxaMonitorLoginUrl;
+    // If there are no services left, remove the label and sep.
+    let hideSvcs = !gFxaSendLoginUrl && !gFxaMonitorLoginUrl;
+    document.getElementById("fxa-menu-service-separator").hidden = hideSvcs;
+    document.getElementById("fxa-menu-service-label").hidden = hideSvcs;
 
     document.getElementById(
       "fxa-menu-device-name-label"
@@ -2171,6 +2179,15 @@ var gBrowserInit = {
 
     Services.obs.notifyObservers(window, "browser-delayed-startup-finished");
     TelemetryTimestamps.add("delayedStartupFinished");
+
+    if (BrowserHandler.kiosk) {
+      // We don't modify popup windows for kiosk mode
+      if (!gURLBar.readOnly) {
+        // Don't show status tooltips in kiosk mode
+        document.getElementById("statuspanel").hidden = true;
+        window.fullScreen = true;
+      }
+    }
   },
 
   _setInitialFocus() {
@@ -3846,7 +3863,7 @@ function getDefaultHomePage() {
 }
 
 function BrowserFullScreen() {
-  window.fullScreen = !window.fullScreen;
+  window.fullScreen = !window.fullScreen || BrowserHandler.kiosk;
 }
 
 function getWebNavigation() {

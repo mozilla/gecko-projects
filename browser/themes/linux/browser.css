@@ -180,8 +180,10 @@ menuitem.bookmark-item {
 
 %include ../shared/urlbar-searchbar.inc.css
 
-#urlbar:not(:-moz-lwtheme):not([focused="true"]),
-#urlbar:not(:-moz-lwtheme).hidden-focus,
+#urlbar:not(.megabar):not(:-moz-lwtheme):not([focused="true"]),
+#urlbar:not(.megabar):not(:-moz-lwtheme).hidden-focus,
+#urlbar.megabar:not(:-moz-lwtheme):not([focused="true"]) > #urlbar-background,
+#urlbar.megabar:not(:-moz-lwtheme).hidden-focus > #urlbar-background,
 #searchbar:not(:-moz-lwtheme):not(:focus-within) {
   border-color: ThreeDShadow;
 }
@@ -378,13 +380,6 @@ notification[value="translation"] menulist > .menulist-dropmarker {
   list-style-image: url(chrome://browser/skin/tabbrowser/tabDragIndicator.png);
   margin-bottom: -9px;
   z-index: 3;
-}
-
-/* Tab bar scroll arrows */
-
-.tabbrowser-arrowscrollbox > .scrollbutton-up > .toolbarbutton-icon,
-.tabbrowser-arrowscrollbox > .scrollbutton-down > .toolbarbutton-icon {
-  -moz-appearance: none;
 }
 
 /* All tabs menupopup */

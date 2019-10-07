@@ -8,11 +8,11 @@
 #include <vector>
 #include "AudioConduit.h"
 #include "VideoConduit.h"
-#include "MediaStreamGraph.h"
+#include "MediaTrackGraph.h"
 #include "MediaPipeline.h"
 #include "MediaPipelineFilter.h"
 #include "signaling/src/jsep/JsepTrack.h"
-#include "MediaStreamGraphImpl.h"
+#include "MediaTrackGraphImpl.h"
 #include "logging.h"
 #include "MediaEngine.h"
 #include "nsIPrincipal.h"
@@ -618,14 +618,26 @@ static nsresult JsepCodecDescToAudioCodecConfig(
 static nsresult NegotiatedDetailsToAudioCodecConfigs(
     const JsepTrackNegotiatedDetails& aDetails,
     std::vector<UniquePtr<AudioCodecConfig>>* aConfigs) {
+  UniquePtr<AudioCodecConfig> telephoneEvent;
+
   if (aDetails.GetEncodingCount()) {
     for (const auto& codec : aDetails.GetEncoding(0).GetCodecs()) {
       UniquePtr<AudioCodecConfig> config;
       if (NS_FAILED(JsepCodecDescToAudioCodecConfig(*codec, &config))) {
         return NS_ERROR_INVALID_ARG;
       }
-      aConfigs->push_back(std::move(config));
+      if (config->mName == "telephone-event") {
+        telephoneEvent = std::move(config);
+      } else {
+        aConfigs->push_back(std::move(config));
+      }
     }
+  }
+
+  // Put telephone event at the back, because webrtc.org crashes if we don't
+  // If we need to do even more sorting, we should use std::sort.
+  if (telephoneEvent) {
+    aConfigs->push_back(std::move(telephoneEvent));
   }
 
   if (aConfigs->empty()) {

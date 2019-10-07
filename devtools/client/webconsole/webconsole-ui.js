@@ -51,6 +51,7 @@ class WebConsoleUI {
     this.hud = hud;
     this.hudId = this.hud.hudId;
     this.isBrowserConsole = this.hud.isBrowserConsole;
+
     this.isBrowserToolboxConsole =
       this.hud.currentTarget &&
       this.hud.currentTarget.isParentProcess &&
@@ -230,6 +231,10 @@ class WebConsoleUI {
     return this.wrapper;
   }
 
+  getPanelWindow() {
+    return this.window;
+  }
+
   logWarningAboutReplacedAPI() {
     return this.hud.currentTarget.logWarningInPage(
       l10n.getStr("ConsoleAPIDisabled"),
@@ -397,10 +402,9 @@ class WebConsoleUI {
       // Make sure keyboard shortcuts work immediately after opening
       // the Browser Console (Bug 1461366).
       this.window.focus();
-
       shortcuts.on(
         l10n.getStr("webconsole.close.key"),
-        this.window.top.close.bind(this.window.top)
+        this.window.close.bind(this.window)
       );
 
       ZoomKeys.register(this.window, shortcuts);
@@ -443,6 +447,10 @@ class WebConsoleUI {
     );
   }
 
+  getLongString(grip) {
+    this.getProxy().webConsoleClient.getString(grip);
+  }
+
   /**
    * Sets the focus to JavaScript input field when the web console tab is
    * selected or when there is a split console present.
@@ -481,6 +489,58 @@ class WebConsoleUI {
 
   handleTabWillNavigate(packet) {
     this.wrapper.dispatchTabWillNavigate(packet);
+  }
+
+  getInputCursor() {
+    return this.jsterm && this.jsterm.getSelectionStart();
+  }
+
+  getJsTermTooltipAnchor() {
+    return this.outputNode.querySelector(".CodeMirror-cursor");
+  }
+
+  attachRef(id, node) {
+    this[id] = node;
+  }
+
+  /**
+   * Retrieve the FrameActor ID given a frame depth, or the selected one if no
+   * frame depth given.
+   *
+   * @return { frameActor: String|null, client: Object }:
+   *         frameActor is the FrameActor ID for the given frame depth
+   *         (or the selected frame if it exists), null if no frame was found.
+   *         client is the WebConsole client for the thread the frame is
+   *         associated with.
+   */
+  getFrameActor() {
+    const state = this.hud.getDebuggerFrames();
+    if (!state) {
+      return { frameActor: null, client: this.webConsoleClient };
+    }
+
+    const grip = state.frames[state.selected];
+
+    if (!grip) {
+      return { frameActor: null, client: this.webConsoleClient };
+    }
+
+    return {
+      frameActor: grip.actor,
+      client: state.target.activeConsole,
+    };
+  }
+
+  getSelectedNodeActor() {
+    const inspectorSelection = this.hud.getInspectorSelection();
+    if (inspectorSelection && inspectorSelection.nodeFront) {
+      return inspectorSelection.nodeFront.actorID;
+    }
+    return null;
+  }
+
+  onMessageHover(type, message) {
+    this.emit("message-hover", type, message);
   }
 }
 

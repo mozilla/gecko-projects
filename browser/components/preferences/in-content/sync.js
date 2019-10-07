@@ -114,6 +114,13 @@ var gSyncPane = {
       );
     });
 
+    FxAccounts.config
+      .promiseConnectDeviceURI(this._getEntryPoint())
+      .then(connectURI => {
+        document
+          .getElementById("connect-another-device")
+          .setAttribute("href", connectURI);
+      });
     // Links for mobile devices.
     for (let platform of ["android", "ios"]) {
       let url =
@@ -526,7 +533,7 @@ var gSyncPane = {
 
     fxAccounts
       .resendVerificationEmail()
-      .then(fxAccounts.getSignedInUser, onError)
+      .then(() => fxAccounts.getSignedInUser(), onError)
       .then(onSuccess, onError);
   },
 

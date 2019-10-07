@@ -522,7 +522,7 @@ class EventStateManager : public nsSupportsWeakReference, public nsIObserver {
 
   void EnsureDocument(nsPresContext* aPresContext);
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
-  void FlushPendingEvents(nsPresContext* aPresContext);
+  void FlushLayout(nsPresContext* aPresContext);
 
   /**
    * The phases of WalkESMTreeToHandleAccessKey processing. See below.
@@ -1022,7 +1022,12 @@ class EventStateManager : public nsSupportsWeakReference, public nsIObserver {
   friend class mozilla::dom::BrowserParent;
   void BeginTrackingRemoteDragGesture(nsIContent* aContent,
                                       dom::RemoteDragStartData* aDragStartData);
-  void StopTrackingDragGesture();
+
+  // Stop tracking a possible drag. If aClearInChildProcesses is true, send
+  // a notification to any child processes that are in the drag service that
+  // tried to start a drag.
+  void StopTrackingDragGesture(bool aClearInChildProcesses);
+
   MOZ_CAN_RUN_SCRIPT
   void GenerateDragGesture(nsPresContext* aPresContext,
                            WidgetInputEvent* aEvent);

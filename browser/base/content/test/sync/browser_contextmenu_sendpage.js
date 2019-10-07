@@ -15,8 +15,15 @@ const fxaDevices = [
 
 add_task(async function setup() {
   await promiseSyncReady();
+  await Services.search.init();
   // gSync.init() is called in a requestIdleCallback. Force its initialization.
   gSync.init();
+  sinon
+    .stub(Weave.Service.clientsEngine, "getClientByFxaDeviceId")
+    .callsFake(fxaDeviceId => {
+      let target = fxaDevices.find(c => c.id == fxaDeviceId);
+      return target ? target.clientRecord : null;
+    });
   sinon.stub(Weave.Service.clientsEngine, "getClientType").returns("desktop");
   await BrowserTestUtils.openNewForegroundTab(gBrowser, "about:mozilla");
 });
@@ -249,7 +256,7 @@ add_task(async function test_page_contextmenu_unconfigured() {
     "Send tab to device is enabled"
   );
   checkPopup([
-    { label: "Not Connected to Firefox", disabled: true },
+    { label: "Not Signed In", disabled: true },
     "----",
     { label: "Sign in to Firefox..." },
     { label: "Learn About Sending Tabs..." },
@@ -336,6 +343,7 @@ add_task(async function test_page_contextmenu_fxa_disabled() {
 // However, browser_contextmenu.js contains tests that verify its presence.
 
 add_task(async function teardown() {
+  Weave.Service.clientsEngine.getClientByFxaDeviceId.restore();
   Weave.Service.clientsEngine.getClientType.restore();
   gBrowser.removeCurrentTab();
 });

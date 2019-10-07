@@ -386,6 +386,9 @@ bool gfxPlatformFontList::AddWithLegacyFamilyName(const nsACString& aLegacyName,
 }
 
 nsresult gfxPlatformFontList::InitFontList() {
+  // This shouldn't be called from stylo threads!
+  MOZ_ASSERT(NS_IsMainThread());
+
   mFontlistInitCount++;
 
   if (LOG_FONTINIT_ENABLED()) {
@@ -446,6 +449,9 @@ nsresult gfxPlatformFontList::InitFontList() {
   if (StaticPrefs::gfx_e10s_font_list_shared_AtStartup() &&
       !gfxPlatform::InSafeMode()) {
     for (auto i = mFontEntries.Iter(); !i.Done(); i.Next()) {
+      if (!i.Data()) {
+        continue;
+      }
       i.Data()->mShmemCharacterMap = nullptr;
       i.Data()->mShmemFace = nullptr;
       i.Data()->mFamilyName = NS_LITERAL_CSTRING("");
@@ -478,6 +484,21 @@ nsresult gfxPlatformFontList::InitFontList() {
       return rv;
     }
     ApplyWhitelist();
+  }
+
+  // Set up mDefaultFontEntry as a "last resort" default that we can use
+  // to avoid crashing if the font list is otherwise unusable.
+  gfxFontStyle defStyle;
+  FontFamily fam = GetDefaultFont(&defStyle);
+  if (fam.mIsShared) {
+    auto face = fam.mShared->FindFaceForStyle(SharedFontList(), defStyle);
+    if (!face) {
+      mDefaultFontEntry = nullptr;
+    } else {
+      mDefaultFontEntry = GetOrCreateFontEntry(face, fam.mShared);
+    }
+  } else {
+    mDefaultFontEntry = fam.mUnshared->FindFontForStyle(defStyle);
   }
 
   return NS_OK;
