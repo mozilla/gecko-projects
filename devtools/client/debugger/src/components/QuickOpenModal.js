@@ -45,11 +45,15 @@ import type { Tab } from "../reducers/tabs";
 
 import "./QuickOpenModal.css";
 
+type OwnProps = {|
+  shortcutsModalEnabled: boolean,
+  toggleShortcutsModal: () => void,
+|};
 type Props = {
   cx: Context,
   enabled: boolean,
   displayedSources: Source[],
-  selectedSource?: Source,
+  selectedSource: ?Source,
   selectedContentLoaded?: boolean,
   query: string,
   searchType: QuickOpenType,
@@ -83,7 +87,7 @@ function filter(values, query) {
 
   return fuzzyAldrin.filter(values, query, {
     key: "value",
-    maxResults: maxResults,
+    maxResults,
     preparedQuery,
   });
 }
@@ -471,7 +475,7 @@ function mapStateToProps(state) {
 }
 
 /* istanbul ignore next: ignoring testing of redux connection stuff */
-export default connect(
+export default connect<Props, OwnProps, _, _, _, _>(
   mapStateToProps,
   {
     selectSpecificLocation: actions.selectSpecificLocation,

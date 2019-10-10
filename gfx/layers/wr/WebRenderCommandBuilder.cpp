@@ -303,6 +303,7 @@ struct DIGroup {
   // This is the intersection of mVisibleRect and mLastVisibleRect
   // we ensure that mInvalidRect is contained in mPreservedRect
   IntRect mPreservedRect;
+  IntRect mActualBounds;
   int32_t mAppUnitsPerDevPixel;
   gfx::Size mScale;
   ScrollableLayerGuid::ViewID mScrollId;
@@ -566,6 +567,7 @@ struct DIGroup {
         }
       }
     }
+    mActualBounds.OrWith(aData->mRect);
     aData->mClip = clip;
     aData->mMatrix = aMatrix;
     aData->mImageRect = mClippedImageBounds;
@@ -580,6 +582,10 @@ struct DIGroup {
                 nsDisplayItem* aStartItem, nsDisplayItem* aEndItem) {
     GP("\n\n");
     GP("Begin EndGroup\n");
+
+    mVisibleRect = mVisibleRect.Intersect(
+            ViewAs<LayerPixel>(mActualBounds,
+                               PixelCastJustification::LayerIsImage));
 
     if (mVisibleRect.IsEmpty()) {
       return;
@@ -725,7 +731,6 @@ struct DIGroup {
       }
     }
     mFonts = std::move(fonts);
-    mInvalidRect.SetEmpty();
     aResources.SetBlobImageVisibleArea(
         mKey.value().second(),
         ViewAs<ImagePixel>(mVisibleRect, PixelCastJustification::LayerIsImage));
@@ -1211,6 +1216,8 @@ void Grouper::ConstructGroups(nsDisplayListBuilder* aDisplayListBuilder,
           aCommandBuilder->CreateOrRecycleWebRenderUserData<WebRenderGroupData>(
               item, aBuilder.GetRenderRoot());
 
+      groupData->mFollowingGroup.mInvalidRect.SetEmpty();
+
       // Initialize groupData->mFollowingGroup with data from currentGroup.
       // We want to copy out this information before calling EndGroup because
       // EndGroup will set mLastVisibleRect depending on whether
@@ -1252,6 +1259,7 @@ void Grouper::ConstructGroups(nsDisplayListBuilder* aDisplayListBuilder,
           groupData->mFollowingGroup.mVisibleRect
               .Intersect(groupData->mFollowingGroup.mLastVisibleRect)
               .ToUnknownRect();
+      groupData->mFollowingGroup.mActualBounds = IntRect();
 
       currentGroup->EndGroup(aCommandBuilder->mManager, aDisplayListBuilder,
                              aBuilder, aResources, this, startOfCurrentGroup,
@@ -1474,6 +1482,8 @@ void WebRenderCommandBuilder::DoGroupingForDisplayList(
   GP("Inherrited scale %f %f\n", scale.width, scale.height);
   GP("Bounds: %d %d %d %d vs %d %d %d %d\n", p.x, p.y, p.width, p.height, q.x,
      q.y, q.width, q.height);
+
+  group.mInvalidRect.SetEmpty();
   if (group.mAppUnitsPerDevPixel != appUnitsPerDevPixel ||
       group.mScale != scale || group.mResidualOffset != residualOffset) {
     GP("Property change. Deleting blob\n");
@@ -1516,6 +1526,7 @@ void WebRenderCommandBuilder::DoGroupingForDisplayList(
   group.mGroupBounds = groupBounds;
   group.mLayerBounds = layerBounds;
   group.mVisibleRect = visibleRect;
+  group.mActualBounds = IntRect();
   group.mPreservedRect =
       group.mVisibleRect.Intersect(group.mLastVisibleRect).ToUnknownRect();
   group.mAppUnitsPerDevPixel = appUnitsPerDevPixel;
@@ -2173,8 +2184,14 @@ WebRenderCommandBuilder::GenerateFallbackData(
   if (visibleSize.IsEmpty()) {
     return nullptr;
   }
-  // Display item bounds should be unscaled
-  aImageRect = visibleRect / layerScale;
+
+  if (useBlobImage) {
+    // Display item bounds should be unscaled
+    aImageRect = visibleRect / layerScale;
+  } else {
+    // Display item bounds should be unscaled
+    aImageRect = dtRect / layerScale;
+  }
 
   // We always paint items at 0,0 so the visibleRect that we use inside the blob
   // is needs to be adjusted by the display item bounds top left.
@@ -2317,7 +2334,7 @@ WebRenderCommandBuilder::GenerateFallbackData(
 
       {
         UpdateImageHelper helper(imageContainer, imageClient,
-                                 visibleSize.ToUnknownSize(), format);
+                                 dtRect.Size().ToUnknownSize(), format);
         {
           RefPtr<gfx::DrawTarget> dt = helper.GetDrawTarget();
           if (!dt) {
@@ -2424,9 +2441,6 @@ Maybe<wr::ImageMask> WebRenderCommandBuilder::BuildWrMaskImage(
 
   bool snap;
   nsRect bounds = aMaskItem->GetBounds(aDisplayListBuilder, &snap);
-  if (bounds.IsEmpty()) {
-    return Nothing();
-  }
 
   const int32_t appUnitsPerDevPixel =
       aMaskItem->Frame()->PresContext()->AppUnitsPerDevPixel();
@@ -2443,6 +2457,10 @@ Maybe<wr::ImageMask> WebRenderCommandBuilder::BuildWrMaskImage(
   LayerIntRect itemRect =
       LayerIntRect::FromUnknownRect(bounds.ScaleToOutsidePixels(
           scale.width, scale.height, appUnitsPerDevPixel));
+
+  if (itemRect.IsEmpty()) {
+    return Nothing();
+  }
 
   LayoutDeviceToLayerScale2D layerScale(scale.width, scale.height);
   LayoutDeviceRect imageRect = LayerRect(itemRect) / layerScale;

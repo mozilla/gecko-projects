@@ -282,33 +282,6 @@ static void AccumulateLayerTransforms(Layer* aLayer, Layer* aAncestor,
   }
 }
 
-static LayerPoint GetLayerFixedMarginsOffset(
-    Layer* aLayer, const ScreenMargin& aFixedLayerMargins) {
-  // Work out the necessary translation, in root scrollable layer space.
-  // Because fixed layer margins are stored relative to the root scrollable
-  // layer, we can just take the difference between these values.
-  LayerPoint translation;
-  int32_t sides = aLayer->GetFixedPositionSides();
-
-  if ((sides & eSideBitsLeftRight) == eSideBitsLeftRight) {
-    translation.x += (aFixedLayerMargins.left - aFixedLayerMargins.right) / 2;
-  } else if (sides & eSideBitsRight) {
-    translation.x -= aFixedLayerMargins.right;
-  } else if (sides & eSideBitsLeft) {
-    translation.x += aFixedLayerMargins.left;
-  }
-
-  if ((sides & eSideBitsTopBottom) == eSideBitsTopBottom) {
-    translation.y += (aFixedLayerMargins.top - aFixedLayerMargins.bottom) / 2;
-  } else if (sides & eSideBitsBottom) {
-    translation.y -= aFixedLayerMargins.bottom;
-  } else if (sides & eSideBitsTop) {
-    translation.y += aFixedLayerMargins.top;
-  }
-
-  return translation;
-}
-
 static gfxFloat IntervalOverlap(gfxFloat aTranslation, gfxFloat aMin,
                                 gfxFloat aMax) {
   // Determine the amount of overlap between the 1D vector |aTranslation|
@@ -512,8 +485,13 @@ void AsyncCompositionManager::AdjustFixedOrStickyLayer(
 
   // Offset the layer's anchor point to make sure fixed position content
   // respects content document fixed position margins.
+  ScreenPoint offset = ComputeFixedMarginsOffset(
+      aFixedLayerMargins, layer->GetFixedPositionSides());
+  // Fixed margins only apply to layers fixed to the root, so we can view
+  // the offset in layer space.
   LayerPoint offsetAnchor =
-      anchor + GetLayerFixedMarginsOffset(layer, aFixedLayerMargins);
+      anchor + ViewAs<LayerPixel>(
+                   offset, PixelCastJustification::ScreenIsParentLayerForRoot);
 
   // Additionally transform the anchor to compensate for the change
   // from the old transform to the new transform. We do
@@ -1226,10 +1204,7 @@ bool AsyncCompositionManager::ApplyAsyncContentTransformToTree(
               !layer->GetParent()->GetIsFixedPosition() &&
               IsFixedToZoomContainer(layer)) {
             LayerToParentLayerMatrix4x4 emptyTransform;
-            ScreenMargin marginsForFixedLayer;
-#ifdef MOZ_WIDGET_ANDROID
-            marginsForFixedLayer = GetFixedLayerMargins();
-#endif
+            ScreenMargin marginsForFixedLayer = GetFixedLayerMargins();
             AdjustFixedOrStickyLayer(zoomContainer, layer,
                                      sampler->GetGuid(*zoomedMetrics).mScrollId,
                                      emptyTransform, emptyTransform,
@@ -1473,7 +1448,6 @@ bool AsyncCompositionManager::TransformShadowTree(
   return wantNextFrame;
 }
 
-#if defined(MOZ_WIDGET_ANDROID)
 void AsyncCompositionManager::SetFixedLayerMargins(ScreenIntCoord aTop,
                                                    ScreenIntCoord aBottom) {
   mFixedLayerMargins.top = aTop;
@@ -1487,7 +1461,31 @@ ScreenMargin AsyncCompositionManager::GetFixedLayerMargins() const {
   }
   return result;
 }
-#endif  // defined(MOZ_WIDGET_ANDROID)
+
+/*static*/
+ScreenPoint AsyncCompositionManager::ComputeFixedMarginsOffset(
+    const ScreenMargin& aFixedMargins, SideBits aFixedSides) {
+  // Work out the necessary translation, in screen space.
+  ScreenPoint translation;
+
+  if ((aFixedSides & eSideBitsLeftRight) == eSideBitsLeftRight) {
+    translation.x += (aFixedMargins.left - aFixedMargins.right) / 2;
+  } else if (aFixedSides & eSideBitsRight) {
+    translation.x -= aFixedMargins.right;
+  } else if (aFixedSides & eSideBitsLeft) {
+    translation.x += aFixedMargins.left;
+  }
+
+  if ((aFixedSides & eSideBitsTopBottom) == eSideBitsTopBottom) {
+    translation.y += (aFixedMargins.top - aFixedMargins.bottom) / 2;
+  } else if (aFixedSides & eSideBitsBottom) {
+    translation.y -= aFixedMargins.bottom;
+  } else if (aFixedSides & eSideBitsTop) {
+    translation.y += aFixedMargins.top;
+  }
+
+  return translation;
+}
 
 }  // namespace layers
 }  // namespace mozilla

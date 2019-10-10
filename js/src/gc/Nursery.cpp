@@ -127,7 +127,7 @@ inline Chunk* js::NurseryChunk::toChunk(GCRuntime* gc) {
 void js::NurseryDecommitTask::queueChunk(
     NurseryChunk* nchunk, const AutoLockHelperThreadState& lock) {
   // Using the chunk pointers to build the queue is infallible.
-  Chunk* chunk = nchunk->toChunk(&runtime()->gc);
+  Chunk* chunk = nchunk->toChunk(gc);
   chunk->info.prev = nullptr;
   chunk->info.next = queue;
   queue = chunk;
@@ -190,7 +190,6 @@ void js::NurseryDecommitTask::run() {
 void js::NurseryDecommitTask::decommitChunk(Chunk* chunk) {
   chunk->decommitAllArenas();
   {
-    GCRuntime* gc = &runtime()->gc;
     AutoLockGC lock(gc);
     gc->recycleChunk(chunk, lock);
   }
@@ -225,7 +224,7 @@ js::Nursery::Nursery(GCRuntime* gc)
       canAllocateStrings_(true),
       reportTenurings_(0),
       minorGCTriggerReason_(JS::GCReason::NO_REASON),
-      decommitTask(gc->rt)
+      decommitTask(gc)
 #ifdef JS_GC_ZEAL
       ,
       lastCanary_(nullptr)
@@ -1091,7 +1090,7 @@ void js::Nursery::doCollection(JS::GCReason reason,
   startProfile(ProfileKey::CheckHashTables);
 #ifdef JS_GC_ZEAL
   if (gc->hasZealMode(ZealMode::CheckHashTablesOnMinorGC)) {
-    CheckHashTablesAfterMovingGC(rt);
+    gc->checkHashTablesAfterMovingGC();
   }
 #endif
   endProfile(ProfileKey::CheckHashTables);
@@ -1552,6 +1551,17 @@ void js::Nursery::shrinkAllocableSpace(size_t newCapacity) {
 }
 
 void js::Nursery::minimizeAllocableSpace() {
+  if (capacity_ < roundSize(tunables().gcMinNurseryBytes())) {
+    // The nursery is already smaller than the minimum size. This can happen
+    // because changing parameters (like an increase in minimum size) can only
+    // occur after a minor GC. See Bug 1585159.
+    //
+    // We could either do the /correct/ thing and increase the size to the
+    // configured minimum size. Or do nothing, keeping the nursery smaller. We
+    // do nothing because this can be executed as a last-ditch GC and we don't
+    // want to add memory pressure then.
+    return;
+  }
   shrinkAllocableSpace(roundSize(tunables().gcMinNurseryBytes()));
 }
 

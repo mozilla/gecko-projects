@@ -1634,7 +1634,7 @@ pref("browser.contentblocking.report.monitor.url", "https://monitor.firefox.com/
 pref("browser.contentblocking.report.monitor.sign_in_url", "https://monitor.firefox.com/oauth/init?entrypoint=protection_report_monitor&utm_source=about-protections&email=");
 pref("browser.contentblocking.report.lockwise.url", "https://lockwise.firefox.com/");
 pref("browser.contentblocking.report.manage_devices.url", "https://accounts.firefox.com/settings/clients");
-pref("browser.contentblocking.report.proxy_extension.url", "https://private-network.firefox.com/");
+pref("browser.contentblocking.report.proxy_extension.url", "https://fpn.firefox.com/browser");
 
 // Protection Report's SUMO urls
 pref("browser.contentblocking.report.monitor.how_it_works.url", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/monitor-faq");
@@ -1784,6 +1784,7 @@ pref("signon.privateBrowsingCapture.enabled", true);
 pref("signon.showAutoCompleteFooter", true);
 pref("signon.management.page.enabled", true);
 pref("signon.management.page.breach-alerts.enabled", true);
+pref("signon.management.page.sort", "name");
 pref("signon.management.overrideURI", "about:logins?filter=%DOMAIN%");
 #ifdef NIGHTLY_BUILD
   // Bug 1563330 tracks shipping this by default.
@@ -1960,6 +1961,15 @@ pref("devtools.toolbox.tabsOrder", "");
 // ⚠ This is a work in progress. Expect weirdness when the pref is enabled. ⚠
 pref("devtools.browsertoolbox.fission", false);
 
+// This pref is also related to fission, but not only. It allows the toolbox
+// to stay open even if the debugged tab switches to another process.
+// It can happen between two documents, one running in the parent process like
+// about:sessionrestore and another one running in the content process like
+// any web page. Or between two distinct domain when running with fission turned
+// on. See bug 1565263.
+// ⚠ This is a work in progress. Expect weirdness when the pref is flipped on ⚠
+pref("devtools.target-switching.enabled", false);
+
 // Toolbox Button preferences
 pref("devtools.command-button-pick.enabled", true);
 pref("devtools.command-button-frames.enabled", true);
@@ -1995,6 +2005,8 @@ pref("devtools.inspector.showAllAnonymousContent", false);
 pref("devtools.inspector.showUserAgentShadowRoots", false);
 // Enable the new Rules View
 pref("devtools.inspector.new-rulesview.enabled", false);
+// Enable the compatibility tool in the inspector.
+pref("devtools.inspector.compatibility.enabled", false);
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);

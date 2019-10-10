@@ -1618,9 +1618,6 @@ void JSScript::resetScriptCounts() {
 void ScriptSourceObject::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
   ScriptSourceObject* sso = &obj->as<ScriptSourceObject>();
-  if (sso->isCanonical()) {
-    sso->source()->finalizeGCData();
-  }
   sso->source()->decref();
 
   // Clear the private value, calling the release hook if necessary.
@@ -2511,7 +2508,6 @@ template bool ScriptSource::assignSource(JSContext* cx,
                                          SourceText<Utf8Unit>& srcBuf);
 
 void ScriptSource::trace(JSTracer* trc) {
-  // This should be kept in sync with ScriptSource::finalizeGCData below.
 #ifdef JS_BUILD_BINAST
   if (data.is<BinAST>()) {
     if (auto& metadata = data.as<BinAST>().metadata) {
@@ -2521,42 +2517,6 @@ void ScriptSource::trace(JSTracer* trc) {
 #else
   MOZ_ASSERT(!data.is<BinAST>());
 #endif  // JS_BUILD_BINAST
-  if (xdrEncoder_) {
-    xdrEncoder_->trace(trc);
-  }
-}
-
-void ScriptSource::finalizeGCData() {
-  // This should be kept in sync with ScriptSource::trace above.
-
-  // When the canonical ScriptSourceObject's finalizer runs, this
-  // ScriptSource can no longer be accessed from the main
-  // thread. However, an offthread source compression task may still
-  // hold a reference. We must clean up any GC pointers owned by this
-  // ScriptSource now, because trying to run those prebarriers
-  // offthread later will fail.
-  MOZ_ASSERT(TlsContext.get() && TlsContext.get()->isMainThreadContext());
-
-#ifdef JS_BUILD_BINAST
-  if (hasBinASTSource()) {
-    if (auto& metadata = data.as<BinAST>().metadata) {
-      metadata.reset();
-    }
-  }
-#endif  // JS_BUILD_BINAST
-  if (xdrEncoder_) {
-    xdrEncoder_.reset();
-  }
-}
-
-ScriptSource::~ScriptSource() {
-  MOZ_ASSERT(refs == 0);
-
-  // GC pointers must have been cleared earlier, because this
-  // destructor could be called off-thread by a source compression
-  // task. See above.
-  MOZ_ASSERT(!xdrEncoder_);
-  MOZ_ASSERT_IF(hasBinASTSource(), !data.as<BinAST>().metadata);
 }
 
 static MOZ_MUST_USE bool reallocUniquePtr(UniqueChars& unique, size_t size) {
@@ -4866,6 +4826,15 @@ void RuntimeScriptData::markForCrossZone(JSContext* cx) {
   }
 }
 
+void ScriptWarmUpData::trace(JSTracer* trc) {
+  if (isJitScript()) {
+    toJitScript()->trace(trc);
+    return;
+  }
+
+  MOZ_ASSERT(isWarmUpCount());
+}
+
 void JSScript::traceChildren(JSTracer* trc) {
   // NOTE: this JSScript may be partially initialized at this point.  E.g. we
   // may have created it and partially initialized it with
@@ -4887,9 +4856,7 @@ void JSScript::traceChildren(JSTracer* trc) {
     scriptData()->traceChildren(trc);
   }
 
-  if (jit::JitScript* jitScript = maybeJitScript()) {
-    jitScript->trace(trc);
-  }
+  warmUpData_.trace(trc);
 
   if (maybeLazyScript()) {
     TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");
@@ -5427,9 +5394,14 @@ void JSScript::resetWarmUpCounterToDelayIonCompilation() {
   // because we don't want scripts to get stuck in the (Baseline) interpreter in
   // pathological cases.
 
-  if (warmUpCount > jit::JitOptions.baselineJitWarmUpThreshold) {
+  if (getWarmUpCount() > jit::JitOptions.baselineJitWarmUpThreshold) {
     incWarmUpResetCounter();
-    warmUpCount = jit::JitOptions.baselineJitWarmUpThreshold;
+    uint32_t newCount = jit::JitOptions.baselineJitWarmUpThreshold;
+    if (warmUpData_.isWarmUpCount()) {
+      warmUpData_.resetWarmUpCount(newCount);
+    } else {
+      warmUpData_.toJitScript()->warmUpCount_ = newCount;
+    }
   }
 }
 

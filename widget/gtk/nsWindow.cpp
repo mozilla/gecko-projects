@@ -981,6 +981,8 @@ void nsWindow::ConstrainPosition(bool aAllowSlop, int32_t* aX, int32_t* aY) {
 }
 
 void nsWindow::SetSizeConstraints(const SizeConstraints& aConstraints) {
+  LOG(("nsWindow::SetSizeConstraints [%p]\n", (void*)this));
+
   mSizeConstraints.mMinSize = GetSafeWindowSize(aConstraints.mMinSize);
   mSizeConstraints.mMaxSize = GetSafeWindowSize(aConstraints.mMaxSize);
 
@@ -995,6 +997,11 @@ void nsWindow::SetSizeConstraints(const SizeConstraints& aConstraints) {
     geometry.max_height =
         DevicePixelsToGdkCoordRoundDown(mSizeConstraints.mMaxSize.height);
 
+    LOG(("    min width %d min height %d\n", geometry.min_width,
+         geometry.min_height));
+    LOG(("    max width %d max height %d\n", geometry.max_width,
+         geometry.max_height));
+
     uint32_t hints = 0;
     if (aConstraints.mMinSize != LayoutDeviceIntSize(0, 0)) {
       hints |= GDK_HINT_MIN_SIZE;
@@ -1004,6 +1011,7 @@ void nsWindow::SetSizeConstraints(const SizeConstraints& aConstraints) {
     }
 
     if (mAspectRatio != 0.0f) {
+      LOG(("    aspect %f\n", mAspectRatio));
       geometry.min_aspect = mAspectRatio;
       geometry.max_aspect = mAspectRatio;
       hints |= GDK_HINT_ASPECT;
@@ -4563,7 +4571,9 @@ void nsWindow::UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion) {
       (void (*)(GdkWindow*, cairo_region_t*))dlsym(
           RTLD_DEFAULT, "gdk_window_set_opaque_region");
 
+  LOG(("nsWindow::UpdateOpaqueRegion [%p]\n", (void*)this));
   if (!sGdkWindowSetOpaqueRegion) {
+    LOG(("    gdk_window_set_opaque_region is not available!\n"));
     return;
   }
 
@@ -4575,12 +4585,16 @@ void nsWindow::UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion) {
   // Also don't set shape mask if we use transparency bitmap.
   if (gdk_window_get_window_type(window) != GDK_WINDOW_TOPLEVEL ||
       mTransparencyBitmapForTitlebar) {
+    LOG(("    disabled due to %s\n", mTransparencyBitmapForTitlebar
+                                         ? "transparency bitmap"
+                                         : "non-toplevel window"));
     return;
   }
 
   // We don't tweak opaque regions for non-toplevel windows (popup, panels etc.)
   // as they can be transparent by gecko.
   if (mWindowType != eWindowType_toplevel) {
+    LOG(("    setting for non-toplevel window\n"));
     if (aOpaqueRegion.IsEmpty()) {
       (*sGdkWindowSetOpaqueRegion)(mGdkWindow, nullptr);
     } else {
@@ -4612,11 +4626,15 @@ void nsWindow::UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion) {
                                   width, height};
     cairo_region_union_rectangle(region, &rect);
 
+    LOG(("    setting for toplevel window %d,%d -> %d x %d\n", rect.x, rect.y,
+         rect.width, rect.height));
+
     // Subtract transparent corners which are used by
     // various Gtk themes for toplevel windows when titlebar
     // is rendered by gecko.
     if (mDrawInTitlebar && !mIsPIPWindow && mSizeMode == nsSizeMode_Normal &&
         !mIsTiled) {
+      LOG(("    substracted corners for titlebar decoration\n"));
       cairo_rectangle_int_t rect = {decorationSize.left, decorationSize.top,
                                     TITLEBAR_SHAPE_MASK_HEIGHT,
                                     TITLEBAR_SHAPE_MASK_HEIGHT};
@@ -7327,8 +7345,9 @@ GtkTextDirection nsWindow::GetTextDirection() {
 
 void nsWindow::LockAspectRatio(bool aShouldLock) {
   if (aShouldLock) {
-    float width = (float)mBounds.Width();
-    float height = (float)mBounds.Height();
+    gint scale = GdkScaleFactor();
+    float width = (float)mBounds.Width() / scale;
+    float height = (float)mBounds.Height() / scale;
 
     if (mCSDSupportLevel == CSD_SUPPORT_CLIENT) {
       GtkBorder decorationSize;

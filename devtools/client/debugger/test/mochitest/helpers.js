@@ -552,6 +552,7 @@ async function clearDebuggerPreferences(prefs = []) {
   resetSchemaVersion();
   asyncStorage.clear();
   Services.prefs.clearUserPref("devtools.recordreplay.enabled");
+  Services.prefs.clearUserPref("devtools.debugger.alphabetize-outline");
   Services.prefs.clearUserPref("devtools.debugger.pause-on-exceptions");
   Services.prefs.clearUserPref("devtools.debugger.pause-on-caught-exceptions");
   Services.prefs.clearUserPref("devtools.debugger.ignore-caught-exceptions");
@@ -1545,7 +1546,7 @@ async function getTokenFromPosition(dbg, {line, ch}) {
   cm.scrollIntoView({ line: line - 1, ch }, 0);
 
   // Ensure the line is visible with margin because the bar at the bottom of
-  // the editor overlaps into what the editor things is its own space, blocking
+  // the editor overlaps into what the editor thinks is its own space, blocking
   // the click event below.
   await waitForScrolling(cm);
 
@@ -1601,7 +1602,7 @@ async function codeMirrorGutterElement(dbg, line) {
 }
 
 async function clickAtPos(dbg, pos) {
-  const tokenEl = await getTokenFromPosition(dbg, pos)
+  const tokenEl = await getTokenFromPosition(dbg, pos);
 
   if (!tokenEl) {
     return false;
@@ -1621,7 +1622,7 @@ async function clickAtPos(dbg, pos) {
 }
 
 async function hoverAtPos(dbg, pos) {
-  const tokenEl = await getTokenFromPosition(dbg, pos)
+  const tokenEl = await getTokenFromPosition(dbg, pos);
 
   if (!tokenEl) {
     return false;

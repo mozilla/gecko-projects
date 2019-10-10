@@ -35,6 +35,7 @@ function handleAllLogins(logins) {
 function handleSyncState(syncState) {
   gElements.fxAccountsButton.updateState(syncState);
   gElements.loginFooter.hidden = syncState.hideMobileFooter;
+  gElements.loginIntro.updateState(syncState);
 }
 
 window.addEventListener("AboutLoginsChromeToContent", event => {
@@ -80,6 +81,7 @@ window.addEventListener("AboutLoginsChromeToContent", event => {
         event.detail.value.selectedBadgeLanguages
       );
       handleSyncState(event.detail.value.syncState);
+      gElements.loginList.setSortDirection(event.detail.value.selectedSort);
       document.documentElement.classList.add("initialized");
       break;
     }

@@ -21,7 +21,7 @@ const {
 } = utils;
 
 import actions from "../../../actions";
-import { getThreadContext, getPreview } from "../../../selectors";
+import { getThreadContext } from "../../../selectors";
 import Popover from "../../shared/Popover";
 import PreviewFunction from "../../shared/PreviewFunction";
 
@@ -32,6 +32,11 @@ import "./Popup.css";
 import type { ThreadContext } from "../../../types";
 import type { Preview } from "../../../reducers/types";
 
+type OwnProps = {|
+  editor: any,
+  preview: Preview,
+  editorRef: ?HTMLDivElement,
+|};
 type Props = {
   cx: ThreadContext,
   preview: Preview,
@@ -296,7 +301,6 @@ export function removeHighlightForTargetSiblings(target: Element) {
 
 const mapStateToProps = state => ({
   cx: getThreadContext(state),
-  preview: getPreview(state),
 });
 
 const {
@@ -319,7 +323,7 @@ const mapDispatchToProps = {
   clearPreview,
 };
 
-export default connect(
+export default connect<Props, OwnProps, _, _, _, _>(
   mapStateToProps,
   mapDispatchToProps
 )(Popup);

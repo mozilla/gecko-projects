@@ -969,6 +969,12 @@ Inspector.prototype = {
         );
         panel = new ChangesView(this, this.panelWin);
         break;
+      case "compatibilityview":
+        const CompatibilityView = this.browserRequire(
+          "devtools/client/inspector/compatibility/CompatibilityView"
+        );
+        panel = new CompatibilityView(this, this.panelWin);
+        break;
       case "computedview":
         const { ComputedViewTool } = this.browserRequire(
           "devtools/client/inspector/computed/computed"
@@ -1080,6 +1086,17 @@ Inspector.prototype = {
       sidebarPanels.push({
         id: "newruleview",
         title: INSPECTOR_L10N.getStr("inspector.sidebar.ruleViewTitle"),
+      });
+    }
+
+    if (
+      Services.prefs.getBoolPref("devtools.inspector.compatibility.enabled")
+    ) {
+      sidebarPanels.push({
+        id: "compatibilityview",
+        title: INSPECTOR_L10N.getStr(
+          "inspector.sidebar.compatibilityViewTitle"
+        ),
       });
     }
 
@@ -1769,11 +1786,12 @@ Inspector.prototype = {
     // turn off color picker when add node is triggered
     this.hideEyeDropper();
 
+    const nodeFront = this.selection.nodeFront;
     const html = "<div></div>";
 
     // Insert the html and expect a childList markup mutation.
     const onMutations = this.once("markupmutation");
-    await this.walker.insertAdjacentHTML(
+    await nodeFront.walkerFront.insertAdjacentHTML(
       this.selection.nodeFront,
       "beforeEnd",
       html
@@ -1781,7 +1799,7 @@ Inspector.prototype = {
     await onMutations;
 
     // Expand the parent node.
-    this.markup.expandNode(this.selection.nodeFront);
+    this.markup.expandNode(nodeFront);
   },
 
   /**
@@ -1791,13 +1809,13 @@ Inspector.prototype = {
     if (this.selection.isElementNode()) {
       const node = this.selection.nodeFront;
       if (node.hasPseudoClassLock(pseudo)) {
-        return this.walker.removePseudoClassLock(node, pseudo, {
+        return node.walkerFront.removePseudoClassLock(node, pseudo, {
           parents: true,
         });
       }
 
       const hierarchical = pseudo == ":hover" || pseudo == ":active";
-      return this.walker.addPseudoClassLock(node, pseudo, {
+      return node.walkerFront.addPseudoClassLock(node, pseudo, {
         parents: hierarchical,
       });
     }

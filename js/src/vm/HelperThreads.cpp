@@ -532,7 +532,7 @@ void ParseTask::trace(JSTracer* trc) {
     return;
   }
 
-  TraceManuallyBarrieredEdge(trc, &parseGlobal, "ParseTask::parseGlobal");
+  TraceRoot(trc, &parseGlobal, "ParseTask::parseGlobal");
   scripts.trace(trc);
   sourceObjects.trace(trc);
 }
@@ -660,13 +660,9 @@ void ScriptDecodeTask::parse(JSContext* cx) {
   RootedScript resultScript(cx);
   Rooted<ScriptSourceObject*> sourceObject(cx);
 
-  auto decoder = js::MakeUnique<XDROffThreadDecoder>(
+  XDROffThreadDecoder decoder(
       cx, &options, /* sourceObjectOut = */ &sourceObject.get(), range);
-  if (!decoder) {
-    ReportOutOfMemory(cx);
-    return;
-  }
-  XDRResult res = decoder->codeScript(&resultScript);
+  XDRResult res = decoder.codeScript(&resultScript);
   MOZ_ASSERT(bool(resultScript) == res.isOk());
   if (res.isOk()) {
     scripts.infallibleAppend(resultScript);
@@ -724,13 +720,8 @@ void MultiScriptsDecodeTask::parse(JSContext* cx) {
     RootedScript resultScript(cx);
     Rooted<ScriptSourceObject*> sourceObject(cx);
 
-    auto decoder = js::MakeUnique<XDROffThreadDecoder>(
-        cx, &opts, &sourceObject.get(), source.range);
-    if (!decoder) {
-      ReportOutOfMemory(cx);
-      return;
-    }
-    XDRResult res = decoder->codeScript(&resultScript);
+    XDROffThreadDecoder decoder(cx, &opts, &sourceObject.get(), source.range);
+    XDRResult res = decoder.codeScript(&resultScript);
     MOZ_ASSERT(bool(resultScript) == res.isOk());
 
     if (res.isErr()) {
@@ -1621,8 +1612,10 @@ static bool IonBuilderHasHigherPriority(jit::IonBuilder* first,
   }
 
   // A higher warm-up counter indicates a higher priority.
-  return first->script()->getWarmUpCount() / first->script()->length() >
-         second->script()->getWarmUpCount() / second->script()->length();
+  jit::JitScript* firstJitScript = first->script()->jitScript();
+  jit::JitScript* secondJitScript = second->script()->jitScript();
+  return firstJitScript->warmUpCount() / first->script()->length() >
+         secondJitScript->warmUpCount() / second->script()->length();
 }
 
 bool GlobalHelperThreadState::canStartIonCompile(
@@ -1744,7 +1737,7 @@ void js::GCParallelTask::startOrRunIfIdle(AutoLockHelperThreadState& lock) {
 
   if (!(CanUseExtraThreads() && startWithLockHeld(lock))) {
     AutoUnlockHelperThreadState unlock(lock);
-    runFromMainThread(runtime());
+    runFromMainThread();
   }
 }
 
@@ -1776,19 +1769,19 @@ static inline TimeDuration TimeSince(TimeStamp prev) {
   return now - prev;
 }
 
-void GCParallelTask::joinAndRunFromMainThread(JSRuntime* rt) {
+void GCParallelTask::joinAndRunFromMainThread() {
   {
     AutoLockHelperThreadState lock;
     MOZ_ASSERT(!isRunningWithLockHeld(lock));
     joinWithLockHeld(lock);
   }
 
-  runFromMainThread(rt);
+  runFromMainThread();
 }
 
-void js::GCParallelTask::runFromMainThread(JSRuntime* rt) {
+void js::GCParallelTask::runFromMainThread() {
   assertNotStarted();
-  MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(rt));
+  MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(gc->rt));
   TimeStamp timeStart = ReallyNow();
   runTask();
   duration_ = TimeSince(timeStart);
@@ -1800,7 +1793,7 @@ void js::GCParallelTask::runFromHelperThread(AutoLockHelperThreadState& lock) {
   {
     AutoUnlockHelperThreadState parallelSection(lock);
     AutoSetHelperThreadContext usesContext;
-    AutoSetContextRuntime ascr(runtime());
+    AutoSetContextRuntime ascr(gc->rt);
     gc::AutoSetThreadIsPerformingGC performingGC;
     TimeStamp timeStart = ReallyNow();
     runTask();

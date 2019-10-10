@@ -37,6 +37,10 @@
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/widget/CompositorWidget.h"
 
+#ifdef XP_WIN
+#  include "mozilla/widget/WinCompositorWidget.h"
+#endif
+
 #ifdef MOZ_GECKO_PROFILER
 #  include "ProfilerMarkerPayload.h"
 #endif
@@ -150,8 +154,8 @@ void record_telemetry_time(mozilla::wr::TelemetryProbe aProbe,
       mozilla::Telemetry::Accumulate(mozilla::Telemetry::WR_SCENESWAP_TIME,
                                      time_ms);
       break;
-    case mozilla::wr::TelemetryProbe::RenderTime:
-      mozilla::Telemetry::Accumulate(mozilla::Telemetry::WR_RENDER_TIME,
+    case mozilla::wr::TelemetryProbe::FrameBuildTime:
+      mozilla::Telemetry::Accumulate(mozilla::Telemetry::WR_FRAMEBUILD_TIME,
                                      time_ms);
       break;
     default:
@@ -2719,7 +2723,8 @@ TextureFactoryIdentifier WebRenderBridgeParent::GetTextureFactoryIdentifier() {
       LayersBackend::LAYERS_WR, XRE_GetProcessType(),
       mApis[wr::RenderRoot::Default]->GetMaxTextureSize(), false,
       mApis[wr::RenderRoot::Default]->GetUseANGLE(),
-      mApis[wr::RenderRoot::Default]->GetUseDComp(), false, false, false,
+      mApis[wr::RenderRoot::Default]->GetUseDComp(),
+      mAsyncImageManager->UseCompositorWnd(), false, false, false,
       mApis[wr::RenderRoot::Default]->GetSyncHandle());
 }
 

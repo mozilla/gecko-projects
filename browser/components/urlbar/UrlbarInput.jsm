@@ -40,15 +40,14 @@ let getBoundsWithoutFlushing = element =>
 let px = number => number.toFixed(2) + "px";
 
 /**
- * Represents the urlbar <textbox>.
- * Also forwards important textbox properties and methods.
+ * Implements the text input part of the address bar UI.
  */
 class UrlbarInput {
   /**
    * @param {object} options
    *   The initial options for UrlbarInput.
    * @param {object} options.textbox
-   *   The <textbox> element.
+   *   The container element.
    */
   constructor(options = {}) {
     this.textbox = options.textbox;
@@ -356,9 +355,8 @@ class UrlbarInput {
   }
 
   /**
-   * Passes DOM events for the textbox to the _on_<event type> methods.
+   * Passes DOM events to the _on_<event type> methods.
    * @param {Event} event
-   *   DOM event from the <textbox>.
    */
   handleEvent(event) {
     let methodName = "_on_" + event.type;
@@ -408,12 +406,17 @@ class UrlbarInput {
     // Use the selected element if we have one; this is usually the case
     // when the view is open.
     let element = this.view.selectedElement;
-    if (!selectedOneOff && element) {
+    let result = this.view.getResultFromElement(element);
+    let selectedPrivateResult =
+      result &&
+      result.type == UrlbarUtils.RESULT_TYPE.SEARCH &&
+      result.payload.inPrivateWindow;
+    let selectedPrivateEngineResult =
+      selectedPrivateResult && result.payload.isPrivateEngine;
+    if (element && (!selectedOneOff || selectedPrivateEngineResult)) {
       this.pickElement(element, event);
       return;
     }
-
-    let result = this.view.getResultFromElement(element);
 
     let url;
     let selType = this.controller.engagementEvent.typeFromElement(element);
@@ -449,6 +452,10 @@ class UrlbarInput {
     );
 
     let where = openWhere || this._whereToOpen(event);
+    if (selectedPrivateResult) {
+      where = "window";
+      openParams.private = true;
+    }
     openParams.allowInheritPrincipal = false;
     url = this._maybeCanonizeURL(event, url) || url.trim();
 
@@ -642,6 +649,11 @@ class UrlbarInput {
           }
         }
 
+        if (result.payload.inPrivateWindow) {
+          where = "window";
+          openParams.private = true;
+        }
+
         const actionDetails = {
           isSuggestion: !!result.payload.suggestion,
           alias: result.payload.keyword,
@@ -812,6 +824,25 @@ class UrlbarInput {
   }
 
   /**
+   * Invoked by the view when the first result is received.
+   * To prevent selection flickering, we apply autofill on input through a
+   * placeholder, without waiting for results.
+   * But, if the first result is not an autofill one, the autofill prediction
+   * was wrong and we should restore the original user typed string.
+   * @param {UrlbarResult} firstResult The first result received.
+   */
+  maybeClearAutofillPlaceholder(firstResult) {
+    if (
+      this._autofillPlaceholder &&
+      !firstResult.autofill &&
+      // Avoid clobbering added spaces (for token aliases, for example).
+      !this.value.endsWith(" ")
+    ) {
+      this._setValue(this.window.gBrowser.userTypedValue, false);
+    }
+  }
+
+  /**
    * Starts a query based on the current input value.
    *
    * @param {boolean} [options.allowAutofill]
@@ -866,7 +897,6 @@ class UrlbarInput {
         allowAutofill,
         isPrivate: this.isPrivate,
         maxResults: UrlbarPrefs.get("maxRichResults"),
-        muxer: "UnifiedComplete",
         searchString,
         userContextId: this.window.gBrowser.selectedBrowser.getAttribute(
           "usercontextid"
@@ -976,10 +1006,25 @@ class UrlbarInput {
   }
 
   startLayoutExtend() {
+    // Do not expand if:
+    // The Urlbar does not support being expanded or it is already expanded
     if (
       !this.hasAttribute("breakout") ||
-      this.hasAttribute("breakout-extend") ||
-      this.selectionStart != this.selectionEnd ||
+      this.hasAttribute("breakout-extend")
+    ) {
+      return;
+    }
+    // The user is copying less than the entire string, provided the view is
+    // not open, otherwise it may be the autofill selection
+    if (
+      this.selectionStart != this.selectionEnd &&
+      !(this.selectionStart == 0 && this.selectionEnd == this.value.length) &&
+      !this.view.isOpen
+    ) {
+      return;
+    }
+    // The Urlbar is unfocused or the view is closed
+    if (
       !(
         (this.getAttribute("focused") == "true" &&
           !this.textbox.classList.contains("hidden-focus")) ||
@@ -1835,6 +1880,14 @@ class UrlbarInput {
         // the browser toolbox.
         if (!UrlbarPrefs.get("ui.popup.disable_autohide")) {
           this.view.close();
+        }
+
+        if (
+          event.target.id == "tabs-newtab-button" ||
+          event.target.id == "new-tab-button" ||
+          event.target.classList.contains("tab-close-button")
+        ) {
+          break;
         }
 
         // We collapse the urlbar for any clicks outside of it.

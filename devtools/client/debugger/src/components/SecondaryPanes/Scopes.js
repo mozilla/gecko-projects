@@ -33,13 +33,14 @@ import "./Scopes.css";
 
 const { ObjectInspector } = objectInspector;
 
+type OwnProps = {||};
 type Props = {
   cx: ThreadContext,
   selectedFrame: Object,
   generatedFrameScopes: Object,
   originalFrameScopes: Object | null,
   isLoading: boolean,
-  why: Why,
+  why: ?Why,
   mapScopesEnabled: boolean,
   openLink: typeof actions.openLink,
   openElementInInspector: typeof actions.openElementInInspectorCommand,
@@ -59,7 +60,7 @@ type State = {
 };
 
 class Scopes extends PureComponent<Props, State> {
-  constructor(props: Props, ...args) {
+  constructor(props: Props) {
     const {
       why,
       selectedFrame,
@@ -67,7 +68,7 @@ class Scopes extends PureComponent<Props, State> {
       generatedFrameScopes,
     } = props;
 
-    super(props, ...args);
+    super(props);
 
     this.state = {
       originalScopes: getScopes(why, selectedFrame, originalFrameScopes),
@@ -76,7 +77,7 @@ class Scopes extends PureComponent<Props, State> {
     };
   }
 
-  componentWillReceiveProps(nextProps) {
+  componentWillReceiveProps(nextProps: Props) {
     const {
       cx,
       selectedFrame,
@@ -115,7 +116,7 @@ class Scopes extends PureComponent<Props, State> {
     this.props.toggleMapScopes();
   };
 
-  onContextMenu = (event, item) => {
+  onContextMenu = (event: any, item: any) => {
     const { addWatchpoint, removeWatchpoint } = this.props;
 
     if (
@@ -275,7 +276,7 @@ const mapStateToProps = state => {
   };
 };
 
-export default connect(
+export default connect<Props, OwnProps, _, _, _, _>(
   mapStateToProps,
   {
     openLink: actions.openLink,

@@ -61,8 +61,11 @@
 #include "nsCSSAnonBoxes.h"
 #include "nsTextFragment.h"
 #include "nsIAnonymousContentCreator.h"
-#include "nsBindingManager.h"
-#include "nsXBLBinding.h"
+#ifdef MOZ_XBL
+#  include "nsBindingManager.h"
+#  include "nsXBLBinding.h"
+#  include "nsXBLService.h"
+#endif
 #include "nsContentUtils.h"
 #include "nsIScriptError.h"
 #ifdef XP_MACOSX
@@ -114,8 +117,6 @@
 #ifdef ACCESSIBILITY
 #  include "nsAccessibilityService.h"
 #endif
-
-#include "nsXBLService.h"
 
 #undef NOISY_FIRST_LETTER
 
@@ -673,7 +674,10 @@ struct PendingBinding : public LinkedListElement<PendingBinding> {
   ~PendingBinding() { MOZ_COUNT_DTOR(PendingBinding); }
 #endif
 
+#ifdef MOZ_XBL
+  // TODO: remove all of this struct.
   RefPtr<nsXBLBinding> mBinding;
+#endif
 };
 
 // Structure used for maintaining state information during the
@@ -950,6 +954,7 @@ nsFrameConstructorState::~nsFrameConstructorState() {
   for (auto& content : Reversed(mGeneratedContentWithInitializer)) {
     content->DeleteProperty(nsGkAtoms::genConInitializerProperty);
   }
+#ifdef MOZ_XBL
   if (!mPendingBindings.isEmpty()) {
     nsBindingManager* bindingManager =
         mPresShell->GetDocument()->BindingManager();
@@ -959,6 +964,7 @@ nsFrameConstructorState::~nsFrameConstructorState() {
     } while (!mPendingBindings.isEmpty());
     mCurrentPendingBindingInsertionPoint = nullptr;
   }
+#endif
 }
 
 void nsFrameConstructorState::ProcessFrameInsertionsForAllLists() {
@@ -2265,6 +2271,7 @@ nsIFrame* nsCSSFrameConstructor::ConstructDocElementFrame(
 
   const nsStyleDisplay* display = computedStyle->StyleDisplay();
 
+#ifdef MOZ_XBL
   // Ensure that our XBL bindings are installed.
   //
   // FIXME(emilio): Can we remove support for bindings on the root?
@@ -2295,7 +2302,7 @@ nsIFrame* nsCSSFrameConstructor::ConstructDocElementFrame(
       mDocument->BindingManager()->AddToAttachedQueue(binding);
     }
   }
-
+#endif
   // --------- IF SCROLLABLE WRAP IN SCROLLFRAME --------
 
   NS_ASSERTION(!display->IsScrollableOverflow() ||
@@ -3044,13 +3051,15 @@ nsIFrame* nsCSSFrameConstructor::ConstructFieldSetFrame(
   nsContainerFrame* contentFrameTop;
   nsContainerFrame* contentFrame;
   auto parent = scrollFrame ? scrollFrame : fieldsetFrame;
-  switch (fieldsetContentDisplay->mDisplay) {
-    case StyleDisplay::Flex:
+  MOZ_ASSERT(fieldsetContentDisplay->DisplayOutside() ==
+             StyleDisplayOutside::Block);
+  switch (fieldsetContentDisplay->DisplayInside()) {
+    case StyleDisplayInside::Flex:
       contentFrame = NS_NewFlexContainerFrame(mPresShell, fieldsetContentStyle);
       InitAndRestoreFrame(aState, content, parent, contentFrame);
       contentFrameTop = contentFrame;
       break;
-    case StyleDisplay::Grid:
+    case StyleDisplayInside::Grid:
       contentFrame = NS_NewGridContainerFrame(mPresShell, fieldsetContentStyle);
       InitAndRestoreFrame(aState, content, parent, contentFrame);
       contentFrameTop = contentFrame;
@@ -3691,15 +3700,13 @@ void nsCSSFrameConstructor::ConstructFrameFromItemInternal(
       nsContainerFrame* container = static_cast<nsContainerFrame*>(newFrame);
       nsContainerFrame* innerFrame;
       if (bits & FCDATA_ALLOW_GRID_FLEX_COLUMN) {
-        switch (display->mDisplay) {
-          case StyleDisplay::Flex:
-          case StyleDisplay::InlineFlex:
+        switch (display->DisplayInside()) {
+          case StyleDisplayInside::Flex:
             outerFrame = NS_NewFlexContainerFrame(mPresShell, outerStyle);
             InitAndRestoreFrame(aState, content, container, outerFrame);
             innerFrame = outerFrame;
             break;
-          case StyleDisplay::Grid:
-          case StyleDisplay::InlineGrid:
+          case StyleDisplayInside::Grid:
             outerFrame = NS_NewGridContainerFrame(mPresShell, outerStyle);
             InitAndRestoreFrame(aState, content, container, outerFrame);
             innerFrame = outerFrame;
@@ -5391,6 +5398,7 @@ nsCSSFrameConstructor::FindElementTagData(const Element& aElement,
   }
 }
 
+#ifdef MOZ_XBL
 nsCSSFrameConstructor::XBLBindingLoadInfo::XBLBindingLoadInfo(
     UniquePtr<PendingBinding> aPendingBinding)
     : mPendingBinding(std::move(aPendingBinding)), mSuccess(true) {}
@@ -5429,6 +5437,7 @@ nsCSSFrameConstructor::LoadXBLBindingIfNeeded(nsIContent& aContent,
 
   return XBLBindingLoadInfo(std::move(newPendingBinding));
 }
+#endif
 
 void nsCSSFrameConstructor::AddFrameConstructionItemsInternal(
     nsFrameConstructorState& aState, nsIContent* aContent,
@@ -5442,6 +5451,7 @@ void nsCSSFrameConstructor::AddFrameConstructionItemsInternal(
              aContent->NodeInfo()->NameAtom() == nsGkAtoms::area);
 
   PendingBinding* pendingBinding = nullptr;
+#ifdef MOZ_XBL
   {
     XBLBindingLoadInfo xblInfo =
         LoadXBLBindingIfNeeded(*aContent, *aComputedStyle, aFlags);
@@ -5454,6 +5464,7 @@ void nsCSSFrameConstructor::AddFrameConstructionItemsInternal(
       aState.AddPendingBinding(std::move(xblInfo.mPendingBinding));
     }
   }
+#endif
 
   const bool isGeneratedContent = !!(aFlags & ITEM_IS_GENERATED_CONTENT);
   MOZ_ASSERT(!isGeneratedContent || aComputedStyle->IsPseudoElement(),
@@ -6603,7 +6614,11 @@ nsCSSFrameConstructor::GetRangeInsertionPoint(nsIContent* aStartChild,
   // If the children of the container may be distributed to different insertion
   // points, insert them separately and bail out, letting ContentInserted handle
   // the mess.
-  if (parent->GetShadowRoot() || parent->GetXBLBinding()) {
+  if (parent->GetShadowRoot()
+#ifdef MOZ_XBL
+      || parent->GetXBLBinding()
+#endif
+  ) {
     IssueSingleInsertNofications(aStartChild, aEndChild, aInsertionKind);
     return {};
   }
@@ -11834,8 +11849,10 @@ void nsCSSFrameConstructor::GenerateChildFrames(nsContainerFrame* aFrame) {
   }
 #endif
 
+#ifdef MOZ_XBL
   // call XBL constructors after the frames are created
   mPresShell->GetDocument()->BindingManager()->ProcessAttachedQueue();
+#endif
 }
 
 //////////////////////////////////////////////////////////

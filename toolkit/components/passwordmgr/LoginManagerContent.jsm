@@ -66,6 +66,11 @@ ChromeUtils.defineModuleGetter(
   "ContentDOMReference",
   "resource://gre/modules/ContentDOMReference.jsm"
 );
+ChromeUtils.defineModuleGetter(
+  this,
+  "AutoCompleteChild",
+  "resource://gre/actors/AutoCompleteChild.jsm"
+);
 
 XPCOMUtils.defineLazyServiceGetter(
   this,
@@ -262,6 +267,76 @@ const observer = {
 // Add this observer once for the process.
 Services.obs.addObserver(observer, "autocomplete-did-enter-text");
 
+let gAutoCompleteListener = {
+  // Input element on which enter keydown event was fired.
+  keyDownEnterForInput: null,
+
+  added: false,
+
+  init() {
+    if (!this.added) {
+      AutoCompleteChild.addPopupStateListener((...args) => {
+        this.popupStateListener(...args);
+      });
+      this.added = true;
+    }
+  },
+
+  popupStateListener(messageName, data, target) {
+    switch (messageName) {
+      case "FormAutoComplete:PopupOpened": {
+        let { chromeEventHandler } = target.docShell;
+        chromeEventHandler.addEventListener("keydown", this, true);
+        break;
+      }
+
+      case "FormAutoComplete:PopupClosed": {
+        this.onPopupClosed(
+          data.selectedRowStyle,
+          target.docShell.messageManager
+        );
+        let { chromeEventHandler } = target.docShell;
+        chromeEventHandler.removeEventListener("keydown", this, true);
+        break;
+      }
+    }
+  },
+
+  handleEvent(event) {
+    if (event.type != "keydown") {
+      return;
+    }
+
+    let focusedElement = LoginManagerContent._formFillService.focusedInput;
+    if (
+      event.keyCode != event.DOM_VK_RETURN ||
+      focusedElement != event.target
+    ) {
+      this.keyDownEnterForInput = null;
+      return;
+    }
+    this.keyDownEnterForInput = focusedElement;
+  },
+
+  onPopupClosed(selectedRowStyle, mm) {
+    let focusedElement = LoginManagerContent._formFillService.focusedInput;
+    let eventTarget = this.keyDownEnterForInput;
+    if (
+      !eventTarget ||
+      eventTarget !== focusedElement ||
+      selectedRowStyle != "loginsFooter"
+    ) {
+      this.keyDownEnterForInput = null;
+      return;
+    }
+    let hostname = eventTarget.ownerDocument.documentURIObject.host;
+    mm.sendAsyncMessage("PasswordManager:OpenPreferences", {
+      hostname,
+      entryPoint: "autocomplete",
+    });
+  },
+};
+
 // This object maps to the "child" process (even in the single-process case).
 this.LoginManagerContent = {
   __formFillService: null, // FormFillController, for username autocompleting
@@ -313,9 +388,6 @@ this.LoginManagerContent = {
 
   // Number of outstanding requests to each manager.
   _managers: new Map(),
-
-  // Input element on which enter keydown event was fired.
-  _keyDownEnterForInput: null,
 
   _takeRequest(msg) {
     let data = msg.data;
@@ -400,36 +472,6 @@ this.LoginManagerContent = {
     return false;
   },
 
-  _onKeyDown(event) {
-    let focusedElement = LoginManagerContent._formFillService.focusedInput;
-    if (
-      event.keyCode != event.DOM_VK_RETURN ||
-      focusedElement != event.target
-    ) {
-      this._keyDownEnterForInput = null;
-      return;
-    }
-    LoginManagerContent._keyDownEnterForInput = focusedElement;
-  },
-
-  _onPopupClosed(selectedRowStyle, mm) {
-    let focusedElement = LoginManagerContent._formFillService.focusedInput;
-    let eventTarget = LoginManagerContent._keyDownEnterForInput;
-    if (
-      !eventTarget ||
-      eventTarget !== focusedElement ||
-      selectedRowStyle != "loginsFooter"
-    ) {
-      this._keyDownEnterForInput = null;
-      return;
-    }
-    let hostname = eventTarget.ownerDocument.documentURIObject.host;
-    mm.sendAsyncMessage("PasswordManager:OpenPreferences", {
-      hostname,
-      entryPoint: "autocomplete",
-    });
-  },
-
   receiveMessage(msg, topWindow) {
     if (msg.name == "PasswordManager:fillForm") {
       this.fillForm({
@@ -493,23 +535,6 @@ this.LoginManagerContent = {
         } else {
           log("Could not resolve inputElementIdentifier to a living element.");
         }
-        break;
-      }
-
-      case "FormAutoComplete:PopupOpened": {
-        let { chromeEventHandler } = msg.target.docShell;
-        chromeEventHandler.addEventListener("keydown", this._onKeyDown, true);
-        break;
-      }
-
-      case "FormAutoComplete:PopupClosed": {
-        this._onPopupClosed(msg.data.selectedRowStyle, msg.target);
-        let { chromeEventHandler } = msg.target.docShell;
-        chromeEventHandler.removeEventListener(
-          "keydown",
-          this._onKeyDown,
-          true
-        );
         break;
       }
     }
@@ -580,8 +605,7 @@ this.LoginManagerContent = {
     };
 
     if (LoginHelper.showAutoCompleteFooter) {
-      messageManager.addMessageListener("FormAutoComplete:PopupOpened", this);
-      messageManager.addMessageListener("FormAutoComplete:PopupClosed", this);
+      gAutoCompleteListener.init();
     }
 
     return this._sendRequest(
@@ -1077,6 +1101,20 @@ this.LoginManagerContent = {
         showMasterPassword: false,
       })
         .then(({ form, loginsFound, recipes }) => {
+          if (!loginGUID) {
+            // not an explicit autocomplete menu selection, filter for exact matches only
+            loginsFound = this._filterForExactFormOriginLogins(
+              loginsFound,
+              acForm
+            );
+            // filter the list for exact matches with the username
+            // NOTE: this could be an empty string which is a valid username
+            let searchString = usernameField.value.toLowerCase();
+            loginsFound = loginsFound.filter(
+              l => l.username.toLowerCase() == searchString
+            );
+          }
+
           this._fillForm(form, loginsFound, recipes, {
             autofillForm: true,
             clobberPassword: true,
@@ -1710,6 +1748,53 @@ this.LoginManagerContent = {
   },
 
   /**
+   * Filter logins for exact origin/formActionOrigin and dedupe on usernamematche
+   * @param {nsILoginInfo[]} logins an array of nsILoginInfo that could be
+   *        used for the form, including ones with a different form action origin
+   *        which are only used when the fill is userTriggered
+   * @param {LoginForm} form
+   */
+  _filterForExactFormOriginLogins(logins, form) {
+    let loginOrigin = LoginHelper.getLoginOrigin(
+      form.ownerDocument.documentURI
+    );
+    let formActionOrigin = LoginHelper.getFormActionOrigin(form);
+
+    logins = logins.filter(l => {
+      let formActionMatches = LoginHelper.isOriginMatching(
+        l.formActionOrigin,
+        formActionOrigin,
+        {
+          schemeUpgrades: LoginHelper.schemeUpgrades,
+          acceptWildcardMatch: true,
+          acceptDifferentSubdomains: false,
+        }
+      );
+      let formOriginMatches = LoginHelper.isOriginMatching(
+        l.origin,
+        loginOrigin,
+        {
+          schemeUpgrades: LoginHelper.schemeUpgrades,
+          acceptWildcardMatch: true,
+          acceptDifferentSubdomains: false,
+        }
+      );
+      return formActionMatches && formOriginMatches;
+    });
+
+    // Since the logins are already filtered now to only match the origin and formAction,
+    // dedupe to just the username since remaining logins may have different schemes.
+    logins = LoginHelper.dedupeLogins(
+      logins,
+      ["username"],
+      ["scheme", "timePasswordChanged"],
+      loginOrigin,
+      formActionOrigin
+    );
+    return logins;
+  },
+
+  /**
    * Attempt to find the username and password fields in a form, and fill them
    * in using the provided logins and recipes.
    *
@@ -1839,41 +1924,7 @@ this.LoginManagerContent = {
       if (!userTriggered) {
         // Only autofill logins that match the form's action and origin. In the above code
         // we have attached autocomplete for logins that don't match the form action.
-        let loginOrigin = LoginHelper.getLoginOrigin(
-          form.ownerDocument.documentURI
-        );
-        let formActionOrigin = LoginHelper.getFormActionOrigin(form);
-        foundLogins = foundLogins.filter(l => {
-          let formActionMatches = LoginHelper.isOriginMatching(
-            l.formActionOrigin,
-            formActionOrigin,
-            {
-              schemeUpgrades: LoginHelper.schemeUpgrades,
-              acceptWildcardMatch: true,
-              acceptDifferentSubdomains: false,
-            }
-          );
-          let formOriginMatches = LoginHelper.isOriginMatching(
-            l.origin,
-            loginOrigin,
-            {
-              schemeUpgrades: LoginHelper.schemeUpgrades,
-              acceptWildcardMatch: true,
-              acceptDifferentSubdomains: false,
-            }
-          );
-          return formActionMatches && formOriginMatches;
-        });
-
-        // Since the logins are already filtered now to only match the origin and formAction,
-        // dedupe to just the username since remaining logins may have different schemes.
-        foundLogins = LoginHelper.dedupeLogins(
-          foundLogins,
-          ["username"],
-          ["scheme", "timePasswordChanged"],
-          loginOrigin,
-          formActionOrigin
-        );
+        foundLogins = this._filterForExactFormOriginLogins(foundLogins, form);
       }
 
       // Nothing to do if we have no matching logins available.
@@ -2227,6 +2278,7 @@ this.LoginManagerContent = {
       ChromeUtils.getClassName(aField) !== "HTMLInputElement" ||
       (aField.type != "password" && !LoginHelper.isUsernameFieldType(aField)) ||
       aField.nodePrincipal.isNullPrincipal ||
+      aField.nodePrincipal.schemeIs("about") ||
       !aField.ownerDocument
     ) {
       return null;

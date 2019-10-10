@@ -95,6 +95,10 @@ const cssVars = {
   searchbarHeight: "var(--editor-searchbar-height)",
 };
 
+type OwnProps = {|
+  startPanelSize: number,
+  endPanelSize: number,
+|};
 export type Props = {
   cx: ThreadContext,
   selectedLocation: ?SourceLocation,
@@ -231,7 +235,7 @@ class Editor extends PureComponent<Props, State> {
     shortcuts.on("Esc", this.onEscape);
   }
 
-  onClosePress = (key, e: KeyboardEvent) => {
+  onClosePress = (key: mixed, e: KeyboardEvent) => {
     const { cx, selectedSource } = this.props;
     if (selectedSource) {
       e.preventDefault();
@@ -265,7 +269,7 @@ class Editor extends PureComponent<Props, State> {
     return toSourceLine(selectedSource.id, line);
   }
 
-  onToggleBreakpoint = (key, e: KeyboardEvent) => {
+  onToggleBreakpoint = (key: mixed, e: KeyboardEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
@@ -277,7 +281,7 @@ class Editor extends PureComponent<Props, State> {
     this.props.toggleBreakpointAtLine(this.props.cx, line);
   };
 
-  onToggleConditionalPanel = (key, e: KeyboardEvent) => {
+  onToggleConditionalPanel = (key: mixed, e: KeyboardEvent) => {
     e.stopPropagation();
     e.preventDefault();
 
@@ -341,7 +345,7 @@ class Editor extends PureComponent<Props, State> {
    * split console. Restore it here, but preventDefault if and only if there
    * is a multiselection.
    */
-  onEscape = (key, e: KeyboardEvent) => {
+  onEscape = (key: mixed, e: KeyboardEvent) => {
     if (!this.state.editor) {
       return;
     }
@@ -484,7 +488,7 @@ class Editor extends PureComponent<Props, State> {
     }
   }
 
-  shouldScrollToLocation(nextProps, editor) {
+  shouldScrollToLocation(nextProps: Props, editor: SourceEditor) {
     const { selectedLocation, selectedSource } = this.props;
     if (
       !editor ||
@@ -505,7 +509,7 @@ class Editor extends PureComponent<Props, State> {
     return isFirstLoad || locationChanged || symbolsChanged;
   }
 
-  scrollToLocation(nextProps, editor) {
+  scrollToLocation(nextProps: Props, editor: SourceEditor) {
     const { selectedLocation, selectedSource } = nextProps;
 
     if (selectedLocation && this.shouldScrollToLocation(nextProps, editor)) {
@@ -521,7 +525,7 @@ class Editor extends PureComponent<Props, State> {
     }
   }
 
-  setSize(nextProps, editor) {
+  setSize(nextProps: Props, editor: SourceEditor) {
     if (!editor) {
       return;
     }
@@ -534,7 +538,7 @@ class Editor extends PureComponent<Props, State> {
     }
   }
 
-  setText(props, editor) {
+  setText(props: Props, editor: ?SourceEditor) {
     const { selectedSource, symbols } = props;
 
     if (!editor) {
@@ -576,7 +580,7 @@ class Editor extends PureComponent<Props, State> {
     clearEditor(editor);
   }
 
-  showErrorMessage(msg) {
+  showErrorMessage(msg: string) {
     const { editor } = this.state;
     if (!editor) {
       return;
@@ -615,7 +619,7 @@ class Editor extends PureComponent<Props, State> {
 
     return (
       <div>
-        <DebugLine editor={editor} />
+        <DebugLine />
         <HighlightLine />
         <EmptyLines editor={editor} />
         <Breakpoints editor={editor} cx={cx} />
@@ -712,7 +716,7 @@ const mapDispatchToProps = dispatch => ({
   editorActions: editorItemActions(dispatch),
 });
 
-export default connect(
+export default connect<Props, OwnProps, _, _, _, _>(
   mapStateToProps,
   mapDispatchToProps
 )(Editor);
