@@ -791,9 +791,11 @@ SHEntryChild::GetChildCount(int32_t* aCount) {
 }
 
 NS_IMETHODIMP
-SHEntryChild::AddChild(nsISHEntry* aChild, int32_t aOffset) {
+SHEntryChild::AddChild(nsISHEntry* aChild, int32_t aOffset,
+                       bool aUseRemoteSubframes) {
   nsresult rv;
-  return SendAddChild(static_cast<SHEntryChild*>(aChild), aOffset, &rv)
+  return SendAddChild(static_cast<SHEntryChild*>(aChild), aOffset,
+                      aUseRemoteSubframes, &rv)
              ? rv
              : NS_ERROR_FAILURE;
 }

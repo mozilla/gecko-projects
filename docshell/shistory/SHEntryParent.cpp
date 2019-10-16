@@ -495,10 +495,10 @@ bool SHEntryParent::RecvSetLoadTypeAsHistory() {
 }
 
 bool SHEntryParent::RecvAddChild(PSHEntryParent* aChild, const int32_t& aOffset,
-                                 nsresult* aResult) {
+                                 const bool& aUseRemoteSubframes, nsresult* aResult) {
   *aResult = mEntry->AddChild(
       aChild ? static_cast<SHEntryParent*>(aChild)->mEntry.get() : nullptr,
-      aOffset);
+      aOffset, aUseRemoteSubframes);
   return true;
 }
 

@@ -179,7 +179,7 @@ class SHEntryParent final : public PSHEntryParent {
                               nsresult* aResult);
   bool RecvSetLoadTypeAsHistory();
   bool RecvAddChild(PSHEntryParent* aChild, const int32_t& aOffset,
-                    nsresult* aResult);
+                    const bool& aUseRemoteSubframes, nsresult* aResult);
   bool RecvRemoveChild(PSHEntryParent* aChild, nsresult* aResult);
   bool RecvGetChildAt(const int32_t& aIndex,
                       RefPtr<CrossProcessSHEntry>* aChild);

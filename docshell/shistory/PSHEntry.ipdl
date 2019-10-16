@@ -100,7 +100,7 @@ parent:
   sync SharesDocumentWith(PSHEntry entry) returns (bool sharesDocumentWith,
                                                    nsresult result);
   async SetLoadTypeAsHistory();
-  sync AddChild(nullable PSHEntry childEntry, int32_t offset) returns (nsresult result);
+  sync AddChild(nullable PSHEntry childEntry, int32_t offset, bool useRemoteSubframes) returns (nsresult result);
   sync RemoveChild(PSHEntry childEntry) returns (nsresult result);
   sync GetChildAt(int32_t index) returns (CrossProcessSHEntry childEntry);
   sync GetChildSHEntryIfHasNoDynamicallyAddedChild(int32_t childOffset) returns (CrossProcessSHEntry childEntry);
