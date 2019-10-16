@@ -21,8 +21,8 @@ async protocol PDNSRequest
 {
   manager PNecko or PSocketProcess;
 
-parent:
-  // constructor in PNecko takes AsyncResolve args that initialize request
+both:
+  // constructor in PNecko or PSocketProcess takes AsyncResolve args that initialize request
 
   // Pass args here rather than storing them in the parent; they are only
   // needed if the request is to be canceled.
@@ -30,10 +30,7 @@ parent:
                          OriginAttributes originAttributes,
                          uint32_t flags, nsresult reason);
   async __delete__();
-
-child:
   async LookupCompleted(DNSRequestResponse reply);
-
 };
 
 } //namespace net

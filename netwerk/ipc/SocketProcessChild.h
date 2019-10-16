@@ -52,6 +52,10 @@ class SocketProcessChild final : public PSocketProcessChild {
   PDNSRequestChild* AllocPDNSRequestChild(
       const nsCString& aHost, const OriginAttributes& aOriginAttributes,
       const uint32_t& aFlags);
+  virtual mozilla::ipc::IPCResult RecvPDNSRequestConstructor(
+      PDNSRequestChild* actor, const nsCString& hostName,
+      const OriginAttributes& aOriginAttributes,
+      const uint32_t& flags) override;
   bool DeallocPDNSRequestChild(PDNSRequestChild*);
   mozilla::ipc::IPCResult RecvPHttpTransactionConstructor(
       PHttpTransactionChild* actor, const uint64_t& aChannelId) override;
@@ -78,6 +82,7 @@ class SocketProcessChild final : public PSocketProcessChild {
       GetHttpConnectionDataResolver&& aResolve);
   mozilla::ipc::IPCResult RecvDoShiftReloadConnectionCleanup(
       const nsCString& hashKey);
+  mozilla::ipc::IPCResult RecvClearDNSCache(const bool& aTrrToo);
 
   void CleanUp();
   void DestroySocketProcessBridgeParent(ProcessId aId);

@@ -58,8 +58,6 @@ parent:
 
   /* tabId is only required for web-proxy support, which isn't always needed */
   async PWebrtcTCPSocket(TabId? tabId);
-  async PDNSRequest(nsCString hostName, OriginAttributes originAttributes,
-                    uint32_t flags);
 
 child:
   async PreferenceUpdate(Pref pref);
@@ -78,12 +76,15 @@ child:
   async GetHttpConnectionData()
     returns (HttpRetParams[] params);
   async DoShiftReloadConnectionCleanup(nsCString hashKey);
+  async ClearDNSCache(bool trrToo);
 
   // test-only
   async SocketProcessTelemetryPing();
 
 both:
   async PFileDescriptorSet(FileDescriptor fd);
+  async PDNSRequest(nsCString hostName, OriginAttributes originAttributes,
+                    uint32_t flags);
 
 };
 

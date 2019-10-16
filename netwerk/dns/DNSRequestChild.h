@@ -7,60 +7,32 @@
 #ifndef mozilla_net_DNSRequestChild_h
 #define mozilla_net_DNSRequestChild_h
 
+#include "mozilla/net/DNSRequestBase.h"
 #include "mozilla/net/PDNSRequestChild.h"
-#include "nsICancelable.h"
-#include "nsIDNSRecord.h"
-#include "nsIDNSListener.h"
-#include "nsIDNSByTypeRecord.h"
-#include "nsIEventTarget.h"
 
 namespace mozilla {
 namespace net {
 
-class DNSRequestChild final : public PDNSRequestChild, public nsICancelable {
+class DNSRequestChild final : public DNSRequestActor, public PDNSRequestChild {
   friend class PDNSRequestChild;
 
  public:
-  NS_DECL_THREADSAFE_ISUPPORTS
-  NS_DECL_NSICANCELABLE
+  explicit DNSRequestChild(DNSRequestBase* aRequest)
+      : DNSRequestActor(aRequest) {}
 
-  DNSRequestChild(const nsACString& aHost, const uint16_t& aType,
-                  const OriginAttributes& aOriginAttributes,
-                  const uint32_t& aFlags, nsIDNSListener* aListener,
-                  nsIEventTarget* target);
-
-  void AddIPDLReference() { AddRef(); }
-  void ReleaseIPDLReference();
-
-  // Sends IPDL request to parent
-  void StartRequest();
-  void CallOnLookupComplete();
-  void CallOnLookupByTypeComplete();
+  DNSRequestChild* AsDNSRequestChild() override { return this; }
+  DNSRequestParent* AsDNSRequestParent() override { return nullptr; }
 
  protected:
-  friend class CancelDNSRequestEvent;
-  friend class ChildDNSService;
-  virtual ~DNSRequestChild() {}
+  virtual ~DNSRequestChild() = default;
 
+  mozilla::ipc::IPCResult RecvCancelDNSRequest(
+      const nsCString& hostName, const uint16_t& type,
+      const OriginAttributes& originAttributes, const uint32_t& flags,
+      const nsresult& reason);
+  mozilla::ipc::IPCResult Recv__delete__() override;
   mozilla::ipc::IPCResult RecvLookupCompleted(const DNSRequestResponse& reply);
   virtual void ActorDestroy(ActorDestroyReason why) override;
-
-  nsCOMPtr<nsIDNSListener> mListener;
-  nsCOMPtr<nsIEventTarget> mTarget;
-  nsCOMPtr<nsIDNSRecord> mResultRecord;
-  nsCOMPtr<nsIDNSByTypeRecord>
-      mResultByTypeRecords;  // the result of a by-type
-                             // query (mType must not be
-                             // equal to
-                             // nsIDNSService::RESOLVE_TYPE_DEFAULT
-                             // (this is reserved for
-                             // the standard A/AAAA query)).
-  nsresult mResultStatus;
-  nsCString mHost;
-  uint16_t mType;
-  const OriginAttributes mOriginAttributes;
-  uint16_t mFlags;
-  bool mIPCOpen;
 };
 
 }  // namespace net

@@ -19,6 +19,7 @@
 #include "mozilla/net/DNSRequestChild.h"
 #include "mozilla/ipc/PChildToParentStreamChild.h"
 #include "mozilla/ipc/PParentToChildStreamChild.h"
+#include "mozilla/net/DNSRequestChild.h"
 #include "mozilla/Preferences.h"
 #include "nsDebugImpl.h"
 #include "nsSocketTransportService2.h"
@@ -263,6 +264,29 @@ mozilla::ipc::IPCResult SocketProcessChild::RecvInitProfiler(
   return IPC_OK();
 }
 
+PDNSRequestChild* SocketProcessChild::AllocPDNSRequestChild(
+    const nsCString& aHost, const OriginAttributes& aOriginAttributes,
+    const uint32_t& aFlags) {
+  RefPtr<DNSRequestHandler> handler = new DNSRequestHandler();
+  DNSRequestChild* p = new DNSRequestChild(handler);
+  p->AddIPDLReference();
+
+  handler->DoAsyncResolve(aHost, aOriginAttributes, aFlags);
+  return p;
+}
+
+mozilla::ipc::IPCResult SocketProcessChild::RecvPDNSRequestConstructor(
+    PDNSRequestChild* aActor, const nsCString& aHost,
+    const OriginAttributes& aOriginAttributes, const uint32_t& aFlags) {
+  return IPC_OK();
+}
+
+bool SocketProcessChild::DeallocPDNSRequestChild(PDNSRequestChild* aActor) {
+  DNSRequestChild* p = static_cast<DNSRequestChild*>(aActor);
+  p->ReleaseIPDLReference();
+  return true;
+}
+
 mozilla::ipc::IPCResult SocketProcessChild::RecvSocketProcessTelemetryPing() {
   const uint32_t kExpectedUintValue = 42;
   Telemetry::ScalarSet(Telemetry::ScalarID::TELEMETRY_TEST_SOCKET_ONLY_UINT,
@@ -323,19 +347,14 @@ mozilla::ipc::IPCResult SocketProcessChild::RecvTopLevelOuterWindowId(
   return IPC_OK();
 }
 
-PDNSRequestChild* SocketProcessChild::AllocPDNSRequestChild(
-    const nsCString& aHost, const OriginAttributes& aOriginAttributes,
-    const uint32_t& aFlags) {
-  // We don't allocate here: instead we always use IPDL constructor that takes
-  // an existing object
-  MOZ_ASSERT_UNREACHABLE("AllocPDNSRequestChild should not be called on child");
-  return nullptr;
-}
-
-bool SocketProcessChild::DeallocPDNSRequestChild(PDNSRequestChild* aChild) {
-  DNSRequestChild* p = static_cast<DNSRequestChild*>(aChild);
-  p->ReleaseIPDLReference();
-  return true;
+mozilla::ipc::IPCResult SocketProcessChild::RecvClearDNSCache(
+    const bool& aTrrToo) {
+  nsCOMPtr<nsIDNSService> dns =
+      do_GetService("@mozilla.org/network/dns-service;1");
+  if (dns) {
+    dns->ClearCache(aTrrToo);
+  }
+  return IPC_OK();
 }
 
 class HttpConnectionDataResolver final {

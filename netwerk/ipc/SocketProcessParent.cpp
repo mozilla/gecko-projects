@@ -147,16 +147,17 @@ bool SocketProcessParent::DeallocPWebrtcTCPSocketParent(
 PDNSRequestParent* SocketProcessParent::AllocPDNSRequestParent(
     const nsCString& aHost, const OriginAttributes& aOriginAttributes,
     const uint32_t& aFlags) {
-  DNSRequestParent* p = new DNSRequestParent();
-  p->AddRef();
+  RefPtr<DNSRequestHandler> handler = new DNSRequestHandler();
+  DNSRequestParent* p = new DNSRequestParent(handler);
+  p->AddIPDLReference();
+
+  handler->DoAsyncResolve(aHost, aOriginAttributes, aFlags);
   return p;
 }
 
 mozilla::ipc::IPCResult SocketProcessParent::RecvPDNSRequestConstructor(
     PDNSRequestParent* aActor, const nsCString& aHost,
     const OriginAttributes& aOriginAttributes, const uint32_t& aFlags) {
-  static_cast<DNSRequestParent*>(aActor)->DoAsyncResolve(
-      aHost, aOriginAttributes, aFlags);
   return IPC_OK();
 }
 
@@ -165,7 +166,6 @@ bool SocketProcessParent::DeallocPDNSRequestParent(PDNSRequestParent* aParent) {
   p->Release();
   return true;
 }
-
 
 PHttpTransactionParent* SocketProcessParent::AllocPHttpTransactionParent(
     const uint64_t& aChannelID) {

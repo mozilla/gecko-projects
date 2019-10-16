@@ -118,7 +118,6 @@ class nsIOService final : public nsIIOService,
   void OnProcessUnexpectedShutdown(SocketProcessHost* aHost);
   bool SocketProcessReady();
   void NotifySocketProcessPrefsChanged(const char* aName);
-  bool IsSocketProcessEnabled() { return mSocketProcess; }
   bool UseSocketProcess();
 
   bool IsSocketProcessLaunchComplete();

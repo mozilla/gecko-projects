@@ -7,22 +7,17 @@
 #ifndef mozilla_net_DNSRequestParent_h
 #define mozilla_net_DNSRequestParent_h
 
+#include "mozilla/net/DNSRequestBase.h"
 #include "mozilla/net/PDNSRequestParent.h"
 #include "nsIDNSService.h"
-#include "nsIDNSListener.h"
 
 namespace mozilla {
 namespace net {
 
-class DNSRequestParent : public PDNSRequestParent, public nsIDNSListener {
+class DNSRequestParent : public DNSRequestActor, public PDNSRequestParent {
  public:
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIDNSLISTENER
-
-  DNSRequestParent();
-
-  void DoAsyncResolve(const nsACString& hostname,
-                      const OriginAttributes& originAttributes, uint32_t flags);
+  explicit DNSRequestParent(DNSRequestBase* aRequest)
+      : DNSRequestActor(aRequest) {}
 
   // Pass args here rather than storing them in the parent; they are only
   // needed if the request is to be canceled.
@@ -31,15 +26,16 @@ class DNSRequestParent : public PDNSRequestParent, public nsIDNSListener {
       const OriginAttributes& originAttributes, const uint32_t& flags,
       const nsresult& reason);
   mozilla::ipc::IPCResult Recv__delete__() override;
+  mozilla::ipc::IPCResult RecvLookupCompleted(const DNSRequestResponse& reply);
+
+  DNSRequestChild* AsDNSRequestChild() override { return nullptr; }
+  DNSRequestParent* AsDNSRequestParent() override { return this; }
 
  protected:
   virtual void ActorDestroy(ActorDestroyReason why) override;
 
  private:
   virtual ~DNSRequestParent() = default;
-
-  uint32_t mFlags;
-  bool mIPCClosed;  // true if IPDL channel has been closed (child crash)
 };
 
 }  // namespace net

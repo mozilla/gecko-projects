@@ -601,22 +601,23 @@ bool NeckoParent::DeallocPUDPSocketParent(PUDPSocketParent* actor) {
 PDNSRequestParent* NeckoParent::AllocPDNSRequestParent(
     const nsCString& aHost, const OriginAttributes& aOriginAttributes,
     const uint32_t& aFlags) {
-  DNSRequestParent* p = new DNSRequestParent();
-  p->AddRef();
+  RefPtr<DNSRequestHandler> handler = new DNSRequestHandler();
+  DNSRequestParent* p = new DNSRequestParent(handler);
+  p->AddIPDLReference();
+
+  handler->DoAsyncResolve(aHost, aOriginAttributes, aFlags);
   return p;
 }
 
 mozilla::ipc::IPCResult NeckoParent::RecvPDNSRequestConstructor(
     PDNSRequestParent* aActor, const nsCString& aHost,
     const OriginAttributes& aOriginAttributes, const uint32_t& aFlags) {
-  static_cast<DNSRequestParent*>(aActor)->DoAsyncResolve(
-      aHost, aOriginAttributes, aFlags);
   return IPC_OK();
 }
 
 bool NeckoParent::DeallocPDNSRequestParent(PDNSRequestParent* aParent) {
   DNSRequestParent* p = static_cast<DNSRequestParent*>(aParent);
-  p->Release();
+  p->ReleaseIPDLReference();
   return true;
 }
 
