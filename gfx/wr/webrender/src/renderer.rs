@@ -2419,6 +2419,10 @@ impl Renderer {
         self.device.preferred_color_formats().external
     }
 
+    pub fn optimal_texture_stride_alignment(&self) -> usize {
+        self.device.optimal_pbo_stride().get()
+    }
+
     pub fn flush_pipeline_info(&mut self) -> PipelineInfo {
         mem::replace(&mut self.pipeline_info, PipelineInfo::default())
     }
@@ -2787,7 +2791,8 @@ impl Renderer {
 
     fn handle_debug_command(&mut self, command: DebugCommand) {
         match command {
-            DebugCommand::EnableDualSourceBlending(_) => {
+            DebugCommand::EnableDualSourceBlending(_) |
+            DebugCommand::SetTransactionLogging(_) => {
                 panic!("Should be handled by render backend");
             }
             DebugCommand::FetchDocuments |
@@ -6108,6 +6113,7 @@ impl Renderer {
                 CaptureConfig::save_png(
                     root.join(format!("textures/{}-{}.png", name, layer_id)),
                     rect_size, format,
+                    None,
                     data_ref,
                 );
             }
@@ -6231,6 +6237,7 @@ impl Renderer {
                         config.root.join(&short_path).with_extension("png"),
                         def.descriptor.size,
                         def.descriptor.format,
+                        def.descriptor.stride,
                         &bytes,
                     );
                 }

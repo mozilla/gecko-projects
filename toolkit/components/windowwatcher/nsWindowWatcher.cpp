@@ -593,7 +593,6 @@ nsresult nsWindowWatcher::OpenWindowInternal(
   bool windowNeedsName = false;
   bool windowIsModal = false;
   bool uriToLoadIsChrome = false;
-  bool windowIsModalContentDialog = false;
 
   uint32_t chromeFlags;
   nsAutoString name;           // string version of aName
@@ -697,8 +696,6 @@ nsresult nsWindowWatcher::OpenWindowInternal(
   } else {
     chromeFlags = CalculateChromeFlagsForChild(features);
 
-    // Until ShowModalDialog is removed, it's still possible for content to
-    // request dialogs, but only in single-process mode.
     if (aDialog) {
       MOZ_ASSERT(XRE_IsParentProcess());
       chromeFlags |= nsIWebBrowserChrome::CHROME_OPENAS_DIALOG;
@@ -812,14 +809,6 @@ nsresult nsWindowWatcher::OpenWindowInternal(
 
         if (NS_SUCCEEDED(rv) && newBC) {
           nsCOMPtr<nsIDocShell> newDocShell = newBC->GetDocShell();
-          if (windowIsNew && newDocShell) {
-            // Make sure to stop any loads happening in this window that the
-            // window provider might have started.  Otherwise if our caller
-            // manipulates the window it just opened and then the load
-            // completes their stuff will get blown away.
-            nsCOMPtr<nsIWebNavigation> webNav = do_QueryInterface(newDocShell);
-            webNav->Stop(nsIWebNavigation::STOP_NETWORK);
-          }
 
           // If this is a new window, but it's incompatible with the current
           // userContextId, we ignore it and we pretend that nothing has been
@@ -1029,7 +1018,7 @@ nsresult nsWindowWatcher::OpenWindowInternal(
     MaybeDisablePersistence(features, newTreeOwner);
   }
 
-  if ((aDialog || windowIsModalContentDialog) && aArgv) {
+  if (aDialog && aArgv) {
     MOZ_ASSERT(win);
     NS_ENSURE_TRUE(win, NS_ERROR_UNEXPECTED);
 
@@ -1271,8 +1260,7 @@ nsresult nsWindowWatcher::OpenWindowInternal(
     SizeOpenedWindow(newTreeOwner, aParent, isCallerChrome, sizeSpec);
   }
 
-  // XXXbz isn't windowIsModal always true when windowIsModalContentDialog?
-  if (windowIsModal || windowIsModalContentDialog) {
+  if (windowIsModal) {
     NS_ENSURE_TRUE(newDocShell, NS_ERROR_NOT_IMPLEMENTED);
 
     nsCOMPtr<nsIDocShellTreeOwner> newTreeOwner;

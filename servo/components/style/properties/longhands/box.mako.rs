@@ -53,7 +53,7 @@ ${helpers.single_keyword(
 >
 impl computed_value::T {
     pub fn is_absolutely_positioned(self) -> bool {
-        matches!(self, computed_value::T::Absolute | computed_value::T::Fixed)
+        matches!(self, Self::Absolute | Self::Fixed)
     }
 }
 </%helpers:single_keyword>
@@ -454,7 +454,6 @@ ${helpers.predefined_type(
     "ScrollSnapAlign",
     "computed::ScrollSnapAlign::none()",
     engines="gecko",
-    gecko_pref="layout.css.scroll-snap-v1.enabled",
     spec="https://drafts.csswg.org/css-scroll-snap-1/#scroll-snap-align",
     animation_value_type="discrete",
 )}

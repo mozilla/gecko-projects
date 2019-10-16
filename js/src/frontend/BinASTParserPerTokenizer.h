@@ -141,9 +141,9 @@ class BinASTParserPerTokenizer : public BinASTParserBase,
                                             FunctionSyntaxKind syntax,
                                             ParseNode* name);
 
-  JS::Result<FunctionNode*> makeEmptyFunctionNode(const size_t start,
-                                                  const BinASTKind kind,
-                                                  FunctionBox* funbox);
+  JS::Result<FunctionNode*> makeEmptyFunctionNode(
+      const size_t start, const FunctionSyntaxKind syntaxKind,
+      FunctionBox* funbox);
   MOZ_MUST_USE JS::Result<Ok> setFunctionParametersAndBody(FunctionNode* fun,
                                                            ListNode* params,
                                                            ParseNode* body);
@@ -198,6 +198,16 @@ class BinASTParserPerTokenizer : public BinASTParserBase,
   // Optionally force a strict context without restarting the parse when we see
   // a strict directive.
   void forceStrictIfNecessary(SharedContext* sc, ListNode* directives);
+
+  // Whether invalid BinASTKind/BinASTVariant can be encoded in the file.
+  // This is used to avoid generating unnecessary branches for more
+  // optimized format.
+  static constexpr bool isInvalidKindPossible() {
+    return mozilla::IsSame<Tok, BinASTTokenReaderMultipart>::value;
+  }
+  static constexpr bool isInvalidVariantPossible() {
+    return mozilla::IsSame<Tok, BinASTTokenReaderMultipart>::value;
+  }
 
  protected:
   // Implement ErrorReportMixin.

@@ -21,6 +21,7 @@
 #include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/Flex.h"
 #include "mozilla/dom/Grid.h"
+#include "mozilla/dom/Link.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/Text.h"
 #include "mozilla/gfx/Matrix.h"
@@ -538,6 +539,16 @@ nsDOMTokenList* Element::ClassList() {
   return slots->mClassList;
 }
 
+nsDOMTokenList* Element::Part() {
+  Element::nsDOMSlots* slots = DOMSlots();
+
+  if (!slots->mPart) {
+    slots->mPart = new nsDOMTokenList(this, nsGkAtoms::part);
+  }
+
+  return slots->mPart;
+}
+
 void Element::GetAttributeNames(nsTArray<nsString>& aResult) {
   uint32_t count = mAttrs.AttrCount();
   for (uint32_t i = 0; i < count; ++i) {
@@ -664,14 +675,12 @@ void Element::ScrollIntoView(const ScrollIntoViewOptions& aOptions) {
       MOZ_ASSERT_UNREACHABLE("Unexpected ScrollLogicalPosition value");
   }
 
-  ScrollFlags scrollFlags = ScrollFlags::ScrollOverflowHidden;
+  ScrollFlags scrollFlags =
+      ScrollFlags::ScrollOverflowHidden | ScrollFlags::ScrollSnap;
   if (aOptions.mBehavior == ScrollBehavior::Smooth) {
     scrollFlags |= ScrollFlags::ScrollSmooth;
   } else if (aOptions.mBehavior == ScrollBehavior::Auto) {
     scrollFlags |= ScrollFlags::ScrollSmoothAuto;
-  }
-  if (StaticPrefs::layout_css_scroll_snap_v1_enabled()) {
-    scrollFlags |= ScrollFlags::ScrollSnap;
   }
 
   presShell->ScrollContentIntoView(
@@ -889,7 +898,7 @@ nsRect Element::GetClientAreaRect() {
       // The display check is OK even though we're not looking at the style
       // frame, because the style frame only differs from "frame" for tables,
       // and table wrappers have the same display as the table itself.
-      (frame->StyleDisplay()->mDisplay != StyleDisplay::Inline ||
+      (!frame->StyleDisplay()->IsInlineFlow() ||
        frame->IsFrameOfType(nsIFrame::eReplaced))) {
     // Special case code to make client area work even when there isn't
     // a scroll view, see bug 180552, bug 227567.
@@ -3102,45 +3111,12 @@ nsresult Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor) {
 
 void Element::GetLinkTarget(nsAString& aTarget) { aTarget.Truncate(); }
 
-static void nsDOMTokenListPropertyDestructor(void* aObject, nsAtom* aProperty,
-                                             void* aPropertyValue,
-                                             void* aData) {
-  nsDOMTokenList* list = static_cast<nsDOMTokenList*>(aPropertyValue);
-  NS_RELEASE(list);
-}
-
 static nsStaticAtom* const sPropertiesToTraverseAndUnlink[] = {
-    nsGkAtoms::sandbox, nsGkAtoms::sizes, nsGkAtoms::dirAutoSetBy, nullptr};
+    nsGkAtoms::dirAutoSetBy, nullptr};
 
 // static
 nsStaticAtom* const* Element::HTMLSVGPropertiesToTraverseAndUnlink() {
   return sPropertiesToTraverseAndUnlink;
-}
-
-nsDOMTokenList* Element::GetTokenList(
-    nsAtom* aAtom, const DOMTokenListSupportedTokenArray aSupportedTokens) {
-#ifdef DEBUG
-  const nsStaticAtom* const* props = HTMLSVGPropertiesToTraverseAndUnlink();
-  bool found = false;
-  for (uint32_t i = 0; props[i]; ++i) {
-    if (props[i] == aAtom) {
-      found = true;
-      break;
-    }
-  }
-  MOZ_ASSERT(found, "Trying to use an unknown tokenlist!");
-#endif
-
-  nsDOMTokenList* list = nullptr;
-  if (HasProperties()) {
-    list = static_cast<nsDOMTokenList*>(GetProperty(aAtom));
-  }
-  if (!list) {
-    list = new nsDOMTokenList(this, aAtom, aSupportedTokens);
-    NS_ADDREF(list);
-    SetProperty(aAtom, list, nsDOMTokenListPropertyDestructor);
-  }
-  return list;
 }
 
 nsresult Element::CopyInnerTo(Element* aDst, ReparseAttributes aReparse) {
@@ -4379,6 +4355,15 @@ double Element::FirstLineBoxBSize() const {
              ? nsPresContext::AppUnitsToDoubleCSSPixels(line->BSize())
              : 0.0;
 }
+
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+void Element::AssertInvariantsOnNodeInfoChange() {
+  MOZ_DIAGNOSTIC_ASSERT(!IsInComposedDoc());
+  if (nsCOMPtr<Link> link = do_QueryInterface(this)) {
+    MOZ_DIAGNOSTIC_ASSERT(!link->HasPendingLinkUpdate());
+  }
+}
+#endif
 
 }  // namespace dom
 }  // namespace mozilla

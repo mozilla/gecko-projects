@@ -24,9 +24,11 @@
 #include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Components.h"
 #include "mozilla/HashTable.h"
 #include "mozilla/Logging.h"
 #include "mozilla/StaticPtr.h"
+#include "nsIURIFixup.h"
 
 #include "nsDocShell.h"
 #include "nsGlobalWindowOuter.h"
@@ -807,8 +809,40 @@ void BrowsingContext::Location(JSContext* aCx,
   }
 }
 
+void BrowsingContext::LoadURI(const nsAString& aURI,
+                              const LoadURIOptions& aOptions,
+                              ErrorResult& aError) {
+  nsCOMPtr<nsIURIFixup> uriFixup = components::URIFixup::Service();
+
+  nsCOMPtr<nsISupports> consumer = mDocShell.get();
+  if (!consumer) {
+    consumer = mEmbedderElement;
+  }
+  if (!consumer) {
+    aError.Throw(NS_ERROR_UNEXPECTED);
+    return;
+  }
+
+  RefPtr<nsDocShellLoadState> loadState;
+  nsresult rv = nsDocShellLoadState::CreateFromLoadURIOptions(
+      consumer, uriFixup, aURI, aOptions, getter_AddRefs(loadState));
+
+  if (rv == NS_ERROR_MALFORMED_URI) {
+    DisplayLoadError(aURI);
+    return;
+  }
+
+  if (NS_FAILED(rv)) {
+    aError.Throw(rv);
+    return;
+  }
+
+  LoadURI(nullptr, loadState, true);
+}
+
 nsresult BrowsingContext::LoadURI(BrowsingContext* aAccessor,
-                                  nsDocShellLoadState* aLoadState) {
+                                  nsDocShellLoadState* aLoadState,
+                                  bool aSetNavigating) {
   // Per spec, most load attempts are silently ignored when a BrowsingContext is
   // null (which in our code corresponds to discarded), so we simply fail
   // silently in those cases. Regardless, we cannot trigger loads in/from
@@ -818,24 +852,52 @@ nsresult BrowsingContext::LoadURI(BrowsingContext* aAccessor,
   }
 
   if (mDocShell) {
-    return mDocShell->LoadURI(aLoadState);
+    return mDocShell->LoadURI(aLoadState, aSetNavigating);
   }
 
   if (!aAccessor && XRE_IsParentProcess()) {
     Unused << Canonical()->GetCurrentWindowGlobal()->SendLoadURIInChild(
-        aLoadState);
+        aLoadState, aSetNavigating);
   } else {
     MOZ_DIAGNOSTIC_ASSERT(aAccessor);
     MOZ_DIAGNOSTIC_ASSERT(aAccessor->Group() == Group());
+
+    if (!aAccessor->CanAccess(this)) {
+      return NS_ERROR_DOM_PROP_ACCESS_DENIED;
+    }
 
     nsCOMPtr<nsPIDOMWindowOuter> win(aAccessor->GetDOMWindow());
     MOZ_DIAGNOSTIC_ASSERT(win);
     if (WindowGlobalChild* wgc =
             win->GetCurrentInnerWindow()->GetWindowGlobalChild()) {
-      wgc->SendLoadURI(this, aLoadState);
+      wgc->SendLoadURI(this, aLoadState, aSetNavigating);
     }
   }
   return NS_OK;
+}
+
+void BrowsingContext::DisplayLoadError(const nsAString& aURI) {
+  MOZ_LOG(GetLog(), LogLevel::Debug, ("DisplayLoadError"));
+  MOZ_DIAGNOSTIC_ASSERT(!IsDiscarded());
+  MOZ_DIAGNOSTIC_ASSERT(mDocShell || XRE_IsParentProcess());
+
+  if (mDocShell) {
+    bool didDisplayLoadError = false;
+    mDocShell->DisplayLoadError(NS_ERROR_MALFORMED_URI, nullptr,
+                                PromiseFlatString(aURI).get(), nullptr,
+                                &didDisplayLoadError);
+  } else {
+    Unused << Canonical()->GetCurrentWindowGlobal()->SendDisplayLoadError(
+        PromiseFlatString(aURI));
+  }
+}
+
+WindowProxyHolder BrowsingContext::Window() {
+  return WindowProxyHolder(Self());
+}
+
+WindowProxyHolder BrowsingContext::GetFrames(ErrorResult& aError) {
+  return Window();
 }
 
 void BrowsingContext::Close(CallerType aCallerType, ErrorResult& aError) {

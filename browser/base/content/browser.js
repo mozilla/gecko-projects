@@ -332,7 +332,6 @@ var gURLBarHandler = {
         this._urlbar.value = this._lastValue;
         delete this._lastValue;
       }
-      gBrowser.tabContainer.addEventListener("TabSelect", this._urlbar);
     }
     return this._urlbar;
   },
@@ -358,7 +357,6 @@ var gURLBarHandler = {
    */
   _reset() {
     if (this._urlbar) {
-      gBrowser.tabContainer.removeEventListener("TabSelect", this._urlbar);
       this._lastValue = this._urlbar.value;
       this._urlbar.uninit();
       delete this._urlbar;
@@ -1279,18 +1277,11 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "privacy.popups.maxReported"
 );
 
-function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
-  let deserializeURI = url => {
-    if (url instanceof Ci.nsIURI) {
-      return url;
-    }
-    return url ? makeURI(url) : null;
-  };
-
+function doURIFixup(browser, fixupInfo) {
   // We get called irrespective of whether we did a keyword search, or
   // whether the original input would be vaguely interpretable as a URL,
   // so figure that out first.
-  let alternativeURI = deserializeURI(fixupInfo.fixedURI);
+  let alternativeURI = fixupInfo.fixedURI;
   if (
     !fixupInfo.keywordProviderName ||
     !alternativeURI ||
@@ -1310,7 +1301,7 @@ function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
   // We keep track of the currentURI to detect case (1) in the DNS lookup
   // callback.
   let previousURI = browser.currentURI;
-  let preferredURI = deserializeURI(fixupInfo.preferredURI);
+  let preferredURI = fixupInfo.preferredURI;
 
   // now swap for a weak ref so we don't hang on to browser needlessly
   // even if the DNS query takes forever
@@ -1434,6 +1425,35 @@ function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
       Cu.reportError(ex);
     }
   }
+}
+
+function gKeywordURIFixupObs(fixupInfo, topic, data) {
+  fixupInfo.QueryInterface(Ci.nsIURIFixupInfo);
+
+  if (!fixupInfo.consumer || fixupInfo.consumer.ownerGlobal != window) {
+    return;
+  }
+
+  doURIFixup(fixupInfo.consumer, {
+    fixedURI: fixupInfo.fixedURI,
+    keywordProviderName: fixupInfo.keywordProviderName,
+    preferredURI: fixupInfo.preferredURI,
+  });
+}
+
+function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
+  let deserializeURI = url => {
+    if (url instanceof Ci.nsIURI) {
+      return url;
+    }
+    return url ? makeURI(url) : null;
+  };
+
+  doURIFixup(browser, {
+    fixedURI: deserializeURI(fixupInfo.fixedURI),
+    keywordProviderName: fixupInfo.keywordProviderName,
+    preferredURI: deserializeURI(fixupInfo.preferredURI),
+  });
 }
 
 function serializeInputStream(aStream) {
@@ -2054,6 +2074,7 @@ var gBrowserInit = {
       "Browser:URIFixup",
       gKeywordURIFixup
     );
+    Services.obs.addObserver(gKeywordURIFixupObs, "keyword-uri-fixup");
 
     BrowserOffline.init();
     IndexedDBPromptHelper.init();
@@ -2589,6 +2610,7 @@ var gBrowserInit = {
         "Browser:URIFixup",
         gKeywordURIFixup
       );
+      Services.obs.removeObserver(gKeywordURIFixupObs, "keyword-uri-fixup");
       window.messageManager.removeMessageListener(
         "Browser:LoadURI",
         RedirectLoad
@@ -4799,21 +4821,31 @@ const BrowserSearch = {
    * @param searchText
    *        The search terms to use for the search.
    *
-   * @param useNewTab
-   *        Boolean indicating whether or not the search should load in a new
-   *        tab.
+   * @param where
+   *        String indicating where the search should load. Most commonly used
+   *        are 'tab' or 'window', defaults to 'current'.
+   *
+   * @param usePrivate
+   *        Whether to use the Private Browsing mode default search engine.
+   *        Defaults to `false`.
    *
    * @param purpose [optional]
    *        A string meant to indicate the context of the search request. This
    *        allows the search service to provide a different nsISearchSubmission
    *        depending on e.g. where the search is triggered in the UI.
    *
+   * @param triggeringPrincipal
+   *        The principal to use for a new window or tab.
+   *
+   * @param csp
+   *        The content security policy to use for a new window or tab.
+   *
    * @return engine The search engine used to perform a search, or null if no
    *                search was performed.
    */
   _loadSearch(
     searchText,
-    useNewTab,
+    where,
     usePrivate,
     purpose,
     triggeringPrincipal,
@@ -4841,7 +4873,8 @@ const BrowserSearch = {
     let inBackground = Services.prefs.getBoolPref(
       "browser.search.context.loadInBackground"
     );
-    openLinkIn(submission.uri.spec, useNewTab ? "tab" : "current", {
+    openLinkIn(submission.uri.spec, where || "current", {
+      private: usePrivate && !PrivateBrowsingUtils.isWindowPrivate(window),
       postData: submission.postData,
       inBackground,
       relatedToCurrent: true,
@@ -4861,7 +4894,9 @@ const BrowserSearch = {
   loadSearchFromContext(terms, usePrivate, triggeringPrincipal, csp) {
     let engine = BrowserSearch._loadSearch(
       terms,
-      true,
+      usePrivate && !PrivateBrowsingUtils.isWindowPrivate(window)
+        ? "window"
+        : "tab",
       usePrivate,
       "contextmenu",
       triggeringPrincipal,
@@ -6432,7 +6467,8 @@ nsBrowserAccess.prototype = {
     aTriggeringPrincipal = null,
     aNextRemoteTabId = 0,
     aName = "",
-    aCsp = null
+    aCsp = null,
+    aSkipLoad = false
   ) {
     let win, needToFocusWin;
 
@@ -6471,6 +6507,7 @@ nsBrowserAccess.prototype = {
       nextRemoteTabId: aNextRemoteTabId,
       name: aName,
       csp: aCsp,
+      skipLoad: aSkipLoad,
     });
     let browser = win.gBrowser.getBrowserForTab(tab);
 
@@ -6495,7 +6532,8 @@ nsBrowserAccess.prototype = {
       aWhere,
       aFlags,
       aTriggeringPrincipal,
-      aCsp
+      aCsp,
+      true
     );
   },
 
@@ -6510,7 +6548,8 @@ nsBrowserAccess.prototype = {
       aWhere,
       aFlags,
       aTriggeringPrincipal,
-      aCsp
+      aCsp,
+      false
     );
   },
 
@@ -6520,7 +6559,8 @@ nsBrowserAccess.prototype = {
     aWhere,
     aFlags,
     aTriggeringPrincipal,
-    aCsp
+    aCsp,
+    aSkipLoad
   ) {
     // This function should only ever be called if we're opening a URI
     // from a non-remote browser window (via nsContentTreeOwner).
@@ -6650,7 +6690,8 @@ nsBrowserAccess.prototype = {
           aTriggeringPrincipal,
           0,
           "",
-          aCsp
+          aCsp,
+          aSkipLoad
         );
         if (browser) {
           browsingContext = browser.browsingContext;
@@ -6688,14 +6729,17 @@ nsBrowserAccess.prototype = {
     aNextRemoteTabId,
     aName
   ) {
-    // Passing a null-URI to only create the content window.
+    // Passing a null-URI to only create the content window,
+    // and pass true for aSkipLoad to prevent loading of
+    // about:blank
     return this.getContentWindowOrOpenURIInFrame(
       null,
       aParams,
       aWhere,
       aFlags,
       aNextRemoteTabId,
-      aName
+      aName,
+      true
     );
   },
 
@@ -6713,7 +6757,8 @@ nsBrowserAccess.prototype = {
       aWhere,
       aFlags,
       aNextRemoteTabId,
-      aName
+      aName,
+      false
     );
   },
 
@@ -6723,7 +6768,8 @@ nsBrowserAccess.prototype = {
     aWhere,
     aFlags,
     aNextRemoteTabId,
-    aName
+    aName,
+    aSkipLoad
   ) {
     if (aWhere != Ci.nsIBrowserDOMWindow.OPEN_NEWTAB) {
       dump("Error: openURIInFrame can only open in new tabs");
@@ -6750,7 +6796,8 @@ nsBrowserAccess.prototype = {
       aParams.triggeringPrincipal,
       aNextRemoteTabId,
       aName,
-      aParams.csp
+      aParams.csp,
+      aSkipLoad
     );
   },
 

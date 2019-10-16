@@ -4,7 +4,7 @@
 /* eslint max-len: ["error", 80] */
 
 /* exported installTestExtension, addCommonAbuseReportTestTasks,
- *          waitClosedWindow,
+ *          handleSubmitRequest, waitForNewWindow, waitClosedWindow,
  *          AbuseReporter, AbuseReporterTestUtils, AddonTestUtils */
 
 /* global mockPromptService, MockProvider, loadInitialView, closeView */
@@ -114,6 +114,12 @@ async function installTestExtension(
   return extension;
 }
 
+function handleSubmitRequest({ request, response }) {
+  response.setStatusLine(request.httpVersion, 200, "OK");
+  response.setHeader("Content-Type", "application/json", false);
+  response.write("{}");
+}
+
 const AbuseReportTestUtils = {
   _mockProvider: null,
   _mockServer: null,
@@ -131,6 +137,10 @@ const AbuseReportTestUtils = {
       set: [
         ["extensions.abuseReport.enabled", true],
         ["extensions.abuseReport.url", "http://test.addons.org/api/report/"],
+        [
+          "extensions.abuseReport.amoDetailsURL",
+          "http://test.addons.org/api/addons/addon/",
+        ],
       ],
     });
 
@@ -566,6 +576,25 @@ const AbuseReportTestUtils = {
         ok(false, `Unexpected request: ${request.path} ${data}`);
       }
     });
+
+    server.registerPrefixHandler("/api/addons/addon/", (request, response) => {
+      const addonId = request.path.split("/").pop();
+      if (!this.amoAddonDetailsMap.has(addonId)) {
+        response.setStatusLine(request.httpVersion, 404, "Not Found");
+        response.write(JSON.stringify({ detail: "Not found." }));
+      } else {
+        response.setStatusLine(request.httpVersion, 200, "Success");
+        response.write(JSON.stringify(this.amoAddonDetailsMap.get(addonId)));
+      }
+    });
+    server.registerPathHandler(
+      "/assets/fake-icon-url.png",
+      (request, response) => {
+        response.setStatusLine(request.httpVersion, 200, "Success");
+        response.write("");
+        response.finish();
+      }
+    );
   },
 };
 

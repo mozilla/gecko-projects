@@ -97,7 +97,7 @@ class UrlbarInput {
     this._actionOverrideKeyCount = 0;
     this._autofillPlaceholder = "";
     this._lastSearchString = "";
-    this._textValueOnLastSearch = "";
+    this._valueOnLastSearch = "";
     this._resultForCurrentValue = null;
     this._suppressStartQuery = false;
     this._suppressPrimaryAdjustment = false;
@@ -206,6 +206,8 @@ class UrlbarInput {
     // recording abandonment events when the command causes a blur event.
     this.view.panel.addEventListener("command", this, true);
 
+    this.window.gBrowser.tabContainer.addEventListener("TabSelect", this);
+
     this._copyCutController = new CopyCutController(this);
     this.inputField.controllers.insertControllerAt(0, this._copyCutController);
 
@@ -236,6 +238,7 @@ class UrlbarInput {
     this.window.removeEventListener("mousedown", this);
     this.textbox.removeEventListener("mousedown", this);
     this._inputContainer.removeEventListener("click", this);
+    this.window.gBrowser.tabContainer.removeEventListener("TabSelect", this);
 
     this.view.panel.remove();
     this.endLayoutExtend(true);
@@ -632,6 +635,9 @@ class UrlbarInput {
           let flags =
             Ci.nsIURIFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS |
             Ci.nsIURIFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
+          if (PrivateBrowsingUtils.isWindowPrivate(this.window)) {
+            flags |= Ci.nsIURIFixup.FIXUP_FLAG_PRIVATE_CONTEXT;
+          }
           // Don't interrupt the load action in case of errors.
           try {
             let fixupInfo = Services.uriFixup.getFixupURIInfo(
@@ -751,7 +757,7 @@ class UrlbarInput {
       // This usually happens when there's no selected results (the user cycles
       // through results and there was no heuristic), and we reset the input
       // value to the previous text value.
-      this.value = this._textValueOnLastSearch;
+      this.value = this._valueOnLastSearch;
     } else {
       // For autofilled results, the value that should be canonized is not the
       // autofilled value but the value that the user typed.
@@ -887,7 +893,7 @@ class UrlbarInput {
     }
 
     this._lastSearchString = searchString;
-    this._textValueOnLastSearch = this.value;
+    this._valueOnLastSearch = this.value;
 
     // TODO (Bug 1522902): This promise is necessary for tests, because some
     // tests are not listening for completion when starting a query through
@@ -942,17 +948,24 @@ class UrlbarInput {
    * This is used by Activity Stream and about:privatebrowsing for search hand-off.
    */
   setHiddenFocus() {
-    this.textbox.classList.add("hidden-focus");
-    this.focus();
+    this._hideFocus = true;
+    if (this.focused) {
+      this.removeAttribute("focused");
+    } else {
+      this.focus();
+    }
   }
 
   /**
-   * Remove the hidden focus styles.
+   * Restore focus styles.
    * This is used by Activity Stream and about:privatebrowsing for search hand-off.
    */
   removeHiddenFocus() {
-    this.textbox.classList.remove("hidden-focus");
-    this.startLayoutExtend();
+    this._hideFocus = false;
+    if (this.focused) {
+      this.setAttribute("focused", "true");
+      this.startLayoutExtend();
+    }
   }
 
   // Getters and Setters below.
@@ -981,14 +994,21 @@ class UrlbarInput {
     return this._setValue(val, true);
   }
 
+  get lastSearchString() {
+    return this._lastSearchString;
+  }
+
+  get openViewOnFocus() {
+    return this._openViewOnFocus;
+  }
+
   get openViewOnFocusForCurrentTab() {
     return (
-      this._openViewOnFocusAndSearchString ||
-      (this._openViewOnFocus &&
-        !["about:newtab", "about:home"].includes(
-          this.window.gBrowser.currentURI.spec
-        ) &&
-        !this.isPrivate)
+      this._openViewOnFocus &&
+      !["about:newtab", "about:home"].includes(
+        this.window.gBrowser.currentURI.spec
+      ) &&
+      !this.isPrivate
     );
   }
 
@@ -1023,14 +1043,8 @@ class UrlbarInput {
     ) {
       return;
     }
-    // The Urlbar is unfocused or the view is closed
-    if (
-      !(
-        (this.getAttribute("focused") == "true" &&
-          !this.textbox.classList.contains("hidden-focus")) ||
-        this.view.isOpen
-      )
-    ) {
+    // The Urlbar is unfocused and the view is closed
+    if (this.getAttribute("focused") != "true" && !this.view.isOpen) {
       return;
     }
 
@@ -1041,6 +1055,7 @@ class UrlbarInput {
     this.removeAttribute("breakout-extend-disabled");
 
     this.setAttribute("breakout-extend", "true");
+    this.view.reOpen();
 
     // Enable the animation only after the first extend call to ensure it
     // doesn't run when opening a new window.
@@ -1062,10 +1077,7 @@ class UrlbarInput {
   endLayoutExtend(force) {
     if (
       !this.hasAttribute("breakout-extend") ||
-      (!force &&
-        (this.view.isOpen ||
-          (this.getAttribute("focused") == "true" &&
-            !this.textbox.classList.contains("hidden-focus"))))
+      (!force && (this.view.isOpen || this.getAttribute("focused") == "true"))
     ) {
       return;
     }
@@ -1079,14 +1091,6 @@ class UrlbarInput {
   }
 
   // Private methods below.
-
-  get _openViewOnFocusAndSearchString() {
-    return (
-      this.megabar &&
-      this.value &&
-      this.getAttribute("pageproxystate") != "valid"
-    );
-  }
 
   async _updateLayoutBreakoutDimensions() {
     // When this method gets called a second time before the first call
@@ -1155,6 +1159,9 @@ class UrlbarInput {
     this.inputField.value = val;
     this.formatValue();
     this.removeAttribute("actiontype");
+    if (!this.view.isOpen) {
+      this.view.clear();
+    }
 
     // Dispatch ValueChange event for accessibility.
     let event = this.document.createEvent("Events");
@@ -1772,6 +1779,8 @@ class UrlbarInput {
     if (this.getAttribute("pageproxystate") != "valid") {
       this.window.UpdatePopupNotificationsVisibility();
     }
+
+    Services.obs.notifyObservers(null, "urlbar-blur");
   }
 
   _on_click(event) {
@@ -1796,11 +1805,15 @@ class UrlbarInput {
   }
 
   _on_focus(event) {
-    this.setAttribute("focused", "true");
+    if (!this._hideFocus) {
+      this.setAttribute("focused", "true");
+    }
 
     // We handle mouse-based expansion events separately in _on_click.
     if (this._focusedViaMousedown) {
       this._focusedViaMousedown = false;
+    } else if (this.inputField.hasAttribute("refocused-by-panel")) {
+      this._maybeSelectAll(true);
     } else {
       this.startLayoutExtend();
     }
@@ -1812,6 +1825,8 @@ class UrlbarInput {
     if (this.getAttribute("pageproxystate") != "valid") {
       this.window.UpdatePopupNotificationsVisibility();
     }
+
+    Services.obs.notifyObservers(null, "urlbar-focus");
   }
 
   _on_mouseover(event) {
@@ -1919,6 +1934,7 @@ class UrlbarInput {
 
     if (!value && this.view.isOpen) {
       this.view.close();
+      this.view.clear();
       return;
     }
 

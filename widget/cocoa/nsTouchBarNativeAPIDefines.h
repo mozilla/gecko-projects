@@ -19,6 +19,10 @@
                              blue:(CGFloat)blue
                             alpha:(CGFloat)alpha;
 @end
+
+@interface NSTextField (NewConstructors)
++ (NSTextField*)labelWithString:(NSString*)stringValue;
+@end
 #endif  // !defined(MAC_OS_X_VERSION_10_12)
 
 #if !defined(MAC_OS_X_VERSION_10_12_2) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_12_2
@@ -28,6 +32,8 @@
 
 typedef NSString* NSTouchBarItemIdentifier;
 __attribute__((weak_import)) @interface NSTouchBarItem : NSObject
+@property(readonly) NSView* view;
+@property(readonly) NSString* customizationLabel;
 - (instancetype)initWithIdentifier:(NSTouchBarItemIdentifier)aIdentifier;
 @end
 
@@ -54,6 +60,17 @@ __attribute__((weak_import)) @interface NSTouchBar : NSObject
 @property(strong) NSTouchBarCustomizationIdentifier customizationIdentifier;
 @property(strong) NSArray<NSTouchBarItemIdentifier>* customizationAllowedItemIdentifiers;
 - (NSTouchBarItem*)itemForIdentifier:(NSTouchBarItemIdentifier)aIdentifier;
+@end
+
+__attribute__((weak_import)) @interface NSPopoverTouchBarItem : NSTouchBarItem
+@property(strong) NSString* customizationLabel;
+@property(strong) NSView* collapsedRepresentation;
+@property(strong) NSImage* collapsedRepresentationImage;
+@property(strong) NSString* collapsedRepresentationLabel;
+@property(strong) NSTouchBar* popoverTouchBar;
+@property BOOL showsCloseButton;
+- (void)showPopover:(id)sender;
+- (void)dismissPopover:(id)sender;
 @end
 
 @interface NSButton (TouchBarButton)

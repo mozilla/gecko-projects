@@ -2183,9 +2183,9 @@ static inline bool NeedFrameFor(const nsFrameConstructorState& aState,
   // eExcludesIgnorableWhitespace frames, where we know we'll be dropping them
   // all anyway, and involve an extra walk down the frame construction item
   // list.
-  if ((aParentFrame &&
-       (!aParentFrame->IsFrameOfType(nsIFrame::eExcludesIgnorableWhitespace) ||
-        aParentFrame->IsGeneratedContentFrame())) ||
+  if (!aParentFrame ||
+      !aParentFrame->IsFrameOfType(nsIFrame::eExcludesIgnorableWhitespace) ||
+      aParentFrame->IsGeneratedContentFrame() ||
       !aChildContent->IsText()) {
     return true;
   }
@@ -2312,6 +2312,42 @@ nsIFrame* nsCSSFrameConstructor::ConstructDocElementFrame(
 
   if (MOZ_UNLIKELY(display->mDisplay == StyleDisplay::None)) {
     return nullptr;
+  }
+
+  if (aDocElement->IsHTMLElement() &&
+      mDocElementContainingBlock->IsCanvasFrame()) {
+    // This implements "The Principal Writing Mode".
+    // https://drafts.csswg.org/css-writing-modes-3/#principal-flow
+    //
+    // If there's a <body> element, its writing-mode, direction, and
+    // text-orientation override the root element's used value.
+    //
+    // We need to copy <body>'s WritingMode to mDocElementContainingBlock before
+    // construct mRootElementFrame so that anonymous internal frames such as
+    // <html> with table style can copy their parent frame's mWritingMode in
+    // nsFrame::Init().
+    MOZ_ASSERT(!mRootElementFrame,
+               "We need to copy <body>'s principal writing-mode before "
+               "constructing mRootElementFrame.");
+
+    Element* body = mDocument->GetBodyElement();
+    if (body) {
+      RefPtr<ComputedStyle> bodyStyle = ResolveComputedStyle(body);
+      WritingMode bodyWM(bodyStyle);
+
+      if (bodyWM != mDocElementContainingBlock->GetWritingMode()) {
+        nsContentUtils::ReportToConsole(
+            nsIScriptError::warningFlag, NS_LITERAL_CSTRING("Layout"),
+            mDocument, nsContentUtils::eLAYOUT_PROPERTIES,
+            "PrincipalWritingModePropagationWarning");
+      }
+
+      mDocElementContainingBlock->PropagateWritingModeToSelfAndAncestors(
+          bodyWM);
+    } else {
+      mDocElementContainingBlock->PropagateWritingModeToSelfAndAncestors(
+          mDocElementContainingBlock->GetWritingMode());
+    }
   }
 
   nsFrameConstructorSaveState docElementContainingBlockAbsoluteSaveState;
@@ -3255,9 +3291,9 @@ nsCSSFrameConstructor::FindTextData(const Text& aTextContent,
       return nullptr;
     }
 
-    // Don't render stuff in display: contents / Shadow DOM subtrees, because
-    // TextCorrespondenceRecorder in the SVG text code doesn't really know how
-    // to deal with it. This kinda sucks. :(
+    // FIXME(bug 1588477) Don't render stuff in display: contents / Shadow DOM
+    // subtrees, because TextCorrespondenceRecorder in the SVG text code doesn't
+    // really know how to deal with it. This kinda sucks. :(
     if (aParentFrame->GetContent() != aTextContent.GetParent()) {
       return nullptr;
     }
@@ -5085,6 +5121,13 @@ nsCSSFrameConstructor::FindSVGData(const Element& aElement,
   if (aIsWithinSVGText) {
     // If aIsWithinSVGText is true, then we know that the "SVG text uses
     // CSS frames" pref was true when this SVG fragment was first constructed.
+    //
+    // FIXME(bug 1588477) Don't render stuff in display: contents / Shadow DOM
+    // subtrees, because TextCorrespondenceRecorder in the SVG text code doesn't
+    // really know how to deal with it. This kinda sucks. :(
+    if (aParentFrame && aParentFrame->GetContent() != aElement.GetParent()) {
+      return nullptr;
+    }
 
     // We don't use ConstructInline because we want different behavior
     // for generated content.
@@ -5221,8 +5264,9 @@ bool nsCSSFrameConstructor::ShouldCreateItemsForChild(
 void nsCSSFrameConstructor::DoAddFrameConstructionItems(
     nsFrameConstructorState& aState, nsIContent* aContent,
     ComputedStyle* aComputedStyle, bool aSuppressWhiteSpaceOptimizations,
-    nsContainerFrame* aParentFrame, FrameConstructionItemList& aItems) {
-  uint32_t flags = ITEM_ALLOW_XBL_BASE | ITEM_ALLOW_PAGE_BREAK;
+    nsContainerFrame* aParentFrame, FrameConstructionItemList& aItems,
+    uint32_t aFlags) {
+  uint32_t flags = aFlags | ITEM_ALLOW_XBL_BASE | ITEM_ALLOW_PAGE_BREAK;
   if (aParentFrame) {
     if (nsSVGUtils::IsInSVGTextSubtree(aParentFrame)) {
       flags |= ITEM_IS_WITHIN_SVG_TEXT;
@@ -5240,7 +5284,7 @@ void nsCSSFrameConstructor::DoAddFrameConstructionItems(
 void nsCSSFrameConstructor::AddFrameConstructionItems(
     nsFrameConstructorState& aState, nsIContent* aContent,
     bool aSuppressWhiteSpaceOptimizations, const InsertionPoint& aInsertion,
-    FrameConstructionItemList& aItems) {
+    FrameConstructionItemList& aItems, uint32_t aFlags) {
   nsContainerFrame* parentFrame = aInsertion.mParentFrame;
   if (!ShouldCreateItemsForChild(aState, aContent, parentFrame)) {
     return;
@@ -5248,7 +5292,7 @@ void nsCSSFrameConstructor::AddFrameConstructionItems(
   RefPtr<ComputedStyle> computedStyle = ResolveComputedStyle(aContent);
   DoAddFrameConstructionItems(aState, aContent, computedStyle,
                               aSuppressWhiteSpaceOptimizations, parentFrame,
-                              aItems);
+                              aItems, aFlags);
 }
 
 // Whether we should suppress frames for a child under a <select> frame.
@@ -5466,6 +5510,7 @@ void nsCSSFrameConstructor::AddFrameConstructionItemsInternal(
   }
 #endif
 
+  const bool withinSVGText = !!(aFlags & ITEM_IS_WITHIN_SVG_TEXT);
   const bool isGeneratedContent = !!(aFlags & ITEM_IS_GENERATED_CONTENT);
   MOZ_ASSERT(!isGeneratedContent || aComputedStyle->IsPseudoElement(),
              "Generated content should be a pseudo-element");
@@ -5491,6 +5536,12 @@ void nsCSSFrameConstructor::AddFrameConstructionItemsInternal(
     MOZ_ASSERT(!aContent->AsElement()->IsRootOfNativeAnonymousSubtree(),
                "display:contents on anonymous content is unsupported");
 
+    // FIXME(bug 1588477): <svg:text>'s TextNodeCorrespondenceRecorder has
+    // trouble with everything that looks like display: contents.
+    if (withinSVGText) {
+      return;
+    }
+
     CreateGeneratedContentItem(aState, aParentFrame, *aContent->AsElement(),
                                *aComputedStyle, PseudoStyleType::before,
                                aItems);
@@ -5500,12 +5551,13 @@ void nsCSSFrameConstructor::AddFrameConstructionItemsInternal(
     for (nsIContent* child = iter.GetNextChild(); child;
          child = iter.GetNextChild()) {
       AddFrameConstructionItems(aState, child, aSuppressWhiteSpaceOptimizations,
-                                insertion, aItems);
+                                insertion, aItems, aFlags);
     }
     aItems.SetParentHasNoXBLChildren(!iter.XBLInvolved());
 
     CreateGeneratedContentItem(aState, aParentFrame, *aContent->AsElement(),
-                               *aComputedStyle, PseudoStyleType::after, aItems);
+                               *aComputedStyle, PseudoStyleType::after,
+                               aItems);
     return;
   }
 
@@ -5613,7 +5665,7 @@ void nsCSSFrameConstructor::AddFrameConstructionItemsInternal(
         // pseudos.
         ((bits & FCDATA_IS_TABLE_PART) &&
          (!aParentFrame ||  // No aParentFrame means inline
-          aParentFrame->StyleDisplay()->mDisplay == StyleDisplay::Inline)) ||
+          aParentFrame->StyleDisplay()->IsInlineFlow())) ||
         // Things that are inline-outside but aren't inline frames are inline
         display.IsInlineOutsideStyle() ||
         // Popups that are certainly out of flow.
@@ -6813,7 +6865,7 @@ void nsCSSFrameConstructor::ContentAppended(nsIContent* aFirstNewContent,
   }
 
   LAYOUT_PHASE_TEMP_EXIT();
-  if (WipeInsertionParent(parentFrame)) {
+  if (WipeInsertionParent(parentFrame, aFirstNewContent, nullptr)) {
     LAYOUT_PHASE_TEMP_REENTER();
     return;
   }
@@ -7214,7 +7266,7 @@ void nsCSSFrameConstructor::ContentRangeInserted(
   }
 
   LAYOUT_PHASE_TEMP_EXIT();
-  if (WipeInsertionParent(insertion.mParentFrame)) {
+  if (WipeInsertionParent(insertion.mParentFrame, aStartChild, aEndChild)) {
     LAYOUT_PHASE_TEMP_REENTER();
     return;
   }
@@ -8413,6 +8465,17 @@ bool nsCSSFrameConstructor::MaybeRecreateContainerForFrameRemoval(
   MOZ_ASSERT(inFlowFrame == inFlowFrame->FirstContinuation(),
              "placeholder for primary frame has previous continuations?");
   nsIFrame* parent = inFlowFrame->GetParent();
+
+  if (aFrame->GetContent() == mDocument->GetBodyElement()) {
+    // If the frame of the canonical body element is removed (either because of
+    // removing of the element, or removing for frame construction like
+    // writing-mode changed), we need to reframe the root element so that the
+    // root element's frames has the correct writing-mode propagated from body
+    // element. (See nsCSSFrameConstructor::ConstructDocElementFrame.)
+    TRACE("Root");
+    RecreateFramesForContent(mDocument->GetRootElement(), InsertionKind::Async);
+    return true;
+  }
 
   if (inFlowFrame->HasAnyStateBits(NS_FRAME_HAS_MULTI_COLUMN_ANCESTOR)) {
     nsIFrame* grandparent = parent->GetParent();
@@ -11286,7 +11349,7 @@ void nsCSSFrameConstructor::BuildInlineChildItems(
                                aParentItem.mChildItems);
   }
 
-  uint32_t flags = ITEM_ALLOW_XBL_BASE | ITEM_ALLOW_PAGE_BREAK;
+  uint32_t flags = 0;
   if (aItemIsWithinSVGText) {
     flags |= ITEM_IS_WITHIN_SVG_TEXT;
   }
@@ -11298,18 +11361,8 @@ void nsCSSFrameConstructor::BuildInlineChildItems(
   FlattenedChildIterator iter(parentContent);
   for (nsIContent* content = iter.GetNextChild(); content;
        content = iter.GetNextChild()) {
-    // Manually check for comments/PIs, since we don't have a frame to pass to
-    // AddFrameConstructionItems.  We know our parent is a non-replaced inline,
-    // so there is no need to do the NeedFrameFor check.
-    content->UnsetFlags(NODE_DESCENDANTS_NEED_FRAMES | NODE_NEEDS_FRAME);
-    if (content->IsComment() || content->IsProcessingInstruction()) {
-      continue;
-    }
-
-    RefPtr<ComputedStyle> childContext = ResolveComputedStyle(content);
-    AddFrameConstructionItemsInternal(aState, content, nullptr,
-                                      iter.XBLInvolved(), childContext, flags,
-                                      aParentItem.mChildItems);
+    AddFrameConstructionItems(aState, content, iter.XBLInvolved(),
+                              InsertionPoint(), aParentItem.mChildItems, flags);
   }
 
   if (!aItemIsWithinSVGText) {
@@ -11344,12 +11397,33 @@ static bool IsSafeToAppendToIBSplitInline(nsIFrame* aParentFrame,
   return true;
 }
 
-bool nsCSSFrameConstructor::WipeInsertionParent(nsContainerFrame* aFrame) {
+bool nsCSSFrameConstructor::WipeInsertionParent(nsContainerFrame* aFrame,
+                                                nsIContent* aStartChild,
+                                                nsIContent* aEndChild) {
 #define TRACE(reason)                                                \
   PROFILER_TRACING("Layout", "WipeInsertionParent: " reason, LAYOUT, \
                    TRACING_EVENT)
 
+  MOZ_ASSERT(aStartChild, "Must always pass aStartChild!");
+
   const LayoutFrameType frameType = aFrame->Type();
+
+  if (aFrame->GetContent() == mDocument->GetRootElement()) {
+    // If we insert a content that becomes the canonical body element, we need
+    // to reframe the root element so that the root element's frames has the
+    // correct writing-mode propagated from body element. (See
+    // nsCSSFrameConstructor::ConstructDocElementFrame.)
+    nsIContent* bodyElement = mDocument->GetBodyElement();
+    for (nsIContent* child = aStartChild; child != aEndChild;
+         child = child->GetNextSibling()) {
+      if (child == bodyElement) {
+        TRACE("Root");
+        RecreateFramesForContent(mDocument->GetRootElement(),
+                                 InsertionKind::Async);
+        return true;
+      }
+    }
+  }
 
   // FIXME(emilio): This looks terribly inefficient if you insert elements deep
   // in a MathML subtree.

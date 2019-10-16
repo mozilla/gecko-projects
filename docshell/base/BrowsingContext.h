@@ -12,6 +12,7 @@
 #include "mozilla/Tuple.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/LoadURIOptionsBinding.h"
 #include "mozilla/dom/LocationBase.h"
 #include "mozilla/dom/UserActivation.h"
 #include "nsCOMPtr.h"
@@ -186,7 +187,13 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // Triggers a load in the process which currently owns this BrowsingContext.
   // aAccessor is the context which initiated the load, and may be null only for
   // in-process BrowsingContexts.
-  nsresult LoadURI(BrowsingContext* aAccessor, nsDocShellLoadState* aLoadState);
+  nsresult LoadURI(BrowsingContext* aAccessor, nsDocShellLoadState* aLoadState,
+                   bool aSetNavigating = false);
+
+  void LoadURI(const nsAString& aURI, const LoadURIOptions& aOptions,
+               ErrorResult& aError);
+
+  void DisplayLoadError(const nsAString& aURI);
 
   // Determine if the current BrowsingContext was 'cached' by the logic in
   // CacheChildren.
@@ -332,7 +339,7 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   }
 
   // Window APIs that are cross-origin-accessible (from the HTML spec).
-  BrowsingContext* Window() { return Self(); }
+  WindowProxyHolder Window();
   BrowsingContext* Self() { return this; }
   void Location(JSContext* aCx, JS::MutableHandle<JSObject*> aLocation,
                 ErrorResult& aError);
@@ -340,7 +347,7 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   bool GetClosed(ErrorResult&) { return mClosed; }
   void Focus(ErrorResult& aError);
   void Blur(ErrorResult& aError);
-  BrowsingContext* GetFrames(ErrorResult& aError) { return Self(); }
+  WindowProxyHolder GetFrames(ErrorResult& aError);
   int32_t Length() const { return mChildren.Length(); }
   Nullable<WindowProxyHolder> GetTop(ErrorResult& aError);
   void GetOpener(JSContext* aCx, JS::MutableHandle<JS::Value> aOpener,

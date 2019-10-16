@@ -548,10 +548,18 @@ enum MethodCallKind {
 
 /// Fixed parameter of interface method.
 const INTERFACE_PARAMS: &str =
-    "const size_t start, const BinASTKind kind";
+    "const size_t start";
 
 /// Fixed arguments of interface method.
 const INTERFACE_ARGS: &str =
+    "start";
+
+/// Fixed parameter of sum interface method.
+const SUM_INTERFACE_PARAMS: &str =
+    "const size_t start, const BinASTKind kind";
+
+/// Fixed arguments of sum interface method.
+const SUM_INTERFACE_ARGS: &str =
     "start, kind";
 
 /// The name of the toplevel interface for the script.
@@ -1916,7 +1924,7 @@ enum class {name} {{
             let rules_for_this_sum = self.rules.get(name);
             let extra_params = rules_for_this_sum.extra_params;
             let rendered = self.get_method_signature(name, prefix,
-                                                     INTERFACE_PARAMS,
+                                                     SUM_INTERFACE_PARAMS,
                                                      &extra_params);
             buffer.push_str(&rendered.reindent("    ")
                             .newline_if_not_empty());
@@ -2114,7 +2122,7 @@ impl CPPExporter {
 ",
                 bnf = rendered_bnf,
                 call = self.get_method_call("result", name,
-                                            "Sum", INTERFACE_ARGS,
+                                            "Sum", SUM_INTERFACE_ARGS,
                                             &extra_args,
                                             "context".to_string(),
                                             MethodCallKind::AlwaysDecl)
@@ -2166,7 +2174,11 @@ impl CPPExporter {
     {type_ok} result;
     switch (kind) {{{cases}
       default:
-        return raiseInvalidKind(\"{kind}\", kind);
+        if (isInvalidKindPossible()) {{
+          return raiseInvalidKind(\"{kind}\", kind);
+        }} else {{
+          MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE(\"invalid BinASTKind should not appear\");
+        }}
     }}
     return result;
 }}
@@ -2175,7 +2187,7 @@ impl CPPExporter {
             kind = kind,
             cases = buffer_cases,
             first_line = self.get_method_definition_start(name, inner_prefix,
-                                                          INTERFACE_PARAMS,
+                                                          SUM_INTERFACE_PARAMS,
                                                           &extra_params),
             type_ok = self.get_type_ok(name)
         ));
@@ -2243,7 +2255,7 @@ impl CPPExporter {
     AutoList guard(*tokenizer_);
 
     const auto start = tokenizer_->offset();
-    const auto childContext = ListContext(context.position, BinASTList::{content_kind});
+    const auto childContext = ListContext(context.position_, BinASTList::{content_kind});
     guard.init();
     MOZ_TRY(tokenizer_->enterList(length, childContext));{empty_check}
 {init}
@@ -2340,11 +2352,15 @@ impl CPPExporter {
     {type_ok} result;
     if (kind == BinASTKind::{null}) {{
 {none_block}
-    }} else if (kind == BinASTKind::{kind}) {{
+    }} else if (!isInvalidKindPossible() || kind == BinASTKind::{kind}) {{
         const auto start = tokenizer_->offset();
 {before}{call}{after}
     }} else {{
+      if (isInvalidKindPossible()) {{
         return raiseInvalidKind(\"{kind}\", kind);
+      }} else {{
+        MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE(\"invalid BinASTKind should not appear\");
+      }}
     }}
     MOZ_TRY(guard.done());
 
@@ -2410,7 +2426,7 @@ impl CPPExporter {
                             first_line = self.get_method_definition_start(&parser.name, "", "",
                                                                           &extra_params),
                             call = self.get_method_call("result", &parser.elements,
-                                                        "Sum", INTERFACE_ARGS,
+                                                        "Sum", SUM_INTERFACE_ARGS,
                                                         &extra_args,
                                                         self.get_context_param_for_optional(
                                                             &parser.name,
@@ -2775,7 +2791,6 @@ impl CPPExporter {
         } else {
             buffer.push_str(&format!("{first_line}
 {{
-    MOZ_ASSERT(kind == BinASTKind::{kind});
     BINJS_TRY(CheckRecursionLimit(cx_));
 {pre}{fields_implem}
 {post}    return result;
@@ -2785,7 +2800,6 @@ impl CPPExporter {
                 fields_implem = fields_implem,
                 pre = init.newline_if_not_empty(),
                 post = build_result.newline_if_not_empty(),
-                kind = name.to_cpp_enum_case(),
                 first_line = first_line,
             ));
         }
@@ -2849,7 +2863,11 @@ impl CPPExporter {
                 let convert = format!("    switch (variant) {{
 {cases}
       default:
-        return raiseInvalidVariant(\"{kind}\", variant);
+        if (isInvalidVariantPossible()) {{
+          return raiseInvalidVariant(\"{kind}\", variant);
+        }} else {{
+          MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE(\"invalid BinASTVariant should not appear\");
+        }}
     }}",
                     kind = kind,
                     cases = enum_.strings()

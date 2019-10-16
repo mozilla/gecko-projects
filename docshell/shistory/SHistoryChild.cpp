@@ -370,7 +370,7 @@ nsresult SHistoryChild::LoadURI(LoadSHEntryData& aLoadData) {
 
   // FIXME Should this be sent through IPC?
   aLoadData.loadState()->SetSHEntry(entry);
-  return docShell->LoadURI(aLoadData.loadState());
+  return docShell->LoadURI(aLoadData.loadState(), false);
 }
 
 }  // namespace dom
