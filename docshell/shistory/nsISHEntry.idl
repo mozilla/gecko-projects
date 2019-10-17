@@ -218,9 +218,11 @@ interface nsISHEntry : nsISupports
     [infallible] readonly attribute boolean loadedInThisProcess;
 
     /**
-     * The session history it belongs to.
+     * The session history it belongs to. It's usually only set on root entries.
+     * SHEntry is strictly bound to the SHistory it belongs to; it should not be
+     * changed once set to a non-null value.
      */
-    [infallible] readonly attribute nsISHistory shistory;
+    [noscript, infallible] attribute nsISHistory SHistory;
 
     /**
      * A number that is assigned by the sHistory when the entry is activated

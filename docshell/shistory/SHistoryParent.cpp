@@ -36,25 +36,9 @@ static void FillInLoadResult(PContentParent* aManager, nsresult aRv,
 }
 
 SHistoryParent::SHistoryParent(CanonicalBrowsingContext* aContext)
-    : mHistory(new LegacySHistory(aContext, nsID())) {}
+    : mContext(aContext), mHistory(new LegacySHistory(aContext, nsID())) {}
 
 SHistoryParent::~SHistoryParent() {}
-
-SHEntryParent* SHistoryParent::CreateEntry(
-    PContentParent* aContentParent, PSHistoryParent* aSHistoryParent,
-    const PSHEntryOrSharedID& aEntryOrSharedID) {
-  RefPtr<LegacySHEntry> entry;
-  if (aEntryOrSharedID.type() == PSHEntryOrSharedID::Tuint64_t) {
-    entry = new LegacySHEntry(
-        aContentParent, static_cast<SHistoryParent*>(aSHistoryParent)->mHistory,
-        aEntryOrSharedID.get_uint64_t());
-  } else {
-    entry = new LegacySHEntry(*(
-        static_cast<const SHEntryParent*>(aEntryOrSharedID.get_PSHEntryParent())
-            ->mEntry));
-  }
-  return entry->CreateActor();
-}
 
 void SHistoryParent::ActorDestroy(ActorDestroyReason aWhy) {}
 
@@ -156,7 +140,6 @@ bool SHistoryParent::RecvEvictAllContentViewers() {
 
 bool SHistoryParent::RecvEvictContentViewersOrReplaceEntry(
     PSHEntryParent* aNewSHEntry, bool aReplace) {
-  MOZ_ASSERT(Manager() == aNewSHEntry->Manager());
   mHistory->EvictContentViewersOrReplaceEntry(
       aNewSHEntry ? static_cast<SHEntryParent*>(aNewSHEntry)->mEntry.get()
                   : nullptr,
@@ -347,17 +330,6 @@ void LegacySHistory::EvictOutOfRangeWindowContentViewers(int32_t aIndex) {
 
     Unused << parent->SendEvictContentViewers(evictArray);
   }
-}
-
-NS_IMETHODIMP
-LegacySHistory::CreateEntry(nsISHEntry** aEntry) {
-  NS_ENSURE_TRUE(mRootBC, NS_ERROR_FAILURE);
-
-  NS_ADDREF(*aEntry = new LegacySHEntry(
-                static_cast<CanonicalBrowsingContext*>(mRootBC)
-                    ->GetContentParent(),
-                this, SHEntryChildShared::CreateSharedID()));
-  return NS_OK;
 }
 
 }  // namespace dom

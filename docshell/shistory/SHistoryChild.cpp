@@ -195,6 +195,7 @@ SHistoryChild::AddEntry(nsISHEntry* aEntry, bool aPersist) {
   }
   NS_ENSURE_SUCCESS(rv, rv);
 
+  aEntry->SetSHistory(this);
   if (mRootDocShell) {
     aEntry->SetDocshellID(mRootDocShell->HistoryID());
 
@@ -223,6 +224,7 @@ SHistoryChild::ReplaceEntry(int32_t aIndex, nsISHEntry* aReplaceEntry) {
   }
   NS_ENSURE_SUCCESS(rv, rv);
 
+  aReplaceEntry->SetSHistory(this);
   return NS_OK;
 }
 
@@ -355,18 +357,6 @@ SHistoryChild::Reload(uint32_t aReloadFlags) {
   }
 
   return LoadURI(loadResult);
-}
-
-NS_IMETHODIMP
-SHistoryChild::CreateEntry(nsISHEntry** aEntry) {
-  uint64_t sharedID = SHEntryChildShared::CreateSharedID();
-  RefPtr<SHEntryChild> entry = static_cast<SHEntryChild*>(
-      Manager()->SendPSHEntryConstructor(this, sharedID));
-  if (!entry) {
-    return NS_ERROR_FAILURE;
-  }
-  entry.forget(aEntry);
-  return NS_OK;
 }
 
 nsresult SHistoryChild::LoadURI(LoadSHEntryData& aLoadData) {

@@ -26,7 +26,6 @@ class nsIDocShellTreeItem;
 class nsILayoutHistoryState;
 class nsDocShellEditorData;
 class nsIMutableArray;
-class nsSHistory;
 
 // A document may have multiple SHEntries, either due to hash navigations or
 // calls to history.pushState.  SHEntries corresponding to the same document
@@ -48,15 +47,15 @@ class Document;
  */
 class SHEntrySharedParentState {
  public:
+  explicit SHEntrySharedParentState(uint64_t aID);
+
   uint64_t GetID() const { return mID; }
 
   void NotifyListenersContentViewerEvicted();
 
  protected:
-  SHEntrySharedParentState(nsSHistory* aSHistory, uint64_t aID);
-  SHEntrySharedParentState(SHEntrySharedParentState* aDuplicate, uint64_t aID)
-      : SHEntrySharedParentState(aDuplicate->mSHistory, aID) {}
-  SHEntrySharedParentState(nsIWeakReference* aDuplicate, uint64_t aID);
+  friend class nsSHEntry;
+
   virtual ~SHEntrySharedParentState();
   NS_INLINE_DECL_VIRTUAL_REFCOUNTING_WITH_DESTROY(SHEntrySharedParentState,
                                                   Destroy())
@@ -138,9 +137,7 @@ class nsSHEntryShared final : public nsIBFCacheEntry,
   static void EnsureHistoryTracker();
   static void Shutdown();
 
-  using SHEntrySharedParentState::SHEntrySharedParentState;
-
-  already_AddRefed<nsSHEntryShared> Duplicate(uint64_t aNewSharedID);
+  explicit nsSHEntryShared(uint64_t aID);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIBFCACHEENTRY
@@ -153,6 +150,9 @@ class nsSHEntryShared final : public nsIBFCacheEntry,
   NS_DECL_NSIMUTATIONOBSERVER_CONTENTREMOVED
 
   nsExpirationState* GetExpirationState() { return &mExpirationState; }
+
+  static already_AddRefed<nsSHEntryShared> Duplicate(nsSHEntryShared* aEntry,
+                                                     uint64_t aNewSharedID);
 
  private:
   ~nsSHEntryShared();

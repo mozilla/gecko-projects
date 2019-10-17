@@ -148,9 +148,6 @@ class nsSHistory : public mozilla::LinkedListElement<nsSHistory>,
  protected:
   virtual ~nsSHistory();
 
-  // Weak reference. Do not refcount this.
-  mozilla::dom::BrowsingContext* mRootBC;
-
  private:
   friend class nsSHistoryObserver;
 
@@ -210,6 +207,8 @@ class nsSHistory : public mozilla::LinkedListElement<nsSHistory>,
   // Session History listeners
   nsAutoTObserverArray<nsWeakPtr, 2> mListeners;
 
+  // Weak reference. Do not refcount this.
+  mozilla::dom::BrowsingContext* mRootBC;
   nsID mRootDocShellID;
 
   // Max viewers allowed total, across all SHistory objects

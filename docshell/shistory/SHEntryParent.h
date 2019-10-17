@@ -16,7 +16,6 @@
 namespace mozilla {
 namespace dom {
 
-class LegacySHistory;
 class PContentParent;
 class SHEntryParent;
 
@@ -26,24 +25,11 @@ class SHEntryParent;
  */
 class SHEntrySharedParent : public SHEntrySharedParentState {
  public:
-  SHEntrySharedParent(PContentParent* aContentParent, LegacySHistory* aSHistory,
-                      uint64_t aSharedID);
-
-  already_AddRefed<SHEntrySharedParent> Duplicate(uint64_t aNewSharedID) {
-    RefPtr<SHEntrySharedParent> shared =
-        new SHEntrySharedParent(this, aNewSharedID);
-    shared->CopyFrom(this);
-    return shared.forget();
-  }
-
-  PContentParent* GetContentParent() { return mContentParent.get(); }
-
- protected:
-  SHEntrySharedParent(SHEntrySharedParent* aDuplicate, uint64_t aSharedID)
-      : SHEntrySharedParentState(aDuplicate, aSharedID),
-        mContentParent(aDuplicate->mContentParent) {}
+  SHEntrySharedParent(PContentParent* aContentParent, uint64_t aSharedID);
 
   void Destroy() override;
+
+  PContentParent* GetContentParent() { return mContentParent.get(); }
 
  private:
   mozilla::WeakPtr<PContentParent> mContentParent;
@@ -58,8 +44,9 @@ class SHEntrySharedParent : public SHEntrySharedParentState {
  */
 class LegacySHEntry final : public nsSHEntry, public CrossProcessSHEntry {
  public:
-  LegacySHEntry(PContentParent* aContentParent, LegacySHistory* aSHistory,
-                uint64_t aSharedID);
+  LegacySHEntry(PContentParent* aParent, uint64_t aSharedID)
+      : nsSHEntry(new SHEntrySharedParent(aParent, aSharedID)),
+        mActor(nullptr) {}
   explicit LegacySHEntry(const LegacySHEntry& aEntry)
       : nsSHEntry(aEntry), mActor(nullptr) {}
 
@@ -79,7 +66,7 @@ class LegacySHEntry final : public nsSHEntry, public CrossProcessSHEntry {
 
  private:
   friend class SHEntryParent;
-  friend class SHistoryParent;
+  friend class ContentParent;
 
   ~LegacySHEntry() {}
 

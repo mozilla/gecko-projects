@@ -582,7 +582,7 @@ class ContentParent final : public PContentParent,
       PSessionStorageObserverParent* aActor);
 
   PSHEntryParent* AllocPSHEntryParent(
-      PSHistoryParent* aSHistory, const PSHEntryOrSharedID& aEntryOrSharedID);
+      const PSHEntryOrSharedID& aEntryOrSharedID);
 
   void DeallocPSHEntryParent(PSHEntryParent*);
 

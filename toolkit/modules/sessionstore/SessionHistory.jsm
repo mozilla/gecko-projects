@@ -351,7 +351,7 @@ var SessionHistoryInternal = {
       }
       let persist = "persist" in entry ? entry.persist : true;
       history.addEntry(
-        this.deserializeEntry(entry, idMap, docIdentMap, history),
+        this.deserializeEntry(entry, idMap, docIdentMap),
         persist
       );
     }
@@ -375,8 +375,10 @@ var SessionHistoryInternal = {
    *        Hash to ensure reuse of BFCache entries
    * @returns nsISHEntry
    */
-  deserializeEntry(entry, idMap, docIdentMap, shistory) {
-    var shEntry = shistory.createEntry();
+  deserializeEntry(entry, idMap, docIdentMap) {
+    var shEntry = Cc[
+      "@mozilla.org/browser/session-history-entry;1"
+    ].createInstance(Ci.nsISHEntry);
 
     shEntry.URI = Services.io.newURI(entry.url);
     shEntry.title = entry.title || entry.url;
@@ -561,12 +563,7 @@ var SessionHistoryInternal = {
         // they have the same parent or their parents have the same document.
 
         shEntry.AddChild(
-          this.deserializeEntry(
-            entry.children[i],
-            idMap,
-            childDocIdents,
-            shEntry.shistory
-          ),
+          this.deserializeEntry(entry.children[i], idMap, childDocIdents),
           i
         );
       }

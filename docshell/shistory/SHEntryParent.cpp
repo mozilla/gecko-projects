@@ -14,10 +14,8 @@ namespace mozilla {
 namespace dom {
 
 SHEntrySharedParent::SHEntrySharedParent(PContentParent* aContentParent,
-                                         LegacySHistory* aSHistory,
                                          uint64_t aSharedID)
-    : SHEntrySharedParentState(aSHistory, aSharedID),
-      mContentParent(aContentParent) {}
+    : SHEntrySharedParentState(aSharedID), mContentParent(aContentParent) {}
 
 void SHEntrySharedParent::Destroy() {
   if (mContentParent &&
@@ -26,11 +24,6 @@ void SHEntrySharedParent::Destroy() {
   }
   SHEntrySharedParentState::Destroy();
 }
-
-LegacySHEntry::LegacySHEntry(PContentParent* aContentParent,
-                             LegacySHistory* aSHistory, uint64_t aSharedID)
-    : nsSHEntry(new SHEntrySharedParent(aContentParent, aSHistory, aSharedID)),
-      mActor(nullptr) {}
 
 NS_IMPL_ISUPPORTS_INHERITED0(LegacySHEntry, nsSHEntry)
 
@@ -51,8 +44,12 @@ MaybeNewPSHEntryParent LegacySHEntry::GetOrCreateActor(
 }
 
 void LegacySHEntry::AbandonBFCacheEntry(uint64_t aNewSharedID) {
-  mShared =
-      static_cast<SHEntrySharedParent*>(mShared.get())->Duplicate(aNewSharedID);
+  PContentParent* contentParent =
+      static_cast<SHEntrySharedParent*>(mShared.get())->GetContentParent();
+  RefPtr<SHEntrySharedParent> shared =
+      new SHEntrySharedParent(contentParent, aNewSharedID);
+  shared->CopyFrom(mShared);
+  mShared = shared.forget();
 }
 
 NS_IMETHODIMP
@@ -304,7 +301,7 @@ bool SHEntryParent::RecvGetStateData(ClonedMessageData* aData) {
   if (container) {
     static_cast<nsStructuredCloneContainer*>(container.get())
         ->BuildClonedMessageDataForParent(
-            static_cast<ContentParent*>(ToplevelProtocol()), *aData);
+            static_cast<ContentParent*>(Manager()), *aData);
   }
   return true;
 }
@@ -504,7 +501,8 @@ bool SHEntryParent::RecvSetLoadTypeAsHistory() {
 }
 
 bool SHEntryParent::RecvAddChild(PSHEntryParent* aChild, const int32_t& aOffset,
-                                 const bool& aUseRemoteSubframes, nsresult* aResult) {
+                                 const bool& aUseRemoteSubframes,
+                                 nsresult* aResult) {
   *aResult = mEntry->AddChild(
       aChild ? static_cast<SHEntryParent*>(aChild)->mEntry.get() : nullptr,
       aOffset, aUseRemoteSubframes);
