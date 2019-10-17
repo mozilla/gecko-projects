@@ -11450,7 +11450,13 @@ nsresult nsDocShell::AddToSessionHistory(
 
   // Create a new entry if necessary.
   if (!entry) {
-    mSessionHistory->LegacySHistory()->CreateEntry(getter_AddRefs(entry));
+    nsCOMPtr<nsIWebNavigation> webnav = do_QueryInterface(root);
+    NS_ENSURE_TRUE(webnav, NS_ERROR_FAILURE);
+
+    RefPtr<ChildSHistory> shistory = webnav->GetSessionHistory();
+    NS_ENSURE_TRUE(shistory, NS_ERROR_FAILURE);
+
+    shistory->LegacySHistory()->CreateEntry(getter_AddRefs(entry));
 
     if (!entry) {
       return NS_ERROR_OUT_OF_MEMORY;
