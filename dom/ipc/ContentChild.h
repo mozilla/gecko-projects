@@ -624,7 +624,8 @@ class ContentChild final : public PContentChild,
   bool DeallocPSessionStorageObserverChild(
       PSessionStorageObserverChild* aActor);
 
-  PSHEntryChild* AllocPSHEntryChild(const PSHEntryOrSharedID& aEntryOrSharedID);
+  PSHEntryChild* AllocPSHEntryChild(PSHistoryChild* aSHistory,
+                                    const PSHEntryOrSharedID& aEntryOrSharedID);
   void DeallocPSHEntryChild(PSHEntryChild*);
 
   PSHistoryChild* AllocPSHistoryChild(BrowsingContext* aContext);
