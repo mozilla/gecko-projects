@@ -332,8 +332,10 @@ pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 // Whether the quantum bar displays the major design update.
 #ifdef NIGHTLY_BUILD
   pref("browser.urlbar.megabar", true);
+  pref("browser.urlbar.view.stripHttps", true);
 #else
   pref("browser.urlbar.megabar", false);
+  pref("browser.urlbar.view.stripHttps", false);
 #endif
 
 pref("browser.urlbar.openViewOnFocus", false);
@@ -393,9 +395,9 @@ pref("browser.search.widget.inNavBar", false);
 // engine in private browsing mode.
 #ifdef EARLY_BETA_OR_EARLIER
   pref("browser.search.separatePrivateDefault.ui.enabled", true);
-#else
-  pref("browser.search.separatePrivateDefault.ui.enabled", false);
 #endif
+// The maximum amount of times the private default banner is shown.
+pref("browser.search.separatePrivateDefault.ui.banner.max", 0);
 
 pref("browser.sessionhistory.max_entries", 50);
 
@@ -600,7 +602,6 @@ pref("privacy.history.custom",              false);
 // 5 - Last 5 minutes
 // 6 - Last 24 hours
 pref("privacy.sanitize.timeSpan", 1);
-pref("privacy.sanitize.sanitizeOnShutdown", false);
 
 pref("privacy.sanitize.migrateFx3Prefs",    false);
 
@@ -608,12 +609,6 @@ pref("privacy.panicButton.enabled",         true);
 
 // Time until temporary permissions expire, in ms
 pref("privacy.temporary_permission_expire_time_ms",  3600000);
-
-// If Accept-Language should be spoofed by en-US
-// 0 - will prompt
-// 1 - don't spoof
-// 2 - spoof
-pref("privacy.spoof_english", 0);
 
 pref("network.proxy.share_proxy_settings",  false); // use the same proxy settings for all protocols
 
@@ -1016,6 +1011,9 @@ pref("browser.bookmarks.editDialog.showForNewBookmarks", true);
 // Don't try to alter this pref, it'll be reset the next time you use the
 // bookmarking dialog
 pref("browser.bookmarks.editDialog.firstEditField", "namePicker");
+
+// The number of recently selected folders in the edit bookmarks dialog.
+pref("browser.bookmarks.editDialog.maxRecentFolders", 7);
 
 pref("dom.ipc.plugins.flash.disable-protected-mode", false);
 
@@ -2265,13 +2263,6 @@ pref("devtools.webconsole.timestampMessages", false);
   pref("devtools.webconsole.sidebarToggle", true);
 #else
   pref("devtools.webconsole.sidebarToggle", false);
-#endif
-
-// Enable editor mode in the console in Nightly and DevEdition builds.
-#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
-  pref("devtools.webconsole.features.editor", true);
-#else
-  pref("devtools.webconsole.features.editor", false);
 #endif
 
 // Saved editor mode state in the console.

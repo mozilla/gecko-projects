@@ -18,17 +18,22 @@ add_task(function test() {
   const {
     getRecordingPreferencesFromBrowser,
     revertRecordingPreferences,
-    getDefaultRecordingSettings,
+    getDefaultRecordingPreferences,
   } = setupBackgroundJsm();
 
   Assert.equal(
     getRecordingPreferencesFromBrowser().buffersize,
-    getDefaultRecordingSettings().buffersize,
+    getDefaultRecordingPreferences().buffersize,
     "The initial state has the default buffersize."
   );
   Assert.equal(
+    getRecordingPreferencesFromBrowser().interval,
+    getDefaultRecordingPreferences().interval,
+    "The initial state has the default interval."
+  );
+  Assert.equal(
     getRecordingPreferencesFromBrowser().features.includes("stackwalk"),
-    getDefaultRecordingSettings().features.includes("stackwalk"),
+    getDefaultRecordingPreferences().features.includes("stackwalk"),
     "The stackwalk feature is initialized to the default."
   );
   revertRecordingPreferences();

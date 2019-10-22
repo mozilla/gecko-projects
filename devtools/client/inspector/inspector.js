@@ -66,11 +66,7 @@ loader.lazyRequireGetter(
   "saveScreenshot",
   "devtools/shared/screenshot/save"
 );
-loader.lazyRequireGetter(
-  this,
-  "ObjectClient",
-  "devtools/shared/client/object-client"
-);
+loader.lazyRequireGetter(this, "ObjectFront", "devtools/shared/fronts/object");
 
 loader.lazyImporter(
   this,
@@ -151,14 +147,21 @@ function Inspector(toolbox) {
   this.panelWin.inspector = this;
   this.telemetry = toolbox.telemetry;
   this.store = Store({
-    createObjectClient: object => {
-      return new ObjectClient(toolbox.target.client, object);
+    createObjectFront: object => {
+      return new ObjectFront(toolbox.target.client, object);
     },
     releaseActor: actor => {
       if (!actor) {
         return;
       }
-      toolbox.target.client.release(actor);
+      const objFront = toolbox.target.client.getFrontByID(actor);
+      if (objFront) {
+        objFront.release();
+        return;
+      }
+
+      // In case there's no object front, use the client's release method.
+      toolbox.target.client.release(actor).catch(() => {});
     },
   });
 
@@ -542,13 +545,20 @@ Inspector.prototype = {
     this.searchboxShortcuts.on(key, event => {
       // Prevent overriding same shortcut from the computed/rule views
       if (
-        event.target.closest("#sidebar-panel-ruleview") ||
-        event.target.closest("#sidebar-panel-computedview")
+        event.originalTarget.closest("#sidebar-panel-ruleview") ||
+        event.originalTarget.closest("#sidebar-panel-computedview")
       ) {
         return;
       }
-      event.preventDefault();
-      this.searchBox.focus();
+
+      const win = event.originalTarget.ownerGlobal;
+      // Check if the event is coming from an inspector window to avoid catching
+      // events from other panels. Note, we are testing both win and win.parent
+      // because the inspector uses iframes.
+      if (win === this.panelWin || win.parent === this.panelWin) {
+        event.preventDefault();
+        this.searchBox.focus();
+      }
     });
   },
 
@@ -1693,6 +1703,7 @@ Inspector.prototype = {
     this._markupFrame.contentWindow.focus();
     this._markupBox.style.visibility = "visible";
     this.markup = new MarkupView(this, this._markupFrame, this._toolbox.win);
+    this.markup.init();
     this.emit("markuploaded");
   },
 

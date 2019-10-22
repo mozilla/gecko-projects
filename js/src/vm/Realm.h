@@ -390,6 +390,13 @@ class JS::Realm : public JS::shadow::Realm {
   // stack.
   unsigned enterRealmDepthIgnoringJit_ = 0;
 
+ public:
+  using DebuggerVector =
+      js::Vector<js::WeakHeapPtr<js::Debugger*>, 0, js::ZoneAllocPolicy>;
+
+ private:
+  DebuggerVector debuggers_;
+
   enum {
     IsDebuggee = 1 << 0,
     DebuggerObservesAllExecution = 1 << 1,
@@ -507,7 +514,9 @@ class JS::Realm : public JS::shadow::Realm {
   inline js::GlobalObject* maybeGlobal() const;
 
   /* An unbarriered getter for use while tracing. */
-  inline js::GlobalObject* unsafeUnbarrieredMaybeGlobal() const;
+  js::GlobalObject* unsafeUnbarrieredMaybeGlobal() const {
+    return global_.unbarrieredGet();
+  }
 
   inline js::LexicalEnvironmentObject* unbarrieredLexicalEnvironment() const;
 
@@ -705,6 +714,8 @@ class JS::Realm : public JS::shadow::Realm {
 
   void setIsDebuggee();
   void unsetIsDebuggee();
+
+  DebuggerVector& getDebuggers() { return debuggers_; };
 
   // True if this compartment's global is a debuggee of some Debugger
   // object with a live hook that observes all execution; e.g.,

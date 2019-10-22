@@ -167,7 +167,11 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     if (!this._dbg) {
       this._dbg = this._parent.dbg;
       // Keep the debugger disabled until a client attaches.
-      this._dbg.enabled = this._state != "detached";
+      if (this._state === "detached") {
+        this._dbg.disable();
+      } else {
+        this._dbg.enable();
+      }
     }
     return this._dbg;
   },
@@ -716,7 +720,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       const frame = this.dbg.getNewestFrame();
       if (frame) {
         const { sourceActor } = this.sources.getFrameLocation(frame);
-        const url = sourceActor.url;
+        const { url } = sourceActor;
         if (this.sources.isBlackBoxed(url)) {
           return;
         }
@@ -730,7 +734,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     return frame => {
       const location = this.sources.getFrameLocation(frame);
       const { sourceActor, line, column } = location;
-      const url = sourceActor.url;
+      const { url } = sourceActor;
 
       if (this.sources.isBlackBoxed(url, line, column)) {
         return undefined;
@@ -1724,7 +1728,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     if (isTopLevel && this.state != "detached") {
       this.sources.reset();
       this.clearDebuggees();
-      this.dbg.enabled = true;
+      this.dbg.enable();
       this.maybePauseOnExceptions();
       // Update the global no matter if the debugger is on or off,
       // otherwise the global will be wrong when enabled later.
@@ -1752,19 +1756,24 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // Proceed normally only if the debuggee is not paused.
     if (this.state == "paused") {
       this.unsafeSynchronize(Promise.resolve(this.doResume()));
-      this.dbg.enabled = false;
+      this.dbg.disable();
     }
     this.disableAllBreakpoints();
   },
 
   _onNavigate: function() {
     if (this.state == "running") {
-      this.dbg.enabled = true;
+      this.dbg.enable();
     }
   },
 
   // JS Debugger API hooks.
-  pauseForMutationBreakpoint: function(mutationType) {
+  pauseForMutationBreakpoint: function(
+    mutationType,
+    targetNode,
+    ancestorNode,
+    action = "" // "add" or "remove"
+  ) {
     if (
       !["subtreeModified", "nodeRemoved", "attributeModified"].includes(
         mutationType
@@ -1784,11 +1793,37 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       return undefined;
     }
 
-    return this._pauseAndRespond(frame, {
-      type: "mutationBreakpoint",
-      mutationType,
-      message: `DOM Mutation: '${mutationType}'`,
-    });
+    const global = (targetNode.ownerDocument || targetNode).defaultView;
+    assert(global && this.dbg.hasDebuggee(global));
+
+    const targetObj = this.dbg
+      .makeGlobalObjectReference(global)
+      .makeDebuggeeValue(targetNode);
+
+    let ancestorObj = null;
+    if (ancestorNode) {
+      ancestorObj = this.dbg
+        .makeGlobalObjectReference(global)
+        .makeDebuggeeValue(ancestorNode);
+    }
+
+    return this._pauseAndRespond(
+      frame,
+      {
+        type: "mutationBreakpoint",
+        mutationType,
+        message: `DOM Mutation: '${mutationType}'`,
+      },
+      pkt => {
+        // We have to add this here because `_pausePool` is `null` beforehand.
+        pkt.why.nodeGrip = this.objectGrip(targetObj, this._pausePool);
+        pkt.why.ancestorGrip = ancestorObj
+          ? this.objectGrip(ancestorObj, this._pausePool)
+          : null;
+        pkt.why.action = action;
+        return pkt;
+      }
+    );
   },
 
   /**

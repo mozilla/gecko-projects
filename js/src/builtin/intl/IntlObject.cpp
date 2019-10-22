@@ -38,6 +38,7 @@
 #include "unicode/uloc.h"
 #include "unicode/utypes.h"
 #include "vm/GlobalObject.h"
+#include "vm/JSAtom.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
 #include "vm/StringType.h"
@@ -155,15 +156,11 @@ bool js::intl_GetCalendarInfo(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-static void ReportBadKey(JSContext* cx,
-                         const Range<const JS::Latin1Char>& range) {
-  JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr, JSMSG_INVALID_KEY,
-                             range.begin().get());
-}
-
-static void ReportBadKey(JSContext* cx, const Range<const char16_t>& range) {
-  JS_ReportErrorNumberUC(cx, GetErrorMessage, nullptr, JSMSG_INVALID_KEY,
-                         range.begin().get());
+static void ReportBadKey(JSContext* cx, HandleString key) {
+  if (UniqueChars chars = QuoteString(cx, key, '"')) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, JSMSG_INVALID_KEY,
+                              chars.get());
+  }
 }
 
 template <typename ConstChar>
@@ -199,22 +196,23 @@ template <typename ConstChar>
 static JSString* ComputeSingleDisplayName(JSContext* cx, UDateFormat* fmt,
                                           UDateTimePatternGenerator* dtpg,
                                           DisplayNameStyle style,
-                                          const Range<ConstChar>& pattern) {
+                                          const Range<ConstChar>& pattern,
+                                          HandleString patternString) {
   RangedPtr<ConstChar> iter = pattern.begin();
   const RangedPtr<ConstChar> end = pattern.end();
 
-  auto MatchSlash = [cx, pattern, &iter, end]() {
+  auto MatchSlash = [cx, patternString, &iter, end]() {
     if (MOZ_LIKELY(iter != end && *iter == '/')) {
       iter++;
       return true;
     }
 
-    ReportBadKey(cx, pattern);
+    ReportBadKey(cx, patternString);
     return false;
   };
 
   if (!MatchPart(&iter, end, "dates")) {
-    ReportBadKey(cx, pattern);
+    ReportBadKey(cx, patternString);
     return nullptr;
   }
 
@@ -238,13 +236,13 @@ static JSString* ComputeSingleDisplayName(JSContext* cx, UDateFormat* fmt,
     } else if (MatchPart(&iter, end, "day")) {
       fieldType = UDATPG_DAY_FIELD;
     } else {
-      ReportBadKey(cx, pattern);
+      ReportBadKey(cx, patternString);
       return nullptr;
     }
 
     // This part must be the final part with no trailing data.
     if (iter != end) {
-      ReportBadKey(cx, pattern);
+      ReportBadKey(cx, patternString);
       return nullptr;
     }
 
@@ -307,7 +305,7 @@ static JSString* ComputeSingleDisplayName(JSContext* cx, UDateFormat* fmt,
       } else if (MatchPart(&iter, end, "december")) {
         index = UCAL_DECEMBER;
       } else {
-        ReportBadKey(cx, pattern);
+        ReportBadKey(cx, patternString);
         return nullptr;
       }
     } else if (MatchPart(&iter, end, "weekdays")) {
@@ -344,7 +342,7 @@ static JSString* ComputeSingleDisplayName(JSContext* cx, UDateFormat* fmt,
       } else if (MatchPart(&iter, end, "sunday")) {
         index = UCAL_SUNDAY;
       } else {
-        ReportBadKey(cx, pattern);
+        ReportBadKey(cx, patternString);
         return nullptr;
       }
     } else if (MatchPart(&iter, end, "dayperiods")) {
@@ -359,17 +357,17 @@ static JSString* ComputeSingleDisplayName(JSContext* cx, UDateFormat* fmt,
       } else if (MatchPart(&iter, end, "pm")) {
         index = UCAL_PM;
       } else {
-        ReportBadKey(cx, pattern);
+        ReportBadKey(cx, patternString);
         return nullptr;
       }
     } else {
-      ReportBadKey(cx, pattern);
+      ReportBadKey(cx, patternString);
       return nullptr;
     }
 
     // This part must be the final part with no trailing data.
     if (iter != end) {
-      ReportBadKey(cx, pattern);
+      ReportBadKey(cx, patternString);
       return nullptr;
     }
 
@@ -379,7 +377,7 @@ static JSString* ComputeSingleDisplayName(JSContext* cx, UDateFormat* fmt,
     });
   }
 
-  ReportBadKey(cx, pattern);
+  ReportBadKey(cx, patternString);
   return nullptr;
 }
 
@@ -465,9 +463,11 @@ bool js::intl_ComputeDisplayNames(JSContext* cx, unsigned argc, Value* vp) {
     JSString* displayName =
         stablePatternChars.isLatin1()
             ? ComputeSingleDisplayName(cx, fmt, dtpg, dnStyle,
-                                       stablePatternChars.latin1Range())
+                                       stablePatternChars.latin1Range(),
+                                       keyValStr)
             : ComputeSingleDisplayName(cx, fmt, dtpg, dnStyle,
-                                       stablePatternChars.twoByteRange());
+                                       stablePatternChars.twoByteRange(),
+                                       keyValStr);
     if (!displayName) {
       return false;
     }
@@ -619,6 +619,8 @@ bool js::intl_BestAvailableLocale(JSContext* cx, unsigned argc, Value* vp) {
       kind = SupportedLocaleKind::Collator;
     } else if (StringEqualsLiteral(typeStr, "DateTimeFormat")) {
       kind = SupportedLocaleKind::DateTimeFormat;
+    } else if (StringEqualsLiteral(typeStr, "ListFormat")) {
+      kind = SupportedLocaleKind::ListFormat;
     } else if (StringEqualsLiteral(typeStr, "NumberFormat")) {
       kind = SupportedLocaleKind::NumberFormat;
     } else if (StringEqualsLiteral(typeStr, "PluralRules")) {
@@ -753,12 +755,12 @@ bool js::intl_supportedLocaleOrFallback(JSContext* cx, unsigned argc,
   // That implies we must ignore any candidate which isn't supported by all Intl
   // service constructors.
   //
-  // Note: We don't test the supported locales of either Intl.PluralRules or
-  // Intl.RelativeTimeFormat, because ICU doesn't provide the necessary API to
-  // return actual set of supported locales for these constructors. Instead it
-  // returns the complete set of available locales for ULocale, which is a
-  // superset of the locales supported by Collator, NumberFormat, and
-  // DateTimeFormat.
+  // Note: We don't test the supported locales of either Intl.ListFormat,
+  // Intl.PluralRules, Intl.RelativeTimeFormat, because ICU doesn't provide the
+  // necessary API to return actual set of supported locales for these
+  // constructors. Instead it returns the complete set of available locales for
+  // ULocale, which is a superset of the locales supported by Collator,
+  // NumberFormat, and DateTimeFormat.
   bool isSupported = true;
   for (auto kind :
        {SupportedLocaleKind::Collator, SupportedLocaleKind::DateTimeFormat,
@@ -802,11 +804,10 @@ static const JSFunctionSpec intl_static_methods[] = {
  * Initializes the Intl Object and its standard built-in properties.
  * Spec: ECMAScript Internationalization API Specification, 8.0, 8.1
  */
-/* static */
-bool GlobalObject::initIntlObject(JSContext* cx, Handle<GlobalObject*> global) {
+JSObject* js::InitIntlClass(JSContext* cx, Handle<GlobalObject*> global) {
   RootedObject proto(cx, GlobalObject::getOrCreateObjectPrototype(cx, global));
   if (!proto) {
-    return false;
+    return nullptr;
   }
 
   // The |Intl| object is just a plain object with some "static" function
@@ -814,82 +815,43 @@ bool GlobalObject::initIntlObject(JSContext* cx, Handle<GlobalObject*> global) {
   RootedObject intl(
       cx, NewObjectWithGivenProto(cx, &IntlClass, proto, SingletonObject));
   if (!intl) {
-    return false;
+    return nullptr;
   }
 
   // Add the static functions.
   if (!JS_DefineFunctions(cx, intl, intl_static_methods)) {
-    return false;
+    return nullptr;
   }
 
-  // Add the constructor properties, computing and returning the relevant
-  // prototype objects needed below.
-  RootedObject collatorProto(cx, CreateCollatorPrototype(cx, intl, global));
-  if (!collatorProto) {
-    return false;
-  }
-  RootedObject dateTimeFormatProto(cx), dateTimeFormat(cx);
-  dateTimeFormatProto = CreateDateTimeFormatPrototype(
-      cx, intl, global, &dateTimeFormat, DateTimeFormatOptions::Standard);
-  if (!dateTimeFormatProto) {
-    return false;
-  }
-  RootedObject numberFormatProto(cx), numberFormat(cx);
-  numberFormatProto =
-      CreateNumberFormatPrototype(cx, intl, global, &numberFormat);
-  if (!numberFormatProto) {
-    return false;
-  }
-  RootedObject pluralRulesProto(cx,
-                                CreatePluralRulesPrototype(cx, intl, global));
-  if (!pluralRulesProto) {
-    return false;
-  }
-  RootedObject relativeTimeFmtProto(
-      cx, CreateRelativeTimeFormatPrototype(cx, intl, global));
-  if (!relativeTimeFmtProto) {
-    return false;
+  // Add the constructor properties.
+  RootedId ctorId(cx);
+  RootedValue ctorValue(cx);
+  for (const auto& protoKey :
+       {JSProto_Collator, JSProto_DateTimeFormat, JSProto_NumberFormat,
+        JSProto_PluralRules, JSProto_RelativeTimeFormat}) {
+    JSObject* ctor = GlobalObject::getOrCreateConstructor(cx, protoKey);
+    if (!ctor) {
+      return nullptr;
+    }
+
+    ctorId = NameToId(ClassName(protoKey, cx));
+    ctorValue.setObject(*ctor);
+    if (!DefineDataProperty(cx, intl, ctorId, ctorValue, 0)) {
+      return nullptr;
+    }
   }
 
   // The |Intl| object is fully set up now, so define the global property.
   RootedValue intlValue(cx, ObjectValue(*intl));
   if (!DefineDataProperty(cx, global, cx->names().Intl, intlValue,
                           JSPROP_RESOLVING)) {
-    return false;
+    return nullptr;
   }
-
-  // Now that the |Intl| object is successfully added, we can OOM-safely fill
-  // in all relevant reserved global slots.
-
-  // Cache the various prototypes, for use in creating instances of these
-  // objects with the proper [[Prototype]] as "the original value of
-  // |Intl.Collator.prototype|" and similar.  For builtin classes like
-  // |String.prototype| we have |JSProto_*| that enables
-  // |getPrototype(JSProto_*)|, but that has global-object-property-related
-  // baggage we don't need or want, so we use one-off reserved slots.
-  global->setReservedSlot(COLLATOR_PROTO, ObjectValue(*collatorProto));
-  global->setReservedSlot(DATE_TIME_FORMAT, ObjectValue(*dateTimeFormat));
-  global->setReservedSlot(DATE_TIME_FORMAT_PROTO,
-                          ObjectValue(*dateTimeFormatProto));
-  global->setReservedSlot(NUMBER_FORMAT, ObjectValue(*numberFormat));
-  global->setReservedSlot(NUMBER_FORMAT_PROTO, ObjectValue(*numberFormatProto));
-  global->setReservedSlot(PLURAL_RULES_PROTO, ObjectValue(*pluralRulesProto));
-  global->setReservedSlot(RELATIVE_TIME_FORMAT_PROTO,
-                          ObjectValue(*relativeTimeFmtProto));
 
   // Also cache |Intl| to implement spec language that conditions behavior
   // based on values being equal to "the standard built-in |Intl| object".
   // Use |setConstructor| to correspond with |JSProto_Intl|.
-  //
-  // XXX We should possibly do a one-off reserved slot like above.
   global->setConstructor(JSProto_Intl, ObjectValue(*intl));
-  return true;
-}
 
-JSObject* js::InitIntlClass(JSContext* cx, Handle<GlobalObject*> global) {
-  if (!GlobalObject::initIntlObject(cx, global)) {
-    return nullptr;
-  }
-
-  return &global->getConstructor(JSProto_Intl).toObject();
+  return intl;
 }

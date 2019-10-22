@@ -3092,8 +3092,9 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "Successfully started HTTP channels",
-    "bug_numbers": [1473333],
-    "alert_emails": ["necko@mozilla.com", "dstenberg@mozilla.com"]
+    "bug_numbers": [1473333,1587226],
+    "releaseChannelCollection": "opt-out",
+    "alert_emails": ["necko@mozilla.com", "ddamjanovic@mozilla.com"]
   },
   "HTTP_CONNECTION_ENTRY_CACHE_HIT_1" : {
     "record_in_processes": ["main", "content"],
@@ -7056,17 +7057,6 @@
     "alert_emails": ["sefeng@mozilla.com", "perfteam@mozilla.com", "product-metrics-telemetry-alerts@mozilla.com"],
     "releaseChannelCollection": "opt-out"
   },
-  "FX_PAGE_RELOAD_KEY_COMBO": {
-    "record_in_processes": ["main"],
-    "products": ["firefox"],
-    "expires_in_version": "72",
-    "kind": "categorical",
-    "description": "Record the frequency for common key combinations that users can use to trigger a page reload",
-    "labels": ["only_f5", "ctrl_f5", "accel_reloadKey", "accel_shift_reload", "toolbar", "shift_toolbar", "accel_toolbar", "auxiliary_toolbar"],
-    "bug_numbers": [1551965],
-    "alert_emails": ["sefeng@mozilla.com", "perfteam@mozilla.com", "product-metrics-telemetry-alerts@mozilla.com"],
-    "releaseChannelCollection": "opt-out"
-  },
   "FX_SCHEDULE_PRESSURE_IDLE_SAMPLE_MS": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
@@ -9120,8 +9110,8 @@
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["seceng-telemetry@mozilla.com", "ehsan+telemetry@mozilla.com"],
-    "bug_numbers": [1513309],
-    "expires_in_version": "73",
+    "bug_numbers": [1513309, 1588844],
+    "expires_in_version": "80",
     "kind": "categorical",
     "labels": ["Request", "AllowAutomatically", "Deny", "Allow", "AllowOnAnySite"],
     "description": "Storage Access API UI events."
@@ -10472,11 +10462,11 @@
   "DEVTOOLS_ACCESSIBILITY_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "70",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 86400,
     "n_buckets": 100,
-    "bug_numbers": [1447302, 1503568],
+    "bug_numbers": [1447302, 1503568, 1587985],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
     "releaseChannelCollection": "opt-out",
     "description": "How long has the accessibility panel been active (seconds)."
@@ -10484,11 +10474,11 @@
   "DEVTOOLS_ACCESSIBILITY_PICKER_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "70",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 86400,
     "n_buckets": 100,
-    "bug_numbers": [1447302, 1503568],
+    "bug_numbers": [1447302, 1503568, 1587985],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
     "releaseChannelCollection": "opt-out",
     "description": "How long has the picker tool in accessibility panel been active (seconds)."
@@ -10496,11 +10486,11 @@
   "DEVTOOLS_ACCESSIBILITY_SERVICE_TIME_ACTIVE_SECONDS": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "70",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 86400,
     "n_buckets": 100,
-    "bug_numbers": [1447302, 1503568],
+    "bug_numbers": [1447302, 1503568, 1587985],
     "alert_emails": ["dev-developer-tools@lists.mozilla.org", "yzenevich@mozilla.com"],
     "releaseChannelCollection": "opt-out",
     "description": "How long has the platform accessibility been active (seconds) in accessibility panel."

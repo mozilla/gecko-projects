@@ -15,53 +15,6 @@ var { XPCOMUtils } = ChromeUtils.import(
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   ContentMetaHandler: "resource:///modules/ContentMetaHandler.jsm",
-  LoginFormFactory: "resource://gre/modules/LoginFormFactory.jsm",
-  LoginManagerContent: "resource://gre/modules/LoginManagerContent.jsm",
-  InsecurePasswordUtils: "resource://gre/modules/InsecurePasswordUtils.jsm",
-});
-
-// NOTE: Much of this logic is duplicated in BrowserCLH.js for Android.
-addMessageListener("PasswordManager:fillForm", function(message) {
-  // intercept if ContextMenu.jsm had sent a plain object for remote targets
-  LoginManagerContent.receiveMessage(message, content);
-});
-addMessageListener("PasswordManager:fillGeneratedPassword", function(message) {
-  // forward message to LMC
-  LoginManagerContent.receiveMessage(message, content);
-});
-
-function shouldIgnoreLoginManagerEvent(event) {
-  let nodePrincipal = event.target.nodePrincipal;
-  // If we have a system or null principal then prevent any more password manager code from running and
-  // incorrectly using the document `location`. Also skip password manager for about: pages.
-  return (
-    nodePrincipal.isSystemPrincipal ||
-    nodePrincipal.isNullPrincipal ||
-    nodePrincipal.schemeIs("about")
-  );
-}
-
-addEventListener("DOMFormBeforeSubmit", function(event) {
-  if (shouldIgnoreLoginManagerEvent(event)) {
-    return;
-  }
-  LoginManagerContent.onDOMFormBeforeSubmit(event);
-});
-addEventListener("DOMFormHasPassword", function(event) {
-  if (shouldIgnoreLoginManagerEvent(event)) {
-    return;
-  }
-  LoginManagerContent.onDOMFormHasPassword(event);
-  let formLike = LoginFormFactory.createFromForm(event.originalTarget);
-  InsecurePasswordUtils.reportInsecurePasswords(formLike);
-});
-addEventListener("DOMInputPasswordAdded", function(event) {
-  if (shouldIgnoreLoginManagerEvent(event)) {
-    return;
-  }
-  LoginManagerContent.onDOMInputPasswordAdded(event, content);
-  let formLike = LoginFormFactory.createFromField(event.originalTarget);
-  InsecurePasswordUtils.reportInsecurePasswords(formLike);
 });
 
 ContentMetaHandler.init(this);

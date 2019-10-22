@@ -130,6 +130,8 @@ async function verifyConfirmationHint(hintElem) {
 }
 
 async function openFormInNewTab(url, formValues, taskFn) {
+  let formFilled = listenForTestNotification("FormProcessed");
+
   await BrowserTestUtils.withNewTab(
     {
       gBrowser,
@@ -137,6 +139,8 @@ async function openFormInNewTab(url, formValues, taskFn) {
     },
     async function(browser) {
       await SimpleTest.promiseFocus(browser.ownerGlobal);
+      await formFilled;
+
       await ContentTask.spawn(
         browser,
         formValues,
@@ -752,7 +756,7 @@ add_task(async function autocomplete_generated_password_edited_no_auto_save() {
     }
   );
 
-  LMP._generatedPasswordsByPrincipalOrigin.clear();
+  LoginManagerParent.getGeneratedPasswordsByPrincipalOrigin().clear();
 });
 
 add_task(async function contextmenu_fill_generated_password_and_set_username() {
@@ -1029,7 +1033,7 @@ add_task(
         info("autoSavedLogin, guid: " + autoSavedLogin.guid);
 
         info("verifyLogins ok");
-        let passwordCacheEntry = LoginManagerParent._generatedPasswordsByPrincipalOrigin.get(
+        let passwordCacheEntry = LoginManagerParent.getGeneratedPasswordsByPrincipalOrigin().get(
           "https://example.com"
         );
 
@@ -1124,7 +1128,7 @@ add_task(
         // make sure the cache entry is unchanged with the removal of the auto-saved login
         is(
           autoSavedLogin.password,
-          LoginManagerParent._generatedPasswordsByPrincipalOrigin.get(
+          LoginManagerParent.getGeneratedPasswordsByPrincipalOrigin().get(
             "https://example.com"
           ).value,
           "Generated password cache entry has the expected password value"
@@ -1200,7 +1204,7 @@ add_task(async function autosaved_login_updated_to_existing_login_onsubmit() {
       info("autoSavedLogin, guid: " + autoSavedLogin.guid);
 
       info("verifyLogins ok");
-      let passwordCacheEntry = LoginManagerParent._generatedPasswordsByPrincipalOrigin.get(
+      let passwordCacheEntry = LoginManagerParent.getGeneratedPasswordsByPrincipalOrigin().get(
         "https://example.com"
       );
 
@@ -1319,7 +1323,7 @@ add_task(async function autosaved_login_updated_to_existing_login_onsubmit() {
       // make sure the cache entry is unchanged with the removal of the auto-saved login
       is(
         autoSavedLogin.password,
-        LoginManagerParent._generatedPasswordsByPrincipalOrigin.get(
+        LoginManagerParent.getGeneratedPasswordsByPrincipalOrigin().get(
           "https://example.com"
         ).value,
         "Generated password cache entry has the expected password value"

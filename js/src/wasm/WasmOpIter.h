@@ -1165,6 +1165,10 @@ inline bool OpIter<Policy>::readBlockType(BlockType* type) {
   }
 
 #ifdef ENABLE_WASM_MULTI_VALUE
+  if (!env_.multiValuesEnabled()) {
+    return fail("invalid block type reference");
+  }
+
   int32_t x;
   if (!d_.readVarS32(&x) || x < 0 || uint32_t(x) >= env_.types.length()) {
     return fail("invalid block type type index");
@@ -2446,13 +2450,12 @@ inline bool OpIter<Policy>::readMemOrTableInit(bool isMem, uint32_t* segIndex,
     }
     *dstTableIndex = memOrTableIndex;
 
-    // Element segments must carry functions exclusively and funcref is not
-    // yet a subtype of anyref.
-    if (env_.tables[*dstTableIndex].kind != TableKind::FuncRef) {
-      return fail("only tables of 'funcref' may have element segments");
-    }
     if (*segIndex >= env_.elemSegments.length()) {
       return fail("table.init segment index out of range");
+    }
+    if (!checkIsSubtypeOf(env_.elemSegments[*segIndex]->elemType(),
+                          ToElemValType(env_.tables[*dstTableIndex].kind))) {
+      return false;
     }
   }
 

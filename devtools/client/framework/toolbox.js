@@ -175,6 +175,13 @@ loader.lazyRequireGetter(
   true
 );
 
+loader.lazyRequireGetter(
+  this,
+  "NodeFront",
+  "devtools/shared/fronts/node",
+  true
+);
+
 /**
  * A "Toolbox" is the component that holds all the tools for one specific
  * target. Visually, it's a document that includes the tools tabs and all
@@ -3410,8 +3417,6 @@ Toolbox.prototype = {
    * An helper function that returns an object contain a highlighter and unhighlighter
    * function.
    *
-   * @param {Boolean} isGrip: Set to true if the `highlight` function is going to be
-   *                          called with a Grip (and not from a NodeFront).
    * @returns {Object} an object of the following shape:
    *   - {AsyncFunction} highlight: A function that will initialize the highlighter front
    *                                and call highlighter.highlight with the provided node
@@ -3423,18 +3428,26 @@ Toolbox.prototype = {
    *                                  then unhighlight to prevent zombie highlighters.
    *
    */
-  getHighlighter(fromGrip = false) {
+  getHighlighter() {
     let pendingHighlight;
+    let currentHighlighterFront;
+
     return {
-      highlight: async (nodeFront, options) => {
+      highlight: async (object, options) => {
         pendingHighlight = (async () => {
-          if (fromGrip) {
-            // TODO: Bug1574506 - Use the contextual WalkerFront for gripToNodeFront.
-            const walkerFront = (await this.target.getFront("inspector"))
-              .walker;
-            nodeFront = await walkerFront.gripToNodeFront(nodeFront);
+          let nodeFront = object;
+
+          if (!(nodeFront instanceof NodeFront)) {
+            const inspectorFront = await this.target.getFront("inspector");
+            nodeFront = await inspectorFront.getNodeFrontFromNodeGrip(object);
           }
 
+          if (!nodeFront) {
+            return null;
+          }
+
+          // We cache the highlighter front so we can unhighlight easily.
+          currentHighlighterFront = nodeFront.highlighterFront;
           return nodeFront.highlighterFront.highlight(nodeFront, options);
         })();
         return pendingHighlight;
@@ -3445,10 +3458,13 @@ Toolbox.prototype = {
           pendingHighlight = null;
         }
 
-        const inspectorFront = this.target.getCachedFront("inspector");
-        return inspectorFront
-          ? inspectorFront.highlighter.unhighlight(forceHide)
-          : null;
+        if (!currentHighlighterFront) {
+          return null;
+        }
+
+        const unHighlight = currentHighlighterFront.unhighlight(forceHide);
+        currentHighlighterFront = null;
+        return unHighlight;
       },
     };
   },

@@ -6,9 +6,10 @@
 
 #include "frontend/BinASTTokenReaderContext.h"
 
-#include "mozilla/IntegerTypeTraits.h"  // mozilla::MaxValue
-#include "mozilla/Result.h"             // MOZ_TRY*
-#include "mozilla/ScopeExit.h"          // mozilla::MakeScopeExit
+#include "mozilla/IntegerTypeTraits.h"      // mozilla::MaxValue
+#include "mozilla/OperatorNewExtensions.h"  // mozilla::KnownNotNull
+#include "mozilla/Result.h"                 // MOZ_TRY*
+#include "mozilla/ScopeExit.h"              // mozilla::MakeScopeExit
 
 #include <string.h>  // memchr, memcmp, memmove
 
@@ -543,7 +544,7 @@ class HuffmanPreludeReader {
     auto& table = dictionary_.tableForField(identity);
     if (table.is<HuffmanTableUnreachable>()) {
       // Effectively, an `Interface` is a sum with a single entry.
-      HuffmanTableIndexedSymbolsSum sum(cx_);
+      HuffmanTableIndexedSymbolsSum sum;
       MOZ_TRY(sum.initWithSingleValue(
           cx_, BinASTSymbol::fromKind(BinASTKind(interface.kind_))));
       table = {mozilla::VariantType<HuffmanTableIndexedSymbolsSum>{},
@@ -726,13 +727,13 @@ class HuffmanPreludeReader {
       // Read and add symbol.
       BINJS_MOZ_TRY_DECL(
           symbol, readSymbol<Entry>(entry, i));  // Symbol is read from disk.
-      MOZ_TRY(table.addSymbol(code, bitLength, symbol));
+      MOZ_TRY(table.addSymbol(i, code, bitLength, symbol));
 
       // Prepare next code.
       code = (code + 1) << (nextBitLength - bitLength);
     }
 
-    MOZ_TRY(table.initComplete());
+    MOZ_TRY(table.initComplete(cx_));
     auxStorageLength_.clear();
     return Ok();
   }
@@ -741,6 +742,9 @@ class HuffmanPreludeReader {
   MOZ_MUST_USE JS::Result<typename Entry::Indexed>
   readMultipleValuesTableAndAssignCode(typename Entry::Table& table,
                                        Entry entry, uint32_t numberOfSymbols) {
+    // In this case, `numberOfSymbols` is actually an upper bound,
+    // rather than an actual number of symbols.
+
     // Data is presented in an order that doesn't match our memory
     // representation, so we need to copy `numberOfSymbols` entries.
     // We use an auxiliary vector to avoid allocating each time.
@@ -767,6 +771,15 @@ class HuffmanPreludeReader {
           largestBitLength = bitLength;
         }
       }
+    }
+
+    if (auxStorageLength_.length() == 1) {
+      // We have only one symbol, so let's use an optimized table.
+      BINJS_MOZ_TRY_DECL(symbol,
+                         readSymbol<Entry>(entry, auxStorageLength_[0].index_));
+      MOZ_TRY(table.initWithSingleValue(cx_, symbol));
+      auxStorageLength_.clear();
+      return Ok();
     }
 
     // Sort by length then webidl order (which is also the index).
@@ -803,19 +816,16 @@ class HuffmanPreludeReader {
       MOZ_ASSERT(bitLength <= nextBitLength);
 
       // Read symbol from memory and add it.
-      BINJS_MOZ_TRY_DECL(
-          symbol,
-          readSymbol<Entry>(
-              entry,
-              auxStorageLength_[i].index_));  // Symbol is read from memory.
+      BINJS_MOZ_TRY_DECL(symbol,
+                         readSymbol<Entry>(entry, auxStorageLength_[i].index_));
 
-      MOZ_TRY(table.addSymbol(code, bitLength, symbol));
+      MOZ_TRY(table.addSymbol(i, code, bitLength, symbol));
 
       // Prepare next code.
       code = (code + 1) << (nextBitLength - bitLength);
     }
 
-    MOZ_TRY(table.initComplete());
+    MOZ_TRY(table.initComplete(cx_));
 
     auxStorageLength_.clear();
     return Ok();
@@ -845,7 +855,7 @@ class HuffmanPreludeReader {
     switch (headerByte) {
       case TableHeader::SingleValue: {
         // Construct in-place.
-        table = {mozilla::VariantType<typename Entry::Table>{}, cx_};
+        table = {mozilla::VariantType<typename Entry::Table>{}};
         auto& tableRef = table.template as<typename Entry::Table>();
 
         // The table contains a single value.
@@ -855,7 +865,7 @@ class HuffmanPreludeReader {
       case TableHeader::MultipleValues: {
         // Table contains multiple values.
         // Construct in-place.
-        table = {mozilla::VariantType<typename Entry::Table>{}, cx_};
+        table = {mozilla::VariantType<typename Entry::Table>{}};
         auto& tableRef = table.template as<typename Entry::Table>();
 
         MOZ_TRY((readMultipleValuesTable<Entry>(tableRef, entry)));
@@ -1040,7 +1050,6 @@ BinASTTokenReaderContext::BinASTTokenReaderContext(JSContext* cx,
                                                    const size_t length)
     : BinASTTokenReaderBase(cx, er, start, length),
       metadata_(nullptr),
-      dictionary_(cx),
       posBeforeTree_(nullptr) {
   MOZ_ASSERT(er);
 }
@@ -1594,6 +1603,10 @@ GenericHuffmanTable::Iterator::Iterator(
     : implementation_(std::move(iterator)) {}
 
 GenericHuffmanTable::Iterator::Iterator(
+    typename TwoEntriesHuffmanTable::Iterator&& iterator)
+    : implementation_(std::move(iterator)) {}
+
+GenericHuffmanTable::Iterator::Iterator(
     typename SingleLookupHuffmanTable::Iterator&& iterator)
     : implementation_(std::move(iterator)) {}
 
@@ -1608,6 +1621,9 @@ GenericHuffmanTable::Iterator::Iterator(
 void GenericHuffmanTable::Iterator::operator++() {
   implementation_.match(
       [](typename SingleEntryHuffmanTable::Iterator& iterator) {
+        iterator.operator++();
+      },
+      [](typename TwoEntriesHuffmanTable::Iterator& iterator) {
         iterator.operator++();
       },
       [](typename SingleLookupHuffmanTable::Iterator& iterator) {
@@ -1628,6 +1644,11 @@ bool GenericHuffmanTable::Iterator::operator==(
         return iterator ==
                other.implementation_
                    .template as<typename SingleEntryHuffmanTable::Iterator>();
+      },
+      [other](const typename TwoEntriesHuffmanTable::Iterator& iterator) {
+        return iterator ==
+               other.implementation_
+                   .template as<typename TwoEntriesHuffmanTable::Iterator>();
       },
       [other](const typename SingleLookupHuffmanTable::Iterator& iterator) {
         return iterator ==
@@ -1654,6 +1675,11 @@ bool GenericHuffmanTable::Iterator::operator!=(
                other.implementation_
                    .template as<typename SingleEntryHuffmanTable::Iterator>();
       },
+      [other](const typename TwoEntriesHuffmanTable::Iterator& iterator) {
+        return iterator !=
+               other.implementation_
+                   .template as<typename TwoEntriesHuffmanTable::Iterator>();
+      },
       [other](const typename SingleLookupHuffmanTable::Iterator& iterator) {
         return iterator !=
                other.implementation_
@@ -1676,6 +1702,9 @@ const BinASTSymbol* GenericHuffmanTable::Iterator::operator*() const {
       [](const typename SingleEntryHuffmanTable::Iterator& iterator) {
         return iterator.operator*();
       },
+      [](const typename TwoEntriesHuffmanTable::Iterator& iterator) {
+        return iterator.operator*();
+      },
       [](const typename SingleLookupHuffmanTable::Iterator& iterator) {
         return iterator.operator*();
       },
@@ -1692,6 +1721,9 @@ const BinASTSymbol* GenericHuffmanTable::Iterator::operator->() const {
       [](const typename SingleEntryHuffmanTable::Iterator& iterator) {
         return iterator.operator->();
       },
+      [](const typename TwoEntriesHuffmanTable::Iterator& iterator) {
+        return iterator.operator->();
+      },
       [](const typename SingleLookupHuffmanTable::Iterator& iterator) {
         return iterator.operator->();
       },
@@ -1703,22 +1735,25 @@ const BinASTSymbol* GenericHuffmanTable::Iterator::operator->() const {
       });
 }
 
-GenericHuffmanTable::GenericHuffmanTable(JSContext*)
+GenericHuffmanTable::GenericHuffmanTable()
     : implementation_(HuffmanTableUnreachable{}) {}
 
-JS::Result<Ok> GenericHuffmanTable::initComplete() {
+JS::Result<Ok> GenericHuffmanTable::initComplete(JSContext* cx) {
   return implementation_.match(
       [](SingleEntryHuffmanTable& implementation) -> JS::Result<Ok> {
         MOZ_CRASH("SingleEntryHuffmanTable shouldn't have multiple entries!");
       },
-      [](SingleLookupHuffmanTable& implementation) -> JS::Result<Ok> {
-        return implementation.initComplete();
+      [cx](TwoEntriesHuffmanTable& implementation) -> JS::Result<Ok> {
+        return implementation.initComplete(cx);
       },
-      [](TwoLookupsHuffmanTable& implementation) -> JS::Result<Ok> {
-        return implementation.initComplete();
+      [cx](SingleLookupHuffmanTable& implementation) -> JS::Result<Ok> {
+        return implementation.initComplete(cx);
       },
-      [](ThreeLookupsHuffmanTable& implementation) -> JS::Result<Ok> {
-        return implementation.initComplete();
+      [cx](TwoLookupsHuffmanTable& implementation) -> JS::Result<Ok> {
+        return implementation.initComplete(cx);
+      },
+      [cx](ThreeLookupsHuffmanTable& implementation) -> JS::Result<Ok> {
+        return implementation.initComplete(cx);
       },
       [](HuffmanTableUnreachable&) -> JS::Result<Ok> {
         MOZ_CRASH("GenericHuffmanTable is unitialized!");
@@ -1728,6 +1763,10 @@ JS::Result<Ok> GenericHuffmanTable::initComplete() {
 typename GenericHuffmanTable::Iterator GenericHuffmanTable::begin() const {
   return implementation_.match(
       [](const SingleEntryHuffmanTable& implementation)
+          -> GenericHuffmanTable::Iterator {
+        return Iterator(implementation.begin());
+      },
+      [](const TwoEntriesHuffmanTable& implementation)
           -> GenericHuffmanTable::Iterator {
         return Iterator(implementation.begin());
       },
@@ -1751,6 +1790,10 @@ typename GenericHuffmanTable::Iterator GenericHuffmanTable::begin() const {
 typename GenericHuffmanTable::Iterator GenericHuffmanTable::end() const {
   return implementation_.match(
       [](const SingleEntryHuffmanTable& implementation)
+          -> GenericHuffmanTable::Iterator {
+        return Iterator(implementation.end());
+      },
+      [](const TwoEntriesHuffmanTable& implementation)
           -> GenericHuffmanTable::Iterator {
         return Iterator(implementation.end());
       },
@@ -1787,14 +1830,26 @@ JS::Result<Ok> GenericHuffmanTable::initStart(JSContext* cx,
   // Make sure that we have a way to represent all legal bit lengths.
   static_assert(MAX_CODE_BIT_LENGTH <= ThreeLookupsHuffmanTable::MAX_BIT_LENGTH,
                 "ThreeLookupsHuffmanTable cannot hold all bit lengths");
+
   // Make sure that we're initializing.
   MOZ_ASSERT(implementation_.template is<HuffmanTableUnreachable>());
+
+  // Make sure we don't accidentally end up with only one symbol.
+  MOZ_ASSERT(numberOfSymbols != 1,
+             "Should have used `initWithSingleValue` instead");
+
+  if (numberOfSymbols == 2) {
+    implementation_ = {mozilla::VariantType<TwoEntriesHuffmanTable>{}};
+    return implementation_.template as<TwoEntriesHuffmanTable>().initStart(
+        cx, numberOfSymbols, largestBitLength);
+  }
 
   // Find the (hopefully) fastest implementation of HuffmanTable for
   // `largestBitLength`.
   // ...hopefully, only one lookup.
   if (largestBitLength <= SingleLookupHuffmanTable::MAX_BIT_LENGTH) {
-    implementation_ = {mozilla::VariantType<SingleLookupHuffmanTable>{}, cx};
+    implementation_ = {mozilla::VariantType<SingleLookupHuffmanTable>{},
+                       SingleLookupHuffmanTable::Use::ToplevelTable};
     return implementation_.template as<SingleLookupHuffmanTable>().initStart(
         cx, numberOfSymbols, largestBitLength);
   }
@@ -1802,41 +1857,48 @@ JS::Result<Ok> GenericHuffmanTable::initStart(JSContext* cx,
   // ...if a single-lookup table would be too large, let's see if
   // we can fit in a two-lookup table.
   if (largestBitLength <= TwoLookupsHuffmanTable::MAX_BIT_LENGTH) {
-    implementation_ = {mozilla::VariantType<TwoLookupsHuffmanTable>{}, cx};
+    implementation_ = {mozilla::VariantType<TwoLookupsHuffmanTable>{}};
     return implementation_.template as<TwoLookupsHuffmanTable>().initStart(
         cx, numberOfSymbols, largestBitLength);
   }
 
   // ...otherwise, we'll need three lookups.
-  implementation_ = {mozilla::VariantType<ThreeLookupsHuffmanTable>{}, cx};
+  implementation_ = {mozilla::VariantType<ThreeLookupsHuffmanTable>{}};
   return implementation_.template as<ThreeLookupsHuffmanTable>().initStart(
       cx, numberOfSymbols, largestBitLength);
 }
 
-JS::Result<Ok> GenericHuffmanTable::addSymbol(uint32_t bits, uint8_t bitLength,
+JS::Result<Ok> GenericHuffmanTable::addSymbol(size_t index, uint32_t bits,
+                                              uint8_t bitLength,
                                               const BinASTSymbol& value) {
   return implementation_.match(
       [](SingleEntryHuffmanTable&) -> JS::Result<Ok> {
         MOZ_CRASH("SingleEntryHuffmanTable shouldn't have multiple entries!");
         return Ok();
       },
-      [bits, bitLength,
+      [index, bits, bitLength,
+       value](TwoEntriesHuffmanTable&
+                  implementation) mutable /* discard implicit const */
+      -> JS::Result<Ok> {
+        return implementation.addSymbol(index, bits, bitLength, value);
+      },
+      [index, bits, bitLength,
        value](SingleLookupHuffmanTable&
                   implementation) mutable /* discard implicit const */
       -> JS::Result<Ok> {
-        return implementation.addSymbol(bits, bitLength, value);
+        return implementation.addSymbol(index, bits, bitLength, value);
       },
-      [bits, bitLength,
+      [index, bits, bitLength,
        value](TwoLookupsHuffmanTable&
                   implementation) mutable /* discard implicit const */
       -> JS::Result<Ok> {
-        return implementation.addSymbol(bits, bitLength, value);
+        return implementation.addSymbol(index, bits, bitLength, value);
       },
-      [bits, bitLength,
+      [index, bits, bitLength,
        value = value](ThreeLookupsHuffmanTable&
                           implementation) mutable /* discard implicit const */
       -> JS::Result<Ok> {
-        return implementation.addSymbol(bits, bitLength, value);
+        return implementation.addSymbol(index, bits, bitLength, value);
       },
       [](HuffmanTableUnreachable&) -> JS::Result<Ok> {
         MOZ_CRASH("GenericHuffmanTable is unitialized!");
@@ -1847,6 +1909,8 @@ JS::Result<Ok> GenericHuffmanTable::addSymbol(uint32_t bits, uint8_t bitLength,
 HuffmanLookupResult GenericHuffmanTable::lookup(HuffmanLookup key) const {
   return implementation_.match(
       [key](const SingleEntryHuffmanTable& implementation)
+          -> HuffmanLookupResult { return implementation.lookup(key); },
+      [key](const TwoEntriesHuffmanTable& implementation)
           -> HuffmanLookupResult { return implementation.lookup(key); },
       [key](const SingleLookupHuffmanTable& implementation)
           -> HuffmanLookupResult { return implementation.lookup(key); },
@@ -1859,65 +1923,26 @@ HuffmanLookupResult GenericHuffmanTable::lookup(HuffmanLookup key) const {
       });
 }
 
-template <int N>
-JS::Result<Ok> NaiveHuffmanTable<N>::initWithSingleValue(
-    JSContext* cx, const BinASTSymbol& value) {
-  MOZ_ASSERT(values_.empty());  // Make sure that we're initializing.
-  if (MOZ_UNLIKELY(!values_.append(HuffmanEntry(0, 0, value)))) {
-    return cx->alreadyReportedError();
-  }
-  return Ok();
-}
-
-template <int N>
-JS::Result<Ok> NaiveHuffmanTable<N>::initStart(JSContext* cx,
-                                               size_t numberOfSymbols,
-                                               uint8_t) {
-  MOZ_ASSERT(values_.empty());  // Make sure that we're initializing.
-  if (MOZ_UNLIKELY(!values_.initCapacity(numberOfSymbols))) {
-    return cx->alreadyReportedError();
-  }
-  return Ok();
-}
-
-template <int N>
-JS::Result<Ok> NaiveHuffmanTable<N>::initComplete() {
-  MOZ_ASSERT(values_.length() <= N);
-  return Ok();
-}
-
-template <int N>
-JS::Result<Ok> NaiveHuffmanTable<N>::addSymbol(uint32_t bits, uint8_t bitLength,
-                                               const BinASTSymbol& value) {
-  MOZ_ASSERT(bitLength != 0,
-             "Adding a symbol with a bitLength of 0 doesn't make sense.");
-  MOZ_ASSERT(values_.empty() || values_.back().key().bitLength_ <= bitLength,
-             "Symbols must be ranked by increasing bits length");
-  MOZ_ASSERT_IF(bitLength != 32 /* >> 32 is UB */, bits >> bitLength == 0);
-  // Memory was reserved in `init()`.
-  MOZ_ALWAYS_TRUE(values_.emplaceBack(bits, bitLength, value));
-
-  return Ok();
-}
-
-template <int N>
-HuffmanLookupResult NaiveHuffmanTable<N>::lookup(HuffmanLookup key) const {
-  // This current implementation is O(length) and designed mostly for testing.
-  // Future versions will presumably adapt the underlying data structure to
-  // provide bounded-time lookup.
-  for (const auto& iter : values_) {
-    if (iter.key().bitLength_ > key.bitLength_) {
-      // We can't find the entry.
-      break;
-    }
-
-    const uint32_t keyBits = key.leadingBits(iter.key().bitLength_);
-    if (keyBits == iter.key().bits_) {
-      return HuffmanLookupResult::found(iter.key().bitLength_, &iter.value());
-    }
-  }
-
-  return HuffmanLookupResult::notFound();
+size_t GenericHuffmanTable::length() const {
+  return implementation_.match(
+      [](const SingleEntryHuffmanTable& implementation) -> size_t {
+        return implementation.length();
+      },
+      [](const TwoEntriesHuffmanTable& implementation) -> size_t {
+        return implementation.length();
+      },
+      [](const SingleLookupHuffmanTable& implementation) -> size_t {
+        return implementation.length();
+      },
+      [](const TwoLookupsHuffmanTable& implementation) -> size_t {
+        return implementation.length();
+      },
+      [](const ThreeLookupsHuffmanTable& implementation) -> size_t {
+        return implementation.length();
+      },
+      [](const HuffmanTableUnreachable& implementation) -> size_t {
+        MOZ_CRASH("GenericHuffmanTable is unitialized!");
+      });
 }
 
 SingleEntryHuffmanTable::Iterator::Iterator(const BinASTSymbol* position)
@@ -1950,6 +1975,60 @@ HuffmanLookupResult SingleEntryHuffmanTable::lookup(HuffmanLookup key) const {
   return HuffmanLookupResult::found(0, &value_);
 }
 
+TwoEntriesHuffmanTable::Iterator::Iterator(const BinASTSymbol* position)
+    : position_(position) {}
+
+void TwoEntriesHuffmanTable::Iterator::operator++() { position_++; }
+
+const BinASTSymbol* TwoEntriesHuffmanTable::Iterator::operator*() const {
+  return position_;
+}
+
+const BinASTSymbol* TwoEntriesHuffmanTable::Iterator::operator->() const {
+  return position_;
+}
+
+bool TwoEntriesHuffmanTable::Iterator::operator==(const Iterator& other) const {
+  return position_ == other.position_;
+}
+
+bool TwoEntriesHuffmanTable::Iterator::operator!=(const Iterator& other) const {
+  return position_ != other.position_;
+}
+
+JS::Result<Ok> TwoEntriesHuffmanTable::initStart(JSContext* cx,
+                                                 size_t numberOfSymbols,
+                                                 uint8_t largestBitLength) {
+  // Make sure that we're initializing.
+  MOZ_ASSERT(numberOfSymbols == 2);
+  MOZ_ASSERT(largestBitLength == 1);
+  return Ok();
+}
+
+JS::Result<Ok> TwoEntriesHuffmanTable::initComplete(JSContext* cx) {
+  return Ok();
+}
+
+JS::Result<Ok> TwoEntriesHuffmanTable::addSymbol(size_t index, uint32_t bits,
+                                                 uint8_t bitLength,
+                                                 const BinASTSymbol& value) {
+  // Symbols must be ranked by increasing bits length
+  MOZ_ASSERT_IF(index == 0, bits == 0);
+  MOZ_ASSERT_IF(index == 1, bits == 1);
+
+  // FIXME: Throw soft error instead of assert.
+  MOZ_ASSERT(bitLength == 1);
+
+  values_[index] = value;
+  return Ok();
+}
+
+HuffmanLookupResult TwoEntriesHuffmanTable::lookup(HuffmanLookup key) const {
+  // By invariant, bit lengths are 1.
+  const auto index = key.leadingBits(1);
+  return HuffmanLookupResult::found(1, &values_[index]);
+}
+
 SingleLookupHuffmanTable::Iterator::Iterator(const HuffmanEntry* position)
     : position_(position) {}
 
@@ -1979,26 +2058,25 @@ JS::Result<Ok> SingleLookupHuffmanTable::initStart(JSContext* cx,
   MOZ_ASSERT_IF(largestBitLength != 32,
                 (uint32_t(1) << largestBitLength) - 1 <=
                     mozilla::MaxValue<InternalIndex>::value);
-  MOZ_ASSERT(values_.empty());  // Make sure that we're initializing.
 
   largestBitLength_ = largestBitLength;
 
-  if (MOZ_UNLIKELY(!values_.initCapacity(numberOfSymbols))) {
+  if (MOZ_UNLIKELY(!values_.allocateUninitialized(cx, numberOfSymbols))) {
     return cx->alreadyReportedError();
   }
   const size_t saturatedLength = 1 << largestBitLength_;
-  if (MOZ_UNLIKELY(!saturated_.initCapacity(saturatedLength))) {
+  if (MOZ_UNLIKELY(!saturated_.allocateUninitialized(cx, saturatedLength))) {
     return cx->alreadyReportedError();
   }
   // Enlarge `saturated_`, as we're going to fill it in random order.
   for (size_t i = 0; i < saturatedLength; ++i) {
     // Capacity reserved in this method.
-    saturated_.infallibleAppend(InternalIndex(-1));
+    saturated_[i] = InternalIndex(-1);
   }
   return Ok();
 }
 
-JS::Result<Ok> SingleLookupHuffmanTable::initComplete() {
+JS::Result<Ok> SingleLookupHuffmanTable::initComplete(JSContext* cx) {
   // Double-check that we've initialized properly.
   MOZ_ASSERT(largestBitLength_ <= MAX_CODE_BIT_LENGTH);
 
@@ -2009,10 +2087,17 @@ JS::Result<Ok> SingleLookupHuffmanTable::initComplete() {
     MOZ_ASSERT(largestBitLength_ == 0);
     return Ok();
   }
+
 #ifdef DEBUG
   bool foundMaxBitLength = false;
   for (size_t i = 0; i < saturated_.length(); ++i) {
     const uint8_t index = saturated_[i];
+    if (use_ != Use::ToplevelTable) {
+      // The table may not be full.
+      if (index >= values_.length()) {
+        continue;
+      }
+    }
     MOZ_ASSERT(values_[index].key().bitLength_ <= largestBitLength_);
     if (values_[index].key().bitLength_ == largestBitLength_) {
       foundMaxBitLength = true;
@@ -2020,21 +2105,20 @@ JS::Result<Ok> SingleLookupHuffmanTable::initComplete() {
   }
   MOZ_ASSERT(foundMaxBitLength);
 #endif  // DEBUG
+
   return Ok();
 }
 
-JS::Result<Ok> SingleLookupHuffmanTable::addSymbol(uint32_t bits,
+JS::Result<Ok> SingleLookupHuffmanTable::addSymbol(size_t index, uint32_t bits,
                                                    uint8_t bitLength,
                                                    const BinASTSymbol& value) {
   MOZ_ASSERT_IF(largestBitLength_ != 0, bitLength != 0);
   MOZ_ASSERT_IF(bitLength != 32 /* >> 32 is UB */, bits >> bitLength == 0);
   MOZ_ASSERT(bitLength <= largestBitLength_);
 
-  const size_t index = values_.length();
-
   // First add the value to `values_`.
-  // Memory was reserved in `init()`.
-  values_.infallibleEmplaceBack(bits, bitLength, value);
+  new (mozilla::KnownNotNull, &values_[index])
+      HuffmanEntry(bits, bitLength, value);
 
   // Notation: in the following, unless otherwise specified, we consider
   // values with `largestBitLength_` bits exactly.
@@ -2071,6 +2155,12 @@ HuffmanLookupResult SingleLookupHuffmanTable::lookup(HuffmanLookup key) const {
   // Invariants: `saturated_.length() == 1 << largestBitLength_`
   // and `bits <= 1 << largestBitLength_`.
   const size_t index = saturated_[bits];
+  if (index >= values_.length()) {
+    // This is useful only when the `SingleLookupHuffmanTable`
+    // is used as a cache inside a `MultiLookupHuffmanTable`.
+    MOZ_ASSERT(use_ == Use::ShortKeys);
+    return HuffmanLookupResult::notFound();
+  }
 
   // Invariants: `saturated_[i] < values_.length()`.
   const auto& entry = values_[index];
@@ -2117,13 +2207,12 @@ JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initStart(
     JSContext* cx, size_t numberOfSymbols, uint8_t largestBitLength) {
   static_assert(PrefixBitLength < MAX_CODE_BIT_LENGTH,
                 "Invalid PrefixBitLength");
-  MOZ_ASSERT(values_.empty());  // Make sure that we're initializing.
-  MOZ_ASSERT(subTables_.empty());
   largestBitLength_ = largestBitLength;
-  if (MOZ_UNLIKELY(!values_.initCapacity(numberOfSymbols))) {
+  if (MOZ_UNLIKELY(!values_.allocateUninitialized(cx, numberOfSymbols))) {
     return cx->alreadyReportedError();
   }
-  if (MOZ_UNLIKELY(!subTables_.initCapacity(1 << PrefixBitLength))) {
+  if (MOZ_UNLIKELY(
+          !suffixTables_.allocateUninitialized(cx, 1 << PrefixBitLength))) {
     return cx->alreadyReportedError();
   }
   return Ok();
@@ -2131,31 +2220,47 @@ JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initStart(
 
 template <typename Subtable, uint8_t PrefixBitLength>
 JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::addSymbol(
-    uint32_t bits, uint8_t bitLength, const BinASTSymbol& value) {
+    size_t index, uint32_t bits, uint8_t bitLength, const BinASTSymbol& value) {
   MOZ_ASSERT_IF(largestBitLength_ != 0, bitLength != 0);
-  MOZ_ASSERT(values_.empty() || values_.back().key().bitLength_ <= bitLength,
+  MOZ_ASSERT(index == 0 || values_[index - 1].key().bitLength_ <= bitLength,
              "Symbols must be ranked by increasing bits length");
   MOZ_ASSERT_IF(bitLength != 32 /* >> 32 is UB */, bits >> bitLength == 0);
 
-  values_.infallibleEmplaceBack(bits, bitLength, value);
+  new (mozilla::KnownNotNull, &values_[index])
+      HuffmanEntry(bits, bitLength, value);
 
   return Ok();
 }
 
 template <typename Subtable, uint8_t PrefixBitLength>
-JS::Result<Ok>
-MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initComplete() {
+JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initComplete(
+    JSContext* cx) {
   // First, we need to collect the `largestBitLength_`
   // and `numberofSymbols` for each subtable.
   struct Bucket {
     Bucket() : largestBitLength_(0), numberOfSymbols_(0){};
     uint8_t largestBitLength_;
     uint32_t numberOfSymbols_;
+    void addSymbol(uint8_t bitLength) {
+      ++numberOfSymbols_;
+      if (bitLength > largestBitLength_) {
+        largestBitLength_ = bitLength;
+      }
+    }
   };
-  Vector<Bucket> buckets{cx_};
-  BINJS_TRY(buckets.resize(1 << PrefixBitLength));
+  FixedLengthVector<Bucket> buckets;
+  if (!buckets.allocate(cx, 1 << PrefixBitLength)) {
+    return cx->alreadyReportedError();
+  }
+  Bucket shortKeysBucket;
 
   for (const auto& entry : values_) {
+    if (entry.key().bitLength_ <= SingleLookupHuffmanTable::MAX_BIT_LENGTH) {
+      // If the key is short, we put it in `shortKeys_` instead of
+      // `suffixTables`.
+      shortKeysBucket.addSymbol(entry.key().bitLength_);
+      continue;
+    }
     const HuffmanLookup lookup(entry.key().bits_, entry.key().bitLength_);
     const auto split = lookup.split(PrefixBitLength);
     MOZ_ASSERT_IF(split.suffix_.bitLength_ != 32,
@@ -2167,44 +2272,76 @@ MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initComplete() {
     // (e.g. G, H in the documentation).
     for (const auto index : lookup.suffixes(PrefixBitLength)) {
       Bucket& bucket = buckets[index];
-      if (split.suffix_.bitLength_ >= bucket.largestBitLength_) {
-        bucket.largestBitLength_ = split.suffix_.bitLength_;
-      }
-      bucket.numberOfSymbols_++;
+      bucket.addSymbol(split.suffix_.bitLength_);
     }
   }
 
-  // We may now create the subtables.
-  for (auto& bucket : buckets) {
-    Subtable sub(cx_);
-    MOZ_TRY(sub.initStart(cx_,
-                          /* numberOfSymbols = */ bucket.numberOfSymbols_,
-                          /* largestBitLength = */ bucket.largestBitLength_));
-    BINJS_TRY(subTables_.append(std::move(sub)));
+  FixedLengthVector<size_t> suffixTablesIndices;
+  if (MOZ_UNLIKELY(!suffixTablesIndices.allocateUninitialized(
+          cx, suffixTables_.length()))) {
+    return cx->alreadyReportedError();
   }
 
-  // Now that the subtables are created, let's dispatch the values
+  // We may now create the subtables.
+  size_t i = 0;
+  for (auto& bucket : buckets) {
+    new (mozilla::KnownNotNull, &suffixTables_[i]) Subtable();
+    suffixTablesIndices[i] = 0;
+
+    if (bucket.numberOfSymbols_ != 0) {
+      // Often, a subtable will end up empty because all the prefixes end up
+      // in `shortKeys_`. In such a case, we want to avoid initializing the
+      // table.
+      MOZ_TRY(suffixTables_[i].initStart(
+          cx,
+          /* numberOfSymbols = */ bucket.numberOfSymbols_,
+          /* maxBitLength = */ bucket.largestBitLength_));
+    }
+
+    i++;
+  }
+
+  // Also, create the shortKeys_ fast lookup.
+  MOZ_TRY(shortKeys_.initStart(cx, shortKeysBucket.numberOfSymbols_,
+                               shortKeysBucket.largestBitLength_));
+
+  // Now that all the subtables are created, let's dispatch the values
   // among these tables.
+  size_t shortKeysIndex = 0;
   for (size_t i = 0; i < values_.length(); ++i) {
     const auto& entry = values_[i];
+    if (entry.key().bitLength_ <= SingleLookupHuffmanTable::MAX_BIT_LENGTH) {
+      // The key fits in `shortKeys_`, let's use this table.
+      MOZ_TRY(shortKeys_.addSymbol(shortKeysIndex++, entry.key().bits_,
+                                   entry.key().bitLength_,
+                                   BinASTSymbol::fromSubtableIndex(i)));
+      continue;
+    }
 
-    // Find the relevant subtables.
+    // Otherwise, use one of the suffix tables.
     const HuffmanLookup lookup(entry.key().bits_, entry.key().bitLength_);
     const auto split = lookup.split(PrefixBitLength);
     MOZ_ASSERT_IF(split.suffix_.bitLength_ != 32,
                   split.suffix_.bits_ >> split.suffix_.bitLength_ == 0);
     for (const auto index : lookup.suffixes(PrefixBitLength)) {
-      auto& sub = subTables_[index];
+      auto& sub = suffixTables_[index];
 
       // We may now add a reference to `entry` into the sybtable.
-      MOZ_TRY(sub.addSymbol(split.suffix_.bits_, split.suffix_.bitLength_,
+      MOZ_TRY(sub.addSymbol(suffixTablesIndices[index]++, split.suffix_.bits_,
+                            split.suffix_.bitLength_,
                             BinASTSymbol::fromSubtableIndex(i)));
     }
   }
 
-  // Finally, complete initialization of subtables.
-  for (auto& sub : subTables_) {
-    MOZ_TRY(sub.initComplete());
+  // Finally, complete initialization of shortKeys_ and subtables.
+  MOZ_TRY(shortKeys_.initComplete(cx));
+  for (size_t i = 0; i < buckets.length(); ++i) {
+    if (buckets[i].numberOfSymbols_ == 0) {
+      // Again, we don't want to initialize empty subtables.
+      continue;
+    }
+    auto& sub = suffixTables_[i];
+    MOZ_TRY(sub.initComplete(cx));
   }
 
   return Ok();
@@ -2213,11 +2350,22 @@ MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initComplete() {
 template <typename Subtable, uint8_t PrefixBitLength>
 HuffmanLookupResult MultiLookupHuffmanTable<Subtable, PrefixBitLength>::lookup(
     HuffmanLookup key) const {
+  {
+    // Let's first look in shortkeys.
+    auto subResult = shortKeys_.lookup(key);
+    if (subResult.isFound()) {
+      // We have found a result in the shortKeys_ fastpath.
+      const auto& result = values_[subResult.value().toSubtableIndex()];
+
+      return HuffmanLookupResult::found(result.key().bitLength_,
+                                        &result.value());
+    }
+  }
   const auto split = key.split(PrefixBitLength);
-  if (split.prefix_.bits_ >= subTables_.length()) {
+  if (split.prefix_.bits_ >= suffixTables_.length()) {
     return HuffmanLookupResult::notFound();
   }
-  const Subtable& subtable = subTables_[split.prefix_.bits_];
+  const Subtable& subtable = suffixTables_[split.prefix_.bits_];
 
   auto subResult = subtable.lookup(split.suffix_);
   if (!subResult.isFound()) {
@@ -2680,7 +2828,7 @@ HuffmanPreludeReader::readSingleValueTable<UnsignedLong>(
   return Ok();
 }
 
-HuffmanDictionary::HuffmanDictionary(JSContext* cx)
+HuffmanDictionary::HuffmanDictionary()
     : fields_(BINAST_PARAM_NUMBER_OF_INTERFACE_AND_FIELD(
           mozilla::AsVariant(HuffmanTableUnreachable()))),
       listLengths_(BINAST_PARAM_NUMBER_OF_LIST_TYPES(

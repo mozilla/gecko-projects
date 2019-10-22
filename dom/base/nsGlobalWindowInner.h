@@ -309,6 +309,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   nsresult PostHandleEvent(mozilla::EventChainPostVisitor& aVisitor) override;
 
+  void ClearActiveStoragePrincipal();
+
   void Suspend();
   void Resume();
   virtual bool IsSuspended() const override;
@@ -386,9 +388,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
       uint32_t aIndex);
 
   static bool IsPrivilegedChromeWindow(JSContext* /* unused */, JSObject* aObj);
-
-  static bool OfflineCacheAllowedForContext(JSContext* /* unused */,
-                                            JSObject* aObj);
 
   static bool IsRequestIdleCallbackEnabled(JSContext* aCx,
                                            JSObject* /* unused */);

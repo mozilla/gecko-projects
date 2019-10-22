@@ -227,61 +227,56 @@ async function _getIntPref(preferenceFront, prefName, defaultValue) {
  * different features or configurations.
  *
  * @param {PreferenceFront} preferenceFront
- * @param {RecordingStateFromPreferences} defaultSettings
+ * @param {RecordingStateFromPreferences} defaultPrefs
  */
 async function getRecordingPreferencesFromDebuggee(
   preferenceFront,
-  defaultSettings
+  defaultPrefs
 ) {
   const [entries, interval, features, threads, objdirs] = await Promise.all([
     _getIntPref(
       preferenceFront,
       `devtools.performance.recording.entries`,
-      defaultSettings.entries
+      defaultPrefs.entries
     ),
     _getIntPref(
       preferenceFront,
       `devtools.performance.recording.interval`,
-      defaultSettings.interval
+      defaultPrefs.interval
     ),
     _getArrayOfStringsPref(
       preferenceFront,
       `devtools.performance.recording.features`,
-      defaultSettings.features
+      defaultPrefs.features
     ),
     _getArrayOfStringsPref(
       preferenceFront,
       `devtools.performance.recording.threads`,
-      defaultSettings.threads
+      defaultPrefs.threads
     ),
-    _getArrayOfStringsHostPref(OBJDIRS_PREF, defaultSettings.objdirs),
+    _getArrayOfStringsHostPref(OBJDIRS_PREF, defaultPrefs.objdirs),
   ]);
 
-  // The pref stores the value in usec.
-  const newInterval = interval / 1000;
-  return { entries, interval: newInterval, features, threads, objdirs };
+  return { entries, interval, features, threads, objdirs };
 }
 
 /**
- * Take the recording settings, as defined by the getRecordingSettings selector, and
- * persist them to preferences. Some of these prefs get persisted on the debuggee,
- * and some of them on the host browser instance.
+ * Take the recording preferences, as defined by the getRecordingSettings
+ * selector, and translated using translatePreferencesFromState, and then
+ * persist them to preferences. Some of these prefs get persisted on the
+ * debuggee, and some of them on the host browser instance.
  *
  * @param {PreferenceFront} preferenceFront
- * @param {RecordingStateFromPreferences} settings
+ * @param {RecordingStateFromPreferences} prefs
  */
-async function setRecordingPreferencesOnDebuggee(preferenceFront, settings) {
+async function setRecordingPreferencesOnDebuggee(preferenceFront, prefs) {
   const { Services } = lazyServices();
   await Promise.all([
-    preferenceFront.setIntPref(ENTRIES_PREF, settings.entries),
-    // The interval pref stores the value in usec.
-    preferenceFront.setIntPref(INTERVAL_PREF, settings.interval * 1000),
-    preferenceFront.setCharPref(
-      FEATURES_PREF,
-      JSON.stringify(settings.features)
-    ),
-    preferenceFront.setCharPref(THREADS_PREF, JSON.stringify(settings.threads)),
-    Services.prefs.setCharPref(OBJDIRS_PREF, JSON.stringify(settings.objdirs)),
+    preferenceFront.setIntPref(ENTRIES_PREF, prefs.entries),
+    preferenceFront.setIntPref(INTERVAL_PREF, prefs.interval),
+    preferenceFront.setCharPref(FEATURES_PREF, JSON.stringify(prefs.features)),
+    preferenceFront.setCharPref(THREADS_PREF, JSON.stringify(prefs.threads)),
+    Services.prefs.setCharPref(OBJDIRS_PREF, JSON.stringify(prefs.objdirs)),
   ]);
 }
 

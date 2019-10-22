@@ -24,11 +24,6 @@ ChromeUtils.defineModuleGetter(
 );
 ChromeUtils.defineModuleGetter(
   this,
-  "LoginManagerContent",
-  "resource://gre/modules/LoginManagerContent.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
   "InsecurePasswordUtils",
   "resource://gre/modules/InsecurePasswordUtils.jsm"
 );
@@ -290,6 +285,7 @@ LoginManager.prototype = {
       );
     }
 
+    login.QueryInterface(Ci.nsILoginMetaInfo);
     for (let pname of ["timeCreated", "timeLastUsed", "timePasswordChanged"]) {
       // Invalid dates
       if (login[pname] > MAX_DATE_MS) {

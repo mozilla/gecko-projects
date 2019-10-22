@@ -895,6 +895,8 @@ GCRuntime::GCRuntime(JSRuntime* rt)
       sweepZone(nullptr),
       hasMarkedGrayRoots(false),
       abortSweepAfterCurrentGroup(false),
+      sweepMarkTaskStarted(false),
+      sweepMarkResult(IncrementalProgress::NotFinished),
       startedCompacting(false),
       relocatedArenasToRelease(nullptr),
 #ifdef JS_GC_ZEAL
@@ -921,6 +923,7 @@ GCRuntime::GCRuntime(JSRuntime* rt)
       sweepTask(this),
       freeTask(this),
       decommitTask(this),
+      sweepMarkTask(this),
       nursery_(this),
       storeBuffer_(rt, nursery()) {
   setGCMode(JSGC_MODE_GLOBAL);
@@ -4695,6 +4698,8 @@ void GCRuntime::getNextSweepGroup() {
   }
 
   if (abortSweepAfterCurrentGroup) {
+    joinTask(sweepMarkTask, gcstats::PhaseKind::SWEEP_MARK);
+
     for (SweepGroupZonesIter zone(this); !zone.done(); zone.next()) {
       MOZ_ASSERT(!zone->gcNextGraphComponent);
       zone->setNeedsIncrementalBarrier(false);
@@ -4977,6 +4982,12 @@ static inline void MaybeCheckWeakMapMarking(GCRuntime* gc) {
 
 IncrementalProgress GCRuntime::markGrayReferencesInCurrentGroup(
     JSFreeOp* fop, SliceBudget& budget) {
+  joinTask(sweepMarkTask, gcstats::PhaseKind::SWEEP_MARK);
+
+  if (sweepMarkTaskStarted && (sweepMarkResult == NotFinished)) {
+    return NotFinished;
+  }
+
   MOZ_ASSERT(marker.markColor() == MarkColor::Black);
 
   if (hasMarkedGrayRoots) {
@@ -5021,6 +5032,12 @@ IncrementalProgress GCRuntime::markGrayReferencesInCurrentGroup(
 
 IncrementalProgress GCRuntime::endMarkingSweepGroup(JSFreeOp* fop,
                                                     SliceBudget& budget) {
+  joinTask(sweepMarkTask, gcstats::PhaseKind::SWEEP_MARK);
+
+  if (sweepMarkTaskStarted && (sweepMarkResult == NotFinished)) {
+    return NotFinished;
+  }
+
   MOZ_ASSERT(marker.markColor() == MarkColor::Black);
   MOZ_ASSERT(!HasIncomingCrossCompartmentPointers(rt));
 
@@ -5182,6 +5199,11 @@ void GCRuntime::joinTask(GCParallelTask& task, gcstats::PhaseKind phase,
     task.joinWithLockHeld(locked);
   }
   stats().recordParallelPhase(phase, task.duration());
+}
+
+void GCRuntime::joinTask(GCParallelTask& task, gcstats::PhaseKind phase) {
+  AutoLockHelperThreadState lock;
+  joinTask(task, phase, lock);
 }
 
 void GCRuntime::sweepDebuggerOnMainThread(JSFreeOp* fop) {
@@ -5567,14 +5589,25 @@ bool ArenaLists::foregroundFinalize(JSFreeOp* fop, AllocKind thingKind,
   return true;
 }
 
+void js::gc::SweepMarkTask::run() {
+  gc->sweepMarkResult = gc->markUntilBudgetExhausted(
+      this->budget, gcstats::PhaseKind::SWEEP_MARK);
+}
+
 IncrementalProgress GCRuntime::markUntilBudgetExhausted(
     SliceBudget& sliceBudget, gcstats::PhaseKind phase) {
   // Marked GC things may vary between recording and replaying, so marking
   // and sweeping should not perform any recorded events.
   mozilla::recordreplay::AutoDisallowThreadEvents disallow;
 
-  /* Run a marking slice and return whether the stack is now empty. */
-  gcstats::AutoPhase ap(stats(), phase);
+  // Run a marking slice and return whether the stack is now empty.
+  // We don't record phaseTimes when we're running on a helper thread.
+  bool enable = TlsContext.get()->isMainThreadContext();
+  gcstats::AutoPhase ap(stats(), enable, phase);
+
+#ifdef DEBUG
+  AutoSetThreadIsMarking threadIsMarking;
+#endif  // DEBUG
 
   if (marker.processMarkQueue() == GCMarker::QueueYielded) {
     return NotFinished;
@@ -6208,14 +6241,25 @@ IncrementalProgress GCRuntime::performSweepActions(SliceBudget& budget) {
   if (initialState != State::Sweep) {
     MOZ_ASSERT(marker.isDrained());
   } else {
-    if (markUntilBudgetExhausted(budget, gcstats::PhaseKind::SWEEP_MARK) ==
-        NotFinished) {
-      return NotFinished;
-    }
+    MOZ_ASSERT(!sweepMarkTask.isRunning());
+    AutoLockHelperThreadState lock;
+    sweepMarkTask.setBudget(budget);
+    sweepMarkTask.startOrRunIfIdle(lock);
+    sweepMarkTaskStarted = true;
   }
 
   SweepAction::Args args{this, &fop, budget};
-  return sweepActions->run(args);
+  IncrementalProgress progress = sweepActions->run(args);
+
+  if (sweepMarkTaskStarted) {
+    joinTask(sweepMarkTask, gcstats::PhaseKind::SWEEP_MARK);
+    sweepMarkTaskStarted = false;
+    if (sweepMarkResult == NotFinished) {
+      progress = NotFinished;
+    }
+  }
+
+  return progress;
 }
 
 bool GCRuntime::allCCVisibleZonesWereCollected() {
@@ -7776,6 +7820,7 @@ void GCRuntime::mergeRealms(Realm* source, Realm* target) {
 
   GlobalObject* global = target->maybeGlobal();
   MOZ_ASSERT(global);
+  AssertTargetIsNotGray(global);
 
   for (auto group = source->zone()->cellIterUnsafe<ObjectGroup>();
        !group.done(); group.next()) {

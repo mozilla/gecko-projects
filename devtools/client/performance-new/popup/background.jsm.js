@@ -83,7 +83,62 @@ const lazyReceiveProfile = requireLazy(() => {
   return browserModule.receiveProfile;
 });
 
+const lazyPreferenceManagement = requireLazy(() => {
+  const { require } = ChromeUtils.import(
+    "resource://devtools/shared/Loader.jsm"
+  );
+
+  /** @type {import("devtools/client/performance-new/preference-management")} */
+  const preferenceManagementModule = require("devtools/client/performance-new/preference-management");
+  return preferenceManagementModule;
+});
+
 /**
+ * This Map caches the symbols from the shared libraries.
+ * @type {Map<string, { path: string, debugPath: string }>}
+ */
+const symbolCache = new Map();
+async function getSymbolsFromThisBrowser(debugName, breakpadId) {
+  if (symbolCache.size === 0) {
+    // Prime the symbols cache.
+    for (const lib of Services.profiler.sharedLibraries) {
+      symbolCache.set(`${lib.debugName}/${lib.breakpadId}`, {
+        path: lib.path,
+        debugPath: lib.debugPath,
+      });
+    }
+  }
+
+  const cachedLibInfo = symbolCache.get(`${debugName}/${breakpadId}`);
+  if (!cachedLibInfo) {
+    throw new Error(
+      `The library ${debugName} ${breakpadId} is not in the ` +
+        "Services.profiler.sharedLibraries list, so the local path for it is not known " +
+        "and symbols for it can not be obtained. This usually happens if a content " +
+        "process uses a library that's not used in the parent process - " +
+        "Services.profiler.sharedLibraries only knows about libraries in the " +
+        "parent process."
+    );
+  }
+
+  const { path, debugPath } = cachedLibInfo;
+  const { OS } = lazyOS();
+  if (!OS.Path.split(path).absolute) {
+    throw new Error(
+      "Services.profiler.sharedLibraries did not contain an absolute path for " +
+        `the library ${debugName} ${breakpadId}, so symbols for this library can not ` +
+        "be obtained."
+    );
+  }
+
+  const { ProfilerGetSymbols } = lazyProfilerGetSymbols();
+
+  return ProfilerGetSymbols.getSymbolTable(path, debugPath, breakpadId);
+}
+
+/**
+ * This function is called directly by devtools/startup/DevToolsStartup.jsm when
+ * using the shortcut keys to capture a profile.
  * @type {() => Promise<void>}
  */
 async function captureProfile() {
@@ -104,60 +159,25 @@ async function captureProfile() {
       }
     );
 
-  // This Map caches the symbols from the shared libraries.
-  const _symbolCache = new Map();
-
   const receiveProfile = lazyReceiveProfile();
-
-  receiveProfile(profile, async function getSymbols(debugName, breakpadId) {
-    if (_symbolCache.size === 0) {
-      // Prime the symbols cache.
-      for (const lib of Services.profiler.sharedLibraries) {
-        _symbolCache.set(`${lib.debugName}/${lib.breakpadId}`, {
-          path: lib.path,
-          debugPath: lib.debugPath,
-        });
-      }
-    }
-
-    const cachedLibInfo = _symbolCache.get(`${debugName}/${breakpadId}`);
-    if (!cachedLibInfo) {
-      throw new Error(
-        `The library ${debugName} ${breakpadId} is not in the ` +
-          "Services.profiler.sharedLibraries list, so the local path for it is not known " +
-          "and symbols for it can not be obtained. This usually happens if a content " +
-          "process uses a library that's not used in the parent process - " +
-          "Services.profiler.sharedLibraries only knows about libraries in the " +
-          "parent process."
-      );
-    }
-
-    const { path, debugPath } = cachedLibInfo;
-    const { OS } = lazyOS();
-    if (!OS.Path.split(path).absolute) {
-      throw new Error(
-        "Services.profiler.sharedLibraries did not contain an absolute path for " +
-          `the library ${debugName} ${breakpadId}, so symbols for this library can not ` +
-          "be obtained."
-      );
-    }
-
-    const { ProfilerGetSymbols } = lazyProfilerGetSymbols();
-
-    return ProfilerGetSymbols.getSymbolTable(path, debugPath, breakpadId);
-  });
+  receiveProfile(profile, getSymbolsFromThisBrowser);
 
   Services.profiler.StopProfiler();
 }
 
+/**
+ * This function is only called by devtools/startup/DevToolsStartup.jsm when
+ * starting the profiler using the shortcut keys, through toggleProfiler below.
+ */
 function startProfiler() {
+  const { translatePreferencesToState } = lazyPreferenceManagement();
   const {
     entries,
     interval,
     features,
     threads,
     duration,
-  } = getRecordingPreferencesFromBrowser();
+  } = translatePreferencesToState(getRecordingPreferencesFromBrowser());
 
   Services.profiler.StartProfiler(
     entries,
@@ -169,6 +189,8 @@ function startProfiler() {
 }
 
 /**
+ * This function is called directly by devtools/startup/DevToolsStartup.jsm when
+ * using the shortcut keys to capture a profile.
  * @type {() => void}
  */
 function stopProfiler() {
@@ -176,6 +198,8 @@ function stopProfiler() {
 }
 
 /**
+ * This function is called directly by devtools/startup/DevToolsStartup.jsm when
+ * using the shortcut keys to start and stop the profiler.
  * @type {() => void}
  */
 function toggleProfiler() {
@@ -246,22 +270,23 @@ function _getArrayOfStringsHostPref(prefName, defaultValue) {
 }
 
 /**
- * A simple cache for the recording settings.
+ * A simple cache for the default recording preferences.
  * @type {RecordingStateFromPreferences}
  */
-let _defaultSettings;
+let _defaultPrefs;
 
 /**
- * This function contains the canonical defaults for both the popup and panel's
- * recording settings.
+ * This function contains the canonical defaults for the data store in the
+ * preferences in the user profile. They represent the default values for both
+ * the popup and panel's recording settings.
  */
-function getDefaultRecordingSettings() {
-  if (!_defaultSettings) {
-    _defaultSettings = {
+function getDefaultRecordingPreferences() {
+  if (!_defaultPrefs) {
+    _defaultPrefs = {
       entries: 10000000, // ~80mb,
       // Do not expire markers, let them roll off naturally from the circular buffer.
       duration: 0,
-      interval: 1, // milliseconds
+      interval: 1000, // 1000µs = 1ms
       features: ["js", "leaf", "responsiveness", "stackwalk"],
       threads: ["GeckoMain", "Compositor"],
       objdirs: [],
@@ -269,47 +294,40 @@ function getDefaultRecordingSettings() {
 
     if (AppConstants.platform === "android") {
       // Java profiling is only meaningful on android.
-      _defaultSettings.features.push("java");
+      _defaultPrefs.features.push("java");
     }
   }
 
-  return _defaultSettings;
+  return _defaultPrefs;
 }
 
 /**
  * @returns {RecordingStateFromPreferences}
  */
 function getRecordingPreferencesFromBrowser() {
-  const defaultSettings = getDefaultRecordingSettings();
+  const defaultPrefs = getDefaultRecordingPreferences();
 
-  const entries = Services.prefs.getIntPref(
-    ENTRIES_PREF,
-    defaultSettings.entries
-  );
+  const entries = Services.prefs.getIntPref(ENTRIES_PREF, defaultPrefs.entries);
   const interval = Services.prefs.getIntPref(
     INTERVAL_PREF,
-    defaultSettings.interval
+    defaultPrefs.interval
   );
-  const features = _getArrayOfStringsPref(
-    FEATURES_PREF,
-    defaultSettings.features
-  );
-  const threads = _getArrayOfStringsPref(THREADS_PREF, defaultSettings.threads);
+  const features = _getArrayOfStringsPref(FEATURES_PREF, defaultPrefs.features);
+  const threads = _getArrayOfStringsPref(THREADS_PREF, defaultPrefs.threads);
   const objdirs = _getArrayOfStringsHostPref(
     OBJDIRS_PREF,
-    defaultSettings.objdirs
+    defaultPrefs.objdirs
   );
   const duration = Services.prefs.getIntPref(
     DURATION_PREF,
-    defaultSettings.duration
+    defaultPrefs.duration
   );
 
   const supportedFeatures = new Set(Services.profiler.GetFeatures());
 
   return {
     entries,
-    // The pref stores the value in usec.
-    interval: interval / 1000,
+    interval,
     // Validate the features before passing them to the profiler.
     features: features.filter(feature => supportedFeatures.has(feature)),
     threads,
@@ -319,15 +337,15 @@ function getRecordingPreferencesFromBrowser() {
 }
 
 /**
- * @param {RecordingStateFromPreferences} settings
+ * @param {RecordingStateFromPreferences} prefs
  */
-function setRecordingPreferencesOnBrowser(settings) {
-  Services.prefs.setIntPref(ENTRIES_PREF, settings.entries);
+function setRecordingPreferencesOnBrowser(prefs) {
+  Services.prefs.setIntPref(ENTRIES_PREF, prefs.entries);
   // The interval pref stores the value in microseconds for extra precision.
-  Services.prefs.setIntPref(INTERVAL_PREF, settings.interval * 1000);
-  Services.prefs.setCharPref(FEATURES_PREF, JSON.stringify(settings.features));
-  Services.prefs.setCharPref(THREADS_PREF, JSON.stringify(settings.threads));
-  Services.prefs.setCharPref(OBJDIRS_PREF, JSON.stringify(settings.objdirs));
+  Services.prefs.setIntPref(INTERVAL_PREF, prefs.interval);
+  Services.prefs.setCharPref(FEATURES_PREF, JSON.stringify(prefs.features));
+  Services.prefs.setCharPref(THREADS_PREF, JSON.stringify(prefs.threads));
+  Services.prefs.setCharPref(OBJDIRS_PREF, JSON.stringify(prefs.objdirs));
 }
 
 const platform = AppConstants.platform;
@@ -336,7 +354,7 @@ const platform = AppConstants.platform;
  * @type {() => void}
  */
 function revertRecordingPreferences() {
-  setRecordingPreferencesOnBrowser(getDefaultRecordingSettings());
+  setRecordingPreferencesOnBrowser(getDefaultRecordingPreferences());
 }
 
 var EXPORTED_SYMBOLS = [
@@ -346,7 +364,8 @@ var EXPORTED_SYMBOLS = [
   "restartProfiler",
   "toggleProfiler",
   "platform",
-  "getDefaultRecordingSettings",
+  "getSymbolsFromThisBrowser",
+  "getDefaultRecordingPreferences",
   "getRecordingPreferencesFromBrowser",
   "setRecordingPreferencesOnBrowser",
   "revertRecordingPreferences",

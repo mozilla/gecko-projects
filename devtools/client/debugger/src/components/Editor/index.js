@@ -32,6 +32,7 @@ import {
   getActiveSearch,
   getSelectedLocation,
   getSelectedSourceWithContent,
+  getCanRewind,
   getConditionalPanelLocation,
   getSymbols,
   getIsPaused,
@@ -80,7 +81,6 @@ import { resizeToggleButton, resizeBreakpointGutter } from "../../utils/ui";
 
 import "./Editor.css";
 import "./Breakpoints.css";
-import "./Highlight.css";
 import "./InlinePreview.css";
 
 import type SourceEditor from "../../utils/editor/source-editor";
@@ -111,6 +111,7 @@ export type Props = {
   isPaused: boolean,
   skipPausing: boolean,
   inlinePreviewEnabled: boolean,
+  canRewind: boolean,
 
   // Actions
   openConditionalPanel: typeof actions.openConditionalPanel,
@@ -424,6 +425,7 @@ class Editor extends PureComponent<Props, State> {
     const {
       cx,
       selectedSource,
+      canRewind,
       conditionalPanelLocation,
       closeConditionalPanel,
       addBreakpointAtLine,
@@ -458,7 +460,9 @@ class Editor extends PureComponent<Props, State> {
       return continueToHere(cx, sourceLine);
     }
 
-    return addBreakpointAtLine(cx, sourceLine, ev.altKey, ev.shiftKey);
+    const shouldLog = ev.altKey || canRewind;
+
+    return addBreakpointAtLine(cx, sourceLine, shouldLog, ev.shiftKey);
   };
 
   onGutterContextMenu = (event: MouseEvent) => {
@@ -692,6 +696,7 @@ const mapStateToProps = state => {
     isPaused: getIsPaused(state, getCurrentThread(state)),
     skipPausing: getSkipPausing(state),
     inlinePreviewEnabled: getInlinePreview(state),
+    canRewind: getCanRewind(state),
   };
 };
 
