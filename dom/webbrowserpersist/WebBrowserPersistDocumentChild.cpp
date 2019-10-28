@@ -14,6 +14,7 @@
 #include "WebBrowserPersistResourcesChild.h"
 #include "WebBrowserPersistSerializeChild.h"
 #include "SHEntryChild.h"
+#include "mozilla/StaticPrefs_fission.h"
 
 namespace mozilla {
 
@@ -57,10 +58,12 @@ void WebBrowserPersistDocumentChild::Start(
   ENSURE(aDocument->GetTitle(attrs.title()));
   ENSURE(aDocument->GetContentDisposition(attrs.contentDisposition()));
 
-  RefPtr<dom::SHEntryChild> shEntryChild =
-      aDocument->GetHistory().downcast<dom::SHEntryChild>();
-  if (shEntryChild) {
-    attrs.sessionHistoryEntryChild() = shEntryChild.get();
+  if (StaticPrefs::fission_sessionHistoryInParent()) {
+    RefPtr<dom::SHEntryChild> shEntryChild =
+        aDocument->GetHistory().downcast<dom::SHEntryChild>();
+    attrs.sessionHistoryEntryOrCacheKey() = shEntryChild;
+  } else {
+    attrs.sessionHistoryEntryOrCacheKey() = aDocument->GetCacheKey();
   }
 
   ENSURE(aDocument->GetPersistFlags(&(attrs.persistFlags())));
