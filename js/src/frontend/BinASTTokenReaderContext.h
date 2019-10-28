@@ -17,6 +17,7 @@
 #include <stddef.h>  // size_t
 #include <stdint.h>  // uint8_t, uint32_t
 
+#include "jstypes.h"               // JS_PUBLIC_API
 #include "ds/FixedLengthVector.h"  // FixedLengthVector
 #include "frontend/BinASTRuntimeSupport.h"  // CharSlice, BinASTVariant, BinASTKind, BinASTField, BinASTSourceMetadata
 #include "frontend/BinASTToken.h"
@@ -26,9 +27,9 @@
 #include "js/Result.h"                       // JS::Result, Ok, Error
 #include "js/Vector.h"                       // js::Vector
 
-class JSAtom;
-class JSTracer;
-struct JSContext;
+class JS_PUBLIC_API JSAtom;
+class JS_PUBLIC_API JSTracer;
+struct JS_PUBLIC_API JSContext;
 
 namespace js {
 
@@ -781,7 +782,7 @@ using ThreeLookupsHuffmanTable =
 // error. This is the default value for `HuffmanTableValue` and represents all
 // states that may not be reached.
 //
-// Part of variants `HuffmanTableValue`, `HuffmanTableListLength` and
+// Part of variants `HuffmanTableValue` and
 // `GenericHuffmanTable::implementation`.
 struct HuffmanTableUnreachable {};
 
@@ -851,6 +852,22 @@ struct GenericHuffmanTable {
   // `result.key().bitLength_` bits.
   HuffmanLookupResult lookup(HuffmanLookup key) const;
 
+  // `true` if this table only contains values for `null` for maybe-interface
+  // table.
+  // This method MUST be used only for maybe-interface table.
+  bool isMaybeInterfaceAlwaysNull() const {
+    MOZ_ASSERT(length() == 1 || length() == 2);
+
+    // By definition, we have either 1 or 2 values.
+    // By definition, if we have 2 values, one of them is not null.
+    if (length() == 2) {
+      return false;
+    }
+
+    // Otherwise, check the single value.
+    return begin()->toKind() == BinASTKind::_Null;
+  }
+
  private:
   mozilla::Variant<SingleEntryHuffmanTable, TwoEntriesHuffmanTable,
                    SingleLookupHuffmanTable, TwoLookupsHuffmanTable,
@@ -864,78 +881,13 @@ struct GenericHuffmanTable {
 //
 // Attempting to get a value from this table is an internal error.
 //
-// Part of variants `HuffmanTableValue` and `HuffmanTableListLength`.
+// Part of variants `HuffmanTableValue`.
 struct HuffmanTableInitializing {};
 
-// These classes are all parts of variant `HuffmanTableValue`.
-
-struct HuffmanTableExplicitSymbolsF64 : GenericHuffmanTable {
-  HuffmanTableExplicitSymbolsF64() : GenericHuffmanTable() {}
-};
-
-struct HuffmanTableExplicitSymbolsU32 : GenericHuffmanTable {
-  HuffmanTableExplicitSymbolsU32() : GenericHuffmanTable() {}
-};
-
-struct HuffmanTableIndexedSymbolsSum : GenericHuffmanTable {
-  HuffmanTableIndexedSymbolsSum() : GenericHuffmanTable() {}
-};
-
-struct HuffmanTableIndexedSymbolsBool : GenericHuffmanTable {
-  HuffmanTableIndexedSymbolsBool() : GenericHuffmanTable() {}
-};
-
-// A Huffman table that may only ever contain two values:
-// `BinASTKind::_Null` and another `BinASTKind`.
-struct HuffmanTableIndexedSymbolsMaybeInterface : GenericHuffmanTable {
-  HuffmanTableIndexedSymbolsMaybeInterface() : GenericHuffmanTable() {}
-
-  // `true` if this table only contains values for `null`.
-  bool isAlwaysNull() const {
-    MOZ_ASSERT(length() == 1 || length() == 2);
-
-    // By definition, we have either 1 or 2 values.
-    // By definition, if we have 2 values, one of them is not null.
-    if (length() == 2) {
-      return false;
-    }
-
-    // Otherwise, check the single value.
-    return begin()->toKind() == BinASTKind::_Null;
-  }
-};
-
-struct HuffmanTableIndexedSymbolsStringEnum : GenericHuffmanTable {
-  HuffmanTableIndexedSymbolsStringEnum() : GenericHuffmanTable() {}
-};
-
-struct HuffmanTableIndexedSymbolsLiteralString : GenericHuffmanTable {
-  HuffmanTableIndexedSymbolsLiteralString() : GenericHuffmanTable() {}
-};
-
-struct HuffmanTableIndexedSymbolsOptionalLiteralString : GenericHuffmanTable {
-  HuffmanTableIndexedSymbolsOptionalLiteralString() : GenericHuffmanTable() {}
-};
-
 // A single Huffman table, used for values.
-using HuffmanTableValue = mozilla::Variant<
-    HuffmanTableUnreachable,  // Default value.
-    HuffmanTableInitializing, HuffmanTableExplicitSymbolsF64,
-    HuffmanTableExplicitSymbolsU32, HuffmanTableIndexedSymbolsSum,
-    HuffmanTableIndexedSymbolsMaybeInterface, HuffmanTableIndexedSymbolsBool,
-    HuffmanTableIndexedSymbolsStringEnum,
-    HuffmanTableIndexedSymbolsLiteralString,
-    HuffmanTableIndexedSymbolsOptionalLiteralString>;
-
-struct HuffmanTableExplicitSymbolsListLength : GenericHuffmanTable {
-  HuffmanTableExplicitSymbolsListLength() : GenericHuffmanTable() {}
-};
-
-// A single Huffman table, specialized for list lengths.
-using HuffmanTableListLength =
+using HuffmanTableValue =
     mozilla::Variant<HuffmanTableUnreachable,  // Default value.
-                     HuffmanTableInitializing,
-                     HuffmanTableExplicitSymbolsListLength>;
+                     HuffmanTableInitializing, GenericHuffmanTable>;
 
 // A Huffman dictionary for the current file.
 //
@@ -947,7 +899,7 @@ class HuffmanDictionary {
   HuffmanDictionary();
 
   HuffmanTableValue& tableForField(NormalizedInterfaceAndField index);
-  HuffmanTableListLength& tableForListLength(BinASTList list);
+  HuffmanTableValue& tableForListLength(BinASTList list);
 
  private:
   // Huffman tables for `(Interface, Field)` pairs, used to decode the value of
@@ -965,8 +917,7 @@ class HuffmanDictionary {
   //
   // The mapping from `List -> index` is extracted statically from the webidl
   // specs.
-  mozilla::Array<HuffmanTableListLength, BINAST_NUMBER_OF_LIST_TYPES>
-      listLengths_;
+  mozilla::Array<HuffmanTableValue, BINAST_NUMBER_OF_LIST_TYPES> listLengths_;
 };
 
 /**
@@ -1284,7 +1235,6 @@ class MOZ_STACK_CLASS BinASTTokenReaderContext : public BinASTTokenReaderBase {
   MOZ_MUST_USE JS::Result<BinASTKind> readTagFromTable(
       const BinASTInterfaceAndField&);
 
-  template <typename Table>
   MOZ_MUST_USE JS::Result<BinASTSymbol> readFieldFromTable(
       const BinASTInterfaceAndField&);
 

@@ -44,9 +44,6 @@
 #include "mozilla/dom/PlacesVisit.h"
 #include "mozilla/dom/ScriptSettings.h"
 
-// Initial size for the cache holding visited status observers.
-#define VISIT_OBSERVERS_INITIAL_CACHE_LENGTH 64
-
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
 using mozilla::Unused;
@@ -1440,7 +1437,6 @@ History* History::gService = nullptr;
 History::History()
     : mShuttingDown(false),
       mShutdownMutex("History::mShutdownMutex"),
-      mObservers(VISIT_OBSERVERS_INITIAL_CACHE_LENGTH),
       mRecentlyVisitedURIs(RECENTLY_VISITED_URIS_SIZE) {
   NS_ASSERTION(!gService, "Ruh-roh!  This service has already been created!");
   if (XRE_IsParentProcess()) {
@@ -1471,17 +1467,6 @@ History::~History() {
 
 void History::InitMemoryReporter() { RegisterWeakMemoryReporter(this); }
 
-// Helper function which performs the checking required to fetch the document
-// object for the given link. May return null if the link does not have an owner
-// document.
-static Document* GetLinkDocument(Link* aLink) {
-  // NOTE: Theoretically GetElement should never return nullptr, but it does
-  // in GTests because they use a mock_Link which returns null from this
-  // method.
-  Element* element = aLink->GetElement();
-  return element ? element->OwnerDoc() : nullptr;
-}
-
 void History::NotifyVisitedParent(const nsTArray<URIParams>& aURIs) {
   MOZ_ASSERT(XRE_IsParentProcess());
   nsTArray<ContentParent*> cplist;
@@ -1491,100 +1476,6 @@ void History::NotifyVisitedParent(const nsTArray<URIParams>& aURIs) {
     for (uint32_t i = 0; i < cplist.Length(); ++i) {
       Unused << cplist[i]->SendNotifyVisited(aURIs);
     }
-  }
-}
-
-NS_IMETHODIMP
-History::NotifyVisited(nsIURI* aURI) {
-  MOZ_ASSERT(NS_IsMainThread());
-  NS_ENSURE_ARG(aURI);
-  // NOTE: This can be run within the SystemGroup, and thus cannot directly
-  // interact with webpages.
-
-  nsAutoScriptBlocker scriptBlocker;
-
-  // If we have no observers for this URI, we have nothing to notify about.
-  KeyClass* key = mObservers.GetEntry(aURI);
-  if (!key) {
-    return NS_OK;
-  }
-  key->mVisited = true;
-
-  // If we have a key, it should have at least one observer.
-  MOZ_ASSERT(!key->array.IsEmpty());
-
-  // Dispatch an event to each document which has a Link observing this URL.
-  // These will fire asynchronously in the correct DocGroup.
-  {
-    nsTArray<Document*> seen;  // Don't dispatch duplicate runnables.
-    ObserverArray::BackwardIterator iter(key->array);
-    while (iter.HasMore()) {
-      Link* link = iter.GetNext();
-      Document* doc = GetLinkDocument(link);
-      if (seen.Contains(doc)) {
-        continue;
-      }
-      seen.AppendElement(doc);
-      DispatchNotifyVisited(aURI, doc);
-    }
-  }
-
-  return NS_OK;
-}
-
-void History::NotifyVisitedForDocument(nsIURI* aURI, Document* aDocument) {
-  MOZ_ASSERT(NS_IsMainThread());
-  // Make sure that nothing invalidates our observer array while we're walking
-  // over it.
-  nsAutoScriptBlocker scriptBlocker;
-
-  // If we have no observers for this URI, we have nothing to notify about.
-  KeyClass* key = mObservers.GetEntry(aURI);
-  if (!key) {
-    return;
-  }
-
-  {
-    // Update status of each Link node. We iterate over the array backwards so
-    // we can remove the items as we encounter them.
-    ObserverArray::BackwardIterator iter(key->array);
-    while (iter.HasMore()) {
-      Link* link = iter.GetNext();
-      Document* doc = GetLinkDocument(link);
-      if (doc == aDocument) {
-        link->SetLinkState(eLinkState_Visited);
-        iter.Remove();
-      }
-
-      // Verify that the observers hash doesn't mutate while looping through
-      // the links associated with this URI.
-      MOZ_ASSERT(key == mObservers.GetEntry(aURI), "The URIs hash mutated!");
-    }
-  }
-
-  // If we don't have any links left, we can remove the array.
-  if (key->array.IsEmpty()) {
-    mObservers.RemoveEntry(key);
-  }
-}
-
-void History::DispatchNotifyVisited(nsIURI* aURI, Document* aDocument) {
-  // Capture strong references to the arguments to capture in the closure.
-  RefPtr<Document> doc = aDocument;
-  nsCOMPtr<nsIURI> uri = aURI;
-
-  // Create and dispatch the runnable to call NotifyVisitedForDocument.
-  nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableFunction("History::DispatchNotifyVisited", [uri, doc] {
-        nsCOMPtr<IHistory> history = services::GetHistoryService();
-        static_cast<History*>(history.get())
-            ->NotifyVisitedForDocument(uri, doc);
-      });
-
-  if (doc) {
-    doc->Dispatch(TaskCategory::Other, runnable.forget());
-  } else {
-    NS_DispatchToMainThread(runnable.forget());
   }
 }
 
@@ -1908,9 +1799,13 @@ History::CollectReports(nsIHandleReportCallback* aHandleReport,
   return NS_OK;
 }
 
-size_t History::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOfThis) {
-  return aMallocSizeOfThis(this) +
-         mObservers.SizeOfExcludingThis(aMallocSizeOfThis);
+size_t History::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) {
+  size_t size = aMallocSizeOf(this);
+  size += mTrackedURIs.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  for (const auto& entry : mTrackedURIs) {
+    size += entry.GetData().SizeOfExcludingThis(aMallocSizeOf);
+  }
+  return size;
 }
 
 /* static */
@@ -1919,7 +1814,7 @@ History* History::GetService() {
     return gService;
   }
 
-  nsCOMPtr<IHistory> service(do_GetService(NS_IHISTORY_CONTRACTID));
+  nsCOMPtr<IHistory> service = services::GetHistoryService();
   if (service) {
     NS_ASSERTION(gService, "Our constructor was not run?!");
   }
@@ -1977,23 +1872,28 @@ void History::Shutdown() {
 }
 
 void History::AppendToRecentlyVisitedURIs(nsIURI* aURI, bool aHidden) {
-  // Add a new entry, if necessary.
-  RecentURIKey* entry = mRecentlyVisitedURIs.GetEntry(aURI);
-  if (!entry) {
-    entry = mRecentlyVisitedURIs.PutEntry(aURI);
-  }
-  if (entry) {
-    entry->time = PR_Now();
-    entry->hidden = aHidden;
+  PRTime now = PR_Now();
+
+  {
+    RecentURIVisit& visit =
+        mRecentlyVisitedURIs.LookupForAdd(aURI).OrInsert([] {
+          return RecentURIVisit{0, false};
+        });
+
+    visit.mTime = now;
+    visit.mHidden = aHidden;
   }
 
   // Remove entries older than RECENTLY_VISITED_URIS_MAX_AGE.
   for (auto iter = mRecentlyVisitedURIs.Iter(); !iter.Done(); iter.Next()) {
-    RecentURIKey* entry = iter.Get();
-    if ((PR_Now() - entry->time) > RECENTLY_VISITED_URIS_MAX_AGE) {
+    if ((now - iter.Data().mTime) > RECENTLY_VISITED_URIS_MAX_AGE) {
       iter.Remove();
     }
   }
+}
+
+Result<Ok, nsresult> History::StartVisitedQuery(nsIURI* aURI) {
+  return ToResult(VisitedQuery::Start(aURI));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2098,11 +1998,12 @@ History::VisitURI(nsIWidget* aWidget, nsIURI* aURI, nsIURI* aLastVisitedURI,
 
   // Do not save a reloaded uri if we have visited the same URI recently.
   if (reload) {
-    RecentURIKey* entry = mRecentlyVisitedURIs.GetEntry(aURI);
+    auto entry = mRecentlyVisitedURIs.Lookup(aURI);
     // Check if the entry exists and is younger than
     // RECENTLY_VISITED_URIS_MAX_AGE.
-    if (entry && (PR_Now() - entry->time) < RECENTLY_VISITED_URIS_MAX_AGE) {
-      bool wasHidden = entry->hidden;
+    if (entry &&
+        (PR_Now() - entry.Data().mTime) < RECENTLY_VISITED_URIS_MAX_AGE) {
+      bool wasHidden = entry.Data().mHidden;
       // Regardless of whether we store the visit or not, we must update the
       // stored visit time.
       AppendToRecentlyVisitedURIs(aURI, place.hidden);
@@ -2126,106 +2027,6 @@ History::VisitURI(nsIWidget* aWidget, nsIURI* aURI, nsIURI* aLastVisitedURI,
 
     rv = InsertVisitedURIs::Start(dbConn, placeArray);
     NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-History::RegisterVisitedCallback(nsIURI* aURI, Link* aLink) {
-  MOZ_ASSERT(NS_IsMainThread());
-  NS_ASSERTION(aURI, "Must pass a non-null URI!");
-  if (XRE_IsContentProcess()) {
-    MOZ_ASSERT(aLink, "Must pass a non-null Link!");
-  }
-
-  // Obtain our array of observers for this URI.
-#ifdef DEBUG
-  bool keyAlreadyExists = !!mObservers.GetEntry(aURI);
-#endif
-  KeyClass* key = mObservers.PutEntry(aURI);
-  NS_ENSURE_TRUE(key, NS_ERROR_OUT_OF_MEMORY);
-  ObserverArray& observers = key->array;
-
-  if (observers.IsEmpty()) {
-    NS_ASSERTION(!keyAlreadyExists,
-                 "An empty key was kept around in our hashtable!");
-
-    // We are the first Link node to ask about this URI, or there are no pending
-    // Links wanting to know about this URI.  Therefore, we should query the
-    // database now.
-    nsresult rv = VisitedQuery::Start(aURI);
-
-    // In IPC builds, we are passed a nullptr Link from
-    // ContentParent::RecvStartVisitedQuery.  Since we won't be adding a
-    // nullptr entry to our list of observers, and the code after this point
-    // assumes that aLink is non-nullptr, we will need to return now.
-    if (NS_FAILED(rv) || !aLink) {
-      // Remove our array from the hashtable so we don't keep it around.
-      MOZ_ASSERT(key == mObservers.GetEntry(aURI), "The URIs hash mutated!");
-      // In some case calling RemoveEntry on the key obtained by PutEntry
-      // crashes for currently unknown reasons.  Our suspect is that something
-      // between PutEntry and this call causes a nested loop that either removes
-      // the entry or reallocs the hash.
-      // TODO (Bug 1412647): we must figure the root cause for these issues and
-      // remove this stop-gap crash fix.
-      key = mObservers.GetEntry(aURI);
-      if (key) {
-        mObservers.RemoveEntry(key);
-      }
-      return rv;
-    }
-  }
-  // In IPC builds, we are passed a nullptr Link from
-  // ContentParent::RecvStartVisitedQuery.  All of our code after this point
-  // assumes aLink is non-nullptr, so we have to return now.
-  else if (!aLink) {
-    NS_ASSERTION(XRE_IsParentProcess(),
-                 "We should only ever get a null Link in the default process!");
-    return NS_OK;
-  }
-
-  // Sanity check that Links are not registered more than once for a given URI.
-  // This will not catch a case where it is registered for two different URIs.
-  NS_ASSERTION(!observers.Contains(aLink),
-               "Already tracking this Link object!");
-
-  // Start tracking our Link.
-  observers.AppendElement(aLink);
-
-  // If this link has already been visited, we cannot synchronously mark
-  // ourselves as visited, so instead we fire a runnable into our docgroup,
-  // which will handle it for us.
-  if (key->mVisited) {
-    DispatchNotifyVisited(aURI, GetLinkDocument(aLink));
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-History::UnregisterVisitedCallback(nsIURI* aURI, Link* aLink) {
-  MOZ_ASSERT(NS_IsMainThread());
-  // TODO: aURI is sometimes null - see bug 548685
-  NS_ASSERTION(aURI, "Must pass a non-null URI!");
-  NS_ASSERTION(aLink, "Must pass a non-null Link object!");
-
-  // Get the array, and remove the item from it.
-  KeyClass* key = mObservers.GetEntry(aURI);
-  if (!key) {
-    NS_ERROR("Trying to unregister for a URI that wasn't registered!");
-    return NS_ERROR_UNEXPECTED;
-  }
-  ObserverArray& observers = key->array;
-  if (!observers.RemoveElement(aLink)) {
-    NS_ERROR("Trying to unregister a node that wasn't registered!");
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  // If the array is now empty, we should remove it from the hashtable.
-  if (observers.IsEmpty()) {
-    MOZ_ASSERT(key == mObservers.GetEntry(aURI), "The URIs hash mutated!");
-    mObservers.RemoveEntry(key);
   }
 
   return NS_OK;

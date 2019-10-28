@@ -153,13 +153,9 @@ static JSScript* DelazifyScript(JSContext* cx, Handle<LazyScript*> lazyScript) {
   }
   MOZ_ASSERT(lazyScript->enclosingScriptHasEverBeenCompiled());
 
-  RootedFunction fun0(cx, lazyScript->functionNonDelazifying());
-  AutoRealm ar(cx, fun0);
-  RootedFunction fun(cx, LazyScript::functionDelazifying(cx, lazyScript));
-  if (!fun) {
-    return nullptr;
-  }
-  return fun->getOrCreateScript(cx, fun);
+  RootedFunction fun(cx, lazyScript->function());
+  AutoRealm ar(cx, fun);
+  return JSFunction::getOrCreateScript(cx, fun);
 }
 
 /* static */
@@ -321,7 +317,7 @@ bool DebuggerScript::CallData::getIsFunction() {
 
   // Note: LazyScripts always have functions.
   args.rval().setBoolean(!referent.is<JSScript*>() ||
-                         referent.as<JSScript*>()->functionNonDelazifying());
+                         referent.as<JSScript*>()->function());
   return true;
 }
 
@@ -338,8 +334,8 @@ bool DebuggerScript::CallData::getDisplayName() {
   if (!ensureScriptMaybeLazy()) {
     return false;
   }
-  JSFunction* func = CallScriptMethod(obj, &JSScript::functionNonDelazifying,
-                                      &LazyScript::functionNonDelazifying);
+  JSFunction* func =
+      CallScriptMethod(obj, &JSScript::function, &LazyScript::function);
   Debugger* dbg = Debugger::fromChildJSObject(obj);
 
   JSString* name = func ? func->displayAtom() : nullptr;
@@ -2045,11 +2041,16 @@ struct DebuggerScript::SetBreakpointMatcher {
   Debugger* dbg_;
   size_t offset_;
   RootedObject handler_;
+  RootedObject debuggerObject_;
 
  public:
   explicit SetBreakpointMatcher(JSContext* cx, Debugger* dbg, size_t offset,
                                 HandleObject handler)
-      : cx_(cx), dbg_(dbg), offset_(offset), handler_(cx, handler) {}
+      : cx_(cx),
+        dbg_(dbg),
+        offset_(offset),
+        handler_(cx, handler),
+        debuggerObject_(cx_, dbg_->toJSObject()) {}
 
   using ReturnType = bool;
 
@@ -2072,20 +2073,28 @@ struct DebuggerScript::SetBreakpointMatcher {
       return false;
     }
 
+    // A Breakpoint belongs logically to its script's compartment, so its
+    // references to its Debugger and handler must be properly wrapped.
+    AutoRealm ar(cx_, script);
+    if (!cx_->compartment()->wrap(cx_, &handler_) ||
+        !cx_->compartment()->wrap(cx_, &debuggerObject_)) {
+      return false;
+    }
+
     jsbytecode* pc = script->offsetToPC(offset_);
-    BreakpointSite* site =
+    JSBreakpointSite* site =
         DebugScript::getOrCreateBreakpointSite(cx_, script, pc);
     if (!site) {
       return false;
     }
-    site->inc(cx_->runtime()->defaultFreeOp());
-    if (cx_->zone()->new_<Breakpoint>(dbg_, site, handler_)) {
-      AddCellMemory(script, sizeof(Breakpoint), MemoryUse::Breakpoint);
-      return true;
+
+    if (!cx_->zone()->new_<Breakpoint>(dbg_, debuggerObject_, site, handler_)) {
+      site->destroyIfEmpty(cx_->runtime()->defaultFreeOp());
+      return false;
     }
-    site->dec(cx_->runtime()->defaultFreeOp());
-    site->destroyIfEmpty(cx_->runtime()->defaultFreeOp());
-    return false;
+    AddCellMemory(script, sizeof(Breakpoint), MemoryUse::Breakpoint);
+
+    return true;
   }
   ReturnType match(Handle<LazyScript*> lazyScript) {
     RootedScript script(cx_, DelazifyScript(cx_, lazyScript));
@@ -2102,20 +2111,27 @@ struct DebuggerScript::SetBreakpointMatcher {
                                 JSMSG_DEBUG_BAD_OFFSET);
       return false;
     }
+
+    // A Breakpoint belongs logically to its Instance's compartment, so its
+    // references to its Debugger and handler must be properly wrapped.
+    AutoRealm ar(cx_, wasmInstance);
+    if (!cx_->compartment()->wrap(cx_, &handler_) ||
+        !cx_->compartment()->wrap(cx_, &debuggerObject_)) {
+      return false;
+    }
+
     WasmBreakpointSite* site = instance.getOrCreateBreakpointSite(cx_, offset_);
     if (!site) {
       return false;
     }
-    site->inc(cx_->runtime()->defaultFreeOp());
-    if (cx_->zone()->new_<WasmBreakpoint>(dbg_, site, handler_,
-                                          instance.object())) {
-      AddCellMemory(wasmInstance, sizeof(WasmBreakpoint),
-                    MemoryUse::Breakpoint);
-      return true;
+
+    if (!cx_->zone()->new_<Breakpoint>(dbg_, debuggerObject_, site, handler_)) {
+      site->destroyIfEmpty(cx_->runtime()->defaultFreeOp());
+      return false;
     }
-    site->dec(cx_->runtime()->defaultFreeOp());
-    site->destroyIfEmpty(cx_->runtime()->defaultFreeOp());
-    return false;
+    AddCellMemory(wasmInstance, sizeof(Breakpoint), MemoryUse::Breakpoint);
+
+    return true;
   }
 };
 
@@ -2167,7 +2183,7 @@ bool DebuggerScript::CallData::getBreakpoints() {
   }
 
   for (unsigned i = 0; i < script->length(); i++) {
-    BreakpointSite* site =
+    JSBreakpointSite* site =
         DebugScript::getBreakpointSite(script, script->offsetToPC(i));
     if (!site) {
       continue;
@@ -2176,9 +2192,12 @@ bool DebuggerScript::CallData::getBreakpoints() {
     if (!pc || site->asJS()->pc == pc) {
       for (Breakpoint* bp = site->firstBreakpoint(); bp;
            bp = bp->nextInSite()) {
-        if (bp->debugger == dbg &&
-            !NewbornArrayPush(cx, arr, ObjectValue(*bp->getHandler()))) {
-          return false;
+        if (bp->debugger == dbg) {
+          RootedObject handler(cx, bp->getHandler());
+          if (!cx->compartment()->wrap(cx, &handler) ||
+              !NewbornArrayPush(cx, arr, ObjectValue(*handler))) {
+            return false;
+          }
         }
       }
     }
@@ -2190,14 +2209,24 @@ bool DebuggerScript::CallData::getBreakpoints() {
 class DebuggerScript::ClearBreakpointMatcher {
   JSContext* cx_;
   Debugger* dbg_;
-  JSObject* handler_;
+  RootedObject handler_;
 
  public:
   ClearBreakpointMatcher(JSContext* cx, Debugger* dbg, JSObject* handler)
-      : cx_(cx), dbg_(dbg), handler_(handler) {}
+      : cx_(cx), dbg_(dbg), handler_(cx, handler) {}
   using ReturnType = bool;
 
   ReturnType match(HandleScript script) {
+    // A Breakpoint belongs logically to its script's compartment, so it holds
+    // its handler via a cross-compartment wrapper. But the handler passed to
+    // `clearBreakpoint` is same-compartment with the Debugger. Wrap it here, so
+    // that `DebugScript::clearBreakpointsIn` gets the right value to search
+    // for.
+    AutoRealm ar(cx_, script);
+    if (!cx_->compartment()->wrap(cx_, &handler_)) {
+      return false;
+    }
+
     DebugScript::clearBreakpointsIn(cx_->runtime()->defaultFreeOp(), script,
                                     dbg_, handler_);
     return true;
@@ -2214,6 +2243,16 @@ class DebuggerScript::ClearBreakpointMatcher {
     if (!instance.debugEnabled()) {
       return true;
     }
+
+    // A Breakpoint belongs logically to its instance's compartment, so it holds
+    // its handler via a cross-compartment wrapper. But the handler passed to
+    // `clearBreakpoint` is same-compartment with the Debugger. Wrap it here, so
+    // that `DebugState::clearBreakpointsIn` gets the right value to search for.
+    AutoRealm ar(cx_, instanceObj);
+    if (!cx_->compartment()->wrap(cx_, &handler_)) {
+      return false;
+    }
+
     instance.debug().clearBreakpointsIn(cx_->runtime()->defaultFreeOp(),
                                         instanceObj, dbg_, handler_);
     return true;

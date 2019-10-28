@@ -10,6 +10,7 @@
 #include "nsXULAppAPI.h"
 
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/ResultExtensions.h"
 
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/Element.h"
@@ -43,11 +44,6 @@ enum class GeckoViewVisitFlags : int32_t {
 // `GetVisited` request for the link to Java. Used to debounce requests and
 // reduce the number of IPC and JNI calls.
 static const uint32_t GET_VISITS_WAIT_MS = 250;
-
-static inline Document* OwnerDocForLink(Link* aLink) {
-  Element* element = aLink->GetElement();
-  return element ? element->OwnerDoc() : nullptr;
-}
 
 GeckoViewHistory::GeckoViewHistory() {}
 
@@ -96,52 +92,42 @@ void GeckoViewHistory::QueryVisitedStateInContentProcess() {
   // instead, but, since we don't expect to have many tab children, we can avoid
   // the cost of hashing.
   AutoTArray<NewURIEntry, 8> newEntries;
-  for (auto newURIsIter = mNewURIs.Iter(); !newURIsIter.Done();
+  for (auto newURIsIter = mNewURIs.ConstIter(); !newURIsIter.Done();
        newURIsIter.Next()) {
     nsIURI* uri = newURIsIter.Get()->GetKey();
-    if (auto entry = mTrackedURIs.Lookup(uri)) {
-      TrackedURI& trackedURI = entry.Data();
-      if (!trackedURI.mLinks.IsEmpty()) {
-        nsTObserverArray<Link*>::BackwardIterator linksIter(trackedURI.mLinks);
-        while (linksIter.HasMore()) {
-          Link* link = linksIter.GetNext();
+    auto entry = mTrackedURIs.Lookup(uri);
+    if (!entry) {
+      continue;
+    }
+    ObservingLinks& links = entry.Data();
+    nsTObserverArray<Link*>::BackwardIterator linksIter(links.mLinks);
+    while (linksIter.HasMore()) {
+      Link* link = linksIter.GetNext();
 
-          BrowserChild* browserChild = nullptr;
-          nsIWidget* widget =
-              nsContentUtils::WidgetForContent(link->GetElement());
-          if (widget) {
-            browserChild = widget->GetOwningBrowserChild();
-          }
-          if (!browserChild) {
-            // We need the link's tab child to find the matching window in the
-            // parent process, so stop tracking it if it doesn't have one.
-            linksIter.Remove();
-            continue;
-          }
-
-          // Add to the list of new URIs for this document, or make a new entry.
-          bool hasEntry = false;
-          for (NewURIEntry& entry : newEntries) {
-            if (entry.mBrowserChild == browserChild) {
-              entry.AddURI(uri);
-              hasEntry = true;
-              break;
-            }
-          }
-          if (!hasEntry) {
-            newEntries.AppendElement(NewURIEntry(browserChild, uri));
-          }
+      nsIWidget* widget = nsContentUtils::WidgetForContent(link->GetElement());
+      if (!widget) {
+        continue;
+      }
+      BrowserChild* browserChild = widget->GetOwningBrowserChild();
+      if (!browserChild) {
+        continue;
+      }
+      // Add to the list of new URIs for this document, or make a new entry.
+      bool hasEntry = false;
+      for (NewURIEntry& entry : newEntries) {
+        if (entry.mBrowserChild == browserChild) {
+          entry.AddURI(uri);
+          hasEntry = true;
+          break;
         }
       }
-      if (trackedURI.mLinks.IsEmpty()) {
-        // If the list of tracked links is empty, remove the entry for the URI.
-        // We'll need to query the history delegate again the next time we look
-        // up the visited status for this URI.
-        entry.Remove();
+      if (!hasEntry) {
+        newEntries.AppendElement(NewURIEntry(browserChild, uri));
       }
     }
-    newURIsIter.Remove();
   }
+
+  mNewURIs.Clear();
 
   // Send the request to the parent process, one message per tab child.
   for (const NewURIEntry& entry : newEntries) {
@@ -170,43 +156,39 @@ void GeckoViewHistory::QueryVisitedStateInParentProcess() {
   MOZ_ASSERT(XRE_IsParentProcess());
 
   nsTArray<NewURIEntry> newEntries;
-  for (auto newURIsIter = mNewURIs.Iter(); !newURIsIter.Done();
+  for (auto newURIsIter = mNewURIs.ConstIter(); !newURIsIter.Done();
        newURIsIter.Next()) {
     nsIURI* uri = newURIsIter.Get()->GetKey();
-    if (auto entry = mTrackedURIs.Lookup(uri)) {
-      TrackedURI& trackedURI = entry.Data();
-      if (!trackedURI.mLinks.IsEmpty()) {
-        nsTObserverArray<Link*>::BackwardIterator linksIter(trackedURI.mLinks);
-        while (linksIter.HasMore()) {
-          Link* link = linksIter.GetNext();
+    auto entry = mTrackedURIs.Lookup(uri);
+    if (!entry) {
+      continue;  // Nobody cares about this uri anymore.
+    }
 
-          nsIWidget* widget =
-              nsContentUtils::WidgetForContent(link->GetElement());
-          if (!widget) {
-            linksIter.Remove();
-            continue;
-          }
+    ObservingLinks& links = entry.Data();
+    nsTObserverArray<Link*>::BackwardIterator linksIter(links.mLinks);
+    while (linksIter.HasMore()) {
+      Link* link = linksIter.GetNext();
 
-          bool hasEntry = false;
-          for (NewURIEntry& entry : newEntries) {
-            if (entry.mWidget == widget) {
-              entry.AddURI(uri);
-              hasEntry = true;
-              break;
-            }
-          }
-          if (!hasEntry) {
-            newEntries.AppendElement(NewURIEntry(widget, uri));
-          }
-        }
+      nsIWidget* widget = nsContentUtils::WidgetForContent(link->GetElement());
+      if (!widget) {
+        continue;
       }
-      if (trackedURI.mLinks.IsEmpty()) {
-        entry.Remove();
+
+      bool hasEntry = false;
+      for (NewURIEntry& entry : newEntries) {
+        if (entry.mWidget != widget) {
+          continue;
+        }
+        entry.AddURI(uri);
+        hasEntry = true;
+      }
+      if (!hasEntry) {
+        newEntries.AppendElement(NewURIEntry(widget, uri));
       }
     }
   }
-  mNewURIs.Clear();
 
+  mNewURIs.Clear();
   for (const NewURIEntry& entry : newEntries) {
     QueryVisitedState(entry.mWidget, entry.mURIs);
   }
@@ -215,8 +197,10 @@ void GeckoViewHistory::QueryVisitedStateInParentProcess() {
 NS_IMETHODIMP
 GeckoViewHistory::Notify(nsITimer* aTimer) {
   MOZ_ASSERT(aTimer == mQueryVisitedStateTimer);
+  MOZ_ASSERT(mQueryVisitedStateTimerPending);
+  mQueryVisitedStateTimerPending = false;
 
-  if (mNewURIs.Count() > 0) {
+  if (!mNewURIs.IsEmpty()) {
     if (XRE_IsContentProcess()) {
       QueryVisitedStateInContentProcess();
     } else {
@@ -227,75 +211,23 @@ GeckoViewHistory::Notify(nsITimer* aTimer) {
   return NS_OK;
 }
 
-NS_IMETHODIMP
-GeckoViewHistory::RegisterVisitedCallback(nsIURI* aURI, Link* aLink) {
-  if (!aLink || !aURI) {
-    return NS_OK;
+Result<Ok, nsresult> GeckoViewHistory::StartVisitedQuery(nsIURI* aURI) {
+  mNewURIs.PutEntry(aURI);
+  if (mQueryVisitedStateTimerPending) {
+    MOZ_ASSERT(mQueryVisitedStateTimer);
+    return Ok();
   }
-
-  auto entry = mTrackedURIs.LookupForAdd(aURI);
-  if (entry) {
-    // Start tracking the link for this URI.
-    TrackedURI& trackedURI = entry.Data();
-    trackedURI.mLinks.AppendElement(aLink);
-
-    if (trackedURI.mVisited) {
-      // If we already know that the URI was visited, update the link state now.
-      DispatchNotifyVisited(aURI, OwnerDocForLink(aLink));
-    }
-  } else {
-    // Otherwise, track the link, and start the timer to request the visited
-    // status from the history delegate for this and any other new URIs. If the
-    // delegate reports that the URI is unvisited, we'll keep tracking the link,
-    // and update its state from `VisitedCallback` once it's visited. If the URI
-    // is already visited, `GetVisitedCallback` will update this and all other
-    // visited links, and stop tracking them.
-    entry.OrInsert([aLink]() {
-      TrackedURI trackedURI;
-      trackedURI.mLinks.AppendElement(aLink);
-      return trackedURI;
-    });
-    mNewURIs.PutEntry(aURI);
-    if (!mQueryVisitedStateTimer) {
-      mQueryVisitedStateTimer = NS_NewTimer();
-    }
-    Unused << NS_WARN_IF(NS_FAILED(mQueryVisitedStateTimer->InitWithCallback(
-        this, GET_VISITS_WAIT_MS, nsITimer::TYPE_ONE_SHOT)));
+  if (!mQueryVisitedStateTimer) {
+    mQueryVisitedStateTimer = NS_NewTimer();
   }
-
-  return NS_OK;
+  nsresult rv = mQueryVisitedStateTimer->InitWithCallback(
+      this, GET_VISITS_WAIT_MS, nsITimer::TYPE_ONE_SHOT);
+  mQueryVisitedStateTimerPending = NS_SUCCEEDED(rv);
+  return ToResult(rv);
 }
 
-NS_IMETHODIMP
-GeckoViewHistory::UnregisterVisitedCallback(nsIURI* aURI, Link* aLink) {
-  if (!aLink || !aURI) {
-    return NS_OK;
-  }
-
-  if (auto entry = mTrackedURIs.Lookup(aURI)) {
-    TrackedURI& trackedURI = entry.Data();
-    if (!trackedURI.mLinks.IsEmpty()) {
-      nsTObserverArray<Link*>::BackwardIterator iter(trackedURI.mLinks);
-      while (iter.HasMore()) {
-        Link* link = iter.GetNext();
-        if (link == aLink) {
-          iter.Remove();
-          break;
-        }
-      }
-    }
-
-    if (trackedURI.mLinks.IsEmpty()) {
-      // If the list of tracked links is empty, remove the entry for the URI.
-      // We'll need to query the history delegate again the next time we look
-      // up the visited status for this URI.
-      entry.Remove();
-    }
-  }
-
+void GeckoViewHistory::CancelVisitedQueryIfPossible(nsIURI* aURI) {
   mNewURIs.RemoveEntry(aURI);
-
-  return NS_OK;
 }
 
 /**
@@ -456,31 +388,6 @@ GeckoViewHistory::VisitURI(nsIWidget* aWidget, nsIURI* aURI,
 NS_IMETHODIMP
 GeckoViewHistory::SetURITitle(nsIURI* aURI, const nsAString& aTitle) {
   return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-GeckoViewHistory::NotifyVisited(nsIURI* aURI) {
-  if (NS_WARN_IF(!aURI)) {
-    return NS_OK;
-  }
-
-  if (auto entry = mTrackedURIs.Lookup(aURI)) {
-    TrackedURI& trackedURI = entry.Data();
-    trackedURI.mVisited = true;
-    nsTArray<Document*> seen;
-    nsTObserverArray<Link*>::BackwardIterator iter(trackedURI.mLinks);
-    while (iter.HasMore()) {
-      Link* link = iter.GetNext();
-      Document* doc = OwnerDocForLink(link);
-      if (seen.Contains(doc)) {
-        continue;
-      }
-      seen.AppendElement(doc);
-      DispatchNotifyVisited(aURI, doc);
-    }
-  }
-
-  return NS_OK;
 }
 
 /**
@@ -653,55 +560,11 @@ void GeckoViewHistory::HandleVisitedState(
 
   // We might still have child processes even if e10s is disabled, so always
   // check if we're tracking any links in the parent, and notify them if so.
-  if (mTrackedURIs.Count() > 0) {
+  if (!mTrackedURIs.IsEmpty()) {
     for (const VisitedURI& visitedURI : aVisitedURIs) {
       if (visitedURI.mVisited) {
-        Unused << NS_WARN_IF(NS_FAILED(NotifyVisited(visitedURI.mURI)));
+        NotifyVisited(visitedURI.mURI);
       }
     }
-  }
-}
-
-/**
- * Asynchronously updates the link state for all links associated with `aURI` in
- * `aDocument`. This is mostly copied from `History::DispatchNotifyVisited` and
- * `History::NotifyVisitedForDocument`.
- */
-void GeckoViewHistory::DispatchNotifyVisited(nsIURI* aURI,
-                                             Document* aDocument) {
-  // Capture strong references to the arguments to capture in the closure.
-  RefPtr<GeckoViewHistory> kungFuDeathGrip(this);
-  RefPtr<Document> doc(aDocument);
-  nsCOMPtr<nsIURI> uri(aURI);
-
-  nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableFunction(
-      "GeckoViewHistory::DispatchNotifyVisited",
-      [this, kungFuDeathGrip, uri, doc] {
-        nsAutoScriptBlocker scriptBlocker;
-        auto entry = mTrackedURIs.Lookup(uri);
-        if (NS_WARN_IF(!entry)) {
-          return;
-        }
-        TrackedURI& trackedURI = entry.Data();
-        if (!trackedURI.mLinks.IsEmpty()) {
-          nsTObserverArray<Link*>::BackwardIterator iter(trackedURI.mLinks);
-          while (iter.HasMore()) {
-            Link* link = iter.GetNext();
-            if (OwnerDocForLink(link) == doc) {
-              link->SetLinkState(eLinkState_Visited);
-              iter.Remove();
-            }
-          }
-        }
-        if (trackedURI.mLinks.IsEmpty()) {
-          entry.Remove();
-        }
-      });
-
-  if (doc) {
-    Unused << NS_WARN_IF(
-        NS_FAILED(doc->Dispatch(TaskCategory::Other, runnable.forget())));
-  } else {
-    Unused << NS_WARN_IF(NS_FAILED(NS_DispatchToMainThread(runnable.forget())));
   }
 }

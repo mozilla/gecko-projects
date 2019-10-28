@@ -1905,6 +1905,7 @@ void nsFrameLoader::DestroyDocShell() {
   }
 
   mBrowsingContext = nullptr;
+  mDocShell = nullptr;
 
   if (mChildMessageManager) {
     // Stop handling events in the in-process frame script.
@@ -2014,6 +2015,7 @@ nsresult nsFrameLoader::MaybeCreateDocShell() {
   // context inside of nsDocShell::Create
   RefPtr<nsDocShell> docShell = nsDocShell::Create(mBrowsingContext);
   NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
+  mDocShell = docShell;
 
   mBrowsingContext->SetEmbedderElement(mOwnerContent);
 
@@ -2522,9 +2524,11 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
   }
 
   RefPtr<ContentParent> openerContentParent;
+  RefPtr<nsIPrincipal> openerContentPrincipal;
   RefPtr<BrowserParent> sameTabGroupAs;
   if (auto* host = BrowserHost::GetFrom(parentDocShell->GetOpener())) {
     openerContentParent = host->GetContentParent();
+    openerContentPrincipal = host->GetActor()->GetContentPrincipal();
   }
 
   // <iframe mozbrowser> gets to skip these checks.
@@ -2601,6 +2605,12 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
   MutableTabContext context;
   nsresult rv = GetNewTabContext(&context);
   NS_ENSURE_SUCCESS(rv, false);
+
+  // We need to propagate the first party domain if the opener is presented.
+  if (openerContentPrincipal) {
+    context.SetFirstPartyDomainAttributes(
+        openerContentPrincipal->OriginAttributesRef().mFirstPartyDomain);
+  }
 
   uint64_t nextRemoteTabId = 0;
   if (mOwnerContent) {

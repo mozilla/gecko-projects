@@ -914,13 +914,18 @@ class SpecialPowersChild extends JSWindowActorChild {
         }
       }
       this._permissionsUndoStack.push(cleanupPermissions);
-      this._pendingPermissions.push([
-        pendingPermissions,
-        this._delayCallbackTwice(callback),
-      ]);
-      this._applyPermissions();
+      await new Promise(resolve => {
+        this._pendingPermissions.push([
+          pendingPermissions,
+          this._delayCallbackTwice(resolve),
+        ]);
+        this._applyPermissions();
+      });
     } else {
-      this._setTimeout(callback);
+      await this.promiseTimeout();
+    }
+    if (callback) {
+      callback();
     }
   }
 
@@ -2254,6 +2259,25 @@ SpecialPowersChild.prototype._proxiedObservers = {
 
   "specialpowers-service-worker-shutdown": function(aMessage) {
     Services.obs.notifyObservers(null, "specialpowers-service-worker-shutdown");
+  },
+
+  "specialpowers-csp-on-violate-policy": function(aMessage) {
+    let subject = null;
+
+    try {
+      subject = Services.io.newURI(aMessage.data.subject);
+    } catch (ex) {
+      // if it's not a valid URI it must be an nsISupportsCString
+      subject = Cc["@mozilla.org/supports-cstring;1"].createInstance(
+        Ci.nsISupportsCString
+      );
+      subject.data = aMessage.data.subject;
+    }
+    Services.obs.notifyObservers(
+      subject,
+      "specialpowers-csp-on-violate-policy",
+      aMessage.data.data
+    );
   },
 };
 

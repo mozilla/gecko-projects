@@ -11,10 +11,11 @@
 
 #include "mozilla/Attributes.h"  // MOZ_MUST_USE
 
+#include "jstypes.h"        // JS_PUBLIC_API
 #include "js/RootingAPI.h"  // JS::Handle
 #include "js/Value.h"       // JS::Value
 
-struct JSContext;
+struct JS_PUBLIC_API JSContext;
 
 namespace js {
 
@@ -51,6 +52,9 @@ extern MOZ_MUST_USE bool SetUpWritableStreamDefaultControllerFromUnderlyingSink(
     JS::Handle<JS::Value> underlyingSink, double highWaterMark,
     JS::Handle<JS::Value> sizeAlgorithm);
 
+extern void WritableStreamDefaultControllerClearAlgorithms(
+    WritableStreamDefaultController* unwrappedController);
+
 extern MOZ_MUST_USE bool WritableStreamDefaultControllerClose(
     JSContext* cx,
     JS::Handle<WritableStreamDefaultController*> unwrappedController);
@@ -59,7 +63,12 @@ extern double WritableStreamDefaultControllerGetDesiredSize(
     const WritableStreamDefaultController* controller);
 
 extern bool WritableStreamDefaultControllerGetBackpressure(
-    const WritableStreamDefaultController* controller);
+    const WritableStreamDefaultController* unwrappedController);
+
+extern MOZ_MUST_USE bool WritableStreamDefaultControllerError(
+    JSContext* cx,
+    JS::Handle<WritableStreamDefaultController*> unwrappedController,
+    JS::Handle<JS::Value> error);
 
 }  // namespace js
 

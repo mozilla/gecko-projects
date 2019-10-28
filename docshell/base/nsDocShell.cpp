@@ -2907,65 +2907,6 @@ static bool ItemIsActive(nsIDocShellTreeItem* aItem) {
   return false;
 }
 
-NS_IMETHODIMP
-nsDocShell::FindItemWithName(const nsAString& aName,
-                             nsIDocShellTreeItem* aRequestor,
-                             nsIDocShellTreeItem* aOriginalRequestor,
-                             bool aSkipTabGroup,
-                             nsIDocShellTreeItem** aResult) {
-  NS_ENSURE_ARG_POINTER(aResult);
-
-  // If we don't find one, we return NS_OK and a null result
-  *aResult = nullptr;
-
-  if (aName.IsEmpty()) {
-    return NS_OK;
-  }
-
-  if (aRequestor) {
-    // If aRequestor is not null we don't need to check special names, so
-    // just hand straight off to the search by actual name function.
-    return DoFindItemWithName(aName, aRequestor, aOriginalRequestor,
-                              aSkipTabGroup, aResult);
-  } else {
-    // This is the entry point into the target-finding algorithm.  Check
-    // for special names.  This should only be done once, hence the check
-    // for a null aRequestor.
-
-    nsCOMPtr<nsIDocShellTreeItem> foundItem;
-    if (aName.LowerCaseEqualsLiteral("_self")) {
-      foundItem = this;
-    } else if (aName.LowerCaseEqualsLiteral("_blank")) {
-      // Just return null.  Caller must handle creating a new window with
-      // a blank name himself.
-      return NS_OK;
-    } else if (aName.LowerCaseEqualsLiteral("_parent")) {
-      GetInProcessSameTypeParent(getter_AddRefs(foundItem));
-      if (!foundItem) {
-        foundItem = this;
-      }
-    } else if (aName.LowerCaseEqualsLiteral("_top")) {
-      GetInProcessSameTypeRootTreeItem(getter_AddRefs(foundItem));
-      NS_ASSERTION(foundItem, "Must have this; worst case it's us!");
-    } else {
-      // Do the search for item by an actual name.
-      DoFindItemWithName(aName, aRequestor, aOriginalRequestor, aSkipTabGroup,
-                         getter_AddRefs(foundItem));
-    }
-
-    if (foundItem && !CanAccessItem(foundItem, aOriginalRequestor)) {
-      foundItem = nullptr;
-    }
-
-    // DoFindItemWithName only returns active items and we don't check if
-    // the item is active for the special cases.
-    if (foundItem) {
-      foundItem.swap(*aResult);
-    }
-    return NS_OK;
-  }
-}
-
 void nsDocShell::AssertOriginAttributesMatchPrivateBrowsing() {
   // Chrome docshells must not have a private browsing OriginAttribute
   // Content docshells must maintain the equality:
@@ -2976,64 +2917,6 @@ void nsDocShell::AssertOriginAttributesMatchPrivateBrowsing() {
     MOZ_DIAGNOSTIC_ASSERT(mOriginAttributes.mPrivateBrowsingId ==
                           mPrivateBrowsingId);
   }
-}
-
-nsresult nsDocShell::DoFindItemWithName(const nsAString& aName,
-                                        nsIDocShellTreeItem* aRequestor,
-                                        nsIDocShellTreeItem* aOriginalRequestor,
-                                        bool aSkipTabGroup,
-                                        nsIDocShellTreeItem** aResult) {
-  // First we check our name.
-  if (mBrowsingContext->NameEquals(aName) && ItemIsActive(this) &&
-      CanAccessItem(this, aOriginalRequestor)) {
-    NS_ADDREF(*aResult = this);
-    return NS_OK;
-  }
-
-  // Second we check our children making sure not to ask a child if
-  // it is the aRequestor.
-#ifdef DEBUG
-  nsresult rv =
-#endif
-      FindChildWithName(aName, true, true, aRequestor, aOriginalRequestor,
-                        aResult);
-  NS_ASSERTION(NS_SUCCEEDED(rv),
-               "FindChildWithName should not be failing here.");
-  if (*aResult) {
-    return NS_OK;
-  }
-
-  // Third if we have a parent and it isn't the requestor then we
-  // should ask it to do the search.  If it is the requestor we
-  // should just stop here and let the parent do the rest.  If we
-  // don't have a parent, then we should ask the
-  // docShellTreeOwner to do the search.
-  nsCOMPtr<nsIDocShellTreeItem> parentAsTreeItem =
-      do_QueryInterface(GetAsSupports(mParent));
-  if (parentAsTreeItem) {
-    if (parentAsTreeItem == aRequestor) {
-      return NS_OK;
-    }
-
-    // If we have a same-type parent, respecting browser and app boundaries.
-    // NOTE: Could use GetInProcessSameTypeParent if the issues described in
-    // bug 1310344 are fixed.
-    if (!GetIsMozBrowser() && parentAsTreeItem->ItemType() == mItemType) {
-      return parentAsTreeItem->FindItemWithName(aName, this, aOriginalRequestor,
-                                                /* aSkipTabGroup = */ false,
-                                                aResult);
-    }
-  }
-
-  // If we have a null parent or the parent is not of the same type, we need to
-  // give up on finding it in our tree, and start looking in our TabGroup.
-  nsCOMPtr<nsPIDOMWindowOuter> window = GetWindow();
-  if (window && !aSkipTabGroup) {
-    RefPtr<mozilla::dom::TabGroup> tabGroup = window->TabGroup();
-    tabGroup->FindItemWithName(aName, this, aOriginalRequestor, aResult);
-  }
-
-  return NS_OK;
 }
 
 bool nsDocShell::IsSandboxedFrom(BrowsingContext* aTargetBC) {
@@ -4843,7 +4726,7 @@ nsDocShell::Destroy() {
   CancelRefreshURITimers();
 
   if (UsePrivateBrowsing()) {
-    mPrivateBrowsingId = 0;
+    mPrivateBrowsingId = nsIScriptSecurityManager::DEFAULT_PRIVATE_BROWSING_ID;
     mOriginAttributes.SyncAttributesWithPrivateBrowsing(false);
     if (mAffectPrivateSessionLifetime) {
       DecreasePrivateDocShellCount();
@@ -8561,11 +8444,9 @@ nsresult nsDocShell::PerformRetargeting(nsDocShellLoadState* aLoadState,
   MOZ_ASSERT(aLoadState, "need a load state!");
   MOZ_ASSERT(!aLoadState->Target().IsEmpty(), "should have a target here!");
 
-  nsresult rv;
+  nsresult rv = NS_OK;
   nsCOMPtr<nsIDocShell> targetDocShell;
 
-  // Locate the target DocShell.
-  nsCOMPtr<nsIDocShellTreeItem> targetItem;
   // Only _self, _parent, and _top are supported in noopener case.  But we
   // have to be careful to not apply that to the noreferrer case.  See bug
   // 1358469.
@@ -8576,12 +8457,12 @@ nsresult nsDocShell::PerformRetargeting(nsDocShellLoadState* aLoadState,
       aLoadState->Target().LowerCaseEqualsLiteral("_self") ||
       aLoadState->Target().LowerCaseEqualsLiteral("_parent") ||
       aLoadState->Target().LowerCaseEqualsLiteral("_top")) {
-    rv = FindItemWithName(aLoadState->Target(), nullptr, this, false,
-                          getter_AddRefs(targetItem));
-    NS_ENSURE_SUCCESS(rv, rv);
+    if (BrowsingContext* context = mBrowsingContext->FindWithName(
+            aLoadState->Target(), /* aUseEntryGlobalForAccessCheck */ false)) {
+      targetDocShell = context->GetDocShell();
+    }
   }
 
-  targetDocShell = do_QueryInterface(targetItem);
   if (!targetDocShell) {
     // If the targetDocShell doesn't exist, then this is a new docShell
     // and we should consider this a TYPE_DOCUMENT load
@@ -9678,13 +9559,13 @@ static bool HasHttpScheme(nsIURI* aURI) {
     nsDocShellLoadState* aLoadState, LoadInfo* aLoadInfo,
     nsIInterfaceRequestor* aCallbacks, nsDocShell* aDocShell,
     const nsString* aInitiatorType, nsLoadFlags aLoadFlags, uint32_t aLoadType,
-    uint32_t aCacheKey, bool aIsActive, bool aIsTopLevelDoc, nsresult& aRv,
-    nsIChannel** aChannel) {
+    uint32_t aCacheKey, bool aIsActive, bool aIsTopLevelDoc,
+    bool aHasNonEmptySandboxingFlags, nsresult& aRv, nsIChannel** aChannel) {
   if (StaticPrefs::browser_tabs_documentchannel() && XRE_IsContentProcess() &&
       HasHttpScheme(aLoadState->URI())) {
     RefPtr<DocumentChannelChild> child = new DocumentChannelChild(
         aLoadState, aLoadInfo, aInitiatorType, aLoadFlags, aLoadType, aCacheKey,
-        aIsActive, aIsTopLevelDoc);
+        aIsActive, aIsTopLevelDoc, aHasNonEmptySandboxingFlags);
     child->SetNotificationCallbacks(aCallbacks);
     child.forget(aChannel);
     aRv = NS_OK;
@@ -9752,36 +9633,6 @@ static bool HasHttpScheme(nsIURI* aURI) {
     isc->SetBaseURI(baseURI);
   }
 
-  nsCOMPtr<nsIContentSecurityPolicy> csp = aLoadState->Csp();
-  if (csp) {
-    // Navigational requests that are same origin need to be upgraded in case
-    // upgrade-insecure-requests is present.
-    bool upgradeInsecureRequests = false;
-    csp->GetUpgradeInsecureRequests(&upgradeInsecureRequests);
-    if (upgradeInsecureRequests) {
-      // only upgrade if the navigation is same origin
-      nsCOMPtr<nsIPrincipal> resultPrincipal;
-      aRv = nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
-          channel, getter_AddRefs(resultPrincipal));
-      NS_ENSURE_SUCCESS(aRv, false);
-      if (IsConsideredSameOriginForUIR(aLoadState->TriggeringPrincipal(),
-                                       resultPrincipal)) {
-        aLoadInfo->SetUpgradeInsecureRequests();
-      }
-    }
-
-    // For document loads we store the CSP that potentially needs to
-    // be inherited by the new document, e.g. in case we are loading
-    // an opaque origin like a data: URI. The actual inheritance
-    // check happens within Document::InitCSP().
-    // Please create an actual copy of the CSP (do not share the same
-    // reference) otherwise a Meta CSP of an opaque origin will
-    // incorrectly be propagated to the embedding document.
-    RefPtr<nsCSPContext> cspToInherit = new nsCSPContext();
-    cspToInherit->InitFromOther(static_cast<nsCSPContext*>(csp.get()));
-    aLoadInfo->SetCSPToInherit(cspToInherit);
-  }
-
   nsCOMPtr<nsIApplicationCacheChannel> appCacheChannel =
       do_QueryInterface(channel);
   if (appCacheChannel) {
@@ -9836,17 +9687,6 @@ static bool HasHttpScheme(nsIURI* aURI) {
     MOZ_ASSERT(NS_SUCCEEDED(aRv));
   }
 
-  nsCOMPtr<nsIURI> rpURI;
-  aLoadInfo->GetResultPrincipalURI(getter_AddRefs(rpURI));
-  Maybe<nsCOMPtr<nsIURI>> originalResultPrincipalURI;
-  aLoadState->GetMaybeResultPrincipalURI(originalResultPrincipalURI);
-  if (originalResultPrincipalURI &&
-      (!aLoadState->KeepResultPrincipalURIIfSet() || !rpURI)) {
-    // Unconditionally override, we want the replay to be equal to what has
-    // been captured.
-    aLoadInfo->SetResultPrincipalURI(originalResultPrincipalURI.ref());
-  }
-
   if (httpChannel) {
     if (aLoadState->HeadersStream()) {
       aRv = AddHeadersToChannel(aLoadState->HeadersStream(), httpChannel);
@@ -9876,7 +9716,8 @@ static bool HasHttpScheme(nsIURI* aURI) {
 
 /* static */ nsresult nsDocShell::ConfigureChannel(
     nsIChannel* aChannel, nsDocShellLoadState* aLoadState,
-    const nsString* aInitiatorType, uint32_t aLoadType, uint32_t aCacheKey) {
+    const nsString* aInitiatorType, uint32_t aLoadType, uint32_t aCacheKey,
+    bool aHasNonEmptySandboxingFlags) {
   nsCOMPtr<nsIWritablePropertyBag2> props(do_QueryInterface(aChannel));
   if (props) {
     nsCOMPtr<nsIURI> referrer;
@@ -9889,6 +9730,20 @@ static bool HasHttpScheme(nsIURI* aURI) {
     // Currently only http and ftp channels support this.
     props->SetPropertyAsInterface(
         NS_LITERAL_STRING("docshell.internalReferrer"), referrer);
+  }
+
+  nsCOMPtr<nsILoadInfo> loadInfo;
+  MOZ_ALWAYS_SUCCEEDS(aChannel->GetLoadInfo(getter_AddRefs(loadInfo)));
+
+  nsCOMPtr<nsIURI> rpURI;
+  loadInfo->GetResultPrincipalURI(getter_AddRefs(rpURI));
+  Maybe<nsCOMPtr<nsIURI>> originalResultPrincipalURI;
+  aLoadState->GetMaybeResultPrincipalURI(originalResultPrincipalURI);
+  if (originalResultPrincipalURI &&
+      (!aLoadState->KeepResultPrincipalURIIfSet() || !rpURI)) {
+    // Unconditionally override, we want the replay to be equal to what has
+    // been captured.
+    loadInfo->SetResultPrincipalURI(originalResultPrincipalURI.ref());
   }
 
   nsresult rv = NS_OK;
@@ -10007,8 +9862,33 @@ static bool HasHttpScheme(nsIURI* aURI) {
 
   nsCOMPtr<nsIContentSecurityPolicy> csp = aLoadState->Csp();
   if (csp) {
-    nsCOMPtr<nsILoadInfo> loadInfo;
-    MOZ_ALWAYS_SUCCEEDS(aChannel->GetLoadInfo(getter_AddRefs(loadInfo)));
+    // Navigational requests that are same origin need to be upgraded in case
+    // upgrade-insecure-requests is present.
+    bool upgradeInsecureRequests = false;
+    csp->GetUpgradeInsecureRequests(&upgradeInsecureRequests);
+    if (upgradeInsecureRequests) {
+      // only upgrade if the navigation is same origin
+      nsCOMPtr<nsIPrincipal> resultPrincipal;
+      rv = nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
+          aChannel, getter_AddRefs(resultPrincipal));
+      NS_ENSURE_SUCCESS(rv, rv);
+      if (IsConsideredSameOriginForUIR(aLoadState->TriggeringPrincipal(),
+                                       resultPrincipal)) {
+        static_cast<LoadInfo*>(loadInfo.get())->SetUpgradeInsecureRequests();
+      }
+    }
+
+    // For document loads we store the CSP that potentially needs to
+    // be inherited by the new document, e.g. in case we are loading
+    // an opaque origin like a data: URI. The actual inheritance
+    // check happens within Document::InitCSP().
+    // Please create an actual copy of the CSP (do not share the same
+    // reference) otherwise a Meta CSP of an opaque origin will
+    // incorrectly be propagated to the embedding document.
+    RefPtr<nsCSPContext> cspToInherit = new nsCSPContext();
+    cspToInherit->InitFromOther(static_cast<nsCSPContext*>(csp.get()));
+    static_cast<LoadInfo*>(loadInfo.get())->SetCSPToInherit(cspToInherit);
+
     // Check CSP navigate-to
     bool allowsNavigateTo = false;
     rv = csp->GetAllowsNavigateTo(aLoadState->URI(), loadInfo,
@@ -10021,6 +9901,14 @@ static bool HasHttpScheme(nsIURI* aURI) {
       return NS_ERROR_CSP_NAVIGATE_TO_VIOLATION;
     }
   }
+
+  if (aHasNonEmptySandboxingFlags) {
+    nsCOMPtr<nsIHttpChannelInternal> httpChannel(do_QueryInterface(aChannel));
+    if (httpChannel) {
+      httpChannel->SetHasNonEmptySandboxingFlag(true);
+    }
+  }
+
   return rv;
 }
 
@@ -10321,9 +10209,10 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
 
   bool isActive =
       mIsActive || (mLoadType & (LOAD_CMD_NORMAL | LOAD_CMD_HISTORY));
-  if (!CreateChannelForLoadState(
-          aLoadState, loadInfo, this, this, initiatorType, loadFlags, mLoadType,
-          cacheKey, isActive, isTopLevelDoc, rv, getter_AddRefs(channel))) {
+  if (!CreateChannelForLoadState(aLoadState, loadInfo, this, this,
+                                 initiatorType, loadFlags, mLoadType, cacheKey,
+                                 isActive, isTopLevelDoc, mSandboxFlags, rv,
+                                 getter_AddRefs(channel))) {
     return rv;
   }
 
@@ -10333,8 +10222,8 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
     NS_ADDREF(*aRequest = channel);
   }
 
-  rv =
-      ConfigureChannel(channel, aLoadState, initiatorType, mLoadType, cacheKey);
+  rv = ConfigureChannel(channel, aLoadState, initiatorType, mLoadType, cacheKey,
+                        mSandboxFlags);
   NS_ENSURE_SUCCESS(rv, rv);
 
   const nsACString& typeHint = aLoadState->TypeHint();
@@ -10464,13 +10353,6 @@ nsresult nsDocShell::DoChannelLoad(nsIChannel* aChannel,
 
   if (SandboxFlagsImplyCookies(mSandboxFlags)) {
     loadFlags |= nsIRequest::LOAD_DOCUMENT_NEEDS_COOKIE;
-  }
-
-  if (mSandboxFlags) {
-    nsCOMPtr<nsIHttpChannelInternal> httpChannel(do_QueryInterface(aChannel));
-    if (httpChannel) {
-      httpChannel->SetHasNonEmptySandboxingFlag(true);
-    }
   }
 
   // Load attributes depend on load type...
@@ -13087,10 +12969,12 @@ nsresult nsDocShell::SetOriginAttributes(const OriginAttributes& aAttrs) {
   AssertOriginAttributesMatchPrivateBrowsing();
   mOriginAttributes = aAttrs;
 
-  bool isPrivate = mOriginAttributes.mPrivateBrowsingId > 0;
+  bool isPrivate = mOriginAttributes.mPrivateBrowsingId !=
+                   nsIScriptSecurityManager::DEFAULT_PRIVATE_BROWSING_ID;
   // Chrome docshell can not contain OriginAttributes.mPrivateBrowsingId
   if (mItemType == typeChrome && isPrivate) {
-    mOriginAttributes.mPrivateBrowsingId = 0;
+    mOriginAttributes.mPrivateBrowsingId =
+        nsIScriptSecurityManager::DEFAULT_PRIVATE_BROWSING_ID;
   }
 
   SetPrivateBrowsing(isPrivate);

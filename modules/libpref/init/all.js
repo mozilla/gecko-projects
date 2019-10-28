@@ -32,11 +32,7 @@ pref("security.tls.insecure_fallback_hosts", "");
 // until the incompatibility with HTTP/2 is resolved:
 // https://tools.ietf.org/html/draft-davidben-http2-tls13-00
 pref("security.tls.enable_post_handshake_auth", false);
-#ifdef RELEASE_OR_BETA
-  pref("security.tls.hello_downgrade_check", false);
-#else
-  pref("security.tls.hello_downgrade_check", true);
-#endif
+pref("security.tls.hello_downgrade_check", true);
 pref("security.tls.enable_delegated_credentials", false);
 
 pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
@@ -828,6 +824,8 @@ pref("toolkit.dump.emit", false);
 #if defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
   pref("devtools.recordreplay.enabled", true);
   pref("devtools.recordreplay.enableRewinding", true);
+#else
+  pref("devtools.recordreplay.enabled", false);
 #endif
 
 pref("devtools.recordreplay.mvp.enabled", false);
@@ -1323,45 +1321,6 @@ pref("network.http.request.max-start-delay", 10);
 
 // If a connection is reset, we will retry it max-attempts times.
 pref("network.http.request.max-attempts", 10);
-
-// Prefs allowing granular control of referers
-// 0=don't send any, 1=send only on clicks, 2=send on image requests as well
-pref("network.http.sendRefererHeader",      2);
-// Set the default Referrer Policy; to be used unless overriden by the site
-// 0=no-referrer, 1=same-origin, 2=strict-origin-when-cross-origin,
-// 3=no-referrer-when-downgrade
-pref("network.http.referer.defaultPolicy", 3);
-// Set the default Referrer Policy applied to third-party trackers when the
-// default cookie policy is set to reject third-party trackers;
-// to be used unless overriden by the site;
-// values are identical to defaultPolicy above
-// Trim referrers from trackers to origins by default.
-pref("network.http.referer.defaultPolicy.trackers", 2);
-// Set the Private Browsing Default Referrer Policy;
-// to be used unless overriden by the site;
-// values are identical to defaultPolicy above
-pref("network.http.referer.defaultPolicy.pbmode", 2);
-// Set the Private Browsing Default Referrer Policy applied to third-party
-// trackers when the default cookie policy is set to reject third-party
-// trackers;
-// to be used unless overriden by the site;
-// values are identical to defaultPolicy above
-// No need to change this pref for trimming referrers from trackers since in
-// private windows we already trim all referrers to origin only.
-pref("network.http.referer.defaultPolicy.trackers.pbmode", 2);
-// false=real referer, true=spoof referer (use target URI as referer)
-pref("network.http.referer.spoofSource", false);
-// false=allow onion referer, true=hide onion referer (use empty referer)
-pref("network.http.referer.hideOnionSource", false);
-// 0=full URI, 1=scheme+host+port+path, 2=scheme+host+port
-pref("network.http.referer.trimmingPolicy", 0);
-// 0=full URI, 1=scheme+host+port+path, 2=scheme+host+port
-pref("network.http.referer.XOriginTrimmingPolicy", 0);
-// 0=always send, 1=send iff base domains match, 2=send iff hosts match
-pref("network.http.referer.XOriginPolicy", 0);
-// The maximum allowed length for a referrer header - 4096 default
-// 0 means no limit.
-pref("network.http.referer.referrerLengthLimit", 4096);
 
 // Include an origin header on non-GET and non-HEAD requests regardless of CORS
 // 0=never send, 1=send when same-origin only, 2=always send

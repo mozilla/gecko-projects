@@ -470,6 +470,7 @@ class JSFunction : public js::NativeObject {
   bool hasSelfHostedLazyScript() const {
     return flags_.hasSelfHostedLazyScript();
   }
+  bool hasBaseScript() const { return hasScript() || hasLazyScript(); }
 
   // Arrow functions store their lexical new.target in the first extended slot.
   bool isArrow() const { return flags_.isArrow(); }
@@ -514,11 +515,7 @@ class JSFunction : public js::NativeObject {
   bool needsPrototypeProperty();
 
   /* Returns the strictness of this function, which must be interpreted. */
-  bool strict() const {
-    MOZ_ASSERT(isInterpreted());
-    return isInterpretedLazy() ? lazyScript()->strict()
-                               : nonLazyScript()->strict();
-  }
+  bool strict() const { return baseScript()->strict(); }
 
   void setFlags(uint16_t flags) { flags_ = FunctionFlags(flags); }
   void setFlags(FunctionFlags flags) { flags_ = flags; }
@@ -655,8 +652,8 @@ class JSFunction : public js::NativeObject {
   }
   static size_t offsetOfAtom() { return offsetof(JSFunction, atom_); }
 
-  static bool createScriptForLazilyInterpretedFunction(JSContext* cx,
-                                                       js::HandleFunction fun);
+  static bool delazifyLazilyInterpretedFunction(JSContext* cx,
+                                                js::HandleFunction fun);
   void maybeRelazify(JSRuntime* rt);
 
   // Function Scripts
@@ -685,7 +682,7 @@ class JSFunction : public js::NativeObject {
     MOZ_ASSERT(fun->isInterpreted());
     MOZ_ASSERT(cx);
     if (fun->isInterpretedLazy()) {
-      if (!createScriptForLazilyInterpretedFunction(cx, fun)) {
+      if (!delazifyLazilyInterpretedFunction(cx, fun)) {
         return nullptr;
       }
       return fun->nonLazyScript();
@@ -702,7 +699,7 @@ class JSFunction : public js::NativeObject {
       // use lazyScript->script_ here as it may be null in some cases,
       // see bug 976536.
       js::LazyScript* lazy = lazyScript();
-      JSFunction* fun = lazy->functionNonDelazifying();
+      JSFunction* fun = lazy->function();
       MOZ_ASSERT(fun);
       return fun->nonLazyScript();
     }
@@ -728,10 +725,10 @@ class JSFunction : public js::NativeObject {
   // builtins don't have a lazy script so in that case we also return nullptr.
   JSFunction* maybeCanonicalFunction() const {
     if (hasScript()) {
-      return nonLazyScript()->functionNonDelazifying();
+      return nonLazyScript()->function();
     }
     if (hasLazyScript()) {
-      return lazyScript()->functionNonDelazifying();
+      return lazyScript()->function();
     }
     return nullptr;
   }
@@ -767,17 +764,20 @@ class JSFunction : public js::NativeObject {
     return u.scripted.s.selfHostedLazy_;
   }
 
-  js::GeneratorKind generatorKind() const {
-    if (!isInterpreted()) {
-      return js::GeneratorKind::NotGenerator;
-    }
+  // Access fields defined on both lazy and non-lazy scripts. This should
+  // optimize away the branch since the union arms are compatible.
+  js::BaseScript* baseScript() const {
     if (hasScript()) {
-      return nonLazyScript()->generatorKind();
+      return nonLazyScript();
     }
-    if (hasLazyScript()) {
-      return lazyScript()->generatorKind();
+    MOZ_ASSERT(hasLazyScript());
+    return lazyScript();
+  }
+
+  js::GeneratorKind generatorKind() const {
+    if (hasBaseScript()) {
+      return baseScript()->generatorKind();
     }
-    MOZ_ASSERT(isSelfHostedBuiltin());
     return js::GeneratorKind::NotGenerator;
   }
 
@@ -786,16 +786,9 @@ class JSFunction : public js::NativeObject {
   }
 
   js::FunctionAsyncKind asyncKind() const {
-    if (!isInterpreted()) {
-      return js::FunctionAsyncKind::SyncFunction;
+    if (hasBaseScript()) {
+      return baseScript()->asyncKind();
     }
-    if (hasScript()) {
-      return nonLazyScript()->asyncKind();
-    }
-    if (hasLazyScript()) {
-      return lazyScript()->asyncKind();
-    }
-    MOZ_ASSERT(isSelfHostedBuiltin());
     return js::FunctionAsyncKind::SyncFunction;
   }
 

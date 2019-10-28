@@ -94,6 +94,7 @@
 
 #include "mozilla/dom/Attr.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/CSPDictionariesBinding.h"
 #include "mozilla/dom/Element.h"
@@ -3060,17 +3061,8 @@ nsresult Document::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
     aChannel->Cancel(NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION);
   }
 
-  // Let's take the CookieSettings from the loadInfo or from the parent
-  // document.
-  if (loadInfo) {
-    rv = loadInfo->GetCookieSettings(getter_AddRefs(mCookieSettings));
-    NS_ENSURE_SUCCESS(rv, rv);
-  } else {
-    nsCOMPtr<Document> parentDocument = GetInProcessParentDocument();
-    if (parentDocument) {
-      mCookieSettings = parentDocument->CookieSettings();
-    }
-  }
+  rv = loadInfo->GetCookieSettings(getter_AddRefs(mCookieSettings));
+  NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
 }
@@ -3286,23 +3278,42 @@ nsresult Document::InitCSP(nsIChannel* aChannel) {
     SetPrincipals(principal, principal);
   }
 
-  // ----- Enforce frame-ancestor policy on any applied policies
-  nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
-  if (docShell) {
-    bool safeAncestry = false;
-
-    // PermitsAncestry sends violation reports when necessary
-    rv = mCSP->PermitsAncestry(docShell, &safeAncestry);
-
-    if (NS_FAILED(rv) || !safeAncestry) {
-      MOZ_LOG(gCspPRLog, LogLevel::Debug,
-              ("CSP doesn't like frame's ancestry, not loading."));
-      // stop!  ERROR page!
-      aChannel->Cancel(NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION);
-    }
-  }
   ApplySettingsFromCSP(false);
   return NS_OK;
+}
+
+already_AddRefed<mozilla::dom::FeaturePolicy>
+Document::GetParentFeaturePolicy() {
+  if (!mDocumentContainer) {
+    return nullptr;
+  }
+
+  nsPIDOMWindowOuter* containerWindow = mDocumentContainer->GetWindow();
+  if (!containerWindow) {
+    return nullptr;
+  }
+
+  BrowsingContext* context = containerWindow->GetBrowsingContext();
+  if (!context) {
+    return nullptr;
+  }
+
+  RefPtr<mozilla::dom::FeaturePolicy> parentPolicy;
+  if (context->IsContentSubframe() && !context->GetParent()->IsInProcess()) {
+    // We are in cross process, so try to get feature policy from
+    // container's BrowsingContext
+    parentPolicy = context->GetFeaturePolicy();
+    return parentPolicy.forget();
+  }
+
+  nsCOMPtr<nsINode> node = containerWindow->GetFrameElementInternal();
+  HTMLIFrameElement* iframe = HTMLIFrameElement::FromNodeOrNull(node);
+  if (!iframe) {
+    return nullptr;
+  }
+
+  parentPolicy = iframe->FeaturePolicy();
+  return parentPolicy.forget();
 }
 
 nsresult Document::InitFeaturePolicy(nsIChannel* aChannel) {
@@ -3316,18 +3327,7 @@ nsresult Document::InitFeaturePolicy(nsIChannel* aChannel) {
 
   mFeaturePolicy->SetDefaultOrigin(NodePrincipal());
 
-  RefPtr<mozilla::dom::FeaturePolicy> parentPolicy = nullptr;
-  if (mDocumentContainer) {
-    nsPIDOMWindowOuter* containerWindow = mDocumentContainer->GetWindow();
-    if (containerWindow) {
-      nsCOMPtr<nsINode> node = containerWindow->GetFrameElementInternal();
-      HTMLIFrameElement* iframe = HTMLIFrameElement::FromNodeOrNull(node);
-      if (iframe) {
-        parentPolicy = iframe->FeaturePolicy();
-      }
-    }
-  }
-
+  RefPtr<mozilla::dom::FeaturePolicy> parentPolicy = GetParentFeaturePolicy();
   if (parentPolicy) {
     // Let's inherit the policy from the parent HTMLIFrameElement if it exists.
     mFeaturePolicy->InheritPolicy(parentPolicy);
@@ -5063,6 +5063,12 @@ nsresult Document::TurnEditingOff() {
 
   nsIDocShell* docshell = window->GetDocShell();
   if (!docshell) {
+    return NS_ERROR_FAILURE;
+  }
+
+  bool isBeingDestroyed = false;
+  docshell->IsBeingDestroyed(&isBeingDestroyed);
+  if (isBeingDestroyed) {
     return NS_ERROR_FAILURE;
   }
 
@@ -12749,9 +12755,8 @@ void Document::MaybeWarnAboutZoom() {
     return;
   }
   const bool usedZoom =
-      mStyleUseCounters &&
-      Servo_IsUnknownPropertyRecordedInUseCounter(mStyleUseCounters.get(),
-                                                  CountedUnknownProperty::Zoom);
+      mStyleUseCounters && Servo_IsPropertyIdRecordedInUseCounter(
+                               mStyleUseCounters.get(), eCSSProperty_zoom);
   if (!usedZoom) {
     return;
   }

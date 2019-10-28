@@ -297,7 +297,7 @@ static XDRResult XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun,
       MOZ_ASSERT(column == lazy->column());
       // We can assert we have no inner functions because we don't
       // relazify scripts with inner functions.  See
-      // JSFunction::createScriptForLazilyInterpretedFunction.
+      // JSFunction::delazifyLazilyInterpretedFunction.
       MOZ_ASSERT(!lazy->hasInnerFunctions());
       if (fun->kind() == FunctionFlags::FunctionKind::ClassConstructor) {
         numFieldInitializers =
@@ -1028,7 +1028,7 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
 
   if (mode == XDR_ENCODE) {
     script = scriptp.get();
-    MOZ_ASSERT(script->functionNonDelazifying() == fun);
+    MOZ_ASSERT(script->function() == fun);
 
     if (!fun && script->treatAsRunOnce() && script->hasRunOnce()) {
       // This is a toplevel or eval script that's runOnce.  We want to
@@ -1250,7 +1250,7 @@ XDRResult js::XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope,
       // to a JSScript. We don't encode it: we can just delazify the
       // lazy script.
 
-      MOZ_ASSERT(fun == lazy->functionNonDelazifying());
+      MOZ_ASSERT(fun == lazy->function());
 
       sourceStart = lazy->sourceStart();
       sourceEnd = lazy->sourceEnd();
@@ -3905,7 +3905,7 @@ JSScript* JSScript::Create(JSContext* cx, HandleObject functionOrGlobal,
 /* static */ JSScript* JSScript::CreateFromLazy(JSContext* cx,
                                                 Handle<LazyScript*> lazy) {
   RootedScriptSourceObject sourceObject(cx, lazy->sourceObject());
-  RootedObject fun(cx, lazy->functionNonDelazifying());
+  RootedObject fun(cx, lazy->function());
   RootedScript script(cx,
                       JSScript::New(cx, fun, sourceObject, lazy->sourceStart(),
                                     lazy->sourceEnd(), lazy->toStringStart(),
@@ -4630,7 +4630,7 @@ JSScript* js::detail::CopyScript(JSContext* cx, HandleScript src,
   // should happen if it's set on the source script.
   MOZ_ASSERT(!src->hideScriptFromDebugger());
 
-  if (src->treatAsRunOnce() && !src->functionNonDelazifying()) {
+  if (src->treatAsRunOnce() && !src->function()) {
     JS_ReportErrorASCII(cx, "No cloning toplevel run-once scripts");
     return nullptr;
   }
@@ -4875,6 +4875,10 @@ void JSScript::traceChildren(JSTracer* trc) {
     TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");
   }
 
+  if (hasDebugScript()) {
+    DebugAPI::traceDebugScript(trc, this);
+  }
+
   if (trc->isMarkingTracer()) {
     GCMarker::fromTracer(trc)->markImplicitEdges(this);
   }
@@ -5031,7 +5035,7 @@ void js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
 
 /* static */
 void JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script) {
-  MOZ_ASSERT(script->functionNonDelazifying());
+  MOZ_ASSERT(script->function());
   MOZ_ASSERT(script->analyzedArgsUsage());
   MOZ_ASSERT(script->argumentsHasVarBinding());
 

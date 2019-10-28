@@ -182,12 +182,6 @@
   value: false
   mirror: always
 
-# Whether the changes in https://github.com/whatwg/html/issues/5002 are in effect.
-- name: accessibility.heading-element-level-changes.enabled
-  type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
-  mirror: always
-
 #ifdef ANDROID
   #---------------------------------------------------------------------------
   # Prefs starting with "android."
@@ -931,7 +925,11 @@
 # If set, use DocumentChannel with nsDocShell in place of HttpChannel.
 - name: browser.tabs.documentchannel
   type: bool
-  value: false
+#if !defined(ANDROID)
+  value: @IS_NIGHTLY_BUILD@
+#else
+  value: false  # See bug 1589982.
+#endif
   mirror: always
 
 - name: browser.tabs.remote.desktopbehavior
@@ -3582,6 +3580,11 @@
   value: false
   mirror: once
 
+- name: gfx.webrender.compositor
+  type: bool
+  value: false
+  mirror: once
+
 #ifdef NIGHTLY_BUILD
   # Keep this pref hidden on non-nightly builds to avoid people accidentally
   # turning it on.
@@ -4674,6 +4677,13 @@
   value: 4096
   mirror: always
 
+# Make `zoom` a `transform` + `transform-origin` alias.
+- name: layout.css.zoom-transform-hack.enabled
+  type: RelaxedAtomicBool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: always
+  rust: true
+
 # Allow <number> and <number>/<number> both for <aspect-ratio>
 # https://github.com/w3c/csswg-drafts/issues/3757
 - name: layout.css.aspect-ratio-number.enabled
@@ -5347,7 +5357,7 @@
 # contain any contents in the area.
 - name: layout.viewport_contains_no_contents_area
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 #---------------------------------------------------------------------------
@@ -6429,6 +6439,95 @@
   value: false
   mirror: always
 
+# false=real referer, true=spoof referer (use target URI as referer).
+- name: network.http.referer.spoofSource
+  type: bool
+  value: false
+  mirror: always
+
+# Check whether we need to hide referrer when leaving a .onion domain.
+# false=allow onion referer, true=hide onion referer (use empty referer).
+- name: network.http.referer.hideOnionSource
+  type: bool
+  value: false
+  mirror: always
+
+# Prefs allowing granular control of referers.
+# 0=don't send any, 1=send only on clicks, 2=send on image requests as well
+- name: network.http.sendRefererHeader
+  type: uint32_t
+  value: 2
+  mirror: always
+  do_not_use_directly: true
+
+# The maximum allowed length for a referrer header - 4096 default.
+# 0 means no limit.
+- name: network.http.referer.referrerLengthLimit
+  type: uint32_t
+  value: 4096
+  mirror: always
+
+#  0=always send, 1=send iff base domains match, 2=send iff hosts match.
+- name: network.http.referer.XOriginPolicy
+  type: uint32_t
+  value: 0
+  mirror: always
+  do_not_use_directly: true
+
+# 0=full URI, 1=scheme+host+port+path, 2=scheme+host+port.
+- name: network.http.referer.trimmingPolicy
+  type: uint32_t
+  value: 0
+  mirror: always
+  do_not_use_directly: true
+
+# 0=full URI, 1=scheme+host+port+path, 2=scheme+host+port.
+- name: network.http.referer.XOriginTrimmingPolicy
+  type: uint32_t
+  value: 0
+  mirror: always
+  do_not_use_directly: true
+
+# Set the default Referrer Policy; to be used unless overriden by the site.
+# 0=no-referrer, 1=same-origin, 2=strict-origin-when-cross-origin,
+# 3=no-referrer-when-downgrade.
+- name: network.http.referer.defaultPolicy
+  type: uint32_t
+  value: 3
+  mirror: always
+
+# Set the default Referrer Policy applied to third-party trackers when the
+# default cookie policy is set to reject third-party trackers, to be used
+# unless overriden by the site.
+# 0=no-referrer, 1=same-origin, 2=strict-origin-when-cross-origin,
+# 3=no-referrer-when-downgrade.
+# Trim referrers from trackers to origins by default.
+- name: network.http.referer.defaultPolicy.trackers
+  type: uint32_t
+  value: 2
+  mirror: always
+
+# Set the Private Browsing Default Referrer Policy, to be used
+# unless overriden by the site.
+# 0=no-referrer, 1=same-origin, 2=strict-origin-when-cross-origin,
+# 3=no-referrer-when-downgrade.
+- name: network.http.referer.defaultPolicy.pbmode
+  type: uint32_t
+  value: 2
+  mirror: always
+
+# Set the Private Browsing Default Referrer Policy applied to third-party
+# trackers when the default cookie policy is set to reject third-party
+# trackers, to be used unless overriden by the site.
+# 0=no-referrer, 1=same-origin, 2=strict-origin-when-cross-origin,
+# 3=no-referrer-when-downgrade.
+# No need to change this pref for trimming referrers from trackers since in
+# private windows we already trim all referrers to origin only.
+- name: network.http.referer.defaultPolicy.trackers.pbmode
+  type: uint32_t
+  value: 2
+  mirror: always
+
 # Enables the predictive service.
 - name: network.predictor.enabled
   type: bool
@@ -6655,6 +6754,16 @@
 - name: permissions.delegation.enable
   type: bool
   value: @IS_NIGHTLY_BUILD@
+  mirror: always
+
+- name: permissions.isolateBy.userContext
+  type: bool
+  value: false
+  mirror: always
+
+- name: permissions.isolateBy.privateBrowsing
+  type: bool
+  value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: always
 
 #---------------------------------------------------------------------------
@@ -7512,6 +7621,16 @@
 
 # Global user preference for disabling native theme. Used in NativeWindowTheme.
 - name: widget.disable-native-theme
+  type: bool
+  value: false
+  mirror: always
+
+# Preference to disable dark scrollbar implementation.
+# This is mainly for testing because dark scrollbars have to be semi-
+# transparent, but many reftests expect scrollbars to look identical
+# among different backgrounds.
+# However, some users may want to disable this as well.
+- name: widget.disable-dark-scrollbar
   type: bool
   value: false
   mirror: always

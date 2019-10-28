@@ -412,7 +412,7 @@ pref("permissions.default.geo", 0);
 pref("permissions.default.desktop-notification", 0);
 pref("permissions.default.shortcuts", 0);
 
-#ifdef EARLY_BETA_OR_EARLIER
+#ifdef NIGHTLY_BUILD
   pref("permissions.desktop-notification.postPrompt.enabled", true);
 #else
   pref("permissions.desktop-notification.postPrompt.enabled", false);
@@ -996,11 +996,8 @@ pref("security.certerrors.permanentOverride", true);
 pref("security.certerrors.mitm.priming.enabled", true);
 pref("security.certerrors.mitm.priming.endpoint", "https://mitmdetection.services.mozilla.com/");
 pref("security.certerrors.mitm.auto_enable_enterprise_roots", true);
-#ifdef NIGHTLY_BUILD
+
 pref("security.aboutcertificate.enabled", true);
-#else
-pref("security.aboutcertificate.enabled", false);
-#endif
 
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
@@ -1337,7 +1334,7 @@ pref("browser.newtabpage.activity-stream.discoverystream.spocs-endpoint", "");
   pref("browser.newtabpage.activity-stream.improvesearch.handoffToAwesomebar", false);
 #endif
 
-pref("trailhead.firstrun.branches", "join-supercharge");
+pref("trailhead.firstrun.branches", "");
 
 // The pref that controls if the What's New panel is enabled.
 pref("browser.messaging-system.whatsNewPanel.enabled", true);
@@ -1526,8 +1523,18 @@ pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked, 5=All Blocked
   pref("media.autoplay.block-webaudio", false);
 #endif
 
+// Picture-in-Picture is currently enabled on Windows for EARLY_BETA_OR_EARLIER
+// and DevEdition
 #if defined(XP_WIN)
   #if defined(EARLY_BETA_OR_EARLIER) || defined(MOZ_DEV_EDITION)
+    pref("media.videocontrols.picture-in-picture.enabled", true);
+    pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
+  #endif
+#endif
+
+// Picture-in-Picture is currently enabled on Nightly for macOS and Linux GTK.
+#if defined(XP_MACOSX) || defined(MOZ_WIDGET_GTK)
+  #if defined(NIGHTLY_BUILD)
     pref("media.videocontrols.picture-in-picture.enabled", true);
     pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
   #endif
@@ -1805,8 +1812,8 @@ pref("signon.management.page.mobileAndroidURL", "https://app.adjust.com/6tteyjo?
 pref("signon.management.page.mobileAppleURL", "https://app.adjust.com/6tteyjo?redirect=https%3A%2F%2Fitunes.apple.com%2Fapp%2Fid1314000270%3Fmt%3D8&utm_campaign=Desktop&utm_adgroup=InProduct&utm_creative=");
 pref("signon.management.page.breachAlertUrl",
      "https://monitor.firefox.com/breach-details/");
-
 pref("signon.management.page.hideMobileFooter", false);
+pref("signon.management.page.showPasswordSyncNotification", true);
 
 // Enable the "Simplify Page" feature in Print Preview. This feature
 // is disabled by default in toolkit.
@@ -2019,6 +2026,8 @@ pref("devtools.inspector.new-rulesview.enabled", false);
 pref("devtools.inspector.compatibility.enabled", false);
 // Enable the new Box Model Highlighter with renderer in parent process
 pref("devtools.inspector.use-new-box-model-highlighter", false);
+// Enable color scheme simulation in the inspector.
+pref("devtools.inspector.color-scheme-simulation.enabled", false);
 
 // Grid highlighter preferences
 pref("devtools.gridinspector.gridOutlineMaxColumns", 50);
@@ -2135,7 +2144,12 @@ pref("devtools.netmonitor.enabled", true);
 #else
   pref("devtools.netmonitor.features.search", false);
 #endif
-pref("devtools.netmonitor.features.requestBlocking", false);
+
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
+  pref("devtools.netmonitor.features.requestBlocking", true);
+#else
+  pref("devtools.netmonitor.features.requestBlocking", false);
+#endif
 
 // Enable the Application panel
 pref("devtools.application.enabled", false);

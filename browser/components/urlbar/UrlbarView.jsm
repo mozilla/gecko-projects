@@ -785,6 +785,8 @@ class UrlbarView {
       helpIcon.setAttribute("role", "button");
       helpIcon.setAttribute("data-l10n-id", "urlbar-tip-help-icon");
       item._elements.set("helpButton", helpIcon);
+      // We will unhide the help icon if our payload has a helpUrl.
+      helpIcon.style.display = "none";
       content.appendChild(helpIcon);
     } else {
       let tagsContainer = this._createElement("span");
@@ -850,6 +852,11 @@ class UrlbarView {
       title.textContent = result.payload.text;
       let tipButton = item._elements.get("tipButton");
       tipButton.textContent = result.payload.buttonText;
+
+      if (result.payload.helpUrl) {
+        let helpIcon = item._elements.get("helpButton");
+        helpIcon.style.display = "";
+      }
       // Tips are dissimilar to other types of results and don't need the rest
       // of this markup. We return early.
       return;
@@ -1090,6 +1097,9 @@ class UrlbarView {
       lastElementChild.result.type == UrlbarUtils.RESULT_TYPE.TIP
     ) {
       lastElementChild = lastElementChild._elements.get("helpButton");
+      if (lastElementChild.style.display == "none") {
+        lastElementChild = this._getPreviousSelectableElement(lastElementChild);
+      }
     }
 
     return lastElementChild;
@@ -1104,6 +1114,9 @@ class UrlbarView {
     let next;
     if (element.classList.contains("urlbarView-tip-button")) {
       next = element.closest(".urlbarView-row")._elements.get("helpButton");
+      if (next.style.display == "none") {
+        next = this._getNextSelectableElement(next);
+      }
     } else if (element.classList.contains("urlbarView-tip-help")) {
       next = element.closest(".urlbarView-row").nextElementSibling;
     } else {
@@ -1145,6 +1158,9 @@ class UrlbarView {
       previous.result.type == UrlbarUtils.RESULT_TYPE.TIP
     ) {
       previous = previous._elements.get("helpButton");
+      if (previous.style.display == "none") {
+        previous = this._getPreviousSelectableElement(previous);
+      }
     }
 
     return previous;
@@ -1380,7 +1396,9 @@ class UrlbarView {
     // When switching to another browser window, open tabs, history or other
     // data sources are likely to change, so make sure we don't re-show stale
     // results when switching back.
-    this.clear();
+    if (!UrlbarPrefs.get("ui.popup.disable_autohide")) {
+      this.clear();
+    }
   }
 
   _on_TabSelect() {

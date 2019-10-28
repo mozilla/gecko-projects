@@ -63,6 +63,17 @@ class DirectoryLock : public RefCountedObject {
   friend class DirectoryLockImpl;
 
  public:
+  int64_t Id() const;
+
+  // 'Get' prefix is to avoid name collisions with the enum
+  PersistenceType GetPersistenceType() const;
+
+  const nsACString& Group() const;
+
+  const nsACString& Origin() const;
+
+  Client::Type ClientType() const;
+
   already_AddRefed<DirectoryLock> Specialize(PersistenceType aPersistenceType,
                                              const nsACString& aGroup,
                                              const nsACString& aOrigin,
@@ -231,6 +242,9 @@ class QuotaManager final : public BackgroundThreadObject {
                                                const nsAString& aPath,
                                                int64_t aFileSize = -1,
                                                int64_t* aFileSizeOut = nullptr);
+
+  already_AddRefed<QuotaObject> GetQuotaObject(const int64_t aDirectoryLockId,
+                                               const nsAString& aPath);
 
   Nullable<bool> OriginPersisted(const nsACString& aGroup,
                                  const nsACString& aOrigin);
@@ -545,6 +559,8 @@ class QuotaManager final : public BackgroundThreadObject {
 
   bool IsSanitizedOriginValid(const nsACString& aSanitizedOrigin);
 
+  int64_t GenerateDirectoryLockId();
+
   static void ShutdownTimerCallback(nsITimer* aTimer, void* aClosure);
 
   // Thread on which IO is performed.
@@ -562,8 +578,15 @@ class QuotaManager final : public BackgroundThreadObject {
   // Maintains a list of directory locks that are queued.
   nsTArray<RefPtr<DirectoryLockImpl>> mPendingDirectoryLocks;
 
-  // Maintains a list of directory locks that are acquired or queued.
+  // Maintains a list of directory locks that are acquired or queued. It can be
+  // accessed on the owning (PBackground) thread only.
   nsTArray<DirectoryLockImpl*> mDirectoryLocks;
+
+  // Only modifed on the owning thread, but read on multiple threads. Therefore
+  // all modifications (including those on the owning thread) and all reads off
+  // the owning thread must be protected by mQuotaMutex. In other words, only
+  // reads on the owning thread don't have to be protected by mQuotaMutex.
+  nsDataHashtable<nsUint64HashKey, DirectoryLockImpl*> mDirectoryLockIdTable;
 
   // Directory lock tables that are used to update origin access time.
   DirectoryLockTable mTemporaryDirectoryLockTable;
@@ -594,6 +617,7 @@ class QuotaManager final : public BackgroundThreadObject {
 
   uint64_t mTemporaryStorageLimit;
   uint64_t mTemporaryStorageUsage;
+  int64_t mNextDirectoryLockId;
   bool mTemporaryStorageInitialized;
   bool mCacheUsable;
 };

@@ -607,8 +607,7 @@ class UrlbarInput {
         break;
       }
       case UrlbarUtils.RESULT_TYPE.TIP: {
-        let helpPicked = element.classList.contains("urlbarView-tip-help");
-        if (helpPicked) {
+        if (element.classList.contains("urlbarView-tip-help")) {
           url = result.payload.helpUrl;
         }
         if (!url) {
@@ -625,7 +624,7 @@ class UrlbarInput {
             Cu.reportError(`Provider not found: ${result.providerName}`);
             return;
           }
-          provider.pickResult(result, { helpPicked });
+          provider.pickResult(result);
           return;
         }
         break;
@@ -1005,7 +1004,8 @@ class UrlbarInput {
   endLayoutExtend(force) {
     if (
       !this.hasAttribute("breakout-extend") ||
-      (!force && (this.view.isOpen || this.getAttribute("focused") == "true"))
+      this.view.isOpen ||
+      (!force && this.getAttribute("focused") == "true")
     ) {
       return;
     }
@@ -2075,8 +2075,8 @@ class UrlbarInput {
       return;
     }
 
-    // Make sure we don't cover the tab bar or other potential drop targets.
-    this.endLayoutExtend(true);
+    // Don't cover potential drop targets on the toolbars or in content.
+    this.view.close();
 
     // Only customize the drag data if the entire value is selected and it's a
     // loaded URI. Use default behavior otherwise.

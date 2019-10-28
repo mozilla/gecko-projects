@@ -1365,12 +1365,12 @@ void MacroAssembler::loadDependentStringBase(Register str, Register dest) {
   MOZ_ASSERT(str != dest);
 
   if (JitOptions.spectreStringMitigations) {
-    // If the string does not have a base-string, zero the |str| register.
+    // If the string is not a dependent string, zero the |str| register.
     // The code below loads str->base so this should block speculative
     // execution.
     movePtr(ImmWord(0), dest);
     test32MovePtr(Assembler::Zero, Address(str, JSString::offsetOfFlags()),
-                  Imm32(JSString::HAS_BASE_BIT), dest, str);
+                  Imm32(JSString::DEPENDENT_BIT), dest, str);
   }
 
   loadPtr(Address(str, JSDependentString::offsetOfBase()), dest);
@@ -2140,6 +2140,10 @@ void MacroAssembler::convertDoubleToInt(FloatRegister src, Register output,
       branchTruncateDoubleMaybeModUint32(src, output,
                                          truncateFail ? truncateFail : fail);
       break;
+    case IntConversionBehavior::TruncateNoWrap:
+      branchTruncateDoubleToInt32(src, output,
+                                  truncateFail ? truncateFail : fail);
+      break;
     case IntConversionBehavior::ClampToUint8:
       // Clamping clobbers the input register, so use a temp.
       if (src != temp) {
@@ -2176,7 +2180,7 @@ void MacroAssembler::convertValueToInt(
 
     if (conversion == IntConversionInputKind::Any) {
       // If we are not truncating, we fail for anything that's not
-      // null. Otherwise we might be able to handle strings and objects.
+      // null. Otherwise we might be able to handle strings and undefined.
       switch (behavior) {
         case IntConversionBehavior::Normal:
         case IntConversionBehavior::NegativeZeroCheck:
@@ -2184,12 +2188,12 @@ void MacroAssembler::convertValueToInt(
           break;
 
         case IntConversionBehavior::Truncate:
+        case IntConversionBehavior::TruncateNoWrap:
         case IntConversionBehavior::ClampToUint8:
           maybeBranchTestType(MIRType::Null, maybeInput, tag, &isNull);
           if (handleStrings) {
             maybeBranchTestType(MIRType::String, maybeInput, tag, &isString);
           }
-          maybeBranchTestType(MIRType::Object, maybeInput, tag, fail);
           branchTestUndefined(Assembler::NotEqual, tag, fail);
           break;
       }

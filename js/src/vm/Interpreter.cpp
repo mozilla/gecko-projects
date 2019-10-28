@@ -405,8 +405,6 @@ bool js::RunScript(JSContext* cx, RunState& state) {
 
   GeckoProfilerEntryMarker marker(cx, state.script());
 
-  state.script()->ensureNonLazyCanonicalFunction();
-
   jit::EnterJitStatus status = jit::MaybeEnterJit(cx, state);
   switch (status) {
     case jit::EnterJitStatus::Error:
@@ -5377,7 +5375,7 @@ void js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
   RootedPropertyName name(cx);
 
   if (op == JSOP_THROWSETCALLEE) {
-    name = script->functionNonDelazifying()->explicitName()->asPropertyName();
+    name = script->function()->explicitName()->asPropertyName();
   } else if (IsLocalOp(op)) {
     name = FrameSlotName(script, pc)->asPropertyName();
   } else if (IsAtomOp(op)) {

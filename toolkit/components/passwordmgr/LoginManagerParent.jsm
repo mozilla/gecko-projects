@@ -339,7 +339,7 @@ class LoginManagerParent extends JSWindowActorParent {
           Services.obs.removeObserver(this, "passwordmgr-crypto-login");
           Services.obs.removeObserver(this, "passwordmgr-crypto-loginCanceled");
           if (topic == "passwordmgr-crypto-loginCanceled") {
-            uiBusyPromise.resolve({ logins: [], recipes });
+            uiBusyPromiseResolve({ logins: [], recipes });
             return;
           }
 
@@ -371,7 +371,7 @@ class LoginManagerParent extends JSWindowActorParent {
       logins = this._searchAndDedupeLogins(formOrigin, {
         formActionOrigin: actionOrigin,
         ignoreActionAndRealm: true,
-        acceptDifferentSubdomains: INCLUDE_OTHER_SUBDOMAINS_IN_LOOKUP, // TODO: for TAB case
+        acceptDifferentSubdomains: INCLUDE_OTHER_SUBDOMAINS_IN_LOOKUP,
       });
     }
 

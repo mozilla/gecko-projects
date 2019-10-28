@@ -36,6 +36,8 @@ MOZ_BC_FIELD(UserActivationState, UserActivation::State)
 // on top level browsing contexts only.
 MOZ_BC_FIELD(Muted, bool)
 
+MOZ_BC_FIELD(FeaturePolicy, RefPtr<mozilla::dom::FeaturePolicy>)
+
 MOZ_BC_FIELD(HistoryID, nsID)
 
 #undef MOZ_BC_FIELD

@@ -1746,10 +1746,6 @@ static AbortReason IonCompile(JSContext* cx, JSScript* script,
 
   cx->check(script);
 
-  // Make sure the script's canonical function isn't lazy. We can't de-lazify
-  // it in a helper thread.
-  script->ensureNonLazyCanonicalFunction();
-
   auto alloc =
       cx->make_unique<LifoAlloc>(TempAllocator::PreferredLifoChunkSize);
   if (!alloc) {
@@ -1783,9 +1779,8 @@ static AbortReason IonCompile(JSContext* cx, JSScript* script,
   }
 
   CompileInfo* info = alloc->new_<CompileInfo>(
-      CompileRuntime::get(cx->runtime()), script,
-      script->functionNonDelazifying(), osrPc, Analysis_None,
-      script->needsArgsObj(), inlineScriptTree);
+      CompileRuntime::get(cx->runtime()), script, script->function(), osrPc,
+      Analysis_None, script->needsArgsObj(), inlineScriptTree);
   if (!info) {
     return AbortReason::Alloc;
   }
@@ -1981,7 +1976,7 @@ static bool CanIonCompileOrInlineScript(JSScript* script, const char** reason) {
     return false;
   }
 
-  if (script->hasNonSyntacticScope() && !script->functionNonDelazifying()) {
+  if (script->hasNonSyntacticScope() && !script->function()) {
     // Support functions with a non-syntactic global scope but not other
     // scripts. For global scripts, IonBuilder currently uses the global
     // object as scope chain, this is not valid when the script has a

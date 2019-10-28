@@ -566,7 +566,7 @@ class APZCTreeManager : public IAPZCTreeManager, public APZInputBridge {
     HitTestingTreeNodeAutoLock mScrollbarNode;
     // If content that is fixed to the root-content APZC was hit,
     // the sides of the viewport to which the content is fixed.
-    SideBits mFixedPosSides;
+    SideBits mFixedPosSides = eSideBitsNone;
 
     HitTestResult() = default;
     // Make it move-only.
@@ -590,6 +590,13 @@ class APZCTreeManager : public IAPZCTreeManager, public APZInputBridge {
   ParentLayerToScreenMatrix4x4 GetApzcToGeckoTransform(
       const AsyncPanZoomController* aApzc) const;
   ScreenPoint GetCurrentMousePosition() const;
+
+  /**
+   * Convert a screen point of an event targeting |aApzc| to Gecko
+   * coordinates.
+   */
+  Maybe<ScreenIntPoint> ConvertToGecko(const ScreenIntPoint& aPoint,
+                                       AsyncPanZoomController* aApzc);
 
   /**
    * Process a movement of the dynamic toolbar by |aDeltaY| over the time
@@ -865,7 +872,7 @@ class APZCTreeManager : public IAPZCTreeManager, public APZInputBridge {
    * used to offset event coordinates accordingly.
    * This should be in sync with mApzcForInputBlock.
    */
-  SideBits mFixedPosSidesForInputBlock;
+  SideBits mFixedPosSidesForInputBlock = eSideBitsNone;
   /* Sometimes we want to ignore all touches except one. In such cases, this
    * is set to the identifier of the touch we are not ignoring; in other cases,
    * this is set to -1.

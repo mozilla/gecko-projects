@@ -483,11 +483,6 @@ JS_PUBLIC_API void JS_SetWrapObjectCallbacks(
   cx->runtime()->wrapObjectCallbacks = callbacks;
 }
 
-JS_PUBLIC_API void JS_SetExternalStringSizeofCallback(
-    JSContext* cx, JSExternalStringSizeofCallback callback) {
-  cx->runtime()->externalStringSizeofCallback = callback;
-}
-
 JS_PUBLIC_API Realm* JS::EnterRealm(JSContext* cx, JSObject* target) {
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
@@ -1389,33 +1384,30 @@ JS_PUBLIC_API void JS_SetGCParametersBasedOnAvailableMemory(JSContext* cx,
   }
 }
 
-JS_PUBLIC_API JSString* JS_NewExternalString(JSContext* cx,
-                                             const char16_t* chars,
-                                             size_t length,
-                                             const JSStringFinalizer* fin) {
+JS_PUBLIC_API JSString* JS_NewExternalString(
+    JSContext* cx, const char16_t* chars, size_t length,
+    const JSExternalStringCallbacks* callbacks) {
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
-  JSString* s = JSExternalString::new_(cx, chars, length, fin);
-  return s;
+  return JSExternalString::new_(cx, chars, length, callbacks);
 }
 
-JS_PUBLIC_API JSString* JS_NewMaybeExternalString(JSContext* cx,
-                                                  const char16_t* chars,
-                                                  size_t length,
-                                                  const JSStringFinalizer* fin,
-                                                  bool* allocatedExternal) {
+JS_PUBLIC_API JSString* JS_NewMaybeExternalString(
+    JSContext* cx, const char16_t* chars, size_t length,
+    const JSExternalStringCallbacks* callbacks, bool* allocatedExternal) {
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
-  return NewMaybeExternalString(cx, chars, length, fin, allocatedExternal);
+  return NewMaybeExternalString(cx, chars, length, callbacks,
+                                allocatedExternal);
 }
 
 extern JS_PUBLIC_API bool JS_IsExternalString(JSString* str) {
   return str->isExternal();
 }
 
-extern JS_PUBLIC_API const JSStringFinalizer* JS_GetExternalStringFinalizer(
-    JSString* str) {
-  return str->asExternal().externalFinalizer();
+extern JS_PUBLIC_API const JSExternalStringCallbacks*
+JS_GetExternalStringCallbacks(JSString* str) {
+  return str->asExternal().callbacks();
 }
 
 static void SetNativeStackLimit(JSContext* cx, JS::StackKind kind,
@@ -3727,8 +3719,7 @@ JS_PUBLIC_API JSString* JS_DecompileScript(JSContext* cx, HandleScript script) {
 
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
-  script->ensureNonLazyCanonicalFunction();
-  RootedFunction fun(cx, script->functionNonDelazifying());
+  RootedFunction fun(cx, script->function());
   if (fun) {
     return JS_DecompileFunction(cx, fun);
   }
@@ -3848,19 +3839,19 @@ extern JS_PUBLIC_API void JS::JobQueueMayNotBeEmpty(JSContext* cx) {
   cx->canSkipEnqueuingJobs = false;
 }
 
-JS_PUBLIC_API JSObject* JS::NewPromiseObject(
-    JSContext* cx, HandleObject executor, HandleObject proto /* = nullptr */) {
+JS_PUBLIC_API JSObject* JS::NewPromiseObject(JSContext* cx,
+                                             HandleObject executor) {
   MOZ_ASSERT(!cx->zone()->isAtomsZone());
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
-  cx->check(executor, proto);
+  cx->check(executor);
 
   if (!executor) {
     return PromiseObject::createSkippingExecutor(cx);
   }
 
   MOZ_ASSERT(IsCallable(executor));
-  return PromiseObject::create(cx, executor, proto);
+  return PromiseObject::create(cx, executor);
 }
 
 JS_PUBLIC_API bool JS::IsPromiseObject(JS::HandleObject obj) {

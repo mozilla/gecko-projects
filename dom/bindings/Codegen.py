@@ -8937,6 +8937,8 @@ class CGSpecializedMethod(CGAbstractStaticMethod):
 
     @staticmethod
     def makeNativeName(descriptor, method):
+        if method.underlyingAttr:
+            return CGSpecializedGetter.makeNativeName(descriptor, method.underlyingAttr)
         name = method.identifier.name
         return MakeNativeName(descriptor.binaryNameFor(name))
 
@@ -10094,10 +10096,34 @@ class CGEnum(CGThing):
     def __init__(self, enum):
         CGThing.__init__(self)
         self.enum = enum
+        entryDecl = fill(
+            """
+            extern const EnumEntry ${entry_array}[${entry_count}];
+
+            static constexpr size_t Count = ${real_entry_count};
+
+            // Our "${entry_array}" contains an extra entry with a null string.
+            static_assert(mozilla::ArrayLength(${entry_array}) - 1 == Count,
+                          "Mismatch between enum strings and enum count");
+
+            static_assert(static_cast<size_t>(${name}::EndGuard_) == Count,
+                          "Mismatch between enum value and enum count");
+
+            inline Span<const char> GetString(${name} stringId) {
+              MOZ_ASSERT(static_cast<${type}>(stringId) < Count);
+              const EnumEntry& entry = ${entry_array}[static_cast<${type}>(stringId)];
+              return MakeSpan(entry.value, entry.length);
+            }
+            """,
+            entry_array=ENUM_ENTRY_VARIABLE_NAME,
+            entry_count=self.nEnumStrings(),
+            # -1 because nEnumStrings() includes a string for EndGuard_
+            real_entry_count=self.nEnumStrings() - 1,
+            name=self.enum.identifier.name,
+            type=self.underlyingType())
         strings = CGNamespace(
             self.stringsNamespace(),
-            CGGeneric(declare=("extern const EnumEntry %s[%d];\n" %
-                               (ENUM_ENTRY_VARIABLE_NAME, self.nEnumStrings())),
+            CGGeneric(declare=entryDecl,
                       define=fill(
                           """
                           extern const EnumEntry ${name}[${count}] = {
@@ -10138,9 +10164,7 @@ class CGEnum(CGThing):
             name=self.enum.identifier.name,
             ty=self.underlyingType(),
             enums=",\n".join(map(getEnumValueName, self.enum.values())) + ",\n")
-        strings = CGNamespace(self.stringsNamespace(),
-                              CGGeneric(declare="extern const EnumEntry %s[%d];\n"
-                                        % (ENUM_ENTRY_VARIABLE_NAME, self.nEnumStrings())))
+
         return decl + "\n" + self.cgThings.declare()
 
     def define(self):
@@ -13304,10 +13328,6 @@ class CGDescriptor(CGThing):
             elif m.isMaplikeOrSetlike():
                 cgThings.append(CGMaplikeOrSetlikeHelperGenerator(descriptor, m))
             elif m.isAttr():
-                if m.stringifier:
-                    raise TypeError("Stringifier attributes not supported yet. "
-                                    "See bug 824857.\n"
-                                    "%s" % m.location)
                 if m.getExtendedAttribute("Unscopable"):
                     assert not m.isStatic()
                     unscopableNames.append(m.identifier.name)
@@ -14915,6 +14935,9 @@ class CGBindingRoot(CGThing):
         # Do codegen for all the enums
         enums = config.getEnums(webIDLFile)
         cgthings.extend(CGEnum(e) for e in enums)
+
+        bindingDeclareHeaders["mozilla/Span.h"] = enums
+        bindingDeclareHeaders["mozilla/ArrayUtils.h"] = enums
 
         hasCode = (descriptors or callbackDescriptors or dictionaries or
                    callbacks)

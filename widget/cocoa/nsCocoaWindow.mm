@@ -154,6 +154,8 @@ nsCocoaWindow::nsCocoaWindow()
       mInReportMoveEvent(false),
       mInResize(false),
       mWindowTransformIsIdentity(true),
+      mAlwaysOnTop(false),
+      mAspectRatioLocked(false),
       mNumModalDescendents(0),
       mWindowAnimationBehavior(NSWindowAnimationBehaviorDefault) {
   if ([NSWindow respondsToSelector:@selector(setAllowsAutomaticWindowTabbing:)]) {
@@ -302,6 +304,7 @@ nsresult nsCocoaWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
 
   mParent = aParent;
   mAncestorLink = aParent;
+  mAlwaysOnTop = aInitData->mAlwaysOnTop;
 
   // Applications that use native popups don't want us to create popup windows.
   if ((mWindowType == eWindowType_popup) && UseNativePopupWindows()) return NS_OK;
@@ -480,6 +483,10 @@ nsresult nsCocoaWindow::CreateNativeWindow(const NSRect& aRect, nsBorderStyle aB
     // Make sure that regular windows are opaque from the start, so that
     // nsChildView::WidgetTypeSupportsAcceleration returns true for them.
     [mWindow setOpaque:YES];
+  }
+
+  if (mAlwaysOnTop) {
+    [mWindow setLevel:NSFloatingWindowLevel];
   }
 
   [mWindow setContentMinSize:NSMakeSize(60, 60)];
@@ -1463,6 +1470,15 @@ void nsCocoaWindow::DoResize(double aX, double aY, double aWidth, double aHeight
     return;
   }
 
+  // We are able to resize a window outside of any aspect ratio contraints
+  // applied to it, but in order to "update" the aspect ratio contraint to the
+  // new window dimensions, we must re-lock the aspect ratio.
+  auto relockAspectRatio = MakeScopeExit([&]() {
+    if (mAspectRatioLocked) {
+      LockAspectRatio(true);
+    }
+  });
+
   AutoRestore<bool> reentrantResizeGuard(mInResize);
   mInResize = true;
 
@@ -2185,6 +2201,23 @@ NS_IMETHODIMP nsCocoaWindow::SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPo
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+}
+
+void nsCocoaWindow::LockAspectRatio(bool aShouldLock) {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  if (aShouldLock) {
+    [mWindow setContentAspectRatio:mWindow.frame.size];
+    mAspectRatioLocked = true;
+  } else {
+    // According to https://developer.apple.com/documentation/appkit/nswindow/1419507-aspectratio,
+    // aspect ratios and resize increments are mutually exclusive, and the accepted way of
+    // cancelling an established aspect ratio is to set the resize increments to 1.0, 1.0
+    [mWindow setResizeIncrements:NSMakeSize(1.0, 1.0)];
+    mAspectRatioLocked = false;
+  }
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 void nsCocoaWindow::UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries) {

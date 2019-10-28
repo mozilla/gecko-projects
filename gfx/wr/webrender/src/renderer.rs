@@ -47,7 +47,8 @@ use api::channel::{MsgSender, PayloadReceiverHelperMethods};
 use crate::batch::{AlphaBatchContainer, BatchKind, BatchFeatures, BatchTextures, BrushBatchKind, ClipBatchList};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use crate::capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
-use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile};
+use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile, CompositeMode, Compositor};
+use crate::composite::{NativeSurfaceOperationDetails};
 use crate::debug_colors;
 use crate::debug_render::{DebugItem, DebugRenderer};
 use crate::device::{DepthFunction, Device, GpuFrameId, Program, UploadMethod, Texture, PBO};
@@ -70,7 +71,7 @@ use crate::internal_types::{CacheTextureId, DebugOutput, FastHashMap, FastHashSe
 use crate::internal_types::{TextureCacheAllocationKind, TextureCacheUpdate, TextureUpdateList, TextureUpdateSource};
 use crate::internal_types::{RenderTargetInfo, SavedTargetIndex, Swizzle};
 use malloc_size_of::MallocSizeOfOps;
-use crate::picture::{RecordedDirtyRegion, TILE_SIZE_LARGE, TILE_SIZE_SMALL};
+use crate::picture::{RecordedDirtyRegion, TILE_SIZE_LARGE, TILE_SIZE_SMALL, ResolvedSurfaceTexture};
 use crate::prim_store::DeferredResolve;
 use crate::profiler::{BackendProfileCounters, FrameProfileCounters, TimeProfileCounter,
                GpuProfileTag, RendererProfileCounters, RendererProfileTimers};
@@ -1875,6 +1876,9 @@ pub struct Renderer {
     /// If true, partial present state has been reset and everything needs to
     /// be drawn on the next render.
     force_redraw: bool,
+
+    /// An optional client provided interface to a native OS compositor
+    native_compositor: Option<Box<dyn Compositor>>,
 }
 
 #[derive(Debug)]
@@ -1946,6 +1950,7 @@ impl Renderer {
             options.allow_texture_storage_support,
             options.allow_texture_swizzling,
             options.dump_shader_source.take(),
+            options.surface_is_y_flipped,
         );
 
         let color_cache_formats = device.preferred_color_formats();
@@ -2131,6 +2136,11 @@ impl Renderer {
             (false, _) => FontRenderMode::Mono,
         };
 
+        let composite_mode = match options.native_compositor {
+            Some(..) => CompositeMode::Native,
+            None => CompositeMode::Draw,
+        };
+
         let config = FrameBuilderConfig {
             default_font_render_mode,
             dual_source_blending_is_enabled: true,
@@ -2143,6 +2153,7 @@ impl Renderer {
             advanced_blend_is_coherent: ext_blend_equation_advanced_coherent,
             batch_lookback_count: options.batch_lookback_count,
             background_color: options.clear_color,
+            composite_mode,
         };
         info!("WR {:?}", config);
 
@@ -2381,6 +2392,7 @@ impl Renderer {
             documents_seen: FastHashSet::default(),
             present_config,
             force_redraw: true,
+            native_compositor: options.native_compositor,
         };
 
         // We initially set the flags to default and then now call set_debug_flags
@@ -3910,8 +3922,11 @@ impl Renderer {
                 CompositeTileSurface::Clear => {
                     (TextureSource::Dummy, 0.0, ColorF::BLACK)
                 }
-                CompositeTileSurface::Texture { texture_id, texture_layer } => {
-                    (texture_id, texture_layer as f32, ColorF::WHITE)
+                CompositeTileSurface::Texture { surface: ResolvedSurfaceTexture::TextureCache { texture, layer } } => {
+                    (texture, layer as f32, ColorF::WHITE)
+                }
+                CompositeTileSurface::Texture { surface: ResolvedSurfaceTexture::NativeSurface { .. } } => {
+                    unreachable!("bug: found native surface in simple composite path");
                 }
             };
             let textures = BatchTextures::color(texture);
@@ -3967,7 +3982,7 @@ impl Renderer {
     /// the only way that picture cache tiles get drawn. In future, the tiles
     /// will often be handed to the OS compositor, and this method will be
     /// rarely used.
-    fn composite(
+    fn composite_simple(
         &mut self,
         composite_state: &CompositeState,
         clear_framebuffer: bool,
@@ -4151,7 +4166,10 @@ impl Renderer {
             }
 
             let clear_rect = match draw_target {
-                DrawTarget::Default { rect, total_size } if rect.origin == FramebufferIntPoint::zero() && rect.size == total_size => {
+                DrawTarget::NativeSurface { .. } => {
+                    unreachable!("bug: native compositor surface in child target");
+                }
+                DrawTarget::Default { rect, total_size, .. } if rect.origin == FramebufferIntPoint::zero() && rect.size == total_size => {
                     // whole screen is covered, no need for scissor
                     None
                 }
@@ -4274,12 +4292,22 @@ impl Renderer {
                     }
                 };
                 let (src_rect, _) = render_tasks[output.task_id].get_target_rect();
-                self.device.blit_render_target_invert_y(
-                    draw_target.into(),
-                    draw_target.to_framebuffer_rect(src_rect.translate(-content_origin.to_vector())),
-                    DrawTarget::External { fbo: fbo_id, size: output_size },
-                    output_size.into(),
-                );
+                if !self.device.surface_is_y_flipped() {
+                    self.device.blit_render_target_invert_y(
+                        draw_target.into(),
+                        draw_target.to_framebuffer_rect(src_rect.translate(-content_origin.to_vector())),
+                        DrawTarget::External { fbo: fbo_id, size: output_size },
+                        output_size.into(),
+                    );
+                } else {
+                    self.device.blit_render_target(
+                        draw_target.into(),
+                        draw_target.to_framebuffer_rect(src_rect.translate(-content_origin.to_vector())),
+                        DrawTarget::External { fbo: fbo_id, size: output_size },
+                        output_size.into(),
+                        TextureFilter::Linear,
+                    );
+                }
                 handler.unlock(output.pipeline_id);
             }
         }
@@ -4858,6 +4886,36 @@ impl Renderer {
         debug_assert!(self.texture_resolver.prev_pass_color.is_none());
     }
 
+    fn update_native_surfaces(
+        &mut self,
+        composite_state: &CompositeState,
+    ) {
+        match self.native_compositor {
+            Some(ref mut compositor) => {
+                for op in &composite_state.native_surface_updates {
+                    match op.details {
+                        NativeSurfaceOperationDetails::CreateSurface { size } => {
+                            compositor.create_surface(
+                                op.id,
+                                size,
+                            );
+                        }
+                        NativeSurfaceOperationDetails::DestroySurface => {
+                            compositor.destroy_surface(
+                                op.id,
+                            );
+                        }
+                    }
+                }
+            }
+            None => {
+                // Ensure nothing is added in simple composite mode, since otherwise
+                // memory will leak as this doesn't get drained
+                debug_assert!(composite_state.native_surface_updates.is_empty());
+            }
+        }
+    }
+
     fn draw_frame(
         &mut self,
         frame: &mut Frame,
@@ -4880,6 +4938,7 @@ impl Renderer {
         self.device.disable_stencil();
 
         self.bind_frame_data(frame);
+        self.update_native_surfaces(&frame.composite_state);
 
         for (_pass_index, pass) in frame.passes.iter_mut().enumerate() {
             #[cfg(not(target_os = "android"))]
@@ -4903,32 +4962,52 @@ impl Renderer {
 
                         let offset = frame.content_origin.to_f32();
                         let size = frame.device_rect.size.to_f32();
+                        let surface_is_y_flipped = self.device.surface_is_y_flipped();
+                        let (bottom, top) = if surface_is_y_flipped {
+                          (offset.y, offset.y + size.height)
+                        } else {
+                          (offset.y + size.height, offset.y)
+                        };
+
                         let projection = Transform3D::ortho(
                             offset.x,
                             offset.x + size.width,
-                            offset.y + size.height,
-                            offset.y,
+                            bottom,
+                            top,
                             ORTHO_NEAR_PLANE,
                             ORTHO_FAR_PLANE,
                         );
 
                         let fb_scale = Scale::<_, _, FramebufferPixel>::new(1i32);
                         let mut fb_rect = frame.device_rect * fb_scale;
-                        fb_rect.origin.y = device_size.height - fb_rect.origin.y - fb_rect.size.height;
+
+                        if !surface_is_y_flipped {
+                            fb_rect.origin.y = device_size.height - fb_rect.origin.y - fb_rect.size.height;
+                        }
 
                         let draw_target = DrawTarget::Default {
                             rect: fb_rect,
                             total_size: device_size * fb_scale,
+                            surface_is_y_flipped,
                         };
 
                         if self.enable_picture_caching {
-                            self.composite(
-                                &frame.composite_state,
-                                clear_framebuffer,
-                                draw_target,
-                                &projection,
-                                results,
-                            );
+                            // If we have a native OS compositor, then make use of that interface
+                            // to specify how to composite each of the picture cache surfaces.
+                            match self.native_compositor {
+                                Some(ref mut interface) => {
+                                    frame.composite_state.composite_native(&mut **interface);
+                                }
+                                None => {
+                                    self.composite_simple(
+                                        &frame.composite_state,
+                                        clear_framebuffer,
+                                        draw_target,
+                                        &projection,
+                                        results,
+                                    );
+                                }
+                            }
                         } else {
                             if clear_framebuffer {
                                 let clear_color = self.clear_color.map(|color| color.to_array());
@@ -4980,14 +5059,30 @@ impl Renderer {
                         for picture_target in picture_cache {
                             results.stats.color_target_count += 1;
 
-                            let (texture, _) = self.texture_resolver
-                                .resolve(&picture_target.texture)
-                                .expect("bug");
-                            let draw_target = DrawTarget::from_texture(
-                                texture,
-                                picture_target.layer,
-                                true,
-                            );
+                            let draw_target = match picture_target.surface {
+                                ResolvedSurfaceTexture::TextureCache { ref texture, layer } => {
+                                    let (texture, _) = self.texture_resolver
+                                        .resolve(texture)
+                                        .expect("bug");
+
+                                    DrawTarget::from_texture(
+                                        texture,
+                                        layer as usize,
+                                        true,
+                                    )
+                                }
+                                ResolvedSurfaceTexture::NativeSurface { id, size, .. } => {
+                                    let offset = self.native_compositor
+                                        .as_mut()
+                                        .expect("bug: no native compositor")
+                                        .bind(id);
+
+                                    DrawTarget::NativeSurface {
+                                        offset,
+                                        dimensions: size,
+                                    }
+                                }
+                            };
 
                             let projection = Transform3D::ortho(
                                 0.0,
@@ -5006,6 +5101,14 @@ impl Renderer {
                                 &frame.render_tasks,
                                 &mut results.stats,
                             );
+
+                            // Native OS surfaces must be unbound at the end of drawing to them
+                            if let ResolvedSurfaceTexture::NativeSurface { .. } = picture_target.surface {
+                                self.native_compositor
+                                    .as_mut()
+                                    .expect("bug: no native compositor")
+                                    .unbind();
+                            }
                         }
                     }
 
@@ -5324,7 +5427,7 @@ impl Renderer {
         }
 
         // Copy frame buffer into the zoom texture
-        let read_target = DrawTarget::new_default(device_size);
+        let read_target = DrawTarget::new_default(device_size, self.device.surface_is_y_flipped());
         self.device.blit_render_target(
             read_target.into(),
             read_target.to_framebuffer_rect(source_rect),
@@ -5460,12 +5563,22 @@ impl Renderer {
                 // we're blitting from a texture to the main framebuffer, which
                 // use different conventions.
                 let dest_rect = rect(x, y + tag_height, size, size);
-                device.blit_render_target_invert_y(
-                    ReadTarget::from_texture(texture, layer),
-                    src_rect,
-                    DrawTarget::new_default(device_size),
-                    FramebufferIntRect::from_untyped(&dest_rect),
-                );
+                if !device.surface_is_y_flipped() {
+                    device.blit_render_target_invert_y(
+                        ReadTarget::from_texture(texture, layer),
+                        src_rect,
+                        DrawTarget::new_default(device_size, device.surface_is_y_flipped()),
+                        FramebufferIntRect::from_untyped(&dest_rect),
+                    );
+                } else {
+                    device.blit_render_target(
+                        ReadTarget::from_texture(texture, layer),
+                        src_rect,
+                        DrawTarget::new_default(device_size, device.surface_is_y_flipped()),
+                        FramebufferIntRect::from_untyped(&dest_rect),
+                        TextureFilter::Linear,
+                    );
+                }
                 i += 1;
             }
         }
@@ -5900,6 +6013,9 @@ pub struct RendererOptions {
     pub dump_shader_source: Option<String>,
     /// An optional presentation config for compositor integration.
     pub present_config: Option<PresentConfig>,
+    /// An optional client provided interface to a native / OS compositor.
+    pub native_compositor: Option<Box<dyn Compositor>>,
+    pub surface_is_y_flipped: bool,
 }
 
 impl Default for RendererOptions {
@@ -5952,6 +6068,8 @@ impl Default for RendererOptions {
             start_debug_server: true,
             dump_shader_source: None,
             present_config: None,
+            native_compositor: None,
+            surface_is_y_flipped: false,
         }
     }
 }
@@ -6475,5 +6593,38 @@ fn should_skip_batch(kind: &BatchKind, flags: &DebugFlags) -> bool {
             flags.contains(DebugFlags::DISABLE_GRADIENT_PRIMS)
         }
         _ => false,
+    }
+}
+
+impl CompositeState {
+    /// Use the client provided native compositor interface to add all picture
+    /// cache tiles to the OS compositor
+    fn composite_native(
+        &self,
+        compositor: &mut dyn Compositor,
+    ) {
+        // Inform the client that we are starting a composition transaction
+        compositor.begin_frame();
+
+        // For each tile, update the properties with the native OS compositor,
+        // such as position and clip rect. z-order of the tiles are implicit based
+        // on the order they are added in this loop.
+        for tile in self.opaque_tiles.iter().chain(self.alpha_tiles.iter()) {
+            // Extract the native surface id. We should only ever encounter native surfaces here!
+            let id = match tile.surface {
+                CompositeTileSurface::Texture { surface: ResolvedSurfaceTexture::NativeSurface { id, .. }, .. } => id,
+                _ => unreachable!(),
+            };
+
+            // Add the tile to the OS compositor.
+            compositor.add_surface(
+                id,
+                tile.rect.origin.to_i32(),
+                tile.clip_rect.to_i32(),
+            );
+        }
+
+        // Inform the client that we are finished this composition transaction
+        compositor.end_frame();
     }
 }

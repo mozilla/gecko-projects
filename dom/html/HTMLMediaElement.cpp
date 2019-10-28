@@ -1165,6 +1165,9 @@ class HTMLMediaElement::AudioChannelAgentCallback final
     }
 
     NotifyMediaStarted(mAudioChannelAgent->WindowID());
+    NotifyMediaAudibleChanged(
+        mAudioChannelAgent->WindowID(),
+        mIsOwnerAudible == AudioChannelService::AudibleState::eAudible);
     mAudioChannelAgent->PullInitialUpdate();
   }
 
@@ -6824,26 +6827,6 @@ void HTMLMediaElement::DispatchEncrypted(const nsTArray<uint8_t>& aInitData,
 bool HTMLMediaElement::IsEventAttributeNameInternal(nsAtom* aName) {
   return aName == nsGkAtoms::onencrypted ||
          nsGenericHTMLElement::IsEventAttributeNameInternal(aName);
-}
-
-already_AddRefed<nsIPrincipal> HTMLMediaElement::GetTopLevelPrincipal() {
-  RefPtr<nsIPrincipal> principal;
-  nsCOMPtr<nsPIDOMWindowInner> window = OwnerDoc()->GetInnerWindow();
-  if (!window) {
-    return nullptr;
-  }
-  // XXXkhuey better hope we always have an outer ...
-  nsCOMPtr<nsPIDOMWindowOuter> top =
-      window->GetOuterWindow()->GetInProcessTop();
-  if (!top) {
-    return nullptr;
-  }
-  Document* doc = top->GetExtantDoc();
-  if (!doc) {
-    return nullptr;
-  }
-  principal = doc->NodePrincipal();
-  return principal.forget();
 }
 
 void HTMLMediaElement::NotifyWaitingForKey() {

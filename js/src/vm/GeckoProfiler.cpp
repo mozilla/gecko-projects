@@ -279,7 +279,7 @@ UniqueChars GeckoProfilerRuntime::allocProfileString(JSContext* cx,
   bool hasName = false;
   size_t nameLength = 0;
   UniqueChars nameStr;
-  JSFunction* func = script->functionDelazifying();
+  JSFunction* func = script->function();
   if (func && func->displayAtom()) {
     nameStr = StringToNewUTF8CharsZ(cx, *func->displayAtom());
     if (!nameStr) {
@@ -298,7 +298,7 @@ UniqueChars GeckoProfilerRuntime::allocProfileString(JSContext* cx,
   bool hasLineAndColumn = false;
   size_t lineAndColumnLength = 0;
   char lineAndColumnStr[30];
-  if (hasName || script->functionNonDelazifying() || script->isForEval()) {
+  if (hasName || script->function() || script->isForEval()) {
     lineAndColumnLength = SprintfLiteral(lineAndColumnStr, "%u:%u",
                                          script->lineno(), script->column());
     hasLineAndColumn = true;

@@ -26,10 +26,8 @@ const MenuList = createFactory(
 class ConsoleSettings extends Component {
   static get propTypes() {
     return {
-      compactToolbar: PropTypes.bool.isRequired,
       dispatch: PropTypes.func.isRequired,
       groupWarnings: PropTypes.bool.isRequired,
-      hideCompactToolbarCheckbox: PropTypes.bool.isRequired,
       hidePersistLogsCheckbox: PropTypes.bool.isRequired,
       hideShowContentMessagesCheckbox: PropTypes.bool.isRequired,
       persistLogs: PropTypes.bool.isRequired,
@@ -132,7 +130,7 @@ class ConsoleSettings extends Component {
     return MenuButton(
       {
         menuId: "webconsole-console-settings-menu-button",
-        doc: toolbox ? toolbox.doc : doc,
+        toolboxDoc: toolbox ? toolbox.doc : doc,
         className: "devtools-button webconsole-console-settings-menu-button",
         title: l10n.getStr("webconsole.console.settings.menu.button.tooltip"),
       },

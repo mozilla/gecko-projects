@@ -3875,7 +3875,7 @@ static bool AnalyzeEntrainedVariablesInScript(JSContext* cx,
 
     buf.printf("Script ");
 
-    if (JSAtom* name = script->functionNonDelazifying()->displayAtom()) {
+    if (JSAtom* name = script->function()->displayAtom()) {
       buf.putString(name);
       buf.printf(" ");
     }
@@ -3883,7 +3883,7 @@ static bool AnalyzeEntrainedVariablesInScript(JSContext* cx,
     buf.printf("(%s:%u) has variables entrained by ", script->filename(),
                script->lineno());
 
-    if (JSAtom* name = innerScript->functionNonDelazifying()->displayAtom()) {
+    if (JSAtom* name = innerScript->function()->displayAtom()) {
       buf.putString(name);
       buf.printf(" ");
     }
@@ -3940,23 +3940,28 @@ bool js::AnalyzeEntrainedVariables(JSContext* cx, HandleScript script) {
     }
 
     JSObject* obj = &gcThing.as<JSObject>();
-    if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
-      fun = &obj->as<JSFunction>();
-      innerScript = JSFunction::getOrCreateScript(cx, fun);
-      if (!innerScript) {
+    if (!obj->is<JSFunction>()) {
+      continue;
+    }
+
+    fun = &obj->as<JSFunction>();
+    if (!fun->isInterpreted()) {
+      continue;
+    }
+
+    innerScript = JSFunction::getOrCreateScript(cx, fun);
+    if (!innerScript) {
+      return false;
+    }
+
+    if (fun->needsCallObject()) {
+      if (!AnalyzeEntrainedVariablesInScript(cx, script, innerScript)) {
         return false;
       }
+    }
 
-      if (script->functionDelazifying() &&
-          script->functionDelazifying()->needsCallObject()) {
-        if (!AnalyzeEntrainedVariablesInScript(cx, script, innerScript)) {
-          return false;
-        }
-      }
-
-      if (!AnalyzeEntrainedVariables(cx, innerScript)) {
-        return false;
-      }
+    if (!AnalyzeEntrainedVariables(cx, innerScript)) {
+      return false;
     }
   }
 

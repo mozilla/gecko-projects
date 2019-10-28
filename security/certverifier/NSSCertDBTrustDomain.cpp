@@ -42,7 +42,6 @@
 
 #include "TrustOverrideUtils.h"
 #include "TrustOverride-StartComAndWoSignData.inc"
-#include "TrustOverride-GlobalSignData.inc"
 #include "TrustOverride-SymantecData.inc"
 #include "TrustOverride-AppleGoogleDigiCertData.inc"
 
@@ -68,6 +67,7 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(
     const OriginAttributes& originAttributes,
     const Vector<Input>& thirdPartyRootInputs,
     const Vector<Input>& thirdPartyIntermediateInputs,
+    const Maybe<nsTArray<nsTArray<uint8_t>>>& extraCertificates,
     /*out*/ UniqueCERTCertList& builtChain,
     /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo,
     /*optional*/ const char* hostname)
@@ -88,6 +88,7 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(
       mOriginAttributes(originAttributes),
       mThirdPartyRootInputs(thirdPartyRootInputs),
       mThirdPartyIntermediateInputs(thirdPartyIntermediateInputs),
+      mExtraCertificates(extraCertificates),
       mBuiltChain(builtChain),
       mPinningTelemetryInfo(pinningTelemetryInfo),
       mHostname(hostname),
@@ -307,6 +308,32 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
     }
   }
 
+  if (mExtraCertificates.isSome()) {
+    for (const auto& extraCert : *mExtraCertificates) {
+      Input certInput;
+      Result rv = certInput.Init(extraCert.Elements(), extraCert.Length());
+      if (rv != Success) {
+        continue;
+      }
+      BackCert cert(certInput, EndEntityOrCA::MustBeCA, nullptr);
+      rv = cert.Init();
+      if (rv != Success) {
+        continue;
+      }
+      // Filter out certificates that can't be issuers we're looking for because
+      // the subject distinguished name doesn't match. This prevents
+      // mozilla::pkix from accumulating spurious errors during path building.
+      if (!InputsAreEqual(encodedIssuerName, cert.GetSubject())) {
+        continue;
+      }
+      // We assume that extra certificates (presumably from the TLS handshake)
+      // are intermediates, since sending trust anchors would be superfluous.
+      if (!geckoIntermediateCandidates.append(certInput)) {
+        return Result::FATAL_ERROR_NO_MEMORY;
+      }
+    }
+  }
+
   // Try all root certs first and then all (presumably) intermediates.
   if (!geckoRootCandidates.appendAll(geckoIntermediateCandidates)) {
     return Result::FATAL_ERROR_NO_MEMORY;
@@ -325,10 +352,10 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
   // NSS seems not to differentiate between "no potential issuers found" and
   // "there was an error trying to retrieve the potential issuers." We assume
   // there was no error if CERT_CreateSubjectCertList returns nullptr.
-  Vector<Input> nssRootCandidates;
-  Vector<Input> nssIntermediateCandidates;
   UniqueCERTCertList candidates(CERT_CreateSubjectCertList(
       nullptr, CERT_GetDefaultCertDB(), &encodedIssuerNameItem, 0, false));
+  Vector<Input> nssRootCandidates;
+  Vector<Input> nssIntermediateCandidates;
   if (candidates) {
     for (CERTCertListNode* n = CERT_LIST_HEAD(candidates);
          !CERT_LIST_END(n, candidates); n = CERT_LIST_NEXT(n)) {
@@ -583,7 +610,7 @@ Result NSSCertDBTrustDomain::CheckRevocation(
 
   // Bug 991815: The BR allow OCSP for intermediates to be up to one year old.
   // Since this affects EV there is no reason why DV should be more strict
-  // so all intermediatates are allowed to have OCSP responses up to one year
+  // so all intermediates are allowed to have OCSP responses up to one year
   // old.
   uint16_t maxOCSPLifetimeInDays = 10;
   if (endEntityOrCA == EndEntityOrCA::MustBeCA) {
@@ -774,7 +801,7 @@ Result NSSCertDBTrustDomain::CheckRevocation(
       cachedResponseResult == Result::ERROR_OCSP_UNKNOWN_CERT ||
       cachedResponseResult == Result::ERROR_OCSP_OLD_RESPONSE) {
     // Only send a request to, and process a response from, the server if we
-    // didn't have a cached indication of failure.  Also, ddon't keep requesting
+    // didn't have a cached indication of failure.  Also, don't keep requesting
     // responses from a failing server.
     return SynchronousCheckRevocationWithServer(
         certID, aiaLocation, time, maxOCSPLifetimeInDays, cachedResponseResult,
@@ -1040,52 +1067,6 @@ Result NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time,
     }
     if (!chainHasValidPins) {
       return Result::ERROR_KEY_PINNING_FAILURE;
-    }
-  }
-
-  // See bug 1349762. If the root is "GlobalSign Root CA - R2", don't consider
-  // the end-entity valid for EV unless the
-  // "GlobalSign Extended Validation CA - SHA256 - G2" intermediate is in the
-  // chain as well. It should be possible to remove this workaround after
-  // January 2019 as per bug 1349727 comment 17.
-  if (requiredPolicy == sGlobalSignEVPolicy &&
-      CertMatchesStaticData(root.get(), sGlobalSignRootCAR2SubjectBytes,
-                            sGlobalSignRootCAR2SPKIBytes)) {
-    rootCert = nullptr;  // Clear the state for Segment...
-    nsCOMPtr<nsIX509CertList> intCerts;
-    nsCOMPtr<nsIX509Cert> eeCert;
-
-    nsrv = nssCertList->SegmentCertificateChain(rootCert, intCerts, eeCert);
-    if (NS_FAILED(nsrv)) {
-      // This is supposed to be a valid EV chain (where at least 3 certificates
-      // are required: end-entity, at least one intermediate, and a root), so
-      // this is an error.
-      return Result::ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED;
-    }
-
-    bool foundRequiredIntermediate = false;
-    RefPtr<nsNSSCertList> intCertList = intCerts->GetCertList();
-    nsrv = intCertList->ForEachCertificateInChain(
-        [&foundRequiredIntermediate](nsCOMPtr<nsIX509Cert> aCert, bool aHasMore,
-                                     /* out */ bool& aContinue) {
-          // We need an owning handle when calling nsIX509Cert::GetCert().
-          UniqueCERTCertificate nssCert(aCert->GetCert());
-          if (CertMatchesStaticData(
-                  nssCert.get(),
-                  sGlobalSignExtendedValidationCASHA256G2SubjectBytes,
-                  sGlobalSignExtendedValidationCASHA256G2SPKIBytes)) {
-            foundRequiredIntermediate = true;
-            aContinue = false;
-          }
-          return NS_OK;
-        });
-
-    if (NS_FAILED(nsrv)) {
-      return Result::FATAL_ERROR_LIBRARY_FAILURE;
-    }
-
-    if (!foundRequiredIntermediate) {
-      return Result::ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED;
     }
   }
 

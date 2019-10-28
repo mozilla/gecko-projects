@@ -82,13 +82,14 @@ nsresult PermissionDelegateHandler::GetPermissionForPermissionsAPI(
     return permMgr->TestPermissionFromPrincipal(principal, aType, aPermission);
   }
 
-  if (info->mPolicy == DelegatePolicy::eDelegateUseIframeOrigin) {
+  if (mDocument->GetWindow()->IsTopLevelWindow() ||
+      info->mPolicy == DelegatePolicy::eDelegateUseIframeOrigin) {
     return permMgr->TestPermissionFromPrincipal(principal, aType, aPermission);
   }
 
   nsPIDOMWindowInner* window = mDocument->GetInnerWindow();
   nsGlobalWindowInner* innerWindow = nsGlobalWindowInner::Cast(window);
-  nsIPrincipal* topPrincipal = innerWindow->GetTopLevelPrincipal();
+  nsIPrincipal* topPrincipal = innerWindow->GetTopLevelAntiTrackingPrincipal();
 
   // Permission is delegated in same origin
   if (principal->Subsumes(topPrincipal)) {

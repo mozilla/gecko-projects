@@ -1656,6 +1656,12 @@ class BaseScript : public gc::TenuredCell {
   uint32_t toStringStart() const { return toStringStart_; }
   uint32_t toStringEnd() const { return toStringEnd_; }
 
+  void setToStringEnd(uint32_t toStringEnd) {
+    MOZ_ASSERT(toStringStart_ <= toStringEnd);
+    MOZ_ASSERT(toStringEnd_ >= sourceEnd_);
+    toStringEnd_ = toStringEnd;
+  }
+
   uint32_t lineno() const { return lineno_; }
   uint32_t column() const { return column_; }
 
@@ -2729,26 +2735,15 @@ class JSScript : public js::BaseScript {
   void setLazyScript(js::LazyScript* lazy) { lazyScript = lazy; }
   js::LazyScript* maybeLazyScript() { return lazyScript; }
 
-  /*
-   * Original compiled function for the script, if it has a function.
-   * nullptr for global and eval scripts.
-   * The delazifying variant ensures that the function isn't lazy. The
-   * non-delazifying variant must only be used after earlier code has
-   * called ensureNonLazyCanonicalFunction and while the function can't
-   * have been relazified.
-   */
-  inline JSFunction* functionDelazifying() const;
-  JSFunction* functionNonDelazifying() const {
+  // Canonical function for the script, if it has a function. For global and
+  // eval scripts this is nullptr. The canonical function is never lazy if the
+  // script exists.
+  JSFunction* function() const {
     if (bodyScope()->is<js::FunctionScope>()) {
       return bodyScope()->as<js::FunctionScope>().canonicalFunction();
     }
     return nullptr;
   }
-  /*
-   * De-lazifies the canonical function. Must be called before entering code
-   * that expects the function to be non-lazy.
-   */
-  inline void ensureNonLazyCanonicalFunction();
 
   bool isModule() const {
     MOZ_ASSERT(hasFlag(ImmutableFlags::IsModule) ==
@@ -2813,7 +2808,7 @@ class JSScript : public js::BaseScript {
    * If this script has a function associated to it, then it is not the
    * top-level of a file.
    */
-  bool isTopLevel() { return code() && !functionNonDelazifying(); }
+  bool isTopLevel() { return code() && !function(); }
 
   /* Ensure the script has a JitScript. */
   inline bool ensureHasJitScript(JSContext* cx, js::jit::AutoKeepJitScripts&);
@@ -3065,13 +3060,6 @@ class JSScript : public js::BaseScript {
 
   inline JSFunction* getFunction(size_t index);
   inline JSFunction* getFunction(jsbytecode* pc);
-
-  JSFunction* function() const {
-    if (functionNonDelazifying()) {
-      return functionNonDelazifying();
-    }
-    return nullptr;
-  }
 
   inline js::RegExpObject* getRegExp(size_t index);
   inline js::RegExpObject* getRegExp(jsbytecode* pc);
@@ -3346,11 +3334,7 @@ class LazyScript : public BaseScript {
       uint32_t sourceStart, uint32_t sourceEnd, uint32_t toStringStart,
       uint32_t toStringEnd, uint32_t lineno, uint32_t column);
 
-  static inline JSFunction* functionDelazifying(JSContext* cx,
-                                                Handle<LazyScript*>);
-  JSFunction* functionNonDelazifying() const {
-    return &functionOrGlobal_->as<JSFunction>();
-  }
+  JSFunction* function() const { return &functionOrGlobal_->as<JSFunction>(); }
 
   bool canRelazify() const {
     // Only functions without inner functions or direct eval are re-lazified.
@@ -3432,12 +3416,6 @@ class LazyScript : public BaseScript {
   const FieldInitializers& getFieldInitializers() const {
     MOZ_ASSERT(lazyData_);
     return lazyData_->fieldInitializers_;
-  }
-
-  void setToStringEnd(uint32_t toStringEnd) {
-    MOZ_ASSERT(toStringStart_ <= toStringEnd);
-    MOZ_ASSERT(toStringEnd_ >= sourceEnd_);
-    toStringEnd_ = toStringEnd;
   }
 
   // Returns true if the enclosing script has ever been compiled.

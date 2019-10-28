@@ -18,7 +18,7 @@
 #include "builtin/streams/QueueWithSizes.h"  // js::ResetQueue
 #include "builtin/streams/WritableStream.h"  // js::WritableStream
 #include "builtin/streams/WritableStreamDefaultController.h"  // js::WritableStreamDefaultController
-#include "builtin/streams/WritableStreamOperations.h"  // js::WritableStream{DealWithRejection,FinishErroring,UpdateBackpressure}
+#include "builtin/streams/WritableStreamOperations.h"  // js::WritableStream{DealWithRejection,{Start,Finish}Erroring,UpdateBackpressure}
 #include "js/CallArgs.h"    // JS::CallArgs{,FromVp}
 #include "js/RootingAPI.h"  // JS::Handle, JS::Rooted
 #include "js/Value.h"       // JS::{,Object}Value
@@ -28,6 +28,7 @@
 #include "vm/Runtime.h"     // JSAtomState
 
 #include "builtin/streams/HandlerFunction-inl.h"  // js::TargetFromHandler
+#include "vm/JSContext-inl.h"                     // JSContext::check
 #include "vm/JSObject-inl.h"  // js::NewBuiltinClassInstance, js::NewObjectWithClassProto
 
 using JS::CallArgs;
@@ -259,6 +260,10 @@ MOZ_MUST_USE bool js::SetUpWritableStreamDefaultController(
 MOZ_MUST_USE bool js::SetUpWritableStreamDefaultControllerFromUnderlyingSink(
     JSContext* cx, Handle<WritableStream*> stream, Handle<Value> underlyingSink,
     double highWaterMark, Handle<Value> sizeAlgorithm) {
+  cx->check(stream);
+  cx->check(underlyingSink);
+  cx->check(sizeAlgorithm);
+
   // Step 1: Assert: underlyingSink is not undefined.
   MOZ_ASSERT(!underlyingSink.isUndefined());
 
@@ -307,6 +312,29 @@ MOZ_MUST_USE bool js::SetUpWritableStreamDefaultControllerFromUnderlyingSink(
   return SetUpWritableStreamDefaultController(
       cx, stream, sinkAlgorithms, underlyingSink, writeMethod, closeMethod,
       abortMethod, highWaterMark, sizeAlgorithm);
+}
+
+/**
+ * Streams spec, 4.8.4.
+ *      WritableStreamDefaultControllerClearAlgorithms ( controller )
+ */
+void js::WritableStreamDefaultControllerClearAlgorithms(
+    WritableStreamDefaultController* unwrappedController) {
+  // Note: This operation will be performed multiple times in some edge cases,
+  //       so it can't assert that the various algorithms initially haven't been
+  //       cleared.
+
+  // Step 1: Set controller.[[writeAlgorithm]] to undefined.
+  unwrappedController->clearWriteMethod();
+
+  // Step 2: Set controller.[[closeAlgorithm]] to undefined.
+  unwrappedController->clearCloseMethod();
+
+  // Step 3: Set controller.[[abortAlgorithm]] to undefined.
+  unwrappedController->clearAbortMethod();
+
+  // Step 4: Set controller.[[strategySizeAlgorithm]] to undefined.
+  unwrappedController->clearStrategySize();
 }
 
 /**
@@ -386,6 +414,30 @@ MOZ_MUST_USE bool WritableStreamDefaultControllerAdvanceQueueIfNeeded(
  *      WritableStreamDefaultControllerGetBackpressure ( controller )
  */
 bool js::WritableStreamDefaultControllerGetBackpressure(
-    const WritableStreamDefaultController* controller) {
-  return WritableStreamDefaultControllerGetDesiredSize(controller) <= 0.0;
+    const WritableStreamDefaultController* unwrappedController) {
+  return WritableStreamDefaultControllerGetDesiredSize(unwrappedController) <=
+         0.0;
+}
+
+/**
+ * Streams spec, 4.8.14.
+ *      WritableStreamDefaultControllerError ( controller, error )
+ */
+bool js::WritableStreamDefaultControllerError(
+    JSContext* cx, Handle<WritableStreamDefaultController*> unwrappedController,
+    Handle<Value> error) {
+  cx->check(error);
+
+  // Step 1: Let stream be controller.[[controlledWritableStream]].
+  Rooted<WritableStream*> unwrappedStream(cx, unwrappedController->stream());
+
+  // Step 2: Assert: stream.[[state]] is "writable".
+  MOZ_ASSERT(unwrappedStream->writable());
+
+  // Step 3: Perform
+  //         ! WritableStreamDefaultControllerClearAlgorithms(controller).
+  WritableStreamDefaultControllerClearAlgorithms(unwrappedController);
+
+  // Step 4: Perform ! WritableStreamStartErroring(stream, error).
+  return WritableStreamStartErroring(cx, unwrappedStream, error);
 }

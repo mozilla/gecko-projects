@@ -1307,8 +1307,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void branchIfTrueBool(Register reg, Label* label);
 
   inline void branchIfRope(Register str, Label* label);
-  inline void branchIfRopeOrExternal(Register str, Register temp, Label* label);
-
   inline void branchIfNotRope(Register str, Label* label);
 
   inline void branchLatin1String(Register string, Label* label);
@@ -3139,6 +3137,16 @@ class MacroAssembler : public MacroAssemblerSpecific {
                             Register output, Label* fail) {
     truncateValueToInt32(value, nullptr, nullptr, nullptr, nullptr, InvalidReg,
                          temp, output, fail);
+  }
+
+  // Truncates, i.e. removes any fractional parts, but doesn't wrap around to
+  // the int32 range.
+  void truncateNoWrapValueToInt32(ValueOperand value, MDefinition* input,
+                                  FloatRegister temp, Register output,
+                                  Label* truncateDoubleSlow, Label* fail) {
+    convertValueToInt(value, input, nullptr, nullptr, truncateDoubleSlow,
+                      InvalidReg, temp, output, fail,
+                      IntConversionBehavior::TruncateNoWrap);
   }
 
   // Convenience functions for clamping values to uint8.

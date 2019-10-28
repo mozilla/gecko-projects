@@ -4003,9 +4003,10 @@ nsresult nsCSSFrameConstructor::GetAnonymousContent(
 
   // Some situations where we don't cache anonymous content styles:
   //
-  // * when visibility is anything other than visible; we rely on visibility
-  //   inheriting into anonymous content, but don't bother adding this state
-  //   to the AnonymousContentKey, since it's not so common
+  // * when visibility or pointer-events is anything other than the initial
+  //   value; we rely on visibility and pointer-events inheriting into anonymous
+  //   content, but don't bother adding this state to the AnonymousContentKey,
+  //   since it's not so common
   //
   // * when the medium is anything other than screen; some UA style sheet rules
   //   apply in e.g. print medium, and will give different results from the
@@ -4014,6 +4015,7 @@ nsresult nsCSSFrameConstructor::GetAnonymousContent(
       StaticPrefs::layout_css_cached_scrollbar_styles_enabled() &&
       aParentFrame->StyleVisibility()->mVisible ==
           NS_STYLE_VISIBILITY_VISIBLE &&
+      aParentFrame->StyleUI()->mPointerEvents == NS_STYLE_POINTER_EVENTS_AUTO &&
       mPresShell->GetPresContext()->Medium() == nsGkAtoms::screen;
 
   // Compute styles for the anonymous content tree.
@@ -4137,11 +4139,9 @@ nsCSSFrameConstructor::FindXULTagData(const Element& aElement,
       SCROLLABLE_XUL_CREATE(toolbarpaletteitem, NS_NewBoxFrame),
       SCROLLABLE_XUL_CREATE(treecolpicker, NS_NewButtonBoxFrame),
       SIMPLE_XUL_CREATE(image, NS_NewImageBoxFrame),
-      SIMPLE_XUL_CREATE(spring, NS_NewLeafBoxFrame),
       SIMPLE_XUL_CREATE(spacer, NS_NewLeafBoxFrame),
       SIMPLE_XUL_CREATE(treechildren, NS_NewTreeBodyFrame),
       SIMPLE_XUL_CREATE(treecol, NS_NewTreeColFrame),
-      SIMPLE_XUL_CREATE(text, NS_NewTextBoxFrame),
       SIMPLE_TAG_CHAIN(button, nsCSSFrameConstructor::FindXULButtonData),
       SIMPLE_TAG_CHAIN(toolbarbutton, nsCSSFrameConstructor::FindXULButtonData),
       SIMPLE_TAG_CHAIN(label, nsCSSFrameConstructor::FindXULLabelData),

@@ -11,15 +11,17 @@
 
 #include "mozilla/Attributes.h"  // MOZ_MUST_USE
 
+#include "jstypes.h"          // JS_PUBLIC_API
 #include "js/Class.h"         // JSClass, js::ClassSpec
 #include "js/Value.h"         // JS::{,Object,Undefined}Value
 #include "vm/NativeObject.h"  // js::NativeObject
 
-struct JSContext;
-class JSObject;
+struct JS_PUBLIC_API JSContext;
+class JS_PUBLIC_API JSObject;
 
 namespace js {
 
+class PromiseObject;
 class WritableStream;
 
 class WritableStreamDefaultWriter : public NativeObject {
@@ -31,22 +33,42 @@ class WritableStreamDefaultWriter : public NativeObject {
    * details.
    */
   enum Slots {
+    /**
+     * A promise that is resolved when the stream this writes to becomes closed.
+     *
+     * This promise is created while this writer is being created, beneath
+     * |WritableStream.prototype.getWriter|, so it is same-compartment with this
+     * writer.
+     */
     Slot_ClosedPromise,
+
+    /**
+     * The stream that this writer writes to.  Because writers are created under
+     * |WritableStream.prototype.getWriter| which may not be same-compartment
+     * with the stream, this is potentially a wrapper.
+     */
     Slot_Stream,
+
+    /**
+     * The promise returned by the |writer.ready| getter property, a promise
+     * signaling that the related stream is accepting writes.
+     *
+     * This value repeatedly changes as the related stream changes back and
+     * forth between being writable and temporarily filled (or, ultimately,
+     * errored or aborted).  These changes are invoked by a number of user-
+     * visible functions, so this may be a wrapper around a promise in another
+     * realm.
+     */
     Slot_ReadyPromise,
+
     SlotCount,
   };
 
-  JSObject* closedPromise() const {
-    return &getFixedSlot(Slot_ClosedPromise).toObject();
-  }
-  void setClosedPromise(JSObject* wrappedPromise) {
-    setFixedSlot(Slot_ClosedPromise, JS::ObjectValue(*wrappedPromise));
-  }
+  inline PromiseObject* closedPromise() const;
+  inline void setClosedPromise(PromiseObject* promise);
 
   bool hasStream() const { return !getFixedSlot(Slot_Stream).isUndefined(); }
-  inline WritableStream* stream() const;
-  inline void setStream(WritableStream* stream);
+  inline void setStream(JSObject* stream);
   void clearStream() { setFixedSlot(Slot_Stream, JS::UndefinedValue()); }
 
   JSObject* readyPromise() const {

@@ -36,6 +36,7 @@
 #include "mozilla/dom/Document.h"
 #include "mozilla/net/NeckoMessageUtils.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_permissions.h"
 #include "nsReadLine.h"
 #include "mozilla/Telemetry.h"
 #include "nsIConsoleService.h"
@@ -154,16 +155,27 @@ bool IsPreloadPermission(const nsACString& aType) {
   return false;
 }
 
+// Strip private browsing and user context (if enabled by pref)
+// Flipping these prefs changes the suffix being hashed.
+void MaybeStripOAs(OriginAttributes& aOriginAttributes) {
+  uint32_t flags = 0;
+
+  if (!StaticPrefs::permissions_isolateBy_privateBrowsing()) {
+    flags |= OriginAttributes::STRIP_PRIVATE_BROWSING_ID;
+  }
+
+  if (!StaticPrefs::permissions_isolateBy_userContext()) {
+    flags |= OriginAttributes::STRIP_USER_CONTEXT_ID;
+  }
+
+  if (flags != 0) {
+    aOriginAttributes.StripAttributes(flags);
+  }
+}
+
 void OriginAppendOASuffix(OriginAttributes aOriginAttributes,
                           nsACString& aOrigin) {
-  // mPrivateBrowsingId must be set to false because PermissionManager is not
-  // supposed to have any knowledge of private browsing. Allowing it to be true
-  // changes the suffix being hashed.
-  aOriginAttributes.mPrivateBrowsingId = 0;
-
-  // Disable userContext for permissions.
-  aOriginAttributes.StripAttributes(
-      mozilla::OriginAttributes::STRIP_USER_CONTEXT_ID);
+  MaybeStripOAs(aOriginAttributes);
 
   nsAutoCString oaSuffix;
   aOriginAttributes.CreateSuffix(oaSuffix);
@@ -214,13 +226,7 @@ nsresult GetPrincipalFromOrigin(const nsACString& aOrigin,
     return NS_ERROR_FAILURE;
   }
 
-  // mPrivateBrowsingId must be set to false because PermissionManager is not
-  // supposed to have any knowledge of private browsing. Allowing it to be true
-  // changes the suffix being hashed.
-  attrs.mPrivateBrowsingId = 0;
-
-  // Disable userContext for permissions.
-  attrs.StripAttributes(mozilla::OriginAttributes::STRIP_USER_CONTEXT_ID);
+  MaybeStripOAs(attrs);
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_NewURI(getter_AddRefs(uri), originNoSuffix);
@@ -3214,13 +3220,7 @@ void nsPermissionManager::GetKeyForOrigin(const nsACString& aOrigin,
     return;
   }
 
-  // mPrivateBrowsingId must be set to false because PermissionManager is not
-  // supposed to have any knowledge of private browsing. Allowing it to be true
-  // changes the suffix being hashed.
-  attrs.mPrivateBrowsingId = 0;
-
-  // Disable userContext for permissions.
-  attrs.StripAttributes(OriginAttributes::STRIP_USER_CONTEXT_ID);
+  MaybeStripOAs(attrs);
 
 #ifdef DEBUG
   // Parse the origin string into a principal, and extract some useful
