@@ -39,7 +39,6 @@ HttpTransactionChild::HttpTransactionChild(const uint64_t& aChannelId)
       mIPCOpen(true),
       mCanceled(false),
       mStatus(NS_OK),
-      mTransaction(new nsHttpTransaction()),
       mVersionOk(false),
       mAuthOK(false),
       mTransactionCloseReason(NS_OK) {
@@ -126,6 +125,7 @@ nsresult HttpTransactionChild::InitInternal(
       pushedStreamId, mChannelId, responseTimeoutEnabled, initialRwin);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     mTransaction = nullptr;
+    return rv;
   }
 
   if (caps & NS_HTTP_ONPUSH_LISTENER) {
@@ -209,22 +209,23 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvInit(
         static_cast<InputChannelThrottleQueueChild*>(aThrottleQueue.ref());
   }
 
-  // TODO: let parent process know about the failure
-  if (NS_FAILED(InitInternal(
-          aCaps, aArgs, &mRequestHead, mUploadStream, aReqContentLength,
-          aReqBodyIncludesHeaders, GetCurrentThreadEventTarget(),
-          aTopLevelOuterContentWindowId, aHttpTrafficCategory,
-          aRequestContextID, aClassOfService, aPushedStreamId,
-          aResponseTimeoutEnabled, aInitialRwin))) {
+  mTransaction = new nsHttpTransaction();
+  nsresult rv = InitInternal(
+      aCaps, aArgs, &mRequestHead, mUploadStream, aReqContentLength,
+      aReqBodyIncludesHeaders, GetCurrentThreadEventTarget(),
+      aTopLevelOuterContentWindowId, aHttpTrafficCategory, aRequestContextID,
+      aClassOfService, aPushedStreamId, aResponseTimeoutEnabled, aInitialRwin);
+  if (NS_FAILED(rv)) {
     LOG(("HttpTransactionChild::RecvInit: [this=%p] InitInternal failed!\n",
          this));
+    mTransaction = nullptr;
+    SendOnInitFailed(rv);
   }
   return IPC_OK();
 }
 
 mozilla::ipc::IPCResult HttpTransactionChild::RecvRead() {
   LOG(("HttpTransactionChild::RecvRead start [this=%p]\n", this));
-  MOZ_ASSERT(mTransaction, "should SentInit first");
   if (mTransaction) {
     Unused << mTransaction->AsyncRead(this, getter_AddRefs(mTransactionPump));
   }

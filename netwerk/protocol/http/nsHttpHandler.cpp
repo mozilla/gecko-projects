@@ -2735,6 +2735,11 @@ HttpTrafficAnalyzer* nsHttpHandler::GetHttpTrafficAnalyzer() {
 
 nsresult nsHttpHandler::InitiateTransaction(nsAHttpTransactionShell* aTrans,
                                             int32_t aPriority) {
+  // This could happen when nsAHttpTransactionShell::Init() failed.
+  if (!aTrans) {
+    return NS_ERROR_FAILURE;
+  }
+
   if (gIOService->UseSocketProcess() && gIOService->SocketProcessReady()) {
     HttpTransactionParent* trans = aTrans->AsHttpTransactionParent();
     MOZ_ASSERT(trans);
@@ -2752,6 +2757,10 @@ nsresult nsHttpHandler::InitiateTransaction(nsAHttpTransactionShell* aTrans,
 nsresult nsHttpHandler::InitiateTransactionWithStickyConn(
     nsAHttpTransactionShell* aTrans, int32_t aPriority,
     nsAHttpTransactionShell* aTransWithStickyConn) {
+  if (!aTrans || !aTransWithStickyConn) {
+    return NS_ERROR_FAILURE;
+  }
+
   if (gIOService->UseSocketProcess() && gIOService->SocketProcessReady()) {
     HttpTransactionParent* trans = aTrans->AsHttpTransactionParent();
     MOZ_ASSERT(trans);

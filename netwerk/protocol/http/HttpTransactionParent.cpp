@@ -639,6 +639,15 @@ mozilla::ipc::IPCResult HttpTransactionParent::RecvOnNetAddrUpdate(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult HttpTransactionParent::RecvOnInitFailed(
+    const nsresult& aStatus) {
+  nsCOMPtr<nsIRequest> request = do_QueryInterface(mEventsink);
+  if (request) {
+    request->Cancel(aStatus);
+  }
+  return IPC_OK();
+}
+
 //-----------------------------------------------------------------------------
 // HttpTransactionParent <nsIRequest>
 //-----------------------------------------------------------------------------

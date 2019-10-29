@@ -59,6 +59,7 @@ class HttpTransactionParent final : public PHttpTransactionParent,
       const TransactionObserverResult& aResult);
   mozilla::ipc::IPCResult RecvOnNetAddrUpdate(const NetAddr& aSelfAddr,
                                               const NetAddr& aPeerAddr);
+  mozilla::ipc::IPCResult RecvOnInitFailed(const nsresult& aStatus);
 
   void DoOnStartRequest(const nsresult& aStatus,
                         const Maybe<nsHttpResponseHead>& aResponseHead,
@@ -77,7 +78,6 @@ class HttpTransactionParent final : public PHttpTransactionParent,
                        const nsHttpHeaderArray& responseTrailers,
                        const bool& aHasStickyConn,
                        const TransactionObserverResult& aResult);
-
   void DoNotifyListener();
 
  private:

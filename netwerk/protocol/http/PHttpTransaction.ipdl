@@ -55,6 +55,7 @@ parent:
                       bool hasStickyConn,
                       TransactionObserverResult result);
   async OnNetAddrUpdate(NetAddr selfAddr, NetAddr peerAddr);
+  async OnInitFailed(nsresult status);
 
 child:
   async __delete__();
