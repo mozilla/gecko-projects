@@ -1855,6 +1855,9 @@ class IDLDictionary(IDLObjectWithScope):
         self._finished = False
         self.members = list(members)
         self._partialDictionaries = []
+        self._extendedAttrDict = {}
+        self.needsConversionToJS = False
+        self.needsConversionFromJS = False
 
         IDLObjectWithScope.__init__(self, location, parentScope, name)
 
@@ -1988,11 +1991,34 @@ class IDLDictionary(IDLObjectWithScope):
                                   self.identifier.name,
                                   [member.location] + locations)
 
+    def getExtendedAttribute(self, name):
+        return self._extendedAttrDict.get(name, None)
+
     def addExtendedAttributes(self, attrs):
-        if len(attrs) != 0:
-            raise WebIDLError("There are no extended attributes that are "
-                              "allowed on dictionaries",
-                              [attrs[0].location, self.location])
+        for attr in attrs:
+            identifier = attr.identifier()
+
+            if (identifier == "GenerateInitFromJSON" or
+                identifier == "GenerateInit"):
+                if not attr.noArguments():
+                    raise WebIDLError("[%s] must not have arguments" % identifier,
+                                      [attr.location])
+                self.needsConversionFromJS = True
+            elif (identifier == "GenerateConversionToJS" or
+                  identifier == "GenerateToJSON"):
+                if not attr.noArguments():
+                    raise WebIDLError("[%s] must not have arguments" % identifier,
+                                      [attr.location])
+                # ToJSON methods require to-JS conversion, because we
+                # implement ToJSON by converting to a JS object and
+                # then using JSON.stringify.
+                self.needsConversionToJS = True
+            else:
+                raise WebIDLError("[%s] extended attribute not allowed on "
+                                  "dictionaries" % identifier,
+                                  [attr.location])
+
+            self._extendedAttrDict[identifier] = True
 
     def _getDependentObjects(self):
         deps = set(self.members)
@@ -2003,6 +2029,7 @@ class IDLDictionary(IDLObjectWithScope):
     def addPartialDictionary(self, partial):
         assert self.identifier.name == partial.identifier.name
         self._partialDictionaries.append(partial)
+
 
 class IDLEnum(IDLObjectWithIdentifier):
     def __init__(self, location, parentScope, name, values):
@@ -4626,7 +4653,7 @@ class IDLAttribute(IDLInterfaceMember):
                            identifier,
                            returnType=self.type, arguments=[],
                            stringifier=True, underlyingAttr=self)
-        allowedExtAttrs = ["Throws", "NeedsSubjectPrincipal"]
+        allowedExtAttrs = ["Throws", "NeedsSubjectPrincipal", "Pure"]
         # Safe to ignore these as they are only meaningful for attributes
         attributeOnlyExtAttrs = [
             "CEReactions",

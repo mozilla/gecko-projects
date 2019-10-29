@@ -47,8 +47,8 @@ use api::channel::{MsgSender, PayloadReceiverHelperMethods};
 use crate::batch::{AlphaBatchContainer, BatchKind, BatchFeatures, BatchTextures, BrushBatchKind, ClipBatchList};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use crate::capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
-use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile, CompositeMode, Compositor};
-use crate::composite::{NativeSurfaceOperationDetails};
+use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile, CompositorKind, Compositor};
+use crate::composite::{CompositorConfig, NativeSurfaceOperationDetails, NativeSurfaceId};
 use crate::debug_colors;
 use crate::debug_render::{DebugItem, DebugRenderer};
 use crate::device::{DepthFunction, Device, GpuFrameId, Program, UploadMethod, Texture, PBO};
@@ -939,19 +939,6 @@ impl CpuProfile {
             draw_calls,
         }
     }
-}
-
-/// Defines the configuration that the client is using to present results
-/// to the underlying device.
-#[derive(Debug, Copy, Clone)]
-pub enum PresentConfig {
-    /// In this mode, the device supports updating some number of dirty
-    /// regions since the last frame was drawn, which can provide significant
-    /// power savings.
-    PartialPresent {
-        /// The maximum number of dirty rects that are supported by the device.
-        max_dirty_rects: usize,
-    },
 }
 
 /// The selected partial present mode for a given frame.
@@ -1869,16 +1856,18 @@ pub struct Renderer {
     #[cfg(feature = "replay")]
     owned_external_images: FastHashMap<(ExternalImageId, u8), ExternalTexture>,
 
-    /// The current presentation config, affecting how WR composites into the
-    /// final scene.
-    present_config: Option<PresentConfig>,
+    /// The compositing config, affecting how WR composites into the final scene.
+    compositor_config: CompositorConfig,
+
+    /// Maintains a set of allocated native composite surfaces. This allows any
+    /// currently allocated surfaces to be cleaned up as soon as deinit() is
+    /// called (the normal bookkeeping for native surfaces exists in the
+    /// render backend thread).
+    allocated_native_surfaces: FastHashSet<NativeSurfaceId>,
 
     /// If true, partial present state has been reset and everything needs to
     /// be drawn on the next render.
     force_redraw: bool,
-
-    /// An optional client provided interface to a native OS compositor
-    native_compositor: Option<Box<dyn Compositor>>,
 }
 
 #[derive(Debug)]
@@ -2136,9 +2125,9 @@ impl Renderer {
             (false, _) => FontRenderMode::Mono,
         };
 
-        let composite_mode = match options.native_compositor {
-            Some(..) => CompositeMode::Native,
-            None => CompositeMode::Draw,
+        let compositor_kind = match options.compositor_config {
+            CompositorConfig::Draw { max_partial_present_rects } => CompositorKind::Draw { max_partial_present_rects },
+            CompositorConfig::Native { max_update_rects, .. } => CompositorKind::Native { max_update_rects },
         };
 
         let config = FrameBuilderConfig {
@@ -2153,11 +2142,10 @@ impl Renderer {
             advanced_blend_is_coherent: ext_blend_equation_advanced_coherent,
             batch_lookback_count: options.batch_lookback_count,
             background_color: options.clear_color,
-            composite_mode,
+            compositor_kind,
         };
         info!("WR {:?}", config);
 
-        let present_config = options.present_config.take();
         let device_pixel_ratio = options.device_pixel_ratio;
         let debug_flags = options.debug_flags;
         let payload_rx_for_backend = payload_rx.to_mpsc_receiver();
@@ -2390,9 +2378,9 @@ impl Renderer {
             cursor_position: DeviceIntPoint::zero(),
             shared_texture_cache_cleared: false,
             documents_seen: FastHashSet::default(),
-            present_config,
             force_redraw: true,
-            native_compositor: options.native_compositor,
+            compositor_config: options.compositor_config,
+            allocated_native_surfaces: FastHashSet::default(),
         };
 
         // We initially set the flags to default and then now call set_debug_flags
@@ -3989,6 +3977,7 @@ impl Renderer {
         draw_target: DrawTarget,
         projection: &default::Transform3D<f32>,
         results: &mut RenderResults,
+        max_partial_present_rects: usize,
     ) {
         let _gm = self.gpu_profile.start_marker("framebuffer");
         let _timer = self.gpu_profile.start_timer(GPU_TAG_COMPOSITE);
@@ -4001,7 +3990,7 @@ impl Renderer {
         // framebuffer clears and calculating the clip rect for each tile that is drawn.
         let mut partial_present_mode = None;
 
-        if let Some(PresentConfig::PartialPresent { max_dirty_rects }) = self.present_config {
+        if max_partial_present_rects > 0 {
             // We can only use partial present if we have valid dirty rects and the
             // client hasn't reset partial present state since last frame.
             if composite_state.dirty_rects_are_valid && !self.force_redraw {
@@ -4018,7 +4007,7 @@ impl Renderer {
                     }
                 }
 
-                let mode = if dirty_rect_count > max_dirty_rects {
+                let mode = if dirty_rect_count > max_partial_present_rects {
                     // In this case, WR produced more dirty rects than what the device supports.
                     // As a simple way to handle this, just union all the dirty rects into a
                     // single dirty rect.
@@ -4890,17 +4879,23 @@ impl Renderer {
         &mut self,
         composite_state: &CompositeState,
     ) {
-        match self.native_compositor {
-            Some(ref mut compositor) => {
+        match self.compositor_config {
+            CompositorConfig::Native { ref mut compositor, .. } => {
                 for op in &composite_state.native_surface_updates {
                     match op.details {
                         NativeSurfaceOperationDetails::CreateSurface { size } => {
+                            let _inserted = self.allocated_native_surfaces.insert(op.id);
+                            debug_assert!(_inserted, "bug: creating existing surface");
+
                             compositor.create_surface(
                                 op.id,
                                 size,
                             );
                         }
                         NativeSurfaceOperationDetails::DestroySurface => {
+                            let _existed = self.allocated_native_surfaces.remove(&op.id);
+                            debug_assert!(_existed, "bug: removing unknown surface");
+
                             compositor.destroy_surface(
                                 op.id,
                             );
@@ -4908,7 +4903,7 @@ impl Renderer {
                     }
                 }
             }
-            None => {
+            CompositorConfig::Draw { .. } => {
                 // Ensure nothing is added in simple composite mode, since otherwise
                 // memory will leak as this doesn't get drained
                 debug_assert!(composite_state.native_surface_updates.is_empty());
@@ -4994,17 +4989,18 @@ impl Renderer {
                         if self.enable_picture_caching {
                             // If we have a native OS compositor, then make use of that interface
                             // to specify how to composite each of the picture cache surfaces.
-                            match self.native_compositor {
-                                Some(ref mut interface) => {
-                                    frame.composite_state.composite_native(&mut **interface);
+                            match self.compositor_config {
+                                CompositorConfig::Native { ref mut compositor, .. } => {
+                                    frame.composite_state.composite_native(&mut **compositor);
                                 }
-                                None => {
+                                CompositorConfig::Draw { max_partial_present_rects, .. } => {
                                     self.composite_simple(
                                         &frame.composite_state,
                                         clear_framebuffer,
                                         draw_target,
                                         &projection,
                                         results,
+                                        max_partial_present_rects,
                                     );
                                 }
                             }
@@ -5072,13 +5068,18 @@ impl Renderer {
                                     )
                                 }
                                 ResolvedSurfaceTexture::NativeSurface { id, size, .. } => {
-                                    let offset = self.native_compositor
-                                        .as_mut()
-                                        .expect("bug: no native compositor")
-                                        .bind(id);
+                                    let surface_info = match self.compositor_config {
+                                        CompositorConfig::Native { ref mut compositor, .. } => {
+                                            compositor.bind(id, picture_target.dirty_rect)
+                                        }
+                                        CompositorConfig::Draw { .. } => {
+                                            unreachable!();
+                                        }
+                                    };
 
                                     DrawTarget::NativeSurface {
-                                        offset,
+                                        offset: surface_info.origin,
+                                        external_fbo_id: surface_info.fbo_id,
                                         dimensions: size,
                                     }
                                 }
@@ -5104,10 +5105,14 @@ impl Renderer {
 
                             // Native OS surfaces must be unbound at the end of drawing to them
                             if let ResolvedSurfaceTexture::NativeSurface { .. } = picture_target.surface {
-                                self.native_compositor
-                                    .as_mut()
-                                    .expect("bug: no native compositor")
-                                    .unbind();
+                                match self.compositor_config {
+                                    CompositorConfig::Native { ref mut compositor, .. } => {
+                                        compositor.unbind();
+                                    }
+                                    CompositorConfig::Draw { .. } => {
+                                        unreachable!();
+                                    }
+                                }
                             }
                         }
                     }
@@ -5689,6 +5694,13 @@ impl Renderer {
     pub fn deinit(mut self) {
         //Note: this is a fake frame, only needed because texture deletion is require to happen inside a frame
         self.device.begin_frame();
+        // If we are using a native compositor, ensure that any remaining native
+        // surfaces are freed.
+        if let CompositorConfig::Native { mut compositor, .. } = self.compositor_config {
+            for id in self.allocated_native_surfaces.drain() {
+                compositor.destroy_surface(id);
+            }
+        }
         self.gpu_cache_texture.deinit(&mut self.device);
         if let Some(dither_matrix_texture) = self.dither_matrix_texture {
             self.device.delete_texture(dither_matrix_texture);
@@ -6011,11 +6023,9 @@ pub struct RendererOptions {
     pub start_debug_server: bool,
     /// Output the source of the shader with the given name.
     pub dump_shader_source: Option<String>,
-    /// An optional presentation config for compositor integration.
-    pub present_config: Option<PresentConfig>,
-    /// An optional client provided interface to a native / OS compositor.
-    pub native_compositor: Option<Box<dyn Compositor>>,
     pub surface_is_y_flipped: bool,
+    /// The configuration options defining how WR composites the final scene.
+    pub compositor_config: CompositorConfig,
 }
 
 impl Default for RendererOptions {
@@ -6067,9 +6077,8 @@ impl Default for RendererOptions {
             // needed.
             start_debug_server: true,
             dump_shader_source: None,
-            present_config: None,
-            native_compositor: None,
             surface_is_y_flipped: false,
+            compositor_config: CompositorConfig::default(),
         }
     }
 }

@@ -27,12 +27,15 @@ ChromeUtils.defineModuleGetter(
 var AboutNetErrorHandler = {
   _inited: false,
   _topics: [
+    "AddCertException",
     "Browser:EnableOnlineMode",
     "Browser:OpenCaptivePortalPage",
     "Browser:PrimeMitm",
     "Browser:ResetEnterpriseRootsPref",
+    "Browser:ResetSSLPreferences",
     "Browser:SSLErrorGoBack",
     "GetChangedCertPrefs",
+    "ReportTLSError",
   ],
 
   init() {
@@ -74,6 +77,13 @@ var AboutNetErrorHandler = {
 
   receiveMessage(msg) {
     switch (msg.name) {
+      case "AddCertException":
+        this.addCertException(
+          msg.browsingContextID,
+          msg.target.browser,
+          msg.data.location
+        );
+        break;
       case "Browser:EnableOnlineMode":
         // Reset network state and refresh the page.
         Services.io.offline = false;
@@ -88,6 +98,15 @@ var AboutNetErrorHandler = {
       case "Browser:ResetEnterpriseRootsPref":
         Services.prefs.clearUserPref("security.enterprise_roots.enabled");
         Services.prefs.clearUserPref("security.enterprise_roots.auto-enabled");
+        break;
+      case "Browser:ResetSSLPreferences":
+        let prefSSLImpact = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
+          return prefs.concat(Services.prefs.getChildList(root));
+        }, []);
+        for (let prefName of prefSSLImpact) {
+          Services.prefs.clearUserPref(prefName);
+        }
+        msg.target.browser.reload();
         break;
       case "Browser:SSLErrorGoBack":
         this.goBackFromErrorPage(msg.target.browser.ownerGlobal);
@@ -104,7 +123,61 @@ var AboutNetErrorHandler = {
           hasChangedCertPrefs,
         });
         break;
+      case "ReportTLSError":
+        this.reportTLSError(
+          msg.browsingContextID,
+          msg.data.host,
+          msg.data.port
+        );
+        break;
     }
+  },
+
+  async addCertException(bcID, browser, location) {
+    let securityInfo = await BrowsingContext.get(
+      bcID
+    ).currentWindowGlobal.getSecurityInfo();
+    securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
+
+    let overrideService = Cc["@mozilla.org/security/certoverride;1"].getService(
+      Ci.nsICertOverrideService
+    );
+    let flags = 0;
+    if (securityInfo.isUntrusted) {
+      flags |= overrideService.ERROR_UNTRUSTED;
+    }
+    if (securityInfo.isDomainMismatch) {
+      flags |= overrideService.ERROR_MISMATCH;
+    }
+    if (securityInfo.isNotValidAtThisTime) {
+      flags |= overrideService.ERROR_TIME;
+    }
+
+    let uri = Services.uriFixup.createFixupURI(location, 0);
+    let permanentOverride =
+      !PrivateBrowsingUtils.isBrowserPrivate(browser) &&
+      Services.prefs.getBoolPref("security.certerrors.permanentOverride");
+    let cert = securityInfo.serverCert;
+    overrideService.rememberValidityOverride(
+      uri.asciiHost,
+      uri.port,
+      cert,
+      flags,
+      !permanentOverride
+    );
+    browser.reload();
+  },
+
+  async reportTLSError(bcID, host, port) {
+    let securityInfo = await BrowsingContext.get(
+      bcID
+    ).currentWindowGlobal.getSecurityInfo();
+    securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
+
+    let errorReporter = Cc["@mozilla.org/securityreporter;1"].getService(
+      Ci.nsISecurityReporter
+    );
+    errorReporter.reportTLSError(securityInfo, host, port);
   },
 
   hasChangedCertPrefs() {

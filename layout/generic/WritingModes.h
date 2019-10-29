@@ -213,10 +213,22 @@ class WritingMode {
   bool IsBidiLTR() const { return eBidiLTR == GetBidiDir(); }
 
   /**
+   * Return true if bidi direction is RTL. (Convenience method)
+   */
+  bool IsBidiRTL() const { return eBidiRTL == GetBidiDir(); }
+
+  /**
    * True if it is vertical and vertical-lr, or is horizontal and bidi LTR.
    */
   bool IsPhysicalLTR() const {
     return IsVertical() ? IsVerticalLR() : IsBidiLTR();
+  }
+
+  /**
+   * True if it is vertical and vertical-rl, or is horizontal and bidi RTL.
+   */
+  bool IsPhysicalRTL() const {
+    return IsVertical() ? IsVerticalRL() : IsBidiRTL();
   }
 
   /**

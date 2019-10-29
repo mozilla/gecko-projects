@@ -36,18 +36,9 @@ class NetErrorChild extends ActorChild {
     let doc = aEvent.originalTarget.ownerDocument || aEvent.originalTarget;
 
     switch (aEvent.type) {
-      case "AboutNetErrorSetAutomatic":
-        this.onSetAutomatic(aEvent);
-        break;
-      case "AboutNetErrorResetPreferences":
-        this.onResetPreferences(aEvent);
-        break;
       case "click":
         let elem = aEvent.originalTarget;
-        if (
-          elem.id == "viewCertificate" ||
-          elem.id == "exceptionDialogButton"
-        ) {
+        if (elem.id == "viewCertificate") {
           this.mm.sendAsyncMessage("Browser:CertExceptionError", {
             location: doc.location.href,
             elementId: elem.id,
@@ -57,31 +48,6 @@ class NetErrorChild extends ActorChild {
           });
         }
         break;
-    }
-  }
-
-  onResetPreferences(evt) {
-    this.mm.sendAsyncMessage("Browser:ResetSSLPreferences");
-  }
-
-  onSetAutomatic(evt) {
-    this.mm.sendAsyncMessage("Browser:SetSSLErrorReportAuto", {
-      automatic: evt.detail,
-    });
-
-    // If we're enabling reports, send a report for this failure.
-    if (evt.detail) {
-      let win = evt.originalTarget.ownerGlobal;
-      let docShell = win.docShell;
-
-      let { securityInfo } = docShell.failedChannel;
-      securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
-      let { host, port } = win.document.mozDocumentURIIfNotForErrorPages;
-
-      let errorReporter = Cc["@mozilla.org/securityreporter;1"].getService(
-        Ci.nsISecurityReporter
-      );
-      errorReporter.reportTLSError(securityInfo, host, port);
     }
   }
 }

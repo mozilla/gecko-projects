@@ -6,6 +6,11 @@
 
 const formatter = new Intl.DateTimeFormat("default");
 
+// Values for telemetry bins: see TLS_ERROR_REPORT_UI in Histograms.json
+const TLS_ERROR_REPORT_TELEMETRY_AUTO_CHECKED = 2;
+const TLS_ERROR_REPORT_TELEMETRY_AUTO_UNCHECKED = 3;
+const TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN = 0;
+
 // The following parameters are parsed from the error URL:
 //   e - the error code
 //   s - custom CSS class to allow alternate styling/favicons
@@ -65,11 +70,8 @@ function showPrefChangeContainer() {
   document.getElementById("netErrorButtonContainer").style.display = "none";
   document
     .getElementById("prefResetButton")
-    .addEventListener("click", function resetPreferences(e) {
-      const event = new CustomEvent("AboutNetErrorResetPreferences", {
-        bubbles: true,
-      });
-      document.dispatchEvent(event);
+    .addEventListener("click", function resetPreferences() {
+      RPMSendAsyncMessage("Browser:ResetSSLPreferences");
     });
   addAutofocus("#prefResetButton", "beforeend");
 }
@@ -330,12 +332,7 @@ function setupErrorUI() {
 
   let checkbox = document.getElementById("automaticallyReportInFuture");
   checkbox.addEventListener("change", function({ target: { checked } }) {
-    document.dispatchEvent(
-      new CustomEvent("AboutNetErrorSetAutomatic", {
-        detail: checked,
-        bubbles: true,
-      })
-    );
+    onSetAutomatic(checked);
   });
 
   let errorReportingEnabled = RPMGetBoolPref(
@@ -343,17 +340,32 @@ function setupErrorUI() {
   );
   if (errorReportingEnabled) {
     showCertificateErrorReporting();
+    RPMAddToHistogram(
+      "TLS_ERROR_REPORT_UI",
+      TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN
+    );
     let errorReportingAutomatic = RPMGetBoolPref(
       "security.ssl.errorReporting.automatic"
     );
     checkbox.checked = !!errorReportingAutomatic;
   }
+}
 
-  // Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
-  const TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN = 0;
-  RPMSendAsyncMessage("Browser:SSLErrorReportTelemetry", {
-    reportStatus: TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN,
-  });
+function onSetAutomatic(checked) {
+  let bin = TLS_ERROR_REPORT_TELEMETRY_AUTO_UNCHECKED;
+  if (checked) {
+    bin = TLS_ERROR_REPORT_TELEMETRY_AUTO_CHECKED;
+  }
+  RPMAddToHistogram("TLS_ERROR_REPORT_UI", bin);
+
+  RPMSetBoolPref("security.ssl.errorReporting.automatic", checked);
+  // If we're enabling reports, send a report for this failure.
+  if (checked) {
+    RPMSendAsyncMessage("ReportTLSError", {
+      host: document.location.host,
+      port: parseInt(document.location.port) || -1,
+    });
+  }
 }
 
 async function setNetErrorMessageFromCode() {
@@ -472,6 +484,9 @@ function initPageCertError() {
   document
     .getElementById("copyToClipboardBottom")
     .addEventListener("click", copyPEMToClipboard);
+  document
+    .getElementById("exceptionDialogButton")
+    .addEventListener("click", addCertException);
 
   setCertErrorDetails();
   setTechnicalDetailsOnCertError();
@@ -479,6 +494,10 @@ function initPageCertError() {
   // Dispatch this event only for tests.
   let event = new CustomEvent("AboutNetErrorLoad", { bubbles: true });
   document.dispatchEvent(event);
+}
+
+function addCertException() {
+  RPMSendAsyncMessage("AddCertException", { location: document.location.href });
 }
 
 function onReturnButtonClick(e) {

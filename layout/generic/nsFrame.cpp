@@ -59,6 +59,7 @@
 #include "nsGkAtoms.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsCSSClipPathInstance.h"
+#include "nsCanvasFrame.h"
 
 #include "nsFrameTraversal.h"
 #include "nsRange.h"
@@ -544,6 +545,13 @@ static bool IsFontSizeInflationContainer(nsIFrame* aFrame,
   }
 
   nsIContent* content = aFrame->GetContent();
+  if (content && content->IsInNativeAnonymousSubtree()) {
+    // Native anonymous content shouldn't be a font inflation root,
+    // except for the canvas custom content container.
+    nsCanvasFrame* canvas = aFrame->PresShell()->GetCanvasFrame();
+    return canvas && canvas->GetCustomContentContainer() == content;
+  }
+
   LayoutFrameType frameType = aFrame->Type();
   bool isInline =
       (nsStyleDisplay::IsInlineFlow(aFrame->GetDisplay()) ||
@@ -555,8 +563,7 @@ static bool IsFontSizeInflationContainer(nsIFrame* aFrame,
        (aFrame->GetParent()->GetContent() == content) ||
        (content &&
         (content->IsAnyOfHTMLElements(nsGkAtoms::option, nsGkAtoms::optgroup,
-                                      nsGkAtoms::select) ||
-         content->IsInNativeAnonymousSubtree()))) &&
+                                      nsGkAtoms::select)))) &&
       !(aFrame->IsXULBoxFrame() && aFrame->GetParent()->IsXULBoxFrame());
   NS_ASSERTION(!aFrame->IsFrameOfType(nsIFrame::eLineParticipant) || isInline ||
                    // br frames and mathml frames report being line
@@ -3027,7 +3034,7 @@ void nsIFrame::BuildDisplayListForStackingContext(
     }
   }
 
-  if (disp->mWillChange.bits) {
+  if (aBuilder->IsForPainting() && disp->mWillChange.bits) {
     aBuilder->AddToWillChangeBudget(this, GetSize());
   }
 
@@ -3895,7 +3902,6 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
   }
 
   nsIFrame* child = aChild;
-  aBuilder->RemoveFromWillChangeBudget(child);
 
   const bool isPaintingToWindow = aBuilder->IsPaintingToWindow();
   const bool doingShortcut =
@@ -3903,6 +3909,10 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
       (child->GetStateBits() & NS_FRAME_SIMPLE_DISPLAYLIST) &&
       // Animations may change the stacking context state.
       !(child->MayHaveTransformAnimation() || child->MayHaveOpacityAnimation());
+
+  if (aBuilder->IsForPainting()) {
+    aBuilder->ClearWillChangeBudgetStatus(child);
+  }
 
   if (StaticPrefs::layout_css_scroll_anchoring_highlight()) {
     if (child->FirstContinuation()->IsScrollAnchor()) {
@@ -3944,8 +3954,8 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
     child = placeholder->GetOutOfFlowFrame();
     NS_ASSERTION(child, "No out of flow frame?");
 
-    if (child) {
-      aBuilder->RemoveFromWillChangeBudget(child);
+    if (child && aBuilder->IsForPainting()) {
+      aBuilder->ClearWillChangeBudgetStatus(child);
     }
 
     // If 'child' is a pushed float then it's owned by a block that's not an
@@ -7805,7 +7815,7 @@ void nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix,
                          mRect.height);
 
   mozilla::WritingMode wm = GetWritingMode();
-  if (wm.IsVertical() || !wm.IsBidiLTR()) {
+  if (wm.IsVertical() || wm.IsBidiRTL()) {
     aTo += nsPrintfCString(" wm=%s logical-size={%d,%d}", wm.DebugString(),
                            ISize(), BSize());
   }
@@ -7813,7 +7823,7 @@ void nsIFrame::ListGeneric(nsACString& aTo, const char* aPrefix,
   nsIFrame* parent = GetParent();
   if (parent) {
     WritingMode pWM = parent->GetWritingMode();
-    if (pWM.IsVertical() || !pWM.IsBidiLTR()) {
+    if (pWM.IsVertical() || pWM.IsBidiRTL()) {
       nsSize containerSize = parent->mRect.Size();
       LogicalRect lr(pWM, mRect, containerSize);
       aTo += nsPrintfCString(

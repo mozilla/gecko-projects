@@ -104,6 +104,23 @@ let ACTORS = {
     allFrames: true,
   },
 
+  PageStyle: {
+    parent: {
+      moduleURI: "resource:///actors/PageStyleParent.jsm",
+    },
+    child: {
+      moduleURI: "resource:///actors/PageStyleChild.jsm",
+      events: {
+        pageshow: {},
+      },
+    },
+
+    // Only matching web pages, as opposed to internal about:, chrome: or
+    // resource: pages. See https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns
+    matches: ["*://*/*"],
+    allFrames: true,
+  },
+
   Plugin: {
     parent: {
       moduleURI: "resource:///actors/PluginParent.jsm",
@@ -294,8 +311,6 @@ let LEGACY_ACTORS = {
     child: {
       module: "resource:///actors/NetErrorChild.jsm",
       events: {
-        AboutNetErrorSetAutomatic: { wantUntrusted: true },
-        AboutNetErrorResetPreferences: { wantUntrusted: true },
         click: {},
       },
       matches: ["about:certerror?*", "about:neterror?*"],
@@ -310,20 +325,6 @@ let LEGACY_ACTORS = {
         MozApplicationManifest: {},
       },
       messages: ["OfflineApps:StartFetching"],
-    },
-  },
-
-  PageStyle: {
-    child: {
-      module: "resource:///actors/PageStyleChild.jsm",
-      group: "browsers",
-      events: {
-        pageshow: {},
-      },
-      messages: ["PageStyle:Switch", "PageStyle:Disable"],
-      // Only matching web pages, as opposed to internal about:, chrome: or
-      // resource: pages. See https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns
-      matches: ["*://*/*"],
     },
   },
 
@@ -1745,7 +1746,7 @@ BrowserGlue.prototype = {
     Services.telemetry.getHistogramById("COOKIE_BEHAVIOR").add(cookieBehavior);
 
     let exceptions = 0;
-    for (let permission of Services.perms.enumerator) {
+    for (let permission of Services.perms.all) {
       if (permission.type == "trackingprotection") {
         exceptions++;
       }
@@ -2751,7 +2752,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 87;
+    const UI_VERSION = 88;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     let currentUIVersion;
@@ -3164,6 +3165,39 @@ BrowserGlue.prototype = {
       // in the about:preferences#privacy custom panel.
       if (Services.prefs.prefHasUserValue(TRACKING_TABLE_PREF)) {
         Services.prefs.setBoolPref(CUSTOM_BLOCKING_PREF, true);
+      }
+    }
+
+    if (currentUIVersion < 88) {
+      // If the user the has "browser.contentblocking.category = custom", but has
+      // the exact same settings as "standard", move them once to "standard". This is
+      // to reset users who we may have moved accidentally, or moved to get ETP early.
+      let category_prefs = [
+        "network.cookie.cookieBehavior",
+        "privacy.trackingprotection.pbmode.enabled",
+        "privacy.trackingprotection.enabled",
+        "privacy.trackingprotection.socialtracking.enabled",
+        "privacy.trackingprotection.fingerprinting.enabled",
+        "privacy.trackingprotection.cryptomining.enabled",
+      ];
+      if (
+        Services.prefs.getStringPref(
+          "browser.contentblocking.category",
+          "standard"
+        ) == "custom"
+      ) {
+        let shouldMigrate = true;
+        for (let pref of category_prefs) {
+          if (Services.prefs.prefHasUserValue(pref)) {
+            shouldMigrate = false;
+          }
+        }
+        if (shouldMigrate) {
+          Services.prefs.setStringPref(
+            "browser.contentblocking.category",
+            "standard"
+          );
+        }
       }
     }
 

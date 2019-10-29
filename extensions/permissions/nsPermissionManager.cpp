@@ -17,8 +17,6 @@
 #include "nsPermission.h"
 #include "nsCRT.h"
 #include "nsNetUtil.h"
-#include "nsCOMArray.h"
-#include "nsArrayEnumerator.h"
 #include "nsTArray.h"
 #include "nsReadableUtils.h"
 #include "nsILineInputStream.h"
@@ -2535,20 +2533,9 @@ nsPermissionManager::GetPermissionHashKey(
   return nullptr;
 }
 
-NS_IMETHODIMP nsPermissionManager::GetEnumerator(nsISimpleEnumerator** aEnum) {
-  nsTArray<RefPtr<nsIPermission>> array;
-  nsresult rv = GetAllWithTypePrefix(NS_LITERAL_CSTRING(""), array);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  nsCOMArray<nsIPermission> comArray;
-  comArray.SetCapacity(array.Length());
-  for (size_t i = 0; i < array.Length(); i++) {
-    comArray.AppendElement(array[i].forget());
-  }
-
-  return NS_NewArrayEnumerator(aEnum, comArray, NS_GET_IID(nsIPermission));
+NS_IMETHODIMP nsPermissionManager::GetAll(
+    nsTArray<RefPtr<nsIPermission>>& aResult) {
+  return GetAllWithTypePrefix(NS_LITERAL_CSTRING(""), aResult);
 }
 
 NS_IMETHODIMP nsPermissionManager::GetAllWithTypePrefix(
@@ -2598,9 +2585,9 @@ NS_IMETHODIMP nsPermissionManager::GetAllWithTypePrefix(
 }
 
 NS_IMETHODIMP
-nsPermissionManager::GetAllForPrincipal(nsIPrincipal* aPrincipal,
-                                        nsISimpleEnumerator** aEnum) {
-  nsCOMArray<nsIPermission> array;
+nsPermissionManager::GetAllForPrincipal(
+    nsIPrincipal* aPrincipal, nsTArray<RefPtr<nsIPermission>>& aResult) {
+  aResult.Clear();
 
   MOZ_ASSERT(PermissionAvailable(aPrincipal, EmptyCString()));
 
@@ -2621,18 +2608,18 @@ nsPermissionManager::GetAllForPrincipal(nsIPrincipal* aPrincipal,
         continue;
       }
 
-      nsCOMPtr<nsIPermission> permission = nsPermission::Create(
+      RefPtr<nsIPermission> permission = nsPermission::Create(
           aPrincipal, mTypeArray[permEntry.mType], permEntry.mPermission,
           permEntry.mExpireType, permEntry.mExpireTime,
           permEntry.mModificationTime);
       if (NS_WARN_IF(!permission)) {
         continue;
       }
-      array.AppendObject(permission);
+      aResult.AppendElement(permission);
     }
   }
 
-  return NS_NewArrayEnumerator(aEnum, array, NS_GET_IID(nsIPermission));
+  return NS_OK;
 }
 
 NS_IMETHODIMP nsPermissionManager::Observe(nsISupports* aSubject,

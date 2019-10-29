@@ -1808,7 +1808,6 @@ var gBrowserInit = {
     // message sent between when the frame script is loaded and when
     // the listener is registered.
     DOMEventHandler.init();
-    gPageStyleMenu.init();
     LanguageDetectionListener.init();
     BrowserOnClick.init();
     CaptivePortalWatcher.init();
@@ -3497,10 +3496,6 @@ function PageProxyClickHandler(aEvent) {
   }
 }
 
-// Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
-const TLS_ERROR_REPORT_TELEMETRY_AUTO_CHECKED = 2;
-const TLS_ERROR_REPORT_TELEMETRY_AUTO_UNCHECKED = 3;
-
 const SEC_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SEC_ERROR_BASE;
 const SEC_ERROR_UNKNOWN_ISSUER = SEC_ERROR_BASE + 13;
 
@@ -3516,16 +3511,12 @@ var BrowserOnClick = {
     let mm = window.messageManager;
     mm.addMessageListener("Browser:CertExceptionError", this);
     mm.addMessageListener("Browser:SiteBlockedError", this);
-    mm.addMessageListener("Browser:SetSSLErrorReportAuto", this);
-    mm.addMessageListener("Browser:ResetSSLPreferences", this);
   },
 
   uninit() {
     let mm = window.messageManager;
     mm.removeMessageListener("Browser:CertExceptionError", this);
     mm.removeMessageListener("Browser:SiteBlockedError", this);
-    mm.removeMessageListener("Browser:SetSSLErrorReportAuto", this);
-    mm.removeMessageListener("Browser:ResetSSLPreferences", this);
   },
 
   receiveMessage(msg) {
@@ -3546,26 +3537,6 @@ var BrowserOnClick = {
           msg.data.location,
           msg.data.blockedInfo
         );
-        break;
-      case "Browser:ResetSSLPreferences":
-        let prefSSLImpact = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
-          return prefs.concat(Services.prefs.getChildList(root));
-        }, []);
-        for (let prefName of prefSSLImpact) {
-          Services.prefs.clearUserPref(prefName);
-        }
-        msg.target.reload();
-        break;
-      case "Browser:SetSSLErrorReportAuto":
-        Services.prefs.setBoolPref(
-          "security.ssl.errorReporting.automatic",
-          msg.json.automatic
-        );
-        let bin = TLS_ERROR_REPORT_TELEMETRY_AUTO_UNCHECKED;
-        if (msg.json.automatic) {
-          bin = TLS_ERROR_REPORT_TELEMETRY_AUTO_CHECKED;
-        }
-        Services.telemetry.getHistogramById("TLS_ERROR_REPORT_UI").add(bin);
         break;
     }
   },
@@ -3596,35 +3567,6 @@ var BrowserOnClick = {
             cert
           );
         }
-        break;
-      case "exceptionDialogButton":
-        securityInfo = getSecurityInfo(securityInfoAsString);
-        let overrideService = Cc[
-          "@mozilla.org/security/certoverride;1"
-        ].getService(Ci.nsICertOverrideService);
-        let flags = 0;
-        if (securityInfo.isUntrusted) {
-          flags |= overrideService.ERROR_UNTRUSTED;
-        }
-        if (securityInfo.isDomainMismatch) {
-          flags |= overrideService.ERROR_MISMATCH;
-        }
-        if (securityInfo.isNotValidAtThisTime) {
-          flags |= overrideService.ERROR_TIME;
-        }
-        let uri = Services.uriFixup.createFixupURI(location, 0);
-        let permanentOverride =
-          !PrivateBrowsingUtils.isBrowserPrivate(browser) &&
-          Services.prefs.getBoolPref("security.certerrors.permanentOverride");
-        cert = securityInfo.serverCert;
-        overrideService.rememberValidityOverride(
-          uri.asciiHost,
-          uri.port,
-          cert,
-          flags,
-          !permanentOverride
-        );
-        browser.reload();
         break;
     }
   },
@@ -5571,6 +5513,8 @@ var XULBrowserWindow = {
     const nsIWebProgressListener = Ci.nsIWebProgressListener;
 
     let browser = gBrowser.selectedBrowser;
+
+    gProtectionsHandler.onStateChange(aStateFlags);
 
     if (
       aStateFlags & nsIWebProgressListener.STATE_START &&
@@ -7730,17 +7674,28 @@ var gPageStyleMenu = {
   //
   _pageStyleSheets: new WeakMap(),
 
-  init() {
-    let mm = window.messageManager;
-    mm.addMessageListener("PageStyle:StyleSheets", msg => {
-      if (msg.target.permanentKey) {
-        this._pageStyleSheets.set(msg.target.permanentKey, msg.data);
-      }
-    });
+  /**
+   * Add/append styleSheets to the _pageStyleSheets weakmap.
+   * @param styleSheets
+   *        The stylesheets to add, including the preferred
+   *        stylesheet set for this document.
+   * @param permanentKey
+   *        The permanent key of the browser that
+   *        these stylesheets come from.
+   */
+  addBrowserStyleSheets(styleSheets, permanentKey) {
+    let sheetData = this._pageStyleSheets.get(permanentKey);
+    if (!sheetData) {
+      this._pageStyleSheets.set(permanentKey, styleSheets);
+      return;
+    }
+    sheetData.filteredStyleSheets.push(...styleSheets.filteredStyleSheets);
+    sheetData.preferredStyleSheetSet =
+      sheetData.preferredStyleSheetSet || styleSheets.preferredStyleSheetSet;
   },
 
   /**
-   * Returns an array of Objects representing stylesheets in a
+   * Return an array of Objects representing stylesheets in a
    * browser. Note that the pageshow event needs to fire in content
    * before this information will be available.
    *
@@ -7762,6 +7717,10 @@ var gPageStyleMenu = {
       return [];
     }
     return data.filteredStyleSheets;
+  },
+
+  clearBrowserStyleSheets(permanentKey) {
+    this._pageStyleSheets.delete(permanentKey);
   },
 
   _getStyleSheetInfo(browser) {
@@ -7832,14 +7791,56 @@ var gPageStyleMenu = {
     sep.hidden = (noStyle.hidden && persistentOnly.hidden) || !haveAltSheets;
   },
 
-  switchStyleSheet(title) {
-    let mm = gBrowser.selectedBrowser.messageManager;
-    mm.sendAsyncMessage("PageStyle:Switch", { title });
+  /**
+   * Send a message to all PageStyleParents by walking the BrowsingContext tree.
+   * @param message
+   *        The string message to send to each PageStyleChild.
+   * @param data
+   *        The data to send to each PageStyleChild within the message.
+   */
+  _sendMessageToAll(message, data) {
+    let contextsToVisit = [gBrowser.selectedBrowser.browsingContext];
+    while (contextsToVisit.length) {
+      let currentContext = contextsToVisit.pop();
+      let global = currentContext.currentWindowGlobal;
+
+      if (!global) {
+        continue;
+      }
+
+      let actor = global.getActor("PageStyle");
+      actor.sendAsyncMessage(message, data);
+
+      contextsToVisit.push(...currentContext.getChildren());
+    }
   },
 
+  /**
+   * Switch the stylesheet of all documents in the current browser.
+   * @param title The title of the stylesheet to switch to.
+   */
+  switchStyleSheet(title) {
+    let { permanentKey } = gBrowser.selectedBrowser;
+    let sheetData = this._pageStyleSheets.get(permanentKey);
+    if (sheetData && sheetData.filteredStyleSheets) {
+      sheetData.authorStyleDisabled = false;
+      for (let sheet of sheetData.filteredStyleSheets) {
+        sheet.disabled = sheet.title !== title;
+      }
+    }
+    this._sendMessageToAll("PageStyle:Switch", { title });
+  },
+
+  /**
+   * Disable all stylesheets. Called with View > Page Style > No Style.
+   */
   disableStyle() {
-    let mm = gBrowser.selectedBrowser.messageManager;
-    mm.sendAsyncMessage("PageStyle:Disable");
+    let { permanentKey } = gBrowser.selectedBrowser;
+    let sheetData = this._pageStyleSheets.get(permanentKey);
+    if (sheetData) {
+      sheetData.authorStyleDisabled = true;
+    }
+    this._sendMessageToAll("PageStyle:Disable", {});
   },
 };
 

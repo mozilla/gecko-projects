@@ -698,7 +698,7 @@ bool Debugger::hasAnyLiveHooks(JSRuntime* rt) const {
        r.popFront()) {
     JSObject* key = r.front().key();
     DebuggerFrame& frameObj = r.front().value()->as<DebuggerFrame>();
-    if (IsMarkedUnbarriered(rt, &key) && frameObj.hasAnyLiveHooks()) {
+    if (IsMarkedUnbarriered(rt, &key) && frameObj.hasAnyHooks()) {
       return true;
     }
   }
@@ -3686,7 +3686,7 @@ void DebugAPI::traceFramesWithLiveHooks(JSTracer* tracer) {
          r.popFront()) {
       HeapPtr<DebuggerFrame*>& frameobj = r.front().value();
       MOZ_ASSERT(frameobj->isLiveMaybeForwarded());
-      if (frameobj->hasAnyLiveHooks()) {
+      if (frameobj->hasAnyHooks()) {
         TraceEdge(tracer, &frameobj, "Debugger.Frame with live hooks");
       }
     }
@@ -3736,7 +3736,7 @@ bool DebugAPI::markIteratively(GCMarker* marker) {
         if (!dbgMarked && dbg->hasAnyLiveHooks(rt)) {
           // obj could be reachable only via its live, enabled
           // debugger hooks, which may yet be called.
-          TraceEdge(marker, &dbgobj, "enabled Debugger");
+          TraceEdge(marker, &dbgobj, "Debugger with live hooks");
           markedAny = true;
           dbgMarked = true;
         }
@@ -4688,7 +4688,7 @@ void Debugger::removeDebuggeeGlobal(JSFreeOp* fop, GlobalObject* global,
     DebuggerFrame* frameobj = e.front().value();
     if (frame.hasGlobal(global)) {
       frameobj->freeFrameIterData(fop);
-      frameobj->maybeDecrementFrameScriptStepperCount(fop, frame);
+      frameobj->maybeDecrementStepperCounter(fop, frame);
       e.removeFront();
     }
   }
@@ -6352,7 +6352,7 @@ bool Debugger::replaceFrameGuts(JSContext* cx, AbstractFramePtr from,
       // lambda. Manually clean it up here.
       JSFreeOp* fop = cx->runtime()->defaultFreeOp();
       frameobj->freeFrameIterData(fop);
-      frameobj->maybeDecrementFrameScriptStepperCount(fop, to);
+      frameobj->maybeDecrementStepperCounter(fop, to);
 
       ReportOutOfMemory(cx);
       return false;
@@ -6399,7 +6399,7 @@ void Debugger::removeFromFrameMapsAndClearBreakpointsIn(JSContext* cx,
         frameobj->clearGenerator(fop, dbg);
       }
     } else {
-      frameobj->maybeDecrementFrameScriptStepperCount(fop, frame);
+      frameobj->maybeDecrementStepperCounter(fop, frame);
     }
   });
 

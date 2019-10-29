@@ -4610,7 +4610,9 @@ NS_IMETHODIMP
 nsCookieService::GetCookiesFromHost(const nsACString& aHost,
                                     JS::HandleValue aOriginAttributes,
                                     JSContext* aCx,
-                                    nsISimpleEnumerator** aEnumerator) {
+                                    nsTArray<RefPtr<nsICookie>>& aResult) {
+  aResult.Clear();
+
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -4638,21 +4640,21 @@ nsCookieService::GetCookiesFromHost(const nsACString& aHost,
   nsCookieKey key = nsCookieKey(baseDomain, attrs);
 
   nsCookieEntry* entry = mDBState->hostTable.GetEntry(key);
-  if (!entry) return NS_NewEmptyEnumerator(aEnumerator);
+  if (!entry) return NS_OK;
 
-  nsCOMArray<nsICookie> cookieList(mMaxCookiesPerHost);
+  aResult.SetCapacity(mMaxCookiesPerHost);
   const nsCookieEntry::ArrayType& cookies = entry->GetCookies();
   for (nsCookieEntry::IndexType i = 0; i < cookies.Length(); ++i) {
-    cookieList.AppendObject(cookies[i]);
+    aResult.AppendElement(cookies[i]);
   }
 
-  return NS_NewArrayEnumerator(aEnumerator, cookieList, NS_GET_IID(nsICookie));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
 nsCookieService::GetCookiesWithOriginAttributes(
     const nsAString& aPattern, const nsACString& aHost,
-    nsISimpleEnumerator** aEnumerator) {
+    nsTArray<RefPtr<nsICookie>>& aResult) {
   mozilla::OriginAttributesPattern pattern;
   if (!pattern.Init(aPattern)) {
     return NS_ERROR_INVALID_ARG;
@@ -4666,12 +4668,12 @@ nsCookieService::GetCookiesWithOriginAttributes(
   rv = GetBaseDomainFromHost(mTLDService, host, baseDomain);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return GetCookiesWithOriginAttributes(pattern, baseDomain, aEnumerator);
+  return GetCookiesWithOriginAttributes(pattern, baseDomain, aResult);
 }
 
 nsresult nsCookieService::GetCookiesWithOriginAttributes(
     const mozilla::OriginAttributesPattern& aPattern,
-    const nsCString& aBaseDomain, nsISimpleEnumerator** aEnumerator) {
+    const nsCString& aBaseDomain, nsTArray<RefPtr<nsICookie>>& aResult) {
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -4684,7 +4686,6 @@ nsresult nsCookieService::GetCookiesWithOriginAttributes(
                  ? mPrivateDBState
                  : mDefaultDBState;
 
-  nsCOMArray<nsICookie> cookies;
   for (auto iter = mDBState->hostTable.Iter(); !iter.Done(); iter.Next()) {
     nsCookieEntry* entry = iter.Get();
 
@@ -4699,11 +4700,11 @@ nsresult nsCookieService::GetCookiesWithOriginAttributes(
     const nsCookieEntry::ArrayType& entryCookies = entry->GetCookies();
 
     for (nsCookieEntry::IndexType i = 0; i < entryCookies.Length(); ++i) {
-      cookies.AppendObject(entryCookies[i]);
+      aResult.AppendElement(entryCookies[i]);
     }
   }
 
-  return NS_NewArrayEnumerator(aEnumerator, cookies, NS_GET_IID(nsICookie));
+  return NS_OK;
 }
 
 NS_IMETHODIMP

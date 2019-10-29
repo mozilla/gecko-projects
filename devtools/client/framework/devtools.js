@@ -32,11 +32,6 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(this, "Telemetry", "devtools/client/shared/telemetry");
 loader.lazyImporter(
   this,
-  "ScratchpadManager",
-  "resource://devtools/client/scratchpad/scratchpad-manager.jsm"
-);
-loader.lazyImporter(
-  this,
   "BrowserToolboxProcess",
   "resource://devtools/client/framework/ToolboxProcess.jsm"
 );
@@ -430,30 +425,12 @@ DevTools.prototype = {
   saveDevToolsSession: function(state) {
     state.browserConsole = BrowserConsoleManager.getBrowserConsoleSessionState();
     state.browserToolbox = BrowserToolboxProcess.getBrowserToolboxSessionState();
-
-    // Check if the module is loaded to avoid loading ScratchpadManager for no reason.
-    state.scratchpads = [];
-    if (
-      Cu.isModuleLoaded(
-        "resource://devtools/client/scratchpad/scratchpad-manager.jsm"
-      )
-    ) {
-      state.scratchpads = ScratchpadManager.getSessionState();
-    }
   },
 
   /**
    * Restore the devtools session state as provided by SessionStore.
    */
-  restoreDevToolsSession: function({
-    scratchpads,
-    browserConsole,
-    browserToolbox,
-  }) {
-    if (scratchpads) {
-      ScratchpadManager.restoreSession(scratchpads);
-    }
-
+  restoreDevToolsSession: function({ browserConsole, browserToolbox }) {
     if (browserToolbox) {
       BrowserToolboxProcess.init();
     }
@@ -724,43 +701,6 @@ DevTools.prototype = {
   },
 
   /**
-   * Evaluate the cross iframes query selectors
-   * @oaram {Object} walker
-   * @param {Array} selectors
-   *        An array of CSS selectors to find the target accessible object.
-   *        Several selectors can be needed if the element is nested in frames
-   *        and not directly in the root document.
-   * @return {Promise} a promise that resolves when the node front is found for
-   *                   selection using inspector tools.
-   */
-  async findNodeFront(walker, nodeSelectors) {
-    async function querySelectors(nodeFront) {
-      const selector = nodeSelectors.shift();
-      if (!selector) {
-        return nodeFront;
-      }
-      nodeFront = await walker.querySelector(nodeFront, selector);
-      if (nodeSelectors.length > 0) {
-        const { nodes } = await walker.children(nodeFront);
-        // If there are remaining selectors to process, they will target a document or a
-        // document-fragment under the current node. Whether the element is a frame or
-        // a web component, it can only contain one document/document-fragment, so just
-        // select the first one available.
-        nodeFront = nodes.find(node => {
-          const { nodeType } = node;
-          return (
-            nodeType === Node.DOCUMENT_FRAGMENT_NODE ||
-            nodeType === Node.DOCUMENT_NODE
-          );
-        });
-      }
-      return querySelectors(nodeFront);
-    }
-    const nodeFront = await walker.getRootNode();
-    return querySelectors(nodeFront);
-  },
-
-  /**
    * Called from the DevToolsShim, used by nsContextMenu.js.
    *
    * @param {XULTab} tab
@@ -789,15 +729,11 @@ DevTools.prototype = {
     );
     const inspector = toolbox.getCurrentPanel();
 
-    // If the toolbox has been switched into a nested frame, we should first remove
-    // selectors according to the frame depth.
-    nodeSelectors.splice(0, toolbox.selectedFrameDepth);
-
     // new-node-front tells us when the node has been selected, whether the
     // browser is remote or not.
     const onNewNode = inspector.selection.once("new-node-front");
 
-    const nodeFront = await this.findNodeFront(inspector.walker, nodeSelectors);
+    const nodeFront = await inspector.walker.findNodeFront(nodeSelectors);
     // Select the final node
     inspector.selection.setNodeFront(nodeFront, {
       reason: "browser-context-menu",
@@ -835,10 +771,7 @@ DevTools.prototype = {
       startTime
     );
     const inspectorFront = await toolbox.target.getFront("inspector");
-    const nodeFront = await this.findNodeFront(
-      inspectorFront.walker,
-      nodeSelectors
-    );
+    const nodeFront = await inspectorFront.walker.findNodeFront(nodeSelectors);
     // Select the accessible object in the panel and wait for the event that
     // tells us it has been done.
     const a11yPanel = toolbox.getCurrentPanel();
@@ -871,8 +804,8 @@ DevTools.prototype = {
     removeThemeObserver(this._onThemeChanged);
 
     // Do not unregister devtools from the DevToolsShim if the destroy is caused by an
-    // application shutdown. For instance SessionStore needs to save the Scratchpad
-    // manager state on shutdown.
+    // application shutdown. For instance SessionStore needs to save the Browser Toolbox
+    // state on shutdown.
     if (!shuttingDown) {
       // Notify the DevToolsShim that DevTools are no longer available, particularly if
       // the destroy was caused by disabling/removing DevTools.
