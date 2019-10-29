@@ -20,6 +20,7 @@ class DNSRequestChild final : public DNSRequestActor, public PDNSRequestChild {
   explicit DNSRequestChild(DNSRequestBase* aRequest)
       : DNSRequestActor(aRequest) {}
 
+  bool CanSend() const override { return PDNSRequestChild::CanSend(); }
   DNSRequestChild* AsDNSRequestChild() override { return this; }
   DNSRequestParent* AsDNSRequestParent() override { return nullptr; }
 
@@ -32,7 +33,6 @@ class DNSRequestChild final : public DNSRequestActor, public PDNSRequestChild {
       const nsresult& reason);
   mozilla::ipc::IPCResult Recv__delete__() override;
   mozilla::ipc::IPCResult RecvLookupCompleted(const DNSRequestResponse& reply);
-  virtual void ActorDestroy(ActorDestroyReason why) override;
 };
 
 }  // namespace net

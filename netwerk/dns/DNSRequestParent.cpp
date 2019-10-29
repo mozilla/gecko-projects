@@ -30,6 +30,10 @@ NS_IMPL_ISUPPORTS(DNSRequestHandler, nsIDNSListener)
 
 static void SendLookupCompletedHelper(DNSRequestActor* aActor,
                                       const DNSRequestResponse& aReply) {
+  if (!aActor->CanSend()) {
+    return;
+  }
+
   if (DNSRequestParent* parent = aActor->AsDNSRequestParent()) {
     Unused << parent->SendLookupCompleted(aReply);
   } else if (DNSRequestChild* child = aActor->AsDNSRequestChild()) {
@@ -50,9 +54,8 @@ void DNSRequestHandler::DoAsyncResolve(const nsACString& hostname,
                                  getter_AddRefs(unused));
   }
 
-  if (NS_FAILED(rv) && mIPCActor->IPCOpen()) {
+  if (NS_FAILED(rv)) {
     SendLookupCompletedHelper(mIPCActor, DNSRequestResponse(rv));
-    mIPCActor->SetIPCOpen(false);
   }
 }
 
@@ -87,7 +90,7 @@ void DNSRequestHandler::OnIPCActorReleased() { mIPCActor = nullptr; }
 NS_IMETHODIMP
 DNSRequestHandler::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
                                     nsresult status) {
-  if (!mIPCActor || !mIPCActor->IPCOpen()) {
+  if (!mIPCActor || !mIPCActor->CanSend()) {
     // nothing to do: child probably crashed
     return NS_OK;
   }
@@ -111,8 +114,6 @@ DNSRequestHandler::OnLookupComplete(nsICancelable* request, nsIDNSRecord* rec,
   } else {
     SendLookupCompletedHelper(mIPCActor, DNSRequestResponse(status));
   }
-
-  mIPCActor->SetIPCOpen(false);
   return NS_OK;
 }
 
@@ -120,7 +121,7 @@ NS_IMETHODIMP
 DNSRequestHandler::OnLookupByTypeComplete(nsICancelable* aRequest,
                                           nsIDNSByTypeRecord* aRes,
                                           nsresult aStatus) {
-  if (!mIPCActor || !mIPCActor->IPCOpen()) {
+  if (!mIPCActor || !mIPCActor->CanSend()) {
     // nothing to do: child probably crashed
     return NS_OK;
   }
@@ -132,7 +133,6 @@ DNSRequestHandler::OnLookupByTypeComplete(nsICancelable* aRequest,
   } else {
     SendLookupCompletedHelper(mIPCActor, DNSRequestResponse(aStatus));
   }
-  mIPCActor->SetIPCOpen(false);
   return NS_OK;
 }
 
@@ -156,17 +156,7 @@ mozilla::ipc::IPCResult DNSRequestParent::RecvLookupCompleted(
                                                    : IPC_FAIL_NO_REASON(this);
 }
 
-mozilla::ipc::IPCResult DNSRequestParent::Recv__delete__() {
-  mIPCOpen = false;
-  return IPC_OK();
-}
-
-void DNSRequestParent::ActorDestroy(ActorDestroyReason why) {
-  // We may still have refcount>0 if DNS hasn't called our OnLookupComplete
-  // yet, but child process has crashed.  We must not send any more msgs
-  // to child, or IPDL will kill chrome process, too.
-  mIPCOpen = false;
-}
+mozilla::ipc::IPCResult DNSRequestParent::Recv__delete__() { return IPC_OK(); }
 
 }  // namespace net
 }  // namespace mozilla

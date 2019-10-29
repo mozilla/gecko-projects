@@ -28,11 +28,9 @@ class DNSRequestParent : public DNSRequestActor, public PDNSRequestParent {
   mozilla::ipc::IPCResult Recv__delete__() override;
   mozilla::ipc::IPCResult RecvLookupCompleted(const DNSRequestResponse& reply);
 
+  bool CanSend() const override { return PDNSRequestParent::CanSend(); }
   DNSRequestChild* AsDNSRequestChild() override { return nullptr; }
   DNSRequestParent* AsDNSRequestParent() override { return this; }
-
- protected:
-  virtual void ActorDestroy(ActorDestroyReason why) override;
 
  private:
   virtual ~DNSRequestParent() = default;

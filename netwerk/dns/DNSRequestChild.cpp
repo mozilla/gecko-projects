@@ -220,13 +220,13 @@ DNSRequestSender::Cancel(nsresult reason) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  if (mIPCActor->IPCOpen()) {
+  if (mIPCActor->CanSend()) {
     // We can only do IPDL on the main thread
     nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableFunction(
         "net::CancelDNSRequestEvent",
         [actor(mIPCActor), host(mHost), type(mType),
          originAttributes(mOriginAttributes), flags(mFlags), reason]() {
-          if (!actor->IPCOpen()) {
+          if (!actor->CanSend()) {
             return;
           }
 
@@ -314,7 +314,6 @@ void DNSRequestSender::CallOnLookupByTypeComplete() {
 }
 
 bool DNSRequestSender::OnRecvLookupCompleted(const DNSRequestResponse& reply) {
-  mIPCActor->SetIPCOpen(false);
   MOZ_ASSERT(mListener);
 
   switch (reply.type()) {
@@ -404,12 +403,7 @@ mozilla::ipc::IPCResult DNSRequestChild::RecvLookupCompleted(
                                                    : IPC_FAIL_NO_REASON(this);
 }
 
-mozilla::ipc::IPCResult DNSRequestChild::Recv__delete__() {
-  mIPCOpen = false;
-  return IPC_OK();
-}
-
-void DNSRequestChild::ActorDestroy(ActorDestroyReason why) { mIPCOpen = false; }
+mozilla::ipc::IPCResult DNSRequestChild::Recv__delete__() { return IPC_OK(); }
 
 //------------------------------------------------------------------------------
 }  // namespace net

@@ -64,8 +64,6 @@ class HttpTransactionChild final : public PHttpTransactionChild,
   mozilla::ipc::IPCResult RecvSetH2WSConnRefTaken();
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
-  bool IPCOpen() const { return mIPCOpen; }
-
   nsHttpTransaction* GetTransaction();
 
  private:
@@ -88,7 +86,6 @@ class HttpTransactionChild final : public PHttpTransactionChild,
 
   uint64_t mChannelId;
   bool mStatusCodeIs200;
-  bool mIPCOpen;
   bool mCanceled;
   nsresult mStatus;
   nsHttpRequestHead mRequestHead;

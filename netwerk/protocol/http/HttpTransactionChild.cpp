@@ -36,7 +36,6 @@ NS_IMPL_ISUPPORTS(HttpTransactionChild, nsIRequestObserver, nsIStreamListener,
 HttpTransactionChild::HttpTransactionChild(const uint64_t& aChannelId)
     : mChannelId(aChannelId),
       mStatusCodeIs200(false),
-      mIPCOpen(true),
       mCanceled(false),
       mStatus(NS_OK),
       mVersionOk(false),
@@ -284,7 +283,6 @@ mozilla::ipc::IPCResult HttpTransactionChild::RecvSetH2WSConnRefTaken() {
 
 void HttpTransactionChild::ActorDestroy(ActorDestroyReason aWhy) {
   LOG(("HttpTransactionChild::ActorDestroy [this=%p]\n", this));
-  mIPCOpen = false;
   mTransaction = nullptr;
   mTransactionPump = nullptr;
 }
@@ -308,6 +306,10 @@ HttpTransactionChild::OnDataAvailable(nsIRequest* aRequest,
   // Don't bother sending IPC if already canceled.
   if (mCanceled) {
     return mStatus;
+  }
+
+  if (!CanSend()) {
+    return NS_ERROR_FAILURE;
   }
 
   // TODO: need to determine how to send the input stream, we use nsCString for
@@ -345,6 +347,7 @@ HttpTransactionChild::OnDataAvailable(nsIRequest* aRequest,
               LOG(("  Sending data directly to the child (len=%u)\n",
                    data.Length()));
               dataSentToContentProcess =
+                  bridge->CanSend() &&
                   bridge->SendOnTransportAndData(aOffset, aCount, data);
             }),
         NS_DISPATCH_SYNC);
@@ -398,6 +401,10 @@ HttpTransactionChild::OnStartRequest(nsIRequest* aRequest) {
     return mStatus;
   }
 
+  if (!CanSend()) {
+    return NS_ERROR_FAILURE;
+  }
+
   MOZ_ASSERT(mTransaction);
 
   nsresult status;
@@ -447,6 +454,10 @@ HttpTransactionChild::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
     return mStatus;
   }
 
+  if (!CanSend()) {
+    return NS_ERROR_FAILURE;
+  }
+
   MOZ_ASSERT(mTransaction);
 
   nsAutoPtr<nsHttpHeaderArray> responseTrailer(
@@ -477,7 +488,7 @@ HttpTransactionChild::OnTransportStatus(nsITransport* aTransport,
   LOG(("HttpTransactionChild::OnTransportStatus [this=%p, status=%x]\n", this,
        aStatus));
 
-  if (!mIPCOpen) {
+  if (!CanSend()) {
     return NS_OK;
   }
 

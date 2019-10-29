@@ -112,7 +112,6 @@ class HttpTransactionParent final : public PHttpTransactionParent,
 
   TimingStruct mTimings;
   nsTArray<uint8_t> mDataForSniffer;
-  bool mIPCOpen;
   bool mResponseHeadTaken;
   bool mResponseTrailersTaken;
   bool mHasStickyConnection;

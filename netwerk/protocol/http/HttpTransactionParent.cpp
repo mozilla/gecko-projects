@@ -48,7 +48,7 @@ NS_IMETHODIMP_(MozExternalRefCountType) HttpTransactionParent::Release(void) {
   // When ref count goes down to 1 (held internally by IPDL), it means that
   // we are done with this transaction. We should send a delete message
   // to delete the transaction child in socket process.
-  if (count == 1 && mIPCOpen) {
+  if (count == 1 && CanSend()) {
     mozilla::Unused << Send__delete__(this);
     return 1;
   }
@@ -60,8 +60,7 @@ NS_IMETHODIMP_(MozExternalRefCountType) HttpTransactionParent::Release(void) {
 //-----------------------------------------------------------------------------
 
 HttpTransactionParent::HttpTransactionParent()
-    : mIPCOpen(false),
-      mResponseHeadTaken(false),
+    : mResponseHeadTaken(false),
       mResponseTrailersTaken(false),
       mHasStickyConnection(false),
       mChannelId(0),
@@ -141,7 +140,7 @@ nsresult HttpTransactionParent::Init(
     uint32_t initialRwin) {
   LOG(("HttpTransactionParent::Init [this=%p caps=%x]\n", this, caps));
 
-  if (!mIPCOpen) {
+  if (!CanSend()) {
     return NS_ERROR_FAILURE;
   }
 
@@ -231,7 +230,7 @@ void HttpTransactionParent::AsyncUpdateClassOfService(uint32_t classOfService) {
 }
 
 nsresult HttpTransactionParent::AsyncCancel(nsresult reason) {
-  if (!mIPCOpen) {
+  if (!CanSend()) {
     return NS_OK;
   }
 
@@ -342,10 +341,7 @@ nsISupports* HttpTransactionParent::SecurityInfo() { return mSecurityInfo; }
 
 bool HttpTransactionParent::ProxyConnectFailed() { return mProxyConnectFailed; }
 
-void HttpTransactionParent::AddIPDLReference() {
-  mIPCOpen = true;
-  AddRef();
-}
+void HttpTransactionParent::AddIPDLReference() { AddRef(); }
 
 void HttpTransactionParent::SetTransactionObserver(TransactionObserver&& obs) {
   mTransactionObserver = std::move(obs);
@@ -704,7 +700,7 @@ HttpTransactionParent::Cancel(nsresult aStatus) {
 
   mCanceled = true;
   mStatus = aStatus;
-  if (mIPCOpen) {
+  if (CanSend()) {
     Unused << SendCancelPump(mStatus);
   }
 
@@ -735,7 +731,7 @@ HttpTransactionParent::Suspend() {
   MOZ_ASSERT(NS_IsMainThread());
 
   // SendSuspend only once, when suspend goes from 0 to 1.
-  if (!mSuspendCount++ && mIPCOpen) {
+  if (!mSuspendCount++ && CanSend()) {
     Unused << SendSuspendPump();
   }
   mEventQ->Suspend();
@@ -748,7 +744,7 @@ HttpTransactionParent::Resume() {
   MOZ_ASSERT(mSuspendCount, "Resume called more than Suspend");
 
   // SendResume only once, when suspend count drops to 0.
-  if (mSuspendCount && !--mSuspendCount && mIPCOpen) {
+  if (mSuspendCount && !--mSuspendCount && CanSend()) {
     Unused << SendResumePump();
   }
   mEventQ->Resume();
@@ -779,7 +775,6 @@ HttpTransactionParent::SetLoadFlags(nsLoadFlags aLoadFlags) {
 
 void HttpTransactionParent::ActorDestroy(ActorDestroyReason aWhy) {
   LOG(("HttpTransactionParent::ActorDestroy [this=%p]\n", this));
-  mIPCOpen = false;
   if (aWhy != Deletion) {
     Cancel(NS_ERROR_FAILURE);
   }

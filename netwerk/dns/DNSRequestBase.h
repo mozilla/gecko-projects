@@ -130,26 +130,19 @@ class DNSRequestActor {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DNSRequestActor)
 
-  explicit DNSRequestActor(DNSRequestBase* aRequest)
-      : mIPCOpen(false), mDNSRequest(aRequest) {
+  explicit DNSRequestActor(DNSRequestBase* aRequest) : mDNSRequest(aRequest) {
     mDNSRequest->SetIPCActor(this);
   }
 
-  void AddIPDLReference() {
-    mIPCOpen = true;
-    AddRef();
-  }
+  void AddIPDLReference() { AddRef(); }
 
   void ReleaseIPDLReference() {
     mDNSRequest->OnIPCActorReleased();
     mDNSRequest = nullptr;
-    mIPCOpen = false;
     Release();
   }
 
-  bool IPCOpen() const { return mIPCOpen; }
-  void SetIPCOpen(bool aIPCOpen) { mIPCOpen = aIPCOpen; }
-
+  virtual bool CanSend() const = 0;
   virtual DNSRequestChild* AsDNSRequestChild() = 0;
   virtual DNSRequestParent* AsDNSRequestParent() = 0;
 
@@ -158,7 +151,6 @@ class DNSRequestActor {
  protected:
   virtual ~DNSRequestActor() = default;
 
-  bool mIPCOpen;
   RefPtr<DNSRequestBase> mDNSRequest;
 };
 
