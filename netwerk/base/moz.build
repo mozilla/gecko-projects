@@ -323,6 +323,7 @@ LOCAL_INCLUDES += [
     '/netwerk/protocol/http',
     '/netwerk/socket',
     '/netwerk/url-classifier',
+    '/security/manager/ssl',
 ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
