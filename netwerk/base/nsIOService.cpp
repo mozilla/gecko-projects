@@ -62,6 +62,8 @@
 #include "nsContentUtils.h"
 #include "nsExceptionHandler.h"
 #include "mozilla/StaticPrefs_network.h"
+#include "nsNSSComponent.h"
+#include "ssl.h"
 
 #ifdef MOZ_WIDGET_GTK
 #  include "nsGIOProtocolHandler.h"
@@ -221,9 +223,26 @@ static const char* gCallbackPrefs[] = {
 };
 
 static const char* gCallbackPrefsForSocketProcess[] = {
-    NETWORK_DNS_PREF,
     WEBRTC_PREF_PREFIX,
     NETWORK_DNS_PREF,
+    "security.",
+    nullptr,
+};
+
+static const char* gCallbackSecurityPrefs[] = {
+    "security.tls.version.min",
+    "security.tls.version.max",
+    "security.tls.hello_downgrade_check",
+    "security.ssl.require_safe_negotiation",
+    "security.ssl.enable_false_start",
+    "security.ssl.enable_alpn",
+    "security.tls.enable_0rtt_data",
+    "security.ssl.disable_session_identifiers",
+    "security.tls.enable_post_handshake_auth",
+    "security.ssl.enable_ocsp_stapling",
+    "security.ssl.enable_ocsp_must_staple",
+    "security.pki.certificate_transparency.mode",
+    "security.tls.enable_delegated_credentials",
     nullptr,
 };
 
@@ -268,6 +287,12 @@ nsresult nsIOService::Init() {
   Preferences::AddBoolVarCache(&mOfflineMirrorsConnectivity,
                                OFFLINE_MIRRORS_CONNECTIVITY, true);
 
+  if (IsSocketProcessChild()) {
+    Preferences::RegisterPrefixCallbacks(
+        PREF_CHANGE_METHOD(nsIOService::UpdateNSSPrefs), gCallbackSecurityPrefs,
+        this);
+  }
+
   gIOService = this;
 
   InitializeNetworkLinkService();
@@ -283,6 +308,19 @@ nsIOService::~nsIOService() {
     MOZ_ASSERT(gIOService == this);
     gIOService = nullptr;
   }
+}
+
+void nsIOService::UpdateNSSPrefs(const char* aPref) {
+  MOZ_ASSERT(IsSocketProcessChild());
+  nsAutoCString pref(aPref);
+  if (UpdatesOnTlsPrefsChanges(pref)) {
+    LOG(("UpdatesOnTlsPrefsChanges done"));
+  } else if (pref.EqualsLiteral("security.ssl.enable_ocsp_stapling") ||
+             pref.EqualsLiteral("security.ssl.enable_ocsp_must_staple") ||
+             pref.EqualsLiteral("security.pki.certificate_transparency.mode")) {
+    SetValidationOptionsCommon();
+  }
+  SSL_ClearSessionCache();
 }
 
 nsresult nsIOService::InitializeCaptivePortalService() {
@@ -1457,6 +1495,14 @@ nsIOService::Observe(nsISupports* subject, const char* topic,
     SSLTokensCache::Shutdown();
 
     DestroySocketProcess();
+
+    if (IsSocketProcessChild()) {
+      Preferences::UnregisterPrefixCallbacks(
+          PREF_CHANGE_METHOD(nsIOService::UpdateNSSPrefs),
+          gCallbackSecurityPrefs, this);
+      NSSShutdownForSocketProcess();
+    }
+
   } else if (!strcmp(topic, NS_NETWORK_LINK_TOPIC)) {
     OnNetworkLinkEvent(NS_ConvertUTF16toUTF8(data).get());
   } else if (!strcmp(topic, NS_WIDGET_WAKE_OBSERVER_TOPIC)) {

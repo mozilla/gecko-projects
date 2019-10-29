@@ -47,12 +47,18 @@ NS_IMETHODIMP
 nsSocketProviderService::GetSocketProvider(const char* type,
                                            nsISocketProvider** result) {
   nsCOMPtr<nsISocketProvider> inst;
-  if (!nsCRT::strcmp(type, "ssl") && XRE_IsParentProcess() &&
-      EnsureNSSInitializedChromeOrContent()) {
-    inst = new nsSSLSocketProvider();
-  } else if (!nsCRT::strcmp(type, "starttls") && XRE_IsParentProcess() &&
-             EnsureNSSInitializedChromeOrContent()) {
-    inst = new nsTLSSocketProvider();
+  if (!nsCRT::strcmp(type, "ssl")) {
+    if (XRE_IsParentProcess() && EnsureNSSInitializedChromeOrContent()) {
+      inst = new nsSSLSocketProvider();
+    } else if (XRE_IsSocketProcess() && NSSInitForSocketProcess()) {
+      inst = new nsSSLSocketProvider();
+    }
+  } else if (!nsCRT::strcmp(type, "starttls")) {
+    if (XRE_IsParentProcess() && EnsureNSSInitializedChromeOrContent()) {
+      inst = new nsTLSSocketProvider();
+    } else if (XRE_IsSocketProcess() && NSSInitForSocketProcess()) {
+      inst = new nsTLSSocketProvider();
+    }
   } else if (!nsCRT::strcmp(type, "socks")) {
     inst = new nsSOCKSSocketProvider(NS_SOCKS_VERSION_5);
   } else if (!nsCRT::strcmp(type, "socks4")) {

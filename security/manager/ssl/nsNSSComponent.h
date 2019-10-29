@@ -50,6 +50,13 @@ UniqueCERTCertList FindNonCACertificatesWithPrivateKeys();
   }
 
 extern bool EnsureNSSInitializedChromeOrContent();
+extern bool NSSInitForSocketProcess();
+extern void FillTLSVersionRange(SSLVersionRange& rangeOut,
+                                uint32_t minFromPrefs, uint32_t maxFromPrefs,
+                                SSLVersionRange defaults);
+extern bool UpdatesOnTlsPrefsChanges(const nsCString& aPref);
+extern void SetValidationOptionsCommon();
+extern void NSSShutdownForSocketProcess();
 
 // Implementation of the PSM component interface.
 class nsNSSComponent final : public nsINSSComponent, public nsIObserver {
@@ -71,10 +78,6 @@ class nsNSSComponent final : public nsINSSComponent, public nsIObserver {
 
   static nsresult GetNewPrompter(nsIPrompt** result);
 
-  static void FillTLSVersionRange(SSLVersionRange& rangeOut,
-                                  uint32_t minFromPrefs, uint32_t maxFromPrefs,
-                                  SSLVersionRange defaults);
-
  protected:
   virtual ~nsNSSComponent();
 
@@ -85,7 +88,6 @@ class nsNSSComponent final : public nsINSSComponent, public nsIObserver {
   void setValidationOptions(bool isInitialSetting,
                             const mozilla::MutexAutoLock& proofOfLock);
   void UpdateCertVerifierWithEnterpriseRoots();
-  nsresult setEnabledTLSVersions();
   nsresult RegisterObservers();
 
   void MaybeImportEnterpriseRoots();
