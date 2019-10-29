@@ -473,7 +473,8 @@ NS_IMETHODIMP
 HttpTransactionChild::OnTransportStatus(nsITransport* aTransport,
                                         nsresult aStatus, int64_t aProgress,
                                         int64_t aProgressMax) {
-  LOG(("HttpTransactionChild::OnTransportStatus [this=%p]\n", this));
+  LOG(("HttpTransactionChild::OnTransportStatus [this=%p, status=%x]\n", this,
+       aStatus));
 
   if (!mIPCOpen) {
     return NS_OK;

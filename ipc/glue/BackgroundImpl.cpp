@@ -229,7 +229,7 @@ class ParentImpl final : public BackgroundParentImpl {
         mLiveActorArray(nullptr),
         mIsOtherProcessActor(true),
         mActorDestroyed(false) {
-    MOZ_ASSERT((XRE_IsParentProcess() && aContent) || XRE_IsSocketProcess());
+    MOZ_ASSERT(XRE_IsParentProcess() || XRE_IsSocketProcess());
     AssertIsOnMainThread();
   }
 
@@ -1059,7 +1059,6 @@ void ParentImpl::Destroy() {
 void ParentImpl::MainThreadActorDestroy() {
   AssertIsInMainOrSocketProcess();
   AssertIsOnMainThread();
-  MOZ_ASSERT_IF(mIsOtherProcessActor && XRE_IsParentProcess(), mContent);
   MOZ_ASSERT_IF(!mIsOtherProcessActor, !mContent);
 
   mContent = nullptr;

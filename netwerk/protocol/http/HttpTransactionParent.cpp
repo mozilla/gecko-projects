@@ -231,6 +231,10 @@ void HttpTransactionParent::AsyncUpdateClassOfService(uint32_t classOfService) {
 }
 
 nsresult HttpTransactionParent::AsyncCancel(nsresult reason) {
+  if (!mIPCOpen) {
+    return NS_OK;
+  }
+
   if (!SendCancel(reason)) {
     return NS_ERROR_FAILURE;
   }
