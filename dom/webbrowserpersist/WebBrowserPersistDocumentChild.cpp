@@ -58,9 +58,11 @@ void WebBrowserPersistDocumentChild::Start(
   ENSURE(aDocument->GetTitle(attrs.title()));
   ENSURE(aDocument->GetContentDisposition(attrs.contentDisposition()));
 
+  // shEntryChild needs to remain in scope until after the SendAttributes call,
+  // to keep the actor alive.
+  RefPtr<dom::SHEntryChild> shEntryChild;
   if (StaticPrefs::fission_sessionHistoryInParent()) {
-    RefPtr<dom::SHEntryChild> shEntryChild =
-        aDocument->GetHistory().downcast<dom::SHEntryChild>();
+    shEntryChild = aDocument->GetHistory().downcast<dom::SHEntryChild>();
     attrs.sessionHistoryEntryOrCacheKey() = shEntryChild;
   } else {
     attrs.sessionHistoryEntryOrCacheKey() = aDocument->GetCacheKey();
