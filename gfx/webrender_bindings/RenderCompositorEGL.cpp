@@ -63,8 +63,7 @@ RenderCompositorEGL::~RenderCompositorEGL() {
   DestroyEGLSurface();
 }
 
-bool RenderCompositorEGL::BeginFrame(layers::NativeLayer* aNativeLayer) {
-  MOZ_RELEASE_ASSERT(!aNativeLayer, "Unexpected native layer on this platform");
+bool RenderCompositorEGL::BeginFrame() {
 #ifdef MOZ_WAYLAND
   bool newSurface =
       mWidget->AsX11() && mWidget->AsX11()->WaylandRequestsUpdatingEGLSurface();
@@ -81,6 +80,9 @@ bool RenderCompositorEGL::BeginFrame(layers::NativeLayer* aNativeLayer) {
     gfxCriticalNote
         << "We don't have EGLSurface to draw into. Called too early?";
     return false;
+  }
+  if (mWidget->AsX11()) {
+    mWidget->AsX11()->SetEGLNativeWindowSize(GetBufferSize());
   }
 #endif
   if (!MakeCurrent()) {

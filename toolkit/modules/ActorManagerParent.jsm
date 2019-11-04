@@ -320,6 +320,35 @@ let ACTORS = {
 
     allFrames: true,
   },
+  PictureInPicture: {
+    parent: {
+      moduleURI: "resource://gre/modules/PictureInPicture.jsm",
+    },
+    child: {
+      moduleURI: "resource://gre/actors/PictureInPictureChild.jsm",
+      events: {
+        MozTogglePictureInPicture: { capture: true },
+        MozStopPictureInPicture: { capture: true },
+      },
+    },
+
+    allFrames: true,
+  },
+
+  PictureInPictureToggle: {
+    parent: {
+      moduleURI: "resource://gre/modules/PictureInPicture.jsm",
+    },
+    child: {
+      moduleURI: "resource://gre/actors/PictureInPictureChild.jsm",
+      events: {
+        UAWidgetSetupOrChange: {},
+        contextmenu: { capture: true },
+      },
+    },
+
+    allFrames: true,
+  },
 
   Select: {
     parent: {
@@ -332,6 +361,20 @@ let ACTORS = {
         mozshowdropdown: {},
         "mozshowdropdown-sourcetouch": {},
         mozhidedropdown: { mozSystemGroup: true },
+      },
+    },
+
+    allFrames: true,
+  },
+
+  WebChannel: {
+    parent: {
+      moduleURI: "resource://gre/actors/WebChannelParent.jsm",
+    },
+    child: {
+      moduleURI: "resource://gre/actors/WebChannelChild.jsm",
+      events: {
+        WebChannelMessageToChrome: { capture: true, wantUntrusted: true },
       },
     },
 
@@ -402,34 +445,6 @@ let LEGACY_ACTORS = {
     },
   },
 
-  PictureInPicture: {
-    child: {
-      module: "resource://gre/actors/PictureInPictureChild.jsm",
-      events: {
-        MozTogglePictureInPicture: { capture: true },
-        MozStopPictureInPicture: { capture: true },
-      },
-
-      messages: [
-        "PictureInPicture:SetupPlayer",
-        "PictureInPicture:Play",
-        "PictureInPicture:Pause",
-        "PictureInPicture:KeyToggle",
-      ],
-    },
-  },
-
-  PictureInPictureToggle: {
-    child: {
-      allFrames: true,
-      module: "resource://gre/actors/PictureInPictureChild.jsm",
-      events: {
-        UAWidgetSetupOrChange: {},
-        contextmenu: { capture: true },
-      },
-    },
-  },
-
   PopupBlocking: {
     child: {
       module: "resource://gre/actors/PopupBlockingChild.jsm",
@@ -482,16 +497,6 @@ let LEGACY_ACTORS = {
         "UnselectedTabHover:Disable": {},
       },
       messages: ["Browser:UnselectedTabHover"],
-    },
-  },
-
-  WebChannel: {
-    child: {
-      module: "resource://gre/actors/WebChannelChild.jsm",
-      events: {
-        WebChannelMessageToChrome: { capture: true, wantUntrusted: true },
-      },
-      messages: ["WebChannelMessageToContent"],
     },
   },
 

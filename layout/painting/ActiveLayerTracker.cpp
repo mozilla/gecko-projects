@@ -10,6 +10,7 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/EffectSet.h"
+#include "mozilla/MotionPathUtils.h"
 #include "mozilla/PodOperations.h"
 #include "gfx2DGlue.h"
 #include "nsExpirationTracker.h"
@@ -74,9 +75,11 @@ class LayerActivity {
       case eCSSProperty_translate:
       case eCSSProperty_rotate:
       case eCSSProperty_scale:
-        // TODO: Bug 1186329: Add motion-path into ActiveLayerTracker.
-        // Note: All transform-like properties are mapping to the same activity
-        // index.
+      case eCSSProperty_offset_path:
+      case eCSSProperty_offset_distance:
+      case eCSSProperty_offset_rotate:
+      case eCSSProperty_offset_anchor:
+        // TODO: Bug 1559232: Add offset-position.
         return ACTIVITY_TRANSFORM;
       case eCSSProperty_left:
         return ACTIVITY_LEFT;
@@ -277,7 +280,7 @@ static void IncrementScaleRestyleCountIfNeeded(nsIFrame* aFrame,
   nsStyleTransformMatrix::TransformReferenceBox refBox(aFrame);
   Matrix4x4 transform = nsStyleTransformMatrix::ReadTransforms(
       display->mTranslate, display->mRotate, display->mScale,
-      nsLayoutUtils::ResolveMotionPath(aFrame), display->mTransform, refBox,
+      MotionPathUtils::ResolveMotionPath(aFrame), display->mTransform, refBox,
       AppUnitsPerCSSPixel());
   Matrix transform2D;
   if (!transform.Is2D(&transform2D)) {

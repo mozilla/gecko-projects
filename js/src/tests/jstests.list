@@ -187,28 +187,6 @@ skip script test262/built-ins/TypedArrayConstructors/internals/Set/detached-buff
 skip script test262/built-ins/TypedArrayConstructors/internals/Set/detached-buffer.js
 skip script test262/built-ins/TypedArrayConstructors/internals/Set/tonumber-value-detached-buffer.js
 
-# https://bugzilla.mozilla.org/show_bug.cgi?id=1129202
-skip script test262/built-ins/TypedArrayConstructors/internals/DefineOwnProperty/BigInt/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/DefineOwnProperty/BigInt/key-is-not-integer.js
-skip script test262/built-ins/TypedArrayConstructors/internals/DefineOwnProperty/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/DefineOwnProperty/key-is-not-integer.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Get/BigInt/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Get/BigInt/key-is-not-integer.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Get/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Get/key-is-not-integer.js
-skip script test262/built-ins/TypedArrayConstructors/internals/GetOwnProperty/BigInt/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/GetOwnProperty/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/HasProperty/BigInt/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/HasProperty/BigInt/key-is-not-integer.js
-skip script test262/built-ins/TypedArrayConstructors/internals/HasProperty/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/HasProperty/key-is-not-integer.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Set/BigInt/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Set/BigInt/key-is-not-integer.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Set/BigInt/tonumber-value-throws.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Set/key-is-not-canonical-index.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Set/key-is-not-integer.js
-skip script test262/built-ins/TypedArrayConstructors/internals/Set/tonumber-value-throws.js
-
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1317405
 skip script test262/language/computed-property-names/class/static/method-number.js
 skip script test262/language/computed-property-names/class/static/method-string.js
@@ -437,6 +415,11 @@ skip script test262/intl402/NumberFormat/numbering-system-options.js
 skip script test262/intl402/NumberFormat/constructor-numberingSystem-order.js
 skip script test262/intl402/NumberFormat/constructor-options-throwing-getters.js
 
+# The relatedYear field type required by this test is only supported in nightly
+# because the change hasn't been merged into the main spec yet.
+# https://bugzilla.mozilla.org/show_bug.cgi?id=1591664
+skip-if(release_or_beta) script test262/intl402/DateTimeFormat/prototype/formatToParts/related-year.js
+
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1277801
 skip script test262/built-ins/Object/prototype/toString/symbol-tag-non-str-builtin.js
 
@@ -462,17 +445,6 @@ skip script test262/intl402/ListFormat/constructor/constructor/options-style-val
 skip script test262/intl402/ListFormat/constructor/constructor/options-toobject-prototype.js
 skip script test262/intl402/ListFormat/constructor/constructor/options-order.js
 skip script test262/intl402/ListFormat/constructor/constructor/options-type-valid.js
-
-# https://bugzilla.mozilla.org/show_bug.cgi?id=1590539
-skip script test262/built-ins/Atomics/add/validate-arraytype-before-index-coercion.js
-skip script test262/built-ins/Atomics/and/validate-arraytype-before-index-coercion.js
-skip script test262/built-ins/Atomics/compareExchange/validate-arraytype-before-index-coercion.js
-skip script test262/built-ins/Atomics/exchange/validate-arraytype-before-index-coercion.js
-skip script test262/built-ins/Atomics/load/validate-arraytype-before-index-coercion.js
-skip script test262/built-ins/Atomics/or/validate-arraytype-before-index-coercion.js
-skip script test262/built-ins/Atomics/store/validate-arraytype-before-index-coercion.js
-skip script test262/built-ins/Atomics/sub/validate-arraytype-before-index-coercion.js
-skip script test262/built-ins/Atomics/xor/validate-arraytype-before-index-coercion.js
 
 # https://bugzilla.mozilla.org/show_bug.cgi?id=1590543
 skip script test262/built-ins/String/prototype/matchAll/flags-nonglobal-throws.js

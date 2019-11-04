@@ -18,7 +18,9 @@
 #include "nsDOMNavigationTiming.h"
 #include "nsIDOMStorageManager.h"
 #include "mozilla/dom/CallbackDebuggerNotification.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentFrameMessageManager.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/CSPEvalChecker.h"
 #include "mozilla/dom/DebuggerNotification.h"
 #include "mozilla/dom/DocumentInlines.h"
@@ -2397,7 +2399,7 @@ void nsGlobalWindowInner::UpdateTopInnerWindow() {
   mTopInnerWindow->UpdateWebSocketCount(-(int32_t)mNumOfOpenWebSockets);
 }
 
-bool nsGlobalWindowInner::CanShareMemory(const nsID& aAgentClusterId) {
+bool nsGlobalWindowInner::IsCrossOriginIsolated() const {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (StaticPrefs::
@@ -2409,18 +2411,24 @@ bool nsGlobalWindowInner::CanShareMemory(const nsID& aAgentClusterId) {
     return false;
   }
 
-  MOZ_DIAGNOSTIC_ASSERT(GetDocGroup());
-  // Ensure they are on the same agent cluster
-  if (!GetDocGroup()->AgentClusterId().Equals(aAgentClusterId)) {
+  RefPtr<BrowsingContext> bc = GetBrowsingContext();
+  MOZ_DIAGNOSTIC_ASSERT(bc);
+  if (bc->Top()->GetOpenerPolicy() !=
+      nsILoadInfo::OPENER_POLICY_SAME_ORIGIN_EMBEDDER_POLICY_REQUIRE_CORP) {
     return false;
   }
 
-  // Ensure the both the coop and coep are set
-  RefPtr<BrowsingContext> bc = GetBrowsingContext();
-  MOZ_DIAGNOSTIC_ASSERT(bc);
-  // XXX Also check remoteType once Bug 1579992 is implemented.
-  return bc->Top()->GetOpenerPolicy() ==
-         nsILoadInfo::OPENER_POLICY_SAME_ORIGIN_EMBEDDER_POLICY_REQUIRE_CORP;
+  ContentChild* cc = ContentChild::GetSingleton();
+  if (!cc ||
+      !StringBeginsWith(cc->GetRemoteType(),
+                        NS_LITERAL_STRING(WITH_COOP_COEP_REMOTE_TYPE_PREFIX))) {
+#if !defined(ANDROID)
+    MOZ_DIAGNOSTIC_ASSERT(false, "COOP+COEP not in webCOOP+COEP process");
+#endif
+    return false;
+  }
+
+  return true;
 }
 
 void nsPIDOMWindowInner::AddPeerConnection() {
@@ -4470,7 +4478,8 @@ Storage* nsGlobalWindowInner::GetSessionStorage(ErrorResult& aError) {
     // 3. Tracking protection (BEHAVIOR_REJECT_TRACKER) is in effect and
     // IsThirdPartyTrackingResourceWindow() returned true and there wasn't a
     // permission that allows it. This will return ePartitionTrackersOrDeny with
-    // a reason of STATE_COOKIES_BLOCKED_TRACKER.
+    // a reason of STATE_COOKIES_BLOCKED_TRACKER or
+    // STATE_COOKIES_BLOCKED_SOCIALTRACKER.
     //
     // In the 1st case, the user has explicitly indicated that they don't want
     // to allow any storage to the origin or all origins and so we throw an

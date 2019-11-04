@@ -19,7 +19,6 @@ class GLContext;
 }
 
 namespace layers {
-class NativeLayer;
 class SyncObjectHost;
 }  // namespace layers
 
@@ -37,13 +36,15 @@ class RenderCompositor {
   RenderCompositor(RefPtr<widget::CompositorWidget>&& aWidget);
   virtual ~RenderCompositor();
 
-  virtual bool BeginFrame(layers::NativeLayer* aNativeLayer) = 0;
+  virtual bool BeginFrame() = 0;
   virtual void EndFrame() = 0;
   // Returns false when waiting gpu tasks is failed.
   // It might happen when rendering context is lost.
   virtual bool WaitForGPU() { return true; }
   virtual void Pause() = 0;
   virtual bool Resume() = 0;
+  // Called when WR rendering is skipped
+  virtual void Update() {}
 
   virtual gl::GLContext* gl() const { return nullptr; }
 
@@ -71,13 +72,11 @@ class RenderCompositor {
   virtual void Bind(wr::NativeSurfaceId aId, wr::DeviceIntPoint* aOffset,
                     uint32_t* aFboId, wr::DeviceIntRect aDirtyRect) {}
   virtual void Unbind() {}
-  virtual void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aSize) {
-  }
+  virtual void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aSize,
+                             bool aIsOpaque) {}
   virtual void DestroySurface(NativeSurfaceId aId) {}
   virtual void AddSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aPosition,
                           wr::DeviceIntRect aClipRect) {}
-
-  void wr_compositor_unbind(void* aCompositor) {}
 
   // Whether the surface contents are flipped vertically
   virtual bool SurfaceIsYFlipped() { return false; }

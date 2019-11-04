@@ -238,6 +238,7 @@ either Raptor or browsertime."""
             raptor_json_path = os.path.join(os.getcwd(), 'local.json')
 
         self.config['raptor_json_path'] = raptor_json_path
+        self.config['artifact_dir'] = self.artifact_dir
         return self.results_handler.summarize_and_output(self.config, tests, test_names)
 
     @abstractmethod
@@ -356,6 +357,8 @@ class Browsertime(Perftest):
                   "browsertime_ffmpeg",
                   "browsertime_geckodriver",
                   "browsertime_chromedriver"):
+            if not self.browsertime_video and k == "browsertime_ffmpeg":
+                continue
             LOG.info("{}: {}".format(k, getattr(self, k)))
             try:
                 LOG.info("{}: {}".format(k, os.stat(getattr(self, k))))
@@ -389,6 +392,12 @@ class Browsertime(Perftest):
 
     def run_test_setup(self, test):
         super(Browsertime, self).run_test_setup(test)
+
+        if test.get('type') == "benchmark":
+            # benchmark-type tests require the benchmark test to be served out
+            self.benchmark = Benchmark(self.config, test)
+            test['test_url'] = test['test_url'].replace('<host>', self.benchmark.host)
+            test['test_url'] = test['test_url'].replace('<port>', self.benchmark.port)
 
         if test.get('playback') is not None:
             self.start_playback(test)
@@ -472,27 +481,38 @@ class Browsertime(Perftest):
 
         # the browser time script cannot restart the browser itself,
         # so we have to keep -n option here.
+
         cmd = ([self.browsertime_node, self.browsertime_browsertimejs] +
                self.driver_paths +
                browsertime_script +
                ['--firefox.profileTemplate', str(self.profile.profile),
                 '--skipHar',
-                '--video', 'false',
+                '--video', self.browsertime_video and 'true' or 'false',
                 '--visualMetrics', 'false',
+                # Timeout when waiting for url to load, in milliseconds
                 '--timeouts.pageLoad', str(timeout),
+                # Timeout when running browser scripts, in milliseconds
+                '--timeouts.script', str(timeout * int(test.get("page_cycles", 1))),
                 '-vv',
                 '--resultDir', self.results_handler.result_dir_for_test(test),
                 '-n', str(test.get('browser_cycles', 1))])
 
+        if test.get('type') == "benchmark":
+            cmd.extend(['--script',
+                        os.path.join(os.path.dirname(__file__), "..",
+                                     "browsertime", "browsertime_benchmark.js")
+                        ])
+
         LOG.info('timeout (s): {}'.format(timeout))
         LOG.info('browsertime cwd: {}'.format(os.getcwd()))
-        LOG.info('browsertime cmd: {}'.format(cmd))
-        LOG.info('browsertime_ffmpeg: {}'.format(self.browsertime_ffmpeg))
+        LOG.info('browsertime cmd: {}'.format(" ".join(cmd)))
+        if self.browsertime_video:
+            LOG.info('browsertime_ffmpeg: {}'.format(self.browsertime_ffmpeg))
 
         # browsertime requires ffmpeg on the PATH for `--video=true`.
         # It's easier to configure the PATH here than at the TC level.
         env = dict(os.environ)
-        if self.browsertime_ffmpeg:
+        if self.browsertime_video and self.browsertime_ffmpeg:
             ffmpeg_dir = os.path.dirname(os.path.abspath(self.browsertime_ffmpeg))
             old_path = env.setdefault('PATH', '')
             new_path = os.pathsep.join([ffmpeg_dir, old_path])
@@ -830,8 +850,10 @@ class RaptorDesktop(Raptor):
                 shutil.make_archive(power_data_path, 'zip', power_data_path)
                 shutil.rmtree(power_data_path)
 
-            self.control_server.submit_supporting_data(perfherder_data['utilization'])
-            self.control_server.submit_supporting_data(perfherder_data['power-usage'])
+            for data_type in perfherder_data:
+                self.control_server.submit_supporting_data(
+                    perfherder_data[data_type]
+                )
 
     def __run_test_cold(self, test, timeout):
         '''

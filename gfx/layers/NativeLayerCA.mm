@@ -80,6 +80,29 @@ void NativeLayerRootCA::RemoveLayer(NativeLayer* aLayer) {
   mMutated = true;
 }
 
+void NativeLayerRootCA::SetLayers(const nsTArray<RefPtr<NativeLayer>>& aLayers) {
+  MutexAutoLock lock(mMutex);
+
+  // Ideally, we'd just be able to do mSublayers = std::move(aLayers).
+  // However, aLayers has a different type: it carries NativeLayer objects, whereas mSublayers
+  // carries NativeLayerCA objects, so we have to downcast all the elements first. There's one other
+  // reason to look at all the elements in aLayers first: We need to make sure any new layers know
+  // about our current backing scale.
+
+  nsTArray<RefPtr<NativeLayerCA>> layersCA(aLayers.Length());
+  for (auto& layer : aLayers) {
+    RefPtr<NativeLayerCA> layerCA = layer->AsNativeLayerCA();
+    MOZ_RELEASE_ASSERT(layerCA);
+    layerCA->SetBackingScale(mBackingScale);
+    layersCA.AppendElement(std::move(layerCA));
+  }
+
+  if (layersCA != mSublayers) {
+    mSublayers = std::move(layersCA);
+    mMutated = true;
+  }
+}
+
 // Must be called within a current CATransaction on the transaction's thread.
 void NativeLayerRootCA::ApplyChanges() {
   MutexAutoLock lock(mMutex);
@@ -128,9 +151,7 @@ NativeLayerCA::~NativeLayerCA() {
     IOSurfaceDecrementUseCount(mReadySurface->mSurface.get());
   }
 
-  for (CALayer* contentLayer : mContentCALayers) {
-    [contentLayer release];
-  }
+  [mContentCALayer release];
   [mWrappingCALayer release];
 }
 
@@ -173,7 +194,7 @@ void NativeLayerCA::SetSurfaceIsFlipped(bool aIsFlipped) {
 
   if (aIsFlipped != mSurfaceIsFlipped) {
     mSurfaceIsFlipped = aIsFlipped;
-    mMutatedGeometry = true;
+    mMutatedSize = true;
   }
 }
 
@@ -192,7 +213,7 @@ void NativeLayerCA::SetRect(const IntRect& aRect) {
   }
   if (aRect.Size() != mSize) {
     mSize = aRect.Size();
-    mMutatedGeometry = true;
+    mMutatedSize = true;
   }
 }
 
@@ -206,22 +227,38 @@ void NativeLayerCA::SetBackingScale(float aBackingScale) {
 
   if (aBackingScale != mBackingScale) {
     mBackingScale = aBackingScale;
-    mMutatedGeometry = true;
+    mMutatedClipRect = true;
+    mMutatedPosition = true;
+    mMutatedSize = true;
   }
 }
 
-void NativeLayerCA::SetOpaqueRegion(const gfx::IntRegion& aRegion) {
+void NativeLayerCA::SetIsOpaque(bool aIsOpaque) {
   MutexAutoLock lock(mMutex);
 
-  if (aRegion != mOpaqueRegion) {
-    mOpaqueRegion = aRegion;
-    mMutatedGeometry = true;
+  if (aIsOpaque != mIsOpaque) {
+    mIsOpaque = aIsOpaque;
+    mMutatedIsOpaque = true;
   }
 }
 
-gfx::IntRegion NativeLayerCA::OpaqueRegion() {
+bool NativeLayerCA::IsOpaque() {
   MutexAutoLock lock(mMutex);
-  return mOpaqueRegion;
+  return mIsOpaque;
+}
+
+void NativeLayerCA::SetClipRect(const Maybe<gfx::IntRect>& aClipRect) {
+  MutexAutoLock lock(mMutex);
+
+  if (aClipRect != mClipRect) {
+    mClipRect = aClipRect;
+    mMutatedClipRect = true;
+  }
+}
+
+Maybe<gfx::IntRect> NativeLayerCA::ClipRect() {
+  MutexAutoLock lock(mMutex);
+  return mClipRect;
 }
 
 IntRegion NativeLayerCA::CurrentSurfaceInvalidRegion() {
@@ -412,86 +449,74 @@ void NativeLayerCA::ApplyChanges() {
     mWrappingCALayer.bounds = NSZeroRect;
     mWrappingCALayer.anchorPoint = NSZeroPoint;
     mWrappingCALayer.contentsGravity = kCAGravityTopLeft;
+    mContentCALayer = [[CALayer layer] retain];
+    mContentCALayer.anchorPoint = NSZeroPoint;
+    mContentCALayer.contentsGravity = kCAGravityTopLeft;
+    [mWrappingCALayer addSublayer:mContentCALayer];
   }
 
-  if (mMutatedPosition || mMutatedGeometry) {
+  // CALayers have a position and a size, specified through the position and the bounds properties.
+  // layer.bounds.origin must always be (0, 0).
+  // A layer's position affects the layer's entire layer subtree. In other words, each layer's
+  // position is relative to its superlayer's position. We implement the clip rect using
+  // masksToBounds on mWrappingCALayer. So mContentCALayer's position is relative to the clip rect
+  // position.
+  // Note: The Core Animation docs on "Positioning and Sizing Sublayers" say:
+  //  Important: Always use integral numbers for the width and height of your layer.
+  // We hope that this refers to integral physical pixels, and not to integral logical coordinates.
+
+  auto globalClipOrigin = mClipRect ? mClipRect->TopLeft() : gfx::IntPoint{};
+  auto globalLayerOrigin = mPosition;
+  auto clipToLayerOffset = globalLayerOrigin - globalClipOrigin;
+
+  if (mMutatedClipRect) {
     mWrappingCALayer.position =
-        CGPointMake(mPosition.x / mBackingScale, mPosition.y / mBackingScale);
-    mMutatedPosition = false;
+        CGPointMake(globalClipOrigin.x / mBackingScale, globalClipOrigin.y / mBackingScale);
+    if (mClipRect) {
+      mWrappingCALayer.masksToBounds = YES;
+      mWrappingCALayer.bounds =
+          CGRectMake(0, 0, mClipRect->Width() / mBackingScale, mClipRect->Height() / mBackingScale);
+    } else {
+      mWrappingCALayer.masksToBounds = NO;
+    }
   }
 
-  if (mMutatedGeometry) {
-    mWrappingCALayer.bounds =
+  if (mMutatedPosition || mMutatedClipRect) {
+    mContentCALayer.position =
+        CGPointMake(clipToLayerOffset.x / mBackingScale, clipToLayerOffset.y / mBackingScale);
+  }
+
+  if (mMutatedSize) {
+    mContentCALayer.bounds =
         CGRectMake(0, 0, mSize.width / mBackingScale, mSize.height / mBackingScale);
-
-    // Assemble opaque and transparent sublayers to cover the respective regions.
-    // mContentCALayers has the current sublayers. We will try to re-use layers
-    // as much as possible.
-    IntRegion opaqueRegion;
-    opaqueRegion.And(IntRect(IntPoint(), mSize), mOpaqueRegion);
-    IntRegion transparentRegion;
-    transparentRegion.Sub(IntRect(IntPoint(), mSize), opaqueRegion);
-    std::deque<CALayer*> layersToRecycle = std::move(mContentCALayers);
-    PlaceContentLayers(lock, opaqueRegion, true, &layersToRecycle);
-    PlaceContentLayers(lock, transparentRegion, false, &layersToRecycle);
-    for (CALayer* unusedLayer : layersToRecycle) {
-      [unusedLayer release];
+    mContentCALayer.contentsScale = mBackingScale;
+    if (mSurfaceIsFlipped) {
+      CGFloat height = mSize.height / mBackingScale;
+      mContentCALayer.affineTransform = CGAffineTransformMake(1.0, 0.0, 0.0, -1.0, 0.0, height);
+    } else {
+      mContentCALayer.affineTransform = CGAffineTransformIdentity;
     }
-    NSMutableArray<CALayer*>* sublayers =
-        [NSMutableArray arrayWithCapacity:mContentCALayers.size()];
-    for (auto layer : mContentCALayers) {
-      [sublayers addObject:layer];
-    }
-    mWrappingCALayer.sublayers = sublayers;
-    mMutatedGeometry = false;
   }
+
+  if (mMutatedIsOpaque) {
+    mContentCALayer.opaque = mIsOpaque;
+    if ([mContentCALayer respondsToSelector:@selector(setContentsOpaque:)]) {
+      // The opaque property seems to not be enough when using IOSurface contents.
+      // Additionally, call the private method setContentsOpaque.
+      [mContentCALayer setContentsOpaque:mIsOpaque];
+    }
+  }
+
+  mMutatedPosition = false;
+  mMutatedSize = false;
+  mMutatedIsOpaque = false;
+  mMutatedClipRect = false;
 
   if (mReadySurface) {
-    for (CALayer* layer : mContentCALayers) {
-      layer.contents = (id)mReadySurface->mSurface.get();
-    }
+    mContentCALayer.contents = (id)mReadySurface->mSurface.get();
     IOSurfaceDecrementUseCount(mReadySurface->mSurface.get());
     mSurfaces.push_back(*mReadySurface);
     mReadySurface = Nothing();
-  }
-}
-
-void NativeLayerCA::PlaceContentLayers(const MutexAutoLock&, const IntRegion& aRegion, bool aOpaque,
-                                       std::deque<CALayer*>* aLayersToRecycle) {
-  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
-    IntRect r = iter.Get();
-
-    CALayer* layer;
-    if (aLayersToRecycle->empty()) {
-      layer = [[CALayer layer] retain];
-      layer.anchorPoint = NSZeroPoint;
-      layer.contentsGravity = kCAGravityTopLeft;
-    } else {
-      layer = aLayersToRecycle->front();
-      aLayersToRecycle->pop_front();
-    }
-    layer.position = CGPointMake(r.x / mBackingScale, r.y / mBackingScale);
-    layer.bounds = CGRectMake(0, 0, r.width / mBackingScale, r.height / mBackingScale);
-    layer.contentsScale = mBackingScale;
-    CGRect unitContentsRect =
-        CGRectMake(CGFloat(r.x) / mSize.width, CGFloat(r.y) / mSize.height,
-                   CGFloat(r.width) / mSize.width, CGFloat(r.height) / mSize.height);
-    if (mSurfaceIsFlipped) {
-      CGFloat height = r.height / mBackingScale;
-      layer.affineTransform = CGAffineTransformMake(1.0, 0.0, 0.0, -1.0, 0.0, height);
-      unitContentsRect.origin.y = 1.0 - (unitContentsRect.origin.y + unitContentsRect.size.height);
-      layer.contentsRect = unitContentsRect;
-    } else {
-      layer.affineTransform = CGAffineTransformIdentity;
-      layer.contentsRect = unitContentsRect;
-    }
-    layer.opaque = aOpaque;
-    if ([layer respondsToSelector:@selector(setContentsOpaque:)]) {
-      // The opaque property seems to not be enough when using IOSurface contents.
-      // Additionally, call the private method setContentsOpaque.
-      [layer setContentsOpaque:aOpaque];
-    }
-    mContentCALayers.push_back(layer);
   }
 }
 

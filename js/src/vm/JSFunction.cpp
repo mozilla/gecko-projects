@@ -764,9 +764,13 @@ inline void JSFunction::trace(JSTracer* trc) {
     // yet at some points when parsing, and can be lazy with no lazy script
     // for self-hosted code.
     if (hasScript() && !hasUncompletedScript()) {
-      TraceManuallyBarrieredEdge(trc, &u.scripted.s.script_, "script");
+      JSScript* script = static_cast<JSScript*>(u.scripted.s.script_);
+      TraceManuallyBarrieredEdge(trc, &script, "script");
+      u.scripted.s.script_ = script;
     } else if (hasLazyScript()) {
-      TraceManuallyBarrieredEdge(trc, &u.scripted.s.lazy_, "lazyScript");
+      LazyScript* lazy = static_cast<LazyScript*>(u.scripted.s.script_);
+      TraceManuallyBarrieredEdge(trc, &lazy, "lazy");
+      u.scripted.s.script_ = lazy;
     }
     // NOTE: The u.scripted.s.selfHostedLazy_ does not point to GC things.
 
@@ -1215,23 +1219,19 @@ const JSClass JSFunction::class_ = {js_Function_str,
 const JSClass* const js::FunctionClassPtr = &JSFunction::class_;
 
 bool JSFunction::isDerivedClassConstructor() {
-  bool derived;
-  if (isInterpretedLazy()) {
+  bool derived = false;
+  if (hasSelfHostedLazyScript()) {
     // There is only one plausible lazy self-hosted derived
     // constructor.
-    if (isSelfHostedBuiltin()) {
-      JSAtom* name = GetClonedSelfHostedFunctionName(this);
+    JSAtom* name = GetClonedSelfHostedFunctionName(this);
 
-      // This function is called from places without access to a
-      // JSContext. Trace some plumbing to get what we want.
-      derived = name == compartment()
-                            ->runtimeFromAnyThread()
-                            ->commonNames->DefaultDerivedClassConstructor;
-    } else {
-      derived = lazyScript()->isDerivedClassConstructor();
-    }
-  } else {
-    derived = nonLazyScript()->isDerivedClassConstructor();
+    // This function is called from places without access to a
+    // JSContext. Trace some plumbing to get what we want.
+    derived = name == compartment()
+                          ->runtimeFromAnyThread()
+                          ->commonNames->DefaultDerivedClassConstructor;
+  } else if (hasBaseScript()) {
+    derived = baseScript()->isDerivedClassConstructor();
   }
   MOZ_ASSERT_IF(derived, isClassConstructor());
   return derived;
@@ -1600,12 +1600,7 @@ static bool DelazifyCanonicalScriptedFunction(JSContext* cx,
   }
 
   RootedScript script(cx, fun->nonLazyScript());
-
-  // Remember the compiled script on the lazy script itself, in case
-  // there are clones of the function still pointing to the lazy script.
-  if (!lazy->maybeScript()) {
-    lazy->initScript(script);
-  }
+  MOZ_ASSERT(lazy->maybeScript() == script);
 
   if (lazy->canRelazify()) {
     // Remember the lazy script on the compiled script, so it can be
@@ -1687,7 +1682,7 @@ void JSFunction::maybeRelazify(JSRuntime* rt) {
   // Try to relazify functions with a non-lazy script. Note: functions can be
   // marked as interpreted despite having no script yet at some points when
   // parsing.
-  if (!hasScript() || !u.scripted.s.script_) {
+  if (!hasScript() || hasUncompletedScript()) {
     return;
   }
 
@@ -1717,7 +1712,8 @@ void JSFunction::maybeRelazify(JSRuntime* rt) {
   }
 
   // Don't relazify functions with JIT code.
-  if (!u.scripted.s.script_->isRelazifiable()) {
+  JSScript* script = nonLazyScript();
+  if (!script->isRelazifiable()) {
     return;
   }
 
@@ -1728,8 +1724,6 @@ void JSFunction::maybeRelazify(JSRuntime* rt) {
     return;
   }
 
-  JSScript* script = nonLazyScript();
-
   flags_.clearInterpreted();
   flags_.setInterpretedLazy();
 
@@ -1738,8 +1732,8 @@ void JSFunction::maybeRelazify(JSRuntime* rt) {
 
   LazyScript* lazy = script->maybeLazyScript();
   if (lazy) {
-    u.scripted.s.lazy_ = lazy;
-    MOZ_ASSERT(!isSelfHostedBuiltin());
+    u.scripted.s.script_ = lazy;
+    MOZ_ASSERT(hasLazyScript());
   } else {
     // Lazy self-hosted builtins point to a SelfHostedLazyScript that may be
     // called from JIT scripted calls.

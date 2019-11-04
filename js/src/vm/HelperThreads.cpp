@@ -594,7 +594,9 @@ void ScriptParseTask<Unit>::parse(JSContext* cx) {
   {
     ScopeKind scopeKind =
         options.nonSyntacticScope ? ScopeKind::NonSyntactic : ScopeKind::Global;
-    frontend::GlobalScriptInfo info(cx, options, scopeKind);
+    LifoAllocScope allocScope(&cx->tempLifoAlloc());
+    frontend::ParseInfo parseInfo(cx, allocScope);
+    frontend::GlobalScriptInfo info(cx, parseInfo, options, scopeKind);
     script = frontend::CompileGlobalScript(
         info, data,
         /* sourceObjectOut = */ &sourceObject.get());
@@ -1687,7 +1689,7 @@ void GlobalHelperThreadState::scheduleCompressionTasks(
 
 bool GlobalHelperThreadState::canStartGCParallelTask(
     const AutoLockHelperThreadState& lock) {
-  return !gcParallelWorklist(lock).empty() &&
+  return !gcParallelWorklist(lock).isEmpty() &&
          checkTaskThreadLimit<GCParallelTask*>(maxGCParallelThreads());
 }
 
@@ -1696,37 +1698,27 @@ js::GCParallelTask::~GCParallelTask() {
   // destructors run after those for derived classes' members, so a join in a
   // base class can't ensure that the task is done using the members. All we
   // can do now is check that someone has previously stopped the task.
-  assertNotStarted();
+  assertIdle();
 }
 
-bool js::GCParallelTask::startWithLockHeld(AutoLockHelperThreadState& lock) {
+void js::GCParallelTask::startWithLockHeld(AutoLockHelperThreadState& lock) {
   MOZ_ASSERT(CanUseExtraThreads());
-  assertNotStarted();
+  MOZ_ASSERT(HelperThreadState().threads);
+  assertIdle();
 
-  // If we do the shutdown GC before running anything, we may never
-  // have initialized the helper threads. Just use the serial path
-  // since we cannot safely intialize them at this point.
-  if (!HelperThreadState().threads) {
-    return false;
-  }
-
-  if (!HelperThreadState().gcParallelWorklist(lock).append(this)) {
-    return false;
-  }
+  HelperThreadState().gcParallelWorklist(lock).insertBack(this);
   setDispatched(lock);
 
   HelperThreadState().notifyOne(GlobalHelperThreadState::PRODUCER, lock);
-
-  return true;
 }
 
-bool js::GCParallelTask::start() {
-  AutoLockHelperThreadState helperLock;
-  return startWithLockHeld(helperLock);
+void js::GCParallelTask::start() {
+  AutoLockHelperThreadState lock;
+  startWithLockHeld(lock);
 }
 
 void js::GCParallelTask::startOrRunIfIdle(AutoLockHelperThreadState& lock) {
-  if (isRunningWithLockHeld(lock)) {
+  if (wasStarted(lock)) {
     return;
   }
 
@@ -1734,28 +1726,57 @@ void js::GCParallelTask::startOrRunIfIdle(AutoLockHelperThreadState& lock) {
   // if the thread has never been started.
   joinWithLockHeld(lock);
 
-  if (!(CanUseExtraThreads() && startWithLockHeld(lock))) {
+  if (!CanUseExtraThreads()) {
     AutoUnlockHelperThreadState unlock(lock);
     runFromMainThread();
-  }
-}
-
-void js::GCParallelTask::joinWithLockHeld(AutoLockHelperThreadState& lock) {
-  if (isNotStarted(lock)) {
     return;
   }
 
+  startWithLockHeld(lock);
+}
+
+void js::GCParallelTask::join() {
+  AutoLockHelperThreadState lock;
+  joinWithLockHeld(lock);
+}
+
+void js::GCParallelTask::joinWithLockHeld(AutoLockHelperThreadState& lock) {
+  // Task has not been started; there's nothing to do.
+  if (isIdle(lock)) {
+    return;
+  }
+
+  // If the task was dispatched but has not yet started then cancel the task and
+  // run it from the main thread. This stops us from blocking here when the
+  // helper threads are busy with other tasks.
+  if (isDispatched(lock)) {
+    cancelDispatchedTask(lock);
+    AutoUnlockHelperThreadState unlock(lock);
+    runFromMainThread();
+    return;
+  }
+
+  joinRunningOrFinishedTask(lock);
+}
+
+void js::GCParallelTask::joinRunningOrFinishedTask(
+    AutoLockHelperThreadState& lock) {
+  MOZ_ASSERT(isRunning(lock) || isFinishing(lock) || isFinished(lock));
+
+  // Wait for the task to run to completion.
   while (!isFinished(lock)) {
     HelperThreadState().wait(lock, GlobalHelperThreadState::CONSUMER);
   }
 
-  setNotStarted(lock);
+  setIdle(lock);
   cancel_ = false;
 }
 
-void js::GCParallelTask::join() {
-  AutoLockHelperThreadState helperLock;
-  joinWithLockHeld(helperLock);
+void js::GCParallelTask::cancelDispatchedTask(AutoLockHelperThreadState& lock) {
+  MOZ_ASSERT(isDispatched(lock));
+  MOZ_ASSERT(isInList());
+  remove();
+  setIdle(lock);
 }
 
 static inline TimeDuration TimeSince(TimeStamp prev) {
@@ -1768,44 +1789,47 @@ static inline TimeDuration TimeSince(TimeStamp prev) {
   return now - prev;
 }
 
-void GCParallelTask::joinAndRunFromMainThread() {
-  {
-    AutoLockHelperThreadState lock;
-    MOZ_ASSERT(!isRunningWithLockHeld(lock));
-    joinWithLockHeld(lock);
-  }
-
-  runFromMainThread();
-}
-
 void js::GCParallelTask::runFromMainThread() {
-  assertNotStarted();
+  assertIdle();
   MOZ_ASSERT(js::CurrentThreadCanAccessRuntime(gc->rt));
-  TimeStamp timeStart = ReallyNow();
   runTask();
-  duration_ = TimeSince(timeStart);
 }
 
 void js::GCParallelTask::runFromHelperThread(AutoLockHelperThreadState& lock) {
-  MOZ_ASSERT(isDispatched(lock));
+  setRunning(lock);
 
   {
     AutoUnlockHelperThreadState parallelSection(lock);
     AutoSetHelperThreadContext usesContext;
     AutoSetContextRuntime ascr(gc->rt);
     gc::AutoSetThreadIsPerformingGC performingGC;
-    TimeStamp timeStart = ReallyNow();
     runTask();
-    duration_ = TimeSince(timeStart);
   }
 
   setFinished(lock);
   HelperThreadState().notifyAll(GlobalHelperThreadState::CONSUMER, lock);
 }
 
-bool js::GCParallelTask::isRunning() const {
+void GCParallelTask::runTask() {
+  // Run the task from either the main thread or a helper thread.
+
+  // The hazard analysis can't tell what the call to func_ will do but it's not
+  // allowed to GC.
+  JS::AutoSuppressGCAnalysis nogc;
+
+  TimeStamp timeStart = ReallyNow();
+  func_(this);
+  duration_ = TimeSince(timeStart);
+}
+
+bool js::GCParallelTask::isIdle() const {
   AutoLockHelperThreadState lock;
-  return isRunningWithLockHeld(lock);
+  return isIdle(lock);
+}
+
+bool js::GCParallelTask::wasStarted() const {
+  AutoLockHelperThreadState lock;
+  return wasStarted(lock);
 }
 
 void HelperThread::handleGCParallelWorkload(AutoLockHelperThreadState& lock) {
@@ -1815,7 +1839,7 @@ void HelperThread::handleGCParallelWorkload(AutoLockHelperThreadState& lock) {
   TraceLoggerThread* logger = TraceLoggerForCurrentThread();
   AutoTraceLog logCompile(logger, TraceLogger_GC);
 
-  currentTask.emplace(HelperThreadState().gcParallelWorklist(lock).popCopy());
+  currentTask.emplace(HelperThreadState().gcParallelWorklist(lock).popFirst());
   gcParallelTask()->runFromHelperThread(lock);
   currentTask.reset();
 }

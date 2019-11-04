@@ -163,6 +163,7 @@ HttpBaseChannel::HttpBaseChannel()
       mChannelCreationTime(0),
       mStartPos(UINT64_MAX),
       mTransferSize(0),
+      mRequestSize(0),
       mDecodedBodySize(0),
       mEncodedBodySize(0),
       mRequestContextID(0),
@@ -1496,6 +1497,18 @@ HttpBaseChannel::IsThirdPartyTrackingResource(bool* aIsTrackingResource) {
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::IsSocialTrackingResource(bool* aIsSocialTrackingResource) {
+  MOZ_ASSERT(!mFirstPartyClassificationFlags ||
+             !mThirdPartyClassificationFlags);
+  *aIsSocialTrackingResource =
+      UrlClassifierCommon::IsSocialTrackingClassificationFlag(
+          mThirdPartyClassificationFlags) ||
+      UrlClassifierCommon::IsSocialTrackingClassificationFlag(
+          mFirstPartyClassificationFlags);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetClassificationFlags(uint32_t* aFlags) {
   if (mThirdPartyClassificationFlags) {
     *aFlags = mThirdPartyClassificationFlags;
@@ -1527,6 +1540,12 @@ HttpBaseChannel::GetFlashPluginState(nsIHttpChannel::FlashPluginState* aState) {
 NS_IMETHODIMP
 HttpBaseChannel::GetTransferSize(uint64_t* aTransferSize) {
   *aTransferSize = mTransferSize;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetRequestSize(uint64_t* aRequestSize) {
+  *aRequestSize = mRequestSize;
   return NS_OK;
 }
 

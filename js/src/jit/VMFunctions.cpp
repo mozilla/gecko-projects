@@ -2085,5 +2085,191 @@ void* AllocateBigIntNoGC(JSContext* cx) {
   return js::Allocate<BigInt, NoGC>(cx);
 }
 
+BigInt* BigIntAdd(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::add(cx, x, y);
+}
+
+BigInt* BigIntSub(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::sub(cx, x, y);
+}
+
+BigInt* BigIntMul(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::mul(cx, x, y);
+}
+
+BigInt* BigIntDiv(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::div(cx, x, y);
+}
+
+BigInt* BigIntMod(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::mod(cx, x, y);
+}
+
+BigInt* BigIntPow(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::pow(cx, x, y);
+}
+
+BigInt* BigIntBitAnd(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::bitAnd(cx, x, y);
+}
+
+BigInt* BigIntBitOr(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::bitOr(cx, x, y);
+}
+
+BigInt* BigIntBitXor(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::bitXor(cx, x, y);
+}
+
+BigInt* BigIntLeftShift(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::lsh(cx, x, y);
+}
+
+BigInt* BigIntRightShift(JSContext* cx, HandleBigInt x, HandleBigInt y) {
+  return BigInt::rsh(cx, x, y);
+}
+
+BigInt* BigIntBitNot(JSContext* cx, HandleBigInt x) {
+  return BigInt::bitNot(cx, x);
+}
+
+BigInt* BigIntNeg(JSContext* cx, HandleBigInt x) { return BigInt::neg(cx, x); }
+
+BigInt* BigIntInc(JSContext* cx, HandleBigInt x) { return BigInt::inc(cx, x); }
+
+BigInt* BigIntDec(JSContext* cx, HandleBigInt x) { return BigInt::dec(cx, x); }
+
+template <EqualityKind Kind>
+bool BigIntEqual(BigInt* x, BigInt* y) {
+  AutoUnsafeCallWithABI unsafe;
+  bool res = BigInt::equal(x, y);
+  if (Kind != EqualityKind::Equal) {
+    res = !res;
+  }
+  return res;
+}
+
+template bool BigIntEqual<EqualityKind::Equal>(BigInt* x, BigInt* y);
+template bool BigIntEqual<EqualityKind::NotEqual>(BigInt* x, BigInt* y);
+
+template <ComparisonKind Kind>
+bool BigIntCompare(BigInt* x, BigInt* y) {
+  AutoUnsafeCallWithABI unsafe;
+  bool res = BigInt::lessThan(x, y);
+  if (Kind != ComparisonKind::LessThan) {
+    res = !res;
+  }
+  return res;
+}
+
+template bool BigIntCompare<ComparisonKind::LessThan>(BigInt* x, BigInt* y);
+template bool BigIntCompare<ComparisonKind::GreaterThanOrEqual>(BigInt* x,
+                                                                BigInt* y);
+
+template <EqualityKind Kind>
+bool BigIntNumberEqual(BigInt* x, double y) {
+  AutoUnsafeCallWithABI unsafe;
+  bool res = BigInt::equal(x, y);
+  if (Kind != EqualityKind::Equal) {
+    res = !res;
+  }
+  return res;
+}
+
+template bool BigIntNumberEqual<EqualityKind::Equal>(BigInt* x, double y);
+template bool BigIntNumberEqual<EqualityKind::NotEqual>(BigInt* x, double y);
+
+template <ComparisonKind Kind>
+bool BigIntNumberCompare(BigInt* x, double y) {
+  AutoUnsafeCallWithABI unsafe;
+  mozilla::Maybe<bool> res = BigInt::lessThan(x, y);
+  if (Kind == ComparisonKind::LessThan) {
+    return res.valueOr(false);
+  }
+  return !res.valueOr(true);
+}
+
+template bool BigIntNumberCompare<ComparisonKind::LessThan>(BigInt* x,
+                                                            double y);
+template bool BigIntNumberCompare<ComparisonKind::GreaterThanOrEqual>(BigInt* x,
+                                                                      double y);
+
+template <ComparisonKind Kind>
+bool NumberBigIntCompare(double x, BigInt* y) {
+  AutoUnsafeCallWithABI unsafe;
+  mozilla::Maybe<bool> res = BigInt::lessThan(x, y);
+  if (Kind == ComparisonKind::LessThan) {
+    return res.valueOr(false);
+  }
+  return !res.valueOr(true);
+}
+
+template bool NumberBigIntCompare<ComparisonKind::LessThan>(double x,
+                                                            BigInt* y);
+template bool NumberBigIntCompare<ComparisonKind::GreaterThanOrEqual>(
+    double x, BigInt* y);
+
+template <EqualityKind Kind>
+bool BigIntStringEqual(JSContext* cx, HandleBigInt x, HandleString y,
+                       bool* res) {
+  JS_TRY_VAR_OR_RETURN_FALSE(cx, *res, BigInt::equal(cx, x, y));
+  if (Kind != EqualityKind::Equal) {
+    *res = !*res;
+  }
+  return true;
+}
+
+template bool BigIntStringEqual<EqualityKind::Equal>(JSContext* cx,
+                                                     HandleBigInt x,
+                                                     HandleString y, bool* res);
+template bool BigIntStringEqual<EqualityKind::NotEqual>(JSContext* cx,
+                                                        HandleBigInt x,
+                                                        HandleString y,
+                                                        bool* res);
+
+template <ComparisonKind Kind>
+bool BigIntStringCompare(JSContext* cx, HandleBigInt x, HandleString y,
+                         bool* res) {
+  mozilla::Maybe<bool> result;
+  if (!BigInt::lessThan(cx, x, y, result)) {
+    return false;
+  }
+  if (Kind == ComparisonKind::LessThan) {
+    *res = result.valueOr(false);
+  } else {
+    *res = !result.valueOr(true);
+  }
+  return true;
+}
+
+template bool BigIntStringCompare<ComparisonKind::LessThan>(JSContext* cx,
+                                                            HandleBigInt x,
+                                                            HandleString y,
+                                                            bool* res);
+template bool BigIntStringCompare<ComparisonKind::GreaterThanOrEqual>(
+    JSContext* cx, HandleBigInt x, HandleString y, bool* res);
+
+template <ComparisonKind Kind>
+bool StringBigIntCompare(JSContext* cx, HandleString x, HandleBigInt y,
+                         bool* res) {
+  mozilla::Maybe<bool> result;
+  if (!BigInt::lessThan(cx, x, y, result)) {
+    return false;
+  }
+  if (Kind == ComparisonKind::LessThan) {
+    *res = result.valueOr(false);
+  } else {
+    *res = !result.valueOr(true);
+  }
+  return true;
+}
+
+template bool StringBigIntCompare<ComparisonKind::LessThan>(JSContext* cx,
+                                                            HandleString x,
+                                                            HandleBigInt y,
+                                                            bool* res);
+template bool StringBigIntCompare<ComparisonKind::GreaterThanOrEqual>(
+    JSContext* cx, HandleString x, HandleBigInt y, bool* res);
+
 }  // namespace jit
 }  // namespace js

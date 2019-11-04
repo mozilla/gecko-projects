@@ -53,6 +53,7 @@ DevToolsModules(
     'debounce.js',
     'defer.js',
     'DevToolsUtils.js',
+    'dom-helpers.js',
     'dom-node-constants.js',
     'dom-node-filter-constants.js',
     'event-emitter.js',

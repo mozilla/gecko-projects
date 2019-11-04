@@ -3786,6 +3786,10 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     // CSP error
     cssClass.AssignLiteral("neterror");
     error = "cspBlocked";
+  } else if (NS_ERROR_XFO_VIOLATION == aError) {
+    // XFO error
+    cssClass.AssignLiteral("neterror");
+    error = "xfoBlocked";
   } else if (NS_ERROR_GET_MODULE(aError) == NS_ERROR_MODULE_SECURITY) {
     nsCOMPtr<nsINSSErrorsService> nsserr =
         do_GetService(NS_NSS_ERRORS_SERVICE_CONTRACTID);
@@ -4035,9 +4039,11 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
         error = "blockedByPolicy";
         break;
       case NS_ERROR_NET_HTTP2_SENT_GOAWAY:
-        // HTTP/2 stack detected a protocol error
+      case NS_ERROR_NET_HTTP3_PROTOCOL_ERROR:
+        // HTTP/2 or HTTP/3 stack detected a protocol error
         error = "networkProtocolError";
         break;
+
       default:
         break;
     }
@@ -6582,6 +6588,7 @@ nsresult nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
                aStatus == NS_ERROR_INTERCEPTION_FAILED ||
                aStatus == NS_ERROR_NET_INADEQUATE_SECURITY ||
                aStatus == NS_ERROR_NET_HTTP2_SENT_GOAWAY ||
+               aStatus == NS_ERROR_NET_HTTP3_PROTOCOL_ERROR ||
                NS_ERROR_GET_MODULE(aStatus) == NS_ERROR_MODULE_SECURITY) {
       // Errors to be shown for any frame
       DisplayLoadError(aStatus, url, nullptr, aChannel);
@@ -9539,8 +9546,9 @@ static bool IsConsideredSameOriginForUIR(nsIPrincipal* aTriggeringPrincipal,
   return aTriggeringPrincipal->Equals(tmpResultPrincipal);
 }
 
-static bool HasHttpScheme(nsIURI* aURI) {
-  return aURI && (aURI->SchemeIs("http") || aURI->SchemeIs("https"));
+static bool SchemeUsesDocChannel(nsIURI* aURI) {
+  return aURI && (aURI->SchemeIs("http") || aURI->SchemeIs("https") ||
+                  aURI->SchemeIs("moz"));
 }
 
 /* static */ bool nsDocShell::CreateChannelForLoadState(
@@ -9550,7 +9558,7 @@ static bool HasHttpScheme(nsIURI* aURI) {
     uint32_t aCacheKey, bool aIsActive, bool aIsTopLevelDoc,
     bool aHasNonEmptySandboxingFlags, nsresult& aRv, nsIChannel** aChannel) {
   if (StaticPrefs::browser_tabs_documentchannel() && XRE_IsContentProcess() &&
-      HasHttpScheme(aLoadState->URI())) {
+      SchemeUsesDocChannel(aLoadState->URI())) {
     RefPtr<DocumentChannelChild> child = new DocumentChannelChild(
         aLoadState, aLoadInfo, aInitiatorType, aLoadFlags, aLoadType, aCacheKey,
         aIsActive, aIsTopLevelDoc, aHasNonEmptySandboxingFlags);
@@ -10197,10 +10205,10 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
 
   bool isActive =
       mIsActive || (mLoadType & (LOAD_CMD_NORMAL | LOAD_CMD_HISTORY));
-  if (!CreateChannelForLoadState(aLoadState, loadInfo, this, this,
-                                 initiatorType, loadFlags, mLoadType, cacheKey,
-                                 isActive, isTopLevelDoc, mBrowsingContext->GetSandboxFlags(), rv,
-                                 getter_AddRefs(channel))) {
+  if (!CreateChannelForLoadState(
+          aLoadState, loadInfo, this, this, initiatorType, loadFlags, mLoadType,
+          cacheKey, isActive, isTopLevelDoc,
+          mBrowsingContext->GetSandboxFlags(), rv, getter_AddRefs(channel))) {
     return rv;
   }
 

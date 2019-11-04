@@ -36,6 +36,7 @@ class NativeLayerRoot {
   virtual already_AddRefed<NativeLayer> CreateLayer() = 0;
   virtual void AppendLayer(NativeLayer* aLayer) = 0;
   virtual void RemoveLayer(NativeLayer* aLayer) = 0;
+  virtual void SetLayers(const nsTArray<RefPtr<NativeLayer>>& aLayers) = 0;
 
  protected:
   virtual ~NativeLayerRoot() {}
@@ -71,9 +72,14 @@ class NativeLayer {
   virtual void SetRect(const gfx::IntRect& aRect) = 0;
   virtual gfx::IntRect GetRect() = 0;
 
-  // Define which parts of the layer are opaque..
-  virtual void SetOpaqueRegion(const gfx::IntRegion& aRegion) = 0;
-  virtual gfx::IntRegion OpaqueRegion() = 0;
+  // Set whether the layer is fully opaque.
+  virtual void SetIsOpaque(bool aIsOpaque) = 0;
+  virtual bool IsOpaque() = 0;
+
+  // Set an optional clip rect on the layer. The clip rect is in the same
+  // coordinate space as the layer rect.
+  virtual void SetClipRect(const Maybe<gfx::IntRect>& aClipRect) = 0;
+  virtual Maybe<gfx::IntRect> ClipRect() = 0;
 
   // Whether the surface contents are flipped vertically compared to this
   // layer's coordinate system. Can be set on any thread at any time.

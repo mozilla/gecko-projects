@@ -38,6 +38,7 @@
 #include "mozilla/dom/RemoteBrowser.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EnumeratedArray.h"
+#include "mozilla/MotionPathUtils.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/gfx/UserData.h"
@@ -73,7 +74,6 @@ struct WrFiltersHolder;
 namespace mozilla {
 class FrameLayerBuilder;
 class PresShell;
-struct MotionPathData;
 namespace layers {
 struct FrameMetrics;
 class RenderRootStateManager;
@@ -7129,19 +7129,18 @@ class nsDisplayTransform : public nsDisplayHitTestInfoItem {
   struct MOZ_STACK_CLASS FrameTransformProperties {
     FrameTransformProperties(const nsIFrame* aFrame, float aAppUnitsPerPixel,
                              const nsRect* aBoundsOverride);
-    // This constructor is used on the compositor (for animations).
-    // FIXME: Bug 1186329: if we want to support compositor animations for
-    // motion path, we need to update this. For now, let mMotion be Nothing().
     FrameTransformProperties(const mozilla::StyleTranslate& aTranslate,
                              const mozilla::StyleRotate& aRotate,
                              const mozilla::StyleScale& aScale,
                              const mozilla::StyleTransform& aTransform,
+                             const Maybe<mozilla::MotionPathData>& aMotion,
                              const Point3D& aToTransformOrigin)
         : mFrame(nullptr),
           mTranslate(aTranslate),
           mRotate(aRotate),
           mScale(aScale),
           mTransform(aTransform),
+          mMotion(aMotion),
           mToTransformOrigin(aToTransformOrigin) {}
 
     bool HasTransform() const {

@@ -300,11 +300,11 @@ bool nsContentSecurityUtils::IsEvalAllowed(JSContext* cx,
     return true;
   }
 
-  // We only perform checks of these two preferences on the Main Thread
-  // (because a String-based preference checks is only safe on Main Thread.)
+  // We only perform a check of this preference on the Main Thread
+  // (because a String-based preference check is only safe on Main Thread.)
   // The consequence of this is that if a user is using userChromeJS _and_
   // the scripts they use start a worker and that worker uses eval - we will
-  // enter this function, skip over these pref checks that would normally cause
+  // enter this function, skip over this pref check that would normally cause
   // us to allow the eval usage - and we will block it.
   // While not ideal, we do not officially support userChromeJS, and hopefully
   // the usage of workers and eval in workers is even lower that userChromeJS
@@ -320,22 +320,6 @@ bool nsContentSecurityUtils::IsEvalAllowed(JSContext* cx,
       MOZ_LOG(sCSMLog, LogLevel::Debug,
               ("Allowing eval() %s because of "
                "general.config.filename",
-               (aIsSystemPrincipal ? "with System Principal"
-                                   : "in parent process")));
-      return true;
-    }
-
-    // This preference is better known as userchrome.css which allows
-    // customization of the Firefox UI. Believe it or not, you can also
-    // use XBL bindings to get it to run Javascript in the same manner
-    // as userChromeJS above, so even though 99.9% of people using
-    // userchrome.css aren't doing that, we're still going to need to
-    // disable the eval() assertion for them.
-    if (Preferences::GetBool(
-            "toolkit.legacyUserProfileCustomizations.stylesheets")) {
-      MOZ_LOG(sCSMLog, LogLevel::Debug,
-              ("Allowing eval() %s because of "
-               "toolkit.legacyUserProfileCustomizations.stylesheets",
                (aIsSystemPrincipal ? "with System Principal"
                                    : "in parent process")));
       return true;
@@ -414,10 +398,15 @@ bool nsContentSecurityUtils::IsEvalAllowed(JSContext* cx,
       fileName.get(), NS_ConvertUTF16toUTF8(aScript).get());
 #endif
 
-  // Do not enforce eval usage blocking on Worker threads; because this is
-  // new behavior and we want to be conservative so we don't accidently break
-  // Nightly. Bug 1584602 will enforce things.
-  return !NS_IsMainThread();
+#if defined(RELEASE_OR_BETA) && !defined(EARLY_BETA_OR_EARLIER)
+  // Until we understand the events coming from release, we don't want to
+  // enforce eval restrictions on release. However there's no RELEASE define,
+  // only RELEASE_OR_BETA so we enforce eval restrictions on Nightly and Early
+  // Beta; but not Release or Late Beta.
+  return false;
+#else
+  return true;
+#endif
 }
 
 /* static */

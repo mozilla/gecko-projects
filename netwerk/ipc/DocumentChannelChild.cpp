@@ -68,6 +68,7 @@ DocumentChannelChild::DocumentChannelChild(
   uint64_t channelId;
   Unused << handler->NewChannelId(channelId);
   mChannelId.emplace(channelId);
+  mAsyncOpenTime = TimeStamp::Now();
 }
 
 NS_IMETHODIMP
@@ -151,6 +152,7 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
   args.isTopLevelDoc() = mIsTopLevelDoc;
   args.hasNonEmptySandboxingFlags() = mHasNonEmptySandboxingFlags;
   args.channelId() = *mChannelId;
+  args.asyncOpenTime() = mAsyncOpenTime;
 
   nsCOMPtr<nsILoadContext> loadContext;
   NS_QueryNotificationCallbacks(this, loadContext);
@@ -611,6 +613,19 @@ DocumentChannelChild::IsThirdPartyTrackingResource(bool* aIsTrackingResource) {
       !(mFirstPartyClassificationFlags && mThirdPartyClassificationFlags));
   *aIsTrackingResource = UrlClassifierCommon::IsTrackingClassificationFlag(
       mThirdPartyClassificationFlags);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+DocumentChannelChild::IsSocialTrackingResource(
+    bool* aIsSocialTrackingResource) {
+  MOZ_ASSERT(!mFirstPartyClassificationFlags ||
+             !mThirdPartyClassificationFlags);
+  *aIsSocialTrackingResource =
+      UrlClassifierCommon::IsSocialTrackingClassificationFlag(
+          mThirdPartyClassificationFlags) ||
+      UrlClassifierCommon::IsSocialTrackingClassificationFlag(
+          mFirstPartyClassificationFlags);
   return NS_OK;
 }
 

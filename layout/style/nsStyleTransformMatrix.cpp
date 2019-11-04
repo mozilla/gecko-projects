@@ -12,6 +12,7 @@
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
 #include "nsSVGUtils.h"
+#include "mozilla/MotionPathUtils.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPrefs_svg.h"
 #include "mozilla/StyleAnimationValue.h"
@@ -574,6 +575,15 @@ Matrix4x4 ReadTransforms(const StyleTranslate& aTranslate,
   result.PostScale(scale, scale, scale);
 
   return result;
+}
+
+mozilla::CSSPoint Convert2DPosition(const mozilla::LengthPercentage& aX,
+                                    const mozilla::LengthPercentage& aY,
+                                    const CSSSize& aSize) {
+  return {
+      aX.ResolveToCSSPixels(aSize.width),
+      aY.ResolveToCSSPixels(aSize.height),
+  };
 }
 
 CSSPoint Convert2DPosition(const LengthPercentage& aX,

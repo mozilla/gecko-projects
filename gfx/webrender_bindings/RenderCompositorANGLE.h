@@ -39,11 +39,12 @@ class RenderCompositorANGLE : public RenderCompositor {
   virtual ~RenderCompositorANGLE();
   bool Initialize();
 
-  bool BeginFrame(layers::NativeLayer* aNativeLayer) override;
+  bool BeginFrame() override;
   void EndFrame() override;
   bool WaitForGPU() override;
   void Pause() override;
   bool Resume() override;
+  void Update() override;
 
   gl::GLContext* gl() const override { return RenderThread::Get()->SharedGL(); }
 
@@ -61,7 +62,22 @@ class RenderCompositorANGLE : public RenderCompositor {
 
   bool SurfaceIsYFlipped() override { return true; }
 
+  bool ShouldUseNativeCompositor() override;
+
+  // Interface for wr::Compositor
+  void CompositorBeginFrame() override;
+  void CompositorEndFrame() override;
+  void Bind(wr::NativeSurfaceId aId, wr::DeviceIntPoint* aOffset,
+            uint32_t* aFboId, wr::DeviceIntRect aDirtyRect) override;
+  void Unbind() override;
+  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aSize,
+                     bool aIsOpaque) override;
+  void DestroySurface(NativeSurfaceId aId) override;
+  void AddSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aPosition,
+                  wr::DeviceIntRect aClipRect) override;
+
  protected:
+  bool UseCompositor();
   void InsertPresentWaitQuery();
   bool WaitForPreviousPresentQuery();
   bool ResizeBufferIfNeeded();

@@ -494,6 +494,7 @@ static bool enableBYOBStreamReaders = false;
 static bool enableWritableStreams = false;
 static bool enableFields = false;
 static bool enableAwaitFix = false;
+static bool enableWeakRefs = false;
 #ifdef JS_GC_ZEAL
 static uint32_t gZealBits = 0;
 static uint32_t gZealFrequency = 0;
@@ -637,7 +638,8 @@ ShellContext::ShellContext(JSContext* cx)
       readLineBufPos(0),
       errFilePtr(nullptr),
       outFilePtr(nullptr),
-      offThreadMonitor(mutexid::ShellOffThreadState) {}
+      offThreadMonitor(mutexid::ShellOffThreadState),
+      finalizationGroupsToCleanUp(cx) {}
 
 ShellContext::~ShellContext() { MOZ_ASSERT(offThreadJobs.empty()); }
 
@@ -1014,6 +1016,38 @@ static MOZ_MUST_USE bool RunModule(JSContext* cx, const char* filename,
   return JS_CallFunction(cx, nullptr, importFun, args, &value);
 }
 
+static void ShellCleanupFinalizationGroupCallback(JSObject* group, void* data) {
+  // In the browser this queues a task. Shell jobs correspond to microtasks so
+  // we arrange for cleanup to happen after all jobs/microtasks have run.
+  auto sc = static_cast<ShellContext*>(data);
+  AutoEnterOOMUnsafeRegion oomUnsafe;
+  if (!sc->finalizationGroupsToCleanUp.append(group)) {
+    oomUnsafe.crash("ShellCleanupFinalizationGroupCallback");
+  }
+}
+
+static void MaybeRunFinalizationGroupCleanupTasks(JSContext* cx) {
+  ShellContext* sc = GetShellContext(cx);
+  MOZ_ASSERT(!sc->quitting);
+
+  Rooted<ShellContext::ObjectVector> groups(cx);
+  std::swap(groups.get(), sc->finalizationGroupsToCleanUp.get());
+
+  RootedObject group(cx);
+  for (const auto& g : groups) {
+    group = g;
+
+    {
+      AutoReportException are(cx);
+      mozilla::Unused << JS::CleanupQueuedFinalizationGroup(cx, group);
+    }
+
+    if (sc->quitting) {
+      break;
+    }
+  }
+}
+
 static bool EnqueueJob(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -1028,6 +1062,22 @@ static bool EnqueueJob(JSContext* cx, unsigned argc, Value* vp) {
   return js::EnqueueJob(cx, job);
 }
 
+static void RunShellJobs(JSContext* cx) {
+  ShellContext* sc = GetShellContext(cx);
+  if (sc->quitting) {
+    return;
+  }
+
+  // Run microtasks.
+  js::RunJobs(cx);
+  if (sc->quitting) {
+    return;
+  }
+
+  // Run tasks (only finalization group clean tasks are possible).
+  MaybeRunFinalizationGroupCleanupTasks(cx);
+}
+
 static bool DrainJobQueue(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -1037,7 +1087,7 @@ static bool DrainJobQueue(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  js::RunJobs(cx);
+  RunShellJobs(cx);
 
   if (GetShellContext(cx)->quitting) {
     return false;
@@ -1402,10 +1452,7 @@ static MOZ_MUST_USE bool ReadEvalPrintLoop(JSContext* cx, FILE* in,
           stderr);
     }
 
-    if (!GetShellContext(cx)->quitting) {
-      js::RunJobs(cx);
-    }
-
+    RunShellJobs(cx);
   } while (!hitEOF && !sc->quitting);
 
   if (gOutFile->isOpen()) {
@@ -3813,7 +3860,8 @@ static void SetStandardRealmOptions(JS::RealmOptions& options) {
       .setBYOBStreamReadersEnabled(enableBYOBStreamReaders)
       .setWritableStreamsEnabled(enableWritableStreams)
       .setFieldsEnabled(enableFields)
-      .setAwaitFixEnabled(enableAwaitFix);
+      .setAwaitFixEnabled(enableAwaitFix)
+      .setWeakRefsEnabled(enableWeakRefs);
   options.behaviors().setDeferredParserAlloc(enableDeferredMode);
 }
 
@@ -4051,6 +4099,9 @@ static void WorkerMain(WorkerInput* input) {
   js::SetWindowProxyClass(cx, &ShellWindowProxyClass);
 
   js::UseInternalJobQueues(cx);
+
+  JS::SetHostCleanupFinalizationGroupCallback(
+      cx, ShellCleanupFinalizationGroupCallback, sc);
 
   if (!JS::InitSelfHostedCode(cx)) {
     return;
@@ -10288,6 +10339,7 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   enableWritableStreams = op.getBoolOption("enable-writable-streams");
   enableFields = !op.getBoolOption("disable-experimental-fields");
   enableAwaitFix = op.getBoolOption("enable-experimental-await-fix");
+  enableWeakRefs = op.getBoolOption("enable-weak-refs");
 
   JS::ContextOptionsRef(cx)
       .setAsmJS(enableAsmJS)
@@ -10835,9 +10887,7 @@ static int Shell(JSContext* cx, OptionParser* op, char** envp) {
    * tasks before the main thread JSRuntime is torn down. Drain after
    * uncaught exceptions have been reported since draining runs callbacks.
    */
-  if (!GetShellContext(cx)->quitting) {
-    js::RunJobs(cx);
-  }
+  RunShellJobs(cx);
 
   // Only if there's no other error, report unhandled rejections.
   if (!result && !sc->exitCode) {
@@ -11062,6 +11112,7 @@ int main(int argc, char** argv, char** envp) {
                         "Disable public fields in classes") ||
       !op.addBoolOption('\0', "enable-experimental-await-fix",
                         "Enable new, faster await semantics") ||
+      !op.addBoolOption('\0', "enable-weak-refs", "Enable weak references") ||
       !op.addStringOption('\0', "shared-memory", "on/off",
                           "SharedArrayBuffer and Atomics "
 #if SHARED_MEMORY_DEFAULT
@@ -11423,6 +11474,9 @@ int main(int argc, char** argv, char** envp) {
   JS::dbg::SetDebuggerMallocSizeOf(cx, moz_malloc_size_of);
 
   js::UseInternalJobQueues(cx);
+
+  JS::SetHostCleanupFinalizationGroupCallback(
+      cx, ShellCleanupFinalizationGroupCallback, sc.get());
 
   auto shutdownShellThreads = MakeScopeExit([cx] {
     KillWatchdog(cx);

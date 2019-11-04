@@ -278,8 +278,8 @@ class WatchdogManager {
   }
 
  private:
-  static void PrefsChanged(const char* aPref, WatchdogManager* aSelf) {
-    aSelf->RefreshWatchdog();
+  static void PrefsChanged(const char* aPref, void* aSelf) {
+    static_cast<WatchdogManager*>(aSelf)->RefreshWatchdog();
   }
 
  public:
@@ -772,6 +772,8 @@ void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
       .setSharedMemoryAndAtomicsEnabled(sSharedMemoryEnabled)
       .setStreamsEnabled(sStreamsEnabled)
+      .setWritableStreamsEnabled(
+          StaticPrefs::javascript_options_writable_streams())
       .setFieldsEnabled(sFieldsEnabled)
       .setAwaitFixEnabled(sAwaitFixEnabled);
 }
@@ -889,9 +891,10 @@ static void LoadStartupJSPrefs(XPCJSContext* xpccx) {
   }
 }
 
-static void ReloadPrefsCallback(const char* pref, XPCJSContext* xpccx) {
+static void ReloadPrefsCallback(const char* pref, void* aXpccx) {
   // Note: Prefs that require a restart are handled in LoadStartupJSPrefs above.
 
+  auto xpccx = static_cast<XPCJSContext*>(aXpccx);
   JSContext* cx = xpccx->Context();
 
   bool useAsmJS = Preferences::GetBool(JS_OPTIONS_DOT_STR "asmjs");

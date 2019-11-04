@@ -1249,6 +1249,12 @@
 # Prefs starting with "dom."
 #---------------------------------------------------------------------------
 
+# Whether window.mozPaintCount is exposed to the web.
+- name: dom.mozPaintCount.enabled
+  type: bool
+  value: false
+  mirror: always
+
 # Allow cut/copy
 - name: dom.allow_cut_copy
   type: bool
@@ -1596,6 +1602,12 @@
 - name: dom.ipc.plugins.asyncdrawing.enabled
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+# How long we wait before unloading an idle plugin process.
+- name: dom.ipc.plugins.unloadTimeoutSecs
+  type: RelaxedAtomicUint32
+  value: 30
   mirror: always
 
 - name: dom.ipc.tabs.disabled
@@ -2135,7 +2147,7 @@
 
 - name: dom.security.respect_document_nosniff
   type: RelaxedAtomicBool
-  value: true
+  value: false
   mirror: always
 
 # Expose the 'policy' attribute in document and HTMLIFrameElement
@@ -2731,6 +2743,12 @@
   value: false
   mirror: always
 
+# WebShare API - allows WebShare without user interaction (for tests only).
+- name: dom.webshare.requireinteraction
+  type: bool
+  value: true
+  mirror: always
+
 #---------------------------------------------------------------------------
 # Prefs starting with "editor"
 #---------------------------------------------------------------------------
@@ -2779,6 +2797,18 @@
 - name: extensions.allowPrivateBrowsingByDefault
   type: bool
   value: @IS_ANDROID@
+  mirror: always
+
+# This pref governs whether we enable content script CSP in extensions.
+- name: extensions.content_script_csp.enabled
+  type: bool
+  value: false
+  mirror: always
+
+# This pref governs whether content script CSP is report-only.
+- name: extensions.content_script_csp.report_only
+  type: bool
+  value: true
   mirror: always
 
 # This pref governs whether we run webextensions in a separate process (true)
@@ -3475,6 +3505,16 @@
   value: false
   mirror: once
 
+- name: gfx.text.subpixel-position.force-enabled
+  type: bool
+  value: false
+  mirror: once
+
+- name: gfx.text.subpixel-position.force-disabled
+  type: bool
+  value: false
+  mirror: once
+
 # Disable surface sharing due to issues with compatible FBConfigs on
 # NVIDIA drivers as described in bug 1193015.
 - name: gfx.use-glx-texture-from-pixmap
@@ -3998,6 +4038,16 @@
 - name: javascript.options.streams
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+# Writable Streams API.  (The pref above must also be set to expose this.)
+#
+# Writable streams are still EXTRAORDINARILY BETA and it is well-known that
+# things are likely pretty broken if you poke much at all, so if you flip this
+# preference, don't report bugs against it just yet.
+- name: javascript.options.writable_streams
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 - name: javascript.options.main_thread_stack_quota_cap
@@ -4844,12 +4894,6 @@
   value: @IS_NOT_RELEASE_OR_BETA@
   mirror: always
 
-# Is support for -moz-binding enabled?
-- name: layout.css.moz-binding.content.enabled
-  type: bool
-  value: false
-  mirror: always
-
 # Expose the media query -moz-touch-enabled to web content.
 - name: layout.css.moz-touch-enabled.enabled
   type: RelaxedAtomicBool
@@ -5278,6 +5322,31 @@
   value: true
   mirror: always
 
+# Pref to control how many consecutive scroll-anchoring adjustments (since the
+# most recent user scroll) we'll average, before we consider whether to
+# automatically turn off scroll anchoring. When we hit this threshold, the
+# actual decision to disable also depends on the
+# min-average-adjustment-threshold pref, see below for more details.
+#
+# Zero disables the heuristic.
+- name: layout.css.scroll-anchoring.max-consecutive-adjustments
+  type: uint32_t
+  value: 10
+  mirror: always
+
+# Pref to control whether we should disable scroll anchoring on a scroller
+# where at least max-consecutive-adjustments have happened, and which the
+# average adjustment ends up being less than this number, in CSS pixels.
+#
+# So, for example, given max-consecutive-adjustments=10 and
+# min-average-adjustment-treshold=3, we'll block scroll anchoring if there have
+# been 10 consecutive adjustments without a user scroll or more, and the
+# average offset difference between them amount to less than 3 CSS pixels.
+- name: layout.css.scroll-anchoring.min-average-adjustment-threshold
+  type: uint32_t
+  value: 3
+  mirror: always
+
 # Pref to control disabling scroll anchoring suppression triggers, see
 #
 # https://drafts.csswg.org/css-scroll-anchoring/#suppression-triggers
@@ -5469,6 +5538,16 @@
   type: RelaxedAtomicUint32
   value: 32768   # Measured in KiB
   mirror: always
+
+# Whether cubeb is sandboxed
+- name: media.cubeb.sandbox
+  type: bool
+  mirror: always
+#if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
+  value: true
+#else
+  value: false
+#endif
 
 # If a resource is known to be smaller than this size (in kilobytes), a
 # memory-backed MediaCache may be used; otherwise the (single shared global)
@@ -7116,6 +7195,16 @@
   type: RelaxedAtomicBool
   value: true
   mirror: always
+
+
+# The level to which we sandbox the content process. firefox.js sets the
+# default to different values on a per-OS basis, and has documentation
+# on what the defaults are and what the numbers mean.
+- name: security.sandbox.content.level
+  type: int32_t
+  value: 0
+  mirror: always
+  do_not_use_directly: true # Consumers should use SandboxSettings to ask.
 
 #if defined(XP_WIN) && defined(MOZ_SANDBOX)
   # Whether win32k is disabled for content processes.

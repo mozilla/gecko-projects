@@ -299,11 +299,6 @@ pref("browser.urlbar.suggest.bookmark",             true);
 pref("browser.urlbar.suggest.openpage",             true);
 pref("browser.urlbar.suggest.searches",             true);
 
-// Whether the user made a choice in the old search suggestions opt-in bar.
-pref("browser.urlbar.userMadeSearchSuggestionsChoice", false);
-// The suggestion opt-out hint will be hidden after being shown 4 times.
-pref("browser.urlbar.timesBeforeHidingSuggestionsHint", 4);
-
 // Limit the number of characters sent to the current search engine to fetch
 // suggestions.
 pref("browser.urlbar.maxCharsForSearchSuggestions", 20);
@@ -330,13 +325,8 @@ pref("browser.urlbar.usepreloadedtopurls.enabled", false);
 pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 
 // Whether the quantum bar displays the major design update.
-#ifdef NIGHTLY_BUILD
-  pref("browser.urlbar.megabar", true);
-  pref("browser.urlbar.view.stripHttps", true);
-#else
-  pref("browser.urlbar.megabar", false);
-  pref("browser.urlbar.view.stripHttps", false);
-#endif
+pref("browser.urlbar.megabar", false);
+pref("browser.urlbar.view.stripHttps", false);
 
 pref("browser.urlbar.openViewOnFocus", false);
 pref("browser.urlbar.eventTelemetry.enabled", false);
@@ -393,7 +383,7 @@ pref("browser.search.widget.inNavBar", false);
 
 // Enables display of the options for the user using a separate default search
 // engine in private browsing mode.
-#ifdef EARLY_BETA_OR_EARLIER
+#ifdef NIGHTLY_BUILD
   pref("browser.search.separatePrivateDefault.ui.enabled", true);
 #endif
 // The maximum amount of times the private default banner is shown.
@@ -412,7 +402,7 @@ pref("permissions.default.geo", 0);
 pref("permissions.default.desktop-notification", 0);
 pref("permissions.default.shortcuts", 0);
 
-#ifdef NIGHTLY_BUILD
+#ifdef EARLY_BETA_OR_EARLIER
   pref("permissions.desktop-notification.postPrompt.enabled", true);
 #else
   pref("permissions.desktop-notification.postPrompt.enabled", false);
@@ -1523,13 +1513,10 @@ pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked, 5=All Blocked
   pref("media.autoplay.block-webaudio", false);
 #endif
 
-// Picture-in-Picture is currently enabled on Windows for EARLY_BETA_OR_EARLIER
-// and DevEdition
+// Picture-in-Picture is currently enabled by default on Windows.
 #if defined(XP_WIN)
-  #if defined(EARLY_BETA_OR_EARLIER) || defined(MOZ_DEV_EDITION)
-    pref("media.videocontrols.picture-in-picture.enabled", true);
-    pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
-  #endif
+  pref("media.videocontrols.picture-in-picture.enabled", true);
+  pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
 #endif
 
 // Picture-in-Picture is currently enabled on Nightly for macOS and Linux GTK.
@@ -1562,8 +1549,6 @@ pref("toolkit.telemetry.newProfilePing.enabled", true);
 pref("toolkit.telemetry.updatePing.enabled", true);
 // Enables sending 'bhr' pings when the browser hangs.
 pref("toolkit.telemetry.bhrPing.enabled", true);
-// Enables using Hybrid Content Telemetry from Mozilla privileged pages.
-pref("toolkit.telemetry.hybridContent.enabled", true);
 // Whether to enable Ecosystem Telemetry, requires a restart.
 #ifdef NIGHTLY_BUILD
   pref("toolkit.telemetry.ecosystemtelemetry.enabled", true);

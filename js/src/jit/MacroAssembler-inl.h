@@ -149,6 +149,7 @@ ABIFunctionType MacroAssembler::signature() const {
     case Args_Double_DoubleDouble:
     case Args_Double_IntDouble:
     case Args_Int_IntDouble:
+    case Args_Int_DoubleInt:
     case Args_Int_DoubleIntInt:
     case Args_Int_IntDoubleIntInt:
     case Args_Double_DoubleDoubleDouble:
@@ -339,6 +340,11 @@ void MacroAssembler::branchLatin1String(Register string, Label* label) {
 void MacroAssembler::branchTwoByteString(Register string, Label* label) {
   branchTest32(Assembler::Zero, Address(string, JSString::offsetOfFlags()),
                Imm32(JSString::LATIN1_CHARS_BIT), label);
+}
+
+void MacroAssembler::branchIfNegativeBigInt(Register bigInt, Label* label) {
+  branchTest32(Assembler::NonZero, Address(bigInt, BigInt::offsetOfFlags()),
+               Imm32(BigInt::signBitMask()), label);
 }
 
 void MacroAssembler::branchTestFunctionFlags(Register fun, uint32_t flags,

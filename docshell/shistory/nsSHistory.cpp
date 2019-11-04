@@ -137,6 +137,7 @@ class nsSHistoryObserver final : public nsIObserver {
 
   nsSHistoryObserver() {}
 
+  static void PrefChanged(const char* aPref, void* aSelf);
   void PrefChanged(const char* aPref);
 
  protected:
@@ -146,6 +147,11 @@ class nsSHistoryObserver final : public nsIObserver {
 StaticRefPtr<nsSHistoryObserver> gObserver;
 
 NS_IMPL_ISUPPORTS(nsSHistoryObserver, nsIObserver)
+
+// static
+void nsSHistoryObserver::PrefChanged(const char* aPref, void* aSelf) {
+  static_cast<nsSHistoryObserver*>(aSelf)->PrefChanged(aPref);
+}
 
 void nsSHistoryObserver::PrefChanged(const char* aPref) {
   nsSHistory::UpdatePrefs();
@@ -309,9 +315,8 @@ nsresult nsSHistory::Startup() {
   // but keep the per SHistory cached viewer limit constant
   if (!gObserver) {
     gObserver = new nsSHistoryObserver();
-    Preferences::RegisterCallbacks(
-        PREF_CHANGE_METHOD(nsSHistoryObserver::PrefChanged), kObservedPrefs,
-        gObserver.get());
+    Preferences::RegisterCallbacks(nsSHistoryObserver::PrefChanged,
+                                   kObservedPrefs, gObserver.get());
 
     nsCOMPtr<nsIObserverService> obsSvc =
         mozilla::services::GetObserverService();
@@ -331,9 +336,8 @@ nsresult nsSHistory::Startup() {
 // static
 void nsSHistory::Shutdown() {
   if (gObserver) {
-    Preferences::UnregisterCallbacks(
-        PREF_CHANGE_METHOD(nsSHistoryObserver::PrefChanged), kObservedPrefs,
-        gObserver.get());
+    Preferences::UnregisterCallbacks(nsSHistoryObserver::PrefChanged,
+                                     kObservedPrefs, gObserver.get());
 
     nsCOMPtr<nsIObserverService> obsSvc =
         mozilla::services::GetObserverService();

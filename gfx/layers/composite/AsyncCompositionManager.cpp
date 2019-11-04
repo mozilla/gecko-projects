@@ -630,12 +630,16 @@ static void ApplyAnimatedValue(
     case eCSSProperty_rotate:
     case eCSSProperty_scale:
     case eCSSProperty_translate:
-    case eCSSProperty_transform: {
+    case eCSSProperty_transform:
+    case eCSSProperty_offset_path:
+    case eCSSProperty_offset_distance:
+    case eCSSProperty_offset_rotate:
+    case eCSSProperty_offset_anchor: {
       const TransformData& transformData = aAnimationData.ref();
 
       Matrix4x4 frameTransform =
-          AnimationHelper::ServoAnimationValueToMatrix4x4(aValues,
-                                                          transformData);
+          AnimationHelper::ServoAnimationValueToMatrix4x4(
+              aValues, transformData, aLayer->CachedMotionPath());
 
       Matrix4x4 transform = FrameTransformToTransformInDevice(
           frameTransform, aLayer, transformData);
@@ -715,7 +719,11 @@ static bool SampleAnimations(Layer* aLayer,
           case eCSSProperty_rotate:
           case eCSSProperty_scale:
           case eCSSProperty_translate:
-          case eCSSProperty_transform: {
+          case eCSSProperty_transform:
+          case eCSSProperty_offset_path:
+          case eCSSProperty_offset_distance:
+          case eCSSProperty_offset_rotate:
+          case eCSSProperty_offset_anchor: {
             MOZ_ASSERT(
                 layer->AsHostLayer()->GetShadowTransformSetByAnimation());
             MOZ_ASSERT(previousValue);
@@ -723,8 +731,8 @@ static bool SampleAnimations(Layer* aLayer,
             const TransformData& transformData =
                 lastPropertyAnimationGroup.mAnimationData.ref();
             Matrix4x4 frameTransform =
-                AnimationHelper::ServoAnimationValueToMatrix4x4(animationValues,
-                                                                transformData);
+                AnimationHelper::ServoAnimationValueToMatrix4x4(
+                    animationValues, transformData, layer->CachedMotionPath());
             Matrix4x4 transformInDevice = FrameTransformToTransformInDevice(
                 frameTransform, layer, transformData);
             MOZ_ASSERT(previousValue->Transform()

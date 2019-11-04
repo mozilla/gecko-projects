@@ -1404,7 +1404,7 @@ class BaseScript : public gc::TenuredCell {
   // Object that determines what Realm this script is compiled for. In general
   // this refers to the realm's GlobalObject, but for a lazy-script we instead
   // refer to the associated function.
-  GCPtrObject functionOrGlobal_;
+  const GCPtrObject functionOrGlobal_;
 
   // The ScriptSourceObject for this script.
   GCPtr<ScriptSourceObject*> sourceObject_ = {};
@@ -1655,6 +1655,12 @@ class BaseScript : public gc::TenuredCell {
   uint32_t sourceLength() const { return sourceEnd_ - sourceStart_; }
   uint32_t toStringStart() const { return toStringStart_; }
   uint32_t toStringEnd() const { return toStringEnd_; }
+
+  void setToStringEnd(uint32_t toStringEnd) {
+    MOZ_ASSERT(toStringStart_ <= toStringEnd);
+    MOZ_ASSERT(toStringEnd_ >= sourceEnd_);
+    toStringEnd_ = toStringEnd;
+  }
 
   uint32_t lineno() const { return lineno_; }
   uint32_t column() const { return column_; }
@@ -3410,12 +3416,6 @@ class LazyScript : public BaseScript {
   const FieldInitializers& getFieldInitializers() const {
     MOZ_ASSERT(lazyData_);
     return lazyData_->fieldInitializers_;
-  }
-
-  void setToStringEnd(uint32_t toStringEnd) {
-    MOZ_ASSERT(toStringStart_ <= toStringEnd);
-    MOZ_ASSERT(toStringEnd_ >= sourceEnd_);
-    toStringEnd_ = toStringEnd;
   }
 
   // Returns true if the enclosing script has ever been compiled.

@@ -64,7 +64,7 @@ class UrlbarInput {
         <vbox class="urlbarView"
               role="group"
               tooltip="aHTMLTooltip"
-              hidden="true">
+              context="">
           <html:div class="urlbarView-body-outer">
             <html:div class="urlbarView-body-inner">
               <html:div id="urlbar-results"
@@ -1232,29 +1232,18 @@ class UrlbarInput {
     if (this.getAttribute("pageproxystate") == "valid") {
       uri = this.window.gBrowser.currentURI;
     } else {
-      // We're dealing with an autocompleted value.
-      if (!this._resultForCurrentValue) {
-        throw new Error(
-          "UrlbarInput: Should have a UrlbarResult since " +
-            "pageproxystate != 'valid' and valueIsTyped == false"
-        );
-      }
-      let resultURL = this._resultForCurrentValue.payload.url;
-      if (!resultURL) {
-        return selectedVal;
-      }
-
+      // The value could be:
+      // 1. a trimmed url, set by selecting a result
+      // 2. a search string set by selecting a result
+      // 3. a url that was confirmed but didn't finish loading yet
+      // If it's an url the untrimmedValue should resolve to a valid URI,
+      // otherwise it's a search string that should be copied as-is.
       try {
-        uri = Services.uriFixup.createFixupURI(
-          resultURL,
-          Services.uriFixup.FIXUP_FLAG_NONE
-        );
-      } catch (e) {}
-      if (!uri) {
+        uri = Services.io.newURI(this._untrimmedValue);
+      } catch (ex) {
         return selectedVal;
       }
     }
-
     uri = this.makeURIReadable(uri);
 
     // If the entire URL is selected, just use the actual loaded URI,
@@ -1435,9 +1424,9 @@ class UrlbarInput {
    * @param {nsIInputStream} [params.postData]
    *   The POST data associated with a search submission.
    * @param {boolean} [params.allowInheritPrincipal]
-   *   If the principal may be inherited
-   * @param {object} [result]
-   *   Details of the selected result, if any
+   *   Whether the principal can be inherited.
+   * @param {object} [resultDetails]
+   *   Details of the selected result, if any.
    * @param {UrlbarUtils.RESULT_TYPE} [result.type]
    *   Details of the result type, if any.
    * @param {UrlbarUtils.RESULT_SOURCE} [result.source]
@@ -1448,7 +1437,7 @@ class UrlbarInput {
     url,
     openUILinkWhere,
     params,
-    result = {},
+    resultDetails = null,
     browser = this.window.gBrowser.selectedBrowser
   ) {
     // No point in setting these because we'll handleRevert() a few rows below.
@@ -1504,7 +1493,7 @@ class UrlbarInput {
     }
 
     // Notify about the start of navigation.
-    this._notifyStartNavigation(result);
+    this._notifyStartNavigation(resultDetails);
 
     try {
       this.window.openTrustedLinkIn(url, openUILinkWhere, params);
@@ -1632,7 +1621,7 @@ class UrlbarInput {
    * if they aren't being used, e.g. WebNavigation.
    *
    * @param {UrlbarResult} result
-   *   The result that was selected, if any.
+   *   Details of the result that was selected, if any.
    */
   _notifyStartNavigation(result) {
     Services.obs.notifyObservers({ result }, "urlbar-user-start-navigation");

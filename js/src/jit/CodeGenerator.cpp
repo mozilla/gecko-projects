@@ -1718,20 +1718,28 @@ void CodeGenerator::visitValueToString(LValueToString* lir) {
 
   // Object
   if (lir->mir()->input()->mightBeType(MIRType::Object)) {
-    // Bail.
-    MOZ_ASSERT(lir->mir()->fallible());
-    Label bail;
-    masm.branchTestObject(Assembler::Equal, tag, &bail);
-    bailoutFrom(&bail, lir->snapshot());
+    if (lir->mir()->supportSideEffects()) {
+      masm.branchTestObject(Assembler::Equal, tag, ool->entry());
+    } else {
+      // Bail.
+      MOZ_ASSERT(lir->mir()->needsSnapshot());
+      Label bail;
+      masm.branchTestObject(Assembler::Equal, tag, &bail);
+      bailoutFrom(&bail, lir->snapshot());
+    }
   }
 
   // Symbol
   if (lir->mir()->input()->mightBeType(MIRType::Symbol)) {
-    // Bail.
-    MOZ_ASSERT(lir->mir()->fallible());
-    Label bail;
-    masm.branchTestSymbol(Assembler::Equal, tag, &bail);
-    bailoutFrom(&bail, lir->snapshot());
+    if (lir->mir()->supportSideEffects()) {
+      masm.branchTestSymbol(Assembler::Equal, tag, ool->entry());
+    } else {
+      // Bail.
+      MOZ_ASSERT(lir->mir()->needsSnapshot());
+      Label bail;
+      masm.branchTestSymbol(Assembler::Equal, tag, &bail);
+      bailoutFrom(&bail, lir->snapshot());
+    }
   }
 
   // BigInt
@@ -1741,7 +1749,7 @@ void CodeGenerator::visitValueToString(LValueToString* lir) {
   }
 
 #ifdef DEBUG
-  masm.assumeUnreachable("Unexpected type for MValueToString.");
+  masm.assumeUnreachable("Unexpected type for LValueToString.");
 #endif
 
   masm.bind(&done);
@@ -3375,7 +3383,13 @@ void CodeGenerator::visitBinaryValueCache(LBinaryValueCache* lir) {
     case JSOP_MUL:
     case JSOP_DIV:
     case JSOP_MOD:
-    case JSOP_POW: {
+    case JSOP_POW:
+    case JSOP_BITAND:
+    case JSOP_BITOR:
+    case JSOP_BITXOR:
+    case JSOP_LSH:
+    case JSOP_RSH:
+    case JSOP_URSH: {
       IonBinaryArithIC ic(liveRegs, lhs, rhs, output);
       addIC(lir, allocateIC(ic));
       return;
@@ -4852,8 +4866,8 @@ static void LoadDOMPrivate(MacroAssembler& masm, Register obj, Register priv,
     masm.bind(&isDOMProxy);
 #endif
     masm.loadPtr(Address(obj, ProxyObject::offsetOfReservedSlots()), priv);
-    masm.loadPrivate(Address(priv, detail::ProxyReservedSlots::offsetOfSlot(0)),
-                     priv);
+    masm.loadPrivate(
+        Address(priv, js::detail::ProxyReservedSlots::offsetOfSlot(0)), priv);
   }
 
   masm.bind(&done);
@@ -7712,6 +7726,41 @@ void CodeGenerator::visitTypedArrayElementShift(LTypedArrayElementShift* lir) {
   masm.bind(&done);
 }
 
+class OutOfLineTypedArrayIndexToInt32
+    : public OutOfLineCodeBase<CodeGenerator> {
+  LTypedArrayIndexToInt32* lir_;
+
+ public:
+  explicit OutOfLineTypedArrayIndexToInt32(LTypedArrayIndexToInt32* lir)
+      : lir_(lir) {}
+
+  void accept(CodeGenerator* codegen) override {
+    codegen->visitOutOfLineTypedArrayIndexToInt32(this);
+  }
+  LTypedArrayIndexToInt32* lir() const { return lir_; }
+};
+
+void CodeGenerator::visitTypedArrayIndexToInt32(LTypedArrayIndexToInt32* lir) {
+  FloatRegister index = ToFloatRegister(lir->index());
+  Register output = ToRegister(lir->output());
+
+  auto* ool = new (alloc()) OutOfLineTypedArrayIndexToInt32(lir);
+  addOutOfLineCode(ool, lir->mir());
+
+  static_assert(TypedArrayObject::MAX_BYTE_LENGTH <= INT32_MAX,
+                "Double exceeding Int32 range can't be in-bounds array access");
+
+  masm.convertDoubleToInt32(index, output, ool->entry(), false);
+  masm.bind(ool->rejoin());
+}
+
+void CodeGenerator::visitOutOfLineTypedArrayIndexToInt32(
+    OutOfLineTypedArrayIndexToInt32* ool) {
+  // Substitute the invalid index with an arbitrary out-of-bounds index.
+  masm.move32(Imm32(-1), ToRegister(ool->lir()->output()));
+  masm.jump(ool->rejoin());
+}
+
 void CodeGenerator::visitTypedObjectDescr(LTypedObjectDescr* lir) {
   Register obj = ToRegister(lir->object());
   Register out = ToRegister(lir->output());
@@ -8085,6 +8134,26 @@ void CodeGenerator::visitBinaryV(LBinaryV* lir) {
 
     case JSOP_MOD:
       callVM<Fn, js::ModValues>(lir);
+      break;
+
+    case JSOP_BITAND:
+      callVM<Fn, js::BitAnd>(lir);
+      break;
+
+    case JSOP_BITOR:
+      callVM<Fn, js::BitOr>(lir);
+      break;
+
+    case JSOP_BITXOR:
+      callVM<Fn, js::BitXor>(lir);
+      break;
+
+    case JSOP_LSH:
+      callVM<Fn, js::BitLsh>(lir);
+      break;
+
+    case JSOP_RSH:
+      callVM<Fn, js::BitRsh>(lir);
       break;
 
     case JSOP_URSH:
@@ -11477,33 +11546,6 @@ void CodeGenerator::visitBitNotV(LBitNotV* lir) {
 
   using Fn = bool (*)(JSContext*, MutableHandleValue, MutableHandleValue);
   callVM<Fn, BitNot>(lir);
-}
-
-void CodeGenerator::visitBitOpV(LBitOpV* lir) {
-  pushArg(ToValue(lir, LBitOpV::RhsInput));
-  pushArg(ToValue(lir, LBitOpV::LhsInput));
-
-  using Fn = bool (*)(JSContext*, MutableHandleValue, MutableHandleValue,
-                      MutableHandleValue);
-  switch (lir->jsop()) {
-    case JSOP_BITAND:
-      callVM<Fn, BitAnd>(lir);
-      break;
-    case JSOP_BITOR:
-      callVM<Fn, BitOr>(lir);
-      break;
-    case JSOP_BITXOR:
-      callVM<Fn, BitXor>(lir);
-      break;
-    case JSOP_LSH:
-      callVM<Fn, BitLsh>(lir);
-      break;
-    case JSOP_RSH:
-      callVM<Fn, BitRsh>(lir);
-      break;
-    default:
-      MOZ_CRASH("unexpected bitop");
-  }
 }
 
 class OutOfLineTypeOfV : public OutOfLineCodeBase<CodeGenerator> {

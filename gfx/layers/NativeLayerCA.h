@@ -66,6 +66,7 @@ class NativeLayerRootCA : public NativeLayerRoot {
   already_AddRefed<NativeLayer> CreateLayer() override;
   void AppendLayer(NativeLayer* aLayer) override;
   void RemoveLayer(NativeLayer* aLayer) override;
+  void SetLayers(const nsTArray<RefPtr<NativeLayer>>& aLayers) override;
 
  protected:
   explicit NativeLayerRootCA(CALayer* aLayer);
@@ -112,6 +113,10 @@ class NativeLayerCA : public NativeLayer {
   Maybe<GLuint> NextSurfaceAsFramebuffer(bool aNeedsDepth) override;
   gfx::IntRegion CurrentSurfaceInvalidRegion() override;
   void NotifySurfaceReady() override;
+  void SetIsOpaque(bool aIsOpaque) override;
+  bool IsOpaque() override;
+  void SetClipRect(const Maybe<gfx::IntRect>& aClipRect) override;
+  Maybe<gfx::IntRect> ClipRect() override;
   void SetSurfaceIsFlipped(bool aIsFlipped) override;
   bool SurfaceIsFlipped() override;
 
@@ -144,12 +149,6 @@ class NativeLayerCA : public NativeLayer {
   void SetSurfaceRegistry(RefPtr<IOSurfaceRegistry> aSurfaceRegistry);
   RefPtr<IOSurfaceRegistry> GetSurfaceRegistry();
 
-  // Set an opaque region on the layer. Internally, this causes the creation
-  // of opaque and transparent sublayers to cover the regions.
-  // The coordinates in aRegion are relative to mPosition.
-  void SetOpaqueRegion(const gfx::IntRegion& aRegion) override;
-  gfx::IntRegion OpaqueRegion() override;
-
  protected:
   friend class NativeLayerRootCA;
 
@@ -173,8 +172,6 @@ class NativeLayerCA : public NativeLayer {
 
   std::vector<SurfaceWithInvalidRegion> RemoveExcessUnusedSurfaces(
       const MutexAutoLock&);
-  void PlaceContentLayers(const MutexAutoLock&, const gfx::IntRegion& aRegion,
-                          bool aOpaque, std::deque<CALayer*>* aLayersToRecycle);
 
   // Controls access to all fields of this class.
   Mutex mMutex;
@@ -256,16 +253,22 @@ class NativeLayerCA : public NativeLayer {
 
   gfx::IntPoint mPosition;
   gfx::IntSize mSize;
-  gfx::IntRegion mOpaqueRegion;  // coordinates relative to mPosition
+  Maybe<gfx::IntRect> mClipRect;
 
-  // Lazily initialized by first call to ApplyChanges.
-  CALayer* mWrappingCALayer = nullptr;    // strong
-  std::deque<CALayer*> mContentCALayers;  // strong
+  // Lazily initialized by first call to ApplyChanges. mWrappingLayer is the
+  // layer that applies mClipRect (if set), and mContentCALayer is the layer
+  // that hosts the IOSurface. We do not share clip layers between consecutive
+  // NativeLayerCA objects with the same clip rect.
+  CALayer* mWrappingCALayer = nullptr;  // strong
+  CALayer* mContentCALayer = nullptr;   // strong
 
   float mBackingScale = 1.0f;
   bool mSurfaceIsFlipped = false;
+  bool mIsOpaque = false;
   bool mMutatedPosition = false;
-  bool mMutatedGeometry = false;
+  bool mMutatedSize = false;
+  bool mMutatedIsOpaque = false;
+  bool mMutatedClipRect = false;
 };
 
 }  // namespace layers

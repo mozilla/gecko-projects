@@ -207,6 +207,10 @@ class ResponsiveUI {
     // Restore the previous state of RDM.
     await this.restoreState();
 
+    if (this.isBrowserUIEnabled) {
+      await this.emulationFront.setDocumentInRDMPane(true);
+    }
+
     if (!this.isBrowserUIEnabled) {
       // Force the newly created Zoom actor to cache its 1.0 zoom level. This
       // prevents it from sending out FullZoomChange events when the content
@@ -238,8 +242,7 @@ class ResponsiveUI {
     const { document: doc, gBrowser } = this.browserWindow;
     const rdmFrame = doc.createElement("iframe");
     rdmFrame.src = "chrome://devtools/content/responsive/toolbar.xhtml";
-    rdmFrame.style.height = rdmFrame.style.minHeight = "30px";
-    rdmFrame.style.borderStyle = "none";
+    rdmFrame.classList.add("rdm-toolbar");
 
     this.browserContainerEl = gBrowser.getBrowserContainer(
       gBrowser.getBrowserForTab(this.tab)
@@ -250,8 +253,8 @@ class ResponsiveUI {
 
     this.browserContainerEl.classList.add("responsive-mode");
 
-    // Prepend the RDM iframe inside of the current tab's browser container.
-    this.browserContainerEl.prepend(rdmFrame);
+    // Prepend the RDM iframe inside of the current tab's browser stack.
+    this.browserStackEl.prepend(rdmFrame);
 
     // Wait for the frame script to be loaded.
     message.wait(rdmFrame.contentWindow, "script-init").then(async () => {
@@ -303,6 +306,10 @@ class ResponsiveUI {
       await this.inited;
     }
 
+    if (this.isBrowserUIEnabled) {
+      await this.emulationFront.setDocumentInRDMPane(false);
+    }
+
     this.tab.removeEventListener("TabClose", this);
     this.tab.removeEventListener("BeforeTabRemotenessChange", this);
     this.browserWindow.removeEventListener("unload", this);
@@ -315,8 +322,8 @@ class ResponsiveUI {
       this.rdmFrame.remove();
 
       this.browserContainerEl.classList.remove("responsive-mode");
-      this.browserStackEl.style.maxWidth = this.browserStackEl.style.minWidth = null;
-      this.browserStackEl.style.maxHeight = this.browserStackEl.style.minHeight = null;
+      this.browserStackEl.style.removeProperty("--rdm-width");
+      this.browserStackEl.style.removeProperty("--rdm-height");
     }
 
     if (!this.isBrowserUIEnabled && !isTabContentDestroying) {
@@ -458,6 +465,9 @@ class ResponsiveUI {
         break;
       case "screenshot":
         this.onScreenshot();
+        break;
+      case "update-device-modal":
+        this.onUpdateDeviceModal(event);
     }
   }
 
@@ -574,6 +584,13 @@ class ResponsiveUI {
 
       message.post(this.rdmFrame.contentWindow, "screenshot-captured");
     }
+  }
+
+  onUpdateDeviceModal(event) {
+    this.browserStackEl.classList.toggle(
+      "device-modal-opened",
+      event.data.isOpen
+    );
   }
 
   /**
@@ -769,8 +786,10 @@ class ResponsiveUI {
       return;
     }
 
-    this.browserStackEl.style.maxWidth = this.browserStackEl.style.minWidth = `${width}px`;
-    this.browserStackEl.style.maxHeight = this.browserStackEl.style.minHeight = `${height}px`;
+    // Setting this with a variable on the stack instead of directly as width/height
+    // on the <browser> because we'll need to use this for the alert dialog as well.
+    this.browserStackEl.style.setProperty("--rdm-width", `${width}px`);
+    this.browserStackEl.style.setProperty("--rdm-height", `${height}px`);
   }
 
   /**

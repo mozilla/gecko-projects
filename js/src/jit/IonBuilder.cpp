@@ -709,13 +709,19 @@ AbortReasonOr<Ok> IonBuilder::analyzeNewLoopTypes(
         case JSOP_UINT16:
         case JSOP_UINT24:
         case JSOP_RESUMEINDEX:
+          type = MIRType::Int32;
+          break;
         case JSOP_BITAND:
         case JSOP_BITOR:
         case JSOP_BITXOR:
         case JSOP_BITNOT:
         case JSOP_RSH:
         case JSOP_LSH:
+          type = inspector->expectedResultType(last.toRawBytecode());
+          break;
         case JSOP_URSH:
+          // Unsigned right shift is not applicable to BigInts, so we don't need
+          // to query the baseline inspector for the possible result types.
           type = MIRType::Int32;
           break;
         case JSOP_FALSE:
@@ -3461,10 +3467,10 @@ AbortReasonOr<Ok> IonBuilder::jsop_bitnot() {
   return resumeAfter(ins);
 }
 
-AbortReasonOr<Ok> IonBuilder::jsop_bitop(JSOp op) {
-  // Pop inputs.
-  MDefinition* right = current->pop();
-  MDefinition* left = current->pop();
+AbortReasonOr<MBinaryBitwiseInstruction*> IonBuilder::binaryBitOpEmit(
+    JSOp op, MIRType specialization, MDefinition* left, MDefinition* right) {
+  MOZ_ASSERT(specialization == MIRType::Int32 ||
+             specialization == MIRType::None);
 
   MBinaryBitwiseInstruction* ins;
   switch (op) {
@@ -3499,11 +3505,68 @@ AbortReasonOr<Ok> IonBuilder::jsop_bitop(JSOp op) {
   current->add(ins);
   ins->infer(inspector, pc);
 
+  // The expected specialization should match the inferred specialization.
+  MOZ_ASSERT_IF(specialization == MIRType::None,
+                ins->specialization() == MIRType::None);
+  MOZ_ASSERT_IF(
+      specialization == MIRType::Int32,
+      ins->specialization() == MIRType::Int32 ||
+          (op == JSOP_URSH && ins->specialization() == MIRType::Double));
+
   current->push(ins);
   if (ins->isEffectful()) {
     MOZ_TRY(resumeAfter(ins));
   }
 
+  return ins;
+}
+
+static inline bool SimpleBitOpOperand(MDefinition* op) {
+  return !op->mightBeType(MIRType::Object) &&
+         !op->mightBeType(MIRType::Symbol) && !op->mightBeType(MIRType::BigInt);
+}
+
+AbortReasonOr<Ok> IonBuilder::binaryBitOpTrySpecialized(bool* emitted, JSOp op,
+                                                        MDefinition* left,
+                                                        MDefinition* right) {
+  MOZ_ASSERT(*emitted == false);
+
+  // Try to emit a specialized binary instruction based on the input types
+  // of the operands.
+
+  // Anything complex - objects, symbols, and bigints - are not specialized
+  if (!SimpleBitOpOperand(left) || !SimpleBitOpOperand(right)) {
+    return Ok();
+  }
+
+  MIRType specialization = MIRType::Int32;
+  MOZ_TRY(binaryBitOpEmit(op, specialization, left, right));
+
+  *emitted = true;
+  return Ok();
+}
+
+AbortReasonOr<Ok> IonBuilder::jsop_bitop(JSOp op) {
+  // Pop inputs.
+  MDefinition* right = current->pop();
+  MDefinition* left = current->pop();
+
+  bool emitted = false;
+
+  if (!forceInlineCaches()) {
+    MOZ_TRY(binaryBitOpTrySpecialized(&emitted, op, left, right));
+    if (emitted) {
+      return Ok();
+    }
+  }
+
+  MOZ_TRY(arithTryBinaryStub(&emitted, op, left, right));
+  if (emitted) {
+    return Ok();
+  }
+
+  // Not possible to optimize. Do a slow vm call.
+  MOZ_TRY(binaryBitOpEmit(op, MIRType::None, left, right));
   return Ok();
 }
 
@@ -3736,6 +3799,12 @@ AbortReasonOr<Ok> IonBuilder::arithTryBinaryStub(bool* emitted, JSOp op,
     case JSOP_MUL:
     case JSOP_DIV:
     case JSOP_MOD:
+    case JSOP_BITAND:
+    case JSOP_BITOR:
+    case JSOP_BITXOR:
+    case JSOP_LSH:
+    case JSOP_RSH:
+    case JSOP_URSH:
       stub = MBinaryCache::New(alloc(), left, right, MIRType::Value);
       break;
     default:
@@ -4011,10 +4080,13 @@ AbortReasonOr<Ok> IonBuilder::jsop_tostring() {
   }
 
   MDefinition* value = current->pop();
-  MToString* ins = MToString::New(alloc(), value);
+  MToString* ins =
+      MToString::New(alloc(), value, MToString::SideEffectHandling::Supported);
   current->add(ins);
   current->push(ins);
-  MOZ_ASSERT(!ins->isEffectful());
+  if (ins->isEffectful()) {
+    MOZ_TRY(resumeAfter(ins));
+  }
   return Ok();
 }
 
@@ -9024,18 +9096,6 @@ AbortReasonOr<Ok> IonBuilder::getElemTryTypedArray(bool* emitted,
     return Ok();
   }
 
-  // Don't generate a fast path if this pc has seen floating-point
-  // indexes accessed to avoid repeated bailouts. Unlike
-  // getElemTryDense, we still generate a fast path if we have seen
-  // negative indices. We expect code to occasionally generate
-  // negative indices by accident, but not to use negative indices
-  // intentionally, because typed arrays always return undefined for
-  // negative indices. See Bug 1535031.
-  if (inspector->hasSeenNonIntegerIndex(pc)) {
-    trackOptimizationOutcome(TrackedOutcome::ArraySeenNonIntegerIndex);
-    return Ok();
-  }
-
   // Emit typed getelem variant.
   MOZ_TRY(jsop_getelem_typed(obj, index, arrayType));
 
@@ -9566,14 +9626,19 @@ AbortReasonOr<Ok> IonBuilder::jsop_getelem_typed(MDefinition* obj,
   // and the instruction is not known to return a double.
   bool allowDouble = types->hasType(TypeSet::DoubleType());
 
-  // Ensure id is an integer.
-  MInstruction* idInt32 = MToNumberInt32::New(alloc(), index);
-  current->add(idInt32);
-  index = idInt32;
-
   if (!maybeUndefined) {
     // Assume the index is in range, so that we can hoist the length,
     // elements vector and bounds check.
+
+    // Ensure the index is an integer. This is a stricter requirement than
+    // enforcing that it is a TypedArray index via MTypedArrayIndexToInt32,
+    // because any double which isn't exactly representable as an int32 will
+    // lead to a bailout. But it's okay to have this stricter requirement here,
+    // since any non-int32 index is equivalent to an out-of-bounds access, which
+    // will lead to a bailout anyway.
+    MInstruction* indexInt32 = MToNumberInt32::New(alloc(), index);
+    current->add(indexInt32);
+    index = indexInt32;
 
     // If we are reading in-bounds elements, we can use knowledge about
     // the array type to determine the result type, even if the opcode has
@@ -9597,6 +9662,11 @@ AbortReasonOr<Ok> IonBuilder::jsop_getelem_typed(MDefinition* obj,
     load->setResultType(knownType);
     return Ok();
   } else {
+    // Ensure the index is a TypedArray index.
+    auto* indexInt32 = MTypedArrayIndexToInt32::New(alloc(), index);
+    current->add(indexInt32);
+    index = indexInt32;
+
     // We need a type barrier if the array's element type has never been
     // observed (we've only read out-of-bounds values). Note that for
     // Uint32Array, we only check for int32: if allowDouble is false we
@@ -10097,8 +10167,15 @@ AbortReasonOr<Ok> IonBuilder::jsop_setelem_typed(Scalar::Type arrayType,
     spew("Emitting OOB TypedArray SetElem");
   }
 
-  // Ensure id is an integer.
-  MInstruction* idInt32 = MToNumberInt32::New(alloc(), id);
+  // Ensure id is an integer. Just as in |jsop_getelem_typed|, use either
+  // MTypedArrayIndexToInt32 or MToNumberInt32 depending on whether or not
+  // out-of-bounds accesses are to be expected.
+  MInstruction* idInt32;
+  if (expectOOB) {
+    idInt32 = MTypedArrayIndexToInt32::New(alloc(), id);
+  } else {
+    idInt32 = MToNumberInt32::New(alloc(), id);
+  }
   current->add(idInt32);
   id = idInt32;
 

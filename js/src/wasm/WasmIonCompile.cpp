@@ -592,6 +592,18 @@ class FunctionCompiler {
     return load;
   }
 
+ public:
+  MWasmHeapBase* memoryBase() {
+    MWasmHeapBase* base = nullptr;
+    AliasSet aliases = env_.maxMemoryLength.isSome()
+                           ? AliasSet::None()
+                           : AliasSet::Load(AliasSet::WasmHeapMeta);
+    base = MWasmHeapBase::New(alloc(), tlsPointer_, aliases);
+    curBlock_->add(base);
+    return base;
+  }
+
+ private:
   // Only sets *mustAdd if it also returns true.
   bool needAlignmentCheck(MemoryAccessDesc* access, MDefinition* base,
                           bool* mustAdd) {
@@ -2880,7 +2892,8 @@ static bool EmitMemOrTableCopy(FunctionCompiler& f, bool isMem) {
   uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
 
   const SymbolicAddressSignature& callee =
-      isMem ? SASigMemCopy : SASigTableCopy;
+      isMem ? (f.env().usesSharedMemory() ? SASigMemCopyShared : SASigMemCopy)
+            : SASigTableCopy;
   CallCompileState args;
   if (!f.passInstance(callee.argTypes[0], &args)) {
     return false;
@@ -2895,7 +2908,12 @@ static bool EmitMemOrTableCopy(FunctionCompiler& f, bool isMem) {
   if (!f.passArg(len, callee.argTypes[3], &args)) {
     return false;
   }
-  if (!isMem) {
+  if (isMem) {
+    MDefinition* memoryBase = f.memoryBase();
+    if (!f.passArg(memoryBase, callee.argTypes[4], &args)) {
+      return false;
+    }
+  } else {
     MDefinition* dti = f.constant(Int32Value(dstTableIndex), MIRType::Int32);
     if (!dti) {
       return false;
@@ -2976,7 +2994,8 @@ static bool EmitMemFill(FunctionCompiler& f) {
 
   uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode();
 
-  const SymbolicAddressSignature& callee = SASigMemFill;
+  const SymbolicAddressSignature& callee =
+      f.env().usesSharedMemory() ? SASigMemFillShared : SASigMemFill;
   CallCompileState args;
   if (!f.passInstance(callee.argTypes[0], &args)) {
     return false;
@@ -2989,6 +3008,10 @@ static bool EmitMemFill(FunctionCompiler& f) {
     return false;
   }
   if (!f.passArg(len, callee.argTypes[3], &args)) {
+    return false;
+  }
+  MDefinition* memoryBase = f.memoryBase();
+  if (!f.passArg(memoryBase, callee.argTypes[4], &args)) {
     return false;
   }
 

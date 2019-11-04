@@ -165,7 +165,6 @@ class Rule;
 }  // namespace css
 
 namespace dom {
-class Animation;
 class AnonymousContent;
 class Attr;
 class XULBroadcastManager;
@@ -1167,6 +1166,14 @@ class Document : public nsINode,
   }
 
   /**
+   * Get social tracking cookies blocked flag for this document.
+   */
+  bool GetHasSocialTrackingCookiesBlocked() {
+    return mContentBlockingLog.HasBlockedAnyOfType(
+        nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER);
+  }
+
+  /**
    * Get third-party cookies blocked flag for this document.
    */
   bool GetHasForeignCookiesBlocked() {
@@ -1245,6 +1252,19 @@ class Document : public nsINode,
     RecordContentBlockingLog(
         aOriginBlocked, nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER,
         aHasTrackingCookiesBlocked, aReason, aTrackingFullHashes);
+  }
+
+  /**
+   * Set the social tracking cookies blocked flag for this document.
+   */
+  void SetHasSocialTrackingCookiesBlocked(
+      bool aHasSocialTrackingCookiesBlocked, const nsACString& aOriginBlocked,
+      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason,
+      const nsTArray<nsCString>& aTrackingFullHashes) {
+    RecordContentBlockingLog(
+        aOriginBlocked,
+        nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER,
+        aHasSocialTrackingCookiesBlocked, aReason, aTrackingFullHashes);
   }
 
   /**
@@ -3290,8 +3310,6 @@ class Document : public nsINode,
 
   DocumentTimeline* Timeline();
   LinkedList<DocumentTimeline>& Timelines() { return mTimelines; }
-
-  void GetAnimations(nsTArray<RefPtr<Animation>>& aAnimations);
 
   SVGSVGElement* GetSVGRootElement() const;
 

@@ -4207,15 +4207,36 @@ class MTruncateToInt32 : public MUnaryInstruction, public ToInt32Policy::Data {
 
 // Converts any type to a string
 class MToString : public MUnaryInstruction, public ToStringPolicy::Data {
-  explicit MToString(MDefinition* def) : MUnaryInstruction(classOpcode, def) {
-    setResultType(MIRType::String);
-    setMovable();
+ public:
+  // MToString has two modes for handling of object/symbol arguments: if the
+  // to-string conversion happens as part of another opcode, we have to bail out
+  // to Baseline. If the conversion is for a stand-alone JSOp we can support
+  // side-effects.
+  enum class SideEffectHandling { Bailout, Supported };
 
-    // Objects might override toString; Symbol throws. We bailout in those cases
-    // and run side-effects in baseline instead.
-    if (def->mightBeType(MIRType::Object) ||
-        def->mightBeType(MIRType::Symbol)) {
-      setGuard();
+ private:
+  SideEffectHandling sideEffects_;
+  bool mightHaveSideEffects_ = false;
+
+  MToString(MDefinition* def, SideEffectHandling sideEffects)
+      : MUnaryInstruction(classOpcode, def), sideEffects_(sideEffects) {
+    setResultType(MIRType::String);
+
+    if (input()->mightBeType(MIRType::Object) ||
+        input()->mightBeType(MIRType::Symbol)) {
+      mightHaveSideEffects_ = true;
+    }
+
+    // If this instruction is not effectful, mark it as movable and set the
+    // Guard flag if needed. If the operation is effectful it won't be optimized
+    // anyway so there's no need to set any flags.
+    if (!isEffectful()) {
+      setMovable();
+      // Objects might override toString; Symbol throws. We bailout in those
+      // cases and run side-effects in baseline instead.
+      if (mightHaveSideEffects_) {
+        setGuard();
+      }
     }
   }
 
@@ -4226,14 +4247,28 @@ class MToString : public MUnaryInstruction, public ToStringPolicy::Data {
   MDefinition* foldsTo(TempAllocator& alloc) override;
 
   bool congruentTo(const MDefinition* ins) const override {
+    if (!ins->isToString()) {
+      return false;
+    }
+    if (sideEffects_ != ins->toToString()->sideEffects_) {
+      return false;
+    }
     return congruentIfOperandsEqual(ins);
   }
 
-  AliasSet getAliasSet() const override { return AliasSet::None(); }
+  AliasSet getAliasSet() const override {
+    if (supportSideEffects() && mightHaveSideEffects_) {
+      return AliasSet::Store(AliasSet::Any);
+    }
+    return AliasSet::None();
+  }
 
-  bool fallible() const {
-    return input()->mightBeType(MIRType::Object) ||
-           input()->mightBeType(MIRType::Symbol);
+  bool supportSideEffects() const {
+    return sideEffects_ == SideEffectHandling::Supported;
+  }
+
+  bool needsSnapshot() const {
+    return sideEffects_ == SideEffectHandling::Bailout && mightHaveSideEffects_;
   }
 
   ALLOW_CLONE(MToString)
@@ -6744,8 +6779,7 @@ struct LambdaFunctionInfo {
       : fun_(fun),
         flags(fun->flags().toRaw()),
         nargs(fun->nargs()),
-        scriptOrLazyScript(fun->hasScript() ? (gc::Cell*)fun->nonLazyScript()
-                                            : (gc::Cell*)fun->lazyScript()),
+        scriptOrLazyScript(fun->baseScript()),
         singletonType(fun->isSingleton()),
         useSingletonForClone(ObjectGroup::useSingletonForClone(fun)) {
     // If this assert fails, make sure CodeGenerator::visitLambda does the
@@ -7232,6 +7266,33 @@ class MTypedArrayElementShift : public MUnaryInstruction,
   }
 
   void computeRange(TempAllocator& alloc) override;
+};
+
+// Convert the input into an Int32 value for accessing a TypedArray element.
+// If the input is non-finite, not an integer, negative, or outside the Int32
+// range, produces a value which is known to trigger an out-of-bounds access.
+class MTypedArrayIndexToInt32 : public MUnaryInstruction,
+                                public NoTypePolicy::Data {
+  explicit MTypedArrayIndexToInt32(MDefinition* def)
+      : MUnaryInstruction(classOpcode, def) {
+    MOZ_ASSERT(def->type() == MIRType::Int32 || def->type() == MIRType::Double);
+    setResultType(MIRType::Int32);
+    setMovable();
+  }
+
+ public:
+  INSTRUCTION_HEADER(TypedArrayIndexToInt32)
+  TRIVIAL_NEW_WRAPPERS
+
+  MDefinition* foldsTo(TempAllocator& alloc) override;
+
+  bool congruentTo(const MDefinition* ins) const override {
+    return congruentIfOperandsEqual(ins);
+  }
+
+  AliasSet getAliasSet() const override { return AliasSet::None(); }
+
+  ALLOW_CLONE(MTypedArrayIndexToInt32)
 };
 
 // Load a binary data object's "elements", which is just its opaque
@@ -11180,6 +11241,27 @@ class MWasmLoadTls : public MUnaryInstruction, public NoTypePolicy::Data {
 
   HashNumber valueHash() const override {
     return addU32ToHash(HashNumber(op()), offset());
+  }
+
+  AliasSet getAliasSet() const override { return aliases_; }
+};
+
+class MWasmHeapBase : public MUnaryInstruction, public NoTypePolicy::Data {
+  AliasSet aliases_;
+
+  explicit MWasmHeapBase(MDefinition* tlsPointer, AliasSet aliases)
+      : MUnaryInstruction(classOpcode, tlsPointer), aliases_(aliases) {
+    setMovable();
+    setResultType(MIRType::Pointer);
+  }
+
+ public:
+  INSTRUCTION_HEADER(WasmHeapBase)
+  TRIVIAL_NEW_WRAPPERS
+  NAMED_OPERANDS((0, tlsPtr))
+
+  bool congruentTo(const MDefinition* ins) const override {
+    return ins->isWasmHeapBase();
   }
 
   AliasSet getAliasSet() const override { return aliases_; }

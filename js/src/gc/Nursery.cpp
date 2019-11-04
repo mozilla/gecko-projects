@@ -44,9 +44,9 @@ using mozilla::PodCopy;
 using mozilla::TimeDuration;
 using mozilla::TimeStamp;
 
+#ifdef JS_GC_ZEAL
 constexpr uintptr_t CanaryMagicValue = 0xDEADB15D;
 
-#ifdef JS_GC_ZEAL
 struct js::Nursery::Canary {
   uintptr_t magicValue;
   Canary* next;
@@ -575,7 +575,7 @@ void* js::Nursery::allocateZeroedBuffer(
     }
   }
 
-  void* buffer = zone->pod_calloc<uint8_t>(nbytes, arena);
+  void* buffer = zone->pod_arena_calloc<uint8_t>(arena, nbytes);
   if (buffer && !registerMallocedBuffer(buffer)) {
     js_free(buffer);
     return nullptr;
@@ -589,7 +589,7 @@ void* js::Nursery::allocateZeroedBuffer(
   MOZ_ASSERT(nbytes > 0);
 
   if (!IsInsideNursery(obj)) {
-    return obj->zone()->pod_calloc<uint8_t>(nbytes, arena);
+    return obj->zone()->pod_arena_calloc<uint8_t>(arena, nbytes);
   }
   return allocateZeroedBuffer(obj->zone(), nbytes, arena);
 }

@@ -3419,7 +3419,11 @@ nsDOMWindowUtils::GetOMTAStyle(Element* aElement, const nsAString& aProperty,
     } else if (aProperty.EqualsLiteral("transform") ||
                aProperty.EqualsLiteral("translate") ||
                aProperty.EqualsLiteral("rotate") ||
-               aProperty.EqualsLiteral("scale")) {
+               aProperty.EqualsLiteral("scale") ||
+               aProperty.EqualsLiteral("offset-path") ||
+               aProperty.EqualsLiteral("offset-distance") ||
+               aProperty.EqualsLiteral("offset-rotate") ||
+               aProperty.EqualsLiteral("offset-anchor")) {
       OMTAValue value = GetOMTAValue(frame, DisplayItemType::TYPE_TRANSFORM,
                                      GetWebRenderBridge());
       if (value.type() == OMTAValue::TMatrix4x4) {
@@ -4148,5 +4152,12 @@ nsDOMWindowUtils::GetLayersId(uint64_t* aOutLayersId) {
 NS_IMETHODIMP
 nsDOMWindowUtils::GetUsesOverlayScrollbars(bool* aResult) {
   *aResult = Document::UseOverlayScrollbars(GetDocument());
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetPaintCount(uint64_t* aPaintCount) {
+  auto* presShell = GetPresShell();
+  *aPaintCount = presShell ? presShell->GetPaintCount() : 0;
   return NS_OK;
 }

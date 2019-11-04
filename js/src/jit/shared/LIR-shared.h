@@ -2112,27 +2112,6 @@ class LBitOpI64 : public LInstructionHelper<INT64_PIECES, 2 * INT64_PIECES, 0> {
   JSOp bitop() const { return op_; }
 };
 
-// Call a VM function to perform a bitwise operation.
-class LBitOpV : public LCallInstructionHelper<BOX_PIECES, 2 * BOX_PIECES, 0> {
-  JSOp jsop_;
-
- public:
-  LIR_HEADER(BitOpV)
-
-  LBitOpV(JSOp jsop, const LBoxAllocation& lhs, const LBoxAllocation& rhs)
-      : LCallInstructionHelper(classOpcode), jsop_(jsop) {
-    setBoxOperand(LhsInput, lhs);
-    setBoxOperand(RhsInput, rhs);
-  }
-
-  JSOp jsop() const { return jsop_; }
-
-  const char* extraName() const { return CodeName[jsop_]; }
-
-  static const size_t LhsInput = 0;
-  static const size_t RhsInput = BOX_PIECES;
-};
-
 // Shift operation, taking two 32-bit integers as inputs and returning
 // a 32-bit integer result as an output.
 class LShiftI : public LBinaryMath<0> {
@@ -3865,6 +3844,24 @@ class LTypedArrayElementShift : public LInstructionHelper<1, 1, 0> {
   }
 
   const LAllocation* object() { return getOperand(0); }
+};
+
+// Double to Int32, eligible for accessing into a TypedArray. If the index isn't
+// exactly representable as an Int32, produce any Int32 which is equivalent to
+// an OOB access into a TypedArray.
+class LTypedArrayIndexToInt32 : public LInstructionHelper<1, 1, 0> {
+ public:
+  LIR_HEADER(TypedArrayIndexToInt32)
+
+  explicit LTypedArrayIndexToInt32(const LAllocation& obj)
+      : LInstructionHelper(classOpcode) {
+    setOperand(0, obj);
+  }
+
+  const LAllocation* index() { return getOperand(0); }
+  const MTypedArrayIndexToInt32* mir() const {
+    return mir_->toTypedArrayIndexToInt32();
+  }
 };
 
 // Load a typed object's descriptor.
@@ -6251,6 +6248,17 @@ class LWasmLoadTls : public LInstructionHelper<1, 1, 0> {
     setOperand(0, tlsPtr);
   }
   MWasmLoadTls* mir() const { return mir_->toWasmLoadTls(); }
+  const LAllocation* tlsPtr() { return getOperand(0); }
+};
+
+class LWasmHeapBase : public LInstructionHelper<1, 1, 0> {
+ public:
+  LIR_HEADER(WasmHeapBase);
+  explicit LWasmHeapBase(const LAllocation& tlsPtr)
+      : LInstructionHelper(classOpcode) {
+    setOperand(0, tlsPtr);
+  }
+  MWasmHeapBase* mir() const { return mir_->toWasmHeapBase(); }
   const LAllocation* tlsPtr() { return getOperand(0); }
 };
 

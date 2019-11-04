@@ -49,9 +49,10 @@ class SearchEngineSelector {
   /**
    * @param {string} locale - Users locale.
    * @param {string} region - Users region.
-   * @returns {object} result - An object with "engines" field, a sorted
-   *   list of engines and optionally "privateDefault" indicating the
-   *   name of the engine which should be the default in private.
+   * @returns {object}
+   *   An object with "engines" field, a sorted list of engines and
+   *   optionally "privateDefault" which is an object continaing the engine
+   *   details for the engine which should be the default in private mode.
    */
   fetchEngineConfiguration(locale, region = "default") {
     log(`fetchEngineConfiguration ${region}:${locale}`);
@@ -83,13 +84,20 @@ class SearchEngineSelector {
           this._copyObject(baseConfig, section);
         }
 
-        if ("webExtensionLocales" in baseConfig) {
-          baseConfig.webExtensionLocales = baseConfig.webExtensionLocales.map(
-            val => (val == USER_LOCALE ? locale : val)
-          );
+        if (
+          "webExtension" in baseConfig &&
+          "locales" in baseConfig.webExtension
+        ) {
+          for (const webExtensionLocale of baseConfig.webExtension.locales) {
+            const engine = { ...baseConfig };
+            engine.webExtension.locales = [
+              webExtensionLocale == USER_LOCALE ? locale : webExtensionLocale,
+            ];
+            engines.push(engine);
+          }
+        } else {
+          engines.push(baseConfig);
         }
-
-        engines.push(baseConfig);
       }
     }
 
@@ -136,7 +144,7 @@ class SearchEngineSelector {
     let result = { engines };
 
     if (privateEngine) {
-      result.privateDefault = privateEngine.engineName;
+      result.privateDefault = privateEngine;
     }
 
     if (SearchUtils.loggingEnabled) {
@@ -192,7 +200,7 @@ class SearchEngineSelector {
         .getCharPref("ignoredJAREngines")
         .split(",");
       let filteredEngines = engines.filter(engine => {
-        let name = engine.webExtensionId.split("@")[0];
+        let name = engine.webExtension.id.split("@")[0];
         return !ignoredJAREngines.includes(name);
       });
       // Don't allow all engines to be hidden
@@ -223,7 +231,15 @@ class SearchEngineSelector {
       if (["included", "excluded", "appliesTo"].includes(key)) {
         continue;
       }
-      target[key] = source[key];
+      if (key == "webExtension") {
+        if (key in target) {
+          this._copyObject(target[key], source[key]);
+        } else {
+          target[key] = { ...source[key] };
+        }
+      } else {
+        target[key] = source[key];
+      }
     }
     return target;
   }

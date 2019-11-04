@@ -116,6 +116,7 @@ JS::Zone::Zone(JSRuntime* rt)
 #ifdef DEBUG
       gcSweepGroupIndex(0),
 #endif
+      finalizationRecordMap_(this, this),
       jitZone_(this, nullptr),
       gcScheduled_(false),
       gcScheduledSaved_(false),
@@ -852,4 +853,13 @@ void Zone::clearScriptLCov(Realm* realm) {
       i.remove();
     }
   }
+}
+
+void Zone::finishRoots() {
+  for (RealmsInZoneIter r(this); !r.done(); r.next()) {
+    r->finishRoots();
+  }
+
+  // Finalization callbacks are not called if we're shutting down.
+  finalizationRecordMap().clear();
 }

@@ -9,6 +9,7 @@ from __future__ import absolute_import
 import json
 import os
 
+from distutils.util import strtobool
 from abc import ABCMeta, abstractmethod
 from logger.logger import RaptorLogger
 from output import RaptorOutput, BrowsertimeOutput
@@ -207,6 +208,7 @@ class RaptorTestResult():
 
 class BrowsertimeResultsHandler(PerftestResultsHandler):
     """Process Browsertime results"""
+
     def __init__(self, config, root_results_dir=None):
         super(BrowsertimeResultsHandler, self).__init__(config)
         self._root_results_dir = root_results_dir
@@ -304,6 +306,29 @@ class BrowsertimeResultsHandler(PerftestResultsHandler):
             }
           }
         ]
+
+        For benchmark tests the browserScripts tag will look like:
+        "browserScripts":[
+         {
+            "browser":{ },
+            "pageinfo":{ },
+            "timings":{ },
+            "custom":{
+               "benchmarks":{
+                  "speedometer":[
+                     {
+                        "Angular2-TypeScript-TodoMVC":[
+                           326.41999999999825,
+                           238.7799999999952,
+                           211.88000000000463,
+                           186.77999999999884,
+                           191.47999999999593
+                        ],
+                        etc...
+                    }
+                  ]
+               }
+           }
         """
         LOG.info("parsing results from browsertime json")
 
@@ -327,18 +352,44 @@ class BrowsertimeResultsHandler(PerftestResultsHandler):
                          'url': bt_url,
                          'measurements': {},
                          'statistics': {}}
-            # extracting values from browserScripts and statistics
-            for bt, raptor in conversion:
-                # XXX looping several times in the list, could do better
-                bt_result['measurements'][bt] = [cycle['timings'][raptor] for cycle in
-                                                 raw_result['browserScripts']]
-                # let's add the browsertime statistics; we'll use those for overall values instead
-                # of calculating our own based on the replicates
-                bt_result['statistics'][bt] = raw_result['statistics']['timings'][raptor]
+
+            if 'custom' in raw_result['browserScripts'][0]:
+                for custom_type in raw_result['browserScripts'][0]['custom']:
+                    bt_result['measurements'].update(
+                        raw_result['browserScripts'][0]['custom'][custom_type])
+            else:
+                # extracting values from browserScripts and statistics
+                for bt, raptor in conversion:
+                    # XXX looping several times in the list, could do better
+                    bt_result['measurements'][bt] = [cycle['timings'][raptor] for cycle in
+                                                     raw_result['browserScripts']]
+                    # let's add the browsertime statistics; we'll use those for overall values
+                    # instead of calculating our own based on the replicates
+                    bt_result['statistics'][bt] = raw_result['statistics']['timings'][raptor]
 
             results.append(bt_result)
 
         return results
+
+    def _extract_vmetrics_jobs(self, test, browsertime_json, browsertime_results):
+        # XXX will do better later
+        url = ("https://queue.taskcluster.net/v1/task/%s/runs/0/artifacts/public/"
+               "test_info/" % os.environ.get("TASK_ID", "??"))
+
+        json_url = url + "/".join(browsertime_json.split(os.path.sep)[-3:])
+        files = []
+        for res in browsertime_results:
+            files.extend(res.get("files", {}).get("video", []))
+        if len(files) == 0:
+            # no video files.
+            return None
+        name = browsertime_json.split(os.path.sep)[-2]
+        result = []
+        for file in files:
+            video_url = url + "browsertime-results/" + name + "/" + file
+            result.append({"browsertime_json_url": json_url,
+                           "video_url": video_url})
+        return result
 
     def summarize_and_output(self, test_config, tests, test_names):
         """
@@ -366,6 +417,11 @@ class BrowsertimeResultsHandler(PerftestResultsHandler):
         # summarize the browsertime result data, write to file and output PERFHERDER_DATA
         LOG.info("retrieving browsertime test results")
 
+        # video_jobs is populated with video files produced by browsertime, we
+        # will send to the visual metrics task
+        video_jobs = []
+        run_local = test_config.get('run_local', False)
+
         for test in tests:
             bt_res_json = os.path.join(self.result_dir_for_test(test), 'browsertime.json')
             if os.path.exists(bt_res_json):
@@ -383,26 +439,69 @@ class BrowsertimeResultsHandler(PerftestResultsHandler):
                 LOG.error("Exception: %s %s" % (type(e).__name__, str(e)))
                 raise
 
+            if not run_local:
+                video_files = self._extract_vmetrics_jobs(test, bt_res_json, raw_btresults)
+                if video_files:
+                    video_jobs.extend(video_files)
+
             for new_result in self.parse_browsertime_json(raw_btresults):
-                # add additional info not from the browsertime json
-                for field in ('name', 'unit', 'lower_is_better',
-                              'alert_threshold', 'cold'):
-                    new_result[field] = test[field]
 
-                # Differentiate Raptor `pageload` tests from `browsertime-pageload`
-                # tests while we compare and contrast.
-                new_result['type'] = "browsertime-pageload"
+                def _new_pageload_result(new_result):
+                    # add additional info not from the browsertime json
+                    for field in ('name', 'unit', 'lower_is_better',
+                                  'alert_threshold', 'cold'):
+                        new_result[field] = test[field]
 
-                # All Browsertime measurements are elapsed times in milliseconds.
-                new_result['subtest_lower_is_better'] = True
-                new_result['subtest_unit'] = 'ms'
-                LOG.info("parsed new result: %s" % str(new_result))
+                    # Differentiate Raptor `pageload` tests from `browsertime-pageload`
+                    # tests while we compare and contrast.
+                    new_result['type'] = "browsertime-pageload"
 
-                # `extra_options` will be populated with Gecko profiling flags in
-                # the future.
-                new_result['extra_options'] = []
+                    # All Browsertime measurements are elapsed times in milliseconds.
+                    new_result['subtest_lower_is_better'] = True
+                    new_result['subtest_unit'] = 'ms'
+                    LOG.info("parsed new result: %s" % str(new_result))
 
-                self.results.append(new_result)
+                    # `extra_options` will be populated with Gecko profiling flags in
+                    # the future.
+                    new_result['extra_options'] = []
+
+                    return new_result
+
+                def _new_benchmark_result(new_result):
+                    # add additional info not from the browsertime json
+                    for field in ('name', 'unit', 'lower_is_better',
+                                  'alert_threshold', 'cold'):
+                        new_result[field] = test[field]
+
+                    # Differentiate Raptor `pageload` tests from other `browsertime`
+                    # tests while we compare and contrast.
+                    new_result['type'] = "browsertime-%s" % test['type']
+
+                    # Try to get subtest values or use the defaults
+                    # If values not available use the defaults
+                    new_result['subtest_lower_is_better'] = bool(
+                        strtobool(
+                            test.get('subtest_lower_is_better', 'True')))
+                    new_result['subtest_unit'] = test.get('subtest_unit', 'ms')
+                    LOG.info("parsed new result: %s" % str(new_result))
+
+                    # `extra_options` will be populated with Gecko profiling flags in
+                    # the future.
+                    new_result['extra_options'] = []
+                    return new_result
+
+                if test['type'] == 'pageload':
+                    self.results.append(_new_pageload_result(new_result))
+                elif test['type'] == 'benchmark':
+                    for i, item in enumerate(self.results):
+                        if item['name'] == test['name']:
+                            # add page cycle custom measurements to the existing results
+                            for measurement in new_result['measurements'].iteritems():
+                                self.results[i]['measurements'][measurement[0]].extend(
+                                    measurement[1])
+                            break
+                    else:
+                        self.results.append(_new_benchmark_result(new_result))
 
         # now have all results gathered from all browsertime test URLs; format them for output
         output = BrowsertimeOutput(self.results,
@@ -415,5 +514,12 @@ class BrowsertimeResultsHandler(PerftestResultsHandler):
         validate_success = True
         if not self.gecko_profile:
             validate_success = self._validate_treeherder_data(output, out_perfdata)
+
+        # Dumping the video list for the visual metrics task.
+        if len(video_jobs) > 0:
+            jobs_file = os.path.join(test_config["artifact_dir"], "jobs.json")
+            LOG.info("Writing %d video jobs into %s" % (len(video_jobs), jobs_file))
+            with open(jobs_file, "w") as f:
+                f.write(json.dumps({"jobs": video_jobs}))
 
         return success and validate_success

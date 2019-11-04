@@ -22,6 +22,15 @@ namespace js {
 class WritableStream;
 class WritableStreamDefaultController;
 
+extern JSObject* WritableStreamControllerAbortSteps(
+    JSContext* cx,
+    JS::Handle<WritableStreamDefaultController*> unwrappedController,
+    JS::Handle<JS::Value> reason);
+
+extern MOZ_MUST_USE bool WritableStreamControllerErrorSteps(
+    JSContext* cx,
+    JS::Handle<WritableStreamDefaultController*> unwrappedController);
+
 extern MOZ_MUST_USE bool WritableStreamControllerStartHandler(JSContext* cx,
                                                               unsigned argc,
                                                               JS::Value* vp);
@@ -59,8 +68,18 @@ extern MOZ_MUST_USE bool WritableStreamDefaultControllerClose(
     JSContext* cx,
     JS::Handle<WritableStreamDefaultController*> unwrappedController);
 
+extern MOZ_MUST_USE bool WritableStreamDefaultControllerGetChunkSize(
+    JSContext* cx,
+    JS::Handle<WritableStreamDefaultController*> unwrappedController,
+    JS::Handle<JS::Value> chunk, JS::MutableHandle<JS::Value> returnValue);
+
 extern double WritableStreamDefaultControllerGetDesiredSize(
     const WritableStreamDefaultController* controller);
+
+extern MOZ_MUST_USE bool WritableStreamDefaultControllerErrorIfNeeded(
+    JSContext* cx,
+    JS::Handle<WritableStreamDefaultController*> unwrappedController,
+    JS::Handle<JS::Value> error);
 
 extern bool WritableStreamDefaultControllerGetBackpressure(
     const WritableStreamDefaultController* unwrappedController);

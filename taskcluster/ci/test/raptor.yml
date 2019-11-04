@@ -6,7 +6,7 @@ job-defaults:
     max-run-time:
         by-test-platform:
             .*-qr/.*: 2400
-            .*-ref-hw-2017/.*: 2400
+            .*-ref-hw-2017/.*: 3600
             default: 1800
     suite: raptor
     workdir: /home/cltbld
@@ -1024,7 +1024,21 @@ browsertime-tp6-1:
             firefox: true
             default: false
     treeherder-symbol: Btime(tp6-1)
-    max-run-time: 3000
+    max-run-time: 4000
+    tier: 3
+    attributes:
+        run-visual-metrics: true
+    mozharness:
+        extra-options:
+            - --browsertime
+
+browsertime-speedometer:
+    description: "Raptor (browsertime) Speedometer on Firefox"
+    raptor-test: raptor-speedometer
+    run-on-projects: ['integration', 'try']
+    variants: ["fission"]
+    apps: ["firefox"]
+    treeherder-symbol: Btime(sp)
     tier: 3
     mozharness:
         extra-options:

@@ -10,8 +10,9 @@
 
 #include "frontend/BytecodeEmitter.h"
 
-#include "mozilla/Casting.h"    // mozilla::AssertedCast
-#include "mozilla/DebugOnly.h"  // mozilla::DebugOnly
+#include "mozilla/ArrayUtils.h"  // mozilla::ArrayLength
+#include "mozilla/Casting.h"     // mozilla::AssertedCast
+#include "mozilla/DebugOnly.h"   // mozilla::DebugOnly
 #include "mozilla/FloatingPoint.h"  // mozilla::NumberEqualsInt32, mozilla::NumberIsInt32
 #include "mozilla/Maybe.h"          // mozilla::{Maybe,Nothing,Some}
 #include "mozilla/PodOperations.h"  // mozilla::PodCopy
@@ -69,6 +70,7 @@
 using namespace js;
 using namespace js::frontend;
 
+using mozilla::ArrayLength;
 using mozilla::AssertedCast;
 using mozilla::AsVariant;
 using mozilla::DebugOnly;
@@ -95,7 +97,7 @@ static bool ParseNodeRequiresSpecialLineNumberNotes(ParseNode* pn) {
 BytecodeEmitter::BytecodeEmitter(
     BytecodeEmitter* parent, SharedContext* sc, HandleScript script,
     Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
-    EmitterMode emitterMode,
+    ParseInfo& parseInfo, EmitterMode emitterMode,
     FieldInitializers fieldInitializers /* = FieldInitializers::Invalid() */)
     : sc(sc),
       cx(sc->cx_),
@@ -105,6 +107,7 @@ BytecodeEmitter::BytecodeEmitter(
       bytecodeSection_(cx, line),
       perScriptData_(cx),
       fieldInitializers_(fieldInitializers),
+      parseInfo(parseInfo),
       firstLine(line),
       firstColumn(column),
       emitterMode(emitterMode) {
@@ -120,10 +123,11 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
                                  BCEParserHandle* handle, SharedContext* sc,
                                  HandleScript script,
                                  Handle<LazyScript*> lazyScript, uint32_t line,
-                                 uint32_t column, EmitterMode emitterMode,
+                                 uint32_t column, ParseInfo& parseInfo,
+                                 EmitterMode emitterMode,
                                  FieldInitializers fieldInitializers)
-    : BytecodeEmitter(parent, sc, script, lazyScript, line, column, emitterMode,
-                      fieldInitializers) {
+    : BytecodeEmitter(parent, sc, script, lazyScript, line, column, parseInfo,
+                      emitterMode, fieldInitializers) {
   parser = handle;
   instrumentationKinds = parser->options().instrumentationKinds;
 }
@@ -132,10 +136,11 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
                                  const EitherParser& parser, SharedContext* sc,
                                  HandleScript script,
                                  Handle<LazyScript*> lazyScript, uint32_t line,
-                                 uint32_t column, EmitterMode emitterMode,
+                                 uint32_t column, ParseInfo& parseInfo,
+                                 EmitterMode emitterMode,
                                  FieldInitializers fieldInitializers)
-    : BytecodeEmitter(parent, sc, script, lazyScript, line, column, emitterMode,
-                      fieldInitializers) {
+    : BytecodeEmitter(parent, sc, script, lazyScript, line, column, parseInfo,
+                      emitterMode, fieldInitializers) {
   ep_.emplace(parser);
   this->parser = ep_.ptr();
   instrumentationKinds = this->parser->options().instrumentationKinds;
@@ -1246,6 +1251,7 @@ restart:
     case ParseNodeKind::StatementList:
     // Strict equality operations and logical operators are well-behaved and
     // perform no conversions.
+    case ParseNodeKind::CoalesceExpr:
     case ParseNodeKind::OrExpr:
     case ParseNodeKind::AndExpr:
     case ParseNodeKind::StrictEqExpr:
@@ -5756,7 +5762,8 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
 
     BytecodeEmitter bce2(this, parser, funbox, innerScript,
                          /* lazyScript = */ nullptr, funbox->startLine,
-                         funbox->startColumn, nestedMode, fieldInitializers);
+                         funbox->startColumn, parseInfo, nestedMode,
+                         fieldInitializers);
     if (!bce2.init(funNode->pn_pos)) {
       return false;
     }
@@ -7503,19 +7510,31 @@ bool BytecodeEmitter::emitCallOrNew(
   return true;
 }
 
+// This list must be kept in the same order in several places:
+//   - The binary operators in ParseNode.h ,
+//   - the binary operators in TokenKind.h
+//   - the precedence list in Parser.cpp
 static const JSOp ParseNodeKindToJSOp[] = {
     // JSOP_NOP is for pipeline operator which does not emit its own JSOp
     // but has highest precedence in binary operators
-    JSOP_NOP,    JSOP_OR,       JSOP_AND, JSOP_BITOR,    JSOP_BITXOR,
-    JSOP_BITAND, JSOP_STRICTEQ, JSOP_EQ,  JSOP_STRICTNE, JSOP_NE,
-    JSOP_LT,     JSOP_LE,       JSOP_GT,  JSOP_GE,       JSOP_INSTANCEOF,
-    JSOP_IN,     JSOP_LSH,      JSOP_RSH, JSOP_URSH,     JSOP_ADD,
-    JSOP_SUB,    JSOP_MUL,      JSOP_DIV, JSOP_MOD,      JSOP_POW};
+    JSOP_NOP,        JSOP_NOP,    JSOP_OR,       JSOP_AND, JSOP_BITOR,
+    JSOP_BITXOR,     JSOP_BITAND, JSOP_STRICTEQ, JSOP_EQ,  JSOP_STRICTNE,
+    JSOP_NE,         JSOP_LT,     JSOP_LE,       JSOP_GT,  JSOP_GE,
+    JSOP_INSTANCEOF, JSOP_IN,     JSOP_LSH,      JSOP_RSH, JSOP_URSH,
+    JSOP_ADD,        JSOP_SUB,    JSOP_MUL,      JSOP_DIV, JSOP_MOD,
+    JSOP_POW};
 
 static inline JSOp BinaryOpParseNodeKindToJSOp(ParseNodeKind pnk) {
   MOZ_ASSERT(pnk >= ParseNodeKind::BinOpFirst);
   MOZ_ASSERT(pnk <= ParseNodeKind::BinOpLast);
-  return ParseNodeKindToJSOp[size_t(pnk) - size_t(ParseNodeKind::BinOpFirst)];
+  int parseNodeFirst = size_t(ParseNodeKind::BinOpFirst);
+#ifdef DEBUG
+  int jsopArraySize = ArrayLength(ParseNodeKindToJSOp);
+  int parseNodeKindListSize =
+      size_t(ParseNodeKind::BinOpLast) - parseNodeFirst + 1;
+  MOZ_ASSERT(jsopArraySize == parseNodeKindListSize);
+#endif
+  return ParseNodeKindToJSOp[size_t(pnk) - parseNodeFirst];
 }
 
 bool BytecodeEmitter::emitRightAssociative(ListNode* node) {
@@ -7554,6 +7573,69 @@ bool BytecodeEmitter::emitLeftAssociative(ListNode* node) {
   return true;
 }
 
+bool BytecodeEmitter::emitNullCoalesce(ListNode* node) {
+  MOZ_ASSERT(node->isKind(ParseNodeKind::CoalesceExpr));
+
+  /*
+   * CoalesceExpr converts the operand on the stack to boolean depending on an
+   * equality check for undefined and null. If true, it leaves the original
+   * value on the stack and jumps; otherwise it falls into the next bytecode,
+   * which pops the left operand and then evaluates the right operand.
+   * The jump goes around the right operand evaluation.
+   */
+
+  TDZCheckCache tdzCache(this);
+
+  JumpList jump;
+  /* Left-associative operator chain: avoid too much recursion. */
+  for (ParseNode* expr = node->head();; expr = expr->pn_next) {
+    if (!emitTree(expr)) {
+      //            [stack] LHS
+      return false;
+    }
+
+    // if there are no nodes after this, break so that we don't emit
+    // unnecessary bytecode instructions
+    if (!expr->pn_next) {
+      break;
+    }
+
+    if (!emitPushNotUndefinedOrNull()) {
+      //            [stack] LHS NOT-UNDEF-OR-NULL
+      return false;
+    }
+
+    // We are using JSOP_IFEQ, so we need to invert the boolean
+    // pushed onto the stack by emitPushNotUndefinedOrNull.
+    // This is to address a constraint in Ion Monkey which throws
+    // if JSOP_IFNE is encountered.
+    if (!emit1(JSOP_NOT)) {
+      //              [stack] LHS UNDEF-OR-NULL
+      return false;
+    }
+
+    // Emit an annotated branch-if-false around the then part.
+    if(!this->newSrcNote(SRC_IF)) {
+      return false;
+    }
+
+    if (!emitJump(JSOP_IFEQ, &jump)) {
+      //              [stack] LHS
+      return false;
+    }
+
+    if (!emit1(JSOP_POP)) {
+      return false;
+    }
+  }
+
+  if (!emitJumpTargetAndPatch(jump)) {
+    return false;
+  }
+
+  return true;
+}
+
 bool BytecodeEmitter::emitLogical(ListNode* node) {
   MOZ_ASSERT(node->isKind(ParseNodeKind::OrExpr) ||
              node->isKind(ParseNodeKind::AndExpr));
@@ -7572,9 +7654,11 @@ bool BytecodeEmitter::emitLogical(ListNode* node) {
 
   /* Left-associative operator chain: avoid too much recursion. */
   ParseNode* expr = node->head();
+
   if (!emitTree(expr)) {
     return false;
   }
+
   JSOp op = node->isKind(ParseNodeKind::OrExpr) ? JSOP_OR : JSOP_AND;
   JumpList jump;
   if (!emitJump(op, &jump)) {
@@ -9221,6 +9305,12 @@ bool BytecodeEmitter::emitTree(
     case ParseNodeKind::ConditionalExpr:
       if (!emitConditionalExpression(pn->as<ConditionalExpression>(),
                                      valueUsage)) {
+        return false;
+      }
+      break;
+
+    case ParseNodeKind::CoalesceExpr:
+      if (!emitNullCoalesce(&pn->as<ListNode>())) {
         return false;
       }
       break;
