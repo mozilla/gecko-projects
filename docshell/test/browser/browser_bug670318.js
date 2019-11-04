@@ -33,7 +33,7 @@ add_task(async function test() {
                   "load",
                   function onLoad() {
                     removeEventListener("load", onLoad, true);
-  
+
                     Assert.ok(
                       history.index < history.count,
                       "history.index is valid"
@@ -75,7 +75,7 @@ add_task(async function test() {
           // completes.
           content._testListener = listener;
           content.location = URL;
-  
+
           await testDone.promise;
         });
 

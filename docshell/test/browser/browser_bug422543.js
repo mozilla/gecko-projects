@@ -68,10 +68,12 @@ add_task(async function runTests() {
     }
 
     function checkListenersAsync(aLast, aMessage) {
-      return listenOnce("bug422543:getListenerStatus").then(listenerStatuses => {
-        is(listenerStatuses[0], aLast, aMessage);
-        is(listenerStatuses[1], aLast, aMessage);
-      });
+      return listenOnce("bug422543:getListenerStatus").then(
+        listenerStatuses => {
+          is(listenerStatuses[0], aLast, aMessage);
+          is(listenerStatuses[1], aLast, aMessage);
+        }
+      );
     }
 
     function resetListenersAsync() {
