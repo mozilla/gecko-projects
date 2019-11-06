@@ -822,10 +822,17 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   void UpdateSrcMediaStreamPlaying(uint32_t aFlags = 0);
 
   /**
+   * Ensure currentTime progresses if and only if we're potentially playing
+   * mSrcStream. Called by the watch manager while we're playing mSrcStream, and
+   * one of the inputs to the potentially playing algorithm changes.
+   */
+  void UpdateSrcStreamPotentiallyPlaying();
+
+  /**
    * mSrcStream's graph's CurrentTime() has been updated. It might be time to
    * fire "timeupdate".
    */
-  void UpdateSrcTrackTime();
+  void UpdateSrcStreamTime();
 
   /**
    * Called by our DOMMediaStream::TrackListener when a new MediaStreamTrack has
@@ -1320,7 +1327,8 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   // True once PlaybackEnded() is called and we're playing a MediaStream.
   // Reset to false if we start playing mSrcStream again.
-  bool mSrcStreamPlaybackEnded = false;
+  Watchable<bool> mSrcStreamPlaybackEnded = {
+      false, "HTMLMediaElement::mSrcStreamPlaybackEnded"};
 
   // Holds a reference to the stream connecting this stream to the window
   // capture sink.
@@ -1371,7 +1379,8 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // Media loading flags. See:
   //   http://www.whatwg.org/specs/web-apps/current-work/#video)
   nsMediaNetworkState mNetworkState = HTMLMediaElement_Binding::NETWORK_EMPTY;
-  nsMediaReadyState mReadyState = HTMLMediaElement_Binding::HAVE_NOTHING;
+  Watchable<nsMediaReadyState> mReadyState = {
+      HTMLMediaElement_Binding::HAVE_NOTHING, "HTMLMediaElement::mReadyState"};
 
   enum LoadAlgorithmState {
     // No load algorithm instance is waiting for a source to be added to the

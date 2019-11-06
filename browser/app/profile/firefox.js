@@ -326,6 +326,8 @@ pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 
 // Whether the quantum bar displays the major design update.
 pref("browser.urlbar.megabar", false);
+// Whether the megabar displays the permanent search icon.
+pref("browser.urlbar.searchIcon", false);
 pref("browser.urlbar.view.stripHttps", false);
 
 pref("browser.urlbar.openViewOnFocus", false);
@@ -1526,6 +1528,9 @@ pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked, 5=All Blocked
     pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
   #endif
 #endif
+
+// Show the audio toggle for Picture-in-Picture.
+pref("media.videocontrols.picture-in-picture.audio-toggle.enabled", false);
 
 pref("browser.translation.detectLanguage", false);
 pref("browser.translation.neverForLanguages", "");

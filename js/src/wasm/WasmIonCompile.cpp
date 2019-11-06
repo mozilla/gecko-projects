@@ -1331,7 +1331,7 @@ class FunctionCompiler {
     return bindBranches(topLabel, defs);
   }
 
-  bool startLoop(MBasicBlock** loopHeader) {
+  bool startLoop(MBasicBlock** loopHeader, size_t paramCount) {
     *loopHeader = nullptr;
 
     blockDepth_++;
@@ -1353,6 +1353,24 @@ class FunctionCompiler {
     mirGraph().addBlock(*loopHeader);
     curBlock_->end(MGoto::New(alloc(), *loopHeader));
 
+    DefVector loopParams;
+    if (!iter().getResults(paramCount, &loopParams)) {
+      return false;
+    }
+    for (size_t i = 0; i < paramCount; i++) {
+      MPhi* phi = MPhi::New(alloc(), loopParams[i]->type());
+      if (!phi) {
+        return false;
+      }
+      if (!phi->reserveLength(2)) {
+        return false;
+      }
+      (*loopHeader)->addPhi(phi);
+      phi->addInput(loopParams[i]);
+      loopParams[i] = phi;
+    }
+    iter().setResults(paramCount, loopParams);
+
     MBasicBlock* body;
     if (!goToNewBlock(*loopHeader, &body)) {
       return false;
@@ -1372,8 +1390,8 @@ class FunctionCompiler {
   }
 
   bool setLoopBackedge(MBasicBlock* loopEntry, MBasicBlock* loopBody,
-                       MBasicBlock* backedge) {
-    if (!loopEntry->setBackedgeWasm(backedge)) {
+                       MBasicBlock* backedge, size_t paramCount) {
+    if (!loopEntry->setBackedgeWasm(backedge, paramCount)) {
       return false;
     }
 
@@ -1444,8 +1462,8 @@ class FunctionCompiler {
     // branches as forward jumps to a single backward jump. This is
     // unfortunate but the optimizer is able to fold these into single jumps
     // to backedges.
-    DefVector _;
-    if (!bindBranches(headerLabel, &_)) {
+    DefVector backedgeValues;
+    if (!bindBranches(headerLabel, &backedgeValues)) {
       return false;
     }
 
@@ -1457,9 +1475,14 @@ class FunctionCompiler {
         curBlock_->pop();
       }
 
+      if (!pushDefs(backedgeValues)) {
+        return false;
+      }
+
       MOZ_ASSERT(curBlock_->loopDepth() == loopDepth_);
       curBlock_->end(MGoto::New(alloc(), loopHeader));
-      if (!setLoopBackedge(loopHeader, loopBody, curBlock_)) {
+      if (!setLoopBackedge(loopHeader, loopBody, curBlock_,
+                           backedgeValues.length())) {
         return false;
       }
     }
@@ -1787,7 +1810,7 @@ static bool EmitLoop(FunctionCompiler& f) {
   }
 
   MBasicBlock* loopHeader;
-  if (!f.startLoop(&loopHeader)) {
+  if (!f.startLoop(&loopHeader, params.length())) {
     return false;
   }
 
@@ -1836,7 +1859,8 @@ static bool EmitEnd(FunctionCompiler& f) {
   LabelKind kind;
   ResultType type;
   DefVector preJoinDefs;
-  if (!f.iter().readEnd(&kind, &type, &preJoinDefs)) {
+  DefVector resultsForEmptyElse;
+  if (!f.iter().readEnd(&kind, &type, &preJoinDefs, &resultsForEmptyElse)) {
     return false;
   }
 
@@ -1866,10 +1890,14 @@ static bool EmitEnd(FunctionCompiler& f) {
         return false;
       }
       break;
-    case LabelKind::Then:
+    case LabelKind::Then: {
       // If we didn't see an Else, create a trivial else block so that we create
       // a diamond anyway, to preserve Ion invariants.
       if (!f.switchToElse(block, &block)) {
+        return false;
+      }
+
+      if (!f.pushDefs(resultsForEmptyElse)) {
         return false;
       }
 
@@ -1877,6 +1905,7 @@ static bool EmitEnd(FunctionCompiler& f) {
         return false;
       }
       break;
+    }
     case LabelKind::Else:
       if (!f.joinIfElse(block, &postJoinDefs)) {
         return false;

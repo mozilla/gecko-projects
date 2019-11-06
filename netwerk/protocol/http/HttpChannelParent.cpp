@@ -299,14 +299,6 @@ NS_INTERFACE_MAP_END
 
 NS_IMETHODIMP
 HttpChannelParent::GetInterface(const nsIID& aIID, void** result) {
-  if (aIID.Equals(NS_GET_IID(nsIAuthPromptProvider)) ||
-      aIID.Equals(NS_GET_IID(nsISecureBrowserUI)) ||
-      aIID.Equals(NS_GET_IID(nsIRemoteTab))) {
-    if (mBrowserParent) {
-      return mBrowserParent->QueryInterface(aIID, result);
-    }
-  }
-
   // Only support nsIAuthPromptProvider in Content process
   if (XRE_IsParentProcess() && aIID.Equals(NS_GET_IID(nsIAuthPromptProvider))) {
     *result = nullptr;
@@ -318,31 +310,6 @@ HttpChannelParent::GetInterface(const nsIID& aIID, void** result) {
     nsCOMPtr<nsILoadContext> copy = mLoadContext;
     copy.forget(result);
     return NS_OK;
-  }
-
-  if (mBrowserParent && aIID.Equals(NS_GET_IID(nsIPrompt))) {
-    nsCOMPtr<Element> frameElement = mBrowserParent->GetOwnerElement();
-    if (frameElement) {
-      nsCOMPtr<nsPIDOMWindowOuter> win = frameElement->OwnerDoc()->GetWindow();
-      NS_ENSURE_TRUE(win, NS_ERROR_UNEXPECTED);
-
-      nsresult rv;
-      nsCOMPtr<nsIWindowWatcher> wwatch =
-          do_GetService(NS_WINDOWWATCHER_CONTRACTID, &rv);
-
-      if (NS_WARN_IF(!NS_SUCCEEDED(rv))) {
-        return rv;
-      }
-
-      nsCOMPtr<nsIPrompt> prompt;
-      rv = wwatch->GetNewPrompter(win, getter_AddRefs(prompt));
-      if (NS_WARN_IF(!NS_SUCCEEDED(rv))) {
-        return rv;
-      }
-
-      prompt.forget(result);
-      return NS_OK;
-    }
   }
 
   return QueryInterface(aIID, result);
@@ -523,7 +490,7 @@ bool HttpChannelParent::DoAsyncOpen(
   }
 
   RefPtr<ParentChannelListener> parentListener =
-      new ParentChannelListener(this);
+      new ParentChannelListener(this, mBrowserParent);
 
   httpChannel->SetRequestMethod(nsDependentCString(requestMethod.get()));
 
@@ -1809,12 +1776,9 @@ HttpChannelParent::OnProgress(nsIRequest* aRequest, nsISupports* aContext,
        "]\n",
        this, aProgress, aProgressMax));
   MOZ_ASSERT(NS_IsMainThread());
-  // Either IPC channel is closed or background channel
-  // is ready to send OnProgress.
-  MOZ_ASSERT(mIPCClosed || mBgParent);
 
   // If IPC channel is closed, there is nothing we can do. Just return NS_OK.
-  if (mIPCClosed || !mBgParent) {
+  if (mIPCClosed) {
     return NS_OK;
   }
 
@@ -1828,7 +1792,7 @@ HttpChannelParent::OnProgress(nsIRequest* aRequest, nsISupports* aContext,
   // Send OnProgress events to the child for data upload progress notifications
   // (i.e. status == NS_NET_STATUS_SENDING_TO) or if the channel has
   // LOAD_BACKGROUND set.
-  if (!mBgParent->OnProgress(aProgress, aProgressMax)) {
+  if (!SendOnProgress(aProgress, aProgressMax)) {
     return NS_ERROR_UNEXPECTED;
   }
 
@@ -1841,12 +1805,9 @@ HttpChannelParent::OnStatus(nsIRequest* aRequest, nsISupports* aContext,
   LOG(("HttpChannelParent::OnStatus [this=%p status=%" PRIx32 "]\n", this,
        static_cast<uint32_t>(aStatus)));
   MOZ_ASSERT(NS_IsMainThread());
-  // Either IPC channel is closed or background channel
-  // is ready to send OnStatus.
-  MOZ_ASSERT(mIPCClosed || mBgParent);
 
   // If IPC channel is closed, there is nothing we can do. Just return NS_OK.
-  if (mIPCClosed || !mBgParent) {
+  if (mIPCClosed) {
     return NS_OK;
   }
 
@@ -1861,7 +1822,7 @@ HttpChannelParent::OnStatus(nsIRequest* aRequest, nsISupports* aContext,
   }
 
   // Otherwise, send to child now
-  if (!mBgParent->OnStatus(aStatus)) {
+  if (!SendOnStatus(aStatus)) {
     return NS_ERROR_UNEXPECTED;
   }
 

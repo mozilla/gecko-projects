@@ -1205,6 +1205,12 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
   }
 
   if (mode == XDR_DECODE) {
+    if (coverage::IsLCovEnabled()) {
+      if (!coverage::InitScriptCoverage(cx, script)) {
+        return xdr->fail(JS::TranscodeResult_Throw);
+      }
+    }
+
     /* see BytecodeEmitter::tellDebuggerAboutCompiledScript */
     if (!fun && !cx->isHelperThreadContext()) {
       DebugAPI::onNewScript(cx, script);
@@ -1621,6 +1627,9 @@ void JSScript::resetScriptCounts() {
 void ScriptSourceObject::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
   ScriptSourceObject* sso = &obj->as<ScriptSourceObject>();
+  if (sso->isCanonical()) {
+    sso->source()->finalizeGCData();
+  }
   sso->source()->decref();
 
   // Clear the private value, calling the release hook if necessary.
@@ -2523,6 +2532,7 @@ template bool ScriptSource::assignSource(JSContext* cx,
                                          SourceText<Utf8Unit>& srcBuf);
 
 void ScriptSource::trace(JSTracer* trc) {
+  // This should be kept in sync with ScriptSource::finalizeGCData below.
 #ifdef JS_BUILD_BINAST
   if (data.is<BinAST>()) {
     if (auto& metadata = data.as<BinAST>().metadata) {
@@ -2532,6 +2542,41 @@ void ScriptSource::trace(JSTracer* trc) {
 #else
   MOZ_ASSERT(!data.is<BinAST>());
 #endif  // JS_BUILD_BINAST
+  if (xdrEncoder_) {
+    xdrEncoder_->trace(trc);
+  }
+}
+
+void ScriptSource::finalizeGCData() {
+  // This should be kept in sync with ScriptSource::trace above.
+
+  // When the canonical ScriptSourceObject's finalizer runs, this
+  // ScriptSource can no longer be accessed from the main
+  // thread. However, an offthread source compression task may still
+  // hold a reference. We must clean up any GC pointers owned by this
+  // ScriptSource now, because trying to run those prebarriers
+  // offthread later will fail.
+  MOZ_ASSERT(TlsContext.get() && TlsContext.get()->isMainThreadContext());
+
+#ifdef JS_BUILD_BINAST
+  if (hasBinASTSource()) {
+    if (auto& metadata = data.as<BinAST>().metadata) {
+      metadata.reset();
+    }
+  }
+#endif  // JS_BUILD_BINAST
+  if (xdrEncoder_) {
+    xdrEncoder_.reset();
+  }
+}
+
+ScriptSource::~ScriptSource() {
+  MOZ_ASSERT(refs == 0);
+
+  // GC pointers must have been cleared earlier, because this destructor could
+  // be called off-thread by SweepCompressionTasks. See above.
+  MOZ_ASSERT(!xdrEncoder_);
+  MOZ_ASSERT_IF(hasBinASTSource(), !data.as<BinAST>().metadata);
 }
 
 static MOZ_MUST_USE bool reallocUniquePtr(UniqueChars& unique, size_t size) {
@@ -3893,12 +3938,6 @@ JSScript* JSScript::Create(JSContext* cx, HandleObject functionOrGlobal,
   script->setFlag(MutableFlags::TrackRecordReplayProgress,
                   ShouldTrackRecordReplayProgress(script));
 
-  if (coverage::IsLCovEnabled()) {
-    if (!coverage::InitScriptCoverage(cx, script)) {
-      return nullptr;
-    }
-  }
-
   return script;
 }
 
@@ -3916,12 +3955,6 @@ JSScript* JSScript::Create(JSContext* cx, HandleObject functionOrGlobal,
 
   script->setFlag(MutableFlags::TrackRecordReplayProgress,
                   ShouldTrackRecordReplayProgress(script));
-
-  if (coverage::IsLCovEnabled()) {
-    if (!coverage::InitScriptCoverage(cx, script)) {
-      return nullptr;
-    }
-  }
 
   return script;
 }
@@ -4061,6 +4094,7 @@ bool JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script,
   script->setFlag(ImmutableFlags::HasCallSiteObj, bce->hasCallSiteObj);
   script->setFlag(ImmutableFlags::IsForEval, bce->sc->isEvalContext());
   script->setFlag(ImmutableFlags::IsModule, bce->sc->isModuleContext());
+  script->setFlag(ImmutableFlags::IsFunction, bce->sc->isFunctionBox());
   script->setFlag(ImmutableFlags::HasNonSyntacticScope,
                   bce->outermostScope()->hasOnChain(ScopeKind::NonSyntactic));
   script->setFlag(ImmutableFlags::NeedsFunctionEnvironmentObjects,
@@ -4111,6 +4145,12 @@ bool JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script,
 #ifdef DEBUG
   script->assertValidJumpTargets();
 #endif
+
+  if (coverage::IsLCovEnabled()) {
+    if (!coverage::InitScriptCoverage(cx, script)) {
+      return false;
+    }
+  }
 
   scriptDataGuard.release();
   return true;
@@ -4631,7 +4671,7 @@ JSScript* js::detail::CopyScript(JSContext* cx, HandleScript src,
   // should happen if it's set on the source script.
   MOZ_ASSERT(!src->hideScriptFromDebugger());
 
-  if (src->treatAsRunOnce() && !src->function()) {
+  if (src->treatAsRunOnce() && !src->isFunction()) {
     JS_ReportErrorASCII(cx, "No cloning toplevel run-once scripts");
     return nullptr;
   }
@@ -4704,7 +4744,19 @@ JSScript* js::CloneGlobalScript(JSContext* cx, ScopeKind scopeKind,
   }
 
   RootedObject global(cx, cx->global());
-  return detail::CopyScript(cx, src, global, sourceObject, &scopes);
+  RootedScript dst(cx,
+                   detail::CopyScript(cx, src, global, sourceObject, &scopes));
+  if (!dst) {
+    return nullptr;
+  }
+
+  if (coverage::IsLCovEnabled()) {
+    if (!coverage::InitScriptCoverage(cx, dst)) {
+      return nullptr;
+    }
+  }
+
+  return dst;
 }
 
 JSScript* js::CloneScriptIntoFunction(
@@ -4753,6 +4805,12 @@ JSScript* js::CloneScriptIntoFunction(
     fun->setUnlazifiedScript(dst);
   } else {
     fun->initScript(dst);
+  }
+
+  if (coverage::IsLCovEnabled()) {
+    if (!coverage::InitScriptCoverage(cx, dst)) {
+      return nullptr;
+    }
   }
 
   return dst;
@@ -5036,7 +5094,7 @@ void js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
 
 /* static */
 void JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script) {
-  MOZ_ASSERT(script->function());
+  MOZ_ASSERT(script->isFunction());
   MOZ_ASSERT(script->analyzedArgsUsage());
   MOZ_ASSERT(script->argumentsHasVarBinding());
 

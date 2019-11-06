@@ -5400,7 +5400,7 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
   if (!docShell) {
     return;
   }
-  nsCOMPtr<Document> doc = docShell->GetDocument();
+  nsCOMPtr<Document> doc = GetExtantDoc();
   NS_ENSURE_TRUE_VOID(doc);
 
   nsCOMPtr<nsIURI> uri(aURIHint);
@@ -5876,7 +5876,7 @@ bool nsGlobalWindowOuter::GatherPostMessageData(
 
   // First, get the caller's window
   RefPtr<nsGlobalWindowInner> callerInnerWin =
-      nsContentUtils::CallerInnerWindow(aCx);
+      nsContentUtils::CallerInnerWindow();
   nsIPrincipal* callerPrin;
   if (callerInnerWin) {
     RefPtr<Document> doc = callerInnerWin->GetExtantDoc();

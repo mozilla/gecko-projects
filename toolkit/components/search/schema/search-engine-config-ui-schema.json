@@ -1,10 +1,6 @@
 {
-  "engineName": {
-    "ui:autofocus": true
-  },
   "ui:order": [
     "webExtension",
-    "engineName",
     "default",
     "defaultPrivate",
     "application",

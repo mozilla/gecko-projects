@@ -6889,9 +6889,11 @@ nsHttpChannel::SetChannelIsForDownload(bool aChannelIsForDownload) {
 base::ProcessId nsHttpChannel::ProcessId() {
   nsCOMPtr<nsIParentChannel> parentChannel;
   NS_QueryNotificationCallbacks(this, parentChannel);
-  RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
-  if (httpParent) {
+  if (RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel)) {
     return httpParent->OtherPid();
+  }
+  if (RefPtr<DocumentChannelParent> docParent = do_QueryObject(parentChannel)) {
+    return docParent->OtherPid();
   }
   return base::GetCurrentProcId();
 }
@@ -6902,9 +6904,11 @@ bool nsHttpChannel::AttachStreamFilter(
 {
   nsCOMPtr<nsIParentChannel> parentChannel;
   NS_QueryNotificationCallbacks(this, parentChannel);
-  RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
-  if (httpParent) {
+  if (RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel)) {
     return httpParent->SendAttachStreamFilter(std::move(aEndpoint));
+  }
+  if (RefPtr<DocumentChannelParent> docParent = do_QueryObject(parentChannel)) {
+    return docParent->SendAttachStreamFilter(std::move(aEndpoint));
   }
 
   extensions::StreamFilterParent::Attach(this, std::move(aEndpoint));
@@ -8664,11 +8668,24 @@ nsHttpChannel::OnTransportStatus(nsITransport* trans, nsresult status,
          (mLoadFlags & LOAD_BACKGROUND) ? "" : " and status", this,
          static_cast<uint32_t>(status), progress, progressMax));
 
+    nsAutoCString host;
+    mURI->GetHost(host);
     if (!(mLoadFlags & LOAD_BACKGROUND)) {
-      nsAutoCString host;
-      mURI->GetHost(host);
       mProgressSink->OnStatus(this, nullptr, status,
                               NS_ConvertUTF8toUTF16(host).get());
+    } else {
+      nsCOMPtr<nsIParentChannel> parentChannel;
+      NS_QueryNotificationCallbacks(this, parentChannel);
+      // If the event sink is |HttpChannelParent|, we have to send status events
+      // to it even if LOAD_BACKGROUND is set. |HttpChannelParent| needs to be
+      // aware of whether the status is |NS_NET_STATUS_RECEIVING_FROM| or
+      // |NS_NET_STATUS_READING|.
+      // LOAD_BACKGROUND is checked again in |HttpChannelChild|, so the final
+      // consumer won't get this event.
+      if (SameCOMIdentity(parentChannel, mProgressSink)) {
+        mProgressSink->OnStatus(this, nullptr, status,
+                                NS_ConvertUTF8toUTF16(host).get());
+      }
     }
 
     if (progress > 0) {

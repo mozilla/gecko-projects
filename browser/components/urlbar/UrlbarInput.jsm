@@ -85,6 +85,10 @@ class UrlbarInput {
     if (this.megabar) {
       this.textbox.classList.add("megabar");
       this.textbox.parentNode.classList.add("megabar");
+      this.searchIcon = UrlbarPrefs.get("searchIcon");
+      if (this.searchIcon) {
+        this.textbox.classList.add("searchIcon");
+      }
     }
 
     this.controller = new UrlbarController({
@@ -158,6 +162,7 @@ class UrlbarInput {
     this.dropmarker = this.querySelector(".urlbar-history-dropmarker");
     this._inputContainer = this.querySelector("#urlbar-input-container");
     this._identityBox = this.querySelector("#identity-box");
+    this._toolbar = this.textbox.closest("toolbar");
 
     XPCOMUtils.defineLazyGetter(this, "valueFormatter", () => {
       return new UrlbarValueFormatter(this);
@@ -987,6 +992,9 @@ class UrlbarInput {
     }
     this.removeAttribute("breakout-extend-disabled");
 
+    if (this._toolbar) {
+      this._toolbar.setAttribute("urlbar-exceeds-toolbar-bounds", "true");
+    }
     this.setAttribute("breakout-extend", "true");
     this.view.reOpen();
 
@@ -1010,6 +1018,9 @@ class UrlbarInput {
       return;
     }
     this.removeAttribute("breakout-extend");
+    if (this._toolbar) {
+      this._toolbar.removeAttribute("urlbar-exceeds-toolbar-bounds");
+    }
   }
 
   setPageProxyState(state) {

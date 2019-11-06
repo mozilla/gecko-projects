@@ -3625,6 +3625,11 @@
   value: false
   mirror: once
 
+- name: gfx.webrender.max-partial-present-rects
+  type: uint32_t
+  value: 0
+  mirror: once
+
 #ifdef NIGHTLY_BUILD
   # Keep this pref hidden on non-nightly builds to avoid people accidentally
   # turning it on.
@@ -4725,6 +4730,18 @@
 - name: layout.animation.prerender.absolute-limit-y
   type: RelaxedAtomicUint32
   value: 4096
+  mirror: always
+
+# Whether we get notified of history queries for visited even if unvisited.
+- name: layout.css.notify-of-unvisited
+  type: RelaxedAtomicBool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: always
+
+# Whether we always restyle / repaint as a result of a visited query
+- name: layout.css.always-repaint-on-unvisited
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 # Make `zoom` a `transform` + `transform-origin` alias.

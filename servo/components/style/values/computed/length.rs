@@ -607,13 +607,11 @@ impl Size {
 }
 
 /// The computed `<length>` value.
-#[cfg_attr(feature = "servo", derive(Deserialize, Serialize))]
 #[derive(
     Animate,
     Clone,
     ComputeSquaredDistance,
     Copy,
-    Debug,
     Deserialize,
     MallocSizeOf,
     PartialEq,
@@ -626,6 +624,13 @@ impl Size {
 )]
 #[repr(C)]
 pub struct CSSPixelLength(CSSFloat);
+
+impl fmt::Debug for CSSPixelLength {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)?;
+        f.write_str(" px")
+    }
+}
 
 impl CSSPixelLength {
     /// Return a new CSSPixelLength.

@@ -281,6 +281,12 @@ struct XPCOMInitData
     DynamicScalarDefinition[] dynamicScalarDefs;
 };
 
+struct VisitedQueryResult
+{
+    URIParams uri;
+    bool visited;
+};
+
 struct StringBundleDescriptor
 {
     nsCString bundleURL;
@@ -495,7 +501,7 @@ child:
     async SetConnectivity(bool connectivity);
     async SetCaptivePortalState(int32_t aState);
 
-    async NotifyVisited(URIParams[] uri);
+    async NotifyVisited(VisitedQueryResult[] uri);
 
     async PreferenceUpdate(Pref pref);
     async VarUpdate(GfxVarUpdate var);

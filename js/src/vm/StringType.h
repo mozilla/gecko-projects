@@ -262,17 +262,17 @@ class JSString : public js::gc::CellWithLengthAndFlags<js::gc::Cell> {
                 "JSString::flags must reserve enough bits for Cell");
 
   static const uint32_t NON_ATOM_BIT = js::gc::Cell::JSSTRING_BIT;
-  static const uint32_t LINEAR_BIT = JS_BIT(4);
-  static const uint32_t DEPENDENT_BIT = JS_BIT(5);
-  static const uint32_t INLINE_CHARS_BIT = JS_BIT(6);
+  static const uint32_t LINEAR_BIT = js::Bit(4);
+  static const uint32_t DEPENDENT_BIT = js::Bit(5);
+  static const uint32_t INLINE_CHARS_BIT = js::Bit(6);
 
   static const uint32_t EXTENSIBLE_FLAGS =
-      NON_ATOM_BIT | LINEAR_BIT | JS_BIT(7);
-  static const uint32_t EXTERNAL_FLAGS = NON_ATOM_BIT | LINEAR_BIT | JS_BIT(8);
+      NON_ATOM_BIT | LINEAR_BIT | js::Bit(7);
+  static const uint32_t EXTERNAL_FLAGS = NON_ATOM_BIT | LINEAR_BIT | js::Bit(8);
 
-  static const uint32_t FAT_INLINE_MASK = INLINE_CHARS_BIT | JS_BIT(7);
-  static const uint32_t PERMANENT_ATOM_MASK = NON_ATOM_BIT | JS_BIT(8);
-  static const uint32_t PERMANENT_ATOM_FLAGS = JS_BIT(8);
+  static const uint32_t FAT_INLINE_MASK = INLINE_CHARS_BIT | js::Bit(7);
+  static const uint32_t PERMANENT_ATOM_MASK = NON_ATOM_BIT | js::Bit(8);
+  static const uint32_t PERMANENT_ATOM_FLAGS = js::Bit(8);
 
   /* Initial flags for thin inline and fat inline strings. */
   static const uint32_t INIT_THIN_INLINE_FLAGS =
@@ -285,14 +285,14 @@ class JSString : public js::gc::CellWithLengthAndFlags<js::gc::Cell> {
       NON_ATOM_BIT | LINEAR_BIT | DEPENDENT_BIT;
 
   static const uint32_t TYPE_FLAGS_MASK =
-      JS_BITMASK(9) - JS_BITMASK(3) + js::gc::Cell::JSSTRING_BIT;
+      js::BitMask(9) - js::BitMask(3) + js::gc::Cell::JSSTRING_BIT;
 
-  static const uint32_t LATIN1_CHARS_BIT = JS_BIT(9);
+  static const uint32_t LATIN1_CHARS_BIT = js::Bit(9);
 
-  static const uint32_t INDEX_VALUE_BIT = JS_BIT(10);
+  static const uint32_t INDEX_VALUE_BIT = js::Bit(10);
   static const uint32_t INDEX_VALUE_SHIFT = 16;
 
-  static const uint32_t PINNED_ATOM_BIT = JS_BIT(11);
+  static const uint32_t PINNED_ATOM_BIT = js::Bit(11);
 
   static const uint32_t MAX_LENGTH = js::MaxStringLength;
 
@@ -1355,19 +1355,35 @@ class StaticStrings {
   }
 
  private:
-  typedef uint8_t SmallChar;
+  using SmallChar = uint8_t;
+
+  struct SmallCharArray {
+    SmallChar storage[SMALL_CHAR_LIMIT];
+
+    constexpr SmallChar& operator[](size_t idx) { return storage[idx]; }
+    constexpr const SmallChar& operator[](size_t idx) const {
+      return storage[idx];
+    }
+  };
+
   static const SmallChar INVALID_SMALL_CHAR = -1;
 
   static bool fitsInSmallChar(char16_t c) {
-    return c < SMALL_CHAR_LIMIT && toSmallChar[c] != INVALID_SMALL_CHAR;
+    return c < SMALL_CHAR_LIMIT && toSmallCharArray[c] != INVALID_SMALL_CHAR;
   }
 
-  static const SmallChar toSmallChar[];
+  static constexpr Latin1Char fromSmallChar(SmallChar c);
+
+  static constexpr SmallChar toSmallChar(uint32_t c);
+
+  static constexpr SmallCharArray createSmallCharArray();
+
+  static const SmallCharArray toSmallCharArray;
 
   MOZ_ALWAYS_INLINE JSAtom* getLength2(char16_t c1, char16_t c2) {
     MOZ_ASSERT(fitsInSmallChar(c1));
     MOZ_ASSERT(fitsInSmallChar(c2));
-    size_t index = (size_t(toSmallChar[c1]) << 6) + toSmallChar[c2];
+    size_t index = (size_t(toSmallCharArray[c1]) << 6) + toSmallCharArray[c2];
     return length2StaticTable[index];
   }
   JSAtom* getLength2(uint32_t u) {
