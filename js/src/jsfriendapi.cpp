@@ -25,8 +25,10 @@
 #include "js/Proxy.h"
 #include "js/Wrapper.h"
 #include "proxy/DeadObjectProxy.h"
+#include "util/Poison.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/DateObject.h"
+#include "vm/FrameIter.h"  // js::FrameIter
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
 #include "vm/Printer.h"

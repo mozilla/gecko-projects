@@ -22,6 +22,7 @@
 #include "mozilla/Utf8.h"
 #include "mozilla/Variant.h"
 
+#include <algorithm>
 #include <chrono>
 #ifdef XP_WIN
 #  include <direct.h>
@@ -59,7 +60,6 @@
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "jstypes.h"
-#include "jsutil.h"
 #ifndef JS_WITHOUT_NSPR
 #  include "prerror.h"
 #  include "prlink.h"
@@ -471,46 +471,45 @@ struct MOZ_STACK_CLASS EnvironmentPreparer
   void invoke(JS::HandleObject global, Closure& closure) override;
 };
 
-// Shell state set once at startup.
-static bool enableDeferredMode = false;
-static bool enableCodeCoverage = false;
-static bool enableDisassemblyDumps = false;
-static bool offthreadCompilation = false;
-static bool enableAsmJS = false;
-static bool enableWasm = false;
-static bool enableSharedMemory = SHARED_MEMORY_DEFAULT;
-static bool enableWasmBaseline = false;
-static bool enableWasmIon = false;
-static bool enableWasmCranelift = false;
+bool shell::enableDeferredMode = false;
+bool shell::enableCodeCoverage = false;
+bool shell::enableDisassemblyDumps = false;
+bool shell::offthreadCompilation = false;
+bool shell::enableAsmJS = false;
+bool shell::enableWasm = false;
+bool shell::enableSharedMemory = SHARED_MEMORY_DEFAULT;
+bool shell::enableWasmBaseline = false;
+bool shell::enableWasmIon = false;
+bool shell::enableWasmCranelift = false;
 #ifdef ENABLE_WASM_GC
-static bool enableWasmGc = false;
+bool shell::enableWasmGc = false;
 #endif
-static bool enableWasmVerbose = false;
-static bool enableTestWasmAwaitTier2 = false;
-static bool enableAsyncStacks = false;
-static bool enableStreams = false;
-static bool enableReadableByteStreams = false;
-static bool enableBYOBStreamReaders = false;
-static bool enableWritableStreams = false;
-static bool enableFields = false;
-static bool enableAwaitFix = false;
-static bool enableWeakRefs = false;
+bool shell::enableWasmVerbose = false;
+bool shell::enableTestWasmAwaitTier2 = false;
+bool shell::enableAsyncStacks = false;
+bool shell::enableStreams = false;
+bool shell::enableReadableByteStreams = false;
+bool shell::enableBYOBStreamReaders = false;
+bool shell::enableWritableStreams = false;
+bool shell::enableFields = false;
+bool shell::enableAwaitFix = false;
+bool shell::enableWeakRefs = false;
 #ifdef JS_GC_ZEAL
-static uint32_t gZealBits = 0;
-static uint32_t gZealFrequency = 0;
+uint32_t shell::gZealBits = 0;
+uint32_t shell::gZealFrequency = 0;
 #endif
-static bool printTiming = false;
-static RCFile* gErrFile = nullptr;
-static RCFile* gOutFile = nullptr;
-static bool reportWarnings = true;
-static bool compileOnly = false;
-static bool fuzzingSafe = false;
-static bool disableOOMFunctions = false;
-static bool defaultToSameCompartment = true;
+bool shell::printTiming = false;
+RCFile* shell::gErrFile = nullptr;
+RCFile* shell::gOutFile = nullptr;
+bool shell::reportWarnings = true;
+bool shell::compileOnly = false;
+bool shell::fuzzingSafe = false;
+bool shell::disableOOMFunctions = false;
+bool shell::defaultToSameCompartment = true;
 
 #ifdef DEBUG
-static bool dumpEntrainedVariables = false;
-static bool OOM_printAllocationCount = false;
+bool shell::dumpEntrainedVariables = false;
+bool shell::OOM_printAllocationCount = false;
 #endif
 
 static bool SetTimeoutValue(JSContext* cx, double t);
@@ -1036,6 +1035,8 @@ static void MaybeRunFinalizationGroupCleanupTasks(JSContext* cx) {
   RootedObject group(cx);
   for (const auto& g : groups) {
     group = g;
+
+    AutoRealm ar(cx, group);
 
     {
       AutoReportException are(cx);
@@ -4283,7 +4284,7 @@ static bool Sleep_fn(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
 
-    duration = TimeDuration::FromSeconds(Max(0.0, t_secs));
+    duration = TimeDuration::FromSeconds(std::max(0.0, t_secs));
     const TimeDuration MAX_TIMEOUT_INTERVAL =
         TimeDuration::FromSeconds(MAX_TIMEOUT_SECONDS);
     if (duration > MAX_TIMEOUT_INTERVAL) {
@@ -5899,8 +5900,9 @@ class AutoPipe {
   }
 };
 
-static int sArgc;
-static char** sArgv;
+int shell::sArgc;
+char** shell::sArgv;
+
 static const char sWasmCompileAndSerializeFlag[] =
     "--wasm-compile-and-serialize";
 static Vector<const char*, 5, js::SystemAllocPolicy> sCompilerProcessFlags;
@@ -7295,7 +7297,7 @@ static void BufferStreamMain(BufferStreamJob* job) {
 
     std::this_thread::sleep_for(std::chrono::milliseconds(delayMillis));
 
-    chunkSize = Min(chunkSize, byteLength - byteOffset);
+    chunkSize = std::min(chunkSize, byteLength - byteOffset);
 
     if (!job->consumer->consumeChunk(bytes + byteOffset, chunkSize)) {
       break;
@@ -9530,7 +9532,7 @@ static FILE* ErrorFilePointer() {
   return stderr;
 }
 
-static bool PrintStackTrace(JSContext* cx, HandleObject stackObj) {
+bool shell::PrintStackTrace(JSContext* cx, HandleObject stackObj) {
   if (!stackObj || !stackObj->is<SavedFrame>()) {
     return true;
   }

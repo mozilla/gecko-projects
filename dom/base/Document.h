@@ -85,9 +85,6 @@ class ElementCreationOptionsOrString;
 
 class gfxUserFontSet;
 class imgIRequest;
-#ifdef MOZ_XBL
-class nsBindingManager;
-#endif
 class nsCachableElementsByNameNodeList;
 class nsCommandManager;
 class nsContentList;
@@ -133,7 +130,7 @@ class nsWindowSizes;
 class nsDOMCaretPosition;
 class nsViewportInfo;
 class nsIGlobalObject;
-class nsIXULWindow;
+class nsIAppWindow;
 class nsXULPrototypeDocument;
 class nsXULPrototypeElement;
 class PermissionDelegateHandler;
@@ -1813,10 +1810,6 @@ class Document : public nsINode,
 
   void DoUnblockOnload();
 
-#ifdef MOZ_XBL
-  void MaybeEndOutermostXBLUpdate();
-#endif
-
   void RetrieveRelevantHeaders(nsIChannel* aChannel);
 
   void TryChannelCharset(nsIChannel* aChannel, int32_t& aCharsetSource,
@@ -2394,12 +2387,6 @@ class Document : public nsINode,
     DoUpdateSVGUseElementShadowTrees();
   }
 
-#ifdef MOZ_XBL
-  nsBindingManager* BindingManager() const {
-    return mNodeInfoManager->GetBindingManager();
-  }
-#endif
-
   /**
    * Only to be used inside Gecko, you can't really do anything with the
    * pointer outside Gecko anyway.
@@ -2757,10 +2744,6 @@ class Document : public nsINode,
    * document.
    */
   bool HaveFiredDOMTitleChange() const { return mHaveFiredTitleChange; }
-
-  Element* GetAnonymousElementByAttribute(nsIContent* aElement,
-                                          nsAtom* aAttrName,
-                                          const nsAString& aAttrValue) const;
 
   /**
    * To batch DOMSubtreeModified, document needs to be informed when
@@ -3536,9 +3519,9 @@ class Document : public nsINode,
   Document* GetTopLevelContentDocument();
   const Document* GetTopLevelContentDocument() const;
 
-  // Returns the associated XUL window if this is a top-level chrome document,
+  // Returns the associated app window if this is a top-level chrome document,
   // null otherwise.
-  already_AddRefed<nsIXULWindow> GetXULWindowIfToplevelChrome() const;
+  already_AddRefed<nsIAppWindow> GetAppWindowIfToplevelChrome() const;
 
   already_AddRefed<Element> CreateElement(
       const nsAString& aTagName, const ElementCreationOptionsOrString& aOptions,
@@ -3726,9 +3709,6 @@ class Document : public nsINode,
 
   // QuerySelector and QuerySelectorAll already defined on nsINode
   nsINodeList* GetAnonymousNodes(Element& aElement);
-  Element* GetAnonymousElementByAttribute(Element& aElement,
-                                          const nsAString& aAttrName,
-                                          const nsAString& aAttrValue);
   Element* GetBindingParent(nsINode& aNode);
 
   XPathExpression* CreateExpression(const nsAString& aExpression,
@@ -4609,7 +4589,7 @@ class Document : public nsINode,
   UniquePtr<ResizeObserverController> mResizeObserverController;
 
   // Permission Delegate Handler, lazily-initialized in
-  // PermissionDelegateHandler
+  // GetPermissionDelegateHandler
   RefPtr<PermissionDelegateHandler> mPermissionDelegateHandler;
 
   // True if BIDI is enabled.
@@ -5294,9 +5274,6 @@ class Document : public nsINode,
 
   RefPtr<EventListenerManager> mListenerManager;
 
-#ifdef MOZ_XBL
-  nsCOMPtr<nsIRunnable> mMaybeEndOutermostXBLUpdateRunner;
-#endif
   nsCOMPtr<nsIRequest> mOnloadBlocker;
 
   nsTArray<RefPtr<StyleSheet>> mAdditionalSheets[AdditionalSheetTypeCount];

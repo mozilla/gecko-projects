@@ -22,7 +22,6 @@
 #include "nsDOMAttributeMap.h"
 #include "nsINodeList.h"
 #include "nsIScrollableFrame.h"
-#include "nsNodeUtils.h"
 #include "nsPresContext.h"
 #include "Units.h"
 #include "mozilla/Attributes.h"
@@ -224,24 +223,6 @@ class Element : public FragmentOrElement {
    * Set tabIndex value to this element.
    */
   void SetTabIndex(int32_t aTabIndex, mozilla::ErrorResult& aError);
-
-#ifdef MOZ_XBL
-  /**
-   * Sets or unsets an XBL binding for this element. Setting a
-   * binding on an element that already has a binding will remove the
-   * old binding.
-   *
-   * @param aBinding The binding to bind to this content. If nullptr is
-   *        provided as the argument, then existing binding will be
-   *        removed.
-   *
-   * @param aOldBindingManager The old binding manager that contains
-   *                           this content if this content was adopted
-   *                           to another document.
-   */
-  void SetXBLBinding(nsXBLBinding* aBinding,
-                     nsBindingManager* aOldBindingManager = nullptr);
-#endif
 
   /**
    * Sets the ShadowRoot binding for this element. The contents of the
@@ -1975,22 +1956,6 @@ class Element : public FragmentOrElement {
   // Array containing all attributes for this element
   AttrArray mAttrs;
 };
-
-#ifdef MOZ_XBL
-class RemoveFromBindingManagerRunnable : public mozilla::Runnable {
- public:
-  RemoveFromBindingManagerRunnable(nsBindingManager* aManager,
-                                   nsIContent* aContent, Document* aDoc);
-
-  NS_IMETHOD Run() override;
-
- private:
-  virtual ~RemoveFromBindingManagerRunnable();
-  RefPtr<nsBindingManager> mManager;
-  RefPtr<nsIContent> mContent;
-  RefPtr<Document> mDoc;
-};
-#endif
 
 NS_DEFINE_STATIC_IID_ACCESSOR(Element, NS_ELEMENT_IID)
 

@@ -61,9 +61,10 @@ class RenderCompositorANGLE : public RenderCompositor {
 
   bool IsContextLost() override;
 
-  bool SurfaceIsYFlipped() override { return true; }
+  bool SurfaceOriginIsTopLeft() override { return true; }
 
   bool ShouldUseNativeCompositor() override;
+  uint32_t GetMaxUpdateRects() override;
 
   // Interface for wr::Compositor
   void CompositorBeginFrame() override;
@@ -78,6 +79,7 @@ class RenderCompositorANGLE : public RenderCompositor {
                   wr::DeviceIntRect aClipRect) override;
 
   // Interface for partial present
+  bool UsePartialPresent() override;
   bool RequestFullRender() override;
   uint32_t GetMaxPartialPresentRects() override;
 

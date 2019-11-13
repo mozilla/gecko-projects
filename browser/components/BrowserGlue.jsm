@@ -20,6 +20,12 @@ ChromeUtils.defineModuleGetter(
   "resource://gre/modules/ActorManagerParent.jsm"
 );
 
+ChromeUtils.defineModuleGetter(
+  this,
+  "CustomizableUI",
+  "resource:///modules/CustomizableUI.jsm"
+);
+
 XPCOMUtils.defineLazyServiceGetter(
   this,
   "PushService",
@@ -29,6 +35,11 @@ XPCOMUtils.defineLazyServiceGetter(
 
 const PREF_PDFJS_ENABLED_CACHE_STATE = "pdfjs.enabledCache.state";
 
+/**
+ * Fission-compatible JSWindowActor implementations.
+ * Detailed documentation of these is in dom/docs/Fission.rst,
+ * available at https://firefox-source-docs.mozilla.org/dom/Fission.html#jswindowactor
+ */
 let ACTORS = {
   BrowserTab: {
     parent: {
@@ -449,11 +460,11 @@ let LEGACY_ACTORS = {
     // Set the size to use when the user leaves the maximized mode.
     // The persisted size is the outer size, but the height/width
     // attributes set the inner size.
-    let xulWin = win.docShell.treeOwner
+    let appWin = win.docShell.treeOwner
       .QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIXULWindow);
-    height -= xulWin.outerToInnerHeightDifferenceInCSSPixels;
-    width -= xulWin.outerToInnerWidthDifferenceInCSSPixels;
+      .getInterface(Ci.nsIAppWindow);
+    height -= appWin.outerToInnerHeightDifferenceInCSSPixels;
+    width -= appWin.outerToInnerWidthDifferenceInCSSPixels;
     docElt.setAttribute("height", height);
     docElt.setAttribute("width", width);
   } else {
@@ -751,6 +762,7 @@ BrowserGlue.prototype = {
   _saveSession: false,
   _migrationImportsDefaultBookmarks: false,
   _placesBrowserInitComplete: false,
+  _isNewProfile: undefined,
 
   _setPrefToSaveSession: function BG__setPrefToSaveSession(aForce) {
     if (!this._saveSession && !aForce) {
@@ -2113,7 +2125,15 @@ BrowserGlue.prototype = {
 
     // Begin listening for incoming push messages.
     Services.tm.idleDispatchToMainThread(() => {
-      PushService.wrappedJSObject.ensureReady();
+      try {
+        PushService.wrappedJSObject.ensureReady();
+      } catch (ex) {
+        // NS_ERROR_NOT_AVAILABLE will get thrown for the PushService getter
+        // if the PushService is disabled.
+        if (ex.result != Cr.NS_ERROR_NOT_AVAILABLE) {
+          throw ex;
+        }
+      }
     });
 
     Services.tm.idleDispatchToMainThread(() => {
@@ -2669,6 +2689,17 @@ BrowserGlue.prototype = {
         }
         this._idleService.addIdleObserver(this, this._bookmarksBackupIdleTime);
       }
+
+      if (this._isNewProfile) {
+        try {
+          // New profiles may have existing bookmarks (imported from another browser or
+          // copied into the profile) and we want to show the bookmark toolbar for them
+          // in some cases.
+          this._maybeToggleBookmarkToolbarVisibility();
+        } catch (ex) {
+          Cu.reportError(ex);
+        }
+      }
     })()
       .catch(ex => {
         Cu.reportError(ex);
@@ -2805,11 +2836,9 @@ BrowserGlue.prototype = {
         toolbarIsCustomized ||
         getToolbarFolderCount() > NUM_TOOLBAR_BOOKMARKS_TO_UNHIDE
       ) {
-        xulStore.setValue(
-          BROWSER_DOCURL,
-          "PersonalToolbar",
-          "collapsed",
-          "false"
+        CustomizableUI.setToolbarVisibility(
+          CustomizableUI.AREA_BOOKMARKS,
+          true
         );
       }
     }
@@ -2836,19 +2865,11 @@ BrowserGlue.prototype = {
     let currentUIVersion;
     if (Services.prefs.prefHasUserValue("browser.migration.version")) {
       currentUIVersion = Services.prefs.getIntPref("browser.migration.version");
+      this._isNewProfile = false;
     } else {
       // This is a new profile, nothing to migrate.
       Services.prefs.setIntPref("browser.migration.version", UI_VERSION);
-
-      try {
-        // New profiles may have existing bookmarks (imported from another browser or
-        // copied into the profile) and we want to show the bookmark toolbar for them
-        // in some cases.
-        this._maybeToggleBookmarkToolbarVisibility();
-      } catch (ex) {
-        Cu.reportError(ex);
-      }
-      return;
+      this._isNewProfile = true;
     }
 
     if (currentUIVersion >= UI_VERSION) {

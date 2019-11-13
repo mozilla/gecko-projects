@@ -363,27 +363,16 @@ nsresult GetJSObjectFromArray(JSContext* aCtx, JS::Handle<JSObject*> aArray,
   return NS_OK;
 }
 
-class VisitedQuery final : public AsyncStatementCallback,
-                           public mozIStorageCompletionCallback {
+} // namespace
+
+class VisitedQuery final : public AsyncStatementCallback {
  public:
   NS_DECL_ISUPPORTS_INHERITED
 
   static nsresult Start(nsIURI* aURI,
                         mozIVisitedStatusCallback* aCallback = nullptr) {
     MOZ_ASSERT(aURI, "Null URI");
-
-    // If we are a content process, always remote the request to the
-    // parent process.
-    if (XRE_IsContentProcess()) {
-      URIParams uri;
-      SerializeURI(aURI, uri);
-
-      mozilla::dom::ContentChild* cpc =
-          mozilla::dom::ContentChild::GetSingleton();
-      NS_ASSERTION(cpc, "Content Protocol is NULL!");
-      (void)cpc->SendStartVisitedQuery(uri);
-      return NS_OK;
-    }
+    MOZ_ASSERT(XRE_IsParentProcess());
 
     nsMainThreadPtrHandle<mozIVisitedStatusCallback> callback(
         new nsMainThreadPtrHolder<mozIVisitedStatusCallback>(
@@ -392,11 +381,10 @@ class VisitedQuery final : public AsyncStatementCallback,
     nsNavHistory* navHistory = nsNavHistory::GetHistoryService();
     NS_ENSURE_STATE(navHistory);
     if (navHistory->hasEmbedVisit(aURI)) {
-      RefPtr<VisitedQuery> cb = new VisitedQuery(aURI, callback, true);
-      NS_ENSURE_TRUE(cb, NS_ERROR_OUT_OF_MEMORY);
+      RefPtr<VisitedQuery> query = new VisitedQuery(aURI, callback, true);
       // As per IHistory contract, we must notify asynchronously.
       NS_DispatchToMainThread(
-          NewRunnableMethod("places::VisitedQuery::NotifyVisitedStatus", cb,
+          NewRunnableMethod("places::VisitedQuery::NotifyVisitedStatus", query,
                             &VisitedQuery::NotifyVisitedStatus));
 
       return NS_OK;
@@ -404,26 +392,21 @@ class VisitedQuery final : public AsyncStatementCallback,
 
     History* history = History::GetService();
     NS_ENSURE_STATE(history);
-    RefPtr<VisitedQuery> cb = new VisitedQuery(aURI, callback);
-    NS_ENSURE_TRUE(cb, NS_ERROR_OUT_OF_MEMORY);
-    nsresult rv = history->GetIsVisitedStatement(cb);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    return NS_OK;
+    RefPtr<VisitedQuery> query = new VisitedQuery(aURI, callback);
+    return history->QueueVisitedStatement(std::move(query));
   }
 
-  // Note: the return value matters here.  We call into this method, it's not
-  // just xpcom boilerplate.
-  NS_IMETHOD Complete(nsresult aResult, nsISupports* aStatement) override {
-    NS_ENSURE_SUCCESS(aResult, aResult);
-    nsCOMPtr<mozIStorageAsyncStatement> stmt = do_QueryInterface(aStatement);
-    NS_ENSURE_STATE(stmt);
+  void Execute(mozIStorageAsyncStatement& aStatement) {
     // Bind by index for performance.
-    nsresult rv = URIBinder::Bind(stmt, 0, mURI);
-    NS_ENSURE_SUCCESS(rv, rv);
+    nsresult rv = URIBinder::Bind(&aStatement, 0, mURI);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return;
+    }
 
     nsCOMPtr<mozIStoragePendingStatement> handle;
-    return stmt->ExecuteAsync(this, getter_AddRefs(handle));
+    rv = aStatement.ExecuteAsync(this, getter_AddRefs(handle));
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    Unused << rv;
   }
 
   NS_IMETHOD HandleResult(mozIStorageResultSet* aResults) override {
@@ -440,25 +423,24 @@ class VisitedQuery final : public AsyncStatementCallback,
   }
 
   NS_IMETHOD HandleCompletion(uint16_t aReason) override {
-    if (aReason != mozIStorageStatementCallback::REASON_FINISHED) {
-      return NS_OK;
+    if (aReason == mozIStorageStatementCallback::REASON_FINISHED) {
+      NotifyVisitedStatus();
     }
-
-    nsresult rv = NotifyVisitedStatus();
-    NS_ENSURE_SUCCESS(rv, rv);
     return NS_OK;
   }
 
-  nsresult NotifyVisitedStatus() {
+  void NotifyVisitedStatus() {
     // If an external handling callback is provided, just notify through it.
-    if (!!mCallback) {
+    if (mCallback) {
       mCallback->IsVisited(mURI, mIsVisited);
-      return NS_OK;
+      return;
     }
 
     if (mIsVisited || StaticPrefs::layout_css_notify_of_unvisited()) {
       History* history = History::GetService();
-      NS_ENSURE_STATE(history);
+      if (!history) {
+        return;
+      }
       auto status = mIsVisited ? IHistory::VisitedStatus::Visited
                                : IHistory::VisitedStatus::Unvisited;
       history->NotifyVisited(mURI, status);
@@ -480,8 +462,6 @@ class VisitedQuery final : public AsyncStatementCallback,
       (void)observerService->NotifyObservers(mURI, URI_VISITED_RESOLUTION_TOPIC,
                                              status);
     }
-
-    return NS_OK;
   }
 
  private:
@@ -498,8 +478,7 @@ class VisitedQuery final : public AsyncStatementCallback,
   bool mIsVisited;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(VisitedQuery, AsyncStatementCallback,
-                            mozIStorageCompletionCallback)
+NS_IMPL_ISUPPORTS_INHERITED0(VisitedQuery, AsyncStatementCallback)
 
 /**
  * Notifies observers about a visit or an array of visits.
@@ -1430,8 +1409,6 @@ void StoreAndNotifyEmbedVisit(VisitData& aPlace,
   (void)NS_DispatchToMainThread(event);
 }
 
-}  // namespace
-
 ////////////////////////////////////////////////////////////////////////////////
 //// History
 
@@ -1511,33 +1488,29 @@ class ConcurrentStatementsHolder final : public mozIStorageCompletionCallback {
                              "last_visit_date NOTNULL "),
           getter_AddRefs(mIsVisitedStatement));
       MOZ_ASSERT(mIsVisitedStatement);
-      nsresult result = mIsVisitedStatement ? NS_OK : NS_ERROR_NOT_AVAILABLE;
-      for (int32_t i = 0; i < mIsVisitedCallbacks.Count(); ++i) {
-        DebugOnly<nsresult> rv;
-        rv = mIsVisitedCallbacks[i]->Complete(result, mIsVisitedStatement);
-        MOZ_ASSERT(NS_SUCCEEDED(rv));
+      auto queries = std::move(mVisitedQueries);
+      if (mIsVisitedStatement) {
+        for (auto& query : queries) {
+          query->Execute(*mIsVisitedStatement);
+        }
       }
-      mIsVisitedCallbacks.Clear();
     }
 
     return NS_OK;
   }
 
-  void GetIsVisitedStatement(mozIStorageCompletionCallback* aCallback) {
+  void QueueVisitedStatement(RefPtr<VisitedQuery> aCallback) {
     if (mIsVisitedStatement) {
-      DebugOnly<nsresult> rv;
-      rv = aCallback->Complete(NS_OK, mIsVisitedStatement);
-      MOZ_ASSERT(NS_SUCCEEDED(rv));
+      aCallback->Execute(*mIsVisitedStatement);
     } else {
-      DebugOnly<bool> added = mIsVisitedCallbacks.AppendObject(aCallback);
-      MOZ_ASSERT(added);
+      mVisitedQueries.AppendElement(std::move(aCallback));
     }
   }
 
   void Shutdown() {
     mShutdownWasInvoked = true;
     if (mReadOnlyDBConn) {
-      mIsVisitedCallbacks.Clear();
+      mVisitedQueries.Clear();
       DebugOnly<nsresult> rv;
       if (mIsVisitedStatement) {
         rv = mIsVisitedStatement->Finalize();
@@ -1554,23 +1527,24 @@ class ConcurrentStatementsHolder final : public mozIStorageCompletionCallback {
 
   nsCOMPtr<mozIStorageAsyncConnection> mReadOnlyDBConn;
   nsCOMPtr<mozIStorageAsyncStatement> mIsVisitedStatement;
-  nsCOMArray<mozIStorageCompletionCallback> mIsVisitedCallbacks;
+  nsTArray<RefPtr<VisitedQuery>> mVisitedQueries;
   bool mShutdownWasInvoked;
 };
 
 NS_IMPL_ISUPPORTS(ConcurrentStatementsHolder, mozIStorageCompletionCallback)
 
-nsresult History::GetIsVisitedStatement(
-    mozIStorageCompletionCallback* aCallback) {
+nsresult History::QueueVisitedStatement(RefPtr<VisitedQuery> aQuery) {
   MOZ_ASSERT(NS_IsMainThread());
-  if (mShuttingDown) return NS_ERROR_NOT_AVAILABLE;
+  if (mShuttingDown) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   if (!mConcurrentStatementsHolder) {
     mozIStorageConnection* dbConn = GetDBConn();
     NS_ENSURE_STATE(dbConn);
     mConcurrentStatementsHolder = new ConcurrentStatementsHolder(dbConn);
   }
-  mConcurrentStatementsHolder->GetIsVisitedStatement(aCallback);
+  mConcurrentStatementsHolder->QueueVisitedStatement(std::move(aQuery));
   return NS_OK;
 }
 
@@ -1891,10 +1865,6 @@ void History::AppendToRecentlyVisitedURIs(nsIURI* aURI, bool aHidden) {
       iter.Remove();
     }
   }
-}
-
-Result<Ok, nsresult> History::StartVisitedQuery(nsIURI* aURI) {
-  return ToResult(VisitedQuery::Start(aURI));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2259,10 +2229,27 @@ History::IsURIVisited(nsIURI* aURI, mozIVisitedStatusCallback* aCallback) {
   NS_ENSURE_ARG(aURI);
   NS_ENSURE_ARG(aCallback);
 
-  nsresult rv = VisitedQuery::Start(aURI, aCallback);
-  NS_ENSURE_SUCCESS(rv, rv);
+  return VisitedQuery::Start(aURI, aCallback);
+}
 
-  return NS_OK;
+void History::StartPendingVisitedQueries(
+    const PendingVisitedQueries& aQueries) {
+  if (XRE_IsContentProcess()) {
+    nsTArray<URIParams> uris(aQueries.Count());
+    for (auto iter = aQueries.ConstIter(); !iter.Done(); iter.Next()) {
+      SerializeURI(iter.Get()->GetKey(), *uris.AppendElement());
+    }
+    auto* cpc = mozilla::dom::ContentChild::GetSingleton();
+    MOZ_ASSERT(cpc, "Content Protocol is NULL!");
+    Unused << cpc->SendStartVisitedQueries(uris);
+  } else {
+    // TODO(bug 1594368): We could do a single query, as long as we can
+    // then notify each URI individually.
+    for (auto iter = aQueries.ConstIter(); !iter.Done(); iter.Next()) {
+      nsresult queryStatus = VisitedQuery::Start(iter.Get()->GetKey());
+      Unused << NS_WARN_IF(NS_FAILED(queryStatus));
+    }
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

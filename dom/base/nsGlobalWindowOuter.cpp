@@ -24,14 +24,13 @@
 #include "nsISecureBrowserUI.h"
 #include "nsIWebProgressListener.h"
 #include "mozilla/AntiTrackingCommon.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/LSObject.h"
 #include "mozilla/dom/Storage.h"
 #include "mozilla/dom/MaybeCrossOriginObject.h"
-#include "mozilla/dom/MediaController.h"
-#include "mozilla/dom/MediaControlUtils.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
@@ -154,7 +153,7 @@
 #include "mozilla/EventStateManager.h"
 #include "nsIObserverService.h"
 #include "nsFocusManager.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 #include "nsITimedChannel.h"
 #include "nsServiceManagerUtils.h"
 #include "mozilla/dom/CustomEvent.h"
@@ -178,10 +177,6 @@
 #include "nsIDOMXULCommandDispatcher.h"
 
 #include "mozilla/GlobalKeyListener.h"
-#ifdef MOZ_XBL
-#  include "nsBindingManager.h"
-#  include "nsXBLService.h"
-#endif
 
 #include "nsIDragService.h"
 #include "mozilla/dom/Element.h"
@@ -275,12 +270,6 @@ using namespace mozilla::dom::ipc;
 using mozilla::BasePrincipal;
 using mozilla::OriginAttributes;
 using mozilla::TimeStamp;
-
-extern mozilla::LazyLogModule gMediaControlLog;
-
-#define MC_LOG(msg, ...)                     \
-  MOZ_LOG(gMediaControlLog, LogLevel::Debug, \
-          ("WindowOuter=%p, " msg, this, ##__VA_ARGS__))
 
 #define FORWARD_TO_INNER(method, args, err_rval)       \
   PR_BEGIN_MACRO                                       \
@@ -1546,7 +1535,7 @@ void nsGlobalWindowOuter::SetInitialPrincipalToSubject(
   // We should never create windows with an expanded principal.
   // If we have a system principal, make sure we're not using it for a content
   // docshell.
-  // NOTE: Please keep this logic in sync with nsWebShellWindow::Initialize().
+  // NOTE: Please keep this logic in sync with AppWindow::Initialize().
   if (nsContentUtils::IsExpandedPrincipal(newWindowPrincipal) ||
       (nsContentUtils::IsSystemPrincipal(newWindowPrincipal) &&
        GetDocShell()->ItemType() != nsIDocShellTreeItem::typeChrome)) {
@@ -2824,26 +2813,6 @@ SuspendTypes nsPIDOMWindowOuter::GetMediaSuspend() const {
   return mMediaSuspend;
 }
 
-void nsPIDOMWindowOuter::UpdateMediaAction(const MediaControlActions aAction) {
-  // TODO : we now temporarily map MediaControlActions to nsISuspendedTypes in
-  // order to control media, but for long term goal in which we should not rely
-  // on nsISuspendedTypes and completely decouple them. See bug1571493.
-  MC_LOG("UpdateMediaAction %s", ToMediaControlActionsStr(aAction));
-  switch (aAction) {
-    case MediaControlActions::ePlay:
-      SetMediaSuspend(nsISuspendedTypes::NONE_SUSPENDED);
-      break;
-    case MediaControlActions::ePause:
-      SetMediaSuspend(nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE);
-      break;
-    case MediaControlActions::eStop:
-      SetMediaSuspend(nsISuspendedTypes::SUSPENDED_STOP_DISPOSABLE);
-      break;
-    default:
-      MOZ_ASSERT_UNREACHABLE("Invalid action.");
-  };
-}
-
 void nsPIDOMWindowOuter::SetMediaSuspend(SuspendTypes aSuspend) {
   if (!IsDisposableSuspend(aSuspend)) {
     MaybeNotifyMediaResumedFromBlock(aSuspend);
@@ -4046,7 +4015,7 @@ bool nsGlobalWindowOuter::WindowExists(const nsAString& aName,
            aName.LowerCaseEqualsLiteral("_parent");
   }
 
-  return !!mBrowsingContext->FindWithName(aName);
+  return !!mBrowsingContext->FindWithName(aName, aLookForCallerOnJSStack);
 }
 
 already_AddRefed<nsIWidget> nsGlobalWindowOuter::GetMainWidget() {
@@ -4404,9 +4373,9 @@ nsresult nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
   // Prevent chrome documents which are still loading from resizing
   // the window after we set fullscreen mode.
   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin = GetTreeOwnerWindow();
-  nsCOMPtr<nsIXULWindow> xulWin(do_GetInterface(treeOwnerAsWin));
-  if (aFullscreen && xulWin) {
-    xulWin->SetIntrinsicallySized(false);
+  nsCOMPtr<nsIAppWindow> appWin(do_GetInterface(treeOwnerAsWin));
+  if (aFullscreen && appWin) {
+    appWin->SetIntrinsicallySized(false);
   }
 
   // Set this before so if widget sends an event indicating its
@@ -6795,10 +6764,10 @@ void nsGlobalWindowOuter::ActivateOrDeactivate(bool aActivate) {
     // Get the top level widget's nsGlobalWindowOuter
     nsCOMPtr<nsPIDOMWindowOuter> topLevelWindow;
 
-    // widgetListener should be a nsXULWindow
+    // widgetListener should be an AppWindow
     nsIWidgetListener* listener = topLevelWidget->GetWidgetListener();
     if (listener) {
-      nsCOMPtr<nsIXULWindow> window = listener->GetXULWindow();
+      nsCOMPtr<nsIAppWindow> window = listener->GetAppWindow();
       nsCOMPtr<nsIInterfaceRequestor> req(do_QueryInterface(window));
       topLevelWindow = do_GetInterface(req);
     }

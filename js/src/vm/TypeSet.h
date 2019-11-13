@@ -17,7 +17,6 @@
 #include <stdio.h>   // FILE
 
 #include "jstypes.h"  // JS_BITS_PER_WORD, JS_PUBLIC_API
-#include "jsutil.h"   // JS_CRASH_DIAGNOSTICS
 
 #include "jit/IonTypes.h"      // jit::MIRType
 #include "js/GCAnnotations.h"  // JS_HAZ_GC_POINTER
@@ -27,6 +26,7 @@
 #include "js/Utility.h"      // UniqueChars
 #include "js/Value.h"        // JSVAL_TYPE_*
 #include "js/Vector.h"       // js::Vector
+#include "util/DiagnosticAssertions.h"
 #include "vm/TaggedProto.h"  // js::TaggedProto
 
 struct JS_PUBLIC_API JSContext;

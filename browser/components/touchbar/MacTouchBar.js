@@ -35,15 +35,23 @@ XPCOMUtils.defineLazyServiceGetter(
  * TouchBarInput.
  * @param {string} commandName
  *        A XUL command.
- * @param {string} telemetryKey
+ * @param {string} [telemetryKey]
  *        A string describing the command, sent for telemetry purposes.
  *        Intended to be shorter and more readable than the XUL command.
  */
 function execCommand(commandName, telemetryKey) {
+  if (!TouchBarHelper.window) {
+    return;
+  }
   let command = TouchBarHelper.window.document.getElementById(commandName);
   if (command) {
     command.doCommand();
   }
+
+  if (!telemetryKey) {
+    return;
+  }
+
   let telemetry = Services.telemetry.getHistogramById(
     "TOUCHBAR_BUTTON_PRESSES"
   );
@@ -261,6 +269,9 @@ class TouchBarHelper {
   }
 
   get activeTitle() {
+    if (!TouchBarHelper.window) {
+      return "";
+    }
     let tabbrowser = TouchBarHelper.window.ownerGlobal.gBrowser;
     let activeTitle;
     if (tabbrowser) {
@@ -300,9 +311,11 @@ class TouchBarHelper {
   }
 
   static get baseWindow() {
-    return TouchBarHelper.window.docShell.treeOwner.QueryInterface(
-      Ci.nsIBaseWindow
-    );
+    return TouchBarHelper.window
+      ? TouchBarHelper.window.docShell.treeOwner.QueryInterface(
+          Ci.nsIBaseWindow
+        )
+      : null;
   }
 
   getTouchBarInput(inputName) {
@@ -384,6 +397,9 @@ class TouchBarHelper {
    *        sourced from UrlbarTokenizer.RESTRICT.
    */
   insertRestrictionInUrlbar(restrictionToken) {
+    if (!TouchBarHelper.window) {
+      return;
+    }
     let searchString = TouchBarHelper.window.gURLBar.lastSearchString.trimStart();
     if (Object.values(UrlbarTokenizer.RESTRICT).includes(searchString[0])) {
       searchString = searchString.substring(1).trimStart();
@@ -467,11 +483,10 @@ helperProto._l10n = new Localization(["browser/touchbar/touchbar.ftl"]);
  *     @param {string} input.title
  *            The lookup key for the button's localized text title.
  *     @param {string} input.image
- *            The name of a icon file added to
- *            /widget/cocoa/resources/touchbar_icons.
+ *            A URL pointing to an SVG internal to Firefox.
  *     @param {string} input.type
  *            The type of Touch Bar input represented by the object.
- *            One of `button`, `mainButton`.
+ *            Must be a value from kInputTypes.
  *     @param {Function} input.callback
  *            A callback invoked when a touchbar item is touched.
  *     @param {string} [input.color]
@@ -533,7 +548,9 @@ class TouchBarInput {
   }
   // Required as context to load our input icons.
   get document() {
-    return BrowserWindowTracker.getTopWindow().document;
+    return BrowserWindowTracker.getTopWindow()
+      ? BrowserWindowTracker.getTopWindow().document
+      : null;
   }
   get type() {
     return this._type == "" ? "button" : this._type;

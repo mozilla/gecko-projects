@@ -13,9 +13,11 @@
 
 #include "jit/BaselineIC.h"
 #include "jit/BytecodeAnalysis.h"
+#include "util/Memory.h"
 #include "vm/BytecodeIterator.h"
 #include "vm/BytecodeLocation.h"
 #include "vm/BytecodeUtil.h"
+#include "vm/FrameIter.h"  // js::OnlyJSJitFrameIter
 #include "vm/JSScript.h"
 #include "vm/Stack.h"
 #include "vm/TypeInference.h"

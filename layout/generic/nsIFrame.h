@@ -1257,6 +1257,8 @@ class nsIFrame : public nsQueryFrame {
   NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(PlaceholderFrameProperty,
                                          nsPlaceholderFrame)
 
+  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(OffsetPathCache, mozilla::gfx::Path)
+
   mozilla::FrameBidiData GetBidiData() const {
     bool exists;
     mozilla::FrameBidiData bidiData = GetProperty(BidiDataProperty(), &exists);
@@ -1414,7 +1416,7 @@ class nsIFrame : public nsQueryFrame {
   virtual nscoord GetLogicalBaseline(mozilla::WritingMode aWM) const = 0;
 
   /**
-   * Synthesize a first(last) inline-axis baseline from our margin-box.
+   * Synthesize a first(last) inline-axis baseline based on our margin-box.
    * An alphabetical baseline is at the start(end) edge and a central baseline
    * is at the center of our block-axis margin-box (aWM tells which to use).
    * https://drafts.csswg.org/css-align-3/#synthesize-baselines
@@ -1428,7 +1430,7 @@ class nsIFrame : public nsQueryFrame {
       mozilla::WritingMode aWM, BaselineSharingGroup aGroup) const;
 
   /**
-   * Synthesize a first(last) inline-axis baseline from our border-box.
+   * Synthesize a first(last) inline-axis baseline based on our border-box.
    * An alphabetical baseline is at the start(end) edge and a central baseline
    * is at the center of our block-axis border-box (aWM tells which to use).
    * https://drafts.csswg.org/css-align-3/#synthesize-baselines
@@ -1443,9 +1445,24 @@ class nsIFrame : public nsQueryFrame {
       mozilla::WritingMode aWM, BaselineSharingGroup aGroup) const;
 
   /**
+   * Synthesize a first(last) inline-axis baseline based on our content-box.
+   * An alphabetical baseline is at the start(end) edge and a central baseline
+   * is at the center of our block-axis content-box (aWM tells which to use).
+   * https://drafts.csswg.org/css-align-3/#synthesize-baselines
+   * @note The returned value is only valid when reflow is not needed.
+   * @note You should only call this on frames with a WM that's parallel to aWM.
+   * @param aWM the writing-mode of the alignment context
+   * @return an offset from our border-box block-axis start(end) edge for
+   * a first(last) baseline respectively
+   * (implemented in nsIFrameInlines.h)
+   */
+  inline nscoord SynthesizeBaselineBOffsetFromContentBox(
+      mozilla::WritingMode aWM, BaselineSharingGroup aGroup) const;
+
+  /**
    * Return the position of the frame's inline-axis baseline, or synthesize one
    * for the given alignment context. The returned baseline is the distance from
-   * the block-axis border-box start(end) edge for aBaselineGroup eFirst(eLast).
+   * the block-axis border-box start(end) edge for aBaselineGroup ::First(Last).
    * @note The returned value is only valid when reflow is not needed.
    * @note You should only call this on frames with a WM that's parallel to aWM.
    * @param aWM the writing-mode of the alignment context
@@ -1476,7 +1493,7 @@ class nsIFrame : public nsQueryFrame {
   /**
    * Return true if the frame has a first(last) inline-axis natural baseline per
    * CSS Box Alignment.  If so, then the returned baseline is the distance from
-   * the block-axis border-box start(end) edge for aBaselineGroup eFirst(eLast).
+   * the block-axis border-box start(end) edge for aBaselineGroup ::First(Last).
    * https://drafts.csswg.org/css-align-3/#natural-baseline
    * @note The returned value is only valid when reflow is not needed.
    * @note You should only call this on frames with a WM that's parallel to aWM.
@@ -2358,17 +2375,23 @@ class nsIFrame : public nsQueryFrame {
                                   InlinePrefISizeData* aData) = 0;
 
   /**
-   * Return the horizontal components of padding, border, and margin
+   * Intrinsic size of a frame in a single axis.
+   *
+   * This can represent either isize or bsize.
+   */
+  struct IntrinsicSizeOffsetData {
+    nscoord padding = 0;
+    nscoord border = 0;
+    nscoord margin = 0;
+  };
+
+  /**
+   * Return the isize components of padding, border, and margin
    * that contribute to the intrinsic width that applies to the parent.
    * @param aPercentageBasis the percentage basis to use for padding/margin -
    *   i.e. the Containing Block's inline-size
    */
-  struct IntrinsicISizeOffsetData {
-    nscoord hPadding, hBorder, hMargin;
-
-    IntrinsicISizeOffsetData() : hPadding(0), hBorder(0), hMargin(0) {}
-  };
-  virtual IntrinsicISizeOffsetData IntrinsicISizeOffsets(
+  virtual IntrinsicSizeOffsetData IntrinsicISizeOffsets(
       nscoord aPercentageBasis = NS_UNCONSTRAINEDSIZE) = 0;
 
   /**
@@ -2377,7 +2400,7 @@ class nsIFrame : public nsQueryFrame {
    * @param aPercentageBasis the percentage basis to use for padding/margin -
    *   i.e. the Containing Block's inline-size
    */
-  IntrinsicISizeOffsetData IntrinsicBSizeOffsets(
+  IntrinsicSizeOffsetData IntrinsicBSizeOffsets(
       nscoord aPercentageBasis = NS_UNCONSTRAINEDSIZE);
 
   virtual mozilla::IntrinsicSize GetIntrinsicSize() = 0;

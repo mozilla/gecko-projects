@@ -10,7 +10,7 @@
  */
 
 // This file uses ContentTask & frame scripts, where these are available.
-/* global addEventListener, removeEventListener, ContentTaskUtils */
+/* global ContentTaskUtils */
 
 "use strict";
 
@@ -77,10 +77,11 @@ const kAboutPageRegistrationContentScript =
   "chrome://mochikit/content/tests/BrowserTestUtils/content-about-page-utils.js";
 
 /**
- * Create and register BrowserTestUtils Window Actor.
+ * Create and register the BrowserTestUtils and ContentEventListener window
+ * actors.
  */
-function registerActor() {
-  let actorOptions = {
+function registerActors() {
+  ChromeUtils.registerWindowActor("BrowserTestUtils", {
     parent: {
       moduleURI: "resource://testing-common/BrowserTestUtilsParent.jsm",
     },
@@ -93,30 +94,25 @@ function registerActor() {
     },
     allFrames: true,
     includeChrome: true,
-  };
-  ChromeUtils.registerWindowActor("BrowserTestUtils", actorOptions);
-}
+  });
 
-function registerContentEventListenerActor() {
-  let actorOptions = {
+  ChromeUtils.registerWindowActor("ContentEventListener", {
     parent: {
       moduleURI: "resource://testing-common/ContentEventListenerParent.jsm",
     },
-
     child: {
       moduleURI: "resource://testing-common/ContentEventListenerChild.jsm",
       events: {
         // We need to see the creation of all new windows, in case they have
-        // a browsing context we are interesting in.
+        // a browsing context we are interested in.
         DOMWindowCreated: { capture: true },
       },
     },
     allFrames: true,
-  };
-  ChromeUtils.registerWindowActor("ContentEventListener", actorOptions);
+  });
 }
 
-registerActor();
+registerActors();
 
 var BrowserTestUtils = {
   /**
@@ -526,8 +522,6 @@ var BrowserTestUtils = {
   _contentEventListenerSharedState: new Map(),
 
   _contentEventListeners: new Map(),
-
-  _contentEventListenerActorRegistered: false,
 
   /**
    * Waits for the web progress listener associated with this tab to fire a
@@ -1157,12 +1151,15 @@ var BrowserTestUtils = {
    *        event is the expected one, or false if it should be ignored and
    *        listening should continue. If not specified, the first event with
    *        the specified name resolves the returned promise.
-   * @param {bool} wantsUntrusted [optional]
+   * @param {bool} wantUntrusted [optional]
    *        Whether to accept untrusted events
    *
-   * @note Because this function is intended for testing, any error in checkFn
-   *       will cause the returned promise to be rejected instead of waiting for
-   *       the next event, since this is probably a bug in the test.
+   * @note As of bug 1588193, this function no longer rejects the returned
+   *       promise in the case of a checkFn error. Instead, since checkFn is now
+   *       called through eval in the content process, the error is thrown in
+   *       the listener created by ContentEventListenerChild. Work to improve
+   *       error handling (eg. to reject the promise as before and to preserve
+   *       the filename/stack) is being tracked in bug 1593811.
    *
    * @returns {Promise}
    */
@@ -1171,46 +1168,20 @@ var BrowserTestUtils = {
     eventName,
     capture = false,
     checkFn,
-    wantsUntrusted = false
+    wantUntrusted = false
   ) {
-    let parameters = {
-      eventName,
-      capture,
-      checkFnSource: checkFn ? checkFn.toSource() : null,
-      wantsUntrusted,
-    };
-    /* eslint-disable no-eval */
-    return ContentTask.spawn(browser, parameters, function({
-      eventName,
-      capture,
-      checkFnSource,
-      wantsUntrusted,
-    }) {
-      let checkFn;
-      if (checkFnSource) {
-        checkFn = eval(`(() => (${checkFnSource}))()`);
-      }
-      return new Promise((resolve, reject) => {
-        addEventListener(
-          eventName,
-          function listener(event) {
-            let completion = resolve;
-            try {
-              if (checkFn && !checkFn(event)) {
-                return;
-              }
-            } catch (e) {
-              completion = () => reject(e);
-            }
-            removeEventListener(eventName, listener, capture);
-            completion();
-          },
-          capture,
-          wantsUntrusted
-        );
-      });
+    return new Promise(resolve => {
+      let removeEventListener = this.addContentEventListener(
+        browser,
+        eventName,
+        () => {
+          removeEventListener();
+          resolve();
+        },
+        { capture, wantUntrusted },
+        checkFn
+      );
     });
-    /* eslint-enable no-eval */
   },
 
   /**
@@ -1238,10 +1209,6 @@ var BrowserTestUtils = {
    * fire until it is removed. A callable object is returned that,
    * when called, removes the event listener. Note that this function
    * works even if the browser's frameloader is swapped.
-   * Note: This will only listen for events that either have the browsing
-   * context of the browser element at the time of the call, or that are fired
-   * on windows that were created after any call to the function since the start
-   * of the test. This could be improved if needed.
    *
    * @param {xul:browser} browser
    *        The browser element to listen for events in.
@@ -1271,7 +1238,10 @@ var BrowserTestUtils = {
   ) {
     let id = gListenerId++;
     let contentEventListeners = this._contentEventListeners;
-    contentEventListeners.set(id, { listener, browser });
+    contentEventListeners.set(id, {
+      listener,
+      browsingContext: browser.browsingContext,
+    });
 
     let eventListenerState = this._contentEventListenerSharedState;
     eventListenerState.set(id, {
@@ -1285,35 +1255,6 @@ var BrowserTestUtils = {
       eventListenerState
     );
     Services.ppmm.sharedData.flush();
-
-    if (!this._contentEventListenerActorRegistered) {
-      this._contentEventListenerActorRegistered = true;
-      registerContentEventListenerActor();
-
-      // We hadn't registered the actor yet, so any existing window
-      // for browser's BC will not have been created yet. Explicitly
-      // make sure the actors are created and ready to go now. This
-      // happens after the updating of sharedData so that the actors
-      // don't have to get created and do nothing, and then later have
-      // to be updated.
-      // Note: As mentioned in the comment at the start of this function,
-      // this will miss any windows that existed at the time that the function
-      // was initially called during this test, but that did not have the
-      // browser's browsing context.
-      let contextsToVisit = [browser.browsingContext];
-      while (contextsToVisit.length) {
-        let currentContext = contextsToVisit.pop();
-        let global = currentContext.currentWindowGlobal;
-        if (!global) {
-          continue;
-        }
-        let actor = browser.browsingContext.currentWindowGlobal.getActor(
-          "ContentEventListener"
-        );
-        actor.sendAsyncMessage("ContentEventListener:LateCreate");
-        contextsToVisit.push(...currentContext.getChildren());
-      }
-    }
 
     let unregisterFunction = function() {
       if (!eventListenerState.has(id)) {
@@ -1335,12 +1276,12 @@ var BrowserTestUtils = {
    * BrowserTestUtilsParent.jsm when a content event we were listening for
    * happens.
    */
-  _receivedContentEventListener(listenerId, browser) {
+  _receivedContentEventListener(listenerId, browsingContext) {
     let listenerData = this._contentEventListeners.get(listenerId);
     if (!listenerData) {
       return;
     }
-    if (listenerData.browser != browser) {
+    if (listenerData.browsingContext != browsingContext) {
       return;
     }
     listenerData.listener();
@@ -2025,26 +1966,6 @@ var BrowserTestUtils = {
         // The originalTarget of the AlertActive on a notificationbox
         // will be the notification itself.
         resolve(event.originalTarget);
-      });
-    });
-  },
-
-  /**
-   * Returns a Promise that will resolve once MozAfterPaint
-   * has been fired in the content of a browser.
-   *
-   * @param browser (<xul:browser>)
-   *        The browser for which we're waiting for the MozAfterPaint
-   *        event to occur in.
-   * @returns Promise
-   */
-  contentPainted(browser) {
-    return ContentTask.spawn(browser, null, async function() {
-      return new Promise(resolve => {
-        addEventListener("MozAfterPaint", function onPaint() {
-          removeEventListener("MozAfterPaint", onPaint);
-          resolve();
-        });
       });
     });
   },

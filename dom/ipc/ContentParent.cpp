@@ -63,7 +63,7 @@
 #include "mozilla/dom/Notification.h"
 #include "mozilla/dom/PContentPermissionRequestParent.h"
 #include "mozilla/dom/PCycleCollectWithLogsParent.h"
-#include "mozilla/dom/PositionError.h"
+#include "mozilla/dom/GeolocationPositionError.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/power/PowerManagerService.h"
 #include "mozilla/dom/Permissions.h"
@@ -180,7 +180,7 @@
 #include "nsIURIFixup.h"
 #include "nsIURL.h"
 #include "nsIDocShellTreeOwner.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 #include "nsIDOMChromeWindow.h"
 #include "nsIWindowWatcher.h"
 #include "nsPIWindowWatcher.h"
@@ -210,6 +210,7 @@
 #include "nsDocShell.h"
 #include "nsOpenURIInFrameParams.h"
 #include "mozilla/net/NeckoMessageUtils.h"
+#include "GfxInfoBase.h"
 #include "gfxPlatform.h"
 #include "gfxPlatformFontList.h"
 #include "prio.h"
@@ -232,6 +233,7 @@
 #include "MMPrinter.h"
 #include "nsStreamUtils.h"
 #include "nsIAsyncInputStream.h"
+#include "xpcpublic.h"
 
 #include "mozilla/Sprintf.h"
 
@@ -1809,7 +1811,15 @@ bool ContentParent::ShouldKeepProcessAlive() {
   int32_t processesToKeepAlive = 0;
 
   nsAutoCString keepAlivePref("dom.ipc.keepProcessesAlive.");
-  keepAlivePref.Append(NS_ConvertUTF16toUTF8(mRemoteType));
+
+  if (StringBeginsWith(mRemoteType,
+                       NS_LITERAL_STRING(FISSION_WEB_REMOTE_TYPE)) &&
+      xpc::IsInAutomation()) {
+    keepAlivePref.Append(FISSION_WEB_REMOTE_TYPE);
+    keepAlivePref.AppendLiteral(".perOrigin");
+  } else {
+    keepAlivePref.Append(NS_ConvertUTF16toUTF8(mRemoteType));
+  }
   if (NS_FAILED(
           Preferences::GetInt(keepAlivePref.get(), &processesToKeepAlive))) {
     return false;
@@ -2148,9 +2158,12 @@ void ContentParent::LaunchSubprocessInternal(
 #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
   // If we're launching a middleman process for a
   // recording or replay, start the sandbox later.
-  if (sEarlySandboxInit && IsContentSandboxEnabled() &&
-      !IsRecordingOrReplaying()) {
+  bool sandboxEnabled = IsContentSandboxEnabled();
+  if (sandboxEnabled && sEarlySandboxInit && !IsRecordingOrReplaying()) {
     AppendSandboxParams(extraArgs);
+  }
+  if (sandboxEnabled) {
+    mSubprocess->DisableOSActivityMode();
   }
 #endif
 
@@ -2486,16 +2499,8 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
 
   nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
   if (gfxInfo) {
-    for (int32_t i = 1; i <= nsIGfxInfo::FEATURE_MAX_VALUE; ++i) {
-      int32_t status = 0;
-      nsAutoCString failureId;
-      gfxInfo->GetFeatureStatus(i, failureId, &status);
-      dom::GfxInfoFeatureStatus gfxFeatureStatus;
-      gfxFeatureStatus.feature() = i;
-      gfxFeatureStatus.status() = status;
-      gfxFeatureStatus.failureId() = failureId;
-      xpcomInit.gfxFeatureStatus().AppendElement(gfxFeatureStatus);
-    }
+    GfxInfoBase* gfxInfoRaw = static_cast<GfxInfoBase*>(gfxInfo.get());
+    gfxInfoRaw->GetAllFeatures(xpcomInit);
   }
 
   DataStorage::GetAllChildProcessData(xpcomInit.dataStorage());
@@ -3722,7 +3727,8 @@ ContentParent::AllocPExternalHelperAppParent(
     const uint32_t& aContentDispositionHint,
     const nsString& aContentDispositionFilename, const bool& aForceSave,
     const int64_t& aContentLength, const bool& aWasFileChannel,
-    const Maybe<URIParams>& aReferrer, PBrowserParent* aBrowser) {
+    const Maybe<URIParams>& aReferrer, BrowsingContext* aContext,
+    const bool& aShouldCloseWindow) {
   RefPtr<ExternalHelperAppParent> parent = new ExternalHelperAppParent(
       uri, aContentLength, aWasFileChannel, aContentDisposition,
       aContentDispositionHint, aContentDispositionFilename);
@@ -3736,9 +3742,11 @@ mozilla::ipc::IPCResult ContentParent::RecvPExternalHelperAppConstructor(
     const uint32_t& aContentDispositionHint,
     const nsString& aContentDispositionFilename, const bool& aForceSave,
     const int64_t& aContentLength, const bool& aWasFileChannel,
-    const Maybe<URIParams>& aReferrer, PBrowserParent* aBrowser) {
+    const Maybe<URIParams>& aReferrer, BrowsingContext* aContext,
+    const bool& aShouldCloseWindow) {
   static_cast<ExternalHelperAppParent*>(actor)->Init(
-      loadInfoArgs, aMimeContentType, aForceSave, aReferrer, aBrowser);
+      loadInfoArgs, aMimeContentType, aForceSave, aReferrer, aContext,
+      aShouldCloseWindow);
   return IPC_OK();
 }
 
@@ -3815,15 +3823,18 @@ mozilla::ipc::IPCResult ContentParent::RecvPSpeechSynthesisConstructor(
 #endif
 }
 
-mozilla::ipc::IPCResult ContentParent::RecvStartVisitedQuery(
-    const URIParams& aURI) {
-  nsCOMPtr<nsIURI> newURI = DeserializeURI(aURI);
-  if (!newURI) {
-    return IPC_FAIL_NO_REASON(this);
-  }
+mozilla::ipc::IPCResult ContentParent::RecvStartVisitedQueries(
+    const nsTArray<URIParams>& aUris) {
   nsCOMPtr<IHistory> history = services::GetHistoryService();
-  if (history) {
-    history->RegisterVisitedCallback(newURI, nullptr);
+  if (!history) {
+    return IPC_OK();
+  }
+  for (const auto& params : aUris) {
+    nsCOMPtr<nsIURI> uri = DeserializeURI(params);
+    if (NS_WARN_IF(!uri)) {
+      continue;
+    }
+    history->RegisterVisitedCallback(uri, nullptr);
   }
   return IPC_OK();
 }
@@ -4104,7 +4115,7 @@ ContentParent::HandleEvent(nsIDOMGeoPosition* postion) {
 }
 
 NS_IMETHODIMP
-ContentParent::HandleEvent(PositionError* positionError) {
+ContentParent::HandleEvent(GeolocationPositionError* positionError) {
   Unused << SendGeolocationError(positionError->Code());
   return NS_OK;
 }
@@ -4944,10 +4955,6 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindow(
       }
     }
   });
-
-  // Content has requested that we open this new content window, so
-  // we must have an opener.
-  newTab->SetHasContentOpener(true);
 
   BrowserParent::AutoUseNewTab aunt(newTab, &cwi.urlToLoad());
   const uint64_t nextRemoteTabId = ++sNextRemoteTabId;

@@ -33,15 +33,6 @@ class WritableStreamDefaultWriter;
 
 class WritableStream : public NativeObject {
  public:
-  /**
-   * Memory layout of WritableStream instances.
-   *
-   * See https://streams.spec.whatwg.org/#ws-internal-slots for details on
-   * the stored state.  [[state]] and [[backpressure]] are stored in Slot_State
-   * as a composite WritableStream::State enum value.
-   *
-   * XXX jwalden needs fleshin' out
-   */
   enum Slots {
     /**
      * A WritableStream's associated controller is always created from under the
@@ -57,6 +48,10 @@ class WritableStream : public NativeObject {
      */
     Slot_Writer,
 
+    /**
+     * A bit field that stores both [[state]] and the [[backpressure]] spec
+     * fields in a WritableStream::State 32-bit integer.
+     */
     Slot_State,
 
     /**
@@ -179,7 +174,7 @@ class WritableStream : public NativeObject {
       if (current == Writable) {
         MOZ_ASSERT(newState == Closed || newState == Erroring);
       } else if (current == Erroring) {
-        MOZ_ASSERT(newState == Errored);
+        MOZ_ASSERT(newState == Errored || newState == Closed);
       } else if (current == Closed || current == Errored) {
         MOZ_ASSERT_UNREACHABLE(
             "closed/errored stream shouldn't undergo state transitions");

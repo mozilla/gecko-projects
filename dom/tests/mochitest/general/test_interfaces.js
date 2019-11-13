@@ -350,6 +350,8 @@ var interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "Element", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "ElementInternals", insecureContext: true, nightly: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "ErrorEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "Event", insecureContext: true },
@@ -384,7 +386,7 @@ var interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "FormData", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "FormDataEvent", insecureContext: true, nightly: true },
+  { name: "FormDataEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "FontFace", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -411,6 +413,14 @@ var interfaceNamesInGlobalScope = [
   { name: "GamepadPose", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "GamepadTouch", insecureContext: false, disabled: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "Geolocation", insecureContext: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "GeolocationCoordinates", insecureContext: false },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "GeolocationPosition", insecureContext: false },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "GeolocationPositionError", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "HashChangeEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!

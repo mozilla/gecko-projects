@@ -31,6 +31,7 @@
 struct JSContext;
 class JSLinearString;
 class JSString;
+class JSTracer;
 
 namespace js {
 
@@ -390,6 +391,12 @@ class MOZ_STACK_CLASS LanguageTag final {
   JSString* toString(JSContext* cx) const;
 
   /**
+   * Return the string representation of this language tag as a null-terminated
+   * C-string.
+   */
+  JS::UniqueChars toStringZ(JSContext* cx) const;
+
+  /**
    * Add likely-subtags to the language tag.
    *
    * Spec: <https://www.unicode.org/reports/tr35/#Likely_Subtags>
@@ -664,15 +671,30 @@ class MOZ_STACK_CLASS LanguageTagParser final {
       JSContext* cx, mozilla::Span<const char> extension,
       AttributesVector& attributes, KeywordsVector& keywords);
 
+  static JS::Result<bool> tryParse(JSContext* cx, LocaleChars& localeChars,
+                                   size_t localeLength, LanguageTag& tag);
+
  public:
   // Parse the input string as a language tag. Reports an error to the context
   // if the input can't be parsed completely.
   static bool parse(JSContext* cx, JSLinearString* locale, LanguageTag& tag);
 
+  // Parse the input string as a language tag. Reports an error to the context
+  // if the input can't be parsed completely.
+  static bool parse(JSContext* cx, mozilla::Span<const char> locale,
+                    LanguageTag& tag);
+
   // Parse the input string as a language tag. Returns Ok(true) if the input
   // could be completely parsed, Ok(false) if the input couldn't be parsed,
   // or Err() in case of internal error.
   static JS::Result<bool> tryParse(JSContext* cx, JSLinearString* locale,
+                                   LanguageTag& tag);
+
+  // Parse the input string as a language tag. Returns Ok(true) if the input
+  // could be completely parsed, Ok(false) if the input couldn't be parsed,
+  // or Err() in case of internal error.
+  static JS::Result<bool> tryParse(JSContext* cx,
+                                   mozilla::Span<const char> locale,
                                    LanguageTag& tag);
 
   // Parse the input string as the base-name parts (language, script, region,
@@ -717,6 +739,28 @@ MOZ_MUST_USE bool ParseStandaloneRegionTag(JS::Handle<JSLinearString*> str,
  */
 JS::Result<JSString*> ParseStandaloneISO639LanguageTag(
     JSContext* cx, JS::Handle<JSLinearString*> str);
+
+class UnicodeExtensionKeyword final {
+  char key_[LanguageTagLimits::UnicodeKeyLength];
+  JSLinearString* type_;
+
+ public:
+  using UnicodeKey = const char (&)[LanguageTagLimits::UnicodeKeyLength + 1];
+  using UnicodeKeySpan =
+      mozilla::Span<const char, LanguageTagLimits::UnicodeKeyLength>;
+
+  UnicodeExtensionKeyword(UnicodeKey key, JSLinearString* type)
+      : key_{key[0], key[1]}, type_(type) {}
+
+  UnicodeKeySpan key() const { return {key_, sizeof(key_)}; }
+  JSLinearString* type() const { return type_; }
+
+  void trace(JSTracer* trc);
+};
+
+extern MOZ_MUST_USE bool ApplyUnicodeExtensionToTag(
+    JSContext* cx, LanguageTag& tag,
+    JS::HandleVector<UnicodeExtensionKeyword> keywords);
 
 }  // namespace intl
 

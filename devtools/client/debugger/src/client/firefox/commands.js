@@ -23,8 +23,6 @@ import type {
   SourceId,
   SourceActor,
   Range,
-  Thread,
-  ThreadType,
   ExecutionPoint,
 } from "../../types";
 
@@ -42,7 +40,7 @@ import type {
   EventListenerActiveList,
 } from "../../actions/types";
 
-let targets: { [ThreadType]: { [string]: Target } };
+let targets: { [string]: Target };
 let currentThreadFront: ThreadFront;
 let currentTarget: Target;
 let debuggerClient: DebuggerClient;
@@ -60,7 +58,7 @@ function setupCommands(dependencies: Dependencies) {
   currentThreadFront = dependencies.threadFront;
   currentTarget = dependencies.tabTarget;
   debuggerClient = dependencies.debuggerClient;
-  targets = { worker: {}, contentProcess: {} };
+  targets = {};
   sourceActors = {};
   breakpoints = {};
 }
@@ -100,9 +98,9 @@ function sendPacket(packet: Object) {
   return debuggerClient.request(packet);
 }
 
-// Transforms targets from {[ThreadType]: TargetMap} to TargetMap
+// Get a copy of the current targets.
 function getTargetsMap(): { string: Target } {
-  return Object.assign({}, ...Object.values(targets));
+  return Object.assign({}, targets);
 }
 
 function lookupTarget(thread: string) {
@@ -217,12 +215,6 @@ function locationKey(location: BreakpointLocation) {
   const sourceId = location.sourceId || "";
   // $FlowIgnore
   return `${sourceUrl}:${sourceId}:${line}:${column}`;
-}
-
-function detachWorkers() {
-  for (const thread of listThreadFronts()) {
-    thread.detach();
-  }
 }
 
 function maybeGenerateLogGroupId(options) {
@@ -340,8 +332,8 @@ async function getFrameScopes(frame: Frame): Promise<*> {
     return frame.scope;
   }
 
-  const sourceThreadFront = lookupThreadFront(frame.thread);
-  return sourceThreadFront.getEnvironment(frame.id);
+  const frameFront = lookupThreadFront(frame.thread).get(frame.id);
+  return frameFront.getEnvironment();
 }
 
 function pauseOnExceptions(
@@ -430,10 +422,8 @@ async function toggleEventLogging(logEventBreakpoints: boolean) {
 
 function getAllThreadFronts() {
   const fronts = [currentThreadFront];
-  for (const targetsForType of (Object.values(targets): any)) {
-    for (const { threadFront } of (Object.values(targetsForType): any)) {
-      fronts.push(threadFront);
-    }
+  for (const { threadFront } of (Object.values(targets): any)) {
+    fronts.push(threadFront);
   }
   return fronts;
 }
@@ -445,6 +435,12 @@ async function fetchSources(): Promise<Array<GeneratedSourceData>> {
     sources = sources.concat(await getSources(threadFront));
   }
   return sources;
+}
+
+async function fetchThreadSources(
+  thread: string
+): Promise<Array<GeneratedSourceData>> {
+  return getSources(lookupThreadFront(thread));
 }
 
 // Check if any of the targets were paused before we opened
@@ -466,44 +462,22 @@ function getSourceForActor(actor: ActorId) {
   return sourceActors[actor];
 }
 
-async function fetchThreads(type: ?ThreadType): Promise<Thread[]> {
-  if (!type) {
-    const workers = await updateThreads("worker");
-    const processes = await updateThreads("contentProcess");
-    return [...workers, ...processes];
-  }
-
-  return updateThreads(type);
-}
-
-async function updateThreads(type: ThreadType) {
+async function fetchThreads() {
   const options = {
     breakpoints,
     eventBreakpoints,
     observeAsmJS: true,
   };
 
-  const oldActors = Object.keys(targets[type]);
-
-  await updateTargets(type, {
+  await updateTargets({
     currentTarget,
     debuggerClient,
     targets,
     options,
   });
 
-  // Fetch the sources and install breakpoints on any new workers.
-  // NOTE: This runs in the background and fails quitely because it is
-  // pretty easy for sources to throw during the fetch if their thread
-  // shuts down, which would cause test failures.
-  for (const entry of Object.entries(targets[type])) {
-    const [actor, { threadFront }] = (entry: any);
-    if (!oldActors.includes(actor)) {
-      getSources(threadFront).catch(e => console.error(e));
-    }
-  }
-
-  return Object.entries(targets[type]).map(([actor, target]) =>
+  // eslint-disable-next-line
+  return (Object.entries(targets).map: any)(([actor, target]) =>
     createThread((actor: any), (target: any))
   );
 }
@@ -596,6 +570,7 @@ const clientCommands = {
   pauseOnExceptions,
   toggleEventLogging,
   fetchSources,
+  fetchThreadSources,
   checkIfAlreadyPaused,
   registerSourceActor,
   fetchThreads,
@@ -604,7 +579,6 @@ const clientCommands = {
   setSkipPausing,
   setEventListenerBreakpoints,
   getEventListenerBreakpointTypes,
-  detachWorkers,
   lookupTarget,
   getFrontByID,
   timeWarp,

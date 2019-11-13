@@ -26,7 +26,6 @@
 #include "mozilla/MouseEvents.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/webrender/WebRenderTypes.h"
-#include "mozilla/gfx/MacIOSurface.h"
 
 #include "nsString.h"
 #include "nsIDragService.h"
@@ -281,8 +280,6 @@ class WidgetRenderingContext;
 - (void)viewWillStartLiveResize;
 - (void)viewDidEndLiveResize;
 
-- (NSColor*)vibrancyFillColorForThemeGeometryType:(nsITheme::ThemeGeometryType)aThemeGeometryType;
-
 /*
  * Gestures support
  *
@@ -432,7 +429,7 @@ class nsChildView final : public nsBaseWidget {
   virtual InputContext GetInputContext() override;
   virtual TextEventDispatcherListener* GetNativeTextEventDispatcherListener() override;
   virtual MOZ_MUST_USE nsresult AttachNativeKeyEvent(mozilla::WidgetKeyboardEvent& aEvent) override;
-  virtual void GetEditCommands(NativeKeyBindingsType aType,
+  virtual bool GetEditCommands(NativeKeyBindingsType aType,
                                const mozilla::WidgetKeyboardEvent& aEvent,
                                nsTArray<mozilla::CommandInt>& aCommands) override;
   void GetEditCommandsRemapped(NativeKeyBindingsType aType,
@@ -442,6 +439,7 @@ class nsChildView final : public nsBaseWidget {
 
   virtual nsTransparencyMode GetTransparencyMode() override;
   virtual void SetTransparencyMode(nsTransparencyMode aMode) override;
+  virtual void SuppressAnimation(bool aSuppress) override;
 
   virtual nsresult SynthesizeNativeKeyEvent(int32_t aNativeKeyboardLayout, int32_t aNativeKeyCode,
                                             uint32_t aModifierFlags, const nsAString& aCharacters,
@@ -477,8 +475,6 @@ class nsChildView final : public nsBaseWidget {
                                const mozilla::gfx::IntSize& aSurfaceSize);
   bool PaintWindowInContext(CGContextRef aContext, const LayoutDeviceIntRegion& aRegion,
                             mozilla::gfx::IntSize aSurfaceSize);
-  bool PaintWindowInIOSurface(CFTypeRefPtr<IOSurfaceRef> aSurface,
-                              const LayoutDeviceIntRegion& aInvalidRegion);
 
   void PaintWindowInContentLayer();
   void HandleMainThreadCATransaction();
@@ -490,6 +486,8 @@ class nsChildView final : public nsBaseWidget {
   virtual void CreateCompositor() override;
   virtual void PrepareWindowEffects() override;
   virtual void CleanupWindowEffects() override;
+
+  virtual bool WidgetPaintsBackground() override { return true; }
 
   virtual void AddWindowOverlayWebRenderCommands(
       mozilla::layers::WebRenderBridgeChild* aWrBridge, mozilla::wr::DisplayListBuilder& aBuilder,
@@ -522,15 +520,11 @@ class nsChildView final : public nsBaseWidget {
 
   NSView<mozView>* GetEditorView();
 
-  nsCocoaWindow* GetXULWindowWidget() const;
+  nsCocoaWindow* GetAppWindowWidget() const;
 
   virtual void ReparentNativeWidget(nsIWidget* aNewParent) override;
 
   mozilla::widget::TextInputHandler* GetTextInputHandler() { return mTextInputHandler; }
-
-  NSColor* VibrancyFillColorForThemeGeometryType(nsITheme::ThemeGeometryType aThemeGeometryType);
-  NSColor* VibrancyFontSmoothingBackgroundColorForThemeGeometryType(
-      nsITheme::ThemeGeometryType aThemeGeometryType);
 
   // unit conversion convenience functions
   int32_t CocoaPointsToDevPixels(CGFloat aPts) const {
@@ -567,8 +561,6 @@ class nsChildView final : public nsBaseWidget {
   bool IsPluginFocused() { return mPluginFocused; }
 
   virtual LayoutDeviceIntPoint GetClientOffset() override;
-
-  virtual LayoutDeviceIntRegion GetOpaqueWidgetRegion() override;
 
   void DispatchAPZWheelInputEvent(mozilla::InputData& aEvent, bool aCanTriggerSwipe);
   nsEventStatus DispatchAPZInputEvent(mozilla::InputData& aEvent);
@@ -626,8 +618,6 @@ class nsChildView final : public nsBaseWidget {
   LayoutDeviceIntRect RectContainingTitlebarControls();
   void UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries);
   mozilla::VibrancyManager& EnsureVibrancyManager();
-
-  void UpdateInternalOpaqueRegion();
 
   nsIWidget* GetWidgetForListenerEvents();
 
@@ -740,9 +730,6 @@ class nsChildView final : public nsBaseWidget {
   mozilla::DataMutex<WidgetCompositingState> mCompositingState;
 
   RefPtr<mozilla::CancelableRunnable> mUnsuspendAsyncCATransactionsRunnable;
-
-  // The widget's opaque region. Written on the main thread, read on any thread.
-  mozilla::DataMutex<mozilla::LayoutDeviceIntRegion> mOpaqueRegion;
 
   // This flag is only used when APZ is off. It indicates that the current pan
   // gesture was processed as a swipe. Sometimes the swipe animation can finish

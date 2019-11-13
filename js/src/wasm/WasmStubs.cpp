@@ -20,9 +20,12 @@
 
 #include "mozilla/ArrayUtils.h"
 
+#include <algorithm>
+
 #include "jit/JitScript.h"
 #include "jit/RegisterAllocator.h"
 #include "js/Printf.h"
+#include "util/Memory.h"
 #include "wasm/WasmCode.h"
 #include "wasm/WasmGenerator.h"
 #include "wasm/WasmInstance.h"
@@ -66,7 +69,8 @@ uint32_t ABIResult::size() const { return ResultStackSize(type()); }
 
 void ABIResultIter::settleRegister(ValType type) {
   MOZ_ASSERT(!done());
-  MOZ_ASSERT(index() < RegisterResultCount);
+  MOZ_ASSERT_IF(direction_ == Next, index() < RegisterResultCount);
+  MOZ_ASSERT_IF(direction_ == Prev, index() >= count_ - RegisterResultCount);
   static_assert(RegisterResultCount == 1, "expected a single register result");
 
   switch (type.code()) {
@@ -751,7 +755,7 @@ static bool GenerateJitEntry(MacroAssembler& masm, size_t funcExportIndex,
   MOZ_ALWAYS_TRUE(coerceArgTypes.append(MIRType::Pointer));
   unsigned oolBytesNeeded = StackArgBytes(coerceArgTypes);
 
-  unsigned bytesNeeded = Max(normalBytesNeeded, oolBytesNeeded);
+  unsigned bytesNeeded = std::max(normalBytesNeeded, oolBytesNeeded);
 
   // Note the jit caller ensures the stack is aligned *after* the call
   // instruction.
@@ -1543,7 +1547,7 @@ static bool GenerateImportInterpExit(MacroAssembler& masm, const FuncImport& fi,
   unsigned argOffset =
       AlignBytes(StackArgBytes(invokeArgTypes), sizeof(double));
   unsigned argBytes =
-      Max<size_t>(1, fi.funcType().args().length()) * sizeof(Value);
+      std::max<size_t>(1, fi.funcType().args().length()) * sizeof(Value);
   unsigned framePushed =
       StackDecrementForCall(ABIStackAlignment,
                             sizeof(Frame),  // pushed by prologue

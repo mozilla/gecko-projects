@@ -100,8 +100,9 @@ class DCLayer {
  public:
   explicit DCLayer(DCLayerTree* aDCLayerTree);
   ~DCLayer();
-  bool Initialize(wr::DeviceIntSize aSize);
-  bool CreateEGLSurfaceForCompositionSurface(wr::DeviceIntPoint* aOffset);
+  bool Initialize(wr::DeviceIntSize aSize, bool aIsOpaque);
+  bool CreateEGLSurfaceForCompositionSurface(wr::DeviceIntRect aDirtyRect,
+                                             wr::DeviceIntPoint* aOffset);
   void EndDraw();
 
   IDCompositionSurface* GetCompositionSurface() const {
@@ -112,7 +113,7 @@ class DCLayer {
 
  protected:
   RefPtr<IDCompositionSurface> CreateCompositionSurface(wr::DeviceIntSize aSize,
-                                                        bool aUseAlpha);
+                                                        bool aIsOpaque);
   void DestroyEGLSurface();
 
  protected:

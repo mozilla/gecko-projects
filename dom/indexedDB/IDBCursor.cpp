@@ -54,6 +54,8 @@ IDBCursor::IDBCursor(Type aType, BackgroundCursorChild* aBackgroundActor,
   MOZ_ASSERT_IF(aType == Type_Index || aType == Type_IndexKey, mSourceIndex);
   MOZ_ASSERT(mTransaction);
   MOZ_ASSERT(!aKey.IsUnset());
+
+  mTransaction->RegisterCursor(this);
 }
 
 bool IDBCursor::IsLocaleAware() const {
@@ -62,6 +64,8 @@ bool IDBCursor::IsLocaleAware() const {
 
 IDBCursor::~IDBCursor() {
   AssertIsOnOwningThread();
+
+  mTransaction->UnregisterCursor(this);
 
   DropJSObjects();
 
@@ -253,6 +257,8 @@ IDBCursorDirection IDBCursor::GetDirection() const {
       MOZ_CRASH("Bad direction!");
   }
 }
+
+IDBCursor::Type IDBCursor::GetType() const { return mType; }
 
 void IDBCursor::GetSource(OwningIDBObjectStoreOrIDBIndex& aSource) const {
   AssertIsOnOwningThread();
@@ -449,7 +455,8 @@ void IDBCursor::Continue(JSContext* aCx, JS::Handle<JS::Value> aKey,
         IDB_LOG_STRINGIFY(key));
   }
 
-  mBackgroundActor->SendContinueInternal(ContinueParams(key), Key());
+  mBackgroundActor->SendContinueInternal(ContinueParams(key), mKey,
+                                         mPrimaryKey);
 
   mContinueCalled = true;
 }
@@ -555,7 +562,7 @@ void IDBCursor::ContinuePrimaryKey(JSContext* aCx, JS::Handle<JS::Value> aKey,
       IDB_LOG_STRINGIFY(key), IDB_LOG_STRINGIFY(primaryKey));
 
   mBackgroundActor->SendContinueInternal(
-      ContinuePrimaryKeyParams(key, primaryKey), Key());
+      ContinuePrimaryKeyParams(key, primaryKey), mKey, mPrimaryKey);
 
   mContinueCalled = true;
 }
@@ -600,7 +607,8 @@ void IDBCursor::Advance(uint32_t aCount, ErrorResult& aRv) {
         IDB_LOG_STRINGIFY(mSourceIndex), IDB_LOG_STRINGIFY(mDirection), aCount);
   }
 
-  mBackgroundActor->SendContinueInternal(AdvanceParams(aCount), Key());
+  mBackgroundActor->SendContinueInternal(AdvanceParams(aCount), mKey,
+                                         mPrimaryKey);
 
   mContinueCalled = true;
 }
@@ -630,6 +638,8 @@ already_AddRefed<IDBRequest> IDBCursor::Update(JSContext* aCx,
   MOZ_ASSERT(mType == Type_ObjectStore || mType == Type_Index);
   MOZ_ASSERT(!mKey.IsUnset());
   MOZ_ASSERT_IF(mType == Type_Index, !mPrimaryKey.IsUnset());
+
+  mTransaction->InvalidateCursorCaches();
 
   IDBObjectStore* objectStore;
   if (mType == Type_ObjectStore) {
@@ -739,6 +749,8 @@ already_AddRefed<IDBRequest> IDBCursor::Delete(JSContext* aCx,
   MOZ_ASSERT(mType == Type_ObjectStore || mType == Type_Index);
   MOZ_ASSERT(!mKey.IsUnset());
 
+  mTransaction->InvalidateCursorCaches();
+
   IDBObjectStore* const objectStore = mType == Type_ObjectStore
                                           ? mSourceObjectStore.get()
                                           : mSourceIndex->ObjectStore();
@@ -835,6 +847,15 @@ void IDBCursor::Reset(Key&& aKey, Key&& aSortKey, Key&& aPrimaryKey) {
   mPrimaryKey = std::move(aPrimaryKey);
 
   mHaveValue = !mKey.IsUnset();
+}
+
+void IDBCursor::InvalidateCachedResponses() {
+  AssertIsOnOwningThread();
+
+  // TODO: In what case would mBackgroundActor be nullptr?
+  if (mBackgroundActor) {
+    mBackgroundActor->InvalidateCachedResponses();
+  }
 }
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(IDBCursor)

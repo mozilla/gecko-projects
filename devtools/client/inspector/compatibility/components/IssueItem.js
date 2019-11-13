@@ -8,7 +8,22 @@ const Services = require("Services");
 const { PureComponent } = require("devtools/client/shared/vendor/react");
 const dom = require("devtools/client/shared/vendor/react-dom-factories");
 
+loader.lazyRequireGetter(
+  this,
+  "openDocLink",
+  "devtools/client/shared/link",
+  true
+);
+
 const Types = require("../types");
+
+// For test
+loader.lazyRequireGetter(
+  this,
+  "toSnakeCase",
+  "devtools/client/inspector/compatibility/utils/cases",
+  true
+);
 
 class IssueItem extends PureComponent {
   static get propTypes() {
@@ -17,38 +32,92 @@ class IssueItem extends PureComponent {
     };
   }
 
-  _isTesting() {
-    return Services.prefs.getBoolPref("devtools.testing", false);
+  constructor(props) {
+    super(props);
+    this._onLinkClicked = this._onLinkClicked.bind(this);
+  }
+
+  _onLinkClicked(e) {
+    const { url } = this.props;
+
+    e.preventDefault();
+    e.stopPropagation();
+    openDocLink(url);
+  }
+
+  _getTestDataAttributes() {
+    const testDataSet = {};
+
+    if (Services.prefs.getBoolPref("devtools.testing", false)) {
+      for (const [key, value] of Object.entries(this.props)) {
+        const datasetKey = `data-qa-${toSnakeCase(key)}`;
+        testDataSet[datasetKey] = JSON.stringify(value);
+      }
+    }
+
+    return testDataSet;
+  }
+
+  _renderCauses() {
+    const { deprecated, experimental } = this.props;
+
+    const causes = [];
+
+    if (deprecated) {
+      causes.push("deprecated");
+    }
+
+    if (experimental) {
+      causes.push("experimental");
+    }
+
+    return causes.length
+      ? dom.span(
+          { className: "compatibility-issue-item__causes" },
+          `(${causes.join(",")})`
+        )
+      : null;
   }
 
   render() {
-    const { property, type } = this.props;
+    const {
+      deprecated,
+      experimental,
+      property,
+      unsupportedBrowsers,
+      url,
+    } = this.props;
 
-    const qaDatasetForLi = this._isTesting()
-      ? { "data-qa-property": property }
-      : {};
+    const classes = ["compatibility-issue-item"];
+
+    if (deprecated) {
+      classes.push("compatibility-issue-item--deprecated");
+    }
+
+    if (experimental) {
+      classes.push("compatibility-issue-item--experimental");
+    }
+
+    if (unsupportedBrowsers.length) {
+      classes.push("compatibility-issue-item--unsupported");
+    }
 
     return dom.li(
       {
-        key: `${property}:${type}`,
-        ...qaDatasetForLi,
+        className: classes.join(" "),
+        key: property,
+        ...this._getTestDataAttributes(),
       },
-      Object.entries(this.props).map(([key, value]) => {
-        const qaDatasetForField = this._isTesting()
-          ? {
-              "data-qa-key": key,
-              "data-qa-value": JSON.stringify(value),
-            }
-          : {};
-
-        return dom.div(
-          {
-            key,
-            ...qaDatasetForField,
-          },
-          `${key}:${JSON.stringify(value)}`
-        );
-      })
+      dom.a(
+        {
+          className: "compatibility-issue-item__mdn-link devtools-monospace",
+          href: url,
+          title: url,
+          onClick: e => this._onLinkClicked(e),
+        },
+        property
+      ),
+      this._renderCauses()
     );
   }
 }

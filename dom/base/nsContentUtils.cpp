@@ -45,6 +45,8 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
+#include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/BrowsingContextGroup.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/CustomElementRegistry.h"
@@ -114,9 +116,6 @@
 #include "nsAttrName.h"
 #include "nsAttrValue.h"
 #include "nsAttrValueInlines.h"
-#ifdef MOZ_XBL
-#  include "nsBindingManager.h"
-#endif
 #include "nsCanvasFrame.h"
 #include "nsCaret.h"
 #include "nsCCUncollectableMarker.h"
@@ -2149,13 +2148,7 @@ bool nsContentUtils::ThreadsafeIsSystemCaller(JSContext* aCx) {
 bool nsContentUtils::LookupBindingMember(
     JSContext* aCx, nsIContent* aContent, JS::Handle<jsid> aId,
     JS::MutableHandle<JS::PropertyDescriptor> aDesc) {
-#ifdef MOZ_XBL
-  nsXBLBinding* binding = aContent->GetXBLBinding();
-  if (!binding) return true;
-  return binding->LookupMember(aCx, aId, aDesc);
-#else
   return true;
-#endif
 }
 
 // static
@@ -3557,7 +3550,6 @@ void nsContentUtils::GetEventArgNames(int32_t aNameSpaceID, nsAtom* aEventName,
 static const char* gPropertiesFiles[nsContentUtils::PropertiesFile_COUNT] = {
     // Must line up with the enum values in |PropertiesFile| enum.
     "chrome://global/locale/css.properties",
-    "chrome://global/locale/xbl.properties",
     "chrome://global/locale/xul.properties",
     "chrome://global/locale/layout_errors.properties",
     "chrome://global/locale/layout/HtmlForm.properties",
@@ -8578,9 +8570,8 @@ bool nsContentUtils::SerializeNodeToMarkup(nsINode* aRoot,
   // If you pass in a DOCUMENT_NODE, you must pass aDescendentsOnly as true
   MOZ_ASSERT(aDescendentsOnly || aRoot->NodeType() != nsINode::DOCUMENT_NODE);
 
-  nsINode* current = aDescendentsOnly
-                         ? nsNodeUtils::GetFirstChildOfTemplateOrNode(aRoot)
-                         : aRoot;
+  nsINode* current =
+      aDescendentsOnly ? aRoot->GetFirstChildOfTemplateOrNode() : aRoot;
 
   if (!current) {
     return true;
@@ -8595,8 +8586,7 @@ bool nsContentUtils::SerializeNodeToMarkup(nsINode* aRoot,
         Element* elem = current->AsElement();
         StartElement(elem, builder);
         isVoid = IsVoidTag(elem);
-        if (!isVoid &&
-            (next = nsNodeUtils::GetFirstChildOfTemplateOrNode(current))) {
+        if (!isVoid && (next = current->GetFirstChildOfTemplateOrNode())) {
           current = next;
           continue;
         }
@@ -8670,7 +8660,7 @@ bool nsContentUtils::SerializeNodeToMarkup(nsINode* aRoot,
           current->NodeType() == nsINode::DOCUMENT_FRAGMENT_NODE) {
         DocumentFragment* frag = static_cast<DocumentFragment*>(current);
         nsIContent* fragHost = frag->GetHost();
-        if (fragHost && nsNodeUtils::IsTemplateElement(fragHost)) {
+        if (fragHost && fragHost->IsTemplateElement()) {
           current = fragHost;
         }
       }
@@ -9333,7 +9323,11 @@ bool nsContentUtils::AttemptLargeAllocationLoad(nsIHttpChannel* aChannel) {
   }
 
   nsIDocShell* docShell = outer->GetDocShell();
-  if (!docShell->GetIsOnlyToplevelInTabGroup()) {
+  BrowsingContext* browsingContext = docShell->GetBrowsingContext();
+  bool isOnlyToplevelBrowsingContext =
+      !browsingContext->GetParent() &&
+      browsingContext->Group()->Toplevels().Length() == 1;
+  if (!isOnlyToplevelBrowsingContext) {
     outer->SetLargeAllocStatus(LargeAllocStatus::NOT_ONLY_TOPLEVEL_IN_TABGROUP);
     return false;
   }

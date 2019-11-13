@@ -159,15 +159,6 @@ holdings = holdings.sort((a, b) => a - b);
 assertEq(holdings[0], 2);
 assertEq(holdings[1], 4);
 
-// OOM test.
-if ('oomTest' in this) {
-    oomTest(() => new FinalizationGroup(x => 0));
-
-    let token = {};
-    oomTest(() => group.register({}, 1, token));
-    oomTest(() => group.unregister(token));
-}
-
 // Watch object in another global.
 let other = newGlobal({newCompartment: true});
 holdings = [];
@@ -257,32 +248,3 @@ let g6 = new FinalizationGroup(x => {
 g6.register({}, 1);
 gc();
 drainJobQueue();
-
-// Test combinations of arguments in different compartments.
-function ccw() {
-    return evalcx('({})', newGlobal({newCompartment: true}));
-}
-function incrementalGC() {
-    startgc(1);
-    while (gcstate() !== "NotActive") {
-        gcslice(1000);
-    }
-}
-for (let x of [false, true]) {
-    for (let y of [false, true]) {
-        for (let z of [false, true]) {
-            let target = x ? ccw() : {};
-            let holding = x ? ccw() : {};
-            let token = x ? ccw() : {};
-            group.register(target, holding, token);
-            group.unregister(token);
-            group.register(target, holding, token);
-            target = undefined;
-            incrementalGC();
-            holdings = [];
-            group.cleanupSome();
-            assertEq(holdings.length, 1);
-            assertEq(holdings[0], holding);
-        }
-    }
-}

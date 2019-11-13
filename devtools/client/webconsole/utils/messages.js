@@ -116,7 +116,7 @@ function transformPacket(packet) {
   }
 }
 
-/* eslint-disable complexity */
+// eslint-disable-next-line complexity
 function transformConsoleAPICallPacket(packet) {
   const { message } = packet;
 
@@ -244,7 +244,7 @@ function transformConsoleAPICallPacket(packet) {
       }
     : null;
 
-  if (type === "logPointError" || type === "logPoint") {
+  if (frame && (type === "logPointError" || type === "logPoint")) {
     frame.options = { logPoint: true };
   }
 
@@ -265,7 +265,6 @@ function transformConsoleAPICallPacket(packet) {
     chromeContext: message.chromeContext,
   });
 }
-/* eslint-enable complexity */
 
 function transformNavigationMessagePacket(packet) {
   const { url } = packet;

@@ -2002,14 +2002,14 @@ class ASRouterUISurface extends react__WEBPACK_IMPORTED_MODULE_6___default.a.Pur
       event: "IMPRESSION",
       ...extraProps
     });
-  } // If link has a `metric` data attribute send it as part of the `value`
+  } // If link has a `metric` data attribute send it as part of the `event_context`
   // telemetry field which can have arbitrary values.
   // Used for router messages with links as part of the content.
 
 
   sendClick(event) {
     const metric = {
-      value: event.target.dataset.metric,
+      event_context: event.target.dataset.metric,
       // Used for the `source` of the event. Needed to differentiate
       // from other snippet or onboarding events that may occur.
       id: "NEWTAB_FOOTER_BAR_CONTENT"
@@ -3619,6 +3619,7 @@ class Triplets extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponen
   render() {
     const {
       cards,
+      headerId,
       showCardPanel,
       showContent,
       sendUserActionTelemetry
@@ -3628,8 +3629,8 @@ class Triplets extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponen
     }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
       className: "trailheadCardsInner",
       "aria-hidden": !showContent
-    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("h1", {
-      "data-l10n-id": "onboarding-welcome-header"
+    }, headerId && react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("h1", {
+      "data-l10n-id": headerId
     }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
       className: `trailheadCardGrid${showContent ? " show" : ""}`
     }, cards.map(card => react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_templates_OnboardingMessage_OnboardingMessage__WEBPACK_IMPORTED_MODULE_1__["OnboardingCard"], _extends({
@@ -8955,7 +8956,6 @@ var ModalOverlay = __webpack_require__(21);
 
 
 
-
 class DSPrivacyModal_DSPrivacyModal extends external_React_default.a.PureComponent {
   constructor(props) {
     super(props);
@@ -8987,12 +8987,11 @@ class DSPrivacyModal_DSPrivacyModal extends external_React_default.a.PureCompone
       "data-l10n-id": "newtab-privacy-modal-header"
     }), external_React_default.a.createElement("p", {
       "data-l10n-id": "newtab-privacy-modal-paragraph"
-    }), external_React_default.a.createElement(SafeAnchor_SafeAnchor, {
-      onLinkClick: this.onLinkClick,
-      url: "https://www.mozilla.org/en-US/privacy/firefox/"
-    }, external_React_default.a.createElement("span", {
-      "data-l10n-id": "newtab-privacy-modal-link"
-    }))), external_React_default.a.createElement("section", {
+    }), external_React_default.a.createElement("a", {
+      "data-l10n-id": "newtab-privacy-modal-link",
+      onClick: this.onLinkClick,
+      href: "https://www.mozilla.org/en-US/privacy/firefox/"
+    })), external_React_default.a.createElement("section", {
       className: "actions"
     }, external_React_default.a.createElement("button", {
       className: "done",
@@ -14697,12 +14696,14 @@ const helpers = {
   selectInterruptAndTriplets(message = {}, interruptCleared) {
     const hasInterrupt = interruptCleared === true ? false : Boolean(message.content);
     const hasTriplets = Boolean(message.bundle && message.bundle.length);
+    const tripletsHeaderId = message.tripletsHeaderId === undefined ? "onboarding-welcome-header" : message.tripletsHeaderId;
     const UTMTerm = message.utm_term || "";
     return {
       hasTriplets,
       hasInterrupt,
       interrupt: hasInterrupt ? message : null,
       triplets: hasTriplets ? message.bundle : null,
+      tripletsHeaderId,
       UTMTerm
     };
   },
@@ -14726,6 +14727,7 @@ class FirstRun_FirstRun extends external_React_default.a.PureComponent {
       hasTriplets: false,
       interrupt: undefined,
       triplets: undefined,
+      tripletsHeaderId: "",
       isInterruptVisible: false,
       isTripletsContainerVisible: false,
       isTripletsContentVisible: false,
@@ -14754,6 +14756,7 @@ class FirstRun_FirstRun extends external_React_default.a.PureComponent {
         hasInterrupt,
         interrupt,
         triplets,
+        tripletsHeaderId,
         UTMTerm
       } = helpers.selectInterruptAndTriplets(message, interruptCleared);
       return {
@@ -14763,6 +14766,7 @@ class FirstRun_FirstRun extends external_React_default.a.PureComponent {
         hasTriplets,
         interrupt,
         triplets,
+        tripletsHeaderId,
         isInterruptVisible: hasInterrupt,
         isTripletsContainerVisible: hasTriplets,
         isTripletsContentVisible: !(hasInterrupt || !hasTriplets),
@@ -14844,6 +14848,7 @@ class FirstRun_FirstRun extends external_React_default.a.PureComponent {
     const {
       interrupt,
       triplets,
+      tripletsHeaderId,
       isInterruptVisible,
       isTripletsContainerVisible,
       isTripletsContentVisible,
@@ -14866,6 +14871,7 @@ class FirstRun_FirstRun extends external_React_default.a.PureComponent {
     }) : null, hasTriplets ? external_React_default.a.createElement(Triplets["Triplets"], {
       document: props.document,
       cards: triplets,
+      headerId: tripletsHeaderId,
       showCardPanel: isTripletsContainerVisible,
       showContent: isTripletsContentVisible,
       hideContainer: this.closeTriplets,

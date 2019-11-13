@@ -172,12 +172,11 @@ class nsExternalHelperAppService : public nsIExternalHelperAppService,
   nsCOMArray<nsIFile> mTemporaryPrivateFilesList;
 
  private:
-  nsresult DoContentContentProcessHelper(const nsACString& aMimeContentType,
-                                         nsIRequest* aRequest,
-                                         nsIInterfaceRequestor* aContentContext,
-                                         bool aForceSave,
-                                         nsIInterfaceRequestor* aWindowContext,
-                                         nsIStreamListener** aStreamListener);
+  nsresult DoContentContentProcessHelper(
+      const nsACString& aMimeContentType, nsIRequest* aRequest,
+      mozilla::dom::BrowsingContext* aContentContext, bool aForceSave,
+      nsIInterfaceRequestor* aWindowContext,
+      nsIStreamListener** aStreamListener);
 };
 
 /**
@@ -217,7 +216,7 @@ class nsExternalAppHandler final : public nsIStreamListener,
    * indicating why the request is handled by a helper app.
    */
   nsExternalAppHandler(nsIMIMEInfo* aMIMEInfo, const nsACString& aFileExtension,
-                       nsIInterfaceRequestor* aContentContext,
+                       mozilla::dom::BrowsingContext* aBrowsingContext,
                        nsIInterfaceRequestor* aWindowContext,
                        nsExternalHelperAppService* aExtProtSvc,
                        const nsAString& aFilename, uint32_t aReason,
@@ -233,17 +232,7 @@ class nsExternalAppHandler final : public nsIStreamListener,
    */
   void MaybeApplyDecodingForExtension(nsIRequest* request);
 
-  /**
-   * Get the dialog parent. Public for ExternalHelperAppChild::OnStartRequest.
-   */
-  nsIInterfaceRequestor* GetDialogParent() {
-    return mWindowContext ? mWindowContext : mContentContext;
-  }
-
-  void SetContentContext(nsIInterfaceRequestor* context) {
-    MOZ_ASSERT(!mWindowContext);
-    mContentContext = context;
-  }
+  void SetShouldCloseWindow() { mShouldCloseWindow = true; }
 
  protected:
   ~nsExternalAppHandler();
@@ -259,9 +248,9 @@ class nsExternalAppHandler final : public nsIStreamListener,
   nsCOMPtr<nsIMIMEInfo> mMimeInfo;
 
   /**
-   * The dom window associated with this request to handle content.
+   * The BrowsingContext associated with this request to handle content.
    */
-  nsCOMPtr<nsIInterfaceRequestor> mContentContext;
+  RefPtr<mozilla::dom::BrowsingContext> mBrowsingContext;
 
   /**
    * If set, the parent window helper app dialogs and file pickers
@@ -301,6 +290,12 @@ class nsExternalAppHandler final : public nsIStreamListener,
   bool mStopRequestIssued;
 
   bool mIsFileChannel;
+
+  /**
+   * True if the ExternalHelperAppChild told us that we should close the window
+   * if we handle the content as a download.
+   */
+  bool mShouldCloseWindow;
 
   /**
    * One of the REASON_ constants from nsIHelperAppLauncherDialog. Indicates the
@@ -349,6 +344,11 @@ class nsExternalAppHandler final : public nsIStreamListener,
    * Stores the redirect information associated with the channel.
    */
   nsCOMPtr<nsIArray> mRedirects;
+  /**
+   * Get the dialog parent: the parent window that we can attach
+   * a dialog to when prompting the user for a download.
+   */
+  already_AddRefed<nsIInterfaceRequestor> GetDialogParent();
   /**
    * Creates the temporary file for the download and an output stream for it.
    * Upon successful return, both mTempFile and mSaver will be valid.
@@ -402,15 +402,6 @@ class nsExternalAppHandler final : public nsIStreamListener,
   nsresult ContinueSave(nsIFile* aFile);
 
   /**
-   * After we're done prompting the user for any information, if the original
-   * channel had a refresh url associated with it (which might point to a
-   * "thank you for downloading" kind of page, then process that....It is safe
-   * to invoke this method multiple times. We'll clear mOriginalChannel after
-   * it's called and this ensures we won't call it again....
-   */
-  void ProcessAnyRefreshTags();
-
-  /**
    * Notify our nsITransfer object that we are done with the download.  This is
    * always called after the target file has been closed.
    *
@@ -450,8 +441,6 @@ class nsExternalAppHandler final : public nsIStreamListener,
    */
   nsCOMPtr<nsITransfer> mTransfer;
 
-  nsCOMPtr<nsIChannel> mOriginalChannel; /**< in the case of a redirect, this
-                                            will be the pre-redirect channel. */
   nsCOMPtr<nsIHelperAppLauncherDialog> mDialog;
 
   /**

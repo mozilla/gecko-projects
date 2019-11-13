@@ -50,6 +50,16 @@ namespace irregexp {
 constexpr size_t JS_HOWMANY(size_t x, size_t y) { return (x + y - 1) / y; }
 
 constexpr size_t JS_ROUNDUP(size_t x, size_t y) { return JS_HOWMANY(x, y) * y; }
+
+template <class T>
+static constexpr inline T Min(T t1, T t2) {
+  return t1 < t2 ? t1 : t2;
+}
+
+template <class T>
+static constexpr inline T Max(T t1, T t2) {
+  return t1 > t2 ? t1 : t2;
+}
 }  // namespace irregexp
 
 extern RegExpObject* RegExpAlloc(JSContext* cx, NewObjectKind newKind,
@@ -65,6 +75,9 @@ class RegExpObject : public NativeObject {
   static_assert(RegExpObject::FLAGS_SLOT == REGEXP_FLAGS_SLOT,
                 "FLAGS_SLOT values should be in sync with self-hosted JS");
 
+  static RegExpObject* create(JSContext* cx, HandleAtom source,
+                              NewObjectKind newKind);
+
  public:
   static const unsigned RESERVED_SLOTS = 3;
   static const unsigned PRIVATE_SLOT = 3;
@@ -79,6 +92,16 @@ class RegExpObject : public NativeObject {
   template <typename CharT>
   static RegExpObject* create(JSContext* cx, const CharT* chars, size_t length,
                               JS::RegExpFlags flags, NewObjectKind newKind);
+
+  // This variant assumes that the characters have already previously been
+  // syntax checked.
+  static RegExpObject* createSyntaxChecked(JSContext* cx, const char16_t* chars,
+                                           size_t length, JS::RegExpFlags flags,
+                                           NewObjectKind newKind);
+
+  static RegExpObject* createSyntaxChecked(JSContext* cx, HandleAtom source,
+                                           JS::RegExpFlags flags,
+                                           NewObjectKind newKind);
 
   template <typename CharT>
   static RegExpObject* create(JSContext* cx, const CharT* chars, size_t length,

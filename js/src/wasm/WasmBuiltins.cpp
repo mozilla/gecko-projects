@@ -28,6 +28,8 @@
 #include "jit/MacroAssembler.h"
 #include "jit/Simulator.h"
 #include "threading/Mutex.h"
+#include "util/Memory.h"
+#include "util/Poison.h"
 #include "wasm/WasmInstance.h"
 #include "wasm/WasmStubs.h"
 

@@ -50,7 +50,10 @@ class LegacyImplementationProcesses {
         this.descriptors.add(descriptor);
         const target = await descriptor.getTarget();
         if (!target) {
-          console.error("Wasn't able to retrieve the target for", target);
+          console.error(
+            "Wasn't able to retrieve the target for",
+            descriptor.actorID
+          );
           return;
         }
         this.onTargetAvailable(target);
@@ -91,7 +94,10 @@ class LegacyImplementationFrames {
       ) {
         const target = await frame.getTarget();
         if (!target) {
-          console.error("Wasn't able to retrieve the target for", frame);
+          console.error(
+            "Wasn't able to retrieve the target for",
+            frame.actorID
+          );
           continue;
         }
         this.onTargetAvailable(target);
@@ -211,11 +217,12 @@ class TargetList {
     const fissionBrowserToolboxEnabled = Services.prefs.getBoolPref(
       BROWSERTOOLBOX_FISSION_ENABLED
     );
-    const isParentProcessToolboxOrBrowserConsole =
-      this.targetFront.chrome && !this.targetFront.isAddon;
-    return (
-      fissionBrowserToolboxEnabled && isParentProcessToolboxOrBrowserConsole
-    );
+    // For now, only enable additional targets when:
+    // - browser toolbox's fission pref is turned on, and,
+    // - we are in the browser toolbox or the browser console.
+    // These are the main two cases where the top level target is the ParentProcessTargetFront.
+    // Note that it can also happen when debugging remotely the main process.
+    return fissionBrowserToolboxEnabled && this.targetFront.isParentProcess;
   }
 
   // Called whenever a new Target front is available.
@@ -223,10 +230,15 @@ class TargetList {
   // or if it has just been created
   async _onTargetAvailable(targetFront) {
     if (this._targets.has(targetFront)) {
-      console.error(
-        "Target is already registered in the TargetList",
-        targetFront
-      );
+      // The top level target front can be reported via listRemoteFrames as well as listProcesses
+      // in the case of the BrowserToolbox. For any other target, log an error if it is already
+      // registered.
+      if (targetFront != this.targetFront) {
+        console.error(
+          "Target is already registered in the TargetList",
+          targetFront.actorID
+        );
+      }
       return;
     }
 

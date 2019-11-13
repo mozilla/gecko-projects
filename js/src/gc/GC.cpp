@@ -201,6 +201,7 @@
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Unused.h"
 
+#include <algorithm>
 #include <initializer_list>
 #include <string.h>
 #ifndef XP_WIN
@@ -211,7 +212,6 @@
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "jstypes.h"
-#include "jsutil.h"
 
 #include "builtin/FinalizationGroupObject.h"
 #include "debugger/DebugAPI.h"
@@ -230,6 +230,7 @@
 #include "jit/MacroAssembler.h"
 #include "js/SliceBudget.h"
 #include "proxy/DeadObjectProxy.h"
+#include "util/Poison.h"
 #include "util/Windows.h"
 #include "vm/BigIntType.h"
 #include "vm/GeckoProfiler.h"
@@ -2296,8 +2297,8 @@ static size_t CellUpdateBackgroundTaskCount() {
   }
 
   size_t targetTaskCount = HelperThreadState().cpuCount / 2;
-  return Min(Max(targetTaskCount, MinCellUpdateBackgroundTasks),
-             MaxCellUpdateBackgroundTasks);
+  return std::min(std::max(targetTaskCount, MinCellUpdateBackgroundTasks),
+                  MaxCellUpdateBackgroundTasks);
 }
 
 static bool CanUpdateKindInBackground(AllocKind kind) {
@@ -5910,7 +5911,7 @@ static const size_t MaxWeakCacheSweepTasks = 8;
 
 static size_t WeakCacheSweepTaskCount() {
   size_t targetTaskCount = HelperThreadState().cpuCount;
-  return Min(targetTaskCount, MaxWeakCacheSweepTasks);
+  return std::min(targetTaskCount, MaxWeakCacheSweepTasks);
 }
 
 IncrementalProgress GCRuntime::sweepWeakCaches(JSFreeOp* fop,
@@ -6965,21 +6966,6 @@ inline void GCRuntime::checkZoneIsScheduled(Zone* zone, JS::GCReason reason,
 #endif
 }
 
-static double LinearInterpolate(double x, double x0, double y0, double x1,
-                                double y1) {
-  MOZ_ASSERT(x0 < x1);
-
-  if (x < x0) {
-    return y0;
-  }
-
-  if (x < x1) {
-    return y0 + (y1 - y0) * ((x - x0) / (x1 - x0));
-  }
-
-  return y1;
-}
-
 GCRuntime::IncrementalResult GCRuntime::budgetIncrementalGC(
     bool nonincrementalByAPI, JS::GCReason reason, SliceBudget& budget) {
   if (nonincrementalByAPI) {
@@ -7066,6 +7052,25 @@ GCRuntime::IncrementalResult GCRuntime::budgetIncrementalGC(
     return resetIncrementalGC(resetReason);
   }
 
+  return IncrementalResult::Ok;
+}
+
+static double LinearInterpolate(double x, double x0, double y0, double x1,
+                                double y1) {
+  MOZ_ASSERT(x0 < x1);
+
+  if (x < x0) {
+    return y0;
+  }
+
+  if (x < x1) {
+    return y0 + (y1 - y0) * ((x - x0) / (x1 - x0));
+  }
+
+  return y1;
+}
+
+void GCRuntime::maybeIncreaseSliceBudget(SliceBudget& budget) {
 #ifndef JS_MORE_DETERMINISTIC
   // Increase time budget for long-running incremental collections. Enforce a
   // minimum time budget that increases linearly with time/slice count up to a
@@ -7092,8 +7097,6 @@ GCRuntime::IncrementalResult GCRuntime::budgetIncrementalGC(
     }
   }
 #endif  // JS_MORE_DETERMINISTIC
-
-  return IncrementalResult::Ok;
 }
 
 static void ScheduleZones(GCRuntime* gc) {
@@ -7189,6 +7192,10 @@ MOZ_NEVER_INLINE GCRuntime::IncrementalResult GCRuntime::gcCycle(
 
   // Note that GC callbacks are allowed to re-enter GC.
   AutoCallGCCallbacks callCallbacks(*this);
+
+  // Increase slice budget for long running collections before it is recorded by
+  // AutoGCSlice.
+  maybeIncreaseSliceBudget(budget);
 
   ScheduleZones(this);
   gcstats::AutoGCSlice agc(stats(), scanZonesBeforeGC(),
@@ -7714,6 +7721,13 @@ bool GCRuntime::gcIfRequested() {
 }
 
 void js::gc::FinishGC(JSContext* cx, JS::GCReason reason) {
+  // Calling this when GC is suppressed won't have any effect.
+  MOZ_ASSERT(!cx->suppressGC);
+
+  // GC callbacks may run arbitrary code, including JS. Check this regardless of
+  // whether we GC for this invocation.
+  MOZ_ASSERT(cx->isNurseryAllocAllowed());
+
   if (JS::IsIncrementalGCInProgress(cx)) {
     JS::PrepareForIncrementalGC(cx);
     JS::FinishIncrementalGC(cx, reason);

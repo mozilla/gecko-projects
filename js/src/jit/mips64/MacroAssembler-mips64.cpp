@@ -16,6 +16,8 @@
 #include "jit/mips64/Simulator-mips64.h"
 #include "jit/MoveEmitter.h"
 #include "jit/SharedICRegisters.h"
+#include "util/Memory.h"
+#include "vm/JitActivation.h"  // js::jit::JitActivation
 
 #include "jit/MacroAssembler-inl.h"
 

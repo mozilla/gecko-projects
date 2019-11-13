@@ -120,7 +120,7 @@
   "network.tcp.tcp_fastopen_http_stalls_timeout"
 
 #define ACCEPT_HEADER_NAVIGATION \
-  "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+  "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
 #define ACCEPT_HEADER_IMAGE "image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5"
 #define ACCEPT_HEADER_STYLE "text/css,*/*;q=0.1"
 #define ACCEPT_HEADER_ALL "*/*"
@@ -442,9 +442,6 @@ nsresult nsHttpHandler::Init() {
   }
   mIOService = new nsMainThreadPtrHolder<nsIIOService>(
       "nsHttpHandler::mIOService", service);
-
-  mBackgroundThread = new mozilla::LazyIdleThread(
-      10000, NS_LITERAL_CSTRING("HTTP Handler Background"));
 
   if (IsNeckoChild()) NeckoChild::InitNeckoChild();
 
@@ -2363,15 +2360,9 @@ void nsHttpHandler::MaybeEnableSpeculativeConnect() {
     return;
   }
 
-  if (!mBackgroundThread) {
-    NS_WARNING(
-        "nsHttpHandler::MaybeEnableSpeculativeConnect() no background thread");
-    return;
-  }
-
   net_EnsurePSMInit();
 
-  mBackgroundThread->Dispatch(
+  NS_DispatchBackgroundTask(
       NS_NewRunnableFunction("CanEnableSpeculativeConnect", [] {
         gHttpHandler->mSpeculativeConnectEnabled =
             CanEnableSpeculativeConnect();

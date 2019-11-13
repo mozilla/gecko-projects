@@ -862,6 +862,13 @@ static void AddNonAnimatingTransformLikePropertiesStyles(
   };
 
   const nsStyleDisplay* display = aFrame->StyleDisplay();
+  // A simple optimization. We don't need to send offset-* properties if we
+  // don't have offset-path and offset-position.
+  // FIXME: Bug 1559232: Add offset-position here.
+  bool hasMotion =
+      !display->mOffsetPath.IsNone() ||
+      !aNonAnimatingProperties.HasProperty(eCSSProperty_offset_path);
+
   for (nsCSSPropertyID id : aNonAnimatingProperties) {
     switch (id) {
       case eCSSProperty_transform:
@@ -895,20 +902,20 @@ static void AddNonAnimatingTransformLikePropertiesStyles(
         }
         break;
       case eCSSProperty_offset_distance:
-        if (!display->mOffsetDistance.IsDefinitelyZero()) {
+        if (hasMotion && !display->mOffsetDistance.IsDefinitelyZero()) {
           appendFakeAnimation(id, display->mOffsetDistance);
         }
         break;
       case eCSSProperty_offset_rotate:
-        if (!display->mOffsetRotate.auto_ ||
-            display->mOffsetRotate.angle.ToDegrees() != 0.0) {
+        if (hasMotion && (!display->mOffsetRotate.auto_ ||
+                          display->mOffsetRotate.angle.ToDegrees() != 0.0)) {
           const StyleOffsetRotate& rotate = display->mOffsetRotate;
           appendFakeAnimation(
               id, OffsetRotate(MakeCSSAngle(rotate.angle), rotate.auto_));
         }
         break;
       case eCSSProperty_offset_anchor:
-        if (!display->mOffsetAnchor.IsAuto()) {
+        if (hasMotion && !display->mOffsetAnchor.IsAuto()) {
           const StylePosition& position = display->mOffsetAnchor.AsPosition();
           appendFakeAnimation(id, OffsetAnchor(AnchorPosition(
                                       position.horizontal, position.vertical)));
@@ -979,6 +986,12 @@ static void AddAnimationsForDisplayItem(nsIFrame* aFrame,
   nsCSSPropertyIDSet nonAnimatingProperties =
       nsCSSPropertyIDSet::TransformLikeProperties();
   for (auto iter = compositorAnimations.iter(); !iter.done(); iter.next()) {
+    // Note: We can skip offset-* if there is no offset-path/offset-position
+    // animations and styles. However, it should be fine and may be better to
+    // send these information to the compositor because 1) they are simple data
+    // structure, 2) AddAnimationsForProperty() marks these animations as
+    // running on the composiror, so CanThrottle() returns true for them, and
+    // we avoid running these animations on the main thread.
     bool added =
         AddAnimationsForProperty(aFrame, effects, iter.get().value(), data,
                                  iter.get().key(), aSendFlag, aAnimationInfo);
@@ -1508,7 +1521,7 @@ void nsDisplayListBuilder::SetGlassDisplayItem(nsDisplayItem* aItem) {
 
 bool nsDisplayListBuilder::NeedToForceTransparentSurfaceForItem(
     nsDisplayItem* aItem) {
-  return aItem == mGlassDisplayItem || aItem->ClearsBackground();
+  return aItem == mGlassDisplayItem;
 }
 
 AnimatedGeometryRoot* nsDisplayListBuilder::WrapAGRForFrame(
@@ -2586,7 +2599,6 @@ bool nsDisplayListBuilder::AddToWillChangeBudget(nsIFrame* aFrame,
 
   if (aFrame->MayHaveWillChangeBudget()) {
     // The frame is already in the will-change budget.
-    MOZ_ASSERT(mFrameWillChangeBudgets.Contains(aFrame));
     return true;
   }
 
@@ -2647,7 +2659,6 @@ void nsDisplayListBuilder::ClearWillChangeBudgetStatus(nsIFrame* aFrame) {
   MOZ_ASSERT(IsForPainting());
 
   if (!aFrame->MayHaveWillChangeBudget()) {
-    MOZ_ASSERT(!mFrameWillChangeBudgets.Contains(aFrame));
     return;
   }
 
@@ -4304,12 +4315,6 @@ bool nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
   }
 
   if (isThemed) {
-    nsITheme* theme = presContext->GetTheme();
-    if (theme->NeedToClearBackgroundBehindWidget(
-            aFrame, aFrame->StyleDisplay()->mAppearance) &&
-        aBuilder->IsInChromeDocumentOrPopup() && !aBuilder->IsInTransform()) {
-      bgItemList.AppendNewToTop<nsDisplayClearBackground>(aBuilder, aFrame);
-    }
     if (aSecondaryReferenceFrame) {
       nsDisplayTableThemedBackground* bgItem =
           MakeDisplayItem<nsDisplayTableThemedBackground>(
@@ -5423,48 +5428,6 @@ void nsDisplayBackgroundColor::WriteDebugInfo(std::stringstream& aStream) {
   aStream << " (rgba " << mColor.r << "," << mColor.g << "," << mColor.b << ","
           << mColor.a << ")";
   aStream << " backgroundRect" << mBackgroundRect;
-}
-
-already_AddRefed<Layer> nsDisplayClearBackground::BuildLayer(
-    nsDisplayListBuilder* aBuilder, LayerManager* aManager,
-    const ContainerLayerParameters& aParameters) {
-  RefPtr<ColorLayer> layer = static_cast<ColorLayer*>(
-      aManager->GetLayerBuilder()->GetLeafLayerFor(aBuilder, this));
-  if (!layer) {
-    layer = aManager->CreateColorLayer();
-    if (!layer) {
-      return nullptr;
-    }
-  }
-  layer->SetColor(Color());
-  layer->SetMixBlendMode(gfx::CompositionOp::OP_SOURCE);
-
-  bool snap;
-  nsRect bounds = GetBounds(aBuilder, &snap);
-  int32_t appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
-  layer->SetBounds(bounds.ToNearestPixels(appUnitsPerDevPixel));  // XXX Do we
-                                                                  // need to
-                                                                  // respect the
-                                                                  // parent
-                                                                  // layer's
-                                                                  // scale here?
-
-  return layer.forget();
-}
-
-bool nsDisplayClearBackground::CreateWebRenderCommands(
-    mozilla::wr::DisplayListBuilder& aBuilder,
-    mozilla::wr::IpcResourceUpdateQueue& aResources,
-    const StackingContextHelper& aSc,
-    mozilla::layers::RenderRootStateManager* aManager,
-    nsDisplayListBuilder* aDisplayListBuilder) {
-  LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(
-      nsRect(ToReferenceFrame(), mFrame->GetSize()),
-      mFrame->PresContext()->AppUnitsPerDevPixel());
-
-  aBuilder.PushClearRect(wr::ToLayoutRect(bounds));
-
-  return true;
 }
 
 nsRect nsDisplayOutline::GetBounds(nsDisplayListBuilder* aBuilder,
@@ -8499,14 +8462,6 @@ auto nsDisplayTransform::ShouldPrerenderTransformedContent(
   // we are already rendering the entire content.
   nsRect overflow = aFrame->GetVisualOverflowRectRelativeToSelf();
   if (aDirtyRect->Contains(overflow)) {
-    return FullPrerender;
-  }
-
-  // If painting is for WebRender, allow full prerender even for large size
-  // frame. With WebRender, memory usage increase for async animation is limited
-  // compared to non-WebRender case.
-  if (aBuilder->IsPaintingForWebRender()) {
-    *aDirtyRect = overflow;
     return FullPrerender;
   }
 

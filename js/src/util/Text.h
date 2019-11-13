@@ -14,13 +14,13 @@
 #include "mozilla/TextUtils.h"
 #include "mozilla/Utf8.h"
 
+#include <algorithm>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string>
 #include <type_traits>
 
-#include "jsutil.h"
 #include "NamespaceImports.h"
 
 #include "js/Utility.h"
@@ -77,7 +77,7 @@ inline bool EqualChars(const Char1* s1, const Char2* s2, size_t len) {
 template <typename Char1, typename Char2>
 inline int32_t CompareChars(const Char1* s1, size_t len1, const Char2* s2,
                             size_t len2) {
-  size_t n = Min(len1, len2);
+  size_t n = std::min(len1, len2);
   for (size_t i = 0; i < n; i++) {
     if (int32_t cmp = s1[i] - s2[i]) {
       return cmp;

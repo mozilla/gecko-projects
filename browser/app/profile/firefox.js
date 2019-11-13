@@ -404,12 +404,7 @@ pref("permissions.default.geo", 0);
 pref("permissions.default.desktop-notification", 0);
 pref("permissions.default.shortcuts", 0);
 
-#ifdef EARLY_BETA_OR_EARLIER
-  pref("permissions.desktop-notification.postPrompt.enabled", true);
-#else
-  pref("permissions.desktop-notification.postPrompt.enabled", false);
-#endif
-
+pref("permissions.desktop-notification.postPrompt.enabled", true);
 pref("permissions.desktop-notification.notNow.enabled", false);
 
 pref("permissions.fullscreen.allowed", false);
@@ -421,6 +416,12 @@ pref("permissions.postPrompt.animate", true);
   pref("permissions.eventTelemetry.enabled", true);
 #else
   pref("permissions.eventTelemetry.enabled", false);
+#endif
+
+#ifdef NIGHTLY_BUILD
+  pref("permissions.delegation.enable", true);
+#else
+  pref("permissions.delegation.enable", false);
 #endif
 
 // handle links targeting new windows
@@ -1129,11 +1130,7 @@ pref("dom.ipc.shims.enabledWarnings", false);
 #endif
 
 #if defined(XP_OPENBSD) && defined(MOZ_SANDBOX)
-  // default pledge strings for the main & content processes, cf bug 1457092
-  // broad list for now, has to be refined over time
-  pref("security.sandbox.pledge.main", "stdio rpath wpath cpath inet proc exec prot_exec flock ps sendfd recvfd dns vminfo tty drm unix fattr getpw mcast");
   pref("security.sandbox.content.level", 1);
-  pref("security.sandbox.pledge.content", "stdio rpath wpath cpath inet recvfd sendfd prot_exec unix drm ps");
 #endif
 
 #if defined(MOZ_SANDBOX)
@@ -2132,18 +2129,8 @@ pref("devtools.serviceWorkers.testing.enabled", false);
 // Enable the Network Monitor
 pref("devtools.netmonitor.enabled", true);
 
-// Enable Network Search in Nightly builds.
-#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
-  pref("devtools.netmonitor.features.search", true);
-#else
-  pref("devtools.netmonitor.features.search", false);
-#endif
-
-#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
-  pref("devtools.netmonitor.features.requestBlocking", true);
-#else
-  pref("devtools.netmonitor.features.requestBlocking", false);
-#endif
+pref("devtools.netmonitor.features.search", true);
+pref("devtools.netmonitor.features.requestBlocking", true);
 
 // Enable the Application panel
 pref("devtools.application.enabled", false);
@@ -2181,12 +2168,7 @@ pref("devtools.netmonitor.har.forceExport", false);
 pref("devtools.netmonitor.har.pageLoadedTimeout", 1500);
 pref("devtools.netmonitor.har.enableAutoExportToFile", false);
 
-// Enable WebSocket monitoring in Nightly and DevEdition/Beta builds.
-#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
-  pref("devtools.netmonitor.features.webSockets", true);
-#else
-  pref("devtools.netmonitor.features.webSockets", false);
-#endif
+pref("devtools.netmonitor.features.webSockets", true);
 
 // Enable the Storage Inspector
 pref("devtools.storage.enabled", true);

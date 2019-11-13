@@ -17,6 +17,7 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/TaggedAnonymousMemory.h"
 
+#include <algorithm>
 #include <string.h>
 #ifndef XP_WIN
 #  include <sys/mman.h>
@@ -29,7 +30,6 @@
 #include "jsfriendapi.h"
 #include "jsnum.h"
 #include "jstypes.h"
-#include "jsutil.h"
 
 #include "builtin/Array.h"
 #include "builtin/DataViewObject.h"
@@ -722,8 +722,8 @@ static bool CreateSpecificWasmBuffer(
     // want "a lot of memory". Maintain the invariant that
     // initialSize <= clampedMaxSize.
     static const uint32_t OneGiB = 1 << 30;
-    uint32_t clamp = Max(OneGiB, initialSize);
-    clampedMaxSize = Some(Min(clamp, *clampedMaxSize));
+    uint32_t clamp = std::max(OneGiB, initialSize);
+    clampedMaxSize = Some(std::min(clamp, *clampedMaxSize));
 #endif
   }
 

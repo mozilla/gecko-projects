@@ -1501,10 +1501,10 @@
   value: false
   mirror: always
 
-# Whether or not formData event is enabled.
+# Enable formData event
 - name: dom.formdata.event.enabled
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 # Support @autocomplete values for form autofill feature.
@@ -1974,13 +1974,6 @@
   value: false
   mirror: always
 
-# WHATWG promise rejection events. See
-# https://html.spec.whatwg.org/multipage/webappapis.html#promiserejectionevent
-- name: dom.promise_rejection_events.enabled
-  type: RelaxedAtomicBool
-  value: true
-  mirror: always
-
 # This currently only affects XHTML. For XUL the cache is always allowed.
 - name: dom.prototype_document_cache.enabled
   type: bool
@@ -2147,7 +2140,7 @@
 
 - name: dom.security.respect_document_nosniff
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 # Expose the 'policy' attribute in document and HTMLIFrameElement
@@ -2627,6 +2620,12 @@
   value: false
   mirror: always
 
+# Is support for elementInternals enabled?
+- name: dom.webcomponents.elementInternals.enabled
+  type: bool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: always
+
 # Is support for the Web GPU API enabled?
 - name: dom.webgpu.enable
   type: RelaxedAtomicBool
@@ -2662,7 +2661,7 @@
 
 - name: dom.webnotifications.requireuserinteraction
   type: RelaxedAtomicBool
-  value: @IS_EARLY_BETA_OR_EARLIER@
+  value: true
   mirror: always
 
 - name: dom.webnotifications.requireinteraction.enabled
@@ -3625,9 +3624,27 @@
   value: false
   mirror: once
 
+- name: gfx.webrender.compositor.max_update_rects
+  type: uint32_t
+#ifdef XP_WIN
+  value: 1
+#else
+  value: 0
+#endif
+  mirror: once
+
 - name: gfx.webrender.max-partial-present-rects
   type: uint32_t
   value: 0
+  mirror: once
+
+- name: gfx.webrender.enable-gpu-markers
+  type: bool
+#ifdef DEBUG
+  value: true
+#else
+  value: false
+#endif
   mirror: once
 
 #ifdef NIGHTLY_BUILD
@@ -6452,6 +6469,13 @@
   value: 1500
   mirror: always
 
+# Mouse wheel scroll position is determined by GetMessagePos rather than
+# LPARAM msg value
+- name: mousewheel.ignore_cursor_position_in_lparam
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 #---------------------------------------------------------------------------
 # Prefs starting with "network."
 #---------------------------------------------------------------------------
@@ -6487,6 +6511,13 @@
 # - true: They are allow to present http auth. dialog
 # - false: They are not allow to present http auth. dialog.
 - name: network.auth.non-web-content-triggered-resources-http-auth-allow
+  type: bool
+  value: false
+  mirror: always
+
+# Whether to show anti-spoof confirmation prompts when navigating to a url
+# with userinfo
+- name: network.auth.confirmAuth.enabled
   type: bool
   value: false
   mirror: always
@@ -6778,6 +6809,12 @@
   value: 30000
   mirror: always
 
+# Whether to send the Accept-Language header for TRR requests
+- name: network.trr.send_accept-language_headers
+  type: bool
+  value: false
+  mirror: always
+
 # Allow the network changed event to get sent when a network topology or setup
 # change is noticed while running.
 - name: network.notify.changed
@@ -6800,20 +6837,6 @@
   type: RelaxedAtomicBool
   value: true
   mirror: always
-
-# IP addresses that are used by netlink service to check whether default route
-# is used for outgoing traffic. They are used just to check routing rules,
-# no packets are sent to those hosts. Initially, addresses of host
-# detectportal.firefox.com were used but they don't necessarily need to be
-# updated when addresses of this host change.
-- name: network.netlink.route.check.IPv4
-  type: String
-  value: "23.219.91.27"
-  mirror: never
-- name: network.netlink.route.check.IPv6
-  type: String
-  value: "2a02:26f0:40::17db:5b1b"
-  mirror: never
 
 #---------------------------------------------------------------------------
 # Prefs starting with "nglayout."

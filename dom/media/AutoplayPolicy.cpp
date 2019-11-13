@@ -93,27 +93,33 @@ static bool IsWindowAllowedToPlay(nsPIDOMWindowInner* aWindow) {
     return true;
   }
 
-  if (!aWindow->GetExtantDoc()) {
+  RefPtr<BrowsingContext> topLevelBC = aWindow->GetBrowsingContext()->Top();
+  if (topLevelBC->HasBeenUserGestureActivated()) {
+    AUTOPLAY_LOG(
+        "Allow autoplay as top-level context has been activated by user "
+        "gesture.");
+    return true;
+  }
+
+  Document* currentDoc = aWindow->GetExtantDoc();
+  if (!currentDoc) {
     return false;
   }
 
-  Document* approver = ApproverDocOf(*aWindow->GetExtantDoc());
+  bool isTopLevelContent = !aWindow->GetBrowsingContext()->GetParent();
+  if (currentDoc->MediaDocumentKind() == Document::MediaDocumentKind::Video &&
+      isTopLevelContent) {
+    AUTOPLAY_LOG("Allow top-level video document to autoplay.");
+    return true;
+  }
+
+  Document* approver = ApproverDocOf(*currentDoc);
   if (!approver) {
     return false;
   }
 
-  if (approver->HasBeenUserGestureActivated()) {
-    AUTOPLAY_LOG("Allow autoplay as document activated by user gesture.");
-    return true;
-  }
-
   if (approver->IsExtensionPage()) {
     AUTOPLAY_LOG("Allow autoplay as in extension document.");
-    return true;
-  }
-
-  if (approver->MediaDocumentKind() == Document::MediaDocumentKind::Video) {
-    AUTOPLAY_LOG("Allow video document to autoplay.");
     return true;
   }
 

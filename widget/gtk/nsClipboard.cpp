@@ -26,6 +26,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TimeStamp.h"
+#include "gfxPlatformGtk.h"
 
 #include "imgIContainer.h"
 
@@ -90,11 +91,7 @@ nsClipboard::~nsClipboard() {
 NS_IMPL_ISUPPORTS(nsClipboard, nsIClipboard, nsIObserver)
 
 nsresult nsClipboard::Init(void) {
-  GdkDisplay* display = gdk_display_get_default();
-
-  // Create a nsRetrievalContext. If there's no default display
-  // create the X11 one as a fallback.
-  if (!display || GDK_IS_X11_DISPLAY(display)) {
+  if (gfxPlatformGtk::GetPlatform()->IsX11Display()) {
     mContext = new nsRetrievalContextX11();
 #if defined(MOZ_WAYLAND)
   } else {
@@ -105,23 +102,28 @@ nsresult nsClipboard::Init(void) {
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
   if (os) {
+    os->AddObserver(this, "quit-application", false);
     os->AddObserver(this, "xpcom-shutdown", false);
   }
 
   return NS_OK;
 }
 
+nsresult nsClipboard::Store(void) {
+  LOGCLIP(("nsClipboard::Store\n"));
+
+  if (mGlobalTransferable) {
+    GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+    gtk_clipboard_store(clipboard);
+  }
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 nsClipboard::Observe(nsISupports* aSubject, const char* aTopic,
                      const char16_t* aData) {
-  // Save global clipboard content to CLIPBOARD_MANAGER.
-  // gtk_clipboard_store() can run an event loop, so call from a dedicated
-  // runnable.
-  return SystemGroup::Dispatch(
-      TaskCategory::Other,
-      NS_NewRunnableFunction("gtk_clipboard_store()", []() {
-        gtk_clipboard_store(gtk_clipboard_get(GDK_SELECTION_CLIPBOARD));
-      }));
+  Store();
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -140,9 +142,6 @@ nsClipboard::SetData(nsITransferable* aTransferable, nsIClipboardOwner* aOwner,
   LOGCLIP(("nsClipboard::SetData (%s)\n",
            aWhichClipboard == kSelectionClipboard ? "primary" : "clipboard"));
 
-  // Clear out the clipboard in order to set the new data
-  EmptyClipboard(aWhichClipboard);
-
   // List of suported targets
   GtkTargetList* list = gtk_target_list_new(nullptr, 0);
 
@@ -151,7 +150,7 @@ nsClipboard::SetData(nsITransferable* aTransferable, nsIClipboardOwner* aOwner,
   nsresult rv = aTransferable->FlavorsTransferableCanExport(flavors);
   if (NS_FAILED(rv)) {
     LOGCLIP(("    FlavorsTransferableCanExport failed!\n"));
-    return rv;
+    // Fall through.  |gtkTargets| will be null below.
   }
 
   // Add all the flavors to this widget's supported type.
@@ -212,6 +211,9 @@ nsClipboard::SetData(nsITransferable* aTransferable, nsIClipboardOwner* aOwner,
     rv = NS_OK;
   } else {
     LOGCLIP(("    gtk_clipboard_set_with_data() failed!\n"));
+    // Clear references to the any old data and let GTK know that it is no
+    // longer available.
+    EmptyClipboard(aWhichClipboard);
     rv = NS_ERROR_FAILURE;
   }
 

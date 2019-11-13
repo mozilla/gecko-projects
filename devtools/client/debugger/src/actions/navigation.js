@@ -36,7 +36,6 @@ export function willNavigate(event: Object) {
     clearWasmStates();
     clearDocuments();
     parser.clear();
-    client.detachWorkers();
     const thread = getMainThread(getState());
 
     dispatch({
@@ -78,7 +77,8 @@ export function connect(
  * @static
  */
 export function navigated() {
-  return async function({ panel }: ThunkArgs) {
+  return async function({ dispatch, panel }: ThunkArgs) {
+    await dispatch(updateThreads());
     panel.emit("reloaded");
   };
 }

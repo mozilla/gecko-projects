@@ -60,8 +60,7 @@
   content: "";
   display: -moz-box;
   -moz-appearance: toolbox;
-  height: 1px;
-  margin-top: -1px;
+  height: 0;
   opacity: 0.001;
 }
 
@@ -72,11 +71,6 @@
 #navigator-toolbox toolbarbutton:-moz-lwtheme {
   color: inherit;
   text-shadow: inherit;
-}
-
-:root {
-  -moz-appearance: none;
-  background-color: #eeeeee;
 }
 
 /** Begin titlebar **/
@@ -493,9 +487,16 @@
 #sidebar-box {
   /* Default font size is 11px on mac, so this is 12px */
   font-size: 1.0909rem;
+  --sidebar-background-color: -moz-mac-source-list;
 }
 
-#sidebar-box:not([lwt-sidebar]) {
+/* Give the sidebar a vibrant -moz-appearance. Only do this when no lwtheme is
+ * in use, because vibrant -moz-appearance values only work if there is no
+ * background-color rendered behind the element, and we have :root:-moz-lwtheme
+ * rules which set -moz-appearance: none and an opaque background color on the
+ * root element. That background color would interfere with the vibrancy.
+ * See bug 1594132 for fixing this. */
+#sidebar-box:not(:-moz-lwtheme) {
   -moz-appearance: -moz-mac-source-list;
   -moz-font-smoothing-background-color: -moz-mac-source-list;
 }
@@ -612,7 +613,9 @@
 .tab-drop-indicator {
   list-style-image: url(chrome://browser/skin/tabbrowser/tabDragIndicator.png);
   margin-top: -2px;
-  z-index: 3;
+  /* The z-index needs to be big enough to trump other positioned UI pieces
+     that we want to overlay. The expanded urlbar uses 3. */
+  z-index: 4;
 }
 
 @media (min-resolution: 2dppx) {

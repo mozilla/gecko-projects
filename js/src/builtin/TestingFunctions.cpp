@@ -246,6 +246,15 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
+#ifdef XP_WIN
+  value = BooleanValue(true);
+#else
+  value = BooleanValue(false);
+#endif
+  if (!JS_SetProperty(cx, info, "windows", value)) {
+    return false;
+  }
+
 #ifdef JS_CODEGEN_ARM64
   value = BooleanValue(true);
 #else
@@ -2156,6 +2165,12 @@ bool RunIterativeFailureTest(JSContext* cx,
 #  ifdef JS_GC_ZEAL
   JS_SetGCZeal(cx, 0, JS_DEFAULT_ZEAL_FREQ);
 #  endif
+
+  // Delazify the function here if necessary so we don't end up testing that.
+  if (params.testFunction->isInterpreted() &&
+      !JSFunction::getOrCreateScript(cx, params.testFunction)) {
+    return false;
+  }
 
   size_t compartmentCount = CountCompartments(cx);
 

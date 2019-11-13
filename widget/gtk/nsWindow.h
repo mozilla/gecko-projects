@@ -300,7 +300,7 @@ class nsWindow final : public nsBaseWidget {
                                const mozilla::WidgetKeyboardEvent& aEvent,
                                nsTArray<mozilla::CommandInt>& aCommands,
                                uint32_t aGeckoKeyCode, uint32_t aNativeKeyCode);
-  virtual void GetEditCommands(
+  virtual bool GetEditCommands(
       NativeKeyBindingsType aType, const mozilla::WidgetKeyboardEvent& aEvent,
       nsTArray<mozilla::CommandInt>& aCommands) override;
 
@@ -448,6 +448,8 @@ class nsWindow final : public nsBaseWidget {
   bool mNeedsUpdatingEGLSurface;
   bool mCompositorInitiallyPaused;
 #endif
+  bool mWindowScaleFactorChanged;
+  int mWindowScaleFactor;
 
  private:
   void DestroyChildWindows();
@@ -622,6 +624,8 @@ class nsWindow final : public nsBaseWidget {
   void CleanLayerManagerRecursive();
 
   virtual int32_t RoundsWidgetCoordinatesTo() override;
+
+  void UpdateMozWindowActive();
 
   void ForceTitlebarRedraw();
 

@@ -13,13 +13,12 @@
 
 #include <stddef.h>
 
-#include "jsutil.h"
-
 #include "gc/DeletePolicy.h"
 #include "gc/Heap.h"
 #include "gc/Policy.h"
 #include "js/UbiNode.h"
 #include "js/UniquePtr.h"
+#include "util/Poison.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/JSObject.h"
 #include "vm/Xdr.h"

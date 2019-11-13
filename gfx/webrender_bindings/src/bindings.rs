@@ -1295,7 +1295,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 enable_picture_caching: bool,
                                 start_debug_server: bool,
                                 gl_context: *mut c_void,
-                                surface_is_y_flipped: bool,
+                                surface_origin_is_top_left: bool,
                                 program_cache: Option<&mut WrProgramCache>,
                                 shaders: Option<&mut WrShaders>,
                                 thread_pool: *mut WrThreadPool,
@@ -1303,10 +1303,12 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 enclosing_size_of_op: VoidPtrToSizeFn,
                                 document_id: u32,
                                 compositor: *mut c_void,
+                                max_update_rects: usize,
                                 max_partial_present_rects: usize,
                                 out_handle: &mut *mut DocumentHandle,
                                 out_renderer: &mut *mut Renderer,
-                                out_max_texture_size: *mut i32)
+                                out_max_texture_size: *mut i32,
+                                enable_gpu_markers: bool)
                                 -> bool {
     assert!(unsafe { is_in_render_thread() });
 
@@ -1358,7 +1360,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
 
     let compositor_config = if compositor != ptr::null_mut() {
         CompositorConfig::Native {
-            max_update_rects: 0,
+            max_update_rects,
             compositor: Box::new(WrCompositor(compositor)),
         }
     } else {
@@ -1369,6 +1371,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
 
     let opts = RendererOptions {
         enable_aa: true,
+        force_subpixel_aa: false,
         enable_subpixel_aa: cfg!(not(target_os = "android")),
         support_low_priority_transactions,
         allow_texture_swizzling,
@@ -1401,8 +1404,9 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         enable_picture_caching,
         allow_pixel_local_storage_support: false,
         start_debug_server,
-        surface_is_y_flipped,
+        surface_origin_is_top_left,
         compositor_config,
+        enable_gpu_markers,
         ..Default::default()
     };
 

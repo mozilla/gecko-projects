@@ -1016,18 +1016,29 @@ raptor-jetstream2-firefox-profiling:
 browsertime-tp6-1:
     description: "Raptor (browsertime) tp6-1"
     raptor-test: raptor-tp6-1
-    run-on-projects: ['integration', 'try']
-    apps: ["firefox"]
-    variants: ["fission"]
-    cold:
+    run-on-projects: ['mozilla-central','integration', 'try']
+    apps: ['firefox', 'chrome']
+    variants:
         by-app:
-            firefox: true
-            default: false
+            firefox: ['fission']
+            default: []
+    pageload:
+        by-app:
+            firefox: 'both'
+            chrome: 'cold'
+            default: 'warm'
+    limit-platforms:
+        by-app:
+            chrome:
+                - .*shippable[^-qr].*
+            default: []
     treeherder-symbol: Btime(tp6-1)
     max-run-time: 4000
     tier: 3
-    attributes:
-        run-visual-metrics: true
+    run-visual-metrics:
+        by-app:
+            chrome: false
+            default: true
     mozharness:
         extra-options:
             - --browsertime

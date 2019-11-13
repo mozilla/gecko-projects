@@ -99,7 +99,7 @@ struct IDBObjectStore::StructuredCloneWriteInfo {
     MOZ_COUNT_CTOR(StructuredCloneWriteInfo);
   }
 
-  StructuredCloneWriteInfo(StructuredCloneWriteInfo&& aCloneWriteInfo)
+  StructuredCloneWriteInfo(StructuredCloneWriteInfo&& aCloneWriteInfo) noexcept
       : mCloneBuffer(std::move(aCloneWriteInfo.mCloneBuffer)),
         mDatabase(aCloneWriteInfo.mDatabase),
         mOffsetToKeyProp(aCloneWriteInfo.mOffsetToKeyProp) {
@@ -273,9 +273,9 @@ bool StructuredCloneWriteCallback(JSContext* aCx,
       return false;
     }
 
-    StructuredCloneFile* const newFile = cloneWriteInfo->mFiles.AppendElement();
-    newFile->mMutableFile = mutableFile;
-    newFile->mType = StructuredCloneFile::eMutableFile;
+    const DebugOnly<StructuredCloneFile*> newFile =
+        cloneWriteInfo->mFiles.EmplaceBack(mutableFile);
+    MOZ_ASSERT(newFile);
 
     return true;
   }
@@ -337,10 +337,9 @@ bool StructuredCloneWriteCallback(JSContext* aCx,
         }
       }
 
-      StructuredCloneFile* const newFile =
-          cloneWriteInfo->mFiles.AppendElement();
-      newFile->mBlob = blob;
-      newFile->mType = StructuredCloneFile::eBlob;
+      const DebugOnly<StructuredCloneFile*> newFile =
+          cloneWriteInfo->mFiles.EmplaceBack(StructuredCloneFile::eBlob, blob);
+      MOZ_ASSERT(newFile);
 
       return true;
     }
@@ -381,9 +380,9 @@ bool CopyingStructuredCloneWriteCallback(JSContext* aCx,
         return false;
       }
 
-      StructuredCloneFile* const newFile = cloneInfo->mFiles.AppendElement();
-      newFile->mBlob = blob;
-      newFile->mType = StructuredCloneFile::eBlob;
+      const DebugOnly<StructuredCloneFile*> newFile =
+          cloneInfo->mFiles.EmplaceBack(StructuredCloneFile::eBlob, blob);
+      MOZ_ASSERT(newFile);
 
       return true;
     }
@@ -404,9 +403,9 @@ bool CopyingStructuredCloneWriteCallback(JSContext* aCx,
         return false;
       }
 
-      StructuredCloneFile* const newFile = cloneInfo->mFiles.AppendElement();
-      newFile->mMutableFile = mutableFile;
-      newFile->mType = StructuredCloneFile::eMutableFile;
+      const DebugOnly<StructuredCloneFile*> newFile =
+          cloneInfo->mFiles.EmplaceBack(mutableFile);
+      MOZ_ASSERT(newFile);
 
       return true;
     }
@@ -1067,14 +1066,10 @@ bool IDBObjectStore::DeserializeValue(JSContext* aCx,
 
   // FIXME: Consider to use StructuredCloneHolder here and in other
   //        deserializing methods.
-  if (!JS_ReadStructuredClone(
-          aCx, aCloneReadInfo.mData, JS_STRUCTURED_CLONE_VERSION,
-          JS::StructuredCloneScope::DifferentProcessForIndexedDB, aValue,
-          JS::CloneDataPolicy(), &callbacks, &aCloneReadInfo)) {
-    return false;
-  }
-
-  return true;
+  return JS_ReadStructuredClone(
+      aCx, aCloneReadInfo.mData, JS_STRUCTURED_CLONE_VERSION,
+      JS::StructuredCloneScope::DifferentProcessForIndexedDB, aValue,
+      JS::CloneDataPolicy(), &callbacks, &aCloneReadInfo);
 }
 
 namespace {
@@ -1675,6 +1670,8 @@ already_AddRefed<IDBRequest> IDBObjectStore::AddOrPut(
 
   mTransaction->StartRequest(request, params);
 
+  mTransaction->InvalidateCursorCaches();
+
   return request.forget();
 }
 
@@ -1740,6 +1737,11 @@ already_AddRefed<IDBRequest> IDBObjectStore::GetAllInternal(
         IDB_LOG_STRINGIFY(keyRange), IDB_LOG_STRINGIFY(aLimit));
   }
 
+  // TODO: This is necessary to preserve request ordering only. Proper
+  // sequencing of requests should be done in a more sophisticated manner that
+  // doesn't require invalidating cursor caches (Bug 1580499).
+  mTransaction->InvalidateCursorCaches();
+
   mTransaction->StartRequest(request, params);
 
   return request.forget();
@@ -1775,6 +1777,8 @@ already_AddRefed<IDBRequest> IDBObjectStore::Clear(JSContext* aCx,
       request->LoggingSerialNumber(),
       IDB_LOG_STRINGIFY(mTransaction->Database()),
       IDB_LOG_STRINGIFY(mTransaction), IDB_LOG_STRINGIFY(this));
+
+  mTransaction->InvalidateCursorCaches();
 
   mTransaction->StartRequest(request, params);
 
@@ -1965,6 +1969,11 @@ already_AddRefed<IDBRequest> IDBObjectStore::GetInternal(
       IDB_LOG_STRINGIFY(mTransaction), IDB_LOG_STRINGIFY(this),
       IDB_LOG_STRINGIFY(keyRange));
 
+  // TODO: This is necessary to preserve request ordering only. Proper
+  // sequencing of requests should be done in a more sophisticated manner that
+  // doesn't require invalidating cursor caches (Bug 1580499).
+  mTransaction->InvalidateCursorCaches();
+
   mTransaction->StartRequest(request, params);
 
   return request.forget();
@@ -2012,7 +2021,7 @@ already_AddRefed<IDBRequest> IDBObjectStore::DeleteInternal(
   if (!aFromCursor) {
     IDB_LOG_MARK_CHILD_TRANSACTION_REQUEST(
         "database(%s).transaction(%s).objectStore(%s).delete(%s)",
-        " IDBObjectStore.delete()", mTransaction->LoggingSerialNumber(),
+        "IDBObjectStore.delete()", mTransaction->LoggingSerialNumber(),
         request->LoggingSerialNumber(),
         IDB_LOG_STRINGIFY(mTransaction->Database()),
         IDB_LOG_STRINGIFY(mTransaction), IDB_LOG_STRINGIFY(this),
@@ -2020,6 +2029,8 @@ already_AddRefed<IDBRequest> IDBObjectStore::DeleteInternal(
   }
 
   mTransaction->StartRequest(request, params);
+
+  mTransaction->InvalidateCursorCaches();
 
   return request.forget();
 }
@@ -2237,6 +2248,11 @@ already_AddRefed<IDBRequest> IDBObjectStore::Count(JSContext* aCx,
       IDB_LOG_STRINGIFY(mTransaction), IDB_LOG_STRINGIFY(this),
       IDB_LOG_STRINGIFY(keyRange));
 
+  // TODO: This is necessary to preserve request ordering only. Proper
+  // sequencing of requests should be done in a more sophisticated manner that
+  // doesn't require invalidating cursor caches (Bug 1580499).
+  mTransaction->InvalidateCursorCaches();
+
   mTransaction->StartRequest(request, params);
 
   return request.forget();
@@ -2313,6 +2329,11 @@ already_AddRefed<IDBRequest> IDBObjectStore::OpenCursorInternal(
   BackgroundCursorChild* const actor =
       new BackgroundCursorChild(request, this, direction);
 
+  // TODO: This is necessary to preserve request ordering only. Proper
+  // sequencing of requests should be done in a more sophisticated manner that
+  // doesn't require invalidating cursor caches (Bug 1580499).
+  mTransaction->InvalidateCursorCaches();
+
   mTransaction->OpenCursor(actor, params);
 
   return request.forget();
@@ -2327,27 +2348,20 @@ void IDBObjectStore::RefreshSpec(bool aMayDelete) {
 
   const nsTArray<ObjectStoreSpec>& objectStores = dbSpec->objectStores();
 
-  bool found = false;
+  const auto foundIt = std::find_if(objectStores.cbegin(), objectStores.cend(),
+                                    [id = Id()](const auto& objSpec) {
+                                      return objSpec.metadata().id() == id;
+                                    });
+  const bool found = foundIt != objectStores.cend();
+  if (found) {
+    mSpec = &*foundIt;
 
-  for (uint32_t objCount = objectStores.Length(), objIndex = 0;
-       objIndex < objCount; objIndex++) {
-    const ObjectStoreSpec& objSpec = objectStores[objIndex];
+    for (auto& index : mIndexes) {
+      index->RefreshMetadata(aMayDelete);
+    }
 
-    if (objSpec.metadata().id() == Id()) {
-      mSpec = &objSpec;
-
-      for (uint32_t idxCount = mIndexes.Length(), idxIndex = 0;
-           idxIndex < idxCount; idxIndex++) {
-        mIndexes[idxIndex]->RefreshMetadata(aMayDelete);
-      }
-
-      for (uint32_t idxCount = mDeletedIndexes.Length(), idxIndex = 0;
-           idxIndex < idxCount; idxIndex++) {
-        mDeletedIndexes[idxIndex]->RefreshMetadata(false);
-      }
-
-      found = true;
-      break;
+    for (auto& index : mDeletedIndexes) {
+      index->RefreshMetadata(false);
     }
   }
 

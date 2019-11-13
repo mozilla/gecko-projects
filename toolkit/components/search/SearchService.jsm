@@ -1144,11 +1144,20 @@ SearchService.prototype = {
           distDirs.push(dir);
         }
       } catch (ex) {
-        if (!(ex instanceof OS.File.Error) || !ex.becauseNoSuchFile) {
+        if (!(ex instanceof OS.File.Error)) {
+          throw ex;
+        }
+        if (ex.becauseAccessDenied) {
+          Cu.reportError(
+            "Not loading distribution files because access was denied."
+          );
+        } else if (!ex.becauseNoSuchFile) {
           throw ex;
         }
       } finally {
-        iterator.close();
+        // If there's an issue on close, we can't do anything about it. It could
+        // be that reading the iterator never fully opened.
+        iterator.close().catch(Cu.reportError);
       }
     }
 
@@ -1768,9 +1777,13 @@ SearchService.prototype = {
     let region = Services.prefs.getCharPref("browser.search.region", "default");
 
     await engineSelector.init();
+    let channel = AppConstants.MOZ_APP_VERSION_DISPLAY.endsWith("esr")
+      ? "esr"
+      : AppConstants.MOZ_UPDATE_CHANNEL;
     let { engines, privateDefault } = engineSelector.fetchEngineConfiguration(
       locale,
-      region
+      region,
+      channel
     );
 
     const defaultEngine = engines[0];
@@ -2528,16 +2541,18 @@ SearchService.prototype = {
 
     // Modern Config encodes params as objects whereas they are
     // strings in webExtensions, stringify them here.
-    [
-      "searchUrlGetParams",
-      "searchUrlPostParams",
-      "suggestUrlGetParams",
-      "suggestUrlPostParams",
-    ].forEach(key => {
-      if (key in config) {
-        params[key] = new URLSearchParams(config[key]).toString();
-      }
-    });
+    if ("params" in config) {
+      [
+        "searchUrlGetParams",
+        "searchUrlPostParams",
+        "suggestUrlGetParams",
+        "suggestUrlPostParams",
+      ].forEach(key => {
+        if (key in config.params) {
+          params[key] = new URLSearchParams(config.params[key]).toString();
+        }
+      });
+    }
 
     if ("telemetryId" in config) {
       params.telemetryId = config.telemetryId;

@@ -52,6 +52,8 @@ class WebrtcAudioConduit : public AudioSessionConduit,
    * feed in received RTCP Frames to the VoiceEngine for decoding
    */
   MediaConduitErrorCode ReceivedRTCPPacket(const void* data, int len) override;
+  Maybe<DOMHighResTimeStamp> LastRtcpReceived() const override;
+  DOMHighResTimeStamp GetNow() const override { return mCall->GetNow(); }
 
   MediaConduitErrorCode StopTransmitting() override;
   MediaConduitErrorCode StartTransmitting() override;
@@ -176,7 +178,7 @@ class WebrtcAudioConduit : public AudioSessionConduit,
   void DeleteStreams() override {}
 
   WebrtcAudioConduit(RefPtr<WebRtcCallWrapper> aCall,
-                     nsCOMPtr<nsIEventTarget> aStsThread)
+                     nsCOMPtr<nsISerialEventTarget> aStsThread)
       : mTransportMonitor("WebrtcAudioConduit"),
         mTransmitterTransport(nullptr),
         mReceiverTransport(nullptr),
@@ -353,10 +355,13 @@ class WebrtcAudioConduit : public AudioSessionConduit,
   RtpSourceObserver mRtpSourceObserver;
 
   // Socket transport service thread. Any thread.
-  const nsCOMPtr<nsIEventTarget> mStsThread;
+  const nsCOMPtr<nsISerialEventTarget> mStsThread;
 
   // Accessed from mStsThread. Last successfully polled RTT
   Maybe<DOMHighResTimeStamp> mRttSec;
+
+  // Accessed only on mStsThread
+  Maybe<DOMHighResTimeStamp> mLastRtcpReceived;
 };
 
 }  // namespace mozilla

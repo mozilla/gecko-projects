@@ -11,8 +11,6 @@
 #include <unistd.h>
 #include <math.h>
 
-#include <IOSurface/IOSurface.h>
-
 #include "nsChildView.h"
 #include "nsCocoaWindow.h"
 
@@ -88,7 +86,6 @@
 #include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/BorrowedContext.h"
-#include "mozilla/gfx/MacIOSurface.h"
 #ifdef ACCESSIBILITY
 #  include "nsAccessibilityService.h"
 #  include "mozilla/a11y/Platform.h"
@@ -335,7 +332,6 @@ nsChildView::nsChildView()
       mIsDispatchPaint(false),
       mPluginFocused{false},
       mCompositingState("nsChildView::mCompositingState"),
-      mOpaqueRegion("nsChildView::mOpaqueRegion"),
       mCurrentPanGestureBelongsToSwipe{false} {}
 
 nsChildView::~nsChildView() {
@@ -492,7 +488,7 @@ void nsChildView::TearDownView() {
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-nsCocoaWindow* nsChildView::GetXULWindowWidget() const {
+nsCocoaWindow* nsChildView::GetAppWindowWidget() const {
   id windowDelegate = [[mView window] delegate];
   if (windowDelegate && [windowDelegate isKindOfClass:[WindowDelegate class]]) {
     return [(WindowDelegate*)windowDelegate geckoWidget];
@@ -594,7 +590,7 @@ void* nsChildView::GetNativeData(uint32_t aDataType) {
 nsTransparencyMode nsChildView::GetTransparencyMode() {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
 
-  nsCocoaWindow* windowWidget = GetXULWindowWidget();
+  nsCocoaWindow* windowWidget = GetAppWindowWidget();
   return windowWidget ? windowWidget->GetTransparencyMode() : eTransparencyOpaque;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(eTransparencyOpaque);
@@ -605,14 +601,16 @@ nsTransparencyMode nsChildView::GetTransparencyMode() {
 void nsChildView::SetTransparencyMode(nsTransparencyMode aMode) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  nsCocoaWindow* windowWidget = GetXULWindowWidget();
+  nsCocoaWindow* windowWidget = GetAppWindowWidget();
   if (windowWidget) {
     windowWidget->SetTransparencyMode(aMode);
   }
 
-  UpdateInternalOpaqueRegion();
-
   NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+void nsChildView::SuppressAnimation(bool aSuppress) {
+  GetAppWindowWidget()->SuppressAnimation(aSuppress);
 }
 
 bool nsChildView::IsVisible() const {
@@ -622,7 +620,7 @@ bool nsChildView::IsVisible() const {
     return mVisible;
   }
 
-  if (!GetXULWindowWidget()->IsVisible()) {
+  if (!GetAppWindowWidget()->IsVisible()) {
     return false;
   }
 
@@ -829,7 +827,7 @@ void nsChildView::BackingScaleFactorChanged() {
     mNativeLayerRoot->SetBackingScale(mBackingScaleFactor);
   }
 
-  if (mWidgetListener && !mWidgetListener->GetXULWindow()) {
+  if (mWidgetListener && !mWidgetListener->GetAppWindow()) {
     if (PresShell* presShell = mWidgetListener->GetPresShell()) {
       presShell->BackingScaleFactorChanged();
     }
@@ -1163,7 +1161,7 @@ static NSMenuItem* NativeMenuItemWithLocation(NSMenu* menubar, NSString* locatio
 
 bool nsChildView::SendEventToNativeMenuSystem(NSEvent* aEvent) {
   bool handled = false;
-  nsCocoaWindow* widget = GetXULWindowWidget();
+  nsCocoaWindow* widget = GetAppWindowWidget();
   if (widget) {
     nsMenuBarX* mb = widget->GetMenuBar();
     if (mb) {
@@ -1228,7 +1226,7 @@ nsresult nsChildView::ActivateNativeMenuItemAt(const nsAString& indexString) {
 nsresult nsChildView::ForceUpdateNativeMenuAt(const nsAString& indexString) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
-  nsCocoaWindow* widget = GetXULWindowWidget();
+  nsCocoaWindow* widget = GetAppWindowWidget();
   if (widget) {
     nsMenuBarX* mb = widget->GetMenuBar();
     if (mb) {
@@ -1489,16 +1487,6 @@ bool nsChildView::PaintWindowInContext(CGContextRef aContext, const LayoutDevice
   return painted;
 }
 
-bool nsChildView::PaintWindowInIOSurface(CFTypeRefPtr<IOSurfaceRef> aSurface,
-                                         const LayoutDeviceIntRegion& aInvalidRegion) {
-  RefPtr<MacIOSurface> surf = new MacIOSurface(std::move(aSurface));
-  surf->Lock(false);
-  RefPtr<gfx::DrawTarget> dt = surf->GetAsDrawTargetLocked(gfx::BackendType::SKIA);
-  bool result = PaintWindowInDrawTarget(dt, aInvalidRegion, dt->GetSize());
-  surf->Unlock(false);
-  return result;
-}
-
 void nsChildView::EnsureContentLayerForMainThreadPainting() {
   if (!mContentLayer) {
     // The content layer gets created on demand for BasicLayers windows. We do
@@ -1513,19 +1501,15 @@ void nsChildView::EnsureContentLayerForMainThreadPainting() {
 void nsChildView::PaintWindowInContentLayer() {
   EnsureContentLayerForMainThreadPainting();
   mContentLayer->SetRect(GetBounds().ToUnknownRect());
-  {
-    auto opaqueRegion = mOpaqueRegion.Lock();
-    bool isOpaque = *opaqueRegion == GetBounds();
-    mContentLayer->SetIsOpaque(isOpaque);
-  }
   mContentLayer->SetSurfaceIsFlipped(false);
-  CFTypeRefPtr<IOSurfaceRef> surf = mContentLayer->NextSurface();
-  if (!surf) {
+  RefPtr<DrawTarget> dt = mContentLayer->NextSurfaceAsDrawTarget(gfx::BackendType::SKIA);
+  if (!dt) {
     return;
   }
 
-  PaintWindowInIOSurface(
-      surf, LayoutDeviceIntRegion::FromUnknownRegion(mContentLayer->CurrentSurfaceInvalidRegion()));
+  PaintWindowInDrawTarget(
+      dt, LayoutDeviceIntRegion::FromUnknownRegion(mContentLayer->CurrentSurfaceInvalidRegion()),
+      dt->GetSize());
   mContentLayer->NotifySurfaceReady();
 }
 
@@ -1598,11 +1582,6 @@ LayoutDeviceIntPoint nsChildView::WidgetToScreenOffset() {
   return CocoaPointsToDevPixels(origin);
 
   NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(LayoutDeviceIntPoint(0, 0));
-}
-
-LayoutDeviceIntRegion nsChildView::GetOpaqueWidgetRegion() {
-  auto opaqueRegion = mOpaqueRegion.Lock();
-  return *opaqueRegion;
 }
 
 nsresult nsChildView::SetTitle(const nsAString& title) {
@@ -1782,10 +1761,12 @@ void nsChildView::GetEditCommandsRemapped(NativeKeyBindingsType aType,
   keyBindings->GetEditCommands(modifiedEvent, aCommands);
 }
 
-void nsChildView::GetEditCommands(NativeKeyBindingsType aType, const WidgetKeyboardEvent& aEvent,
+bool nsChildView::GetEditCommands(NativeKeyBindingsType aType, const WidgetKeyboardEvent& aEvent,
                                   nsTArray<CommandInt>& aCommands) {
   // Validate the arguments.
-  nsIWidget::GetEditCommands(aType, aEvent, aCommands);
+  if (NS_WARN_IF(!nsIWidget::GetEditCommands(aType, aEvent, aCommands))) {
+    return false;
+  }
 
   // If the key is a cursor-movement arrow, and the current selection has
   // vertical writing-mode, we'll remap so that the movement command
@@ -1833,12 +1814,13 @@ void nsChildView::GetEditCommands(NativeKeyBindingsType aType, const WidgetKeybo
       }
 
       GetEditCommandsRemapped(aType, aEvent, aCommands, geckoKey, cocoaKey);
-      return;
+      return true;
     }
   }
 
   NativeKeyBindings* keyBindings = NativeKeyBindings::GetInstance(aType);
   keyBindings->GetEditCommands(aEvent, aCommands);
+  return true;
 }
 
 NSView<mozView>* nsChildView::GetEditorView() {
@@ -1908,7 +1890,7 @@ void nsChildView::PrepareWindowEffects() {
     mIsCoveringTitlebar = [mView isCoveringTitlebar];
     NSInteger styleMask = [[mView window] styleMask];
     bool wasFullscreen = mIsFullscreen;
-    nsCocoaWindow* windowWidget = GetXULWindowWidget();
+    nsCocoaWindow* windowWidget = GetAppWindowWidget();
     mIsFullscreen =
         (styleMask & NSFullScreenWindowMask) || (windowWidget && windowWidget->InFullScreenMode());
 
@@ -2380,8 +2362,6 @@ static Maybe<VibrancyType> ThemeGeometryTypeToVibrancyType(
     case nsNativeThemeCocoa::eThemeGeometryTypeVibrancyDark:
     case nsNativeThemeCocoa::eThemeGeometryTypeVibrantTitlebarDark:
       return Some(VibrancyType::DARK);
-    case nsNativeThemeCocoa::eThemeGeometryTypeSheet:
-      return Some(VibrancyType::SHEET);
     case nsNativeThemeCocoa::eThemeGeometryTypeTooltip:
       return Some(VibrancyType::TOOLTIP);
     case nsNativeThemeCocoa::eThemeGeometryTypeMenu:
@@ -2435,7 +2415,6 @@ void nsChildView::UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries
     return;
   }
 
-  LayoutDeviceIntRegion sheetRegion = GatherVibrantRegion(aThemeGeometries, VibrancyType::SHEET);
   LayoutDeviceIntRegion vibrantLightRegion =
       GatherVibrantRegion(aThemeGeometries, VibrancyType::LIGHT);
   LayoutDeviceIntRegion vibrantDarkRegion =
@@ -2452,9 +2431,9 @@ void nsChildView::UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries
   LayoutDeviceIntRegion activeSourceListSelectionRegion =
       GatherVibrantRegion(aThemeGeometries, VibrancyType::ACTIVE_SOURCE_LIST_SELECTION);
 
-  MakeRegionsNonOverlapping(sheetRegion, vibrantLightRegion, vibrantDarkRegion, menuRegion,
-                            tooltipRegion, highlightedMenuItemRegion, sourceListRegion,
-                            sourceListSelectionRegion, activeSourceListSelectionRegion);
+  MakeRegionsNonOverlapping(vibrantLightRegion, vibrantDarkRegion, menuRegion, tooltipRegion,
+                            highlightedMenuItemRegion, sourceListRegion, sourceListSelectionRegion,
+                            activeSourceListSelectionRegion);
 
   auto& vm = EnsureVibrancyManager();
   bool changed = false;
@@ -2463,27 +2442,14 @@ void nsChildView::UpdateVibrancy(const nsTArray<ThemeGeometry>& aThemeGeometries
   changed |= vm.UpdateVibrantRegion(VibrancyType::MENU, menuRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::TOOLTIP, tooltipRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::HIGHLIGHTED_MENUITEM, highlightedMenuItemRegion);
-  changed |= vm.UpdateVibrantRegion(VibrancyType::SHEET, sheetRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::SOURCE_LIST, sourceListRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::SOURCE_LIST_SELECTION, sourceListSelectionRegion);
   changed |= vm.UpdateVibrantRegion(VibrancyType::ACTIVE_SOURCE_LIST_SELECTION,
                                     activeSourceListSelectionRegion);
 
-  UpdateInternalOpaqueRegion();
-
   if (changed) {
     SuspendAsyncCATransactions();
   }
-}
-
-NSColor* nsChildView::VibrancyFillColorForThemeGeometryType(
-    nsITheme::ThemeGeometryType aThemeGeometryType) {
-  if (VibrancyManager::SystemSupportsVibrancy()) {
-    Maybe<VibrancyType> vibrancyType = ThemeGeometryTypeToVibrancyType(aThemeGeometryType);
-    MOZ_RELEASE_ASSERT(vibrancyType, "should only encounter vibrant theme geometry types here");
-    return EnsureVibrancyManager().VibrancyFillColorForType(*vibrancyType);
-  }
-  return [NSColor whiteColor];
 }
 
 mozilla::VibrancyManager& nsChildView::EnsureVibrancyManager() {
@@ -2492,19 +2458,6 @@ mozilla::VibrancyManager& nsChildView::EnsureVibrancyManager() {
     mVibrancyManager = MakeUnique<VibrancyManager>(*this, [mView vibrancyViewsContainer]);
   }
   return *mVibrancyManager;
-}
-
-void nsChildView::UpdateInternalOpaqueRegion() {
-  MOZ_RELEASE_ASSERT(NS_IsMainThread(), "This should only be called on the main thread.");
-  auto opaqueRegion = mOpaqueRegion.Lock();
-  bool widgetIsOpaque = GetTransparencyMode() == eTransparencyOpaque;
-  if (!widgetIsOpaque) {
-    opaqueRegion->SetEmpty();
-  } else if (VibrancyManager::SystemSupportsVibrancy()) {
-    opaqueRegion->Sub(mBounds, EnsureVibrancyManager().GetUnionOfVibrantRegions());
-  } else {
-    *opaqueRegion = mBounds;
-  }
 }
 
 nsChildView::SwipeInfo nsChildView::SendMayStartSwipe(
@@ -3434,7 +3387,7 @@ NSEvent* gLastDragMouseDownEvent = nil;  // [strong]
 }
 
 - (void)viewWillStartLiveResize {
-  nsCocoaWindow* windowWidget = mGeckoChild ? mGeckoChild->GetXULWindowWidget() : nullptr;
+  nsCocoaWindow* windowWidget = mGeckoChild ? mGeckoChild->GetAppWindowWidget() : nullptr;
   if (windowWidget) {
     windowWidget->NotifyLiveResizeStarted();
   }
@@ -3447,17 +3400,10 @@ NSEvent* gLastDragMouseDownEvent = nil;  // [strong]
   // is null here, that might be problematic because we might get stuck with
   // a content process that has the displayport suppressed. If that scenario
   // arises (I'm not sure that it does) we will need to handle it gracefully.
-  nsCocoaWindow* windowWidget = mGeckoChild ? mGeckoChild->GetXULWindowWidget() : nullptr;
+  nsCocoaWindow* windowWidget = mGeckoChild ? mGeckoChild->GetAppWindowWidget() : nullptr;
   if (windowWidget) {
     windowWidget->NotifyLiveResizeStopped();
   }
-}
-
-- (NSColor*)vibrancyFillColorForThemeGeometryType:(nsITheme::ThemeGeometryType)aThemeGeometryType {
-  if (!mGeckoChild) {
-    return [NSColor whiteColor];
-  }
-  return mGeckoChild->VibrancyFillColorForThemeGeometryType(aThemeGeometryType);
 }
 
 - (LayoutDeviceIntRegion)nativeDirtyRegionWithBoundingRect:(NSRect)aRect {

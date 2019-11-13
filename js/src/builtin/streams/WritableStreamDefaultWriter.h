@@ -36,9 +36,21 @@ class WritableStreamDefaultWriter : public NativeObject {
     /**
      * A promise that is resolved when the stream this writes to becomes closed.
      *
-     * This promise is created while this writer is being created, beneath
-     * |WritableStream.prototype.getWriter|, so it is same-compartment with this
-     * writer.
+     * This promise is ordinarily created while this writer is being created; in
+     * this case this promise is not a wrapper and is same-compartment with
+     * this.  However, if the writer is closed and then this writer releases its
+     * lock on the stream, this promise will be recreated within whatever realm
+     * is in force when the lock is released:
+     *
+     *   var ws = new WritableStream({});
+     *   var w = ws.getWriter();
+     *   var c = w.closed;
+     *   w.close().then(() => {
+     *     w.releaseLock(); // changes this slot, and |w.closed|
+     *     assertEq(c === w.closed, false);
+     *   });
+     *
+     * So this field *may* potentially contain a wrapper around a promise.
      */
     Slot_ClosedPromise,
 
@@ -64,11 +76,17 @@ class WritableStreamDefaultWriter : public NativeObject {
     SlotCount,
   };
 
-  inline PromiseObject* closedPromise() const;
-  inline void setClosedPromise(PromiseObject* promise);
+  JSObject* closedPromise() const {
+    return &getFixedSlot(Slot_ClosedPromise).toObject();
+  }
+  void setClosedPromise(JSObject* wrappedPromise) {
+    setFixedSlot(Slot_ClosedPromise, JS::ObjectValue(*wrappedPromise));
+  }
 
   bool hasStream() const { return !getFixedSlot(Slot_Stream).isUndefined(); }
-  inline void setStream(JSObject* stream);
+  void setStream(JSObject* stream) {
+    setFixedSlot(Slot_Stream, JS::ObjectValue(*stream));
+  }
   void clearStream() { setFixedSlot(Slot_Stream, JS::UndefinedValue()); }
 
   JSObject* readyPromise() const {
@@ -87,7 +105,8 @@ class WritableStreamDefaultWriter : public NativeObject {
 
 extern MOZ_MUST_USE WritableStreamDefaultWriter*
 CreateWritableStreamDefaultWriter(JSContext* cx,
-                                  JS::Handle<WritableStream*> unwrappedStream);
+                                  JS::Handle<WritableStream*> unwrappedStream,
+                                  JS::Handle<JSObject*> proto = nullptr);
 
 }  // namespace js
 

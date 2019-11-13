@@ -194,9 +194,6 @@
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/dom/ImageTracker.h"
 #include "nsIDocShellTreeOwner.h"
-#ifdef MOZ_XBL
-#  include "nsBindingManager.h"
-#endif
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 #include "VisualViewport.h"
@@ -1670,22 +1667,6 @@ void PresShell::EndObservingDocument() {
 char* nsPresShell_ReflowStackPointerTop;
 #endif
 
-#ifdef MOZ_XBL
-class XBLConstructorRunner : public Runnable {
- public:
-  explicit XBLConstructorRunner(Document* aDocument)
-      : Runnable("XBLConstructorRunner"), mDocument(aDocument) {}
-
-  NS_IMETHOD Run() override {
-    mDocument->BindingManager()->ProcessAttachedQueue();
-    return NS_OK;
-  }
-
- private:
-  RefPtr<Document> mDocument;
-};
-#endif
-
 nsresult PresShell::Initialize() {
   if (mIsDestroying) {
     return NS_OK;
@@ -1762,13 +1743,6 @@ nsresult PresShell::Initialize() {
     // nsAutoCauseReflowNotifier (which sets up a script blocker) going out of
     // scope may have killed us too
     NS_ENSURE_STATE(!mHaveShutDown);
-
-#ifdef MOZ_XBL
-    // Run the XBL binding constructors for any new frames we've constructed.
-    // (Do this in a script runner, since our caller might have a script
-    // blocker on the stack.)
-    nsContentUtils::AddScriptRunner(new XBLConstructorRunner(mDocument));
-#endif
 
     // XBLConstructorRunner might destroy us.
     NS_ENSURE_STATE(!mHaveShutDown);
@@ -2882,23 +2856,6 @@ static void AssertNoFramesInSubtree(nsIContent* aContent) {
   for (nsINode* node : ShadowIncludingTreeIterator(*aContent)) {
     nsIContent* c = nsIContent::FromNode(node);
     MOZ_ASSERT(!c->GetPrimaryFrame());
-#  ifdef MOZ_XBL
-    if (auto* binding = c->GetXBLBinding()) {
-      if (auto* bindingWithContent = binding->GetBindingWithContent()) {
-        nsIContent* anonContent = bindingWithContent->GetAnonymousContent();
-        MOZ_ASSERT(!anonContent->GetPrimaryFrame());
-
-        // Need to do this instead of just AssertNoFramesInSubtree(anonContent),
-        // because the parent of the children of the <content> element isn't the
-        // <content> element, but the bound element, and that confuses
-        // GetNextNode a lot.
-        for (nsIContent* child = anonContent->GetFirstChild(); child;
-             child = child->GetNextSibling()) {
-          AssertNoFramesInSubtree(child);
-        }
-      }
-    }
-#  endif
   }
 }
 #endif
@@ -4117,15 +4074,6 @@ void PresShell::DoFlushPendingNotifications(mozilla::ChangesToFlush aFlush) {
       mPresContext->RestyleManager()->ProcessPendingRestyles();
     }
 
-#ifdef MOZ_XBL
-    // Process whatever XBL constructors those restyles queued up.  This
-    // ensures that onload doesn't fire too early and that we won't do extra
-    // reflows after those constructors run.
-    if (MOZ_LIKELY(!mIsDestroying)) {
-      mDocument->BindingManager()->ProcessAttachedQueue();
-    }
-#endif
-
     // Now those constructors or events might have posted restyle
     // events.  At the same time, we still need up-to-date style data.
     // In particular, reflow depends on style being completely up to
@@ -5111,11 +5059,16 @@ void PresShell::UpdateCanvasBackground() {
     // style frame but we don't have access to the canvasframe here. It isn't
     // a problem because only a few frames can return something other than true
     // and none of them would be a canvas frame or root element style frame.
-    bool drawBackgroundImage;
-    bool drawBackgroundColor;
-    mCanvasBackgroundColor = nsCSSRendering::DetermineBackgroundColor(
-        mPresContext, bgStyle, rootStyleFrame, drawBackgroundImage,
-        drawBackgroundColor);
+    bool drawBackgroundImage = false;
+    bool drawBackgroundColor = false;
+    if (rootStyleFrame->IsThemed()) {
+      // Ignore the CSS background-color if -moz-appearance is used.
+      mCanvasBackgroundColor = NS_RGBA(0, 0, 0, 0);
+    } else {
+      mCanvasBackgroundColor = nsCSSRendering::DetermineBackgroundColor(
+          mPresContext, bgStyle, rootStyleFrame, drawBackgroundImage,
+          drawBackgroundColor);
+    }
     mHasCSSBackgroundColor = drawBackgroundColor;
     if (mPresContext->IsRootContentDocumentCrossProcess() &&
         !IsTransparentContainerElement(mPresContext)) {
@@ -9893,9 +9846,6 @@ bool PresShell::VerifyIncrementalReflow() {
     nsAutoCauseReflowNotifier crNotifier(this);
     presShell->Initialize();
   }
-#  ifdef MOZ_XBL
-  mDocument->BindingManager()->ProcessAttachedQueue();
-#  endif
   presShell->FlushPendingNotifications(FlushType::Layout);
   presShell->SetVerifyReflowEnable(
       true);  // turn on verify reflow again now that

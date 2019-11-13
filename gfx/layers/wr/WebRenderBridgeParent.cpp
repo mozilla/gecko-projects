@@ -1030,8 +1030,14 @@ void WebRenderBridgeParent::SetCompositionRecorder(
   Api(wr::RenderRoot::Default)->SetCompositionRecorder(std::move(aRecorder));
 }
 
-void WebRenderBridgeParent::WriteCollectedFrames() {
-  Api(wr::RenderRoot::Default)->WriteCollectedFrames();
+RefPtr<wr::WebRenderAPI::WriteCollectedFramesPromise>
+WebRenderBridgeParent::WriteCollectedFrames() {
+  return Api(wr::RenderRoot::Default)->WriteCollectedFrames();
+}
+
+RefPtr<wr::WebRenderAPI::GetCollectedFramesPromise>
+WebRenderBridgeParent::GetCollectedFrames() {
+  return Api(wr::RenderRoot::Default)->GetCollectedFrames();
 }
 
 CompositorBridgeParent* WebRenderBridgeParent::GetRootCompositorBridgeParent()

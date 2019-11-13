@@ -13,6 +13,7 @@
 #include "gc/Zone.h"
 #include "jit/JitFrames.h"
 #include "proxy/Proxy.h"
+#include "util/DiagnosticAssertions.h"
 #include "vm/BigIntType.h"
 #include "vm/GlobalObject.h"
 #include "vm/HelperThreads.h"
@@ -20,6 +21,8 @@
 #include "vm/Iteration.h"
 #include "vm/Realm.h"
 #include "vm/SymbolType.h"
+
+#include "vm/Activation-inl.h"  // js::Activation::hasWasmExitFP
 
 namespace js {
 

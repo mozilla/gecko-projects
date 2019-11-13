@@ -28,7 +28,6 @@
 
 #include "jsapi.h"
 #include "jstypes.h"
-#include "jsutil.h"
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/BytecodeEmitter.h"
@@ -46,6 +45,8 @@
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
 #include "js/Wrapper.h"
+#include "util/Memory.h"
+#include "util/Poison.h"
 #include "util/StringBuffer.h"
 #include "util/Text.h"
 #include "vm/ArgumentsObject.h"
@@ -2869,8 +2870,8 @@ struct UnretrievableSourceDecoder {
         uncompressedLength_(uncompressedLength) {}
 
   XDRResult decode() {
-    auto sourceUnits =
-        xdr_->cx()->make_pod_array<Unit>(Max<size_t>(uncompressedLength_, 1));
+    auto sourceUnits = xdr_->cx()->make_pod_array<Unit>(
+        std::max<size_t>(uncompressedLength_, 1));
     if (!sourceUnits) {
       return xdr_->fail(JS::TranscodeResult_Throw);
     }
@@ -3055,8 +3056,8 @@ XDRResult ScriptSource::codeBinASTData(XDRState<mode>* const xdr,
   // XDR the BinAST data.
   Maybe<SharedImmutableString> binASTData;
   if (mode == XDR_DECODE) {
-    auto bytes =
-        xdr->cx()->template make_pod_array<char>(Max<size_t>(binASTLength, 1));
+    auto bytes = xdr->cx()->template make_pod_array<char>(
+        std::max<size_t>(binASTLength, 1));
     if (!bytes) {
       return xdr->fail(JS::TranscodeResult_Throw);
     }

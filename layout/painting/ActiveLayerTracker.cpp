@@ -277,11 +277,12 @@ static void IncrementScaleRestyleCountIfNeeded(nsIFrame* aFrame,
   }
 
   // Compute the new scale due to the CSS transform property.
+  // Note: Motion path doesn't contribute to scale factor. (It only has 2d
+  // translate and 2d rotate, so we use Nothing() for it.)
   nsStyleTransformMatrix::TransformReferenceBox refBox(aFrame);
   Matrix4x4 transform = nsStyleTransformMatrix::ReadTransforms(
-      display->mTranslate, display->mRotate, display->mScale,
-      MotionPathUtils::ResolveMotionPath(aFrame), display->mTransform, refBox,
-      AppUnitsPerCSSPixel());
+      display->mTranslate, display->mRotate, display->mScale, Nothing(),
+      display->mTransform, refBox, AppUnitsPerCSSPixel());
   Matrix transform2D;
   if (!transform.Is2D(&transform2D)) {
     // We don't attempt to handle 3D transforms; just assume the scale changed.
@@ -453,17 +454,31 @@ bool ActiveLayerTracker::IsBackgroundPositionAnimated(
                                   eCSSProperty_background_position_y}));
 }
 
+static bool IsMotionPathAnimated(nsDisplayListBuilder* aBuilder,
+                                 nsIFrame* aFrame) {
+  return ActiveLayerTracker::IsStyleAnimated(
+             aBuilder, aFrame, nsCSSPropertyIDSet{eCSSProperty_offset_path}) ||
+         (!aFrame->StyleDisplay()->mOffsetPath.IsNone() &&
+          ActiveLayerTracker::IsStyleAnimated(
+              aBuilder, aFrame,
+              nsCSSPropertyIDSet{eCSSProperty_offset_distance,
+                                 eCSSProperty_offset_rotate,
+                                 eCSSProperty_offset_anchor}));
+}
+
 /* static */
 bool ActiveLayerTracker::IsTransformAnimated(nsDisplayListBuilder* aBuilder,
                                              nsIFrame* aFrame) {
   return IsStyleAnimated(aBuilder, aFrame,
-                         nsCSSPropertyIDSet::TransformLikeProperties());
+                         nsCSSPropertyIDSet::CSSTransformProperties()) ||
+         IsMotionPathAnimated(aBuilder, aFrame);
 }
 
 /* static */
 bool ActiveLayerTracker::IsTransformMaybeAnimated(nsIFrame* aFrame) {
   return IsStyleAnimated(nullptr, aFrame,
-                         nsCSSPropertyIDSet::TransformLikeProperties());
+                         nsCSSPropertyIDSet::CSSTransformProperties()) ||
+         IsMotionPathAnimated(nullptr, aFrame);
 }
 
 /* static */

@@ -111,6 +111,7 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "jit/AtomicOp.h"
@@ -138,6 +139,7 @@
 #  include "jit/mips64/Assembler-mips64.h"
 #endif
 
+#include "util/Memory.h"
 #include "wasm/WasmGC.h"
 #include "wasm/WasmGenerator.h"
 #include "wasm/WasmInstance.h"
@@ -1670,7 +1672,7 @@ class BaseStackFrame final : public BaseStackFrameAllocator {
 #else
     masm.Push(r);
 #endif
-    maxFramePushed_ = Max(maxFramePushed_, masm.framePushed());
+    maxFramePushed_ = std::max(maxFramePushed_, masm.framePushed());
     MOZ_ASSERT(stackBefore + StackSizeOfPtr == currentStackHeight());
     return currentStackHeight();
   }
@@ -1683,7 +1685,7 @@ class BaseStackFrame final : public BaseStackFrameAllocator {
 #else
     masm.Push(r);
 #endif
-    maxFramePushed_ = Max(maxFramePushed_, masm.framePushed());
+    maxFramePushed_ = std::max(maxFramePushed_, masm.framePushed());
     MOZ_ASSERT(stackBefore + StackSizeOfFloat == currentStackHeight());
     return currentStackHeight();
   }
@@ -1696,7 +1698,7 @@ class BaseStackFrame final : public BaseStackFrameAllocator {
 #else
     masm.Push(r);
 #endif
-    maxFramePushed_ = Max(maxFramePushed_, masm.framePushed());
+    maxFramePushed_ = std::max(maxFramePushed_, masm.framePushed());
     MOZ_ASSERT(stackBefore + StackSizeOfDouble == currentStackHeight());
     return currentStackHeight();
   }
@@ -1787,7 +1789,7 @@ class BaseStackFrame final : public BaseStackFrameAllocator {
 #else
       masm.reserveStack(bytes);
 #endif
-      maxFramePushed_ = Max(maxFramePushed_, masm.framePushed());
+      maxFramePushed_ = std::max(maxFramePushed_, masm.framePushed());
     }
     return end;
   }
@@ -4411,7 +4413,13 @@ class BaseCompiler final : public BaseCompilerInterface {
           break;
       }
     }
-    MOZ_ASSERT(size == fr.dynamicHeight());
+    if (deadCode_) {
+      // Some stack allocation may be used to pass values along control flow
+      // edges without being accounted for on the value stack.
+      MOZ_ASSERT(size <= fr.dynamicHeight());
+    } else {
+      MOZ_ASSERT(size == fr.dynamicHeight());
+    }
   }
 
 #endif
@@ -8587,6 +8595,8 @@ bool BaseCompiler::emitLoop() {
     topBlockResults(params);
     masm.nopAlign(CodeAlignment);
     masm.bind(&controlItem(0).label);
+    // The interrupt check barfs if there are live registers.
+    sync();
     if (!addInterruptCheck()) {
       return false;
     }
@@ -8618,12 +8628,10 @@ bool BaseCompiler::emitIf() {
 
   BranchState b(&controlItem().otherLabel, InvertBranch(true));
   if (!deadCode_) {
+    needResultRegisters(params);
     emitBranchSetup(&b);
+    freeResultRegisters(params);
     sync();
-    // Because params can flow immediately to results in the case of an empty
-    // "then" or "else" block, and the result of an if/then is a join in
-    // general, we shuffle params eagerly to the result allocations.
-    topBlockResults(params);
   } else {
     resetLatentOp();
   }
@@ -8631,6 +8639,10 @@ bool BaseCompiler::emitIf() {
   initControl(controlItem(), params);
 
   if (!deadCode_) {
+    // Because params can flow immediately to results in the case of an empty
+    // "then" or "else" block, and the result of an if/then is a join in
+    // general, we shuffle params eagerly to the result allocations.
+    topBlockResults(params);
     emitBranchPerform(&b);
   }
 
@@ -8726,6 +8738,7 @@ bool BaseCompiler::emitElse() {
   fr.resetStackHeight(ifThenElse.stackHeight, params);
 
   if (!deadCode_) {
+    captureResultRegisters(params);
     pushBlockResults(params);
   }
 

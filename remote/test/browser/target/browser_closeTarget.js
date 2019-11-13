@@ -3,43 +3,43 @@
 
 "use strict";
 
-// Test the Target closeTarget method and the targetDestroyed event.
-add_task(async function(client) {
-  info("Setup Target domain");
-  const { Target } = client;
+add_task(async function raisesWithoutArguments({ Target }, _, tab) {
+  await getDiscoveredTargets(Target);
 
-  // Wait for all Target.targetCreated event. One for each tab, plus the one
-  // for the main process target.
-  const targetsCreated = new Promise(resolve => {
-    let targets = 0;
-    const unsubscribe = Target.targetCreated(event => {
-      if (++targets >= gBrowser.tabs.length + 1) {
-        unsubscribe();
-        resolve();
-      }
-    });
-  });
-  Target.setDiscoverTargets({ discover: true });
-  await targetsCreated;
+  let exceptionThrown = false;
+  try {
+    await Target.closeTarget();
+  } catch (e) {
+    exceptionThrown = true;
+  }
+  ok(exceptionThrown, "closeTarget raised error without an argument");
+});
 
-  info("Create a new tab and wait for the target to be created");
-  const otherTargetCreated = Target.targetCreated();
-  const tab = await BrowserTestUtils.openNewForegroundTab(
-    gBrowser,
-    toDataURL("")
-  );
-  const { targetInfo } = await otherTargetCreated;
-  is(targetInfo.type, "page");
+add_task(async function raisesWithUnknownTargetId({ Target }, _, tab) {
+  await getDiscoveredTargets(Target);
 
-  const onTabClose = BrowserTestUtils.waitForEvent(tab, "TabClose");
+  let exceptionThrown = false;
+  try {
+    await Target.closeTarget({ targetId: "-1" });
+  } catch (e) {
+    exceptionThrown = true;
+  }
+  ok(exceptionThrown, "closeTarget raised error with unkown target id");
+});
+
+add_task(async function triggersTargetDestroyed({ Target }, _, tab) {
+  await getDiscoveredTargets(Target);
+  const { targetInfo, newTab } = await openTab(Target);
+
+  const tabClosed = BrowserTestUtils.waitForEvent(newTab, "TabClose");
   const targetDestroyed = Target.targetDestroyed();
 
-  info("Close the target");
+  info("Closing the target");
   Target.closeTarget({ targetId: targetInfo.targetId });
 
-  await onTabClose;
-  ok(true, "Tab was closed");
+  await tabClosed;
+  info("Tab was closed");
 
   await targetDestroyed;
-  ok(true, "Received the expected Target.targetDestroyed event");
+  info("Received the Target.targetDestroyed event");
 });

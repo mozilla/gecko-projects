@@ -11,13 +11,13 @@
 #include "mozilla/Result.h"  // for Result
 #include "mozilla/Vector.h"  // for Vector
 
+#include <algorithm>
 #include <string.h>     // for size_t, strlen
 #include <type_traits>  // for remove_reference<>::type
 #include <utility>      // for move
 
 #include "jsapi.h"        // for CallArgs, RootedObject, Rooted
 #include "jsfriendapi.h"  // for GetErrorMessage
-#include "jsutil.h"       // for Min
 
 #include "builtin/Array.h"       // for NewDenseCopiedArray
 #include "debugger/Debugger.h"   // for Completion, Debugger
@@ -983,7 +983,7 @@ bool DebuggerObject::CallData::applyMethod() {
     if (!GetLengthProperty(cx, argsobj, &argc)) {
       return false;
     }
-    argc = unsigned(Min(argc, ARGS_LENGTH_MAX));
+    argc = unsigned(std::min(argc, ARGS_LENGTH_MAX));
 
     if (!nargs.growBy(argc) || !GetElements(cx, argsobj, argc, nargs.begin())) {
       return false;

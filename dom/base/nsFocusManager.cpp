@@ -24,7 +24,7 @@
 #include "nsIWebNavigation.h"
 #include "nsCaret.h"
 #include "nsIBaseWindow.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 #include "nsViewManager.h"
 #include "nsFrameSelection.h"
 #include "mozilla/dom/Document.h"
@@ -35,9 +35,6 @@
 #include "nsIPrincipal.h"
 #include "nsIObserverService.h"
 #include "nsIObjectFrame.h"
-#ifdef MOZ_XBL
-#  include "nsBindingManager.h"
-#endif
 #include "BrowserChild.h"
 #include "nsFrameLoader.h"
 #include "nsHTMLDocument.h"
@@ -700,10 +697,10 @@ nsFocusManager::WindowRaised(mozIDOMWindowProxy* aWindow) {
   NS_ASSERTION(currentWindow, "window raised with no window current");
   if (!currentWindow) return NS_OK;
 
-  // If there is no nsIXULWindow, then this is an embedded or child process
+  // If there is no nsIAppWindow, then this is an embedded or child process
   // window. Pass false for aWindowRaised so that commands get updated.
-  nsCOMPtr<nsIXULWindow> xulWin(do_GetInterface(baseWindow));
-  Focus(currentWindow, currentFocus, 0, true, false, xulWin != nullptr, true);
+  nsCOMPtr<nsIAppWindow> appWin(do_GetInterface(baseWindow));
+  Focus(currentWindow, currentFocus, 0, true, false, appWin != nullptr, true);
 
   return NS_OK;
 }

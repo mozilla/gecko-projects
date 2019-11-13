@@ -2187,29 +2187,19 @@ void MediaManager::DeviceListChanged() {
                 deviceIDs.AppendElement(id);
               }
             }
-
+            // For any removed devices, notify their listeners cleanly that the
+            // source has stopped, so JS knows and usage indicators update.
             for (auto& id : mDeviceIDs) {
               if (deviceIDs.Contains(id)) {
+                // Device has not been removed
                 continue;
               }
-
-              // Stop the coresponding SourceListener
-              nsGlobalWindowInner::InnerWindowByIdTable* windowsById =
-                  nsGlobalWindowInner::GetWindowsTable();
-              if (!windowsById) {
-                continue;
-              }
-
-              for (auto iter = windowsById->Iter(); !iter.Done(); iter.Next()) {
-                nsGlobalWindowInner* window = iter.Data();
-                IterateWindowListeners(
-                    window,
-                    [&id](const RefPtr<GetUserMediaWindowListener>& aListener) {
-                      aListener->StopRawID(id);
-                    });
+              // Stop the corresponding SourceListener
+              for (auto iter = mActiveWindows.Iter(); !iter.Done();
+                   iter.Next()) {
+                iter.UserData()->StopRawID(id);
               }
             }
-
             mDeviceIDs = deviceIDs;
           },
           [](RefPtr<MediaMgrError>&& reason) {});
@@ -2234,7 +2224,7 @@ nsresult MediaManager::GenerateUUID(nsAString& aResult) {
 
 static bool IsFullyActive(nsPIDOMWindowInner* aWindow) {
   while (true) {
-    if (!aWindow) {
+    if (!aWindow || nsGlobalWindowInner::Cast(aWindow)->IsDying()) {
       return false;
     }
     Document* document = aWindow->GetExtantDoc();
@@ -3368,6 +3358,12 @@ void MediaManager::OnNavigation(uint64_t aWindowID) {
   // be added to from the main-thread
   auto* window = nsGlobalWindowInner::GetInnerWindowWithId(aWindowID);
   if (window) {
+    // We have cleanup to do when we're the current window. OnNavigation is also
+    // called by nsGlobalWindowInner::FreeInnerObjects, which MAY happen later
+    // when window is not current. In that case, cleanup has already happened.
+    if (!window->IsCurrentInnerWindow()) {
+      return;
+    }
     IterateWindowListeners(
         window, [self = RefPtr<MediaManager>(this),
                  windowID = DebugOnly<decltype(aWindowID)>(aWindowID)](
@@ -3895,11 +3891,11 @@ MediaManager::SanitizeDeviceIds(int64_t aSinceWhen) {
 }
 
 void MediaManager::StopScreensharing(uint64_t aWindowID) {
-  // We need to stop window/screensharing for all streams in all innerwindows
-  // that correspond to that outerwindow.
+  // We need to stop window/screensharing for all streams in this innerwindow
+  // and all its sub frames.
 
   auto* window = nsGlobalWindowInner::GetInnerWindowWithId(aWindowID);
-  if (!window) {
+  if (!window || !window->IsCurrentInnerWindow()) {
     return;
   }
   IterateWindowListeners(
@@ -3913,29 +3909,29 @@ void MediaManager::IterateWindowListeners(nsPIDOMWindowInner* aWindow,
                                           const FunctionType& aCallback) {
   // Iterate the docshell tree to find all the child windows, and for each
   // invoke the callback
-  if (aWindow) {
-    {
-      uint64_t windowID = aWindow->WindowID();
-      RefPtr<GetUserMediaWindowListener> listener = GetWindowListener(windowID);
-      if (listener) {
-        aCallback(listener);
-      }
-      // NB: `listener` might have been destroyed.
+  MOZ_DIAGNOSTIC_ASSERT(aWindow);
+  MOZ_DIAGNOSTIC_ASSERT(aWindow->IsCurrentInnerWindow());
+  {
+    uint64_t windowID = aWindow->WindowID();
+    RefPtr<GetUserMediaWindowListener> listener = GetWindowListener(windowID);
+    if (listener) {
+      aCallback(listener);
     }
+    // NB: `listener` might have been destroyed.
+  }
 
-    // iterate any children of *this* window (iframes, etc)
-    nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
-    if (docShell) {
-      int32_t i, count;
-      docShell->GetInProcessChildCount(&count);
-      for (i = 0; i < count; ++i) {
-        nsCOMPtr<nsIDocShellTreeItem> item;
-        docShell->GetInProcessChildAt(i, getter_AddRefs(item));
-        nsCOMPtr<nsPIDOMWindowOuter> winOuter =
-            item ? item->GetWindow() : nullptr;
-
-        if (winOuter) {
-          IterateWindowListeners(winOuter->GetCurrentInnerWindow(), aCallback);
+  // iterate any children of *this* window (iframes, etc)
+  nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
+  if (docShell) {
+    int32_t i, count;
+    docShell->GetInProcessChildCount(&count);
+    for (i = 0; i < count; ++i) {
+      nsCOMPtr<nsIDocShellTreeItem> item;
+      docShell->GetInProcessChildAt(i, getter_AddRefs(item));
+      nsCOMPtr<nsPIDOMWindowOuter> child = item ? item->GetWindow() : nullptr;
+      if (child) {
+        if (auto* innerChild = child->GetCurrentInnerWindow()) {
+          IterateWindowListeners(innerChild, aCallback);
         }
       }
     }

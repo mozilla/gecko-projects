@@ -284,6 +284,7 @@ UNIFIED_SOURCES += [
     'util/StructuredSpewer.cpp',
     'util/Text.cpp',
     'util/Unicode.cpp',
+    'vm/Activation.cpp',
     'vm/ArgumentsObject.cpp',
     'vm/ArrayBufferObject.cpp',
     'vm/ArrayBufferViewObject.cpp',
@@ -305,6 +306,7 @@ UNIFIED_SOURCES += [
     'vm/ErrorObject.cpp',
     'vm/ErrorReporting.cpp',
     'vm/ForOfIterator.cpp',
+    'vm/FrameIter.cpp',
     'vm/GeckoProfiler.cpp',
     'vm/GeneratorObject.cpp',
     'vm/GlobalObject.cpp',
@@ -313,6 +315,7 @@ UNIFIED_SOURCES += [
     'vm/Initialization.cpp',
     'vm/Instrumentation.cpp',
     'vm/Iteration.cpp',
+    'vm/JitActivation.cpp',
     'vm/JSAtom.cpp',
     'vm/JSContext.cpp',
     'vm/JSFunction.cpp',
@@ -361,17 +364,17 @@ UNIFIED_SOURCES += [
 #   win32 test slowdowns
 # jsmath.cpp cannot be built in unified mode because it needs to re-#define the
 #   RtlGenRandom declaration's calling convention in <ntsecapi.h> on Windows.
-# jsutil.cpp cannot be built in unified mode because it is needed for
-#   check-vanilla-allocations.
 # util/DoubleToString.cpp cannot be built in unified mode because we want to
 #   suppress compiler warnings in third-party dtoa.c.
+# util/Utility.cpp cannot be built in unified mode because it is needed for
+#   check-vanilla-allocations.
 # vm/Interpreter.cpp is gigantic and destroys incremental build times for any
 #   files unlucky enough to be unified with it.
 SOURCES += [
     'builtin/RegExp.cpp',
     'jsmath.cpp',
-    'jsutil.cpp',
     'util/DoubleToString.cpp',
+    'util/Utility.cpp',
     'vm/Interpreter.cpp',
     'vm/ProfilingStack.cpp',
 ]

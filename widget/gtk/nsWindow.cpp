@@ -406,7 +406,7 @@ nsWindow::nsWindow() {
   mHandleTouchEvent = false;
 #endif
   mIsDragPopup = false;
-  mIsX11Display = GDK_IS_X11_DISPLAY(gdk_display_get_default());
+  mIsX11Display = gfxPlatformGtk::GetPlatform()->IsX11Display();
 
   mContainer = nullptr;
   mGdkWindow = nullptr;
@@ -476,6 +476,9 @@ nsWindow::nsWindow() {
 
   mHasAlphaVisual = false;
   mIsPIPWindow = false;
+
+  mWindowScaleFactorChanged = true;
+  mWindowScaleFactor = 1;
 }
 
 nsWindow::~nsWindow() {
@@ -775,8 +778,7 @@ double nsWindow::GetDefaultScaleInternal() {
 
 DesktopToLayoutDeviceScale nsWindow::GetDesktopToDeviceScale() {
 #ifdef MOZ_WAYLAND
-  GdkDisplay* gdkDisplay = gdk_display_get_default();
-  if (!GDK_IS_X11_DISPLAY(gdkDisplay)) {
+  if (!mIsX11Display) {
     return DesktopToLayoutDeviceScale(GdkScaleFactor());
   }
 #endif
@@ -787,14 +789,13 @@ DesktopToLayoutDeviceScale nsWindow::GetDesktopToDeviceScale() {
 
 DesktopToLayoutDeviceScale nsWindow::GetDesktopToDeviceScaleByScreen() {
 #ifdef MOZ_WAYLAND
-  GdkDisplay* gdkDisplay = gdk_display_get_default();
   // In Wayland there's no way to get absolute position of the window and use it
   // to determine the screen factor of the monitor on which the window is
   // placed. The window is notified of the current scale factor but not at this
   // point, so the GdkScaleFactor can return wrong value which can lead to wrong
   // popup placement. We need to use parent's window scale factor for the new
   // one.
-  if (!GDK_IS_X11_DISPLAY(gdkDisplay)) {
+  if (!mIsX11Display) {
     nsView* view = nsView::GetViewFor(this);
     if (view) {
       nsView* parentView = view->GetParent();
@@ -1508,7 +1509,7 @@ static void SetUserTimeAndStartupIDForActivatedWindow(GtkWidget* aWindow) {
 
 #if defined(MOZ_ENABLE_STARTUP_NOTIFICATION)
   // TODO - Implement for non-X11 Gtk backends (Bug 726479)
-  if (GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+  if (gfxPlatformGtk::GetPlatform()->IsX11Display()) {
     GdkWindow* gdkWindow = gtk_widget_get_window(aWindow);
 
     GdkScreen* screen = gdk_window_get_screen(gdkWindow);
@@ -1854,7 +1855,7 @@ void* nsWindow::GetNativeData(uint32_t aDataType) {
     case NS_NATIVE_DISPLAY: {
 #ifdef MOZ_X11
       GdkDisplay* gdkDisplay = gdk_display_get_default();
-      if (GDK_IS_X11_DISPLAY(gdkDisplay)) {
+      if (gdkDisplay && GDK_IS_X11_DISPLAY(gdkDisplay)) {
         return GDK_DISPLAY_XDISPLAY(gdkDisplay);
       }
 #endif /* MOZ_X11 */
@@ -1892,10 +1893,13 @@ void* nsWindow::GetNativeData(uint32_t aDataType) {
       return gfxPlatformGtk::GetPlatform()->GetCompositorDisplay();
 #endif  // MOZ_X11
     case NS_NATIVE_EGL_WINDOW: {
-      if (mIsX11Display)
+      if (mIsX11Display) {
         return mGdkWindow ? (void*)GDK_WINDOW_XID(mGdkWindow) : nullptr;
+      }
 #ifdef MOZ_WAYLAND
-      if (mContainer) return moz_container_get_wl_egl_window(mContainer);
+      if (mContainer) {
+        return moz_container_get_wl_egl_window(mContainer, GdkScaleFactor());
+      }
 #endif
       return nullptr;
     }
@@ -3058,6 +3062,14 @@ void nsWindow::OnContainerFocusOutEvent(GdkEventFocus* aEvent) {
 
   DispatchDeactivateEvent();
 
+  if (mDrawInTitlebar) {
+    // DispatchDeactivateEvent() ultimately results in a call to
+    // nsGlobalWindowOuter::ActivateOrDeactivate(), which resets
+    // the mIsActive flag.  We call UpdateMozWindowActive() to keep
+    // the flag in sync with GDK_WINDOW_STATE_FOCUSED.
+    UpdateMozWindowActive();
+  }
+
   LOGFOCUS(("Done with container focus out [%p]\n", (void*)this));
 }
 
@@ -3324,6 +3336,9 @@ void nsWindow::OnWindowStateEvent(GtkWidget* aWidget,
     mTitlebarBackdropState =
         !(aEvent->new_window_state & GDK_WINDOW_STATE_FOCUSED);
 
+    // keep mIsActive in sync with GDK_WINDOW_STATE_FOCUSED
+    UpdateMozWindowActive();
+
     ForceTitlebarRedraw();
   }
 
@@ -3437,12 +3452,8 @@ void nsWindow::OnCompositedChanged() {
 }
 
 void nsWindow::OnScaleChanged(GtkAllocation* aAllocation) {
-#ifdef MOZ_WAYLAND
-  if (mContainer && moz_container_has_wl_egl_window(mContainer)) {
-    // We need to resize wl_egl_window when scale changes.
-    moz_container_scale_changed(mContainer, aAllocation);
-  }
-#endif
+  // Force scale factor recalculation
+  mWindowScaleFactorChanged = true;
 
   // This eventually propagate new scale to the PuppetWidgets
   OnDPIChanged();
@@ -6383,11 +6394,13 @@ void nsWindow::GetEditCommandsRemapped(NativeKeyBindingsType aType,
   keyBindings->GetEditCommands(modifiedEvent, aCommands);
 }
 
-void nsWindow::GetEditCommands(NativeKeyBindingsType aType,
+bool nsWindow::GetEditCommands(NativeKeyBindingsType aType,
                                const WidgetKeyboardEvent& aEvent,
                                nsTArray<CommandInt>& aCommands) {
   // Validate the arguments.
-  nsIWidget::GetEditCommands(aType, aEvent, aCommands);
+  if (NS_WARN_IF(!nsIWidget::GetEditCommands(aType, aEvent, aCommands))) {
+    return false;
+  }
 
   if (aEvent.mKeyCode >= NS_VK_LEFT && aEvent.mKeyCode <= NS_VK_DOWN) {
     // Check if we're targeting content with vertical writing mode,
@@ -6433,12 +6446,13 @@ void nsWindow::GetEditCommands(NativeKeyBindingsType aType,
       }
 
       GetEditCommandsRemapped(aType, aEvent, aCommands, geckoCode, gdkCode);
-      return;
+      return true;
     }
   }
 
   NativeKeyBindings* keyBindings = NativeKeyBindings::GetInstance(aType);
   keyBindings->GetEditCommands(aEvent, aCommands);
+  return true;
 }
 
 already_AddRefed<DrawTarget> nsWindow::StartRemoteDrawingInRegion(
@@ -6751,6 +6765,12 @@ GtkWindow* nsWindow::GetCurrentTopmostWindow() {
 }
 
 gint nsWindow::GdkScaleFactor() {
+  // We depend on notify::scale-factor callback which is reliable for toplevel
+  // windows only, so don't use scale cache for popup windows.
+  if (mWindowType == eWindowType_toplevel && !mWindowScaleFactorChanged) {
+    return mWindowScaleFactor;
+  }
+
   GdkWindow* scaledGdkWindow = mGdkWindow;
   if (!mIsX11Display) {
     // For popup windows/dialogs with parent window we need to get scale factor
@@ -6771,13 +6791,18 @@ gint nsWindow::GdkScaleFactor() {
       }
     }
   }
+
   // Available as of GTK 3.10+
   static auto sGdkWindowGetScaleFactorPtr =
       (gint(*)(GdkWindow*))dlsym(RTLD_DEFAULT, "gdk_window_get_scale_factor");
   if (sGdkWindowGetScaleFactorPtr && scaledGdkWindow) {
-    return (*sGdkWindowGetScaleFactorPtr)(scaledGdkWindow);
+    mWindowScaleFactor = (*sGdkWindowGetScaleFactorPtr)(scaledGdkWindow);
+  } else {
+    mWindowScaleFactor = ScreenHelperGTK::GetGTKMonitorScaleFactor();
   }
-  return ScreenHelperGTK::GetGTKMonitorScaleFactor();
+  mWindowScaleFactorChanged = false;
+
+  return mWindowScaleFactor;
 }
 
 gint nsWindow::DevicePixelsToGdkCoordRoundUp(int pixels) {
@@ -7037,7 +7062,7 @@ nsWindow::CSDSupportLevel nsWindow::GetSystemCSDSupportLevel() {
   }
 
   // We use CSD titlebar mode on Wayland only
-  if (!GDK_IS_X11_DISPLAY(gdk_display_get_default())) {
+  if (gfxPlatformGtk::GetPlatform()->IsWaylandDisplay()) {
     sCSDSupportLevel = CSD_SUPPORT_CLIENT;
     return sCSDSupportLevel;
   }
@@ -7181,7 +7206,8 @@ void nsWindow::GetCompositorWidgetInitData(
 #ifdef MOZ_WAYLAND
 wl_surface* nsWindow::GetWaylandSurface() {
   if (mContainer)
-    return moz_container_get_wl_surface(MOZ_CONTAINER(mContainer));
+    return moz_container_get_wl_surface(MOZ_CONTAINER(mContainer),
+                                        GdkScaleFactor());
 
   NS_WARNING(
       "nsWindow::GetWaylandSurfaces(): We don't have any mContainer for "
@@ -7382,6 +7408,19 @@ nsIFrame* nsWindow::GetFrame(void) {
   return view->GetFrame();
 }
 
+void nsWindow::UpdateMozWindowActive() {
+  // Update activation state for the :-moz-window-inactive pseudoclass.
+  // Normally, this follows focus; we override it here to follow
+  // GDK_WINDOW_STATE_FOCUSED.
+  mozilla::dom::Document* document = GetDocument();
+  if (document) {
+    nsPIDOMWindowOuter* window = document->GetWindow();
+    if (window) {
+      window->SetActive(!mTitlebarBackdropState);
+    }
+  }
+}
+
 void nsWindow::ForceTitlebarRedraw(void) {
   MOZ_ASSERT(mDrawInTitlebar, "We should not redraw invisible titlebar.");
 
@@ -7396,8 +7435,11 @@ void nsWindow::ForceTitlebarRedraw(void) {
 
   frame = FindTitlebarFrame(frame);
   if (frame) {
-    nsLayoutUtils::PostRestyleEvent(frame->GetContent()->AsElement(),
-                                    RestyleHint{0}, nsChangeHint_RepaintFrame);
+    nsIContent* content = frame->GetContent();
+    if (content) {
+      nsLayoutUtils::PostRestyleEvent(content->AsElement(), RestyleHint{0},
+                                      nsChangeHint_RepaintFrame);
+    }
   }
 }
 

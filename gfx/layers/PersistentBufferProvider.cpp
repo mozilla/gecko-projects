@@ -101,6 +101,7 @@ PersistentBufferProviderShared::Create(gfx::IntSize aSize,
                                        gfx::SurfaceFormat aFormat,
                                        KnowsCompositor* aKnowsCompositor) {
   if (!aKnowsCompositor ||
+      !aKnowsCompositor->GetTextureForwarder() ||
       !aKnowsCompositor->GetTextureForwarder()->IPCOpen() ||
       // Bug 1556433 - shared buffer provider and direct texture mapping do not
       // synchronize properly
@@ -273,7 +274,8 @@ TextureClient* PersistentBufferProviderShared::GetTexture(
 already_AddRefed<gfx::DrawTarget>
 PersistentBufferProviderShared::BorrowDrawTarget(
     const gfx::IntRect& aPersistedRect) {
-  if (!mKnowsCompositor->GetTextureForwarder()->IPCOpen()) {
+  if (!mKnowsCompositor->GetTextureForwarder() ||
+      !mKnowsCompositor->GetTextureForwarder()->IPCOpen()) {
     return nullptr;
   }
 

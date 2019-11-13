@@ -15,6 +15,7 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/Sprintf.h"
 
+#include <algorithm>
 #ifdef __linux__
 #  include <dlfcn.h>
 #endif
@@ -27,7 +28,6 @@
 #include "jsmath.h"
 #include "jsnum.h"
 #include "jstypes.h"
-#include "jsutil.h"
 
 #include "builtin/Array.h"
 #include "builtin/AtomicsObject.h"
@@ -4576,7 +4576,7 @@ JS_PUBLIC_API bool JS_EncodeStringToBuffer(JSContext* cx, JSString* str,
   }
 
   JS::AutoCheckCannotGC nogc;
-  size_t writeLength = Min(linear->length(), length);
+  size_t writeLength = std::min(linear->length(), length);
   if (linear->hasLatin1Chars()) {
     mozilla::PodCopy(reinterpret_cast<Latin1Char*>(buffer),
                      linear->latin1Chars(nogc), writeLength);

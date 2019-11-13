@@ -112,6 +112,7 @@
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/ServoStyleSetInlines.h"
 #include "mozilla/css/ImageLoader.h"
+#include "mozilla/dom/SVGPathData.h"
 #include "mozilla/dom/TouchEvent.h"
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/layers/WebRenderUserData.h"
@@ -1335,6 +1336,30 @@ void nsFrame::DidSetComputedStyle(ComputedStyle* aOldComputedStyle) {
     PresContext()->SetBidiEnabled();
   }
 
+  // The following part is for caching offset-path:path(). We cache the
+  // flatten gfx path, so we don't have to rebuild and re-flattern it at
+  // each cycle if we have animations on offset-* with a fixed offset-path.
+  const StyleOffsetPath* oldPath =
+      aOldComputedStyle ? &aOldComputedStyle->StyleDisplay()->mOffsetPath
+                        : nullptr;
+  const StyleOffsetPath& newPath = StyleDisplay()->mOffsetPath;
+  if (!oldPath || *oldPath != newPath) {
+    if (newPath.IsPath()) {
+      // Here we only need to build a valid path for motion path, so
+      // using the default values of stroke-width, stoke-linecap, and fill-rule
+      // is fine for now because what we want is to get the point and its normal
+      // vector along the path, instead of rendering it.
+      RefPtr<gfx::PathBuilder> builder =
+          gfxPlatform::GetPlatform()
+              ->ScreenReferenceDrawTarget()
+              ->CreatePathBuilder(gfx::FillRule::FILL_WINDING);
+      SetProperty(nsIFrame::OffsetPathCache(),
+                  MotionPathUtils::BuildPath(newPath.AsPath(), builder).take());
+    } else if (oldPath) {
+      DeleteProperty(nsIFrame::OffsetPathCache());
+    }
+  }
+
   RemoveStateBits(NS_FRAME_SIMPLE_EVENT_REGIONS | NS_FRAME_SIMPLE_DISPLAYLIST);
 
   mMayHaveRoundedCorners = true;
@@ -1670,8 +1695,7 @@ bool nsIFrame::IsCSSTransformed(const nsStyleDisplay* aStyleDisplay) const {
 
 bool nsIFrame::HasAnimationOfTransform() const {
   return IsPrimaryFrame() &&
-         nsLayoutUtils::HasAnimationOfPropertySet(
-             this, nsCSSPropertyIDSet::TransformLikeProperties()) &&
+         nsLayoutUtils::HasAnimationOfTransformAndMotionPath(this) &&
          IsFrameOfType(eSupportsCSSTransforms);
 }
 
@@ -2615,18 +2639,17 @@ Maybe<nsRect> nsIFrame::GetClipPropClipRect(const nsStyleDisplay* aDisp,
  *
  * Return true if clipping was applied.
  */
-static bool ApplyOverflowClipping(
+static void ApplyOverflowClipping(
     nsDisplayListBuilder* aBuilder, const nsIFrame* aFrame,
-    const nsStyleDisplay* aDisp,
     DisplayListClipState::AutoClipMultiple& aClipState) {
   // Only -moz-hidden-unscrollable is handled here (and 'hidden' for table
   // frames, and any non-visible value for blocks in a paginated context).
   // We allow -moz-hidden-unscrollable to apply to any kind of frame. This
   // is required by comboboxes which make their display text (an inline frame)
   // have clipping.
-  if (!nsFrame::ShouldApplyOverflowClipping(aFrame, aDisp)) {
-    return false;
-  }
+  MOZ_ASSERT(
+      nsFrame::ShouldApplyOverflowClipping(aFrame, aFrame->StyleDisplay()));
+
   nsRect clipRect;
   bool haveRadii = false;
   nscoord radii[8];
@@ -2655,7 +2678,6 @@ static bool ApplyOverflowClipping(
   haveRadii = aFrame->GetBoxBorderRadii(radii, bp, false);
   aClipState.ClipContainingBlockDescendantsExtra(clipRect,
                                                  haveRadii ? radii : nullptr);
-  return true;
 }
 
 #ifdef DEBUG
@@ -3902,13 +3924,25 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
   }
 
   nsIFrame* child = aChild;
+  auto* placeholder = child->IsPlaceholderFrame()
+                          ? static_cast<nsPlaceholderFrame*>(child)
+                          : nullptr;
+  nsIFrame* childOrOutOfFlow =
+      placeholder ? placeholder->GetOutOfFlowFrame() : child;
+
+  nsIFrame* parent = childOrOutOfFlow->GetParent();
+  const bool shouldApplyOverflowClip =
+      nsFrame::ShouldApplyOverflowClipping(parent, parent->StyleDisplay());
 
   const bool isPaintingToWindow = aBuilder->IsPaintingToWindow();
   const bool doingShortcut =
       isPaintingToWindow &&
       (child->GetStateBits() & NS_FRAME_SIMPLE_DISPLAYLIST) &&
       // Animations may change the stacking context state.
-      !(child->MayHaveTransformAnimation() || child->MayHaveOpacityAnimation());
+      // ShouldApplyOverflowClipping is affected by the parent style, which does
+      // not invalidate the NS_FRAME_SIMPLE_DISPLAYLIST bit.
+      !(shouldApplyOverflowClip || child->MayHaveTransformAnimation() ||
+        child->MayHaveOpacityAnimation());
 
   if (aBuilder->IsForPainting()) {
     aBuilder->ClearWillChangeBudgetStatus(child);
@@ -3939,9 +3973,7 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
   nsRect dirty = aBuilder->GetDirtyRect() - offset;
 
   nsDisplayListBuilder::OutOfFlowDisplayData* savedOutOfFlowData = nullptr;
-  const bool isPlaceholder = child->IsPlaceholderFrame();
-  if (isPlaceholder) {
-    nsPlaceholderFrame* placeholder = static_cast<nsPlaceholderFrame*>(child);
+  if (placeholder) {
     if (placeholder->GetStateBits() & PLACEHOLDER_FOR_TOPLAYER) {
       // If the out-of-flow frame is in the top layer, the viewport frame
       // will paint it. Skip it here. Note that, only out-of-flow frames
@@ -3951,10 +3983,8 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
       return;
     }
 
-    child = placeholder->GetOutOfFlowFrame();
-    NS_ASSERTION(child, "No out of flow frame?");
-
-    if (child && aBuilder->IsForPainting()) {
+    child = childOrOutOfFlow;
+    if (aBuilder->IsForPainting()) {
       aBuilder->ClearWillChangeBudgetStatus(child);
     }
 
@@ -3965,12 +3995,11 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
     static const nsFrameState skipFlags =
         (NS_FRAME_IS_PUSHED_FLOAT | NS_FRAME_TOO_DEEP_IN_FRAME_TREE |
          NS_FRAME_IS_NONDISPLAY);
-    if (!child || (child->GetStateBits() & skipFlags) ||
-        nsLayoutUtils::IsPopup(child)) {
+    if (child->HasAnyStateBits(skipFlags) || nsLayoutUtils::IsPopup(child)) {
       return;
     }
 
-    MOZ_ASSERT(child->GetStateBits() & NS_FRAME_OUT_OF_FLOW);
+    MOZ_ASSERT(child->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW));
     savedOutOfFlowData = nsDisplayListBuilder::GetOutOfFlowData(child);
 
     if (aBuilder->GetIncludeAllOutOfFlows()) {
@@ -4043,7 +4072,7 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
       child->IsStackingContext(disp, pos, effects, isPositioned);
 
   if (pseudoStackingContext || isStackingContext || isPositioned ||
-      isPlaceholder || (!isSVG && disp->IsFloating(child)) ||
+      placeholder || (!isSVG && disp->IsFloating(child)) ||
       (isSVG && effects->mClip.IsRect() && IsSVGContentWithCSSClip(child))) {
     pseudoStackingContext = true;
     awayFromCommonPath = true;
@@ -4067,8 +4096,8 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
         savedOutOfFlowData->mContainingBlockActiveScrolledRoot);
     MOZ_ASSERT(awayFromCommonPath,
                "It is impossible when savedOutOfFlowData is true");
-  } else if (GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO &&
-             isPlaceholder) {
+  } else if (HasAnyStateBits(NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO) &&
+             placeholder) {
     NS_ASSERTION(visible.IsEmpty(), "should have empty visible rect");
     // Every item we build from now until we descent into an out of flow that
     // does have saved out of flow data should be invisible. This state gets
@@ -4090,10 +4119,12 @@ void nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder* aBuilder,
   // Don't use overflowClip to restrict the dirty rect, since some of the
   // descendants may not be clipped by it. Even if we end up with unnecessary
   // display items, they'll be pruned during ComputeVisibility.
-  nsIFrame* parent = child->GetParent();
-  const nsStyleDisplay* parentDisp =
-      parent == this ? ourDisp : parent->StyleDisplay();
-  if (ApplyOverflowClipping(aBuilder, parent, parentDisp, clipState)) {
+  //
+  // FIXME(emilio): Why can't we handle this more similarly to `clip` (on the
+  // parent, rather than on the children)? Would ClipContentDescendants do what
+  // we want?
+  if (shouldApplyOverflowClip) {
+    ApplyOverflowClipping(aBuilder, parent, clipState);
     awayFromCommonPath = true;
   }
 
@@ -5730,38 +5761,37 @@ static nscoord ResolvePadding(const LengthPercentage& aStyle,
   return nsLayoutUtils::ResolveToLength<true>(aStyle, aPercentageBasis);
 }
 
-static nsIFrame::IntrinsicISizeOffsetData IntrinsicSizeOffsets(
+static nsIFrame::IntrinsicSizeOffsetData IntrinsicSizeOffsets(
     nsIFrame* aFrame, nscoord aPercentageBasis, bool aForISize) {
-  nsIFrame::IntrinsicISizeOffsetData result;
+  nsIFrame::IntrinsicSizeOffsetData result;
   WritingMode wm = aFrame->GetWritingMode();
   const auto& margin = aFrame->StyleMargin()->mMargin;
   bool verticalAxis = aForISize == wm.IsVertical();
   if (verticalAxis) {
-    result.hMargin += ResolveMargin(margin.Get(eSideTop), aPercentageBasis);
-    result.hMargin += ResolveMargin(margin.Get(eSideBottom), aPercentageBasis);
+    result.margin += ResolveMargin(margin.Get(eSideTop), aPercentageBasis);
+    result.margin += ResolveMargin(margin.Get(eSideBottom), aPercentageBasis);
   } else {
-    result.hMargin += ResolveMargin(margin.Get(eSideLeft), aPercentageBasis);
-    result.hMargin += ResolveMargin(margin.Get(eSideRight), aPercentageBasis);
+    result.margin += ResolveMargin(margin.Get(eSideLeft), aPercentageBasis);
+    result.margin += ResolveMargin(margin.Get(eSideRight), aPercentageBasis);
   }
 
   const auto& padding = aFrame->StylePadding()->mPadding;
   if (verticalAxis) {
-    result.hPadding += ResolvePadding(padding.Get(eSideTop), aPercentageBasis);
-    result.hPadding +=
+    result.padding += ResolvePadding(padding.Get(eSideTop), aPercentageBasis);
+    result.padding +=
         ResolvePadding(padding.Get(eSideBottom), aPercentageBasis);
   } else {
-    result.hPadding += ResolvePadding(padding.Get(eSideLeft), aPercentageBasis);
-    result.hPadding +=
-        ResolvePadding(padding.Get(eSideRight), aPercentageBasis);
+    result.padding += ResolvePadding(padding.Get(eSideLeft), aPercentageBasis);
+    result.padding += ResolvePadding(padding.Get(eSideRight), aPercentageBasis);
   }
 
   const nsStyleBorder* styleBorder = aFrame->StyleBorder();
   if (verticalAxis) {
-    result.hBorder += styleBorder->GetComputedBorderWidth(eSideTop);
-    result.hBorder += styleBorder->GetComputedBorderWidth(eSideBottom);
+    result.border += styleBorder->GetComputedBorderWidth(eSideTop);
+    result.border += styleBorder->GetComputedBorderWidth(eSideBottom);
   } else {
-    result.hBorder += styleBorder->GetComputedBorderWidth(eSideLeft);
-    result.hBorder += styleBorder->GetComputedBorderWidth(eSideRight);
+    result.border += styleBorder->GetComputedBorderWidth(eSideLeft);
+    result.border += styleBorder->GetComputedBorderWidth(eSideRight);
   }
 
   const nsStyleDisplay* disp = aFrame->StyleDisplay();
@@ -5770,26 +5800,26 @@ static nsIFrame::IntrinsicISizeOffsetData IntrinsicSizeOffsets(
 
     LayoutDeviceIntMargin border = presContext->GetTheme()->GetWidgetBorder(
         presContext->DeviceContext(), aFrame, disp->mAppearance);
-    result.hBorder = presContext->DevPixelsToAppUnits(
+    result.border = presContext->DevPixelsToAppUnits(
         verticalAxis ? border.TopBottom() : border.LeftRight());
 
     LayoutDeviceIntMargin padding;
     if (presContext->GetTheme()->GetWidgetPadding(presContext->DeviceContext(),
                                                   aFrame, disp->mAppearance,
                                                   &padding)) {
-      result.hPadding = presContext->DevPixelsToAppUnits(
+      result.padding = presContext->DevPixelsToAppUnits(
           verticalAxis ? padding.TopBottom() : padding.LeftRight());
     }
   }
   return result;
 }
 
-/* virtual */ nsIFrame::IntrinsicISizeOffsetData nsFrame::IntrinsicISizeOffsets(
+/* virtual */ nsIFrame::IntrinsicSizeOffsetData nsFrame::IntrinsicISizeOffsets(
     nscoord aPercentageBasis) {
   return IntrinsicSizeOffsets(this, aPercentageBasis, true);
 }
 
-nsIFrame::IntrinsicISizeOffsetData nsIFrame::IntrinsicBSizeOffsets(
+nsIFrame::IntrinsicSizeOffsetData nsIFrame::IntrinsicBSizeOffsets(
     nscoord aPercentageBasis) {
   return IntrinsicSizeOffsets(this, aPercentageBasis, false);
 }
@@ -10890,9 +10920,9 @@ bool nsIFrame::IsStackingContext(const nsStyleDisplay* aStyleDisplay,
                                  bool aIsPositioned) {
   return HasOpacity(aStyleDisplay, aStyleEffects, nullptr) ||
          IsTransformed(aStyleDisplay) ||
-         (IsFrameOfType(eSupportsContainLayoutAndPaint) &&
-          (aStyleDisplay->IsContainPaint() ||
-           aStyleDisplay->IsContainLayout())) ||
+         ((aStyleDisplay->IsContainPaint() ||
+           aStyleDisplay->IsContainLayout()) &&
+          IsFrameOfType(eSupportsContainLayoutAndPaint)) ||
          // strictly speaking, 'perspective' doesn't require visual atomicity,
          // but the spec says it acts like the rest of these
          ChildrenHavePerspective(aStyleDisplay) ||

@@ -24,23 +24,23 @@
 namespace mozilla {
 namespace net {
 
-const uint64_t HTTP3_APP_ERROR_NO_ERROR = 0x0;
-const uint64_t HTTP3_APP_ERROR_GENERAL_PROTOCOL_ERROR = 0x1;
-const uint64_t HTTP3_APP_ERROR_INTERNAL_ERROR = 0x3;
-const uint64_t HTTP3_APP_ERROR_REQUEST_CANCELLED = 0x5;
-const uint64_t HTTP3_APP_ERROR_INCOMPLETE_REQUEST = 0x6;
-const uint64_t HTTP3_APP_ERROR_CONNECT_ERROR = 0x7;
-const uint64_t HTTP3_APP_ERROR_EXCESSIVE_LOAD = 0x8;
-const uint64_t HTTP3_APP_ERROR_VERSION_FALLBACK = 0x9;
-const uint64_t HTTP3_APP_ERROR_WRONG_STREAM = 0xa;
-const uint64_t HTTP3_APP_ERROR_ID_ERROR = 0xb;
-const uint64_t HTTP3_APP_ERROR_STREAM_CREATION_ERROR = 0xd;
-const uint64_t HTTP3_APP_ERROR_CLOSED_CRITICAL_STREAM = 0xf;
-const uint64_t HTTP3_APP_ERROR_EARLY_RESPONSE = 0x0011;
-const uint64_t HTTP3_APP_ERROR_MISSING_SETTINGS = 0x0012;
-const uint64_t HTTP3_APP_ERROR_UNEXPECTED_FRAME = 0x0013;
-const uint64_t HTTP3_APP_ERROR_REQUEST_REJECTED = 0x0014;
-const uint64_t HTTP3_APP_ERROR_SETTINGS_ERROR = 0x00ff;
+const uint64_t HTTP3_APP_ERROR_NO_ERROR = 0x100;
+const uint64_t HTTP3_APP_ERROR_GENERAL_PROTOCOL_ERROR = 0x101;
+const uint64_t HTTP3_APP_ERROR_INTERNAL_ERROR = 0x102;
+const uint64_t HTTP3_APP_ERROR_STREAM_CREATION_ERROR = 0x103;
+const uint64_t HTTP3_APP_ERROR_CLOSED_CRITICAL_STREAM = 0x104;
+const uint64_t HTTP3_APP_ERROR_FRAME_UNEXPECTED = 0x105;
+const uint64_t HTTP3_APP_ERROR_FRAME_ERROR = 0x106;
+const uint64_t HTTP3_APP_ERROR_EXCESSIVE_LOAD = 0x107;
+const uint64_t HTTP3_APP_ERROR_ID_ERROR = 0x108;
+const uint64_t HTTP3_APP_ERROR_SETTINGS_ERROR = 0x109;
+const uint64_t HTTP3_APP_ERROR_MISSING_SETTINGS = 0x10a;
+const uint64_t HTTP3_APP_ERROR_REQUEST_REJECTED = 0x10b;
+const uint64_t HTTP3_APP_ERROR_REQUEST_CANCELLED = 0x10c;
+const uint64_t HTTP3_APP_ERROR_REQUEST_INCOMPLETE = 0x10d;
+const uint64_t HTTP3_APP_ERROR_EARLY_RESPONSE = 0x10e;
+const uint64_t HTTP3_APP_ERROR_CONNECT_ERROR = 0x10f;
+const uint64_t HTTP3_APP_ERROR_VERSION_FALLBACK = 0x110;
 
 const uint32_t UDP_MAX_PACKET_SIZE = 4096;
 
@@ -157,7 +157,7 @@ void Http3Session::Shutdown() {
       MOZ_ASSERT(NS_FAILED(mError));
       stream->Close(mError);
     } else if (!stream->HasStreamId()) {
-      // Connection has nto been started yet. We can restart it.
+      // Connection has not been started yet. We can restart it.
       stream->Transaction()->DoNotRemoveAltSvc();
       stream->Close(NS_ERROR_NET_RESET);
     } else if (stream->RecvdData()) {
@@ -230,8 +230,13 @@ nsresult Http3Session::ProcessEvents(uint32_t count, uint32_t* countWritten,
 
         RefPtr<Http3Stream> stream = mStreamIdHash.Get(id);
         if (!stream) {
-          // This is an old event. This may happen because we store events in neqo_glue.
+          // This is an old event. This may happen because we store events in
+          // neqo_glue.
           // TODO: maybe change neqo interface to return only one event.
+          LOG(("Http3Session::ProcessEvents - stream not found "
+               "stream_id=0x%" PRIx64 " [this=%p].",
+               id, this));
+          event = mHttp3Connection->GetEvent();
           continue;
         }
 
@@ -269,7 +274,7 @@ nsresult Http3Session::ProcessEvents(uint32_t count, uint32_t* countWritten,
 
         if (stream->Done()) {
           LOG3(("Http3Session::ProcessEvents session=%p stream=%p 0x%" PRIx64
-                "cleanup stream.\n",
+                " cleanup stream.\n",
                 this, stream.get(), stream->StreamId()));
           CloseStream(stream, NS_OK);
         }
@@ -323,6 +328,7 @@ nsresult Http3Session::ProcessEvents(uint32_t count, uint32_t* countWritten,
         break;
       case Http3Event::Tag::ConnectionClosed:
         LOG(("Http3Session::ProcessEvents - ConnectionClosed"));
+        CloseInternal(false);
         mState = CLOSED;
         break;
       default:

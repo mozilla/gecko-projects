@@ -140,6 +140,8 @@ MSG_DEF(JSMSG_INVALID_NORMALIZE_FORM,  0, JSEXN_RANGEERR, "form must be one of '
 MSG_DEF(JSMSG_NEGATIVE_REPETITION_COUNT, 0, JSEXN_RANGEERR, "repeat count must be non-negative")
 MSG_DEF(JSMSG_NOT_A_CODEPOINT,         1, JSEXN_RANGEERR, "{0} is not a valid code point")
 MSG_DEF(JSMSG_RESULTING_STRING_TOO_LARGE, 0, JSEXN_RANGEERR, "repeat count must be less than infinity and not overflow maximum string size")
+MSG_DEF(JSMSG_FLAGS_UNDEFINED_OR_NULL, 0, JSEXN_TYPEERR, "'flags' property must neither be undefined nor null")
+MSG_DEF(JSMSG_REQUIRES_GLOBAL_REGEXP,  1, JSEXN_TYPEERR, "{0} must be called with a global RegExp")
 
 // Number
 MSG_DEF(JSMSG_BAD_RADIX,               0, JSEXN_RANGEERR, "radix must be an integer at least 2 and no greater than 36")
@@ -687,7 +689,12 @@ MSG_DEF(JSMSG_READABLESTREAM_METHOD_NOT_IMPLEMENTED,     1, JSEXN_TYPEERR, "Read
 MSG_DEF(JSMSG_READABLESTREAM_UNDERLYINGSINK_TYPE_WRONG,  0, JSEXN_RANGEERR,"'underlyingSink.type' must be undefined.")
 MSG_DEF(JSMSG_WRITABLESTREAMWRITER_NOT_OWNED,            1, JSEXN_TYPEERR, "the WritableStream writer method '{0}' may only be called on a writer owned by a stream")
 MSG_DEF(JSMSG_WRITABLESTREAM_CLOSED_OR_ERRORED,          0, JSEXN_TYPEERR, "writable stream is already closed or errored")
-MSG_DEF(JSMSG_CANT_ABORT_LOCKED_WRITABLESTREAM,          0, JSEXN_TYPEERR, "can't abort a WritableStream that's locked to a writer")
+MSG_DEF(JSMSG_WRITABLESTREAM_RELEASED_DURING_WRITE,      0, JSEXN_TYPEERR, "writer's lock on the stream was released before writing completed")
+MSG_DEF(JSMSG_WRITABLESTREAM_WRITE_CLOSING_OR_CLOSED,    0, JSEXN_TYPEERR, "can't write to a stream that's currently closing or already closed")
+MSG_DEF(JSMSG_CANT_USE_LOCKED_WRITABLESTREAM,            1, JSEXN_TYPEERR, "can't {0} a WritableStream that's locked to a writer")
+MSG_DEF(JSMSG_WRITABLESTREAM_CLOSE_CLOSING_OR_CLOSED,    0, JSEXN_TYPEERR, "can't close a stream that's currently closing or already closed")
+MSG_DEF(JSMSG_WRITABLESTREAM_CANT_RELEASE_ALREADY_CLOSED,0, JSEXN_TYPEERR, "writer has already been released and can't be closed")
+MSG_DEF(JSMSG_WRITABLESTREAM_ALREADY_LOCKED,             0, JSEXN_TYPEERR, "writable stream is already locked by another writer")
 MSG_DEF(JSMSG_READABLESTREAM_NYI,                        0, JSEXN_ERR,     "full WritableStream support is not yet implemented")
 
 // Other Stream-related

@@ -18,6 +18,7 @@
 #include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLSlotElement.h"
+#include "mozilla/dom/MutationObservers.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/Document.h"
 #include "nsReadableUtils.h"
@@ -27,11 +28,7 @@
 #include "nsDOMString.h"
 #include "nsChangeHint.h"
 #include "nsCOMArray.h"
-#include "nsNodeUtils.h"
 #include "mozilla/dom/DirectionalityUtils.h"
-#ifdef MOZ_XBL
-#  include "nsBindingManager.h"
-#endif
 #include "nsCCUncollectableMarker.h"
 #include "mozAutoDocUpdate.h"
 #include "nsTextNode.h"
@@ -247,7 +244,7 @@ nsresult CharacterData::SetTextInternal(
   if (aNotify) {
     CharacterDataChangeInfo info = {aOffset == textLength, aOffset, endOffset,
                                     aLength, aDetails};
-    nsNodeUtils::CharacterDataWillChange(this, info);
+    MutationObservers::NotifyCharacterDataWillChange(this, info);
   }
 
   Directionality oldDir = eDir_NotSet;
@@ -326,7 +323,7 @@ nsresult CharacterData::SetTextInternal(
   if (aNotify) {
     CharacterDataChangeInfo info = {aOffset == textLength, aOffset, endOffset,
                                     aLength, aDetails};
-    nsNodeUtils::CharacterDataChanged(this, info);
+    MutationObservers::NotifyCharacterDataChanged(this, info);
 
     if (haveMutationListeners) {
       InternalMutationEvent mutation(true, eLegacyCharacterDataModified);
@@ -484,9 +481,9 @@ nsresult CharacterData::BindToTree(BindContext& aContext, nsINode& aParent) {
     SetSubtreeRootPointer(aParent.SubtreeRoot());
   }
 
-  nsNodeUtils::ParentChainChanged(this);
+  MutationObservers::NotifyParentChainChanged(this);
   if (!hadParent && IsRootOfNativeAnonymousSubtree()) {
-    nsNodeUtils::NativeAnonymousChildListChange(this, false);
+    MutationObservers::NotifyNativeAnonymousChildListChange(this, false);
   }
 
   UpdateEditableState(false);
@@ -515,13 +512,9 @@ void CharacterData::UnbindFromTree(bool aNullParent) {
 
   HandleShadowDOMRelatedRemovalSteps(aNullParent);
 
-#ifdef MOZ_XBL
-  Document* document = GetComposedDoc();
-#endif
-
   if (aNullParent) {
     if (IsRootOfNativeAnonymousSubtree()) {
-      nsNodeUtils::NativeAnonymousChildListChange(this, true);
+      MutationObservers::NotifyNativeAnonymousChildListChange(this, true);
     }
     if (GetParent()) {
       NS_RELEASE(mParent);
@@ -540,19 +533,6 @@ void CharacterData::UnbindFromTree(bool aNullParent) {
     SetSubtreeRootPointer(aNullParent ? this : mParent->SubtreeRoot());
   }
 
-#ifdef MOZ_XBL
-  if (document && !GetContainingShadow()) {
-    // Notify XBL- & nsIAnonymousContentCreator-generated
-    // anonymous content that the document is changing.
-    // Unlike XBL, bindings for web components shadow DOM
-    // do not get uninstalled.
-    if (HasFlag(NODE_MAY_BE_IN_BINDING_MNGR)) {
-      nsContentUtils::AddScriptRunner(new RemoveFromBindingManagerRunnable(
-          document->BindingManager(), this, document));
-    }
-  }
-#endif
-
   nsExtendedContentSlots* slots = GetExistingExtendedContentSlots();
   if (slots) {
     slots->mBindingParent = nullptr;
@@ -561,7 +541,7 @@ void CharacterData::UnbindFromTree(bool aNullParent) {
     }
   }
 
-  nsNodeUtils::ParentChainChanged(this);
+  MutationObservers::NotifyParentChainChanged(this);
 
 #if defined(ACCESSIBILITY) && defined(DEBUG)
   MOZ_ASSERT(!GetAccService() || !GetAccService()->HasAccessible(this),

@@ -4923,7 +4923,7 @@ nsDocShell::SetParentNativeWindow(nativeWindow aParentNativeWindow) {
 
 NS_IMETHODIMP
 nsDocShell::GetNativeHandle(nsAString& aNativeHandle) {
-  // the nativeHandle should be accessed from nsIXULWindow
+  // the nativeHandle should be accessed from nsIAppWindow
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -9547,8 +9547,9 @@ static bool IsConsideredSameOriginForUIR(nsIPrincipal* aTriggeringPrincipal,
 }
 
 static bool SchemeUsesDocChannel(nsIURI* aURI) {
-  return aURI && (aURI->SchemeIs("http") || aURI->SchemeIs("https") ||
-                  aURI->SchemeIs("moz"));
+  return SchemeIsHTTP(aURI) || SchemeIsHTTPS(aURI) || aURI->SchemeIs("moz") ||
+         SchemeIsData(aURI) || SchemeIsFile(aURI) || SchemeIsFTP(aURI) ||
+         SchemeIsBlob(aURI);
 }
 
 /* static */ bool nsDocShell::CreateChannelForLoadState(
@@ -13239,35 +13240,6 @@ nsCommandManager* nsDocShell::GetCommandManager() {
 }
 
 NS_IMETHODIMP
-nsDocShell::GetIsOnlyToplevelInTabGroup(bool* aResult) {
-  MOZ_ASSERT(aResult);
-
-  nsPIDOMWindowOuter* outer = GetWindow();
-  MOZ_ASSERT(outer);
-
-  // If we are not toplevel then we are not the only toplevel window in the
-  // tab group.
-  if (outer->GetInProcessScriptableParentOrNull()) {
-    *aResult = false;
-    return NS_OK;
-  }
-
-  // If we have any other toplevel windows in our tab group, then we are not
-  // the only toplevel window in the tab group.
-  nsTArray<nsPIDOMWindowOuter*> toplevelWindows =
-      outer->TabGroup()->GetTopLevelWindows();
-  if (toplevelWindows.Length() > 1) {
-    *aResult = false;
-    return NS_OK;
-  }
-  MOZ_ASSERT(toplevelWindows.Length() == 1);
-  MOZ_ASSERT(toplevelWindows[0] == outer);
-
-  *aResult = true;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDocShell::GetAwaitingLargeAlloc(bool* aResult) {
   MOZ_ASSERT(aResult);
   nsCOMPtr<nsIBrowserChild> browserChild = GetBrowserChild();
@@ -13370,6 +13342,12 @@ nsDocShell::GetColorMatrix(nsTArray<float>& aMatrix) {
 }
 
 #undef MATRIX_LENGTH
+
+NS_IMETHODIMP
+nsDocShell::GetIsForceReloading(bool* aForceReload) {
+  *aForceReload = IsForceReloading();
+  return NS_OK;
+}
 
 bool nsDocShell::IsForceReloading() { return IsForceReloadType(mLoadType); }
 

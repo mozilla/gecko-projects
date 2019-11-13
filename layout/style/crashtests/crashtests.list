@@ -181,7 +181,6 @@ load 1344210.html
 load 1353312.html
 load 1356601-1.html
 load 1364139-1.html
-skip-if(!xbl) load 1370793-1.xhtml
 load 1371450-1.html
 load 1374175-1.html
 load 1375812-1.html
@@ -310,3 +309,6 @@ load 1566684.html
 load 1579788.html
 load 1580307.html
 load 1581579.html
+skip-if(release_or_beta) pref(dom.paintWorklet.enabled,true) pref(dom.worklet.enabled,true) load 1593766.html # bug 1581896
+pref(layout.css.motion-path.enabled,true) load 1594949.html
+pref(layout.css.motion-path.enabled,true) pref(layout.css.individual-transform.enabled,true) load 1594960.html

@@ -12,12 +12,15 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
 
+#include <algorithm>
+
 #include "debugger/DebugAPI.h"
 #include "gc/Marking.h"
 #include "jit/BaselineIC.h"
 #include "js/CharacterEncoding.h"
 #include "js/Result.h"
 #include "js/Value.h"
+#include "util/Memory.h"
 #include "vm/EqualityOperations.h"  // js::SameValue
 #include "vm/TypedArrayObject.h"
 
@@ -534,7 +537,7 @@ DenseElementResult NativeObject::maybeDensifySparseElements(
       if (shape->attributes() == JSPROP_ENUMERATE &&
           shape->hasDefaultGetter() && shape->hasDefaultSetter()) {
         numDenseElements++;
-        newInitializedLength = Max(newInitializedLength, index + 1);
+        newInitializedLength = std::max(newInitializedLength, index + 1);
       } else {
         /*
          * For simplicity, only densify the object if all indexed
@@ -700,7 +703,7 @@ bool NativeObject::tryUnshiftDenseElements(uint32_t count) {
 
     // Move more elements than we need, so that other unshift calls will be
     // fast. We just have to make sure we don't exceed unusedCapacity.
-    toShift = Min(toShift + unusedCapacity / 2, unusedCapacity);
+    toShift = std::min(toShift + unusedCapacity / 2, unusedCapacity);
 
     // Ensure |numShifted + toShift| does not exceed MaxShiftedElements.
     if (numShifted + toShift > ObjectElements::MaxShiftedElements) {

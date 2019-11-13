@@ -7,7 +7,8 @@
 module.exports = {
   prefs: {
     getBoolPref: (pref, defaultValue) => {
-      return pref === "devtools.testing" ? true : !!defaultValue;
+      // We always use the default value while jest testing.
+      return !!defaultValue;
     },
   },
 };

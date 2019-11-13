@@ -2553,9 +2553,19 @@ void nsCSSFrameConstructor::SetUpDocElementContainingBlock(
     isXUL = aDocElement->IsXULElement();
   }
 
-  // Never create scrollbars for XUL documents
-  bool isScrollable =
-      isPaginated ? presContext->HasPaginatedScrolling() : !isXUL;
+  // Never create scrollbars for XUL documents or top level XHTML documents that
+  // disable scrolling.
+  bool isScrollable = true;
+  if (isPaginated) {
+    isScrollable = presContext->HasPaginatedScrolling();
+  } else if (isXUL) {
+    isScrollable = false;
+  } else if (nsContentUtils::IsInChromeDocshell(aDocElement->OwnerDoc()) &&
+             aDocElement->AsElement()->AttrValueIs(
+                 kNameSpaceID_None, nsGkAtoms::scrolling, nsGkAtoms::_false,
+                 eCaseMatters)) {
+    isScrollable = false;
+  }
 
   // We no longer need to do overflow propagation here. It's taken care of
   // when we construct frames for the element whose overflow might be
@@ -6692,7 +6702,7 @@ void nsCSSFrameConstructor::ContentAppended(nsIContent* aFirstNewContent,
   }
 
   LAYOUT_PHASE_TEMP_EXIT();
-  if (WipeInsertionParent(parentFrame, aFirstNewContent, nullptr)) {
+  if (WipeInsertionParent(parentFrame)) {
     LAYOUT_PHASE_TEMP_REENTER();
     return;
   }
@@ -7093,7 +7103,7 @@ void nsCSSFrameConstructor::ContentRangeInserted(
   }
 
   LAYOUT_PHASE_TEMP_EXIT();
-  if (WipeInsertionParent(insertion.mParentFrame, aStartChild, aEndChild)) {
+  if (WipeInsertionParent(insertion.mParentFrame)) {
     LAYOUT_PHASE_TEMP_REENTER();
     return;
   }
@@ -10160,9 +10170,18 @@ void nsCSSFrameConstructor::WrapFramesInFirstLetterFrame(
   nsIFrame* prevFrame = nullptr;
   nsIFrame* frame = aParentFrameList;
 
+  // This loop attempts to implement "Finding the First Letter":
+  // https://drafts.csswg.org/css-pseudo-4/#application-in-css
+  // FIXME: we don't handle nested blocks correctly yet though (bug 214004)
   while (frame) {
     nsIFrame* nextFrame = frame->GetNextSibling();
 
+    // Skip all ::markers.
+    if (frame->Style()->GetPseudoType() == PseudoStyleType::marker) {
+      prevFrame = frame;
+      frame = nextFrame;
+      continue;
+    }
     LayoutFrameType frameType = frame->Type();
     if (LayoutFrameType::Text == frameType) {
       // Wrap up first-letter content in a letter frame
@@ -11209,33 +11228,12 @@ static bool IsSafeToAppendToIBSplitInline(nsIFrame* aParentFrame,
   return true;
 }
 
-bool nsCSSFrameConstructor::WipeInsertionParent(nsContainerFrame* aFrame,
-                                                nsIContent* aStartChild,
-                                                nsIContent* aEndChild) {
+bool nsCSSFrameConstructor::WipeInsertionParent(nsContainerFrame* aFrame) {
 #define TRACE(reason)                                                \
   PROFILER_TRACING("Layout", "WipeInsertionParent: " reason, LAYOUT, \
                    TRACING_EVENT)
 
-  MOZ_ASSERT(aStartChild, "Must always pass aStartChild!");
-
   const LayoutFrameType frameType = aFrame->Type();
-
-  if (aFrame->GetContent() == mDocument->GetRootElement()) {
-    // If we insert a content that becomes the canonical body element, we need
-    // to reframe the root element so that the root element's frames has the
-    // correct writing-mode propagated from body element. (See
-    // nsCSSFrameConstructor::ConstructDocElementFrame.)
-    nsIContent* bodyElement = mDocument->GetBodyElement();
-    for (nsIContent* child = aStartChild; child != aEndChild;
-         child = child->GetNextSibling()) {
-      if (child == bodyElement) {
-        TRACE("Root");
-        RecreateFramesForContent(mDocument->GetRootElement(),
-                                 InsertionKind::Async);
-        return true;
-      }
-    }
-  }
 
   // FIXME(emilio): This looks terribly inefficient if you insert elements deep
   // in a MathML subtree.
@@ -11303,6 +11301,29 @@ bool nsCSSFrameConstructor::WipeContainingBlock(
 
   // Before we go and append the frames, we must check for several
   // special situations.
+
+  if (aFrame->GetContent() == mDocument->GetRootElement()) {
+    // If we insert a content that becomes the canonical body element, and its
+    // used WritingMode is different from the root element's used WritingMode,
+    // we need to reframe the root element so that the root element's frames has
+    // the correct writing-mode propagated from body element. (See
+    // nsCSSFrameConstructor::ConstructDocElementFrame.)
+    //
+    // Bug 1594297: When inserting a new <body>, we may need to reframe the old
+    // <body> which has a "overflow" value other than simple "visible". But it's
+    // tricky, see bug 1593752.
+    nsIContent* bodyElement = mDocument->GetBodyElement();
+    for (FCItemIterator iter(aItems); !iter.IsDone(); iter.Next()) {
+      const WritingMode bodyWM(iter.item().mComputedStyle);
+      if (iter.item().mContent == bodyElement &&
+          bodyWM != aFrame->GetWritingMode()) {
+        TRACE("Root");
+        RecreateFramesForContent(mDocument->GetRootElement(),
+                                 InsertionKind::Async);
+        return true;
+      }
+    }
+  }
 
   // Situation #1 is a XUL frame that contains frames that are required
   // to be wrapped in blocks.

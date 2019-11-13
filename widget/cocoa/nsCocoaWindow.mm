@@ -19,7 +19,7 @@
 #include "nsIAppShellService.h"
 #include "nsIBaseWindow.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 #include "nsToolkit.h"
 #include "nsTouchBarNativeAPIDefines.h"
 #include "nsPIDOMWindow.h"
@@ -665,7 +665,7 @@ void nsCocoaWindow::SetModal(bool aState) {
     // appears over behave as they should.  We can't rely on native methods to
     // do this, for the following reason:  The OS runs modal non-sheet windows
     // in an event loop (using [NSApplication runModalForWindow:] or similar
-    // methods) that's incompatible with the modal event loop in nsXULWindow::
+    // methods) that's incompatible with the modal event loop in AppWindow::
     // ShowModal() (each of these event loops is "exclusive", and can't run at
     // the same time as other (similar) event loops).
     if (mWindowType != eWindowType_sheet) {
@@ -1198,8 +1198,10 @@ void nsCocoaWindow::SetSizeMode(nsSizeMode aMode) {
 void nsCocoaWindow::SuppressAnimation(bool aSuppress) {
   if ([mWindow respondsToSelector:@selector(setAnimationBehavior:)]) {
     if (aSuppress) {
+      [mWindow setIsAnimationSuppressed:YES];
       [mWindow setAnimationBehavior:NSWindowAnimationBehaviorNone];
     } else {
+      [mWindow setIsAnimationSuppressed:NO];
       [mWindow setAnimationBehavior:mWindowAnimationBehavior];
     }
   }
@@ -1653,7 +1655,7 @@ void nsCocoaWindow::BackingScaleFactorChanged() {
 
   mBackingScaleFactor = newScale;
 
-  if (!mWidgetListener || mWidgetListener->GetXULWindow()) {
+  if (!mWidgetListener || mWidgetListener->GetAppWindow()) {
     return;
   }
 
@@ -2255,13 +2257,16 @@ void nsCocoaWindow::SetInputContext(const InputContext& aContext,
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-void nsCocoaWindow::GetEditCommands(NativeKeyBindingsType aType, const WidgetKeyboardEvent& aEvent,
+bool nsCocoaWindow::GetEditCommands(NativeKeyBindingsType aType, const WidgetKeyboardEvent& aEvent,
                                     nsTArray<CommandInt>& aCommands) {
   // Validate the arguments.
-  nsIWidget::GetEditCommands(aType, aEvent, aCommands);
+  if (NS_WARN_IF(!nsIWidget::GetEditCommands(aType, aEvent, aCommands))) {
+    return false;
+  }
 
   NativeKeyBindings* keyBindings = NativeKeyBindings::GetInstance(aType);
   keyBindings->GetEditCommands(aEvent, aCommands);
+  return true;
 }
 
 already_AddRefed<nsIWidget> nsIWidget::CreateTopLevelWindow() {
@@ -2848,6 +2853,7 @@ static NSMutableSet* gSwizzledFrameViewClasses = nil;
   mBrightTitlebarForeground = NO;
   mUseMenuStyle = NO;
   mTouchBar = nil;
+  mIsAnimationSuppressed = NO;
   [self updateTrackingArea];
 
   return self;
@@ -2927,6 +2933,14 @@ static NSImage* GetMenuMaskImage() {
   return [super isVisible] || mBeingShown;
 }
 
+- (void)setIsAnimationSuppressed:(BOOL)aValue {
+  mIsAnimationSuppressed = aValue;
+}
+
+- (BOOL)isAnimationSuppressed {
+  return mIsAnimationSuppressed;
+}
+
 - (void)disableSetNeedsDisplay {
   mDisabledNeedsDisplay = YES;
 }
@@ -3002,6 +3016,15 @@ static const NSString* kStateWantsTitleDrawn = @"wantsTitleDrawn";
   NSUInteger styleMask = [self styleMask];
   styleMask &= ~NSFullSizeContentViewWindowMask;
   return [NSWindow frameRectForContentRect:aChildViewRect styleMask:styleMask];
+}
+
+- (NSTimeInterval)animationResizeTime:(NSRect)newFrame {
+  if (mIsAnimationSuppressed) {
+    // Should not animate the initial session-restore size change
+    return 0.0;
+  }
+
+  return [super animationResizeTime:newFrame];
 }
 
 - (void)setWantsTitleDrawn:(BOOL)aDrawTitle {

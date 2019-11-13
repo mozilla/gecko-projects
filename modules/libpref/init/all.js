@@ -233,8 +233,6 @@ pref("browser.download.forbid_open_with", false);
 // Insecure registerProtocolHandler is disabled by default
 pref("dom.registerProtocolHandler.insecure.enabled", false);
 
-// Whether or not indexedDB is enabled.
-pref("dom.indexedDB.enabled", true);
 // Whether or not indexedDB experimental features are enabled.
 pref("dom.indexedDB.experimental", false);
 // Enable indexedDB logging.
@@ -486,7 +484,12 @@ pref("media.videocontrols.picture-in-picture.video-toggle.always-show", false);
   pref("media.peerconnection.ice.trickle_grace_period", 5000);
   pref("media.peerconnection.ice.no_host", false);
   pref("media.peerconnection.ice.default_address_only", false);
-  pref("media.peerconnection.ice.obfuscate_host_addresses", false);
+  // See Bug 1581947 for Android hostname obfuscation
+  #if defined(MOZ_WIDGET_ANDROID)
+    pref("media.peerconnection.ice.obfuscate_host_addresses", false);
+  #else
+    pref("media.peerconnection.ice.obfuscate_host_addresses", true);
+  #endif
   pref("media.peerconnection.ice.proxy_only_if_behind_proxy", false);
   pref("media.peerconnection.ice.proxy_only", false);
   pref("media.peerconnection.turn.disable", false);
@@ -831,6 +834,7 @@ pref("devtools.recordreplay.allowRepaintFailures", true);
 pref("devtools.recordreplay.includeSystemScripts", false);
 pref("devtools.recordreplay.logging", false);
 pref("devtools.recordreplay.loggingFull", false);
+pref("devtools.recordreplay.fastLogpoints", false);
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -3882,6 +3886,8 @@ pref("signon.includeOtherSubdomainsInLookup", false);
 pref("signon.masterPasswordReprompt.timeout_ms", 900000); // 15 Minutes
 pref("signon.showAutoCompleteFooter", false);
 pref("signon.showAutoCompleteOrigins", false);
+// Enable login manager storage.
+pref("signon.storeSignons", true);
 
 // Satchel (Form Manager) prefs
 pref("browser.formfill.debug",            false);
@@ -4854,6 +4860,12 @@ pref("devtools.errorconsole.deprecation_warnings", true);
   // In local builds, enable the browser toolbox by default.
   pref("devtools.chrome.enabled", true, sticky);
   pref("devtools.debugger.remote-enabled", true, sticky);
+#endif
+
+#if defined(MOZ_DEV_EDITION) || defined(NIGHTLY_BUILD)
+  pref("devtools.debugger.features.watchpoints", true);
+#else
+  pref("devtools.debugger.features.watchpoints", false);
 #endif
 
 // Disable remote debugging protocol logging.

@@ -649,5 +649,6 @@ DocShellLoadStateInit nsDocShellLoadState::Serialize() {
   loadState.HeadersStream() = mHeadersStream;
   loadState.SrcdocData() = mSrcdocData;
   loadState.ResultPrincipalURI() = mResultPrincipalURI;
+
   return loadState;
 }

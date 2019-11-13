@@ -21,7 +21,7 @@
 #include "nsIWindowMediator.h"
 #include "nsIWindowWatcher.h"
 #include "nsIXULRuntime.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 #include "nsNativeCharsetUtils.h"
 #include "nsThreadUtils.h"
 #include "nsAutoPtr.h"
@@ -277,6 +277,11 @@ nsAppStartup::Run(void) {
     if (NS_FAILED(rv)) return rv;
   }
 
+  // Make sure that the appropriate quit notifications have been dispatched
+  // regardless of whether the event loop has spun or not. Note that this call
+  // is a no-op if Quit has already been called previously.
+  Quit(eForceQuit);
+
   nsresult retval = NS_OK;
   if (mRestart) {
     retval = NS_SUCCESS_RESTART_APP;
@@ -318,7 +323,7 @@ nsAppStartup::Quit(uint32_t aMode) {
 
       bool usefulHiddenWindow;
       appShell->GetApplicationProvidedHiddenWindow(&usefulHiddenWindow);
-      nsCOMPtr<nsIXULWindow> hiddenWindow;
+      nsCOMPtr<nsIAppWindow> hiddenWindow;
       appShell->GetHiddenWindow(getter_AddRefs(hiddenWindow));
       // If the remaining windows are useful, we won't quit:
       if (!hiddenWindow || usefulHiddenWindow) {
@@ -597,16 +602,16 @@ nsAppStartup::CreateChromeWindow(nsIWebBrowserChrome* aParent,
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMPtr<nsIXULWindow> newWindow;
+  nsCOMPtr<nsIAppWindow> newWindow;
 
   if (aParent) {
-    nsCOMPtr<nsIXULWindow> xulParent(do_GetInterface(aParent));
-    NS_ASSERTION(xulParent,
-                 "window created using non-XUL parent. that's unexpected, but "
+    nsCOMPtr<nsIAppWindow> appParent(do_GetInterface(aParent));
+    NS_ASSERTION(appParent,
+                 "window created using non-app parent. that's unexpected, but "
                  "may work.");
 
-    if (xulParent)
-      xulParent->CreateNewWindow(aChromeFlags, aOpeningTab, aOpener,
+    if (appParent)
+      appParent->CreateNewWindow(aChromeFlags, aOpeningTab, aOpener,
                                  aNextRemoteTabId, getter_AddRefs(newWindow));
     // And if it fails, don't try again without a parent. It could fail
     // intentionally (bug 115969).

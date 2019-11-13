@@ -24,6 +24,7 @@
 
 #include "jit/AtomicOp.h"
 #include "js/Printf.h"
+#include "wasm/WasmUtility.h"
 #include "wasm/WasmValidate.h"
 
 namespace js {
@@ -1194,10 +1195,6 @@ inline bool OpIter<Policy>::readBlockType(BlockType* type) {
 
   *type = BlockType::Func(env_.types[x].funcType());
 
-  if (!type->params().empty() || type->results().length() > 1) {
-    return fail("multi-value block codegen not yet implemented");
-  }
-
   return true;
 #else
   return fail("invalid block type reference");
@@ -2094,6 +2091,12 @@ inline bool OpIter<Policy>::readCallIndirect(uint32_t* funcTypeIndex,
 
   const FuncType& funcType = env_.types[*funcTypeIndex].funcType();
 
+  // FIXME: Remove this check when full multi-value function returns land.
+  // Bug 1585909.
+  if (funcType.results().length() > MaxFuncResults) {
+    return fail("too many returns in signature");
+  }
+
 #ifdef WASM_PRIVATE_REFTYPES
   if (env_.tables[*tableIndex].importedOrExported && funcType.exposesRef()) {
     return fail("cannot expose reference type");
@@ -2156,6 +2159,12 @@ inline bool OpIter<Policy>::readOldCallIndirect(uint32_t* funcTypeIndex,
   }
 
   const FuncType& funcType = env_.types[*funcTypeIndex].funcType();
+
+  // FIXME: Remove this check when full multi-value function returns land.
+  // Bug 1585909.
+  if (funcType.results().length() > MaxFuncResults) {
+    return fail("too many returns in signature");
+  }
 
   if (!popCallArgs(funcType.args(), argValues)) {
     return false;

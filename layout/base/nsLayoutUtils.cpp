@@ -267,6 +267,19 @@ bool nsLayoutUtils::HasAnimationOfPropertySet(
 }
 
 /* static */
+bool nsLayoutUtils::HasAnimationOfTransformAndMotionPath(
+    const nsIFrame* aFrame) {
+  return nsLayoutUtils::HasAnimationOfPropertySet(
+             aFrame,
+             nsCSSPropertyIDSet{eCSSProperty_transform, eCSSProperty_translate,
+                                eCSSProperty_rotate, eCSSProperty_scale,
+                                eCSSProperty_offset_path}) ||
+         (!aFrame->StyleDisplay()->mOffsetPath.IsNone() &&
+          nsLayoutUtils::HasAnimationOfPropertySet(
+              aFrame, nsCSSPropertyIDSet::MotionPathProperties()));
+}
+
+/* static */
 bool nsLayoutUtils::HasEffectiveAnimation(
     const nsIFrame* aFrame, const nsCSSPropertyIDSet& aPropertySet) {
   return HasMatchingAnimations(
@@ -298,6 +311,15 @@ nsCSSPropertyIDSet nsLayoutUtils::GetAnimationPropertiesForCompositor(
 
   for (const KeyframeEffect* effect : *effects) {
     properties |= effect->GetPropertiesForCompositor(*effects, aStyleFrame);
+  }
+
+  // If properties only have motion-path properties, we have to make sure they
+  // have effects. i.e. offset-path is not none or we have offset-path
+  // animations.
+  if (properties.IsSubsetOf(nsCSSPropertyIDSet::MotionPathProperties()) &&
+      !properties.HasProperty(eCSSProperty_offset_path) &&
+      aStyleFrame->StyleDisplay()->mOffsetPath.IsNone()) {
+    properties.Empty();
   }
 
   return properties;
@@ -5197,7 +5219,7 @@ static bool IsReplacedBoxResolvedAgainstZero(
  */
 static nscoord AddIntrinsicSizeOffset(
     gfxContext* aRenderingContext, nsIFrame* aFrame,
-    const nsIFrame::IntrinsicISizeOffsetData& aOffsets,
+    const nsIFrame::IntrinsicSizeOffsetData& aOffsets,
     nsLayoutUtils::IntrinsicISizeType aType, StyleBoxSizing aBoxSizing,
     nscoord aContentSize, nscoord aContentMinSize, const StyleSize& aStyleSize,
     const nscoord* aFixedMinSize, const StyleSize& aStyleMinSize,
@@ -5208,10 +5230,10 @@ static nscoord AddIntrinsicSizeOffset(
   nscoord coordOutsideSize = 0;
 
   if (!(aFlags & nsLayoutUtils::IGNORE_PADDING)) {
-    coordOutsideSize += aOffsets.hPadding;
+    coordOutsideSize += aOffsets.padding;
   }
 
-  coordOutsideSize += aOffsets.hBorder;
+  coordOutsideSize += aOffsets.border;
 
   if (aBoxSizing == StyleBoxSizing::Border) {
     min += coordOutsideSize;
@@ -5220,7 +5242,7 @@ static nscoord AddIntrinsicSizeOffset(
     coordOutsideSize = 0;
   }
 
-  coordOutsideSize += aOffsets.hMargin;
+  coordOutsideSize += aOffsets.margin;
 
   min += coordOutsideSize;
   result = NSCoordSaturatingAdd(result, coordOutsideSize);
@@ -5268,7 +5290,7 @@ static nscoord AddIntrinsicSizeOffset(
     nscoord themeSize = pc->DevPixelsToAppUnits(
         aAxis == eAxisVertical ? devSize.height : devSize.width);
     // GetMinimumWidgetSize() returns a border-box width.
-    themeSize += aOffsets.hMargin;
+    themeSize += aOffsets.margin;
     if (themeSize > result || !canOverride) {
       result = themeSize;
     }
@@ -5541,7 +5563,7 @@ nscoord nsLayoutUtils::IntrinsicForAxis(
             ? aPercentageBasis->BSize(childWM)
             : aPercentageBasis->ISize(childWM);
   }
-  nsIFrame::IntrinsicISizeOffsetData offsets =
+  nsIFrame::IntrinsicSizeOffsetData offsets =
       MOZ_LIKELY(isInlineAxis)
           ? aFrame->IntrinsicISizeOffsets(pmPercentageBasis)
           : aFrame->IntrinsicBSizeOffsets(pmPercentageBasis);
@@ -5674,7 +5696,7 @@ nscoord nsLayoutUtils::MinSizeContributionForAxis(
       aFrame->GetParent()->GetWritingMode().IsOrthogonalTo(childWM)
           ? aPercentageBasis.BSize(childWM)
           : aPercentageBasis.ISize(childWM);
-  nsIFrame::IntrinsicISizeOffsetData offsets =
+  nsIFrame::IntrinsicSizeOffsetData offsets =
       ourInlineAxis == aAxis ? aFrame->IntrinsicISizeOffsets(pmPercentageBasis)
                              : aFrame->IntrinsicBSizeOffsets(pmPercentageBasis);
   nscoord result = 0;

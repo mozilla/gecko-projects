@@ -27,7 +27,7 @@ NS_IMPL_ISUPPORTS(nsTouchBarUpdater, nsITouchBarUpdater);
 NS_IMETHODIMP
 nsTouchBarUpdater::UpdateTouchBarInputs(nsIBaseWindow* aWindow,
                                         const nsTArray<RefPtr<nsITouchBarInput>>& aInputs) {
-  if (!sTouchBarIsInitialized) {
+  if (!sTouchBarIsInitialized || !aWindow) {
     return NS_OK;
   }
 
@@ -54,7 +54,7 @@ nsTouchBarUpdater::UpdateTouchBarInputs(nsIBaseWindow* aWindow,
 
 NS_IMETHODIMP
 nsTouchBarUpdater::ShowPopover(nsIBaseWindow* aWindow, nsITouchBarInput* aPopover, bool aShowing) {
-  if (!sTouchBarIsInitialized || !aPopover) {
+  if (!sTouchBarIsInitialized || !aPopover || !aWindow) {
     return NS_OK;
   }
 
@@ -66,22 +66,10 @@ nsTouchBarUpdater::ShowPopover(nsIBaseWindow* aWindow, nsITouchBarInput* aPopove
   if ([cocoaWin respondsToSelector:@selector(touchBar)]) {
     // We don't need to completely reinitialize the popover. We only need its
     // identifier to look it up in [nsTouchBar mappedLayoutItems].
-    nsAutoString keyStr;
-    nsresult rv = aPopover->GetKey(keyStr);
-    if (NS_FAILED(rv)) {
-      return NS_ERROR_FAILURE;
-    }
-    NSString* key = nsCocoaUtils::ToNSString(keyStr);
+    NSTouchBarItemIdentifier popoverIdentifier = [TouchBarInput nativeIdentifierWithXPCOM:aPopover];
 
-    nsAutoString typeStr;
-    rv = aPopover->GetType(typeStr);
-    if (NS_FAILED(rv)) {
-      return NS_ERROR_FAILURE;
-    }
-    NSString* type = nsCocoaUtils::ToNSString(typeStr);
-
-    TouchBarInput* popoverItem = [[(nsTouchBar*)cocoaWin.touchBar mappedLayoutItems]
-        objectForKey:[TouchBarInput nativeIdentifierWithType:type withKey:key]];
+    TouchBarInput* popoverItem =
+        [[(nsTouchBar*)cocoaWin.touchBar mappedLayoutItems] objectForKey:popoverIdentifier];
 
     [(nsTouchBar*)cocoaWin.touchBar showPopover:popoverItem showing:aShowing];
   }

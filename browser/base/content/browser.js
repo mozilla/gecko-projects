@@ -1759,7 +1759,7 @@ var gBrowserInit = {
     // This needs setting up before we create the first remote browser.
     window.docShell.treeOwner
       .QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIXULWindow).XULBrowserWindow = window.XULBrowserWindow;
+      .getInterface(Ci.nsIAppWindow).XULBrowserWindow = window.XULBrowserWindow;
     window.browserDOMWindow = new nsBrowserAccess();
 
     gBrowser = window._gBrowser;
@@ -2534,7 +2534,7 @@ var gBrowserInit = {
     window.XULBrowserWindow = null;
     window.docShell.treeOwner
       .QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIXULWindow).XULBrowserWindow = null;
+      .getInterface(Ci.nsIAppWindow).XULBrowserWindow = null;
     window.browserDOMWindow = null;
   },
 };
@@ -3320,10 +3320,6 @@ function URLBarSetURI(aURI, updatePopupNotifications) {
 
 function losslessDecodeURI(aURI) {
   let scheme = aURI.scheme;
-  if (scheme == "moz-action") {
-    throw new Error("losslessDecodeURI should never get a moz-action URI");
-  }
-
   var value = aURI.displaySpec;
 
   let decodeASCIIOnly = !["https", "http", "file", "ftp"].includes(scheme);
@@ -8624,10 +8620,7 @@ var gPrivateBrowsingUI = {
     // Adjust the window's title
     let docElement = document.documentElement;
     if (!PrivateBrowsingUtils.permanentPrivateBrowsing) {
-      docElement.setAttribute(
-        "title",
-        docElement.getAttribute("title_privatebrowsing")
-      );
+      docElement.title = docElement.getAttribute("title_privatebrowsing");
       docElement.setAttribute(
         "titlemodifier",
         docElement.getAttribute("titlemodifier_privatebrowsing")

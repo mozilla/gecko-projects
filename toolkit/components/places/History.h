@@ -30,6 +30,7 @@ namespace places {
 
 struct VisitData;
 class ConcurrentStatementsHolder;
+class VisitedQuery;
 
 // Initial size of mRecentlyVisitedURIs.
 #define RECENTLY_VISITED_URIS_SIZE 64
@@ -60,17 +61,11 @@ class History final : public BaseHistory,
   NS_IMETHOD SetURITitle(nsIURI*, const nsAString&) final;
 
   // BaseHistory
-  Result<Ok, nsresult> StartVisitedQuery(nsIURI*) final;
-  void CancelVisitedQueryIfPossible(nsIURI*) final {
-    // TODO(bug 1591393): This could be worth it? Needs some measurement.
-  }
+  void StartPendingVisitedQueries(const PendingVisitedQueries&) final;
 
   History();
 
-  /**
-   * Obtains the statement to use to check if a URI is visited or not.
-   */
-  nsresult GetIsVisitedStatement(mozIStorageCompletionCallback* aCallback);
+  nsresult QueueVisitedStatement(RefPtr<VisitedQuery>);
 
   /**
    * Adds an entry in moz_places with the data in aVisitData.

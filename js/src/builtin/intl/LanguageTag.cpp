@@ -26,12 +26,15 @@
 
 #include "builtin/intl/CommonFunctions.h"
 #include "ds/Sort.h"
+#include "gc/Tracer.h"
 #include "js/Result.h"
+#include "js/TracingAPI.h"
 #include "js/Utility.h"
 #include "js/Vector.h"
 #include "unicode/uloc.h"
 #include "unicode/utypes.h"
 #include "util/StringBuffer.h"
+#include "util/Text.h"
 #include "vm/JSContext.h"
 #include "vm/Printer.h"
 #include "vm/StringType.h"
@@ -825,6 +828,18 @@ JSString* LanguageTag::toString(JSContext* cx) const {
   return sb.finishString();
 }
 
+UniqueChars LanguageTag::toStringZ(JSContext* cx) const {
+  Vector<char, 16> sb(cx);
+  if (!LanguageTagToString(cx, *this, sb)) {
+    return nullptr;
+  }
+  if (!sb.append('\0')) {
+    return nullptr;
+  }
+
+  return UniqueChars(sb.extractOrCopyRawBuffer());
+}
+
 // Zero-terminated ICU Locale ID.
 using LocaleId =
     js::Vector<char, LanguageLength + 1 + ScriptLength + 1 + RegionLength + 1>;
@@ -1162,12 +1177,25 @@ JS::Result<bool> LanguageTagParser::tryParse(JSContext* cx,
                                              LanguageTag& tag) {
   JS::AutoCheckCannotGC nogc;
   LocaleChars localeChars = StringChars(locale, nogc);
+  return tryParse(cx, localeChars, locale->length(), tag);
+}
 
+JS::Result<bool> LanguageTagParser::tryParse(JSContext* cx,
+                                             mozilla::Span<const char> locale,
+                                             LanguageTag& tag) {
+  LocaleChars localeChars = StringChars(locale.data());
+  return tryParse(cx, localeChars, locale.size(), tag);
+}
+
+JS::Result<bool> LanguageTagParser::tryParse(JSContext* cx,
+                                             LocaleChars& localeChars,
+                                             size_t localeLength,
+                                             LanguageTag& tag) {
   // unicode_locale_id = unicode_language_id
   //                     extensions*
   //                     pu_extensions? ;
 
-  LanguageTagParser ts(localeChars, locale->length());
+  LanguageTagParser ts(localeChars, localeLength);
   Token tok = ts.nextToken();
 
   bool ok;
@@ -1301,6 +1329,21 @@ bool LanguageTagParser::parse(JSContext* cx, JSLinearString* locale,
   if (UniqueChars localeChars = QuoteString(cx, locale, '"')) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_INVALID_LANGUAGE_TAG, localeChars.get());
+  }
+  return false;
+}
+
+bool LanguageTagParser::parse(JSContext* cx, mozilla::Span<const char> locale,
+                              LanguageTag& tag) {
+  bool ok;
+  JS_TRY_VAR_OR_RETURN_FALSE(cx, ok, tryParse(cx, locale, tag));
+  if (ok) {
+    return true;
+  }
+  if (UniqueChars localeChars =
+          DuplicateString(cx, locale.data(), locale.size())) {
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                             JSMSG_INVALID_LANGUAGE_TAG, localeChars.get());
   }
   return false;
 }
@@ -1481,6 +1524,8 @@ bool LanguageTagParser::canParseUnicodeExtension(
 
 bool LanguageTagParser::canParseUnicodeExtensionType(
     JSLinearString* unicodeType) {
+  MOZ_ASSERT(unicodeType->length() > 0, "caller must exclude empty strings");
+
   JS::AutoCheckCannotGC nogc;
   LocaleChars unicodeTypeChars = StringChars(unicodeType, nogc);
 
@@ -1629,6 +1674,10 @@ JS::Result<JSString*> ParseStandaloneISO639LanguageTag(JSContext* cx,
     return cx->alreadyReportedOOM();
   }
   return result;
+}
+
+void js::intl::UnicodeExtensionKeyword::trace(JSTracer* trc) {
+  TraceRoot(trc, &type_, "UnicodeExtensionKeyword::type");
 }
 
 }  // namespace intl

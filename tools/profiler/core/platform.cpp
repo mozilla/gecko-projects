@@ -225,8 +225,7 @@ static uint32_t AvailableFeatures() {
 // Default features common to all contexts (even if not available).
 static uint32_t DefaultFeatures() {
   return ProfilerFeature::Java | ProfilerFeature::JS | ProfilerFeature::Leaf |
-         ProfilerFeature::StackWalk | ProfilerFeature::Threads |
-         ProfilerFeature::Responsiveness;
+         ProfilerFeature::StackWalk | ProfilerFeature::Threads;
 }
 
 // Extra default features when MOZ_PROFILER_STARTUP is set (even if not
@@ -1905,22 +1904,16 @@ static void DoSyncSample(PSLockRef aLock, RegisteredThread& aRegisteredThread,
 // Writes the components of a periodic sample to ActivePS's ProfileBuffer.
 // The ThreadId entry is already written in the main ProfileBuffer, its location
 // is `aSamplePos`, we can write the rest to `aBuffer` (which may be different).
-static void DoPeriodicSample(PSLockRef aLock,
-                             RegisteredThread& aRegisteredThread,
-                             ProfiledThreadData& aProfiledThreadData,
-                             const TimeStamp& aNow, const Registers& aRegs,
-                             uint64_t aSamplePos, ProfileBuffer& aBuffer) {
+static inline void DoPeriodicSample(PSLockRef aLock,
+                                    RegisteredThread& aRegisteredThread,
+                                    ProfiledThreadData& aProfiledThreadData,
+                                    const TimeStamp& aNow,
+                                    const Registers& aRegs, uint64_t aSamplePos,
+                                    ProfileBuffer& aBuffer) {
   // WARNING: this function runs within the profiler's "critical section".
 
   DoSharedSample(aLock, /* aIsSynchronous = */ false, aRegisteredThread, aRegs,
                  aSamplePos, aBuffer);
-
-  ThreadResponsiveness* resp = aProfiledThreadData.GetThreadResponsiveness();
-  if (resp && resp->HasData()) {
-    double delta = resp->GetUnresponsiveDuration(
-        (aNow - CorePS::ProcessStartTime()).ToMilliseconds());
-    aBuffer.AddEntry(ProfileBufferEntry::Responsiveness(delta));
-  }
 }
 
 // END sampling/unwinding code
@@ -2354,8 +2347,7 @@ static void locked_profiler_stream_json_for_this_process(
       // java thread, we have to get thread id and name via JNI.
       RefPtr<ThreadInfo> threadInfo = new ThreadInfo(
           "Java Main Thread", 0, false, CorePS::ProcessStartTime());
-      ProfiledThreadData profiledThreadData(
-          threadInfo, nullptr, ActivePS::FeatureResponsiveness(aLock));
+      ProfiledThreadData profiledThreadData(threadInfo, nullptr);
       profiledThreadData.StreamJSON(*javaBuffer.get(), nullptr, aWriter,
                                     CorePS::ProcessName(aLock),
                                     CorePS::ProcessStartTime(), aSinceTime,
@@ -2445,6 +2437,7 @@ static char FeatureCategory(uint32_t aFeature) {
   return 'x';
 }
 
+// Doesn't exist if aExitCode is 0
 static void PrintUsageThenExit(int aExitCode) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
@@ -2544,7 +2537,9 @@ static void PrintUsageThenExit(int aExitCode) {
 #endif
   );
 
-  exit(aExitCode);
+  if (aExitCode != 0) {
+    exit(aExitCode);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -2578,13 +2573,17 @@ class Sampler {
 
   // This method suspends and resumes the samplee thread. It calls the passed-in
   // function-like object aProcessRegs (passing it a populated |const
-  // Registers&| arg) while the samplee thread is suspended.
+  // Registers&| arg) while the samplee thread is suspended.  Note that
+  // the aProcessRegs function must be very careful not to do anything that
+  // requires a lock, since we may have interrupted the thread at any point.
+  // As an example, you can't call TimeStamp::Now() since on windows it
+  // takes a lock on the performance counter.
   //
   // Func must be a function-like object of type `void()`.
   template <typename Func>
   void SuspendAndSampleAndResumeThread(
       PSLockRef aLock, const RegisteredThread& aRegisteredThread,
-      const Func& aProcessRegs);
+      const TimeStamp& aNow, const Func& aProcessRegs);
 
  private:
 #if defined(GP_OS_linux) || defined(GP_OS_android)
@@ -2851,12 +2850,6 @@ void SamplerThread::Run() {
               }
             }
 
-            ThreadResponsiveness* resp =
-                profiledThreadData->GetThreadResponsiveness();
-            if (resp) {
-              resp->Update();
-            }
-
             AUTO_PROFILER_STATS(gecko_SamplerThread_Run_DoPeriodicSample);
 
             TimeStamp now = TimeStamp::NowUnfuzzed();
@@ -2874,13 +2867,213 @@ void SamplerThread::Run() {
             buffer.AddEntry(ProfileBufferEntry::TimeBeforeCompactStack(
                 delta.ToMilliseconds()));
 
+            Maybe<double> unresponsiveDuration_ms;
+
             // Suspend the thread and collect its stack data in the local
             // buffer.
             mSampler.SuspendAndSampleAndResumeThread(
-                lock, *registeredThread, [&](const Registers& aRegs) {
+                lock, *registeredThread, now,
+                [&](const Registers& aRegs, const TimeStamp& aNow) {
                   DoPeriodicSample(lock, *registeredThread, *profiledThreadData,
                                    now, aRegs, samplePos, localProfileBuffer);
+
+                  // For "responsiveness", we want the input delay - but if
+                  // there are no events in the input queue (or even if there
+                  // are), we're interested in how long the delay *would* be for
+                  // an input event now, which would be the time to finish the
+                  // current event + the delay caused by any events already in
+                  // the input queue (plus any High priority events).  Events at
+                  // lower priorities (in a PrioritizedEventQueue) than Input
+                  // count for input delay only for the duration that they're
+                  // running, since when they finish, any queued input event
+                  // would run.
+                  //
+                  // Unless we record the time state of all events and queue
+                  // states at all times, this is hard to precisely calculate,
+                  // but we can approximate it well in post-processing with
+                  // RunningEventDelay and RunningEventStart.
+                  //
+                  // RunningEventDelay is the time duration the event was queued
+                  // before starting execution.  RunningEventStart is the time
+                  // the event started. (Note: since we care about Input event
+                  // delays on MainThread, for PrioritizedEventQueues we return
+                  // 0 for RunningEventDelay if the currently running event has
+                  // a lower priority than Input (since Input events won't queue
+                  // behind them).
+                  //
+                  // To directly measure this we would need to record the time
+                  // at which the newest event currently in each queue at time X
+                  // (the sample time) finishes running.  This of course would
+                  // require looking into the future, or recording all this
+                  // state and then post-processing it later. If we were to
+                  // trace every event start and end we could do this, but it
+                  // would have significant overhead to do so (and buffer
+                  // usage).  From a recording of RunningEventDelays and
+                  // RunningEventStarts we can infer the actual delay:
+                  //
+                  // clang-format off
+                  // Event queue: <tail> D  :  C  :  B  : A <head>
+                  // Time inserted (ms): 40 :  20 : 10  : 0
+                  // Run Time (ms):      30 : 100 : 40  : 30
+                  //
+                  // 0    10   20   30   40   50   60   70   80   90  100  110  120  130  140  150  160  170
+                  // [A||||||||||||]
+                  //      ----------[B|||||||||||||||||]
+                  //           -------------------------[C|||||||||||||||||||||||||||||||||||||||||||||||]
+                  //                     -----------------------------------------------------------------[D|||||||||...]
+                  //
+                  // Calculate the delay of a new event added at time t: (run every sample)
+                  //    TimeSinceRunningEventBlockedInputEvents = RunningEventDelay + (now - RunningEventStart);
+                  //    effective_submission = now - TimeSinceRunningEventBlockedInputEvents;
+                  //    delta = (now - last_sample_time);
+                  //    last_sample_time = now;
+                  //    for (t=effective_submission to now) {
+                  //       delay[t] += delta;
+                  //    }
+                  //
+                  // Can be reduced in overhead by:
+                  //    TimeSinceRunningEventBlockedInputEvents = RunningEventDelay + (now - RunningEventStart);
+                  //    effective_submission = now - TimeSinceRunningEventBlockedInputEvents;
+                  //    if (effective_submission != last_submission) {
+                  //      delta = (now - last_submision);
+                  //      // this loop should be made to match each sample point in the range
+                  //      // intead of assuming 1ms sampling as this pseudocode does
+                  //      for (t=last_submission to effective_submission-1) {
+                  //         delay[t] += delta;
+                  //         delta -= 1; // assumes 1ms; adjust as needed to match for()
+                  //      }
+                  //      last_submission = effective_submission;
+                  //    }
+                  //
+                  // Time  Head of queue   Running Event  RunningEventDelay  Delay of       Effective     Started    Calc (submission->now add 10ms)  Final
+                  //                                                         hypothetical   Submission    Running @                                   result
+                  //                                                         event E
+                  // 0        Empty            A                0                30              0           0       @0=10                             30
+                  // 10         B              A                0                60              0           0       @0=20, @10=10                     60
+                  // 20         B              A                0               150              0           0       @0=30, @10=20, @20=10            150
+                  // 30         C              B               20               140             10          30       @10=20, @20=10, @30=0            140
+                  // 40         C              B               20               160                                  @10=30, @20=20...                160
+                  // 50         C              B               20               150                                                                   150
+                  // 60         C              B               20               140                                  @10=50, @20=40...                140
+                  // 70         D              C               50               130             20          70       @20=50, @30=40...                130
+                  // ...
+                  // 160        D              C               50                40                                  @20=140, @30=130...               40
+                  // 170      <empty>          D              140                30             40                   @40=140, @50=130... (rounding)    30
+                  // 180      <empty>          D              140                20             40                   @40=150                           20
+                  // 190      <empty>          D              140                10             40                   @40=160                           10
+                  // 200      <empty>        <empty>            0                 0             NA                                                      0
+                  //
+                  // Function Delay(t) = the time between t and the time at which a hypothetical
+                  // event e would start executing, if e was enqueued at time t.
+                  //
+                  // Delay(-1) = 0 // Before A was enqueued. No wait time, can start running
+                  //               // instantly.
+                  // Delay(0) = 30 // The hypothetical event e got enqueued just after A got
+                  //               // enqueued. It can start running at 30, when A is done.
+                  // Delay(5) = 25
+                  // Delay(10) = 60 // Can start running at 70, after both A and B are done.
+                  // Delay(19) = 51
+                  // Delay(20) = 150 // Can start running at 170, after A, B & C.
+                  // Delay(25) = 145
+                  // Delay(30) = 170 // Can start running at 200, after A, B, C & D.
+                  // Delay(120) = 80
+                  // Delay(200) = 0 // (assuming nothing was enqueued after D)
+                  //
+                  // For every event that gets enqueued, the Delay time will go up by the
+                  // event's running time at the time at which the event is enqueued.
+                  // The Delay function will be a sawtooth of the following shape:
+                  //
+                  //             |\           |...
+                  //             | \          |
+                  //        |\   |  \         |
+                  //        | \  |   \        |
+                  //     |\ |  \ |    \       |
+                  //  |\ | \|   \|     \      |
+                  //  | \|              \     |
+                  // _|                  \____|
+                  //
+                  //
+                  // A more complex example with a PrioritizedEventQueue:
+                  //
+                  // Event queue: <tail> D  :  C  :  B  : A <head>
+                  // Time inserted (ms): 40 :  20 : 10  : 0
+                  // Run Time (ms):      30 : 100 : 40  : 30
+                  // Priority:         Input: Norm: Norm: Norm
+                  //
+                  // 0    10   20   30   40   50   60   70   80   90  100  110  120  130  140  150  160  170
+                  // [A||||||||||||]
+                  //      ----------[B|||||||||||||||||]
+                  //           ----------------------------------------[C|||||||||||||||||||||||||||||||||||||||||||||||]
+                  //                     ---------------[D||||||||||||]
+                  //
+                  //
+                  // Time  Head of queue   Running Event  RunningEventDelay  Delay of       Effective   Started    Calc (submission->now add 10ms)   Final
+                  //                                                         hypothetical   Submission  Running @                                    result
+                  //                                                         event
+                  // 0        Empty            A                0                30              0           0       @0=10                             30
+                  // 10         B              A                0                20              0           0       @0=20, @10=10                     20
+                  // 20         B              A                0                10              0           0       @0=30, @10=20, @20=10             10
+                  // 30         C              B                0                40             30          30       @30=10                            40
+                  // 40         C              B                0                60             30                   @40=10, @30=20                    60
+                  // 50         C              B                0                50             30                   @50=10, @40=20, @30=30            50
+                  // 60         C              B                0                40             30                   @60=10, @50=20, @40=30, @30=40    40
+                  // 70         C              D               30                30             40          70       @60=20, @50=30, @40=40            30
+                  // 80         C              D               30                20             40          70       ...@50=40, @40=50                 20
+                  // 90         C              D               30                10             40          70       ...@60=40, @50=50, @40=60         10
+                  // 100      <empty>          C                0               100             100        100       @100=10                          100
+                  // 110      <empty>          C                0                90             100        100       @110=10, @100=20                  90
+
+                  //
+                  // For PrioritizedEventQueue, the definition of the Delay(t) function is adjusted: the hypothetical event e has Input priority.
+                  // Delay(-1) = 0 // Before A was enqueued. No wait time, can start running
+                  //               // instantly.
+                  // Delay(0) = 30 // The hypothetical input event e got enqueued just after A got
+                  //               // enqueued. It can start running at 30, when A is done.
+                  // Delay(5) = 25
+                  // Delay(10) = 20
+                  // Delay(25) = 5 // B has been queued, but e does not need to wait for B because e has Input priority and B does not.
+                  //               // So e can start running at 30, when A is done.
+                  // Delay(30) = 40 // Can start running at 70, after B is done.
+                  // Delay(40) = 60 // Can start at 100, after B and D are done (D is Input Priority)
+                  // Delay(80) = 20
+                  // Delay(100) = 100 // Wait for C to finish
+
+                  // clang-format on
+                  //
+                  // Alternatively we could insert (recycled instead of
+                  // allocated/freed) input events at every sample period
+                  // (1ms...), and use them to back-calculate the delay.  This
+                  // might also be somewhat expensive, and would require
+                  // guessing at the maximum delay, which would likely be in the
+                  // seconds, and so you'd need 1000's of pre-allocated events
+                  // per queue per thread - so there would be a memory impact as
+                  // well.
+
+                  TimeDuration currentEventDelay;
+                  TimeDuration currentEventRunning;
+                  registeredThread->GetRunningEventDelay(
+                      aNow, currentEventDelay, currentEventRunning);
+
+                  // Note: a different definition of responsiveness than the
+                  // 16ms event injection.
+
+                  // Don't suppress 0's for now; that can be a future
+                  // optimization.  We probably want one zero to be stored
+                  // before we start suppressing, which would be more
+                  // complex.
+                  unresponsiveDuration_ms =
+                      Some(currentEventDelay.ToMilliseconds() +
+                           currentEventRunning.ToMilliseconds());
                 });
+
+            // If we got responsiveness data, store it before the CompactStack.
+            // Note: It is not stored inside the CompactStack so that it doesn't
+            // get incorrectly duplicated when the thread is sleeping.
+            if (unresponsiveDuration_ms.isSome()) {
+              CorePS::CoreBlocksRingBuffer().PutObjects(
+                  ProfileBufferEntry::Kind::UnresponsiveDurationMs,
+                  *unresponsiveDuration_ms);
+            }
 
             // There *must* be a CompactStack after a TimeBeforeCompactStack;
             // but note that other entries may have been concurrently inserted
@@ -3049,7 +3242,8 @@ static uint32_t ParseFeature(const char* aFeature, bool aIsStartup) {
 #undef PARSE_FEATURE_BIT
 
   printf("\nUnrecognized feature \"%s\".\n\n", aFeature);
-  PrintUsageThenExit(1);
+  // Since we may have an old feature we don't implement anymore, don't exit
+  PrintUsageThenExit(0);
   return 0;
 }
 
@@ -3103,8 +3297,7 @@ static ProfilingStack* locked_register_thread(PSLockRef aLock,
     nsCOMPtr<nsIEventTarget> eventTarget = registeredThread->GetEventTarget();
     ProfiledThreadData* profiledThreadData = ActivePS::AddLiveProfiledThread(
         aLock, registeredThread.get(),
-        MakeUnique<ProfiledThreadData>(info, eventTarget,
-                                       ActivePS::FeatureResponsiveness(aLock)));
+        MakeUnique<ProfiledThreadData>(info, eventTarget));
 
     if (ActivePS::FeatureJS(aLock)) {
       // This StartJSSampling() call is on-thread, so we can poll manually to
@@ -3210,6 +3403,17 @@ static Vector<const char*> SplitAtCommas(const char* aString,
   return array;
 }
 
+void profiler_init_threadmanager() {
+  LOG("profiler_init_threadmanager");
+
+  PSAutoLock lock(gPSMutex);
+  RegisteredThread* registeredThread =
+      TLSRegisteredThread::RegisteredThread(lock);
+  if (!registeredThread->GetEventTarget()) {
+    registeredThread->ResetMainThread(NS_GetCurrentThreadNoCreate());
+  }
+}
+
 void profiler_init(void* aStackTop) {
   LOG("profiler_init");
 
@@ -3218,7 +3422,7 @@ void profiler_init(void* aStackTop) {
   MOZ_RELEASE_ASSERT(!CorePS::Exists());
 
   if (getenv("MOZ_PROFILER_HELP")) {
-    PrintUsageThenExit(0);  // terminates execution
+    PrintUsageThenExit(1);  // terminates execution
   }
 
   SharedLibraryInfo::Initialize();
@@ -3787,8 +3991,7 @@ static void locked_profiler_start(PSLockRef aLock, PowerOfTwo32 aCapacity,
       nsCOMPtr<nsIEventTarget> eventTarget = registeredThread->GetEventTarget();
       ProfiledThreadData* profiledThreadData = ActivePS::AddLiveProfiledThread(
           aLock, registeredThread.get(),
-          MakeUnique<ProfiledThreadData>(
-              info, eventTarget, ActivePS::FeatureResponsiveness(aLock)));
+          MakeUnique<ProfiledThreadData>(info, eventTarget));
       if (ActivePS::FeatureJS(aLock)) {
         registeredThread->StartJSSampling(ActivePS::JSFlags(aLock));
         if (info->ThreadId() == tid) {
@@ -4665,8 +4868,10 @@ void profiler_suspend_and_sample_thread(int aThreadId, uint32_t aFeatures,
 
       // Suspend, sample, and then resume the target thread.
       Sampler sampler(lock);
+      TimeStamp now = TimeStamp::Now();
       sampler.SuspendAndSampleAndResumeThread(
-          lock, registeredThread, [&](const Registers& aRegs) {
+          lock, registeredThread, now,
+          [&](const Registers& aRegs, const TimeStamp& aNow) {
             // The target thread is now suspended. Collect a native backtrace,
             // and call the callback.
             bool isSynchronous = false;
@@ -4679,7 +4884,8 @@ void profiler_suspend_and_sample_thread(int aThreadId, uint32_t aFeatures,
               DoFramePointerBacktrace(lock, registeredThread, aRegs,
                                       nativeStack);
 #  elif defined(USE_MOZ_STACK_WALK)
-          DoMozStackWalkBacktrace(lock, registeredThread, aRegs, nativeStack);
+              DoMozStackWalkBacktrace(lock, registeredThread, aRegs,
+                                      nativeStack);
 #  else
 #    error "Invalid configuration"
 #  endif

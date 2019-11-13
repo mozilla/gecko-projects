@@ -5,13 +5,17 @@
 use api::ColorF;
 use api::units::{DeviceRect, DeviceIntSize, DeviceIntRect, DeviceIntPoint, WorldRect, DevicePixelScale};
 use crate::gpu_types::{ZBufferId, ZBufferIdGenerator};
-use crate::picture::{ResolvedSurfaceTexture, SurfaceTextureDescriptor};
-use std::ops;
+use crate::picture::{ResolvedSurfaceTexture};
+use std::{ops, u64};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /*
  Types and definitions related to compositing picture cache tiles
  and/or OS compositor integration.
  */
+
+// Counter for generating unique native surface ids
+static NEXT_NATIVE_SURFACE_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Describes details of an operation to apply to a native surface
 #[derive(Debug, Clone)]
@@ -192,10 +196,11 @@ impl CompositeState {
     /// specified id and dimensions.
     pub fn create_surface(
         &mut self,
-        id: NativeSurfaceId,
         size: DeviceIntSize,
         is_opaque: bool,
-    ) -> SurfaceTextureDescriptor {
+    ) -> NativeSurfaceId {
+        let id = NativeSurfaceId(NEXT_NATIVE_SURFACE_ID.fetch_add(1, Ordering::Relaxed));
+
         self.native_surface_updates.push(
             NativeSurfaceOperation {
                 id,
@@ -206,10 +211,7 @@ impl CompositeState {
             }
         );
 
-        SurfaceTextureDescriptor::NativeSurface {
-            id,
-            size,
-        }
+        id
     }
 
     /// Queue up destruction of an existing native OS surface. This is used when
@@ -279,6 +281,11 @@ impl CompositeState {
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct NativeSurfaceId(pub u64);
+
+impl NativeSurfaceId {
+    /// A special id for the native surface that is used for debug / profiler overlays.
+    pub const DEBUG_OVERLAY: NativeSurfaceId = NativeSurfaceId(u64::MAX);
+}
 
 /// Information about a bound surface that the native compositor
 /// returns to WR.

@@ -497,9 +497,9 @@ def executable_name(name):
 
 
 @CommandProvider
-class CheckSpiderMonkeyCommand(MachCommandBase):
+class SpiderMonkeyTests(MachCommandBase):
     @Command('jstests', category='testing',
-             description='Run SpiderMonkey JS tests in the JavaScript shell.')
+             description='Run SpiderMonkey JS tests in the JS shell.')
     @CommandArgument('--shell', help='The shell to be used')
     @CommandArgument('params', nargs=argparse.REMAINDER,
                      help="Extra arguments to pass down to the test harness.")
@@ -516,10 +516,11 @@ class CheckSpiderMonkeyCommand(MachCommandBase):
             js,
             '--jitflags=jstests',
         ] + params
+
         return subprocess.call(jstest_cmd)
 
     @Command('jit-test', category='testing',
-             description='Run SpiderMonkey jit-tests in the JavaScript shell.')
+             description='Run SpiderMonkey jit-tests in the JS shell.')
     @CommandArgument('--shell', help='The shell to be used')
     @CommandArgument('params', nargs=argparse.REMAINDER,
                      help="Extra arguments to pass down to the test harness.")
@@ -532,92 +533,65 @@ class CheckSpiderMonkeyCommand(MachCommandBase):
         js = shell or os.path.join(self.bindir, executable_name('js'))
         jittest_cmd = [
             python,
-            os.path.join(self.topsrcdir, 'js', 'src',
-                         'jit-test', 'jit_test.py'),
+            os.path.join(self.topsrcdir, 'js', 'src', 'jit-test', 'jit_test.py'),
             js,
         ] + params
 
         return subprocess.call(jittest_cmd)
 
-    @Command('check-spidermonkey', category='testing',
-             description='Run SpiderMonkey tests (JavaScript engine).')
-    @CommandArgument('--valgrind', action='store_true',
-                     help='Run jit-test suite with valgrind flag')
-    def run_checkspidermonkey(self, **params):
+    @Command('jsapi-tests', category='testing',
+             description='Run SpiderMonkey JSAPI tests.')
+    @CommandArgument('test_name', nargs='?', metavar='N',
+                     help='Test to run. Can be a prefix or omitted. If '
+                     'omitted, the entire test suite is executed.')
+    def run_jsapitests(self, test_name=None):
+        import subprocess
+
+        jsapi_tests_cmd = [
+            os.path.join(self.bindir, executable_name('jsapi-tests'))
+        ]
+        if test_name:
+            jsapi_tests_cmd.append(test_name)
+
+        return subprocess.call(jsapi_tests_cmd)
+
+    def run_check_js_msg(self):
         import subprocess
 
         self.virtualenv_manager.ensure()
         python = self.virtualenv_manager.python_path
 
-        js = os.path.join(self.bindir, executable_name('js'))
+        check_cmd = [
+            python,
+            os.path.join(self.topsrcdir, 'config', 'check_js_msg_encoding.py')
+        ]
 
+        return subprocess.call(check_cmd)
+
+    @Command('check-spidermonkey', category='testing',
+             description='Run SpiderMonkey tests (JavaScript engine).')
+    @CommandArgument('--valgrind', action='store_true',
+                     help='Run jit-test suite with valgrind flag')
+    def run_checkspidermonkey(self, valgrind=False):
         print('Running jit-tests')
         jittest_args = [
             '--no-slow',
             '--jitflags=all',
         ]
-        if params['valgrind']:
+        if valgrind:
             jittest_args.append('--valgrind')
-        jittest_result = self.run_jittests(js, jittest_args)
+        jittest_result = self.run_jittests(shell=None, params=jittest_args)
 
         print('running jstests')
-        jstest_result = self.run_jstests(js, [])
+        jstest_result = self.run_jstests(shell=None, params=[])
 
         print('running jsapi-tests')
-        jsapi_tests_cmd = [os.path.join(
-            self.bindir, executable_name('jsapi-tests'))]
-        jsapi_tests_result = subprocess.call(jsapi_tests_cmd)
+        jsapi_tests_result = self.run_jsapitests(test_name=None)
 
         print('running check-js-msg-encoding')
-        check_js_msg_cmd = [python, os.path.join(
-            self.topsrcdir, 'config', 'check_js_msg_encoding.py')]
-        check_js_msg_result = subprocess.call(
-            check_js_msg_cmd, cwd=self.topsrcdir)
+        check_js_msg_result = self.run_check_js_msg()
 
-        all_passed = jittest_result and jstest_result and jsapi_tests_result and \
-            check_js_msg_result
-
-        return all_passed
-
-
-def has_js_binary(binary):
-    def has_binary(cls):
-        try:
-            name = binary + cls.substs['BIN_SUFFIX']
-        except BuildEnvironmentNotFoundException:
-            return False
-
-        path = os.path.join(cls.topobjdir, 'dist', 'bin', name)
-
-        has_binary.__doc__ = """
-`{}` not found in <objdir>/dist/bin. Make sure you aren't using an artifact build
-and try rebuilding with `ac_add_options --enable-js-shell`.
-""".format(name).lstrip()
-
-        return os.path.isfile(path)
-    return has_binary
-
-
-@CommandProvider
-class JsapiTestsCommand(MachCommandBase):
-    @Command('jsapi-tests', category='testing',
-             conditions=[has_js_binary('jsapi-tests')],
-             description='Run jsapi tests (JavaScript engine).')
-    @CommandArgument('test_name', nargs='?', metavar='N',
-                     help='Test to run. Can be a prefix or omitted. If omitted, the entire '
-                     'test suite is executed.')
-    def run_jsapitests(self, **params):
-        import subprocess
-
-        print('running jsapi-tests')
-        jsapi_tests_cmd = [os.path.join(
-            self.bindir, executable_name('jsapi-tests'))]
-        if params['test_name']:
-            jsapi_tests_cmd.append(params['test_name'])
-
-        jsapi_tests_result = subprocess.call(jsapi_tests_cmd)
-
-        return jsapi_tests_result
+        return jittest_result and jstest_result and jsapi_tests_result and check_js_msg_result
 
 
 def get_jsshell_parser():
@@ -761,14 +735,15 @@ class TestInfoCommand(MachCommandBase):
                 print("'%s' is too short for a test name!" % self.test_name)
                 continue
             self.set_test_name()
+            if self.show_bugs:
+                self.report_bugs()
+            self.set_activedata_test_name()
             if self.show_results:
                 self.report_test_results()
             if self.show_durations:
                 self.report_test_durations()
             if self.show_tasks:
                 self.report_test_tasks()
-            if self.show_bugs:
-                self.report_bugs()
 
     def find_in_hg_or_git(self, test_name):
         if self._hg:
@@ -798,7 +773,6 @@ class TestInfoCommand(MachCommandBase):
         # queries based on the specified test name.
 
         import posixpath
-        import re
 
         # full_test_name is full path to file in hg (or git)
         self.full_test_name = None
@@ -848,27 +822,22 @@ class TestInfoCommand(MachCommandBase):
         name_idx = self.full_test_name.rfind('/')
         if name_idx > 0:
             self.short_name = self.full_test_name[name_idx + 1:]
-
-        # robo_name is short_name without ".java" - for robocop
-        self.robo_name = None
-        if self.short_name:
-            robo_idx = self.short_name.rfind('.java')
-            if robo_idx > 0:
-                self.robo_name = self.short_name[:robo_idx]
-            if self.short_name == self.test_name:
-                self.short_name = None
+        if self.short_name and self.short_name == self.test_name:
+            self.short_name = None
 
         if not (self.show_results or self.show_durations or self.show_tasks):
             # no need to determine ActiveData name if not querying
             return
+
+    def set_activedata_test_name(self):
+        import re
 
         # activedata_test_name is name in ActiveData
         self.activedata_test_name = None
         simple_names = [
             self.full_test_name,
             self.test_name,
-            self.short_name,
-            self.robo_name
+            self.short_name
         ]
         simple_names = [x for x in simple_names if x]
         searches = [
@@ -1099,8 +1068,6 @@ class TestInfoCommand(MachCommandBase):
             search = '%s,%s' % (search, self.test_name)
         if self.short_name:
             search = '%s,%s' % (search, self.short_name)
-        if self.robo_name:
-            search = '%s,%s' % (search, self.robo_name)
         payload = {'quicksearch': search,
                    'include_fields': 'id,summary'}
         response = requests.get('https://bugzilla.mozilla.org/rest/bug',

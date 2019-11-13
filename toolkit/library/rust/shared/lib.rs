@@ -6,6 +6,7 @@
 
 extern crate geckoservo;
 
+extern crate mapped_hyph;
 extern crate kvstore;
 extern crate mp4parse_capi;
 extern crate nsstring;
@@ -53,6 +54,9 @@ extern crate audio_thread_priority;
 #[cfg(feature = "webrtc")]
 extern crate mdns_service;
 extern crate neqo_glue;
+
+#[cfg(feature = "wasm_library_sandboxing")]
+extern crate rlbox_lucet_sandbox;
 
 use std::boxed::Box;
 use std::env;

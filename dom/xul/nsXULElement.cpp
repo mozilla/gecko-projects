@@ -50,7 +50,6 @@
 #include "nsJSPrincipals.h"
 #include "nsDOMAttributeMap.h"
 #include "nsGkAtoms.h"
-#include "nsNodeUtils.h"
 #include "nsFrameLoader.h"
 #include "mozilla/Logging.h"
 #include "nsIControllers.h"
@@ -65,9 +64,6 @@
 #include "nsReadableUtils.h"
 #include "nsIFrame.h"
 #include "nsNodeInfoManager.h"
-#ifdef MOZ_XBL
-#  include "nsXBLBinding.h"
-#endif
 #include "nsXULTooltipListener.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozAutoDocUpdate.h"

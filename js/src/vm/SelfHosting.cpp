@@ -64,6 +64,7 @@
 #include "vm/BytecodeLocation.h"
 #include "vm/Compression.h"
 #include "vm/DateObject.h"
+#include "vm/FrameIter.h"  // js::ScriptFrameIter
 #include "vm/GeneratorObject.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
@@ -523,7 +524,7 @@ static bool intrinsic_MakeDefaultConstructor(JSContext* cx, unsigned argc,
 
   RootedFunction ctor(cx, &args[0].toObject().as<JSFunction>());
 
-  ctor->nonLazyScript()->setIsDefaultClassConstructor();
+  ctor->baseScript()->setIsDefaultClassConstructor();
 
   // Because self-hosting code does not allow top-level lexicals,
   // class constructors are class expressions in top-level vars.
@@ -1569,6 +1570,24 @@ static bool intrinsic_StringReplaceString(JSContext* cx, unsigned argc,
   return true;
 }
 
+static bool intrinsic_StringReplaceAllString(JSContext* cx, unsigned argc,
+                                             Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  MOZ_ASSERT(args.length() == 3);
+
+  RootedString string(cx, args[0].toString());
+  RootedString pattern(cx, args[1].toString());
+  RootedString replacement(cx, args[2].toString());
+  JSString* result =
+      str_replaceAll_string_raw(cx, string, pattern, replacement);
+  if (!result) {
+    return false;
+  }
+
+  args.rval().setString(result);
+  return true;
+}
+
 bool js::intrinsic_StringSplitString(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   MOZ_ASSERT(args.length() == 2);
@@ -2431,6 +2450,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
           intl_ValidateAndCanonicalizeLanguageTag, 2, 0),
     JS_FN("intl_TryValidateAndCanonicalizeLanguageTag",
           intl_TryValidateAndCanonicalizeLanguageTag, 1, 0),
+    JS_FN("intl_ValidateAndCanonicalizeUnicodeExtensionType",
+          intl_ValidateAndCanonicalizeUnicodeExtensionType, 2, 0),
 
     JS_INLINABLE_FN("GuardToCollator", intrinsic_GuardToBuiltin<CollatorObject>,
                     1, 0, IntlGuardToCollator),
@@ -2478,6 +2499,9 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_INLINABLE_FN("IsRegExpObject",
                     intrinsic_IsInstanceOfBuiltin<RegExpObject>, 1, 0,
                     IsRegExpObject),
+    JS_INLINABLE_FN("IsPossiblyWrappedRegExpObject",
+                    intrinsic_IsPossiblyWrappedInstanceOfBuiltin<RegExpObject>,
+                    1, 0, IsPossiblyWrappedRegExpObject),
     JS_FN("CallRegExpMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<RegExpObject>>, 2, 0),
     JS_INLINABLE_FN("RegExpMatcher", RegExpMatcher, 3, 0, RegExpMatcher),
@@ -2498,6 +2522,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("FlatStringSearch", FlatStringSearch, 2, 0),
     JS_INLINABLE_FN("StringReplaceString", intrinsic_StringReplaceString, 3, 0,
                     IntrinsicStringReplaceString),
+    JS_FN("StringReplaceAllString", intrinsic_StringReplaceAllString, 3, 0),
     JS_INLINABLE_FN("StringSplitString", intrinsic_StringSplitString, 2, 0,
                     IntrinsicStringSplitString),
     JS_FN("StringSplitStringLimit", intrinsic_StringSplitStringLimit, 3, 0),
@@ -2810,7 +2835,7 @@ static bool CloneProperties(JSContext* cx, HandleNativeObject selfHostedObject,
   }
 
   // Now our shapes are in last-to-first order, so....
-  Reverse(shapes.begin(), shapes.end());
+  std::reverse(shapes.begin(), shapes.end());
   for (size_t i = 0; i < shapes.length(); ++i) {
     MOZ_ASSERT(!shapes[i]->isAccessorShape(),
                "Can't handle cloning accessors here yet.");
@@ -3100,7 +3125,7 @@ bool JSRuntime::cloneSelfHostedFunctionScript(JSContext* cx,
   MOZ_ASSERT(!targetFun->isInterpretedLazy());
 
   MOZ_ASSERT(sourceFun->nargs() == targetFun->nargs());
-  MOZ_ASSERT(sourceScript->hasRest() == targetFun->nonLazyScript()->hasRest());
+  MOZ_ASSERT(sourceScript->hasRest() == targetFun->baseScript()->hasRest());
   MOZ_ASSERT(targetFun->strict(), "Self-hosted builtins must be strict");
 
   // The target function might have been relazified after its flags changed.

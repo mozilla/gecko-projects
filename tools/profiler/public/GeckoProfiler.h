@@ -30,6 +30,7 @@
 // avoid the need for many #ifdefs.
 
 #  define AUTO_PROFILER_INIT
+#  define AUTO_PROFILER_INIT2
 
 #  define PROFILER_REGISTER_THREAD(name)
 #  define PROFILER_UNREGISTER_THREAD()
@@ -146,29 +147,26 @@ class Vector;
     MACRO(4, "privacy", Privacy,                                               \
           "Do not include user-identifiable information")                      \
                                                                                \
-    MACRO(5, "responsiveness", Responsiveness,                                 \
-          "Collect thread responsiveness information")                         \
-                                                                               \
-    MACRO(6, "screenshots", Screenshots,                                       \
+    MACRO(5, "screenshots", Screenshots,                                       \
           "Take a snapshot of the window on every composition")                \
                                                                                \
-    MACRO(7, "seqstyle", SequentialStyle,                                      \
+    MACRO(6, "seqstyle", SequentialStyle,                                      \
           "Disable parallel traversal in styling")                             \
                                                                                \
-    MACRO(8, "stackwalk", StackWalk,                                           \
+    MACRO(7, "stackwalk", StackWalk,                                           \
           "Walk the C++ stack, not available on all platforms")                \
                                                                                \
-    MACRO(9, "tasktracer", TaskTracer,                                         \
+    MACRO(8, "tasktracer", TaskTracer,                                         \
           "Start profiling with feature TaskTracer")                           \
                                                                                \
-    MACRO(10, "threads", Threads, "Profile the registered secondary threads")  \
+    MACRO(9, "threads", Threads, "Profile the registered secondary threads")   \
                                                                                \
-    MACRO(11, "trackopts", TrackOptimizations,                                 \
+    MACRO(10, "trackopts", TrackOptimizations,                                 \
           "Have the JavaScript engine track JIT optimizations")                \
                                                                                \
-    MACRO(12, "jstracer", JSTracer, "Enable tracing of the JavaScript engine") \
+    MACRO(11, "jstracer", JSTracer, "Enable tracing of the JavaScript engine") \
                                                                                \
-    MACRO(13, "jsallocations", JSAllocations,                                  \
+    MACRO(12, "jsallocations", JSAllocations,                                  \
           "Have the JavaScript engine track allocations")                      \
                                                                                \
     MACRO(14, "nostacksampling", NoStackSampling,                              \
@@ -300,8 +298,12 @@ static constexpr mozilla::PowerOfTwo32 PROFILER_DEFAULT_STARTUP_ENTRIES =
 // (except profiler_start(), which will call profiler_init() if it hasn't
 // already run).
 void profiler_init(void* stackTop);
+void profiler_init_threadmanager();
 
+// Call this as early as possible
 #  define AUTO_PROFILER_INIT mozilla::AutoProfilerInit PROFILER_RAII
+// Call this after the nsThreadManager is Init()ed
+#  define AUTO_PROFILER_INIT2 mozilla::AutoProfilerInit2 PROFILER_RAII
 
 // Clean up the profiler module, stopping it if required. This function may
 // also save a shutdown profile if requested. No profiler calls should happen
@@ -955,6 +957,17 @@ class MOZ_RAII AutoProfilerInit {
   }
 
   ~AutoProfilerInit() { profiler_shutdown(); }
+
+ private:
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+class MOZ_RAII AutoProfilerInit2 {
+ public:
+  explicit AutoProfilerInit2(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM) {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    profiler_init_threadmanager();
+  }
 
  private:
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER

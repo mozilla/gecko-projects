@@ -163,6 +163,56 @@ SandboxBroker::SandboxBroker() {
   }
 }
 
+#define WSTRING(STRING) L"" STRING
+
+static void AddMozLogRulesToPolicy(sandbox::TargetPolicy* aPolicy,
+                                   const base::EnvironmentMap& aEnvironment) {
+  auto it = aEnvironment.find(ENVIRONMENT_LITERAL("MOZ_LOG_FILE"));
+  if (it == aEnvironment.end()) {
+    it = aEnvironment.find(ENVIRONMENT_LITERAL("NSPR_LOG_FILE"));
+  }
+  if (it == aEnvironment.end()) {
+    return;
+  }
+
+  char const* logFileModules = getenv("MOZ_LOG");
+  if (!logFileModules) {
+    return;
+  }
+
+  // MOZ_LOG files have a standard file extension appended.
+  std::wstring logFileName(it->second);
+  logFileName.append(WSTRING(MOZ_LOG_FILE_EXTENSION));
+
+  // Allow for rotation number if rotate is on in the MOZ_LOG settings.
+  bool rotate = false;
+  NSPRLogModulesParser(
+      logFileModules,
+      [&rotate](const char* aName, LogLevel aLevel, int32_t aValue) {
+        if (strcmp(aName, "rotate") == 0) {
+          // Less or eq zero means to turn rotate off.
+          rotate = aValue > 0;
+        }
+      });
+  if (rotate) {
+    logFileName.append(L".?");
+  }
+
+  // Allow for %PID token in the filename. We don't allow it in the dir path, if
+  // specified, because we have to use a wildcard as we don't know the PID yet.
+  auto pidPos = logFileName.find(WSTRING(MOZ_LOG_PID_TOKEN));
+  auto lastSlash = logFileName.find_last_of(L"/\\");
+  if (pidPos != std::wstring::npos &&
+      (lastSlash == std::wstring::npos || lastSlash < pidPos)) {
+    logFileName.replace(pidPos, strlen(MOZ_LOG_PID_TOKEN), L"*");
+  }
+
+  aPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                   sandbox::TargetPolicy::FILES_ALLOW_ANY, logFileName.c_str());
+}
+
+#undef WSTRING
+
 bool SandboxBroker::LaunchApp(const wchar_t* aPath, const wchar_t* aArguments,
                               base::EnvironmentMap& aEnvironment,
                               GeckoProcessType aProcessType,
@@ -197,47 +247,9 @@ bool SandboxBroker::LaunchApp(const wchar_t* aPath, const wchar_t* aArguments,
 #endif
 
   // Enable the child process to write log files when setup
-  wchar_t const* logFileName = nullptr;
-  auto it = aEnvironment.find(ENVIRONMENT_LITERAL("MOZ_LOG_FILE"));
-  if (it != aEnvironment.end()) {
-    logFileName = (it->second).c_str();
-  }
-  char const* logFileModules = getenv("MOZ_LOG");
-  if (logFileName && logFileModules) {
-    bool rotate = false;
-    NSPRLogModulesParser(
-        logFileModules,
-        [&rotate](const char* aName, LogLevel aLevel, int32_t aValue) mutable {
-          if (strcmp(aName, "rotate") == 0) {
-            // Less or eq zero means to turn rotate off.
-            rotate = aValue > 0;
-          }
-        });
+  AddMozLogRulesToPolicy(mPolicy, aEnvironment);
 
-    if (rotate) {
-      wchar_t logFileNameWild[MAX_PATH + 2];
-      _snwprintf(logFileNameWild, sizeof(logFileNameWild), L"%s.?",
-                 logFileName);
-
-      mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
-                       sandbox::TargetPolicy::FILES_ALLOW_ANY, logFileNameWild);
-    } else {
-      mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
-                       sandbox::TargetPolicy::FILES_ALLOW_ANY, logFileName);
-    }
-  }
-
-  logFileName = nullptr;
-  it = aEnvironment.find(ENVIRONMENT_LITERAL("NSPR_LOG_FILE"));
-  if (it != aEnvironment.end()) {
-    logFileName = (it->second).c_str();
-  }
-  if (logFileName) {
-    mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
-                     sandbox::TargetPolicy::FILES_ALLOW_ANY, logFileName);
-  }
-
-  // Ceate the sandboxed process
+  // Create the sandboxed process
   PROCESS_INFORMATION targetInfo = {0};
   sandbox::ResultCode result;
   sandbox::ResultCode last_warning = sandbox::SBOX_ALL_OK;
@@ -1040,7 +1052,8 @@ bool SandboxBroker::SetSecurityLevelForPluginProcess(int32_t aSandboxLevel) {
   return true;
 }
 
-bool SandboxBroker::SetSecurityLevelForGMPlugin(SandboxLevel aLevel) {
+bool SandboxBroker::SetSecurityLevelForGMPlugin(SandboxLevel aLevel,
+                                                bool aIsRemoteLaunch) {
   if (!mPolicy) {
     return false;
   }
@@ -1230,10 +1243,14 @@ bool SandboxBroker::SetSecurityLevelForGMPlugin(SandboxLevel aLevel) {
       "With these static arguments AddRule should never fail, what happened?");
 
   // The GMP process needs to be able to share memory with the main process for
-  // crash reporting.
-  result =
-      mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
-                       sandbox::TargetPolicy::HANDLES_DUP_BROKER, L"Section");
+  // crash reporting. On arm64 when we are launching remotely via an x86 broker,
+  // we need the rule to be HANDLES_DUP_ANY, because we still need to duplicate
+  // to the main process not the child's broker.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_HANDLES,
+                            aIsRemoteLaunch
+                                ? sandbox::TargetPolicy::HANDLES_DUP_ANY
+                                : sandbox::TargetPolicy::HANDLES_DUP_BROKER,
+                            L"Section");
   SANDBOX_ENSURE_SUCCESS(
       result,
       "With these static arguments AddRule should never fail, what happened?");

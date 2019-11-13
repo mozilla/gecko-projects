@@ -14,6 +14,7 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Sprintf.h"
 
+#include <algorithm>
 #include <new>
 
 #include "jsapi.h"
@@ -28,6 +29,9 @@
 #include "jit/OptimizationTracking.h"
 #include "js/MemoryMetrics.h"
 #include "js/UniquePtr.h"
+#include "util/DiagnosticAssertions.h"
+#include "util/Poison.h"
+#include "vm/FrameIter.h"  // js::AllScriptFramesIter
 #include "vm/HelperThreads.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
@@ -3818,7 +3822,7 @@ bool TypeNewScript::maybeAnalyze(JSContext* cx, ObjectGroup* group,
       return true;
     }
 
-    maxSlotSpan = Max<size_t>(maxSlotSpan, obj->slotSpan());
+    maxSlotSpan = std::max<size_t>(maxSlotSpan, obj->slotSpan());
 
     if (prefixShape) {
       MOZ_ASSERT(shape->numFixedSlots() == prefixShape->numFixedSlots());

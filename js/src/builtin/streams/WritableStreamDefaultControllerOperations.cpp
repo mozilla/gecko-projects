@@ -15,11 +15,12 @@
 
 #include "builtin/Promise.h"  // js::PromiseObject
 #include "builtin/streams/MiscellaneousOperations.h"  // js::CreateAlgorithmFromUnderlyingMethod, js::InvokeOrNoop
-#include "builtin/streams/QueueWithSizes.h"  // js::{EnqueueValueWithSize,ResetQueue}
+#include "builtin/streams/QueueWithSizes.h"  // js::{EnqueueValueWithSize,QueueIsEmpty,ResetQueue}
 #include "builtin/streams/WritableStream.h"  // js::WritableStream
 #include "builtin/streams/WritableStreamDefaultController.h"  // js::WritableStreamDefaultController
-#include "builtin/streams/WritableStreamOperations.h"  // js::WritableStream{DealWithRejection,{Start,Finish}Erroring,UpdateBackpressure}
+#include "builtin/streams/WritableStreamOperations.h"  // js::WritableStream{CloseQueuedOrInFlight,DealWithRejection,{Start,Finish}Erroring,UpdateBackpressure,Mark{Close,FirstWrite}RequestInFlight}
 #include "js/CallArgs.h"    // JS::CallArgs{,FromVp}
+#include "js/Promise.h"     // JS::AddPromiseReactions
 #include "js/RootingAPI.h"  // JS::Handle, JS::Rooted
 #include "js/Value.h"  // JS::{,Int32,Magic,Object}Value, JS::UndefinedHandleValue, JS_WRITABLESTREAM_CLOSE_RECORD
 #include "vm/Compartment.h"  // JS::Compartment
@@ -30,9 +31,10 @@
 
 #include "builtin/streams/HandlerFunction-inl.h"  // js::TargetFromHandler
 #include "builtin/streams/MiscellaneousOperations-inl.h"  // js::PromiseCall
+#include "builtin/streams/QueueWithSizes-inl.h"           // js::PeekQueueValue
 #include "vm/Compartment-inl.h"                   // JS::Compartment::wrap
 #include "vm/JSContext-inl.h"                     // JSContext::check
-#include "vm/JSObject-inl.h"  // js::NewBuiltinClassInstance, js::NewObjectWithClassProto
+#include "vm/JSObject-inl.h"  // js::IsCallable, js::NewBuiltinClassInstance, js::NewObjectWithClassProto
 #include "vm/Realm-inl.h"     // js::AutoRealm
 
 using JS::CallArgs;
@@ -45,10 +47,19 @@ using JS::Rooted;
 using JS::UndefinedHandleValue;
 using JS::Value;
 
+using js::IsCallable;
 using js::ListObject;
+using js::NewHandler;
+using js::PeekQueueValue;
+using js::PromiseObject;
+using js::TargetFromHandler;
 using js::WritableStream;
+using js::WritableStreamCloseQueuedOrInFlight;
 using js::WritableStreamDefaultController;
 using js::WritableStreamFinishErroring;
+using js::WritableStreamMarkCloseRequestInFlight;
+using js::WritableStreamMarkFirstWriteRequestInFlight;
+using js::WritableStreamUpdateBackpressure;
 
 /*** 4.7. Writable stream default controller internal methods ***************/
 
@@ -273,6 +284,9 @@ MOZ_MUST_USE bool js::SetUpWritableStreamDefaultController(
   // Step 9: Set controller.[[writeAlgorithm]] to writeAlgorithm.
   // Step 10: Set controller.[[closeAlgorithm]] to closeAlgorithm.
   // Step 11: Set controller.[[abortAlgorithm]] to abortAlgorithm.
+  // (In this implementation, all [[*Algorithm]] are determined by the
+  // underlyingSink in combination with the corresponding *Method field.)
+  controller->setUnderlyingSink(underlyingSink);
   controller->setWriteMethod(writeMethod);
   controller->setCloseMethod(closeMethod);
   controller->setAbortMethod(abortMethod);
@@ -521,6 +535,70 @@ double js::WritableStreamDefaultControllerGetDesiredSize(
 }
 
 /**
+ * Streams spec, 4.8.8.
+ *      WritableStreamDefaultControllerWrite ( controller, chunk, chunkSize )
+ */
+bool js::WritableStreamDefaultControllerWrite(
+    JSContext* cx, Handle<WritableStreamDefaultController*> unwrappedController,
+    Handle<Value> chunk, Handle<Value> chunkSize) {
+  MOZ_ASSERT(!chunk.isMagic());
+  cx->check(chunk);
+  cx->check(chunkSize);
+
+  // Step 1: Let writeRecord be Record {[[chunk]]: chunk}.
+  // Step 2: Let enqueueResult be
+  //         EnqueueValueWithSize(controller, writeRecord, chunkSize).
+  bool succeeded =
+      EnqueueValueWithSize(cx, unwrappedController, chunk, chunkSize);
+
+  // Step 3: If enqueueResult is an abrupt completion,
+  if (!succeeded) {
+    Rooted<Value> enqueueResult(cx);
+    if (!cx->isExceptionPending() || !cx->getPendingException(&enqueueResult)) {
+      // Uncatchable error.  Die immediately without erroring the stream.
+      return false;
+    }
+    cx->check(enqueueResult);
+
+    cx->clearPendingException();
+
+    // Step 3.a: Perform ! WritableStreamDefaultControllerErrorIfNeeded(
+    //                 controller, enqueueResult.[[Value]]).
+    // Step 3.b: Return.
+    return WritableStreamDefaultControllerErrorIfNeeded(cx, unwrappedController,
+                                                        enqueueResult);
+  }
+
+  // Step 4: Let stream be controller.[[controlledWritableStream]].
+  Rooted<WritableStream*> unwrappedStream(cx, unwrappedController->stream());
+
+  // Step 5: If ! WritableStreamCloseQueuedOrInFlight(stream) is false and
+  //         stream.[[state]] is "writable",
+  if (!WritableStreamCloseQueuedOrInFlight(unwrappedStream) &&
+      unwrappedStream->writable()) {
+    // Step 5.a: Let backpressure be
+    //           ! WritableStreamDefaultControllerGetBackpressure(controller).
+    bool backpressure =
+        WritableStreamDefaultControllerGetBackpressure(unwrappedController);
+
+    // Step 5.b: Perform
+    //           ! WritableStreamUpdateBackpressure(stream, backpressure).
+    if (!WritableStreamUpdateBackpressure(cx, unwrappedStream, backpressure)) {
+      return false;
+    }
+  }
+
+  // Step 6: Perform
+  //         ! WritableStreamDefaultControllerAdvanceQueueIfNeeded(controller).
+  return WritableStreamDefaultControllerAdvanceQueueIfNeeded(
+      cx, unwrappedController);
+}
+
+static MOZ_MUST_USE bool WritableStreamDefaultControllerProcessIfNeeded(
+    JSContext* cx,
+    Handle<WritableStreamDefaultController*> unwrappedController);
+
+/**
  * Streams spec, 4.8.9.
  *      WritableStreamDefaultControllerAdvanceQueueIfNeeded ( controller )
  */
@@ -552,20 +630,14 @@ MOZ_MUST_USE bool WritableStreamDefaultControllerAdvanceQueueIfNeeded(
   }
 
   // Step 7: If controller.[[queue]] is empty, return.
-  Rooted<ListObject*> unwrappedQueue(cx, unwrappedController->queue());
-  if (unwrappedQueue->length() == 0) {
-    return true;
-  }
-
   // Step 8: Let writeRecord be ! PeekQueueValue(controller).
   // Step 9: If writeRecord is "close", perform
   //         ! WritableStreamDefaultControllerProcessClose(controller).
   // Step 10: Otherwise, perform
   //          ! WritableStreamDefaultControllerProcessWrite(
   //              controller, writeRecord.[[chunk]]).
-  // XXX jwalden fill me in!
-  JS_ReportErrorASCII(cx, "nope");
-  return false;
+  return WritableStreamDefaultControllerProcessIfNeeded(cx,
+                                                        unwrappedController);
 }
 
 /**
@@ -586,6 +658,325 @@ bool js::WritableStreamDefaultControllerErrorIfNeeded(
   }
 
   return true;
+}
+
+// 4.8.11 step 5: Let sinkClosePromise be the result of performing
+//                controller.[[closeAlgorithm]].
+static MOZ_MUST_USE JSObject* PerformCloseAlgorithm(
+    JSContext* cx,
+    Handle<WritableStreamDefaultController*> unwrappedController) {
+  // 4.8.3 step 5: Let closeAlgorithm be
+  //               ? CreateAlgorithmFromUnderlyingMethod(underlyingSink,
+  //                                                     "close", 0, « »).
+
+  // Step 1: Assert: underlyingObject is not undefined.
+  // Step 2: Assert: ! IsPropertyKey(methodName) is true (implicit).
+  // Step 3: Assert: algoArgCount is 0 or 1 (omitted).
+  // Step 4: Assert: extraArgs is a List (omitted).
+  // Step 5: Let method be ? GetV(underlyingObject, methodName).
+  //
+  // These steps were performed in |CreateAlgorithmFromUnderlyingMethod|.  The
+  // spec stores away algorithms for later invocation; we instead store the
+  // value that determines the algorithm to be created -- either |undefined|, or
+  // a callable object that's called with context-specific arguments.
+
+  // Step 7: (If method is undefined,) Return an algorithm which returns a
+  //         promise resolved with undefined (implicit).
+  if (unwrappedController->closeMethod().isUndefined()) {
+    return PromiseObject::unforgeableResolve(cx, UndefinedHandleValue);
+  }
+
+  // Step 6: If method is not undefined,
+
+  // Step 6.a: If ! IsCallable(method) is false, throw a TypeError exception.
+  MOZ_ASSERT(IsCallable(unwrappedController->closeMethod()));
+
+  // Step 6.b: If algoArgCount is 0, return an algorithm that performs the
+  //           following steps:
+  // Step 6.b.ii: Return ! PromiseCall(method, underlyingObject, extraArgs).
+  Rooted<Value> closeMethod(cx, unwrappedController->closeMethod());
+  if (!cx->compartment()->wrap(cx, &closeMethod)) {
+    return nullptr;
+  }
+
+  Rooted<Value> underlyingSink(cx, unwrappedController->underlyingSink());
+  if (!cx->compartment()->wrap(cx, &underlyingSink)) {
+    return nullptr;
+  }
+
+  return PromiseCall(cx, closeMethod, underlyingSink);
+}
+
+// 4.8.12 step 3: Let sinkWritePromise be the result of performing
+//                controller.[[writeAlgorithm]], passing in chunk.
+static MOZ_MUST_USE JSObject* PerformWriteAlgorithm(
+    JSContext* cx, Handle<WritableStreamDefaultController*> unwrappedController,
+    Handle<Value> chunk) {
+  cx->check(chunk);
+
+  // 4.8.3 step 4: Let writeAlgorithm be
+  //               ? CreateAlgorithmFromUnderlyingMethod(underlyingSink,
+  //                                                     "write", 1,
+  //                                                     « controller »).
+
+  // Step 1: Assert: underlyingObject is not undefined.
+  // Step 2: Assert: ! IsPropertyKey(methodName) is true (implicit).
+  // Step 3: Assert: algoArgCount is 0 or 1 (omitted).
+  // Step 4: Assert: extraArgs is a List (omitted).
+  // Step 5: Let method be ? GetV(underlyingObject, methodName).
+  //
+  // These steps were performed in |CreateAlgorithmFromUnderlyingMethod|.  The
+  // spec stores away algorithms for later invocation; we instead store the
+  // value that determines the algorithm to be created -- either |undefined|, or
+  // a callable object that's called with context-specific arguments.
+
+  // Step 7: (If method is undefined,) Return an algorithm which returns a
+  //         promise resolved with undefined (implicit).
+  if (unwrappedController->writeMethod().isUndefined()) {
+    return PromiseObject::unforgeableResolve(cx, UndefinedHandleValue);
+  }
+
+  // Step 6: If method is not undefined,
+
+  // Step 6.a: If ! IsCallable(method) is false, throw a TypeError exception.
+  MOZ_ASSERT(IsCallable(unwrappedController->writeMethod()));
+
+  // Step 6.c: Otherwise (if algoArgCount is not 0), return an algorithm that
+  //           performs the following steps, taking an arg argument:
+  // Step 6.c.i:  Let fullArgs be a List consisting of arg followed by the
+  //              elements of extraArgs in order.
+  // Step 6.c.ii: Return ! PromiseCall(method, underlyingObject, fullArgs).
+  Rooted<Value> writeMethod(cx, unwrappedController->writeMethod());
+  if (!cx->compartment()->wrap(cx, &writeMethod)) {
+    return nullptr;
+  }
+
+  Rooted<Value> underlyingSink(cx, unwrappedController->underlyingSink());
+  if (!cx->compartment()->wrap(cx, &underlyingSink)) {
+    return nullptr;
+  }
+
+  Rooted<Value> controller(cx, ObjectValue(*unwrappedController));
+  if (!cx->compartment()->wrap(cx, &controller)) {
+    return nullptr;
+  }
+
+  return PromiseCall(cx, writeMethod, underlyingSink, chunk, controller);
+}
+
+/**
+ * Streams spec, 4.8.11 step 7:
+ * Upon fulfillment of sinkClosePromise,
+ */
+static MOZ_MUST_USE bool WritableStreamCloseHandler(JSContext* cx,
+                                                    unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  Rooted<WritableStream*> unwrappedStream(
+      cx, TargetFromHandler<WritableStream>(args));
+
+  // Step 7.a: Perform ! WritableStreamFinishInFlightClose(stream).
+  if (!WritableStreamFinishInFlightClose(cx, unwrappedStream)) {
+    return false;
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
+/**
+ * Streams spec, 4.8.11 step 8:
+ * Upon rejection of sinkClosePromise with reason reason,
+ */
+static MOZ_MUST_USE bool WritableStreamCloseFailedHandler(JSContext* cx,
+                                                          unsigned argc,
+                                                          Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  Rooted<WritableStream*> unwrappedStream(
+      cx, TargetFromHandler<WritableStream>(args));
+
+  // Step 8.a: Perform
+  //           ! WritableStreamFinishInFlightCloseWithError(stream, reason).
+  if (!WritableStreamFinishInFlightCloseWithError(cx, unwrappedStream,
+                                                  args.get(0))) {
+    return false;
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
+/**
+ * Streams spec, 4.8.12 step 4:
+ * Upon fulfillment of sinkWritePromise,
+ */
+static MOZ_MUST_USE bool WritableStreamWriteHandler(JSContext* cx,
+                                                    unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  Rooted<WritableStream*> unwrappedStream(
+      cx, TargetFromHandler<WritableStream>(args));
+
+  // Step 4.a: Perform ! WritableStreamFinishInFlightWrite(stream).
+  if (!WritableStreamFinishInFlightWrite(cx, unwrappedStream)) {
+    return false;
+  }
+
+  // Step 4.b: Let state be stream.[[state]].
+  // Step 4.c: Assert: state is "writable" or "erroring".
+  MOZ_ASSERT(unwrappedStream->writable() ^ unwrappedStream->erroring());
+
+  // Step 4.d: Perform ! DequeueValue(controller).
+  DequeueValue(unwrappedStream->controller(), cx);
+
+  // Step 4.e: If ! WritableStreamCloseQueuedOrInFlight(stream) is false and
+  //           state is "writable",
+  if (!WritableStreamCloseQueuedOrInFlight(unwrappedStream) &&
+      unwrappedStream->writable()) {
+    // Step 4.e.i: Let backpressure be
+    //             ! WritableStreamDefaultControllerGetBackpressure(
+    //                   controller).
+    bool backpressure = WritableStreamDefaultControllerGetBackpressure(
+        unwrappedStream->controller());
+
+    // Step 4.e.ii: Perform
+    //              ! WritableStreamUpdateBackpressure(stream, backpressure).
+    if (!WritableStreamUpdateBackpressure(cx, unwrappedStream, backpressure)) {
+      return false;
+    }
+  }
+
+  // Step 4.f: Perform
+  //           ! WritableStreamDefaultControllerAdvanceQueueIfNeeded(
+  //                 controller).
+  Rooted<WritableStreamDefaultController*> unwrappedController(
+      cx, unwrappedStream->controller());
+  if (!WritableStreamDefaultControllerAdvanceQueueIfNeeded(
+          cx, unwrappedController)) {
+    return false;
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
+/**
+ * Streams spec, 4.8.12 step 5:
+ * Upon rejection of sinkWritePromise with reason,
+ */
+static MOZ_MUST_USE bool WritableStreamWriteFailedHandler(JSContext* cx,
+                                                          unsigned argc,
+                                                          Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  Rooted<WritableStream*> unwrappedStream(
+      cx, TargetFromHandler<WritableStream>(args));
+
+  // Step 5.a: If stream.[[state]] is "writable", perform
+  //           ! WritableStreamDefaultControllerClearAlgorithms(controller).
+  if (unwrappedStream->writable()) {
+    WritableStreamDefaultControllerClearAlgorithms(
+        unwrappedStream->controller());
+  }
+
+  // Step 5.b: Perform
+  //           ! WritableStreamFinishInFlightWriteWithError(stream, reason).
+  if (!WritableStreamFinishInFlightWriteWithError(cx, unwrappedStream,
+                                                  args.get(0))) {
+    return false;
+  }
+
+  args.rval().setUndefined();
+  return true;
+}
+
+/**
+ * Streams spec, 4.8.9 (steps 7-10),
+ *      WritableStreamDefaultControllerAdvanceQueueIfNeeded ( controller )
+ * Streams spec, 4.8.11.
+ *      WritableStreamDefaultControllerProcessClose ( controller )
+ * Streams spec, 4.8.12.
+ *      WritableStreamDefaultControllerProcessWrite ( controller, chunk )
+ */
+bool WritableStreamDefaultControllerProcessIfNeeded(
+    JSContext* cx,
+    Handle<WritableStreamDefaultController*> unwrappedController) {
+  // Step 7: If controller.[[queue]] is empty, return.
+  ListObject* unwrappedQueue = unwrappedController->queue();
+  if (QueueIsEmpty(unwrappedQueue)) {
+    return true;
+  }
+
+  // Step 8: Let writeRecord be ! PeekQueueValue(controller).
+  // Step 9: If writeRecord is "close", perform
+  //         ! WritableStreamDefaultControllerProcessClose(controller).
+  // Step 10: Otherwise, perform
+  //          ! WritableStreamDefaultControllerProcessWrite(
+  //                controller, writeRecord.[[chunk]]).
+  Rooted<JSObject*> sinkWriteOrClosePromise(cx);
+  JSNative onFulfilledFunc, onRejectedFunc;
+  if (PeekQueueValue(unwrappedQueue).isMagic(JS_WRITABLESTREAM_CLOSE_RECORD)) {
+    MOZ_ASSERT(unwrappedQueue->length() == 2);
+
+    onFulfilledFunc = WritableStreamCloseHandler;
+    onRejectedFunc = WritableStreamCloseFailedHandler;
+
+    // 4.8.11 step 1: Let stream be controller.[[controlledWritableStream]].
+    // 4.8.11 step 2: Perform ! WritableStreamMarkCloseRequestInFlight(stream).
+    WritableStreamMarkCloseRequestInFlight(unwrappedController->stream());
+
+    // 4.8.11 step 3: Perform ! DequeueValue(controller).
+    DequeueValue(unwrappedController, cx);
+
+    // 4.8.11 step 4: Assert: controller.[[queue]] is empty.
+    MOZ_ASSERT(unwrappedQueue->isEmpty());
+
+    // 4.8.11 step 5: Let sinkClosePromise be the result of performing
+    //         controller.[[closeAlgorithm]].
+    sinkWriteOrClosePromise = PerformCloseAlgorithm(cx, unwrappedController);
+  } else {
+    onFulfilledFunc = WritableStreamWriteHandler;
+    onRejectedFunc = WritableStreamWriteFailedHandler;
+
+    Rooted<Value> chunk(cx, PeekQueueValue(unwrappedQueue));
+    if (!cx->compartment()->wrap(cx, &chunk)) {
+      return false;
+    }
+
+    // 4.8.12 step 1: Let stream be controller.[[controlledWritableStream]].
+    // 4.8.12 step 2: Perform
+    //                ! WritableStreamMarkFirstWriteRequestInFlight(stream).
+    WritableStreamMarkFirstWriteRequestInFlight(unwrappedController->stream());
+
+    // 4.8.12 step 3: Let sinkWritePromise be the result of performing
+    //                controller.[[writeAlgorithm]], passing in chunk.
+    sinkWriteOrClosePromise =
+        PerformWriteAlgorithm(cx, unwrappedController, chunk);
+  }
+  if (!sinkWriteOrClosePromise) {
+    return false;
+  }
+
+  Rooted<JSObject*> stream(cx, unwrappedController->stream());
+  if (!cx->compartment()->wrap(cx, &stream)) {
+    return false;
+  }
+
+  // Step 7: Upon fulfillment of sinkClosePromise,
+  // Step 4: Upon fulfillment of sinkWritePromise,
+  // Step 8: Upon rejection of sinkClosePromise with reason reason,
+  // Step 5: Upon rejection of sinkWritePromise with reason,
+  Rooted<JSObject*> onFulfilled(cx, NewHandler(cx, onFulfilledFunc, stream));
+  if (!onFulfilled) {
+    return false;
+  }
+  Rooted<JSObject*> onRejected(cx, NewHandler(cx, onRejectedFunc, stream));
+  if (!onRejected) {
+    return false;
+  }
+  return JS::AddPromiseReactions(cx, sinkWriteOrClosePromise, onFulfilled,
+                                 onRejected);
 }
 
 /**

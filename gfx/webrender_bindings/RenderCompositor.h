@@ -77,6 +77,7 @@ class RenderCompositor {
   virtual bool IsContextLost();
 
   virtual bool ShouldUseNativeCompositor() { return false; }
+  virtual uint32_t GetMaxUpdateRects() { return 0; }
 
   // Interface for wr::Compositor
   virtual void CompositorBeginFrame() {}
@@ -91,11 +92,12 @@ class RenderCompositor {
                           wr::DeviceIntRect aClipRect) {}
 
   // Interface for partial present
+  virtual bool UsePartialPresent() { return false; }
   virtual bool RequestFullRender() { return false; }
   virtual uint32_t GetMaxPartialPresentRects() { return 0; }
 
-  // Whether the surface contents are flipped vertically
-  virtual bool SurfaceIsYFlipped() { return false; }
+  // Whether the surface origin is top-left.
+  virtual bool SurfaceOriginIsTopLeft() { return false; }
 
  protected:
   // We default this to 2, so that mLatestRenderFrameId.Prev() is always valid.

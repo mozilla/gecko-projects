@@ -52,6 +52,7 @@
 // ContentChild:RecvRemoteType.  Add your value there too or it will be called
 // "Web Content".
 #define DEFAULT_REMOTE_TYPE "web"
+#define FISSION_WEB_REMOTE_TYPE "webIsolated"
 #define FILE_REMOTE_TYPE "file"
 #define EXTENSION_REMOTE_TYPE "extension"
 #define PRIVILEGEDABOUT_REMOTE_TYPE "privilegedabout"
@@ -889,7 +890,8 @@ class ContentParent final : public PContentParent,
       const uint32_t& aContentDispositionHint,
       const nsString& aContentDispositionFilename, const bool& aForceSave,
       const int64_t& aContentLength, const bool& aWasFileChannel,
-      const Maybe<URIParams>& aReferrer, PBrowserParent* aBrowser);
+      const Maybe<URIParams>& aReferrer, BrowsingContext* aContext,
+      const bool& aShouldCloseWindow);
 
   mozilla::ipc::IPCResult RecvPExternalHelperAppConstructor(
       PExternalHelperAppParent* actor, const Maybe<URIParams>& uri,
@@ -898,7 +900,8 @@ class ContentParent final : public PContentParent,
       const uint32_t& aContentDispositionHint,
       const nsString& aContentDispositionFilename, const bool& aForceSave,
       const int64_t& aContentLength, const bool& aWasFileChannel,
-      const Maybe<URIParams>& aReferrer, PBrowserParent* aBrowser) override;
+      const Maybe<URIParams>& aReferrer, BrowsingContext* aContext,
+      const bool& aShouldCloseWindow) override;
 
   already_AddRefed<PHandlerServiceParent> AllocPHandlerServiceParent();
 
@@ -963,7 +966,7 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvGetShowPasswordSetting(bool* showPassword);
 
-  mozilla::ipc::IPCResult RecvStartVisitedQuery(const URIParams& uri);
+  mozilla::ipc::IPCResult RecvStartVisitedQueries(const nsTArray<URIParams>&);
 
   mozilla::ipc::IPCResult RecvSetURITitle(const URIParams& uri,
                                           const nsString& title);
