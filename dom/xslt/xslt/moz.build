@@ -59,8 +59,6 @@ LOCAL_INCLUDES += [
     '/js/xpconnect/src',
 ]
 
-include('/ipc/chromium/chromium-config.mozbuild')
-
 FINAL_LIBRARY = 'xul'
 
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):

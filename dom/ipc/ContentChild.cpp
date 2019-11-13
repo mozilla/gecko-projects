@@ -3768,18 +3768,6 @@ mozilla::ipc::IPCResult ContentChild::RecvEvictContentViewers(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult ContentChild::RecvDestroySHEntrySharedState(
-    const uint64_t& aID) {
-  SHEntryChildShared::Remove(aID);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult ContentChild::RecvEvictContentViewers(
-    nsTArray<uint64_t>&& aToEvictSharedStateIDs) {
-  SHEntryChildShared::EvictContentViewers(std::move(aToEvictSharedStateIDs));
-  return IPC_OK();
-}
-
 already_AddRefed<nsIEventTarget> ContentChild::GetSpecificMessageEventTarget(
     const Message& aMsg) {
   switch (aMsg.type()) {
