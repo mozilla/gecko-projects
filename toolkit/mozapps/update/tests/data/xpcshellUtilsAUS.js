@@ -4224,6 +4224,7 @@ function getProcessArgs(aExtraArgs) {
   // run locally when the profiles.ini and installs.ini files already exist.
   let profileDir = appBin.parent.parent;
   profileDir.append("profile");
+//  profileDir.create(Ci.nsIFile.DIRECTORY_TYPE, PERMS_DIRECTORY);
   let profilePath = profileDir.path;
   if (/ /.test(profilePath)) {
     profilePath = '"' + profilePath + '"';
@@ -4236,9 +4237,9 @@ function getProcessArgs(aExtraArgs) {
     launchScript.create(Ci.nsIFile.NORMAL_FILE_TYPE, PERMS_DIRECTORY);
 
     let scriptContents = "#! /bin/sh\n";
-    scriptContents += "export XRE_PROFILE_PATH=" + profilePath + "\n";
     scriptContents +=
       appBinPath +
+      " -profile " + profilePath +
       " -no-remote -test-process-updates " +
       aExtraArgs.join(" ") +
       " " +
@@ -4253,10 +4254,9 @@ function getProcessArgs(aExtraArgs) {
       "/D",
       "/Q",
       "/C",
-      "set",
-      "XRE_PROFILE_PATH=" + profilePath,
-      "&&",
       appBinPath,
+      "-profile",
+      profilePath,
       "-no-remote",
       "-test-process-updates",
       "-wait-for-browser",
@@ -4264,6 +4264,7 @@ function getProcessArgs(aExtraArgs) {
       .concat(aExtraArgs)
       .concat([PIPE_TO_NULL]);
   }
+
   return args;
 }
 
@@ -4449,8 +4450,18 @@ async function runUpdateUsingApp(aExpectedStatus) {
   );
 
   await TestUtils.waitForCondition(
-    () => readStatusFile() == aExpectedStatus,
+    () =>
+      readStatusFile() == aExpectedStatus,
     "Waiting for expected status file contents: " + aExpectedStatus
+  ).catch(e => {
+    // Instead of throwing let the check below fail the test so the status
+    // file's contents are logged.
+    logTestInfo(e);
+  });
+  Assert.equal(
+    readStatusFile(),
+    aExpectedStatus,
+    "the status file state" + MSG_SHOULD_EQUAL
   );
 
   // Don't check for an update log when the code in nsUpdateDriver.cpp skips
