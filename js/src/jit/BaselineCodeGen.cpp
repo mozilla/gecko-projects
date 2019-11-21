@@ -27,7 +27,9 @@
 #include "vm/Interpreter.h"
 #include "vm/JSFunction.h"
 #include "vm/TraceLogging.h"
-#include "vtune/VTuneWrapper.h"
+#ifdef MOZ_VTUNE
+#  include "vtune/VTuneWrapper.h"
+#endif
 
 #include "debugger/DebugAPI-inl.h"
 #include "jit/BaselineFrameInfo-inl.h"
@@ -1126,7 +1128,7 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   masm.storePtr(scratch1, frame.addressOfInterpreterScript());
 
   // Initialize interpreterICEntry.
-  masm.loadPtr(Address(scratch1, JSScript::offsetOfJitScript()), scratch2);
+  masm.loadJitScript(scratch1, scratch2);
   masm.computeEffectiveAddress(
       Address(scratch2, JitScript::offsetOfICEntries()), scratch2);
   masm.storePtr(scratch2, frame.addressOfInterpreterICEntry());
@@ -1284,9 +1286,12 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
 
   Register scriptReg = R2.scratchReg();
   Register countReg = R0.scratchReg();
-  Address warmUpCounterAddr(scriptReg, JSScript::offsetOfWarmUpCounter());
 
-  masm.movePtr(ImmGCPtr(script), scriptReg);
+  // Load the JitScript* in scriptReg.
+  masm.movePtr(ImmPtr(script->jitScript()), scriptReg);
+
+  // Bump warm-up counter.
+  Address warmUpCounterAddr(scriptReg, JitScript::offsetOfWarmUpCount());
   masm.load32(warmUpCounterAddr, countReg);
   masm.add32(Imm32(1), countReg);
   masm.store32(countReg, warmUpCounterAddr);
@@ -1304,35 +1309,99 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
     }
   }
 
-  Label skipCall;
+  Label done;
 
   const OptimizationInfo* info =
       IonOptimizations.get(IonOptimizations.firstLevel());
   uint32_t warmUpThreshold = info->compilerWarmUpThreshold(script, pc);
-  masm.branch32(Assembler::LessThan, countReg, Imm32(warmUpThreshold),
-                &skipCall);
+  masm.branch32(Assembler::LessThan, countReg, Imm32(warmUpThreshold), &done);
 
   // Do nothing if Ion is already compiling this script off-thread or if Ion has
   // been disabled for this script.
-  masm.movePtr(ImmPtr(script->jitScript()), scriptReg);
   masm.loadPtr(Address(scriptReg, JitScript::offsetOfIonScript()), scriptReg);
   masm.branchPtr(Assembler::Equal, scriptReg, ImmPtr(IonCompilingScriptPtr),
-                 &skipCall);
+                 &done);
   masm.branchPtr(Assembler::Equal, scriptReg, ImmPtr(IonDisabledScriptPtr),
-                 &skipCall);
+                 &done);
 
   // Try to compile and/or finish a compilation.
   if (JSOp(*pc) == JSOP_LOOPENTRY) {
-    // During the loop entry we can try to OSR into ion. The IC for this expects
-    // the frame size in R0.scratchReg().
+    // Try to OSR into Ion.
     computeFrameSize(R0.scratchReg());
-    if (!emitNextIC()) {
+
+    prepareVMCall();
+
+    pushBytecodePCArg();
+    pushArg(R0.scratchReg());
+    masm.PushBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
+
+    using Fn = bool (*)(JSContext*, BaselineFrame*, uint32_t, jsbytecode*,
+                        IonOsrTempData**);
+    if (!callVM<Fn, IonCompileScriptForBaselineOSR>()) {
       return false;
     }
+
+    // The return register holds the IonOsrTempData*. Perform OSR if it's not
+    // nullptr.
+    static_assert(ReturnReg != OsrFrameReg,
+                  "Code below depends on osrDataReg != OsrFrameReg");
+    Register osrDataReg = ReturnReg;
+    masm.branchTestPtr(Assembler::Zero, osrDataReg, osrDataReg, &done);
+
+    // Success! Switch from Baseline JIT code to Ion JIT code.
+
+    // At this point, stack looks like:
+    //
+    //  +-> [...Calling-Frame...]
+    //  |   [...Actual-Args/ThisV/ArgCount/Callee...]
+    //  |   [Descriptor]
+    //  |   [Return-Addr]
+    //  +---[Saved-FramePtr]
+    //      [...Baseline-Frame...]
+
+    // Restore the stack pointer so that the return address is on top of
+    // the stack.
+    masm.addToStackPtr(Imm32(frame.frameSize()));
+
+#ifdef DEBUG
+    // Get a scratch register that's not osrDataReg or OsrFrameReg.
+    AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
+    regs.take(BaselineFrameReg);
+    regs.take(osrDataReg);
+    regs.take(OsrFrameReg);
+
+    Register scratchReg = regs.takeAny();
+
+    // If profiler instrumentation is on, ensure that lastProfilingFrame is
+    // the frame currently being OSR-ed
+    {
+      Label checkOk;
+      AbsoluteAddress addressOfEnabled(
+          cx->runtime()->geckoProfiler().addressOfEnabled());
+      masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
+      masm.loadPtr(AbsoluteAddress((void*)&cx->jitActivation), scratchReg);
+      masm.loadPtr(
+          Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
+          scratchReg);
+
+      // It may be the case that we entered the baseline frame with
+      // profiling turned off on, then in a call within a loop (i.e. a
+      // callee frame), turn on profiling, then return to this frame,
+      // and then OSR with profiling turned on.  In this case, allow for
+      // lastProfilingFrame to be null.
+      masm.branchPtr(Assembler::Equal, scratchReg, ImmWord(0), &checkOk);
+
+      masm.branchStackPtr(Assembler::Equal, scratchReg, &checkOk);
+      masm.assumeUnreachable("Baseline OSR lastProfilingFrame mismatch.");
+      masm.bind(&checkOk);
+    }
+#endif
+
+    // Jump into Ion.
+    masm.loadPtr(Address(osrDataReg, IonOsrTempData::offsetOfBaselineFrame()),
+                 OsrFrameReg);
+    masm.jump(Address(osrDataReg, IonOsrTempData::offsetOfJitCode()));
   } else {
-    // To call stubs we need to have an opcode. This code handles the
-    // prologue and there is no dedicatd opcode present. Therefore use an
-    // annotated vm call.
     prepareVMCall();
 
     masm.PushBaselineFramePtr(BaselineFrameReg, R0.scratchReg());
@@ -1344,8 +1413,8 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
       return false;
     }
   }
-  masm.bind(&skipCall);
 
+  masm.bind(&done);
   return true;
 }
 
@@ -1354,9 +1423,12 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
   Register scriptReg = R2.scratchReg();
   Register countReg = R0.scratchReg();
 
-  // Bump warm-up counter.
-  Address warmUpCounterAddr(scriptReg, JSScript::offsetOfWarmUpCounter());
+  // Load the JitScript* in scriptReg.
   loadScript(scriptReg);
+  masm.loadJitScript(scriptReg, scriptReg);
+
+  // Bump warm-up counter.
+  Address warmUpCounterAddr(scriptReg, JitScript::offsetOfWarmUpCount());
   masm.load32(warmUpCounterAddr, countReg);
   masm.add32(Imm32(1), countReg);
   masm.store32(countReg, warmUpCounterAddr);
@@ -1366,7 +1438,6 @@ bool BaselineInterpreterCodeGen::emitWarmUpCounterIncrement() {
   Label done;
   masm.branch32(Assembler::BelowOrEqual, countReg,
                 Imm32(JitOptions.baselineJitWarmUpThreshold), &done);
-  masm.loadPtr(Address(scriptReg, JSScript::offsetOfJitScript()), scriptReg);
   masm.branchPtr(Assembler::Equal,
                  Address(scriptReg, JitScript::offsetOfBaselineScript()),
                  ImmPtr(BaselineDisabledScriptPtr), &done);
@@ -2080,6 +2151,24 @@ bool BaselineCodeGen<Handler>::emit_JSOP_AND() {
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emit_JSOP_OR() {
   return emitAndOr(true);
+}
+
+template <typename Handler>
+bool BaselineCodeGen<Handler>::emit_JSOP_COALESCE() {
+  // COALESCE leaves the original value on the stack.
+  frame.syncStack(0);
+
+  masm.loadValue(frame.addressOfStackValue(-1), R0);
+
+  Label undefinedOrNull;
+
+  masm.branchTestUndefined(Assembler::Equal, R0, &undefinedOrNull);
+  masm.branchTestNull(Assembler::Equal, R0, &undefinedOrNull);
+  emitJump();
+
+  masm.bind(&undefinedOrNull);
+  // fall through
+  return true;
 }
 
 template <typename Handler>
@@ -4670,7 +4759,6 @@ bool BaselineCodeGen<Handler>::emit_JSOP_GIMPLICITTHIS() {
     return true;
   };
   auto emitImplicitThis = [this]() { return emit_JSOP_IMPLICITTHIS(); };
-
   return emitTestScriptFlag(JSScript::ImmutableFlags::HasNonSyntacticScope,
                             emitImplicitThis, pushUndefined, R2.scratchReg());
 }
@@ -5544,8 +5632,7 @@ bool BaselineCodeGen<Handler>::emit_JSOP_SETRVAL() {
 
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emit_JSOP_CALLEE() {
-  MOZ_ASSERT_IF(handler.maybeScript(),
-                handler.maybeScript()->functionNonDelazifying());
+  MOZ_ASSERT_IF(handler.maybeScript(), handler.maybeScript()->function());
   frame.syncStack(0);
   masm.loadFunctionFromCalleeToken(frame.addressOfCalleeToken(),
                                    R0.scratchReg());
@@ -5941,7 +6028,25 @@ bool BaselineInterpreterCodeGen::emitGeneratorThrowOrReturnCallVM() {
 
   using Fn = bool (*)(JSContext*, BaselineFrame*,
                       Handle<AbstractGeneratorObject*>, HandleValue, uint32_t);
-  return callVM<Fn, jit::GeneratorThrowOrReturn>();
+  if (!callVM<Fn, jit::GeneratorThrowOrReturn>()) {
+    return false;
+  }
+
+  // Control only flows out of GeneratorThrowOrReturn if the debugger
+  // overrode the function resumption with an explicit return value, so here
+  // we want to do all of the cleanup on the baseline frame that _would_ have
+  // happened inside the epilogue of the baseline frame execution.
+
+  // Save the frame's return value to return from resume.
+  masm.loadValue(frame.addressOfReturnValue(), JSReturnOperand);
+
+  // Remove the baseline frame from the stack.
+  masm.moveToStackPtr(BaselineFrameReg);
+  masm.pop(BaselineFrameReg);
+
+  masm.ret();
+
+  return true;
 }
 
 template <>
@@ -5986,7 +6091,7 @@ bool BaselineCodeGen<Handler>::emitEnterGeneratorCode(Register script,
                 "Comparison below requires specific sentinel encoding");
 
   Label noBaselineScript;
-  masm.loadPtr(Address(script, JSScript::offsetOfJitScript()), scratch);
+  masm.loadJitScript(script, scratch);
   masm.loadPtr(Address(scratch, JitScript::offsetOfBaselineScript()), scratch);
   masm.branchPtr(Assembler::BelowOrEqual, scratch,
                  ImmPtr(BaselineDisabledScriptPtr), &noBaselineScript);
@@ -6044,15 +6149,13 @@ bool BaselineCodeGen<Handler>::emitGeneratorResume(
   Label interpret;
   Register scratch1 = regs.takeAny();
   masm.loadPtr(Address(callee, JSFunction::offsetOfScript()), scratch1);
-  masm.branchPtr(Assembler::Equal,
-                 Address(scratch1, JSScript::offsetOfJitScript()),
-                 ImmPtr(nullptr), &interpret);
+  masm.branchIfScriptHasNoJitScript(scratch1, &interpret);
 
 #ifdef JS_TRACE_LOGGING
   if (JS::TraceLoggerSupported()) {
     // TODO (bug 1565788): add Baseline Interpreter support.
     MOZ_CRASH("Unimplemented Baseline Interpreter TraceLogger support");
-    masm.loadPtr(Address(scratch1, JSScript::offsetOfJitScript()), scratch1);
+    masm.loadJitScript(scratch1, scratch1);
     Address baselineAddr(scratch1, JitScript::offsetOfBaselineScript());
     masm.loadPtr(baselineAddr, scratch1);
     if (!emitTraceLoggerResume(scratch1, regs)) {
@@ -6367,7 +6470,7 @@ bool BaselineInterpreterCodeGen::emit_JSOP_JUMPTARGET() {
 
   // Compute ICEntry* and store to frame->interpreterICEntry.
   loadScript(scratch2);
-  masm.loadPtr(Address(scratch2, JSScript::offsetOfJitScript()), scratch2);
+  masm.loadJitScript(scratch2, scratch2);
   masm.computeEffectiveAddress(
       BaseIndex(scratch2, scratch1, TimesOne, JitScript::offsetOfICEntries()),
       scratch2);

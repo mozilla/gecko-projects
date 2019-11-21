@@ -117,13 +117,6 @@ struct DisplayPortMarginsPropertyData {
   uint32_t mPriority;
 };
 
-struct MotionPathData {
-  gfx::Point mTranslate;
-  float mRotate;
-  // The delta value between transform-origin and offset-anchor.
-  gfx::Point mShift;
-};
-
 }  // namespace mozilla
 
 // For GetDisplayPort
@@ -2332,6 +2325,17 @@ class nsLayoutUtils {
                                         mozilla::EffectSet* aEffectSet);
 
   /**
+   * A variant of the above HasAnimationOfPropertySet. This is especially for
+   * tranform-like properties with motion-path.
+   * For transform-like properties with motion-path, we need to check if
+   * offset-path has effect. If we don't have any animation on offset-path and
+   * offset-path is none, there is no effective motion-path, and so we don't
+   * care other offset-* properties. In this case, this function only checks the
+   * rest of transform-like properties (i.e. transform/translate/rotate/scale).
+   */
+  static bool HasAnimationOfTransformAndMotionPath(const nsIFrame* aFrame);
+
+  /**
    * Returns true if |aFrame| has an animation of |aProperty| which is
    * not overridden by !important rules.
    */
@@ -2978,12 +2982,6 @@ class nsLayoutUtils {
   static ComputedStyle* StyleForScrollbar(nsIFrame* aScrollbarPart);
 
   /**
-   * Generate the motion path transform result.
-   **/
-  static mozilla::Maybe<mozilla::MotionPathData> ResolveMotionPath(
-      const nsIFrame* aFrame);
-
-  /**
    * Returns true if |aFrame| is scrolled out of view by a scrollable element in
    * a cross-process ancestor document.
    * Note this function only works for frames in out-of-process iframes.
@@ -2997,6 +2995,16 @@ class nsLayoutUtils {
    **/
   static bool FrameIsMostlyScrolledOutOfViewInCrossProcess(
       const nsIFrame* aFrame, nscoord aMargin);
+
+  /**
+   * Expand the height of |aSize| to the size of `vh` units.
+   *
+   * With dynamic toolbar(s) the height for `vh` units is greater than the
+   * ICB height, we need to expand it in some places.
+   **/
+  template <typename SizeType>
+  static SizeType ExpandHeightForViewportUnits(nsPresContext* aPresContext,
+                                               const SizeType& aSize);
 
  private:
   /**
@@ -3048,6 +3056,23 @@ template <typename PointType, typename RectType, typename CoordType>
   }
 
   return false;
+}
+
+template <typename SizeType>
+/* static */ SizeType nsLayoutUtils::ExpandHeightForViewportUnits(
+    nsPresContext* aPresContext, const SizeType& aSize) {
+  nsSize sizeForViewportUnits = aPresContext->GetSizeForViewportUnits();
+
+  // |aSize| might be the size expanded to the minimum-scale size whereas the
+  // size for viewport units is not scaled so that we need to expand the |aSize|
+  // height with the aspect ratio of the size for viewport units instead of just
+  // expanding to the size for viewport units.
+  float ratio = (float)sizeForViewportUnits.height / sizeForViewportUnits.width;
+
+  MOZ_ASSERT(aSize.height <=
+             NSCoordSaturatingNonnegativeMultiply(aSize.width, ratio));
+  return SizeType(aSize.width,
+                  NSCoordSaturatingNonnegativeMultiply(aSize.width, ratio));
 }
 
 namespace mozilla {

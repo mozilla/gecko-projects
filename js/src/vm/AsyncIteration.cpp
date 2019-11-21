@@ -406,8 +406,8 @@ static const JSFunctionSpec async_generator_methods[] = {
     JS_FN("throw", AsyncGeneratorThrow, 1, 0),
     JS_FN("return", AsyncGeneratorReturn, 1, 0), JS_FS_END};
 
-/* static */ MOZ_MUST_USE bool GlobalObject::initAsyncGenerators(
-    JSContext* cx, Handle<GlobalObject*> global) {
+bool GlobalObject::initAsyncIteratorProto(JSContext* cx,
+                                          Handle<GlobalObject*> global) {
   if (global->getReservedSlot(ASYNC_ITERATOR_PROTO).isObject()) {
     return true;
   }
@@ -420,6 +420,22 @@ static const JSFunctionSpec async_generator_methods[] = {
   }
   if (!DefinePropertiesAndFunctions(cx, asyncIterProto, nullptr,
                                     async_iterator_proto_methods)) {
+    return false;
+  }
+
+  global->setReservedSlot(ASYNC_ITERATOR_PROTO, ObjectValue(*asyncIterProto));
+  return true;
+}
+
+bool GlobalObject::initAsyncFromSyncIteratorProto(
+    JSContext* cx, Handle<GlobalObject*> global) {
+  if (global->getReservedSlot(ASYNC_FROM_SYNC_ITERATOR_PROTO).isObject()) {
+    return true;
+  }
+
+  RootedObject asyncIterProto(
+      cx, GlobalObject::getOrCreateAsyncIteratorPrototype(cx, global));
+  if (!asyncIterProto) {
     return false;
   }
 
@@ -437,6 +453,57 @@ static const JSFunctionSpec async_generator_methods[] = {
     return false;
   }
 
+  global->setReservedSlot(ASYNC_FROM_SYNC_ITERATOR_PROTO,
+                          ObjectValue(*asyncFromSyncIterProto));
+  return true;
+}
+
+static JSObject* CreateAsyncGeneratorFunction(JSContext* cx, JSProtoKey key) {
+  RootedObject proto(
+      cx, GlobalObject::getOrCreateFunctionConstructor(cx, cx->global()));
+  if (!proto) {
+    return nullptr;
+  }
+  HandlePropertyName name = cx->names().AsyncGeneratorFunction;
+
+  // 25.3.1 The AsyncGeneratorFunction Constructor
+  return NewFunctionWithProto(cx, AsyncGeneratorConstructor, 1,
+                              FunctionFlags::NATIVE_CTOR, nullptr, name, proto,
+                              gc::AllocKind::FUNCTION, SingletonObject);
+}
+
+static JSObject* CreateAsyncGeneratorFunctionPrototype(JSContext* cx,
+                                                       JSProtoKey key) {
+  return NewSingletonObjectWithFunctionPrototype(cx, cx->global());
+}
+
+static bool AsyncGeneratorFunctionClassFinish(JSContext* cx,
+                                              HandleObject asyncGenFunction,
+                                              HandleObject asyncGenerator) {
+  Handle<GlobalObject*> global = cx->global();
+
+  // Change the "constructor" property to non-writable before adding any other
+  // properties, so it's still the last property and can be modified without a
+  // dictionary-mode transition.
+  MOZ_ASSERT(StringEqualsAscii(
+      JSID_TO_LINEAR_STRING(
+          asyncGenerator->as<NativeObject>().lastProperty()->propid()),
+      "constructor"));
+  MOZ_ASSERT(!asyncGenerator->as<NativeObject>().inDictionaryMode());
+
+  RootedValue asyncGenFunctionVal(cx, ObjectValue(*asyncGenFunction));
+  if (!DefineDataProperty(cx, asyncGenerator, cx->names().constructor,
+                          asyncGenFunctionVal, JSPROP_READONLY)) {
+    return false;
+  }
+  MOZ_ASSERT(!asyncGenerator->as<NativeObject>().inDictionaryMode());
+
+  RootedObject asyncIterProto(
+      cx, GlobalObject::getOrCreateAsyncIteratorPrototype(cx, global));
+  if (!asyncIterProto) {
+    return false;
+  }
+
   // 25.5 AsyncGenerator Objects
   RootedObject asyncGenProto(cx, GlobalObject::createBlankPrototypeInheriting(
                                      cx, &PlainObject::class_, asyncIterProto));
@@ -450,11 +517,6 @@ static const JSFunctionSpec async_generator_methods[] = {
   }
 
   // 25.3.3 Properties of the AsyncGeneratorFunction Prototype Object
-  RootedObject asyncGenerator(
-      cx, NewSingletonObjectWithFunctionPrototype(cx, global));
-  if (!asyncGenerator) {
-    return false;
-  }
   if (!LinkConstructorAndPrototype(cx, asyncGenerator, asyncGenProto,
                                    JSPROP_READONLY, JSPROP_READONLY) ||
       !DefineToStringTag(cx, asyncGenerator,
@@ -462,33 +524,21 @@ static const JSFunctionSpec async_generator_methods[] = {
     return false;
   }
 
-  RootedObject proto(
-      cx, GlobalObject::getOrCreateFunctionConstructor(cx, cx->global()));
-  if (!proto) {
-    return false;
-  }
-  HandlePropertyName name = cx->names().AsyncGeneratorFunction;
+  global->setAsyncGeneratorPrototype(asyncGenProto);
 
-  // 25.3.1 The AsyncGeneratorFunction Constructor
-  RootedObject asyncGenFunction(
-      cx, NewFunctionWithProto(cx, AsyncGeneratorConstructor, 1,
-                               FunctionFlags::NATIVE_CTOR, nullptr, name, proto,
-                               gc::AllocKind::FUNCTION, SingletonObject));
-  if (!asyncGenFunction) {
-    return false;
-  }
-  if (!LinkConstructorAndPrototype(cx, asyncGenFunction, asyncGenerator,
-                                   JSPROP_PERMANENT | JSPROP_READONLY,
-                                   JSPROP_READONLY)) {
-    return false;
-  }
-
-  global->setReservedSlot(ASYNC_ITERATOR_PROTO, ObjectValue(*asyncIterProto));
-  global->setReservedSlot(ASYNC_FROM_SYNC_ITERATOR_PROTO,
-                          ObjectValue(*asyncFromSyncIterProto));
-  global->setReservedSlot(ASYNC_GENERATOR, ObjectValue(*asyncGenerator));
-  global->setReservedSlot(ASYNC_GENERATOR_FUNCTION,
-                          ObjectValue(*asyncGenFunction));
-  global->setReservedSlot(ASYNC_GENERATOR_PROTO, ObjectValue(*asyncGenProto));
   return true;
 }
+
+static const ClassSpec AsyncGeneratorFunctionClassSpec = {
+    CreateAsyncGeneratorFunction,
+    CreateAsyncGeneratorFunctionPrototype,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    AsyncGeneratorFunctionClassFinish,
+    ClassSpec::DontDefineConstructor};
+
+const JSClass js::AsyncGeneratorFunctionClass = {
+    "AsyncGeneratorFunction", 0, JS_NULL_CLASS_OPS,
+    &AsyncGeneratorFunctionClassSpec};

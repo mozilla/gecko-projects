@@ -42,7 +42,6 @@ LOCAL_INCLUDES += [
     '/dom/offline',
     '/dom/storage',
     '/dom/svg',
-    '/dom/xbl',
     '/dom/xslt/base',
     '/dom/xslt/xml',
     '/dom/xslt/xpath',

@@ -35,13 +35,17 @@ function installAddonEngine(name = "engine-addon") {
 /**
  * Copy the engine-distribution.xml engine to a fake distribution
  * created in the profile, and registered with the directory service.
+ *
+ * @returns {nsIFile}
+ *   An object referencing the distribution directory.
  */
 function installDistributionEngine() {
   const XRE_APP_DISTRIBUTION_DIR = "XREAppDist";
 
-  const profD = do_get_profile().QueryInterface(Ci.nsIFile);
-
-  let dir = profD.clone();
+  // Use a temp directory rather than the profile or app directory, as then the
+  // engine gets registered as a proper [distribution] load path rather than
+  // something else.
+  let dir = do_get_tempdir();
   dir.append("distribution");
   dir.create(dir.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
   let distDir = dir.clone();
@@ -63,4 +67,5 @@ function installDistributionEngine() {
       return null;
     },
   });
+  return distDir;
 }

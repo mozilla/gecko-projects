@@ -9,6 +9,8 @@
 
 // Globals
 
+const MAX_DATE_MS = 8640000000000000;
+
 /**
  * Verifies that the specified login is considered invalid by addLogin and by
  * modifyLogin with both nsILoginInfo and nsIPropertyBag arguments.
@@ -128,33 +130,29 @@ add_task(function test_invalid_httpRealm_formActionOrigin() {
   );
 
   // httpRealm === null, formActionOrigin === ""
-  // This is not enforced for now.
+  // TODO: This is not enforced for now.
   // checkLoginInvalid(TestData.formLogin({ formActionOrigin: "" }),
   //                   /without a httpRealm or formActionOrigin/);
 
   // httpRealm === "", formActionOrigin === ""
-  checkLoginInvalid(
-    TestData.formLogin({ formActionOrigin: "", httpRealm: "" }),
-    /both a httpRealm and formActionOrigin/
-  );
+  let login = TestData.formLogin({ formActionOrigin: "" });
+  login.httpRealm = "";
+  checkLoginInvalid(login, /both a httpRealm and formActionOrigin/);
 
   // !!httpRealm, !!formActionOrigin
-  checkLoginInvalid(
-    TestData.formLogin({ httpRealm: "The HTTP Realm" }),
-    /both a httpRealm and formActionOrigin/
-  );
+  login = TestData.formLogin();
+  login.httpRealm = "The HTTP Realm";
+  checkLoginInvalid(login, /both a httpRealm and formActionOrigin/);
 
   // httpRealm === "", !!formActionOrigin
-  checkLoginInvalid(
-    TestData.formLogin({ httpRealm: "" }),
-    /both a httpRealm and formActionOrigin/
-  );
+  login = TestData.formLogin();
+  login.httpRealm = "";
+  checkLoginInvalid(login, /both a httpRealm and formActionOrigin/);
 
   // !!httpRealm, formActionOrigin === ""
-  checkLoginInvalid(
-    TestData.authLogin({ formActionOrigin: "" }),
-    /both a httpRealm and formActionOrigin/
-  );
+  login = TestData.authLogin();
+  login.formActionOrigin = "";
+  checkLoginInvalid(login, /both a httpRealm and formActionOrigin/);
 });
 
 /**
@@ -439,4 +437,112 @@ add_task(function test_deduplicate_keeps_most_recent() {
     Date.UTC(2015, 11, 4, 0, 0, 0),
     "Most recent login was kept."
   );
+});
+
+/**
+ * Tests handling when adding a login with bad date values
+ */
+add_task(function test_addLogin_badDates() {
+  LoginTestUtils.clearData();
+
+  let now = Date.now();
+  let defaultLoginDates = {
+    timeCreated: now,
+    timeLastUsed: now,
+    timePasswordChanged: now,
+  };
+
+  let defaultsLogin = TestData.formLogin();
+  for (let pname of ["timeCreated", "timeLastUsed", "timePasswordChanged"]) {
+    Assert.ok(!defaultsLogin[pname]);
+  }
+  Assert.ok(
+    !!Services.logins.addLogin(defaultsLogin),
+    "Sanity check adding defaults formLogin"
+  );
+  Services.logins.removeAllLogins();
+
+  // 0 is a valid date in this context - new nsLoginInfo timestamps init to 0
+  for (let pname of ["timeCreated", "timeLastUsed", "timePasswordChanged"]) {
+    let loginInfo = TestData.formLogin(
+      Object.assign({}, defaultLoginDates, {
+        [pname]: 0,
+      })
+    );
+    Assert.ok(
+      !!Services.logins.addLogin(loginInfo),
+      "Check 0 value for " + pname
+    );
+    Services.logins.removeAllLogins();
+  }
+
+  // negative dates get clamped to 0 and are ok
+  for (let pname of ["timeCreated", "timeLastUsed", "timePasswordChanged"]) {
+    let loginInfo = TestData.formLogin(
+      Object.assign({}, defaultLoginDates, {
+        [pname]: -1,
+      })
+    );
+    Assert.ok(
+      !!Services.logins.addLogin(loginInfo),
+      "Check -1 value for " + pname
+    );
+    Services.logins.removeAllLogins();
+  }
+
+  // out-of-range dates will throw
+  for (let pname of ["timeCreated", "timeLastUsed", "timePasswordChanged"]) {
+    let loginInfo = TestData.formLogin(
+      Object.assign({}, defaultLoginDates, {
+        [pname]: MAX_DATE_MS + 1,
+      })
+    );
+    Assert.throws(
+      () => Services.logins.addLogin(loginInfo),
+      /invalid date properties/
+    );
+    Assert.equal(Services.logins.getAllLogins().length, 0);
+  }
+
+  LoginTestUtils.checkLogins([]);
+});
+
+/**
+ * Tests handling when adding multiple logins with bad date values
+ */
+add_task(async function test_addLogins_badDates() {
+  LoginTestUtils.clearData();
+
+  let defaultsLogin = TestData.formLogin({
+    username: "defaults",
+  });
+
+  // -11644473600000 is the value you get if you convert Dec 31 1600 16:07:02 to unix epoch time
+  let timeCreatedLogin = TestData.formLogin({
+    username: "tc",
+    timeCreated: -11644473600000,
+  });
+
+  let timeLastUsedLogin = TestData.formLogin({
+    username: "tlu",
+    timeLastUsed: -11644473600000,
+  });
+
+  let timePasswordChangedLogin = TestData.formLogin({
+    username: "tpc",
+    timePasswordChanged: -11644473600000,
+  });
+
+  await Services.logins.addLogins([
+    defaultsLogin,
+    timeCreatedLogin,
+    timeLastUsedLogin,
+    timePasswordChangedLogin,
+  ]);
+
+  // none of the logins with invalid dates should have been added
+  let savedLogins = Services.logins.getAllLogins();
+  Assert.equal(savedLogins.length, 1);
+
+  Services.logins.removeAllLogins();
 });

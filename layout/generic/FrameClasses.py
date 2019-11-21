@@ -98,7 +98,6 @@ FRAME_CLASSES = [
     Frame("nsPageSequenceFrame", "Sequence", NOT_LEAF),
     Frame("nsSliderFrame", "Slider", NOT_LEAF),
     Frame("nsSplitterFrame", "Box", NOT_LEAF),
-    Frame("nsStackFrame", "Box", NOT_LEAF),
     Frame("nsSubDocumentFrame", "SubDocument", LEAF),
     Frame("nsSVGAFrame", "SVGA", NOT_LEAF),
     Frame("nsSVGClipPathFrame", "SVGClipPath", NOT_LEAF),
@@ -147,6 +146,7 @@ FRAME_CLASSES = [
     Frame("nsXULLabelFrame", "XULLabel", NOT_LEAF),
     Frame("nsXULScrollFrame", "Scroll", NOT_LEAF),
     Frame("ViewportFrame", "Viewport", NOT_LEAF),
+    Frame("WBRFrame", "Wbr", LEAF),
 
     # Non-concrete classes (for FrameIID use)
     AbstractFrame("nsContainerFrame"),

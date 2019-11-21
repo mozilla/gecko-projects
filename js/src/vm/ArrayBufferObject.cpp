@@ -17,6 +17,7 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/TaggedAnonymousMemory.h"
 
+#include <algorithm>
 #include <string.h>
 #ifndef XP_WIN
 #  include <sys/mman.h>
@@ -29,7 +30,6 @@
 #include "jsfriendapi.h"
 #include "jsnum.h"
 #include "jstypes.h"
-#include "jsutil.h"
 
 #include "builtin/Array.h"
 #include "builtin/DataViewObject.h"
@@ -445,7 +445,8 @@ bool ArrayBufferObject::class_constructor(JSContext* cx, unsigned argc,
 }
 
 static uint8_t* AllocateArrayBufferContents(JSContext* cx, uint32_t nbytes) {
-  auto* p = cx->pod_callocCanGC<uint8_t>(nbytes, js::ArrayBufferContentsArena);
+  auto* p =
+      cx->pod_arena_callocCanGC<uint8_t>(js::ArrayBufferContentsArena, nbytes);
   if (!p) {
     ReportOutOfMemory(cx);
   }
@@ -596,82 +597,54 @@ void ArrayBufferObject::detach(JSContext* cx,
  *
  */
 
-class js::WasmArrayRawBuffer {
-  Maybe<uint32_t> maxSize_;
-  size_t mappedSize_;  // Not including the header page
+MOZ_MUST_USE bool WasmArrayRawBuffer::growToSizeInPlace(uint32_t oldSize,
+                                                        uint32_t newSize) {
+  MOZ_ASSERT(newSize >= oldSize);
+  MOZ_ASSERT_IF(maxSize(), newSize <= maxSize().value());
+  MOZ_ASSERT(newSize <= mappedSize());
 
- protected:
-  WasmArrayRawBuffer(uint8_t* buffer, const Maybe<uint32_t>& maxSize,
-                     size_t mappedSize)
-      : maxSize_(maxSize), mappedSize_(mappedSize) {
-    MOZ_ASSERT(buffer == dataPointer());
+  uint32_t delta = newSize - oldSize;
+  MOZ_ASSERT(delta % wasm::PageSize == 0);
+
+  uint8_t* dataEnd = dataPointer() + oldSize;
+  MOZ_ASSERT(uintptr_t(dataEnd) % gc::SystemPageSize() == 0);
+
+  if (delta && !CommitBufferMemory(dataEnd, delta)) {
+    return false;
   }
 
- public:
-  static WasmArrayRawBuffer* Allocate(uint32_t numBytes,
-                                      const Maybe<uint32_t>& maxSize,
-                                      const Maybe<size_t>& mappedSize);
-  static void Release(void* mem);
+  length_ = newSize;
 
-  uint8_t* dataPointer() {
-    uint8_t* ptr = reinterpret_cast<uint8_t*>(this);
-    return ptr + sizeof(WasmArrayRawBuffer);
-  }
+  return true;
+}
 
-  uint8_t* basePointer() { return dataPointer() - gc::SystemPageSize(); }
-
-  size_t mappedSize() const { return mappedSize_; }
-
-  Maybe<uint32_t> maxSize() const { return maxSize_; }
-
-  MOZ_MUST_USE bool growToSizeInPlace(uint32_t oldSize, uint32_t newSize) {
-    MOZ_ASSERT(newSize >= oldSize);
-    MOZ_ASSERT_IF(maxSize(), newSize <= maxSize().value());
-    MOZ_ASSERT(newSize <= mappedSize());
-
-    uint32_t delta = newSize - oldSize;
-    MOZ_ASSERT(delta % wasm::PageSize == 0);
-
-    uint8_t* dataEnd = dataPointer() + oldSize;
-    MOZ_ASSERT(uintptr_t(dataEnd) % gc::SystemPageSize() == 0);
-
-    if (delta && !CommitBufferMemory(dataEnd, delta)) {
-      return false;
-    }
-
+bool WasmArrayRawBuffer::extendMappedSize(uint32_t maxSize) {
+  size_t newMappedSize = wasm::ComputeMappedSize(maxSize);
+  MOZ_ASSERT(mappedSize_ <= newMappedSize);
+  if (mappedSize_ == newMappedSize) {
     return true;
   }
 
-  bool extendMappedSize(uint32_t maxSize) {
-    size_t newMappedSize = wasm::ComputeMappedSize(maxSize);
-    MOZ_ASSERT(mappedSize_ <= newMappedSize);
-    if (mappedSize_ == newMappedSize) {
-      return true;
-    }
-
-    if (!ExtendBufferMapping(dataPointer(), mappedSize_, newMappedSize)) {
-      return false;
-    }
-
-    mappedSize_ = newMappedSize;
-    return true;
+  if (!ExtendBufferMapping(dataPointer(), mappedSize_, newMappedSize)) {
+    return false;
   }
 
-  // Try and grow the mapped region of memory. Does not change current size.
-  // Does not move memory if no space to grow.
-  void tryGrowMaxSizeInPlace(uint32_t deltaMaxSize) {
-    CheckedInt<uint32_t> newMaxSize = maxSize_.value();
-    newMaxSize += deltaMaxSize;
-    MOZ_ASSERT(newMaxSize.isValid());
-    MOZ_ASSERT(newMaxSize.value() % wasm::PageSize == 0);
+  mappedSize_ = newMappedSize;
+  return true;
+}
 
-    if (!extendMappedSize(newMaxSize.value())) {
-      return;
-    }
+void WasmArrayRawBuffer::tryGrowMaxSizeInPlace(uint32_t deltaMaxSize) {
+  CheckedInt<uint32_t> newMaxSize = maxSize_.value();
+  newMaxSize += deltaMaxSize;
+  MOZ_ASSERT(newMaxSize.isValid());
+  MOZ_ASSERT(newMaxSize.value() % wasm::PageSize == 0);
 
-    maxSize_ = Some(newMaxSize.value());
+  if (!extendMappedSize(newMaxSize.value())) {
+    return;
   }
-};
+
+  maxSize_ = Some(newMaxSize.value());
+}
 
 /* static */
 WasmArrayRawBuffer* WasmArrayRawBuffer::Allocate(uint32_t numBytes,
@@ -700,7 +673,8 @@ WasmArrayRawBuffer* WasmArrayRawBuffer::Allocate(uint32_t numBytes,
   uint8_t* base = reinterpret_cast<uint8_t*>(data) + gc::SystemPageSize();
   uint8_t* header = base - sizeof(WasmArrayRawBuffer);
 
-  auto rawBuf = new (header) WasmArrayRawBuffer(base, maxSize, mappedSize);
+  auto rawBuf =
+      new (header) WasmArrayRawBuffer(base, maxSize, mappedSize, numBytes);
   return rawBuf;
 }
 
@@ -724,17 +698,17 @@ template <typename ObjT, typename RawbufT>
 static bool CreateSpecificWasmBuffer(
     JSContext* cx, uint32_t initialSize, const Maybe<uint32_t>& maxSize,
     MutableHandleArrayBufferObjectMaybeShared maybeSharedObject) {
-#define ROUND_UP(v, a) ((v) % (a) == 0 ? (v) : v + a - ((v) % (a)))
-
   bool useHugeMemory = wasm::IsHugeMemoryEnabled();
 
   Maybe<uint32_t> clampedMaxSize = maxSize;
   if (clampedMaxSize) {
 #ifdef JS_64BIT
-    // On 64-bit platforms when we aren't using huge memory, clamp clampedMaxSize to
-    // a smaller value that satisfies the 32-bit invariants
-    // clampedMaxSize + wasm::PageSize < UINT32_MAX and clampedMaxSize % wasm::PageSize == 0
-    if (!useHugeMemory && clampedMaxSize.value() >= (UINT32_MAX - wasm::PageSize)) {
+    // On 64-bit platforms when we aren't using huge memory, clamp
+    // clampedMaxSize to a smaller value that satisfies the 32-bit invariants
+    // clampedMaxSize + wasm::PageSize < UINT32_MAX and clampedMaxSize %
+    // wasm::PageSize == 0
+    if (!useHugeMemory &&
+        clampedMaxSize.value() >= (UINT32_MAX - wasm::PageSize)) {
       uint32_t clamp = (wasm::MaxMemoryMaximumPages - 2) * wasm::PageSize;
       MOZ_ASSERT(clamp < UINT32_MAX);
       MOZ_ASSERT(initialSize <= clamp);
@@ -748,8 +722,8 @@ static bool CreateSpecificWasmBuffer(
     // want "a lot of memory". Maintain the invariant that
     // initialSize <= clampedMaxSize.
     static const uint32_t OneGiB = 1 << 30;
-    uint32_t clamp = Max(OneGiB, initialSize);
-    clampedMaxSize = Some(Min(clamp, *clampedMaxSize));
+    uint32_t clamp = std::max(OneGiB, initialSize);
+    clampedMaxSize = Some(std::min(clamp, *clampedMaxSize));
 #endif
   }
 
@@ -774,8 +748,8 @@ static bool CreateSpecificWasmBuffer(
       return false;
     }
 
-    // If we fail, and have a clampedMaxSize, try to reserve the biggest chunk in
-    // the range [initialSize, clampedMaxSize) using log backoff.
+    // If we fail, and have a clampedMaxSize, try to reserve the biggest chunk
+    // in the range [initialSize, clampedMaxSize) using log backoff.
     if (!clampedMaxSize) {
       wasm::Log(cx, "new Memory({initial=%u bytes}) failed", initialSize);
       ReportOutOfMemory(cx);
@@ -785,7 +759,7 @@ static bool CreateSpecificWasmBuffer(
     uint32_t cur = clampedMaxSize.value() / 2;
 
     for (; cur > initialSize; cur /= 2) {
-      uint32_t clampedMaxSize = ROUND_UP(cur, wasm::PageSize);
+      uint32_t clampedMaxSize = RoundUp(cur, wasm::PageSize);
       buffer = RawbufT::Allocate(initialSize, Some(clampedMaxSize), mappedSize);
       if (buffer) {
         break;
@@ -800,15 +774,14 @@ static bool CreateSpecificWasmBuffer(
 
     // Try to grow our chunk as much as possible.
     for (size_t d = cur / 2; d >= wasm::PageSize; d /= 2) {
-      buffer->tryGrowMaxSizeInPlace(ROUND_UP(d, wasm::PageSize));
+      buffer->tryGrowMaxSizeInPlace(RoundUp(d, wasm::PageSize));
     }
   }
 
-#undef ROUND_UP
-
   // ObjT::createFromNewRawBuffer assumes ownership of |buffer| even in case
   // of failure.
-  RootedArrayBufferObjectMaybeShared object(cx, ObjT::createFromNewRawBuffer(cx, buffer, initialSize));
+  RootedArrayBufferObjectMaybeShared object(
+      cx, ObjT::createFromNewRawBuffer(cx, buffer, initialSize));
   if (!object) {
     return false;
   }
@@ -1001,7 +974,7 @@ inline size_t ArrayBufferObject::associatedBytes() const {
   if (bufferKind() == MALLOCED) {
     return byteLength();
   } else if (bufferKind() == MAPPED) {
-    return JS_ROUNDUP(byteLength(), js::gc::SystemPageSize());
+    return RoundUp(byteLength(), js::gc::SystemPageSize());
   } else {
     MOZ_CRASH("Unexpected buffer kind");
   }
@@ -1195,7 +1168,7 @@ ArrayBufferObject* ArrayBufferObject::createForContents(
   } else if (contents.kind() == EXTERNAL) {
     // Store the FreeInfo in the inline data slots so that we
     // don't use up slots for it in non-refcounted array buffers.
-    size_t freeInfoSlots = JS_HOWMANY(sizeof(FreeInfo), sizeof(Value));
+    size_t freeInfoSlots = HowMany(sizeof(FreeInfo), sizeof(Value));
     MOZ_ASSERT(reservedSlots + freeInfoSlots <= NativeObject::MAX_FIXED_SLOTS,
                "FreeInfo must fit in inline slots");
     nslots += freeInfoSlots;
@@ -1203,7 +1176,7 @@ ArrayBufferObject* ArrayBufferObject::createForContents(
     // The ABO is taking ownership, so account the bytes against the zone.
     nAllocated = nbytes;
     if (contents.kind() == MAPPED) {
-      nAllocated = JS_ROUNDUP(nbytes, js::gc::SystemPageSize());
+      nAllocated = RoundUp(nbytes, js::gc::SystemPageSize());
     } else {
       MOZ_ASSERT(contents.kind() == MALLOCED,
                  "should have handled all possible callers' kinds");
@@ -1247,7 +1220,7 @@ ArrayBufferObject* ArrayBufferObject::createZeroed(
   size_t nslots = JSCLASS_RESERVED_SLOTS(&class_);
   uint8_t* data;
   if (nbytes <= MaxInlineBytes) {
-    int newSlots = JS_HOWMANY(nbytes, sizeof(Value));
+    int newSlots = HowMany(nbytes, sizeof(Value));
     MOZ_ASSERT(int(nbytes) <= newSlots * int(sizeof(Value)));
 
     nslots += newSlots;
@@ -1307,6 +1280,8 @@ ArrayBufferObject* ArrayBufferObject::createFromNewRawBuffer(
     WasmArrayRawBuffer::Release(rawBuffer->dataPointer());
     return nullptr;
   }
+
+  MOZ_ASSERT(initialSize == rawBuffer->byteLength());
 
   buffer->setByteLength(initialSize);
   buffer->setFlags(0);

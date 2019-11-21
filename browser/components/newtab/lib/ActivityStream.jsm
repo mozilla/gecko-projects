@@ -10,11 +10,6 @@ ChromeUtils.defineModuleGetter(
   "AppConstants",
   "resource://gre/modules/AppConstants.jsm"
 );
-ChromeUtils.defineModuleGetter(
-  this,
-  "PrivateBrowsingUtils",
-  "resource://gre/modules/PrivateBrowsingUtils.jsm"
-);
 
 // NB: Eagerly load modules that will be loaded/constructed/initialized in the
 // common case to avoid the overhead of wrapping and detecting lazy loading.
@@ -315,7 +310,7 @@ const PREFS_CONFIG = new Map([
     "telemetry.structuredIngestion.endpoint",
     {
       title: "Structured Ingestion telemetry server endpoint",
-      value: "https://incoming.telemetry.mozilla.org/submit/activity-stream",
+      value: "https://incoming.telemetry.mozilla.org/submit",
     },
   ],
   [
@@ -468,6 +463,14 @@ const PREFS_CONFIG = new Map([
   ],
   // See browser/app/profile/firefox.js for other ASR preferences. They must be defined there to enable roll-outs.
   [
+    "discoverystream.campaign.blocks",
+    {
+      title: "Track campaign blocks",
+      skipBroadcast: true,
+      value: "{}",
+    },
+  ],
+  [
     "discoverystream.config",
     {
       title: "Configuration for the new pocket new tab",
@@ -489,7 +492,7 @@ const PREFS_CONFIG = new Map([
           enabled: isEnabled,
           show_spocs: showSpocs({ geo }),
           hardcoded_layout: true,
-          personalized: false,
+          personalized: true,
           // This is currently an exmple layout used for dev purposes.
           layout_endpoint:
             "https://getpocket.cdn.mozilla.net/v3/newtab/layout?version=1&consumer_key=$apiKey&layout_variant=basic",
@@ -503,6 +506,14 @@ const PREFS_CONFIG = new Map([
       title:
         "Endpoint prefixes (comma-separated) that are allowed to be requested",
       value: "https://getpocket.cdn.mozilla.net/,https://spocs.getpocket.com/",
+    },
+  ],
+  [
+    "discoverystream.engagementLabelEnabled",
+    {
+      title:
+        "Allow the display of engagement labels for discovery stream components (eg: Trending, Popular, etc)",
+      value: false,
     },
   ],
   [
@@ -651,10 +662,7 @@ this.ActivityStream = class ActivityStream {
         this.feeds,
         ac.BroadcastToContent({
           type: at.INIT,
-          data: {
-            permanentPrivateBrowsing:
-              PrivateBrowsingUtils.permanentPrivateBrowsing,
-          },
+          data: {},
         }),
         { type: at.UNINIT }
       );

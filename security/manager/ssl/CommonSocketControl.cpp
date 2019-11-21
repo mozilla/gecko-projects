@@ -41,24 +41,20 @@ CommonSocketControl::SetNotificationCallbacks(
 }
 
 NS_IMETHODIMP
-CommonSocketControl::ProxyStartSSL(void) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
+CommonSocketControl::ProxyStartSSL(void) { return NS_ERROR_NOT_IMPLEMENTED; }
 
 NS_IMETHODIMP
-CommonSocketControl::StartTLS(void) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
+CommonSocketControl::StartTLS(void) { return NS_ERROR_NOT_IMPLEMENTED; }
 
 NS_IMETHODIMP
-CommonSocketControl::SetNPNList(nsTArray<nsCString> & aNPNList) {
+CommonSocketControl::SetNPNList(nsTArray<nsCString>& aNPNList) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
 CommonSocketControl::GetNegotiatedNPN(nsACString& aNegotiatedNPN) {
   if (!mNPNCompleted) {
-      return NS_ERROR_NOT_CONNECTED;
+    return NS_ERROR_NOT_CONNECTED;
   }
 
   aNegotiatedNPN = mNegotiatedNPN;
@@ -71,14 +67,12 @@ CommonSocketControl::GetAlpnEarlySelection(nsACString& _retval) {
 }
 
 NS_IMETHODIMP
-CommonSocketControl::GetEarlyDataAccepted(bool *aEarlyDataAccepted) {
+CommonSocketControl::GetEarlyDataAccepted(bool* aEarlyDataAccepted) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-CommonSocketControl::DriveHandshake(void) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
+CommonSocketControl::DriveHandshake(void) { return NS_ERROR_NOT_IMPLEMENTED; }
 
 NS_IMETHODIMP
 CommonSocketControl::JoinConnection(const nsACString& npnProtocol,
@@ -179,15 +173,10 @@ CommonSocketControl::IsAcceptableForHost(const nsACString& hostname,
   }
   psm::CertVerifier::Flags flags = psm::CertVerifier::FLAG_LOCAL_ONLY;
   UniqueCERTCertList unusedBuiltChain;
-  mozilla::pkix::Result result = certVerifier->VerifySSLServerCert(
-      nssCert,
-      Maybe<nsTArray<uint8_t>>(),  // stapledOCSPResponse
-      Maybe<nsTArray<uint8_t>>(),  // sctsFromTLSExtension
-      mozilla::pkix::Now(),
-      nullptr,  // pinarg
-      hostname, unusedBuiltChain,
-      false,  // save intermediates
-      flags);
+  mozilla::pkix::Result result =
+      certVerifier->VerifySSLServerCert(nssCert, mozilla::pkix::Now(),
+                                        nullptr,  // pinarg
+                                        hostname, unusedBuiltChain, flags);
   if (result != mozilla::pkix::Success) {
     return NS_OK;
   }
@@ -198,12 +187,12 @@ CommonSocketControl::IsAcceptableForHost(const nsACString& hostname,
 }
 
 NS_IMETHODIMP
-CommonSocketControl::GetKEAUsed(int16_t *aKEAUsed) {
+CommonSocketControl::GetKEAUsed(int16_t* aKEAUsed) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-CommonSocketControl::GetKEAKeyBits(uint32_t *aKEAKeyBits) {
+CommonSocketControl::GetKEAKeyBits(uint32_t* aKEAKeyBits) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -214,7 +203,7 @@ CommonSocketControl::GetProviderFlags(uint32_t* aProviderFlags) {
 }
 
 NS_IMETHODIMP
-CommonSocketControl::GetProviderTlsFlags(uint32_t *aProviderTlsFlags) {
+CommonSocketControl::GetProviderTlsFlags(uint32_t* aProviderTlsFlags) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -230,21 +219,21 @@ CommonSocketControl::GetSSLVersionOffered(int16_t* aSSLVersionOffered) {
 }
 
 NS_IMETHODIMP
-CommonSocketControl::GetMACAlgorithmUsed(int16_t *aMACAlgorithmUsed) {
+CommonSocketControl::GetMACAlgorithmUsed(int16_t* aMACAlgorithmUsed) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-bool  CommonSocketControl::GetDenyClientCert() { return true; }
+bool CommonSocketControl::GetDenyClientCert() { return true; }
 
 void CommonSocketControl::SetDenyClientCert(bool aDenyClientCert) {}
 
 NS_IMETHODIMP
-CommonSocketControl::GetClientCert(nsIX509Cert **aClientCert) {
+CommonSocketControl::GetClientCert(nsIX509Cert** aClientCert) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-CommonSocketControl::SetClientCert(nsIX509Cert *aClientCert) {
+CommonSocketControl::SetClientCert(nsIX509Cert* aClientCert) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -277,6 +266,6 @@ CommonSocketControl::GetResumed(bool* aResumed) {
 }
 
 NS_IMETHODIMP
-CommonSocketControl::GetPeerId(nsACString &aResult) {
+CommonSocketControl::GetPeerId(nsACString& aResult) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

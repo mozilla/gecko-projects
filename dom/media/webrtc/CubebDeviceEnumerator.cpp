@@ -222,6 +222,8 @@ void CubebDeviceEnumerator::EnumerateAudioDevices(
 #else
   if (devices.IsEmpty() || manualInvalidation) {
     devices.Clear();
+
+    MutexAutoUnlock unlock(mMutex);
     GetDeviceCollection(devices, (aSide == Side::INPUT) ? CubebUtils::Input
                                                         : CubebUtils::Output);
   }
@@ -308,17 +310,13 @@ void CubebDeviceEnumerator::AudioDeviceListChanged(Side aSide) {
     MutexAutoLock lock(mMutex);
     if (aSide == Side::INPUT) {
       mInputDevices.Clear();
+      mOnInputDeviceListChange.Notify();
     } else {
       MOZ_ASSERT(aSide == Side::OUTPUT);
       mOutputDevices.Clear();
+      mOnOutputDeviceListChange.Notify();
     }
   }
-
-  NS_DispatchToMainThread(NS_NewRunnableFunction(
-      "CubebDeviceEnumerator::AudioDeviceListChanged",
-      [self = RefPtr<CubebDeviceEnumerator>(this)]() {
-        self->NotifyDeviceChange();
-      }));
 }
 
 }  // namespace mozilla

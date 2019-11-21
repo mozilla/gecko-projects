@@ -111,6 +111,9 @@ class TransportSecurityInfo : public nsITransportSecurityInfo,
      connection is eligible for joining in nsNSSSocketInfo::JoinConnection() */
   bool mHaveCertErrorBits;
 
+  static nsresult ConvertCertArrayToCertList(
+      const nsTArray<RefPtr<nsIX509Cert>>& aCertArray,
+      nsIX509CertList** aCertList);
  private:
   // True if SetCanceled has been called (or if this was deserialized with a
   // non-zero mErrorCode, which can only be the case if SetCanceled was called
@@ -121,7 +124,7 @@ class TransportSecurityInfo : public nsITransportSecurityInfo,
 
  protected:
   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
-  nsCOMPtr<nsIX509CertList> mSucceededCertChain;
+  nsTArray<RefPtr<nsIX509Cert>> mSucceededCertChain;
 
  private:
   uint32_t mSecurityState;
@@ -135,9 +138,20 @@ class TransportSecurityInfo : public nsITransportSecurityInfo,
   nsCOMPtr<nsIX509Cert> mServerCert;
 
   /* Peer cert chain for failed connections (for error reporting) */
-  nsCOMPtr<nsIX509CertList> mFailedCertChain;
+  nsTArray<RefPtr<nsIX509Cert>> mFailedCertChain;
 
   nsresult ReadSSLStatus(nsIObjectInputStream* aStream);
+  static nsresult ConvertCertListToCertArray(
+      const nsCOMPtr<nsIX509CertList>& aCertList,
+      nsTArray<RefPtr<nsIX509Cert>>& aCertArray);
+
+  // This function is used to read the binary that are serialized
+  // by using nsIX509CertList
+  nsresult ReadCertList(nsIObjectInputStream* aStream,
+                        nsTArray<RefPtr<nsIX509Cert>>& aCertList);
+  nsresult ReadCertificatesFromStream(nsIObjectInputStream* aStream,
+                                      uint32_t aSize,
+                                      nsTArray<RefPtr<nsIX509Cert>>& aCertList);
 };
 
 class RememberCertErrorsTable {

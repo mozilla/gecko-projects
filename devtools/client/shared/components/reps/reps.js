@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
 		module.exports = factory(require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories"), require("devtools/client/shared/vendor/react"), require("Services"), require("devtools/client/shared/vendor/react-redux"));
@@ -2053,6 +2057,7 @@ function makeDefaultPropsBucket(propertiesNames, parent, ownProperties) {
     const defaultNodes = defaultProperties.map((name, index) => createNode({
       parent: defaultPropertiesNode,
       name: maybeEscapePropertyName(name),
+      propertyName: name,
       path: createPath(index, name),
       contents: ownProperties[name]
     }));
@@ -2066,6 +2071,7 @@ function makeNodesForOwnProps(propertiesNames, parent, ownProperties) {
   return propertiesNames.map(name => createNode({
     parent,
     name: maybeEscapePropertyName(name),
+    propertyName: name,
     contents: ownProperties[name]
   }));
 }
@@ -2187,6 +2193,7 @@ function createNode(options) {
   const {
     parent,
     name,
+    propertyName,
     path,
     contents,
     type = NODE_TYPES.GRIP,
@@ -2203,6 +2210,8 @@ function createNode(options) {
   return {
     parent,
     name,
+    // `name` can be escaped; propertyName contains the original property name.
+    propertyName,
     path: createPath(parent && parent.path, path || name),
     contents,
     type,
@@ -2350,7 +2359,8 @@ function getChildren(options) {
 
 function getPathExpression(item) {
   if (item && item.parent) {
-    return `${getPathExpression(item.parent)}.${item.name}`;
+    const parent = nodeIsBucket(item.parent) ? item.parent.parent : item.parent;
+    return `${getPathExpression(parent)}.${item.name}`;
   }
 
   return item.name;
@@ -2838,14 +2848,16 @@ const IGNORED_SOURCE_URLS = ["debugger eval code"];
 FunctionRep.propTypes = {
   object: PropTypes.object.isRequired,
   parameterNames: PropTypes.array,
-  onViewSourceInDebugger: PropTypes.func
+  onViewSourceInDebugger: PropTypes.func,
+  sourceMapService: PropTypes.object
 };
 
 function FunctionRep(props) {
   const {
     object: grip,
     onViewSourceInDebugger,
-    recordTelemetryEvent
+    recordTelemetryEvent,
+    sourceMapService
   } = props;
   let jumpToDefinitionButton;
 
@@ -2854,7 +2866,7 @@ function FunctionRep(props) {
       className: "jump-definition",
       draggable: false,
       title: "Jump to definition",
-      onClick: e => {
+      onClick: async e => {
         // Stop the event propagation so we don't trigger ObjectInspector
         // expand/collapse.
         e.stopPropagation();
@@ -2863,7 +2875,8 @@ function FunctionRep(props) {
           recordTelemetryEvent("jump_to_definition");
         }
 
-        onViewSourceInDebugger(grip.location);
+        const sourceLocation = await getSourceLocation(grip.location, sourceMapService);
+        onViewSourceInDebugger(sourceLocation);
       }
     });
   }
@@ -2981,6 +2994,31 @@ function supportsObject(grip, noGrip = false) {
   }
 
   return type == "Function";
+}
+
+async function getSourceLocation(location, sourceMapService) {
+  if (!sourceMapService) {
+    return location;
+  }
+
+  try {
+    const originalLocation = await sourceMapService.originalPositionFor(location.url, location.line, location.column);
+
+    if (originalLocation) {
+      const {
+        sourceUrl,
+        line,
+        column
+      } = originalLocation;
+      return {
+        url: sourceUrl,
+        line,
+        column
+      };
+    }
+  } catch (e) {}
+
+  return location;
 } // Exports from this module
 
 
@@ -3919,36 +3957,46 @@ function loadItemProperties(item, client, loadedProperties) {
   const value = getValue(gripItem);
   const [start, end] = item.meta ? [item.meta.startIndex, item.meta.endIndex] : [];
   const promises = [];
-  let objectClient;
+  let objectFront;
 
-  const getObjectClient = () => objectClient || client.createObjectClient(value);
+  if (value && client && client.getFrontByID) {
+    objectFront = client.getFrontByID(value.actor);
+  }
+
+  const getObjectFront = function () {
+    if (!objectFront) {
+      objectFront = client.createObjectFront(value);
+    }
+
+    return objectFront;
+  };
 
   if (shouldLoadItemIndexedProperties(item, loadedProperties)) {
-    promises.push(enumIndexedProperties(getObjectClient(), start, end));
+    promises.push(enumIndexedProperties(getObjectFront(), start, end));
   }
 
   if (shouldLoadItemNonIndexedProperties(item, loadedProperties)) {
-    promises.push(enumNonIndexedProperties(getObjectClient(), start, end));
+    promises.push(enumNonIndexedProperties(getObjectFront(), start, end));
   }
 
   if (shouldLoadItemEntries(item, loadedProperties)) {
-    promises.push(enumEntries(getObjectClient(), start, end));
+    promises.push(enumEntries(getObjectFront(), start, end));
   }
 
   if (shouldLoadItemPrototype(item, loadedProperties)) {
-    promises.push(getPrototype(getObjectClient()));
+    promises.push(getPrototype(getObjectFront()));
   }
 
   if (shouldLoadItemSymbols(item, loadedProperties)) {
-    promises.push(enumSymbols(getObjectClient(), start, end));
+    promises.push(enumSymbols(getObjectFront(), start, end));
   }
 
   if (shouldLoadItemFullText(item, loadedProperties)) {
-    promises.push(getFullText(client.createLongStringClient(value), item));
+    promises.push(getFullText(client.createLongStringFront(value), item));
   }
 
   if (shouldLoadItemProxySlots(item, loadedProperties)) {
-    promises.push(getProxySlots(getObjectClient()));
+    promises.push(getProxySlots(getObjectFront()));
   }
 
   return Promise.all(promises).then(mergeResponses);
@@ -4048,11 +4096,9 @@ const {
   nodeHasFullText
 } = __webpack_require__(114);
 
-async function enumIndexedProperties(objectClient, start, end) {
+async function enumIndexedProperties(objectFront, start, end) {
   try {
-    const {
-      iterator
-    } = await objectClient.enumProperties({
+    const iterator = await objectFront.enumProperties({
       ignoreNonIndexedProperties: true
     });
     const response = await iteratorSlice(iterator, start, end);
@@ -4063,11 +4109,9 @@ async function enumIndexedProperties(objectClient, start, end) {
   }
 }
 
-async function enumNonIndexedProperties(objectClient, start, end) {
+async function enumNonIndexedProperties(objectFront, start, end) {
   try {
-    const {
-      iterator
-    } = await objectClient.enumProperties({
+    const iterator = await objectFront.enumProperties({
       ignoreIndexedProperties: true
     });
     const response = await iteratorSlice(iterator, start, end);
@@ -4078,11 +4122,9 @@ async function enumNonIndexedProperties(objectClient, start, end) {
   }
 }
 
-async function enumEntries(objectClient, start, end) {
+async function enumEntries(objectFront, start, end) {
   try {
-    const {
-      iterator
-    } = await objectClient.enumEntries();
+    const iterator = await objectFront.enumEntries();
     const response = await iteratorSlice(iterator, start, end);
     return response;
   } catch (e) {
@@ -4091,11 +4133,9 @@ async function enumEntries(objectClient, start, end) {
   }
 }
 
-async function enumSymbols(objectClient, start, end) {
+async function enumSymbols(objectFront, start, end) {
   try {
-    const {
-      iterator
-    } = await objectClient.enumSymbols();
+    const iterator = await objectFront.enumSymbols();
     const response = await iteratorSlice(iterator, start, end);
     return response;
   } catch (e) {
@@ -4104,16 +4144,16 @@ async function enumSymbols(objectClient, start, end) {
   }
 }
 
-async function getPrototype(objectClient) {
-  if (typeof objectClient.getPrototype !== "function") {
-    console.error("objectClient.getPrototype is not a function");
+async function getPrototype(objectFront) {
+  if (typeof objectFront.getPrototype !== "function") {
+    console.error("objectFront.getPrototype is not a function");
     return Promise.resolve({});
   }
 
-  return objectClient.getPrototype();
+  return objectFront.getPrototype();
 }
 
-async function getFullText(longStringClient, item) {
+async function getFullText(longStringFront, item) {
   const {
     initial,
     fullText,
@@ -4122,28 +4162,24 @@ async function getFullText(longStringClient, item) {
   // loadedProperties map.
 
   if (nodeHasFullText(item)) {
-    return Promise.resolve({
+    return {
       fullText
-    });
+    };
   }
 
-  return new Promise((resolve, reject) => {
-    longStringClient.substring(initial.length, length, response => {
-      if (response.error) {
-        console.error("LongStringClient.substring", `${response.error}: ${response.message}`);
-        reject({});
-        return;
-      }
-
-      resolve({
-        fullText: initial + response.substring
-      });
-    });
-  });
+  try {
+    const substring = await longStringFront.substring(initial.length, length);
+    return {
+      fullText: initial + substring
+    };
+  } catch (e) {
+    console.error("LongStringFront.substring", e);
+    throw e;
+  }
 }
 
-async function getProxySlots(objectClient) {
-  return objectClient.getProxySlots();
+async function getProxySlots(objectFront) {
+  return objectFront.getProxySlots();
 }
 
 function iteratorSlice(iterator, start, end) {
@@ -7868,7 +7904,8 @@ const {
 
 const {
   getPathExpression,
-  getValue
+  getValue,
+  nodeIsBucket
 } = __webpack_require__(114);
 
 const {
@@ -7906,7 +7943,7 @@ function nodeCollapse(node) {
 }
 /*
  * This action checks if we need to fetch properties, entries, prototype and
- * symbols for a given node. If we do, it will call the appropriate ObjectClient
+ * symbols for a given node. If we do, it will call the appropriate ObjectFront
  * functions.
  */
 
@@ -7957,7 +7994,11 @@ function addWatchpoint(item, watchpoint) {
       parent,
       name
     } = item;
-    const object = getValue(parent);
+    let object = getValue(parent);
+
+    if (nodeIsBucket(parent)) {
+      object = getValue(parent.parent);
+    }
 
     if (!object) {
       return;
@@ -7989,9 +8030,18 @@ function removeWatchpoint(item) {
     dispatch,
     client
   }) {
-    const object = getValue(item.parent);
-    const property = item.name;
-    const path = item.parent.path;
+    const {
+      parent,
+      name
+    } = item;
+    let object = getValue(parent);
+
+    if (nodeIsBucket(parent)) {
+      object = getValue(parent.parent);
+    }
+
+    const property = name;
+    const path = parent.path;
     const actor = object.actor;
     await client.removeWatchpoint(object, property);
     dispatch({
@@ -8072,8 +8122,8 @@ function invokeGetter(node, targetGrip, receiverId, getterName) {
     getState
   }) => {
     try {
-      const objectClient = client.createObjectClient(targetGrip);
-      const result = await objectClient.getPropertyValue(getterName, receiverId);
+      const objectFront = client.createObjectFront(targetGrip);
+      const result = await objectFront.getPropertyValue(getterName, receiverId);
       dispatch({
         type: "GETTER_INVOKED",
         data: {
@@ -8262,17 +8312,8 @@ class ObjectInspectorItem extends Component {
         const receiverGrip = getNonPrototypeParentGripValue(item);
 
         if (targetGrip && receiverGrip) {
-          let propertyName = item.name; // If we're dealing with a property that can't be accessed
-          // with the dot notation, for example: x["hello-world"]
-
-          if (propertyName.startsWith(`"`) && propertyName.endsWith(`"`)) {
-            // We remove the quotes wrapping the property name, and we replace any
-            // "double" escaped quotes (\\\") by simple escaped ones (\").
-            propertyName = propertyName.substring(1, propertyName.length - 1).replace(/\\\"/g, `\"`);
-          }
-
           Object.assign(repProps, {
-            onInvokeGetterButtonClick: () => this.props.invokeGetter(item, targetGrip, receiverGrip.actor, propertyName)
+            onInvokeGetterButtonClick: () => this.props.invokeGetter(item, targetGrip, receiverGrip.actor, item.propertyName || item.name)
           });
         }
       }
@@ -8381,7 +8422,7 @@ class ObjectInspectorItem extends Component {
       removeWatchpoint
     } = this.props;
 
-    if (!item || !item.contents || !item.contents.watchpoint) {
+    if (!item || !item.contents || !item.contents.watchpoint || typeof L10N === "undefined") {
       return;
     }
 

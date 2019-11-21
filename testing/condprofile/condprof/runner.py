@@ -13,7 +13,10 @@ import shutil
 if __name__ == "__main__":
     sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from condprof import check_install  # NOQA
+from condprof.check_install import check  # NOQA
+
+check()  # NOQA
+
 from condprof.creator import ProfileCreator  # NOQA
 from condprof.desktop import DesktopEnv  # NOQA
 from condprof.android import AndroidEnv  # NOQA
@@ -114,7 +117,10 @@ def main(args=sys.argv[1:]):
         raise IOError("Cannot find %s" % args.geckodriver)
 
     try:
-        plat = args.android and "android" or get_current_platform()
+        if args.android:
+            plat = "%s-%s" % (args.device_name, args.firefox.split("org.mozilla.")[-1])
+        else:
+            plat = get_current_platform()
         changelog = read_changelog(plat)
         LOG("Got the changelog from TaskCluster")
     except ProfileNotFoundError:

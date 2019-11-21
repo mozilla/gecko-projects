@@ -242,6 +242,12 @@ struct MemorySectionNameBuf : public _MEMORY_SECTION_NAME {
 
   // Native NT paths, so we can't assume MAX_PATH. Use a larger buffer.
   WCHAR mBuf[2 * MAX_PATH];
+
+  bool IsEmpty() const {
+    return !mSectionFileName.Buffer || !mSectionFileName.Length;
+  }
+
+  operator PCUNICODE_STRING() const { return &mSectionFileName; }
 };
 
 inline bool FindCharInUnicodeString(const UNICODE_STRING& aStr, WCHAR aChar,
@@ -404,7 +410,10 @@ class MOZ_RAII PEHeaders final {
   explicit PEHeaders(HMODULE aModule) : PEHeaders(HModuleToBaseAddr(aModule)) {}
 
   explicit PEHeaders(PIMAGE_DOS_HEADER aMzHeader)
-      : mMzHeader(aMzHeader), mPeHeader(nullptr), mImageLimit(nullptr) {
+      : mMzHeader(aMzHeader),
+        mPeHeader(nullptr),
+        mImageLimit(nullptr),
+        mIsImportDirectoryTampered(false) {
     if (!mMzHeader || mMzHeader->e_magic != IMAGE_DOS_SIGNATURE) {
       return;
     }
@@ -471,8 +480,14 @@ class MOZ_RAII PEHeaders final {
   }
 
   PIMAGE_IMPORT_DESCRIPTOR GetImportDirectory() {
-    return GetImageDirectoryEntry<PIMAGE_IMPORT_DESCRIPTOR>(
-        IMAGE_DIRECTORY_ENTRY_IMPORT);
+    // If the import directory is already tampered, we skip bounds check
+    // because it could be located outside the mapped image.
+    return mIsImportDirectoryTampered
+               ? GetImageDirectoryEntry<PIMAGE_IMPORT_DESCRIPTOR,
+                                        BoundsCheckPolicy::Skip>(
+                     IMAGE_DIRECTORY_ENTRY_IMPORT)
+               : GetImageDirectoryEntry<PIMAGE_IMPORT_DESCRIPTOR>(
+                     IMAGE_DIRECTORY_ENTRY_IMPORT);
   }
 
   PIMAGE_RESOURCE_DIRECTORY GetResourceTable() {
@@ -536,7 +551,9 @@ class MOZ_RAII PEHeaders final {
   GetIATForModule(const char* aModuleNameASCII) {
     for (PIMAGE_IMPORT_DESCRIPTOR curImpDesc = GetImportDirectory();
          IsValid(curImpDesc); ++curImpDesc) {
-      auto curName = RVAToPtr<const char*>(curImpDesc->Name);
+      auto curName = mIsImportDirectoryTampered
+                         ? RVAToPtrUnchecked<const char*>(curImpDesc->Name)
+                         : RVAToPtr<const char*>(curImpDesc->Name);
       if (!curName) {
         return nullptr;
       }
@@ -672,15 +689,21 @@ class MOZ_RAII PEHeaders final {
     return aImgThunk && aImgThunk->u1.Ordinal != 0;
   }
 
+  void SetImportDirectoryTampered() { mIsImportDirectoryTampered = true; }
+
  private:
-  template <typename T>
+  enum class BoundsCheckPolicy { Default, Skip };
+
+  template <typename T, BoundsCheckPolicy Policy = BoundsCheckPolicy::Default>
   T GetImageDirectoryEntry(const uint32_t aDirectoryIndex) {
     PIMAGE_DATA_DIRECTORY dirEntry = GetImageDirectoryEntryPtr(aDirectoryIndex);
     if (!dirEntry) {
       return nullptr;
     }
 
-    return RVAToPtr<T>(dirEntry->VirtualAddress);
+    return Policy == BoundsCheckPolicy::Skip
+               ? RVAToPtrUnchecked<T>(dirEntry->VirtualAddress)
+               : RVAToPtr<T>(dirEntry->VirtualAddress);
   }
 
   // This private variant does not have bounds checks, because we need to be
@@ -774,6 +797,7 @@ class MOZ_RAII PEHeaders final {
   PIMAGE_DOS_HEADER mMzHeader;
   PIMAGE_NT_HEADERS mPeHeader;
   void* mImageLimit;
+  bool mIsImportDirectoryTampered;
 };
 
 inline HANDLE RtlGetProcessHeap() {
@@ -819,6 +843,14 @@ struct DataDirectoryEntry : public _IMAGE_DATA_DIRECTORY {
       : _IMAGE_DATA_DIRECTORY(aOther) {}
 
   DataDirectoryEntry(const DataDirectoryEntry& aOther) = default;
+
+  bool operator==(const DataDirectoryEntry& aOther) const {
+    return VirtualAddress == aOther.VirtualAddress && Size == aOther.Size;
+  }
+
+  bool operator!=(const DataDirectoryEntry& aOther) const {
+    return !(*this == aOther);
+  }
 };
 
 inline LauncherResult<void*> GetProcessPebPtr(HANDLE aProcess) {

@@ -78,7 +78,7 @@ g.test('fullscreen quad', async t => {
       vertexBuffers: []
     }
   });
-  const encoder = t.device.createCommandEncoder({});
+  const encoder = t.device.createCommandEncoder();
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
       attachment: colorAttachmentView,
@@ -112,6 +112,6 @@ g.test('fullscreen quad', async t => {
     depth: 1
   });
   t.device.getQueue().submit([encoder.finish()]);
-  await t.expectContents(dst, new Uint8Array([0x00, 0xff, 0x00, 0xff]));
+  t.expectContents(dst, new Uint8Array([0x00, 0xff, 0x00, 0xff]));
 });
 //# sourceMappingURL=rendering.spec.js.map

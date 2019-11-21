@@ -1149,20 +1149,34 @@ struct nsGridContainerFrame::TrackSizingFunctions {
   const StyleTrackSize& SizingFor(uint32_t aTrackIndex) const {
     static const StyleTrackSize kAutoTrackSize =
         StyleTrackSize::Breadth(StyleTrackBreadth::Auto());
-    auto getImplicitSize = [this](size_t aIndex) -> const StyleTrackSize& {
+    // |aIndex| is the relative index to mAutoSizing. A negative value means it
+    // is the last Nth element.
+    auto getImplicitSize = [this](int32_t aIndex) -> const StyleTrackSize& {
       MOZ_ASSERT(!(mAutoSizing.Length() == 1 &&
                    mAutoSizing.AsSpan()[0] == kAutoTrackSize),
                  "It's impossible to have one track with auto value because we "
                  "filter out this case during parsing");
+
+      if (mAutoSizing.IsEmpty()) {
+        return kAutoTrackSize;
+      }
+
       // If multiple track sizes are given, the pattern is repeated as necessary
       // to find the size of the implicit tracks.
-      return mAutoSizing.IsEmpty()
-                 ? kAutoTrackSize
-                 : mAutoSizing.AsSpan()[aIndex % mAutoSizing.Length()];
+      int32_t i = aIndex % int32_t(mAutoSizing.Length());
+      if (i < 0) {
+        i += mAutoSizing.Length();
+      }
+      return mAutoSizing.AsSpan()[i];
     };
 
     if (MOZ_UNLIKELY(aTrackIndex < mExplicitGridOffset)) {
-      return getImplicitSize(aTrackIndex);
+      // The last implicit grid track before the explicit grid receives the
+      // last specified size, and so on backwards. Therefore we pass the
+      // negative relative index to imply that we should get the implicit size
+      // from the last Nth specified grid auto size.
+      return getImplicitSize(int32_t(aTrackIndex) -
+                             int32_t(mExplicitGridOffset));
     }
     uint32_t index = aTrackIndex - mExplicitGridOffset;
     if (index >= mRepeatAutoStart) {
@@ -1173,7 +1187,7 @@ struct nsGridContainerFrame::TrackSizingFunctions {
       }
     }
     if (index >= mExpandedTracks.Length()) {
-      return getImplicitSize(index);
+      return getImplicitSize(index - mExpandedTracks.Length());
     }
     auto& indices = mExpandedTracks[index];
     const TrackListValue& value = mTrackListValues[indices.first()];
@@ -4634,6 +4648,8 @@ static nscoord MeasuringReflow(nsIFrame* aChild,
   // child does some of the things that are affected by
   // ReflowInput::COMPUTE_SIZE_USE_AUTO_BSIZE.
   childRI.SetBResize(true);
+  // Not 100% sure this is needed, but be conservative for now:
+  childRI.mFlags.mIsBResizeForPercentages = true;
 
   ReflowOutput childSize(childRI);
   nsReflowStatus childStatus;
@@ -6379,6 +6395,7 @@ void nsGridContainerFrame::ReflowInFlowChild(
   // does some of the things that are affected by
   // ReflowInput::COMPUTE_SIZE_USE_AUTO_BSIZE.
   childRI.SetBResize(true);
+  childRI.mFlags.mIsBResizeForPercentages = true;
 
   // A table-wrapper needs to propagate the CB size we give it to its
   // inner table frame later.  @see nsTableWrapperFrame::InitChildReflowInput.
@@ -7521,7 +7538,8 @@ void nsGridContainerFrame::Reflow(nsPresContext* aPresContext,
         0, col, std::move(colTrackPositions), std::move(colTrackSizes),
         std::move(colTrackStates), std::move(colRemovedRepeatTracks),
         gridReflowInput.mColFunctions.mRepeatAutoStart,
-        colLineNameMap.GetResolvedLineNamesForComputedGridTrackInfo());
+        colLineNameMap.GetResolvedLineNamesForComputedGridTrackInfo(),
+        IsSubgrid(eLogicalAxisInline));
     SetProperty(GridColTrackInfo(), colInfo);
 
     const auto* subgridRowRange = subgrid && IsSubgrid(eLogicalAxisBlock)
@@ -7561,7 +7579,8 @@ void nsGridContainerFrame::Reflow(nsPresContext* aPresContext,
         std::move(rowTrackSizes), std::move(rowTrackStates),
         std::move(rowRemovedRepeatTracks),
         gridReflowInput.mRowFunctions.mRepeatAutoStart,
-        rowLineNameMap.GetResolvedLineNamesForComputedGridTrackInfo());
+        rowLineNameMap.GetResolvedLineNamesForComputedGridTrackInfo(),
+        IsSubgrid(eLogicalAxisBlock));
     SetProperty(GridRowTrackInfo(), rowInfo);
 
     if (prevInFlow) {
@@ -7590,7 +7609,8 @@ void nsGridContainerFrame::Reflow(nsPresContext* aPresContext,
           std::move(priorRowInfo->mSizes), std::move(priorRowInfo->mStates),
           std::move(priorRowInfo->mRemovedRepeatTracks),
           priorRowInfo->mRepeatFirstTrack,
-          std::move(priorRowInfo->mResolvedLineNames));
+          std::move(priorRowInfo->mResolvedLineNames),
+          priorRowInfo->mIsSubgrid);
       prevInFlow->SetProperty(GridRowTrackInfo(), revisedPriorRowInfo);
     }
 

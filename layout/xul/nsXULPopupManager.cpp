@@ -14,7 +14,6 @@
 #include "nsXULElement.h"
 #include "nsIDOMXULMenuListElement.h"
 #include "nsIDOMXULCommandDispatcher.h"
-#include "nsBindingManager.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsGlobalWindow.h"
 #include "nsIContentInlines.h"
@@ -2240,9 +2239,7 @@ static nsIContent* FindDefaultInsertionPoint(nsIContent* aParent) {
       return slot;
     }
   }
-  bool multiple = false;  // Unused
-  return aParent->OwnerDoc()->BindingManager()->FindNestedSingleInsertionPoint(
-      aParent, &multiple);
+  return aParent;
 }
 
 nsContainerFrame* nsXULPopupManager::ImmediateParentFrame(

@@ -12,7 +12,7 @@
 #include "mozilla/net/PDocumentChannelChild.h"
 #include "nsBaseChannel.h"
 #include "nsIChildChannel.h"
-#include "nsIClassifiedChannel.h"
+#include "nsITraceableChannel.h"
 
 #define DOCUMENT_CHANNEL_CHILD_IID                   \
   {                                                  \
@@ -26,17 +26,17 @@ namespace net {
 
 class DocumentChannelChild final : public PDocumentChannelChild,
                                    public nsBaseChannel,
-                                   public nsIClassifiedChannel {
+                                   public nsITraceableChannel {
  public:
   DocumentChannelChild(nsDocShellLoadState* aLoadState,
                        class LoadInfo* aLoadInfo,
                        const nsString* aInitiatorType, nsLoadFlags aLoadFlags,
                        uint32_t aLoadType, uint32_t aCacheKey, bool aIsActive,
-                       bool aIsTopLevelDoc);
+                       bool aIsTopLevelDoc, bool aHasNonEmptySandboxingFlags);
 
   NS_DECL_ISUPPORTS_INHERITED;
   NS_DECL_NSIASYNCVERIFYREDIRECTCALLBACK
-  NS_DECL_NSICLASSIFIEDCHANNEL
+  NS_DECL_NSITRACEABLECHANNEL
 
   NS_DECLARE_STATIC_IID_ACCESSOR(DOCUMENT_CHANNEL_CHILD_IID)
 
@@ -54,69 +54,45 @@ class DocumentChannelChild final : public PDocumentChannelChild,
 
   mozilla::ipc::IPCResult RecvFailedAsyncOpen(const nsresult& aStatusCode);
 
-  mozilla::ipc::IPCResult RecvCancelForProcessSwitch();
+  mozilla::ipc::IPCResult RecvDisconnectChildListeners(const nsresult& aStatus);
 
   mozilla::ipc::IPCResult RecvDeleteSelf();
 
   mozilla::ipc::IPCResult RecvRedirectToRealChannel(
-      const uint32_t& aRegistrarId, nsIURI* aURI, const uint32_t& aNewLoadFlags,
-      const Maybe<ReplacementChannelConfigInit>& aInit,
-      const Maybe<LoadInfoArgs>& aLoadInfo,
-      nsTArray<DocumentChannelRedirect>&& aRedirects,
-      const uint64_t& aChannelId, nsIURI* aOriginalURI,
-      const uint32_t& aRedirectMode, const uint32_t& aRedirectFlags,
-      const Maybe<uint32_t>& aContentDisposition,
-      const Maybe<nsString>& aContentDispositionFilename,
+      const RedirectToRealChannelArgs& aArgs,
       RedirectToRealChannelResolver&& aResolve);
 
-  mozilla::ipc::IPCResult RecvNotifyChannelClassifierProtectionDisabled(
-      const uint32_t& aAcceptedReason);
-  mozilla::ipc::IPCResult RecvNotifyCookieAllowed();
-  mozilla::ipc::IPCResult RecvNotifyCookieBlocked(
-      const uint32_t& aRejectedReason);
-
-  mozilla::ipc::IPCResult RecvSetClassifierMatchedInfo(
-      const nsCString& aList, const nsCString& aProvider,
-      const nsCString& aFullHash);
-  mozilla::ipc::IPCResult RecvSetClassifierMatchedTrackingInfo(
-      const nsCString& aLists, const nsCString& aFullHash);
+  mozilla::ipc::IPCResult RecvAttachStreamFilter(
+      Endpoint<extensions::PStreamFilterParent>&& aEndpoint);
 
   mozilla::ipc::IPCResult RecvConfirmRedirect(
       const LoadInfoArgs& aLoadInfo, nsIURI* aNewUri,
       ConfirmRedirectResolver&& aResolve);
 
-  void DoFailedAsyncOpen(const nsresult& aStatusCode);
-
   const nsTArray<DocumentChannelRedirect>& GetRedirectChain() const {
     return mRedirects;
   }
 
-  friend class NeckoTargetChannelEvent<DocumentChannelChild>;
-
  private:
+  friend class NeckoTargetChannelFunctionEvent;
   void ShutdownListeners(nsresult aStatusCode);
 
   ~DocumentChannelChild() = default;
 
   RefPtr<ChannelEventQueue> mEventQueue;
-  nsCOMPtr<nsIChildChannel> mRedirectChannel;
+  nsCOMPtr<nsIChannel> mRedirectChannel;
   nsTArray<DocumentChannelRedirect> mRedirects;
-
-  // Classified channel's matched information
-  nsCString mMatchedList;
-  nsCString mMatchedProvider;
-  nsCString mMatchedFullHash;
-  nsTArray<nsCString> mMatchedTrackingLists;
-  nsTArray<nsCString> mMatchedTrackingFullHashes;
 
   RedirectToRealChannelResolver mRedirectResolver;
 
+  TimeStamp mAsyncOpenTime;
   const RefPtr<nsDocShellLoadState> mLoadState;
   const Maybe<nsString> mInitiatorType;
   const uint32_t mLoadType;
   const uint32_t mCacheKey;
   const bool mIsActive;
   const bool mIsTopLevelDoc;
+  const bool mHasNonEmptySandboxingFlags;
 
   bool mCanceled = false;
   uint32_t mSuspendCount = 0;

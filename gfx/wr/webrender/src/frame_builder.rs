@@ -7,8 +7,8 @@ use api::{PipelineId};
 use api::units::*;
 use crate::batch::{BatchBuilder, AlphaBatchBuilder, AlphaBatchContainer};
 use crate::clip::{ClipStore, ClipChainStack};
-use crate::clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex};
-use crate::composite::CompositeConfig;
+use crate::clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex, CoordinateSystemId};
+use crate::composite::{CompositorKind, CompositeState};
 use crate::debug_render::DebugItem;
 use crate::gpu_cache::{GpuCache, GpuCacheHandle};
 use crate::gpu_types::{PrimitiveHeaders, TransformPalette, UvRectKind, ZBufferIdGenerator};
@@ -18,7 +18,7 @@ use crate::picture::{PictureUpdateState, SurfaceInfo, ROOT_SURFACE_INDEX, Surfac
 use crate::picture::{RetainedTiles, TileCacheInstance, DirtyRegion, SurfaceRenderTasks, SubpixelMode};
 use crate::prim_store::{SpaceMapper, PictureIndex, PrimitiveDebugId, PrimitiveScratchBuffer};
 use crate::prim_store::{DeferredResolve, PrimitiveVisibilityMask};
-use crate::profiler::{FrameProfileCounters, GpuCacheProfileCounters, TextureCacheProfileCounters};
+use crate::profiler::{FrameProfileCounters, TextureCacheProfileCounters, ResourceProfileCounters};
 use crate::render_backend::{DataStores, FrameStamp, FrameId};
 use crate::render_target::{RenderTarget, PictureCacheTarget, TextureCacheRenderTarget};
 use crate::render_target::{RenderTargetContext, RenderTargetKind};
@@ -56,7 +56,8 @@ pub struct FrameBuilderConfig {
     pub dual_source_blending_is_supported: bool,
     pub dual_source_blending_is_enabled: bool,
     pub chase_primitive: ChasePrimitive,
-    pub enable_picture_caching: bool,
+    /// The immutable global picture caching enable from `RendererOptions`
+    pub global_enable_picture_caching: bool,
     /// True if we're running tests (i.e. via wrench).
     pub testing: bool,
     pub gpu_supports_fast_clears: bool,
@@ -64,6 +65,7 @@ pub struct FrameBuilderConfig {
     pub advanced_blend_is_coherent: bool,
     pub batch_lookback_count: usize,
     pub background_color: Option<ColorF>,
+    pub compositor_kind: CompositorKind,
 }
 
 /// A set of common / global resources that are retained between
@@ -129,6 +131,7 @@ pub struct FrameVisibilityState<'a> {
     pub data_stores: &'a mut DataStores,
     pub clip_chain_stack: ClipChainStack,
     pub render_tasks: &'a mut RenderTaskGraph,
+    pub composite_state: &'a mut CompositeState,
 }
 
 pub struct FrameBuildingContext<'a> {
@@ -152,6 +155,7 @@ pub struct FrameBuildingState<'a> {
     pub segment_builder: SegmentBuilder,
     pub surfaces: &'a mut Vec<SurfaceInfo>,
     pub dirty_region_stack: Vec<DirtyRegion>,
+    pub composite_state: &'a mut CompositeState,
 }
 
 impl<'a> FrameBuildingState<'a> {
@@ -238,6 +242,7 @@ impl FrameBuilder {
         scratch: &mut PrimitiveScratchBuffer,
         debug_flags: DebugFlags,
         texture_cache_profile: &mut TextureCacheProfileCounters,
+        composite_state: &mut CompositeState,
     ) -> Option<RenderTaskId> {
         profile_scope!("cull");
 
@@ -311,6 +316,7 @@ impl FrameBuilder {
             gpu_cache,
             &scene.clip_store,
             data_stores,
+            composite_state,
         );
 
         {
@@ -336,6 +342,7 @@ impl FrameBuilder {
                 data_stores,
                 clip_chain_stack: ClipChainStack::new(),
                 render_tasks,
+                composite_state,
             };
 
             scene.prim_store.update_visibility(
@@ -345,6 +352,22 @@ impl FrameBuilder {
                 &visibility_context,
                 &mut visibility_state,
             );
+
+            // When a new display list is processed by WR, the existing tiles from
+            // any picture cache are stored in the `retained_tiles` field above. This
+            // allows the first frame of a new display list to reuse any existing tiles
+            // and surfaces that match. Once the `update_visibility` call above is
+            // complete, any tiles that are left remaining in the `retained_tiles`
+            // map are not needed and will be dropped. For simple compositing mode,
+            // this is fine, since texture cache handles are garbage collected at
+            // the end of each frame. However, if we're in native compositor mode,
+            // we need to manually clean up any native compositor surfaces that were
+            // allocated by these tiles.
+            for (_, cache_state) in visibility_state.retained_tiles.caches.drain() {
+                visibility_state.composite_state.destroy_native_surfaces(
+                    cache_state.tiles.values(),
+                );
+            }
         }
 
         let mut frame_state = FrameBuildingState {
@@ -357,6 +380,7 @@ impl FrameBuilder {
             segment_builder: SegmentBuilder::new(),
             surfaces,
             dirty_region_stack: Vec::new(),
+            composite_state,
         };
 
         frame_state
@@ -390,6 +414,7 @@ impl FrameBuilder {
                 SubpixelMode::Allow,
                 &mut frame_state,
                 &frame_context,
+                scratch,
             )
             .unwrap();
 
@@ -438,8 +463,7 @@ impl FrameBuilder {
         layer: DocumentLayer,
         device_origin: DeviceIntPoint,
         pan: WorldPoint,
-        texture_cache_profile: &mut TextureCacheProfileCounters,
-        gpu_cache_profile: &mut GpuCacheProfileCounters,
+        resource_profile: &mut ResourceProfileCounters,
         scene_properties: &SceneProperties,
         data_stores: &mut DataStores,
         scratch: &mut PrimitiveScratchBuffer,
@@ -453,7 +477,7 @@ impl FrameBuilder {
         profile_counters
             .total_primitives
             .set(scene.prim_store.prim_count());
-
+        resource_profile.content_slices.set(scene.content_slice_count);
         resource_cache.begin_frame(stamp);
         gpu_cache.begin_frame(stamp);
 
@@ -476,6 +500,28 @@ impl FrameBuilder {
         let output_size = scene.output_rect.size.to_i32();
         let screen_world_rect = (scene.output_rect.to_f32() / global_device_pixel_scale).round_out();
 
+        // Determine if we will draw this frame with picture caching enabled. This depends on:
+        // (1) If globally enabled when WR was initialized
+        // (2) If current debug flags allow picture caching
+        // (3) Whether we are currently pinch zooming
+        // (4) If any picture cache spatial nodes are not in the root coordinate system
+        let picture_caching_is_enabled =
+            scene.config.global_enable_picture_caching &&
+            !debug_flags.contains(DebugFlags::DISABLE_PICTURE_CACHING) &&
+            !scene.picture_cache_spatial_nodes.iter().any(|spatial_node_index| {
+                let spatial_node = &scene
+                    .clip_scroll_tree
+                    .spatial_nodes[spatial_node_index.0 as usize];
+                spatial_node.coordinate_system_id != CoordinateSystemId::root() ||
+                    spatial_node.is_ancestor_or_self_zooming
+            });
+
+        let mut composite_state = CompositeState::new(
+            scene.config.compositor_kind,
+            picture_caching_is_enabled,
+            global_device_pixel_scale,
+        );
+
         let main_render_task_id = self.build_layer_screen_rects_and_cull_layers(
             scene,
             screen_world_rect,
@@ -490,14 +536,14 @@ impl FrameBuilder {
             &mut surfaces,
             scratch,
             debug_flags,
-            texture_cache_profile,
+            &mut resource_profile.texture_cache,
+            &mut composite_state,
         );
 
         let mut passes;
         let mut deferred_resolves = vec![];
         let mut has_texture_cache_tasks = false;
         let mut prim_headers = PrimitiveHeaders::new();
-        let mut composite_config = CompositeConfig::new();
 
         {
             profile_marker!("Batching");
@@ -540,7 +586,7 @@ impl FrameBuilder {
                     &mut transform_palette,
                     &mut prim_headers,
                     &mut z_generator,
-                    &mut composite_config,
+                    &mut composite_state,
                 );
 
                 match pass.kind {
@@ -557,11 +603,11 @@ impl FrameBuilder {
             }
         }
 
-        let gpu_cache_frame_id = gpu_cache.end_frame(gpu_cache_profile).frame_id();
+        let gpu_cache_frame_id = gpu_cache.end_frame(&mut resource_profile.gpu_cache).frame_id();
 
         render_tasks.write_task_data();
         *render_task_counters = render_tasks.counters();
-        resource_cache.end_frame(texture_cache_profile);
+        resource_cache.end_frame(&mut resource_profile.texture_cache);
 
         Frame {
             content_origin: scene.output_rect.origin,
@@ -569,7 +615,6 @@ impl FrameBuilder {
                 device_origin,
                 scene.output_rect.size,
             ),
-            background_color: scene.background_color,
             layer,
             profile_counters,
             passes,
@@ -581,9 +626,8 @@ impl FrameBuilder {
             has_texture_cache_tasks,
             prim_headers,
             recorded_dirty_regions: mem::replace(&mut scratch.recorded_dirty_regions, Vec::new()),
-            dirty_rects: mem::replace(&mut scratch.dirty_rects, Vec::new()),
             debug_items: mem::replace(&mut scratch.debug_items, Vec::new()),
-            composite_config,
+            composite_state,
         }
     }
 }
@@ -603,7 +647,7 @@ pub fn build_render_pass(
     transforms: &mut TransformPalette,
     prim_headers: &mut PrimitiveHeaders,
     z_generator: &mut ZBufferIdGenerator,
-    composite_config: &mut CompositeConfig,
+    composite_state: &mut CompositeState,
 ) {
     profile_scope!("RenderPass::build");
 
@@ -629,7 +673,7 @@ pub fn build_render_pass(
                 prim_headers,
                 transforms,
                 z_generator,
-                composite_config,
+                composite_state,
             );
         }
         RenderPassKind::OffScreen {
@@ -827,7 +871,7 @@ pub fn build_render_pass(
                     root_spatial_node_index,
                     surface_spatial_node_index,
                     z_generator,
-                    composite_config,
+                    composite_state,
                 );
 
                 // Create picture cache targets, one per render task, and assign
@@ -838,7 +882,7 @@ pub fn build_render_pass(
                     let (target_rect, _) = task.get_target_rect();
 
                     match task.location {
-                        RenderTaskLocation::PictureCache { texture, layer, .. } => {
+                        RenderTaskLocation::PictureCache { ref surface, .. } => {
                             // TODO(gw): The interface here is a bit untidy since it's
                             //           designed to support batch merging, which isn't
                             //           relevant for picture cache targets. We
@@ -846,9 +890,9 @@ pub fn build_render_pass(
                             let scissor_rect  = match render_tasks[task_id].kind {
                                 RenderTaskKind::Picture(ref info) => info.scissor_rect,
                                 _ => unreachable!(),
-                            };
+                            }.expect("bug: dirty rect must be set for picture cache tasks");
                             let mut batch_containers = Vec::new();
-                            let mut alpha_batch_container = AlphaBatchContainer::new(scissor_rect);
+                            let mut alpha_batch_container = AlphaBatchContainer::new(Some(scissor_rect));
                             batcher.build(
                                 &mut batch_containers,
                                 &mut alpha_batch_container,
@@ -858,10 +902,10 @@ pub fn build_render_pass(
                             debug_assert!(batch_containers.is_empty());
 
                             let target = PictureCacheTarget {
-                                texture,
-                                layer: layer as usize,
+                                surface: surface.clone(),
                                 clear_color,
                                 alpha_batch_container,
+                                dirty_rect: scissor_rect,
                             };
 
                             picture_cache.push(target);
@@ -882,7 +926,7 @@ pub fn build_render_pass(
                 prim_headers,
                 transforms,
                 z_generator,
-                composite_config,
+                composite_state,
             );
             alpha.build(
                 ctx,
@@ -893,7 +937,7 @@ pub fn build_render_pass(
                 prim_headers,
                 transforms,
                 z_generator,
-                composite_config,
+                composite_state,
             );
         }
     }
@@ -908,7 +952,6 @@ pub struct Frame {
     pub content_origin: DeviceIntPoint,
     /// The rectangle to show the frame in, on screen.
     pub device_rect: DeviceIntRect,
-    pub background_color: Option<ColorF>,
     pub layer: DocumentLayer,
     pub passes: Vec<RenderPass>,
     #[cfg_attr(any(feature = "capture", feature = "replay"), serde(default = "FrameProfileCounters::new", skip))]
@@ -940,17 +983,13 @@ pub struct Frame {
     #[cfg_attr(feature = "serde", serde(skip))]
     pub recorded_dirty_regions: Vec<RecordedDirtyRegion>,
 
-    /// Dirty rects calculated when generating this frame.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    pub dirty_rects: Vec<DeviceIntRect>,
-
     /// Debugging information to overlay for this frame.
     pub debug_items: Vec<DebugItem>,
 
     /// Contains picture cache tiles, and associated information.
     /// Used by the renderer to composite tiles into the framebuffer,
     /// or hand them off to an OS compositor.
-    pub composite_config: CompositeConfig,
+    pub composite_state: CompositeState,
 }
 
 impl Frame {

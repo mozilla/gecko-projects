@@ -205,7 +205,6 @@ class JitcodeGlobalEntry {
     template <class ShouldTraceProvider>
     bool traceJitcode(JSTracer* trc);
     bool isJitcodeMarkedFromAnyThread(JSRuntime* rt);
-    bool isJitcodeAboutToBeFinalized();
   };
 
   struct IonEntry : public BaseEntry {
@@ -327,6 +326,8 @@ class JitcodeGlobalEntry {
     void youngestFrameLocationAtAddr(void* ptr, JSScript** script,
                                      jsbytecode** pc) const;
 
+    uint64_t lookupRealmID(void* ptr) const;
+
     bool hasTrackedOptimizations() const { return !!optsRegionTable_; }
 
     const IonTrackedOptimizationsRegionTable* trackedOptimizationsRegionTable()
@@ -417,6 +418,8 @@ class JitcodeGlobalEntry {
     void youngestFrameLocationAtAddr(void* ptr, JSScript** script,
                                      jsbytecode** pc) const;
 
+    uint64_t lookupRealmID() const;
+
     template <class ShouldTraceProvider>
     bool trace(JSTracer* trc);
     void sweepChildren();
@@ -442,6 +445,8 @@ class JitcodeGlobalEntry {
 
     void youngestFrameLocationAtAddr(void* ptr, JSScript** script,
                                      jsbytecode** pc) const;
+
+    uint64_t lookupRealmID() const;
   };
 
   struct IonCacheEntry : public BaseEntry {
@@ -472,6 +477,8 @@ class JitcodeGlobalEntry {
 
     void youngestFrameLocationAtAddr(JSRuntime* rt, void* ptr,
                                      JSScript** script, jsbytecode** pc) const;
+
+    uint64_t lookupRealmID(JSRuntime* rt, void* ptr) const;
 
     bool hasTrackedOptimizations() const { return true; }
     mozilla::Maybe<uint8_t> trackedOptimizationIndexAtAddr(
@@ -519,6 +526,8 @@ class JitcodeGlobalEntry {
       *script = nullptr;
       *pc = nullptr;
     }
+
+    uint64_t lookupRealmID() const { return 0; }
   };
 
   // QueryEntry is never stored in the table, just used for queries
@@ -801,6 +810,21 @@ class JitcodeGlobalEntry {
     }
   }
 
+  uint64_t lookupRealmID(JSRuntime* rt, void* ptr) const {
+    switch (kind()) {
+      case Ion:
+        return ionEntry().lookupRealmID(ptr);
+      case Baseline:
+        return baselineEntry().lookupRealmID();
+      case IonCache:
+        return ionCacheEntry().lookupRealmID(rt, ptr);
+      case Dummy:
+        return dummyEntry().lookupRealmID();
+      default:
+        MOZ_CRASH("Invalid JitcodeGlobalEntry kind.");
+    }
+  }
+
   // Figure out the number of the (JSScript*, jsbytecode*) pairs that are active
   // at this location.
   uint32_t lookupInlineCallDepth(void* ptr);
@@ -1057,7 +1081,7 @@ class JitcodeGlobalTable {
   void setAllEntriesAsExpired();
   void traceForMinorGC(JSTracer* trc);
   MOZ_MUST_USE bool markIteratively(GCMarker* marker);
-  void sweep(JSRuntime* rt);
+  void traceWeak(JSRuntime* rt, JSTracer* trc);
 
  private:
   MOZ_MUST_USE bool addEntry(const JitcodeGlobalEntry& entry);

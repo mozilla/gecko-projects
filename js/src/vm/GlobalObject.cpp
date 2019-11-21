@@ -1,3 +1,4 @@
+
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
  * vim: set ts=8 sts=2 et sw=2 tw=80:
  * This Source Code Form is subject to the terms of the Mozilla Public
@@ -14,6 +15,16 @@
 #include "builtin/BigInt.h"
 #include "builtin/DataViewObject.h"
 #include "builtin/Eval.h"
+#ifdef ENABLE_INTL_API
+#  include "builtin/intl/Collator.h"
+#  include "builtin/intl/DateTimeFormat.h"
+#  include "builtin/intl/ListFormat.h"
+#  include "builtin/intl/Locale.h"
+#  include "builtin/intl/NumberFormat.h"
+#  include "builtin/intl/PluralRules.h"
+#  include "builtin/intl/RelativeTimeFormat.h"
+#endif
+#include "builtin/FinalizationGroupObject.h"
 #include "builtin/MapObject.h"
 #include "builtin/ModuleObject.h"
 #include "builtin/Object.h"
@@ -22,10 +33,12 @@
 #include "builtin/SelfHostingDefines.h"
 #include "builtin/Stream.h"
 #include "builtin/streams/QueueingStrategies.h"  // js::{ByteLength,Count}QueueingStrategy
-#include "builtin/streams/ReadableStream.h"      // js::ReadableStream
+#include "builtin/streams/ReadableStream.h"  // js::ReadableStream
 #include "builtin/streams/ReadableStreamController.h"  // js::Readable{StreamDefault,ByteStream}Controller
 #include "builtin/streams/ReadableStreamReader.h"  // js::ReadableStreamDefaultReader
 #include "builtin/streams/WritableStream.h"        // js::WritableStream
+#include "builtin/streams/WritableStreamDefaultController.h"  // js::WritableStreamDefaultController
+#include "builtin/streams/WritableStreamDefaultWriter.h"  // js::WritableStreamDefaultWriter
 #include "builtin/Symbol.h"
 #include "builtin/TypedObject.h"
 #include "builtin/WeakMapObject.h"
@@ -33,8 +46,11 @@
 #include "debugger/DebugAPI.h"
 #include "gc/FreeOp.h"
 #include "js/ProtoKey.h"
+#include "vm/AsyncFunction.h"
+#include "vm/AsyncIteration.h"
 #include "vm/DateObject.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/GeneratorObject.h"
 #include "vm/HelperThreads.h"
 #include "vm/JSContext.h"
 #include "vm/PIC.h"
@@ -49,32 +65,19 @@
 
 using namespace js;
 
-struct ProtoTableEntry {
-  const JSClass* clasp;
-  ClassInitializerOp init;
-};
-
 namespace js {
 
 extern const JSClass IntlClass;
 extern const JSClass JSONClass;
 extern const JSClass MathClass;
+extern const JSClass ReflectClass;
 extern const JSClass WebAssemblyClass;
-
-#define DECLARE_PROTOTYPE_CLASS_INIT(name, init, clasp) \
-  extern JSObject* init(JSContext* cx, Handle<GlobalObject*> global);
-JS_FOR_EACH_PROTOTYPE(DECLARE_PROTOTYPE_CLASS_INIT)
-#undef DECLARE_PROTOTYPE_CLASS_INIT
 
 }  // namespace js
 
-JSObject* js::InitViaClassSpec(JSContext* cx, Handle<GlobalObject*> global) {
-  MOZ_CRASH("InitViaClassSpec() should not be called.");
-}
-
-static const ProtoTableEntry protoTable[JSProto_LIMIT] = {
-#define INIT_FUNC(name, init, clasp) {clasp, init},
-#define INIT_FUNC_DUMMY(name, init, clasp) {nullptr, nullptr},
+static const JSClass* const protoTable[JSProto_LIMIT] = {
+#define INIT_FUNC(name, clasp) clasp,
+#define INIT_FUNC_DUMMY(name, clasp) nullptr,
     JS_FOR_PROTOTYPES(INIT_FUNC, INIT_FUNC_DUMMY)
 #undef INIT_FUNC_DUMMY
 #undef INIT_FUNC
@@ -82,7 +85,7 @@ static const ProtoTableEntry protoTable[JSProto_LIMIT] = {
 
 JS_FRIEND_API const JSClass* js::ProtoKeyToClass(JSProtoKey key) {
   MOZ_ASSERT(key < JSProto_LIMIT);
-  return protoTable[key].clasp;
+  return protoTable[key];
 }
 
 // This method is not in the header file to avoid having to include
@@ -109,7 +112,9 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_CountQueuingStrategy:
       return !cx->realm()->creationOptions().getStreamsEnabled();
 
-    case JSProto_WritableStream: {
+    case JSProto_WritableStream:
+    case JSProto_WritableStreamDefaultController:
+    case JSProto_WritableStreamDefaultWriter: {
       const auto& realmOptions = cx->realm()->creationOptions();
       return !realmOptions.getStreamsEnabled() ||
              !realmOptions.getWritableStreamsEnabled();
@@ -119,6 +124,10 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_Atomics:
     case JSProto_SharedArrayBuffer:
       return !cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled();
+
+    case JSProto_FinalizationGroup:
+      return !cx->realm()->creationOptions().getWeakRefsEnabled();
+
     default:
       return false;
   }
@@ -153,19 +162,10 @@ bool GlobalObject::resolveConstructor(JSContext* cx,
   // all scripts to execute, even in debuggee compartments that are paused.
   AutoSuppressDebuggeeNoExecuteChecks suppressNX(cx);
 
-  // There are two different kinds of initialization hooks. One of them is
-  // the class js::InitFoo hook, defined in a JSProtoKey-keyed table at the
-  // top of this file. The other lives in the ClassSpec for classes that
-  // define it. Classes may use one or the other, but not both.
-  ClassInitializerOp init = protoTable[key].init;
-  if (init == InitViaClassSpec) {
-    init = nullptr;
-  }
-
   // Some classes can be disabled at compile time, others at run time;
-  // if a feature is compile-time disabled, init and clasp are both null.
+  // if a feature is compile-time disabled, clasp is null.
   const JSClass* clasp = ProtoKeyToClass(key);
-  if ((!init && !clasp) || skipDeselectedConstructor(cx, key)) {
+  if (!clasp || skipDeselectedConstructor(cx, key)) {
     if (mode == IfClassIsDisabled::Throw) {
       JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                                 JSMSG_CONSTRUCTOR_DISABLED,
@@ -175,26 +175,10 @@ bool GlobalObject::resolveConstructor(JSContext* cx,
     return true;
   }
 
-  // Some classes have no init routine, which means that they're disabled at
-  // compile-time. We could try to enforce that callers never pass such keys
-  // to resolveConstructor, but that would cramp the style of consumers like
-  // GlobalObject::initStandardClasses that want to just carpet-bomb-call
-  // resolveConstructor with every JSProtoKey. So it's easier to just handle
-  // it here.
-  bool haveSpec = clasp && clasp->specDefined();
-  if (!init && !haveSpec) {
+  // Class spec must have a constructor defined.
+  if (!clasp->specDefined()) {
     return true;
   }
-
-  // See if there's an old-style initialization hook.
-  if (init) {
-    MOZ_ASSERT(!haveSpec);
-    return init(cx, global);
-  }
-
-  //
-  // Ok, we're doing it with a class spec.
-  //
 
   bool isObjectOrFunction = key == JSProto_Function || key == JSProto_Object;
 
@@ -391,7 +375,9 @@ bool GlobalObject::resolveOffThreadConstructor(JSContext* cx,
 
   MOZ_ASSERT(global->zone()->createdForHelperThread());
   MOZ_ASSERT(key == JSProto_Object || key == JSProto_Function ||
-             key == JSProto_Array || key == JSProto_RegExp);
+             key == JSProto_Array || key == JSProto_RegExp ||
+             key == JSProto_AsyncFunction || key == JSProto_GeneratorFunction ||
+             key == JSProto_AsyncGeneratorFunction);
 
   Rooted<OffThreadPlaceholderObject*> placeholder(cx);
   placeholder = OffThreadPlaceholderObject::New(cx, prototypeSlot(key));
@@ -428,10 +414,8 @@ JSObject* GlobalObject::createOffThreadObject(JSContext* cx,
   // compartment.
 
   MOZ_ASSERT(global->zone()->createdForHelperThread());
-  MOZ_ASSERT(slot == GENERATOR_FUNCTION_PROTO || slot == ASYNC_FUNCTION_PROTO ||
-             slot == ASYNC_GENERATOR || slot == MODULE_PROTO ||
-             slot == IMPORT_ENTRY_PROTO || slot == EXPORT_ENTRY_PROTO ||
-             slot == REQUESTED_MODULE_PROTO);
+  MOZ_ASSERT(slot == MODULE_PROTO || slot == IMPORT_ENTRY_PROTO ||
+             slot == EXPORT_ENTRY_PROTO || slot == REQUESTED_MODULE_PROTO);
 
   auto placeholder = OffThreadPlaceholderObject::New(cx, slot);
   if (!placeholder) {
@@ -736,7 +720,7 @@ bool GlobalObject::initSelfHostingBuiltins(JSContext* cx,
          InitBareBuiltinCtor(cx, global, JSProto_TypedArray) &&
          InitBareBuiltinCtor(cx, global, JSProto_Uint8Array) &&
          InitBareBuiltinCtor(cx, global, JSProto_Int32Array) &&
-         InitBareSymbolCtor(cx, global) &&
+         InitBareBuiltinCtor(cx, global, JSProto_Symbol) &&
          DefineFunctions(cx, global, builtins, AsIntrinsic);
 }
 
@@ -844,31 +828,6 @@ bool js::DefineToStringTag(JSContext* cx, HandleObject obj, JSAtom* tag) {
                          SYMBOL_TO_JSID(cx->wellKnownSymbols().toStringTag));
   RootedValue tagString(cx, StringValue(tag));
   return DefineDataProperty(cx, obj, toStringTagId, tagString, JSPROP_READONLY);
-}
-
-GlobalObject::DebuggerVector* GlobalObject::getDebuggers() const {
-  Value debuggers = getReservedSlot(DEBUGGERS);
-  if (debuggers.isUndefined()) {
-    return nullptr;
-  }
-  return DebugAPI::getGlobalDebuggers(&debuggers.toObject());
-}
-
-/* static */ GlobalObject::DebuggerVector* GlobalObject::getOrCreateDebuggers(
-    JSContext* cx, Handle<GlobalObject*> global) {
-  cx->check(global);
-  DebuggerVector* debuggers = global->getDebuggers();
-  if (debuggers) {
-    return debuggers;
-  }
-
-  JSObject* obj = DebugAPI::newGlobalDebuggersHolder(cx);
-  if (!obj) {
-    return nullptr;
-  }
-
-  global->setReservedSlot(DEBUGGERS, ObjectValue(*obj));
-  return global->getDebuggers();
 }
 
 /* static */

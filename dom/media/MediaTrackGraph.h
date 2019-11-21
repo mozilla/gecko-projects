@@ -6,7 +6,8 @@
 #ifndef MOZILLA_MEDIATRACKGRAPH_H_
 #define MOZILLA_MEDIATRACKGRAPH_H_
 
-#include "AudioStream.h"
+#include "AudioSampleFormat.h"
+#include "CubebUtils.h"
 #include "MainThreadUtils.h"
 #include "MediaSegment.h"
 #include "mozilla/LinkedList.h"
@@ -303,12 +304,6 @@ class MediaTrack : public mozilla::LinkedListElement<MediaTrack> {
   void SetGraphImpl(MediaTrackGraph* aGraph);
 
   // Control API.
-  // Since a track can be played multiple ways, we need to combine independent
-  // volume settings. The aKey parameter is used to keep volume settings
-  // separate. Since the track is always playing the same contents, only
-  // a single audio output track is used; the volumes are combined.
-  // Currently only the first enabled audio track is played.
-  // XXX change this so all enabled audio tracks are mixed and played.
   virtual void AddAudioOutput(void* aKey);
   virtual void SetAudioOutputVolume(void* aKey, float aVolume);
   virtual void RemoveAudioOutput(void* aKey);
@@ -557,12 +552,6 @@ class MediaTrack : public mozilla::LinkedListElement<MediaTrack> {
   bool mNotifiedEnded;
 
   // Client-set volume of this track
-  struct AudioOutput {
-    explicit AudioOutput(void* aKey) : mKey(aKey), mVolume(1.0f) {}
-    void* mKey;
-    float mVolume;
-  };
-  nsTArray<AudioOutput> mAudioOutputs;
   nsTArray<RefPtr<MediaTrackListener>> mTrackListeners;
   nsTArray<MainThreadMediaTrackListener*> mMainThreadListeners;
   // This track's associated disabled mode. It can either by disabled by frames
@@ -577,20 +566,6 @@ class MediaTrack : public mozilla::LinkedListElement<MediaTrack> {
 
   // MediaInputPorts to which this is connected
   nsTArray<MediaInputPort*> mConsumers;
-
-  // Where audio output is going. There is one AudioOutputStream per
-  // Type::AUDIO MediaTrack.
-  struct AudioOutputStream {
-    // When we started audio playback for this track.
-    // Add mTrack->GetPosition() to find the current audio playback position.
-    GraphTime mAudioPlaybackStartTime;
-    // Amount of time that we've wanted to play silence because of the track
-    // blocking.
-    MediaTime mBlockedAudioTime;
-    // Last tick written to the audio output.
-    TrackTime mLastTickWritten;
-  };
-  UniquePtr<AudioOutputStream> mAudioOutputStream;
 
   /**
    * Number of outstanding suspend operations on this track. Track is
@@ -716,7 +691,7 @@ class SourceMediaTrack : public MediaTrack {
     // Resampler if the rate of the input track does not match the
     // MediaTrackGraph's.
     nsAutoRef<SpeexResamplerState> mResampler;
-    int mResamplerChannelCount;
+    uint32_t mResamplerChannelCount;
     // Each time the track updates are flushed to the media graph thread,
     // the segment buffer is emptied.
     UniquePtr<MediaSegment> mData;
@@ -1052,6 +1027,7 @@ class MediaTrackGraph {
                                   AudioDataListener* aListener) = 0;
   virtual void CloseAudioInput(Maybe<CubebUtils::AudioDeviceID>& aID,
                                AudioDataListener* aListener) = 0;
+
   // Control API.
   /**
    * Create a track that a media decoder (or some other source of

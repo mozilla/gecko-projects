@@ -12,6 +12,7 @@ describe("ASRouterTriggerListeners", () => {
   const bookmarkedURLListener = ASRouterTriggerListeners.get(
     "openBookmarkedURL"
   );
+  const openArticleURLListener = ASRouterTriggerListeners.get("openArticleURL");
   const hosts = ["www.mozilla.com", "www.mozilla.org"];
 
   beforeEach(async () => {
@@ -91,6 +92,75 @@ describe("ASRouterTriggerListeners", () => {
     });
   });
 
+  describe("openArticleURL", () => {
+    describe("#init", () => {
+      beforeEach(() => {
+        globals.set(
+          "MatchPatternSet",
+          sandbox.stub().callsFake(patterns => ({
+            patterns,
+            matches: url => patterns.has(url),
+          }))
+        );
+        sandbox.stub(global.Services.mm, "addMessageListener");
+        sandbox.stub(global.Services.mm, "removeMessageListener");
+      });
+      afterEach(() => {
+        openArticleURLListener.uninit();
+      });
+      it("setup an event listener on init", () => {
+        openArticleURLListener.init(sandbox.stub(), hosts, hosts);
+
+        assert.calledOnce(global.Services.mm.addMessageListener);
+        assert.calledWithExactly(
+          global.Services.mm.addMessageListener,
+          openArticleURLListener.readerModeEvent,
+          sinon.match.object
+        );
+      });
+      it("should call triggerHandler correctly for matches [host match]", () => {
+        const stub = sandbox.stub();
+        const target = { currentURI: { host: hosts[0], spec: hosts[1] } };
+        openArticleURLListener.init(stub, hosts, hosts);
+
+        const [
+          ,
+          { receiveMessage },
+        ] = global.Services.mm.addMessageListener.firstCall.args;
+        receiveMessage({ data: { isArticle: true }, target });
+
+        assert.calledOnce(stub);
+        assert.calledWithExactly(stub, target, {
+          id: openArticleURLListener.id,
+          param: { host: hosts[0], url: hosts[1] },
+        });
+      });
+      it("should call triggerHandler correctly for matches [pattern match]", () => {
+        const stub = sandbox.stub();
+        const target = { currentURI: { host: null, spec: hosts[1] } };
+        openArticleURLListener.init(stub, hosts, hosts);
+
+        const [
+          ,
+          { receiveMessage },
+        ] = global.Services.mm.addMessageListener.firstCall.args;
+        receiveMessage({ data: { isArticle: true }, target });
+
+        assert.calledOnce(stub);
+        assert.calledWithExactly(stub, target, {
+          id: openArticleURLListener.id,
+          param: { host: null, url: hosts[1] },
+        });
+      });
+      it("should remove the message listener", () => {
+        openArticleURLListener.init(sandbox.stub(), hosts, hosts);
+        openArticleURLListener.uninit();
+
+        assert.calledOnce(global.Services.mm.removeMessageListener);
+      });
+    });
+  });
+
   describe("frequentVisits", () => {
     let _triggerHandler;
     beforeEach(() => {
@@ -155,7 +225,7 @@ describe("ASRouterTriggerListeners", () => {
       beforeEach(() => {
         globals.set(
           "MatchPatternSet",
-          sandbox.stub().callsFake(patterns => ({ patterns }))
+          sandbox.stub().callsFake(patterns => ({ patterns: patterns || [] }))
         );
       });
       afterEach(() => {
@@ -165,7 +235,7 @@ describe("ASRouterTriggerListeners", () => {
         frequentVisitsListener.init(_triggerHandler, hosts, ["pattern"]);
 
         assert.calledOnce(window.MatchPatternSet);
-        assert.calledWithExactly(window.MatchPatternSet, ["pattern"], {
+        assert.calledWithExactly(window.MatchPatternSet, new Set(["pattern"]), {
           ignorePath: true,
         });
       });
@@ -178,6 +248,22 @@ describe("ASRouterTriggerListeners", () => {
           window.MatchPatternSet,
           new Set(["pattern", "foo"]),
           { ignorePath: true }
+        );
+      });
+      it("should handle bad arguments to MatchPatternSet", () => {
+        const badArgs = ["www.example.com"];
+        window.MatchPatternSet.withArgs(new Set(badArgs)).throws();
+        frequentVisitsListener.init(_triggerHandler, hosts, badArgs);
+
+        // Fails with an empty MatchPatternSet
+        assert.property(frequentVisitsListener._matchPatternSet, "patterns");
+
+        // Second try is succesful
+        frequentVisitsListener.init(_triggerHandler, hosts, ["foo"]);
+
+        assert.property(frequentVisitsListener._matchPatternSet, "patterns");
+        assert.isTrue(
+          frequentVisitsListener._matchPatternSet.patterns.has("foo")
         );
       });
     });

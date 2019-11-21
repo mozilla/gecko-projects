@@ -29,8 +29,8 @@ namespace wasm {
 // stateful objects exposed to WebAssembly. asm.js also uses Tables to represent
 // its homogeneous function-pointer tables.
 //
-// A table of FuncRef holds FunctionTableElems, which are (instance*,index)
-// pairs, where the instance must be traced.
+// A table of FuncRef holds FunctionTableElems, which are (code*,tls*) pairs,
+// where the tls must be traced.
 //
 // A table of AnyRef holds JSObject pointers, which must be traced.
 
@@ -88,7 +88,7 @@ class Table : public ShareableBase<Table> {
   bool getFuncRef(JSContext* cx, uint32_t index,
                   MutableHandleFunction fun) const;
   void setFuncRef(uint32_t index, void* code, const Instance* instance);
-  void fillFuncRef(uint32_t index, uint32_t fillCount, AnyRef ref,
+  void fillFuncRef(uint32_t index, uint32_t fillCount, FuncRef ref,
                    JSContext* cx);
 
   AnyRef getAnyRef(uint32_t index) const;
@@ -96,9 +96,9 @@ class Table : public ShareableBase<Table> {
 
   void setNull(uint32_t index);
 
-  // Copy entry from |srcTable| at |srcIndex| to this table at |dstIndex|.
-  // Used by table.copy.
-  void copy(const Table& srcTable, uint32_t dstIndex, uint32_t srcIndex);
+  // Copy entry from |srcTable| at |srcIndex| to this table at |dstIndex|.  Used
+  // by table.copy.  May OOM if it needs to box up a function during an upcast.
+  bool copy(const Table& srcTable, uint32_t dstIndex, uint32_t srcIndex);
 
   // grow() returns (uint32_t)-1 if it could not grow.
   uint32_t grow(uint32_t delta);

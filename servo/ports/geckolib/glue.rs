@@ -4,6 +4,7 @@
 
 use super::error_reporter::ErrorReporter;
 use super::stylesheet_loader::{AsyncStylesheetParser, StylesheetLoader};
+use bincode::{deserialize, serialize};
 use cssparser::ToCss as ParserToCss;
 use cssparser::{ParseErrorKind, Parser, ParserInput, SourceLocation, UnicodeRange};
 use malloc_size_of::MallocSizeOfOps;
@@ -131,6 +132,7 @@ use style::use_counters::UseCounters;
 use style::values::animated::{Animate, Procedure, ToAnimatedZero};
 use style::values::computed::{self, Context, ToComputedValue};
 use style::values::distance::ComputeSquaredDistance;
+use style::values::generics;
 use style::values::specified;
 use style::values::specified::gecko::IntersectionObserverRootMargin;
 use style::values::specified::source_size_list::SourceSizeList;
@@ -838,6 +840,50 @@ pub unsafe extern "C" fn Servo_AnimationValue_GetTransform(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_GetOffsetPath(
+    value: &RawServoAnimationValue,
+) -> *const computed::motion::OffsetPath {
+    let value = AnimationValue::as_arc(&value);
+    match **value {
+        AnimationValue::OffsetPath(ref value) => value,
+        _ => unreachable!("Expected offset-path"),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_GetOffsetDistance(
+    value: &RawServoAnimationValue,
+) -> *const computed::LengthPercentage {
+    let value = AnimationValue::as_arc(&value);
+    match **value {
+        AnimationValue::OffsetDistance(ref value) => value,
+        _ => unreachable!("Expected offset-distance"),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_GetOffsetRotate(
+    value: &RawServoAnimationValue,
+) -> *const computed::motion::OffsetRotate {
+    let value = AnimationValue::as_arc(&value);
+    match **value {
+        AnimationValue::OffsetRotate(ref value) => value,
+        _ => unreachable!("Expected offset-rotate"),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_GetOffsetAnchor(
+    value: &RawServoAnimationValue,
+) -> *const computed::position::PositionOrAuto {
+    let value = AnimationValue::as_arc(&value);
+    match **value {
+        AnimationValue::OffsetAnchor(ref value) => value,
+        _ => unreachable!("Expected offset-anchor"),
+    }
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn Servo_AnimationValue_Rotate(
     r: &computed::Rotate,
 ) -> Strong<RawServoAnimationValue> {
@@ -873,6 +919,56 @@ pub unsafe extern "C" fn Servo_AnimationValue_Transform(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_SVGPath(
+    list: *const specified::svg_path::PathCommand,
+    len: usize,
+) -> Strong<RawServoAnimationValue> {
+    use style::values::generics::motion::OffsetPath;
+    use style::values::specified::SVGPathData;
+
+    let slice = std::slice::from_raw_parts(list, len);
+    Arc::new(AnimationValue::OffsetPath(OffsetPath::Path(SVGPathData(
+        style_traits::arc_slice::ArcSlice::from_iter(slice.iter().cloned()),
+    ))))
+    .into_strong()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_RayFunction(
+    r: &generics::motion::RayFunction<computed::Angle>,
+) -> Strong<RawServoAnimationValue> {
+    use style::values::generics::motion::OffsetPath;
+    Arc::new(AnimationValue::OffsetPath(OffsetPath::Ray(r.clone()))).into_strong()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_NoneOffsetPath() -> Strong<RawServoAnimationValue> {
+    use style::values::generics::motion::OffsetPath;
+    Arc::new(AnimationValue::OffsetPath(OffsetPath::None)).into_strong()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_OffsetDistance(
+    d: &computed::length::LengthPercentage,
+) -> Strong<RawServoAnimationValue> {
+    Arc::new(AnimationValue::OffsetDistance(*d)).into_strong()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_OffsetRotate(
+    r: &computed::motion::OffsetRotate,
+) -> Strong<RawServoAnimationValue> {
+    Arc::new(AnimationValue::OffsetRotate(*r)).into_strong()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_AnimationValue_OffsetAnchor(
+    p: &computed::position::PositionOrAuto,
+) -> Strong<RawServoAnimationValue> {
+    Arc::new(AnimationValue::OffsetAnchor(*p)).into_strong()
+}
+
+#[no_mangle]
 pub extern "C" fn Servo_AnimationValue_DeepEqual(
     this: &RawServoAnimationValue,
     other: &RawServoAnimationValue,
@@ -897,6 +993,95 @@ pub extern "C" fn Servo_AnimationValue_Uncompute(
             )),
     )
     .into_strong()
+}
+
+// This is an intermediate type for passing Vec<u8> through FFI.
+// We convert this type into ByteBuf when passing it through IPC.
+#[repr(C)]
+pub struct VecU8 {
+    data: *mut u8,
+    length: usize,
+    capacity: usize,
+}
+
+impl VecU8 {
+    #[inline]
+    fn from_vec(mut v: Vec<u8>) -> Self {
+        let w = VecU8 {
+            data: v.as_mut_ptr(),
+            length: v.len(),
+            capacity: v.capacity(),
+        };
+        std::mem::forget(v);
+        w
+    }
+
+    #[inline]
+    fn flush_into_vec(&mut self) -> Vec<u8> {
+        if self.data.is_null() {
+            debug_assert_eq!(self.capacity, 0);
+            return Vec::new();
+        }
+
+        let vec = unsafe { Vec::from_raw_parts(self.data, self.length, self.capacity) };
+        self.data = ptr::null_mut();
+        self.length = 0;
+        self.capacity = 0;
+        vec
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_VecU8_Free(v: &mut VecU8) {
+    if !v.data.is_null() {
+        v.flush_into_vec();
+    }
+}
+
+macro_rules! impl_basic_serde_funcs {
+    ($ser_name:ident, $de_name:ident, $computed_type:ty) => {
+        #[no_mangle]
+        pub extern "C" fn $ser_name(v: &$computed_type, output: &mut VecU8) -> bool {
+            let buf = match serialize(v) {
+                Ok(buf) => buf,
+                Err(..) => return false,
+            };
+
+            *output = VecU8::from_vec(buf);
+            true
+        }
+
+        #[no_mangle]
+        pub extern "C" fn $de_name(input: &mut VecU8, v: &mut $computed_type) -> bool {
+            let buf = match deserialize(&input.flush_into_vec()) {
+                Ok(buf) => buf,
+                Err(..) => return false,
+            };
+
+            *v = buf;
+            true
+        }
+    };
+}
+
+impl_basic_serde_funcs!(
+    Servo_LengthPercentage_Serialize,
+    Servo_LengthPercentage_Deserialize,
+    computed::LengthPercentage
+);
+
+impl_basic_serde_funcs!(
+    Servo_RayFunction_Serialize,
+    Servo_RayFunction_Deserialize,
+    generics::motion::RayFunction<computed::Angle>
+);
+
+#[no_mangle]
+pub extern "C" fn Servo_SVGPathData_Normalize(
+    input: &specified::SVGPathData,
+    output: &mut specified::SVGPathData,
+) {
+    *output = input.normalize();
 }
 
 // Return the ComputedValues by a base ComputedValues and the rules.
@@ -1788,6 +1973,8 @@ pub extern "C" fn Servo_StyleSheet_SizeOfIncludingThis(
         Some(malloc_enclosing_size_of.unwrap()),
         None,
     );
+    // TODO(emilio): We're not measuring the size of the Arc<StyleSheetContents>
+    // allocation itself here.
     StylesheetContents::as_arc(&sheet).size_of(&guard, &mut ops)
 }
 
@@ -3348,7 +3535,7 @@ pub unsafe extern "C" fn Servo_ComputedValues_GetForAnonymousBox(
                 let level = match origin {
                     Origin::UserAgent => CascadeLevel::UANormal,
                     Origin::User => CascadeLevel::UserNormal,
-                    Origin::Author => CascadeLevel::SameTreeAuthorNormal,
+                    Origin::Author => CascadeLevel::same_tree_author_normal(),
                 };
                 for rule in data.pages.iter() {
                     declarations.push(ApplicableDeclarationBlock::from_declarations(
@@ -6136,7 +6323,11 @@ pub extern "C" fn Servo_ProcessInvalidations(
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_HasPendingRestyleAncestor(element: &RawGeckoElement) -> bool {
+pub extern "C" fn Servo_HasPendingRestyleAncestor(
+    element: &RawGeckoElement,
+    may_need_to_flush_layout: bool,
+) -> bool {
+    let mut has_yet_to_be_styled = false;
     let mut element = Some(GeckoElement(element));
     while let Some(e) = element {
         if e.has_animations() {
@@ -6146,15 +6337,36 @@ pub extern "C" fn Servo_HasPendingRestyleAncestor(element: &RawGeckoElement) -> 
         // If the element needs a frame, it means that we haven't styled it yet
         // after it got inserted in the document, and thus we may need to do
         // that for transitions and animations to trigger.
+        //
+        // This is a fast path in the common case, but `has_yet_to_be_styled` is
+        // the real check for this.
         if e.needs_frame() {
             return true;
         }
 
-        if let Some(data) = e.borrow_data() {
+        let data = e.borrow_data();
+        if let Some(ref data) = data {
             if !data.hint.is_empty() {
                 return true;
             }
+            if has_yet_to_be_styled && !data.styles.is_display_none() {
+                return true;
+            }
+            // Ideally, DOM mutations wouldn't affect layout trees of siblings.
+            //
+            // In practice, this can happen because Gecko deals pretty badly
+            // with some kinds of content insertion and removals.
+            //
+            // If we may need to flush layout, we need frames to accurately
+            // determine whether we'll actually flush, so if we have to
+            // reconstruct we need to flush style, which is what will take care
+            // of ensuring that frames are constructed, even if the style itself
+            // is up-to-date.
+            if may_need_to_flush_layout && data.damage.contains(GeckoRestyleDamage::reconstruct()) {
+                return true;
+            }
         }
+        has_yet_to_be_styled = data.is_none();
 
         element = e.traversal_parent();
     }

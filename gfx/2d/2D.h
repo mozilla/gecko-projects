@@ -320,6 +320,8 @@ class SurfacePattern : public Pattern {
 class StoredPattern;
 class DrawTargetCaptureImpl;
 
+static const int32_t kReasonableSurfaceSize = 8192;
+
 /**
  * This is the base class for source surfaces. These objects are surfaces
  * which may be used as a source in a SurfacePattern or a DrawSurface call.
@@ -771,30 +773,37 @@ class SharedFTFace : public external::AtomicRefCounted<SharedFTFace> {
   FT_Face GetFace() const { return mFace; }
   SharedFTFaceData* GetData() const { return mData; }
 
-  /** Locks the face for exclusive access by a given owner. Returns true if
-   * the given owner is acquiring the lock for the first time, and false if
+  /** Locks the face for exclusive access by a given owner. Returns false if
+   * the given owner is acquiring the lock for the first time, and true if
    * the owner was the prior owner of the lock. Thus the return value can be
    * used to do owner-specific initialization of the FT face such as setting
    * a size or transform that may have been invalidated by a previous owner.
-   * If no owner is given, then the user should avoid modify any state on
+   * If no owner is given, then the user should avoid modifying any state on
    * the face so as not to invalidate the prior owner's modification.
    */
   bool Lock(void* aOwner = nullptr) {
     mLock.Lock();
-    if (mLockOwner == aOwner || !aOwner) {
-      return true;
-    } else {
-      mLockOwner = aOwner;
-      return false;
-    }
+    return !aOwner || mLastLockOwner.exchange(aOwner) == aOwner;
   }
   void Unlock() { mLock.Unlock(); }
+
+  /** Should be called when a lock owner is destroyed so that we don't have
+   * a dangling pointer to a destroyed owner.
+   */
+  void ForgetLockOwner(void* aOwner) {
+    if (aOwner) {
+      mLastLockOwner.compareExchange(aOwner, nullptr);
+    }
+  }
 
  private:
   FT_Face mFace;
   SharedFTFaceData* mData;
   Mutex mLock;
-  void* mLockOwner;
+  // Remember the last owner of the lock, even after unlocking, to allow users
+  // to avoid reinitializing state on the FT face if the last owner hasn't
+  // changed by the next time it is locked with the same owner.
+  Atomic<void*> mLastLockOwner;
 };
 #endif
 
@@ -1590,7 +1599,7 @@ struct Config {
 
   Config()
       : mLogForwarder(nullptr),
-        mMaxTextureSize(8192),
+        mMaxTextureSize(kReasonableSurfaceSize),
         mMaxAllocSize(52000000) {}
 };
 
@@ -1645,6 +1654,12 @@ class GFX2D_API Factory {
   static already_AddRefed<DrawTarget> CreateDrawTarget(BackendType aBackend,
                                                        const IntSize& aSize,
                                                        SurfaceFormat aFormat);
+
+  /**
+   * Create a simple PathBuilder, which uses SKIA backend. If USE_SKIA is not
+   * defined, this returns nullptr;
+   */
+  static already_AddRefed<PathBuilder> CreateSimplePathBuilder();
 
   /**
    * Create a DrawTarget that captures the drawing commands to eventually be
@@ -1871,7 +1886,8 @@ class GFX2D_API Factory {
       IDWriteFontFace* aFontFace, const gfxFontStyle* aStyle,
       const RefPtr<UnscaledFont>& aUnscaledFont, Float aSize,
       bool aUseEmbeddedBitmap, int aRenderingMode,
-      IDWriteRenderingParams* aParams, Float aGamma, Float aContrast);
+      IDWriteRenderingParams* aParams, Float aGamma, Float aContrast,
+      Float aClearTypeLevel);
 
   static already_AddRefed<ScaledFont> CreateScaledFontForGDIFont(
       const void* aLogFont, const RefPtr<UnscaledFont>& aUnscaledFont,

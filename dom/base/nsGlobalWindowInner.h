@@ -47,11 +47,11 @@
 #include "mozilla/LinkedList.h"
 #include "mozilla/OwningNonNull.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/webgpu/InstanceProvider.h"
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/WindowBinding.h"
+#include "mozilla/dom/WindowProxyHolder.h"
 #include "Units.h"
 #include "nsComponentManagerUtils.h"
 #include "nsSize.h"
@@ -180,8 +180,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
                                   public nsSupportsWeakReference,
                                   public nsIInterfaceRequestor,
                                   public PRCListStr,
-                                  public nsAPostRefreshObserver,
-                                  public mozilla::webgpu::InstanceProvider {
+                                  public nsAPostRefreshObserver {
  public:
   typedef mozilla::dom::BrowsingContext RemoteProxy;
 
@@ -308,6 +307,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   nsresult PostHandleEvent(mozilla::EventChainPostVisitor& aVisitor) override;
 
+  void ClearActiveStoragePrincipal();
+
   void Suspend();
   void Resume();
   virtual bool IsSuspended() const override;
@@ -386,9 +387,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   static bool IsPrivilegedChromeWindow(JSContext* /* unused */, JSObject* aObj);
 
-  static bool OfflineCacheAllowedForContext(JSContext* /* unused */,
-                                            JSObject* aObj);
-
   static bool IsRequestIdleCallbackEnabled(JSContext* aCx,
                                            JSObject* /* unused */);
 
@@ -448,8 +446,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   static void ShutDown();
   static bool IsCallerChrome();
 
-  void CleanupCachedXBLHandlers();
-
   friend class WindowStateHolder;
 
   NS_DECL_CYCLE_COLLECTION_SKIPPABLE_SCRIPT_HOLDER_CLASS_AMBIGUOUS(
@@ -460,12 +456,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   // with caution.
   void RiskyUnlink();
 #endif
-
-  virtual JSObject* GetCachedXBLPrototypeHandler(
-      nsXBLPrototypeHandler* aKey) override;
-
-  virtual void CacheXBLPrototypeHandler(
-      nsXBLPrototypeHandler* aKey, JS::Handle<JSObject*> aHandler) override;
 
   virtual bool TakeFocus(bool aFocus, uint32_t aFocusMethod) override;
   virtual void SetReadyForFocus() override;
@@ -586,8 +576,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   static JSObject* CreateNamedPropertiesObject(JSContext* aCx,
                                                JS::Handle<JSObject*> aProto);
 
-  mozilla::dom::BrowsingContext* Window();
-  mozilla::dom::BrowsingContext* Self() { return Window(); }
+  mozilla::dom::WindowProxyHolder Window();
+  mozilla::dom::WindowProxyHolder Self() { return Window(); }
   Document* GetDocument() { return GetDoc(); }
   void GetName(nsAString& aName, mozilla::ErrorResult& aError);
   void SetName(const nsAString& aName, mozilla::ErrorResult& aError);
@@ -610,7 +600,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   void Focus(mozilla::ErrorResult& aError);
   nsresult Focus() override;
   void Blur(mozilla::ErrorResult& aError);
-  mozilla::dom::BrowsingContext* GetFrames(mozilla::ErrorResult& aError);
+  mozilla::dom::WindowProxyHolder GetFrames(mozilla::ErrorResult& aError);
   uint32_t Length();
   mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> GetTop(
       mozilla::ErrorResult& aError);
@@ -916,13 +906,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   void DidRefresh() override;
 
-  void GetDialogArgumentsOuter(JSContext* aCx,
-                               JS::MutableHandle<JS::Value> aRetval,
-                               nsIPrincipal& aSubjectPrincipal,
-                               mozilla::ErrorResult& aError);
-  void GetDialogArguments(JSContext* aCx, JS::MutableHandle<JS::Value> aRetval,
-                          nsIPrincipal& aSubjectPrincipal,
-                          mozilla::ErrorResult& aError);
   void GetReturnValueOuter(JSContext* aCx,
                            JS::MutableHandle<JS::Value> aReturnValue,
                            nsIPrincipal& aSubjectPrincipal,
@@ -957,7 +940,10 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
     return GetExtantDoc() && GetExtantDoc()->IsInSyncOperation();
   }
 
-  bool CanShareMemory(const nsID& aAgentClusterId);
+  bool IsSharedMemoryAllowed() const;
+
+  // https://whatpr.org/html/4734/structured-data.html#cross-origin-isolated
+  bool CrossOriginIsolated() const;
 
  protected:
   // Web IDL helpers
@@ -1142,7 +1128,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   virtual already_AddRefed<nsPIWindowRoot> GetTopWindowRoot() override;
 
   // Get the toplevel principal, returns null if this is a toplevel window.
-  nsIPrincipal* GetTopLevelPrincipal();
+  nsIPrincipal* GetTopLevelAntiTrackingPrincipal();
 
   // Get the parent principal, returns null if this or the parent are not a
   // toplevel window. This is mainly used to determine the anti-tracking storage
@@ -1371,10 +1357,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 #endif
 
   RefPtr<nsDOMOfflineResourceList> mApplicationCache;
-
-  using XBLPrototypeHandlerTable =
-      nsJSThingHashtable<nsPtrHashKey<nsXBLPrototypeHandler>, JSObject*>;
-  mozilla::UniquePtr<XBLPrototypeHandlerTable> mCachedXBLPrototypeHandlers;
 
   RefPtr<mozilla::dom::IDBFactory> mIndexedDB;
 

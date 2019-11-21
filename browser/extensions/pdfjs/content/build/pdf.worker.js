@@ -123,8 +123,8 @@ return /******/ (function(modules) { // webpackBootstrap
 "use strict";
 
 
-const pdfjsVersion = '2.3.194';
-const pdfjsBuild = 'cd909c53';
+const pdfjsVersion = '2.4.127';
+const pdfjsBuild = '21895aa7';
 
 const pdfjsCoreWorker = __w_pdfjs_require__(1);
 
@@ -148,15 +148,13 @@ var _primitives = __w_pdfjs_require__(6);
 
 var _pdf_manager = __w_pdfjs_require__(7);
 
-var _is_node = _interopRequireDefault(__w_pdfjs_require__(46));
+var _is_node = __w_pdfjs_require__(46);
 
 var _message_handler = __w_pdfjs_require__(47);
 
 var _worker_stream = __w_pdfjs_require__(48);
 
 var _core_utils = __w_pdfjs_require__(9);
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 var WorkerTask = function WorkerTaskClosure() {
   function WorkerTask(name) {
@@ -225,7 +223,7 @@ var WorkerMessageHandler = {
     var WorkerTasks = [];
     const verbosity = (0, _util.getVerbosityLevel)();
     const apiVersion = docParams.apiVersion;
-    const workerVersion = '2.3.194';
+    const workerVersion = '2.4.127';
 
     if (apiVersion !== workerVersion) {
       throw new Error(`The API version "${apiVersion}" does not match ` + `the Worker version "${workerVersion}".`);
@@ -398,28 +396,24 @@ var WorkerMessageHandler = {
         });
       }
 
-      function onFailure(e) {
+      function onFailure(ex) {
         ensureNotTerminated();
 
-        if (e instanceof _util.PasswordException) {
-          var task = new WorkerTask('PasswordException: response ' + e.code);
+        if (ex instanceof _util.PasswordException) {
+          var task = new WorkerTask(`PasswordException: response ${ex.code}`);
           startWorkerTask(task);
-          handler.sendWithPromise('PasswordRequest', e).then(function (data) {
+          handler.sendWithPromise('PasswordRequest', ex).then(function (data) {
             finishWorkerTask(task);
             pdfManager.updatePassword(data.password);
             pdfManagerReady();
-          }).catch(function (boundException) {
+          }).catch(function () {
             finishWorkerTask(task);
-            handler.send('PasswordException', boundException);
-          }.bind(null, e));
-        } else if (e instanceof _util.InvalidPDFException) {
-          handler.send('InvalidPDF', e);
-        } else if (e instanceof _util.MissingPDFException) {
-          handler.send('MissingPDF', e);
-        } else if (e instanceof _util.UnexpectedResponseException) {
-          handler.send('UnexpectedResponse', e);
+            handler.send('DocException', ex);
+          });
+        } else if (ex instanceof _util.InvalidPDFException || ex instanceof _util.MissingPDFException || ex instanceof _util.UnexpectedResponseException || ex instanceof _util.UnknownErrorException) {
+          handler.send('DocException', ex);
         } else {
-          handler.send('UnknownError', new _util.UnknownErrorException(e.message, e.toString()));
+          handler.send('DocException', new _util.UnknownErrorException(ex.message, ex.toString()));
         }
       }
 
@@ -655,7 +649,7 @@ function isMessagePort(maybePort) {
   return typeof maybePort.postMessage === 'function' && 'onmessage' in maybePort;
 }
 
-if (typeof window === 'undefined' && !(0, _is_node.default)() && typeof self !== 'undefined' && isMessagePort(self)) {
+if (typeof window === 'undefined' && !_is_node.isNodeJS && typeof self !== 'undefined' && isMessagePort(self)) {
   WorkerMessageHandler.initializeFromPort(self);
 }
 
@@ -707,7 +701,7 @@ Object.defineProperty(exports, "ReadableStream", {
     return _streams_polyfill.ReadableStream;
   }
 });
-exports.createObjectURL = exports.FormatError = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.PermissionFlag = exports.PasswordResponses = exports.PasswordException = exports.NativeImageDecoding = exports.MissingPDFException = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationStateModelType = exports.AnnotationReviewState = exports.AnnotationReplyType = exports.AnnotationMarkedState = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VerbosityLevel = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = void 0;
+exports.createObjectURL = exports.FormatError = exports.Util = exports.UnknownErrorException = exports.UnexpectedResponseException = exports.TextRenderingMode = exports.StreamType = exports.PermissionFlag = exports.PasswordResponses = exports.PasswordException = exports.NativeImageDecoding = exports.MissingPDFException = exports.InvalidPDFException = exports.AbortException = exports.CMapCompressionType = exports.ImageKind = exports.FontType = exports.AnnotationType = exports.AnnotationStateModelType = exports.AnnotationReviewState = exports.AnnotationReplyType = exports.AnnotationMarkedState = exports.AnnotationFlag = exports.AnnotationFieldFlag = exports.AnnotationBorderStyleType = exports.UNSUPPORTED_FEATURES = exports.VerbosityLevel = exports.OPS = exports.IDENTITY_MATRIX = exports.FONT_IDENTITY_MATRIX = exports.BaseException = void 0;
 
 __w_pdfjs_require__(3);
 
@@ -1090,97 +1084,66 @@ function shadow(obj, prop, value) {
   return value;
 }
 
-const PasswordException = function PasswordExceptionClosure() {
-  function PasswordException(msg, code) {
-    this.name = 'PasswordException';
-    this.message = msg;
+const BaseException = function BaseExceptionClosure() {
+  function BaseException(message) {
+    if (this.constructor === BaseException) {
+      unreachable('Cannot initialize BaseException.');
+    }
+
+    this.message = message;
+    this.name = this.constructor.name;
+  }
+
+  BaseException.prototype = new Error();
+  BaseException.constructor = BaseException;
+  return BaseException;
+}();
+
+exports.BaseException = BaseException;
+
+class PasswordException extends BaseException {
+  constructor(msg, code) {
+    super(msg);
     this.code = code;
   }
 
-  PasswordException.prototype = new Error();
-  PasswordException.constructor = PasswordException;
-  return PasswordException;
-}();
+}
 
 exports.PasswordException = PasswordException;
 
-const UnknownErrorException = function UnknownErrorExceptionClosure() {
-  function UnknownErrorException(msg, details) {
-    this.name = 'UnknownErrorException';
-    this.message = msg;
+class UnknownErrorException extends BaseException {
+  constructor(msg, details) {
+    super(msg);
     this.details = details;
   }
 
-  UnknownErrorException.prototype = new Error();
-  UnknownErrorException.constructor = UnknownErrorException;
-  return UnknownErrorException;
-}();
+}
 
 exports.UnknownErrorException = UnknownErrorException;
 
-const InvalidPDFException = function InvalidPDFExceptionClosure() {
-  function InvalidPDFException(msg) {
-    this.name = 'InvalidPDFException';
-    this.message = msg;
-  }
-
-  InvalidPDFException.prototype = new Error();
-  InvalidPDFException.constructor = InvalidPDFException;
-  return InvalidPDFException;
-}();
+class InvalidPDFException extends BaseException {}
 
 exports.InvalidPDFException = InvalidPDFException;
 
-const MissingPDFException = function MissingPDFExceptionClosure() {
-  function MissingPDFException(msg) {
-    this.name = 'MissingPDFException';
-    this.message = msg;
-  }
-
-  MissingPDFException.prototype = new Error();
-  MissingPDFException.constructor = MissingPDFException;
-  return MissingPDFException;
-}();
+class MissingPDFException extends BaseException {}
 
 exports.MissingPDFException = MissingPDFException;
 
-const UnexpectedResponseException = function UnexpectedResponseExceptionClosure() {
-  function UnexpectedResponseException(msg, status) {
-    this.name = 'UnexpectedResponseException';
-    this.message = msg;
+class UnexpectedResponseException extends BaseException {
+  constructor(msg, status) {
+    super(msg);
     this.status = status;
   }
 
-  UnexpectedResponseException.prototype = new Error();
-  UnexpectedResponseException.constructor = UnexpectedResponseException;
-  return UnexpectedResponseException;
-}();
+}
 
 exports.UnexpectedResponseException = UnexpectedResponseException;
 
-const FormatError = function FormatErrorClosure() {
-  function FormatError(msg) {
-    this.message = msg;
-  }
-
-  FormatError.prototype = new Error();
-  FormatError.prototype.name = 'FormatError';
-  FormatError.constructor = FormatError;
-  return FormatError;
-}();
+class FormatError extends BaseException {}
 
 exports.FormatError = FormatError;
 
-const AbortException = function AbortExceptionClosure() {
-  function AbortException(msg) {
-    this.name = 'AbortException';
-    this.message = msg;
-  }
-
-  AbortException.prototype = new Error();
-  AbortException.constructor = AbortException;
-  return AbortException;
-}();
+class AbortException extends BaseException {}
 
 exports.AbortException = AbortException;
 const NullCharactersRegExp = /\x00/g;
@@ -1424,6 +1387,10 @@ function stringToPDFString(str) {
     for (let i = 2; i < length; i += 2) {
       strBuf.push(String.fromCharCode(str.charCodeAt(i) << 8 | str.charCodeAt(i + 1)));
     }
+  } else if (str[0] === '\xFF' && str[1] === '\xFE') {
+    for (let i = 2; i < length; i += 2) {
+      strBuf.push(String.fromCharCode(str.charCodeAt(i + 1) << 8 | str.charCodeAt(i)));
+    }
   } else {
     for (let i = 0; i < length; ++i) {
       const code = PDFStringTranslateTable[str.charCodeAt(i)];
@@ -1539,7 +1506,9 @@ exports.createObjectURL = createObjectURL;
 "use strict";
 
 
-const globalScope = __w_pdfjs_require__(4);
+const {
+  globalScope
+} = __w_pdfjs_require__(4);
 
 ;
 
@@ -1550,7 +1519,12 @@ const globalScope = __w_pdfjs_require__(4);
 "use strict";
 
 
-module.exports = typeof window !== 'undefined' && window.Math === Math ? window : typeof global !== 'undefined' && global.Math === Math ? global : typeof self !== 'undefined' && self.Math === Math ? self : {};
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.globalScope = void 0;
+const globalScope = typeof window !== 'undefined' && window.Math === Math ? window : typeof global !== 'undefined' && global.Math === Math ? global : typeof self !== 'undefined' && self.Math === Math ? self : {};
+exports.globalScope = globalScope;
 
 /***/ }),
 /* 5 */
@@ -2308,7 +2282,11 @@ class ChunkedStream {
 
   peekByte() {
     const peekedByte = this.getByte();
-    this.pos--;
+
+    if (peekedByte !== -1) {
+      this.pos--;
+    }
+
     return peekedByte;
   }
 
@@ -2378,6 +2356,14 @@ class ChunkedStream {
       }
 
       return missingChunks;
+    };
+
+    ChunkedStreamSubstream.prototype.allChunksLoaded = function () {
+      if (this.numChunksLoaded === this.numChunks) {
+        return true;
+      }
+
+      return this.getMissingChunks().length === 0;
     };
 
     const subStream = new ChunkedStreamSubstream();
@@ -2719,44 +2705,22 @@ function getLookupTableFactory(initializer) {
   };
 }
 
-const MissingDataException = function MissingDataExceptionClosure() {
-  function MissingDataException(begin, end) {
+class MissingDataException extends _util.BaseException {
+  constructor(begin, end) {
+    super(`Missing data [${begin}, ${end})`);
     this.begin = begin;
     this.end = end;
-    this.message = `Missing data [${begin}, ${end})`;
   }
 
-  MissingDataException.prototype = new Error();
-  MissingDataException.prototype.name = 'MissingDataException';
-  MissingDataException.constructor = MissingDataException;
-  return MissingDataException;
-}();
+}
 
 exports.MissingDataException = MissingDataException;
 
-const XRefEntryException = function XRefEntryExceptionClosure() {
-  function XRefEntryException(msg) {
-    this.message = msg;
-  }
-
-  XRefEntryException.prototype = new Error();
-  XRefEntryException.prototype.name = 'XRefEntryException';
-  XRefEntryException.constructor = XRefEntryException;
-  return XRefEntryException;
-}();
+class XRefEntryException extends _util.BaseException {}
 
 exports.XRefEntryException = XRefEntryException;
 
-const XRefParseException = function XRefParseExceptionClosure() {
-  function XRefParseException(msg) {
-    this.message = msg;
-  }
-
-  XRefParseException.prototype = new Error();
-  XRefParseException.prototype.name = 'XRefParseException';
-  XRefParseException.constructor = XRefParseException;
-  return XRefParseException;
-}();
+class XRefParseException extends _util.BaseException {}
 
 exports.XRefParseException = XRefParseException;
 
@@ -3536,8 +3500,6 @@ var _primitives = __w_pdfjs_require__(6);
 var _parser = __w_pdfjs_require__(12);
 
 var _core_utils = __w_pdfjs_require__(9);
-
-var _chunked_stream = __w_pdfjs_require__(8);
 
 var _crypto = __w_pdfjs_require__(23);
 
@@ -4980,7 +4942,7 @@ var XRef = function XRefClosure() {
           const num = m[1] | 0,
                 gen = m[2] | 0;
 
-          if (typeof this.entries[num] === 'undefined') {
+          if (!this.entries[num] || this.entries[num].gen === gen) {
             this.entries[num] = {
               offset: position - stream.start,
               gen,
@@ -5627,12 +5589,12 @@ exports.FileSpec = FileSpec;
 
 let ObjectLoader = function () {
   function mayHaveChildren(value) {
-    return (0, _primitives.isRef)(value) || (0, _primitives.isDict)(value) || Array.isArray(value) || (0, _primitives.isStream)(value);
+    return value instanceof _primitives.Ref || value instanceof _primitives.Dict || Array.isArray(value) || (0, _primitives.isStream)(value);
   }
 
   function addChildren(node, nodesToVisit) {
-    if ((0, _primitives.isDict)(node) || (0, _primitives.isStream)(node)) {
-      let dict = (0, _primitives.isDict)(node) ? node : node.dict;
+    if (node instanceof _primitives.Dict || (0, _primitives.isStream)(node)) {
+      let dict = node instanceof _primitives.Dict ? node : node.dict;
       let dictKeys = dict.getKeys();
 
       for (let i = 0, ii = dictKeys.length; i < ii; i++) {
@@ -5658,16 +5620,12 @@ let ObjectLoader = function () {
     this.keys = keys;
     this.xref = xref;
     this.refSet = null;
-    this.capability = null;
   }
 
   ObjectLoader.prototype = {
-    load() {
-      this.capability = (0, _util.createPromiseCapability)();
-
-      if (!(this.xref.stream instanceof _chunked_stream.ChunkedStream) || this.xref.stream.getMissingChunks().length === 0) {
-        this.capability.resolve();
-        return this.capability.promise;
+    async load() {
+      if (!this.xref.stream.allChunksLoaded || this.xref.stream.allChunksLoaded()) {
+        return undefined;
       }
 
       let {
@@ -5685,19 +5643,17 @@ let ObjectLoader = function () {
         }
       }
 
-      this._walk(nodesToVisit);
-
-      return this.capability.promise;
+      return this._walk(nodesToVisit);
     },
 
-    _walk(nodesToVisit) {
+    async _walk(nodesToVisit) {
       let nodesToRevisit = [];
       let pendingRequests = [];
 
       while (nodesToVisit.length) {
         let currentNode = nodesToVisit.pop();
 
-        if ((0, _primitives.isRef)(currentNode)) {
+        if (currentNode instanceof _primitives.Ref) {
           if (this.refSet.has(currentNode)) {
             continue;
           }
@@ -5725,7 +5681,7 @@ let ObjectLoader = function () {
           for (let i = 0, ii = baseStreams.length; i < ii; i++) {
             let stream = baseStreams[i];
 
-            if (stream.getMissingChunks && stream.getMissingChunks().length) {
+            if (stream.allChunksLoaded && !stream.allChunksLoaded()) {
               foundMissingData = true;
               pendingRequests.push({
                 begin: stream.start,
@@ -5743,22 +5699,21 @@ let ObjectLoader = function () {
       }
 
       if (pendingRequests.length) {
-        this.xref.stream.manager.requestRanges(pendingRequests).then(() => {
-          for (let i = 0, ii = nodesToRevisit.length; i < ii; i++) {
-            let node = nodesToRevisit[i];
+        await this.xref.stream.manager.requestRanges(pendingRequests);
 
-            if ((0, _primitives.isRef)(node)) {
-              this.refSet.remove(node);
-            }
+        for (let i = 0, ii = nodesToRevisit.length; i < ii; i++) {
+          let node = nodesToRevisit[i];
+
+          if (node instanceof _primitives.Ref) {
+            this.refSet.remove(node);
           }
+        }
 
-          this._walk(nodesToRevisit);
-        }, this.capability.reject);
-        return;
+        return this._walk(nodesToRevisit);
       }
 
       this.refSet = null;
-      this.capability.resolve();
+      return undefined;
     }
 
   };
@@ -7131,7 +7086,11 @@ var Stream = function StreamClosure() {
 
     peekByte: function Stream_peekByte() {
       var peekedByte = this.getByte();
-      this.pos--;
+
+      if (peekedByte !== -1) {
+        this.pos--;
+      }
+
       return peekedByte;
     },
 
@@ -7294,7 +7253,11 @@ var DecodeStream = function DecodeStreamClosure() {
 
     peekByte: function DecodeStream_peekByte() {
       var peekedByte = this.getByte();
-      this.pos--;
+
+      if (peekedByte !== -1) {
+        this.pos--;
+      }
+
       return peekedByte;
     },
 
@@ -9217,16 +9180,12 @@ var _arithmetic_decoder = __w_pdfjs_require__(18);
 
 var _ccitt = __w_pdfjs_require__(15);
 
-let Jbig2Error = function Jbig2ErrorClosure() {
-  function Jbig2Error(msg) {
-    this.message = 'JBIG2 error: ' + msg;
+class Jbig2Error extends _util.BaseException {
+  constructor(msg) {
+    super(`JBIG2 error: ${msg}`);
   }
 
-  Jbig2Error.prototype = new Error();
-  Jbig2Error.prototype.name = 'Jbig2Error';
-  Jbig2Error.constructor = Jbig2Error;
-  return Jbig2Error;
-}();
+}
 
 var Jbig2Image = function Jbig2ImageClosure() {
   function ContextCache() {}
@@ -11891,39 +11850,22 @@ exports.JpegImage = void 0;
 
 var _util = __w_pdfjs_require__(2);
 
-let JpegError = function JpegErrorClosure() {
-  function JpegError(msg) {
-    this.message = 'JPEG error: ' + msg;
+class JpegError extends _util.BaseException {
+  constructor(msg) {
+    super(`JPEG error: ${msg}`);
   }
 
-  JpegError.prototype = new Error();
-  JpegError.prototype.name = 'JpegError';
-  JpegError.constructor = JpegError;
-  return JpegError;
-}();
+}
 
-let DNLMarkerError = function DNLMarkerErrorClosure() {
-  function DNLMarkerError(message, scanLines) {
-    this.message = message;
+class DNLMarkerError extends _util.BaseException {
+  constructor(message, scanLines) {
+    super(message);
     this.scanLines = scanLines;
   }
 
-  DNLMarkerError.prototype = new Error();
-  DNLMarkerError.prototype.name = 'DNLMarkerError';
-  DNLMarkerError.constructor = DNLMarkerError;
-  return DNLMarkerError;
-}();
+}
 
-let EOIMarkerError = function EOIMarkerErrorClosure() {
-  function EOIMarkerError(message) {
-    this.message = message;
-  }
-
-  EOIMarkerError.prototype = new Error();
-  EOIMarkerError.prototype.name = 'EOIMarkerError';
-  EOIMarkerError.constructor = EOIMarkerError;
-  return EOIMarkerError;
-}();
+class EOIMarkerError extends _util.BaseException {}
 
 var JpegImage = function JpegImageClosure() {
   var dctZigZag = new Uint8Array([0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61, 54, 47, 55, 62, 63]);
@@ -13167,16 +13109,12 @@ var _util = __w_pdfjs_require__(2);
 
 var _arithmetic_decoder = __w_pdfjs_require__(18);
 
-let JpxError = function JpxErrorClosure() {
-  function JpxError(msg) {
-    this.message = 'JPX error: ' + msg;
+class JpxError extends _util.BaseException {
+  constructor(msg) {
+    super(`JPX error: ${msg}`);
   }
 
-  JpxError.prototype = new Error();
-  JpxError.prototype.name = 'JpxError';
-  JpxError.constructor = JpxError;
-  return JpxError;
-}();
+}
 
 var JpxImage = function JpxImageClosure() {
   var SubbandsGainLog2 = {
@@ -19976,8 +19914,25 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
     }
   };
 
-  function normalizeBlendMode(value) {
+  function normalizeBlendMode(value, parsingArray = false) {
+    if (Array.isArray(value)) {
+      for (let i = 0, ii = value.length; i < ii; i++) {
+        const maybeBM = normalizeBlendMode(value[i], true);
+
+        if (maybeBM) {
+          return maybeBM;
+        }
+      }
+
+      (0, _util.warn)(`Unsupported blend mode Array: ${value}`);
+      return 'source-over';
+    }
+
     if (!(0, _primitives.isName)(value)) {
+      if (parsingArray) {
+        return null;
+      }
+
       return 'source-over';
     }
 
@@ -20032,7 +19987,11 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
         return 'luminosity';
     }
 
-    (0, _util.warn)('Unsupported blend mode: ' + value.name);
+    if (parsingArray) {
+      return null;
+    }
+
+    (0, _util.warn)(`Unsupported blend mode: ${value.name}`);
     return 'source-over';
   }
 
@@ -20047,7 +20006,7 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
     },
 
     hasBlendModes: function PartialEvaluator_hasBlendModes(resources) {
-      if (!(0, _primitives.isDict)(resources)) {
+      if (!(resources instanceof _primitives.Dict)) {
         return false;
       }
 
@@ -20061,37 +20020,65 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
           xref = this.xref;
 
       while (nodes.length) {
-        var key, i, ii;
         var node = nodes.shift();
         var graphicStates = node.get('ExtGState');
 
-        if ((0, _primitives.isDict)(graphicStates)) {
+        if (graphicStates instanceof _primitives.Dict) {
           var graphicStatesKeys = graphicStates.getKeys();
 
-          for (i = 0, ii = graphicStatesKeys.length; i < ii; i++) {
-            key = graphicStatesKeys[i];
-            var graphicState = graphicStates.get(key);
-            var bm = graphicState.get('BM');
+          for (let i = 0, ii = graphicStatesKeys.length; i < ii; i++) {
+            const key = graphicStatesKeys[i];
+            let graphicState = graphicStates.getRaw(key);
 
-            if ((0, _primitives.isName)(bm) && bm.name !== 'Normal') {
-              return true;
+            if (graphicState instanceof _primitives.Ref) {
+              if (processed[graphicState.toString()]) {
+                continue;
+              }
+
+              graphicState = xref.fetch(graphicState);
+            }
+
+            if (!(graphicState instanceof _primitives.Dict)) {
+              continue;
+            }
+
+            if (graphicState.objId) {
+              processed[graphicState.objId] = true;
+            }
+
+            const bm = graphicState.get('BM');
+
+            if (bm instanceof _primitives.Name) {
+              if (bm.name !== 'Normal') {
+                return true;
+              }
+
+              continue;
+            }
+
+            if (bm !== undefined && Array.isArray(bm)) {
+              for (let j = 0, jj = bm.length; j < jj; j++) {
+                if (bm[j] instanceof _primitives.Name && bm[j].name !== 'Normal') {
+                  return true;
+                }
+              }
             }
           }
         }
 
         var xObjects = node.get('XObject');
 
-        if (!(0, _primitives.isDict)(xObjects)) {
+        if (!(xObjects instanceof _primitives.Dict)) {
           continue;
         }
 
         var xObjectsKeys = xObjects.getKeys();
 
-        for (i = 0, ii = xObjectsKeys.length; i < ii; i++) {
-          key = xObjectsKeys[i];
+        for (let i = 0, ii = xObjectsKeys.length; i < ii; i++) {
+          const key = xObjectsKeys[i];
           var xObject = xObjects.getRaw(key);
 
-          if ((0, _primitives.isRef)(xObject)) {
+          if (xObject instanceof _primitives.Ref) {
             if (processed[xObject.toString()]) {
               continue;
             }
@@ -20113,7 +20100,7 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
 
           var xResources = xObject.dict.get('Resources');
 
-          if ((0, _primitives.isDict)(xResources) && (!xResources.objId || !processed[xResources.objId])) {
+          if (xResources instanceof _primitives.Dict && (!xResources.objId || !processed[xResources.objId])) {
             nodes.push(xResources);
 
             if (xResources.objId) {
@@ -20125,7 +20112,8 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
 
       return false;
     },
-    buildFormXObject: function PartialEvaluator_buildFormXObject(resources, xobj, smask, operatorList, task, initialState) {
+
+    async buildFormXObject(resources, xobj, smask, operatorList, task, initialState) {
       var dict = xobj.dict;
       var matrix = dict.getArray('Matrix');
       var bbox = dict.getArray('BBox');
@@ -20154,13 +20142,10 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
           groupOptions.knockout = group.get('K') || false;
 
           if (group.has('CS')) {
-            colorSpace = group.get('CS');
-
-            if (colorSpace) {
-              colorSpace = _colorspace.ColorSpace.parse(colorSpace, this.xref, resources, this.pdfFunctionFactory);
-            } else {
-              (0, _util.warn)('buildFormXObject - invalid/non-existent Group /CS entry: ' + group.getRaw('CS'));
-            }
+            colorSpace = await this.parseColorSpace({
+              cs: group.get('CS'),
+              resources
+            });
           }
         }
 
@@ -20551,7 +20536,7 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
 
       if (font) {
         if (!(0, _primitives.isRef)(font)) {
-          throw new Error('The "font" object should be a reference.');
+          throw new _util.FormatError('The "font" object should be a reference.');
         }
 
         fontRef = font;
@@ -20560,15 +20545,26 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
 
         if (fontRes) {
           fontRef = fontRes.getRaw(fontName);
-        } else {
-          (0, _util.warn)('fontRes not available');
-          return errorFont();
         }
       }
 
       if (!fontRef) {
-        (0, _util.warn)('fontRef not available');
-        return errorFont();
+        const partialMsg = `Font "${fontName || font && font.toString()}" is not available`;
+
+        if (!this.options.ignoreErrors && !this.parsingType3Font) {
+          (0, _util.warn)(`${partialMsg}.`);
+          return errorFont();
+        }
+
+        this.handler.send('UnsupportedFeature', {
+          featureId: _util.UNSUPPORTED_FEATURES.font
+        });
+        (0, _util.warn)(`${partialMsg} -- attempting to fallback to a default font.`);
+        fontRef = new _primitives.Dict();
+        fontRef.set('BaseFont', _primitives.Name.get('PDFJS-FallbackFont'));
+        fontRef.set('Type', _primitives.Name.get('FallbackType'));
+        fontRef.set('Subtype', _primitives.Name.get('FallbackType'));
+        fontRef.set('Encoding', _primitives.Name.get('WinAnsiEncoding'));
       }
 
       if (this.fontCache.has(fontRef)) {
@@ -20694,6 +20690,29 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
         opArgs[0].push(fn);
         Array.prototype.push.apply(opArgs[1], args);
       }
+    },
+
+    parseColorSpace({
+      cs,
+      resources
+    }) {
+      return new Promise(resolve => {
+        resolve(_colorspace.ColorSpace.parse(cs, this.xref, resources, this.pdfFunctionFactory));
+      }).catch(reason => {
+        if (reason instanceof _util.AbortException) {
+          return null;
+        }
+
+        if (this.options.ignoreErrors) {
+          this.handler.send('UnsupportedFeature', {
+            featureId: _util.UNSUPPORTED_FEATURES.unknown
+          });
+          (0, _util.warn)(`parseColorSpace - ignoring ColorSpace: "${reason}".`);
+          return null;
+        }
+
+        throw reason;
+      });
     },
 
     async handleColorN(operatorList, fn, args, cs, patterns, resources, task) {
@@ -20938,12 +20957,26 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
               break;
 
             case _util.OPS.setFillColorSpace:
-              stateManager.state.fillColorSpace = _colorspace.ColorSpace.parse(args[0], xref, resources, self.pdfFunctionFactory);
-              continue;
+              next(self.parseColorSpace({
+                cs: args[0],
+                resources
+              }).then(function (colorSpace) {
+                if (colorSpace) {
+                  stateManager.state.fillColorSpace = colorSpace;
+                }
+              }));
+              return;
 
             case _util.OPS.setStrokeColorSpace:
-              stateManager.state.strokeColorSpace = _colorspace.ColorSpace.parse(args[0], xref, resources, self.pdfFunctionFactory);
-              continue;
+              next(self.parseColorSpace({
+                cs: args[0],
+                resources
+              }).then(function (colorSpace) {
+                if (colorSpace) {
+                  stateManager.state.strokeColorSpace = colorSpace;
+                }
+              }));
+              return;
 
             case _util.OPS.setFillColor:
               cs = stateManager.state.fillColorSpace;
@@ -21806,7 +21839,7 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
       });
     },
 
-    _buildSimpleFontToUnicode(properties) {
+    _buildSimpleFontToUnicode(properties, forceGlyphs = false) {
       (0, _util.assert)(!properties.composite, 'Must be a simple font.');
       let toUnicode = [],
           charcode,
@@ -21852,8 +21885,19 @@ var PartialEvaluator = function PartialEvaluatorClosure() {
 
             case 'C':
             case 'c':
-              if (glyphName.length >= 3) {
-                code = +glyphName.substring(1);
+              if (glyphName.length >= 3 && glyphName.length <= 4) {
+                const codeStr = glyphName.substring(1);
+
+                if (forceGlyphs) {
+                  code = parseInt(codeStr, 16);
+                  break;
+                }
+
+                code = +codeStr;
+
+                if (Number.isNaN(code) && Number.isInteger(parseInt(codeStr, 16))) {
+                  return this._buildSimpleFontToUnicode(properties, true);
+                }
               }
 
               break;
@@ -25069,8 +25113,8 @@ var Font = function FontClosure() {
       this.remeasure = Object.keys(this.widths).length > 0;
 
       if (isStandardFont && type === 'CIDFontType2' && this.cidEncoding.startsWith('Identity-')) {
-        var GlyphMapForStandardFonts = (0, _standard_fonts.getGlyphMapForStandardFonts)();
-        var map = [];
+        const GlyphMapForStandardFonts = (0, _standard_fonts.getGlyphMapForStandardFonts)();
+        const map = [];
 
         for (charCode in GlyphMapForStandardFonts) {
           map[+charCode] = GlyphMapForStandardFonts[charCode];
@@ -25111,7 +25155,8 @@ var Font = function FontClosure() {
       } else if (isStandardFont) {
         this.toFontChar = buildToFontChar(this.defaultEncoding, (0, _glyphlist.getGlyphsUnicode)(), this.differences);
       } else {
-        var glyphsUnicodeMap = (0, _glyphlist.getGlyphsUnicode)();
+        const glyphsUnicodeMap = (0, _glyphlist.getGlyphsUnicode)();
+        const map = [];
         this.toUnicode.forEach((charCode, unicodeCharCode) => {
           if (!this.composite) {
             var glyphName = this.differences[charCode] || this.defaultEncoding[charCode];
@@ -25122,8 +25167,20 @@ var Font = function FontClosure() {
             }
           }
 
-          this.toFontChar[charCode] = unicodeCharCode;
+          map[+charCode] = unicodeCharCode;
         });
+
+        if (this.composite && this.toUnicode instanceof IdentityToUnicodeMap) {
+          if (/Verdana/i.test(name)) {
+            const GlyphMapForStandardFonts = (0, _standard_fonts.getGlyphMapForStandardFonts)();
+
+            for (charCode in GlyphMapForStandardFonts) {
+              map[+charCode] = GlyphMapForStandardFonts[charCode];
+            }
+          }
+        }
+
+        this.toFontChar = map;
       }
 
       this.loadedName = fontName.split('-')[0];
@@ -25660,9 +25717,8 @@ var Font = function FontClosure() {
         }
 
         var numGlyphsOut = dupFirstEntry ? numGlyphs + 1 : numGlyphs;
-        var locaData = loca.data;
         var locaDataSize = itemSize * (1 + numGlyphsOut);
-        locaData = new Uint8Array(locaDataSize);
+        var locaData = new Uint8Array(locaDataSize);
         locaData.set(loca.data.subarray(0, locaDataSize));
         loca.data = locaData;
         var oldGlyfData = glyf.data;
@@ -44692,9 +44748,12 @@ exports.PDFImage = PDFImage;
 "use strict";
 
 
-module.exports = function isNodeJS() {
-  return typeof process === 'object' && process + '' === '[object process]' && !process.versions['nw'] && !process.versions['electron'];
-};
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.isNodeJS = void 0;
+const isNodeJS = typeof process === 'object' && process + '' === '[object process]' && !process.versions['nw'] && !process.versions['electron'];
+exports.isNodeJS = isNodeJS;
 
 /***/ }),
 /* 47 */
@@ -44706,10 +44765,15 @@ module.exports = function isNodeJS() {
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
-exports.MessageHandler = MessageHandler;
+exports.MessageHandler = void 0;
 
 var _util = __w_pdfjs_require__(2);
 
+const CallbackKind = {
+  UNKNOWN: 0,
+  DATA: 1,
+  ERROR: 2
+};
 const StreamKind = {
   UNKNOWN: 0,
   CANCEL: 1,
@@ -44723,7 +44787,7 @@ const StreamKind = {
 };
 
 function wrapReason(reason) {
-  if (typeof reason !== 'object') {
+  if (typeof reason !== 'object' || reason === null) {
     return reason;
   }
 
@@ -44745,55 +44809,69 @@ function wrapReason(reason) {
   }
 }
 
-function MessageHandler(sourceName, targetName, comObj) {
-  this.sourceName = sourceName;
-  this.targetName = targetName;
-  this.comObj = comObj;
-  this.callbackId = 1;
-  this.streamId = 1;
-  this.postMessageTransfers = true;
-  this.streamSinks = Object.create(null);
-  this.streamControllers = Object.create(null);
-  let callbacksCapabilities = this.callbacksCapabilities = Object.create(null);
-  let ah = this.actionHandler = Object.create(null);
+class MessageHandler {
+  constructor(sourceName, targetName, comObj) {
+    this.sourceName = sourceName;
+    this.targetName = targetName;
+    this.comObj = comObj;
+    this.callbackId = 1;
+    this.streamId = 1;
+    this.postMessageTransfers = true;
+    this.streamSinks = Object.create(null);
+    this.streamControllers = Object.create(null);
+    this.callbackCapabilities = Object.create(null);
+    this.actionHandler = Object.create(null);
 
-  this._onComObjOnMessage = event => {
-    let data = event.data;
+    this._onComObjOnMessage = event => {
+      const data = event.data;
 
-    if (data.targetName !== this.sourceName) {
-      return;
-    }
-
-    if (data.stream) {
-      this._processStreamMessage(data);
-    } else if (data.isReply) {
-      let callbackId = data.callbackId;
-
-      if (data.callbackId in callbacksCapabilities) {
-        let callback = callbacksCapabilities[callbackId];
-        delete callbacksCapabilities[callbackId];
-
-        if ('reason' in data) {
-          callback.reject(wrapReason(data.reason));
-        } else {
-          callback.resolve(data.data);
-        }
-      } else {
-        throw new Error(`Cannot resolve callback ${callbackId}`);
+      if (data.targetName !== this.sourceName) {
+        return;
       }
-    } else if (data.action in ah) {
-      let action = ah[data.action];
+
+      if (data.stream) {
+        this._processStreamMessage(data);
+
+        return;
+      }
+
+      if (data.callback) {
+        const callbackId = data.callbackId;
+        const capability = this.callbackCapabilities[callbackId];
+
+        if (!capability) {
+          throw new Error(`Cannot resolve callback ${callbackId}`);
+        }
+
+        delete this.callbackCapabilities[callbackId];
+
+        if (data.callback === CallbackKind.DATA) {
+          capability.resolve(data.data);
+        } else if (data.callback === CallbackKind.ERROR) {
+          capability.reject(wrapReason(data.reason));
+        } else {
+          throw new Error('Unexpected callback case');
+        }
+
+        return;
+      }
+
+      const action = this.actionHandler[data.action];
+
+      if (!action) {
+        throw new Error(`Unknown action from worker: ${data.action}`);
+      }
 
       if (data.callbackId) {
-        let sourceName = this.sourceName;
-        let targetName = data.sourceName;
+        const sourceName = this.sourceName;
+        const targetName = data.sourceName;
         new Promise(function (resolve) {
           resolve(action(data.data));
         }).then(function (result) {
           comObj.postMessage({
             sourceName,
             targetName,
-            isReply: true,
+            callback: CallbackKind.DATA,
             callbackId: data.callbackId,
             data: result
           });
@@ -44801,51 +44879,52 @@ function MessageHandler(sourceName, targetName, comObj) {
           comObj.postMessage({
             sourceName,
             targetName,
-            isReply: true,
+            callback: CallbackKind.ERROR,
             callbackId: data.callbackId,
             reason: wrapReason(reason)
           });
         });
-      } else if (data.streamId) {
-        this._createStreamSink(data);
-      } else {
-        action(data.data);
+        return;
       }
-    } else {
-      throw new Error(`Unknown action from worker: ${data.action}`);
-    }
-  };
 
-  comObj.addEventListener('message', this._onComObjOnMessage);
-}
+      if (data.streamId) {
+        this._createStreamSink(data);
 
-MessageHandler.prototype = {
+        return;
+      }
+
+      action(data.data);
+    };
+
+    comObj.addEventListener('message', this._onComObjOnMessage);
+  }
+
   on(actionName, handler) {
-    var ah = this.actionHandler;
+    const ah = this.actionHandler;
 
     if (ah[actionName]) {
       throw new Error(`There is already an actionName called "${actionName}"`);
     }
 
     ah[actionName] = handler;
-  },
+  }
 
   send(actionName, data, transfers) {
-    this.postMessage({
+    this._postMessage({
       sourceName: this.sourceName,
       targetName: this.targetName,
       action: actionName,
       data
     }, transfers);
-  },
+  }
 
   sendWithPromise(actionName, data, transfers) {
-    var callbackId = this.callbackId++;
-    var capability = (0, _util.createPromiseCapability)();
-    this.callbacksCapabilities[callbackId] = capability;
+    const callbackId = this.callbackId++;
+    const capability = (0, _util.createPromiseCapability)();
+    this.callbackCapabilities[callbackId] = capability;
 
     try {
-      this.postMessage({
+      this._postMessage({
         sourceName: this.sourceName,
         targetName: this.targetName,
         action: actionName,
@@ -44857,16 +44936,16 @@ MessageHandler.prototype = {
     }
 
     return capability.promise;
-  },
+  }
 
   sendWithStream(actionName, data, queueingStrategy, transfers) {
-    let streamId = this.streamId++;
-    let sourceName = this.sourceName;
-    let targetName = this.targetName;
+    const streamId = this.streamId++;
+    const sourceName = this.sourceName;
+    const targetName = this.targetName;
     const comObj = this.comObj;
     return new _util.ReadableStream({
       start: controller => {
-        let startCapability = (0, _util.createPromiseCapability)();
+        const startCapability = (0, _util.createPromiseCapability)();
         this.streamControllers[streamId] = {
           controller,
           startCall: startCapability,
@@ -44874,7 +44953,8 @@ MessageHandler.prototype = {
           cancelCall: null,
           isClosed: false
         };
-        this.postMessage({
+
+        this._postMessage({
           sourceName,
           targetName,
           action: actionName,
@@ -44882,10 +44962,11 @@ MessageHandler.prototype = {
           data,
           desiredSize: controller.desiredSize
         }, transfers);
+
         return startCapability.promise;
       },
       pull: controller => {
-        let pullCapability = (0, _util.createPromiseCapability)();
+        const pullCapability = (0, _util.createPromiseCapability)();
         this.streamControllers[streamId].pullCall = pullCapability;
         comObj.postMessage({
           sourceName,
@@ -44898,7 +44979,7 @@ MessageHandler.prototype = {
       },
       cancel: reason => {
         (0, _util.assert)(reason instanceof Error, 'cancel must have a valid reason');
-        let cancelCapability = (0, _util.createPromiseCapability)();
+        const cancelCapability = (0, _util.createPromiseCapability)();
         this.streamControllers[streamId].cancelCall = cancelCapability;
         this.streamControllers[streamId].isClosed = true;
         comObj.postMessage({
@@ -44911,24 +44992,22 @@ MessageHandler.prototype = {
         return cancelCapability.promise;
       }
     }, queueingStrategy);
-  },
+  }
 
   _createStreamSink(data) {
-    let self = this;
-    let action = this.actionHandler[data.action];
-    let streamId = data.streamId;
-    let desiredSize = data.desiredSize;
-    let sourceName = this.sourceName;
-    let targetName = data.sourceName;
-    let capability = (0, _util.createPromiseCapability)();
+    const self = this;
+    const action = this.actionHandler[data.action];
+    const streamId = data.streamId;
+    const sourceName = this.sourceName;
+    const targetName = data.sourceName;
     const comObj = this.comObj;
-    let streamSink = {
+    const streamSink = {
       enqueue(chunk, size = 1, transfers) {
         if (this.isCancelled) {
           return;
         }
 
-        let lastDesiredSize = this.desiredSize;
+        const lastDesiredSize = this.desiredSize;
         this.desiredSize -= size;
 
         if (lastDesiredSize > 0 && this.desiredSize <= 0) {
@@ -44936,7 +45015,7 @@ MessageHandler.prototype = {
           this.ready = this.sinkCapability.promise;
         }
 
-        self.postMessage({
+        self._postMessage({
           sourceName,
           targetName,
           stream: StreamKind.ENQUEUE,
@@ -44977,11 +45056,11 @@ MessageHandler.prototype = {
         });
       },
 
-      sinkCapability: capability,
+      sinkCapability: (0, _util.createPromiseCapability)(),
       onPull: null,
       onCancel: null,
       isCancelled: false,
-      desiredSize,
+      desiredSize: data.desiredSize,
       ready: null
     };
     streamSink.sinkCapability.resolve();
@@ -45006,21 +45085,13 @@ MessageHandler.prototype = {
         reason: wrapReason(reason)
       });
     });
-  },
+  }
 
   _processStreamMessage(data) {
-    let sourceName = this.sourceName;
-    let targetName = data.sourceName;
     const streamId = data.streamId;
+    const sourceName = this.sourceName;
+    const targetName = data.sourceName;
     const comObj = this.comObj;
-
-    let deleteStreamController = () => {
-      Promise.all([this.streamControllers[streamId].startCall, this.streamControllers[streamId].pullCall, this.streamControllers[streamId].cancelCall].map(function (capability) {
-        return capability && capability.promise.catch(function () {});
-      })).then(() => {
-        delete this.streamControllers[streamId];
-      });
-    };
 
     switch (data.stream) {
       case StreamKind.START_COMPLETE:
@@ -45101,13 +45172,17 @@ MessageHandler.prototype = {
 
         this.streamControllers[streamId].isClosed = true;
         this.streamControllers[streamId].controller.close();
-        deleteStreamController();
+
+        this._deleteStreamController(streamId);
+
         break;
 
       case StreamKind.ERROR:
         (0, _util.assert)(this.streamControllers[streamId], 'error should have stream controller');
         this.streamControllers[streamId].controller.error(wrapReason(data.reason));
-        deleteStreamController();
+
+        this._deleteStreamController(streamId);
+
         break;
 
       case StreamKind.CANCEL_COMPLETE:
@@ -45117,7 +45192,8 @@ MessageHandler.prototype = {
           this.streamControllers[streamId].cancelCall.reject(wrapReason(data.reason));
         }
 
-        deleteStreamController();
+        this._deleteStreamController(streamId);
+
         break;
 
       case StreamKind.CANCEL:
@@ -45155,21 +45231,30 @@ MessageHandler.prototype = {
       default:
         throw new Error('Unexpected stream case');
     }
-  },
+  }
 
-  postMessage(message, transfers) {
+  async _deleteStreamController(streamId) {
+    await Promise.all([this.streamControllers[streamId].startCall, this.streamControllers[streamId].pullCall, this.streamControllers[streamId].cancelCall].map(function (capability) {
+      return capability && capability.promise.catch(function () {});
+    }));
+    delete this.streamControllers[streamId];
+  }
+
+  _postMessage(message, transfers) {
     if (transfers && this.postMessageTransfers) {
       this.comObj.postMessage(message, transfers);
     } else {
       this.comObj.postMessage(message);
     }
-  },
+  }
 
   destroy() {
     this.comObj.removeEventListener('message', this._onComObjOnMessage);
   }
 
-};
+}
+
+exports.MessageHandler = MessageHandler;
 
 /***/ }),
 /* 48 */

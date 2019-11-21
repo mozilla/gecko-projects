@@ -41,7 +41,7 @@ const rules = {
   HTMLElm: [...ARIARule, { attr: "title" }],
   HTMLImg: [
     ...ARIARule,
-    { attr: "alt", waitFor: EVENT_REORDER },
+    { attr: "alt", waitFor: EVENT_NAME_CHANGE },
     { attr: "title" },
   ],
   HTMLImgEmptyAlt: [...ARIARule, { attr: "title" }, { attr: "alt" }],
@@ -52,13 +52,13 @@ const rules = {
   ],
   HTMLInputImage: [
     ...HTMLControlHeadRule,
-    { attr: "alt" },
+    { attr: "alt", waitFor: EVENT_NAME_CHANGE },
     { attr: "value" },
     { attr: "title" },
   ],
   HTMLInputImageNoValidSrc: [
     ...HTMLControlHeadRule,
-    { attr: "alt" },
+    { attr: "alt", waitFor: EVENT_NAME_CHANGE },
     { attr: "value" },
   ],
   HTMLInputReset: [
@@ -339,12 +339,14 @@ const markupTests = [
     id: "btn",
     ruleset: "CSSContent",
     markup: `
-    <style>
-      button::before {
-        content: "do not ";
-      }
-    </style>
-    <button id="btn">press me</button>`,
+    <div role="main">
+      <style>
+        button::before {
+          content: "do not ";
+        }
+      </style>
+      <button id="btn">press me</button>
+    </div>`,
     expected: ["do not press me", "press me"],
   },
   {
@@ -412,7 +414,7 @@ async function testAttrRule(browser, target, rule, expected) {
       {
         expected: [[waitFor, waitFor === EVENT_REORDER ? parent : id]],
       },
-      ([contentId, contentAttr]) =>
+      (contentId, contentAttr) =>
         content.document.getElementById(contentId).removeAttribute(contentAttr),
       [id, attr]
     );
@@ -447,7 +449,7 @@ async function testElmRule(browser, target, rule, expected) {
       expected: [[EVENT_REORDER, isSibling ? parent : id]],
     },
     contentElm => content.document.querySelector(`${contentElm}`).remove(),
-    elm
+    [elm]
   );
 
   // Update accessible just in case it is now defunct.
@@ -481,7 +483,7 @@ async function testSubtreeRule(browser, target, rule, expected) {
         elm.firstChild.remove();
       }
     },
-    id
+    [id]
   );
 
   // Update accessible just in case it is now defunct.
@@ -514,20 +516,24 @@ async function testNameRule(browser, target, ruleset, expected) {
 }
 
 markupTests.forEach(({ id, ruleset, markup, expected }) =>
-  addAccessibleTask(markup, async function(browser, accDoc) {
-    const observer = {
-      observe(subject, topic, data) {
-        const event = subject.QueryInterface(nsIAccessibleEvent);
-        console.log(eventToString(event));
-      },
-    };
-    Services.obs.addObserver(observer, "accessible-event");
-    // Find a target accessible from an accessible subtree.
-    let acc = findAccessibleChildByID(accDoc, id);
-    // Find target's parent accessible from an accessible subtree.
-    let parent = getAccessibleDOMNodeID(acc.parent);
-    let target = { id, parent, acc };
-    await testNameRule(browser, target, rules[ruleset], expected);
-    Services.obs.removeObserver(observer, "accessible-event");
-  })
+  addAccessibleTask(
+    markup,
+    async function(browser, accDoc) {
+      const observer = {
+        observe(subject, topic, data) {
+          const event = subject.QueryInterface(nsIAccessibleEvent);
+          console.log(eventToString(event));
+        },
+      };
+      Services.obs.addObserver(observer, "accessible-event");
+      // Find a target accessible from an accessible subtree.
+      let acc = findAccessibleChildByID(accDoc, id);
+      // Find target's parent accessible from an accessible subtree.
+      let parent = getAccessibleDOMNodeID(acc.parent);
+      let target = { id, parent, acc };
+      await testNameRule(browser, target, rules[ruleset], expected);
+      Services.obs.removeObserver(observer, "accessible-event");
+    },
+    { iframe: true, remoteIframe: true }
+  )
 );

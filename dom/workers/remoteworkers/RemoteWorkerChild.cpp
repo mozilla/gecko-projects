@@ -14,8 +14,8 @@
 #include "nsIConsoleReportCollector.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIPrincipal.h"
-#include "nsIPermissionManager.h"
 #include "nsNetUtil.h"
+#include "nsPermissionManager.h"
 #include "nsProxyRelease.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
@@ -265,7 +265,6 @@ RemoteWorkerChild::RemoteWorkerChild(const RemoteWorkerData& aData)
 
 RemoteWorkerChild::~RemoteWorkerChild() {
 #ifdef DEBUG
-  MOZ_ASSERT(mTerminationPromise.IsEmpty());
   auto lock = mState.Lock();
   MOZ_ASSERT(lock->is<Terminated>());
 #endif
@@ -416,14 +415,6 @@ nsresult RemoteWorkerChild::ExecWorkerOnMainThread(RemoteWorkerData&& aData) {
     MOZ_ASSERT(!data.id().IsEmpty());
     workerPrivateId = std::move(data.id());
 
-    nsCOMPtr<nsIPermissionManager> permissionManager =
-        services::GetPermissionManager();
-
-    for (auto& keyAndPermissions : data.permissionsByKey()) {
-      permissionManager->SetPermissionsWithKey(keyAndPermissions.key(),
-                                               keyAndPermissions.permissions());
-    }
-
     info.mServiceWorkerCacheName = data.cacheName();
     info.mServiceWorkerDescriptor.emplace(data.descriptor());
     info.mServiceWorkerRegistrationDescriptor.emplace(
@@ -471,9 +462,29 @@ nsresult RemoteWorkerChild::ExecWorkerOnMainThread(RemoteWorkerData&& aData) {
   RefPtr<InitializeWorkerRunnable> runnable =
       new InitializeWorkerRunnable(std::move(workerPrivate), SelfHolder(this));
 
-  if (NS_WARN_IF(!runnable->Dispatch())) {
-    rv = NS_ERROR_FAILURE;
-    return rv;
+  if (mIsServiceWorker) {
+    SelfHolder self = this;
+
+    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
+        __func__, [initializeWorkerRunnable = std::move(runnable),
+                   self = std::move(self)] {
+          if (NS_WARN_IF(!initializeWorkerRunnable->Dispatch())) {
+            self->TransitionStateToTerminated();
+            self->CreationFailedOnAnyThread();
+          }
+        });
+
+    RefPtr<nsPermissionManager> permissionManager =
+        nsPermissionManager::GetInstance();
+    if (!permissionManager) {
+      return NS_ERROR_FAILURE;
+    }
+    permissionManager->WhenPermissionsAvailable(principal, r);
+  } else {
+    if (NS_WARN_IF(!runnable->Dispatch())) {
+      rv = NS_ERROR_FAILURE;
+      return rv;
+    }
   }
 
   scopeExit.release();
@@ -591,7 +602,7 @@ void RemoteWorkerChild::CreationSucceededOrFailedOnAnyThread(
         Unused << self->SendCreated(didCreationSucceed);
       });
 
-  Unused << GetOwningEventTarget()->Dispatch(r.forget(), NS_DISPATCH_NORMAL);
+  GetOwningEventTarget()->Dispatch(r.forget(), NS_DISPATCH_NORMAL);
 }
 
 void RemoteWorkerChild::CloseWorkerOnMainThread(State& aState) {
@@ -759,7 +770,16 @@ void RemoteWorkerChild::TransitionStateToTerminated(State& aState) {
     CancelAllPendingOps(aState);
   }
 
-  mTerminationPromise.ResolveIfExists(true, __func__);
+  if (GetOwningEventTarget()->IsOnCurrentThread()) {
+    mTerminationPromise.ResolveIfExists(true, __func__);
+  } else {
+    SelfHolder self = this;
+    nsCOMPtr<nsIRunnable> r =
+        NS_NewRunnableFunction(__func__, [self = std::move(self)] {
+          self->mTerminationPromise.ResolveIfExists(true, __func__);
+        });
+    GetOwningEventTarget()->Dispatch(r.forget(), NS_DISPATCH_NORMAL);
+  }
 
   aState = VariantType<Terminated>();
 }

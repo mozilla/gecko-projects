@@ -338,7 +338,17 @@ nsresult UrlClassifierCommon::CreatePairwiseWhiteListURI(nsIChannel* aChannel,
   // Craft a whitelist URL like "toplevel.page/?resource=third.party.domain"
   nsAutoCString pageHostname, resourceDomain;
   rv = topWinURI->GetHost(pageHostname);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) {
+    // When the top-level page doesn't support GetHost, for example, about:home,
+    // we don't return an error here; instead, we return success to make sure
+    // that the lookup process calling this API continues to run.
+    UC_LOG(
+        ("CreatePairwiseWhiteListURI: Cannot get host from the top-level "
+         "(channel=%p)",
+         aChannel));
+    return NS_OK;
+  }
+
   rv = chanPrincipal->GetBaseDomain(resourceDomain);
   NS_ENSURE_SUCCESS(rv, rv);
   nsAutoCString whitelistEntry = NS_LITERAL_CSTRING("http://") + pageHostname +
@@ -538,30 +548,41 @@ bool UrlClassifierCommon::IsAllowListed(nsIChannel* aChannel) {
 // static
 bool UrlClassifierCommon::IsTrackingClassificationFlag(uint32_t aFlag) {
   if (StaticPrefs::privacy_annotate_channels_strict_list_enabled() &&
-      (aFlag &
-       nsIHttpChannel::ClassificationFlags::CLASSIFIED_ANY_STRICT_TRACKING)) {
+      (aFlag & nsIClassifiedChannel::ClassificationFlags::
+                   CLASSIFIED_ANY_STRICT_TRACKING)) {
     return true;
   }
 
   if (StaticPrefs::privacy_socialtracking_block_cookies_enabled() &&
-      (aFlag &
-       nsIHttpChannel::ClassificationFlags::CLASSIFIED_ANY_SOCIAL_TRACKING)) {
+      IsSocialTrackingClassificationFlag(aFlag)) {
     return true;
   }
 
-  return (aFlag &
-          nsIHttpChannel::ClassificationFlags::CLASSIFIED_ANY_BASIC_TRACKING);
+  return (
+      aFlag &
+      nsIClassifiedChannel::ClassificationFlags::CLASSIFIED_ANY_BASIC_TRACKING);
+}
+
+// static
+bool UrlClassifierCommon::IsSocialTrackingClassificationFlag(uint32_t aFlag) {
+  if (aFlag & nsIClassifiedChannel::ClassificationFlags::
+                  CLASSIFIED_ANY_SOCIAL_TRACKING) {
+    return true;
+  }
+
+  return false;
 }
 
 // static
 bool UrlClassifierCommon::IsCryptominingClassificationFlag(uint32_t aFlag) {
-  if (aFlag & nsIHttpChannel::ClassificationFlags::CLASSIFIED_CRYPTOMINING) {
+  if (aFlag &
+      nsIClassifiedChannel::ClassificationFlags::CLASSIFIED_CRYPTOMINING) {
     return true;
   }
 
   if (StaticPrefs::privacy_annotate_channels_strict_list_enabled() &&
-      (aFlag &
-       nsIHttpChannel::ClassificationFlags::CLASSIFIED_CRYPTOMINING_CONTENT)) {
+      (aFlag & nsIClassifiedChannel::ClassificationFlags::
+                   CLASSIFIED_CRYPTOMINING_CONTENT)) {
     return true;
   }
 

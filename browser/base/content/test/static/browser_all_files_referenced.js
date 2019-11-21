@@ -172,7 +172,7 @@ var whitelist = [
   // Bug 1356031 (only used by devtools)
   { file: "chrome://global/skin/icons/error-16.png" },
   // Bug 1344267
-  { file: "chrome://marionette/content/test_anonymous_content.xul" },
+  { file: "chrome://marionette/content/test.xul" },
   { file: "chrome://marionette/content/test_dialog.properties" },
   { file: "chrome://marionette/content/test_dialog.xul" },
   // Bug 1348533
@@ -243,9 +243,6 @@ const ignorableWhitelist = new Set([
 
   // Bug 1351669 - obsolete test file
   "resource://gre/res/test.properties",
-
-  // Bug 1532703
-  "resource://app/localization/en-US/browser/aboutConfig.ftl",
 ]);
 for (let entry of ignorableWhitelist) {
   whitelist.add(entry);
@@ -267,11 +264,6 @@ if (!isDevtools) {
   ]) {
     whitelist.add("resource://services-sync/engines/" + module);
   }
-}
-
-if (!AppConstants.NIGHTLY_BUILD && !isDevtools) {
-  // Bug 1532703 - only used in HTML-based about:config
-  whitelist.add("chrome://browser/skin/toggle.svg");
 }
 
 if (AppConstants.MOZ_CODE_COVERAGE) {

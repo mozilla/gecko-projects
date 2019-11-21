@@ -51,6 +51,11 @@ interface nsINetworkLinkService : nsISupports
    * Empty when there are no active network interfaces.
    */
   readonly attribute ACString networkID;
+
+  /**
+   * The list of DNS suffixes for the currently active network interfaces.
+   */
+  readonly attribute Array<ACString> dnsSuffixList;
 };
 
 %{C++
@@ -79,6 +84,11 @@ interface nsINetworkLinkService : nsISupports
  * linkStatusKnown is now false.
  */
 #define NS_NETWORK_LINK_DATA_UNKNOWN "unknown"
+
+/**
+ * network ID has changed.
+ */
+#define NS_NETWORK_ID_CHANGED_TOPIC "network:networkid-changed"
 
 /**
  * We send notifications through nsIObserverService with topic

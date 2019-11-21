@@ -6,57 +6,42 @@
 // Test that we get the magic properties on Error objects.
 
 var gDebuggee;
-var gClient;
 var gThreadFront;
 
-Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
+add_task(
+  threadFrontTest(
+    async ({ threadFront, debuggee }) => {
+      gThreadFront = threadFront;
+      gDebuggee = debuggee;
+      test_object_grip();
+    },
+    { waitForFinish: true }
+  )
+);
 
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-});
+function test_object_grip() {
+  gThreadFront.once("paused", async function(packet) {
+    const args = packet.frame.arguments;
 
-function run_test() {
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-grips");
+    const objClient = gThreadFront.pauseGrip(args[0]);
+    const response = await objClient.getOwnPropertyNames();
+    const opn = response.ownPropertyNames;
+    Assert.equal(opn.length, 4);
+    opn.sort();
+    Assert.equal(opn[0], "columnNumber");
+    Assert.equal(opn[1], "fileName");
+    Assert.equal(opn[2], "lineNumber");
+    Assert.equal(opn[3], "message");
+
+    await gThreadFront.resume();
+    threadFrontTestFinished();
+  });
+
   gDebuggee.eval(
     function stopMe(arg1) {
       debugger;
     }.toString()
   );
-
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-grips", function(
-      response,
-      targetFront,
-      threadFront
-    ) {
-      gThreadFront = threadFront;
-      test_object_grip();
-    });
-  });
-  do_test_pending();
-}
-
-function test_object_grip() {
-  gThreadFront.once("paused", function(packet) {
-    const args = packet.frame.arguments;
-
-    const objClient = gThreadFront.pauseGrip(args[0]);
-    objClient.getOwnPropertyNames(function(response) {
-      const opn = response.ownPropertyNames;
-      Assert.equal(opn.length, 4);
-      opn.sort();
-      Assert.equal(opn[0], "columnNumber");
-      Assert.equal(opn[1], "fileName");
-      Assert.equal(opn[2], "lineNumber");
-      Assert.equal(opn[3], "message");
-
-      gThreadFront.resume().then(function() {
-        finishClient(gClient);
-      });
-    });
-  });
 
   gDebuggee.eval("stopMe(new TypeError('error message text'))");
 }

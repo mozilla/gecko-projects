@@ -109,7 +109,7 @@ class MozbuildObject(ProcessExecutionMixin):
         self._virtualenv_manager = None
 
     @classmethod
-    def from_environment(cls, cwd=None, detect_virtualenv_mozinfo=True):
+    def from_environment(cls, cwd=None, detect_virtualenv_mozinfo=True, **kwargs):
         """Create a MozbuildObject by detecting the proper one from the env.
 
         This examines environment state like the current working directory and
@@ -186,7 +186,7 @@ class MozbuildObject(ProcessExecutionMixin):
         # If we can't resolve topobjdir, oh well. We'll figure out when we need
         # one.
         return cls(topsrcdir, None, None, topobjdir=topobjdir,
-                   mozconfig=mozconfig)
+                   mozconfig=mozconfig, **kwargs)
 
     def resolve_mozconfig_topobjdir(self, default=None):
         topobjdir = self.mozconfig['topobjdir'] or default
@@ -956,6 +956,12 @@ class MachCommandConditions(object):
     def is_firefox_or_android(cls):
         """Must have a Firefox or Android build."""
         return MachCommandConditions.is_firefox(cls) or MachCommandConditions.is_android(cls)
+
+    @staticmethod
+    def has_build(cls):
+        """Must have a build."""
+        return (MachCommandConditions.is_firefox_or_android(cls) or
+                MachCommandConditions.is_thunderbird(cls))
 
     @staticmethod
     def is_hg(cls):

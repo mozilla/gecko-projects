@@ -33,20 +33,19 @@
 }
 
 /* hide the content, but don't destroy the frames */
-[collapsed="true"],
-[moz-collapsed="true"] {
+[collapsed="true"] {
   visibility: collapse;
 }
 
 /* Rules required for style caching of anonymous content scrollbar parts */
-
 scrollcorner, resizer, scrollbar, scrollbarbutton, slider {
   /* All scrollbar parts must not inherit any properties from the scrollable
-   * element (except for visibility), for the anonymous content style caching
-   * system to work.
+   * element (except for visibility and pointer-events), for the anonymous
+   * content style caching system to work.
    */
   all: initial;
   visibility: inherit;
+  pointer-events: inherit;
 
   /* These properties are not included in 'all'. */
   -moz-list-reversed: initial;
@@ -73,6 +72,11 @@ scrollcorner, resizer, scrollbar, scrollbarbutton, slider {
    */
   justify-items: start;
 
+  /* Avoid `object > *` rule in html.css from setting a useless, non-initial
+   * value of vertical-align.
+   */
+  vertical-align: initial !important;
+
   /* Duplicate the rules from the '*' rule above, which were clobbered by the
    * 'all: initial' declaration.
    *
@@ -85,10 +89,19 @@ scrollcorner, resizer, scrollbar, scrollbarbutton, slider {
   box-sizing: border-box;
 }
 
+scrollbar[orient="vertical"],
+slider[orient="vertical"],
+thumb[orient="vertical"] {
+  -moz-box-orient: vertical;
+}
+
 thumb {
   /* Prevent -moz-user-modify declaration from designmode.css having an
    * effect. */
   -moz-user-modify: initial;
+
+  -moz-box-align: center;
+  -moz-box-pack: center;
 }
 
 /* There are other rules that set direction and cursor on scrollbar,

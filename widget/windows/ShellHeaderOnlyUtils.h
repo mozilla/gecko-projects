@@ -126,10 +126,11 @@ inline LauncherVoidResult ShellExecuteByExplorer(const _bstr_t& aPath,
   }
 
   // Passing the foreground privilege so that the shell can launch an
-  // application in the foreground.  If CoAllowSetForegroundWindow fails,
-  // we continue because it's not fatal.
+  // application in the foreground.  This fails with E_ACCESSDENIED if the
+  // current window is shown in the background.  We keep a soft assert for
+  // the other failures to investigate how it happened.
   hr = ::CoAllowSetForegroundWindow(shellDisp, nullptr);
-  MOZ_ASSERT(SUCCEEDED(hr));
+  MOZ_ASSERT(SUCCEEDED(hr) || hr == E_ACCESSDENIED);
 
   // shellapi.h macros interfere with the correct naming of the method being
   // called on IShellDispatch2. Temporarily remove that definition.
@@ -139,7 +140,7 @@ inline LauncherVoidResult ShellExecuteByExplorer(const _bstr_t& aPath,
 #endif  // defined(ShellExecute)
 
   // 4. Now call IShellDispatch2::ShellExecute to ask Explorer to execute.
-  hr = shellDisp->ShellExecute(aPath, aArgs, aVerb, aWorkingDir, aShowCmd);
+  hr = shellDisp->ShellExecute(aPath, aArgs, aWorkingDir, aVerb, aShowCmd);
   if (FAILED(hr)) {
     return LAUNCHER_ERROR_FROM_HRESULT(hr);
   }

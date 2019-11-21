@@ -8,24 +8,24 @@
 #define mozilla_dom_HTMLInputElement_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Decimal.h"
+#include "mozilla/TextControlState.h"
+#include "mozilla/UniquePtr.h"
+#include "mozilla/Variant.h"
+#include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/HTMLFormElement.h"  // for HasEverTriedInvalidSubmit()
+#include "mozilla/dom/HTMLInputElementBinding.h"
+#include "mozilla/dom/Promise.h"
+#include "mozilla/dom/UnionTypes.h"
 #include "nsGenericHTMLElement.h"
 #include "nsImageLoadingContent.h"
 #include "nsITextControlElement.h"
 #include "nsITimer.h"
 #include "nsCOMPtr.h"
 #include "nsIConstraintValidation.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/dom/BindingDeclarations.h"
-#include "mozilla/dom/HTMLFormElement.h"  // for HasEverTriedInvalidSubmit()
-#include "mozilla/dom/HTMLInputElementBinding.h"
-#include "mozilla/dom/Promise.h"
-#include "mozilla/dom/UnionTypes.h"
 #include "nsIFilePicker.h"
 #include "nsIContentPrefService2.h"
-#include "mozilla/Decimal.h"
 #include "nsContentUtils.h"
-#include "nsTextEditorState.h"
-#include "mozilla/Variant.h"
 #include "SingleLineTextInputTypes.h"
 #include "NumericInputTypes.h"
 #include "CheckableInputTypes.h"
@@ -226,10 +226,13 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   NS_IMETHOD_(bool) ValueChanged() const override;
   NS_IMETHOD_(void)
   GetTextEditorValue(nsAString& aValue, bool aIgnoreWrap) const override;
-  NS_IMETHOD_(mozilla::TextEditor*) GetTextEditor() override;
-  NS_IMETHOD_(mozilla::TextEditor*) GetTextEditorWithoutCreation() override;
+  NS_IMETHOD_(TextEditor*) GetTextEditor() override;
+  NS_IMETHOD_(TextEditor*) GetTextEditorWithoutCreation() override;
   NS_IMETHOD_(nsISelectionController*) GetSelectionController() override;
   NS_IMETHOD_(nsFrameSelection*) GetConstFrameSelection() override;
+  NS_IMETHOD_(TextControlState*) GetTextControlState() const override {
+    return GetEditorState();
+  }
   NS_IMETHOD BindToFrame(nsTextControlFrame* aFrame) override;
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   NS_IMETHOD_(void) UnbindFromFrame(nsTextControlFrame* aFrame) override;
@@ -314,7 +317,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
     MOZ_ASSERT(mType == NS_FORM_INPUT_NUMBER);
     mSelectionCached = false;
   }
-  nsTextEditorState::SelectionProperties& GetSelectionProperties() {
+  TextControlState::SelectionProperties& GetSelectionProperties() {
     MOZ_ASSERT(mType == NS_FORM_INPUT_NUMBER);
     return mSelectionProperties;
   }
@@ -846,8 +849,6 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   void UpdateEntries(
       const nsTArray<OwningFileOrDirectory>& aFilesOrDirectories);
 
-  static void Shutdown();
-
   /**
    * Returns if the required attribute applies for the current type.
    */
@@ -921,7 +922,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
    * @param aValue      String to set.
    * @param aOldValue   Previous value before setting aValue.
                         If previous value is unknown, aOldValue can be nullptr.
-   * @param aFlags      See nsTextEditorState::SetValueFlags.
+   * @param aFlags      See TextControlState::SetValueFlags.
    */
   MOZ_CAN_RUN_SCRIPT
   nsresult SetValueInternal(const nsAString& aValue, const nsAString* aOldValue,
@@ -1085,7 +1086,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   bool DoesAutocompleteApply() const;
 
   void FreeData();
-  nsTextEditorState* GetEditorState() const;
+  TextControlState* GetEditorState() const;
 
   mozilla::TextEditor* GetTextEditorFromState();
 
@@ -1456,7 +1457,7 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
     /**
      * The state of the text editor associated with the text/password input
      */
-    nsTextEditorState* mState;
+    TextControlState* mState;
   } mInputData;
 
   struct FileData;
@@ -1488,9 +1489,9 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
   /**
    * The selection properties cache for number controls.  This is needed because
    * the number controls don't recycle their text field, so the normal cache in
-   * nsTextEditorState cannot do its job.
+   * TextControlState cannot do its job.
    */
-  nsTextEditorState::SelectionProperties mSelectionProperties;
+  TextControlState::SelectionProperties mSelectionProperties;
 
   /**
    * The triggering principal for the src attribute.
@@ -1660,11 +1661,6 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
     nsCOMPtr<nsIFilePicker> mFilePicker;
     RefPtr<HTMLInputElement> mInput;
   };
-
-  static void ReleaseTextEditorState(nsTextEditorState* aState);
-
-  static nsTextEditorState* sCachedTextEditorState;
-  static bool sShutdown;
 };
 
 }  // namespace dom

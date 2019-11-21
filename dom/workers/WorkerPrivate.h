@@ -695,6 +695,9 @@ class WorkerPrivate : public RelativeTimeline {
   }
 
   bool UsesSystemPrincipal() const { return mLoadInfo.mPrincipalIsSystem; }
+  bool UsesAddonOrExpandedAddonPrincipal() const {
+    return mLoadInfo.mPrincipalIsAddonOrExpandedAddon;
+  }
 
   const mozilla::ipc::PrincipalInfo& GetPrincipalInfo() const {
     return *mLoadInfo.mPrincipalInfo;
@@ -893,11 +896,10 @@ class WorkerPrivate : public RelativeTimeline {
 
   const nsID& AgentClusterId() const { return mAgentClusterId; }
 
-  bool CanShareMemory(const nsID& aAgentClusterId);
+  bool IsSharedMemoryAllowed() const;
 
-  nsILoadInfo::CrossOriginOpenerPolicy AgentClusterOpenerPolicy() {
-    return mAgentClusterOpenerPolicy;
-  }
+  // https://whatpr.org/html/4734/structured-data.html#cross-origin-isolated
+  bool CrossOriginIsolated() const;
 
  private:
   WorkerPrivate(

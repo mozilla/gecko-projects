@@ -75,26 +75,31 @@ class NewRenderer : public RendererEvent {
     bool supportLowPriorityTransactions = isMainWindow;
     bool supportPictureCaching = isMainWindow;
     wr::Renderer* wrRenderer = nullptr;
-    if (!wr_window_new(aWindowId, mSize.width, mSize.height,
-                       supportLowPriorityTransactions, allow_texture_swizzling,
-                       StaticPrefs::gfx_webrender_picture_caching() &&
-                           supportPictureCaching,
+    if (!wr_window_new(
+            aWindowId, mSize.width, mSize.height,
+            supportLowPriorityTransactions, allow_texture_swizzling,
+            StaticPrefs::gfx_webrender_picture_caching() &&
+                supportPictureCaching,
 #ifdef NIGHTLY_BUILD
-                       StaticPrefs::gfx_webrender_start_debug_server(),
+            StaticPrefs::gfx_webrender_start_debug_server(),
 #else
-                       false,
+            false,
 #endif
-                       compositor->gl(),
-                       aRenderThread.GetProgramCache()
-                           ? aRenderThread.GetProgramCache()->Raw()
-                           : nullptr,
-                       aRenderThread.GetShaders()
-                           ? aRenderThread.GetShaders()->RawShaders()
-                           : nullptr,
-                       aRenderThread.ThreadPool().Raw(), &WebRenderMallocSizeOf,
-                       &WebRenderMallocEnclosingSizeOf,
-                       (uint32_t)wr::RenderRoot::Default, mDocHandle,
-                       &wrRenderer, mMaxTextureSize)) {
+            compositor->gl(), compositor->SurfaceOriginIsTopLeft(),
+            aRenderThread.GetProgramCache()
+                ? aRenderThread.GetProgramCache()->Raw()
+                : nullptr,
+            aRenderThread.GetShaders()
+                ? aRenderThread.GetShaders()->RawShaders()
+                : nullptr,
+            aRenderThread.ThreadPool().Raw(), &WebRenderMallocSizeOf,
+            &WebRenderMallocEnclosingSizeOf, (uint32_t)wr::RenderRoot::Default,
+            compositor->ShouldUseNativeCompositor() ? compositor.get()
+                                                    : nullptr,
+            compositor->GetMaxUpdateRects(),
+            compositor->GetMaxPartialPresentRects(), mDocHandle, &wrRenderer,
+            mMaxTextureSize,
+            StaticPrefs::gfx_webrender_enable_gpu_markers_AtStartup())) {
       // wr_window_new puts a message into gfxCriticalNote if it returns false
       return;
     }
@@ -584,6 +589,10 @@ void WebRenderAPI::Capture() {
   wr_api_capture(mDocHandle, path, bits);
 }
 
+void WebRenderAPI::SetTransactionLogging(bool aValue) {
+  wr_api_set_transaction_logging(mDocHandle, aValue);
+}
+
 void WebRenderAPI::SetCompositionRecorder(
     UniquePtr<layers::WebRenderCompositionRecorder> aRecorder) {
   class SetCompositionRecorderEvent final : public RendererEvent {
@@ -613,7 +622,8 @@ void WebRenderAPI::SetCompositionRecorder(
   RunOnRenderThread(std::move(event));
 }
 
-void WebRenderAPI::WriteCollectedFrames() {
+RefPtr<WebRenderAPI::WriteCollectedFramesPromise>
+WebRenderAPI::WriteCollectedFrames() {
   class WriteCollectedFramesEvent final : public RendererEvent {
    public:
     explicit WriteCollectedFramesEvent() {
@@ -624,11 +634,58 @@ void WebRenderAPI::WriteCollectedFrames() {
 
     void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
       aRenderThread.WriteCollectedFramesForWindow(aWindowId);
+      mPromise.Resolve(true, __func__);
     }
+
+    RefPtr<WebRenderAPI::WriteCollectedFramesPromise> GetPromise() {
+      return mPromise.Ensure(__func__);
+    }
+
+   private:
+    MozPromiseHolder<WebRenderAPI::WriteCollectedFramesPromise> mPromise;
   };
 
   auto event = MakeUnique<WriteCollectedFramesEvent>();
+  auto promise = event->GetPromise();
+
   RunOnRenderThread(std::move(event));
+  return promise;
+}
+
+RefPtr<WebRenderAPI::GetCollectedFramesPromise>
+WebRenderAPI::GetCollectedFrames() {
+  class GetCollectedFramesEvent final : public RendererEvent {
+   public:
+    explicit GetCollectedFramesEvent() {
+      MOZ_COUNT_CTOR(GetCollectedFramesEvent);
+    }
+
+    ~GetCollectedFramesEvent() { MOZ_COUNT_DTOR(GetCollectedFramesEvent); };
+
+    void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+      Maybe<layers::CollectedFrames> frames =
+          aRenderThread.GetCollectedFramesForWindow(aWindowId);
+
+      if (frames) {
+        mPromise.Resolve(std::move(*frames), __func__);
+      } else {
+        mPromise.Reject(NS_ERROR_UNEXPECTED, __func__);
+      }
+    }
+
+    RefPtr<WebRenderAPI::GetCollectedFramesPromise> GetPromise() {
+      return mPromise.Ensure(__func__);
+    }
+
+   private:
+    MozPromiseHolder<WebRenderAPI::GetCollectedFramesPromise> mPromise;
+  };
+
+  auto event = MakeUnique<GetCollectedFramesEvent>();
+  auto promise = event->GetPromise();
+
+  RunOnRenderThread(std::move(event));
+  return promise;
 }
 
 void TransactionBuilder::Clear() { wr_resource_updates_clear(mTxn); }

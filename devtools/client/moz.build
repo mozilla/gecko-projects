@@ -22,13 +22,13 @@ DIRS += [
     'performance-new',
     'preferences',
     'responsive',
-    'scratchpad',
     'shared',
     'storage',
     'styleeditor',
     'themes',
     'webconsole',
     'webreplay',
+    'whats-new',
 ]
 
 JAR_MANIFESTS += ['jar.mn']
@@ -37,6 +37,11 @@ DevToolsModules(
     'definitions.js',
     'menus.js',
 )
+
+if not CONFIG['MOZILLA_OFFICIAL']:
+    DevToolsModules(
+        'devtools-fission-prefs.js',
+    )
 
 with Files('**'):
     BUG_COMPONENT = ('DevTools', 'General')

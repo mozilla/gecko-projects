@@ -1,5 +1,6 @@
 "use strict";
 
+const { NodeServer } = ChromeUtils.import("resource://testing-common/httpd.js");
 const dns = Cc["@mozilla.org/network/dns-service;1"].getService(
   Ci.nsIDNSService
 );
@@ -57,6 +58,9 @@ add_task(function setup() {
   Services.prefs.setBoolPref("network.trr.wait-for-A-and-AAAA", true);
   // don't confirm that TRR is working, just go!
   Services.prefs.setCharPref("network.trr.confirmationNS", "skip");
+  // some tests rely on the cache not being cleared on pref change.
+  // we specifically test that this works
+  Services.prefs.setBoolPref("network.trr.clear-cache-on-pref-change", false);
 
   // The moz-http2 cert is for foo.example.com and is signed by http2-ca.pem
   // so add that cert to the trust list as a signing cert.  // the foo.example.com domain name.
@@ -86,6 +90,7 @@ registerCleanupFunction(() => {
   Services.prefs.clearUserPref("network.trr.wait-for-A-and-AAAA");
   Services.prefs.clearUserPref("network.trr.excluded-domains");
   Services.prefs.clearUserPref("network.trr.builtin-excluded-domains");
+  Services.prefs.clearUserPref("network.trr.clear-cache-on-pref-change");
   Services.prefs.clearUserPref("captivedetect.canonicalURL");
 
   Services.prefs.clearUserPref("network.http.spdy.enabled");
@@ -139,6 +144,26 @@ class DNSListener {
     return this.promise.then.apply(this.promise, arguments);
   }
 }
+
+Cu.importGlobalProperties(["fetch"]);
+
+add_task(async function test0_nodeExecute() {
+  // This test checks that moz-http2.js running in node is working.
+  // This should always be the first test in this file (except for setup)
+  // otherwise we may encounter random failures when the http2 server is down.
+
+  let env = Cc["@mozilla.org/process/environment;1"].getService(
+    Ci.nsIEnvironment
+  );
+  let execPort = env.get("MOZNODE_EXEC_PORT");
+  await fetch(`http://127.0.0.1:${execPort}/test`)
+    .then(response => {
+      ok(true, "NodeServer is working");
+    })
+    .catch(e => {
+      ok(false, `There was an error ${e}`);
+    });
+});
 
 // verify basic A record
 add_task(async function test1() {
@@ -235,9 +260,9 @@ add_task(async function test5b() {
     "network.trr.uri",
     `https://foo.example.com:${h2Port}/404`
   );
-  dump("test5b - resolve push.example.now please\n");
+  dump("test5b - resolve push.example.org please\n");
 
-  await new DNSListener("push.example.com", "2018::2018");
+  await new DNSListener("push.example.org", "2018::2018");
 });
 
 // verify AAAA entry
@@ -1041,4 +1066,64 @@ add_task(async function test_connection_closed_trr_first() {
   await new DNSListener("closeme.com", "127.0.0.1");
   // TRR should be back up again
   await new DNSListener("bar2.example.com", "9.9.9.9");
+});
+
+add_task(async function test_clearCacheOnURIChange() {
+  dns.clearCache(true);
+  Services.prefs.setBoolPref("network.trr.clear-cache-on-pref-change", true);
+  Services.prefs.setIntPref("network.trr.mode", 2); // TRR-first
+  Services.prefs.setCharPref(
+    "network.trr.uri",
+    `https://localhost:${h2Port}/doh?responseIP=7.7.7.7`
+  );
+
+  await new DNSListener("bar.example.com", "7.7.7.7");
+
+  // The TRR cache should be cleared by this pref change.
+  Services.prefs.setCharPref(
+    "network.trr.uri",
+    `https://localhost:${h2Port}/doh?responseIP=8.8.8.8`
+  );
+
+  await new DNSListener("bar.example.com", "8.8.8.8");
+  Services.prefs.setBoolPref("network.trr.clear-cache-on-pref-change", false);
+});
+
+add_task(async function test_dnsSuffix() {
+  async function checkDnsSuffixInMode(mode) {
+    dns.clearCache(true);
+    Services.prefs.setIntPref("network.trr.mode", mode);
+    Services.prefs.setCharPref(
+      "network.trr.uri",
+      `https://foo.example.com:${h2Port}/doh?responseIP=1.2.3.4&push=true`
+    );
+    await new DNSListener("example.org", "1.2.3.4");
+    await new DNSListener("push.example.org", "2018::2018");
+
+    let networkLinkService = {
+      dnsSuffixList: ["example.org"],
+      QueryInterface: ChromeUtils.generateQI([Ci.nsINetworkLinkService]),
+    };
+    Services.obs.notifyObservers(
+      networkLinkService,
+      "network:link-status-changed",
+      "changed"
+    );
+    await new DNSListener("example.org", "127.0.0.1");
+    // Also test that we don't use the pushed entry.
+    await new DNSListener("push.example.org", "127.0.0.1");
+
+    // Attempt to clean up, just in case
+    networkLinkService.dnsSuffixList = [];
+    Services.obs.notifyObservers(
+      networkLinkService,
+      "network:link-status-changed",
+      "changed"
+    );
+  }
+
+  await checkDnsSuffixInMode(2);
+  Services.prefs.setCharPref("network.trr.bootstrapAddress", "127.0.0.1");
+  await checkDnsSuffixInMode(3);
+  Services.prefs.clearUserPref("network.trr.bootstrapAddress");
 });

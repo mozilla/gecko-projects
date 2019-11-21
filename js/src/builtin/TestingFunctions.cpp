@@ -164,6 +164,10 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
+  if (!JS_SetProperty(cx, info, "oom-backtraces", FalseHandleValue)) {
+    return false;
+  }
+
   RootedValue value(cx);
 #ifdef DEBUG
   value = BooleanValue(true);
@@ -243,6 +247,15 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
   value = BooleanValue(false);
 #endif
   if (!JS_SetProperty(cx, info, "android", value)) {
+    return false;
+  }
+
+#ifdef XP_WIN
+  value = BooleanValue(true);
+#else
+  value = BooleanValue(false);
+#endif
+  if (!JS_SetProperty(cx, info, "windows", value)) {
     return false;
   }
 
@@ -372,15 +385,6 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#ifdef JS_OOM_DO_BACKTRACES
-  value = BooleanValue(true);
-#else
-  value = BooleanValue(false);
-#endif
-  if (!JS_SetProperty(cx, info, "oom-backtraces", value)) {
-    return false;
-  }
-
 #ifdef ENABLE_TYPED_OBJECTS
   value = BooleanValue(true);
 #else
@@ -468,13 +472,26 @@ static bool GC(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  bool shrinking = false;
+  JSGCInvocationKind gckind = GC_NORMAL;
+  JS::GCReason reason = JS::GCReason::API;
   if (args.length() >= 2) {
     Value arg = args[1];
     if (arg.isString()) {
+      bool shrinking = false;
+      bool last_ditch = false;
       if (!JS_StringEqualsLiteral(cx, arg.toString(), "shrinking",
                                   &shrinking)) {
         return false;
+      }
+      if (!JS_StringEqualsLiteral(cx, arg.toString(), "last-ditch",
+                                  &last_ditch)) {
+        return false;
+      }
+      if (shrinking) {
+        gckind = GC_SHRINK;
+      } else if (last_ditch) {
+        gckind = GC_SHRINK;
+        reason = JS::GCReason::LAST_DITCH;
       }
     }
   }
@@ -489,8 +506,7 @@ static bool GC(JSContext* cx, unsigned argc, Value* vp) {
     JS::PrepareForFullGC(cx);
   }
 
-  JSGCInvocationKind gckind = shrinking ? GC_SHRINK : GC_NORMAL;
-  JS::NonIncrementalGC(cx, gckind, JS::GCReason::API);
+  JS::NonIncrementalGC(cx, gckind, reason);
 
   char buf[256] = {'\0'};
 #ifndef JS_MORE_DETERMINISTIC
@@ -570,8 +586,8 @@ static bool GCParameter(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  JSFlatString* flatStr = JS_FlattenString(cx, str);
-  if (!flatStr) {
+  JSLinearString* linearStr = JS_EnsureLinearString(cx, str);
+  if (!linearStr) {
     return false;
   }
 
@@ -582,7 +598,7 @@ static bool GCParameter(JSContext* cx, unsigned argc, Value* vp) {
           cx, "the first argument must be one of:" GC_PARAMETER_ARGS_LIST);
       return false;
     }
-    if (JS_FlatStringEqualsAscii(flatStr, paramMap[paramIndex].name)) {
+    if (JS_LinearStringEqualsAscii(linearStr, paramMap[paramIndex].name)) {
       break;
     }
   }
@@ -630,13 +646,7 @@ static bool GCParameter(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  bool ok;
-  {
-    JSRuntime* rt = cx->runtime();
-    AutoLockGC lock(rt);
-    ok = rt->gc.setParameter(param, value, lock);
-  }
-
+  bool ok = cx->runtime()->gc.setParameter(param, value);
   if (!ok) {
     JS_ReportErrorASCII(cx, "Parameter value out of range");
     return false;
@@ -839,6 +849,8 @@ static bool WasmTextToBinary(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
+  size_t textLen = args[0].toString()->length();
+
   AutoStableStringChars twoByteChars(cx);
   if (!twoByteChars.initTwoByte(cx, args[0].toString())) {
     return false;
@@ -859,8 +871,8 @@ static bool WasmTextToBinary(JSContext* cx, unsigned argc, Value* vp) {
   wasm::Bytes bytes;
   UniqueChars error;
   wasm::Uint32Vector offsets;
-  if (!wasm::TextToBinary(twoByteChars.twoByteChars(), stackLimit, &bytes,
-                          &offsets, &error)) {
+  if (!wasm::TextToBinary(twoByteChars.twoByteChars(), textLen, stackLimit,
+                          &bytes, &offsets, &error)) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_WASM_TEXT_FAIL,
                               error.get() ? error.get() : "out of memory");
@@ -1110,13 +1122,13 @@ static bool InternalConst(JSContext* cx, unsigned argc, Value* vp) {
   if (!str) {
     return false;
   }
-  JSFlatString* flat = JS_FlattenString(cx, str);
-  if (!flat) {
+  JSLinearString* linear = JS_EnsureLinearString(cx, str);
+  if (!linear) {
     return false;
   }
 
-  if (JS_FlatStringEqualsLiteral(flat,
-                                 "INCREMENTAL_MARK_STACK_BASE_CAPACITY")) {
+  if (JS_LinearStringEqualsLiteral(linear,
+                                   "INCREMENTAL_MARK_STACK_BASE_CAPACITY")) {
     args.rval().setNumber(uint32_t(js::INCREMENTAL_MARK_STACK_BASE_CAPACITY));
   } else {
     JS_ReportErrorASCII(cx, "unknown const name");
@@ -1833,17 +1845,15 @@ static bool SetTestFilenameValidationCallback(JSContext* cx, unsigned argc,
   return true;
 }
 
-static void FinalizeExternalString(const JSStringFinalizer* fin,
-                                   char16_t* chars);
+struct TestExternalString : public JSExternalStringCallbacks {
+  void finalize(char16_t* chars) const override { js_free(chars); }
+  size_t sizeOfBuffer(const char16_t* chars,
+                      mozilla::MallocSizeOf mallocSizeOf) const override {
+    return mallocSizeOf(chars);
+  }
+};
 
-static const JSStringFinalizer ExternalStringFinalizer = {
-    FinalizeExternalString};
-
-static void FinalizeExternalString(const JSStringFinalizer* fin,
-                                   char16_t* chars) {
-  MOZ_ASSERT(fin == &ExternalStringFinalizer);
-  js_free(chars);
-}
+static constexpr TestExternalString TestExternalStringCallbacks;
 
 static bool NewExternalString(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
@@ -1867,7 +1877,7 @@ static bool NewExternalString(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   JSString* res =
-      JS_NewExternalString(cx, buf.get(), len, &ExternalStringFinalizer);
+      JS_NewExternalString(cx, buf.get(), len, &TestExternalStringCallbacks);
   if (!res) {
     return false;
   }
@@ -1900,7 +1910,7 @@ static bool NewMaybeExternalString(JSContext* cx, unsigned argc, Value* vp) {
 
   bool allocatedExternal;
   JSString* res = JS_NewMaybeExternalString(
-      cx, buf.get(), len, &ExternalStringFinalizer, &allocatedExternal);
+      cx, buf.get(), len, &TestExternalStringCallbacks, &allocatedExternal);
   if (!res) {
     return false;
   }
@@ -1968,21 +1978,21 @@ static bool IsRope(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-static bool EnsureFlatString(JSContext* cx, unsigned argc, Value* vp) {
+static bool EnsureLinearString(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
   if (args.length() != 1 || !args[0].isString()) {
-    JS_ReportErrorASCII(cx,
-                        "ensureFlatString takes exactly one string argument.");
+    JS_ReportErrorASCII(
+        cx, "ensureLinearString takes exactly one string argument.");
     return false;
   }
 
-  JSFlatString* flat = args[0].toString()->ensureFlat(cx);
-  if (!flat) {
+  JSLinearString* linear = args[0].toString()->ensureLinear(cx);
+  if (!linear) {
     return false;
   }
 
-  args.rval().setString(flat);
+  args.rval().setString(linear);
   return true;
 }
 
@@ -2150,6 +2160,12 @@ bool RunIterativeFailureTest(JSContext* cx,
 #  ifdef JS_GC_ZEAL
   JS_SetGCZeal(cx, 0, JS_DEFAULT_ZEAL_FREQ);
 #  endif
+
+  // Delazify the function here if necessary so we don't end up testing that.
+  if (params.testFunction->isInterpreted() &&
+      !JSFunction::getOrCreateScript(cx, params.testFunction)) {
+    return false;
+  }
 
   size_t compartmentCount = CountCompartments(cx);
 
@@ -3439,6 +3455,7 @@ static bool Deserialize(JSContext* cx, unsigned argc, Value* vp) {
   Rooted<CloneBufferObject*> obj(cx,
                                  &args[0].toObject().as<CloneBufferObject>());
 
+  JS::CloneDataPolicy policy;
   JS::StructuredCloneScope scope =
       obj->isSynthetic() ? JS::StructuredCloneScope::DifferentProcess
                          : JS::StructuredCloneScope::SameProcessSameThread;
@@ -3449,6 +3466,30 @@ static bool Deserialize(JSContext* cx, unsigned argc, Value* vp) {
     }
 
     RootedValue v(cx);
+    if (!JS_GetProperty(cx, opts, "SharedArrayBuffer", &v)) {
+      return false;
+    }
+
+    if (!v.isUndefined()) {
+      JSString* str = JS::ToString(cx, v);
+      if (!str) {
+        return false;
+      }
+      JSLinearString* poli = str->ensureLinear(cx);
+      if (!poli) {
+        return false;
+      }
+
+      if (StringEqualsLiteral(poli, "allow")) {
+        policy.allowSharedMemory();
+      } else if (StringEqualsLiteral(poli, "deny")) {
+        // default
+      } else {
+        JS_ReportErrorASCII(cx, "Invalid policy value for 'SharedArrayBuffer'");
+        return false;
+      }
+    }
+
     if (!JS_GetProperty(cx, opts, "scope", &v)) {
       return false;
     }
@@ -3490,7 +3531,7 @@ static bool Deserialize(JSContext* cx, unsigned argc, Value* vp) {
 
   RootedValue deserialized(cx);
   if (!JS_ReadStructuredClone(cx, *obj->data(), JS_STRUCTURED_CLONE_VERSION,
-                              scope, &deserialized, nullptr, nullptr)) {
+                              scope, &deserialized, policy, nullptr, nullptr)) {
     return false;
   }
   args.rval().set(deserialized);
@@ -6161,12 +6202,13 @@ static bool PCCountProfiling_ScriptContents(JSContext* cx, unsigned argc,
 // clang-format off
 static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("gc", ::GC, 0, 0,
-"gc([obj] | 'zone' [, 'shrinking'])",
-"  Run the garbage collector. When obj is given, GC only its zone.\n"
-"  If 'zone' is given, GC any zones that were scheduled for\n"
-"  GC via schedulegc.\n"
-"  If 'shrinking' is passed as the optional second argument, perform a\n"
-"  shrinking GC rather than a normal GC."),
+"gc([obj] | 'zone' [, ('shrinking' | 'last-ditch') ])",
+"  Run the garbage collector.\n"
+"  The first parameter describes which zones to collect: if an object is\n"
+"  given, GC only its zone. If 'zone' is given, GC any zones that were\n"
+"  scheduled via schedulegc.\n"
+"  The second parameter is optional and may be 'shrinking' to perform a\n"
+"  shrinking GC or 'last-ditch' for a shrinking, last-ditch GC."),
 
     JS_FN_HELP("minorgc", ::MinorGC, 0, 0,
 "minorgc([aboutToOverflow])",
@@ -6254,9 +6296,9 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "newMaybeExternalString(str)",
 "  Like newExternalString but uses the JS_NewMaybeExternalString API."),
 
-    JS_FN_HELP("ensureFlatString", EnsureFlatString, 1, 0,
-"ensureFlatString(str)",
-"  Ensures str is a flat (null-terminated) string and returns it."),
+    JS_FN_HELP("ensureLinearString", EnsureLinearString, 1, 0,
+"ensureLinearString(str)",
+"  Ensures str is a linear (non-rope) string and returns it."),
 
     JS_FN_HELP("representativeStringArray", RepresentativeStringArray, 0, 0,
 "representativeStringArray()",
@@ -6663,8 +6705,11 @@ gc::ZealModeHelpText),
 
     JS_FN_HELP("deserialize", Deserialize, 1, 0,
 "deserialize(clonebuffer[, opts])",
-"  Deserialize data generated by serialize. 'opts' is an options hash with one\n"
-"  recognized key 'scope', which limits the clone buffers that are considered\n"
+"  Deserialize data generated by serialize. 'opts' may be an options hash.\n"
+"  Valid keys:\n"
+"    'SharedArrayBuffer' - either 'allow' or 'deny' (the default)\n"
+"      to specify whether SharedArrayBuffers may be serialized.\n"
+"    'scope', which limits the clone buffers that are considered\n"
 "  valid. Allowed values: 'SameProcessSameThread', 'SameProcessDifferentThread',\n"
 "  'DifferentProcess', and 'DifferentProcessForIndexedDB'. So for example, a\n"
 "  DifferentProcessForIndexedDB clone buffer may be deserialized in any scope, but\n"

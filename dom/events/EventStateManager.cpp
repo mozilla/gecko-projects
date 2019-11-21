@@ -19,6 +19,7 @@
 #include "mozilla/TextEditor.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
+#include "mozilla/Telemetry.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/DragEvent.h"
 #include "mozilla/dom/Event.h"
@@ -487,8 +488,7 @@ nsresult EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
        aEvent->mClass == eWheelEventClass ||
        aEvent->mClass == ePointerEventClass ||
        aEvent->mClass == eTouchEventClass ||
-       (aEvent->mClass == eKeyboardEventClass &&
-        IsKeyboardEventUserActivity(aEvent)) ||
+       aEvent->mClass == eKeyboardEventClass ||
        (aEvent->mClass == eDragEventClass && aEvent->mMessage == eDrop) ||
        IsMessageGamepadUserActivity(aEvent->mMessage))) {
     if (gMouseOrKeyboardEventCounter == 0) {
@@ -502,9 +502,11 @@ nsresult EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     ++gMouseOrKeyboardEventCounter;
 
     nsCOMPtr<nsINode> node = aTargetContent;
-    if (node && (aEvent->mMessage == eKeyUp || aEvent->mMessage == eMouseUp ||
-                 aEvent->mMessage == eWheel || aEvent->mMessage == eTouchEnd ||
-                 aEvent->mMessage == ePointerUp || aEvent->mMessage == eDrop)) {
+    if (node &&
+        ((aEvent->mMessage == eKeyUp && IsKeyboardEventUserActivity(aEvent)) ||
+         aEvent->mMessage == eMouseUp || aEvent->mMessage == eWheel ||
+         aEvent->mMessage == eTouchEnd || aEvent->mMessage == ePointerUp ||
+         aEvent->mMessage == eDrop)) {
       Document* doc = node->OwnerDoc();
       while (doc) {
         doc->SetUserHasInteracted();
@@ -1015,11 +1017,11 @@ bool EventStateManager::LookForAccessKeyAndExecute(
     nsTArray<uint32_t>& aAccessCharCodes, bool aIsTrustedEvent, bool aIsRepeat,
     bool aExecute) {
   int32_t count, start = -1;
-  nsIContent* focusedContent = GetFocusedContent();
-  if (focusedContent) {
+  if (nsIContent* focusedContent = GetFocusedContent()) {
     start = mAccessKeys.IndexOf(focusedContent);
-    if (start == -1 && focusedContent->GetBindingParent())
-      start = mAccessKeys.IndexOf(focusedContent->GetBindingParent());
+    if (start == -1 && focusedContent->IsInNativeAnonymousSubtree()) {
+      start = mAccessKeys.IndexOf(focusedContent->GetClosestNativeAnonymousSubtreeRootParent());
+    }
   }
   RefPtr<Element> element;
   nsIFrame* frame;
@@ -1692,9 +1694,10 @@ void EventStateManager::StopTrackingDragGesture(bool aClearInChildProcesses) {
   mGestureDownFrameOwner = nullptr;
   mGestureDownDragStartData = nullptr;
 
-  // If a content process starts a drag but the mouse is released before the parent
-  // starts the actual drag, the content process will think a drag is still happening.
-  // Inform any child processes with active drags that the drag should be stopped.
+  // If a content process starts a drag but the mouse is released before the
+  // parent starts the actual drag, the content process will think a drag is
+  // still happening. Inform any child processes with active drags that the drag
+  // should be stopped.
   if (aClearInChildProcesses) {
     nsCOMPtr<nsIDragService> dragService =
         do_GetService("@mozilla.org/widget/dragservice;1");
@@ -1854,6 +1857,7 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
   nsCOMPtr<nsIContent> eventContent, targetContent;
   nsCOMPtr<nsIPrincipal> principal;
   nsCOMPtr<nsIContentSecurityPolicy> csp;
+  bool allowEmptyDataTransfer = false;
   mCurrentTarget->GetContentForEvent(aEvent, getter_AddRefs(eventContent));
   if (eventContent) {
     // If the content is a text node in a password field, we shouldn't
@@ -1875,9 +1879,10 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       }
     }
     DetermineDragTargetAndDefaultData(
-        window, eventContent, dataTransfer, getter_AddRefs(selection),
-        getter_AddRefs(remoteDragStartData), getter_AddRefs(targetContent),
-        getter_AddRefs(principal), getter_AddRefs(csp));
+        window, eventContent, dataTransfer, &allowEmptyDataTransfer,
+        getter_AddRefs(selection), getter_AddRefs(remoteDragStartData),
+        getter_AddRefs(targetContent), getter_AddRefs(principal),
+        getter_AddRefs(csp));
   }
 
   // Stop tracking the drag gesture now. This should stop us from
@@ -1942,9 +1947,9 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
   }
 
   if (status != nsEventStatus_eConsumeNoDefault) {
-    bool dragStarted =
-        DoDefaultDragStart(aPresContext, event, dataTransfer, targetContent,
-                           selection, remoteDragStartData, principal, csp);
+    bool dragStarted = DoDefaultDragStart(
+        aPresContext, event, dataTransfer, allowEmptyDataTransfer,
+        targetContent, selection, remoteDragStartData, principal, csp);
     if (dragStarted) {
       sActiveESM = nullptr;
       MaybeFirePointerCancel(aEvent);
@@ -1962,11 +1967,12 @@ void EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
 
 void EventStateManager::DetermineDragTargetAndDefaultData(
     nsPIDOMWindowOuter* aWindow, nsIContent* aSelectionTarget,
-    DataTransfer* aDataTransfer, Selection** aSelection,
-    RemoteDragStartData** aRemoteDragStartData, nsIContent** aTargetNode,
-    nsIPrincipal** aPrincipal, nsIContentSecurityPolicy** aCsp) {
+    DataTransfer* aDataTransfer, bool* aAllowEmptyDataTransfer,
+    Selection** aSelection, RemoteDragStartData** aRemoteDragStartData,
+    nsIContent** aTargetNode, nsIPrincipal** aPrincipal,
+    nsIContentSecurityPolicy** aCsp) {
   *aTargetNode = nullptr;
-
+  *aAllowEmptyDataTransfer = false;
   nsCOMPtr<nsIContent> dragDataNode;
 
   nsIContent* editingElement = aSelectionTarget->IsEditable()
@@ -1982,6 +1988,7 @@ void EventStateManager::DetermineDragTargetAndDefaultData(
       mGestureDownDragStartData->AddInitialDnDDataTo(aDataTransfer, aPrincipal,
                                                      aCsp);
       mGestureDownDragStartData.forget(aRemoteDragStartData);
+      *aAllowEmptyDataTransfer = true;
     }
   } else {
     mGestureDownDragStartData = nullptr;
@@ -2021,6 +2028,9 @@ void EventStateManager::DetermineDragTargetAndDefaultData(
     while (dragContent) {
       if (auto htmlElement = nsGenericHTMLElement::FromNode(dragContent)) {
         if (htmlElement->Draggable()) {
+          // We let draggable elements to trigger dnd even if there is no data
+          // in the DataTransfer.
+          *aAllowEmptyDataTransfer = true;
           break;
         }
       } else {
@@ -2057,7 +2067,8 @@ void EventStateManager::DetermineDragTargetAndDefaultData(
 
 bool EventStateManager::DoDefaultDragStart(
     nsPresContext* aPresContext, WidgetDragEvent* aDragEvent,
-    DataTransfer* aDataTransfer, nsIContent* aDragTarget, Selection* aSelection,
+    DataTransfer* aDataTransfer, bool aAllowEmptyDataTransfer,
+    nsIContent* aDragTarget, Selection* aSelection,
     RemoteDragStartData* aDragStartData, nsIPrincipal* aPrincipal,
     nsIContentSecurityPolicy* aCsp) {
   nsCOMPtr<nsIDragService> dragService =
@@ -2081,7 +2092,7 @@ bool EventStateManager::DoDefaultDragStart(
   if (aDataTransfer) {
     count = aDataTransfer->MozItemCount();
   }
-  if (!count) {
+  if (!aAllowEmptyDataTransfer && !count) {
     return false;
   }
 
@@ -4989,6 +5000,11 @@ nsresult EventStateManager::InitAndDispatchClickEvent(
   nsEventStatus status = nsEventStatus_eIgnore;
   nsresult rv = aPresShell->HandleEventWithTarget(
       &event, targetFrame, MOZ_KnownLive(target), &status);
+
+  if (event.mFlags.mHadNonPrivilegedClickListeners && !aNoContentDispatch) {
+    Telemetry::AccumulateCategorical(
+        Telemetry::LABELS_TYPES_OF_USER_CLICKS::Has_JS_Listener);
+  }
   // Copy mMultipleActionsPrevented flag from a click event to the mouseup
   // event only when it's set to true.  It may be set to true if an editor has
   // already handled it.  This is important to avoid two or more default
@@ -5113,6 +5129,14 @@ nsresult EventStateManager::DispatchClickEvents(
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
+  }
+
+  // notDispatchToContents is used here because we don't want to
+  // count auxclicks.
+  if (XRE_IsParentProcess() && !IsRemoteTarget(aClickTarget) &&
+      !notDispatchToContents) {
+    Telemetry::AccumulateCategorical(
+        Telemetry::LABELS_TYPES_OF_USER_CLICKS::Browser_Chrome);
   }
 
   return rv;
@@ -5502,20 +5526,17 @@ void EventStateManager::RemoveNodeFromChainIfNeeded(EventStates aState,
       aState == NS_EVENT_STATE_HOVER ? mHoverContent : mActiveContent;
 
   MOZ_ASSERT(leaf);
-  // XBL Likes to unbind content without notifying, thus the
-  // NODE_IS_ANONYMOUS_ROOT check...
-  //
-  // This can also happen for Shadow DOM sometimes, and it's not clear how to
-  // best handle it, see https://github.com/whatwg/html/issues/4795 and
-  // bug 1551621.
-  NS_ASSERTION(nsContentUtils::ContentIsFlattenedTreeDescendantOf(
-                   leaf, aContentRemoved) ||
-                   leaf->SubtreeRoot()->HasFlag(NODE_IS_ANONYMOUS_ROOT),
-               "Flat tree and active / hover chain got out of sync");
+  // These two NS_ASSERTIONS below can fail for Shadow DOM sometimes, and it's
+  // not clear how to best handle it, see
+  // https://github.com/whatwg/html/issues/4795 and bug 1551621.
+  NS_ASSERTION(
+      nsContentUtils::ContentIsFlattenedTreeDescendantOf(leaf, aContentRemoved),
+      "Flat tree and active / hover chain got out of sync");
 
   nsIContent* newLeaf = aContentRemoved->GetFlattenedTreeParent();
-  MOZ_ASSERT_IF(newLeaf, newLeaf->IsElement() &&
-                             newLeaf->AsElement()->State().HasState(aState));
+  MOZ_ASSERT(!newLeaf || newLeaf->IsElement());
+  NS_ASSERTION(!newLeaf || newLeaf->AsElement()->State().HasState(aState),
+               "State got out of sync because of shadow DOM");
   if (aNotify) {
     SetContentState(newLeaf, aState);
   } else {
@@ -5533,6 +5554,24 @@ void EventStateManager::NativeAnonymousContentRemoved(nsIContent* aContent) {
   MOZ_ASSERT(aContent->IsRootOfNativeAnonymousSubtree());
   RemoveNodeFromChainIfNeeded(NS_EVENT_STATE_HOVER, aContent, false);
   RemoveNodeFromChainIfNeeded(NS_EVENT_STATE_ACTIVE, aContent, false);
+
+  if (mLastLeftMouseDownContent &&
+      nsContentUtils::ContentIsFlattenedTreeDescendantOf(
+          mLastLeftMouseDownContent, aContent)) {
+    mLastLeftMouseDownContent = aContent->GetFlattenedTreeParent();
+  }
+
+  if (mLastMiddleMouseDownContent &&
+      nsContentUtils::ContentIsFlattenedTreeDescendantOf(
+          mLastMiddleMouseDownContent, aContent)) {
+    mLastMiddleMouseDownContent = aContent->GetFlattenedTreeParent();
+  }
+
+  if (mLastRightMouseDownContent &&
+      nsContentUtils::ContentIsFlattenedTreeDescendantOf(
+          mLastRightMouseDownContent, aContent)) {
+    mLastRightMouseDownContent = aContent->GetFlattenedTreeParent();
+  }
 }
 
 void EventStateManager::ContentRemoved(Document* aDocument,

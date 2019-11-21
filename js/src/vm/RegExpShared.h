@@ -101,7 +101,7 @@ class RegExpShared : public gc::TenuredCell {
   RegExpCompilation compilationArray[4];
 
   /* Source to the RegExp, for lazy compilation. */
-  GCPtr<JSAtom*> source;
+  const GCPtrAtom source;
 
   uint32_t parenCount;
   JS::RegExpFlags flags;
@@ -301,7 +301,7 @@ class RegExpRealm {
  public:
   explicit RegExpRealm();
 
-  void sweep();
+  void traceWeak(JSTracer* trc);
 
   static const size_t MatchResultObjectIndexSlot = 0;
   static const size_t MatchResultObjectInputSlot = 1;

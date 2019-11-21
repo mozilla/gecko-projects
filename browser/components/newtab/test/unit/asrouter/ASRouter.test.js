@@ -40,6 +40,9 @@ const FAKE_BUNDLE = [FAKE_LOCAL_MESSAGES[1], FAKE_LOCAL_MESSAGES[2]];
 const ONE_DAY_IN_MS = 24 * 60 * 60 * 1000;
 const FAKE_RESPONSE_HEADERS = { get() {} };
 
+const USE_REMOTE_L10N_PREF =
+  "browser.newtabpage.activity-stream.asrouter.useRemoteL10n";
+
 // Creates a message object that looks like messages returned by
 // RemotePageManager listeners
 function fakeAsyncMessage(action) {
@@ -119,6 +122,12 @@ describe("ASRouter", () => {
     sandbox.spy(ASRouterPreferences, "uninit");
     sandbox.spy(ASRouterPreferences, "addListener");
     sandbox.spy(ASRouterPreferences, "removeListener");
+    sandbox.replaceGetter(ASRouterPreferences, "personalizedCfr", function() {
+      return {
+        personalizedCfrScores: {},
+        personalizedCfrThreshold: 1.5,
+      };
+    });
 
     clock = sandbox.useFakeTimers();
     fetchStub = sandbox
@@ -331,6 +340,17 @@ describe("ASRouter", () => {
         "intl:app-locales-changed"
       );
     });
+    it("should add a pref observer", async () => {
+      sandbox.spy(global.Services.prefs, "addObserver");
+      await createRouterAndInit();
+
+      assert.calledOnce(global.Services.prefs.addObserver);
+      assert.calledWithExactly(
+        global.Services.prefs.addObserver,
+        USE_REMOTE_L10N_PREF,
+        Router
+      );
+    });
     describe("lazily loading local test providers", () => {
       afterEach(() => {
         Router.uninit();
@@ -498,6 +518,7 @@ describe("ASRouter", () => {
     beforeEach(() => {
       sandbox.stub(CFRPageActions, "forceRecommendation");
       sandbox.stub(CFRPageActions, "addRecommendation");
+      sandbox.stub(CFRPageActions, "showMilestone");
       target = { sendAsyncMessage: sandbox.stub() };
     });
     it("should route whatsnew_panel_message message to the right hub", () => {
@@ -513,6 +534,7 @@ describe("ASRouter", () => {
       assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
       assert.notCalled(CFRPageActions.addRecommendation);
       assert.notCalled(CFRPageActions.forceRecommendation);
+      assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(target.sendAsyncMessage);
     });
     it("should route toolbar_badge message to the right hub", () => {
@@ -523,6 +545,18 @@ describe("ASRouter", () => {
       assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
       assert.notCalled(CFRPageActions.addRecommendation);
       assert.notCalled(CFRPageActions.forceRecommendation);
+      assert.notCalled(CFRPageActions.showMilestone);
+      assert.notCalled(target.sendAsyncMessage);
+    });
+    it("should route milestone_message to the right hub", () => {
+      Router.routeMessageToTarget({ template: "milestone_message" }, target);
+
+      assert.calledOnce(CFRPageActions.showMilestone);
+      assert.notCalled(CFRPageActions.addRecommendation);
+      assert.notCalled(CFRPageActions.forceRecommendation);
+      assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
+      assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
+      assert.notCalled(FakeToolbarPanelHub.forceShowMessage);
       assert.notCalled(target.sendAsyncMessage);
     });
     it("should route fxa_bookmark_panel message to the right hub force = true", () => {
@@ -538,6 +572,7 @@ describe("ASRouter", () => {
       assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
       assert.notCalled(CFRPageActions.addRecommendation);
       assert.notCalled(CFRPageActions.forceRecommendation);
+      assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(target.sendAsyncMessage);
     });
     it("should route cfr_doorhanger message to the right hub force = false", () => {
@@ -553,6 +588,7 @@ describe("ASRouter", () => {
       assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
       assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
       assert.notCalled(CFRPageActions.forceRecommendation);
+      assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(target.sendAsyncMessage);
     });
     it("should route cfr_doorhanger message to the right hub force = true", () => {
@@ -566,6 +602,7 @@ describe("ASRouter", () => {
       assert.calledOnce(CFRPageActions.forceRecommendation);
       assert.notCalled(FakeToolbarPanelHub.forceShowMessage);
       assert.notCalled(CFRPageActions.addRecommendation);
+      assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
       assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
       assert.notCalled(target.sendAsyncMessage);
@@ -577,6 +614,7 @@ describe("ASRouter", () => {
       assert.notCalled(FakeToolbarPanelHub.forceShowMessage);
       assert.notCalled(CFRPageActions.forceRecommendation);
       assert.notCalled(CFRPageActions.addRecommendation);
+      assert.notCalled(CFRPageActions.showMilestone);
       assert.notCalled(FakeBookmarkPanelHub._forceShowMessage);
       assert.notCalled(FakeToolbarBadgeHub.registerBadgeNotificationListener);
     });
@@ -718,7 +756,7 @@ describe("ASRouter", () => {
         data: {
           action: "asrouter_undesired_event",
           event: "ASR_RS_ERROR",
-          value: "remotey-settingsy",
+          event_context: "remotey-settingsy",
           message_id: "n/a",
         },
         meta: { from: "ActivityStream:Content", to: "ActivityStream:Main" },
@@ -734,7 +772,7 @@ describe("ASRouter", () => {
         data: {
           action: "asrouter_undesired_event",
           event: "ASR_RS_NO_MESSAGES",
-          value: "remotey-settingsy",
+          event_context: "remotey-settingsy",
           message_id: "n/a",
         },
         meta: { from: "ActivityStream:Content", to: "ActivityStream:Main" },
@@ -782,7 +820,7 @@ describe("ASRouter", () => {
         data: {
           action: "asrouter_undesired_event",
           event: "ASR_RS_NO_MESSAGES",
-          value: "ms-language-packs",
+          event_context: "ms-language-packs",
           message_id: "n/a",
         },
         meta: { from: "ActivityStream:Content", to: "ActivityStream:Main" },
@@ -1062,6 +1100,31 @@ describe("ASRouter", () => {
         context: trigger.triggerContext,
       });
     });
+    it("should filter out messages without a trigger (or different) when a triggerId is defined", async () => {
+      const trigger = { triggerId: "foo" };
+      const message1 = {
+        id: "1",
+        campaign: "foocampaign",
+        trigger: { id: "foo" },
+      };
+      const message2 = {
+        id: "2",
+        campaign: "foocampaign",
+        trigger: { id: "bar" },
+      };
+      const message3 = {
+        id: "3",
+        campaign: "bazcampaign",
+      };
+      await Router.setState({ messages: [message2, message1, message3] });
+      // Just return the first message provided as arg
+      sandbox.stub(Router, "_findMessage").callsFake(args => args);
+
+      const result = Router.handleMessageRequest(trigger);
+
+      assert.lengthOf(result, 1);
+      assert.deepEqual(result[0], message1);
+    });
   });
 
   describe("#uninit", () => {
@@ -1111,6 +1174,14 @@ describe("ASRouter", () => {
         global.Services.obs.removeObserver.args[0][1],
         "intl:app-locales-changed"
       );
+    });
+    it("should remove the pref observer for `USE_REMOTE_L10N_PREF`", async () => {
+      sandbox.spy(global.Services.prefs, "removeObserver");
+      Router.uninit();
+
+      // Grab the last call as #uninit() also involves multiple calls of `Services.prefs.removeObserver`.
+      const call = global.Services.prefs.removeObserver.lastCall;
+      assert.calledWithExactly(call, USE_REMOTE_L10N_PREF, Router);
     });
   });
 
@@ -1348,7 +1419,6 @@ describe("ASRouter", () => {
         );
         handleMessageRequestStub
           .withArgs({
-            provider: "onboarding",
             template: "extended_triplets",
           })
           .resolves({ id: "foo" });
@@ -1369,7 +1439,6 @@ describe("ASRouter", () => {
         );
         handleMessageRequestStub
           .withArgs({
-            provider: "onboarding",
             template: "extended_triplets",
           })
           .resolves({ id: "foo" });
@@ -1381,7 +1450,6 @@ describe("ASRouter", () => {
 
         assert.calledTwice(handleMessageRequestStub);
         assert.calledWithExactly(handleMessageRequestStub, {
-          provider: "onboarding",
           template: "extended_triplets",
         });
         assert.calledWithExactly(handleMessageRequestStub, {
@@ -1395,7 +1463,6 @@ describe("ASRouter", () => {
         );
         handleMessageRequestStub
           .withArgs({
-            provider: "onboarding",
             template: "extended_triplets",
           })
           .resolves(null);
@@ -1409,7 +1476,6 @@ describe("ASRouter", () => {
         assert.notCalled(spy);
         assert.calledTwice(handleMessageRequestStub);
         assert.calledWithExactly(handleMessageRequestStub, {
-          provider: "onboarding",
           template: "extended_triplets",
         });
         assert.calledWithExactly(handleMessageRequestStub, {
@@ -1712,7 +1778,12 @@ describe("ASRouter", () => {
           provider: testMessage1.provider,
           bundle: [
             { content: testMessage1.content, id: testMessage1.id, order: 1 },
-            { content: testMessage2.content, id: testMessage2.id, order: 2 },
+            {
+              content: testMessage2.content,
+              id: testMessage2.id,
+              order: 2,
+              blockOnClick: false,
+            },
           ],
         };
         assert.calledWith(
@@ -1819,13 +1890,14 @@ describe("ASRouter", () => {
     });
 
     describe(".includeBundle", () => {
-      it("should send a message with .includeBundle property with specified length and template", async () => {
+      let msg;
+      beforeEach(async () => {
         let messages = [
           {
             id: "trailhead",
             template: "trailhead",
             includeBundle: {
-              length: 2,
+              length: 3,
               template: "foo",
               trigger: { id: "foo" },
             },
@@ -1835,31 +1907,142 @@ describe("ASRouter", () => {
           {
             id: "foo2",
             template: "foo",
-            bundled: 2,
+            bundled: 3,
+            order: 2,
             trigger: { id: "foo" },
             content: { title: "Foo2", body: "Foo123-2" },
           },
           {
             id: "foo3",
             template: "foo",
-            bundled: 2,
+            bundled: 3,
+            order: 3,
             trigger: { id: "foo" },
             content: { title: "Foo3", body: "Foo123-3" },
           },
+          {
+            id: "foo4",
+            template: "foo",
+            bundled: 3,
+            order: 1,
+            trigger: { id: "foo" },
+            content: { title: "Foo4", body: "Foo123-4" },
+          },
+          {
+            id: "foo5",
+            template: "foo",
+            bundled: 3,
+            order: 4,
+            trigger: { id: "foo" },
+            content: { title: "Foo5", body: "Foo123-5" },
+          },
         ];
+
         sandbox.stub(Router, "_findProvider").returns(null);
         await Router.setState({ messages });
 
-        const msg = fakeAsyncMessage({
+        msg = fakeAsyncMessage({
           type: "TRIGGER",
           data: { trigger: { id: "firstRun" } },
         });
-        await Router.onMessage(msg);
+      });
 
+      it("should send a message with .includeBundle property with specified length and template", async () => {
+        await Router.onMessage(msg);
         const [, resp] = msg.target.sendAsyncMessage.firstCall.args;
         assert.propertyVal(resp, "type", "SET_MESSAGE");
         assert.isArray(resp.data.bundle, "resp.data.bundle");
-        assert.lengthOf(resp.data.bundle, 2, "resp.data.bundle");
+        assert.lengthOf(resp.data.bundle, 3, "resp.data.bundle");
+      });
+
+      it("should set blockOnClick property by default false on returned ordered bundle messages", async () => {
+        const expectedBundle = [
+          {
+            content: { title: "Foo4", body: "Foo123-4" },
+            id: "foo4",
+            order: 1,
+            blockOnClick: false,
+          },
+          {
+            content: { title: "Foo2", body: "Foo123-2" },
+            id: "foo2",
+            order: 2,
+            blockOnClick: false,
+          },
+          {
+            content: { title: "Foo3", body: "Foo123-3" },
+            id: "foo3",
+            order: 3,
+            blockOnClick: false,
+          },
+        ];
+
+        await Router.onMessage(msg);
+        const [, resp] = msg.target.sendAsyncMessage.firstCall.args;
+
+        for (let i = 0; i < 3; i++) {
+          assert.deepEqual(resp.data.bundle[i], expectedBundle[i]);
+        }
+      });
+
+      it("should set blockOnClick property true for dynamic triplet and matching messages more than 3", async () => {
+        await Router.setState({ trailheadTriplet: "dynamic" });
+        await Router.onMessage(msg);
+        const [, resp] = msg.target.sendAsyncMessage.firstCall.args;
+        const expectedBundle = [
+          {
+            content: { title: "Foo4", body: "Foo123-4" },
+            id: "foo4",
+            order: 1,
+            blockOnClick: true,
+          },
+          {
+            content: { title: "Foo2", body: "Foo123-2" },
+            id: "foo2",
+            order: 2,
+            blockOnClick: true,
+          },
+          {
+            content: { title: "Foo3", body: "Foo123-3" },
+            id: "foo3",
+            order: 3,
+            blockOnClick: true,
+          },
+        ];
+
+        for (let i = 0; i < 3; i++) {
+          assert.deepEqual(resp.data.bundle[i], expectedBundle[i]);
+        }
+      });
+
+      it("should set blockOnClick property true for triplet branch name that starts with 'dynamic' and matching messages more than 3", async () => {
+        await Router.setState({ trailheadTriplet: "dynamic_test" });
+        await Router.onMessage(msg);
+        const [, resp] = msg.target.sendAsyncMessage.firstCall.args;
+        const expectedBundle = [
+          {
+            content: { title: "Foo4", body: "Foo123-4" },
+            id: "foo4",
+            order: 1,
+            blockOnClick: true,
+          },
+          {
+            content: { title: "Foo2", body: "Foo123-2" },
+            id: "foo2",
+            order: 2,
+            blockOnClick: true,
+          },
+          {
+            content: { title: "Foo3", body: "Foo123-3" },
+            id: "foo3",
+            order: 3,
+            blockOnClick: true,
+          },
+        ];
+
+        for (let i = 0; i < 3; i++) {
+          assert.deepEqual(resp.data.bundle[i], expectedBundle[i]);
+        }
       });
     });
 
@@ -1986,7 +2169,9 @@ describe("ASRouter", () => {
     describe("#onMessage: SHOW_FIREFOX_ACCOUNTS", () => {
       beforeEach(() => {
         globals.set("FxAccounts", {
-          config: { promiseSignUpURI: sandbox.stub().resolves("some/url") },
+          config: {
+            promiseConnectAccountURI: sandbox.stub().resolves("some/url"),
+          },
         });
       });
       it("should call openLinkIn with the correct params on OPEN_URL", async () => {
@@ -2093,6 +2278,33 @@ describe("ASRouter", () => {
 
         assert.calledOnce(gProtectionsHandler.showProtectionsPopup);
         assert.calledWithExactly(gProtectionsHandler.showProtectionsPopup, {});
+      });
+    });
+
+    describe("#onMessage: OPEN_PROTECTION_REPORT", () => {
+      it("should open protection report", async () => {
+        const msg = fakeExecuteUserAction({ type: "OPEN_PROTECTION_REPORT" });
+        let { gProtectionsHandler } = msg.target.browser.ownerGlobal;
+
+        await Router.onMessage(msg);
+
+        assert.calledOnce(gProtectionsHandler.openProtections);
+      });
+    });
+
+    describe("#onMessage: DISABLE_STP_DOORHANGERS", () => {
+      it("should block STP related messages", async () => {
+        const msg = fakeExecuteUserAction({ type: "DISABLE_STP_DOORHANGERS" });
+
+        assert.deepEqual(Router.state.messageBlockList, []);
+
+        await Router.onMessage(msg);
+
+        assert.deepEqual(Router.state.messageBlockList, [
+          "SOCIAL_TRACKING_PROTECTION",
+          "FINGERPRINTERS_PROTECTION",
+          "CRYPTOMINERS_PROTECTION",
+        ]);
       });
     });
 
@@ -2282,9 +2494,17 @@ describe("ASRouter", () => {
 
   describe("#UITour", () => {
     let showMenuStub;
+    const highlightTarget = { target: "target" };
     beforeEach(() => {
       showMenuStub = sandbox.stub();
-      globals.set("UITour", { showMenu: showMenuStub });
+      globals.set("UITour", {
+        showMenu: showMenuStub,
+        getTarget: sandbox
+          .stub()
+          .withArgs(sinon.match.object, "pageAaction-sendToDevice")
+          .resolves(highlightTarget),
+        showHighlight: sandbox.stub(),
+      });
     });
     it("should call UITour.showMenu with the correct params on OPEN_APPLICATIONS_MENU", async () => {
       const msg = fakeExecuteUserAction({
@@ -2298,6 +2518,21 @@ describe("ASRouter", () => {
         showMenuStub,
         msg.target.browser.ownerGlobal,
         "appMenu"
+      );
+    });
+    it("should call UITour.showHighlight with the correct params on HIGHLIGHT_FEATURE", async () => {
+      const msg = fakeExecuteUserAction({
+        type: "HIGHLIGHT_FEATURE",
+        data: { args: "pageAction-sendToDevice" },
+      });
+      await Router.onMessage(msg);
+
+      assert.calledOnce(UITour.getTarget);
+      assert.calledOnce(UITour.showHighlight);
+      assert.calledWith(
+        UITour.showHighlight,
+        msg.target.browser.ownerGlobal,
+        highlightTarget
       );
     });
   });
@@ -2420,6 +2655,7 @@ describe("ASRouter", () => {
           document: { getElementById },
           promiseDocumentFlushed: sandbox.stub().resolves([{ width: 0 }]),
           setTimeout: sandbox.stub(),
+          A11yUtils: { announce: sandbox.stub() },
         };
         const firstMessage = { ...FAKE_RECOMMENDATION, id: "first_message" };
         const secondMessage = { ...FAKE_RECOMMENDATION, id: "second_message" };
@@ -2789,6 +3025,18 @@ describe("ASRouter", () => {
       assert.equal(Router.state.trailheadInterrupt, "join");
       assert.equal(Router.state.trailheadTriplet, "supercharge");
     });
+    it("should set default triplet when firstrun.branches pref not set", async () => {
+      sandbox.spy(Router, "setFirstRunStateFromPref");
+      getStringPrefStub.withArgs(TRAILHEAD_CONFIG.OVERRIDE_PREF).returns("");
+
+      await Router.init(channel, createFakeStorage(), dispatchStub);
+
+      assert.calledOnce(Router.setFirstRunStateFromPref);
+      assert.equal(
+        Router.state.trailheadTriplet,
+        TRAILHEAD_CONFIG.DEFAULT_TRIPLET
+      );
+    });
     it.skip("should call .setupTrailhead on init", async () => {
       sandbox.spy(Router, "setupTrailhead");
       sandbox
@@ -2883,8 +3131,8 @@ describe("ASRouter", () => {
       };
       const configWithoutExperiment = {
         experiment: "",
-        interrupt: "control",
-        triplet: "",
+        interrupt: "join",
+        triplet: "supercharge",
       };
 
       it("should generates an experiment/branch configuration and update Router.state", async () => {
@@ -3013,17 +3261,25 @@ describe("ASRouter", () => {
           triplet: "",
         });
       });
-      it("should return control experience with no experiment if locale is NOT in TRAILHEAD_LOCALES", async () => {
+      it("should return default experience with no experiment if locale is NOT in TRAILHEAD_LOCALES", async () => {
         sandbox
           .stub(global.Services.locale, "appLocaleAsLangTag")
           .get(() => "zh-CN");
-        checkReturnValue({ experiment: "", interrupt: "control", triplet: "" });
+        checkReturnValue({
+          experiment: "",
+          interrupt: "join",
+          triplet: "supercharge",
+        });
       });
-      it("should return control experience with no experiment if locale is NOT in TRAILHEAD_LOCALES", async () => {
+      it("should return default experience with no experiment if locale is NOT in TRAILHEAD_LOCALES", async () => {
         sandbox
           .stub(global.Services.locale, "appLocaleAsLangTag")
           .get(() => "zh-CN");
-        checkReturnValue({ experiment: "", interrupt: "control", triplet: "" });
+        checkReturnValue({
+          experiment: "",
+          interrupt: "join",
+          triplet: "supercharge",
+        });
       });
       it("should roll for experiment if locale is in TRAILHEAD_LOCALES", async () => {
         sandbox.stub(global.Sampling, "ratioSample").resolves(1); // 1 = interrupts experiment
@@ -3234,6 +3490,23 @@ describe("ASRouter", () => {
 
       assert.notCalled(Router.setState);
       assert.notCalled(Router.loadMessagesFromAllProviders);
+    });
+  });
+
+  describe("#observe", () => {
+    it("should reload l10n for CFRPageActions when the `USE_REMOTE_L10N_PREF` pref is changed", () => {
+      sandbox.spy(CFRPageActions, "reloadL10n");
+
+      Router.observe("", "", USE_REMOTE_L10N_PREF);
+
+      assert.calledOnce(CFRPageActions.reloadL10n);
+    });
+    it("should not react to other pref changes", () => {
+      sandbox.spy(CFRPageActions, "reloadL10n");
+
+      Router.observe("", "", "foo");
+
+      assert.notCalled(CFRPageActions.reloadL10n);
     });
   });
 });

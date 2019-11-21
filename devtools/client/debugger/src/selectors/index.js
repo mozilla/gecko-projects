@@ -36,6 +36,7 @@ export {
   getClosestBreakpoint,
   getBreakpointAtLocation,
   getBreakpointsAtLine,
+  getClosestBreakpointPosition,
 } from "./breakpointAtLocation";
 export {
   getVisibleBreakpoints,
@@ -52,6 +53,7 @@ export {
   getSelectedFrame,
   getSelectedFrames,
   getVisibleSelectedFrame,
+  getFramePositions,
 } from "./pause";
 
 // eslint-disable-next-line import/named

@@ -865,6 +865,12 @@ var snapshotFormatters = {
     }
 
     function insertEnumerateDatabase() {
+      if (
+        !Services.prefs.getBoolPref("media.mediacapabilities.from-database")
+      ) {
+        $("media-capabilities-tbody").style.display = "none";
+        return;
+      }
       let button = $("enumerate-database-button");
       if (button) {
         button.addEventListener("click", function(event) {
@@ -925,6 +931,14 @@ var snapshotFormatters = {
 
   javaScript(data) {
     $("javascript-incremental-gc").textContent = data.incrementalGCEnabled;
+  },
+
+  remoteAgent(data) {
+    if (!AppConstants.ENABLE_REMOTE_AGENT) {
+      return;
+    }
+    $("remote-debugging-accepting-connections").textContent = data.listening;
+    $("remote-debugging-url").textContent = data.url;
   },
 
   accessibility(data) {
@@ -1489,11 +1503,11 @@ function setupEventListeners() {
     button = $("show-update-history-button");
     if (button) {
       button.addEventListener("click", function(event) {
-        let uri = "chrome://mozapps/content/update/history.xul";
-        let features =
-          "chrome,centerscreen,resizable=no,titlebar,toolbar=no," +
-          "dialog=yes,modal";
-        Services.ww.openWindow(window, uri, "Update:History", features, null);
+        window.docShell.rootTreeItem.domWindow.openDialog(
+          "chrome://mozapps/content/update/history.xhtml",
+          "Update:History",
+          "centerscreen,resizable=no,titlebar,modal"
+        );
       });
     }
   }

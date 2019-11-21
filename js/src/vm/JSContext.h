@@ -22,6 +22,7 @@
 #include "js/Vector.h"
 #include "threading/ProtectedData.h"
 #include "util/StructuredSpewer.h"
+#include "vm/Activation.h"  // js::Activation
 #include "vm/ErrorReporting.h"
 #include "vm/MallocProvider.h"
 #include "vm/Runtime.h"
@@ -35,6 +36,7 @@ class AutoMaybeLeaveAtomsZone;
 class AutoRealm;
 
 namespace jit {
+class JitActivation;
 class JitContext;
 class DebugModeOSRVolatileJitFrameIter;
 }  // namespace jit
@@ -43,8 +45,6 @@ namespace gc {
 class AutoCheckCanAccessAtomsDuringGC;
 class AutoSuppressNurseryCellAlloc;
 }  // namespace gc
-
-typedef HashSet<Shape*> ShapeSet;
 
 /* Detects cycles when traversing an object graph. */
 class MOZ_RAII AutoCycleDetector {
@@ -251,8 +251,8 @@ struct JSContext : public JS::RootingContext,
    * on OOM and retry the allocation.
    */
   template <typename T>
-  T* pod_callocCanGC(size_t numElems, arena_id_t arena = js::MallocArena) {
-    T* p = maybe_pod_calloc<T>(numElems, arena);
+  T* pod_arena_callocCanGC(arena_id_t arena, size_t numElems) {
+    T* p = maybe_pod_arena_calloc<T>(arena, numElems);
     if (MOZ_LIKELY(!!p)) {
       return p;
     }
@@ -537,13 +537,21 @@ struct JSContext : public JS::RootingContext,
    */
   js::ContextData<int32_t> suppressGC;
 
-  // Whether this thread is currently sweeping GC things.  This thread could
-  // be the main thread or a helper thread while the main thread is running
-  // the mutator.  This is used to assert that destruction of GCPtr only
-  // happens when we are sweeping.
+#ifdef DEBUG
+  // Whether this thread is currently sweeping GC things. This thread could be
+  // the main thread or a helper thread while the main thread is running the
+  // mutator. This is used to assert that destruction of GCPtrs only happens
+  // when we are sweeping, among other things.
   js::ContextData<bool> gcSweeping;
 
-#ifdef DEBUG
+  // The specific zone currently being swept, if any. Setting this restricts
+  // IsAboutToBeFinalized and IsMarked calls to this zone.
+  js::ContextData<JS::Zone*> gcSweepingZone;
+
+  // Whether this thread is currently marking GC things. This thread could
+  // be the main thread or a helper thread doing sweep-marking.
+  js::ContextData<bool> gcMarking;
+
   // Whether this thread is currently manipulating possibly-gray GC things.
   js::ContextData<size_t> isTouchingGrayThings;
 
@@ -888,13 +896,6 @@ struct JSContext : public JS::RootingContext,
   // object.
   js::FutexThread fx;
 
-  // Buffer for OSR from baseline to Ion. To avoid holding on to this for
-  // too long, it's also freed in EnterBaseline (after returning from JIT code).
-  js::ContextData<uint8_t*> osrTempData_;
-
-  uint8_t* allocateOsrTempData(size_t size);
-  void freeOsrTempData();
-
   // In certain cases, we want to optimize certain opcodes to typed
   // instructions, to avoid carrying an extra register to feed into an unbox.
   // Unfortunately, that's not always possible. For example, a GetPropertyCacheT
@@ -1049,8 +1050,7 @@ struct MOZ_RAII AutoResolving {
  * Create and destroy functions for JSContext, which is manually allocated
  * and exclusively owned.
  */
-extern JSContext* NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes,
-                             JSRuntime* parentRuntime);
+extern JSContext* NewContext(uint32_t maxBytes, JSRuntime* parentRuntime);
 
 extern void DestroyContext(JSContext* cx);
 
@@ -1316,16 +1316,56 @@ class MOZ_RAII AutoSetThreadIsPerformingGC {
 
 // In debug builds, set/reset the GC sweeping flag for the current thread.
 struct MOZ_RAII AutoSetThreadIsSweeping {
-  AutoSetThreadIsSweeping() : cx(TlsContext.get()), prevState(cx->gcSweeping) {
+#ifndef DEBUG
+  explicit AutoSetThreadIsSweeping(Zone* zone = nullptr) {}
+#else
+  explicit AutoSetThreadIsSweeping(Zone* zone = nullptr)
+      : cx(TlsContext.get()),
+        prevState(cx->gcSweeping),
+        prevZone(cx->gcSweepingZone) {
     cx->gcSweeping = true;
+    cx->gcSweepingZone = zone;
   }
 
-  ~AutoSetThreadIsSweeping() { cx->gcSweeping = prevState; }
+  ~AutoSetThreadIsSweeping() {
+    cx->gcSweeping = prevState;
+    cx->gcSweepingZone = prevZone;
+    MOZ_ASSERT_IF(!cx->gcSweeping, !cx->gcSweepingZone);
+  }
+
+ private:
+  JSContext* cx;
+  bool prevState;
+  JS::Zone* prevZone;
+#endif
+};
+
+// Note that this class does not suppress buffer allocation/reallocation in the
+// nursery, only Cells themselves.
+class MOZ_RAII AutoSuppressNurseryCellAlloc {
+  JSContext* cx_;
+
+ public:
+  explicit AutoSuppressNurseryCellAlloc(JSContext* cx) : cx_(cx) {
+    cx_->nurserySuppressions_++;
+  }
+  ~AutoSuppressNurseryCellAlloc() { cx_->nurserySuppressions_--; }
+};
+
+#ifdef DEBUG
+// Set/reset the GC marking flag for the current thread.
+struct MOZ_RAII AutoSetThreadIsMarking {
+  AutoSetThreadIsMarking() : cx(TlsContext.get()), prevState(cx->gcMarking) {
+    cx->gcMarking = true;
+  }
+
+  ~AutoSetThreadIsMarking() { cx->gcMarking = prevState; }
 
  private:
   JSContext* cx;
   bool prevState;
 };
+#endif  // DEBUG
 
 }  // namespace gc
 

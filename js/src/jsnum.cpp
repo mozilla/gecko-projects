@@ -33,6 +33,7 @@
 #endif
 #include "js/PropertySpec.h"
 #include "util/DoubleToString.h"
+#include "util/Memory.h"
 #include "util/StringBuffer.h"
 #include "vm/BigIntType.h"
 #include "vm/GlobalObject.h"
@@ -629,7 +630,8 @@ static const JSFunctionSpec number_functions[] = {
 
 const JSClass NumberObject::class_ = {
     js_Number_str,
-    JSCLASS_HAS_RESERVED_SLOTS(1) | JSCLASS_HAS_CACHED_PROTO(JSProto_Number)};
+    JSCLASS_HAS_RESERVED_SLOTS(1) | JSCLASS_HAS_CACHED_PROTO(JSProto_Number),
+    JS_NULL_CLASS_OPS, &NumberObject::classSpec_};
 
 static bool Number(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
@@ -710,9 +712,9 @@ ToCStringBuf::ToCStringBuf() : dbuf(nullptr) {
 ToCStringBuf::~ToCStringBuf() { js_free(dbuf); }
 
 MOZ_ALWAYS_INLINE
-static JSFlatString* LookupDtoaCache(JSContext* cx, double d) {
+static JSLinearString* LookupDtoaCache(JSContext* cx, double d) {
   if (Realm* realm = cx->realm()) {
-    if (JSFlatString* str = realm->dtoaCache.lookup(10, d)) {
+    if (JSLinearString* str = realm->dtoaCache.lookup(10, d)) {
       return str;
     }
   }
@@ -721,14 +723,14 @@ static JSFlatString* LookupDtoaCache(JSContext* cx, double d) {
 }
 
 MOZ_ALWAYS_INLINE
-static void CacheNumber(JSContext* cx, double d, JSFlatString* str) {
+static void CacheNumber(JSContext* cx, double d, JSLinearString* str) {
   if (Realm* realm = cx->realm()) {
     realm->dtoaCache.cache(10, d, str);
   }
 }
 
 MOZ_ALWAYS_INLINE
-static JSFlatString* LookupInt32ToString(JSContext* cx, int32_t si) {
+static JSLinearString* LookupInt32ToString(JSContext* cx, int32_t si) {
   if (si >= 0 && StaticStrings::hasInt(si)) {
     return cx->staticStrings().getInt(si);
   }
@@ -754,8 +756,8 @@ MOZ_ALWAYS_INLINE static T* BackfillInt32InBuffer(int32_t si, T* buffer,
 }
 
 template <AllowGC allowGC>
-JSFlatString* js::Int32ToString(JSContext* cx, int32_t si) {
-  if (JSFlatString* str = LookupInt32ToString(cx, si)) {
+JSLinearString* js::Int32ToString(JSContext* cx, int32_t si) {
+  if (JSLinearString* str = LookupInt32ToString(cx, si)) {
     return str;
   }
 
@@ -777,13 +779,13 @@ JSFlatString* js::Int32ToString(JSContext* cx, int32_t si) {
   return str;
 }
 
-template JSFlatString* js::Int32ToString<CanGC>(JSContext* cx, int32_t si);
+template JSLinearString* js::Int32ToString<CanGC>(JSContext* cx, int32_t si);
 
-template JSFlatString* js::Int32ToString<NoGC>(JSContext* cx, int32_t si);
+template JSLinearString* js::Int32ToString<NoGC>(JSContext* cx, int32_t si);
 
-JSFlatString* js::Int32ToStringHelperPure(JSContext* cx, int32_t si) {
+JSLinearString* js::Int32ToStringHelperPure(JSContext* cx, int32_t si) {
   AutoUnsafeCallWithABI unsafe;
-  JSFlatString* res = Int32ToString<NoGC>(cx, si);
+  JSLinearString* res = Int32ToString<NoGC>(cx, si);
   if (!res) {
     cx->recoverFromOutOfMemory();
   }
@@ -791,7 +793,7 @@ JSFlatString* js::Int32ToStringHelperPure(JSContext* cx, int32_t si) {
 }
 
 JSAtom* js::Int32ToAtom(JSContext* cx, int32_t si) {
-  if (JSFlatString* str = LookupInt32ToString(cx, si)) {
+  if (JSLinearString* str = LookupInt32ToString(cx, si)) {
     return js::AtomizeString(cx, str);
   }
 
@@ -1256,8 +1258,11 @@ static const JSFunctionSpec number_methods[] = {
     JS_FS_END};
 
 bool js::IsInteger(const Value& val) {
-  return val.isInt32() || (mozilla::IsFinite(val.toDouble()) &&
-                           JS::ToInteger(val.toDouble()) == val.toDouble());
+  return val.isInt32() || IsInteger(val.toDouble());
+}
+
+bool js::IsInteger(double d) {
+  return mozilla::IsFinite(d) && JS::ToInteger(d) == d;
 }
 
 static const JSFunctionSpec number_static_methods[] = {
@@ -1335,24 +1340,18 @@ void js::FinishRuntimeNumberState(JSRuntime* rt) {
 }
 #endif
 
-JSObject* js::InitNumberClass(JSContext* cx, Handle<GlobalObject*> global) {
-  Rooted<NumberObject*> numberProto(cx);
-  numberProto = GlobalObject::createBlankPrototype<NumberObject>(cx, global);
+JSObject* NumberObject::createPrototype(JSContext* cx, JSProtoKey key) {
+  NumberObject* numberProto =
+      GlobalObject::createBlankPrototype<NumberObject>(cx, cx->global());
   if (!numberProto) {
     return nullptr;
   }
   numberProto->setPrimitiveValue(0);
+  return numberProto;
+}
 
-  RootedFunction ctor(cx);
-  ctor = GlobalObject::createConstructor(cx, Number, cx->names().Number, 1);
-  if (!ctor) {
-    return nullptr;
-  }
-
-  if (!LinkConstructorAndPrototype(cx, ctor, numberProto)) {
-    return nullptr;
-  }
-
+static bool NumberClassFinish(JSContext* cx, HandleObject ctor,
+                              HandleObject proto) {
   // Our NaN must be one particular canonical value, because we rely on NaN
   // encoding for our value representation.  See Value.h.
   static const JSConstDoubleSpec number_constants[] = {
@@ -1374,19 +1373,13 @@ JSObject* js::InitNumberClass(JSContext* cx, Handle<GlobalObject*> global) {
 
   // Add numeric constants (MAX_VALUE, NaN, &c.) to the Number constructor.
   if (!JS_DefineConstDoubles(cx, ctor, number_constants)) {
-    return nullptr;
+    return false;
   }
 
-  if (!DefinePropertiesAndFunctions(cx, ctor, nullptr, number_static_methods)) {
-    return nullptr;
-  }
-
-  if (!DefinePropertiesAndFunctions(cx, numberProto, nullptr, number_methods)) {
-    return nullptr;
-  }
+  Handle<GlobalObject*> global = cx->global();
 
   if (!JS_DefineFunctions(cx, global, number_functions)) {
-    return nullptr;
+    return false;
   }
 
   // Number.parseInt should be the same function object as global parseInt.
@@ -1394,11 +1387,11 @@ JSObject* js::InitNumberClass(JSContext* cx, Handle<GlobalObject*> global) {
   JSFunction* parseInt =
       DefineFunction(cx, global, parseIntId, num_parseInt, 2, JSPROP_RESOLVING);
   if (!parseInt) {
-    return nullptr;
+    return false;
   }
   RootedValue parseIntValue(cx, ObjectValue(*parseInt));
   if (!DefineDataProperty(cx, ctor, parseIntId, parseIntValue, 0)) {
-    return nullptr;
+    return false;
   }
 
   // Number.parseFloat should be the same function object as global
@@ -1407,11 +1400,11 @@ JSObject* js::InitNumberClass(JSContext* cx, Handle<GlobalObject*> global) {
   JSFunction* parseFloat = DefineFunction(cx, global, parseFloatId,
                                           num_parseFloat, 1, JSPROP_RESOLVING);
   if (!parseFloat) {
-    return nullptr;
+    return false;
   }
   RootedValue parseFloatValue(cx, ObjectValue(*parseFloat));
   if (!DefineDataProperty(cx, ctor, parseFloatId, parseFloatValue, 0)) {
-    return nullptr;
+    return false;
   }
 
   RootedValue valueNaN(cx, JS::NaNValue());
@@ -1424,16 +1417,20 @@ JSObject* js::InitNumberClass(JSContext* cx, Handle<GlobalObject*> global) {
       !NativeDefineDataProperty(
           cx, global, cx->names().Infinity, valueInfinity,
           JSPROP_PERMANENT | JSPROP_READONLY | JSPROP_RESOLVING)) {
-    return nullptr;
+    return false;
   }
 
-  if (!GlobalObject::initBuiltinConstructor(cx, global, JSProto_Number, ctor,
-                                            numberProto)) {
-    return nullptr;
-  }
-
-  return numberProto;
+  return true;
 }
+
+const ClassSpec NumberObject::classSpec_ = {
+    GenericCreateConstructor<Number, 1, gc::AllocKind::FUNCTION>,
+    NumberObject::createPrototype,
+    number_static_methods,
+    nullptr,
+    number_methods,
+    nullptr,
+    NumberClassFinish};
 
 static char* FracNumberToCString(JSContext* cx, ToCStringBuf* cbuf, double d,
                                  int base = 10) {
@@ -1525,7 +1522,7 @@ static JSString* NumberToStringWithBase(JSContext* cx, double d, int base) {
       return cx->staticStrings().getUnit(c);
     }
 
-    if (JSFlatString* str = realm->dtoaCache.lookup(base, d)) {
+    if (JSLinearString* str = realm->dtoaCache.lookup(base, d)) {
       return str;
     }
 
@@ -1534,7 +1531,7 @@ static JSString* NumberToStringWithBase(JSContext* cx, double d, int base) {
                numStr < cbuf.sbuf + cbuf.sbufSize);
     MOZ_ASSERT(numStrLen == strlen(numStr));
   } else {
-    if (JSFlatString* str = realm->dtoaCache.lookup(base, d)) {
+    if (JSLinearString* str = realm->dtoaCache.lookup(base, d)) {
       return str;
     }
 
@@ -1550,7 +1547,7 @@ static JSString* NumberToStringWithBase(JSContext* cx, double d, int base) {
     numStrLen = strlen(numStr);
   }
 
-  JSFlatString* s = NewStringCopyN<allowGC>(cx, numStr, numStrLen);
+  JSLinearString* s = NewStringCopyN<allowGC>(cx, numStr, numStrLen);
   if (!s) {
     return nullptr;
   }
@@ -1587,7 +1584,7 @@ JSAtom* js::NumberToAtom(JSContext* cx, double d) {
     return Int32ToAtom(cx, si);
   }
 
-  if (JSFlatString* str = LookupDtoaCache(cx, d)) {
+  if (JSLinearString* str = LookupDtoaCache(cx, d)) {
     return AtomizeString(cx, str);
   }
 
@@ -1611,13 +1608,13 @@ JSAtom* js::NumberToAtom(JSContext* cx, double d) {
   return atom;
 }
 
-JSFlatString* js::IndexToString(JSContext* cx, uint32_t index) {
+JSLinearString* js::IndexToString(JSContext* cx, uint32_t index) {
   if (StaticStrings::hasUint(index)) {
     return cx->staticStrings().getUint(index);
   }
 
   Realm* realm = cx->realm();
-  if (JSFlatString* str = realm->dtoaCache.lookup(10, index)) {
+  if (JSLinearString* str = realm->dtoaCache.lookup(10, index)) {
     return str;
   }
 

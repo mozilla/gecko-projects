@@ -14,6 +14,7 @@ This currently affects the following sections:
 
 - profile
 - add-ons
+- services
 
 
 Structure:
@@ -85,6 +86,13 @@ Structure:
         sandbox: {
           effectiveContentProcessLevel: <integer>,
         }
+      },
+      // Optional, missing if fetching the information failed or had not yet completed.
+      services: {
+        // True if the user has a firefox account
+        accountEnabled: <bool>,
+        // True if the user has sync enabled.
+        syncEnabled: <bool>
       },
       profile: {
         creationDate: <integer>, // integer days since UNIX epoch, e.g. 16446
@@ -371,8 +379,6 @@ The following is a partial list of collected preferences.
 - ``browser.search.suggest.enabled``: The "master switch" for search suggestions everywhere in Firefox (search bar, urlbar, etc.). Defaults to true.
 
 - ``browser.urlbar.suggest.searches``: True if search suggestions are enabled in the urlbar. Defaults to false.
-
-- ``browser.urlbar.userMadeSearchSuggestionsChoice``: True if the user has clicked Yes or No in the urlbar's opt-in notification. Defaults to false.
 
 - ``browser.zoom.full`` (deprecated): True if zoom is enabled for both text and images, that is if "Zoom Text Only" is not enabled. Defaults to true. This preference was collected in Firefox 50 to 52 (`Bug 979323 <https://bugzilla.mozilla.org/show_bug.cgi?id=979323>`_).
 

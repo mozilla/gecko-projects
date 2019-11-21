@@ -8,35 +8,23 @@
  */
 
 var gDebuggee;
-var gClient;
 var gThreadFront;
 
-Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
-
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-});
-
-function run_test() {
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-stack");
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-stack", function(
-      response,
-      targetFront,
-      threadFront
-    ) {
+add_task(
+  threadFrontTest(
+    async ({ threadFront, debuggee }) => {
       gThreadFront = threadFront;
+      gDebuggee = debuggee;
       test_pause_frame();
-    });
-  });
-  do_test_pending();
-}
+    },
+    { waitForFinish: true }
+  )
+);
 
 function test_pause_frame() {
-  gThreadFront.once("paused", function(packet) {
-    let parentEnv = packet.frame.environment.parent;
+  gThreadFront.once("paused", async function(packet) {
+    const environment = await packet.frame.getEnvironment();
+    let parentEnv = environment.parent;
     const bindings = parentEnv.bindings;
     const args = bindings.arguments;
     const vars = bindings.variables;
@@ -50,15 +38,13 @@ function test_pause_frame() {
     parentEnv = parentEnv.parent.parent;
     Assert.notEqual(parentEnv, undefined);
     const objClient = gThreadFront.pauseGrip(parentEnv.object);
-    objClient.getPrototypeAndProperties(function(response) {
-      Assert.equal(response.ownProperties.Object.value.type, "object");
-      Assert.equal(response.ownProperties.Object.value.class, "Function");
-      Assert.ok(!!response.ownProperties.Object.value.actor);
+    const response = await objClient.getPrototypeAndProperties();
+    Assert.equal(response.ownProperties.Object.value.type, "object");
+    Assert.equal(response.ownProperties.Object.value.class, "Function");
+    Assert.ok(!!response.ownProperties.Object.value.actor);
 
-      gThreadFront.resume().then(function() {
-        finishClient(gClient);
-      });
-    });
+    await gThreadFront.resume();
+    threadFrontTestFinished();
   });
 
   /* eslint-disable */

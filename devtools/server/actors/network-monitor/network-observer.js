@@ -348,13 +348,15 @@ NetworkObserver.prototype = {
       (topic != "http-on-examine-response" &&
         topic != "http-on-examine-cached-response" &&
         topic != "http-on-failed-opening-request") ||
-      !(subject instanceof Ci.nsIHttpChannel)
+      !(subject instanceof Ci.nsIHttpChannel) ||
+      !(subject instanceof Ci.nsIClassifiedChannel)
     ) {
       return;
     }
 
     const blockedOrFailed = topic === "http-on-failed-opening-request";
 
+    subject.QueryInterface(Ci.nsIClassifiedChannel);
     const channel = subject.QueryInterface(Ci.nsIHttpChannel);
 
     if (!matchRequest(channel, this.filters)) {
@@ -559,11 +561,15 @@ NetworkObserver.prototype = {
       return;
     }
 
-    if (!(channel instanceof Ci.nsIHttpChannel)) {
+    if (
+      !(channel instanceof Ci.nsIHttpChannel) ||
+      !(channel instanceof Ci.nsIClassifiedChannel)
+    ) {
       return;
     }
 
     channel = channel.QueryInterface(Ci.nsIHttpChannel);
+    channel = channel.QueryInterface(Ci.nsIClassifiedChannel);
 
     if (
       activitySubtype == gActivityDistributor.ACTIVITY_SUBTYPE_REQUEST_HEADER
@@ -1023,7 +1029,7 @@ NetworkObserver.prototype = {
    *         - total - the total time for all of the request and response.
    *         - timings - the HAR timings object.
    */
-  /* eslint-disable complexity */
+  // eslint-disable-next-line complexity
   _setupHarTimings: function(httpActivity, fromCache) {
     if (fromCache) {
       // If it came from the browser cache, we have no timing
@@ -1264,7 +1270,6 @@ NetworkObserver.prototype = {
       offsets: ot.offsets,
     };
   },
-  /* eslint-enable complexity */
 
   _extractServerTimings: function(channel) {
     if (!channel || !channel.serverTiming) {

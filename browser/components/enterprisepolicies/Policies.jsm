@@ -112,17 +112,33 @@ var Policies = {
         );
       }
       if ("AllowNonFQDN" in param) {
-        if (param.AllowNonFQDN.NTLM) {
+        if ("NTLM" in param.AllowNonFQDN) {
           setDefaultPref(
             "network.automatic-ntlm-auth.allow-non-fqdn",
             param.AllowNonFQDN.NTLM,
             locked
           );
         }
-        if (param.AllowNonFQDN.SPNEGO) {
+        if ("SPNEGO" in param.AllowNonFQDN) {
           setDefaultPref(
             "network.negotiate-auth.allow-non-fqdn",
             param.AllowNonFQDN.SPNEGO,
+            locked
+          );
+        }
+      }
+      if ("AllowProxies" in param) {
+        if ("NTLM" in param.AllowProxies) {
+          setDefaultPref(
+            "network.automatic-ntlm-auth.allow-proxies",
+            param.AllowProxies.NTLM,
+            locked
+          );
+        }
+        if ("SPNEGO" in param.AllowProxies) {
+          setDefaultPref(
+            "network.negotiate-auth.allow-proxies",
+            param.AllowProxies.SPNEGO,
             locked
           );
         }
@@ -235,9 +251,13 @@ var Policies = {
                 return;
               }
               let certFile = reader.result;
+              let certFileArray = [];
+              for (let i = 0; i < certFile.length; i++) {
+                certFileArray.push(certFile.charCodeAt(i));
+              }
               let cert;
               try {
-                cert = gCertDB.constructX509(certFile);
+                cert = gCertDB.constructX509(certFileArray);
               } catch (e) {
                 try {
                   // It might be PEM instead of DER.
@@ -450,6 +470,14 @@ var Policies = {
     },
   },
 
+  DisablePasswordReveal: {
+    onBeforeUIStartup(manager, param) {
+      if (param) {
+        manager.disallowFeature("passwordReveal");
+      }
+    },
+  },
+
   DisablePocket: {
     onBeforeAddons(manager, param) {
       if (param) {
@@ -560,18 +588,53 @@ var Policies = {
 
   DisplayMenuBar: {
     onBeforeUIStartup(manager, param) {
-      let value = (!param).toString();
-      // This policy is meant to change the default behavior, not to force it.
-      // If this policy was alreay applied and the user chose to re-hide the
-      // menu bar, do not show it again.
-      runOncePerModification("displayMenuBar", value, () => {
+      let value;
+      if (
+        typeof param === "boolean" ||
+        param == "default-on" ||
+        param == "default-off"
+      ) {
+        switch (param) {
+          case "default-on":
+            value = "false";
+            break;
+          case "default-off":
+            value = "true";
+            break;
+          default:
+            value = (!param).toString();
+            break;
+        }
+        // This policy is meant to change the default behavior, not to force it.
+        // If this policy was already applied and the user chose to re-hide the
+        // menu bar, do not show it again.
+        runOncePerModification("displayMenuBar", value, () => {
+          gXulStore.setValue(
+            BROWSER_DOCUMENT_URL,
+            "toolbar-menubar",
+            "autohide",
+            value
+          );
+        });
+      } else {
+        switch (param) {
+          case "always":
+            value = "false";
+            break;
+          case "never":
+            // Make sure Alt key doesn't show the menubar
+            setAndLockPref("ui.key.menuAccessKeyFocuses", false);
+            value = "true";
+            break;
+        }
         gXulStore.setValue(
           BROWSER_DOCUMENT_URL,
           "toolbar-menubar",
           "autohide",
           value
         );
-      });
+        manager.disallowFeature("hideShowMenuBar");
+      }
     },
   },
 
@@ -942,6 +1005,10 @@ var Policies = {
     },
   },
 
+  LegacyProfiles: {
+    // Handled in nsToolkitProfileService.cpp (Windows only)
+  },
+
   LocalFileLinks: {
     onBeforeAddons(manager, param) {
       // If there are existing capabilities, lock them with the policy pref.
@@ -1278,6 +1345,40 @@ var Policies = {
                   await Services.search.setDefault(defaultEngine);
                 } catch (ex) {
                   log.error("Unable to set the default search engine", ex);
+                }
+              }
+            }
+          );
+        }
+        if (param.DefaultPrivate) {
+          await runOncePerModification(
+            "setDefaultPrivateSearchEngine",
+            param.DefaultPrivate,
+            async () => {
+              let defaultPrivateEngine;
+              try {
+                defaultPrivateEngine = Services.search.getEngineByName(
+                  param.DefaultPrivate
+                );
+                if (!defaultPrivateEngine) {
+                  throw new Error("No engine by that name could be found");
+                }
+              } catch (ex) {
+                log.error(
+                  `Search engine lookup failed when attempting to set ` +
+                    `the default private engine. Requested engine was ` +
+                    `"${param.DefaultPrivate}".`,
+                  ex
+                );
+              }
+              if (defaultPrivateEngine) {
+                try {
+                  await Services.search.setDefaultPrivate(defaultPrivateEngine);
+                } catch (ex) {
+                  log.error(
+                    "Unable to set the default private search engine",
+                    ex
+                  );
                 }
               }
             }

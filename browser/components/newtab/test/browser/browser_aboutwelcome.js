@@ -70,14 +70,41 @@ async function test_trailhead_branch(
  */
 add_task(async function test_trailhead_branches() {
   await test_trailhead_branch(
-    "join-privacy",
+    "join-dynamic",
     // Expected selectors:
     [
       ".trailhead.joinCohort",
+      "button[data-l10n-id=onboarding-data-sync-button2]",
+      "button[data-l10n-id=onboarding-firefox-monitor-button]",
       "button[data-l10n-id=onboarding-browse-privately-button]",
-      "button[data-l10n-id=onboarding-tracking-protection-button2]",
-      "button[data-l10n-id=onboarding-lockwise-passwords-button2]",
     ]
+  );
+
+  // Validate sync card is not shown if user usesFirefoxSync
+  await pushPrefs(["services.sync.username", "someone@foo.com"]);
+  await test_trailhead_branch(
+    "join-dynamic",
+    // Expected selectors:
+    [
+      ".trailhead.joinCohort",
+      "button[data-l10n-id=onboarding-firefox-monitor-button]",
+      "button[data-l10n-id=onboarding-browse-privately-button]",
+    ],
+    // Unexpected selectors:
+    ["button[data-l10n-id=onboarding-data-sync-button2]"]
+  );
+
+  // Validate multidevice card is not shown if user has mobile devices connected
+  await pushPrefs(["services.sync.clients.devices.mobile", 1]);
+  await test_trailhead_branch(
+    "join-dynamic",
+    // Expected selectors:
+    [
+      ".trailhead.joinCohort",
+      "button[data-l10n-id=onboarding-firefox-monitor-button]",
+    ],
+    // Unexpected selectors:
+    ["button[data-l10n-id=onboarding-mobile-phone-button"]
   );
 
   await test_trailhead_branch(
@@ -92,39 +119,56 @@ add_task(async function test_trailhead_branches() {
   );
 
   await test_trailhead_branch(
-    "cards-multidevice",
-    // Expected selectors:
-    [
-      "button[data-l10n-id=onboarding-mobile-phone-button]",
-      "button[data-l10n-id=onboarding-pocket-anywhere-button]",
-      "button[data-l10n-id=onboarding-send-tabs-button]",
-    ],
-    // Unexpected selectors:
-    ["#trailheadDialog"]
-  );
-
-  await test_trailhead_branch(
-    "join-payoff",
+    "modal_variant_a-supercharge",
     // Expected selectors:
     [
       ".trailhead.joinCohort",
-      "button[data-l10n-id=onboarding-firefox-monitor-button]",
-      "button[data-l10n-id=onboarding-facebook-container-button]",
-      "button[data-l10n-id=onboarding-firefox-send-button]",
+      "p[data-l10n-id=onboarding-benefit-sync-text]",
+      "p[data-l10n-id=onboarding-benefit-monitor-text]",
+      "p[data-l10n-id=onboarding-benefit-lockwise-text]",
+    ]
+  );
+
+  await test_trailhead_branch(
+    "modal_variant_f-supercharge",
+    // Expected selectors:
+    [
+      ".trailhead.joinCohort",
+      "h3[data-l10n-id=onboarding-welcome-form-header]",
+      "p[data-l10n-id=onboarding-benefit-products-text]",
+      "p[data-l10n-id=onboarding-benefit-knowledge-text]",
+      "p[data-l10n-id=onboarding-benefit-privacy-text]",
+    ]
+  );
+
+  await test_trailhead_branch(
+    "full_page_d-supercharge",
+    // Expected selectors:
+    [
+      ".trailhead-fullpage",
+      ".trailheadCard",
+      "p[data-l10n-id=onboarding-benefit-products-text]",
+      "button[data-l10n-id=onboarding-join-form-continue]",
+      "button[data-l10n-id=onboarding-join-form-signin]",
+    ]
+  );
+
+  await test_trailhead_branch(
+    "full_page_e-supercharge",
+    // Expected selectors:
+    [
+      ".fullPageCardsAtTop",
+      ".trailhead-fullpage",
+      ".trailheadCard",
+      "p[data-l10n-id=onboarding-benefit-products-text]",
+      "button[data-l10n-id=onboarding-join-form-continue]",
+      "button[data-l10n-id=onboarding-join-form-signin]",
     ]
   );
 
   await test_trailhead_branch(
     "nofirstrun",
     [],
-    // Unexpected selectors:
-    ["#trailheadDialog", ".trailheadCards"]
-  );
-
-  await test_trailhead_branch(
-    "control",
-    // Expected selectors:
-    [".firstrun-scene"],
     // Unexpected selectors:
     ["#trailheadDialog", ".trailheadCards"]
   );

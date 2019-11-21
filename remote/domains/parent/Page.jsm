@@ -12,6 +12,15 @@ const { DialogHandler } = ChromeUtils.import(
 const { Domain } = ChromeUtils.import(
   "chrome://remote/content/domains/Domain.jsm"
 );
+const { UnsupportedError } = ChromeUtils.import(
+  "chrome://remote/content/Error.jsm"
+);
+const { TabManager } = ChromeUtils.import(
+  "chrome://remote/content/TabManager.jsm"
+);
+const { WindowManager } = ChromeUtils.import(
+  "chrome://remote/content/WindowManager.jsm"
+);
 
 class Page extends Domain {
   constructor(session) {
@@ -31,6 +40,92 @@ class Page extends Domain {
   }
 
   // commands
+
+  /**
+   * Capture page screenshot.
+   *
+   * @param {Object} options
+   * @param {Viewport=} options.clip (not supported)
+   *     Capture the screenshot of a given region only.
+   * @param {string=} options.format
+   *     Image compression format. Defaults to "png".
+   * @param {number=} options.quality
+   *     Compression quality from range [0..100] (jpeg only). Defaults to 80.
+   *
+   * @return {string}
+   *     Base64-encoded image data.
+   */
+  async captureScreenshot(options = {}) {
+    const { format = "png", quality = 80 } = options;
+
+    if (options.clip) {
+      throw new UnsupportedError("clip not supported");
+    }
+    if (options.fromSurface) {
+      throw new UnsupportedError("fromSurface not supported");
+    }
+
+    const MAX_CANVAS_DIMENSION = 32767;
+    const MAX_CANVAS_AREA = 472907776;
+
+    // Retrieve the browsing context of the content browser
+    const { browsingContext, window } = this.session.target;
+    const scale = window.devicePixelRatio;
+
+    const rect = await this.executeInChild("_viewportRect");
+
+    let canvasWidth = rect.width * scale;
+    let canvasHeight = rect.height * scale;
+
+    // Cap the screenshot size based on maximum allowed canvas sizes.
+    // Using higher dimensions would trigger exceptions in Gecko.
+    //
+    // See: https://developer.mozilla.org/en-US/docs/Web/HTML/Element/canvas#Maximum_canvas_size
+    if (canvasWidth > MAX_CANVAS_DIMENSION) {
+      rect.width = Math.floor(MAX_CANVAS_DIMENSION / scale);
+      canvasWidth = rect.width * scale;
+    }
+    if (canvasHeight > MAX_CANVAS_DIMENSION) {
+      rect.height = Math.floor(MAX_CANVAS_DIMENSION / scale);
+      canvasHeight = rect.height * scale;
+    }
+    // If the area is larger, reduce the height to keep the full width.
+    if (canvasWidth * canvasHeight > MAX_CANVAS_AREA) {
+      rect.height = Math.floor(MAX_CANVAS_AREA / (canvasWidth * scale));
+      canvasHeight = rect.height * scale;
+    }
+
+    const snapshot = await browsingContext.currentWindowGlobal.drawSnapshot(
+      rect,
+      scale,
+      "rgb(255,255,255)"
+    );
+
+    const canvas = window.document.createElementNS(
+      "http://www.w3.org/1999/xhtml",
+      "canvas"
+    );
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(snapshot, 0, 0);
+
+    // Bug 1574935 - Huge dimensions can trigger an OOM because multiple copies
+    // of the bitmap will exist in memory. Force the removal of the snapshot
+    // because it is no longer needed.
+    snapshot.close();
+
+    const url = canvas.toDataURL(`image/${format}`, quality / 100);
+    if (!url.startsWith(`data:image/${format}`)) {
+      throw new UnsupportedError(`Unsupported MIME type: image/${format}`);
+    }
+
+    // only return the base64 encoded data without the data URL prefix
+    const data = url.substring(url.indexOf(",") + 1);
+
+    return { data };
+  }
 
   async enable() {
     if (this.enabled) {
@@ -62,16 +157,12 @@ class Page extends Domain {
     }
   }
 
-  bringToFront() {
-    const { browser } = this.session.target;
-    const navigator = browser.ownerGlobal;
-    const { gBrowser } = navigator;
+  async bringToFront() {
+    const { tab, window } = this.session.target;
 
-    // Focus the window responsible for this page.
-    navigator.focus();
-
-    // Select the corresponding tab
-    gBrowser.selectedTab = gBrowser.getTabForBrowser(browser);
+    // Focus the window, and select the corresponding tab
+    await WindowManager.focus(window);
+    TabManager.selectTab(tab);
   }
 
   /**

@@ -33,6 +33,11 @@ import type { Source, Context } from "../../types";
 
 type SourcesList = Source[];
 
+type OwnProps = {|
+  horizontal: boolean,
+  startPanelCollapsed: boolean,
+  endPanelCollapsed: boolean,
+|};
 type Props = {
   cx: Context,
   tabSources: SourcesList,
@@ -53,6 +58,23 @@ type State = {
   hiddenTabs: SourcesList,
 };
 
+function haveTabSourcesChanged(
+  tabSources: SourcesList,
+  prevTabSources: SourcesList
+): boolean {
+  if (tabSources.length !== prevTabSources.length) {
+    return true;
+  }
+
+  for (let i = 0; i < tabSources.length; ++i) {
+    if (tabSources[i].id !== prevTabSources[i].id) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 class Tabs extends PureComponent<Props, State> {
   onTabContextMenu: Function;
   showContextMenu: Function;
@@ -65,7 +87,7 @@ class Tabs extends PureComponent<Props, State> {
   renderEndPanelToggleButton: Function;
   onResize: Function;
 
-  constructor(props) {
+  constructor(props: Props) {
     super(props);
     this.state = {
       dropdownShown: false,
@@ -77,8 +99,11 @@ class Tabs extends PureComponent<Props, State> {
     });
   }
 
-  componentDidUpdate(prevProps) {
-    if (!(prevProps === this.props)) {
+  componentDidUpdate(prevProps: Props) {
+    if (
+      this.props.selectedSource !== prevProps.selectedSource ||
+      haveTabSourcesChanged(this.props.tabSources, prevProps.tabSources)
+    ) {
       this.updateHiddenTabs();
     }
   }
@@ -121,7 +146,7 @@ class Tabs extends PureComponent<Props, State> {
     this.setState({ hiddenTabs });
   };
 
-  toggleSourcesDropdown(e) {
+  toggleSourcesDropdown() {
     this.setState(prevState => ({
       dropdownShown: !prevState.dropdownShown,
     }));
@@ -234,7 +259,7 @@ const mapStateToProps = state => ({
   isPaused: getIsPaused(state, getCurrentThread(state)),
 });
 
-export default connect(
+export default connect<Props, OwnProps, _, _, _, _>(
   mapStateToProps,
   {
     selectSource: actions.selectSource,

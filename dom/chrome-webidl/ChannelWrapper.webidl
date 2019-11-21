@@ -38,7 +38,7 @@ enum MozContentPolicyType {
 };
 
 /**
- * String versions of CLASSIFIED_* tracking flags from nsHttpChannel.idl
+ * String versions of CLASSIFIED_* tracking flags from nsIClassifiedChannel.idl
  */
 enum MozUrlClassificationFlags {
   "fingerprinting",
@@ -410,6 +410,27 @@ interface ChannelWrapper : EventTarget {
    */
   [Cached, Frozen, GetterThrows, Pure]
   readonly attribute MozUrlClassification? urlClassification;
+
+  /**
+   * Indicates if this response and its content window hierarchy is third
+   * party.
+   */
+  [Cached, Constant]
+  readonly attribute boolean thirdParty;
+
+  /**
+   * The current bytes sent of the request. This will be 0 if a request has not
+   * sent yet, or if the request is not an HTTP request.
+   */
+  [Cached, Pure]
+  readonly attribute unsigned long long requestSize;
+
+  /**
+   * The current bytes received of the response. This will be 0 if a response
+   * has not recieved yet, or if the request is not an HTTP response.
+   */
+  [Cached, Pure]
+  readonly attribute unsigned long long responseSize;
 };
 
 /**

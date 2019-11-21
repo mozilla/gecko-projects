@@ -7,6 +7,8 @@
 #ifndef js_Id_h
 #define js_Id_h
 
+// [SMDOC] Property Key / JSID
+//
 // A jsid is an identifier for a property or method of an object which is
 // either a 31-bit unsigned integer, interned string or symbol.
 //
@@ -170,7 +172,9 @@ namespace JS {
 template <>
 struct GCPolicy<jsid> {
   static void trace(JSTracer* trc, jsid* idp, const char* name) {
-    js::UnsafeTraceManuallyBarrieredEdge(trc, idp, name);
+    // It's not safe to trace unbarriered pointers except as part of root
+    // marking.
+    UnsafeTraceRoot(trc, idp, name);
   }
   static bool isValid(jsid id) {
     return !JSID_IS_GCTHING(id) ||

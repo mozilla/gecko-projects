@@ -21,14 +21,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AttributionCode: "resource:///modules/AttributionCode.jsm",
   FilterExpressions:
     "resource://gre/modules/components-utils/FilterExpressions.jsm",
+  fxAccounts: "resource://gre/modules/FxAccounts.jsm",
 });
-
-XPCOMUtils.defineLazyServiceGetter(
-  this,
-  "UpdateManager",
-  "@mozilla.org/updates/update-manager;1",
-  "nsIUpdateManager"
-);
 
 XPCOMUtils.defineLazyPreferenceGetter(
   this,
@@ -221,6 +215,18 @@ const QueryCache = {
     RecentBookmarks: new CachedTargetingGetter("getRecentBookmarks"),
   },
 };
+
+/**
+ * sortMessagesByOrder
+ *
+ * Each message has an associated order, which is guaranteed to be strictly
+ * positive. Sort the messages so that message shows in order specified
+ *
+ */
+
+function sortMessagesByOrder(messages) {
+  return messages.sort((a, b) => a.order - b.order);
+}
 
 /**
  * sortMessagesByWeightedRank
@@ -454,16 +460,6 @@ const TargetingGetters = {
   get isWhatsNewPanelEnabled() {
     return isWhatsNewPanelEnabled;
   },
-  get earliestFirefoxVersion() {
-    if (UpdateManager.updateCount) {
-      const earliestFirefoxVersion = UpdateManager.getUpdateAt(
-        UpdateManager.updateCount - 1
-      ).previousAppVersion;
-      return parseInt(earliestFirefoxVersion.match(/\d+/), 10);
-    }
-
-    return null;
-  },
   get isFxABadgeEnabled() {
     return isFxABadgeEnabled;
   },
@@ -476,6 +472,23 @@ const TargetingGetters = {
   },
   get totalBlockedCount() {
     return TrackingDBService.sumAllEvents();
+  },
+  get attachedFxAOAuthClients() {
+    // Explicitly catch error objects e.g.  NO_ACCOUNT triggered when
+    // setting FXA_USERNAME_PREF from tests
+    return this.usesFirefoxSync
+      ? new Promise(resolve => {
+          fxAccounts
+            .listAttachedOAuthClients()
+            .then(clients => {
+              resolve(clients);
+            })
+            .catch(() => resolve([]));
+        })
+      : [];
+  },
+  get platformName() {
+    return AppConstants.platform;
   },
 };
 
@@ -538,7 +551,9 @@ this.ASRouterTargeting = {
         candidateMessageTrigger.params.includes(trigger.param.host)) ||
       (candidateMessageTrigger.params &&
         trigger.param.type &&
-        candidateMessageTrigger.params.includes(trigger.param.type)) ||
+        candidateMessageTrigger.params.filter(
+          t => (t & trigger.param.type) === t
+        ).length) ||
       (candidateMessageTrigger.patterns &&
         trigger.param.url &&
         new MatchPatternSet(candidateMessageTrigger.patterns).matches(
@@ -576,8 +591,10 @@ this.ASRouterTargeting = {
     return result;
   },
 
-  _getSortedMessages(messages) {
-    const weightSortedMessages = sortMessagesByWeightedRank([...messages]);
+  _getSortedMessages(messages, ordered) {
+    const weightSortedMessages = ordered
+      ? sortMessagesByOrder(messages)
+      : sortMessagesByWeightedRank([...messages]);
     const sortedMessages = sortMessagesByTargeting(weightSortedMessages);
     return sortMessagesByPriority(sortedMessages);
   },
@@ -607,10 +624,17 @@ this.ASRouterTargeting = {
    * @param {trigger} string A trigger expression if a message for that trigger is desired
    * @param {obj|null} context A FilterExpression context. Defaults to TargetingGetters above.
    * @param {func} onError A function to handle errors (takes two params; error, message)
+   * @param {func} ordered An optional param when true sort message by order specified in message
    * @returns {obj} an AS router message
    */
-  async findMatchingMessage({ messages, trigger, context, onError }) {
-    const sortedMessages = this._getSortedMessages(messages);
+  async findMatchingMessage({
+    messages,
+    trigger,
+    context,
+    onError,
+    ordered = false,
+  }) {
+    const sortedMessages = this._getSortedMessages(messages, ordered);
     const combinedContext = this._getCombinedContext(trigger, context);
 
     for (const candidate of sortedMessages) {
@@ -631,10 +655,17 @@ this.ASRouterTargeting = {
    * @param {trigger} string A trigger expression if a message for that trigger is desired.
    * @param {obj|null} context A FilterExpression context. Defaults to TargetingGetters above.
    * @param {func} onError A function to handle errors (takes two params; error, message)
+   * @param {func} ordered An optional param when true sort message by order specified in message
    * @returns {Array} An array of AS router messages that match.
    */
-  async findAllMatchingMessages({ messages, trigger, context, onError }) {
-    const sortedMessages = this._getSortedMessages(messages);
+  async findAllMatchingMessages({
+    messages,
+    trigger,
+    context,
+    onError,
+    ordered = false,
+  }) {
+    const sortedMessages = this._getSortedMessages(messages, ordered);
     const combinedContext = this._getCombinedContext(trigger, context);
     const matchingMessages = [];
 

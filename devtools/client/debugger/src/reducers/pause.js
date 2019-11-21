@@ -30,6 +30,7 @@ import type {
   ThreadContext,
   Previews,
   SourceLocation,
+  ExecutionPoint,
 } from "../types";
 
 export type Command =
@@ -46,6 +47,9 @@ type ThreadPauseState = {
   why: ?Why,
   isWaitingOnBreak: boolean,
   frames: ?(any[]),
+  replayFramePositions: {
+    [FrameId]: Array<ExecutionPoint>,
+  },
   frameScopes: {
     generated: {
       [FrameId]: {
@@ -91,7 +95,6 @@ type ThreadPauseState = {
 export type PauseState = {
   cx: Context,
   threadcx: ThreadContext,
-  canRewind: boolean,
   threads: { [ThreadId]: ThreadPauseState },
   skipPausing: boolean,
   mapScopes: boolean,
@@ -113,7 +116,6 @@ function createPauseState(thread: ThreadId = "UnknownThread") {
     },
     previewLocation: null,
     threads: {},
-    canRewind: false,
     skipPausing: prefs.skipPausing,
     mapScopes: prefs.mapScopes,
     shouldPauseOnExceptions: prefs.pauseOnExceptions,
@@ -136,7 +138,6 @@ const resumedPauseState = {
 const createInitialPauseState = () => ({
   ...resumedPauseState,
   isWaitingOnBreak: false,
-  canRewind: false,
   command: null,
   lastCommand: null,
   previousLocation: null,
@@ -270,6 +271,14 @@ function update(
       });
     }
 
+    case "SET_FRAME_POSITIONS":
+      return updateThreadState({
+        replayFramePositions: {
+          ...threadState().replayFramePositions,
+          [action.frame]: action.positions,
+        },
+      });
+
     case "BREAK_ON_NEXT":
       return updateThreadState({ isWaitingOnBreak: true });
 
@@ -279,7 +288,6 @@ function update(
     case "CONNECT":
       return {
         ...createPauseState(action.mainThread.actor),
-        canRewind: action.canRewind,
       };
 
     case "PAUSE_ON_EXCEPTIONS": {
@@ -353,20 +361,6 @@ function update(
           },
         },
       };
-    }
-
-    // Disable skipPausing if a breakpoint is enabled or added
-    case "SET_BREAKPOINT": {
-      return action.breakpoint.disabled
-        ? state
-        : { ...state, skipPausing: false };
-    }
-
-    case "UPDATE_EVENT_LISTENERS":
-    case "REMOVE_BREAKPOINT":
-    case "SET_XHR_BREAKPOINT":
-    case "ENABLE_XHR_BREAKPOINT": {
-      return { ...state, skipPausing: false };
     }
 
     case "TOGGLE_SKIP_PAUSING": {
@@ -483,10 +477,6 @@ export function getShouldPauseOnExceptions(state: State) {
 
 export function getShouldPauseOnCaughtExceptions(state: State) {
   return state.pause.shouldPauseOnCaughtExceptions;
-}
-
-export function getCanRewind(state: State) {
-  return state.pause.canRewind;
 }
 
 export function getFrames(state: State, thread: ThreadId) {

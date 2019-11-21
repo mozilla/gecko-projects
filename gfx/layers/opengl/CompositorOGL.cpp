@@ -53,7 +53,9 @@
 #include "HeapCopyOfStackArray.h"
 #include "GLBlitHelper.h"
 #include "mozilla/gfx/Swizzle.h"
-
+#ifdef MOZ_WAYLAND
+#  include "mozilla/widget/GtkCompositorWidget.h"
+#endif
 #if MOZ_WIDGET_ANDROID
 #  include "GeneratedJNIWrappers.h"
 #endif
@@ -587,15 +589,9 @@ void CompositorOGL::PrepareViewport(CompositingRenderTargetOGL* aRenderTarget) {
     // Matrix to transform (0, 0, aWidth, aHeight) to viewport space (-1.0, 1.0,
     // 2, 2) and flip the contents.
     Matrix viewMatrix;
-    if (mGLContext->IsOffscreen() && !gIsGtest) {
-      // In case of rendering via GL Offscreen context, disable Y-Flipping
-      viewMatrix.PreTranslate(-1.0, -1.0);
-      viewMatrix.PreScale(2.0f / float(size.width), 2.0f / float(size.height));
-    } else {
-      viewMatrix.PreTranslate(-1.0, 1.0);
-      viewMatrix.PreScale(2.0f / float(size.width), 2.0f / float(size.height));
-      viewMatrix.PreScale(1.0f, -1.0f);
-    }
+    viewMatrix.PreTranslate(-1.0, 1.0);
+    viewMatrix.PreScale(2.0f / float(size.width), 2.0f / float(size.height));
+    viewMatrix.PreScale(1.0f, -1.0f);
 
     MOZ_ASSERT(mCurrentRenderTarget, "No destination");
     // If we're drawing directly to the window then we want to offset
@@ -756,7 +752,7 @@ void CompositorOGL::ClearRect(const gfx::Rect& aRect) {
 
 already_AddRefed<CompositingRenderTargetOGL>
 CompositorOGL::RenderTargetForNativeLayer(NativeLayer* aNativeLayer,
-                                          IntRegion& aInvalidRegion) {
+                                          const IntRegion& aInvalidRegion) {
   if (aInvalidRegion.IsEmpty()) {
     return nullptr;
   }
@@ -767,14 +763,11 @@ CompositorOGL::RenderTargetForNativeLayer(NativeLayer* aNativeLayer,
   IntRect layerRect = aNativeLayer->GetRect();
   IntRegion invalidRelativeToLayer =
       aInvalidRegion.MovedBy(-layerRect.TopLeft());
-  aNativeLayer->InvalidateRegionThroughoutSwapchain(invalidRelativeToLayer);
-  Maybe<GLuint> fbo = aNativeLayer->NextSurfaceAsFramebuffer(false);
+  Maybe<GLuint> fbo =
+      aNativeLayer->NextSurfaceAsFramebuffer(invalidRelativeToLayer, false);
   if (!fbo) {
     return nullptr;
   }
-
-  invalidRelativeToLayer = aNativeLayer->CurrentSurfaceInvalidRegion();
-  aInvalidRegion = invalidRelativeToLayer.MovedBy(layerRect.TopLeft());
 
   RefPtr<CompositingRenderTargetOGL> rt =
       CompositingRenderTargetOGL::CreateForExternallyOwnedFBO(
@@ -990,6 +983,11 @@ Maybe<IntRect> CompositorOGL::BeginFrame(const nsIntRegion& aInvalidRegion,
     MakeCurrent(ForceMakeCurrent);
 
     mWidgetSize = LayoutDeviceIntSize::FromUnknownSize(rect.Size());
+#ifdef MOZ_WAYLAND
+    if (mWidget && mWidget->AsX11()) {
+      mWidget->AsX11()->SetEGLNativeWindowSize(mWidgetSize);
+    }
+#endif
   } else {
     MakeCurrent();
   }
@@ -1056,6 +1054,67 @@ void CompositorOGL::CreateFBOWithTexture(const gfx::IntRect& aRect,
   mGLContext->fGenFramebuffers(1, aFBO);
 }
 
+// Should be called after calls to fReadPixels or fCopyTexImage2D, and other
+// GL read calls.
+static void WorkAroundAppleIntelHD3000GraphicsGLDriverBug(GLContext* aGL) {
+#ifdef XP_MACOSX
+  if (aGL->WorkAroundDriverBugs() &&
+      aGL->Renderer() == GLRenderer::IntelHD3000) {
+    // Work around a bug in the Apple Intel HD Graphics 3000 driver (bug
+    // 1586627, filed with Apple as FB7379358). This bug has been found present
+    // on 10.9.3 and on 10.13.6, so it likely affects all shipped versions of
+    // this driver. (macOS 10.14 does not support this GPU.)
+    // The bug manifests as follows: Reading from a framebuffer puts that
+    // framebuffer into a state such that deleting that framebuffer can break
+    // other framebuffers in certain cases. More specifically, if you have two
+    // framebuffers A and B, the following sequence of events breaks subsequent
+    // drawing to B:
+    //  1. A becomes "most recently read-from framebuffer".
+    //  2. B is drawn to.
+    //  3. A is deleted, and other GL state (such as GL_SCISSOR enabled state)
+    //     is touched.
+    //  4. B is drawn to again.
+    // Now all draws to framebuffer B, including the draw from step 4, will
+    // render at the wrong position and upside down.
+    //
+    // When AfterGLReadCall() is called, the currently bound framebuffer is the
+    // framebuffer that has been read from most recently. So in the presence of
+    // this bug, deleting this framebuffer has now become dangerous. We work
+    // around the bug by creating a new short-lived framebuffer, making that new
+    // framebuffer the most recently read-from framebuffer (using
+    // glCopyTexImage2D), and then deleting it under controlled circumstances.
+    // This deletion is not affected by the bug because our deletion call is not
+    // interleaved with draw calls to another framebuffer and a touching of the
+    // GL scissor enabled state.
+
+    ScopedTexture texForReading(aGL);
+    {
+      // Initialize a 1x1 texture.
+      ScopedBindTexture autoBindTexForReading(aGL, texForReading);
+      aGL->fTexImage2D(LOCAL_GL_TEXTURE_2D, 0, LOCAL_GL_RGBA, 1, 1, 0,
+                       LOCAL_GL_RGBA, LOCAL_GL_UNSIGNED_BYTE, nullptr);
+      aGL->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MIN_FILTER,
+                          LOCAL_GL_LINEAR);
+      aGL->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MAG_FILTER,
+                          LOCAL_GL_LINEAR);
+    }
+    // Make a framebuffer around the texture.
+    ScopedFramebufferForTexture autoFBForReading(aGL, texForReading);
+    if (autoFBForReading.IsComplete()) {
+      // "Read" from the framebuffer, by initializing a new texture using
+      // glCopyTexImage2D. This flips the bad bit on autoFBForReading.FB().
+      ScopedBindFramebuffer autoFB(aGL, autoFBForReading.FB());
+      ScopedTexture texReadingDest(aGL);
+      ScopedBindTexture autoBindTexReadingDest(aGL, texReadingDest);
+      aGL->fCopyTexImage2D(LOCAL_GL_TEXTURE_2D, 0, LOCAL_GL_RGBA, 0, 0, 1, 1,
+                           0);
+    }
+    // When autoFBForReading goes out of scope, the "poisoned" framebuffer is
+    // deleted, and the bad state seems to go away along with it.
+  }
+#endif
+}
+
 GLuint CompositorOGL::CreateTexture(const IntRect& aRect, bool aCopyFromSource,
                                     GLuint aSourceFrameBuffer,
                                     IntSize* aAllocSize) {
@@ -1100,6 +1159,7 @@ GLuint CompositorOGL::CreateTexture(const IntRect& aRect, bool aCopyFromSource,
       mGLContext->fCopyTexImage2D(mFBOTextureTarget, 0, LOCAL_GL_RGBA,
                                   clampedRect.X(), FlipY(clampedRect.YMost()),
                                   clampedRectWidth, clampedRectHeight, 0);
+      WorkAroundAppleIntelHD3000GraphicsGLDriverBug(mGLContext);
     } else {
       // Curses, incompatible formats.  Take a slow path.
 
@@ -1110,6 +1170,7 @@ GLuint CompositorOGL::CreateTexture(const IntRect& aRect, bool aCopyFromSource,
       mGLContext->fReadPixels(clampedRect.X(), clampedRect.Y(),
                               clampedRectWidth, clampedRectHeight,
                               LOCAL_GL_RGBA, LOCAL_GL_UNSIGNED_BYTE, buf.get());
+      WorkAroundAppleIntelHD3000GraphicsGLDriverBug(mGLContext);
       mGLContext->fTexImage2D(mFBOTextureTarget, 0, LOCAL_GL_RGBA,
                               clampedRectWidth, clampedRectHeight, 0,
                               LOCAL_GL_RGBA, LOCAL_GL_UNSIGNED_BYTE, buf.get());
@@ -1987,13 +2048,11 @@ void CompositorOGL::InsertFrameDoneSync() {
 #ifdef XP_MACOSX
   // Only do this on macOS.
   // On other platforms, SwapBuffers automatically applies back-pressure.
-  if (StaticPrefs::gfx_core_animation_enabled_AtStartup()) {
-    if (mThisFrameDoneSync) {
-      mGLContext->fDeleteSync(mThisFrameDoneSync);
-    }
-    mThisFrameDoneSync =
-        mGLContext->fFenceSync(LOCAL_GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  if (mThisFrameDoneSync) {
+    mGLContext->fDeleteSync(mThisFrameDoneSync);
   }
+  mThisFrameDoneSync =
+      mGLContext->fFenceSync(LOCAL_GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 #endif
 }
 

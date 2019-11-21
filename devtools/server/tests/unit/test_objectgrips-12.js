@@ -11,37 +11,18 @@ const { PromiseTestUtils } = ChromeUtils.import(
 );
 
 var gDebuggee;
-var gClient;
 var gThreadFront;
 
-Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
-
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-});
-
-function run_test() {
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-grips");
-  gDebuggee.eval(
-    function stopMe(arg1) {
-      debugger;
-    }.toString()
-  );
-
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-grips", function(
-      response,
-      targetFront,
-      threadFront
-    ) {
+add_task(
+  threadFrontTest(
+    async ({ threadFront, debuggee }) => {
       gThreadFront = threadFront;
+      gDebuggee = debuggee;
       test_display_string();
-    });
-  });
-  do_test_pending();
-}
+    },
+    { waitForFinish: true }
+  )
+);
 
 function test_display_string() {
   const testCases = [
@@ -163,20 +144,24 @@ function test_display_string() {
   gThreadFront.once("paused", function(packet) {
     const args = packet.frame.arguments;
 
-    (function loop() {
+    (async function loop() {
       const objClient = gThreadFront.pauseGrip(args.pop());
-      objClient.getDisplayString(function({ displayString }) {
-        Assert.equal(displayString, testCases.pop().output);
-        if (args.length) {
-          loop();
-        } else {
-          gThreadFront.resume().then(function() {
-            finishClient(gClient);
-          });
-        }
-      });
+      const response = await objClient.getDisplayString();
+      Assert.equal(response.displayString, testCases.pop().output);
+      if (args.length) {
+        loop();
+      } else {
+        await gThreadFront.resume();
+        threadFrontTestFinished();
+      }
     })();
   });
+
+  gDebuggee.eval(
+    function stopMe(arg1) {
+      debugger;
+    }.toString()
+  );
 
   const inputs = testCases.map(({ input }) => input).join(",");
   gDebuggee.eval("stopMe(" + inputs + ")");

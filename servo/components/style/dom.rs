@@ -331,7 +331,7 @@ where
 }
 
 /// The ShadowRoot trait.
-pub trait TShadowRoot: Sized + Copy + Clone + PartialEq {
+pub trait TShadowRoot: Sized + Copy + Clone + Debug + PartialEq {
     /// The concrete node type.
     type ConcreteNode: TNode<ConcreteShadowRoot = Self>;
 
@@ -774,14 +774,6 @@ pub trait TElement:
             None => return false,
         };
         return data.hint.has_animation_hint();
-    }
-
-    /// Returns the anonymous content for the current element's XBL binding,
-    /// given if any.
-    ///
-    /// This is used in Gecko for XBL.
-    fn xbl_binding_anonymous_content(&self) -> Option<Self::ConcreteNode> {
-        None
     }
 
     /// The shadow root this element is a host of.

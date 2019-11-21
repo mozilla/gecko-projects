@@ -30,26 +30,26 @@ $excerpt-line-height: 20;
     }
   }
 
-  &:not(.placeholder):hover .ds-card-link {
-    @include ds-fade-in($grey-30);
-
-    @include dark-theme-only {
-      @include ds-fade-in($grey-60);
-    }
-
-    header {
-      @include dark-theme-only {
-        color: $blue-40;
-      }
-
-      color: $blue-60;
-    }
-  }
-
   .ds-card-link {
     height: 100%;
     display: flex;
     flex-direction: column;
+
+    &:hover {
+      @include ds-fade-in($grey-30);
+
+      @include dark-theme-only {
+        @include ds-fade-in($grey-60);
+      }
+
+      header {
+        @include dark-theme-only {
+          color: $blue-40;
+        }
+
+        color: $blue-60;
+      }
+    }
 
     &:focus {
       @include ds-fade-in;
@@ -68,6 +68,12 @@ $excerpt-line-height: 20;
     }
 
     &:active {
+      @include ds-fade-in($grey-30);
+
+      @include dark-theme-only {
+        @include ds-fade-in($grey-60);
+      }
+
       header {
         @include dark-theme-only {
           color: $blue-50;
@@ -90,13 +96,13 @@ $excerpt-line-height: 20;
 
     .title {
       // show only 3 lines of copy
-      @include limit-visibile-lines(3, $header-line-height, $header-font-size);
+      @include limit-visible-lines(3, $header-line-height, $header-font-size);
       font-weight: 600;
     }
 
     .excerpt {
       // show only 3 lines of copy
-      @include limit-visibile-lines(
+      @include limit-visible-lines(
         3,
         $excerpt-line-height,
         $excerpt-font-size
@@ -117,26 +123,29 @@ $excerpt-line-height: 20;
     .cta-button {
       @include dark-theme-only {
         color: $grey-10;
-        background: $grey-90-30;
+        background: $grey-90-70;
       }
+
       width: 100%;
       margin: 12px 0 4px;
       box-shadow: none;
       border-radius: 4px;
       height: 32px;
       font-size: 14px;
+      font-weight: 600;
       padding: 5px 8px 7px;
       border: 0;
       color: $grey-90;
       background: $grey-90-10;
 
-
-      &:active {
+      &:focus {
         @include dark-theme-only {
           background: $grey-90-70;
+          box-shadow: 0 0 0 2px $grey-80, 0 0 0 5px $blue-50-50;
         }
 
-        background: $grey-90-30;
+        background: $grey-90-10;
+        box-shadow: 0 0 0 2px $white, 0 0 0 5px $blue-50-50;
       }
 
       &:hover {
@@ -144,16 +153,15 @@ $excerpt-line-height: 20;
           background: $grey-90-50;
         }
 
-        background: $grey-90-30;
+        background: $grey-90-20;
       }
 
-      &:focus {
+      &:active {
         @include dark-theme-only {
-          background: $grey-90-30;
-          box-shadow: 0 0 0 2px $grey-80, 0 0 0 5px $blue-50-50;
+          background: $grey-90-70;
         }
 
-        box-shadow: 0 0 0 2px $white, 0 0 0 5px $blue-50-50;
+        background: $grey-90-30;
       }
     }
 
@@ -164,6 +172,7 @@ $excerpt-line-height: 20;
       }
 
       font-size: 15px;
+      font-weight: 600;
       line-height: 24px;
       height: 24px;
       width: auto;

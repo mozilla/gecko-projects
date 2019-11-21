@@ -40,18 +40,12 @@ enum class StyleDisplay : uint16_t {
       StyleDisplayFrom(StyleDisplayOutside::None, StyleDisplayInside::Contents),
   Inline =
       StyleDisplayFrom(StyleDisplayOutside::Inline, StyleDisplayInside::Inline),
-  InlineBlock = StyleDisplayFrom(StyleDisplayOutside::Inline,
-                                 StyleDisplayInside::FlowRoot),
   Block =
       StyleDisplayFrom(StyleDisplayOutside::Block, StyleDisplayInside::Block),
   FlowRoot = StyleDisplayFrom(StyleDisplayOutside::Block,
                               StyleDisplayInside::FlowRoot),
   Flex = StyleDisplayFrom(StyleDisplayOutside::Block, StyleDisplayInside::Flex),
-  InlineFlex =
-      StyleDisplayFrom(StyleDisplayOutside::Inline, StyleDisplayInside::Flex),
   Grid = StyleDisplayFrom(StyleDisplayOutside::Block, StyleDisplayInside::Grid),
-  InlineGrid =
-      StyleDisplayFrom(StyleDisplayOutside::Inline, StyleDisplayInside::Grid),
   Table =
       StyleDisplayFrom(StyleDisplayOutside::Block, StyleDisplayInside::Table),
   InlineTable =
@@ -103,8 +97,6 @@ enum class StyleDisplay : uint16_t {
                                   StyleDisplayInside::MozGridGroup),
   MozGridLine = StyleDisplayFrom(StyleDisplayOutside::XUL,
                                  StyleDisplayInside::MozGridLine),
-  MozStack =
-      StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozStack),
   MozDeck =
       StyleDisplayFrom(StyleDisplayOutside::XUL, StyleDisplayInside::MozDeck),
   MozGroupbox = StyleDisplayFrom(StyleDisplayOutside::XUL,
@@ -276,14 +268,6 @@ enum class StyleShapeSourceType : uint8_t {
   Path,  // SVG path function
 };
 
-// -moz-stack-sizing
-enum class StyleStackSizing : uint8_t {
-  Ignore,
-  StretchToFit,
-  IgnoreHorizontal,
-  IgnoreVertical,
-};
-
 // text-justify
 enum class StyleTextJustify : uint8_t {
   None,
@@ -453,9 +437,11 @@ enum class StyleFlexDirection : uint8_t {
 };
 
 // See nsStylePosition
-#define NS_STYLE_FLEX_WRAP_NOWRAP 0
-#define NS_STYLE_FLEX_WRAP_WRAP 1
-#define NS_STYLE_FLEX_WRAP_WRAP_REVERSE 2
+enum class StyleFlexWrap : uint8_t {
+  Nowrap,
+  Wrap,
+  WrapReverse,
+};
 
 // See nsStylePosition
 // NOTE: This is the initial value of the integer-valued 'order' property
@@ -688,9 +674,6 @@ enum class StyleWhiteSpace : uint8_t {
 #define NS_STYLE_TEXT_COMBINE_UPRIGHT_ALL 1
 
 // See nsStyleText
-#define NS_STYLE_LINE_HEIGHT_BLOCK_HEIGHT 0
-
-// See nsStyleText
 #define NS_STYLE_UNICODE_BIDI_NORMAL 0x0
 #define NS_STYLE_UNICODE_BIDI_EMBED 0x1
 #define NS_STYLE_UNICODE_BIDI_ISOLATE 0x2
@@ -780,10 +763,12 @@ enum class StyleWhiteSpace : uint8_t {
 #define NS_STYLE_MASK_TYPE_ALPHA 1
 
 // shape-rendering
-#define NS_STYLE_SHAPE_RENDERING_AUTO 0
-#define NS_STYLE_SHAPE_RENDERING_OPTIMIZESPEED 1
-#define NS_STYLE_SHAPE_RENDERING_CRISPEDGES 2
-#define NS_STYLE_SHAPE_RENDERING_GEOMETRICPRECISION 3
+enum class StyleShapeRendering : uint8_t {
+  Auto,
+  Optimizespeed,
+  Crispedges,
+  Geometricprecision,
+};
 
 // stroke-linecap
 #define NS_STYLE_STROKE_LINECAP_BUTT 0
@@ -794,9 +779,6 @@ enum class StyleWhiteSpace : uint8_t {
 #define NS_STYLE_STROKE_LINEJOIN_MITER 0
 #define NS_STYLE_STROKE_LINEJOIN_ROUND 1
 #define NS_STYLE_STROKE_LINEJOIN_BEVEL 2
-
-// stroke-dasharray, stroke-dashoffset, stroke-width
-#define NS_STYLE_STROKE_PROP_CONTEXT_VALUE 0
 
 // text-anchor
 #define NS_STYLE_TEXT_ANCHOR_START 0
@@ -843,10 +825,6 @@ enum class StyleColorAdjust : uint8_t {
 
 #define NS_STYLE_TRANSFORM_STYLE_FLAT 0
 #define NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D 1
-
-// object {fill,stroke}-opacity inherited from context for SVG glyphs
-#define NS_STYLE_CONTEXT_FILL_OPACITY 0
-#define NS_STYLE_CONTEXT_STROKE_OPACITY 1
 
 // blending
 #define NS_STYLE_BLEND_NORMAL 0

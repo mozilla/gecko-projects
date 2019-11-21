@@ -234,6 +234,8 @@ add_task(async function fill_generated_password_with_matching_logins() {
   Services.logins.addLogin(login);
   await storageChangedPromised;
 
+  let formFilled = listenForTestNotification("FormProcessed");
+
   await BrowserTestUtils.withNewTab(
     {
       gBrowser,
@@ -241,6 +243,7 @@ add_task(async function fill_generated_password_with_matching_logins() {
     },
     async function(browser) {
       await SimpleTest.promiseFocus(browser.ownerGlobal);
+      await formFilled;
       await ContentTask.spawn(
         browser,
         [passwordInputSelector],
@@ -296,7 +299,7 @@ add_task(async function fill_generated_password_with_matching_logins() {
       let popupMenu = document.getElementById("fill-login-popup");
       let firstLoginItem = popupMenu.getElementsByClassName(
         "context-login-item"
-      )[0];
+      )[1];
       firstLoginItem.doCommand();
 
       await passwordChangedPromise;

@@ -14,9 +14,7 @@ const { DebuggerServer } = require("devtools/server/debugger-server");
 const { ActorPool } = require("devtools/server/actors/common");
 const { ThreadActor } = require("devtools/server/actors/thread");
 const { ObjectActor } = require("devtools/server/actors/object");
-const {
-  LongStringActor,
-} = require("devtools/server/actors/object/long-string");
+const { LongStringActor } = require("devtools/server/actors/string");
 const {
   createValueGrip,
   stringIsLong,
@@ -579,9 +577,9 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
    *         A LongStringActor object that wraps the given string.
    */
   longStringGrip: function(string, pool) {
-    const actor = new LongStringActor(string);
+    const actor = new LongStringActor(this.conn, string);
     pool.addActor(actor);
-    return actor.grip();
+    return actor.form();
   },
 
   /**
@@ -657,7 +655,7 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
    * @return object
    *        The response object which holds the startedListeners array.
    */
-  /* eslint-disable complexity */
+  // eslint-disable-next-line complexity
   startListeners: async function(listeners) {
     const startedListeners = [];
     const window = !this.parentActor.isRootActor ? this.window : null;
@@ -828,7 +826,6 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
       traits: this.traits,
     };
   },
-  /* eslint-enable complexity */
 
   /**
    * Handler for the "stopListeners" request.
@@ -1137,7 +1134,7 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
    * @return object
    *         The evaluation response packet.
    */
-  /* eslint-disable complexity */
+  // eslint-disable-next-line complexity
   evaluateJS: function(request) {
     const input = request.text;
     const timestamp = Date.now();
@@ -1325,7 +1322,6 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
       notes: errorNotes,
     };
   },
-  /* eslint-enable complexity */
 
   /**
    * The Autocomplete request handler.
@@ -1352,7 +1348,6 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
   ) {
     let dbgObject = null;
     let environment = null;
-    let hadDebuggee = false;
     let matches = [];
     let matchProp;
     let isElementAccess;
@@ -1385,8 +1380,6 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
           );
         }
       } else {
-        // This is the general case (non-paused debugger)
-        hadDebuggee = this.dbg.hasDebuggee(this.evalWindow);
         dbgObject = this.dbg.addDebuggee(this.evalWindow);
       }
 
@@ -1399,10 +1392,6 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
         selectedNodeActor,
         authorizedEvaluations,
       });
-
-      if (!hadDebuggee && dbgObject) {
-        this.dbg.removeDebuggee(this.evalWindow);
-      }
 
       if (result === null) {
         return {

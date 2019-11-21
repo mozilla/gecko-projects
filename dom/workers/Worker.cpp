@@ -103,13 +103,13 @@ void Worker::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
 
   JS::CloneDataPolicy clonePolicy;
   if (NS_IsMainThread()) {
-    nsGlobalWindowInner* win = nsContentUtils::CallerInnerWindow(aCx);
-    if (win && win->CanShareMemory(mWorkerPrivate->AgentClusterId())) {
+    nsGlobalWindowInner* win = nsContentUtils::CallerInnerWindow();
+    if (win && win->IsSharedMemoryAllowed()) {
       clonePolicy.allowSharedMemory();
     }
   } else {
     WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
-    if (worker && worker->CanShareMemory(mWorkerPrivate->AgentClusterId())) {
+    if (worker && worker->IsSharedMemoryAllowed()) {
       clonePolicy.allowSharedMemory();
     }
   }

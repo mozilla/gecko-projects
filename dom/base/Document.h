@@ -52,7 +52,6 @@
 #include "ReferrerInfo.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/CORSMode.h"
-#include "mozilla/dom/BrowsingContext.h"
 #include "mozilla/dom/ContentBlockingLog.h"
 #include "mozilla/dom/DispatcherTrait.h"
 #include "mozilla/dom/DocumentOrShadowRoot.h"
@@ -86,8 +85,8 @@ class ElementCreationOptionsOrString;
 
 class gfxUserFontSet;
 class imgIRequest;
-class nsBindingManager;
 class nsCachableElementsByNameNodeList;
+class nsCommandManager;
 class nsContentList;
 class nsIDocShell;
 class nsDocShell;
@@ -131,7 +130,7 @@ class nsWindowSizes;
 class nsDOMCaretPosition;
 class nsViewportInfo;
 class nsIGlobalObject;
-class nsIXULWindow;
+class nsIAppWindow;
 class nsXULPrototypeDocument;
 class nsXULPrototypeElement;
 class PermissionDelegateHandler;
@@ -163,7 +162,6 @@ class Rule;
 }  // namespace css
 
 namespace dom {
-class Animation;
 class AnonymousContent;
 class Attr;
 class XULBroadcastManager;
@@ -219,6 +217,8 @@ class XPathEvaluator;
 class XPathExpression;
 class XPathNSResolver;
 class XPathResult;
+class BrowsingContext;
+
 template <typename>
 class Sequence;
 
@@ -570,6 +570,8 @@ class Document : public nsINode,
   nsIPrincipal* IntrinsicStoragePrincipal() const {
     return mIntrinsicStoragePrincipal;
   }
+
+  void ClearActiveStoragePrincipal() { mActiveStoragePrincipal = nullptr; }
 
   nsIPrincipal* GetContentBlockingAllowListPrincipal() const {
     return mContentBlockingAllowListPrincipal;
@@ -1161,6 +1163,14 @@ class Document : public nsINode,
   }
 
   /**
+   * Get social tracking cookies blocked flag for this document.
+   */
+  bool GetHasSocialTrackingCookiesBlocked() {
+    return mContentBlockingLog.HasBlockedAnyOfType(
+        nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER);
+  }
+
+  /**
    * Get third-party cookies blocked flag for this document.
    */
   bool GetHasForeignCookiesBlocked() {
@@ -1242,6 +1252,19 @@ class Document : public nsINode,
   }
 
   /**
+   * Set the social tracking cookies blocked flag for this document.
+   */
+  void SetHasSocialTrackingCookiesBlocked(
+      bool aHasSocialTrackingCookiesBlocked, const nsACString& aOriginBlocked,
+      const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason,
+      const nsTArray<nsCString>& aTrackingFullHashes) {
+    RecordContentBlockingLog(
+        aOriginBlocked,
+        nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER,
+        aHasSocialTrackingCookiesBlocked, aReason, aTrackingFullHashes);
+  }
+
+  /**
    * Set the third-party cookies blocked flag for this document.
    */
   void SetHasForeignCookiesBlocked(bool aHasForeignCookiesBlocked,
@@ -1318,20 +1341,40 @@ class Document : public nsINode,
   }
 
   /**
-   * Get tracking content loaded flag for this document.
+   * Get level 1 tracking content loaded flag for this document.
    */
-  bool GetHasTrackingContentLoaded() {
+  bool GetHasLevel1TrackingContentLoaded() {
     return mContentBlockingLog.HasBlockedAnyOfType(
-        nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT);
+        nsIWebProgressListener::STATE_LOADED_LEVEL_1_TRACKING_CONTENT);
   }
 
   /**
-   * Set the tracking content loaded flag for this document.
+   * Set the level 1 tracking content loaded flag for this document.
    */
-  void SetHasTrackingContentLoaded(bool aHasTrackingContentLoaded,
-                                   const nsACString& aOriginBlocked) {
+  void SetHasLevel1TrackingContentLoaded(bool aHasTrackingContentLoaded,
+                                         const nsACString& aOriginBlocked) {
     RecordContentBlockingLog(
-        aOriginBlocked, nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT,
+        aOriginBlocked,
+        nsIWebProgressListener::STATE_LOADED_LEVEL_1_TRACKING_CONTENT,
+        aHasTrackingContentLoaded);
+  }
+
+  /**
+   * Get level 2 tracking content loaded flag for this document.
+   */
+  bool GetHasLevel2TrackingContentLoaded() {
+    return mContentBlockingLog.HasBlockedAnyOfType(
+        nsIWebProgressListener::STATE_LOADED_LEVEL_2_TRACKING_CONTENT);
+  }
+
+  /**
+   * Set the level 2 tracking content loaded flag for this document.
+   */
+  void SetHasLevel2TrackingContentLoaded(bool aHasTrackingContentLoaded,
+                                         const nsACString& aOriginBlocked) {
+    RecordContentBlockingLog(
+        aOriginBlocked,
+        nsIWebProgressListener::STATE_LOADED_LEVEL_2_TRACKING_CONTENT,
         aHasTrackingContentLoaded);
   }
 
@@ -1787,8 +1830,6 @@ class Document : public nsINode,
 
   void DoUnblockOnload();
 
-  void MaybeEndOutermostXBLUpdate();
-
   void RetrieveRelevantHeaders(nsIChannel* aChannel);
 
   void TryChannelCharset(nsIChannel* aChannel, int32_t& aCharsetSource,
@@ -2146,7 +2187,8 @@ class Document : public nsINode,
 
   // This is called asynchronously by Document::AsyncRequestFullscreen()
   // to move this document into fullscreen mode if allowed.
-  void RequestFullscreen(UniquePtr<FullscreenRequest> aRequest);
+  void RequestFullscreen(UniquePtr<FullscreenRequest> aRequest,
+                         bool applyFullScreenDirectly = false);
 
   // Removes all elements from the fullscreen stack, removing full-scren
   // styles from the top element in the stack.
@@ -2262,11 +2304,7 @@ class Document : public nsINode,
     return mOrientationPendingPromise;
   }
 
-  void SetRDMPaneOrientation(OrientationType aType, uint16_t aAngle) {
-    if (mInRDMPane) {
-      SetCurrentOrientation(aType, aAngle);
-    }
-  }
+  void SetRDMPaneOrientation(OrientationType aType, uint16_t aAngle);
 
   //----------------------------------------------------------------------
 
@@ -2363,10 +2401,6 @@ class Document : public nsINode,
       return;
     }
     DoUpdateSVGUseElementShadowTrees();
-  }
-
-  nsBindingManager* BindingManager() const {
-    return mNodeInfoManager->GetBindingManager();
   }
 
   /**
@@ -2726,10 +2760,6 @@ class Document : public nsINode,
    * document.
    */
   bool HaveFiredDOMTitleChange() const { return mHaveFiredTitleChange; }
-
-  Element* GetAnonymousElementByAttribute(nsIContent* aElement,
-                                          nsAtom* aAttrName,
-                                          const nsAString& aAttrValue) const;
 
   /**
    * To batch DOMSubtreeModified, document needs to be informed when
@@ -3280,8 +3310,6 @@ class Document : public nsINode,
   DocumentTimeline* Timeline();
   LinkedList<DocumentTimeline>& Timelines() { return mTimelines; }
 
-  void GetAnimations(nsTArray<RefPtr<Animation>>& aAnimations);
-
   SVGSVGElement* GetSVGRootElement() const;
 
   struct FrameRequest {
@@ -3402,23 +3430,8 @@ class Document : public nsINode,
   // Add aLink to the set of links that need their status resolved.
   void RegisterPendingLinkUpdate(Link* aLink);
 
-  // Update state on links in mLinksToUpdate.  This function must be called
-  // prior to selector matching that needs to differentiate between :link and
-  // :visited.  In particular, it does _not_ need to be called before doing any
-  // selector matching that uses TreeMatchContext::eNeverMatchVisited.  The only
-  // reason we haven't moved all calls to this function entirely inside the
-  // TreeMatchContext constructor is to not call it all the time during various
-  // style system and frame construction operations (though it would likely be a
-  // no-op for all but the first call).
-  //
-  // XXXbz Does this really need to be called before selector matching?  All it
-  // will do is ensure all the links involved are registered to observe history,
-  // which won't synchronously change their state to :visited anyway!  So
-  // calling this won't affect selector matching done immediately afterward, as
-  // far as I can tell.
+  // Update state on links in mLinksToUpdate.
   void FlushPendingLinkUpdates();
-
-  void FlushPendingLinkUpdatesFromRunnable();
 
 #define DEPRECATED_OPERATION(_op) e##_op,
   enum DeprecatedOperations {
@@ -3522,9 +3535,9 @@ class Document : public nsINode,
   Document* GetTopLevelContentDocument();
   const Document* GetTopLevelContentDocument() const;
 
-  // Returns the associated XUL window if this is a top-level chrome document,
+  // Returns the associated app window if this is a top-level chrome document,
   // null otherwise.
-  already_AddRefed<nsIXULWindow> GetXULWindowIfToplevelChrome() const;
+  already_AddRefed<nsIAppWindow> GetAppWindowIfToplevelChrome() const;
 
   already_AddRefed<Element> CreateElement(
       const nsAString& aTagName, const ElementCreationOptionsOrString& aOptions,
@@ -3711,13 +3724,7 @@ class Document : public nsINode,
   bool IsScrollingElement(Element* aElement);
 
   // QuerySelector and QuerySelectorAll already defined on nsINode
-  nsINodeList* GetAnonymousNodes(Element& aElement);
-  Element* GetAnonymousElementByAttribute(Element& aElement,
-                                          const nsAString& aAttrName,
-                                          const nsAString& aAttrValue);
-  Element* GetBindingParent(nsINode& aNode);
-  void LoadBindingDocument(const nsAString& aURI,
-                           nsIPrincipal& aSubjectPrincipal, ErrorResult& rv);
+
   XPathExpression* CreateExpression(const nsAString& aExpression,
                                     XPathNSResolver* aResolver,
                                     ErrorResult& rv);
@@ -3958,7 +3965,8 @@ class Document : public nsINode,
   FlashClassification DocumentFlashClassification();
 
   // ResizeObserver usage.
-  void AddResizeObserver(ResizeObserver* aResizeObserver);
+  void AddResizeObserver(ResizeObserver&);
+  void RemoveResizeObserver(ResizeObserver&);
   void ScheduleResizeObserversNotification() const;
 
   // Getter for PermissionDelegateHandler. Performs lazy initialization.
@@ -4025,6 +4033,11 @@ class Document : public nsINode,
    */
   void InitialDocumentTranslationCompleted();
 
+  /**
+   * Returns whether the document allows localization.
+   */
+  bool AllowsL10n() const;
+
  protected:
   RefPtr<DocumentL10n> mDocumentL10n;
 
@@ -4055,6 +4068,10 @@ class Document : public nsINode,
   // mScaleMinFloat, mScaleMaxFloat and mScaleFloat respectively.
   // Returns true if there is any valid scale value in the |aViewportMetaData|.
   bool ParseScalesInViewportMetaData(const ViewportMetaData& aViewportMetaData);
+
+  // Get parent FeaturePolicy from container. The parent FeaturePolicy is
+  // stored in parent iframe or container's browsingContext (cross process)
+  already_AddRefed<mozilla::dom::FeaturePolicy> GetParentFeaturePolicy();
 
   // Returns a ViewportMetaData for this document.
   ViewportMetaData GetViewportMetaData() const;
@@ -4178,9 +4195,6 @@ class Document : public nsINode,
   }
 
   void SetPrototypeDocument(nsXULPrototypeDocument* aPrototype);
-
-  bool InRDMPane() const { return mInRDMPane; }
-  void SetInRDMPane(bool aInRDMPane) { mInRDMPane = aInRDMPane; }
 
   // Returns true if we use overlay scrollbars on the system wide or on the
   // given document.
@@ -4587,7 +4601,7 @@ class Document : public nsINode,
   UniquePtr<ResizeObserverController> mResizeObserverController;
 
   // Permission Delegate Handler, lazily-initialized in
-  // PermissionDelegateHandler
+  // GetPermissionDelegateHandler
   RefPtr<PermissionDelegateHandler> mPermissionDelegateHandler;
 
   // True if BIDI is enabled.
@@ -5272,7 +5286,6 @@ class Document : public nsINode,
 
   RefPtr<EventListenerManager> mListenerManager;
 
-  nsCOMPtr<nsIRunnable> mMaybeEndOutermostXBLUpdateRunner;
   nsCOMPtr<nsIRequest> mOnloadBlocker;
 
   nsTArray<RefPtr<StyleSheet>> mAdditionalSheets[AdditionalSheetTypeCount];
@@ -5345,10 +5358,13 @@ class Document : public nsINode,
   int32_t mCachedTabSizeGeneration;
   nsTabSizes mCachedTabSizes;
 
-  bool mInRDMPane;
-
   // The principal to use for the storage area of this document.
   nsCOMPtr<nsIPrincipal> mIntrinsicStoragePrincipal;
+
+  // The cached storage principal for this document.
+  // This is mutable so that we can keep EffectiveStoragePrincipal() const
+  // which is required due to its CloneDocHelper() call site.  :-(
+  mutable nsCOMPtr<nsIPrincipal> mActiveStoragePrincipal;
 
   // The principal to use for the content blocking allow list.
   nsCOMPtr<nsIPrincipal> mContentBlockingAllowListPrincipal;

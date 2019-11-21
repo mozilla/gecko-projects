@@ -7,9 +7,7 @@
 const EventEmitter = require("devtools/shared/event-emitter");
 const promise = require("promise");
 const Services = require("Services");
-const {
-  DOMHelpers,
-} = require("resource://devtools/client/shared/DOMHelpers.jsm");
+const { DOMHelpers } = require("devtools/shared/dom-helpers");
 
 loader.lazyRequireGetter(
   this,
@@ -80,12 +78,11 @@ BottomHost.prototype = {
     this.frame.setAttribute("src", "about:blank");
 
     const frame = await new Promise(resolve => {
-      const domHelper = new DOMHelpers(this.frame.contentWindow);
       const frameLoad = () => {
         this.emit("ready", this.frame);
         resolve(this.frame);
       };
-      domHelper.onceDOMReady(frameLoad);
+      DOMHelpers.onceDOMReady(this.frame.contentWindow, frameLoad);
       focusTab(this.hostTab);
     });
 
@@ -176,12 +173,11 @@ class SidebarHost {
     this.frame.setAttribute("src", "about:blank");
 
     const frame = await new Promise(resolve => {
-      const domHelper = new DOMHelpers(this.frame.contentWindow);
       const frameLoad = () => {
         this.emit("ready", this.frame);
         resolve(this.frame);
       };
-      domHelper.onceDOMReady(frameLoad);
+      DOMHelpers.onceDOMReady(this.frame.contentWindow, frameLoad);
       focusTab(this.hostTab);
     });
 
@@ -247,7 +243,7 @@ function WindowHost() {
 WindowHost.prototype = {
   type: "window",
 
-  WINDOW_URL: "chrome://devtools/content/framework/toolbox-window.xul",
+  WINDOW_URL: "chrome://devtools/content/framework/toolbox-window.xhtml",
 
   /**
    * Create a new xul window to contain the toolbox.
@@ -434,12 +430,16 @@ function focusTab(tab) {
  * Create an iframe that can be used to load DevTools via about:devtools-toolbox.
  */
 function createDevToolsFrame(doc, className) {
-  const frame = doc.createXULElement("iframe");
+  let frame;
+  if (Services.prefs.getBoolPref("devtools.toolbox.content-frame", false)) {
+    frame = doc.createXULElement("browser");
+    frame.setAttribute("type", "content");
+  } else {
+    frame = doc.createXULElement("iframe");
+  }
+
   frame.flex = 1; // Required to be able to shrink when the window shrinks
   frame.className = className;
-  if (Services.prefs.getBoolPref("devtools.toolbox.content-frame", false)) {
-    frame.setAttribute("type", "content");
-  }
   frame.tooltip = "aHTMLTooltip";
   return frame;
 }

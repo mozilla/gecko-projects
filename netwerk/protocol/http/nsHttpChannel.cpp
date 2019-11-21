@@ -65,6 +65,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_browser.h"
+#include "mozilla/StaticPrefs_fission.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StaticPrefs_security.h"
@@ -839,7 +840,7 @@ nsresult nsHttpChannel::ContinueConnect() {
   return DoConnect();
 }
 
-nsresult nsHttpChannel::DoConnect(nsHttpTransaction* aTransWithStickyConn) {
+nsresult nsHttpChannel::DoConnect(HttpTransactionShell* aTransWithStickyConn) {
   LOG(("nsHttpChannel::DoConnect [this=%p, aTransWithStickyConn=%p]\n", this,
        aTransWithStickyConn));
 
@@ -1335,7 +1336,7 @@ HttpTrafficCategory nsHttpChannel::CreateTrafficCategory() {
     uint32_t flags = isThirdParty ? mThirdPartyClassificationFlags
                                   : mFirstPartyClassificationFlags;
 
-    using CF = nsIHttpChannel::ClassificationFlags;
+    using CF = nsIClassifiedChannel::ClassificationFlags;
     using TC = HttpTrafficAnalyzer::TrackingClassification;
 
     if (flags & CF::CLASSIFIED_TRACKING_CONTENT) {
@@ -1766,6 +1767,8 @@ nsresult nsHttpChannel::CallOnStartRequest() {
     LOG(("CallOnStartRequest already invoked before"));
     return mStatus;
   }
+
+  ReportContentTypeTelemetryForCrossOriginStylesheets();
 
   mTracingEnabled = false;
 
@@ -2571,40 +2574,73 @@ nsresult nsHttpChannel::ContinueProcessResponse1() {
 
   rv = NS_OK;
   if (!mCanceled) {
-    ComputeCrossOriginOpenerPolicyMismatch();
-    if (mHasCrossOriginOpenerPolicyMismatch &&
-        GetHasSandboxedAuxiliaryNavigations()) {
+    rv = ComputeCrossOriginOpenerPolicyMismatch();
+    if (rv == NS_ERROR_BLOCKED_BY_POLICY) {
       // this navigates the doc's browsing context to a network error.
       mStatus = NS_ERROR_BLOCKED_BY_POLICY;
       HandleAsyncAbort();
       return NS_OK;
     }
 
-    nsCOMPtr<nsIParentChannel> parentChannel;
-    NS_QueryNotificationCallbacks(this, parentChannel);
-
-    RefPtr<DocumentChannelParent> documentChannelParent =
-        do_QueryObject(parentChannel);
-
-    if (!documentChannelParent) {
-      // notify "http-on-may-change-process" observers
-      gHttpHandler->OnMayChangeProcess(this);
-
-      if (mRedirectContentProcessIdPromise) {
-        MOZ_ASSERT(!mOnStartRequestCalled);
-
-        PushRedirectAsyncFunc(&nsHttpChannel::ContinueProcessResponse2);
-        rv = StartCrossProcessRedirect();
-        if (NS_SUCCEEDED(rv)) {
-          return NS_OK;
-        }
-        PopRedirectAsyncFunc(&nsHttpChannel::ContinueProcessResponse2);
-      }
-    }
+    AssertNotDocumentChannel();
   }
 
   // No process switch needed, continue as normal.
   return ContinueProcessResponse2(rv);
+}
+
+void nsHttpChannel::AssertNotDocumentChannel() {
+  if (!mLoadInfo || !IsDocument()) {
+    return;
+  }
+
+#ifndef DEBUG
+  if (!StaticPrefs::fission_autostart()) {
+    // This assertion is firing in the wild (Bug 1593545) and its not clear
+    // why. Disable the assertion in non-fission non-debug configurations to
+    // avoid crashing user's browsers until we're done dogfooding fission.
+    return;
+  }
+#endif
+
+  nsCOMPtr<nsIParentChannel> parentChannel;
+  NS_QueryNotificationCallbacks(this, parentChannel);
+  RefPtr<DocumentLoadListener> documentChannelParent =
+      do_QueryObject(parentChannel);
+  if (documentChannelParent) {
+    // The load is using document channel.
+    return;
+  }
+
+  RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
+  if (!httpParent) {
+    // The load was initiated in the parent and doesn't need document
+    // channel.
+    return;
+  }
+
+  nsContentPolicyType contentPolicy;
+  MOZ_ALWAYS_SUCCEEDS(mLoadInfo->GetExternalContentPolicyType(&contentPolicy));
+  RefPtr<BrowsingContext> bc;
+  if (contentPolicy == CSPService::TYPE_DOCUMENT) {
+    MOZ_ALWAYS_SUCCEEDS(mLoadInfo->GetBrowsingContext(getter_AddRefs(bc)));
+  } else {
+    MOZ_ALWAYS_SUCCEEDS(mLoadInfo->GetFrameBrowsingContext(getter_AddRefs(bc)));
+  }
+  if (!bc) {
+    return;
+  }
+
+  if (mLoadInfo->LoadingPrincipal() &&
+      mLoadInfo->LoadingPrincipal()->IsSystemPrincipal()) {
+    // Loads with the system principal can skip document channel
+    return;
+  }
+
+  // The load was supposed to use document channel but didn't.
+  MOZ_DIAGNOSTIC_ASSERT(
+      !StaticPrefs::browser_tabs_documentchannel(),
+      "DocumentChannel is enabled but this load was done without it");
 }
 
 nsresult nsHttpChannel::ContinueProcessResponse2(nsresult rv) {
@@ -6084,7 +6120,7 @@ NS_IMETHODIMP nsHttpChannel::CloseStickyConnection() {
   }
 
   if (!(mCaps & NS_HTTP_STICKY_CONNECTION ||
-        mTransaction->Caps() & NS_HTTP_STICKY_CONNECTION)) {
+        mTransaction->HasStickyConnection())) {
     LOG(("  not sticky"));
     return NS_OK;
   }
@@ -6863,9 +6899,11 @@ nsHttpChannel::SetChannelIsForDownload(bool aChannelIsForDownload) {
 base::ProcessId nsHttpChannel::ProcessId() {
   nsCOMPtr<nsIParentChannel> parentChannel;
   NS_QueryNotificationCallbacks(this, parentChannel);
-  RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
-  if (httpParent) {
+  if (RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel)) {
     return httpParent->OtherPid();
+  }
+  if (RefPtr<DocumentLoadListener> docParent = do_QueryObject(parentChannel)) {
+    return docParent->OtherPid();
   }
   return base::GetCurrentProcId();
 }
@@ -6876,9 +6914,11 @@ bool nsHttpChannel::AttachStreamFilter(
 {
   nsCOMPtr<nsIParentChannel> parentChannel;
   NS_QueryNotificationCallbacks(this, parentChannel);
-  RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
-  if (httpParent) {
+  if (RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel)) {
     return httpParent->SendAttachStreamFilter(std::move(aEndpoint));
+  }
+  if (RefPtr<DocumentLoadListener> docParent = do_QueryObject(parentChannel)) {
+    return docParent->AttachStreamFilter(std::move(aEndpoint));
   }
 
   extensions::StreamFilterParent::Attach(this, std::move(aEndpoint));
@@ -7260,7 +7300,7 @@ NS_IMETHODIMP nsHttpChannel::SwitchProcessTo(
 
   nsCOMPtr<nsIParentChannel> parentChannel;
   NS_QueryNotificationCallbacks(this, parentChannel);
-  RefPtr<DocumentChannelParent> documentChannelParent =
+  RefPtr<DocumentLoadListener> documentChannelParent =
       do_QueryObject(parentChannel);
   // This is a temporary change as the DocumentChannelParent currently must go
   // through the nsHttpChannel to perform a process switch via SessionStore.
@@ -7288,26 +7328,21 @@ nsHttpChannel::HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) {
   return NS_OK;
 }
 
-nsresult nsHttpChannel::StartCrossProcessRedirect() {
-  nsresult rv;
-
-  LOG(("nsHttpChannel::StartCrossProcessRedirect [this=%p]", this));
-
-  rv = CheckRedirectLimit(nsIChannelEventSink::REDIRECT_INTERNAL);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIParentChannel> parentChannel;
-  NS_QueryNotificationCallbacks(this, parentChannel);
-  RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
-  MOZ_ASSERT(httpParent);
-  NS_ENSURE_TRUE(httpParent, NS_ERROR_UNEXPECTED);
-
-  httpParent->TriggerCrossProcessSwitch(this, mCrossProcessRedirectIdentifier);
-
-  // This will suspend the channel
-  rv = WaitForRedirectCallback();
-
-  return rv;
+NS_IMETHODIMP
+nsHttpChannel::GetCrossOriginOpenerPolicy(
+    nsILoadInfo::CrossOriginOpenerPolicy* aPolicy) {
+  MOZ_ASSERT(aPolicy);
+  if (!aPolicy) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  // If this method is called before OnStartRequest (ie. before we call
+  // ComputeCrossOriginOpenerPolicy) or if we were unable to compute the
+  // policy we'll throw an error.
+  if (!mComputedCrossOriginOpenerPolicy.isSome()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+  *aPolicy = mComputedCrossOriginOpenerPolicy.value();
+  return NS_OK;
 }
 
 // See https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
@@ -7378,7 +7413,18 @@ nsresult nsHttpChannel::ComputeCrossOriginOpenerPolicyMismatch() {
   nsILoadInfo::CrossOriginOpenerPolicy documentPolicy = ctx->GetOpenerPolicy();
   nsILoadInfo::CrossOriginOpenerPolicy resultPolicy =
       nsILoadInfo::OPENER_POLICY_NULL;
-  Unused << GetCrossOriginOpenerPolicy(documentPolicy, &resultPolicy);
+  Unused << ComputeCrossOriginOpenerPolicy(documentPolicy, &resultPolicy);
+  mComputedCrossOriginOpenerPolicy = Some(resultPolicy);
+
+  // If bc's popup sandboxing flag set is not empty and potentialCOOP is
+  // non-null, then navigate bc to a network error and abort these steps.
+  if (resultPolicy != nsILoadInfo::OPENER_POLICY_NULL &&
+      GetHasNonEmptySandboxingFlag()) {
+    LOG(
+        ("nsHttpChannel::ComputeCrossOriginOpenerPolicyMismatch network error "
+         "for non empty sandboxing and non null COOP"));
+    return NS_ERROR_BLOCKED_BY_POLICY;
+  }
 
   if (!ctx->Canonical()->GetCurrentWindowGlobal()) {
     return NS_ERROR_NOT_AVAILABLE;
@@ -7706,32 +7752,16 @@ nsHttpChannel::OnStartRequest(nsIRequest* request) {
   rv = NS_OK;
   if (!mCanceled) {
     // notify "http-on-may-change-process" observers
-    ComputeCrossOriginOpenerPolicyMismatch();
+    rv = ComputeCrossOriginOpenerPolicyMismatch();
 
-    if (mHasCrossOriginOpenerPolicyMismatch &&
-        GetHasSandboxedAuxiliaryNavigations()) {
+    if (rv == NS_ERROR_BLOCKED_BY_POLICY) {
       // this navigates the doc's browsing context to a network error.
       mStatus = NS_ERROR_BLOCKED_BY_POLICY;
       HandleAsyncAbort();
       return NS_OK;
     }
 
-    nsCOMPtr<nsIParentChannel> parentChannel;
-    NS_QueryNotificationCallbacks(this, parentChannel);
-    RefPtr<DocumentChannelParent> documentChannelParent =
-        do_QueryObject(parentChannel);
-    if (!documentChannelParent) {
-      gHttpHandler->OnMayChangeProcess(this);
-
-      if (mRedirectContentProcessIdPromise) {
-        PushRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest1);
-        rv = StartCrossProcessRedirect();
-        if (NS_SUCCEEDED(rv)) {
-          return NS_OK;
-        }
-        PopRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest1);
-      }
-    }
+    AssertNotDocumentChannel();
   }
 
   // No process change is needed, so continue on to ContinueOnStartRequest1.
@@ -7909,9 +7939,9 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
     // when it has a sticky connection.
     // In the case we need to retry an authentication request, we need to
     // reuse the connection of |transactionWithStickyConn|.
-    RefPtr<nsHttpTransaction> transactionWithStickyConn;
+    RefPtr<HttpTransactionShell> transactionWithStickyConn;
     if (mCaps & NS_HTTP_STICKY_CONNECTION ||
-        mTransaction->Caps() & NS_HTTP_STICKY_CONNECTION) {
+        mTransaction->HasStickyConnection()) {
       transactionWithStickyConn = mTransaction;
       LOG(("  transaction %p has sticky connection",
            transactionWithStickyConn.get()));
@@ -7947,6 +7977,7 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
     }
 
     mTransferSize = mTransaction->GetTransferSize();
+    mRequestSize = mTransaction->GetRequestSize();
 
     // If we are using the transaction to serve content, we also save the
     // time since async open in the cache entry so we can compare telemetry
@@ -8007,7 +8038,7 @@ nsHttpChannel::OnStopRequest(nsIRequest* request, nsresult status) {
 
 nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
     nsresult aStatus, bool aAuthRetry, bool aIsFromNet, bool aContentComplete,
-    nsHttpTransaction* aTransWithStickyConn) {
+    HttpTransactionShell* aTransWithStickyConn) {
   LOG(
       ("nsHttpChannel::ContinueOnStopRequestAfterAuthRetry "
        "[this=%p, aStatus=%" PRIx32
@@ -8072,6 +8103,93 @@ nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
   }
 
   return ContinueOnStopRequest(aStatus, aIsFromNet, aContentComplete);
+}
+
+class HeaderValuesVisitor final : public nsIHttpHeaderVisitor {
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIHTTPHEADERVISITOR
+
+  nsTArray<nsCString>& Get() { return mHeaderValues; }
+
+ private:
+  nsTArray<nsCString> mHeaderValues;
+  ~HeaderValuesVisitor() = default;
+};
+
+NS_IMETHODIMP HeaderValuesVisitor::VisitHeader(const nsACString& aHeader,
+                                               const nsACString& aValue) {
+  mHeaderValues.AppendElement(aValue);
+  return NS_OK;
+}
+
+NS_IMPL_ISUPPORTS(HeaderValuesVisitor, nsIHttpHeaderVisitor)
+
+void nsHttpChannel::ReportContentTypeTelemetryForCrossOriginStylesheets() {
+  // Only record for successful requests.
+  if (NS_FAILED(mStatus)) {
+    return;
+  }
+  // Only record for stylesheet requests
+  if (!mContentTypeHint.EqualsLiteral("text/css") &&
+      mLoadInfo->GetExternalContentPolicyType() !=
+          nsIContentPolicy::TYPE_STYLESHEET) {
+    return;
+  }
+
+  if (!mLoadInfo->LoadingPrincipal()) {
+    // No loading principal to check if it's same-origin
+    return;
+  }
+
+  nsCOMPtr<nsIURI> docURI = mLoadInfo->LoadingPrincipal()->GetURI();
+  nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
+  bool isPrivateWin = mLoadInfo->GetOriginAttributes().mPrivateBrowsingId > 0;
+  nsresult rv = ssm->CheckSameOriginURI(mURI, docURI, false, isPrivateWin);
+  bool isSameOrigin = NS_SUCCEEDED(rv);
+
+  // Only report cross origin stylesheet requests
+  if (isSameOrigin) {
+    return;
+  }
+
+  RefPtr<HeaderValuesVisitor> visitor = new HeaderValuesVisitor();
+  rv = GetOriginalResponseHeader(NS_LITERAL_CSTRING("Content-Type"), visitor);
+
+  auto allEmptyValues = [&visitor]() {
+    for (const auto& v : visitor->Get()) {
+      if (!v.IsEmpty()) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  nsAutoCString contentType;
+  if (mResponseHead) {
+    mResponseHead->ContentType(contentType);
+  }
+
+  typedef Telemetry::LABELS_NETWORK_CROSS_ORIGIN_STYLESHEET_CONTENT_TYPE
+      CTLabels;
+  CTLabels label;
+  if (rv == NS_ERROR_NOT_AVAILABLE) {
+    // No Content-Type header
+    label = CTLabels::NoHeader;
+  } else if (allEmptyValues()) {
+    // Any/all Content-Type headers are empty
+    label = CTLabels::EmptyHeader;
+  } else if (contentType.IsEmpty()) {
+    // failed to parse
+    label = CTLabels::FailedToParse;
+  } else if (contentType.EqualsLiteral("text/css")) {
+    // text/css
+    label = CTLabels::ParsedTextCSS;
+  } else {
+    // some other value
+    label = CTLabels::ParsedOther;
+  }
+
+  Telemetry::AccumulateCategorical(label);
 }
 
 nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
@@ -8538,11 +8656,24 @@ nsHttpChannel::OnTransportStatus(nsITransport* trans, nsresult status,
          (mLoadFlags & LOAD_BACKGROUND) ? "" : " and status", this,
          static_cast<uint32_t>(status), progress, progressMax));
 
+    nsAutoCString host;
+    mURI->GetHost(host);
     if (!(mLoadFlags & LOAD_BACKGROUND)) {
-      nsAutoCString host;
-      mURI->GetHost(host);
       mProgressSink->OnStatus(this, nullptr, status,
                               NS_ConvertUTF8toUTF16(host).get());
+    } else {
+      nsCOMPtr<nsIParentChannel> parentChannel;
+      NS_QueryNotificationCallbacks(this, parentChannel);
+      // If the event sink is |HttpChannelParent|, we have to send status events
+      // to it even if LOAD_BACKGROUND is set. |HttpChannelParent| needs to be
+      // aware of whether the status is |NS_NET_STATUS_RECEIVING_FROM| or
+      // |NS_NET_STATUS_READING|.
+      // LOAD_BACKGROUND is checked again in |HttpChannelChild|, so the final
+      // consumer won't get this event.
+      if (SameCOMIdentity(parentChannel, mProgressSink)) {
+        mProgressSink->OnStatus(this, nullptr, status,
+                                NS_ConvertUTF8toUTF16(host).get());
+      }
     }
 
     if (progress > 0) {
@@ -8879,7 +9010,7 @@ nsHttpChannel::ResumeAt(uint64_t aStartPos, const nsACString& aEntityID) {
 }
 
 nsresult nsHttpChannel::DoAuthRetry(
-    nsHttpTransaction* aTransWithStickyConn,
+    HttpTransactionShell* aTransWithStickyConn,
     const std::function<nsresult(nsHttpChannel*, nsresult)>&
         aContinueOnStopRequestFunc) {
   LOG(("nsHttpChannel::DoAuthRetry [this=%p, aTransWithStickyConn=%p]\n", this,
@@ -8906,7 +9037,7 @@ nsresult nsHttpChannel::DoAuthRetry(
   // notify "http-on-modify-request" observers
   CallOnModifyRequestObservers();
 
-  RefPtr<nsHttpTransaction> trans(aTransWithStickyConn);
+  RefPtr<HttpTransactionShell> trans(aTransWithStickyConn);
   return CallOrWaitForResume(
       [trans{std::move(trans)}, aContinueOnStopRequestFunc](auto* self) {
         return self->ContinueDoAuthRetry(trans, aContinueOnStopRequestFunc);
@@ -8914,7 +9045,7 @@ nsresult nsHttpChannel::DoAuthRetry(
 }
 
 nsresult nsHttpChannel::ContinueDoAuthRetry(
-    nsHttpTransaction* aTransWithStickyConn,
+    HttpTransactionShell* aTransWithStickyConn,
     const std::function<nsresult(nsHttpChannel*, nsresult)>&
         aContinueOnStopRequestFunc) {
   LOG(("nsHttpChannel::ContinueDoAuthRetry [this=%p]\n", this));
@@ -8947,7 +9078,7 @@ nsresult nsHttpChannel::ContinueDoAuthRetry(
   // notify "http-on-before-connect" observers
   gHttpHandler->OnBeforeConnect(this);
 
-  RefPtr<nsHttpTransaction> trans(aTransWithStickyConn);
+  RefPtr<HttpTransactionShell> trans(aTransWithStickyConn);
   return CallOrWaitForResume(
       [trans{std::move(trans)}, aContinueOnStopRequestFunc](auto* self) {
         nsresult rv = self->DoConnect(trans);
@@ -9685,7 +9816,7 @@ void nsHttpChannel::SetOriginHeader() {
       // Origin header suppressed by user setting
       return;
     }
-  } else if (dom::ReferrerInfo::HideOnionReferrerSource()) {
+  } else if (StaticPrefs::network_http_referer_hideOnionSource()) {
     nsAutoCString host;
     if (referrer && NS_SUCCEEDED(referrer->GetAsciiHost(host)) &&
         StringEndsWith(host, NS_LITERAL_CSTRING(".onion"))) {
@@ -10319,9 +10450,17 @@ void nsHttpChannel::ReEvaluateReferrerAfterTrackingStatusIsKnown() {
                                                      isPrivate)) {
         nsCOMPtr<nsIReferrerInfo> newReferrerInfo =
             referrerInfo->CloneWithNewPolicy(ReferrerPolicy::_empty);
-        // Pass false for the 3rd bool to not overwrite the original
-        // referrer for these referrer policy mutations.
-        SetReferrerInfo(newReferrerInfo, false, true, false);
+        // The arguments passed to SetReferrerInfoInternal here should mirror
+        // the arguments passed in
+        // HttpChannelChild::RecvOverrideReferrerInfoDuringBeginConnect().
+        SetReferrerInfoInternal(newReferrerInfo, false, true, true);
+
+        nsCOMPtr<nsIParentChannel> parentChannel;
+        NS_QueryNotificationCallbacks(this, parentChannel);
+        RefPtr<HttpChannelParent> httpParent = do_QueryObject(parentChannel);
+        if (httpParent) {
+          httpParent->OverrideReferrerInfoDuringBeginConnect(newReferrerInfo);
+        }
       }
     }
   }

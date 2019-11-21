@@ -4,7 +4,7 @@
 
 const EXPORTED_SYMBOLS = ["SendTab", "FxAccountsCommands"];
 
-const { COMMAND_SENDTAB, log } = ChromeUtils.import(
+const { COMMAND_SENDTAB, COMMAND_SENDTAB_TAIL, log } = ChromeUtils.import(
   "resource://gre/modules/FxAccountsCommon.js"
 );
 ChromeUtils.defineModuleGetter(
@@ -31,6 +31,22 @@ class FxAccountsCommands {
   constructor(fxAccountsInternal) {
     this._fxai = fxAccountsInternal;
     this.sendTab = new SendTab(this, fxAccountsInternal);
+  }
+
+  async availableCommands() {
+    if (
+      !Services.prefs.getBoolPref("identity.fxaccounts.commands.enabled", true)
+    ) {
+      return {};
+    }
+    const sendTabKey = await this.sendTab.getEncryptedKey();
+    if (!sendTabKey) {
+      // This will happen if the account is not verified yet.
+      return {};
+    }
+    return {
+      [COMMAND_SENDTAB]: sendTabKey,
+    };
   }
 
   async invoke(command, device, payload) {
@@ -112,12 +128,19 @@ class FxAccountsCommands {
   }
 
   async _handleCommands(messages) {
-    const fxaDevices = await this._fxai.getDeviceList();
+    try {
+      await this._fxai.device.refreshDeviceList();
+    } catch (e) {
+      log.warn("Error refreshing device list", e);
+    }
     // We debounce multiple incoming tabs so we show a single notification.
     const tabsReceived = [];
     for (const { data } of messages) {
       const { command, payload, sender: senderId } = data;
-      const sender = senderId ? fxaDevices.find(d => d.id == senderId) : null;
+      const sender =
+        senderId && this._fxai.device.recentDeviceList
+          ? this._fxai.device.recentDeviceList.find(d => d.id == senderId)
+          : null;
       if (!sender) {
         log.warn(
           "Incoming command is from an unknown device (maybe disconnected?)"
@@ -126,7 +149,7 @@ class FxAccountsCommands {
       switch (command) {
         case COMMAND_SENDTAB:
           try {
-            const { title, uri } = await this.sendTab.handle(payload);
+            const { title, uri } = await this.sendTab.handle(senderId, payload);
             log.info(
               `Tab received with FxA commands: ${title} from ${
                 sender ? sender.name : "Unknown device"
@@ -169,10 +192,9 @@ class SendTab {
    */
   async send(to, tab) {
     log.info(`Sending a tab to ${to.length} devices.`);
+    const flowID = this._fxai.telemetry.generateFlowID();
     const encoder = new TextEncoder("utf8");
-    const data = {
-      entries: [{ title: tab.title, url: tab.url }],
-    };
+    const data = { entries: [{ title: tab.title, url: tab.url }] };
     const bytes = encoder.encode(JSON.stringify(data));
     const report = {
       succeeded: [],
@@ -181,8 +203,14 @@ class SendTab {
     for (let device of to) {
       try {
         const encrypted = await this._encrypt(bytes, device);
-        const payload = { encrypted };
+        const payload = { encrypted, flowID };
         await this._commands.invoke(COMMAND_SENDTAB, device, payload); // FxA needs an object.
+        this._fxai.telemetry.recordEvent(
+          "command-sent",
+          COMMAND_SENDTAB_TAIL,
+          this._fxai.telemetry.sanitizeDeviceId(device.id),
+          { flowID }
+        );
         report.succeeded.push(device);
       } catch (error) {
         log.error("Error while invoking a send tab command.", error);
@@ -205,7 +233,7 @@ class SendTab {
   }
 
   // Handle incoming send tab payload, called by FxAccountsCommands.
-  async handle({ encrypted }) {
+  async handle(senderID, { encrypted, flowID }) {
     const bytes = await this._decrypt(encrypted);
     const decoder = new TextDecoder("utf8");
     const data = JSON.parse(decoder.decode(bytes));
@@ -213,6 +241,13 @@ class SendTab {
       ? data.current
       : data.entries.length - 1;
     const { title, url: uri } = data.entries[current];
+    this._fxai.telemetry.recordEvent(
+      "command-received",
+      COMMAND_SENDTAB_TAIL,
+      this._fxai.telemetry.sanitizeDeviceId(senderID),
+      { flowID }
+    );
+
     return {
       title,
       uri,

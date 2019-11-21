@@ -43,8 +43,6 @@ const MONITOR_API_ENDPOINT = "https://monitor.firefox.com/user/breach-stats";
 
 const SECURE_PROXY_ADDON_ID = "secure-proxy@mozilla.com";
 
-// TODO: there will be a monitor-specific scope for FxA access tokens, which we should be
-// using once it's implemented. See: https://github.com/mozilla/blurts-server/issues/1128
 const SCOPE_MONITOR = [
   "profile:uid",
   "https://identity.mozilla.com/apps/monitor",
@@ -174,12 +172,11 @@ var AboutProtectionsHandler = {
    *         The login data.
    */
   async getLoginData() {
-    let syncedDevices = [];
     let hasFxa = false;
 
     try {
-      if ((hasFxa = await fxAccounts.accountStatus())) {
-        syncedDevices = await fxAccounts.getDeviceList();
+      if ((hasFxa = !!(await fxAccounts.getSignedInUser()))) {
+        await fxAccounts.device.refreshDeviceList();
       }
     } catch (e) {
       Cu.reportError("There was an error fetching login data: ", e.message);
@@ -192,7 +189,9 @@ var AboutProtectionsHandler = {
     return {
       hasFxa,
       numLogins: userFacingLogins,
-      numSyncedDevices: syncedDevices.length,
+      numSyncedDevices: fxAccounts.device.recentDeviceList
+        ? fxAccounts.device.recentDeviceList.length
+        : 0,
     };
   },
 
@@ -214,7 +213,7 @@ var AboutProtectionsHandler = {
     let token = await this.getMonitorScopedOAuthToken();
 
     try {
-      if ((await fxAccounts.accountStatus()) && token) {
+      if (token) {
         monitorData = await this.fetchUserBreachStats(token);
 
         // Get the stats for number of potentially breached Lockwise passwords if no master
@@ -225,6 +224,10 @@ var AboutProtectionsHandler = {
             logins
           );
         }
+        // Send back user's email so the protections report can direct them to the proper
+        // OAuth flow on Monitor.
+        const { email } = await fxAccounts.getSignedInUser();
+        userEmail = email;
       } else {
         // If no account exists, then the user is not logged in with an fxAccount.
         monitorData = {

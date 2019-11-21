@@ -4,38 +4,21 @@
 "use strict";
 
 var gDebuggee;
-var gClient;
 var gThreadFront;
 
-function run_test() {
-  Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
-  registerCleanupFunction(() => {
-    Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-  });
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-grips");
-  gDebuggee.eval(
-    function stopMe(arg1) {
-      debugger;
-    }.toString()
-  );
-
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-grips", function(
-      response,
-      targetFront,
-      threadFront
-    ) {
+add_task(
+  threadFrontTest(
+    async ({ threadFront, debuggee }) => {
       gThreadFront = threadFront;
+      gDebuggee = debuggee;
       test_named_function();
-    });
-  });
-  do_test_pending();
-}
+    },
+    { waitForFinish: true }
+  )
+);
 
 function test_named_function() {
-  gThreadFront.once("paused", function(packet) {
+  gThreadFront.once("paused", async function(packet) {
     const args = packet.frame.arguments;
 
     Assert.equal(args[0].class, "Function");
@@ -43,19 +26,24 @@ function test_named_function() {
     Assert.equal(args[0].displayName, "stopMe");
 
     const objClient = gThreadFront.pauseGrip(args[0]);
-    objClient.getParameterNames(function(response) {
-      Assert.equal(response.parameterNames.length, 1);
-      Assert.equal(response.parameterNames[0], "arg1");
+    const response = await objClient.getParameterNames();
+    Assert.equal(response.parameterNames.length, 1);
+    Assert.equal(response.parameterNames[0], "arg1");
 
-      gThreadFront.resume().then(test_inferred_name_function);
-    });
+    await gThreadFront.resume();
+    test_inferred_name_function();
   });
 
+  gDebuggee.eval(
+    function stopMe(arg1) {
+      debugger;
+    }.toString()
+  );
   gDebuggee.eval("stopMe(stopMe)");
 }
 
 function test_inferred_name_function() {
-  gThreadFront.once("paused", function(packet) {
+  gThreadFront.once("paused", async function(packet) {
     const args = packet.frame.arguments;
 
     Assert.equal(args[0].class, "Function");
@@ -64,21 +52,21 @@ function test_inferred_name_function() {
     Assert.equal(args[0].displayName, "m");
 
     const objClient = gThreadFront.pauseGrip(args[0]);
-    objClient.getParameterNames(function(response) {
-      Assert.equal(response.parameterNames.length, 3);
-      Assert.equal(response.parameterNames[0], "foo");
-      Assert.equal(response.parameterNames[1], "bar");
-      Assert.equal(response.parameterNames[2], "baz");
+    const response = await objClient.getParameterNames();
+    Assert.equal(response.parameterNames.length, 3);
+    Assert.equal(response.parameterNames[0], "foo");
+    Assert.equal(response.parameterNames[1], "bar");
+    Assert.equal(response.parameterNames[2], "baz");
 
-      gThreadFront.resume().then(test_anonymous_function);
-    });
+    await gThreadFront.resume();
+    test_anonymous_function();
   });
 
   gDebuggee.eval("var o = { m: function(foo, bar, baz) { } }; stopMe(o.m)");
 }
 
 function test_anonymous_function() {
-  gThreadFront.once("paused", function(packet) {
+  gThreadFront.once("paused", async function(packet) {
     const args = packet.frame.arguments;
 
     Assert.equal(args[0].class, "Function");
@@ -87,16 +75,14 @@ function test_anonymous_function() {
     Assert.equal(args[0].displayName, undefined);
 
     const objClient = gThreadFront.pauseGrip(args[0]);
-    objClient.getParameterNames(function(response) {
-      Assert.equal(response.parameterNames.length, 3);
-      Assert.equal(response.parameterNames[0], "foo");
-      Assert.equal(response.parameterNames[1], "bar");
-      Assert.equal(response.parameterNames[2], "baz");
+    const response = await objClient.getParameterNames();
+    Assert.equal(response.parameterNames.length, 3);
+    Assert.equal(response.parameterNames[0], "foo");
+    Assert.equal(response.parameterNames[1], "bar");
+    Assert.equal(response.parameterNames[2], "baz");
 
-      gThreadFront.resume().then(function() {
-        finishClient(gClient);
-      });
-    });
+    await gThreadFront.resume();
+    threadFrontTestFinished();
   });
 
   gDebuggee.eval("stopMe(function(foo, bar, baz) { })");

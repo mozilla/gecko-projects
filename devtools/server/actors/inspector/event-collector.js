@@ -304,15 +304,22 @@ class MainEventCollector {
   }
 
   isChromeHandler(handler) {
-    const handlerPrincipal = Cu.getObjectPrincipal(handler);
+    try {
+      const handlerPrincipal = Cu.getObjectPrincipal(handler);
 
-    // Chrome codebase may register listeners on the page from a frame script or
-    // JSM <video> tags may also report internal listeners, but they won't be
-    // coming from the system principal. Instead, they will be using an expanded
-    // principal.
-    return (
-      handlerPrincipal.isSystemPrincipal || handlerPrincipal.isExpandedPrincipal
-    );
+      // Chrome codebase may register listeners on the page from a frame script or
+      // JSM <video> tags may also report internal listeners, but they won't be
+      // coming from the system principal. Instead, they will be using an expanded
+      // principal.
+      return (
+        handlerPrincipal.isSystemPrincipal ||
+        handlerPrincipal.isExpandedPrincipal
+      );
+    } catch (e) {
+      // Anything from a dead object to a CSP error can leave us here so let's
+      // return false so that we can fail gracefully.
+      return false;
+    }
   }
 }
 
@@ -402,7 +409,7 @@ class DOMEventCollector extends MainEventCollector {
  * Get or detect jQuery events.
  */
 class JQueryEventCollector extends MainEventCollector {
-  /* eslint-disable complexity */
+  // eslint-disable-next-line complexity
   getListeners(node, { checkOnly } = {}) {
     const jQuery = this.getJQuery(node);
     const handlers = [];
@@ -494,14 +501,13 @@ class JQueryEventCollector extends MainEventCollector {
     }
     return handlers;
   }
-  /* eslint-enable complexity */
 }
 
 /**
  * Get or detect jQuery live events.
  */
 class JQueryLiveEventCollector extends MainEventCollector {
-  /* eslint-disable complexity */
+  // eslint-disable-next-line complexity
   getListeners(node, { checkOnly } = {}) {
     const jQuery = this.getJQuery(node);
     const handlers = [];
@@ -594,7 +600,6 @@ class JQueryLiveEventCollector extends MainEventCollector {
     }
     return handlers;
   }
-  /* eslint-enable complexity */
 
   normalizeListener(handlerDO) {
     function isFunctionInProxy(funcDO) {
@@ -896,7 +901,7 @@ class EventCollector {
    *             native: false
    *           }
    */
-  /* eslint-disable complexity */
+  // eslint-disable-next-line complexity
   processHandlerForEvent(listenerArray, listener, dbg) {
     let globalDO;
 
@@ -929,6 +934,7 @@ class EventCollector {
       let dom0 = false;
       let functionSource = handler.toString();
       let line = 0;
+      let column = null;
       let native = false;
       let url = "";
       let sourceActor = "";
@@ -968,8 +974,8 @@ class EventCollector {
         } else {
           dom0 = false;
         }
-
         line = script.startLine;
+        column = script.startColumn;
         url = script.url;
         const actor = this.targetActor.sources.getOrCreateSourceActor(
           script.source
@@ -1023,7 +1029,11 @@ class EventCollector {
       if (native) {
         origin = "[native code]";
       } else {
-        origin = url + (dom0 || line === 0 ? "" : ":" + line);
+        origin =
+          url +
+          (dom0 || line === 0
+            ? ""
+            : ":" + line + (column === null ? "" : ":" + column));
       }
 
       const eventObj = {
@@ -1055,7 +1065,6 @@ class EventCollector {
       }
     }
   }
-  /* eslint-enable complexity */
 }
 
 exports.EventCollector = EventCollector;

@@ -17,15 +17,17 @@
 
 #include "jsfriendapi.h"
 #include "jsmath.h"
-#include "jsutil.h"
 
 #include "gc/Memory.h"
 #ifdef JS_CODEGEN_ARM64
 #  include "jit/arm64/vixl/Cpu-vixl.h"
 #endif
 #include "jit/AtomicOperations.h"
+#include "jit/FlushICache.h"  // js::jit::FlushICache
 #include "threading/LockGuard.h"
 #include "threading/Mutex.h"
+#include "util/Memory.h"
+#include "util/Poison.h"
 #include "util/Windows.h"
 #include "vm/MutexIDs.h"
 
@@ -317,7 +319,17 @@ static void DecommitPages(void* addr, size_t bytes) {
   }
 }
 #else  // !XP_WIN
+#  ifndef MAP_NORESERVE
+#    define MAP_NORESERVE 0
+#  endif
+
 static void* ComputeRandomAllocationAddress() {
+#ifdef __OpenBSD__
+  // OpenBSD already has random mmap and the idea that all x64 cpus
+  // have 48-bit address space is not correct. Returning nullptr
+  // allows OpenBSD do to the right thing.
+  return nullptr;
+#else
   uint64_t rand = js::GenerateRandomSeed();
 
 #  ifdef HAVE_64BIT_BUILD
@@ -337,6 +349,7 @@ static void* ComputeRandomAllocationAddress() {
   // Ensure page alignment.
   uintptr_t mask = ~uintptr_t(gc::SystemPageSize() - 1);
   return (void*)uintptr_t(rand & mask);
+#endif
 }
 
 static void* ReserveProcessExecutableMemory(size_t bytes) {
@@ -344,8 +357,8 @@ static void* ReserveProcessExecutableMemory(size_t bytes) {
   // mmap will pick a different address.
   void* randomAddr = ComputeRandomAllocationAddress();
   void* p = MozTaggedAnonymousMmap(randomAddr, bytes, PROT_NONE,
-                                   MAP_PRIVATE | MAP_ANON, -1, 0,
-                                   "js-executable-memory");
+                                   MAP_NORESERVE | MAP_PRIVATE | MAP_ANON, -1,
+                                   0, "js-executable-memory");
   if (p == MAP_FAILED) {
     return nullptr;
   }

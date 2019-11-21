@@ -18,7 +18,6 @@ import type {
   Script,
   Pause,
   PendingLocation,
-  Frame,
   SourceId,
   QueuedSourceData,
   Range,
@@ -66,21 +65,32 @@ type URL = string;
  * @static
  */
 
+export type FramePacket = {|
+  +actor: ActorId,
+  +arguments: any[],
+  +displayName: string,
+  +this: any,
+  +depth?: number,
+  +oldest?: boolean,
+  +type: "pause" | "call",
+  +where: ServerLocation,
+|};
+
+type ServerLocation = {| actor: string, line: number, column: number |};
+
 /**
  * Frame Packet
  * @memberof firefox/packets
  * @static
  */
-export type FramePacket = {
-  actor: ActorId,
-  arguments: any[],
+export type FrameFront = {
+  +typeName: "frame",
+  +data: FramePacket,
+  +getEnvironment: () => Promise<*>,
+  +where: ServerLocation,
+  actorID: string,
   displayName: string,
-  environment: any,
   this: any,
-  depth?: number,
-  oldest?: boolean,
-  type: "pause" | "call",
-  where: {| actor: string, line: number, column: number |},
 };
 
 /**
@@ -131,7 +141,7 @@ export type PausedPacket = {
   actor: ActorId,
   from: ActorId,
   type: string,
-  frame: FramePacket,
+  frame: FrameFront,
   why: {
     actors: ActorId[],
     type: string,
@@ -144,10 +154,6 @@ export type PausedPacket = {
  * @memberof firefox
  * @static
  */
-export type FramesResponse = {
-  frames: FramePacket[],
-  from: ActorId,
-};
 
 export type TabPayload = {
   actor: ActorId,
@@ -165,7 +171,6 @@ export type TabPayload = {
   performanceActor: ActorId,
   performanceEntriesActor: ActorId,
   profilerActor: ActorId,
-  promisesActor: ActorId,
   reflowActor: ActorId,
   storageActor: ActorId,
   styleEditorActor: ActorId,
@@ -187,14 +192,11 @@ export type Actions = {
   newQueuedSources: (QueuedSourceData[]) => void,
   fetchEventListeners: () => void,
   updateThreads: typeof actions.updateThreads,
+  ensureHasThread: typeof actions.ensureHasThread,
+  setFramePositions: typeof actions.setFramePositions,
 };
 
 type ConsoleClient = {
-  evaluateJS: (
-    script: Script,
-    func: Function,
-    params?: { frameActor: ?FrameId }
-  ) => void,
   evaluateJSAsync: (
     script: Script,
     func: Function,
@@ -256,12 +258,16 @@ export type DebuggerClient = {
     traits: any,
     getFront: string => Promise<*>,
     listProcesses: () => Promise<{ processes: ProcessDescriptor }>,
+    listAllWorkers: () => Promise<*>,
+    getWorker: any => Promise<*>,
+    on: (string, Function) => void,
   },
   connect: () => Promise<*>,
   request: (packet: Object) => Promise<*>,
   attachConsole: (actor: String, listeners: Array<*>) => Promise<*>,
-  createObjectClient: (grip: Grip) => ObjectClient,
+  createObjectFront: (grip: Grip) => ObjectFront,
   release: (actor: String) => {},
+  getFrontByID: (actor: String) => { release: () => Promise<*> },
 };
 
 type ProcessDescriptor = Object;
@@ -301,6 +307,7 @@ export type Grip = {
   sealed: boolean,
   optimizedOut: boolean,
   type: string,
+  release: () => Promise<*>,
 };
 
 export type FunctionGrip = {|
@@ -332,11 +339,11 @@ export type SourceClient = {
 };
 
 /**
- * ObjectClient
+ * ObjectFront
  * @memberof firefox
  * @static
  */
-export type ObjectClient = {
+export type ObjectFront = {
   getPrototypeAndProperties: () => any,
   addWatchpoint: (
     property: string,
@@ -344,6 +351,7 @@ export type ObjectClient = {
     watchpointType: string
   ) => {},
   removeWatchpoint: (property: string) => {},
+  release: () => Promise<*>,
 };
 
 /**
@@ -352,6 +360,7 @@ export type ObjectClient = {
  * @static
  */
 export type ThreadFront = {
+  getFrames: (number, number) => Promise<{| frames: FrameFront[] |}>,
   resume: Function => Promise<*>,
   stepIn: Function => Promise<*>,
   stepOver: Function => Promise<*>,
@@ -361,7 +370,7 @@ export type ThreadFront = {
   breakOnNext: () => Promise<*>,
   // FIXME: unclear if SourceId or ActorId here
   source: ({ actor: SourceId }) => SourceClient,
-  pauseGrip: (Grip | Function) => ObjectClient,
+  pauseGrip: (Grip | Function) => ObjectFront,
   pauseOnExceptions: (boolean, boolean) => Promise<*>,
   setBreakpoint: (BreakpointLocation, BreakpointOptions) => Promise<*>,
   removeBreakpoint: PendingLocation => Promise<*>,
@@ -369,8 +378,6 @@ export type ThreadFront = {
   removeXHRBreakpoint: (path: string, method: string) => Promise<boolean>,
   interrupt: () => Promise<*>,
   eventListeners: () => Promise<*>,
-  getFrames: (number, number) => FramesResponse,
-  getEnvironment: (frame: Frame) => Promise<*>,
   on: (string, Function) => void,
   getSources: () => Promise<SourcesPacket>,
   reconfigure: ({ observeAsmJS: boolean }) => Promise<*>,
@@ -384,6 +391,9 @@ export type ThreadFront = {
   getAvailableEventBreakpoints: () => Promise<EventListenerCategoryList>,
   skipBreakpoints: boolean => Promise<{| skip: boolean |}>,
   detach: () => Promise<void>,
+  timeWarp: Function => Promise<*>,
+  fetchAncestorFramePositions: Function => Promise<*>,
+  get: string => FrameFront,
 };
 
 export type Panel = {|

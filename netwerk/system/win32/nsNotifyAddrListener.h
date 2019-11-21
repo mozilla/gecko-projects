@@ -38,31 +38,14 @@ class nsNotifyAddrListener : public nsINetworkLinkService,
                                    mozilla::SHA1Sum& sha1);
 
  protected:
-  class ChangeEvent : public mozilla::Runnable {
-   public:
-    NS_DECL_NSIRUNNABLE
-    ChangeEvent(nsINetworkLinkService* aService, const char* aEventID)
-        : Runnable("nsNotifyAddrListener::ChangeEvent"),
-          mService(aService),
-          mEventID(aEventID) {}
-
-   private:
-    nsCOMPtr<nsINetworkLinkService> mService;
-    const char* mEventID;
-  };
-
   bool mLinkUp;
   bool mStatusKnown;
   bool mCheckAttempted;
 
   nsresult Shutdown(void);
-  nsresult SendEvent(const char* aEventID);
+  nsresult NotifyObservers(const char* aTopic, const char* aData);
 
   DWORD CheckAdaptersAddresses(void);
-
-  // Checks for an Internet Connection Sharing (ICS) gateway.
-  bool CheckICSGateway(PIP_ADAPTER_ADDRESSES aAdapter);
-  bool CheckICSStatus(PWCHAR aAdapterName);
 
   // This threadpool only ever holds 1 thread. It is a threadpool and not a
   // regular thread so that we may call shutdownWithTimeout on it.
@@ -81,6 +64,7 @@ class nsNotifyAddrListener : public nsINetworkLinkService,
 
   mozilla::Mutex mMutex;
   nsCString mNetworkId;
+  nsTArray<nsCString> mDnsSuffixList;
 
   HANDLE mCheckEvent;
 

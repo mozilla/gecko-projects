@@ -500,6 +500,50 @@ Sync11Service.prototype = {
     this.engineManager.setDeclined(declined);
   },
 
+  /**
+   * This method updates the local engines state from an existing meta/global
+   * when Sync is disabled.
+   * Running this code if sync is enabled would end up in very weird results
+   * (but we're nice and we check before doing anything!).
+   */
+  async updateLocalEnginesState() {
+    await this.promiseInitialized;
+
+    // Sanity check, this method is not meant to be run if Sync is enabled!
+    if (Svc.Prefs.get("username", "")) {
+      throw new Error("Sync is enabled!");
+    }
+
+    // For historical reasons the behaviour of setCluster() is bizarre,
+    // so just check what we care about - the meta URL.
+    if (!this.metaURL) {
+      await this.identity.setCluster();
+      if (!this.metaURL) {
+        this._log.warn("Could not find a cluster.");
+        return;
+      }
+    }
+    // Clear the cache so we always fetch the latest meta/global.
+    this.recordManager.clearCache();
+    let meta = await this.recordManager.get(this.metaURL);
+    if (!meta) {
+      this._log.info("Meta record is null, aborting engine state update.");
+      return;
+    }
+    const declinedEngines = meta.payload.declined;
+    const allEngines = this.engineManager.getAll().map(e => e.name);
+    // We don't want our observer of the enabled prefs to treat the change as
+    // a user-change, otherwise we will do the wrong thing with declined etc.
+    this._ignorePrefObserver = true;
+    try {
+      for (const engine of allEngines) {
+        Svc.Prefs.set(`engine.${engine}`, !declinedEngines.includes(engine));
+      }
+    } finally {
+      this._ignorePrefObserver = false;
+    }
+  },
+
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsIObserver,
     Ci.nsISupportsWeakReference,
@@ -1325,31 +1369,37 @@ Sync11Service.prototype = {
           this.identity.prefetchMigrationSentinel(this);
         }
 
-        // Now let's update our declined engines (but only if we have a metaURL;
-        // if Sync failed due to no node we will not have one)
-        if (this.metaURL) {
-          let meta = await this.recordManager.get(this.metaURL);
-          if (!meta) {
-            this._log.warn("No meta/global; can't update declined state.");
-            return;
-          }
-
-          let declinedEngines = new DeclinedEngines(this);
-          let didChange = declinedEngines.updateDeclined(
-            meta,
-            this.engineManager
-          );
-          if (!didChange) {
-            this._log.info(
-              "No change to declined engines. Not reuploading meta/global."
-            );
-            return;
-          }
-
-          await this.uploadMetaGlobal(meta);
-        }
+        // Now let's update our declined engines
+        await this._maybeUpdateDeclined();
       })
     )();
+  },
+
+  /**
+   * Update the "declined" information in meta/global if necessary.
+   */
+  async _maybeUpdateDeclined() {
+    // if Sync failed due to no node we will not have a meta URL, so can't
+    // update anything.
+    if (!this.metaURL) {
+      return;
+    }
+    let meta = await this.recordManager.get(this.metaURL);
+    if (!meta) {
+      this._log.warn("No meta/global; can't update declined state.");
+      return;
+    }
+
+    let declinedEngines = new DeclinedEngines(this);
+    let didChange = declinedEngines.updateDeclined(meta, this.engineManager);
+    if (!didChange) {
+      this._log.info(
+        "No change to declined engines. Not reuploading meta/global."
+      );
+      return;
+    }
+
+    await this.uploadMetaGlobal(meta);
   },
 
   /**

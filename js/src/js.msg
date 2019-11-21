@@ -123,7 +123,7 @@ MSG_DEF(JSMSG_ASSIGN_TO_CALL,          0, JSEXN_REFERENCEERR, "cannot assign to 
 MSG_DEF(JSMSG_BAD_INSTANCEOF_RHS,      1, JSEXN_TYPEERR, "invalid 'instanceof' operand {0}")
 MSG_DEF(JSMSG_BAD_PROTOTYPE,           1, JSEXN_TYPEERR, "'prototype' property of {0} is not an object")
 MSG_DEF(JSMSG_IN_NOT_OBJECT,           1, JSEXN_TYPEERR, "right-hand side of 'in' should be an object, got {0}")
-MSG_DEF(JSMSG_IN_STRING,               2, JSEXN_TYPEERR, "cannot use 'in' operator to search for '{0}' in '{1}'")
+MSG_DEF(JSMSG_IN_STRING,               2, JSEXN_TYPEERR, "cannot use 'in' operator to search for {0} in {1}")
 MSG_DEF(JSMSG_TOO_MANY_CON_SPREADARGS, 0, JSEXN_RANGEERR, "too many constructor arguments")
 MSG_DEF(JSMSG_TOO_MANY_FUN_SPREADARGS, 0, JSEXN_RANGEERR, "too many function arguments")
 MSG_DEF(JSMSG_UNINITIALIZED_LEXICAL,   1, JSEXN_REFERENCEERR, "can't access lexical declaration `{0}' before initialization")
@@ -140,6 +140,8 @@ MSG_DEF(JSMSG_INVALID_NORMALIZE_FORM,  0, JSEXN_RANGEERR, "form must be one of '
 MSG_DEF(JSMSG_NEGATIVE_REPETITION_COUNT, 0, JSEXN_RANGEERR, "repeat count must be non-negative")
 MSG_DEF(JSMSG_NOT_A_CODEPOINT,         1, JSEXN_RANGEERR, "{0} is not a valid code point")
 MSG_DEF(JSMSG_RESULTING_STRING_TOO_LARGE, 0, JSEXN_RANGEERR, "repeat count must be less than infinity and not overflow maximum string size")
+MSG_DEF(JSMSG_FLAGS_UNDEFINED_OR_NULL, 0, JSEXN_TYPEERR, "'flags' property must neither be undefined nor null")
+MSG_DEF(JSMSG_REQUIRES_GLOBAL_REGEXP,  1, JSEXN_TYPEERR, "{0} must be called with a global RegExp")
 
 // Number
 MSG_DEF(JSMSG_BAD_RADIX,               0, JSEXN_RANGEERR, "radix must be an integer at least 2 and no greater than 36")
@@ -195,6 +197,7 @@ MSG_DEF(JSMSG_AWAIT_IN_PARAMETER,      0, JSEXN_SYNTAXERR, "await expression can
 MSG_DEF(JSMSG_AWAIT_OUTSIDE_ASYNC,     0, JSEXN_SYNTAXERR, "await is only valid in async functions and async generators")
 MSG_DEF(JSMSG_BAD_ARROW_ARGS,          0, JSEXN_SYNTAXERR, "invalid arrow-function arguments (parentheses around the arrow-function may help)")
 MSG_DEF(JSMSG_BAD_BINDING,             1, JSEXN_SYNTAXERR, "redefining {0} is deprecated")
+MSG_DEF(JSMSG_BAD_COALESCE_MIXING,     0, JSEXN_SYNTAXERR, "cannot use `??` unparenthesized within `||` and `&&` expressions")
 MSG_DEF(JSMSG_BAD_CONST_DECL,          0, JSEXN_SYNTAXERR, "missing = in const declaration")
 MSG_DEF(JSMSG_BAD_CONTINUE,            0, JSEXN_SYNTAXERR, "continue must be inside loop")
 MSG_DEF(JSMSG_BAD_DESTRUCT_ASS,        0, JSEXN_SYNTAXERR, "invalid destructuring assignment operator")
@@ -290,7 +293,8 @@ MSG_DEF(JSMSG_MISSING_EXPR_AFTER_THROW,0, JSEXN_SYNTAXERR, "throw statement is m
 MSG_DEF(JSMSG_MISSING_FORMAL,          0, JSEXN_SYNTAXERR, "missing formal parameter")
 MSG_DEF(JSMSG_MISSING_HEXDIGITS,       0, JSEXN_SYNTAXERR, "missing hexadecimal digits after '0x'")
 MSG_DEF(JSMSG_MISSING_OCTAL_DIGITS,    0, JSEXN_SYNTAXERR, "missing octal digits after '0o'")
-MSG_DEF(JSMSG_MISSING_DIGIT_AFTER_SEPARATOR, 0, JSEXN_SYNTAXERR, "missing digit after '_' numeric separator")
+MSG_DEF(JSMSG_NUMBER_END_WITH_UNDERSCORE, 0, JSEXN_SYNTAXERR, "underscore can appear only between digits, not after the last digit in a number")
+MSG_DEF(JSMSG_NUMBER_MULTIPLE_ADJACENT_UNDERSCORES, 0, JSEXN_SYNTAXERR, "number cannot contain multiple adjacent underscores")
 MSG_DEF(JSMSG_MODULE_SPEC_AFTER_FROM,  0, JSEXN_SYNTAXERR, "missing module specifier after 'from' keyword")
 MSG_DEF(JSMSG_NAME_AFTER_DOT,          0, JSEXN_SYNTAXERR, "missing name after . operator")
 MSG_DEF(JSMSG_NAMED_IMPORTS_OR_NAMESPACE_IMPORT, 0, JSEXN_SYNTAXERR, "expected named imports or namespace import after comma")
@@ -469,7 +473,7 @@ MSG_DEF(JSMSG_SC_BAD_SERIALIZED_DATA,  1, JSEXN_INTERNALERR, "bad serialized str
 MSG_DEF(JSMSG_SC_DUP_TRANSFERABLE,     0, JSEXN_TYPEERR, "duplicate transferable for structured clone")
 MSG_DEF(JSMSG_SC_NOT_TRANSFERABLE,     0, JSEXN_TYPEERR, "invalid transferable array for structured clone")
 MSG_DEF(JSMSG_SC_UNSUPPORTED_TYPE,     0, JSEXN_TYPEERR, "unsupported type for structured data")
-MSG_DEF(JSMSG_SC_NOT_CLONABLE,         1, JSEXN_TYPEERR, "{0} cannot be cloned in this context")
+MSG_DEF(JSMSG_SC_NOT_CLONABLE,         1, JSEXN_TYPEERR, "The {0} object cannot be serialized. The Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy HTTP headers will enable this in the future.")
 MSG_DEF(JSMSG_SC_SAB_DISABLED,         0, JSEXN_TYPEERR, "SharedArrayBuffer not cloned - shared memory disabled in receiver")
 MSG_DEF(JSMSG_SC_SAB_REFCNT_OFLO,      0, JSEXN_TYPEERR, "SharedArrayBuffer has too many references")
 MSG_DEF(JSMSG_SC_SHMEM_TRANSFERABLE,   0, JSEXN_TYPEERR, "Shared memory objects must not be in the transfer list")
@@ -522,6 +526,7 @@ MSG_DEF(JSMSG_TRACELOGGER_ENABLE_FAIL, 1, JSEXN_ERR, "enabling tracelogger faile
 
 // Intl
 MSG_DEF(JSMSG_DATE_NOT_FINITE,         2, JSEXN_RANGEERR, "date value is not finite in {0}.{1}()")
+MSG_DEF(JSMSG_DUPLICATE_VARIANT_SUBTAG, 1, JSEXN_RANGEERR, "duplicate variant subtag: {0}")
 MSG_DEF(JSMSG_INTERNAL_INTL_ERROR,     0, JSEXN_ERR, "internal error while computing Intl data")
 MSG_DEF(JSMSG_INVALID_CURRENCY_CODE,   1, JSEXN_RANGEERR, "invalid currency code in NumberFormat(): {0}")
 MSG_DEF(JSMSG_INVALID_UNIT_IDENTIFIER, 1, JSEXN_RANGEERR, "invalid unit identifier in NumberFormat(): {0}")
@@ -630,7 +635,6 @@ MSG_DEF(JSMSG_AMBIGUOUS_IMPORT,          0, JSEXN_SYNTAXERR, "ambiguous import")
 MSG_DEF(JSMSG_MISSING_NAMESPACE_EXPORT,  0, JSEXN_SYNTAXERR, "export not found for namespace")
 MSG_DEF(JSMSG_MISSING_EXPORT,            1, JSEXN_SYNTAXERR, "local binding for export '{0}' not found")
 MSG_DEF(JSMSG_BAD_MODULE_STATUS,         0, JSEXN_INTERNALERR, "module record has unexpected status")
-MSG_DEF(JSMSG_NO_DYNAMIC_IMPORT,         0, JSEXN_SYNTAXERR, "dynamic module import is not implemented")
 MSG_DEF(JSMSG_DYNAMIC_IMPORT_FAILED,     0, JSEXN_TYPEERR, "error loading dynamically imported module")
 MSG_DEF(JSMSG_BAD_MODULE_SPECIFIER,      1, JSEXN_TYPEERR, "error resolving module specifier '{0}'")
 
@@ -683,6 +687,14 @@ MSG_DEF(JSMSG_READABLESTREAM_METHOD_NOT_IMPLEMENTED,     1, JSEXN_TYPEERR, "Read
 
 // WritableStream
 MSG_DEF(JSMSG_READABLESTREAM_UNDERLYINGSINK_TYPE_WRONG,  0, JSEXN_RANGEERR,"'underlyingSink.type' must be undefined.")
+MSG_DEF(JSMSG_WRITABLESTREAMWRITER_NOT_OWNED,            1, JSEXN_TYPEERR, "the WritableStream writer method '{0}' may only be called on a writer owned by a stream")
+MSG_DEF(JSMSG_WRITABLESTREAM_CLOSED_OR_ERRORED,          0, JSEXN_TYPEERR, "writable stream is already closed or errored")
+MSG_DEF(JSMSG_WRITABLESTREAM_RELEASED_DURING_WRITE,      0, JSEXN_TYPEERR, "writer's lock on the stream was released before writing completed")
+MSG_DEF(JSMSG_WRITABLESTREAM_WRITE_CLOSING_OR_CLOSED,    0, JSEXN_TYPEERR, "can't write to a stream that's currently closing or already closed")
+MSG_DEF(JSMSG_CANT_USE_LOCKED_WRITABLESTREAM,            1, JSEXN_TYPEERR, "can't {0} a WritableStream that's locked to a writer")
+MSG_DEF(JSMSG_WRITABLESTREAM_CLOSE_CLOSING_OR_CLOSED,    0, JSEXN_TYPEERR, "can't close a stream that's currently closing or already closed")
+MSG_DEF(JSMSG_WRITABLESTREAM_CANT_RELEASE_ALREADY_CLOSED,0, JSEXN_TYPEERR, "writer has already been released and can't be closed")
+MSG_DEF(JSMSG_WRITABLESTREAM_ALREADY_LOCKED,             0, JSEXN_TYPEERR, "writable stream is already locked by another writer")
 MSG_DEF(JSMSG_READABLESTREAM_NYI,                        0, JSEXN_ERR,     "full WritableStream support is not yet implemented")
 
 // Other Stream-related
@@ -710,3 +722,11 @@ MSG_DEF(JSMSG_SC_BIGINT_DISABLED, 0, JSEXN_ERR, "BigInt not cloned - feature dis
 
 // BinAST
 MSG_DEF(JSMSG_BINAST,                                    1, JSEXN_SYNTAXERR, "BinAST Parsing Error: {0}")
+
+// FinalizationGroup
+MSG_DEF(JSMSG_NOT_A_FINALIZATION_GROUP,                  1, JSEXN_TYPEERR, "{0} is not a FinalizationGroup")
+MSG_DEF(JSMSG_NOT_A_FINALIZATION_ITERATOR,               1, JSEXN_TYPEERR, "{0} is not a FinalizationGroupCleanupIterator")
+MSG_DEF(JSMSG_BAD_HOLDINGS,                              0, JSEXN_TYPEERR, "The holdings passed to FinalizationGroup.register must not be the same as its target object")
+MSG_DEF(JSMSG_BAD_UNREGISTER_TOKEN,                      1, JSEXN_TYPEERR, "Invalid unregister token passed to {0}")
+MSG_DEF(JSMSG_STALE_FINALIZATION_GROUP_ITERATOR,         0, JSEXN_TYPEERR, "Can't use stale finalization group iterator")
+MSG_DEF(JSMSG_BAD_CLEANUP_STATE,                         0, JSEXN_TYPEERR, "Can't call FinalizeGroup.cleanupSome while cleanup is in progress")

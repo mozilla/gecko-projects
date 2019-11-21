@@ -22,6 +22,9 @@
 #include "nsQueryObject.h"
 #include "nsSerializationHelper.h"
 #include "nsStringStream.h"
+#include "mozilla/dom/nsCSPContext.h"
+#include "nsStreamListenerWrapper.h"
+#include "mozilla/extensions/StreamFilterParent.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
@@ -40,7 +43,7 @@ NS_INTERFACE_MAP_BEGIN(DocumentChannelChild)
         "Trying to request nsIHttpChannel from DocumentChannelChild, this is "
         "likely broken");
   }
-  NS_INTERFACE_MAP_ENTRY(nsIClassifiedChannel)
+  NS_INTERFACE_MAP_ENTRY(nsITraceableChannel)
   NS_INTERFACE_MAP_ENTRY_CONCRETE(DocumentChannelChild)
 NS_INTERFACE_MAP_END_INHERITING(nsBaseChannel)
 
@@ -50,13 +53,15 @@ NS_IMPL_RELEASE_INHERITED(DocumentChannelChild, nsBaseChannel)
 DocumentChannelChild::DocumentChannelChild(
     nsDocShellLoadState* aLoadState, net::LoadInfo* aLoadInfo,
     const nsString* aInitiatorType, nsLoadFlags aLoadFlags, uint32_t aLoadType,
-    uint32_t aCacheKey, bool aIsActive, bool aIsTopLevelDoc)
+    uint32_t aCacheKey, bool aIsActive, bool aIsTopLevelDoc,
+    bool aHasNonEmptySandboxingFlags)
     : mLoadState(aLoadState),
       mInitiatorType(aInitiatorType ? Some(*aInitiatorType) : Nothing()),
       mLoadType(aLoadType),
       mCacheKey(aCacheKey),
       mIsActive(aIsActive),
-      mIsTopLevelDoc(aIsTopLevelDoc) {
+      mIsTopLevelDoc(aIsTopLevelDoc),
+      mHasNonEmptySandboxingFlags(aHasNonEmptySandboxingFlags) {
   mEventQueue = new ChannelEventQueue(static_cast<nsIChannel*>(this));
   SetURI(aLoadState->URI());
   SetLoadInfo(aLoadInfo);
@@ -65,6 +70,7 @@ DocumentChannelChild::DocumentChannelChild(
   uint64_t channelId;
   Unused << handler->NewChannelId(channelId);
   mChannelId.emplace(channelId);
+  mAsyncOpenTime = TimeStamp::Now();
 }
 
 NS_IMETHODIMP
@@ -146,7 +152,9 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
   args.cacheKey() = mCacheKey;
   args.isActive() = mIsActive;
   args.isTopLevelDoc() = mIsTopLevelDoc;
+  args.hasNonEmptySandboxingFlags() = mHasNonEmptySandboxingFlags;
   args.channelId() = *mChannelId;
+  args.asyncOpenTime() = mAsyncOpenTime;
 
   nsCOMPtr<nsILoadContext> loadContext;
   NS_QueryNotificationCallbacks(this, loadContext);
@@ -182,29 +190,13 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
   return NS_OK;
 }
 
-class DocumentFailedAsyncOpenEvent
-    : public NeckoTargetChannelEvent<DocumentChannelChild> {
- public:
-  DocumentFailedAsyncOpenEvent(DocumentChannelChild* aChild,
-                               nsresult aStatusCode)
-      : NeckoTargetChannelEvent<DocumentChannelChild>(aChild),
-        mStatus(aStatusCode) {}
-
-  void Run() override { mChild->DoFailedAsyncOpen(mStatus); }
-
- private:
-  nsresult mStatus;
-};
-
 IPCResult DocumentChannelChild::RecvFailedAsyncOpen(
     const nsresult& aStatusCode) {
-  mEventQueue->RunOrEnqueue(
-      new DocumentFailedAsyncOpenEvent(this, aStatusCode));
+  mEventQueue->RunOrEnqueue(new NeckoTargetChannelFunctionEvent(
+      this, [self = UnsafePtr<DocumentChannelChild>(this), aStatusCode]() {
+        self->ShutdownListeners(aStatusCode);
+      }));
   return IPC_OK();
-}
-
-void DocumentChannelChild::DoFailedAsyncOpen(const nsresult& aStatusCode) {
-  ShutdownListeners(aStatusCode);
 }
 
 void DocumentChannelChild::ShutdownListeners(nsresult aStatusCode) {
@@ -234,8 +226,18 @@ void DocumentChannelChild::ShutdownListeners(nsresult aStatusCode) {
   }
 }
 
-IPCResult DocumentChannelChild::RecvCancelForProcessSwitch() {
-  ShutdownListeners(NS_BINDING_ABORTED);
+IPCResult DocumentChannelChild::RecvDisconnectChildListeners(
+    const nsresult& aStatus) {
+  MOZ_ASSERT(NS_FAILED(aStatus));
+  // Make sure we remove from the load group before
+  // setting mStatus, as existing tests expect the
+  // status to be successful when we disconnect.
+  if (mLoadGroup) {
+    mLoadGroup->RemoveRequest(this, nullptr, aStatus);
+    mLoadGroup = nullptr;
+  }
+
+  ShutdownListeners(aStatus);
   return IPC_OK();
 }
 
@@ -247,34 +249,33 @@ IPCResult DocumentChannelChild::RecvDeleteSelf() {
 }
 
 IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
-    const uint32_t& aRegistrarId, nsIURI* aURI, const uint32_t& aNewLoadFlags,
-    const Maybe<ReplacementChannelConfigInit>& aInit,
-    const Maybe<LoadInfoArgs>& aLoadInfo,
-    nsTArray<DocumentChannelRedirect>&& aRedirects, const uint64_t& aChannelId,
-    nsIURI* aOriginalURI, const uint32_t& aRedirectMode,
-    const uint32_t& aRedirectFlags, const Maybe<uint32_t>& aContentDisposition,
-    const Maybe<nsString>& aContentDispositionFilename,
+    const RedirectToRealChannelArgs& aArgs,
     RedirectToRealChannelResolver&& aResolve) {
   RefPtr<dom::Document> loadingDocument;
   mLoadInfo->GetLoadingDocument(getter_AddRefs(loadingDocument));
 
-  nsCOMPtr<nsILoadInfo> loadInfo;
-  nsresult rv = LoadInfoArgsToLoadInfo(aLoadInfo, loadingDocument,
-                                       getter_AddRefs(loadInfo));
-  if (NS_FAILED(rv)) {
-    MOZ_DIAGNOSTIC_ASSERT(false, "LoadInfoArgsToLoadInfo failed");
-    return IPC_OK();
+  RefPtr<dom::Document> cspToInheritLoadingDocument;
+  nsCOMPtr<nsIContentSecurityPolicy> policy = mLoadInfo->GetCspToInherit();
+  if (policy) {
+    nsWeakPtr ctx =
+        static_cast<nsCSPContext*>(policy.get())->GetLoadingContext();
+    cspToInheritLoadingDocument = do_QueryReferent(ctx);
   }
+  nsCOMPtr<nsILoadInfo> loadInfo;
+  MOZ_ALWAYS_SUCCEEDS(LoadInfoArgsToLoadInfo(aArgs.loadInfo(), loadingDocument,
+                                             cspToInheritLoadingDocument,
+                                             getter_AddRefs(loadInfo)));
 
-  mRedirects = std::move(aRedirects);
+  mRedirects = std::move(aArgs.redirects());
   mRedirectResolver = std::move(aResolve);
 
   nsCOMPtr<nsIChannel> newChannel;
-  rv = NS_NewChannelInternal(getter_AddRefs(newChannel), aURI, loadInfo,
-                             nullptr,     // PerformanceStorage
-                             mLoadGroup,  // aLoadGroup
-                             nullptr,     // aCallbacks
-                             aNewLoadFlags);
+  nsresult rv =
+      NS_NewChannelInternal(getter_AddRefs(newChannel), aArgs.uri(), loadInfo,
+                            nullptr,     // PerformanceStorage
+                            mLoadGroup,  // aLoadGroup
+                            nullptr,     // aCallbacks
+                            aArgs.newLoadFlags());
 
   RefPtr<HttpChannelChild> httpChild = do_QueryObject(newChannel);
   RefPtr<nsIChildChannel> childChannel = do_QueryObject(newChannel);
@@ -286,24 +287,26 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
   // This is used to report any errors back to the parent by calling
   // CrossProcessRedirectFinished.
   auto scopeExit = MakeScopeExit([&]() {
-    mRedirectResolver(rv);
+    Maybe<LoadInfoArgs> dummy;
+    mRedirectResolver(
+        Tuple<const nsresult&, const Maybe<LoadInfoArgs>&>(rv, dummy));
     mRedirectResolver = nullptr;
   });
 
   if (httpChild) {
-    rv = httpChild->SetChannelId(aChannelId);
+    rv = httpChild->SetChannelId(aArgs.channelId());
   }
   if (NS_FAILED(rv)) {
     return IPC_OK();
   }
 
-  rv = newChannel->SetOriginalURI(aOriginalURI);
+  rv = newChannel->SetOriginalURI(aArgs.originalURI());
   if (NS_FAILED(rv)) {
     return IPC_OK();
   }
 
   if (httpChild) {
-    rv = httpChild->SetRedirectMode(aRedirectMode);
+    rv = httpChild->SetRedirectMode(aArgs.redirectMode());
   }
   if (NS_FAILED(rv)) {
     return IPC_OK();
@@ -311,19 +314,20 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
 
   newChannel->SetNotificationCallbacks(mCallbacks);
 
-  if (aInit) {
-    HttpBaseChannel::ReplacementChannelConfig config(*aInit);
+  if (aArgs.init()) {
+    HttpBaseChannel::ReplacementChannelConfig config(*aArgs.init());
     HttpBaseChannel::ConfigureReplacementChannel(
         newChannel, config,
         HttpBaseChannel::ConfigureReason::DocumentChannelReplacement);
   }
 
-  if (aContentDisposition) {
-    newChannel->SetContentDisposition(*aContentDisposition);
+  if (aArgs.contentDisposition()) {
+    newChannel->SetContentDisposition(*aArgs.contentDisposition());
   }
 
-  if (aContentDispositionFilename) {
-    newChannel->SetContentDispositionFilename(*aContentDispositionFilename);
+  if (aArgs.contentDispositionFilename()) {
+    newChannel->SetContentDispositionFilename(
+        *aArgs.contentDispositionFilename());
   }
 
   // transfer any properties. This appears to be entirely a content-side
@@ -343,18 +347,18 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
 
   // connect parent.
   if (childChannel) {
-    rv = childChannel->ConnectParent(aRegistrarId);  // creates parent channel
+    rv = childChannel->ConnectParent(
+        aArgs.registrarId());  // creates parent channel
     if (NS_FAILED(rv)) {
       return IPC_OK();
     }
-
-    mRedirectChannel = childChannel;
   }
+  mRedirectChannel = newChannel;
 
   nsCOMPtr<nsIEventTarget> target = GetNeckoTarget();
   MOZ_ASSERT(target);
-  rv = gHttpHandler->AsyncOnChannelRedirect(this, newChannel, aRedirectFlags,
-                                            target);
+  rv = gHttpHandler->AsyncOnChannelRedirect(this, newChannel,
+                                            aArgs.redirectFlags(), target);
 
   if (NS_SUCCEEDED(rv)) {
     scopeExit.release();
@@ -366,21 +370,37 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
 
 NS_IMETHODIMP
 DocumentChannelChild::OnRedirectVerifyCallback(nsresult aStatusCode) {
-  if (mRedirectChannel) {
-    if (NS_SUCCEEDED(aStatusCode) && NS_SUCCEEDED(mStatus)) {
-      mRedirectChannel->CompleteRedirectSetup(mListener, nullptr);
-    } else {
-      nsCOMPtr<nsIChannel> channel = do_QueryInterface(mRedirectChannel);
-      channel->SetNotificationCallbacks(nullptr);
-    }
+  nsCOMPtr<nsIChannel> redirectChannel = std::move(mRedirectChannel);
+  RedirectToRealChannelResolver redirectResolver = std::move(mRedirectResolver);
+
+  // If we've already shut down, then just notify the parent that
+  // we're done.
+  if (NS_FAILED(mStatus)) {
+    redirectChannel->SetNotificationCallbacks(nullptr);
+    Maybe<LoadInfoArgs> dummy;
+    redirectResolver(
+        Tuple<const nsresult&, const Maybe<LoadInfoArgs>&>(aStatusCode, dummy));
+    return NS_OK;
   }
-  mRedirectChannel = nullptr;
 
-  mRedirectResolver(aStatusCode);
-  mRedirectResolver = nullptr;
+  nsresult rv = aStatusCode;
+  if (NS_SUCCEEDED(rv)) {
+    if (nsCOMPtr<nsIChildChannel> childChannel =
+            do_QueryInterface(redirectChannel)) {
+      rv = childChannel->CompleteRedirectSetup(mListener, nullptr);
+    } else {
+      rv = redirectChannel->AsyncOpen(mListener);
+    }
+  } else {
+    redirectChannel->SetNotificationCallbacks(nullptr);
+  }
 
-  if (NS_FAILED(aStatusCode)) {
-    ShutdownListeners(aStatusCode);
+  Maybe<LoadInfoArgs> dummy;
+  redirectResolver(
+      Tuple<const nsresult&, const Maybe<LoadInfoArgs>&>(rv, dummy));
+
+  if (NS_FAILED(rv)) {
+    ShutdownListeners(rv);
     return NS_OK;
   }
 
@@ -408,8 +428,16 @@ IPCResult DocumentChannelChild::RecvConfirmRedirect(
   // This just checks CSP thus far, hopefully there's not much else needed.
   RefPtr<dom::Document> loadingDocument;
   mLoadInfo->GetLoadingDocument(getter_AddRefs(loadingDocument));
+  RefPtr<dom::Document> cspToInheritLoadingDocument;
+  nsCOMPtr<nsIContentSecurityPolicy> policy = mLoadInfo->GetCspToInherit();
+  if (policy) {
+    nsWeakPtr ctx =
+        static_cast<nsCSPContext*>(policy.get())->GetLoadingContext();
+    cspToInheritLoadingDocument = do_QueryReferent(ctx);
+  }
   nsCOMPtr<nsILoadInfo> loadInfo;
   MOZ_ALWAYS_SUCCEEDS(LoadInfoArgsToLoadInfo(Some(aLoadInfo), loadingDocument,
+                                             cspToInheritLoadingDocument,
                                              getter_AddRefs(loadInfo)));
 
   nsCOMPtr<nsIURI> originalUri;
@@ -421,108 +449,31 @@ IPCResult DocumentChannelChild::RecvConfirmRedirect(
   }
 
   Maybe<nsresult> cancelCode;
-  rv = CSPService::ConsultCSPForRedirect(originalUri, aNewUri, loadInfo,
+  rv = CSPService::ConsultCSPForRedirect(originalUri, aNewUri, mLoadInfo,
                                          cancelCode);
   aResolve(Tuple<const nsresult&, const Maybe<nsresult>&>(rv, cancelCode));
   return IPC_OK();
 }
 
-IPCResult DocumentChannelChild::RecvNotifyChannelClassifierProtectionDisabled(
-    const uint32_t& aAcceptedReason) {
-  UrlClassifierCommon::NotifyChannelClassifierProtectionDisabled(
-      this, aAcceptedReason);
-  return IPC_OK();
-}
-
-IPCResult DocumentChannelChild::RecvNotifyCookieAllowed() {
-  AntiTrackingCommon::NotifyBlockingDecision(
-      this, AntiTrackingCommon::BlockingDecision::eAllow, 0);
-  return IPC_OK();
-}
-
-IPCResult DocumentChannelChild::RecvNotifyCookieBlocked(
-    const uint32_t& aRejectedReason) {
-  AntiTrackingCommon::NotifyBlockingDecision(
-      this, AntiTrackingCommon::BlockingDecision::eBlock, aRejectedReason);
-  return IPC_OK();
-}
-
-IPCResult DocumentChannelChild::RecvSetClassifierMatchedInfo(
-    const nsCString& aList, const nsCString& aProvider,
-    const nsCString& aFullHash) {
-  SetMatchedInfo(aList, aProvider, aFullHash);
-  return IPC_OK();
-}
-
-IPCResult DocumentChannelChild::RecvSetClassifierMatchedTrackingInfo(
-    const nsCString& aLists, const nsCString& aFullHash) {
-  nsTArray<nsCString> lists, fullhashes;
-  for (const nsACString& token : aLists.Split(',')) {
-    lists.AppendElement(token);
-  }
-  for (const nsACString& token : aFullHash.Split(',')) {
-    fullhashes.AppendElement(token);
-  }
-
-  SetMatchedTrackingInfo(lists, fullhashes);
+mozilla::ipc::IPCResult DocumentChannelChild::RecvAttachStreamFilter(
+    Endpoint<extensions::PStreamFilterParent>&& aEndpoint) {
+  extensions::StreamFilterParent::Attach(this, std::move(aEndpoint));
   return IPC_OK();
 }
 
 //-----------------------------------------------------------------------------
-// DocumentChannelChild::nsIClassifiedChannel
+// DocumentChannelChild::nsITraceableChannel
+//-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-DocumentChannelChild::GetMatchedList(nsACString& aList) {
-  aList = mMatchedList;
-  return NS_OK;
-}
+DocumentChannelChild::SetNewListener(nsIStreamListener* aListener,
+                                     nsIStreamListener** _retval) {
+  NS_ENSURE_ARG_POINTER(aListener);
 
-NS_IMETHODIMP
-DocumentChannelChild::GetMatchedProvider(nsACString& aProvider) {
-  aProvider = mMatchedProvider;
-  return NS_OK;
-}
+  nsCOMPtr<nsIStreamListener> wrapper = new nsStreamListenerWrapper(mListener);
 
-NS_IMETHODIMP
-DocumentChannelChild::GetMatchedFullHash(nsACString& aFullHash) {
-  aFullHash = mMatchedFullHash;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DocumentChannelChild::SetMatchedInfo(const nsACString& aList,
-                                     const nsACString& aProvider,
-                                     const nsACString& aFullHash) {
-  NS_ENSURE_ARG(!aList.IsEmpty());
-
-  mMatchedList = aList;
-  mMatchedProvider = aProvider;
-  mMatchedFullHash = aFullHash;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DocumentChannelChild::GetMatchedTrackingLists(nsTArray<nsCString>& aLists) {
-  aLists = mMatchedTrackingLists;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DocumentChannelChild::GetMatchedTrackingFullHashes(
-    nsTArray<nsCString>& aFullHashes) {
-  aFullHashes = mMatchedTrackingFullHashes;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-DocumentChannelChild::SetMatchedTrackingInfo(
-    const nsTArray<nsCString>& aLists, const nsTArray<nsCString>& aFullHashes) {
-  NS_ENSURE_ARG(!aLists.IsEmpty());
-  // aFullHashes can be empty for non hash-matching algorithm, for example,
-  // host based test entries in preference.
-
-  mMatchedTrackingLists = aLists;
-  mMatchedTrackingFullHashes = aFullHashes;
+  wrapper.forget(_retval);
+  mListener = aListener;
   return NS_OK;
 }
 

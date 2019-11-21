@@ -134,8 +134,10 @@ class WebReplayPlayer extends Component {
       paused: false,
       messages: [],
       highlightedMessage: null,
+      hoveredMessageOffset: null,
       unscannedRegions: [],
       cachedPoints: [],
+      shouldAnimate: true,
       start: 0,
       end: 1,
     };
@@ -285,8 +287,10 @@ class WebReplayPlayer extends Component {
       unscannedRegions,
       cachedPoints,
     };
+
     if (recording) {
       newState.recordingEndpoint = executionPoint;
+      newState.shouldAnimate = true;
     }
 
     this.setState(newState);
@@ -304,7 +308,7 @@ class WebReplayPlayer extends Component {
 
       messages = sortBy(messages, message => getMessageProgress(message));
 
-      this.setState({ messages, visibleMessages });
+      this.setState({ messages, visibleMessages, shouldAnimate: false });
     }
   }
 
@@ -375,9 +379,14 @@ class WebReplayPlayer extends Component {
     this.paint(message.executionPoint);
   }
 
-  onMessageMouseEnter(message) {
+  onMessageMouseEnter(message, offset) {
+    this.setState({ hoveredMessageOffset: offset });
     this.previewLocation(message);
     this.showMessage(message);
+  }
+
+  onMessageMouseLeave() {
+    this.setState({ hoveredMessageOffset: null });
   }
 
   async previewLocation(closestMessage) {
@@ -628,7 +637,8 @@ class WebReplayPlayer extends Component {
         e.stopPropagation();
         this.seek(message.executionPoint);
       },
-      onMouseEnter: () => this.onMessageMouseEnter(message),
+      onMouseEnter: () => this.onMessageMouseEnter(message, offset),
+      onMouseLeave: () => this.onMessageMouseLeave(),
     });
   }
 
@@ -644,15 +654,17 @@ class WebReplayPlayer extends Component {
   }
 
   renderTick(index) {
-    const { executionPoint } = this.state;
+    const { executionPoint, hoveredMessageOffset } = this.state;
     const tickSize = this.getTickSize();
     const offset = Math.round(this.getOffset(executionPoint));
     const position = index * tickSize;
     const isFuture = position > offset;
+    const shouldHighlight = hoveredMessageOffset > position;
 
     return dom.span({
       className: classname("tick", {
         future: isFuture,
+        highlight: shouldHighlight,
       }),
       style: {
         left: `${position}px`,
@@ -695,8 +707,11 @@ class WebReplayPlayer extends Component {
   render() {
     const percent = this.getVisiblePercent(this.state.executionPoint);
     const recording = this.isRecording();
+    const { shouldAnimate } = this.state;
     return div(
-      { className: "webreplay-player" },
+      {
+        className: "webreplay-player",
+      },
       div(
         {
           id: "overlay",
@@ -707,7 +722,11 @@ class WebReplayPlayer extends Component {
           onMouseLeave: this.onPlayerMouseLeave,
         },
         div(
-          { className: "overlay-container " },
+          {
+            className: classname("overlay-container", {
+              animate: shouldAnimate,
+            }),
+          },
           div({ className: "commands" }, ...this.renderCommands()),
           div(
             {

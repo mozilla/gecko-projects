@@ -24,6 +24,7 @@
 #include "mozilla/Sprintf.h"
 #include "mozilla/TextUtils.h"
 
+#include <algorithm>
 #include <math.h>
 #include <string.h>
 
@@ -31,7 +32,6 @@
 #include "jsfriendapi.h"
 #include "jsnum.h"
 #include "jstypes.h"
-#include "jsutil.h"
 
 #include "js/Conversions.h"
 #include "js/Date.h"
@@ -799,7 +799,7 @@ static bool ParseDigitsN(size_t n, size_t* result, const CharT* s, size_t* i,
                          size_t limit) {
   size_t init = *i;
 
-  if (ParseDigits(result, s, i, Min(limit, init + n))) {
+  if (ParseDigits(result, s, i, std::min(limit, init + n))) {
     return (*i - init) == n;
   }
 
@@ -819,7 +819,7 @@ static bool ParseDigitsNOrLess(size_t n, size_t* result, const CharT* s,
                                size_t* i, size_t limit) {
   size_t init = *i;
 
-  if (ParseDigits(result, s, i, Min(limit, init + n))) {
+  if (ParseDigits(result, s, i, std::min(limit, init + n))) {
     return ((*i - init) > 0) && ((*i - init) <= n);
   }
 
@@ -1411,7 +1411,7 @@ static bool date_parse(JSContext* cx, unsigned argc, Value* vp) {
 
 static ClippedTime NowAsMillis(JSContext* cx) {
   double now = PRMJ_Now();
-  bool clampAndJitter = cx->realm()->creationOptions().clampAndJitterTime();
+  bool clampAndJitter = cx->realm()->behaviors().clampAndJitterTime();
   if (clampAndJitter && sReduceMicrosecondTimePrecisionCallback) {
     now = sReduceMicrosecondTimePrecisionCallback(now);
   } else if (clampAndJitter && sResolutionUsec) {

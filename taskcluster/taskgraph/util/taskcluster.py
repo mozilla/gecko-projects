@@ -24,7 +24,7 @@ testing = False
 
 # Default rootUrl to use if none is given in the environment; this should point
 # to the production Taskcluster deployment used for CI.
-PRODUCTION_TASKCLUSTER_ROOT_URL = 'https://taskcluster.net'
+PRODUCTION_TASKCLUSTER_ROOT_URL = 'https://firefox-ci-tc.services.mozilla.com'
 
 # the maximum number of parallel Taskcluster API calls to make
 CONCURRENCY = 50
@@ -146,6 +146,8 @@ def get_artifact_prefix(task):
         prefix = task.get('attributes', {}).get("artifact_prefix")
     elif isinstance(task, Task):
         prefix = task.attributes.get("artifact_prefix")
+    else:
+        raise Exception("Can't find artifact-prefix of non-task: {}".format(task))
     return prefix or "public/build"
 
 

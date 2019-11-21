@@ -19,6 +19,7 @@ struct ID3D11Device;
 struct ID3D11Query;
 struct IDXGIFactory2;
 struct IDXGISwapChain;
+struct IDXGISwapChain1;
 
 namespace mozilla {
 namespace gl {
@@ -38,11 +39,13 @@ class RenderCompositorANGLE : public RenderCompositor {
   virtual ~RenderCompositorANGLE();
   bool Initialize();
 
-  bool BeginFrame(layers::NativeLayer* aNativeLayer) override;
-  void EndFrame() override;
+  bool BeginFrame() override;
+  RenderedFrameId EndFrame(const FfiVec<DeviceIntRect>& aDirtyRects) final;
   bool WaitForGPU() override;
+  RenderedFrameId GetLastCompletedFrameId() final;
   void Pause() override;
   bool Resume() override;
+  void Update() override;
 
   gl::GLContext* gl() const override { return RenderThread::Get()->SharedGL(); }
 
@@ -58,14 +61,40 @@ class RenderCompositorANGLE : public RenderCompositor {
 
   bool IsContextLost() override;
 
+  bool SurfaceOriginIsTopLeft() override { return true; }
+
+  bool ShouldUseNativeCompositor() override;
+  uint32_t GetMaxUpdateRects() override;
+
+  // Interface for wr::Compositor
+  void CompositorBeginFrame() override;
+  void CompositorEndFrame() override;
+  void Bind(wr::NativeSurfaceId aId, wr::DeviceIntPoint* aOffset,
+            uint32_t* aFboId, wr::DeviceIntRect aDirtyRect) override;
+  void Unbind() override;
+  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aSize,
+                     bool aIsOpaque) override;
+  void DestroySurface(NativeSurfaceId aId) override;
+  void AddSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aPosition,
+                  wr::DeviceIntRect aClipRect) override;
+
+  // Interface for partial present
+  bool UsePartialPresent() override;
+  bool RequestFullRender() override;
+  uint32_t GetMaxPartialPresentRects() override;
+
  protected:
-  void InsertPresentWaitQuery();
+  bool UseCompositor();
+  void InitializeUsePartialPresent();
+  void InsertPresentWaitQuery(RenderedFrameId aRenderedFrameId);
   bool WaitForPreviousPresentQuery();
   bool ResizeBufferIfNeeded();
   bool CreateEGLSurface();
   void DestroyEGLSurface();
   ID3D11Device* GetDeviceOfEGLDisplay();
   void CreateSwapChainForDCompIfPossible(IDXGIFactory2* aDXGIFactory2);
+  RefPtr<IDXGISwapChain1> CreateSwapChainForDComp(bool aUseTripleBuffering,
+                                                  bool aUseAlpha);
   bool SutdownEGLLibraryIfNecessary();
   RefPtr<ID3D11Query> GetD3D11Query();
 
@@ -73,17 +102,23 @@ class RenderCompositorANGLE : public RenderCompositor {
   EGLSurface mEGLSurface;
 
   bool mUseTripleBuffering;
+  bool mUseAlpha;
 
   RefPtr<ID3D11Device> mDevice;
   RefPtr<ID3D11DeviceContext> mCtx;
   RefPtr<IDXGISwapChain> mSwapChain;
+  RefPtr<IDXGISwapChain1> mSwapChain1;
 
   UniquePtr<DCLayerTree> mDCLayerTree;
 
-  std::queue<RefPtr<ID3D11Query>> mWaitForPresentQueries;
+  std::queue<std::pair<RenderedFrameId, RefPtr<ID3D11Query>>>
+      mWaitForPresentQueries;
   RefPtr<ID3D11Query> mRecycledQuery;
+  RenderedFrameId mLastCompletedFrameId;
 
   Maybe<LayoutDeviceIntSize> mBufferSize;
+  bool mUsePartialPresent;
+  bool mFullRender;
 };
 
 }  // namespace wr

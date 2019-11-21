@@ -1653,13 +1653,25 @@ impl UnparsedValue {
                     shorthands::${shorthand.ident}::parse_value(&context, input)
                     .map(|longhands| {
                         match longhand_id {
+                            <% seen = set() %>
                             % for property in shorthand.sub_properties:
-                                LonghandId::${property.camel_case} => {
-                                    PropertyDeclaration::${property.camel_case}(
-                                        longhands.${property.ident}
-                                    )
-                                }
+                            // When animating logical properties, we end up
+                            // physicalizing the value during the animation, but
+                            // the value still comes from the logical shorthand.
+                            //
+                            // So we need to handle the physical properties too.
+                            % for prop in [property] + property.all_physical_mapped_properties(data):
+                            % if prop.camel_case not in seen:
+                            LonghandId::${prop.camel_case} => {
+                                PropertyDeclaration::${prop.camel_case}(
+                                    longhands.${property.ident}
+                                )
+                            }
+                            <% seen.add(prop.camel_case) %>
+                            % endif
                             % endfor
+                            % endfor
+                            <% del seen %>
                             _ => unreachable!()
                         }
                     })
@@ -1876,7 +1888,19 @@ impl PropertyId {
         if let Some(id) = static_id(property_name) {
             return Ok(match *id {
                 StaticId::Longhand(id) => PropertyId::Longhand(id),
-                StaticId::Shorthand(id) => PropertyId::Shorthand(id),
+                StaticId::Shorthand(id) => {
+                    #[cfg(feature = "gecko")]
+                    {
+                        // We want to count `zoom` even if disabled.
+                        if matches!(id, ShorthandId::Zoom) {
+                            if let Some(counters) = use_counters {
+                                counters.non_custom_properties.record(id.into());
+                            }
+                        }
+                    }
+
+                    PropertyId::Shorthand(id)
+                },
                 StaticId::LonghandAlias(id, alias) => PropertyId::LonghandAlias(id, alias),
                 StaticId::ShorthandAlias(id, alias) => PropertyId::ShorthandAlias(id, alias),
                 StaticId::CountedUnknown(unknown_prop) => {
@@ -2166,14 +2190,12 @@ impl PropertyDeclaration {
         let mut ret = self.clone();
 
         % for prop in data.longhands:
-        % if prop.logical:
-        % for physical_property in prop.all_physical_mapped_properties():
-        % if data.longhands_by_name[physical_property].specified_type() != prop.specified_type():
+        % for physical_property in prop.all_physical_mapped_properties(data):
+        % if physical_property.specified_type() != prop.specified_type():
             <% raise "Logical property %s should share specified value with physical property %s" % \
-                     (prop.name, physical_property) %>
+                     (prop.name, physical_property.name) %>
         % endif
         % endfor
-        % endif
         % endfor
 
         unsafe {
@@ -3065,10 +3087,6 @@ impl ComputedValuesInner {
         self.rules.as_ref().unwrap()
     }
 
-    /// Whether this style has a -moz-binding value. This is always false for
-    /// Servo for obvious reasons.
-    pub fn has_moz_binding(&self) -> bool { false }
-
     #[inline]
     /// Returns whether the "content" property for the given style is completely
     /// ineffective, and would yield an empty `::before` or `::after`
@@ -3682,16 +3700,14 @@ impl<'a> StyleBuilder<'a> {
     <% del style_struct %>
 
     /// Returns whether this computed style represents a floated object.
-    pub fn floated(&self) -> bool {
-        self.get_box().clone_float() != longhands::float::computed_value::T::None
+    pub fn is_floating(&self) -> bool {
+        self.get_box().clone_float().is_floating()
     }
 
-    /// Returns whether this computed style represents an out of flow-positioned
+    /// Returns whether this computed style represents an absolutely-positioned
     /// object.
-    pub fn out_of_flow_positioned(&self) -> bool {
-        use crate::properties::longhands::position::computed_value::T as Position;
-        matches!(self.get_box().clone_position(),
-                 Position::Absolute | Position::Fixed)
+    pub fn is_absolutely_positioned(&self) -> bool {
+        self.get_box().clone_position().is_absolutely_positioned()
     }
 
     /// Whether this style has a top-layer style.

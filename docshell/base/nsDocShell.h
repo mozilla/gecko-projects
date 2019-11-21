@@ -21,6 +21,7 @@
 #include "mozilla/dom/ProfileTimelineMarkerBinding.h"
 #include "mozilla/gfx/Matrix.h"
 #include "mozilla/dom/ChildSHistory.h"
+#include "mozilla/dom/WindowProxyHolder.h"
 
 #include "nsIAuthPromptProvider.h"
 #include "nsIBaseWindow.h"
@@ -448,9 +449,9 @@ class nsDocShell final : public nsDocLoader,
   // shift while triggering reload)
   bool IsForceReloading();
 
-  mozilla::dom::BrowsingContext* GetWindowProxy() {
+  mozilla::dom::WindowProxyHolder GetWindowProxy() {
     EnsureScriptEnvironment();
-    return mBrowsingContext;
+    return mozilla::dom::WindowProxyHolder(mBrowsingContext);
   }
 
   /**
@@ -479,12 +480,20 @@ class nsDocShell final : public nsDocLoader,
       nsIInterfaceRequestor* aCallbacks, nsDocShell* aDocShell,
       const nsString* aInitiatorType, nsLoadFlags aLoadFlags,
       uint32_t aLoadType, uint32_t aCacheKey, bool aIsActive,
-      bool aIsTopLevelDoc, nsresult& rv, nsIChannel** aChannel);
+      bool aIsTopLevelDoc, bool aHasNonEmptySandboxingFlags, nsresult& rv,
+      nsIChannel** aChannel);
 
   static nsresult ConfigureChannel(nsIChannel* aChannel,
                                    nsDocShellLoadState* aLoadState,
                                    const nsString* aInitiatorType,
-                                   uint32_t aLoadType, uint32_t aCacheKey);
+                                   uint32_t aLoadType, uint32_t aCacheKey,
+                                   bool aHasNonEmptySandboxingFlags);
+
+  // Notify consumers of a search being loaded through the observer service:
+  static void MaybeNotifyKeywordSearchLoading(const nsString& aProvider,
+                                              const nsString& aKeyword);
+
+  nsDocShell* GetInProcessChildAt(int32_t aIndex);
 
  private:  // member functions
   friend class nsDSURIContentListener;
@@ -522,8 +531,7 @@ class nsDocShell final : public nsDocLoader,
                              nsIDocShellTreeItem* aTargetTreeItem);
 
   static inline uint32_t PRTimeToSeconds(PRTime aTimeUsec) {
-    PRTime usecPerSec = PR_USEC_PER_SEC;
-    return uint32_t(aTimeUsec /= usecPerSec);
+    return uint32_t(aTimeUsec / PR_USEC_PER_SEC);
   }
 
   static const nsCString FrameTypeToString(uint32_t aFrameType) {
@@ -942,24 +950,12 @@ class nsDocShell final : public nsDocLoader,
   MOZ_MUST_USE bool MaybeInitTiming();
   void MaybeResetInitTiming(bool aReset);
 
-  // Separate function to do the actual name (i.e. not _top, _self etc.)
-  // searching for FindItemWithName.
-  nsresult DoFindItemWithName(const nsAString& aName,
-                              nsIDocShellTreeItem* aRequestor,
-                              nsIDocShellTreeItem* aOriginalRequestor,
-                              bool aSkipTabGroup,
-                              nsIDocShellTreeItem** aResult);
-
   // Convenience method for getting our parent docshell. Can return null
   already_AddRefed<nsDocShell> GetInProcessParentDocshell();
 
   // Helper assertion to enforce that mInPrivateBrowsing is in sync with
   // OriginAttributes.mPrivateBrowsingId
   void AssertOriginAttributesMatchPrivateBrowsing();
-
-  // Notify consumers of a search being loaded through the observer service:
-  void MaybeNotifyKeywordSearchLoading(const nsString& aProvider,
-                                       const nsString& aKeyword);
 
   // Internal implementation of nsIDocShell::FirePageHideNotification.
   // If aSkipCheckingDynEntries is true, it will not try to remove dynamic
@@ -1206,7 +1202,6 @@ class nsDocShell final : public nsDocLoader,
   // -1 if the docshell is added dynamically to the parent shell.
   int32_t mChildOffset;
 
-  uint32_t mSandboxFlags;
   BusyFlags mBusyFlags;
   AppType mAppType;
   uint32_t mLoadType;
@@ -1283,7 +1278,6 @@ class nsDocShell final : public nsDocLoader,
   bool mAllowAuth : 1;
   bool mAllowKeywordFixup : 1;
   bool mIsOffScreenBrowser : 1;
-  bool mIsActive : 1;
   bool mDisableMetaRefreshWhenInactive : 1;
   bool mIsAppTab : 1;
   bool mUseGlobalHistory : 1;

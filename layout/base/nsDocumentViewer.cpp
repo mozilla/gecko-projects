@@ -875,12 +875,6 @@ nsresult nsDocumentViewer::InitInternal(
     nsIWidget* aParentWidget, nsISupports* aState, WindowGlobalChild* aActor,
     const nsIntRect& aBounds, bool aDoCreation, bool aNeedMakeCX /*= true*/,
     bool aForceSetNewDocument /* = true*/) {
-  if (mIsPageMode) {
-    // XXXbz should the InitInternal in SetPageModeForTesting just pass false
-    // here itself?
-    aForceSetNewDocument = false;
-  }
-
   // We don't want any scripts to run here. That can cause flushing,
   // which can cause reentry into initialization of this document viewer,
   // which would be disastrous.
@@ -2826,6 +2820,14 @@ nsDocumentViewer::SetFullZoom(float aFullZoom) {
   }
 
   bool fullZoomChange = (mPageZoom != aFullZoom);
+
+  // Dispatch PreFullZoomChange event only if fullzoom value really has changed.
+  if (fullZoomChange) {
+    nsContentUtils::DispatchChromeEvent(mDocument, ToSupports(mDocument),
+                                        NS_LITERAL_STRING("PreFullZoomChange"),
+                                        CanBubble::eYes, Cancelable::eYes);
+  }
+
   mPageZoom = aFullZoom;
 
   PropagateToPresContextsHelper(
@@ -3175,6 +3177,12 @@ nsresult nsDocumentViewer::GetContentSizeInternal(int32_t* aWidth,
   if (prefWidth > aMaxWidth) {
     prefWidth = aMaxWidth;
   }
+
+  // We should never intentionally get here with this sentinel value, but it's
+  // possible that a document with huge sizes might inadvertently have a
+  // prefWidth that exactly matches NS_UNCONSTRAINEDSIZE.
+  // Just bail if that happens.
+  NS_ENSURE_TRUE(prefWidth != NS_UNCONSTRAINEDSIZE, NS_ERROR_FAILURE);
 
   nsresult rv = presShell->ResizeReflow(prefWidth, aMaxHeight,
                                         ResizeReflowOptions::BSizeLimit);
@@ -3768,16 +3776,12 @@ static void ResetFocusState(nsIDocShell* aDocShell) {
     return;
   }
 
-  nsCOMPtr<nsISimpleEnumerator> docShellEnumerator;
-  aDocShell->GetDocShellEnumerator(nsIDocShellTreeItem::typeContent,
-                                   nsIDocShell::ENUMERATE_FORWARDS,
-                                   getter_AddRefs(docShellEnumerator));
+  nsTArray<RefPtr<nsIDocShell>> docShells;
+  aDocShell->GetAllDocShellsInSubtree(nsIDocShellTreeItem::typeContent,
+                                      nsIDocShell::ENUMERATE_FORWARDS,
+                                      docShells);
 
-  nsCOMPtr<nsISupports> currentContainer;
-  bool hasMoreDocShells;
-  while (NS_SUCCEEDED(docShellEnumerator->HasMoreElements(&hasMoreDocShells)) &&
-         hasMoreDocShells) {
-    docShellEnumerator->GetNext(getter_AddRefs(currentContainer));
+  for (const auto& currentContainer : docShells) {
     nsCOMPtr<nsPIDOMWindowOuter> win = do_GetInterface(currentContainer);
     if (win) {
       fm->ClearFocus(win);
@@ -4105,9 +4109,9 @@ NS_IMETHODIMP nsDocumentViewer::SetPageModeForTesting(
     nsresult rv = mPresContext->Init(mDeviceContext);
     NS_ENSURE_SUCCESS(rv, rv);
   }
-  NS_ENSURE_SUCCESS(
-      InitInternal(mParentWidget, nullptr, nullptr, mBounds, true, false),
-      NS_ERROR_FAILURE);
+  NS_ENSURE_SUCCESS(InitInternal(mParentWidget, nullptr, nullptr, mBounds, true,
+                                 false, false),
+                    NS_ERROR_FAILURE);
 
   Show();
   return NS_OK;

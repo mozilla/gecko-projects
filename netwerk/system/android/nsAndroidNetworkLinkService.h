@@ -26,6 +26,7 @@ class nsAndroidNetworkLinkService
   nsresult Init();
 
   void OnNetworkChanged() override;
+  void OnNetworkIDChanged() override;
   void OnLinkUp() override;
   void OnLinkDown() override;
   void OnLinkStatusKnown() override;
@@ -37,7 +38,7 @@ class nsAndroidNetworkLinkService
   nsresult Shutdown();
 
   // Sends the network event.
-  void SendEvent(const char* aEventID);
+  void NotifyObservers(const char* aTopic, const char* aData);
 
   mozilla::Atomic<bool, mozilla::Relaxed> mStatusIsKnown;
 

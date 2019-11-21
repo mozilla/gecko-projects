@@ -278,6 +278,9 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
       const mozilla::layers::CompositorOptions& aCompositorOptions,
       const bool& aLayersConnected);
 
+  mozilla::ipc::IPCResult RecvCompositorOptionsChanged(
+      const mozilla::layers::CompositorOptions& aNewOptions);
+
   mozilla::ipc::IPCResult RecvUpdateDimensions(
       const mozilla::dom::DimensionInfo& aDimensionInfo);
   mozilla::ipc::IPCResult RecvSizeModeChanged(const nsSizeMode& aSizeMode);
@@ -285,6 +288,10 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   mozilla::ipc::IPCResult RecvChildToParentMatrix(
       const mozilla::Maybe<mozilla::gfx::Matrix4x4>& aMatrix,
       const mozilla::ScreenRect& aRemoteDocumentRect);
+
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
+  mozilla::ipc::IPCResult RecvDynamicToolbarMaxHeightChanged(
+      const mozilla::ScreenIntCoord& aHeight);
 
   mozilla::ipc::IPCResult RecvActivate();
 
@@ -538,6 +545,9 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
 
   LayoutDeviceIntPoint GetClientOffset() const { return mClientOffset; }
   LayoutDeviceIntPoint GetChromeOffset() const { return mChromeOffset; };
+  ScreenIntCoord GetDynamicToolbarMaxHeight() const {
+    return mDynamicToolbarMaxHeight;
+  };
 
   bool IPCOpen() const { return mIPCOpen; }
 
@@ -662,8 +672,15 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   bool UpdateSessionStore(uint32_t aFlushId, bool aIsFinal = false);
 
 #ifdef XP_WIN
-  void UpdateIsWindowSupportingProtectedMedia(bool aIsSupported);
-  bool RequiresIsWindowSupportingProtectedMediaCheck(bool& aIsSupported);
+  // Check if the window this BrowserChild is associated with supports
+  // protected media (EME) or not.
+  // Returns a promise the will resolve true if the window supports protected
+  // media or false if it does not. The promise will be rejected with an
+  // ResponseRejectReason if the IPC needed to do the check fails. Callers
+  // should treat the reject case as if the window does not support protected
+  // media to ensure robust handling.
+  RefPtr<IsWindowSupportingProtectedMediaPromise>
+  DoesWindowSupportProtectedMedia();
 #endif
 
  protected:
@@ -822,6 +839,7 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   LayoutDeviceIntPoint mClientOffset;
   // Position of tab, relative to parent widget (typically the window)
   LayoutDeviceIntPoint mChromeOffset;
+  ScreenIntCoord mDynamicToolbarMaxHeight;
   TabId mUniqueId;
 
   // Whether or not this browser is the child part of the top level PBrowser
@@ -913,8 +931,8 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   ScreenRect mRemoteDocumentRect;
 
 #ifdef XP_WIN
-  bool mWindowSupportsProtectedMedia;
-  bool mWindowSupportsProtectedMediaChecked;
+  // Should only be accessed on main thread.
+  Maybe<bool> mWindowSupportsProtectedMedia;
 #endif
 
   // This state is used to keep track of the current visible tabs (the ones

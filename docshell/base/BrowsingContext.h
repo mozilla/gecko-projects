@@ -12,10 +12,13 @@
 #include "mozilla/Tuple.h"
 #include "mozilla/WeakPtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/dom/LoadURIOptionsBinding.h"
 #include "mozilla/dom/LocationBase.h"
+#include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/UserActivation.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
+#include "nsID.h"
 #include "nsIDocShell.h"
 #include "nsString.h"
 #include "nsTArray.h"
@@ -94,7 +97,9 @@ class BrowsingContextBase {
 // Trees of BrowsingContexts should only ever contain nodes of the
 // same BrowsingContext::Type. This is enforced by asserts in the
 // BrowsingContext::Create* methods.
-class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
+class BrowsingContext : public nsISupports,
+                        public nsWrapperCache,
+                        public BrowsingContextBase {
  public:
   enum class Type { Chrome, Content };
 
@@ -185,7 +190,14 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // Triggers a load in the process which currently owns this BrowsingContext.
   // aAccessor is the context which initiated the load, and may be null only for
   // in-process BrowsingContexts.
-  nsresult LoadURI(BrowsingContext* aAccessor, nsDocShellLoadState* aLoadState);
+  nsresult LoadURI(BrowsingContext* aAccessor, nsDocShellLoadState* aLoadState,
+                   bool aSetNavigating = false);
+
+  nsresult InternalLoad(BrowsingContext* aAccessor,
+                        nsDocShellLoadState* aLoadState,
+                        nsIDocShell** aDocShell, nsIRequest** aRequest);
+
+  void DisplayLoadError(const nsAString& aURI);
 
   // Determine if the current BrowsingContext was 'cached' by the logic in
   // CacheChildren.
@@ -251,10 +263,14 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
 
   BrowsingContextGroup* Group() { return mGroup; }
 
+  uint32_t SandboxFlags() { return mSandboxFlags; }
+
+  bool InRDMPane() { return mInRDMPane; }
+
   // Using the rules for choosing a browsing context we try to find
   // the browsing context with the given name in the set of
   // transitively reachable browsing contexts. Performs access control
-  // with regards to this.
+  // checks with regard to this.
   // See
   // https://html.spec.whatwg.org/multipage/browsers.html#the-rules-for-choosing-a-browsing-context-given-a-browsing-context-name.
   //
@@ -262,14 +278,21 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   // calling nsIDocShellTreeItem::FindItemWithName(aName, nullptr,
   // nullptr, false, <return value>).
   BrowsingContext* FindWithName(const nsAString& aName,
-                                BrowsingContext& aRequestingContext);
+                                bool aUseEntryGlobalForAccessCheck = true);
 
   // Find a browsing context in this context's list of
   // children. Doesn't consider the special names, '_self', '_parent',
-  // '_top', or '_blank'. Performs access control with regard to
+  // '_top', or '_blank'. Performs access control checks with regard to
   // 'this'.
   BrowsingContext* FindChildWithName(const nsAString& aName,
                                      BrowsingContext& aRequestingContext);
+
+  // Find a browsing context in the subtree rooted at 'this' Doesn't
+  // consider the special names, '_self', '_parent', '_top', or
+  // '_blank'. Performs access control checks with regard to
+  // 'aRequestingContext'.
+  BrowsingContext* FindWithNameInSubtree(const nsAString& aName,
+                                         BrowsingContext& aRequestingContext);
 
   nsISupports* GetParentObject() const;
   JSObject* WrapObject(JSContext* aCx,
@@ -300,14 +323,21 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
 
   // Return the window proxy object that corresponds to this browsing context.
   inline JSObject* GetWindowProxy() const { return mWindowProxy; }
+  inline JSObject* GetUnbarrieredWindowProxy() const {
+    return mWindowProxy.unbarrieredGet();
+  }
+
   // Set the window proxy object that corresponds to this browsing context.
   void SetWindowProxy(JS::Handle<JSObject*> aWindowProxy) {
     mWindowProxy = aWindowProxy;
   }
 
+  Nullable<WindowProxyHolder> GetWindow();
+
   MOZ_DECLARE_WEAKREFERENCE_TYPENAME(BrowsingContext)
-  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(BrowsingContext)
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(BrowsingContext)
+
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(BrowsingContext)
 
   const Children& GetChildren() { return mChildren; }
 
@@ -329,7 +359,7 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   }
 
   // Window APIs that are cross-origin-accessible (from the HTML spec).
-  BrowsingContext* Window() { return Self(); }
+  WindowProxyHolder Window();
   BrowsingContext* Self() { return this; }
   void Location(JSContext* aCx, JS::MutableHandle<JSObject*> aLocation,
                 ErrorResult& aError);
@@ -337,7 +367,7 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
   bool GetClosed(ErrorResult&) { return mClosed; }
   void Focus(ErrorResult& aError);
   void Blur(ErrorResult& aError);
-  BrowsingContext* GetFrames(ErrorResult& aError) { return Self(); }
+  WindowProxyHolder GetFrames(ErrorResult& aError);
   int32_t Length() const { return mChildren.Length(); }
   Nullable<WindowProxyHolder> GetTop(ErrorResult& aError);
   void GetOpener(JSContext* aCx, JS::MutableHandle<JS::Value> aOpener,
@@ -454,21 +484,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
                   uint64_t aBrowsingContextId, Type aType);
 
  private:
-  // Returns true if the given name is one of the "special" names, currently:
-  // "_self", "_parent", "_top", or "_blank".
-  static bool IsSpecialName(const nsAString& aName);
-
   // Find the special browsing context if aName is '_self', '_parent',
   // '_top', but not '_blank'. The latter is handled in FindWithName
   BrowsingContext* FindWithSpecialName(const nsAString& aName,
                                        BrowsingContext& aRequestingContext);
-
-  // Find a browsing context in the subtree rooted at 'this' Doesn't
-  // consider the special names, '_self', '_parent', '_top', or
-  // '_blank'. Performs access control with regard to
-  // 'aRequestingContext'.
-  BrowsingContext* FindWithNameInSubtree(const nsAString& aName,
-                                         BrowsingContext& aRequestingContext);
 
   friend class ::nsOuterWindowProxy;
   friend class ::nsGlobalWindowOuter;
@@ -529,6 +548,10 @@ class BrowsingContext : public nsWrapperCache, public BrowsingContextBase {
 
   bool MaySetEmbedderInnerWindowId(const uint64_t& aValue,
                                    ContentParent* aSource);
+
+  bool MaySetIsPopupSpam(const bool& aValue, ContentParent* aSource);
+
+  void DidSetIsPopupSpam();
 
   // Type of BrowsingContent
   const Type mType;

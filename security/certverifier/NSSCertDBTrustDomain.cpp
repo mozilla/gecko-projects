@@ -29,6 +29,7 @@
 #include "nsNSSCertHelper.h"
 #include "nsNSSCertValidity.h"
 #include "nsNSSCertificate.h"
+#include "nsNSSCertificateDB.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "nss.h"
@@ -42,7 +43,6 @@
 
 #include "TrustOverrideUtils.h"
 #include "TrustOverride-StartComAndWoSignData.inc"
-#include "TrustOverride-GlobalSignData.inc"
 #include "TrustOverride-SymantecData.inc"
 #include "TrustOverride-AppleGoogleDigiCertData.inc"
 
@@ -68,6 +68,7 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(
     const OriginAttributes& originAttributes,
     const Vector<Input>& thirdPartyRootInputs,
     const Vector<Input>& thirdPartyIntermediateInputs,
+    const Maybe<nsTArray<nsTArray<uint8_t>>>& extraCertificates,
     /*out*/ UniqueCERTCertList& builtChain,
     /*optional*/ PinningTelemetryInfo* pinningTelemetryInfo,
     /*optional*/ const char* hostname)
@@ -88,6 +89,7 @@ NSSCertDBTrustDomain::NSSCertDBTrustDomain(
       mOriginAttributes(originAttributes),
       mThirdPartyRootInputs(thirdPartyRootInputs),
       mThirdPartyIntermediateInputs(thirdPartyIntermediateInputs),
+      mExtraCertificates(extraCertificates),
       mBuiltChain(builtChain),
       mPinningTelemetryInfo(pinningTelemetryInfo),
       mHostname(hostname),
@@ -272,6 +274,17 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
   }
 
   for (const auto& thirdPartyRootInput : mThirdPartyRootInputs) {
+    BackCert root(thirdPartyRootInput, EndEntityOrCA::MustBeCA, nullptr);
+    Result rv = root.Init();
+    if (rv != Success) {
+      continue;
+    }
+    // Filter out 3rd party roots that can't be issuers we're looking for
+    // because the subject distinguished name doesn't match. This prevents
+    // mozilla::pkix from accumulating spurious errors during path building.
+    if (!InputsAreEqual(encodedIssuerName, root.GetSubject())) {
+      continue;
+    }
     if (!geckoRootCandidates.append(thirdPartyRootInput)) {
       return Result::FATAL_ERROR_NO_MEMORY;
     }
@@ -279,8 +292,46 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
 
   for (const auto& thirdPartyIntermediateInput :
        mThirdPartyIntermediateInputs) {
+    BackCert intermediate(thirdPartyIntermediateInput, EndEntityOrCA::MustBeCA,
+                          nullptr);
+    Result rv = intermediate.Init();
+    if (rv != Success) {
+      continue;
+    }
+    // Filter out 3rd party intermediates that can't be issuers we're looking
+    // for because the subject distinguished name doesn't match. This prevents
+    // mozilla::pkix from accumulating spurious errors during path building.
+    if (!InputsAreEqual(encodedIssuerName, intermediate.GetSubject())) {
+      continue;
+    }
     if (!geckoIntermediateCandidates.append(thirdPartyIntermediateInput)) {
       return Result::FATAL_ERROR_NO_MEMORY;
+    }
+  }
+
+  if (mExtraCertificates.isSome()) {
+    for (const auto& extraCert : *mExtraCertificates) {
+      Input certInput;
+      Result rv = certInput.Init(extraCert.Elements(), extraCert.Length());
+      if (rv != Success) {
+        continue;
+      }
+      BackCert cert(certInput, EndEntityOrCA::MustBeCA, nullptr);
+      rv = cert.Init();
+      if (rv != Success) {
+        continue;
+      }
+      // Filter out certificates that can't be issuers we're looking for because
+      // the subject distinguished name doesn't match. This prevents
+      // mozilla::pkix from accumulating spurious errors during path building.
+      if (!InputsAreEqual(encodedIssuerName, cert.GetSubject())) {
+        continue;
+      }
+      // We assume that extra certificates (presumably from the TLS handshake)
+      // are intermediates, since sending trust anchors would be superfluous.
+      if (!geckoIntermediateCandidates.append(certInput)) {
+        return Result::FATAL_ERROR_NO_MEMORY;
+      }
     }
   }
 
@@ -302,10 +353,10 @@ Result NSSCertDBTrustDomain::FindIssuer(Input encodedIssuerName,
   // NSS seems not to differentiate between "no potential issuers found" and
   // "there was an error trying to retrieve the potential issuers." We assume
   // there was no error if CERT_CreateSubjectCertList returns nullptr.
-  Vector<Input> nssRootCandidates;
-  Vector<Input> nssIntermediateCandidates;
   UniqueCERTCertList candidates(CERT_CreateSubjectCertList(
       nullptr, CERT_GetDefaultCertDB(), &encodedIssuerNameItem, 0, false));
+  Vector<Input> nssRootCandidates;
+  Vector<Input> nssIntermediateCandidates;
   if (candidates) {
     for (CERTCertListNode* n = CERT_LIST_HEAD(candidates);
          !CERT_LIST_END(n, candidates); n = CERT_LIST_NEXT(n)) {
@@ -546,7 +597,7 @@ static Result GetOCSPAuthorityInfoAccessLocation(const UniquePLArenaPool& arena,
 
 Result NSSCertDBTrustDomain::CheckRevocation(
     EndEntityOrCA endEntityOrCA, const CertID& certID, Time time,
-    Duration validityDuration,
+    Time validityPeriodBeginning, Duration validityDuration,
     /*optional*/ const Input* stapledOCSPResponse,
     /*optional*/ const Input* aiaExtension) {
   // Actively distrusted certificates will have already been blocked by
@@ -560,7 +611,7 @@ Result NSSCertDBTrustDomain::CheckRevocation(
 
   // Bug 991815: The BR allow OCSP for intermediates to be up to one year old.
   // Since this affects EV there is no reason why DV should be more strict
-  // so all intermediatates are allowed to have OCSP responses up to one year
+  // so all intermediates are allowed to have OCSP responses up to one year
   // old.
   uint16_t maxOCSPLifetimeInDays = 10;
   if (endEntityOrCA == EndEntityOrCA::MustBeCA) {
@@ -751,7 +802,7 @@ Result NSSCertDBTrustDomain::CheckRevocation(
       cachedResponseResult == Result::ERROR_OCSP_UNKNOWN_CERT ||
       cachedResponseResult == Result::ERROR_OCSP_OLD_RESPONSE) {
     // Only send a request to, and process a response from, the server if we
-    // didn't have a cached indication of failure.  Also, ddon't keep requesting
+    // didn't have a cached indication of failure.  Also, don't keep requesting
     // responses from a failing server.
     return SynchronousCheckRevocationWithServer(
         certID, aiaLocation, time, maxOCSPLifetimeInDays, cachedResponseResult,
@@ -975,19 +1026,16 @@ Result NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time,
   }
 
   // Modernization in-progress: Keep certList as a CERTCertList for storage into
-  // the mBuiltChain variable at the end, but let's use nsNSSCertList for the
-  // validity calculations.
-  UniqueCERTCertList certListCopy = nsNSSCertList::DupCertList(certList);
+  // the mBuiltChain variable at the end.
+  nsTArray<RefPtr<nsIX509Cert>> nssCertList;
+  nsresult nsrv = nsNSSCertificateDB::ConstructCertArrayFromUniqueCertList(
+      certList, nssCertList);
 
-  // This adopts the list
-  RefPtr<nsNSSCertList> nssCertList =
-      new nsNSSCertList(std::move(certListCopy));
-  if (!nssCertList) {
+  if (NS_FAILED(nsrv)) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
-
   nsCOMPtr<nsIX509Cert> rootCert;
-  nsresult nsrv = nssCertList->GetRootCertificate(rootCert);
+  nsrv = nsNSSCertificate::GetRootCertificate(nssCertList, rootCert);
   if (NS_FAILED(nsrv)) {
     return Result::FATAL_ERROR_LIBRARY_FAILURE;
   }
@@ -1020,52 +1068,6 @@ Result NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time,
     }
   }
 
-  // See bug 1349762. If the root is "GlobalSign Root CA - R2", don't consider
-  // the end-entity valid for EV unless the
-  // "GlobalSign Extended Validation CA - SHA256 - G2" intermediate is in the
-  // chain as well. It should be possible to remove this workaround after
-  // January 2019 as per bug 1349727 comment 17.
-  if (requiredPolicy == sGlobalSignEVPolicy &&
-      CertMatchesStaticData(root.get(), sGlobalSignRootCAR2SubjectBytes,
-                            sGlobalSignRootCAR2SPKIBytes)) {
-    rootCert = nullptr;  // Clear the state for Segment...
-    nsCOMPtr<nsIX509CertList> intCerts;
-    nsCOMPtr<nsIX509Cert> eeCert;
-
-    nsrv = nssCertList->SegmentCertificateChain(rootCert, intCerts, eeCert);
-    if (NS_FAILED(nsrv)) {
-      // This is supposed to be a valid EV chain (where at least 3 certificates
-      // are required: end-entity, at least one intermediate, and a root), so
-      // this is an error.
-      return Result::ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED;
-    }
-
-    bool foundRequiredIntermediate = false;
-    RefPtr<nsNSSCertList> intCertList = intCerts->GetCertList();
-    nsrv = intCertList->ForEachCertificateInChain(
-        [&foundRequiredIntermediate](nsCOMPtr<nsIX509Cert> aCert, bool aHasMore,
-                                     /* out */ bool& aContinue) {
-          // We need an owning handle when calling nsIX509Cert::GetCert().
-          UniqueCERTCertificate nssCert(aCert->GetCert());
-          if (CertMatchesStaticData(
-                  nssCert.get(),
-                  sGlobalSignExtendedValidationCASHA256G2SubjectBytes,
-                  sGlobalSignExtendedValidationCASHA256G2SPKIBytes)) {
-            foundRequiredIntermediate = true;
-            aContinue = false;
-          }
-          return NS_OK;
-        });
-
-    if (NS_FAILED(nsrv)) {
-      return Result::FATAL_ERROR_LIBRARY_FAILURE;
-    }
-
-    if (!foundRequiredIntermediate) {
-      return Result::ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED;
-    }
-  }
-
   // See bug 1434300. If the root is a Symantec root, see if we distrust this
   // path. Since we already have the root available, we can check that cheaply
   // here before proceeding with the rest of the algorithm.
@@ -1078,10 +1080,11 @@ Result NSSCertDBTrustDomain::IsChainValid(const DERArray& certArray, Time time,
        (mDistrustedCAPolicy &
         DistrustedCAPolicy::DistrustSymantecRootsRegardlessOfDate))) {
     rootCert = nullptr;  // Clear the state for Segment...
-    nsCOMPtr<nsIX509CertList> intCerts;
+    nsTArray<RefPtr<nsIX509Cert>> intCerts;
     nsCOMPtr<nsIX509Cert> eeCert;
 
-    nsrv = nssCertList->SegmentCertificateChain(rootCert, intCerts, eeCert);
+    nsrv = nsNSSCertificate::SegmentCertificateChain(nssCertList, rootCert,
+                                                     intCerts, eeCert);
     if (NS_FAILED(nsrv)) {
       // This chain is supposed to be complete, so this is an error.
       return Result::ERROR_ADDITIONAL_POLICY_CONSTRAINT_FAILED;
@@ -1300,7 +1303,7 @@ SECStatus InitializeNSS(const nsACString& dir, NSSDBConfig nssDbConfig,
   MOZ_ASSERT(NS_IsMainThread());
 
   // The NSS_INIT_NOROOTINIT flag turns off the loading of the root certs
-  // module by NSS_Initialize because we will load it in InstallLoadableRoots
+  // module by NSS_Initialize because we will load it in LoadLoadableRoots
   // later.  It also allows us to work around a bug in the system NSS in
   // Ubuntu 8.04, which loads any nonexistent "<configdir>/libnssckbi.so" as
   // "/usr/lib/nss/libnssckbi.so".
@@ -1352,53 +1355,71 @@ void DisableMD5() {
       NSS_USE_ALG_IN_CERT_SIGNATURE | NSS_USE_ALG_IN_CMS_SIGNATURE);
 }
 
-bool LoadLoadableRoots(const nsCString& dir) {
+bool LoadUserModuleAt(const char* moduleName, const char* libraryName,
+                      const nsCString& dir) {
   // If a module exists with the same name, make a best effort attempt to delete
   // it. Note that it isn't possible to delete the internal module, so checking
   // the return value would be detrimental in that case.
   int unusedModType;
-  Unused << SECMOD_DeleteModule(kRootModuleName, &unusedModType);
-  // Some NSS command-line utilities will load a roots module under the name
-  // "Root Certs" if there happens to be a `MOZ_DLL_PREFIX "nssckbi"
-  // MOZ_DLL_SUFFIX` file in the directory being operated on. In some cases this
-  // can cause us to fail to load our roots module. In these cases, deleting the
-  // "Root Certs" module allows us to load the correct one. See bug 1406396.
-  Unused << SECMOD_DeleteModule("Root Certs", &unusedModType);
+  Unused << SECMOD_DeleteModule(moduleName, &unusedModType);
 
   nsAutoCString fullLibraryPath;
   if (!dir.IsEmpty()) {
     fullLibraryPath.Assign(dir);
     fullLibraryPath.AppendLiteral(FILE_PATH_SEPARATOR);
   }
-  fullLibraryPath.Append(MOZ_DLL_PREFIX "nssckbi" MOZ_DLL_SUFFIX);
+  fullLibraryPath.Append(MOZ_DLL_PREFIX);
+  fullLibraryPath.Append(libraryName);
+  fullLibraryPath.Append(MOZ_DLL_SUFFIX);
   // Escape the \ and " characters.
   fullLibraryPath.ReplaceSubstring("\\", "\\\\");
   fullLibraryPath.ReplaceSubstring("\"", "\\\"");
 
   nsAutoCString pkcs11ModuleSpec("name=\"");
-  pkcs11ModuleSpec.Append(kRootModuleName);
+  pkcs11ModuleSpec.Append(moduleName);
   pkcs11ModuleSpec.AppendLiteral("\" library=\"");
   pkcs11ModuleSpec.Append(fullLibraryPath);
   pkcs11ModuleSpec.AppendLiteral("\"");
 
-  UniqueSECMODModule rootsModule(SECMOD_LoadUserModule(
+  UniqueSECMODModule userModule(SECMOD_LoadUserModule(
       const_cast<char*>(pkcs11ModuleSpec.get()), nullptr, false));
-  if (!rootsModule) {
+  if (!userModule) {
     return false;
   }
 
-  if (!rootsModule->loaded) {
+  if (!userModule->loaded) {
     return false;
   }
 
   return true;
 }
 
-void UnloadLoadableRoots() {
-  UniqueSECMODModule rootsModule(SECMOD_FindModule(kRootModuleName));
+const char* kOSClientCertsModuleName = "OS Client Cert Module";
 
+bool LoadOSClientCertsModule(const nsCString& dir) {
+  return LoadUserModuleAt(kOSClientCertsModuleName, "osclientcerts", dir);
+}
+
+bool LoadLoadableRoots(const nsCString& dir) {
+  // Some NSS command-line utilities will load a roots module under the name
+  // "Root Certs" if there happens to be a `MOZ_DLL_PREFIX "nssckbi"
+  // MOZ_DLL_SUFFIX` file in the directory being operated on. In some cases this
+  // can cause us to fail to load our roots module. In these cases, deleting the
+  // "Root Certs" module allows us to load the correct one. See bug 1406396.
+  int unusedModType;
+  Unused << SECMOD_DeleteModule("Root Certs", &unusedModType);
+  return LoadUserModuleAt(kRootModuleName, "nssckbi", dir);
+}
+
+void UnloadUserModules() {
+  UniqueSECMODModule rootsModule(SECMOD_FindModule(kRootModuleName));
   if (rootsModule) {
     SECMOD_UnloadUserModule(rootsModule.get());
+  }
+  UniqueSECMODModule osClientCertsModule(
+      SECMOD_FindModule(kOSClientCertsModuleName));
+  if (osClientCertsModule) {
+    SECMOD_UnloadUserModule(osClientCertsModule.get());
   }
 }
 

@@ -23,6 +23,11 @@ ChromeUtils.defineModuleGetter(
   "AppConstants",
   "resource://gre/modules/AppConstants.jsm"
 );
+ChromeUtils.defineModuleGetter(
+  this,
+  "FileUtils",
+  "resource://gre/modules/FileUtils.jsm"
+);
 
 XPCOMUtils.defineLazyGetter(this, "Telemetry", function() {
   return require("devtools/client/shared/telemetry");
@@ -44,8 +49,16 @@ var processes = new Set();
  *        A function called when the process stops running.
  * @param function onRun [optional]
  *        A function called when the process starts running.
+ * @param boolean overwritePreferences [optional]
+ *        Set to force overwriting the toolbox profile's preferences with the
+ *        current set of preferences.
  */
-this.BrowserToolboxProcess = function BrowserToolboxProcess(onClose, onRun) {
+this.BrowserToolboxProcess = function BrowserToolboxProcess(
+  onClose,
+  onRun,
+  overwritePreferences,
+  binaryPath
+) {
   const emitter = new EventEmitter();
   this.on = emitter.on.bind(emitter);
   this.off = emitter.off.bind(emitter);
@@ -68,8 +81,8 @@ this.BrowserToolboxProcess = function BrowserToolboxProcess(onClose, onRun) {
   this.close = this.close.bind(this);
   Services.obs.addObserver(this.close, "quit-application");
   this._initServer();
-  this._initProfile();
-  this._create();
+  this._initProfile(overwritePreferences);
+  this._create(binaryPath);
 
   processes.add(this);
 };
@@ -80,7 +93,12 @@ EventEmitter.decorate(BrowserToolboxProcess);
  * Initializes and starts a chrome toolbox process.
  * @return object
  */
-BrowserToolboxProcess.init = function(onClose, onRun) {
+BrowserToolboxProcess.init = function(
+  onClose,
+  onRun,
+  overwritePreferences,
+  binaryPath
+) {
   if (
     !Services.prefs.getBoolPref("devtools.chrome.enabled") ||
     !Services.prefs.getBoolPref("devtools.debugger.remote-enabled")
@@ -88,7 +106,12 @@ BrowserToolboxProcess.init = function(onClose, onRun) {
     console.error("Could not start Browser Toolbox, you need to enable it.");
     return null;
   }
-  return new BrowserToolboxProcess(onClose, onRun);
+  return new BrowserToolboxProcess(
+    onClose,
+    onRun,
+    overwritePreferences,
+    binaryPath
+  );
 };
 
 /**
@@ -161,25 +184,25 @@ BrowserToolboxProcess.prototype = {
   /**
    * Initializes a profile for the remote debugger process.
    */
-  _initProfile: function() {
+  _initProfile(overwritePreferences) {
     dumpn("Initializing the chrome toolbox user profile.");
-
-    // We used to use `ProfLD` instead of `ProfD`, so migrate old profiles if they exist.
-    this._migrateProfileDir();
 
     const debuggingProfileDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
     debuggingProfileDir.append(CHROME_DEBUGGER_PROFILE_NAME);
     try {
       debuggingProfileDir.create(Ci.nsIFile.DIRECTORY_TYPE, 0o755);
     } catch (ex) {
-      // Don't re-copy over the prefs again if this profile already exists
       if (ex.result === Cr.NS_ERROR_FILE_ALREADY_EXISTS) {
-        this._dbgProfilePath = debuggingProfileDir.path;
+        if (!overwritePreferences) {
+          this._dbgProfilePath = debuggingProfileDir.path;
+          return;
+        }
+        // Fall through and copy the current set of prefs to the profile.
       } else {
         dumpn("Error trying to create a profile directory, failing.");
         dumpn("Error: " + (ex.message || ex));
+        return;
       }
-      return;
     }
 
     this._dbgProfilePath = debuggingProfileDir.path;
@@ -203,59 +226,30 @@ BrowserToolboxProcess.prototype = {
   },
 
   /**
-   * Originally, the profile was placed in `ProfLD` instead of `ProfD`.  On some systems,
-   * such as macOS, `ProfLD` is in the user's Caches directory, which is not an
-   * appropriate place to store supposedly persistent profile data.
-   */
-  _migrateProfileDir() {
-    const oldDebuggingProfileDir = Services.dirsvc.get("ProfLD", Ci.nsIFile);
-    const newDebuggingProfileDir = Services.dirsvc.get("ProfD", Ci.nsIFile);
-    if (oldDebuggingProfileDir.path == newDebuggingProfileDir.path) {
-      // It's possible for these locations to be the same, such as running from
-      // a custom profile directory specified via CLI.
-      return;
-    }
-    oldDebuggingProfileDir.append(CHROME_DEBUGGER_PROFILE_NAME);
-    if (!oldDebuggingProfileDir.exists()) {
-      return;
-    }
-    dumpn(`Old debugging profile exists: ${oldDebuggingProfileDir.path}`);
-    try {
-      // Remove the directory from the target location, if it exists
-      newDebuggingProfileDir.append(CHROME_DEBUGGER_PROFILE_NAME);
-      if (newDebuggingProfileDir.exists()) {
-        dumpn(`Removing folder at destination: ${newDebuggingProfileDir.path}`);
-        newDebuggingProfileDir.remove(true);
-      }
-      // Move profile from old to new location
-      const newDebuggingProfileParent = Services.dirsvc.get(
-        "ProfD",
-        Ci.nsIFile
-      );
-      oldDebuggingProfileDir.moveTo(newDebuggingProfileParent, null);
-      dumpn("Debugging profile migrated successfully");
-    } catch (e) {
-      dumpn(`Debugging profile migration failed: ${e}`);
-    }
-  },
-
-  /**
    * Creates and initializes the profile & process for the remote debugger.
    */
-  _create: function() {
+  _create: function(binaryPath) {
     dumpn("Initializing chrome debugging process.");
 
-    const command = Services.dirsvc.get("XREExeF", Ci.nsIFile).path;
+    let command = Services.dirsvc.get("XREExeF", Ci.nsIFile).path;
+    let profilePath = this._dbgProfilePath;
+
+    if (binaryPath) {
+      command = binaryPath;
+      profilePath = FileUtils.getDir("TmpD", ["browserToolboxProfile"], true)
+        .path;
+    }
 
     dumpn("Running chrome debugging process.");
     const args = [
       "-no-remote",
       "-foreground",
       "-profile",
-      this._dbgProfilePath,
+      profilePath,
       "-chrome",
       DBG_XUL,
     ];
+
     const environment = {
       // Disable safe mode for the new process in case this was opened via the
       // keyboard shortcut.
@@ -274,6 +268,7 @@ BrowserToolboxProcess.prototype = {
       args.push("-purgecaches");
     }
 
+    dump(`Starting Browser Toolbox ${command} ${args.join(" ")}\n`);
     this._dbgProcessPromise = Subprocess.call({
       command,
       arguments: args,

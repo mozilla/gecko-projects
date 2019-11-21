@@ -36,7 +36,11 @@ export const updateSelectedItem = (() => {
 })();
 
 const createEntryItem = (labelId, info) => {
-  if (labelId == null || info == null) {
+  if (
+    labelId == null ||
+    info == null ||
+    (Array.isArray(info) && !info.length)
+  ) {
     return null;
   }
   return {
@@ -264,10 +268,8 @@ export const adjustCertInformation = cert => {
   addToResultUsing(
     () => {
       let items = [];
-      if (cert.ext.ocspStaple) {
-        items = [
-          createEntryItem("required", cert.ext.ocspStaple.critical),
-        ].filter(elem => elem != null);
+      if (cert.ext.ocspStaple && cert.ext.ocspStaple.required) {
+        items = [createEntryItem("required", true)];
       }
       return items;
     },

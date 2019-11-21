@@ -21,6 +21,7 @@
 #include "mozIThirdPartyUtil.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindowInner.h"
+#include "nsIClassifiedChannel.h"
 #include "nsICookiePermission.h"
 #include "nsICookieService.h"
 #include "nsIDocShell.h"
@@ -77,19 +78,13 @@ bool GetParentPrincipalAndTrackingOrigin(
     nsGlobalWindowInner* a3rdPartyTrackingWindow, uint32_t aBehavior,
     nsIPrincipal** aTopLevelStoragePrincipal, nsACString& aTrackingOrigin,
     nsIURI** aTrackingURI, nsIPrincipal** aTrackingPrincipal) {
-  Document* doc = a3rdPartyTrackingWindow->GetDocument();
-  // Make sure storage access isn't disabled
-  if (doc && (doc->StorageAccessSandboxed())) {
-    return false;
-  }
-
   // Now we need the principal and the origin of the parent window.
   nsCOMPtr<nsIPrincipal> topLevelStoragePrincipal =
       // Use the "top-level storage area principal" behaviour in reject tracker
       // mode only.
       (aBehavior == nsICookieService::BEHAVIOR_REJECT_TRACKER)
           ? a3rdPartyTrackingWindow->GetTopLevelStorageAreaPrincipal()
-          : a3rdPartyTrackingWindow->GetTopLevelPrincipal();
+          : a3rdPartyTrackingWindow->GetTopLevelAntiTrackingPrincipal();
   if (!topLevelStoragePrincipal) {
     LOG(("No top-level storage area principal at hand"));
     return false;
@@ -393,16 +388,13 @@ void ReportBlockingToConsole(nsPIDOMWindowOuter* aWindow, nsIURI* aURI,
       aRejectedReason ==
           nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER ||
       aRejectedReason ==
+          nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER ||
+      aRejectedReason ==
           nsIWebProgressListener::STATE_COOKIES_PARTITIONED_FOREIGN ||
       aRejectedReason == nsIWebProgressListener::STATE_COOKIES_BLOCKED_ALL ||
       aRejectedReason == nsIWebProgressListener::STATE_COOKIES_BLOCKED_FOREIGN);
 
-  nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
-  if (NS_WARN_IF(!docShell)) {
-    return;
-  }
-
-  RefPtr<Document> doc = docShell->GetDocument();
+  RefPtr<Document> doc = aWindow->GetExtantDoc();
   if (NS_WARN_IF(!doc)) {
     return;
   }
@@ -482,12 +474,7 @@ void ReportUnblockingToConsole(
     return;
   }
 
-  nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
-  if (NS_WARN_IF(!docShell)) {
-    return;
-  }
-
-  RefPtr<Document> doc = docShell->GetDocument();
+  RefPtr<Document> doc = aWindow->GetExtantDoc();
   if (NS_WARN_IF(!doc)) {
     return;
   }
@@ -792,20 +779,21 @@ bool CheckAntiTrackingPermission(nsIPrincipal* aPrincipal,
               "permission of type %s for %s",
               aType.get(), _spec),
              aPrincipalURI);
-    nsCOMPtr<nsISimpleEnumerator> se;
-    nsresult rv =
-        permManager->GetAllForPrincipal(aPrincipal, getter_AddRefs(se));
+    if (!permManager->PermissionAvailable(aPrincipal, aType)) {
+      LOG(
+          ("Permission isn't available for this principal in the current "
+           "process"));
+      return false;
+    }
+    nsTArray<RefPtr<nsIPermission>> permissions;
+    nsresult rv = permManager->GetAllForPrincipal(aPrincipal, permissions);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       LOG(("Failed to get the list of permissions"));
       return false;
     }
 
-    bool more = false;
     bool found = false;
-    while (NS_SUCCEEDED(se->HasMoreElements(&more)) && more) {
-      nsCOMPtr<nsISupports> supports;
-      Unused << se->GetNext(getter_AddRefs(supports));
-      nsCOMPtr<nsIPermission> permission = do_QueryInterface(supports);
+    for (const auto& permission : permissions) {
       if (!permission) {
         LOG(("Couldn't get the permission for unknown reasons"));
         continue;
@@ -892,22 +880,23 @@ void NotifyBlockingDecisionInternal(
       nsIWebProgressListener::STATE_COOKIES_LOADED, aReportingChannel, false,
       aURI, aTrackingChannel);
 
-  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aTrackingChannel);
-  if (!httpChannel) {
+  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+      do_QueryInterface(aTrackingChannel);
+  if (!classifiedChannel) {
     return;
   }
 
   uint32_t classificationFlags =
-      httpChannel->GetThirdPartyClassificationFlags();
+      classifiedChannel->GetThirdPartyClassificationFlags();
   if (classificationFlags &
-      nsIHttpChannel::ClassificationFlags::CLASSIFIED_TRACKING) {
+      nsIClassifiedChannel::ClassificationFlags::CLASSIFIED_TRACKING) {
     aWindow->NotifyContentBlockingEvent(
         nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER, aReportingChannel,
         false, aURI, aTrackingChannel);
   }
 
   if (classificationFlags &
-      nsIHttpChannel::ClassificationFlags::CLASSIFIED_SOCIALTRACKING) {
+      nsIClassifiedChannel::ClassificationFlags::CLASSIFIED_SOCIALTRACKING) {
     aWindow->NotifyContentBlockingEvent(
         nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER,
         aReportingChannel, false, aURI, aTrackingChannel);
@@ -1016,6 +1005,13 @@ AntiTrackingCommon::AddFirstPartyStorageAccessGrantedFor(
                      BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN) {
         LOG(("Our window isn't a third-party window"));
       }
+      return StorageAccessGrantPromise::CreateAndReject(false, __func__);
+    }
+
+    Document* doc = parentWindow->GetExtantDoc();
+    // Make sure storage access isn't disabled
+    if (doc && (doc->StorageAccessSandboxed())) {
+      LOG(("Our document is sandboxed"));
       return StorageAccessGrantPromise::CreateAndReject(false, __func__);
     }
 
@@ -1445,6 +1441,18 @@ bool AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
       LOG(("Our window isn't a third-party tracking window"));
       return true;
     }
+
+    nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+        do_QueryInterface(document->GetChannel());
+    if (classifiedChannel) {
+      uint32_t classificationFlags =
+          classifiedChannel->GetThirdPartyClassificationFlags();
+      if (classificationFlags & nsIClassifiedChannel::ClassificationFlags::
+                                    CLASSIFIED_SOCIALTRACKING) {
+        blockedReason =
+            nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER;
+      }
+    }
   } else {
     MOZ_ASSERT(behavior ==
                nsICookieService::BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN);
@@ -1474,6 +1482,13 @@ bool AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
                                         aWindow, nullptr, aURI) == thirdParty);
   }
 #endif
+
+  Document* doc = aWindow->GetExtantDoc();
+  // Make sure storage access isn't disabled
+  if (doc && (doc->StorageAccessSandboxed())) {
+    LOG(("Our document is sandboxed"));
+    return false;
+  }
 
   nsCOMPtr<nsIPrincipal> parentPrincipal;
   nsCOMPtr<nsIURI> parentPrincipalURI;
@@ -1683,15 +1698,28 @@ bool AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
       nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER;
 
   // Not a tracker.
+  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+      do_QueryInterface(aChannel);
   if (behavior == nsICookieService::BEHAVIOR_REJECT_TRACKER) {
-    if (httpChannel && !httpChannel->IsThirdPartyTrackingResource()) {
-      LOG(("Our channel isn't a third-party tracking channel"));
-      return true;
+    if (classifiedChannel) {
+      if (!classifiedChannel->IsThirdPartyTrackingResource()) {
+        LOG(("Our channel isn't a third-party tracking channel"));
+        return true;
+      }
+
+      uint32_t classificationFlags =
+          classifiedChannel->GetThirdPartyClassificationFlags();
+      if (classificationFlags & nsIClassifiedChannel::ClassificationFlags::
+                                    CLASSIFIED_SOCIALTRACKING) {
+        blockedReason =
+            nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER;
+      }
     }
   } else {
     MOZ_ASSERT(behavior ==
                nsICookieService::BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN);
-    if (httpChannel && httpChannel->IsThirdPartyTrackingResource()) {
+    if (classifiedChannel &&
+        classifiedChannel->IsThirdPartyTrackingResource()) {
       // fall through
     } else if (nsContentUtils::IsThirdPartyWindowOrChannel(nullptr, aChannel,
                                                            aURI)) {
@@ -2023,6 +2051,8 @@ void AntiTrackingCommon::NotifyBlockingDecision(nsIChannel* aChannel,
       aRejectedReason ==
           nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER ||
       aRejectedReason ==
+          nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER ||
+      aRejectedReason ==
           nsIWebProgressListener::STATE_COOKIES_PARTITIONED_FOREIGN ||
       aRejectedReason == nsIWebProgressListener::STATE_COOKIES_BLOCKED_ALL ||
       aRejectedReason == nsIWebProgressListener::STATE_COOKIES_BLOCKED_FOREIGN);
@@ -2085,6 +2115,8 @@ void AntiTrackingCommon::NotifyBlockingDecision(nsPIDOMWindowInner* aWindow,
           nsIWebProgressListener::STATE_COOKIES_BLOCKED_BY_PERMISSION ||
       aRejectedReason ==
           nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER ||
+      aRejectedReason ==
+          nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER ||
       aRejectedReason ==
           nsIWebProgressListener::STATE_COOKIES_PARTITIONED_FOREIGN ||
       aRejectedReason == nsIWebProgressListener::STATE_COOKIES_BLOCKED_ALL ||

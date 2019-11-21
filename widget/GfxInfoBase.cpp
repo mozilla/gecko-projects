@@ -150,8 +150,8 @@ static const char* GetPrefNameForFeature(int32_t aFeature) {
     case nsIGfxInfo::FEATURE_STAGEFRIGHT:
       name = BLACKLIST_PREF_BRANCH "stagefright";
       break;
-    case nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION:
-      name = BLACKLIST_PREF_BRANCH "webrtc.hw.acceleration";
+    case nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION_H264:
+      name = BLACKLIST_PREF_BRANCH "webrtc.hw.acceleration.h264";
       break;
     case nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION_ENCODE:
       name = BLACKLIST_PREF_BRANCH "webrtc.hw.acceleration.encode";
@@ -234,6 +234,10 @@ static void SetPrefValueForFeature(int32_t aFeature, int32_t aValue,
                                    const nsACString& aFailureId) {
   const char* prefname = GetPrefNameForFeature(aFeature);
   if (!prefname) return;
+  if (XRE_IsParentProcess()) {
+    delete GfxInfoBase::sFeatureStatus;
+    GfxInfoBase::sFeatureStatus = nullptr;
+  }
 
   Preferences::SetInt(prefname, aValue);
   if (!aFailureId.IsEmpty()) {
@@ -247,6 +251,10 @@ static void RemovePrefForFeature(int32_t aFeature) {
   const char* prefname = GetPrefNameForFeature(aFeature);
   if (!prefname) return;
 
+  if (XRE_IsParentProcess()) {
+    delete GfxInfoBase::sFeatureStatus;
+    GfxInfoBase::sFeatureStatus = nullptr;
+  }
   Preferences::ClearUser(prefname);
 }
 
@@ -292,6 +300,10 @@ static OperatingSystem BlacklistOSToOperatingSystem(const nsAString& os) {
     return OperatingSystem::OSX10_12;
   else if (os.EqualsLiteral("Darwin 17"))
     return OperatingSystem::OSX10_13;
+  else if (os.EqualsLiteral("Darwin 18"))
+    return OperatingSystem::OSX10_14;
+  else if (os.EqualsLiteral("Darwin 19"))
+    return OperatingSystem::OSX10_15;
   else if (os.EqualsLiteral("Android"))
     return OperatingSystem::Android;
   // For historical reasons, "All" in blocklist means "All Windows"
@@ -348,8 +360,8 @@ static int32_t BlacklistFeatureToGfxFeature(const nsAString& aFeature) {
     return nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION_ENCODE;
   else if (aFeature.EqualsLiteral("WEBRTC_HW_ACCELERATION_DECODE"))
     return nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION_DECODE;
-  else if (aFeature.EqualsLiteral("WEBRTC_HW_ACCELERATION"))
-    return nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION;
+  else if (aFeature.EqualsLiteral("WEBRTC_HW_ACCELERATION_H264"))
+    return nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION_H264;
   else if (aFeature.EqualsLiteral("CANVAS2D_ACCELERATION"))
     return nsIGfxInfo::FEATURE_CANVAS2D_ACCELERATION;
   else if (aFeature.EqualsLiteral("DX_INTEROP2"))
@@ -649,6 +661,27 @@ GfxInfoBase::GetFeatureStatus(int32_t aFeature, nsACString& aFailureId,
   nsresult rv =
       GetFeatureStatusImpl(aFeature, aStatus, version, driverInfo, aFailureId);
   return rv;
+}
+
+void GfxInfoBase::GetAllFeatures(dom::XPCOMInitData& xpcomInit) {
+  MOZ_RELEASE_ASSERT(XRE_IsParentProcess());
+  if (!sFeatureStatus) {
+    sFeatureStatus = new nsTArray<dom::GfxInfoFeatureStatus>();
+    for (int32_t i = 1; i <= nsIGfxInfo::FEATURE_MAX_VALUE; ++i) {
+      int32_t status = 0;
+      nsAutoCString failureId;
+      GetFeatureStatus(i, failureId, &status);
+      dom::GfxInfoFeatureStatus gfxFeatureStatus;
+      gfxFeatureStatus.feature() = i;
+      gfxFeatureStatus.status() = status;
+      gfxFeatureStatus.failureId() = failureId;
+      sFeatureStatus->AppendElement(gfxFeatureStatus);
+    }
+  }
+  for (const auto& status : *sFeatureStatus) {
+    dom::GfxInfoFeatureStatus copy = status;
+    xpcomInit.gfxFeatureStatus().AppendElement(copy);
+  }
 }
 
 // Matching OS go somewhat beyond the simple equality check because of the
@@ -1016,7 +1049,7 @@ void GfxInfoBase::EvaluateDownloadedBlacklist(
                         nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION_DECODE,
                         nsIGfxInfo::FEATURE_WEBGL_MSAA,
                         nsIGfxInfo::FEATURE_STAGEFRIGHT,
-                        nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION,
+                        nsIGfxInfo::FEATURE_WEBRTC_HW_ACCELERATION_H264,
                         nsIGfxInfo::FEATURE_CANVAS2D_ACCELERATION,
                         nsIGfxInfo::FEATURE_VP8_HW_DECODE,
                         nsIGfxInfo::FEATURE_VP9_HW_DECODE,
@@ -1386,19 +1419,20 @@ bool GfxInfoBase::BuildFeatureStateLog(JSContext* aCx,
 void GfxInfoBase::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj) {
   JS::Rooted<JSObject*> obj(aCx);
 
-  gfx::FeatureStatus gpuProcess = gfxConfig::GetValue(Feature::GPU_PROCESS);
+  gfx::FeatureStatus gpuProcess =
+      gfxConfig::GetValue(gfx::Feature::GPU_PROCESS);
   InitFeatureObject(aCx, aObj, "gpuProcess", gpuProcess, &obj);
 
   gfx::FeatureStatus wrQualified =
-      gfxConfig::GetValue(Feature::WEBRENDER_QUALIFIED);
+      gfxConfig::GetValue(gfx::Feature::WEBRENDER_QUALIFIED);
   InitFeatureObject(aCx, aObj, "wrQualified", wrQualified, &obj);
 
-  gfx::FeatureStatus webrender = gfxConfig::GetValue(Feature::WEBRENDER);
+  gfx::FeatureStatus webrender = gfxConfig::GetValue(gfx::Feature::WEBRENDER);
   InitFeatureObject(aCx, aObj, "webrender", webrender, &obj);
 
   // Only include AL if the platform attempted to use it.
   gfx::FeatureStatus advancedLayers =
-      gfxConfig::GetValue(Feature::ADVANCED_LAYERS);
+      gfxConfig::GetValue(gfx::Feature::ADVANCED_LAYERS);
   if (advancedLayers != FeatureStatus::Unused) {
     InitFeatureObject(aCx, aObj, "advancedLayers", advancedLayers, &obj);
 
@@ -1484,14 +1518,14 @@ GfxInfoBase::GetContentUsesTiling(bool* aUsesTiling) {
 
 NS_IMETHODIMP
 GfxInfoBase::GetOffMainThreadPaintEnabled(bool* aOffMainThreadPaintEnabled) {
-  *aOffMainThreadPaintEnabled = gfxConfig::IsEnabled(Feature::OMTP);
+  *aOffMainThreadPaintEnabled = gfxConfig::IsEnabled(gfx::Feature::OMTP);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 GfxInfoBase::GetOffMainThreadPaintWorkerCount(
     int32_t* aOffMainThreadPaintWorkerCount) {
-  if (gfxConfig::IsEnabled(Feature::OMTP)) {
+  if (gfxConfig::IsEnabled(gfx::Feature::OMTP)) {
     *aOffMainThreadPaintWorkerCount =
         layers::PaintThread::CalculatePaintWorkerCount();
   } else {
@@ -1556,13 +1590,13 @@ GfxInfoBase::ControlGPUProcessForXPCShell(bool aEnable, bool* _retval) {
 
   GPUProcessManager* gpm = GPUProcessManager::Get();
   if (aEnable) {
-    if (!gfxConfig::IsEnabled(Feature::GPU_PROCESS)) {
-      gfxConfig::UserForceEnable(Feature::GPU_PROCESS, "xpcshell-test");
+    if (!gfxConfig::IsEnabled(gfx::Feature::GPU_PROCESS)) {
+      gfxConfig::UserForceEnable(gfx::Feature::GPU_PROCESS, "xpcshell-test");
     }
     gpm->LaunchGPUProcess();
     gpm->EnsureGPUReady();
   } else {
-    gfxConfig::UserDisable(Feature::GPU_PROCESS, "xpcshell-test");
+    gfxConfig::UserDisable(gfx::Feature::GPU_PROCESS, "xpcshell-test");
     gpm->KillProcess();
   }
 

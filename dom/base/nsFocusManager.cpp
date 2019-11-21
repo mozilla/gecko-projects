@@ -24,7 +24,7 @@
 #include "nsIWebNavigation.h"
 #include "nsCaret.h"
 #include "nsIBaseWindow.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 #include "nsViewManager.h"
 #include "nsFrameSelection.h"
 #include "mozilla/dom/Document.h"
@@ -35,7 +35,6 @@
 #include "nsIPrincipal.h"
 #include "nsIObserverService.h"
 #include "nsIObjectFrame.h"
-#include "nsBindingManager.h"
 #include "BrowserChild.h"
 #include "nsFrameLoader.h"
 #include "nsHTMLDocument.h"
@@ -172,8 +171,8 @@ static const char* kObservedPrefs[] = {
 nsFocusManager::nsFocusManager() : mEventHandlingNeedsFlush(false) {}
 
 nsFocusManager::~nsFocusManager() {
-  Preferences::UnregisterCallbacks(
-      PREF_CHANGE_METHOD(nsFocusManager::PrefChanged), kObservedPrefs, this);
+  Preferences::UnregisterCallbacks(nsFocusManager::PrefChanged, kObservedPrefs,
+                                   this);
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
@@ -196,8 +195,8 @@ nsresult nsFocusManager::Init() {
 
   sTestMode = Preferences::GetBool("focusmanager.testmode", false);
 
-  Preferences::RegisterCallbacks(
-      PREF_CHANGE_METHOD(nsFocusManager::PrefChanged), kObservedPrefs, fm);
+  Preferences::RegisterCallbacks(nsFocusManager::PrefChanged, kObservedPrefs,
+                                 fm);
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
@@ -209,6 +208,11 @@ nsresult nsFocusManager::Init() {
 
 // static
 void nsFocusManager::Shutdown() { NS_IF_RELEASE(sInstance); }
+
+// static
+void nsFocusManager::PrefChanged(const char* aPref, void* aSelf) {
+  static_cast<nsFocusManager*>(aSelf)->PrefChanged(aPref);
+}
 
 void nsFocusManager::PrefChanged(const char* aPref) {
   nsDependentCString pref(aPref);
@@ -335,17 +339,12 @@ Element* nsFocusManager::GetRedirectedFocus(nsIContent* aContent) {
 
 #ifdef MOZ_XUL
   if (aContent->IsXULElement()) {
-    if (aContent->IsXULElement(nsGkAtoms::textbox)) {
-      return aContent->OwnerDoc()->GetAnonymousElementByAttribute(
-          aContent, nsGkAtoms::anonid, NS_LITERAL_STRING("input"));
-    } else {
-      nsCOMPtr<nsIDOMXULMenuListElement> menulist =
-          aContent->AsElement()->AsXULMenuList();
-      if (menulist) {
-        RefPtr<Element> inputField;
-        menulist->GetInputField(getter_AddRefs(inputField));
-        return inputField;
-      }
+    nsCOMPtr<nsIDOMXULMenuListElement> menulist =
+        aContent->AsElement()->AsXULMenuList();
+    if (menulist) {
+      RefPtr<Element> inputField;
+      menulist->GetInputField(getter_AddRefs(inputField));
+      return inputField;
     }
   }
 #endif
@@ -698,10 +697,10 @@ nsFocusManager::WindowRaised(mozIDOMWindowProxy* aWindow) {
   NS_ASSERTION(currentWindow, "window raised with no window current");
   if (!currentWindow) return NS_OK;
 
-  // If there is no nsIXULWindow, then this is an embedded or child process
+  // If there is no nsIAppWindow, then this is an embedded or child process
   // window. Pass false for aWindowRaised so that commands get updated.
-  nsCOMPtr<nsIXULWindow> xulWin(do_GetInterface(baseWindow));
-  Focus(currentWindow, currentFocus, 0, true, false, xulWin != nullptr, true);
+  nsCOMPtr<nsIAppWindow> appWin(do_GetInterface(baseWindow));
+  Focus(currentWindow, currentFocus, 0, true, false, appWin != nullptr, true);
 
   return NS_OK;
 }

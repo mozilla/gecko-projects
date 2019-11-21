@@ -34,6 +34,8 @@ XPCOMUtils.defineLazyGetter(this, "logger", () =>
 var localProviderModules = {
   UrlbarProviderUnifiedComplete:
     "resource:///modules/UrlbarProviderUnifiedComplete.jsm",
+  UrlbarProviderPrivateSearch:
+    "resource:///modules/UrlbarProviderPrivateSearch.jsm",
 };
 
 // List of available local muxers, each is implemented in its own jsm module.
@@ -380,16 +382,22 @@ class Query {
       }
       this.muxer.sort(this.context);
 
-      // Crop results to the requested number.
+      // Crop results to the requested number, taking their result spans into
+      // account.
       logger.debug(
         `Cropping ${this.context.results.length} matches to ${
           this.context.maxResults
         }`
       );
-      this.context.results = this.context.results.slice(
-        0,
-        this.context.maxResults
-      );
+      let resultCount = this.context.maxResults;
+      for (let i = 0; i < this.context.results.length; i++) {
+        resultCount -= UrlbarUtils.getSpanForResult(this.context.results[i]);
+        if (resultCount < 0) {
+          this.context.results.splice(i, this.context.results.length - i);
+          break;
+        }
+      }
+
       this.controller.receiveResults(this.context);
     };
 
@@ -453,8 +461,13 @@ function getAcceptableMatchSources(context) {
       case UrlbarUtils.RESULT_SOURCE.SEARCH:
         if (
           restrictTokenType === UrlbarTokenizer.TYPE.RESTRICT_SEARCH ||
-          (!restrictTokenType && UrlbarPrefs.get("suggest.searches"))
+          !restrictTokenType
         ) {
+          // We didn't check browser.urlbar.suggest.searches here, because it
+          // just controls search suggestions. If a search suggestion arrives
+          // here, we lost already, because we broke user's privacy by hitting
+          // the network. Thus, it's better to leave things go through and
+          // notice the bug, rather than hiding it with a filter.
           acceptedSources.push(source);
         }
         break;

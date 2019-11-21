@@ -264,16 +264,30 @@ class WebRenderAPI final {
   layers::SyncHandle GetSyncHandle() const { return mSyncHandle; }
 
   void Capture();
+  void SetTransactionLogging(bool aValue);
 
   void SetCompositionRecorder(
       UniquePtr<layers::WebRenderCompositionRecorder> aRecorder);
+
+  typedef MozPromise<bool, nsresult, true> WriteCollectedFramesPromise;
+  typedef MozPromise<layers::CollectedFrames, nsresult, true>
+      GetCollectedFramesPromise;
 
   /**
    * Write the frames collected by the |WebRenderCompositionRecorder| to disk.
    *
    * If there is not currently a recorder, this is a no-op.
    */
-  void WriteCollectedFrames();
+  RefPtr<WriteCollectedFramesPromise> WriteCollectedFrames();
+
+  /**
+   * Return the frames collected by the |WebRenderCompositionRecorder| encoded
+   * as data URIs.
+   *
+   * If there is not currently a recorder, this is a no-op and the promise will
+   * be rejected.
+   */
+  RefPtr<GetCollectedFramesPromise> GetCollectedFrames();
 
  protected:
   WebRenderAPI(wr::DocumentHandle* aHandle, wr::WindowId aId,

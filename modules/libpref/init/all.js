@@ -32,11 +32,7 @@ pref("security.tls.insecure_fallback_hosts", "");
 // until the incompatibility with HTTP/2 is resolved:
 // https://tools.ietf.org/html/draft-davidben-http2-tls13-00
 pref("security.tls.enable_post_handshake_auth", false);
-#ifdef RELEASE_OR_BETA
-  pref("security.tls.hello_downgrade_check", false);
-#else
-  pref("security.tls.hello_downgrade_check", true);
-#endif
+pref("security.tls.hello_downgrade_check", true);
 pref("security.tls.enable_delegated_credentials", false);
 
 pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
@@ -78,6 +74,11 @@ pref("security.password_lifetime",       30);
 pref("security.family_safety.mode", 2);
 
 pref("security.enterprise_roots.enabled", false);
+
+// If true, attempt to load the osclientcerts PKCS#11 module at startup on a
+// background thread. This module allows Firefox to use client certificates
+// stored in OS certificate storage. Currently only available for Windows.
+pref("security.osclientcerts.autoload", false);
 
 // The supported values of this pref are:
 // 0: do not fetch OCSP
@@ -186,10 +187,10 @@ pref("security.pki.mitm_canary_issuer.enabled", true);
 pref("security.pki.mitm_detected", false);
 
 // Intermediate CA Preloading settings
-#if defined(RELEASE_OR_BETA) || defined(MOZ_WIDGET_ANDROID)
-  pref("security.remote_settings.intermediates.enabled", false);
-#else
+#if defined(MOZ_NEW_CERT_STORAGE) && !defined(MOZ_WIDGET_ANDROID)
   pref("security.remote_settings.intermediates.enabled", true);
+#else
+  pref("security.remote_settings.intermediates.enabled", false);
 #endif
 pref("security.remote_settings.intermediates.bucket", "security-state");
 pref("security.remote_settings.intermediates.collection", "intermediates");
@@ -212,7 +213,9 @@ pref("general.useragent.compatMode.firefox", false);
 
 pref("general.config.obscure_value", 13); // for MCD .cfg files
 
+#ifndef MOZ_BUILD_APP_IS_BROWSER
 pref("general.warnOnAboutConfig", true);
+#endif
 
 // maximum number of dated backups to keep at any time
 pref("browser.bookmarks.max_backups",       5);
@@ -235,8 +238,6 @@ pref("browser.download.forbid_open_with", false);
 // Insecure registerProtocolHandler is disabled by default
 pref("dom.registerProtocolHandler.insecure.enabled", false);
 
-// Whether or not indexedDB is enabled.
-pref("dom.indexedDB.enabled", true);
 // Whether or not indexedDB experimental features are enabled.
 pref("dom.indexedDB.experimental", false);
 // Enable indexedDB logging.
@@ -488,10 +489,19 @@ pref("media.videocontrols.picture-in-picture.video-toggle.always-show", false);
   pref("media.peerconnection.ice.trickle_grace_period", 5000);
   pref("media.peerconnection.ice.no_host", false);
   pref("media.peerconnection.ice.default_address_only", false);
-  pref("media.peerconnection.ice.obfuscate_host_addresses", false);
+  // See Bug 1581947 for Android hostname obfuscation
+  #if defined(MOZ_WIDGET_ANDROID)
+    pref("media.peerconnection.ice.obfuscate_host_addresses", false);
+  #else
+    pref("media.peerconnection.ice.obfuscate_host_addresses", true);
+  #endif
   pref("media.peerconnection.ice.proxy_only_if_behind_proxy", false);
   pref("media.peerconnection.ice.proxy_only", false);
   pref("media.peerconnection.turn.disable", false);
+
+  // 770 = DTLS 1.0, 771 = DTLS 1.2
+  pref("media.peerconnection.dtls.version.min", 770);
+  pref("media.peerconnection.dtls.version.max", 771);
 
   // These values (aec, agc, and noise) are from:
   // media/webrtc/trunk/webrtc/modules/audio_processing/include/audio_processing.h
@@ -555,12 +565,13 @@ pref("media.cubeb.logging_level", "");
 
 // Cubeb sandbox (remoting) control
 #if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
-  pref("media.cubeb.sandbox", true);
   pref("media.audioipc.pool_size", 1);
   // 64 * 4 kB stack per pool thread.
   pref("media.audioipc.stack_size", 262144);
-#else
-  pref("media.cubeb.sandbox", false);
+#endif
+
+#if defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
+  pref("media.cubeb.backend", "audiounit-rust");
 #endif
 
 // GraphRunner (fixed MediaTrackGraph thread) control
@@ -660,6 +671,7 @@ pref("gfx.webrender.debug.gpu-sample-queries", false);
 pref("gfx.webrender.debug.disable-batching", false);
 pref("gfx.webrender.debug.epochs", false);
 pref("gfx.webrender.debug.compact-profiler", false);
+pref("gfx.webrender.debug.smart-profiler", false);
 pref("gfx.webrender.debug.echo-driver-messages", false);
 pref("gfx.webrender.debug.new-frame-indicator", false);
 pref("gfx.webrender.debug.new-scene-indicator", false);
@@ -669,7 +681,7 @@ pref("gfx.webrender.debug.picture-caching", false);
 pref("gfx.webrender.debug.primitives", false);
 pref("gfx.webrender.debug.small-screen", false);
 pref("gfx.webrender.debug.obscure-images", false);
-pref("gfx.webrender.debug.log-transactions", false);
+pref("gfx.webrender.debug.glyph-flashing", false);
 
 pref("accessibility.warn_on_browsewithcaret", true);
 
@@ -818,6 +830,8 @@ pref("toolkit.dump.emit", false);
 #if defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
   pref("devtools.recordreplay.enabled", true);
   pref("devtools.recordreplay.enableRewinding", true);
+#else
+  pref("devtools.recordreplay.enabled", false);
 #endif
 
 pref("devtools.recordreplay.mvp.enabled", false);
@@ -825,6 +839,7 @@ pref("devtools.recordreplay.allowRepaintFailures", true);
 pref("devtools.recordreplay.includeSystemScripts", false);
 pref("devtools.recordreplay.logging", false);
 pref("devtools.recordreplay.loggingFull", false);
+pref("devtools.recordreplay.fastLogpoints", false);
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -940,13 +955,11 @@ pref("dom.disable_window_open_feature.menubar",     false);
 pref("dom.disable_window_open_feature.resizable",   true);
 pref("dom.disable_window_open_feature.minimizable", false);
 pref("dom.disable_window_open_feature.status",      true);
-pref("dom.disable_window_showModalDialog",          true);
 
 pref("dom.allow_scripts_to_close_windows",          false);
 
 pref("dom.require_user_interaction_for_beforeunload", true);
 
-pref("dom.popup_maximum",                           20);
 pref("dom.popup_allowed_events", "change click dblclick auxclick mouseup pointerup notificationclick reset submit touchend contextmenu");
 
 pref("dom.serviceWorkers.disable_open_click_delay", 1000);
@@ -1046,16 +1059,17 @@ pref("javascript.options.ion.threshold",    1000);
 pref("javascript.options.ion.full.threshold", 100000);
 // Duplicated in JitOptions - ensure both match.
 pref("javascript.options.ion.frequent_bailout_threshold", 10);
-pref("javascript.options.asmjs",            true);
-pref("javascript.options.wasm",             true);
-pref("javascript.options.wasm_verbose",     false);
-pref("javascript.options.wasm_ionjit",      true);
-pref("javascript.options.wasm_baselinejit", true);
+pref("javascript.options.asmjs",                  true);
+pref("javascript.options.wasm",                   true);
+pref("javascript.options.wasm_trustedprincipals", true);
+pref("javascript.options.wasm_verbose",           false);
+pref("javascript.options.wasm_ionjit",            true);
+pref("javascript.options.wasm_baselinejit",       true);
 #ifdef ENABLE_WASM_CRANELIFT
-  pref("javascript.options.wasm_cranelift",   false);
+  pref("javascript.options.wasm_cranelift",       false);
 #endif
 #ifdef ENABLE_WASM_REFTYPES
-  pref("javascript.options.wasm_gc",          false);
+  pref("javascript.options.wasm_gc",              false);
 #endif
 pref("javascript.options.native_regexp",    true);
 pref("javascript.options.parallel_parsing", true);
@@ -1243,9 +1257,6 @@ pref("network.protocol-handler.external.le", false);   // file
 // to override this value.
 pref("network.protocol-handler.expose-all", true);
 
-// Warning for about:networking page
-pref("network.warnOnAboutNetworking", false);
-
 // Example: make IMAP an exposed protocol
 // pref("network.protocol-handler.expose.imap", true);
 
@@ -1264,6 +1275,13 @@ pref("network.http.version", "1.1");      // default
 pref("network.http.proxy.version", "1.1");    // default
 // pref("network.http.proxy.version", "1.0"); // uncomment this out in case of problems
                                               // (required if using junkbuster proxy)
+
+// Whether we should respect the BE_CONSERVATIVE (aka nsIHttpChannelInternal.beConservative)
+// flag when connecting to a proxy.  If the configured proxy accepts only TLS 1.3, system
+// requests like updates will not pass through.  Setting this pref to false will fix that
+// problem.
+// Default at true to preserve the behavior we had before for backward compat.
+pref("network.http.proxy.respect-be-conservative", true);
 
 // this preference can be set to override the socket type used for normal
 // HTTP traffic.  an empty value indicates the normal TCP/IP socket type.
@@ -1310,45 +1328,6 @@ pref("network.http.request.max-start-delay", 10);
 
 // If a connection is reset, we will retry it max-attempts times.
 pref("network.http.request.max-attempts", 10);
-
-// Prefs allowing granular control of referers
-// 0=don't send any, 1=send only on clicks, 2=send on image requests as well
-pref("network.http.sendRefererHeader",      2);
-// Set the default Referrer Policy; to be used unless overriden by the site
-// 0=no-referrer, 1=same-origin, 2=strict-origin-when-cross-origin,
-// 3=no-referrer-when-downgrade
-pref("network.http.referer.defaultPolicy", 3);
-// Set the default Referrer Policy applied to third-party trackers when the
-// default cookie policy is set to reject third-party trackers;
-// to be used unless overriden by the site;
-// values are identical to defaultPolicy above
-// Trim referrers from trackers to origins by default.
-pref("network.http.referer.defaultPolicy.trackers", 2);
-// Set the Private Browsing Default Referrer Policy;
-// to be used unless overriden by the site;
-// values are identical to defaultPolicy above
-pref("network.http.referer.defaultPolicy.pbmode", 2);
-// Set the Private Browsing Default Referrer Policy applied to third-party
-// trackers when the default cookie policy is set to reject third-party
-// trackers;
-// to be used unless overriden by the site;
-// values are identical to defaultPolicy above
-// No need to change this pref for trimming referrers from trackers since in
-// private windows we already trim all referrers to origin only.
-pref("network.http.referer.defaultPolicy.trackers.pbmode", 2);
-// false=real referer, true=spoof referer (use target URI as referer)
-pref("network.http.referer.spoofSource", false);
-// false=allow onion referer, true=hide onion referer (use empty referer)
-pref("network.http.referer.hideOnionSource", false);
-// 0=full URI, 1=scheme+host+port+path, 2=scheme+host+port
-pref("network.http.referer.trimmingPolicy", 0);
-// 0=full URI, 1=scheme+host+port+path, 2=scheme+host+port
-pref("network.http.referer.XOriginTrimmingPolicy", 0);
-// 0=always send, 1=send iff base domains match, 2=send iff hosts match
-pref("network.http.referer.XOriginPolicy", 0);
-// The maximum allowed length for a referrer header - 4096 default
-// 0 means no limit.
-pref("network.http.referer.referrerLengthLimit", 4096);
 
 // Include an origin header on non-GET and non-HEAD requests regardless of CORS
 // 0=never send, 1=send when same-origin only, 2=always send
@@ -1436,6 +1415,14 @@ pref("network.http.spdy.default-concurrent", 100);
 pref("network.http.spdy.default-hpack-buffer", 65536); // 64k
 pref("network.http.spdy.websockets", true);
 pref("network.http.spdy.enable-hpack-dump", false);
+
+// Http3 parameters
+pref("network.http.http3.enabled", false);
+// Http3 qpack table size.
+pref("network.http.http3.default-qpack-table-size", 65536); // 64k
+// Maximal number of streams that can be blocked on waiting for qpack
+// instructions.
+pref("network.http.http3.default-max-stream-blocked", 10);
 
 // alt-svc allows separation of transport routing from
 // the origin host without using a proxy.
@@ -1989,6 +1976,7 @@ pref("intl.regional_prefs.use_os_locales",  false);
 // for ISO-8859-1
 pref("intl.fallbackCharsetList.ISO-8859-1", "windows-1252");
 pref("font.language.group",                 "chrome://global/locale/intl.properties");
+pref("font.cjk_pref_fallback_order",        "zh-cn,zh-hk,zh-tw,ja,ko");
 
 // Android-specific pref to control if keydown and keyup events are fired even
 // in during composition.  Note that those prefs are ignored if
@@ -2277,6 +2265,15 @@ pref("security.cert_pinning.enforcement_level", 0);
 // for tests.
 pref("security.cert_pinning.process_headers_from_non_builtin_roots", false);
 
+// Controls whether or not HPKP (the HTTP Public Key Pinning header) is enabled.
+// If true, the header is processed and collected HPKP information is consulted
+// when looking for pinning information.
+// If false, the header is not processed and collected HPKP information is not
+// consulted when looking for pinning information. Preloaded pins are not
+// affected by this preference.
+// Default: false
+pref("security.cert_pinning.hpkp.enabled", false);
+
 // If set to true strict checks will happen on the triggering principal for loads.
 // Android is disabled at the moment pending Bug 1504968
 #if !defined(RELEASE_OR_BETA) && !defined(ANDROID)
@@ -2302,13 +2299,20 @@ pref("services.settings.security.onecrl.signer", "onecrl.content-signature.mozil
 pref("services.settings.security.onecrl.checked", 0);
 
 pref("extensions.abuseReport.enabled", true);
+// Allow AMO to handoff reports to the Firefox integrated dialog.
+pref("extensions.abuseReport.amWebAPI.enabled", false);
+// Opened as a sub-frame of the about:addons page when set to false.
+pref("extensions.abuseReport.openDialog", false);
 pref("extensions.abuseReport.url", "https://services.addons.mozilla.org/api/v4/abuse/report/addon/");
+pref("extensions.abuseReport.amoDetailsURL", "https://services.addons.mozilla.org/api/v4/addons/addon/");
 
 // Blocklist preferences
 pref("extensions.blocklist.enabled", true);
 // OneCRL freshness checking depends on this value, so if you change it,
 // please also update security.onecrl.maximum_staleness_in_seconds.
 pref("extensions.blocklist.interval", 86400);
+// Whether to use the XML backend (true) or the remotesettings one (false).
+pref("extensions.blocklist.useXML", false);
 // Required blocklist freshness for OneCRL OCSP bypass
 // (default is 1.25x extensions.blocklist.interval, or 30 hours)
 pref("security.onecrl.maximum_staleness_in_seconds", 108000);
@@ -2639,10 +2643,6 @@ pref("dom.ipc.plugins.flash.disable-protected-mode", false);
 
 pref("dom.ipc.plugins.flash.subprocess.crashreporter.enabled", true);
 pref("dom.ipc.plugins.reportCrashURL", true);
-
-// How long we wait before unloading an idle plugin process.
-// Defaults to 30 seconds.
-pref("dom.ipc.plugins.unloadTimeoutSecs", 30);
 
 // Force the accelerated direct path for a subset of Flash wmode values
 pref("dom.ipc.plugins.forcedirect.enabled", true);
@@ -3903,6 +3903,8 @@ pref("signon.includeOtherSubdomainsInLookup", false);
 pref("signon.masterPasswordReprompt.timeout_ms", 900000); // 15 Minutes
 pref("signon.showAutoCompleteFooter", false);
 pref("signon.showAutoCompleteOrigins", false);
+// Enable login manager storage.
+pref("signon.storeSignons", true);
 
 // Satchel (Form Manager) prefs
 pref("browser.formfill.debug",            false);
@@ -3973,11 +3975,10 @@ pref("network.tcp.tcp_fastopen_http_check_for_stalls_only_if_idle_for", 10);
 pref("network.tcp.tcp_fastopen_http_stalls_limit", 3);
 pref("network.tcp.tcp_fastopen_http_stalls_timeout", 20);
 
-#ifdef MOZ_X11
-  #ifdef MOZ_WIDGET_GTK
-    pref("gfx.xrender.enabled",false);
-    pref("widget.content.allow-gtk-dark-theme", false);
-  #endif
+#ifdef MOZ_WIDGET_GTK
+  pref("gfx.xrender.enabled",false);
+  pref("widget.content.allow-gtk-dark-theme", false);
+  pref("widget.content.gtk-theme-override", "");
 #endif
 #ifdef MOZ_WAYLAND
   pref("widget.wayland_dmabuf_backend.enabled", false);
@@ -4256,6 +4257,9 @@ pref("network.trr.max-fails", 5);
 // Comma separated list of domains that we should not use TRR for
 pref("network.trr.excluded-domains", "");
 pref("network.trr.builtin-excluded-domains", "localhost,local");
+// When true, the DNS+TRR cache will be cleared when a relevant TRR pref
+// changes. (uri, bootstrapAddress, excluded-domains)
+pref("network.trr.clear-cache-on-pref-change", true);
 
 pref("captivedetect.canonicalURL", "http://detectportal.firefox.com/success.txt");
 pref("captivedetect.canonicalContent", "success\n");
@@ -4283,7 +4287,7 @@ pref("urlclassifier.passwordAllowTable", "goog-passwordwhite-proto");
 // Tables for anti-tracking features
 pref("urlclassifier.trackingAnnotationTable", "moztest-track-simple,ads-track-digest256,social-track-digest256,analytics-track-digest256,content-track-digest256");
 pref("urlclassifier.trackingAnnotationWhitelistTable", "moztest-trackwhite-simple,mozstd-trackwhite-digest256");
-pref("urlclassifier.trackingTable", "moztest-track-simple,base-track-digest256");
+pref("urlclassifier.trackingTable", "moztest-track-simple,ads-track-digest256,social-track-digest256,analytics-track-digest256");
 pref("urlclassifier.trackingWhitelistTable", "moztest-trackwhite-simple,mozstd-trackwhite-digest256");
 
 pref("urlclassifier.features.fingerprinting.blacklistTables", "base-fingerprinting-track-digest256");
@@ -4294,9 +4298,9 @@ pref("urlclassifier.features.cryptomining.blacklistTables", "base-cryptomining-t
 pref("urlclassifier.features.cryptomining.whitelistTables", "mozstd-trackwhite-digest256");
 pref("urlclassifier.features.cryptomining.annotate.blacklistTables", "base-cryptomining-track-digest256");
 pref("urlclassifier.features.cryptomining.annotate.whitelistTables", "mozstd-trackwhite-digest256");
-pref("urlclassifier.features.socialtracking.blacklistTables", "social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256");
+pref("urlclassifier.features.socialtracking.blacklistTables", "social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256");
 pref("urlclassifier.features.socialtracking.whitelistTables", "mozstd-trackwhite-digest256");
-pref("urlclassifier.features.socialtracking.annotate.blacklistTables", "social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256");
+pref("urlclassifier.features.socialtracking.annotate.blacklistTables", "social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256");
 pref("urlclassifier.features.socialtracking.annotate.whitelistTables", "mozstd-trackwhite-digest256");
 
 // These tables will never trigger a gethash call.
@@ -4424,10 +4428,12 @@ pref("browser.search.update", true);
 pref("browser.search.update.log", false);
 pref("browser.search.update.interval", 21600);
 pref("browser.search.suggest.enabled", true);
+pref("browser.search.suggest.enabled.private", false);
 pref("browser.search.geoSpecificDefaults", false);
 pref("browser.search.geoip.url", "https://location.services.mozilla.com/v1/country?key=%MOZILLA_API_KEY%");
 pref("browser.search.geoip.timeout", 3000);
 pref("browser.search.separatePrivateDefault", false);
+pref("browser.search.separatePrivateDefault.ui.enabled", false);
 
 #ifdef MOZ_OFFICIAL_BRANDING
   // {moz:official} expands to "official"
@@ -4708,13 +4714,7 @@ pref("services.common.log.logger.tokenserverclient", "Debug");
   pref("services.sync.engine.addons", true);
   pref("services.sync.engine.addresses", false);
   pref("services.sync.engine.bookmarks", true);
-  #ifdef EARLY_BETA_OR_EARLIER
-    // Enable the new bookmark sync engine through early Beta, but not release
-    // candidates or Release.
-    pref("services.sync.engine.bookmarks.buffer", true);
-  #else
-    pref("services.sync.engine.bookmarks.buffer", false);
-  #endif
+  pref("services.sync.engine.bookmarks.buffer", true);
   pref("services.sync.engine.creditcards", false);
   pref("services.sync.engine.history", true);
   pref("services.sync.engine.passwords", true);
@@ -4876,6 +4876,12 @@ pref("devtools.errorconsole.deprecation_warnings", true);
   pref("devtools.debugger.remote-enabled", true, sticky);
 #endif
 
+#if defined(MOZ_DEV_EDITION) || defined(NIGHTLY_BUILD)
+  pref("devtools.debugger.features.watchpoints", true);
+#else
+  pref("devtools.debugger.features.watchpoints", false);
+#endif
+
 // Disable remote debugging protocol logging.
 pref("devtools.debugger.log", false);
 pref("devtools.debugger.log.verbose", false);
@@ -4919,3 +4925,11 @@ pref("devtools.devices.url", "https://code.cdn.mozilla.net/devices/devices.json"
 
 // Enable Inactive CSS detection; used both by the client and the server.
 pref("devtools.inspector.inactive.css.enabled", true);
+
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
+// Define in StaticPrefList.yaml and override here since StaticPrefList.yaml
+// doesn't provide a way to lock the pref
+pref("dom.postMessage.sharedArrayBuffer.bypassCOOP_COEP.insecure.enabled", false);
+#else
+pref("dom.postMessage.sharedArrayBuffer.bypassCOOP_COEP.insecure.enabled", false, locked);
+#endif

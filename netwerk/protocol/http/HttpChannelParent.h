@@ -129,18 +129,9 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
 
   base::ProcessId OtherPid() const;
 
-  // Called by nsHttpChannel when a process switch is about to start.
-  // aChannel: nsIHttpChannel caller.
-  // aIdentifier: identifier from SessionStore to be passed to the childChannel
-  //              in order to identify it.
-  nsresult TriggerCrossProcessSwitch(nsIHttpChannel* aChannel,
-                                     uint64_t aIdentifier);
-
-  // Calling this method will cancel the HttpChannelChild because the consumer
-  // needs to be relocated to another process.
-  // Any OnStart/Stop/DataAvailable calls that follow will not be sent to the
-  // child channel.
-  void CancelChildCrossProcessRedirect();
+  // Inform the child actor that our referrer info was modified late during
+  // BeginConnect.
+  void OverrideReferrerInfoDuringBeginConnect(nsIReferrerInfo* aReferrerInfo);
 
  protected:
   // used to connect redirected-to channel in parent with just created
@@ -186,7 +177,7 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
       const TimeStamp& aHandleFetchEventEnd,
       const bool& aForceMainDocumentChannel,
       const TimeStamp& aNavigationStartTimeStamp,
-      const bool& hasSandboxedAuxiliaryNavigations);
+      const bool& hasNonEmptySandboxingFlag);
 
   virtual mozilla::ipc::IPCResult RecvSetPriority(
       const int16_t& priority) override;
@@ -256,11 +247,6 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
   void DivertComplete();
   void MaybeFlushPendingDiversion();
   void ResponseSynthesized();
-
-  void CrossProcessRedirectDone(
-      const nsresult& aResult,
-      const mozilla::Maybe<LoadInfoArgs>& aLoadInfoArgs);
-  void FinishCrossProcessSwitch(nsHttpChannel* aChannel, nsresult aStatus);
 
   // final step for Redirect2Verify procedure, will be invoked while both
   // redirecting and redirected channel are ready or any error happened.
@@ -362,10 +348,6 @@ class HttpChannelParent final : public nsIInterfaceRequestor,
   uint8_t mCacheNeedFlowControlInitialized : 1;
   uint8_t mNeedFlowControl : 1;
   uint8_t mSuspendedForFlowControl : 1;
-
-  // The child channel was cancelled, as the consumer was relocated to another
-  // process.
-  uint8_t mDoingCrossProcessRedirect : 1;
 
   // Number of events to wait before actually invoking AsyncOpen on the main
   // channel. For each asynchronous step required before InvokeAsyncOpen, should

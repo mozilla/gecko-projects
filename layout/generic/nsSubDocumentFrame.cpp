@@ -31,6 +31,8 @@
 #include "nsViewManager.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
+#include "nsStyleStruct.h"
+#include "nsStyleStructInlines.h"
 #include "nsFrameSetFrame.h"
 #include "nsIScrollable.h"
 #include "nsNameSpaceManager.h"
@@ -53,8 +55,9 @@
 #include "mozilla/layers/RenderRootStateManager.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
+using namespace mozilla::gfx;
 using namespace mozilla::layers;
-using mozilla::dom::Document;
 
 static Document* GetDocumentFromView(nsView* aView) {
   MOZ_ASSERT(aView, "null view");
@@ -845,12 +848,6 @@ nsresult nsSubDocumentFrame::AttributeChanged(int32_t aNameSpaceID,
           framesetFrame->RecalculateBorderResize();
         }
       }
-    }
-  } else if (aAttribute == nsGkAtoms::showresizer) {
-    nsIFrame* rootFrame = GetSubdocumentRootFrame();
-    if (rootFrame) {
-      rootFrame->PresShell()->FrameNeedsReflow(
-          rootFrame, IntrinsicDirty::Resize, NS_FRAME_IS_DIRTY);
     }
   } else if (aAttribute == nsGkAtoms::marginwidth ||
              aAttribute == nsGkAtoms::marginheight) {

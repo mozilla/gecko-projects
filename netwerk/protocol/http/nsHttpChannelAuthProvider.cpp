@@ -677,6 +677,7 @@ nsresult nsHttpChannelAuthProvider::GetCredentialsForChallenge(
     if (mIdent.IsEmpty()) {
       GetIdentityFromURI(authFlags, mIdent);
       identFromURI = !mIdent.IsEmpty();
+      Telemetry::Accumulate(Telemetry::HTTP_AUTH_USERINFO_URI, identFromURI);
     }
 
     if ((loadFlags & nsIRequest::LOAD_ANONYMOUS) && !identFromURI) {
@@ -1426,12 +1427,23 @@ nsresult nsHttpChannelAuthProvider::ContinueOnAuthAvailable(
   return NS_OK;
 }
 
+void nsHttpChannelAuthProvider::RecordConfirmAuthTelemetry(const char* aType) {
+  if (nsCRT::strcmp(aType, "SuperfluousAuth")) {
+    Telemetry::AccumulateCategorical(
+        Telemetry::LABELS_HTTP_AUTH_CONFIRM_PROMPT::Superfluous);
+  } else if (nsCRT::strcmp(aType, "AutomaticAuth")) {
+    Telemetry::AccumulateCategorical(
+        Telemetry::LABELS_HTTP_AUTH_CONFIRM_PROMPT::Automatic);
+  }
+}
+
 bool nsHttpChannelAuthProvider::ConfirmAuth(const char* bundleKey,
                                             bool doYesNoPrompt) {
   // skip prompting the user if
-  //   1) we've already prompted the user
-  //   2) we're not a toplevel channel
-  //   3) the userpass length is less than the "phishy" threshold
+  //   1) prompts are disabled by pref
+  //   2) we've already prompted the user
+  //   3) we're not a toplevel channel
+  //   4) the userpass length is less than the "phishy" threshold
 
   uint32_t loadFlags;
   nsresult rv = mAuthChannel->GetLoadFlags(&loadFlags);
@@ -1446,6 +1458,12 @@ bool nsHttpChannelAuthProvider::ConfirmAuth(const char* bundleKey,
   if (NS_FAILED(rv) ||
       (userPass.Length() < gHttpHandler->PhishyUserPassLength()))
     return true;
+
+  if (!StaticPrefs::network_auth_confirmAuth_enabled()) {
+    // If it wasn't for the pref, we would have prompted, record telemetry
+    RecordConfirmAuthTelemetry(bundleKey);
+    return true;
+  }
 
   // we try to confirm by prompting the user.  if we cannot do so, then
   // assume the user said ok.  this is done to keep things working in
@@ -1532,6 +1550,8 @@ bool nsHttpChannelAuthProvider::ConfirmAuth(const char* bundleKey,
     rv = prompt->Confirm(nullptr, msg.get(), &confirmed);
     if (NS_FAILED(rv)) return true;
   }
+
+  RecordConfirmAuthTelemetry(bundleKey);
 
   return confirmed;
 }

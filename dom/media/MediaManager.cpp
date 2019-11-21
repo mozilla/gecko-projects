@@ -463,10 +463,9 @@ class GetUserMediaWindowListener {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(GetUserMediaWindowListener)
 
   // Create in an inactive state
-  GetUserMediaWindowListener(base::Thread* aThread, uint64_t aWindowID,
+  GetUserMediaWindowListener(uint64_t aWindowID,
                              const PrincipalHandle& aPrincipalHandle)
-      : mMediaThread(aThread),
-        mWindowID(aWindowID),
+      : mWindowID(aWindowID),
         mPrincipalHandle(aPrincipalHandle),
         mChromeNotificationTaskPosted(false) {}
 
@@ -698,11 +697,7 @@ class GetUserMediaWindowListener {
                "Inactive listeners should already be removed");
     MOZ_ASSERT(mActiveListeners.Length() == 0,
                "Active listeners should already be removed");
-    Unused << mMediaThread;
   }
-
-  // Set at construction
-  base::Thread* mMediaThread;
 
   uint64_t mWindowID;
   const PrincipalHandle mPrincipalHandle;
@@ -849,8 +844,8 @@ MediaDevice::MediaDevice(const RefPtr<MediaEngineSource>& aSource,
                 : MediaDeviceKind::Audioinput),
       mScary(mSource->GetScary()),
       mIsFake(mSource->IsFake()),
-      mType(NS_ConvertUTF8toUTF16(
-          dom::MediaDeviceKindValues::strings[uint32_t(mKind)].value)),
+      mType(
+          NS_ConvertASCIItoUTF16(dom::MediaDeviceKindValues::GetString(mKind))),
       mName(aName),
       mID(aID),
       mGroupID(aGroupID),
@@ -868,8 +863,8 @@ MediaDevice::MediaDevice(const RefPtr<AudioDeviceInfo>& aAudioDeviceInfo,
                 : MediaDeviceKind::Audiooutput),
       mScary(false),
       mIsFake(false),
-      mType(NS_ConvertUTF8toUTF16(
-          dom::MediaDeviceKindValues::strings[uint32_t(mKind)].value)),
+      mType(
+          NS_ConvertASCIItoUTF16(dom::MediaDeviceKindValues::GetString(mKind))),
       mName(mSinkInfo->Name()),
       mID(aID),
       mGroupID(aGroupID),
@@ -1023,8 +1018,8 @@ void MediaDevice::GetSettings(MediaTrackSettings& aOutSettings) const {
 // Threadsafe since mSource is const.
 NS_IMETHODIMP
 MediaDevice::GetMediaSource(nsAString& aMediaSource) {
-  aMediaSource.Assign(NS_ConvertUTF8toUTF16(
-      dom::MediaSourceEnumValues::strings[uint32_t(GetMediaSource())].value));
+  aMediaSource.AssignASCII(
+      dom::MediaSourceEnumValues::GetString(GetMediaSource()));
   return NS_OK;
 }
 
@@ -1216,7 +1211,7 @@ class GetUserMediaStreamRunnable : public Runnable {
         MOZ_ASSERT(IsOn(mConstraints.mAudio));
         RefPtr<MediaStreamTrack> domTrack = new dom::AudioStreamTrack(
             window, track, audioTrackSource, dom::MediaStreamTrackState::Live,
-            GetInvariant(mConstraints.mAudio));
+            false, GetInvariant(mConstraints.mAudio));
         domStream->AddTrackInternal(domTrack);
       }
     }
@@ -1230,7 +1225,7 @@ class GetUserMediaStreamRunnable : public Runnable {
       MOZ_ASSERT(IsOn(mConstraints.mVideo));
       RefPtr<MediaStreamTrack> domTrack = new dom::VideoStreamTrack(
           window, track, videoTrackSource, dom::MediaStreamTrackState::Live,
-          GetInvariant(mConstraints.mVideo));
+          false, GetInvariant(mConstraints.mVideo));
       domStream->AddTrackInternal(domTrack);
       switch (mVideoDevice->GetMediaSource()) {
         case MediaSourceEnum::Browser:
@@ -1638,25 +1633,6 @@ class GetUserMediaTask : public Runnable {
   RefPtr<MediaManager> mManager;  // get ref to this when creating the runnable
 };
 
-#if defined(ANDROID)
-class GetUserMediaRunnableWrapper : public Runnable {
- public:
-  // This object must take ownership of task
-  explicit GetUserMediaRunnableWrapper(GetUserMediaTask* task)
-      : Runnable("GetUserMediaRunnableWrapper"), mTask(task) {}
-
-  ~GetUserMediaRunnableWrapper() {}
-
-  NS_IMETHOD Run() override {
-    mTask->Run();
-    return NS_OK;
-  }
-
- private:
-  nsAutoPtr<GetUserMediaTask> mTask;
-};
-#endif
-
 /* static */
 void MediaManager::GuessVideoDeviceGroupIDs(MediaDeviceSet& aDevices,
                                             const MediaDeviceSet& aAudios) {
@@ -1898,7 +1874,8 @@ RefPtr<MediaManager::MgrPromise> MediaManager::EnumerateRawDevices(
   return promise;
 }
 
-MediaManager::MediaManager() : mMediaThread(nullptr), mBackend(nullptr) {
+MediaManager::MediaManager(UniquePtr<base::Thread> aMediaThread)
+    : mMediaThread(std::move(aMediaThread)), mBackend(nullptr) {
   mPrefs.mFreq = 1000;  // 1KHz test tone
   mPrefs.mWidth = 0;    // adaptive default
   mPrefs.mHeight = 0;   // adaptive default
@@ -1946,10 +1923,13 @@ NS_IMPL_ISUPPORTS(MediaManager, nsIMediaManagerService, nsIObserver)
 
 /* static */
 StaticRefPtr<MediaManager> MediaManager::sSingleton;
+/* static */
+StaticMutex MediaManager::sSingletonMutex;
 
 #ifdef DEBUG
 /* static */
 bool MediaManager::IsInMediaThread() {
+  StaticMutexAutoLock lock(sSingletonMutex);
   return sSingleton ? (sSingleton->mMediaThread->thread_id() ==
                        PlatformThread::CurrentId())
                     : false;
@@ -1985,6 +1965,7 @@ class MTAThread : public base::Thread {
 // Guaranteed never to return nullptr.
 /* static */
 MediaManager* MediaManager::Get() {
+  StaticMutexAutoLock lock(sSingletonMutex);
   if (!sSingleton) {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -1992,20 +1973,24 @@ MediaManager* MediaManager::Get() {
     timesCreated++;
     MOZ_RELEASE_ASSERT(timesCreated == 1);
 
-    sSingleton = new MediaManager();
-
+    {
+      UniquePtr<base::Thread> mediaThread =
 #ifdef XP_WIN
-    sSingleton->mMediaThread = new MTAThread("MediaManager");
+          MakeUnique<MTAThread>("MediaManager");
 #else
-    sSingleton->mMediaThread = new base::Thread("MediaManager");
+          MakeUnique<base::Thread>("MediaManager");
 #endif
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_MOZILLA_NONMAINTHREAD;
-    if (!sSingleton->mMediaThread->StartWithOptions(options)) {
-      MOZ_CRASH();
-    }
 
-    LOG("New Media thread for gum");
+      base::Thread::Options options;
+      options.message_loop_type = MessageLoop::TYPE_MOZILLA_NONMAINTHREAD;
+      if (!mediaThread->StartWithOptions(options)) {
+        MOZ_CRASH();
+      }
+
+      LOG("New Media thread for gum");
+
+      sSingleton = new MediaManager(std::move(mediaThread));
+    }
 
     nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
     if (obs) {
@@ -2070,7 +2055,10 @@ MediaManager* MediaManager::Get() {
 }
 
 /* static */
-MediaManager* MediaManager::GetIfExists() { return sSingleton; }
+MediaManager* MediaManager::GetIfExists() {
+  StaticMutexAutoLock lock(sSingletonMutex);
+  return sSingleton;
+}
 
 /* static */
 already_AddRefed<MediaManager> MediaManager::GetInstance() {
@@ -2167,84 +2155,54 @@ nsresult MediaManager::NotifyRecordingStatusChange(
   return NS_OK;
 }
 
-int MediaManager::AddDeviceChangeCallback(DeviceChangeCallback* aCallback) {
-  bool fakeDeviceChangeEventOn = mPrefs.mFakeDeviceChangeEventOn;
-  MediaManager::PostTask(NewTaskFrom([fakeDeviceChangeEventOn]() {
-    MediaManager* manager = MediaManager::GetIfExists();
-    MOZ_RELEASE_ASSERT(manager);  // Must exist while media thread is alive
-    // this is needed in case persistent permission is given but no gUM()
-    // or enumeration() has created the real backend yet
-    manager->GetBackend();
-    if (fakeDeviceChangeEventOn)
-      manager->GetBackend()->SetFakeDeviceChangeEvents();
-  }));
+void MediaManager::DeviceListChanged() {
+  MOZ_ASSERT(NS_IsMainThread());
+  if (sHasShutdown) {
+    return;
+  }
+  mDeviceListChangeEvent.Notify();
 
-  return DeviceChangeNotifier::AddDeviceChangeCallback(aCallback);
-}
+  // On some Windows machines, if we call EnumerateRawDevices immediately after
+  // receiving devicechange event, we would get an outdated devices list.
+  PR_Sleep(PR_MillisecondsToInterval(200));
+  auto devices = MakeRefPtr<MediaDeviceSetRefCnt>();
+  EnumerateRawDevices(0, MediaSourceEnum::Camera, MediaSourceEnum::Microphone,
+                      MediaSinkEnum::Speaker, DeviceEnumerationType::Normal,
+                      DeviceEnumerationType::Normal, false, devices)
+      ->Then(
+          GetCurrentThreadSerialEventTarget(), __func__,
+          [self = RefPtr<MediaManager>(this), this, devices](bool) {
+            if (!MediaManager::GetIfExists()) {
+              return;
+            }
 
-void MediaManager::OnDeviceChange() {
-  NS_DispatchToMainThread(NS_NewRunnableFunction(
-      "MediaManager::OnDeviceChange", [self = RefPtr<MediaManager>(this)]() {
-        MOZ_ASSERT(NS_IsMainThread());
-        if (sHasShutdown) {
-          return;
-        }
-        self->NotifyDeviceChange();
+            nsTArray<nsString> deviceIDs;
 
-        // On some Windows machine, if we call EnumerateRawDevices immediately
-        // after receiving devicechange event, sometimes we would get outdated
-        // devices list.
-        PR_Sleep(PR_MillisecondsToInterval(200));
-        auto devices = MakeRefPtr<MediaDeviceSetRefCnt>();
-        self->EnumerateRawDevices(
-                0, MediaSourceEnum::Camera, MediaSourceEnum::Microphone,
-                MediaSinkEnum::Speaker, DeviceEnumerationType::Normal,
-                DeviceEnumerationType::Normal, false, devices)
-            ->Then(
-                GetCurrentThreadSerialEventTarget(), __func__,
-                [self, devices](bool) {
-                  if (!MediaManager::GetIfExists()) {
-                    return;
-                  }
-
-                  nsTArray<nsString> deviceIDs;
-
-                  for (auto& device : *devices) {
-                    nsString id;
-                    device->GetId(id);
-                    id.ReplaceSubstring(NS_LITERAL_STRING("default: "),
-                                        NS_LITERAL_STRING(""));
-                    if (!deviceIDs.Contains(id)) {
-                      deviceIDs.AppendElement(id);
-                    }
-                  }
-
-                  for (auto& id : self->mDeviceIDs) {
-                    if (deviceIDs.Contains(id)) {
-                      continue;
-                    }
-
-                    // Stop the coresponding SourceListener
-                    nsGlobalWindowInner::InnerWindowByIdTable* windowsById =
-                        nsGlobalWindowInner::GetWindowsTable();
-                    if (!windowsById) {
-                      continue;
-                    }
-
-                    for (auto iter = windowsById->Iter(); !iter.Done();
-                         iter.Next()) {
-                      nsGlobalWindowInner* window = iter.Data();
-                      self->IterateWindowListeners(
-                          window,
-                          [&id](const RefPtr<GetUserMediaWindowListener>&
-                                    aListener) { aListener->StopRawID(id); });
-                    }
-                  }
-
-                  self->mDeviceIDs = deviceIDs;
-                },
-                [](RefPtr<MediaMgrError>&& reason) {});
-      }));
+            for (auto& device : *devices) {
+              nsString id;
+              device->GetId(id);
+              id.ReplaceSubstring(NS_LITERAL_STRING("default: "),
+                                  NS_LITERAL_STRING(""));
+              if (!deviceIDs.Contains(id)) {
+                deviceIDs.AppendElement(id);
+              }
+            }
+            // For any removed devices, notify their listeners cleanly that the
+            // source has stopped, so JS knows and usage indicators update.
+            for (auto& id : mDeviceIDs) {
+              if (deviceIDs.Contains(id)) {
+                // Device has not been removed
+                continue;
+              }
+              // Stop the corresponding SourceListener
+              for (auto iter = mActiveWindows.Iter(); !iter.Done();
+                   iter.Next()) {
+                iter.UserData()->StopRawID(id);
+              }
+            }
+            mDeviceIDs = deviceIDs;
+          },
+          [](RefPtr<MediaMgrError>&& reason) {});
 }
 
 nsresult MediaManager::GenerateUUID(nsAString& aResult) {
@@ -2266,7 +2224,7 @@ nsresult MediaManager::GenerateUUID(nsAString& aResult) {
 
 static bool IsFullyActive(nsPIDOMWindowInner* aWindow) {
   while (true) {
-    if (!aWindow) {
+    if (!aWindow || nsGlobalWindowInner::Cast(aWindow)->IsDying()) {
       return false;
     }
     Document* document = aWindow->GetExtantDoc();
@@ -2438,8 +2396,8 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
   if (c.mVideo.IsMediaTrackConstraints()) {
     auto& vc = c.mVideo.GetAsMediaTrackConstraints();
     if (!vc.mMediaSource.WasPassed()) {
-      vc.mMediaSource.Construct().AssignASCII(EnumToASCII(
-          dom::MediaSourceEnumValues::strings, MediaSourceEnum::Camera));
+      vc.mMediaSource.Construct().AssignASCII(
+          dom::MediaSourceEnumValues::GetString(MediaSourceEnum::Camera));
     }
     videoType = StringToEnum(dom::MediaSourceEnumValues::strings,
                              vc.mMediaSource.Value(), MediaSourceEnum::Other);
@@ -2509,7 +2467,7 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
           videoType == MediaSourceEnum::Browser) {
         videoType = MediaSourceEnum::Window;
         vc.mMediaSource.Value().AssignASCII(
-            EnumToASCII(dom::MediaSourceEnumValues::strings, videoType));
+            dom::MediaSourceEnumValues::GetString(videoType));
       }
       // only allow privileged content to set the window id
       if (vc.mBrowserWindow.WasPassed()) {
@@ -2532,8 +2490,8 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
   if (c.mAudio.IsMediaTrackConstraints()) {
     auto& ac = c.mAudio.GetAsMediaTrackConstraints();
     if (!ac.mMediaSource.WasPassed()) {
-      ac.mMediaSource.Construct(NS_ConvertASCIItoUTF16(EnumToASCII(
-          dom::MediaSourceEnumValues::strings, MediaSourceEnum::Microphone)));
+      ac.mMediaSource.Construct(NS_ConvertASCIItoUTF16(
+          dom::MediaSourceEnumValues::GetString(MediaSourceEnum::Microphone)));
     }
     audioType = StringToEnum(dom::MediaSourceEnumValues::strings,
                              ac.mMediaSource.Value(), MediaSourceEnum::Other);
@@ -2578,7 +2536,7 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
     MOZ_ASSERT(PrincipalHandleMatches(existingPrincipalHandle, principal));
   } else {
     windowListener = new GetUserMediaWindowListener(
-        mMediaThread, windowID, MakePrincipalHandle(principal));
+        windowID, MakePrincipalHandle(principal));
     AddWindowID(windowID, windowListener);
   }
 
@@ -2754,6 +2712,7 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
               LOG("GetUserMedia: bad window (%" PRIu64
                   ") in post enumeration success callback 2!",
                   windowID);
+              windowListener->Remove(sourceListener);
               return StreamPromise::CreateAndReject(
                   MakeRefPtr<MediaMgrError>(MediaMgrError::Name::AbortError),
                   __func__);
@@ -2764,6 +2723,7 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
                   "promise2 success callback! Calling error handler!");
               nsString constraint;
               constraint.AssignASCII(badConstraint);
+              windowListener->Remove(sourceListener);
               return StreamPromise::CreateAndReject(
                   MakeRefPtr<MediaMgrError>(
                       MediaMgrError::Name::OverconstrainedError,
@@ -2773,6 +2733,7 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
             if (!devices->Length()) {
               LOG("GetUserMedia: no devices found in post enumeration promise2 "
                   "success callback! Calling error handler!");
+              windowListener->Remove(sourceListener);
               // When privacy.resistFingerprinting = true, no
               // available device implies content script is requesting
               // a fake device, so report NotAllowedError.
@@ -2789,6 +2750,7 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
               for (auto& device : *devices) {
                 nsresult rv = devicesCopy->AppendElement(device);
                 if (NS_WARN_IF(NS_FAILED(rv))) {
+                  windowListener->Remove(sourceListener);
                   return StreamPromise::CreateAndReject(
                       MakeRefPtr<MediaMgrError>(
                           MediaMgrError::Name::AbortError),
@@ -2847,9 +2809,10 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetUserMedia(
 #endif
             return p;
           },
-          [](RefPtr<MediaMgrError>&& aError) {
+          [windowListener, sourceListener](RefPtr<MediaMgrError>&& aError) {
             LOG("GetUserMedia: post enumeration SelectSettings failure "
                 "callback called!");
+            windowListener->Remove(sourceListener);
             return StreamPromise::CreateAndReject(std::move(aError), __func__);
           });
 };
@@ -2860,6 +2823,21 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetDisplayMedia(
     CallerType aCallerType) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
+  Document* doc = aWindow->GetExtantDoc();
+  if (NS_WARN_IF(!doc)) {
+    return StreamPromise::CreateAndReject(
+        MakeRefPtr<MediaMgrError>(MediaMgrError::Name::SecurityError),
+        __func__);
+  }
+
+  if (!doc->HasBeenUserGestureActivated()) {
+    return StreamPromise::CreateAndReject(
+        MakeRefPtr<MediaMgrError>(
+            MediaMgrError::Name::InvalidStateError,
+            NS_LITERAL_STRING(
+                "getDisplayMedia must be called from a user gesture handler.")),
+        __func__);
+  }
 
   if (!IsOn(aConstraintsPassedIn.mVideo)) {
     return StreamPromise::CreateAndReject(
@@ -2935,8 +2913,8 @@ RefPtr<MediaManager::StreamPromise> MediaManager::GetDisplayMedia(
   // If this is a non-priviliged call, GetUserMedia() will change it to "window"
   // for us.
   vc.mMediaSource.Reset();
-  vc.mMediaSource.Construct().AssignASCII(EnumToASCII(
-      dom::MediaSourceEnumValues::strings, MediaSourceEnum::Screen));
+  vc.mMediaSource.Construct().AssignASCII(
+      dom::MediaSourceEnumValues::GetString(MediaSourceEnum::Screen));
 
   return MediaManager::GetUserMedia(aWindow, c, aCallerType);
 }
@@ -3172,7 +3150,7 @@ RefPtr<MediaManager::DevicesPromise> MediaManager::EnumerateDevices(
     MOZ_ASSERT(PrincipalHandleMatches(existingPrincipalHandle, principal));
   } else {
     windowListener = new GetUserMediaWindowListener(
-        mMediaThread, windowId, MakePrincipalHandle(principal));
+        windowId, MakePrincipalHandle(principal));
     AddWindowID(windowId, windowListener);
   }
 
@@ -3243,7 +3221,14 @@ RefPtr<MediaManager::DevicesPromise> MediaManager::EnumerateDevices(
                               devices)
       ->Then(
           GetCurrentThreadSerialEventTarget(), __func__,
-          [windowListener, sourceListener, devices](bool) {
+          [self = RefPtr<MediaManager>(this), this, windowListener,
+           sourceListener, devices](bool) {
+            if (!IsWindowListenerStillActive(windowListener)) {
+              MOZ_ASSERT(!windowListener->Remove(sourceListener));
+              return DevicesPromise::CreateAndReject(
+                  MakeRefPtr<MediaMgrError>(MediaMgrError::Name::AbortError),
+                  __func__);
+            }
             DebugOnly<bool> rv = windowListener->Remove(sourceListener);
             MOZ_ASSERT(rv);
             return DevicesPromise::CreateAndResolve(devices, __func__);
@@ -3251,9 +3236,7 @@ RefPtr<MediaManager::DevicesPromise> MediaManager::EnumerateDevices(
           [windowListener, sourceListener](RefPtr<MediaMgrError>&& aError) {
             // This may fail, if a new doc has been set the OnNavigation
             // method should have removed all previous active listeners.
-            // Attempt to clean it here, just in case, but ignore the return
-            // value.
-            Unused << windowListener->Remove(sourceListener);
+            MOZ_ASSERT(!windowListener->Remove(sourceListener));
             return DevicesPromise::CreateAndReject(std::move(aError), __func__);
           });
 }
@@ -3275,7 +3258,7 @@ RefPtr<SinkInfoPromise> MediaManager::GetSinkDevice(nsPIDOMWindowInner* aWindow,
     MOZ_ASSERT(PrincipalHandleMatches(existingPrincipalHandle, principal));
   } else {
     windowListener = new GetUserMediaWindowListener(
-        mMediaThread, windowId, MakePrincipalHandle(principal));
+        windowId, MakePrincipalHandle(principal));
     AddWindowID(windowId, windowListener);
   }
   // Create an inactive SourceListener to act as a placeholder, so the
@@ -3365,7 +3348,8 @@ MediaEngine* MediaManager::GetBackend() {
 #else
     mBackend = new MediaEngineDefault();
 #endif
-    mBackend->AddDeviceChangeCallback(this);
+    mDeviceListChangeListener = mBackend->DeviceListChangeEvent().Connect(
+        AbstractThread::MainThread(), this, &MediaManager::DeviceListChanged);
   }
   return mBackend;
 }
@@ -3389,6 +3373,12 @@ void MediaManager::OnNavigation(uint64_t aWindowID) {
   // be added to from the main-thread
   auto* window = nsGlobalWindowInner::GetInnerWindowWithId(aWindowID);
   if (window) {
+    // We have cleanup to do when we're the current window. OnNavigation is also
+    // called by nsGlobalWindowInner::FreeInnerObjects, which MAY happen later
+    // when window is not current. In that case, cleanup has already happened.
+    if (!window->IsCurrentInnerWindow()) {
+      return;
+    }
     IterateWindowListeners(
         window, [self = RefPtr<MediaManager>(this),
                  windowID = DebugOnly<decltype(aWindowID)>(aWindowID)](
@@ -3400,24 +3390,6 @@ void MediaManager::OnNavigation(uint64_t aWindowID) {
     RemoveWindowID(aWindowID);
   }
   MOZ_ASSERT(!GetWindowListener(aWindowID));
-
-  RemoveMediaDevicesCallback(aWindowID);
-}
-
-void MediaManager::RemoveMediaDevicesCallback(uint64_t aWindowID) {
-  MutexAutoLock lock(mCallbackMutex);
-  for (DeviceChangeCallback* observer : mDeviceChangeCallbackList) {
-    MediaDevices* mediadevices = static_cast<MediaDevices*>(observer);
-    MOZ_ASSERT(mediadevices);
-    if (mediadevices) {
-      nsPIDOMWindowInner* window = mediadevices->GetOwner();
-      MOZ_ASSERT(window);
-      if (window && window->WindowID() == aWindowID) {
-        RemoveDeviceChangeCallbackLocked(observer);
-        return;
-      }
-    }
-  }
 }
 
 void MediaManager::AddWindowID(uint64_t aWindowId,
@@ -3511,8 +3483,22 @@ void MediaManager::GetPrefs(nsIPrefBranch* aBranch, const char* aData) {
   GetPrefBool(aBranch, "media.getusermedia.aec_aec_delay_agnostic", aData,
               &mPrefs.mDelayAgnostic);
   GetPref(aBranch, "media.getusermedia.channels", aData, &mPrefs.mChannels);
+  bool oldFakeDeviceChangeEventOn = mPrefs.mFakeDeviceChangeEventOn;
   GetPrefBool(aBranch, "media.ondevicechange.fakeDeviceChangeEvent.enabled",
               aData, &mPrefs.mFakeDeviceChangeEventOn);
+  if (mPrefs.mFakeDeviceChangeEventOn != oldFakeDeviceChangeEventOn) {
+    // Dispatch directly to the media thread since we're guaranteed to not be in
+    // shutdown here. This is called either on construction, or when a pref has
+    // changed. The pref observers are disconnected during shutdown.
+    MOZ_DIAGNOSTIC_ASSERT(!sHasShutdown);
+    mMediaThread->message_loop()->PostTask(NS_NewRunnableFunction(
+        "MediaManager::SetFakeDeviceChangeEventsEnabled",
+        [enable = mPrefs.mFakeDeviceChangeEventOn] {
+          if (MediaManager* mm = MediaManager::GetIfExists()) {
+            mm->GetBackend()->SetFakeDeviceChangeEventsEnabled(enable);
+          }
+        }));
+  }
 #endif
   GetPrefBool(aBranch, "media.navigator.audio.full_duplex", aData,
               &mPrefs.mFullDuplex);
@@ -3603,8 +3589,9 @@ void MediaManager::Shutdown() {
       // started it from!
       {
         if (mManager->mBackend) {
-          mManager->mBackend->Shutdown();  // ok to invoke multiple times
-          mManager->mBackend->RemoveDeviceChangeCallback(mManager);
+          mManager->mBackend->SetFakeDeviceChangeEventsEnabled(false);
+          mManager->mBackend->Shutdown();  // idempotent
+          mManager->mDeviceListChangeListener.DisconnectIfExists();
         }
       }
       mozilla::ipc::BackgroundChild::CloseForCurrentThread();
@@ -3632,7 +3619,12 @@ void MediaManager::Shutdown() {
   // cleared until the lambda function clears it.
 
   // note that this == sSingleton
-  MOZ_ASSERT(this == sSingleton);
+#ifdef DEBUG
+  {
+    StaticMutexAutoLock lock(sSingletonMutex);
+    MOZ_ASSERT(this == sSingleton);
+  }
+#endif
 
   // Release the backend (and call Shutdown()) from within the MediaManager
   // thread Don't use MediaManager::PostTask() because we're sHasShutdown=true
@@ -3644,6 +3636,7 @@ void MediaManager::Shutdown() {
         if (mMediaThread) {
           mMediaThread->Stop();
         }
+        StaticMutexAutoLock lock(sSingletonMutex);
         // Remove async shutdown blocker
         media::GetShutdownBarrier()->RemoveBlocker(
             sSingleton->mShutdownBlocker);
@@ -3913,11 +3906,11 @@ MediaManager::SanitizeDeviceIds(int64_t aSinceWhen) {
 }
 
 void MediaManager::StopScreensharing(uint64_t aWindowID) {
-  // We need to stop window/screensharing for all streams in all innerwindows
-  // that correspond to that outerwindow.
+  // We need to stop window/screensharing for all streams in this innerwindow
+  // and all its sub frames.
 
   auto* window = nsGlobalWindowInner::GetInnerWindowWithId(aWindowID);
-  if (!window) {
+  if (!window || !window->IsCurrentInnerWindow()) {
     return;
   }
   IterateWindowListeners(
@@ -3931,29 +3924,29 @@ void MediaManager::IterateWindowListeners(nsPIDOMWindowInner* aWindow,
                                           const FunctionType& aCallback) {
   // Iterate the docshell tree to find all the child windows, and for each
   // invoke the callback
-  if (aWindow) {
-    {
-      uint64_t windowID = aWindow->WindowID();
-      RefPtr<GetUserMediaWindowListener> listener = GetWindowListener(windowID);
-      if (listener) {
-        aCallback(listener);
-      }
-      // NB: `listener` might have been destroyed.
+  MOZ_DIAGNOSTIC_ASSERT(aWindow);
+  MOZ_DIAGNOSTIC_ASSERT(aWindow->IsCurrentInnerWindow());
+  {
+    uint64_t windowID = aWindow->WindowID();
+    RefPtr<GetUserMediaWindowListener> listener = GetWindowListener(windowID);
+    if (listener) {
+      aCallback(listener);
     }
+    // NB: `listener` might have been destroyed.
+  }
 
-    // iterate any children of *this* window (iframes, etc)
-    nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
-    if (docShell) {
-      int32_t i, count;
-      docShell->GetInProcessChildCount(&count);
-      for (i = 0; i < count; ++i) {
-        nsCOMPtr<nsIDocShellTreeItem> item;
-        docShell->GetInProcessChildAt(i, getter_AddRefs(item));
-        nsCOMPtr<nsPIDOMWindowOuter> winOuter =
-            item ? item->GetWindow() : nullptr;
-
-        if (winOuter) {
-          IterateWindowListeners(winOuter->GetCurrentInnerWindow(), aCallback);
+  // iterate any children of *this* window (iframes, etc)
+  nsCOMPtr<nsIDocShell> docShell = aWindow->GetDocShell();
+  if (docShell) {
+    int32_t i, count;
+    docShell->GetInProcessChildCount(&count);
+    for (i = 0; i < count; ++i) {
+      nsCOMPtr<nsIDocShellTreeItem> item;
+      docShell->GetInProcessChildAt(i, getter_AddRefs(item));
+      nsCOMPtr<nsPIDOMWindowOuter> child = item ? item->GetWindow() : nullptr;
+      if (child) {
+        if (auto* innerChild = child->GetCurrentInnerWindow()) {
+          IterateWindowListeners(innerChild, aCallback);
         }
       }
     }

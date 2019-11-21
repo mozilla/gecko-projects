@@ -18,7 +18,9 @@
 #include "nsDOMNavigationTiming.h"
 #include "nsIDOMStorageManager.h"
 #include "mozilla/dom/CallbackDebuggerNotification.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentFrameMessageManager.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/CSPEvalChecker.h"
 #include "mozilla/dom/DebuggerNotification.h"
 #include "mozilla/dom/DocumentInlines.h"
@@ -158,7 +160,6 @@
 #include "mozilla/EventStateManager.h"
 #include "nsIObserverService.h"
 #include "nsFocusManager.h"
-#include "nsIXULWindow.h"
 #include "nsITimedChannel.h"
 #include "nsServiceManagerUtils.h"
 #ifdef MOZ_XUL
@@ -182,9 +183,6 @@
 #include "nsWindowRoot.h"
 #include "nsNetCID.h"
 #include "nsIArray.h"
-
-#include "nsBindingManager.h"
-#include "nsXBLService.h"
 
 #include "nsIDragService.h"
 #include "mozilla/dom/Element.h"
@@ -268,6 +266,7 @@
 #include "mozilla/net/CookieSettings.h"
 
 #include "AccessCheck.h"
+#include "SessionStorageCache.h"
 
 #ifdef ANDROID
 #  include <android/log.h>
@@ -420,9 +419,8 @@ class IdleRequestExecutorTimeoutHandler final : public TimeoutHandler {
   explicit IdleRequestExecutorTimeoutHandler(IdleRequestExecutor* aExecutor)
       : mExecutor(aExecutor) {}
 
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IdleRequestExecutorTimeoutHandler,
-                                           TimeoutHandler)
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(IdleRequestExecutorTimeoutHandler)
 
   bool Call(const char* /* unused */) override;
 
@@ -431,14 +429,14 @@ class IdleRequestExecutorTimeoutHandler final : public TimeoutHandler {
   RefPtr<IdleRequestExecutor> mExecutor;
 };
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(IdleRequestExecutorTimeoutHandler,
-                                   TimeoutHandler, mExecutor)
+NS_IMPL_CYCLE_COLLECTION(IdleRequestExecutorTimeoutHandler, mExecutor)
 
-NS_IMPL_ADDREF_INHERITED(IdleRequestExecutorTimeoutHandler, TimeoutHandler)
-NS_IMPL_RELEASE_INHERITED(IdleRequestExecutorTimeoutHandler, TimeoutHandler)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(IdleRequestExecutorTimeoutHandler)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(IdleRequestExecutorTimeoutHandler)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IdleRequestExecutorTimeoutHandler)
-NS_INTERFACE_MAP_END_INHERITING(TimeoutHandler)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
 
 class IdleRequestExecutor final : public nsIRunnable,
                                   public nsICancelableRunnable,
@@ -716,9 +714,8 @@ class IdleRequestTimeoutHandler final : public TimeoutHandler {
                             nsPIDOMWindowInner* aWindow)
       : TimeoutHandler(aCx), mIdleRequest(aIdleRequest), mWindow(aWindow) {}
 
-  NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(IdleRequestTimeoutHandler,
-                                           TimeoutHandler)
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTION_CLASS(IdleRequestTimeoutHandler)
 
   MOZ_CAN_RUN_SCRIPT bool Call(const char* /* unused */) override {
     RefPtr<nsGlobalWindowInner> window(nsGlobalWindowInner::Cast(mWindow));
@@ -734,14 +731,14 @@ class IdleRequestTimeoutHandler final : public TimeoutHandler {
   nsCOMPtr<nsPIDOMWindowInner> mWindow;
 };
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(IdleRequestTimeoutHandler, TimeoutHandler,
-                                   mIdleRequest, mWindow)
+NS_IMPL_CYCLE_COLLECTION(IdleRequestTimeoutHandler, mIdleRequest, mWindow)
 
-NS_IMPL_ADDREF_INHERITED(IdleRequestTimeoutHandler, TimeoutHandler)
-NS_IMPL_RELEASE_INHERITED(IdleRequestTimeoutHandler, TimeoutHandler)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(IdleRequestTimeoutHandler)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(IdleRequestTimeoutHandler)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(IdleRequestTimeoutHandler)
-NS_INTERFACE_MAP_END_INHERITING(TimeoutHandler)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END
 
 uint32_t nsGlobalWindowInner::RequestIdleCallback(
     JSContext* aCx, IdleRequestCallback& aCallback,
@@ -843,7 +840,6 @@ class PromiseDocumentFlushedResolver final {
 nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow,
                                          WindowGlobalChild* aActor)
     : nsPIDOMWindowInner(aOuterWindow, aActor),
-      mozilla::webgpu::InstanceProvider(this),
       mWasOffline(false),
       mHasHadSlowScript(false),
       mIsChrome(false),
@@ -1061,13 +1057,6 @@ void nsGlobalWindowInner::ShutDown() {
   sInnerWindowsById = nullptr;
 }
 
-// static
-void nsGlobalWindowInner::CleanupCachedXBLHandlers() {
-  if (mCachedXBLPrototypeHandlers && mCachedXBLPrototypeHandlers->Count() > 0) {
-    mCachedXBLPrototypeHandlers->Clear();
-  }
-}
-
 void nsGlobalWindowInner::FreeInnerObjects() {
   if (IsDying()) {
     return;
@@ -1155,8 +1144,6 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   UnlinkHostObjectURIs();
 
   NotifyWindowIDDestroyed("inner-window-destroyed");
-
-  CleanupCachedXBLHandlers();
 
   for (uint32_t i = 0; i < mAudioContexts.Length(); ++i) {
     mAudioContexts[i]->Shutdown();
@@ -1279,12 +1266,6 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsGlobalWindowInner)
       return true;
     }
     tmp->mCanSkipCCGeneration = nsCCUncollectableMarker::sGeneration;
-    if (tmp->mCachedXBLPrototypeHandlers) {
-      for (auto iter = tmp->mCachedXBLPrototypeHandlers->Iter(); !iter.Done();
-           iter.Next()) {
-        iter.Data().exposeToActiveJS();
-      }
-    }
     if (EventListenerManager* elm = tmp->GetExistingListenerManager()) {
       elm->MarkForCC();
     }
@@ -1400,8 +1381,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
     NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocumentFlushedResolvers[i]->mCallback);
   }
 
-  static_cast<mozilla::webgpu::InstanceProvider*>(tmp)->CcTraverse(cb);
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
@@ -1411,8 +1390,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
     // global after this point.
     JS::RealmBehaviorsRef(js::GetNonCCWObjectRealm(wrapper)).setNonLive();
   }
-
-  tmp->CleanupCachedXBLHandlers();
 
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mNavigator)
 
@@ -1516,8 +1493,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
   }
   tmp->mDocumentFlushedResolvers.Clear();
 
-  static_cast<mozilla::webgpu::InstanceProvider*>(tmp)->CcUnlink();
-
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -1528,12 +1503,6 @@ void nsGlobalWindowInner::RiskyUnlink() {
 #endif
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsGlobalWindowInner)
-  if (tmp->mCachedXBLPrototypeHandlers) {
-    for (auto iter = tmp->mCachedXBLPrototypeHandlers->Iter(); !iter.Done();
-         iter.Next()) {
-      aCallbacks.Trace(&iter.Data(), "Cached XBL prototype handler", aClosure);
-    }
-  }
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
@@ -1604,8 +1573,8 @@ void nsGlobalWindowInner::InnerSetNewDocument(JSContext* aCx,
     mWindowGlobalChild = WindowGlobalChild::Create(this);
   }
 
-  if (mWindowGlobalChild && Window()) {
-    Window()->NotifyResetUserGestureActivation();
+  if (mWindowGlobalChild && GetBrowsingContext()) {
+    GetBrowsingContext()->NotifyResetUserGestureActivation();
   }
 
 #ifdef DEBUG
@@ -2007,11 +1976,6 @@ nsresult nsGlobalWindowInner::PostHandleEvent(EventChainPostVisitor& aVisitor) {
         break;
       }
     }
-    // Execute bindingdetached handlers before we tear ourselves
-    // down.
-    if (mDoc) {
-      mDoc->BindingManager()->ExecuteDetachedHandlers();
-    }
     mIsDocumentLoaded = false;
   } else if (aVisitor.mEvent->mMessage == eLoad &&
              aVisitor.mEvent->IsTrusted()) {
@@ -2134,8 +2098,8 @@ void nsPIDOMWindowInner::UnmuteAudioContexts() {
   }
 }
 
-BrowsingContext* nsGlobalWindowInner::Window() {
-  return mOuterWindow ? mOuterWindow->GetBrowsingContext() : nullptr;
+WindowProxyHolder nsGlobalWindowInner::Window() {
+  return WindowProxyHolder(GetBrowsingContext());
 }
 
 Navigator* nsPIDOMWindowInner::Navigator() {
@@ -2395,25 +2359,42 @@ void nsGlobalWindowInner::UpdateTopInnerWindow() {
   mTopInnerWindow->UpdateWebSocketCount(-(int32_t)mNumOfOpenWebSockets);
 }
 
-bool nsGlobalWindowInner::CanShareMemory(const nsID& aAgentClusterId) {
+bool nsGlobalWindowInner::IsSharedMemoryAllowed() const {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (StaticPrefs::
+          dom_postMessage_sharedArrayBuffer_bypassCOOP_COEP_insecure_enabled()) {
+    return true;
+  }
+
+  return CrossOriginIsolated();
+}
+
+bool nsGlobalWindowInner::CrossOriginIsolated() const {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!StaticPrefs::dom_postMessage_sharedArrayBuffer_withCOOP_COEP()) {
     return false;
   }
 
-  MOZ_DIAGNOSTIC_ASSERT(GetDocGroup());
-  // Ensure they are on the same agent cluster
-  if (!GetDocGroup()->AgentClusterId().Equals(aAgentClusterId)) {
+  RefPtr<BrowsingContext> bc = GetBrowsingContext();
+  MOZ_DIAGNOSTIC_ASSERT(bc);
+  if (bc->Top()->GetOpenerPolicy() !=
+      nsILoadInfo::OPENER_POLICY_SAME_ORIGIN_EMBEDDER_POLICY_REQUIRE_CORP) {
     return false;
   }
 
-  // Ensure the both the coop and coep are set
-  RefPtr<BrowsingContext> bc = GetBrowsingContext();
-  MOZ_DIAGNOSTIC_ASSERT(bc);
-  // XXX Also check remoteType once Bug 1579992 is implemented.
-  return bc->Top()->GetOpenerPolicy() ==
-         nsILoadInfo::OPENER_POLICY_SAME_ORIGIN_EMBEDDER_POLICY_REQUIRE_CORP;
+  ContentChild* cc = ContentChild::GetSingleton();
+  if (!cc ||
+      !StringBeginsWith(cc->GetRemoteType(),
+                        NS_LITERAL_STRING(WITH_COOP_COEP_REMOTE_TYPE_PREFIX))) {
+#if !defined(ANDROID)
+    MOZ_DIAGNOSTIC_ASSERT(false, "COOP+COEP not in webCOOP+COEP process");
+#endif
+    return false;
+  }
+
+  return true;
 }
 
 void nsPIDOMWindowInner::AddPeerConnection() {
@@ -2542,6 +2523,26 @@ bool nsPIDOMWindowInner::HasOpenWebSockets() const {
 
   return mNumOfOpenWebSockets ||
          (mTopInnerWindow && mTopInnerWindow->mNumOfOpenWebSockets);
+}
+
+bool nsPIDOMWindowInner::IsCurrentInnerWindow() const {
+  auto* bc = GetBrowsingContext();
+  MOZ_ASSERT(bc);
+
+  nsPIDOMWindowOuter* outer;
+  // When a BC is discarded, it stops returning outer windows altogether. That
+  // doesn't work for this check, since we still want current inner window to be
+  // treated as current after that point. Simply falling back to `mOuterWindow`
+  // here isn't ideal, since it will start returning true for inner windows
+  // which were current before a remoteness switch once a BrowsingContext has
+  // been discarded, but it's not incorrect in a way which should cause
+  // significant issues.
+  if (!bc->IsDiscarded()) {
+    outer = bc->GetDOMWindow();
+  } else {
+    outer = mOuterWindow;
+  }
+  return outer && outer->GetCurrentInnerWindow() == this;
 }
 
 void nsPIDOMWindowInner::SetAudioCapture(bool aCapture) {
@@ -2958,12 +2959,6 @@ bool nsGlobalWindowInner::IsPrivilegedChromeWindow(JSContext* aCx,
   return win && win->IsChromeWindow() &&
          nsContentUtils::ObjectPrincipal(aObj) ==
              nsContentUtils::GetSystemPrincipal();
-}
-
-/* static */
-bool nsGlobalWindowInner::OfflineCacheAllowedForContext(JSContext* aCx,
-                                                        JSObject* aObj) {
-  return IsSecureContextOrObjectIsFromSecureContext(aCx, aObj);
 }
 
 /* static */
@@ -3778,8 +3773,8 @@ Nullable<WindowProxyHolder> nsGlobalWindowInner::OpenDialog(
       aError, nullptr);
 }
 
-BrowsingContext* nsGlobalWindowInner::GetFrames(ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(GetFramesOuter, (), aError, nullptr);
+WindowProxyHolder nsGlobalWindowInner::GetFrames(ErrorResult& aError) {
+  FORWARD_TO_OUTER_OR_THROW(GetFramesOuter, (), aError, Window());
 }
 
 void nsGlobalWindowInner::PostMessageMoz(JSContext* aCx,
@@ -3879,25 +3874,6 @@ void nsGlobalWindowInner::NotifyDOMWindowThawed(nsGlobalWindowInner* aWindow) {
                                        DOM_WINDOW_THAWED_TOPIC, nullptr);
     }
   }
-}
-
-JSObject* nsGlobalWindowInner::GetCachedXBLPrototypeHandler(
-    nsXBLPrototypeHandler* aKey) {
-  JS::Rooted<JSObject*> handler(RootingCx());
-  if (mCachedXBLPrototypeHandlers) {
-    mCachedXBLPrototypeHandlers->Get(aKey, handler.address());
-  }
-  return handler;
-}
-
-void nsGlobalWindowInner::CacheXBLPrototypeHandler(
-    nsXBLPrototypeHandler* aKey, JS::Handle<JSObject*> aHandler) {
-  if (!mCachedXBLPrototypeHandlers) {
-    mCachedXBLPrototypeHandlers = MakeUnique<XBLPrototypeHandlerTable>();
-    PreserveWrapper(ToSupports(this));
-  }
-
-  mCachedXBLPrototypeHandlers->Put(aKey, aHandler);
 }
 
 Element* nsGlobalWindowInner::GetFrameElement(nsIPrincipal& aSubjectPrincipal,
@@ -4065,7 +4041,12 @@ void nsGlobalWindowInner::DisableGamepadUpdates() {
 
 void nsGlobalWindowInner::EnableVRUpdates() {
   if (mHasVREvents && !mVREventObserver) {
+    MOZ_ASSERT(!IsDying());
     mVREventObserver = new VREventObserver(this);
+    nsPIDOMWindowOuter* outer = GetOuterWindow();
+    if (outer && !outer->IsBackground()) {
+      mVREventObserver->StartActivity();
+    }
   }
 }
 
@@ -4445,7 +4426,8 @@ Storage* nsGlobalWindowInner::GetSessionStorage(ErrorResult& aError) {
     // 3. Tracking protection (BEHAVIOR_REJECT_TRACKER) is in effect and
     // IsThirdPartyTrackingResourceWindow() returned true and there wasn't a
     // permission that allows it. This will return ePartitionTrackersOrDeny with
-    // a reason of STATE_COOKIES_BLOCKED_TRACKER.
+    // a reason of STATE_COOKIES_BLOCKED_TRACKER or
+    // STATE_COOKIES_BLOCKED_SOCIALTRACKER.
     //
     // In the 1st case, the user has explicitly indicated that they don't want
     // to allow any storage to the origin or all origins and so we throw an
@@ -4519,16 +4501,20 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
   StorageAccess access = StorageAllowedForWindow(this);
 
   // We allow partitioned localStorage only to some hosts.
+  bool isolated = false;
   if (ShouldPartitionStorage(access)) {
     if (!mDoc) {
       access = StorageAccess::eDeny;
     } else if (!StoragePartitioningEnabled(access, mDoc->CookieSettings())) {
-      nsCOMPtr<nsIURI> uri;
-      Unused << mDoc->NodePrincipal()->GetURI(getter_AddRefs(uri));
       static const char* kPrefName =
           "privacy.restrict3rdpartystorage.partitionedHosts";
-      if (!uri || !nsContentUtils::IsURIInPrefList(uri, kPrefName)) {
+
+      bool isInList = false;
+      mDoc->NodePrincipal()->IsURIInPrefList(kPrefName, &isInList);
+      if (!isInList) {
         access = StorageAccess::eDeny;
+      } else {
+        isolated = true;
       }
     }
   }
@@ -4545,16 +4531,22 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
     cookieSettings = net::CookieSettings::CreateBlockingAll();
   }
 
+  bool partitioningEnabled = StoragePartitioningEnabled(access, cookieSettings);
+  bool shouldPartition = ShouldPartitionStorage(access);
+  bool partition = partitioningEnabled && shouldPartition;
+
   // Note that this behavior is observable: if we grant storage permission to a
   // tracker, we pass from the partitioned LocalStorage (or a partitioned cookie
   // jar) to the 'normal' one. The previous data is lost and the 2
   // window.localStorage objects, before and after the permission granted, will
   // be different.
-  if ((StoragePartitioningEnabled(access, cookieSettings) ||
-       !ShouldPartitionStorage(access)) &&
-      (!mLocalStorage ||
-       mLocalStorage->Type() == Storage::ePartitionedLocalStorage ||
-       mLocalStorage->StoragePrincipal() != GetEffectiveStoragePrincipal())) {
+  if ((partitioningEnabled || !shouldPartition) &&
+      ((mLocalStorage && ((mLocalStorage->Type() !=
+                           (partition ? Storage::ePartitionedLocalStorage
+                                      : Storage::eLocalStorage)) ||
+                          mLocalStorage->StoragePrincipal() !=
+                              GetEffectiveStoragePrincipal())) ||
+       (!partition && !mLocalStorage))) {
     RefPtr<Storage> storage;
 
     if (NextGenLocalStorageEnabled()) {
@@ -4601,7 +4593,16 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
     MOZ_ASSERT(mLocalStorage);
   }
 
-  if (ShouldPartitionStorage(access) && !mLocalStorage) {
+  if (((partitioningEnabled && shouldPartition) || isolated) &&
+      !mLocalStorage) {
+    nsresult rv;
+    nsCOMPtr<nsIDOMSessionStorageManager> storageManager =
+        do_GetService("@mozilla.org/dom/sessionStorage-manager;1", &rv);
+    if (NS_FAILED(rv)) {
+      aError.Throw(rv);
+      return nullptr;
+    }
+
     nsIPrincipal* principal = GetPrincipal();
     if (!principal) {
       aError.Throw(NS_ERROR_DOM_SECURITY_ERR);
@@ -4614,14 +4615,26 @@ Storage* nsGlobalWindowInner::GetLocalStorage(ErrorResult& aError) {
       return nullptr;
     }
 
+    RefPtr<SessionStorageCache> cache;
+    if (isolated) {
+      cache = new SessionStorageCache();
+    } else {
+      // This will clone the session storage if it exists.
+      rv = storageManager->GetSessionStorageCache(principal, storagePrincipal,
+                                                  &cache);
+      if (NS_FAILED(rv)) {
+        aError.Throw(rv);
+        return nullptr;
+      }
+    }
+
     mLocalStorage =
-        new PartitionedLocalStorage(this, principal, storagePrincipal);
+        new PartitionedLocalStorage(this, principal, storagePrincipal, cache);
   }
 
-  MOZ_ASSERT_IF(
-      !StoragePartitioningEnabled(access, cookieSettings),
-      ShouldPartitionStorage(access) ==
-          (mLocalStorage->Type() == Storage::ePartitionedLocalStorage));
+  MOZ_ASSERT_IF(!partitioningEnabled,
+                shouldPartition == (mLocalStorage->Type() ==
+                                    Storage::ePartitionedLocalStorage));
 
   return mLocalStorage;
 }
@@ -5593,7 +5606,7 @@ nsPIDOMWindowOuter* nsGlobalWindowInner::GetInProcessParentInternal() {
   return outer->GetInProcessParentInternal();
 }
 
-nsIPrincipal* nsGlobalWindowInner::GetTopLevelPrincipal() {
+nsIPrincipal* nsGlobalWindowInner::GetTopLevelAntiTrackingPrincipal() {
   nsPIDOMWindowOuter* outerWindow = GetOuterWindowInternal();
   if (!outerWindow) {
     return nullptr;
@@ -7121,6 +7134,11 @@ void nsGlobalWindowInner::StorageAccessGranted() {
 
   // Reset DOM Cache
   mCacheStorage = nullptr;
+
+  // Reset the active storage principal
+  if (mDoc) {
+    mDoc->ClearActiveStoragePrincipal();
+  }
 }
 
 mozilla::dom::TabGroup* nsPIDOMWindowInner::TabGroup() {
@@ -7187,6 +7205,17 @@ void nsPIDOMWindowInner::SaveStorageAccessGranted(
   if (!HasStorageAccessGranted(aPermissionKey)) {
     mStorageAccessGranted.AppendElement(aPermissionKey);
   }
+
+  nsGlobalWindowInner::Cast(this)->ClearActiveStoragePrincipal();
+}
+
+void nsGlobalWindowInner::ClearActiveStoragePrincipal() {
+  Document* doc = GetExtantDoc();
+  if (doc) {
+    doc->ClearActiveStoragePrincipal();
+  }
+
+  CallOnChildren(&nsGlobalWindowInner::ClearActiveStoragePrincipal);
 }
 
 bool nsPIDOMWindowInner::HasStorageAccessGranted(

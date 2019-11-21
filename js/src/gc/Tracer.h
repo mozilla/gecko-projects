@@ -119,7 +119,7 @@ inline void AssertRootMarkingPhase(JSTracer* trc) {}
 // wrapped in the WeakCache<> template to perform the appropriate sweeping.
 
 template <typename T>
-inline void TraceEdge(JSTracer* trc, WriteBarriered<T>* thingp,
+inline void TraceEdge(JSTracer* trc, const WriteBarriered<T>* thingp,
                       const char* name) {
   gc::TraceEdgeInternal(
       trc, gc::ConvertToBase(thingp->unsafeUnbarrieredForTracing()), name);
@@ -134,7 +134,7 @@ inline void TraceEdge(JSTracer* trc, WeakHeapPtr<T>* thingp, const char* name) {
 // tracing.
 
 template <typename T>
-inline void TraceNullableEdge(JSTracer* trc, WriteBarriered<T>* thingp,
+inline void TraceNullableEdge(JSTracer* trc, const WriteBarriered<T>* thingp,
                               const char* name) {
   if (InternalBarrierMethods<T>::isMarkable(thingp->get())) {
     TraceEdge(trc, thingp, name);
@@ -195,8 +195,16 @@ inline void TraceManuallyBarrieredEdge(JSTracer* trc, T* thingp,
 // it is replaced by nullptr, and this method will return false to indicate that
 // the edge no longer exists.
 template <typename T>
-inline bool TraceWeakEdge(JSTracer* trc, T* thingp, const char* name) {
+inline bool TraceManuallyBarrieredWeakEdge(JSTracer* trc, T* thingp,
+                                           const char* name) {
   return gc::TraceEdgeInternal(trc, gc::ConvertToBase(thingp), name);
+}
+
+template <typename T>
+inline bool TraceWeakEdge(JSTracer* trc, BarrieredBase<T>* thingp,
+                          const char* name) {
+  return gc::TraceEdgeInternal(
+      trc, gc::ConvertToBase(thingp->unsafeUnbarrieredForTracing()), name);
 }
 
 // Trace all edges contained in the given array.
@@ -220,7 +228,7 @@ void TraceRootRange(JSTracer* trc, size_t len, T* vec, const char* name) {
 // destination thing is not being GC'd, then the edge will not be traced.
 template <typename T>
 void TraceCrossCompartmentEdge(JSTracer* trc, JSObject* src,
-                               WriteBarriered<T>* dst, const char* name);
+                               const WriteBarriered<T>* dst, const char* name);
 
 // As above but with manual barriers.
 template <typename T>

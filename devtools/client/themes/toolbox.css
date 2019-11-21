@@ -312,6 +312,22 @@
   background-image: url("chrome://devtools/skin/images/command-replay.svg");
 }
 
+#command-button-fission-prefs::before {
+  content: "FIS";
+  font-weight: bold;
+}
+
+.fission-pref-icon::before {
+  content: "";
+  background-image: url("chrome://devtools/skin/images/help.svg");
+  -moz-context-properties: fill;
+  fill: var(--theme-body-color);
+  display: block;
+  background-size: 12px;
+  width: 12px;
+  height: 12px;
+}
+
 #command-button-replay,
 #command-button-stop-replay {
   background-color: transparent;
@@ -320,10 +336,6 @@
 #command-button-replay:hover,
 #command-button-stop-replay:hover {
   background: var(--toolbarbutton-background);
-}
-
-#command-button-scratchpad::before {
-  background-image: url("chrome://devtools/skin/images/tool-scratchpad.svg");
 }
 
 #command-button-rulers::before {
@@ -515,6 +527,9 @@
   border-radius: 4.5px;
   top: calc(50% - 3.5px);
   background: var(--replaying-marker-background);
+}
+
+.webreplay-player .animate .message {
   transition-duration: 100ms;
 }
 
@@ -682,7 +697,8 @@
   opacity: 0.5;
 }
 
-.webreplay-player #overlay .tick:hover ~ .tick {
+.webreplay-player #overlay .tick:hover ~ .tick,
+.webreplay-player #overlay .tick.highlight ~ .tick:not(.highlight) {
   opacity: 0.5;
 }
 

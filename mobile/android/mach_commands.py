@@ -3,6 +3,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 from __future__ import absolute_import, print_function, unicode_literals
+from distutils.file_util import copy_file
 
 import argparse
 import logging
@@ -31,8 +32,8 @@ from mach.decorators import (
 # deprecation message ourselves instead.
 LINT_DEPRECATION_MESSAGE = """
 Android lints are now integrated with mozlint.  Instead of
-`mach android {api-lint,checkstyle,findbugs,lint,test}`, run
-`mach lint --linter android-{api-lint,checkstyle,findbugs,lint,test}`.
+`mach android {api-lint,checkstyle,lint,test}`, run
+`mach lint --linter android-{api-lint,checkstyle,lint,test}`.
 Or run `mach lint`.
 """
 
@@ -136,13 +137,6 @@ REMOVED/DEPRECATED: Use 'mach lint --linter android-checkstyle'.""")
         print(LINT_DEPRECATION_MESSAGE)
         return 1
 
-    @SubCommand('android', 'findbugs',
-                """Run Android findbugs.
-REMOVED/DEPRECATED: Use 'mach lint --linter android-findbugs'.""")
-    def android_findbugs_REMOVED(self):
-        print(LINT_DEPRECATION_MESSAGE)
-        return 1
-
     @SubCommand('android', 'gradle-dependencies',
                 """Collect Android Gradle dependencies.
         See http://firefox-source-docs.mozilla.org/build/buildsystem/toolchains.html#firefox-for-android-with-gradle""")  # NOQA: E501
@@ -196,15 +190,18 @@ REMOVED/DEPRECATED: Use 'mach lint --linter android-findbugs'.""")
     @CommandArgument('--archive', action='store_true',
                      help='Generate a javadoc archive.')
     @CommandArgument('--upload', metavar='USER/REPO',
-                     help='Upload generated javadoc to Github, '
+                     help='Upload geckoview documentation to Github, '
                      'using the specified USER/REPO.')
     @CommandArgument('--upload-branch', metavar='BRANCH[/PATH]',
-                     default='gh-pages/javadoc',
-                     help='Use the specified branch/path for commits.')
+                     default='gh-pages',
+                     help='Use the specified branch/path for documentation commits.')
+    @CommandArgument('--javadoc-path', metavar='/PATH',
+                     default='javadoc',
+                     help='Use the specified path for javadoc commits.')
     @CommandArgument('--upload-message', metavar='MSG',
                      default='GeckoView docs upload',
                      help='Use the specified message for commits.')
-    def android_geckoview_docs(self, archive, upload, upload_branch,
+    def android_geckoview_docs(self, archive, upload, upload_branch, javadoc_path,
                                upload_message):
 
         tasks = (self.substs['GRADLE_ANDROID_GECKOVIEW_DOCS_ARCHIVE_TASKS'] if archive or upload
@@ -244,21 +241,39 @@ REMOVED/DEPRECATED: Use 'mach lint --linter android-findbugs'.""")
             env['GIT_SSH_COMMAND'] = 'ssh -i "%s" -o StrictHostKeyChecking=no' % keyfile
 
         # Clone remote repo.
-        branch, _, branch_path = upload_branch.partition('/')
+        branch = upload_branch.format(**fmt)
         repo_url = 'git@github.com:%s.git' % upload
         repo_path = mozpath.abspath('gv-docs-repo')
-        self.run_process(['git', 'clone', '--branch', branch, '--depth', '1',
+        self.run_process(['git', 'clone', '--branch', upload_branch, '--depth', '1',
                           repo_url, repo_path], append_env=env, pass_thru=True)
         env['GIT_DIR'] = mozpath.join(repo_path, '.git')
         env['GIT_WORK_TREE'] = repo_path
         env['GIT_AUTHOR_NAME'] = env['GIT_COMMITTER_NAME'] = 'GeckoView Docs Bot'
         env['GIT_AUTHOR_EMAIL'] = env['GIT_COMMITTER_EMAIL'] = 'nobody@mozilla.com'
 
-        # Extract new javadoc to specified directory inside repo.
+        # Copy over user documentation.
         import mozfile
+
+        docs_path = mozpath.join(self.topsrcdir, 'mobile', 'android', 'docs')
+
+        # Some files need to be in the GH repo root folder and should be
+        # copied over directly
+        root_docs = ["_config.yml", "Gemfile"]
+        for filename in root_docs:
+            src_filepath = mozpath.join(docs_path, filename)
+            dst_filepath = mozpath.join(repo_path, filename)
+            copy_file(src_filepath, dst_filepath, update=1)
+
+        # Remove existing geckoview docs and replace with the local copy
+        src_path = mozpath.join(docs_path, 'geckoview')
+        docs_path = mozpath.join(repo_path, 'geckoview')
+        mozfile.remove(docs_path)
+        os.system("rsync -aruz {} {}".format(src_path, repo_path))
+
+        # Extract new javadoc to specified directory inside repo.
         src_tar = mozpath.join(self.topobjdir, 'gradle', 'build', 'mobile', 'android',
                                'geckoview', 'libs', 'geckoview-javadoc.jar')
-        dst_path = mozpath.join(repo_path, branch_path.format(**fmt))
+        dst_path = mozpath.join(docs_path, javadoc_path)
         mozfile.remove(dst_path)
         mozfile.extract_zip(src_tar, dst_path)
 
@@ -270,7 +285,7 @@ REMOVED/DEPRECATED: Use 'mach lint --linter android-findbugs'.""")
             self.run_process(['git', 'commit',
                               '--message', upload_message.format(**fmt)],
                              append_env=env, pass_thru=True)
-            self.run_process(['git', 'push', 'origin', 'gh-pages'],
+            self.run_process(['git', 'push', 'origin', branch],
                              append_env=env, pass_thru=True)
 
         mozfile.remove(repo_path)

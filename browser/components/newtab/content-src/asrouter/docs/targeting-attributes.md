@@ -36,11 +36,15 @@ Please note that some targeting attributes require stricter controls on the tele
 * [hasPinnedTabs](#haspinnedtabs)
 * [hasAccessedFxAPanel](#hasaccessedfxapanel)
 * [isWhatsNewPanelEnabled](#iswhatsnewpanelenabled)
-* [earliestFirefoxVersion](#earliestfirefoxversion)
 * [isFxABadgeEnabled](#isfxabadgeenabled)
 * [totalBlockedCount](#totalblockedcount)
 * [recentBookmarks](#recentbookmarks)
 * [userPrefs](#userprefs)
+* [attachedFxAOAuthClients](#attachedfxaoauthclients)
+* [platformName](#platformname)
+* [personalizedCfrScores](#personalizedcfrscores)
+* [personalizedCfrThreshold](#personalizedcfrthreshold)
+* [messageImpressions](#messageimpressions)
 
 ## Detailed usage
 
@@ -175,7 +179,7 @@ type ECMA262DateString = string;
 ```
 
 ### `devToolsOpenedCount`
-Number of usages of the web console or scratchpad.
+Number of usages of the web console.
 
 #### Examples
 * Has the user opened the web console more than 10 times?
@@ -502,16 +506,6 @@ Boolean pref that controls if the What's New panel feature is enabled
 declare const isWhatsNewPanelEnabled: boolean;
 ```
 
-### `earliestFirefoxVersion`
-
-Integer value of the first Firefox version the profile ran on
-
-#### Definition
-
-```ts
-declare const earliestFirefoxVersion: boolean;
-```
-
 ### `isFxABadgeEnabled`
 
 Boolean pref that controls if the FxA toolbar button is badged by Messaging System.
@@ -565,4 +559,80 @@ declare const userPrefs: {
   cfrAddons: boolean;
   snippets: boolean;
 }
+```
+
+### `attachedFxAOAuthClients`
+
+Information about connected services associated with the FxA Account.
+Return an empty array if no account is found or an error occurs.
+
+#### Definition
+
+```
+interface OAuthClient {
+  // OAuth client_id of the service
+  // https://docs.telemetry.mozilla.org/datasets/fxa_metrics/attribution.html#service-attribution
+  id: string;
+  lastAccessedDaysAgo: number;
+}
+
+declare const attachedFxAOAuthClients: Promise<OAuthClient[]>
+```
+
+#### Examples
+```javascript
+{
+  id: "7377719276ad44ee",
+  name: "Pocket",
+  lastAccessTime: 1513599164000
+}
+```
+
+### `platformName`
+
+[Platform information](https://searchfox.org/mozilla-central/rev/05a22d864814cb1e4352faa4004e1f975c7d2eb9/toolkit/modules/AppConstants.jsm#156).
+
+#### Definition
+
+```
+declare const platformName = "linux" | "win" | "macosx" | "android" | "other";
+```
+
+### `personalizedCfrScores`
+
+#### Definition
+
+See more in [CFR Machine Learning Experiment](https://bugzilla.mozilla.org/show_bug.cgi?id=1594422).
+
+```
+declare const personalizedCfrScores = { [cfrId: string]: number (float); }
+```
+
+### `personalizedCfrThreshold`
+
+#### Definition
+
+See more in [CFR Machine Learning Experiment](https://bugzilla.mozilla.org/show_bug.cgi?id=1594422).
+
+```
+declare const personalizedCfrThreshold = float;
+```
+
+### `messageImpressions`
+
+Dictionary that maps message ids to impression timestamps. Timestamps are stored in
+consecutive order. Can be used to detect first impression of a message, number of
+impressions. Can be used in targeting to show a message if another message has been
+seen.
+Impressions are used for frequency capping so we only store them if the message has
+`frequency` configured.
+Impressions for badges might not work as expected: we add a badge for every opened
+window so the number of impressions stored might be higher than expected. Additionally
+not all badges have `frequency` cap so `messageImpressions` might not be defined.
+Badge impressions should not be used for targeting.
+
+#### Definition
+
+```
+declare const messageImpressions: { [key: string]: Array<UnixEpochNumber> };
 ```

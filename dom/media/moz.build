@@ -45,6 +45,7 @@ DIRS += [
     'mediacontrol',
     'mediasink',
     'mediasource',
+    'mediasession',
     'mp3',
     'ogg',
     'platforms',
@@ -185,6 +186,7 @@ EXPORTS += [
 
 EXPORTS.mozilla += [
     'MediaManager.h',
+    'UnderrunHandler.h',
 ]
 
 EXPORTS.mozilla.media.webrtc += [
@@ -196,10 +198,6 @@ if not CONFIG['MOZ_WEBRTC']:
   EXPORTS.mtransport += [
       '../../media/mtransport/runnable_utils.h',
   ]
-
-IPDL_SOURCES += [
-    'webrtc/PWebrtcGlobal.ipdl',
-]
 
 EXPORTS.mozilla.dom += [
     'AudioDeviceInfo.h',
@@ -301,6 +299,11 @@ UNIFIED_SOURCES += [
     'XiphExtradata.cpp',
 ]
 
+if CONFIG['OS_TARGET'] == 'Linux':
+    UNIFIED_SOURCES += [ 'UnderrunHandlerLinux.cpp' ]
+else:
+    UNIFIED_SOURCES += [ 'UnderrunHandlerNoop.cpp']
+
 if CONFIG['OS_TARGET'] == 'WINNT':
   EXPORTS.mozilla.audio += [
       'AudioNotificationReceiver.h',
@@ -336,7 +339,6 @@ if CONFIG['MOZ_WEBRTC']:
 EXTRA_JS_MODULES.media += [
     'IdpSandbox.jsm',
     'PeerConnectionIdp.jsm',
-    'RTCStatsReport.jsm',
 ]
 
 LOCAL_INCLUDES += [

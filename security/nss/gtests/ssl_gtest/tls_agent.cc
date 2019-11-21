@@ -48,6 +48,7 @@ const std::string TlsAgent::kServerEcdhRsa = "ecdh_rsa";
 const std::string TlsAgent::kServerEcdhEcdsa = "ecdh_ecdsa";
 const std::string TlsAgent::kServerDsa = "dsa";
 const std::string TlsAgent::kDelegatorEcdsa256 = "delegator_ecdsa256";
+const std::string TlsAgent::kDelegatorRsae2048 = "delegator_rsae2048";
 
 static const uint8_t kCannedTls13ServerHello[] = {
     0x03, 0x03, 0x9c, 0xbc, 0x14, 0x9b, 0x0e, 0x2e, 0xfa, 0x0d, 0xf3,
@@ -284,6 +285,9 @@ bool TlsAgent::EnsureTlsSetup(PRFileDesc* modelSocket) {
   rv = SSL_HandshakeCallback(ssl_fd(), HandshakeCallback, this);
   EXPECT_EQ(SECSuccess, rv);
   if (rv != SECSuccess) return false;
+
+  // All these tests depend on having this disabled to start with.
+  SetOption(SSL_ENABLE_EXTENDED_MASTER_SECRET, PR_FALSE);
 
   return true;
 }
@@ -841,6 +845,13 @@ void TlsAgent::ResetPreliminaryInfo() {
   expected_cipher_suite_ = 0;
 }
 
+void TlsAgent::UpdatePreliminaryChannelInfo() {
+  SECStatus rv = SSL_GetPreliminaryChannelInfo(ssl_fd_.get(), &pre_info_,
+                                               sizeof(pre_info_));
+  EXPECT_EQ(SECSuccess, rv);
+  EXPECT_EQ(sizeof(pre_info_), pre_info_.length);
+}
+
 void TlsAgent::ValidateCipherSpecs() {
   PRInt32 cipherSpecs = SSLInt_CountCipherSpecs(ssl_fd());
   // We use one ciphersuite in each direction.
@@ -903,6 +914,7 @@ void TlsAgent::Connected() {
   // Preliminary values are exposed through callbacks during the handshake.
   // If either expected values were set or the callbacks were called, check
   // that the final values are correct.
+  UpdatePreliminaryChannelInfo();
   EXPECT_EQ(expected_version_, info_.protocolVersion);
   EXPECT_EQ(expected_cipher_suite_, info_.cipherSuite);
 

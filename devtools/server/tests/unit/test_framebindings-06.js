@@ -4,36 +4,22 @@
 "use strict";
 
 var gDebuggee;
-var gClient;
 var gThreadFront;
 
-Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
-
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-});
-
-function run_test() {
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-grips");
-
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-grips", function(
-      response,
-      targetFront,
-      threadFront
-    ) {
+add_task(
+  threadFrontTest(
+    async ({ threadFront, debuggee }) => {
       gThreadFront = threadFront;
+      gDebuggee = debuggee;
       test_banana_environment();
-    });
-  });
-  do_test_pending();
-}
+    },
+    { waitForFinish: true }
+  )
+);
 
 function test_banana_environment() {
-  gThreadFront.once("paused", function(packet) {
-    const env = packet.frame.environment;
+  gThreadFront.once("paused", async function(packet) {
+    const env = await packet.frame.getEnvironment();
     equal(env.type, "function");
     equal(env.function.name, "banana3");
     let parent = env.parent;
@@ -49,9 +35,8 @@ function test_banana_environment() {
     equal(parent.type, "function");
     equal(parent.function.name, "banana");
 
-    gThreadFront.resume().then(function() {
-      finishClient(gClient);
-    });
+    await gThreadFront.resume();
+    threadFrontTestFinished();
   });
 
   gDebuggee.eval(

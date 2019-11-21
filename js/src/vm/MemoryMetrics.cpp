@@ -6,6 +6,8 @@
 
 #include "js/MemoryMetrics.h"
 
+#include <algorithm>
+
 #include "gc/GC.h"
 #include "gc/Heap.h"
 #include "gc/Nursery.h"
@@ -42,27 +44,18 @@ namespace js {
 
 JS_FRIEND_API size_t MemoryReportingSundriesThreshold() { return 8 * 1024; }
 
-template <typename CharT>
-static uint32_t HashStringChars(JSString* s) {
-  uint32_t hash = 0;
-  if (s->isLinear()) {
-    JS::AutoCheckCannotGC nogc;
-    const CharT* chars = s->asLinear().chars<CharT>(nogc);
-    hash = mozilla::HashString(chars, s->length());
-  } else {
-    // Use rope's non-copying hash function.
-    if (!s->asRope().hash(&hash)) {
-      MOZ_CRASH("oom");
-    }
-  }
-
-  return hash;
-}
-
 /* static */
 HashNumber InefficientNonFlatteningStringHashPolicy::hash(const Lookup& l) {
-  return l->hasLatin1Chars() ? HashStringChars<Latin1Char>(l)
-                             : HashStringChars<char16_t>(l);
+  if (l->isLinear()) {
+    return HashStringChars(&l->asLinear());
+  }
+
+  // Use rope's non-copying hash function.
+  uint32_t hash = 0;
+  if (!l->asRope().hash(&hash)) {
+    MOZ_CRASH("oom");
+  }
+  return hash;
 }
 
 template <typename Char1, typename Char2>
@@ -143,7 +136,7 @@ static void StoreStringChars(char* buffer, size_t bufferSize, JSString* str) {
 
 NotableStringInfo::NotableStringInfo(JSString* str, const StringInfo& info)
     : StringInfo(info), length(str->length()) {
-  size_t bufferSize = Min(str->length() + 1, size_t(MAX_SAVED_CHARS));
+  size_t bufferSize = std::min(str->length() + 1, size_t(MAX_SAVED_CHARS));
   buffer.reset(js_pod_malloc<char>(bufferSize));
   if (!buffer) {
     MOZ_CRASH("oom");
@@ -220,8 +213,8 @@ static void StatsZoneCallback(JSRuntime* rt, void* data, Zone* zone) {
   rtStats->currZoneStats = &zStats;
 
   zone->addSizeOfIncludingThis(
-      rtStats->mallocSizeOf_, &zStats.typePool, &zStats.regexpZone,
-      &zStats.jitZone, &zStats.baselineStubsOptimized, &zStats.cachedCFG,
+      rtStats->mallocSizeOf_, &zStats.code, &zStats.typePool,
+      &zStats.regexpZone, &zStats.jitZone, &zStats.baselineStubsOptimized,
       &zStats.uniqueIdMap, &zStats.shapeTables,
       &rtStats->runtime.atomsMarkBitmaps, &zStats.compartmentObjects,
       &zStats.crossCompartmentWrappersTables, &zStats.compartmentsPrivateData,
@@ -332,14 +325,15 @@ static void CollectScriptSourceStats(StatsClosure* closure, ScriptSource* ss) {
 // doing coarse-grained measurements. Skipping them more than doubles the
 // profile speed for complex pages such as gmail.com.
 template <Granularity granularity>
-static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
-                              JS::TraceKind traceKind, size_t thingSize) {
+static void StatsCellCallback(JSRuntime* rt, void* data, JS::GCCellPtr cellptr,
+                              size_t thingSize) {
   StatsClosure* closure = static_cast<StatsClosure*>(data);
   RuntimeStats* rtStats = closure->rtStats;
   ZoneStats* zStats = rtStats->currZoneStats;
-  switch (traceKind) {
+  JS::TraceKind kind = cellptr.kind();
+  switch (kind) {
     case JS::TraceKind::Object: {
-      JSObject* obj = static_cast<JSObject*>(thing);
+      JSObject* obj = &cellptr.as<JSObject>();
       RealmStats& realmStats = obj->maybeCCWRealm()->realmStats();
       JS::ClassInfo info;  // This zeroes all the sizes.
       info.objectsGCHeap += thingSize;
@@ -384,7 +378,7 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
     }
 
     case JS::TraceKind::Script: {
-      JSScript* script = static_cast<JSScript*>(thing);
+      JSScript* script = &cellptr.as<JSScript>();
       RealmStats& realmStats = script->realm()->realmStats();
       realmStats.scriptsGCHeap += thingSize;
       realmStats.scriptsMallocHeapData +=
@@ -399,7 +393,7 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
     }
 
     case JS::TraceKind::String: {
-      JSString* str = static_cast<JSString*>(thing);
+      JSString* str = &cellptr.as<JSString>();
       size_t size = thingSize;
       if (!str->isTenured()) {
         size += Nursery::stringHeaderSize();
@@ -441,7 +435,7 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
       break;
 
     case JS::TraceKind::BigInt: {
-      JS::BigInt* bi = static_cast<BigInt*>(thing);
+      JS::BigInt* bi = &cellptr.as<BigInt>();
       zStats->bigIntsGCHeap += thingSize;
       zStats->bigIntsMallocHeap +=
           bi->sizeOfExcludingThis(rtStats->mallocSizeOf_);
@@ -464,7 +458,7 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
     }
 
     case JS::TraceKind::LazyScript: {
-      LazyScript* lazy = static_cast<LazyScript*>(thing);
+      LazyScript* lazy = &cellptr.as<LazyScript>();
       zStats->lazyScriptsGCHeap += thingSize;
       zStats->lazyScriptsMallocHeap +=
           lazy->sizeOfExcludingThis(rtStats->mallocSizeOf_);
@@ -472,7 +466,7 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
     }
 
     case JS::TraceKind::Shape: {
-      Shape* shape = static_cast<Shape*>(thing);
+      Shape* shape = &cellptr.as<Shape>();
 
       JS::ShapeInfo info;  // This zeroes all the sizes.
       if (shape->inDictionary()) {
@@ -486,7 +480,7 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
     }
 
     case JS::TraceKind::ObjectGroup: {
-      ObjectGroup* group = static_cast<ObjectGroup*>(thing);
+      ObjectGroup* group = &cellptr.as<ObjectGroup>();
       zStats->objectGroupsGCHeap += thingSize;
       zStats->objectGroupsMallocHeap +=
           group->sizeOfExcludingThis(rtStats->mallocSizeOf_);
@@ -494,7 +488,7 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
     }
 
     case JS::TraceKind::Scope: {
-      Scope* scope = static_cast<Scope*>(thing);
+      Scope* scope = &cellptr.as<Scope>();
       zStats->scopesGCHeap += thingSize;
       zStats->scopesMallocHeap +=
           scope->sizeOfExcludingThis(rtStats->mallocSizeOf_);
@@ -502,7 +496,7 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
     }
 
     case JS::TraceKind::RegExpShared: {
-      auto regexp = static_cast<RegExpShared*>(thing);
+      auto regexp = &cellptr.as<RegExpShared>();
       zStats->regExpSharedsGCHeap += thingSize;
       zStats->regExpSharedsMallocHeap +=
           regexp->sizeOfExcludingThis(rtStats->mallocSizeOf_);
@@ -514,7 +508,7 @@ static void StatsCellCallback(JSRuntime* rt, void* data, void* thing,
   }
 
   // Yes, this is a subtraction:  see StatsArenaCallback() for details.
-  zStats->unusedGCThings.addToKind(traceKind, -thingSize);
+  zStats->unusedGCThings.addToKind(kind, -thingSize);
 }
 
 void ZoneStats::initStrings() {

@@ -81,8 +81,6 @@ const mozilla::dom::Element* Gecko_GetBeforeOrAfterPseudo(
 const mozilla::dom::Element* Gecko_GetMarkerPseudo(
     const mozilla::dom::Element*);
 
-bool Gecko_IsInAnonymousSubtree(const mozilla::dom::Element*);
-
 nsTArray<nsIContent*>* Gecko_GetAnonymousContentForElement(
     const mozilla::dom::Element*);
 void Gecko_DestroyAnonymousContentList(nsTArray<nsIContent*>* anon_content);
@@ -560,10 +558,6 @@ mozilla::StyleGenericFontFamily Gecko_nsStyleFont_ComputeDefaultFontType(
     mozilla::StyleGenericFontFamily generic_family, nsAtom* language);
 
 mozilla::FontSizePrefs Gecko_GetBaseSize(nsAtom* lang);
-
-// XBL related functions.
-const mozilla::dom::Element* Gecko_GetBindingParent(
-    const mozilla::dom::Element*);
 
 struct GeckoFontMetrics {
   nscoord mChSize;  // -1.0 indicates not found

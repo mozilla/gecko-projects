@@ -69,10 +69,6 @@ class EnterDebuggeeNoExecute;
 class TraceLoggerThread;
 #endif
 
-namespace gc {
-class AutoHeapSession;
-}
-
 }  // namespace js
 
 struct DtoaState;
@@ -138,7 +134,7 @@ struct JSAtomState {
 #define PROPERTYNAME_FIELD(idpart, id, text) js::ImmutablePropertyNamePtr id;
   FOR_EACH_COMMON_PROPERTYNAME(PROPERTYNAME_FIELD)
 #undef PROPERTYNAME_FIELD
-#define PROPERTYNAME_FIELD(name, init, clasp) js::ImmutablePropertyNamePtr name;
+#define PROPERTYNAME_FIELD(name, clasp) js::ImmutablePropertyNamePtr name;
   JS_FOR_EACH_PROTOTYPE(PROPERTYNAME_FIELD)
 #undef PROPERTYNAME_FIELD
 #define PROPERTYNAME_FIELD(name) js::ImmutablePropertyNamePtr name;
@@ -388,10 +384,6 @@ struct JSRuntime {
   /* Call this to get the name of a realm. */
   js::MainThreadData<JS::RealmNameCallback> realmNameCallback;
 
-  /* Callback for doing memory reporting on external strings. */
-  js::MainThreadData<JSExternalStringSizeofCallback>
-      externalStringSizeofCallback;
-
   js::MainThreadData<mozilla::UniquePtr<js::SourceHook>> sourceHook;
 
   js::MainThreadData<const JSSecurityCallbacks*> securityCallbacks;
@@ -510,11 +502,6 @@ struct JSRuntime {
                   mozilla::recordreplay::Behavior::DontPreserve>
       numActiveHelperThreadZones;
 
-  // Any activity affecting the heap.
-  mozilla::Atomic<JS::HeapState, mozilla::SequentiallyConsistent,
-                  mozilla::recordreplay::Behavior::DontPreserve>
-      heapState_;
-
   friend class js::AutoLockScriptData;
 
  public:
@@ -539,7 +526,7 @@ struct JSRuntime {
   }
 #endif
 
-  JS::HeapState heapState() const { return heapState_; }
+  JS::HeapState heapState() const { return gc.heapState(); }
 
   // How many realms there are across all zones. This number includes
   // off-thread context realms, so it isn't necessarily equal to the
@@ -689,7 +676,7 @@ struct JSRuntime {
   js::WriteOnceData<js::PropertyName*> emptyString;
 
  private:
-  js::MainThreadData<JSFreeOp*> defaultFreeOp_;
+  js::MainThreadOrGCTaskData<JSFreeOp*> defaultFreeOp_;
 
  public:
   JSFreeOp* defaultFreeOp() {
@@ -849,7 +836,7 @@ struct JSRuntime {
   // to JSContext remains valid. The final GC triggered here depends on this.
   void destroyRuntime();
 
-  bool init(JSContext* cx, uint32_t maxbytes, uint32_t maxNurseryBytes);
+  bool init(JSContext* cx, uint32_t maxbytes);
 
   JSRuntime* thisFromCtor() { return this; }
 
@@ -970,10 +957,6 @@ struct JSRuntime {
     MOZ_ASSERT(format != js::StackFormat::Default);
     stackFormat_ = format;
   }
-
-  // For inherited heap state accessors.
-  friend class js::gc::AutoHeapSession;
-  friend class JS::AutoEnterCycleCollection;
 
  private:
   js::MainThreadData<js::RuntimeCaches> caches_;

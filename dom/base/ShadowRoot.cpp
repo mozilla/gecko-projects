@@ -12,7 +12,6 @@
 #include "nsContentUtils.h"
 #include "nsIStyleSheetLinkingElement.h"
 #include "nsWindowSizes.h"
-#include "nsXBLPrototypeBinding.h"
 #include "mozilla/dom/DirectionalityUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/HTMLSlotElement.h"
@@ -63,7 +62,6 @@ ShadowRoot::ShadowRoot(Element* aElement, ShadowRootMode aMode,
   SetFlags(NODE_IS_IN_SHADOW_TREE);
   Bind();
 
-  ExtendedDOMSlots()->mBindingParent = aElement;
   ExtendedDOMSlots()->mContainingShadow = this;
 }
 
@@ -92,8 +90,8 @@ void ShadowRoot::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
       ShadowRootAuthorStylesMallocEnclosingSizeOf, mServoStyles.get());
 }
 
-JSObject* ShadowRoot::WrapObject(JSContext* aCx,
-                                 JS::Handle<JSObject*> aGivenProto) {
+JSObject* ShadowRoot::WrapNode(JSContext* aCx,
+                               JS::Handle<JSObject*> aGivenProto) {
   return mozilla::dom::ShadowRoot_Binding::Wrap(aCx, this, aGivenProto);
 }
 
@@ -467,7 +465,7 @@ void ShadowRoot::GetEventTargetParent(EventChainPreVisitor& aVisitor) {
   aVisitor.SetParentTarget(shadowHost, false);
 
   nsCOMPtr<nsIContent> content(do_QueryInterface(aVisitor.mEvent->mTarget));
-  if (content && content->GetBindingParent() == shadowHost) {
+  if (content && content->GetContainingShadow() == this) {
     aVisitor.mEventTargetAtParent = shadowHost;
   }
 }

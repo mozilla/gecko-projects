@@ -112,150 +112,78 @@ There are three elements that are used for each event. They are: event name, val
 Default value for event value is 0.0. Default value for event info is empty string.
 
 List of current Events related data that is sent:
-
 * When a page could be reader mode and is visible to the user
-
-.. code-block:: json
-
-    {
-      "event": "E_Reader_Available"
-    }
-
+{
+"event" : "E_Reader_Available"
+}
 * Download videos or any other media
-
-.. code-block:: json
-
-    {
-      "event" : "E_Download_Media_Saved_Image"
-    }
-
+{
+"event" : "E_Download_Media_Saved_Image"
+}
 * Save password and login from door hanger
-
-.. code-block:: json
-
-    {
-      "event" : "E_Saved_Login_And_Password"
-    }
-
+{
+"event" : "E_Saved_Login_And_Password"
+}
 * Save a bookmark from Fennec menu
-
-.. code-block:: json
-
-    {
-      "event" : "E_Saved_Bookmark"
-    }
-
+{
+"event" : "E_Saved_Bookmark"
+}
 * Load the bookmark from home panel
-
-.. code-block:: json
-
-    {
-      "event" : "E_Opened_Bookmark"
-    }
-
+{
+"event" : "E_Opened_Bookmark"
+}
 * Interact with search url area
-
-.. code-block:: json
-
-    {
-      "event" : "E_Interact_With_Search_URL_Area"
-    }
-
+{
+"event" : "E_Interact_With_Search_URL_Area"
+}
 * Interact with search widget
-
-.. code-block:: json
-
-    {
-      "event" : "E_Interact_With_Search_Widget"
-    }
-
+{
+"event" : "E_Interact_With_Search_Widget"
+}
 * When a screenshot is taken
-
-.. code-block:: json
-
-    {
-      "event" : "E_Screenshot"
-    }
-
+{
+"event" : "E_Screenshot"
+}
 * Open a new tab
-
-.. code-block:: json
-
-    {
-      "event" : "E_Opened_New_Tab"
-    }
-
+{
+"event" : "E_Opened_New_Tab"
+}
 * App start but Fennec is not set as default browser
-
-.. code-block:: json
-
-    {
-      "event" : "E_Launch_But_Not_Default_Browser"
-    }
-
+{
+"event" : "E_Launch_But_Not_Default_Browser"
+}
 * General app start event
-
-.. code-block:: json
-
-    {
-      "event" : "E_Launch_Browser"
-    }
-
+{
+"event" : "E_Launch_Browser"
+}
 * The user just dismissed on-boarding
-
-.. code-block:: json
-
-    {
-      "event" : "E_Dismiss_Onboarding"
-    }
-
+{
+"event" : "E_Dismiss_Onboarding"
+}
 * Sign in Firefox Account
-
-.. code-block:: json
-
-    {
-      "event" : "E_User_Signed_In_To_FxA"
-    }
-
+{
+"event" : "E_User_Signed_In_To_FxA"
+}
 * Firefox Sync finished event
-
-.. code-block:: json
-
-    {
-      "event" : "E_User_Finished_Sync"
-    }
-
+{
+"event" : "E_User_Finished_Sync"
+}
 * The user just resumed the app from background
-
-.. code-block:: json
-
-    {
-      "event" : "E_Resumed_From_Background"
-    }
-
+{
+"event" : "E_Resumed_From_Background"
+}
 * User set Fennec as default browser and resumed the app
-
-.. code-block:: json
-
-    {
-      "event" : "E_Changed_Default_To_Fennec"
-    }
-
+{
+"event" : "E_Changed_Default_To_Fennec"
+}
 * User installed the Focus app
-
-.. code-block:: json
-
-    {
-      "event" : "E_Just_Installed_Focus"
-    }
-
+{
+"event" : "E_Just_Installed_Focus"
+}
 * User installed the Klar app
-
-.. code-block:: json
-
-    {
-      "event" : "E_Just_Installed_Klar"
-    }
+{
+"event" : "E_Just_Installed_Klar"
+}
 
 Deep Links:
 Deep links are actions that can point Fennec to open certain pages or load features such as `show bookmark list` or

@@ -12,26 +12,17 @@ var gDebuggee;
 var gClient;
 var gThreadFront;
 
-function run_test() {
-  Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
-  registerCleanupFunction(() => {
-    Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-  });
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-stack");
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-stack", function(
-      response,
-      targetFront,
-      threadFront
-    ) {
+add_task(
+  threadFrontTest(
+    async ({ threadFront, debuggee, client }) => {
       gThreadFront = threadFront;
+      gDebuggee = debuggee;
+      gClient = client;
       test_pause_frame();
-    });
-  });
-  do_test_pending();
-}
+    },
+    { waitForFinish: true }
+  )
+);
 
 function test_pause_frame() {
   gThreadFront.once("paused", async function(packet) {
@@ -46,11 +37,12 @@ function test_pause_frame() {
     // Make a bogus request to the grip actor.  Should get
     // unrecognized-packet-type (and not no-such-actor).
     try {
-      await gClient.request({ to: objActor, type: "bogusRequest" });
+      const objFront = gClient.getFrontByID(objActor);
+      await objFront.request({ to: objActor, type: "bogusRequest" });
       ok(false, "bogusRequest should throw");
     } catch (e) {
       ok(true, "bogusRequest thrown");
-      Assert.equal(e.error, "unrecognizedPacketType");
+      Assert.ok(!!e.match(/unrecognizedPacketType/));
     }
     Assert.ok(objClient.valid);
 
@@ -58,14 +50,15 @@ function test_pause_frame() {
       // Now that we've resumed, should get no-such-actor for the
       // same request.
       try {
-        await gClient.request({ to: objActor, type: "bogusRequest" });
+        const objFront = gClient.getFrontByID(objActor);
+        await objFront.request({ to: objActor, type: "bogusRequest" });
         ok(false, "bogusRequest should throw");
       } catch (e) {
         ok(true, "bogusRequest thrown");
-        Assert.equal(e.error, "noSuchActor");
+        Assert.ok(!!e.match(/noSuchActor/));
       }
       Assert.ok(!objClient.valid);
-      finishClient(gClient);
+      threadFrontTestFinished();
     });
   });
 

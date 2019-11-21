@@ -135,6 +135,25 @@ this.urlbar = class extends ExtensionAPI {
   getAPI(context) {
     return {
       urlbar: {
+        closeView() {
+          let window = windowTracker.getTopNormalWindow(context);
+          window.gURLBar.view.close();
+        },
+
+        focus(select = false) {
+          let window = windowTracker.getTopNormalWindow(context);
+          if (select) {
+            window.focusAndSelectUrlBar();
+          } else {
+            window.gURLBar.focus();
+          }
+        },
+
+        search(searchString, options = {}) {
+          let window = windowTracker.getTopNormalWindow(context);
+          window.gURLBar.search(searchString, options);
+        },
+
         onBehaviorRequested: new EventManager({
           context,
           name: "urlbar.onBehaviorRequested",
@@ -197,14 +216,11 @@ this.urlbar = class extends ExtensionAPI {
           name: "urlbar.onResultPicked",
           register: (fire, providerName) => {
             let provider = UrlbarProviderExtension.getOrCreate(providerName);
-            provider.setEventListener(
-              "resultPicked",
-              async (resultPayload, details) => {
-                return fire.async(resultPayload, details).catch(error => {
-                  throw context.normalizeError(error);
-                });
-              }
-            );
+            provider.setEventListener("resultPicked", async resultPayload => {
+              return fire.async(resultPayload).catch(error => {
+                throw context.normalizeError(error);
+              });
+            });
             return () => provider.setEventListener("resultPicked", null);
           },
         }).api(),

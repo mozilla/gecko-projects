@@ -29,8 +29,8 @@ enum XDRMode { XDR_ENCODE, XDR_DECODE };
 
 using XDRResult = mozilla::Result<mozilla::Ok, JS::TranscodeResult>;
 
-using XDRAtomTable = JS::GCVector<HeapPtr<JSAtom*>>;
-using XDRAtomMap = JS::GCHashMap<HeapPtr<JSAtom*>, uint32_t>;
+using XDRAtomTable = JS::GCVector<PreBarriered<JSAtom*>>;
+using XDRAtomMap = JS::GCHashMap<PreBarriered<JSAtom*>, uint32_t>;
 
 class XDRBufferBase {
  public:
@@ -225,7 +225,7 @@ class XDRState : public XDRCoderBase {
 
   virtual ~XDRState(){};
 
-  JSContext* cx() const { return buf->cx(); }
+  JSContext* cx() const { return mainBuf.cx(); }
 
   virtual bool hasOptions() const { return false; }
   virtual const JS::ReadOnlyCompileOptions& options() {
@@ -243,6 +243,8 @@ class XDRState : public XDRCoderBase {
   virtual bool hasAtomTable() const { return false; }
   virtual XDRAtomTable& atomTable() { MOZ_CRASH("does not have atomTable"); }
   virtual void finishAtomTable() { MOZ_CRASH("does not have atomTable"); }
+
+  virtual bool isMainBuf() { return true; }
 
   virtual void switchToAtomBuf() { MOZ_CRASH("cannot switch to atom buffer."); }
   virtual void switchToMainBuf() { MOZ_CRASH("cannot switch to main buffer."); }
@@ -441,6 +443,8 @@ class XDRDecoder : public XDRDecoderBase {
   XDRAtomTable& atomTable() override { return atomTable_; }
   void finishAtomTable() override { hasFinishedAtomTable_ = true; }
 
+  void trace(JSTracer* trc);
+
  private:
   XDRAtomTable atomTable_;
   bool hasFinishedAtomTable_ = false;
@@ -541,11 +545,16 @@ class XDRIncrementalEncoder : public XDREncoder {
   // Tree of slices.
   SlicesTree tree_;
   JS::TranscodeBuffer slices_;
-  bool oom_;
+  // Map from atoms to their index in the atom buffer
+  XDRAtomMap atomMap_;
   // Atom buffer.
   JS::TranscodeBuffer atoms_;
+  XDRBuffer<XDR_ENCODE> atomBuf_;
   // Header buffer.
   JS::TranscodeBuffer header_;
+  XDRBuffer<XDR_ENCODE> headerBuf_;
+  bool oom_;
+  uint32_t natoms_ = 0;
 
   class DepthFirstSliceIterator;
 
@@ -554,22 +563,18 @@ class XDRIncrementalEncoder : public XDREncoder {
       : XDREncoder(cx, slices_, 0),
         scope_(nullptr),
         node_(nullptr),
-        oom_(false),
         atomMap_(cx),
         atomBuf_(cx, atoms_, 0),
-        headerBuf_(cx, header_, 0) {}
+        headerBuf_(cx, header_, 0),
+        oom_(false) {}
 
   virtual ~XDRIncrementalEncoder() {}
-
-  uint32_t natoms_ = 0;
-
-  XDRAtomMap atomMap_;
-  XDRBuffer<XDR_ENCODE> atomBuf_;
-  XDRBuffer<XDR_ENCODE> headerBuf_;
 
   bool hasAtomMap() const override { return true; }
   XDRAtomMap& atomMap() override { return atomMap_; }
   uint32_t& natoms() override { return natoms_; }
+
+  bool isMainBuf() override { return buf == &mainBuf; }
 
   // Switch from streaming into the main buffer into the atom buffer.
   void switchToAtomBuf() override { buf = &atomBuf_; }

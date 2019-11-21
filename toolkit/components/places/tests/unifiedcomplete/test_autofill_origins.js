@@ -234,6 +234,27 @@ add_task(async function test_ip() {
   }
 });
 
+// host starting with large number.
+add_task(async function large_number_host() {
+  await PlacesTestUtils.addVisits([
+    {
+      uri: "http://12345example.it:8888/",
+    },
+  ]);
+  await check_autocomplete({
+    search: "1234",
+    completed: "http://12345example.it:8888/",
+    matches: [
+      {
+        value: "12345example.it:8888/",
+        comment: "12345example.it:8888",
+        style: ["autofill", "heuristic"],
+      },
+    ],
+  });
+  await cleanup();
+});
+
 // When determining which origins should be autofilled, all the origins sharing
 // a host should be added together to get their combined frecency -- i.e.,
 // prefixes should be collapsed.  And then from that list, the origin with the
@@ -259,14 +280,14 @@ add_task(async function groupByHost() {
   let httpFrec = frecencyForUrl("http://example.com/");
   let httpsFrec = frecencyForUrl("https://example.com/");
   let otherFrec = frecencyForUrl("https://mozilla.org/");
-  Assert.ok(httpFrec < httpsFrec, "Sanity check");
-  Assert.ok(httpsFrec < otherFrec, "Sanity check");
+  Assert.less(httpFrec, httpsFrec, "Sanity check");
+  Assert.less(httpsFrec, otherFrec, "Sanity check");
 
   // Make sure the frecencies of the three origins are as expected in relation
   // to the threshold.
   let threshold = await getOriginAutofillThreshold();
-  Assert.ok(httpFrec < threshold, "http origin should be < threshold");
-  Assert.ok(httpsFrec < threshold, "https origin should be < threshold");
+  Assert.less(httpFrec, threshold, "http origin should be < threshold");
+  Assert.less(httpsFrec, threshold, "https origin should be < threshold");
   Assert.ok(threshold <= otherFrec, "Other origin should cross threshold");
 
   Assert.ok(
@@ -328,14 +349,14 @@ add_task(async function groupByHostNonDefaultStddevMultiplier() {
   let httpFrec = frecencyForUrl("http://example.com/");
   let httpsFrec = frecencyForUrl("https://example.com/");
   let otherFrec = frecencyForUrl("https://mozilla.org/");
-  Assert.ok(httpFrec < httpsFrec, "Sanity check");
-  Assert.ok(httpsFrec < otherFrec, "Sanity check");
+  Assert.less(httpFrec, httpsFrec, "Sanity check");
+  Assert.less(httpsFrec, otherFrec, "Sanity check");
 
   // Make sure the frecencies of the three origins are as expected in relation
   // to the threshold.
   let threshold = await getOriginAutofillThreshold();
-  Assert.ok(httpFrec < threshold, "http origin should be < threshold");
-  Assert.ok(httpsFrec < threshold, "https origin should be < threshold");
+  Assert.less(httpFrec, threshold, "http origin should be < threshold");
+  Assert.less(httpsFrec, threshold, "https origin should be < threshold");
   Assert.ok(threshold <= otherFrec, "Other origin should cross threshold");
 
   Assert.ok(

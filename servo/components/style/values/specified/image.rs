@@ -10,16 +10,18 @@
 use crate::custom_properties::SpecifiedValue;
 use crate::parser::{Parse, ParserContext};
 use crate::stylesheets::CorsMode;
-use crate::values::generics::NonNegative;
 use crate::values::generics::image::PaintWorklet;
 use crate::values::generics::image::{
     self as generic, Circle, Ellipse, GradientCompatMode, ShapeExtent,
 };
 use crate::values::generics::position::Position as GenericPosition;
+use crate::values::generics::NonNegative;
 use crate::values::specified::position::{HorizontalPositionKeyword, VerticalPositionKeyword};
 use crate::values::specified::position::{Position, PositionComponent, Side};
 use crate::values::specified::url::SpecifiedImageUrl;
-use crate::values::specified::{Angle, Color, Length, LengthPercentage, NonNegativeLength, NonNegativeLengthPercentage};
+use crate::values::specified::{
+    Angle, Color, Length, LengthPercentage, NonNegativeLength, NonNegativeLengthPercentage,
+};
 use crate::values::specified::{Number, NumberOrPercentage, Percentage};
 use crate::Atom;
 use cssparser::{Delimiter, Parser, Token};
@@ -88,7 +90,8 @@ impl SpecifiedValueInfo for Gradient {
 }
 
 /// A specified gradient kind.
-pub type GradientKind = generic::GradientKind<LineDirection, NonNegativeLength, NonNegativeLengthPercentage, Position>;
+pub type GradientKind =
+    generic::GradientKind<LineDirection, NonNegativeLength, NonNegativeLengthPercentage, Position>;
 
 /// A specified gradient line direction.
 ///
@@ -217,7 +220,7 @@ impl Parse for Gradient {
             },
             "-webkit-radial-gradient" => {
                 Some((Shape::Radial, false, GradientCompatMode::WebKit))
-            }
+            },
             #[cfg(feature = "gecko")]
             "-moz-radial-gradient" => {
                 Some((Shape::Radial, false, GradientCompatMode::Moz))
@@ -432,10 +435,7 @@ impl Gradient {
                     let (color, mut p) = i.parse_nested_block(|i| {
                         let p = match_ignore_ascii_case! { &function,
                             "color-stop" => {
-                                let p = match NumberOrPercentage::parse(context, i)? {
-                                    NumberOrPercentage::Number(number) => Percentage::new(number.value),
-                                    NumberOrPercentage::Percentage(p) => p,
-                                };
+                                let p = NumberOrPercentage::parse(context, i)?.to_percentage();
                                 i.expect_comma()?;
                                 p
                             },
@@ -751,7 +751,10 @@ impl EndingShape {
                 }
                 NonNegativeLengthPercentage::parse(context, i)?
             };
-            Ok(generic::EndingShape::Ellipse(Ellipse::Radii(NonNegative(LengthPercentage::from(x)), y)))
+            Ok(generic::EndingShape::Ellipse(Ellipse::Radii(
+                NonNegative(LengthPercentage::from(x)),
+                y,
+            )))
         })
     }
 }

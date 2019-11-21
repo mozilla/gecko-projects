@@ -26,6 +26,11 @@ ChromeUtils.defineModuleGetter(
 );
 ChromeUtils.defineModuleGetter(
   this,
+  "fxAccounts",
+  "resource://gre/modules/FxAccounts.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
   "FxAccounts",
   "resource://gre/modules/FxAccounts.jsm"
 );
@@ -193,27 +198,6 @@ var UITour = {
           return searchbar.querySelector(".searchbar-search-button");
         },
         widgetName: "search-container",
-      },
-    ],
-    [
-      "searchPrefsLink",
-      {
-        query: aDocument => {
-          let element = null;
-          let popup = aDocument.getElementById("PopupSearchAutoComplete");
-          if (popup.state != "open") {
-            return null;
-          }
-          element = aDocument.getAnonymousElementByAttribute(
-            popup,
-            "anonid",
-            "search-settings"
-          );
-          if (!element || !UITour.isElementVisible(element)) {
-            return null;
-          }
-          return element;
-        },
       },
     ],
     [
@@ -550,7 +534,7 @@ var UITour = {
           .then(() => {
             return data.email
               ? FxAccounts.config.promiseEmailURI(data.email, "uitour")
-              : FxAccounts.config.promiseSignUpURI("uitour");
+              : FxAccounts.config.promiseConnectAccountURI("uitour");
           })
           .then(uri => {
             const url = new URL(uri);
@@ -1047,8 +1031,9 @@ var UITour = {
    * @param {ChromeWindow} aWindow the chrome window
    * @param {bool} aShouldOpen true means we should open the menu, otherwise false
    * @param {String} aMenuName "appMenu" or "pageActionPanel"
+   * @param {Object} aOptions Extra config arguments, example `autohide: true`.
    */
-  _setMenuStateForAnnotation(aWindow, aShouldOpen, aMenuName) {
+  _setMenuStateForAnnotation(aWindow, aShouldOpen, aMenuName, aOptions = {}) {
     log.debug("_setMenuStateForAnnotation: Menu is ", aMenuName);
     log.debug(
       "_setMenuStateForAnnotation: Menu is expected to be:",
@@ -1071,7 +1056,7 @@ var UITour = {
     if (aShouldOpen) {
       log.debug("_setMenuStateForAnnotation: Opening the menu");
       promise = new Promise(resolve => {
-        this.showMenu(aWindow, aMenuName, resolve);
+        this.showMenu(aWindow, aMenuName, resolve, aOptions);
       });
     } else if (!this.noautohideMenus.has(aMenuName)) {
       // If the menu was opened explictly by api user through `Mozilla.UITour.showMenu`,
@@ -1091,8 +1076,9 @@ var UITour = {
    *
    * @param {ChromeWindow} aChromeWindow The chrome window
    * @param {Object} aTarget The target on which we show highlight or show info.
+   * @param {Object} options Extra config arguments, example `autohide: true`.
    */
-  async _ensureTarget(aChromeWindow, aTarget) {
+  async _ensureTarget(aChromeWindow, aTarget, aOptions = {}) {
     let shouldOpenAppMenu = false;
     let shouldOpenPageActionPanel = false;
     if (this.targetIsInAppMenu(aTarget)) {
@@ -1144,7 +1130,8 @@ var UITour = {
       promise = this._setMenuStateForAnnotation(
         aChromeWindow,
         true,
-        menuToOpen
+        menuToOpen,
+        aOptions
       );
     }
     return promise;
@@ -1182,9 +1169,10 @@ var UITour = {
    *                      window.
    * @param aTarget    The element to highlight.
    * @param aEffect    (optional) The effect to use from UITour.highlightEffects or "none".
+   * @param aOptions   (optional) Extra config arguments, example `autohide: true`.
    * @see UITour.highlightEffects
    */
-  async showHighlight(aChromeWindow, aTarget, aEffect = "none") {
+  async showHighlight(aChromeWindow, aTarget, aEffect = "none", aOptions = {}) {
     let showHighlightElement = aAnchorEl => {
       let highlighter = aChromeWindow.document.getElementById(
         "UITourHighlight"
@@ -1266,7 +1254,7 @@ var UITour = {
     };
 
     try {
-      await this._ensureTarget(aChromeWindow, aTarget);
+      await this._ensureTarget(aChromeWindow, aTarget, aOptions);
       let anchorEl = await this._correctAnchor(aChromeWindow, aTarget);
       showHighlightElement(anchorEl);
     } catch (e) {
@@ -1452,7 +1440,7 @@ var UITour = {
     this._setMenuStateForAnnotation(aWindow, false, "pageActionPanel");
   },
 
-  showMenu(aWindow, aMenuName, aOpenCallback = null) {
+  showMenu(aWindow, aMenuName, aOpenCallback = null, aOptions = {}) {
     log.debug("showMenu:", aMenuName);
     function openMenuButton(aMenuBtn) {
       if (!aMenuBtn || !aMenuBtn.hasMenu() || aMenuBtn.open) {
@@ -1483,7 +1471,9 @@ var UITour = {
         menu.show = () => aWindow.BrowserPageActions.showPanel();
       }
 
-      menu.node.setAttribute("noautohide", "true");
+      if (!aOptions.autohide) {
+        menu.node.setAttribute("noautohide", "true");
+      }
       // If the popup is already opened, don't recreate the widget as it may cause a flicker.
       if (menu.node.state != "open") {
         this.recreatePopup(menu.node);
@@ -1684,6 +1674,13 @@ var UITour = {
             });
           });
         break;
+      case "fxa":
+        this.getFxA(aMessageManager, aCallbackID);
+        break;
+
+      // NOTE: 'sync' is deprecated and should be removed in Firefox 73 (because
+      // by then, all consumers will have upgraded to use 'fxa' in that version
+      // and later.)
       case "sync":
         this.sendPageCallback(aMessageManager, aCallbackID, {
           setup: Services.prefs.prefHasUserValue("services.sync.username"),
@@ -1734,6 +1731,77 @@ var UITour = {
         );
         break;
     }
+  },
+
+  getFxA(aMessageManager, aCallbackID) {
+    (async () => {
+      let setup = !!(await fxAccounts.getSignedInUser());
+      let result = { setup };
+      if (!setup) {
+        this.sendPageCallback(aMessageManager, aCallbackID, result);
+        return;
+      }
+      // We are signed in so need to build a richer result.
+      let devices = fxAccounts.device.recentDeviceList;
+      // A recent device list is fine, but if we don't even have that we should
+      // wait for it to be fetched.
+      if (!devices) {
+        await fxAccounts.device.refreshDeviceList();
+        devices = fxAccounts.device.recentDeviceList;
+      }
+      if (devices) {
+        // A falsey `devices` should be impossible, so we omit `devices` from
+        // the result object so the consuming page can try to differentiate
+        // between "no additional devices" and "something's wrong"
+        result.numOtherDevices = Math.max(0, devices.length - 1);
+        result.numDevicesByType = devices
+          .filter(d => !d.isCurrentDevice)
+          .reduce((accum, d) => {
+            let type = d.type || "unknown";
+            accum[type] = (accum[type] || 0) + 1;
+            return accum;
+          }, {});
+      }
+
+      // Each of the "browser services" - currently only "sync" is supported.
+      result.browserServices = {};
+      let hasSync = Services.prefs.prefHasUserValue("services.sync.username");
+      if (hasSync) {
+        result.browserServices.sync = {
+          // We always include 'setup' for b/w compatibility.
+          setup: true,
+          desktopDevices: Services.prefs.getIntPref(
+            "services.sync.clients.devices.desktop",
+            0
+          ),
+          mobileDevices: Services.prefs.getIntPref(
+            "services.sync.clients.devices.mobile",
+            0
+          ),
+          totalDevices: Services.prefs.getIntPref(
+            "services.sync.numClients",
+            0
+          ),
+        };
+      }
+      // Each of the "account services", which we turn into a map keyed by ID.
+      let attachedClients = await fxAccounts.listAttachedOAuthClients();
+      result.accountServices = attachedClients
+        .filter(c => !!c.id)
+        .reduce((accum, c) => {
+          accum[c.id] = {
+            id: c.id,
+            lastAccessedWeeksAgo: c.lastAccessedDaysAgo
+              ? Math.floor(c.lastAccessedDaysAgo / 7)
+              : null,
+          };
+          return accum;
+        }, {});
+      this.sendPageCallback(aMessageManager, aCallbackID, result);
+    })().catch(err => {
+      log.error(err);
+      this.sendPageCallback(aMessageManager, aCallbackID, {});
+    });
   },
 
   getAppInfo(aMessageManager, aWindow, aCallbackID) {

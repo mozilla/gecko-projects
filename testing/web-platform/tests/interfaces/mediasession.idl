@@ -36,7 +36,7 @@ interface MediaSession {
 
   void setActionHandler(MediaSessionAction action, MediaSessionActionHandler? handler);
 
-  void setPositionState(optional MediaPositionState? state);
+  void setPositionState(optional MediaPositionState state = {});
 };
 
 [Exposed=Window]
@@ -77,5 +77,5 @@ dictionary MediaSessionSeekActionDetails : MediaSessionActionDetails {
 
 dictionary MediaSessionSeekToActionDetails : MediaSessionActionDetails {
   required double seekTime;
-  bool? fastSeek;
+  boolean? fastSeek;
 };

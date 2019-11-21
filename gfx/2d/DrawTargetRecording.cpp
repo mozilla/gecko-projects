@@ -106,6 +106,10 @@ class DataSourceSurfaceRecording : public DataSourceSurface {
   static already_AddRefed<DataSourceSurface> Init(
       uint8_t* aData, IntSize aSize, int32_t aStride, SurfaceFormat aFormat,
       DrawEventRecorderPrivate* aRecorder) {
+    if (!Factory::AllowedSurfaceSize(aSize)) {
+      return nullptr;
+    }
+
     // XXX: do we need to ensure any alignment here?
     auto data = MakeUnique<uint8_t[]>(aStride * aSize.height);
     if (data) {
@@ -293,7 +297,7 @@ void DrawTargetRecording::FillGlyphs(ScaledFont* aFont,
     mRecorder->AddScaledFont(aFont);
   } else if (!aFont->GetUserData(userDataKey)) {
     UnscaledFont* unscaledFont = aFont->GetUnscaledFont();
-    if (!mRecorder->HasStoredObject(unscaledFont)) {
+    if (!mRecorder->HasStoredUnscaledFont(unscaledFont)) {
       RecordedFontData fontData(unscaledFont);
       RecordedFontDetails fontDetails;
       if (fontData.GetFontDetails(fontDetails)) {
@@ -316,7 +320,7 @@ void DrawTargetRecording::FillGlyphs(ScaledFont* aFont,
                           "UnscaledFont";
         }
       }
-      mRecorder->AddStoredObject(unscaledFont);
+      mRecorder->AddStoredUnscaledFont(unscaledFont);
     }
     mRecorder->RecordEvent(RecordedScaledFontCreation(aFont, unscaledFont));
     RecordingFontUserData* userData = new RecordingFontUserData;

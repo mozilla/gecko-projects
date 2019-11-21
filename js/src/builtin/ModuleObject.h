@@ -136,7 +136,8 @@ class IndirectBindingMap {
     HeapPtr<Shape*> shape;
   };
 
-  typedef HashMap<jsid, Binding, DefaultHasher<jsid>, ZoneAllocPolicy> Map;
+  using Map = HashMap<PreBarrieredId, Binding, DefaultHasher<PreBarrieredId>,
+                      ZoneAllocPolicy>;
 
   mozilla::Maybe<Map> map_;
 };
@@ -211,8 +212,8 @@ struct FunctionDeclaration {
   FunctionDeclaration(HandleAtom name, HandleFunction fun);
   void trace(JSTracer* trc);
 
-  HeapPtr<JSAtom*> name;
-  HeapPtr<JSFunction*> fun;
+  const HeapPtr<JSAtom*> name;
+  const HeapPtr<JSFunction*> fun;
 };
 
 // A vector of function bindings to be instantiated. This can be created in a

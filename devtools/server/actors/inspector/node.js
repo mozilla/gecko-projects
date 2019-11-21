@@ -6,7 +6,6 @@
 
 const { Cu } = require("chrome");
 const Services = require("Services");
-const ChromeUtils = require("ChromeUtils");
 const InspectorUtils = require("InspectorUtils");
 const protocol = require("devtools/shared/protocol");
 const { PSEUDO_CLASSES } = require("devtools/shared/css/constants");
@@ -26,6 +25,12 @@ loader.lazyRequireGetter(
 loader.lazyRequireGetter(
   this,
   "findCssSelector",
+  "devtools/shared/inspector/css-logic",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "findAllCssSelectors",
   "devtools/shared/inspector/css-logic",
   true
 );
@@ -68,12 +73,6 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "isShadowAnonymous",
-  "devtools/shared/layout/utils",
-  true
-);
-loader.lazyRequireGetter(
-  this,
   "isShadowHost",
   "devtools/shared/layout/utils",
   true
@@ -92,7 +91,7 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "isXBLAnonymous",
+  "isRemoteFrame",
   "devtools/shared/layout/utils",
   true
 );
@@ -136,6 +135,12 @@ loader.lazyRequireGetter(
   this,
   "scrollbarTreeWalkerFilter",
   "devtools/server/actors/inspector/utils",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "DOMHelpers",
+  "devtools/shared/dom-helpers",
   true
 );
 
@@ -243,8 +248,6 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       isAfterPseudoElement: isAfterPseudoElement(this.rawNode),
       isAnonymous: isAnonymous(this.rawNode),
       isNativeAnonymous: isNativeAnonymous(this.rawNode),
-      isXBLAnonymous: isXBLAnonymous(this.rawNode),
-      isShadowAnonymous: isShadowAnonymous(this.rawNode),
       isShadowRoot: shadowRoot,
       shadowRootMode: getShadowRootMode(this.rawNode),
       isShadowHost: isShadowHost(this.rawNode),
@@ -257,6 +260,12 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
         this.rawNode.ownerDocument &&
         this.rawNode.ownerDocument.contentType === "text/html",
       hasEventListeners: this._hasEventListeners,
+      traits: {
+        // Added in FF72
+        supportsGetAllSelectors: true,
+        // Added in FF72
+        supportsWaitForFrameLoad: true,
+      },
     };
 
     if (this.isDocumentElement()) {
@@ -305,14 +314,13 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
 
   /**
    * Check if the current node is representing a remote frame.
-   * EXPERIMENTAL: Only works if fission is enabled in the toolbox.
+   * In the context of the browser toolbox, a remote frame can be the <browser remote>
+   * element found inside each tab.
+   * In the context of the content toolbox, a remote frame can be a <iframe> that contains
+   * a different origin document.
    */
   get isRemoteFrame() {
-    return (
-      this.numChildren == 0 &&
-      ChromeUtils.getClassName(this.rawNode) == "XULFrameElement" &&
-      this.rawNode.getAttribute("remote") == "true"
-    );
+    return isRemoteFrame(this.rawNode);
   },
 
   // Estimate the number of children that the walker will return without making
@@ -330,10 +338,6 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
 
     const rawNode = this.rawNode;
     let numChildren = rawNode.childNodes.length;
-    const hasAnonChildren =
-      rawNode.nodeType === Node.ELEMENT_NODE &&
-      rawNode.ownerDocument.getAnonymousNodes(rawNode);
-
     const hasContentDocument = rawNode.contentDocument;
     const hasSVGDocument = rawNode.getSVGDocument && rawNode.getSVGDocument();
     if (numChildren === 0 && (hasContentDocument || hasSVGDocument)) {
@@ -343,11 +347,13 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
 
     // Normal counting misses ::before/::after.  Also, some anonymous children
     // may ultimately be skipped, so we have to consult with the walker.
+    //
+    // FIXME: We should be able to just check <slot> rather than
+    // containingShadowRoot.
     if (
       numChildren === 0 ||
-      hasAnonChildren ||
       isShadowHost(this.rawNode) ||
-      isShadowAnonymous(this.rawNode)
+      this.rawNode.containingShadowRoot
     ) {
       numChildren = this.walker.countChildren(this);
     }
@@ -546,9 +552,20 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
    */
   getUniqueSelector: function() {
     if (Cu.isDeadWrapper(this.rawNode)) {
-      return "";
+      return [];
     }
     return findCssSelector(this.rawNode);
+  },
+
+  /**
+   * Get the full array of selectors from the topmost document, going through
+   * iframes.
+   */
+  getAllSelectors: function() {
+    if (Cu.isDeadWrapper(this.rawNode)) {
+      return "";
+    }
+    return findAllCssSelectors(this.rawNode);
   },
 
   /**
@@ -703,6 +720,22 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       innerWidth: win.innerWidth,
       innerHeight: win.innerHeight,
     };
+  },
+
+  /**
+   * If the current node is an iframe, wait for the content window to be loaded.
+   */
+  async waitForFrameLoad() {
+    if (Cu.isDeadWrapper(this.rawNode)) {
+      return;
+    }
+
+    const { contentDocument, contentWindow } = this.rawNode;
+    if (contentDocument && contentDocument.readyState !== "complete") {
+      await new Promise(resolve => {
+        DOMHelpers.onceDOMReady(contentWindow, resolve);
+      });
+    }
   },
 });
 

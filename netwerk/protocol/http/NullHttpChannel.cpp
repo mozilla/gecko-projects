@@ -84,40 +84,18 @@ NullHttpChannel::SetTopLevelOuterContentWindowId(uint64_t aWindowId) {
 }
 
 NS_IMETHODIMP
-NullHttpChannel::IsTrackingResource(bool* aIsTrackingResource) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-NullHttpChannel::IsThirdPartyTrackingResource(bool* aIsTrackingResource) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-NullHttpChannel::GetClassificationFlags(uint32_t* aClassificationFlags) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 NullHttpChannel::GetFlashPluginState(
     nsIHttpChannel::FlashPluginState* aResult) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-NullHttpChannel::GetFirstPartyClassificationFlags(
-    uint32_t* aClassificationFlags) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
-NullHttpChannel::GetThirdPartyClassificationFlags(
-    uint32_t* aClassificationFlags) {
-  return NS_ERROR_NOT_IMPLEMENTED;
-}
-
-NS_IMETHODIMP
 NullHttpChannel::GetTransferSize(uint64_t* aTransferSize) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+NullHttpChannel::GetRequestSize(uint64_t* aRequestSize) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

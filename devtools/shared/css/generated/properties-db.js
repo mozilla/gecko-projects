@@ -1156,23 +1156,6 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
-  "-moz-stack-sizing": {
-    "isInherited": false,
-    "subproperties": [
-      "-moz-stack-sizing"
-    ],
-    "supports": [],
-    "values": [
-      "ignore",
-      "ignore-horizontal",
-      "ignore-vertical",
-      "inherit",
-      "initial",
-      "revert",
-      "stretch-to-fit",
-      "unset"
-    ]
-  },
   "-moz-tab-size": {
     "isInherited": true,
     "subproperties": [
@@ -3119,7 +3102,6 @@ exports.CSS_PROPERTIES = {
       "transform-origin",
       "contain",
       "-moz-appearance",
-      "-moz-binding",
       "-moz-orient",
       "will-change",
       "shape-image-threshold",
@@ -3340,7 +3322,6 @@ exports.CSS_PROPERTIES = {
       "-moz-box-flex",
       "-moz-box-orient",
       "-moz-box-pack",
-      "-moz-stack-sizing",
       "-moz-box-ordinal-group"
     ],
     "supports": [],
@@ -9141,6 +9122,20 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "rotate": {
+    "isInherited": false,
+    "subproperties": [
+      "rotate"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "none",
+      "revert",
+      "unset"
+    ]
+  },
   "row-gap": {
     "isInherited": false,
     "subproperties": [
@@ -9211,6 +9206,20 @@ exports.CSS_PROPERTIES = {
       "auto",
       "inherit",
       "initial",
+      "revert",
+      "unset"
+    ]
+  },
+  "scale": {
+    "isInherited": false,
+    "subproperties": [
+      "scale"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "none",
       "revert",
       "unset"
     ]
@@ -10517,6 +10526,20 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "translate": {
+    "isInherited": false,
+    "subproperties": [
+      "translate"
+    ],
+    "supports": [],
+    "values": [
+      "inherit",
+      "initial",
+      "none",
+      "revert",
+      "unset"
+    ]
+  },
   "unicode-bidi": {
     "isInherited": false,
     "subproperties": [
@@ -10771,6 +10794,49 @@ exports.CSS_PROPERTIES = {
       "revert",
       "unset"
     ]
+  },
+  "zoom": {
+    "isInherited": false,
+    "subproperties": [
+      "transform",
+      "transform-origin"
+    ],
+    "supports": [],
+    "values": [
+      "accumulatematrix",
+      "bottom",
+      "center",
+      "inherit",
+      "initial",
+      "interpolatematrix",
+      "left",
+      "matrix",
+      "matrix3d",
+      "none",
+      "perspective",
+      "revert",
+      "right",
+      "rotate",
+      "rotate3d",
+      "rotateX",
+      "rotateY",
+      "rotateZ",
+      "scale",
+      "scale3d",
+      "scaleX",
+      "scaleY",
+      "scaleZ",
+      "skew",
+      "skewX",
+      "skewY",
+      "top",
+      "translate",
+      "translate3d",
+      "translateX",
+      "translateY",
+      "translateZ",
+      "unset"
+    ]
   }
 };
 
@@ -10829,10 +10895,6 @@ exports.PREFERENCES = [
   [
     "overflow-anchor",
     "layout.css.scroll-anchoring.enabled"
-  ],
-  [
-    "scroll-snap-align",
-    "layout.css.scroll-snap-v1.enabled"
   ],
   [
     "scrollbar-width",
@@ -10923,76 +10985,8 @@ exports.PREFERENCES = [
     "layout.css.text-underline-offset.enabled"
   ],
   [
-    "-moz-binding",
-    "layout.css.moz-binding.content.enabled"
-  ],
-  [
     "offset-distance",
     "layout.css.motion-path.enabled"
-  ],
-  [
-    "scroll-margin-block-end",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-margin-block-start",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-margin-bottom",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-margin-inline-end",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-margin-inline-start",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-margin-left",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-margin-right",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-margin-top",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-block-end",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-block-start",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-bottom",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-inline-end",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-inline-start",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-left",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-right",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-top",
-    "layout.css.scroll-snap-v1.enabled"
   ],
   [
     "overflow-clip-box",
@@ -11007,28 +11001,8 @@ exports.PREFERENCES = [
     "layout.css.motion-path.enabled"
   ],
   [
-    "scroll-margin",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-margin-block",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-margin-inline",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-block",
-    "layout.css.scroll-snap-v1.enabled"
-  ],
-  [
-    "scroll-padding-inline",
-    "layout.css.scroll-snap-v1.enabled"
+    "zoom",
+    "layout.css.zoom-transform-hack.enabled"
   ],
   [
     "-moz-transition-duration",

@@ -9,11 +9,13 @@
 #include "builtin/intl/Collator.h"
 
 #include "mozilla/Assertions.h"
+#include "mozilla/Span.h"
 
 #include "jsapi.h"
 
 #include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
+#include "builtin/intl/LanguageTag.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "builtin/intl/SharedIntlData.h"
 #include "gc/FreeOp.h"
@@ -36,7 +38,6 @@ using namespace js;
 
 using JS::AutoStableStringChars;
 
-using js::intl::GetAvailableLocales;
 using js::intl::IcuLocale;
 using js::intl::ReportInternalError;
 using js::intl::SharedIntlData;
@@ -53,8 +54,11 @@ const JSClassOps CollatorObject::classOps_ = {nullptr, /* addProperty */
 const JSClass CollatorObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(CollatorObject::SLOT_COUNT) |
+        JSCLASS_HAS_CACHED_PROTO(JSProto_Collator) |
         JSCLASS_FOREGROUND_FINALIZE,
-    &CollatorObject::classOps_};
+    &CollatorObject::classOps_, &CollatorObject::classSpec_};
+
+const JSClass& CollatorObject::protoClass_ = PlainObject::class_;
 
 static bool collator_toSource(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
@@ -75,6 +79,18 @@ static const JSPropertySpec collator_properties[] = {
     JS_SELF_HOSTED_GET("compare", "$Intl_Collator_compare_get", 0),
     JS_STRING_SYM_PS(toStringTag, "Object", JSPROP_READONLY), JS_PS_END};
 
+static bool Collator(JSContext* cx, unsigned argc, Value* vp);
+
+const ClassSpec CollatorObject::classSpec_ = {
+    GenericCreateConstructor<Collator, 0, gc::AllocKind::FUNCTION>,
+    GenericCreatePrototype<CollatorObject>,
+    collator_static_methods,
+    nullptr,
+    collator_methods,
+    collator_properties,
+    nullptr,
+    ClassSpec::DontDefineConstructor};
+
 /**
  * 10.1.2 Intl.Collator([ locales [, options]])
  *
@@ -85,19 +101,12 @@ static bool Collator(JSContext* cx, const CallArgs& args) {
 
   // Steps 2-5 (Inlined 9.1.14, OrdinaryCreateFromConstructor).
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Null, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Collator, &proto)) {
     return false;
   }
 
-  if (!proto) {
-    proto = GlobalObject::getOrCreateCollatorPrototype(cx, cx->global());
-    if (!proto) {
-      return false;
-    }
-  }
-
   Rooted<CollatorObject*> collator(
-      cx, NewObjectWithGivenProto<CollatorObject>(cx, proto));
+      cx, NewObjectWithClassProto<CollatorObject>(cx, proto));
   if (!collator) {
     return false;
   }
@@ -132,59 +141,10 @@ void js::CollatorObject::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
 
   if (UCollator* coll = obj->as<CollatorObject>().getCollator()) {
+    intl::RemoveICUCellMemory(fop, obj, CollatorObject::EstimatedMemoryUse);
+
     ucol_close(coll);
   }
-}
-
-JSObject* js::CreateCollatorPrototype(JSContext* cx, HandleObject Intl,
-                                      Handle<GlobalObject*> global) {
-  RootedFunction ctor(cx, GlobalObject::createConstructor(
-                              cx, &Collator, cx->names().Collator, 0));
-  if (!ctor) {
-    return nullptr;
-  }
-
-  RootedObject proto(
-      cx, GlobalObject::createBlankPrototype<PlainObject>(cx, global));
-  if (!proto) {
-    return nullptr;
-  }
-
-  if (!LinkConstructorAndPrototype(cx, ctor, proto)) {
-    return nullptr;
-  }
-
-  // 10.2.2
-  if (!JS_DefineFunctions(cx, ctor, collator_static_methods)) {
-    return nullptr;
-  }
-
-  // 10.3.5
-  if (!JS_DefineFunctions(cx, proto, collator_methods)) {
-    return nullptr;
-  }
-
-  // 10.3.2 and 10.3.3
-  if (!JS_DefineProperties(cx, proto, collator_properties)) {
-    return nullptr;
-  }
-
-  // 8.1
-  RootedValue ctorValue(cx, ObjectValue(*ctor));
-  if (!DefineDataProperty(cx, Intl, cx->names().Collator, ctorValue, 0)) {
-    return nullptr;
-  }
-
-  return proto;
-}
-
-bool js::intl_Collator_availableLocales(JSContext* cx, unsigned argc,
-                                        Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-  MOZ_ASSERT(args.length() == 0);
-
-  return GetAvailableLocales(cx, ucol_countAvailable, ucol_getAvailable,
-                             args.rval());
 }
 
 bool js::intl_availableCollations(JSContext* cx, unsigned argc, Value* vp) {
@@ -299,35 +259,30 @@ static UCollator* NewUCollator(JSContext* cx,
     }
     if (StringEqualsLiteral(usage, "search")) {
       // ICU expects search as a Unicode locale extension on locale.
-      // Unicode locale extensions must occur before private use extensions.
-      const char* oldLocale = locale.get();
-      const char* p;
-      size_t index;
-      size_t localeLen = strlen(oldLocale);
-      if ((p = strstr(oldLocale, "-x-"))) {
-        index = p - oldLocale;
-      } else {
-        index = localeLen;
-      }
-
-      const char* insert;
-      if ((p = strstr(oldLocale, "-u-")) &&
-          static_cast<size_t>(p - oldLocale) < index) {
-        index = p - oldLocale + 2;
-        insert = "-co-search";
-      } else {
-        insert = "-u-co-search";
-      }
-      size_t insertLen = strlen(insert);
-      char* newLocale = cx->pod_malloc<char>(localeLen + insertLen + 1);
-      if (!newLocale) {
+      intl::LanguageTag tag(cx);
+      if (!intl::LanguageTagParser::parse(
+              cx, mozilla::MakeStringSpan(locale.get()), tag)) {
         return nullptr;
       }
-      memcpy(newLocale, oldLocale, index);
-      memcpy(newLocale + index, insert, insertLen);
-      memcpy(newLocale + index + insertLen, oldLocale + index,
-             localeLen - index + 1);  // '\0'
-      locale = JS::UniqueChars(newLocale);
+
+      JS::RootedVector<intl::UnicodeExtensionKeyword> keywords(cx);
+
+      if (!keywords.emplaceBack("co", cx->names().search)) {
+        return nullptr;
+      }
+
+      // |ApplyUnicodeExtensionToTag| applies the new keywords to the front of
+      // the Unicode extension subtag. We're then relying on ICU to follow RFC
+      // 6067, which states that any trailing keywords using the same key
+      // should be ignored.
+      if (!intl::ApplyUnicodeExtensionToTag(cx, tag, keywords)) {
+        return nullptr;
+      }
+
+      locale = tag.toStringZ(cx);
+      if (!locale) {
+        return nullptr;
+      }
     } else {
       MOZ_ASSERT(StringEqualsLiteral(usage, "sort"));
     }
@@ -482,6 +437,8 @@ bool js::intl_CompareStrings(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
     collator->setCollator(coll);
+
+    intl::AddICUCellMemory(collator, CollatorObject::EstimatedMemoryUse);
   }
 
   // Use the UCollator to actually compare the strings.

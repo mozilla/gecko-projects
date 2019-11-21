@@ -16,6 +16,7 @@
 #include "BrowserParent.h"
 #include "js/JSON.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/BrowserElementParent.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/EventListenerManager.h"
@@ -367,6 +368,7 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
       mIgnoreKeyPressEvent(false),
       mHasValidInnerSize(false),
       mDestroyed(false),
+      mDynamicToolbarMaxHeight(0),
       mUniqueId(aTabId),
       mIsTopLevel(aIsTopLevel),
       mHasSiblings(false),
@@ -393,13 +395,7 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
       mPendingLayersObserverEpoch{0},
       mPendingDocShellBlockers(0),
       mCancelContentJSEpoch(0),
-      mWidgetNativeData(0)
-#ifdef XP_WIN
-      ,
-      mWindowSupportsProtectedMedia(true),
-      mWindowSupportsProtectedMediaChecked(false)
-#endif
-{
+      mWidgetNativeData(0) {
   mozilla::HoldJSObjects(this);
 
   nsWeakPtr weakPtrThis(do_GetWeakReference(
@@ -581,9 +577,13 @@ nsresult BrowserChild::Init(mozIDOMWindowProxy* aParent,
     window->SetInitialKeyboardIndicators(ShowFocusRings());
   }
 
-  nsContentUtils::SetScrollbarsVisibility(
-      window->GetDocShell(),
-      !!(mChromeFlags & nsIWebBrowserChrome::CHROME_SCROLLBARS));
+  // Window scrollbar flags only affect top level remote frames, not fission
+  // frames.
+  if (mIsTopLevel) {
+    nsContentUtils::SetScrollbarsVisibility(
+        window->GetDocShell(),
+        !!(mChromeFlags & nsIWebBrowserChrome::CHROME_SCROLLBARS));
+  }
 
   nsWeakPtr weakPtrThis = do_GetWeakReference(
       static_cast<nsIBrowserChild*>(this));  // for capture by the lambda
@@ -629,7 +629,7 @@ void BrowserChild::NotifyTabContextUpdated(bool aIsPreallocated) {
 
   // Set SANDBOXED_AUXILIARY_NAVIGATION flag if this is a receiver page.
   if (!PresentationURL().IsEmpty()) {
-    docShell->SetSandboxFlags(SANDBOXED_AUXILIARY_NAVIGATION);
+    mBrowsingContext->SetSandboxFlags(SANDBOXED_AUXILIARY_NAVIGATION);
   }
 }
 
@@ -1231,6 +1231,27 @@ mozilla::ipc::IPCResult BrowserChild::RecvInitRendering(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult BrowserChild::RecvCompositorOptionsChanged(
+    const CompositorOptions& aNewOptions) {
+  MOZ_ASSERT(mCompositorOptions);
+
+  // The only compositor option we currently support changing is APZ
+  // enablement. Even that is only partially supported for now:
+  //   * Going from APZ to non-APZ is fine - we just flip the stored flag.
+  //     Note that we keep the actors (mApzcTreeManager, and the APZChild
+  //     created in InitAPZState()) around (read on for why).
+  //   * Going from non-APZ to APZ is only supported if we were using
+  //     APZ initially (at InitRendering() time) and we are transitioning
+  //     back. In this case, we just reuse the actors which we kept around.
+  //     Fully supporting a non-APZ to APZ transition (i.e. even in cases
+  //     where we initialized as non-APZ) would require setting up the actors
+  //     here. (In that case, we would also have the options of destroying
+  //     the actors in the APZ --> non-APZ case, and always re-creating them
+  //     during a non-APZ --> APZ transition).
+  mCompositorOptions->SetUseAPZ(aNewOptions.UseAPZ());
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult BrowserChild::RecvUpdateDimensions(
     const DimensionInfo& aDimensionInfo) {
   // When recording/replaying we need to make sure the dimensions are up to
@@ -1264,6 +1285,19 @@ mozilla::ipc::IPCResult BrowserChild::RecvUpdateDimensions(
                         screenRect.y + mClientOffset.y + mChromeOffset.y,
                         screenSize.width, screenSize.height, true);
 
+  // For our devtools Responsive Design Mode, we need to send a special
+  // event to indicate that we've finished processing a frame size change.
+  // This is used by RDM to respond correctly to changes to full zoom,
+  // which also change the window size.
+  RefPtr<Document> doc = GetTopLevelDocument();
+  BrowsingContext* bc = doc ? doc->GetBrowsingContext() : nullptr;
+  if (bc && bc->InRDMPane()) {
+    RefPtr<AsyncEventDispatcher> dispatcher = new AsyncEventDispatcher(
+        doc, NS_LITERAL_STRING("mozupdatedremoteframedimensions"),
+        CanBubble::eYes, ChromeOnlyDispatch::eYes);
+    dispatcher->PostDOMEvent();
+  }
+
   return IPC_OK();
 }
 
@@ -1295,6 +1329,23 @@ mozilla::ipc::IPCResult BrowserChild::RecvSetIsUnderHiddenEmbedderElement(
   if (RefPtr<PresShell> presShell = GetTopLevelPresShell()) {
     presShell->SetIsUnderHiddenEmbedderElement(aIsUnderHiddenEmbedderElement);
   }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BrowserChild::RecvDynamicToolbarMaxHeightChanged(
+    const ScreenIntCoord& aHeight) {
+#if defined(MOZ_WIDGET_ANDROID)
+  mDynamicToolbarMaxHeight = aHeight;
+
+  RefPtr<Document> document = GetTopLevelDocument();
+  if (!document) {
+    return IPC_OK();
+  }
+
+  if (RefPtr<nsPresContext> presContext = document->GetPresContext()) {
+    presContext->SetDynamicToolbarMaxHeight(aHeight);
+  }
+#endif
   return IPC_OK();
 }
 
@@ -1445,10 +1496,12 @@ mozilla::ipc::IPCResult BrowserChild::RecvActivate() {
   // is definitely not going to work. GetPresShell should
   // create a PresShell if one doesn't exist yet.
   RefPtr<PresShell> presShell = GetTopLevelPresShell();
-  MOZ_ASSERT(presShell);
+  NS_ASSERTION(presShell, "Need a PresShell to activate!");
   Unused << presShell;
 
-  mWebBrowser->FocusActivate();
+  if (presShell) {
+    mWebBrowser->FocusActivate();
+  }
   return IPC_OK();
 }
 
@@ -3438,6 +3491,12 @@ nsresult BrowserChild::CanCancelContentJS(
       return NS_ERROR_FAILURE;
     }
 
+    if (aNavigationURI->SchemeIs("javascript")) {
+      // "javascript:" URIs don't (necessarily) trigger navigation to a
+      // different page, so don't allow the current page's JS to terminate.
+      return NS_OK;
+    }
+
     // If navigating directly to a URL (e.g. via hitting Enter in the location
     // bar), then we can cancel anytime the next URL is different from the
     // current, *excluding* the ref ("#").
@@ -3916,23 +3975,38 @@ bool BrowserChild::UpdateSessionStore(uint32_t aFlushId, bool aIsFinal) {
 }
 
 #ifdef XP_WIN
-// Cache the response to the IPC call to IsWindowSupportingProtectedMedia,
-// since it will not change for the lifetime of this object
-void BrowserChild::UpdateIsWindowSupportingProtectedMedia(bool aIsSupported) {
-  mWindowSupportsProtectedMediaChecked = true;
-  mWindowSupportsProtectedMedia = aIsSupported;
-}
-
-// Reuse the cached response to the IPC call IsWindowSupportingProtectedMedia
-// when available
-bool BrowserChild::RequiresIsWindowSupportingProtectedMediaCheck(
-    bool& aIsSupported) {
-  if (mWindowSupportsProtectedMediaChecked) {
-    aIsSupported = mWindowSupportsProtectedMedia;
-    return false;
-  } else {
-    return true;
+RefPtr<PBrowserChild::IsWindowSupportingProtectedMediaPromise>
+BrowserChild::DoesWindowSupportProtectedMedia() {
+  MOZ_ASSERT(
+      NS_IsMainThread(),
+      "Protected media support check should be done on main thread only.");
+  if (mWindowSupportsProtectedMedia) {
+    // If we've already checked and have a cached result, resolve with that.
+    return IsWindowSupportingProtectedMediaPromise::CreateAndResolve(
+        mWindowSupportsProtectedMedia.value(), __func__);
   }
+  RefPtr<BrowserChild> self = this;
+  // We chain off the promise rather than passing it directly so we can cache
+  // the result and use that for future calls.
+  return SendIsWindowSupportingProtectedMedia(ChromeOuterWindowID())
+      ->Then(
+          GetCurrentThreadSerialEventTarget(), __func__,
+          [self](bool isSupported) {
+            // If a result was cached while this check was inflight, ensure the
+            // results match.
+            MOZ_ASSERT_IF(
+                self->mWindowSupportsProtectedMedia,
+                self->mWindowSupportsProtectedMedia.value() == isSupported);
+            // Cache the response as it will not change during the lifetime
+            // of this object.
+            self->mWindowSupportsProtectedMedia = Some(isSupported);
+            return IsWindowSupportingProtectedMediaPromise::CreateAndResolve(
+                self->mWindowSupportsProtectedMedia.value(), __func__);
+          },
+          [](ResponseRejectReason reason) {
+            return IsWindowSupportingProtectedMediaPromise::CreateAndReject(
+                reason, __func__);
+          });
 }
 #endif
 

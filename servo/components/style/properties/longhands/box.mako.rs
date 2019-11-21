@@ -42,22 +42,27 @@ ${helpers.single_keyword(
     spec="Internal (not web-exposed)",
 )}
 
-${helpers.single_keyword(
-    "position",
-    "static absolute relative fixed" + (" sticky" if engine in ["gecko", "servo-2013"] else ""),
-    engines="gecko servo-2013 servo-2020",
-    animation_value_type="discrete",
-    flags="CREATES_STACKING_CONTEXT ABSPOS_CB",
-    spec="https://drafts.csswg.org/css-position/#position-property",
-    servo_restyle_damage="rebuild_and_reflow",
-)}
+<%helpers:single_keyword
+    name="position"
+    values="static absolute relative fixed ${'sticky' if engine in ['gecko', 'servo-2013'] else ''}"
+    engines="gecko servo-2013 servo-2020"
+    animation_value_type="discrete"
+    flags="CREATES_STACKING_CONTEXT ABSPOS_CB"
+    spec="https://drafts.csswg.org/css-position/#position-property"
+    servo_restyle_damage="rebuild_and_reflow"
+>
+impl computed_value::T {
+    pub fn is_absolutely_positioned(self) -> bool {
+        matches!(self, Self::Absolute | Self::Fixed)
+    }
+}
+</%helpers:single_keyword>
 
 ${helpers.predefined_type(
     "float",
     "Float",
     "computed::Float::None",
     engines="gecko servo-2013 servo-2020",
-    servo_2020_pref="layout.2020.unimplemented",
     initial_specified_value="specified::Float::None",
     spec="https://drafts.csswg.org/css-box/#propdef-float",
     animation_value_type="discrete",
@@ -391,7 +396,7 @@ ${helpers.predefined_type(
     engines="gecko",
     animation_value_type="ComputedValue",
     gecko_pref="layout.css.motion-path.enabled",
-    flags="CREATES_STACKING_CONTEXT FIXPOS_CB",
+    flags="CREATES_STACKING_CONTEXT FIXPOS_CB CAN_ANIMATE_ON_COMPOSITOR",
     spec="https://drafts.fxtf.org/motion-1/#offset-path-property",
     servo_restyle_damage="reflow_out_of_flow"
 )}
@@ -404,6 +409,7 @@ ${helpers.predefined_type(
     engines="gecko",
     animation_value_type="ComputedValue",
     gecko_pref="layout.css.motion-path.enabled",
+    flags="CAN_ANIMATE_ON_COMPOSITOR",
     spec="https://drafts.fxtf.org/motion-1/#offset-distance-property",
     servo_restyle_damage="reflow_out_of_flow"
 )}
@@ -416,6 +422,7 @@ ${helpers.predefined_type(
     engines="gecko",
     animation_value_type="ComputedValue",
     gecko_pref="layout.css.motion-path.enabled",
+    flags="CAN_ANIMATE_ON_COMPOSITOR",
     spec="https://drafts.fxtf.org/motion-1/#offset-rotate-property",
     servo_restyle_damage="reflow_out_of_flow"
 )}
@@ -428,6 +435,7 @@ ${helpers.predefined_type(
     engines="gecko",
     animation_value_type="ComputedValue",
     gecko_pref="layout.css.motion-path.enabled",
+    flags="CAN_ANIMATE_ON_COMPOSITOR",
     spec="https://drafts.fxtf.org/motion-1/#offset-anchor-property",
     servo_restyle_damage="reflow_out_of_flow",
     boxed=True
@@ -448,7 +456,6 @@ ${helpers.predefined_type(
     "ScrollSnapAlign",
     "computed::ScrollSnapAlign::none()",
     engines="gecko",
-    gecko_pref="layout.css.scroll-snap-v1.enabled",
     spec="https://drafts.csswg.org/css-scroll-snap-1/#scroll-snap-align",
     animation_value_type="discrete",
 )}
@@ -624,18 +631,6 @@ ${helpers.predefined_type(
     spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-appearance)",
     animation_value_type="discrete",
     gecko_ffi_name="mAppearance",
-)}
-
-${helpers.predefined_type(
-    "-moz-binding",
-    "url::UrlOrNone",
-    "computed::url::UrlOrNone::none()",
-    engines="gecko",
-    animation_value_type="none",
-    gecko_ffi_name="mBinding",
-    gecko_pref="layout.css.moz-binding.content.enabled",
-    enabled_in="chrome",
-    spec="Nonstandard (https://developer.mozilla.org/en-US/docs/Web/CSS/-moz-binding)",
 )}
 
 ${helpers.single_keyword(

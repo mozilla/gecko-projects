@@ -9,6 +9,8 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/MathAlgorithms.h"
 
+#include <algorithm>
+
 #include "jsfriendapi.h"
 
 #include "builtin/TypedObject.h"
@@ -367,6 +369,25 @@ void MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType,
   StoreToTypedFloatArray(*this, arrayType, value, dest);
 }
 
+template <typename S, typename T>
+static void StoreToTypedBigIntArray(MacroAssembler& masm,
+                                    Scalar::Type arrayType, const S& value,
+                                    const T& dest) {
+  MOZ_ASSERT(Scalar::isBigIntType(arrayType));
+  masm.store64(value, dest);
+}
+
+void MacroAssembler::storeToTypedBigIntArray(Scalar::Type arrayType,
+                                             Register64 value,
+                                             const BaseIndex& dest) {
+  StoreToTypedBigIntArray(*this, arrayType, value, dest);
+}
+void MacroAssembler::storeToTypedBigIntArray(Scalar::Type arrayType,
+                                             Register64 value,
+                                             const Address& dest) {
+  StoreToTypedBigIntArray(*this, arrayType, value, dest);
+}
+
 template <typename T>
 void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src,
                                         AnyRegister dest, Register temp,
@@ -401,11 +422,6 @@ void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src,
         branchTest32(Assembler::Signed, dest.gpr(), dest.gpr(), fail);
       }
       break;
-    case Scalar::BigInt64:
-    case Scalar::BigUint64:
-      // FIXME: https://bugzil.la/1536702
-      jump(fail);
-      break;
     case Scalar::Float32:
       loadFloat32(src, dest.fpu());
       canonicalizeFloat(dest.fpu());
@@ -416,6 +432,8 @@ void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src,
         canonicalizeDouble(dest.fpu());
       }
       break;
+    case Scalar::BigInt64:
+    case Scalar::BigUint64:
     default:
       MOZ_CRASH("Invalid typed array type");
   }
@@ -489,12 +507,8 @@ void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType, const T& src,
       boxDouble(fpscratch, dest, fpscratch);
       break;
     }
-    // FIXME: https://bugzil.la/1536702
     case Scalar::BigInt64:
-    case Scalar::BigUint64: {
-      jump(fail);
-      break;
-    }
+    case Scalar::BigUint64:
     default:
       MOZ_CRASH("Invalid typed array type");
   }
@@ -510,6 +524,25 @@ template void MacroAssembler::loadFromTypedArray(Scalar::Type arrayType,
                                                  const ValueOperand& dest,
                                                  bool allowDouble,
                                                  Register temp, Label* fail);
+
+template <typename T>
+void MacroAssembler::loadFromTypedBigIntArray(Scalar::Type arrayType,
+                                              const T& src, Register bigInt,
+                                              Register64 temp) {
+  MOZ_ASSERT(Scalar::isBigIntType(arrayType));
+
+  load64(src, temp);
+  initializeBigInt64(arrayType, bigInt, temp);
+}
+
+template void MacroAssembler::loadFromTypedBigIntArray(Scalar::Type arrayType,
+                                                       const Address& src,
+                                                       Register bigInt,
+                                                       Register64 temp);
+template void MacroAssembler::loadFromTypedBigIntArray(Scalar::Type arrayType,
+                                                       const BaseIndex& src,
+                                                       Register bigInt,
+                                                       Register64 temp);
 
 // Inlined version of gc::CheckAllocatorState that checks the bare essentials
 // and bails for anything that cannot be handled with our jit allocators.
@@ -784,10 +817,15 @@ void MacroAssembler::newGCFatInlineString(Register result, Register temp,
                  attemptNursery ? gc::DefaultHeap : gc::TenuredHeap, fail);
 }
 
+void MacroAssembler::newGCBigInt(Register result, Register temp, Label* fail) {
+  checkAllocatorState(fail);
+  freeListAllocate(result, temp, gc::AllocKind::BIGINT, fail);
+}
+
 void MacroAssembler::copySlotsFromTemplate(
     Register obj, const NativeTemplateObject& templateObj, uint32_t start,
     uint32_t end) {
-  uint32_t nfixed = Min(templateObj.numFixedSlots(), end);
+  uint32_t nfixed = std::min(templateObj.numFixedSlots(), end);
   for (unsigned i = start; i < nfixed; i++) {
     // Template objects are not exposed to script and therefore immutable.
     // However, regexp template objects are sometimes used directly (when
@@ -891,9 +929,9 @@ static void AllocateAndInitTypedArrayBuffer(JSContext* cx,
 
   size_t nbytes = count * obj->bytesPerElement();
   MOZ_ASSERT((CheckedUint32(nbytes) + sizeof(Value)).isValid(),
-             "JS_ROUNDUP must not overflow");
+             "RoundUp must not overflow");
 
-  nbytes = JS_ROUNDUP(nbytes, sizeof(Value));
+  nbytes = RoundUp(nbytes, sizeof(Value));
   void* buf = cx->nursery().allocateZeroedBuffer(obj, nbytes,
                                                  js::ArrayBufferContentsArena);
   if (buf) {
@@ -1016,7 +1054,7 @@ void MacroAssembler::initGCSlots(Register obj, Register temp,
   if (initContents) {
     size_t offset = NativeObject::getFixedSlotOffset(startOfUninitialized);
     fillSlotsWithUninitialized(Address(obj, offset), temp, startOfUninitialized,
-                               Min(startOfUndefined, nfixed));
+                               std::min(startOfUndefined, nfixed));
 
     offset = NativeObject::getFixedSlotOffset(startOfUndefined);
     fillSlotsWithUndefined(Address(obj, offset), temp, startOfUndefined,
@@ -1329,12 +1367,12 @@ void MacroAssembler::loadDependentStringBase(Register str, Register dest) {
   MOZ_ASSERT(str != dest);
 
   if (JitOptions.spectreStringMitigations) {
-    // If the string does not have a base-string, zero the |str| register.
+    // If the string is not a dependent string, zero the |str| register.
     // The code below loads str->base so this should block speculative
     // execution.
     movePtr(ImmWord(0), dest);
     test32MovePtr(Assembler::Zero, Address(str, JSString::offsetOfFlags()),
-                  Imm32(JSString::HAS_BASE_BIT), dest, str);
+                  Imm32(JSString::DEPENDENT_BIT), dest, str);
   }
 
   loadPtr(Address(str, JSDependentString::offsetOfBase()), dest);
@@ -1416,6 +1454,143 @@ void MacroAssembler::addToCharPtr(Register chars, Register index,
   } else {
     computeEffectiveAddress(BaseIndex(chars, index, TimesTwo), chars);
   }
+}
+
+void MacroAssembler::loadBigIntDigits(Register bigInt, Register digits) {
+  MOZ_ASSERT(digits != bigInt);
+
+  // Load the inline digits.
+  computeEffectiveAddress(Address(bigInt, BigInt::offsetOfInlineDigits()),
+                          digits);
+
+  // If inline digits aren't used, load the heap digits. Use a conditional move
+  // to prevent speculative execution.
+  cmp32LoadPtr(Assembler::GreaterThan,
+               Address(bigInt, BigInt::offsetOfLength()),
+               Imm32(int32_t(BigInt::inlineDigitsLength())),
+               Address(bigInt, BigInt::offsetOfHeapDigits()), digits);
+}
+
+void MacroAssembler::loadBigInt64(Register bigInt, Register64 dest) {
+  // This code follows the implementation of |BigInt::toUint64()|. We're also
+  // using it for inline callers of |BigInt::toInt64()|, which works, because
+  // all supported Jit architectures use a two's complement representation for
+  // int64 values, which means the WrapToSigned call in toInt64() is a no-op.
+
+  Label done, nonZero;
+
+  branch32(Assembler::NotEqual, Address(bigInt, BigInt::offsetOfLength()),
+           Imm32(0), &nonZero);
+  {
+    move64(Imm64(0), dest);
+    jump(&done);
+  }
+  bind(&nonZero);
+
+#ifdef JS_PUNBOX64
+  Register digits = dest.reg;
+#else
+  Register digits = dest.high;
+#endif
+
+  loadBigIntDigits(bigInt, digits);
+
+#if JS_PUNBOX64
+  // Load the first digit into the destination register.
+  load64(Address(digits, 0), dest);
+#else
+  // Load the first digit into the destination register's low value.
+  load32(Address(digits, 0), dest.low);
+
+  // And conditionally load the second digit into the high value register.
+  Label twoDigits, digitsDone;
+  branch32(Assembler::GreaterThan, Address(bigInt, BigInt::offsetOfLength()),
+           Imm32(1), &twoDigits);
+  {
+    move32(Imm32(0), dest.high);
+    jump(&digitsDone);
+  }
+  {
+    bind(&twoDigits);
+    load32(Address(digits, sizeof(BigInt::Digit)), dest.high);
+  }
+  bind(&digitsDone);
+#endif
+
+  branchTest32(Assembler::Zero, Address(bigInt, BigInt::offsetOfFlags()),
+               Imm32(BigInt::signBitMask()), &done);
+  neg64(dest);
+
+  bind(&done);
+}
+
+void MacroAssembler::loadFirstBigIntDigitOrZero(Register bigInt,
+                                                Register dest) {
+  Label done, nonZero;
+  branch32(Assembler::NotEqual, Address(bigInt, BigInt::offsetOfLength()),
+           Imm32(0), &nonZero);
+  {
+    movePtr(ImmWord(0), dest);
+    jump(&done);
+  }
+  bind(&nonZero);
+
+  loadBigIntDigits(bigInt, dest);
+
+  // Load the first digit into the destination register.
+  loadPtr(Address(dest, 0), dest);
+
+  bind(&done);
+}
+
+void MacroAssembler::initializeBigInt64(Scalar::Type type, Register bigInt,
+                                        Register64 val) {
+  MOZ_ASSERT(Scalar::isBigIntType(type));
+
+  store32(Imm32(0), Address(bigInt, BigInt::offsetOfFlags()));
+
+  Label done, nonZero;
+  branch64(Assembler::NotEqual, val, Imm64(0), &nonZero);
+  {
+    store32(Imm32(0), Address(bigInt, BigInt::offsetOfLength()));
+    jump(&done);
+  }
+  bind(&nonZero);
+
+  if (type == Scalar::BigInt64) {
+    // Set the sign-bit for negative values and then continue with the two's
+    // complement.
+    Label isPositive;
+    branch64(Assembler::GreaterThan, val, Imm64(0), &isPositive);
+    {
+      store32(Imm32(BigInt::signBitMask()),
+              Address(bigInt, BigInt::offsetOfFlags()));
+      neg64(val);
+    }
+    bind(&isPositive);
+  }
+
+  store32(Imm32(1), Address(bigInt, BigInt::offsetOfLength()));
+
+  static_assert(sizeof(BigInt::Digit) == sizeof(uintptr_t),
+                "BigInt Digit size matches uintptr_t, so there's a single "
+                "store on 64-bit and up to two stores on 32-bit");
+
+#ifndef JS_PUNBOX64
+  Label singleDigit;
+  branchTest32(Assembler::Zero, val.high, val.high, &singleDigit);
+  store32(Imm32(2), Address(bigInt, BigInt::offsetOfLength()));
+  bind(&singleDigit);
+
+  // We can perform a single store64 on 32-bit platforms, because inline
+  // storage can store at least two 32-bit integers.
+  static_assert(BigInt::inlineDigitsLength() >= 2,
+                "BigInt inline storage can store at least two digits");
+#endif
+
+  store64(val, Address(bigInt, js::BigInt::offsetOfInlineDigits()));
+
+  bind(&done);
 }
 
 void MacroAssembler::typeOfObject(Register obj, Register scratch, Label* slow,
@@ -1629,7 +1804,7 @@ void MacroAssembler::loadJitCodeRaw(Register func, Register dest) {
 
 void MacroAssembler::loadJitCodeNoArgCheck(Register func, Register dest) {
   loadPtr(Address(func, JSFunction::offsetOfScript()), dest);
-  loadPtr(Address(dest, JSScript::offsetOfJitScript()), dest);
+  loadJitScript(dest, dest);
   loadPtr(Address(dest, JitScript::offsetOfJitCodeSkipArgCheck()), dest);
 }
 
@@ -1926,110 +2101,6 @@ void MacroAssembler::convertValueToFloatingPoint(ValueOperand value,
   bind(&done);
 }
 
-bool MacroAssembler::convertValueToFloatingPoint(JSContext* cx, const Value& v,
-                                                 FloatRegister output,
-                                                 Label* fail,
-                                                 MIRType outputType) {
-  if (v.isNumber() || v.isString()) {
-    double d;
-    if (v.isNumber()) {
-      d = v.toNumber();
-    } else if (!StringToNumber(cx, v.toString(), &d)) {
-      return false;
-    }
-
-    loadConstantFloatingPoint(d, (float)d, output, outputType);
-    return true;
-  }
-
-  if (v.isBoolean()) {
-    if (v.toBoolean()) {
-      loadConstantFloatingPoint(1.0, 1.0f, output, outputType);
-    } else {
-      loadConstantFloatingPoint(0.0, 0.0f, output, outputType);
-    }
-    return true;
-  }
-
-  if (v.isNull()) {
-    loadConstantFloatingPoint(0.0, 0.0f, output, outputType);
-    return true;
-  }
-
-  if (v.isUndefined()) {
-    loadConstantFloatingPoint(GenericNaN(), float(GenericNaN()), output,
-                              outputType);
-    return true;
-  }
-
-  MOZ_ASSERT(v.isObject() || v.isSymbol());
-  jump(fail);
-  return true;
-}
-
-bool MacroAssembler::convertConstantOrRegisterToFloatingPoint(
-    JSContext* cx, const ConstantOrRegister& src, FloatRegister output,
-    Label* fail, MIRType outputType) {
-  if (src.constant()) {
-    return convertValueToFloatingPoint(cx, src.value(), output, fail,
-                                       outputType);
-  }
-
-  convertTypedOrValueToFloatingPoint(src.reg(), output, fail, outputType);
-  return true;
-}
-
-void MacroAssembler::convertTypedOrValueToFloatingPoint(
-    TypedOrValueRegister src, FloatRegister output, Label* fail,
-    MIRType outputType) {
-  MOZ_ASSERT(IsFloatingPointType(outputType));
-
-  if (src.hasValue()) {
-    convertValueToFloatingPoint(src.valueReg(), output, fail, outputType);
-    return;
-  }
-
-  bool outputIsDouble = outputType == MIRType::Double;
-  switch (src.type()) {
-    case MIRType::Null:
-      loadConstantFloatingPoint(0.0, 0.0f, output, outputType);
-      break;
-    case MIRType::Boolean:
-    case MIRType::Int32:
-      convertInt32ToFloatingPoint(src.typedReg().gpr(), output, outputType);
-      break;
-    case MIRType::Float32:
-      if (outputIsDouble) {
-        convertFloat32ToDouble(src.typedReg().fpu(), output);
-      } else {
-        if (src.typedReg().fpu() != output) {
-          moveFloat32(src.typedReg().fpu(), output);
-        }
-      }
-      break;
-    case MIRType::Double:
-      if (outputIsDouble) {
-        if (src.typedReg().fpu() != output) {
-          moveDouble(src.typedReg().fpu(), output);
-        }
-      } else {
-        convertDoubleToFloat32(src.typedReg().fpu(), output);
-      }
-      break;
-    case MIRType::Object:
-    case MIRType::String:
-    case MIRType::Symbol:
-      jump(fail);
-      break;
-    case MIRType::Undefined:
-      loadConstantFloatingPoint(GenericNaN(), float(GenericNaN()), output,
-                                outputType);
-      break;
-    default:
-      MOZ_CRASH("Bad MIRType");
-  }
-}
-
 void MacroAssembler::outOfLineTruncateSlow(FloatRegister src, Register dest,
                                            bool widenFloatToDouble,
                                            bool compilingWasm,
@@ -2096,9 +2167,15 @@ void MacroAssembler::convertDoubleToInt(FloatRegister src, Register output,
       branchTruncateDoubleMaybeModUint32(src, output,
                                          truncateFail ? truncateFail : fail);
       break;
+    case IntConversionBehavior::TruncateNoWrap:
+      branchTruncateDoubleToInt32(src, output,
+                                  truncateFail ? truncateFail : fail);
+      break;
     case IntConversionBehavior::ClampToUint8:
       // Clamping clobbers the input register, so use a temp.
-      moveDouble(src, temp);
+      if (src != temp) {
+        moveDouble(src, temp);
+      }
       clampDoubleToUint8(temp, output);
       break;
   }
@@ -2130,7 +2207,7 @@ void MacroAssembler::convertValueToInt(
 
     if (conversion == IntConversionInputKind::Any) {
       // If we are not truncating, we fail for anything that's not
-      // null. Otherwise we might be able to handle strings and objects.
+      // null. Otherwise we might be able to handle strings and undefined.
       switch (behavior) {
         case IntConversionBehavior::Normal:
         case IntConversionBehavior::NegativeZeroCheck:
@@ -2138,12 +2215,12 @@ void MacroAssembler::convertValueToInt(
           break;
 
         case IntConversionBehavior::Truncate:
+        case IntConversionBehavior::TruncateNoWrap:
         case IntConversionBehavior::ClampToUint8:
           maybeBranchTestType(MIRType::Null, maybeInput, tag, &isNull);
           if (handleStrings) {
             maybeBranchTestType(MIRType::String, maybeInput, tag, &isString);
           }
-          maybeBranchTestType(MIRType::Object, maybeInput, tag, fail);
           branchTestUndefined(Assembler::NotEqual, tag, fail);
           break;
       }
@@ -2198,114 +2275,6 @@ void MacroAssembler::convertValueToInt(
   }
 
   bind(&done);
-}
-
-bool MacroAssembler::convertValueToInt(JSContext* cx, const Value& v,
-                                       Register output, Label* fail,
-                                       IntConversionBehavior behavior) {
-  bool handleStrings = (behavior == IntConversionBehavior::Truncate ||
-                        behavior == IntConversionBehavior::ClampToUint8);
-
-  if (v.isNumber() || (handleStrings && v.isString())) {
-    double d;
-    if (v.isNumber()) {
-      d = v.toNumber();
-    } else if (!StringToNumber(cx, v.toString(), &d)) {
-      return false;
-    }
-
-    switch (behavior) {
-      case IntConversionBehavior::Normal:
-      case IntConversionBehavior::NegativeZeroCheck: {
-        // -0 is checked anyways if we have a constant value.
-        int i;
-        if (mozilla::NumberIsInt32(d, &i)) {
-          move32(Imm32(i), output);
-        } else {
-          jump(fail);
-        }
-        break;
-      }
-      case IntConversionBehavior::Truncate:
-        move32(Imm32(ToInt32(d)), output);
-        break;
-      case IntConversionBehavior::ClampToUint8:
-        move32(Imm32(ClampDoubleToUint8(d)), output);
-        break;
-    }
-
-    return true;
-  }
-
-  if (v.isBoolean()) {
-    move32(Imm32(v.toBoolean() ? 1 : 0), output);
-    return true;
-  }
-
-  if (v.isNull() || v.isUndefined()) {
-    move32(Imm32(0), output);
-    return true;
-  }
-
-  MOZ_ASSERT(v.isObject() || v.isSymbol());
-
-  jump(fail);
-  return true;
-}
-
-bool MacroAssembler::convertConstantOrRegisterToInt(
-    JSContext* cx, const ConstantOrRegister& src, FloatRegister temp,
-    Register output, Label* fail, IntConversionBehavior behavior) {
-  if (src.constant()) {
-    return convertValueToInt(cx, src.value(), output, fail, behavior);
-  }
-
-  convertTypedOrValueToInt(src.reg(), temp, output, fail, behavior);
-  return true;
-}
-
-void MacroAssembler::convertTypedOrValueToInt(TypedOrValueRegister src,
-                                              FloatRegister temp,
-                                              Register output, Label* fail,
-                                              IntConversionBehavior behavior) {
-  if (src.hasValue()) {
-    convertValueToInt(src.valueReg(), temp, output, fail, behavior);
-    return;
-  }
-
-  switch (src.type()) {
-    case MIRType::Undefined:
-    case MIRType::Null:
-      move32(Imm32(0), output);
-      break;
-    case MIRType::Boolean:
-    case MIRType::Int32:
-      if (src.typedReg().gpr() != output) {
-        move32(src.typedReg().gpr(), output);
-      }
-      if (src.type() == MIRType::Int32 &&
-          behavior == IntConversionBehavior::ClampToUint8) {
-        clampIntToUint8(output);
-      }
-      break;
-    case MIRType::Double:
-      convertDoubleToInt(src.typedReg().fpu(), output, temp, nullptr, fail,
-                         behavior);
-      break;
-    case MIRType::Float32:
-      // Conversion to Double simplifies implementation at the expense of
-      // performance.
-      convertFloat32ToDouble(src.typedReg().fpu(), temp);
-      convertDoubleToInt(temp, output, temp, nullptr, fail, behavior);
-      break;
-    case MIRType::String:
-    case MIRType::Symbol:
-    case MIRType::Object:
-      jump(fail);
-      break;
-    default:
-      MOZ_CRASH("Bad MIRType");
-  }
 }
 
 void MacroAssembler::finish() {
@@ -2622,6 +2591,7 @@ void MacroAssembler::PushEmptyRooted(VMFunctionData::RootType rootType) {
     case VMFunctionData::RootString:
     case VMFunctionData::RootFunction:
     case VMFunctionData::RootCell:
+    case VMFunctionData::RootBigInt:
       Push(ImmPtr(nullptr));
       break;
     case VMFunctionData::RootValue:
@@ -2643,6 +2613,7 @@ void MacroAssembler::popRooted(VMFunctionData::RootType rootType,
     case VMFunctionData::RootFunction:
     case VMFunctionData::RootCell:
     case VMFunctionData::RootId:
+    case VMFunctionData::RootBigInt:
       Pop(cellReg);
       break;
     case VMFunctionData::RootValue:
@@ -3051,7 +3022,9 @@ std::pair<CodeOffset, uint32_t> MacroAssembler::wasmReserveStackChecked(
     Label trap;
     branchPtr(Assembler::Below, scratch, Imm32(amount), &trap);
     subPtr(Imm32(amount), scratch);
-    branchPtr(Assembler::Below, Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)), scratch, &ok);
+    branchPtr(Assembler::Below,
+              Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)), scratch,
+              &ok);
 
     bind(&trap);
     wasmTrap(wasm::Trap::StackOverflow, trapOffset);
@@ -3476,7 +3449,7 @@ void MacroAssembler::iteratorMore(Register obj, ValueOperand output,
   loadPtr(Address(temp, 0), temp);
 
   // Increase the cursor.
-  addPtr(Imm32(sizeof(GCPtrFlatString)), cursorAddr);
+  addPtr(Imm32(sizeof(GCPtrLinearString)), cursorAddr);
 
   tagValue(JSVAL_TYPE_STRING, temp, output);
   jump(&done);
@@ -3519,7 +3492,7 @@ static bool AddPendingReadBarrier(Vector<T*, N, P>& list, T* value) {
   const size_t TailWindow = 4;
 
   size_t len = list.length();
-  for (size_t i = 0; i < Min(len, TailWindow); i++) {
+  for (size_t i = 0; i < std::min(len, TailWindow); i++) {
     if (list[len - i - 1] == value) {
       return true;
     }

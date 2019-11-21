@@ -7,6 +7,7 @@ package org.mozilla.geckoview.test
 import android.support.test.filters.MediumTest
 import android.support.test.runner.AndroidJUnit4
 import org.hamcrest.Matchers
+import org.hamcrest.Matchers.equalTo
 import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -14,14 +15,18 @@ import org.mozilla.geckoview.ContentBlocking
 import org.mozilla.geckoview.ContentBlockingController
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule
+import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.AssertCalled
 import org.mozilla.geckoview.test.util.Callbacks
+import org.junit.Assume.assumeThat
 
 @RunWith(AndroidJUnit4::class)
 @MediumTest
 class ContentBlockingControllerTest : BaseSessionTest() {
     @GeckoSessionTestRule.Setting(key = GeckoSessionTestRule.Setting.Key.USE_TRACKING_PROTECTION, value = "true")
+// disable test on debug for frequently failing #Bug 1580223
     @Test
     fun trackingProtectionException() {
+        assumeThat(sessionRule.env.isDebugBuild, equalTo(false))
         val category = ContentBlocking.AntiTracking.TEST
         sessionRule.runtime.settings.contentBlocking.setAntiTracking(category)
         sessionRule.session.loadTestPath(TRACKERS_PATH)
@@ -148,8 +153,13 @@ class ContentBlockingControllerTest : BaseSessionTest() {
         sessionRule.runtime.settings.contentBlocking.setAntiTracking(category)
         sessionRule.session.settings.useTrackingProtection = true
         sessionRule.session.loadTestPath(TRACKERS_PATH)
-
-        sessionRule.waitForPageStop()
+        
+        sessionRule.waitUntilCalled(object : Callbacks.ContentBlockingDelegate {
+            @AssertCalled(count = 1)
+            override fun onContentBlocked(session: GeckoSession,
+                                          event: ContentBlocking.BlockEvent) {
+            }
+        })
 
         sessionRule.waitForResult(sessionRule.runtime.contentBlockingController.getLog(sessionRule.session).accept {
             assertThat("Log must not be null", it, Matchers.notNullValue())

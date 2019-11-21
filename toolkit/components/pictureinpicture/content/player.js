@@ -10,6 +10,9 @@ const { DeferredTask } = ChromeUtils.import(
   "resource://gre/modules/DeferredTask.jsm"
 );
 
+const AUDIO_TOGGLE_ENABLED_PREF =
+  "media.videocontrols.picture-in-picture.audio-toggle.enabled";
+
 // Time to fade the Picture-in-Picture video controls after first opening.
 const CONTROLS_FADE_TIMEOUT_MS = 3000;
 const RESIZE_DEBOUNCE_RATE_MS = 500;
@@ -39,6 +42,17 @@ function setIsPlayingState(isPlaying) {
 }
 
 /**
+ * Public function to be called from PictureInPicture.jsm. This update the
+ * controls based on whether or not the video is muted.
+ *
+ * @param isMuted (Boolean)
+ *   True if the Picture-in-Picture video is muted.
+ */
+function setIsMutedState(isMuted) {
+  Player.isMuted = isMuted;
+}
+
+/**
  * The Player object handles initializing the player, holds state, and handles
  * events for updating state.
  */
@@ -51,7 +65,7 @@ let Player = {
     "resize",
     "unload",
   ],
-  mm: null,
+  actor: null,
   /**
    * Used for resizing Telemetry to avoid recording an event for every resize
    * event. Instead, we wait until RESIZE_DEBOUNCE_RATE_MS has passed since the
@@ -91,12 +105,10 @@ let Player = {
     browser.sameProcessAsFrameLoader = originatingBrowser.frameLoader;
     holder.appendChild(browser);
 
-    browser.loadURI("about:blank", {
-      triggeringPrincipal: originatingBrowser.contentPrincipal,
-    });
-
-    this.mm = browser.frameLoader.messageManager;
-    this.mm.sendAsyncMessage("PictureInPicture:SetupPlayer");
+    this.actor = browser.browsingContext.currentWindowGlobal.getActor(
+      "PictureInPicture"
+    );
+    this.actor.sendAsyncMessage("PictureInPicture:SetupPlayer");
 
     for (let eventType of this.WINDOW_EVENTS) {
       addEventListener(eventType, this);
@@ -107,6 +119,12 @@ let Player = {
     browser.addEventListener("oop-browser-crashed", this);
 
     this.revealControls(false);
+
+    if (Services.prefs.getBoolPref(AUDIO_TOGGLE_ENABLED_PREF, false)) {
+      const audioButton = document.getElementById("audio");
+      audioButton.hidden = false;
+      audioButton.previousElementSibling.hidden = false;
+    }
 
     Services.telemetry.setEventRecordingEnabled("pictureinpicture", true);
 
@@ -179,6 +197,15 @@ let Player = {
 
   onClick(event) {
     switch (event.target.id) {
+      case "audio": {
+        if (this.isMuted) {
+          this.actor.sendAsyncMessage("PictureInPicture:Unmute");
+        } else {
+          this.actor.sendAsyncMessage("PictureInPicture:Mute");
+        }
+        break;
+      }
+
       case "close": {
         PictureInPicture.closePipWindow({ reason: "close-button" });
         break;
@@ -186,10 +213,10 @@ let Player = {
 
       case "playpause": {
         if (!this.isPlaying) {
-          this.mm.sendAsyncMessage("PictureInPicture:Play");
+          this.actor.sendAsyncMessage("PictureInPicture:Play");
           this.revealControls(false);
         } else {
-          this.mm.sendAsyncMessage("PictureInPicture:Pause");
+          this.actor.sendAsyncMessage("PictureInPicture:Pause");
           this.revealControls(true);
         }
 
@@ -245,6 +272,25 @@ let Player = {
   set isPlaying(isPlaying) {
     this._isPlaying = isPlaying;
     this.controls.classList.toggle("playing", isPlaying);
+  },
+
+  _isMuted: false,
+  /**
+   * isMuted returns true if the video is currently muted.
+   *
+   * @return Boolean
+   */
+  get isMuted() {
+    return this._isMuted;
+  },
+
+  /**
+   * Set isMuted to true if the video is muted, false otherwise. This will
+   * update the internal state and displayed controls.
+   */
+  set isMuted(isMuted) {
+    this._isMuted = isMuted;
+    this.controls.classList.toggle("muted", isMuted);
   },
 
   recordEvent(type, args) {

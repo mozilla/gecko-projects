@@ -109,9 +109,6 @@ class ProviderUnifiedComplete extends UrlbarProvider {
     // This is necessary because we insert matches one by one, thus we don't
     // want UnifiedComplete to reuse results.
     params.push(`insert-method:${UrlbarUtils.INSERTMETHOD.APPEND}`);
-    // The Quantum Bar has its own telemetry measurement, thus disable old
-    // telemetry logged by UnifiedComplete.
-    params.push("disable-telemetry");
     if (queryContext.isPrivate) {
       params.push("private-window");
       if (!PrivateBrowsingUtils.permanentPrivateBrowsing) {
@@ -221,28 +218,24 @@ function convertResultToMatches(context, result, urls) {
     if (!match) {
       continue;
     }
-    // Manage autofill and preselected properties for the first match.
-    if (isHeuristic) {
-      if (style.includes("autofill") && result.defaultIndex == 0) {
-        let autofillValue = result.getValueAt(i);
-        if (
-          autofillValue
-            .toLocaleLowerCase()
-            .startsWith(context.searchString.toLocaleLowerCase())
-        ) {
-          match.autofill = {
-            value:
-              context.searchString +
-              autofillValue.substring(context.searchString.length),
-            selectionStart: context.searchString.length,
-            selectionEnd: autofillValue.length,
-          };
-        }
+    // Manage autofill for the first match.
+    if (isHeuristic && style.includes("autofill") && result.defaultIndex == 0) {
+      let autofillValue = result.getValueAt(i);
+      if (
+        autofillValue
+          .toLocaleLowerCase()
+          .startsWith(context.searchString.toLocaleLowerCase())
+      ) {
+        match.autofill = {
+          value:
+            context.searchString +
+            autofillValue.substring(context.searchString.length),
+          selectionStart: context.searchString.length,
+          selectionEnd: autofillValue.length,
+        };
       }
-
-      context.preselected = true;
-      match.heuristic = true;
     }
+    match.heuristic = isHeuristic;
     matches.push(match);
   }
   return { matches, done };
@@ -386,32 +379,44 @@ function makeUrlbarResult(tokens, info) {
   let source;
   let tags = [];
   let comment = info.comment;
+
   // UnifiedComplete may return "bookmark", "bookmark-tag" or "tag". In the last
   // case it should not be considered a bookmark, but an history item with tags.
   // We don't show tags for non bookmarked items though.
   if (info.style.includes("bookmark")) {
     source = UrlbarUtils.RESULT_SOURCE.BOOKMARKS;
-    if (info.style.includes("tag")) {
-      // Split title and tags.
-      [comment, tags] = info.comment.split(UrlbarUtils.TITLE_TAGS_SEPARATOR);
-      // Tags are separated by a comma and in a random order.
-      // We should also just include tags that match the searchString.
-      tags = tags
-        .split(",")
-        .map(t => t.trim())
-        .filter(tag => {
-          let lowerCaseTag = tag.toLocaleLowerCase();
-          return tokens.some(token =>
-            lowerCaseTag.includes(token.lowerCaseValue)
-          );
-        })
-        .sort();
-    }
   } else if (info.style.includes("preloaded-top-sites")) {
     source = UrlbarUtils.RESULT_SOURCE.OTHER_LOCAL;
   } else {
     source = UrlbarUtils.RESULT_SOURCE.HISTORY;
   }
+
+  // If the style indicates that the result is tagged, then the tags are
+  // included in the title, and we must extract them.
+  if (info.style.includes("tag")) {
+    [comment, tags] = info.comment.split(UrlbarUtils.TITLE_TAGS_SEPARATOR);
+
+    // However, as mentioned above, we don't want to show tags for non-
+    // bookmarked items, so we include tags in the final result only if it's
+    // bookmarked, and we drop the tags otherwise.
+    if (source != UrlbarUtils.RESULT_SOURCE.BOOKMARKS) {
+      tags = "";
+    }
+
+    // Tags are separated by a comma and in a random order.
+    // We should also just include tags that match the searchString.
+    tags = tags
+      .split(",")
+      .map(t => t.trim())
+      .filter(tag => {
+        let lowerCaseTag = tag.toLocaleLowerCase();
+        return tokens.some(token =>
+          lowerCaseTag.includes(token.lowerCaseValue)
+        );
+      })
+      .sort();
+  }
+
   return new UrlbarResult(
     UrlbarUtils.RESULT_TYPE.URL,
     source,

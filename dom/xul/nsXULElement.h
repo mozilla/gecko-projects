@@ -349,8 +349,6 @@ class nsXULElement : public nsStyledElement {
                                 bool aIsTrustedEvent) override;
   void ClickWithInputSource(uint16_t aInputSource, bool aIsTrustedEvent);
 
-  Element* GetBindingParent() const final { return mBindingParent; }
-
   virtual bool IsNodeOfType(uint32_t aFlags) const override;
   virtual bool IsFocusableInternal(int32_t* aTabIndex,
                                    bool aWithMouse) override;
@@ -361,16 +359,8 @@ class nsXULElement : public nsStyledElement {
 
   virtual nsresult Clone(mozilla::dom::NodeInfo*,
                          nsINode** aResult) const override;
-  virtual mozilla::EventStates IntrinsicState() const override;
 
   virtual void RecompileScriptEventListeners() override;
-
-  // This function should ONLY be used by BindToTree implementations.
-  // The function exists solely because XUL elements store the binding
-  // parent as a member instead of in the slots, as Element does.
-  void SetXULBindingParent(Element* aBindingParent) {
-    mBindingParent = aBindingParent;
-  }
 
   virtual bool IsEventAttributeNameInternal(nsAtom* aName) override;
 
@@ -534,12 +524,6 @@ class nsXULElement : public nsStyledElement {
   nsresult AddPopupListener(nsAtom* aName);
 
   /**
-   * The nearest enclosing content node with a binding
-   * that created us.
-   */
-  RefPtr<Element> mBindingParent;
-
-  /**
    * Abandon our prototype linkage, and copy all attributes locally
    */
   nsresult MakeHeavyweight(nsXULPrototypeElement* aPrototype);
@@ -607,11 +591,6 @@ class nsXULElement : public nsStyledElement {
   static already_AddRefed<nsXULElement> CreateFromPrototype(
       nsXULPrototypeElement* aPrototype, mozilla::dom::NodeInfo* aNodeInfo,
       bool aIsScriptable, bool aIsRoot);
-
-  bool IsReadWriteTextElement() const {
-    return IsAnyOfXULElements(nsGkAtoms::textbox, nsGkAtoms::textarea) &&
-           !HasAttr(kNameSpaceID_None, nsGkAtoms::readonly);
-  }
 
   virtual JSObject* WrapNode(JSContext* aCx,
                              JS::Handle<JSObject*> aGivenProto) override;

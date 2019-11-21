@@ -13,6 +13,7 @@
 #include "GeckoProfiler.h"
 #include "gfxFontFamilyList.h"
 #include "gfxFontFeatures.h"
+#include "gfxTextRun.h"
 #include "nsAnimationManager.h"
 #include "nsAttrValueInlines.h"
 #include "nsCSSFrameConstructor.h"
@@ -151,10 +152,6 @@ const Element* Gecko_GetMarkerPseudo(const Element* aElement) {
   MOZ_ASSERT(aElement->HasProperties());
 
   return nsLayoutUtils::GetMarkerPseudo(aElement);
-}
-
-bool Gecko_IsInAnonymousSubtree(const Element* aElement) {
-  return aElement->IsInAnonymousSubtree();
 }
 
 nsTArray<nsIContent*>* Gecko_GetAnonymousContentForElement(
@@ -1036,8 +1033,8 @@ nsTArray<uint32_t>* Gecko_AppendFeatureValueHashEntry(
     gfxFontFeatureValueSet* aFontFeatureValues, nsAtom* aFamily,
     uint32_t aAlternate, nsAtom* aName) {
   MOZ_ASSERT(NS_IsMainThread());
-  return aFontFeatureValues->AppendFeatureValueHashEntry(
-      nsAtomCString(aFamily), aName, aAlternate);
+  return aFontFeatureValues->AppendFeatureValueHashEntry(nsAtomCString(aFamily),
+                                                         aName, aAlternate);
 }
 
 float Gecko_FontStretch_ToFloat(FontStretch aStretch) {
@@ -1574,10 +1571,6 @@ FontSizePrefs Gecko_GetBaseSize(nsAtom* aLanguage) {
   FontSizePrefs sizes;
   sizes.CopyFrom(prefs);
   return sizes;
-}
-
-const Element* Gecko_GetBindingParent(const Element* aElement) {
-  return aElement->GetBindingParent();
 }
 
 static StaticRefPtr<UACacheReporter> gUACacheReporter;

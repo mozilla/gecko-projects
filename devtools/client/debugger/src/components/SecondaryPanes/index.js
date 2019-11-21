@@ -45,6 +45,7 @@ import XHRBreakpoints from "./XHRBreakpoints";
 import EventListeners from "./EventListeners";
 import DOMMutationBreakpoints from "./DOMMutationBreakpoints";
 import WhyPaused from "./WhyPaused";
+import FrameTimeline from "./FrameTimeline";
 
 import Scopes from "./Scopes";
 
@@ -85,6 +86,10 @@ type State = {
   showXHRInput: boolean,
 };
 
+type OwnProps = {|
+  horizontal: boolean,
+  toggleShortcutsModal: () => void,
+|};
 type Props = {
   cx: ThreadContext,
   expressions: List<Expression>,
@@ -517,6 +522,7 @@ class SecondaryPanes extends Component<Props, State> {
     return (
       <div className="secondary-panes-wrapper">
         <CommandBar horizontal={this.props.horizontal} />
+        <FrameTimeline />
         <div
           className={classnames(
             "secondary-panes",
@@ -569,7 +575,7 @@ const mapStateToProps = state => {
   };
 };
 
-export default connect(
+export default connect<Props, OwnProps, _, _, _, _>(
   mapStateToProps,
   {
     toggleAllBreakpoints: actions.toggleAllBreakpoints,

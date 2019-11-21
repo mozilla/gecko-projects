@@ -246,6 +246,20 @@ impl ScaleOffset {
         )
     }
 
+    pub fn map_vector<F, T>(&self, vector: &Vector2D<f32, F>) -> Vector2D<f32, T> {
+        Vector2D::new(
+            vector.x * self.scale.x + self.offset.x,
+            vector.y * self.scale.y + self.offset.y,
+        )
+    }
+
+    pub fn unmap_vector<F, T>(&self, vector: &Vector2D<f32, F>) -> Vector2D<f32, T> {
+        Vector2D::new(
+            (vector.x - self.offset.x) / self.scale.x,
+            (vector.y - self.offset.y) / self.scale.y,
+        )
+    }
+
     pub fn to_transform<F, T>(&self) -> Transform3D<f32, F, T> {
         Transform3D::row_major(
             self.scale.x,
@@ -1164,54 +1178,3 @@ pub fn round_up_to_multiple(val: usize, mul: NonZeroUsize) -> usize {
     }
 }
 
-/// A helper function to construct a rect from a (x0,y0) and (x1,y1) pair
-#[inline]
-fn rect_from_points_f<U>(x0: f32,
-                         y0: f32,
-                         x1: f32,
-                         y1: f32) -> Rect<f32, U> {
-    Rect::new(Point2D::new(x0, y0),
-              Size2D::new(x1 - x0, y1 - y0))
-}
-
-/// Subtract `other` from `rect`, and write the outputs into `results`.
-pub fn subtract_rect<U>(rect: &Rect<f32, U>,
-                        other: &Rect<f32, U>,
-                        results: &mut Vec<Rect<f32, U>>) {
-    results.clear();
-
-    let int = rect.intersection(other);
-    match int {
-        Some(int) => {
-            let rx0 = rect.origin.x;
-            let ry0 = rect.origin.y;
-            let rx1 = rx0 + rect.size.width;
-            let ry1 = ry0 + rect.size.height;
-
-            let ox0 = int.origin.x;
-            let oy0 = int.origin.y;
-            let ox1 = ox0 + int.size.width;
-            let oy1 = oy0 + int.size.height;
-
-            let r = rect_from_points_f(rx0, ry0, ox0, ry1);
-            if r.size.width > 0.0 && r.size.height > 0.0 {
-                results.push(r);
-            }
-            let r = rect_from_points_f(ox0, ry0, ox1, oy0);
-            if r.size.width > 0.0 && r.size.height > 0.0 {
-                results.push(r);
-            }
-            let r = rect_from_points_f(ox0, oy1, ox1, ry1);
-            if r.size.width > 0.0 && r.size.height > 0.0 {
-                results.push(r);
-            }
-            let r = rect_from_points_f(ox1, ry0, rx1, ry1);
-            if r.size.width > 0.0 && r.size.height > 0.0 {
-                results.push(r);
-            }
-        }
-        None => {
-            results.push(*rect);
-        }
-    }
-}

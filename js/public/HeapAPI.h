@@ -11,10 +11,11 @@
 
 #include "jspubtd.h"
 
+#include "js/GCAnnotations.h"
 #include "js/TraceKind.h"
 #include "js/Utility.h"
 
-struct JSStringFinalizer;
+struct JSExternalStringCallbacks;
 
 /* These values are private to the JS engine. */
 namespace js {
@@ -105,6 +106,46 @@ MOZ_ALWAYS_INLINE bool IsInsideNursery(const js::gc::Cell* cell);
 
 namespace JS {
 
+enum class HeapState {
+  Idle,             // doing nothing with the GC heap
+  Tracing,          // tracing the GC heap without collecting, e.g.
+                    // IterateCompartments()
+  MajorCollecting,  // doing a GC of the major heap
+  MinorCollecting,  // doing a GC of the minor heap (nursery)
+  CycleCollecting   // in the "Unlink" phase of cycle collection
+};
+
+JS_PUBLIC_API HeapState RuntimeHeapState();
+
+static inline bool RuntimeHeapIsBusy() {
+  return RuntimeHeapState() != HeapState::Idle;
+}
+
+static inline bool RuntimeHeapIsTracing() {
+  return RuntimeHeapState() == HeapState::Tracing;
+}
+
+static inline bool RuntimeHeapIsMajorCollecting() {
+  return RuntimeHeapState() == HeapState::MajorCollecting;
+}
+
+static inline bool RuntimeHeapIsMinorCollecting() {
+  return RuntimeHeapState() == HeapState::MinorCollecting;
+}
+
+static inline bool RuntimeHeapIsCollecting(HeapState state) {
+  return state == HeapState::MajorCollecting ||
+         state == HeapState::MinorCollecting;
+}
+
+static inline bool RuntimeHeapIsCollecting() {
+  return RuntimeHeapIsCollecting(RuntimeHeapState());
+}
+
+static inline bool RuntimeHeapIsCycleCollecting() {
+  return RuntimeHeapState() == HeapState::CycleCollecting;
+}
+
 /*
  * This list enumerates the different types of conceptual stacks we have in
  * SpiderMonkey. In reality, they all share the C stack, but we allow different
@@ -118,11 +159,11 @@ enum StackKind {
 };
 
 /*
- * Default size for the generational nursery in bytes.
- * This is the initial nursery size, when running in the browser this is
- * updated by JS_SetGCParameter().
+ * Default maximum size for the generational nursery in bytes. This is the
+ * initial value. In the browser this configured by the
+ * javascript.options.mem.nursery.max_kb pref.
  */
-const uint32_t DefaultNurseryBytes = 16 * js::gc::ChunkSize;
+const uint32_t DefaultNurseryMaxBytes = 16 * js::gc::ChunkSize;
 
 /* Default maximum heap size in bytes to pass to JS_NewContext(). */
 const uint32_t DefaultHeapMaxBytes = 32 * 1024 * 1024;
@@ -189,14 +230,15 @@ struct Zone {
 };
 
 struct String {
-  static const uint32_t NON_ATOM_BIT = JS_BIT(1);
-  static const uint32_t LINEAR_BIT = JS_BIT(4);
-  static const uint32_t INLINE_CHARS_BIT = JS_BIT(6);
-  static const uint32_t LATIN1_CHARS_BIT = JS_BIT(9);
-  static const uint32_t EXTERNAL_FLAGS = LINEAR_BIT | NON_ATOM_BIT | JS_BIT(8);
-  static const uint32_t TYPE_FLAGS_MASK = JS_BITMASK(9) - JS_BIT(2) - JS_BIT(0);
-  static const uint32_t PERMANENT_ATOM_MASK = NON_ATOM_BIT | JS_BIT(8);
-  static const uint32_t PERMANENT_ATOM_FLAGS = JS_BIT(8);
+  static const uint32_t NON_ATOM_BIT = js::Bit(1);
+  static const uint32_t LINEAR_BIT = js::Bit(4);
+  static const uint32_t INLINE_CHARS_BIT = js::Bit(6);
+  static const uint32_t LATIN1_CHARS_BIT = js::Bit(9);
+  static const uint32_t EXTERNAL_FLAGS = LINEAR_BIT | NON_ATOM_BIT | js::Bit(8);
+  static const uint32_t TYPE_FLAGS_MASK =
+      js::BitMask(9) - js::Bit(2) - js::Bit(0);
+  static const uint32_t PERMANENT_ATOM_MASK = NON_ATOM_BIT | js::Bit(8);
+  static const uint32_t PERMANENT_ATOM_FLAGS = js::Bit(8);
 
   uintptr_t flags_;
 #if JS_BITS_PER_WORD == 32
@@ -209,7 +251,7 @@ struct String {
     JS::Latin1Char inlineStorageLatin1[1];
     char16_t inlineStorageTwoByte[1];
   };
-  const JSStringFinalizer* externalFinalizer;
+  const JSExternalStringCallbacks* externalCallbacks;
 
   inline uint32_t flags() const { return uint32_t(flags_); }
   inline uint32_t length() const {
@@ -263,8 +305,6 @@ class JS_FRIEND_API GCCellPtr {
       : ptr(checkedCast(p, JS::MapTypeToTraceKind<T>::kind)) {}
   explicit GCCellPtr(JSFunction* p)
       : ptr(checkedCast(p, JS::TraceKind::Object)) {}
-  explicit GCCellPtr(JSFlatString* str)
-      : ptr(checkedCast(str, JS::TraceKind::String)) {}
   explicit GCCellPtr(const Value& v);
 
   JS::TraceKind kind() const {
@@ -339,12 +379,10 @@ class JS_FRIEND_API GCCellPtr {
     return uintptr_t(p) | (uintptr_t(traceKind) & OutOfLineTraceKindMask);
   }
 
-  bool mayBeOwnedByOtherRuntimeSlow() const;
-
   JS::TraceKind outOfLineKind() const;
 
   uintptr_t ptr;
-};
+} JS_HAZ_GC_POINTER;
 
 // Unwraps the given GCCellPtr, calls the functor |f| with a template argument
 // of the actual type of the pointer, and returns the result.

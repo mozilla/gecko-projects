@@ -284,7 +284,7 @@ struct HttpChannelOpenArgs
   TimeStamp                   handleFetchEventEnd;
   bool                        forceMainDocumentChannel;
   TimeStamp                   navigationStartTimeStamp;
-  bool                        hasSandboxedAuxiliaryNavigations;
+  bool                        hasNonEmptySandboxingFlag;
 };
 
 struct HttpChannelConnectArgs
@@ -357,6 +357,7 @@ struct DocumentChannelCreationArgs {
   DocShellLoadStateInit loadState;
   LoadInfoArgs loadInfo;
   PrincipalInfo? contentBlockingAllowListPrincipal;
+  TimeStamp asyncOpenTime;
   nsString? initiatorType;
   nsString customUserAgent;
   uint64_t channelId;
@@ -365,7 +366,32 @@ struct DocumentChannelCreationArgs {
   uint32_t cacheKey;
   bool isActive;
   bool isTopLevelDoc;
+  bool hasNonEmptySandboxingFlags;
 };
+
+struct DocumentChannelRedirect {
+  nsIURI uri;
+  uint32_t redirectFlags;
+  uint32_t responseStatus;
+  bool isPost;
+};
+
+struct RedirectToRealChannelArgs {
+  uint32_t registrarId;
+  nsIURI uri;
+  uint32_t newLoadFlags;
+  ReplacementChannelConfigInit? init;
+  LoadInfoArgs? loadInfo;
+  DocumentChannelRedirect[] redirects;
+  uint64_t channelId;
+  nsIURI originalURI;
+  uint32_t redirectMode;
+  uint32_t redirectFlags;
+  uint32_t? contentDisposition;
+  nsString? contentDispositionFilename;
+  uint64_t redirectIdentifier;
+};
+
 
 
 } // namespace ipc

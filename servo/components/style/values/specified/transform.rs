@@ -33,6 +33,27 @@ pub type TransformOrigin = generic::TransformOrigin<
     Length,
 >;
 
+impl TransformOrigin {
+    /// Returns the initial specified value for `transform-origin`.
+    #[inline]
+    pub fn initial_value() -> Self {
+        Self::new(
+            OriginComponent::Length(LengthPercentage::Percentage(ComputedPercentage(0.5))),
+            OriginComponent::Length(LengthPercentage::Percentage(ComputedPercentage(0.5))),
+            Length::zero(),
+        )
+    }
+
+    /// Returns the `0 0` value.
+    pub fn zero_zero() -> Self {
+        Self::new(
+            OriginComponent::Length(LengthPercentage::zero()),
+            OriginComponent::Length(LengthPercentage::zero()),
+            Length::zero(),
+        )
+    }
+}
+
 impl Transform {
     /// Internal parse function for deciding if we wish to accept prefixed values or not
     ///
@@ -260,7 +281,7 @@ impl Parse for TransformOrigin {
         let parse_depth = |input: &mut Parser| {
             input
                 .try(|i| Length::parse(context, i))
-                .unwrap_or(Length::from_px(0.))
+                .unwrap_or(Length::zero())
         };
         match input.try(|i| OriginComponent::parse(context, i)) {
             Ok(x_origin @ OriginComponent::Center) => {
@@ -400,17 +421,22 @@ impl Parse for Translate {
         if let Ok(ty) = input.try(|i| specified::LengthPercentage::parse(context, i)) {
             if let Ok(tz) = input.try(|i| specified::Length::parse(context, i)) {
                 // 'translate: <length-percentage> <length-percentage> <length>'
-                return Ok(generic::Translate::Translate3D(tx, ty, tz));
+                return Ok(generic::Translate::Translate(tx, ty, tz));
             }
 
             // translate: <length-percentage> <length-percentage>'
-            return Ok(generic::Translate::Translate(tx, ty));
+            return Ok(generic::Translate::Translate(
+                tx,
+                ty,
+                specified::Length::zero(),
+            ));
         }
 
         // 'translate: <length-percentage> '
         Ok(generic::Translate::Translate(
             tx,
             specified::LengthPercentage::zero(),
+            specified::Length::zero(),
         ))
     }
 }
@@ -431,14 +457,14 @@ impl Parse for Scale {
         if let Ok(sy) = input.try(|i| Number::parse(context, i)) {
             if let Ok(sz) = input.try(|i| Number::parse(context, i)) {
                 // 'scale: <number> <number> <number>'
-                return Ok(generic::Scale::Scale3D(sx, sy, sz));
+                return Ok(generic::Scale::Scale(sx, sy, sz));
             }
 
             // 'scale: <number> <number>'
-            return Ok(generic::Scale::Scale(sx, sy));
+            return Ok(generic::Scale::Scale(sx, sy, Number::new(1.0)));
         }
 
         // 'scale: <number>'
-        Ok(generic::Scale::Scale(sx, sx))
+        Ok(generic::Scale::Scale(sx, sx, Number::new(1.0)))
     }
 }

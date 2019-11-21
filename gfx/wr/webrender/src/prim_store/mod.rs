@@ -16,7 +16,7 @@ use crate::clip::{ClipDataStore, ClipNodeFlags, ClipChainId, ClipChainInstance, 
 use crate::debug_colors;
 use crate::debug_render::DebugItem;
 use crate::scene_building::{CreateShadow, IsVisible};
-use euclid::{SideOffsets2D, Transform3D, Rect, Scale, Size2D, Point2D};
+use euclid::{SideOffsets2D, Transform3D, Rect, Scale, Size2D, Point2D, Vector2D};
 use euclid::approxeq::ApproxEq;
 use crate::frame_builder::{FrameBuildingContext, FrameBuildingState, PictureContext, PictureState};
 use crate::frame_builder::{FrameVisibilityContext, FrameVisibilityState};
@@ -52,7 +52,7 @@ use std::{cmp, fmt, hash, ops, u32, usize, mem};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::storage;
 use crate::texture_cache::TEXTURE_REGION_DIMENSIONS;
-use crate::util::{MatrixHelpers, MaxRect, Recycler, ScaleOffset, RectHelpers};
+use crate::util::{MatrixHelpers, MaxRect, Recycler, ScaleOffset, RectHelpers, VectorHelpers};
 use crate::util::{clamp_to_scale_factor, pack_as_float, project_rect, raster_rect_to_device_pixels};
 use crate::internal_types::{LayoutPrimitiveInfo, Filter};
 use smallvec::SmallVec;
@@ -202,6 +202,17 @@ impl SpaceSnapper {
                 scale_offset.unmap_rect(&snapped_device_rect)
             }
             None => *rect,
+        }
+    }
+
+    pub fn snap_vector<F>(&self, vector: &Vector2D<f32, F>) -> Vector2D<f32, F> where F: fmt::Debug {
+        debug_assert!(self.current_target_spatial_node_index != SpatialNodeIndex::INVALID);
+        match self.snapping_transform {
+            Some(ref scale_offset) => {
+                let snapped_device_vector : DeviceVector2D = scale_offset.map_vector(&vector).snap();
+                scale_offset.unmap_vector(&snapped_device_vector)
+            }
+            None => *vector,
         }
     }
 
@@ -1692,9 +1703,6 @@ pub struct PrimitiveScratchBuffer {
     /// verify invalidation in wrench reftests. Only collected in testing.
     pub recorded_dirty_regions: Vec<RecordedDirtyRegion>,
 
-    /// List of dirty rects for the cached pictures in this document.
-    pub dirty_rects: Vec<DeviceIntRect>,
-
     /// List of debug display items for rendering.
     pub debug_items: Vec<DebugItem>,
 }
@@ -1709,7 +1717,6 @@ impl PrimitiveScratchBuffer {
             segment_instances: SegmentInstanceStorage::new(0),
             gradient_tiles: GradientTileStorage::new(0),
             recorded_dirty_regions: Vec::new(),
-            dirty_rects: Vec::new(),
             debug_items: Vec::new(),
             prim_info: Vec::new(),
         }
@@ -1746,7 +1753,6 @@ impl PrimitiveScratchBuffer {
         self.debug_items.clear();
 
         assert!(self.recorded_dirty_regions.is_empty(), "Should have sent to Renderer");
-        assert!(self.dirty_rects.is_empty(), "Should have sent to Renderer");
     }
 
     #[allow(dead_code)]
@@ -1936,6 +1942,21 @@ impl PrimitiveStore {
         for cluster in &mut prim_list.clusters {
             // Get the cluster and see if is visible
             if !cluster.flags.contains(ClusterFlags::IS_VISIBLE) {
+                // Each prim instance must have reset called each frame, to clear
+                // indices into various scratch buffers. If this doesn't occur,
+                // the primitive may incorrectly be considered visible, which can
+                // cause unexpected conditions to occur later during the frame.
+                // Primitive instances are normally reset in the main loop below,
+                // but we must also reset them in the rare case that the cluster
+                // visibility has changed (due to an invalid transform and/or
+                // backface visibility changing for this cluster).
+                // TODO(gw): This is difficult to test for in CI - as a follow up,
+                //           we should add a debug flag that validates the prim
+                //           instance is always reset every frame to catch similar
+                //           issues in future.
+                for prim_instance in &mut cluster.prim_instances {
+                    prim_instance.reset();
+                }
                 continue;
             }
 
@@ -2124,6 +2145,7 @@ impl PrimitiveStore {
                             &self.opacity_bindings,
                             &self.images,
                             surface_index,
+                            surface.surface_spatial_node_index,
                         ) {
                             prim_instance.visibility_info = PrimitiveVisibilityIndex::INVALID;
                             // Ensure the primitive clip is popped - perhaps we can use
@@ -2315,10 +2337,8 @@ impl PrimitiveStore {
 
                 // Build the dirty region(s) for this tile cache.
                 tile_cache.post_update(
-                    frame_state.resource_cache,
-                    frame_state.gpu_cache,
                     frame_context,
-                    frame_state.scratch,
+                    frame_state,
                 );
 
                 pic.tile_cache = Some(tile_cache);
@@ -2648,6 +2668,7 @@ impl PrimitiveStore {
                         pic_context.subpixel_mode,
                         frame_state,
                         frame_context,
+                        scratch,
                     ) {
                         Some(info) => Some(info),
                         None => {
@@ -2902,11 +2923,13 @@ impl PrimitiveStore {
                     &prim_data.glyphs,
                     &transform.to_transform().with_destination::<_>(),
                     surface,
+                    prim_spatial_node_index,
                     raster_space,
                     pic_context.subpixel_mode,
                     frame_state.resource_cache,
                     frame_state.gpu_cache,
                     frame_state.render_tasks,
+                    frame_context.clip_scroll_tree,
                     scratch,
                 );
 

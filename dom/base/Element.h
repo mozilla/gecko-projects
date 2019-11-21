@@ -22,7 +22,6 @@
 #include "nsDOMAttributeMap.h"
 #include "nsINodeList.h"
 #include "nsIScrollableFrame.h"
-#include "nsNodeUtils.h"
 #include "nsPresContext.h"
 #include "Units.h"
 #include "mozilla/Attributes.h"
@@ -224,22 +223,6 @@ class Element : public FragmentOrElement {
    * Set tabIndex value to this element.
    */
   void SetTabIndex(int32_t aTabIndex, mozilla::ErrorResult& aError);
-
-  /**
-   * Sets or unsets an XBL binding for this element. Setting a
-   * binding on an element that already has a binding will remove the
-   * old binding.
-   *
-   * @param aBinding The binding to bind to this content. If nullptr is
-   *        provided as the argument, then existing binding will be
-   *        removed.
-   *
-   * @param aOldBindingManager The old binding manager that contains
-   *                           this content if this content was adopted
-   *                           to another document.
-   */
-  void SetXBLBinding(nsXBLBinding* aBinding,
-                     nsBindingManager* aOldBindingManager = nullptr);
 
   /**
    * Sets the ShadowRoot binding for this element. The contents of the
@@ -763,6 +746,20 @@ class Element : public FragmentOrElement {
   }
 
   /**
+   * Determine if an attribute has been set to a non-empty string value. If the
+   * attribute is not set at all, this will return false.
+   *
+   * @param aNameSpaceId the namespace id of the attribute (defaults to
+   *                     kNameSpaceID_None in the overload that omits this arg)
+   * @param aAttr the attribute name
+   */
+  inline bool HasNonEmptyAttr(int32_t aNameSpaceID, const nsAtom* aName) const;
+
+  bool HasNonEmptyAttr(const nsAtom* aAttr) const {
+    return HasNonEmptyAttr(kNameSpaceID_None, aAttr);
+  }
+
+  /**
    * Test whether this Element's given attribute has the given value.  If the
    * attribute is not set at all, this will return false.
    *
@@ -1028,6 +1025,8 @@ class Element : public FragmentOrElement {
   }
 
   nsDOMTokenList* ClassList();
+  nsDOMTokenList* Part();
+
   nsDOMAttributeMap* Attributes() {
     nsDOMSlots* slots = DOMSlots();
     if (!slots->mAttributeMap) {
@@ -1332,11 +1331,13 @@ class Element : public FragmentOrElement {
       const UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
       ErrorResult& aError);
 
-  // Note: GetAnimations will flush style while GetAnimationsUnsorted won't.
-  // Callers must keep this element alive because flushing style may destroy
-  // this element.
+  enum class Flush { Yes, No };
+
+  MOZ_CAN_RUN_SCRIPT
   void GetAnimations(const GetAnimationsOptions& aOptions,
-                     nsTArray<RefPtr<Animation>>& aAnimations);
+                     nsTArray<RefPtr<Animation>>& aAnimations,
+                     Flush aFlush = Flush::Yes);
+
   static void GetAnimationsUnsorted(Element* aElement,
                                     PseudoStyleType aPseudoType,
                                     nsTArray<RefPtr<Animation>>& aAnimations);
@@ -1466,7 +1467,11 @@ class Element : public FragmentOrElement {
    *
    * If you change this, change also the similar method in Link.
    */
-  virtual void NodeInfoChanged(Document* aOldDoc) {}
+  virtual void NodeInfoChanged(Document* aOldDoc) {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    AssertInvariantsOnNodeInfoChange();
+#endif
+  }
 
   /**
    * Parse a string into an nsAttrValue for a CORS attribute.  This
@@ -1485,8 +1490,6 @@ class Element : public FragmentOrElement {
    * but if not should have been parsed via ParseCORSValue).
    */
   static CORSMode AttrValueToCORSMode(const nsAttrValue* aValue);
-
-  JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) final;
 
   nsINode* GetScopeChainParent() const override;
 
@@ -1904,10 +1907,6 @@ class Element : public FragmentOrElement {
    */
   virtual void GetLinkTarget(nsAString& aTarget);
 
-  nsDOMTokenList* GetTokenList(
-      nsAtom* aAtom,
-      const DOMTokenListSupportedTokenArray aSupportedTokens = nullptr);
-
   enum class ReparseAttributes { No, Yes };
   /**
    * Copy attributes and state to another element
@@ -1917,6 +1916,10 @@ class Element : public FragmentOrElement {
                        ReparseAttributes = ReparseAttributes::Yes);
 
  private:
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  void AssertInvariantsOnNodeInfoChange();
+#endif
+
   /**
    * Slow path for GetClasses, this should only be called for SVG elements.
    */
@@ -1954,20 +1957,6 @@ class Element : public FragmentOrElement {
   AttrArray mAttrs;
 };
 
-class RemoveFromBindingManagerRunnable : public mozilla::Runnable {
- public:
-  RemoveFromBindingManagerRunnable(nsBindingManager* aManager,
-                                   nsIContent* aContent, Document* aDoc);
-
-  NS_IMETHOD Run() override;
-
- private:
-  virtual ~RemoveFromBindingManagerRunnable();
-  RefPtr<nsBindingManager> mManager;
-  RefPtr<nsIContent> mContent;
-  RefPtr<Document> mDoc;
-};
-
 NS_DEFINE_STATIC_IID_ACCESSOR(Element, NS_ELEMENT_IID)
 
 inline bool Element::HasAttr(int32_t aNameSpaceID, const nsAtom* aName) const {
@@ -1976,6 +1965,15 @@ inline bool Element::HasAttr(int32_t aNameSpaceID, const nsAtom* aName) const {
                "must have a real namespace ID!");
 
   return mAttrs.IndexOfAttr(aName, aNameSpaceID) >= 0;
+}
+
+inline bool Element::HasNonEmptyAttr(int32_t aNameSpaceID,
+                                     const nsAtom* aName) const {
+  MOZ_ASSERT(aNameSpaceID > kNameSpaceID_Unknown, "Must have namespace");
+  MOZ_ASSERT(aName, "Must have attribute name");
+
+  const nsAttrValue* val = mAttrs.GetAttr(aName, aNameSpaceID);
+  return val && !val->IsEmptyString();
 }
 
 inline bool Element::AttrValueIs(int32_t aNameSpaceID, const nsAtom* aName,

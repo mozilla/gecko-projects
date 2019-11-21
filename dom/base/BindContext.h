@@ -9,7 +9,6 @@
 #ifndef mozilla_dom_BindContext_h__
 #define mozilla_dom_BindContext_h__
 
-#include "nsXBLBinding.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/dom/Document.h"
@@ -48,17 +47,9 @@ struct MOZ_STACK_CLASS BindContext final {
   // Whether our subtree root is changing as a result of this operation.
   bool SubtreeRootChanges() const { return mSubtreeRootChanges; }
 
-  // Returns the binding parent of the subtree to be inserted.
-  //
-  // This can be null.
-  Element* GetBindingParent() const { return mBindingParent; }
-
   // This constructor should be used for regular appends to content.
   explicit BindContext(nsINode& aParent)
       : mDoc(*aParent.OwnerDoc()),
-        mBindingParent(aParent.IsContent()
-                           ? aParent.AsContent()->GetBindingParent()
-                           : nullptr),
         mInComposedDoc(aParent.IsInComposedDoc()),
         mInUncomposedDoc(aParent.IsInUncomposedDoc()),
         mSubtreeRootChanges(true),
@@ -74,7 +65,6 @@ struct MOZ_STACK_CLASS BindContext final {
   // This constructor is only meant to be used in that situation.
   explicit BindContext(ShadowRoot& aShadowRoot)
       : mDoc(*aShadowRoot.OwnerDoc()),
-        mBindingParent(aShadowRoot.Host()),
         mInComposedDoc(aShadowRoot.IsInComposedDoc()),
         mInUncomposedDoc(false),
         mSubtreeRootChanges(false),
@@ -87,7 +77,6 @@ struct MOZ_STACK_CLASS BindContext final {
   enum ForNativeAnonymous { ForNativeAnonymous };
   BindContext(Element& aParentElement, enum ForNativeAnonymous)
       : mDoc(*aParentElement.OwnerDoc()),
-        mBindingParent(&aParentElement),
         mInComposedDoc(aParentElement.IsInComposedDoc()),
         mInUncomposedDoc(aParentElement.IsInUncomposedDoc()),
         mSubtreeRootChanges(true),
@@ -96,17 +85,6 @@ struct MOZ_STACK_CLASS BindContext final {
                                                      aParentElement)) {
     MOZ_ASSERT(mInComposedDoc, "Binding NAC in a disconnected subtree?");
   }
-
-  // This is meant to be used to bind XBL anonymous content.
-  BindContext(nsXBLBinding& aBinding, Element& aParentElement)
-      : mDoc(*aParentElement.OwnerDoc()),
-        mBindingParent(aBinding.GetBoundElement()),
-        mInComposedDoc(aParentElement.IsInComposedDoc()),
-        mInUncomposedDoc(aParentElement.IsInUncomposedDoc()),
-        mSubtreeRootChanges(true),
-        mCollectingDisplayedNodeDataDuringLoad(
-            ShouldCollectDisplayedNodeDataDuringLoad(mInComposedDoc, mDoc,
-                                                     aParentElement)) {}
 
   bool CollectingDisplayedNodeDataDuringLoad() const {
     return mCollectingDisplayedNodeDataDuringLoad;
@@ -125,8 +103,6 @@ struct MOZ_STACK_CLASS BindContext final {
   }
 
   Document& mDoc;
-
-  Element* const mBindingParent;
 
   const bool mInComposedDoc;
   const bool mInUncomposedDoc;

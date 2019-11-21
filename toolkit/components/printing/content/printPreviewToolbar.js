@@ -30,7 +30,7 @@ customElements.define(
       <toolbarbutton id="print-preview-navigateHome" class="print-preview-navigate-button tabbable" oncommand="parentNode.navigate(0, 0, 'home');" data-l10n-id="printpreview-homearrow"/>
       <toolbarbutton id="print-preview-navigatePrevious" class="print-preview-navigate-button tabbable" oncommand="parentNode.navigate(-1, 0, 0);" data-l10n-id="printpreview-previousarrow"/>
       <hbox align="center" pack="center">
-        <html:input id="print-preview-pageNumber" hidespinbuttons="true" type="number" value="1" min="1"/>
+        <html:input id="print-preview-pageNumber" class="input-number-mozbox" hidespinbuttons="true" type="number" value="1" min="1"/>
         <label data-l10n-id="printpreview-of"/>
         <label id="print-preview-totalPages" value="1"/>
       </hbox>
@@ -245,6 +245,8 @@ customElements.define(
       const nsIWebBrowserPrint = Ci.nsIWebBrowserPrint;
       let navType, pageNum;
 
+      let { min: lowerLimit, max: upperLimit } = this.mPageTextBox;
+
       // we use only one of aHomeOrEnd, aDirection, or aPageNum
       if (aHomeOrEnd) {
         // We're going to either the very first page ("home"), or the
@@ -254,19 +256,23 @@ customElements.define(
           this.mPageTextBox.value = 1;
         } else {
           navType = nsIWebBrowserPrint.PRINTPREVIEW_END;
-          this.mPageTextBox.value = this.mPageTextBox.max;
+          this.mPageTextBox.value = upperLimit;
         }
         pageNum = 0;
       } else if (aDirection) {
         // aDirection is either +1 or -1, and allows us to increment
         // or decrement our currently viewed page.
-        this.mPageTextBox.value = Number(this.mPageTextBox.value) + aDirection;
+        pageNum = Number(this.mPageTextBox.value) + aDirection;
+        pageNum = Math.min(upperLimit, Math.max(lowerLimit, pageNum));
+        this.mPageTextBox.value = pageNum;
         navType = nsIWebBrowserPrint.PRINTPREVIEW_GOTO_PAGENUM;
-        pageNum = this.mPageTextBox.value;
       } else {
         // We're going to a specific page (aPageNum)
         navType = nsIWebBrowserPrint.PRINTPREVIEW_GOTO_PAGENUM;
-        pageNum = aPageNum;
+        pageNum = Math.min(upperLimit, Math.max(lowerLimit, aPageNum));
+        if (pageNum != aPageNum) {
+          this.mPageTextBox.value = pageNum;
+        }
       }
 
       this.mMessageManager.sendAsyncMessage("Printing:Preview:Navigate", {

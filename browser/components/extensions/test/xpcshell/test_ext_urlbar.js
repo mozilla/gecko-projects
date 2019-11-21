@@ -29,6 +29,10 @@ add_task(async function startup() {
   Services.prefs.setCharPref("browser.search.region", "US");
   Services.prefs.setBoolPref("browser.search.geoSpecificDefaults", false);
   Services.prefs.setIntPref("browser.search.addonLoadTimeout", 0);
+  Services.prefs.setBoolPref(
+    "browser.search.separatePrivateDefault.ui.enabled",
+    false
+  );
   await AddonTestUtils.promiseStartupManager();
 
   // Add a test engine and make it default so that when we do searches below,
@@ -297,7 +301,9 @@ add_task(async function test_onProviderResultsRequested() {
       payload: {
         title: "Test remote_tab-tabs result",
         url: "http://example.com/remote_tab-tabs",
-        displayUrl: "example.com/remote_tab-tabs",
+        displayUrl:
+          (UrlbarPrefs.get("view.stripHttps") ? "http://" : "") +
+          "example.com/remote_tab-tabs",
       },
     },
     {
@@ -308,7 +314,9 @@ add_task(async function test_onProviderResultsRequested() {
       payload: {
         title: "Test tab-tabs result",
         url: "http://example.com/tab-tabs",
-        displayUrl: "example.com/tab-tabs",
+        displayUrl:
+          (UrlbarPrefs.get("view.stripHttps") ? "http://" : "") +
+          "example.com/tab-tabs",
       },
     },
     {
@@ -331,7 +339,9 @@ add_task(async function test_onProviderResultsRequested() {
       payload: {
         title: "Test url-history result",
         url: "http://example.com/url-history",
-        displayUrl: "example.com/url-history",
+        displayUrl:
+          (UrlbarPrefs.get("view.stripHttps") ? "http://" : "") +
+          "example.com/url-history",
       },
     },
   ];
@@ -806,6 +816,129 @@ add_task(async function test_activeInactiveAndRestrictingProviders() {
   // Check the results.
   Assert.equal(context.results.length, 1);
   Assert.equal(context.results[0].title, "Test result restricting");
+
+  await ext.unload();
+});
+
+// Adds a restricting provider that returns a heuristic result.  The actual
+// result created from the extension's result should be a heuristic.
+add_task(async function test_heuristicRestricting() {
+  let ext = ExtensionTestUtils.loadExtension({
+    manifest: {
+      permissions: ["urlbar"],
+    },
+    isPrivileged: true,
+    incognitoOverride: "spanning",
+    background() {
+      browser.urlbar.onBehaviorRequested.addListener(query => {
+        return "restricting";
+      }, "test");
+      browser.urlbar.onResultsRequested.addListener(query => {
+        return [
+          {
+            type: "url",
+            source: "history",
+            heuristic: true,
+            payload: {
+              title: "Test result",
+              url: "http://example.com/",
+            },
+          },
+        ];
+      }, "test");
+    },
+  });
+  await ext.startup();
+
+  // Check the provider.
+  let provider = UrlbarProvidersManager.getProvider("test");
+  Assert.ok(provider);
+
+  // Run a query.
+  let context = new UrlbarQueryContext({
+    allowAutofill: false,
+    isPrivate: false,
+    maxResults: 10,
+    searchString: "test",
+  });
+  let controller = new UrlbarController({
+    browserWindow: {
+      location: {
+        href: AppConstants.BROWSER_CHROME_URL,
+      },
+    },
+  });
+  await controller.startQuery(context);
+
+  // Check the results.
+  Assert.equal(context.results.length, 1);
+  Assert.ok(context.results[0].heuristic);
+
+  await ext.unload();
+});
+
+// Adds a non-restricting provider that returns a heuristic result.  The actual
+// result created from the extension's result should *not* be a heuristic, and
+// the usual UnifiedComplete heuristic should be present.
+add_task(async function test_heuristicNonRestricting() {
+  let ext = ExtensionTestUtils.loadExtension({
+    manifest: {
+      permissions: ["urlbar"],
+    },
+    isPrivileged: true,
+    incognitoOverride: "spanning",
+    background() {
+      browser.urlbar.onBehaviorRequested.addListener(query => {
+        return "active";
+      }, "test");
+      browser.urlbar.onResultsRequested.addListener(query => {
+        return [
+          {
+            type: "url",
+            source: "history",
+            heuristic: true,
+            payload: {
+              title: "Test result",
+              url: "http://example.com/",
+            },
+          },
+        ];
+      }, "test");
+    },
+  });
+  await ext.startup();
+
+  // Check the provider.
+  let provider = UrlbarProvidersManager.getProvider("test");
+  Assert.ok(provider);
+
+  // Run a query.
+  let context = new UrlbarQueryContext({
+    allowAutofill: false,
+    isPrivate: false,
+    maxResults: 10,
+    searchString: "test",
+  });
+  let controller = new UrlbarController({
+    browserWindow: {
+      location: {
+        href: AppConstants.BROWSER_CHROME_URL,
+      },
+    },
+  });
+  await controller.startQuery(context);
+
+  // Check the results.  The first result should be UnifiedComplete's heuristic.
+  let firstResult = context.results[0];
+  Assert.ok(firstResult.heuristic);
+  Assert.equal(firstResult.type, UrlbarUtils.RESULT_TYPE.SEARCH);
+  Assert.equal(firstResult.source, UrlbarUtils.RESULT_SOURCE.SEARCH);
+  Assert.equal(firstResult.payload.engine, "Test engine");
+
+  // The extension result should be present but not the heuristic.
+  let result = context.results.find(r => r.title == "Test result");
+  Assert.ok(result);
+  Assert.ok(!result.heuristic);
 
   await ext.unload();
 });

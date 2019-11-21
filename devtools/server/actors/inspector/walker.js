@@ -8,7 +8,7 @@ const { Cc, Ci, Cu } = require("chrome");
 
 const Services = require("Services");
 const protocol = require("devtools/shared/protocol");
-const { walkerSpec } = require("devtools/shared/specs/inspector");
+const { walkerSpec } = require("devtools/shared/specs/walker");
 const { LongStringActor } = require("devtools/server/actors/string");
 const InspectorUtils = require("InspectorUtils");
 const ReplayInspector = require("devtools/server/actors/replay/inspector");
@@ -170,6 +170,16 @@ loader.lazyRequireGetter(
   "devtools/server/actors/utils/walker-search",
   true
 );
+
+// ContentDOMReference requires ChromeUtils, which isn't available in worker context.
+if (!isWorker) {
+  loader.lazyRequireGetter(
+    this,
+    "ContentDOMReference",
+    "resource://gre/modules/ContentDOMReference.jsm",
+    true
+  );
+}
 
 loader.lazyServiceGetter(
   this,
@@ -372,7 +382,10 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     return {
       actor: this.actorID,
       root: this.rootNode.form(),
-      traits: {},
+      traits: {
+        // Firefox 71: getNodeActorFromContentDomReference is available.
+        retrieveNodeFromContentDomReference: true,
+      },
     };
   },
 
@@ -906,7 +919,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    *    hasLast: true if the last child of the node is included in the list.
    *    nodes: Array of DOMNodes.
    */
-  /* eslint-disable complexity */
+  // eslint-disable-next-line complexity
   _getChildren: function(node, options = {}) {
     if (isNodeDead(node)) {
       return { hasFirst: true, hasLast: true, nodes: [] };
@@ -1096,7 +1109,6 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     return { hasFirst, hasLast, nodes };
   },
-  /* eslint-enable complexity */
 
   getNativeAnonymousChildren: function(rawNode) {
     // Get an anonymous walker and start on the first child.
@@ -1289,7 +1301,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    * @param string selectorState
    *        One of "pseudo", "id", "tag", "class", "null"
    */
-  /* eslint-disable complexity */
+  // eslint-disable-next-line complexity
   getSuggestionsForQuery: function(query, completing, selectorState) {
     const sugs = {
       classes: new Map(),
@@ -1431,7 +1443,6 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
       suggestions: result,
     };
   },
-  /* eslint-enable complexity */
 
   /**
    * Add a pseudo-class lock to a node.
@@ -2085,8 +2096,13 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     rawDoc.dontWarnAboutMutationEventsAndAllowSlowDOMMutations = origFlag;
   },
 
-  _breakOnMutation: function(bpType) {
-    this.targetActor.threadActor.pauseForMutationBreakpoint(bpType);
+  _breakOnMutation: function(mutationType, targetNode, ancestorNode, action) {
+    this.targetActor.threadActor.pauseForMutationBreakpoint(
+      mutationType,
+      targetNode,
+      ancestorNode,
+      action
+    );
   },
 
   _mutationBreakpointsForDoc(rawDoc, createIfNeeded = false) {
@@ -2116,7 +2132,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
   },
 
   onNodeInserted: function(evt) {
-    this.onSubtreeModified(evt);
+    this.onSubtreeModified(evt, "add");
   },
 
   onNodeRemoved: function(evt) {
@@ -2126,25 +2142,25 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     this._clearMutationBreakpointsFromSubtree(evt.target);
 
     if (hasNodeRemovalEvent) {
-      this._breakOnMutation("nodeRemoved");
+      this._breakOnMutation("nodeRemoved", evt.target);
     } else {
-      this.onSubtreeModified(evt);
+      this.onSubtreeModified(evt, "remove");
     }
   },
 
   onAttributeModified: function(evt) {
     const mutationBpInfo = this._breakpointInfoForNode(evt.target);
     if (mutationBpInfo && mutationBpInfo.attribute) {
-      this._breakOnMutation("attributeModified");
+      this._breakOnMutation("attributeModified", evt.target);
     }
   },
 
-  onSubtreeModified: function(evt) {
+  onSubtreeModified: function(evt, action) {
     let node = evt.target;
     while ((node = node.parentNode) !== null) {
       const mutationBpInfo = this._breakpointInfoForNode(node);
       if (mutationBpInfo && mutationBpInfo.subtree) {
-        this._breakOnMutation("subtreeModified");
+        this._breakOnMutation("subtreeModified", evt.target, node, action);
         break;
       }
     }
@@ -2646,6 +2662,24 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     }
 
     return this.attachElement(win.frameElement);
+  },
+
+  /**
+   * Given a contentDomReference return the NodeActor for the corresponding frameElement.
+   */
+  getNodeActorFromContentDomReference: function(contentDomReference) {
+    let rawNode = ContentDOMReference.resolve(contentDomReference);
+    if (!rawNode || !this._isInDOMTree(rawNode)) {
+      return null;
+    }
+
+    // This is a special case for the document object whereby it is considered
+    // as document.documentElement (the <html> node)
+    if (rawNode.defaultView && rawNode === rawNode.defaultView.document) {
+      rawNode = rawNode.documentElement;
+    }
+
+    return this.attachElement(rawNode);
   },
 
   /**

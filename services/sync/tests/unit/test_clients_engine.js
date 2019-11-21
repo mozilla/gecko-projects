@@ -379,7 +379,10 @@ add_task(async function test_client_name_change() {
   let changedIDs = await tracker.getChangedIDs();
   equal(Object.keys(changedIDs).length, 0);
 
-  Svc.Prefs.set("client.name", "new name");
+  Services.prefs.setStringPref(
+    "identity.fxaccounts.account.device.name",
+    "new name"
+  );
   await tracker.asyncObserver.promiseObserversComplete();
 
   _("new name: " + engine.localName);
@@ -990,9 +993,10 @@ add_task(async function test_clients_not_in_fxa_list() {
       getLocalType() {
         return fxAccounts.device.getLocalType();
       },
-    },
-    getDeviceList() {
-      return Promise.resolve([{ id: remoteId }]);
+      recentDeviceList: [{ id: remoteId }],
+      refreshDeviceList() {
+        return Promise.resolve(true);
+      },
     },
   };
 
@@ -1069,9 +1073,10 @@ add_task(async function test_dupe_device_ids() {
       getLocalType() {
         return fxAccounts.device.getLocalType();
       },
-    },
-    getDeviceList() {
-      return Promise.resolve([{ id: remoteDeviceId }]);
+      recentDeviceList: [{ id: remoteDeviceId }],
+      refreshDeviceList() {
+        return Promise.resolve(true);
+      },
     },
   };
 

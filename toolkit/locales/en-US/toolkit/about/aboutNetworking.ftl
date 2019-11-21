@@ -3,18 +3,16 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 title = About Networking
-warning = This is very experimental. Do not use without adult supervision.
-show-next-time-checkbox = Show this warning next time
-ok = OK
 http = HTTP
 sockets = Sockets
 dns = DNS
+dnssuffix = DNS suffix
 websockets = WebSockets
 refresh = Refresh
 auto-refresh = Autorefresh every 3 seconds
 hostname = Hostname
 port = Port
-http2 = HTTP/2
+about-networking-http-version = HTTP Version
 ssl = SSL
 active = Active
 idle = Idle

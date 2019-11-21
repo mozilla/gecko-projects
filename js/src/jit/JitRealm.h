@@ -20,7 +20,6 @@
 #include "jit/CompileInfo.h"
 #include "jit/ICStubSpace.h"
 #include "jit/IonCode.h"
-#include "jit/IonControlFlow.h"
 #include "jit/JitFrames.h"
 #include "jit/shared/Assembler-shared.h"
 #include "js/GCHashTable.h"
@@ -132,10 +131,12 @@ class JitRuntime {
  private:
   friend class JitRealm;
 
-  // Executable allocator for all code except wasm code.
-  MainThreadData<ExecutableAllocator> execAlloc_;
-
   MainThreadData<uint64_t> nextCompilationId_;
+
+  // Buffer for OSR from baseline to Ion. To avoid holding on to this for too
+  // long it's also freed in EnterBaseline and EnterJit (after returning from
+  // JIT code).
+  MainThreadData<js::UniquePtr<uint8_t>> ionOsrTempData_;
 
   // Shared exception-handler tail.
   WriteOnceData<uint32_t> exceptionTailOffset_;
@@ -299,9 +300,7 @@ class JitRuntime {
   static void Trace(JSTracer* trc, const js::AutoAccessAtomsZone& access);
   static void TraceJitcodeGlobalTableForMinorGC(JSTracer* trc);
   static MOZ_MUST_USE bool MarkJitcodeGlobalTableIteratively(GCMarker* marker);
-  static void SweepJitcodeGlobalTable(JSRuntime* rt);
-
-  ExecutableAllocator& execAlloc() { return execAlloc_.ref(); }
+  static void TraceWeakJitcodeGlobalTable(JSRuntime* rt, JSTracer* trc);
 
   const BaselineICFallbackCode& baselineICFallbackCode() const {
     return baselineICFallbackCode_.ref();
@@ -310,6 +309,9 @@ class JitRuntime {
   IonCompilationId nextCompilationId() {
     return IonCompilationId(nextCompilationId_++);
   }
+
+  uint8_t* allocateIonOsrTempData(size_t size);
+  void freeIonOsrTempData();
 
   TrampolinePtr getVMWrapper(const VMFunction& f) const;
 
@@ -470,16 +472,14 @@ struct CacheIRStubKey : public DefaultHasher<CacheIRStubKey> {
 
 template <typename Key>
 struct IcStubCodeMapGCPolicy {
-  static bool needsSweep(Key*, WeakHeapPtrJitCode* value) {
-    return IsAboutToBeFinalized(value);
+  static bool traceWeak(JSTracer* trc, Key*, WeakHeapPtrJitCode* value) {
+    return TraceWeakEdge(trc, value, "traceWeak");
   }
 };
 
 class JitZone {
   // Allocated space for optimized baseline stubs.
   OptimizedICStubSpace optimizedStubSpace_;
-  // Allocated space for cached cfg.
-  CFGSpace cfgSpace_;
 
   // Set of CacheIRStubInfo instances used by Ion stubs in this Zone.
   using IonCacheIRStubInfoSet =
@@ -492,15 +492,17 @@ class JitZone {
                 SystemAllocPolicy, IcStubCodeMapGCPolicy<CacheIRStubKey>>;
   BaselineCacheIRStubCodeMap baselineCacheIRStubCodes_;
 
+  // Executable allocator for all code except wasm code.
+  MainThreadData<ExecutableAllocator> execAlloc_;
+
  public:
-  void sweep();
+  void traceWeak(JSTracer* trc);
 
   void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
-                              size_t* jitZone, size_t* baselineStubsOptimized,
-                              size_t* cachedCFG) const;
+                              JS::CodeSizes* code, size_t* jitZone,
+                              size_t* baselineStubsOptimized) const;
 
   OptimizedICStubSpace* optimizedStubSpace() { return &optimizedStubSpace_; }
-  CFGSpace* cfgSpace() { return &cfgSpace_; }
 
   JitCode* getBaselineCacheIRStubCode(const CacheIRStubKey::Lookup& key,
                                       CacheIRStubInfo** stubInfo) {
@@ -532,6 +534,9 @@ class JitZone {
     return ionCacheIRStubInfoSet_.add(p, std::move(key));
   }
   void purgeIonCacheIRStubInfo() { ionCacheIRStubInfoSet_.clearAndCompact(); }
+
+  ExecutableAllocator& execAlloc() { return execAlloc_.ref(); }
+  const ExecutableAllocator& execAlloc() const { return execAlloc_.ref(); }
 };
 
 class JitRealm {
@@ -610,7 +615,7 @@ class JitRealm {
     return stubs_[StringConcat];
   }
 
-  void sweep(JS::Realm* realm);
+  void traceWeak(JSTracer* trc, JS::Realm* realm);
 
   void discardStubs() {
     for (WeakHeapPtrJitCode& stubRef : stubs_) {

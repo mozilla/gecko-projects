@@ -37,7 +37,6 @@ class nsCSSAnonBoxPseudoStaticAtom;
 class nsPageSequenceFrame;
 
 class nsPageContentFrame;
-struct PendingBinding;
 
 class nsFrameConstructorState;
 
@@ -389,7 +388,8 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                                  nsIContent* aContent,
                                  bool aSuppressWhiteSpaceOptimizations,
                                  const InsertionPoint& aInsertion,
-                                 FrameConstructionItemList& aItems);
+                                 FrameConstructionItemList& aItems,
+                                 uint32_t aFlags = 0);
 
   // Helper method for AddFrameConstructionItems etc.
   // Unsets the need-frame/restyle bits on aContent.
@@ -405,7 +405,8 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                                    ComputedStyle* aComputedStyle,
                                    bool aSuppressWhiteSpaceOptimizations,
                                    nsContainerFrame* aParentFrame,
-                                   FrameConstructionItemList& aItems);
+                                   FrameConstructionItemList& aItems,
+                                   uint32_t aFlags = 0);
 
   // Construct the frames for the document element.  This can return null if the
   // document element is display:none, or if the document element has a
@@ -767,24 +768,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
      pseudo-frames as needed */
   static const PseudoParentData sPseudoParentData[eParentTypeCount];
 
-  // The information that concerns the frame constructor after loading an XBL
-  // binding.
-  //
-  // This is expected to just be used temporarily to aggregate the different
-  // objects that LoadXBLBindingIfNeeded returns.
-  struct MOZ_STACK_CLASS XBLBindingLoadInfo {
-    mozilla::UniquePtr<PendingBinding> mPendingBinding;
-    bool mSuccess = false;
-
-    // For the error case.
-    XBLBindingLoadInfo();
-    explicit XBLBindingLoadInfo(mozilla::UniquePtr<PendingBinding>);
-  };
-
-  // Returns null mStyle member to signal an error.
-  XBLBindingLoadInfo LoadXBLBindingIfNeeded(nsIContent&, const ComputedStyle&,
-                                            uint32_t aFlags);
-
   const FrameConstructionData* FindDataForContent(nsIContent&, ComputedStyle&,
                                                   nsIFrame* aParentFrame,
                                                   uint32_t aFlags);
@@ -859,12 +842,11 @@ class nsCSSFrameConstructor final : public nsFrameManager {
     // Also, the return value is always non-null, thanks to infallible 'new'.
     FrameConstructionItem* AppendItem(
         nsCSSFrameConstructor* aFCtor, const FrameConstructionData* aFCData,
-        nsIContent* aContent, PendingBinding* aPendingBinding,
-        already_AddRefed<ComputedStyle>&& aComputedStyle,
+        nsIContent* aContent, already_AddRefed<ComputedStyle>&& aComputedStyle,
         bool aSuppressWhiteSpaceOptimizations) {
-      FrameConstructionItem* item = new (aFCtor) FrameConstructionItem(
-          aFCData, aContent, aPendingBinding, std::move(aComputedStyle),
-          aSuppressWhiteSpaceOptimizations);
+      FrameConstructionItem* item = new (aFCtor)
+          FrameConstructionItem(aFCData, aContent, std::move(aComputedStyle),
+                                aSuppressWhiteSpaceOptimizations);
       mItems.insertBack(item);
       ++mItemCount;
       ++mDesiredParentCounts[item->DesiredParentType()];
@@ -874,12 +856,11 @@ class nsCSSFrameConstructor final : public nsFrameManager {
     // Arguments are the same as AppendItem().
     FrameConstructionItem* PrependItem(
         nsCSSFrameConstructor* aFCtor, const FrameConstructionData* aFCData,
-        nsIContent* aContent, PendingBinding* aPendingBinding,
-        already_AddRefed<ComputedStyle>&& aComputedStyle,
+        nsIContent* aContent, already_AddRefed<ComputedStyle>&& aComputedStyle,
         bool aSuppressWhiteSpaceOptimizations) {
-      FrameConstructionItem* item = new (aFCtor) FrameConstructionItem(
-          aFCData, aContent, aPendingBinding, std::move(aComputedStyle),
-          aSuppressWhiteSpaceOptimizations);
+      FrameConstructionItem* item = new (aFCtor)
+          FrameConstructionItem(aFCData, aContent, std::move(aComputedStyle),
+                                aSuppressWhiteSpaceOptimizations);
       mItems.insertFront(item);
       ++mItemCount;
       ++mDesiredParentCounts[item->DesiredParentType()];
@@ -1094,12 +1075,11 @@ class nsCSSFrameConstructor final : public nsFrameManager {
   struct FrameConstructionItem final
       : public mozilla::LinkedListElement<FrameConstructionItem> {
     FrameConstructionItem(const FrameConstructionData* aFCData,
-                          nsIContent* aContent, PendingBinding* aPendingBinding,
+                          nsIContent* aContent,
                           already_AddRefed<ComputedStyle>&& aComputedStyle,
                           bool aSuppressWhiteSpaceOptimizations)
         : mFCData(aFCData),
           mContent(aContent),
-          mPendingBinding(aPendingBinding),
           mComputedStyle(std::move(aComputedStyle)),
           mSuppressWhiteSpaceOptimizations(aSuppressWhiteSpaceOptimizations),
           mIsText(false),
@@ -1155,15 +1135,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
     const FrameConstructionData* mFCData;
     // The nsIContent node to use when initializing the new frame.
     nsIContent* mContent;
-    // The PendingBinding for this frame construction item, if any.  May be
-    // null.  We maintain a list of PendingBindings in the frame construction
-    // state in the order in which AddToAttachedQueue should be called on them:
-    // depth-first, post-order traversal order.  Since we actually traverse the
-    // DOM in a mix of breadth-first and depth-first, it is the responsibility
-    // of whoever constructs FrameConstructionItem kids of a given
-    // FrameConstructionItem to push its mPendingBinding as the current
-    // insertion point before doing so and pop it afterward.
-    PendingBinding* mPendingBinding;
     // The style to use for creating the new frame.
     RefPtr<ComputedStyle> mComputedStyle;
     // Whether optimizations to skip constructing textframes around
@@ -1623,8 +1594,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
    * @param aFrameList the list in which we should place the in-flow children
    * @param aAllowBlockStyles Whether to allow first-letter and first-line
    *        styles on the parent.
-   * @param aPendingBinding Make sure to push this into aState before doing any
-   *        child item construction.
    * @param aPossiblyLeafFrame if non-null, this should be used for the isLeaf
    *        test and the anonymous content creation.  If null, aFrame will be
    *        used.
@@ -1634,7 +1603,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                        nsContainerFrame* aParentFrame,
                        const bool aCanHaveGeneratedContent,
                        nsFrameList& aFrameList, const bool aAllowBlockStyles,
-                       PendingBinding* aPendingBinding,
                        nsIFrame* aPossiblyLeafFrame = nullptr);
 
   /**
@@ -1684,7 +1652,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                              nsIContent* aContent,
                              nsContainerFrame* aParentFrame,
                              ComputedStyle* aComputedStyle, bool aBuildCombobox,
-                             PendingBinding* aPendingBinding,
                              nsFrameList& aFrameList);
 
   /**
@@ -1759,15 +1726,12 @@ class nsCSSFrameConstructor final : public nsFrameManager {
   // @param aPositionedFrameForAbsPosContainer if non-null, then the new
   // block should be an abs-pos container and aPositionedFrameForAbsPosContainer
   // is the frame whose style is making this block an abs-pos container.
-  // @param aPendingBinding the pending binding  from this block's frame
-  // construction item.
   void ConstructBlock(nsFrameConstructorState& aState, nsIContent* aContent,
                       nsContainerFrame* aParentFrame,
                       nsContainerFrame* aContentParentFrame,
                       ComputedStyle* aComputedStyle,
                       nsContainerFrame** aNewFrame, nsFrameList& aFrameList,
-                      nsIFrame* aPositionedFrameForAbsPosContainer,
-                      PendingBinding* aPendingBinding);
+                      nsIFrame* aPositionedFrameForAbsPosContainer);
 
   // Build the initial column hierarchy around aColumnContent. This function
   // should be called before constructing aColumnContent's children.
@@ -2115,7 +2079,7 @@ class nsCSSFrameConstructor final : public nsFrameManager {
   void CountersDirty();
 
   void ConstructAnonymousContentForCanvas(nsFrameConstructorState& aState,
-                                          nsIFrame* aFrame,
+                                          nsContainerFrame* aFrame,
                                           nsIContent* aDocElement,
                                           nsFrameList&);
 

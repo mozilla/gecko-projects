@@ -85,7 +85,7 @@ def _raw_log():
 
 
 def test_environment(xrePath, env=None, crashreporter=True, debugger=False,
-                     lsanPath=None, ubsanPath=None, log=None):
+                     useLSan=False, log=None):
     """
     populate OS environment variables for mochitest and reftests.
 
@@ -141,6 +141,9 @@ def test_environment(xrePath, env=None, crashreporter=True, debugger=False,
     env.setdefault('R_LOG_DESTINATION', 'stderr')
     env.setdefault('R_LOG_VERBOSE', '1')
 
+    # Ask NSS to use lower-security password encryption. See Bug 1594559
+    env.setdefault('NSS_MAX_MP_PBE_ITERATION_COUNT', '10')
+
     # ASan specific environment stuff
     asan = bool(mozinfo.info.get("asan"))
     if asan:
@@ -182,20 +185,12 @@ def test_environment(xrePath, env=None, crashreporter=True, debugger=False,
             else:
                 message = message % 'default memory'
 
-            if lsanPath:
+            if useLSan:
                 log.info("LSan enabled.")
                 asanOptions.append('detect_leaks=1')
                 lsanOptions = ["exitcode=0"]
                 # Uncomment out the next line to report the addresses of leaked objects.
                 # lsanOptions.append("report_objects=1")
-                suppressionsFile = os.path.join(
-                    lsanPath, 'lsan_suppressions.txt')
-                if os.path.exists(suppressionsFile):
-                    log.info("LSan using suppression file " + suppressionsFile)
-                    lsanOptions.append("suppressions=" + suppressionsFile)
-                else:
-                    log.info("WARNING | runtests.py | LSan suppressions file"
-                             " does not exist! " + suppressionsFile)
                 env["LSAN_OPTIONS"] = ':'.join(lsanOptions)
 
             if len(asanOptions):
@@ -224,18 +219,7 @@ def test_environment(xrePath, env=None, crashreporter=True, debugger=False,
 
     ubsan = bool(mozinfo.info.get("ubsan"))
     if ubsan and (mozinfo.isLinux or mozinfo.isMac):
-        if ubsanPath:
-            log.info("UBSan enabled.")
-            ubsanOptions = []
-            suppressionsFile = os.path.join(
-                ubsanPath, 'ubsan_suppressions.txt')
-            if os.path.exists(suppressionsFile):
-                log.info("UBSan using suppression file " + suppressionsFile)
-                ubsanOptions.append("suppressions=" + suppressionsFile)
-            else:
-                log.info("WARNING | runtests.py | UBSan suppressions file"
-                         " does not exist! " + suppressionsFile)
-            env["UBSAN_OPTIONS"] = ':'.join(ubsanOptions)
+        log.info("UBSan enabled.")
 
     return env
 

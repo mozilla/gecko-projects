@@ -71,6 +71,10 @@ class TRRService : public nsIObserver,
   friend class ::nsDNSService;
   void GetParentalControlEnabledInternal();
 
+  bool IsDomainBlacklisted(const nsACString& aHost,
+                           const nsACString& aOriginSuffix,
+                           bool aPrivateBrowsing);
+
   bool mInitialized;
   Atomic<uint32_t, Relaxed> mMode;
   Atomic<uint32_t, Relaxed> mTRRBlacklistExpireTime;
@@ -106,6 +110,7 @@ class TRRService : public nsIObserver,
 
   // A set of domains that we should not use TRR for.
   nsTHashtable<nsCStringHashKey> mExcludedDomains;
+  nsTHashtable<nsCStringHashKey> mDNSSuffixDomains;
 
   enum ConfirmationState {
     CONFIRM_INIT = 0,

@@ -7,6 +7,8 @@
 #ifndef jit_BaselineFrame_h
 #define jit_BaselineFrame_h
 
+#include <algorithm>
+
 #include "jit/JitFrames.h"
 #include "vm/Stack.h"
 
@@ -174,9 +176,7 @@ class BaselineFrame {
     return *(size_t*)(reinterpret_cast<const uint8_t*>(this) +
                       BaselineFrame::Size() + offsetOfNumActualArgs());
   }
-  unsigned numFormalArgs() const {
-    return script()->functionNonDelazifying()->nargs();
-  }
+  unsigned numFormalArgs() const { return script()->function()->nargs(); }
   Value& thisArgument() const {
     MOZ_ASSERT(isFunctionFrame());
     return *(Value*)(reinterpret_cast<const uint8_t*>(this) +
@@ -207,7 +207,7 @@ class BaselineFrame {
     if (isConstructing()) {
       return *(Value*)(reinterpret_cast<const uint8_t*>(this) +
                        BaselineFrame::Size() +
-                       offsetOfArg(Max(numFormalArgs(), numActualArgs())));
+                       offsetOfArg(std::max(numFormalArgs(), numActualArgs())));
     }
     return UndefinedValue();
   }
@@ -242,6 +242,12 @@ class BaselineFrame {
     flags_ |= RUNNING_IN_INTERPRETER;
     setInterpreterFields(pc);
   }
+  void switchFromJitToInterpreterAtPrologue(JSContext* cx) {
+    MOZ_ASSERT(!cx->isProfilerSamplingEnabled());
+    MOZ_ASSERT(!runningInInterpreter());
+    flags_ |= RUNNING_IN_INTERPRETER;
+    setInterpreterFieldsForPrologue(script());
+  }
 
   // Like switchFromJitToInterpreter, but set the interpreterICEntry_ field to
   // nullptr. Initializing this field requires a binary search on the
@@ -275,7 +281,9 @@ class BaselineFrame {
     setInterpreterFields(script(), pc);
   }
 
-  void setInterpreterFieldsForPrologueBailout(JSScript* script);
+  // Initialize interpreter fields for resuming in the prologue (before the
+  // argument type check ICs).
+  void setInterpreterFieldsForPrologue(JSScript* script);
 
   bool hasReturnValue() const { return flags_ & HAS_RVAL; }
   MutableHandleValue returnValue() {
@@ -333,7 +341,7 @@ class BaselineFrame {
   void trace(JSTracer* trc, const JSJitFrameIter& frame);
 
   bool isGlobalFrame() const { return script()->isGlobalCode(); }
-  bool isModuleFrame() const { return script()->module(); }
+  bool isModuleFrame() const { return script()->isModule(); }
   bool isEvalFrame() const { return script()->isForEval(); }
   bool isStrictEvalFrame() const { return isEvalFrame() && script()->strict(); }
   bool isNonStrictEvalFrame() const {

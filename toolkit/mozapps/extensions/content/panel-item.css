@@ -1,7 +1,20 @@
+:host {
+  display: flex;
+  align-items: center;
+}
+
+::slotted(a) {
+  margin-inline-end: 12px;
+}
+
 :host([checked]) {
   --icon: url("chrome://global/skin/icons/check.svg");
   -moz-context-properties: fill;
   fill: currentColor;
+}
+
+:host([checked]) button {
+  background-size: 1em;
 }
 
 button {
@@ -34,7 +47,7 @@ button:dir(rtl) {
   background: var(--blue-50);
   position: absolute;
   top: 4px;
-  left: 28px;
+  inset-inline-start: 28px;
 }
 
 button:focus,

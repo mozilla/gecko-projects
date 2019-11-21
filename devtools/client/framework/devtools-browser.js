@@ -68,11 +68,6 @@ loader.lazyImporter(
   "BrowserToolboxProcess",
   "resource://devtools/client/framework/ToolboxProcess.jsm"
 );
-loader.lazyImporter(
-  this,
-  "ScratchpadManager",
-  "resource://devtools/client/scratchpad/scratchpad-manager.jsm"
-);
 
 const { LocalizationHelper } = require("devtools/shared/l10n");
 const L10N = new LocalizationHelper(
@@ -151,14 +146,10 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
     );
 
     // Enable record/replay menu items?
-    try {
-      const recordReplayEnabled = Services.prefs.getBoolPref(
-        "devtools.recordreplay.enabled"
-      );
-      toggleMenuItem("menu_webreplay", recordReplayEnabled);
-    } catch (e) {
-      // devtools.recordreplay.enabled only exists on certain platforms.
-    }
+    const recordReplayEnabled = Services.prefs.getBoolPref(
+      "devtools.recordreplay.enabled"
+    );
+    toggleMenuItem("menu_webreplay", recordReplayEnabled);
 
     // The profiler's popup is experimental. The plan is to eventually turn it on
     // everywhere, but while it's under active development we don't want everyone
@@ -320,8 +311,7 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
    *         from devtools-startup.js's KeyShortcuts array. The useful fields here
    *         are:
    *         - `toolId` used to identify a toolbox's panel like inspector or webconsole,
-   *         - `id` used to identify any other key shortcuts like scratchpad or
-   *         about:debugging
+   *         - `id` used to identify any other key shortcuts like about:debugging
    * @param {Number} startTime
    *        Optional, indicates the time at which the key event fired. This is a
    *        `Cu.now()` timing.
@@ -360,9 +350,6 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
         ResponsiveUIManager.toggle(window, window.gBrowser.selectedTab, {
           trigger: "shortcut",
         });
-        break;
-      case "scratchpad":
-        ScratchpadManager.openScratchpad();
         break;
     }
   },
@@ -411,7 +398,7 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
     for (let i = 1; i < childCount; i++) {
       const child = Services.ppmm.getChildAt(i);
       if (child == mm) {
-        processId = i;
+        processId = mm.osPid;
         break;
       }
     }

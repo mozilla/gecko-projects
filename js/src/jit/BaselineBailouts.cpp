@@ -6,8 +6,6 @@
 
 #include "mozilla/ScopeExit.h"
 
-#include "jsutil.h"
-
 #include "debugger/DebugAPI.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/BaselineFrame.h"
@@ -21,6 +19,7 @@
 #include "jit/Recover.h"
 #include "jit/RematerializedFrame.h"
 #include "js/Utility.h"
+#include "util/Memory.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/TraceLogging.h"
@@ -1129,7 +1128,7 @@ static bool InitFromBailout(JSContext* cx, size_t frameNo, HandleFunction fun,
     if (isPrologueBailout) {
       JitSpew(JitSpew_BaselineBailouts, "      Resuming into prologue.");
       MOZ_ASSERT(pc == script->code());
-      blFrame->setInterpreterFieldsForPrologueBailout(script);
+      blFrame->setInterpreterFieldsForPrologue(script);
       resumeAddr = baselineInterp.bailoutPrologueEntryAddr();
     } else if (excInfo && excInfo->propagatingIonExceptionForDebugMode()) {
       // When propagating an exception for debug mode, set the

@@ -36,6 +36,7 @@ pref_groups = [
     'content',
     'device',
     'devtools',
+    'docshell',
     'dom',
     'editor',
     'extensions',
@@ -63,6 +64,7 @@ pref_groups = [
     'page_load',
     'permissions',
     'plain_text',
+    'plugin',
     'plugins',
     'preferences',
     'print',
@@ -132,7 +134,7 @@ XPCOM_MANIFESTS += [
     'components.conf',
 ]
 
-SPHINX_TREES['libpref'] = 'docs'
+SPHINX_TREES['/modules/libpref'] = 'docs'
 
 include('/ipc/chromium/chromium-config.mozbuild')
 
@@ -143,6 +145,9 @@ DEFINES['MOZ_WIDGET_TOOLKIT'] = CONFIG['MOZ_WIDGET_TOOLKIT']
 
 if CONFIG['MOZ_SERVICES_SYNC']:
   DEFINES['MOZ_SERVICES_SYNC'] = True
+
+if CONFIG['MOZ_BUILD_APP'] == 'browser':
+    DEFINES['MOZ_BUILD_APP_IS_BROWSER'] = True
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
     if not CONFIG['MOZ_ANDROID_FAT_AAR_ARCHITECTURES']:

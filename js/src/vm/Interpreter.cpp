@@ -47,6 +47,7 @@
 #include "vm/JSScript.h"
 #include "vm/Opcodes.h"
 #include "vm/PIC.h"
+#include "vm/Printer.h"
 #include "vm/Scope.h"
 #include "vm/Shape.h"
 #include "vm/StringType.h"
@@ -404,8 +405,6 @@ bool js::RunScript(JSContext* cx, RunState& state) {
 
   GeckoProfilerEntryMarker marker(cx, state.script());
 
-  state.script()->ensureNonLazyCanonicalFunction();
-
   jit::EnterJitStatus status = jit::MaybeEnterJit(cx, state);
   switch (status) {
     case jit::EnterJitStatus::Error:
@@ -429,8 +428,7 @@ bool js::RunScript(JSContext* cx, RunState& state) {
 
 STATIC_PRECONDITION_ASSUME(ubound(args.argv_) >= argc)
 MOZ_ALWAYS_INLINE bool CallJSNative(JSContext* cx, Native native,
-                                    CallReason reason,
-                                    const CallArgs& args) {
+                                    CallReason reason, const CallArgs& args) {
   TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
   AutoTraceLog traceLog(logger, TraceLogger_Call);
 
@@ -502,8 +500,7 @@ MOZ_ALWAYS_INLINE bool CallJSNativeConstructor(JSContext* cx, Native native,
  *       this step already!
  */
 bool js::InternalCallOrConstruct(JSContext* cx, const CallArgs& args,
-                                 MaybeConstruct construct,
-                                 CallReason reason) {
+                                 MaybeConstruct construct, CallReason reason) {
   MOZ_ASSERT(args.length() <= ARGS_LENGTH_MAX);
   MOZ_ASSERT(!cx->zone()->types.activeAnalysis);
 
@@ -823,7 +820,7 @@ bool js::Execute(JSContext* cx, HandleScript script, JSObject& envChainArg,
   RootedObject envChain(cx, &envChainArg);
   MOZ_ASSERT(!IsWindowProxy(envChain));
 
-  if (script->module()) {
+  if (script->isModule()) {
     MOZ_RELEASE_ASSERT(
         envChain == script->module()->environment(),
         "Module scripts can only be executed in the module's environment");
@@ -1663,7 +1660,7 @@ void js::ReportInNotObjectError(JSContext* cx, HandleValue lref, int lindex,
         return nullptr;
       }
     }
-    return StringToNewUTF8CharsZ(cx, *str);
+    return QuoteString(cx, str, '"');
   };
 
   if (lref.isString() && rref.isString()) {
@@ -2196,6 +2193,15 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
       }
     }
     END_CASE(JSOP_OR)
+
+    CASE(JSOP_COALESCE) {
+      MutableHandleValue res = REGS.stackHandleAt(-1);
+      bool cond = !res.isNullOrUndefined();
+      if (cond) {
+        ADVANCE_AND_DISPATCH(GET_JUMP_OFFSET(REGS.pc));
+      }
+    }
+    END_CASE(JSOP_COALESCE)
 
     CASE(JSOP_AND) {
       bool cond = ToBoolean(REGS.stackHandleAt(-1));
@@ -4244,7 +4250,7 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     CASE(JSOP_SUPERBASE) {
       JSFunction& superEnvFunc = REGS.sp[-1].toObject().as<JSFunction>();
       MOZ_ASSERT(superEnvFunc.allowSuperProperty());
-      MOZ_ASSERT(superEnvFunc.nonLazyScript()->needsHomeObject());
+      MOZ_ASSERT(superEnvFunc.baseScript()->needsHomeObject());
       const Value& homeObjVal = superEnvFunc.getExtendedSlot(
           FunctionExtended::METHOD_HOMEOBJECT_SLOT);
 
@@ -4497,7 +4503,7 @@ bool js::GetProperty(JSContext* cx, HandleValue v, HandlePropertyName name,
   // Optimize common cases like (2).toString() or "foo".valueOf() to not
   // create a wrapper object.
   if (v.isPrimitive() && !v.isNullOrUndefined()) {
-    NativeObject* proto;
+    JSObject* proto;
 
     switch (v.type()) {
       case ValueType::Double:
@@ -5378,7 +5384,7 @@ void js::ReportRuntimeLexicalError(JSContext* cx, unsigned errorNumber,
   RootedPropertyName name(cx);
 
   if (op == JSOP_THROWSETCALLEE) {
-    name = script->functionNonDelazifying()->explicitName()->asPropertyName();
+    name = script->function()->explicitName()->asPropertyName();
   } else if (IsLocalOp(op)) {
     name = FrameSlotName(script, pc)->asPropertyName();
   } else if (IsAtomOp(op)) {
@@ -5465,7 +5471,7 @@ JSObject* js::HomeObjectSuperBase(JSContext* cx, HandleObject homeObj) {
 JSObject* js::SuperFunOperation(JSContext* cx, HandleObject callee) {
   MOZ_ASSERT(callee->as<JSFunction>().isClassConstructor());
   MOZ_ASSERT(
-      callee->as<JSFunction>().nonLazyScript()->isDerivedClassConstructor());
+      callee->as<JSFunction>().baseScript()->isDerivedClassConstructor());
 
   RootedObject superFun(cx);
 

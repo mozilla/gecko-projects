@@ -54,6 +54,7 @@
 #  include <gtk/gtkx.h>
 #  include "mozilla/widget/nsWaylandDisplay.h"
 #  include "mozilla/layers/WaylandDMABUFTextureClientOGL.h"
+#  include "gfxPlatformGtk.h"
 #endif
 
 #ifdef XP_MACOSX
@@ -116,7 +117,8 @@ class TextureChild final : PTextureChild {
         mMainThreadOnly(false),
         mIPCOpen(false),
         mOwnsTextureData(false),
-        mOwnerCalledDestroy(false) {}
+        mOwnerCalledDestroy(false),
+        mUsesImageBridge(false) {}
 
   mozilla::ipc::IPCResult Recv__delete__() override { return IPC_OK(); }
 
@@ -127,15 +129,13 @@ class TextureChild final : PTextureChild {
   bool IPCOpen() const { return mIPCOpen; }
 
   void Lock() const {
-    if (mCompositableForwarder &&
-        mCompositableForwarder->GetTextureForwarder()->UsesImageBridge()) {
+    if (mUsesImageBridge) {
       mLock.Enter();
     }
   }
 
   void Unlock() const {
-    if (mCompositableForwarder &&
-        mCompositableForwarder->GetTextureForwarder()->UsesImageBridge()) {
+    if (mUsesImageBridge) {
       mLock.Leave();
     }
   }
@@ -238,6 +238,7 @@ class TextureChild final : PTextureChild {
   bool mIPCOpen;
   bool mOwnsTextureData;
   bool mOwnerCalledDestroy;
+  bool mUsesImageBridge;
 
   friend class TextureClient;
   friend void DeallocateTextureClient(TextureDeallocParams params);
@@ -282,9 +283,9 @@ static TextureType GetTextureType(gfx::SurfaceFormat aFormat,
 #endif
 
 #ifdef MOZ_WAYLAND
-  if (aLayersBackend == LayersBackend::LAYERS_OPENGL &&
-      !GDK_IS_X11_DISPLAY(gdk_display_get_default()) &&
-      widget::nsWaylandDisplay::IsDMABufEnabled() &&
+  if ((aLayersBackend == LayersBackend::LAYERS_OPENGL ||
+       aLayersBackend == LayersBackend::LAYERS_WR) &&
+      gfxPlatformGtk::GetPlatform()->UseWaylandDMABufSurfaces() &&
       aFormat != SurfaceFormat::A8) {
     return TextureType::WaylandDMABUF;
   }
@@ -1054,6 +1055,7 @@ bool TextureClient::InitIPDLActor(CompositableForwarder* aForwarder) {
         }
       }
       mActor->mCompositableForwarder = aForwarder;
+      mActor->mUsesImageBridge = aForwarder->GetTextureForwarder()->UsesImageBridge();
     }
     return true;
   }
@@ -1490,7 +1492,7 @@ void TextureClient::GPUVideoDesc(SurfaceDescriptorGPUVideo* const aOutDesc) {
   MOZ_RELEASE_ASSERT(mData);
   mData->GetSubDescriptor(&subDesc);
 
-  *aOutDesc = SurfaceDescriptorGPUVideo(handle, std::move(subDesc));
+  *aOutDesc = SurfaceDescriptorGPUVideo(handle, std::move(subDesc), Nothing());
 }
 
 class MemoryTextureReadLock : public NonBlockingTextureReadLock {

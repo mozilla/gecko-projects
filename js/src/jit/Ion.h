@@ -140,13 +140,26 @@ void SetJitContext(JitContext* ctx);
 bool CanIonCompileScript(JSContext* cx, JSScript* script);
 bool CanIonInlineScript(JSScript* script);
 
-MOZ_MUST_USE bool IonCompileScriptForBaseline(JSContext* cx,
-                                              BaselineFrame* frame,
-                                              uint32_t frameSize,
-                                              jsbytecode* pc);
-
 MOZ_MUST_USE bool IonCompileScriptForBaselineAtEntry(JSContext* cx,
                                                      BaselineFrame* frame);
+
+struct IonOsrTempData {
+  void* jitcode;
+  uint8_t* baselineFrame;
+
+  static constexpr size_t offsetOfJitCode() {
+    return offsetof(IonOsrTempData, jitcode);
+  }
+  static constexpr size_t offsetOfBaselineFrame() {
+    return offsetof(IonOsrTempData, baselineFrame);
+  }
+};
+
+MOZ_MUST_USE bool IonCompileScriptForBaselineOSR(JSContext* cx,
+                                                 BaselineFrame* frame,
+                                                 uint32_t frameSize,
+                                                 jsbytecode* pc,
+                                                 IonOsrTempData** infoPtr);
 
 MethodStatus CanEnterIon(JSContext* cx, RunState& state);
 
@@ -222,7 +235,7 @@ inline bool TooManyFormalArguments(unsigned nargs) {
 
 inline size_t NumLocalsAndArgs(JSScript* script) {
   size_t num = 1 /* this */ + script->nfixed();
-  if (JSFunction* fun = script->functionNonDelazifying()) {
+  if (JSFunction* fun = script->function()) {
     num += fun->nargs();
   }
   return num;

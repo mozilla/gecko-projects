@@ -90,8 +90,8 @@ const DISPLAY_TYPES = {
  *
  * @param  {MarkupContainer} container
  *         The container owning this editor.
- * @param  {Element} node
- *         The node being edited.
+ * @param  {NodeFront} node
+ *         The NodeFront being edited.
  */
 function ElementEditor(container, node) {
   this.container = container;
@@ -402,9 +402,6 @@ ElementEditor.prototype = {
     this._displayBadge.addEventListener("click", this.onDisplayBadgeClick);
     // Badges order is [event][display][custom], insert display badge before custom.
     this.elt.insertBefore(this._displayBadge, this._customBadge);
-
-    this.startTrackingFlexboxHighlighterEvents();
-    this.startTrackingGridHighlighterEvents();
   },
 
   _updateDisplayBadgeContent: function() {
@@ -412,14 +409,10 @@ ElementEditor.prototype = {
     this._displayBadge.textContent = displayType;
     this._displayBadge.dataset.display = displayType;
     this._displayBadge.title = DISPLAY_TYPES[displayType];
-    this._displayBadge.classList.toggle(
-      "active",
-      this.highlighters.flexboxHighlighterShown === this.node ||
-        this.highlighters.gridHighlighters.has(this.node)
-    );
 
     if (displayType === "flex" || displayType === "inline-flex") {
       this._displayBadge.classList.toggle("interactive", true);
+      this.startTrackingFlexboxHighlighterEvents();
     } else if (
       displayType === "grid" ||
       displayType === "inline-grid" ||
@@ -429,6 +422,7 @@ ElementEditor.prototype = {
         "interactive",
         this.highlighters.canGridHighlighterToggle(this.node)
       );
+      this.startTrackingGridHighlighterEvents();
     } else {
       this._displayBadge.classList.remove("interactive");
     }
@@ -959,7 +953,10 @@ ElementEditor.prototype = {
       this.highlighters.gridHighlighters.has(this.node)
     );
 
-    this._updateDisplayBadgeContent();
+    this._displayBadge.classList.toggle(
+      "interactive",
+      this.highlighters.canGridHighlighterToggle(this.node)
+    );
   },
 
   /**
@@ -977,7 +974,7 @@ ElementEditor.prototype = {
     // Changing the tagName removes the node. Make sure the replacing node gets
     // selected afterwards.
     this.markup.reselectOnRemoved(this.node, "edittagname");
-    this.markup.walker.editTagName(this.node, newTagName).catch(() => {
+    this.node.walkerFront.editTagName(this.node, newTagName).catch(() => {
       // Failed to edit the tag name, cancel the reselection.
       this.markup.cancelReselectOnRemoved();
     });

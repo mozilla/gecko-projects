@@ -74,6 +74,7 @@ def Libxul(name, output_category=None):
         LDFLAGS += ['-Wl,-U,_OBJC_CLASS_$_NSSharingServicePickerTouchBarItem']
         LDFLAGS += ['-Wl,-U,_OBJC_METACLASS_$_NSTouchBar']
         LDFLAGS += ['-Wl,-U,_OBJC_CLASS_$_NSCustomTouchBarItem']
+        LDFLAGS += ['-Wl,-U,_OBJC_CLASS_$_NSPopoverTouchBarItem']
         LDFLAGS += ['-lresolv']
 
     if CONFIG['MOZ_DEBUG_SYMBOLS'] and CONFIG['CC_TYPE'] == 'clang-cl':
@@ -82,12 +83,9 @@ def Libxul(name, output_category=None):
         LDFLAGS += CONFIG['RUSTC_NATVIS_LDFLAGS']
 
     if CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TARGET'] != 'Android':
-        GENERATED_FILES += ['symverscript']
-        GENERATED_FILES['symverscript'].script = '/build/gen_symverscript.py'
-        GENERATED_FILES['symverscript'].inputs = ['../symverscript.in']
-        GENERATED_FILES['symverscript'].flags = [
-            'xul%s' % CONFIG['MOZILLA_SYMBOLVERSION']
-        ]
+        GeneratedFile('symverscript', script='/build/gen_symverscript.py',
+                      inputs=['../symverscript.in'],
+                      flags=['xul%s' % CONFIG['MOZILLA_SYMBOLVERSION']])
         SYMBOLS_FILE = '!symverscript'
 
     # Generate GDB pretty printer-autoload files only on Linux. OSX's GDB is
@@ -259,9 +257,6 @@ if CONFIG['MOZ_SYSTEM_LIBVPX']:
 if not CONFIG['MOZ_TREE_PIXMAN']:
     OS_LIBS += CONFIG['MOZ_PIXMAN_LIBS']
 
-if CONFIG['MOZ_ALSA']:
-    OS_LIBS += CONFIG['MOZ_ALSA_LIBS']
-
 if CONFIG['HAVE_CLOCK_MONOTONIC']:
     OS_LIBS += CONFIG['REALTIME_LIBS']
 
@@ -310,6 +305,13 @@ if CONFIG['OS_ARCH'] == 'FreeBSD':
         'util',
     ]
 
+if CONFIG['OS_ARCH'] == 'Darwin':
+    OS_LIBS += [
+        # Link to Metal as required by the Metal gfx-hal backend
+        '-framework Metal',
+    ]
+
+
 if CONFIG['OS_ARCH'] == 'WINNT':
     OS_LIBS += [
         'shell32',
@@ -337,6 +339,10 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         'sapi',
         'dxguid',
         'dhcpcsvc',
+        # gfx-rs supports D3D11 and D3D12, but we are not linking to them implicitly
+        #"d3d11", # should be explicitly linked by gfx-backend-d3d11
+        #'d3d12', # should be explicitly linked by d3d12-rs
+        'd3dcompiler',
     ]
 
     if CONFIG['CC_TYPE'] == 'clang-cl':
@@ -348,6 +354,9 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         OS_LIBS += [
             'oleacc',
         ]
+
+    # Prevent winapi-rs from statically linking
+    LIBRARY_DEFINES['WINAPI_NO_BUNDLED_LIBRARIES'] = True
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     OS_LIBS += [
@@ -363,11 +372,11 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
 # objects files that constitute libxul, so that if any of the files linked into
 # libxul is rebuilt, we refresh the buildid and link it into libxul.
 SOURCES += ['!buildid.cpp']
-GENERATED_FILES += ['buildid.cpp']
-GENERATED_FILES['buildid.cpp'].script = 'gen_buildid.py'
 if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('cocoa', 'uikit'):
     libxul_list = 'XUL'
 else:
     libxul_list = '%sxul_%s' % (
         CONFIG['DLL_PREFIX'], CONFIG['DLL_SUFFIX'].lstrip('.').replace('.','_'))
-GENERATED_FILES['buildid.cpp'].inputs = ['!build/%s.list' % libxul_list]
+GeneratedFile('buildid.cpp', script = 'gen_buildid.py',
+              inputs=['!build/%s.list' % libxul_list])
+

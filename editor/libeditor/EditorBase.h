@@ -211,7 +211,9 @@ class EditorBase : public nsIEditor,
   nsPIDOMWindowInner* GetInnerWindow() const {
     return mDocument ? mDocument->GetInnerWindow() : nullptr;
   }
-  bool HasMutationEventListeners(
+  // @param aMutationEventType One or multiple of NS_EVENT_BITS_MUTATION_*.
+  // @return true, iff at least one of NS_EVENT_BITS_MUTATION_* is set.
+  bool MaybeHasMutationEventListeners(
       uint32_t aMutationEventType = 0xFFFFFFFF) const {
     if (!mIsHTMLEditorClass) {
       // DOM mutation event listeners cannot catch the changes of
@@ -676,8 +678,8 @@ class EditorBase : public nsIEditor,
     void DidJoinContents(EditorBase& aEditorBase, nsIContent& aLeftContent,
                          nsIContent& aRightContent);
     void DidInsertText(EditorBase& aEditorBase,
-                       const EditorRawDOMPoint& aInsertionPoint,
-                       const nsAString& aString);
+                       const EditorRawDOMPoint& aInsertionBegin,
+                       const EditorRawDOMPoint& aInsertionEnd);
     void DidDeleteText(EditorBase& aEditorBase,
                        const EditorRawDOMPoint& aStartInTextNode);
     void WillDeleteRange(EditorBase& aEditorBase,
@@ -2241,16 +2243,14 @@ class EditorBase : public nsIEditor,
 
   /**
    * Helper method for scrolling the selection into view after
-   * an edit operation. aScrollToAnchor should be true if you
-   * want to scroll to the point where the selection was started.
-   * If false, it attempts to scroll the end of the selection into view.
+   * an edit operation.
    *
    * Editor methods *should* call this method instead of the versions
-   * in the various selection interfaces, since this version makes sure
-   * that the editor's sync/async settings for reflowing, painting, and
-   * scrolling match.
+   * in the various selection interfaces, since this makes sure that
+   * the editor's sync/async settings for reflowing, painting, and scrolling
+   * match.
    */
-  nsresult ScrollSelectionIntoView(bool aScrollToAnchor);
+  MOZ_CAN_RUN_SCRIPT MOZ_MUST_USE nsresult ScrollSelectionFocusIntoView();
 
   /**
    * Helper for GetPreviousNodeInternal() and GetNextNodeInternal().

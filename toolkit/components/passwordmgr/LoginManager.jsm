@@ -5,6 +5,7 @@
 "use strict";
 
 const PERMISSION_SAVE_LOGINS = "login-saving";
+const MAX_DATE_MS = 8640000000000000;
 
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
@@ -20,11 +21,6 @@ ChromeUtils.defineModuleGetter(
   this,
   "LoginFormFactory",
   "resource://gre/modules/LoginFormFactory.jsm"
-);
-ChromeUtils.defineModuleGetter(
-  this,
-  "LoginManagerContent",
-  "resource://gre/modules/LoginManagerContent.jsm"
 );
 ChromeUtils.defineModuleGetter(
   this,
@@ -288,6 +284,14 @@ LoginManager.prototype = {
         "Can't add a login without a httpRealm or formActionOrigin."
       );
     }
+
+    login.QueryInterface(Ci.nsILoginMetaInfo);
+    for (let pname of ["timeCreated", "timeLastUsed", "timePasswordChanged"]) {
+      // Invalid dates
+      if (login[pname] > MAX_DATE_MS) {
+        throw new Error("Can't add a login with invalid date properties.");
+      }
+    }
   },
 
   /* ---------- Primary Public interfaces ---------- */
@@ -418,7 +422,7 @@ LoginManager.prototype = {
     log.debug("Getting a list of all disabled origins");
 
     let disabledHosts = [];
-    for (let perm of Services.perms.enumerator) {
+    for (let perm of Services.perms.all) {
       if (
         perm.type == PERMISSION_SAVE_LOGINS &&
         perm.capability == Services.perms.DENY_ACTION

@@ -1085,7 +1085,6 @@ class nsContentUtils {
    */
   enum PropertiesFile {
     eCSS_PROPERTIES,
-    eXBL_PROPERTIES,
     eXUL_PROPERTIES,
     eLAYOUT_PROPERTIES,
     eFORMS_PROPERTIES,
@@ -1098,8 +1097,8 @@ class nsContentUtils {
     eMATHML_PROPERTIES,
     eSECURITY_PROPERTIES,
     eNECKO_PROPERTIES,
-    eFORMS_PROPERTIES_MAYBESPOOF,
     eFORMS_PROPERTIES_en_US,
+    eDOM_PROPERTIES_en_US,
     PropertiesFile_COUNT
   };
   static nsresult ReportToConsole(
@@ -1113,11 +1112,22 @@ class nsContentUtils {
 
   static void LogMessageToConsole(const char* aMsg);
 
+  static bool SpoofLocaleEnglish();
+
   /**
    * Get the localized string named |aKey| in properties file |aFile|.
    */
   static nsresult GetLocalizedString(PropertiesFile aFile, const char* aKey,
                                      nsAString& aResult);
+
+  /**
+   * Same as GetLocalizedString, except that it might use en-US locale depending
+   * on SpoofLocaleEnglish() and whether the document is a built-in browser
+   * page.
+   */
+  static nsresult GetMaybeLocalizedString(PropertiesFile aFile,
+                                          const char* aKey, Document* aDocument,
+                                          nsAString& aResult);
 
   /**
    * A helper function that parses a sandbox attribute (of an <iframe> or a CSP
@@ -1204,6 +1214,24 @@ class nsContentUtils {
   }
 
   /**
+   * Same as FormatLocalizedString template version, except that it might use
+   * en-US locale depending on SpoofLocaleEnglish() and whether the document is
+   * a built-in browser page.
+   */
+  template <typename... T>
+  static nsresult FormatMaybeLocalizedString(nsAString& aResult,
+                                             PropertiesFile aFile,
+                                             const char* aKey,
+                                             Document* aDocument,
+                                             const T&... aParams) {
+    static_assert(sizeof...(aParams) != 0, "Use GetMaybeLocalizedString()");
+    AutoTArray<nsString, sizeof...(aParams)> params = {
+        aParams...,
+    };
+    return FormatMaybeLocalizedString(aFile, aKey, aDocument, params, aResult);
+  }
+
+  /**
    * Fill (with the parameters given) the localized string named |aKey| in
    * properties file |aFile| consuming an nsTArray of nsString parameters rather
    * than a char16_t** for the sake of avoiding use-after-free errors involving
@@ -1212,6 +1240,15 @@ class nsContentUtils {
   static nsresult FormatLocalizedString(PropertiesFile aFile, const char* aKey,
                                         const nsTArray<nsString>& aParamArray,
                                         nsAString& aResult);
+
+  /**
+   * Same as FormatLocalizedString, except that it might use en-US locale
+   * depending on SpoofLocaleEnglish() and whether the document is a built-in
+   * browser page.
+   */
+  static nsresult FormatMaybeLocalizedString(
+      PropertiesFile aFile, const char* aKey, Document* aDocument,
+      const nsTArray<nsString>& aParamArray, nsAString& aResult);
 
   /**
    * Returns true if aDocument is a chrome document
@@ -2301,16 +2338,6 @@ class nsContentUtils {
   static bool IsFocusedContent(const nsIContent* aContent);
 
   /**
-   * Returns nullptr if requests for fullscreen are allowed in the current
-   * context. Requests are only allowed if the user initiated them (like with
-   * a mouse-click or key press), unless this check has been disabled by
-   * setting the pref "full-screen-api.allow-trusted-requests-only" to false.
-   * If fullscreen is not allowed, a key for the error message is returned.
-   */
-  static const char* CheckRequestFullscreenAllowed(
-      mozilla::dom::CallerType aCallerType);
-
-  /**
    * Returns true if calling execCommand with 'cut' or 'copy' arguments is
    * allowed for the given subject principal. These are only allowed if the user
    * initiated them (like with a mouse-click or key press).
@@ -2372,13 +2399,6 @@ class nsContentUtils {
    * have common scriptable top window.
    */
   static bool IsInPointerLockContext(nsPIDOMWindowOuter* aWin);
-
-  /**
-   * Returns the time limit on handling user input before
-   * EventStateManager::IsHandlingUserInput() stops returning true.
-   * This enables us to detect long running user-generated event handlers.
-   */
-  static TimeDuration HandlingUserInputTimeout();
 
   static void GetShiftText(nsAString& text);
   static void GetControlText(nsAString& text);
@@ -2644,6 +2664,13 @@ class nsContentUtils {
    */
   static mozilla::TextEditor* GetTextEditorFromAnonymousNodeWithoutCreation(
       nsIContent* aAnonymousContent);
+
+  /**
+   * Returns whether a node has an editable ancestor.
+   *
+   * @param aNode The node to test.
+   */
+  static bool IsNodeInEditableRegion(nsINode* aNode);
 
   /**
    * Returns a LogModule that dump calls from content script are logged to.
@@ -3066,6 +3093,13 @@ class nsContentUtils {
   static uint64_t GenerateBrowsingContextId();
 
   /**
+   * Generate an id using a range of serial numbers reserved for the current
+   * process. aId should be a counter that's incremented every time
+   * GenerateProcessSpecificId is called.
+   */
+  static uint64_t GenerateProcessSpecificId(uint64_t aId);
+
+  /**
    * Generate a window ID which is unique across processes and will never be
    * recycled.
    */
@@ -3145,10 +3179,7 @@ class nsContentUtils {
   static bool HighPriorityEventPendingForTopLevelDocumentBeforeContentfulPaint(
       Document* aDocument);
 
-  /**
-   * We need a JSContext to get prototypes inside CallerInnerWindow.
-   */
-  static nsGlobalWindowInner* CallerInnerWindow(JSContext* aCx);
+  static nsGlobalWindowInner* CallerInnerWindow();
 
  private:
   static bool InitializeEventTable();

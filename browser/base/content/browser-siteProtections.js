@@ -285,6 +285,8 @@ var TrackingProtection = {
   PREF_ENABLED_IN_PRIVATE_WINDOWS: "privacy.trackingprotection.pbmode.enabled",
   PREF_TRACKING_TABLE: "urlclassifier.trackingTable",
   PREF_TRACKING_ANNOTATION_TABLE: "urlclassifier.trackingAnnotationTable",
+  PREF_ANNOTATIONS_LEVEL_2_ENABLED:
+    "privacy.annotate_channels.strict_list.enabled",
   enabledGlobally: false,
   enabledInPrivateWindows: false,
 
@@ -350,6 +352,12 @@ var TrackingProtection = {
       this.PREF_TRACKING_ANNOTATION_TABLE,
       false
     );
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "annotationsLevel2Enabled",
+      this.PREF_ANNOTATIONS_LEVEL_2_ENABLED,
+      false
+    );
   },
 
   uninit() {
@@ -359,6 +367,11 @@ var TrackingProtection = {
 
   observe() {
     this.updateEnabled();
+  },
+
+  get trackingProtectionLevel2Enabled() {
+    const CONTENT_TABLE = "content-track-digest256";
+    return this.trackingTable.includes(CONTENT_TABLE);
   },
 
   get enabled() {
@@ -385,10 +398,24 @@ var TrackingProtection = {
     );
   },
 
-  isAllowing(state) {
+  isAllowingLevel1(state) {
     return (
-      (state & Ci.nsIWebProgressListener.STATE_LOADED_TRACKING_CONTENT) != 0
+      (state &
+        Ci.nsIWebProgressListener.STATE_LOADED_LEVEL_1_TRACKING_CONTENT) !=
+      0
     );
+  },
+
+  isAllowingLevel2(state) {
+    return (
+      (state &
+        Ci.nsIWebProgressListener.STATE_LOADED_LEVEL_2_TRACKING_CONTENT) !=
+      0
+    );
+  },
+
+  isAllowing(state) {
+    return this.isAllowingLevel1(state) || this.isAllowingLevel2(state);
   },
 
   isDetected(state) {
@@ -453,28 +480,6 @@ var TrackingProtection = {
     }
   },
 
-  // Given a URI from a source that was tracking-annotated, figure out
-  // if it's really on the tracking table or just on the annotation table.
-  _isOnTrackingTable(uri) {
-    if (this.trackingTable == this.trackingAnnotationTable) {
-      return true;
-    }
-
-    let feature = classifierService.getFeatureByName("tracking-protection");
-    if (!feature) {
-      return false;
-    }
-
-    return new Promise(resolve => {
-      classifierService.asyncClassifyLocalWithFeatures(
-        uri,
-        [feature],
-        Ci.nsIUrlClassifierFeature.blacklist,
-        list => resolve(!!list.length)
-      );
-    });
-  },
-
   async _createListItem(origin, actions) {
     // Figure out if this list entry was actually detected by TP or something else.
     let isAllowed = actions.some(([state]) => this.isAllowing(state));
@@ -490,8 +495,16 @@ var TrackingProtection = {
     // Because we might use different lists for annotation vs. blocking, we
     // need to make sure that this is a tracker that we would actually have blocked
     // before showing it to the user.
-    let isTracker = await this._isOnTrackingTable(uri);
-    if (!isTracker) {
+    if (
+      this.annotationsLevel2Enabled &&
+      !this.trackingProtectionLevel2Enabled &&
+      actions.some(
+        ([state]) =>
+          (state &
+            Ci.nsIWebProgressListener.STATE_LOADED_LEVEL_2_TRACKING_CONTENT) !=
+          0
+      )
+    ) {
       return null;
     }
 
@@ -606,55 +619,44 @@ var ThirdPartyCookies = {
     this.updateCategoryItem();
   },
 
-  get disabledCategoryLabel() {
-    delete this.disabledCategoryLabel;
-    return (this.disabledCategoryLabel = document.getElementById(
-      "protections-popup-cookies-category-label-disabled"
-    ));
-  },
-
-  get enabledCategoryLabel() {
-    delete this.enabledCategoryLabel;
-    return (this.enabledCategoryLabel = document.getElementById(
-      "protections-popup-cookies-category-label-enabled"
+  get categoryLabel() {
+    delete this.categoryLabel;
+    return (this.categoryLabel = document.getElementById(
+      "protections-popup-cookies-category-label"
     ));
   },
 
   updateCategoryItem() {
     this.categoryItem.classList.toggle("blocked", this.enabled);
 
-    if (!this.enabled) {
-      this.disabledCategoryLabel.hidden = false;
-      this.enabledCategoryLabel.hidden = true;
-      return;
-    }
-
     let label;
-    switch (this.behaviorPref) {
-      case Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN:
-        label = "contentBlocking.cookies.blocking3rdParty2.label";
-        break;
-      case Ci.nsICookieService.BEHAVIOR_REJECT:
-        label = "contentBlocking.cookies.blockingAll2.label";
-        break;
-      case Ci.nsICookieService.BEHAVIOR_LIMIT_FOREIGN:
-        label = "contentBlocking.cookies.blockingUnvisited2.label";
-        break;
-      case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER:
-        label = "contentBlocking.cookies.blockingTrackers3.label";
-        break;
-      default:
-        Cu.reportError(
-          `Error: Unknown cookieBehavior pref observed: ${this.behaviorPref}`
-        );
-        break;
+
+    if (!this.enabled) {
+      label = "contentBlocking.cookies.blockingTrackers3.label";
+    } else {
+      switch (this.behaviorPref) {
+        case Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN:
+          label = "contentBlocking.cookies.blocking3rdParty2.label";
+          break;
+        case Ci.nsICookieService.BEHAVIOR_REJECT:
+          label = "contentBlocking.cookies.blockingAll2.label";
+          break;
+        case Ci.nsICookieService.BEHAVIOR_LIMIT_FOREIGN:
+          label = "contentBlocking.cookies.blockingUnvisited2.label";
+          break;
+        case Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER:
+          label = "contentBlocking.cookies.blockingTrackers3.label";
+          break;
+        default:
+          Cu.reportError(
+            `Error: Unknown cookieBehavior pref observed: ${this.behaviorPref}`
+          );
+          break;
+      }
     }
-    this.enabledCategoryLabel.textContent = label
+    this.categoryLabel.textContent = label
       ? gNavigatorBundle.getString(label)
       : "";
-
-    this.disabledCategoryLabel.hidden = true;
-    this.enabledCategoryLabel.hidden = false;
   },
 
   get enabled() {
@@ -664,6 +666,8 @@ var ThirdPartyCookies = {
   isBlocking(state) {
     return (
       (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER) != 0 ||
+      (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_SOCIALTRACKER) !=
+        0 ||
       (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_ALL) != 0 ||
       (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_BY_PERMISSION) !=
         0 ||
@@ -681,7 +685,11 @@ var ThirdPartyCookies = {
       this.behaviorPref == Ci.nsICookieService.BEHAVIOR_ACCEPT
     ) {
       return (
-        (state & Ci.nsIWebProgressListener.STATE_COOKIES_LOADED_TRACKER) != 0
+        (state & Ci.nsIWebProgressListener.STATE_COOKIES_LOADED_TRACKER) != 0 ||
+        (SocialTracking.enabled &&
+          (state &
+            Ci.nsIWebProgressListener.STATE_COOKIES_LOADED_SOCIALTRACKER) !=
+            0)
       );
     }
 
@@ -804,7 +812,7 @@ var ThirdPartyCookies = {
 
     // Cookie exceptions get "inherited" from parent- to sub-domain, so we need to
     // clear any cookie permissions from parent domains as well.
-    for (let perm of Services.perms.enumerator) {
+    for (let perm of Services.perms.all) {
       if (
         perm.type == "cookie" &&
         Services.eTLD.hasRootDomain(host, perm.principal.URI.host)
@@ -999,7 +1007,7 @@ var SocialTracking = {
     );
     XPCOMUtils.defineLazyPreferenceGetter(
       this,
-      "blockSocialTrackingCookies",
+      "enabled",
       this.PREF_STP_COOKIE_ENABLED,
       false,
       this.updateCategoryItem.bind(this)
@@ -1007,41 +1015,44 @@ var SocialTracking = {
     this.updateCategoryItem();
   },
 
-  get enabled() {
-    return this.blockSocialTrackingCookies;
-  },
-
   get blockingEnabled() {
     return (
       (this.socialTrackingProtectionEnabled || this.rejectTrackingCookies) &&
-      this.blockSocialTrackingCookies
+      this.enabled
     );
   },
 
   updateCategoryItem() {
-    this.categoryItem.hidden = !this.enabled;
+    if (this.enabled) {
+      this.categoryItem.removeAttribute("uidisabled");
+    } else {
+      this.categoryItem.setAttribute("uidisabled", true);
+    }
     this.categoryItem.classList.toggle("blocked", this.blockingEnabled);
   },
 
   isBlocking(state) {
-    let cookieTrackerBlocked =
-      (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_TRACKER) != 0;
     let socialtrackingContentBlocked =
       (state &
         Ci.nsIWebProgressListener.STATE_BLOCKED_SOCIALTRACKING_CONTENT) !=
       0;
-    let socialtrackingContentLoaded =
-      (state & Ci.nsIWebProgressListener.STATE_LOADED_SOCIALTRACKING_CONTENT) !=
+    let socialtrackingCookieBlocked =
+      (state & Ci.nsIWebProgressListener.STATE_COOKIES_BLOCKED_SOCIALTRACKER) !=
       0;
-    return (
-      (socialtrackingContentLoaded && cookieTrackerBlocked) ||
-      socialtrackingContentBlocked
-    );
+    return socialtrackingCookieBlocked || socialtrackingContentBlocked;
   },
 
   isAllowing(state) {
+    if (this.socialTrackingProtectionEnabled) {
+      return (
+        (state &
+          Ci.nsIWebProgressListener.STATE_LOADED_SOCIALTRACKING_CONTENT) !=
+        0
+      );
+    }
+
     return (
-      (state & Ci.nsIWebProgressListener.STATE_LOADED_SOCIALTRACKING_CONTENT) !=
+      (state & Ci.nsIWebProgressListener.STATE_COOKIES_LOADED_SOCIALTRACKER) !=
       0
     );
   },
@@ -1178,6 +1189,12 @@ var gProtectionsHandler = {
       "protections-popup-tp-switch-breakage-link"
     ));
   },
+  get _protectionsPopupTPSwitchBreakageFixedLink() {
+    delete this._protectionsPopupTPSwitchBreakageFixedLink;
+    return (this._protectionsPopupTPSwitchBreakageFixedLink = document.getElementById(
+      "protections-popup-tp-switch-breakage-fixed-link"
+    ));
+  },
   get _protectionsPopupTPSwitchSection() {
     delete this._protectionsPopupTPSwitchSection;
     return (this._protectionsPopupTPSwitchSection = document.getElementById(
@@ -1238,6 +1255,12 @@ var gProtectionsHandler = {
       "protections-popup-siteNotWorking-tp-switch"
     ));
   },
+  get _protectionsPopupSiteNotWorkingReportError() {
+    delete this._protectionsPopupSiteNotWorkingReportError;
+    return (this._protectionsPopupSiteNotWorkingReportError = document.getElementById(
+      "protections-popup-sendReportView-report-error"
+    ));
+  },
   get _protectionsPopupSendReportLearnMore() {
     delete this._protectionsPopupSendReportLearnMore;
     return (this._protectionsPopupSendReportLearnMore = document.getElementById(
@@ -1248,6 +1271,12 @@ var gProtectionsHandler = {
     delete this._protectionsPopupSendReportURL;
     return (this._protectionsPopupSendReportURL = document.getElementById(
       "protections-popup-sendReportView-collection-url"
+    ));
+  },
+  get _protectionsPopupSendReportButton() {
+    delete this._protectionsPopupSendReportButton;
+    return (this._protectionsPopupSendReportButton = document.getElementById(
+      "protections-popup-sendReportView-submit"
     ));
   },
   get _trackingProtectionIconTooltipLabel() {
@@ -1261,6 +1290,13 @@ var gProtectionsHandler = {
     delete this.noTrackersDetectedDescription;
     return (this.noTrackersDetectedDescription = document.getElementById(
       "protections-popup-no-trackers-found-description"
+    ));
+  },
+
+  get _protectionsPopupMilestonesText() {
+    delete this._protectionsPopupMilestonesText;
+    return (this._protectionsPopupMilestonesText = document.getElementById(
+      "protections-popup-milestones-text"
     ));
   },
 
@@ -1337,6 +1373,42 @@ var gProtectionsHandler = {
       3000
     );
 
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "milestoneListPref",
+      "browser.contentblocking.cfr-milestone.milestones",
+      [],
+      () => this.maybeSetMilestoneCounterText(),
+      val => JSON.parse(val)
+    );
+
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "milestonePref",
+      "browser.contentblocking.cfr-milestone.milestone-achieved",
+      0,
+      () => this.maybeSetMilestoneCounterText()
+    );
+
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "milestoneTimestampPref",
+      "browser.contentblocking.cfr-milestone.milestone-shown-time",
+      0,
+      null,
+      val => parseInt(val)
+    );
+
+    XPCOMUtils.defineLazyPreferenceGetter(
+      this,
+      "milestonesEnabledPref",
+      "browser.contentblocking.cfr-milestone.enabled",
+      false,
+      () => this.maybeSetMilestoneCounterText()
+    );
+
+    this.maybeSetMilestoneCounterText();
+
     for (let blocker of this.blockers) {
       if (blocker.init) {
         blocker.init();
@@ -1383,6 +1455,11 @@ var gProtectionsHandler = {
       relatedToCurrent,
       triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
     });
+
+    // Don't show the milestones section anymore.
+    Services.prefs.clearUserPref(
+      "browser.contentblocking.cfr-milestone.milestone-shown-time"
+    );
   },
 
   async showTrackersSubview(event) {
@@ -1569,6 +1646,37 @@ var gProtectionsHandler = {
     this.shieldHistogramAdd(0);
   },
 
+  notifyContentBlockingEvent(event) {
+    // We don't notify observers until the document stops loading, therefore
+    // a merged event can be sent, which gives an opportunity to decide the
+    // priority by the handler.
+    // Content blocking events coming after stopping will not be merged, and are
+    // sent directly.
+    if (!this._isStoppedState) {
+      return;
+    }
+
+    let uri = gBrowser.currentURI;
+    let uriHost = uri.asciiHost ? uri.host : uri.spec;
+    Services.obs.notifyObservers(
+      {
+        wrappedJSObject: {
+          browser: gBrowser.selectedBrowser,
+          host: uriHost,
+          event,
+        },
+      },
+      "SiteProtection:ContentBlockingEvent"
+    );
+  },
+
+  onStateChange(stateFlags) {
+    this._isStoppedState = !!(
+      stateFlags & Ci.nsIWebProgressListener.STATE_STOP
+    );
+    this.notifyContentBlockingEvent(gBrowser.securityUI.contentBlockingEvent);
+  },
+
   onContentBlockingEvent(event, webProgress, isSimulated) {
     let previousState = gBrowser.securityUI.contentBlockingEvent;
 
@@ -1585,6 +1693,9 @@ var gProtectionsHandler = {
     this.noTrackersDetectedDescription.hidden = false;
 
     for (let blocker of this.blockers) {
+      if (blocker.categoryItem.hasAttribute("uidisabled")) {
+        continue;
+      }
       // Store data on whether the blocker is activated in the current document for
       // reporting it using the "report breakage" dialog. Under normal circumstances this
       // dialog should only be able to open in the currently selected tab and onSecurityChange
@@ -1657,24 +1768,7 @@ var gProtectionsHandler = {
       this.showNoTrackerTooltipForTPIcon();
     }
 
-    if (
-      Cryptomining.isBlocking(event) ||
-      Fingerprinting.isBlocking(event) ||
-      SocialTracking.isBlocking(event)
-    ) {
-      let uri = gBrowser.currentURI;
-      let uriHost = uri.asciiHost ? uri.host : uri.spec;
-      Services.obs.notifyObservers(
-        {
-          wrappedJSObject: {
-            browser: gBrowser.selectedBrowser,
-            host: uriHost,
-            event,
-          },
-        },
-        "SiteProtection:ContentBlockingEvent"
-      );
-    }
+    this.notifyContentBlockingEvent(event);
 
     // We report up to one instance of fingerprinting and cryptomining
     // blocking and/or allowing per page load.
@@ -1788,6 +1882,16 @@ var gProtectionsHandler = {
 
     // Update the tooltip of the blocked tracker counter.
     this.maybeUpdateEarliestRecordedDateTooltip();
+
+    let today = Date.now();
+    let threeDaysMillis = 72 * 60 * 60 * 1000;
+    let expired = today - this.milestoneTimestampPref > threeDaysMillis;
+
+    if (this._milestoneTextSet && !expired) {
+      this._protectionsPopup.setAttribute("milestone", this.milestonePref);
+    } else {
+      this._protectionsPopup.removeAttribute("milestone");
+    }
   },
 
   /*
@@ -1808,7 +1912,10 @@ var gProtectionsHandler = {
     this._protectionsPopupNotFoundHeader.hidden = true;
 
     for (let { categoryItem } of this.blockers) {
-      if (categoryItem.classList.contains("notFound")) {
+      if (
+        categoryItem.classList.contains("notFound") ||
+        categoryItem.hasAttribute("uidisabled")
+      ) {
         // Add the item to the bottom of the list. This will be under
         // the "None Detected" section.
         categoryItem.parentNode.insertAdjacentElement(
@@ -1952,6 +2059,46 @@ var gProtectionsHandler = {
     );
   },
 
+  // Whenever one of the milestone prefs are changed, we attempt to update
+  // the milestone section string. This requires us to fetch the earliest
+  // recorded date from the Tracking DB, hence this process is async.
+  // When completed, we set _milestoneSetText to signal that the section
+  // is populated and ready to be shown - which happens next time we call
+  // refreshProtectionsPopup.
+  _milestoneTextSet: false,
+  async maybeSetMilestoneCounterText() {
+    let trackerCount = this.milestonePref;
+    if (
+      !this.milestonesEnabledPref ||
+      !trackerCount ||
+      !this.milestoneListPref.includes(trackerCount)
+    ) {
+      this._milestoneTextSet = false;
+      return;
+    }
+
+    let date = await TrackingDBService.getEarliestRecordedDate();
+    let dateLocaleStr = new Date(date).toLocaleDateString("default", {
+      month: "short",
+      year: "numeric",
+    });
+
+    let desc = PluralForm.get(
+      trackerCount,
+      gNavigatorBundle.getString("protections.milestone.description")
+    );
+
+    this._protectionsPopupMilestonesText.textContent = desc
+      .replace("#1", gBrandBundle.GetStringFromName("brandShortName"))
+      .replace(
+        "#2",
+        trackerCount.toLocaleString(Services.locale.appLocalesAsBCP47)
+      )
+      .replace("#3", dateLocaleStr);
+
+    this._milestoneTextSet = true;
+  },
+
   showDisabledTooltipForTPIcon() {
     this._trackingProtectionIconTooltipLabel.textContent = this.strings.disabledTooltipText;
     gIdentityHandler._trackingProtectionIconContainer.setAttribute(
@@ -2058,7 +2205,12 @@ var gProtectionsHandler = {
       "?" + this.reportURI.query,
       ""
     );
+    let commentsTextarea = document.getElementById(
+      "protections-popup-sendReportView-collection-comments"
+    );
+    commentsTextarea.value = "";
     this._protectionsPopupSendReportURL.value = urlWithoutQuery;
+    this._protectionsPopupSiteNotWorkingReportError.hidden = true;
     this._protectionsPopupMultiView.showSubView(
       "protections-popup-sendReportView"
     );
@@ -2076,7 +2228,12 @@ var gProtectionsHandler = {
     // ContentBlockingAllowList here.
     this._protectionsPopupTPSwitchBreakageLink.hidden =
       ContentBlockingAllowList.includes(gBrowser.selectedBrowser) ||
+      !this._protectionsPopup.hasAttribute("blocking") ||
       !this._protectionsPopupTPSwitch.hasAttribute("enabled");
+    // The "Site Fixed?" link behaves similarly but for the opposite state.
+    this._protectionsPopupTPSwitchBreakageFixedLink.hidden =
+      !ContentBlockingAllowList.includes(gBrowser.selectedBrowser) ||
+      this._protectionsPopupTPSwitch.hasAttribute("enabled");
   },
 
   submitBreakageReport(uri) {
@@ -2137,6 +2294,7 @@ var gProtectionsHandler = {
     body += `${Cryptomining.PREF_ENABLED}: ${Services.prefs.getBoolPref(
       Cryptomining.PREF_ENABLED
     )}\n`;
+    body += `\nhasException: ${this.hasException}\n`;
 
     body += "\n**Comments**\n" + commentsTextarea.value;
 
@@ -2149,32 +2307,33 @@ var gProtectionsHandler = {
       }
     }
 
-    if (activatedBlockers.length) {
-      formData.set("labels", activatedBlockers.join(","));
-    }
+    formData.set("labels", activatedBlockers.join(","));
+
+    this._protectionsPopupSendReportButton.disabled = true;
 
     fetch(reportEndpoint, {
       method: "POST",
       credentials: "omit",
       body: formData,
     })
-      .then(function(response) {
+      .then(response => {
+        this._protectionsPopupSendReportButton.disabled = false;
         if (!response.ok) {
           Cu.reportError(
             `Content Blocking report to ${reportEndpoint} failed with status ${
               response.status
             }`
           );
+          this._protectionsPopupSiteNotWorkingReportError.hidden = false;
         } else {
-          // Clear the textarea value when the report is submitted
-          commentsTextarea.value = "";
+          this._protectionsPopup.hidePopup();
+          ConfirmationHint.show(this.iconBox, "breakageReport");
         }
       })
       .catch(Cu.reportError);
   },
 
   onSendReportClicked() {
-    this._protectionsPopup.hidePopup();
     this.submitBreakageReport(this.reportURI);
   },
 

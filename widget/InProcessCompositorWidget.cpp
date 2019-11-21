@@ -49,11 +49,6 @@ InProcessCompositorWidget::GetNativeLayerRoot() {
   return mWidget->GetNativeLayerRoot();
 }
 
-void InProcessCompositorWidget::DrawWindowOverlay(
-    WidgetRenderingContext* aContext, LayoutDeviceIntRect aRect) {
-  mWidget->DrawWindowOverlay(aContext, aRect);
-}
-
 already_AddRefed<gfx::DrawTarget>
 InProcessCompositorWidget::StartRemoteDrawing() {
   return mWidget->StartRemoteDrawing();
@@ -100,12 +95,6 @@ uintptr_t InProcessCompositorWidget::GetWidgetKey() {
 }
 
 nsIWidget* InProcessCompositorWidget::RealWidget() { return mWidget; }
-
-#ifdef XP_MACOSX
-LayoutDeviceIntRegion InProcessCompositorWidget::GetOpaqueWidgetRegion() {
-  return mWidget->GetOpaqueWidgetRegion();
-}
-#endif
 
 void InProcessCompositorWidget::ObserveVsync(VsyncObserver* aObserver) {
   if (RefPtr<CompositorVsyncDispatcher> cvd =

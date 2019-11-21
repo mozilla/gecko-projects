@@ -31,7 +31,8 @@ class nsTArrayElementTraits<nsISupports*> {
   // Construct in place.
   template <class... Args>
   static inline void Emplace(E* aE, Args&&... aArgs) {
-    new (mozilla::KnownNotNull, static_cast<void*>(aE)) E(std::forward<Args>(aArgs)...);
+    new (mozilla::KnownNotNull, static_cast<void*>(aE))
+        E(std::forward<Args>(aArgs)...);
   }
   // Invoke the destructor in place.
   static inline void Destruct(E* aE) { aE->~E(); }
@@ -95,20 +96,19 @@ bool nsCOMArray_base::EnumerateBackwards(nsBaseArrayEnumFunc aFunc,
   return true;
 }
 
-int nsCOMArray_base::nsCOMArrayComparator(const void* aElement1,
-                                          const void* aElement2, void* aData) {
-  nsCOMArrayComparatorContext* ctx =
-      static_cast<nsCOMArrayComparatorContext*>(aData);
+int nsCOMArray_base::VoidStarComparator(const void* aElement1,
+                                        const void* aElement2, void* aData) {
+  auto ctx = static_cast<nsISupportsComparatorContext*>(aData);
   return (*ctx->mComparatorFunc)(*static_cast<nsISupports* const*>(aElement1),
                                  *static_cast<nsISupports* const*>(aElement2),
                                  ctx->mData);
 }
 
-void nsCOMArray_base::Sort(nsBaseArrayComparatorFunc aFunc, void* aData) {
+void nsCOMArray_base::Sort(nsISupportsComparatorFunc aFunc, void* aData) {
   if (mArray.Length() > 1) {
-    nsCOMArrayComparatorContext ctx = {aFunc, aData};
+    nsISupportsComparatorContext ctx = {aFunc, aData};
     NS_QuickSort(mArray.Elements(), mArray.Length(), sizeof(nsISupports*),
-                 nsCOMArrayComparator, &ctx);
+                 VoidStarComparator, &ctx);
   }
 }
 

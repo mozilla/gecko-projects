@@ -9,6 +9,8 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/TimeStamp.h"
 
+#include <algorithm>
+
 #include "gc/RelocationOverlay.h"
 #include "gc/ZoneAllocator.h"
 #include "vm/MutexIDs.h"
@@ -32,13 +34,13 @@ static constexpr float LowFrequencyEagerAllocTriggerFactor = 0.9f;
  * reduce the trigger threshold.
  */
 static constexpr float MinHeapGrowthFactor =
-    1.0f / Min(HighFrequencyEagerAllocTriggerFactor,
-               LowFrequencyEagerAllocTriggerFactor);
+    1.0f / std::min(HighFrequencyEagerAllocTriggerFactor,
+                    LowFrequencyEagerAllocTriggerFactor);
 
 GCSchedulingTunables::GCSchedulingTunables()
     : gcMaxBytes_(0),
       gcMinNurseryBytes_(TuningDefaults::GCMinNurseryBytes),
-      gcMaxNurseryBytes_(0),
+      gcMaxNurseryBytes_(JS::DefaultNurseryMaxBytes),
       gcZoneAllocThresholdBase_(TuningDefaults::GCZoneAllocThresholdBase),
       nonIncrementalFactor_(TuningDefaults::NonIncrementalFactor),
       avoidInterruptFactor_(TuningDefaults::AvoidInterruptFactor),
@@ -277,7 +279,7 @@ void GCSchedulingTunables::resetParameter(JSGCParamKey key,
     case JSGC_MAX_NURSERY_BYTES:
       // Reset these togeather to maintain their min <= max invariant.
       gcMinNurseryBytes_ = TuningDefaults::GCMinNurseryBytes;
-      gcMaxNurseryBytes_ = JS::DefaultNurseryBytes;
+      gcMaxNurseryBytes_ = JS::DefaultNurseryMaxBytes;
       break;
     case JSGC_HIGH_FREQUENCY_TIME_LIMIT:
       highFrequencyThreshold_ =
@@ -414,11 +416,11 @@ size_t GCHeapThreshold::computeZoneTriggerBytes(
   size_t baseMin = gckind == GC_SHRINK
                        ? tunables.minEmptyChunkCount(lock) * ChunkSize
                        : tunables.gcZoneAllocThresholdBase();
-  size_t base = Max(lastBytes, baseMin);
+  size_t base = std::max(lastBytes, baseMin);
   float trigger = float(base) * growthFactor;
   float triggerMax =
       float(tunables.gcMaxBytes()) / tunables.nonIncrementalFactor();
-  return size_t(Min(triggerMax, trigger));
+  return size_t(std::min(triggerMax, trigger));
 }
 
 void GCHeapThreshold::updateAfterGC(size_t lastBytes, JSGCInvocationKind gckind,
@@ -436,7 +438,7 @@ size_t MallocHeapThreshold::computeZoneTriggerBytes(float growthFactor,
                                                     size_t lastBytes,
                                                     size_t baseBytes,
                                                     const AutoLockGC& lock) {
-  return size_t(float(Max(lastBytes, baseBytes)) * growthFactor);
+  return size_t(float(std::max(lastBytes, baseBytes)) * growthFactor);
 }
 
 void MallocHeapThreshold::updateAfterGC(size_t lastBytes, size_t baseBytes,
@@ -512,7 +514,7 @@ inline bool MemoryTracker::allowMultipleAssociations(MemoryUse use) const {
   // one-to-many relationship only where necessary.
   return use == MemoryUse::RegExpSharedBytecode ||
          use == MemoryUse::BreakpointSite || use == MemoryUse::Breakpoint ||
-         use == MemoryUse::ForOfPICStub;
+         use == MemoryUse::ForOfPICStub || use == MemoryUse::ICUObject;
 }
 
 void MemoryTracker::trackMemory(Cell* cell, size_t nbytes, MemoryUse use) {

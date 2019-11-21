@@ -49,6 +49,18 @@ DEFAULT_CXX_14 = {
     '__cplusplus': '201402L',
 }
 
+DRAFT_CXX17_201500 = {
+    '__cplusplus': '201500L',
+}
+
+DRAFT_CXX17_201406 = {
+    '__cplusplus': '201406L',
+}
+
+DEFAULT_CXX_17 = {
+    '__cplusplus': '201703L',
+}
+
 SUPPORTS_GNU99 = {
     '-std=gnu99': DEFAULT_C99,
 }
@@ -63,6 +75,14 @@ SUPPORTS_GNUXX14 = {
 
 SUPPORTS_CXX14 = {
     '-std=c++14': DEFAULT_CXX_14,
+}
+
+SUPPORTS_GNUXX17 = {
+    '-std=gnu++17': DEFAULT_CXX_17,
+}
+
+SUPPORTS_CXX17 = {
+    '-std=c++17': DEFAULT_CXX_17,
 }
 
 
@@ -91,14 +111,22 @@ SUPPORTS_DRAFT_CXX14_VERSION = {
     '-std=gnu++14': DRAFT_CXX_14,
 }
 
+SUPPORTS_GNUXX1Z = {
+    '-std=gnu++1z': DRAFT_CXX17_201406,
+}
+
+SUPPORTS_DRAFT_CXX17_201500_VERSION = {
+    '-std=gnu++17': DRAFT_CXX17_201500,
+}
+
 GCC_4_9 = GCC('4.9.3')
 GXX_4_9 = GXX('4.9.3') + SUPPORTS_DRAFT_CXX14_VERSION
 GCC_5 = GCC('5.2.1') + DEFAULT_C11
 GXX_5 = GXX('5.2.1') + SUPPORTS_GNUXX14
 GCC_6 = GCC('6.4.0') + DEFAULT_C11
-GXX_6 = GXX('6.4.0') + DEFAULT_CXX_14
+GXX_6 = GXX('6.4.0') + DEFAULT_CXX_14 + SUPPORTS_GNUXX17 + SUPPORTS_DRAFT_CXX17_201500_VERSION
 GCC_7 = GCC('7.3.0') + DEFAULT_C11
-GXX_7 = GXX('7.3.0') + DEFAULT_CXX_14
+GXX_7 = GXX('7.3.0') + DEFAULT_CXX_14 + SUPPORTS_GNUXX17 + SUPPORTS_CXX17
 
 DEFAULT_GCC = GCC_6
 DEFAULT_GXX = GXX_6
@@ -194,19 +222,19 @@ CLANGXX_3_3 = CLANGXX('3.3.0')
 CLANG_4_0 = CLANG('4.0.2') + DEFAULT_C11 + {
     '__has_attribute(diagnose_if)': '1',
 }
-CLANGXX_4_0 = CLANGXX('4.0.2') + {
+CLANGXX_4_0 = CLANGXX('4.0.2') + SUPPORTS_GNUXX1Z + {
     '__has_attribute(diagnose_if)': '1',
 }
 CLANG_5_0 = CLANG('5.0.1') + DEFAULT_C11 + {
     '__has_attribute(diagnose_if)': '1',
     '__has_warning("-Wunguarded-availability")': '1',
 }
-CLANGXX_5_0 = CLANGXX('5.0.1') + {
+CLANGXX_5_0 = CLANGXX('5.0.1') + SUPPORTS_GNUXX17 + {
     '__has_attribute(diagnose_if)': '1',
     '__has_warning("-Wunguarded-availability")': '1',
 }
-DEFAULT_CLANG = CLANG_4_0
-DEFAULT_CLANGXX = CLANGXX_4_0
+DEFAULT_CLANG = CLANG_5_0
+DEFAULT_CLANGXX = CLANGXX_5_0
 
 
 def CLANG_PLATFORM(gcc_platform):
@@ -269,7 +297,8 @@ CLANG_CL_3_9 = (CLANG_BASE('3.9.0') + VS('18.00.00000') + DEFAULT_C11 +
     },
 }
 CLANG_CL_8_0 = (CLANG_BASE('8.0.0') + VS('18.00.00000') + DEFAULT_C11 +
-                SUPPORTS_GNU99 + SUPPORTS_GNUXX11 + SUPPORTS_CXX14) + {
+                SUPPORTS_GNU99 + SUPPORTS_GNUXX11 + SUPPORTS_CXX14 +
+                SUPPORTS_CXX17) + {
     '*.cpp': {
         '__STDC_VERSION__': False,
         '__cplusplus': '201103L',
@@ -450,6 +479,8 @@ class LinuxToolchainTest(BaseToolchainTest):
         '/usr/bin/g++-7': GXX_7 + GCC_PLATFORM_X86_64_LINUX,
         '/usr/bin/clang': DEFAULT_CLANG + CLANG_PLATFORM_X86_64_LINUX,
         '/usr/bin/clang++': DEFAULT_CLANGXX + CLANG_PLATFORM_X86_64_LINUX,
+        '/usr/bin/clang-5.0': CLANG_5_0 + CLANG_PLATFORM_X86_64_LINUX,
+        '/usr/bin/clang++-5.0': CLANGXX_5_0 + CLANG_PLATFORM_X86_64_LINUX,
         '/usr/bin/clang-4.0': CLANG_4_0 + CLANG_PLATFORM_X86_64_LINUX,
         '/usr/bin/clang++-4.0': CLANGXX_4_0 + CLANG_PLATFORM_X86_64_LINUX,
         '/usr/bin/clang-3.3': CLANG_3_3 + CLANG_PLATFORM_X86_64_LINUX,
@@ -493,24 +524,26 @@ class LinuxToolchainTest(BaseToolchainTest):
     DEFAULT_GCC_RESULT = GCC_6_RESULT + {'compiler': '/usr/bin/gcc'}
     DEFAULT_GXX_RESULT = GXX_6_RESULT + {'compiler': '/usr/bin/g++'}
 
-    CLANG_3_3_RESULT = 'Only clang/llvm 4.0 or newer is supported.'
-    CLANGXX_3_3_RESULT = 'Only clang/llvm 4.0 or newer is supported.'
-    CLANG_4_0_RESULT = CompilerResult(
+    CLANG_3_3_RESULT = 'Only clang/llvm 5.0 or newer is supported.'
+    CLANGXX_3_3_RESULT = 'Only clang/llvm 5.0 or newer is supported.'
+    CLANG_4_0_RESULT = 'Only clang/llvm 5.0 or newer is supported.'
+    CLANGXX_4_0_RESULT = 'Only clang/llvm 5.0 or newer is supported.'
+    CLANG_5_0_RESULT = CompilerResult(
         flags=['-std=gnu99'],
-        version='4.0.2',
+        version='5.0.1',
         type='clang',
-        compiler='/usr/bin/clang-4.0',
+        compiler='/usr/bin/clang-5.0',
         language='C',
     )
-    CLANGXX_4_0_RESULT = CompilerResult(
+    CLANGXX_5_0_RESULT = CompilerResult(
         flags=['-std=gnu++14'],
-        version='4.0.2',
+        version='5.0.1',
         type='clang',
-        compiler='/usr/bin/clang++-4.0',
+        compiler='/usr/bin/clang++-5.0',
         language='C++',
     )
-    DEFAULT_CLANG_RESULT = CLANG_4_0_RESULT + {'compiler': '/usr/bin/clang'}
-    DEFAULT_CLANGXX_RESULT = CLANGXX_4_0_RESULT + {'compiler': '/usr/bin/clang++'}
+    DEFAULT_CLANG_RESULT = CLANG_5_0_RESULT + {'compiler': '/usr/bin/clang'}
+    DEFAULT_CLANGXX_RESULT = CLANGXX_5_0_RESULT + {'compiler': '/usr/bin/clang++'}
 
     def test_default(self):
         # We'll try clang and gcc, and find clang first.
@@ -639,10 +672,10 @@ class LinuxToolchainTest(BaseToolchainTest):
     def test_guess_cxx_clang(self):
         # When CXX is not set, we guess it from CC.
         self.do_toolchain_test(self.PATHS, {
-            'c_compiler': self.CLANG_4_0_RESULT,
-            'cxx_compiler': self.CLANGXX_4_0_RESULT,
+            'c_compiler': self.CLANG_5_0_RESULT,
+            'cxx_compiler': self.CLANGXX_5_0_RESULT,
         }, environ={
-            'CC': 'clang-4.0',
+            'CC': 'clang-5.0',
         })
 
     def test_unsupported_clang(self):
@@ -652,6 +685,13 @@ class LinuxToolchainTest(BaseToolchainTest):
         }, environ={
             'CC': 'clang-3.3',
             'CXX': 'clang++-3.3',
+        })
+        self.do_toolchain_test(self.PATHS, {
+            'c_compiler': self.CLANG_4_0_RESULT,
+            'cxx_compiler': self.CLANGXX_4_0_RESULT,
+        }, environ={
+            'CC': 'clang-4.0',
+            'CXX': 'clang++-4.0',
         })
 
     def test_no_supported_compiler(self):
@@ -925,6 +965,8 @@ class WindowsToolchainTest(BaseToolchainTest):
         '/usr/bin/g++-6': GXX_6 + GCC_PLATFORM_X86_WIN,
         '/usr/bin/clang': DEFAULT_CLANG + CLANG_PLATFORM_X86_WIN,
         '/usr/bin/clang++': DEFAULT_CLANGXX + CLANG_PLATFORM_X86_WIN,
+        '/usr/bin/clang-5.0': CLANG_5_0 + CLANG_PLATFORM_X86_WIN,
+        '/usr/bin/clang++-5.0': CLANGXX_5_0 + CLANG_PLATFORM_X86_WIN,
         '/usr/bin/clang-4.0': CLANG_4_0 + CLANG_PLATFORM_X86_WIN,
         '/usr/bin/clang++-4.0': CLANGXX_4_0 + CLANG_PLATFORM_X86_WIN,
         '/usr/bin/clang-3.3': CLANG_3_3 + CLANG_PLATFORM_X86_WIN,
@@ -949,6 +991,8 @@ class WindowsToolchainTest(BaseToolchainTest):
     )
     CLANG_3_3_RESULT = LinuxToolchainTest.CLANG_3_3_RESULT
     CLANGXX_3_3_RESULT = LinuxToolchainTest.CLANGXX_3_3_RESULT
+    CLANG_4_0_RESULT = LinuxToolchainTest.CLANG_4_0_RESULT
+    CLANGXX_4_0_RESULT = LinuxToolchainTest.CLANGXX_4_0_RESULT
     DEFAULT_CLANG_RESULT = LinuxToolchainTest.DEFAULT_CLANG_RESULT
     DEFAULT_CLANGXX_RESULT = LinuxToolchainTest.DEFAULT_CLANGXX_RESULT
     GCC_4_9_RESULT = LinuxToolchainTest.GCC_4_9_RESULT
@@ -1042,6 +1086,8 @@ class Windows64ToolchainTest(WindowsToolchainTest):
         '/usr/bin/g++-7': GXX_7 + GCC_PLATFORM_X86_64_WIN,
         '/usr/bin/clang': DEFAULT_CLANG + CLANG_PLATFORM_X86_64_WIN,
         '/usr/bin/clang++': DEFAULT_CLANGXX + CLANG_PLATFORM_X86_64_WIN,
+        '/usr/bin/clang-5.0': CLANG_5_0 + CLANG_PLATFORM_X86_64_WIN,
+        '/usr/bin/clang++-5.0': CLANGXX_5_0 + CLANG_PLATFORM_X86_64_WIN,
         '/usr/bin/clang-4.0': CLANG_4_0 + CLANG_PLATFORM_X86_64_WIN,
         '/usr/bin/clang++-4.0': CLANGXX_4_0 + CLANG_PLATFORM_X86_64_WIN,
         '/usr/bin/clang-3.3': CLANG_3_3 + CLANG_PLATFORM_X86_64_WIN,
@@ -1590,6 +1636,30 @@ def gen_invoke_rustc(version, rustup_wrapper=False):
                 ]
                 rust_targets.remove('wasm32-unknown-wasi')
                 rust_targets.remove('x86_64-unknown-bitrig')
+            # Additional targets from 1.37
+            if Version(version) >= '1.37.0':
+                rust_targets += [
+                    'x86_64-pc-solaris',
+                ]
+            # Additional targets from 1.38
+            if Version(version) >= '1.38.0':
+                rust_targets += [
+                    'aarch64-unknown-redox',
+                    'aarch64-wrs-vxworks',
+                    'armv7-unknown-linux-gnueabi',
+                    'armv7-unknown-linux-musleabi',
+                    'armv7-wrs-vxworks',
+                    'hexagon-unknown-linux-musl',
+                    'i586-wrs-vxworks',
+                    'i686-uwp-windows-gnu',
+                    'i686-wrs-vxworks',
+                    'powerpc-wrs-vxworks',
+                    'powerpc-wrs-vxworks-spe',
+                    'powerpc64-wrs-vxworks',
+                    'riscv32i-unknown-none-elf',
+                    'x86_64-uwp-windows-gnu',
+                    'x86_64-wrs-vxworks',
+                ]
             return 0, '\n'.join(sorted(rust_targets)), ''
         if (len(args) == 6 and args[:2] == ('--crate-type', 'staticlib') and
             args[2].startswith('--target=') and args[3] == '-o'):
@@ -1601,7 +1671,7 @@ def gen_invoke_rustc(version, rustup_wrapper=False):
 
 
 class RustTest(BaseConfigureTest):
-    def get_rust_target(self, target, compiler_type='gcc', version='1.36.0',
+    def get_rust_target(self, target, compiler_type='gcc', version='1.38.0',
                         arm_target=None):
         environ = {
             'PATH': os.pathsep.join(
@@ -1643,7 +1713,6 @@ class RustTest(BaseConfigureTest):
             'i686-unknown-openbsd',
             'x86_64-unknown-openbsd',
             'aarch64-unknown-linux-gnu',
-            'armv7-unknown-linux-gnueabihf',
             'sparc64-unknown-linux-gnu',
             'i686-unknown-linux-gnu',
             'i686-apple-darwin',
@@ -1668,6 +1737,7 @@ class RustTest(BaseConfigureTest):
             ('armv7-unknown-linux-androideabi', 'armv7-linux-androideabi'),
             ('i386-unknown-linux-android', 'i686-linux-android'),
             ('i686-unknown-linux-android', 'i686-linux-android'),
+            ('i686-pc-linux-gnu', 'i686-unknown-linux-gnu'),
             ('x86_64-unknown-linux-android', 'x86_64-linux-android'),
             ('x86_64-pc-linux-gnu', 'x86_64-unknown-linux-gnu'),
             ('sparcv9-sun-solaris2', 'sparcv9-sun-solaris'),
@@ -1683,6 +1753,8 @@ class RustTest(BaseConfigureTest):
             ('x86_64-pc-mingw32', 'gcc', 'x86_64-pc-windows-gnu'),
             ('i686-pc-mingw32', 'clang', 'i686-pc-windows-gnu'),
             ('x86_64-pc-mingw32', 'clang', 'x86_64-pc-windows-gnu'),
+            ('i686-w64-mingw32', 'clang', 'i686-pc-windows-gnu'),
+            ('x86_64-w64-mingw32', 'clang', 'x86_64-pc-windows-gnu'),
         ):
             self.assertEqual(self.get_rust_target(autoconf, building_with_gcc), rust)
 

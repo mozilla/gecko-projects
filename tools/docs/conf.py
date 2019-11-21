@@ -8,8 +8,6 @@ import os
 import re
 import sys
 
-from recommonmark.parser import CommonMarkParser
-
 from datetime import datetime
 
 # Set up Python environment to load build system packages.
@@ -41,12 +39,14 @@ extensions = [
     'mozbuild.sphinx',
     'sphinx_js',
     'sphinxcontrib.mermaid',
+    'recommonmark',
 ]
 
 # JSDoc must run successfully for dirs specified, so running
 # tree-wide (the default) will not work currently.
 js_source_path = [
     'browser/components/extensions',
+    'browser/components/uitour',
     'testing/marionette',
     'toolkit/components/extensions',
     'toolkit/components/extensions/parent',
@@ -54,14 +54,11 @@ js_source_path = [
     'toolkit/mozapps/extensions',
 ]
 root_for_relative_js_paths = '.'
-jsdoc_config_path = 'tools/docs/jsdoc.json'
+jsdoc_config_path = 'jsdoc.json'
 
 templates_path = ['_templates']
 source_suffix = '.rst'
 source_suffix = ['.rst', '.md']
-source_parsers = {
-   '.md': CommonMarkParser,
-}
 master_doc = 'index'
 project = u'Mozilla Source Tree Docs'
 year = datetime.now().year
@@ -105,3 +102,5 @@ html_static_path = ['_static']
 htmlhelp_basename = 'MozillaTreeDocs'
 
 moz_project_name = 'main'
+
+html_show_copyright = False

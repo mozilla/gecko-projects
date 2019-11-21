@@ -28,17 +28,7 @@
 #include "mozilla/layers/LayersSurfaces.h"
 
 /*
-TODO
-
-Lock/Unlock:
-An important detail is that you *must* use DMA_BUF_IOCTL_SYNC to
-bracket your actual CPU read/write sequences to the dmabuf. That ioctl
-will ensure the appropriate caches are flushed correctly (you might not
-notice anything wrong on x86, but on other hardware forgetting to do
-that can randomly result in bad data), and I think it also waits for
-implicit fences (e.g. if you had GPU write to the dmabuf earlier, to
-ensure the operation finished).
-
+TODO:
 DRM device selection:
 https://lists.freedesktop.org/archives/wayland-devel/2018-November/039660.html
 */
@@ -180,7 +170,7 @@ bool WaylandDMABufSurface::Create(int aWidth, int aHeight,
       int ret = nsGbmLib::DrmPrimeHandleToFD(display->GetGbmDeviceFd(), handle,
                                              0, &mDmabufFds[i]);
       if (ret < 0 || mDmabufFds[i] < 0) {
-        Release();
+        ReleaseDMABufSurface();
         return false;
       }
       mStrides[i] = nsGbmLib::GetStrideForPlane(mGbmBufferObject, i);
@@ -191,7 +181,7 @@ bool WaylandDMABufSurface::Create(int aWidth, int aHeight,
     mStrides[0] = nsGbmLib::GetStride(mGbmBufferObject);
     mDmabufFds[0] = nsGbmLib::GetFd(mGbmBufferObject);
     if (mDmabufFds[0] < 0) {
-      Release();
+      ReleaseDMABufSurface();
       return false;
     }
   }
@@ -237,7 +227,7 @@ bool WaylandDMABufSurface::Create(const SurfaceDescriptor& aDesc) {
                        &importData, mGbmBufferFlags);
 
   if (!mGbmBufferObject) {
-    Release();
+    ReleaseDMABufSurface();
     return false;
   }
 
@@ -293,6 +283,7 @@ bool WaylandDMABufSurface::IsEGLSupported(mozilla::gl::GLContext* aGLContext) {
 bool WaylandDMABufSurface::CreateEGLImage(mozilla::gl::GLContext* aGLContext) {
   MOZ_ASSERT(mGbmBufferObject, "Can't create EGLImage, missing dmabuf object!");
   MOZ_ASSERT(mBufferPlaneCount == 1, "Modifiers are not supported yet!");
+  MOZ_ASSERT(!mEGLImage && !mGLFbo, "EGLImage is already created!");
 
   nsTArray<EGLint> attribs;
   attribs.AppendElement(LOCAL_EGL_WIDTH);
@@ -328,9 +319,8 @@ bool WaylandDMABufSurface::CreateEGLImage(mozilla::gl::GLContext* aGLContext) {
   int savedFb = 0;
   aGLContext->fGetIntegerv(LOCAL_GL_FRAMEBUFFER_BINDING, &savedFb);
 
-  GLuint texture;
-  aGLContext->fGenTextures(1, &texture);
-  aGLContext->fBindTexture(LOCAL_GL_TEXTURE_2D, texture);
+  aGLContext->fGenTextures(1, &mTexture);
+  aGLContext->fBindTexture(LOCAL_GL_TEXTURE_2D, mTexture);
   aGLContext->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_S,
                              LOCAL_GL_CLAMP_TO_EDGE);
   aGLContext->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_T,
@@ -345,15 +335,12 @@ bool WaylandDMABufSurface::CreateEGLImage(mozilla::gl::GLContext* aGLContext) {
   aGLContext->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, mGLFbo);
   aGLContext->fFramebufferTexture2D(LOCAL_GL_FRAMEBUFFER,
                                     LOCAL_GL_COLOR_ATTACHMENT0,
-                                    LOCAL_GL_TEXTURE_2D, texture, 0);
-  aGLContext->fDeleteTextures(1, &texture);
-
-  bool ret = (aGLContext->fCheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER) !=
+                                    LOCAL_GL_TEXTURE_2D, mTexture, 0);
+  bool ret = (aGLContext->fCheckFramebufferStatus(LOCAL_GL_FRAMEBUFFER) ==
               LOCAL_GL_FRAMEBUFFER_COMPLETE);
   if (!ret) {
     NS_WARNING("WaylandDMABufSurface - FBO creation failed");
   }
-
   aGLContext->fBindFramebuffer(LOCAL_GL_FRAMEBUFFER, savedFb);
 
   mGL = aGLContext;
@@ -370,8 +357,10 @@ void WaylandDMABufSurface::ReleaseEGLImage() {
 
   if (mGLFbo) {
     if (mGL->MakeCurrent()) {
+      mGL->fDeleteTextures(1, &mTexture);
       mGL->fDeleteFramebuffers(1, &mGLFbo);
     }
+    mTexture = 0;
     mGLFbo = 0;
   }
 
@@ -456,7 +445,7 @@ bool WaylandDMABufSurface::Resize(int aWidth, int aHeight) {
     return false;
   }
 
-  Release();
+  ReleaseDMABufSurface();
   if (Create(aWidth, aHeight, mSurfaceFlags)) {
     if (mSurfaceFlags & DMABUF_CREATE_WL_BUFFER) {
       return CreateWLBuffer();

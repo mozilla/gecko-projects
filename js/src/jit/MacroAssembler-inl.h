@@ -116,7 +116,7 @@ void MacroAssembler::appendSignatureType(MoveOp::Type type) {
       signature_ |= ArgType_General;
       break;
     case MoveOp::DOUBLE:
-      signature_ |= ArgType_Double;
+      signature_ |= ArgType_Float64;
       break;
     case MoveOp::FLOAT32:
       signature_ |= ArgType_Float32;
@@ -149,6 +149,7 @@ ABIFunctionType MacroAssembler::signature() const {
     case Args_Double_DoubleDouble:
     case Args_Double_IntDouble:
     case Args_Int_IntDouble:
+    case Args_Int_DoubleInt:
     case Args_Int_DoubleIntInt:
     case Args_Int_IntDoubleIntInt:
     case Args_Double_DoubleDoubleDouble:
@@ -326,16 +327,6 @@ void MacroAssembler::branchIfRope(Register str, Label* label) {
   branchTest32(Assembler::Zero, flags, Imm32(JSString::LINEAR_BIT), label);
 }
 
-void MacroAssembler::branchIfRopeOrExternal(Register str, Register temp,
-                                            Label* label) {
-  Address flags(str, JSString::offsetOfFlags());
-  move32(Imm32(JSString::TYPE_FLAGS_MASK), temp);
-  and32(flags, temp);
-
-  branchTest32(Assembler::Zero, temp, Imm32(JSString::LINEAR_BIT), label);
-  branch32(Assembler::Equal, temp, Imm32(JSString::EXTERNAL_FLAGS), label);
-}
-
 void MacroAssembler::branchIfNotRope(Register str, Label* label) {
   Address flags(str, JSString::offsetOfFlags());
   branchTest32(Assembler::NonZero, flags, Imm32(JSString::LINEAR_BIT), label);
@@ -349,6 +340,11 @@ void MacroAssembler::branchLatin1String(Register string, Label* label) {
 void MacroAssembler::branchTwoByteString(Register string, Label* label) {
   branchTest32(Assembler::Zero, Address(string, JSString::offsetOfFlags()),
                Imm32(JSString::LATIN1_CHARS_BIT), label);
+}
+
+void MacroAssembler::branchIfNegativeBigInt(Register bigInt, Label* label) {
+  branchTest32(Assembler::NonZero, Address(bigInt, BigInt::offsetOfFlags()),
+               Imm32(BigInt::signBitMask()), label);
 }
 
 void MacroAssembler::branchTestFunctionFlags(Register fun, uint32_t flags,
@@ -388,6 +384,36 @@ void MacroAssembler::branchIfInterpreted(Register fun, bool isConstructing,
     flags |= FunctionFlags::WASM_JIT_ENTRY;
   }
   branchTestFunctionFlags(fun, flags, Assembler::NonZero, label);
+}
+
+void MacroAssembler::branchIfScriptHasJitScript(Register script, Label* label) {
+  static_assert(ScriptWarmUpData::JitScriptTag == 0,
+                "Code below depends on tag value");
+  branchTestPtr(Assembler::Zero,
+                Address(script, JSScript::offsetOfWarmUpData()),
+                Imm32(ScriptWarmUpData::TagMask), label);
+}
+
+void MacroAssembler::branchIfScriptHasNoJitScript(Register script,
+                                                  Label* label) {
+  static_assert(ScriptWarmUpData::JitScriptTag == 0,
+                "Code below depends on tag value");
+  branchTestPtr(Assembler::NonZero,
+                Address(script, JSScript::offsetOfWarmUpData()),
+                Imm32(ScriptWarmUpData::TagMask), label);
+}
+
+void MacroAssembler::loadJitScript(Register script, Register dest) {
+#ifdef DEBUG
+  Label ok;
+  branchIfScriptHasJitScript(script, &ok);
+  assumeUnreachable("Script has no JitScript!");
+  bind(&ok);
+#endif
+
+  static_assert(ScriptWarmUpData::JitScriptTag == 0,
+                "Code below depends on tag value");
+  loadPtr(Address(script, JSScript::offsetOfWarmUpData()), dest);
 }
 
 void MacroAssembler::branchIfObjectEmulatesUndefined(Register objReg,

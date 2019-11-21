@@ -227,5 +227,40 @@ NS_IMETHODIMP RemoteWebProgressRequest::SetLoadFlags(nsLoadFlags aLoadFlags) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+NS_IMETHODIMP
+RemoteWebProgressRequest::IsTrackingResource(bool* aIsTrackingResource) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+RemoteWebProgressRequest::IsThirdPartyTrackingResource(
+    bool* aIsTrackingResource) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+RemoteWebProgressRequest::IsSocialTrackingResource(
+    bool* aIsSocialTrackingResource) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+RemoteWebProgressRequest::GetClassificationFlags(
+    uint32_t* aClassificationFlags) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+RemoteWebProgressRequest::GetFirstPartyClassificationFlags(
+    uint32_t* aClassificationFlags) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+RemoteWebProgressRequest::GetThirdPartyClassificationFlags(
+    uint32_t* aClassificationFlags) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 }  // namespace dom
 }  // namespace mozilla

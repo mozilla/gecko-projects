@@ -710,8 +710,9 @@ static bool IsPercentageAware(const nsIFrame* aFrame, WritingMode aWM) {
     // We need to check for frames that shrink-wrap when they're auto
     // width.
     const nsStyleDisplay* disp = aFrame->StyleDisplay();
-    if (disp->mDisplay == StyleDisplay::InlineBlock ||
-        disp->mDisplay == StyleDisplay::InlineTable ||
+    if ((disp->DisplayOutside() == StyleDisplayOutside::Inline &&
+         (disp->DisplayInside() == StyleDisplayInside::FlowRoot ||
+          disp->DisplayInside() == StyleDisplayInside::Table)) ||
         fType == LayoutFrameType::HTMLButtonControl ||
         fType == LayoutFrameType::GfxButtonControl ||
         fType == LayoutFrameType::FieldSet ||
@@ -3156,7 +3157,7 @@ void nsLineLayout::TextAlignLine(nsLineBox* aLine, bool aIsLastLine) {
 
       case NS_STYLE_TEXT_ALIGN_LEFT:
       case NS_STYLE_TEXT_ALIGN_MOZ_LEFT:
-        if (!lineWM.IsBidiLTR()) {
+        if (lineWM.IsBidiRTL()) {
           dx = remainingISize;
         }
         break;
@@ -3184,7 +3185,7 @@ void nsLineLayout::TextAlignLine(nsLineBox* aLine, bool aIsLastLine) {
   }
 
   if (mPresContext->BidiEnabled() &&
-      (!mPresContext->IsVisualMode() || !lineWM.IsBidiLTR())) {
+      (!mPresContext->IsVisualMode() || lineWM.IsBidiRTL())) {
     PerFrameData* startFrame = psd->mFirstFrame;
     MOZ_ASSERT(startFrame, "empty line?");
     if (startFrame->mIsMarker) {

@@ -23,11 +23,10 @@ struct UNumberFormatter;
 
 namespace js {
 
-class ArrayObject;
-
 class NumberFormatObject : public NativeObject {
  public:
   static const JSClass class_;
+  static const JSClass& protoClass_;
 
   static constexpr uint32_t INTERNALS_SLOT = 0;
   static constexpr uint32_t UNUMBER_FORMATTER_SLOT = 1;
@@ -37,6 +36,9 @@ class NumberFormatObject : public NativeObject {
   static_assert(INTERNALS_SLOT == INTL_INTERNALS_OBJECT_SLOT,
                 "INTERNALS_SLOT must match self-hosting define for internals "
                 "object slot");
+
+  // Estimated memory use for UNumberFormatter and UFormattedNumber.
+  static constexpr size_t EstimatedMemoryUse = 750;
 
   UNumberFormatter* getNumberFormatter() const {
     const auto& slot = getFixedSlot(UNUMBER_FORMATTER_SLOT);
@@ -64,13 +66,10 @@ class NumberFormatObject : public NativeObject {
 
  private:
   static const JSClassOps classOps_;
+  static const ClassSpec classSpec_;
 
   static void finalize(JSFreeOp* fop, JSObject* obj);
 };
-
-extern JSObject* CreateNumberFormatPrototype(JSContext* cx, HandleObject Intl,
-                                             Handle<GlobalObject*> global,
-                                             MutableHandleObject constructor);
 
 /**
  * Returns a new instance of the standard built-in NumberFormat constructor.
@@ -81,18 +80,6 @@ extern JSObject* CreateNumberFormatPrototype(JSContext* cx, HandleObject Intl,
  */
 extern MOZ_MUST_USE bool intl_NumberFormat(JSContext* cx, unsigned argc,
                                            Value* vp);
-
-/**
- * Returns an object indicating the supported locales for number formatting
- * by having a true-valued property for each such locale with the
- * canonicalized language tag as the property name. The object has no
- * prototype.
- *
- * Usage: availableLocales = intl_NumberFormat_availableLocales()
- */
-extern MOZ_MUST_USE bool intl_NumberFormat_availableLocales(JSContext* cx,
-                                                            unsigned argc,
-                                                            Value* vp);
 
 /**
  * Returns the numbering system type identifier per Unicode

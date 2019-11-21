@@ -16,6 +16,8 @@
 
 namespace js {
 
+extern const JSClass GeneratorFunctionClass;
+
 enum class GeneratorResumeKind { Next, Throw, Return };
 
 class AbstractGeneratorObject : public NativeObject {

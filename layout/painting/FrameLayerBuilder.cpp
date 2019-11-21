@@ -5961,7 +5961,7 @@ void ContainerState::Finish(uint32_t* aTextContentFlags,
   mPaintedLayerDataTree.Finish();
 
   NS_ASSERTION(mContainerBounds.IsEqualInterior(mAccumulatedChildBounds),
-                "Bounds computation mismatch");
+               "Bounds computation mismatch");
 
   if (mLayerBuilder->IsBuildingRetainedLayers()) {
     nsIntRegion containerOpaqueRegion;
@@ -7005,8 +7005,8 @@ void FrameLayerBuilder::PaintItems(std::vector<AssignedDisplayItem>& aItems,
     }
 
 #ifdef MOZ_DUMP_PAINTING
-    AUTO_PROFILER_LABEL_DYNAMIC_CSTR("FrameLayerBuilder::PaintItems",
-                                     GRAPHICS_Rasterization, item->Name());
+    AUTO_PROFILER_LABEL_DYNAMIC_CSTR_NONSENSITIVE(
+        "FrameLayerBuilder::PaintItems", GRAPHICS_Rasterization, item->Name());
 #else
     AUTO_PROFILER_LABEL("FrameLayerBuilder::PaintItems",
                         GRAPHICS_Rasterization);

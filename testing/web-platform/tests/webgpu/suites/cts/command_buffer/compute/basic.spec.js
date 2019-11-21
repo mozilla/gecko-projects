@@ -78,13 +78,13 @@ g.test('memcpy', async t => {
     },
     layout: pl
   });
-  const encoder = t.device.createCommandEncoder({});
+  const encoder = t.device.createCommandEncoder();
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bg);
   pass.dispatch(1, 1, 1);
   pass.endPass();
   t.device.getQueue().submit([encoder.finish()]);
-  await t.expectContents(dst, data);
+  t.expectContents(dst, data);
 });
 //# sourceMappingURL=basic.spec.js.map

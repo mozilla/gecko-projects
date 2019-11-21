@@ -709,6 +709,11 @@ static void PreliminaryHandshakeDone(PRFileDesc* fd) {
       infoObject->SetKEAKeyBits(channelInfo.keaKeyBits);
       infoObject->SetMACAlgorithmUsed(cipherInfo.macAlgorithm);
       infoObject->mIsDelegatedCredential = channelInfo.peerDelegCred;
+
+      if (infoObject->mIsDelegatedCredential) {
+        Telemetry::ScalarAdd(
+            Telemetry::ScalarID::SECURITY_TLS_DELEGATED_CREDENTIALS_TXN, 1);
+      }
     }
   }
 
@@ -1038,6 +1043,27 @@ static void RebuildVerifiedCertificateInformation(PRFileDesc* fd,
     return;
   }
 
+  Maybe<nsTArray<nsTArray<uint8_t>>> maybePeerCertsBytes;
+  UniqueCERTCertList peerCertChain(SSL_PeerCertificateChain(fd));
+  if (!peerCertChain) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+            ("RebuildVerifiedCertificateInformation: failed to get peer "
+             "certificate chain"));
+  } else {
+    nsTArray<nsTArray<uint8_t>> peerCertsBytes;
+    for (CERTCertListNode* n = CERT_LIST_HEAD(peerCertChain);
+         !CERT_LIST_END(n, peerCertChain); n = CERT_LIST_NEXT(n)) {
+      // Don't include the end-entity certificate.
+      if (n == CERT_LIST_HEAD(peerCertChain)) {
+        continue;
+      }
+      nsTArray<uint8_t> certBytes;
+      certBytes.AppendElements(n->cert->derCert.data, n->cert->derCert.len);
+      peerCertsBytes.AppendElement(std::move(certBytes));
+    }
+    maybePeerCertsBytes.emplace(std::move(peerCertsBytes));
+  }
+
   RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
   MOZ_ASSERT(certVerifier,
              "Certificate verifier uninitialized in TLS handshake callback?");
@@ -1076,9 +1102,10 @@ static void RebuildVerifiedCertificateInformation(PRFileDesc* fd,
   UniqueCERTCertList builtChain;
   const bool saveIntermediates = false;
   mozilla::pkix::Result rv = certVerifier->VerifySSLServerCert(
-      cert, stapledOCSPResponse, sctsFromTLSExtension, mozilla::pkix::Now(),
-      infoObject, infoObject->GetHostName(), builtChain, saveIntermediates,
-      flags, infoObject->GetOriginAttributes(), &evOidPolicy,
+      cert, mozilla::pkix::Now(), infoObject, infoObject->GetHostName(),
+      builtChain, flags, maybePeerCertsBytes, stapledOCSPResponse,
+      sctsFromTLSExtension, Nothing(), infoObject->GetOriginAttributes(),
+      saveIntermediates, &evOidPolicy,
       nullptr,  // OCSP stapling telemetry
       nullptr,  // key size telemetry
       nullptr,  // SHA-1 telemetry
@@ -1108,18 +1135,19 @@ static void RebuildVerifiedCertificateInformation(PRFileDesc* fd,
   }
 }
 
-nsresult IsCertificateDistrustImminent(nsIX509CertList* aCertList,
-                                       /* out */ bool& isDistrusted) {
-  if (!aCertList) {
-    return NS_ERROR_INVALID_POINTER;
+nsresult IsCertificateDistrustImminent(
+    const nsTArray<RefPtr<nsIX509Cert>>& aCertArray,
+    /* out */ bool& isDistrusted) {
+  if (aCertArray.IsEmpty()) {
+    return NS_ERROR_INVALID_ARG;
   }
 
   nsCOMPtr<nsIX509Cert> rootCert;
-  nsCOMPtr<nsIX509CertList> intCerts;
+  nsTArray<RefPtr<nsIX509Cert>> intCerts;
   nsCOMPtr<nsIX509Cert> eeCert;
 
-  RefPtr<nsNSSCertList> certList = aCertList->GetCertList();
-  nsresult rv = certList->SegmentCertificateChain(rootCert, intCerts, eeCert);
+  nsresult rv = nsNSSCertificate::SegmentCertificateChain(aCertArray, rootCert,
+                                                          intCerts, eeCert);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -1378,15 +1406,16 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
     }
   }
 
-  nsCOMPtr<nsIX509CertList> succeededCertChain;
-  // This always returns NS_OK, but the list could be empty. This is a
-  // best-effort check for now. Bug 731478 will reduce the incidence of empty
+  nsTArray<RefPtr<nsIX509Cert>> succeededCertArray;
+  // The list could be empty. Bug 731478 will reduce the incidence of empty
   // succeeded cert chains through better caching.
-  Unused << infoObject->GetSucceededCertChain(
-      getter_AddRefs(succeededCertChain));
+  nsresult srv = infoObject->GetSucceededCertChain(succeededCertArray);
+
   bool distrustImminent;
-  nsresult srv =
-      IsCertificateDistrustImminent(succeededCertChain, distrustImminent);
+  if (NS_SUCCEEDED(srv)) {
+    srv = IsCertificateDistrustImminent(succeededCertArray, distrustImminent);
+  }
+
   if (NS_SUCCEEDED(srv) && distrustImminent) {
     state |= nsIWebProgressListener::STATE_CERT_DISTRUST_IMMINENT;
   }

@@ -71,6 +71,7 @@ struct CompilerEnvironment {
       DebugEnabled debug_;
       bool refTypes_;
       bool gcTypes_;
+      bool multiValues_;
       bool hugeMemory_;
     };
   };
@@ -120,6 +121,10 @@ struct CompilerEnvironment {
   bool refTypes() const {
     MOZ_ASSERT(isComputed());
     return refTypes_;
+  }
+  bool multiValues() const {
+    MOZ_ASSERT(isComputed());
+    return multiValues_;
   }
   bool hugeMemory() const {
     MOZ_ASSERT(isComputed());
@@ -209,6 +214,7 @@ struct ModuleEnvironment {
   }
   bool gcTypesEnabled() const { return compilerEnv->gcTypes(); }
   bool refTypesEnabled() const { return compilerEnv->refTypes(); }
+  bool multiValuesEnabled() const { return compilerEnv->multiValues(); }
   bool usesMemory() const { return memoryUsage != MemoryUsage::None; }
   bool usesSharedMemory() const { return memoryUsage == MemoryUsage::Shared; }
   bool isAsmJS() const { return kind == ModuleKind::AsmJS; }
@@ -392,15 +398,6 @@ class Encoder {
     MOZ_ASSERT(size_t(type.code()) < size_t(TypeCode::Limit));
     if (type.isRef()) {
       return writeFixedU8(uint8_t(TypeCode::Ref)) &&
-             writeVarU32(type.refTypeIndex());
-    }
-    return writeFixedU8(uint8_t(type.code()));
-  }
-  MOZ_MUST_USE bool writeBlockType(ExprType type) {
-    static_assert(size_t(TypeCode::Limit) <= UINT8_MAX, "fits");
-    MOZ_ASSERT(size_t(type.code()) < size_t(TypeCode::Limit));
-    if (type.isRef()) {
-      return writeFixedU8(uint8_t(ExprType::Ref)) &&
              writeVarU32(type.refTypeIndex());
     }
     return writeFixedU8(uint8_t(type.code()));
@@ -626,6 +623,16 @@ class Decoder {
   const uint8_t* begin() const { return beg_; }
   const uint8_t* end() const { return end_; }
 
+  // Peek at the next byte, if it exists, without advancing the position.
+
+  bool peekByte(uint8_t* byte) {
+    if (done()) {
+      return false;
+    }
+    *byte = *cur_;
+    return true;
+  }
+
   // Fixed-size encoding operations simply copy the literal bytes (without
   // attempting to align).
 
@@ -705,20 +712,6 @@ class Decoder {
     }
     if (type->isRef() && !types[type->refTypeIndex()].isStructType()) {
       return fail("ref does not reference a struct type");
-    }
-    return true;
-  }
-  MOZ_MUST_USE bool readBlockType(uint8_t* code, uint32_t* refTypeIndex) {
-    static_assert(size_t(TypeCode::Limit) <= UINT8_MAX, "fits");
-    if (!readFixedU8(code)) {
-      return false;
-    }
-    if (*code == uint8_t(TypeCode::Ref)) {
-      if (!readVarU32(refTypeIndex)) {
-        return false;
-      }
-    } else {
-      *refTypeIndex = NoRefTypeIndex;
     }
     return true;
   }

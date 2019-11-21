@@ -13,7 +13,11 @@
 
 #include "jit/BaselineIC.h"
 #include "jit/BytecodeAnalysis.h"
+#include "util/Memory.h"
+#include "vm/BytecodeIterator.h"
+#include "vm/BytecodeLocation.h"
 #include "vm/BytecodeUtil.h"
+#include "vm/FrameIter.h"  // js::OnlyJSJitFrameIter
 #include "vm/JSScript.h"
 #include "vm/Stack.h"
 #include "vm/TypeInference.h"
@@ -21,6 +25,8 @@
 
 #include "gc/FreeOp-inl.h"
 #include "jit/JSJitFrameIter-inl.h"
+#include "vm/BytecodeIterator-inl.h"
+#include "vm/BytecodeLocation-inl.h"
 #include "vm/JSScript-inl.h"
 #include "vm/TypeInference-inl.h"
 
@@ -36,7 +42,7 @@ size_t JitScript::NumTypeSets(JSScript* script) {
                 "JSFunction nargs should have safe range to avoid overflow");
 
   size_t num = script->numBytecodeTypeSets() + 1 /* this */;
-  if (JSFunction* fun = script->functionNonDelazifying()) {
+  if (JSFunction* fun = script->function()) {
     num += fun->nargs();
   }
 
@@ -54,6 +60,9 @@ JitScript::JitScript(JSScript* script, uint32_t typeSetOffset,
 
   uint8_t* base = reinterpret_cast<uint8_t*>(this);
   DefaultInitializeElements<StackTypeSet>(base + typeSetOffset, numTypeSets());
+
+  // Initialize the warm-up count from the count stored in the script.
+  warmUpCount_ = script->getWarmUpCount();
 
   // Ensure the baselineScript_ and ionScript_ fields match the BaselineDisabled
   // and IonDisabled script flags.
@@ -142,7 +151,7 @@ bool JSScript::createJitScript(JSContext* cx) {
 
   MOZ_ASSERT(!hasJitScript());
   prepareForDestruction.release();
-  jitScript_ = jitScript.release();
+  warmUpData_.setJitScript(jitScript.release());
   AddCellMemory(this, allocSize.value(), MemoryUse::JitScript);
 
   // We have a JitScript so we can set the script's jitCodeRaw_ pointer to the
@@ -160,8 +169,7 @@ bool JSScript::createJitScript(JSContext* cx) {
   StackTypeSet* thisTypes = this->jitScript()->thisTypes(sweep, this);
   InferSpew(ISpewOps, "typeSet: %sT%p%s this %p", InferSpewColor(thisTypes),
             thisTypes, InferSpewColorReset(), this);
-  unsigned nargs =
-      functionNonDelazifying() ? functionNonDelazifying()->nargs() : 0;
+  unsigned nargs = function() ? function()->nargs() : 0;
   for (unsigned i = 0; i < nargs; i++) {
     StackTypeSet* types = this->jitScript()->argTypes(sweep, this, i);
     InferSpew(ISpewOps, "typeSet: %sT%p%s arg%u %p", InferSpewColor(types),
@@ -191,7 +199,7 @@ void JSScript::releaseJitScript(JSFreeOp* fop) {
   fop->removeCellMemory(this, jitScript()->allocBytes(), MemoryUse::JitScript);
 
   JitScript::Destroy(zone(), jitScript());
-  jitScript_ = nullptr;
+  warmUpData_.clearJitScript();
   updateJitCodeRaw(fop->runtime());
 }
 
@@ -257,7 +265,7 @@ void JitScript::printTypes(JSContext* cx, HandleScript script) {
   AutoEnterAnalysis enter(nullptr, script->zone());
   Fprinter out(stderr);
 
-  if (script->functionNonDelazifying()) {
+  if (script->function()) {
     fprintf(stderr, "Function");
   } else if (script->isForEval()) {
     fprintf(stderr, "Eval");
@@ -267,8 +275,8 @@ void JitScript::printTypes(JSContext* cx, HandleScript script) {
   fprintf(stderr, " %#" PRIxPTR " %s:%u ", uintptr_t(script.get()),
           script->filename(), script->lineno());
 
-  if (script->functionNonDelazifying()) {
-    if (JSAtom* name = script->functionNonDelazifying()->explicitName()) {
+  if (script->function()) {
+    if (JSAtom* name = script->function()->explicitName()) {
       name->dumpCharsNoNewline(out);
     }
   }
@@ -276,29 +284,28 @@ void JitScript::printTypes(JSContext* cx, HandleScript script) {
   fprintf(stderr, "\n    this:");
   thisTypes(sweep, script)->print();
 
-  for (unsigned i = 0; script->functionNonDelazifying() &&
-                       i < script->functionNonDelazifying()->nargs();
+  for (uint32_t i = 0; script->function() && i < script->function()->nargs();
        i++) {
     fprintf(stderr, "\n    arg%u:", i);
     argTypes(sweep, script, i)->print();
   }
   fprintf(stderr, "\n");
 
-  for (jsbytecode* pc = script->code(); pc < script->codeEnd();
-       pc += GetBytecodeLength(pc)) {
+  for (BytecodeLocation it : AllBytecodesIterable(script)) {
     {
       fprintf(stderr, "%p:", script.get());
       Sprinter sprinter(cx);
       if (!sprinter.init()) {
         return;
       }
-      Disassemble1(cx, script, pc, script->pcToOffset(pc), true, &sprinter);
+      Disassemble1(cx, script, it.toRawBytecode(), it.bytecodeToOffset(script),
+                   true, &sprinter);
       fprintf(stderr, "%s", sprinter.string());
     }
 
-    if (BytecodeOpHasTypeSet(JSOp(*pc))) {
-      StackTypeSet* types = bytecodeTypes(sweep, script, pc);
-      fprintf(stderr, "  typeset %u:", unsigned(types - typeArray(sweep)));
+    if (it.opHasTypeSet()) {
+      StackTypeSet* types = bytecodeTypes(sweep, script, it.toRawBytecode());
+      fprintf(stderr, "  typeset %u:", uint32_t(types - typeArray(sweep)));
       types->print();
       fprintf(stderr, "\n");
     }
@@ -558,8 +565,8 @@ bool JitScript::ensureHasCachedIonData(JSContext* cx, HandleScript script) {
   }
 
   Rooted<EnvironmentObject*> templateEnv(cx);
-  if (script->functionNonDelazifying()) {
-    RootedFunction fun(cx, script->functionNonDelazifying());
+  if (script->function()) {
+    RootedFunction fun(cx, script->function());
 
     if (fun->needsNamedLambdaEnvironment()) {
       templateEnv =

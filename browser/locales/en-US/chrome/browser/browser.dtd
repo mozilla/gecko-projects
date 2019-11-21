@@ -82,10 +82,6 @@ convenience of Safari and Chrome users on macOS. See bug 1398988. -->
 <!ENTITY fullScreenMinimize.tooltip "Minimize">
 <!ENTITY fullScreenRestore.tooltip "Restore">
 <!ENTITY fullScreenClose.tooltip "Close">
-<!ENTITY fullScreenAutohide.label "Hide Toolbars">
-<!ENTITY fullScreenAutohide.accesskey "H">
-<!ENTITY fullScreenExit.label "Exit Full Screen Mode">
-<!ENTITY fullScreenExit.accesskey "F">
 
 <!ENTITY pictureInPictureHideToggle.label "Hide Picture-in-Picture Toggle">
 <!ENTITY pictureInPictureHideToggle.accesskey "H">
@@ -93,7 +89,7 @@ convenience of Safari and Chrome users on macOS. See bug 1398988. -->
 <!-- LOCALIZATION NOTE (fxa.menu) Used to define the different labels
      for the Firefox Account toolbar menu screen. The `Signed in as` text is
      followed by the user's email. -->
-<!ENTITY fxa.menu.syncSettings.label "&syncBrand.shortName.label; Settings…">
+<!ENTITY fxa.menu.syncSettings2.label "&syncBrand.shortName.label; Settings">
 <!ENTITY fxa.menu.connectAnotherDevice2.label "Connect Another Device…">
 <!ENTITY fxa.menu.firefoxAccount "&syncBrand.fxAccount.label;">
 <!ENTITY fxa.menu.signin.label "Sign in to &brandProductName;">
@@ -104,6 +100,7 @@ convenience of Safari and Chrome users on macOS. See bug 1398988. -->
 <!ENTITY fxa.menu.accountSettings.label "Account Settings">
 <!ENTITY fxa.menu.signOut.label "Sign Out…">
 <!ENTITY fxa.menu.deviceSettings.label "Device Settings">
+<!ENTITY fxa.menu.setupSync.label "Set Up &syncBrand.shortName.label;…">
 
 <!-- LOCALIZATION NOTE (fxa.service) Used to define the different FxA services
      for the Firefox Account toolbar menu screen.  -->
@@ -170,17 +167,6 @@ convenience of Safari and Chrome users on macOS. See bug 1398988. -->
 
 <!ENTITY urlbar.permissionsGranted.tooltip       "You have granted this website additional permissions.">
 
-<!ENTITY urlbar.cameraBlocked.tooltip            "You have blocked your camera for this website.">
-<!ENTITY urlbar.microphoneBlocked.tooltip        "You have blocked your microphone for this website.">
-<!ENTITY urlbar.screenBlocked.tooltip            "You have blocked this website from sharing your screen.">
-<!ENTITY urlbar.geolocationBlocked.tooltip       "You have blocked location information for this website.">
-<!ENTITY urlbar.webNotificationsBlocked.tooltip  "You have blocked notifications for this website.">
-<!ENTITY urlbar.persistentStorageBlocked.tooltip "You have blocked persistent storage for this website.">
-<!ENTITY urlbar.popupBlocked.tooltip             "You have blocked pop-ups for this website.">
-<!ENTITY urlbar.autoplayMediaBlocked.tooltip     "You have blocked autoplay media with sound for this website.">
-<!ENTITY urlbar.canvasBlocked.tooltip            "You have blocked canvas data extraction for this website.">
-<!ENTITY urlbar.midiBlocked.tooltip              "You have blocked MIDI access for this website.">
-<!ENTITY urlbar.installBlocked.tooltip           "You have blocked add-on installation for this website.">
 
 <!ENTITY urlbar.openHistoryPopup.tooltip                "Show history">
 
@@ -392,22 +378,6 @@ convenience of Safari and Chrome users on macOS. See bug 1398988. -->
      This string is displayed in the search box when the input field is empty. -->
 <!ENTITY searchInput.placeholder      "Search">
 <!ENTITY searchIcon.tooltip           "Search">
-
-<!-- LOCALIZATION NOTE (searchWithDesc.label):
-     This string prompts the user to use the list of one-click search engines in
-     the Urlbar and searchbar. -->
-<!ENTITY searchWithDesc.label         "This time, search with:">
-
-<!-- LOCALIZATION NOTE (changeSearchSettings.button):
-     This string won't wrap, so if the translated string is longer,
-     consider translating it as if it said only "Search Settings". -->
-<!ENTITY changeSearchSettings.button  "Change Search Settings">
-<!ENTITY changeSearchSettings.tooltip "Change search settings">
-
-<!ENTITY searchInNewTab.label         "Search in New Tab">
-<!ENTITY searchInNewTab.accesskey     "T">
-<!ENTITY searchSetAsDefault.label     "Set As Default Search Engine">
-<!ENTITY searchSetAsDefault.accesskey "D">
 
 <!ENTITY openLinkCmdInTab.label       "Open Link in New Tab">
 <!ENTITY openLinkCmdInTab.accesskey   "T">
@@ -715,7 +685,7 @@ you can use these alternative items. Otherwise, their values should be empty.  -
      a tooltip explaining why these items were not blocked in the page. -->
 <!ENTITY protections.notBlocking.why.label "Why?">
 <!ENTITY protections.notBlocking.why.etpOn.tooltip "Blocking these could break elements of some websites. Without trackers, some buttons, forms, and login fields might not work.">
-<!ENTITY protections.notBlocking.why.etpOff.tooltip "Turning off protections will allow all trackers on this site. It may also improve some website functionality.">
+<!ENTITY protections.notBlocking.why.etpOff2.tooltip "All trackers on this site have been loaded because protections are turned off.">
 <!ENTITY protections.noTrackersFound.description "No trackers known to &brandShortName; were detected on this page.">
 
 <!ENTITY protections.crossSiteTrackingCookies.description "These cookies follow you from site to site to gather data about what you do online. They are set by third parties such as advertisers and analytics companies.">
@@ -732,10 +702,6 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 
 <!ENTITY syncBrand.shortName.label    "Sync">
 
-<!ENTITY syncSyncNowItem.label        "Sync Now">
-<!ENTITY syncSyncNowItemSyncing.label "Syncing…">
-<!ENTITY syncSyncNowItem.accesskey    "S">
-
 <!ENTITY customizeMode.autoHideDownloadsButton.label "Auto-hide">
 
 <!ENTITY getUserMedia.selectCamera.label "Camera to share:">
@@ -750,8 +716,6 @@ you can use these alternative items. Otherwise, their values should be empty.  -
 <!ENTITY contentBlocking.manageSettings2.accesskey "M">
 
 <!ENTITY contentBlocking.socialblock.label "Social Media Trackers">
-
-<!ENTITY contentBlocking.cookies2.label "Cross-Site Tracking Cookies">
 
 <!ENTITY contentBlocking.cryptominers.label "Cryptominers">
 

@@ -11,13 +11,13 @@
 #include "mozilla/Result.h"  // for Result
 #include "mozilla/Vector.h"  // for Vector
 
+#include <algorithm>
 #include <string.h>     // for size_t, strlen
 #include <type_traits>  // for remove_reference<>::type
 #include <utility>      // for move
 
 #include "jsapi.h"        // for CallArgs, RootedObject, Rooted
 #include "jsfriendapi.h"  // for GetErrorMessage
-#include "jsutil.h"       // for Min
 
 #include "builtin/Array.h"       // for NewDenseCopiedArray
 #include "debugger/Debugger.h"   // for Completion, Debugger
@@ -26,39 +26,39 @@
 #include "debugger/Source.h"     // for DebuggerSource
 #include "gc/Barrier.h"          // for ImmutablePropertyNamePtr
 #include "gc/Rooting.h"          // for RootedDebuggerObject
-#include "gc/Tracer.h"       // for TraceManuallyBarrieredCrossCompartmentEdge
-#include "js/CompilationAndEvaluation.h" //  for Compile
-#include "js/Conversions.h"  // for ToObject
-#include "js/HeapAPI.h"      // for IsInsideNursery
-#include "js/Promise.h"      // for PromiseState
-#include "js/Proxy.h"        // for PropertyDescriptor
-#include "js/StableStringChars.h"        // for AutoStableStringChars
-#include "proxy/ScriptedProxyHandler.h"  // for ScriptedProxyHandler
-#include "vm/ArgumentsObject.h"          // for ARGS_LENGTH_MAX
-#include "vm/ArrayObject.h"              // for ArrayObject
-#include "vm/BytecodeUtil.h"             // for JSDVG_SEARCH_STACK
-#include "vm/Compartment.h"              // for Compartment
-#include "vm/EnvironmentObject.h"        // for GetDebugEnvironmentForFunction
-#include "vm/ErrorObject.h"              // for JSObject::is, ErrorObject
-#include "vm/GlobalObject.h"             // for JSObject::is, GlobalObject
-#include "vm/Instrumentation.h"          // for RealmInstrumentation
-#include "vm/Interpreter.h"              // for Call
-#include "vm/JSAtom.h"                   // for Atomize, js_apply_str
-#include "vm/JSContext.h"                // for JSContext, ReportValueError
-#include "vm/JSFunction.h"               // for JSFunction
-#include "vm/JSScript.h"                 // for JSScript
-#include "vm/NativeObject.h"             // for NativeObject, JSObject::is
-#include "vm/ObjectGroup.h"              // for GenericObject, NewObjectKind
-#include "vm/ObjectOperations.h"         // for DefineProperty
-#include "vm/Realm.h"                    // for AutoRealm, ErrorCopier, Realm
-#include "vm/Runtime.h"                  // for JSAtomState
-#include "vm/SavedFrame.h"               // for SavedFrame
-#include "vm/Scope.h"                    // for PositionalFormalParameterIter
-#include "vm/SelfHosting.h"              // for GetClonedSelfHostedFunctionName
-#include "vm/Shape.h"                    // for Shape
-#include "vm/Stack.h"                    // for InvokeArgs
-#include "vm/StringType.h"               // for JSAtom, PropertyName
-#include "vm/WrapperObject.h"            // for JSObject::is, WrapperObject
+#include "gc/Tracer.h"  // for TraceManuallyBarrieredCrossCompartmentEdge
+#include "js/CompilationAndEvaluation.h"  //  for Compile
+#include "js/Conversions.h"               // for ToObject
+#include "js/HeapAPI.h"                   // for IsInsideNursery
+#include "js/Promise.h"                   // for PromiseState
+#include "js/Proxy.h"                     // for PropertyDescriptor
+#include "js/StableStringChars.h"         // for AutoStableStringChars
+#include "proxy/ScriptedProxyHandler.h"   // for ScriptedProxyHandler
+#include "vm/ArgumentsObject.h"           // for ARGS_LENGTH_MAX
+#include "vm/ArrayObject.h"               // for ArrayObject
+#include "vm/BytecodeUtil.h"              // for JSDVG_SEARCH_STACK
+#include "vm/Compartment.h"               // for Compartment
+#include "vm/EnvironmentObject.h"         // for GetDebugEnvironmentForFunction
+#include "vm/ErrorObject.h"               // for JSObject::is, ErrorObject
+#include "vm/GlobalObject.h"              // for JSObject::is, GlobalObject
+#include "vm/Instrumentation.h"           // for RealmInstrumentation
+#include "vm/Interpreter.h"               // for Call
+#include "vm/JSAtom.h"                    // for Atomize, js_apply_str
+#include "vm/JSContext.h"                 // for JSContext, ReportValueError
+#include "vm/JSFunction.h"                // for JSFunction
+#include "vm/JSScript.h"                  // for JSScript
+#include "vm/NativeObject.h"              // for NativeObject, JSObject::is
+#include "vm/ObjectGroup.h"               // for GenericObject, NewObjectKind
+#include "vm/ObjectOperations.h"          // for DefineProperty
+#include "vm/Realm.h"                     // for AutoRealm, ErrorCopier, Realm
+#include "vm/Runtime.h"                   // for JSAtomState
+#include "vm/SavedFrame.h"                // for SavedFrame
+#include "vm/Scope.h"                     // for PositionalFormalParameterIter
+#include "vm/SelfHosting.h"               // for GetClonedSelfHostedFunctionName
+#include "vm/Shape.h"                     // for Shape
+#include "vm/Stack.h"                     // for InvokeArgs
+#include "vm/StringType.h"                // for JSAtom, PropertyName
+#include "vm/WrapperObject.h"             // for JSObject::is, WrapperObject
 
 #include "vm/Compartment-inl.h"       // for Compartment::wrap
 #include "vm/JSAtom-inl.h"            // for ValueToId
@@ -151,6 +151,7 @@ struct MOZ_STACK_CLASS DebuggerObject::CallData {
   bool isBoundFunctionGetter();
   bool isArrowFunctionGetter();
   bool isAsyncFunctionGetter();
+  bool isClassConstructorGetter();
   bool isGeneratorFunctionGetter();
   bool protoGetter();
   bool classGetter();
@@ -219,7 +220,8 @@ struct MOZ_STACK_CLASS DebuggerObject::CallData {
 
 template <DebuggerObject::CallData::Method MyMethod>
 /* static */
-bool DebuggerObject::CallData::ToNative(JSContext* cx, unsigned argc, Value* vp) {
+bool DebuggerObject::CallData::ToNative(JSContext* cx, unsigned argc,
+                                        Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
   RootedDebuggerObject obj(cx, DebuggerObject_checkThis(cx, args));
@@ -273,6 +275,16 @@ bool DebuggerObject::CallData::isGeneratorFunctionGetter() {
   }
 
   args.rval().setBoolean(object->isGeneratorFunction());
+  return true;
+}
+
+bool DebuggerObject::CallData::isClassConstructorGetter() {
+  if (!object->isDebuggeeFunction()) {
+    args.rval().setUndefined();
+    return true;
+  }
+
+  args.rval().setBoolean(object->isClassConstructor());
   return true;
 }
 
@@ -971,7 +983,7 @@ bool DebuggerObject::CallData::applyMethod() {
     if (!GetLengthProperty(cx, argsobj, &argc)) {
       return false;
     }
-    argc = unsigned(Min(argc, ARGS_LENGTH_MAX));
+    argc = unsigned(std::min(argc, ARGS_LENGTH_MAX));
 
     if (!nargs.growBy(argc) || !GetElements(cx, argsobj, argc, nargs.begin())) {
       return false;
@@ -1144,20 +1156,19 @@ bool DebuggerObject::CallData::executeInGlobalWithBindingsMethod() {
 // Copy a narrow or wide string to a vector, appending a null terminator.
 template <typename T>
 static bool CopyStringToVector(JSContext* cx, JSString* str, Vector<T>& chars) {
-  JSFlatString* flat = str->ensureFlat(cx);
-  if (!flat) {
+  JSLinearString* linear = str->ensureLinear(cx);
+  if (!linear) {
     return false;
   }
-  if (!chars.appendN(0, flat->length() + 1)) {
+  if (!chars.appendN(0, linear->length() + 1)) {
     return false;
   }
-  CopyChars(chars.begin(), *flat);
+  CopyChars(chars.begin(), *linear);
   return true;
 }
 
 bool DebuggerObject::CallData::createSource() {
-  if (!args.requireAtLeast(
-          cx, "Debugger.Object.prototype.createSource", 1)) {
+  if (!args.requireAtLeast(cx, "Debugger.Object.prototype.createSource", 1)) {
     return false;
   }
 
@@ -1228,7 +1239,7 @@ bool DebuggerObject::CallData::createSource() {
   if (!CopyStringToVector(cx, url, urlChars)) {
     return false;
   }
-  compileOptions.setFile((const char*) urlChars.begin());
+  compileOptions.setFile((const char*)urlChars.begin());
 
   Vector<char16_t> sourceMapURLChars(cx);
   if (sourceMapURL) {
@@ -1293,8 +1304,7 @@ bool DebuggerObject::CallData::makeDebuggeeNativeFunctionMethod() {
 }
 
 bool DebuggerObject::CallData::isSameNativeMethod() {
-  if (!args.requireAtLeast(
-          cx, "Debugger.Object.prototype.isSameNative", 1)) {
+  if (!args.requireAtLeast(cx, "Debugger.Object.prototype.isSameNative", 1)) {
     return false;
   }
 
@@ -1413,6 +1423,7 @@ const JSPropertySpec DebuggerObject::properties_[] = {
     JS_DEBUG_PSG("isArrowFunction", isArrowFunctionGetter),
     JS_DEBUG_PSG("isGeneratorFunction", isGeneratorFunctionGetter),
     JS_DEBUG_PSG("isAsyncFunction", isAsyncFunctionGetter),
+    JS_DEBUG_PSG("isClassConstructor", isClassConstructorGetter),
     JS_DEBUG_PSG("proto", protoGetter),
     JS_DEBUG_PSG("class", classGetter),
     JS_DEBUG_PSG("name", nameGetter),
@@ -1471,8 +1482,8 @@ const JSFunctionSpec DebuggerObject::methods_[] = {
                 executeInGlobalWithBindingsMethod, 2),
     JS_DEBUG_FN("createSource", createSource, 1),
     JS_DEBUG_FN("makeDebuggeeValue", makeDebuggeeValueMethod, 1),
-    JS_DEBUG_FN("makeDebuggeeNativeFunction",
-                makeDebuggeeNativeFunctionMethod, 1),
+    JS_DEBUG_FN("makeDebuggeeNativeFunction", makeDebuggeeNativeFunctionMethod,
+                1),
     JS_DEBUG_FN("isSameNative", isSameNativeMethod, 1),
     JS_DEBUG_FN("unsafeDereference", unsafeDereferenceMethod, 0),
     JS_DEBUG_FN("unwrap", unwrapMethod, 0),
@@ -1549,6 +1560,12 @@ bool DebuggerObject::isGeneratorFunction() const {
   MOZ_ASSERT(isDebuggeeFunction());
 
   return referent()->as<JSFunction>().isGenerator();
+}
+
+bool DebuggerObject::isClassConstructor() const {
+  MOZ_ASSERT(isDebuggeeFunction());
+
+  return referent()->as<JSFunction>().isClassConstructor();
 }
 
 bool DebuggerObject::isGlobal() const { return referent()->is<GlobalObject>(); }
@@ -2456,8 +2473,8 @@ bool DebuggerObject::isSameNative(JSContext* cx, HandleDebuggerObject object,
       return false;
     }
 
-    result.setBoolean(
-        selfHostedName == MaybeGetSelfHostedFunctionName(referentValue));
+    result.setBoolean(selfHostedName ==
+                      MaybeGetSelfHostedFunctionName(referentValue));
     return true;
   }
 

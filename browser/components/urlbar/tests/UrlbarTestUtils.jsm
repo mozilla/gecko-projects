@@ -138,12 +138,13 @@ var UrlbarTestUtils = {
     let actions = element.getElementsByClassName("urlbarView-action");
     let urls = element.getElementsByClassName("urlbarView-url");
     let typeIcon = element.querySelector(".urlbarView-type-icon");
-    let typeIconStyle = win.getComputedStyle(typeIcon);
     details.displayed = {
       title: element.getElementsByClassName("urlbarView-title")[0].textContent,
       action: actions.length ? actions[0].textContent : null,
       url: urls.length ? urls[0].textContent : null,
-      typeIcon: typeIconStyle["background-image"],
+      typeIcon: typeIcon
+        ? win.getComputedStyle(typeIcon)["background-image"]
+        : null,
     };
     details.element = {
       action: element.getElementsByClassName("urlbarView-action")[0],
@@ -160,6 +161,8 @@ var UrlbarTestUtils = {
         keyword: result.payload.keyword,
         query: result.payload.query,
         suggestion: result.payload.suggestion,
+        inPrivateWindow: result.payload.inPrivateWindow,
+        isPrivateEngine: result.payload.isPrivateEngine,
       };
     } else if (details.type == UrlbarUtils.RESULT_TYPE.KEYWORD) {
       details.keyword = result.payload.keyword;
@@ -239,12 +242,13 @@ var UrlbarTestUtils = {
     // complete.
     return this.promiseSearchComplete(win).then(context => {
       // Look for search suggestions.
-      let hasSearchSuggestion = context.results.some(
+      let firstSearchSuggestionIndex = context.results.findIndex(
         r => r.type == UrlbarUtils.RESULT_TYPE.SEARCH && r.payload.suggestion
       );
-      if (!hasSearchSuggestion) {
+      if (firstSearchSuggestionIndex == -1) {
         throw new Error("Cannot find a search suggestion");
       }
+      return firstSearchSuggestionIndex;
     });
   },
 

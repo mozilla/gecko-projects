@@ -9,6 +9,8 @@
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/layers/Compositor.h"
+#include "mozilla/layers/CompositorThread.h"
+#include "mozilla/webrender/RenderThread.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #include "nsWindow.h"
 #include "VsyncDispatcher.h"
@@ -27,6 +29,7 @@ WinCompositorWidget::WinCompositorWidget(
     const WinCompositorWidgetInitData& aInitData,
     const layers::CompositorOptions& aOptions)
     : CompositorWidget(aOptions),
+      mSetParentCompleted(false),
       mWidgetKey(aInitData.widgetKey()),
       mWnd(reinterpret_cast<HWND>(aInitData.hWnd())),
       mCompositorWnds(nullptr, nullptr),
@@ -248,6 +251,15 @@ void WinCompositorWidget::UpdateTransparency(nsTransparencyMode aMode) {
   }
 }
 
+bool WinCompositorWidget::HasGlass() const {
+  MOZ_ASSERT(layers::CompositorThreadHolder::IsInCompositorThread() ||
+             wr::RenderThread::IsInRenderThread());
+
+  nsTransparencyMode transparencyMode = mTransparencyMode;
+  return transparencyMode == eTransparencyGlass ||
+         transparencyMode == eTransparencyBorderlessGlass;
+}
+
 void WinCompositorWidget::ClearTransparentWindow() {
   MutexAutoLock lock(mTransparentSurfaceLock);
   if (!mTransparentSurface) {
@@ -328,13 +340,26 @@ void WinCompositorWidget::UpdateCompositorWndSizeIfNecessary() {
     return;
   }
 
-  // Force a resize and redraw (but not a move, activate, etc.).
-  if (!::SetWindowPos(mCompositorWnds.mCompositorWnd, nullptr, 0, 0, size.width,
-                      size.height,
-                      SWP_NOMOVE | SWP_NOACTIVATE | SWP_NOCOPYBITS |
-                          SWP_NOOWNERZORDER | SWP_NOZORDER)) {
+  // This code is racing with the compositor, which needs to reparent
+  // the compositor surface to the actual window (mWnd). To avoid racing
+  // mutations, we refuse to proceed until ::SetParent() is called in parent
+  // process. After the ::SetParent() call, composition is scheduled in
+  // CompositorWidgetParent::UpdateCompositorWnd().
+  if (!mSetParentCompleted) {
+    // ::SetParent() is not completed yet.
     return;
   }
+
+  MOZ_ASSERT(mWnd == ::GetParent(mCompositorWnds.mCompositorWnd));
+
+  // Force a resize and redraw (but not a move, activate, etc.).
+  if (!::SetWindowPos(
+          mCompositorWnds.mCompositorWnd, nullptr, 0, 0, size.width,
+          size.height,
+          SWP_NOACTIVATE | SWP_NOCOPYBITS | SWP_NOOWNERZORDER | SWP_NOZORDER)) {
+    return;
+  }
+
   mLastCompositorWndSize = size;
 }
 

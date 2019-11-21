@@ -52,10 +52,12 @@
 // ContentChild:RecvRemoteType.  Add your value there too or it will be called
 // "Web Content".
 #define DEFAULT_REMOTE_TYPE "web"
+#define FISSION_WEB_REMOTE_TYPE "webIsolated"
 #define FILE_REMOTE_TYPE "file"
 #define EXTENSION_REMOTE_TYPE "extension"
 #define PRIVILEGEDABOUT_REMOTE_TYPE "privilegedabout"
 #define PRIVILEGEDMOZILLA_REMOTE_TYPE "privilegedmozilla"
+#define WITH_COOP_COEP_REMOTE_TYPE_PREFIX "webCOOP+COEP="
 
 // This must start with the DEFAULT_REMOTE_TYPE above.
 #define LARGE_ALLOCATION_REMOTE_TYPE "webLargeAllocation"
@@ -483,12 +485,14 @@ class ContentParent final : public PContentParent,
 
   already_AddRefed<POfflineCacheUpdateParent> AllocPOfflineCacheUpdateParent(
       const URIParams& aManifestURI, const URIParams& aDocumentURI,
-      const PrincipalInfo& aLoadingPrincipalInfo, const bool& aStickDocument);
+      const PrincipalInfo& aLoadingPrincipalInfo, const bool& aStickDocument,
+      const CookieSettingsArgs& aCookieSettingsArgs);
 
   virtual mozilla::ipc::IPCResult RecvPOfflineCacheUpdateConstructor(
       POfflineCacheUpdateParent* aActor, const URIParams& aManifestURI,
       const URIParams& aDocumentURI, const PrincipalInfo& aLoadingPrincipal,
-      const bool& stickDocument) override;
+      const bool& stickDocument,
+      const CookieSettingsArgs& aCookieSettingsArgs) override;
 
   mozilla::ipc::IPCResult RecvSetOfflinePermission(
       const IPC::Principal& principal);
@@ -578,6 +582,15 @@ class ContentParent final : public PContentParent,
 
   bool DeallocPSessionStorageObserverParent(
       PSessionStorageObserverParent* aActor);
+
+  PSHEntryParent* AllocPSHEntryParent(
+      PSHistoryParent* aSHistory, const PSHEntryOrSharedID& aEntryOrSharedID);
+
+  void DeallocPSHEntryParent(PSHEntryParent*);
+
+  PSHistoryParent* AllocPSHistoryParent(BrowsingContext* aContext);
+
+  void DeallocPSHistoryParent(PSHistoryParent* aActor);
 
   bool DeallocPURLClassifierLocalParent(PURLClassifierLocalParent* aActor);
 
@@ -877,7 +890,8 @@ class ContentParent final : public PContentParent,
       const uint32_t& aContentDispositionHint,
       const nsString& aContentDispositionFilename, const bool& aForceSave,
       const int64_t& aContentLength, const bool& aWasFileChannel,
-      const Maybe<URIParams>& aReferrer, PBrowserParent* aBrowser);
+      const Maybe<URIParams>& aReferrer, BrowsingContext* aContext,
+      const bool& aShouldCloseWindow);
 
   mozilla::ipc::IPCResult RecvPExternalHelperAppConstructor(
       PExternalHelperAppParent* actor, const Maybe<URIParams>& uri,
@@ -886,7 +900,8 @@ class ContentParent final : public PContentParent,
       const uint32_t& aContentDispositionHint,
       const nsString& aContentDispositionFilename, const bool& aForceSave,
       const int64_t& aContentLength, const bool& aWasFileChannel,
-      const Maybe<URIParams>& aReferrer, PBrowserParent* aBrowser) override;
+      const Maybe<URIParams>& aReferrer, BrowsingContext* aContext,
+      const bool& aShouldCloseWindow) override;
 
   already_AddRefed<PHandlerServiceParent> AllocPHandlerServiceParent();
 
@@ -951,7 +966,7 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvGetShowPasswordSetting(bool* showPassword);
 
-  mozilla::ipc::IPCResult RecvStartVisitedQuery(const URIParams& uri);
+  mozilla::ipc::IPCResult RecvStartVisitedQueries(const nsTArray<URIParams>&);
 
   mozilla::ipc::IPCResult RecvSetURITitle(const URIParams& uri,
                                           const nsString& title);
@@ -1041,6 +1056,7 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvDeviceReset();
 
   mozilla::ipc::IPCResult RecvKeywordToURI(const nsCString& aKeyword,
+                                           const bool& aIsPrivateContext,
                                            nsString* aProviderName,
                                            RefPtr<nsIInputStream>* aPostData,
                                            Maybe<URIParams>* aURI);
@@ -1110,6 +1126,10 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvSetupFamilyCharMap(
       const uint32_t& aGeneration,
       const mozilla::fontlist::Pointer& aFamilyPtr);
+
+  mozilla::ipc::IPCResult RecvGetHyphDict(
+      const mozilla::ipc::URIParams& aURIParams,
+      mozilla::ipc::SharedMemoryBasic::Handle* aOutHandle, uint32_t* aOutSize);
 
   mozilla::ipc::IPCResult RecvNotifyBenchmarkResult(const nsString& aCodecName,
                                                     const uint32_t& aDecodeFPS);

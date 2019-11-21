@@ -117,7 +117,6 @@ class nsCSSPropertyIDSet;
 class nsCSSValue;
 class nsINode;
 class nsPresContext;
-class nsXBLBinding;
 struct nsFontFaceRuleContainer;
 struct nsTimingFunction;
 

@@ -123,6 +123,7 @@ const previewers = {
         grip.location = {
           url: obj.script.url,
           line: obj.script.startLine,
+          column: obj.script.startColumn
         };
       }
 
@@ -424,7 +425,7 @@ function wrappedPrimitivePreviewer(
   return true;
 }
 
-/* eslint-disable complexity */
+// eslint-disable-next-line complexity
 function GenericObject(
   objectActor,
   grip,
@@ -528,7 +529,6 @@ function GenericObject(
 
   return true;
 }
-/* eslint-enable complexity */
 
 // Preview functions that do not rely on the object class.
 previewers.Object = [
@@ -770,7 +770,7 @@ previewers.Object = [
     return true;
   },
 
-  /* eslint-disable complexity */
+  // eslint-disable-next-line complexity
   function DOMEvent({ obj, hooks }, grip, rawObj) {
     if (isWorker || !rawObj || !Event.isInstance(rawObj)) {
       return false;
@@ -863,7 +863,6 @@ previewers.Object = [
 
     return true;
   },
-  /* eslint-enable complexity */
 
   function DOMException({ obj, hooks }, grip, rawObj) {
     if (isWorker || !rawObj || obj.class !== "DOMException") {

@@ -417,21 +417,24 @@ var gMainPane = {
     setEventListener("manageBrowserLanguagesButton", "command", function() {
       gMainPane.showBrowserLanguages({ search: false });
     });
-    setEventListener("checkForUpdatesButton", "command", function() {
-      gAppUpdater.checkForUpdates();
-    });
-    setEventListener("downloadAndInstallButton", "command", function() {
-      gAppUpdater.startDownload();
-    });
-    setEventListener("updateButton", "command", function() {
-      gAppUpdater.buttonRestartAfterDownload();
-    });
-    setEventListener("checkForUpdatesButton2", "command", function() {
-      gAppUpdater.checkForUpdates();
-    });
-    setEventListener("checkForUpdatesButton3", "command", function() {
-      gAppUpdater.checkForUpdates();
-    });
+    if (AppConstants.MOZ_UPDATER) {
+      // These elements are only compiled in when the updater is enabled
+      setEventListener("checkForUpdatesButton", "command", function() {
+        gAppUpdater.checkForUpdates();
+      });
+      setEventListener("downloadAndInstallButton", "command", function() {
+        gAppUpdater.startDownload();
+      });
+      setEventListener("updateButton", "command", function() {
+        gAppUpdater.buttonRestartAfterDownload();
+      });
+      setEventListener("checkForUpdatesButton2", "command", function() {
+        gAppUpdater.checkForUpdates();
+      });
+      setEventListener("checkForUpdatesButton3", "command", function() {
+        gAppUpdater.checkForUpdates();
+      });
+    }
 
     // Startup pref
     setEventListener(
@@ -854,7 +857,9 @@ var gMainPane = {
       win.openTrustedLinkIn("about:preferences#sync", "current");
       return;
     }
-    let url = await FxAccounts.config.promiseSignInURI("dev-edition-setup");
+    let url = await FxAccounts.config.promiseConnectAccountURI(
+      "dev-edition-setup"
+    );
     let accountsTab = win.gBrowser.addWebTab(url);
     win.gBrowser.selectedTab = accountsTab;
   },
@@ -1228,7 +1233,7 @@ var gMainPane = {
    * Shows a dialog in which the preferred language for web content may be set.
    */
   showLanguages() {
-    gSubDialog.open("chrome://browser/content/preferences/languages.xul");
+    gSubDialog.open("chrome://browser/content/preferences/languages.xhtml");
   },
 
   recordBrowserLanguagesTelemetry(method, value = null) {
@@ -1251,7 +1256,7 @@ var gMainPane = {
 
     let opts = { selected: gMainPane.selectedLocales, search, telemetryId };
     gSubDialog.open(
-      "chrome://browser/content/preferences/browserLanguages.xul",
+      "chrome://browser/content/preferences/browserLanguages.xhtml",
       null,
       opts,
       this.browserLanguagesClosed
@@ -1284,7 +1289,7 @@ var gMainPane = {
    * translation preferences can be set.
    */
   showTranslationExceptions() {
-    gSubDialog.open("chrome://browser/content/preferences/translation.xul");
+    gSubDialog.open("chrome://browser/content/preferences/translation.xhtml");
   },
 
   openTranslationProviderAttribution() {
@@ -1300,7 +1305,7 @@ var gMainPane = {
    */
   configureFonts() {
     gSubDialog.open(
-      "chrome://browser/content/preferences/fonts.xul",
+      "chrome://browser/content/preferences/fonts.xhtml",
       "resizable=no"
     );
   },
@@ -1311,7 +1316,7 @@ var gMainPane = {
    */
   configureColors() {
     gSubDialog.open(
-      "chrome://browser/content/preferences/colors.xul",
+      "chrome://browser/content/preferences/colors.xhtml",
       "resizable=no"
     );
   },
@@ -1322,7 +1327,7 @@ var gMainPane = {
    */
   showConnections() {
     gSubDialog.open(
-      "chrome://browser/content/preferences/connection.xul",
+      "chrome://browser/content/preferences/connection.xhtml",
       null,
       null,
       this.updateProxySettingsUI.bind(this)
@@ -1765,7 +1770,7 @@ var gMainPane = {
    * Displays the history of installed updates.
    */
   showUpdates() {
-    gSubDialog.open("chrome://mozapps/content/update/history.xul");
+    gSubDialog.open("chrome://mozapps/content/update/history.xhtml");
   },
 
   destroy() {
@@ -2312,17 +2317,37 @@ var gMainPane = {
           }
           break;
         case Ci.nsIHandlerInfo.useSystemDefault:
-          menu.selectedItem = defaultMenuItem;
+          // We might not have a default item if we're not aware of an
+          // OS-default handler for this type:
+          menu.selectedItem = defaultMenuItem || askMenuItem;
           break;
         case Ci.nsIHandlerInfo.useHelperApp:
           if (preferredApp) {
-            menu.selectedItem = possibleAppMenuItems.filter(v =>
+            let preferredItem = possibleAppMenuItems.find(v =>
               v.handlerApp.equals(preferredApp)
-            )[0];
+            );
+            if (preferredItem) {
+              menu.selectedItem = preferredItem;
+            } else {
+              // This shouldn't happen, but let's make sure we end up with a
+              // selected item:
+              let possible = possibleAppMenuItems
+                .map(v => v.handlerApp && v.handlerApp.name)
+                .join(", ");
+              Cu.reportError(
+                new Error(
+                  `Preferred handler for ${
+                    handlerInfo.type
+                  } not in list of possible handlers!? (List: ${possible})`
+                )
+              );
+              menu.selectedItem = askMenuItem;
+            }
           }
           break;
         case kActionUsePlugin:
-          menu.selectedItem = pluginMenuItem;
+          // The plugin may have been removed, if so, select 'always ask':
+          menu.selectedItem = pluginMenuItem || askMenuItem;
           break;
         case Ci.nsIHandlerInfo.saveToDisk:
           menu.selectedItem = saveMenuItem;
@@ -2493,7 +2518,7 @@ var gMainPane = {
     };
 
     gSubDialog.open(
-      "chrome://browser/content/preferences/applicationManager.xul",
+      "chrome://browser/content/preferences/applicationManager.xhtml",
       "resizable=no",
       handlerInfo,
       onComplete
@@ -2538,7 +2563,8 @@ var gMainPane = {
       );
       if ("id" in handlerInfo.description) {
         params.description = await document.l10n.formatValue(
-          handlerInfo.description.id
+          handlerInfo.description.id,
+          handlerInfo.description.args
         );
       } else {
         params.description = handlerInfo.typeDescription.raw;
@@ -3066,6 +3092,10 @@ class HandlerListItem {
       ],
     ]);
     const selectedItem = this.node.querySelector("[selected=true]");
+    if (!selectedItem) {
+      Cu.reportError("No selected item for " + this.handlerInfoWrapper.type);
+      return;
+    }
     const { id, args } = document.l10n.getAttributes(selectedItem);
     localizeElement(this.node.querySelector(".actionDescription"), {
       id: id + "-label",
@@ -3165,11 +3195,12 @@ class HandlerInfoWrapper {
     if (this.disambiguateDescription) {
       const description = this.description;
       if (description.id) {
+        // Pass through the arguments:
+        let { args = {} } = description;
+        args.type = this.type;
         return {
           id: description.id + "-with-type",
-          args: {
-            type: this.type,
-          },
+          args,
         };
       }
 

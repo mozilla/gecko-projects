@@ -308,12 +308,6 @@ class InternalRequest final {
   already_AddRefed<InternalRequest> GetRequestConstructorCopy(
       nsIGlobalObject* aGlobal, ErrorResult& aRv) const;
 
-  bool WasCreatedByFetchEvent() const { return mCreatedByFetchEvent; }
-
-  void SetCreatedByFetchEvent() { mCreatedByFetchEvent = true; }
-
-  void ClearCreatedByFetchEvent() { mCreatedByFetchEvent = false; }
-
   bool IsNavigationRequest() const;
 
   bool IsWorkerRequest() const;
@@ -406,7 +400,7 @@ class InternalRequest final {
   RequestCache mCacheMode;
   RequestRedirect mRedirectMode;
   nsString mIntegrity;
-  bool mMozErrors;
+  bool mMozErrors = false;
   nsCString mFragment;
   MOZ_INIT_OUTSIDE_CTOR bool mAuthenticationFlag;
   MOZ_INIT_OUTSIDE_CTOR bool mPreserveContentCodings;
@@ -415,10 +409,6 @@ class InternalRequest final {
   MOZ_INIT_OUTSIDE_CTOR bool mSynchronous;
   MOZ_INIT_OUTSIDE_CTOR bool mUnsafeRequest;
   MOZ_INIT_OUTSIDE_CTOR bool mUseURLCredentials;
-  // This is only set when a Request object is created by a fetch event.  We
-  // use it to check if Service Workers are simply fetching intercepted Request
-  // objects without modifying them.
-  bool mCreatedByFetchEvent = false;
   // This is only set when Request.overrideContentPolicyType() has been set.
   // It is illegal to pass such a Request object to a fetch() method unless
   // if the caller has chrome privileges.

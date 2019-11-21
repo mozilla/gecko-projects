@@ -42,7 +42,9 @@
 #include "vm/Opcodes.h"
 #include "vm/SelfHosting.h"
 #include "vm/TypedArrayObject.h"
-#include "vtune/VTuneWrapper.h"
+#ifdef MOZ_VTUNE
+#  include "vtune/VTuneWrapper.h"
+#endif
 
 #include "builtin/Boolean-inl.h"
 
@@ -215,7 +217,7 @@ bool JitScript::initICEntriesAndBytecodeTypeMap(JSContext* cx,
   // Add ICEntries and fallback stubs for this/argument type checks.
   // Note: we pass a nullptr pc to indicate this is a non-op IC.
   // See ICEntry::NonOpPCOffset.
-  if (JSFunction* fun = script->functionNonDelazifying()) {
+  if (JSFunction* fun = script->function()) {
     ICStub* stub =
         alloc.newStub<ICTypeMonitor_Fallback>(Kind::TypeMonitor, nullptr, 0);
     if (!addPrologueIC(stub)) {
@@ -303,14 +305,6 @@ bool JitScript::initICEntriesAndBytecodeTypeMap(JSContext* cx,
       case JSOP_STRICTEQ:
       case JSOP_STRICTNE: {
         ICStub* stub = alloc.newStub<ICCompare_Fallback>(Kind::Compare);
-        if (!addIC(loc, stub)) {
-          return false;
-        }
-        break;
-      }
-      case JSOP_LOOPENTRY: {
-        ICStub* stub =
-            alloc.newStub<ICWarmUpCounter_Fallback>(Kind::WarmUpCounter);
         if (!addIC(loc, stub)) {
           return false;
         }
@@ -573,7 +567,6 @@ bool ICStub::NonCacheIRStubMakesGCCalls(Kind kind) {
 
   switch (kind) {
     case Call_Fallback:
-    case WarmUpCounter_Fallback:
     // These three fallback stubs don't actually make non-tail calls,
     // but the fallback code for the bailout path needs to pop the stub frame
     // pushed during the bailout.
@@ -738,224 +731,6 @@ static void TryAttachStub(const char* name, JSContext* cx, BaselineFrame* frame,
   }
 }
 
-//
-// WarmUpCounter_Fallback
-//
-
-/* clang-format off */
-// The following data is kept in a temporary heap-allocated buffer, stored in
-// JitRuntime (high memory addresses at top, low at bottom):
-//
-//     +----->+=================================+  --      <---- High Address
-//     |      |                                 |   |
-//     |      |     ...BaselineFrame...         |   |-- Copy of BaselineFrame + stack values
-//     |      |                                 |   |
-//     |      +---------------------------------+   |
-//     |      |                                 |   |
-//     |      |     ...Locals/Stack...          |   |
-//     |      |                                 |   |
-//     |      +=================================+  --
-//     |      |     Padding(Maybe Empty)        |
-//     |      +=================================+  --
-//     +------|-- baselineFrame                 |   |-- IonOsrTempData
-//            |   jitcode                       |   |
-//            +=================================+  --      <---- Low Address
-//
-// A pointer to the IonOsrTempData is returned.
-/* clang-format on */
-
-struct IonOsrTempData {
-  void* jitcode;
-  uint8_t* baselineFrame;
-};
-
-static IonOsrTempData* PrepareOsrTempData(JSContext* cx, BaselineFrame* frame,
-                                          uint32_t frameSize, void* jitcode) {
-  uint32_t numValueSlots = frame->numValueSlots(frameSize);
-
-  // Calculate the amount of space to allocate:
-  //      BaselineFrame space:
-  //          (sizeof(Value) * numValueSlots)
-  //        + sizeof(BaselineFrame)
-  //
-  //      IonOsrTempData space:
-  //          sizeof(IonOsrTempData)
-
-  size_t frameSpace = sizeof(BaselineFrame) + sizeof(Value) * numValueSlots;
-  size_t ionOsrTempDataSpace = sizeof(IonOsrTempData);
-
-  size_t totalSpace = AlignBytes(frameSpace, sizeof(Value)) +
-                      AlignBytes(ionOsrTempDataSpace, sizeof(Value));
-
-  IonOsrTempData* info = (IonOsrTempData*)cx->allocateOsrTempData(totalSpace);
-  if (!info) {
-    ReportOutOfMemory(cx);
-    return nullptr;
-  }
-
-  memset(info, 0, totalSpace);
-
-  info->jitcode = jitcode;
-
-  // Copy the BaselineFrame + local/stack Values to the buffer. Arguments and
-  // |this| are not copied but left on the stack: the Baseline and Ion frame
-  // share the same frame prefix and Ion won't clobber these values. Note
-  // that info->baselineFrame will point to the *end* of the frame data, like
-  // the frame pointer register in baseline frames.
-  uint8_t* frameStart =
-      (uint8_t*)info + AlignBytes(ionOsrTempDataSpace, sizeof(Value));
-  info->baselineFrame = frameStart + frameSpace;
-
-  memcpy(frameStart, (uint8_t*)frame - numValueSlots * sizeof(Value),
-         frameSpace);
-
-  JitSpew(JitSpew_BaselineOSR, "Allocated IonOsrTempData at %p", (void*)info);
-  JitSpew(JitSpew_BaselineOSR, "Jitcode is %p", info->jitcode);
-
-  // All done.
-  return info;
-}
-
-bool DoWarmUpCounterFallbackOSR(JSContext* cx, BaselineFrame* frame,
-                                uint32_t frameSize,
-                                ICWarmUpCounter_Fallback* stub,
-                                IonOsrTempData** infoPtr) {
-  MOZ_ASSERT(infoPtr);
-  *infoPtr = nullptr;
-
-  MOZ_ASSERT(frame->debugFrameSize() == frameSize);
-
-  RootedScript script(cx, frame->script());
-  jsbytecode* pc = stub->icEntry()->pc(script);
-  MOZ_ASSERT(JSOp(*pc) == JSOP_LOOPENTRY);
-
-  FallbackICSpew(cx, stub, "WarmUpCounter(%d)", int(script->pcToOffset(pc)));
-
-  if (!IonCompileScriptForBaseline(cx, frame, frameSize, pc)) {
-    return false;
-  }
-
-  if (!script->hasIonScript() || script->ionScript()->osrPc() != pc ||
-      script->ionScript()->bailoutExpected() || frame->isDebuggee()) {
-    return true;
-  }
-
-  IonScript* ion = script->ionScript();
-  MOZ_ASSERT(cx->runtime()->geckoProfiler().enabled() ==
-             ion->hasProfilingInstrumentation());
-  MOZ_ASSERT(ion->osrPc() == pc);
-
-  JitSpew(JitSpew_BaselineOSR, "  OSR possible!");
-  void* jitcode = ion->method()->raw() + ion->osrEntryOffset();
-
-  // Prepare the temporary heap copy of the fake InterpreterFrame and actual
-  // args list.
-  JitSpew(JitSpew_BaselineOSR, "Got jitcode.  Preparing for OSR into ion.");
-  IonOsrTempData* info = PrepareOsrTempData(cx, frame, frameSize, jitcode);
-  if (!info) {
-    return false;
-  }
-  *infoPtr = info;
-
-  return true;
-}
-
-bool FallbackICCodeCompiler::emit_WarmUpCounter() {
-  // Note: frame size is stored in R0.scratchReg().
-
-  // Push a stub frame so that we can perform a non-tail call.
-  enterStubFrame(masm, R1.scratchReg());
-
-  Label noCompiledCode;
-  // Call DoWarmUpCounterFallbackOSR to compile/check-for Ion-compiled function
-  {
-    // Push IonOsrTempData pointer storage
-    masm.subFromStackPtr(Imm32(sizeof(void*)));
-    masm.push(masm.getStackPointer());
-
-    // Push stub pointer, frame size, frame pointer.
-    masm.push(ICStubReg);
-    masm.push(R0.scratchReg());
-    pushStubPayload(masm, R0.scratchReg());
-
-    using Fn = bool (*)(JSContext*, BaselineFrame*, uint32_t,
-                        ICWarmUpCounter_Fallback*, IonOsrTempData**);
-    if (!callVM<Fn, DoWarmUpCounterFallbackOSR>(masm)) {
-      return false;
-    }
-
-    // Pop IonOsrTempData pointer.
-    masm.pop(R0.scratchReg());
-
-    leaveStubFrame(masm);
-
-    // If no JitCode was found, then skip just exit the IC.
-    masm.branchPtr(Assembler::Equal, R0.scratchReg(), ImmPtr(nullptr),
-                   &noCompiledCode);
-  }
-
-  // Get a scratch register.
-  AllocatableGeneralRegisterSet regs(availableGeneralRegs(0));
-  Register osrDataReg = R0.scratchReg();
-  regs.take(osrDataReg);
-  regs.takeUnchecked(OsrFrameReg);
-
-  Register scratchReg = regs.takeAny();
-
-  // At this point, stack looks like:
-  //  +-> [...Calling-Frame...]
-  //  |   [...Actual-Args/ThisV/ArgCount/Callee...]
-  //  |   [Descriptor]
-  //  |   [Return-Addr]
-  //  +---[Saved-FramePtr]            <-- BaselineFrameReg points here.
-  //      [...Baseline-Frame...]
-
-  // Restore the stack pointer to point to the saved frame pointer.
-  masm.moveToStackPtr(BaselineFrameReg);
-
-  // Discard saved frame pointer, so that the return address is on top of
-  // the stack.
-  masm.pop(scratchReg);
-
-#ifdef DEBUG
-  // If profiler instrumentation is on, ensure that lastProfilingFrame is
-  // the frame currently being OSR-ed
-  {
-    Label checkOk;
-    AbsoluteAddress addressOfEnabled(
-        cx->runtime()->geckoProfiler().addressOfEnabled());
-    masm.branch32(Assembler::Equal, addressOfEnabled, Imm32(0), &checkOk);
-    masm.loadPtr(AbsoluteAddress((void*)&cx->jitActivation), scratchReg);
-    masm.loadPtr(
-        Address(scratchReg, JitActivation::offsetOfLastProfilingFrame()),
-        scratchReg);
-
-    // It may be the case that we entered the baseline frame with
-    // profiling turned off on, then in a call within a loop (i.e. a
-    // callee frame), turn on profiling, then return to this frame,
-    // and then OSR with profiling turned on.  In this case, allow for
-    // lastProfilingFrame to be null.
-    masm.branchPtr(Assembler::Equal, scratchReg, ImmWord(0), &checkOk);
-
-    masm.branchStackPtr(Assembler::Equal, scratchReg, &checkOk);
-    masm.assumeUnreachable("Baseline OSR lastProfilingFrame mismatch.");
-    masm.bind(&checkOk);
-  }
-#endif
-
-  // Jump into Ion.
-  masm.loadPtr(Address(osrDataReg, offsetof(IonOsrTempData, jitcode)),
-               scratchReg);
-  masm.loadPtr(Address(osrDataReg, offsetof(IonOsrTempData, baselineFrame)),
-               OsrFrameReg);
-  masm.jump(scratchReg);
-
-  // No jitcode available, do nothing.
-  masm.bind(&noCompiledCode);
-  EmitReturnFromIC(masm);
-  return true;
-}
-
 void ICFallbackStub::unlinkStub(Zone* zone, ICStub* prev, ICStub* stub) {
   MOZ_ASSERT(stub->next());
 
@@ -1118,7 +893,7 @@ static void TypeMonitorMagicValue(JSContext* cx, ICTypeMonitor_Fallback* stub,
   // In derived class constructors (including nested arrows/eval), the
   // |this| argument or GETALIASEDVAR can return the magic TDZ value.
   MOZ_ASSERT(value.whyMagic() == JS_UNINITIALIZED_LEXICAL);
-  MOZ_ASSERT(script->functionNonDelazifying() || script->isForEval());
+  MOZ_ASSERT(script->function() || script->isForEval());
   MOZ_ASSERT(stub->monitorsThis() || *GetNextPc(pc) == JSOP_CHECKTHIS ||
              *GetNextPc(pc) == JSOP_CHECKTHISREINIT ||
              *GetNextPc(pc) == JSOP_CHECKRETURN);
@@ -2475,74 +2250,6 @@ bool FallbackICCodeCompiler::emit_SetElem() {
                       HandleValue, HandleValue, HandleValue);
   return tailCallVM<Fn, DoSetElemFallback>(masm);
 }
-
-template <typename T>
-void StoreToTypedArray(JSContext* cx, MacroAssembler& masm, Scalar::Type type,
-                       const ValueOperand& value, const T& dest,
-                       Register scratch, Label* failure) {
-  Label done;
-
-  if (type == Scalar::Float32 || type == Scalar::Float64) {
-    masm.ensureDouble(value, FloatReg0, failure);
-    if (type == Scalar::Float32) {
-      ScratchFloat32Scope fpscratch(masm);
-      masm.convertDoubleToFloat32(FloatReg0, fpscratch);
-      masm.storeToTypedFloatArray(type, fpscratch, dest);
-    } else {
-      masm.storeToTypedFloatArray(type, FloatReg0, dest);
-    }
-  } else if (type == Scalar::Uint8Clamped) {
-    Label notInt32;
-    masm.branchTestInt32(Assembler::NotEqual, value, &notInt32);
-    masm.unboxInt32(value, scratch);
-    masm.clampIntToUint8(scratch);
-
-    Label clamped;
-    masm.bind(&clamped);
-    masm.storeToTypedIntArray(type, scratch, dest);
-    masm.jump(&done);
-
-    // If the value is a double, clamp to uint8 and jump back.
-    // Else, jump to failure.
-    masm.bind(&notInt32);
-    masm.branchTestDouble(Assembler::NotEqual, value, failure);
-    masm.unboxDouble(value, FloatReg0);
-    masm.clampDoubleToUint8(FloatReg0, scratch);
-    masm.jump(&clamped);
-  } else if (type == Scalar::BigInt64 || type == Scalar::BigUint64) {
-    // FIXME: https://bugzil.la/1536703
-    masm.jump(failure);
-  } else {
-    Label notInt32;
-    masm.branchTestInt32(Assembler::NotEqual, value, &notInt32);
-    masm.unboxInt32(value, scratch);
-
-    Label isInt32;
-    masm.bind(&isInt32);
-    masm.storeToTypedIntArray(type, scratch, dest);
-    masm.jump(&done);
-
-    // If the value is a double, truncate and jump back.
-    // Else, jump to failure.
-    masm.bind(&notInt32);
-    masm.branchTestDouble(Assembler::NotEqual, value, failure);
-    masm.unboxDouble(value, FloatReg0);
-    masm.branchTruncateDoubleMaybeModUint32(FloatReg0, scratch, failure);
-    masm.jump(&isInt32);
-  }
-
-  masm.bind(&done);
-}
-
-template void StoreToTypedArray(JSContext* cx, MacroAssembler& masm,
-                                Scalar::Type type, const ValueOperand& value,
-                                const Address& dest, Register scratch,
-                                Label* failure);
-
-template void StoreToTypedArray(JSContext* cx, MacroAssembler& masm,
-                                Scalar::Type type, const ValueOperand& value,
-                                const BaseIndex& dest, Register scratch,
-                                Label* failure);
 
 //
 // In_Fallback

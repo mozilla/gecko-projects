@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 /*
- * Test: zerolen.c 
+ * Test: zerolen.c
  *
  * Description: a test for Bugzilla bug #17699.  We perform
  * the same test for PR_Writev, PR_Write, and PR_Send.  In
@@ -72,7 +72,7 @@ static void ClientThread(void *arg)
     /*
      * Then start reading.
      */
-    while ((nbytes = PR_Read(sock, buf, sizeof(buf))) > 0) {
+    while (nbytes = PR_Read(sock, buf, sizeof(buf)) > 0) {
         /* empty loop body */
     }
     if (-1 == nbytes) {
@@ -124,8 +124,8 @@ int main()
      * First test PR_Writev.
      */
     clientThread = PR_CreateThread(PR_USER_THREAD,
-            ClientThread, (void *) PR_ntohs(PR_NetAddrInetPort(&addr)),
-            PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
+                                   ClientThread, (void *) PR_ntohs(PR_NetAddrInetPort(&addr)),
+                                   PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
     if (NULL == clientThread) {
         fprintf(stderr, "PR_CreateThread failed\n");
         exit(1);
@@ -136,7 +136,7 @@ int main()
         exit(1);
     }
     osfd = PR_FileDesc2NativeHandle(acceptSock);
-    while ((nbytes = write(osfd, buf, sizeof(buf))) != -1) {
+    while (write(osfd, buf, sizeof(buf)) != -1) {
         /* empty loop body */
     }
     if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
@@ -165,8 +165,8 @@ int main()
      * Then test PR_Write.
      */
     clientThread = PR_CreateThread(PR_USER_THREAD,
-            ClientThread, (void *) PR_ntohs(PR_NetAddrInetPort(&addr)),
-            PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
+                                   ClientThread, (void *) PR_ntohs(PR_NetAddrInetPort(&addr)),
+                                   PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
     if (NULL == clientThread) {
         fprintf(stderr, "PR_CreateThread failed\n");
         exit(1);
@@ -177,7 +177,7 @@ int main()
         exit(1);
     }
     osfd = PR_FileDesc2NativeHandle(acceptSock);
-    while ((nbytes = write(osfd, buf, sizeof(buf))) != -1) {
+    while (write(osfd, buf, sizeof(buf)) != -1) {
         /* empty loop body */
     }
     if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {
@@ -204,8 +204,8 @@ int main()
      * Finally test PR_Send.
      */
     clientThread = PR_CreateThread(PR_USER_THREAD,
-            ClientThread, (void *) PR_ntohs(PR_NetAddrInetPort(&addr)),
-            PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
+                                   ClientThread, (void *) PR_ntohs(PR_NetAddrInetPort(&addr)),
+                                   PR_PRIORITY_NORMAL, PR_GLOBAL_THREAD, PR_JOINABLE_THREAD, 0);
     if (NULL == clientThread) {
         fprintf(stderr, "PR_CreateThread failed\n");
         exit(1);
@@ -216,7 +216,7 @@ int main()
         exit(1);
     }
     osfd = PR_FileDesc2NativeHandle(acceptSock);
-    while ((nbytes = write(osfd, buf, sizeof(buf))) != -1) {
+    while (write(osfd, buf, sizeof(buf)) != -1) {
         /* empty loop body */
     }
     if ((errno != EAGAIN) && (errno != EWOULDBLOCK)) {

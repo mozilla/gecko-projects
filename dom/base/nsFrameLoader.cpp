@@ -39,7 +39,7 @@
 #include "nsSubDocumentFrame.h"
 #include "nsError.h"
 #include "nsISHistory.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsISHistory.h"
 #include "nsIScriptError.h"
@@ -667,7 +667,7 @@ nsresult nsFrameLoader::ReallyStartLoadingInternal() {
   mNeedsAsyncDestroy = true;
   loadState->SetLoadFlags(flags);
   loadState->SetFirstParty(false);
-  rv = GetDocShell()->LoadURI(loadState);
+  rv = GetDocShell()->LoadURI(loadState, false);
   mNeedsAsyncDestroy = tmpState;
   mURIToLoad = nullptr;
   NS_ENSURE_SUCCESS(rv, rv);
@@ -869,6 +869,8 @@ bool nsFrameLoader::Show(int32_t marginWidth, int32_t marginHeight,
 
   ScreenIntSize size = frame->GetSubdocumentSize();
   if (IsRemoteFrame()) {
+    // FIXME(bug 1588791): For fission iframes we need to pass down the
+    // scrollbar preferences.
     return ShowRemoteFrame(size, frame);
   }
 
@@ -1903,6 +1905,7 @@ void nsFrameLoader::DestroyDocShell() {
   }
 
   mBrowsingContext = nullptr;
+  mDocShell = nullptr;
 
   if (mChildMessageManager) {
     // Stop handling events in the in-process frame script.
@@ -2012,6 +2015,7 @@ nsresult nsFrameLoader::MaybeCreateDocShell() {
   // context inside of nsDocShell::Create
   RefPtr<nsDocShell> docShell = nsDocShell::Create(mBrowsingContext);
   NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
+  mDocShell = docShell;
 
   mBrowsingContext->SetEmbedderElement(mOwnerContent);
 
@@ -2129,12 +2133,8 @@ nsresult nsFrameLoader::MaybeCreateDocShell() {
 
   if (OwnerIsMozBrowserFrame()) {
     docShell->SetFrameType(nsIDocShell::FRAME_TYPE_BROWSER);
-  } else {
-    nsCOMPtr<nsIDocShellTreeItem> parentCheck;
-    docShell->GetInProcessSameTypeParent(getter_AddRefs(parentCheck));
-    if (!!parentCheck) {
-      docShell->SetIsFrame();
-    }
+  } else if (mBrowsingContext->GetParent()) {
+    docShell->SetIsFrame();
   }
 
   // Apply sandbox flags even if our owner is not an iframe, as this copies
@@ -2524,9 +2524,14 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
   }
 
   RefPtr<ContentParent> openerContentParent;
+  RefPtr<nsIPrincipal> openerContentPrincipal;
   RefPtr<BrowserParent> sameTabGroupAs;
   if (auto* host = BrowserHost::GetFrom(parentDocShell->GetOpener())) {
     openerContentParent = host->GetContentParent();
+    BrowserParent* openerBrowserParent = host->GetActor();
+    if (openerBrowserParent) {
+      openerContentPrincipal = openerBrowserParent->GetContentPrincipal();
+    }
   }
 
   // <iframe mozbrowser> gets to skip these checks.
@@ -2593,7 +2598,7 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
       !parentOwner) {
     return false;
   }
-  nsCOMPtr<nsIXULWindow> window(do_GetInterface(parentOwner));
+  nsCOMPtr<nsIAppWindow> window(do_GetInterface(parentOwner));
   if (window && NS_FAILED(window->GetChromeFlags(&chromeFlags))) {
     return false;
   }
@@ -2603,6 +2608,12 @@ bool nsFrameLoader::TryRemoteBrowserInternal() {
   MutableTabContext context;
   nsresult rv = GetNewTabContext(&context);
   NS_ENSURE_SUCCESS(rv, false);
+
+  // We need to propagate the first party domain if the opener is presented.
+  if (openerContentPrincipal) {
+    context.SetFirstPartyDomainAttributes(
+        openerContentPrincipal->OriginAttributesRef().mFirstPartyDomain);
+  }
 
   uint64_t nextRemoteTabId = 0;
   if (mOwnerContent) {
@@ -3033,12 +3044,13 @@ nsIFrame* nsFrameLoader::GetDetachedSubdocFrame(
 }
 
 void nsFrameLoader::ApplySandboxFlags(uint32_t sandboxFlags) {
+  uint32_t parentSandboxFlags = mOwnerContent->OwnerDoc()->GetSandboxFlags();
+
+  // The child can only add restrictions, never remove them.
+  sandboxFlags |= parentSandboxFlags;
+
+  // XXX this probably isn't fission compatible.
   if (GetDocShell()) {
-    uint32_t parentSandboxFlags = mOwnerContent->OwnerDoc()->GetSandboxFlags();
-
-    // The child can only add restrictions, never remove them.
-    sandboxFlags |= parentSandboxFlags;
-
     // If this frame is a receiving browsing context, we should add
     // sandboxed auxiliary navigation flag to sandboxFlags. See
     // https://w3c.github.io/presentation-api/#creating-a-receiving-browsing-context
@@ -3047,8 +3059,8 @@ void nsFrameLoader::ApplySandboxFlags(uint32_t sandboxFlags) {
     if (!presentationURL.IsEmpty()) {
       sandboxFlags |= SANDBOXED_AUXILIARY_NAVIGATION;
     }
-    GetDocShell()->SetSandboxFlags(sandboxFlags);
   }
+  mBrowsingContext->SetSandboxFlags(sandboxFlags);
 }
 
 /* virtual */

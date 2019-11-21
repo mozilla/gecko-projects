@@ -270,7 +270,8 @@ class BuildOptionParser(object):
         'asan-tc': 'builds/releng_sub_%s_configs/%s_asan_tc.py',
         'asan-reporter-tc': 'builds/releng_sub_%s_configs/%s_asan_reporter_tc.py',
         'fuzzing-asan-tc': 'builds/releng_sub_%s_configs/%s_fuzzing_asan_tc.py',
-        'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
+        'tsan-tc': 'builds/releng_sub_%s_configs/%s_tsan_tc.py',
+        'fuzzing-tsan-tc': 'builds/releng_sub_%s_configs/%s_fuzzing_tsan_tc.py',
         'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
         'cross-debug-searchfox': 'builds/releng_sub_%s_configs/%s_cross_debug_searchfox.py',
         'cross-noopt-debug': 'builds/releng_sub_%s_configs/%s_cross_noopt_debug.py',
@@ -296,8 +297,6 @@ class BuildOptionParser(object):
         'api-16-gradle': 'builds/releng_sub_%s_configs/%s_api_16_gradle.py',
         'api-16-profile-generate': 'builds/releng_sub_%s_configs/%s_api_16_profile_generate.py',
         'api-16-profile-use': 'builds/releng_sub_%s_configs/%s_api_16_profile_use.py',
-        'api-16-without-google-play-services':
-            'builds/releng_sub_%s_configs/%s_api_16_without_google_play_services.py',
         'rusttests': 'builds/releng_sub_%s_configs/%s_rusttests.py',
         'rusttests-debug': 'builds/releng_sub_%s_configs/%s_rusttests_debug.py',
         'x86': 'builds/releng_sub_%s_configs/%s_x86.py',
@@ -598,33 +597,6 @@ items from that key's value."
         self.info("Both --dump-config and --dump-config-hierarchy don't "
                   "actually run any actions.")
 
-    def _assert_cfg_valid_for_action(self, dependencies, action):
-        """ assert dependency keys are in config for given action.
-
-        Takes a list of dependencies and ensures that each have an
-        assoctiated key in the config. Displays error messages as
-        appropriate.
-
-        """
-        # TODO add type and value checking, not just keys
-        # TODO solution should adhere to: bug 699343
-        # TODO add this to BaseScript when the above is done
-        # for now, let's just use this as a way to save typing...
-        c = self.config
-        undetermined_keys = []
-        err_template = "The key '%s' could not be determined \
-and is needed for the action '%s'. Please add this to your config \
-or run without that action (ie: --no-{action})"
-        for dep in dependencies:
-            if dep not in c:
-                undetermined_keys.append(dep)
-        if undetermined_keys:
-            fatal_msgs = [err_template % (key, action)
-                          for key in undetermined_keys]
-            self.fatal("".join(fatal_msgs))
-        # otherwise:
-        return  # all good
-
     def _query_build_prop_from_app_ini(self, prop, app_ini_path=None):
         dirs = self.query_abs_dirs()
         print_conf_setting_path = os.path.join(dirs['abs_src_dir'],
@@ -783,10 +755,6 @@ or run without that action (ie: --no-{action})"
         env = self.query_build_env()
         env.update(self.query_mach_build_env())
 
-        self._assert_cfg_valid_for_action(
-            ['tooltool_url'],
-            'build'
-        )
         c = self.config
         dirs = self.query_abs_dirs()
         toolchains = os.environ.get('MOZ_TOOLCHAINS')
@@ -809,8 +777,6 @@ or run without that action (ie: --no-{action})"
             cmd.extend([
                 '--tooltool-manifest',
                 os.path.join(dirs['abs_src_dir'], manifest_src),
-                '--tooltool-url',
-                c['tooltool_url'],
             ])
             auth_file = self._get_tooltool_auth_file()
             if auth_file:

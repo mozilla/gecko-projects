@@ -30,6 +30,7 @@
 #include "gc/Zone.h"
 #include "jit/JitRealm.h"
 #include "js/MemoryMetrics.h"
+#include "util/Poison.h"
 
 using namespace js::jit;
 
@@ -261,9 +262,10 @@ void ExecutableAllocator::reprotectPool(JSRuntime* rt, ExecutablePool* pool,
                                         ProtectionSetting protection,
                                         MustFlushICache flushICache) {
   char* start = pool->m_allocation.pages;
+  AutoEnterOOMUnsafeRegion oomUnsafe;
   if (!ReprotectRegion(start, pool->m_freePtr - start, protection,
                        flushICache)) {
-    MOZ_CRASH();
+    oomUnsafe.crash("ExecutableAllocator::reprotectPool");
   }
 }
 

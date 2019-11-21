@@ -9,6 +9,8 @@
 
 #include "DisplayListChecker.h"
 #include "mozilla/StaticPrefs_layout.h"
+#include "nsIFrame.h"
+#include "nsIFrameInlines.h"
 #include "nsPlaceholderFrame.h"
 #include "nsSubDocumentFrame.h"
 #include "nsViewManager.h"
@@ -866,7 +868,7 @@ static void TakeAndAddModifiedAndFramesWithPropsFromRootFrame(
     }
 
     if (flags & RetainedDisplayListData::FrameFlags::HadWillChange) {
-      aBuilder->RemoveFromWillChangeBudget(frame);
+      aBuilder->RemoveFromWillChangeBudgets(frame);
     }
   }
 

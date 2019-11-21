@@ -24,14 +24,13 @@
 #include "nsISecureBrowserUI.h"
 #include "nsIWebProgressListener.h"
 #include "mozilla/AntiTrackingCommon.h"
+#include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/LSObject.h"
 #include "mozilla/dom/Storage.h"
 #include "mozilla/dom/MaybeCrossOriginObject.h"
-#include "mozilla/dom/MediaController.h"
-#include "mozilla/dom/MediaControlUtils.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
@@ -154,7 +153,7 @@
 #include "mozilla/EventStateManager.h"
 #include "nsIObserverService.h"
 #include "nsFocusManager.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 #include "nsITimedChannel.h"
 #include "nsServiceManagerUtils.h"
 #include "mozilla/dom/CustomEvent.h"
@@ -177,8 +176,6 @@
 
 #include "nsIDOMXULCommandDispatcher.h"
 
-#include "nsBindingManager.h"
-#include "nsXBLService.h"
 #include "mozilla/GlobalKeyListener.h"
 
 #include "nsIDragService.h"
@@ -198,6 +195,8 @@
 #include "mozilla/dom/GamepadManager.h"
 
 #include "gfxVR.h"
+#include "VRShMem.h"
+#include "FxRWindowManager.h"
 #include "mozilla/dom/VRDisplay.h"
 #include "mozilla/dom/VRDisplayEvent.h"
 #include "mozilla/dom/VRDisplayEventBinding.h"
@@ -272,12 +271,6 @@ using mozilla::BasePrincipal;
 using mozilla::OriginAttributes;
 using mozilla::TimeStamp;
 
-extern mozilla::LazyLogModule gMediaControlLog;
-
-#define MC_LOG(msg, ...)                     \
-  MOZ_LOG(gMediaControlLog, LogLevel::Debug, \
-          ("WindowOuter=%p, " msg, this, ##__VA_ARGS__))
-
 #define FORWARD_TO_INNER(method, args, err_rval)       \
   PR_BEGIN_MACRO                                       \
   if (!mInnerWindow) {                                 \
@@ -316,8 +309,6 @@ extern mozilla::LazyLogModule gMediaControlLog;
 
 static LazyLogModule gDOMLeakPRLogOuter("DOMLeakOuter");
 extern LazyLogModule gPageCacheLog;
-
-static int32_t gOpenPopupSpamCount = 0;
 
 nsGlobalWindowOuter::OuterWindowByIdTable*
     nsGlobalWindowOuter::sOuterWindowsById = nullptr;
@@ -610,6 +601,10 @@ bool nsOuterWindowProxy::getOwnPropertyDescriptor(
 
   // Step 3.
   if (isSameOrigin) {
+    if (StaticPrefs::dom_missing_prop_counters_enabled() && JSID_IS_ATOM(id)) {
+      Window_Binding::CountMaybeMissingProperty(proxy, id);
+    }
+
     // Fall through to js::Wrapper.
     {  // Scope for JSAutoRealm while we are dealing with js::Wrapper.
       // When forwarding to js::Wrapper, we should just enter the Realm of proxy
@@ -892,6 +887,10 @@ bool nsOuterWindowProxy::get(JSContext* cx, JS::Handle<JSObject*> proxy,
     return true;
   }
 
+  if (StaticPrefs::dom_missing_prop_counters_enabled() && JSID_IS_ATOM(id)) {
+    Window_Binding::CountMaybeMissingProperty(proxy, id);
+  }
+
   {  // Scope for JSAutoRealm
     // Enter "proxy"'s Realm.  We're in the same-origin case, so this should be
     // safe.
@@ -1093,6 +1092,7 @@ nsGlobalWindowOuter::nsGlobalWindowOuter(uint64_t aWindowID)
     : nsPIDOMWindowOuter(aWindowID),
       mFullscreen(false),
       mFullscreenMode(false),
+      mForceFullScreenInWidget(false),
       mIsClosed(false),
       mInClose(false),
       mHavePendingClose(false),
@@ -1214,8 +1214,15 @@ nsGlobalWindowOuter::~nsGlobalWindowOuter() {
 
   JSObject* proxy = GetWrapperMaybeDead();
   if (proxy) {
-    if (mBrowsingContext) {
-      mBrowsingContext->ClearWindowProxy();
+    if (mBrowsingContext && mBrowsingContext->GetUnbarrieredWindowProxy()) {
+      nsGlobalWindowOuter* outer = nsOuterWindowProxy::GetOuterWindow(
+          mBrowsingContext->GetUnbarrieredWindowProxy());
+      // Check that the current WindowProxy object corresponds to this
+      // nsGlobalWindowOuter, because we don't want to clear the WindowProxy if
+      // we've replaced it with a cross-process WindowProxy.
+      if (outer == this) {
+        mBrowsingContext->ClearWindowProxy();
+      }
     }
     js::SetProxyReservedSlot(proxy, OUTER_WINDOW_SLOT,
                              js::PrivateValue(nullptr));
@@ -1262,23 +1269,6 @@ void nsGlobalWindowOuter::ShutDown() {
 
   delete sOuterWindowsById;
   sOuterWindowsById = nullptr;
-}
-
-void nsGlobalWindowOuter::MaybeForgiveSpamCount() {
-  if (IsPopupSpamWindow()) {
-    SetIsPopupSpamWindow(false);
-  }
-}
-
-void nsGlobalWindowOuter::SetIsPopupSpamWindow(bool aIsPopupSpam) {
-  mIsPopupSpam = aIsPopupSpam;
-  if (aIsPopupSpam) {
-    ++gOpenPopupSpamCount;
-  } else {
-    --gOpenPopupSpamCount;
-    NS_ASSERTION(gOpenPopupSpamCount >= 0,
-                 "Unbalanced decrement of gOpenPopupSpamCount");
-  }
 }
 
 void nsGlobalWindowOuter::DropOuterWindowDocs() {
@@ -1431,7 +1421,16 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowOuter)
 
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocShell)
   if (tmp->mBrowsingContext) {
-    tmp->mBrowsingContext->ClearWindowProxy();
+    if (tmp->mBrowsingContext->GetUnbarrieredWindowProxy()) {
+      nsGlobalWindowOuter* outer = nsOuterWindowProxy::GetOuterWindow(
+          tmp->mBrowsingContext->GetUnbarrieredWindowProxy());
+      // Check that the current WindowProxy object corresponds to this
+      // nsGlobalWindowOuter, because we don't want to clear the WindowProxy if
+      // we've replaced it with a cross-process WindowProxy.
+      if (outer == tmp) {
+        tmp->mBrowsingContext->ClearWindowProxy();
+      }
+    }
     tmp->mBrowsingContext = nullptr;
   }
 
@@ -1471,6 +1470,8 @@ nsresult nsGlobalWindowOuter::EnsureScriptEnvironment() {
   if (GetWrapperPreserveColor()) {
     return NS_OK;
   }
+
+  NS_ENSURE_STATE(!mCleanedUp);
 
   NS_ASSERTION(!GetCurrentInnerWindowInternal(),
                "No cached wrapper, but we have an inner window?");
@@ -1534,7 +1535,7 @@ void nsGlobalWindowOuter::SetInitialPrincipalToSubject(
   // We should never create windows with an expanded principal.
   // If we have a system principal, make sure we're not using it for a content
   // docshell.
-  // NOTE: Please keep this logic in sync with nsWebShellWindow::Initialize().
+  // NOTE: Please keep this logic in sync with AppWindow::Initialize().
   if (nsContentUtils::IsExpandedPrincipal(newWindowPrincipal) ||
       (nsContentUtils::IsSystemPrincipal(newWindowPrincipal) &&
        GetDocShell()->ItemType() != nsIDocShellTreeItem::typeChrome)) {
@@ -2511,7 +2512,6 @@ void nsGlobalWindowOuter::DetachFromDocShell() {
   mDocShell = nullptr;
   mBrowsingContext->ClearDocShell();
 
-  MaybeForgiveSpamCount();
   CleanUp();
 }
 
@@ -2685,13 +2685,6 @@ void nsGlobalWindowOuter::PoisonOuterWindowProxy(JSObject* aObject) {
 nsresult nsGlobalWindowOuter::SetArguments(nsIArray* aArguments) {
   nsresult rv;
 
-  // Historically, we've used the same machinery to handle openDialog arguments
-  // (exposed via window.arguments) and showModalDialog arguments (exposed via
-  // window.dialogArguments), even though the former is XUL-only and uses an
-  // XPCOM array while the latter is web-exposed and uses an arbitrary JS value.
-  // Moreover, per-spec |dialogArguments| is a property of the browsing context
-  // (outer), whereas |arguments| lives on the inner.
-  //
   // We've now mostly separated them, but the difference is still opaque to
   // nsWindowWatcher (the caller of SetArguments in this little back-and-forth
   // embedding waltz we do here).
@@ -2818,26 +2811,6 @@ void nsPIDOMWindowOuter::MaybeActiveMediaComponents() {
 
 SuspendTypes nsPIDOMWindowOuter::GetMediaSuspend() const {
   return mMediaSuspend;
-}
-
-void nsPIDOMWindowOuter::UpdateMediaAction(const MediaControlActions aAction) {
-  // TODO : we now temporarily map MediaControlActions to nsISuspendedTypes in
-  // order to control media, but for long term goal in which we should not rely
-  // on nsISuspendedTypes and completely decouple them. See bug1571493.
-  MC_LOG("UpdateMediaAction %s", ToMediaControlActionsStr(aAction));
-  switch (aAction) {
-    case MediaControlActions::ePlay:
-      SetMediaSuspend(nsISuspendedTypes::NONE_SUSPENDED);
-      break;
-    case MediaControlActions::ePause:
-      SetMediaSuspend(nsISuspendedTypes::SUSPENDED_PAUSE_DISPOSABLE);
-      break;
-    case MediaControlActions::eStop:
-      SetMediaSuspend(nsISuspendedTypes::SUSPENDED_STOP_DISPOSABLE);
-      break;
-    default:
-      MOZ_ASSERT_UNREACHABLE("Invalid action.");
-  };
 }
 
 void nsPIDOMWindowOuter::SetMediaSuspend(SuspendTypes aSuspend) {
@@ -3649,7 +3622,8 @@ Maybe<CSSIntSize> nsGlobalWindowOuter::GetRDMDeviceSize(
   // Bug 1576256: This does not work for cross-process subframes.
   const Document* topInProcessContentDoc =
       aDocument.GetTopLevelContentDocument();
-  if (topInProcessContentDoc && topInProcessContentDoc->InRDMPane()) {
+  BrowsingContext* bc = topInProcessContentDoc ? topInProcessContentDoc->GetBrowsingContext() : nullptr;
+  if (bc && bc->InRDMPane()) {
     nsIDocShell* docShell = topInProcessContentDoc->GetDocShell();
     if (docShell) {
       nsPresContext* presContext = docShell->GetPresContext();
@@ -4031,13 +4005,6 @@ bool nsGlobalWindowOuter::DispatchResizeEvent(const CSSIntSize& aSize) {
   return target->DispatchEvent(*domEvent, CallerType::System, IgnoreErrors());
 }
 
-static already_AddRefed<nsIDocShellTreeItem> GetCallerDocShellTreeItem() {
-  nsCOMPtr<nsIWebNavigation> callerWebNav = do_GetInterface(GetEntryGlobal());
-  nsCOMPtr<nsIDocShellTreeItem> callerItem = do_QueryInterface(callerWebNav);
-
-  return callerItem.forget();
-}
-
 bool nsGlobalWindowOuter::WindowExists(const nsAString& aName,
                                        bool aForceNoOpener,
                                        bool aLookForCallerOnJSStack) {
@@ -4049,20 +4016,7 @@ bool nsGlobalWindowOuter::WindowExists(const nsAString& aName,
            aName.LowerCaseEqualsLiteral("_parent");
   }
 
-  nsCOMPtr<nsIDocShellTreeItem> caller;
-  if (aLookForCallerOnJSStack) {
-    caller = GetCallerDocShellTreeItem();
-  }
-
-  if (!caller) {
-    caller = mDocShell;
-  }
-
-  nsCOMPtr<nsIDocShellTreeItem> namedItem;
-  mDocShell->FindItemWithName(aName, nullptr, caller,
-                              /* aSkipTabGroup = */ false,
-                              getter_AddRefs(namedItem));
-  return namedItem != nullptr;
+  return !!mBrowsingContext->FindWithName(aName, aLookForCallerOnJSStack);
 }
 
 already_AddRefed<nsIWidget> nsGlobalWindowOuter::GetMainWidget() {
@@ -4420,20 +4374,23 @@ nsresult nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
   // Prevent chrome documents which are still loading from resizing
   // the window after we set fullscreen mode.
   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin = GetTreeOwnerWindow();
-  nsCOMPtr<nsIXULWindow> xulWin(do_GetInterface(treeOwnerAsWin));
-  if (aFullscreen && xulWin) {
-    xulWin->SetIntrinsicallySized(false);
+  nsCOMPtr<nsIAppWindow> appWin(do_GetInterface(treeOwnerAsWin));
+  if (aFullscreen && appWin) {
+    appWin->SetIntrinsicallySized(false);
   }
 
   // Set this before so if widget sends an event indicating its
   // gone full screen, the state trap above works.
   mFullscreen = aFullscreen;
 
-  // Sometimes we don't want the top-level widget to actually go fullscreen,
-  // for example in the B2G desktop client, we don't want the emulated screen
-  // dimensions to appear to increase when entering fullscreen mode; we just
-  // want the content to fill the entire client area of the emulator window.
-  if (!Preferences::GetBool("full-screen-api.ignore-widgets", false)) {
+  // Sometimes we don't want the top-level widget to actually go fullscreen:
+  // - in the B2G desktop client, we don't want the emulated screen dimensions
+  //   to appear to increase when entering fullscreen mode; we just want the
+  //   content to fill the entire client area of the emulator window.
+  // - in FxR Desktop, we don't want fullscreen to take over the monitor, but
+  //   instead we want fullscreen to fill the FxR window in the the headset.
+  if (!Preferences::GetBool("full-screen-api.ignore-widgets", false) &&
+      !mForceFullScreenInWidget) {
     if (MakeWidgetFullscreen(this, aReason, aFullscreen)) {
       // The rest of code for switching fullscreen is in nsGlobalWindowOuter::
       // FinishFullscreenChange() which will be called after sizemodechange
@@ -4442,8 +4399,22 @@ nsresult nsGlobalWindowOuter::SetFullscreenInternal(FullscreenReason aReason,
     }
   }
 
+#if defined(NIGHTLY_BUILD) && defined(XP_WIN)
+  if (FxRWindowManager::GetInstance()->IsFxRWindow(mWindowID)) {
+    mozilla::gfx::VRShMem shmem(nullptr, true /*aRequiresMutex*/);
+    shmem.SendFullscreenState(mWindowID, aFullscreen);
+  }
+#endif  // NIGHTLY_BUILD && XP_WIN
   FinishFullscreenChange(aFullscreen);
   return NS_OK;
+}
+
+// Support a per-window, dynamic equivalent of enabling
+// full-screen-api.ignore-widgets
+void nsGlobalWindowOuter::ForceFullScreenInWidget() {
+  MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess());
+
+  mForceFullScreenInWidget = true;
 }
 
 bool nsGlobalWindowOuter::SetWidgetFullscreen(FullscreenReason aReason,
@@ -5389,7 +5360,8 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
         aReason) {
   MOZ_ASSERT(aURIHint);
   DebugOnly<bool> isCookiesBlockedTracker =
-      aEvent == nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER;
+      aEvent == nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER ||
+      aEvent == nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER;
   MOZ_ASSERT_IF(aBlocked, aReason.isNothing());
   MOZ_ASSERT_IF(!isCookiesBlockedTracker, aReason.isNothing());
   MOZ_ASSERT_IF(isCookiesBlockedTracker && !aBlocked, aReason.isSome());
@@ -5398,7 +5370,7 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
   if (!docShell) {
     return;
   }
-  nsCOMPtr<Document> doc = docShell->GetDocument();
+  nsCOMPtr<Document> doc = GetExtantDoc();
   NS_ENSURE_TRUE_VOID(doc);
 
   nsCOMPtr<nsIURI> uri(aURIHint);
@@ -5438,11 +5410,17 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
           if (!aBlocked) {
             unblocked = !doc->GetHasTrackingContentBlocked();
           }
-        } else if (aEvent ==
-                   nsIWebProgressListener::STATE_LOADED_TRACKING_CONTENT) {
-          doc->SetHasTrackingContentLoaded(aBlocked, origin);
+        } else if (aEvent == nsIWebProgressListener::
+                                 STATE_LOADED_LEVEL_1_TRACKING_CONTENT) {
+          doc->SetHasLevel1TrackingContentLoaded(aBlocked, origin);
           if (!aBlocked) {
-            unblocked = !doc->GetHasTrackingContentLoaded();
+            unblocked = !doc->GetHasLevel1TrackingContentLoaded();
+          }
+        } else if (aEvent == nsIWebProgressListener::
+                                 STATE_LOADED_LEVEL_2_TRACKING_CONTENT) {
+          doc->SetHasLevel2TrackingContentLoaded(aBlocked, origin);
+          if (!aBlocked) {
+            unblocked = !doc->GetHasLevel2TrackingContentLoaded();
           }
         } else if (aEvent == nsIWebProgressListener::
                                  STATE_BLOCKED_FINGERPRINTING_CONTENT) {
@@ -5498,6 +5476,19 @@ void nsGlobalWindowOuter::NotifyContentBlockingEvent(
 
           if (!aBlocked) {
             unblocked = !doc->GetHasTrackingCookiesBlocked();
+          }
+        } else if (aEvent == nsIWebProgressListener::
+                                 STATE_COOKIES_BLOCKED_SOCIALTRACKER) {
+          nsTArray<nsCString> trackingFullHashes;
+          if (trackingChannel) {
+            Unused << trackingChannel->GetMatchedTrackingFullHashes(
+                trackingFullHashes);
+          }
+          doc->SetHasSocialTrackingCookiesBlocked(aBlocked, origin, aReason,
+                                                  trackingFullHashes);
+
+          if (!aBlocked) {
+            unblocked = !doc->GetHasSocialTrackingCookiesBlocked();
           }
         } else if (aEvent ==
                    nsIWebProgressListener::STATE_COOKIES_BLOCKED_ALL) {
@@ -5675,9 +5666,11 @@ PopupBlocker::PopupControlState nsGlobalWindowOuter::RevisePopupAbuseLevel(
   // limit the number of simultaneously open popups
   if (abuse == PopupBlocker::openAbused || abuse == PopupBlocker::openBlocked ||
       abuse == PopupBlocker::openControlled) {
-    int32_t popupMax = Preferences::GetInt("dom.popup_maximum", -1);
-    if (popupMax >= 0 && gOpenPopupSpamCount >= popupMax)
+    int32_t popupMax = StaticPrefs::dom_popup_maximum();
+    if (popupMax >= 0 &&
+        PopupBlocker::GetOpenPopupSpamCount() >= (uint32_t)popupMax) {
       abuse = PopupBlocker::openOverridden;
+    }
   }
 
   // If this popup is allowed, let's block any other for this event, forcing
@@ -5836,10 +5829,10 @@ Nullable<WindowProxyHolder> nsGlobalWindowOuter::OpenDialogOuter(
   return WindowProxyHolder(dialog.forget());
 }
 
-BrowsingContext* nsGlobalWindowOuter::GetFramesOuter() {
+WindowProxyHolder nsGlobalWindowOuter::GetFramesOuter() {
   RefPtr<nsPIDOMWindowOuter> frames(this);
   FlushPendingNotifications(FlushType::ContentAndNotify);
-  return mBrowsingContext;
+  return WindowProxyHolder(mBrowsingContext);
 }
 
 /* static */
@@ -5847,7 +5840,8 @@ bool nsGlobalWindowOuter::GatherPostMessageData(
     JSContext* aCx, const nsAString& aTargetOrigin, BrowsingContext** aSource,
     nsAString& aOrigin, nsIURI** aTargetOriginURI,
     nsIPrincipal** aCallerPrincipal, nsGlobalWindowInner** aCallerInnerWindow,
-    nsIURI** aCallerDocumentURI, ErrorResult& aError) {
+    nsIURI** aCallerDocumentURI, Maybe<nsID>* aCallerAgentClusterId,
+    ErrorResult& aError) {
   //
   // Window.postMessage is an intentional subversion of the same-origin policy.
   // As such, this code must be particularly careful in the information it
@@ -5858,7 +5852,7 @@ bool nsGlobalWindowOuter::GatherPostMessageData(
 
   // First, get the caller's window
   RefPtr<nsGlobalWindowInner> callerInnerWin =
-      nsContentUtils::CallerInnerWindow(aCx);
+      nsContentUtils::CallerInnerWindow();
   nsIPrincipal* callerPrin;
   if (callerInnerWin) {
     RefPtr<Document> doc = callerInnerWin->GetExtantDoc();
@@ -5931,6 +5925,12 @@ bool nsGlobalWindowOuter::GatherPostMessageData(
                              ->GetBrowsingContext());
   } else {
     *aSource = nullptr;
+  }
+
+  if (aCallerAgentClusterId && callerInnerWin &&
+      callerInnerWin->GetDocGroup()) {
+    *aCallerAgentClusterId =
+        Some(callerInnerWin->GetDocGroup()->AgentClusterId());
   }
 
   callerInnerWin.forget(aCallerInnerWindow);
@@ -6040,11 +6040,12 @@ void nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx,
   nsCOMPtr<nsIPrincipal> callerPrincipal;
   RefPtr<nsGlobalWindowInner> callerInnerWindow;
   nsCOMPtr<nsIURI> callerDocumentURI;
-  if (!GatherPostMessageData(aCx, aTargetOrigin, getter_AddRefs(sourceBc),
-                             origin, getter_AddRefs(targetOriginURI),
-                             getter_AddRefs(callerPrincipal),
-                             getter_AddRefs(callerInnerWindow),
-                             getter_AddRefs(callerDocumentURI), aError)) {
+  Maybe<nsID> callerAgentClusterId = Nothing();
+  if (!GatherPostMessageData(
+          aCx, aTargetOrigin, getter_AddRefs(sourceBc), origin,
+          getter_AddRefs(targetOriginURI), getter_AddRefs(callerPrincipal),
+          getter_AddRefs(callerInnerWindow), getter_AddRefs(callerDocumentURI),
+          &callerAgentClusterId, aError)) {
     return;
   }
 
@@ -6059,11 +6060,12 @@ void nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx,
   // event creation and dispatch.
   RefPtr<PostMessageEvent> event = new PostMessageEvent(
       sourceBc, origin, this, providedPrincipal,
-      callerInnerWindow ? callerInnerWindow->WindowID() : 0, callerDocumentURI);
+      callerInnerWindow ? callerInnerWindow->WindowID() : 0, callerDocumentURI,
+      callerAgentClusterId);
 
   JS::CloneDataPolicy clonePolicy;
   if (GetDocGroup() && callerInnerWindow &&
-      callerInnerWindow->CanShareMemory(GetDocGroup()->AgentClusterId())) {
+      callerInnerWindow->IsSharedMemoryAllowed()) {
     clonePolicy.allowSharedMemory();
   }
   event->Write(aCx, aMessage, aTransfer, clonePolicy, aError);
@@ -6125,7 +6127,6 @@ class nsCloseEvent : public Runnable {
   static nsresult PostCloseEvent(nsGlobalWindowOuter* aWindow, bool aIndirect) {
     nsCOMPtr<nsIRunnable> ev = new nsCloseEvent(aWindow, aIndirect);
     nsresult rv = aWindow->Dispatch(TaskCategory::Other, ev.forget());
-    if (NS_SUCCEEDED(rv)) aWindow->MaybeForgiveSpamCount();
     return rv;
   }
 
@@ -6770,10 +6771,10 @@ void nsGlobalWindowOuter::ActivateOrDeactivate(bool aActivate) {
     // Get the top level widget's nsGlobalWindowOuter
     nsCOMPtr<nsPIDOMWindowOuter> topLevelWindow;
 
-    // widgetListener should be a nsXULWindow
+    // widgetListener should be an AppWindow
     nsIWidgetListener* listener = topLevelWidget->GetWidgetListener();
     if (listener) {
-      nsCOMPtr<nsIXULWindow> window = listener->GetXULWindow();
+      nsCOMPtr<nsIAppWindow> window = listener->GetAppWindow();
       nsCOMPtr<nsIInterfaceRequestor> req(do_QueryInterface(window));
       topLevelWindow = do_GetInterface(req);
     }

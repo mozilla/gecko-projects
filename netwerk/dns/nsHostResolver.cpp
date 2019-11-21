@@ -552,7 +552,7 @@ static const char kPrefSkipTRRParentalControl[] =
 static bool sGetTtlEnabled = false;
 mozilla::Atomic<bool, mozilla::Relaxed> gNativeIsLocalhost;
 
-static void DnsPrefChanged(const char* aPref, nsHostResolver* aSelf) {
+static void DnsPrefChanged(const char* aPref, void* aSelf) {
   MOZ_ASSERT(NS_IsMainThread(),
              "Should be getting pref changed notification on main thread!");
 
@@ -1111,12 +1111,13 @@ nsresult nsHostResolver::ResolveHost(const nsACString& aHost, uint16_t type,
         }
       }
     }
-  }
 
-  if (result) {
-    if (callback->isInList()) {
+    if (result && callback->isInList()) {
       callback->remove();
     }
+  }  // lock
+
+  if (result) {
     callback->OnResolveHostComplete(this, result, status);
   }
 

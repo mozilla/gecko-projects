@@ -13,10 +13,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "jsutil.h"
-
 #include "ds/LifoAlloc.h"
 #include "js/CharacterEncoding.h"
+#include "util/Memory.h"
 #include "util/Text.h"
 #include "util/Windows.h"
 #include "vm/JSContext.h"
@@ -197,12 +196,12 @@ bool Sprinter::put(const char* s, size_t len) {
 bool Sprinter::putString(JSString* s) {
   InvariantChecker ic(this);
 
-  JSFlatString* flat = s->ensureFlat(context);
-  if (!flat) {
+  JSLinearString* linear = s->ensureLinear(context);
+  if (!linear) {
     return false;
   }
 
-  size_t length = JS::GetDeflatedUTF8StringLength(flat);
+  size_t length = JS::GetDeflatedUTF8StringLength(linear);
 
   char* buffer = reserve(length);
   if (!buffer) {
@@ -210,7 +209,7 @@ bool Sprinter::putString(JSString* s) {
   }
 
   mozilla::DebugOnly<size_t> written =
-      JS::DeflateStringToUTF8Buffer(flat, mozilla::MakeSpan(buffer, length));
+      JS::DeflateStringToUTF8Buffer(linear, mozilla::MakeSpan(buffer, length));
   MOZ_ASSERT(written == length);
 
   buffer[length] = '\0';

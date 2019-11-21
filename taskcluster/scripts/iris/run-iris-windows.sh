@@ -1,6 +1,9 @@
 #!/bin/bash
 set -x +e -v
 
+# Set Iris code root, required by moziris
+export IRIS_CODE_ROOT=$MOZ_FETCHES_DIR/iris_firefox
+
 # Store our starting dir so we can get back to it later
 dir=$(pwd)
 
@@ -11,7 +14,7 @@ scoopstatus=$?
 
 # Install some packages
 scoop install git # Needed to update scoop and pick up newer packages
-scoop install python # Worker only has 3.6.5 out of the box, we need 3.7.3+
+scoop install python@3.7.3 # Worker only has 3.6.5 out of the box, we need 3.7.3+
 
 # Enable some extra packages to be installed
 scoop bucket add versions

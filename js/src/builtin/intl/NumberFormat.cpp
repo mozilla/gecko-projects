@@ -24,6 +24,7 @@
 
 #include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
+#include "builtin/intl/LanguageTag.h"
 #include "builtin/intl/ScopedICUObject.h"
 #include "ds/Sort.h"
 #include "gc/FreeOp.h"
@@ -42,6 +43,7 @@
 #include "unicode/ures.h"
 #include "unicode/utypes.h"
 #include "vm/BigIntType.h"
+#include "vm/GlobalObject.h"
 #include "vm/JSContext.h"
 #include "vm/SelfHosting.h"
 #include "vm/Stack.h"
@@ -60,7 +62,6 @@ using mozilla::SpecificNaN;
 using js::intl::CallICU;
 using js::intl::DateTimeFormatOptions;
 using js::intl::FieldType;
-using js::intl::GetAvailableLocales;
 using js::intl::IcuLocale;
 
 using JS::AutoStableStringChars;
@@ -76,8 +77,11 @@ const JSClassOps NumberFormatObject::classOps_ = {nullptr, /* addProperty */
 const JSClass NumberFormatObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_RESERVED_SLOTS(NumberFormatObject::SLOT_COUNT) |
+        JSCLASS_HAS_CACHED_PROTO(JSProto_NumberFormat) |
         JSCLASS_FOREGROUND_FINALIZE,
-    &NumberFormatObject::classOps_};
+    &NumberFormatObject::classOps_, &NumberFormatObject::classSpec_};
+
+const JSClass& NumberFormatObject::protoClass_ = PlainObject::class_;
 
 static bool numberFormat_toSource(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
@@ -100,6 +104,18 @@ static const JSPropertySpec numberFormat_properties[] = {
     JS_SELF_HOSTED_GET("format", "$Intl_NumberFormat_format_get", 0),
     JS_STRING_SYM_PS(toStringTag, "Object", JSPROP_READONLY), JS_PS_END};
 
+static bool NumberFormat(JSContext* cx, unsigned argc, Value* vp);
+
+const ClassSpec NumberFormatObject::classSpec_ = {
+    GenericCreateConstructor<NumberFormat, 0, gc::AllocKind::FUNCTION>,
+    GenericCreatePrototype<NumberFormatObject>,
+    numberFormat_static_methods,
+    nullptr,
+    numberFormat_methods,
+    numberFormat_properties,
+    nullptr,
+    ClassSpec::DontDefineConstructor};
+
 /**
  * 11.2.1 Intl.NumberFormat([ locales [, options]])
  *
@@ -110,19 +126,13 @@ static bool NumberFormat(JSContext* cx, const CallArgs& args, bool construct) {
 
   // Step 2 (Inlined 9.1.14, OrdinaryCreateFromConstructor).
   RootedObject proto(cx);
-  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_Null, &proto)) {
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_NumberFormat,
+                                          &proto)) {
     return false;
   }
 
-  if (!proto) {
-    proto = GlobalObject::getOrCreateNumberFormatPrototype(cx, cx->global());
-    if (!proto) {
-      return false;
-    }
-  }
-
   Rooted<NumberFormatObject*> numberFormat(cx);
-  numberFormat = NewObjectWithGivenProto<NumberFormatObject>(cx, proto);
+  numberFormat = NewObjectWithClassProto<NumberFormatObject>(cx, proto);
   if (!numberFormat) {
     return false;
   }
@@ -161,65 +171,15 @@ void js::NumberFormatObject::finalize(JSFreeOp* fop, JSObject* obj) {
   UFormattedNumber* formatted = numberFormat->getFormattedNumber();
 
   if (nf) {
+    intl::RemoveICUCellMemory(fop, obj, NumberFormatObject::EstimatedMemoryUse);
+
     unumf_close(nf);
   }
   if (formatted) {
+    // UFormattedNumber memory tracked as part of UNumberFormatter.
+
     unumf_closeResult(formatted);
   }
-}
-
-JSObject* js::CreateNumberFormatPrototype(JSContext* cx, HandleObject Intl,
-                                          Handle<GlobalObject*> global,
-                                          MutableHandleObject constructor) {
-  RootedFunction ctor(cx);
-  ctor = GlobalObject::createConstructor(cx, &NumberFormat,
-                                         cx->names().NumberFormat, 0);
-  if (!ctor) {
-    return nullptr;
-  }
-
-  RootedObject proto(
-      cx, GlobalObject::createBlankPrototype<PlainObject>(cx, global));
-  if (!proto) {
-    return nullptr;
-  }
-
-  if (!LinkConstructorAndPrototype(cx, ctor, proto)) {
-    return nullptr;
-  }
-
-  // 11.3.2
-  if (!JS_DefineFunctions(cx, ctor, numberFormat_static_methods)) {
-    return nullptr;
-  }
-
-  // 11.4.4
-  if (!JS_DefineFunctions(cx, proto, numberFormat_methods)) {
-    return nullptr;
-  }
-
-  // 11.4.2 and 11.4.3
-  if (!JS_DefineProperties(cx, proto, numberFormat_properties)) {
-    return nullptr;
-  }
-
-  // 8.1
-  RootedValue ctorValue(cx, ObjectValue(*ctor));
-  if (!DefineDataProperty(cx, Intl, cx->names().NumberFormat, ctorValue, 0)) {
-    return nullptr;
-  }
-
-  constructor.set(ctor);
-  return proto;
-}
-
-bool js::intl_NumberFormat_availableLocales(JSContext* cx, unsigned argc,
-                                            Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-  MOZ_ASSERT(args.length() == 0);
-
-  return GetAvailableLocales(cx, unum_countAvailable, unum_getAvailable,
-                             args.rval());
 }
 
 bool js::intl_numberingSystem(JSContext* cx, unsigned argc, Value* vp) {
@@ -600,15 +560,53 @@ static UNumberFormatter* NewUNumberFormatter(
   if (!GetProperty(cx, internals, internals, cx->names().locale, &value)) {
     return nullptr;
   }
-  UniqueChars locale = intl::EncodeLocale(cx, value.toString());
+
+  // ICU expects numberingSystem as a Unicode locale extensions on locale.
+
+  intl::LanguageTag tag(cx);
+  {
+    JSLinearString* locale = value.toString()->ensureLinear(cx);
+    if (!locale) {
+      return nullptr;
+    }
+
+    if (!intl::LanguageTagParser::parse(cx, locale, tag)) {
+      return nullptr;
+    }
+  }
+
+  JS::RootedVector<intl::UnicodeExtensionKeyword> keywords(cx);
+
+  if (!GetProperty(cx, internals, internals, cx->names().numberingSystem,
+                   &value)) {
+    return nullptr;
+  }
+
+  {
+    JSLinearString* numberingSystem = value.toString()->ensureLinear(cx);
+    if (!numberingSystem) {
+      return nullptr;
+    }
+
+    if (!keywords.emplaceBack("nu", numberingSystem)) {
+      return nullptr;
+    }
+  }
+
+  // |ApplyUnicodeExtensionToTag| applies the new keywords to the front of
+  // the Unicode extension subtag. We're then relying on ICU to follow RFC
+  // 6067, which states that any trailing keywords using the same key
+  // should be ignored.
+  if (!intl::ApplyUnicodeExtensionToTag(cx, tag, keywords)) {
+    return nullptr;
+  }
+
+  UniqueChars locale = tag.toStringZ(cx);
   if (!locale) {
     return nullptr;
   }
 
   intl::NumberFormatterSkeleton skeleton(cx);
-
-  // We don't need to look at numberingSystem - it can only be set via
-  // the Unicode locale extension and is therefore already set on locale.
 
   if (!GetProperty(cx, internals, internals, cx->names().style, &value)) {
     return nullptr;
@@ -1558,6 +1556,9 @@ bool js::intl_FormatNumber(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
     numberFormat->setNumberFormatter(nf);
+
+    intl::AddICUCellMemory(numberFormat,
+                           NumberFormatObject::EstimatedMemoryUse);
   }
 
   // Obtain a cached UFormattedNumber object.
@@ -1568,6 +1569,8 @@ bool js::intl_FormatNumber(JSContext* cx, unsigned argc, Value* vp) {
       return false;
     }
     numberFormat->setFormattedNumber(formatted);
+
+    // UFormattedNumber memory tracked as part of UNumberFormatter.
   }
 
   // Use the UNumberFormatter to actually format the number.

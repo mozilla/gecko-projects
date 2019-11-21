@@ -60,14 +60,16 @@ extern JSString* NumberToStringHelperPure(JSContext* cx, double d);
 extern JSAtom* NumberToAtom(JSContext* cx, double d);
 
 template <AllowGC allowGC>
-extern JSFlatString* Int32ToString(JSContext* cx, int32_t i);
+extern JSLinearString* Int32ToString(JSContext* cx, int32_t i);
 
-extern JSFlatString* Int32ToStringHelperPure(JSContext* cx, int32_t i);
+extern JSLinearString* Int32ToStringHelperPure(JSContext* cx, int32_t i);
 
 extern JSAtom* Int32ToAtom(JSContext* cx, int32_t si);
 
 // ES6 15.7.3.12
 extern bool IsInteger(const Value& val);
+
+extern bool IsInteger(double d);
 
 /*
  * Convert an integer or double (contained in the given value) to a string and
@@ -76,7 +78,7 @@ extern bool IsInteger(const Value& val);
 extern MOZ_MUST_USE bool JS_FASTCALL
 NumberValueToStringBuffer(JSContext* cx, const Value& v, StringBuffer& sb);
 
-extern JSFlatString* IndexToString(JSContext* cx, uint32_t index);
+extern JSLinearString* IndexToString(JSContext* cx, uint32_t index);
 
 /*
  * Usually a small amount of static storage is enough, but sometimes we need
@@ -110,7 +112,7 @@ extern char* NumberToCString(JSContext* cx, ToCStringBuf* cbuf, double d,
  * The largest positive integer such that all positive integers less than it
  * may be precisely represented using the IEEE-754 double-precision format.
  */
-const double DOUBLE_INTEGRAL_PRECISION_LIMIT = uint64_t(1) << 53;
+constexpr double DOUBLE_INTEGRAL_PRECISION_LIMIT = uint64_t(1) << 53;
 
 /*
  * Parse a decimal number encoded in |chars|.  The decimal number must be

@@ -2,9 +2,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import, unicode_literals
+from __future__ import absolute_import, unicode_literals, print_function
 
 import os
+import yaml
 
 from mozbuild.base import MozbuildObject
 from mozbuild.frontend.reader import BuildReader
@@ -41,8 +42,10 @@ def read_build_config(docdir):
     class fakeconfig(object):
         topsrcdir = build.topsrcdir
 
+    variables = ('SPHINX_TREES', 'SPHINX_PYTHON_PACKAGE_DIRS')
     reader = BuildReader(fakeconfig())
-    for path, name, key, value in reader.find_sphinx_variables(relevant_mozbuild_path):
+    result = reader.find_variables_from_ast(variables, path=relevant_mozbuild_path)
+    for path, name, key, value in result:
         reldir = os.path.dirname(path)
 
         if name == 'SPHINX_TREES':
@@ -114,6 +117,9 @@ class _SphinxManager(object):
     def _synchronize_docs(self):
         m = InstallManifest()
 
+        with open(os.path.join(MAIN_DOC_PATH, 'config.yml'), 'r') as fh:
+            tree_config = yaml.safe_load(fh)['categories']
+
         m.add_link(self.conf_py_path, 'conf.py')
 
         for dest, source in sorted(self.trees.items()):
@@ -143,14 +149,29 @@ class _SphinxManager(object):
                     return False
             return True
 
-        toplevel_trees = {k: v for k, v in self.trees.items() if is_toplevel(k)}
-        indexes = ['%s/index' % p for p in sorted(toplevel_trees.keys())]
-        indexes = '\n   '.join(indexes)
+        def format_paths(paths):
+            source_doc = ['%s/index' % p for p in paths]
+            return '\n   '.join(source_doc)
 
-        packages = [os.path.basename(p) for p in self.python_package_dirs]
-        packages = ['python/%s' % p for p in packages]
-        packages = '\n   '.join(sorted(packages))
-        data = data.format(indexes=indexes, python_packages=packages)
+        toplevel_trees = {k: v for k, v in self.trees.items() if is_toplevel(k)}
+
+        CATEGORIES = {}
+        # generate the datastructure to deal with the tree
+        for t in tree_config:
+            CATEGORIES[t] = format_paths(tree_config[t])
+
+        indexes = set(['%s/index' % p for p in toplevel_trees.keys()])
+        # Format categories like indexes
+        cats = '\n'.join(CATEGORIES.values()).split("\n")
+        # Remove heading spaces
+        cats = [x.strip() for x in cats]
+        indexes = tuple(set(indexes) - set(cats))
+        if indexes:
+            # In case a new doc isn't categorized
+            print(indexes)
+            raise Exception("Uncategorized documentation. Please add it in tools/docs/config.yml")
+
+        data = data.format(**CATEGORIES)
 
         with open(os.path.join(self.staging_dir, 'index.rst'), 'wb') as fh:
             fh.write(data)

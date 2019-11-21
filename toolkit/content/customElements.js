@@ -460,6 +460,18 @@
       }
 
       /**
+       * Passes DOM events to the on_<event type> methods.
+       */
+      handleEvent(event) {
+        let methodName = "on_" + event.type;
+        if (methodName in this) {
+          this[methodName](event);
+        } else {
+          throw new Error("Unrecognized event: " + event.type);
+        }
+      }
+
+      /**
        * Allows eager deterministic construction of XUL elements with XBL attached, by
        * parsing an element tree and returning a DOM fragment to be inserted in the
        * document before any of the inner elements is referenced by JavaScript.
@@ -509,6 +521,11 @@
     `,
           "application/xml"
         );
+
+        if (doc.documentElement.localName === "parsererror") {
+          throw new Error("not well-formed XML");
+        }
+
         // The XUL/XBL parser is set to ignore all-whitespace nodes, whereas (X)HTML
         // does not do this. Most XUL code assumes that the whitespace has been
         // stripped out, so we simply remove all text nodes after using the parser.
@@ -542,7 +559,10 @@
       static insertFTLIfNeeded(path) {
         let container = document.head || document.querySelector("linkset");
         if (!container) {
-          if (document.contentType == "application/vnd.mozilla.xul+xml") {
+          if (
+            document.documentElement.namespaceURI ===
+            "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+          ) {
             container = document.createXULElement("linkset");
             document.documentElement.appendChild(container);
           } else if (document.documentURI == AppConstants.BROWSER_CHROME_URL) {
@@ -761,6 +781,7 @@
       "chrome://global/content/elements/menu.js",
       "chrome://global/content/elements/menupopup.js",
       "chrome://global/content/elements/notificationbox.js",
+      "chrome://global/content/elements/panel.js",
       "chrome://global/content/elements/popupnotification.js",
       "chrome://global/content/elements/radio.js",
       "chrome://global/content/elements/richlistbox.js",

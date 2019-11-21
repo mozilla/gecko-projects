@@ -14,6 +14,7 @@
 #include "ipc/IPCMessageUtils.h"
 #include "ipc/nsGUIEventIPC.h"
 #include "mozilla/GfxMessageUtils.h"
+#include "mozilla/ipc/ByteBuf.h"
 #include "mozilla/layers/APZInputBridge.h"
 #include "mozilla/layers/APZTypes.h"
 #include "mozilla/layers/AsyncDragMetrics.h"
@@ -28,6 +29,8 @@
 #include "mozilla/layers/RefCountedShmem.h"
 #include "mozilla/layers/RepaintRequest.h"
 #include "mozilla/layers/WebRenderMessageUtils.h"
+#include "mozilla/MotionPathUtils.h"
+#include "mozilla/ServoBindings.h"
 #include "VsyncSource.h"
 #include "mozilla/Move.h"
 #include "nsSize.h"
@@ -322,10 +325,6 @@ struct ParamTraits<mozilla::layers::ScrollSnapInfo> {
   static void Write(Message* aMsg, const paramType& aParam) {
     WriteParam(aMsg, aParam.mScrollSnapStrictnessX);
     WriteParam(aMsg, aParam.mScrollSnapStrictnessY);
-    WriteParam(aMsg, aParam.mScrollSnapIntervalX);
-    WriteParam(aMsg, aParam.mScrollSnapIntervalY);
-    WriteParam(aMsg, aParam.mScrollSnapDestination);
-    WriteParam(aMsg, aParam.mScrollSnapCoordinates);
     WriteParam(aMsg, aParam.mSnapPositionX);
     WriteParam(aMsg, aParam.mSnapPositionY);
     WriteParam(aMsg, aParam.mXRangeWiderThanSnapport);
@@ -337,10 +336,6 @@ struct ParamTraits<mozilla::layers::ScrollSnapInfo> {
                    paramType* aResult) {
     return (ReadParam(aMsg, aIter, &aResult->mScrollSnapStrictnessX) &&
             ReadParam(aMsg, aIter, &aResult->mScrollSnapStrictnessY) &&
-            ReadParam(aMsg, aIter, &aResult->mScrollSnapIntervalX) &&
-            ReadParam(aMsg, aIter, &aResult->mScrollSnapIntervalY) &&
-            ReadParam(aMsg, aIter, &aResult->mScrollSnapDestination) &&
-            ReadParam(aMsg, aIter, &aResult->mScrollSnapCoordinates) &&
             ReadParam(aMsg, aIter, &aResult->mSnapPositionX) &&
             ReadParam(aMsg, aIter, &aResult->mSnapPositionY) &&
             ReadParam(aMsg, aIter, &aResult->mXRangeWiderThanSnapport) &&
@@ -453,6 +448,7 @@ struct ParamTraits<mozilla::layers::TextureFactoryIdentifier> {
     WriteParam(aMsg, aParam.mSupportsTextureDirectMapping);
     WriteParam(aMsg, aParam.mCompositorUseANGLE);
     WriteParam(aMsg, aParam.mCompositorUseDComp);
+    WriteParam(aMsg, aParam.mUseCompositorWnd);
     WriteParam(aMsg, aParam.mSupportsTextureBlitting);
     WriteParam(aMsg, aParam.mSupportsPartialUploads);
     WriteParam(aMsg, aParam.mSupportsComponentAlpha);
@@ -469,6 +465,7 @@ struct ParamTraits<mozilla::layers::TextureFactoryIdentifier> {
         ReadParam(aMsg, aIter, &aResult->mSupportsTextureDirectMapping) &&
         ReadParam(aMsg, aIter, &aResult->mCompositorUseANGLE) &&
         ReadParam(aMsg, aIter, &aResult->mCompositorUseDComp) &&
+        ReadParam(aMsg, aIter, &aResult->mUseCompositorWnd) &&
         ReadParam(aMsg, aIter, &aResult->mSupportsTextureBlitting) &&
         ReadParam(aMsg, aIter, &aResult->mSupportsPartialUploads) &&
         ReadParam(aMsg, aIter, &aResult->mSupportsComponentAlpha) &&
@@ -813,6 +810,91 @@ struct ParamTraits<mozilla::layers::CompositionPayload> {
                    paramType* aResult) {
     return ReadParam(aMsg, aIter, &aResult->mType) &&
            ReadParam(aMsg, aIter, &aResult->mTimeStamp);
+  }
+};
+
+inline mozilla::ipc::ByteBuf ConvertToByteBuf(mozilla::StyleVecU8&& aVec) {
+  mozilla::ipc::ByteBuf out(aVec.data, aVec.length, aVec.capacity);
+  aVec.data = nullptr;
+  aVec.length = 0;
+  aVec.capacity = 0;
+  return out;
+}
+
+inline mozilla::StyleVecU8 ConvertToStyleVecU8(mozilla::ipc::ByteBuf&& aOther) {
+  mozilla::StyleVecU8 v;
+  v.data = aOther.mData;
+  v.length = aOther.mLen;
+  v.capacity = aOther.mCapacity;
+  aOther.mData = nullptr;
+  aOther.mLen = 0;
+  aOther.mCapacity = 0;
+  return v;
+}
+
+template <>
+struct ParamTraits<mozilla::LengthPercentage> {
+  typedef mozilla::LengthPercentage paramType;
+
+  static void Write(Message* aMsg, const paramType& aParam) {
+    mozilla::StyleVecU8 v;
+    mozilla::DebugOnly<bool> rv = Servo_LengthPercentage_Serialize(&aParam, &v);
+    MOZ_ASSERT(rv, "Serialize LengthPercentage failed");
+
+    WriteParam(aMsg, ConvertToByteBuf(std::move(v)));
+  }
+
+  static bool Read(const Message* aMsg, PickleIterator* aIter,
+                   paramType* aResult) {
+    mozilla::ipc::ByteBuf in;
+    bool rv = ReadParam(aMsg, aIter, &in);
+    if (!rv) {
+      return false;
+    }
+
+    mozilla::StyleVecU8 v = ConvertToStyleVecU8(std::move(in));
+    return v.data && Servo_LengthPercentage_Deserialize(&v, aResult);
+  }
+};
+
+template <>
+struct ParamTraits<mozilla::RayFunction> {
+  typedef mozilla::RayFunction paramType;
+
+  static void Write(Message* aMsg, const paramType& aParam) {
+    mozilla::StyleVecU8 v;
+    mozilla::DebugOnly<bool> rv = Servo_RayFunction_Serialize(&aParam, &v);
+    MOZ_ASSERT(rv, "Serialize RayFunction failed");
+
+    WriteParam(aMsg, ConvertToByteBuf(std::move(v)));
+  }
+
+  static bool Read(const Message* aMsg, PickleIterator* aIter,
+                   paramType* aResult) {
+    mozilla::ipc::ByteBuf in;
+    bool rv = ReadParam(aMsg, aIter, &in);
+    if (!rv) {
+      return false;
+    }
+
+    mozilla::StyleVecU8 v = ConvertToStyleVecU8(std::move(in));
+    return v.data && Servo_RayFunction_Deserialize(&v, aResult);
+  }
+};
+
+template <>
+struct ParamTraits<mozilla::RayReferenceData> {
+  typedef mozilla::RayReferenceData paramType;
+
+  static void Write(Message* aMsg, const paramType& aParam) {
+    WriteParam(aMsg, aParam.mInitialPosition);
+    WriteParam(aMsg, aParam.mContainingBlockRect);
+  }
+
+  static bool Read(const Message* aMsg, PickleIterator* aIter,
+                   paramType* aResult) {
+    return (ReadParam(aMsg, aIter, &aResult->mInitialPosition) &&
+            ReadParam(aMsg, aIter, &aResult->mContainingBlockRect));
   }
 };
 

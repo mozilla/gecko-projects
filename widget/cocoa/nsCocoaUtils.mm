@@ -22,7 +22,7 @@
 #include "nsIAppShellService.h"
 #include "nsIOSPermissionRequest.h"
 #include "nsIRunnable.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 #include "nsIBaseWindow.h"
 #include "nsIServiceManager.h"
 #include "nsMenuUtilsX.h"
@@ -274,7 +274,7 @@ nsIWidget* nsCocoaUtils::GetHiddenWindowWidget() {
     return nullptr;
   }
 
-  nsCOMPtr<nsIXULWindow> hiddenWindow;
+  nsCOMPtr<nsIAppWindow> hiddenWindow;
   appShell->GetHiddenWindow(getter_AddRefs(hiddenWindow));
   if (!hiddenWindow) {
     // Don't warn, this happens during shutdown, bug 358607.
@@ -284,7 +284,7 @@ nsIWidget* nsCocoaUtils::GetHiddenWindowWidget() {
   nsCOMPtr<nsIBaseWindow> baseHiddenWindow;
   baseHiddenWindow = do_GetInterface(hiddenWindow);
   if (!baseHiddenWindow) {
-    NS_WARNING("Couldn't get nsIBaseWindow from hidden window (nsIXULWindow)");
+    NS_WARNING("Couldn't get nsIBaseWindow from hidden window (nsIAppWindow)");
     return nullptr;
   }
 
@@ -1086,6 +1086,45 @@ TimeStamp nsCocoaUtils::GetEventTimeStamp(NSTimeInterval aEventTime) {
   // seconds into ticks.
   int64_t tick = BaseTimeDurationPlatformUtils::TicksFromMilliseconds(aEventTime * 1000.0);
   return TimeStamp::FromSystemTime(tick);
+}
+
+static NSString* ActionOnDoubleClickSystemPref() {
+  NSUserDefaults* userDefaults = [NSUserDefaults standardUserDefaults];
+  NSString* kAppleActionOnDoubleClickKey = @"AppleActionOnDoubleClick";
+  id value = [userDefaults objectForKey:kAppleActionOnDoubleClickKey];
+  if ([value isKindOfClass:[NSString class]]) {
+    return value;
+  }
+  return nil;
+}
+
+@interface NSWindow (NSWindowShouldZoomOnDoubleClick)
++ (BOOL)_shouldZoomOnDoubleClick;  // present on 10.7 and above
+@end
+
+bool nsCocoaUtils::ShouldZoomOnTitlebarDoubleClick() {
+  if ([NSWindow respondsToSelector:@selector(_shouldZoomOnDoubleClick)]) {
+    return [NSWindow _shouldZoomOnDoubleClick];
+  }
+  if (nsCocoaFeatures::OnElCapitanOrLater()) {
+    return [ActionOnDoubleClickSystemPref() isEqualToString:@"Maximize"];
+  }
+  return false;
+}
+
+bool nsCocoaUtils::ShouldMinimizeOnTitlebarDoubleClick() {
+  // Check the system preferences.
+  // We could also check -[NSWindow _shouldMiniaturizeOnDoubleClick]. It's not clear to me which
+  // approach would be preferable; neither is public API.
+  if (nsCocoaFeatures::OnElCapitanOrLater()) {
+    return [ActionOnDoubleClickSystemPref() isEqualToString:@"Minimize"];
+  }
+
+  // Pre-10.11:
+  NSUserDefaults* userDefaults = [NSUserDefaults standardUserDefaults];
+  NSString* kAppleMiniaturizeOnDoubleClickKey = @"AppleMiniaturizeOnDoubleClick";
+  id value1 = [userDefaults objectForKey:kAppleMiniaturizeOnDoubleClickKey];
+  return [value1 isKindOfClass:[NSValue class]] && [value1 boolValue];
 }
 
 // AVAuthorizationStatus is not needed unless we are running on 10.14.

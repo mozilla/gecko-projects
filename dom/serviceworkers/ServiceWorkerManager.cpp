@@ -63,6 +63,7 @@
 
 #include "nsContentUtils.h"
 #include "nsNetUtil.h"
+#include "nsPermissionManager.h"
 #include "nsProxyRelease.h"
 #include "nsQueryObject.h"
 #include "nsTArray.h"
@@ -127,7 +128,7 @@ static_assert(
         static_cast<uint32_t>(RequestRedirect::Manual),
     "RequestRedirect enumeration value should make Necko Redirect mode value.");
 static_assert(
-    3 == static_cast<uint32_t>(RequestRedirect::EndGuard_),
+    3 == RequestRedirectValues::Count,
     "RequestRedirect enumeration value should make Necko Redirect mode value.");
 
 static_assert(
@@ -155,7 +156,7 @@ static_assert(
         static_cast<uint32_t>(RequestCache::Only_if_cached),
     "RequestCache enumeration value should match Necko Cache mode value.");
 static_assert(
-    6 == static_cast<uint32_t>(RequestCache::EndGuard_),
+    6 == RequestCacheValues::Count,
     "RequestCache enumeration value should match Necko Cache mode value.");
 
 static_assert(static_cast<uint16_t>(ServiceWorkerUpdateViaCache::Imports) ==
@@ -486,26 +487,31 @@ void ServiceWorkerManager::MaybeStartShutdown() {
 
   mShuttingDown = true;
 
-  for (auto it1 = mRegistrationInfos.Iter(); !it1.Done(); it1.Next()) {
-    for (auto it2 = it1.UserData()->mUpdateTimers.Iter(); !it2.Done();
-         it2.Next()) {
-      nsCOMPtr<nsITimer> timer = it2.UserData();
-      timer->Cancel();
-    }
-    it1.UserData()->mUpdateTimers.Clear();
+  for (auto& entry : mRegistrationInfos) {
+    auto& dataPtr = entry.GetData();
 
-    for (auto it2 = it1.UserData()->mJobQueues.Iter(); !it2.Done();
-         it2.Next()) {
-      RefPtr<ServiceWorkerJobQueue> queue = it2.UserData();
-      queue->CancelAll();
+    for (auto& timerEntry : dataPtr->mUpdateTimers) {
+      timerEntry.GetData()->Cancel();
     }
-    it1.UserData()->mJobQueues.Clear();
+    dataPtr->mUpdateTimers.Clear();
 
-    for (auto it2 = it1.UserData()->mInfos.Iter(); !it2.Done(); it2.Next()) {
-      RefPtr<ServiceWorkerRegistrationInfo> regInfo = it2.UserData();
-      regInfo->ShutdownWorkers();
+    for (auto& queueEntry : dataPtr->mJobQueues) {
+      queueEntry.GetData()->CancelAll();
     }
-    it1.UserData()->mInfos.Clear();
+    dataPtr->mJobQueues.Clear();
+
+    for (auto& registrationEntry : dataPtr->mInfos) {
+      registrationEntry.GetData()->ShutdownWorkers();
+    }
+    dataPtr->mInfos.Clear();
+  }
+
+  for (auto& entry : mControlledClients) {
+    entry.GetData()->mRegistrationInfo->ShutdownWorkers();
+  }
+
+  for (auto iter = mOrphanedRegistrations.iter(); !iter.done(); iter.next()) {
+    iter.get()->ShutdownWorkers();
   }
 
   if (mShutdownBlocker) {
@@ -2126,7 +2132,7 @@ void ServiceWorkerManager::DispatchFetchEvent(nsIInterceptedChannel* aChannel,
 
   MOZ_DIAGNOSTIC_ASSERT(serviceWorker);
 
-  nsCOMPtr<nsIRunnable> continueRunnable =
+  RefPtr<ContinueDispatchFetchEventRunnable> continueRunnable =
       new ContinueDispatchFetchEventRunnable(serviceWorker->WorkerPrivate(),
                                              aChannel, loadGroup,
                                              loadInfo->GetIsDocshellReload());
@@ -2136,10 +2142,14 @@ void ServiceWorkerManager::DispatchFetchEvent(nsIInterceptedChannel* aChannel,
   // wait for them if they have not.
   nsCOMPtr<nsIRunnable> permissionsRunnable = NS_NewRunnableFunction(
       "dom::ServiceWorkerManager::DispatchFetchEvent", [=]() {
-        nsCOMPtr<nsIPermissionManager> permMgr =
-            services::GetPermissionManager();
-        MOZ_ALWAYS_SUCCEEDS(permMgr->WhenPermissionsAvailable(
-            serviceWorker->Principal(), continueRunnable));
+        RefPtr<nsPermissionManager> permMgr =
+            nsPermissionManager::GetInstance();
+        if (permMgr) {
+          permMgr->WhenPermissionsAvailable(serviceWorker->Principal(),
+                                            continueRunnable);
+        } else {
+          continueRunnable->HandleError();
+        }
       });
 
   nsCOMPtr<nsIUploadChannel2> uploadChannel =
@@ -2180,6 +2190,41 @@ nsresult ServiceWorkerManager::GetClientRegistration(
   RefPtr<ServiceWorkerRegistrationInfo> ref = data->mRegistrationInfo;
   ref.forget(aRegistrationInfo);
   return NS_OK;
+}
+
+void ServiceWorkerManager::UpdateControlledClient(
+    const ClientInfo& aOldClientInfo, const ClientInfo& aNewClientInfo,
+    const ServiceWorkerDescriptor& aServiceWorker) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!ServiceWorkerParentInterceptEnabled()) {
+    return;
+  }
+  if (aOldClientInfo.Id() == aNewClientInfo.Id()) {
+    return;
+  }
+
+  RefPtr<ServiceWorkerRegistrationInfo> registration;
+  if (NS_WARN_IF(NS_FAILED(GetClientRegistration(
+          aOldClientInfo, getter_AddRefs(registration))))) {
+    return;
+  }
+  MOZ_ASSERT(registration);
+  MOZ_ASSERT(registration->GetActive());
+
+  RefPtr<ServiceWorkerManager> self = this;
+
+  RefPtr<GenericPromise> p =
+      StartControllingClient(aNewClientInfo, registration);
+  p->Then(
+      SystemGroup::EventTargetFor(TaskCategory::Other), __func__,
+      // Controlling the new ClientInfo, stop controlling the old one.
+      [self, aOldClientInfo](bool aResult) {
+        self->StopControllingClient(aOldClientInfo);
+      },
+      // Controlling the new ClientInfo fail, do nothing.
+      // Probably need to call LoadInfo::ClearController
+      [](nsresult aRv) {});
 }
 
 void ServiceWorkerManager::SoftUpdate(const OriginAttributes& aOriginAttributes,
@@ -3029,6 +3074,30 @@ ServiceWorkerManager::IsParentInterceptEnabled(bool* aIsEnabled) {
   MOZ_ASSERT(NS_IsMainThread());
   *aIsEnabled = ServiceWorkerParentInterceptEnabled();
   return NS_OK;
+}
+
+void ServiceWorkerManager::AddOrphanedRegistration(
+    ServiceWorkerRegistrationInfo* aRegistration) {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aRegistration);
+  MOZ_ASSERT(aRegistration->IsUnregistered());
+  MOZ_ASSERT(!aRegistration->IsControllingClients());
+  MOZ_ASSERT(!aRegistration->IsIdle());
+  MOZ_ASSERT(!mOrphanedRegistrations.has(aRegistration));
+
+  MOZ_ALWAYS_TRUE(mOrphanedRegistrations.putNew(aRegistration));
+}
+
+void ServiceWorkerManager::RemoveOrphanedRegistration(
+    ServiceWorkerRegistrationInfo* aRegistration) {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aRegistration);
+  MOZ_ASSERT(aRegistration->IsUnregistered());
+  MOZ_ASSERT(!aRegistration->IsControllingClients());
+  MOZ_ASSERT(aRegistration->IsIdle());
+  MOZ_ASSERT(mOrphanedRegistrations.has(aRegistration));
+
+  mOrphanedRegistrations.remove(aRegistration);
 }
 
 }  // namespace dom

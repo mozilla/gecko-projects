@@ -10,6 +10,7 @@
 #include "mozilla/Maybe.h"
 
 #include "builtin/TypedObjectConstants.h"
+#include "gc/Memory.h"
 #include "gc/ZoneAllocator.h"
 #include "js/ArrayBuffer.h"
 #include "js/GCHashTable.h"
@@ -670,6 +671,51 @@ class MutableWrappedPtrOperations<InnerViewTable, Wrapper>
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
     return table().sizeOfExcludingThis(mallocSizeOf);
   }
+};
+
+class WasmArrayRawBuffer {
+  mozilla::Maybe<uint32_t> maxSize_;
+  size_t mappedSize_;  // Not including the header page
+  uint32_t length_;
+
+ protected:
+  WasmArrayRawBuffer(uint8_t* buffer, const mozilla::Maybe<uint32_t>& maxSize,
+                     size_t mappedSize, uint32_t length)
+      : maxSize_(maxSize), mappedSize_(mappedSize), length_(length) {
+    MOZ_ASSERT(buffer == dataPointer());
+  }
+
+ public:
+  static WasmArrayRawBuffer* Allocate(uint32_t numBytes,
+                                      const mozilla::Maybe<uint32_t>& maxSize,
+                                      const mozilla::Maybe<size_t>& mappedSize);
+  static void Release(void* mem);
+
+  uint8_t* dataPointer() {
+    uint8_t* ptr = reinterpret_cast<uint8_t*>(this);
+    return ptr + sizeof(WasmArrayRawBuffer);
+  }
+
+  static const WasmArrayRawBuffer* fromDataPtr(const uint8_t* dataPtr) {
+    return reinterpret_cast<const WasmArrayRawBuffer*>(
+        dataPtr - sizeof(WasmArrayRawBuffer));
+  }
+
+  uint8_t* basePointer() { return dataPointer() - gc::SystemPageSize(); }
+
+  size_t mappedSize() const { return mappedSize_; }
+
+  mozilla::Maybe<uint32_t> maxSize() const { return maxSize_; }
+
+  uint32_t byteLength() const { return length_; }
+
+  MOZ_MUST_USE bool growToSizeInPlace(uint32_t oldSize, uint32_t newSize);
+
+  MOZ_MUST_USE bool extendMappedSize(uint32_t maxSize);
+
+  // Try and grow the mapped region of memory. Does not change current size.
+  // Does not move memory if no space to grow.
+  void tryGrowMaxSizeInPlace(uint32_t deltaMaxSize);
 };
 
 }  // namespace js

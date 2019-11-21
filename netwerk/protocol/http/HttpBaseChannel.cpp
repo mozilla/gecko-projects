@@ -163,6 +163,7 @@ HttpBaseChannel::HttpBaseChannel()
       mChannelCreationTime(0),
       mStartPos(UINT64_MAX),
       mTransferSize(0),
+      mRequestSize(0),
       mDecodedBodySize(0),
       mEncodedBodySize(0),
       mRequestContextID(0),
@@ -210,7 +211,7 @@ HttpBaseChannel::HttpBaseChannel()
       mAddedAsNonTailRequest(false),
       mAsyncOpenWaitingForStreamLength(false),
       mUpgradableToSecure(true),
-      mHasSandboxedNavigations(false),
+      mHasNonEmptySandboxingFlag(false),
       mTlsFlags(0),
       mSuspendCount(0),
       mInitialRwin(0),
@@ -1496,6 +1497,18 @@ HttpBaseChannel::IsThirdPartyTrackingResource(bool* aIsTrackingResource) {
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::IsSocialTrackingResource(bool* aIsSocialTrackingResource) {
+  MOZ_ASSERT(!mFirstPartyClassificationFlags ||
+             !mThirdPartyClassificationFlags);
+  *aIsSocialTrackingResource =
+      UrlClassifierCommon::IsSocialTrackingClassificationFlag(
+          mThirdPartyClassificationFlags) ||
+      UrlClassifierCommon::IsSocialTrackingClassificationFlag(
+          mFirstPartyClassificationFlags);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetClassificationFlags(uint32_t* aFlags) {
   if (mThirdPartyClassificationFlags) {
     *aFlags = mThirdPartyClassificationFlags;
@@ -1527,6 +1540,12 @@ HttpBaseChannel::GetFlashPluginState(nsIHttpChannel::FlashPluginState* aState) {
 NS_IMETHODIMP
 HttpBaseChannel::GetTransferSize(uint64_t* aTransferSize) {
   *aTransferSize = mTransferSize;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetRequestSize(uint64_t* aRequestSize) {
+  *aRequestSize = mRequestSize;
   return NS_OK;
 }
 
@@ -1568,17 +1587,18 @@ HttpBaseChannel::GetReferrerInfo(nsIReferrerInfo** aReferrerInfo) {
   return NS_OK;
 }
 
-nsresult HttpBaseChannel::SetReferrerInfo(nsIReferrerInfo* aReferrerInfo,
-                                          bool aClone, bool aCompute,
-                                          bool aSetOriginal) {
-  LOG(("HttpBaseChannel::SetReferrerInfo [this=%p aClone(%d) aCompute(%d)]\n",
+nsresult HttpBaseChannel::SetReferrerInfoInternal(
+    nsIReferrerInfo* aReferrerInfo, bool aClone, bool aCompute,
+    bool aRespectBeforeConnect) {
+  LOG(
+      ("HttpBaseChannel::SetReferrerInfoInternal [this=%p aClone(%d) "
+       "aCompute(%d)]\n",
        this, aClone, aCompute));
-  ENSURE_CALLED_BEFORE_CONNECT();
+  if (aRespectBeforeConnect) {
+    ENSURE_CALLED_BEFORE_CONNECT();
+  }
 
   mReferrerInfo = aReferrerInfo;
-  if (aSetOriginal) {
-    mOriginalReferrerInfo = aReferrerInfo;
-  }
 
   // clear existing referrer, if any
   nsresult rv = ClearReferrerHeader();
@@ -1592,9 +1612,6 @@ nsresult HttpBaseChannel::SetReferrerInfo(nsIReferrerInfo* aReferrerInfo,
 
   if (aClone) {
     mReferrerInfo = static_cast<dom::ReferrerInfo*>(aReferrerInfo)->Clone();
-    if (aSetOriginal) {
-      mOriginalReferrerInfo = mReferrerInfo;
-    }
   }
 
   dom::ReferrerInfo* referrerInfo =
@@ -1624,17 +1641,17 @@ nsresult HttpBaseChannel::SetReferrerInfo(nsIReferrerInfo* aReferrerInfo,
     return rv;
   }
 
-  return SetReferrerHeader(spec);
+  return SetReferrerHeader(spec, aRespectBeforeConnect);
 }
 
 NS_IMETHODIMP
 HttpBaseChannel::SetReferrerInfo(nsIReferrerInfo* aReferrerInfo) {
-  return SetReferrerInfo(aReferrerInfo, true, true);
+  return SetReferrerInfoInternal(aReferrerInfo, true, true, true);
 }
 
 NS_IMETHODIMP
 HttpBaseChannel::SetReferrerInfoWithoutClone(nsIReferrerInfo* aReferrerInfo) {
-  return SetReferrerInfo(aReferrerInfo, false, true);
+  return SetReferrerInfoInternal(aReferrerInfo, false, true, true);
 }
 
 // Return the channel's proxy URI, or if it doesn't exist, the
@@ -3141,7 +3158,7 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
     config.privateBrowsing = Some(mPrivateBrowsing);
   }
 
-  if (mOriginalReferrerInfo) {
+  if (mReferrerInfo) {
     dom::ReferrerPolicy referrerPolicy = dom::ReferrerPolicy::_empty;
     nsAutoCString tRPHeaderCValue;
     Unused << GetResponseHeader(NS_LITERAL_CSTRING("referrer-policy"),
@@ -3158,11 +3175,11 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
       // changes, we must not use the old computed value, and have to compute
       // again.
       nsCOMPtr<nsIReferrerInfo> referrerInfo =
-          dom::ReferrerInfo::CreateFromOtherAndPolicyOverride(
-              mOriginalReferrerInfo, referrerPolicy);
+          dom::ReferrerInfo::CreateFromOtherAndPolicyOverride(mReferrerInfo,
+                                                              referrerPolicy);
       config.referrerInfo = referrerInfo;
     } else {
-      config.referrerInfo = mOriginalReferrerInfo;
+      config.referrerInfo = mReferrerInfo;
     }
   }
 
@@ -4463,7 +4480,7 @@ nsILoadInfo::CrossOriginOpenerPolicy CreateCrossOriginOpenerPolicy(
 // Obtain a cross-origin opener-policy from a response response and a
 // cross-origin opener policy initiator.
 // https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
-NS_IMETHODIMP HttpBaseChannel::GetCrossOriginOpenerPolicy(
+NS_IMETHODIMP HttpBaseChannel::ComputeCrossOriginOpenerPolicy(
     nsILoadInfo::CrossOriginOpenerPolicy aInitiatorPolicy,
     nsILoadInfo::CrossOriginOpenerPolicy* aOutPolicy) {
   MOZ_ASSERT(aOutPolicy);

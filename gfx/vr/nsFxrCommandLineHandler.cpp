@@ -65,6 +65,10 @@ nsFxrCommandLineHandler::Handle(nsICommandLine* aCmdLine) {
   nsresult result =
       aCmdLine->HandleFlag(NS_LITERAL_STRING("fxr"), false, &handleFlagRetVal);
   if (result == NS_OK && handleFlagRetVal) {
+    if (XRE_IsParentProcess() && !XRE_IsE10sParentProcess()) {
+      MOZ_CRASH("--fxr not supported without e10s");
+    }
+
     aCmdLine->SetPreventDefault(true);
 
     nsCOMPtr<nsIWindowWatcher> wwatch =
@@ -75,7 +79,7 @@ nsFxrCommandLineHandler::Handle(nsICommandLine* aCmdLine) {
     result = wwatch->OpenWindow(nullptr,                            // aParent
                                 "chrome://fxr/content/fxrui.html",  // aUrl
                                 "_blank",                           // aName
-                                "chrome,dialog=no,all",             // aFeatures
+                                "chrome,dialog=no,all,private",     // aFeatures
                                 nullptr,  // aArguments
                                 getter_AddRefs(newWindow));
 
@@ -83,6 +87,12 @@ nsFxrCommandLineHandler::Handle(nsICommandLine* aCmdLine) {
 
     nsPIDOMWindowOuter* newWindowOuter = nsPIDOMWindowOuter::From(newWindow);
     FxRWindowManager::GetInstance()->AddWindow(newWindowOuter);
+
+    // Set ForceFullScreenInWidget so that full-screen (in an FxR window)
+    // fills only the window and thus the same texture that will already be
+    // shared with the host. Also, this is set here per-window because
+    // changing the related pref would impact all browser window instances.
+    newWindowOuter->ForceFullScreenInWidget();
 
     // Send the window's HWND to vrhost through VRShMem
     mozilla::gfx::VRShMem shmem(nullptr, true /*aRequiresMutex*/);

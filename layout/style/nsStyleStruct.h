@@ -1033,7 +1033,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   uint8_t mJustifyItems;
   uint8_t mJustifySelf;
   mozilla::StyleFlexDirection mFlexDirection;
-  uint8_t mFlexWrap;   // NS_STYLE_FLEX_WRAP_*
+  mozilla::StyleFlexWrap mFlexWrap;
   uint8_t mObjectFit;  // NS_STYLE_OBJECT_FIT_*
   int32_t mOrder;
   float mFlexGrow;
@@ -1470,7 +1470,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
   nsChangeHint CalcDifference(const nsStyleDisplay& aNewData,
                               const nsStylePosition& aOldPosition) const;
 
-  mozilla::StyleUrlOrNone mBinding;
   nsStyleAutoArray<mozilla::StyleTransition> mTransitions;
   // The number of elements in mTransitions that are not from repeating
   // a list due to another property being longer.
@@ -1629,6 +1628,13 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleDisplay {
     return !!(uint16_t(aDisplay) & mozilla::STYLE_DISPLAY_LIST_ITEM_BIT);
   }
   bool IsListItem() const { return IsListItem(mDisplay); }
+
+  // Whether display is `inline` or `inline list-item`.
+  static bool IsInlineFlow(mozilla::StyleDisplay aDisplay) {
+    return DisplayInside(aDisplay) == mozilla::StyleDisplayInside::Inline;
+  }
+
+  bool IsInlineFlow() const { return IsInlineFlow(mDisplay); }
 
   bool IsInlineInsideStyle() const {
     auto inside = DisplayInside();
@@ -2135,7 +2141,6 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleXUL {
   mozilla::StyleBoxDirection mBoxDirection;
   mozilla::StyleBoxOrient mBoxOrient;
   mozilla::StyleBoxPack mBoxPack;
-  mozilla::StyleStackSizing mStackSizing;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleColumn {
@@ -2214,7 +2219,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleSVG {
   uint8_t mColorInterpolationFilters;  // NS_STYLE_COLOR_INTERPOLATION_*
   mozilla::StyleFillRule mFillRule;
   mozilla::StyleSVGPaintOrder mPaintOrder;
-  uint8_t mShapeRendering;    // NS_STYLE_SHAPE_RENDERING_*
+  mozilla::StyleShapeRendering mShapeRendering;
   uint8_t mStrokeLinecap;     // NS_STYLE_STROKE_LINECAP_*
   uint8_t mStrokeLinejoin;    // NS_STYLE_STROKE_LINEJOIN_*
   uint8_t mDominantBaseline;  // NS_STYLE_DOMINANT_BASELINE_*

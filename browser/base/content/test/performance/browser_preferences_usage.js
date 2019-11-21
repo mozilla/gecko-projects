@@ -123,6 +123,10 @@ add_task(async function startup() {
       min: 4,
       max: 55,
     },
+    "extensions.webextensions.default-content-security-policy": {
+      min: 0,
+      max: 50,
+    },
     "chrome.override_package.global": {
       min: 0,
       max: 50,
@@ -131,6 +135,11 @@ add_task(async function startup() {
       // This is accessed in debug only.
     },
   };
+
+  if (SpecialPowers.useRemoteSubframes) {
+    // Bug 1585732 - Number of accesses with Fission enabled is higher than without.
+    max = 50;
+  }
 
   let startupRecorder = Cc["@mozilla.org/test/startuprecorder;1"].getService()
     .wrappedJSObject;
@@ -209,6 +218,11 @@ add_task(async function navigate_around() {
       max: 55,
     },
   };
+
+  if (SpecialPowers.useRemoteSubframes) {
+    // Bug 1592442 - Number of accesses with Fission enabled is higher than without.
+    max = 50;
+  }
 
   Services.prefs.resetStats();
 

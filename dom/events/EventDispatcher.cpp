@@ -346,6 +346,12 @@ class EventTargetChainItem {
     if (mManager) {
       NS_ASSERTION(aVisitor.mEvent->mCurrentTarget == nullptr,
                    "CurrentTarget should be null!");
+
+      if (aVisitor.mEvent->mMessage == eMouseClick) {
+        aVisitor.mEvent->mFlags.mHadNonPrivilegedClickListeners =
+            aVisitor.mEvent->mFlags.mHadNonPrivilegedClickListeners ||
+            mManager->HasNonPrivilegedClickListeners();
+      }
       mManager->HandleEvent(aVisitor.mPresContext, aVisitor.mEvent,
                             &aVisitor.mDOMEvent, CurrentTarget(),
                             &aVisitor.mEventStatus, IsItemInShadowTree());
@@ -1026,11 +1032,15 @@ nsresult EventDispatcher::Dispatch(nsISupports* aTarget,
 
           nsCOMPtr<nsIDocShell> docShell;
           docShell = nsContentUtils::GetDocShellForEventTarget(aEvent->mTarget);
-          DECLARE_DOCSHELL_AND_HISTORY_ID(docShell);
+          Maybe<uint64_t> innerWindowID;
+          if (nsCOMPtr<nsPIDOMWindowInner> inner =
+                  do_QueryInterface(aEvent->mTarget->GetOwnerGlobal())) {
+            innerWindowID = Some(inner->WindowID());
+          }
           PROFILER_ADD_MARKER_WITH_PAYLOAD(
               "DOMEvent", DOM, DOMEventMarkerPayload,
               (typeStr, aEvent->mTimeStamp, "DOMEvent", TRACING_INTERVAL_START,
-               docShellId, docShellHistoryId));
+               innerWindowID));
 
           EventTargetChainItem::HandleEventTargetChain(chain, postVisitor,
                                                        aCallback, cd);
@@ -1038,7 +1048,7 @@ nsresult EventDispatcher::Dispatch(nsISupports* aTarget,
           PROFILER_ADD_MARKER_WITH_PAYLOAD(
               "DOMEvent", DOM, DOMEventMarkerPayload,
               (typeStr, aEvent->mTimeStamp, "DOMEvent", TRACING_INTERVAL_END,
-               docShellId, docShellHistoryId));
+               innerWindowID));
         } else
 #endif
         {

@@ -50,7 +50,7 @@ using mozilla::dom::ContentParent;
 #include "nsISupportsPrimitives.h"
 #include "nsIWidgetListener.h"
 #include "nsIWindowWatcher.h"
-#include "nsIXULWindow.h"
+#include "nsIAppWindow.h"
 
 #include "nsAppShell.h"
 #include "nsFocusManager.h"
@@ -85,7 +85,6 @@ using mozilla::dom::ContentParent;
 #include "AndroidBridge.h"
 #include "AndroidBridgeUtilities.h"
 #include "AndroidUiThread.h"
-#include "FennecJNINatives.h"
 #include "GeckoEditableSupport.h"
 #include "GeneratedJNINatives.h"
 #include "KeyEvent.h"
@@ -98,6 +97,8 @@ using mozilla::dom::ContentParent;
 #include "nsIXULRuntime.h"
 #include "nsPrintfCString.h"
 #include "nsString.h"
+
+#include "JavaBuiltins.h"
 
 #include "mozilla/ipc/Shmem.h"
 
@@ -468,8 +469,7 @@ class nsWindow::NPZCSupport final
       }
 
       uiThread->Dispatch(NS_NewRunnableFunction(
-          "NPZCSupport::OnDetach",
-          [npzc, disposer = std::move(disposer)] {
+          "NPZCSupport::OnDetach", [npzc, disposer = std::move(disposer)] {
             npzc->SetAttached(false);
             disposer->Run();
           }));
@@ -800,7 +800,22 @@ class nsWindow::LayerViewSupport final
   GeckoSession::Compositor::WeakRef mCompositor;
   Atomic<bool, ReleaseAcquire> mCompositorPaused;
   jni::Object::GlobalRef mSurface;
-  std::queue<java::GeckoResult::GlobalRef> mCapturePixelsResults;
+
+  struct CaptureRequest {
+    explicit CaptureRequest() : mResult(nullptr) {}
+    explicit CaptureRequest(java::GeckoResult::GlobalRef aResult,
+                            const ScreenRect& aSource,
+                            const IntSize& aOutputSize)
+        : mResult(aResult), mSource(aSource), mOutputSize(aOutputSize) {}
+
+    // where to send the pixels
+    java::GeckoResult::GlobalRef mResult;
+
+    ScreenRect mSource;
+
+    IntSize mOutputSize;
+  };
+  std::queue<CaptureRequest> mCapturePixelsResults;
 
   // In order to use Event::HasSameTypeAs in PostTo(), we cannot make
   // LayerViewEvent a template because each template instantiation is
@@ -866,7 +881,8 @@ class nsWindow::LayerViewSupport final
            results = &mCapturePixelsResults, window = &mWindow] {
             if (LockedWindowPtr lock{*window}) {
               while (!results->empty()) {
-                auto aResult = java::GeckoResult::LocalRef(results->front());
+                auto aResult =
+                    java::GeckoResult::LocalRef(results->front().mResult);
                 if (aResult) {
                   aResult->CompleteExceptionally(
                       java::sdk::IllegalStateException::New(
@@ -900,19 +916,24 @@ class nsWindow::LayerViewSupport final
     return child.forget();
   }
 
-  int8_t* FlipScreenPixels(Shmem& aMem, const ScreenIntSize& aSize) {
-    const IntSize size(aSize.width, aSize.height);
+  int8_t* FlipScreenPixels(Shmem& aMem, const ScreenIntSize& aInSize,
+                           const ScreenRect& aInRegion,
+                           const IntSize& aOutSize) {
     RefPtr<DataSourceSurface> image = gfx::CreateDataSourceSurfaceFromData(
-        size, SurfaceFormat::B8G8R8A8, aMem.get<uint8_t>(),
-        StrideForFormatAndWidth(SurfaceFormat::B8G8R8A8, aSize.width));
+        IntSize(aInSize.width, aInSize.height), SurfaceFormat::B8G8R8A8,
+        aMem.get<uint8_t>(),
+        StrideForFormatAndWidth(SurfaceFormat::B8G8R8A8, aInSize.width));
     RefPtr<DrawTarget> drawTarget =
         gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(
-            size, SurfaceFormat::B8G8R8A8);
+            aOutSize, SurfaceFormat::B8G8R8A8);
     drawTarget->SetTransform(Matrix::Scaling(1.0, -1.0) *
-                             Matrix::Translation(0, aSize.height));
+                             Matrix::Translation(0, aOutSize.height));
 
-    gfx::Rect drawRect(0, 0, aSize.width, aSize.height);
-    drawTarget->DrawSurface(image, drawRect, drawRect);
+    gfx::Rect srcRect(aInRegion.x,
+                      (aInSize.height - aInRegion.height) - aInRegion.y,
+                      aInRegion.width, aInRegion.height);
+    gfx::Rect destRect(0, 0, aOutSize.width, aOutSize.height);
+    drawTarget->DrawSurface(image, destRect, srcRect);
 
     RefPtr<SourceSurface> snapshot = drawTarget->Snapshot();
     RefPtr<DataSourceSurface> data = snapshot->GetDataSurface();
@@ -959,6 +980,15 @@ class nsWindow::LayerViewSupport final
     }
 
     mWindow->Resize(aLeft, aTop, aWidth, aHeight, /* repaint */ false);
+  }
+
+  void SetDynamicToolbarMaxHeight(int32_t aHeight) {
+    MOZ_ASSERT(NS_IsMainThread());
+    if (!mWindow) {
+      return;  // Already shut down.
+    }
+
+    mWindow->UpdateDynamicToolbarMaxHeight(ScreenIntCoord(aHeight));
   }
 
   void SyncPauseCompositor() {
@@ -1126,13 +1156,18 @@ class nsWindow::LayerViewSupport final
     }
   }
 
-  void RequestScreenPixels(jni::Object::Param aResult) {
+  void RequestScreenPixels(jni::Object::Param aResult, int32_t aXOffset,
+                           int32_t aYOffset, int32_t aSrcWidth,
+                           int32_t aSrcHeight, int32_t aOutWidth,
+                           int32_t aOutHeight) {
     MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
 
     int size = 0;
     if (LockedWindowPtr window{mWindow}) {
-      mCapturePixelsResults.push(
-          java::GeckoResult::GlobalRef(java::GeckoResult::LocalRef(aResult)));
+      mCapturePixelsResults.push(CaptureRequest(
+          java::GeckoResult::GlobalRef(java::GeckoResult::LocalRef(aResult)),
+          ScreenRect(aXOffset, aYOffset, aSrcWidth, aSrcHeight),
+          IntSize(aOutWidth, aOutHeight)));
       size = mCapturePixelsResults.size();
     }
 
@@ -1146,20 +1181,22 @@ class nsWindow::LayerViewSupport final
 
   void RecvScreenPixels(Shmem&& aMem, const ScreenIntSize& aSize) {
     MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
+    CaptureRequest aCaptureRequest;
     java::GeckoResult::LocalRef aResult = nullptr;
     if (LockedWindowPtr window{mWindow}) {
-      aResult = java::GeckoResult::LocalRef(mCapturePixelsResults.front());
+      aCaptureRequest = mCapturePixelsResults.front();
+      aResult = java::GeckoResult::LocalRef(aCaptureRequest.mResult);
       if (aResult) {
         mCapturePixelsResults.pop();
       }
     }
+
     if (aResult) {
-      auto pixels = mozilla::jni::ByteBuffer::New(FlipScreenPixels(aMem, aSize),
-                                                  aMem.Size<int8_t>());
-      auto bitmap = java::sdk::Bitmap::CreateBitmap(
-          aSize.width, aSize.height, java::sdk::Config::ARGB_8888());
-      bitmap->CopyPixelsFromBuffer(pixels);
-      aResult->Complete(bitmap);
+      auto pixels = mozilla::jni::ByteBuffer::New(
+          FlipScreenPixels(aMem, aSize, aCaptureRequest.mSource,
+                           aCaptureRequest.mOutputSize),
+          aMem.Size<int8_t>());
+      aResult->Complete(pixels);
     }
 
     // Pixels have been copied, so Dealloc Shmem
@@ -1287,11 +1324,11 @@ void nsWindow::GeckoViewSupport::Open(
                                       aInitData);
 
   if (window->mWidgetListener) {
-    nsCOMPtr<nsIXULWindow> xulWindow(window->mWidgetListener->GetXULWindow());
-    if (xulWindow) {
-      // Our window is not intrinsically sized, so tell nsXULWindow to
+    nsCOMPtr<nsIAppWindow> appWindow(window->mWidgetListener->GetAppWindow());
+    if (appWindow) {
+      // Our window is not intrinsically sized, so tell AppWindow to
       // not set a size for us.
-      xulWindow->SetIntrinsicallySized(false);
+      appWindow->SetIntrinsicallySized(false);
     }
   }
 }
@@ -1449,6 +1486,7 @@ nsWindow::nsWindow()
     : mScreenId(0),  // Use 0 (primary screen) as the default value.
       mIsVisible(false),
       mParent(nullptr),
+      mDynamicToolbarMaxHeight(0),
       mIsFullScreen(false),
       mIsDisablingWebRender(false) {}
 
@@ -2004,9 +2042,9 @@ void nsWindow::SetNativeData(uint32_t aDataType, uintptr_t aVal) {
 void nsWindow::DispatchHitTest(const WidgetTouchEvent& aEvent) {
   if (aEvent.mMessage == eTouchStart && aEvent.mTouches.Length() == 1) {
     // Since touch events don't get retargeted by PositionedEventTargeting.cpp
-    // code on Fennec, we dispatch a dummy mouse event that *does* get
-    // retargeted. The Fennec browser.js code can use this to activate the
-    // highlight element in case the this touchstart is the start of a tap.
+    // code, we dispatch a dummy mouse event that *does* get retargeted.
+    // Front-end code can use this to activate the highlight element in case
+    // this touchstart is the start of a tap.
     WidgetMouseEvent hittest(true, eMouseHitTest, this,
                              WidgetMouseEvent::eReal);
     hittest.mRefPoint = aEvent.mTouches[0]->mRefPoint;
@@ -2269,6 +2307,22 @@ void nsWindow::RecvScreenPixels(Shmem&& aMem, const ScreenIntSize& aSize) {
   MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
   if (NativePtr<LayerViewSupport>::Locked lvs{mLayerViewSupport}) {
     lvs->RecvScreenPixels(std::move(aMem), aSize);
+  }
+}
+
+void nsWindow::UpdateDynamicToolbarMaxHeight(ScreenIntCoord aHeight) {
+  if (mDynamicToolbarMaxHeight == aHeight) {
+    return;
+  }
+
+  mDynamicToolbarMaxHeight = aHeight;
+
+  if (mWidgetListener) {
+    mWidgetListener->DynamicToolbarMaxHeightChanged(aHeight);
+  }
+
+  if (mAttachedWidgetListener) {
+    mAttachedWidgetListener->DynamicToolbarMaxHeightChanged(aHeight);
   }
 }
 

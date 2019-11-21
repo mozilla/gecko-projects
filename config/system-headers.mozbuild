@@ -814,7 +814,6 @@ system_headers = [
     'synch.h',
     'syncmgr.h',
     'sys/atomic_op.h',
-    'sys/auxv.h',
     'sys/bitypes.h',
     'sys/byteorder.h',
     'syscall.h',
@@ -1321,6 +1320,7 @@ if CONFIG['MOZ_SYSTEM_ICU']:
         'unicode/udata.h',
         'unicode/udatpg.h',
         'unicode/udisplaycontext.h',
+        'unicode/ulistformatter.h',
         'unicode/uenum.h',
         'unicode/uformattedvalue.h',
         'unicode/unistr.h',
@@ -1340,6 +1340,11 @@ if CONFIG['MOZ_WAYLAND']:
         'wayland-client.h',
         'wayland-egl.h',
         'wayland-util.h',
+    ]
+
+if CONFIG['OS_TARGET'] in ('Android', 'Linux', 'FreeBSD'):
+    system_headers += [
+        'sys/auxv.h',
     ]
 
 if CONFIG['OS_TARGET'] == 'Linux' and CONFIG['CPU_ARCH'].startswith('mips'):

@@ -22,10 +22,13 @@ import type { Source, Context } from "../../types";
 // eslint-disable-next-line max-len
 import type { ColumnBreakpoint as ColumnBreakpointType } from "../../selectors/visibleColumnBreakpoints";
 
+type OwnProps = {|
+  editor: Object,
+|};
 type Props = {
   cx: Context,
   editor: Object,
-  selectedSource: Source,
+  selectedSource: ?Source,
   columnBreakpoints: ColumnBreakpointType[],
   breakpointActions: BreakpointItemActions,
 };
@@ -73,7 +76,7 @@ const mapStateToProps = state => ({
   columnBreakpoints: visibleColumnBreakpoints(state),
 });
 
-export default connect(
+export default connect<Props, OwnProps, _, _, _, _>(
   mapStateToProps,
   dispatch => ({ breakpointActions: breakpointItemActions(dispatch) })
 )(ColumnBreakpoints);

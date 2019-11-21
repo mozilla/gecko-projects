@@ -14,11 +14,11 @@
 #ifdef SOLARIS
 #  define _REENTRANT 1
 #endif
+#include <algorithm>
 #include <string.h>
 #include <time.h>
 
 #include "jstypes.h"
-#include "jsutil.h"
 
 #ifdef XP_WIN
 #  include <windef.h>
@@ -50,7 +50,7 @@ int64_t PRMJ_Now() {
 
   // We check the FuzzyFox clock in case it was recently disabled, to prevent
   // time from going backwards.
-  return js::Max(PRMJ_NowImpl(), mozilla::TimeStamp::NowFuzzyTime());
+  return std::max(PRMJ_NowImpl(), mozilla::TimeStamp::NowFuzzyTime());
 }
 
 #if defined(XP_UNIX)

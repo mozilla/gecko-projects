@@ -34,7 +34,6 @@
 #include "mozilla/ServoStyleSetInlines.h"
 #include "mozilla/dom/Element.h"
 #include "nsDisplayList.h"
-#include "nsNodeUtils.h"
 #include "mozAutoDocUpdate.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/ChildIterator.h"
@@ -934,11 +933,10 @@ void nsHTMLFramesetFrame::Reflow(nsPresContext* aPresContext,
     if (firstTime) {
       int32_t childVis;
       nsHTMLFramesetFrame* framesetFrame = do_QueryFrame(child);
-      nsSubDocumentFrame* subdocFrame;
       if (framesetFrame) {
         childVis = framesetFrame->mEdgeVisibility;
         mChildBorderColors[childX] = framesetFrame->mEdgeColors;
-      } else if ((subdocFrame = do_QueryFrame(child))) {
+      } else if (child->IsSubDocumentFrame()) {
         if (eFrameborder_Yes == mChildFrameborder[childX]) {
           childVis = ALL_VIS;
         } else if (eFrameborder_No == mChildFrameborder[childX]) {

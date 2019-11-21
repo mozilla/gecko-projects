@@ -109,8 +109,6 @@ pub enum DisplayInside {
     #[cfg(feature = "gecko")]
     MozGridLine,
     #[cfg(feature = "gecko")]
-    MozStack,
-    #[cfg(feature = "gecko")]
     MozDeck,
     #[cfg(feature = "gecko")]
     MozGroupbox,
@@ -242,8 +240,6 @@ impl Display {
     pub const MozGridGroup: Self = Self::new(DisplayOutside::XUL, DisplayInside::MozGridGroup);
     #[cfg(feature = "gecko")]
     pub const MozGridLine: Self = Self::new(DisplayOutside::XUL, DisplayInside::MozGridLine);
-    #[cfg(feature = "gecko")]
-    pub const MozStack: Self = Self::new(DisplayOutside::XUL, DisplayInside::MozStack);
     #[cfg(feature = "gecko")]
     pub const MozDeck: Self = Self::new(DisplayOutside::XUL, DisplayInside::MozDeck);
     #[cfg(feature = "gecko")]
@@ -398,14 +394,16 @@ impl Display {
             // blockify both to "block".
             #[cfg(feature = "gecko")]
             DisplayOutside::XUL => {
-              if static_prefs::pref!("layout.css.xul-box-display-values.survive-blockification.enabled") {
-                match self.inside() {
-                  DisplayInside::MozInlineBox | DisplayInside::MozBox => Display::MozBox,
-                  _ => Display::Block,
+                if static_prefs::pref!(
+                    "layout.css.xul-box-display-values.survive-blockification.enabled"
+                ) {
+                    match self.inside() {
+                        DisplayInside::MozInlineBox | DisplayInside::MozBox => Display::MozBox,
+                        _ => Display::Block,
+                    }
+                } else {
+                    Display::Block
                 }
-              } else {
-                Display::Block
-              }
             },
             DisplayOutside::Block | DisplayOutside::None => *self,
             #[cfg(any(feature = "servo-layout-2013", feature = "gecko"))]
@@ -617,7 +615,7 @@ impl Parse for Display {
         // Now parse the single-keyword `display` values.
         Ok(try_match_ident_ignore_ascii_case! { input,
             "none" => Display::None,
-            #[cfg(feature = "gecko")]
+            #[cfg(any(feature = "servo-layout-2020", feature = "gecko"))]
             "contents" => Display::Contents,
             "inline-block" => Display::InlineBlock,
             #[cfg(any(feature = "servo-layout-2013", feature = "gecko"))]
@@ -666,8 +664,6 @@ impl Parse for Display {
             "-moz-grid-group" if moz_display_values_enabled(context) => Display::MozGridGroup,
             #[cfg(feature = "gecko")]
             "-moz-grid-line" if moz_display_values_enabled(context) => Display::MozGridLine,
-            #[cfg(feature = "gecko")]
-            "-moz-stack" if moz_display_values_enabled(context) => Display::MozStack,
             #[cfg(feature = "gecko")]
             "-moz-deck" if moz_display_values_enabled(context) => Display::MozDeck,
             #[cfg(feature = "gecko")]
@@ -1153,7 +1149,9 @@ bitflags! {
 fn change_bits_for_longhand(longhand: LonghandId) -> WillChangeBits {
     let mut flags = match longhand {
         LonghandId::Opacity => WillChangeBits::OPACITY,
-        LonghandId::Transform | LonghandId::Translate | LonghandId::Rotate | LonghandId::Scale => {
+        LonghandId::Transform => WillChangeBits::TRANSFORM,
+        #[cfg(feature = "gecko")]
+        LonghandId::Translate | LonghandId::Rotate | LonghandId::Scale | LonghandId::OffsetPath => {
             WillChangeBits::TRANSFORM
         }
         _ => WillChangeBits::empty(),

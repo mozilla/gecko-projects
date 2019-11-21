@@ -66,7 +66,6 @@ LOCAL_INCLUDES += [
     '/docshell/base',
     '/dom/base',
     '/dom/html',
-    '/dom/xbl',
     '/dom/xml',
     '/layout/base',
     '/layout/generic',

@@ -36,7 +36,6 @@
 #include "nsMediaFeatures.h"
 #include "nsPrintfCString.h"
 #include "gfxUserFontSet.h"
-#include "nsBindingManager.h"
 #include "nsWindowSizes.h"
 #include "GeckoProfiler.h"
 

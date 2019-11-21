@@ -14,6 +14,7 @@
 #ifdef XP_WIN
 #  include <windows.h>
 #  include <shlobj.h>
+#  include "mozilla/PolicyChecks.h"
 #endif
 #ifdef XP_UNIX
 #  include <unistd.h>
@@ -470,23 +471,60 @@ bool nsToolkitProfileService::IsProfileForCurrentInstall(
     return false;
   }
 
-  nsCString greDirPath;
-  rv = compatData.GetString("Compatibility", "LastPlatformDir", greDirPath);
+  nsCString lastGreDirStr;
+  rv = compatData.GetString("Compatibility", "LastPlatformDir", lastGreDirStr);
   // If this string is missing then this profile is from an ancient version.
   // We'll opt to use it in this case.
   if (NS_FAILED(rv)) {
     return true;
   }
 
-  nsCOMPtr<nsIFile> greDir;
-  rv = NS_NewNativeLocalFile(EmptyCString(), false, getter_AddRefs(greDir));
+  nsCOMPtr<nsIFile> lastGreDir;
+  rv = NS_NewNativeLocalFile(EmptyCString(), false, getter_AddRefs(lastGreDir));
   NS_ENSURE_SUCCESS(rv, false);
 
-  rv = greDir->SetPersistentDescriptor(greDirPath);
+  rv = lastGreDir->SetPersistentDescriptor(lastGreDirStr);
   NS_ENSURE_SUCCESS(rv, false);
+
+#ifdef XP_WIN
+#  if defined(MOZ_THUNDERBIRD) || defined(MOZ_SUITE)
+  mozilla::PathString lastGreDirPath, currentGreDirPath;
+  lastGreDirPath = lastGreDir->NativePath();
+  currentGreDirPath = currentGreDir->NativePath();
+  if (lastGreDirPath.Equals(currentGreDirPath,
+                            nsCaseInsensitiveStringComparator())) {
+    return true;
+  }
+
+  // Convert a 64-bit install path to what would have been the 32-bit install
+  // path to allow users to migrate their profiles from one to the other.
+  PWSTR pathX86 = nullptr;
+  HRESULT hres =
+      SHGetKnownFolderPath(FOLDERID_ProgramFilesX86, 0, nullptr, &pathX86);
+  if (SUCCEEDED(hres)) {
+    nsDependentString strPathX86(pathX86);
+    if (!StringBeginsWith(currentGreDirPath, strPathX86,
+                          nsCaseInsensitiveStringComparator())) {
+      PWSTR path = nullptr;
+      hres = SHGetKnownFolderPath(FOLDERID_ProgramFiles, 0, nullptr, &path);
+      if (SUCCEEDED(hres)) {
+        if (StringBeginsWith(currentGreDirPath, nsDependentString(path),
+                             nsCaseInsensitiveStringComparator())) {
+          currentGreDirPath.Replace(0, wcslen(path), strPathX86);
+        }
+      }
+      CoTaskMemFree(path);
+    }
+  }
+  CoTaskMemFree(pathX86);
+
+  return lastGreDirPath.Equals(currentGreDirPath,
+                               nsCaseInsensitiveStringComparator());
+#  endif
+#endif
 
   bool equal;
-  rv = greDir->Equals(currentGreDir, &equal);
+  rv = lastGreDir->Equals(currentGreDir, &equal);
   NS_ENSURE_SUCCESS(rv, false);
 
   return equal;
@@ -1272,11 +1310,16 @@ nsresult nsToolkitProfileService::SelectStartupProfile(
 
     mStartupReason = NS_LITERAL_STRING("argument-profile");
 
-    // If a profile path is specified directly on the command line, then
-    // assume that the temp directory is the same as the given directory.
-    GetProfileByDir(lf, lf, getter_AddRefs(mCurrent));
+    GetProfileByDir(lf, nullptr, getter_AddRefs(mCurrent));
     NS_ADDREF(*aRootDir = lf);
-    lf.forget(aLocalDir);
+    // If the root dir matched a profile then use its local dir, otherwise use
+    // the root dir as the local dir.
+    if (mCurrent) {
+      mCurrent->GetLocalDir(aLocalDir);
+    } else {
+      lf.forget(aLocalDir);
+    }
+
     NS_IF_ADDREF(*aProfile = mCurrent);
     return NS_OK;
   }
@@ -1621,9 +1664,16 @@ void nsToolkitProfileService::GetProfileByDir(nsIFile* aRootDir,
     bool equal;
     nsresult rv = profile->mRootDir->Equals(aRootDir, &equal);
     if (NS_SUCCEEDED(rv) && equal) {
+      if (!aLocalDir) {
+        // If no local directory was given then we will just use the normal
+        // local directory for the profile.
+        profile.forget(aResult);
+        return;
+      }
+
       rv = profile->mLocalDir->Equals(aLocalDir, &equal);
       if (NS_SUCCEEDED(rv) && equal) {
-        NS_ADDREF(*aResult = profile);
+        profile.forget(aResult);
         return;
       }
     }
@@ -1797,9 +1847,15 @@ bool nsToolkitProfileService::IsSnapEnvironment() {
  * application versions to different locations, some application sandboxing
  * systems as well as enterprise deployments. This environment variable provides
  * a way to opt out of dedicated profiles for these cases.
+ *
+ * For Windows, we provide a policy to accomplish the same thing.
  */
 bool nsToolkitProfileService::UseLegacyProfiles() {
-  return !!PR_GetEnv("MOZ_LEGACY_PROFILES");
+  bool legacyProfiles = !!PR_GetEnv("MOZ_LEGACY_PROFILES");
+#ifdef XP_WIN
+  legacyProfiles |= PolicyCheckBoolean(L"LegacyProfiles");
+#endif
+  return legacyProfiles;
 }
 
 struct FindInstallsClosure {

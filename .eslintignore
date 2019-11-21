@@ -11,10 +11,6 @@
 # Exclude expected objdirs.
 obj*/
 
-# dom/ exclusions which should be removed (aka ESLint enabled)
-dom/media/test/
-!dom/media/test/marionette/yttest/*.js
-
 # build/ third-party code
 build/pgo/js-input/
 
@@ -60,15 +56,6 @@ browser/extensions/formautofill/phonenumberutils/PhoneNumberMetaData.jsm
 # devtools/ exclusions
 devtools/client/inspector/markup/test/doc_markup_events_*.html
 devtools/client/performance/components/test/test_jit_optimizations_01.html
-devtools/client/shared/test/*.html
-devtools/client/shared/components/test/mochitest/*.html
-!devtools/client/shared/components/test/mochitest/test_stack-trace.html
-devtools/client/storage/test/*.html
-!devtools/client/storage/test/storage-cookies.html
-!devtools/client/storage/test/storage-overflow.html
-!devtools/client/storage/test/storage-search.html
-!devtools/client/storage/test/storage-unsecured-iframe.html
-!devtools/client/storage/test/storage-unsecured-iframe-usercontextid.html
 devtools/server/tests/browser/storage-*.html
 !devtools/server/tests/browser/storage-unsecured-iframe.html
 devtools/server/tests/browser/stylesheets-nested-iframes.html
@@ -128,7 +115,6 @@ devtools/client/shared/source-map/
 devtools/client/shared/vendor/
 devtools/client/shared/sourceeditor/codemirror/*.js
 devtools/client/shared/sourceeditor/codemirror/**/*.js
-devtools/client/shared/sourceeditor/tern/
 devtools/client/shared/sourceeditor/test/cm_mode_ruby.js
 devtools/client/shared/sourceeditor/test/codemirror/
 devtools/server/actors/utils/automation-timeline.js
@@ -165,6 +151,8 @@ dom/encoding/test/file_utf16_be_bom.js
 dom/encoding/test/file_utf16_le_bom.js
 
 # Not parsable
+dom/media/test/marionette/yttest/duration_test.js
+dom/media/test/marionette/yttest/until_end_test.js
 dom/tests/mochitest/general/test_focusrings.xul
 dom/html/test/test_bug677658.html
 
@@ -195,6 +183,7 @@ editor/libeditor/tests/browserscope/
 # Third-party
 gfx/ots/
 gfx/skia/
+gfx/wgpu
 gfx/wr/
 
 # intl/ exclusions
@@ -230,9 +219,6 @@ mobile/android/tests/browser/chrome/tp5/
 # Uses `#filter substitution`
 mobile/android/app/mobile.js
 mobile/android/app/geckoview-prefs.js
-
-# Uses `#expand`
-mobile/android/chrome/content/about.js
 
 # Not much JS to lint and non-standard at that
 mobile/android/installer/

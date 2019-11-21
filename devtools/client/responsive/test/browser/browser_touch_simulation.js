@@ -11,8 +11,6 @@ const PREF_DOM_META_VIEWPORT_ENABLED = "dom.meta-viewport.enabled";
 addRDMTask(TEST_URL, async function({ ui }) {
   reloadOnTouchChange(true);
 
-  await injectEventUtilsInContentTask(ui.getViewportBrowser());
-
   await waitBootstrap(ui);
   await testWithNoTouch(ui);
   await toggleTouchSimulation(ui);
@@ -201,6 +199,29 @@ async function testWithTouch(ui) {
     ok(
       content.document.defaultView.matchMedia("(any-hover: none)").matches,
       "any-hover: none should be matched"
+    );
+  });
+
+  // Capturing touch events with the content window as a registered listener causes the
+  // "changedTouches" field to be undefined when using deprecated TouchEvent APIs.
+  // See Bug 1549220 and Bug 1588438 for more information on this issue.
+  info("Test that changed touches captured on the content window are defined.");
+  await ContentTask.spawn(ui.getViewportBrowser(), {}, async function() {
+    const div = content.document.querySelector("div");
+
+    content.addEventListener(
+      "touchstart",
+      event => {
+        const changedTouch = event.changedTouches[0];
+        ok(changedTouch, "Changed touch is defined.");
+      },
+      true
+    );
+
+    await EventUtils.synthesizeMouseAtCenter(
+      div,
+      { type: "mousedown", isSynthesized: false },
+      content
     );
   });
 }

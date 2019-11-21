@@ -525,6 +525,17 @@ nsresult TextEditor::DeleteSelectionAsAction(EDirection aDirection,
                "operation "
                "unless mutation event listener nests some operations");
 
+  // Although ExtendSelectionForDelete will use nsFrameSelection, if it
+  // still has dirty frame, nsFrameSelection doesn't extend selection
+  // since we block script.
+  RefPtr<PresShell> presShell = GetPresShell();
+  if (presShell) {
+    presShell->FlushPendingNotifications(FlushType::Layout);
+    if (NS_WARN_IF(Destroyed())) {
+      return NS_ERROR_EDITOR_DESTROYED;
+    }
+  }
+
   EditAction editAction = EditAction::eDeleteSelection;
   switch (aDirection) {
     case nsIEditor::ePrevious:
@@ -2071,7 +2082,7 @@ nsresult TextEditor::SelectEntireDocument() {
   if (childNode && EditorBase::IsPaddingBRElementForEmptyLastLine(*childNode)) {
     ErrorResult error;
     MOZ_KnownLive(SelectionRefPtr())
-        ->SetStartAndEndInLimiter(RawRangeBoundary(anonymousDivElement, 0),
+        ->SetStartAndEndInLimiter(RawRangeBoundary(anonymousDivElement, 0u),
                                   EditorRawDOMPoint(childNode), error);
     NS_WARNING_ASSERTION(!error.Failed(),
                          "Failed to select all children of the editor root "
@@ -2272,10 +2283,9 @@ nsresult TextEditor::SetUnmaskRangeInternal(uint32_t aStart, uint32_t aLength,
 
     // Scroll caret into the view since masking or unmasking character may
     // move caret to outside of the view.
-    ScrollSelectionIntoView(false);
-
-    if (NS_WARN_IF(Destroyed())) {
-      return NS_ERROR_EDITOR_DESTROYED;
+    nsresult rv = ScrollSelectionFocusIntoView();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
     }
   }
 

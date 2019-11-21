@@ -349,9 +349,7 @@ class JSFunction : public js::NativeObject {
     struct {
       JSObject* env_; /* environment for new activations */
       union {
-        JSScript* script_;     /* interpreted bytecode descriptor or
-                                  null; use the accessor! */
-        js::LazyScript* lazy_; /* lazily compiled script, or nullptr */
+        js::BaseScript* script_;
         js::SelfHostedLazyScript* selfHostedLazy_;
       } s;
     } scripted;
@@ -407,8 +405,8 @@ class JSFunction : public js::NativeObject {
 
     // Note: this should be kept in sync with
     // FunctionBox::needsCallObjectRegardlessOfBindings().
-    MOZ_ASSERT_IF(nonLazyScript()->funHasExtensibleScope() ||
-                      nonLazyScript()->needsHomeObject() ||
+    MOZ_ASSERT_IF(baseScript()->funHasExtensibleScope() ||
+                      baseScript()->needsHomeObject() ||
                       nonLazyScript()->isDerivedClassConstructor() ||
                       isGenerator() || isAsync(),
                   nonLazyScript()->bodyScope()->hasEnvironment());
@@ -470,6 +468,7 @@ class JSFunction : public js::NativeObject {
   bool hasSelfHostedLazyScript() const {
     return flags_.hasSelfHostedLazyScript();
   }
+  bool hasBaseScript() const { return hasScript() || hasLazyScript(); }
 
   // Arrow functions store their lexical new.target in the first extended slot.
   bool isArrow() const { return flags_.isArrow(); }
@@ -514,11 +513,7 @@ class JSFunction : public js::NativeObject {
   bool needsPrototypeProperty();
 
   /* Returns the strictness of this function, which must be interpreted. */
-  bool strict() const {
-    MOZ_ASSERT(isInterpreted());
-    return isInterpretedLazy() ? lazyScript()->strict()
-                               : nonLazyScript()->strict();
-  }
+  bool strict() const { return baseScript()->strict(); }
 
   void setFlags(uint16_t flags) { flags_ = FunctionFlags(flags); }
   void setFlags(FunctionFlags flags) { flags_ = flags; }
@@ -655,8 +650,8 @@ class JSFunction : public js::NativeObject {
   }
   static size_t offsetOfAtom() { return offsetof(JSFunction, atom_); }
 
-  static bool createScriptForLazilyInterpretedFunction(JSContext* cx,
-                                                       js::HandleFunction fun);
+  static bool delazifyLazilyInterpretedFunction(JSContext* cx,
+                                                js::HandleFunction fun);
   void maybeRelazify(JSRuntime* rt);
 
   // Function Scripts
@@ -674,39 +669,18 @@ class JSFunction : public js::NativeObject {
   //   JSScript, delazifying the function if necessary. This is the safest to
   //   use, but has extra checks, requires a cx and may trigger a GC.
   //
-  // - For inlined functions which may have a LazyScript but whose JSScript
-  //   is known to exist, existingScript() will get the script and delazify
-  //   the function if necessary. If the function should not be delazified,
-  //   use existingScriptNonDelazifying().
-  //
   // - For functions known to have a JSScript, nonLazyScript() will get it.
 
   static JSScript* getOrCreateScript(JSContext* cx, js::HandleFunction fun) {
     MOZ_ASSERT(fun->isInterpreted());
     MOZ_ASSERT(cx);
     if (fun->isInterpretedLazy()) {
-      if (!createScriptForLazilyInterpretedFunction(cx, fun)) {
+      if (!delazifyLazilyInterpretedFunction(cx, fun)) {
         return nullptr;
       }
       return fun->nonLazyScript();
     }
     return fun->nonLazyScript();
-  }
-
-  JSScript* existingScriptNonDelazifying() const {
-    MOZ_ASSERT(isInterpreted());
-    if (isInterpretedLazy()) {
-      // Get the script from the canonical function. Ion used the
-      // canonical function to inline the script and because it has
-      // Baseline code it has not been relazified. Note that we can't
-      // use lazyScript->script_ here as it may be null in some cases,
-      // see bug 976536.
-      js::LazyScript* lazy = lazyScript();
-      JSFunction* fun = lazy->functionNonDelazifying();
-      MOZ_ASSERT(fun);
-      return fun->nonLazyScript();
-    }
-    return nonLazyScript();
   }
 
   JSScript* existingScript() {
@@ -715,7 +689,8 @@ class JSFunction : public js::NativeObject {
       if (shadowZone()->needsIncrementalBarrier()) {
         js::LazyScript::writeBarrierPre(lazyScript());
       }
-      JSScript* script = existingScriptNonDelazifying();
+      JSFunction* canonicalFunction = lazyScript()->function();
+      JSScript* script = canonicalFunction->nonLazyScript();
       flags_.clearInterpretedLazy();
       flags_.setInterpreted();
       initScript(script);
@@ -728,10 +703,10 @@ class JSFunction : public js::NativeObject {
   // builtins don't have a lazy script so in that case we also return nullptr.
   JSFunction* maybeCanonicalFunction() const {
     if (hasScript()) {
-      return nonLazyScript()->functionNonDelazifying();
+      return nonLazyScript()->function();
     }
     if (hasLazyScript()) {
-      return lazyScript()->functionNonDelazifying();
+      return lazyScript()->function();
     }
     return nullptr;
   }
@@ -748,38 +723,37 @@ class JSFunction : public js::NativeObject {
   }
 
   JSScript* nonLazyScript() const {
-    MOZ_ASSERT(!hasUncompletedScript());
+    MOZ_ASSERT(hasScript());
+    MOZ_ASSERT(u.scripted.s.script_);
+    return static_cast<JSScript*>(u.scripted.s.script_);
+  }
+
+  js::LazyScript* lazyScript() const {
+    MOZ_ASSERT(hasLazyScript());
+    MOZ_ASSERT(u.scripted.s.script_);
+    return static_cast<js::LazyScript*>(u.scripted.s.script_);
+  }
+
+  js::SelfHostedLazyScript* selfHostedLazyScript() const {
+    MOZ_ASSERT(hasSelfHostedLazyScript());
+    MOZ_ASSERT(u.scripted.s.selfHostedLazy_);
+    return u.scripted.s.selfHostedLazy_;
+  }
+
+  // Access fields defined on both lazy and non-lazy scripts.
+  js::BaseScript* baseScript() const {
+    MOZ_ASSERT(hasBaseScript());
+    MOZ_ASSERT(u.scripted.s.script_);
     return u.scripted.s.script_;
   }
 
   static bool getLength(JSContext* cx, js::HandleFunction fun,
                         uint16_t* length);
 
-  js::LazyScript* lazyScript() const {
-    MOZ_ASSERT(hasLazyScript() && u.scripted.s.lazy_);
-    return u.scripted.s.lazy_;
-  }
-  js::LazyScript* maybeLazyScript() const {
-    MOZ_ASSERT(hasLazyScript());
-    return u.scripted.s.lazy_;
-  }
-
-  js::SelfHostedLazyScript* selfHostedLazyScript() const {
-    MOZ_ASSERT(hasSelfHostedLazyScript() && u.scripted.s.selfHostedLazy_);
-    return u.scripted.s.selfHostedLazy_;
-  }
-
   js::GeneratorKind generatorKind() const {
-    if (!isInterpreted()) {
-      return js::GeneratorKind::NotGenerator;
+    if (hasBaseScript()) {
+      return baseScript()->generatorKind();
     }
-    if (hasScript()) {
-      return nonLazyScript()->generatorKind();
-    }
-    if (hasLazyScript()) {
-      return lazyScript()->generatorKind();
-    }
-    MOZ_ASSERT(isSelfHostedBuiltin());
     return js::GeneratorKind::NotGenerator;
   }
 
@@ -788,16 +762,9 @@ class JSFunction : public js::NativeObject {
   }
 
   js::FunctionAsyncKind asyncKind() const {
-    if (!isInterpreted()) {
-      return js::FunctionAsyncKind::SyncFunction;
+    if (hasBaseScript()) {
+      return baseScript()->asyncKind();
     }
-    if (hasScript()) {
-      return nonLazyScript()->asyncKind();
-    }
-    if (hasLazyScript()) {
-      return lazyScript()->asyncKind();
-    }
-    MOZ_ASSERT(isSelfHostedBuiltin());
     return js::FunctionAsyncKind::SyncFunction;
   }
 
@@ -805,21 +772,38 @@ class JSFunction : public js::NativeObject {
     return asyncKind() == js::FunctionAsyncKind::AsyncFunction;
   }
 
-  void setScript(JSScript* script) {
-    MOZ_ASSERT(realm() == script->realm());
-    mutableScript() = script;
-  }
-
   void initScript(JSScript* script) {
     MOZ_ASSERT_IF(script, realm() == script->realm());
-    mutableScript().init(script);
+
+    u.scripted.s.script_ = script;
+    MOZ_ASSERT(hasScript());
   }
 
+  void initLazyScript(js::LazyScript* lazy) {
+    MOZ_ASSERT(isInterpreted());
+    flags_.clearInterpreted();
+    flags_.setInterpretedLazy();
+    u.scripted.s.script_ = lazy;
+    MOZ_ASSERT(hasLazyScript());
+  }
+
+  void initSelfHostLazyScript(js::SelfHostedLazyScript* lazy) {
+    MOZ_ASSERT(isInterpreted());
+    flags_.clearInterpreted();
+    flags_.setInterpretedLazy();
+    u.scripted.s.selfHostedLazy_ = lazy;
+    MOZ_ASSERT(hasSelfHostedLazyScript());
+  }
+
+  // Transform from lazy to non-lazy mode.
   void setUnlazifiedScript(JSScript* script) {
     MOZ_ASSERT(isInterpretedLazy());
     if (hasLazyScript()) {
       // Trigger a pre barrier on the lazy script being overwritten.
-      js::LazyScript::writeBarrierPre(lazyScript());
+      if (shadowZone()->needsIncrementalBarrier()) {
+        js::LazyScript::writeBarrierPre(lazyScript());
+      }
+
       if (!lazyScript()->maybeScript()) {
         lazyScript()->initScript(script);
       }
@@ -827,21 +811,6 @@ class JSFunction : public js::NativeObject {
     flags_.clearInterpretedLazy();
     flags_.setInterpreted();
     initScript(script);
-  }
-
-  void initLazyScript(js::LazyScript* lazy) {
-    MOZ_ASSERT(isInterpreted());
-    flags_.clearInterpreted();
-    flags_.setInterpretedLazy();
-    u.scripted.s.lazy_ = lazy;
-  }
-
-  void initSelfHostLazyScript(js::SelfHostedLazyScript* lazy) {
-    MOZ_ASSERT(isInterpreted());
-    MOZ_ASSERT(isSelfHostedBuiltin());
-    flags_.clearInterpreted();
-    flags_.setInterpretedLazy();
-    u.scripted.s.selfHostedLazy_ = lazy;
   }
 
   JSNative native() const {
@@ -920,9 +889,6 @@ class JSFunction : public js::NativeObject {
     return offsetOfNative();
   }
   static unsigned offsetOfScriptOrLazyScript() {
-    static_assert(
-        offsetof(U, scripted.s.script_) == offsetof(U, scripted.s.lazy_),
-        "U.scripted.s.script_ must be at the same offset as lazy_");
     return offsetof(JSFunction, u.scripted.s.script_);
   }
 
@@ -948,11 +914,6 @@ class JSFunction : public js::NativeObject {
                                       int32_t argCount);
 
  private:
-  js::GCPtrScript& mutableScript() {
-    MOZ_ASSERT(hasScript());
-    return *(js::GCPtrScript*)&u.scripted.s.script_;
-  }
-
   inline js::FunctionExtended* toExtended();
   inline const js::FunctionExtended* toExtended() const;
 

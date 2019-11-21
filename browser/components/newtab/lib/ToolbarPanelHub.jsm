@@ -160,7 +160,14 @@ class _ToolbarPanelHub {
       (await this.messages).sort(this._sortWhatsNewMessages);
     const container = doc.getElementById(containerId);
 
-    if (messages && !container.querySelector(".whatsNew-message")) {
+    if (messages) {
+      // Targeting attribute state might have changed making new messages
+      // available and old messages invalid, we need to refresh
+      for (const prevMessageEl of container.querySelectorAll(
+        ".whatsNew-message"
+      )) {
+        container.removeChild(prevMessageEl);
+      }
       let previousDate = 0;
       // Get and store any variable part of the message content
       this.state.contentArguments = await this._contentArguments();
@@ -470,7 +477,7 @@ class _ToolbarPanelHub {
         message_id: message.id,
         bucket_id: message.id,
         event,
-        value: options.value,
+        event_context: options.value,
       });
     }
   }
@@ -502,7 +509,7 @@ class _ToolbarPanelHub {
         const messageEl = this._createHeroElement(win, doc, message);
         container.appendChild(messageEl);
         infoButton.addEventListener("click", toggleMessage);
-        this.sendUserEventTelemetry(win, "IMPRESSION", message.id);
+        this.sendUserEventTelemetry(win, "IMPRESSION", message);
       }
     }
     // Message is collapsed by default. If it was never shown before we want

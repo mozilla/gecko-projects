@@ -10,6 +10,7 @@
 
 #include "Role.h"
 #include "Accessible.h"
+#include "Accessible-inl.h"
 #include "HTMLListAccessible.h"
 #include "SessionAccessibility.h"
 #include "nsAccUtils.h"
@@ -39,7 +40,7 @@ uint16_t TraversalRule::Match(Accessible* aAccessible) {
 
   if ((state & states::OPAQUE1) == 0) {
     nsIFrame* frame = aAccessible->GetFrame();
-    if (frame->StyleEffects()->mOpacity == 0.0f) {
+    if (frame && frame->StyleEffects()->mOpacity == 0.0f) {
       return result | nsIAccessibleTraversalRule::FILTER_IGNORE_SUBTREE;
     }
   }

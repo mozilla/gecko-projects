@@ -111,18 +111,26 @@ JSWindowActorProtocol::FromWebIDLOptions(const nsAString& aName,
     proto->mRemoteTypes = aOptions.mRemoteTypes.Value();
   }
 
-  if (aOptions.mParent.mModuleURI.WasPassed()) {
-    proto->mParent.mModuleURI.emplace(aOptions.mParent.mModuleURI.Value());
+  if (aOptions.mParent.WasPassed()) {
+    proto->mParent.mModuleURI.emplace(aOptions.mParent.Value().mModuleURI);
+  }
+  if (aOptions.mChild.WasPassed()) {
+    proto->mChild.mModuleURI.emplace(aOptions.mChild.Value().mModuleURI);
   }
 
-  if (aOptions.mChild.mModuleURI.WasPassed()) {
-    proto->mChild.mModuleURI.emplace(aOptions.mChild.mModuleURI.Value());
+  if (!aOptions.mChild.WasPassed() && !aOptions.mParent.WasPassed()) {
+    aRv.ThrowDOMException(
+        NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+        NS_LITERAL_CSTRING("No point registering an actor with neither child "
+                           "nor parent specifications."));
+    return nullptr;
   }
 
   // For each event declared in the source dictionary, initialize the
-  // corresponding envent declaration entry in the JSWindowActorProtocol.
-  if (aOptions.mChild.mEvents.WasPassed()) {
-    auto& entries = aOptions.mChild.mEvents.Value().Entries();
+  // corresponding event declaration entry in the JSWindowActorProtocol.
+  if (aOptions.mChild.WasPassed() &&
+      aOptions.mChild.Value().mEvents.WasPassed()) {
+    auto& entries = aOptions.mChild.Value().mEvents.Value().Entries();
     proto->mChild.mEvents.SetCapacity(entries.Length());
 
     for (auto& entry : entries) {
@@ -148,8 +156,9 @@ JSWindowActorProtocol::FromWebIDLOptions(const nsAString& aName,
     }
   }
 
-  if (aOptions.mChild.mObservers.WasPassed()) {
-    proto->mChild.mObservers = aOptions.mChild.mObservers.Value();
+  if (aOptions.mChild.WasPassed() &&
+      aOptions.mChild.Value().mObservers.WasPassed()) {
+    proto->mChild.mObservers = aOptions.mChild.Value().mObservers.Value();
   }
 
   return proto.forget();
@@ -243,8 +252,8 @@ NS_IMETHODIMP JSWindowActorProtocol::Observe(nsISupports* aSubject,
   return NS_OK;
 }
 
-void JSWindowActorProtocol::RegisterListenersFor(EventTarget* aRoot) {
-  EventListenerManager* elm = aRoot->GetOrCreateListenerManager();
+void JSWindowActorProtocol::RegisterListenersFor(EventTarget* aTarget) {
+  EventListenerManager* elm = aTarget->GetOrCreateListenerManager();
 
   for (auto& event : mChild.mEvents) {
     elm->AddEventListenerByType(EventListenerHolder(this), event.mName,
@@ -252,8 +261,8 @@ void JSWindowActorProtocol::RegisterListenersFor(EventTarget* aRoot) {
   }
 }
 
-void JSWindowActorProtocol::UnregisterListenersFor(EventTarget* aRoot) {
-  EventListenerManager* elm = aRoot->GetOrCreateListenerManager();
+void JSWindowActorProtocol::UnregisterListenersFor(EventTarget* aTarget) {
+  EventListenerManager* elm = aTarget->GetOrCreateListenerManager();
 
   for (auto& event : mChild.mEvents) {
     elm->RemoveEventListenerByType(EventListenerHolder(this), event.mName,
@@ -368,7 +377,9 @@ void JSWindowActorService::RegisterWindowActor(
 
   auto entry = mDescriptors.LookupForAdd(aName);
   if (entry) {
-    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    aRv.ThrowDOMException(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+                          nsPrintfCString("'%s' actor is already registered.",
+                                          NS_ConvertUTF16toUTF8(aName).get()));
     return;
   }
 
@@ -376,6 +387,7 @@ void JSWindowActorService::RegisterWindowActor(
   RefPtr<JSWindowActorProtocol> proto =
       JSWindowActorProtocol::FromWebIDLOptions(aName, aOptions, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
+    entry.OrRemove();
     return;
   }
 
@@ -388,9 +400,9 @@ void JSWindowActorService::RegisterWindowActor(
     Unused << cp->SendInitJSWindowActorInfos(ipcInfos);
   }
 
-  // Register event listeners for any existing window roots.
-  for (EventTarget* root : mRoots) {
-    proto->RegisterListenersFor(root);
+  // Register event listeners for any existing chrome targets.
+  for (EventTarget* target : mChromeEventTargets) {
+    proto->RegisterListenersFor(target);
   }
 
   // Add observers to the protocol.
@@ -410,9 +422,9 @@ void JSWindowActorService::UnregisterWindowActor(const nsAString& aName) {
       }
     }
 
-    // Remove listeners for this actor from each of our window roots.
-    for (EventTarget* root : mRoots) {
-      proto->UnregisterListenersFor(root);
+    // Remove listeners for this actor from each of our chrome targets.
+    for (EventTarget* target : mChromeEventTargets) {
+      proto->UnregisterListenersFor(target);
     }
 
     // Remove observers for this actor from observer serivce.
@@ -431,9 +443,9 @@ void JSWindowActorService::LoadJSWindowActorInfos(
         JSWindowActorProtocol::FromIPC(aInfos[i]);
     mDescriptors.Put(aInfos[i].name(), proto);
 
-    // Register listeners for each window root.
-    for (EventTarget* root : mRoots) {
-      proto->RegisterListenersFor(root);
+    // Register listeners for each chrome target.
+    for (EventTarget* target : mChromeEventTargets) {
+      proto->RegisterListenersFor(target);
     }
 
     // Add observers for each actor.
@@ -451,21 +463,21 @@ void JSWindowActorService::GetJSWindowActorInfos(
   }
 }
 
-void JSWindowActorService::RegisterWindowRoot(EventTarget* aRoot) {
-  MOZ_ASSERT(!mRoots.Contains(aRoot));
-  mRoots.AppendElement(aRoot);
+void JSWindowActorService::RegisterChromeEventTarget(EventTarget* aTarget) {
+  MOZ_ASSERT(!mChromeEventTargets.Contains(aTarget));
+  mChromeEventTargets.AppendElement(aTarget);
 
   // Register event listeners on the newly added Window Root.
   for (auto iter = mDescriptors.Iter(); !iter.Done(); iter.Next()) {
-    iter.Data()->RegisterListenersFor(aRoot);
+    iter.Data()->RegisterListenersFor(aTarget);
   }
 }
 
 /* static */
-void JSWindowActorService::UnregisterWindowRoot(EventTarget* aRoot) {
+void JSWindowActorService::UnregisterChromeEventTarget(EventTarget* aTarget) {
   if (gJSWindowActorService) {
-    // NOTE: No need to unregister listeners here, as the root is going away.
-    gJSWindowActorService->mRoots.RemoveElement(aRoot);
+    // NOTE: No need to unregister listeners here, as the target is going away.
+    gJSWindowActorService->mChromeEventTargets.RemoveElement(aTarget);
   }
 }
 

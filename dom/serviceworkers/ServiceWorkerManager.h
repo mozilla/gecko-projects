@@ -14,6 +14,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/ConsoleReportCollector.h"
+#include "mozilla/HashTable.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/Preferences.h"
@@ -76,6 +77,28 @@ class ServiceWorkerUpdateFinishCallback {
  * The ServiceWorkerManager is a per-process global that deals with the
  * installation, querying and event dispatch of ServiceWorkers for all the
  * origins in the process.
+ *
+ * NOTE: the following documentation is a WIP and only applies with
+ * dom.serviceWorkers.parent_intercept=true:
+ *
+ * The ServiceWorkerManager (SWM) is a main-thread, parent-process singleton
+ * that encapsulates the browser-global state of service workers. This state
+ * includes, but is not limited to, all service worker registrations and all
+ * controlled service worker clients. The SWM also provides methods to read and
+ * mutate this state and to dispatch operations (e.g. DOM events such as a
+ * FetchEvent) to service workers.
+ *
+ * Example usage:
+ *
+ * MOZ_ASSERT(NS_IsMainThread(), "SWM is main-thread only");
+ *
+ * RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+ *
+ * // Nullness must be checked by code that possibly executes during browser
+ * // shutdown, which is when the SWM is destroyed.
+ * if (swm) {
+ *   // Do something with the SWM.
+ * }
  */
 class ServiceWorkerManager final : public nsIServiceWorkerManager,
                                    public nsIObserver {
@@ -91,32 +114,6 @@ class ServiceWorkerManager final : public nsIServiceWorkerManager,
   NS_DECL_ISUPPORTS
   NS_DECL_NSISERVICEWORKERMANAGER
   NS_DECL_NSIOBSERVER
-
-  struct RegistrationDataPerPrincipal;
-  nsClassHashtable<nsCStringHashKey, RegistrationDataPerPrincipal>
-      mRegistrationInfos;
-
-  struct ControlledClientData {
-    RefPtr<ClientHandle> mClientHandle;
-    RefPtr<ServiceWorkerRegistrationInfo> mRegistrationInfo;
-
-    ControlledClientData(ClientHandle* aClientHandle,
-                         ServiceWorkerRegistrationInfo* aRegistrationInfo)
-        : mClientHandle(aClientHandle), mRegistrationInfo(aRegistrationInfo) {}
-  };
-
-  nsClassHashtable<nsIDHashKey, ControlledClientData> mControlledClients;
-
-  struct PendingReadyData {
-    RefPtr<ClientHandle> mClientHandle;
-    RefPtr<ServiceWorkerRegistrationPromise::Private> mPromise;
-
-    explicit PendingReadyData(ClientHandle* aClientHandle)
-        : mClientHandle(aClientHandle),
-          mPromise(new ServiceWorkerRegistrationPromise::Private(__func__)) {}
-  };
-
-  nsTArray<UniquePtr<PendingReadyData>> mPendingReadyList;
 
   bool IsAvailable(nsIPrincipal* aPrincipal, nsIURI* aURI);
 
@@ -256,11 +253,6 @@ class ServiceWorkerManager final : public nsIServiceWorkerManager,
   void LoadRegistrations(
       const nsTArray<ServiceWorkerRegistrationData>& aRegistrations);
 
-  // Used by remove() and removeAll() when clearing history.
-  // MUST ONLY BE CALLED FROM UnregisterIfMatchesHost!
-  void ForceUnregister(RegistrationDataPerPrincipal* aRegistrationData,
-                       ServiceWorkerRegistrationInfo* aRegistration);
-
   void MaybeCheckNavigationUpdate(const ClientInfo& aClientInfo);
 
   nsresult SendPushEvent(const nsACString& aOriginAttributes,
@@ -287,7 +279,18 @@ class ServiceWorkerManager final : public nsIServiceWorkerManager,
       const ClientInfo& aClientInfo,
       ServiceWorkerRegistrationInfo** aRegistrationInfo);
 
+  void UpdateControlledClient(const ClientInfo& aOldClientInfo,
+                              const ClientInfo& aNewClientInfo,
+                              const ServiceWorkerDescriptor& aServiceWorker);
+
  private:
+  struct RegistrationDataPerPrincipal;
+
+  static bool FindScopeForPath(const nsACString& aScopeKey,
+                               const nsACString& aPath,
+                               RegistrationDataPerPrincipal** aData,
+                               nsACString& aMatch);
+
   ServiceWorkerManager();
   ~ServiceWorkerManager();
 
@@ -342,11 +345,6 @@ class ServiceWorkerManager final : public nsIServiceWorkerManager,
   static void AddScopeAndRegistration(
       const nsACString& aScope, ServiceWorkerRegistrationInfo* aRegistation);
 
-  static bool FindScopeForPath(const nsACString& aScopeKey,
-                               const nsACString& aPath,
-                               RegistrationDataPerPrincipal** aData,
-                               nsACString& aMatch);
-
   static bool HasScope(nsIPrincipal* aPrincipal, const nsACString& aScope);
 
   static void RemoveScopeAndRegistration(
@@ -389,7 +387,49 @@ class ServiceWorkerManager final : public nsIServiceWorkerManager,
                                  const nsAString& aData,
                                  const nsAString& aBehavior);
 
+  // Used by remove() and removeAll() when clearing history.
+  // MUST ONLY BE CALLED FROM UnregisterIfMatchesHost!
+  void ForceUnregister(RegistrationDataPerPrincipal* aRegistrationData,
+                       ServiceWorkerRegistrationInfo* aRegistration);
+
+  // An "orphaned" registration is one that is unregistered and not controlling
+  // clients. The ServiceWorkerManager must know about all orphaned
+  // registrations to forcefully shutdown all Service Workers during browser
+  // shutdown.
+  void AddOrphanedRegistration(ServiceWorkerRegistrationInfo* aRegistration);
+
+  void RemoveOrphanedRegistration(ServiceWorkerRegistrationInfo* aRegistration);
+
+  HashSet<RefPtr<ServiceWorkerRegistrationInfo>,
+          PointerHasher<ServiceWorkerRegistrationInfo*>>
+      mOrphanedRegistrations;
+
   RefPtr<ServiceWorkerShutdownBlocker> mShutdownBlocker;
+
+  nsClassHashtable<nsCStringHashKey, RegistrationDataPerPrincipal>
+      mRegistrationInfos;
+
+  struct ControlledClientData {
+    RefPtr<ClientHandle> mClientHandle;
+    RefPtr<ServiceWorkerRegistrationInfo> mRegistrationInfo;
+
+    ControlledClientData(ClientHandle* aClientHandle,
+                         ServiceWorkerRegistrationInfo* aRegistrationInfo)
+        : mClientHandle(aClientHandle), mRegistrationInfo(aRegistrationInfo) {}
+  };
+
+  nsClassHashtable<nsIDHashKey, ControlledClientData> mControlledClients;
+
+  struct PendingReadyData {
+    RefPtr<ClientHandle> mClientHandle;
+    RefPtr<ServiceWorkerRegistrationPromise::Private> mPromise;
+
+    explicit PendingReadyData(ClientHandle* aClientHandle)
+        : mClientHandle(aClientHandle),
+          mPromise(new ServiceWorkerRegistrationPromise::Private(__func__)) {}
+  };
+
+  nsTArray<UniquePtr<PendingReadyData>> mPendingReadyList;
 };
 
 }  // namespace dom

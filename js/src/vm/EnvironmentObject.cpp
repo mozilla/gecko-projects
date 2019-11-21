@@ -1336,9 +1336,11 @@ void EnvironmentIter::settle() {
       if (scope->is<LexicalScope>()) {
         MOZ_ASSERT(scope == &env_->as<LexicalEnvironmentObject>().scope());
       } else if (scope->is<FunctionScope>()) {
-        MOZ_ASSERT(
-            scope->as<FunctionScope>().script() ==
-            env_->as<CallObject>().callee().existingScriptNonDelazifying());
+        MOZ_ASSERT(scope->as<FunctionScope>().script() ==
+                   env_->as<CallObject>()
+                       .callee()
+                       .maybeCanonicalFunction()
+                       ->nonLazyScript());
       } else if (scope->is<VarScope>()) {
         MOZ_ASSERT(scope == &env_->as<VarEnvironmentObject>().scope());
       } else if (scope->is<WithScope>()) {
@@ -1426,14 +1428,6 @@ void LiveEnvironmentVal::staticAsserts() {
 
 namespace {
 
-static void ReportOptimizedOut(JSContext* cx, HandleId id) {
-  if (UniqueChars printable =
-          IdToPrintableUTF8(cx, id, IdToPrintableBehavior::IdIsIdentifier)) {
-    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
-                             JSMSG_DEBUG_OPTIMIZED_OUT, printable.get());
-  }
-}
-
 /*
  * DebugEnvironmentProxy is the handler for DebugEnvironmentProxy proxy
  * objects. Having a custom handler (rather than trying to reuse js::Wrapper)
@@ -1505,7 +1499,6 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
       } else {
         script = env->as<ModuleEnvironmentObject>().module().maybeScript();
         if (!script) {
-          *accessResult = ACCESS_LOST;
           return true;
         }
       }
@@ -1827,7 +1820,7 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
   static bool isMissingArgumentsBinding(EnvironmentObject& env) {
     return isFunctionEnvironment(env) && !env.as<CallObject>()
                                               .callee()
-                                              .nonLazyScript()
+                                              .baseScript()
                                               ->argumentsHasVarBinding();
   }
 
@@ -1899,7 +1892,7 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
           }
         }
       }
-      MOZ_ASSERT(callee && callee->nonLazyScript()->argumentsHasVarBinding());
+      MOZ_ASSERT(callee && callee->baseScript()->argumentsHasVarBinding());
     }
 #endif
 
@@ -1960,6 +1953,20 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
     maybeEnv->frame().thisArgument() = thisv;
     *success = true;
     return true;
+  }
+
+  static void reportOptimizedOut(JSContext* cx, HandleId id) {
+    if (isThis(cx, id)) {
+      JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                               JSMSG_DEBUG_OPTIMIZED_OUT, "this");
+      return;
+    }
+
+    if (UniqueChars printable =
+            IdToPrintableUTF8(cx, id, IdToPrintableBehavior::IdIsIdentifier)) {
+      JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                               JSMSG_DEBUG_OPTIMIZED_OUT, printable.get());
+    }
   }
 
  public:
@@ -2077,7 +2084,7 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
       case ACCESS_GENERIC:
         return JS_GetOwnPropertyDescriptorById(cx, env, id, desc);
       case ACCESS_LOST:
-        ReportOptimizedOut(cx, id);
+        reportOptimizedOut(cx, id);
         return false;
       default:
         MOZ_CRASH("bad AccessResult");
@@ -2157,7 +2164,7 @@ class DebugEnvironmentProxyHandler : public BaseProxyHandler {
         }
         return true;
       case ACCESS_LOST:
-        ReportOptimizedOut(cx, id);
+        reportOptimizedOut(cx, id);
         return false;
       default:
         MOZ_CRASH("bad AccessResult");
@@ -3869,7 +3876,7 @@ static bool AnalyzeEntrainedVariablesInScript(JSContext* cx,
 
     buf.printf("Script ");
 
-    if (JSAtom* name = script->functionNonDelazifying()->displayAtom()) {
+    if (JSAtom* name = script->function()->displayAtom()) {
       buf.putString(name);
       buf.printf(" ");
     }
@@ -3877,7 +3884,7 @@ static bool AnalyzeEntrainedVariablesInScript(JSContext* cx,
     buf.printf("(%s:%u) has variables entrained by ", script->filename(),
                script->lineno());
 
-    if (JSAtom* name = innerScript->functionNonDelazifying()->displayAtom()) {
+    if (JSAtom* name = innerScript->function()->displayAtom()) {
       buf.putString(name);
       buf.printf(" ");
     }
@@ -3934,23 +3941,28 @@ bool js::AnalyzeEntrainedVariables(JSContext* cx, HandleScript script) {
     }
 
     JSObject* obj = &gcThing.as<JSObject>();
-    if (obj->is<JSFunction>() && obj->as<JSFunction>().isInterpreted()) {
-      fun = &obj->as<JSFunction>();
-      innerScript = JSFunction::getOrCreateScript(cx, fun);
-      if (!innerScript) {
+    if (!obj->is<JSFunction>()) {
+      continue;
+    }
+
+    fun = &obj->as<JSFunction>();
+    if (!fun->isInterpreted()) {
+      continue;
+    }
+
+    innerScript = JSFunction::getOrCreateScript(cx, fun);
+    if (!innerScript) {
+      return false;
+    }
+
+    if (fun->needsCallObject()) {
+      if (!AnalyzeEntrainedVariablesInScript(cx, script, innerScript)) {
         return false;
       }
+    }
 
-      if (script->functionDelazifying() &&
-          script->functionDelazifying()->needsCallObject()) {
-        if (!AnalyzeEntrainedVariablesInScript(cx, script, innerScript)) {
-          return false;
-        }
-      }
-
-      if (!AnalyzeEntrainedVariables(cx, innerScript)) {
-        return false;
-      }
+    if (!AnalyzeEntrainedVariables(cx, innerScript)) {
+      return false;
     }
   }
 

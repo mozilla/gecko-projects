@@ -226,6 +226,10 @@ class nsWindow final : public nsBaseWidget {
 
   void SetProgress(unsigned long progressPercent);
 
+#ifdef MOZ_WAYLAND
+  void SetEGLNativeWindowSize(const LayoutDeviceIntSize& aEGLWindowSize);
+#endif
+
  private:
   void UpdateAlpha(mozilla::gfx::SourceSurface* aSourceSurface,
                    nsIntRect aBoundsRect);
@@ -247,7 +251,7 @@ class nsWindow final : public nsBaseWidget {
   void DispatchContextMenuEventFromMouseEvent(uint16_t domButton,
                                               GdkEventButton* aEvent);
 #ifdef MOZ_WAYLAND
-  void WaylandEGLSurfaceForceRedraw();
+  void MaybeResumeCompositor();
 #endif
 
  public:
@@ -296,7 +300,7 @@ class nsWindow final : public nsBaseWidget {
                                const mozilla::WidgetKeyboardEvent& aEvent,
                                nsTArray<mozilla::CommandInt>& aCommands,
                                uint32_t aGeckoKeyCode, uint32_t aNativeKeyCode);
-  virtual void GetEditCommands(
+  virtual bool GetEditCommands(
       NativeKeyBindingsType aType, const mozilla::WidgetKeyboardEvent& aEvent,
       nsTArray<mozilla::CommandInt>& aCommands) override;
 
@@ -394,6 +398,9 @@ class nsWindow final : public nsBaseWidget {
   static bool HideTitlebarByDefault();
   static bool GetTopLevelWindowActiveState(nsIFrame* aFrame);
   static bool TitlebarCanUseShapeMask();
+#ifdef MOZ_WAYLAND
+  virtual nsresult GetScreenRect(LayoutDeviceIntRect* aRect) override;
+#endif
 
  protected:
   virtual ~nsWindow();
@@ -438,9 +445,11 @@ class nsWindow final : public nsBaseWidget {
   // Can we access X?
   bool mIsX11Display;
 #ifdef MOZ_WAYLAND
-  bool mNeedsUpdatingEGLSurface;
+  bool mNeedsCompositorResume;
   bool mCompositorInitiallyPaused;
 #endif
+  bool mWindowScaleFactorChanged;
+  int mWindowScaleFactor;
 
  private:
   void DestroyChildWindows();
@@ -616,6 +625,8 @@ class nsWindow final : public nsBaseWidget {
 
   virtual int32_t RoundsWidgetCoordinatesTo() override;
 
+  void UpdateMozWindowActive();
+
   void ForceTitlebarRedraw();
 
   void SetPopupWindowDecoration(bool aShowOnTaskbar);
@@ -626,6 +637,7 @@ class nsWindow final : public nsBaseWidget {
   void HideWaylandTooltips();
   void HideWaylandPopupAndAllChildren();
   void CleanupWaylandPopups();
+  GtkWindow* GetCurrentTopmostWindow();
 
   /**
    * |mIMContext| takes all IME related stuff.

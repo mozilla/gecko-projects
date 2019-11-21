@@ -151,6 +151,7 @@ class WebRenderBridgeParent final
   mozilla::ipc::IPCResult RecvClearCachedResources() override;
   mozilla::ipc::IPCResult RecvScheduleComposite() override;
   mozilla::ipc::IPCResult RecvCapture() override;
+  mozilla::ipc::IPCResult RecvSetTransactionLogging(const bool&) override;
   mozilla::ipc::IPCResult RecvSyncWithCompositor() override;
 
   mozilla::ipc::IPCResult RecvSetConfirmedTargetAPZC(
@@ -295,7 +296,23 @@ class WebRenderBridgeParent final
    *
    * If there is not currently a recorder, this is a no-op.
    */
-  void WriteCollectedFrames();
+  RefPtr<wr::WebRenderAPI::WriteCollectedFramesPromise> WriteCollectedFrames();
+
+#if defined(MOZ_WIDGET_ANDROID)
+  /**
+   * Request a screengrab for android
+   */
+  void RequestScreenPixels(UiCompositorControllerParent* aController);
+  void MaybeCaptureScreenPixels();
+#endif
+  /**
+   * Return the frames collected by the |WebRenderCompositionRecorder| encoded
+   * as data URIs.
+   *
+   * If there is not currently a recorder, this is a no-op and the promise will
+   * be rejected.
+   */
+  RefPtr<wr::WebRenderAPI::GetCollectedFramesPromise> GetCollectedFrames();
 
  private:
   class ScheduleSharedSurfaceRelease;
@@ -547,6 +564,9 @@ class WebRenderBridgeParent final
   wr::NonDefaultRenderRootArray<ScreenRect> mRenderRootRects;
 
   Maybe<wr::RenderRoot> mRenderRoot;
+#if defined(MOZ_WIDGET_ANDROID)
+  UiCompositorControllerParent* mScreenPixelsTarget;
+#endif
   bool mPaused;
   bool mDestroyed;
   bool mReceivedDisplayList;

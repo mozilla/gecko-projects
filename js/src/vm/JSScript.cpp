@@ -17,6 +17,7 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/Unused.h"
+#include "mozilla/Utf8.h"
 #include "mozilla/Vector.h"
 
 #include <algorithm>
@@ -27,7 +28,6 @@
 
 #include "jsapi.h"
 #include "jstypes.h"
-#include "jsutil.h"
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/BytecodeEmitter.h"
@@ -45,6 +45,8 @@
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
 #include "js/Wrapper.h"
+#include "util/Memory.h"
+#include "util/Poison.h"
 #include "util/StringBuffer.h"
 #include "util/Text.h"
 #include "vm/ArgumentsObject.h"
@@ -62,7 +64,9 @@
 #include "vm/Shape.h"
 #include "vm/SharedImmutableStringsCache.h"
 #include "vm/Xdr.h"
-#include "vtune/VTuneWrapper.h"
+#ifdef MOZ_VTUNE
+#  include "vtune/VTuneWrapper.h"
+#endif
 
 #include "debugger/DebugAPI-inl.h"
 #include "gc/Marking-inl.h"
@@ -268,7 +272,7 @@ static XDRResult XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun,
                                        HandleScope enclosingScope,
                                        MutableHandle<LazyScript*> lazy) {
   MOZ_ASSERT_IF(mode == XDR_ENCODE, script->maybeLazyScript());
-  MOZ_ASSERT_IF(mode == XDR_ENCODE, !lazy->numInnerFunctions());
+  MOZ_ASSERT_IF(mode == XDR_ENCODE, !lazy->hasInnerFunctions());
 
   JSContext* cx = xdr->cx();
 
@@ -294,8 +298,8 @@ static XDRResult XDRRelazificationInfo(XDRState<mode>* xdr, HandleFunction fun,
       MOZ_ASSERT(column == lazy->column());
       // We can assert we have no inner functions because we don't
       // relazify scripts with inner functions.  See
-      // JSFunction::createScriptForLazilyInterpretedFunction.
-      MOZ_ASSERT(lazy->numInnerFunctions() == 0);
+      // JSFunction::delazifyLazilyInterpretedFunction.
+      MOZ_ASSERT(!lazy->hasInnerFunctions());
       if (fun->kind() == FunctionFlags::FunctionKind::ClassConstructor) {
         numFieldInitializers =
             (uint32_t)lazy->getFieldInitializers().numFieldInitializers;
@@ -1025,7 +1029,7 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
 
   if (mode == XDR_ENCODE) {
     script = scriptp.get();
-    MOZ_ASSERT(script->functionNonDelazifying() == fun);
+    MOZ_ASSERT(script->function() == fun);
 
     if (!fun && script->treatAsRunOnce() && script->hasRunOnce()) {
       // This is a toplevel or eval script that's runOnce.  We want to
@@ -1202,6 +1206,12 @@ XDRResult js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope,
   }
 
   if (mode == XDR_DECODE) {
+    if (coverage::IsLCovEnabled()) {
+      if (!coverage::InitScriptCoverage(cx, script)) {
+        return xdr->fail(JS::TranscodeResult_Throw);
+      }
+    }
+
     /* see BytecodeEmitter::tellDebuggerAboutCompiledScript */
     if (!fun && !cx->isHelperThreadContext()) {
       DebugAPI::onNewScript(cx, script);
@@ -1247,7 +1257,7 @@ XDRResult js::XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope,
       // to a JSScript. We don't encode it: we can just delazify the
       // lazy script.
 
-      MOZ_ASSERT(fun == lazy->functionNonDelazifying());
+      MOZ_ASSERT(fun == lazy->function());
 
       sourceStart = lazy->sourceStart();
       sourceEnd = lazy->sourceEnd();
@@ -1499,9 +1509,13 @@ js::PCCounts* ScriptCounts::getThrowCounts(size_t offset) {
 }
 
 size_t ScriptCounts::sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) {
-  return mallocSizeOf(this) + pcCounts_.sizeOfExcludingThis(mallocSizeOf) +
-         throwCounts_.sizeOfExcludingThis(mallocSizeOf) +
-         ionCounts_->sizeOfIncludingThis(mallocSizeOf);
+  size_t size = mallocSizeOf(this);
+  size += pcCounts_.sizeOfExcludingThis(mallocSizeOf);
+  size += throwCounts_.sizeOfExcludingThis(mallocSizeOf);
+  if (ionCounts_) {
+    size += ionCounts_->sizeOfIncludingThis(mallocSizeOf);
+  }
+  return size;
 }
 
 js::PCCounts* JSScript::maybeGetPCCounts(jsbytecode* pc) {
@@ -1614,6 +1628,9 @@ void JSScript::resetScriptCounts() {
 void ScriptSourceObject::finalize(JSFreeOp* fop, JSObject* obj) {
   MOZ_ASSERT(fop->onMainThread());
   ScriptSourceObject* sso = &obj->as<ScriptSourceObject>();
+  if (sso->isCanonical()) {
+    sso->source()->finalizeGCData();
+  }
   sso->source()->decref();
 
   // Clear the private value, calling the release hook if necessary.
@@ -1721,8 +1738,14 @@ static MOZ_MUST_USE bool MaybeValidateFilename(
     return true;
   }
 
+  const char* utf8Filename;
+  if (mozilla::IsUtf8(mozilla::MakeStringSpan(filename))) {
+    utf8Filename = filename;
+  } else {
+    utf8Filename = "(invalid UTF-8 filename)";
+  }
   JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_UNSAFE_FILENAME,
-                           filename);
+                           utf8Filename);
   return false;
 }
 
@@ -1910,7 +1933,7 @@ bool ScriptSource::loadSource(JSContext* cx, ScriptSource* ss, bool* loaded) {
 }
 
 /* static */
-JSFlatString* JSScript::sourceData(JSContext* cx, HandleScript script) {
+JSLinearString* JSScript::sourceData(JSContext* cx, HandleScript script) {
   MOZ_ASSERT(script->scriptSource()->hasSourceText());
   return script->scriptSource()->substring(cx, script->sourceStart(),
                                            script->sourceEnd());
@@ -2205,11 +2228,14 @@ ScriptSource::PinnedUnits<Unit>::PinnedUnits(
 template class ScriptSource::PinnedUnits<Utf8Unit>;
 template class ScriptSource::PinnedUnits<char16_t>;
 
-JSFlatString* ScriptSource::substring(JSContext* cx, size_t start,
-                                      size_t stop) {
+JSLinearString* ScriptSource::substring(JSContext* cx, size_t start,
+                                        size_t stop) {
   MOZ_ASSERT(start <= stop);
 
   size_t len = stop - start;
+  if (!len) {
+    return cx->emptyString();
+  }
   UncompressedSourceCache::AutoHoldEntry holder;
 
   // UTF-8 source text.
@@ -2232,11 +2258,14 @@ JSFlatString* ScriptSource::substring(JSContext* cx, size_t start,
   return NewStringCopyN<CanGC>(cx, units.asChars(), len);
 }
 
-JSFlatString* ScriptSource::substringDontDeflate(JSContext* cx, size_t start,
-                                                 size_t stop) {
+JSLinearString* ScriptSource::substringDontDeflate(JSContext* cx, size_t start,
+                                                   size_t stop) {
   MOZ_ASSERT(start <= stop);
 
   size_t len = stop - start;
+  if (!len) {
+    return cx->emptyString();
+  }
   UncompressedSourceCache::AutoHoldEntry holder;
 
   // UTF-8 source text.
@@ -2295,7 +2324,7 @@ bool ScriptSource::appendSubstring(JSContext* cx, StringBuffer& buf,
   }
 }
 
-JSFlatString* ScriptSource::functionBodyString(JSContext* cx) {
+JSLinearString* ScriptSource::functionBodyString(JSContext* cx) {
   MOZ_ASSERT(isFunctionBody());
 
   size_t start =
@@ -2504,6 +2533,7 @@ template bool ScriptSource::assignSource(JSContext* cx,
                                          SourceText<Utf8Unit>& srcBuf);
 
 void ScriptSource::trace(JSTracer* trc) {
+  // This should be kept in sync with ScriptSource::finalizeGCData below.
 #ifdef JS_BUILD_BINAST
   if (data.is<BinAST>()) {
     if (auto& metadata = data.as<BinAST>().metadata) {
@@ -2516,6 +2546,38 @@ void ScriptSource::trace(JSTracer* trc) {
   if (xdrEncoder_) {
     xdrEncoder_->trace(trc);
   }
+}
+
+void ScriptSource::finalizeGCData() {
+  // This should be kept in sync with ScriptSource::trace above.
+
+  // When the canonical ScriptSourceObject's finalizer runs, this
+  // ScriptSource can no longer be accessed from the main
+  // thread. However, an offthread source compression task may still
+  // hold a reference. We must clean up any GC pointers owned by this
+  // ScriptSource now, because trying to run those prebarriers
+  // offthread later will fail.
+  MOZ_ASSERT(TlsContext.get() && TlsContext.get()->isMainThreadContext());
+
+#ifdef JS_BUILD_BINAST
+  if (hasBinASTSource()) {
+    if (auto& metadata = data.as<BinAST>().metadata) {
+      metadata.reset();
+    }
+  }
+#endif  // JS_BUILD_BINAST
+  if (xdrEncoder_) {
+    xdrEncoder_.reset();
+  }
+}
+
+ScriptSource::~ScriptSource() {
+  MOZ_ASSERT(refs == 0);
+
+  // GC pointers must have been cleared earlier, because this destructor could
+  // be called off-thread by SweepCompressionTasks. See above.
+  MOZ_ASSERT(!xdrEncoder_);
+  MOZ_ASSERT_IF(hasBinASTSource(), !data.as<BinAST>().metadata);
 }
 
 static MOZ_MUST_USE bool reallocUniquePtr(UniqueChars& unique, size_t size) {
@@ -2808,8 +2870,8 @@ struct UnretrievableSourceDecoder {
         uncompressedLength_(uncompressedLength) {}
 
   XDRResult decode() {
-    auto sourceUnits =
-        xdr_->cx()->make_pod_array<Unit>(Max<size_t>(uncompressedLength_, 1));
+    auto sourceUnits = xdr_->cx()->make_pod_array<Unit>(
+        std::max<size_t>(uncompressedLength_, 1));
     if (!sourceUnits) {
       return xdr_->fail(JS::TranscodeResult_Throw);
     }
@@ -2994,8 +3056,8 @@ XDRResult ScriptSource::codeBinASTData(XDRState<mode>* const xdr,
   // XDR the BinAST data.
   Maybe<SharedImmutableString> binASTData;
   if (mode == XDR_DECODE) {
-    auto bytes =
-        xdr->cx()->template make_pod_array<char>(Max<size_t>(binASTLength, 1));
+    auto bytes = xdr->cx()->template make_pod_array<char>(
+        std::max<size_t>(binASTLength, 1));
     if (!bytes) {
       return xdr->fail(JS::TranscodeResult_Throw);
     }
@@ -3793,7 +3855,9 @@ PrivateScriptData* PrivateScriptData::new_(JSContext* cx, uint32_t ngcthings) {
 
   js::PrivateScriptData* data = script->data_;
   if (ngcthings) {
-    bce->perScriptData().gcThingList().finish(data->gcthings());
+    if (!bce->perScriptData().gcThingList().finish(cx, data->gcthings())) {
+      return false;
+    }
   }
 
   return true;
@@ -3875,19 +3939,13 @@ JSScript* JSScript::Create(JSContext* cx, HandleObject functionOrGlobal,
   script->setFlag(MutableFlags::TrackRecordReplayProgress,
                   ShouldTrackRecordReplayProgress(script));
 
-  if (coverage::IsLCovEnabled()) {
-    if (!coverage::InitScriptCoverage(cx, script)) {
-      return nullptr;
-    }
-  }
-
   return script;
 }
 
 /* static */ JSScript* JSScript::CreateFromLazy(JSContext* cx,
                                                 Handle<LazyScript*> lazy) {
   RootedScriptSourceObject sourceObject(cx, lazy->sourceObject());
-  RootedObject fun(cx, lazy->functionNonDelazifying());
+  RootedObject fun(cx, lazy->function());
   RootedScript script(cx,
                       JSScript::New(cx, fun, sourceObject, lazy->sourceStart(),
                                     lazy->sourceEnd(), lazy->toStringStart(),
@@ -3898,12 +3956,6 @@ JSScript* JSScript::Create(JSContext* cx, HandleObject functionOrGlobal,
 
   script->setFlag(MutableFlags::TrackRecordReplayProgress,
                   ShouldTrackRecordReplayProgress(script));
-
-  if (coverage::IsLCovEnabled()) {
-    if (!coverage::InitScriptCoverage(cx, script)) {
-      return nullptr;
-    }
-  }
 
   return script;
 }
@@ -4043,6 +4095,7 @@ bool JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script,
   script->setFlag(ImmutableFlags::HasCallSiteObj, bce->hasCallSiteObj);
   script->setFlag(ImmutableFlags::IsForEval, bce->sc->isEvalContext());
   script->setFlag(ImmutableFlags::IsModule, bce->sc->isModuleContext());
+  script->setFlag(ImmutableFlags::IsFunction, bce->sc->isFunctionBox());
   script->setFlag(ImmutableFlags::HasNonSyntacticScope,
                   bce->outermostScope()->hasOnChain(ScopeKind::NonSyntactic));
   script->setFlag(ImmutableFlags::NeedsFunctionEnvironmentObjects,
@@ -4074,7 +4127,8 @@ bool JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script,
     if (fun->isInterpretedLazy()) {
       fun->setUnlazifiedScript(script);
     } else {
-      fun->setScript(script);
+      MOZ_ASSERT(fun->hasUncompletedScript());
+      fun->initScript(script);
     }
   }
 
@@ -4092,6 +4146,12 @@ bool JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script,
 #ifdef DEBUG
   script->assertValidJumpTargets();
 #endif
+
+  if (coverage::IsLCovEnabled()) {
+    if (!coverage::InitScriptCoverage(cx, script)) {
+      return false;
+    }
+  }
 
   scriptDataGuard.release();
   return true;
@@ -4612,7 +4672,7 @@ JSScript* js::detail::CopyScript(JSContext* cx, HandleScript src,
   // should happen if it's set on the source script.
   MOZ_ASSERT(!src->hideScriptFromDebugger());
 
-  if (src->treatAsRunOnce() && !src->functionNonDelazifying()) {
+  if (src->treatAsRunOnce() && !src->isFunction()) {
     JS_ReportErrorASCII(cx, "No cloning toplevel run-once scripts");
     return nullptr;
   }
@@ -4685,7 +4745,19 @@ JSScript* js::CloneGlobalScript(JSContext* cx, ScopeKind scopeKind,
   }
 
   RootedObject global(cx, cx->global());
-  return detail::CopyScript(cx, src, global, sourceObject, &scopes);
+  RootedScript dst(cx,
+                   detail::CopyScript(cx, src, global, sourceObject, &scopes));
+  if (!dst) {
+    return nullptr;
+  }
+
+  if (coverage::IsLCovEnabled()) {
+    if (!coverage::InitScriptCoverage(cx, dst)) {
+      return nullptr;
+    }
+  }
+
+  return dst;
 }
 
 JSScript* js::CloneScriptIntoFunction(
@@ -4734,6 +4806,12 @@ JSScript* js::CloneScriptIntoFunction(
     fun->setUnlazifiedScript(dst);
   } else {
     fun->initScript(dst);
+  }
+
+  if (coverage::IsLCovEnabled()) {
+    if (!coverage::InitScriptCoverage(cx, dst)) {
+      return nullptr;
+    }
   }
 
   return dst;
@@ -4825,6 +4903,15 @@ void RuntimeScriptData::markForCrossZone(JSContext* cx) {
   }
 }
 
+void ScriptWarmUpData::trace(JSTracer* trc) {
+  if (isJitScript()) {
+    toJitScript()->trace(trc);
+    return;
+  }
+
+  MOZ_ASSERT(isWarmUpCount());
+}
+
 void JSScript::traceChildren(JSTracer* trc) {
   // NOTE: this JSScript may be partially initialized at this point.  E.g. we
   // may have created it and partially initialized it with
@@ -4834,10 +4921,6 @@ void JSScript::traceChildren(JSTracer* trc) {
   // Trace base class fields.
   BaseScript::traceChildren(trc);
 
-  MOZ_ASSERT_IF(trc->isMarkingTracer() &&
-                    GCMarker::fromTracer(trc)->shouldCheckCompartments(),
-                zone()->isCollecting());
-
   if (data_) {
     data_->trace(trc);
   }
@@ -4846,12 +4929,14 @@ void JSScript::traceChildren(JSTracer* trc) {
     scriptData()->traceChildren(trc);
   }
 
-  if (jit::JitScript* jitScript = maybeJitScript()) {
-    jitScript->trace(trc);
-  }
+  warmUpData_.trace(trc);
 
   if (maybeLazyScript()) {
     TraceManuallyBarrieredEdge(trc, &lazyScript, "lazyScript");
+  }
+
+  if (hasDebugScript()) {
+    DebugAPI::traceDebugScript(trc, this);
   }
 
   if (trc->isMarkingTracer()) {
@@ -5010,7 +5095,7 @@ void js::SetFrameArgumentsObject(JSContext* cx, AbstractFramePtr frame,
 
 /* static */
 void JSScript::argumentsOptimizationFailed(JSContext* cx, HandleScript script) {
-  MOZ_ASSERT(script->functionNonDelazifying());
+  MOZ_ASSERT(script->isFunction());
   MOZ_ASSERT(script->analyzedArgsUsage());
   MOZ_ASSERT(script->argumentsHasVarBinding());
 
@@ -5269,6 +5354,9 @@ LazyScript* LazyScript::Create(
   if (parseGoal == frontend::ParseGoal::Module) {
     immutableFlags |= uint32_t(ImmutableFlags::IsModule);
   }
+  if (!innerFunctionBoxes.empty()) {
+    immutableFlags |= uint32_t(ImmutableFlags::HasInnerFunctions);
+  }
 
   LazyScript* res = LazyScript::CreateRaw(
       cx, closedOverBindings.length(), innerFunctionBoxes.length(), fun,
@@ -5386,9 +5474,14 @@ void JSScript::resetWarmUpCounterToDelayIonCompilation() {
   // because we don't want scripts to get stuck in the (Baseline) interpreter in
   // pathological cases.
 
-  if (warmUpCount > jit::JitOptions.baselineJitWarmUpThreshold) {
+  if (getWarmUpCount() > jit::JitOptions.baselineJitWarmUpThreshold) {
     incWarmUpResetCounter();
-    warmUpCount = jit::JitOptions.baselineJitWarmUpThreshold;
+    uint32_t newCount = jit::JitOptions.baselineJitWarmUpThreshold;
+    if (warmUpData_.isWarmUpCount()) {
+      warmUpData_.resetWarmUpCount(newCount);
+    } else {
+      warmUpData_.toJitScript()->warmUpCount_ = newCount;
+    }
   }
 }
 

@@ -74,6 +74,7 @@ def build_dict(config, env=os.environ):
 
     d['debug'] = substs.get('MOZ_DEBUG') == '1'
     d['nightly_build'] = substs.get('NIGHTLY_BUILD') == '1'
+    d['early_beta_or_earlier'] = substs.get('EARLY_BETA_OR_EARLIER') == '1'
     d['release_or_beta'] = substs.get('RELEASE_OR_BETA') == '1'
     d['devedition'] = substs.get('MOZ_DEV_EDITION') == '1'
     d['pgo'] = substs.get('MOZ_PGO') == '1'
@@ -116,6 +117,10 @@ def build_dict(config, env=os.environ):
         if d['buildapp'] == 'mobile/android':
             if d['processor'] == 'x86':
                 return 'android-x86'
+            if d['processor'] == 'x86_64':
+                return 'android-x86_64'
+            if d['processor'] == 'aarch64':
+                return 'android-aarch64'
             return 'android-arm'
 
     def guess_buildtype():

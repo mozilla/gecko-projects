@@ -7,8 +7,6 @@
 #ifndef threading_ThreadId_h
 #define threading_ThreadId_h
 
-#include "jsutil.h"
-
 namespace js {
 
 class ThreadId {
@@ -33,6 +31,6 @@ class ThreadId {
   static ThreadId ThisThreadId();
 };
 
-} // namespace js
+}  // namespace js
 
 #endif  // threading_ThreadId_h

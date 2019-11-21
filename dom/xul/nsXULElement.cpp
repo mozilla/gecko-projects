@@ -50,7 +50,6 @@
 #include "nsJSPrincipals.h"
 #include "nsDOMAttributeMap.h"
 #include "nsGkAtoms.h"
-#include "nsNodeUtils.h"
 #include "nsFrameLoader.h"
 #include "mozilla/Logging.h"
 #include "nsIControllers.h"
@@ -65,7 +64,6 @@
 #include "nsReadableUtils.h"
 #include "nsIFrame.h"
 #include "nsNodeInfoManager.h"
-#include "nsXBLBinding.h"
 #include "nsXULTooltipListener.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozAutoDocUpdate.h"
@@ -105,14 +103,8 @@ uint32_t nsXULPrototypeAttribute::gNumCacheFills;
 //
 
 nsXULElement::nsXULElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo)
-    : nsStyledElement(std::move(aNodeInfo)), mBindingParent(nullptr) {
+    : nsStyledElement(std::move(aNodeInfo)) {
   XUL_PROTOTYPE_ATTRIBUTE_METER(gNumElements);
-
-  // We may be READWRITE by default; check.
-  if (IsReadWriteTextElement()) {
-    AddStatesSilently(NS_EVENT_STATE_MOZ_READWRITE);
-    RemoveStatesSilently(NS_EVENT_STATE_MOZ_READONLY);
-  }
 }
 
 nsXULElement::~nsXULElement() {}
@@ -279,17 +271,7 @@ void NS_TrustedNewXULElement(
 //----------------------------------------------------------------------
 // nsISupports interface
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULElement)
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXULElement, nsStyledElement)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBindingParent);
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsXULElement, nsStyledElement)
-  // Why aren't we unlinking the prototype?
-  tmp->ClearHasID();
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mBindingParent);
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_INHERITED(nsXULElement, nsStyledElement)
 
 NS_IMPL_ADDREF_INHERITED(nsXULElement, nsStyledElement)
 NS_IMPL_RELEASE_INHERITED(nsXULElement, nsStyledElement)
@@ -523,8 +505,7 @@ bool nsXULElement::PerformAccesskey(bool aKeyCausesActivation,
         }
       }
     }
-    if (aKeyCausesActivation &&
-        !content->IsAnyOfXULElements(nsGkAtoms::textbox, nsGkAtoms::menulist)) {
+    if (aKeyCausesActivation && !content->IsXULElement(nsGkAtoms::menulist)) {
       elm->ClickWithInputSource(MouseEvent_Binding::MOZ_SOURCE_KEYBOARD,
                                 aIsTrustedEvent);
     }
@@ -602,17 +583,15 @@ nsresult nsXULElement::BindToTree(BindContext& aContext, nsINode& aParent) {
   nsresult rv = nsStyledElement::BindToTree(aContext, aParent);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  Document& doc = aContext.OwnerDoc();
-
-  // FIXME(emilio): Could use IsInComposedDoc().
-  if (!aContext.GetBindingParent() && IsInUncomposedDoc() &&
-      !doc.IsLoadedAsInteractiveData() && !doc.AllowXULXBL() &&
-      !doc.HasWarnedAbout(Document::eImportXULIntoContent)) {
-    nsContentUtils::AddScriptRunner(new XULInContentErrorReporter(doc));
-  }
-
   if (!IsInComposedDoc()) {
     return rv;
+  }
+
+  Document& doc = aContext.OwnerDoc();
+  if (!IsInNativeAnonymousSubtree() && !doc.IsLoadedAsInteractiveData() &&
+      !doc.AllowXULXBL() &&
+      !doc.HasWarnedAbout(Document::eImportXULIntoContent)) {
+    nsContentUtils::AddScriptRunner(new XULInContentErrorReporter(doc));
   }
 
 #ifdef DEBUG
@@ -728,24 +707,9 @@ void nsXULElement::UnregisterAccessKey(const nsAString& aOldValue) {
   //
   Document* doc = GetComposedDoc();
   if (doc && !aOldValue.IsEmpty()) {
-    PresShell* presShell = doc->GetPresShell();
-
-    if (presShell) {
-      Element* element = this;
-
-      // find out what type of content node this is
-      if (mNodeInfo->Equals(nsGkAtoms::label)) {
-        // For anonymous labels the unregistering must
-        // occur on the binding parent control.
-        // XXXldb: And what if the binding parent is null?
-        nsIContent* bindingParent = GetBindingParent();
-        element = bindingParent ? bindingParent->AsElement() : nullptr;
-      }
-
-      if (element) {
-        presShell->GetPresContext()->EventStateManager()->UnregisterAccessKey(
-            element, aOldValue.First());
-      }
+    if (PresShell* presShell = doc->GetPresShell()) {
+      presShell->GetPresContext()->EventStateManager()->UnregisterAccessKey(
+          this, aOldValue.First());
     }
   }
 }
@@ -1023,10 +987,8 @@ void nsXULElement::GetEventTargetParent(EventChainPreVisitor& aVisitor) {
     // in a special way.
     // See if we have a command elt.  If so, we execute on the command
     // instead of on our content element.
-    nsAutoString command;
     if (aVisitor.mDOMEvent && aVisitor.mDOMEvent->AsXULCommandEvent() &&
-        GetAttr(kNameSpaceID_None, nsGkAtoms::command, command) &&
-        !command.IsEmpty()) {
+        HasNonEmptyAttr(nsGkAtoms::command)) {
       // Stop building the event target chain for the original event.
       // We don't want it to propagate to any DOM nodes.
       aVisitor.mCanHandle = false;
@@ -1188,17 +1150,6 @@ nsresult nsXULElement::AddPopupListener(nsAtom* aName) {
                                     TrustedEventsAtSystemGroupBubble());
   }
   return NS_OK;
-}
-
-EventStates nsXULElement::IntrinsicState() const {
-  EventStates state = nsStyledElement::IntrinsicState();
-
-  if (IsReadWriteTextElement()) {
-    state |= NS_EVENT_STATE_MOZ_READWRITE;
-    state &= ~NS_EVENT_STATE_MOZ_READONLY;
-  }
-
-  return state;
 }
 
 //----------------------------------------------------------------------

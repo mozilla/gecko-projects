@@ -18,9 +18,10 @@
 
 class nsISelectionController;
 class EditorInitializerEntryTracker;
-class nsTextEditorState;
 namespace mozilla {
+class AutoTextControlHandlingState;
 class TextEditor;
+class TextControlState;
 enum class PseudoStyleType : uint8_t;
 namespace dom {
 class Element;
@@ -97,8 +98,6 @@ class nsTextControlFrame final : public nsContainerFrame,
 #endif
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override {
-    // nsStackFrame is already both of these, but that's somewhat bogus,
-    // and we really mean it.
     return nsContainerFrame::IsFrameOfType(
         aFlags & ~(nsIFrame::eReplaced | nsIFrame::eReplacedContainsBlock));
   }
@@ -204,7 +203,9 @@ class nsTextControlFrame final : public nsContainerFrame,
  protected:
   class EditorInitializer;
   friend class EditorInitializer;
-  friend class nsTextEditorState;  // needs access to UpdateValueDisplay
+  friend class mozilla::AutoTextControlHandlingState;  // needs access to
+                                                       // CacheValue
+  friend class mozilla::TextControlState;  // needs access to UpdateValueDisplay
 
   // Temp reference to scriptrunner
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(TextControlInitializer, EditorInitializer,

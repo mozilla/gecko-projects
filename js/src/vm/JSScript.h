@@ -16,6 +16,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/Span.h"
+#include "mozilla/Tuple.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Utf8.h"
 #include "mozilla/Variant.h"
@@ -261,7 +262,10 @@ using UniqueScriptCounts = js::UniquePtr<ScriptCounts>;
 using ScriptCountsMap = HashMap<JSScript*, UniqueScriptCounts,
                                 DefaultHasher<JSScript*>, SystemAllocPolicy>;
 
-using ScriptLCovMap = HashMap<JSScript*, coverage::LCovSource*,
+// The 'const char*' for the function name is a pointer within the LCovSource's
+// LifoAlloc and will be discarded at the same time.
+using ScriptLCovEntry = mozilla::Tuple<coverage::LCovSource*, const char*>;
+using ScriptLCovMap = HashMap<JSScript*, ScriptLCovEntry,
                               DefaultHasher<JSScript*>, SystemAllocPolicy>;
 
 #ifdef MOZ_VTUNE
@@ -652,6 +656,8 @@ class ScriptSource {
   // The bytecode cache encoder is used to encode only the content of function
   // which are delazified.  If this value is not nullptr, then each delazified
   // function should be recorded before their first execution.
+  // This value is logically owned by the canonical ScriptSourceObject, and
+  // will be released in the canonical SSO's finalizer.
   UniquePtr<XDRIncrementalEncoder> xdrEncoder_ = nullptr;
 
   // Instant at which the first parse of this source started, or null
@@ -729,7 +735,8 @@ class ScriptSource {
 
   explicit ScriptSource() : id_(++idCount_) {}
 
-  ~ScriptSource() { MOZ_ASSERT(refs == 0); }
+  void finalizeGCData();
+  ~ScriptSource();
 
   void incref() { refs++; }
   void decref() {
@@ -1006,14 +1013,15 @@ class ScriptSource {
     return data.match(UncompressedLengthMatcher());
   }
 
-  JSFlatString* substring(JSContext* cx, size_t start, size_t stop);
-  JSFlatString* substringDontDeflate(JSContext* cx, size_t start, size_t stop);
+  JSLinearString* substring(JSContext* cx, size_t start, size_t stop);
+  JSLinearString* substringDontDeflate(JSContext* cx, size_t start,
+                                       size_t stop);
 
   MOZ_MUST_USE bool appendSubstring(JSContext* cx, js::StringBuffer& buf,
                                     size_t start, size_t stop);
 
   bool isFunctionBody() { return parameterListEnd_ != 0; }
-  JSFlatString* functionBodyString(JSContext* cx);
+  JSLinearString* functionBodyString(JSContext* cx);
 
   void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                               JS::ScriptSourceInfo* info) const;
@@ -1403,7 +1411,7 @@ class BaseScript : public gc::TenuredCell {
   // Object that determines what Realm this script is compiled for. In general
   // this refers to the realm's GlobalObject, but for a lazy-script we instead
   // refer to the associated function.
-  GCPtrObject functionOrGlobal_;
+  const GCPtrObject functionOrGlobal_;
 
   // The ScriptSourceObject for this script.
   GCPtr<ScriptSourceObject*> sourceObject_ = {};
@@ -1546,7 +1554,8 @@ class BaseScript : public gc::TenuredCell {
     // Whether the Parser declared 'arguments'.
     ShouldDeclareArguments = 1 << 25,
 
-    // (1 << 26) is unused.
+    // Script is for function.
+    IsFunction = 1 << 26,
 
     // Whether this script contains a direct eval statement.
     HasDirectEval = 1 << 27,
@@ -1632,6 +1641,15 @@ class BaseScript : public gc::TenuredCell {
 
   uint8_t* jitCodeRaw() const { return jitCodeRaw_; }
 
+  // Canonical function for the script, if it has a function. For global and
+  // eval scripts this is nullptr.
+  JSFunction* function() const {
+    if (functionOrGlobal_->is<JSFunction>()) {
+      return &functionOrGlobal_->as<JSFunction>();
+    }
+    return nullptr;
+  }
+
   JS::Realm* realm() const { return functionOrGlobal_->nonCCWRealm(); }
   JS::Compartment* compartment() const {
     return functionOrGlobal_->compartment();
@@ -1654,6 +1672,12 @@ class BaseScript : public gc::TenuredCell {
   uint32_t sourceLength() const { return sourceEnd_ - sourceStart_; }
   uint32_t toStringStart() const { return toStringStart_; }
   uint32_t toStringEnd() const { return toStringEnd_; }
+
+  void setToStringEnd(uint32_t toStringEnd) {
+    MOZ_ASSERT(toStringStart_ <= toStringEnd);
+    MOZ_ASSERT(toStringEnd_ >= sourceEnd_);
+    toStringEnd_ = toStringEnd;
+  }
 
   uint32_t lineno() const { return lineno_; }
   uint32_t column() const { return column_; }
@@ -1733,7 +1757,7 @@ setterLevel:                                                                  \
   IMMUTABLE_FLAG_GETTER_SETTER_CUSTOM_PUBLIC(FunctionHasThisBinding,
                                              hasThisBinding, HasThisBinding)
   // FunctionHasExtraBodyVarScope: custom logic below.
-  IMMUTABLE_FLAG_GETTER_SETTER(hasMappedArgsObj, HasMappedArgsObj)
+  IMMUTABLE_FLAG_GETTER(hasMappedArgsObj, HasMappedArgsObj)
   IMMUTABLE_FLAG_GETTER_SETTER(hasInnerFunctions, HasInnerFunctions)
   IMMUTABLE_FLAG_GETTER_SETTER_PUBLIC(needsHomeObject, NeedsHomeObject)
   IMMUTABLE_FLAG_GETTER_SETTER_PUBLIC(isDerivedClassConstructor,
@@ -1759,6 +1783,7 @@ setterLevel:                                                                  \
                                NeedsFunctionEnvironmentObjects)
   IMMUTABLE_FLAG_GETTER_SETTER_PUBLIC(shouldDeclareArguments,
                                       ShouldDeclareArguments)
+  IMMUTABLE_FLAG_GETTER(isFunction, IsFunction)
   IMMUTABLE_FLAG_GETTER_SETTER_PUBLIC(hasDirectEval, HasDirectEval)
 
   MUTABLE_FLAG_GETTER_SETTER(warnedAboutUndefinedProp, WarnedAboutUndefinedProp)
@@ -2328,6 +2353,75 @@ using RuntimeScriptDataTable =
 
 extern void SweepScriptData(JSRuntime* rt);
 
+// ScriptWarmUpData represents a pointer-sized field in JSScript that stores
+// one of the following:
+//
+// * The script's warm-up count. This is only used until the script has a
+//   JitScript. The Baseline Interpreter and JITs use the warm-up count stored
+//   in JitScript.
+//
+// * A pointer to the JitScript, when the script is warm enough for the Baseline
+//   Interpreter.
+//
+// Pointer tagging is used to distinguish those states.
+class ScriptWarmUpData {
+  static constexpr uintptr_t NumTagBits = 2;
+  static constexpr uint32_t MaxWarmUpCount = UINT32_MAX >> NumTagBits;
+
+ public:
+  // Public only for the JITs.
+  static constexpr uintptr_t TagMask = (1 << NumTagBits) - 1;
+  static constexpr uintptr_t JitScriptTag = 0;
+  static constexpr uintptr_t WarmUpCountTag = 1;
+
+ private:
+  uintptr_t data_ = 0 | WarmUpCountTag;
+
+  void setWarmUpCount(uint32_t count) {
+    if (count > MaxWarmUpCount) {
+      count = MaxWarmUpCount;
+    }
+    data_ = (uintptr_t(count) << NumTagBits) | WarmUpCountTag;
+  }
+
+ public:
+  void trace(JSTracer* trc);
+
+  bool isWarmUpCount() const { return (data_ & TagMask) == WarmUpCountTag; }
+  bool isJitScript() const { return (data_ & TagMask) == JitScriptTag; }
+
+  uint32_t toWarmUpCount() const {
+    MOZ_ASSERT(isWarmUpCount());
+    return data_ >> NumTagBits;
+  }
+  void resetWarmUpCount(uint32_t count) {
+    MOZ_ASSERT(isWarmUpCount());
+    setWarmUpCount(count);
+  }
+  void incWarmUpCount(uint32_t amount) {
+    MOZ_ASSERT(isWarmUpCount());
+    data_ += uintptr_t(amount) << NumTagBits;
+  }
+
+  jit::JitScript* toJitScript() const {
+    MOZ_ASSERT(isJitScript());
+    static_assert(JitScriptTag == 0, "Code depends on JitScriptTag being zero");
+    return reinterpret_cast<jit::JitScript*>(data_);
+  }
+  void setJitScript(jit::JitScript* jitScript) {
+    MOZ_ASSERT(isWarmUpCount());
+    MOZ_ASSERT((uintptr_t(jitScript) & TagMask) == 0);
+    data_ = uintptr_t(jitScript) | JitScriptTag;
+  }
+  void clearJitScript() {
+    MOZ_ASSERT(isJitScript());
+    setWarmUpCount(0);
+  }
+};
+
+static_assert(sizeof(ScriptWarmUpData) == sizeof(uintptr_t),
+              "JIT code depends on ScriptWarmUpData being pointer-sized");
+
 } /* namespace js */
 
 namespace JS {
@@ -2349,20 +2443,10 @@ class JSScript : public js::BaseScript {
   js::PrivateScriptData* data_ = nullptr;
 
  private:
-  // JIT and type inference data for this script. May be purged on GC.
-  js::jit::JitScript* jitScript_ = nullptr;
+  js::ScriptWarmUpData warmUpData_ = {};
 
   /* Information used to re-lazify a lazily-parsed interpreted function. */
   js::LazyScript* lazyScript = nullptr;
-
-  // 32-bit fields.
-
-  // Number of times the script has been called or has had backedges taken.
-  // When running in ion, also increased for any inlined scripts. Reset if
-  // the script's JIT code is forcibly discarded.
-  mozilla::Atomic<uint32_t, mozilla::Relaxed,
-                  mozilla::recordreplay::Behavior::DontPreserve>
-      warmUpCount = {};
 
   //
   // End of fields.  Start methods.
@@ -2649,8 +2733,8 @@ class JSScript : public js::BaseScript {
   static constexpr size_t offsetOfPrivateScriptData() {
     return offsetof(JSScript, data_);
   }
-  static constexpr size_t offsetOfJitScript() {
-    return offsetof(JSScript, jitScript_);
+  static constexpr size_t offsetOfWarmUpData() {
+    return offsetof(JSScript, warmUpData_);
   }
 
   void updateJitCodeRaw(JSRuntime* rt);
@@ -2669,50 +2753,25 @@ class JSScript : public js::BaseScript {
   void setLazyScript(js::LazyScript* lazy) { lazyScript = lazy; }
   js::LazyScript* maybeLazyScript() { return lazyScript; }
 
-  /*
-   * Original compiled function for the script, if it has a function.
-   * nullptr for global and eval scripts.
-   * The delazifying variant ensures that the function isn't lazy. The
-   * non-delazifying variant must only be used after earlier code has
-   * called ensureNonLazyCanonicalFunction and while the function can't
-   * have been relazified.
-   */
-  inline JSFunction* functionDelazifying() const;
-  JSFunction* functionNonDelazifying() const {
-    if (bodyScope()->is<js::FunctionScope>()) {
-      return bodyScope()->as<js::FunctionScope>().canonicalFunction();
-    }
-    return nullptr;
-  }
-  /*
-   * De-lazifies the canonical function. Must be called before entering code
-   * that expects the function to be non-lazy.
-   */
-  inline void ensureNonLazyCanonicalFunction();
-
   bool isModule() const {
     MOZ_ASSERT(hasFlag(ImmutableFlags::IsModule) ==
                bodyScope()->is<js::ModuleScope>());
     return hasFlag(ImmutableFlags::IsModule);
   }
   js::ModuleObject* module() const {
-    if (isModule()) {
+    if (bodyScope()->is<js::ModuleScope>()) {
       return bodyScope()->as<js::ModuleScope>().module();
     }
     return nullptr;
   }
 
-  bool isGlobalOrEvalCode() const {
-    return bodyScope()->is<js::GlobalScope>() ||
-           bodyScope()->is<js::EvalScope>();
-  }
   bool isGlobalCode() const { return bodyScope()->is<js::GlobalScope>(); }
 
   // Returns true if the script may read formal arguments on the stack
   // directly, via lazy arguments or a rest parameter.
   bool mayReadFrameArgsDirectly();
 
-  static JSFlatString* sourceData(JSContext* cx, JS::HandleScript script);
+  static JSLinearString* sourceData(JSContext* cx, JS::HandleScript script);
 
   MOZ_MUST_USE bool appendSourceDataForToString(JSContext* cx,
                                                 js::StringBuffer& buf);
@@ -2730,9 +2789,9 @@ class JSScript : public js::BaseScript {
  public:
   /* Return whether this script was compiled for 'eval' */
   bool isForEval() const {
-    bool forEval = hasFlag(ImmutableFlags::IsForEval);
-    MOZ_ASSERT_IF(forEval, bodyScope()->is<js::EvalScope>());
-    return forEval;
+    MOZ_ASSERT(hasFlag(ImmutableFlags::IsForEval) ==
+               bodyScope()->is<js::EvalScope>());
+    return hasFlag(ImmutableFlags::IsForEval);
   }
 
   /* Return whether this is a 'direct eval' script in a function scope. */
@@ -2753,16 +2812,16 @@ class JSScript : public js::BaseScript {
    * If this script has a function associated to it, then it is not the
    * top-level of a file.
    */
-  bool isTopLevel() { return code() && !functionNonDelazifying(); }
+  bool isTopLevel() { return code() && !isFunction(); }
 
   /* Ensure the script has a JitScript. */
   inline bool ensureHasJitScript(JSContext* cx, js::jit::AutoKeepJitScripts&);
 
-  bool hasJitScript() const { return jitScript_ != nullptr; }
+  bool hasJitScript() const { return warmUpData_.isJitScript(); }
 
   js::jit::JitScript* jitScript() const {
     MOZ_ASSERT(hasJitScript());
-    return jitScript_;
+    return warmUpData_.toJitScript();
   }
   js::jit::JitScript* maybeJitScript() const {
     return hasJitScript() ? jitScript() : nullptr;
@@ -2850,20 +2909,9 @@ class JSScript : public js::BaseScript {
   void freeScriptData();
 
  public:
-  uint32_t getWarmUpCount() const { return warmUpCount; }
-  uint32_t incWarmUpCounter(uint32_t amount = 1) {
-    return warmUpCount += amount;
-  }
-  uint32_t* addressOfWarmUpCounter() {
-    return reinterpret_cast<uint32_t*>(&warmUpCount);
-  }
-  static size_t offsetOfWarmUpCounter() {
-    return offsetof(JSScript, warmUpCount);
-  }
-  void resetWarmUpCounterForGC() {
-    incWarmUpResetCounter();
-    warmUpCount = 0;
-  }
+  inline uint32_t getWarmUpCount() const;
+  inline void incWarmUpCounter(uint32_t amount = 1);
+  inline void resetWarmUpCounterForGC();
 
   void resetWarmUpCounterToDelayIonCompilation();
 
@@ -2907,6 +2955,10 @@ class JSScript : public js::BaseScript {
 
   js::BytecodeLocation endLocation() const {
     return js::BytecodeLocation(this, codeEnd());
+  }
+
+  js::BytecodeLocation offsetToLocation(uint32_t offset) const {
+    return js::BytecodeLocation(this, offsetToPC(offset));
   }
 
   /*
@@ -3012,13 +3064,6 @@ class JSScript : public js::BaseScript {
 
   inline JSFunction* getFunction(size_t index);
   inline JSFunction* getFunction(jsbytecode* pc);
-
-  JSFunction* function() const {
-    if (functionNonDelazifying()) {
-      return functionNonDelazifying();
-    }
-    return nullptr;
-  }
 
   inline js::RegExpObject* getRegExp(size_t index);
   inline js::RegExpObject* getRegExp(jsbytecode* pc);
@@ -3293,10 +3338,13 @@ class LazyScript : public BaseScript {
       uint32_t sourceStart, uint32_t sourceEnd, uint32_t toStringStart,
       uint32_t toStringEnd, uint32_t lineno, uint32_t column);
 
-  static inline JSFunction* functionDelazifying(JSContext* cx,
-                                                Handle<LazyScript*>);
-  JSFunction* functionNonDelazifying() const {
-    return &functionOrGlobal_->as<JSFunction>();
+  bool canRelazify() const {
+    // Only functions without inner functions or direct eval are re-lazified.
+    // Functions with either of those are on the static scope chain of their
+    // inner functions, or in the case of eval, possibly eval'd inner
+    // functions. Note that if this ever changes, XDRRelazificationInfo will
+    // have to be fixed.
+    return !hasInnerFunctions() && !hasDirectEval();
   }
 
   void initScript(JSScript* script);
@@ -3370,12 +3418,6 @@ class LazyScript : public BaseScript {
   const FieldInitializers& getFieldInitializers() const {
     MOZ_ASSERT(lazyData_);
     return lazyData_->fieldInitializers_;
-  }
-
-  void setToStringEnd(uint32_t toStringEnd) {
-    MOZ_ASSERT(toStringStart_ <= toStringEnd);
-    MOZ_ASSERT(toStringEnd_ >= sourceEnd_);
-    toStringEnd_ = toStringEnd;
   }
 
   // Returns true if the enclosing script has ever been compiled.

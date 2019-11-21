@@ -48,6 +48,9 @@ class ZoneAllCellIter;
 template <typename T>
 class ZoneCellIter;
 
+// A vector of FinalizationRecord objects, or CCWs to them.
+using FinalizationRecordVector = GCVector<HeapPtrObject, 1, ZoneAllocPolicy>;
+
 }  // namespace gc
 
 using StringWrapperMap =
@@ -207,8 +210,8 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
       ShouldDiscardJitScripts discardJitScripts = KeepJitScripts);
 
   void addSizeOfIncludingThis(
-      mozilla::MallocSizeOf mallocSizeOf, size_t* typePool, size_t* regexpZone,
-      size_t* jitZone, size_t* baselineStubsOptimized, size_t* cachedCFG,
+      mozilla::MallocSizeOf mallocSizeOf, JS::CodeSizes* code, size_t* typePool,
+      size_t* regexpZone, size_t* jitZone, size_t* baselineStubsOptimized,
       size_t* uniqueIdMap, size_t* shapeCaches, size_t* atomsMarkBitmaps,
       size_t* compartmentObjects, size_t* crossCompartmentWrappersTables,
       size_t* compartmentsPrivateData, size_t* scriptCountsMapArg);
@@ -310,12 +313,9 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
 #endif
 
   void sweepAfterMinorGC(JSTracer* trc);
-  void sweepBreakpoints(JSFreeOp* fop);
   void sweepUniqueIds();
   void sweepWeakMaps();
   void sweepCompartments(JSFreeOp* fop, bool keepAtleastOne, bool lastGC);
-
-  using DebuggerVector = js::Vector<js::Debugger*, 0, js::SystemAllocPolicy>;
 
  private:
   js::jit::JitZone* createJitZone(JSContext* cx);
@@ -631,7 +631,21 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   // a non-zero value since bug 1458011.
   uint32_t detachedTypedObjects = 0;
 
+  void finishRoots();
+
  private:
+  // A map from finalization group targets to a list of finalization records
+  // representing groups that the target is registered with and their associated
+  // holdings.
+  using FinalizationRecordMap =
+      GCHashMap<js::HeapPtrObject, js::gc::FinalizationRecordVector,
+                js::MovableCellHasher<js::HeapPtrObject>, js::ZoneAllocPolicy>;
+  js::ZoneOrGCTaskData<FinalizationRecordMap> finalizationRecordMap_;
+
+  FinalizationRecordMap& finalizationRecordMap() {
+    return finalizationRecordMap_.ref();
+  }
+
   js::ZoneOrGCTaskData<js::jit::JitZone*> jitZone_;
 
   js::MainThreadData<bool> gcScheduled_;

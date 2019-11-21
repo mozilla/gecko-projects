@@ -8,9 +8,10 @@ import { clearDocuments } from "../utils/editor";
 import sourceQueue from "../utils/source-queue";
 
 import { updateThreads } from "./threads";
+import { evaluateExpressions } from "./expressions";
 
 import { clearWasmStates } from "../utils/wasm";
-import { getMainThread } from "../selectors";
+import { getMainThread, getThreadContext } from "../selectors";
 import type { Action, ThunkArgs } from "./types";
 
 /**
@@ -35,7 +36,6 @@ export function willNavigate(event: Object) {
     clearWasmStates();
     clearDocuments();
     parser.clear();
-    client.detachWorkers();
     const thread = getMainThread(getState());
 
     dispatch({
@@ -48,12 +48,12 @@ export function willNavigate(event: Object) {
 export function connect(
   url: string,
   actor: string,
-  canRewind: boolean,
+  traits: Object,
   isWebExtension: boolean
 ) {
-  return async function({ dispatch }: ThunkArgs) {
+  return async function({ dispatch, getState }: ThunkArgs) {
     await dispatch(updateThreads());
-    dispatch(
+    await dispatch(
       ({
         type: "CONNECT",
         mainThread: {
@@ -62,10 +62,13 @@ export function connect(
           type: "mainThread",
           name: L10N.getStr("mainThread"),
         },
-        canRewind,
+        traits,
         isWebExtension,
       }: Action)
     );
+
+    const cx = getThreadContext(getState());
+    dispatch(evaluateExpressions(cx));
   };
 }
 
@@ -74,7 +77,8 @@ export function connect(
  * @static
  */
 export function navigated() {
-  return async function({ panel }: ThunkArgs) {
+  return async function({ dispatch, panel }: ThunkArgs) {
+    await dispatch(updateThreads());
     panel.emit("reloaded");
   };
 }

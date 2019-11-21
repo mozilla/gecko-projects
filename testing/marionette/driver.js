@@ -97,8 +97,6 @@ const SUPPORTED_STRATEGIES = new Set([
   element.Strategy.ID,
   element.Strategy.TagName,
   element.Strategy.XPath,
-  element.Strategy.Anon,
-  element.Strategy.AnonAttribute,
 ]);
 
 // Timeout used to abort fullscreen, maximize, and minimize
@@ -1804,37 +1802,6 @@ GeckoDriver.prototype.switchToFrame = async function(cmd) {
         return;
       }
 
-      // Check if the frame is XBL anonymous
-      let parent = curWindow.document.getBindingParent(wantedFrame);
-      // Shadow nodes also show up in getAnonymousNodes, we should
-      // ignore them.
-      if (
-        parent &&
-        !(parent.shadowRoot && parent.shadowRoot.contains(wantedFrame))
-      ) {
-        const doc = curWindow.document;
-        let anonNodes = [...(doc.getAnonymousNodes(parent) || [])];
-        if (anonNodes.length > 0) {
-          let el = wantedFrame;
-          while (el) {
-            if (anonNodes.indexOf(el) > -1) {
-              curWindow = wantedFrame.contentWindow;
-              this.curFrame = curWindow;
-              if (focus) {
-                this.curFrame.focus();
-              }
-              checkTimer.initWithCallback(
-                checkLoad.bind(this),
-                100,
-                Ci.nsITimer.TYPE_ONE_SHOT
-              );
-              return;
-            }
-            el = el.parentNode;
-          }
-        }
-      }
-
       // else, assume iframe
       let frames = curWindow.document.getElementsByTagName("iframe");
       let numFrames = frames.length;
@@ -2660,7 +2627,7 @@ GeckoDriver.prototype.clearElement = async function(cmd) {
     case Context.Chrome:
       // the selenium atom doesn't work here
       let el = this.curBrowser.seenEls.get(webEl);
-      if (el.nodeName == "textbox") {
+      if (el.nodeName == "input" && el.type == "text") {
         el.value = "";
       } else if (el.nodeName == "checkbox") {
         el.checked = false;
@@ -3019,6 +2986,7 @@ GeckoDriver.prototype.deleteSession = function() {
  */
 GeckoDriver.prototype.takeScreenshot = async function(cmd) {
   let win = assert.open(this.getCurrentWindow());
+  await this._handleUserPrompts();
 
   let { id, full, hash, scroll } = cmd.parameters;
   let format = hash ? capture.Format.Hash : capture.Format.Base64;

@@ -154,6 +154,79 @@ And the related Glean SDK metric
 The ``ipc.message.gpu_size`` metric in the Glean SDK will now contain all the data coming exclusively from the GPU process.
 Similar definitions can be used for the other processes.
 
+Reporting a scalar
+==================
+Exfiltrating existing boolean, string or uint scalars, or adding new ones, is a relatively straightforward process made up of a few small steps.
+
+Tag scalars in ``Scalars.yaml``
+----------------------------------
+Accumulations to non-tagged scalars are ignored if streaming Telemetry is enabled.
+To tag a scalar you must add the `geckoview_streaming` product to the `products list <https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/collection/scalars.html#required-fields>`__  in the `Scalars.yaml file <https://hg.mozilla.org/mozilla-central/file/tip/toolkit/components/telemetry/Scalars.yaml>`__ .
+
+Add Glean metrics to ``metrics.yaml``
+-------------------------------------
+The Glean SDK provides the `Quantity <https://mozilla.github.io/glean/book/user/metrics/quantity.html>`__, `Boolean <https://mozilla.github.io/glean/book/user/metrics/boolean.html>`__ and `String <https://mozilla.github.io/glean/book/user/metrics/string.html>`__ metric types to map Gecko scalars to.
+However, Gecko scalars lack the metadata to infer the Glean SDK destination type manually.
+For this reason, engineers must pick the most appropriate Gecko SDK type themselves.
+
+Read more about how to add Glean SDK metrics to the `metrics.yaml file <https://hg.mozilla.org/mozilla-central/file/tip/toolkit/components/telemetry/geckoview/streaming/metrics.yaml>`__ in the `Glean SDK documentation <https://mozilla.github.io/glean/book/user/adding-new-metrics.html>`__.
+
+.. important::
+
+    Every new or changed data collection in Firefox needs a `data collection review <https://wiki.mozilla.org/Firefox/Data_Collection>`__ from a Data Steward.
+
+Example: reporting the display width from Gecko
+-----------------------------------------------
+The first step is to add the relevant Gecko scalar with its streaming telemetry tag (i.e. ``geckoview_streaming``) in the ``Scalars.yaml`` file.
+
+.. code-block:: yaml
+
+  gfx.info:
+    display_width:
+      bug_numbers:
+        - 1514840
+      description: >
+        The width of the main display as detected by Gecko.
+      kind: uint
+      expires: never
+      notification_emails:
+        - gfx-telemetry-alerts@mozilla.com
+        - rhunt@mozilla.com
+      products:
+        - 'firefox'
+        - 'fennec'
+        - 'geckoview'
+        - 'geckoview_streaming'
+      record_in_processes:
+        - 'main'
+
+.. note::
+
+    Scalars with ``"release_channel_collection": "opt-in"``, or without a ``release_channel_collection`` specified in its definition are only collected on Gecko built for ``"nightly"`` and ``"beta"`` channels.
+
+Since this is a uint scalar, it can be added as follows to the ``metrics.yaml`` file:
+
+.. code-block:: yaml
+
+  gfx.display:
+    width:
+      type: quantity
+      description: The width of the display, in pixels.
+      unit: pixels
+      gecko_datapoint: gfx.info.display_width
+      description: |
+        Duration of a checkerboard event.
+      bugs:
+        - 1514840
+      data_reviews:
+        - https://example.com/data-review-url-example
+      notification_emails:
+        - gfx-telemetry-alerts@mozilla.com
+        - rhunt@mozilla.com
+      expires: never
+
+Please note that the ``gecko_datapoint`` property will need to point to the name of the scalar exactly as written in the ``Scalars.yaml`` file.
+
 How to access the data?
 =======================
 Once a new build of Gecko will be provided through `Maven <https://maven.mozilla.org/?prefix=maven2/org/mozilla/geckoview>`__, the Android Components team will automatically pick it up.
@@ -164,8 +237,22 @@ For example, if Fenix Release depends on the ``engine-gecko (release)`` channel,
 
 Unless `Glean custom pings <https://mozilla.github.io/glean/book/user/pings/custom.html>`__ are used, all the metrics are reported through the `Glean metrics ping <https://mozilla.github.io/glean/book/user/pings/metrics.html>`__.
 
+Testing your metrics
+====================
+At this time, the procedure for testing that metrics are correctly exfiltrated from GeckoView to Glean SDK-enabled products is a bit involved.
+
+1. After adding your metric as described in the previous section, substitute the locally built GeckoView in your local copy of `Android Components <https://github.com/mozilla-mobile/android-components/>`__ as described in the `GeckoView docs <https://mozilla.github.io/geckoview/contributor/geckoview-quick-start#dependency-substiting-your-local-geckoview-into-a-mozilla-project>`__.
+2. In Android Components, follow the `instructions to enable upload <https://github.com/mozilla-mobile/android-components/tree/master/samples/browser#glean-sdk-support>`__ in the `samples-browser` application.
+3. Build Android Components and the `samples-browser` application.
+4. Use the Glean SDK `debugging features <https://mozilla.github.io/glean/book/user/debugging.html>`__ to either dump the `metrics` ping or send it to the `Glean Debug View <https://docs.telemetry.mozilla.org/concepts/glean/debug_ping_view.html>`__.
+
+.. note::
+
+    It is important to substitute GeckoView in Android Components, even if it's possible to substitute it directly in the final product. This is because the bulk of the processing happens in Android Components, in the `engine-gecko-*` components wrapping GeckoView.
+
 Unsupported features
 ====================
 This is the list of the currently unsupported features:
 
-* `categorical histograms <../collection/histograms.html#categorical>`__ (`bug 1571740 <https://bugzilla.mozilla.org/show_bug.cgi?id=1571740>`__);
+* `keyed scalars <https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/telemetry/collection/scalars.html#keyed-scalars>`__ are not supported and there are no future plans for supporting them;
+* uint scalar operations other than `set <https://firefox-source-docs.mozilla.org/toolkit/components/telemetry/telemetry/collection/scalars.html#id2>`__ are not supported and there are no future plans for supporting them.

@@ -288,12 +288,10 @@ nsresult HTMLEditor::DoInsertHTMLWithContext(
 
     if (aClearStyle) {
       // pasting does not inherit local inline styles
-      nsCOMPtr<nsINode> tmpNode = SelectionRefPtr()->GetAnchorNode();
-      int32_t tmpOffset =
-          static_cast<int32_t>(SelectionRefPtr()->AnchorOffset());
-      rv = ClearStyle(address_of(tmpNode), &tmpOffset, nullptr, nullptr);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
+      EditResult result = ClearStyleAt(
+          EditorDOMPoint(SelectionRefPtr()->AnchorRef()), nullptr, nullptr);
+      if (NS_WARN_IF(result.Failed())) {
+        return result.Rv();
       }
     }
   } else {
@@ -497,9 +495,10 @@ nsresult HTMLEditor::DoInsertHTMLWithContext(
                   pointToInsert.GetContainer()->GetParentNode(),
                   "Insertion point is out of the DOM tree");
               if (pointToInsert.GetContainer()->GetParentNode()) {
-                DeleteNodeWithTransaction(
-                    MOZ_KnownLive(*pointToInsert.GetContainer()));
                 pointToInsert.Set(pointToInsert.GetContainer());
+                AutoEditorDOMPointChildInvalidator lockOffset(pointToInsert);
+                DeleteNodeWithTransaction(
+                    MOZ_KnownLive(*pointToInsert.GetChild()));
               }
             }
           }
@@ -1322,7 +1321,9 @@ nsresult HTMLEditor::InsertFromTransferable(nsITransferable* transferable,
   }
 
   // Try to scroll the selection into view if the paste succeeded
-  ScrollSelectionIntoView(false);
+  DebugOnly<nsresult> rvIgnored = ScrollSelectionFocusIntoView();
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
+                       "ScrollSelectionFocusIntoView() failed, but ignored");
   return NS_OK;
 }
 

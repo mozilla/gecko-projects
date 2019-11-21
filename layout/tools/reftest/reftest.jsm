@@ -796,6 +796,9 @@ function DoneTests()
         }
 
         function onStopped() {
+            if (g.logFile) {
+                g.logFile.close()
+            }
             let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"].getService(Ci.nsIAppStartup);
             appStartup.quit(Ci.nsIAppStartup.eForceQuit);
         }
@@ -1388,6 +1391,13 @@ function DoAssertionCheck(numAsserts)
         var minAsserts = g.urls[0].minAsserts;
         var maxAsserts = g.urls[0].maxAsserts;
 
+        if (numAsserts < minAsserts) {
+            ++g.testResults.AssertionUnexpectedFixed;
+        } else if (numAsserts > maxAsserts) {
+            ++g.testResults.AssertionUnexpected;
+        } else if (numAsserts != 0) {
+            ++g.testResults.AssertionKnown;
+        }
         logger.assertionCount(g.urls[0].identifier, numAsserts, minAsserts, maxAsserts);
     }
 
@@ -1500,6 +1510,17 @@ function RegisterMessageListenersAndLoadContentScript()
     );
 
     g.browserMessageManager.loadFrameScript("resource://reftest/reftest-content.js", true, true);
+
+    ChromeUtils.registerWindowActor("ReftestFission", {
+        parent: {
+          moduleURI: "resource://reftest/ReftestFissionParent.jsm",
+        },
+        child: {
+          moduleURI: "resource://reftest/ReftestFissionChild.jsm",
+        },
+        allFrames: true,
+        includeChrome: true,
+    });
 }
 
 function RecvAssertionCount(count)
@@ -1563,6 +1584,9 @@ function RecvLog(type, msg)
         TestBuffer(msg);
     } else if (type == "warning") {
         logger.warning(msg);
+    } else if (type == "error") {
+        logger.error("REFTEST TEST-UNEXPECTED-FAIL | " + g.currentURL + " | " + msg + "\n");
+        ++g.testResults.Exception;
     } else {
         logger.error("REFTEST TEST-UNEXPECTED-FAIL | " + g.currentURL + " | unknown log type " + type + "\n");
         ++g.testResults.Exception;

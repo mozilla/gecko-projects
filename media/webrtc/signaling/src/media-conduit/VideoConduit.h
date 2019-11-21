@@ -76,6 +76,9 @@ class WebrtcVideoConduit
   // VoiceEngine defined constant for Payload Name Size.
   static const unsigned int CODEC_PLNAME_SIZE;
 
+  // Returns true when both encoder and decoder are HW accelerated.
+  static bool HasH264Hardware();
+
   MediaConduitErrorCode SetLocalRTPExtensions(
       MediaSessionConduitLocalDirection aDirection,
       const RtpExtList& aExtensions) override;
@@ -102,6 +105,8 @@ class WebrtcVideoConduit
    * feed in received RTCP Frames to the VideoEngine for decoding
    */
   MediaConduitErrorCode ReceivedRTCPPacket(const void* data, int len) override;
+  Maybe<DOMHighResTimeStamp> LastRtcpReceived() const override;
+  DOMHighResTimeStamp GetNow() const override { return mCall->GetNow(); }
 
   MediaConduitErrorCode StopTransmitting() override;
   MediaConduitErrorCode StartTransmitting() override;
@@ -227,7 +232,7 @@ class WebrtcVideoConduit
   }
 
   WebrtcVideoConduit(RefPtr<WebRtcCallWrapper> aCall,
-                     nsCOMPtr<nsIEventTarget> aStsThread);
+                     nsCOMPtr<nsISerialEventTarget> aStsThread);
   virtual ~WebrtcVideoConduit();
 
   MediaConduitErrorCode InitMain();
@@ -297,13 +302,13 @@ class WebrtcVideoConduit
    */
   class CallStatistics {
    public:
-    explicit CallStatistics(nsCOMPtr<nsIEventTarget> aStatsThread)
+    explicit CallStatistics(nsCOMPtr<nsISerialEventTarget> aStatsThread)
         : mStatsThread(aStatsThread) {}
     void Update(const webrtc::Call::Stats& aStats);
     Maybe<DOMHighResTimeStamp> RttSec() const;
 
    protected:
-    const nsCOMPtr<nsIEventTarget> mStatsThread;
+    const nsCOMPtr<nsISerialEventTarget> mStatsThread;
 
    private:
     Maybe<DOMHighResTimeStamp> mRttSec = Nothing();
@@ -315,7 +320,7 @@ class WebrtcVideoConduit
    */
   class StreamStatistics {
    public:
-    explicit StreamStatistics(nsCOMPtr<nsIEventTarget> aStatsThread)
+    explicit StreamStatistics(nsCOMPtr<nsISerialEventTarget> aStatsThread)
         : mStatsThread(aStatsThread) {}
     void Update(const double aFrameRate, const double aBitrate,
                 const webrtc::RtcpPacketTypeCounter& aPacketCounts);
@@ -339,7 +344,7 @@ class WebrtcVideoConduit
     virtual bool IsSend() const { return false; };
 
    protected:
-    const nsCOMPtr<nsIEventTarget> mStatsThread;
+    const nsCOMPtr<nsISerialEventTarget> mStatsThread;
 
    private:
     bool mActive = false;
@@ -353,9 +358,9 @@ class WebrtcVideoConduit
    */
   class SendStreamStatistics : public StreamStatistics {
    public:
-    explicit SendStreamStatistics(nsCOMPtr<nsIEventTarget> aStatsThread)
+    explicit SendStreamStatistics(nsCOMPtr<nsISerialEventTarget> aStatsThread)
         : StreamStatistics(
-              std::forward<nsCOMPtr<nsIEventTarget>>(aStatsThread)) {}
+              std::forward<nsCOMPtr<nsISerialEventTarget>>(aStatsThread)) {}
     /**
      * Returns the calculate number of dropped frames
      */
@@ -397,9 +402,10 @@ class WebrtcVideoConduit
    */
   class ReceiveStreamStatistics : public StreamStatistics {
    public:
-    explicit ReceiveStreamStatistics(nsCOMPtr<nsIEventTarget> aStatsThread)
+    explicit ReceiveStreamStatistics(
+        nsCOMPtr<nsISerialEventTarget> aStatsThread)
         : StreamStatistics(
-              std::forward<nsCOMPtr<nsIEventTarget>>(aStatsThread)) {}
+              std::forward<nsCOMPtr<nsISerialEventTarget>>(aStatsThread)) {}
     uint32_t BytesSent() const;
     /**
      * Returns the number of discarded packets
@@ -473,7 +479,7 @@ class WebrtcVideoConduit
 
   // Socket transport service thread that runs stats queries against us. Any
   // thread.
-  const nsCOMPtr<nsIEventTarget> mStsThread;
+  const nsCOMPtr<nsISerialEventTarget> mStsThread;
 
   Mutex mMutex;
 
@@ -624,6 +630,9 @@ class WebrtcVideoConduit
 
   // Main thread only
   std::string mPCHandle;
+
+  // Accessed only on mStsThread
+  Maybe<DOMHighResTimeStamp> mLastRtcpReceived;
 };
 }  // namespace mozilla
 

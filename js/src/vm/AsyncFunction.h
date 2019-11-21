@@ -17,6 +17,8 @@ namespace js {
 
 class AsyncFunctionGeneratorObject;
 
+extern const JSClass AsyncFunctionClass;
+
 // Resume the async function when the `await` operand resolves.
 // Split into two functions depending on whether the awaited value was
 // fulfilled or rejected.

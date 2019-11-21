@@ -61,8 +61,8 @@ const char XPC_SCRIPT_ERROR_CONTRACTID[] = "@mozilla.org/scripterror;1";
 /***************************************************************************/
 
 // This global should be used very sparingly: only to create and destroy
-// nsXPConnect and when creating a new cooperative (non-primary) XPCJSContext.
-static XPCJSContext* gPrimaryContext;
+// nsXPConnect.
+static XPCJSContext* gContext;
 
 nsXPConnect::nsXPConnect() : mShuttingDown(false) {
   XPCJSContext::InitTLS();
@@ -72,16 +72,16 @@ nsXPConnect::nsXPConnect() : mShuttingDown(false) {
                                   profiler_unregister_thread);
 #endif
 
-  XPCJSContext* xpccx = XPCJSContext::NewXPCJSContext(nullptr);
+  XPCJSContext* xpccx = XPCJSContext::NewXPCJSContext();
   if (!xpccx) {
     MOZ_CRASH("Couldn't create XPCJSContext.");
   }
-  gPrimaryContext = xpccx;
+  gContext = xpccx;
   mRuntime = xpccx->Runtime();
 }
 
 nsXPConnect::~nsXPConnect() {
-  MOZ_ASSERT(XPCJSContext::Get() == gPrimaryContext);
+  MOZ_ASSERT(XPCJSContext::Get() == gContext);
 
   mRuntime->DeleteSingletonScopes();
 
@@ -109,7 +109,7 @@ nsXPConnect::~nsXPConnect() {
   // shutdown the logging system
   XPC_LOG_FINISH();
 
-  delete gPrimaryContext;
+  delete gContext;
 
   MOZ_ASSERT(gSelf == this);
   gSelf = nullptr;
@@ -380,10 +380,10 @@ void xpc::ErrorReport::ErrorReportToMessageString(JSErrorReport* aReport,
                                                   nsAString& aString) {
   aString.Truncate();
   if (aReport->message()) {
-    JSFlatString* name = js::GetErrorTypeName(
+    JSLinearString* name = js::GetErrorTypeName(
         CycleCollectedJSContext::Get()->Context(), aReport->exnType);
     if (name) {
-      AssignJSFlatString(aString, name);
+      AssignJSLinearString(aString, name);
       aString.AppendLiteral(": ");
     }
     aString.Append(NS_ConvertUTF8toUTF16(aReport->message().c_str()));
@@ -470,10 +470,11 @@ JSObject* CreateGlobalObject(JSContext* cx, const JSClass* clasp,
 #endif
 
       const char* className = clasp->name;
-      AllocateProtoAndIfaceCache(global, (strcmp(className, "Window") == 0 ||
-                                          strcmp(className, "ChromeWindow") == 0)
-                                           ? ProtoAndIfaceCache::WindowLike
-                                           : ProtoAndIfaceCache::NonWindowLike);
+      AllocateProtoAndIfaceCache(global,
+                                 (strcmp(className, "Window") == 0 ||
+                                  strcmp(className, "ChromeWindow") == 0)
+                                     ? ProtoAndIfaceCache::WindowLike
+                                     : ProtoAndIfaceCache::NonWindowLike);
     }
   }
 
@@ -490,7 +491,7 @@ void InitGlobalObjectOptions(JS::RealmOptions& aOptions,
   if (isSystem) {
     // Make sure [SecureContext] APIs are visible:
     aOptions.creationOptions().setSecureContext(true);
-    aOptions.creationOptions().setClampAndJitterTime(false);
+    aOptions.behaviors().setClampAndJitterTime(false);
   }
 
   if (shouldDiscardSystemSource) {
@@ -1157,8 +1158,7 @@ bool IsChromeOrXBL(JSContext* cx, JSObject* /* unused */) {
   // Note that, for performance, we don't check AllowXULXBLForPrincipal here,
   // and instead rely on the fact that AllowContentXBLScope() only returns false
   // in remote XUL situations.
-  return AccessCheck::isChrome(c) || IsContentXBLCompartment(c) ||
-         !AllowContentXBLScope(realm);
+  return AccessCheck::isChrome(c) || !AllowContentXBLScope(realm);
 }
 
 bool IsNotUAWidget(JSContext* cx, JSObject* /* unused */) {
@@ -1194,24 +1194,6 @@ bool ThreadSafeIsChromeOrXBLOrUAWidget(JSContext* cx, JSObject* obj) {
 
 }  // namespace dom
 }  // namespace mozilla
-
-void xpc::CreateCooperativeContext() {
-  MOZ_ASSERT(gPrimaryContext);
-  XPCJSContext::NewXPCJSContext(gPrimaryContext);
-}
-
-void xpc::DestroyCooperativeContext() {
-  MOZ_ASSERT(XPCJSContext::Get() != gPrimaryContext);
-  delete XPCJSContext::Get();
-}
-
-void xpc::YieldCooperativeContext() {
-  JS_YieldCooperativeContext(XPCJSContext::Get()->Context());
-}
-
-void xpc::ResumeCooperativeContext() {
-  JS_ResumeCooperativeContext(XPCJSContext::Get()->Context());
-}
 
 void xpc::CacheAutomationPref(bool* aMirror) {
   // The obvious thing is to make this pref a static pref. But then it would

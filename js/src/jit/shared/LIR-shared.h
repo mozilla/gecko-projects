@@ -7,10 +7,9 @@
 #ifndef jit_shared_LIR_shared_h
 #define jit_shared_LIR_shared_h
 
-#include "jsutil.h"
-
 #include "jit/AtomicOp.h"
 #include "jit/shared/Assembler-shared.h"
+#include "util/Memory.h"
 
 // This file declares LIR instructions that are common to every platform.
 
@@ -2112,27 +2111,6 @@ class LBitOpI64 : public LInstructionHelper<INT64_PIECES, 2 * INT64_PIECES, 0> {
   JSOp bitop() const { return op_; }
 };
 
-// Call a VM function to perform a bitwise operation.
-class LBitOpV : public LCallInstructionHelper<BOX_PIECES, 2 * BOX_PIECES, 0> {
-  JSOp jsop_;
-
- public:
-  LIR_HEADER(BitOpV)
-
-  LBitOpV(JSOp jsop, const LBoxAllocation& lhs, const LBoxAllocation& rhs)
-      : LCallInstructionHelper(classOpcode), jsop_(jsop) {
-    setBoxOperand(LhsInput, lhs);
-    setBoxOperand(RhsInput, rhs);
-  }
-
-  JSOp jsop() const { return jsop_; }
-
-  const char* extraName() const { return CodeName[jsop_]; }
-
-  static const size_t LhsInput = 0;
-  static const size_t RhsInput = BOX_PIECES;
-};
-
 // Shift operation, taking two 32-bit integers as inputs and returning
 // a 32-bit integer result as an output.
 class LShiftI : public LBinaryMath<0> {
@@ -2962,7 +2940,7 @@ class LValueToFloat32 : public LInstructionHelper<1, BOX_PIECES, 0> {
 // This instruction requires a temporary float register.
 class LValueToInt32 : public LInstructionHelper<1, BOX_PIECES, 2> {
  public:
-  enum Mode { NORMAL, TRUNCATE };
+  enum Mode { NORMAL, TRUNCATE, TRUNCATE_NOWRAP };
 
  private:
   Mode mode_;
@@ -2979,7 +2957,9 @@ class LValueToInt32 : public LInstructionHelper<1, BOX_PIECES, 2> {
   }
 
   const char* extraName() const {
-    return mode() == NORMAL ? "Normal" : "Truncate";
+    return mode() == NORMAL
+               ? "Normal"
+               : mode() == TRUNCATE ? "Truncate" : "TruncateNoWrap";
   }
 
   static const size_t Input = 0;
@@ -2994,6 +2974,10 @@ class LValueToInt32 : public LInstructionHelper<1, BOX_PIECES, 2> {
   MTruncateToInt32* mirTruncate() const {
     MOZ_ASSERT(mode_ == TRUNCATE);
     return mir_->toTruncateToInt32();
+  }
+  MToIntegerInt32* mirTruncateNoWrap() const {
+    MOZ_ASSERT(mode_ == TRUNCATE_NOWRAP);
+    return mir_->toToIntegerInt32();
   }
   MInstruction* mir() const { return mir_->toInstruction(); }
 };
@@ -3028,6 +3012,40 @@ class LFloat32ToInt32 : public LInstructionHelper<1, 1, 0> {
   }
 
   MToNumberInt32* mir() const { return mir_->toToNumberInt32(); }
+};
+
+// Truncates a double to an int32.
+//   Input: floating-point register
+//   Output: 32-bit integer
+//   Bailout: if the double when converted to an integer exceeds the int32
+//            bounds. No bailout for NaN or negative zero.
+class LDoubleToIntegerInt32 : public LInstructionHelper<1, 1, 0> {
+ public:
+  LIR_HEADER(DoubleToIntegerInt32)
+
+  explicit LDoubleToIntegerInt32(const LAllocation& in)
+      : LInstructionHelper(classOpcode) {
+    setOperand(0, in);
+  }
+
+  MToIntegerInt32* mir() const { return mir_->toToIntegerInt32(); }
+};
+
+// Truncates a float to an int32.
+//   Input: floating-point register
+//   Output: 32-bit integer
+//   Bailout: if the double when converted to an integer exceeds the int32
+//            bounds. No bailout for NaN or negative zero.
+class LFloat32ToIntegerInt32 : public LInstructionHelper<1, 1, 0> {
+ public:
+  LIR_HEADER(Float32ToIntegerInt32)
+
+  explicit LFloat32ToIntegerInt32(const LAllocation& in)
+      : LInstructionHelper(classOpcode) {
+    setOperand(0, in);
+  }
+
+  MToIntegerInt32* mir() const { return mir_->toToIntegerInt32(); }
 };
 
 // Convert a double to a truncated int32.
@@ -3825,6 +3843,24 @@ class LTypedArrayElementShift : public LInstructionHelper<1, 1, 0> {
   }
 
   const LAllocation* object() { return getOperand(0); }
+};
+
+// Double to Int32, eligible for accessing into a TypedArray. If the index isn't
+// exactly representable as an Int32, produce any Int32 which is equivalent to
+// an OOB access into a TypedArray.
+class LTypedArrayIndexToInt32 : public LInstructionHelper<1, 1, 0> {
+ public:
+  LIR_HEADER(TypedArrayIndexToInt32)
+
+  explicit LTypedArrayIndexToInt32(const LAllocation& obj)
+      : LInstructionHelper(classOpcode) {
+    setOperand(0, obj);
+  }
+
+  const LAllocation* index() { return getOperand(0); }
+  const MTypedArrayIndexToInt32* mir() const {
+    return mir_->toTypedArrayIndexToInt32();
+  }
 };
 
 // Load a typed object's descriptor.
@@ -4922,9 +4958,6 @@ class LGetPropertyPolymorphicV : public LInstructionHelper<BOX_PIECES, 1, 1> {
   const MGetPropertyPolymorphic* mir() const {
     return mir_->toGetPropertyPolymorphic();
   }
-  const char* extraName() const {
-    return PropertyNameToExtraName(mir()->name());
-  }
 };
 
 // Emit code to load a typed value from an object's slots if its shape matches
@@ -4942,9 +4975,6 @@ class LGetPropertyPolymorphicT : public LInstructionHelper<1, 1, 1> {
   const LDefinition* temp() { return getTemp(0); }
   const MGetPropertyPolymorphic* mir() const {
     return mir_->toGetPropertyPolymorphic();
-  }
-  const char* extraName() const {
-    return PropertyNameToExtraName(mir()->name());
   }
 };
 
@@ -5415,21 +5445,21 @@ class LCallDeleteElement : public LCallInstructionHelper<1, 2 * BOX_PIECES, 0> {
 };
 
 // Patchable jump to stubs generated for a SetProperty cache.
-class LSetPropertyCache : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 3> {
+class LSetPropertyCache : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 2> {
  public:
   LIR_HEADER(SetPropertyCache)
 
+  // Takes an additional temp: this is intendend to be FloatReg0 to allow the
+  // actual cache code to safely clobber that value without save and restore.
   LSetPropertyCache(const LAllocation& object, const LBoxAllocation& id,
                     const LBoxAllocation& value, const LDefinition& temp,
-                    const LDefinition& tempDouble,
-                    const LDefinition& tempFloat32)
+                    const LDefinition& tempDouble)
       : LInstructionHelper(classOpcode) {
     setOperand(0, object);
     setBoxOperand(Id, id);
     setBoxOperand(Value, value);
     setTemp(0, temp);
     setTemp(1, tempDouble);
-    setTemp(2, tempFloat32);
   }
 
   static const size_t Id = 1;
@@ -5438,13 +5468,6 @@ class LSetPropertyCache : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 3> {
   const MSetPropertyCache* mir() const { return mir_->toSetPropertyCache(); }
 
   const LDefinition* temp() { return getTemp(0); }
-  const LDefinition* tempDouble() { return getTemp(1); }
-  const LDefinition* tempFloat32() {
-    if (hasUnaliasedDouble()) {
-      return getTemp(2);
-    }
-    return getTemp(1);
-  }
 };
 
 class LGetIteratorCache : public LInstructionHelper<1, BOX_PIECES, 2> {
@@ -6054,6 +6077,19 @@ class LIsObjectAndBranch : public LControlInstructionHelper<2, BOX_PIECES, 0> {
   MBasicBlock* ifFalse() const { return getSuccessor(1); }
 };
 
+class LIsNullOrUndefined : public LInstructionHelper<1, BOX_PIECES, 0> {
+ public:
+  LIR_HEADER(IsNullOrUndefined);
+  static const size_t Input = 0;
+
+  explicit LIsNullOrUndefined(const LBoxAllocation& input)
+      : LInstructionHelper(classOpcode) {
+    setBoxOperand(Input, input);
+  }
+
+  MIsNullOrUndefined* mir() const { return mir_->toIsNullOrUndefined(); }
+};
+
 class LHasClass : public LInstructionHelper<1, 1, 0> {
  public:
   LIR_HEADER(HasClass);
@@ -6224,6 +6260,17 @@ class LWasmLoadTls : public LInstructionHelper<1, 1, 0> {
     setOperand(0, tlsPtr);
   }
   MWasmLoadTls* mir() const { return mir_->toWasmLoadTls(); }
+  const LAllocation* tlsPtr() { return getOperand(0); }
+};
+
+class LWasmHeapBase : public LInstructionHelper<1, 1, 0> {
+ public:
+  LIR_HEADER(WasmHeapBase);
+  explicit LWasmHeapBase(const LAllocation& tlsPtr)
+      : LInstructionHelper(classOpcode) {
+    setOperand(0, tlsPtr);
+  }
+  MWasmHeapBase* mir() const { return mir_->toWasmHeapBase(); }
   const LAllocation* tlsPtr() { return getOperand(0); }
 };
 
@@ -7167,6 +7214,30 @@ class LIonToWasmCallV : public LIonToWasmCallBase<BOX_PIECES> {
   LIonToWasmCallV(uint32_t numOperands, const LDefinition& temp,
                   const LDefinition& fp)
       : LIonToWasmCallBase<BOX_PIECES>(classOpcode, numOperands, temp, fp) {}
+};
+
+class LWasmBoxValue : public LInstructionHelper<1, BOX_PIECES, 0> {
+ public:
+  LIR_HEADER(WasmBoxValue)
+
+  explicit LWasmBoxValue(const LBoxAllocation& input)
+      : LInstructionHelper(classOpcode) {
+    setBoxOperand(Input, input);
+  }
+
+  static const size_t Input = 0;
+};
+
+class LWasmAnyRefFromJSObject : public LInstructionHelper<1, 1, 0> {
+ public:
+  LIR_HEADER(WasmAnyRefFromJSObject)
+
+  explicit LWasmAnyRefFromJSObject(const LAllocation& input)
+      : LInstructionHelper(classOpcode) {
+    setOperand(Input, input);
+  }
+
+  static const size_t Input = 0;
 };
 
 }  // namespace jit

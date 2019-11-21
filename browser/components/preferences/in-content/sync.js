@@ -114,6 +114,13 @@ var gSyncPane = {
       );
     });
 
+    FxAccounts.config
+      .promiseConnectDeviceURI(this._getEntryPoint())
+      .then(connectURI => {
+        document
+          .getElementById("connect-another-device")
+          .setAttribute("href", connectURI);
+      });
     // Links for mobile devices.
     for (let platform of ["android", "ios"]) {
       let url =
@@ -125,12 +132,6 @@ var gSyncPane = {
         elt.setAttribute("href", url);
       }
     }
-
-    FxAccounts.config
-      .promiseSignUpURI(this._getEntryPoint())
-      .then(signUpURI => {
-        document.getElementById("noFxaSignUp").setAttribute("href", signUpURI);
-      });
 
     this.updateWeavePrefs();
 
@@ -276,14 +277,24 @@ var gSyncPane = {
     });
   },
 
-  _chooseWhatToSync(isAlreadySyncing) {
+  async _chooseWhatToSync(isAlreadySyncing) {
+    // Assuming another device is syncing and we're not,
+    // we update the engines selection so the correct
+    // checkboxes are pre-filed.
+    if (!isAlreadySyncing) {
+      try {
+        await Weave.Service.updateLocalEnginesState();
+      } catch (err) {
+        console.error("Error updating the local engines state", err);
+      }
+    }
     let params = {};
     if (isAlreadySyncing) {
       // If we are already syncing then we also offer to disconnect.
       params.disconnectFun = () => this.disconnectSync();
     }
     gSubDialog.open(
-      "chrome://browser/content/preferences/in-content/syncChooseWhatToSync.xul",
+      "chrome://browser/content/preferences/in-content/syncChooseWhatToSync.xhtml",
       "" /* aFeatures */,
       params /* aParams */,
       event => {
@@ -439,7 +450,9 @@ var gSyncPane = {
   },
 
   async signIn() {
-    const url = await FxAccounts.config.promiseSignInURI(this._getEntryPoint());
+    const url = await FxAccounts.config.promiseConnectAccountURI(
+      this._getEntryPoint()
+    );
     this.replaceTabWithUrl(url);
   },
 
@@ -451,7 +464,7 @@ var gSyncPane = {
     let entryPoint = this._getEntryPoint();
     const url =
       (await FxAccounts.config.promiseForceSigninURI(entryPoint)) ||
-      (await FxAccounts.config.promiseSignInURI(entryPoint));
+      (await FxAccounts.config.promiseConnectAccountURI(entryPoint));
     this.replaceTabWithUrl(url);
   },
 
@@ -545,7 +558,7 @@ var gSyncPane = {
 
   pairAnotherDevice() {
     gSubDialog.open(
-      "chrome://browser/content/preferences/in-content/fxaPairDevice.xul",
+      "chrome://browser/content/preferences/in-content/fxaPairDevice.xhtml",
       "resizable=no" /* aFeatures */,
       null /* aParams */,
       null /* aClosingCallback */

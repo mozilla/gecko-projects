@@ -61,12 +61,13 @@ type State = {
   focusedItem: ?Item,
 };
 
+type OwnProps = {||};
 type Props = {
   cx: Context,
   query: string,
   results: List<Result>,
   status: StatusType,
-  activeSearch: ActiveSearchType,
+  activeSearch: ?ActiveSearchType,
   closeProjectSearch: typeof actions.closeProjectSearch,
   searchSources: typeof actions.searchSources,
   clearSearch: typeof actions.clearSearch,
@@ -294,7 +295,7 @@ export class ProjectSearch extends Component<Props, State> {
   }
 
   renderInput() {
-    const { status } = this.props;
+    const { cx, closeProjectSearch, status } = this.props;
     return (
       <SearchInput
         query={this.state.inputValue}
@@ -309,10 +310,7 @@ export class ProjectSearch extends Component<Props, State> {
         onBlur={() => this.setState({ inputFocused: false })}
         onKeyDown={this.onKeyDown}
         onHistoryScroll={this.onHistoryScroll}
-        handleClose={
-          // TODO - This function doesn't quite match the signature.
-          (this.props.closeProjectSearch: any)
-        }
+        handleClose={() => closeProjectSearch(cx)}
         ref="searchInput"
       />
     );
@@ -345,7 +343,7 @@ const mapStateToProps = state => ({
   status: getTextSearchStatus(state),
 });
 
-export default connect(
+export default connect<Props, OwnProps, _, _, _, _>(
   mapStateToProps,
   {
     closeProjectSearch: actions.closeProjectSearch,

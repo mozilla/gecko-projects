@@ -3,11 +3,25 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* import-globals-from common.js */
+/* import-globals-from permissions.js */
+
 // Configuration vars
-let homeURL = "https://www.mozilla.org/en-US/";
+let homeURL = "https://webxr.today/";
+// Bug 1586294 - Localize the privacy policy URL (Services.urlFormatter?)
+let privacyPolicyURL = "https://www.mozilla.org/en-US/privacy/firefox/";
+let reportIssueURL = "https://mzl.la/fxr";
+let licenseURL =
+  "https://mixedreality.mozilla.org/FirefoxRealityPC/license.html";
 
 // https://developer.mozilla.org/en-US/docs/Mozilla/Tech/XUL/browser
 let browser = null;
+// Keep track of the current Permissions request to only allow one outstanding
+// request/prompt at a time.
+let currentPermissionRequest = null;
+// And, keep a queue of pending Permissions requests to resolve when the
+// current request finishes
+let pendingPermissionRequests = [];
 // The following variable map to UI elements whose behavior changes depending
 // on some state from the browser control
 let urlInput = null;
@@ -18,6 +32,27 @@ let refreshButton = null;
 let stopButton = null;
 
 let { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+const { PrivateBrowsingUtils } = ChromeUtils.import(
+  "resource://gre/modules/PrivateBrowsingUtils.jsm"
+);
+const { AppConstants } = ChromeUtils.import(
+  "resource://gre/modules/AppConstants.jsm"
+);
+const { XPCOMUtils } = ChromeUtils.import(
+  "resource://gre/modules/XPCOMUtils.jsm"
+);
+
+// Note: FxR UI uses a fork of browser-fullScreenAndPointerLock.js which removes
+// the dependencies on browser.js.
+// Bug 1587946 - Rationalize the fork of browser-fullScreenAndPointerLock.js
+XPCOMUtils.defineLazyScriptGetter(
+  this,
+  "FullScreen",
+  "chrome://fxr/content/fxr-fullScreen.js"
+);
+XPCOMUtils.defineLazyGetter(this, "gSystemPrincipal", () =>
+  Services.scriptSecurityManager.getSystemPrincipal()
+);
 
 window.addEventListener(
   "DOMContentLoaded",
@@ -44,10 +79,19 @@ function setupBrowser() {
     browser = document.createXULElement("browser");
     browser.setAttribute("type", "content");
     browser.setAttribute("remote", "true");
-    document.body.append(browser);
+    browser.classList.add("browser_instance");
+    document.getElementById("eBrowserContainer").appendChild(browser);
+
+    browser.loadUrlWithSystemPrincipal = function(url) {
+      this.loadURI(url, { triggeringPrincipal: gSystemPrincipal });
+    };
+
+    // Expose this function for Permissions to be used on this browser element
+    // in other parts of the frontend
+    browser.fxrPermissionPrompt = permissionPrompt;
 
     urlInput.value = homeURL;
-    browser.loadURI(homeURL);
+    browser.loadUrlWithSystemPrincipal(homeURL);
 
     browser.addProgressListener(
       {
@@ -90,11 +134,20 @@ function setupBrowser() {
         Ci.nsIWebProgress.NOTIFY_SECURITY |
         Ci.nsIWebProgress.NOTIFY_STATE_REQUEST
     );
+
+    FullScreen.init();
   }
 }
 
 function setupNavButtons() {
-  let aryNavButtons = ["eBack", "eForward", "eRefresh", "eStop", "eHome"];
+  let aryNavButtons = [
+    "eBack",
+    "eForward",
+    "eRefresh",
+    "eStop",
+    "eHome",
+    "ePrefs",
+  ];
 
   function navButtonHandler(e) {
     if (!this.disabled) {
@@ -116,7 +169,11 @@ function setupNavButtons() {
           break;
 
         case "eHome":
-          browser.loadURI(homeURL);
+          browser.loadUrlWithSystemPrincipal(homeURL);
+          break;
+
+        case "ePrefs":
+          openSettings();
           break;
       }
     }
@@ -140,10 +197,13 @@ function setupUrlBar() {
       let flags =
         Services.uriFixup.FIXUP_FLAG_FIX_SCHEME_TYPOS |
         Services.uriFixup.FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP;
+      if (PrivateBrowsingUtils.isWindowPrivate(window)) {
+        flags |= Services.uriFixup.FIXUP_FLAG_PRIVATE_CONTEXT;
+      }
 
       let uriToLoad = Services.uriFixup.createFixupURI(valueToFixUp, flags);
 
-      browser.loadURI(uriToLoad.spec);
+      browser.loadUrlWithSystemPrincipal(uriToLoad.spec);
       browser.focus();
     }
   });
@@ -152,4 +212,71 @@ function setupUrlBar() {
   urlInput.addEventListener("focus", function() {
     urlInput.select();
   });
+}
+
+//
+// Code to manage Settings UI
+//
+
+function openSettings() {
+  let browserSettingsUI = document.createXULElement("browser");
+  browserSettingsUI.setAttribute("type", "chrome");
+  browserSettingsUI.classList.add("browser_settings");
+
+  showModalContainer(browserSettingsUI);
+
+  browserSettingsUI.loadURI("chrome://fxr/content/prefs.html", {
+    triggeringPrincipal: gSystemPrincipal,
+  });
+}
+
+function closeSettings() {
+  clearModalContainer();
+}
+
+function showPrivacyPolicy() {
+  closeSettings();
+  browser.loadUrlWithSystemPrincipal(privacyPolicyURL);
+}
+
+function showLicenseInfo() {
+  closeSettings();
+  browser.loadUrlWithSystemPrincipal(licenseURL);
+}
+
+function showReportIssue() {
+  closeSettings();
+  browser.loadUrlWithSystemPrincipal(reportIssueURL);
+}
+
+//
+// Code to manage Permissions UI
+//
+
+function permissionPrompt(aRequest) {
+  let newPrompt;
+  if (aRequest instanceof Ci.nsIContentPermissionRequest) {
+    newPrompt = new FxrContentPrompt(aRequest, this, finishPrompt);
+  } else {
+    newPrompt = new FxrWebRTCPrompt(aRequest, this, finishPrompt);
+  }
+
+  if (currentPermissionRequest) {
+    // There is already an outstanding request running. Cache this new request
+    // to be prompted later
+    pendingPermissionRequests.push(newPrompt);
+  } else {
+    currentPermissionRequest = newPrompt;
+    currentPermissionRequest.showPrompt();
+  }
+}
+
+function finishPrompt() {
+  if (pendingPermissionRequests.length) {
+    // Prompt the next request
+    currentPermissionRequest = pendingPermissionRequests.shift();
+    currentPermissionRequest.showPrompt();
+  } else {
+    currentPermissionRequest = null;
+  }
 }

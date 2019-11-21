@@ -559,30 +559,7 @@ bool XPCConvert::JSData2Native(JSContext* cx, void* d, HandleValue s,
         return true;
       }
 
-      if (XPCStringConvert::IsDOMString(str)) {
-        // The characters represent an existing nsStringBuffer that
-        // was shared by XPCStringConvert::ReadableToJSVal.
-        const char16_t* chars = JS_GetTwoByteExternalStringChars(str);
-        if (chars[length] == '\0') {
-          // Safe to share the buffer.
-          nsStringBuffer::FromData((void*)chars)->ToString(length, *ws);
-        } else {
-          // We have to copy to ensure null-termination.
-          ws->Assign(chars, length);
-        }
-      } else if (XPCStringConvert::IsLiteral(str)) {
-        // The characters represent a literal char16_t string constant
-        // compiled into libxul, such as the string "undefined" above.
-        const char16_t* chars = JS_GetTwoByteExternalStringChars(str);
-        ws->AssignLiteral(chars, length);
-      } else {
-        // We don't bother checking for a dynamic-atom external string,
-        // because we'd just need to copy out of it anyway.
-        if (!AssignJSString(cx, *ws, str)) {
-          return false;
-        }
-      }
-      return true;
+      return AssignJSString(cx, *ws, str);
     }
 
     case nsXPTType::T_CHAR_STR:
@@ -709,16 +686,16 @@ bool XPCConvert::JSData2Native(JSContext* cx, void* d, HandleValue s,
         return true;
       }
 
-      JSFlatString* flat = JS_FlattenString(cx, str);
-      if (!flat) {
+      JSLinearString* linear = JS_EnsureLinearString(cx, str);
+      if (!linear) {
         return false;
       }
 
-      size_t utf8Length = JS::GetDeflatedUTF8StringLength(flat);
+      size_t utf8Length = JS::GetDeflatedUTF8StringLength(linear);
       rs->SetLength(utf8Length);
 
       mozilla::DebugOnly<size_t> written = JS::DeflateStringToUTF8Buffer(
-          flat, mozilla::MakeSpan(rs->BeginWriting(), utf8Length));
+          linear, mozilla::MakeSpan(rs->BeginWriting(), utf8Length));
       MOZ_ASSERT(written == utf8Length);
 
       return true;

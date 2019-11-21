@@ -9,7 +9,7 @@ const { actorBridgeWithSpec } = require("devtools/server/actors/common");
 const { perfSpec } = require("devtools/shared/specs/perf");
 const {
   ActorReadyGeckoProfilerInterface,
-} = require("devtools/server/performance-new/gecko-profiler-interface");
+} = require("devtools/shared/performance-new/gecko-profiler-interface");
 
 /**
  * Pass on the events from the bridge to the actor.
@@ -30,7 +30,10 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
     Actor.prototype.initialize.call(this, conn);
     // The "bridge" is the actual implementation of the actor. It is abstracted
     // out into its own class so that it can be re-used with the profiler popup.
-    this.bridge = new ActorReadyGeckoProfilerInterface();
+    this.bridge = new ActorReadyGeckoProfilerInterface({
+      // Do not use the gzipped API from the Profiler to capture profiles.
+      gzipped: false,
+    });
 
     _bridgeEvents(this, [
       "profile-locked-by-private-browsing",
@@ -55,4 +58,6 @@ exports.PerfActor = ActorClassWithSpec(perfSpec, {
   isActive: actorBridgeWithSpec("isActive"),
   isSupportedPlatform: actorBridgeWithSpec("isSupportedPlatform"),
   isLockedForPrivateBrowsing: actorBridgeWithSpec("isLockedForPrivateBrowsing"),
+  // Added in Firefox 72.
+  getSupportedFeatures: actorBridgeWithSpec("getSupportedFeatures"),
 });

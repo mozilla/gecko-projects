@@ -61,16 +61,24 @@ const TRAILHEAD_CONFIG = {
   DID_SEE_ABOUT_WELCOME_PREF: "trailhead.firstrun.didSeeAboutWelcome",
   INTERRUPTS_EXPERIMENT_PREF: "trailhead.firstrun.interruptsExperiment",
   TRIPLETS_ENROLLED_PREF: "trailhead.firstrun.tripletsEnrolled",
+  DEFAULT_TRIPLET: "supercharge",
+  DYNAMIC_TRIPLET_BUNDLE_LENGTH: 3,
   BRANCHES: {
-    interrupts: [["control"], ["join"], ["sync"], ["nofirstrun"], ["cards"]],
+    interrupts: [
+      ["modal_control"],
+      ["modal_variant_a"],
+      ["modal_variant_b"],
+      ["modal_variant_c"],
+      ["modal_variant_f"],
+      ["full_page_d"],
+      ["full_page_e"],
+    ],
     triplets: [["supercharge"], ["payoff"], ["multidevice"], ["privacy"]],
   },
-  LOCALES: ["en-US", "en-GB", "en-CA", "de", "de-DE", "fr", "fr-FR"],
-  EXPERIMENT_RATIOS: [["", 0], ["interrupts", 1], ["triplets", 3]],
-  // Per bug 1574003, for those who meet the targeting criteria of extended
-  // triplets, 95% users (control group) will see the extended triplets, and
-  // the rest 5% (holdback group) won't.
-  EXPERIMENT_RATIOS_FOR_EXTENDED_TRIPLETS: [["control", 95], ["holdback", 5]],
+  EXPERIMENT_RATIOS: [["", 0], ["interrupts", 1], ["triplets", 0]],
+  // Per bug 1589146, for those who meet the targeting criteria of extended
+  // triplets, 100% users (control group) will see the extended triplets
+  EXPERIMENT_RATIOS_FOR_EXTENDED_TRIPLETS: [["control", 100], ["holdback", 0]],
   EXTENDED_TRIPLETS_EXPERIMENT_PREF: "trailhead.extendedTriplets.experiment",
 };
 
@@ -105,6 +113,9 @@ const RS_DOWNLOAD_MAX_RETRIES = 2;
 
 // To observe the app locale change notification.
 const TOPIC_INTL_LOCALE_CHANGED = "intl:app-locales-changed";
+// To observe the pref that controls if ASRouter should use the remote Fluent files for l10n.
+const USE_REMOTE_L10N_PREF =
+  "browser.newtabpage.activity-stream.asrouter.useRemoteL10n";
 
 /**
  * chooseBranch<T> -  Choose an item from a list of "branches" pseudorandomly using a seed / ratio configuration
@@ -340,7 +351,7 @@ const MessageLoaderUtils = {
           action: "asrouter_undesired_event",
           event,
           message_id: "n/a",
-          value: providerId,
+          event_context: providerId,
         })
       );
     }
@@ -759,6 +770,14 @@ class _ASRouter {
     await this._maybeUpdateL10nAttachment();
   }
 
+  observe(aSubject, aTopic, aPrefName) {
+    switch (aPrefName) {
+      case USE_REMOTE_L10N_PREF:
+        CFRPageActions.reloadL10n();
+        break;
+    }
+  }
+
   /**
    * init - Initializes the MessageRouter.
    * It is ready when it has been connected to a RemotePageManager instance.
@@ -833,6 +852,7 @@ class _ASRouter {
     );
 
     Services.obs.addObserver(this._onLocaleChanged, TOPIC_INTL_LOCALE_CHANGED);
+    Services.prefs.addObserver(USE_REMOTE_L10N_PREF, this);
     // sets .initialized to true and resolves .waitForInitialized promise
     this._finishInitializing();
   }
@@ -864,6 +884,7 @@ class _ASRouter {
       this._onLocaleChanged,
       TOPIC_INTL_LOCALE_CHANGED
     );
+    Services.prefs.removeObserver(USE_REMOTE_L10N_PREF, this);
     // If we added any CFR recommendations, they need to be removed
     CFRPageActions.clearRecommendations();
     this._resetInitialization();
@@ -943,7 +964,7 @@ class _ASRouter {
           message_id: message.id,
           action: "asrouter_undesired_event",
           event: "TARGETING_EXPRESSION_ERROR",
-          value: type,
+          event_context: type,
         })
       );
     }
@@ -969,6 +990,8 @@ class _ASRouter {
 
     if (overrideValue) {
       [interrupt, triplet] = overrideValue.split("-");
+    } else {
+      triplet = TRAILHEAD_CONFIG.DEFAULT_TRIPLET;
     }
 
     await this.setState({
@@ -995,11 +1018,11 @@ class _ASRouter {
       [interrupt, triplet] = overrideValue.split("-");
     }
 
-    // Use control Trailhead Branch (for cards) if we are showing RTAMO.
+    // Use join Trailhead Branch (for cards) if we are showing RTAMO.
     if (await this._hasAddonAttributionData()) {
       return {
         experiment,
-        interrupt: "control",
+        interrupt: "join",
         triplet: triplet || "privacy",
       };
     }
@@ -1009,38 +1032,32 @@ class _ASRouter {
       return { experiment, interrupt, triplet: triplet || "" };
     }
 
-    const locale = Services.locale.appLocaleAsLangTag;
+    const { userId } = ClientEnvironment;
+    experiment = await chooseBranch(
+      `${userId}-trailhead-experiments`,
+      TRAILHEAD_CONFIG.EXPERIMENT_RATIOS
+    );
 
-    if (TRAILHEAD_CONFIG.LOCALES.includes(locale)) {
-      const { userId } = ClientEnvironment;
-      experiment = await chooseBranch(
-        `${userId}-trailhead-experiments`,
-        TRAILHEAD_CONFIG.EXPERIMENT_RATIOS
+    // For the interrupts experiment,
+    // we randomly assign an interrupt and always use the "supercharge" triplet.
+    if (experiment === "interrupts") {
+      interrupt = await chooseBranch(
+        `${userId}-interrupts-branch`,
+        TRAILHEAD_CONFIG.BRANCHES.interrupts
       );
-
-      // For the interrupts experiment,
-      // we randomly assign an interrupt and always use the "supercharge" triplet.
-      if (experiment === "interrupts") {
-        interrupt = await chooseBranch(
-          `${userId}-interrupts-branch`,
-          TRAILHEAD_CONFIG.BRANCHES.interrupts
-        );
-        if (["join", "sync", "cards"].includes(interrupt)) {
-          triplet = "supercharge";
-        }
-
-        // For the triplets experiment or non-experiment experience,
-        // we randomly assign a triplet and always use the "join" interrupt.
-      } else {
-        interrupt = "join";
-        triplet = await chooseBranch(
-          `${userId}-triplets-branch`,
-          TRAILHEAD_CONFIG.BRANCHES.triplets
-        );
-      }
+      triplet = TRAILHEAD_CONFIG.DEFAULT_TRIPLET;
+      // For the triplets experiment or non-experiment experience,
+      // we randomly assign a triplet and always use the "join" interrupt.
+    } else if (experiment === "triplets") {
+      interrupt = "join";
+      triplet = await chooseBranch(
+        `${userId}-triplets-branch`,
+        TRAILHEAD_CONFIG.BRANCHES.triplets
+      );
     } else {
-      // If the user is not in a trailhead-compabtible locale, return the control experience and no experiment.
-      interrupt = "control";
+      // If the user is not in a trailhead-compabtible locale, return the join + supercharge (default) experience and no experiment.
+      interrupt = "join";
+      triplet = TRAILHEAD_CONFIG.DEFAULT_TRIPLET;
     }
 
     return { experiment, interrupt, triplet };
@@ -1171,6 +1188,11 @@ class _ASRouter {
       trailheadTriplet,
     } = this.state;
 
+    const {
+      personalizedCfrScores,
+      personalizedCfrThreshold,
+    } = ASRouterPreferences.personalizedCfr;
+
     return {
       get messageImpressions() {
         return messageImpressions;
@@ -1184,10 +1206,16 @@ class _ASRouter {
       get trailheadTriplet() {
         return trailheadTriplet;
       },
+      get scores() {
+        return personalizedCfrScores;
+      },
+      get scoreThreshold() {
+        return personalizedCfrThreshold;
+      },
     };
   }
 
-  _findAllMessages(candidateMessages, trigger) {
+  _findAllMessages(candidateMessages, trigger, ordered = false) {
     const messages = candidateMessages.filter(m =>
       this.isBelowFrequencyCaps(m)
     );
@@ -1198,10 +1226,11 @@ class _ASRouter {
       trigger,
       context,
       onError: this._handleTargetingError,
+      ordered,
     });
   }
 
-  _findMessage(candidateMessages, trigger) {
+  _findMessage(candidateMessages, trigger, ordered = false) {
     const messages = candidateMessages.filter(m =>
       this.isBelowFrequencyCaps(m)
     );
@@ -1214,6 +1243,7 @@ class _ASRouter {
       trigger,
       context,
       onError: this._handleTargetingError,
+      ordered,
     });
   }
 
@@ -1319,31 +1349,29 @@ class _ASRouter {
         }
       }
     } else {
-      while (bundledMessagesOfSameTemplate.length) {
-        // Find a message that matches the targeting context - or break if there are no matching messages
-        const message = await this._findMessage(
-          bundledMessagesOfSameTemplate,
-          trigger
-        );
-        if (!message) {
-          /* istanbul ignore next */ // Code coverage in mochitests
-          break;
-        }
+      // Find all messages that matches the targeting context
+      const allMessages = await this._findAllMessages(
+        bundledMessagesOfSameTemplate,
+        trigger,
+        true
+      );
+
+      if (allMessages && allMessages.length) {
+        // Retrieve enough messages needed to fill a bundle
         // Only copy the content of the message (that's what the UI cares about)
-        // Also delete the message we picked so we don't pick it again
-        result.push({
-          content: message.content,
-          id: message.id,
-          order: message.order || 0,
-        });
-        bundledMessagesOfSameTemplate.splice(
-          bundledMessagesOfSameTemplate.findIndex(msg => msg.id === message.id),
-          1
+        result = result.concat(
+          allMessages.slice(0, bundleLength).map(message => ({
+            content: message.content,
+            id: message.id,
+            order: message.order || 0,
+            // This is used to determine whether to block when action is triggered
+            // Only block for dynamic triplets experiment and when there are more messages available
+            blockOnClick:
+              this.state.trailheadTriplet.startsWith("dynamic") &&
+              allMessages.length >
+                TRAILHEAD_CONFIG.DYNAMIC_TRIPLET_BUNDLE_LENGTH,
+          }))
         );
-        // Stop once we have enough messages to fill a bundle
-        if (result.length === bundleLength) {
-          break;
-        }
       }
     }
 
@@ -1423,6 +1451,9 @@ class _ASRouter {
       case "toolbar_badge":
       case "update_action":
         ToolbarBadgeHub.registerBadgeNotificationListener(message, { force });
+        break;
+      case "milestone_message":
+        CFRPageActions.showMilestone(target, message, this.dispatch, { force });
         break;
       default:
         try {
@@ -1607,7 +1638,10 @@ class _ASRouter {
       if (template && m.template !== template) {
         return false;
       }
-      if (m.trigger && m.trigger.id !== triggerId) {
+      if (triggerId && !m.trigger) {
+        return false;
+      }
+      if (triggerId && m.trigger.id !== triggerId) {
         return false;
       }
 
@@ -1879,6 +1913,20 @@ class _ASRouter {
       case ra.OPEN_APPLICATIONS_MENU:
         UITour.showMenu(target.browser.ownerGlobal, action.data.args);
         break;
+      case ra.HIGHLIGHT_FEATURE:
+        const highlight = await UITour.getTarget(
+          target.browser.ownerGlobal,
+          action.data.args
+        );
+        if (highlight) {
+          await UITour.showHighlight(
+            target.browser.ownerGlobal,
+            highlight,
+            "none",
+            { autohide: true }
+          );
+        }
+        break;
       case ra.INSTALL_ADDON_FROM_URL:
         this._updateOnboardingState();
         await MessageLoaderUtils.installAddonFromURL(
@@ -1895,7 +1943,9 @@ class _ASRouter {
         });
         break;
       case ra.SHOW_FIREFOX_ACCOUNTS:
-        const url = await FxAccounts.config.promiseSignUpURI("snippets");
+        const url = await FxAccounts.config.promiseConnectAccountURI(
+          "snippets"
+        );
         // We want to replace the current tab.
         target.browser.ownerGlobal.openLinkIn(url, "current", {
           private: false,
@@ -1908,6 +1958,16 @@ class _ASRouter {
       case ra.OPEN_PROTECTION_PANEL:
         let { gProtectionsHandler } = target.browser.ownerGlobal;
         gProtectionsHandler.showProtectionsPopup({});
+        break;
+      case ra.OPEN_PROTECTION_REPORT:
+        target.browser.ownerGlobal.gProtectionsHandler.openProtections();
+        break;
+      case ra.DISABLE_STP_DOORHANGERS:
+        await this.blockMessageById([
+          "SOCIAL_TRACKING_PROTECTION",
+          "FINGERPRINTERS_PROTECTION",
+          "CRYPTOMINERS_PROTECTION",
+        ]);
         break;
     }
   }
@@ -1940,7 +2000,6 @@ class _ASRouter {
     } else {
       // On new tab, send cards if they match; othwerise send a snippet
       message = await this.handleMessageRequest({
-        provider: "onboarding",
         template: "extended_triplets",
       });
 

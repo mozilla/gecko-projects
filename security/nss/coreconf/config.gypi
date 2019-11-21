@@ -96,6 +96,7 @@
     'cc_is_gcc%': '<(cc_is_gcc)',
     'cc_use_gnu_ld%': '<(cc_use_gnu_ld)',
     # Some defaults
+    'disable_arm_hw_aes%': 0,
     'disable_tests%': 0,
     'disable_chachapoly%': 0,
     'disable_dbm%': 0,
@@ -354,6 +355,8 @@
               'LINUX2_1',
               'LINUX',
               'linux',
+              '_DEFAULT_SOURCE', # for <endian.h> functions, strdup, realpath, and getentropy
+              '_BSD_SOURCE', # for the above in glibc <= 2.19
             ],
           }],
           [ 'OS=="dragonfly" or OS=="freebsd"', {
@@ -390,8 +393,11 @@
               '-ffunction-sections',
               '-fdata-sections',
             ],
+            'cflags_c': [
+              '-std=c99',
+            ],
             'cflags_cc': [
-              '-std=c++0x',
+              '-std=c++11',
             ],
             'ldflags': [
               '-z', 'noexecstack',

@@ -67,8 +67,7 @@
   bottom: 0px;
   z-index: -1;
   cursor: default;
-  -moz-user-select: none;
-       user-select: none;
+  user-select: none;
 }
 
 .textLayer .endOfContent.active {
@@ -425,8 +424,7 @@ select {
   height: 100%;
   overflow: hidden;
   cursor: none;
-  -moz-user-select: none;
-       user-select: none;
+  user-select: none;
 }
 
 .pdfPresentationMode:fullscreen a:not(.internalLink) {
@@ -481,8 +479,7 @@ html[dir='rtl'] #sidebarContainer {
   /* Improve responsiveness and avoid visual glitches when the sidebar is resized. */
   transition-duration: 0s;
   /* Prevent e.g. the thumbnails being selected when the sidebar is resized. */
-  -moz-user-select: none;
-       user-select: none;
+  user-select: none;
 }
 
 #outerContainer.sidebarMoving #sidebarContainer,
@@ -708,8 +705,7 @@ html[dir='rtl'] .findbar {
 }
 
 .findbar label {
-  -moz-user-select: none;
-       user-select: none;
+  user-select: none;
 }
 
 #findInput {
@@ -980,8 +976,7 @@ html[dir='rtl'] .splitToolbarButtonSeparator {
   color: hsla(0,0%,100%,.8);
   font-size: 12px;
   line-height: 14px;
-  -moz-user-select: none;
-       user-select: none;
+  user-select: none;
   /* Opera does not support user-select, use <... unselectable="on"> instead */
   cursor: default;
   transition-property: background-color, border-color, box-shadow;
@@ -1380,12 +1375,12 @@ html[dir='rtl'] .verticalToolbarSeparator {
 .toolbarField {
   padding: 3px 6px;
   margin: 4px 0 4px 0;
-  border: 1px solid transparent;
   border-radius: 2px;
   background-color: hsla(0,0%,100%,.09);
   background-image: linear-gradient(hsla(0,0%,100%,.05), hsla(0,0%,100%,0));
   background-clip: padding-box;
-  border: 1px solid hsla(0,0%,0%,.35);
+  border-width: 1px;
+  border-style: solid;
   border-color: hsla(0,0%,0%,.32) hsla(0,0%,0%,.38) hsla(0,0%,0%,.42);
   box-shadow: 0 1px 0 hsla(0,0%,0%,.05) inset,
               0 1px 0 hsla(0,0%,100%,.05);
@@ -1436,8 +1431,7 @@ html[dir='rtl'] .verticalToolbarSeparator {
   font-size: 12px;
   line-height: 14px;
   text-align: left;
-  -moz-user-select: none;
-       user-select: none;
+  user-select: none;
   cursor: default;
 }
 
@@ -1530,8 +1524,7 @@ a:focus > .thumbnail > .thumbnailSelectionRing,
   top: 0;
   bottom: 0;
   overflow: auto;
-  -moz-user-select: none;
-       user-select: none;
+  user-select: none;
 }
 
 #outlineView {
@@ -1564,8 +1557,7 @@ html[dir='rtl'] .outlineItem > .outlineItems {
   color: hsla(0,0%,100%,.8);
   font-size: 13px;
   line-height: 15px;
-  -moz-user-select: none;
-       user-select: none;
+  user-select: none;
   white-space: normal;
 }
 
@@ -1726,11 +1718,6 @@ html[dir='rtl'] .outlineItemToggler::before {
   background-color: #474747; /* fallback */
   background-image: url(images/texture.png),
                     linear-gradient(hsla(0,0%,32%,.99), hsla(0,0%,27%,.95));
-  box-shadow: inset 1px 0 0 hsla(0,0%,100%,.08),
-              inset 0 1px 1px hsla(0,0%,0%,.15),
-              inset 0 -1px 0 hsla(0,0%,100%,.05),
-              0 1px 0 hsla(0,0%,0%,.15),
-              0 1px 1px hsla(0,0%,0%,.1);
   border: 1px solid hsla(0,0%,0%,.5);
   border-radius: 4px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);

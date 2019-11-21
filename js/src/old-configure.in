@@ -441,15 +441,6 @@ case "$host" in
 esac
 
 dnl ========================================================
-dnl Add optional and non-optional hardening flags from toolchain.configure
-dnl ========================================================
-
-CFLAGS="$CFLAGS $MOZ_HARDENING_CFLAGS_JS"
-CPPFLAGS="$CPPFLAGS $MOZ_HARDENING_CFLAGS_JS"
-CXXFLAGS="$CXXFLAGS $MOZ_HARDENING_CFLAGS_JS"
-LDFLAGS="$LDFLAGS $MOZ_HARDENING_LDFLAGS_JS"
-
-dnl ========================================================
 dnl System overrides of the defaults for target
 dnl ========================================================
 
@@ -532,9 +523,6 @@ case "$target" in
             AC_MSG_ERROR(Firefox cannot be built with mingw-gcc and requires a mingw-clang toolchain to work)
         fi
 
-        CC="$CC -mwindows"
-        CXX="$CXX -mwindows"
-        CPP="$CPP -mwindows"
         DSO_LDOPTS='-shared'
         # Use temp file for windres (bug 213281)
         RCFLAGS='-O coff --use-temp-file'
@@ -643,6 +631,10 @@ case "$target" in
             # declare |delete| differently.  Therefore, suppress this
             # warning.
             CXXFLAGS="$CXXFLAGS -Wno-implicit-exception-spec-mismatch"
+            # Macros like STDMETHOD() and IFACEMETHOD() can declare
+            # __attribute__((nothrow)) on their respective method declarations,
+            # while the definitions are left without the matching attribute.
+            CXXFLAGS="$CXXFLAGS -Wno-microsoft-exception-spec"
             # At least one MSVC header and several headers in-tree have
             # unused typedefs, so turn this on.
             CXXFLAGS="$CXXFLAGS -Wno-unused-local-typedef"
@@ -678,11 +670,6 @@ case "$target" in
         AC_MSG_ERROR([Using a Cygwin build environment is unsupported. Configure cannot check for presence of necessary headers. Please upgrade to MozillaBuild; see https://developer.mozilla.org/en/Windows_Build_Prerequisites.])
         ;;
     esac
-
-    if test -n "$GNU_CC" -a -z "$CLANG_CC"; then
-        CFLAGS="$CFLAGS -fno-keep-inline-dllexport"
-        CXXFLAGS="$CXXFLAGS -fno-keep-inline-dllexport"
-    fi
 
     case "$target" in
     i*86-*)

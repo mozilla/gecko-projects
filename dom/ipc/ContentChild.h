@@ -321,7 +321,7 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvBidiKeyboardNotify(const bool& isLangRTL,
                                                  const bool& haveBidiKeyboards);
 
-  mozilla::ipc::IPCResult RecvNotifyVisited(nsTArray<URIParams>&& aURIs);
+  mozilla::ipc::IPCResult RecvNotifyVisited(nsTArray<VisitedQueryResult>&&);
 
   // auto remove when alertfinished is received.
   nsresult AddRemoteAlertObserver(const nsString& aData,
@@ -624,6 +624,14 @@ class ContentChild final : public PContentChild,
   bool DeallocPSessionStorageObserverChild(
       PSessionStorageObserverChild* aActor);
 
+  PSHEntryChild* AllocPSHEntryChild(PSHistoryChild* aSHistory,
+                                    const PSHEntryOrSharedID& aEntryOrSharedID);
+  void DeallocPSHEntryChild(PSHEntryChild*);
+
+  PSHistoryChild* AllocPSHistoryChild(BrowsingContext* aContext);
+
+  void DeallocPSHistoryChild(PSHistoryChild* aActor);
+
   nsTArray<LookAndFeelInt>& LookAndFeelCache() { return mLookAndFeelCache; }
 
   /**
@@ -658,11 +666,8 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvSaveRecording(const FileDescriptor& aFile);
 
   mozilla::ipc::IPCResult RecvCrossProcessRedirect(
-      const uint32_t& aRegistrarId, nsIURI* aURI,
-      const ReplacementChannelConfigInit& aConfig,
-      const Maybe<LoadInfoArgs>& aLoadInfoForwarder, const uint64_t& aChannelId,
-      nsIURI* aOriginalURI, const uint64_t& aIdentifier,
-      const uint32_t& aRedirectMode, CrossProcessRedirectResolver&& aResolve);
+      const RedirectToRealChannelArgs&& aArgs,
+      CrossProcessRedirectResolver&& aResolve);
 
   mozilla::ipc::IPCResult RecvStartDelayedAutoplayMediaComponents(
       BrowsingContext* aContext);
@@ -682,12 +687,22 @@ class ContentChild final : public PContentChild,
     return mBrowsingContextFieldEpoch;
   }
 
+  mozilla::ipc::IPCResult RecvDestroySHEntrySharedState(const uint64_t& aID);
+
+  mozilla::ipc::IPCResult RecvEvictContentViewers(
+      nsTArray<uint64_t>&& aToEvictSharedStateIDs);
+
 #ifdef NIGHTLY_BUILD
   // Fetch the current number of pending input events.
   //
   // NOTE: This method performs an atomic read, and is safe to call from all
   // threads.
   uint32_t GetPendingInputEvents() { return mPendingInputEvents; }
+#endif
+
+#if defined(MOZ_SANDBOX) && defined(MOZ_DEBUG) && defined(ENABLE_TESTS)
+  mozilla::ipc::IPCResult RecvInitSandboxTesting(
+      Endpoint<PSandboxTestingChild>&& aEndpoint);
 #endif
 
  private:

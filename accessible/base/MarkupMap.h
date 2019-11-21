@@ -258,6 +258,8 @@ MARKUPMAP(main, New_HyperText, roles::LANDMARK)
 
 MARKUPMAP(map, nullptr, roles::TEXT_CONTAINER)
 
+MARKUPMAP(mark, New_HyperText, roles::MARK, Attr(xmlroles, mark))
+
 MARKUPMAP(math, New_HyperText, roles::MATHML_MATH)
 
 MARKUPMAP(mi_, New_HyperText, roles::MATHML_IDENTIFIER)
@@ -343,6 +345,13 @@ MARKUPMAP(
 MARKUPMAP(maction_, New_HyperText, roles::MATHML_ACTION,
           AttrFromDOM(actiontype_, actiontype_),
           AttrFromDOM(selection_, selection_))
+
+MARKUPMAP(
+    menu,
+    [](Element* aElement, Accessible* aContext) -> Accessible* {
+      return new HTMLListAccessible(aElement, aContext->Document());
+    },
+    roles::LIST)
 
 MARKUPMAP(merror_, New_HyperText, roles::MATHML_ERROR)
 

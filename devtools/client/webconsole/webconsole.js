@@ -25,11 +25,6 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "viewSource",
-  "devtools/client/shared/view-source"
-);
-loader.lazyRequireGetter(
-  this,
   "openDocLink",
   "devtools/client/shared/link",
   true
@@ -97,6 +92,10 @@ class WebConsole {
     return this.toolbox.target;
   }
 
+  get targetList() {
+    return this.toolbox.targetList;
+  }
+
   /**
    * Getter for the window that can provide various utilities that the web
    * console makes use of, like opening links, managing popups, etc.  In
@@ -136,8 +135,7 @@ class WebConsole {
   }
 
   canRewind() {
-    const target = this.hud && this.hud.currentTarget;
-    const traits = target && target.traits;
+    const traits = this.currentTarget && this.currentTarget.traits;
     return traits && traits.canRewind;
   }
 
@@ -257,17 +255,6 @@ class WebConsole {
 
     await toolbox.viewSourceInDebugger(sourceURL, sourceLine, sourceColumn);
     this.ui.emit("source-in-debugger-opened");
-  }
-
-  /**
-   * Tries to open a JavaScript file related to the web page for the web console
-   * instance in the corresponding Scratchpad.
-   *
-   * @param string sourceURL
-   *        The URL of the file which corresponds to a Scratchpad id.
-   */
-  viewSourceInScratchpad(sourceURL, sourceLine) {
-    viewSource.viewSourceInScratchpad(sourceURL, sourceLine);
   }
 
   /**
@@ -393,13 +380,6 @@ class WebConsole {
     }
   }
 
-  async onViewSourceInScratchpad(frame) {
-    if (this.toolbox) {
-      await this.toolbox.viewSourceInScratchpad(frame.url, frame.line);
-      this.recordEvent("jump_to_source");
-    }
-  }
-
   async onViewSourceInStyleEditor(frame) {
     if (!this.toolbox) {
       return;
@@ -438,17 +418,18 @@ class WebConsole {
       "inspector",
       "inspect_dom"
     );
-    // TODO: Bug1574506 - Use the contextual WalkerFront for gripToNodeFront.
-    const walkerFront = (await this.toolbox.target.getFront("inspector"))
-      .walker;
-    const onGripNodeToFront = walkerFront.gripToNodeFront(grip);
-    const [front, inspector] = await Promise.all([
-      onGripNodeToFront,
+
+    const onNodeFront = this.toolbox.target
+      .getFront("inspector")
+      .then(inspectorFront => inspectorFront.getNodeFrontFromNodeGrip(grip));
+
+    const [nodeFront, inspectorPanel] = await Promise.all([
+      onNodeFront,
       onSelectInspector,
     ]);
 
-    const onInspectorUpdated = inspector.once("inspector-updated");
-    const onNodeFrontSet = this.toolbox.selection.setNodeFront(front, {
+    const onInspectorUpdated = inspectorPanel.once("inspector-updated");
+    const onNodeFrontSet = this.toolbox.selection.setNodeFront(nodeFront, {
       reason: "console",
     });
 

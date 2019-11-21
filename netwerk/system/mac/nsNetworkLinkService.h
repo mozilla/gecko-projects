@@ -7,6 +7,7 @@
 
 #include "nsINetworkLinkService.h"
 #include "nsIObserver.h"
+#include "nsITimer.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/SHA1.h"
@@ -16,11 +17,14 @@
 
 using prefix_and_netmask = std::pair<in6_addr, in6_addr>;
 
-class nsNetworkLinkService : public nsINetworkLinkService, public nsIObserver {
+class nsNetworkLinkService : public nsINetworkLinkService,
+                             public nsIObserver,
+                             public nsITimerCallback {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSINETWORKLINKSERVICE
   NS_DECL_NSIOBSERVER
+  NS_DECL_NSITIMERCALLBACK
 
   nsNetworkLinkService();
 
@@ -43,20 +47,40 @@ class nsNetworkLinkService : public nsINetworkLinkService, public nsIObserver {
   CFRunLoopSourceRef mRunLoopSource;
   SCDynamicStoreRef mStoreRef;
 
+  bool IPv4NetworkId(mozilla::SHA1Sum* sha1);
+  bool IPv6NetworkId(mozilla::SHA1Sum* sha1);
+
   void UpdateReachability();
-  void SendEvent(bool aNetworkChanged);
+  void OnIPConfigChanged();
+  void OnNetworkIdChanged();
+  void OnReachabilityChanged();
+  void NotifyObservers(const char* aTopic, const char* aData);
   static void ReachabilityChanged(SCNetworkReachabilityRef target,
                                   SCNetworkConnectionFlags flags, void* info);
-  static void IPConfigChanged(SCDynamicStoreRef store, CFArrayRef changedKeys,
-                              void* info);
-  void calculateNetworkId(void);
+  static void NetworkConfigChanged(SCDynamicStoreRef store,
+                                   CFArrayRef changedKeys, void* info);
+  void calculateNetworkIdWithDelay(uint32_t aDelay);
   void calculateNetworkIdInternal(void);
+  void DNSConfigChanged();
+  void GetDnsSuffixListInternal();
+  bool RoutingFromKernel(nsTArray<nsCString>& aHash);
+  bool RoutingTable(nsTArray<nsCString>& aHash);
 
   mozilla::Mutex mMutex;
   nsCString mNetworkId;
+  nsTArray<nsCString> mDNSSuffixList;
 
   // Time stamp of last NS_NETWORK_LINK_DATA_CHANGED event
   mozilla::TimeStamp mNetworkChangeTime;
+
+  // The timer used to delay the calculation of network id since it takes some
+  // time to discover the gateway's MAC address.
+  nsCOMPtr<nsITimer> mNetworkIdTimer;
+
+  // Is true if preference network.netlink.route.check.IPv4 was successfully
+  // parsed and stored to mRouteCheckIPv4
+  bool mDoRouteCheckIPv4;
+  struct in_addr mRouteCheckIPv4;
 };
 
 #endif /* NSNETWORKLINKSERVICEMAC_H_ */

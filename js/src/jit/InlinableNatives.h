@@ -31,7 +31,7 @@
                                                    \
   _(IntlGuardToCollator)                           \
   _(IntlGuardToDateTimeFormat)                     \
-  _(IntlGuardToLocale)                             \
+  _(IntlGuardToListFormat)                         \
   _(IntlGuardToNumberFormat)                       \
   _(IntlGuardToPluralRules)                        \
   _(IntlGuardToRelativeTimeFormat)                 \
@@ -78,6 +78,7 @@
   _(RegExpSearcher)                                \
   _(RegExpTester)                                  \
   _(IsRegExpObject)                                \
+  _(IsPossiblyWrappedRegExpObject)                 \
   _(RegExpPrototypeOptimizable)                    \
   _(RegExpInstanceOptimizable)                     \
   _(GetFirstDollarIndex)                           \
@@ -114,7 +115,7 @@
   _(IntrinsicToObject)                             \
   _(IntrinsicIsObject)                             \
   _(IntrinsicIsCrossRealmArrayConstructor)         \
-  _(IntrinsicToInteger)                            \
+  _(IntrinsicToIntegerPositiveZero)                \
   _(IntrinsicToString)                             \
   _(IntrinsicIsConstructing)                       \
   _(IntrinsicSubstringKernel)                      \

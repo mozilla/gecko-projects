@@ -209,7 +209,7 @@ const TEST_GLOBAL = {
     },
     urlFormatter: { formatURL: str => str, formatURLPref: str => str },
     mm: {
-      addMessageListener: (msg, cb) => cb(),
+      addMessageListener: (msg, cb) => this.receiveMessage(),
       removeMessageListener() {},
     },
     appShell: { hiddenDOMWindow: { performance: new FakePerformance() } },
@@ -353,7 +353,7 @@ const TEST_GLOBAL = {
     }
   },
   FxAccountsConfig: {
-    promiseEmailFirstURI(id) {
+    promiseConnectAccountURI(id) {
       return Promise.resolve(id);
     },
   },

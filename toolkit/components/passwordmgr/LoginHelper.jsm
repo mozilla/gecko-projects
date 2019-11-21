@@ -27,9 +27,11 @@ const { XPCOMUtils } = ChromeUtils.import(
 this.LoginHelper = {
   debug: null,
   enabled: null,
+  storageEnabled: null,
   formlessCaptureEnabled: null,
   generationAvailable: null,
   generationEnabled: null,
+  includeOtherSubdomainsInLookup: null,
   insecureAutofill: null,
   managementURI: null,
   privateBrowsingCaptureEnabled: null,
@@ -50,6 +52,7 @@ this.LoginHelper = {
     );
     this.debug = Services.prefs.getBoolPref("signon.debug");
     this.enabled = Services.prefs.getBoolPref("signon.rememberSignons");
+    this.storageEnabled = Services.prefs.getBoolPref("signon.storeSignons");
     this.formlessCaptureEnabled = Services.prefs.getBoolPref(
       "signon.formlessCapture.enabled"
     );
@@ -61,6 +64,9 @@ this.LoginHelper = {
     );
     this.insecureAutofill = Services.prefs.getBoolPref(
       "signon.autofillForms.http"
+    );
+    this.includeOtherSubdomainsInLookup = Services.prefs.getBoolPref(
+      "signon.includeOtherSubdomainsInLookup"
     );
     this.managementURI = Services.prefs.getStringPref(
       "signon.management.overrideURI",
@@ -721,6 +727,14 @@ this.LoginHelper = {
               newLoginURI.host == preferredOriginURI.host
             ) {
               return true;
+            }
+            // if the existing login host *is* a match and the new one isn't
+            // we explicitly want to keep the existing one
+            if (
+              existingLoginURI.host == preferredOriginURI.host &&
+              newLoginURI.host != preferredOriginURI.host
+            ) {
+              return false;
             }
             break;
           }

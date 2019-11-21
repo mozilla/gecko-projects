@@ -27,7 +27,7 @@ const {
 const SplitBox = createFactory(
   require("devtools/client/shared/components/splitter/SplitBox")
 );
-const RequestList = createFactory(require("./RequestList"));
+const RequestList = createFactory(require("./request-list/RequestList"));
 const Toolbar = createFactory(require("./Toolbar"));
 
 loader.lazyGetter(this, "NetworkDetailsPanel", function() {
@@ -172,7 +172,7 @@ class MonitorPanel extends Component {
       className: "devtools-responsive-container",
       initialWidth,
       initialHeight,
-      minSize: "50px",
+      minSize: "250px",
       maxSize: "80%",
       splitterSize: panelOpen ? 1 : 0,
       startPanel:

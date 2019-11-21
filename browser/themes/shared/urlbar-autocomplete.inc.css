@@ -6,10 +6,11 @@
 
 %filter substitution
 %define urlbarViewPadding 4px
-%define urlbarViewIconMarginEnd 8px
+%define urlbarViewIconMarginEnd (@identityBoxPaddingInline@ + @identityBoxMarginInlineEnd@)
 %define urlbarViewFaviconOffset (@urlbarViewPadding@ + 16px /* type icon width */ + @urlbarViewIconMarginEnd@)
-%define urlbarViewInlineStartPadding (@urlbarBreakoutHorizontalExtend@ - 16px /* type icon width */ - @urlbarViewIconMarginEnd@ - 2px /* border */)
-%define urlbarViewHorizontalMargin 8px
+%define urlbarViewMarginInline 7px
+%define urlbarViewPaddingInline 30px
+%define urlbarViewItemPaddingStart (@urlbarViewPaddingInline@ - (/* type icon: */ 16px + @urlbarViewIconMarginEnd@))
 
 :root {
   --autocomplete-popup-background: var(--arrowpanel-background);
@@ -44,14 +45,17 @@
   /* Don't handle window drag events in case we are overlapping a toolbar */
   -moz-window-dragging: no-drag;
   text-shadow: none;
+  overflow: -moz-hidden-unscrollable;
 }
 
 .urlbarView.megabar {
-  margin-inline: @urlbarViewHorizontalMargin@;
-  width: calc(100% - 2 * @urlbarViewHorizontalMargin@);
+  margin-inline: @urlbarViewMarginInline@;
+  width: calc(100% - 2 * @urlbarViewMarginInline@);
+  /* Match urlbar-background's border. */
+  border-inline: 1px solid transparent;
 }
 
-.urlbarView:not([hidden]) {
+.urlbarView {
   display: block;
 }
 
@@ -68,6 +72,7 @@
   background: var(--autocomplete-popup-background);
   color: var(--autocomplete-popup-color);
   border-block: 1px solid var(--chrome-content-separator-color);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .2);
 }
 
 #urlbar-contextual-tip {
@@ -75,8 +80,8 @@
   display: flex;
   padding-top: 24px;
   padding-bottom: 24px;
-  padding-inline-start: calc(@urlbarViewInlineStartPadding@);
-  padding-inline-end: calc(@urlbarBreakoutHorizontalExtend@ - @urlbarViewHorizontalMargin@);
+  padding-inline-start: calc(@urlbarViewItemPaddingStart@);
+  padding-inline-end: @urlbarViewPaddingInline@;
 }
 
 .urlbarView:not(.megabar) #urlbar-contextual-tip {
@@ -124,13 +129,20 @@
 }
 
 .urlbarView-row {
-  border-radius: 2px;
   fill: currentColor;
   fill-opacity: .6;
-  padding-top: 6px;
-  padding-bottom: 6px;
-  padding-inline-start: calc(@urlbarViewInlineStartPadding@);
-  padding-inline-end: calc(@urlbarBreakoutHorizontalExtend@ - @urlbarViewHorizontalMargin@);
+  padding-block: 3px;
+}
+
+.urlbarView:not(.megabar) .urlbarView-row,
+.urlbarView.megabar .urlbarView-row-inner {
+  border-radius: 2px;
+  padding-inline-start: calc(@urlbarViewItemPaddingStart@);
+}
+
+.urlbarView:not(.megabar) .urlbarView-row:not([type=tip]),
+.urlbarView.megabar .urlbarView-row-inner {
+  padding-block: 6px;
 }
 
 .urlbarView:not(.megabar) .urlbarView-row {
@@ -138,9 +150,18 @@
   padding-inline-end: var(--item-padding-end, 5px);
 }
 
-:root[uidensity=touch] .urlbarView-row {
-  padding-top: 11px;
-  padding-bottom: 11px;
+:root[uidensity=touch] .urlbarView-row:not([type=tip]) {
+  padding-block: 11px;
+}
+
+.urlbarView:not(.megabar) .urlbarView-row[type=tip] {
+  padding-block: 24px;
+}
+
+.urlbarView.megabar .urlbarView-row[type=tip] {
+  padding-block: 18px;
+  /* Compensating for the 4px focus ring on tip buttons. */
+  padding-inline-end: calc(@urlbarViewItemPaddingStart@ + 4px);
 }
 
 .urlbarView-row-inner {
@@ -164,11 +185,13 @@
   direction: ltr !important;
 }
 
-.urlbarView-row:not([type=tip]):hover {
+.urlbarView:not(.megabar) .urlbarView-row:not([type=tip]):hover,
+.urlbarView.megabar .urlbarView-row:not([type=tip]):hover > .urlbarView-row-inner {
   background: var(--arrowpanel-dimmed);
 }
 
-.urlbarView-row:not([type=tip])[selected] {
+.urlbarView:not(.megabar) .urlbarView-row:not([type=tip])[selected],
+.urlbarView.megabar .urlbarView-row:not([type=tip])[selected] > .urlbarView-row-inner {
   background: var(--autocomplete-popup-highlight-background);
   color: var(--autocomplete-popup-highlight-color);
   fill-opacity: 1;
@@ -178,7 +201,7 @@
 .urlbarView-favicon {
   min-width: 16px;
   height: 16px;
-  margin-inline-end: @urlbarViewIconMarginEnd@;
+  margin-inline-end: calc(@urlbarViewIconMarginEnd@);
   background-repeat: no-repeat;
   background-size: contain;
   -moz-context-properties: fill, fill-opacity;
@@ -187,6 +210,7 @@
 .urlbarView-row[type=tip] > .urlbarView-row-inner > .urlbarView-favicon {
   min-width: 24px;
   height: 24px;
+  margin-inline-start: calc(12px + @urlbarViewIconMarginEnd@);
   margin-inline-end: 12px;
 }
 
@@ -218,7 +242,7 @@
 #urlbar-contextual-tip-icon {
   min-width: 24px;
   height: 24px;
-  margin-inline-end: @urlbarViewIconMarginEnd@;
+  margin-inline-end: calc(@urlbarViewIconMarginEnd@);
   background-repeat: no-repeat;
   background-size: contain;
   -moz-context-properties: fill, fill-opacity;
@@ -241,9 +265,8 @@
   background-image: url(chrome://browser/skin/tab.svg);
 }
 
-.urlbarView-row[type=tip] {
+.urlbarView-row[type=tip]:not(:last-child) {
   border-bottom: 1px solid var(--panel-separator-color);
-  padding-block: 24px;
   margin-bottom: 4px;
 }
 
@@ -323,9 +346,10 @@
   font-size: .85em;
 }
 
-.urlbarView-title > strong,
-.urlbarView-url > strong,
-.urlbarView-tag > strong {
+/* The megabar uses full bold weight (700). */
+.urlbarView:not(.megabar) .urlbarView-title > strong,
+.urlbarView:not(.megabar) .urlbarView-url > strong,
+.urlbarView:not(.megabar) .urlbarView-tag > strong {
   font-weight: 600;
 }
 
@@ -349,8 +373,8 @@
 .urlbarView-row[type=remotetab][selected] > .urlbarView-row-inner > .urlbarView-action,
 .urlbarView-row[type=remotetab]:hover > .urlbarView-row-inner > .urlbarView-action,
 .urlbarView-row[type=remotetab]:not([selected]):not(:hover) > .urlbarView-row-inner > .urlbarView-url,
-.urlbarView-row[type=search]:not([selected]):not(:hover) > .urlbarView-row-inner > .urlbarView-title:not(:empty) ~ .urlbarView-action,
-.urlbarView-row[type=search]:not([selected]):not(:hover) > .urlbarView-row-inner > .urlbarView-title-separator,
+.urlbarView-row[type=search]:not([selected]):not(:hover):not([show-action-text]) > .urlbarView-row-inner > .urlbarView-title:not(:empty) ~ .urlbarView-action,
+.urlbarView-row[type=search]:not([selected]):not(:hover):not([show-action-text]) > .urlbarView-row-inner > .urlbarView-title-separator,
 .urlbarView[actionoverride] .urlbarView-row[type=switchtab] > .urlbarView-row-inner > .urlbarView-action,
 .urlbarView:not([actionoverride]) .urlbarView-row[type=switchtab] > .urlbarView-row-inner > .urlbarView-url {
   /* Use visibility:collapse instead of display:none since the latter can
@@ -381,23 +405,17 @@
   display: flex;
   align-items: start;
   padding-block: 16px;
-}
-
-.urlbarView.megabar .search-one-offs {
-  padding-inline-start: @urlbarBreakoutHorizontalExtend@;
-  padding-inline-end: calc(@urlbarBreakoutHorizontalExtend@ - @urlbarViewHorizontalMargin@);
+  flex-wrap: wrap;
 }
 
 #urlbar:not(.megabar) .search-one-offs {
-  padding-inline-start: var(--item-padding-start, 5px);
+  padding-inline-start: calc(var(--item-padding-start, 5px) - /* icon padding */ 8px);
   padding-inline-end: var(--item-padding-end, 5px);
 }
 
-#urlbar .search-panel-one-offs {
-  padding-inline-start: 12px;
-  /* Make sure we can fit at least three buttons horizontally. */
-  min-width: 120px;
-  box-sizing: content-box;
+#urlbar .search-panel-one-offs-container {
+  /* Make sure horizontally we can fit four buttons, empty space, settings. */
+  min-width: calc(4 * /* one-off */ 32px + 3 * /* one-off end margin */ 8px + /* empty space */ 32px + /* settings icon with end padding */ 24px);
 }
 
 #urlbar .search-panel-header {
@@ -409,13 +427,26 @@
 }
 
 #urlbar .search-panel-one-offs-header-label {
+  white-space: nowrap;
   margin: 0;
+  padding-inline-start: 8px;
+  padding-inline-end: 16px;
 }
 
 #urlbar .searchbar-engine-one-off-item {
   min-width: 32px;
   height: 32px;
-  margin: 0 4px;
+  margin-inline-end: 8px;
+}
+
+#urlbar .searchbar-engine-one-off-item:last-child {
+  /* This applies to both the last one-off and the compact settings button */
+  margin-inline-end: 0;
+}
+
+#urlbar .search-setting-button-compact {
+  /* Force empty space before the button */
+  margin-inline-start: calc(32px - /* settings start padding */ 8px );
 }
 
 #urlbar .search-one-offs-spacer {

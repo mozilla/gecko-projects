@@ -47,11 +47,14 @@
 #include "jit/WasmBCE.h"
 #include "js/Printf.h"
 #include "js/UniquePtr.h"
+#include "util/Memory.h"
 #include "util/Windows.h"
 #include "vm/HelperThreads.h"
 #include "vm/Realm.h"
 #include "vm/TraceLogging.h"
-#include "vtune/VTuneWrapper.h"
+#ifdef MOZ_VTUNE
+#  include "vtune/VTuneWrapper.h"
+#endif
 
 #include "debugger/DebugAPI-inl.h"
 #include "gc/PrivateIterators-inl.h"
@@ -153,8 +156,7 @@ bool jit::InitializeJit() {
 }
 
 JitRuntime::JitRuntime()
-    : execAlloc_(),
-      nextCompilationId_(0),
+    : nextCompilationId_(0),
       exceptionTailOffset_(0),
       bailoutTailOffset_(0),
       profilerExitFrameTailOffset_(0),
@@ -374,15 +376,15 @@ void JitRuntime::ionLazyLinkListAdd(JSRuntime* rt, jit::IonBuilder* builder) {
   ionLazyLinkListSize_++;
 }
 
-uint8_t* JSContext::allocateOsrTempData(size_t size) {
-  osrTempData_ = (uint8_t*)js_realloc(osrTempData_, size);
-  return osrTempData_;
+uint8_t* JitRuntime::allocateIonOsrTempData(size_t size) {
+  // Free the old buffer (if needed) before allocating a new one. Note that we
+  // could use realloc here but it's likely not worth the complexity.
+  freeIonOsrTempData();
+  ionOsrTempData_.ref().reset(static_cast<uint8_t*>(js_malloc(size)));
+  return ionOsrTempData_.ref().get();
 }
 
-void JSContext::freeOsrTempData() {
-  js_free(osrTempData_);
-  osrTempData_ = nullptr;
-}
+void JitRuntime::freeIonOsrTempData() { ionOsrTempData_.ref().reset(); }
 
 JitRealm::JitRealm() : stubCodes_(nullptr), stringsCanBeInNursery(false) {}
 
@@ -422,6 +424,7 @@ void jit::FreeIonBuilder(IonBuilder* builder) {
   // destroy the builder and all other data accumulated during compilation,
   // except any final codegen (which includes an assembler and needs to be
   // explicitly destroyed).
+  MOZ_ASSERT(builder->pendingBlocks().empty(), "Should not leak malloc memory");
   js_delete(builder->backgroundCodegen());
   js_delete(builder->alloc().lifoAlloc());
 }
@@ -574,26 +577,28 @@ bool JitRuntime::MarkJitcodeGlobalTableIteratively(GCMarker* marker) {
 }
 
 /* static */
-void JitRuntime::SweepJitcodeGlobalTable(JSRuntime* rt) {
+void JitRuntime::TraceWeakJitcodeGlobalTable(JSRuntime* rt, JSTracer* trc) {
   if (rt->hasJitRuntime() && rt->jitRuntime()->hasJitcodeGlobalTable()) {
-    rt->jitRuntime()->getJitcodeGlobalTable()->sweep(rt);
+    rt->jitRuntime()->getJitcodeGlobalTable()->traceWeak(rt, trc);
   }
 }
 
-void JitRealm::sweep(JS::Realm* realm) {
+void JitRealm::traceWeak(JSTracer* trc, JS::Realm* realm) {
   // Any outstanding compilations should have been cancelled by the GC.
   MOZ_ASSERT(!HasOffThreadIonCompile(realm));
 
-  stubCodes_->sweep();
+  stubCodes_->traceWeak(trc);
 
   for (WeakHeapPtrJitCode& stub : stubs_) {
-    if (stub && IsAboutToBeFinalized(&stub)) {
-      stub.set(nullptr);
+    if (stub) {
+      TraceWeakEdge(trc, &stub, "JitRealm::stubs_");
     }
   }
 }
 
-void JitZone::sweep() { baselineCacheIRStubCodes_.sweep(); }
+void JitZone::traceWeak(JSTracer* trc) {
+  baselineCacheIRStubCodes_.traceWeak(trc);
+}
 
 size_t JitRealm::sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
   size_t n = mallocSizeOf(this);
@@ -604,17 +609,17 @@ size_t JitRealm::sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
 }
 
 void JitZone::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
-                                     size_t* jitZone,
-                                     size_t* baselineStubsOptimized,
-                                     size_t* cachedCFG) const {
+                                     JS::CodeSizes* code, size_t* jitZone,
+                                     size_t* baselineStubsOptimized) const {
   *jitZone += mallocSizeOf(this);
   *jitZone +=
       baselineCacheIRStubCodes_.shallowSizeOfExcludingThis(mallocSizeOf);
   *jitZone += ionCacheIRStubInfoSet_.shallowSizeOfExcludingThis(mallocSizeOf);
 
+  execAlloc().addSizeOfCode(code);
+
   *baselineStubsOptimized +=
       optimizedStubSpace_.sizeOfExcludingThis(mallocSizeOf);
-  *cachedCFG += cfgSpace_.sizeOfExcludingThis(mallocSizeOf);
 }
 
 TrampolinePtr JitRuntime::getBailoutTable(
@@ -1742,10 +1747,6 @@ static AbortReason IonCompile(JSContext* cx, JSScript* script,
 
   cx->check(script);
 
-  // Make sure the script's canonical function isn't lazy. We can't de-lazify
-  // it in a helper thread.
-  script->ensureNonLazyCanonicalFunction();
-
   auto alloc =
       cx->make_unique<LifoAlloc>(TempAllocator::PreferredLifoChunkSize);
   if (!alloc) {
@@ -1779,9 +1780,8 @@ static AbortReason IonCompile(JSContext* cx, JSScript* script,
   }
 
   CompileInfo* info = alloc->new_<CompileInfo>(
-      CompileRuntime::get(cx->runtime()), script,
-      script->functionNonDelazifying(), osrPc, Analysis_None,
-      script->needsArgsObj(), inlineScriptTree);
+      CompileRuntime::get(cx->runtime()), script, script->function(), osrPc,
+      Analysis_None, script->needsArgsObj(), inlineScriptTree);
   if (!info) {
     return AbortReason::Alloc;
   }
@@ -1977,7 +1977,7 @@ static bool CanIonCompileOrInlineScript(JSScript* script, const char** reason) {
     return false;
   }
 
-  if (script->hasNonSyntacticScope() && !script->functionNonDelazifying()) {
+  if (script->hasNonSyntacticScope() && !script->function()) {
     // Support functions with a non-syntactic global scope but not other
     // scripts. For global scripts, IonBuilder currently uses the global
     // object as scope chain, this is not valid when the script has a
@@ -2347,8 +2347,8 @@ static MethodStatus BaselineCanEnterAtBranch(JSContext* cx, HandleScript script,
   return Method_Compiled;
 }
 
-bool jit::IonCompileScriptForBaseline(JSContext* cx, BaselineFrame* frame,
-                                      uint32_t frameSize, jsbytecode* pc) {
+static bool IonCompileScriptForBaseline(JSContext* cx, BaselineFrame* frame,
+                                        uint32_t frameSize, jsbytecode* pc) {
   MOZ_ASSERT(IsIonEnabled());
   MOZ_ASSERT(frame->debugFrameSize() == frameSize);
 
@@ -2432,6 +2432,114 @@ bool jit::IonCompileScriptForBaselineAtEntry(JSContext* cx,
   uint32_t frameSize =
       BaselineFrame::frameSizeForNumValueSlots(script->nfixed());
   return IonCompileScriptForBaseline(cx, frame, frameSize, script->code());
+}
+
+/* clang-format off */
+// The following data is kept in a temporary heap-allocated buffer, stored in
+// JitRuntime (high memory addresses at top, low at bottom):
+//
+//     +----->+=================================+  --      <---- High Address
+//     |      |                                 |   |
+//     |      |     ...BaselineFrame...         |   |-- Copy of BaselineFrame + stack values
+//     |      |                                 |   |
+//     |      +---------------------------------+   |
+//     |      |                                 |   |
+//     |      |     ...Locals/Stack...          |   |
+//     |      |                                 |   |
+//     |      +=================================+  --
+//     |      |     Padding(Maybe Empty)        |
+//     |      +=================================+  --
+//     +------|-- baselineFrame                 |   |-- IonOsrTempData
+//            |   jitcode                       |   |
+//            +=================================+  --      <---- Low Address
+//
+// A pointer to the IonOsrTempData is returned.
+/* clang-format on */
+
+static IonOsrTempData* PrepareOsrTempData(JSContext* cx, BaselineFrame* frame,
+                                          uint32_t frameSize, void* jitcode) {
+  uint32_t numValueSlots = frame->numValueSlots(frameSize);
+
+  // Calculate the amount of space to allocate:
+  //      BaselineFrame space:
+  //          (sizeof(Value) * numValueSlots)
+  //        + sizeof(BaselineFrame)
+  //
+  //      IonOsrTempData space:
+  //          sizeof(IonOsrTempData)
+
+  size_t frameSpace = sizeof(BaselineFrame) + sizeof(Value) * numValueSlots;
+  size_t ionOsrTempDataSpace = sizeof(IonOsrTempData);
+
+  size_t totalSpace = AlignBytes(frameSpace, sizeof(Value)) +
+                      AlignBytes(ionOsrTempDataSpace, sizeof(Value));
+
+  JitRuntime* jrt = cx->runtime()->jitRuntime();
+  uint8_t* buf = jrt->allocateIonOsrTempData(totalSpace);
+  if (!buf) {
+    ReportOutOfMemory(cx);
+    return nullptr;
+  }
+
+  IonOsrTempData* info = new (buf) IonOsrTempData();
+  info->jitcode = jitcode;
+
+  // Copy the BaselineFrame + local/stack Values to the buffer. Arguments and
+  // |this| are not copied but left on the stack: the Baseline and Ion frame
+  // share the same frame prefix and Ion won't clobber these values. Note
+  // that info->baselineFrame will point to the *end* of the frame data, like
+  // the frame pointer register in baseline frames.
+  uint8_t* frameStart =
+      (uint8_t*)info + AlignBytes(ionOsrTempDataSpace, sizeof(Value));
+  info->baselineFrame = frameStart + frameSpace;
+
+  memcpy(frameStart, (uint8_t*)frame - numValueSlots * sizeof(Value),
+         frameSpace);
+
+  JitSpew(JitSpew_BaselineOSR, "Allocated IonOsrTempData at %p", info);
+  JitSpew(JitSpew_BaselineOSR, "Jitcode is %p", info->jitcode);
+
+  // All done.
+  return info;
+}
+
+bool jit::IonCompileScriptForBaselineOSR(JSContext* cx, BaselineFrame* frame,
+                                         uint32_t frameSize, jsbytecode* pc,
+                                         IonOsrTempData** infoPtr) {
+  MOZ_ASSERT(infoPtr);
+  *infoPtr = nullptr;
+
+  MOZ_ASSERT(frame->debugFrameSize() == frameSize);
+  MOZ_ASSERT(JSOp(*pc) == JSOP_LOOPENTRY);
+
+  if (!IonCompileScriptForBaseline(cx, frame, frameSize, pc)) {
+    return false;
+  }
+
+  RootedScript script(cx, frame->script());
+  if (!script->hasIonScript() || script->ionScript()->osrPc() != pc ||
+      script->ionScript()->bailoutExpected() || frame->isDebuggee()) {
+    return true;
+  }
+
+  IonScript* ion = script->ionScript();
+  MOZ_ASSERT(cx->runtime()->geckoProfiler().enabled() ==
+             ion->hasProfilingInstrumentation());
+  MOZ_ASSERT(ion->osrPc() == pc);
+
+  JitSpew(JitSpew_BaselineOSR, "  OSR possible!");
+  void* jitcode = ion->method()->raw() + ion->osrEntryOffset();
+
+  // Prepare the temporary heap copy of the fake InterpreterFrame and actual
+  // args list.
+  JitSpew(JitSpew_BaselineOSR, "Got jitcode.  Preparing for OSR into ion.");
+  IonOsrTempData* info = PrepareOsrTempData(cx, frame, frameSize, jitcode);
+  if (!info) {
+    return false;
+  }
+
+  *infoPtr = info;
+  return true;
 }
 
 MethodStatus jit::Recompile(JSContext* cx, HandleScript script, bool force) {

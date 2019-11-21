@@ -8,8 +8,10 @@
 
 #include "CompositorWidget.h"
 #include "gfxASurface.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/gfx/CriticalSection.h"
 #include "mozilla/gfx/Point.h"
+#include "mozilla/layers/LayersTypes.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/widget/WinCompositorWindowThread.h"
 #include "FxROutputHandler.h"
@@ -37,6 +39,7 @@ class PlatformCompositorWidgetDelegate : public CompositorWidgetDelegate {
   virtual void SetParentWnd(const HWND aParentWnd) {}
   virtual void UpdateCompositorWnd(const HWND aCompositorWnd,
                                    const HWND aParentWnd) {}
+  virtual void SetRootLayerTreeID(const layers::LayersId& aRootLayerTreeId) {}
 
   // CompositorWidgetDelegate Overrides
 
@@ -109,12 +112,17 @@ class WinCompositorWidget : public CompositorWidget,
   bool HasFxrOutputHandler() const { return mFxrHandler != nullptr; }
   FxROutputHandler* GetFxrOutputHandler() const { return mFxrHandler.get(); }
 
+  bool HasGlass() const;
+
  protected:
  private:
   HDC GetWindowSurface();
   void FreeWindowSurface(HDC dc);
 
   void CreateTransparentSurface(const gfx::IntSize& aSize);
+
+ protected:
+  bool mSetParentCompleted;
 
  private:
   uintptr_t mWidgetKey;
@@ -127,7 +135,8 @@ class WinCompositorWidget : public CompositorWidget,
 
   // Transparency handling.
   mozilla::Mutex mTransparentSurfaceLock;
-  nsTransparencyMode mTransparencyMode;
+  mozilla::Atomic<nsTransparencyMode, MemoryOrdering::Relaxed>
+      mTransparencyMode;
   RefPtr<gfxASurface> mTransparentSurface;
   HDC mMemoryDC;
   HDC mCompositeDC;

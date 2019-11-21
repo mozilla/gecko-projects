@@ -101,7 +101,7 @@ function getUniqueIdentifiers(identifiers) {
   return newIdentifiers;
 }
 
-/* eslint-disable complexity */
+// eslint-disable-next-line complexity
 function extractSymbol(path: SimplePath, symbols, state) {
   if (isFunction(path)) {
     const name = getFunctionName(path.node, path.parent);
@@ -196,7 +196,7 @@ function extractSymbol(path: SimplePath, symbols, state) {
         property: { name, loc },
       } = callee;
       symbols.callExpressions.push({
-        name: name,
+        name,
         values: args.filter(arg => arg.value).map(arg => arg.value),
         location: loc,
       });
@@ -262,8 +262,6 @@ function extractSymbol(path: SimplePath, symbols, state) {
     symbols.identifiers.push(...getPatternIdentifiers(nodeId));
   }
 }
-
-/* eslint-enable complexity */
 
 function extractSymbols(sourceId): SymbolDeclarations {
   const symbols = {
@@ -435,8 +433,7 @@ function getSnippet(
       return expression;
     }
 
-    const name = node.name;
-    const prop = extendSnippet(name, expression, path, prevPath);
+    const prop = extendSnippet(node.name, expression, path, prevPath);
     return prop;
   }
 
@@ -455,8 +452,7 @@ function getSnippet(
   }
 
   if (t.isIdentifier(path)) {
-    const node = path.node;
-    return `${node.name}.${expression}`;
+    return `${path.node.name}.${expression}`;
   }
 
   if (t.isObjectProperty(path)) {

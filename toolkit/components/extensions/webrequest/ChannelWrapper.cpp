@@ -23,7 +23,9 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/BrowserHost.h"
+#include "mozIThirdPartyUtil.h"
 #include "nsIContentPolicy.h"
+#include "nsIClassifiedChannel.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIHttpHeaderVisitor.h"
 #include "nsIInterfaceRequestor.h"
@@ -48,7 +50,7 @@ namespace extensions {
 #define CHANNELWRAPPER_PROP_KEY \
   NS_LITERAL_STRING("ChannelWrapper::CachedInstance")
 
-using CF = nsIHttpChannel::ClassificationFlags;
+using CF = nsIClassifiedChannel::ClassificationFlags;
 using MUC = MozUrlClassificationFlags;
 
 struct ClassificationStruct {
@@ -823,6 +825,22 @@ void ChannelWrapper::GetStatusLine(nsCString& aRetVal) const {
   }
 }
 
+uint64_t ChannelWrapper::ResponseSize() const {
+  uint64_t result = 0;
+  if (nsCOMPtr<nsIHttpChannel> chan = MaybeHttpChannel()) {
+    Unused << chan->GetTransferSize(&result);
+  }
+  return result;
+}
+
+uint64_t ChannelWrapper::RequestSize() const {
+  uint64_t result = 0;
+  if (nsCOMPtr<nsIHttpChannel> chan = MaybeHttpChannel()) {
+    Unused << chan->GetRequestSize(&result);
+  }
+  return result;
+}
+
 /*****************************************************************************
  * ...
  *****************************************************************************/
@@ -907,16 +925,41 @@ void ChannelWrapper::GetUrlClassification(
     dom::Nullable<dom::MozUrlClassification>& aRetVal, ErrorResult& aRv) const {
   MozUrlClassification classification;
   if (nsCOMPtr<nsIHttpChannel> chan = MaybeHttpChannel()) {
+    nsCOMPtr<nsIClassifiedChannel> classified = do_QueryInterface(chan);
+    MOZ_DIAGNOSTIC_ASSERT(
+        classified,
+        "Must be an object inheriting from both nsIHttpChannel and "
+        "nsIClassifiedChannel");
     uint32_t classificationFlags;
-    chan->GetFirstPartyClassificationFlags(&classificationFlags);
+    classified->GetFirstPartyClassificationFlags(&classificationFlags);
     FillClassification(classification.mFirstParty, classificationFlags, aRv);
     if (aRv.Failed()) {
       return;
     }
-    chan->GetThirdPartyClassificationFlags(&classificationFlags);
+    classified->GetThirdPartyClassificationFlags(&classificationFlags);
     FillClassification(classification.mThirdParty, classificationFlags, aRv);
   }
   aRetVal.SetValue(std::move(classification));
+}
+
+bool ChannelWrapper::ThirdParty() const {
+  nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil = services::GetThirdPartyUtil();
+  if (NS_WARN_IF(!thirdPartyUtil)) {
+    return true;
+  }
+
+  nsCOMPtr<nsIHttpChannel> chan = MaybeHttpChannel();
+  if (!chan) {
+    return false;
+  }
+
+  bool thirdParty = false;
+  nsresult rv = thirdPartyUtil->IsThirdPartyChannel(chan, nullptr, &thirdParty);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return true;
+  }
+
+  return thirdParty;
 }
 
 /*****************************************************************************

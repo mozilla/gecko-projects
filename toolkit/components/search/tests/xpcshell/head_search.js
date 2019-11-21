@@ -53,6 +53,13 @@ Services.prefs
   .getDefaultBranch(SearchUtils.BROWSER_SEARCH_PREF)
   .setCharPref("geoSpecificDefaults.url", "");
 
+XPCOMUtils.defineLazyPreferenceGetter(
+  this,
+  "gModernConfig",
+  SearchUtils.BROWSER_SEARCH_PREF + "modernConfig",
+  false
+);
+
 AddonTestUtils.init(this, false);
 AddonTestUtils.createAppInfo(
   "xpcshell@tests.mozilla.org",
@@ -134,6 +141,15 @@ async function forceExpiration() {
   // Make the current geodefaults expire 1s ago.
   metadata.searchDefaultExpir = Date.now() - 1000;
   await promiseSaveGlobalMetadata(metadata);
+}
+
+function promiseDefaultNotification(type = "normal") {
+  return SearchTestUtils.promiseSearchNotification(
+    SearchUtils.MODIFIED_TYPE[
+      type == "private" ? "DEFAULT_PRIVATE" : "DEFAULT"
+    ],
+    SearchUtils.TOPIC_ENGINE_MODIFIED
+  );
 }
 
 /**
@@ -305,17 +321,28 @@ function readJSONFile(aFile) {
  *
  * @param {object} expectedObj
  * @param {object} actualObj
+ * @param {function} skipProp
+ *   A function that is called with the property name and its value, to see if
+ *   testing that property should be skipped or not.
  */
-function isSubObjectOf(expectedObj, actualObj) {
+function isSubObjectOf(expectedObj, actualObj, skipProp) {
   for (let prop in expectedObj) {
+    if (skipProp && skipProp(prop, expectedObj[prop])) {
+      continue;
+    }
     if (expectedObj[prop] instanceof Object) {
-      Assert.equal(expectedObj[prop].length, actualObj[prop].length);
-      isSubObjectOf(expectedObj[prop], actualObj[prop]);
+      Assert.equal(
+        actualObj[prop].length,
+        expectedObj[prop].length,
+        `Should have the correct length for property ${prop}`
+      );
+      isSubObjectOf(expectedObj[prop], actualObj[prop], skipProp);
     } else {
-      if (expectedObj[prop] != actualObj[prop]) {
-        info("comparing property " + prop);
-      }
-      Assert.equal(expectedObj[prop], actualObj[prop]);
+      Assert.equal(
+        actualObj[prop],
+        expectedObj[prop],
+        `Should have the correct value for property ${prop}`
+      );
     }
   }
 }

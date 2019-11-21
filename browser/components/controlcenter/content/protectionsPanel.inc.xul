@@ -49,6 +49,10 @@
           <label id="protections-popup-tp-switch-breakage-link"
                  class="text-link"
                  onclick="gProtectionsHandler.showSiteNotWorkingView(); gProtectionsHandler.recordClick('sitenotworking_link');">&protections.siteNotWorking.label;</label>
+          <label id="protections-popup-tp-switch-breakage-fixed-link"
+                 class="text-link"
+                 onclick="gProtectionsHandler.showSendReportView(); gProtectionsHandler.recordClick('sitenotworking_link', 'sitefixed');"
+                 data-l10n-id="protections-panel-sitefixedsendreport-label"></label>
         </vbox>
         <vbox class="protections-popup-tp-switch-box">
           <toolbarbutton id="protections-popup-tp-switch"
@@ -62,7 +66,7 @@
       <vbox id="tracking-protection-container" class="protections-popup-section">
         <description id="protections-popup-no-trackers-found-description">&protections.noTrackersFound.description;</description>
         <tooltip id="protections-popup-not-blocking-why-etp-on-tooltip">&protections.notBlocking.why.etpOn.tooltip;</tooltip>
-        <tooltip id="protections-popup-not-blocking-why-etp-off-tooltip">&protections.notBlocking.why.etpOff.tooltip;</tooltip>
+        <tooltip id="protections-popup-not-blocking-why-etp-off-tooltip">&protections.notBlocking.why.etpOff2.tooltip;</tooltip>
         <vbox id="protections-popup-content" flex="1">
           <vbox id="protections-popup-category-list">
             <!-- wrap=true is needed for descriptionheightworkaround, see bug 1564077 -->
@@ -88,11 +92,8 @@
                            class="protections-popup-category" align="center"
                            wrap="true">
               <image class="protections-popup-category-icon thirdpartycookies-icon"/>
-              <label flex="1" id="protections-popup-cookies-category-label-disabled"
-                     class="protections-popup-category-label">&contentBlocking.cookies2.label;</label>
-              <label flex="1" id="protections-popup-cookies-category-label-enabled"
-                     class="protections-popup-category-label"
-                     hidden="true"></label>
+              <label flex="1" id="protections-popup-cookies-category-label"
+                     class="protections-popup-category-label"/>
             </toolbarbutton>
             <!-- wrap=true is needed for descriptionheightworkaround, see bug 1564077 -->
             <toolbarbutton id="protections-popup-category-cryptominers"
@@ -148,13 +149,24 @@
             <label class="protections-popup-footer-button-label" flex="1">&protections.showreport.label;</label>
           </toolbarbutton>
           <hbox id="protections-popup-trackers-blocked-counter-box"
-                align="center"
-                end="0">
+                align="center">
             <description id="protections-popup-trackers-blocked-counter-description"
                          onclick="gProtectionsHandler.openProtections(true);"/>
           </hbox>
         </stack>
       </vbox>
+
+      <hbox id="protections-popup-milestones" class="protections-popup-section">
+        <!-- wrap=true is needed for descriptionheightworkaround, see bug 1564077 -->
+        <toolbarbutton id="protections-popup-milestones-content"
+                       flex="1"
+                       wrap="true"
+                       oncommand="gProtectionsHandler.openProtections(true);">
+          <description id="protections-popup-milestones-text" flex="1"
+                       role="heading" aria-level="2"/>
+          <image id="protections-popup-milestones-illustration"/>
+        </toolbarbutton>
+      </hbox>
     </panelview>
 
     <!-- Site Not Working? SubView -->
@@ -301,6 +313,9 @@
             <label control="protections-popup-sendReportView-collection-comments">&contentBlocking.breakageReportView2.collection.comments.label;</label>
             <html:textarea id="protections-popup-sendReportView-collection-comments" aria-label="&contentBlocking.breakageReportView2.collection.comments.label;"/>
           </vbox>
+          <label id="protections-popup-sendReportView-report-error"
+            data-l10n-id="protections-panel-sendreportview-error"
+            hidden="true" role="alert"></label>
         </vbox>
         <vbox id="protections-popup-sendReportView-footer"
               class="panel-footer">

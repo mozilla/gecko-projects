@@ -3,11 +3,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 use api::{AlphaType, ClipMode, ExternalImageType, ImageRendering};
-use api::{YuvColorSpace, YuvFormat, ColorDepth, ColorRange, PremultipliedColorF, RasterSpace};
+use api::{YuvColorSpace, YuvFormat, ColorDepth, ColorRange, PremultipliedColorF};
 use api::units::*;
 use crate::clip::{ClipDataStore, ClipNodeFlags, ClipNodeRange, ClipItemKind, ClipStore};
 use crate::clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex, CoordinateSystemId};
-use crate::composite::{CompositeConfig, CompositeTile, CompositeTileSurface};
+use crate::composite::{CompositeState, CompositeTile, CompositeTileSurface};
 use crate::glyph_rasterizer::GlyphFormat;
 use crate::gpu_cache::{GpuBlockData, GpuCache, GpuCacheHandle, GpuCacheAddress};
 use crate::gpu_types::{BrushFlags, BrushInstance, PrimitiveHeaders, ZBufferId, ZBufferIdGenerator};
@@ -448,7 +448,7 @@ impl AlphaBatchContainer {
 #[derive(Debug, Copy, Clone)]
 struct SegmentInstanceData {
     textures: BatchTextures,
-    user_data: i32,
+    specific_resource_address: i32,
 }
 
 /// Encapsulates the logic of building batches for items that are blended.
@@ -645,7 +645,7 @@ impl BatchBuilder {
         root_spatial_node_index: SpatialNodeIndex,
         surface_spatial_node_index: SpatialNodeIndex,
         z_generator: &mut ZBufferIdGenerator,
-        composite_config: &mut CompositeConfig,
+        composite_state: &mut CompositeState,
     ) {
         for cluster in &pic.prim_list.clusters {
             // Add each run in this picture to the batch.
@@ -662,7 +662,7 @@ impl BatchBuilder {
                     root_spatial_node_index,
                     surface_spatial_node_index,
                     z_generator,
-                    composite_config,
+                    composite_state,
                 );
             }
         }
@@ -685,7 +685,7 @@ impl BatchBuilder {
         root_spatial_node_index: SpatialNodeIndex,
         surface_spatial_node_index: SpatialNodeIndex,
         z_generator: &mut ZBufferIdGenerator,
-        composite_config: &mut CompositeConfig,
+        composite_state: &mut CompositeState,
     ) {
         if prim_instance.visibility_info == PrimitiveVisibilityIndex::INVALID {
             return;
@@ -806,7 +806,7 @@ impl BatchBuilder {
                     segment_data.push(
                         SegmentInstanceData {
                             textures: BatchTextures::color(cache_item.texture_id),
-                            user_data: cache_item.uv_rect_handle.as_int(gpu_cache),
+                            specific_resource_address: cache_item.uv_rect_handle.as_int(gpu_cache),
                         }
                     );
                 }
@@ -879,19 +879,15 @@ impl BatchBuilder {
                 };
 
                 let glyph_keys = &ctx.scratch.glyph_keys[run.glyph_keys_range];
-                let rasterization_space = match run.raster_space {
-                    RasterSpace::Screen => RasterizationSpace::Screen,
-                    RasterSpace::Local(..) => RasterizationSpace::Local,
-                };
                 let raster_scale = run.raster_space.local_scale().unwrap_or(1.0).max(0.001);
                 let prim_header_index = prim_headers.push(
                     &prim_header,
                     z_id,
                     [
-                        (run.reference_frame_relative_offset.x * 256.0) as i32,
-                        (run.reference_frame_relative_offset.y * 256.0) as i32,
+                        (run.snapped_reference_frame_relative_offset.x * 256.0) as i32,
+                        (run.snapped_reference_frame_relative_offset.y * 256.0) as i32,
                         (raster_scale * 65535.0).round() as i32,
-                        clip_task_address.unwrap().0 as i32,
+                        0,
                     ],
                 );
                 let base_instance = GlyphInstance::new(
@@ -979,11 +975,12 @@ impl BatchBuilder {
 
                                 for glyph in glyphs {
                                     batch.push(base_instance.build(
-                                        glyph.index_in_text_run | ((render_task_address.0 as i32) << 16),
+                                        ((render_task_address.0 as i32) << 16)
+                                        | clip_task_address.unwrap().0 as i32,
+                                        (subpx_dir as u32 as i32) << 24
+                                        | (color_mode as u32 as i32) << 16
+                                        | glyph.index_in_text_run,
                                         glyph.uv_rect_address.as_int(),
-                                        (rasterization_space as i32) << 16 |
-                                        (subpx_dir as u32 as i32) << 8 |
-                                        (color_mode as u32 as i32),
                                     ));
                                 }
                             }
@@ -997,7 +994,7 @@ impl BatchBuilder {
                 let common_data = &ctx.data_stores.line_decoration[data_handle].common;
                 let prim_cache_address = gpu_cache.get_address(&common_data.gpu_cache_handle);
 
-                let (batch_kind, textures, prim_user_data, segment_user_data) = match cache_handle {
+                let (batch_kind, textures, prim_user_data, specific_resource_address) = match cache_handle {
                     Some(cache_handle) => {
                         let rt_cache_entry = ctx
                             .resource_cache
@@ -1069,7 +1066,7 @@ impl BatchBuilder {
                     clip_task_address.unwrap(),
                     BrushFlags::PERSPECTIVE_INTERPOLATION,
                     prim_header_index,
-                    segment_user_data,
+                    specific_resource_address,
                     prim_vis_mask,
                 );
             }
@@ -1199,38 +1196,42 @@ impl BatchBuilder {
                                     .map(&local_tile_clip_rect)
                                     .expect("bug: unable to map clip rect");
                                 let device_clip_rect = (world_clip_rect * ctx.global_device_pixel_scale).round();
-                                let z_id = composite_config.z_generator.next();
+                                let z_id = composite_state.z_generator.next();
                                 for key in &tile_cache.tiles_to_draw {
                                     let tile = &tile_cache.tiles[key];
+                                    if !tile.is_visible {
+                                        // This can occur when a tile is found to be occluded during frame building.
+                                        continue;
+                                    }
                                     let device_rect = (tile.world_rect * ctx.global_device_pixel_scale).round();
+                                    let dirty_rect = (tile.world_dirty_rect * ctx.global_device_pixel_scale).round();
                                     let surface = tile.surface.as_ref().expect("no tile surface set!");
+
                                     let (surface, is_opaque) = match surface {
                                         TileSurface::Color { color } => {
                                             (CompositeTileSurface::Color { color: *color }, true)
                                         }
-                                        TileSurface::Texture { handle, .. } => {
-                                            let cache_item = ctx.resource_cache.texture_cache.get(handle);
-
+                                        TileSurface::Clear => {
+                                            (CompositeTileSurface::Clear, false)
+                                        }
+                                        TileSurface::Texture { descriptor, .. } => {
+                                            let surface = descriptor.resolve(ctx.resource_cache);
                                             (
-                                                CompositeTileSurface::Texture {
-                                                    texture_id: cache_item.texture_id,
-                                                    texture_layer: cache_item.texture_layer,
-                                                },
+                                                CompositeTileSurface::Texture { surface },
                                                 tile.is_opaque || tile_cache.is_opaque(),
                                             )
                                         }
                                     };
-                                    let composite_tile = CompositeTile {
+
+                                    let tile = CompositeTile {
                                         surface,
                                         rect: device_rect,
+                                        dirty_rect,
                                         clip_rect: device_clip_rect,
                                         z_id,
                                     };
-                                    if is_opaque {
-                                        composite_config.opaque_tiles.push(composite_tile);
-                                    } else {
-                                        composite_config.alpha_tiles.push(composite_tile);
-                                    }
+
+                                    composite_state.push_tile(tile, is_opaque);
                                 }
                             }
                             PictureCompositeMode::Filter(ref filter) => {
@@ -1700,7 +1701,7 @@ impl BatchBuilder {
                             root_spatial_node_index,
                             surface_spatial_node_index,
                             z_generator,
-                            composite_config,
+                            composite_state,
                         );
                     }
                 }
@@ -2145,7 +2146,7 @@ impl BatchBuilder {
                         get_shader_opacity(1.0),
                         0,
                     ];
-                    let segment_user_data = cache_item.uv_rect_handle.as_int(gpu_cache);
+                    let specific_resource_address = cache_item.uv_rect_handle.as_int(gpu_cache);
                     prim_header.specific_prim_address = gpu_cache.get_address(&ctx.globals.default_image_handle);
 
                     let prim_header_index = prim_headers.push(
@@ -2170,7 +2171,7 @@ impl BatchBuilder {
                         clip_task_address.unwrap(),
                         BrushFlags::PERSPECTIVE_INTERPOLATION,
                         prim_header_index,
-                        segment_user_data,
+                        specific_resource_address,
                         prim_vis_mask,
                     );
                 } else if gradient.visible_tiles_range.is_empty() {
@@ -2432,7 +2433,7 @@ impl BatchBuilder {
             clip_task_address,
             BrushFlags::PERSPECTIVE_INTERPOLATION | segment.brush_flags,
             prim_header_index,
-            segment_data.user_data,
+            segment_data.specific_resource_address,
             prim_vis_mask,
         );
     }
@@ -2532,7 +2533,7 @@ impl BatchBuilder {
                     clip_task_address,
                     BrushFlags::PERSPECTIVE_INTERPOLATION,
                     prim_header_index,
-                    segment_data.user_data,
+                    segment_data.specific_resource_address,
                     prim_vis_mask,
                 );
             }
@@ -2654,7 +2655,7 @@ impl BrushBatchParameters {
         batch_kind: BrushBatchKind,
         textures: BatchTextures,
         prim_user_data: [i32; 4],
-        segment_user_data: i32,
+        specific_resource_address: i32,
     ) -> Self {
         BrushBatchParameters {
             batch_kind,
@@ -2662,7 +2663,7 @@ impl BrushBatchParameters {
             segment_data: SegmentDataKind::Shared(
                 SegmentInstanceData {
                     textures,
-                    user_data: segment_user_data,
+                    specific_resource_address,
                 }
             ),
         }

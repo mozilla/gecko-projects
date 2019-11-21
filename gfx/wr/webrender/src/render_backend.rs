@@ -23,6 +23,7 @@ use api::CaptureBits;
 #[cfg(feature = "replay")]
 use api::CapturedDocument;
 use crate::clip_scroll_tree::SpatialNodeIndex;
+use crate::composite::CompositorKind;
 #[cfg(feature = "debugger")]
 use crate::debug_server;
 use crate::frame_builder::{FrameBuilder, FrameBuilderConfig};
@@ -549,8 +550,7 @@ impl Document {
                 self.view.layer,
                 self.view.device_rect.origin,
                 pan,
-                &mut resource_profile.texture_cache,
-                &mut resource_profile.gpu_cache,
+                resource_profile,
                 &self.dynamic_properties,
                 &mut self.data_stores,
                 &mut self.scratch,
@@ -701,7 +701,7 @@ pub struct RenderBackend {
 
     notifier: Box<dyn RenderNotifier>,
     recorder: Option<Box<dyn ApiRecordingReceiver>>,
-    logrecorder: Option<Box<dyn ApiRecordingReceiver>>,
+    logrecorder: Option<Box<LogRecorder>>,
     sampler: Option<Box<dyn AsyncPropertySampler + Send>>,
     size_of_ops: Option<MallocSizeOfOps>,
     debug_flags: DebugFlags,
@@ -956,18 +956,6 @@ impl RenderBackend {
 
             status = match self.api_rx.recv() {
                 Ok(msg) => {
-                    if self.debug_flags.contains(DebugFlags::LOG_TRANSACTIONS) {
-                        if let None = self.logrecorder {
-                            let current_time = time::now_utc().to_local();
-                            let name = format!("wr-log-{}.log",
-                                current_time.strftime("%Y%m%d_%H%M%S").unwrap()
-                            );
-                            self.logrecorder = Some(Box::new(LogRecorder::new(&PathBuf::from(name))))
-                        }
-                    } else {
-                        self.logrecorder = None;
-                    }
-
                     if let Some(ref mut r) = self.logrecorder {
                         r.write_msg(frame_counter, &msg);
                     }
@@ -1178,6 +1166,21 @@ impl RenderBackend {
 
                         // Note: we can't pass `LoadCapture` here since it needs to arrive
                         // before the `PublishDocument` messages sent by `load_capture`.
+                        return RenderBackendStatus::Continue;
+                    }
+                    DebugCommand::SetTransactionLogging(value) => {
+                        match (value, self.logrecorder.as_ref()) {
+                            (true, None) => {
+                                    let current_time = time::now_utc().to_local();
+                                    let name = format!("wr-log-{}.log",
+                                        current_time.strftime("%Y%m%d_%H%M%S").unwrap()
+                                    );
+                                    self.logrecorder = LogRecorder::new(&PathBuf::from(name));
+                            },
+                            (false, _) => self.logrecorder = None,
+                            _ => (),
+                        };
+
                         return RenderBackendStatus::Continue;
                     }
                     DebugCommand::ClearCaches(mask) => {
@@ -1492,6 +1495,13 @@ impl RenderBackend {
         // external image with NativeTexture or when platform requested to composite frame.
         if invalidate_rendered_frame {
             doc.rendered_frame_is_valid = false;
+            if let CompositorKind::Draw { max_partial_present_rects } = self.frame_config.compositor_kind {
+              // When partial present is enabled, we need to force redraw.
+              if max_partial_present_rects > 0 {
+                  let msg = ResultMsg::ForceRedraw;
+                  self.result_tx.send(msg).unwrap();
+              }
+            }
         }
 
         let mut frame_build_time = None;

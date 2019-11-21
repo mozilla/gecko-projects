@@ -87,6 +87,7 @@
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/PerformanceTiming.h"
 #include "mozilla/layers/APZThreadUtils.h"
+#include "MobileViewportManager.h"
 
 // Needed for Start/Stop of Image Animation
 #include "imgIContainer.h"
@@ -167,6 +168,7 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       mLastFontInflationScreenSize(gfxSize(-1.0, -1.0)),
       mCurAppUnitsPerDevPixel(0),
       mAutoQualityMinFontSizePixelsPref(0),
+      mDynamicToolbarMaxHeight(0),
       mPageSize(-1, -1),
       mPageScale(0.0),
       mPPScale(1.0f),
@@ -270,12 +272,10 @@ void nsPresContext::Destroy() {
   }
 
   // Unregister preference callbacks
-  Preferences::UnregisterPrefixCallbacks(
-      PREF_CHANGE_METHOD(nsPresContext::PreferenceChanged),
-      gPrefixCallbackPrefs, this);
-  Preferences::UnregisterCallbacks(
-      PREF_CHANGE_METHOD(nsPresContext::PreferenceChanged), gExactCallbackPrefs,
-      this);
+  Preferences::UnregisterPrefixCallbacks(nsPresContext::PreferenceChanged,
+                                         gPrefixCallbackPrefs, this);
+  Preferences::UnregisterCallbacks(nsPresContext::PreferenceChanged,
+                                   gExactCallbackPrefs, this);
 
   mRefreshDriver = nullptr;
 }
@@ -423,6 +423,12 @@ void nsPresContext::AppUnitsPerDevPixelChanged() {
 
   mCurAppUnitsPerDevPixel = mDeviceContext->AppUnitsPerDevPixel();
 
+  // Recompute the size for vh units since it's changed by the dynamic toolbar
+  // max height which is stored in screen coord.
+  if (IsRootContentDocumentCrossProcess()) {
+    AdjustSizeForViewportUnits();
+  }
+
   // nsSubDocumentFrame uses a AppUnitsPerDevPixel difference between parent and
   // child document to determine if it needs to build a nsDisplayZoom item. So
   // if we that changes then we need to invalidate the subdoc frame so that
@@ -443,6 +449,11 @@ void nsPresContext::AppUnitsPerDevPixelChanged() {
   // We would also have to look at all of our child subdocuments but the
   // InvalidatePaintedLayers call above calls InvalidateFrameSubtree which
   // would invalidate all subdocument frames already.
+}
+
+// static
+void nsPresContext::PreferenceChanged(const char* aPrefName, void* aSelf) {
+  static_cast<nsPresContext*>(aSelf)->PreferenceChanged(aPrefName);
 }
 
 void nsPresContext::PreferenceChanged(const char* aPrefName) {
@@ -649,17 +660,24 @@ nsresult nsPresContext::Init(nsDeviceContext* aDeviceContext) {
   }
 
   // Register callbacks so we're notified when the preferences change
-  Preferences::RegisterPrefixCallbacks(
-      PREF_CHANGE_METHOD(nsPresContext::PreferenceChanged),
-      gPrefixCallbackPrefs, this);
-  Preferences::RegisterCallbacks(
-      PREF_CHANGE_METHOD(nsPresContext::PreferenceChanged), gExactCallbackPrefs,
-      this);
+  Preferences::RegisterPrefixCallbacks(nsPresContext::PreferenceChanged,
+                                       gPrefixCallbackPrefs, this);
+  Preferences::RegisterCallbacks(nsPresContext::PreferenceChanged,
+                                 gExactCallbackPrefs, this);
 
   nsresult rv = mEventManager->Init();
   NS_ENSURE_SUCCESS(rv, rv);
 
   mEventManager->SetPresContext(this);
+
+#if defined(MOZ_WIDGET_ANDROID)
+  if (IsRootContentDocumentCrossProcess()) {
+    if (BrowserChild* browserChild =
+            BrowserChild::GetFrom(mDocument->GetDocShell())) {
+      mDynamicToolbarMaxHeight = browserChild->GetDynamicToolbarMaxHeight();
+    }
+  }
+#endif
 
 #ifdef DEBUG
   mInitialized = true;
@@ -817,9 +835,11 @@ nsPresContext* nsPresContext::GetToplevelContentDocumentPresContext() {
 
 nsIWidget* nsPresContext::GetNearestWidget(nsPoint* aOffset) {
   NS_ENSURE_TRUE(mPresShell, nullptr);
-  nsIFrame* frame = mPresShell->GetRootFrame();
-  NS_ENSURE_TRUE(frame, nullptr);
-  return frame->GetView()->GetNearestWidget(aOffset);
+  nsViewManager* vm = mPresShell->GetViewManager();
+  NS_ENSURE_TRUE(vm, nullptr);
+  nsView* rootView = vm->GetRootView();
+  NS_ENSURE_TRUE(rootView, nullptr);
+  return rootView->GetNearestWidget(aOffset);
 }
 
 nsIWidget* nsPresContext::GetRootWidget() const {
@@ -1037,19 +1057,15 @@ static bool CheckOverflow(const ComputedStyle* aComputedStyle,
     return false;
   }
 
-  if (display->mOverflowX == StyleOverflow::Visible &&
-      display->mOverscrollBehaviorX == StyleOverscrollBehavior::Auto &&
-      display->mOverscrollBehaviorY == StyleOverscrollBehavior::Auto &&
-      display->mScrollSnapType.strictness == StyleScrollSnapStrictness::None) {
+  if (display->mOverflowX == StyleOverflow::Visible) {
+    MOZ_ASSERT(display->mOverflowY == StyleOverflow::Visible);
     return false;
   }
 
-  WritingMode writingMode = WritingMode(aComputedStyle);
   if (display->mOverflowX == StyleOverflow::MozHiddenUnscrollable) {
-    *aStyles = ScrollStyles(writingMode, StyleOverflow::Hidden,
-                            StyleOverflow::Hidden, display);
+    *aStyles = ScrollStyles(StyleOverflow::Hidden, StyleOverflow::Hidden);
   } else {
-    *aStyles = ScrollStyles(writingMode, display);
+    *aStyles = ScrollStyles(*display);
   }
   return true;
 }
@@ -2372,8 +2388,9 @@ void nsPresContext::NotifyContentfulPaint() {
             Some(rootPresContext->mRefreshDriver->LastTransactionId().Next());
 #if defined(MOZ_WIDGET_ANDROID)
         (new AsyncEventDispatcher(mDocument,
-            NS_LITERAL_STRING("MozFirstContentfulPaint"), CanBubble::eYes,
-            ChromeOnlyDispatch::eYes))->PostDOMEvent();
+                                  NS_LITERAL_STRING("MozFirstContentfulPaint"),
+                                  CanBubble::eYes, ChromeOnlyDispatch::eYes))
+            ->PostDOMEvent();
 #endif
       }
     }
@@ -2454,6 +2471,68 @@ void nsPresContext::FlushFontFeatureValues() {
     mFontFeatureValuesLookup = styleSet->BuildFontFeatureValueSet();
     mFontFeatureValuesDirty = false;
   }
+}
+
+void nsPresContext::SetVisibleArea(const nsRect& r) {
+  if (!r.IsEqualEdges(mVisibleArea)) {
+    mVisibleArea = r;
+    mSizeForViewportUnits = mVisibleArea.Size();
+    if (IsRootContentDocumentCrossProcess()) {
+      AdjustSizeForViewportUnits();
+    }
+    // Visible area does not affect media queries when paginated.
+    if (!IsPaginated()) {
+      MediaFeatureValuesChanged(
+          {mozilla::MediaFeatureChangeReason::ViewportChange});
+    }
+  }
+}
+
+void nsPresContext::SetDynamicToolbarMaxHeight(ScreenIntCoord aHeight) {
+  MOZ_ASSERT(IsRootContentDocumentCrossProcess());
+
+  if (mDynamicToolbarMaxHeight == aHeight) {
+    return;
+  }
+  mDynamicToolbarMaxHeight = aHeight;
+
+  AdjustSizeForViewportUnits();
+
+  if (RefPtr<mozilla::PresShell> presShell = mPresShell) {
+    // Changing the max height of the dynamic toolbar changes the ICB size, we
+    // need to kick a reflow with the current window dimensions since the max
+    // height change doesn't change the window dimensions but
+    // PresShell::ResizeReflow ends up subtracting the new dynamic toolbar
+    // height from the window dimensions and kick a reflow with the proper ICB
+    // size.
+    nscoord currentWidth, currentHeight;
+    presShell->GetViewManager()->GetWindowDimensions(&currentWidth,
+                                                     &currentHeight);
+    presShell->ResizeReflow(currentWidth, currentHeight,
+                            ResizeReflowOptions::NoOption);
+  }
+}
+
+void nsPresContext::AdjustSizeForViewportUnits() {
+  MOZ_ASSERT(IsRootContentDocumentCrossProcess());
+  if (mVisibleArea.height == NS_UNCONSTRAINEDSIZE) {
+    // Ignore `NS_UNCONSTRAINEDSIZE` since it's a temporary state during a
+    // reflow. We will end up calling this function again with a proper size in
+    // the same reflow.
+    return;
+  }
+
+  if (MOZ_UNLIKELY(mVisibleArea.height +
+                       NSIntPixelsToAppUnits(mDynamicToolbarMaxHeight,
+                                             mCurAppUnitsPerDevPixel) >
+                   nscoord_MAX)) {
+    MOZ_ASSERT_UNREACHABLE("The dynamic toolbar max height is probably wrong");
+    return;
+  }
+
+  mSizeForViewportUnits.height =
+      mVisibleArea.height +
+      NSIntPixelsToAppUnits(mDynamicToolbarMaxHeight, mCurAppUnitsPerDevPixel);
 }
 
 #ifdef DEBUG

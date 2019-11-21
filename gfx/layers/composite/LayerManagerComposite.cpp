@@ -116,7 +116,6 @@ HostLayerManager::HostLayerManager()
     : mDebugOverlayWantsNextFrame(false),
       mWarningLevel(0.0f),
       mCompositorBridgeID(0),
-      mWindowOverlayChanged(false),
       mLastPaintTime(TimeDuration::Forever()),
       mRenderStartTime(TimeStamp::Now()) {}
 
@@ -135,6 +134,17 @@ void HostLayerManager::WriteCollectedFrames() {
     mCompositionRecorder->WriteCollectedFrames();
     mCompositionRecorder = nullptr;
   }
+}
+
+Maybe<CollectedFrames> HostLayerManager::GetCollectedFrames() {
+  Maybe<CollectedFrames> maybeFrames;
+
+  if (mCompositionRecorder) {
+    maybeFrames.emplace(mCompositionRecorder->GetCollectedFrames());
+    mCompositionRecorder = nullptr;
+  }
+
+  return maybeFrames;
 }
 
 /**
@@ -607,7 +617,7 @@ void LayerManagerComposite::UpdateAndRender() {
     invalid = mInvalidRegion;
   }
 
-  if (invalid.IsEmpty() && !mWindowOverlayChanged) {
+  if (invalid.IsEmpty()) {
     // Composition requested, but nothing has changed. Don't do any work.
     mClonedLayerTreeProperties = LayerProperties::CloneFrom(GetRoot());
     mProfilerScreenshotGrabber.NotifyEmptyFrame();
@@ -635,7 +645,6 @@ void LayerManagerComposite::UpdateAndRender() {
 
   if (!mTarget && rendered) {
     mInvalidRegion.SetEmpty();
-    mWindowOverlayChanged = false;
   }
 
   // Update cached layer tree information.
@@ -823,10 +832,6 @@ void LayerManagerComposite::UpdateDebugOverlayNativeLayers() {
   bool drawFps = StaticPrefs::layers_acceleration_draw_fps();
 
   if (drawFps) {
-    if (!mGPUStatsLayer) {
-      mGPUStatsLayer = mNativeLayerRoot->CreateLayer();
-    }
-
     GPUStats stats;
     stats.mScreenPixels = mRenderBounds.Area();
     mCompositor->GetFrameStats(&stats);
@@ -835,9 +840,13 @@ void LayerManagerComposite::UpdateDebugOverlayNativeLayers() {
     IntSize size = mTextRenderer->ComputeSurfaceSize(
         text, 600, TextRenderer::FontType::FixedWidth);
 
-    mGPUStatsLayer->SetRect(IntRect(IntPoint(2, 5), size));
-    RefPtr<DrawTarget> dt =
-        mGPUStatsLayer->NextSurfaceAsDrawTarget(BackendType::SKIA);
+    if (!mGPUStatsLayer || mGPUStatsLayer->GetSize() != size) {
+      mGPUStatsLayer = mNativeLayerRoot->CreateLayer(size, false);
+    }
+
+    mGPUStatsLayer->SetPosition(IntPoint(2, 5));
+    RefPtr<DrawTarget> dt = mGPUStatsLayer->NextSurfaceAsDrawTarget(
+        IntRect({}, size), BackendType::SKIA);
     mTextRenderer->RenderTextToDrawTarget(dt, text, 600,
                                           TextRenderer::FontType::FixedWidth);
     mGPUStatsLayer->NotifySurfaceReady();
@@ -851,17 +860,16 @@ void LayerManagerComposite::UpdateDebugOverlayNativeLayers() {
       // If we have an unused APZ transform on this composite, draw a 20x20 red
       // box in the top-right corner.
       if (!mUnusedTransformWarningLayer) {
-        mUnusedTransformWarningLayer = mNativeLayerRoot->CreateLayer();
-        mUnusedTransformWarningLayer->SetRect(IntRect(0, 0, 20, 20));
-        mUnusedTransformWarningLayer->SetOpaqueRegion(IntRect(0, 0, 20, 20));
+        mUnusedTransformWarningLayer =
+            mNativeLayerRoot->CreateLayer(IntSize(20, 20), true);
         RefPtr<DrawTarget> dt =
             mUnusedTransformWarningLayer->NextSurfaceAsDrawTarget(
-                BackendType::SKIA);
+                IntRect(0, 0, 20, 20), BackendType::SKIA);
         dt->FillRect(Rect(0, 0, 20, 20), ColorPattern(Color(1, 0, 0, 1)));
         mUnusedTransformWarningLayer->NotifySurfaceReady();
       }
-      mUnusedTransformWarningLayer->SetRect(
-          IntRect(mRenderBounds.XMost() - 20, mRenderBounds.Y(), 20, 20));
+      mUnusedTransformWarningLayer->SetPosition(
+          IntPoint(mRenderBounds.XMost() - 20, mRenderBounds.Y()));
       mNativeLayerRoot->AppendLayer(mUnusedTransformWarningLayer);
 
       mUnusedApzTransformWarning = false;
@@ -873,17 +881,16 @@ void LayerManagerComposite::UpdateDebugOverlayNativeLayers() {
       // in the top-right corner, to the left of the unused-apz-transform
       // warning box.
       if (!mDisabledApzWarningLayer) {
-        mDisabledApzWarningLayer = mNativeLayerRoot->CreateLayer();
-        mDisabledApzWarningLayer->SetRect(IntRect(0, 0, 20, 20));
-        mDisabledApzWarningLayer->SetOpaqueRegion(IntRect(0, 0, 20, 20));
+        mDisabledApzWarningLayer =
+            mNativeLayerRoot->CreateLayer(IntSize(20, 20), true);
         RefPtr<DrawTarget> dt =
             mDisabledApzWarningLayer->NextSurfaceAsDrawTarget(
-                BackendType::SKIA);
+                IntRect(0, 0, 20, 20), BackendType::SKIA);
         dt->FillRect(Rect(0, 0, 20, 20), ColorPattern(Color(1, 1, 0, 1)));
         mDisabledApzWarningLayer->NotifySurfaceReady();
       }
-      mDisabledApzWarningLayer->SetRect(
-          IntRect(mRenderBounds.XMost() - 40, mRenderBounds.Y(), 20, 20));
+      mDisabledApzWarningLayer->SetPosition(
+          IntPoint(mRenderBounds.XMost() - 40, mRenderBounds.Y()));
       mNativeLayerRoot->AppendLayer(mDisabledApzWarningLayer);
 
       mDisabledApzWarning = false;
@@ -997,20 +1004,22 @@ void LayerManagerComposite::PlaceNativeLayer(
     std::deque<RefPtr<NativeLayer>>* aLayersToRecycle,
     IntRegion* aWindowInvalidRegion) {
   RefPtr<NativeLayer> layer;
-  if (aLayersToRecycle->empty()) {
-    layer = mNativeLayerRoot->CreateLayer();
+  if (aLayersToRecycle->empty() ||
+      aLayersToRecycle->front()->GetSize() != aRect.Size() ||
+      aLayersToRecycle->front()->IsOpaque() != aOpaque) {
+    layer = mNativeLayerRoot->CreateLayer(aRect.Size(), aOpaque);
     mNativeLayerRoot->AppendLayer(layer);
+    aWindowInvalidRegion->OrWith(aRect);
   } else {
     layer = aLayersToRecycle->front();
     aLayersToRecycle->pop_front();
+    IntRect oldRect = layer->GetRect();
+    if (!aRect.IsEqualInterior(oldRect)) {
+      aWindowInvalidRegion->OrWith(oldRect);
+      aWindowInvalidRegion->OrWith(aRect);
+    }
   }
-  IntRect oldRect = layer->GetRect();
-  if (!aRect.IsEqualInterior(oldRect)) {
-    aWindowInvalidRegion->OrWith(oldRect);
-    aWindowInvalidRegion->OrWith(aRect);
-  }
-  layer->SetRect(aRect);
-  layer->SetOpaqueRegion(aOpaque ? aRect - aRect.TopLeft() : IntRect());
+  layer->SetPosition(aRect.TopLeft());
   mNativeLayers.push_back(layer);
 }
 
@@ -1199,11 +1208,7 @@ bool LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
       // opaque parts of the window are covered by different layers and we can
       // update those parts separately.
       IntRegion opaqueRegion;
-#ifdef XP_MACOSX
-      opaqueRegion =
-          mCompositor->GetWidget()->GetOpaqueWidgetRegion().ToUnknownRegion();
-#endif
-      opaqueRegion.AndWith(mRenderBounds);
+      opaqueRegion.And(aOpaqueRegion, mRenderBounds);
 
       // Limit the complexity of these regions. Usually, opaqueRegion should be
       // only one or two rects, so this SimplifyInward call will not change the
@@ -1267,14 +1272,10 @@ bool LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion,
   if (usingNativeLayers) {
     UpdateDebugOverlayNativeLayers();
   } else {
-    // Allow widget to render a custom foreground.
-    mCompositor->GetWidget()->DrawWindowOverlay(
-        &widgetContext, LayoutDeviceIntRect::FromUnknownRect(bounds));
-
 #if defined(MOZ_WIDGET_ANDROID)
-    // Depending on the content shift the toolbar may be rendered on top of
-    // some of the content so it must be rendered after the content.
-    if (jni::IsFennec()) {
+    if (AndroidDynamicToolbarAnimator::IsEnabled()) {
+      // Depending on the content shift the toolbar may be rendered on top of
+      // some of the content so it must be rendered after the content.
       RenderToolbar();
     }
     HandlePixelsTarget();
@@ -1448,11 +1449,11 @@ void LayerManagerComposite::RenderToPresentationSurface() {
 
 ScreenCoord LayerManagerComposite::GetContentShiftForToolbar() {
   ScreenCoord result(0.0f);
-  // If we're not in Fennec, we don't have a dynamic toolbar so there isn't a
-  // content offset.
-  if (!jni::IsFennec()) {
+
+  if (!AndroidDynamicToolbarAnimator::IsEnabled()) {
     return result;
   }
+
   // If mTarget not null we are not drawing to the screen so
   // there will not be any content offset.
   if (mTarget) {

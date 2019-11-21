@@ -16,6 +16,7 @@ ChromeUtils.defineModuleGetter(
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 const FIREFOX_VERSION = parseInt(Services.appinfo.version.match(/\d+/), 10);
 const ONE_MINUTE = 60 * 1000;
+const FX_MONITOR_CLIENT_ID = "802d56ef2a9af9fa";
 
 const L10N = new Localization([
   "branding/brand.ftl",
@@ -24,50 +25,85 @@ const L10N = new Localization([
   "browser/newtab/onboarding.ftl",
 ]);
 
+const TRAILHEAD_ONBOARDING_TEMPLATE = {
+  trigger: { id: "firstRun" },
+  template: "trailhead",
+  includeBundle: {
+    length: 3,
+    template: "onboarding",
+    trigger: { id: "showOnboarding" },
+  },
+};
+
+const TRAILHEAD_MODAL_VARIANT_CONTENT = {
+  className: "joinCohort",
+  benefits: ["sync", "monitor", "lockwise"].map(id => ({
+    id,
+    title: { string_id: `onboarding-benefit-${id}-title` },
+    text: { string_id: `onboarding-benefit-${id}-text` },
+  })),
+  learn: {
+    text: { string_id: "onboarding-welcome-modal-family-learn-more" },
+    url: "https://www.mozilla.org/firefox/accounts/",
+  },
+  form: {
+    title: { string_id: "onboarding-welcome-form-header" },
+    text: { string_id: "onboarding-join-form-body" },
+    email: { string_id: "onboarding-join-form-email" },
+    button: { string_id: "onboarding-join-form-continue" },
+  },
+  skipButton: { string_id: "onboarding-start-browsing-button-label" },
+};
+
+const TRAILHEAD_FULL_PAGE_CONTENT = {
+  title: { string_id: "onboarding-welcome-body" },
+  learn: {
+    text: { string_id: "onboarding-welcome-learn-more" },
+    url: "https://www.mozilla.org/firefox/accounts/",
+  },
+  form: {
+    title: { string_id: "onboarding-welcome-form-header" },
+    text: { string_id: "onboarding-join-form-body" },
+    email: { string_id: "onboarding-fullpage-form-email" },
+    button: { string_id: "onboarding-join-form-continue" },
+  },
+};
+
+const JOIN_CONTENT = {
+  className: "joinCohort",
+  title: { string_id: "onboarding-welcome-body" },
+  benefits: ["products", "knowledge", "privacy"].map(id => ({
+    id,
+    title: { string_id: `onboarding-benefit-${id}-title` },
+    text: { string_id: `onboarding-benefit-${id}-text` },
+  })),
+  learn: {
+    text: { string_id: "onboarding-welcome-learn-more" },
+    url: "https://www.mozilla.org/firefox/accounts/",
+  },
+  form: {
+    title: { string_id: "onboarding-join-form-header" },
+    text: { string_id: "onboarding-join-form-body" },
+    email: { string_id: "onboarding-join-form-email" },
+    button: { string_id: "onboarding-join-form-continue" },
+  },
+  skipButton: { string_id: "onboarding-start-browsing-button-label" },
+};
+
 const ONBOARDING_MESSAGES = () => [
   {
     id: "TRAILHEAD_1",
-    template: "trailhead",
-    targeting: "trailheadInterrupt == 'join'",
-    trigger: { id: "firstRun" },
-    includeBundle: {
-      length: 3,
-      template: "onboarding",
-      trigger: { id: "showOnboarding" },
-    },
     utm_term: "trailhead-join",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
     content: {
-      className: "joinCohort",
-      title: { string_id: "onboarding-welcome-body" },
-      benefits: ["products", "knowledge", "privacy"].map(id => ({
-        id,
-        title: { string_id: `onboarding-benefit-${id}-title` },
-        text: { string_id: `onboarding-benefit-${id}-text` },
-      })),
-      learn: {
-        text: { string_id: "onboarding-welcome-learn-more" },
-        url: "https://www.mozilla.org/firefox/accounts/",
-      },
-      form: {
-        title: { string_id: "onboarding-join-form-header" },
-        text: { string_id: "onboarding-join-form-body" },
-        email: { string_id: "onboarding-join-form-email" },
-        button: { string_id: "onboarding-join-form-continue" },
-      },
-      skipButton: { string_id: "onboarding-start-browsing-button-label" },
+      ...JOIN_CONTENT,
     },
   },
   {
     id: "TRAILHEAD_2",
-    template: "trailhead",
     targeting: "trailheadInterrupt == 'sync'",
-    trigger: { id: "firstRun" },
-    includeBundle: {
-      length: 3,
-      template: "onboarding",
-      trigger: { id: "showOnboarding" },
-    },
     utm_term: "trailhead-sync",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
     content: {
       className: "syncCohort",
       title: { string_id: "onboarding-sync-welcome-header" },
@@ -88,21 +124,85 @@ const ONBOARDING_MESSAGES = () => [
   },
   {
     id: "TRAILHEAD_3",
-    template: "trailhead",
     targeting: "trailheadInterrupt == 'cards'",
-    trigger: { id: "firstRun" },
-    includeBundle: {
-      length: 3,
-      template: "onboarding",
-      trigger: { id: "showOnboarding" },
-    },
     utm_term: "trailhead-cards",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
   },
   {
     id: "TRAILHEAD_4",
     template: "trailhead",
     targeting: "trailheadInterrupt == 'nofirstrun'",
     trigger: { id: "firstRun" },
+  },
+  {
+    id: "TRAILHEAD_5",
+    targeting: "trailheadInterrupt == 'modal_control'",
+    utm_term: "trailhead-modal_control",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
+    content: {
+      ...JOIN_CONTENT,
+    },
+  },
+  {
+    id: "TRAILHEAD_6",
+    targeting: "trailheadInterrupt == 'modal_variant_a'",
+    utm_term: "trailhead-modal_variant_a",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
+    content: {
+      ...TRAILHEAD_MODAL_VARIANT_CONTENT,
+      title: { string_id: "onboarding-welcome-modal-get-body" },
+    },
+  },
+  {
+    id: "TRAILHEAD_7",
+    targeting: "trailheadInterrupt == 'modal_variant_b'",
+    utm_term: "trailhead-modal_variant_b",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
+    content: {
+      ...TRAILHEAD_MODAL_VARIANT_CONTENT,
+      title: { string_id: "onboarding-welcome-modal-supercharge-body" },
+    },
+  },
+  {
+    id: "TRAILHEAD_8",
+    targeting: "trailheadInterrupt == 'modal_variant_c'",
+    utm_term: "trailhead-modal_variant_c",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
+    content: {
+      ...TRAILHEAD_MODAL_VARIANT_CONTENT,
+      title: { string_id: "onboarding-welcome-modal-privacy-body" },
+    },
+  },
+  {
+    id: "TRAILHEAD_9",
+    targeting: "trailheadInterrupt == 'modal_variant_f'",
+    utm_term: "trailhead-modal_variant_f",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
+    content: {
+      ...JOIN_CONTENT,
+      form: TRAILHEAD_MODAL_VARIANT_CONTENT.form,
+    },
+  },
+  {
+    id: "FULL_PAGE_1",
+    targeting: "trailheadInterrupt == 'full_page_d'",
+    utm_term: "trailhead-full_page_d",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
+    content: {
+      ...TRAILHEAD_FULL_PAGE_CONTENT,
+    },
+    template: "full_page_interrupt",
+  },
+  {
+    id: "FULL_PAGE_2",
+    targeting: "trailheadInterrupt == 'full_page_e'",
+    utm_term: "trailhead-full_page_e",
+    ...TRAILHEAD_ONBOARDING_TEMPLATE,
+    content: {
+      className: "fullPageCardsAtTop",
+      ...TRAILHEAD_FULL_PAGE_CONTENT,
+    },
+    template: "full_page_interrupt",
   },
   {
     id: "EXTENDED_TRIPLETS_1",
@@ -169,7 +269,8 @@ const ONBOARDING_MESSAGES = () => [
         },
       },
     },
-    targeting: "trailheadTriplet == 'supercharge'",
+    targeting:
+      "trailheadTriplet == 'supercharge' || (trailheadTriplet == 'dynamic' && usesFirefoxSync == false)",
     trigger: { id: "showOnboarding" },
   },
   {
@@ -179,7 +280,7 @@ const ONBOARDING_MESSAGES = () => [
     order: 2,
     content: {
       title: { string_id: "onboarding-firefox-monitor-title" },
-      text: { string_id: "onboarding-firefox-monitor-text" },
+      text: { string_id: "onboarding-firefox-monitor-text2" },
       icon: "ffmonitor",
       primary_button: {
         label: { string_id: "onboarding-firefox-monitor-button" },
@@ -189,14 +290,16 @@ const ONBOARDING_MESSAGES = () => [
         },
       },
     },
-    targeting: "trailheadTriplet in ['payoff', 'supercharge']",
+    // Use service oauth client_id to identify 'Firefox Monitor' service attached to Firefox Account
+    // https://docs.telemetry.mozilla.org/datasets/fxa_metrics/attribution.html#service-attribution
+    targeting: `trailheadTriplet == 'supercharge' || (trailheadTriplet == 'dynamic' && !("${FX_MONITOR_CLIENT_ID}" in attachedFxAOAuthClients|mapToProperty('id')))`,
     trigger: { id: "showOnboarding" },
   },
   {
     id: "TRAILHEAD_CARD_4",
     template: "onboarding",
     bundled: 3,
-    order: 1,
+    order: 3,
     content: {
       title: { string_id: "onboarding-browse-privately-title" },
       text: { string_id: "onboarding-browse-privately-text" },
@@ -206,7 +309,7 @@ const ONBOARDING_MESSAGES = () => [
         action: { type: "OPEN_PRIVATE_BROWSER_WINDOW" },
       },
     },
-    targeting: "trailheadTriplet == 'privacy'",
+    targeting: "trailheadTriplet == 'dynamic'",
     trigger: { id: "showOnboarding" },
   },
   {
@@ -233,7 +336,7 @@ const ONBOARDING_MESSAGES = () => [
     id: "TRAILHEAD_CARD_6",
     template: "onboarding",
     bundled: 3,
-    order: 3,
+    order: 6,
     content: {
       title: { string_id: "onboarding-mobile-phone-title" },
       text: { string_id: "onboarding-mobile-phone-text" },
@@ -249,14 +352,15 @@ const ONBOARDING_MESSAGES = () => [
         },
       },
     },
-    targeting: "trailheadTriplet in ['supercharge', 'multidevice']",
+    targeting:
+      "trailheadTriplet == 'supercharge' || (trailheadTriplet == 'dynamic' && sync.mobileDevices < 1)",
     trigger: { id: "showOnboarding" },
   },
   {
     id: "TRAILHEAD_CARD_7",
     template: "onboarding",
     bundled: 3,
-    order: 3,
+    order: 4,
     content: {
       title: { string_id: "onboarding-send-tabs-title" },
       text: { string_id: "onboarding-send-tabs-text" },
@@ -273,7 +377,7 @@ const ONBOARDING_MESSAGES = () => [
         },
       },
     },
-    targeting: "trailheadTriplet == 'multidevice'",
+    targeting: "trailheadTriplet == 'dynamic'",
     trigger: { id: "showOnboarding" },
   },
   {
@@ -303,7 +407,7 @@ const ONBOARDING_MESSAGES = () => [
     id: "TRAILHEAD_CARD_9",
     template: "onboarding",
     bundled: 3,
-    order: 3,
+    order: 7,
     content: {
       title: { string_id: "onboarding-lockwise-passwords-title" },
       text: { string_id: "onboarding-lockwise-passwords-text2" },
@@ -316,7 +420,7 @@ const ONBOARDING_MESSAGES = () => [
         },
       },
     },
-    targeting: "trailheadTriplet == 'privacy'",
+    targeting: "trailheadTriplet == 'dynamic'",
     trigger: { id: "showOnboarding" },
   },
   {
@@ -342,17 +446,6 @@ const ONBOARDING_MESSAGES = () => [
     },
     targeting: "trailheadTriplet == 'payoff'",
     trigger: { id: "showOnboarding" },
-  },
-  {
-    id: "FXA_1",
-    template: "fxa_overlay",
-    content: {},
-    trigger: { id: "firstRun" },
-    includeBundle: {
-      length: 3,
-      template: "onboarding",
-      trigger: { id: "showOnboarding" },
-    },
   },
   {
     id: "RETURN_TO_AMO_1",
@@ -418,6 +511,7 @@ const ONBOARDING_MESSAGES = () => [
       delay: 5 * ONE_MINUTE,
       target: "whats-new-menu-button",
       action: { id: "show-whatsnew-button" },
+      badgeDescription: { string_id: "cfr-badge-reader-label-newfeature" },
     },
     priority: 1,
     trigger: { id: "toolbarBadgeUpdate" },

@@ -8,6 +8,8 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
 
+#include <algorithm>
+
 #include "jit/BaselineIC.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/IonIC.h"
@@ -17,6 +19,7 @@
 #include "jit/VMFunctions.h"
 #include "proxy/DeadObjectProxy.h"
 #include "proxy/Proxy.h"
+#include "util/Memory.h"
 
 #include "jit/JSJitFrameIter-inl.h"
 #include "jit/MacroAssembler-inl.h"
@@ -1567,29 +1570,6 @@ bool IonCacheIRCompiler::emitStoreTypedObjectReferenceProperty() {
   return true;
 }
 
-bool IonCacheIRCompiler::emitStoreTypedObjectScalarProperty() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  Register obj = allocator.useRegister(masm, reader.objOperandId());
-  int32_t offset = int32StubField(reader.stubOffset());
-  TypedThingLayout layout = reader.typedThingLayout();
-  Scalar::Type type = reader.scalarType();
-  ValueOperand val = allocator.useValueRegister(masm, reader.valOperandId());
-  AutoScratchRegister scratch1(allocator, masm);
-  AutoScratchRegister scratch2(allocator, masm);
-
-  FailurePath* failure;
-  if (!addFailurePath(&failure)) {
-    return false;
-  }
-
-  // Compute the address being written to.
-  LoadTypedThingData(masm, layout, obj, scratch1);
-  Address dest(scratch1, offset);
-
-  StoreToTypedArray(cx_, masm, type, val, dest, scratch2, failure->label());
-  return true;
-}
-
 static void EmitStoreDenseElement(MacroAssembler& masm,
                                   const ConstantOrRegister& value,
                                   Register elements,
@@ -1666,7 +1646,7 @@ bool IonCacheIRCompiler::emitStoreDenseElement() {
       allocator.useConstantOrRegister(masm, reader.valOperandId());
 
   AutoScratchRegister scratch1(allocator, masm);
-  AutoScratchRegister scratch2(allocator, masm);
+  AutoSpectreBoundsScratchRegister spectreScratch(allocator, masm);
 
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
@@ -1683,7 +1663,8 @@ bool IonCacheIRCompiler::emitStoreDenseElement() {
 
   // Bounds check.
   Address initLength(scratch1, ObjectElements::offsetOfInitializedLength());
-  masm.spectreBoundsCheck32(index, initLength, scratch2, failure->label());
+  masm.spectreBoundsCheck32(index, initLength, spectreScratch,
+                            failure->label());
 
   // Hole check.
   BaseObjectElementIndex element(scratch1, index);
@@ -1717,7 +1698,7 @@ bool IonCacheIRCompiler::emitStoreDenseElementHole() {
   reader.readBool();
 
   AutoScratchRegister scratch1(allocator, masm);
-  AutoScratchRegister scratch2(allocator, masm);
+  AutoSpectreBoundsScratchRegister spectreScratch(allocator, masm);
 
   FailurePath* failure;
   if (!addFailurePath(&failure)) {
@@ -1736,8 +1717,7 @@ bool IonCacheIRCompiler::emitStoreDenseElementHole() {
   BaseObjectElementIndex element(scratch1, index);
 
   Label inBounds, outOfBounds;
-  Register spectreTemp = scratch2;
-  masm.spectreBoundsCheck32(index, initLength, spectreTemp, &outOfBounds);
+  masm.spectreBoundsCheck32(index, initLength, spectreScratch, &outOfBounds);
   masm.jump(&inBounds);
 
   masm.bind(&outOfBounds);
@@ -1747,7 +1727,7 @@ bool IonCacheIRCompiler::emitStoreDenseElementHole() {
   // need to allocate more elements.
   Label capacityOk, allocElement;
   Address capacity(scratch1, ObjectElements::offsetOfCapacity());
-  masm.spectreBoundsCheck32(index, capacity, spectreTemp, &allocElement);
+  masm.spectreBoundsCheck32(index, capacity, spectreScratch, &allocElement);
   masm.jump(&capacityOk);
 
   // Check for non-writable array length. We only have to do this if
@@ -1807,76 +1787,6 @@ bool IonCacheIRCompiler::emitStoreDenseElementHole() {
 bool IonCacheIRCompiler::emitArrayPush() {
   MOZ_ASSERT_UNREACHABLE("emitArrayPush not supported for IonCaches.");
   return false;
-}
-
-bool IonCacheIRCompiler::emitStoreTypedElement() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  Register obj = allocator.useRegister(masm, reader.objOperandId());
-  Register index = allocator.useRegister(masm, reader.int32OperandId());
-  ConstantOrRegister val =
-      allocator.useConstantOrRegister(masm, reader.valOperandId());
-
-  TypedThingLayout layout = reader.typedThingLayout();
-  Scalar::Type arrayType = reader.scalarType();
-  bool handleOOB = reader.readBool();
-
-  AutoScratchRegister scratch1(allocator, masm);
-  AutoScratchRegister scratch2(allocator, masm);
-
-  FailurePath* failure;
-  if (!addFailurePath(&failure)) {
-    return false;
-  }
-
-  // Bounds check.
-  Label done;
-  LoadTypedThingLength(masm, layout, obj, scratch1);
-  masm.spectreBoundsCheck32(index, scratch1, scratch2,
-                            handleOOB ? &done : failure->label());
-
-  // Load the elements vector.
-  LoadTypedThingData(masm, layout, obj, scratch1);
-
-  BaseIndex dest(scratch1, index,
-                 ScaleFromElemWidth(Scalar::byteSize(arrayType)));
-
-  FloatRegister maybeTempDouble = ic_->asSetPropertyIC()->maybeTempDouble();
-  FloatRegister maybeTempFloat32 = ic_->asSetPropertyIC()->maybeTempFloat32();
-  MOZ_ASSERT(maybeTempDouble != InvalidFloatReg);
-  MOZ_ASSERT_IF(jit::hasUnaliasedDouble(), maybeTempFloat32 != InvalidFloatReg);
-
-  if (arrayType == Scalar::Float32) {
-    FloatRegister tempFloat =
-        hasUnaliasedDouble() ? maybeTempFloat32 : maybeTempDouble;
-    if (!masm.convertConstantOrRegisterToFloat(cx_, val, tempFloat,
-                                               failure->label())) {
-      return false;
-    }
-    masm.storeToTypedFloatArray(arrayType, tempFloat, dest);
-  } else if (arrayType == Scalar::Float64) {
-    if (!masm.convertConstantOrRegisterToDouble(cx_, val, maybeTempDouble,
-                                                failure->label())) {
-      return false;
-    }
-    masm.storeToTypedFloatArray(arrayType, maybeTempDouble, dest);
-  } else {
-    Register valueToStore = scratch2;
-    if (arrayType == Scalar::Uint8Clamped) {
-      if (!masm.clampConstantOrRegisterToUint8(
-              cx_, val, maybeTempDouble, valueToStore, failure->label())) {
-        return false;
-      }
-    } else {
-      if (!masm.truncateConstantOrRegisterToInt32(
-              cx_, val, maybeTempDouble, valueToStore, failure->label())) {
-        return false;
-      }
-    }
-    masm.storeToTypedIntArray(arrayType, valueToStore, dest);
-  }
-
-  masm.bind(&done);
-  return true;
 }
 
 bool IonCacheIRCompiler::emitCallNativeSetter() {
@@ -1973,7 +1883,7 @@ bool IonCacheIRCompiler::emitCallScriptedSetter() {
   // The JitFrameLayout pushed below will be aligned to JitStackAlignment,
   // so we just have to make sure the stack is aligned after we push the
   // |this| + argument Values.
-  size_t numArgs = Max<size_t>(1, target->nargs());
+  size_t numArgs = std::max<size_t>(1, target->nargs());
   uint32_t argSize = (numArgs + 1) * sizeof(Value);
   uint32_t padding =
       ComputeByteAlignment(masm.framePushed() + argSize, JitStackAlignment);
@@ -2137,25 +2047,6 @@ bool IonCacheIRCompiler::emitMegamorphicSetElement() {
   return true;
 }
 
-bool IonCacheIRCompiler::emitLoadTypedObjectResult() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  AutoOutputRegister output(*this);
-  Register obj = allocator.useRegister(masm, reader.objOperandId());
-  AutoScratchRegister scratch1(allocator, masm);
-  AutoScratchRegister scratch2(allocator, masm);
-
-  TypedThingLayout layout = reader.typedThingLayout();
-  uint32_t typeDescr = reader.typeDescrKey();
-  uint32_t fieldOffset = int32StubField(reader.stubOffset());
-
-  // Get the object's data pointer.
-  LoadTypedThingData(masm, layout, obj, scratch1);
-
-  Address fieldAddr(scratch1, fieldOffset);
-  emitLoadTypedObjectResultShared(fieldAddr, scratch2, typeDescr, output);
-  return true;
-}
-
 bool IonCacheIRCompiler::emitTypeMonitorResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   return emitReturnFromIC();
@@ -2267,7 +2158,7 @@ bool IonCacheIRCompiler::emitLoadDOMExpandoValueGuardGeneration() {
 
   masm.loadPtr(Address(obj, ProxyObject::offsetOfReservedSlots()), scratch1);
   Address expandoAddr(scratch1,
-                      detail::ProxyReservedSlots::offsetOfPrivateSlot());
+                      js::detail::ProxyReservedSlots::offsetOfPrivateSlot());
 
   // Guard the ExpandoAndGeneration* matches the proxy's ExpandoAndGeneration.
   masm.loadValue(expandoAddr, output);
@@ -2389,28 +2280,6 @@ void IonIC::attachCacheIRStub(JSContext* cx, const CacheIRWriter& writer,
 
   attachStub(newStub, code);
   *attached = true;
-}
-
-bool IonCacheIRCompiler::emitCallStringConcatResult() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  AutoSaveLiveRegisters save(*this);
-  AutoOutputRegister output(*this);
-
-  Register lhs = allocator.useRegister(masm, reader.stringOperandId());
-  Register rhs = allocator.useRegister(masm, reader.stringOperandId());
-
-  allocator.discardStack(masm);
-
-  prepareVMCall(masm, save);
-
-  masm.Push(rhs);
-  masm.Push(lhs);
-
-  using Fn = JSString* (*)(JSContext*, HandleString, HandleString);
-  callVM<Fn, ConcatStrings<CanGC>>(masm);
-
-  masm.tagValue(JSVAL_TYPE_STRING, ReturnReg, output.valueReg());
-  return true;
 }
 
 bool IonCacheIRCompiler::emitCallStringObjectConcatResult() {

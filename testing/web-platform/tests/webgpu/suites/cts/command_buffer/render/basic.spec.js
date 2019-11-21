@@ -23,7 +23,7 @@ g.test('clear', async t => {
     usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.OUTPUT_ATTACHMENT
   });
   const colorAttachmentView = colorAttachment.createView();
-  const encoder = t.device.createCommandEncoder({});
+  const encoder = t.device.createCommandEncoder();
   const pass = encoder.beginRenderPass({
     colorAttachments: [{
       attachment: colorAttachmentView,
@@ -55,6 +55,6 @@ g.test('clear', async t => {
     depth: 1
   });
   t.device.getQueue().submit([encoder.finish()]);
-  await t.expectContents(dst, new Uint8Array([0x00, 0xff, 0x00, 0xff]));
+  t.expectContents(dst, new Uint8Array([0x00, 0xff, 0x00, 0xff]));
 });
 //# sourceMappingURL=basic.spec.js.map

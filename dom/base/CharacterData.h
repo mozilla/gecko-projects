@@ -169,8 +169,6 @@ class CharacterData : public nsIContent {
   void DumpContent(FILE* out, int32_t aIndent, bool aDumpAll) const override {}
 #endif
 
-  nsXBLBinding* DoGetXBLBinding() const final { return nullptr; }
-
   bool IsNodeOfType(uint32_t aFlags) const override { return false; }
 
   bool IsLink(nsIURI** aURI) const final {

@@ -448,20 +448,20 @@ nsresult LookupCache::GetLookupWhitelistFragments(
   nsTArray<nsCString> topLevelURLs;
   topLevelURLs.AppendElement(topLevelURL);
 
-  MOZ_ASSERT(!IsCanonicalizedIP(topLevelURL));
-
-  topLevelURL.BeginReading(begin);
-  topLevelURL.EndReading(end);
-  int numTopLevelURLComponents = 0;
-  while (RFindInReadable(NS_LITERAL_CSTRING("."), begin, end) &&
-         numTopLevelURLComponents < MAX_HOST_COMPONENTS) {
-    // don't bother checking toplevel domains
-    if (++numTopLevelURLComponents >= 2) {
-      topLevelURL.EndReading(iter);
-      topLevelURLs.AppendElement(Substring(end, iter));
-    }
-    end = begin;
+  if (!IsCanonicalizedIP(topLevelURL)) {
     topLevelURL.BeginReading(begin);
+    topLevelURL.EndReading(end);
+    int numTopLevelURLComponents = 0;
+    while (RFindInReadable(NS_LITERAL_CSTRING("."), begin, end) &&
+           numTopLevelURLComponents < MAX_HOST_COMPONENTS) {
+      // don't bother checking toplevel domains
+      if (++numTopLevelURLComponents >= 2) {
+        topLevelURL.EndReading(iter);
+        topLevelURLs.AppendElement(Substring(end, iter));
+      }
+      end = begin;
+      topLevelURL.BeginReading(begin);
+    }
   }
 
   /**
@@ -474,16 +474,18 @@ nsresult LookupCache::GetLookupWhitelistFragments(
   nsTArray<nsCString> thirdPartyURLs;
   thirdPartyURLs.AppendElement(thirdPartyURL);
 
-  thirdPartyURL.BeginReading(iter);
-  thirdPartyURL.EndReading(end);
-  if (FindCharInReadable('.', iter, end)) {
-    iter++;
-    nsAutoCString thirdPartyURLToAdd;
-    thirdPartyURLToAdd.Assign(Substring(iter++, end));
-
-    // don't bother checking toplevel domains
+  if (!IsCanonicalizedIP(thirdPartyURL)) {
+    thirdPartyURL.BeginReading(iter);
+    thirdPartyURL.EndReading(end);
     if (FindCharInReadable('.', iter, end)) {
-      thirdPartyURLs.AppendElement(thirdPartyURLToAdd);
+      iter++;
+      nsAutoCString thirdPartyURLToAdd;
+      thirdPartyURLToAdd.Assign(Substring(iter++, end));
+
+      // don't bother checking toplevel domains
+      if (FindCharInReadable('.', iter, end)) {
+        thirdPartyURLs.AppendElement(thirdPartyURLToAdd);
+      }
     }
   }
 
@@ -588,7 +590,9 @@ nsresult LookupCache::GetLookupFragments(const nsACString& aSpec,
     paths.AppendElement(path);
   }
   // Check an empty path (for whole-domain blacklist entries)
-  paths.AppendElement(EmptyCString());
+  if (!paths.Contains(EmptyCString())) {
+    paths.AppendElement(EmptyCString());
+  }
 
   for (uint32_t hostIndex = 0; hostIndex < hosts.Length(); hostIndex++) {
     for (uint32_t pathIndex = 0; pathIndex < paths.Length(); pathIndex++) {
@@ -973,8 +977,7 @@ nsresult LookupCacheV2::LoadLegacyFile() {
   nsresult rv = store.Open(3);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (store.AddChunks().Length() == 0 &&
-      store.SubChunks().Length() == 0) {
+  if (store.AddChunks().Length() == 0 && store.SubChunks().Length() == 0) {
     // Return when file doesn't exist
     return NS_OK;
   }

@@ -81,7 +81,7 @@ nsRetrievalContextX11::~nsRetrievalContextX11() {
 }
 
 static void DispatchSelectionNotifyEvent(GtkWidget* widget, XEvent* xevent) {
-  GdkEvent event;
+  GdkEvent event = {};
   event.selection.type = GDK_SELECTION_NOTIFY;
   event.selection.window = gtk_widget_get_window(widget);
   event.selection.selection =
@@ -96,7 +96,7 @@ static void DispatchSelectionNotifyEvent(GtkWidget* widget, XEvent* xevent) {
 static void DispatchPropertyNotifyEvent(GtkWidget* widget, XEvent* xevent) {
   GdkWindow* window = gtk_widget_get_window(widget);
   if ((gdk_window_get_events(window)) & GDK_PROPERTY_CHANGE_MASK) {
-    GdkEvent event;
+    GdkEvent event = {};
     event.property.type = GDK_PROPERTY_NOTIFY;
     event.property.window = window;
     event.property.atom = gdk_x11_xatom_to_atom(xevent->xproperty.atom);
@@ -139,7 +139,8 @@ bool nsRetrievalContextX11::WaitForX11Content() {
   }
 
   GdkDisplay* gdkDisplay = gdk_display_get_default();
-  if (GDK_IS_X11_DISPLAY(gdkDisplay)) {
+  // gdk_display_get_default() returns null on headless
+  if (gdkDisplay && GDK_IS_X11_DISPLAY(gdkDisplay)) {
     Display* xDisplay = GDK_DISPLAY_XDISPLAY(gdkDisplay);
     checkEventContext context;
     context.cbWidget = nullptr;

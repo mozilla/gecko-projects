@@ -5,7 +5,20 @@ const { E10SUtils } = ChromeUtils.import(
   "resource://gre/modules/E10SUtils.jsm"
 );
 
-const PREF_NAME = "browser.tabs.remote.useCrossOriginOpenerPolicy";
+const COOP_PREF = "browser.tabs.remote.useCrossOriginOpenerPolicy";
+const DOCUMENT_CHANNEL_PREF = "browser.tabs.documentchannel";
+
+async function setPref() {
+  await SpecialPowers.pushPrefEnv({
+    set: [[COOP_PREF, true], [DOCUMENT_CHANNEL_PREF, true]],
+  });
+}
+
+async function unsetPref() {
+  await SpecialPowers.pushPrefEnv({
+    set: [[COOP_PREF, false], [DOCUMENT_CHANNEL_PREF, false]],
+  });
+}
 
 function httpURL(filename, host = "https://example.com") {
   let root = getRootDirectory(gTestPath).replace(
@@ -25,7 +38,13 @@ async function performLoad(browser, opts, action) {
   await loadedPromise;
 }
 
-async function test_coop(start, target, expectedProcessSwitch) {
+async function test_coop(
+  start,
+  target,
+  expectedProcessSwitch,
+  startRemoteTypeCheck,
+  targetRemoteTypeCheck
+) {
   return BrowserTestUtils.withNewTab(
     {
       gBrowser,
@@ -37,11 +56,16 @@ async function test_coop(start, target, expectedProcessSwitch) {
 
       await new Promise(resolve => setTimeout(resolve, 20));
       let browser = gBrowser.selectedBrowser;
-      let firstProcessID = await ContentTask.spawn(browser, null, () => {
-        return Services.appinfo.processID;
-      });
+      let firstRemoteType = browser.remoteType;
+      let firstProcessID = browser.frameLoader.remoteTab.osPid;
 
-      info(`firstProcessID: ${firstProcessID}`);
+      info(
+        `firstProcessID: ${firstProcessID} firstRemoteType: ${firstRemoteType}`
+      );
+
+      if (startRemoteTypeCheck) {
+        startRemoteTypeCheck(firstRemoteType);
+      }
 
       await performLoad(
         browser,
@@ -63,11 +87,15 @@ async function test_coop(start, target, expectedProcessSwitch) {
       info(`Navigated to: ${target}`);
       await new Promise(resolve => setTimeout(resolve, 20));
       browser = gBrowser.selectedBrowser;
-      let secondProcessID = await ContentTask.spawn(browser, null, () => {
-        return Services.appinfo.processID;
-      });
+      let secondRemoteType = browser.remoteType;
+      let secondProcessID = browser.frameLoader.remoteTab.osPid;
 
-      info(`secondProcessID: ${secondProcessID}`);
+      info(
+        `secondProcessID: ${secondProcessID} secondRemoteType: ${secondRemoteType}`
+      );
+      if (targetRemoteTypeCheck) {
+        targetRemoteTypeCheck(secondRemoteType);
+      }
       if (expectedProcessSwitch) {
         Assert.notEqual(
           firstProcessID,
@@ -118,7 +146,7 @@ async function test_download_from(initCoop, downloadCoop) {
     info(`test_download: Test tab ready`);
 
     let start = httpURL(
-      "coop_header.sjs?downloadPage&" + initCoop,
+      "coop_header.sjs?downloadPage&coop=" + initCoop,
       "https://example.com"
     );
     await performLoad(
@@ -163,7 +191,7 @@ async function test_download_from(initCoop, downloadCoop) {
 // Check that multiple navigations of the same tab will only switch processes
 // when it's expected.
 add_task(async function test_multiple_nav_process_switches() {
-  await SpecialPowers.pushPrefEnv({ set: [[PREF_NAME, true]] });
+  await setPref();
   await BrowserTestUtils.withNewTab(
     {
       gBrowser,
@@ -195,7 +223,10 @@ add_task(async function test_multiple_nav_process_switches() {
       Assert.equal(prevPID, currentPID);
       prevPID = currentPID;
 
-      target = httpURL("coop_header.sjs?same-origin", "https://example.org");
+      target = httpURL(
+        "coop_header.sjs?coop=same-origin",
+        "https://example.org"
+      );
       await performLoad(
         browser,
         {
@@ -219,7 +250,10 @@ add_task(async function test_multiple_nav_process_switches() {
       Assert.notEqual(prevPID, currentPID);
       prevPID = currentPID;
 
-      target = httpURL("coop_header.sjs?same-origin", "https://example.com");
+      target = httpURL(
+        "coop_header.sjs?coop=same-origin",
+        "https://example.com"
+      );
       await performLoad(
         browser,
         {
@@ -243,7 +277,10 @@ add_task(async function test_multiple_nav_process_switches() {
       Assert.notEqual(prevPID, currentPID);
       prevPID = currentPID;
 
-      target = httpURL("coop_header.sjs?same-origin.#4", "https://example.com");
+      target = httpURL(
+        "coop_header.sjs?coop=same-origin&index=4",
+        "https://example.com"
+      );
       await performLoad(
         browser,
         {
@@ -267,56 +304,133 @@ add_task(async function test_multiple_nav_process_switches() {
 });
 
 add_task(async function test_disabled() {
-  await SpecialPowers.pushPrefEnv({ set: [[PREF_NAME, false]] });
+  await unsetPref();
   await test_coop(
     httpURL("coop_header.sjs", "https://example.com"),
     httpURL("coop_header.sjs", "https://example.com"),
     false
   );
   await test_coop(
-    httpURL("coop_header.sjs?same-origin", "http://example.com"),
+    httpURL("coop_header.sjs?coop=same-origin", "http://example.com"),
     httpURL("coop_header.sjs", "http://example.com"),
     false
   );
   await test_coop(
     httpURL("coop_header.sjs", "http://example.com"),
-    httpURL("coop_header.sjs?same-origin", "http://example.com"),
+    httpURL("coop_header.sjs?coop=same-origin", "http://example.com"),
     false
   );
   await test_coop(
-    httpURL("coop_header.sjs?same-origin", "http://example.com"),
-    httpURL("coop_header.sjs?same-site", "http://example.com"),
+    httpURL("coop_header.sjs?coop=same-origin", "http://example.com"),
+    httpURL("coop_header.sjs?coop=same-site", "http://example.com"),
     false
   ); // assuming we don't have fission yet :)
 });
 
 add_task(async function test_enabled() {
-  await SpecialPowers.pushPrefEnv({ set: [[PREF_NAME, true]] });
+  await setPref();
+
+  function checkIsCoopRemoteType(remoteType) {
+    Assert.ok(
+      remoteType.startsWith(E10SUtils.WEB_REMOTE_COOP_COEP_TYPE_PREFIX),
+      `${remoteType} expected to be coop`
+    );
+  }
+
+  function checkIsNotCoopRemoteType(remoteType) {
+    if (gFissionBrowser) {
+      Assert.ok(
+        remoteType.startsWith("webIsolated="),
+        `${remoteType} expected to start with webIsolated=`
+      );
+    } else {
+      Assert.equal(
+        remoteType,
+        E10SUtils.WEB_REMOTE_TYPE,
+        `${remoteType} expected to be web`
+      );
+    }
+  }
+
   await test_coop(
     httpURL("coop_header.sjs", "https://example.com"),
     httpURL("coop_header.sjs", "https://example.com"),
-    false
+    false,
+    checkIsNotCoopRemoteType,
+    checkIsNotCoopRemoteType
   );
   await test_coop(
     httpURL("coop_header.sjs", "https://example.com"),
-    httpURL("coop_header.sjs?same-origin", "https://example.org"),
-    true
+    httpURL("coop_header.sjs?coop=same-origin", "https://example.org"),
+    true,
+    checkIsNotCoopRemoteType,
+    checkIsNotCoopRemoteType
   );
   await test_coop(
-    httpURL("coop_header.sjs?same-origin#1", "https://example.com"),
-    httpURL("coop_header.sjs?same-origin#1", "https://example.org"),
-    true
+    httpURL("coop_header.sjs?coop=same-origin&index=1", "https://example.com"),
+    httpURL("coop_header.sjs?coop=same-origin&index=1", "https://example.org"),
+    true,
+    checkIsNotCoopRemoteType,
+    checkIsNotCoopRemoteType
   );
   await test_coop(
-    httpURL("coop_header.sjs?same-origin#2", "https://example.com"),
-    httpURL("coop_header.sjs?same-site#2", "https://example.org"),
-    true
+    httpURL("coop_header.sjs?coop=same-origin&index=2", "https://example.com"),
+    httpURL("coop_header.sjs?coop=same-site&index=2", "https://example.org"),
+    true,
+    checkIsNotCoopRemoteType,
+    checkIsNotCoopRemoteType
+  );
+  await test_coop(
+    httpURL("coop_header.sjs", "https://example.com"),
+    httpURL(
+      "coop_header.sjs?coop=same-origin&coep=require-corp",
+      "https://example.com"
+    ),
+    true,
+    checkIsNotCoopRemoteType,
+    checkIsCoopRemoteType
+  );
+  await test_coop(
+    httpURL(
+      "coop_header.sjs?coop=same-origin&coep=require-corp&index=2",
+      "https://example.com"
+    ),
+    httpURL(
+      "coop_header.sjs?coop=same-origin&coep=require-corp&index=3",
+      "https://example.com"
+    ),
+    false,
+    checkIsCoopRemoteType,
+    checkIsCoopRemoteType
+  );
+  await test_coop(
+    httpURL(
+      "coop_header.sjs?coop=same-origin&coep=require-corp&index=4",
+      "https://example.com"
+    ),
+    httpURL("coop_header.sjs", "https://example.com"),
+    true,
+    checkIsCoopRemoteType,
+    checkIsNotCoopRemoteType
+  );
+  await test_coop(
+    httpURL(
+      "coop_header.sjs?coop=same-origin&coep=require-corp&index=5",
+      "https://example.com"
+    ),
+    httpURL(
+      "coop_header.sjs?coop=same-origin&coep=require-corp&index=6",
+      "https://example.org"
+    ),
+    true,
+    checkIsCoopRemoteType,
+    checkIsCoopRemoteType
   );
 });
 
 add_task(async function test_download() {
   requestLongerTimeout(4);
-  await SpecialPowers.pushPrefEnv({ set: [[PREF_NAME, true]] });
+  await setPref();
 
   let initCoopArray = ["", "same-site", "same-origin"];
 

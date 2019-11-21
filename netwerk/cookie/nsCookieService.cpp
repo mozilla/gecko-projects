@@ -19,6 +19,7 @@
 
 #include "nsCookieService.h"
 #include "nsContentUtils.h"
+#include "nsIClassifiedChannel.h"
 #include "nsIServiceManager.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIWebProgressListener.h"
@@ -45,15 +46,12 @@
 #include "nsTArray.h"
 #include "nsCOMArray.h"
 #include "nsIMutableArray.h"
-#include "nsArrayEnumerator.h"
-#include "nsEnumeratorUtils.h"
 #include "nsAutoPtr.h"
 #include "nsReadableUtils.h"
 #include "nsCRT.h"
 #include "prprf.h"
 #include "nsNetUtil.h"
 #include "nsNetCID.h"
-#include "nsISimpleEnumerator.h"
 #include "nsIInputStream.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsNetCID.h"
@@ -2010,17 +2008,20 @@ nsresult nsCookieService::GetCookieStringCommon(nsIURI* aHostURI,
   }
 
   bool isTrackingResource = false;
+  bool isSocialTrackingResource = false;
   bool firstPartyStorageAccessGranted = false;
   uint32_t rejectedReason = 0;
-  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
-  if (httpChannel) {
-    isTrackingResource = httpChannel->IsTrackingResource();
+  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+      do_QueryInterface(aChannel);
+  if (classifiedChannel) {
+    isTrackingResource = classifiedChannel->IsTrackingResource();
+    isSocialTrackingResource = classifiedChannel->IsSocialTrackingResource();
 
     // Check first-party storage access even for non-tracking resources, since
     // we will need the result when computing the access rights for the reject
     // foreign cookie behavior mode.
     if (AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
-            httpChannel, aHostURI, &rejectedReason)) {
+            aChannel, aHostURI, &rejectedReason)) {
       firstPartyStorageAccessGranted = true;
     }
   }
@@ -2033,10 +2034,10 @@ nsresult nsCookieService::GetCookieStringCommon(nsIURI* aHostURI,
 
   bool isSafeTopLevelNav = NS_IsSafeTopLevelNav(aChannel);
   bool isSameSiteForeign = NS_IsSameSiteForeign(aChannel, aHostURI);
-  GetCookieStringInternal(aHostURI, aChannel, isForeign, isTrackingResource,
-                          firstPartyStorageAccessGranted, rejectedReason,
-                          isSafeTopLevelNav, isSameSiteForeign, aHttpBound,
-                          attrs, aCookie);
+  GetCookieStringInternal(
+      aHostURI, aChannel, isForeign, isTrackingResource,
+      isSocialTrackingResource, firstPartyStorageAccessGranted, rejectedReason,
+      isSafeTopLevelNav, isSameSiteForeign, aHttpBound, attrs, aCookie);
   return NS_OK;
 }
 
@@ -2132,17 +2133,20 @@ nsresult nsCookieService::SetCookieStringCommon(nsIURI* aHostURI,
   }
 
   bool isTrackingResource = false;
+  bool isSocialTrackingResource = false;
   bool firstPartyStorageAccessGranted = false;
   uint32_t rejectedReason = 0;
-  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
-  if (httpChannel) {
-    isTrackingResource = httpChannel->IsTrackingResource();
+  nsCOMPtr<nsIClassifiedChannel> classifiedChannel =
+      do_QueryInterface(aChannel);
+  if (classifiedChannel) {
+    isTrackingResource = classifiedChannel->IsTrackingResource();
+    isSocialTrackingResource = classifiedChannel->IsSocialTrackingResource();
 
     // Check first-party storage access even for non-tracking resources, since
     // we will need the result when computing the access rights for the reject
     // foreign cookie behavior mode.
     if (AntiTrackingCommon::IsFirstPartyStorageAccessGrantedFor(
-            httpChannel, aHostURI, &rejectedReason)) {
+            aChannel, aHostURI, &rejectedReason)) {
       firstPartyStorageAccessGranted = true;
     }
   }
@@ -2155,15 +2159,17 @@ nsresult nsCookieService::SetCookieStringCommon(nsIURI* aHostURI,
 
   nsCString cookieString(aCookieHeader);
   SetCookieStringInternal(
-      aHostURI, isForeign, isTrackingResource, firstPartyStorageAccessGranted,
-      rejectedReason, cookieString, aServerTime, aFromHttp, attrs, aChannel);
+      aHostURI, isForeign, isTrackingResource, isSocialTrackingResource,
+      firstPartyStorageAccessGranted, rejectedReason, cookieString, aServerTime,
+      aFromHttp, attrs, aChannel);
   return NS_OK;
 }
 
 void nsCookieService::SetCookieStringInternal(
     nsIURI* aHostURI, bool aIsForeign, bool aIsTrackingResource,
-    bool aFirstPartyStorageAccessGranted, uint32_t aRejectedReason,
-    nsCString& aCookieHeader, const nsACString& aServerTime, bool aFromHttp,
+    bool aIsSocialTrackingResource, bool aFirstPartyStorageAccessGranted,
+    uint32_t aRejectedReason, nsCString& aCookieHeader,
+    const nsACString& aServerTime, bool aFromHttp,
     const OriginAttributes& aOriginAttrs, nsIChannel* aChannel) {
   NS_ASSERTION(aHostURI, "null host!");
 
@@ -2202,10 +2208,10 @@ void nsCookieService::SetCookieStringInternal(
   nsAutoCString hostFromURI;
   aHostURI->GetHost(hostFromURI);
   CountCookiesFromHost(hostFromURI, &priorCookieCount);
-  CookieStatus cookieStatus =
-      CheckPrefs(cookieSettings, aHostURI, aIsForeign, aIsTrackingResource,
-                 aFirstPartyStorageAccessGranted, aCookieHeader,
-                 priorCookieCount, aOriginAttrs, &rejectedReason);
+  CookieStatus cookieStatus = CheckPrefs(
+      cookieSettings, aHostURI, aIsForeign, aIsTrackingResource,
+      aIsSocialTrackingResource, aFirstPartyStorageAccessGranted, aCookieHeader,
+      priorCookieCount, aOriginAttrs, &rejectedReason);
 
   MOZ_ASSERT_IF(rejectedReason, cookieStatus == STATUS_REJECTED);
 
@@ -2418,7 +2424,7 @@ nsCookieService::RemoveAll() {
 }
 
 NS_IMETHODIMP
-nsCookieService::GetEnumerator(nsISimpleEnumerator** aEnumerator) {
+nsCookieService::GetCookies(nsTArray<RefPtr<nsICookie>>& aCookies) {
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -2426,19 +2432,19 @@ nsCookieService::GetEnumerator(nsISimpleEnumerator** aEnumerator) {
 
   EnsureReadComplete(true);
 
-  nsCOMArray<nsICookie> cookieList(mDBState->cookieCount);
+  aCookies.SetCapacity(mDBState->cookieCount);
   for (auto iter = mDBState->hostTable.Iter(); !iter.Done(); iter.Next()) {
     const nsCookieEntry::ArrayType& cookies = iter.Get()->GetCookies();
     for (nsCookieEntry::IndexType i = 0; i < cookies.Length(); ++i) {
-      cookieList.AppendObject(cookies[i]);
+      aCookies.AppendElement(cookies[i]);
     }
   }
 
-  return NS_NewArrayEnumerator(aEnumerator, cookieList, NS_GET_IID(nsICookie));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
-nsCookieService::GetSessionEnumerator(nsISimpleEnumerator** aEnumerator) {
+nsCookieService::GetSessionCookies(nsTArray<RefPtr<nsICookie>>& aCookies) {
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -2446,19 +2452,19 @@ nsCookieService::GetSessionEnumerator(nsISimpleEnumerator** aEnumerator) {
 
   EnsureReadComplete(true);
 
-  nsCOMArray<nsICookie> cookieList(mDBState->cookieCount);
+  aCookies.SetCapacity(mDBState->cookieCount);
   for (auto iter = mDBState->hostTable.Iter(); !iter.Done(); iter.Next()) {
     const nsCookieEntry::ArrayType& cookies = iter.Get()->GetCookies();
     for (nsCookieEntry::IndexType i = 0; i < cookies.Length(); ++i) {
       nsCookie* cookie = cookies[i];
       // Filter out non-session cookies.
       if (cookie->IsSession()) {
-        cookieList.AppendObject(cookie);
+        aCookies.AppendElement(cookie);
       }
     }
   }
 
-  return NS_NewArrayEnumerator(aEnumerator, cookieList, NS_GET_IID(nsICookie));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2963,10 +2969,10 @@ bool nsCookieService::PathMatches(nsCookie* aCookie, const nsACString& aPath) {
 
 void nsCookieService::GetCookiesForURI(
     nsIURI* aHostURI, nsIChannel* aChannel, bool aIsForeign,
-    bool aIsTrackingResource, bool aFirstPartyStorageAccessGranted,
-    uint32_t aRejectedReason, bool aIsSafeTopLevelNav, bool aIsSameSiteForeign,
-    bool aHttpBound, const OriginAttributes& aOriginAttrs,
-    nsTArray<nsCookie*>& aCookieList) {
+    bool aIsTrackingResource, bool aIsSocialTrackingResource,
+    bool aFirstPartyStorageAccessGranted, uint32_t aRejectedReason,
+    bool aIsSafeTopLevelNav, bool aIsSameSiteForeign, bool aHttpBound,
+    const OriginAttributes& aOriginAttrs, nsTArray<nsCookie*>& aCookieList) {
   NS_ASSERTION(aHostURI, "null host!");
 
   if (!mDBState) {
@@ -3003,10 +3009,10 @@ void nsCookieService::GetCookiesForURI(
   uint32_t rejectedReason = aRejectedReason;
   uint32_t priorCookieCount = 0;
   CountCookiesFromHost(hostFromURI, &priorCookieCount);
-  CookieStatus cookieStatus =
-      CheckPrefs(cookieSettings, aHostURI, aIsForeign, aIsTrackingResource,
-                 aFirstPartyStorageAccessGranted, VoidCString(),
-                 priorCookieCount, aOriginAttrs, &rejectedReason);
+  CookieStatus cookieStatus = CheckPrefs(
+      cookieSettings, aHostURI, aIsForeign, aIsTrackingResource,
+      aIsSocialTrackingResource, aFirstPartyStorageAccessGranted, VoidCString(),
+      priorCookieCount, aOriginAttrs, &rejectedReason);
 
   MOZ_ASSERT_IF(rejectedReason, cookieStatus == STATUS_REJECTED);
 
@@ -3138,15 +3144,15 @@ void nsCookieService::GetCookiesForURI(
 
 void nsCookieService::GetCookieStringInternal(
     nsIURI* aHostURI, nsIChannel* aChannel, bool aIsForeign,
-    bool aIsTrackingResource, bool aFirstPartyStorageAccessGranted,
-    uint32_t aRejectedReason, bool aIsSafeTopLevelNav, bool aIsSameSiteForeign,
-    bool aHttpBound, const OriginAttributes& aOriginAttrs,
-    nsACString& aCookieString) {
+    bool aIsTrackingResource, bool aIsSocialTrackingResource,
+    bool aFirstPartyStorageAccessGranted, uint32_t aRejectedReason,
+    bool aIsSafeTopLevelNav, bool aIsSameSiteForeign, bool aHttpBound,
+    const OriginAttributes& aOriginAttrs, nsACString& aCookieString) {
   AutoTArray<nsCookie*, 8> foundCookieList;
   GetCookiesForURI(aHostURI, aChannel, aIsForeign, aIsTrackingResource,
-                   aFirstPartyStorageAccessGranted, aRejectedReason,
-                   aIsSafeTopLevelNav, aIsSameSiteForeign, aHttpBound,
-                   aOriginAttrs, foundCookieList);
+                   aIsSocialTrackingResource, aFirstPartyStorageAccessGranted,
+                   aRejectedReason, aIsSafeTopLevelNav, aIsSameSiteForeign,
+                   aHttpBound, aOriginAttrs, foundCookieList);
 
   nsCookie* cookie;
   for (uint32_t i = 0; i < foundCookieList.Length(); ++i) {
@@ -3962,9 +3968,10 @@ static inline bool IsSubdomainOf(const nsCString& a, const nsCString& b) {
 
 CookieStatus nsCookieService::CheckPrefs(
     nsICookieSettings* aCookieSettings, nsIURI* aHostURI, bool aIsForeign,
-    bool aIsTrackingResource, bool aFirstPartyStorageAccessGranted,
-    const nsACString& aCookieHeader, const int aNumOfCookies,
-    const OriginAttributes& aOriginAttrs, uint32_t* aRejectedReason) {
+    bool aIsTrackingResource, bool aIsSocialTrackingResource,
+    bool aFirstPartyStorageAccessGranted, const nsACString& aCookieHeader,
+    const int aNumOfCookies, const OriginAttributes& aOriginAttrs,
+    uint32_t* aRejectedReason) {
   nsresult rv;
 
   MOZ_ASSERT(aRejectedReason);
@@ -4028,7 +4035,12 @@ CookieStatus nsCookieService::CheckPrefs(
     COOKIE_LOGFAILURE(aCookieHeader.IsVoid() ? GET_COOKIE : SET_COOKIE,
                       aHostURI, aCookieHeader,
                       "cookies are disabled in trackers");
-    *aRejectedReason = nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER;
+    if (aIsSocialTrackingResource) {
+      *aRejectedReason =
+          nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER;
+    } else {
+      *aRejectedReason = nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER;
+    }
     return STATUS_REJECTED;
   }
 
@@ -4607,7 +4619,9 @@ NS_IMETHODIMP
 nsCookieService::GetCookiesFromHost(const nsACString& aHost,
                                     JS::HandleValue aOriginAttributes,
                                     JSContext* aCx,
-                                    nsISimpleEnumerator** aEnumerator) {
+                                    nsTArray<RefPtr<nsICookie>>& aResult) {
+  aResult.Clear();
+
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -4635,21 +4649,21 @@ nsCookieService::GetCookiesFromHost(const nsACString& aHost,
   nsCookieKey key = nsCookieKey(baseDomain, attrs);
 
   nsCookieEntry* entry = mDBState->hostTable.GetEntry(key);
-  if (!entry) return NS_NewEmptyEnumerator(aEnumerator);
+  if (!entry) return NS_OK;
 
-  nsCOMArray<nsICookie> cookieList(mMaxCookiesPerHost);
+  aResult.SetCapacity(mMaxCookiesPerHost);
   const nsCookieEntry::ArrayType& cookies = entry->GetCookies();
   for (nsCookieEntry::IndexType i = 0; i < cookies.Length(); ++i) {
-    cookieList.AppendObject(cookies[i]);
+    aResult.AppendElement(cookies[i]);
   }
 
-  return NS_NewArrayEnumerator(aEnumerator, cookieList, NS_GET_IID(nsICookie));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
 nsCookieService::GetCookiesWithOriginAttributes(
     const nsAString& aPattern, const nsACString& aHost,
-    nsISimpleEnumerator** aEnumerator) {
+    nsTArray<RefPtr<nsICookie>>& aResult) {
   mozilla::OriginAttributesPattern pattern;
   if (!pattern.Init(aPattern)) {
     return NS_ERROR_INVALID_ARG;
@@ -4663,12 +4677,12 @@ nsCookieService::GetCookiesWithOriginAttributes(
   rv = GetBaseDomainFromHost(mTLDService, host, baseDomain);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return GetCookiesWithOriginAttributes(pattern, baseDomain, aEnumerator);
+  return GetCookiesWithOriginAttributes(pattern, baseDomain, aResult);
 }
 
 nsresult nsCookieService::GetCookiesWithOriginAttributes(
     const mozilla::OriginAttributesPattern& aPattern,
-    const nsCString& aBaseDomain, nsISimpleEnumerator** aEnumerator) {
+    const nsCString& aBaseDomain, nsTArray<RefPtr<nsICookie>>& aResult) {
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -4681,7 +4695,6 @@ nsresult nsCookieService::GetCookiesWithOriginAttributes(
                  ? mPrivateDBState
                  : mDefaultDBState;
 
-  nsCOMArray<nsICookie> cookies;
   for (auto iter = mDBState->hostTable.Iter(); !iter.Done(); iter.Next()) {
     nsCookieEntry* entry = iter.Get();
 
@@ -4696,11 +4709,11 @@ nsresult nsCookieService::GetCookiesWithOriginAttributes(
     const nsCookieEntry::ArrayType& entryCookies = entry->GetCookies();
 
     for (nsCookieEntry::IndexType i = 0; i < entryCookies.Length(); ++i) {
-      cookies.AppendObject(entryCookies[i]);
+      aResult.AppendElement(entryCookies[i]);
     }
   }
 
-  return NS_NewArrayEnumerator(aEnumerator, cookies, NS_GET_IID(nsICookie));
+  return NS_OK;
 }
 
 NS_IMETHODIMP

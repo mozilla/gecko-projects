@@ -43,12 +43,19 @@ const { DebuggerServer: WorkerDebuggerServer } = worker.require(
   "devtools/server/debugger-server"
 );
 const { DebuggerClient } = require("devtools/shared/client/debugger-client");
-const ObjectClient = require("devtools/shared/client/object-client");
+const ObjectFront = require("devtools/shared/fronts/object");
 const { LongStringFront } = require("devtools/shared/fronts/string");
 const { TargetFactory } = require("devtools/client/framework/target");
 
 const { addDebuggerToGlobal } = ChromeUtils.import(
   "resource://gre/modules/jsdebugger.jsm"
+);
+
+const { AddonTestUtils } = ChromeUtils.import(
+  "resource://testing-common/AddonTestUtils.jsm"
+);
+const { getAppInfo } = ChromeUtils.import(
+  "resource://testing-common/AppInfo.jsm"
 );
 
 const systemPrincipal = Cc["@mozilla.org/systemprincipal;1"].createInstance(
@@ -59,17 +66,22 @@ var { loadSubScript, loadSubScriptWithOptions } = Services.scriptloader;
 
 /**
  * Initializes any test that needs to work with add-ons.
+ *
+ * Should be called once per test script that needs to use AddonTestUtils (and
+ * not once per test task!).
  */
-function startupAddonsManager() {
+async function startupAddonsManager() {
   // Create a directory for extensions.
   const profileDir = do_get_profile().clone();
   profileDir.append("extensions");
 
-  const internalManager = Cc["@mozilla.org/addons/integration;1"]
-    .getService(Ci.nsIObserver)
-    .QueryInterface(Ci.nsITimerCallback);
+  /* global globalThis */
+  /* See Bug 1595810 to add globalThis to eslint */
+  AddonTestUtils.init(globalThis);
+  AddonTestUtils.overrideCertDB();
+  AddonTestUtils.appInfo = getAppInfo();
 
-  internalManager.observe(null, "addons-startup", null);
+  await AddonTestUtils.promiseStartupManager();
 }
 
 async function createTargetForFakeTab(title) {
@@ -113,46 +125,6 @@ async function createTabMemoryFront() {
   });
 
   return { target, memoryFront };
-}
-
-/**
- * Create a PromisesFront for a fake test tab.
- */
-async function createTabPromisesFront() {
-  const title = "test_promises";
-  const target = await createTargetForFakeTab(title);
-
-  // Retrieve the debuggee create by createTargetForFakeTab
-  const debuggee = DebuggerServer.getTestGlobal(title);
-
-  const promisesFront = await target.getFront("promises");
-
-  registerCleanupFunction(async () => {
-    // On XPCShell, the target isn't for a local tab and so target.destroy
-    // won't close the client. So do it so here. It will automatically destroy the target.
-    await target.client.close();
-  });
-
-  return { debuggee, client: target.client, promisesFront };
-}
-
-/**
- * Create a PromisesFront for the main process target actor.
- */
-async function createMainProcessPromisesFront() {
-  const target = await createTargetForMainProcess();
-
-  const promisesFront = await target.getFront("promises");
-
-  registerCleanupFunction(async () => {
-    // For XPCShell, the main process target actor is ContentProcessTargetActor
-    // which doesn't expose any `detach` method. So that the target actor isn't
-    // destroyed when calling target.destroy.
-    // Close the client to cleanup everything.
-    await target.client.close();
-  });
-
-  return { client: target.client, promisesFront };
 }
 
 /**
@@ -276,9 +248,7 @@ function setBreakpoint(threadFront, location) {
 function getPrototypeAndProperties(objClient) {
   dump("getting prototype and properties.\n");
 
-  return new Promise(resolve => {
-    objClient.getPrototypeAndProperties(response => resolve(response));
-  });
+  return objClient.getPrototypeAndProperties();
 }
 
 function dumpn(msg) {
@@ -931,12 +901,16 @@ async function setupTestFromUrl(url) {
  *        - bool wantXrays
  *          Whether the debuggee wants Xray vision with respect to same-origin objects
  *          outside the sandbox. Defaults to true.
+ *        - bool waitForFinish
+ *          Whether to wait for a call to threadFrontTestFinished after the test
+ *          function finishes.
  */
 function threadFrontTest(test, options = {}) {
   const {
     principal = systemPrincipal,
     doNotRunWorker = false,
     wantXrays = true,
+    waitForFinish = false,
   } = options;
 
   async function runThreadFrontTestWithServer(server, test) {
@@ -962,7 +936,18 @@ function threadFrontTest(test, options = {}) {
     );
 
     // Run the test function
-    await test({ threadFront, debuggee, client, server, targetFront });
+    const args = { threadFront, debuggee, client, server, targetFront };
+    if (waitForFinish) {
+      // Use dispatchToMainThread so that the test function does not have to
+      // finish executing before the test itself finishes.
+      const promise = new Promise(
+        resolve => (threadFrontTestFinished = resolve)
+      );
+      Services.tm.dispatchToMainThread(() => test(args));
+      await promise;
+    } else {
+      await test(args);
+    }
 
     // Cleanup the client after the test ran
     await client.close();
@@ -984,3 +969,10 @@ function threadFrontTest(test, options = {}) {
     }
   };
 }
+
+// This callback is used in tandem with the waitForFinish option of
+// threadFrontTest to support thread front tests that use promises to
+// asynchronously finish the tests, instead of using async/await.
+// Newly written tests should avoid using this. See bug 1596114 for migrating
+// existing tests to async/await and removing this functionality.
+let threadFrontTestFinished;

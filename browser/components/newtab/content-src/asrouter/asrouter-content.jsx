@@ -21,7 +21,7 @@ const INCOMING_MESSAGE_NAME = "ASRouter:parent-to-child";
 const OUTGOING_MESSAGE_NAME = "ASRouter:child-to-parent";
 const TEMPLATES_ABOVE_PAGE = [
   "trailhead",
-  "fxa_overlay",
+  "full_page_interrupt",
   "return_to_amo_overlay",
   "extended_triplets",
 ];
@@ -190,12 +190,12 @@ export class ASRouterUISurface extends React.PureComponent {
     this.sendUserActionTelemetry({ event: "IMPRESSION", ...extraProps });
   }
 
-  // If link has a `metric` data attribute send it as part of the `value`
+  // If link has a `metric` data attribute send it as part of the `event_context`
   // telemetry field which can have arbitrary values.
   // Used for router messages with links as part of the content.
   sendClick(event) {
     const metric = {
-      value: event.target.dataset.metric,
+      event_context: event.target.dataset.metric,
       // Used for the `source` of the event. Needed to differentiate
       // from other snippet or onboarding events that may occur.
       id: "NEWTAB_FOOTER_BAR_CONTENT",
@@ -384,6 +384,7 @@ export class ASRouterUISurface extends React.PureComponent {
             onBlockById={ASRouterUtils.blockById}
             onDismiss={this.onDismissById(this.state.message.id)}
             fxaEndpoint={this.props.fxaEndpoint}
+            appUpdateChannel={this.props.appUpdateChannel}
             fetchFlowParams={this.fetchFlowParams}
           />
         </ImpressionsWrapper>

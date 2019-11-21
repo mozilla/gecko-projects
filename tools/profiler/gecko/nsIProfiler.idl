@@ -43,6 +43,16 @@ interface nsIProfiler : nsISupports
   void PauseSampling();
   void ResumeSampling();
   void AddMarker(in string aMarker);
+
+  /*
+   * Resolves the returned promise after at least one full periodic sampling.
+   * Rejects the promise if sampler is not running (yet, or anymore, or paused).
+   * This is mainly useful in tests, to wait just long enough to guarantee that
+   * one sample was taken in the main process.
+   */
+  [implicit_jscontext]
+  Promise waitOnePeriodicSampling();
+
   /*
    * Returns the JSON string of the profile. If aSinceTime is passed, only
    * report samples taken at >= aSinceTime.
@@ -84,6 +94,15 @@ interface nsIProfiler : nsISupports
    * Features may vary depending on platform and build flags.
    */
   Array<AUTF8String> GetFeatures();
+
+  /**
+   * Returns a JavaScript object that contains a description of the currently configured
+   * state of the profiler when the profiler is active. This can be useful to assert
+   * the UI of the profiler's recording panel in tests. It returns null when the profiler
+   * is not active.
+   */
+  [implicit_jscontext]
+  readonly attribute jsval activeConfiguration;
 
   /**
    * Returns an array of all features that are supported by the profiler.

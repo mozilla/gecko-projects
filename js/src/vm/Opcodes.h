@@ -2456,7 +2456,7 @@
      *   Operands: uint32_t icIndex, uint8_t BITFIELD
      *   Stack: =>
      */ \
-    MACRO(JSOP_LOOPENTRY, 227, "loopentry", NULL, 6, 0, 0, JOF_LOOPENTRY|JOF_IC) \
+    MACRO(JSOP_LOOPENTRY, 227, "loopentry", NULL, 6, 0, 0, JOF_LOOPENTRY) \
     /*
      * Converts the value on the top of the stack to a String.
      *
@@ -2568,7 +2568,18 @@
      *   Operands:
      *   Stack: => val
      */ \
-    MACRO(JSOP_INSTRUMENTATION_SCRIPT_ID, 240, "instrumentationScriptId", NULL, 1, 0, 1, JOF_BYTE)
+    MACRO(JSOP_INSTRUMENTATION_SCRIPT_ID, 240, "instrumentationScriptId", NULL, 1, 0, 1, JOF_BYTE) \
+    /*
+     * If the value on top of the stack is not null or undefined, jumps to a 32-bit offset from the
+     * current bytecode.
+     *
+     *   Category: Statements
+     *   Type: Jumps
+     *   Operands: int32_t offset
+     *   Stack: cond => cond
+     */ \
+    MACRO(JSOP_COALESCE, 241, "coalesce", NULL, 5, 1, 1, JOF_JUMP|JOF_DETECTING)
+
 // clang-format on
 
 /*
@@ -2576,7 +2587,6 @@
  * a power of two.  Use this macro to do so.
  */
 #define FOR_EACH_TRAILING_UNUSED_OPCODE(MACRO) \
-  MACRO(241)                                   \
   MACRO(242)                                   \
   MACRO(243)                                   \
   MACRO(244)                                   \

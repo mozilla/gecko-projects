@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files("**"):
-    BUG_COMPONENT = ("Core", "DOM: Core & HTML")
+    BUG_COMPONENT = ("Core", "DOM: Bindings (WebIDL)")
 
 TEST_DIRS += ['test']
 
@@ -77,7 +77,6 @@ LOCAL_INCLUDES += [
     '/dom/media/webaudio',
     '/dom/media/webspeech/recognition',
     '/dom/svg',
-    '/dom/xbl',
     '/dom/xml',
     '/dom/xslt/base',
     '/dom/xslt/xpath',
@@ -175,10 +174,10 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     ]
 
 if CONFIG['COMPILE_ENVIRONMENT']:
-    GENERATED_FILES += ['CSS2Properties.webidl']
-    css_props = GENERATED_FILES['CSS2Properties.webidl']
-    css_props.script = 'GenerateCSS2PropertiesWebIDL.py:generate'
-    css_props.inputs = [
-        '/dom/webidl/CSS2Properties.webidl.in',
-        '!/layout/style/ServoCSSPropList.py',
-    ]
+    GeneratedFile('CSS2Properties.webidl',
+                  script='GenerateCSS2PropertiesWebIDL.py',
+                  entry_point='generate',
+                  inputs=[
+                      '/dom/webidl/CSS2Properties.webidl.in',
+                      '!/layout/style/ServoCSSPropList.py',
+                  ])

@@ -45,6 +45,7 @@
 #ifdef JS_SIMULATOR_ARM
 #  include "jit/arm/Simulator-arm.h"
 #endif
+#include "util/DiagnosticAssertions.h"
 #include "util/DoubleToString.h"
 #include "util/NativeStack.h"
 #include "util/Windows.h"
@@ -135,8 +136,7 @@ bool JSContext::init(ContextKind kind) {
   return true;
 }
 
-JSContext* js::NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes,
-                          JSRuntime* parentRuntime) {
+JSContext* js::NewContext(uint32_t maxBytes, JSRuntime* parentRuntime) {
   AutoNoteSingleThreadedRegion anstr;
 
   MOZ_RELEASE_ASSERT(!TlsContext.get());
@@ -163,7 +163,7 @@ JSContext* js::NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes,
     return nullptr;
   }
 
-  if (!runtime->init(cx, maxBytes, maxNurseryBytes)) {
+  if (!runtime->init(cx, maxBytes)) {
     runtime->destroyRuntime();
     js_delete(cx);
     js_delete(runtime);
@@ -1246,8 +1246,10 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
 #endif
       dtoaState(this, nullptr),
       suppressGC(this, 0),
-      gcSweeping(this, false),
 #ifdef DEBUG
+      gcSweeping(this, false),
+      gcSweepingZone(this, nullptr),
+      gcMarking(this, false),
       isTouchingGrayThings(this, false),
       noNurseryAllocationCheck(this, 0),
       disableStrictProxyCheckingCount(this, 0),
@@ -1285,7 +1287,6 @@ JSContext::JSContext(JSRuntime* runtime, const JS::ContextOptions& options)
       interruptCallbacks_(this),
       interruptCallbackDisabled(this, false),
       interruptBits_(0),
-      osrTempData_(this, nullptr),
       ionReturnOverride_(this, MagicValue(JS_ARG_POISON)),
       jitStackLimit(UINTPTR_MAX),
       jitStackLimitNoInterrupt(this, UINTPTR_MAX),
@@ -1315,7 +1316,6 @@ JSContext::~JSContext() {
   }
 
   fx.destroyInstance();
-  freeOsrTempData();
 
 #ifdef JS_SIMULATOR
   js::jit::Simulator::Destroy(simulator_);
@@ -1517,8 +1517,13 @@ void AutoEnterOOMUnsafeRegion::crash(const char* reason) {
   char msgbuf[1024];
   js::NoteIntentionalCrash();
   SprintfLiteral(msgbuf, "[unhandlable oom] %s", reason);
-  MOZ_ReportAssertionFailure(msgbuf, __FILE__, __LINE__);
-  MOZ_CRASH();
+#ifndef DEBUG
+  // In non-DEBUG builds MOZ_CRASH normally doesn't print to stderr so we have
+  // to do this explicitly (the jit-test allow-unhandlable-oom annotation and
+  // fuzzers depend on it).
+  MOZ_ReportCrash(msgbuf, __FILE__, __LINE__);
+#endif
+  MOZ_CRASH_UNSAFE(msgbuf);
 }
 
 AutoEnterOOMUnsafeRegion::AnnotateOOMAllocationSizeCallback

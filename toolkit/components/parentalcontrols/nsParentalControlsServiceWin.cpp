@@ -144,8 +144,15 @@ NS_IMETHODIMP
 nsParentalControlsService::GetBlockFileDownloadsEnabled(bool* aResult) {
   *aResult = false;
 
-  if (!mEnabled || !mPC) {
+  if (!mEnabled) {
     return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  // If we're on Windows 10 and we don't have the whole API available, then
+  // we can't tell if file downloads are allowed, so assume they are to avoid
+  // breaking downloads for every single user with parental controls.
+  if (!mPC) {
+    return NS_OK;
   }
 
   RefPtr<IWPCWebSettings> wpcws;
@@ -162,8 +169,14 @@ NS_IMETHODIMP
 nsParentalControlsService::GetLoggingEnabled(bool* aResult) {
   *aResult = false;
 
-  if (!mEnabled || !mPC) {
+  if (!mEnabled) {
     return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  // If we're on Windows 10 and we don't have the whole API available, then
+  // we don't know how logging should be done, so report that it's disabled.
+  if (!mPC) {
+    return NS_OK;
   }
 
   // Check the general purpose logging flag
@@ -207,109 +220,6 @@ nsParentalControlsService::Log(int16_t aEntryType, bool blocked,
     default:
       break;
   }
-
-  return NS_OK;
-}
-
-// Override a single URI
-NS_IMETHODIMP
-nsParentalControlsService::RequestURIOverride(
-    nsIURI* aTarget, nsIInterfaceRequestor* aWindowContext, bool* _retval) {
-  *_retval = false;
-
-  if (!mEnabled || !mPC) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  NS_ENSURE_ARG_POINTER(aTarget);
-
-  nsAutoCString spec;
-  aTarget->GetSpec(spec);
-  if (spec.IsEmpty()) return NS_ERROR_INVALID_ARG;
-
-  HWND hWnd = nullptr;
-  // If we have a native window, use its handle instead
-  nsCOMPtr<nsIWidget> widget(do_GetInterface(aWindowContext));
-  if (widget) hWnd = (HWND)widget->GetNativeData(NS_NATIVE_WINDOW);
-  if (hWnd == nullptr) hWnd = GetDesktopWindow();
-
-  BOOL ret;
-  RefPtr<IWPCWebSettings> wpcws;
-  if (SUCCEEDED(mPC->GetWebSettings(nullptr, getter_AddRefs(wpcws)))) {
-    wpcws->RequestURLOverride(hWnd, NS_ConvertUTF8toUTF16(spec).get(), 0,
-                              nullptr, &ret);
-    *_retval = ret;
-  }
-
-  return NS_OK;
-}
-
-// Override a web page
-NS_IMETHODIMP
-nsParentalControlsService::RequestURIOverrides(
-    nsIArray* aTargets, nsIInterfaceRequestor* aWindowContext, bool* _retval) {
-  *_retval = false;
-
-  if (!mEnabled || !mPC) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  NS_ENSURE_ARG_POINTER(aTargets);
-
-  uint32_t arrayLength = 0;
-  aTargets->GetLength(&arrayLength);
-  if (!arrayLength) return NS_ERROR_INVALID_ARG;
-
-  if (arrayLength == 1) {
-    nsCOMPtr<nsIURI> uri = do_QueryElementAt(aTargets, 0);
-    if (!uri) return NS_ERROR_INVALID_ARG;
-    return RequestURIOverride(uri, aWindowContext, _retval);
-  }
-
-  HWND hWnd = nullptr;
-  // If we have a native window, use its handle instead
-  nsCOMPtr<nsIWidget> widget(do_GetInterface(aWindowContext));
-  if (widget) hWnd = (HWND)widget->GetNativeData(NS_NATIVE_WINDOW);
-  if (hWnd == nullptr) hWnd = GetDesktopWindow();
-
-  // The first entry should be the root uri
-  nsAutoCString rootSpec;
-  nsCOMPtr<nsIURI> rootURI = do_QueryElementAt(aTargets, 0);
-  if (!rootURI) return NS_ERROR_INVALID_ARG;
-
-  rootURI->GetSpec(rootSpec);
-  if (rootSpec.IsEmpty()) return NS_ERROR_INVALID_ARG;
-
-  // Allocate an array of sub uri
-  int32_t count = arrayLength - 1;
-  auto arrUrls = MakeUnique<LPCWSTR[]>(count);
-
-  uint32_t uriIdx = 0, idx;
-  for (idx = 1; idx < arrayLength; idx++) {
-    nsCOMPtr<nsIURI> uri = do_QueryElementAt(aTargets, idx);
-    if (!uri) continue;
-
-    nsAutoCString subURI;
-    if (NS_FAILED(uri->GetSpec(subURI))) continue;
-
-    arrUrls[uriIdx] = (LPCWSTR)UTF8ToNewUnicode(subURI);  // allocation
-    if (!arrUrls[uriIdx]) continue;
-
-    uriIdx++;
-  }
-
-  if (!uriIdx) return NS_ERROR_INVALID_ARG;
-
-  BOOL ret;
-  RefPtr<IWPCWebSettings> wpcws;
-  if (SUCCEEDED(mPC->GetWebSettings(nullptr, getter_AddRefs(wpcws)))) {
-    wpcws->RequestURLOverride(hWnd, NS_ConvertUTF8toUTF16(rootSpec).get(),
-                              uriIdx, (LPCWSTR*)arrUrls.get(), &ret);
-    *_retval = ret;
-  }
-
-  // Free up the allocated strings in our array
-  for (idx = 0; idx < uriIdx; idx++) free((void*)arrUrls[idx]);
 
   return NS_OK;
 }

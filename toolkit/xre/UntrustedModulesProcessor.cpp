@@ -19,6 +19,27 @@
 #include "nsXULAppAPI.h"
 #include "private/prpriv.h"  // For PR_GetThreadID
 
+static DWORD ToWin32ThreadId(nsIThread* aThread) {
+  MOZ_ASSERT(aThread);
+  if (!aThread) {
+    return 0UL;
+  }
+
+  PRThread* prThread;
+  nsresult rv = aThread->GetPRThread(&prThread);
+  if (NS_FAILED(rv)) {
+    // Possible when a LazyInitThread's underlying nsThread is not present
+    return 0UL;
+  }
+
+  PRUint32 tid = ::PR_GetThreadID(prThread);
+  if (!tid) {
+    return 0UL;
+  }
+
+  return DWORD(tid);
+}
+
 namespace mozilla {
 
 class MOZ_RAII BackgroundPriorityRegion final {
@@ -36,19 +57,10 @@ class MOZ_RAII BackgroundPriorityRegion final {
   }
 
   static void Clear(nsIThread* aThread) {
-    MOZ_ASSERT(aThread);
-    if (!aThread) {
+    DWORD tid = ToWin32ThreadId(aThread);
+    if (!tid) {
       return;
     }
-
-    PRThread* prThread;
-    nsresult rv = aThread->GetPRThread(&prThread);
-    if (NS_FAILED(rv)) {
-      // Possible when a LazyInitThread's underlying nsThread is not present
-      return;
-    }
-
-    PRUint32 tid = ::PR_GetThreadID(prThread);
 
     nsAutoHandle thread(
         ::OpenThread(THREAD_SET_LIMITED_INFORMATION, FALSE, tid));
@@ -76,7 +88,7 @@ class MOZ_RAII BackgroundPriorityRegion final {
 
 /* static */
 RefPtr<UntrustedModulesProcessor> UntrustedModulesProcessor::Create() {
-#if defined(NIGHTLY_BUILD)
+#if defined(EARLY_BETA_OR_EARLIER)
   if (!XRE_IsParentProcess()) {
     // Not currently supported outside the parent process
     return nullptr;
@@ -90,7 +102,7 @@ RefPtr<UntrustedModulesProcessor> UntrustedModulesProcessor::Create() {
   return result.forget();
 #else
   return nullptr;
-#endif  // defined(NIGHTLY_BUILD)
+#endif  // defined(EARLY_BETA_OR_EARLIER)
 }
 
 NS_IMPL_ISUPPORTS(UntrustedModulesProcessor, nsIObserver)
@@ -221,6 +233,12 @@ void UntrustedModulesProcessor::Enqueue(
     return;
   }
 
+  DWORD bgThreadId = ToWin32ThreadId(mThread);
+  if (aModLoadInfo.mNtLoadInfo.mThreadId == bgThreadId) {
+    // Exclude loads that were caused by our own background thread
+    return;
+  }
+
   MutexAutoLock lock(mUnprocessedMutex);
 
   Unused << mUnprocessedModuleLoads.emplaceBack(std::move(aModLoadInfo));
@@ -232,6 +250,9 @@ void UntrustedModulesProcessor::Enqueue(ModuleLoadInfoVec&& aEvents) {
   if (!mAllowProcessing) {
     return;
   }
+
+  // We do not need to attempt to exclude our background thread in this case
+  // because |aEvents| was accumulated prior to |mThread|'s existence.
 
   MutexAutoLock lock(mUnprocessedMutex);
 
@@ -374,7 +395,7 @@ void UntrustedModulesProcessor::ProcessModuleLoadQueue(const char* aSource) {
     }
 
     glue::EnhancedModuleLoadInfo::BacktraceType backtrace =
-      std::move(entry.mNtLoadInfo.mBacktrace);
+        std::move(entry.mNtLoadInfo.mBacktrace);
     ProcessedModuleLoadEvent event(std::move(entry), std::move(module));
 
     if (!event) {

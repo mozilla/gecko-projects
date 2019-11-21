@@ -812,8 +812,10 @@ SearchEngine.prototype = {
   _updateURL: null,
   // The url to check for a new icon
   _iconUpdateURL: null,
-  /* The extension ID if added by an extension. */
+  // The extension ID if added by an extension.
   _extensionID: null,
+  // The locale, or "DEFAULT", if required.
+  _locale: null,
   // Built in search engine extensions.
   _isBuiltin: false,
 
@@ -1397,6 +1399,7 @@ SearchEngine.prototype = {
    */
   _initFromMetadata(engineName, params) {
     this._extensionID = params.extensionID;
+    this._locale = params.locale;
     this._isBuiltin = !!params.isBuiltin;
 
     this._initEngineURLFromMetaData(SearchUtils.URL_TYPE.SEARCH, {
@@ -1678,6 +1681,9 @@ SearchEngine.prototype = {
     if (json.extensionID) {
       this._extensionID = json.extensionID;
     }
+    if (json.extensionLocale) {
+      this._locale = json.extensionLocale;
+    }
     for (let i = 0; i < json._urls.length; ++i) {
       let url = json._urls[i];
       let engineURL = new EngineURL(
@@ -1735,6 +1741,9 @@ SearchEngine.prototype = {
     }
     if (this._extensionID) {
       json.extensionID = this._extensionID;
+    }
+    if (this._locale) {
+      json.extensionLocale = this._locale;
     }
 
     return json;

@@ -52,16 +52,34 @@ class MuxerUnifiedComplete extends UrlbarMuxer {
    * @param {UrlbarQueryContext} context The query context.
    */
   sort(context) {
+    // A Search in a Private Window result should only be shown when there are
+    // other results, and all of them are searches. It should also not be shown
+    // if the user typed an alias, because it's an explicit search engine choice.
+    let searchInPrivateWindowIndex = context.results.findIndex(
+      r => r.type == UrlbarUtils.RESULT_TYPE.SEARCH && r.payload.inPrivateWindow
+    );
+    if (
+      searchInPrivateWindowIndex != -1 &&
+      (context.results.length == 1 ||
+        context.results.some(
+          r =>
+            r.type != UrlbarUtils.RESULT_TYPE.SEARCH ||
+            r.payload.keywordOffer ||
+            (r.heuristic && r.payload.keyword)
+        ))
+    ) {
+      // Remove the result.
+      context.results.splice(searchInPrivateWindowIndex, 1);
+    }
+
     if (!context.results.length) {
       return;
     }
-    // Look for an heuristic result.  If it's a preselected search result, use
-    // search buckets, otherwise use normal buckets.
+    // Look for an heuristic result.  If it's a search result, use search
+    // buckets, otherwise use normal buckets.
     let heuristicResult = context.results.find(r => r.heuristic);
     let buckets =
-      context.preselected &&
-      heuristicResult &&
-      heuristicResult.type == UrlbarUtils.RESULT_TYPE.SEARCH
+      heuristicResult && heuristicResult.type == UrlbarUtils.RESULT_TYPE.SEARCH
         ? UrlbarPrefs.get("matchBucketsSearch")
         : UrlbarPrefs.get("matchBuckets");
     logger.debug(`Buckets: ${buckets}`);
@@ -88,13 +106,11 @@ class MuxerUnifiedComplete extends UrlbarMuxer {
 
         if (
           group == UrlbarUtils.RESULT_GROUP.HEURISTIC &&
-          result == heuristicResult &&
-          context.preselected
+          result == heuristicResult
         ) {
           // Handle the heuristic result.
           sortedResults.unshift(result);
           handled.add(result);
-          context.maxResults -= UrlbarUtils.getSpanForResult(result) - 1;
           slots--;
         } else if (group == RESULT_TYPE_TO_GROUP.get(result.type)) {
           // If there's no suggestedIndex, insert the result now, otherwise
@@ -103,7 +119,6 @@ class MuxerUnifiedComplete extends UrlbarMuxer {
             sortedResults.push(result);
           }
           handled.add(result);
-          context.maxResults -= UrlbarUtils.getSpanForResult(result) - 1;
           slots--;
         } else if (!RESULT_TYPE_TO_GROUP.has(result.type)) {
           let errorMsg = `Result type ${

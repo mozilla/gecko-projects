@@ -19,6 +19,7 @@
 #include "wasm/WasmTypes.h"
 
 #include "js/Printf.h"
+#include "util/Memory.h"
 #include "vm/ArrayBufferObject.h"
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmInstance.h"
@@ -103,17 +104,6 @@ void AnyRef::trace(JSTracer* trc) {
   }
 }
 
-class WasmValueBox : public NativeObject {
-  static const unsigned VALUE_SLOT = 0;
-
- public:
-  static const unsigned RESERVED_SLOTS = 1;
-  static const JSClass class_;
-
-  static WasmValueBox* create(JSContext* cx, HandleValue val);
-  Value value() const { return getFixedSlot(VALUE_SLOT); }
-};
-
 const JSClass WasmValueBox::class_ = {
     "WasmValueBox", JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS)};
 
@@ -147,6 +137,11 @@ bool wasm::BoxAnyRef(JSContext* cx, HandleValue val, MutableHandleAnyRef addr) {
   return true;
 }
 
+JSObject* wasm::BoxBoxableValue(JSContext* cx, HandleValue val) {
+  MOZ_ASSERT(!val.isNull() && !val.isObject());
+  return WasmValueBox::create(cx, val);
+}
+
 Value wasm::UnboxAnyRef(AnyRef val) {
   // If UnboxAnyRef needs to allocate then we need a more complicated API, and
   // we need to root the value in the callers, see comments in callExport().
@@ -159,6 +154,14 @@ Value wasm::UnboxAnyRef(AnyRef val) {
   } else {
     result.setObjectOrNull(obj);
   }
+  return result;
+}
+
+Value wasm::UnboxFuncRef(FuncRef val) {
+  JSFunction* fn = val.asJSFunction();
+  Value result;
+  MOZ_ASSERT_IF(fn, fn->is<JSFunction>());
+  result.setObjectOrNull(fn);
   return result;
 }
 
@@ -226,21 +229,6 @@ uint8_t* FuncType::serialize(uint8_t* cursor) const {
   cursor = SerializePodVector(cursor, args_);
   return cursor;
 }
-
-namespace js {
-namespace wasm {
-
-// ExprType is not POD while ReadScalar requires POD, so specialize.
-template <>
-inline const uint8_t* ReadScalar<ExprType>(const uint8_t* src, ExprType* dst) {
-  static_assert(sizeof(PackedTypeCode) == sizeof(ExprType),
-                "ExprType must carry only a PackedTypeCode");
-  memcpy(dst->packedPtr(), src, sizeof(PackedTypeCode));
-  return src + sizeof(*dst);
-}
-
-}  // namespace wasm
-}  // namespace js
 
 const uint8_t* FuncType::deserialize(const uint8_t* cursor) {
   cursor = DeserializePodVector(cursor, &results_);
@@ -494,19 +482,23 @@ size_t Export::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const {
 }
 
 size_t ElemSegment::serializedSize() const {
-  return sizeof(tableIndex) + sizeof(offsetIfActive) +
-         SerializedPodVectorSize(elemFuncIndices);
+  return sizeof(kind) + sizeof(tableIndex) + sizeof(elementType) +
+         sizeof(offsetIfActive) + SerializedPodVectorSize(elemFuncIndices);
 }
 
 uint8_t* ElemSegment::serialize(uint8_t* cursor) const {
+  cursor = WriteBytes(cursor, &kind, sizeof(kind));
   cursor = WriteBytes(cursor, &tableIndex, sizeof(tableIndex));
+  cursor = WriteBytes(cursor, &elementType, sizeof(elementType));
   cursor = WriteBytes(cursor, &offsetIfActive, sizeof(offsetIfActive));
   cursor = SerializePodVector(cursor, elemFuncIndices);
   return cursor;
 }
 
 const uint8_t* ElemSegment::deserialize(const uint8_t* cursor) {
-  (cursor = ReadBytes(cursor, &tableIndex, sizeof(tableIndex))) &&
+  (cursor = ReadBytes(cursor, &kind, sizeof(kind))) &&
+      (cursor = ReadBytes(cursor, &tableIndex, sizeof(tableIndex))) &&
+      (cursor = ReadBytes(cursor, &elementType, sizeof(elementType))) &&
       (cursor = ReadBytes(cursor, &offsetIfActive, sizeof(offsetIfActive))) &&
       (cursor = DeserializePodVector(cursor, &elemFuncIndices));
   return cursor;
@@ -731,6 +723,9 @@ bool DebugFrame::updateReturnJSValue() {
       cachedReturnJSValue_ = ObjectOrNullValue((JSObject*)resultRef_);
       break;
     case ValType::FuncRef:
+      cachedReturnJSValue_ =
+          UnboxFuncRef(FuncRef::fromAnyRefUnchecked(resultAnyRef_));
+      break;
     case ValType::AnyRef:
       cachedReturnJSValue_ = UnboxAnyRef(resultAnyRef_);
       break;

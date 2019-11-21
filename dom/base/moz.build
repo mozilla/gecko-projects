@@ -5,7 +5,7 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 with Files('*Selection*'):
-    BUG_COMPONENT = ('Core', 'Selection')
+    BUG_COMPONENT = ('Core', 'DOM: Selection')
 
 with Files("**"):
     BUG_COMPONENT = ("Core", "DOM: Core & HTML")
@@ -91,7 +91,6 @@ EXPORTS += [
     'nsMappedAttributeElement.h',
     'nsNameSpaceManager.h',
     'nsNodeInfoManager.h',
-    'nsNodeUtils.h',
     'nsPIDOMWindow.h',
     'nsPIDOMWindowInlines.h',
     'nsPIWindowRoot.h',
@@ -201,6 +200,7 @@ EXPORTS.mozilla.dom += [
     'MessageSender.h',
     'MimeType.h',
     'MozQueryInterface.h',
+    'MutationObservers.h',
     'NameSpaceConstants.h',
     'Navigator.h',
     'NodeInfo.h',
@@ -318,6 +318,7 @@ UNIFIED_SOURCES += [
     'MessageSender.cpp',
     'MimeType.cpp',
     'MozQueryInterface.cpp',
+    'MutationObservers.cpp',
     'Navigator.cpp',
     'NodeInfo.cpp',
     'NodeIterator.cpp',
@@ -357,7 +358,6 @@ UNIFIED_SOURCES += [
     'nsNameSpaceManager.cpp',
     'nsNoDataProtocolContentPolicy.cpp',
     'nsNodeInfoManager.cpp',
-    'nsNodeUtils.cpp',
     'nsOpenURIInFrameParams.cpp',
     'nsPlainTextSerializer.cpp',
     'nsPropertyTable.cpp',
@@ -503,7 +503,6 @@ LOCAL_INCLUDES += [
     '/dom/storage',
     '/dom/svg',
     '/dom/u2f',
-    '/dom/xbl',
     '/dom/xml',
     '/dom/xslt/xpath',
     '/dom/xul',
@@ -541,13 +540,8 @@ if CONFIG['MOZ_BUILD_APP'] in ['browser', 'mobile/android', 'xulrunner']:
 if CONFIG['MOZ_X11']:
     CXXFLAGS += CONFIG['TK_CFLAGS']
 
-GENERATED_FILES += [
-    'UseCounterList.h',
-]
-
-counterlist = GENERATED_FILES['UseCounterList.h']
-counterlist.script = 'gen-usecounters.py:use_counter_list'
-counterlist.inputs = ['UseCounters.conf']
+GeneratedFile('UseCounterList.h', script='gen-usecounters.py',
+              entry_point='use_counter_list', inputs=['UseCounters.conf'])
 
 if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
     CXXFLAGS += ['-Wno-error=shadow']

@@ -19,14 +19,14 @@
 
 #include "js/Class.h"  // JSTraceOp
 
-struct JSContext;
-class JSObject;
+struct JS_PUBLIC_API JSContext;
+class JS_PUBLIC_API JSObject;
 
 namespace JS {
 
-class Compartment;
-class Realm;
-class Zone;
+class JS_PUBLIC_API Compartment;
+class JS_PUBLIC_API Realm;
+class JS_PUBLIC_API Zone;
 
 }  // namespace JS
 
@@ -164,6 +164,12 @@ class JS_PUBLIC_API RealmCreationOptions {
     return *this;
   }
 
+  bool getWeakRefsEnabled() const { return weakRefs_; }
+  RealmCreationOptions& setWeakRefsEnabled(bool flag) {
+    weakRefs_ = flag;
+    return *this;
+  }
+
   // This flag doesn't affect JS engine behavior.  It is used by Gecko to
   // mark whether content windows and workers are "Secure Context"s. See
   // https://w3c.github.io/webappsec-secure-contexts/
@@ -174,9 +180,9 @@ class JS_PUBLIC_API RealmCreationOptions {
     return *this;
   }
 
-  bool clampAndJitterTime() const { return clampAndJitterTime_; }
-  RealmCreationOptions& setClampAndJitterTime(bool flag) {
-    clampAndJitterTime_ = flag;
+  uint64_t profilerRealmID() const { return profilerRealmID_; }
+  RealmCreationOptions& setProfilerRealmID(uint64_t id) {
+    profilerRealmID_ = id;
     return *this;
   }
 
@@ -187,6 +193,7 @@ class JS_PUBLIC_API RealmCreationOptions {
     Compartment* comp_;
     Zone* zone_;
   };
+  uint64_t profilerRealmID_ = 0;
   bool invisibleToDebugger_ = false;
   bool mergeable_ = false;
   bool preserveJitCode_ = false;
@@ -198,8 +205,8 @@ class JS_PUBLIC_API RealmCreationOptions {
   bool writableStreams_ = false;
   bool fields_ = false;
   bool awaitFix_ = false;
+  bool weakRefs_ = false;
   bool secureContext_ = false;
-  bool clampAndJitterTime_ = true;
 };
 
 /**
@@ -227,6 +234,12 @@ class JS_PUBLIC_API RealmBehaviors {
   bool deferredParserAlloc() const { return deferredParserAlloc_; }
   RealmBehaviors& setDeferredParserAlloc(bool flag) {
     deferredParserAlloc_ = flag;
+    return *this;
+  }
+
+  bool clampAndJitterTime() const { return clampAndJitterTime_; }
+  RealmBehaviors& setClampAndJitterTime(bool flag) {
+    clampAndJitterTime_ = flag;
     return *this;
   }
 
@@ -274,6 +287,7 @@ class JS_PUBLIC_API RealmBehaviors {
  private:
   bool discardSource_ = false;
   bool disableLazyParsing_ = false;
+  bool clampAndJitterTime_ = true;
   Override extraWarningsOverride_ = {};
 
   // To XDR singletons, we need to ensure that all singletons are all used as

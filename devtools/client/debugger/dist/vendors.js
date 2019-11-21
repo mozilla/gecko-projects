@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
 (function webpackUniversalModuleDefinition(root, factory) {
 	if(typeof exports === 'object' && typeof module === 'object')
 		module.exports = factory(require("devtools/client/shared/vendor/react-prop-types"), require("devtools/client/shared/vendor/react-dom-factories"), require("devtools/client/shared/vendor/react"), require("Services"), require("devtools/shared/flags"), require("devtools/client/shared/vendor/react-dom"), require("devtools/client/shared/vendor/lodash"), require("devtools/client/framework/menu"), require("devtools/client/framework/menu-item"));
@@ -268,7 +272,9 @@ class TreeNode extends Component {
     const elms = this.getFocusableElements();
 
     if (this.props.active) {
-      if (elms.length > 0 && !elms.includes(document.activeElement)) {
+      const doc = this.treeNodeRef.current.ownerDocument;
+
+      if (elms.length > 0 && !elms.includes(doc.activeElement)) {
         elms[0].focus();
       }
     } else {
@@ -399,10 +405,15 @@ const TreeNodeFactory = createFactory(TreeNode);
  * frame.
  *
  * @param {Function} fn
+ * @param {Object} options: object that contains the following properties:
+ *                      - {Function} getDocument: A function that return the document
+ *                                                the component is rendered in.
  * @returns {Function}
  */
 
-function oncePerAnimationFrame(fn) {
+function oncePerAnimationFrame(fn, {
+  getDocument
+}) {
   let animationId = null;
   let argsToPass = null;
   return function (...args) {
@@ -412,7 +423,13 @@ function oncePerAnimationFrame(fn) {
       return;
     }
 
-    animationId = requestAnimationFrame(() => {
+    const doc = getDocument();
+
+    if (!doc) {
+      return;
+    }
+
+    animationId = doc.defaultView.requestAnimationFrame(() => {
       fn.call(this, ...argsToPass);
       animationId = null;
       argsToPass = null;
@@ -646,13 +663,18 @@ class Tree extends Component {
       autoExpanded: new Set()
     };
     this.treeRef = _react.default.createRef();
-    this._onExpand = oncePerAnimationFrame(this._onExpand).bind(this);
-    this._onCollapse = oncePerAnimationFrame(this._onCollapse).bind(this);
-    this._focusPrevNode = oncePerAnimationFrame(this._focusPrevNode).bind(this);
-    this._focusNextNode = oncePerAnimationFrame(this._focusNextNode).bind(this);
-    this._focusParentNode = oncePerAnimationFrame(this._focusParentNode).bind(this);
-    this._focusFirstNode = oncePerAnimationFrame(this._focusFirstNode).bind(this);
-    this._focusLastNode = oncePerAnimationFrame(this._focusLastNode).bind(this);
+
+    const opaf = fn => oncePerAnimationFrame(fn, {
+      getDocument: () => this.treeRef.current && this.treeRef.current.ownerDocument
+    });
+
+    this._onExpand = opaf(this._onExpand).bind(this);
+    this._onCollapse = opaf(this._onCollapse).bind(this);
+    this._focusPrevNode = opaf(this._focusPrevNode).bind(this);
+    this._focusNextNode = opaf(this._focusNextNode).bind(this);
+    this._focusParentNode = opaf(this._focusParentNode).bind(this);
+    this._focusFirstNode = opaf(this._focusFirstNode).bind(this);
+    this._focusLastNode = opaf(this._focusLastNode).bind(this);
     this._autoExpand = this._autoExpand.bind(this);
     this._preventArrowKeyScrolling = this._preventArrowKeyScrolling.bind(this);
     this._preventEvent = this._preventEvent.bind(this);
@@ -877,7 +899,9 @@ class Tree extends Component {
     if (this.props.active != undefined) {
       this._activate(undefined);
 
-      if (this.treeRef.current !== document.activeElement) {
+      const doc = this.treeRef.current && this.treeRef.current.ownerDocument;
+
+      if (this.treeRef.current !== doc.activeElement) {
         this.treeRef.current.focus();
       }
     }
@@ -916,7 +940,8 @@ class Tree extends Component {
   _scrollNodeIntoView(item, options = {}) {
     if (item !== undefined) {
       const treeElement = this.treeRef.current;
-      const element = document.getElementById(this.props.getKey(item));
+      const doc = treeElement && treeElement.ownerDocument;
+      const element = doc.getElementById(this.props.getKey(item));
 
       if (element) {
         const {
@@ -988,6 +1013,8 @@ class Tree extends Component {
 
     this._preventArrowKeyScrolling(e);
 
+    const doc = this.treeRef.current && this.treeRef.current.ownerDocument;
+
     switch (e.key) {
       case "ArrowUp":
         this._focusPrevNode();
@@ -1029,7 +1056,7 @@ class Tree extends Component {
 
       case "Enter":
       case " ":
-        if (this.treeRef.current === document.activeElement) {
+        if (this.treeRef.current === doc.activeElement) {
           this._preventEvent(e);
 
           if (this.props.active !== this.props.focused) {
@@ -1046,7 +1073,7 @@ class Tree extends Component {
           this._activate(undefined);
         }
 
-        if (this.treeRef.current !== document.activeElement) {
+        if (this.treeRef.current !== doc.activeElement) {
           this.treeRef.current.focus();
         }
 
@@ -1629,6 +1656,8 @@ const {
 
 const PluralForm = __webpack_require__(501);
 
+const saveAs = __webpack_require__(520);
+
 module.exports = {
   KeyShortcuts,
   PrefsHelper,
@@ -1641,7 +1670,8 @@ module.exports = {
   getUnicodeHostname,
   getUnicodeUrlPath,
   getUnicodeUrl,
-  PluralForm
+  PluralForm,
+  saveAs
 };
 
 /***/ }),
@@ -3595,17 +3625,6 @@ function getSourceNames(source) {
       gSourceNamesStore.set(source, result);
       return result;
     }
-  } // If Scratchpad URI, like "Scratchpad/1"; no modifications,
-  // and short/long are the same.
-
-
-  if (isScratchpadScheme(sourceStr)) {
-    let result = {
-      short: sourceStr,
-      long: sourceStr
-    };
-    gSourceNamesStore.set(source, result);
-    return result;
   }
 
   const parsedUrl = parseURL(sourceStr);
@@ -3659,14 +3678,6 @@ function getSourceNames(source) {
 
 function isColonSlashSlash(location, i = 0) {
   return location.charCodeAt(++i) === CHAR_CODE_COLON && location.charCodeAt(++i) === CHAR_CODE_SLASH && location.charCodeAt(++i) === CHAR_CODE_SLASH;
-}
-/**
-* Checks for a Scratchpad URI, like "Scratchpad/1"
-*/
-
-
-function isScratchpadScheme(location, i = 0) {
-  return location.charCodeAt(i) === CHAR_CODE_CAP_S && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_R && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_T && location.charCodeAt(++i) === CHAR_CODE_C && location.charCodeAt(++i) === CHAR_CODE_H && location.charCodeAt(++i) === CHAR_CODE_P && location.charCodeAt(++i) === CHAR_CODE_A && location.charCodeAt(++i) === CHAR_CODE_D && location.charCodeAt(++i) === CHAR_CODE_SLASH;
 }
 
 function isDataScheme(location, i = 0) {
@@ -3782,7 +3793,6 @@ function getSourceMappedFile(source) {
 module.exports = {
   parseURL,
   getSourceNames,
-  isScratchpadScheme,
   isChromeScheme,
   isContentScheme,
   isWASM,
@@ -4164,7 +4174,7 @@ module.exports = Telemetry;
 // devtools/client/shared/unicode-url.js in the mozilla-central repository.
 
 
-const punycode = __webpack_require__(62);
+const punycode = __webpack_require__(521);
 /**
  * Gets a readble Unicode hostname from a hostname.
  *
@@ -6297,14 +6307,14 @@ module.exports = asyncStoreHelper;
 
 /***/ }),
 
-/***/ 6:
+/***/ 520:
 /***/ (function(module, exports) {
 
-module.exports = __WEBPACK_EXTERNAL_MODULE_6__;
+module.exports = () => {};
 
 /***/ }),
 
-/***/ 62:
+/***/ 521:
 /***/ (function(module, exports, __webpack_require__) {
 
 /* WEBPACK VAR INJECTION */(function(module, global) {var __WEBPACK_AMD_DEFINE_RESULT__;/*! https://mths.be/punycode v1.4.1 by @mathias */
@@ -6841,6 +6851,13 @@ module.exports = __WEBPACK_EXTERNAL_MODULE_6__;
 }(this));
 
 /* WEBPACK VAR INJECTION */}.call(exports, __webpack_require__(22)(module), __webpack_require__(15)))
+
+/***/ }),
+
+/***/ 6:
+/***/ (function(module, exports) {
+
+module.exports = __WEBPACK_EXTERNAL_MODULE_6__;
 
 /***/ }),
 

@@ -444,15 +444,24 @@ bool wasm::DecodeValidatedLocalEntries(Decoder& d, ValTypeVector* locals) {
 
 // Function body validation.
 
+class NothingVector {
+  Nothing unused_;
+
+ public:
+  bool resize(size_t length) { return true; }
+  Nothing& operator[](size_t) { return unused_; }
+  Nothing& back() { return unused_; }
+};
+
 struct ValidatingPolicy {
   typedef Nothing Value;
+  typedef NothingVector ValueVector;
   typedef Nothing ControlItem;
 };
 
 typedef OpIter<ValidatingPolicy> ValidatingOpIter;
 
 static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
-                                    // FIXME(1401675): Replace with BlockType.
                                     uint32_t funcIndex,
                                     const ValTypeVector& locals,
                                     const uint8_t* bodyEnd, Decoder* d) {
@@ -473,12 +482,13 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
     }
 
     Nothing nothing;
+    NothingVector nothings;
+    ResultType unusedType;
 
     switch (op.b0) {
       case uint16_t(Op::End): {
         LabelKind unusedKind;
-        ExprType unusedType;
-        if (!iter.readEnd(&unusedKind, &unusedType, &nothing)) {
+        if (!iter.readEnd(&unusedKind, &unusedType, &nothings, &nothings)) {
           return false;
         }
         iter.popEnd();
@@ -493,12 +503,12 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
         CHECK(iter.readDrop());
       case uint16_t(Op::Call): {
         uint32_t unusedIndex;
-        ValidatingOpIter::ValueVector unusedArgs;
+        NothingVector unusedArgs;
         CHECK(iter.readCall(&unusedIndex, &unusedArgs));
       }
       case uint16_t(Op::CallIndirect): {
         uint32_t unusedIndex, unusedIndex2;
-        ValidatingOpIter::ValueVector unusedArgs;
+        NothingVector unusedArgs;
         CHECK(iter.readCallIndirect(&unusedIndex, &unusedIndex2, &nothing,
                                     &unusedArgs));
       }
@@ -568,15 +578,13 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
                               &nothing));
       }
       case uint16_t(Op::Block):
-        CHECK(iter.readBlock());
+        CHECK(iter.readBlock(&unusedType));
       case uint16_t(Op::Loop):
-        CHECK(iter.readLoop());
+        CHECK(iter.readLoop(&unusedType));
       case uint16_t(Op::If):
-        CHECK(iter.readIf(&nothing));
-      case uint16_t(Op::Else): {
-        ExprType type;
-        CHECK(iter.readElse(&type, &nothing));
-      }
+        CHECK(iter.readIf(&unusedType, &nothing));
+      case uint16_t(Op::Else):
+        CHECK(iter.readElse(&unusedType, &unusedType, &nothings));
       case uint16_t(Op::I32Clz):
       case uint16_t(Op::I32Ctz):
       case uint16_t(Op::I32Popcnt):
@@ -815,23 +823,20 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
         CHECK(iter.readMemorySize());
       case uint16_t(Op::Br): {
         uint32_t unusedDepth;
-        ExprType unusedType;
-        CHECK(iter.readBr(&unusedDepth, &unusedType, &nothing));
+        CHECK(iter.readBr(&unusedDepth, &unusedType, &nothings));
       }
       case uint16_t(Op::BrIf): {
         uint32_t unusedDepth;
-        ExprType unusedType;
-        CHECK(iter.readBrIf(&unusedDepth, &unusedType, &nothing, &nothing));
+        CHECK(iter.readBrIf(&unusedDepth, &unusedType, &nothings, &nothing));
       }
       case uint16_t(Op::BrTable): {
         Uint32Vector unusedDepths;
         uint32_t unusedDefault;
-        ExprType unusedType;
         CHECK(iter.readBrTable(&unusedDepths, &unusedDefault, &unusedType,
-                               &nothing, &nothing));
+                               &nothings, &nothing));
       }
       case uint16_t(Op::Return):
-        CHECK(iter.readReturn(&nothing));
+        CHECK(iter.readReturn(&nothings));
       case uint16_t(Op::Unreachable):
         CHECK(iter.readUnreachable());
       case uint16_t(Op::MiscPrefix): {
@@ -958,7 +963,7 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
               return iter.unrecognizedOpcode(&op);
             }
             uint32_t unusedUint;
-            ValidatingOpIter::ValueVector unusedArgs;
+            NothingVector unusedArgs;
             CHECK(iter.readStructNew(&unusedUint, &unusedArgs));
           }
           case uint32_t(MiscOp::StructGet): {
@@ -1210,10 +1215,10 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
 bool wasm::ValidateFunctionBody(const ModuleEnvironment& env,
                                 uint32_t funcIndex, uint32_t bodySize,
                                 Decoder& d) {
-  const FuncType& funcType = *env.funcTypes[funcIndex];
+  MOZ_ASSERT(env.funcTypes[funcIndex]->results().length() <= MaxFuncResults);
 
   ValTypeVector locals;
-  if (!locals.appendAll(funcType.args())) {
+  if (!locals.appendAll(env.funcTypes[funcIndex]->args())) {
     return false;
   }
 
@@ -1323,7 +1328,7 @@ static bool DecodeFuncType(Decoder& d, ModuleEnvironment* env,
   if (!d.readVarU32(&numResults)) {
     return d.fail("bad number of function returns");
   }
-  if (numResults > 1) {
+  if (numResults > MaxResults) {
     return d.fail("too many returns in signature");
   }
   ValTypeVector results;
@@ -1577,8 +1582,16 @@ static bool DecodeSignatureIndex(Decoder& d, const TypeDefVector& types,
     return d.fail("signature index out of range");
   }
 
-  if (!types[*funcTypeIndex].isFuncType()) {
+  const TypeDef& def = types[*funcTypeIndex];
+
+  if (!def.isFuncType()) {
     return d.fail("signature index references non-signature");
+  }
+
+  // FIXME: Remove this check when full multi-value function returns land.
+  // Bug 1585909.
+  if (def.funcType().results().length() > MaxFuncResults) {
+    return d.fail("too many returns in signature");
   }
 
   return true;
@@ -2292,7 +2305,7 @@ static inline ElemSegment::Kind NormalizeElemSegmentKind(
     ElemSegmentKind decodedKind) {
   switch (decodedKind) {
     case ElemSegmentKind::Active:
-    case ElemSegmentKind::ActiveWithIndex: {
+    case ElemSegmentKind::ActiveWithTableIndex: {
       return ElemSegment::Kind::Active;
     }
     case ElemSegmentKind::Passive: {
@@ -2347,21 +2360,18 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
     seg->kind = NormalizeElemSegmentKind(kind);
 
     if (kind == ElemSegmentKind::Active ||
-        kind == ElemSegmentKind::ActiveWithIndex) {
+        kind == ElemSegmentKind::ActiveWithTableIndex) {
       if (env->tables.length() == 0) {
         return d.fail("active elem segment requires a table");
       }
 
       uint32_t tableIndex = 0;
-      if (kind == ElemSegmentKind::ActiveWithIndex &&
+      if (kind == ElemSegmentKind::ActiveWithTableIndex &&
           !d.readVarU32(&tableIndex)) {
         return d.fail("expected table index");
       }
       if (tableIndex >= env->tables.length()) {
         return d.fail("table index out of range for element segment");
-      }
-      if (env->tables[tableIndex].kind != TableKind::FuncRef) {
-        return d.fail("only tables of 'funcref' may have element segments");
       }
       seg->tableIndex = tableIndex;
 
@@ -2380,11 +2390,14 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
     }
 
     ElemSegmentPayload payload = flags->payload();
+    ValType elemType;
 
-    // `ActiveWithIndex`, `Declared`, and `Passive` element segments encode the
-    // type or definition kind of the payload. `Active` element segments are
+    // `ActiveWithTableIndex`, `Declared`, and `Passive` element segments encode
+    // the type or definition kind of the payload. `Active` element segments are
     // restricted to MVP behavior, which assumes only function indices.
-    if (kind != ElemSegmentKind::Active) {
+    if (kind == ElemSegmentKind::Active) {
+      elemType = ValType::FuncRef;
+    } else {
       uint8_t form;
       if (!d.readFixedU8(&form)) {
         return d.fail("expected type or extern kind");
@@ -2392,10 +2405,23 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
 
       switch (payload) {
         case ElemSegmentPayload::ElemExpression: {
-          if (form != uint8_t(TypeCode::FuncRef)) {
-            return d.fail(
-                "segments with element expressions can only contain function "
-                "references");
+          switch (form) {
+            case uint8_t(TypeCode::FuncRef):
+              // Below we must in principle check every element expression to
+              // ensure that it is a subtype of FuncRef.  However, the only
+              // reference expressions allowed are ref.null and ref.func, and
+              // they both pass that test, and so no additional check is needed
+              // at this time.
+              elemType = ValType::FuncRef;
+              break;
+            case uint8_t(TypeCode::AnyRef):
+              // Ditto, for AnyRef, just even more trivial.
+              elemType = ValType::AnyRef;
+              break;
+            default:
+              return d.fail(
+                  "segments with element expressions can only contain "
+                  "references");
           }
           break;
         }
@@ -2405,9 +2431,39 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
                 "segments with extern indices can only contain function "
                 "references");
           }
+          elemType = ValType::FuncRef;
         }
       }
     }
+
+    // Check constraints on the element type.
+    switch (kind) {
+      case ElemSegmentKind::Declared: {
+        if (!(elemType.isReference() &&
+              env->isRefSubtypeOf(elemType, ValType::FuncRef))) {
+          return d.fail(
+              "declared segment's element type must be subtype of funcref");
+        }
+        break;
+      }
+      case ElemSegmentKind::Active:
+      case ElemSegmentKind::ActiveWithTableIndex: {
+        ValType tblElemType = ToElemValType(env->tables[seg->tableIndex].kind);
+        if (!(elemType == tblElemType ||
+              (elemType.isReference() && tblElemType.isReference() &&
+               env->isRefSubtypeOf(elemType, tblElemType)))) {
+          return d.fail(
+              "segment's element type must be subtype of table's element type");
+        }
+        break;
+      }
+      case ElemSegmentKind::Passive: {
+        // By construction, above.
+        MOZ_ASSERT(elemType.isReference());
+        break;
+      }
+    }
+    seg->elementType = elemType;
 
     uint32_t numElems;
     if (!d.readVarU32(&numElems)) {
@@ -2699,7 +2755,7 @@ static bool DecodeDataSection(Decoder& d, ModuleEnvironment* env) {
     switch (initializerKindVal) {
       case uint32_t(DataSegmentKind::Active):
       case uint32_t(DataSegmentKind::Passive):
-      case uint32_t(DataSegmentKind::ActiveWithIndex):
+      case uint32_t(DataSegmentKind::ActiveWithMemoryIndex):
         break;
       default:
         return d.fail("invalid data initializer-kind field");
@@ -2712,7 +2768,7 @@ static bool DecodeDataSection(Decoder& d, ModuleEnvironment* env) {
     }
 
     uint32_t memIndex = 0;
-    if (initializerKind == DataSegmentKind::ActiveWithIndex) {
+    if (initializerKind == DataSegmentKind::ActiveWithMemoryIndex) {
       if (!d.readVarU32(&memIndex)) {
         return d.fail("expected memory index");
       }
@@ -2723,7 +2779,7 @@ static bool DecodeDataSection(Decoder& d, ModuleEnvironment* env) {
 
     DataSegmentEnv seg;
     if (initializerKind == DataSegmentKind::Active ||
-        initializerKind == DataSegmentKind::ActiveWithIndex) {
+        initializerKind == DataSegmentKind::ActiveWithMemoryIndex) {
       InitExpr segOffset;
       if (!DecodeInitializerExpression(d, env, ValType::I32, &segOffset)) {
         return false;

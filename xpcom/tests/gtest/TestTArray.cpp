@@ -199,11 +199,10 @@ TEST(TArray, CopyOverlappingBackwards)
 namespace {
 
 class E {
-public:
+ public:
   E() : mA(-1), mB(-2) { constructCount++; }
   E(int a, int b) : mA(a), mB(b) { constructCount++; }
-  E(E&& aRhs)
-    : mA(aRhs.mA), mB(aRhs.mB) {
+  E(E&& aRhs) : mA(aRhs.mA), mB(aRhs.mB) {
     aRhs.mA = 0;
     aRhs.mB = 0;
     moveCount++;
@@ -218,7 +217,6 @@ public:
     return *this;
   }
 
-
   int a() const { return mA; }
   int b() const { return mB; }
 
@@ -228,7 +226,7 @@ public:
   static size_t constructCount;
   static size_t moveCount;
 
-private:
+ private:
   int mA;
   int mB;
 };
@@ -236,7 +234,7 @@ private:
 size_t E::constructCount = 0;
 size_t E::moveCount = 0;
 
-}
+}  // namespace
 
 TEST(TArray, Emplace)
 {
@@ -443,6 +441,24 @@ TEST(TArray, RemoveElementsAt_ByIterator)
   ASSERT_EQ(2, std::distance(array.cbegin(), itAfter));
   const nsTArray<int> expected{1, 2};
   ASSERT_EQ(expected, array);
+}
+
+static_assert(std::is_copy_assignable<decltype(
+                  MakeBackInserter(std::declval<nsTArray<int>&>()))>::value,
+              "output iteraror must be copy-assignable");
+static_assert(std::is_copy_constructible<decltype(
+                  MakeBackInserter(std::declval<nsTArray<int>&>()))>::value,
+              "output iterator must be copy-constructible");
+
+TEST(TArray, MakeBackInserter)
+{
+  const std::vector<int> src{1, 2, 3, 4};
+  nsTArray<int> dst;
+
+  std::copy(src.begin(), src.end(), MakeBackInserter(dst));
+
+  const nsTArray<int> expected{1, 2, 3, 4};
+  ASSERT_EQ(expected, dst);
 }
 
 }  // namespace TestTArray

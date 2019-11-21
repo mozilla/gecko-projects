@@ -4,11 +4,6 @@
 
 "use strict";
 
-loader.lazyRequireGetter(
-  this,
-  "ThreadClient",
-  "devtools/shared/client/deprecated-thread-client"
-);
 loader.lazyRequireGetter(this, "getFront", "devtools/shared/protocol", true);
 
 /**
@@ -45,6 +40,12 @@ function TargetMixin(parentClass) {
 
       this.activeConsole = null;
       this.threadFront = null;
+
+      // By default, we close the DebuggerClient of local tabs which
+      // are instanciated from TargetFactory module.
+      // This flag will also be set on local targets opened from about:debugging,
+      // for which a dedicated DebuggerClient is also created.
+      this.shouldCloseClient = this.isLocalTab;
 
       this._client = client;
 
@@ -327,7 +328,7 @@ function TargetMixin(parentClass) {
     }
 
     get canRewind() {
-      return this.traits.canRewind;
+      return this.traits && this.traits.canRewind;
     }
 
     isReplayEnabled() {
@@ -377,17 +378,7 @@ function TargetMixin(parentClass) {
             "attachThread"
         );
       }
-      if (this.getTrait("hasThreadFront")) {
-        this.threadFront = await this.getFront("thread");
-      } else {
-        // Backwards compat for Firefox 68
-        // mimics behavior of a front
-        this.threadFront = new ThreadClient(this._client, this._threadActor);
-        this.fronts.set("thread", this.threadFront);
-        this.threadFront.actorID = this._threadActor;
-        this.threadFront.targetFront = this;
-        this.manage(this.threadFront);
-      }
+      this.threadFront = await this.getFront("thread");
       const result = await this.threadFront.attach(options);
 
       this.threadFront.on("newSource", this._onNewSource);
@@ -445,24 +436,24 @@ function TargetMixin(parentClass) {
         this.emit("close");
 
         for (let [, front] of this.fronts) {
-          front = await front;
-          await front.destroy();
+          // If a Front with an async initialize method is still being instantiated,
+          // we should wait for completion before trying to destroy it.
+          if (front instanceof Promise) {
+            front = await front;
+          }
+          front.destroy();
         }
 
         this._teardownRemoteListeners();
 
         this.threadFront = null;
 
-        if (this.isLocalTab || this.shouldCloseClient) {
-          // Local tab targets are typically instantiated from TargetFactory.
-          // And we ought to destroy their client at some point. We do it from here.
-          // There is also the clients created by about:debugging toolboxes opened
-          // for local Firefox's targets, which sets the `shouldCloseClient` attribute.
-          // Ignore any errors while closing, since there is not much that can be done
-          // at this point.
+        if (this.shouldCloseClient) {
           try {
             await this._client.close();
           } catch (e) {
+            // Ignore any errors while closing, since there is not much that can be done
+            // at this point.
             console.warn(`Error while closing client: ${e.message}`);
           }
 

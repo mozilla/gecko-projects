@@ -81,12 +81,6 @@ xul|iframe {
 
 /* ::::: miscellaneous formatting ::::: */
 
-xul|sidebarheader {
-  background-color: -moz-Dialog;
-  color: -moz-dialogText;
-  text-shadow: none;
-}
-
 :root:-moz-lwtheme {
   -moz-appearance: none;
 }
@@ -173,7 +167,7 @@ xul|label[disabled="true"] {
 }
 
 html|input {
-  margin: 4px; /* matches xul <textbox> default margin */
+  margin: 4px;
 }
 
 xul|notification > xul|hbox > xul|button {

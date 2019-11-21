@@ -1381,7 +1381,7 @@ add_task(async function test_addonsWatch_InterestingChange() {
 });
 
 add_task(async function test_pluginsWatch_Add() {
-  if (gIsAndroid) {
+  if (!gIsFirefox) {
     Assert.ok(true, "Skipping: there is no Plugin Manager on Android.");
     return;
   }
@@ -1423,7 +1423,7 @@ add_task(async function test_pluginsWatch_Add() {
 });
 
 add_task(async function test_pluginsWatch_Remove() {
-  if (gIsAndroid) {
+  if (!gIsFirefox) {
     Assert.ok(true, "Skipping: there is no Plugin Manager on Android.");
     return;
   }
@@ -1894,6 +1894,10 @@ async function checkDefaultSearch(privateOn, reInitSearchService) {
   );
 
   // Start off with separate default engine for private browsing turned off.
+  Preferences.set(
+    "browser.search.separatePrivateDefault.ui.enabled",
+    privateOn
+  );
   Preferences.set("browser.search.separatePrivateDefault", privateOn);
 
   let data = await TelemetryEnvironment.testCleanRestart().onInitialized();
@@ -2534,6 +2538,66 @@ if (gIsWindows) {
     );
   });
 }
+
+add_task(
+  { skip_if: () => AppConstants.MOZ_APP_NAME == "thunderbird" },
+  async function test_environmentServicesInfo() {
+    let cache = TelemetryEnvironment.testCleanRestart();
+    await cache.onInitialized();
+    let oldGetFxaSignedInUser = cache._getFxaSignedInUser;
+    try {
+      // Test the 'yes to both' case.
+
+      // This makes the weave service return that the usere is definitely a sync user
+      Preferences.set("services.sync.username", "c00lperson123@example.com");
+      let calledFxa = false;
+      cache._getFxaSignedInUser = () => {
+        calledFxa = true;
+        return null;
+      };
+
+      await cache._updateServicesInfo();
+      ok(
+        !calledFxa,
+        "Shouldn't need to ask FxA if they're definitely signed in"
+      );
+      deepEqual(cache.currentEnvironment.services, {
+        accountEnabled: true,
+        syncEnabled: true,
+      });
+
+      // Test the fxa-but-not-sync case.
+      Preferences.reset("services.sync.username");
+      // We don't actually inspect the returned object, just t
+      cache._getFxaSignedInUser = async () => {
+        return {};
+      };
+      await cache._updateServicesInfo();
+      deepEqual(cache.currentEnvironment.services, {
+        accountEnabled: true,
+        syncEnabled: false,
+      });
+      // Test the "no to both" case.
+      cache._getFxaSignedInUser = async () => {
+        return null;
+      };
+      await cache._updateServicesInfo();
+      deepEqual(cache.currentEnvironment.services, {
+        accountEnabled: false,
+        syncEnabled: false,
+      });
+      // And finally, the 'fxa is in an error state' case.
+      cache._getFxaSignedInUser = () => {
+        throw new Error("You'll never know");
+      };
+      await cache._updateServicesInfo();
+      equal(cache.currentEnvironment.services, null);
+    } finally {
+      cache._getFxaSignedInUser = oldGetFxaSignedInUser;
+      Preferences.reset("services.sync.username");
+    }
+  }
+);
 
 add_task(async function test_environmentShutdown() {
   // Define and reset the test preference.

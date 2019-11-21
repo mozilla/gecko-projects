@@ -31,14 +31,14 @@ class ManifestItemMeta(ABCMeta):
     attribute, and otherwise behaves like an ABCMeta."""
 
     def __new__(cls, name, bases, attrs):
-        # type: (Type[ManifestItemMeta], str, Tuple[ManifestItemMeta, ...], Dict[str, Any]) -> type
-        rv = ABCMeta.__new__(cls, name, bases, attrs)
+        # type: (Type[ManifestItemMeta], str, Tuple[ManifestItemMeta, ...], Dict[str, Any]) -> ManifestItemMeta
+        rv = super(ManifestItemMeta, cls).__new__(cls, name, bases, attrs)
         if not isabstract(rv):
             assert issubclass(rv, ManifestItem)
             assert isinstance(rv.item_type, str)
             item_types[rv.item_type] = rv
 
-        return rv
+        return rv  # type: ignore
 
 
 class ManifestItem(with_metaclass(ManifestItemMeta)):
@@ -78,7 +78,7 @@ class ManifestItem(with_metaclass(ManifestItemMeta)):
 
     def __repr__(self):
         # type: () -> str
-        return "<%s.%s id=%s, path=%s>" % (self.__module__, self.__class__.__name__, self.id, self.path)
+        return "<%s.%s id=%r, path=%r>" % (self.__module__, self.__class__.__name__, self.id, self.path)
 
     def to_json(self):
         # type: () -> Tuple[Any, ...]

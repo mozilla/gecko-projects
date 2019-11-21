@@ -883,8 +883,11 @@ nsresult HTMLCanvasElement::MozGetAsFileImpl(const nsAString& aName,
       do_QueryInterface(OwnerDoc()->GetScopeObject());
 
   // The File takes ownership of the buffer
-  RefPtr<File> file =
-      File::CreateMemoryFile(win, imgData, imgSize, aName, type, PR_Now());
+  RefPtr<File> file = File::CreateMemoryFile(win->AsGlobal(), imgData, imgSize,
+                                             aName, type, PR_Now());
+  if (NS_WARN_IF(!file)) {
+    return NS_ERROR_FAILURE;
+  }
 
   file.forget(aResult);
   return NS_OK;
@@ -1434,6 +1437,20 @@ HTMLCanvasElement::GetVRFrame() {
   }
 
   return webgl->GetVRFrame();
+}
+
+void HTMLCanvasElement::ClearVRFrame() {
+  if (GetCurrentContextType() != CanvasContextType::WebGL1 &&
+      GetCurrentContextType() != CanvasContextType::WebGL2) {
+    return;
+  }
+
+  WebGLContext* webgl = static_cast<WebGLContext*>(GetContextAtIndex(0));
+  if (!webgl) {
+    return;
+  }
+
+  webgl->ClearVRFrame();
 }
 
 }  // namespace dom

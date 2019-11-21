@@ -914,7 +914,7 @@ SECStatus
 tls13_HandlePostHelloHandshakeMessage(sslSocket *ss, PRUint8 *b, PRUint32 length)
 {
     if (ss->sec.isServer && ss->ssl3.hs.zeroRttIgnore != ssl_0rtt_ignore_none) {
-        SSL_TRC(3, ("%d: TLS13[%d]: %s successfully decrypted handshake after"
+        SSL_TRC(3, ("%d: TLS13[%d]: successfully decrypted handshake after "
                     "failed 0-RTT",
                     SSL_GETPID(), ss->fd));
         ss->ssl3.hs.zeroRttIgnore = ssl_0rtt_ignore_none;
@@ -1731,18 +1731,10 @@ tls13_HandleClientHelloPart2(sslSocket *ss,
         ss->ssl3.hs.zeroRttState = ssl_0rtt_sent;
     }
 
-#ifndef PARANOID
-    /* Look for a matching cipher suite. */
-    if (ssl3_config_match_init(ss) == 0) { /* no ciphers are working/supported by PK11 */
-        FATAL_ERROR(ss, PORT_GetError(), internal_error);
-        goto loser;
-    }
-#endif
-
     /* Negotiate cipher suite. */
     rv = ssl3_NegotiateCipherSuite(ss, suites, PR_FALSE);
     if (rv != SECSuccess) {
-        FATAL_ERROR(ss, SSL_ERROR_NO_CYPHER_OVERLAP, handshake_failure);
+        FATAL_ERROR(ss, PORT_GetError(), handshake_failure);
         goto loser;
     }
 
@@ -4192,8 +4184,10 @@ tls13_HandleCertificateVerify(sslSocket *ss, PRUint8 *b, PRUint32 length)
     if (tls13_IsVerifyingWithDelegatedCredential(ss)) {
         /* DelegatedCredential.cred.expected_cert_verify_algorithm is expected
          * to match CertificateVerify.scheme.
+         * DelegatedCredential.cred.expected_cert_verify_algorithm must also be
+         * the same as was reported in ssl3_AuthCertificate.
          */
-        if (sigScheme != dc->expectedCertVerifyAlg) {
+        if (sigScheme != dc->expectedCertVerifyAlg || sigScheme != ss->sec.signatureScheme) {
             FATAL_ERROR(ss, SSL_ERROR_DC_CERT_VERIFY_ALG_MISMATCH, illegal_parameter);
             return SECFailure;
         }
@@ -4253,12 +4247,19 @@ tls13_HandleCertificateVerify(sslSocket *ss, PRUint8 *b, PRUint32 length)
         goto loser;
     }
 
-    /* Set the auth type. */
+    /* Set the auth type and verify it is what we captured in ssl3_AuthCertificate */
     if (!ss->sec.isServer) {
         ss->sec.authType = ssl_SignatureSchemeToAuthType(sigScheme);
+
+        uint32_t prelimAuthKeyBits = ss->sec.authKeyBits;
         rv = ssl_SetAuthKeyBits(ss, pubKey);
         if (rv != SECSuccess) {
             goto loser; /* Alert sent and code set. */
+        }
+
+        if (prelimAuthKeyBits != ss->sec.authKeyBits) {
+            FATAL_ERROR(ss, SSL_ERROR_DC_CERT_VERIFY_ALG_MISMATCH, illegal_parameter);
+            goto loser;
         }
     }
 

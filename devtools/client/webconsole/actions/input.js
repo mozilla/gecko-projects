@@ -37,7 +37,7 @@ loader.lazyRequireGetter(
 const HELP_URL = "https://developer.mozilla.org/docs/Tools/Web_Console/Helpers";
 
 function evaluateExpression(expression) {
-  return async ({ dispatch, webConsoleUI, hud }) => {
+  return async ({ dispatch, webConsoleUI, hud, client }) => {
     if (!expression) {
       expression = hud.getInputSelection() || hud.getInputValue();
     }
@@ -72,7 +72,7 @@ function evaluateExpression(expression) {
       ? mappedExpressionRes.expression
       : expression;
 
-    const { frameActor, client } = webConsoleUI.getFrameActor();
+    const { frameActor, webConsoleFront } = webConsoleUI.getFrameActor();
 
     // Even if the evaluation fails,
     // we still need to pass the error response to onExpressionEvaluated.
@@ -81,7 +81,8 @@ function evaluateExpression(expression) {
     const response = await client
       .evaluateJSAsync(expression, {
         frameActor,
-        selectedNodeActor: webConsoleUI.getSelectedNodeActor(),
+        selectedNodeFront: webConsoleUI.getSelectedNodeFront(),
+        webConsoleFront,
         mapped: mappedExpressionRes ? mappedExpressionRes.mapped : null,
       })
       .then(onSettled, onSettled);

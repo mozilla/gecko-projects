@@ -70,7 +70,7 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
     envChain = nullptr;
     calleeToken = CalleeToToken(&args.callee().as<JSFunction>(), constructing);
 
-    unsigned numFormals = script->functionNonDelazifying()->nargs();
+    unsigned numFormals = script->function()->nargs();
     if (numFormals > numActualArgs) {
       code = cx->runtime()->jitRuntime()->getArgumentsRectifier().value;
     }
@@ -114,7 +114,7 @@ static EnterJitStatus JS_HAZ_JSNATIVE_CALLER EnterJit(JSContext* cx,
   MOZ_ASSERT(!cx->hasIonReturnOverride());
 
   // Release temporary buffer used for OSR into Ion.
-  cx->freeOsrTempData();
+  cx->runtime()->jitRuntime()->freeIonOsrTempData();
 
   if (result.isMagic()) {
     MOZ_ASSERT(result.isMagic(JS_ION_ERROR));

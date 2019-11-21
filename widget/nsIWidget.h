@@ -261,6 +261,12 @@ enum nsTopLevelWidgetZPlacement {  // for PlaceBehind()
  */
 #define NS_WIDGET_RESUME_PROCESS_OBSERVER_TOPIC "resume_process_notification"
 
+/**
+ * When an app(-shell) is activated by the OS, this topic is notified.
+ * Currently, this only happens on Mac OSX.
+ */
+#define NS_WIDGET_MAC_APP_ACTIVATE_OBSERVER_TOPIC "mac_app_activate"
+
 namespace mozilla {
 namespace widget {
 
@@ -1713,6 +1719,15 @@ class nsIWidget : public nsISupports {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
 
+  // Get rectangle of the screen where the window is placed.
+  // It's used to detect popup overflow under Wayland because
+  // Screenmanager does not work under it.
+#ifdef MOZ_WAYLAND
+  virtual nsresult GetScreenRect(LayoutDeviceIntRect* aRect) {
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+#endif
+
  private:
   class LongTapInfo {
    public:
@@ -1880,7 +1895,7 @@ class nsIWidget : public nsISupports {
     NativeKeyBindingsForMultiLineEditor,
     NativeKeyBindingsForRichTextEditor
   };
-  virtual void GetEditCommands(NativeKeyBindingsType aType,
+  virtual bool GetEditCommands(NativeKeyBindingsType aType,
                                const mozilla::WidgetKeyboardEvent& aEvent,
                                nsTArray<mozilla::CommandInt>& aCommands);
 
@@ -2104,6 +2119,11 @@ class nsIWidget : public nsISupports {
    */
   virtual void RecvScreenPixels(mozilla::ipc::Shmem&& aMem,
                                 const ScreenIntSize& aSize) = 0;
+
+  virtual void UpdateDynamicToolbarMaxHeight(mozilla::ScreenIntCoord aHeight) {}
+  virtual mozilla::ScreenIntCoord GetDynamicToolbarMaxHeight() const {
+    return 0;
+  }
 #endif
 
   static already_AddRefed<nsIBidiKeyboard> CreateBidiKeyboard();

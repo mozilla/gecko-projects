@@ -91,8 +91,8 @@ pub trait Example {
     fn get_image_handlers(
         &mut self,
         _gl: &dyn gl::Gl,
-    ) -> (Option<Box<dyn webrender::ExternalImageHandler>>,
-          Option<Box<dyn webrender::OutputImageHandler>>) {
+    ) -> (Option<Box<dyn ExternalImageHandler>>,
+          Option<Box<dyn OutputImageHandler>>) {
         (None, None)
     }
     fn draw_custom(&mut self, _gl: &dyn gl::Gl) {
@@ -166,6 +166,7 @@ pub fn main_wrapper<E: Example>(
         clear_color: Some(ColorF::new(0.3, 0.0, 0.0, 1.0)),
         //scatter_gpu_cache_updates: false,
         debug_flags,
+        //allow_texture_swizzling: false,
         ..options.unwrap_or(webrender::RendererOptions::default())
     };
 

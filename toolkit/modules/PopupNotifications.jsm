@@ -1110,6 +1110,7 @@ PopupNotifications.prototype = {
             telemetryStatId++;
           }
         }
+        popupnotification.setAttribute("secondarybuttonhidden", "false");
       } else {
         popupnotification.setAttribute("secondarybuttonhidden", "true");
       }
@@ -1211,10 +1212,15 @@ PopupNotifications.prototype = {
     if (isNullOrHidden(anchorElement)) {
       anchorElement = this.window.document.getElementById("identity-icon");
 
-      // If the identity icon is not available in this window, or maybe the
-      // entire location bar is hidden for any reason, use the tab as the
-      // anchor. We only ever show notifications for the current browser, so we
-      // can just use the current tab.
+      if (isNullOrHidden(anchorElement)) {
+        anchorElement = this.window.document.getElementById(
+          "urlbar-search-icon"
+        );
+      }
+
+      // If the identity and search icons are not available in this window, use
+      // the tab as the anchor. We only ever show notifications for the current
+      // browser, so we can just use the current tab.
       if (isNullOrHidden(anchorElement)) {
         anchorElement = this.tabbrowser.selectedTab;
 
@@ -1789,18 +1795,21 @@ PopupNotifications.prototype = {
     let notificationEl = getNotificationFromElement(event.target);
 
     let notification = notificationEl.notification;
-    if (notification.options.checkbox) {
-      if (notificationEl.checkbox.checked) {
-        this._setNotificationUIState(
-          notificationEl,
-          notification.options.checkbox.checkedState
-        );
-      } else {
-        this._setNotificationUIState(
-          notificationEl,
-          notification.options.checkbox.uncheckedState
-        );
-      }
+    if (!notification.options.checkbox) {
+      this._setNotificationUIState(notificationEl);
+      return;
+    }
+
+    if (notificationEl.checkbox.checked) {
+      this._setNotificationUIState(
+        notificationEl,
+        notification.options.checkbox.checkedState
+      );
+    } else {
+      this._setNotificationUIState(
+        notificationEl,
+        notification.options.checkbox.uncheckedState
+      );
     }
   },
 

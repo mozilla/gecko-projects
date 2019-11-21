@@ -197,6 +197,11 @@ var ModuleManager = {
     Object.assign(this._settings, aSettings);
     this._frozenSettings = Object.freeze(Object.assign({}, this._settings));
 
+    const windowType = aSettings.isPopup
+      ? "navigator:popup"
+      : "navigator:geckoview";
+    window.document.documentElement.setAttribute("windowType", windowType);
+
     this.forEach(module => {
       if (module.impl) {
         module.impl.onSettingsUpdate();
@@ -472,8 +477,6 @@ function startup() {
       name: "GeckoViewNavigation",
       onInit: {
         resource: "resource://gre/modules/GeckoViewNavigation.jsm",
-        // TODO: frameScript only needed for Fennec
-        frameScript: "chrome://geckoview/content/GeckoViewNavigationChild.js",
       },
     },
     {
@@ -517,8 +520,10 @@ function startup() {
     },
     {
       name: "GeckoViewContentBlocking",
-      onEnable: {
+      onInit: {
         resource: "resource://gre/modules/GeckoViewContentBlocking.jsm",
+      },
+      onEnable: {
         frameScript:
           "chrome://geckoview/content/GeckoViewContentBlockingChild.js",
       },
@@ -527,6 +532,12 @@ function startup() {
       name: "SessionStateAggregator",
       onInit: {
         frameScript: "chrome://geckoview/content/SessionStateAggregator.js",
+      },
+    },
+    {
+      name: "GeckoViewAutofill",
+      onInit: {
+        frameScript: "chrome://geckoview/content/GeckoViewAutofillChild.js",
       },
     },
   ]);

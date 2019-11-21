@@ -19,8 +19,6 @@ const INITIAL_STATE = {
   App: {
     // Have we received real data from the app yet?
     initialized: false,
-    // Are we in permanentPrivateBrowsing mode?
-    permanentPrivateBrowsing: false,
   },
   ASRouter: { initialized: false },
   Snippets: { initialized: false },
@@ -56,6 +54,7 @@ const INITIAL_STATE = {
     config: { enabled: false, layout_endpoint: "" },
     layout: [],
     lastUpdated: null,
+    isPrivacyInfoModalVisible: false,
     feeds: {
       data: {
         // "https://foo.com/feed1": {lastUpdated: 123, data: []}
@@ -581,6 +580,16 @@ function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
         ...prevState,
         lastUpdated: action.data.lastUpdated || null,
         layout: action.data.layout || [],
+      };
+    case at.HIDE_PRIVACY_INFO:
+      return {
+        ...prevState,
+        isPrivacyInfoModalVisible: false,
+      };
+    case at.SHOW_PRIVACY_INFO:
+      return {
+        ...prevState,
+        isPrivacyInfoModalVisible: true,
       };
     case at.DISCOVERY_STREAM_LAYOUT_RESET:
       return { ...INITIAL_STATE.DiscoveryStream, config: prevState.config };

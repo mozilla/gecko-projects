@@ -16,8 +16,7 @@
 #include <stdint.h>  // intptr_t, uintptr_t, uint8_t, uint32_t
 #include <stdio.h>   // FILE
 
-#include "jstypes.h"  // JS_BITS_PER_WORD
-#include "jsutil.h"   // JS_CRASH_DIAGNOSTICS
+#include "jstypes.h"  // JS_BITS_PER_WORD, JS_PUBLIC_API
 
 #include "jit/IonTypes.h"      // jit::MIRType
 #include "js/GCAnnotations.h"  // JS_HAZ_GC_POINTER
@@ -27,16 +26,17 @@
 #include "js/Utility.h"      // UniqueChars
 #include "js/Value.h"        // JSVAL_TYPE_*
 #include "js/Vector.h"       // js::Vector
+#include "util/DiagnosticAssertions.h"
 #include "vm/TaggedProto.h"  // js::TaggedProto
 
-struct JSContext;
-class JSObject;
+struct JS_PUBLIC_API JSContext;
+class JS_PUBLIC_API JSObject;
 
 namespace JS {
 
-class Compartment;
-class Realm;
-class Zone;
+class JS_PUBLIC_API Compartment;
+class JS_PUBLIC_API Realm;
+class JS_PUBLIC_API Zone;
 
 }  // namespace JS
 

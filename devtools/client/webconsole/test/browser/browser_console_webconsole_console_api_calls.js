@@ -56,12 +56,6 @@ async function checkContentConsoleApiMessages(nonPrimitiveVariablesDisplayed) {
   const hud = await BrowserConsoleManager.toggleBrowserConsole();
   await setFilterState(hud, { text: FILTER_PREFIX });
 
-  // we need to wait for the
-  // if (nonPrimitiveVariablesDisplayed) {
-  //   await waitFor(() => hud.ui.outputNode.querySelector(".new-consoletable"));
-  // }
-  // await clearOutput(hud);
-
   // In non fission world, we don't retrieve cached messages, so we need to reload the
   // tab to see them.
   if (!nonPrimitiveVariablesDisplayed) {
@@ -122,10 +116,10 @@ async function checkContentConsoleApiMessages(nonPrimitiveVariablesDisplayed) {
   const onContentMessagesHidden = waitFor(
     () => !findMessage(hud, contentArgs.log)
   );
-  const checkbox = hud.ui.outputNode.querySelector(
-    ".webconsole-filterbar-primary .filter-checkbox"
+  await toggleConsoleSetting(
+    hud,
+    ".webconsole-console-settings-menu-item-contentMessages"
   );
-  checkbox.click();
   await onContentMessagesHidden;
 
   for (const expectedMessage of expectedMessages) {
@@ -136,7 +130,10 @@ async function checkContentConsoleApiMessages(nonPrimitiveVariablesDisplayed) {
   const onContentMessagesDisplayed = waitFor(() =>
     expectedMessages.every(expectedMessage => findMessage(hud, expectedMessage))
   );
-  checkbox.click();
+  await toggleConsoleSetting(
+    hud,
+    ".webconsole-console-settings-menu-item-contentMessages"
+  );
   await onContentMessagesDisplayed;
 
   for (const expectedMessage of expectedMessages) {
@@ -145,5 +142,9 @@ async function checkContentConsoleApiMessages(nonPrimitiveVariablesDisplayed) {
 
   info("Clear and close the Browser Console");
   await clearOutput(hud);
+  // We use waitForTick here because of a race condition. Otherwise, the test
+  // would occassionally fail because the transport is closed before pending server
+  // responses have been sent.
+  await waitForTick();
   await BrowserConsoleManager.toggleBrowserConsole();
 }

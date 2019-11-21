@@ -120,6 +120,9 @@ export const UserEventAction = Joi.object().keys({
         "ARCHIVE_FROM_POCKET",
         "SKIPPED_SIGNIN",
         "SUBMIT_EMAIL",
+        "SUBMIT_SIGNIN",
+        "SHOW_PRIVACY_INFO",
+        "CLICK_PRIVACY_INFO",
       ]).required(),
       source: Joi.valid(["TOP_SITES", "TOP_STORIES", "HIGHLIGHTS"]),
       action_position: Joi.number().integer(),
@@ -130,6 +133,7 @@ export const UserEventAction = Joi.object().keys({
           "screenshot_with_icon",
           "screenshot",
           "no_image",
+          "custom_screenshot",
         ]),
         card_type: Joi.valid([
           "bookmark",
@@ -137,6 +141,7 @@ export const UserEventAction = Joi.object().keys({
           "pinned",
           "pocket",
           "search",
+          "spoc",
         ]),
         search_vendor: Joi.valid(["google", "amazon"]),
         has_flow_params: Joi.bool(),
@@ -199,7 +204,6 @@ export const SpocsFillEntrySchema = Joi.object().keys({
 export const SpocsFillPing = Joi.object().keys(
   Object.assign({}, baseKeys, {
     impression_id: Joi.string().required(),
-    client_id: Joi.valid("n/a").required(),
     session_id: Joi.valid("n/a").required(),
     spoc_fills: Joi.array()
       .items(SpocsFillEntrySchema)
@@ -292,16 +296,16 @@ export const SessionPing = Joi.object().keys(
   })
 );
 
-export const ASRouterEventPing = Joi.object().keys({
-  client_id: Joi.string().required(),
-  action: Joi.string().required(),
-  impression_id: Joi.string().required(),
-  source: Joi.string().required(),
-  addon_version: Joi.string().required(),
-  locale: Joi.string().required(),
-  message_id: Joi.string().required(),
-  event: Joi.string().required(),
-});
+export const ASRouterEventPing = Joi.object()
+  .keys({
+    addon_version: Joi.string().required(),
+    locale: Joi.string().required(),
+    message_id: Joi.string().required(),
+    event: Joi.string().required(),
+    client_id: Joi.string(),
+    impression_id: Joi.string(),
+  })
+  .or("client_id", "impression_id");
 
 export const UTSessionPing = Joi.array().items(
   Joi.string()

@@ -47,6 +47,31 @@ urlbar-persistent-storage-notification-anchor =
     .tooltiptext = Store data in Persistent Storage
 urlbar-addons-notification-anchor =
     .tooltiptext = Open add-on installation message panel
+urlbar-tip-help-icon =
+    .title = Get help
+
+urlbar-geolocation-blocked =
+    .tooltiptext = You have blocked location information for this website.
+urlbar-web-notifications-blocked =
+    .tooltiptext = You have blocked notifications for this website.
+urlbar-camera-blocked =
+    .tooltiptext = You have blocked your camera for this website.
+urlbar-microphone-blocked =
+    .tooltiptext = You have blocked your microphone for this website.
+urlbar-screen-blocked =
+    .tooltiptext = You have blocked this website from sharing your screen.
+urlbar-persistent-storage-blocked =
+    .tooltiptext = You have blocked persistent storage for this website.
+urlbar-popup-blocked =
+    .tooltiptext = You have blocked pop-ups for this website.
+urlbar-autoplay-media-blocked =
+    .tooltiptext = You have blocked autoplay media with sound for this website.
+urlbar-canvas-blocked =
+    .tooltiptext = You have blocked canvas data extraction for this website.
+urlbar-midi-blocked =
+    .tooltiptext = You have blocked MIDI access for this website.
+urlbar-install-blocked =
+    .tooltiptext = You have blocked add-on installation for this website.
 
 ## Page Action Context Menu
 
@@ -56,3 +81,35 @@ page-action-manage-extension =
     .label = Manage Extension…
 page-action-remove-from-urlbar =
     .label = Remove from Address Bar
+
+## Auto-hide Context Menu
+
+full-screen-autohide =
+    .label = Hide Toolbars
+    .accesskey = H
+full-screen-exit =
+    .label = Exit Full Screen Mode
+    .accesskey = F
+
+## Search Engine selection buttons (one-offs)
+
+# This string prompts the user to use the list of one-click search engines in
+# the Urlbar and searchbar.
+search-one-offs-with-title = This time, search with:
+
+# This string won't wrap, so if the translated string is longer,
+# consider translating it as if it said only "Search Settings".
+search-one-offs-change-settings-button =
+    .label = Change Search Settings
+search-one-offs-change-settings-compact-button =
+    .tooltiptext = Change search settings
+
+search-one-offs-context-open-new-tab =
+    .label = Search in New Tab
+    .accesskey = T
+search-one-offs-context-set-as-default =
+    .label = Set as Default Search Engine
+    .accesskey = D
+search-one-offs-context-set-as-default-private =
+    .label = Set as Default Search Engine for Private Windows
+    .accesskey = P

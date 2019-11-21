@@ -30,7 +30,7 @@ describe("SourcesTree", () => {
 
   it("Should show a 'No Sources' message if there are no sources", async () => {
     const { component, defaultState } = render();
-    const sourceTree = defaultState.sourceTree;
+    const { sourceTree } = defaultState;
     sourceTree.contents = [];
     component.setState({ sourceTree: sourceTree });
     expect(component).toMatchSnapshot();
@@ -373,7 +373,7 @@ function generateDefaults(overrides: Object) {
       ),
       "server1.conn13.child1/42/originalSource-sha": createMockSource(
         "server1.conn13.child1/42/originalSource-sha",
-        "http://mdn.com/four.js",
+        "http://mdn.com/four.js [original]",
         false
       ),
       "server1.conn13.child1/42": createMockSource(

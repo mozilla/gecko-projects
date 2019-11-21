@@ -215,8 +215,8 @@ static already_AddRefed<Element> MakeAnonButton(Document* aDoc,
 
   // Set the file picking button text depending on the current locale.
   nsAutoString buttonTxt;
-  nsContentUtils::GetLocalizedString(
-      nsContentUtils::eFORMS_PROPERTIES_MAYBESPOOF, labelKey, buttonTxt);
+  nsContentUtils::GetMaybeLocalizedString(nsContentUtils::eFORMS_PROPERTIES,
+                                          labelKey, aDoc, buttonTxt);
 
   // Set the browse button text. It's a bit of a pain to do because we want to
   // make sure we are not notifying.
@@ -331,7 +331,7 @@ static void AppendBlobImplAsDirectory(nsTArray<OwningFileOrDirectory>& aArray,
     return;
   }
 
-  RefPtr<Directory> directory = Directory::Create(inner, file);
+  RefPtr<Directory> directory = Directory::Create(inner->AsGlobal(), file);
   MOZ_ASSERT(directory);
 
   OwningFileOrDirectory* element = aArray.AppendElement();

@@ -65,8 +65,6 @@
 #include "nsTreeBodyFrame.h"
 #include "nsTreeColumns.h"
 #include "nsTreeUtils.h"
-#include "nsXBLPrototypeBinding.h"
-#include "nsXBLBinding.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/EventTarget.h"
@@ -1024,7 +1022,10 @@ Accessible* nsAccessibilityService::CreateAccessible(nsINode* aNode,
 
     if (!isARIATablePart || frame->AccessibleType() == eHTMLTableCellType ||
         frame->AccessibleType() == eHTMLTableRowType ||
-        frame->AccessibleType() == eHTMLTableType) {
+        frame->AccessibleType() == eHTMLTableType ||
+        // We should always use OuterDocAccessible for OuterDocs, even for
+        // ARIA table roles.
+        frame->AccessibleType() == eOuterDocType) {
       // Prefer to use markup to decide if and what kind of accessible to
       // create,
       const HTMLMarkupMapInfo* markupMap =
@@ -1076,7 +1077,7 @@ Accessible* nsAccessibilityService::CreateAccessible(nsINode* aNode,
     }
   }
 
-  // Accessible XBL types and deck stuff are used in XUL only currently.
+  // XUL accessibles.
   if (!newAcc && content->IsXULElement()) {
     // No accessible for not selected deck panel and its children.
     if (!aContext->IsXULTabpanels()) {
@@ -1117,6 +1118,8 @@ Accessible* nsAccessibilityService::CreateAccessible(nsINode* aNode,
         // polyline and image. A 'use' and 'text' graphic elements require
         // special support.
         newAcc = new EnumRoleAccessible<roles::GRAPHIC>(content, document);
+      } else if (content->IsSVGElement(nsGkAtoms::text)) {
+        newAcc = new HyperTextAccessibleWrap(content->AsElement(), document);
       } else if (content->IsSVGElement(nsGkAtoms::svg)) {
         newAcc = new EnumRoleAccessible<roles::DIAGRAM>(content, document);
       }

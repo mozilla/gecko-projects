@@ -10,72 +10,56 @@
  */
 
 var gDebuggee;
-var gClient;
 var gThreadFront;
 
-Services.prefs.setBoolPref("security.allow_eval_with_system_principal", true);
-
-registerCleanupFunction(() => {
-  Services.prefs.clearUserPref("security.allow_eval_with_system_principal");
-});
-
-function run_test() {
-  initTestDebuggerServer();
-  gDebuggee = addTestGlobal("test-stack");
-  gClient = new DebuggerClient(DebuggerServer.connectPipe());
-  gClient.connect().then(function() {
-    attachTestTabAndResume(gClient, "test-stack", function(
-      response,
-      targetFront,
-      threadFront
-    ) {
+add_task(
+  threadFrontTest(
+    async ({ threadFront, debuggee }) => {
       gThreadFront = threadFront;
+      gDebuggee = debuggee;
       test_pause_frame();
-    });
-  });
-  do_test_pending();
-}
+    },
+    { waitForFinish: true }
+  )
+);
 
 function test_pause_frame() {
-  gThreadFront.once("paused", function(packet) {
-    const env = packet.frame.environment;
+  gThreadFront.once("paused", async function(packet) {
+    const env = await packet.frame.getEnvironment();
     Assert.notEqual(env, undefined);
 
     const objClient = gThreadFront.pauseGrip(env.object);
-    objClient.getPrototypeAndProperties(function(response) {
-      Assert.equal(response.ownProperties.one.value, 1);
-      Assert.equal(response.ownProperties.two.value, 2);
-      Assert.equal(response.ownProperties.foo, undefined);
+    let response = await objClient.getPrototypeAndProperties();
+    Assert.equal(response.ownProperties.one.value, 1);
+    Assert.equal(response.ownProperties.two.value, 2);
+    Assert.equal(response.ownProperties.foo, undefined);
 
-      let parentEnv = env.parent;
-      Assert.notEqual(parentEnv, undefined);
+    let parentEnv = env.parent;
+    Assert.notEqual(parentEnv, undefined);
 
-      const parentClient = gThreadFront.pauseGrip(parentEnv.object);
-      parentClient.getPrototypeAndProperties(function(response) {
-        Assert.equal(response.ownProperties.PI.value, Math.PI);
-        Assert.equal(response.ownProperties.cos.value.type, "object");
-        Assert.equal(response.ownProperties.cos.value.class, "Function");
-        Assert.ok(!!response.ownProperties.cos.value.actor);
+    const parentClient = gThreadFront.pauseGrip(parentEnv.object);
+    response = await parentClient.getPrototypeAndProperties();
+    Assert.equal(response.ownProperties.PI.value, Math.PI);
+    Assert.equal(response.ownProperties.cos.value.type, "object");
+    Assert.equal(response.ownProperties.cos.value.class, "Function");
+    Assert.ok(!!response.ownProperties.cos.value.actor);
 
-        parentEnv = parentEnv.parent;
-        Assert.notEqual(parentEnv, undefined);
+    parentEnv = parentEnv.parent;
+    Assert.notEqual(parentEnv, undefined);
 
-        const bindings = parentEnv.bindings;
-        const args = bindings.arguments;
-        const vars = bindings.variables;
-        Assert.equal(args.length, 1);
-        Assert.equal(args[0].number.value, 10);
-        Assert.equal(vars.r.value, 10);
-        Assert.equal(vars.a.value, Math.PI * 100);
-        Assert.equal(vars.arguments.value.class, "Arguments");
-        Assert.ok(!!vars.arguments.value.actor);
-        Assert.equal(vars.foo.value, 2 * Math.PI);
+    const bindings = parentEnv.bindings;
+    const args = bindings.arguments;
+    const vars = bindings.variables;
+    Assert.equal(args.length, 1);
+    Assert.equal(args[0].number.value, 10);
+    Assert.equal(vars.r.value, 10);
+    Assert.equal(vars.a.value, Math.PI * 100);
+    Assert.equal(vars.arguments.value.class, "Arguments");
+    Assert.ok(!!vars.arguments.value.actor);
+    Assert.equal(vars.foo.value, 2 * Math.PI);
 
-        gThreadFront.resume().then(function() {
-          finishClient(gClient);
-        });
-      });
-    });
+    await gThreadFront.resume();
+    threadFrontTestFinished();
   });
 
   /* eslint-disable */

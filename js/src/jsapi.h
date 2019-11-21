@@ -211,17 +211,6 @@ typedef size_t (*JSSizeOfIncludingThisCompartmentCallback)(
     mozilla::MallocSizeOf mallocSizeOf, JS::Compartment* compartment);
 
 /**
- * Callback used by memory reporting to ask the embedder how much memory an
- * external string is keeping alive.  The embedder is expected to return a value
- * that corresponds to the size of the allocation that will be released by the
- * JSStringFinalizer passed to JS_NewExternalString for this string.
- *
- * Implementations of this callback MUST NOT do anything that can cause GC.
- */
-using JSExternalStringSizeofCallback =
-    size_t (*)(JSString* str, mozilla::MallocSizeOf mallocSizeOf);
-
-/**
  * Callback used to intercept JavaScript errors.
  */
 struct JSErrorInterceptor {
@@ -338,31 +327,10 @@ extern JS_PUBLIC_API bool JS_IsBuiltinFunctionConstructor(JSFunction* fun);
 
 // Create a new context (and runtime) for this thread.
 extern JS_PUBLIC_API JSContext* JS_NewContext(
-    uint32_t maxbytes, uint32_t maxNurseryBytes = JS::DefaultNurseryBytes,
-    JSRuntime* parentRuntime = nullptr);
+    uint32_t maxbytes, JSRuntime* parentRuntime = nullptr);
 
-// The methods below for controlling the active context in a cooperatively
-// multithreaded runtime are not threadsafe, and the caller must ensure they
-// are called serially if there is a chance for contention between threads.
-
-// Called from the active context for a runtime, yield execution so that
-// this context is no longer active and can no longer use the API.
-extern JS_PUBLIC_API void JS_YieldCooperativeContext(JSContext* cx);
-
-// Called from a context whose runtime has no active context, this thread
-// becomes the active context for that runtime and may use the API.
-extern JS_PUBLIC_API void JS_ResumeCooperativeContext(JSContext* cx);
-
-// Create a new context on this thread for cooperative multithreading in the
-// same runtime as siblingContext. Called on a runtime (as indicated by
-// siblingContet) which has no active context, on success the new context will
-// become the runtime's active context.
-extern JS_PUBLIC_API JSContext* JS_NewCooperativeContext(
-    JSContext* siblingContext);
-
-// Destroy a context allocated with JS_NewContext or JS_NewCooperativeContext.
-// The context must be the current active context in the runtime, and after
-// this call the runtime will have no active context.
+// Destroy a context allocated with JS_NewContext. Must be called on the thread
+// that called JS_NewContext.
 extern JS_PUBLIC_API void JS_DestroyContext(JSContext* cx);
 
 JS_PUBLIC_API void* JS_GetContextPrivate(JSContext* cx);
@@ -428,9 +396,6 @@ extern JS_PUBLIC_API void JS_SetSizeOfIncludingThisCompartmentCallback(
 
 extern JS_PUBLIC_API void JS_SetWrapObjectCallbacks(
     JSContext* cx, const JSWrapObjectCallbacks* callbacks);
-
-extern JS_PUBLIC_API void JS_SetExternalStringSizeofCallback(
-    JSContext* cx, JSExternalStringSizeofCallback callback);
 
 #if defined(NIGHTLY_BUILD)
 
@@ -2316,28 +2281,28 @@ extern JS_PUBLIC_API size_t JS_PutEscapedString(JSContext* cx, char* buffer,
  * The first case is for strings that have been atomized, e.g. directly by
  * JS_AtomizeAndPinString or implicitly because it is stored in a jsid.
  *
- * The second case is "flat" strings that have been explicitly prepared in a
- * fallible context by JS_FlattenString. To catch errors, a separate opaque
- * JSFlatString type is returned by JS_FlattenString and expected by
- * JS_GetFlatStringChars. Note, though, that this is purely a syntactic
- * distinction: the input and output of JS_FlattenString are the same actual
- * GC-thing. If a JSString is known to be flat, JS_ASSERT_STRING_IS_FLAT can be
- * used to make a debug-checked cast. Example:
+ * The second case is "linear" strings that have been explicitly prepared in a
+ * fallible context by JS_EnsureLinearString. To catch errors, a separate opaque
+ * JSLinearString type is returned by JS_EnsureLinearString and expected by
+ * JS_Get{Latin1,TwoByte}StringCharsAndLength. Note, though, that this is purely
+ * a syntactic distinction: the input and output of JS_EnsureLinearString are
+ * the same actual GC-thing. If a JSString is known to be linear,
+ * JS_ASSERT_STRING_IS_LINEAR can be used to make a debug-checked cast. Example:
  *
- *   // in a fallible context
- *   JSFlatString* fstr = JS_FlattenString(cx, str);
- *   if (!fstr) {
+ *   // In a fallible context.
+ *   JSLinearString* lstr = JS_EnsureLinearString(cx, str);
+ *   if (!lstr) {
  *     return false;
  *   }
- *   MOZ_ASSERT(fstr == JS_ASSERT_STRING_IS_FLAT(str));
+ *   MOZ_ASSERT(lstr == JS_ASSERT_STRING_IS_LINEAR(str));
  *
- *   // in an infallible context, for the same 'str'
+ *   // In an infallible context, for the same 'str'.
  *   AutoCheckCannotGC nogc;
- *   const char16_t* chars = JS_GetTwoByteFlatStringChars(nogc, fstr)
+ *   const char16_t* chars = JS_GetTwoByteLinearStringChars(nogc, lstr)
  *   MOZ_ASSERT(chars);
  *
- * Flat strings and interned strings are always null-terminated, so
- * JS_FlattenString can be used to get a null-terminated string.
+ * Note: JS strings (including linear strings and atoms) are not
+ * null-terminated!
  *
  * Additionally, string characters are stored as either Latin1Char (8-bit)
  * or char16_t (16-bit). Clients can use JS_StringHasLatin1Chars and can then
@@ -2348,7 +2313,7 @@ extern JS_PUBLIC_API size_t JS_PutEscapedString(JSContext* cx, char* buffer,
 
 extern JS_PUBLIC_API size_t JS_GetStringLength(JSString* str);
 
-extern JS_PUBLIC_API bool JS_StringIsFlat(JSString* str);
+extern JS_PUBLIC_API bool JS_StringIsLinear(JSString* str);
 
 /** Returns true iff the string's characters are stored as Latin1. */
 extern JS_PUBLIC_API bool JS_StringHasLatin1Chars(JSString* str);
@@ -2364,8 +2329,8 @@ extern JS_PUBLIC_API const char16_t* JS_GetTwoByteStringCharsAndLength(
 extern JS_PUBLIC_API bool JS_GetStringCharAt(JSContext* cx, JSString* str,
                                              size_t index, char16_t* res);
 
-extern JS_PUBLIC_API char16_t JS_GetFlatStringCharAt(JSFlatString* str,
-                                                     size_t index);
+extern JS_PUBLIC_API char16_t JS_GetLinearStringCharAt(JSLinearString* str,
+                                                       size_t index);
 
 extern JS_PUBLIC_API const char16_t* JS_GetTwoByteExternalStringChars(
     JSString* str);
@@ -2374,50 +2339,59 @@ extern JS_PUBLIC_API bool JS_CopyStringChars(JSContext* cx,
                                              mozilla::Range<char16_t> dest,
                                              JSString* str);
 
-extern JS_PUBLIC_API JSFlatString* JS_FlattenString(JSContext* cx,
-                                                    JSString* str);
+/**
+ * Copies the string's characters to a null-terminated char16_t buffer.
+ *
+ * Returns nullptr on OOM.
+ */
+extern JS_PUBLIC_API JS::UniqueTwoByteChars JS_CopyStringCharsZ(JSContext* cx,
+                                                                JSString* str);
 
-extern JS_PUBLIC_API const JS::Latin1Char* JS_GetLatin1FlatStringChars(
-    const JS::AutoRequireNoGC& nogc, JSFlatString* str);
+extern JS_PUBLIC_API JSLinearString* JS_EnsureLinearString(JSContext* cx,
+                                                           JSString* str);
 
-extern JS_PUBLIC_API const char16_t* JS_GetTwoByteFlatStringChars(
-    const JS::AutoRequireNoGC& nogc, JSFlatString* str);
+extern JS_PUBLIC_API const JS::Latin1Char* JS_GetLatin1LinearStringChars(
+    const JS::AutoRequireNoGC& nogc, JSLinearString* str);
 
-static MOZ_ALWAYS_INLINE JSFlatString* JSID_TO_FLAT_STRING(jsid id) {
+extern JS_PUBLIC_API const char16_t* JS_GetTwoByteLinearStringChars(
+    const JS::AutoRequireNoGC& nogc, JSLinearString* str);
+
+static MOZ_ALWAYS_INLINE JSLinearString* JSID_TO_LINEAR_STRING(jsid id) {
   MOZ_ASSERT(JSID_IS_STRING(id));
-  return (JSFlatString*)JSID_TO_STRING(id);
+  return reinterpret_cast<JSLinearString*>(JSID_TO_STRING(id));
 }
 
-static MOZ_ALWAYS_INLINE JSFlatString* JS_ASSERT_STRING_IS_FLAT(JSString* str) {
-  MOZ_ASSERT(JS_StringIsFlat(str));
-  return (JSFlatString*)str;
+static MOZ_ALWAYS_INLINE JSLinearString* JS_ASSERT_STRING_IS_LINEAR(
+    JSString* str) {
+  MOZ_ASSERT(JS_StringIsLinear(str));
+  return reinterpret_cast<JSLinearString*>(str);
 }
 
-static MOZ_ALWAYS_INLINE JSString* JS_FORGET_STRING_FLATNESS(
-    JSFlatString* fstr) {
-  return (JSString*)fstr;
+static MOZ_ALWAYS_INLINE JSString* JS_FORGET_STRING_LINEARNESS(
+    JSLinearString* str) {
+  return reinterpret_cast<JSString*>(str);
 }
 
 /*
- * Additional APIs that avoid fallibility when given a flat string.
+ * Additional APIs that avoid fallibility when given a linear string.
  */
 
-extern JS_PUBLIC_API bool JS_FlatStringEqualsAscii(JSFlatString* str,
-                                                   const char* asciiBytes);
-extern JS_PUBLIC_API bool JS_FlatStringEqualsAscii(JSFlatString* str,
-                                                   const char* asciiBytes,
-                                                   size_t length);
+extern JS_PUBLIC_API bool JS_LinearStringEqualsAscii(JSLinearString* str,
+                                                     const char* asciiBytes);
+extern JS_PUBLIC_API bool JS_LinearStringEqualsAscii(JSLinearString* str,
+                                                     const char* asciiBytes,
+                                                     size_t length);
 
 template <size_t N>
-bool JS_FlatStringEqualsLiteral(JSFlatString* str,
-                                const char (&asciiBytes)[N]) {
+bool JS_LinearStringEqualsLiteral(JSLinearString* str,
+                                  const char (&asciiBytes)[N]) {
   MOZ_ASSERT(asciiBytes[N - 1] == '\0');
-  return JS_FlatStringEqualsAscii(str, asciiBytes, N - 1);
+  return JS_LinearStringEqualsAscii(str, asciiBytes, N - 1);
 }
 
-extern JS_PUBLIC_API size_t JS_PutEscapedFlatString(char* buffer, size_t size,
-                                                    JSFlatString* str,
-                                                    char quote);
+extern JS_PUBLIC_API size_t JS_PutEscapedLinearString(char* buffer, size_t size,
+                                                      JSLinearString* str,
+                                                      char quote);
 
 /**
  * Create a dependent string, i.e., a string that owns no character storage,
@@ -3271,6 +3245,13 @@ extern JS_PUBLIC_API bool IsMaybeWrappedSavedFrame(JSObject* obj);
  * SavedFrame.prototype object.
  */
 extern JS_PUBLIC_API bool IsUnwrappedSavedFrame(JSObject* obj);
+
+/**
+ * Clean up a finalization group in response to the engine calling the
+ * HostCleanupFinalizationGroup callback.
+ */
+extern JS_PUBLIC_API bool CleanupQueuedFinalizationGroup(JSContext* cx,
+                                                         HandleObject group);
 
 } /* namespace JS */
 

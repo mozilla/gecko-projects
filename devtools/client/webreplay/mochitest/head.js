@@ -27,6 +27,14 @@ async function attachDebugger(tab) {
   return { ...dbg, tab, threadFront };
 }
 
+async function openRecordingTab(url) {
+  const tab = BrowserTestUtils.addTab(gBrowser, null, { recordExecution: "*" });
+  gBrowser.selectedTab = tab;
+  await once(Services.ppmm, "RecordingInitialized");
+  openTrustedLinkIn(EXAMPLE_URL + url, "current");
+  return tab;
+}
+
 async function attachRecordingDebugger(
   url,
   { waitForRecording, disableLogging, skipInterrupt } = {}
@@ -35,9 +43,7 @@ async function attachRecordingDebugger(
     await pushPref("devtools.recordreplay.logging", true);
   }
 
-  const tab = BrowserTestUtils.addTab(gBrowser, null, { recordExecution: "*" });
-  gBrowser.selectedTab = tab;
-  openTrustedLinkIn(EXAMPLE_URL + url, "current");
+  const tab = await openRecordingTab(url);
 
   if (waitForRecording) {
     await once(Services.ppmm, "RecordingFinished");
@@ -98,8 +104,8 @@ async function checkEvaluateInTopFrameThrows(dbg, text) {
   const consoleFront = await dbg.toolbox.target.getFront("console");
   const { frames } = await threadFront.getFrames(0, 1);
   ok(frames.length == 1, "Got one frame");
-  const options = { thread: threadFront.actor, frameActor: frames[0].actor };
-  const response = await consoleFront.evaluateJS(text, options);
+  const options = { thread: threadFront.actor, frameActor: frames[0].actorID };
+  const response = await consoleFront.evaluateJSAsync(text, options);
   ok(response.exception, "Eval threw an exception");
 }
 
