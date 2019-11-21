@@ -3399,6 +3399,10 @@ int NS_main(int argc, NS_tchar** argv) {
         WriteStatusFile(lastFallbackError);
       }
 
+      // The logging output needs to be finished before launching the callback
+      // application so the update status file contains the value from the
+      // secure directory used by the maintenance service and the elevated
+      // updater.
       output_finish();
       if (argc > callbackIndex) {
         LaunchCallbackApp(argv[5], argc - callbackIndex, argv + callbackIndex,
