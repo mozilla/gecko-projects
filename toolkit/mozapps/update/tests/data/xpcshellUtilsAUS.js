@@ -4263,6 +4263,7 @@ function getProcessArgs(aExtraArgs) {
       .concat(aExtraArgs)
       .concat([PIPE_TO_NULL]);
   }
+
   return args;
 }
 
