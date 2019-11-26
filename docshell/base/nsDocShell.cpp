@@ -4000,7 +4000,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
         break;
       case NS_ERROR_PROXY_CONNECTION_REFUSED:
       case NS_ERROR_PROXY_AUTHENTICATION_FAILED:
-      case NS_ERROR_TOO_MANY_REQUESTS:
+      case NS_ERROR_PROXY_TOO_MANY_REQUESTS:
         // Proxy connection was refused.
         error = "proxyConnectFailure";
         break;
@@ -6119,7 +6119,7 @@ void nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
   if (RefPtr<DocumentChannelChild> docChannel = do_QueryObject(aOldChannel)) {
     nsCOMPtr<nsIURI> previousURI;
     uint32_t previousFlags = 0;
-    ExtractLastVisit(aOldChannel, getter_AddRefs(previousURI), &previousFlags);
+    docChannel->GetLastVisit(getter_AddRefs(previousURI), &previousFlags);
 
     for (auto redirect : docChannel->GetRedirectChain()) {
       if (!redirect.isPost()) {
@@ -6144,7 +6144,7 @@ void nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
     ExtractLastVisit(aOldChannel, getter_AddRefs(previousURI), &previousFlags);
 
     if (aRedirectFlags & nsIChannelEventSink::REDIRECT_INTERNAL ||
-        ChannelIsPost(aOldChannel)) {
+        net::ChannelIsPost(aOldChannel)) {
       // 1. Internal redirects are ignored because they are specific to the
       //    channel implementation.
       // 2. POSTs are not saved by global history.
@@ -6563,7 +6563,7 @@ nsresult nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
          aStatus == NS_ERROR_UNKNOWN_PROXY_HOST ||
          aStatus == NS_ERROR_PROXY_CONNECTION_REFUSED ||
          aStatus == NS_ERROR_PROXY_AUTHENTICATION_FAILED ||
-         aStatus == NS_ERROR_TOO_MANY_REQUESTS ||
+         aStatus == NS_ERROR_PROXY_TOO_MANY_REQUESTS ||
          aStatus == NS_ERROR_BLOCKED_BY_POLICY) &&
         (isTopFrame || UseErrorPages())) {
       DisplayLoadError(aStatus, url, nullptr, aChannel);
@@ -9683,6 +9683,41 @@ static bool SchemeUsesDocChannel(nsIURI* aURI) {
     }
   }
 
+  channel->SetOriginalURI(aLoadState->OriginalURI() ? aLoadState->OriginalURI()
+                                                    : aLoadState->URI());
+
+  const nsACString& typeHint = aLoadState->TypeHint();
+  if (!typeHint.IsVoid()) {
+    channel->SetContentType(typeHint);
+  }
+
+  const nsAString& fileName = aLoadState->FileName();
+  if (!fileName.IsVoid()) {
+    aRv = channel->SetContentDisposition(nsIChannel::DISPOSITION_ATTACHMENT);
+    NS_ENSURE_SUCCESS(aRv, false);
+    if (!fileName.IsEmpty()) {
+      aRv = channel->SetContentDispositionFilename(fileName);
+      NS_ENSURE_SUCCESS(aRv, false);
+    }
+  }
+
+  if (nsCOMPtr<nsIWritablePropertyBag2> props = do_QueryInterface(channel)) {
+    nsCOMPtr<nsIURI> referrer;
+    nsIReferrerInfo* referrerInfo = aLoadState->GetReferrerInfo();
+    if (referrerInfo) {
+      referrerInfo->GetOriginalReferrer(getter_AddRefs(referrer));
+    }
+    // save true referrer for those who need it (e.g. xpinstall whitelisting)
+    // Currently only http and ftp channels support this.
+    props->SetPropertyAsInterface(
+        NS_LITERAL_STRING("docshell.internalReferrer"), referrer);
+
+    if (aLoadState->HasLoadFlags(INTERNAL_LOAD_FLAGS_FIRST_LOAD)) {
+      props->SetPropertyAsBool(NS_LITERAL_STRING("docshell.newWindowTarget"),
+                               true);
+    }
+  }
+
   channel.forget(aChannel);
   return true;
 }
@@ -9691,20 +9726,6 @@ static bool SchemeUsesDocChannel(nsIURI* aURI) {
     nsIChannel* aChannel, nsDocShellLoadState* aLoadState,
     const nsString* aInitiatorType, uint32_t aLoadType, uint32_t aCacheKey,
     bool aHasNonEmptySandboxingFlags) {
-  nsCOMPtr<nsIWritablePropertyBag2> props(do_QueryInterface(aChannel));
-  if (props) {
-    nsCOMPtr<nsIURI> referrer;
-    nsIReferrerInfo* referrerInfo = aLoadState->GetReferrerInfo();
-    if (referrerInfo) {
-      referrerInfo->GetOriginalReferrer(getter_AddRefs(referrer));
-    }
-
-    // save true referrer for those who need it (e.g. xpinstall whitelisting)
-    // Currently only http and ftp channels support this.
-    props->SetPropertyAsInterface(
-        NS_LITERAL_STRING("docshell.internalReferrer"), referrer);
-  }
-
   nsCOMPtr<nsILoadInfo> loadInfo;
   MOZ_ALWAYS_SUCCEEDS(aChannel->GetLoadInfo(getter_AddRefs(loadInfo)));
 
@@ -9720,37 +9741,17 @@ static bool SchemeUsesDocChannel(nsIURI* aURI) {
   }
 
   nsresult rv = NS_OK;
-  if (aLoadState->OriginalURI()) {
-    aChannel->SetOriginalURI(aLoadState->OriginalURI());
+  if (aLoadState->OriginalURI() && aLoadState->LoadReplace()) {
     // The LOAD_REPLACE flag and its handling here will be removed as part
     // of bug 1319110.  For now preserve its restoration here to not break
     // any code expecting it being set specially on redirected channels.
     // If the flag has originally been set to change result of
     // NS_GetFinalChannelURI it won't have any effect and also won't cause
     // any harm.
-    if (aLoadState->LoadReplace()) {
-      uint32_t loadFlags;
-      aChannel->GetLoadFlags(&loadFlags);
-      NS_ENSURE_SUCCESS(rv, rv);
-      aChannel->SetLoadFlags(loadFlags | nsIChannel::LOAD_REPLACE);
-    }
-  } else {
-    aChannel->SetOriginalURI(aLoadState->URI());
-  }
-
-  const nsACString& typeHint = aLoadState->TypeHint();
-  if (!typeHint.IsVoid()) {
-    aChannel->SetContentType(typeHint);
-  }
-
-  const nsAString& fileName = aLoadState->FileName();
-  if (!fileName.IsVoid()) {
-    rv = aChannel->SetContentDisposition(nsIChannel::DISPOSITION_ATTACHMENT);
+    uint32_t loadFlags;
+    rv = aChannel->GetLoadFlags(&loadFlags);
     NS_ENSURE_SUCCESS(rv, rv);
-    if (!fileName.IsEmpty()) {
-      rv = aChannel->SetContentDispositionFilename(fileName);
-      NS_ENSURE_SUCCESS(rv, rv);
-    }
+    aChannel->SetLoadFlags(loadFlags | nsIChannel::LOAD_REPLACE);
   }
 
   nsCOMPtr<nsICacheInfoChannel> cacheChannel(do_QueryInterface(aChannel));
@@ -9813,14 +9814,6 @@ static bool SchemeUsesDocChannel(nsIURI* aURI) {
   if (scriptChannel) {
     // Allow execution against our context if the principals match
     scriptChannel->SetExecutionPolicy(nsIScriptChannel::EXECUTE_NORMAL);
-  }
-
-  if (aLoadState->HasLoadFlags(INTERNAL_LOAD_FLAGS_FIRST_LOAD)) {
-    nsCOMPtr<nsIWritablePropertyBag2> props = do_QueryInterface(aChannel);
-    if (props) {
-      props->SetPropertyAsBool(NS_LITERAL_STRING("docshell.newWindowTarget"),
-                               true);
-    }
   }
 
   // TODO: What should we do with this?
@@ -10201,7 +10194,6 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
 
   const nsACString& typeHint = aLoadState->TypeHint();
   if (!typeHint.IsVoid()) {
-    channel->SetContentType(typeHint);
     mContentTypeHint = typeHint;
   } else {
     mContentTypeHint.Truncate();
@@ -10791,7 +10783,7 @@ bool nsDocShell::OnNewURI(nsIURI* aURI, nsIChannel* aChannel,
 
   // If this is a POST request, we do not want to include this in global
   // history.
-  if (updateGHistory && aAddToGlobalHistory && !ChannelIsPost(aChannel)) {
+  if (updateGHistory && aAddToGlobalHistory && !net::ChannelIsPost(aChannel)) {
     nsCOMPtr<nsIURI> previousURI;
     uint32_t previousFlags = 0;
 
@@ -11761,19 +11753,8 @@ nsDocShell::MakeEditable(bool aInWaitForUriLoad) {
   return mEditorData->MakeEditable(aInWaitForUriLoad);
 }
 
-bool nsDocShell::ChannelIsPost(nsIChannel* aChannel) {
-  nsCOMPtr<nsIHttpChannel> httpChannel(do_QueryInterface(aChannel));
-  if (!httpChannel) {
-    return false;
-  }
-
-  nsAutoCString method;
-  Unused << httpChannel->GetRequestMethod(method);
-  return method.EqualsLiteral("POST");
-}
-
-void nsDocShell::ExtractLastVisit(nsIChannel* aChannel, nsIURI** aURI,
-                                  uint32_t* aChannelRedirectFlags) {
+/* static */ void nsDocShell::ExtractLastVisit(
+    nsIChannel* aChannel, nsIURI** aURI, uint32_t* aChannelRedirectFlags) {
   nsCOMPtr<nsIPropertyBag2> props(do_QueryInterface(aChannel));
   if (!props) {
     return;

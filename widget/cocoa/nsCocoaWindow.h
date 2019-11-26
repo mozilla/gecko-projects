@@ -294,9 +294,10 @@ class nsCocoaWindow final : public nsBaseWidget, public nsPIWidgetCocoa {
   virtual bool HasPendingInputEvent() override;
   virtual nsTransparencyMode GetTransparencyMode() override;
   virtual void SetTransparencyMode(nsTransparencyMode aMode) override;
-  virtual void SetWindowShadowStyle(int32_t aStyle) override;
+  virtual void SetWindowShadowStyle(mozilla::StyleWindowShadow aStyle) override;
   virtual void SetWindowOpacity(float aOpacity) override;
   virtual void SetWindowTransform(const mozilla::gfx::Matrix& aTransform) override;
+  virtual void SetWindowMouseTransparent(bool aIsTransparent) override;
   virtual void SetShowsToolbarButton(bool aShow) override;
   virtual void SetShowsFullScreenButton(bool aShow) override;
   virtual void SetWindowAnimationType(WindowAnimationType aType) override;
@@ -366,7 +367,7 @@ class nsCocoaWindow final : public nsBaseWidget, public nsPIWidgetCocoa {
   // if this is a toplevel window, and there is any ongoing fullscreen
   // transition, it is the animation object.
   NSAnimation* mFullscreenTransitionAnimation;
-  int32_t mShadowStyle;
+  mozilla::StyleWindowShadow mShadowStyle;
 
   CGFloat mBackingScaleFactor;
   CGFloat mAspectRatio;

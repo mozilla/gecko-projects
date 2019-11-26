@@ -357,6 +357,7 @@ nsHttpChannel::nsHttpChannel()
       mRaceDelay(0),
       mIgnoreCacheEntry(false),
       mRCWNLock("nsHttpChannel.mRCWNLock"),
+      mProxyConnectResponseCode(0),
       mDidReval(false) {
   LOG(("Creating nsHttpChannel [this=%p]\n", this));
   mChannelCreationTime = PR_Now();
@@ -1924,6 +1925,18 @@ nsresult nsHttpChannel::CallOnStartRequest() {
   return NS_OK;
 }
 
+NS_IMETHODIMP nsHttpChannel::GetHttpProxyConnectResponseCode(
+    int32_t* aResponseCode) {
+  NS_ENSURE_ARG_POINTER(aResponseCode);
+
+  if (mConnectionInfo && mConnectionInfo->UsingConnect()) {
+    *aResponseCode = mProxyConnectResponseCode;
+  } else {
+    *aResponseCode = -1;
+  }
+  return NS_OK;
+}
+
 nsresult nsHttpChannel::ProcessFailedProxyConnect(uint32_t httpStatus) {
   // Failure to set up a proxy tunnel via CONNECT means one of the following:
   // 1) Proxy wants authorization, or forbids.
@@ -1938,67 +1951,7 @@ nsresult nsHttpChannel::ProcessFailedProxyConnect(uint32_t httpStatus) {
 
   MOZ_ASSERT(mConnectionInfo->UsingConnect(),
              "proxy connect failed but not using CONNECT?");
-  nsresult rv;
-  switch (httpStatus) {
-    case 300:
-    case 301:
-    case 302:
-    case 303:
-    case 307:
-    case 308:
-      // Bad redirect: not top-level, or it's a POST, bad/missing Location,
-      // or ProcessRedirect() failed for some other reason.  Legal
-      // redirects that fail because site not available, etc., are handled
-      // elsewhere, in the regular codepath.
-      rv = NS_ERROR_CONNECTION_REFUSED;
-      break;
-    case 403:  // HTTP/1.1: "Forbidden"
-    case 501:  // HTTP/1.1: "Not Implemented"
-      // user sees boilerplate Mozilla "Proxy Refused Connection" page.
-      rv = NS_ERROR_PROXY_CONNECTION_REFUSED;
-      break;
-    case 407:  // ProcessAuthentication() failed (e.g. no header)
-      rv = NS_ERROR_PROXY_AUTHENTICATION_FAILED;
-      break;
-    case 429:
-      rv = NS_ERROR_TOO_MANY_REQUESTS;
-      break;
-      // Squid sends 404 if DNS fails (regular 404 from target is tunneled)
-    case 404:  // HTTP/1.1: "Not Found"
-               // RFC 2616: "some deployed proxies are known to return 400 or
-               // 500 when DNS lookups time out."  (Squid uses 500 if it runs
-               // out of sockets: so we have a conflict here).
-    case 400:  // HTTP/1.1 "Bad Request"
-    case 500:  // HTTP/1.1: "Internal Server Error"
-      /* User sees: "Address Not Found: Firefox can't find the server at
-       * www.foo.com."
-       */
-      rv = NS_ERROR_UNKNOWN_HOST;
-      break;
-    case 502:  // HTTP/1.1: "Bad Gateway" (invalid resp from target server)
-      rv = NS_ERROR_PROXY_BAD_GATEWAY;
-      break;
-    case 503:  // HTTP/1.1: "Service Unavailable"
-      // Squid returns 503 if target request fails for anything but DNS.
-      /* User sees: "Failed to Connect:
-       *  Firefox can't establish a connection to the server at
-       *  www.foo.com.  Though the site seems valid, the browser
-       *  was unable to establish a connection."
-       */
-      rv = NS_ERROR_CONNECTION_REFUSED;
-      break;
-    // RFC 2616 uses 504 for both DNS and target timeout, so not clear what to
-    // do here: picking target timeout, as DNS covered by 400/404/500
-    case 504:  // HTTP/1.1: "Gateway Timeout"
-      // user sees: "Network Timeout: The server at www.foo.com
-      //              is taking too long to respond."
-      rv = NS_ERROR_PROXY_GATEWAY_TIMEOUT;
-      break;
-    // Confused proxy server or malicious response
-    default:
-      rv = NS_ERROR_PROXY_CONNECTION_REFUSED;
-      break;
-  }
+  nsresult rv = HttpProxyResponseToErrorCode(httpStatus);
   LOG(("Cancelling failed proxy CONNECT [this=%p httpStatus=%u]\n", this,
        httpStatus));
 
@@ -7403,11 +7356,18 @@ nsresult nsHttpChannel::ComputeCrossOriginOpenerPolicyMismatch() {
   nsHttpResponseHead* head =
       mResponseHead ? mResponseHead : mCachedResponseHead;
   if (!head) {
-    return NS_ERROR_NOT_AVAILABLE;
+    // Not having a response head is not a hard failure at the point where
+    // this method is called.
+    return NS_OK;
   }
 
   RefPtr<mozilla::dom::BrowsingContext> ctx;
   mLoadInfo->GetBrowsingContext(getter_AddRefs(ctx));
+
+  // In xpcshell-tests we don't always have a browsingContext
+  if (!ctx) {
+    return NS_OK;
+  }
 
   // Get the policy of the active document, and the policy for the result.
   nsILoadInfo::CrossOriginOpenerPolicy documentPolicy = ctx->GetOpenerPolicy();
@@ -7705,10 +7665,14 @@ nsHttpChannel::OnStartRequest(nsIRequest* request) {
   Telemetry::Accumulate(Telemetry::HTTP_ONSTART_SUSPEND_TOTAL_TIME,
                         mSuspendTotalTime);
 
-  if (!mSecurityInfo && !mCachePump && mTransaction) {
-    // grab the security info from the connection object; the transaction
-    // is guaranteed to own a reference to the connection.
-    mSecurityInfo = mTransaction->SecurityInfo();
+  if (mTransaction) {
+    mProxyConnectResponseCode = mTransaction->GetProxyConnectResponseCode();
+
+    if (!mSecurityInfo && !mCachePump) {
+      // grab the security info from the connection object; the transaction
+      // is guaranteed to own a reference to the connection.
+      mSecurityInfo = mTransaction->SecurityInfo();
+    }
   }
 
   // don't enter this block if we're reading from the cache...
@@ -7818,7 +7782,10 @@ nsresult nsHttpChannel::ContinueOnStartRequest2(nsresult result) {
        mStatus == NS_ERROR_UNKNOWN_PROXY_HOST ||
        mStatus == NS_ERROR_NET_TIMEOUT)) {
     PushRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest3);
-    if (NS_SUCCEEDED(ProxyFailover())) return NS_OK;
+    if (NS_SUCCEEDED(ProxyFailover())) {
+      mProxyConnectResponseCode = 0;
+      return NS_OK;
+    }
     PopRedirectAsyncFunc(&nsHttpChannel::ContinueOnStartRequest3);
   }
 
@@ -9815,17 +9782,6 @@ void nsHttpChannel::SetOriginHeader() {
     if (!origin.EqualsIgnoreCase(currentOrigin.get())) {
       // Origin header suppressed by user setting
       return;
-    }
-  } else if (StaticPrefs::network_http_referer_hideOnionSource()) {
-    nsAutoCString host;
-    if (referrer && NS_SUCCEEDED(referrer->GetAsciiHost(host)) &&
-        StringEndsWith(host, NS_LITERAL_CSTRING(".onion"))) {
-      nsAutoCString currentOrigin;
-      nsContentUtils::GetASCIIOrigin(mURI, currentOrigin);
-      if (!origin.EqualsIgnoreCase(currentOrigin.get())) {
-        // Origin header is suppressed by .onion
-        return;
-      }
     }
   }
 

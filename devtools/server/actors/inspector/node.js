@@ -530,6 +530,7 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     return {
       url: customElementDO.script.url,
       line: customElementDO.script.startLine,
+      column: customElementDO.script.startColumn,
     };
   },
 
@@ -654,13 +655,13 @@ const NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
           rawNode.removeAttribute(change.attributeName);
         }
       } else if (change.attributeNamespace) {
-        rawNode.setAttributeNS(
+        rawNode.setAttributeDevtoolsNS(
           change.attributeNamespace,
           change.attributeName,
           change.newValue
         );
       } else {
-        rawNode.setAttribute(change.attributeName, change.newValue);
+        rawNode.setAttributeDevtools(change.attributeName, change.newValue);
       }
     }
   },

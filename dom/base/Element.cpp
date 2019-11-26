@@ -77,6 +77,7 @@
 #include "mozilla/RestyleManager.h"
 #include "mozilla/ScrollTypes.h"
 #include "mozilla/SizeOfState.h"
+#include "mozilla/TextControlElement.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/dom/DirectionalityUtils.h"
@@ -133,7 +134,6 @@
 #include "mozilla/dom/NodeListBinding.h"
 
 #include "nsStyledElement.h"
-#include "nsITextControlElement.h"
 #include "nsITextControlFrame.h"
 #include "nsISupportsImpl.h"
 #include "mozilla/dom/CSSPseudoElement.h"
@@ -1350,6 +1350,44 @@ void Element::SetAttributeNS(const nsAString& aNamespaceURI,
 
   aError = SetAttr(ni->NamespaceID(), ni->NameAtom(), ni->GetPrefixAtom(),
                    aValue, aTriggeringPrincipal, true);
+}
+
+static already_AddRefed<BasePrincipal> CreateDevtoolsPrincipal(
+    nsIPrincipal* aPrincipal, nsIContentSecurityPolicy* aCsp) {
+  // Return an ExpandedPrincipal that subsumes aPrincipal, and expands aCSP
+  // to allow the actions that devtools needs to perform.
+  AutoTArray<nsCOMPtr<nsIPrincipal>, 1> allowList = {aPrincipal};
+  RefPtr<ExpandedPrincipal> dtPrincipal =
+      ExpandedPrincipal::Create(allowList, aPrincipal->OriginAttributesRef());
+
+  if (aCsp) {
+    RefPtr<nsCSPContext> dtCsp = new nsCSPContext();
+    dtCsp->InitFromOther(static_cast<nsCSPContext*>(aCsp));
+    dtCsp->SetSkipAllowInlineStyleCheck(true);
+
+    dtPrincipal->SetCsp(dtCsp);
+  }
+
+  return dtPrincipal.forget();
+}
+
+void Element::SetAttributeDevtools(const nsAString& aName,
+                                   const nsAString& aValue,
+                                   ErrorResult& aError) {
+  // Run this through SetAttribute with a devtools-ready principal.
+  RefPtr<BasePrincipal> dtPrincipal =
+      CreateDevtoolsPrincipal(NodePrincipal(), GetCsp());
+  SetAttribute(aName, aValue, dtPrincipal, aError);
+}
+
+void Element::SetAttributeDevtoolsNS(const nsAString& aNamespaceURI,
+                                     const nsAString& aLocalName,
+                                     const nsAString& aValue,
+                                     ErrorResult& aError) {
+  // Run this through SetAttributeNS with a devtools-ready principal.
+  RefPtr<BasePrincipal> dtPrincipal =
+      CreateDevtoolsPrincipal(NodePrincipal(), GetCsp());
+  SetAttributeNS(aNamespaceURI, aLocalName, aValue, dtPrincipal, aError);
 }
 
 void Element::RemoveAttributeNS(const nsAString& aNamespaceURI,
@@ -3530,8 +3568,9 @@ void Element::InsertAdjacentText(const nsAString& aWhere,
 }
 
 TextEditor* Element::GetTextEditorInternal() {
-  nsCOMPtr<nsITextControlElement> textCtrl = do_QueryInterface(this);
-  return textCtrl ? textCtrl->GetTextEditor() : nullptr;
+  TextControlElement* textControlElement = TextControlElement::FromNode(this);
+  return textControlElement ? MOZ_KnownLive(textControlElement)->GetTextEditor()
+                            : nullptr;
 }
 
 nsresult Element::SetBoolAttr(nsAtom* aAttr, bool aValue) {
@@ -3704,7 +3743,7 @@ void Element::UnlinkIntersectionObservers() {
 
 bool Element::UpdateIntersectionObservation(DOMIntersectionObserver* aObserver,
                                             int32_t aThreshold) {
-  IntersectionObserverList* observers = static_cast<IntersectionObserverList*>(
+  auto* observers = static_cast<IntersectionObserverList*>(
       GetProperty(nsGkAtoms::intersectionobserverlist));
   if (!observers) {
     return false;

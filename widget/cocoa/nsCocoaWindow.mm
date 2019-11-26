@@ -139,7 +139,7 @@ nsCocoaWindow::nsCocoaWindow()
       mSheetWindowParent(nil),
       mPopupContentView(nil),
       mFullscreenTransitionAnimation(nil),
-      mShadowStyle(NS_STYLE_WINDOW_SHADOW_DEFAULT),
+      mShadowStyle(StyleWindowShadow::Default),
       mBackingScaleFactor(0.0),
       mAnimationType(nsIWidget::eGenericWindowAnimation),
       mWindowMadeHere(false),
@@ -314,9 +314,8 @@ nsresult nsCocoaWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (mWindowType == eWindowType_popup) {
-    if (aInitData->mMouseTransparent) {
-      [mWindow setIgnoresMouseEvents:YES];
-    }
+    SetWindowMouseTransparent(aInitData->mMouseTransparent);
+
     // now we can convert newBounds to device pixels for the window we created,
     // as the child view expects a rect expressed in the dev pix of its parent
     LayoutDeviceIntRect devRect = RoundedToInt(newBounds * GetDesktopToDeviceScale());
@@ -982,8 +981,8 @@ void nsCocoaWindow::AdjustWindowShadow() {
     return;
 
   const ShadowParams& params = nsCocoaFeatures::OnYosemiteOrLater()
-                                   ? kWindowShadowParametersPostYosemite[mShadowStyle]
-                                   : kWindowShadowParametersPreYosemite[mShadowStyle];
+                                   ? kWindowShadowParametersPostYosemite[uint8_t(mShadowStyle)]
+                                   : kWindowShadowParametersPreYosemite[uint8_t(mShadowStyle)];
   CGSConnection cid = _CGSDefaultConnection();
   CGSSetWindowShadowAndRimParameters(cid, [mWindow windowNumber], params.standardDeviation,
                                      params.density, params.offsetX, params.offsetY, params.flags);
@@ -999,8 +998,7 @@ void nsCocoaWindow::SetWindowBackgroundBlur() {
   if (!mWindow || ![mWindow isVisible] || [mWindow windowNumber] == -1) return;
 
   // Only blur the background of menus and fake sheets.
-  if (mShadowStyle != NS_STYLE_WINDOW_SHADOW_MENU && mShadowStyle != NS_STYLE_WINDOW_SHADOW_SHEET)
-    return;
+  if (mShadowStyle != StyleWindowShadow::Menu && mShadowStyle != StyleWindowShadow::Sheet) return;
 
   CGSConnection cid = _CGSDefaultConnection();
   CGSSetWindowBackgroundBlurRadius(cid, [mWindow windowNumber], kWindowBackgroundBlurRadius);
@@ -1992,7 +1990,7 @@ nsresult nsCocoaWindow::GetAttention(int32_t aCycleCount) {
 
 bool nsCocoaWindow::HasPendingInputEvent() { return nsChildView::DoHasPendingInputEvent(); }
 
-void nsCocoaWindow::SetWindowShadowStyle(int32_t aStyle) {
+void nsCocoaWindow::SetWindowShadowStyle(StyleWindowShadow aStyle) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   if (!mWindow) return;
@@ -2001,10 +1999,10 @@ void nsCocoaWindow::SetWindowShadowStyle(int32_t aStyle) {
 
   // Shadowless windows are only supported on popups.
   if (mWindowType == eWindowType_popup) {
-    [mWindow setHasShadow:aStyle != NS_STYLE_WINDOW_SHADOW_NONE];
+    [mWindow setHasShadow:aStyle != StyleWindowShadow::None];
   }
 
-  [mWindow setUseMenuStyle:(aStyle == NS_STYLE_WINDOW_SHADOW_MENU)];
+  [mWindow setUseMenuStyle:(aStyle == StyleWindowShadow::Menu)];
   AdjustWindowShadow();
   SetWindowBackgroundBlur();
 
@@ -2098,6 +2096,15 @@ void nsCocoaWindow::SetWindowTransform(const gfx::Matrix& aTransform) {
   mWindowTransformIsIdentity = isIdentity;
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
+void nsCocoaWindow::SetWindowMouseTransparent(bool aIsTransparent) {
+  MOZ_ASSERT(mWindowType == eWindowType_popup, "This should only be called on popup windows.");
+  if (aIsTransparent) {
+    [mWindow setIgnoresMouseEvents:YES];
+  } else {
+    [mWindow setIgnoresMouseEvents:NO];
+  }
 }
 
 void nsCocoaWindow::SetShowsToolbarButton(bool aShow) {

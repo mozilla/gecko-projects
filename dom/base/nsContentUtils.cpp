@@ -4087,9 +4087,7 @@ nsresult nsContentUtils::DispatchInputEvent(Element* aEventTargetElement,
   }
 #ifdef DEBUG
   else {
-    nsCOMPtr<nsITextControlElement> textControlElement =
-        do_QueryInterface(aEventTargetElement);
-    MOZ_ASSERT(!textControlElement,
+    MOZ_ASSERT(!aEventTargetElement->IsTextControlElement(),
                "The event target may have editor, but we've not known it yet.");
   }
 #endif  // #ifdef DEBUG
@@ -10259,9 +10257,9 @@ bool nsContentUtils::IsURIInList(nsIURI* aURI, const nsCString& aBlackList) {
           if (StringBeginsWith(filePath, pathInBlackList) &&
               (filePath.Length() == pathInBlackList.Length() ||
                pathInBlackList.EqualsLiteral("/") ||
-               filePath[pathInBlackList.Length()] == '/' ||
-               filePath[pathInBlackList.Length()] == '?' ||
-               filePath[pathInBlackList.Length()] == '#')) {
+               filePath[pathInBlackList.Length() - 1] == '/' ||
+               filePath[pathInBlackList.Length() - 1] == '?' ||
+               filePath[pathInBlackList.Length() - 1] == '#')) {
             return true;
           }
         }

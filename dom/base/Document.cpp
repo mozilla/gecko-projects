@@ -39,6 +39,7 @@
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StaticPrefs_security.h"
 #include "mozilla/StorageAccess.h"
+#include "mozilla/TextControlElement.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/URLDecorationStripper.h"
 #include "mozilla/URLExtraData.h"
@@ -64,7 +65,7 @@
 #include "nsIObserver.h"
 #include "nsIBaseWindow.h"
 #include "nsILayoutHistoryState.h"
-#include "nsLayoutStylesheetCache.h"
+#include "mozilla/GlobalStyleSheetCache.h"
 #include "mozilla/css/Loader.h"
 #include "mozilla/css/ImageLoader.h"
 #include "nsDocShell.h"
@@ -283,7 +284,6 @@
 #include "nsDOMCaretPosition.h"
 #include "nsViewportInfo.h"
 #include "mozilla/StaticPtr.h"
-#include "nsITextControlElement.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsISecurityConsoleMessage.h"
 #include "nsCharSeparatedTokenizer.h"
@@ -1196,7 +1196,7 @@ void Document::Shutdown() {
 
 Document::Document(const char* aContentType)
     : nsINode(nullptr),
-      DocumentOrShadowRoot(*this),
+      DocumentOrShadowRoot(this),
       mBlockAllMixedContent(false),
       mBlockAllMixedContentPreloads(false),
       mUpgradeInsecureRequests(false),
@@ -2616,7 +2616,7 @@ void Document::FillStyleSetUserAndUASheets() {
   // ordering.
 
   // The document will fill in the document sheets when we create the presshell
-  auto cache = nsLayoutStylesheetCache::Singleton();
+  auto* cache = GlobalStyleSheetCache::Singleton();
 
   nsStyleSheetService* sheetService = nsStyleSheetService::GetInstance();
   MOZ_ASSERT(sheetService,
@@ -2691,7 +2691,7 @@ void Document::FillStyleSet() {
 void Document::RemoveContentEditableStyleSheets() {
   MOZ_ASSERT(IsHTMLOrXHTML());
 
-  auto* cache = nsLayoutStylesheetCache::Singleton();
+  auto* cache = GlobalStyleSheetCache::Singleton();
   bool changed = false;
   if (mDesignModeSheetAdded) {
     mStyleSet->RemoveStyleSheet(StyleOrigin::UserAgent,
@@ -2716,7 +2716,7 @@ void Document::AddContentEditableStyleSheetsToStyleSet(bool aDesignMode) {
   MOZ_DIAGNOSTIC_ASSERT(mStyleSetFilled,
                         "Caller should ensure we're being rendered");
 
-  auto* cache = nsLayoutStylesheetCache::Singleton();
+  auto* cache = GlobalStyleSheetCache::Singleton();
   bool changed = false;
   if (!mContentEditableSheetAdded) {
     mStyleSet->AppendStyleSheet(StyleOrigin::UserAgent,
@@ -2779,7 +2779,7 @@ void Document::CompatibilityModeChanged() {
   if (mQuirkSheetAdded == NeedsQuirksSheet()) {
     return;
   }
-  auto cache = nsLayoutStylesheetCache::Singleton();
+  auto* cache = GlobalStyleSheetCache::Singleton();
   StyleSheet* sheet = cache->QuirkSheet();
   if (mQuirkSheetAdded) {
     mStyleSet->RemoveStyleSheet(StyleOrigin::UserAgent, sheet);
@@ -5008,14 +5008,12 @@ nsresult Document::TurnEditingOff() {
 
   // Editor resets selection since it is being destroyed.  But if focus is
   // still into editable control, we have to initialize selection again.
-  nsFocusManager* fm = nsFocusManager::GetFocusManager();
-  if (fm) {
-    Element* element = fm->GetFocusedElement();
-    nsCOMPtr<nsITextControlElement> txtCtrl = do_QueryInterface(element);
-    if (txtCtrl) {
-      RefPtr<TextEditor> textEditor = txtCtrl->GetTextEditor();
+  if (nsFocusManager* fm = nsFocusManager::GetFocusManager()) {
+    if (RefPtr<TextControlElement> textControlElement =
+            TextControlElement::FromNodeOrNull(fm->GetFocusedElement())) {
+      RefPtr<TextEditor> textEditor = textControlElement->GetTextEditor();
       if (textEditor) {
-        textEditor->ReinitializeSelection(*element);
+        textEditor->ReinitializeSelection(*textControlElement);
       }
     }
   }

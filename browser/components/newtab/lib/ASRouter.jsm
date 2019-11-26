@@ -33,6 +33,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   CFRMessageProvider: "resource://activity-stream/lib/CFRMessageProvider.jsm",
   KintoHttpClient: "resource://services-common/kinto-http-client.js",
   Downloader: "resource://services-settings/Attachments.jsm",
+  RemoteL10n: "resource://activity-stream/lib/RemoteL10n.jsm",
+  MigrationUtils: "resource:///modules/MigrationUtils.jsm",
 });
 const {
   ASRouterActions: ra,
@@ -106,10 +108,14 @@ const STARTPAGE_VERSION = "6";
 const RS_SERVER_PREF = "services.settings.server";
 const RS_MAIN_BUCKET = "main";
 const RS_COLLECTION_L10N = "ms-language-packs"; // "ms" stands for Messaging System
-const RS_PROVIDERS_WITH_L10N = ["cfr", "cfr-fxa"];
+const RS_PROVIDERS_WITH_L10N = ["cfr", "cfr-fxa", "whats-new-panel"];
 const RS_FLUENT_VERSION = "v1";
 const RS_FLUENT_RECORD_PREFIX = `cfr-${RS_FLUENT_VERSION}`;
 const RS_DOWNLOAD_MAX_RETRIES = 2;
+// This is the list of providers for which we want to cache the targeting
+// expression result and reuse between calls. Cache duration is defined in
+// ASRouterTargeting where evaluation takes place.
+const JEXL_PROVIDER_CACHE = new Set(["snippets"]);
 
 // To observe the app locale change notification.
 const TOPIC_INTL_LOCALE_CHANGED = "intl:app-locales-changed";
@@ -320,6 +326,7 @@ const MessageLoaderUtils = {
             await downloader.download(record.data, {
               retries: RS_DOWNLOAD_MAX_RETRIES,
             });
+            RemoteL10n.reloadL10n();
           } else {
             MessageLoaderUtils._handleRemoteSettingsUndesiredEvent(
               "ASR_RS_NO_MESSAGES",
@@ -1215,7 +1222,11 @@ class _ASRouter {
     };
   }
 
-  _findAllMessages(candidateMessages, trigger, ordered = false) {
+  _findAllMessages(
+    candidateMessages,
+    trigger,
+    { ordered = false, shouldCache = false } = {}
+  ) {
     const messages = candidateMessages.filter(m =>
       this.isBelowFrequencyCaps(m)
     );
@@ -1227,10 +1238,15 @@ class _ASRouter {
       context,
       onError: this._handleTargetingError,
       ordered,
+      shouldCache,
     });
   }
 
-  _findMessage(candidateMessages, trigger, ordered = false) {
+  _findMessage(
+    candidateMessages,
+    trigger,
+    { ordered = false, shouldCache = false } = {}
+  ) {
     const messages = candidateMessages.filter(m =>
       this.isBelowFrequencyCaps(m)
     );
@@ -1244,6 +1260,7 @@ class _ASRouter {
       context,
       onError: this._handleTargetingError,
       ordered,
+      shouldCache,
     });
   }
 
@@ -1353,7 +1370,7 @@ class _ASRouter {
       const allMessages = await this._findAllMessages(
         bundledMessagesOfSameTemplate,
         trigger,
-        true
+        { ordered: true }
       );
 
       if (allMessages && allMessages.length) {
@@ -1648,6 +1665,8 @@ class _ASRouter {
       return true;
     });
 
+    const shouldCache = msgs.every(m => JEXL_PROVIDER_CACHE.has(m.provider));
+
     if (returnAll) {
       return this._findAllMessages(
         msgs,
@@ -1655,7 +1674,8 @@ class _ASRouter {
           id: triggerId,
           param: triggerParam,
           context: triggerContext,
-        }
+        },
+        { shouldCache }
       );
     }
 
@@ -1665,7 +1685,8 @@ class _ASRouter {
         id: triggerId,
         param: triggerParam,
         context: triggerContext,
-      }
+      },
+      { shouldCache }
     );
   }
 
@@ -1884,6 +1905,11 @@ class _ASRouter {
 
   async handleUserAction({ data: action, target }) {
     switch (action.type) {
+      case ra.SHOW_MIGRATION_WIZARD:
+        MigrationUtils.showMigrationWizard(target.browser.ownerGlobal, [
+          MigrationUtils.MIGRATION_ENTRYPOINT_NEWTAB,
+        ]);
+        break;
       case ra.OPEN_PRIVATE_BROWSER_WINDOW:
         // Forcefully open about:privatebrowsing
         target.browser.ownerGlobal.OpenBrowserWindow({ private: true });

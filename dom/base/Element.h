@@ -1058,6 +1058,11 @@ class Element : public FragmentOrElement {
                     ErrorResult& aError) {
     SetAttribute(aName, aValue, nullptr, aError);
   }
+  void SetAttributeDevtools(const nsAString& aName, const nsAString& aValue,
+                            ErrorResult& aError);
+  void SetAttributeDevtoolsNS(const nsAString& aNamespaceURI,
+                              const nsAString& aLocalName,
+                              const nsAString& aValue, ErrorResult& aError);
 
   void RemoveAttribute(const nsAString& aName, ErrorResult& aError);
   void RemoveAttributeNS(const nsAString& aNamespaceURI,
@@ -1496,7 +1501,7 @@ class Element : public FragmentOrElement {
   /**
    * Locate a TextEditor rooted at this content node, if there is one.
    */
-  mozilla::TextEditor* GetTextEditorInternal();
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY mozilla::TextEditor* GetTextEditorInternal();
 
   /**
    * Gets value of boolean attribute. Only works for attributes in null

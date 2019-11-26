@@ -15,7 +15,7 @@
 #include "builtin/BigInt.h"
 #include "builtin/DataViewObject.h"
 #include "builtin/Eval.h"
-#ifdef ENABLE_INTL_API
+#ifdef JS_HAS_INTL_API
 #  include "builtin/intl/Collator.h"
 #  include "builtin/intl/DateTimeFormat.h"
 #  include "builtin/intl/ListFormat.h"
@@ -50,6 +50,7 @@
 #include "vm/AsyncIteration.h"
 #include "vm/DateObject.h"
 #include "vm/EnvironmentObject.h"
+#include "vm/ErrorObject.h"
 #include "vm/GeneratorObject.h"
 #include "vm/HelperThreads.h"
 #include "vm/JSContext.h"
@@ -127,6 +128,11 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
 
     case JSProto_FinalizationGroup:
       return !cx->realm()->creationOptions().getWeakRefsEnabled();
+
+#ifndef NIGHTLY_BUILD
+    case JSProto_AggregateError:
+      return true;
+#endif
 
     default:
       return false;

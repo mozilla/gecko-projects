@@ -1076,17 +1076,8 @@
      */ \
     MACRO(JSOP_STRICTSETPROP_SUPER, 105, "strictsetprop-super", NULL, 5, 3, 1, JOF_ATOM|JOF_PROP|JOF_PROPSET|JOF_DETECTING|JOF_CHECKSTRICT) \
     /*
-     * This opcode precedes every labeled statement. It's a no-op.
-     *
-     * 'offset' is the offset to the next instruction after this statement, the
-     * one 'break LABEL;' would jump to. IonMonkey uses this.
-     *
-     *   Category: Statements
-     *   Type: Jumps
-     *   Operands: int32_t offset
-     *   Stack: =>
      */ \
-    MACRO(JSOP_LABEL, 106, "label", NULL, 5, 0, 0, JOF_CODE_OFFSET) \
+    MACRO(JSOP_UNUSED106, 106, "unused", NULL, 1, 0, 0, JOF_BYTE) \
     /*
      * Pops the top three values on the stack as 'val', 'obj' and 'receiver',
      * and performs 'obj.prop = val', pushing 'val' back onto the stack.
@@ -1242,40 +1233,8 @@
      */ \
     MACRO(JSOP_LINENO, 119, "lineno", NULL, 5, 0, 0, JOF_UINT32) \
     /*
-     * This no-op appears after the bytecode for EXPR in 'switch (EXPR) {...}'
-     * if the switch cannot be optimized using JSOP_TABLESWITCH.
-     *
-     * For a non-optimized switch statement like this:
-     *
-     *     switch (EXPR) {
-     *       case V0:
-     *         C0;
-     *       ...
-     *       default:
-     *         D;
-     *     }
-     *
-     * the bytecode looks like this:
-     *
-     *     (EXPR)
-     *     condswitch
-     *     (V0)
-     *     case ->C0
-     *     ...
-     *     default ->D
-     *     (C0)
-     *     ...
-     *     (D)
-     *
-     * Note that code for all case-labels is emitted first, then code for the
-     * body of each case clause.
-     *
-     *   Category: Statements
-     *   Type: Switch Statement
-     *   Operands:
-     *   Stack: =>
      */ \
-    MACRO(JSOP_CONDSWITCH, 120, "condswitch", NULL, 1, 0, 0, JOF_BYTE) \
+    MACRO(JSOP_UNUSED120, 120, "unused", NULL, 1, 0, 0, JOF_BYTE) \
     /*
      * Pops the top two values on the stack as 'val' and 'cond'. If 'cond' is
      * 'true', jumps to a 32-bit offset from the current bytecode, re-pushes

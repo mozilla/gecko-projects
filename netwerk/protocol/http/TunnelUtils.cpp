@@ -1168,24 +1168,11 @@ void SpdyConnectTransaction::MapStreamToHttpConnection(
   mTunnelStreamOut = new OutputStreamShim(this, mIsWebsocket);
   mTunneledConn = new nsHttpConnection();
 
-  switch (httpResponseCode) {
-    case 404:
-      CreateShimError(NS_ERROR_UNKNOWN_HOST);
-      break;
-    case 407:
-      CreateShimError(NS_ERROR_PROXY_AUTHENTICATION_FAILED);
-      break;
-    case 429:
-      CreateShimError(NS_ERROR_TOO_MANY_REQUESTS);
-      break;
-    case 502:
-      CreateShimError(NS_ERROR_PROXY_BAD_GATEWAY);
-      break;
-    case 504:
-      CreateShimError(NS_ERROR_PROXY_GATEWAY_TIMEOUT);
-      break;
-    default:
-      break;
+  if (httpResponseCode != 200) {
+    nsresult err = HttpProxyResponseToErrorCode(httpResponseCode);
+    if (NS_FAILED(err)) {
+      CreateShimError(err);
+    }
   }
 
   // this new http connection has a specific hashkey (i.e. to a particular
@@ -1221,6 +1208,7 @@ void SpdyConnectTransaction::MapStreamToHttpConnection(
       gHttpHandler->ConnMgr()->MakeConnectionHandle(mTunneledConn);
   mDrivingTransaction->SetConnection(wrappedConn);
   mDrivingTransaction->MakeSticky();
+  mDrivingTransaction->OnProxyConnectComplete(httpResponseCode);
 
   if (!mIsWebsocket) {
     // jump the priority and start the dispatcher
@@ -1740,6 +1728,38 @@ nsIInputStreamCallback* InputStreamShim::GetCallback() {
   return mCallback;
 }
 
+class CheckAvailData final : public Runnable {
+ public:
+  explicit CheckAvailData(InputStreamShim* shim)
+      : Runnable("CheckAvailData"), mShim(shim) {}
+
+  ~CheckAvailData() = default;
+
+  NS_IMETHOD Run() override {
+    uint64_t avail = 0;
+    if (NS_SUCCEEDED(mShim->Available(&avail)) && avail) {
+      nsIInputStreamCallback* cb = mShim->GetCallback();
+      if (cb) {
+        cb->OnInputStreamReady(mShim);
+      }
+    }
+    return NS_OK;
+  }
+
+  MOZ_MUST_USE nsresult Dispatch() {
+    if (OnSocketThread()) {
+      return Run();
+    }
+
+    nsCOMPtr<nsIEventTarget> sts =
+        do_GetService("@mozilla.org/network/socket-transport-service;1");
+    return sts->Dispatch(this, nsIEventTarget::DISPATCH_NORMAL);
+  }
+
+ private:
+  RefPtr<InputStreamShim> mShim;
+};
+
 NS_IMETHODIMP
 InputStreamShim::AsyncWait(nsIInputStreamCallback* callback, unsigned int flags,
                            unsigned int requestedCount,
@@ -1768,6 +1788,11 @@ InputStreamShim::AsyncWait(nsIInputStreamCallback* callback, unsigned int flags,
   {
     mozilla::MutexAutoLock lock(mMutex);
     mCallback = callback;
+  }
+
+  if (callback) {
+    RefPtr<CheckAvailData> cad = new CheckAvailData(this);
+    Unused << cad->Dispatch();
   }
 
   return NS_OK;

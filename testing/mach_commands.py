@@ -431,8 +431,8 @@ class MachCommands(MachCommandBase):
         utility_path = self.bindir
 
         if conditions.is_android(self):
-            from mozrunner.devices.android_device import verify_android_device
-            verify_android_device(self, install=False)
+            from mozrunner.devices.android_device import (verify_android_device, InstallIntent)
+            verify_android_device(self, install=InstallIntent.NO)
             return self.run_android_test(tests, symbols_path, manifest_path, log)
 
         return self.run_desktop_test(tests, symbols_path, manifest_path,
@@ -799,8 +799,9 @@ class TestInfoCommand(MachCommandBase):
             self.full_test_name = self.test_name
 
         # search for full_test_name in test manifests
-        from moztest.resolve import TestResolver
-        resolver = self._spawn(TestResolver)
+        from moztest.resolve import TestResolver, TestManifestLoader
+        here = os.path.abspath(os.path.dirname(__file__))
+        resolver = TestResolver.from_environment(cwd=here, loader_cls=TestManifestLoader)
         relpath = self._wrap_path_argument(self.full_test_name).relpath()
         tests = list(resolver.resolve_tests(paths=[relpath]))
         if len(tests) == 1:
@@ -1216,7 +1217,7 @@ class TestInfoCommand(MachCommandBase):
         import mozpack.path as mozpath
         import re
         from mozbuild.build_commands import Build
-        from moztest.resolve import TestResolver
+        from moztest.resolve import TestResolver, TestManifestLoader
 
         def matches_filters(test):
             '''
@@ -1259,7 +1260,8 @@ class TestInfoCommand(MachCommandBase):
             builder.configure()
 
         print("Finding tests...")
-        resolver = self._spawn(TestResolver)
+        here = os.path.abspath(os.path.dirname(__file__))
+        resolver = TestResolver.from_environment(cwd=here, loader_cls=TestManifestLoader)
         tests = list(resolver.resolve_tests(paths=paths, flavor=flavor,
                                             subsuite=subsuite))
 

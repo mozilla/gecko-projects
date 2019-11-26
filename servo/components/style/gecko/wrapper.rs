@@ -1244,8 +1244,12 @@ impl<'le> TElement for GeckoElement<'le> {
 
     #[inline]
     fn has_part_attr(&self) -> bool {
-        self.as_node()
-            .get_bool_flag(nsINode_BooleanFlag::ElementHasPart)
+        self.as_node().get_bool_flag(nsINode_BooleanFlag::ElementHasPart)
+    }
+
+    #[inline]
+    fn exports_any_part(&self) -> bool {
+        snapshot_helpers::find_attr(self.attrs(), &atom!("exportparts")).is_some()
     }
 
     // FIXME(emilio): we should probably just return a reference to the Atom.
@@ -2214,6 +2218,16 @@ impl<'le> ::selectors::Element for GeckoElement<'le> {
         };
 
         snapshot_helpers::has_class_or_part(name, CaseSensitivity::CaseSensitive, attr)
+    }
+
+    #[inline]
+    fn exported_part(&self, name: &Atom) -> Option<Atom> {
+        snapshot_helpers::exported_part(self.attrs(), name)
+    }
+
+    #[inline]
+    fn imported_part(&self, name: &Atom) -> Option<Atom> {
+        snapshot_helpers::imported_part(self.attrs(), name)
     }
 
     #[inline(always)]

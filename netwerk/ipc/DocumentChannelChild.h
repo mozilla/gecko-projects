@@ -8,9 +8,9 @@
 #ifndef mozilla_net_DocumentChannelChild_h
 #define mozilla_net_DocumentChannelChild_h
 
-#include "mozilla/net/ChannelEventQueue.h"
 #include "mozilla/net/PDocumentChannelChild.h"
-#include "nsBaseChannel.h"
+#include "nsIAsyncVerifyRedirectCallback.h"
+#include "nsIChannel.h"
 #include "nsIChildChannel.h"
 #include "nsITraceableChannel.h"
 
@@ -24,9 +24,10 @@
 namespace mozilla {
 namespace net {
 
-class DocumentChannelChild final : public PDocumentChannelChild,
-                                   public nsBaseChannel,
-                                   public nsITraceableChannel {
+class DocumentChannelChild final : public nsIIdentChannel,
+                                   public nsIAsyncVerifyRedirectCallback,
+                                   public nsITraceableChannel,
+                                   public PDocumentChannelChild {
  public:
   DocumentChannelChild(nsDocShellLoadState* aLoadState,
                        class LoadInfo* aLoadInfo,
@@ -34,23 +35,14 @@ class DocumentChannelChild final : public PDocumentChannelChild,
                        uint32_t aLoadType, uint32_t aCacheKey, bool aIsActive,
                        bool aIsTopLevelDoc, bool aHasNonEmptySandboxingFlags);
 
-  NS_DECL_ISUPPORTS_INHERITED;
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIREQUEST
+  NS_DECL_NSICHANNEL
+  NS_DECL_NSIIDENTCHANNEL
   NS_DECL_NSIASYNCVERIFYREDIRECTCALLBACK
   NS_DECL_NSITRACEABLECHANNEL
 
   NS_DECLARE_STATIC_IID_ACCESSOR(DOCUMENT_CHANNEL_CHILD_IID)
-
-  // nsIRequest
-  NS_IMETHOD Cancel(nsresult status) override;
-  NS_IMETHOD Suspend() override;
-  NS_IMETHOD Resume() override;
-  // nsIChannel
-  NS_IMETHOD AsyncOpen(nsIStreamListener* aListener) override;
-
-  nsresult OpenContentStream(bool aAsync, nsIInputStream** aStream,
-                             nsIChannel** aChannel) override {
-    return NS_ERROR_NOT_IMPLEMENTED;
-  }
 
   mozilla::ipc::IPCResult RecvFailedAsyncOpen(const nsresult& aStatusCode);
 
@@ -73,19 +65,24 @@ class DocumentChannelChild final : public PDocumentChannelChild,
     return mRedirects;
   }
 
+  void GetLastVisit(nsIURI** aURI, uint32_t* aChannelRedirectFlags) const {
+    *aURI = do_AddRef(mLastVisitInfo.uri()).take();
+    *aChannelRedirectFlags = mLastVisitInfo.previousFlags();
+  }
+
  private:
-  friend class NeckoTargetChannelFunctionEvent;
   void ShutdownListeners(nsresult aStatusCode);
+  nsDocShell* GetDocShell();
 
   ~DocumentChannelChild() = default;
 
-  RefPtr<ChannelEventQueue> mEventQueue;
+  LastVisitInfo mLastVisitInfo;
   nsCOMPtr<nsIChannel> mRedirectChannel;
   nsTArray<DocumentChannelRedirect> mRedirects;
 
   RedirectToRealChannelResolver mRedirectResolver;
 
-  TimeStamp mAsyncOpenTime;
+  const TimeStamp mAsyncOpenTime;
   const RefPtr<nsDocShellLoadState> mLoadState;
   const Maybe<nsString> mInitiatorType;
   const uint32_t mLoadType;
@@ -94,10 +91,18 @@ class DocumentChannelChild final : public PDocumentChannelChild,
   const bool mIsTopLevelDoc;
   const bool mHasNonEmptySandboxingFlags;
 
+  nsresult mStatus = NS_OK;
   bool mCanceled = false;
-  uint32_t mSuspendCount = 0;
   bool mIsPending = false;
   bool mWasOpened = false;
+  uint64_t mChannelId;
+  uint32_t mLoadFlags = LOAD_NORMAL;
+  const nsCOMPtr<nsIURI> mURI;
+  nsCOMPtr<nsILoadGroup> mLoadGroup;
+  nsCOMPtr<nsILoadInfo> mLoadInfo;
+  nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
+  nsCOMPtr<nsIStreamListener> mListener;
+  nsCOMPtr<nsISupports> mOwner;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(DocumentChannelChild, DOCUMENT_CHANNEL_CHILD_IID)

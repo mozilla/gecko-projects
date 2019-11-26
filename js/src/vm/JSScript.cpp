@@ -15,6 +15,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/Span.h"  // mozilla::{Span,MakeSpan}
 #include "mozilla/Sprintf.h"
 #include "mozilla/Unused.h"
 #include "mozilla/Utf8.h"
@@ -29,6 +30,8 @@
 #include "jsapi.h"
 #include "jstypes.h"
 
+#include "frontend/BinASTRuntimeSupport.h"  // BinASTSourceMetadata{,Multipart,Context}
+#include "frontend/BinASTTokenReaderContext.h"  // HuffmanDictionaryForMetadata,AutoClearHuffmanDictionaryForMetadata
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/BytecodeEmitter.h"
 #include "frontend/SharedContext.h"
@@ -3054,7 +3057,7 @@ XDRResult ScriptSource::codeBinASTData(XDRState<mode>* const xdr,
   MOZ_TRY(xdr->codeUint32(&binASTLength));
 
   // XDR the BinAST data.
-  Maybe<SharedImmutableString> binASTData;
+  mozilla::Maybe<SharedImmutableString> binASTData;
   if (mode == XDR_DECODE) {
     auto bytes = xdr->cx()->template make_pod_array<char>(
         std::max<size_t>(binASTLength, 1));
@@ -3095,74 +3098,442 @@ XDRResult ScriptSource::codeBinASTData(XDRState<mode>* const xdr,
         mode == XDR_DECODE ? freshMetadata.get()
                            : ss->data.as<BinAST>().metadata;
 
-    uint32_t numBinASTKinds;
-    uint32_t numStrings;
+    frontend::BinASTSourceMetadata::Type metadataType;
+    uint8_t metadataTypeAsInt;
     if (mode == XDR_ENCODE) {
-      numBinASTKinds = binASTMetadata->numBinASTKinds();
-      numStrings = binASTMetadata->numStrings();
+      metadataType = binASTMetadata->type();
+      metadataTypeAsInt = static_cast<uint8_t>(metadataType);
     }
-    MOZ_TRY(xdr->codeUint32(&numBinASTKinds));
-    MOZ_TRY(xdr->codeUint32(&numStrings));
-
+    MOZ_TRY(xdr->codeUint8(&metadataTypeAsInt));
     if (mode == XDR_DECODE) {
-      // Use calloc, since we're storing this immediately, and filling it
-      // might GC, to avoid marking bogus atoms.
-      void* mem = js_calloc(frontend::BinASTSourceMetadata::totalSize(
-          numBinASTKinds, numStrings));
-      if (!mem) {
-        return xdr->fail(JS::TranscodeResult_Throw);
-      }
-
-      auto metadata =
-          new (mem) frontend::BinASTSourceMetadata(numBinASTKinds, numStrings);
-      binASTMetadata.reset(metadata);
+      metadataType =
+          static_cast<frontend::BinASTSourceMetadata::Type>(metadataTypeAsInt);
     }
 
-    MOZ_ASSERT(binASTMetadata != nullptr);
+    if (metadataType == frontend::BinASTSourceMetadata::Type::Multipart) {
+      auto metadata = binASTMetadata->asMultipart();
 
-    frontend::BinASTKind* binASTKindBase = binASTMetadata->binASTKindBase();
-    for (uint32_t i = 0; i < numBinASTKinds; i++) {
-      MOZ_TRY(xdr->codeEnum32(&binASTKindBase[i]));
-    }
-
-    RootedAtom atom(xdr->cx());
-    JSAtom** atomsBase = binASTMetadata->atomsBase();
-    auto slices = binASTMetadata->sliceBase();
-    const char* sourceBase =
-        (mode == XDR_ENCODE ? ss->data.as<BinAST>().string : *binASTData)
-            .chars();
-
-    for (uint32_t i = 0; i < numStrings; i++) {
-      uint8_t isNull;
+      uint32_t numBinASTKinds;
+      uint32_t numStrings;
       if (mode == XDR_ENCODE) {
-        atom = binASTMetadata->getAtom(i);
-        isNull = !atom;
+        numBinASTKinds = metadata->numBinASTKinds();
+        numStrings = metadata->numStrings();
       }
-      MOZ_TRY(xdr->codeUint8(&isNull));
-      if (isNull) {
-        atom = nullptr;
-      } else {
-        MOZ_TRY(XDRAtom(xdr, &atom));
-      }
-      if (mode == XDR_DECODE) {
-        atomsBase[i] = atom;
-      }
-
-      uint64_t sliceOffset;
-      uint32_t sliceLen;
-      if (mode == XDR_ENCODE) {
-        auto& slice = binASTMetadata->getSlice(i);
-        sliceOffset = slice.begin() - sourceBase;
-        sliceLen = slice.byteLen_;
-      }
-
-      MOZ_TRY(xdr->codeUint64(&sliceOffset));
-      MOZ_TRY(xdr->codeUint32(&sliceLen));
+      MOZ_TRY(xdr->codeUint32(&numBinASTKinds));
+      MOZ_TRY(xdr->codeUint32(&numStrings));
 
       if (mode == XDR_DECODE) {
-        new (&slices[i]) frontend::BinASTSourceMetadata::CharSlice(
-            sourceBase + sliceOffset, sliceLen);
+        metadata = frontend::BinASTSourceMetadataMultipart::create(
+            numBinASTKinds, numStrings);
+        if (!metadata) {
+          return xdr->fail(JS::TranscodeResult_Throw);
+        }
+
+        binASTMetadata.reset(metadata);
       }
+
+      MOZ_ASSERT(binASTMetadata != nullptr);
+
+      frontend::BinASTKind* binASTKindBase = metadata->binASTKindBase();
+      for (uint32_t i = 0; i < numBinASTKinds; i++) {
+        MOZ_TRY(xdr->codeEnum32(&binASTKindBase[i]));
+      }
+
+      Rooted<JSAtom*> atom(xdr->cx());
+      JSAtom** atomsBase = metadata->atomsBase();
+      auto slices = metadata->sliceBase();
+      const char* sourceBase =
+          (mode == XDR_ENCODE ? ss->data.as<BinAST>().string : *binASTData)
+              .chars();
+
+      for (uint32_t i = 0; i < numStrings; i++) {
+        uint8_t isNull;
+        if (mode == XDR_ENCODE) {
+          atom = metadata->getAtom(i);
+          isNull = !atom;
+        }
+        MOZ_TRY(xdr->codeUint8(&isNull));
+        if (isNull) {
+          atom = nullptr;
+        } else {
+          MOZ_TRY(XDRAtom(xdr, &atom));
+        }
+        if (mode == XDR_DECODE) {
+          atomsBase[i] = atom;
+        }
+
+        uint64_t sliceOffset;
+        uint32_t sliceLen;
+        if (mode == XDR_ENCODE) {
+          auto& slice = metadata->getSlice(i);
+          sliceOffset = slice.begin() - sourceBase;
+          sliceLen = slice.byteLen_;
+        }
+
+        MOZ_TRY(xdr->codeUint64(&sliceOffset));
+        MOZ_TRY(xdr->codeUint32(&sliceLen));
+
+        if (mode == XDR_DECODE) {
+          new (&slices[i]) frontend::BinASTSourceMetadataMultipart::CharSlice(
+              sourceBase + sliceOffset, sliceLen);
+        }
+      }
+    } else {
+      MOZ_ASSERT(metadataType == frontend::BinASTSourceMetadata::Type::Context);
+
+      auto metadata = binASTMetadata->asContext();
+
+      uint32_t numStrings;
+      if (mode == XDR_ENCODE) {
+        numStrings = metadata->numStrings();
+      }
+      MOZ_TRY(xdr->codeUint32(&numStrings));
+
+      if (mode == XDR_DECODE) {
+        metadata = frontend::BinASTSourceMetadataContext::create(numStrings);
+        if (!metadata) {
+          return xdr->fail(JS::TranscodeResult_Throw);
+        }
+
+        binASTMetadata.reset(metadata);
+      }
+
+      MOZ_ASSERT(binASTMetadata != nullptr);
+
+      Rooted<JSAtom*> atom(xdr->cx());
+      JSAtom** atomsBase = metadata->atomsBase();
+
+      for (uint32_t i = 0; i < numStrings; i++) {
+        uint8_t isNull;
+        if (mode == XDR_ENCODE) {
+          atom = metadata->getAtom(i);
+          isNull = !atom;
+        }
+        MOZ_TRY(xdr->codeUint8(&isNull));
+        if (isNull) {
+          atom = nullptr;
+        } else {
+          MOZ_TRY(XDRAtom(xdr, &atom));
+        }
+        if (mode == XDR_DECODE) {
+          atomsBase[i] = atom;
+        }
+      }
+
+      uint32_t numTables;
+      uint32_t numHuffmanEntries;
+      uint32_t numInternalIndices;
+      uint32_t numSingleTables;
+      uint32_t numTwoTables;
+
+      UniquePtr<frontend::HuffmanDictionaryForMetadata> newDictionary;
+      frontend::AutoClearHuffmanDictionaryForMetadata autoClear;
+
+      frontend::HuffmanDictionaryForMetadata* dictionary;
+      if (mode == XDR_ENCODE) {
+        dictionary = metadata->dictionary();
+        MOZ_ASSERT(metadata->dictionary());
+
+        numTables = dictionary->numTables();
+        numHuffmanEntries = dictionary->numHuffmanEntries();
+        numInternalIndices = dictionary->numInternalIndices();
+        numSingleTables = dictionary->numSingleTables();
+        numTwoTables = dictionary->numTwoTables();
+      }
+      MOZ_TRY(xdr->codeUint32(&numTables));
+      MOZ_TRY(xdr->codeUint32(&numHuffmanEntries));
+      MOZ_TRY(xdr->codeUint32(&numInternalIndices));
+      MOZ_TRY(xdr->codeUint32(&numSingleTables));
+      MOZ_TRY(xdr->codeUint32(&numTwoTables));
+      if (mode == XDR_DECODE) {
+        dictionary = frontend::HuffmanDictionaryForMetadata::create(
+            numTables, numHuffmanEntries, numInternalIndices, numSingleTables,
+            numTwoTables);
+        if (!dictionary) {
+          return xdr->fail(JS::TranscodeResult_Throw);
+        }
+        autoClear.set(dictionary);
+
+        newDictionary.reset(dictionary);
+      }
+
+      auto huffmanEntryPtr = dictionary->huffmanEntriesBase();
+      auto internalIndexPtr = dictionary->internalIndicesBase();
+      auto singleTablePtr = dictionary->singleTablesBase();
+      auto twoTablePtr = dictionary->twoTablesBase();
+
+      for (uint32_t i = 0; i < frontend::TableIdentity::Limit; i++) {
+        MOZ_TRY(xdr->codeUint16(&dictionary->tableIndices_[i]));
+      }
+
+      enum TableTag {
+        SingleEntryHuffmanTableTag = 0,
+        TwoEntriesHuffmanTableTag = 1,
+        SingleLookupHuffmanTableTag = 2,
+        TwoLookupsHuffmanTableTag = 3,
+        ThreeLookupsHuffmanTableTag = 4,
+      };
+
+      // Encode/decode tables and the content of those tables.
+      for (uint32_t i = 0; i < numTables; i++) {
+        auto& table = dictionary->tableAtIndex(i);
+
+        uint8_t tag;
+        if (mode == XDR_ENCODE) {
+          if (table.implementation_.is<frontend::SingleEntryHuffmanTable>()) {
+            tag = SingleEntryHuffmanTableTag;
+          } else if (table.implementation_
+                         .is<frontend::TwoEntriesHuffmanTable>()) {
+            tag = TwoEntriesHuffmanTableTag;
+          } else if (table.implementation_
+                         .is<frontend::SingleLookupHuffmanTable>()) {
+            tag = SingleLookupHuffmanTableTag;
+          } else if (table.implementation_
+                         .is<frontend::TwoLookupsHuffmanTable>()) {
+            tag = TwoLookupsHuffmanTableTag;
+          } else {
+            MOZ_ASSERT(
+                table.implementation_.is<frontend::ThreeLookupsHuffmanTable>());
+            tag = ThreeLookupsHuffmanTableTag;
+          }
+        }
+
+        MOZ_TRY(xdr->codeUint8(&tag));
+
+        // Encode/decode HuffmanEntry, without moving `huffmanEntryPtr`.
+        // The caller is responsible to move `huffmanEntryPtr`.
+        auto codeHuffmanEntryWithoutMovePtr =
+            [xdr](frontend::HuffmanEntry* entry) -> XDRResult {
+          uint32_t keyBits;
+          uint8_t keyBitLength;
+          uint64_t bits;
+          if (mode == XDR_ENCODE) {
+            keyBits = entry->key().bits_;
+            keyBitLength = entry->key().bitLength_;
+            bits = entry->value().asBits_;
+          }
+          MOZ_TRY(xdr->codeUint32(&keyBits));
+          MOZ_TRY(xdr->codeUint8(&keyBitLength));
+          MOZ_TRY(xdr->codeUint64(&bits));
+          if (mode == XDR_DECODE) {
+            new (entry) frontend::HuffmanEntry(keyBits, keyBitLength,
+                                               frontend::BinASTSymbol(bits));
+          }
+
+          return Ok();
+        };
+
+        // Encode/decode SingleLookupHuffmanTable and its contents.
+        auto codeSingleTable =
+            [xdr, &huffmanEntryPtr, &internalIndexPtr,
+             codeHuffmanEntryWithoutMovePtr](
+                frontend::SingleLookupHuffmanTable* table) -> XDRResult {
+          uint32_t numValues;
+          if (mode == XDR_ENCODE) {
+            numValues = table->values_.size();
+          }
+          MOZ_TRY(xdr->codeUint32(&numValues));
+          if (mode == XDR_DECODE) {
+            table->values_ =
+                mozilla::MakeSpan(huffmanEntryPtr.get(), numValues);
+            huffmanEntryPtr += numValues;
+          }
+
+          for (size_t i = 0; i < numValues; i++) {
+            MOZ_TRY(codeHuffmanEntryWithoutMovePtr(&table->values_[i]));
+          }
+
+          uint32_t numSaturated;
+          if (mode == XDR_ENCODE) {
+            numSaturated = table->saturated_.size();
+          }
+          MOZ_TRY(xdr->codeUint32(&numSaturated));
+          if (mode == XDR_DECODE) {
+            table->saturated_ =
+                mozilla::MakeSpan(internalIndexPtr.get(), numSaturated);
+            internalIndexPtr += numSaturated;
+          }
+
+          for (size_t i = 0; i < numSaturated; i++) {
+            MOZ_TRY(xdr->codeUint8(&table->saturated_[i]));
+          }
+
+          MOZ_TRY(xdr->codeUint8(&table->largestBitLength_));
+
+          return Ok();
+        };
+
+        // Encode/decode TwoLookupsHuffmanTable and its contents,
+        // including suffixTables_ recursively.
+        auto codeTwoTable =
+            [xdr, &huffmanEntryPtr, &singleTablePtr,
+             codeHuffmanEntryWithoutMovePtr, codeSingleTable](
+                frontend::TwoLookupsHuffmanTable* table) -> XDRResult {
+          MOZ_TRY(codeSingleTable(&table->shortKeys_));
+
+          uint32_t numValues;
+          if (mode == XDR_ENCODE) {
+            numValues = table->values_.size();
+          }
+          MOZ_TRY(xdr->codeUint32(&numValues));
+          if (mode == XDR_DECODE) {
+            table->values_ =
+                mozilla::MakeSpan(huffmanEntryPtr.get(), numValues);
+            huffmanEntryPtr += numValues;
+          }
+
+          for (size_t i = 0; i < numValues; i++) {
+            MOZ_TRY(codeHuffmanEntryWithoutMovePtr(&table->values_[i]));
+          }
+
+          uint32_t numSuffixTables;
+          if (mode == XDR_ENCODE) {
+            numSuffixTables = table->suffixTables_.size();
+          }
+          MOZ_TRY(xdr->codeUint32(&numSuffixTables));
+          if (mode == XDR_DECODE) {
+            table->suffixTables_ =
+                mozilla::MakeSpan(singleTablePtr.get(), numSuffixTables);
+            singleTablePtr += numSuffixTables;
+          }
+
+          for (size_t i = 0; i < numSuffixTables; i++) {
+            auto suffixTable = &table->suffixTables_[i];
+            new (suffixTable) frontend::SingleLookupHuffmanTable();
+            MOZ_TRY(codeSingleTable(suffixTable));
+          }
+
+          MOZ_TRY(xdr->codeUint8(&table->largestBitLength_));
+
+          return Ok();
+        };
+
+        // Encode/decode ThreeLookupsHuffmanTable and its contents,
+        // including suffixTables_ recursively.
+        auto codeThreeTable =
+            [xdr, &huffmanEntryPtr, &twoTablePtr,
+             codeHuffmanEntryWithoutMovePtr, codeSingleTable, codeTwoTable](
+                frontend::ThreeLookupsHuffmanTable* table) -> XDRResult {
+          MOZ_TRY(codeSingleTable(&table->shortKeys_));
+
+          uint32_t numValues;
+          if (mode == XDR_ENCODE) {
+            numValues = table->values_.size();
+          }
+          MOZ_TRY(xdr->codeUint32(&numValues));
+          if (mode == XDR_DECODE) {
+            table->values_ =
+                mozilla::MakeSpan(huffmanEntryPtr.get(), numValues);
+            huffmanEntryPtr += numValues;
+          }
+
+          for (size_t i = 0; i < numValues; i++) {
+            MOZ_TRY(codeHuffmanEntryWithoutMovePtr(&table->values_[i]));
+          }
+
+          uint32_t numSuffixTables;
+          if (mode == XDR_ENCODE) {
+            numSuffixTables = table->suffixTables_.size();
+          }
+          MOZ_TRY(xdr->codeUint32(&numSuffixTables));
+          if (mode == XDR_DECODE) {
+            table->suffixTables_ =
+                mozilla::MakeSpan(twoTablePtr.get(), numSuffixTables);
+            twoTablePtr += numSuffixTables;
+          }
+
+          for (size_t i = 0; i < numSuffixTables; i++) {
+            auto suffixTable = &table->suffixTables_[i];
+            new (suffixTable) frontend::TwoLookupsHuffmanTable();
+            MOZ_TRY(codeTwoTable(suffixTable));
+          }
+
+          MOZ_TRY(xdr->codeUint8(&table->largestBitLength_));
+
+          return Ok();
+        };
+
+        if (tag == SingleEntryHuffmanTableTag) {
+          uint64_t bits;
+          if (mode == XDR_ENCODE) {
+            auto& specialized =
+                table.implementation_.as<frontend::SingleEntryHuffmanTable>();
+            bits = specialized.value_.asBits_;
+          }
+          MOZ_TRY(xdr->codeUint64(&bits));
+          if (mode == XDR_DECODE) {
+            new (&table) frontend::GenericHuffmanTable();
+
+            auto value = frontend::BinASTSymbol(bits);
+            table.implementation_ = {
+                mozilla::VariantType<frontend::SingleEntryHuffmanTable>{},
+                value};
+          }
+        } else if (tag == SingleEntryHuffmanTableTag) {
+          if (mode == XDR_DECODE) {
+            new (&table) frontend::GenericHuffmanTable();
+
+            table.implementation_ = {
+                mozilla::VariantType<frontend::TwoEntriesHuffmanTable>{}};
+          }
+
+          auto& specialized =
+              table.implementation_.as<frontend::TwoEntriesHuffmanTable>();
+
+          for (size_t i = 0; i < 2; i++) {
+            uint64_t bits;
+
+            if (mode == XDR_ENCODE) {
+              bits = specialized.values_[i].asBits_;
+            }
+            MOZ_TRY(xdr->codeUint64(&bits));
+            if (mode == XDR_DECODE) {
+              specialized.values_[i] = frontend::BinASTSymbol(bits);
+            }
+          }
+        } else if (tag == SingleLookupHuffmanTableTag) {
+          if (mode == XDR_DECODE) {
+            new (&table) frontend::GenericHuffmanTable();
+
+            table.implementation_ = {
+                mozilla::VariantType<frontend::SingleLookupHuffmanTable>{}};
+          }
+
+          auto& specialized =
+              table.implementation_.as<frontend::SingleLookupHuffmanTable>();
+
+          MOZ_TRY(codeSingleTable(&specialized));
+        } else if (tag == TwoLookupsHuffmanTableTag) {
+          if (mode == XDR_DECODE) {
+            new (&table) frontend::GenericHuffmanTable();
+
+            table.implementation_ = {
+                mozilla::VariantType<frontend::TwoLookupsHuffmanTable>{}};
+          }
+
+          auto& specialized =
+              table.implementation_.as<frontend::TwoLookupsHuffmanTable>();
+
+          MOZ_TRY(codeTwoTable(&specialized));
+        } else {
+          MOZ_ASSERT(tag == ThreeLookupsHuffmanTableTag);
+
+          if (mode == XDR_DECODE) {
+            new (&table) frontend::GenericHuffmanTable();
+
+            table.implementation_ = {
+                mozilla::VariantType<frontend::ThreeLookupsHuffmanTable>{}};
+          }
+
+          auto& specialized =
+              table.implementation_.as<frontend::ThreeLookupsHuffmanTable>();
+
+          MOZ_TRY(codeThreeTable(&specialized));
+        }
+      }
+
+      autoClear.reset();
+      metadata->setDictionary(newDictionary.release());
     }
   }
 

@@ -13,11 +13,13 @@
 
 #include <string.h>  // memchr, memcmp, memmove
 
+#include "ds/FixedLengthVector.h"    // FixedLengthVector
 #include "ds/Sort.h"                 // MergeSort
 #include "frontend/BinAST-macros.h"  // BINJS_TRY*, BINJS_MOZ_TRY*
 #include "gc/Rooting.h"              // RootedAtom
 #include "js/AllocPolicy.h"          // SystemAllocPolicy
 #include "js/StableStringChars.h"    // Latin1Char
+#include "js/UniquePtr.h"            // js::UniquePtr
 #include "js/Utility.h"              // js_free
 #include "js/Vector.h"               // js::Vector
 #include "util/StringBuffer.h"       // StringBuffer
@@ -110,26 +112,27 @@ using Chars = BinASTTokenReaderContext::Chars;
 class HuffmanPreludeReader {
  public:
   // Construct a prelude reader.
-  //
-  // `dictionary` is the dictionary we're currently constructing.
-  // It MUST be empty.
-  HuffmanPreludeReader(JSContext* cx, BinASTTokenReaderContext& reader,
-                       HuffmanDictionary& dictionary)
+  HuffmanPreludeReader(JSContext* cx, BinASTTokenReaderContext& reader)
       : cx_(cx),
         reader_(reader),
-        dictionary_(dictionary),
+        dictionary_(nullptr),
         stack_(cx_),
         auxStorageLength_(cx_) {}
 
   // Start reading the prelude.
-  MOZ_MUST_USE JS::Result<Ok> run(size_t initialCapacity);
+  MOZ_MUST_USE JS::Result<HuffmanDictionaryForMetadata*> run(
+      size_t initialCapacity);
 
  private:
   JSContext* cx_;
   BinASTTokenReaderContext& reader_;
 
   // The dictionary we're currently constructing.
-  HuffmanDictionary& dictionary_;
+  UniquePtr<HuffmanDictionary> dictionary_;
+
+  // Temporary storage for items allocated while reading huffman prelude.
+  // All items are freed after reading huffman prelude.
+  TemporaryStorage tempStorage_;
 
  public:
   // Tables may have different representations in the stream.
@@ -469,24 +472,21 @@ class HuffmanPreludeReader {
   // Enqueue an entry to the stack.
   MOZ_MUST_USE JS::Result<Ok> pushValue(NormalizedInterfaceAndField identity,
                                         const List& list) {
-    auto index = list.contents_;
-    auto& status = dictionary_.listLengthStatus(index);
-    if (status == HuffmanDictionary::TableStatus::Unreachable) {
+    const auto tableId = TableIdentity(list.contents_);
+    if (dictionary_->isUnreachable(tableId)) {
       // Spec:
       // 2. Add the field to the set of visited fields
-      status = HuffmanDictionary::TableStatus::Initializing;
-
-      auto& table = dictionary_.tableForListLength(index);
+      dictionary_->setInitializing(tableId);
 
       // Read the lengths immediately.
-      MOZ_TRY((readTable<List>(table, status, list)));
+      MOZ_TRY((readTable<List>(tableId, list)));
     }
 
     // Spec:
     // 3. If the field has a FrozenArray type
     //   a. Determine if the array type is always empty
     //   b. If so, stop
-    auto& table = dictionary_.tableForListLength(index);
+    const auto& table = dictionary_->getTable(tableId);
     bool empty = true;
     for (auto iter : table) {
       if (iter->toListLength() > 0) {
@@ -523,13 +523,10 @@ class HuffmanPreludeReader {
 
   MOZ_MUST_USE JS::Result<Ok> pushValue(NormalizedInterfaceAndField identity,
                                         const Interface& interface) {
-    auto& status = dictionary_.fieldStatus(identity);
-    if (status == HuffmanDictionary::TableStatus::Unreachable) {
+    const auto tableId = TableIdentity(identity);
+    if (dictionary_->isUnreachable(tableId)) {
       // Effectively, an `Interface` is a sum with a single entry.
-      auto& table = dictionary_.tableForField(identity);
-
-      status = HuffmanDictionary::TableStatus::Ready;
-      new (mozilla::KnownNotNull, &table) GenericHuffmanTable();
+      auto& table = dictionary_->createTable(tableId);
 
       MOZ_TRY(table.initWithSingleValue(
           cx_, BinASTSymbol::fromKind(BinASTKind(interface.kind_))));
@@ -547,15 +544,15 @@ class HuffmanPreludeReader {
                                         const Entry& entry) {
     // Spec:
     // 1. If the field is in the set of visited contexts, stop.
-    auto& status = dictionary_.fieldStatus(identity);
-    if (status != HuffmanDictionary::TableStatus::Unreachable) {
+    const auto tableId = TableIdentity(identity);
+    if (!dictionary_->isUnreachable(tableId)) {
       // Entry already initialized/initializing.
       return Ok();
     }
 
     // Spec:
     // 2. Add the field to the set of visited fields
-    status = HuffmanDictionary::TableStatus::Initializing;
+    dictionary_->setInitializing(tableId);
 
     // Spec:
     // 5. Otherwise, push the field onto the stack
@@ -696,7 +693,8 @@ class HuffmanPreludeReader {
 
     // Now read the symbols and assign bits.
     uint32_t code = 0;
-    MOZ_TRY(table.initStart(cx_, numberOfSymbols, largestBitLength));
+    MOZ_TRY(
+        table.initStart(cx_, &tempStorage_, numberOfSymbols, largestBitLength));
 
     for (size_t i = 0; i < numberOfSymbols; ++i) {
       const auto bitLength = auxStorageLength_[i].bitLength_;
@@ -719,7 +717,7 @@ class HuffmanPreludeReader {
       code = (code + 1) << (nextBitLength - bitLength);
     }
 
-    MOZ_TRY(table.initComplete(cx_));
+    MOZ_TRY(table.initComplete(cx_, &tempStorage_));
     auxStorageLength_.clear();
     return Ok();
   }
@@ -787,12 +785,13 @@ class HuffmanPreludeReader {
 
     // Append a terminator.
     // Already reserved sufficient space above.
-    auxStorageLength_.infallibleEmplaceBack(MAX_CODE_BIT_LENGTH, numberOfSymbols);
+    auxStorageLength_.infallibleEmplaceBack(MAX_CODE_BIT_LENGTH,
+                                            numberOfSymbols);
 
     // Now read the symbols and assign bits.
     uint32_t code = 0;
-    MOZ_TRY(
-        table.initStart(cx_, auxStorageLength_.length() - 1, largestBitLength));
+    MOZ_TRY(table.initStart(cx_, &tempStorage_, auxStorageLength_.length() - 1,
+                            largestBitLength));
 
     for (size_t i = 0; i < auxStorageLength_.length() - 1; ++i) {
       const auto bitLength = auxStorageLength_[i].bitLength_;
@@ -812,52 +811,48 @@ class HuffmanPreludeReader {
       code = (code + 1) << (nextBitLength - bitLength);
     }
 
-    MOZ_TRY(table.initComplete(cx_));
+    MOZ_TRY(table.initComplete(cx_, &tempStorage_));
 
     auxStorageLength_.clear();
     return Ok();
   }
 
-  // Single-argument version: lookup the table using `dictionary_.tableForField`
+  // Single-argument version: lookup the table using `dictionary_->table`
   // then proceed as three-arguments version.
   template <typename Entry>
   MOZ_MUST_USE JS::Result<Ok> readTable(Entry entry) {
-    auto index = entry.identity_;
-    auto& status = dictionary_.fieldStatus(index);
-    if (MOZ_UNLIKELY(status != HuffmanDictionary::TableStatus::Initializing)) {
+    const auto tableId = TableIdentity(entry.identity_);
+    if (MOZ_UNLIKELY(!dictionary_->isInitializing(tableId))) {
       // We're attempting to re-read a table that has already been read.
       // FIXME: Shouldn't this be a MOZ_CRASH?
-      return raiseDuplicateTableError(index);
+      return raiseDuplicateTableError(entry.identity_);
     }
 
-    auto& table = dictionary_.tableForField(index);
-    return readTable<Entry>(table, status, entry);
+    return readTable<Entry>(tableId, entry);
   }
 
-  // Three-arguments version: pass table explicitly. Generally called from
-  // single-argument version, but may be called manually, e.g. for list
-  // lengths, as their tables don't appear in `dictionary_.tableForField`.
+  // Two-arguments version: pass table identity explicitly. Generally called
+  // from single-argument version, but may be called manually, e.g. for list
+  // lengths.
   template <typename Entry>
-  MOZ_MUST_USE JS::Result<Ok> readTable(GenericHuffmanTable& table,
-                                        HuffmanDictionary::TableStatus& status,
-                                        Entry entry) {
+  MOZ_MUST_USE JS::Result<Ok> readTable(TableIdentity tableId, Entry entry) {
     uint8_t headerByte;
     MOZ_TRY_VAR(headerByte, reader_.readByte<Compression::No>());
     switch (headerByte) {
-      case TableHeader::SingleValue:
-        new (mozilla::KnownNotNull, &table) GenericHuffmanTable();
-        status = HuffmanDictionary::TableStatus::Ready;
+      case TableHeader::SingleValue: {
+        auto& table = dictionary_->createTable(tableId);
 
         // The table contains a single value.
         MOZ_TRY((readSingleValueTable<Entry>(table, entry)));
         return Ok();
-      case TableHeader::MultipleValues:
-        new (mozilla::KnownNotNull, &table) GenericHuffmanTable();
-        status = HuffmanDictionary::TableStatus::Ready;
+      }
+      case TableHeader::MultipleValues: {
+        auto& table = dictionary_->createTable(tableId);
 
         // Table contains multiple values.
         MOZ_TRY((readMultipleValuesTable<Entry>(table, entry)));
         return Ok();
+      }
       case TableHeader::Unreachable:
         // Table is unreachable, nothing to do.
         return Ok();
@@ -920,13 +915,12 @@ class HuffmanPreludeReader {
       // interface.
       // FIXME: readTable could return a reference to the table, eliminating an
       // array lookup.
-      auto index = entry.identity_;
-      auto& status = owner.dictionary_.fieldStatus(index);
-      if (status == HuffmanDictionary::TableStatus::Unreachable) {
+      const auto tableId = TableIdentity(entry.identity_);
+      if (owner.dictionary_->isUnreachable(tableId)) {
         return Ok();
       }
 
-      const auto& table = owner.dictionary_.tableForField(index);
+      const auto& table = owner.dictionary_->getTable(tableId);
       if (!table.isMaybeInterfaceAlwaysNull()) {
         MOZ_TRY(owner.pushFields(entry.kind_));
       }
@@ -943,13 +937,13 @@ class HuffmanPreludeReader {
       // FIXME: readTable could return a reference to the table, eliminating an
       // array lookup.
 
-      auto index = entry.identity_;
-      auto& status = owner.dictionary_.fieldStatus(index);
-      if (status == HuffmanDictionary::TableStatus::Initializing) {
+      const auto tableId = TableIdentity(entry.identity_);
+      if (owner.dictionary_->isInitializing(tableId)) {
         return Ok();
       }
 
-      const auto& table = owner.dictionary_.tableForField(index);
+      auto index = entry.identity_;
+      const auto& table = owner.dictionary_->getTable(tableId);
       for (auto iter : table) {
         MOZ_TRY(owner.pushValue(index, Interface(index, iter->toKind())));
       }
@@ -966,13 +960,13 @@ class HuffmanPreludeReader {
       // Now, walk the table to enqueue each value if necessary.
       // FIXME: readTable could return a reference to the table, eliminating an
       // array lookup.
-      auto index = entry.identity_;
-      auto& status = owner.dictionary_.fieldStatus(index);
-      if (status == HuffmanDictionary::TableStatus::Unreachable) {
+      const auto tableId = TableIdentity(entry.identity_);
+      if (owner.dictionary_->isUnreachable(tableId)) {
         return Ok();
       }
 
-      const auto& table = owner.dictionary_.tableForField(index);
+      auto index = entry.identity_;
+      const auto& table = owner.dictionary_->getTable(tableId);
       for (auto iter : table) {
         MOZ_TRY(owner.pushValue(index, Interface(index, iter->toKind())));
       }
@@ -1037,7 +1031,8 @@ BinASTTokenReaderContext::BinASTTokenReaderContext(JSContext* cx,
                                                    const size_t length)
     : BinASTTokenReaderBase(cx, er, start, length),
       metadata_(nullptr),
-      posBeforeTree_(nullptr) {
+      posBeforeTree_(nullptr),
+      lazyScripts_(cx) {
   MOZ_ASSERT(er);
 }
 
@@ -1087,7 +1082,7 @@ BinASTSourceMetadata* BinASTTokenReaderContext::takeMetadata() {
 
 JS::Result<Ok> BinASTTokenReaderContext::initFromScriptSource(
     ScriptSource* scriptSource) {
-  metadata_ = scriptSource->binASTSourceMetadata();
+  metadata_ = scriptSource->binASTSourceMetadata()->asContext();
   metadataOwned_ = MetadataOwnership::Unowned;
 
   return Ok();
@@ -1113,6 +1108,38 @@ JS::Result<Ok> BinASTTokenReaderContext::readHeader() {
   return Ok();
 }
 
+JS::Result<Ok> BinASTTokenReaderContext::readTreeFooter() {
+  flushBitStream();
+
+  BINJS_MOZ_TRY_DECL(numLazy, readVarU32<Compression::No>());
+  if (numLazy != lazyScripts_.length()) {
+    return raiseError("The number of lazy functions does not match");
+  }
+
+  for (size_t i = 0; i < numLazy; i++) {
+    BINJS_MOZ_TRY_DECL(len, readVarU32<Compression::No>());
+    // Use sourceEnd as temporary space to store length of each script.
+    lazyScripts_[i]->setPositions(0, len, 0, len);
+  }
+
+  for (size_t i = 0; i < numLazy; i++) {
+    uint32_t begin = offset();
+    uint32_t len = lazyScripts_[i]->sourceEnd();
+
+    current_ += len;
+
+    lazyScripts_[0]->setPositions(begin, begin + len, begin, begin + len);
+    lazyScripts_[0]->setColumn(begin);
+  }
+
+  return Ok();
+}
+
+void BinASTTokenReaderContext::flushBitStream() {
+  current_ -= bitBuffer.numUnusedBytes();
+  bitBuffer.flush();
+}
+
 JS::Result<Ok> BinASTTokenReaderContext::readStringPrelude() {
   BINJS_MOZ_TRY_DECL(stringsNumberOfEntries, readVarU32<Compression::No>());
 
@@ -1122,13 +1149,8 @@ JS::Result<Ok> BinASTTokenReaderContext::readStringPrelude() {
     return raiseError("Too many entries in strings dictionary");
   }
 
-  // FIXME: We don't use the global table like multipart format, but
-  //        (interface, field)-local dictionary.
-  //        Metadata should be fixed to store that.
-  Vector<BinASTKind> binASTKinds(cx_);
-
-  BinASTSourceMetadata* metadata =
-      BinASTSourceMetadata::Create(binASTKinds, stringsNumberOfEntries);
+  BinASTSourceMetadataContext* metadata =
+      BinASTSourceMetadataContext::create(stringsNumberOfEntries);
   if (MOZ_UNLIKELY(!metadata)) {
     return raiseOOM();
   }
@@ -1160,9 +1182,6 @@ JS::Result<Ok> BinASTTokenReaderContext::readStringPrelude() {
     const char* start = reinterpret_cast<const char*>(current_);
     BINJS_TRY_VAR(atom, AtomizeWTF8Chars(cx_, start, end - current_));
 
-    // FIXME: We don't populate `slicesTable_` given we won't use it.
-    //        Update BinASTSourceMetadata to reflect this.
-
     metadata->getAtom(stringIndex) = atom;
 
     // +1 for skipping 0x00.
@@ -1181,8 +1200,10 @@ JS::Result<Ok> BinASTTokenReaderContext::readStringPrelude() {
 }
 
 JS::Result<Ok> BinASTTokenReaderContext::readHuffmanPrelude() {
-  HuffmanPreludeReader reader{cx_, *this, dictionary_};
-  return reader.run(HUFFMAN_STACK_INITIAL_CAPACITY);
+  HuffmanPreludeReader reader(cx_, *this);
+  BINJS_MOZ_TRY_DECL(dictionary, reader.run(HUFFMAN_STACK_INITIAL_CAPACITY));
+  metadata_->setDictionary(dictionary);
+  return Ok();
 }
 
 BinASTTokenReaderContext::BitBuffer::BitBuffer() : bits_(0), bitLength_(0) {
@@ -1339,8 +1360,8 @@ struct ExtractBinASTInterfaceAndFieldMatcher {
 JS::Result<BinASTKind> BinASTTokenReaderContext::readTagFromTable(
     const BinASTInterfaceAndField& identity) {
   // Extract the table.
-  auto index = NormalizedInterfaceAndField(identity);
-  const auto& table = dictionary_.tableForField(index);
+  const auto tableId = TableIdentity(NormalizedInterfaceAndField(identity));
+  const auto& table = metadata_->dictionary()->getTable(tableId);
   BINJS_MOZ_TRY_DECL(bits_,
                      (bitBuffer.getHuffmanLookup<Compression::No>(*this)));
 
@@ -1355,14 +1376,12 @@ JS::Result<BinASTKind> BinASTTokenReaderContext::readTagFromTable(
 
 JS::Result<BinASTSymbol> BinASTTokenReaderContext::readFieldFromTable(
     const BinASTInterfaceAndField& identity) {
-  auto index = NormalizedInterfaceAndField(identity);
-
-  auto& status = dictionary_.fieldStatus(index);
-  if (status != HuffmanDictionary::TableStatus::Ready) {
+  const auto tableId = TableIdentity(NormalizedInterfaceAndField(identity));
+  if (!metadata_->dictionary()->isReady(tableId)) {
     return raiseNotInPrelude();
   }
 
-  const auto& table = dictionary_.tableForField(index);
+  const auto& table = metadata_->dictionary()->getTable(tableId);
   BINJS_MOZ_TRY_DECL(bits_, bitBuffer.getHuffmanLookup<Compression::No>(*this));
 
   const auto result = table.lookup(bits_);
@@ -1389,13 +1408,17 @@ JS::Result<double> BinASTTokenReaderContext::readDouble(
 JS::Result<JSAtom*> BinASTTokenReaderContext::readMaybeAtom(
     const FieldContext& context) {
   BINJS_MOZ_TRY_DECL(result, readFieldFromTable(context.position_));
-  return result.toAtom();
+  if (result.isNullAtom()) {
+    return nullptr;
+  }
+  return metadata_->getAtom(result.toAtomIndex());
 }
 
 JS::Result<JSAtom*> BinASTTokenReaderContext::readAtom(
     const FieldContext& context) {
   BINJS_MOZ_TRY_DECL(result, readFieldFromTable(context.position_));
-  return result.toAtom();
+  MOZ_ASSERT(!result.isNullAtom());
+  return metadata_->getAtom(result.toAtomIndex());
 }
 
 JS::Result<JSAtom*> BinASTTokenReaderContext::readMaybeIdentifierName(
@@ -1438,7 +1461,13 @@ JS::Result<uint32_t> BinASTTokenReaderContext::readUnsignedLong(
 
 JS::Result<BinASTTokenReaderBase::SkippableSubTree>
 BinASTTokenReaderContext::readSkippableSubTree(const FieldContext&) {
-  return raiseError("Not Yet Implemented");
+  // Postions are set when reading lazy functions after the tree.
+  return SkippableSubTree(0, 0);
+}
+
+JS::Result<Ok> BinASTTokenReaderContext::registerLazyScript(LazyScript* lazy) {
+  BINJS_TRY(lazyScripts_.append(lazy));
+  return Ok();
 }
 
 JS::Result<Ok> BinASTTokenReaderContext::enterSum(
@@ -1497,8 +1526,8 @@ JS::Result<Ok> BinASTTokenReaderContext::enterSum(BinASTKind& tag,
 
 JS::Result<Ok> BinASTTokenReaderContext::enterList(uint32_t& items,
                                                    const ListContext& context) {
-  const auto identity = context.content_;
-  const auto& table = dictionary_.tableForListLength(identity);
+  const auto tableId = TableIdentity(context.content_);
+  const auto& table = metadata_->dictionary()->getTable(tableId);
   BINJS_MOZ_TRY_DECL(bits_, bitBuffer.getHuffmanLookup<Compression::No>(*this));
   const auto result = table.lookup(bits_);
   if (MOZ_UNLIKELY(!result.isFound())) {
@@ -1555,6 +1584,90 @@ HuffmanKey::HuffmanKey(const uint32_t bits, const uint8_t bitLength)
     : bits_(bits), bitLength_(bitLength) {
   MOZ_ASSERT(bitLength_ <= MAX_PREFIX_BIT_LENGTH);
   MOZ_ASSERT_IF(bitLength_ != 32 /* >> 32 is UB */, bits >> bitLength == 0);
+}
+
+template <typename T>
+T* TemporaryStorageItem<T>::alloc(JSContext* cx, size_t count) {
+  total_ += count;
+
+  if (MOZ_LIKELY(head_)) {
+    if (MOZ_LIKELY(head_->used_ + count < head_->size_)) {
+      // This chunk still has sufficient space to allocate `count` bytes.
+      T* ret = head_->entries_ + head_->used_;
+      head_->used_ += count;
+      return ret;
+    }
+  }
+
+  size_t chunkSize = Chunk::DefaultSize;
+  if (count > chunkSize) {
+    chunkSize = count;
+  }
+
+  // Subtract `sizeof(T)` because `Chunk` already has `T entries_[1]`
+  // and that we want `T entries_[chunkSize]`.
+  Chunk* chunk =
+      reinterpret_cast<Chunk*>(cx->template maybe_pod_malloc<uint8_t>(
+          sizeof(Chunk) - sizeof(T) + chunkSize * sizeof(T)));
+  if (!chunk) {
+    ReportOutOfMemory(cx);
+    return nullptr;
+  }
+  chunk->used_ = count;
+  chunk->size_ = chunkSize;
+  chunk->next_ = head_;
+
+  head_ = chunk;
+
+  return head_->entries_;
+}
+
+template <typename T>
+JS::Result<mozilla::Span<T>> TemporaryStorage::alloc(JSContext* cx,
+                                                     size_t count) {
+  MOZ_CRASH("unsupported type");
+  return nullptr;
+}
+
+template <>
+JS::Result<mozilla::Span<HuffmanEntry>> TemporaryStorage::alloc<HuffmanEntry>(
+    JSContext* cx, size_t count) {
+  auto* items = huffmanEntries_.alloc(cx, count);
+  if (!items) {
+    return cx->alreadyReportedError();
+  }
+  return mozilla::MakeSpan(items, count);
+}
+
+template <>
+JS::Result<mozilla::Span<TemporaryStorage::InternalIndex>>
+TemporaryStorage::alloc<TemporaryStorage::InternalIndex>(JSContext* cx,
+                                                         size_t count) {
+  auto* items = internalIndices_.alloc(cx, count);
+  if (!items) {
+    return cx->alreadyReportedError();
+  }
+  return mozilla::MakeSpan(items, count);
+}
+
+template <>
+JS::Result<mozilla::Span<SingleLookupHuffmanTable>>
+TemporaryStorage::alloc<SingleLookupHuffmanTable>(JSContext* cx, size_t count) {
+  auto* items = singleTables_.alloc(cx, count);
+  if (!items) {
+    return cx->alreadyReportedError();
+  }
+  return mozilla::MakeSpan(items, count);
+}
+
+template <>
+JS::Result<mozilla::Span<TwoLookupsHuffmanTable>>
+TemporaryStorage::alloc<TwoLookupsHuffmanTable>(JSContext* cx, size_t count) {
+  auto* items = twoTables_.alloc(cx, count);
+  if (!items) {
+    return cx->alreadyReportedError();
+  }
+  return mozilla::MakeSpan(items, count);
 }
 
 // ---- Implementation of Huffman Tables
@@ -1699,22 +1812,27 @@ const BinASTSymbol* GenericHuffmanTable::Iterator::operator->() const {
 GenericHuffmanTable::GenericHuffmanTable()
     : implementation_(TableImplementationUninitialized{}) {}
 
-JS::Result<Ok> GenericHuffmanTable::initComplete(JSContext* cx) {
+JS::Result<Ok> GenericHuffmanTable::initComplete(
+    JSContext* cx, TemporaryStorage* tempStorage) {
   return implementation_.match(
       [](SingleEntryHuffmanTable& implementation) -> JS::Result<Ok> {
         MOZ_CRASH("SingleEntryHuffmanTable shouldn't have multiple entries!");
       },
-      [cx](TwoEntriesHuffmanTable& implementation) -> JS::Result<Ok> {
-        return implementation.initComplete(cx);
+      [cx,
+       tempStorage](TwoEntriesHuffmanTable& implementation) -> JS::Result<Ok> {
+        return implementation.initComplete(cx, tempStorage);
       },
-      [cx](SingleLookupHuffmanTable& implementation) -> JS::Result<Ok> {
-        return implementation.initComplete(cx);
+      [cx, tempStorage](
+          SingleLookupHuffmanTable& implementation) -> JS::Result<Ok> {
+        return implementation.initComplete(cx, tempStorage);
       },
-      [cx](TwoLookupsHuffmanTable& implementation) -> JS::Result<Ok> {
-        return implementation.initComplete(cx);
+      [cx,
+       tempStorage](TwoLookupsHuffmanTable& implementation) -> JS::Result<Ok> {
+        return implementation.initComplete(cx, tempStorage);
       },
-      [cx](ThreeLookupsHuffmanTable& implementation) -> JS::Result<Ok> {
-        return implementation.initComplete(cx);
+      [cx, tempStorage](
+          ThreeLookupsHuffmanTable& implementation) -> JS::Result<Ok> {
+        return implementation.initComplete(cx, tempStorage);
       },
       [](TableImplementationUninitialized&) -> JS::Result<Ok> {
         MOZ_CRASH("GenericHuffmanTable is unitialized!");
@@ -1743,7 +1861,8 @@ typename GenericHuffmanTable::Iterator GenericHuffmanTable::begin() const {
           -> GenericHuffmanTable::Iterator {
         return Iterator(implementation.begin());
       },
-      [](const TableImplementationUninitialized&) -> GenericHuffmanTable::Iterator {
+      [](const TableImplementationUninitialized&)
+          -> GenericHuffmanTable::Iterator {
         MOZ_CRASH("GenericHuffmanTable is unitialized!");
       });
 }
@@ -1770,7 +1889,8 @@ typename GenericHuffmanTable::Iterator GenericHuffmanTable::end() const {
           -> GenericHuffmanTable::Iterator {
         return Iterator(implementation.end());
       },
-      [](const TableImplementationUninitialized&) -> GenericHuffmanTable::Iterator {
+      [](const TableImplementationUninitialized&)
+          -> GenericHuffmanTable::Iterator {
         MOZ_CRASH("GenericHuffmanTable is unitialized!");
       });
 }
@@ -1779,13 +1899,15 @@ JS::Result<Ok> GenericHuffmanTable::initWithSingleValue(
     JSContext* cx, const BinASTSymbol& value) {
   // Only one value: use HuffmanImplementationSaturated
   MOZ_ASSERT(implementation_.template is<
-             TableImplementationUninitialized>());  // Make sure that we're initializing.
+             TableImplementationUninitialized>());  // Make sure that we're
+                                                    // initializing.
 
   implementation_ = {mozilla::VariantType<SingleEntryHuffmanTable>{}, value};
   return Ok();
 }
 
 JS::Result<Ok> GenericHuffmanTable::initStart(JSContext* cx,
+                                              TemporaryStorage* tempStorage,
                                               size_t numberOfSymbols,
                                               uint8_t largestBitLength) {
   // Make sure that we have a way to represent all legal bit lengths.
@@ -1802,7 +1924,7 @@ JS::Result<Ok> GenericHuffmanTable::initStart(JSContext* cx,
   if (numberOfSymbols == 2) {
     implementation_ = {mozilla::VariantType<TwoEntriesHuffmanTable>{}};
     return implementation_.template as<TwoEntriesHuffmanTable>().initStart(
-        cx, numberOfSymbols, largestBitLength);
+        cx, tempStorage, numberOfSymbols, largestBitLength);
   }
 
   // Find the (hopefully) fastest implementation of HuffmanTable for
@@ -1812,7 +1934,7 @@ JS::Result<Ok> GenericHuffmanTable::initStart(JSContext* cx,
     implementation_ = {mozilla::VariantType<SingleLookupHuffmanTable>{},
                        SingleLookupHuffmanTable::Use::ToplevelTable};
     return implementation_.template as<SingleLookupHuffmanTable>().initStart(
-        cx, numberOfSymbols, largestBitLength);
+        cx, tempStorage, numberOfSymbols, largestBitLength);
   }
 
   // ...if a single-lookup table would be too large, let's see if
@@ -1820,13 +1942,13 @@ JS::Result<Ok> GenericHuffmanTable::initStart(JSContext* cx,
   if (largestBitLength <= TwoLookupsHuffmanTable::MAX_BIT_LENGTH) {
     implementation_ = {mozilla::VariantType<TwoLookupsHuffmanTable>{}};
     return implementation_.template as<TwoLookupsHuffmanTable>().initStart(
-        cx, numberOfSymbols, largestBitLength);
+        cx, tempStorage, numberOfSymbols, largestBitLength);
   }
 
   // ...otherwise, we'll need three lookups.
   implementation_ = {mozilla::VariantType<ThreeLookupsHuffmanTable>{}};
   return implementation_.template as<ThreeLookupsHuffmanTable>().initStart(
-      cx, numberOfSymbols, largestBitLength);
+      cx, tempStorage, numberOfSymbols, largestBitLength);
 }
 
 JS::Result<Ok> GenericHuffmanTable::addSymbol(size_t index, uint32_t bits,
@@ -1958,6 +2080,7 @@ bool TwoEntriesHuffmanTable::Iterator::operator!=(const Iterator& other) const {
 }
 
 JS::Result<Ok> TwoEntriesHuffmanTable::initStart(JSContext* cx,
+                                                 TemporaryStorage* tempStorage,
                                                  size_t numberOfSymbols,
                                                  uint8_t largestBitLength) {
   // Make sure that we're initializing.
@@ -1966,7 +2089,8 @@ JS::Result<Ok> TwoEntriesHuffmanTable::initStart(JSContext* cx,
   return Ok();
 }
 
-JS::Result<Ok> TwoEntriesHuffmanTable::initComplete(JSContext* cx) {
+JS::Result<Ok> TwoEntriesHuffmanTable::initComplete(
+    JSContext* cx, TemporaryStorage* tempStorage) {
   return Ok();
 }
 
@@ -2013,22 +2137,21 @@ bool SingleLookupHuffmanTable::Iterator::operator!=(
   return position_ != other.position_;
 }
 
-JS::Result<Ok> SingleLookupHuffmanTable::initStart(JSContext* cx,
-                                                   size_t numberOfSymbols,
-                                                   uint8_t largestBitLength) {
+JS::Result<Ok> SingleLookupHuffmanTable::initStart(
+    JSContext* cx, TemporaryStorage* tempStorage, size_t numberOfSymbols,
+    uint8_t largestBitLength) {
   MOZ_ASSERT_IF(largestBitLength != 32,
                 (uint32_t(1) << largestBitLength) - 1 <=
                     mozilla::MaxValue<InternalIndex>::value);
 
   largestBitLength_ = largestBitLength;
 
-  if (MOZ_UNLIKELY(!values_.allocateUninitialized(cx, numberOfSymbols))) {
-    return cx->alreadyReportedError();
-  }
+  MOZ_TRY_VAR(values_, tempStorage->alloc<HuffmanEntry>(cx, numberOfSymbols));
+
   const size_t saturatedLength = 1 << largestBitLength_;
-  if (MOZ_UNLIKELY(!saturated_.allocateUninitialized(cx, saturatedLength))) {
-    return cx->alreadyReportedError();
-  }
+  MOZ_TRY_VAR(saturated_,
+              tempStorage->alloc<InternalIndex>(cx, saturatedLength));
+
   // Enlarge `saturated_`, as we're going to fill it in random order.
   for (size_t i = 0; i < saturatedLength; ++i) {
     // Capacity reserved in this method.
@@ -2037,25 +2160,26 @@ JS::Result<Ok> SingleLookupHuffmanTable::initStart(JSContext* cx,
   return Ok();
 }
 
-JS::Result<Ok> SingleLookupHuffmanTable::initComplete(JSContext* cx) {
+JS::Result<Ok> SingleLookupHuffmanTable::initComplete(
+    JSContext* cx, TemporaryStorage* tempStorage) {
   // Double-check that we've initialized properly.
   MOZ_ASSERT(largestBitLength_ <= MAX_CODE_BIT_LENGTH);
 
   // We can end up with empty tables, if this `SingleLookupHuffmanTable`
   // is used to store suffixes in a `MultiLookupHuffmanTable` and
   // the corresponding prefix is never used.
-  if (values_.length() == 0) {
+  if (values_.size() == 0) {
     MOZ_ASSERT(largestBitLength_ == 0);
     return Ok();
   }
 
 #ifdef DEBUG
   bool foundMaxBitLength = false;
-  for (size_t i = 0; i < saturated_.length(); ++i) {
+  for (size_t i = 0; i < saturated_.size(); ++i) {
     const uint8_t index = saturated_[i];
     if (use_ != Use::ToplevelTable) {
       // The table may not be full.
-      if (index >= values_.length()) {
+      if (index >= values_.size()) {
         continue;
       }
     }
@@ -2102,7 +2226,7 @@ JS::Result<Ok> SingleLookupHuffmanTable::addSymbol(size_t index, uint32_t bits,
 }
 
 HuffmanLookupResult SingleLookupHuffmanTable::lookup(HuffmanLookup key) const {
-  if (values_.length() == 0) {
+  if (values_.size() == 0) {
     // If the table is empty, any lookup fails.
     return HuffmanLookupResult::notFound();
   }
@@ -2113,17 +2237,17 @@ HuffmanLookupResult SingleLookupHuffmanTable::lookup(HuffmanLookup key) const {
   // `0bB...B`.
   const uint32_t bits = key.leadingBits(largestBitLength_);
 
-  // Invariants: `saturated_.length() == 1 << largestBitLength_`
+  // Invariants: `saturated_.size() == 1 << largestBitLength_`
   // and `bits <= 1 << largestBitLength_`.
   const size_t index = saturated_[bits];
-  if (index >= values_.length()) {
+  if (index >= values_.size()) {
     // This is useful only when the `SingleLookupHuffmanTable`
     // is used as a cache inside a `MultiLookupHuffmanTable`.
     MOZ_ASSERT(use_ == Use::ShortKeys);
     return HuffmanLookupResult::notFound();
   }
 
-  // Invariants: `saturated_[i] < values_.length()`.
+  // Invariants: `saturated_[i] < values_.size()`.
   const auto& entry = values_[index];
   return HuffmanLookupResult::found(entry.key().bitLength_, &entry.value());
 }
@@ -2165,17 +2289,17 @@ bool MultiLookupHuffmanTable<Subtable, PrefixBitLength>::Iterator::operator!=(
 
 template <typename Subtable, uint8_t PrefixBitLength>
 JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initStart(
-    JSContext* cx, size_t numberOfSymbols, uint8_t largestBitLength) {
+    JSContext* cx, TemporaryStorage* tempStorage, size_t numberOfSymbols,
+    uint8_t largestBitLength) {
   static_assert(PrefixBitLength < MAX_CODE_BIT_LENGTH,
                 "Invalid PrefixBitLength");
   largestBitLength_ = largestBitLength;
-  if (MOZ_UNLIKELY(!values_.allocateUninitialized(cx, numberOfSymbols))) {
-    return cx->alreadyReportedError();
-  }
-  if (MOZ_UNLIKELY(
-          !suffixTables_.allocateUninitialized(cx, 1 << PrefixBitLength))) {
-    return cx->alreadyReportedError();
-  }
+
+  MOZ_TRY_VAR(values_, tempStorage->alloc<HuffmanEntry>(cx, numberOfSymbols));
+
+  auto numTables = 1 << PrefixBitLength;
+  MOZ_TRY_VAR(suffixTables_, tempStorage->alloc<Subtable>(cx, numTables));
+
   return Ok();
 }
 
@@ -2195,7 +2319,7 @@ JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::addSymbol(
 
 template <typename Subtable, uint8_t PrefixBitLength>
 JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initComplete(
-    JSContext* cx) {
+    JSContext* cx, TemporaryStorage* tempStorage) {
   // First, we need to collect the `largestBitLength_`
   // and `numberofSymbols` for each subtable.
   struct Bucket {
@@ -2239,7 +2363,7 @@ JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initComplete(
 
   FixedLengthVector<size_t> suffixTablesIndices;
   if (MOZ_UNLIKELY(!suffixTablesIndices.allocateUninitialized(
-          cx, suffixTables_.length()))) {
+          cx, suffixTables_.size()))) {
     return cx->alreadyReportedError();
   }
 
@@ -2254,7 +2378,7 @@ JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initComplete(
       // in `shortKeys_`. In such a case, we want to avoid initializing the
       // table.
       MOZ_TRY(suffixTables_[i].initStart(
-          cx,
+          cx, tempStorage,
           /* numberOfSymbols = */ bucket.numberOfSymbols_,
           /* maxBitLength = */ bucket.largestBitLength_));
     }
@@ -2263,13 +2387,14 @@ JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initComplete(
   }
 
   // Also, create the shortKeys_ fast lookup.
-  MOZ_TRY(shortKeys_.initStart(cx, shortKeysBucket.numberOfSymbols_,
+  MOZ_TRY(shortKeys_.initStart(cx, tempStorage,
+                               shortKeysBucket.numberOfSymbols_,
                                shortKeysBucket.largestBitLength_));
 
   // Now that all the subtables are created, let's dispatch the values
   // among these tables.
   size_t shortKeysIndex = 0;
-  for (size_t i = 0; i < values_.length(); ++i) {
+  for (size_t i = 0; i < values_.size(); ++i) {
     const auto& entry = values_[i];
     if (entry.key().bitLength_ <= SingleLookupHuffmanTable::MAX_BIT_LENGTH) {
       // The key fits in `shortKeys_`, let's use this table.
@@ -2295,14 +2420,14 @@ JS::Result<Ok> MultiLookupHuffmanTable<Subtable, PrefixBitLength>::initComplete(
   }
 
   // Finally, complete initialization of shortKeys_ and subtables.
-  MOZ_TRY(shortKeys_.initComplete(cx));
+  MOZ_TRY(shortKeys_.initComplete(cx, tempStorage));
   for (size_t i = 0; i < buckets.length(); ++i) {
     if (buckets[i].numberOfSymbols_ == 0) {
       // Again, we don't want to initialize empty subtables.
       continue;
     }
     auto& sub = suffixTables_[i];
-    MOZ_TRY(sub.initComplete(cx));
+    MOZ_TRY(sub.initComplete(cx, tempStorage));
   }
 
   return Ok();
@@ -2323,7 +2448,7 @@ HuffmanLookupResult MultiLookupHuffmanTable<Subtable, PrefixBitLength>::lookup(
     }
   }
   const auto split = key.split(PrefixBitLength);
-  if (split.prefix_.bits_ >= suffixTables_.length()) {
+  if (split.prefix_.bits_ >= suffixTables_.size()) {
     return HuffmanLookupResult::notFound();
   }
   const Subtable& subtable = suffixTables_[split.prefix_.bits_];
@@ -2406,8 +2531,12 @@ const BinASTVariant* STRING_ENUM_RESOLUTIONS[BINASTSTRINGENUM_LIMIT]{
 };
 
 // Start reading the prelude.
-MOZ_MUST_USE JS::Result<Ok> HuffmanPreludeReader::run(size_t initialCapacity) {
+MOZ_MUST_USE JS::Result<HuffmanDictionaryForMetadata*>
+HuffmanPreludeReader::run(size_t initialCapacity) {
   BINJS_TRY(stack_.reserve(initialCapacity));
+
+  dictionary_.reset(cx_->new_<HuffmanDictionary>());
+  BINJS_TRY(dictionary_);
 
   // For the moment, the root node is hardcoded to be a BinASTKind::Script.
   // In future versions of the codec, we'll extend the format to handle
@@ -2417,7 +2546,15 @@ MOZ_MUST_USE JS::Result<Ok> HuffmanPreludeReader::run(size_t initialCapacity) {
     const Entry entry = stack_.popCopy();
     MOZ_TRY(entry.match(ReadPoppedEntryMatcher(*this)));
   }
-  return Ok();
+
+  auto dictForMetadata = HuffmanDictionaryForMetadata::createFrom(
+      dictionary_.get(), &tempStorage_);
+  if (!dictForMetadata) {
+    ReportOutOfMemory(cx_);
+    return cx_->alreadyReportedError();
+  }
+
+  return dictForMetadata;
 }
 
 // ------ Reading booleans.
@@ -2663,7 +2800,7 @@ MOZ_MUST_USE JS::Result<BinASTSymbol> HuffmanPreludeReader::readSymbol(
   if (MOZ_UNLIKELY(index > reader_.metadata_->numStrings())) {
     return raiseInvalidTableData(entry.identity_);
   }
-  return BinASTSymbol::fromAtom(reader_.metadata_->getAtom(index));
+  return BinASTSymbol::fromAtomIndex(index);
 }
 
 // Reading a single-value table of string indices.
@@ -2674,8 +2811,7 @@ MOZ_MUST_USE JS::Result<Ok> HuffmanPreludeReader::readSingleValueTable<String>(
   if (MOZ_UNLIKELY(index > reader_.metadata_->numStrings())) {
     return raiseInvalidTableData(entry.identity_);
   }
-  JSAtom* value = reader_.metadata_->getAtom(index);
-  MOZ_TRY(table.initWithSingleValue(cx_, BinASTSymbol::fromAtom(value)));
+  MOZ_TRY(table.initWithSingleValue(cx_, BinASTSymbol::fromAtomIndex(index)));
   return Ok();
 }
 
@@ -2700,13 +2836,15 @@ template <>
 MOZ_MUST_USE JS::Result<BinASTSymbol> HuffmanPreludeReader::readSymbol(
     const MaybeString& entry, size_t) {
   BINJS_MOZ_TRY_DECL(index, reader_.readVarU32<Compression::No>());
+  // (index == 0) is specified as `null` value and
+  // (index > 0) maps to (index - 1)-th atom.
   if (index == 0) {
-    return BinASTSymbol::fromAtom(nullptr);
+    return BinASTSymbol::nullAtom();
   }
   if (MOZ_UNLIKELY(index > reader_.metadata_->numStrings() + 1)) {
     return raiseInvalidTableData(entry.identity_);
   }
-  return BinASTSymbol::fromAtom(reader_.metadata_->getAtom(index - 1));
+  return BinASTSymbol::fromAtomIndex(index - 1);
 }
 
 // Reading a single-value table of string indices.
@@ -2718,8 +2856,14 @@ HuffmanPreludeReader::readSingleValueTable<MaybeString>(
   if (MOZ_UNLIKELY(index > reader_.metadata_->numStrings() + 1)) {
     return raiseInvalidTableData(entry.identity_);
   }
-  JSAtom* symbol = index == 0 ? nullptr : reader_.metadata_->getAtom(index - 1);
-  MOZ_TRY(table.initWithSingleValue(cx_, BinASTSymbol::fromAtom(symbol)));
+  // (index == 0) is specified as `null` value and
+  // (index > 0) maps to (index - 1)-th atom.
+  if (index == 0) {
+    MOZ_TRY(table.initWithSingleValue(cx_, BinASTSymbol::nullAtom()));
+  } else {
+    MOZ_TRY(
+        table.initWithSingleValue(cx_, BinASTSymbol::fromAtomIndex(index - 1)));
+  }
   return Ok();
 }
 
@@ -2788,36 +2932,283 @@ HuffmanPreludeReader::readSingleValueTable<UnsignedLong>(
   return Ok();
 }
 
+HuffmanDictionaryForMetadata::~HuffmanDictionaryForMetadata() {
+  // WARNING: If you change the code of this destructor,
+  //          `clearFromIncompleteInitialization` needs to be synchronized.
+  for (size_t i = 0; i < numTables_; i++) {
+    tablesBase()[i].~GenericHuffmanTable();
+  }
+  for (size_t i = 0; i < numSingleTables_; i++) {
+    singleTablesBase()[i].~SingleLookupHuffmanTable();
+  }
+  for (size_t i = 0; i < numTwoTables_; i++) {
+    twoTablesBase()[i].~TwoLookupsHuffmanTable();
+  }
+}
+
+/* static */
+HuffmanDictionaryForMetadata* HuffmanDictionaryForMetadata::createFrom(
+    HuffmanDictionary* dictionary, TemporaryStorage* tempStorage) {
+  size_t numTables = dictionary->numTables();
+  size_t numHuffmanEntries = tempStorage->numHuffmanEntries();
+  size_t numInternalIndices = tempStorage->numInternalIndices();
+  while (numInternalIndices * sizeof(InternalIndex) % sizeof(uintptr_t) != 0) {
+    numInternalIndices++;
+  }
+  size_t numSingleTables = tempStorage->numSingleTables();
+  size_t numTwoTables = tempStorage->numTwoTables();
+
+  HuffmanDictionaryForMetadata* data =
+      static_cast<HuffmanDictionaryForMetadata*>(
+          js_malloc(totalSize(numTables, numHuffmanEntries, numInternalIndices,
+                              numSingleTables, numTwoTables)));
+  if (MOZ_UNLIKELY(!data)) {
+    return nullptr;
+  }
+
+  new (mozilla::KnownNotNull, data) HuffmanDictionaryForMetadata(
+      numTables, numHuffmanEntries, numInternalIndices, numSingleTables,
+      numTwoTables);
+
+  data->moveFrom(dictionary, tempStorage);
+  return data;
+}
+
+/* static */
+HuffmanDictionaryForMetadata* HuffmanDictionaryForMetadata::create(
+    size_t numTables, size_t numHuffmanEntries, size_t numInternalIndices,
+    size_t numSingleTables, size_t numTwoTables) {
+  HuffmanDictionaryForMetadata* data =
+      static_cast<HuffmanDictionaryForMetadata*>(
+          js_malloc(totalSize(numTables, numHuffmanEntries, numInternalIndices,
+                              numSingleTables, numTwoTables)));
+  if (MOZ_UNLIKELY(!data)) {
+    return nullptr;
+  }
+
+  new (mozilla::KnownNotNull, data) HuffmanDictionaryForMetadata(
+      numTables, numHuffmanEntries, numInternalIndices, numSingleTables,
+      numTwoTables);
+
+  return data;
+}
+
+void HuffmanDictionaryForMetadata::clearFromIncompleteInitialization(
+    size_t numInitializedTables, size_t numInitializedSingleTables,
+    size_t numInitializedTwoTables) {
+  // This is supposed to be called from AutoClearHuffmanDictionaryForMetadata.
+  // See AutoClearHuffmanDictionaryForMetadata class comment for more details.
+
+  // Call destructors for already-initialized tables.
+  for (size_t i = 0; i < numInitializedTables; i++) {
+    tablesBase()[i].~GenericHuffmanTable();
+  }
+  for (size_t i = 0; i < numInitializedSingleTables; i++) {
+    singleTablesBase()[i].~SingleLookupHuffmanTable();
+  }
+  for (size_t i = 0; i < numInitializedTwoTables; i++) {
+    twoTablesBase()[i].~TwoLookupsHuffmanTable();
+  }
+
+  // Set the following fields to 0 so that destructor doesn't call tables'
+  // destructor.
+  numTables_ = 0;
+  numSingleTables_ = 0;
+  numTwoTables_ = 0;
+}
+
+void HuffmanDictionaryForMetadata::moveFrom(HuffmanDictionary* dictionary,
+                                            TemporaryStorage* tempStorage) {
+  // Move tableIndices_ from HuffmanDictionary to the payload of
+  // HuffmanDictionaryForMetadata.
+  for (size_t i = 0; i < TableIdentity::Limit; i++) {
+    // HuffmanDictionaryForMetadata.tableIndices_ is initialized to
+    // UnreachableIndex, and we don't have to move if
+    // dictionary->status_[i] == HuffmanDictionary::TableStatus::Unreachable.
+    if (dictionary->status_[i] == HuffmanDictionary::TableStatus::Ready) {
+      tableIndices_[i] = dictionary->tableIndices_[i];
+    }
+  }
+
+  // Fill items of each array from the beginning.
+  auto tablePtr = tablesBase();
+  auto huffmanEntryPtr = huffmanEntriesBase();
+  auto internalIndexPtr = internalIndicesBase();
+  auto singleTablePtr = singleTablesBase();
+  auto twoTablePtr = twoTablesBase();
+
+  // Move the content of SingleLookupHuffmanTable from
+  // TemporaryStorage to the payload of HuffmanDictionaryForMetadata.
+  //
+  // SingleLookupHuffmanTable itself should already be moved to
+  // HuffmanDictionaryForMetadata.
+  auto moveSingleTableContent =
+      [&huffmanEntryPtr, &internalIndexPtr](SingleLookupHuffmanTable& table) {
+        // table.{values_,saturated_} points the spans in TemporaryStorage.
+        // Move those items to the payload and then update
+        // table.{values_,saturated_} to point that range.
+
+        {
+          size_t size = table.values_.size();
+          memmove(huffmanEntryPtr.get(), table.values_.data(),
+                  sizeof(HuffmanEntry) * size);
+          table.values_ = mozilla::MakeSpan(huffmanEntryPtr.get(), size);
+          huffmanEntryPtr += size;
+        }
+
+        {
+          size_t size = table.saturated_.size();
+          memmove(internalIndexPtr.get(), table.saturated_.data(),
+                  sizeof(InternalIndex) * size);
+          table.saturated_ = mozilla::MakeSpan(internalIndexPtr.get(), size);
+          internalIndexPtr += size;
+        }
+      };
+
+  // Move the content of TwoLookupsHuffmanTable from
+  // TemporaryStorage to the payload of HuffmanDictionaryForMetadata.
+  auto moveTwoTableContent =
+      [&huffmanEntryPtr, &singleTablePtr,
+       moveSingleTableContent](TwoLookupsHuffmanTable& table) {
+        // table.shortKeys_ instance itself is already moved.
+        // Move the contents to the payload.
+        moveSingleTableContent(table.shortKeys_);
+
+        // table.{values_,suffixTables_} points the spans in TemporaryStorage.
+        // Move those items to the payload and then update
+        // table.{values_,suffixTables_} to point that range.
+        // Also recursively move the content of suffixTables_.
+
+        {
+          size_t size = table.values_.size();
+          memmove(huffmanEntryPtr.get(), table.values_.data(),
+                  sizeof(HuffmanEntry) * size);
+          table.values_ = mozilla::MakeSpan(huffmanEntryPtr.get(), size);
+          huffmanEntryPtr += size;
+        }
+
+        {
+          size_t size = table.suffixTables_.size();
+          auto head = singleTablePtr.get();
+          for (auto& fromSubTable : table.suffixTables_) {
+            memmove(singleTablePtr.get(), &fromSubTable,
+                    sizeof(SingleLookupHuffmanTable));
+            auto& toSubTable = *singleTablePtr;
+            singleTablePtr++;
+
+            moveSingleTableContent(toSubTable);
+          }
+          table.suffixTables_ = mozilla::MakeSpan(head, size);
+        }
+      };
+
+  // Move the content of ThreeLookupsHuffmanTable from
+  // TemporaryStorage to the payload of HuffmanDictionaryForMetadata.
+  auto moveThreeTableContent =
+      [&huffmanEntryPtr, &twoTablePtr, moveSingleTableContent,
+       moveTwoTableContent](ThreeLookupsHuffmanTable& table) {
+        // table.shortKeys_ instance itself is already moved.
+        // Move the contents to the payload.
+        moveSingleTableContent(table.shortKeys_);
+
+        // table.{values_,suffixTables_} points the spans in TemporaryStorage.
+        // Move those items to the payload and then update
+        // table.{values_,suffixTables_} to point that range.
+        // Also recursively move the content of suffixTables_.
+
+        {
+          size_t size = table.values_.size();
+          memmove(huffmanEntryPtr.get(), table.values_.data(),
+                  sizeof(HuffmanEntry) * size);
+          table.values_ = mozilla::MakeSpan(huffmanEntryPtr.get(), size);
+          huffmanEntryPtr += size;
+        }
+
+        {
+          size_t size = table.suffixTables_.size();
+          auto head = twoTablePtr.get();
+          for (auto& fromSubTable : table.suffixTables_) {
+            memmove(twoTablePtr.get(), &fromSubTable,
+                    sizeof(TwoLookupsHuffmanTable));
+            auto& toSubTable = *twoTablePtr;
+            twoTablePtr++;
+
+            moveTwoTableContent(toSubTable);
+          }
+          table.suffixTables_ = mozilla::MakeSpan(head, size);
+        }
+      };
+
+  // Move tables from HuffmanDictionary to the payload of
+  // HuffmanDictionaryForMetadata, and then move contents of those tables
+  // to the payload of HuffmanDictionaryForMetadata.
+  for (size_t i = 0; i < numTables_; i++) {
+    auto& fromTable = dictionary->tableAtIndex(i);
+
+    if (fromTable.implementation_.is<SingleEntryHuffmanTable>() ||
+        fromTable.implementation_.is<TwoEntriesHuffmanTable>()) {
+      memmove(tablePtr.get(), &fromTable, sizeof(GenericHuffmanTable));
+      tablePtr++;
+    } else if (fromTable.implementation_.is<SingleLookupHuffmanTable>()) {
+      memmove(tablePtr.get(), &fromTable, sizeof(GenericHuffmanTable));
+      auto& specialized =
+          tablePtr->implementation_.as<SingleLookupHuffmanTable>();
+      tablePtr++;
+
+      moveSingleTableContent(specialized);
+    } else if (fromTable.implementation_.is<TwoLookupsHuffmanTable>()) {
+      memmove(tablePtr.get(), &fromTable, sizeof(GenericHuffmanTable));
+      auto& specialized =
+          tablePtr->implementation_.as<TwoLookupsHuffmanTable>();
+      tablePtr++;
+
+      moveTwoTableContent(specialized);
+    } else {
+      MOZ_ASSERT(fromTable.implementation_.is<ThreeLookupsHuffmanTable>());
+
+      memmove(tablePtr.get(), &fromTable, sizeof(GenericHuffmanTable));
+      auto& specialized =
+          tablePtr->implementation_.as<ThreeLookupsHuffmanTable>();
+      tablePtr++;
+
+      moveThreeTableContent(specialized);
+    }
+  }
+}
+
+/* static */
+size_t HuffmanDictionaryForMetadata::totalSize(size_t numTables,
+                                               size_t numHuffmanEntries,
+                                               size_t numInternalIndices,
+                                               size_t numSingleTables,
+                                               size_t numTwoTables) {
+  static_assert(alignof(GenericHuffmanTable) % sizeof(uintptr_t) == 0,
+                "should be aligned to pointer size");
+  static_assert(alignof(HuffmanEntry) % sizeof(uintptr_t) == 0,
+                "should be aligned to pointer size");
+  static_assert(alignof(SingleLookupHuffmanTable) % sizeof(uintptr_t) == 0,
+                "should be aligned to pointer size");
+  static_assert(alignof(TwoLookupsHuffmanTable) % sizeof(uintptr_t) == 0,
+                "should be aligned to pointer size");
+
+  // InternalIndex is not guaranteed to be aligned to pointer size.
+  // Make sure `numInternalIndices` meets the requirement that
+  // the entire block size is aligned to pointer size.
+  MOZ_ASSERT(numInternalIndices * sizeof(InternalIndex) % sizeof(uintptr_t) ==
+             0);
+
+  return sizeof(HuffmanDictionaryForMetadata) +
+         numTables * sizeof(GenericHuffmanTable) +
+         numHuffmanEntries * sizeof(HuffmanEntry) +
+         numInternalIndices * sizeof(InternalIndex) +
+         numSingleTables * sizeof(SingleLookupHuffmanTable) +
+         numTwoTables * sizeof(TwoLookupsHuffmanTable);
+}
+
 HuffmanDictionary::~HuffmanDictionary() {
-  for (size_t i = 0; i < BINAST_INTERFACE_AND_FIELD_LIMIT; i++) {
-    if (fieldStatus(i) == TableStatus::Ready) {
-      tableForField(i).~GenericHuffmanTable();
-    }
+  for (size_t i = 0; i < nextIndex_; i++) {
+    tableAtIndex(i).~GenericHuffmanTable();
   }
-  for (size_t i = 0; i < BINAST_NUMBER_OF_LIST_TYPES; i++) {
-    if (listLengthStatus(i) == TableStatus::Ready) {
-      tableForListLength(i).~GenericHuffmanTable();
-    }
-  }
-}
-
-HuffmanDictionary::TableStatus& HuffmanDictionary::fieldStatus(
-    NormalizedInterfaceAndField index) {
-  return fieldStatus(static_cast<size_t>(index.identity_));
-}
-
-GenericHuffmanTable& HuffmanDictionary::tableForField(
-    NormalizedInterfaceAndField index) {
-  return tableForField(static_cast<size_t>(index.identity_));
-}
-
-HuffmanDictionary::TableStatus& HuffmanDictionary::listLengthStatus(
-    BinASTList list) {
-  return listLengthStatus(static_cast<size_t>(list));
-}
-
-GenericHuffmanTable& HuffmanDictionary::tableForListLength(BinASTList list) {
-  return tableForListLength(static_cast<size_t>(list));
 }
 
 uint32_t HuffmanLookup::leadingBits(const uint8_t aBitLength) const {

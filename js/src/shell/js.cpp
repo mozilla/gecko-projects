@@ -911,7 +911,8 @@ static MOZ_MUST_USE bool RunFile(JSContext* cx, const char* filename,
 #if defined(JS_BUILD_BINAST)
 
 static MOZ_MUST_USE bool RunBinAST(JSContext* cx, const char* filename,
-                                   FILE* file, bool compileOnly) {
+                                   FILE* file, bool compileOnly,
+                                   JS::BinASTFormat format) {
   RootedScript script(cx);
 
   {
@@ -920,7 +921,7 @@ static MOZ_MUST_USE bool RunBinAST(JSContext* cx, const char* filename,
         .setIsRunOnce(true)
         .setNoScriptRval(true);
 
-    script = JS::DecodeBinAST(cx, options, file);
+    script = JS::DecodeBinAST(cx, options, file, format);
     if (!script) {
       return false;
     }
@@ -1300,7 +1301,7 @@ static bool BindToAsyncStack(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-#ifdef ENABLE_INTL_API
+#ifdef JS_HAS_INTL_API
 static bool AddIntlExtras(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   if (!args.get(0).isObject()) {
@@ -1334,7 +1335,7 @@ static bool AddIntlExtras(JSContext* cx, unsigned argc, Value* vp) {
   args.rval().setUndefined();
   return true;
 }
-#endif  // ENABLE_INTL_API
+#endif  // JS_HAS_INTL_API
 
 static MOZ_MUST_USE bool EvalUtf8AndPrint(JSContext* cx, const char* bytes,
                                           size_t length, int lineno,
@@ -1467,7 +1468,8 @@ enum FileKind {
   FileScript,       // UTF-8, directly parsed as such
   FileScriptUtf16,  // FileScript, but inflate to UTF-16 before parsing
   FileModule,
-  FileBinAST
+  FileBinASTMultipart,
+  FileBinASTContext,
 };
 
 static void ReportCantOpenErrorUnknownEncoding(JSContext* cx,
@@ -1521,8 +1523,15 @@ static MOZ_MUST_USE bool Process(JSContext* cx, const char* filename,
         }
         break;
 #if defined(JS_BUILD_BINAST)
-      case FileBinAST:
-        if (!RunBinAST(cx, filename, file, compileOnly)) {
+      case FileBinASTMultipart:
+        if (!RunBinAST(cx, filename, file, compileOnly,
+                       JS::BinASTFormat::Multipart)) {
+          return false;
+        }
+        break;
+      case FileBinASTContext:
+        if (!RunBinAST(cx, filename, file, compileOnly,
+                       JS::BinASTFormat::Context)) {
           return false;
         }
         break;
@@ -2989,37 +2998,6 @@ static bool PCToLine(JSContext* cx, unsigned argc, Value* vp) {
 
 #if defined(DEBUG) || defined(JS_JITSPEW)
 
-static void UpdateSwitchTableBounds(JSContext* cx, HandleScript script,
-                                    unsigned offset, unsigned* start,
-                                    unsigned* end) {
-  jsbytecode* pc;
-  JSOp op;
-  ptrdiff_t jmplen;
-  int32_t low, high, n;
-
-  pc = script->offsetToPC(offset);
-  op = JSOp(*pc);
-  switch (op) {
-    case JSOP_TABLESWITCH:
-      jmplen = JUMP_OFFSET_LEN;
-      pc += jmplen;
-      low = GET_JUMP_OFFSET(pc);
-      pc += JUMP_OFFSET_LEN;
-      high = GET_JUMP_OFFSET(pc);
-      pc += JUMP_OFFSET_LEN;
-      n = high - low + 1;
-      break;
-
-    default:
-      /* [condswitch] switch does not have any jump or lookup tables. */
-      MOZ_ASSERT(op == JSOP_CONDSWITCH);
-      return;
-  }
-
-  *start = script->pcToOffset(pc);
-  *end = *start + (unsigned)(n * jmplen);
-}
-
 static MOZ_MUST_USE bool SrcNotes(JSContext* cx, HandleScript script,
                                   Sprinter* sp) {
   if (!sp->put("\nSource notes:\n") ||
@@ -3033,7 +3011,6 @@ static MOZ_MUST_USE bool SrcNotes(JSContext* cx, HandleScript script,
   unsigned colspan = 0;
   unsigned lineno = script->lineno();
   jssrcnote* notes = script->notes();
-  unsigned switchTableEnd = 0, switchTableStart = 0;
   for (jssrcnote* sn = notes; !SN_IS_TERMINATOR(sn); sn = SN_NEXT(sn)) {
     unsigned delta = SN_DELTA(sn);
     offset += delta;
@@ -3046,13 +3023,6 @@ static MOZ_MUST_USE bool SrcNotes(JSContext* cx, HandleScript script,
 
     switch (type) {
       case SRC_NULL:
-      case SRC_IF:
-      case SRC_IF_ELSE:
-      case SRC_COND:
-      case SRC_CONTINUE:
-      case SRC_BREAK:
-      case SRC_BREAK2LABEL:
-      case SRC_SWITCHBREAK:
       case SRC_ASSIGNOP:
       case SRC_BREAKPOINT:
       case SRC_STEP_SEP:
@@ -3080,9 +3050,8 @@ static MOZ_MUST_USE bool SrcNotes(JSContext* cx, HandleScript script,
 
       case SRC_FOR:
         if (!sp->jsprintf(
-                " cond %u update %u backjump %u",
+                " cond %u backjump %u",
                 unsigned(GetSrcNoteOffset(sn, SrcNote::For::CondOffset)),
-                unsigned(GetSrcNoteOffset(sn, SrcNote::For::UpdateOffset)),
                 unsigned(GetSrcNoteOffset(sn, SrcNote::For::BackJumpOffset)))) {
           return false;
         }
@@ -3107,53 +3076,12 @@ static MOZ_MUST_USE bool SrcNotes(JSContext* cx, HandleScript script,
         break;
 
       case SRC_DO_WHILE:
-        if (!sp->jsprintf(
-                " cond %u backjump %u",
-                unsigned(GetSrcNoteOffset(sn, SrcNote::DoWhile::CondOffset)),
-                unsigned(
-                    GetSrcNoteOffset(sn, SrcNote::DoWhile::BackJumpOffset)))) {
-          return false;
-        }
-        break;
-
-      case SRC_NEXTCASE:
-        if (!sp->jsprintf(" next case offset %u",
+        if (!sp->jsprintf(" backjump %u",
                           unsigned(GetSrcNoteOffset(
-                              sn, SrcNote::NextCase::NextCaseOffset)))) {
+                              sn, SrcNote::DoWhile::BackJumpOffset)))) {
           return false;
         }
         break;
-
-      case SRC_TABLESWITCH: {
-        mozilla::DebugOnly<JSOp> op = JSOp(script->code()[offset]);
-        MOZ_ASSERT(op == JSOP_TABLESWITCH);
-        if (!sp->jsprintf(" end offset %u",
-                          unsigned(GetSrcNoteOffset(
-                              sn, SrcNote::TableSwitch::EndOffset)))) {
-          return false;
-        }
-        UpdateSwitchTableBounds(cx, script, offset, &switchTableStart,
-                                &switchTableEnd);
-        break;
-      }
-      case SRC_CONDSWITCH: {
-        mozilla::DebugOnly<JSOp> op = JSOp(script->code()[offset]);
-        MOZ_ASSERT(op == JSOP_CONDSWITCH);
-        if (!sp->jsprintf(" end offset %u",
-                          unsigned(GetSrcNoteOffset(
-                              sn, SrcNote::CondSwitch::EndOffset)))) {
-          return false;
-        }
-        if (unsigned caseOff = unsigned(
-                GetSrcNoteOffset(sn, SrcNote::CondSwitch::FirstCaseOffset))) {
-          if (!sp->jsprintf(" first case offset %u", caseOff)) {
-            return false;
-          }
-        }
-        UpdateSwitchTableBounds(cx, script, offset, &switchTableStart,
-                                &switchTableEnd);
-        break;
-      }
 
       case SRC_TRY:
         MOZ_ASSERT(JSOp(script->code()[offset]) == JSOP_TRY);
@@ -9141,7 +9069,7 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "            or only when there are no other JavaScript frames on the stack\n"
 "            below it (false). If omitted, this is treated as 'true'."),
 
-#ifdef ENABLE_INTL_API
+#ifdef JS_HAS_INTL_API
     JS_FN_HELP("addIntlExtras", AddIntlExtras, 1, 0,
 "addIntlExtras(obj)",
 "Adds various not-yet-standardized Intl functions as properties on the\n"
@@ -9149,7 +9077,7 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 "functions and their behavior are experimental: don't depend upon them\n"
 "unless you're willing to update your code if these experimental APIs change\n"
 "underneath you."),
-#endif // ENABLE_INTL_API
+#endif // JS_HAS_INTL_API
 
     JS_FN_HELP("wasmCompileInSeparateProcess", WasmCompileInSeparateProcess, 1, 0,
 "wasmCompileInSeparateProcess(buffer)",
@@ -10166,8 +10094,18 @@ static MOZ_MUST_USE bool ProcessArgs(JSContext* cx, OptionParser* op) {
   MultiStringRange codeChunks = op->getMultiStringOption('e');
   MultiStringRange modulePaths = op->getMultiStringOption('m');
   MultiStringRange binASTPaths(nullptr, nullptr);
+  FileKind binASTFileKind = FileBinASTMultipart;
 #if defined(JS_BUILD_BINAST)
   binASTPaths = op->getMultiStringOption('B');
+  if (const char* str = op->getStringOption("binast-format")) {
+    if (strcmp(str, "multipart") == 0) {
+      binASTFileKind = FileBinASTMultipart;
+    } else if (strcmp(str, "context") == 0) {
+      binASTFileKind = FileBinASTContext;
+    } else {
+      return OptionFailure("binast-format", str);
+    }
+  }
 #endif  // JS_BUILD_BINAST
 
   if (filePaths.empty() && utf16FilePaths.empty() && codeChunks.empty() &&
@@ -10259,7 +10197,7 @@ static MOZ_MUST_USE bool ProcessArgs(JSContext* cx, OptionParser* op) {
     if (baArgno < fpArgno && baArgno < ufpArgno && baArgno < ccArgno &&
         baArgno < mpArgno) {
       char* path = binASTPaths.front();
-      if (!Process(cx, path, false, FileBinAST)) {
+      if (!Process(cx, path, false, binASTFileKind)) {
         return false;
       }
 
@@ -11039,8 +10977,11 @@ int main(int argc, char** argv, char** envp) {
       !op.addMultiStringOption('m', "module", "PATH", "Module path to run") ||
 #if defined(JS_BUILD_BINAST)
       !op.addMultiStringOption('B', "binast", "PATH", "BinAST path to run") ||
+      !op.addStringOption('\0', "binast-format", "[format]",
+                          "Format of BinAST file (multipart/context)") ||
 #else
       !op.addMultiStringOption('B', "binast", "", "No-op") ||
+      !op.addStringOption('\0', "binast-format", "[format]", "No-op") ||
 #endif  // JS_BUILD_BINAST
       !op.addMultiStringOption('e', "execute", "CODE", "Inline code to run") ||
       !op.addBoolOption('i', "shell", "Enter prompt after running code") ||

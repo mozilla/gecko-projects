@@ -1165,6 +1165,14 @@ void nsWindow::HideWaylandTooltips() {
   }
 }
 
+void nsWindow::HideWaylandOpenedPopups() {
+  while (gVisibleWaylandPopupWindows) {
+    nsWindow* window =
+        static_cast<nsWindow*>(gVisibleWaylandPopupWindows->data);
+    window->HideWaylandWindow();
+  }
+}
+
 // Hide popup nsWindows which are no longer in the nsXULPopupManager widget
 // chain list.
 void nsWindow::CleanupWaylandPopups() {
@@ -1218,7 +1226,10 @@ bool nsWindow::IsMainMenuWindow() {
 // popup needs to have an unique parent.
 GtkWidget* nsWindow::ConfigureWaylandPopupWindows() {
   MOZ_ASSERT(this->mWindowType == eWindowType_popup);
-  LOG(("nsWindow::ConfigureWaylandPopupWindows [%p]\n", (void*)this));
+  LOG(
+      ("nsWindow::ConfigureWaylandPopupWindows [%p], frame %p hasRemoteContent "
+       "%d\n",
+       (void*)this, this->GetFrame(), this->HasRemoteContent()));
 #if DEBUG
   if (this->GetFrame() && this->GetFrame()->GetContent()->GetID()) {
     nsCString nodeId;
@@ -1245,14 +1256,14 @@ GtkWidget* nsWindow::ConfigureWaylandPopupWindows() {
     // gVisibleWaylandPopupWindows which were not yet been hidden.
     CleanupWaylandPopups();
     // Since the popups are shown by unknown order it can happen that child
-    // popup is shown before parent popup. The
+    // popup is shown before parent popup.
     // We look for the current window parent in nsXULPopupManager since it
     // always has correct popup hierarchy while gVisibleWaylandPopupWindows may
     // not.
     nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
     AutoTArray<nsIWidget*, 5> widgetChain;
     pm->GetSubmenuWidgetChain(&widgetChain);
-    for (unsigned long i = 0; i < widgetChain.Length(); i++) {
+    for (unsigned long i = 0; i < widgetChain.Length() - 1; i++) {
       unsigned long parentIndex = i + 1;
       if (widgetChain.Length() > parentIndex && widgetChain[i] == this) {
         nsWindow* parentWindow =
@@ -1264,6 +1275,29 @@ GtkWidget* nsWindow::ConfigureWaylandPopupWindows() {
       }
     }
   } else {
+    // Panels usually ends there
+    if (gVisibleWaylandPopupWindows && HasRemoteContent()) {
+      // If the new panel is remote content, we need to close all other popups
+      // before to keep the correct hierarchy because the remote content popup
+      // can replace the overflow-widget panel.
+      HideWaylandOpenedPopups();
+    } else if (gVisibleWaylandPopupWindows) {
+      // If there is any remote content panel currently opened, close all
+      // opened popups to keep the correct hierarchy.
+      GList* popupList = gVisibleWaylandPopupWindows;
+      while (popupList) {
+        nsWindow* waylandWnd = static_cast<nsWindow*>(popupList->data);
+        LOG(("  Checking [%p] IsRemoteContent %d\n", popupList->data,
+             waylandWnd->IsRemoteContent()));
+        if (waylandWnd->IsRemoteContent()) {
+          // close all popups including remote content before showing our panel
+          // Most likely returning from addon panel to overflow-widget.
+          HideWaylandOpenedPopups();
+          break;
+        }
+        popupList = popupList->next;
+      }
+    }
     // For popups in panels use the last opened popup window as parent,
     // panels are not stored in nsXULPopupManager.
     if (gVisibleWaylandPopupWindows) {
@@ -1295,13 +1329,12 @@ static void NativeMoveResizeWaylandPopupCallback(
     GdkWindow* window, const GdkRectangle* flipped_rect,
     const GdkRectangle* final_rect, gboolean flipped_x, gboolean flipped_y,
     void* aWindow) {
-  LOG(("%s [%p] flipped_x %d flipped_y %d\n", __FUNCTION__, aWindow, flipped_x,
-       flipped_y));
+  LOG(("NativeMoveResizeWaylandPopupCallback [%p] flipped_x %d flipped_y %d\n",
+       aWindow, flipped_x, flipped_y));
 
-  LOG(("%s [%p] flipped %d %d w:%d h:%d\n", __FUNCTION__, aWindow,
-       flipped_rect->x, flipped_rect->y, flipped_rect->width,
-       flipped_rect->height));
-  LOG(("%s [%p] final %d %d w:%d h:%d\n", __FUNCTION__, aWindow, final_rect->x,
+  LOG(("  flipped_rect x: %d y: %d width: %d height: %d\n", flipped_rect->x,
+       flipped_rect->y, flipped_rect->width, flipped_rect->height));
+  LOG(("  final_rect x: %d y: %d width: %d height: %d\n", final_rect->x,
        final_rect->y, final_rect->width, final_rect->height));
 }
 #endif
@@ -1312,12 +1345,13 @@ void nsWindow::NativeMoveResizeWaylandPopup(GdkPoint* aPosition,
   static auto sGdkWindowMoveToRect = (void (*)(
       GdkWindow*, const GdkRectangle*, GdkGravity, GdkGravity, GdkAnchorHints,
       gint, gint))dlsym(RTLD_DEFAULT, "gdk_window_move_to_rect");
+  LOG(("nsWindow::NativeMoveResizeWaylandPopup [%p]\n", (void*)this));
 
   // Compositor may be confused by windows with width/height = 0
   // and positioning such windows leads to Bug 1555866.
   if (!AreBoundsSane()) {
-    LOG(("nsWindow::NativeMoveResizeWaylandPopup [%p] Bounds are not sane\n",
-         (void*)this));
+    LOG(("  Bounds are not sane (width: %d height: %d)\n", mBounds.width,
+         mBounds.height));
     return;
   }
 
@@ -1331,15 +1365,14 @@ void nsWindow::NativeMoveResizeWaylandPopup(GdkPoint* aPosition,
   // - gdk_window_move_to_rect() is not available
   // - the widget doesn't have a valid GdkWindow
   if (!sGdkWindowMoveToRect || !gdkWindow) {
-    LOG(("nsWindow::NativeMoveResizeWaylandPopup [%p] use gtk_window_move()\n",
-         (void*)this));
+    LOG(("  use gtk_window_move(%d, %d)\n", aPosition->x, aPosition->y));
     gtk_window_move(GTK_WINDOW(mShell), aPosition->x, aPosition->y);
     return;
   }
 
   GtkWidget* parentWindow = ConfigureWaylandPopupWindows();
-  LOG(("nsWindow::NativeMoveResizeWaylandPopup [%p] Set popup parent %p\n",
-       (void*)this, parentWindow));
+  LOG(("nsWindow::NativeMoveResizeWaylandPopup: Set popup parent %p\n",
+       parentWindow));
 
   int x_parent, y_parent;
   gdk_window_get_origin(gtk_widget_get_window(GTK_WIDGET(parentWindow)),
@@ -1351,12 +1384,6 @@ void nsWindow::NativeMoveResizeWaylandPopup(GdkPoint* aPosition,
     rect.height = aSize->height;
   }
 
-  LOG(("%s [%p] request position %d,%d\n", __FUNCTION__, (void*)this,
-       aPosition->x, aPosition->y));
-  if (aSize) {
-    LOG(("  request size %d,%d\n", aSize->width, aSize->height));
-  }
-  LOG(("  request result %d %d\n", rect.x, rect.y));
 #ifdef DEBUG
   if (!g_signal_handler_find(
           gdkWindow, G_SIGNAL_MATCH_FUNC, 0, 0, nullptr,
@@ -1389,10 +1416,8 @@ void nsWindow::NativeMoveResizeWaylandPopup(GdkPoint* aPosition,
     HideWaylandWindow();
   }
 
-  LOG(
-      ("nsWindow::NativeMoveResizeWaylandPopup [%p]: requested rect: x%d y%d "
-       "w%d h%d\n",
-       this, rect.x, rect.y, rect.width, rect.height));
+  LOG(("  requested rect: x: %d y: %d width: %d height: %d\n", rect.x, rect.y,
+       rect.width, rect.height));
   if (aSize) {
     LOG(("  aSize: x%d y%d w%d h%d\n", aSize->x, aSize->y, aSize->width,
          aSize->height));
@@ -2213,6 +2238,8 @@ gboolean nsWindow::OnExposeEvent(cairo_t* cr) {
   nsIWidgetListener* listener = GetListener();
   if (!listener) return FALSE;
 
+  LOGDRAW(("received expose event [%p] %p 0x%lx (rects follow):\n", this,
+           mGdkWindow, mIsX11Display ? gdk_x11_window_get_xid(mGdkWindow) : 0));
   LayoutDeviceIntRegion exposeRegion;
   if (!ExtractExposeRegion(exposeRegion, cr)) {
     return FALSE;
@@ -2251,10 +2278,6 @@ gboolean nsWindow::OnExposeEvent(cairo_t* cr) {
     GetLayerManager()->ScheduleComposite();
     GetLayerManager()->SetNeedsComposite(false);
   }
-
-  LOGDRAW(("sending expose event [%p] %p 0x%lx (rects follow):\n", (void*)this,
-           (void*)mGdkWindow,
-           mIsX11Display ? gdk_x11_window_get_xid(mGdkWindow) : 0));
 
   // Our bounds may have changed after calling WillPaintWindow.  Clip
   // to the new bounds here.  The region is relative to this
@@ -3977,13 +4000,7 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
         }
 
         // If the popup ignores mouse events, set an empty input shape.
-        if (aInitData->mMouseTransparent) {
-          cairo_rectangle_int_t rect = {0, 0, 0, 0};
-          cairo_region_t* region = cairo_region_create_rectangle(&rect);
-
-          gdk_window_input_shape_combine_region(mGdkWindow, region, 0, 0);
-          cairo_region_destroy(region);
-        }
+        SetWindowMouseTransparent(aInitData->mMouseTransparent);
       }
     } break;
 
@@ -4380,6 +4397,7 @@ void nsWindow::NativeMoveResize() {
 void nsWindow::HideWaylandWindow() {
 #ifdef MOZ_WAYLAND
   if (mWindowType == eWindowType_popup) {
+    LOG(("nsWindow::HideWaylandWindow: popup [%p]\n", this));
     GList* foundWindow = g_list_find(gVisibleWaylandPopupWindows, this);
     if (foundWindow) {
       gVisibleWaylandPopupWindows =
@@ -4605,6 +4623,21 @@ nsTransparencyMode nsWindow::GetTransparencyMode() {
   }
 
   return mIsTransparent ? eTransparencyTransparent : eTransparencyOpaque;
+}
+
+void nsWindow::SetWindowMouseTransparent(bool aIsTransparent) {
+  if (!mGdkWindow) {
+    return;
+  }
+
+  cairo_rectangle_int_t emptyRect = {0, 0, 0, 0};
+  cairo_region_t* region =
+      aIsTransparent ? cairo_region_create_rectangle(&emptyRect) : nullptr;
+
+  gdk_window_input_shape_combine_region(mGdkWindow, region, 0, 0);
+  if (region) {
+    cairo_region_destroy(region);
+  }
 }
 
 // For setting the draggable titlebar region from CSS
@@ -7350,8 +7383,9 @@ nsresult nsWindow::GetScreenRect(LayoutDeviceIntRect* aRect) {
   if (monitor) {
     GdkRectangle workArea;
     s_gdk_monitor_get_workarea(monitor, &workArea);
-    aRect->x = workArea.x;
-    aRect->y = workArea.y;
+    // The monitor offset won't help us in Wayland, because we can't get the
+    // absolute position of our window.
+    aRect->x = aRect->y = 0;
     aRect->width = workArea.width;
     aRect->height = workArea.height;
     LOG(("  workarea for [%p], monitor %p: x%d y%d w%d h%d\n", this, monitor,

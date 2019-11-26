@@ -1166,6 +1166,10 @@ version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "fog"
+version = "0.1.0"
+
+[[package]]
 name = "foreign-types"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1444,6 +1448,7 @@ dependencies = [
  "env_logger 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "fluent-langneg 0.11.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "fluent-langneg-ffi 0.1.0",
+ "fog 0.1.0",
  "geckoservo 0.0.1",
  "gkrust_utils 0.1.0",
  "jsrust_shared 0.1.0",
@@ -1460,6 +1465,7 @@ dependencies = [
  "nsstring 0.1.0",
  "prefs_parser 0.0.1",
  "profiler_helper 0.1.0",
+ "remote 0.1.0",
  "rlbox_lucet_sandbox 0.1.0 (git+https://github.com/PLSysSec/rlbox_lucet_sandbox/?rev=997c648eb0eaeaaa7a00a9eee20431f750b4e190)",
  "rsdparsa_capi 0.1.0",
  "rustc_version 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3053,6 +3059,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "remote"
+version = "0.1.0"
+dependencies = [
+ "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "http 0.1.17 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nserror 0.1.0",
+ "nsstring 0.1.0",
+ "xpcom 0.1.0",
+]
+
+[[package]]
 name = "remove_dir_all"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4314,8 +4333,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "wgpu-native"
-version = "0.4.0"
+name = "wgpu-core"
+version = "0.1.0"
 dependencies = [
  "arrayvec 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4341,7 +4360,7 @@ version = "0.1.0"
 dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "wgpu-native 0.4.0",
+ "wgpu-core 0.1.0",
 ]
 
 [[package]]

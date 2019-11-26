@@ -34,13 +34,13 @@
 #define TYPED_ARRAY_CLASP(TYPE) (&TypedArrayObject::classes[Scalar::TYPE])
 #define ERROR_CLASP(TYPE) (&ErrorObject::classes[TYPE])
 
-#ifdef ENABLE_INTL_API
+#ifdef JS_HAS_INTL_API
 #  define IF_INTL(REAL, IMAGINARY) REAL
 #else
 #  define IF_INTL(REAL, IMAGINARY) IMAGINARY
 #endif
 
-#ifdef ENABLE_TYPED_OBJECTS
+#ifdef JS_HAS_TYPED_OBJECTS
 #  define IF_TYPEDOBJ(REAL, IMAGINARY) REAL
 #else
 #  define IF_TYPEDOBJ(REAL, IMAGINARY) IMAGINARY
@@ -60,6 +60,7 @@
   REAL(RegExp, OCLASP(RegExp))                                                \
   REAL(Error, ERROR_CLASP(JSEXN_ERR))                                         \
   REAL(InternalError, ERROR_CLASP(JSEXN_INTERNALERR))                         \
+  REAL(AggregateError, ERROR_CLASP(JSEXN_AGGREGATEERR))                       \
   REAL(EvalError, ERROR_CLASP(JSEXN_EVALERR))                                 \
   REAL(RangeError, ERROR_CLASP(JSEXN_RANGEERR))                               \
   REAL(ReferenceError, ERROR_CLASP(JSEXN_REFERENCEERR))                       \

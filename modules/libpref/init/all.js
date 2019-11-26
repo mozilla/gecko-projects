@@ -431,11 +431,11 @@ pref("media.videocontrols.picture-in-picture.video-toggle.always-show", false);
   pref("media.navigator.video.red_ulpfec_enabled", false);
 
   #ifdef NIGHTLY_BUILD
-    pref("media.peerconnection.sdp.rust.enabled", true);
-    pref("media.peerconnection.sdp.rust.compare", true);
+    pref("media.peerconnection.sdp.parser", "sipcc");
+    pref("media.peerconnection.sdp.alternate_parse_mode", "never");
   #else
-    pref("media.peerconnection.sdp.rust.enabled", false);
-    pref("media.peerconnection.sdp.rust.compare", false);
+    pref("media.peerconnection.sdp.parser", "sipcc");
+    pref("media.peerconnection.sdp.alternate_parse_mode", "never");
   #endif
 
   pref("media.webrtc.debug.trace_mask", 0);
@@ -495,6 +495,7 @@ pref("media.videocontrols.picture-in-picture.video-toggle.always-show", false);
   #else
     pref("media.peerconnection.ice.obfuscate_host_addresses", true);
   #endif
+  pref("media.peerconnection.ice.obfuscate_host_addresses.whitelist", "");
   pref("media.peerconnection.ice.proxy_only_if_behind_proxy", false);
   pref("media.peerconnection.ice.proxy_only", false);
   pref("media.peerconnection.turn.disable", false);
@@ -1161,7 +1162,11 @@ pref("javascript.options.mem.gc_max_empty_chunk_count", 30);
 
 pref("javascript.options.showInConsole", false);
 
+#if defined(NIGHTLY_BUILD)
+pref("javascript.options.shared_memory", true);
+#else
 pref("javascript.options.shared_memory", false);
+#endif
 
 pref("javascript.options.throw_on_debuggee_would_run", false);
 pref("javascript.options.dump_stack_on_debuggee_would_run", false);
@@ -2300,7 +2305,7 @@ pref("services.settings.security.onecrl.checked", 0);
 
 pref("extensions.abuseReport.enabled", true);
 // Allow AMO to handoff reports to the Firefox integrated dialog.
-pref("extensions.abuseReport.amWebAPI.enabled", false);
+pref("extensions.abuseReport.amWebAPI.enabled", true);
 // Opened as a sub-frame of the about:addons page when set to false.
 pref("extensions.abuseReport.openDialog", false);
 pref("extensions.abuseReport.url", "https://services.addons.mozilla.org/api/v4/abuse/report/addon/");

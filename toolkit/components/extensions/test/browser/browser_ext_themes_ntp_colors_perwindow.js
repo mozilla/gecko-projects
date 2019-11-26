@@ -161,6 +161,9 @@ add_task(async function test_per_window_ntp_theme() {
       await checkWindow(null, false, winId);
       await checkWindow(brightTextTheme, true, secondWinId);
 
+      // Not strictly necessary, but added to avoid error from bug 1579943.
+      await browser.theme.reset(secondWinId);
+
       await removeWindow(secondWinId);
       await checkWindow(null, false, winId);
       browser.test.notifyPass("perwindow-ntp-theme");
@@ -191,7 +194,7 @@ add_task(async function test_per_window_ntp_theme() {
 
   // BrowserTestUtils.withNewTab waits for about:newtab to load
   // so we disable preloading before running the test.
-  SpecialPowers.setBoolPref("browser.newtab.preload", false);
+  await SpecialPowers.setBoolPref("browser.newtab.preload", false);
   registerCleanupFunction(() => {
     SpecialPowers.clearUserPref("browser.newtab.preload");
   });

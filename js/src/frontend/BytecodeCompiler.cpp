@@ -739,9 +739,10 @@ ScriptSourceObject* frontend::CreateScriptSourceObject(
 
 #if defined(JS_BUILD_BINAST)
 
-JSScript* frontend::CompileGlobalBinASTScript(
+template <class ParserT>
+static JSScript* CompileGlobalBinASTScriptImpl(
     JSContext* cx, const ReadOnlyCompileOptions& options, const uint8_t* src,
-    size_t len, ScriptSourceObject** sourceObjectOut) {
+    size_t len, JS::BinASTFormat format, ScriptSourceObject** sourceObjectOut) {
   AutoAssertReportedException assertException(cx);
 
   LifoAllocScope allocScope(&cx->tempLifoAlloc());
@@ -768,8 +769,7 @@ JSScript* frontend::CompileGlobalBinASTScript(
   GlobalSharedContext globalsc(cx, ScopeKind::Global, directives,
                                options.extraWarningsOption);
 
-  frontend::BinASTParser<BinASTTokenReaderMultipart> parser(cx, parseInfo,
-                                                            options, sourceObj);
+  frontend::BinASTParser<ParserT> parser(cx, parseInfo, options, sourceObj);
 
   // Metadata stores internal pointers, so we must use the same buffer every
   // time, including for lazy parses
@@ -802,6 +802,19 @@ JSScript* frontend::CompileGlobalBinASTScript(
 
   assertException.reset();
   return script;
+}
+
+JSScript* frontend::CompileGlobalBinASTScript(
+    JSContext* cx, const ReadOnlyCompileOptions& options, const uint8_t* src,
+    size_t len, JS::BinASTFormat format, ScriptSourceObject** sourceObjectOut) {
+  if (format == JS::BinASTFormat::Multipart) {
+    return CompileGlobalBinASTScriptImpl<BinASTTokenReaderMultipart>(
+        cx, options, src, len, format, sourceObjectOut);
+  }
+
+  MOZ_ASSERT(format == JS::BinASTFormat::Context);
+  return CompileGlobalBinASTScriptImpl<BinASTTokenReaderContext>(
+      cx, options, src, len, format, sourceObjectOut);
 }
 
 #endif  // JS_BUILD_BINAST
@@ -1042,9 +1055,10 @@ bool frontend::CompileLazyFunction(JSContext* cx, Handle<LazyScript*> lazy,
 
 #ifdef JS_BUILD_BINAST
 
-bool frontend::CompileLazyBinASTFunction(JSContext* cx,
-                                         Handle<LazyScript*> lazy,
-                                         const uint8_t* buf, size_t length) {
+template <class ParserT>
+static bool CompileLazyBinASTFunctionImpl(JSContext* cx,
+                                          Handle<LazyScript*> lazy,
+                                          const uint8_t* buf, size_t length) {
   MOZ_ASSERT(cx->compartment() == lazy->compartment());
 
   // We can only compile functions whose parents have previously been
@@ -1084,8 +1098,8 @@ bool frontend::CompileLazyBinASTFunction(JSContext* cx,
     script->setHasBeenCloned();
   }
 
-  frontend::BinASTParser<BinASTTokenReaderMultipart> parser(
-      cx, parseInfo, options, sourceObj, lazy);
+  frontend::BinASTParser<ParserT> parser(cx, parseInfo, options, sourceObj,
+                                         lazy);
 
   auto parsed =
       parser.parseLazyFunction(lazy->scriptSource(), lazy->sourceStart());
@@ -1111,6 +1125,19 @@ bool frontend::CompileLazyBinASTFunction(JSContext* cx,
   delazificationCompletion.complete();
   assertException.reset();
   return script;
+}
+
+bool frontend::CompileLazyBinASTFunction(JSContext* cx,
+                                         Handle<LazyScript*> lazy,
+                                         const uint8_t* buf, size_t length) {
+  if (lazy->scriptSource()->binASTSourceMetadata()->isMultipart()) {
+    return CompileLazyBinASTFunctionImpl<BinASTTokenReaderMultipart>(
+        cx, lazy, buf, length);
+  }
+
+  MOZ_ASSERT(lazy->scriptSource()->binASTSourceMetadata()->isContext());
+  return CompileLazyBinASTFunctionImpl<BinASTTokenReaderContext>(cx, lazy, buf,
+                                                                 length);
 }
 
 #endif  // JS_BUILD_BINAST

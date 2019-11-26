@@ -21,7 +21,7 @@
 
 #include "builtin/Array.h"
 #include "builtin/BigInt.h"
-#ifdef ENABLE_INTL_API
+#ifdef JS_HAS_INTL_API
 #  include "builtin/intl/Collator.h"
 #  include "builtin/intl/DateTimeFormat.h"
 #  include "builtin/intl/IntlObject.h"
@@ -388,6 +388,15 @@ static bool intrinsic_ThrowSyntaxError(JSContext* cx, unsigned argc,
   MOZ_ASSERT(args.length() >= 1);
 
   ThrowErrorWithType(cx, JSEXN_SYNTAXERR, args);
+  return false;
+}
+
+static bool intrinsic_ThrowAggregateError(JSContext* cx, unsigned argc,
+                                          Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  MOZ_ASSERT(args.length() >= 1);
+
+  ThrowErrorWithType(cx, JSEXN_AGGREGATEERR, args);
   return false;
 }
 
@@ -1752,7 +1761,7 @@ bool js::ReportIncompatibleSelfHostedMethod(JSContext* cx,
   return false;
 }
 
-#ifdef ENABLE_INTL_API
+#ifdef JS_HAS_INTL_API
 /**
  * Returns the default locale as a well-formed, but not necessarily
  * canonicalized, BCP-47 language tag.
@@ -1807,7 +1816,7 @@ static bool intrinsic_IsRuntimeDefaultLocale(JSContext* cx, unsigned argc,
   args.rval().setBoolean(equals);
   return true;
 }
-#endif  // ENABLE_INTL_API
+#endif  // JS_HAS_INTL_API
 
 static bool intrinsic_ThrowArgTypeNotObject(JSContext* cx, unsigned argc,
                                             Value* vp) {
@@ -2169,6 +2178,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("ThrowRangeError", intrinsic_ThrowRangeError, 4, 0),
     JS_FN("ThrowTypeError", intrinsic_ThrowTypeError, 4, 0),
     JS_FN("ThrowSyntaxError", intrinsic_ThrowSyntaxError, 4, 0),
+    JS_FN("ThrowAggregateError", intrinsic_ThrowAggregateError, 4, 0),
     JS_FN("ThrowInternalError", intrinsic_ThrowInternalError, 4, 0),
     JS_FN("GetErrorMessage", intrinsic_GetErrorMessage, 1, 0),
     JS_FN("CreateModuleSyntaxError", intrinsic_CreateModuleSyntaxError, 4, 0),
@@ -2410,7 +2420,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
 // clang-format on
 #undef LOAD_AND_STORE_REFERENCE_FN_DECLS
 
-#ifdef ENABLE_INTL_API
+#ifdef JS_HAS_INTL_API
     // See builtin/intl/*.h for descriptions of the intl_* functions.
     JS_FN("intl_availableCalendars", intl_availableCalendars, 1, 0),
     JS_FN("intl_availableCollations", intl_availableCollations, 1, 0),
@@ -2491,7 +2501,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
 
     JS_FN("RuntimeDefaultLocale", intrinsic_RuntimeDefaultLocale, 0, 0),
     JS_FN("IsRuntimeDefaultLocale", intrinsic_IsRuntimeDefaultLocale, 1, 0),
-#endif  // ENABLE_INTL_API
+#endif  // JS_HAS_INTL_API
 
     JS_FN("GetOwnPropertyDescriptorToArray", GetOwnPropertyDescriptorToArray, 2,
           0),

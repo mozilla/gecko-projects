@@ -44,10 +44,74 @@ BaselineFrameInspector* NewBaselineFrameInspector(TempAllocator* temp,
 
 using CallTargets = Vector<JSFunction*, 6, JitAllocPolicy>;
 
-// PendingBlock is used whenever a block is terminated with a forward branch in
+// [SMDOC] Control Flow handling in IonBuilder
+//
+// IonBuilder traverses the script's bytecode and compiles each instruction to
+// corresponding MIR instructions. Handling control flow bytecode ops requires
+// some special machinery:
+//
+// Forward branches
+// ----------------
+// Most branches in the bytecode are forward branches to a JSOP_JUMPTARGET
+// instruction that we have not inspected yet. We compile them in two phases:
+//
+// 1) When compiling the source instruction: the MBasicBlock is terminated
+//    with a control instruction that has a nullptr successor block. We also add
+//    a PendingEdge instance to the PendingEdges list for the target bytecode
+//    location.
+//
+// 2) When finally compiling the JSOP_JUMPTARGET: IonBuilder::visitJumpTarget
+//    creates the target block and uses the list of PendingEdges to 'link' the
+//    blocks.
+//
+// Loops
+// -----
+// Loops complicate this a bit:
+//
+// * In the bytecode, most loops currently start with a jump to the loop
+//   condition because the condition is emitted after the loop body. This is the
+//   only case where IonBuilder follows a forward branch immediately and later
+//   'jumps back' to compile the loop body. The LoopState class is used to track
+//   this.
+//
+//   Bug 1598548 aims to change the bytecode for these loops so that all loops
+//   can be compiled in order.
+//
+// * Because of IonBuilder's single pass design, we sometimes have to 'restart'
+//   a loop when we find new types for locals, arguments, or stack slots while
+//   compiling the loop body. When this happens the loop has to be recompiled
+//   from the beginning.
+//
+// * Loops may be nested within other loops, so we track loop states in a stack
+//   per IonBuilder.
+//
+// Unreachable/dead code
+// ---------------------
+// Some bytecode instructions never fall through to the next instruction, for
+// example JSOP_RETURN, JSOP_GOTO, or JSOP_THROW. Code after such instructions
+// is guaranteed to be dead so IonBuilder skips it until it gets to a jump
+// target instruction with pending edges.
+//
+// Note: The frontend may generate unnecessary JSOP_JUMPTARGET instructions we
+// can ignore when they have no incoming pending edges.
+//
+// Try-catch
+// ---------
+// IonBuilder supports scripts with try-catch by only compiling the try-block
+// and bailing out (to the Baseline Interpreter) from the exception handler
+// whenever we need to execute the catch-block.
+//
+// Because we don't compile the catch-block and the code after the try-catch may
+// only be reachable via the catch-block, MGotoWithFake is used to ensure the
+// code after the try-catch is always compiled and is part of the graph.
+// See IonBuilder::visitTry for more information.
+//
+// Finally-blocks are currently not supported by Ion.
+
+// PendingEdge is used whenever a block is terminated with a forward branch in
 // the bytecode. When IonBuilder reaches the jump target it uses this
 // information to link the block to the jump target's block.
-class PendingBlock {
+class PendingEdge {
  public:
   enum class Kind : uint8_t {
     // MTest true-successor.
@@ -68,21 +132,21 @@ class PendingBlock {
   Kind kind_;
   JSOp testOp_ = JSOP_LIMIT;
 
-  PendingBlock(MBasicBlock* block, Kind kind, JSOp testOp = JSOP_LIMIT)
+  PendingEdge(MBasicBlock* block, Kind kind, JSOp testOp = JSOP_LIMIT)
       : block_(block), kind_(kind), testOp_(testOp) {}
 
  public:
-  static PendingBlock NewTestTrue(MBasicBlock* block, JSOp op) {
-    return PendingBlock(block, Kind::TestTrue, op);
+  static PendingEdge NewTestTrue(MBasicBlock* block, JSOp op) {
+    return PendingEdge(block, Kind::TestTrue, op);
   }
-  static PendingBlock NewTestFalse(MBasicBlock* block, JSOp op) {
-    return PendingBlock(block, Kind::TestFalse, op);
+  static PendingEdge NewTestFalse(MBasicBlock* block, JSOp op) {
+    return PendingEdge(block, Kind::TestFalse, op);
   }
-  static PendingBlock NewGoto(MBasicBlock* block) {
-    return PendingBlock(block, Kind::Goto);
+  static PendingEdge NewGoto(MBasicBlock* block) {
+    return PendingEdge(block, Kind::Goto);
   }
-  static PendingBlock NewGotoWithFake(MBasicBlock* block) {
-    return PendingBlock(block, Kind::GotoWithFake);
+  static PendingEdge NewGotoWithFake(MBasicBlock* block) {
+    return PendingEdge(block, Kind::GotoWithFake);
   }
 
   MBasicBlock* block() const { return block_; }
@@ -94,13 +158,13 @@ class PendingBlock {
   }
 };
 
-// PendingBlocksMap maps a bytecode instruction to a Vector of PendingBlocks
+// PendingEdgesMap maps a bytecode instruction to a Vector of PendingEdges
 // targeting it. We use InlineMap<> for this because most of the time there are
-// only a few pending blocks but there can be many when switch-statements are
+// only a few pending edges but there can be many when switch-statements are
 // involved.
-using PendingBlocks = Vector<PendingBlock, 2, SystemAllocPolicy>;
-using PendingBlocksMap =
-    InlineMap<jsbytecode*, PendingBlocks, 8, PointerHasher<jsbytecode*>,
+using PendingEdges = Vector<PendingEdge, 2, SystemAllocPolicy>;
+using PendingEdgesMap =
+    InlineMap<jsbytecode*, PendingEdges, 8, PointerHasher<jsbytecode*>,
               SystemAllocPolicy>;
 
 // LoopState stores information about a loop that's being compiled to MIR.
@@ -222,8 +286,7 @@ class IonBuilder : public MIRGenerator,
     return newBlock(predecessor->stackDepth(), pc, predecessor);
   }
 
-  AbortReasonOr<Ok> addPendingBlock(const PendingBlock& block,
-                                    jsbytecode* target);
+  AbortReasonOr<Ok> addPendingEdge(const PendingEdge& edge, jsbytecode* target);
 
   AbortReasonOr<Ok> startLoop(LoopState::State initState,
                               jsbytecode* beforeLoopEntry,
@@ -291,6 +354,8 @@ class IonBuilder : public MIRGenerator,
   // Improve the type information at tests
   AbortReasonOr<Ok> improveTypesAtTest(MDefinition* ins, bool trueBranch,
                                        MTest* test);
+  AbortReasonOr<Ok> improveTypesAtTestSuccessor(MTest* test,
+                                                MBasicBlock* successor);
   AbortReasonOr<Ok> improveTypesAtCompare(MCompare* ins, bool trueBranch,
                                           MTest* test);
   AbortReasonOr<Ok> improveTypesAtNullOrUndefinedCompare(MCompare* ins,
@@ -299,8 +364,6 @@ class IonBuilder : public MIRGenerator,
   AbortReasonOr<Ok> improveTypesAtTypeOfCompare(MCompare* ins, bool trueBranch,
                                                 MTest* test);
 
-  // Used to detect triangular structure at test.
-  bool detectAndOrStructure(MPhi* ins, bool* branchIsTrue);
   AbortReasonOr<Ok> replaceTypeSet(MDefinition* subject, TemporaryTypeSet* type,
                                    MTest* test);
 
@@ -1085,16 +1148,21 @@ class IonBuilder : public MIRGenerator,
   // where the block cannot have phis whose type needs to be computed.
 
   AbortReasonOr<Ok> setCurrentAndSpecializePhis(MBasicBlock* block) {
-    if (block) {
-      if (!block->specializePhis(alloc())) {
-        return abort(AbortReason::Alloc);
-      }
+    MOZ_ASSERT(block);
+    if (!block->specializePhis(alloc())) {
+      return abort(AbortReason::Alloc);
     }
     setCurrent(block);
     return Ok();
   }
 
-  void setCurrent(MBasicBlock* block) { current = block; }
+  void setCurrent(MBasicBlock* block) {
+    MOZ_ASSERT(block);
+    current = block;
+  }
+
+  bool hasTerminatedBlock() const { return current == nullptr; }
+  void setTerminatedBlock() { current = nullptr; }
 
   // A builder is inextricably tied to a particular script.
   JSScript* script_;
@@ -1180,10 +1248,14 @@ class IonBuilder : public MIRGenerator,
   GSNCache gsn;
   jsbytecode* pc;
   jsbytecode* nextpc = nullptr;
-  MBasicBlock* current;
+
+  // The current MIR block. This can be nullptr after a block has been
+  // terminated, for example right after a 'return' or 'break' statement.
+  MBasicBlock* current = nullptr;
+
   uint32_t loopDepth_;
 
-  PendingBlocksMap pendingBlocks_;
+  mozilla::Maybe<PendingEdgesMap> pendingEdges_;
   LoopStateStack loopStack_;
 
   Vector<BytecodeSite*, 0, JitAllocPolicy> trackedOptimizationSites_;
@@ -1366,7 +1438,7 @@ class IonBuilder : public MIRGenerator,
   void trackInlineSuccessUnchecked(InliningStatus status);
 
  public:
-  const PendingBlocksMap& pendingBlocks() const { return pendingBlocks_; }
+  bool hasPendingEdgesMap() const { return pendingEdges_.isSome(); }
 
   // This is only valid for IonBuilders that have moved to background
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;

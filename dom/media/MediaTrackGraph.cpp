@@ -525,7 +525,8 @@ void MediaTrackGraphImpl::UpdateTrackOrder() {
   MOZ_ASSERT(orderedTrackCount == mFirstCycleBreaker);
 }
 
-TrackTime MediaTrackGraphImpl::PlayAudio(const TrackKeyAndVolume& aTkv) {
+TrackTime MediaTrackGraphImpl::PlayAudio(const TrackKeyAndVolume& aTkv,
+                                         GraphTime aPlayedTime) {
   MOZ_ASSERT(OnGraphThread());
   MOZ_ASSERT(mRealtime, "Should only attempt to play audio in realtime mode");
 
@@ -536,14 +537,14 @@ TrackTime MediaTrackGraphImpl::PlayAudio(const TrackKeyAndVolume& aTkv) {
   AudioSegment* audio = track->GetData<AudioSegment>();
   AudioSegment output;
 
-  TrackTime offset = track->GraphTimeToTrackTime(mProcessedTime);
+  TrackTime offset = track->GraphTimeToTrackTime(aPlayedTime);
 
   // We don't update Track->mTracksStartTime here to account for time spent
   // blocked. Instead, we'll update it in UpdateCurrentTimeForTracks after
   // the blocked period has completed. But we do need to make sure we play
   // from the right offsets in the track buffer, even if we've already
   // written silence for some amount of blocked time after the current time.
-  GraphTime t = mProcessedTime;
+  GraphTime t = aPlayedTime;
   while (t < mStateComputedTime) {
     bool blocked = t >= track->mStartBlocking;
     GraphTime end = blocked ? mStateComputedTime : track->mStartBlocking;
@@ -1066,25 +1067,24 @@ void MediaTrackGraphImpl::ProduceDataForTracksBlockByBlock(
   MOZ_ASSERT(OnGraphThread());
   MOZ_ASSERT(aTrackIndex <= mFirstCycleBreaker,
              "Cycle breaker is not AudioNodeTrack?");
-  GraphTime t = mProcessedTime;
-  while (t < mStateComputedTime) {
-    GraphTime next = RoundUpToNextAudioBlock(t);
+  while (mProcessedTime < mStateComputedTime) {
+    GraphTime next = RoundUpToNextAudioBlock(mProcessedTime);
     for (uint32_t i = mFirstCycleBreaker; i < mTracks.Length(); ++i) {
       auto nt = static_cast<AudioNodeTrack*>(mTracks[i]);
       MOZ_ASSERT(nt->AsAudioNodeTrack());
-      nt->ProduceOutputBeforeInput(t);
+      nt->ProduceOutputBeforeInput(mProcessedTime);
     }
     for (uint32_t i = aTrackIndex; i < mTracks.Length(); ++i) {
       ProcessedMediaTrack* pt = mTracks[i]->AsProcessedTrack();
       if (pt) {
         pt->ProcessInput(
-            t, next,
+            mProcessedTime, next,
             (next == mStateComputedTime) ? ProcessedMediaTrack::ALLOW_END : 0);
       }
     }
-    t = next;
+    mProcessedTime = next;
   }
-  NS_ASSERTION(t == mStateComputedTime,
+  NS_ASSERTION(mProcessedTime == mStateComputedTime,
                "Something went wrong with rounding to block boundaries");
 }
 
@@ -1217,6 +1217,7 @@ void MediaTrackGraphImpl::Process() {
   bool allBlockedForever = true;
   // True when we've done ProcessInput for all processed tracks.
   bool doneAllProducing = false;
+  const GraphTime oldProcessedTime = mProcessedTime;
 
   mMixer.StartMixing();
 
@@ -1254,10 +1255,11 @@ void MediaTrackGraphImpl::Process() {
         }
       }
     }
-    if (track->mStartBlocking > mProcessedTime) {
+    if (track->mStartBlocking > oldProcessedTime) {
       allBlockedForever = false;
     }
   }
+  mProcessedTime = mStateComputedTime;
 
   // This is the number of frames that are written to the output buffer, for
   // this iteration.
@@ -1266,7 +1268,7 @@ void MediaTrackGraphImpl::Process() {
   if (mRealtime) {
     if (CurrentDriver()->AsAudioCallbackDriver()) {
       for (auto& t : mAudioOutputs) {
-        TrackTime ticksPlayedForThisTrack = PlayAudio(t);
+        TrackTime ticksPlayedForThisTrack = PlayAudio(t, oldProcessedTime);
         if (ticksPlayed == 0) {
           ticksPlayed = ticksPlayedForThisTrack;
         } else {
@@ -1285,7 +1287,7 @@ void MediaTrackGraphImpl::Process() {
       // been processed. (bug 1406027)
       mMixer.Mix(nullptr,
                  CurrentDriver()->AsAudioCallbackDriver()->OutputChannelCount(),
-                 mStateComputedTime - mProcessedTime, mSampleRate);
+                 mStateComputedTime - oldProcessedTime, mSampleRate);
     }
     mMixer.FinishMixing();
   }
@@ -1352,10 +1354,9 @@ bool MediaTrackGraphImpl::OneIterationImpl(GraphTime aStateEnd) {
 
   mStateComputedTime = stateEnd;
 
-  Process();
-
   GraphTime oldProcessedTime = mProcessedTime;
-  mProcessedTime = stateEnd;
+  Process();
+  MOZ_ASSERT(mProcessedTime == stateEnd);
 
   UpdateCurrentTimeForTracks(oldProcessedTime);
 
@@ -3626,6 +3627,11 @@ void MediaTrackGraph::DispatchToMainThreadStableState(
 Watchable<mozilla::GraphTime>& MediaTrackGraphImpl::CurrentTime() {
   MOZ_ASSERT(NS_IsMainThread());
   return mMainThreadGraphTime;
+}
+
+GraphTime MediaTrackGraph::ProcessedTime() const {
+  AssertOnGraphThreadOrNotRunning();
+  return static_cast<const MediaTrackGraphImpl*>(this)->mProcessedTime;
 }
 
 }  // namespace mozilla

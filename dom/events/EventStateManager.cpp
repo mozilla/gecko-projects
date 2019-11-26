@@ -53,7 +53,6 @@
 #include "mozilla/dom/Document.h"
 #include "nsIFrame.h"
 #include "nsFrameLoaderOwner.h"
-#include "nsITextControlElement.h"
 #include "nsIWidget.h"
 #include "nsPresContext.h"
 #include "nsGkAtoms.h"
@@ -1275,16 +1274,9 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
     return;
   }
 
-  if (aEvent->mLayersId.IsValid()) {
-    BrowserParent* preciseRemote =
-        BrowserParent::GetBrowserParentFromLayersId(aEvent->mLayersId);
-    if (preciseRemote) {
-      remote = preciseRemote;
-    }
-    // else there is a race between APZ and the LayersId to BrowserParent
-    // mapping, so fall back to delivering the event to the topmost child
-    // process.
-  } else if (aEvent->mClass == eKeyboardEventClass) {
+  WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
+  bool isContextMenuKey = mouseEvent && mouseEvent->IsContextMenuKeyEvent();
+  if (aEvent->mClass == eKeyboardEventClass || isContextMenuKey) {
     // APZ attaches a LayersId to hit-testable events, for keyboard events,
     // we use focus.
     BrowserParent* preciseRemote = BrowserParent::GetFocused();
@@ -1293,11 +1285,20 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
     }
     // else there is a race between layout and focus tracking,
     // so fall back to delivering the event to the topmost child process.
+  } else if (aEvent->mLayersId.IsValid()) {
+    BrowserParent* preciseRemote =
+        BrowserParent::GetBrowserParentFromLayersId(aEvent->mLayersId);
+    if (preciseRemote) {
+      remote = preciseRemote;
+    }
+    // else there is a race between APZ and the LayersId to BrowserParent
+    // mapping, so fall back to delivering the event to the topmost child
+    // process.
   }
 
   switch (aEvent->mClass) {
     case eMouseEventClass: {
-      remote->SendRealMouseEvent(*aEvent->AsMouseEvent());
+      remote->SendRealMouseEvent(*mouseEvent);
       return;
     }
     case eKeyboardEventClass: {

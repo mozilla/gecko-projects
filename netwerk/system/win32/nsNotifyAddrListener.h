@@ -15,6 +15,7 @@
 #include "nsThreadUtils.h"
 #include "nsThreadPool.h"
 #include "nsCOMPtr.h"
+#include "mozilla/Atomics.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/SHA1.h"
@@ -70,6 +71,10 @@ class nsNotifyAddrListener : public nsINetworkLinkService,
 
   // set true when mCheckEvent means shutdown
   bool mShutdown;
+
+  // Contains a set of flags that codify the reasons for which
+  // the platform indicates DNS should be used instead of TRR.
+  mozilla::Atomic<uint32_t, mozilla::Relaxed> mPlatformDNSIndications;
 
   // This is a checksum of various meta data for all network interfaces
   // considered UP at last check.

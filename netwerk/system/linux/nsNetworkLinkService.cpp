@@ -69,6 +69,12 @@ nsNetworkLinkService::GetDnsSuffixList(nsTArray<nsCString>& aDnsSuffixList) {
 }
 
 NS_IMETHODIMP
+nsNetworkLinkService::GetPlatformDNSIndications(
+    uint32_t* aPlatformDNSIndications) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
 nsNetworkLinkService::Observe(nsISupports* subject, const char* topic,
                               const char16_t* data) {
   if (!strcmp("xpcom-shutdown-threads", topic)) {

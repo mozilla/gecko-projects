@@ -55,7 +55,12 @@ class PrioritizedEventQueue final : public AbstractEventQueue {
   // aHypotheticalInputEventDelay
   already_AddRefed<nsIRunnable> GetEvent(
       EventQueuePriority* aPriority, const MutexAutoLock& aProofOfLock,
-      mozilla::TimeDuration* aHypotheticalInputEventDelay = nullptr) final;
+      TimeDuration* aHypotheticalInputEventDelay = nullptr) final;
+  // *aIsIdleEvent will be set to true when we are returning a non-null runnable
+  // which came from one of our idle queues, and will be false otherwise.
+  already_AddRefed<nsIRunnable> GetEvent(
+      EventQueuePriority* aPriority, const MutexAutoLock& aProofOfLock,
+      TimeDuration* aHypotheticalInputEventDelay, bool* aIsIdleEvent);
   void DidRunEvent(const MutexAutoLock& aProofOfLock);
 
   bool IsEmpty(const MutexAutoLock& aProofOfLock) final;
@@ -73,6 +78,10 @@ class PrioritizedEventQueue final : public AbstractEventQueue {
   void FlushInputEventPrioritization(const MutexAutoLock& aProofOfLock) final;
   void SuspendInputEventPrioritization(const MutexAutoLock& aProofOfLock) final;
   void ResumeInputEventPrioritization(const MutexAutoLock& aProofOfLock) final;
+
+  IdlePeriodState* GetIdlePeriodState() { return &mIdlePeriodState; }
+
+  bool HasIdleRunnables(const MutexAutoLock& aProofOfLock) const;
 
   size_t SizeOfExcludingThis(
       mozilla::MallocSizeOf aMallocSizeOf) const override {
@@ -95,9 +104,9 @@ class PrioritizedEventQueue final : public AbstractEventQueue {
                                  const MutexAutoLock& aProofOfLock);
 
   UniquePtr<EventQueue> mHighQueue;
-  UniquePtr<EventQueue> mInputQueue;
+  UniquePtr<EventQueueSized<32>> mInputQueue;
   UniquePtr<EventQueue> mMediumHighQueue;
-  UniquePtr<EventQueue> mNormalQueue;
+  UniquePtr<EventQueueSized<64>> mNormalQueue;
   UniquePtr<EventQueue> mDeferredTimersQueue;
   UniquePtr<EventQueue> mIdleQueue;
 

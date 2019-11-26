@@ -224,12 +224,12 @@
 #include "nsPluginTags.h"
 #include "nsIBlocklistService.h"
 #include "nsITrackingDBService.h"
+#include "mozilla/GlobalStyleSheetCache.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "nsICaptivePortalService.h"
 #include "nsIObjectLoadingContent.h"
 #include "nsIBidiKeyboard.h"
-#include "nsLayoutStylesheetCache.h"
 #include "MMPrinter.h"
 #include "nsStreamUtils.h"
 #include "nsIAsyncInputStream.h"
@@ -726,6 +726,11 @@ const nsDependentSubstring RemoteTypePrefix(
 bool IsWebRemoteType(const nsAString& aContentProcessType) {
   return StringBeginsWith(aContentProcessType,
                           NS_LITERAL_STRING(DEFAULT_REMOTE_TYPE));
+}
+
+bool IsWebCoopCoepRemoteType(const nsAString& aContentProcessType) {
+  return StringBeginsWith(aContentProcessType,
+                          NS_LITERAL_STRING(WITH_COOP_COEP_REMOTE_TYPE_PREFIX));
 }
 
 /*static*/
@@ -2483,8 +2488,8 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
 
   // Content processes have no permission to access profile directory, so we
   // send the file URL instead.
-  StyleSheet* ucs = nsLayoutStylesheetCache::Singleton()->GetUserContentSheet();
-  if (ucs) {
+  auto* sheetCache = GlobalStyleSheetCache::Singleton();
+  if (StyleSheet* ucs = sheetCache->GetUserContentSheet()) {
     SerializeURI(ucs->GetSheetURI(), xpcomInit.userContentSheetURL());
   } else {
     SerializeURI(nullptr, xpcomInit.userContentSheetURL());
@@ -2514,12 +2519,11 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
   screenManager.CopyScreensToRemote(this);
 
   // Send the UA sheet shared memory buffer and the address it is mapped at.
-  auto cache = nsLayoutStylesheetCache::Singleton();
   Maybe<SharedMemoryHandle> sharedUASheetHandle;
-  uintptr_t sharedUASheetAddress = cache->GetSharedMemoryAddress();
+  uintptr_t sharedUASheetAddress = sheetCache->GetSharedMemoryAddress();
 
   SharedMemoryHandle handle;
-  if (cache->ShareToProcess(OtherPid(), &handle)) {
+  if (sheetCache->ShareToProcess(OtherPid(), &handle)) {
     sharedUASheetHandle.emplace(handle);
   } else {
     sharedUASheetAddress = 0;
@@ -5787,7 +5791,7 @@ mozilla::ipc::IPCResult ContentParent::RecvBHRThreadHang(
     // XXX: We should be able to avoid this potentially expensive copy here by
     // moving our deserialized argument.
     nsCOMPtr<nsIHangDetails> hangDetails =
-        new nsHangDetails(HangDetails(aDetails));
+        new nsHangDetails(HangDetails(aDetails), PersistedToDisk::No);
     obs->NotifyObservers(hangDetails, "bhr-thread-hang", nullptr);
   }
   return IPC_OK();

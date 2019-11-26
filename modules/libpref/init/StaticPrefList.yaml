@@ -1617,6 +1617,11 @@
   value: 30
   mirror: always
 
+- name: dom.ipc.plugins.allow_dxgi_surface
+  type: bool
+  value: true
+  mirror: always
+
 # Enable e10s hang monitoring (slow script checking and plugin hang detection).
 - name: dom.ipc.processHangMonitor
   type: bool
@@ -2848,6 +2853,12 @@
   value: false
   mirror: always
 
+# This pref enables/disables nsContentBlocker
+- name: extensions.contentblocker.enabled
+  type: bool
+  value: false
+  mirror: once
+
 #---------------------------------------------------------------------------
 # Prefs starting with "findbar."
 #---------------------------------------------------------------------------
@@ -3234,7 +3245,7 @@
 
 - name: gfx.canvas.remote
   type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
+  value: false
   mirror: always
 
 - name: gfx.color_management.enablev4
@@ -3256,6 +3267,11 @@
   mirror: always
 
 - name: gfx.compositor.clearstate
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+- name: gfx.core-animation.tint-opaque
   type: RelaxedAtomicBool
   value: false
   mirror: always
@@ -4140,6 +4156,12 @@
   value: false
   mirror: always
 
+# Whether we allow advanced layers with fission
+- name: layers.advanced.fission.enabled
+  type: bool
+  value: false
+  mirror: always
+
 # Whether we allow AMD switchable graphics.
 - name: layers.amd-switchable-gfx.enabled
   type: bool
@@ -4911,7 +4933,7 @@
 # Is support for CSS individual transform enabled?
 - name: layout.css.individual-transform.enabled
   type: bool
-  value: @IS_NOT_RELEASE_OR_BETA@
+  value: true
   mirror: always
 
 # Is support for CSS initial-letter property enabled?
@@ -4930,8 +4952,15 @@
 # Is support for motion-path enabled?
 - name: layout.css.motion-path.enabled
   type: bool
-  value: @IS_NOT_RELEASE_OR_BETA@
+  value: true
   mirror: always
+
+# Is support for motion-path ray() enabled?
+- name: layout.css.motion-path-ray.enabled
+  type: RelaxedAtomicBool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: always
+  rust: true
 
 # Expose the media query -moz-touch-enabled to web content.
 - name: layout.css.moz-touch-enabled.enabled
@@ -5409,7 +5438,7 @@
 
 - name: layout.css.shadow-parts.enabled
   type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
   rust: true
 
@@ -5793,6 +5822,8 @@
   value: true
 #elif defined(XP_MACOSX)
   value: true
+#elif defined(XP_WIN) && !defined(_ARM64_)
+  value: true
 #else
   value: false
 #endif
@@ -5803,7 +5834,7 @@
 #if defined(XP_LINUX) && !defined(ANDROID)
   value: true
 #elif defined(XP_WIN) && !defined(_ARM64_)
-  value: false
+  value: true
 #elif defined(XP_MACOSX)
   value: true
 #else
@@ -5816,7 +5847,7 @@
 #if defined(XP_LINUX) && !defined(ANDROID)
   value: true
 #elif defined(XP_WIN) && !defined(_ARM64_)
-  value: false
+  value: true
 #elif defined(XP_MACOSX)
   value: true
 #else
@@ -6422,6 +6453,24 @@
   value: false
   mirror: always
 
+ # If true, then we require explicit approval from the embedding app (ex. Fenix)
+ # on GeckoView to know if we can allow audible, inaudible media or both kinds
+ # of media to autoplay.
+- name: media.geckoview.autoplay.request
+  type: bool
+  value: false
+  mirror: always
+
+ # This is used in testing only, in order to skip the prompting process. This
+ # pref works only when enabling the pref `media.geckoview.autoplay.request`.
+ # 0=prompt as normal, 1=allow all, 2=deny all, 3=allow audible request,
+ # 4=deny audible request, 5=allow inaudible request, 6=deny inaudible request.
+ # 7=leave all requests pending.
+- name: media.geckoview.autoplay.request.testing
+  type: uint32_t
+  value: 0
+  mirror: always
+
 #---------------------------------------------------------------------------
 # Prefs starting with "mousewheel."
 #---------------------------------------------------------------------------
@@ -6827,6 +6876,26 @@
   value: false
   mirror: always
 
+# This pref controls if TRR will still be enabled when a VPN is detected on
+# the system. Detection is not foolproof, and some VPNs may not be detected.
+# See bug 1565004 comment 3 for details.
+- name: network.trr.enable_when_vpn_detected
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# This pref controls if TRR will still be enabled when a proxy is detected
+- name: network.trr.enable_when_proxy_detected
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# This pref controls if TRR will still be enabled when NRPT rules are detected
+- name: network.trr.enable_when_nrpt_detected
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # Allow the network changed event to get sent when a network topology or setup
 # change is noticed while running.
 - name: network.notify.changed
@@ -6846,6 +6915,20 @@
 
 # Whether to check the dnsSuffix on network changes
 - name: network.notify.dnsSuffixList
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+# Whether to check the registry for proxies on network changes that indicate
+# that TRR should not be used.
+- name: network.notify.checkForProxies
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+# Whether to check the registry for NRPT rules on network changes that
+# indicate that TRR should not be used.
+- name: network.notify.checkForNRPT
   type: RelaxedAtomicBool
   value: true
   mirror: always
@@ -7164,6 +7247,18 @@
 
 # Report Anti-tracking warnings to console lazily
 - name: privacy.restrict3rdpartystorage.console.lazy
+  type: bool
+  value: true
+  mirror: always
+
+# Enable the heuristic to allow storage access for windows opened using window.open() after user interaction
+- name: privacy.restrict3rdpartystorage.heuristic.opened_window_after_interaction
+  type: bool
+  value: true
+  mirror: always
+
+# Enable the heuristic to allow storage access for windows opened using window.open()
+- name: privacy.restrict3rdpartystorage.heuristic.window_open
   type: bool
   value: true
   mirror: always
@@ -7641,7 +7736,11 @@
 
 - name: webgl.dxgl.enabled
   type: RelaxedAtomicBool
+#ifdef XP_WIN
+  value: true
+#else
   value: false
+#endif
   mirror: always
 
 - name: webgl.dxgl.needs-finish

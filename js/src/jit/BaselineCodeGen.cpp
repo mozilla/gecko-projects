@@ -173,6 +173,15 @@ bool BaselineInterpreterHandler::recordCallRetAddr(JSContext* cx,
   return true;
 }
 
+bool BaselineInterpreterHandler::addDebugInstrumentationOffset(
+    JSContext* cx, CodeOffset offset) {
+  if (!debugInstrumentationOffsets_.append(offset.offset())) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  return true;
+}
+
 MethodStatus BaselineCompiler::compile() {
   JSScript* script = handler.script();
   JitSpew(JitSpew_BaselineScripts, "Baseline compiling script %s:%u:%u (%p)",
@@ -769,7 +778,7 @@ bool BaselineInterpreterCodeGen::emitIsDebuggeeCheck() {
     restoreInterpreterPCReg();
   }
   masm.bind(&skipCheck);
-  return handler.addDebugInstrumentationOffset(toggleOffset);
+  return handler.addDebugInstrumentationOffset(cx, toggleOffset);
 }
 
 static void MaybeIncrementCodeCoverageCounter(MacroAssembler& masm,
@@ -1723,11 +1732,6 @@ bool BaselineCodeGen<Handler>::emit_JSOP_NOP_DESTRUCTURING() {
 
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emit_JSOP_TRY_DESTRUCTURING() {
-  return true;
-}
-
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_JSOP_LABEL() {
   return true;
 }
 
@@ -2945,11 +2949,6 @@ bool BaselineCodeGen<Handler>::emit_JSOP_STRICTEQ() {
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emit_JSOP_STRICTNE() {
   return emitCompare();
-}
-
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_JSOP_CONDSWITCH() {
-  return true;
 }
 
 template <typename Handler>
@@ -4951,7 +4950,7 @@ MOZ_MUST_USE bool BaselineInterpreterCodeGen::emitDebugInstrumentation(
   Label isNotDebuggee, done;
 
   CodeOffset toggleOffset = masm.toggledJump(&isNotDebuggee);
-  if (!handler.addDebugInstrumentationOffset(toggleOffset)) {
+  if (!handler.addDebugInstrumentationOffset(cx, toggleOffset)) {
     return false;
   }
 
@@ -5954,7 +5953,7 @@ bool BaselineInterpreterCodeGen::emitAfterYieldDebugInstrumentation(
   // If the current Realm is not a debuggee we're done.
   Label done;
   CodeOffset toggleOffset = masm.toggledJump(&done);
-  if (!handler.addDebugInstrumentationOffset(toggleOffset)) {
+  if (!handler.addDebugInstrumentationOffset(cx, toggleOffset)) {
     return false;
   }
   masm.loadPtr(AbsoluteAddress(cx->addressOfRealm()), scratch);
@@ -6932,6 +6931,8 @@ MethodStatus BaselineCompiler::emitBody() {
       case JSOP_FORCEINTERPRETER:
         // Caller must have checked script->hasForceInterpreterOp().
       case JSOP_UNUSED71:
+      case JSOP_UNUSED106:
+      case JSOP_UNUSED120:
       case JSOP_UNUSED149:
       case JSOP_LIMIT:
         MOZ_CRASH("Unexpected op");

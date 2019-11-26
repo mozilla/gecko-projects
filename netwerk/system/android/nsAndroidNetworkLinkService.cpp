@@ -152,6 +152,12 @@ nsAndroidNetworkLinkService::GetDnsSuffixList(
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsAndroidNetworkLinkService::GetPlatformDNSIndications(
+    uint32_t* aPlatformDNSIndications) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 void nsAndroidNetworkLinkService::OnNetworkChanged() {
   if (mozilla::StaticPrefs::network_notify_changed()) {
     if (!mNetworkChangeTime.IsNull()) {

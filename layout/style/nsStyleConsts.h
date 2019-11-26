@@ -588,11 +588,13 @@ enum class StyleGridTrackBreadth : uint8_t {
 #define NS_STYLE_ISOLATION_ISOLATE 1
 
 // See nsStylePosition.mObjectFit
-#define NS_STYLE_OBJECT_FIT_FILL 0
-#define NS_STYLE_OBJECT_FIT_CONTAIN 1
-#define NS_STYLE_OBJECT_FIT_COVER 2
-#define NS_STYLE_OBJECT_FIT_NONE 3
-#define NS_STYLE_OBJECT_FIT_SCALE_DOWN 4
+enum class StyleObjectFit : uint8_t {
+  Fill,
+  Contain,
+  Cover,
+  None,
+  ScaleDown,
+};
 
 // See nsStyleText
 #define NS_STYLE_TEXT_ALIGN_START 0
@@ -665,9 +667,11 @@ enum class StyleWhiteSpace : uint8_t {
 #define NS_STYLE_TEXT_SIZE_ADJUST_AUTO 1
 
 // See nsStyleText
-#define NS_STYLE_TEXT_ORIENTATION_MIXED 0
-#define NS_STYLE_TEXT_ORIENTATION_UPRIGHT 1
-#define NS_STYLE_TEXT_ORIENTATION_SIDEWAYS 2
+enum class StyleTextOrientation : uint8_t {
+  Mixed,
+  Upright,
+  Sideways,
+};
 
 // See nsStyleText
 #define NS_STYLE_TEXT_COMBINE_UPRIGHT_NONE 0
@@ -722,11 +726,13 @@ enum class StyleWhiteSpace : uint8_t {
 #define NS_STYLE_PAGE_BREAK_RIGHT 4
 
 // See nsStyleUIReset
-#define NS_STYLE_IME_MODE_AUTO 0
-#define NS_STYLE_IME_MODE_NORMAL 1
-#define NS_STYLE_IME_MODE_ACTIVE 2
-#define NS_STYLE_IME_MODE_DISABLED 3
-#define NS_STYLE_IME_MODE_INACTIVE 4
+enum class StyleImeMode : uint8_t {
+  Auto,
+  Normal,
+  Active,
+  Disabled,
+  Inactive,
+};
 
 // See nsStyleSVG
 
@@ -734,12 +740,13 @@ enum class StyleWhiteSpace : uint8_t {
  * -moz-window-shadow
  * Also used in widget code
  */
-
-#define NS_STYLE_WINDOW_SHADOW_NONE 0
-#define NS_STYLE_WINDOW_SHADOW_DEFAULT 1
-#define NS_STYLE_WINDOW_SHADOW_MENU 2
-#define NS_STYLE_WINDOW_SHADOW_TOOLTIP 3
-#define NS_STYLE_WINDOW_SHADOW_SHEET 4
+enum class StyleWindowShadow : uint8_t {
+  None,
+  Default,
+  Menu,
+  Tooltip,
+  Sheet,
+};
 
 // dominant-baseline
 #define NS_STYLE_DOMINANT_BASELINE_AUTO 0
@@ -771,9 +778,11 @@ enum class StyleShapeRendering : uint8_t {
 };
 
 // stroke-linecap
-#define NS_STYLE_STROKE_LINECAP_BUTT 0
-#define NS_STYLE_STROKE_LINECAP_ROUND 1
-#define NS_STYLE_STROKE_LINECAP_SQUARE 2
+enum class StyleStrokeLinecap : uint8_t {
+  Butt,
+  Round,
+  Square,
+};
 
 // stroke-linejoin
 #define NS_STYLE_STROKE_LINEJOIN_MITER 0
@@ -781,9 +790,11 @@ enum class StyleShapeRendering : uint8_t {
 #define NS_STYLE_STROKE_LINEJOIN_BEVEL 2
 
 // text-anchor
-#define NS_STYLE_TEXT_ANCHOR_START 0
-#define NS_STYLE_TEXT_ANCHOR_MIDDLE 1
-#define NS_STYLE_TEXT_ANCHOR_END 2
+enum class StyleTextAnchor : uint8_t {
+  Start,
+  Middle,
+  End,
+};
 
 // text-emphasis-position
 #define NS_STYLE_TEXT_EMPHASIS_POSITION_OVER (1 << 0)

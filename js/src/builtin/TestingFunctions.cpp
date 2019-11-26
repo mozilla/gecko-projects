@@ -69,6 +69,7 @@
 #include "util/Text.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
+#include "vm/ErrorObject.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
 #include "vm/Iteration.h"
@@ -385,7 +386,7 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#ifdef ENABLE_TYPED_OBJECTS
+#ifdef JS_HAS_TYPED_OBJECTS
   value = BooleanValue(true);
 #else
   value = BooleanValue(false);
@@ -394,7 +395,7 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-#ifdef ENABLE_INTL_API
+#ifdef JS_HAS_INTL_API
   value = BooleanValue(true);
 #else
   value = BooleanValue(false);

@@ -1422,13 +1422,14 @@ void PluginModuleParent::NotifyPluginCrashed() {
   }
 
   nsString dumpID;
-  nsString browserDumpID;
+  nsCString additionalMinidumps;
 
   if (mCrashReporter && mCrashReporter->HasMinidump()) {
     dumpID = mCrashReporter->MinidumpID();
+    additionalMinidumps = mCrashReporter->AdditionalMinidumps();
   }
 
-  mPlugin->PluginCrashed(dumpID, browserDumpID);
+  mPlugin->PluginCrashed(dumpID, additionalMinidumps);
 }
 
 PPluginInstanceParent* PluginModuleParent::AllocPPluginInstanceParent(
@@ -2119,7 +2120,7 @@ nsresult PluginModuleParent::NPP_NewInternal(
     // direct path for flash objects that have wmode=window or no wmode
     // specified.
     if (supportsAsyncRender && supportsForceDirect &&
-        gfxWindowsPlatform::GetPlatform()->SupportsPluginDirectDXGIDrawing()) {
+        PluginInstanceParent::SupportsPluginDirectDXGISurfaceDrawing()) {
       ForceDirect(names, values);
     }
 #endif

@@ -88,6 +88,9 @@ function verifyLogins(expectedLogins = []) {
           "Check timePasswordChanged"
         );
       }
+      if (typeof expected.timeCreated !== "undefined") {
+        is(login.timeCreated, expected.timeCreated, "Check timeCreated");
+      }
     }
   }
   return allLogins;
@@ -108,7 +111,11 @@ async function submitFormAndGetResults(
   selectorValues,
   responseSelectors
 ) {
-  function contentSubmitForm([contentFormAction, contentSelectorValues]) {
+  async function contentSubmitForm([contentFormAction, contentSelectorValues]) {
+    const { WrapPrivileged } = ChromeUtils.import(
+      "resource://specialpowers/WrapPrivileged.jsm",
+      this
+    );
     let doc = content.document;
     let form = doc.querySelector("form");
     if (contentFormAction) {
@@ -116,9 +123,20 @@ async function submitFormAndGetResults(
     }
     for (let [sel, value] of Object.entries(contentSelectorValues)) {
       try {
-        doc.querySelector(sel).setUserInput(value);
+        let field = doc.querySelector(sel);
+        let gotInput = ContentTaskUtils.waitForEvent(
+          field,
+          "input",
+          "Got input event on " + sel
+        );
+        // we don't get an input event if the new value == the old
+        field.value = "###";
+        WrapPrivileged.wrap(field).setUserInput(value);
+        await gotInput;
       } catch (ex) {
-        throw new Error(`submitForm: Couldn't set value of field at: ${sel}`);
+        throw new Error(
+          `submitForm: Couldn't set value of field at: ${sel}: ${ex.message}`
+        );
       }
     }
     form.submit();
@@ -536,6 +554,42 @@ async function closePopup(popup) {
   }
 }
 
+async function fillGeneratedPasswordFromOpenACPopup(
+  browser,
+  passwordInputSelector
+) {
+  let popup = browser.ownerDocument.getElementById("PopupAutoComplete");
+  let item;
+
+  await TestUtils.waitForCondition(() => {
+    item = popup.querySelector(`[originaltype="generatedPassword"]`);
+    return item && !EventUtils.isHidden(item);
+  }, "Waiting for item to become visible");
+
+  let inputEventPromise = ContentTask.spawn(
+    browser,
+    [passwordInputSelector],
+    async function waitForInput(inputSelector) {
+      let passwordInput = content.document.querySelector(inputSelector);
+      await ContentTaskUtils.waitForEvent(
+        passwordInput,
+        "input",
+        "Password input value changed"
+      );
+    }
+  );
+
+  let passwordGeneratedPromise = listenForTestNotification(
+    "PasswordFilledOrEdited"
+  );
+
+  info("Clicking the generated password AC item");
+  EventUtils.synthesizeMouseAtCenter(item, {});
+  info("Waiting for the content input value to change");
+  await inputEventPromise;
+  await passwordGeneratedPromise;
+}
+
 // Contextmenu functions //
 
 /**
@@ -648,26 +702,16 @@ async function doFillGeneratedPasswordContextMenuItem(browser, passwordInput) {
     "separator is visible"
   );
 
-  let passwordChangedPromise = ContentTask.spawn(
-    browser,
-    [passwordInput],
-    async function(passwordInput) {
-      let input = content.document.querySelector(passwordInput);
-      await ContentTaskUtils.waitForEvent(input, "input");
-    }
-  );
+  let popup = document.getElementById("PopupAutoComplete");
+  ok(popup, "Got popup");
+  let promiseShown = BrowserTestUtils.waitForEvent(popup, "popupshown");
 
-  let passwordGeneratedPromise = listenForTestNotification(
-    "PasswordFilledOrEdited"
-  );
   await new Promise(resolve => {
     SimpleTest.executeSoon(resolve);
   });
 
   EventUtils.synthesizeMouseAtCenter(generatedPasswordItem, {});
-  info(
-    "doFillGeneratedPasswordContextMenuItem: Waiting for content input event"
-  );
-  await passwordChangedPromise;
-  await passwordGeneratedPromise;
+
+  await promiseShown;
+  await fillGeneratedPasswordFromOpenACPopup(browser, passwordInput);
 }

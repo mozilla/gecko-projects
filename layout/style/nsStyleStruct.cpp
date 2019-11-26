@@ -743,10 +743,10 @@ nsStyleSVG::nsStyleSVG(const Document& aDocument)
       mFillRule(StyleFillRule::Nonzero),
       mPaintOrder(0),
       mShapeRendering(StyleShapeRendering::Auto),
-      mStrokeLinecap(NS_STYLE_STROKE_LINECAP_BUTT),
+      mStrokeLinecap(StyleStrokeLinecap::Butt),
       mStrokeLinejoin(NS_STYLE_STROKE_LINEJOIN_MITER),
       mDominantBaseline(NS_STYLE_DOMINANT_BASELINE_AUTO),
-      mTextAnchor(NS_STYLE_TEXT_ANCHOR_START),
+      mTextAnchor(StyleTextAnchor::Start),
       mContextFlags(
           (eStyleSVGOpacitySource_Normal << FILL_OPACITY_SOURCE_SHIFT) |
           (eStyleSVGOpacitySource_Normal << STROKE_OPACITY_SOURCE_SHIFT)) {
@@ -1166,7 +1166,7 @@ nsStylePosition::nsStylePosition(const Document& aDocument)
       mJustifySelf(NS_STYLE_JUSTIFY_AUTO),
       mFlexDirection(StyleFlexDirection::Row),
       mFlexWrap(StyleFlexWrap::Nowrap),
-      mObjectFit(NS_STYLE_OBJECT_FIT_FILL),
+      mObjectFit(StyleObjectFit::Fill),
       mOrder(NS_STYLE_ORDER_INITIAL),
       mFlexGrow(0.0f),
       mFlexShrink(1.0f),
@@ -3132,7 +3132,7 @@ nsStyleVisibility::nsStyleVisibility(const Document& aDocument)
       mVisible(NS_STYLE_VISIBILITY_VISIBLE),
       mImageRendering(NS_STYLE_IMAGE_RENDERING_AUTO),
       mWritingMode(NS_STYLE_WRITING_MODE_HORIZONTAL_TB),
-      mTextOrientation(NS_STYLE_TEXT_ORIENTATION_MIXED),
+      mTextOrientation(StyleTextOrientation::Mixed),
       mColorAdjust(StyleColorAdjust::Economy) {
   MOZ_COUNT_CTOR(nsStyleVisibility);
 }
@@ -3703,9 +3703,9 @@ nsStyleUIReset::nsStyleUIReset(const Document& aDocument)
     : mUserSelect(StyleUserSelect::Auto),
       mScrollbarWidth(StyleScrollbarWidth::Auto),
       mForceBrokenImageIcon(0),
-      mIMEMode(NS_STYLE_IME_MODE_AUTO),
+      mIMEMode(StyleImeMode::Auto),
       mWindowDragging(StyleWindowDragging::Default),
-      mWindowShadow(NS_STYLE_WINDOW_SHADOW_DEFAULT),
+      mWindowShadow(StyleWindowShadow::Default),
       mWindowOpacity(1.0),
       mWindowTransformOrigin{LengthPercentage::FromPercentage(0.5),
                              LengthPercentage::FromPercentage(0.5),

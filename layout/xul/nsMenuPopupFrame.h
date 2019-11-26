@@ -248,7 +248,7 @@ class nsMenuPopupFrame final : public nsBoxFrame,
   void EnsureWidget(bool aRecreate = false);
 
   nsresult CreateWidgetForView(nsView* aView);
-  uint8_t GetShadowStyle();
+  mozilla::StyleWindowShadow GetShadowStyle();
 
   bool IsLeafDynamic() const override;
 
@@ -258,8 +258,6 @@ class nsMenuPopupFrame final : public nsBoxFrame,
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   void LayoutPopup(nsBoxLayoutState& aState, nsIFrame* aParentMenu,
                    bool aSizedToPopup);
-
-  nsView* GetRootViewForPopup(nsIFrame* aStartFrame);
 
   // Set the position of the popup either relative to the anchor aAnchorFrame
   // (or the frame for mAnchorContent if aAnchorFrame is null), anchored at a

@@ -6,11 +6,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "DocumentChannelChild.h"
+
 #include "SerializedLoadContext.h"
 #include "mozIThirdPartyUtil.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/dom/nsCSPContext.h"
+#include "mozilla/extensions/StreamFilterParent.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/net/HttpChannelChild.h"
@@ -21,10 +24,9 @@
 #include "nsHttpHandler.h"
 #include "nsQueryObject.h"
 #include "nsSerializationHelper.h"
-#include "nsStringStream.h"
-#include "mozilla/dom/nsCSPContext.h"
 #include "nsStreamListenerWrapper.h"
-#include "mozilla/extensions/StreamFilterParent.h"
+#include "nsStringStream.h"
+#include "nsURLHelper.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
@@ -32,45 +34,71 @@ using namespace mozilla::ipc;
 namespace mozilla {
 namespace net {
 
-NS_INTERFACE_MAP_BEGIN(DocumentChannelChild)
-  if (mWasOpened && aIID == NS_GET_IID(nsIHttpChannel)) {
-    // DocumentChannelChild generally is doing an http connection
-    // internally, but doesn't implement the interface. Everything
-    // before AsyncOpen should be duplicated in the parent process
-    // on the real http channel, but anything trying to QI to nsIHttpChannel
-    // after that will be failing and get confused.
-    NS_WARNING(
-        "Trying to request nsIHttpChannel from DocumentChannelChild, this is "
-        "likely broken");
-  }
-  NS_INTERFACE_MAP_ENTRY(nsITraceableChannel)
-  NS_INTERFACE_MAP_ENTRY_CONCRETE(DocumentChannelChild)
-NS_INTERFACE_MAP_END_INHERITING(nsBaseChannel)
+//-----------------------------------------------------------------------------
+// DocumentChannelChild::nsISupports
 
-NS_IMPL_ADDREF_INHERITED(DocumentChannelChild, nsBaseChannel)
-NS_IMPL_RELEASE_INHERITED(DocumentChannelChild, nsBaseChannel)
+NS_IMPL_ADDREF(DocumentChannelChild)
+NS_IMPL_RELEASE(DocumentChannelChild)
+
+NS_INTERFACE_MAP_BEGIN(DocumentChannelChild)
+  NS_INTERFACE_MAP_ENTRY(nsIRequest)
+  NS_INTERFACE_MAP_ENTRY(nsIChannel)
+  NS_INTERFACE_MAP_ENTRY(nsITraceableChannel)
+  NS_INTERFACE_MAP_ENTRY(nsIAsyncVerifyRedirectCallback)
+  NS_INTERFACE_MAP_ENTRY_CONCRETE(DocumentChannelChild)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIRequest)
+  /* previous macro end with "else" keyword */ {
+    foundInterface = 0;
+    if (mWasOpened && aIID == NS_GET_IID(nsIHttpChannel)) {
+      // DocumentChannelChild generally is doing an http connection
+      // internally, but doesn't implement the interface. Everything
+      // before AsyncOpen should be duplicated in the parent process
+      // on the real http channel, but anything trying to QI to nsIHttpChannel
+      // after that will be failing and get confused.
+      NS_WARNING(
+          "Trying to request nsIHttpChannel from DocumentChannelChild, this is "
+          "likely broken");
+    } else if (aIID == NS_GET_IID(nsIPropertyBag)) {
+      NS_WARNING(
+          "Trying to request nsIPropertyBag from DocumentChannelChild, this "
+          "will be broken");
+    } else if (aIID == NS_GET_IID(nsIPropertyBag2)) {
+      NS_WARNING(
+          "Trying to request nsIPropertyBag2 from DocumentChannelChild, this "
+          "will be broken");
+    } else if (aIID == NS_GET_IID(nsIWritablePropertyBag)) {
+      NS_WARNING(
+          "Trying to request nsIWritablePropertyBag from DocumentChannelChild, "
+          "this will be broken");
+    } else if (aIID == NS_GET_IID(nsIWritablePropertyBag2)) {
+      NS_WARNING(
+          "Trying to request nsIWritablePropertyBag2 from "
+          "DocumentChannelChild, this will be broken");
+    }
+  }
+  if (false) // So we fallback properly in the final macro
+NS_INTERFACE_MAP_END
 
 DocumentChannelChild::DocumentChannelChild(
     nsDocShellLoadState* aLoadState, net::LoadInfo* aLoadInfo,
     const nsString* aInitiatorType, nsLoadFlags aLoadFlags, uint32_t aLoadType,
     uint32_t aCacheKey, bool aIsActive, bool aIsTopLevelDoc,
     bool aHasNonEmptySandboxingFlags)
-    : mLoadState(aLoadState),
+    : mAsyncOpenTime(TimeStamp::Now()),
+      mLoadState(aLoadState),
       mInitiatorType(aInitiatorType ? Some(*aInitiatorType) : Nothing()),
       mLoadType(aLoadType),
       mCacheKey(aCacheKey),
       mIsActive(aIsActive),
       mIsTopLevelDoc(aIsTopLevelDoc),
-      mHasNonEmptySandboxingFlags(aHasNonEmptySandboxingFlags) {
-  mEventQueue = new ChannelEventQueue(static_cast<nsIChannel*>(this));
-  SetURI(aLoadState->URI());
-  SetLoadInfo(aLoadInfo);
-  SetLoadFlags(aLoadFlags);
+      mHasNonEmptySandboxingFlags(aHasNonEmptySandboxingFlags),
+      mLoadFlags(aLoadFlags),
+      mURI(aLoadState->URI()),
+      mLoadInfo(aLoadInfo) {
   RefPtr<nsHttpHandler> handler = nsHttpHandler::GetInstance();
   uint64_t channelId;
   Unused << handler->NewChannelId(channelId);
-  mChannelId.emplace(channelId);
-  mAsyncOpenTime = TimeStamp::Now();
+  mChannelId = channelId;
 }
 
 NS_IMETHODIMP
@@ -88,9 +116,7 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
 
   // Port checked in parent, but duplicate here so we can return with error
   // immediately, as we've done since before e10s.
-  rv = NS_CheckPortSafety(nsBaseChannel::URI());  // Need to disambiguate,
-                                                  // because in the child ipdl,
-                                                  // a typedef URI is defined...
+  rv = NS_CheckPortSafety(mURI);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIURI> topWindowURI;
@@ -146,32 +172,25 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
   }
 
   args.loadInfo() = *maybeArgs;
-  GetLoadFlags(&args.loadFlags());
+  args.loadFlags() = mLoadFlags;
   args.initiatorType() = mInitiatorType;
   args.loadType() = mLoadType;
   args.cacheKey() = mCacheKey;
   args.isActive() = mIsActive;
   args.isTopLevelDoc() = mIsTopLevelDoc;
   args.hasNonEmptySandboxingFlags() = mHasNonEmptySandboxingFlags;
-  args.channelId() = *mChannelId;
+  args.channelId() = mChannelId;
   args.asyncOpenTime() = mAsyncOpenTime;
 
-  nsCOMPtr<nsILoadContext> loadContext;
-  NS_QueryNotificationCallbacks(this, loadContext);
-  if (loadContext) {
-    nsCOMPtr<mozIDOMWindowProxy> domWindow;
-    loadContext->GetAssociatedWindow(getter_AddRefs(domWindow));
-    if (domWindow) {
-      auto* pDomWindow = nsPIDOMWindowOuter::From(domWindow);
-      nsIDocShell* docshell = pDomWindow->GetDocShell();
-      if (docshell) {
-        docshell->GetCustomUserAgent(args.customUserAgent());
-      }
-    }
+  nsDocShell* docshell = GetDocShell();
+  if (docshell) {
+    docshell->GetCustomUserAgent(args.customUserAgent());
   }
 
   nsCOMPtr<nsIBrowserChild> iBrowserChild;
-  GetCallback(iBrowserChild);
+  NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
+                                NS_GET_TEMPLATE_IID(nsIBrowserChild),
+                                getter_AddRefs(iBrowserChild));
   BrowserChild* browserChild = static_cast<BrowserChild*>(iBrowserChild.get());
   if (MissingRequiredBrowserChild(browserChild, "ftp")) {
     return NS_ERROR_ILLEGAL_VALUE;
@@ -190,12 +209,25 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
   return NS_OK;
 }
 
+nsDocShell* DocumentChannelChild::GetDocShell() {
+  nsCOMPtr<nsILoadContext> loadContext;
+  NS_QueryNotificationCallbacks(this, loadContext);
+  if (!loadContext) {
+    return nullptr;
+  }
+  nsCOMPtr<mozIDOMWindowProxy> domWindow;
+  loadContext->GetAssociatedWindow(getter_AddRefs(domWindow));
+  if (!domWindow) {
+    return nullptr;
+  }
+  auto* pDomWindow = nsPIDOMWindowOuter::From(domWindow);
+  nsIDocShell* docshell = pDomWindow->GetDocShell();
+  return nsDocShell::Cast(docshell);
+}
+
 IPCResult DocumentChannelChild::RecvFailedAsyncOpen(
     const nsresult& aStatusCode) {
-  mEventQueue->RunOrEnqueue(new NeckoTargetChannelFunctionEvent(
-      this, [self = UnsafePtr<DocumentChannelChild>(this), aStatusCode]() {
-        self->ShutdownListeners(aStatusCode);
-      }));
+  ShutdownListeners(aStatusCode);
   return IPC_OK();
 }
 
@@ -266,6 +298,7 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
                                              cspToInheritLoadingDocument,
                                              getter_AddRefs(loadInfo)));
 
+  mLastVisitInfo = std::move(aArgs.lastVisitInfo());
   mRedirects = std::move(aArgs.redirects());
   mRedirectResolver = std::move(aResolve);
 
@@ -338,11 +371,8 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
   // (ContentChild::RecvCrossProcessRedirect)? In that case there is no local
   // existing actor in the destination process... We really need all information
   // to go up to the parent, and then come down to the new child actor.
-  nsCOMPtr<nsIWritablePropertyBag> bag(do_QueryInterface(newChannel));
-  if (bag) {
-    for (auto iter = mPropertyHash.Iter(); !iter.Done(); iter.Next()) {
-      bag->SetProperty(iter.Key(), iter.UserData());
-    }
+  if (nsCOMPtr<nsIWritablePropertyBag> bag = do_QueryInterface(newChannel)) {
+    nsHashPropertyBag::CopyFrom(bag, aArgs.properties());
   }
 
   // connect parent.
@@ -355,10 +385,8 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
   }
   mRedirectChannel = newChannel;
 
-  nsCOMPtr<nsIEventTarget> target = GetNeckoTarget();
-  MOZ_ASSERT(target);
-  rv = gHttpHandler->AsyncOnChannelRedirect(this, newChannel,
-                                            aArgs.redirectFlags(), target);
+  rv = gHttpHandler->AsyncOnChannelRedirect(
+      this, newChannel, aArgs.redirectFlags(), GetMainThreadEventTarget());
 
   if (NS_SUCCEEDED(rv)) {
     scopeExit.release();
@@ -441,16 +469,10 @@ IPCResult DocumentChannelChild::RecvConfirmRedirect(
                                              getter_AddRefs(loadInfo)));
 
   nsCOMPtr<nsIURI> originalUri;
-  nsresult rv = GetOriginalURI(getter_AddRefs(originalUri));
-  if (NS_FAILED(rv)) {
-    aResolve(Tuple<const nsresult&, const Maybe<nsresult>&>(NS_BINDING_FAILED,
-                                                            Some(rv)));
-    return IPC_OK();
-  }
-
+  GetOriginalURI(getter_AddRefs(originalUri));
   Maybe<nsresult> cancelCode;
-  rv = CSPService::ConsultCSPForRedirect(originalUri, aNewUri, mLoadInfo,
-                                         cancelCode);
+  nsresult rv = CSPService::ConsultCSPForRedirect(originalUri, aNewUri,
+                                                  mLoadInfo, cancelCode);
   aResolve(Tuple<const nsresult&, const Maybe<nsresult>&>(rv, cancelCode));
   return IPC_OK();
 }
@@ -495,26 +517,203 @@ DocumentChannelChild::Cancel(nsresult aStatusCode) {
 
 NS_IMETHODIMP
 DocumentChannelChild::Suspend() {
-  NS_ENSURE_TRUE(CanSend(), NS_ERROR_NOT_AVAILABLE);
-
-  if (!mSuspendCount++) {
-    SendSuspend();
-  }
-
-  mEventQueue->Suspend();
-  return NS_OK;
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
 DocumentChannelChild::Resume() {
-  NS_ENSURE_TRUE(CanSend(), NS_ERROR_NOT_AVAILABLE);
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
 
-  MOZ_ASSERT(mSuspendCount);
-  if (!--mSuspendCount) {
-    SendResume();
+//-----------------------------------------------------------------------------
+// Remainder of nsIRequest/nsIChannel.
+//-----------------------------------------------------------------------------
+
+NS_IMETHODIMP DocumentChannelChild::GetNotificationCallbacks(
+    nsIInterfaceRequestor** aCallbacks) {
+  nsCOMPtr<nsIInterfaceRequestor> callbacks(mCallbacks);
+  callbacks.forget(aCallbacks);
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetNotificationCallbacks(
+    nsIInterfaceRequestor* aNotificationCallbacks) {
+  mCallbacks = aNotificationCallbacks;
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetLoadGroup(nsILoadGroup** aLoadGroup) {
+  nsCOMPtr<nsILoadGroup> loadGroup(mLoadGroup);
+  loadGroup.forget(aLoadGroup);
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetLoadGroup(nsILoadGroup* aLoadGroup) {
+  mLoadGroup = aLoadGroup;
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetStatus(nsresult* aStatus) {
+  *aStatus = mStatus;
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetName(nsACString& aResult) {
+  if (!mURI) {
+    aResult.Truncate();
+    return NS_OK;
   }
+  return mURI->GetSpec(aResult);
+}
 
-  mEventQueue->Resume();
+NS_IMETHODIMP DocumentChannelChild::IsPending(bool* aResult) {
+  *aResult = mIsPending;
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetLoadFlags(nsLoadFlags* aLoadFlags) {
+  *aLoadFlags = mLoadFlags;
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetLoadFlags(nsLoadFlags aLoadFlags) {
+  mLoadFlags = aLoadFlags;
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetOriginalURI(nsIURI** aOriginalURI) {
+  nsCOMPtr<nsIURI> originalURI =
+      mLoadState->OriginalURI() ? mLoadState->OriginalURI() : mLoadState->URI();
+  originalURI.forget(aOriginalURI);
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetOriginalURI(nsIURI* aOriginalURI) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetURI(nsIURI** aURI) {
+  nsCOMPtr<nsIURI> uri(mURI);
+  uri.forget(aURI);
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetOwner(nsISupports** aOwner) {
+  nsCOMPtr<nsISupports> owner(mOwner);
+  owner.forget(aOwner);
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetOwner(nsISupports* aOwner) {
+  mOwner = aOwner;
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetSecurityInfo(
+    nsISupports** aSecurityInfo) {
+  *aSecurityInfo = nullptr;
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetContentType(nsACString& aContentType) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetContentType(
+    const nsACString& aContentType) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetContentCharset(
+    nsACString& aContentCharset) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetContentCharset(
+    const nsACString& aContentCharset) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetContentLength(int64_t* aContentLength) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetContentLength(int64_t aContentLength) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::Open(nsIInputStream** aStream) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetContentDisposition(
+    uint32_t* aContentDisposition) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetContentDisposition(
+    uint32_t aContentDisposition) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetContentDispositionFilename(
+    nsAString& aContentDispositionFilename) {
+  MOZ_CRASH("If we get here, something will be broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetContentDispositionFilename(
+    const nsAString& aContentDispositionFilename) {
+  MOZ_CRASH("If we get here, something will be broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetContentDispositionHeader(
+    nsACString& aContentDispositionHeader) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetLoadInfo(nsILoadInfo** aLoadInfo) {
+  nsCOMPtr<nsILoadInfo> loadInfo(mLoadInfo);
+  loadInfo.forget(aLoadInfo);
+  return NS_OK;
+}
+
+NS_IMETHODIMP DocumentChannelChild::SetLoadInfo(nsILoadInfo* aLoadInfo) {
+  MOZ_CRASH("If we get here, something is broken");
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP DocumentChannelChild::GetIsDocument(bool* aIsDocument) {
+  return NS_GetIsDocumentChannel(this, aIsDocument);
+}
+
+//-----------------------------------------------------------------------------
+// nsIIdentChannel
+//-----------------------------------------------------------------------------
+
+NS_IMETHODIMP
+DocumentChannelChild::GetChannelId(uint64_t* aChannelId) {
+  *aChannelId = mChannelId;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+DocumentChannelChild::SetChannelId(uint64_t aChannelId) {
+  mChannelId = aChannelId;
   return NS_OK;
 }
 
