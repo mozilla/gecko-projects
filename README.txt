@@ -17,5 +17,5 @@ Nightly development builds can be downloaded from:
     https://www.mozilla.org/firefox/channel/desktop/#nightly
 
 Keep in mind that nightly builds, which are used by Mozilla developers for
-testing, may be buggy.
+testing, may be buggy!
 
