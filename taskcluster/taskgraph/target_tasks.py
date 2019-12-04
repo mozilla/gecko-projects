@@ -180,6 +180,87 @@ def target_tasks_default(full_task_graph, parameters, graph_config):
             and filter_out_nightly(t, parameters)]
 
 
+@_target_task('ash_tasks')
+def target_tasks_ash(full_task_graph, parameters, graph_config):
+    """Target tasks that only run on the ash branch."""
+    def filter(task):
+        attr = task.attributes
+        platform = attr.get('build_platform')
+        # Early return if platform is None
+        if not platform:
+            return False
+        # Only on Linux platforms
+        if 'linux' not in platform:
+            return False
+        # No random non-build jobs either. This is being purposely done as a
+        # blacklist so newly-added jobs aren't missed by default.
+        for p in ('shippable', 'haz', 'artifact', 'cov', 'add-on'):
+            if p in platform:
+                return False
+        for k in ('toolchain', 'l10n'):
+            if k in attr['kind']:
+                return False
+        # and none of this linux64-asan/debug stuff
+        if platform == 'linux64-asan' and attr['build_type'] == 'debug':
+            return False
+
+        if attr.get('unittest_suite'):
+            # no non-e10s tests
+            if not attr.get('e10s'):
+                return False
+
+            # filter out by test platform
+            for p in ('-qr',):
+                if p in attr['test_platform']:
+                    return False
+
+            # filter out raptor-fis (they are broken)
+            if attr['unittest_suite'] == 'raptor' and attr.get('unittest_variant') == 'fission':
+                return False
+
+        # don't upload symbols
+        if attr['kind'] == 'upload-symbols':
+            return False
+        return True
+
+    return [l for l, t in full_task_graph.tasks.iteritems()
+            if filter(t)
+            and standard_filter(t, parameters)
+            and filter_out_nightly(t, parameters)]
+
+@_target_task('holly_tasks')
+def target_tasks_holly(full_task_graph, parameters, graph_config):
+    """Limit tasks run on holly branch to just linux64/opt."""
+    def filter(task):
+        attr = task.attributes
+        platform = attr.get('build_platform')
+        # Early return if platform is None
+        if not platform:
+            return False
+        # Only on Linux 64 platforms
+        if platform != 'linux64':
+            return False
+        # skip all debug
+        if attr['build_type'] == 'debug':
+            return False
+        # skip all linux64-asan
+        if platform == 'linux64-asan':
+            return False
+
+        # filter out raptor (they are expensive)
+        if attr['unittest_suite'] == 'raptor':
+            return False
+
+        # don't upload symbols
+        if attr['kind'] == 'upload-symbols':
+            return False
+        return True
+
+    return [l for l, t in full_task_graph.tasks.iteritems()
+            if filter(t)
+            and standard_filter(t, parameters)
+            and filter_out_nightly(t, parameters)]
+
 @_target_task('graphics_tasks')
 def target_tasks_graphics(full_task_graph, parameters, graph_config):
     """In addition to doing the filtering by project that the 'default'
@@ -469,16 +550,6 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
         if '-chromium' in try_name:
             return True
 
-        # Run raptor scn-power-idle and speedometer for fenix and fennec68
-        if 'raptor-scn-power-idle' in try_name \
-                and 'pgo' in platform \
-                and ('-fenix' in try_name or '-fennec68' in try_name):
-            return True
-        if 'raptor-speedometer' in try_name \
-                and 'pgo' in platform \
-                and ('-fenix' in try_name or '-fennec68' in try_name):
-            return True
-
         # Run the following tests on android geckoview
         if platform and 'android' not in platform:
             return False
@@ -577,18 +648,6 @@ def target_tasks_nightly_asan(full_task_graph, parameters, graph_config):
         'win64-asan-reporter-nightly'
     })
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t, parameters)]
-
-
-@_target_task('daily_releases')
-def target_tasks_daily_releases(full_task_graph, parameters, graph_config):
-    """Select the set of tasks required to identify if we should release.
-    If we determine that we should the task will communicate to ship-it to
-    schedule the release itself."""
-
-    def filter(task):
-        return task.kind in ['maybe-release']
-
-    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
 @_target_task('nightly_desktop')
