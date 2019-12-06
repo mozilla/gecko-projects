@@ -59,7 +59,7 @@ PER_PROJECT_PARAMETERS = {
 
     'holly': {
         'target_tasks_method': 'holly_tasks',
-    }
+    },
 
     'oak': {
         'target_tasks_method': 'nightly_desktop',
