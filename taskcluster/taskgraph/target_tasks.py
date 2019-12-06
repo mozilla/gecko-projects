@@ -248,8 +248,9 @@ def target_tasks_holly(full_task_graph, parameters, graph_config):
             return False
 
         # filter out raptor (they are expensive)
-        if attr['unittest_suite'] == 'raptor':
-            return False
+        if attr.get('unittest_suite'):
+            if attr['unittest_suite'] == 'raptor':
+                return False
 
         # don't upload symbols
         if attr['kind'] == 'upload-symbols':
