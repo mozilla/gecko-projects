@@ -228,6 +228,7 @@ def target_tasks_ash(full_task_graph, parameters, graph_config):
             and standard_filter(t, parameters)
             and filter_out_nightly(t, parameters)]
 
+
 @_target_task('holly_tasks')
 def target_tasks_holly(full_task_graph, parameters, graph_config):
     """Limit tasks run on holly branch to just linux64/opt."""
@@ -261,6 +262,7 @@ def target_tasks_holly(full_task_graph, parameters, graph_config):
             if filter(t)
             and standard_filter(t, parameters)
             and filter_out_nightly(t, parameters)]
+
 
 @_target_task('graphics_tasks')
 def target_tasks_graphics(full_task_graph, parameters, graph_config):
