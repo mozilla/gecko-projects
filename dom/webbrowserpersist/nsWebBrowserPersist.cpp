@@ -19,11 +19,9 @@
 #include "nsILoadContext.h"
 #include "nsIPrivateBrowsingChannel.h"
 #include "nsComponentManagerUtils.h"
-#include "nsIComponentRegistrar.h"
 #include "nsIStorageStream.h"
 #include "nsISeekableStream.h"
 #include "nsIHttpChannel.h"
-#include "nsIHttpChannelInternal.h"
 #include "nsIEncodedChannel.h"
 #include "nsIUploadChannel.h"
 #include "nsICacheInfoChannel.h"
@@ -38,20 +36,13 @@
 
 #include "nsIURL.h"
 #include "nsIFileURL.h"
-#include "nsIURIMutator.h"
 #include "nsIWebProgressListener.h"
 #include "nsIAuthPrompt.h"
 #include "nsIPrompt.h"
-#include "nsISHEntry.h"
-#include "nsIWebPageDescriptor.h"
 #include "nsIFormControl.h"
 #include "nsContentUtils.h"
 
-#include "nsIImageLoadingContent.h"
-
 #include "ftpCore.h"
-#include "nsITransport.h"
-#include "nsISocketTransport.h"
 #include "nsIStringBundle.h"
 #include "nsIProtocolHandler.h"
 
@@ -326,10 +317,8 @@ NS_IMETHODIMP nsWebBrowserPersist::GetPersistFlags(uint32_t* aPersistFlags) {
 }
 NS_IMETHODIMP nsWebBrowserPersist::SetPersistFlags(uint32_t aPersistFlags) {
   mPersistFlags = aPersistFlags;
-  mReplaceExisting =
-      (mPersistFlags & PERSIST_FLAGS_REPLACE_EXISTING_FILES) ? true : false;
-  mSerializingOutput =
-      (mPersistFlags & PERSIST_FLAGS_SERIALIZE_OUTPUT) ? true : false;
+  mReplaceExisting = (mPersistFlags & PERSIST_FLAGS_REPLACE_EXISTING_FILES);
+  mSerializingOutput = (mPersistFlags & PERSIST_FLAGS_SERIALIZE_OUTPUT);
   return NS_OK;
 }
 

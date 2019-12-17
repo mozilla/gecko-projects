@@ -46,19 +46,20 @@ class DocumentChannelChild final : public nsIIdentChannel,
 
   mozilla::ipc::IPCResult RecvFailedAsyncOpen(const nsresult& aStatusCode);
 
-  mozilla::ipc::IPCResult RecvDisconnectChildListeners(const nsresult& aStatus);
+  mozilla::ipc::IPCResult RecvDisconnectChildListeners(
+      const nsresult& aStatus, const nsresult& aLoadGroupStatus);
 
   mozilla::ipc::IPCResult RecvDeleteSelf();
 
   mozilla::ipc::IPCResult RecvRedirectToRealChannel(
-      const RedirectToRealChannelArgs& aArgs,
+      RedirectToRealChannelArgs&& aArgs,
       RedirectToRealChannelResolver&& aResolve);
 
   mozilla::ipc::IPCResult RecvAttachStreamFilter(
       Endpoint<extensions::PStreamFilterParent>&& aEndpoint);
 
   mozilla::ipc::IPCResult RecvConfirmRedirect(
-      const LoadInfoArgs& aLoadInfo, nsIURI* aNewUri,
+      LoadInfoArgs&& aLoadInfo, nsIURI* aNewUri,
       ConfirmRedirectResolver&& aResolve);
 
   const nsTArray<DocumentChannelRedirect>& GetRedirectChain() const {
@@ -70,11 +71,16 @@ class DocumentChannelChild final : public nsIIdentChannel,
     *aChannelRedirectFlags = mLastVisitInfo.previousFlags();
   }
 
+  void SetDocumentOpenFlags(uint32_t aFlags, bool aPluginsAllowed) {
+    mDocumentOpenFlags = Some(aFlags);
+    mPluginsAllowed = aPluginsAllowed;
+  }
+
  private:
   void ShutdownListeners(nsresult aStatusCode);
   nsDocShell* GetDocShell();
 
-  ~DocumentChannelChild() = default;
+  ~DocumentChannelChild();
 
   LastVisitInfo mLastVisitInfo;
   nsCOMPtr<nsIChannel> mRedirectChannel;
@@ -93,6 +99,7 @@ class DocumentChannelChild final : public nsIIdentChannel,
 
   nsresult mStatus = NS_OK;
   bool mCanceled = false;
+  Maybe<uint32_t> mDocumentOpenFlags;
   bool mIsPending = false;
   bool mWasOpened = false;
   uint64_t mChannelId;
@@ -103,6 +110,7 @@ class DocumentChannelChild final : public nsIIdentChannel,
   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
   nsCOMPtr<nsIStreamListener> mListener;
   nsCOMPtr<nsISupports> mOwner;
+  bool mPluginsAllowed = false;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(DocumentChannelChild, DOCUMENT_CHANNEL_CHILD_IID)

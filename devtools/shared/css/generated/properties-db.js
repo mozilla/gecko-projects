@@ -2995,6 +2995,8 @@ exports.CSS_PROPERTIES = {
       "border-end-end-radius",
       "overflow-inline",
       "overflow-block",
+      "overscroll-behavior-inline",
+      "overscroll-behavior-block",
       "margin-block-start",
       "margin-block-end",
       "margin-inline-start",
@@ -3206,6 +3208,7 @@ exports.CSS_PROPERTIES = {
       "text-rendering",
       "-moz-control-character-visibility",
       "text-underline-offset",
+      "text-underline-position",
       "text-decoration-skip-ink",
       "cursor",
       "pointer-events",
@@ -8649,6 +8652,38 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "overscroll-behavior-block": {
+    "isInherited": false,
+    "subproperties": [
+      "overscroll-behavior-block"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "contain",
+      "inherit",
+      "initial",
+      "none",
+      "revert",
+      "unset"
+    ]
+  },
+  "overscroll-behavior-inline": {
+    "isInherited": false,
+    "subproperties": [
+      "overscroll-behavior-inline"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "contain",
+      "inherit",
+      "initial",
+      "none",
+      "revert",
+      "unset"
+    ]
+  },
   "overscroll-behavior-x": {
     "isInherited": false,
     "subproperties": [
@@ -10314,6 +10349,23 @@ exports.CSS_PROPERTIES = {
       "unset"
     ]
   },
+  "text-underline-position": {
+    "isInherited": true,
+    "subproperties": [
+      "text-underline-position"
+    ],
+    "supports": [],
+    "values": [
+      "auto",
+      "inherit",
+      "initial",
+      "left",
+      "revert",
+      "right",
+      "under",
+      "unset"
+    ]
+  },
   "top": {
     "isInherited": false,
     "subproperties": [
@@ -10794,49 +10846,6 @@ exports.CSS_PROPERTIES = {
       "revert",
       "unset"
     ]
-  },
-  "zoom": {
-    "isInherited": false,
-    "subproperties": [
-      "transform",
-      "transform-origin"
-    ],
-    "supports": [],
-    "values": [
-      "accumulatematrix",
-      "bottom",
-      "center",
-      "inherit",
-      "initial",
-      "interpolatematrix",
-      "left",
-      "matrix",
-      "matrix3d",
-      "none",
-      "perspective",
-      "revert",
-      "right",
-      "rotate",
-      "rotate3d",
-      "rotateX",
-      "rotateY",
-      "rotateZ",
-      "scale",
-      "scale3d",
-      "scaleX",
-      "scaleY",
-      "scaleZ",
-      "skew",
-      "skewX",
-      "skewY",
-      "top",
-      "translate",
-      "translate3d",
-      "translateX",
-      "translateY",
-      "translateZ",
-      "unset"
-    ]
   }
 };
 
@@ -10909,6 +10918,10 @@ exports.PREFERENCES = [
     "layout.css.text-justify.enabled"
   ],
   [
+    "text-underline-position",
+    "layout.css.text-underline-position.enabled"
+  ],
+  [
     "touch-action",
     "layout.css.touch_action.enabled"
   ],
@@ -10929,20 +10942,28 @@ exports.PREFERENCES = [
     "layout.css.overflow-clip-box.enabled"
   ],
   [
-    "overscroll-behavior-x",
-    "layout.css.overscroll-behavior.enabled"
-  ],
-  [
-    "overscroll-behavior-y",
-    "layout.css.overscroll-behavior.enabled"
-  ],
-  [
     "overflow-block",
     "layout.css.overflow-logical.enabled"
   ],
   [
     "overflow-inline",
     "layout.css.overflow-logical.enabled"
+  ],
+  [
+    "overscroll-behavior-block",
+    "layout.css.overscroll-behavior.enabled"
+  ],
+  [
+    "overscroll-behavior-inline",
+    "layout.css.overscroll-behavior.enabled"
+  ],
+  [
+    "overscroll-behavior-x",
+    "layout.css.overscroll-behavior.enabled"
+  ],
+  [
+    "overscroll-behavior-y",
+    "layout.css.overscroll-behavior.enabled"
   ],
   [
     "backdrop-filter",

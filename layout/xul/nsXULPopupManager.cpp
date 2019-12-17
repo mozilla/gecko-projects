@@ -12,14 +12,12 @@
 #include "nsMenuBarListener.h"
 #include "nsContentUtils.h"
 #include "nsXULElement.h"
-#include "nsIDOMXULMenuListElement.h"
 #include "nsIDOMXULCommandDispatcher.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsGlobalWindow.h"
 #include "nsIContentInlines.h"
 #include "nsLayoutUtils.h"
 #include "nsViewManager.h"
-#include "nsIComponentManager.h"
 #include "nsITimer.h"
 #include "nsFocusManager.h"
 #include "nsIDocShell.h"
@@ -2089,7 +2087,7 @@ bool nsXULPopupManager::HandleKeyboardNavigationInPopup(
       // Cursor navigation does not wrap on Mac or for menulists on Windows.
       bool wrap =
 #ifdef XP_WIN
-          aFrame->IsMenuList() ? false : true;
+          !aFrame->IsMenuList();
 #elif defined XP_MACOSX
           false;
 #else

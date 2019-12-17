@@ -20,15 +20,12 @@
 #include "mozilla/dom/Document.h"
 #include "nsIObserverService.h"
 #include "nsIScriptError.h"
-#include "nsIWindowMediator.h"
-#include "nsIPrefService.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/Printf.h"
 #include "mozilla/StyleSheet.h"
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/dom/Location.h"
-#include "nsIURIMutator.h"
 
 #include "unicode/uloc.h"
 
@@ -376,16 +373,6 @@ nsChromeRegistry::MustLoadURLRemotely(nsIURI* aURI, bool* aResult) {
     *aResult = !!(flags & REMOTE_REQUIRED);
   }
   return NS_OK;
-}
-
-bool nsChromeRegistry::GetDirectionForLocale(const nsACString& aLocale) {
-  int pref = mozilla::Preferences::GetInt("intl.uidirection", -1);
-  if (pref >= 0) {
-    return (pref > 0);
-  }
-  nsAutoCString locale(aLocale);
-  SanitizeForBCP47(locale);
-  return uloc_isRightToLeft(locale.get());
 }
 
 already_AddRefed<nsChromeRegistry> nsChromeRegistry::GetSingleton() {

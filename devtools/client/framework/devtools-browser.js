@@ -65,8 +65,8 @@ loader.lazyRequireGetter(
 );
 loader.lazyImporter(
   this,
-  "BrowserToolboxProcess",
-  "resource://devtools/client/framework/ToolboxProcess.jsm"
+  "BrowserToolboxLauncher",
+  "resource://devtools/client/framework/browser-toolbox/Launcher.jsm"
 );
 
 const { LocalizationHelper } = require("devtools/shared/l10n");
@@ -338,7 +338,7 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
         await gDevToolsBrowser.toggleToolboxCommand(window.gBrowser, startTime);
         break;
       case "browserToolbox":
-        BrowserToolboxProcess.init();
+        BrowserToolboxLauncher.init();
         break;
       case "browserConsole":
         const {
@@ -624,7 +624,7 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
   hasToolboxOpened(win) {
     const tab = win.gBrowser.selectedTab;
     for (const [target] of gDevTools._toolboxes) {
-      if (target.tab == tab) {
+      if (target.localTab == tab) {
         return true;
       }
     }
@@ -734,7 +734,7 @@ var gDevToolsBrowser = (exports.gDevToolsBrowser = {
 
     // Destroy toolboxes for closed window
     for (const [target, toolbox] of gDevTools._toolboxes) {
-      if (target.tab && target.tab.ownerDocument.defaultView == win) {
+      if (target.localTab && target.localTab.ownerDocument.defaultView == win) {
         toolbox.destroy();
       }
     }

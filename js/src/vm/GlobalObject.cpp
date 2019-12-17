@@ -42,6 +42,7 @@
 #include "builtin/Symbol.h"
 #include "builtin/TypedObject.h"
 #include "builtin/WeakMapObject.h"
+#include "builtin/WeakRefObject.h"
 #include "builtin/WeakSetObject.h"
 #include "debugger/DebugAPI.h"
 #include "gc/FreeOp.h"
@@ -126,6 +127,7 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_SharedArrayBuffer:
       return !cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled();
 
+    case JSProto_WeakRef:
     case JSProto_FinalizationGroup:
       return !cx->realm()->creationOptions().getWeakRefsEnabled();
 
@@ -853,10 +855,6 @@ NativeObject* GlobalObject::getOrCreateForOfPICObject(
   return forOfPIC;
 }
 
-bool GlobalObject::hasRegExpStatics() const {
-  return !getSlot(REGEXP_STATICS).isUndefined();
-}
-
 /* static */
 RegExpStatics* GlobalObject::getRegExpStatics(JSContext* cx,
                                               Handle<GlobalObject*> global) {
@@ -875,13 +873,6 @@ RegExpStatics* GlobalObject::getRegExpStatics(JSContext* cx,
     resObj = &val.toObject().as<RegExpStaticsObject>();
   }
   return static_cast<RegExpStatics*>(resObj->getPrivate(/* nfixed = */ 1));
-}
-
-RegExpStatics* GlobalObject::getAlreadyCreatedRegExpStatics() const {
-  const Value& val = this->getSlot(REGEXP_STATICS);
-  MOZ_ASSERT(val.isObject());
-  return static_cast<RegExpStatics*>(
-      val.toObject().as<RegExpStaticsObject>().getPrivate(/* nfixed = */ 1));
 }
 
 /* static */

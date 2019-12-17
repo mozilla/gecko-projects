@@ -157,6 +157,14 @@ android {
                 }
             }
 
+            resources {
+                if (mozconfig.substs.MOZ_ASAN) {
+                    // If this is an ASAN build, include a `wrap.sh` for Android 8.1+ devices.  See
+                    // https://developer.android.com/ndk/guides/wrap-script.
+                    srcDir "${topsrcdir}/mobile/android/geckoview/src/asan/resources"
+                }
+            }
+
             assets {
             }
         }
@@ -351,6 +359,10 @@ android.libraryVariants.all { variant ->
 apply plugin: 'maven-publish'
 
 version = computeVersionNumber()
+if (!mozconfig.substs.MOZILLA_OFFICIAL && !mozconfig.substs.MOZ_ANDROID_FAT_AAR_ARCHITECTURES) {
+    // Use -SNAPSHOT versions locally to enable the local GeckoView substitution flow.
+    version = "${version}-SNAPSHOT"
+}
 
 publishing {
     publications {

@@ -15,7 +15,6 @@ function toMojoNDEFPushTarget(target) {
 // and mojom.NDEFMessage structure, so that watch function can be tested.
 function toMojoNDEFMessage(message) {
   let ndefMessage = new device.mojom.NDEFMessage();
-  ndefMessage.url = message.url;
   ndefMessage.data = [];
   for (let record of message.records) {
     ndefMessage.data.push(toMojoNDEFRecord(record));
@@ -27,7 +26,12 @@ function toMojoNDEFRecord(record) {
   let nfcRecord = new device.mojom.NDEFRecord();
   nfcRecord.recordType = record.recordType;
   nfcRecord.mediaType = record.mediaType;
+  nfcRecord.id = record.id;
   nfcRecord.data = toByteArray(record.data);
+  if (record.data != null && record.data.records !== undefined) {
+    // |record.data| may be an NDEFMessageInit, i.e. the payload is a message.
+    nfcRecord.payloadMessage = toMojoNDEFMessage(record.data);
+  }
   return nfcRecord;
 }
 
@@ -55,11 +59,17 @@ function toByteArray(data) {
 function compareNDEFRecords(providedRecord, receivedRecord) {
   assert_equals(providedRecord.recordType, receivedRecord.recordType);
 
-  // Compares media types without charset.
-  // Charset should be compared when watch method is implemented, in order
-  // to check that written and read strings are equal.
-  assert_equals(providedRecord.mediaType,
-      receivedRecord.mediaType.substring(0, providedRecord.mediaType.length));
+  if (providedRecord.id === undefined) {
+    assert_equals(null, receivedRecord.id);
+  } else {
+    assert_equals(providedRecord.id, receivedRecord.id);
+  }
+
+  if (providedRecord.mediaType === undefined) {
+    assert_equals(null, receivedRecord.mediaType);
+  } else {
+    assert_equals(providedRecord.mediaType, receivedRecord.mediaType);
+  }
 
   assert_not_equals(providedRecord.recordType, 'empty');
 
@@ -74,11 +84,6 @@ function assertNDEFPushOptionsEqual(provided, received) {
     assert_equals(provided.ignoreRead, !!received.ignoreRead);
   else
     assert_equals(!!received.ignore_read, true);
-
-  if (provided.timeout !== undefined)
-    assert_equals(provided.timeout, received.timeout);
-  else
-    assert_equals(received.timeout, Infinity);
 
   if (provided.target !== undefined)
     assert_equals(toMojoNDEFPushTarget(provided.target), received.target);
@@ -100,56 +105,35 @@ function assertNDEFReaderOptionsEqual(provided, received) {
     assert_equals(received.mediaType, '');
 
   if (provided.recordType !== undefined) {
-    assert_equals(!+received.record_filter, true);
-    assert_equals(provided.recordType, received.recordFilter.recordType);
+    assert_equals(provided.recordType, received.recordType);
   }
 }
 
 // Checks whether NDEFReaderOptions are matched with given message.
 function matchesWatchOptions(message, options) {
-  // Filter by Web NFC id.
-  if (!matchesWebNfcId(message.url, options.url)) return false;
+  // A message with no records is to notify that the tag is already formatted to
+  // support NDEF but does not contain a message yet. We always dispatch it for
+  // all options.
+  if (message.records.length == 0)
+    return true;
 
-  // Matches any record / media type.
-  if ((options.mediaType == null || options.mediaType === "")
-      && options.recordFilter == null) {
+  for (let record of message.records) {
+    if (options.id != null && options.id !== record.id) {
+      continue;
+    }
+    if (options.recordType != null &&
+        options.recordType !== record.recordType) {
+      continue;
+    }
+    if (options.mediaType !== '' && options.mediaType !== record.mediaType) {
+      continue;
+    }
+
+    // Found one record matches, means the message matches.
     return true;
   }
 
-  // Filter by mediaType and recordType.
-  for (let record of message.records) {
-    if (options.mediaType != null && options.mediaType !== ""
-        && options.mediaType !== record.mediaType) {
-      return false;
-    }
-    if (options.recordFilter != null &&
-        options.recordFilter.recordType !== record.recordType) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-// Web NFC id match algorithm.
-// https://w3c.github.io/web-nfc/#url-pattern-match-algorithm
-function matchesWebNfcId(id, pattern) {
-  if (id != null && id !== "" && pattern != null && pattern !== "") {
-    const id_url = new URL(id);
-    const pattern_url = new URL(pattern);
-
-    if (id_url.protocol !== pattern_url.protocol) return false;
-    if (!id_url.host.endsWith("." + pattern_url.host)
-        && id_url.host !== pattern_url.host) {
-      return false;
-    }
-    if (pattern_url.pathname === "/*") return true;
-    if (id_url.pathname.startsWith(pattern_url.pathname)) return true;
-
-    return false;
-  }
-
-  return true;
+  return false;
 }
 
 function createNDEFError(type) {
@@ -173,7 +157,6 @@ var WebNFCTest = (() => {
       this.push_options_ = null;
       this.pending_promise_func_ = null;
       this.push_completed_ = true;
-      this.push_should_timeout_ = false;
       this.client_ = null;
       this.watchers_ = [];
       this.reading_messages_ = [];
@@ -199,13 +182,8 @@ var WebNFCTest = (() => {
         this.pending_promise_func_ = resolve;
         if (this.operations_suspended_) {
           // Pends push operation if NFC operation is suspended.
-        } else if (options.timeout && options.timeout !== Infinity &&
-            !this.push_completed_) {
-          // Resolves with TimeoutError, else pend push operation.
-          if (this.push_should_timeout_) {
-            resolve(
-                createNDEFError(device.mojom.NDEFErrorType.TIMER_EXPIRED));
-          }
+        } else if (!this.push_completed_) {
+          // Leaves the push operating pending.
         } else if (!this.is_ndef_tech_) {
           // Resolves with NotSupportedError if the device does not expose
           // NDEF technology.
@@ -306,13 +284,10 @@ var WebNFCTest = (() => {
 
     reset() {
       this.hw_status_ = NFCHWStatus.ENABLED;
-      this.push_completed_ = true;
       this.watchers_ = [];
       this.reading_messages_ = [];
       this.operations_suspended_ = false;
       this.cancelPendingPushOperation();
-      this.bindingSet_.closeAllBindings();
-      this.interceptor_.stop();
       this.is_ndef_tech_ = true;
       this.is_formatted_tag_ = false;
     }
@@ -326,7 +301,6 @@ var WebNFCTest = (() => {
       this.pushed_message_ = null;
       this.push_options_ = null;
       this.pending_promise_func_ = null;
-      this.push_should_timeout_ = false;
       this.push_completed_ = true;
     }
 
@@ -348,10 +322,6 @@ var WebNFCTest = (() => {
               toMojoNDEFMessage(message));
         }
       }
-    }
-
-    setPushShouldTimeout(result) {
-      this.push_should_timeout_ = result;
     }
 
     // Suspends all pending NFC operations. Could be used when web page
@@ -402,15 +372,23 @@ var WebNFCTest = (() => {
       if (testInternal.initialized)
         throw new Error('Call reset() before initialize().');
 
-      testInternal.mockNFC = new MockNFC;
+      if (window.testRunner) {
+        // Grant nfc permissions for Chromium testrunner.
+        window.testRunner.setPermission('nfc', 'granted',
+                                        location.origin, location.origin);
+      }
+
+      if (testInternal.mockNFC == null) {
+        testInternal.mockNFC = new MockNFC();
+      }
       testInternal.initialized = true;
     }
-    // Resets state of nfc mocks between test runs.
+
+    // Reuses the nfc mock but resets its state between test runs.
     async reset() {
       if (!testInternal.initialized)
         throw new Error('Call initialize() before reset().');
       testInternal.mockNFC.reset();
-      testInternal.mockNFC = null;
       testInternal.initialized = false;
 
       await new Promise(resolve => setTimeout(resolve, 0));

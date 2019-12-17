@@ -24,12 +24,14 @@
 #include "nsAtom.h"
 #include "nsIMemoryReporter.h"
 #include "nsTArray.h"
+#include "nsIMemoryReporter.h"
 
 namespace mozilla {
 namespace css {
 class Rule;
 }  // namespace css
 namespace dom {
+class CSSImportRule;
 class Element;
 class ShadowRoot;
 }  // namespace dom
@@ -110,7 +112,8 @@ class ServoStyleSet {
   void RuleAdded(StyleSheet&, css::Rule&);
   void RuleRemoved(StyleSheet&, css::Rule&);
   void RuleChanged(StyleSheet&, css::Rule* aRule);
-  void StyleSheetCloned(StyleSheet&);
+  void SheetCloned(StyleSheet&) { mNeedsRestyleAfterEnsureUniqueInner = true; }
+  void ImportRuleLoaded(dom::CSSImportRule&, StyleSheet&);
 
   // Runs style invalidation due to document state changes.
   void InvalidateStyleForDocumentStateChanges(EventStates aStatesChanged);

@@ -15,9 +15,6 @@
 #include "mozilla/dom/Document.h"
 #include "nsImageFrame.h"
 #include "nsIScriptContext.h"
-#include "nsIURL.h"
-#include "nsIIOService.h"
-#include "nsIServiceManager.h"
 #include "nsContentUtils.h"
 #include "nsContainerFrame.h"
 #include "nsNodeInfoManager.h"
@@ -35,12 +32,9 @@
 #include "mozilla/dom/HTMLSourceElement.h"
 #include "mozilla/dom/ResponsiveImageSelector.h"
 
-#include "imgIContainer.h"
-#include "imgILoader.h"
 #include "imgINotificationObserver.h"
 #include "imgRequestProxy.h"
 
-#include "nsILoadGroup.h"
 #include "mozilla/CycleCollectedJSContext.h"
 
 #include "mozilla/EventDispatcher.h"
@@ -75,7 +69,7 @@ namespace dom {
 // Calls LoadSelectedImage on host element unless it has been superseded or
 // canceled -- this is the synchronous section of "update the image data".
 // https://html.spec.whatwg.org/multipage/embedded-content.html#update-the-image-data
-class ImageLoadTask : public MicroTaskRunnable {
+class ImageLoadTask final : public MicroTaskRunnable {
  public:
   ImageLoadTask(HTMLImageElement* aElement, bool aAlwaysLoad,
                 bool aUseUrgentStartForChannel)
@@ -87,7 +81,7 @@ class ImageLoadTask : public MicroTaskRunnable {
     mDocument->BlockOnload();
   }
 
-  virtual void Run(AutoSlowOperation& aAso) override {
+  void Run(AutoSlowOperation& aAso) override {
     if (mElement->mPendingImageLoadTask == this) {
       mElement->mPendingImageLoadTask = nullptr;
       mElement->mUseUrgentStartForChannel = mUseUrgentStartForChannel;
@@ -96,7 +90,7 @@ class ImageLoadTask : public MicroTaskRunnable {
     mDocument->UnblockOnload(false);
   }
 
-  virtual bool Suppressed() override {
+  bool Suppressed() override {
     nsIGlobalObject* global = mElement->GetOwnerGlobal();
     return global && global->IsInSyncOperation();
   }
@@ -782,7 +776,7 @@ void HTMLImageElement::ClearForm(bool aRemoveFromForm) {
 void HTMLImageElement::QueueImageLoadTask(bool aAlwaysLoad) {
   // If loading is temporarily disabled, we don't want to queue tasks
   // that may then run when loading is re-enabled.
-  if (!LoadingEnabled() || !this->OwnerDoc()->ShouldLoadImages()) {
+  if (!LoadingEnabled() || !OwnerDoc()->ShouldLoadImages()) {
     return;
   }
 

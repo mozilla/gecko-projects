@@ -44,6 +44,7 @@
 
 #include "builtin/DataViewObject.h"
 #include "builtin/MapObject.h"
+#include "js/Array.h"        // JS::GetArrayLength, JS::IsArrayObject
 #include "js/ArrayBuffer.h"  // JS::{ArrayBufferHasData,DetachArrayBuffer,IsArrayBufferObject,New{,Mapped}ArrayBufferWithContents,ReleaseMappedArrayBufferContents}
 #include "js/Date.h"
 #include "js/GCHashTable.h"
@@ -1027,7 +1028,7 @@ bool JSStructuredCloneWriter::parseTransferable() {
   JSContext* cx = context();
   RootedObject array(cx, &transferable.toObject());
   bool isArray;
-  if (!JS_IsArrayObject(cx, array, &isArray)) {
+  if (!JS::IsArrayObject(cx, array, &isArray)) {
     return false;
   }
   if (!isArray) {
@@ -1035,7 +1036,7 @@ bool JSStructuredCloneWriter::parseTransferable() {
   }
 
   uint32_t length;
-  if (!JS_GetArrayLength(cx, array, &length)) {
+  if (!JS::GetArrayLength(cx, array, &length)) {
     return false;
   }
 
@@ -1253,8 +1254,12 @@ bool JSStructuredCloneWriter::writeSharedArrayBuffer(HandleObject obj) {
   MOZ_ASSERT(obj->canUnwrapAs<SharedArrayBufferObject>());
 
   if (!cloneDataPolicy.isSharedArrayBufferAllowed()) {
-    JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr,
-                              JSMSG_SC_NOT_CLONABLE, "SharedArrayBuffer");
+    auto errorMsg =
+        context()->realm()->creationOptions().getCoopAndCoepEnabled()
+            ? JSMSG_SC_NOT_CLONABLE_WITH_COOP_COEP
+            : JSMSG_SC_NOT_CLONABLE;
+    JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr, errorMsg,
+                              "SharedArrayBuffer");
     return false;
   }
 
@@ -1293,8 +1298,12 @@ bool JSStructuredCloneWriter::writeSharedWasmMemory(HandleObject obj) {
 
   // Check the policy here so that we can report a sane error.
   if (!cloneDataPolicy.isSharedArrayBufferAllowed()) {
-    JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr,
-                              JSMSG_SC_NOT_CLONABLE, "WebAssembly.Memory");
+    auto errorMsg =
+        context()->realm()->creationOptions().getCoopAndCoepEnabled()
+            ? JSMSG_SC_NOT_CLONABLE_WITH_COOP_COEP
+            : JSMSG_SC_NOT_CLONABLE;
+    JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr, errorMsg,
+                              "WebAssembly.Memory");
     return false;
   }
 
@@ -1430,7 +1439,7 @@ bool JSStructuredCloneWriter::traverseObject(HandleObject obj, ESClass cls) {
   // Write the header for obj.
   if (cls == ESClass::Array) {
     uint32_t length = 0;
-    if (!JS_GetArrayLength(context(), obj, &length)) {
+    if (!JS::GetArrayLength(context(), obj, &length)) {
       return false;
     }
 
@@ -2009,17 +2018,6 @@ bool JSStructuredCloneWriter::write(HandleValue v) {
 }
 
 template <typename CharT>
-static UniquePtr<CharT[], JS::FreePolicy> AllocateChars(JSContext* cx,
-                                                        size_t len) {
-  // We're going to null-terminate!
-  auto p = cx->make_pod_array<CharT>(len + 1);
-  if (p) {
-    p[len] = CharT(0);
-  }
-  return p;
-}
-
-template <typename CharT>
 JSString* JSStructuredCloneReader::readStringImpl(uint32_t nchars) {
   if (nchars > JSString::MAX_LENGTH) {
     JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr,
@@ -2217,8 +2215,12 @@ bool JSStructuredCloneReader::readArrayBuffer(uint32_t nbytes,
 
 bool JSStructuredCloneReader::readSharedArrayBuffer(MutableHandleValue vp) {
   if (!cloneDataPolicy.isSharedArrayBufferAllowed()) {
-    JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr,
-                              JSMSG_SC_NOT_CLONABLE, "SharedArrayBuffer");
+    auto errorMsg =
+        context()->realm()->creationOptions().getCoopAndCoepEnabled()
+            ? JSMSG_SC_NOT_CLONABLE_WITH_COOP_COEP
+            : JSMSG_SC_NOT_CLONABLE;
+    JS_ReportErrorNumberASCII(context(), GetErrorMessage, nullptr, errorMsg,
+                              "SharedArrayBuffer");
     return false;
   }
 
@@ -2277,8 +2279,12 @@ bool JSStructuredCloneReader::readSharedWasmMemory(uint32_t nbytes,
   }
 
   if (!cloneDataPolicy.isSharedArrayBufferAllowed()) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_SC_NOT_CLONABLE, "WebAssembly.Memory");
+    auto errorMsg =
+        context()->realm()->creationOptions().getCoopAndCoepEnabled()
+            ? JSMSG_SC_NOT_CLONABLE_WITH_COOP_COEP
+            : JSMSG_SC_NOT_CLONABLE;
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr, errorMsg,
+                              "WebAssembly.Memory");
     return false;
   }
 

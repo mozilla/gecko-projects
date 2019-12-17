@@ -156,12 +156,9 @@
   _(IntrinsicTypedArrayElementShift)               \
                                                    \
   _(IntrinsicObjectIsTypedObject)                  \
-  _(IntrinsicObjectIsTransparentTypedObject)       \
-  _(IntrinsicObjectIsOpaqueTypedObject)            \
   _(IntrinsicObjectIsTypeDescr)                    \
   _(IntrinsicTypeDescrIsSimpleType)                \
-  _(IntrinsicTypeDescrIsArrayType)                 \
-  _(IntrinsicSetTypedObjectOffset)
+  _(IntrinsicTypeDescrIsArrayType)
 
 struct JSJitInfo;
 

@@ -12,6 +12,7 @@ job-defaults:
             linux64-ccov/.*: 3
             default: default
     variants: ['fission']
+    fission-tier: 2
     virtualization:
         by-test-platform:
             windows10-64-ccov/.*: virtual
@@ -85,7 +86,7 @@ talos-chrome:
             (?:windows10-64|windows7-32|linux64)(?:-qr)?/opt: ['mozilla-central', 'try']
             windows10-aarch64/opt: ['try']
             default: ['mozilla-beta', 'trunk', 'try']
-    max-run-time: 1200
+    max-run-time: 1800
     mozharness:
         extra-options:
             - --suite=chromez
@@ -334,6 +335,7 @@ talos-g5:
     max-run-time:
         by-test-platform:
             linux64.*: 1200
+            macosx.*: 2400
             default: 1800
 
 talos-g5-profiling:
@@ -411,7 +413,6 @@ talos-motionmark-profiling:
     description: "Talos motionmark with gecko profiling"
     try-name: motionmark-prof
     treeherder-symbol: T-Prof(mm)
-    tier: 2
     run-on-projects: ['mozilla-central', 'try']
     max-run-time: 3600
     tier:

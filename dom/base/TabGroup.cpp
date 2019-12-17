@@ -16,8 +16,6 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/ThrottledEventQueue.h"
 #include "nsIDocShell.h"
-#include "nsIEffectiveTLDService.h"
-#include "nsIURI.h"
 
 namespace mozilla {
 namespace dom {
@@ -255,46 +253,6 @@ bool TabGroup::IsBackground() const {
   return mForegroundCount == 0;
 }
 
-nsresult TabGroup::QueuePostMessageEvent(
-    already_AddRefed<nsIRunnable>&& aRunnable) {
-  if (StaticPrefs::dom_separate_event_queue_for_post_message_enabled()) {
-    if (!mPostMessageEventQueue) {
-      nsCOMPtr<nsISerialEventTarget> target = GetMainThreadSerialEventTarget();
-      mPostMessageEventQueue = ThrottledEventQueue::Create(
-          target, "PostMessage Queue",
-          nsIRunnablePriority::PRIORITY_DEFERRED_TIMERS);
-      nsresult rv = mPostMessageEventQueue->SetIsPaused(false);
-      MOZ_ALWAYS_SUCCEEDS(rv);
-    }
-
-    // Ensure the queue is enabled
-    if (mPostMessageEventQueue->IsPaused()) {
-      nsresult rv = mPostMessageEventQueue->SetIsPaused(false);
-      MOZ_ALWAYS_SUCCEEDS(rv);
-    }
-
-    if (mPostMessageEventQueue) {
-      mPostMessageEventQueue->Dispatch(std::move(aRunnable),
-                                       NS_DISPATCH_NORMAL);
-      return NS_OK;
-    }
-  }
-  return NS_ERROR_FAILURE;
-}
-
-void TabGroup::FlushPostMessageEvents() {
-  if (StaticPrefs::dom_separate_event_queue_for_post_message_enabled()) {
-    if (mPostMessageEventQueue) {
-      nsresult rv = mPostMessageEventQueue->SetIsPaused(true);
-      MOZ_ALWAYS_SUCCEEDS(rv);
-      nsCOMPtr<nsIRunnable> event;
-      while ((event = mPostMessageEventQueue->GetEvent())) {
-        Dispatch(TaskCategory::Other, event.forget());
-      }
-    }
-  }
-}
-
 uint32_t TabGroup::Count(bool aActiveOnly) const {
   if (!aActiveOnly) {
     return mDocGroups.Count();
@@ -308,36 +266,6 @@ uint32_t TabGroup::Count(bool aActiveOnly) const {
   }
 
   return count;
-}
-
-/*static*/
-bool TabGroup::HasOnlyThrottableTabs() {
-  if (!sTabGroups) {
-    return false;
-  }
-
-  for (TabGroup* tabGroup = sTabGroups->getFirst(); tabGroup;
-       tabGroup =
-           static_cast<LinkedListElement<TabGroup>*>(tabGroup)->getNext()) {
-    for (auto iter = tabGroup->Iter(); !iter.Done(); iter.Next()) {
-      DocGroup* docGroup = iter.Get()->mDocGroup;
-      for (auto* documentInDocGroup : *docGroup) {
-        if (documentInDocGroup->IsCurrentActiveDocument()) {
-          nsPIDOMWindowInner* win = documentInDocGroup->GetInnerWindow();
-          if (win && win->IsCurrentInnerWindow()) {
-            nsPIDOMWindowOuter* outer = win->GetOuterWindow();
-            if (outer) {
-              TimeoutManager& tm = win->TimeoutManager();
-              if (!tm.BudgetThrottlingEnabled(outer->IsBackground())) {
-                return false;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  return true;
 }
 
 }  // namespace dom

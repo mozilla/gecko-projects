@@ -5622,6 +5622,9 @@ class nsDisplayOpacity : public nsDisplayWrapList {
     MOZ_ASSERT(aOther.mChildOpacityState != ChildOpacityState::Applied);
   }
 
+  void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
+               HitTestState* aState, nsTArray<nsIFrame*>* aOutFrames) override;
+
 #ifdef NS_BUILD_REFCNT_LOGGING
   ~nsDisplayOpacity() override { MOZ_COUNT_DTOR(nsDisplayOpacity); }
 #endif
@@ -6075,6 +6078,7 @@ class nsDisplayOwnLayer : public nsDisplayWrapList {
   bool IsScrollThumbLayer() const;
   bool IsScrollbarContainer() const;
   bool IsZoomingLayer() const;
+  bool IsFixedPositionLayer() const;
 
  protected:
   nsDisplayOwnLayerFlags mFlags;

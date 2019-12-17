@@ -17,8 +17,6 @@
 #include "nsHashKeys.h"
 #include "nsISHistory.h"
 
-class nsIDocShell;
-
 namespace mozilla {
 namespace dom {
 
@@ -78,6 +76,12 @@ class CanonicalBrowsingContext final : public BrowsingContext {
   // set the media mute property for the top level window and propagate it to
   // other top level windows in other processes.
   void NotifyMediaMutedChanged(bool aMuted);
+
+  // Return the number of unique site origins by iterating all given BCs,
+  // including their subtrees.
+  static uint32_t CountSiteOrigins(
+      GlobalObject& aGlobal,
+      const Sequence<mozilla::OwningNonNull<BrowsingContext>>& aRoots);
 
   // This function would update the media action for the current outer window
   // and propogate the action to other browsing contexts in content processes.

@@ -3,14 +3,15 @@
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 // ReactJS
-const PropTypes = require("prop-types");
+const PropTypes = require("devtools/client/shared/vendor/react-prop-types");
+const {
+  button,
+  span,
+} = require("devtools/client/shared/vendor/react-dom-factories");
 
 // Reps
 const { getGripType, isGrip, cropString, wrapRender } = require("./rep-utils");
 const { MODE } = require("./constants");
-
-const dom = require("react-dom-factories");
-const { span } = dom;
 
 const IGNORED_SOURCE_URLS = ["debugger eval code"];
 
@@ -19,7 +20,6 @@ const IGNORED_SOURCE_URLS = ["debugger eval code"];
  */
 FunctionRep.propTypes = {
   object: PropTypes.object.isRequired,
-  parameterNames: PropTypes.array,
   onViewSourceInDebugger: PropTypes.func,
   sourceMapService: PropTypes.object,
 };
@@ -39,7 +39,7 @@ function FunctionRep(props) {
     grip.location.url &&
     !IGNORED_SOURCE_URLS.includes(grip.location.url)
   ) {
-    jumpToDefinitionButton = dom.button({
+    jumpToDefinitionButton = button({
       className: "jump-definition",
       draggable: false,
       title: "Jump to definition",
@@ -71,7 +71,7 @@ function FunctionRep(props) {
     getTitle(grip, props),
     getFunctionName(grip, props),
     "(",
-    ...renderParams(props),
+    ...renderParams(grip),
     ")",
     jumpToDefinitionButton
   );
@@ -168,8 +168,8 @@ function cleanFunctionName(name) {
   return name;
 }
 
-function renderParams(props) {
-  const { parameterNames = [] } = props;
+function renderParams(grip) {
+  const { parameterNames = [] } = grip;
 
   return parameterNames
     .filter(param => param)

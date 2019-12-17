@@ -17,23 +17,17 @@
 #include "nsNetUtil.h"
 
 #include "nsIStreamListener.h"
-#include "nsIComponentManager.h"
-#include "nsIServiceManager.h"
 #include "nsIURI.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIPrincipal.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIWindowMediator.h"
 #include "nsPIDOMWindow.h"
-#include "nsIConsoleService.h"
 #include "nsEscape.h"
 #include "nsIWebNavigation.h"
 #include "nsIDocShell.h"
 #include "nsIContentViewer.h"
-#include "nsIXPConnect.h"
 #include "nsContentUtils.h"
 #include "nsJSUtils.h"
 #include "nsThreadUtils.h"
@@ -45,6 +39,7 @@
 #include "nsIWritablePropertyBag2.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsSandboxFlags.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/PopupBlocker.h"
@@ -270,7 +265,7 @@ nsresult nsJSThunk::EvaluateScript(
   }
 
   // Fail if someone tries to execute in a global with system principal.
-  if (nsContentUtils::IsSystemPrincipal(objectPrincipal)) {
+  if (objectPrincipal->IsSystemPrincipal()) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
@@ -1043,27 +1038,11 @@ bool nsJSChannel::GetIsDocumentLoad() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-nsJSProtocolHandler::nsJSProtocolHandler() {}
+nsJSProtocolHandler::nsJSProtocolHandler() = default;
 
-nsresult nsJSProtocolHandler::Init() { return NS_OK; }
-
-nsJSProtocolHandler::~nsJSProtocolHandler() {}
+nsJSProtocolHandler::~nsJSProtocolHandler() = default;
 
 NS_IMPL_ISUPPORTS(nsJSProtocolHandler, nsIProtocolHandler)
-
-nsresult nsJSProtocolHandler::Create(nsISupports* aOuter, REFNSIID aIID,
-                                     void** aResult) {
-  if (aOuter) return NS_ERROR_NO_AGGREGATION;
-
-  nsJSProtocolHandler* ph = new nsJSProtocolHandler();
-  NS_ADDREF(ph);
-  nsresult rv = ph->Init();
-  if (NS_SUCCEEDED(rv)) {
-    rv = ph->QueryInterface(aIID, aResult);
-  }
-  NS_RELEASE(ph);
-  return rv;
-}
 
 /* static */ nsresult nsJSProtocolHandler::EnsureUTF8Spec(
     const nsCString& aSpec, const char* aCharset, nsACString& aUTF8Spec) {

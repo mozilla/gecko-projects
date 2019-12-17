@@ -74,8 +74,6 @@
 #include "nsCOMPtr.h"
 #include "nsReadableUtils.h"
 #include "nsPageSequenceFrame.h"
-#include "nsIPermissionManager.h"
-#include "nsIMozBrowserFrame.h"
 #include "nsCaret.h"
 #include "mozilla/AccessibleCaretEventHub.h"
 #include "nsFrameManager.h"
@@ -170,7 +168,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "nsCanvasFrame.h"
-#include "nsIImageLoadingContent.h"
 #include "nsImageFrame.h"
 #include "nsIScreen.h"
 #include "nsIScreenManager.h"
@@ -772,8 +769,9 @@ bool PresShell::AccessibleCaretEnabled(nsIDocShell* aDocShell) {
   return false;
 }
 
-PresShell::PresShell()
-    : mViewManager(nullptr),
+PresShell::PresShell(Document* aDocument)
+    : mDocument(aDocument),
+      mViewManager(nullptr),
       mFrameManager(nullptr),
       mAutoWeakFrames(nullptr),
 #ifdef ACCESSIBILITY
@@ -842,6 +840,7 @@ PresShell::PresShell()
       mForceUseLegacyNonPrimaryDispatch(false),
       mInitializedWithClickEventDispatchingBlacklist(false) {
   MOZ_LOG(gLog, LogLevel::Debug, ("PresShell::PresShell this=%p", this));
+  MOZ_ASSERT(aDocument);
 
 #ifdef MOZ_REFLOW_PERF
   mReflowCountMgr = MakeUnique<ReflowCountMgr>();
@@ -912,18 +911,12 @@ PresShell::~PresShell() {
  * Note this can't be merged into our constructor because caret initialization
  * calls AddRef() on us.
  */
-void PresShell::Init(Document* aDocument, nsPresContext* aPresContext,
-                     nsViewManager* aViewManager) {
-  MOZ_ASSERT(aDocument, "null ptr");
-  MOZ_ASSERT(aPresContext, "null ptr");
-  MOZ_ASSERT(aViewManager, "null ptr");
-  MOZ_ASSERT(!mDocument, "already initialized");
+void PresShell::Init(nsPresContext* aPresContext, nsViewManager* aViewManager) {
+  MOZ_ASSERT(mDocument);
+  MOZ_ASSERT(aPresContext);
+  MOZ_ASSERT(aViewManager);
+  MOZ_ASSERT(!mViewManager, "already initialized");
 
-  if (!aDocument || !aPresContext || !aViewManager || mDocument) {
-    return;
-  }
-
-  mDocument = aDocument;
   mViewManager = aViewManager;
 
   // mDocument is now set.  It might have a display document whose "need layout/
@@ -942,7 +935,14 @@ void PresShell::Init(Document* aDocument, nsPresContext* aPresContext,
   mViewManager->SetPresShell(this);
 
   // Bind the context to the presentation shell.
-  mPresContext = aPresContext;
+  // FYI: We cannot initialize mPresContext in the constructor because we
+  //      cannot call AttachPresShell() in it and once we initialize
+  //      mPresContext, other objects may refer refresh driver or restyle
+  //      manager via mPresContext and that causes hitting MOZ_ASSERT in some
+  //      places.  Therefore, we should initialize mPresContext here with
+  //      const_cast hack since we want to guarantee that mPresContext lives
+  //      as long as the PresShell.
+  const_cast<RefPtr<nsPresContext>&>(mPresContext) = aPresContext;
   mPresContext->AttachPresShell(this);
 
   mPresContext->DeviceContext()->InitFontCache();
@@ -978,10 +978,11 @@ void PresShell::Init(Document* aDocument, nsPresContext* aPresContext,
 #endif
   // set up selection to be displayed in document
   // Don't enable selection for print media
-  nsPresContext::nsPresContextType type = aPresContext->Type();
+  nsPresContext::nsPresContextType type = mPresContext->Type();
   if (type != nsPresContext::eContext_PrintPreview &&
-      type != nsPresContext::eContext_Print)
+      type != nsPresContext::eContext_Print) {
     SetDisplaySelection(nsISelectionController::SELECTION_DISABLED);
+  }
 
   if (gMaxRCProcessingTime == -1) {
     gMaxRCProcessingTime =
@@ -1868,10 +1869,6 @@ void PresShell::SimpleResizeReflow(nscoord aWidth, nscoord aHeight,
 nsresult PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
                                                ResizeReflowOptions aOptions) {
   MOZ_ASSERT(!mIsReflowing, "Shouldn't be in reflow here!");
-  nsSize oldSize = mPresContext->GetVisibleArea().Size();
-  if (oldSize == nsSize(aWidth, aHeight)) {
-    return NS_OK;
-  }
 
   // Historically we never fired resize events if there was no root frame by the
   // time this function got called.
@@ -1888,6 +1885,11 @@ nsresult PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight,
   };
 
   if (!(aOptions & ResizeReflowOptions::BSizeLimit)) {
+    nsSize oldSize = mPresContext->GetVisibleArea().Size();
+    if (oldSize == nsSize(aWidth, aHeight)) {
+      return NS_OK;
+    }
+
     SimpleResizeReflow(aWidth, aHeight, aOptions);
     postResizeEventIfNeeded();
     return NS_OK;
@@ -4177,8 +4179,9 @@ void PresShell::CharacterDataChanged(nsIContent* aContent,
   mFrameConstructor->CharacterDataChanged(aContent, aInfo);
 }
 
-void PresShell::ContentStateChanged(Document* aDocument, nsIContent* aContent,
-                                    EventStates aStateMask) {
+MOZ_CAN_RUN_SCRIPT_BOUNDARY void PresShell::ContentStateChanged(
+    Document* aDocument, nsIContent* aContent, EventStates aStateMask) {
+  MOZ_ASSERT(!nsContentUtils::IsSafeToRunScript());
   MOZ_ASSERT(!mIsDocumentGone, "Unexpected ContentStateChanged");
   MOZ_ASSERT(aDocument == mDocument, "Unexpected aDocument");
 
@@ -4337,8 +4340,6 @@ void PresShell::ReconstructFrames() {
     // Nothing to do here
     return;
   }
-
-  RefPtr<PresShell> kungFuDeathGrip(this);
 
   // Have to make sure that the content notifications are flushed before we
   // start messing with the frame model; otherwise we can get content doubling.
@@ -6323,16 +6324,15 @@ nsIFrame* PresShell::EventHandler::GetNearestFrameContainingPresShell(
   return frame;
 }
 
-static bool FlushThrottledStyles(Document* aDocument, void* aData) {
-  PresShell* presShell = aDocument->GetPresShell();
+static bool FlushThrottledStyles(Document& aDocument, void* aData) {
+  PresShell* presShell = aDocument.GetPresShell();
   if (presShell && presShell->IsVisible()) {
-    nsPresContext* presContext = presShell->GetPresContext();
-    if (presContext) {
+    if (nsPresContext* presContext = presShell->GetPresContext()) {
       presContext->RestyleManager()->UpdateOnlyAnimationStyles();
     }
   }
 
-  aDocument->EnumerateSubDocuments(FlushThrottledStyles, nullptr);
+  aDocument.EnumerateSubDocuments(FlushThrottledStyles, nullptr);
   return true;
 }
 
@@ -7203,7 +7203,7 @@ nsIFrame* PresShell::EventHandler::MaybeFlushThrottledStyles(
   AutoWeakFrame weakFrameForPresShell(aFrameForPresShell);
   {  // scope for scriptBlocker.
     nsAutoScriptBlocker scriptBlocker;
-    FlushThrottledStyles(rootDocument, nullptr);
+    FlushThrottledStyles(*rootDocument, nullptr);
   }
 
   if (weakFrameForPresShell.IsAlive()) {
@@ -8835,9 +8835,8 @@ static void FreezeElement(nsISupports* aSupports, void* /* unused */) {
   }
 }
 
-static bool FreezeSubDocument(Document* aDocument, void* aData) {
-  PresShell* presShell = aDocument->GetPresShell();
-  if (presShell) {
+static bool FreezeSubDocument(Document& aDocument, void*) {
+  if (PresShell* presShell = aDocument.GetPresShell()) {
     presShell->Freeze();
   }
   return true;
@@ -8906,9 +8905,8 @@ static void ThawElement(nsISupports* aSupports, void* aShell) {
   }
 }
 
-static bool ThawSubDocument(Document* aDocument, void* aData) {
-  PresShell* presShell = aDocument->GetPresShell();
-  if (presShell) {
+static bool ThawSubDocument(Document& aDocument, void* aData) {
+  if (PresShell* presShell = aDocument.GetPresShell()) {
     presShell->Thaw();
   }
   return true;
@@ -8923,7 +8921,9 @@ void PresShell::Thaw() {
 
   mDocument->EnumerateActivityObservers(ThawElement, this);
 
-  if (mDocument) mDocument->EnumerateSubDocuments(ThawSubDocument, nullptr);
+  if (mDocument) {
+    mDocument->EnumerateSubDocuments(ThawSubDocument, nullptr);
+  }
 
   // Get the activeness of our presshell, as this might have changed
   // while we were in the bfcache
@@ -10394,9 +10394,8 @@ void PresShell::QueryIsActive() {
 }
 
 // Helper for propagating mIsActive changes to external resources
-static bool SetExternalResourceIsActive(Document* aDocument, void* aClosure) {
-  PresShell* presShell = aDocument->GetPresShell();
-  if (presShell) {
+static bool SetExternalResourceIsActive(Document& aDocument, void* aClosure) {
+  if (PresShell* presShell = aDocument.GetPresShell()) {
     presShell->SetIsActive(*static_cast<bool*>(aClosure));
   }
   return true;
@@ -10452,6 +10451,19 @@ nsresult PresShell::SetIsActive(bool aIsActive) {
       presContext->UpdateDynamicToolbarOffset(0);
     }
   }
+
+  // When the PresShell is being reactivated, make sure that we repaint
+  // This is needed for pages living in the parent process (like about:support).
+  // Content pages are refreshed by the BrowserHost, which does not exist
+  // in parent process pages
+  if (aIsActive) {
+    if (nsIFrame* root = GetRootFrame()) {
+      FrameLayerBuilder::InvalidateAllLayersForFrame(
+          nsLayoutUtils::GetDisplayRootFrame(root));
+      root->SchedulePaint();
+    }
+  }
+
 #endif
 
   return rv;
@@ -11181,8 +11193,8 @@ PresShell::EventHandler::HandlingTimeAccumulator::~HandlingTimeAccumulator() {
   }
 }
 
-static bool EndPaintHelper(Document* aDocument, void* aData) {
-  if (PresShell* presShell = aDocument->GetPresShell()) {
+static bool EndPaintHelper(Document& aDocument, void* aData) {
+  if (PresShell* presShell = aDocument.GetPresShell()) {
     presShell->EndPaint();
   }
   return true;

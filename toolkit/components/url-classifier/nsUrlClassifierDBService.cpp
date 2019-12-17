@@ -7,13 +7,9 @@
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsArrayUtils.h"
 #include "nsCRT.h"
-#include "nsIDirectoryService.h"
-#include "nsIKeyModule.h"
 #include "nsIObserverService.h"
 #include "nsIPermissionManager.h"
 #include "nsIPrefBranch.h"
-#include "nsIPrefService.h"
-#include "nsIProperties.h"
 #include "nsIXULRuntime.h"
 #include "nsToolkitCompsCID.h"
 #include "nsUrlClassifierDBService.h"
@@ -28,6 +24,7 @@
 #include "nsProxyRelease.h"
 #include "nsString.h"
 #include "mozilla/Atomics.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/Components.h"
 #include "mozilla/DebugOnly.h"
 #include "mozilla/ErrorNames.h"
@@ -43,6 +40,7 @@
 #include "ProtocolParser.h"
 #include "mozilla/Attributes.h"
 #include "nsIPrincipal.h"
+#include "nsIUrlListManager.h"
 #include "Classifier.h"
 #include "ProtocolParser.h"
 #include "nsContentUtils.h"
@@ -59,7 +57,6 @@
 #include "nsStringStream.h"
 #include "nsNetUtil.h"
 #include "nsToolkitCompsCID.h"
-#include "nsIClassifiedChannel.h"
 
 namespace mozilla {
 namespace safebrowsing {
@@ -1715,7 +1712,7 @@ nsUrlClassifierDBService::Classify(nsIPrincipal* aPrincipal,
   NS_ENSURE_ARG(aPrincipal);
   NS_ENSURE_ARG(aResult);
 
-  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
+  if (aPrincipal->IsSystemPrincipal()) {
     *aResult = false;
     return NS_OK;
   }
@@ -2035,7 +2032,7 @@ nsUrlClassifierDBService::Lookup(nsIPrincipal* aPrincipal,
                                  nsIUrlClassifierCallback* aCallback) {
   // We don't expect someone with SystemPrincipal calls this API(See Bug
   // 813897).
-  MOZ_ASSERT(!nsContentUtils::IsSystemPrincipal(aPrincipal));
+  MOZ_ASSERT(!aPrincipal->IsSystemPrincipal());
 
   NS_ENSURE_TRUE(gDbBackgroundThread, NS_ERROR_NOT_INITIALIZED);
 
@@ -2402,11 +2399,14 @@ bool nsUrlClassifierDBService::ShutdownHasStarted() {
 
 // static
 nsUrlClassifierDBServiceWorker* nsUrlClassifierDBService::GetWorker() {
-  if (!sUrlClassifierDBService) {
+  nsresult rv;
+  RefPtr<nsUrlClassifierDBService> service =
+      nsUrlClassifierDBService::GetInstance(&rv);
+  if (!service) {
     return nullptr;
   }
 
-  return sUrlClassifierDBService->mWorker;
+  return service->mWorker;
 }
 
 NS_IMETHODIMP

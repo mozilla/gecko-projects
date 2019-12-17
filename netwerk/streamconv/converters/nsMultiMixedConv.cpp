@@ -13,7 +13,6 @@
 #include "nsIHttpChannelInternal.h"
 #include "nsURLHelper.h"
 #include "nsIStreamConverterService.h"
-#include "nsICacheInfoChannel.h"
 #include <algorithm>
 #include "nsContentSecurityManager.h"
 #include "nsHttp.h"
@@ -407,6 +406,12 @@ nsMultiMixedConv::AsyncConvertData(const char* aFromType, const char* aToType,
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsMultiMixedConv::GetConvertedType(const nsACString& aFromType,
+                                   nsACString& aToType) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 // nsIRequestObserver implementation
 NS_IMETHODIMP
 nsMultiMixedConv::OnStartRequest(nsIRequest* request) {
@@ -553,6 +558,12 @@ nsMultiMixedConv::OnStopRequest(nsIRequest* request, nsresult aStatus) {
 
     (void)mFinalListener->OnStartRequest(request);
     (void)mFinalListener->OnStopRequest(request, aStatus);
+  }
+
+  nsCOMPtr<nsIMultiPartChannelListener> multiListener =
+      do_QueryInterface(mFinalListener);
+  if (multiListener) {
+    multiListener->OnAfterLastPart(aStatus);
   }
 
   return NS_OK;

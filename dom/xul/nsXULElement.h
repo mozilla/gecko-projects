@@ -15,11 +15,9 @@
 #include "js/SourceText.h"
 #include "js/TracingAPI.h"
 #include "mozilla/Attributes.h"
-#include "nsIServiceManager.h"
 #include "nsAtom.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "nsIControllers.h"
-#include "nsIDOMXULMultSelectCntrlEl.h"
 #include "nsIURI.h"
 #include "nsLayoutCID.h"
 #include "AttrArray.h"
@@ -385,12 +383,6 @@ class nsXULElement : public nsStyledElement {
   }
 
   // WebIDL API
-  void GetAlign(DOMString& aValue) const {
-    GetXULAttr(nsGkAtoms::align, aValue);
-  }
-  void SetAlign(const nsAString& aValue, mozilla::ErrorResult& rv) {
-    SetXULAttr(nsGkAtoms::align, aValue, rv);
-  }
   void GetDir(DOMString& aValue) const { GetXULAttr(nsGkAtoms::dir, aValue); }
   void SetDir(const nsAString& aValue, mozilla::ErrorResult& rv) {
     SetXULAttr(nsGkAtoms::dir, aValue, rv);
@@ -512,6 +504,8 @@ class nsXULElement : public nsStyledElement {
 
   bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override;
 
+  void MaybeUpdatePrivateLifetime();
+
  protected:
   ~nsXULElement();
 
@@ -553,17 +547,6 @@ class nsXULElement : public nsStyledElement {
   void AddListenerForAttributeIfNeeded(const nsAttrName& aName);
   void AddListenerForAttributeIfNeeded(nsAtom* aLocalName);
 
-  nsIWidget* GetWindowWidget();
-
-  // attribute setters for widget
-  nsresult HideWindowChrome(bool aShouldHide);
-  void SetChromeMargins(const nsAttrValue* aValue);
-  void ResetChromeMargins();
-
-  void SetDrawsInTitlebar(bool aState);
-  void SetDrawsTitle(bool aState);
-  void UpdateBrightTitlebarForeground(Document* aDocument);
-
  protected:
   void AddTooltipSupport();
   void RemoveTooltipSupport();
@@ -594,8 +577,6 @@ class nsXULElement : public nsStyledElement {
 
   virtual JSObject* WrapNode(JSContext* aCx,
                              JS::Handle<JSObject*> aGivenProto) override;
-
-  void MaybeUpdatePrivateLifetime();
 
   bool IsEventStoppedFromAnonymousScrollbar(mozilla::EventMessage aMessage);
 

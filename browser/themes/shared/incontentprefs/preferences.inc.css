@@ -27,7 +27,7 @@ body {
   overflow: hidden;
 }
 
-body {
+#preferences-body {
   display: -moz-box;
   -moz-box-orient: vertical;
 }
@@ -618,12 +618,13 @@ button > hbox > label {
 
 #fxaSyncComputerName {
   -moz-box-flex: 1;
+  margin-block: 4px;
   margin-inline-start: 0;
-  margin-bottom: 4px;
 }
 
 #fxaChangeDeviceName {
   margin-block: 4px;
+  margin-inline-end: 0;
 }
 
 #noFxaCaption {
@@ -838,6 +839,13 @@ image.update-throbber {
   width: 16px;
   height: 16px;
   margin-top: calc((32px - 16px) / 2);
+}
+
+.info-icon-telemetry {
+  list-style-image: url("chrome://browser/skin/identity-icon.svg");
+  width: 16px;
+  height: 16px;
+  margin-inline: 2px 8px;
 }
 
 .sticky-container {

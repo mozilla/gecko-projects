@@ -19,7 +19,7 @@ import {
   getThreadContext,
 } from "../../selectors";
 import { getValue } from "../../utils/expressions";
-import { createObjectFront } from "../../client/firefox";
+import { getGrip, getFront } from "../../utils/evaluation-result";
 
 import { CloseButton } from "../shared/Button";
 import { debounce } from "lodash";
@@ -246,30 +246,35 @@ class Expressions extends Component<Props, State> {
       return;
     }
 
-    const { value } = getValue(expression);
+    let value = getValue(expression);
+    let front = null;
+    if (value && value.unavailable !== true) {
+      value = getGrip(value);
+      front = getFront(value);
+    }
 
     const root = {
       name: expression.input,
       path: input,
-      contents: { value },
+      contents: {
+        value,
+        front,
+      },
     };
 
     return (
-      <li
-        className="expression-container"
-        key={input}
-        title={expression.input}
-        onDoubleClick={(items, options) =>
-          this.editExpression(expression, index)
-        }
-      >
+      <li className="expression-container" key={input} title={expression.input}>
         <div className="expression-content">
           <ObjectInspector
             roots={[root]}
             autoExpandDepth={0}
             disableWrap={true}
             openLink={openLink}
-            createObjectFront={grip => createObjectFront(grip)}
+            onDoubleClick={(items, { depth }) => {
+              if (depth === 0) {
+                this.editExpression(expression, index);
+              }
+            }}
             onDOMNodeClick={grip => openElementInInspector(grip)}
             onInspectIconClick={grip => openElementInInspector(grip)}
             onDOMNodeMouseOver={grip => highlightDomElement(grip)}

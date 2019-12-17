@@ -34,8 +34,8 @@ try {
 // case it is not defined) from a parent/opener window.
 //
 // Finding the SpecialPowers object is needed when we have ChromePowers in
-// harness.xul and we need SpecialPowers in the iframe, and also for tests
-// like test_focus.xul where we open a window which opens another window which
+// harness.xhtml and we need SpecialPowers in the iframe, and also for tests
+// like test_focus.xhtml where we open a window which opens another window which
 // includes SimpleTest.js.
 (function() {
     function ancestor(w) {
@@ -278,7 +278,7 @@ SimpleTest.ok = function (condition, name) {
     }
 };
 
-SimpleTest.record = function (condition, name, diag, stack) {
+SimpleTest.record = function (condition, name, diag, stack, expected) {
     var test = {'result': !!condition, 'name': name, 'diag': diag};
     if (SimpleTest.expected == 'fail') {
       if (!test.result) {
@@ -295,6 +295,9 @@ SimpleTest.record = function (condition, name, diag, stack) {
       }
       var successInfo = {status:"FAIL", expected:"FAIL", message:"TEST-KNOWN-FAIL"};
       var failureInfo = {status:"FAIL", expected:"PASS", message:"TEST-UNEXPECTED-FAIL"};
+    } else if (expected == "fail") {
+      var successInfo = {status:"PASS", expected:"FAIL", message:"TEST-UNEXPECTED-PASS"};
+      var failureInfo = {status:"FAIL", expected:"FAIL", message:"TEST-KNOWN-FAIL"};
     } else {
       var successInfo = {status:"PASS", expected:"PASS", message:"TEST-PASS"};
       var failureInfo = {status:"FAIL", expected:"PASS", message:"TEST-UNEXPECTED-FAIL"};

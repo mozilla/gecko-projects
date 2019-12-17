@@ -11,7 +11,21 @@
 namespace mozilla {
 namespace dom {
 
-enum class MediaControlKeysEvent { ePlayPause, ePrev, eNext, eNone };
+/**
+ * MediaControlKeysEvent represents all possible control buttons in controller
+ * interface, no matter it's physical one, such as keyboard, headset, or a
+ * virtual one, such as the interface provided by Android MediaController.
+ */
+enum class MediaControlKeysEvent : uint32_t {
+  ePlay,
+  ePause,
+  ePlayPause,
+  ePrevTrack,
+  eNextTrack,
+  eSeekBackward,
+  eSeekForward,
+  eStop,
+};
 
 /**
  * MediaControlKeysEventListener is a pure interface, which is used to monitor
@@ -57,7 +71,12 @@ class MediaControlKeysEventSource : public nsISupports {
   virtual void AddListener(MediaControlKeysEventListener* aListener);
   virtual void RemoveListener(MediaControlKeysEventListener* aListener);
   size_t GetListenersNum() const;
-  void Close();
+
+  // Return true if the initialization of the source succeeds, and inherited
+  // sources should implement this method to handle the initialization fails.
+  virtual bool Open() = 0;
+  virtual void Close();
+  virtual bool IsOpened() const = 0;
 
  protected:
   virtual ~MediaControlKeysEventSource() = default;

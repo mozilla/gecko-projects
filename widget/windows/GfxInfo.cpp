@@ -17,8 +17,8 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/Logging.h"
+#include "mozilla/SSE.h"
 #include "nsExceptionHandler.h"
-#include "nsICrashReporter.h"
 #include "nsPrintfCString.h"
 #include "jsapi.h"
 #include <intrin.h>
@@ -32,8 +32,6 @@ using namespace mozilla::widget;
 #ifdef DEBUG
 NS_IMPL_ISUPPORTS_INHERITED(GfxInfo, GfxInfoBase, nsIGfxInfoDebug)
 #endif
-
-static const uint32_t allWindowsVersions = 0xffffffff;
 
 GfxInfo::GfxInfo()
     : mWindowsVersion(0), mActiveGPUIndex(0), mHasDualGPU(false) {}
@@ -132,7 +130,8 @@ GfxInfo::GetWindowProtocol(nsAString& aWindowProtocol) {
 }
 
 static nsresult GetKeyValue(const WCHAR* keyLocation, const WCHAR* keyName,
-                            nsAString& destString, int type) {
+                            uint32_t& destValue, int type) {
+  MOZ_ASSERT(type == REG_DWORD || type == REG_QWORD);
   HKEY key;
   DWORD dwcbData;
   DWORD dValue;
@@ -153,8 +152,7 @@ static nsresult GetKeyValue(const WCHAR* keyLocation, const WCHAR* keyName,
       result = RegQueryValueExW(key, keyName, nullptr, &resultType,
                                 (LPBYTE)&dValue, &dwcbData);
       if (result == ERROR_SUCCESS && resultType == REG_DWORD) {
-        dValue = dValue / 1024 / 1024;
-        destString.AppendInt(int32_t(dValue));
+        destValue = (uint32_t)(dValue / 1024 / 1024);
       } else {
         retval = NS_ERROR_FAILURE;
       }
@@ -167,48 +165,65 @@ static nsresult GetKeyValue(const WCHAR* keyLocation, const WCHAR* keyName,
       result = RegQueryValueExW(key, keyName, nullptr, &resultType,
                                 (LPBYTE)&qValue, &dwcbData);
       if (result == ERROR_SUCCESS && resultType == REG_QWORD) {
-        qValue = qValue / 1024 / 1024;
-        destString.AppendInt(int32_t(qValue));
+        destValue = (uint32_t)(qValue / 1024 / 1024);
       } else {
         retval = NS_ERROR_FAILURE;
       }
-      break;
-    }
-    case REG_MULTI_SZ: {
-      // A chain of null-separated strings; we convert the nulls to spaces
-      WCHAR wCharValue[1024];
-      dwcbData = sizeof(wCharValue);
-
-      result = RegQueryValueExW(key, keyName, nullptr, &resultType,
-                                (LPBYTE)wCharValue, &dwcbData);
-      if (result == ERROR_SUCCESS && resultType == REG_MULTI_SZ) {
-        // This bit here could probably be cleaner.
-        bool isValid = false;
-
-        DWORD strLen = dwcbData / sizeof(wCharValue[0]);
-        for (DWORD i = 0; i < strLen; i++) {
-          if (wCharValue[i] == '\0') {
-            if (i < strLen - 1 && wCharValue[i + 1] == '\0') {
-              isValid = true;
-              break;
-            } else {
-              wCharValue[i] = ' ';
-            }
-          }
-        }
-
-        // ensure wCharValue is null terminated
-        wCharValue[strLen - 1] = '\0';
-
-        if (isValid) destString = wCharValue;
-
-      } else {
-        retval = NS_ERROR_FAILURE;
-      }
-
       break;
     }
   }
+  RegCloseKey(key);
+
+  return retval;
+}
+
+static nsresult GetKeyValue(const WCHAR* keyLocation, const WCHAR* keyName,
+                            nsAString& destString, int type) {
+  MOZ_ASSERT(type == REG_MULTI_SZ);
+
+  HKEY key;
+  DWORD dwcbData;
+  DWORD resultType;
+  LONG result;
+  nsresult retval = NS_OK;
+
+  result =
+      RegOpenKeyExW(HKEY_LOCAL_MACHINE, keyLocation, 0, KEY_QUERY_VALUE, &key);
+  if (result != ERROR_SUCCESS) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // A chain of null-separated strings; we convert the nulls to spaces
+  WCHAR wCharValue[1024];
+  dwcbData = sizeof(wCharValue);
+
+  result = RegQueryValueExW(key, keyName, nullptr, &resultType,
+                            (LPBYTE)wCharValue, &dwcbData);
+  if (result == ERROR_SUCCESS && resultType == REG_MULTI_SZ) {
+    // This bit here could probably be cleaner.
+    bool isValid = false;
+
+    DWORD strLen = dwcbData / sizeof(wCharValue[0]);
+    for (DWORD i = 0; i < strLen; i++) {
+      if (wCharValue[i] == '\0') {
+        if (i < strLen - 1 && wCharValue[i + 1] == '\0') {
+          isValid = true;
+          break;
+        } else {
+          wCharValue[i] = ' ';
+        }
+      }
+    }
+
+    // ensure wCharValue is null terminated
+    wCharValue[strLen - 1] = '\0';
+
+    if (isValid) destString = wCharValue;
+
+  } else {
+    retval = NS_ERROR_FAILURE;
+  }
+
   RegCloseKey(key);
 
   return retval;
@@ -769,34 +784,38 @@ GfxInfo::GetAdapterDescription2(nsAString& aAdapterDescription) {
 }
 
 NS_IMETHODIMP
-GfxInfo::GetAdapterRAM(nsAString& aAdapterRAM) {
+GfxInfo::GetAdapterRAM(uint32_t* aAdapterRAM) {
+  uint32_t result = 0;
   if (NS_FAILED(GetKeyValue(mDeviceKey[mActiveGPUIndex].get(),
-                            L"HardwareInformation.qwMemorySize", aAdapterRAM,
+                            L"HardwareInformation.qwMemorySize", result,
                             REG_QWORD)) ||
-      aAdapterRAM.Length() == 0) {
+      result == 0) {
     if (NS_FAILED(GetKeyValue(mDeviceKey[mActiveGPUIndex].get(),
-                              L"HardwareInformation.MemorySize", aAdapterRAM,
+                              L"HardwareInformation.MemorySize", result,
                               REG_DWORD))) {
-      aAdapterRAM = L"Unknown";
+      result = 0;
     }
   }
+  *aAdapterRAM = result;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-GfxInfo::GetAdapterRAM2(nsAString& aAdapterRAM) {
-  if (!mHasDualGPU) {
-    aAdapterRAM.Truncate();
-  } else if (NS_FAILED(GetKeyValue(mDeviceKey[1 - mActiveGPUIndex].get(),
-                                   L"HardwareInformation.qwMemorySize",
-                                   aAdapterRAM, REG_QWORD)) ||
-             aAdapterRAM.Length() == 0) {
+GfxInfo::GetAdapterRAM2(uint32_t* aAdapterRAM) {
+  uint32_t result = 0;
+  if (mHasDualGPU) {
     if (NS_FAILED(GetKeyValue(mDeviceKey[1 - mActiveGPUIndex].get(),
-                              L"HardwareInformation.MemorySize", aAdapterRAM,
-                              REG_DWORD))) {
-      aAdapterRAM = L"Unknown";
+                              L"HardwareInformation.qwMemorySize", result,
+                              REG_QWORD)) ||
+        result == 0) {
+      if (NS_FAILED(GetKeyValue(mDeviceKey[1 - mActiveGPUIndex].get(),
+                                L"HardwareInformation.MemorySize", result,
+                                REG_DWORD))) {
+        result = 0;
+      }
     }
   }
+  *aAdapterRAM = result;
   return NS_OK;
 }
 
@@ -912,6 +931,22 @@ GfxInfo::GetDisplayInfo(nsTArray<nsString>& aDisplayInfo) {
     aDisplayInfo.AppendElement(value);
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfo::GetDisplayWidth(nsTArray<uint32_t>& aDisplayWidth) {
+  for (auto displayInfo : mDisplayInfo) {
+    aDisplayWidth.AppendElement((uint32_t)displayInfo.mScreenWidth);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfo::GetDisplayHeight(nsTArray<uint32_t>& aDisplayHeight) {
+  for (auto displayInfo : mDisplayInfo) {
+    aDisplayHeight.AppendElement((uint32_t)displayInfo.mScreenHeight);
+  }
   return NS_OK;
 }
 
@@ -1062,7 +1097,7 @@ static inline bool DetectBrokenAVX() {
   }
 
   const unsigned AVX_CTRL_BITS = (1 << 1) | (1 << 2);
-  return (_xgetbv(0) & AVX_CTRL_BITS) != AVX_CTRL_BITS;
+  return (xgetbv(0) & AVX_CTRL_BITS) != AVX_CTRL_BITS;
 }
 #endif
 
@@ -1830,6 +1865,18 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_LESS_THAN,
         V(21, 20, 16, 4590), "Intel driver >= 21.20.16.4590");
 #endif
+
+    ////////////////////////////////////
+    // FEATURE_WEBRENDER_COMPOSITOR
+
+    APPEND_TO_DRIVER_BLOCKLIST2(
+        OperatingSystem::Windows10,
+        (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorIntel),
+        (nsAString&)GfxDriverInfo::GetDriverVendor(DriverVendorAll),
+        (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(IntelHD520),
+        nsIGfxInfo::FEATURE_WEBRENDER_COMPOSITOR,
+        nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_LESS_THAN_OR_EQUAL,
+        V(25, 20, 100, 6472), "FEATURE_FAILURE_BUG_1602511");
   }
   return *sDriverInfo;
 }

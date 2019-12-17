@@ -152,7 +152,7 @@ void ResizeObserver::Observe(Element& aTarget,
   }
 
   RefPtr<ResizeObservation>& observation =
-    mObservationMap.LookupForAdd(&aTarget).OrInsert([] { return nullptr; });
+      mObservationMap.LookupForAdd(&aTarget).OrInsert([] { return nullptr; });
   if (observation) {
     if (observation->BoxOptions() == aOptions.mBox) {
       // Already observed this target and the observed box is the same, so
@@ -201,9 +201,13 @@ void ResizeObserver::Unobserve(Element& aTarget, ErrorResult& aRv) {
 }
 
 void ResizeObserver::Disconnect() {
+  const bool registered = !mObservationList.isEmpty();
   mObservationList.clear();
   mObservationMap.Clear();
   mActiveTargets.Clear();
+  if (registered && MOZ_LIKELY(mDocument)) {
+    mDocument->RemoveResizeObserver(*this);
+  }
 }
 
 void ResizeObserver::GatherActiveObservations(uint32_t aDepth) {

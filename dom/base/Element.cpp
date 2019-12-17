@@ -35,7 +35,6 @@
 #include "nsFlexContainerFrame.h"
 #include "nsFocusManager.h"
 #include "nsIScriptGlobalObject.h"
-#include "nsIURL.h"
 #include "nsContainerFrame.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsPresContext.h"
@@ -43,7 +42,6 @@
 #include "nsString.h"
 #include "nsUnicharUtils.h"
 #include "nsDOMCID.h"
-#include "nsIServiceManager.h"
 #include "nsDOMCSSAttrDeclaration.h"
 #include "nsNameSpaceManager.h"
 #include "nsContentList.h"
@@ -51,7 +49,6 @@
 #include "nsDOMTokenList.h"
 #include "nsError.h"
 #include "nsDOMString.h"
-#include "nsIScriptSecurityManager.h"
 #include "mozilla/dom/AnimatableBinding.h"
 #include "mozilla/dom/FeaturePolicyUtils.h"
 #include "mozilla/dom/HTMLDivElement.h"
@@ -103,16 +100,11 @@
 #include "nsGkAtoms.h"
 #include "ChildIterator.h"
 
-#include "nsIDOMEventListener.h"
-#include "nsIWebNavigation.h"
-#include "nsIBaseWindow.h"
 #include "nsIWidget.h"
 
 #include "nsNodeInfoManager.h"
-#include "nsICategoryManager.h"
 #include "nsGenericHTMLElement.h"
 #include "nsContentCreatorFunctions.h"
-#include "nsIControllers.h"
 #include "nsView.h"
 #include "nsViewManager.h"
 #include "nsIScrollableFrame.h"
@@ -164,7 +156,6 @@
 #include "nsIAutoCompletePopup.h"
 
 #include "nsISpeculativeConnect.h"
-#include "nsIIOService.h"
 #include "nsBlockFrame.h"
 
 #include "DOMMatrix.h"
@@ -1835,22 +1826,17 @@ DeclarationBlock* Element::GetSMILOverrideStyleDeclaration() {
   return slots ? slots->mSMILOverrideStyleDeclaration.get() : nullptr;
 }
 
-nsresult Element::SetSMILOverrideStyleDeclaration(
-    DeclarationBlock* aDeclaration) {
-  Element::nsExtendedDOMSlots* slots = ExtendedDOMSlots();
-
-  slots->mSMILOverrideStyleDeclaration = aDeclaration;
+void Element::SetSMILOverrideStyleDeclaration(DeclarationBlock& aDeclaration) {
+  ExtendedDOMSlots()->mSMILOverrideStyleDeclaration = &aDeclaration;
 
   // Only need to request a restyle if we're in a document.  (We might not
   // be in a document, if we're clearing animation effects on a target node
   // that's been detached since the previous animation sample.)
   if (Document* doc = GetComposedDoc()) {
     if (PresShell* presShell = doc->GetPresShell()) {
-      presShell->RestyleForAnimation(this, StyleRestyleHint_RESTYLE_SMIL);
+      presShell->RestyleForAnimation(this, RestyleHint::RESTYLE_SMIL);
     }
   }
-
-  return NS_OK;
 }
 
 bool Element::IsLabelable() const { return false; }
@@ -2026,13 +2012,13 @@ nsresult Element::LeaveLink(nsPresContext* aPresContext) {
   return nsDocShell::Cast(shell)->OnLeaveLink();
 }
 
-nsresult Element::SetEventHandler(nsAtom* aEventName, const nsAString& aValue,
-                                  bool aDefer) {
+void Element::SetEventHandler(nsAtom* aEventName, const nsAString& aValue,
+                              bool aDefer) {
   Document* ownerDoc = OwnerDoc();
   if (ownerDoc->IsLoadedAsData()) {
     // Make this a no-op rather than throwing an error to avoid
     // the error causing problems setting the attribute.
-    return NS_OK;
+    return;
   }
 
   MOZ_ASSERT(aEventName, "Must have event name!");
@@ -2040,13 +2026,12 @@ nsresult Element::SetEventHandler(nsAtom* aEventName, const nsAString& aValue,
   EventListenerManager* manager =
       GetEventListenerManagerForAttr(aEventName, &defer);
   if (!manager) {
-    return NS_OK;
+    return;
   }
 
   defer = defer && aDefer;  // only defer if everyone agrees...
   manager->SetEventHandler(aEventName, aValue, defer,
                            !nsContentUtils::IsChromeDoc(ownerDoc), this);
-  return NS_OK;
 }
 
 //----------------------------------------------------------------------

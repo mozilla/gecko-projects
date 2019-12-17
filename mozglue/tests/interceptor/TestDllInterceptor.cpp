@@ -702,17 +702,21 @@ bool TestAssemblyFunctions() {
         : functionName(aFunctionName), expectedStub(aExpectedStub) {}
   } testCases[] = {
 #if defined(__clang__)
-#  if defined(_M_X64)
+// We disable these testcases because the code coverage instrumentation injects
+// code in a way that WindowsDllInterceptor doesn't understand.
+#  ifndef MOZ_CODE_COVERAGE
+#    if defined(_M_X64)
     // Since we have PatchIfTargetIsRecognizedTrampoline for x64, we expect the
     // original jump destination is returned as a stub.
     TestCase("MovPushRet", JumpDestination),
     TestCase("MovRaxJump", JumpDestination),
-#  elif defined(_M_IX86)
+#    elif defined(_M_IX86)
     // Skip the stub address check as we always generate a trampoline for x86.
     TestCase("PushRet", NoStubAddressCheck),
     TestCase("MovEaxJump", NoStubAddressCheck),
-#  endif
-#endif
+#    endif
+#  endif  // MOZ_CODE_COVERAGE
+#endif    // defined(__clang__)
   };
 
   static const auto patchedFunction = []() { patched_func_called = true; };
@@ -911,13 +915,6 @@ extern "C" int wmain(int argc, wchar_t* argv[]) {
       TEST_HOOK("user32.dll", GetKeyState, Ignore, 0) &&  // see Bug 1316415
 #endif
       TEST_HOOK("user32.dll", GetWindowInfo, Equals, FALSE) &&
-#if defined(_M_X64)
-      TEST_HOOK("user32.dll", SetWindowLongPtrA, Equals, 0) &&
-      TEST_HOOK("user32.dll", SetWindowLongPtrW, Equals, 0) &&
-#elif defined(_M_IX86)
-      TEST_HOOK("user32.dll", SetWindowLongA, Equals, 0) &&
-      TEST_HOOK("user32.dll", SetWindowLongW, Equals, 0) &&
-#endif
       TEST_HOOK("user32.dll", TrackPopupMenu, Equals, FALSE) &&
       TEST_DETOUR("user32.dll", CreateWindowExW, Equals, nullptr) &&
       TEST_HOOK("user32.dll", InSendMessageEx, Equals, ISMEX_NOSEND) &&

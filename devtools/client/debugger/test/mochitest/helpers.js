@@ -489,7 +489,11 @@ function waitForBreakpointRemoved(dbg, url, line) {
  * @static
  */
 async function waitForPaused(dbg, url) {
-  const { getSelectedScope, getCurrentThread, getCurrentThreadFrames } = dbg.selectors;
+  const {
+    getSelectedScope,
+    getCurrentThread,
+    getCurrentThreadFrames,
+  } = dbg.selectors;
 
   await waitForState(
     dbg,
@@ -497,7 +501,7 @@ async function waitForPaused(dbg, url) {
     "paused"
   );
 
-  await waitForState(dbg, getCurrentThreadFrames, 'fetched frames');
+  await waitForState(dbg, getCurrentThreadFrames, "fetched frames");
   await waitForLoadedScopes(dbg);
   await waitForSelectedSource(dbg, url);
 }
@@ -1078,22 +1082,25 @@ function waitForActive(dbg) {
  */
 function invokeInTab(fnc, ...args) {
   info(`Invoking in tab: ${fnc}(${args.map(uneval).join(",")})`);
-  return ContentTask.spawn(gBrowser.selectedBrowser, { fnc, args }, function*({
-    fnc,
-    args,
-  }) {
-    return content.wrappedJSObject[fnc](...args);
-  });
+  return ContentTask.spawn(
+    gBrowser.selectedBrowser,
+    { fnc, args },
+    function({ fnc, args }) {
+      return content.wrappedJSObject[fnc](...args);
+    }
+  );
 }
 
 function clickElementInTab(selector) {
   info(`click element ${selector} in tab`);
 
-  return ContentTask.spawn(gBrowser.selectedBrowser, { selector }, function*({
-    selector,
-  }) {
-    content.wrappedJSObject.document.querySelector(selector).click();
-  });
+  return SpecialPowers.spawn(
+    gBrowser.selectedBrowser,
+    [{ selector }],
+    function({ selector }) {
+      content.wrappedJSObject.document.querySelector(selector).click();
+    }
+  );
 }
 
 const isLinux = Services.appinfo.OS === "Linux";
@@ -1709,7 +1716,7 @@ async function assertPreviewTooltip(dbg, line, column, { result, expression }) {
   is(previewEl.innerText, result, "Preview text shown to user");
 
   const preview = dbg.selectors.getPreview();
-  is(`${preview.result}`, result, "Preview.result");
+  is(`${preview.resultGrip}`, result, "Preview.result");
   is(preview.expression, expression, "Preview.expression");
 }
 
@@ -1719,8 +1726,9 @@ async function hoverOnToken(dbg, line, column, selector) {
 }
 
 function getPreviewProperty(preview, field) {
+  const { resultGrip } = preview;
   const properties =
-    preview.result.preview.ownProperties || preview.result.preview.items;
+    resultGrip.preview.ownProperties || resultGrip.preview.items;
   const property = properties[field];
   return property.value || property;
 }
@@ -1937,3 +1945,4 @@ PromiseTestUtils.whitelistRejectionsGlobally(/Current thread has changed/);
 PromiseTestUtils.whitelistRejectionsGlobally(
   /Current thread has paused or resumed/
 );
+PromiseTestUtils.whitelistRejectionsGlobally(/Connection closed/);

@@ -19,14 +19,13 @@
 #include "builtin/streams/ReadableStreamDefaultControllerOperations.h"  // js::ReadableStreamControllerClearAlgorithms
 #include "builtin/streams/ReadableStreamInternals.h"  // js::ReadableStream{AddReadOrReadIntoRequest,CloseInternal,CreateReadResult,ErrorInternal,FulfillReadOrReadIntoRequest,GetNumReadRequests,HasDefaultReader}
 #include "builtin/streams/ReadableStreamReader.h"  // js::ReadableStream{,Default}Reader, js::CreateReadableStreamDefaultReader, js::ReadableStreamReaderGeneric{Cancel,Initialize,Release}, js::ReadableStreamDefaultReaderRead
-#include "gc/Heap.h"
-#include "js/ArrayBuffer.h"  // JS::NewArrayBuffer
+#include "js/ArrayBuffer.h"                        // JS::NewArrayBuffer
 #include "js/PropertySpec.h"
 #include "vm/Interpreter.h"
 #include "vm/JSContext.h"
 #include "vm/SelfHosting.h"
 
-#include "builtin/streams/HandlerFunction-inl.h"       // js::NewHandler
+#include "builtin/streams/HandlerFunction-inl.h"  // js::NewHandler
 #include "builtin/streams/ReadableStreamReader-inl.h"  // js::Unwrap{ReaderFromStream{,NoThrow},StreamFromReader}
 #include "vm/Compartment-inl.h"
 #include "vm/List-inl.h"  // js::ListObject, js::StoreNewListInFixedSlot

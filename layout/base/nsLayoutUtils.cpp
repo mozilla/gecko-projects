@@ -1060,12 +1060,17 @@ enum class MaxSizeExceededBehaviour {
 
 static bool GetDisplayPortImpl(
     nsIContent* aContent, nsRect* aResult, float aMultiplier,
-    MaxSizeExceededBehaviour aBehaviour = MaxSizeExceededBehaviour::Assert) {
+    MaxSizeExceededBehaviour aBehaviour = MaxSizeExceededBehaviour::Assert,
+    bool* aOutPainted = nullptr) {
   DisplayPortPropertyData* rectData = nullptr;
   DisplayPortMarginsPropertyData* marginsData = nullptr;
 
   if (!GetDisplayPortData(aContent, &rectData, &marginsData)) {
     return false;
+  }
+
+  if (aOutPainted) {
+    *aOutPainted = rectData ? rectData->mPainted : marginsData->mPainted;
   }
 
   nsIFrame* frame = aContent->GetPrimaryFrame();
@@ -1094,7 +1099,7 @@ static bool GetDisplayPortImpl(
     result = GetDisplayPortFromRectData(aContent, rectData, aMultiplier);
   } else if (isDisplayportSuppressed ||
              nsLayoutUtils::ShouldDisableApzForElement(aContent)) {
-    DisplayPortMarginsPropertyData noMargins(ScreenMargin(), 1);
+    DisplayPortMarginsPropertyData noMargins(ScreenMargin(), 1, /*painted=*/false);
     result = GetDisplayPortFromMarginsData(aContent, &noMargins, aMultiplier);
   } else {
     result = GetDisplayPortFromMarginsData(aContent, marginsData, aMultiplier);
@@ -1130,12 +1135,16 @@ static void TranslateFromScrollPortToScrollFrame(nsIContent* aContent,
 
 bool nsLayoutUtils::GetDisplayPort(
     nsIContent* aContent, nsRect* aResult,
-    RelativeTo aRelativeTo /* = RelativeTo::ScrollPort */) {
+    RelativeTo aRelativeTo /* = RelativeTo::ScrollPort */,
+    bool* aOutPainted /* = nullptr */) {
   float multiplier = StaticPrefs::layers_low_precision_buffer()
                          ? 1.0f / StaticPrefs::layers_low_precision_resolution()
                          : 1.0f;
-  bool usingDisplayPort = GetDisplayPortImpl(aContent, aResult, multiplier);
-  if (aResult && usingDisplayPort && aRelativeTo == RelativeTo::ScrollFrame) {
+  bool usingDisplayPort =
+      GetDisplayPortImpl(aContent, aResult, multiplier,
+                         MaxSizeExceededBehaviour::Assert, aOutPainted);
+  if (aResult && usingDisplayPort &&
+      aRelativeTo == RelativeTo::ScrollFrame) {
     TranslateFromScrollPortToScrollFrame(aContent, aResult);
   }
   return usingDisplayPort;
@@ -1143,6 +1152,34 @@ bool nsLayoutUtils::GetDisplayPort(
 
 bool nsLayoutUtils::HasDisplayPort(nsIContent* aContent) {
   return GetDisplayPort(aContent, nullptr);
+}
+
+bool nsLayoutUtils::HasPaintedDisplayPort(nsIContent* aContent) {
+  DisplayPortPropertyData* rectData = nullptr;
+  DisplayPortMarginsPropertyData* marginsData = nullptr;
+  GetDisplayPortData(aContent, &rectData, &marginsData);
+  if (rectData) {
+    return rectData->mPainted;
+  }
+  if (marginsData) {
+    return marginsData->mPainted;
+  }
+  return false;
+}
+
+void nsLayoutUtils::MarkDisplayPortAsPainted(nsIContent* aContent) {
+  DisplayPortPropertyData* rectData = nullptr;
+  DisplayPortMarginsPropertyData* marginsData = nullptr;
+  GetDisplayPortData(aContent, &rectData, &marginsData);
+  MOZ_ASSERT(rectData || marginsData,
+             "MarkDisplayPortAsPainted should only be called for an element "
+             "with a displayport");
+  if (rectData) {
+    rectData->mPainted = true;
+  }
+  if (marginsData) {
+    marginsData->mPainted = true;
+  }
 }
 
 /* static */
@@ -1239,18 +1276,20 @@ bool nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
 
   nsRect oldDisplayPort;
   bool hadDisplayPort = false;
+  bool wasPainted = false;
   if (scrollFrame) {
     // We only use the two return values from this function to call
     // InvalidateForDisplayPortChange. InvalidateForDisplayPortChange does
     // nothing if aContent does not have a frame. So getting the displayport is
     // useless if the content has no frame, so we avoid calling this to avoid
     // triggering a warning about not having a frame.
-    hadDisplayPort = GetHighResolutionDisplayPort(aContent, &oldDisplayPort);
+    hadDisplayPort =
+        GetHighResolutionDisplayPort(aContent, &oldDisplayPort, &wasPainted);
   }
 
   aContent->SetProperty(
       nsGkAtoms::DisplayPortMargins,
-      new DisplayPortMarginsPropertyData(aMargins, aPriority),
+      new DisplayPortMarginsPropertyData(aMargins, aPriority, wasPainted),
       nsINode::DeleteProperty<DisplayPortMarginsPropertyData>);
 
   nsRect newDisplayPort;
@@ -1321,9 +1360,10 @@ void nsLayoutUtils::SetDisplayPortBaseIfNotSet(nsIContent* aContent,
 }
 
 bool nsLayoutUtils::GetCriticalDisplayPort(nsIContent* aContent,
-                                           nsRect* aResult) {
+                                           nsRect* aResult, bool* aOutPainted) {
   if (StaticPrefs::layers_low_precision_buffer()) {
-    return GetDisplayPortImpl(aContent, aResult, 1.0f);
+    return GetDisplayPortImpl(aContent, aResult, 1.0f,
+                              MaxSizeExceededBehaviour::Assert, aOutPainted);
   }
   return false;
 }
@@ -1333,11 +1373,12 @@ bool nsLayoutUtils::HasCriticalDisplayPort(nsIContent* aContent) {
 }
 
 bool nsLayoutUtils::GetHighResolutionDisplayPort(nsIContent* aContent,
-                                                 nsRect* aResult) {
+                                                 nsRect* aResult,
+                                                 bool* aOutPainted) {
   if (StaticPrefs::layers_low_precision_buffer()) {
-    return GetCriticalDisplayPort(aContent, aResult);
+    return GetCriticalDisplayPort(aContent, aResult, aOutPainted);
   }
-  return GetDisplayPort(aContent, aResult);
+  return GetDisplayPort(aContent, aResult, RelativeTo::ScrollPort, aOutPainted);
 }
 
 void nsLayoutUtils::RemoveDisplayPort(nsIContent* aContent) {
@@ -1863,6 +1904,54 @@ nsIScrollableFrame* nsLayoutUtils::GetScrollableFrameFor(
 }
 
 /* static */
+SideBits nsLayoutUtils::GetSideBitsForFixedPositionContent(
+    const nsIFrame* aFixedPosFrame) {
+  return GetSideBitsAndAdjustAnchorForFixedPositionContent(
+      nullptr, aFixedPosFrame, nullptr, nullptr);
+}
+
+/* static */
+SideBits nsLayoutUtils::GetSideBitsAndAdjustAnchorForFixedPositionContent(
+    const nsIFrame* aViewportFrame, const nsIFrame* aFixedPosFrame,
+    LayerPoint* aAnchor, const Rect* aAnchorRect) {
+  SideBits sides = SideBits::eNone;
+  if (aFixedPosFrame != aViewportFrame) {
+    const nsStylePosition* position = aFixedPosFrame->StylePosition();
+    if (!position->mOffset.Get(eSideRight).IsAuto()) {
+      sides |= SideBits::eRight;
+      if (!position->mOffset.Get(eSideLeft).IsAuto()) {
+        sides |= SideBits::eLeft;
+        if (aAnchor) {
+          aAnchor->x = aAnchorRect->x + aAnchorRect->width / 2.f;
+        }
+      } else {
+        if (aAnchor) {
+          aAnchor->x = aAnchorRect->XMost();
+        }
+      }
+    } else if (!position->mOffset.Get(eSideLeft).IsAuto()) {
+      sides |= SideBits::eLeft;
+    }
+    if (!position->mOffset.Get(eSideBottom).IsAuto()) {
+      sides |= SideBits::eBottom;
+      if (!position->mOffset.Get(eSideTop).IsAuto()) {
+        sides |= SideBits::eTop;
+        if (aAnchor) {
+          aAnchor->y = aAnchorRect->y + aAnchorRect->height / 2.f;
+        }
+      } else {
+        if (aAnchor) {
+          aAnchor->y = aAnchorRect->YMost();
+        }
+      }
+    } else if (!position->mOffset.Get(eSideTop).IsAuto()) {
+      sides |= SideBits::eTop;
+    }
+  }
+  return sides;
+}
+
+/* static */
 void nsLayoutUtils::SetFixedPositionLayerData(
     Layer* aLayer, const nsIFrame* aViewportFrame, const nsRect& aAnchorRect,
     const nsIFrame* aFixedPosFrame, nsPresContext* aPresContext,
@@ -1898,32 +1987,8 @@ void nsLayoutUtils::SetFixedPositionLayerData(
   // defaulting to top-left.
   LayerPoint anchor(anchorRect.x, anchorRect.y);
 
-  SideBits sides = SideBits::eNone;
-  if (aFixedPosFrame != aViewportFrame) {
-    const nsStylePosition* position = aFixedPosFrame->StylePosition();
-    if (!position->mOffset.Get(eSideRight).IsAuto()) {
-      sides |= SideBits::eRight;
-      if (!position->mOffset.Get(eSideLeft).IsAuto()) {
-        sides |= SideBits::eLeft;
-        anchor.x = anchorRect.x + anchorRect.width / 2.f;
-      } else {
-        anchor.x = anchorRect.XMost();
-      }
-    } else if (!position->mOffset.Get(eSideLeft).IsAuto()) {
-      sides |= SideBits::eLeft;
-    }
-    if (!position->mOffset.Get(eSideBottom).IsAuto()) {
-      sides |= SideBits::eBottom;
-      if (!position->mOffset.Get(eSideTop).IsAuto()) {
-        sides |= SideBits::eTop;
-        anchor.y = anchorRect.y + anchorRect.height / 2.f;
-      } else {
-        anchor.y = anchorRect.YMost();
-      }
-    } else if (!position->mOffset.Get(eSideTop).IsAuto()) {
-      sides |= SideBits::eTop;
-    }
-  }
+  SideBits sides = GetSideBitsAndAdjustAnchorForFixedPositionContent(
+      aViewportFrame, aFixedPosFrame, &anchor, &anchorRect);
 
   ViewID id = ScrollIdForRootScrollFrame(aPresContext);
   aLayer->SetFixedPositionData(id, anchor, sides);
@@ -3809,7 +3874,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
 
   nsRect canvasArea(nsPoint(0, 0), aFrame->GetSize());
   bool ignoreViewportScrolling =
-      aFrame->GetParent() ? false : presShell->IgnoringViewportScrolling();
+      !aFrame->GetParent() && presShell->IgnoringViewportScrolling();
   if (ignoreViewportScrolling && rootScrollFrame) {
     nsIScrollableFrame* rootScrollableFrame =
         presShell->GetRootScrollFrameAsScrollable();
@@ -3958,6 +4023,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
 
       if (doFullRebuild) {
         list->DeleteAll(builder);
+        list->RestoreState();
 
         builder->ClearRetainedWindowRegions();
         builder->ClearWillChangeBudgets();
@@ -8314,7 +8380,7 @@ static bool ShouldInflateFontsForContainer(const nsIFrame* aFrame) {
   // we hit overflow-y [or -x, for vertical mode]: scroll or auto.
   const nsStyleText* styleText = aFrame->StyleText();
 
-  return styleText->mTextSizeAdjust != NS_STYLE_TEXT_SIZE_ADJUST_NONE &&
+  return styleText->mTextSizeAdjust != StyleTextSizeAdjust::None &&
          !(aFrame->GetStateBits() & NS_FRAME_IN_CONSTRAINED_BSIZE) &&
          // We also want to disable font inflation for containers that have
          // preformatted text.
@@ -8969,6 +9035,7 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
     nsRect dp;
     if (nsLayoutUtils::GetDisplayPort(aContent, &dp)) {
       metrics.SetDisplayPort(CSSRect::FromAppUnits(dp));
+      MarkDisplayPortAsPainted(aContent);
     }
     if (nsLayoutUtils::GetCriticalDisplayPort(aContent, &dp)) {
       metrics.SetCriticalDisplayPort(CSSRect::FromAppUnits(dp));
@@ -9386,7 +9453,7 @@ bool nsLayoutUtils::ContainsMetricsWithId(const Layer* aLayer,
 /* static */
 StyleTouchAction nsLayoutUtils::GetTouchActionFromFrame(nsIFrame* aFrame) {
   if (!aFrame) {
-    return StyleTouchAction_AUTO;
+    return StyleTouchAction::AUTO;
   }
 
   // The touch-action CSS property applies to: all elements except:
@@ -9395,13 +9462,13 @@ StyleTouchAction nsLayoutUtils::GetTouchActionFromFrame(nsIFrame* aFrame) {
   bool isNonReplacedInlineElement =
       aFrame->IsFrameOfType(nsIFrame::eLineParticipant);
   if (isNonReplacedInlineElement) {
-    return StyleTouchAction_AUTO;
+    return StyleTouchAction::AUTO;
   }
 
   const nsStyleDisplay* disp = aFrame->StyleDisplay();
   bool isTableElement = disp->IsInternalTableStyleExceptCell();
   if (isTableElement) {
-    return StyleTouchAction_AUTO;
+    return StyleTouchAction::AUTO;
   }
 
   return disp->mTouchAction;

@@ -7,6 +7,10 @@ use std::ffi::{CStr, CString};
 use std::ffi::OsString;
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStringExt;
+#[cfg(target_os = "windows")]
+use winapi::um::processthreadsapi::{SetThreadPriority,GetCurrentThread};
+#[cfg(target_os = "windows")]
+use winapi::um::winbase::{SetThreadAffinityMask};
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 use std::os::unix::ffi::OsStringExt;
 use std::io::Cursor;
@@ -38,6 +42,12 @@ use rayon;
 use num_cpus;
 use euclid::SideOffsets2D;
 use nsstring::nsAString;
+
+#[cfg(target_os = "linux")]
+use libc::{
+    pthread_self, pthread_setschedparam, sched_param,
+    cpu_set_t, CPU_SET, pthread_setaffinity_np
+};
 
 #[cfg(target_os = "macos")]
 use core_foundation::string::CFString;
@@ -352,10 +362,21 @@ pub struct WrImageDescriptor {
     pub height: i32,
     pub stride: i32,
     pub opacity: OpacityType,
+    pub prefer_compositor_surface: bool,
 }
 
 impl<'a> Into<ImageDescriptor> for &'a WrImageDescriptor {
     fn into(self) -> ImageDescriptor {
+        let mut flags = ImageDescriptorFlags::empty();
+
+        if self.opacity == OpacityType::Opaque {
+            flags |= ImageDescriptorFlags::IS_OPAQUE;
+        }
+
+        if self.prefer_compositor_surface {
+            flags |= ImageDescriptorFlags::PREFER_COMPOSITOR_SURFACE;
+        }
+
         ImageDescriptor {
             size: DeviceIntSize::new(self.width, self.height),
             stride: if self.stride != 0 {
@@ -364,9 +385,8 @@ impl<'a> Into<ImageDescriptor> for &'a WrImageDescriptor {
                 None
             },
             format: self.format,
-            is_opaque: self.opacity == OpacityType::Opaque,
             offset: 0,
-            allow_mipmaps: false,
+            flags,
         }
     }
 }
@@ -1043,18 +1063,57 @@ impl ThreadListener for GeckoProfilerThreadListener {
 pub struct WrThreadPool(Arc<rayon::ThreadPool>);
 
 #[no_mangle]
-pub unsafe extern "C" fn wr_thread_pool_new() -> *mut WrThreadPool {
+pub unsafe extern "C" fn wr_thread_pool_new(low_priority: bool) -> *mut WrThreadPool {
     // Clamp the number of workers between 1 and 8. We get diminishing returns
     // with high worker counts and extra overhead because of rayon and font
     // management.
     let num_threads = num_cpus::get().max(2).min(8);
 
+    let priority_tag = if low_priority { "LP" } else { "" };
+
+    // helper function to make sure that low priority threads really are low priority.
+    // it also sets the affinity so that WRWorkerX and WRWorkerLPX are both locked to
+    // the same core X, so one or the other can run, but not both: the total number
+    // of worker threads that's running should respect num_threads above, even if
+    // they exist in two separate pools.
+    #[cfg(target_os = "windows")]
+    fn set_thread_priority_and_affinity(low_priority:bool, thread_index: usize) {
+        unsafe {
+            SetThreadPriority(
+                GetCurrentThread(),
+                if low_priority {
+                    -1 /* THREAD_PRIORITY_BELOW_NORMAL */
+                } else {
+                    0 /* THREAD_PRIORITY_NORMAL */
+                });
+            SetThreadAffinityMask(GetCurrentThread(), 1usize << thread_index);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    fn set_thread_priority_and_affinity(low_priority:bool, thread_index: usize) {
+        unsafe {
+            let thread_id = pthread_self();
+            if low_priority {
+                let params = sched_param {
+                    sched_priority: 0
+                };
+                pthread_setschedparam(thread_id, 3 /* SCHED_BATCH */, &params);
+            }
+            let mut cpu_set = mem::zeroed::<cpu_set_t>();
+            CPU_SET(thread_index, &mut cpu_set);
+            pthread_setaffinity_np(thread_id, mem::size_of::<cpu_set_t>(), &cpu_set);
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux" )))]
+    fn set_thread_priority_and_affinity(_low_priority:bool, _thread_index: usize) { }
+
     let worker = rayon::ThreadPoolBuilder::new()
-        .thread_name(|idx|{ format!("WRWorker#{}", idx) })
+        .thread_name(move |idx|{ format!("WRWorker{}#{}", priority_tag, idx) })
         .num_threads(num_threads)
-        .start_handler(|idx| {
+        .start_handler(move |idx| {
+            set_thread_priority_and_affinity(low_priority, idx);
             wr_register_thread_local_arena();
-            let name = format!("WRWorker#{}", idx);
+            let name = format!("WRWorker{}#{}",priority_tag, idx);
             register_thread_with_profiler(name.clone());
             gecko_profiler_register_thread(CString::new(name).unwrap().as_ptr());
         })
@@ -1295,6 +1354,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 window_width: i32,
                                 window_height: i32,
                                 support_low_priority_transactions: bool,
+                                support_low_priority_threadpool: bool,
                                 allow_texture_swizzling: bool,
                                 enable_picture_caching: bool,
                                 start_debug_server: bool,
@@ -1303,6 +1363,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 program_cache: Option<&mut WrProgramCache>,
                                 shaders: Option<&mut WrShaders>,
                                 thread_pool: *mut WrThreadPool,
+                                thread_pool_low_priority: *mut WrThreadPool,
                                 size_of_op: VoidPtrToSizeFn,
                                 enclosing_size_of_op: VoidPtrToSizeFn,
                                 document_id: u32,
@@ -1336,6 +1397,13 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
 
     let workers = unsafe {
         Arc::clone(&(*thread_pool).0)
+    };
+    let workers_low_priority = unsafe {
+        if support_low_priority_threadpool {
+            Arc::clone(&(*thread_pool_low_priority).0)
+        } else {
+            Arc::clone(&(*thread_pool).0)
+        }
     };
 
     let upload_method = if unsafe { is_glcontext_angle(gl_context) } {
@@ -1380,7 +1448,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         support_low_priority_transactions,
         allow_texture_swizzling,
         recorder: recorder,
-        blob_image_handler: Some(Box::new(Moz2dBlobImageHandler::new(workers.clone()))),
+        blob_image_handler: Some(Box::new(Moz2dBlobImageHandler::new(workers.clone(), workers_low_priority.clone()))),
         workers: Some(workers.clone()),
         thread_listener: Some(Box::new(GeckoProfilerThreadListener::new())),
         size_of_op: Some(size_of_op),
@@ -1742,12 +1810,12 @@ pub extern "C" fn wr_transaction_pinch_zoom(
 }
 
 #[no_mangle]
-pub extern "C" fn wr_transaction_set_is_transform_pinch_zooming(
+pub extern "C" fn wr_transaction_set_is_transform_async_zooming(
     txn: &mut Transaction,
     animation_id: u64,
     is_zooming: bool
 ) {
-    txn.set_is_transform_pinch_zooming(is_zooming, PropertyBindingId::new(animation_id));
+    txn.set_is_transform_async_zooming(is_zooming, PropertyBindingId::new(animation_id));
 }
 
 #[no_mangle]

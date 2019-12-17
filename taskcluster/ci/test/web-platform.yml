@@ -14,6 +14,13 @@ job-defaults:
         by-test-platform:
             linux64/debug: ['fission', 'serviceworker']
             default: ['fission']
+    fission-run-on-projects:
+        by-test-platform:
+            linux64-qr/debug: ['trunk']
+            linux64-qr/opt: ['mozilla-central']
+            windows10-64-qr/opt: ['mozilla-central']
+            default: []
+    fission-tier: 2
     mozharness:
         script: web_platform_tests.py
         config:
@@ -58,7 +65,7 @@ web-platform-tests:
     e10s: true
     run-on-projects:
         by-test-platform:
-            windows10-aarch64/opt: ['try']
+            windows10-aarch64/opt: ['try', 'mozilla-central']
             .*-qr/.*: ['release', 'try']  # skip on integration branches due to high load
             default: built-projects
     tier:
@@ -95,7 +102,7 @@ web-platform-tests-reftests:
     e10s: true
     run-on-projects:
         by-test-platform:
-            windows10-aarch64/opt: ['try']
+            windows10-aarch64/opt: ['try', 'mozilla-central']
             default: built-projects
     tier:
         by-test-platform:
@@ -121,7 +128,7 @@ web-platform-tests-wdspec:
             - --test-type=wdspec
     run-on-projects:
         by-test-platform:
-            windows10-aarch64/opt: ['try']
+            windows10-aarch64/opt: ['try', 'mozilla-central']
             .*-qr/.*: ['release', 'try']
             default: built-projects
     tier:

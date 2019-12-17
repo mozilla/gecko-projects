@@ -39,12 +39,13 @@ class LinkHandlerParent extends JSWindowActorParent {
     let win = browser.ownerGlobal;
 
     let gBrowser = win.gBrowser;
-    if (!gBrowser) {
-      return;
-    }
 
     switch (aMsg.name) {
       case "Link:LoadingIcon":
+        if (!gBrowser) {
+          return;
+        }
+
         if (aMsg.data.canUseForTab) {
           let tab = gBrowser.getTabForBrowser(browser);
           if (tab.hasAttribute("busy")) {
@@ -56,20 +57,27 @@ class LinkHandlerParent extends JSWindowActorParent {
         break;
 
       case "Link:SetIcon":
-        this.setIconFromLink(
-          gBrowser,
-          browser,
-          aMsg.data.pageURL,
-          aMsg.data.originalURL,
-          aMsg.data.canUseForTab,
-          aMsg.data.expiration,
-          aMsg.data.iconURL
-        );
+        // Cache the most recent icon and rich icon locally.
+        if (aMsg.data.canUseForTab) {
+          this.icon = aMsg.data;
+        } else {
+          this.richIcon = aMsg.data;
+        }
+
+        if (!gBrowser) {
+          return;
+        }
+
+        this.setIconFromLink(gBrowser, browser, aMsg.data);
 
         this.notifyTestListeners("SetIcon", aMsg.data);
         break;
 
       case "Link:SetFailedIcon":
+        if (!gBrowser) {
+          return;
+        }
+
         if (aMsg.data.canUseForTab) {
           this.clearPendingIcon(gBrowser, browser);
         }
@@ -78,6 +86,10 @@ class LinkHandlerParent extends JSWindowActorParent {
         break;
 
       case "Link:AddSearch":
+        if (!gBrowser) {
+          return;
+        }
+
         let tab = gBrowser.getTabForBrowser(browser);
         if (!tab) {
           break;
@@ -107,25 +119,21 @@ class LinkHandlerParent extends JSWindowActorParent {
 
   setIconFromLink(
     gBrowser,
-    aBrowser,
-    aPageURL,
-    aOriginalURL,
-    aCanUseForTab,
-    aExpiration,
-    aIconURL
+    browser,
+    { pageURL, originalURL, canUseForTab, expiration, iconURL, canStoreIcon }
   ) {
-    let tab = gBrowser.getTabForBrowser(aBrowser);
+    let tab = gBrowser.getTabForBrowser(browser);
     if (!tab) {
       return;
     }
 
-    if (aCanUseForTab) {
-      this.clearPendingIcon(gBrowser, aBrowser);
+    if (canUseForTab) {
+      this.clearPendingIcon(gBrowser, browser);
     }
 
     let iconURI;
     try {
-      iconURI = Services.io.newURI(aIconURL);
+      iconURI = Services.io.newURI(iconURL);
     } catch (ex) {
       Cu.reportError(ex);
       return;
@@ -133,7 +141,7 @@ class LinkHandlerParent extends JSWindowActorParent {
     if (iconURI.scheme != "data") {
       try {
         Services.scriptSecurityManager.checkLoadURIWithPrincipal(
-          aBrowser.contentPrincipal,
+          browser.contentPrincipal,
           iconURI,
           Services.scriptSecurityManager.ALLOW_CHROME
         );
@@ -141,21 +149,23 @@ class LinkHandlerParent extends JSWindowActorParent {
         return;
       }
     }
-    try {
-      PlacesUIUtils.loadFavicon(
-        aBrowser,
-        Services.scriptSecurityManager.getSystemPrincipal(),
-        Services.io.newURI(aPageURL),
-        Services.io.newURI(aOriginalURL),
-        aExpiration,
-        iconURI
-      );
-    } catch (ex) {
-      Cu.reportError(ex);
+    if (canStoreIcon) {
+      try {
+        PlacesUIUtils.loadFavicon(
+          browser,
+          Services.scriptSecurityManager.getSystemPrincipal(),
+          Services.io.newURI(pageURL),
+          Services.io.newURI(originalURL),
+          expiration,
+          iconURI
+        );
+      } catch (ex) {
+        Cu.reportError(ex);
+      }
     }
 
-    if (aCanUseForTab) {
-      gBrowser.setIcon(tab, aIconURL, aOriginalURL);
+    if (canUseForTab) {
+      gBrowser.setIcon(tab, iconURL, originalURL);
     }
   }
 }

@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 /* Scroll to bottom */
 
 #messages-panel .uncontrolled {
@@ -48,6 +52,10 @@
 
 #messages-panel .ws-frame-list-item.selected .ws-frames-list-type-icon {
   color: inherit;
+}
+
+#messages-panel .ws-connection-closed-message {
+  text-align: center;
 }
 
 /* Use lining numbers so that seconds and milliseconds align */

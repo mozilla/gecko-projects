@@ -18,6 +18,7 @@
 #include "jit/LIR.h"
 #include "jit/Lowering.h"
 #include "jit/MIRGraph.h"
+#include "util/CheckedArithmetic.h"
 #include "vm/RegExpObject.h"
 #include "vm/SelfHosting.h"
 
@@ -1638,7 +1639,10 @@ static MIRType GuessPhiType(MPhi* phi, bool* hasInputsWithEmptyTypes) {
       }
       continue;
     }
-    if (type != in->type()) {
+
+    if (type == in->type()) {
+      convertibleToFloat32 = convertibleToFloat32 && in->canProduceFloat32();
+    } else {
       if (convertibleToFloat32 && in->type() == MIRType::Float32) {
         // If we only saw definitions that can be converted into Float32 before
         // and encounter a Float32 value, promote previous values to Float32
@@ -1647,7 +1651,7 @@ static MIRType GuessPhiType(MPhi* phi, bool* hasInputsWithEmptyTypes) {
                  IsTypeRepresentableAsDouble(in->type())) {
         // Specialize phis with int32 and double operands as double.
         type = MIRType::Double;
-        convertibleToFloat32 &= in->canProduceFloat32();
+        convertibleToFloat32 = convertibleToFloat32 && in->canProduceFloat32();
       } else {
         return MIRType::Value;
       }
@@ -1870,10 +1874,13 @@ bool TypeAnalyzer::adjustPhiInputs(MPhi* phi) {
       continue;
     }
 
-    // The input is being explicitly unboxed, so sneak past and grab
-    // the original box.
-    if (in->isUnbox() && phi->typeIncludes(in->toUnbox()->input())) {
-      in = in->toUnbox()->input();
+    // The input is being explicitly unboxed, so sneak past and grab the
+    // original box. Don't bother optimizing if magic values are involved.
+    if (in->isUnbox()) {
+      MDefinition* unboxInput = in->toUnbox()->input();
+      if (!IsMagicType(unboxInput->type()) && phi->typeIncludes(unboxInput)) {
+        in = in->toUnbox()->input();
+      }
     }
 
     if (in->type() != MIRType::Value) {

@@ -2,15 +2,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// Test that the debugger pauses in the omniscient browser toolbox even when it
-// hasn't been opened.
+// Test that the debugger pauses in the multiprocess browser toolbox even when
+// it hasn't been opened.
 
 "use strict";
 
 requestLongerTimeout(4);
 
 Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/devtools/client/framework/test/helpers.js",
+  "chrome://mochitests/content/browser/devtools/client/framework/browser-toolbox/test/helpers-browser-toolbox.js",
   this
 );
 

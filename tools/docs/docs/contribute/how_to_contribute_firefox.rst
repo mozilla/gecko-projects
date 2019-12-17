@@ -2,7 +2,7 @@ How to contribute to Firefox
 ============================
 
 The goal of this doc is to have a place where all simple commands
-are listed from start to end on a Linux/Mac system.
+are listed from start to end.
 
 This aims to be a simple tutorial for lazy copy and paste.
 
@@ -11,11 +11,14 @@ Each section in this tutorial links to more detailed documentation on the topic.
 Clone the sources
 -----------------
 
-We use mercurial, to clone the source:
+You can use either mercurial or git. Mercurial is the canonical version control
+system.
 
 .. code-block:: shell
 
     $ hg clone https://hg.mozilla.org/mozilla-central/
+
+For git, see the `git cinnabar documentation <https://github.com/glandium/git-cinnabar/wiki/Mozilla:-A-git-workflow-for-Gecko-development>`__  |
 
 The clone should be around 30 minutes (depending on your connection) and
 the repository should be less than 5GB (~ 20GB after the build).
@@ -33,10 +36,24 @@ Firefox provides a mechanism to install all dependencies; in the source tree:
      $ ./mach bootstrap
 
 The default options are recommended.
-Select "Artifact Mode" if you are not planning to write C++ or Rust code.
+Select "`Artifact Mode <https://developer.mozilla.org/docs/Mozilla/Developer_guide/Build_Instructions/Artifact_builds>`__" if you are not planning to write C++ or Rust code.
 
 `More
 information <https://developer.mozilla.org/docs/Mozilla/Developer_guide/Build_Instructions/Linux_Prerequisites>`__
+
+Windows dependencies
+--------------------
+
+#. You need 64-bit version of Windows 7 or later.
+#. Download and install `Visual Studio. <https://visualstudio.microsoft.com/downloads/>`__
+#. Finally download the `MozillaBuild Package. <https://ftp.mozilla.org/pub/mozilla.org/mozilla/libraries/win32/MozillaBuildSetup-Latest.exe>`__ Installation directory should be:
+
+.. code-block:: shell
+
+    $ c:\mozilla-build\
+
+`More
+information <https://developer.mozilla.org/docs/Mozilla/Developer_guide/Build_Instructions/Windows_Prerequisites>`__
 
 
 To build & run
@@ -70,17 +87,35 @@ Then:
 
 .. code-block:: shell
 
-    $ hg commit -m “Bug xxxx - the description of your change r?reviewer”
+    # Mercurial
+    $ hg commit
 
-To find a reviewer, the easiest way is to do an “hg log” on the modified
-file and look who usually is reviewing the actual changes (ie not
-reformat, renaming of variables, etc).
+    # Git
+    $ git commit
+
+The commit message should look like:
+
+.. code-block::
+
+    Bug xxxx - Short description of your change. r?reviewer
+
+    Optionally, a longer description of the change.
+
+To find a reviewer, the easiest way is to do ``hg log <modified-file>`` (or
+``git log <modified-file>``, if you're using git) on the relevant files, and
+look who usually is reviewing the actual changes (ie not reformat, renaming
+of variables, etc).
 
 To visualize your patch in the repository, run:
 
 .. code-block:: shell
 
+    # Mercurial
     $ hg wip
+
+    # Git
+    $ git show
+
 
 `More information <https://developer.mozilla.org/docs/Mozilla/Mercurial>`__
 
@@ -114,7 +149,16 @@ To select jobs running a fuzzy search:
 
     $ ./mach try fuzzy
 
-Note that it requires `level 1 permissions <https://www.mozilla.org/about/governance/policies/commit/access-policy/>`__.
+From Treeherder, it is also possible to attach new jobs. As every review has
+a try CI run associated, it makes this work easier. See :ref:`attach-job-review` for
+more information.
+
+.. note::
+
+    This requires `level 1 commit access <https://www.mozilla.org/about/governance/policies/commit/access-policy/>`__.
+
+    You can ask your reviewer to submit the patch for you if you don't have that
+    level of access.
 
 `More information <https://firefox-source-docs.mozilla.org/tools/try/index.html>`__
 
@@ -150,19 +194,26 @@ Run:
 
 .. code-block:: shell
 
-    $ hg commit --amend <the modified file>
+   # Mercurial
+   $ hg commit --amend
+
+   # Git
+   $ git commit --amend
+
+After amending the patch, you will need to submit it using moz-phab again.
 
 If you wrote many changes, you can squash or edit commits with the
 command:
 
 .. code-block:: shell
 
-    $ hg histedit
+   # Mercurial
+   $ hg histedit
 
-(similar to `git rebase -i`)
+   # Git
+   $ git rebase -i
 
-The submission is the same as a the initial patch.
-
+The submission step is the same as for the initial patch.
 
 Retrieve new changes from the repository
 ----------------------------------------
@@ -171,14 +222,11 @@ To pull changes from the repository, run:
 
 .. code-block:: shell
 
-    $ hg update
+   # Mercurial
+   $ hg pull --rebase
 
-If needed, to rebase a patch, run:
-
-.. code-block:: shell
-
-    $ hg rebase -s <origin_revision> -d <destination_revision>
-
+   # Git
+   $ git pull --rebase
 
 To push a change in the code base
 ---------------------------------

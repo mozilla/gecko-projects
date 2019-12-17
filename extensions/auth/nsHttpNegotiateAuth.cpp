@@ -20,10 +20,7 @@
 #include "nsHttpNegotiateAuth.h"
 
 #include "nsIHttpAuthenticableChannel.h"
-#include "nsIProxiedChannel.h"
 #include "nsIAuthModule.h"
-#include "nsIServiceManager.h"
-#include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsIProxyInfo.h"
 #include "nsIURI.h"
@@ -492,8 +489,10 @@ nsHttpNegotiateAuth::GenerateCredentials(
     while (*challenge == ' ') challenge++;
     len = strlen(challenge);
 
+    if (!len) return NS_ERROR_UNEXPECTED;
+
     // strip off any padding (see bug 230351)
-    while (challenge[len - 1] == '=') len--;
+    while (len && challenge[len - 1] == '=') len--;
 
     //
     // Decode the response that followed the "Negotiate" token

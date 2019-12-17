@@ -10,8 +10,6 @@
 #include "CacheIndexIterator.h"
 #include "CacheIndexContextIterator.h"
 #include "nsThreadUtils.h"
-#include "nsISimpleEnumerator.h"
-#include "nsIDirectoryEnumerator.h"
 #include "nsISizeOf.h"
 #include "nsPrintfCString.h"
 #include "mozilla/DebugOnly.h"
@@ -2675,9 +2673,7 @@ nsresult CacheIndex::InitEntryFromDiskData(CacheIndexEntry* aEntry,
   aEntry->Init(GetOriginAttrsHash(aMetaData->OriginAttributes()),
                aMetaData->IsAnonymous(), aMetaData->Pinned());
 
-  uint32_t frecency;
-  aMetaData->GetFrecency(&frecency);
-  aEntry->SetFrecency(frecency);
+  aEntry->SetFrecency(aMetaData->GetFrecency());
 
   const char* altData = aMetaData->GetElement(CacheFileUtils::kAltDataKey);
   bool hasAltData = altData ? true : false;
@@ -3508,14 +3504,13 @@ nsresult CacheIndex::Run() {
   return NS_OK;
 }
 
-nsresult CacheIndex::OnFileOpenedInternal(FileOpenHelper* aOpener,
-                                          CacheFileHandle* aHandle,
-                                          nsresult aResult) {
+void CacheIndex::OnFileOpenedInternal(FileOpenHelper* aOpener,
+                                      CacheFileHandle* aHandle,
+                                      nsresult aResult) {
   LOG(
       ("CacheIndex::OnFileOpenedInternal() [opener=%p, handle=%p, "
        "result=0x%08" PRIx32 "]",
        aOpener, aHandle, static_cast<uint32_t>(aResult)));
-
   MOZ_ASSERT(CacheFileIOManager::IsOnIOThread());
 
   nsresult rv;
@@ -3525,7 +3520,7 @@ nsresult CacheIndex::OnFileOpenedInternal(FileOpenHelper* aOpener,
   MOZ_RELEASE_ASSERT(IsIndexUsable());
 
   if (mState == READY && mShuttingDown) {
-    return NS_OK;
+    return;
   }
 
   switch (mState) {
@@ -3612,8 +3607,6 @@ nsresult CacheIndex::OnFileOpenedInternal(FileOpenHelper* aOpener,
     default:
       MOZ_ASSERT(false, "Unexpected state!");
   }
-
-  return NS_OK;
 }
 
 nsresult CacheIndex::OnFileOpened(CacheFileHandle* aHandle, nsresult aResult) {

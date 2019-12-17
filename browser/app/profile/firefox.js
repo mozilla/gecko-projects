@@ -37,15 +37,11 @@ pref("extensions.webextOptionalPermissionPrompts", true);
 // Preferences for AMO integration
 pref("extensions.getAddons.cache.enabled", true);
 pref("extensions.getAddons.get.url", "https://services.addons.mozilla.org/api/v3/addons/search/?guid=%IDS%&lang=%LOCALE%");
-pref("extensions.getAddons.compatOverides.url", "https://services.addons.mozilla.org/api/v3/addons/compat-override/?guid=%IDS%&lang=%LOCALE%");
 pref("extensions.getAddons.search.browseURL", "https://addons.mozilla.org/%LOCALE%/firefox/search?q=%TERMS%&platform=%OS%&appver=%VERSION%");
 pref("extensions.webservice.discoverURL", "https://discovery.addons.mozilla.org/%LOCALE%/firefox/discovery/pane/%VERSION%/%OS%/%COMPATIBILITY_MODE%");
 pref("extensions.getAddons.link.url", "https://addons.mozilla.org/%LOCALE%/firefox/");
 pref("extensions.getAddons.langpacks.url", "https://services.addons.mozilla.org/api/v3/addons/language-tools/?app=firefox&type=language&appversion=%VERSION%");
 pref("extensions.getAddons.discovery.api_url", "https://services.addons.mozilla.org/api/v4/discovery/?lang=%LOCALE%&edition=%DISTRIBUTION%");
-
-// Enable the HTML-based discovery panel at about:addons.
-pref("extensions.htmlaboutaddons.discover.enabled", true);
 
 // The URL for the privacy policy related to recommended extensions.
 pref("extensions.recommendations.privacyPolicyUrl", "https://www.mozilla.org/privacy/firefox/?utm_source=firefox-browser&utm_medium=firefox-browser&utm_content=privacy-policy-link#addons");
@@ -73,9 +69,6 @@ pref("extensions.webextensions.default-content-security-policy", "script-src 'se
 
 pref("extensions.webextensions.remote", true);
 pref("extensions.webextensions.background-delayed-startup", true);
-
-// Extensions that should not be flagged as legacy in about:addons
-pref("extensions.legacy.exceptions", "testpilot@cliqz.com,@testpilot-containers,jid1-NeEaf3sAHdKHPA@jetpack,@activity-streams,pulse@mozilla.com,@testpilot-addon,@min-vid,tabcentertest1@mozilla.com,snoozetabs@mozilla.com,speaktome@mozilla.com,hoverpad@mozilla.com");
 
 // Require signed add-ons by default
 pref("extensions.langpacks.signatures.required", true);
@@ -324,13 +317,18 @@ pref("browser.urlbar.openintab", false);
 pref("browser.urlbar.usepreloadedtopurls.enabled", false);
 pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 
-// Whether the quantum bar displays the major design update.
-pref("browser.urlbar.megabar", false);
-// Whether we expand the font size when the megabar is focused.
-pref("browser.urlbar.megabar.expandTextOnFocus", false);
-// Whether the megabar displays the permanent search icon.
-pref("browser.urlbar.searchIcon", false);
-pref("browser.urlbar.view.stripHttps", false);
+#ifdef NIGHTLY_BUILD
+  // Whether the quantum bar displays design update 1.
+  pref("browser.urlbar.update1", true);
+  // Whether the urlbar should strip https from urls in the view.
+  pref("browser.urlbar.update1.view.stripHttps", true);
+#else
+  pref("browser.urlbar.update1", false);
+  pref("browser.urlbar.update1.view.stripHttps", false);
+#endif
+// Whether we expand the font size when when the urlbar is
+// focused in design update 1.
+pref("browser.urlbar.update1.expandTextOnFocus", false);
 
 pref("browser.urlbar.openViewOnFocus", false);
 pref("browser.urlbar.eventTelemetry.enabled", false);
@@ -403,28 +401,17 @@ pref("permissions.manager.defaultsUrl", "resource://app/defaults/permissions");
 pref("permissions.default.camera", 0);
 pref("permissions.default.microphone", 0);
 pref("permissions.default.geo", 0);
+pref("permissions.default.xr", 0);
 pref("permissions.default.desktop-notification", 0);
 pref("permissions.default.shortcuts", 0);
 
+pref("permissions.delegation.enabled", true);
 pref("permissions.desktop-notification.postPrompt.enabled", true);
 pref("permissions.desktop-notification.notNow.enabled", false);
 
 pref("permissions.fullscreen.allowed", false);
 
 pref("permissions.postPrompt.animate", true);
-
-// This is primarily meant to be enabled for studies.
-#ifdef NIGHTLY_BUILD
-  pref("permissions.eventTelemetry.enabled", true);
-#else
-  pref("permissions.eventTelemetry.enabled", false);
-#endif
-
-#ifdef NIGHTLY_BUILD
-  pref("permissions.delegation.enable", true);
-#else
-  pref("permissions.delegation.enable", false);
-#endif
 
 // handle links targeting new windows
 // 1=current window/tab, 2=new window, 3=new tab in most recent window
@@ -516,13 +503,7 @@ pref("browser.tabs.delayHidingAudioPlayingIconMS", 3000);
 pref("security.allow_eval_with_system_principal", false);
 pref("security.allow_eval_in_parent_process", false);
 
-#ifdef NIGHTLY_BUILD
-  pref("browser.tabs.remote.useHTTPResponseProcessSelection", true);
-#else
-  // Disabled outside of nightly due to bug 1554217
-  pref("browser.tabs.remote.useHTTPResponseProcessSelection", false);
-#endif
-
+pref("security.allow_parent_unrestricted_js_loads", false);
 
 // Unload tabs when available memory is running low
 pref("browser.tabs.unloadOnLowMemory", false);
@@ -830,6 +811,7 @@ pref("gecko.handlerService.schemes.ircs.3.name", "chrome://browser-region/locale
 pref("gecko.handlerService.schemes.ircs.3.uriTemplate", "chrome://browser-region/locale/region.properties");
 
 pref("browser.geolocation.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/geolocation/");
+pref("browser.xr.warning.infoURL", "https://www.mozilla.org/%LOCALE%/firefox/xr/");
 
 pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.resume_session_once", false);
@@ -1321,11 +1303,9 @@ pref("trailhead.firstrun.branches", "");
 
 // The pref that controls if the What's New panel is enabled.
 pref("browser.messaging-system.whatsNewPanel.enabled", true);
-// Whether to use Messaging System to add a badge to the FxA toolbar button
-pref("browser.messaging-system.fxatoolbarbadge.enabled", true);
 // Used for CFR messages with scores. See Bug 1594422.
 pref("browser.messaging-system.personalized-cfr.scores", "{}");
-pref("browser.messaging-system.personalized-cfr.score-threshold", "0.0");
+pref("browser.messaging-system.personalized-cfr.score-threshold", 5000);
 
 // Enable the DOM fullscreen API.
 pref("full-screen-api.enabled", true);
@@ -1513,7 +1493,11 @@ pref("media.videocontrols.picture-in-picture.enabled", true);
 pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
 
 // Show the audio toggle for Picture-in-Picture.
-pref("media.videocontrols.picture-in-picture.audio-toggle.enabled", false);
+#ifdef NIGHTLY_BUILD
+  pref("media.videocontrols.picture-in-picture.audio-toggle.enabled", true);
+#else
+  pref("media.videocontrols.picture-in-picture.audio-toggle.enabled", false);
+#endif
 
 pref("browser.translation.detectLanguage", false);
 pref("browser.translation.neverForLanguages", "");
@@ -1719,6 +1703,8 @@ pref("view_source.tab", true);
 
 pref("dom.serviceWorkers.enabled", true);
 
+pref("dom.security.featurePolicy.enabled", true);
+
 // Enable Push API.
 pref("dom.push.enabled", true);
 
@@ -1749,17 +1735,10 @@ pref("extensions.pocket.enabled", true);
 pref("extensions.pocket.oAuthConsumerKey", "40249-e88c401e1b1f2242d9e441c4");
 pref("extensions.pocket.site", "getpocket.com");
 
-pref("signon.generation.available", true);
-pref("signon.generation.enabled", true);
-pref("signon.schemeUpgrades", true);
-pref("signon.privateBrowsingCapture.enabled", true);
-pref("signon.showAutoCompleteFooter", true);
 pref("signon.management.page.enabled", true);
 pref("signon.management.page.breach-alerts.enabled", true);
 pref("signon.management.page.sort", "name");
 pref("signon.management.overrideURI", "about:logins?filter=%DOMAIN%");
-pref("signon.showAutoCompleteOrigins", true);
-pref("signon.includeOtherSubdomainsInLookup", true);
 // The utm_creative value is appended within the code (specific to the location on
 // where it is clicked). Be sure that if these two prefs are updated, that
 // the utm_creative param be last.
@@ -1853,6 +1832,8 @@ pref("app.normandy.first_run", true);
 pref("app.normandy.logging.level", 50); // Warn
 pref("app.normandy.run_interval_seconds", 21600); // 6 hours
 pref("app.normandy.shieldLearnMoreUrl", "https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/shield");
+pref("app.normandy.last_seen_buildid", "");
+pref("app.normandy.onsync_skew_sec", 600);
 #ifdef MOZ_DATA_REPORTING
   pref("app.shield.optoutstudies.enabled", true);
 #else
@@ -2077,17 +2058,6 @@ pref("devtools.performance.ui.enable-memory-flame", false);
   pref("devtools.performance.ui.experimental", false);
 #endif
 
-// Preferences for the new performance panel. This pref configures the base URL
-// for the profiler.firefox.com instance to use. This is useful so that a
-// developer can change it while working on profiler.firefox.com, or in tests.
-// This isn't exposed directly to the user.
-pref("devtools.performance.recording.ui-base-url", "https://profiler.firefox.com");
-
-// A JSON array of strings, where each string is a file path to an objdir on
-// the host machine. This is used in order to look up symbol information from
-// build artifacts of local builds.
-pref("devtools.performance.recording.objdirs", "[]");
-
 // The default cache UI setting
 pref("devtools.cache.disabled", false);
 
@@ -2171,6 +2141,10 @@ pref("devtools.webconsole.filter.netxhr", false);
 
 // Webconsole autocomplete preference
 pref("devtools.webconsole.input.autocomplete",true);
+
+// Set to true to eagerly show the results of webconsole terminal evaluations
+// when they don't have side effects.
+pref("devtools.webconsole.input.eagerEvaluation", false);
 
 // Browser console filters
 pref("devtools.browserconsole.filter.error", true);
@@ -2264,7 +2238,14 @@ pref("devtools.responsive.reloadNotification.enabled", true);
 pref("devtools.responsive.touchSimulation.enabled", false);
 // Whether or not meta viewport is enabled, if and only if touchSimulation
 // is also enabled.
-pref("devtools.responsive.metaViewport.enabled", false);
+// For now this is only available in nightly, dev-edition and early betas. It is planned
+// to be gradually rolled out with release 72. Starting with 73, this pref needs to be set
+// to true on all channels.
+#if defined(EARLY_BETA_OR_EARLIER) || defined(MOZ_DEV_EDITION)
+  pref("devtools.responsive.metaViewport.enabled", true);
+#else
+  pref("devtools.responsive.metaViewport.enabled", false);
+#endif
 // The user agent of the viewport.
 pref("devtools.responsive.userAgent", "");
 // Whether or not the RDM UI is embedded in the browser.

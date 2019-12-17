@@ -87,7 +87,7 @@ mochitest-harness:
     worker:
         by-platform:
             linux64.*:
-                docker-image: {in-tree: "desktop1604-test"}
+                docker-image: {in-tree: "ubuntu1804-test"}
                 max-run-time: 3600
     run:
         using: run-task
@@ -140,6 +140,22 @@ mozharness:
         cwd: '{checkout}/testing/mozharness'
         command: >
             /usr/local/bin/tox -e py27-hg4.3
+    when:
+        files-changed:
+            - 'testing/mozharness/**'
+
+mozharness-py3:
+    description: mozharness integration tests
+    treeherder:
+        tier: 3
+        symbol: py3(mh)
+    run:
+        using: run-task
+        cache-dotcache: true
+        cwd: '{checkout}/testing/mozharness'
+        command: >
+            /usr/local/bin/tox -e py35-hg4.3
+    run-on-projects: ['mozilla-central', 'try']
     when:
         files-changed:
             - 'testing/mozharness/**'
@@ -229,7 +245,7 @@ reftest-harness:
     worker:
         by-platform:
             linux64.*:
-                docker-image: {in-tree: "desktop1604-test"}
+                docker-image: {in-tree: "ubuntu1804-test"}
                 max-run-time: 3600
     run:
         using: run-task
@@ -322,4 +338,3 @@ condprof:
         files-changed:
             - 'testing/condprofile/condprof**'
             - 'testing/condprofile/setup.py'
-

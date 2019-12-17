@@ -18,7 +18,6 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/Unused.h"
 #include "nsContentUtils.h"
-#include "nsICertOverrideService.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIPrompt.h"
 #include "nsIProtocolProxyService.h"
@@ -1401,8 +1400,10 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
   } else {
     if (mozilla::net::SSLTokensCache::IsEnabled()) {
       RebuildCertificateInfoFromSSLTokenCache(infoObject);
+      infoObject->NoteSessionResumptionTime(true);
     } else {
       RebuildVerifiedCertificateInformation(fd, infoObject);
+      infoObject->NoteSessionResumptionTime(false);
     }
   }
 

@@ -105,7 +105,7 @@
                   </hbox>
                 </vbox>
                 <vbox class="content-blocking-warning reload-tabs" hidden="true">
-                  <hbox class="indent">
+                  <html:div class="indent">
                     <vbox>
                       <spacer flex="1"/>
                       <hbox>
@@ -126,7 +126,7 @@
                               data-l10n-id="content-blocking-reload-tabs-button"/>
                       <spacer flex="1"/>
                     </vbox>
-                  </hbox>
+                  </html:div>
                 </vbox>
               </vbox>
             </vbox>
@@ -189,7 +189,7 @@
                   </hbox>
                 </vbox>
                 <vbox class="content-blocking-warning reload-tabs" hidden="true">
-                  <hbox class="indent">
+                  <html:div class="indent">
                     <vbox>
                       <spacer flex="1"/>
                       <hbox>
@@ -210,7 +210,7 @@
                               data-l10n-id="content-blocking-reload-tabs-button"/>
                       <spacer flex="1"/>
                     </vbox>
-                  </hbox>
+                  </html:div>
                 </vbox>
                 <vbox class="content-blocking-warning">
                   <vbox class="indent">
@@ -305,7 +305,7 @@
                             aria-describedby="contentBlockingCustomDesc"/>
                 </hbox>
               <vbox class="content-blocking-warning reload-tabs" hidden="true">
-                <hbox class="indent">
+                <html:div class="indent">
                   <vbox>
                     <spacer flex="1"/>
                     <hbox>
@@ -326,7 +326,7 @@
                             data-l10n-id="content-blocking-reload-tabs-button"/>
                     <spacer flex="1"/>
                   </vbox>
-                </hbox>
+                </html:div>
               </vbox>
               <vbox class="content-blocking-warning">
                 <vbox class="indent">
@@ -776,6 +776,30 @@
                 " />
       </hbox>
     </hbox>
+
+    <hbox id="xrSettingsRow" align="center" role="group" aria-labelledby="xrPermissionsLabel">
+      <description flex="1">
+        <image class="xr-icon permission-icon" />
+        <separator orient="vertical" class="thin"/>
+        <label id="xrPermissionsLabel" data-l10n-id="permissions-xr"/>
+      </description>
+      <hbox pack="end">
+        <button id="xrSettingsButton"
+                is="highlightable-button"
+                class="accessory-button"
+                data-l10n-id="permissions-xr-settings"
+                search-l10n-ids="
+                  permissions-remove.label,
+                  permissions-remove-all.label,
+                  permissions-button-cancel.label,
+                  permissions-button-ok.label,
+                  permissions-site-xr-window.title,
+                  permissions-site-xr-desc,
+                  permissions-site-xr-disable-label,
+                  permissions-site-xr-disable-desc,
+                " />
+      </hbox>
+    </hbox>
   </vbox>
 
   <separator flex="1"/>
@@ -852,6 +876,21 @@
     <label id="dataCollectionPrivacyNotice"
            class="learnMore" is="text-link"
            data-l10n-id="collection-privacy-notice"/>
+  </description>
+  <description>
+    <hbox id="telemetry-container" align="stretch" flex="1" hidden="true">
+      <hbox align="top">
+        <image class="info-icon-telemetry" flex="1"></image>
+      </hbox>
+      <hbox align="center" id="dataDescriptionBox" flex="1">
+        <html:span id="telemetryDisabledDescription" class="tail-with-learn-more" data-l10n-id="collection-health-report-telemetry-disabled"/>
+      </hbox>
+      <hbox>
+          <button id="telemetryDataDeletionLearnMore"
+                 class="learnMore" is="text-link"
+                 data-l10n-id="collection-health-report-telemetry-disabled-link"/>
+      </hbox>
+    </hbox>
   </description>
   <vbox data-subcategory="reports">
     <description flex="1">

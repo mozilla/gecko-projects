@@ -23,6 +23,7 @@ const { getPrefsService } = require("devtools/client/webconsole/utils/prefs");
 const { reducers } = require("./reducers/index");
 
 // Middlewares
+const { ignore } = require("devtools/client/shared/redux/middleware/ignore");
 const eventTelemetry = require("./middleware/event-telemetry");
 const historyPersistence = require("./middleware/history-persistence");
 const {
@@ -48,6 +49,7 @@ function configureStore(webConsoleUI, options = {}) {
     options.logLimit || Math.max(getIntPref("devtools.hud.loglimit"), 1);
   const sidebarToggle = getBoolPref(PREFS.FEATURES.SIDEBAR_TOGGLE);
   const autocomplete = getBoolPref(PREFS.FEATURES.AUTOCOMPLETE);
+  const eagerEvaluation = getBoolPref(PREFS.FEATURES.EAGER_EVALUATION);
   const groupWarnings = getBoolPref(PREFS.FEATURES.GROUP_WARNINGS);
   const historyCount = getIntPref(PREFS.UI.INPUT_HISTORY_COUNT);
 
@@ -56,6 +58,7 @@ function configureStore(webConsoleUI, options = {}) {
       logLimit,
       sidebarToggle,
       autocomplete,
+      eagerEvaluation,
       historyCount,
       groupWarnings,
     }),
@@ -72,9 +75,10 @@ function configureStore(webConsoleUI, options = {}) {
     ui: UiState({
       networkMessageActiveTabId: "headers",
       persistLogs: getBoolPref(PREFS.UI.PERSIST),
-      showContentMessages: webConsoleUI.isBrowserConsole
-        ? getBoolPref(PREFS.UI.CONTENT_MESSAGES)
-        : true,
+      showContentMessages:
+        webConsoleUI.isBrowserConsole || webConsoleUI.isBrowserToolboxConsole
+          ? getBoolPref(PREFS.UI.CONTENT_MESSAGES)
+          : true,
       editor: getBoolPref(PREFS.UI.EDITOR),
       editorWidth: getIntPref(PREFS.UI.EDITOR_WIDTH),
       showEditorOnboarding: getBoolPref(PREFS.UI.EDITOR_ONBOARDING),
@@ -83,6 +87,7 @@ function configureStore(webConsoleUI, options = {}) {
   };
 
   const middleware = applyMiddleware(
+    ignore,
     thunkWithOptions.bind(null, {
       prefsService,
       ...options.thunkArgs,

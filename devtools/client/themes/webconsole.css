@@ -499,6 +499,10 @@ html #webconsole-notificationbox {
   fill: var(--theme-icon-checked-color);
 }
 
+.eager-evaluation-result * {
+  color: var(--theme-comment) !important;
+}
+
 .webconsole-app .cm-auto-complete-shadow-text::after {
   content: attr(title);
   color: var(--theme-comment);
@@ -834,13 +838,14 @@ a.learn-more-link.webconsole-learn-more-link {
   padding: 5px 4px;
   font-weight: inherit;
   z-index: 1;
+  text-overflow: ellipsis;
 }
 
 .new-consoletable > [role="gridcell"] {
   background-color: var(--theme-body-background);
-  padding: 3px 4px;
-  min-width: 100px;
   color: var(--theme-body-color);
+  padding: 3px 4px;
+  text-overflow: ellipsis;
 }
 
 .new-consoletable > [role="gridcell"].even {

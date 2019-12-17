@@ -431,7 +431,7 @@ template <>
 void BaselineInterpreterCodeGen::loadScriptAtom(Register index, Register dest) {
   MOZ_ASSERT(index != dest);
   loadScript(dest);
-  masm.loadPtr(Address(dest, JSScript::offsetOfScriptData()), dest);
+  masm.loadPtr(Address(dest, JSScript::offsetOfSharedData()), dest);
   masm.loadPtr(
       BaseIndex(dest, index, ScalePointer, RuntimeScriptData::offsetOfAtoms()),
       dest);
@@ -483,7 +483,7 @@ void BaselineInterpreterCodeGen::emitInitializeLocals() {
 
   Register scratch = R0.scratchReg();
   loadScript(scratch);
-  masm.loadPtr(Address(scratch, JSScript::offsetOfScriptData()), scratch);
+  masm.loadPtr(Address(scratch, JSScript::offsetOfSharedData()), scratch);
   masm.loadPtr(Address(scratch, RuntimeScriptData::offsetOfISD()), scratch);
   masm.load32(Address(scratch, ImmutableScriptData::offsetOfNfixed()), scratch);
 
@@ -826,7 +826,7 @@ void BaselineInterpreterCodeGen::subtractScriptSlotsSize(Register reg,
   // reg = reg - script->nslots() * sizeof(Value)
   MOZ_ASSERT(reg != scratch);
   loadScript(scratch);
-  masm.loadPtr(Address(scratch, JSScript::offsetOfScriptData()), scratch);
+  masm.loadPtr(Address(scratch, JSScript::offsetOfSharedData()), scratch);
   masm.loadPtr(Address(scratch, RuntimeScriptData::offsetOfISD()), scratch);
   masm.load32(Address(scratch, ImmutableScriptData::offsetOfNslots()), scratch);
   static_assert(sizeof(Value) == 8,
@@ -949,7 +949,7 @@ void BaselineInterpreterCodeGen::loadScriptGCThing(ScriptGCThingType type,
 
   // Load the GCCellPtr.
   loadScript(dest);
-  masm.loadPtr(Address(dest, JSScript::offsetOfPrivateScriptData()), dest);
+  masm.loadPtr(Address(dest, JSScript::offsetOfPrivateData()), dest);
   masm.loadPtr(BaseIndex(dest, scratch, ScalePointer,
                          PrivateScriptData::offsetOfGCThings()),
                dest);
@@ -1143,7 +1143,7 @@ void BaselineInterpreterCodeGen::emitInitFrameFields(Register nonFunctionEnv) {
   masm.storePtr(scratch2, frame.addressOfInterpreterICEntry());
 
   // Initialize interpreter pc.
-  masm.loadPtr(Address(scratch1, JSScript::offsetOfScriptData()), scratch1);
+  masm.loadPtr(Address(scratch1, JSScript::offsetOfSharedData()), scratch1);
   masm.loadPtr(Address(scratch1, RuntimeScriptData::offsetOfISD()), scratch1);
   masm.addPtr(Imm32(ImmutableScriptData::offsetOfCode()), scratch1);
 
@@ -1259,8 +1259,12 @@ bool BaselineCodeGen<Handler>::emitInterruptCheck() {
 
   prepareVMCall();
 
+  // Use a custom RetAddrEntry::Kind so DebugModeOSR can distinguish this call
+  // from other callVMs that might happen at this pc.
+  const RetAddrEntry::Kind kind = RetAddrEntry::Kind::InterruptCheck;
+
   using Fn = bool (*)(JSContext*);
-  if (!callVM<Fn, InterruptCheck>()) {
+  if (!callVM<Fn, InterruptCheck>(kind)) {
     return false;
   }
 
@@ -1278,7 +1282,7 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
   // if --ion-eager is used.
   JSScript* script = handler.script();
   jsbytecode* pc = handler.pc();
-  if (JSOp(*pc) == JSOP_LOOPENTRY) {
+  if (JSOp(*pc) == JSOP_LOOPHEAD) {
     uint32_t pcOffset = script->pcToOffset(pc);
     uint32_t nativeOffset = masm.currentOffset();
     if (!handler.osrEntries().emplaceBack(pcOffset, nativeOffset)) {
@@ -1305,15 +1309,10 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
   masm.add32(Imm32(1), countReg);
   masm.store32(countReg, warmUpCounterAddr);
 
-  if (JSOp(*pc) == JSOP_LOOPENTRY) {
+  if (JSOp(*pc) == JSOP_LOOPHEAD) {
     // If this is a loop inside a catch or finally block, increment the warmup
     // counter but don't attempt OSR (Ion only compiles the try block).
-    if (handler.analysis().info(pc).loopEntryInCatchOrFinally) {
-      return true;
-    }
-
-    if (!LoopEntryCanIonOsr(pc)) {
-      // OSR into Ion not possible at this loop entry.
+    if (handler.analysis().info(pc).loopHeadInCatchOrFinally) {
       return true;
     }
   }
@@ -1334,7 +1333,7 @@ bool BaselineCompilerCodeGen::emitWarmUpCounterIncrement() {
                  &done);
 
   // Try to compile and/or finish a compilation.
-  if (JSOp(*pc) == JSOP_LOOPENTRY) {
+  if (JSOp(*pc) == JSOP_LOOPHEAD) {
     // Try to OSR into Ion.
     computeFrameSize(R0.scratchReg());
 
@@ -2241,7 +2240,13 @@ bool BaselineCodeGen<Handler>::emit_JSOP_LOOPHEAD() {
   if (!emit_JSOP_JUMPTARGET()) {
     return false;
   }
-  return emitInterruptCheck();
+  if (!emitInterruptCheck()) {
+    return false;
+  }
+  if (!emitWarmUpCounterIncrement()) {
+    return false;
+  }
+  return emitIncExecutionProgressCounter(R0.scratchReg());
 }
 
 template <typename Handler>
@@ -2258,19 +2263,6 @@ bool BaselineCodeGen<Handler>::emitIncExecutionProgressCounter(
   };
   return emitTestScriptFlag(JSScript::MutableFlags::TrackRecordReplayProgress,
                             true, incCounter, scratch);
-}
-
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_JSOP_LOOPENTRY() {
-  if (!emit_JSOP_JUMPTARGET()) {
-    return false;
-  }
-  frame.syncStack(0);
-  if (!emitWarmUpCounterIncrement()) {
-    return false;
-  }
-
-  return emitIncExecutionProgressCounter(R0.scratchReg());
 }
 
 template <typename Handler>
@@ -3058,18 +3050,21 @@ bool BaselineCodeGen<Handler>::emit_JSOP_INITELEM_ARRAY() {
 
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emit_JSOP_NEWOBJECT() {
-  frame.syncStack(0);
+  return emitNewObject();
+}
 
-  if (!emitNextIC()) {
-    return false;
-  }
-
-  frame.push(R0);
-  return true;
+template <typename Handler>
+bool BaselineCodeGen<Handler>::emit_JSOP_NEWOBJECT_WITHGROUP() {
+  return emitNewObject();
 }
 
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emit_JSOP_NEWINIT() {
+  return emitNewObject();
+}
+
+template <typename Handler>
+bool BaselineCodeGen<Handler>::emitNewObject() {
   frame.syncStack(0);
 
   if (!emitNextIC()) {
@@ -4853,7 +4848,7 @@ void BaselineCodeGen<Handler>::emitInterpJumpToResumeEntry(Register script,
                                                            Register resumeIndex,
                                                            Register scratch) {
   // Load JSScript::immutableScriptData() into |script|.
-  masm.loadPtr(Address(script, JSScript::offsetOfScriptData()), script);
+  masm.loadPtr(Address(script, JSScript::offsetOfSharedData()), script);
   masm.loadPtr(Address(script, RuntimeScriptData::offsetOfISD()), script);
 
   // Load the resume pcOffset in |resumeIndex|.
@@ -5586,6 +5581,10 @@ bool BaselineCodeGen<Handler>::emit_JSOP_ISNOITER() {
 
 template <typename Handler>
 bool BaselineCodeGen<Handler>::emit_JSOP_ENDITER() {
+  // Pop iterator value.
+  frame.pop();
+
+  // Pop the iterator object to close in R0.
   frame.popRegsAndSync(1);
 
   AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
@@ -6934,6 +6933,7 @@ MethodStatus BaselineCompiler::emitBody() {
       case JSOP_UNUSED106:
       case JSOP_UNUSED120:
       case JSOP_UNUSED149:
+      case JSOP_UNUSED227:
       case JSOP_LIMIT:
         MOZ_CRASH("Unexpected op");
 

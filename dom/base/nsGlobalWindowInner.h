@@ -28,7 +28,6 @@
 #include "nsIDOMChromeWindow.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptObjectPrincipal.h"
-#include "nsITimer.h"
 #include "mozilla/EventListenerManager.h"
 #include "nsIPrincipal.h"
 #include "nsSize.h"
@@ -372,6 +371,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   bool HasUsedVR() const;
   bool IsVRContentDetected() const;
   bool IsVRContentPresenting() const;
+  void RequestXRPermission();
+  void OnXRPermissionRequestAllow();
+  void OnXRPermissionRequestCancel();
 
   using EventTarget::EventListenerAdded;
   virtual void EventListenerAdded(nsAtom* aType) override;
@@ -1242,7 +1244,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   void RemoveIdleCallback(mozilla::dom::IdleRequest* aRequest);
 
   void SetActiveLoadingState(bool aIsLoading) override;
-  void AddDeprioritizedLoadRunner(nsIRunnable* aRunner) override;
 
  protected:
   // Window offline status. Checked to see if we need to fire offline event
@@ -1287,9 +1288,25 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   // Indicates whether this window wants VRDisplayActivate events
   bool mHasVRDisplayActivateEvents : 1;
+
+  // Indicates that an XR permission request has been requested
+  // but has not yet been resolved.
+  bool mXRPermissionRequestInFlight : 1;
+
+  // Indicates that an XR permission request has been granted.
+  // The page should not request permission multiple times.
+  bool mXRPermissionGranted : 1;
+
+  // True if this was the currently-active inner window for a BrowsingContext at
+  // the time it was discarded.
+  bool mWasCurrentInnerWindow : 1;
+  void SetWasCurrentInnerWindow() { mWasCurrentInnerWindow = true; }
+  bool WasCurrentInnerWindow() const override { return mWasCurrentInnerWindow; }
+
+  bool mHasSeenGamepadInput : 1;
+
   nsCheapSet<nsUint32HashKey> mGamepadIndexSet;
   nsRefPtrHashtable<nsUint32HashKey, mozilla::dom::Gamepad> mGamepads;
-  bool mHasSeenGamepadInput;
 
   RefPtr<nsScreen> mScreen;
 
@@ -1413,28 +1430,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   nsTArray<mozilla::UniquePtr<PromiseDocumentFlushedResolver>>
       mDocumentFlushedResolvers;
-
-  class DeprioritizedLoadRunner
-      : public mozilla::Runnable,
-        public mozilla::LinkedListElement<DeprioritizedLoadRunner> {
-   public:
-    explicit DeprioritizedLoadRunner(nsIRunnable* aInner)
-        : Runnable("DeprioritizedLoadRunner"), mInner(aInner) {}
-
-    NS_IMETHOD Run() override {
-      if (mInner) {
-        RefPtr<nsIRunnable> inner = std::move(mInner);
-        inner->Run();
-      }
-
-      return NS_OK;
-    }
-
-   private:
-    RefPtr<nsIRunnable> mInner;
-  };
-
-  mozilla::LinkedList<DeprioritizedLoadRunner> mDeprioritizedLoadRunner;
 
   static InnerWindowByIdTable* sInnerWindowsById;
 

@@ -47,7 +47,7 @@ dnl Set the version number of the libs included with mozilla
 dnl ========================================================
 MOZPNG=10635
 NSPR_VERSION=4
-NSPR_MINVER=4.23
+NSPR_MINVER=4.24
 NSS_VERSION=3
 
 dnl Set the minimum version of toolkit libs used by mozilla
@@ -206,8 +206,6 @@ case "$target" in
 
         WRAP_STL_INCLUDES=1
         STL_FLAGS="-I${DIST}/stl_wrappers"
-        CFLAGS="$CFLAGS -D_HAS_EXCEPTIONS=0"
-        CXXFLAGS="$CXXFLAGS -D_HAS_EXCEPTIONS=0"
     else
         # Check w32api version
         _W32API_MAJOR_VERSION=`echo $W32API_VERSION | $AWK -F\. '{ print $1 }'`
@@ -228,6 +226,9 @@ case "$target" in
         # causing problems with local implementations with the same name.
         AC_DEFINE(STRSAFE_NO_DEPRECATE)
     fi # !GNU_CC
+
+    CFLAGS="$CFLAGS -D_HAS_EXCEPTIONS=0"
+    CXXFLAGS="$CXXFLAGS -D_HAS_EXCEPTIONS=0"
 
     AC_DEFINE_UNQUOTED(WINVER,0x$WINVER)
     AC_DEFINE_UNQUOTED(_WIN32_WINNT,0x$WINVER)
@@ -1507,7 +1508,7 @@ MOZ_ARG_WITH_BOOL(system-nss,
     _USE_SYSTEM_NSS=1 )
 
 if test -n "$_USE_SYSTEM_NSS"; then
-    AM_PATH_NSS(3.48, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
+    AM_PATH_NSS(3.49, [MOZ_SYSTEM_NSS=1], [AC_MSG_ERROR([you don't have NSS installed or your version is too old])])
 fi
 
 NSS_CFLAGS="$NSS_CFLAGS -I${DIST}/include/nss"

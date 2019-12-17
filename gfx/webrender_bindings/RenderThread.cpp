@@ -45,6 +45,8 @@ static StaticRefPtr<RenderThread> sRenderThread;
 
 RenderThread::RenderThread(base::Thread* aThread)
     : mThread(aThread),
+      mThreadPool(false),
+      mThreadPoolLP(true),
       mWindowInfos("RenderThread.mWindowInfos"),
       mRenderTextureMapLock("RenderThread.mRenderTextureMapLock"),
       mHasShutdown(false),
@@ -118,6 +120,7 @@ void RenderThread::ShutDownTask(layers::SynchronousTask* aTask) {
 
   // Let go of our handle to the (internally ref-counted) thread pool.
   mThreadPool.Release();
+  mThreadPoolLP.Release();
 
   // Releasing on the render thread will allow us to avoid dispatching to remove
   // remaining textures from the texture map.
@@ -503,6 +506,12 @@ void RenderThread::UpdateAndRender(
     renderer->WaitForGPU();
   }
 
+  if (!aRender) {
+    // Update frame id for NotifyPipelinesUpdated() when rendering does not
+    // happen.
+    latestFrameId = renderer->UpdateFrameId();
+  }
+
   RenderedFrameId lastCompletedFrameId = renderer->GetLastCompletedFrameId();
 
   RefPtr<layers::AsyncImagePipelineManager> pipelineMgr =
@@ -861,8 +870,8 @@ WebRenderPipelineInfo::~WebRenderPipelineInfo() {
   wr_pipeline_info_delete(mPipelineInfo);
 }
 
-WebRenderThreadPool::WebRenderThreadPool() {
-  mThreadPool = wr_thread_pool_new();
+WebRenderThreadPool::WebRenderThreadPool(bool low_priority) {
+  mThreadPool = wr_thread_pool_new(low_priority);
 }
 
 WebRenderThreadPool::~WebRenderThreadPool() { Release(); }

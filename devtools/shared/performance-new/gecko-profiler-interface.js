@@ -18,6 +18,11 @@ loader.lazyImporter(
 );
 
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
+loader.lazyRequireGetter(
+  this,
+  "RecordingUtils",
+  "devtools/shared/performance-new/recording-utils"
+);
 
 // Some platforms are built without the Gecko Profiler.
 const IS_SUPPORTED_PLATFORM = "nsIProfiler" in Ci;
@@ -96,6 +101,7 @@ class ActorReadyGeckoProfilerInterface {
         "leaf",
       ],
       threads: options.threads || ["GeckoMain", "Compositor"],
+      activeBrowsingContextID: RecordingUtils.getActiveBrowsingContextID(),
     };
 
     try {
@@ -105,6 +111,7 @@ class ActorReadyGeckoProfilerInterface {
         settings.interval,
         settings.features,
         settings.threads,
+        settings.activeBrowsingContextID,
         settings.duration
       );
     } catch (e) {
@@ -216,7 +223,8 @@ class ActorReadyGeckoProfilerInterface {
           param.entries,
           param.interval,
           param.features,
-          param.duration
+          param.duration,
+          param.activeBrowsingContextID
         );
         break;
       case "profiler-stopped":
@@ -235,6 +243,24 @@ class ActorReadyGeckoProfilerInterface {
       return [];
     }
     return Services.profiler.GetFeatures();
+  }
+
+  /**
+   * @param {string} type
+   * @param {() => void} listener
+   */
+  on(type, listener) {
+    // This is a stub for TypeScript. This function is assigned by the EventEmitter
+    // decorator.
+  }
+
+  /**
+   * @param {string} type
+   * @param {() => void} listener
+   */
+  off(type, listener) {
+    // This is a stub for TypeScript. This function is assigned by the EventEmitter
+    // decorator.
   }
 }
 

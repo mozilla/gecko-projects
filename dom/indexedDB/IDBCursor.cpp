@@ -76,9 +76,9 @@ IDBCursor::~IDBCursor() {
 }
 
 // static
-already_AddRefed<IDBCursor> IDBCursor::Create(
-    BackgroundCursorChild* aBackgroundActor, Key aKey,
-    StructuredCloneReadInfo&& aCloneInfo) {
+RefPtr<IDBCursor> IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
+                                    Key aKey,
+                                    StructuredCloneReadInfo&& aCloneInfo) {
   MOZ_ASSERT(aBackgroundActor);
   aBackgroundActor->AssertIsOnOwningThread();
   MOZ_ASSERT(aBackgroundActor->GetObjectStore());
@@ -90,12 +90,12 @@ already_AddRefed<IDBCursor> IDBCursor::Create(
 
   cursor->mCloneInfo = std::move(aCloneInfo);
 
-  return cursor.forget();
+  return cursor;
 }
 
 // static
-already_AddRefed<IDBCursor> IDBCursor::Create(
-    BackgroundCursorChild* aBackgroundActor, Key aKey) {
+RefPtr<IDBCursor> IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
+                                    Key aKey) {
   MOZ_ASSERT(aBackgroundActor);
   aBackgroundActor->AssertIsOnOwningThread();
   MOZ_ASSERT(aBackgroundActor->GetObjectStore());
@@ -105,13 +105,13 @@ already_AddRefed<IDBCursor> IDBCursor::Create(
   RefPtr<IDBCursor> cursor =
       new IDBCursor(Type_ObjectStoreKey, aBackgroundActor, std::move(aKey));
 
-  return cursor.forget();
+  return cursor;
 }
 
 // static
-already_AddRefed<IDBCursor> IDBCursor::Create(
-    BackgroundCursorChild* aBackgroundActor, Key aKey, Key aSortKey,
-    Key aPrimaryKey, StructuredCloneReadInfo&& aCloneInfo) {
+RefPtr<IDBCursor> IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
+                                    Key aKey, Key aSortKey, Key aPrimaryKey,
+                                    StructuredCloneReadInfo&& aCloneInfo) {
   MOZ_ASSERT(aBackgroundActor);
   aBackgroundActor->AssertIsOnOwningThread();
   MOZ_ASSERT(aBackgroundActor->GetIndex());
@@ -126,13 +126,12 @@ already_AddRefed<IDBCursor> IDBCursor::Create(
   cursor->mPrimaryKey = std::move(aPrimaryKey);
   cursor->mCloneInfo = std::move(aCloneInfo);
 
-  return cursor.forget();
+  return cursor;
 }
 
 // static
-already_AddRefed<IDBCursor> IDBCursor::Create(
-    BackgroundCursorChild* aBackgroundActor, Key aKey, Key aSortKey,
-    Key aPrimaryKey) {
+RefPtr<IDBCursor> IDBCursor::Create(BackgroundCursorChild* aBackgroundActor,
+                                    Key aKey, Key aSortKey, Key aPrimaryKey) {
   MOZ_ASSERT(aBackgroundActor);
   aBackgroundActor->AssertIsOnOwningThread();
   MOZ_ASSERT(aBackgroundActor->GetIndex());
@@ -146,7 +145,7 @@ already_AddRefed<IDBCursor> IDBCursor::Create(
   cursor->mSortKey = std::move(aSortKey);
   cursor->mPrimaryKey = std::move(aPrimaryKey);
 
-  return cursor.forget();
+  return cursor;
 }
 
 // static
@@ -195,7 +194,7 @@ void IDBCursor::DropJSObjects() {
 bool IDBCursor::IsSourceDeleted() const {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mTransaction);
-  MOZ_ASSERT(mTransaction->IsOpen());
+  MOZ_ASSERT(mTransaction->CanAcceptRequests());
 
   IDBObjectStore* sourceObjectStore;
   if (mType == Type_Index || mType == Type_IndexKey) {
@@ -376,7 +375,7 @@ void IDBCursor::Continue(JSContext* aCx, JS::Handle<JS::Value> aKey,
                          ErrorResult& aRv) {
   AssertIsOnOwningThread();
 
-  if (!mTransaction->IsOpen()) {
+  if (!mTransaction->CanAcceptRequests()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return;
   }
@@ -466,7 +465,7 @@ void IDBCursor::ContinuePrimaryKey(JSContext* aCx, JS::Handle<JS::Value> aKey,
                                    ErrorResult& aRv) {
   AssertIsOnOwningThread();
 
-  if (!mTransaction->IsOpen()) {
+  if (!mTransaction->CanAcceptRequests()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return;
   }
@@ -575,7 +574,7 @@ void IDBCursor::Advance(uint32_t aCount, ErrorResult& aRv) {
     return;
   }
 
-  if (!mTransaction->IsOpen()) {
+  if (!mTransaction->CanAcceptRequests()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return;
   }
@@ -613,12 +612,12 @@ void IDBCursor::Advance(uint32_t aCount, ErrorResult& aRv) {
   mContinueCalled = true;
 }
 
-already_AddRefed<IDBRequest> IDBCursor::Update(JSContext* aCx,
-                                               JS::Handle<JS::Value> aValue,
-                                               ErrorResult& aRv) {
+RefPtr<IDBRequest> IDBCursor::Update(JSContext* aCx,
+                                     JS::Handle<JS::Value> aValue,
+                                     ErrorResult& aRv) {
   AssertIsOnOwningThread();
 
-  if (!mTransaction->IsOpen()) {
+  if (!mTransaction->CanAcceptRequests()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return nullptr;
   }
@@ -628,9 +627,9 @@ already_AddRefed<IDBRequest> IDBCursor::Update(JSContext* aCx,
     return nullptr;
   }
 
-  if (mTransaction->GetMode() == IDBTransaction::CLEANUP || IsSourceDeleted() ||
-      !mHaveValue || mType == Type_ObjectStoreKey || mType == Type_IndexKey ||
-      mContinueCalled) {
+  if (mTransaction->GetMode() == IDBTransaction::Mode::Cleanup ||
+      IsSourceDeleted() || !mHaveValue || mType == Type_ObjectStoreKey ||
+      mType == Type_IndexKey || mContinueCalled) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
     return nullptr;
   }
@@ -702,7 +701,6 @@ already_AddRefed<IDBRequest> IDBCursor::Update(JSContext* aCx,
 
   if (mType == Type_ObjectStore) {
     IDB_LOG_MARK_CHILD_TRANSACTION_REQUEST(
-        " %s: Child  Transaction[%lld] Request[%llu]: "
         "database(%s).transaction(%s).objectStore(%s)."
         "cursor(%s).update(%s)",
         "IDBCursor.update()", mTransaction->LoggingSerialNumber(),
@@ -723,14 +721,13 @@ already_AddRefed<IDBRequest> IDBCursor::Update(JSContext* aCx,
         IDB_LOG_STRINGIFY(objectStore, primaryKey));
   }
 
-  return request.forget();
+  return request;
 }
 
-already_AddRefed<IDBRequest> IDBCursor::Delete(JSContext* aCx,
-                                               ErrorResult& aRv) {
+RefPtr<IDBRequest> IDBCursor::Delete(JSContext* aCx, ErrorResult& aRv) {
   AssertIsOnOwningThread();
 
-  if (!mTransaction->IsOpen()) {
+  if (!mTransaction->CanAcceptRequests()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return nullptr;
   }
@@ -795,7 +792,7 @@ already_AddRefed<IDBRequest> IDBCursor::Delete(JSContext* aCx,
         IDB_LOG_STRINGIFY(objectStore, primaryKey));
   }
 
-  return request.forget();
+  return request;
 }
 
 void IDBCursor::Reset(Key&& aKey, StructuredCloneReadInfo&& aValue) {

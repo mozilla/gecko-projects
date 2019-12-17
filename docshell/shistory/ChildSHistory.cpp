@@ -11,12 +11,10 @@
 #include "mozilla/dom/SHEntryChild.h"
 #include "mozilla/dom/SHistoryChild.h"
 #include "mozilla/StaticPrefs_fission.h"
-#include "nsIMessageManager.h"
 #include "nsComponentManagerUtils.h"
 #include "nsSHEntry.h"
 #include "nsSHistory.h"
 #include "nsDocShell.h"
-#include "nsISHEntry.h"
 #include "nsXULAppAPI.h"
 
 namespace mozilla {
@@ -90,14 +88,6 @@ void ChildSHistory::EvictLocalContentViewers() {
 }
 
 nsISHistory* ChildSHistory::LegacySHistory() { return mHistory; }
-
-ParentSHistory* ChildSHistory::GetParentIfSameProcess() {
-  if (XRE_IsContentProcess()) {
-    return nullptr;
-  }
-
-  MOZ_CRASH("Unimplemented!");
-}
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ChildSHistory)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY

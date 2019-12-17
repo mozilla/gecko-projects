@@ -21,7 +21,6 @@
 
 #include "nsCommandManager.h"
 #include "nsContentUtils.h"
-#include "nsIMutableArray.h"
 #include "nsIDocShell.h"
 #include "mozilla/dom/Document.h"
 #include "nsPIDOMWindow.h"
@@ -30,7 +29,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsImageFrame.h"
 #include "nsIPersistentProperties2.h"
-#include "nsIServiceManager.h"
 #include "nsViewManager.h"
 #include "nsIScrollableFrame.h"
 #include "nsUnicharUtils.h"
@@ -1955,7 +1953,8 @@ void DocAccessible::ProcessContentInserted(
           // previousSibling should be later in the insertion list, so the tree
           // will get adjusted when we process it later.
           MOZ_DIAGNOSTIC_ASSERT(parent == aContainer,
-            "Child moving to new parent, but previous sibling in wrong parent");
+                                "Child moving to new parent, but previous "
+                                "sibling in wrong parent");
           continue;
         }
 #ifdef A11Y_LOG

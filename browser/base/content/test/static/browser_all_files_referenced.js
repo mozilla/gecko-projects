@@ -174,9 +174,9 @@ var whitelist = [
   // Bug 1356031 (only used by devtools)
   { file: "chrome://global/skin/icons/error-16.png" },
   // Bug 1344267
-  { file: "chrome://marionette/content/test.xul" },
+  { file: "chrome://marionette/content/test.xhtml" },
   { file: "chrome://marionette/content/test_dialog.properties" },
-  { file: "chrome://marionette/content/test_dialog.xul" },
+  { file: "chrome://marionette/content/test_dialog.xhtml" },
   // Bug 1348533
   {
     file: "chrome://mozapps/skin/downloads/buttons.png",
@@ -191,7 +191,7 @@ var whitelist = [
   // Bug 1337345
   { file: "resource://gre/modules/Manifest.jsm" },
   // Bug 1356045
-  { file: "chrome://global/content/test-ipc.xul" },
+  { file: "chrome://global/content/test-ipc.xhtml" },
   // Bug 1378173 (warning: still used by devtools)
   { file: "resource://gre/modules/Promise.jsm" },
   // Bug 1494170

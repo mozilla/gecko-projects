@@ -8,19 +8,15 @@
 
 #include "mozIStorageConnection.h"
 #include "mozIStorageService.h"
-#include "mozIThirdPartyUtil.h"
-#include "nsIObjectInputStream.h"
+#include "nsIBinaryInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsIFile.h"
 #include "nsIFileStreams.h"
 #include "nsIObserverService.h"
-#include "nsIPermissionManager.h"
 #include "nsIPlatformInfo.h"
 #include "nsIPrincipal.h"
 #include "nsIRunnable.h"
-#include "nsISimpleEnumerator.h"
 #include "nsIScriptObjectPrincipal.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsISupportsPrimitives.h"
 #include "nsITimer.h"
 #include "nsIURI.h"
@@ -196,9 +192,10 @@ const char kAboutHomeOriginPrefix[] = "moz-safe-about:home";
 const char kIndexedDBOriginPrefix[] = "indexeddb://";
 const char kResourceOriginPrefix[] = "resource://";
 
-constexpr auto kStorageTelemetryKey = NS_LITERAL_CSTRING("Storage");
-constexpr auto kTempStorageTelemetryKey =
-    NS_LITERAL_CSTRING("TemporaryStorage");
+constexpr auto kPersistentOriginTelemetryKey =
+    NS_LITERAL_CSTRING("PersistentOrigin");
+constexpr auto kTemporaryOriginTelemetryKey =
+    NS_LITERAL_CSTRING("TemporaryOrigin");
 
 #define INDEXEDDB_DIRECTORY_NAME "indexedDB"
 #define STORAGE_DIRECTORY_NAME "storage"
@@ -3494,8 +3491,6 @@ QuotaManager::QuotaManager()
       mTemporaryStorageLimit(0),
       mTemporaryStorageUsage(0),
       mNextDirectoryLockId(0),
-      mStorageInitializationAttempted(false),
-      mTemporaryStorageInitializationAttempted(false),
       mTemporaryStorageInitialized(false),
       mCacheUsable(false) {
   AssertIsOnOwningThread();
@@ -4447,6 +4442,11 @@ nsresult QuotaManager::LoadQuota() {
       }
 
       rv = InitializeRepository(type);
+      mInitializationInfo.RecordFirstInitializationAttempt(
+          type == PERSISTENCE_TYPE_DEFAULT
+              ? Initialization::DefaultRepository
+              : Initialization::TemporaryRepository,
+          rv);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         RECORD_IN_NIGHTLY(statusKeeper, rv);
 #ifndef NIGHTLY_BUILD
@@ -6318,21 +6318,13 @@ nsresult QuotaManager::EnsureStorageIsInitialized() {
   AssertIsOnIOThread();
 
   if (mStorageConnection) {
-    MOZ_ASSERT(mStorageInitializationAttempted);
+    mInitializationInfo.AssertInitializationAttempted(Initialization::Storage);
     return NS_OK;
   }
 
-  auto autoReportTelemetry = MakeScopeExit([&]() {
-    Telemetry::Accumulate(Telemetry::QM_FIRST_INITIALIZATION_ATTEMPT,
-                          kStorageTelemetryKey,
-                          static_cast<uint32_t>(!!mStorageConnection));
-  });
-
-  if (mStorageInitializationAttempted) {
-    autoReportTelemetry.release();
-  }
-
-  mStorageInitializationAttempted = true;
+  const auto autoRecord = mInitializationInfo.RecordFirstInitializationAttempt(
+      Initialization::Storage,
+      [& self = *this] { return static_cast<bool>(self.mStorageConnection); });
 
   nsCOMPtr<nsIFile> storageFile;
   nsresult rv = NS_NewLocalFile(mBasePath, false, getter_AddRefs(storageFile));
@@ -6467,14 +6459,24 @@ nsresult QuotaManager::EnsureStorageIsInitialized() {
       while (storageVersion != kStorageVersion) {
         if (storageVersion == 0) {
           rv = UpgradeStorageFrom0_0To1_0(connection);
+          mInitializationInfo.RecordFirstInitializationAttempt(
+              Initialization::UpgradeStorageFrom0_0To1_0, rv);
         } else if (storageVersion == MakeStorageVersion(1, 0)) {
           rv = UpgradeStorageFrom1_0To2_0(connection);
+          mInitializationInfo.RecordFirstInitializationAttempt(
+              Initialization::UpgradeStorageFrom1_0To2_0, rv);
         } else if (storageVersion == MakeStorageVersion(2, 0)) {
           rv = UpgradeStorageFrom2_0To2_1(connection);
+          mInitializationInfo.RecordFirstInitializationAttempt(
+              Initialization::UpgradeStorageFrom2_0To2_1, rv);
         } else if (storageVersion == MakeStorageVersion(2, 1)) {
           rv = UpgradeStorageFrom2_1To2_2(connection);
+          mInitializationInfo.RecordFirstInitializationAttempt(
+              Initialization::UpgradeStorageFrom2_1To2_2, rv);
         } else if (storageVersion == MakeStorageVersion(2, 2)) {
           rv = UpgradeStorageFrom2_2To2_3(connection);
+          mInitializationInfo.RecordFirstInitializationAttempt(
+              Initialization::UpgradeStorageFrom2_2To2_3, rv);
         } else {
           NS_WARNING(
               "Unable to initialize storage, no upgrade path is "
@@ -6846,9 +6848,24 @@ nsresult QuotaManager::EnsurePersistentOriginIsInitialized(
   MOZ_ASSERT(aCreated);
   MOZ_ASSERT(mStorageConnection);
 
+  nsresult rv = NS_OK;
+
+  auto autoReportTelemetry = MakeScopeExit([&]() {
+    Telemetry::Accumulate(Telemetry::QM_FIRST_INITIALIZATION_ATTEMPT,
+                          kPersistentOriginTelemetryKey,
+                          static_cast<uint32_t>(NS_SUCCEEDED(rv)));
+  });
+
+  auto& info = mOriginInitializationInfos.GetOrInsert(aOrigin);
+  if (info.mPersistentOriginAttempted) {
+    autoReportTelemetry.release();
+  } else {
+    info.mPersistentOriginAttempted = true;
+  }
+
   nsCOMPtr<nsIFile> directory;
-  nsresult rv = GetDirectoryForOrigin(PERSISTENCE_TYPE_PERSISTENT, aOrigin,
-                                      getter_AddRefs(directory));
+  rv = GetDirectoryForOrigin(PERSISTENCE_TYPE_PERSISTENT, aOrigin,
+                             getter_AddRefs(directory));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -6856,7 +6873,7 @@ nsresult QuotaManager::EnsurePersistentOriginIsInitialized(
   if (mInitializedOrigins.Contains(aOrigin)) {
     directory.forget(aDirectory);
     *aCreated = false;
-    return NS_OK;
+    return rv;
   }
 
   bool created;
@@ -6897,7 +6914,7 @@ nsresult QuotaManager::EnsurePersistentOriginIsInitialized(
 
   directory.forget(aDirectory);
   *aCreated = created;
-  return NS_OK;
+  return rv;
 }
 
 nsresult QuotaManager::EnsureTemporaryOriginIsInitialized(
@@ -6911,10 +6928,25 @@ nsresult QuotaManager::EnsureTemporaryOriginIsInitialized(
   MOZ_ASSERT(mStorageConnection);
   MOZ_ASSERT(mTemporaryStorageInitialized);
 
+  nsresult rv = NS_OK;
+
+  auto autoReportTelemetry = MakeScopeExit([&]() {
+    Telemetry::Accumulate(Telemetry::QM_FIRST_INITIALIZATION_ATTEMPT,
+                          kTemporaryOriginTelemetryKey,
+                          static_cast<uint32_t>(NS_SUCCEEDED(rv)));
+  });
+
+  auto& info = mOriginInitializationInfos.GetOrInsert(aOrigin);
+  if (info.mTemporaryOriginAttempted) {
+    autoReportTelemetry.release();
+  } else {
+    info.mTemporaryOriginAttempted = true;
+  }
+
   // Get directory for this origin and persistence type.
   nsCOMPtr<nsIFile> directory;
-  nsresult rv = GetDirectoryForOrigin(aPersistenceType, aOrigin,
-                                      getter_AddRefs(directory));
+  rv = GetDirectoryForOrigin(aPersistenceType, aOrigin,
+                             getter_AddRefs(directory));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -6941,7 +6973,7 @@ nsresult QuotaManager::EnsureTemporaryOriginIsInitialized(
 
   directory.forget(aDirectory);
   *aCreated = created;
-  return NS_OK;
+  return rv;
 }
 
 nsresult QuotaManager::EnsureTemporaryStorageIsInitialized() {
@@ -6949,21 +6981,14 @@ nsresult QuotaManager::EnsureTemporaryStorageIsInitialized() {
   MOZ_ASSERT(mStorageConnection);
 
   if (mTemporaryStorageInitialized) {
-    MOZ_ASSERT(mTemporaryStorageInitializationAttempted);
+    mInitializationInfo.AssertInitializationAttempted(
+        Initialization::TemporaryStorage);
     return NS_OK;
   }
 
-  auto autoReportTelemetry = MakeScopeExit([&]() {
-    Telemetry::Accumulate(Telemetry::QM_FIRST_INITIALIZATION_ATTEMPT,
-                          kTempStorageTelemetryKey,
-                          static_cast<uint32_t>(mTemporaryStorageInitialized));
-  });
-
-  if (mTemporaryStorageInitializationAttempted) {
-    autoReportTelemetry.release();
-  }
-
-  mTemporaryStorageInitializationAttempted = true;
+  const auto autoRecord = mInitializationInfo.RecordFirstInitializationAttempt(
+      Initialization::TemporaryStorage,
+      [& self = *this] { return self.mTemporaryStorageInitialized; });
 
   nsresult rv;
 
@@ -7019,6 +7044,7 @@ void QuotaManager::ShutdownStorage() {
   AssertIsOnIOThread();
 
   if (mStorageConnection) {
+    mOriginInitializationInfos.Clear();
     mInitializedOrigins.Clear();
 
     if (mTemporaryStorageInitialized) {
@@ -7031,13 +7057,12 @@ void QuotaManager::ShutdownStorage() {
       mTemporaryStorageInitialized = false;
     }
 
-    mTemporaryStorageInitializationAttempted = false;
-
     ReleaseIOThreadObjects();
 
     mStorageConnection = nullptr;
-    mStorageInitializationAttempted = false;
   }
+
+  mInitializationInfo.ResetInitializationAttempts();
 }
 
 nsresult QuotaManager::EnsureOriginDirectory(nsIFile* aDirectory,
@@ -7346,7 +7371,7 @@ nsresult QuotaManager::GetInfoFromPrincipal(nsIPrincipal* aPrincipal,
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aPrincipal);
 
-  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
+  if (aPrincipal->IsSystemPrincipal()) {
     GetInfoForChrome(aSuffix, aGroup, aOrigin);
     return NS_OK;
   }

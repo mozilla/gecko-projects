@@ -168,7 +168,6 @@ MSG_DEF(JSMSG_OBJECT_ACCESS_DENIED,    0, JSEXN_ERR, "Permission denied to acces
 MSG_DEF(JSMSG_PROPERTY_ACCESS_DENIED,  1, JSEXN_ERR, "Permission denied to access property {0}")
 
 // JSAPI-only (Not thrown as JS exceptions)
-MSG_DEF(JSMSG_BAD_CLONE_FUNOBJ_SCOPE,  0, JSEXN_TYPEERR, "bad cloned function scope chain")
 MSG_DEF(JSMSG_CANT_CLONE_OBJECT,       0, JSEXN_TYPEERR, "can't clone object")
 MSG_DEF(JSMSG_CANT_OPEN,               2, JSEXN_ERR, "can't open {0}: {1}")
 MSG_DEF(JSMSG_SUPPORT_NOT_ENABLED,     1, JSEXN_ERR, "support for {0} is not enabled")
@@ -407,8 +406,6 @@ MSG_DEF(JSMSG_WASM_INT_DIVIDE_BY_ZERO, 0, JSEXN_WASMRUNTIMEERROR, "integer divid
 MSG_DEF(JSMSG_WASM_OUT_OF_BOUNDS,      0, JSEXN_WASMRUNTIMEERROR, "index out of bounds")
 MSG_DEF(JSMSG_WASM_UNALIGNED_ACCESS,   0, JSEXN_WASMRUNTIMEERROR, "unaligned memory access")
 MSG_DEF(JSMSG_WASM_WAKE_OVERFLOW,      0, JSEXN_WASMRUNTIMEERROR, "too many woken agents")
-MSG_DEF(JSMSG_WASM_DROPPED_DATA_SEG,   0, JSEXN_WASMRUNTIMEERROR, "use of dropped data segment")
-MSG_DEF(JSMSG_WASM_DROPPED_ELEM_SEG,   0, JSEXN_WASMRUNTIMEERROR, "use of dropped element segment")
 MSG_DEF(JSMSG_WASM_DEREF_NULL,         0, JSEXN_WASMRUNTIMEERROR, "dereferencing null pointer")
 MSG_DEF(JSMSG_WASM_BAD_RANGE ,         2, JSEXN_RANGEERR,    "bad {0} {1}")
 MSG_DEF(JSMSG_WASM_BAD_GROW,           1, JSEXN_RANGEERR,    "failed to grow {0}")
@@ -429,6 +426,7 @@ MSG_DEF(JSMSG_WASM_NO_TRANSFER,        0, JSEXN_TYPEERR,     "cannot transfer We
 MSG_DEF(JSMSG_WASM_TEXT_FAIL,          1, JSEXN_SYNTAXERR,   "wasm text error: {0}")
 MSG_DEF(JSMSG_WASM_MISSING_MAXIMUM,    0, JSEXN_TYPEERR,     "'shared' is true but maximum is not specified")
 MSG_DEF(JSMSG_WASM_GLOBAL_IMMUTABLE,   0, JSEXN_TYPEERR,     "can't set value of immutable global")
+MSG_DEF(JSMSG_WASM_NULL_REQUIRED,      0, JSEXN_TYPEERR,     "nullref requires a null value")
 
 // Proxy
 MSG_DEF(JSMSG_BAD_TRAP_RETURN_VALUE,   2, JSEXN_TYPEERR,"trap {1} for {0} returned a primitive value")
@@ -475,6 +473,7 @@ MSG_DEF(JSMSG_SC_DUP_TRANSFERABLE,     0, JSEXN_TYPEERR, "duplicate transferable
 MSG_DEF(JSMSG_SC_NOT_TRANSFERABLE,     0, JSEXN_TYPEERR, "invalid transferable array for structured clone")
 MSG_DEF(JSMSG_SC_UNSUPPORTED_TYPE,     0, JSEXN_TYPEERR, "unsupported type for structured data")
 MSG_DEF(JSMSG_SC_NOT_CLONABLE,         1, JSEXN_TYPEERR, "The {0} object cannot be serialized. The Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy HTTP headers will enable this in the future.")
+MSG_DEF(JSMSG_SC_NOT_CLONABLE_WITH_COOP_COEP, 1, JSEXN_TYPEERR, "The {0} object cannot be serialized. The Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy HTTP headers can be used to enable this.")
 MSG_DEF(JSMSG_SC_SAB_DISABLED,         0, JSEXN_TYPEERR, "SharedArrayBuffer not cloned - shared memory disabled in receiver")
 MSG_DEF(JSMSG_SC_SAB_REFCNT_OFLO,      0, JSEXN_TYPEERR, "SharedArrayBuffer has too many references")
 MSG_DEF(JSMSG_SC_SHMEM_TRANSFERABLE,   0, JSEXN_TYPEERR, "Shared memory objects must not be in the transfer list")
@@ -495,7 +494,8 @@ MSG_DEF(JSMSG_DEBUG_LOOP,              0, JSEXN_TYPEERR, "cannot debug an object
 MSG_DEF(JSMSG_DEBUG_NOT_DEBUGGEE,      2, JSEXN_ERR, "{0} is not a debuggee {1}")
 MSG_DEF(JSMSG_DEBUG_NOT_DEBUGGING,     0, JSEXN_ERR, "can't set breakpoint: script global is not a debuggee")
 MSG_DEF(JSMSG_DEBUG_NOT_IDLE,          0, JSEXN_ERR, "can't start debugging: a debuggee script is on the stack")
-MSG_DEF(JSMSG_DEBUG_NOT_LIVE,          1, JSEXN_ERR, "{0} is not live")
+MSG_DEF(JSMSG_DEBUG_NOT_ON_STACK,      1, JSEXN_ERR, "{0} is not on stack")
+MSG_DEF(JSMSG_DEBUG_NOT_ON_STACK_OR_SUSPENDED, 1, JSEXN_ERR, "{0} is not on stack or suspended")
 MSG_DEF(JSMSG_DEBUG_NO_ENV_OBJECT,     0, JSEXN_TYPEERR, "declarative Environments don't have binding objects")
 MSG_DEF(JSMSG_DEBUG_PROTO,             2, JSEXN_TYPEERR, "{0}.prototype is not a valid {1} instance")
 MSG_DEF(JSMSG_DEBUG_WRONG_OWNER,       1, JSEXN_TYPEERR, "{0} belongs to a different Debugger")
@@ -593,6 +593,7 @@ MSG_DEF(JSMSG_TYPED_ARRAY_CONSTRUCT_BOUNDS, 0, JSEXN_RANGEERR, "attempting to co
 MSG_DEF(JSMSG_TYPED_ARRAY_CALL_OR_CONSTRUCT, 1, JSEXN_TYPEERR, "cannot directly {0} builtin %TypedArray%")
 MSG_DEF(JSMSG_NON_TYPED_ARRAY_RETURNED, 0, JSEXN_TYPEERR, "constructor didn't return TypedArray object")
 MSG_DEF(JSMSG_SHORT_TYPED_ARRAY_RETURNED, 2, JSEXN_TYPEERR, "expected TypedArray of at least length {0}, but constructor returned TypedArray of length {1}")
+MSG_DEF(JSMSG_TYPED_ARRAY_NOT_COMPATIBLE, 2, JSEXN_TYPEERR, "{0} elements are incompatible with {1}")
 
 // Shared array buffer
 MSG_DEF(JSMSG_SHARED_ARRAY_BAD_LENGTH,  0, JSEXN_RANGEERR, "length argument out of range")
@@ -718,7 +719,6 @@ MSG_DEF(JSMSG_BIGINT_TOO_LARGE, 0, JSEXN_RANGEERR, "BigInt is too large to alloc
 MSG_DEF(JSMSG_BIGINT_DIVISION_BY_ZERO, 0, JSEXN_RANGEERR, "BigInt division by zero")
 MSG_DEF(JSMSG_BIGINT_NEGATIVE_EXPONENT, 0, JSEXN_RANGEERR, "BigInt negative exponent")
 MSG_DEF(JSMSG_BIGINT_INVALID_SYNTAX, 0, JSEXN_SYNTAXERR, "invalid BigInt syntax")
-MSG_DEF(JSMSG_NOT_BIGINT, 0, JSEXN_TYPEERR, "not a BigInt")
 MSG_DEF(JSMSG_BIGINT_NOT_SERIALIZABLE, 0, JSEXN_TYPEERR, "BigInt value can't be serialized in JSON")
 MSG_DEF(JSMSG_SC_BIGINT_DISABLED, 0, JSEXN_ERR, "BigInt not cloned - feature disabled in receiver")
 
@@ -732,3 +732,6 @@ MSG_DEF(JSMSG_BAD_HOLDINGS,                              0, JSEXN_TYPEERR, "The 
 MSG_DEF(JSMSG_BAD_UNREGISTER_TOKEN,                      1, JSEXN_TYPEERR, "Invalid unregister token passed to {0}")
 MSG_DEF(JSMSG_STALE_FINALIZATION_GROUP_ITERATOR,         0, JSEXN_TYPEERR, "Can't use stale finalization group iterator")
 MSG_DEF(JSMSG_BAD_CLEANUP_STATE,                         0, JSEXN_TYPEERR, "Can't call FinalizeGroup.cleanupSome while cleanup is in progress")
+
+// WeakRef
+MSG_DEF(JSMSG_NOT_A_WEAK_REF,                            1, JSEXN_TYPEERR, "{0} is not a WeakRef")

@@ -5,6 +5,7 @@
 from __future__ import absolute_import, unicode_literals, print_function
 
 import os
+import tempfile
 import yaml
 
 from mozbuild.base import MozbuildObject
@@ -14,13 +15,14 @@ from mozpack.copier import FileCopier
 from mozpack.files import FileFinder
 from mozpack.manifests import InstallManifest
 
+import frontmatter
 import sphinx
 import sphinx.apidoc
 
 here = os.path.abspath(os.path.dirname(__file__))
 build = MozbuildObject.from_environment(cwd=here)
 
-MAIN_DOC_PATH = os.path.join(build.topsrcdir, 'tools', 'docs')
+MAIN_DOC_PATH = os.path.normpath(os.path.join(build.topsrcdir, 'tools', 'docs'))
 
 logger = sphinx.util.logging.getLogger(__name__)
 
@@ -114,6 +116,35 @@ class _SphinxManager(object):
 
             sphinx.ext.apidoc.main(argv=args)
 
+    def _process_markdown(self, m, markdown_file, dest):
+        """
+        When dealing with a markdown file, we check if we have a front matter.
+        If this is the case, we read the information, create a temporary file,
+        reuse the front matter info into the md file
+        """
+        with open(markdown_file) as f:
+            # Load the front matter header
+            post = frontmatter.load(f)
+            if len(post.keys()) > 0:
+                # Has a front matter, use it
+                with tempfile.NamedTemporaryFile(delete=False) as fh:
+                    # Use the frontmatter title
+                    fh.write(post["title"] + "\n")
+                    # Add the md syntax for the title
+                    fh.write('=' * len(post["title"]) + "\n")
+                    # If there is a summary, add it
+                    if "summary" in post:
+                        fh.write(post["summary"] + "\n")
+                    # Write the content
+                    fh.write(post.__str__())
+                    fh.close()
+                    # Instead of a symlink, we copy the file
+                    m.add_copy(fh.name, dest)
+            else:
+                # No front matter, create the symlink like for rst
+                # as it will be the the same file
+                m.add_link(markdown_file, dest)
+
     def _synchronize_docs(self):
         m = InstallManifest()
 
@@ -126,14 +157,17 @@ class _SphinxManager(object):
             source_dir = os.path.join(self.topsrcdir, source)
             for root, dirs, files in os.walk(source_dir):
                 for f in files:
-                    source_path = os.path.join(root, f)
+                    source_path = os.path.normpath(os.path.join(root, f))
                     rel_source = source_path[len(source_dir) + 1:]
-
-                    m.add_link(source_path, os.path.join(dest, rel_source))
+                    target = os.path.normpath(os.path.join(dest, rel_source))
+                    if source_path.endswith(".md"):
+                        self._process_markdown(m, source_path, os.path.join(".", target))
+                    else:
+                        m.add_link(source_path, target)
 
         copier = FileCopier()
         m.populate_registry(copier)
-        copier.copy(self.staging_dir)
+        copier.copy(self.staging_dir, remove_empty_directories=False)
 
         with open(self.index_path, 'rb') as fh:
             data = fh.read()
@@ -160,11 +194,11 @@ class _SphinxManager(object):
         for t in tree_config:
             CATEGORIES[t] = format_paths(tree_config[t])
 
-        indexes = set(['%s/index' % p for p in toplevel_trees.keys()])
+        indexes = set([os.path.normpath(os.path.join(p, 'index')) for p in toplevel_trees.keys()])
         # Format categories like indexes
         cats = '\n'.join(CATEGORIES.values()).split("\n")
         # Remove heading spaces
-        cats = [x.strip() for x in cats]
+        cats = [os.path.normpath(x.strip()) for x in cats]
         indexes = tuple(set(indexes) - set(cats))
         if indexes:
             # In case a new doc isn't categorized

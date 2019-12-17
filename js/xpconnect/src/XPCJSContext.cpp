@@ -19,13 +19,8 @@
 #include "nsNetUtil.h"
 #include "nsThreadUtils.h"
 
-#include "nsIMemoryInfoDumper.h"
-#include "nsIMemoryReporter.h"
 #include "nsIObserverService.h"
-#include "nsIBrowserChild.h"
 #include "nsIDebug2.h"
-#include "nsIDocShell.h"
-#include "nsIRunnable.h"
 #include "nsPIDOMWindow.h"
 #include "nsPrintfCString.h"
 #include "mozilla/Preferences.h"
@@ -63,7 +58,6 @@
 #include "nsAboutProtocolUtils.h"
 
 #include "GeckoProfiler.h"
-#include "nsIInputStream.h"
 #include "nsIXULRuntime.h"
 #include "nsJSPrincipals.h"
 #include "ExpandedPrincipal.h"
@@ -79,8 +73,6 @@
 #  include <algorithm>
 #  include <windows.h>
 #endif
-
-static MOZ_THREAD_LOCAL(XPCJSContext*) gTlsContext;
 
 using namespace mozilla;
 using namespace xpc;
@@ -766,16 +758,21 @@ bool xpc::ExtraWarningsForSystemJS() { return false; }
 static mozilla::Atomic<bool> sSharedMemoryEnabled(false);
 static mozilla::Atomic<bool> sStreamsEnabled(false);
 static mozilla::Atomic<bool> sFieldsEnabled(false);
+static mozilla::Atomic<bool> sParserDeferAllocationEnabled(false);
 static mozilla::Atomic<bool> sAwaitFixEnabled(false);
 
 void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
       .setSharedMemoryAndAtomicsEnabled(sSharedMemoryEnabled)
+      .setCoopAndCoepEnabled(
+          StaticPrefs::browser_tabs_remote_useCrossOriginOpenerPolicy() &&
+          StaticPrefs::browser_tabs_remote_useCrossOriginEmbedderPolicy())
       .setStreamsEnabled(sStreamsEnabled)
       .setWritableStreamsEnabled(
           StaticPrefs::javascript_options_writable_streams())
       .setFieldsEnabled(sFieldsEnabled)
       .setAwaitFixEnabled(sAwaitFixEnabled);
+  options.behaviors().setDeferredParserAlloc(sParserDeferAllocationEnabled);
 }
 
 static void LoadStartupJSPrefs(XPCJSContext* xpccx) {
@@ -936,6 +933,8 @@ static void ReloadPrefsCallback(const char* pref, void* aXpccx) {
   sSharedMemoryEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "shared_memory");
   sStreamsEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "streams");
+  sParserDeferAllocationEnabled =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "parser_defer_allocation");
   sFieldsEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.fields");
   sAwaitFixEnabled =
@@ -1030,8 +1029,6 @@ XPCJSContext::~XPCJSContext() {
   }
 
   PROFILER_CLEAR_JS_CONTEXT();
-
-  gTlsContext.set(nullptr);
 }
 
 XPCJSContext::XPCJSContext()
@@ -1047,15 +1044,18 @@ XPCJSContext::XPCJSContext()
       mActive(CONTEXT_INACTIVE),
       mLastStateChange(PR_Now()) {
   MOZ_COUNT_CTOR_INHERITED(XPCJSContext, CycleCollectedJSContext);
-  MOZ_RELEASE_ASSERT(!gTlsContext.get());
   MOZ_ASSERT(mWatchdogManager);
   ++sInstanceCount;
   mWatchdogManager->RegisterContext(this);
-  gTlsContext.set(this);
 }
 
 /* static */
-XPCJSContext* XPCJSContext::Get() { return gTlsContext.get(); }
+XPCJSContext* XPCJSContext::Get() {
+  // Do an explicit null check, because this can get called from a process that
+  // does not run JS.
+  nsXPConnect* xpc = static_cast<nsXPConnect*>(nsXPConnect::XPConnect());
+  return xpc ? xpc->GetContext() : nullptr;
+}
 
 #ifdef XP_WIN
 static size_t GetWindowsStackSize() {
@@ -1102,7 +1102,7 @@ CycleCollectedJSRuntime* XPCJSContext::CreateRuntime(JSContext* aCx) {
 
 nsresult XPCJSContext::Initialize() {
   nsresult rv = CycleCollectedJSContext::Initialize(
-      nullptr, JS::DefaultHeapMaxBytes, JS::DefaultNurseryMaxBytes);
+      nullptr, JS::DefaultHeapMaxBytes);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -1285,9 +1285,6 @@ WatchdogManager* XPCJSContext::GetWatchdogManager() {
   sWatchdogInstance = new WatchdogManager();
   return sWatchdogInstance;
 }
-
-// static
-void XPCJSContext::InitTLS() { MOZ_RELEASE_ASSERT(gTlsContext.init()); }
 
 // static
 XPCJSContext* XPCJSContext::NewXPCJSContext() {

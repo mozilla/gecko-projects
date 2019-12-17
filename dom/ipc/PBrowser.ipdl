@@ -7,7 +7,9 @@
 
 include protocol PColorPicker;
 include protocol PContent;
+#ifdef ACCESSIBILITY
 include protocol PDocAccessible;
+#endif
 include protocol PFilePicker;
 include protocol PPluginWidget;
 include protocol PRemotePrintJob;
@@ -182,7 +184,11 @@ nested(upto inside_cpow) sync refcounted protocol PBrowser
     manager PContent;
 
     manages PColorPicker;
+
+#ifdef ACCESSIBILITY
     manages PDocAccessible;
+#endif
+
     manages PFilePicker;
     manages PPluginWidget;
     manages PPaymentRequest;
@@ -194,6 +200,7 @@ both:
                        nsIPrincipal aPrincipal, ClonedMessageData aData);
 
 parent:
+#ifdef ACCESSIBILITY
     /**
      * Tell the parent process a new accessible document has been created.
      * aParentDoc is the accessible document it was created in if any, and
@@ -204,6 +211,7 @@ parent:
      */
     async PDocAccessible(nullable PDocAccessible aParentDoc, uint64_t aParentAcc,
                          uint32_t aMsaaID, IAccessibleHolder aDocCOMProxy);
+#endif
 
     /*
      * Creates a new remoted nsIWidget connection for windowed plugins
@@ -463,9 +471,9 @@ parent:
 
     /**
      * Used to set the current text of the status tooltip.
-     * Nowadays this is mainly used for link locations on hover.
+     * Nowadays this is only used for link locations on hover.
      */
-    async SetStatus(uint32_t type, nsString status);
+    async SetLinkStatus(nsString status);
 
     /**
      * Show/hide a tooltip when the mouse hovers over an element in the content
@@ -671,7 +679,8 @@ parent:
      * Sent by the child to the parent to inform it that an update to the
      * dimensions has been requested, likely through win.moveTo or resizeTo
      */
-    async SetDimensions(uint32_t aFlags, int32_t aX, int32_t aY, int32_t aCx, int32_t aCy);
+    async SetDimensions(uint32_t aFlags, int32_t aX, int32_t aY,
+                        int32_t aCx, int32_t aCy, double aScale);
 
     nested(inside_sync) sync DispatchWheelEvent(WidgetWheelEvent event);
     nested(inside_sync) sync DispatchMouseEvent(WidgetMouseEvent event);

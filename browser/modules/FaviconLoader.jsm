@@ -244,6 +244,24 @@ class FaviconLoad {
       }
     }
 
+    // By default don't store icons added after "pageshow".
+    let canStoreIcon = this.icon.beforePageShow;
+    if (canStoreIcon) {
+      // Don't store icons responding with Cache-Control: no-store.
+      try {
+        if (
+          this.channel instanceof Ci.nsIHttpChannel &&
+          this.channel.isNoStoreResponse()
+        ) {
+          canStoreIcon = false;
+        }
+      } catch (ex) {
+        if (ex.result != Cr.NS_ERROR_NOT_AVAILABLE) {
+          throw ex;
+        }
+      }
+    }
+
     // Attempt to get an expiration time from the cache.  If this fails, we'll
     // use this default.
     let expiration = Date.now() + MAX_FAVICON_EXPIRATION;
@@ -314,6 +332,7 @@ class FaviconLoad {
       this._deferred.resolve({
         expiration,
         dataURL,
+        canStoreIcon,
       });
     } catch (e) {
       this._deferred.reject(e);
@@ -531,6 +550,7 @@ class IconLoader {
         canUseForTab: !iconInfo.isRichIcon,
         expiration: undefined,
         iconURL: iconInfo.iconUri.spec,
+        canStoreIcon: true,
       });
       return;
     }
@@ -543,7 +563,7 @@ class IconLoader {
 
     try {
       this._loader = new FaviconLoad(iconInfo);
-      let { dataURL, expiration } = await this._loader.load();
+      let { dataURL, expiration, canStoreIcon } = await this._loader.load();
 
       this.actor.sendAsyncMessage("Link:SetIcon", {
         pageURL: iconInfo.pageUri.spec,
@@ -551,6 +571,7 @@ class IconLoader {
         canUseForTab: !iconInfo.isRichIcon,
         expiration,
         iconURL: dataURL,
+        canStoreIcon,
       });
     } catch (e) {
       if (e.result != Cr.NS_BINDING_ABORTED) {
@@ -581,6 +602,12 @@ class FaviconLoader {
   constructor(actor) {
     this.actor = actor;
     this.iconInfos = [];
+
+    // Icons added after onPageShow() are likely added by modifying <link> tags
+    // through javascript; we want to avoid storing those permanently because
+    // they are probably used to show badges, and many of them could be
+    // randomly generated. This boolean can be used to track that case.
+    this.beforePageShow = true;
 
     // For every page we attempt to find a rich icon and a tab icon. These
     // objects take care of the load process for each.
@@ -619,6 +646,7 @@ class FaviconLoader {
   addIconFromLink(aLink, aIsRichIcon) {
     let iconInfo = makeFaviconFromLink(aLink, aIsRichIcon);
     if (iconInfo) {
+      iconInfo.beforePageShow = this.beforePageShow;
       this.iconInfos.push(iconInfo);
       this.iconTask.arm();
       return true;
@@ -639,6 +667,7 @@ class FaviconLoader {
       isRichIcon: false,
       type: TYPE_ICO,
       node: this.actor.document,
+      beforePageShow: this.beforePageShow,
     });
     this.iconTask.arm();
   }
@@ -649,6 +678,7 @@ class FaviconLoader {
       this.iconTask.disarm();
       this.loadIcons();
     }
+    this.beforePageShow = false;
   }
 
   onPageHide() {

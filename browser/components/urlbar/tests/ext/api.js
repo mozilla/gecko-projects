@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 /* global ExtensionAPI */
 
 "use strict";
@@ -8,6 +12,7 @@ const { XPCOMUtils } = ChromeUtils.import(
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AppMenuNotifications: "resource://gre/modules/AppMenuNotifications.jsm",
+  AppUpdater: "resource:///modules/AppUpdater.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   Preferences: "resource://gre/modules/Preferences.jsm",
   ProfileAge: "resource://gre/modules/ProfileAge.jsm",
@@ -30,25 +35,74 @@ XPCOMUtils.defineLazyServiceGetter(
   "nsIUpdateManager"
 );
 
+XPCOMUtils.defineLazyGetter(this, "appUpdater", () => new AppUpdater());
+
+XPCOMUtils.defineLazyGetter(this, "appUpdaterStatusToStringMap", () => {
+  // The AppUpdater.STATUS values have uppercase, underscored names like
+  // READY_FOR_RESTART.  The statuses we return from this API are camel-cased
+  // versions of those names, like "readyForRestart".  Here we convert those
+  // AppUpdater.STATUS names to camel-cased names and store them in a map.
+  let map = new Map();
+  for (let name in AppUpdater.STATUS) {
+    let parts = name.split("_").map(p => p.toLowerCase());
+    let string =
+      parts[0] +
+      parts
+        .slice(1)
+        .map(p => p[0].toUpperCase() + p.substring(1))
+        .join("");
+    map.set(AppUpdater.STATUS[name], string);
+  }
+  return map;
+});
+
 XPCOMUtils.defineLazyGetter(
   this,
   "defaultPreferences",
   () => new Preferences({ defaultBranch: true })
 );
 
-function updateStateIs(prefix) {
-  let update = updateManager.activeUpdate;
-  return !!(update && update.state.startsWith(prefix));
-}
-
 this.experiments_urlbar = class extends ExtensionAPI {
   getAPI() {
     return {
       experiments: {
         urlbar: {
+          checkForBrowserUpdate() {
+            appUpdater.check();
+          },
+
           engagementTelemetry: this._getDefaultSettingsAPI(
             "browser.urlbar.eventTelemetry.enabled"
           ),
+
+          getBrowserUpdateStatus() {
+            return appUpdaterStatusToStringMap.get(appUpdater.status);
+          },
+
+          installBrowserUpdateAndRestart() {
+            if (appUpdater.status != AppUpdater.STATUS.DOWNLOAD_AND_INSTALL) {
+              return Promise.resolve();
+            }
+            return new Promise(resolve => {
+              let listener = () => {
+                // Once we call startDownload, there are two possible end
+                // states: DOWNLOAD_FAILED and READY_FOR_RESTART.
+                if (
+                  appUpdater.status != AppUpdater.STATUS.READY_FOR_RESTART &&
+                  appUpdater.status != AppUpdater.STATUS.DOWNLOAD_FAILED
+                ) {
+                  return;
+                }
+                appUpdater.removeListener(listener);
+                if (appUpdater.status == AppUpdater.STATUS.READY_FOR_RESTART) {
+                  restartBrowser();
+                }
+                resolve();
+              };
+              appUpdater.addListener(listener);
+              appUpdater.startDownload();
+            });
+          },
 
           isBrowserShowingNotification() {
             let window = BrowserWindowTracker.getTopWindow();
@@ -106,23 +160,6 @@ this.experiments_urlbar = class extends ExtensionAPI {
             return false;
           },
 
-          isBrowserUpdateReadyToInstall() {
-            if (
-              !updateService.canStageUpdates ||
-              !Services.policies.isAllowed("appUpdate")
-            ) {
-              return updateStateIs("pending");
-            }
-            if (updateStateIs("applied")) {
-              return true;
-            }
-            // If the state is pending and there is an error, staging failed and
-            // Firefox can be restarted to apply the update without staging.
-            let update = updateManager.activeUpdate;
-            let errorCode = update ? update.errorCode : 0;
-            return updateStateIs("pending") && errorCode != 0;
-          },
-
           async lastBrowserUpdateDate() {
             // Get the newest update in the update history.  This isn't perfect
             // because these dates are when updates are applied, not when the
@@ -151,27 +188,7 @@ this.experiments_urlbar = class extends ExtensionAPI {
           },
 
           restartBrowser() {
-            // Notify all windows that an application quit has been requested.
-            let cancelQuit = Cc[
-              "@mozilla.org/supports-PRBool;1"
-            ].createInstance(Ci.nsISupportsPRBool);
-            Services.obs.notifyObservers(
-              cancelQuit,
-              "quit-application-requested",
-              "restart"
-            );
-            // Something aborted the quit process.
-            if (cancelQuit.data) {
-              return;
-            }
-            // If already in safe mode restart in safe mode.
-            if (Services.appinfo.inSafeMode) {
-              Services.startup.restartInSafeMode(Ci.nsIAppStartup.eAttemptQuit);
-            } else {
-              Services.startup.quit(
-                Ci.nsIAppStartup.eAttemptQuit | Ci.nsIAppStartup.eRestart
-              );
-            }
+            restartBrowser();
           },
 
           resetBrowser() {
@@ -229,3 +246,27 @@ this.experiments_urlbar = class extends ExtensionAPI {
     };
   }
 };
+
+function restartBrowser() {
+  // Notify all windows that an application quit has been requested.
+  let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"].createInstance(
+    Ci.nsISupportsPRBool
+  );
+  Services.obs.notifyObservers(
+    cancelQuit,
+    "quit-application-requested",
+    "restart"
+  );
+  // Something aborted the quit process.
+  if (cancelQuit.data) {
+    return;
+  }
+  // If already in safe mode restart in safe mode.
+  if (Services.appinfo.inSafeMode) {
+    Services.startup.restartInSafeMode(Ci.nsIAppStartup.eAttemptQuit);
+  } else {
+    Services.startup.quit(
+      Ci.nsIAppStartup.eAttemptQuit | Ci.nsIAppStartup.eRestart
+    );
+  }
+}

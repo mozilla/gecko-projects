@@ -60,8 +60,8 @@ interface nsIGfxInfo : nsISupports
   /**
    * The amount of RAM in MB in the display adapter.
    */
-  readonly attribute AString adapterRAM;
-  readonly attribute AString adapterRAM2;
+  readonly attribute unsigned long adapterRAM;
+  readonly attribute unsigned long adapterRAM2;
 
   readonly attribute AString adapterDriverVendor;
   readonly attribute AString adapterDriverVendor2;
@@ -78,6 +78,8 @@ interface nsIGfxInfo : nsISupports
    * Information about display devices
    */
   readonly attribute Array<AString> displayInfo;
+  readonly attribute Array<unsigned long> displayWidth;
+  readonly attribute Array<unsigned long> displayHeight;
 
   /**
    * Returns an array of objects describing each monitor. Guaranteed properties
@@ -152,8 +154,10 @@ interface nsIGfxInfo : nsISupports
   const long FEATURE_DX_P016 = 27;
   /* Whether OpenGL swizzle configuration of texture units is supported, starting in 70 */
   const long FEATURE_GL_SWIZZLE = 28;
+  /* Whether WebRender native compositor is supported, starting in 73 */
+  const long FEATURE_WEBRENDER_COMPOSITOR = 29;
   /* the maximum feature value. */
-  const long FEATURE_MAX_VALUE = FEATURE_GL_SWIZZLE;
+  const long FEATURE_MAX_VALUE = FEATURE_WEBRENDER_COMPOSITOR;
 
   /*
    * A set of return values from GetFeatureStatus
@@ -279,4 +283,5 @@ interface nsIGfxInfo : nsISupports
   // xpcshell-tests.
   boolean controlGPUProcessForXPCShell(in boolean aEnable);
 };
+
 

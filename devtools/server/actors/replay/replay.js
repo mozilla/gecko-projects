@@ -1308,6 +1308,7 @@ function getScriptData(id) {
     url: script.url,
     format: script.format,
     mainOffset: script.mainOffset,
+    childScripts: script.getChildScripts().map(s => gScripts.getId(s)),
   };
 }
 
@@ -1350,7 +1351,6 @@ function getFrameData(index) {
     type: frame.type,
     callee: getObjectId(frame.callee),
     environment: getObjectId(frame.environment),
-    generator: frame.generator,
     constructing: frame.constructing,
     this: convertValue(frame.this),
     script,

@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_idbtransaction_h__
 #define mozilla_dom_idbtransaction_h__
 
+#include "FlippedOnce.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/IDBTransactionBinding.h"
 #include "mozilla/DOMEventTargetHelper.h"
@@ -48,18 +49,18 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
   friend class indexedDB::BackgroundRequestChild;
 
  public:
-  enum Mode {
-    READ_ONLY = 0,
-    READ_WRITE,
-    READ_WRITE_FLUSH,
-    CLEANUP,
-    VERSION_CHANGE,
+  enum struct Mode {
+    ReadOnly = 0,
+    ReadWrite,
+    ReadWriteFlush,
+    Cleanup,
+    VersionChange,
 
     // Only needed for IPC serialization helper, should never be used in code.
-    MODE_INVALID
+    Invalid
   };
 
-  enum ReadyState { INITIAL = 0, LOADING, COMMITTING, DONE };
+  enum struct ReadyState { Active, Inactive, Committing, Finished };
 
  private:
   // TODO: Only non-const because of Bug 1575173.
@@ -71,8 +72,8 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
   RefPtr<StrongWorkerRef> mWorkerRef;
   nsTArray<IDBCursor*> mCursors;
 
-  // Tagged with mMode. If mMode is VERSION_CHANGE then mBackgroundActor will be
-  // a BackgroundVersionChangeTransactionChild. Otherwise it will be a
+  // Tagged with mMode. If mMode is Mode::VersionChange then mBackgroundActor
+  // will be a BackgroundVersionChangeTransactionChild. Otherwise it will be a
   // BackgroundTransactionChild.
   union {
     indexedDB::BackgroundTransactionChild* mNormalBackgroundActor;
@@ -82,7 +83,7 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
 
   const int64_t mLoggingSerialNumber;
 
-  // Only used for VERSION_CHANGE transactions.
+  // Only used for Mode::VersionChange transactions.
   int64_t mNextObjectStoreId;
   int64_t mNextIndexId;
 
@@ -101,7 +102,8 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
   const uint32_t mLineNo;
   const uint32_t mColumn;
 
-  ReadyState mReadyState;
+  ReadyState mReadyState = ReadyState::Active;
+  FlippedOnce<false> mStarted;
   const Mode mMode;
 
   bool mCreating;    ///< Set between successful creation until the transaction
@@ -109,22 +111,22 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
   bool mRegistered;  ///< Whether mDatabase->RegisterTransaction() has been
                      ///< called (which may not be the case if construction was
                      ///< incomplete).
-  bool mAbortedByScript;
+  FlippedOnce<false> mAbortedByScript;
   bool mNotedActiveTransaction;
 
 #ifdef DEBUG
-  bool mSentCommitOrAbort;
-  bool mFiredCompleteOrAbort;
+  FlippedOnce<false> mSentCommitOrAbort;
+  FlippedOnce<false> mFiredCompleteOrAbort;
 #endif
 
  public:
-  static already_AddRefed<IDBTransaction> CreateVersionChange(
+  static MOZ_MUST_USE RefPtr<IDBTransaction> CreateVersionChange(
       IDBDatabase* aDatabase,
       indexedDB::BackgroundVersionChangeTransactionChild* aActor,
       IDBOpenDBRequest* aOpenRequest, int64_t aNextObjectStoreId,
       int64_t aNextIndexId);
 
-  static already_AddRefed<IDBTransaction> Create(
+  static MOZ_MUST_USE RefPtr<IDBTransaction> Create(
       JSContext* aCx, IDBDatabase* aDatabase,
       const nsTArray<nsString>& aObjectStoreNames, Mode aMode);
 
@@ -144,7 +146,7 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
   void ClearBackgroundActor() {
     AssertIsOnOwningThread();
 
-    if (mMode == VERSION_CHANGE) {
+    if (mMode == Mode::VersionChange) {
       mBackgroundActor.mVersionChangeBackgroundActor = nullptr;
     } else {
       mBackgroundActor.mNormalBackgroundActor = nullptr;
@@ -163,29 +165,85 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
 
   void RefreshSpec(bool aMayDelete);
 
-  bool IsOpen() const;
+  bool CanAcceptRequests() const;
 
-  bool IsCommittingOrDone() const {
+  bool IsCommittingOrFinished() const {
     AssertIsOnOwningThread();
 
-    return mReadyState == COMMITTING || mReadyState == DONE;
+    return mReadyState == ReadyState::Committing ||
+           mReadyState == ReadyState::Finished;
   }
 
-  bool IsDone() const {
+  bool IsActive() const {
     AssertIsOnOwningThread();
 
-    return mReadyState == DONE;
+    return mReadyState == ReadyState::Active;
+  }
+
+  bool IsInactive() const {
+    AssertIsOnOwningThread();
+
+    return mReadyState == ReadyState::Inactive;
+  }
+
+  bool IsFinished() const {
+    AssertIsOnOwningThread();
+
+    return mReadyState == ReadyState::Finished;
   }
 
   bool IsWriteAllowed() const {
     AssertIsOnOwningThread();
-    return mMode == READ_WRITE || mMode == READ_WRITE_FLUSH ||
-           mMode == CLEANUP || mMode == VERSION_CHANGE;
+    return mMode == Mode::ReadWrite || mMode == Mode::ReadWriteFlush ||
+           mMode == Mode::Cleanup || mMode == Mode::VersionChange;
   }
 
   bool IsAborted() const {
     AssertIsOnOwningThread();
     return NS_FAILED(mAbortCode);
+  }
+
+  template <ReadyState OriginalState, ReadyState TemporaryState>
+  class AutoRestoreState {
+   public:
+    explicit AutoRestoreState(IDBTransaction& aOwner) : mOwner { aOwner }
+#ifdef DEBUG
+    , mSavedPendingRequestCount { mOwner.mPendingRequestCount }
+#endif
+    {
+      mOwner.AssertIsOnOwningThread();
+      MOZ_ASSERT(mOwner.mReadyState == OriginalState);
+      mOwner.mReadyState = TemporaryState;
+    }
+
+    ~AutoRestoreState() {
+      mOwner.AssertIsOnOwningThread();
+      MOZ_ASSERT(mOwner.mReadyState == TemporaryState);
+      MOZ_ASSERT(mOwner.mPendingRequestCount == mSavedPendingRequestCount);
+
+      mOwner.mReadyState = OriginalState;
+    }
+
+   private:
+    IDBTransaction& mOwner;
+#ifdef DEBUG
+    const uint32_t mSavedPendingRequestCount;
+#endif
+  };
+
+  AutoRestoreState<ReadyState::Inactive, ReadyState::Active>
+  TemporarilyTransitionToActive();
+  AutoRestoreState<ReadyState::Active, ReadyState::Inactive>
+  TemporarilyTransitionToInactive();
+
+  void TransitionToActive() {
+    MOZ_ASSERT(mReadyState == ReadyState::Inactive);
+    mReadyState = ReadyState::Active;
+  }
+
+  void TransitionToInactive() {
+    MOZ_ASSERT(mReadyState == ReadyState::Active);
+    mReadyState = ReadyState::Inactive;
   }
 
   nsresult AbortCode() const {
@@ -213,7 +271,7 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
     return mObjectStoreNames;
   }
 
-  already_AddRefed<IDBObjectStore> CreateObjectStore(
+  MOZ_MUST_USE RefPtr<IDBObjectStore> CreateObjectStore(
       const indexedDB::ObjectStoreSpec& aSpec);
 
   void DeleteObjectStore(int64_t aObjectStoreId);
@@ -242,10 +300,10 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
 
   void FireCompleteOrAbortEvents(nsresult aResult);
 
-  // Only for VERSION_CHANGE transactions.
+  // Only for Mode::VersionChange transactions.
   int64_t NextObjectStoreId();
 
-  // Only for VERSION_CHANGE transactions.
+  // Only for Mode::VersionChange transactions.
   int64_t NextIndexId();
 
   void InvalidateCursorCaches();
@@ -267,8 +325,10 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
 
   DOMException* GetError() const;
 
-  already_AddRefed<IDBObjectStore> ObjectStore(const nsAString& aName,
-                                               ErrorResult& aRv);
+  MOZ_MUST_USE RefPtr<IDBObjectStore> ObjectStore(const nsAString& aName,
+                                                  ErrorResult& aRv);
+
+  void Commit(ErrorResult& aRv);
 
   void Abort(ErrorResult& aRv);
 
@@ -276,19 +336,24 @@ class IDBTransaction final : public DOMEventTargetHelper, public nsIRunnable {
   IMPL_EVENT_HANDLER(complete)
   IMPL_EVENT_HANDLER(error)
 
-  already_AddRefed<DOMStringList> ObjectStoreNames() const;
+  MOZ_MUST_USE RefPtr<DOMStringList> ObjectStoreNames() const;
 
   // EventTarget
   void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
 
  private:
+  struct CreatedFromFactoryFunction {};
+
+ public:
   IDBTransaction(IDBDatabase* aDatabase,
                  const nsTArray<nsString>& aObjectStoreNames, Mode aMode,
-                 nsString aFilename, uint32_t aLineNo, uint32_t aColumn);
+                 nsString aFilename, uint32_t aLineNo, uint32_t aColumn,
+                 CreatedFromFactoryFunction aDummy);
+
+ private:
   ~IDBTransaction();
 
-  void AbortInternal(nsresult aAbortCode,
-                     already_AddRefed<DOMException> aError);
+  void AbortInternal(nsresult aAbortCode, RefPtr<DOMException> aError);
 
   void SendCommit();
 

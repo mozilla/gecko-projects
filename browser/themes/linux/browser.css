@@ -281,7 +281,7 @@ notification[value="translation"] menulist > .menulist-dropmarker {
   font-size: 1.05em;
 }
 
-@supports -moz-bool-pref("browser.urlbar.megabar.expandTextOnFocus") {
+@supports -moz-bool-pref("browser.urlbar.update1.expandTextOnFocus") {
   .urlbarView {
     font-size: inherit;
   }
@@ -456,15 +456,6 @@ notification[value="translation"] menulist > .menulist-dropmarker {
   /* override toolkit/themes/linux/global/menu.css */
   padding-inline-end: 0 !important;
   margin-inline-end: 0 !important;
-}
-
-#fill-login-popup > menucaption {
-  color: GrayText;
-  font-weight: normal;
-}
-
-#fill-login-popup > menucaption > .menu-iconic-left {
-  display: none;
 }
 
 .webextension-popup-browser,

@@ -275,7 +275,8 @@ var PreferenceExperiments = {
         experiment.branch,
         {
           type: EXPERIMENT_TYPE_PREFIX + experiment.experimentType,
-          enrollmentId: experiment.enrollmentId,
+          enrollmentId:
+            experiment.enrollmentId || TelemetryEvents.NO_ENROLLMENT_ID_MARKER,
         }
       );
 
@@ -370,6 +371,15 @@ var PreferenceExperiments = {
         }
       };
     };
+  },
+
+  /** When Telemetry is disabled, clear all identifiers from the stored experiments.  */
+  async onTelemetryDisabled() {
+    const store = await ensureStorage();
+    for (const experiment of Object.values(store.data.experiments)) {
+      experiment.enrollmentId = TelemetryEvents.NO_ENROLLMENT_ID_MARKER;
+    }
+    store.saveSoon();
   },
 
   /**
@@ -551,12 +561,12 @@ var PreferenceExperiments = {
 
     TelemetryEnvironment.setExperimentActive(slug, branch, {
       type: EXPERIMENT_TYPE_PREFIX + experimentType,
-      enrollmentId,
+      enrollmentId: enrollmentId || TelemetryEvents.NO_ENROLLMENT_ID_MARKER,
     });
     TelemetryEvents.sendEvent("enroll", "preference_study", slug, {
       experimentType,
       branch,
-      enrollmentId,
+      enrollmentId: enrollmentId || TelemetryEvents.NO_ENROLLMENT_ID_MARKER,
     });
     await this.saveStartupPrefs();
 
@@ -712,7 +722,11 @@ var PreferenceExperiments = {
         "unenrollFailed",
         "preference_study",
         experimentSlug,
-        { reason: "already-unenrolled", enrollmentId: experiment.enrollmentId }
+        {
+          reason: "already-unenrolled",
+          enrollmentId:
+            experiment.enrollmentId || TelemetryEvents.NO_ENROLLMENT_ID_MARKER,
+        }
       );
       throw new Error(
         `Cannot stop preference experiment "${experimentSlug}" because it is already expired`
@@ -764,7 +778,8 @@ var PreferenceExperiments = {
       didResetValue: resetValue ? "true" : "false",
       branch: experiment.branch,
       reason,
-      enrollmentId: experiment.enrollmentId,
+      enrollmentId:
+        experiment.enrollmentId || TelemetryEvents.NO_ENROLLMENT_ID_MARKER,
     });
     await this.saveStartupPrefs();
   },

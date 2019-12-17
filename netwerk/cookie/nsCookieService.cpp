@@ -20,17 +20,9 @@
 #include "nsCookieService.h"
 #include "nsContentUtils.h"
 #include "nsIClassifiedChannel.h"
-#include "nsIServiceManager.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsIWebProgressListener.h"
 #include "nsIHttpChannel.h"
 
-#include "nsIIOService.h"
-#include "nsIPermissionManager.h"
-#include "nsIProtocolHandler.h"
-#include "nsIPrefBranch.h"
-#include "nsIPrefService.h"
-#include "nsIScriptError.h"
 #include "nsCookiePermission.h"
 #include "nsIURI.h"
 #include "nsIURL.h"
@@ -40,24 +32,25 @@
 #include "nsILineInputStream.h"
 #include "nsIEffectiveTLDService.h"
 #include "nsIIDNService.h"
-#include "nsIThread.h"
+#include "mozIStorageBindingParamsArray.h"
+#include "mozIStorageError.h"
+#include "mozIStorageFunction.h"
+#include "mozIStorageService.h"
 #include "mozIThirdPartyUtil.h"
 
 #include "nsTArray.h"
 #include "nsCOMArray.h"
 #include "nsIMutableArray.h"
-#include "nsArrayEnumerator.h"
-#include "nsEnumeratorUtils.h"
 #include "nsAutoPtr.h"
 #include "nsReadableUtils.h"
 #include "nsCRT.h"
 #include "prprf.h"
 #include "nsNetUtil.h"
 #include "nsNetCID.h"
-#include "nsISimpleEnumerator.h"
 #include "nsIInputStream.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsNetCID.h"
+#include "mozilla/dom/Promise.h"
 #include "mozilla/storage.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/FileUtils.h"
@@ -71,6 +64,7 @@
 #include "nsVariant.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 using namespace mozilla::net;
 
 // Create key from baseDomain that will access the default cookie namespace.
@@ -107,8 +101,6 @@ static StaticRefPtr<nsCookieService> gCookieService;
 #define IDX_ORIGIN_ATTRIBUTES 10
 #define IDX_SAME_SITE 11
 #define IDX_RAW_SAME_SITE 12
-
-#define TOPIC_CLEAR_ORIGIN_DATA "clear-origin-attributes-data"
 
 static const int64_t kCookiePurgeAge =
     int64_t(30 * 24 * 60 * 60) * PR_USEC_PER_SEC;  // 30 days in microseconds
@@ -464,31 +456,6 @@ NS_IMPL_ISUPPORTS(CloseCookieDBListener, mozIStorageCompletionCallback)
 
 namespace {
 
-class AppClearDataObserver final : public nsIObserver {
-  ~AppClearDataObserver() = default;
-
- public:
-  NS_DECL_ISUPPORTS
-
-  // nsIObserver implementation.
-  NS_IMETHOD
-  Observe(nsISupports* aSubject, const char* aTopic,
-          const char16_t* aData) override {
-    MOZ_ASSERT(!nsCRT::strcmp(aTopic, TOPIC_CLEAR_ORIGIN_DATA));
-
-    MOZ_ASSERT(XRE_IsParentProcess());
-
-    nsCOMPtr<nsICookieManager> cookieManager =
-        do_GetService(NS_COOKIEMANAGER_CONTRACTID);
-    MOZ_ASSERT(cookieManager);
-
-    return cookieManager->RemoveCookiesWithOriginAttributes(
-        nsDependentString(aData), EmptyCString());
-  }
-};
-
-NS_IMPL_ISUPPORTS(AppClearDataObserver, nsIObserver)
-
 // comparator class for sorting cookies by entry and index.
 class CompareCookiesByIndex {
  public:
@@ -562,14 +529,6 @@ already_AddRefed<nsCookieService> nsCookieService::GetSingleton() {
   }
 
   return do_AddRef(gCookieService);
-}
-
-/* static */
-void nsCookieService::AppClearDataObserverInit() {
-  nsCOMPtr<nsIObserverService> observerService = services::GetObserverService();
-  nsCOMPtr<nsIObserver> obs = new AppClearDataObserver();
-  observerService->AddObserver(obs, TOPIC_CLEAR_ORIGIN_DATA,
-                               /* ownsWeak= */ false);
 }
 
 /******************************************************************************
@@ -2427,7 +2386,7 @@ nsCookieService::RemoveAll() {
 }
 
 NS_IMETHODIMP
-nsCookieService::GetEnumerator(nsISimpleEnumerator** aEnumerator) {
+nsCookieService::GetCookies(nsTArray<RefPtr<nsICookie>>& aCookies) {
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -2435,19 +2394,19 @@ nsCookieService::GetEnumerator(nsISimpleEnumerator** aEnumerator) {
 
   EnsureReadComplete(true);
 
-  nsCOMArray<nsICookie> cookieList(mDBState->cookieCount);
+  aCookies.SetCapacity(mDBState->cookieCount);
   for (auto iter = mDBState->hostTable.Iter(); !iter.Done(); iter.Next()) {
     const nsCookieEntry::ArrayType& cookies = iter.Get()->GetCookies();
     for (nsCookieEntry::IndexType i = 0; i < cookies.Length(); ++i) {
-      cookieList.AppendObject(cookies[i]);
+      aCookies.AppendElement(cookies[i]);
     }
   }
 
-  return NS_NewArrayEnumerator(aEnumerator, cookieList, NS_GET_IID(nsICookie));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
-nsCookieService::GetSessionEnumerator(nsISimpleEnumerator** aEnumerator) {
+nsCookieService::GetSessionCookies(nsTArray<RefPtr<nsICookie>>& aCookies) {
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -2455,19 +2414,19 @@ nsCookieService::GetSessionEnumerator(nsISimpleEnumerator** aEnumerator) {
 
   EnsureReadComplete(true);
 
-  nsCOMArray<nsICookie> cookieList(mDBState->cookieCount);
+  aCookies.SetCapacity(mDBState->cookieCount);
   for (auto iter = mDBState->hostTable.Iter(); !iter.Done(); iter.Next()) {
     const nsCookieEntry::ArrayType& cookies = iter.Get()->GetCookies();
     for (nsCookieEntry::IndexType i = 0; i < cookies.Length(); ++i) {
       nsCookie* cookie = cookies[i];
       // Filter out non-session cookies.
       if (cookie->IsSession()) {
-        cookieList.AppendObject(cookie);
+        aCookies.AppendElement(cookie);
       }
     }
   }
 
-  return NS_NewArrayEnumerator(aEnumerator, cookieList, NS_GET_IID(nsICookie));
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -4861,6 +4820,88 @@ nsresult nsCookieService::RemoveCookiesFromExactHost(
   MOZ_ASSERT(NS_SUCCEEDED(rv));
 
   return NS_OK;
+}
+
+namespace {
+
+class RemoveAllSinceRunnable : public Runnable {
+ public:
+  typedef nsTArray<nsCOMPtr<nsICookie>> CookieArray;
+  RemoveAllSinceRunnable(Promise* aPromise, nsCookieService* aSelf,
+                         CookieArray&& aCookieArray, int64_t aSinceWhen)
+      : Runnable("RemoveAllSinceRunnable"),
+        mPromise(aPromise),
+        mSelf(aSelf),
+        mList(std::move(aCookieArray)),
+        mIndex(0),
+        mSinceWhen(aSinceWhen) {}
+
+  NS_IMETHODIMP Run() {
+    RemoveSome();
+
+    if (mIndex < mList.Length()) {
+      return NS_DispatchToCurrentThread(this);
+    } else {
+      mPromise->MaybeResolveWithUndefined();
+    }
+    return NS_OK;
+  }
+
+ private:
+  void RemoveSome() {
+    for (CookieArray::size_type iter = 0;
+         iter < kYieldPeriod && mIndex < mList.Length(); ++mIndex, ++iter) {
+      nsCookie* cookie = static_cast<nsCookie*>(mList[mIndex].get());
+      if (cookie->CreationTime() > mSinceWhen &&
+          NS_FAILED(mSelf->Remove(cookie->Host(), cookie->OriginAttributesRef(),
+                                  cookie->Name(), cookie->Path()))) {
+        continue;
+      }
+    }
+  }
+
+ private:
+  RefPtr<Promise> mPromise;
+  RefPtr<nsCookieService> mSelf;
+  CookieArray mList;
+  CookieArray::size_type mIndex;
+  int64_t mSinceWhen;
+  static const CookieArray::size_type kYieldPeriod = 10;
+};
+
+}  // namespace
+
+NS_IMETHODIMP
+nsCookieService::RemoveAllSince(int64_t aSinceWhen, JSContext* aCx,
+                                Promise** aRetVal) {
+  nsIGlobalObject* globalObject = xpc::CurrentNativeGlobal(aCx);
+  if (NS_WARN_IF(!globalObject)) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  ErrorResult result;
+  RefPtr<Promise> promise = Promise::Create(globalObject, result);
+  if (NS_WARN_IF(result.Failed())) {
+    return result.StealNSResult();
+  }
+
+  EnsureReadComplete(true);
+
+  typedef RemoveAllSinceRunnable::CookieArray CookieArray;
+  CookieArray cookieList(mDBState->cookieCount);
+  for (auto iter = mDBState->hostTable.Iter(); !iter.Done(); iter.Next()) {
+    const nsCookieEntry::ArrayType& cookies = iter.Get()->GetCookies();
+    for (nsCookieEntry::IndexType i = 0; i < cookies.Length(); ++i) {
+      cookieList.AppendElement(cookies[i]);
+    }
+  }
+
+  RefPtr<RemoveAllSinceRunnable> runMe = new RemoveAllSinceRunnable(
+      promise, this, std::move(cookieList), aSinceWhen);
+
+  promise.forget(aRetVal);
+
+  return runMe->Run();
 }
 
 // find an secure cookie specified by host and name

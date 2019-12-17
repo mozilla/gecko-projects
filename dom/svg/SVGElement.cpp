@@ -126,7 +126,7 @@ void SVGElement::DidAnimateClass() {
   // FIXME(emilio): This re-selector-matches, but we do the snapshot stuff right
   // above... Is this needed anymore?
   if (presShell) {
-    presShell->RestyleForAnimation(this, StyleRestyleHint_RESTYLE_SELF);
+    presShell->RestyleForAnimation(this, RestyleHint::RESTYLE_SELF);
   }
 }
 
@@ -286,9 +286,7 @@ nsresult SVGElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
   if (IsEventAttributeName(aName) && aValue) {
     MOZ_ASSERT(aValue->Type() == nsAttrValue::eString,
                "Expected string value for script body");
-    nsresult rv =
-        SetEventHandler(GetEventNameForAttr(aName), aValue->GetStringValue());
-    NS_ENSURE_SUCCESS(rv, rv);
+    SetEventHandler(GetEventNameForAttr(aName), aValue->GetStringValue());
   }
 
   return SVGElementBase::AfterSetAttr(aNamespaceID, aName, aValue, aOldValue,

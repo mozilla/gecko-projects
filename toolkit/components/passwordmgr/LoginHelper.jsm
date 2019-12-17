@@ -52,7 +52,10 @@ this.LoginHelper = {
     );
     this.debug = Services.prefs.getBoolPref("signon.debug");
     this.enabled = Services.prefs.getBoolPref("signon.rememberSignons");
-    this.storageEnabled = Services.prefs.getBoolPref("signon.storeSignons");
+    this.storageEnabled = Services.prefs.getBoolPref(
+      "signon.storeSignons",
+      true
+    );
     this.formlessCaptureEnabled = Services.prefs.getBoolPref(
       "signon.formlessCapture.enabled"
     );
@@ -81,6 +84,9 @@ this.LoginHelper = {
     );
     this.storeWhenAutocompleteOff = Services.prefs.getBoolPref(
       "signon.storeWhenAutocompleteOff"
+    );
+    this.userInputRequiredToCapture = Services.prefs.getBoolPref(
+      "signon.userInputRequiredToCapture.enabled"
     );
   },
 
@@ -209,6 +215,7 @@ this.LoginHelper = {
   /**
    * Helper to avoid the property bags when calling
    * Services.logins.searchLogins from JS.
+   * @deprecated Use Services.logins.searchLoginsAsync instead.
    *
    * @param {Object} aSearchOptions - A regular JS object to copy to a property bag before searching
    * @return {nsILoginInfo[]} - The result of calling searchLogins.
@@ -814,7 +821,7 @@ this.LoginHelper = {
       win.focus();
     } else {
       window.openDialog(
-        "chrome://passwordmgr/content/passwordManager.xul",
+        "chrome://passwordmgr/content/passwordManager.xhtml",
         "Toolkit:PasswordManager",
         "",
         { filterString }
@@ -1033,10 +1040,9 @@ this.LoginHelper = {
     let formLogin = Cc["@mozilla.org/login-manager/loginInfo;1"].createInstance(
       Ci.nsILoginInfo
     );
-    // For compatibility for the Lockwise extension we fallback to hostname/formSubmitURL
     formLogin.init(
-      login.origin || login.hostname,
-      "formSubmitURL" in login ? login.formSubmitURL : login.formActionOrigin,
+      login.origin,
+      login.formActionOrigin,
       login.httpRealm,
       login.username,
       login.password,

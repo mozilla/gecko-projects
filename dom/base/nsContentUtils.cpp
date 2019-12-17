@@ -20,6 +20,7 @@
 #include "imgRequestProxy.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
+#include "js/Array.h"        // JS::NewArrayObject
 #include "js/ArrayBuffer.h"  // JS::{GetArrayBufferData,IsArrayBufferObject,NewArrayBuffer}
 #include "js/JSON.h"
 #include "js/RegExp.h"  // JS::ExecuteRegExpNoStatics, JS::NewUCRegExpObject, JS::RegExpFlags
@@ -145,13 +146,10 @@
 #include "nsHtml5StringParser.h"
 #include "nsHTMLDocument.h"
 #include "nsHTMLTags.h"
-#include "nsIAddonPolicyService.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsICategoryManager.h"
 #include "nsIChannelEventSink.h"
-#include "nsICharsetDetectionObserver.h"
-#include "nsIChromeRegistry.h"
 #include "nsIConsoleService.h"
 #include "nsIContent.h"
 #include "nsIContentInlines.h"
@@ -162,7 +160,6 @@
 #include "nsIDocShellTreeOwner.h"
 #include "mozilla/dom/Document.h"
 #include "nsIDocumentEncoder.h"
-#include "nsIDOMChromeWindow.h"
 #include "nsIDOMWindowUtils.h"
 #include "nsIDragService.h"
 #include "nsIFormControl.h"
@@ -179,7 +176,6 @@
 #include "nsILoadContext.h"
 #include "nsILoadGroup.h"
 #include "nsIMemoryReporter.h"
-#include "nsIMIMEHeaderParam.h"
 #include "nsIMIMEService.h"
 #include "nsINode.h"
 #include "mozilla/dom/NodeInfo.h"
@@ -191,7 +187,6 @@
 #include "nsIParser.h"
 #include "nsIParserUtils.h"
 #include "nsIPermissionManager.h"
-#include "nsIPluginHost.h"
 #include "nsIRequest.h"
 #include "nsIRunnable.h"
 #include "nsIScriptContext.h"
@@ -199,14 +194,13 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIScriptSecurityManager.h"
-#include "nsIScrollable.h"
 #include "nsIStreamConverter.h"
 #include "nsIStreamConverterService.h"
 #include "nsIStringBundle.h"
 #include "nsIURI.h"
 #include "nsIURIMutator.h"
 #include "nsIURIWithSpecialOrigin.h"
-#include "nsIURL.h"
+#include "nsIUUIDGenerator.h"
 #include "nsIWebNavigation.h"
 #include "nsIWidget.h"
 #include "nsIWindowMediator.h"
@@ -242,8 +236,6 @@
 #include "HTMLSplitOnSpacesTokenizer.h"
 #include "InProcessBrowserChildMessageManager.h"
 #include "nsContentTypeParser.h"
-#include "nsICookiePermission.h"
-#include "nsICookieService.h"
 #include "ThirdPartyUtil.h"
 #include "mozilla/EnumSet.h"
 #include "mozilla/BloomFilter.h"
@@ -1686,19 +1678,19 @@ static bool IsErrorPage(nsIURI* aURI) {
 }
 
 /* static */
-bool nsContentUtils::PrincipalAllowsL10n(nsIPrincipal* aPrincipal,
+bool nsContentUtils::PrincipalAllowsL10n(nsIPrincipal& aPrincipal,
                                          nsIURI* aDocumentURI) {
   if (IsErrorPage(aDocumentURI)) {
     return true;
   }
 
   // The system principal is always allowed.
-  if (IsSystemPrincipal(aPrincipal)) {
+  if (aPrincipal.IsSystemPrincipal()) {
     return true;
   }
 
   nsCOMPtr<nsIURI> uri;
-  nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
+  nsresult rv = aPrincipal.GetURI(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, false);
 
   bool hasFlags;
@@ -1719,8 +1711,8 @@ bool nsContentUtils::PrincipalAllowsL10n(nsIPrincipal* aPrincipal,
     return true;
   }
 
-  auto principal = BasePrincipal::Cast(aPrincipal);
-  auto policy = principal->AddonPolicy();
+  auto& principal = BasePrincipal::Cast(aPrincipal);
+  auto policy = principal.AddonPolicy();
   return (policy && policy->IsPrivileged());
 }
 
@@ -1856,7 +1848,7 @@ bool nsContentUtils::CanCallerAccess(nsIPrincipal* aSubjectPrincipal,
 // static
 bool nsContentUtils::CanCallerAccess(const nsINode* aNode) {
   nsIPrincipal* subject = SubjectPrincipal();
-  if (IsSystemPrincipal(subject)) {
+  if (subject->IsSystemPrincipal()) {
     return true;
   }
 
@@ -1876,20 +1868,20 @@ bool nsContentUtils::CanCallerAccess(nsPIDOMWindowInner* aWindow) {
 }
 
 // static
-bool nsContentUtils::PrincipalHasPermission(nsIPrincipal* aPrincipal,
+bool nsContentUtils::PrincipalHasPermission(nsIPrincipal& aPrincipal,
                                             const nsAtom* aPerm) {
   // Chrome gets access by default.
-  if (IsSystemPrincipal(aPrincipal)) {
+  if (aPrincipal.IsSystemPrincipal()) {
     return true;
   }
 
   // Otherwise, only allow if caller is an addon with the permission.
-  return BasePrincipal::Cast(aPrincipal)->AddonHasPermission(aPerm);
+  return BasePrincipal::Cast(aPrincipal).AddonHasPermission(aPerm);
 }
 
 // static
 bool nsContentUtils::CallerHasPermission(JSContext* aCx, const nsAtom* aPerm) {
-  return PrincipalHasPermission(SubjectPrincipal(aCx), aPerm);
+  return PrincipalHasPermission(*SubjectPrincipal(aCx), aPerm);
 }
 
 // static
@@ -2008,7 +2000,7 @@ bool nsContentUtils::ShouldResistFingerprinting(nsIPrincipal* aPrincipal) {
   if (!aPrincipal) {
     return false;
   }
-  bool isChrome = nsContentUtils::IsSystemPrincipal(aPrincipal);
+  bool isChrome = aPrincipal->IsSystemPrincipal();
   return !isChrome && ShouldResistFingerprinting();
 }
 
@@ -2504,9 +2496,14 @@ int32_t nsContentUtils::ComparePoints(
   }
   // XXX Re-implement this without calling `Offset()` as far as possible,
   //     and the other overload should be an alias of this.
-  return ComparePoints(aFirstBoundary.Container(), aFirstBoundary.Offset(),
-                       aSecondBoundary.Container(), aSecondBoundary.Offset(),
-                       aDisconnected);
+  return ComparePoints(
+      aFirstBoundary.Container(),
+      *aFirstBoundary.Offset(
+          RangeBoundaryBase<FPT, FRT>::OffsetFilter::kValidOrInvalidOffsets),
+      aSecondBoundary.Container(),
+      *aSecondBoundary.Offset(
+          RangeBoundaryBase<SPT, SRT>::OffsetFilter::kValidOrInvalidOffsets),
+      aDisconnected);
 }
 
 inline bool IsCharInSet(const char* aSet, const char16_t aChar) {
@@ -3167,7 +3164,8 @@ bool nsContentUtils::CanLoadImage(nsIURI* aURI, nsINode* aNode,
     // from anywhere.  This allows editor to insert images from file://
     // into documents that are being edited.
     rv = sSecurityManager->CheckLoadURIWithPrincipal(
-        aLoadingPrincipal, aURI, nsIScriptSecurityManager::ALLOW_CHROME);
+        aLoadingPrincipal, aURI, nsIScriptSecurityManager::ALLOW_CHROME,
+        aLoadingDocument->InnerWindowID());
     if (NS_FAILED(rv)) {
       return false;
     }
@@ -3185,7 +3183,7 @@ bool nsContentUtils::CanLoadImage(nsIURI* aURI, nsINode* aNode,
                                  EmptyCString(),  // mime guess
                                  &decision, GetContentPolicy());
 
-  return NS_FAILED(rv) ? false : NS_CP_ACCEPTED(decision);
+  return NS_SUCCEEDED(rv) && NS_CP_ACCEPTED(decision);
 }
 
 // static
@@ -3428,6 +3426,9 @@ bool nsContentUtils::ContentIsDraggable(nsIContent* aContent) {
                                  nsGkAtoms::_false, eIgnoreCase)) {
       return false;
     }
+  }
+  if (aContent->IsSVGElement()) {
+    return false;
   }
 
   // special handling for content area image and link dragging
@@ -3797,12 +3798,10 @@ void nsContentUtils::LogMessageToConsole(const char* aMsg) {
 }
 
 bool nsContentUtils::IsChildOfSameType(Document* aDoc) {
-  nsCOMPtr<nsIDocShellTreeItem> docShellAsItem(aDoc->GetDocShell());
-  nsCOMPtr<nsIDocShellTreeItem> sameTypeParent;
-  if (docShellAsItem) {
-    docShellAsItem->GetInProcessSameTypeParent(getter_AddRefs(sameTypeParent));
+  if (BrowsingContext* bc = aDoc->GetBrowsingContext()) {
+    return bc->GetParent();
   }
-  return sameTypeParent != nullptr;
+  return false;
 }
 
 bool nsContentUtils::IsPlainTextType(const nsACString& aContentType) {
@@ -4717,7 +4716,7 @@ nsresult nsContentUtils::ParseFragmentHTML(const nsAString& aSourceBuffer,
   // If this is a chrome-privileged document, create a fragment first, and
   // sanitize it before insertion.
   RefPtr<DocumentFragment> fragment;
-  if (IsSystemPrincipal(aTargetNode->NodePrincipal())) {
+  if (aTargetNode->NodePrincipal()->IsSystemPrincipal()) {
     fragment = new DocumentFragment(aTargetNode->OwnerDoc()->NodeInfoManager());
     target = fragment;
   }
@@ -4811,7 +4810,7 @@ nsresult nsContentUtils::ParseFragmentXML(const nsAString& aSourceBuffer,
 
   // If this is a chrome-privileged document, sanitize the fragment before
   // returning.
-  if (IsSystemPrincipal(aDocument->NodePrincipal())) {
+  if (aDocument->NodePrincipal()->IsSystemPrincipal()) {
     // Don't fire mutation events for nodes removed by the sanitizer.
     nsAutoScriptBlockerSuppressNodeRemoved scriptBlocker;
 
@@ -5008,7 +5007,8 @@ bool nsContentUtils::IsInSameAnonymousTree(const nsINode* aNode,
   MOZ_ASSERT(aNode, "Must have a node to work with");
   MOZ_ASSERT(aContent, "Must have a content to work with");
 
-  if (aNode->IsInNativeAnonymousSubtree() != aContent->IsInNativeAnonymousSubtree()) {
+  if (aNode->IsInNativeAnonymousSubtree() !=
+      aContent->IsInNativeAnonymousSubtree()) {
     return false;
   }
 
@@ -5045,12 +5045,6 @@ bool nsContentUtils::SchemeIs(nsIURI* aURI, const char* aScheme) {
   nsCOMPtr<nsIURI> baseURI = NS_GetInnermostURI(aURI);
   NS_ENSURE_TRUE(baseURI, false);
   return baseURI->SchemeIs(aScheme);
-}
-
-bool nsContentUtils::IsSystemPrincipal(nsIPrincipal* aPrincipal) {
-  // Some consumers call us with a null aPrincipal and expect a false return
-  // value...
-  return aPrincipal && aPrincipal->IsSystemPrincipal();
 }
 
 bool nsContentUtils::IsExpandedPrincipal(nsIPrincipal* aPrincipal) {
@@ -5111,7 +5105,8 @@ void nsContentUtils::TriggerLink(nsIContent* aContent, nsIURI* aLinkURI,
   if (sSecurityManager) {
     uint32_t flag = static_cast<uint32_t>(nsIScriptSecurityManager::STANDARD);
     proceed = sSecurityManager->CheckLoadURIWithPrincipal(
-        aContent->NodePrincipal(), aLinkURI, flag);
+        aContent->NodePrincipal(), aLinkURI, flag,
+        aContent->OwnerDoc()->InnerWindowID());
   }
 
   // Only pass off the click event if the script security manager says it's ok.
@@ -5128,8 +5123,7 @@ void nsContentUtils::TriggerLink(nsIContent* aContent, nsIURI* aLinkURI,
          !aContent->IsSVGElement(nsGkAtoms::a)) ||
         !aContent->AsElement()->GetAttr(kNameSpaceID_None, nsGkAtoms::download,
                                         fileName) ||
-        NS_FAILED(
-            aContent->NodePrincipal()->CheckMayLoad(aLinkURI, false, true))) {
+        NS_FAILED(aContent->NodePrincipal()->CheckMayLoad(aLinkURI, true))) {
       fileName.SetIsVoid(true);  // No actionable download attribute was found.
     }
 
@@ -5267,7 +5261,7 @@ void nsContentUtils::WarnScriptWasIgnored(Document* aDocument) {
     }
     privateBrowsing =
         !!aDocument->NodePrincipal()->OriginAttributesRef().mPrivateBrowsingId;
-    chromeContext = IsSystemPrincipal(aDocument->NodePrincipal());
+    chromeContext = aDocument->NodePrincipal()->IsSystemPrincipal();
   }
 
   msg.AppendLiteral(
@@ -5445,13 +5439,8 @@ bool nsContentUtils::CheckForSubFrameDrop(nsIDragSession* aDragSession,
     return true;
   }
 
-  nsCOMPtr<nsIDocShellTreeItem> tdsti = targetWin->GetDocShell();
-  if (!tdsti) {
-    return true;
-  }
-
   // Always allow dropping onto chrome shells.
-  if (tdsti->ItemType() == nsIDocShellTreeItem::typeChrome) {
+  if (targetWin->GetBrowsingContext()->IsChrome()) {
     return false;
   }
 
@@ -5681,9 +5670,9 @@ nsresult nsContentUtils::CheckSameOrigin(nsIChannel* aOldChannel,
 
   NS_ENSURE_STATE(oldPrincipal && newURI && newOriginalURI);
 
-  nsresult rv = oldPrincipal->CheckMayLoad(newURI, false, false);
+  nsresult rv = oldPrincipal->CheckMayLoad(newURI, false);
   if (NS_SUCCEEDED(rv) && newOriginalURI != newURI) {
-    rv = oldPrincipal->CheckMayLoad(newOriginalURI, false, false);
+    rv = oldPrincipal->CheckMayLoad(newOriginalURI, false);
   }
 
   return rv;
@@ -5830,7 +5819,7 @@ bool nsContentUtils::CheckMayLoad(nsIPrincipal* aPrincipal,
   NS_ENSURE_SUCCESS(rv, false);
 
   return NS_SUCCEEDED(
-      aPrincipal->CheckMayLoad(channelURI, false, aAllowIfInheritsPrincipal));
+      aPrincipal->CheckMayLoad(channelURI, aAllowIfInheritsPrincipal));
 }
 
 /* static */
@@ -6438,7 +6427,7 @@ bool nsContentUtils::ChannelShouldInheritPrincipal(
         // based on its own codebase later.
         //
         (URIIsLocalFile(aURI) &&
-         NS_SUCCEEDED(aLoadingPrincipal->CheckMayLoad(aURI, false, false)) &&
+         NS_SUCCEEDED(aLoadingPrincipal->CheckMayLoad(aURI, false)) &&
          // One more check here.  CheckMayLoad will always return true for the
          // system principal, but we do NOT want to inherit in that case.
          !aLoadingPrincipal->IsSystemPrincipal());
@@ -6447,7 +6436,7 @@ bool nsContentUtils::ChannelShouldInheritPrincipal(
 }
 
 /* static */
-bool nsContentUtils::IsCutCopyAllowed(nsIPrincipal* aSubjectPrincipal) {
+bool nsContentUtils::IsCutCopyAllowed(nsIPrincipal& aSubjectPrincipal) {
   if (StaticPrefs::dom_allow_cut_copy() &&
       UserActivation::IsHandlingUserInput()) {
     return true;
@@ -8710,22 +8699,11 @@ bool nsContentUtils::IsSpecificAboutPage(JSObject* aGlobal, const char* aUri) {
 /* static */
 void nsContentUtils::SetScrollbarsVisibility(nsIDocShell* aDocShell,
                                              bool aVisible) {
-  nsCOMPtr<nsIScrollable> scroller = do_QueryInterface(aDocShell);
-
-  if (scroller) {
-    int32_t prefValue;
-
-    if (aVisible) {
-      prefValue = nsIScrollable::Scrollbar_Auto;
-    } else {
-      prefValue = nsIScrollable::Scrollbar_Never;
-    }
-
-    scroller->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_Y,
-                                             prefValue);
-    scroller->SetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_X,
-                                             prefValue);
+  if (!aDocShell) {
+    return;
   }
+  auto pref = aVisible ? ScrollbarPreference::Auto : ScrollbarPreference::Never;
+  nsDocShell::Cast(aDocShell)->SetScrollbarPreference(pref);
 }
 
 /* static */
@@ -8890,18 +8868,9 @@ bool nsContentUtils::HttpsStateIsModern(Document* aDocument) {
 
   MOZ_ASSERT(principal->GetIsContentPrincipal());
 
-  nsCOMPtr<nsIContentSecurityManager> csm =
-      do_GetService(NS_CONTENTSECURITYMANAGER_CONTRACTID);
-  NS_WARNING_ASSERTION(csm, "csm is null");
-  if (csm) {
-    bool isTrustworthyOrigin = false;
-    csm->IsOriginPotentiallyTrustworthy(principal, &isTrustworthyOrigin);
-    if (isTrustworthyOrigin) {
-      return true;
-    }
-  }
-
-  return false;
+  bool isTrustworthyOrigin = false;
+  principal->GetIsOriginPotentiallyTrustworthy(&isTrustworthyOrigin);
+  return isTrustworthyOrigin;
 }
 
 /* static */
@@ -8931,15 +8900,9 @@ bool nsContentUtils::ComputeIsSecureContext(nsIChannel* aChannel) {
     return false;
   }
 
-  nsCOMPtr<nsIContentSecurityManager> csm =
-      do_GetService(NS_CONTENTSECURITYMANAGER_CONTRACTID);
-  NS_WARNING_ASSERTION(csm, "csm is null");
-  if (csm) {
-    bool isTrustworthyOrigin = false;
-    csm->IsOriginPotentiallyTrustworthy(principal, &isTrustworthyOrigin);
-    return isTrustworthyOrigin;
-  }
-  return true;
+  bool isTrustworthyOrigin = false;
+  principal->GetIsOriginPotentiallyTrustworthy(&isTrustworthyOrigin);
+  return isTrustworthyOrigin;
 }
 
 /* static */
@@ -9449,11 +9412,8 @@ void nsContentUtils::AppendDocumentLevelNativeAnonymousContentTo(
           "scroll frame should always implement nsIAnonymousContentCreator");
       creator->AppendAnonymousContentTo(aElements, 0);
     }
-
     if (nsCanvasFrame* canvasFrame = presShell->GetCanvasFrame()) {
-      if (Element* container = canvasFrame->GetCustomContentContainer()) {
-        aElements.AppendElement(container);
-      }
+      canvasFrame->AppendAnonymousContentTo(aElements, 0);
     }
   }
 
@@ -9592,7 +9552,7 @@ nsresult nsContentUtils::CreateJSValueFromSequenceOfObject(
     return NS_OK;
   }
 
-  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, aTransfer.Length()));
+  JS::Rooted<JSObject*> array(aCx, JS::NewArrayObject(aCx, aTransfer.Length()));
   if (!array) {
     return NS_ERROR_OUT_OF_MEMORY;
   }

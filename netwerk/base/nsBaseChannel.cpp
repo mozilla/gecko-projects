@@ -12,7 +12,6 @@
 #include "nsUnknownDecoder.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsMimeTypes.h"
-#include "nsIHttpChannel.h"
 #include "nsIChannelEventSink.h"
 #include "nsIStreamConverterService.h"
 #include "nsChannelClassifier.h"
@@ -23,6 +22,7 @@
 #include "LoadInfo.h"
 #include "nsServiceManagerUtils.h"
 #include "nsRedirectHistoryEntry.h"
+#include "mozilla/BasePrincipal.h"
 
 using namespace mozilla;
 
@@ -654,7 +654,8 @@ nsBaseChannel::AsyncOpen(nsIStreamListener* aListener) {
           mLoadInfo->GetInitialSecurityCheckDone() ||
           (mLoadInfo->GetSecurityMode() ==
                nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
-           nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
+           mLoadInfo->LoadingPrincipal() &&
+           mLoadInfo->LoadingPrincipal()->IsSystemPrincipal()),
       "security flags in loadInfo but doContentSecurityCheck() not called");
 
   NS_ENSURE_TRUE(mURI, NS_ERROR_NOT_INITIALIZED);

@@ -198,7 +198,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
   get threadLifetimePool() {
     if (!this._threadLifetimePool) {
-      this._threadLifetimePool = new ActorPool(this.conn);
+      this._threadLifetimePool = new ActorPool(this.conn, "thread");
       this.conn.addActorPool(this._threadLifetimePool);
       this._threadLifetimePool.objectActors = new WeakMap();
     }
@@ -286,6 +286,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       this.doResume();
     }
 
+    this.removeAllWatchpoints();
     this._xhrBreakpoints = [];
     this._updateNetworkObserver();
 
@@ -296,7 +297,9 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
     for (const global of this.dbg.getDebuggees()) {
       try {
-        this._debuggerNotificationObserver.disconnect(global);
+        this._debuggerNotificationObserver.disconnect(
+          global.unsafeDereference()
+        );
       } catch (e) {}
     }
 
@@ -582,7 +585,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
   _onNewDebuggee(global) {
     try {
-      this._debuggerNotificationObserver.connect(global);
+      this._debuggerNotificationObserver.connect(global.unsafeDereference());
     } catch (e) {}
   },
 
@@ -1147,7 +1150,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       this.dbg.replayClearSteppingHooks();
     } else {
       let frame = this.youngestFrame;
-      if (frame && frame.live) {
+      if (frame && frame.onStack) {
         while (frame) {
           frame.onStep = undefined;
           frame.onPop = undefined;
@@ -1330,15 +1333,59 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
     // Find the starting frame...
     let frame = this.youngestFrame;
+
+    const walkToParentFrame = () => {
+      if (!frame) {
+        return;
+      }
+
+      const currentFrame = frame;
+      frame = null;
+
+      if (currentFrame.older) {
+        frame = currentFrame.older;
+      } else if (
+        this._options.shouldIncludeAsyncLiveFrames &&
+        currentFrame.asyncPromise
+      ) {
+        // We support returning Frame actors for frames that are suspended
+        // at an 'await', and here we want to walk upward to look for the first
+        // frame that will be resumed when the current frame's promise resolves.
+        let reactions = currentFrame.asyncPromise.getPromiseReactions();
+        while (true) {
+          // We loop here because we may have code like:
+          //
+          //   async function inner(){ debugger; }
+          //
+          //   async function outer() {
+          //     await Promise.resolve().then(() => inner());
+          //   }
+          //
+          // where we can see that when `inner` resolves, we will resume from
+          // `outer`, even though there is a layer of promises between, and
+          // that layer could be any number of promises deep.
+          if (!(reactions[0] instanceof Debugger.Object)) {
+            break;
+          }
+
+          reactions = reactions[0].getPromiseReactions();
+        }
+
+        if (reactions[0] instanceof Debugger.Frame) {
+          frame = reactions[0];
+        }
+      }
+    };
+
     let i = 0;
     while (frame && i < start) {
-      frame = frame.older;
+      walkToParentFrame();
       i++;
     }
 
     // Return count frames, or all remaining frames if count is not defined.
     const frames = [];
-    for (; frame && (!count || i < start + count); i++, frame = frame.older) {
+    for (; frame && (!count || i < start + count); i++, walkToParentFrame()) {
       const sourceActor = this.sources.createSourceActor(frame.script.source);
       if (!sourceActor) {
         continue;
@@ -1499,7 +1546,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     // Create the actor pool that will hold the pause actor and its
     // children.
     assert(!this._pausePool, "No pause pool should exist yet");
-    this._pausePool = new ActorPool(this.conn);
+    this._pausePool = new ActorPool(this.conn, "pause");
     this.conn.addActorPool(this._pausePool);
 
     // Give children of the pause pool a quick link back to the
@@ -1591,12 +1638,12 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
     const popped = [];
 
     // Create the actor pool that will hold the still-living frames.
-    const framePool = new ActorPool(this.conn);
+    const framesPool = new ActorPool(this.conn, "frames");
     const frameList = [];
 
     for (const frameActor of this._frameActors) {
-      if (frameActor.frame.live) {
-        framePool.addActor(frameActor);
+      if (frameActor.frame.onStack) {
+        framesPool.addActor(frameActor);
         frameList.push(frameActor);
       } else {
         popped.push(frameActor.actorID);
@@ -1605,13 +1652,13 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
     // Remove the old frame actor pool, this will expire
     // any actors that weren't added to the new pool.
-    if (this._framePool) {
-      this.conn.removeActorPool(this._framePool);
+    if (this._framesPool) {
+      this.conn.removeActorPool(this._framesPool);
     }
 
     this._frameActors = frameList;
-    this._framePool = framePool;
-    this.conn.addActorPool(framePool);
+    this._framesPool = framesPool;
+    this.conn.addActorPool(framesPool);
 
     return popped;
   },
@@ -1623,7 +1670,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
 
     const actor = new FrameActor(frame, this, depth);
     this._frameActors.push(actor);
-    this._framePool.addActor(actor);
+    this._framesPool.addActor(actor);
     frame.actor = actor;
 
     return actor;
@@ -1724,11 +1771,23 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
    *        The object actor.
    */
   threadObjectGrip: function(actor) {
-    // We want to reuse the existing actor ID, so we just remove it from the
-    // current pool's weak map and then let pool.addActor do the rest.
-    actor.registeredPool.objectActors.delete(actor.obj);
+    // Save the reference for when we need to demote the object
+    // back to its original registered pool
+    actor.originalRegisteredPool = actor.registeredPool;
+
     this.threadLifetimePool.addActor(actor);
     this.threadLifetimePool.objectActors.set(actor.obj, actor);
+  },
+
+  demoteObjectGrip: function(actor) {
+    // We want to reuse the existing actor ID, so we just remove it from the
+    // current pool's weak map and then let ActorPool.addActor do the rest.
+    actor.registeredPool.objectActors.delete(actor.obj);
+
+    actor.originalRegisteredPool.addActor(actor);
+    actor.originalRegisteredPool.objectActors.set(actor.obj, actor);
+
+    delete actor.originalRegisteredPool;
   },
 
   _onWindowReady: function({ isTopLevel, isBFCache, window }) {
@@ -2050,6 +2109,7 @@ const ThreadActor = ActorClassWithSpec(threadSpec, {
       this.sources.hasSourceActor(source)
     ) {
       sourceActor = this.sources.getSourceActor(source);
+      sourceActor.resetDebuggeeScripts();
     } else {
       sourceActor = this.sources.createSourceActor(source);
     }

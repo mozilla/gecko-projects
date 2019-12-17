@@ -14,7 +14,6 @@
 #include "nsIContentSecurityPolicy.h"
 #include "nsIDocShell.h"
 #include "nsIHttpChannel.h"
-#include "nsIHttpChannelInternal.h"
 #include "nsIInputStreamPump.h"
 #include "nsIIOService.h"
 #include "nsIOService.h"
@@ -25,6 +24,7 @@
 #include "nsIStreamListenerTee.h"
 #include "nsIThreadRetargetableRequest.h"
 #include "nsIURI.h"
+#include "nsIXPConnect.h"
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -34,7 +34,6 @@
 #include "nsContentPolicyUtils.h"
 #include "nsContentUtils.h"
 #include "nsDocShellCID.h"
-#include "nsISupportsPrimitives.h"
 #include "nsNetUtil.h"
 #include "nsIPipe.h"
 #include "nsIOutputStream.h"
@@ -1128,8 +1127,8 @@ class ScriptLoaderRunnable final : public nsIRunnable, public nsINamed {
     // same-origin checks on them so we should be able to see their errors.
     // Note that for data: url, where we allow it through the same-origin check
     // but then give it a different origin.
-    aLoadInfo.mMutedErrorFlag.emplace(
-        IsMainWorkerScript() ? false : !principal->Subsumes(channelPrincipal));
+    aLoadInfo.mMutedErrorFlag.emplace(!IsMainWorkerScript() &&
+                                      !principal->Subsumes(channelPrincipal));
 
     // Make sure we're not seeing the result of a 404 or something by checking
     // the 'requestSucceeded' attribute on the http channel.

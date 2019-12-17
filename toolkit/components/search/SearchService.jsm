@@ -43,7 +43,11 @@ XPCOMUtils.defineLazyPreferenceGetter(
   this,
   "gModernConfig",
   SearchUtils.BROWSER_SEARCH_PREF + "modernConfig",
-  false
+  false,
+  () => {
+    // We'll re-init the service, regardless of which way the pref-flip went.
+    Services.search.reInit();
+  }
 );
 
 // A text encoder to UTF8, used whenever we commit the cache to disk.
@@ -777,7 +781,7 @@ SearchService.prototype = {
     } catch (ex) {
       this._initRV = ex.result !== undefined ? ex.result : Cr.NS_ERROR_FAILURE;
       SearchUtils.log(
-        "_init: failure initializng search: " + ex + "\n" + ex.stack
+        "_init: failure initializing search: " + ex + "\n" + ex.stack
       );
     }
     gInitialized = true;
@@ -2584,16 +2588,18 @@ SearchService.prototype = {
     // Modern Config encodes params as objects whereas they are
     // strings in webExtensions, stringify them here.
     if ("params" in config) {
-      [
+      for (const key of [
         "searchUrlGetParams",
         "searchUrlPostParams",
         "suggestUrlGetParams",
         "suggestUrlPostParams",
-      ].forEach(key => {
+      ]) {
         if (key in config.params) {
-          params[key] = new URLSearchParams(config.params[key]).toString();
+          params[key] = new URLSearchParams(
+            config.params[key].map(kv => [kv.name, kv.value])
+          ).toString();
         }
-      });
+      }
     }
 
     if ("telemetryId" in config) {

@@ -162,6 +162,14 @@ AsyncTransform APZSampler::GetCurrentAsyncTransform(
       AsyncPanZoomController::eForCompositing, aComponents);
 }
 
+Maybe<CompositionPayload> APZSampler::NotifyScrollSampling(
+    const LayerMetricsWrapper& aLayer) {
+  MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
+  AssertOnSamplerThread();
+  MOZ_ASSERT(aLayer.GetApzc());
+  return aLayer.GetApzc()->NotifyScrollSampling();
+}
+
 AsyncTransformComponentMatrix APZSampler::GetOverscrollTransform(
     const LayerMetricsWrapper& aLayer) {
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
@@ -212,7 +220,7 @@ ScrollableLayerGuid APZSampler::GetGuid(const LayerMetricsWrapper& aLayer) {
   return aLayer.GetApzc()->GetGuid();
 }
 
-const ScreenMargin& APZSampler::GetGeckoFixedLayerMargins() const {
+ScreenMargin APZSampler::GetGeckoFixedLayerMargins() const {
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   AssertOnSamplerThread();
 

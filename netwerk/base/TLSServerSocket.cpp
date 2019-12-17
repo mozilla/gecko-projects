@@ -10,7 +10,6 @@
 #include "nsComponentManagerUtils.h"
 #include "nsDependentSubstring.h"
 #include "nsIServerSocket.h"
-#include "nsITimer.h"
 #include "nsIX509Cert.h"
 #include "nsIX509CertDB.h"
 #include "nsNetCID.h"
@@ -280,10 +279,6 @@ TLSServerConnectionInfo::TLSServerConnectionInfo()
       mSecurityObserver(nullptr) {}
 
 TLSServerConnectionInfo::~TLSServerConnectionInfo() {
-  if (!mSecurityObserver) {
-    return;
-  }
-
   RefPtr<nsITLSServerSecurityObserver> observer;
   {
     MutexAutoLock lock(mLock);
@@ -422,14 +417,13 @@ nsresult TLSServerConnectionInfo::HandshakeCallback(PRFileDesc* aFD) {
   mKeyLength = cipherInfo.effectiveKeyBits;
   mMacLength = cipherInfo.macBits;
 
-  if (!mSecurityObserver) {
-    return NS_OK;
-  }
-
   // Notify consumer code that handshake is complete
   nsCOMPtr<nsITLSServerSecurityObserver> observer;
   {
     MutexAutoLock lock(mLock);
+    if (!mSecurityObserver) {
+      return NS_OK;
+    }
     mSecurityObserver.swap(observer);
   }
   nsCOMPtr<nsITLSServerSocket> serverSocket;

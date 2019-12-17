@@ -61,12 +61,15 @@ XPCOMUtils.defineLazyGetter(this, "passwordMgrBundle", () => {
     "chrome://passwordmgr/locale/passwordmgr.properties"
   );
 });
+XPCOMUtils.defineLazyGetter(this, "dateAndTimeFormatter", () => {
+  return new Services.intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+  });
+});
 
 function loginSort(formHostPort, a, b) {
   let maybeHostPortA = LoginHelper.maybeGetHostPortForURL(a.origin);
   let maybeHostPortB = LoginHelper.maybeGetHostPortForURL(b.origin);
-
-  // Exact hostPort matches should appear first.
   if (formHostPort == maybeHostPortA && formHostPort != maybeHostPortB) {
     return -1;
   }
@@ -84,8 +87,18 @@ function loginSort(formHostPort, a, b) {
     }
   }
 
-  // Finally sort by username.
-  return a.username.localeCompare(b.username);
+  let userA = a.username.toLowerCase();
+  let userB = b.username.toLowerCase();
+
+  if (userA < userB) {
+    return -1;
+  }
+
+  if (userA > userB) {
+    return 1;
+  }
+
+  return 0;
 }
 
 function findDuplicates(loginList) {
@@ -136,7 +149,6 @@ class LoginAutocompleteItem extends AutocompleteItem {
   constructor(
     login,
     isPasswordField,
-    dateAndTimeFormatter,
     duplicateUsernames,
     actor,
     isOriginMatched
@@ -188,9 +200,14 @@ class LoginAutocompleteItem extends AutocompleteItem {
 }
 
 class GeneratedPasswordAutocompleteItem extends AutocompleteItem {
-  constructor(generatedPassword) {
+  constructor(generatedPassword, willAutoSaveGeneratedPassword) {
     super("generatedPassword");
-    this.comment = generatedPassword;
+    XPCOMUtils.defineLazyGetter(this, "comment", () => {
+      return JSON.stringify({
+        generatedPassword,
+        willAutoSaveGeneratedPassword,
+      });
+    });
     this.value = generatedPassword;
 
     XPCOMUtils.defineLazyGetter(this, "label", () => {
@@ -215,7 +232,14 @@ function LoginAutoCompleteResult(
   aSearchString,
   matchingLogins,
   formOrigin,
-  { generatedPassword, isSecure, actor, isPasswordField, hostname }
+  {
+    generatedPassword,
+    willAutoSaveGeneratedPassword,
+    isSecure,
+    actor,
+    isPasswordField,
+    hostname,
+  }
 ) {
   let hidingFooterOnPWFieldAutoOpened = false;
   function isFooterEnabled() {
@@ -261,16 +285,12 @@ function LoginAutoCompleteResult(
   // Saved login items
   let formHostPort = LoginHelper.maybeGetHostPortForURL(formOrigin);
   let logins = matchingLogins.sort(loginSort.bind(null, formHostPort));
-  let dateAndTimeFormatter = new Services.intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-  });
   let duplicateUsernames = findDuplicates(matchingLogins);
 
   for (let login of logins) {
     let item = new LoginAutocompleteItem(
       login,
       isPasswordField,
-      dateAndTimeFormatter,
       duplicateUsernames,
       actor,
       LoginHelper.isOriginMatching(login.origin, formOrigin, {
@@ -283,7 +303,12 @@ function LoginAutoCompleteResult(
   // The footer comes last if it's enabled
   if (isFooterEnabled()) {
     if (generatedPassword) {
-      this._rows.push(new GeneratedPasswordAutocompleteItem(generatedPassword));
+      this._rows.push(
+        new GeneratedPasswordAutocompleteItem(
+          generatedPassword,
+          willAutoSaveGeneratedPassword
+        )
+      );
     }
     this._rows.push(new LoginsFooterAutocompleteItem(hostname));
   }
@@ -435,7 +460,7 @@ LoginAutoComplete.prototype = {
 
     let completeSearch = (
       autoCompleteLookupPromise,
-      { generatedPassword, logins }
+      { generatedPassword, logins, willAutoSaveGeneratedPassword }
     ) => {
       // If the search was canceled before we got our
       // results, don't bother reporting them.
@@ -452,6 +477,7 @@ LoginAutoComplete.prototype = {
         formOrigin,
         {
           generatedPassword,
+          willAutoSaveGeneratedPassword,
           actor: loginManagerActor,
           isSecure,
           isPasswordField,

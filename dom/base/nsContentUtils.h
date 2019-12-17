@@ -626,7 +626,7 @@ class nsContentUtils {
   static bool CanCallerAccess(nsPIDOMWindowInner* aWindow);
 
   // Check if the principal is chrome or an addon with the permission.
-  static bool PrincipalHasPermission(nsIPrincipal* aPrincipal,
+  static bool PrincipalHasPermission(nsIPrincipal& aPrincipal,
                                      const nsAtom* aPerm);
 
   // Check if the JS caller is chrome or an addon with the permission.
@@ -1857,14 +1857,6 @@ class nsContentUtils {
   static bool SchemeIs(nsIURI* aURI, const char* aScheme);
 
   /**
-   * Returns true if aPrincipal is the system principal.
-   *
-   * @deprecated Use nsIPrincipal::IsSystemPrincipal instead!
-   * https://bugzilla.mozilla.org/show_bug.cgi?id=1517588 tracks removing this.
-   */
-  static bool IsSystemPrincipal(nsIPrincipal* aPrincipal);
-
-  /**
    * Returns true if aPrincipal is an ExpandedPrincipal.
    */
   static bool IsExpandedPrincipal(nsIPrincipal* aPrincipal);
@@ -1873,7 +1865,8 @@ class nsContentUtils {
    * Returns true if aPrincipal is the system or an ExpandedPrincipal.
    */
   static bool IsSystemOrExpandedPrincipal(nsIPrincipal* aPrincipal) {
-    return IsSystemPrincipal(aPrincipal) || IsExpandedPrincipal(aPrincipal);
+    return (aPrincipal && aPrincipal->IsSystemPrincipal()) ||
+           IsExpandedPrincipal(aPrincipal);
   }
 
   /**
@@ -1995,9 +1988,10 @@ class nsContentUtils {
   /**
    * Determine whether the principal or document is allowed access to the
    * localization system. We don't want the web to ever see this but all our UI
-   * including in content pages should pass this test.
+   * including in content pages should pass this test.  aDocumentURI may be
+   * null.
    */
-  static bool PrincipalAllowsL10n(nsIPrincipal* aPrincipal,
+  static bool PrincipalAllowsL10n(nsIPrincipal& aPrincipal,
                                   nsIURI* aDocumentURI);
 
   /**
@@ -2342,7 +2336,7 @@ class nsContentUtils {
    * allowed for the given subject principal. These are only allowed if the user
    * initiated them (like with a mouse-click or key press).
    */
-  static bool IsCutCopyAllowed(nsIPrincipal* aSubjectPrincipal);
+  static bool IsCutCopyAllowed(nsIPrincipal& aSubjectPrincipal);
 
   /*
    * Returns true if the browser should attempt to prevent the given caller type

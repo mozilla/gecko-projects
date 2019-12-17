@@ -123,7 +123,7 @@ var Sanitizer = {
         : parentWindow;
     Services.ww.openWindow(
       win,
-      "chrome://browser/content/sanitize.xul",
+      "chrome://browser/content/sanitize.xhtml",
       "Sanitize",
       "chrome,titlebar,dialog,centerscreen,modal",
       null
@@ -411,13 +411,14 @@ var Sanitizer = {
           )) {
             let currentDocument = currentWindow.document;
 
-            // searchBar.textbox may not exist due to the search bar binding
-            // not having been constructed yet if the search bar is in the
-            // overflow or menu panel. It won't have a value or edit history in
-            // that case.
+            // searchBar may not exist if it's in the customize mode.
             let searchBar = currentDocument.getElementById("searchbar");
-            if (searchBar && searchBar.textbox) {
-              searchBar.textbox.reset();
+            if (searchBar) {
+              let input = searchBar.textbox;
+              input.value = "";
+              try {
+                input.editor.transactionManager.clear();
+              } catch (e) {}
             }
 
             let tabBrowser = currentWindow.gBrowser;
@@ -810,9 +811,9 @@ class PrincipalsCollector {
 
     // Let's take the list of unique hosts+OA from cookies.
     progress.step = "principals-cookies";
-    let enumerator = Services.cookies.enumerator;
+    let cookies = Services.cookies.cookies;
     let hosts = new Set();
-    for (let cookie of enumerator) {
+    for (let cookie of cookies) {
       hosts.add(
         cookie.rawHost +
           ChromeUtils.originAttributesToSuffix(cookie.originAttributes)

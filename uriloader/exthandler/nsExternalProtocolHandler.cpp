@@ -6,21 +6,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/ContentChild.h"
+#include "mozilla/BasePrincipal.h"
 #include "nsIURI.h"
-#include "nsIURL.h"
 #include "nsExternalProtocolHandler.h"
 #include "nsString.h"
 #include "nsReadableUtils.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
-#include "nsIServiceManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIStringBundle.h"
-#include "nsIPrefService.h"
-#include "nsIPrompt.h"
-#include "nsIURIMutator.h"
 #include "nsNetUtil.h"
 #include "nsContentSecurityManager.h"
 #include "nsExternalHelperAppService.h"
@@ -171,7 +166,7 @@ nsresult nsExtProtocolChannel::OpenURL() {
     rv = extProtService->LoadURI(mUrl, aggCallbacks);
 
     if (NS_SUCCEEDED(rv) && mListener) {
-      Cancel(NS_ERROR_NO_CONTENT);
+      mStatus = NS_ERROR_NO_CONTENT;
 
       RefPtr<nsExtProtocolChannel> self = this;
       nsCOMPtr<nsIStreamListener> listener = mListener;
@@ -216,7 +211,8 @@ NS_IMETHODIMP nsExtProtocolChannel::AsyncOpen(nsIStreamListener* aListener) {
           mLoadInfo->GetInitialSecurityCheckDone() ||
           (mLoadInfo->GetSecurityMode() ==
                nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
-           nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
+           mLoadInfo->LoadingPrincipal() &&
+           mLoadInfo->LoadingPrincipal()->IsSystemPrincipal()),
       "security flags in loadInfo but doContentSecurityCheck() not called");
 
   NS_ENSURE_ARG_POINTER(listener);
@@ -335,7 +331,9 @@ NS_IMETHODIMP nsExtProtocolChannel::GetStatus(nsresult* status) {
 }
 
 NS_IMETHODIMP nsExtProtocolChannel::Cancel(nsresult status) {
-  mStatus = status;
+  if (NS_SUCCEEDED(mStatus)) {
+    mStatus = status;
+  }
   return NS_OK;
 }
 

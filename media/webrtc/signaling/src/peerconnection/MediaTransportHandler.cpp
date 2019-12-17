@@ -12,7 +12,6 @@
 #include "transportlayersrtp.h"
 
 // Config stuff
-#include "nsIPrefService.h"
 #include "mozilla/dom/RTCConfigurationBinding.h"
 
 // Parsing STUN/TURN URIs
@@ -704,7 +703,11 @@ void MediaTransportHandlerSTS::AddIceCandidate(
         nsresult rv = stream->ParseTrickleCandidate(aCandidate, aUfrag,
                                                     aObfuscatedAddress);
         if (NS_SUCCEEDED(rv)) {
-          if (mObfuscateHostAddresses && tokens.size() > 4) {
+          // If the address is not obfuscated, we want to track it as
+          // explicitly signaled so that we know it is fine to reveal
+          // the address later on.
+          if (mObfuscateHostAddresses && tokens.size() > 4 &&
+              aObfuscatedAddress.empty()) {
             mSignaledAddresses.insert(tokens[4]);
           }
         } else {

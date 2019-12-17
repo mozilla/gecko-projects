@@ -29,6 +29,7 @@ class ErrorValue;
 class FetchEventOpProxyChild;
 class RemoteWorkerData;
 class ServiceWorkerOp;
+class UniqueMessagePortId;
 class WeakWorkerRef;
 class WorkerErrorReport;
 class WorkerPrivate;
@@ -59,7 +60,7 @@ class RemoteWorkerChild final
   void FlushReportsOnMainThread(nsIConsoleReportCollector* aReporter);
 
   void AddPortIdentifier(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
-                         const MessagePortIdentifier& aPortIdentifier);
+                         UniqueMessagePortId& aPortIdentifier);
 
   RefPtr<GenericNonExclusivePromise> GetTerminationPromise();
 
@@ -148,8 +149,6 @@ class RemoteWorkerChild final
 
   void MaybeStartOp(RefPtr<Op>&& aOp);
 
-  MozPromiseHolder<GenericNonExclusivePromise> mTerminationPromise;
-
   const bool mIsServiceWorker;
   const nsCOMPtr<nsISerialEventTarget> mOwningEventTarget;
 
@@ -158,6 +157,7 @@ class RemoteWorkerChild final
 
   struct LauncherBoundData {
     bool mIPCActive = true;
+    MozPromiseHolder<GenericNonExclusivePromise> mTerminationPromise;
   };
 
   ThreadBound<LauncherBoundData> mLauncherData;

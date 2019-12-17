@@ -12,7 +12,6 @@
 #include "nsCOMPtr.h"              // for member, local
 #include "nsGkAtoms.h"             // for nsGkAtoms::baseURIProperty
 #include "mozilla/dom/NodeInfo.h"  // member (in nsCOMPtr)
-#include "nsIVariant.h"            // for use in GetUserData()
 #include "nsIWeakReference.h"
 #include "nsNodeInfoManager.h"  // for use in NodePrincipal()
 #include "nsPropertyTable.h"    // for typedefs
@@ -907,9 +906,8 @@ class nsINode : public mozilla::dom::EventTarget {
    * @return the parent, or null if no parent or the parent is not an nsIContent
    */
   nsIContent* GetParent() const {
-    return MOZ_LIKELY(GetBoolFlag(ParentIsContent))
-               ? mParent->AsContent()
-               : nullptr;
+    return MOZ_LIKELY(GetBoolFlag(ParentIsContent)) ? mParent->AsContent()
+                                                    : nullptr;
   }
 
   /**

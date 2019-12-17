@@ -30,7 +30,7 @@
              oncommand="MailIntegration.sendLinkForBrowser(gBrowser.selectedBrowser);"/>
 
     <command id="cmd_pageSetup" oncommand="PrintUtils.showPageSetup();"/>
-    <command id="cmd_print" oncommand="PrintUtils.printWindow(window.gBrowser.selectedBrowser.outerWindowID, window.gBrowser.selectedBrowser);"/>
+    <command id="cmd_print" oncommand="PrintUtils.printWindow(window.gBrowser.selectedBrowser.browsingContext);"/>
     <command id="cmd_printPreview" oncommand="PrintUtils.printPreview(PrintPreviewListener);"/>
     <command id="cmd_importFromAnotherBrowser" oncommand="MigrationUtils.showMigrationWizard(window, [MigrationUtils.MIGRATION_ENTRYPOINT_FILE_MENU]);"/>
     <command id="cmd_close" oncommand="BrowserCloseTabOrWindow(event);"/>
@@ -92,6 +92,14 @@
     <command id="Tools:Sanitize" oncommand="Sanitizer.showUI(window);"/>
     <command id="Tools:PrivateBrowsing"
       oncommand="OpenBrowserWindow({private: true});"/>
+#ifdef NIGHTLY_BUILD
+    <command id="Tools:FissionWindow"
+      oncommand="OpenBrowserWindow({fission: true});"
+      hidden="true"/>
+    <command id="Tools:NonFissionWindow"
+      oncommand="OpenBrowserWindow({fission: false});"
+      hidden="true"/>
+#endif
     <command id="History:UndoCloseTab" oncommand="undoCloseTab();"/>
     <command id="History:UndoCloseWindow" oncommand="undoCloseWindow();"/>
 
@@ -213,7 +221,7 @@
     <key id="key_toggleReaderMode" keycode="&toggleReaderMode.win.keycode;" command="View:ReaderView" disabled="true"/>
 #endif
 
-#ifdef XP_WIN
+#ifndef XP_MACOSX
     <key id="key_togglePictureInPicture" key="&togglePictureInPicture.key;" command="View:PictureInPicture" modifiers="accel,shift"/>
     <key                                 key="&togglePictureInPicture.key2;" command="View:PictureInPicture" modifiers="accel,shift"/>
 #endif

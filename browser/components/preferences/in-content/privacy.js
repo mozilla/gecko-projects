@@ -501,6 +501,11 @@ var gPrivacyPane = {
       "command",
       gPrivacyPane.showSecurityDevices
     );
+    setEventListener(
+      "telemetryDataDeletionLearnMore",
+      "command",
+      gPrivacyPane.showDataDeletion
+    );
 
     this._pane = document.getElementById("panePrivacy");
 
@@ -531,6 +536,11 @@ var gPrivacyPane = {
       "locationSettingsButton",
       "command",
       gPrivacyPane.showLocationExceptions
+    );
+    setEventListener(
+      "xrSettingsButton",
+      "command",
+      gPrivacyPane.showXRExceptions
     );
     setEventListener(
       "cameraSettingsButton",
@@ -1337,7 +1347,7 @@ var gPrivacyPane = {
     }
 
     gSubDialog.open(
-      "chrome://browser/content/sanitize.xul",
+      "chrome://browser/content/sanitize.xhtml",
       "resizable=no",
       null,
       () => {
@@ -1679,6 +1689,22 @@ var gPrivacyPane = {
     );
   },
 
+  // XR
+
+  /**
+   * Displays the XR exceptions dialog where specific site XR
+   * preferences can be set.
+   */
+  showXRExceptions() {
+    let params = { permissionType: "xr" };
+
+    gSubDialog.open(
+      "chrome://browser/content/preferences/sitePermissions.xhtml",
+      "resizable=yes",
+      params
+    );
+  },
+
   // CAMERA
 
   /**
@@ -1910,7 +1936,7 @@ var gPrivacyPane = {
       return;
     }
     Services.telemetry.recordEvent("pwmgr", "open_management", "preferences");
-    gSubDialog.open("chrome://passwordmgr/content/passwordManager.xul");
+    gSubDialog.open("chrome://passwordmgr/content/passwordManager.xhtml");
   },
 
   /**
@@ -1992,32 +2018,24 @@ var gPrivacyPane = {
       safeBrowsingMalwarePref.value = enableSafeBrowsing.checked;
 
       if (enableSafeBrowsing.checked) {
-        if (blockDownloads) {
-          blockDownloads.removeAttribute("disabled");
-          if (blockDownloads.checked) {
-            blockUncommonUnwanted.removeAttribute("disabled");
-          }
-        } else {
+        blockDownloads.removeAttribute("disabled");
+        if (blockDownloads.checked) {
           blockUncommonUnwanted.removeAttribute("disabled");
         }
       } else {
-        if (blockDownloads) {
-          blockDownloads.setAttribute("disabled", "true");
-        }
+        blockDownloads.setAttribute("disabled", "true");
         blockUncommonUnwanted.setAttribute("disabled", "true");
       }
     });
 
-    if (blockDownloads) {
-      blockDownloads.addEventListener("command", function() {
-        blockDownloadsPref.value = blockDownloads.checked;
-        if (blockDownloads.checked) {
-          blockUncommonUnwanted.removeAttribute("disabled");
-        } else {
-          blockUncommonUnwanted.setAttribute("disabled", "true");
-        }
-      });
-    }
+    blockDownloads.addEventListener("command", function() {
+      blockDownloadsPref.value = blockDownloads.checked;
+      if (blockDownloads.checked) {
+        blockUncommonUnwanted.removeAttribute("disabled");
+      } else {
+        blockUncommonUnwanted.setAttribute("disabled", "true");
+      }
+    });
 
     blockUncommonUnwanted.addEventListener("command", function() {
       blockUnwantedPref.value = blockUncommonUnwanted.checked;
@@ -2056,20 +2074,14 @@ var gPrivacyPane = {
     enableSafeBrowsing.checked =
       safeBrowsingPhishingPref.value && safeBrowsingMalwarePref.value;
     if (!enableSafeBrowsing.checked) {
-      if (blockDownloads) {
-        blockDownloads.setAttribute("disabled", "true");
-      }
-
+      blockDownloads.setAttribute("disabled", "true");
       blockUncommonUnwanted.setAttribute("disabled", "true");
     }
 
-    if (blockDownloads) {
-      blockDownloads.checked = blockDownloadsPref.value;
-      if (!blockDownloadsPref.value) {
-        blockUncommonUnwanted.setAttribute("disabled", "true");
-      }
+    blockDownloads.checked = blockDownloadsPref.value;
+    if (!blockDownloadsPref.value) {
+      blockUncommonUnwanted.setAttribute("disabled", "true");
     }
-
     blockUncommonUnwanted.checked =
       blockUnwantedPref.value && blockUncommonPref.value;
   },
@@ -2154,6 +2166,16 @@ var gPrivacyPane = {
     gSubDialog.open("chrome://pippki/content/device_manager.xhtml");
   },
 
+  /**
+   * Displays the learn more health report page when a user opts out of data collection.
+   */
+  showDataDeletion() {
+    let url =
+      Services.urlFormatter.formatURLPref("app.support.baseURL") +
+      "telemetry-clientid";
+    window.open(url, "_blank");
+  },
+
   initDataCollection() {
     this._setupLearnMoreLink(
       "toolkit.datacollection.infoURL",
@@ -2215,7 +2237,15 @@ var gPrivacyPane = {
    */
   updateSubmitHealthReport() {
     let checkbox = document.getElementById("submitHealthReportBox");
+    let telemetryContainer = document.getElementById("telemetry-container");
+
     Services.prefs.setBoolPref(PREF_UPLOAD_ENABLED, checkbox.checked);
+
+    if (!checkbox.checked) {
+      telemetryContainer.hidden = checkbox.checked;
+    } else {
+      telemetryContainer.hidden = checkbox.checked;
+    }
   },
 
   /**

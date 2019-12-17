@@ -6,7 +6,6 @@ with Files("**"):
     BUG_COMPONENT = ("Firefox", "Address Bar")
 
 EXTRA_JS_MODULES += [
-    'UrlbarContextualTip.jsm',
     'UrlbarController.jsm',
     'UrlbarEventBufferer.jsm',
     'UrlbarInput.jsm',
@@ -30,6 +29,7 @@ TESTING_JS_MODULES += [
 BROWSER_CHROME_MANIFESTS += [
     'tests/browser/browser.ini',
     'tests/ext/browser/browser.ini',
+    'tests/ext/browser/update/browser.ini',
 ]
 XPCSHELL_TESTS_MANIFESTS += ['tests/unit/xpcshell.ini']
 

@@ -70,16 +70,6 @@ bool ForOfEmitter::emitInitialize(const Maybe<uint32_t>& forPos) {
 
   loopInfo_.emplace(bce_, iterDepth, allowSelfHostedIter_, iterKind_);
 
-  // Annotate so IonMonkey can find the loop-closing jump.
-  if (!bce_->newSrcNote(SRC_FOR_OF, &noteIndex_)) {
-    return false;
-  }
-
-  if (!loopInfo_->emitEntryJump(bce_)) {
-    //              [stack] NEXT ITER UNDEF
-    return false;
-  }
-
   if (!loopInfo_->emitLoopHead(bce_, Nothing())) {
     //              [stack] NEXT ITER UNDEF
     return false;
@@ -94,7 +84,7 @@ bool ForOfEmitter::emitInitialize(const Maybe<uint32_t>& forPos) {
     // it must be the innermost one. If that scope has closed-over
     // bindings inducing an environment, recreate the current environment.
     MOZ_ASSERT(headLexicalEmitterScope_ == bce_->innermostEmitterScope());
-    MOZ_ASSERT(headLexicalEmitterScope_->scope(bce_)->kind() ==
+    MOZ_ASSERT(headLexicalEmitterScope_->scope(bce_).kind() ==
                ScopeKind::Lexical);
 
     if (headLexicalEmitterScope_->hasEnvironment()) {
@@ -229,40 +219,22 @@ bool ForOfEmitter::emitEnd(const Maybe<uint32_t>& iteratedPos) {
     return false;
   }
 
-  // We use the iterated value's position to attribute JSOP_LOOPENTRY,
+  // We use the iterated value's position to attribute the backedge,
   // which corresponds to the iteration protocol.
   // This is a bit misleading for 2nd and later iterations and might need
   // some fix (bug 1482003).
-  if (!loopInfo_->emitLoopEntry(bce_, iteratedPos)) {
-    return false;
+  if (iteratedPos) {
+    if (!bce_->updateSourceCoordNotes(*iteratedPos)) {
+      return false;
+    }
   }
 
-  if (!bce_->emit1(JSOP_FALSE)) {
-    //              [stack] NEXT ITER UNDEF FALSE
-    return false;
-  }
-  if (!loopInfo_->emitLoopEnd(bce_, JSOP_IFEQ)) {
+  if (!loopInfo_->emitLoopEnd(bce_, JSOP_GOTO, JSTRY_FOR_OF)) {
     //              [stack] NEXT ITER UNDEF
     return false;
   }
 
   MOZ_ASSERT(bce_->bytecodeSection().stackDepth() == loopDepth_);
-
-  // Let Ion know where the closing jump of this loop is.
-  if (!bce_->setSrcNoteOffset(noteIndex_, SrcNote::ForOf::BackJumpOffset,
-                              loopInfo_->loopEndOffsetFromEntryJump())) {
-    return false;
-  }
-
-  if (!loopInfo_->patchBreaksAndContinues(bce_)) {
-    return false;
-  }
-
-  if (!bce_->addTryNote(JSTRY_FOR_OF, bce_->bytecodeSection().stackDepth(),
-                        loopInfo_->headOffset(),
-                        loopInfo_->breakTargetOffset())) {
-    return false;
-  }
 
   if (!bce_->emitPopN(3)) {
     //              [stack]

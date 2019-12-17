@@ -61,7 +61,6 @@
 #include "nsComputedDOMStyle.h"
 #include "nsCSSProps.h"
 #include "nsIDocShell.h"
-#include "nsIContentViewer.h"
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FileBinding.h"
@@ -92,7 +91,6 @@
 #include "nsPrintfCString.h"
 #include "nsViewportInfo.h"
 #include "nsIFormControl.h"
-#include "nsIScriptError.h"
 //#include "nsWidgetsCID.h"
 #include "FrameLayerBuilder.h"
 #include "nsDisplayList.h"
@@ -102,7 +100,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "GeckoProfiler.h"
 #include "mozilla/Preferences.h"
-#include "nsIStyleSheetService.h"
 #include "nsContentPermissionHelper.h"
 #include "nsCSSPseudoElements.h"  // for PseudoStyleType
 #include "nsNetUtil.h"
@@ -426,6 +423,7 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
   }
 
   bool hadDisplayPort = false;
+  bool wasPainted = false;
   nsRect oldDisplayPort;
   {
     DisplayPortPropertyData* currentData =
@@ -437,6 +435,7 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
       }
       hadDisplayPort = true;
       oldDisplayPort = currentData->mRect;
+      wasPainted = currentData->mPainted;
     }
   }
 
@@ -445,9 +444,10 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
                      nsPresContext::CSSPixelsToAppUnits(aWidthPx),
                      nsPresContext::CSSPixelsToAppUnits(aHeightPx));
 
-  aElement->SetProperty(nsGkAtoms::DisplayPort,
-                        new DisplayPortPropertyData(displayport, aPriority),
-                        nsINode::DeleteProperty<DisplayPortPropertyData>);
+  aElement->SetProperty(
+      nsGkAtoms::DisplayPort,
+      new DisplayPortPropertyData(displayport, aPriority, wasPainted),
+      nsINode::DeleteProperty<DisplayPortPropertyData>);
 
   nsLayoutUtils::InvalidateForDisplayPortChange(aElement, hadDisplayPort,
                                                 oldDisplayPort, displayport);
@@ -3672,7 +3672,7 @@ nsDOMWindowUtils::PostRestyleSelfEvent(Element* aElement) {
     return NS_ERROR_INVALID_ARG;
   }
 
-  nsLayoutUtils::PostRestyleEvent(aElement, StyleRestyleHint_RESTYLE_SELF,
+  nsLayoutUtils::PostRestyleEvent(aElement, RestyleHint::RESTYLE_SELF,
                                   nsChangeHint(0));
   return NS_OK;
 }

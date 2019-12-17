@@ -592,7 +592,6 @@ let PDFViewerApplication = {
     if (this.supportsFullscreen) {
       this.pdfPresentationMode = new _pdf_presentation_mode.PDFPresentationMode({
         container,
-        viewer,
         pdfViewer: this.pdfViewer,
         eventBus,
         contextMenuItems: appConfig.fullscreen
@@ -6092,19 +6091,10 @@ class PDFHistory {
     }
 
     if (shouldReplace) {
-      if (newUrl) {
-        window.history.replaceState(newState, '', newUrl);
-      } else {
-        window.history.replaceState(newState, '');
-      }
+      window.history.replaceState(newState, '', newUrl);
     } else {
       this._maxUid = this._uid;
-
-      if (newUrl) {
-        window.history.pushState(newState, '', newUrl);
-      } else {
-        window.history.pushState(newState, '');
-      }
+      window.history.pushState(newState, '', newUrl);
     }
   }
 
@@ -7053,13 +7043,11 @@ const SWIPE_ANGLE_THRESHOLD = Math.PI / 6;
 class PDFPresentationMode {
   constructor({
     container,
-    viewer = null,
     pdfViewer,
     eventBus,
     contextMenuItems = null
   }) {
     this.container = container;
-    this.viewer = viewer || container.firstElementChild;
     this.pdfViewer = pdfViewer;
     this.eventBus = eventBus;
     this.active = false;
@@ -7098,7 +7086,7 @@ class PDFPresentationMode {
   }
 
   request() {
-    if (this.switchInProgress || this.active || !this.viewer.hasChildNodes()) {
+    if (this.switchInProgress || this.active || !this.pdfViewer.pagesCount) {
       return false;
     }
 
@@ -7701,7 +7689,7 @@ class PDFThumbnailViewer {
     this._currentPageNumber = 1;
     this._pageLabels = null;
     this._pagesRotation = 0;
-    this._pagesRequests = [];
+    this._pagesRequests = new WeakMap();
     this.container.textContent = '';
   }
 
@@ -7718,9 +7706,9 @@ class PDFThumbnailViewer {
       return;
     }
 
-    pdfDocument.getPage(1).then(firstPage => {
+    pdfDocument.getPage(1).then(firstPdfPage => {
       let pagesCount = pdfDocument.numPages;
-      let viewport = firstPage.getViewport({
+      const viewport = firstPdfPage.getViewport({
         scale: 1
       });
 
@@ -7736,6 +7724,12 @@ class PDFThumbnailViewer {
         });
 
         this._thumbnails.push(thumbnail);
+      }
+
+      const firstThumbnailView = this._thumbnails[0];
+
+      if (firstThumbnailView) {
+        firstThumbnailView.setPdfPage(firstPdfPage);
       }
 
       const thumbnailView = this._thumbnails[this._currentPageNumber - 1];
@@ -7779,21 +7773,26 @@ class PDFThumbnailViewer {
       return Promise.resolve(thumbView.pdfPage);
     }
 
-    let pageNumber = thumbView.id;
-
-    if (this._pagesRequests[pageNumber]) {
-      return this._pagesRequests[pageNumber];
+    if (this._pagesRequests.has(thumbView)) {
+      return this._pagesRequests.get(thumbView);
     }
 
-    let promise = this.pdfDocument.getPage(pageNumber).then(pdfPage => {
-      thumbView.setPdfPage(pdfPage);
-      this._pagesRequests[pageNumber] = null;
+    const promise = this.pdfDocument.getPage(thumbView.id).then(pdfPage => {
+      if (!thumbView.pdfPage) {
+        thumbView.setPdfPage(pdfPage);
+      }
+
+      this._pagesRequests.delete(thumbView);
+
       return pdfPage;
     }).catch(reason => {
       console.error('Unable to get page for thumb view', reason);
-      this._pagesRequests[pageNumber] = null;
+
+      this._pagesRequests.delete(thumbView);
     });
-    this._pagesRequests[pageNumber] = promise;
+
+    this._pagesRequests.set(thumbView, promise);
+
     return promise;
   }
 
@@ -8440,7 +8439,13 @@ class BaseViewer {
   }
 
   get pageViewsReady() {
-    return this._pageViewsReady;
+    if (!this._pageViewsReady) {
+      return false;
+    }
+
+    return this._pages.every(function (pageView) {
+      return !!(pageView && pageView.pdfPage);
+    });
   }
 
   get currentPageNumber() {
@@ -8639,9 +8644,9 @@ class BaseViewer {
     };
 
     this.eventBus.on('pagerendered', this._onAfterDraw);
-    firstPagePromise.then(pdfPage => {
+    firstPagePromise.then(firstPdfPage => {
       let scale = this.currentScale;
-      let viewport = pdfPage.getViewport({
+      const viewport = firstPdfPage.getViewport({
         scale: scale * _ui_utils.CSS_UNITS
       });
 
@@ -8674,6 +8679,13 @@ class BaseViewer {
         this._pages.push(pageView);
       }
 
+      const firstPageView = this._pages[0];
+
+      if (firstPageView) {
+        firstPageView.setPdfPage(firstPdfPage);
+        this.linkService.cachePageRef(1, firstPdfPage.ref);
+      }
+
       if (this._spreadMode !== _ui_utils.SpreadMode.NONE) {
         this._updateSpreadMode();
       }
@@ -8688,9 +8700,14 @@ class BaseViewer {
           return;
         }
 
-        let getPagesLeft = pagesCount;
+        let getPagesLeft = pagesCount - 1;
 
-        for (let pageNum = 1; pageNum <= pagesCount; ++pageNum) {
+        if (getPagesLeft <= 0) {
+          pagesCapability.resolve();
+          return;
+        }
+
+        for (let pageNum = 2; pageNum <= pagesCount; ++pageNum) {
           pdfDocument.getPage(pageNum).then(pdfPage => {
             let pageView = this._pages[pageNum - 1];
 
@@ -8754,7 +8771,7 @@ class BaseViewer {
     this._buffer = new PDFPageViewBuffer(DEFAULT_CACHE_SIZE);
     this._location = null;
     this._pagesRotation = 0;
-    this._pagesRequests = [];
+    this._pagesRequests = new WeakMap();
     this._pageViewsReady = false;
     this._scrollMode = _ui_utils.ScrollMode.VERTICAL;
     this._spreadMode = _ui_utils.SpreadMode.NONE;
@@ -9136,7 +9153,7 @@ class BaseViewer {
       return false;
     }
 
-    if (this.pageNumber < 1 || pageNumber > this.pagesCount) {
+    if (pageNumber < 1 || pageNumber > this.pagesCount) {
       console.error(`${this._name}.isPageVisible: "${pageNumber}" is out of bounds.`);
       return false;
     }
@@ -9167,24 +9184,26 @@ class BaseViewer {
       return Promise.resolve(pageView.pdfPage);
     }
 
-    let pageNumber = pageView.id;
-
-    if (this._pagesRequests[pageNumber]) {
-      return this._pagesRequests[pageNumber];
+    if (this._pagesRequests.has(pageView)) {
+      return this._pagesRequests.get(pageView);
     }
 
-    let promise = this.pdfDocument.getPage(pageNumber).then(pdfPage => {
+    const promise = this.pdfDocument.getPage(pageView.id).then(pdfPage => {
       if (!pageView.pdfPage) {
         pageView.setPdfPage(pdfPage);
       }
 
-      this._pagesRequests[pageNumber] = null;
+      this._pagesRequests.delete(pageView);
+
       return pdfPage;
     }).catch(reason => {
       console.error('Unable to get page for page view', reason);
-      this._pagesRequests[pageNumber] = null;
+
+      this._pagesRequests.delete(pageView);
     });
-    this._pagesRequests[pageNumber] = promise;
+
+    this._pagesRequests.set(pageView, promise);
+
     return promise;
   }
 
@@ -10596,13 +10615,12 @@ class SecondaryToolbar {
   _bindClickListeners() {
     this.toggleButton.addEventListener('click', this.toggle.bind(this));
 
-    for (let button in this.buttons) {
-      let {
-        element,
-        eventName,
-        close,
-        eventDetails
-      } = this.buttons[button];
+    for (const {
+      element,
+      eventName,
+      close,
+      eventDetails
+    } of this.buttons) {
       element.addEventListener('click', evt => {
         if (eventName !== null) {
           let details = {
@@ -10868,7 +10886,45 @@ class Toolbar {
     this.toolbar = options.container;
     this.eventBus = eventBus;
     this.l10n = l10n;
-    this.items = options;
+    this.buttons = [{
+      element: options.previous,
+      eventName: 'previouspage'
+    }, {
+      element: options.next,
+      eventName: 'nextpage'
+    }, {
+      element: options.zoomIn,
+      eventName: 'zoomin'
+    }, {
+      element: options.zoomOut,
+      eventName: 'zoomout'
+    }, {
+      element: options.openFile,
+      eventName: 'openfile'
+    }, {
+      element: options.print,
+      eventName: 'print'
+    }, {
+      element: options.presentationModeButton,
+      eventName: 'presentationmode'
+    }, {
+      element: options.download,
+      eventName: 'download'
+    }, {
+      element: options.viewBookmark,
+      eventName: null
+    }];
+    this.items = {
+      numPages: options.numPages,
+      pageNumber: options.pageNumber,
+      scaleSelectContainer: options.scaleSelectContainer,
+      scaleSelect: options.scaleSelect,
+      customScaleOption: options.customScaleOption,
+      previous: options.previous,
+      next: options.next,
+      zoomIn: options.zoomIn,
+      zoomOut: options.zoomOut
+    };
     this._wasLocalized = false;
     this.reset();
 
@@ -10910,82 +10966,52 @@ class Toolbar {
   }
 
   _bindListeners() {
-    let {
-      eventBus,
-      items
-    } = this;
-    let self = this;
-    items.previous.addEventListener('click', function () {
-      eventBus.dispatch('previouspage', {
-        source: self
+    const {
+      pageNumber,
+      scaleSelect
+    } = this.items;
+    const self = this;
+
+    for (const {
+      element,
+      eventName
+    } of this.buttons) {
+      element.addEventListener('click', evt => {
+        if (eventName !== null) {
+          this.eventBus.dispatch(eventName, {
+            source: this
+          });
+        }
       });
-    });
-    items.next.addEventListener('click', function () {
-      eventBus.dispatch('nextpage', {
-        source: self
-      });
-    });
-    items.zoomIn.addEventListener('click', function () {
-      eventBus.dispatch('zoomin', {
-        source: self
-      });
-    });
-    items.zoomOut.addEventListener('click', function () {
-      eventBus.dispatch('zoomout', {
-        source: self
-      });
-    });
-    items.pageNumber.addEventListener('click', function () {
+    }
+
+    pageNumber.addEventListener('click', function () {
       this.select();
     });
-    items.pageNumber.addEventListener('change', function () {
-      eventBus.dispatch('pagenumberchanged', {
+    pageNumber.addEventListener('change', function () {
+      self.eventBus.dispatch('pagenumberchanged', {
         source: self,
         value: this.value
       });
     });
-    items.scaleSelect.addEventListener('change', function () {
+    scaleSelect.addEventListener('change', function () {
       if (this.value === 'custom') {
         return;
       }
 
-      eventBus.dispatch('scalechanged', {
+      self.eventBus.dispatch('scalechanged', {
         source: self,
         value: this.value
       });
     });
-    items.presentationModeButton.addEventListener('click', function () {
-      eventBus.dispatch('presentationmode', {
-        source: self
-      });
-    });
-    items.openFile.addEventListener('click', function () {
-      eventBus.dispatch('openfile', {
-        source: self
-      });
-    });
-    items.print.addEventListener('click', function () {
-      eventBus.dispatch('print', {
-        source: self
-      });
-    });
-    items.download.addEventListener('click', function () {
-      eventBus.dispatch('download', {
-        source: self
-      });
-    });
-    items.scaleSelect.oncontextmenu = _ui_utils.noContextMenuHandler;
-    eventBus.on('localized', () => {
-      this._localized();
-    });
-  }
+    scaleSelect.oncontextmenu = _ui_utils.noContextMenuHandler;
+    this.eventBus.on('localized', () => {
+      this._wasLocalized = true;
 
-  _localized() {
-    this._wasLocalized = true;
+      this._adjustScaleWidth();
 
-    this._adjustScaleWidth();
-
-    this._updateUIState(true);
+      this._updateUIState(true);
+    });
   }
 
   _updateUIState(resetNumPages = false) {
@@ -11036,12 +11062,9 @@ class Toolbar {
     this.l10n.get('page_scale_percent', {
       scale: customScale
     }, '{{scale}}%').then(msg => {
-      let options = items.scaleSelect.options;
       let predefinedValueFound = false;
 
-      for (let i = 0, ii = options.length; i < ii; i++) {
-        let option = options[i];
-
+      for (const option of items.scaleSelect.options) {
         if (option.value !== pageScaleValue) {
           option.selected = false;
           continue;

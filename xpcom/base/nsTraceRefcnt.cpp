@@ -249,7 +249,7 @@ class BloatEntry {
 
   bool PrintDumpHeader(FILE* aOut, const char* aMsg) {
     fprintf(aOut, "\n== BloatView: %s, %s process %d\n", aMsg,
-            XRE_GeckoProcessTypeToString(XRE_GetProcessType()), getpid());
+            XRE_GetProcessTypeString(), getpid());
     if (gLogLeaksOnly && !mStats.HaveLeaks()) {
       return false;
     }
@@ -506,8 +506,7 @@ static bool InitLog(const EnvCharType* aEnvVar, const char* aMsg,
           fname.Cut(fname.Length() - 4, 4);
         }
         fname.Append('_');
-        const char* processType =
-            XRE_GeckoProcessTypeToString(XRE_GetProcessType());
+        const char* processType = XRE_GetProcessTypeString();
         fname.AppendASCII(processType);
         fname.AppendLiteral("_pid");
         fname.AppendInt((uint32_t)getpid());
@@ -524,6 +523,9 @@ static bool InitLog(const EnvCharType* aEnvVar, const char* aMsg,
 #endif
       if (stream) {
         MozillaRegisterDebugFD(fileno(stream));
+#ifdef MOZ_ENABLE_FORKSERVER
+        base::RegisterForkServerNoCloseFD(fileno(stream));
+#endif
         *aResult = stream;
         fprintf(stderr,
                 "### " ENVVAR_PRINTF " defined -- logging %s to " ENVVAR_PRINTF
@@ -827,8 +829,7 @@ static void LogDMDFile() {
   }
 
   const char* logProcessEnv = PR_GetEnv("MOZ_DMD_LOG_PROCESS");
-  if (logProcessEnv && !!strcmp(logProcessEnv, XRE_GeckoProcessTypeToString(
-                                                   XRE_GetProcessType()))) {
+  if (logProcessEnv && !!strcmp(logProcessEnv, XRE_GetProcessTypeString())) {
     return;
   }
 
@@ -1159,3 +1160,32 @@ void nsTraceRefcnt::SetActivityIsLegal(bool aLegal) {
 
   PR_SetThreadPrivate(gActivityTLS, reinterpret_cast<void*>(!aLegal));
 }
+
+#ifdef MOZ_ENABLE_FORKSERVER
+void nsTraceRefcnt::ResetLogFiles() {
+#ifdef XP_WIN
+#  define ENVVAR(x) u"" x
+#else
+#  define ENVVAR(x) x
+#endif
+  if (gBloatLog) {
+    maybeUnregisterAndCloseFile(gBloatLog);
+    bool defined = InitLog(ENVVAR("XPCOM_MEM_BLOAT_LOG"), "bloat/leaks", &gBloatLog);
+    if (!defined) {
+      InitLog(ENVVAR("XPCOM_MEM_LEAK_LOG"), "leaks", &gBloatLog);
+    }
+  }
+  if (gRefcntsLog) {
+    maybeUnregisterAndCloseFile(gRefcntsLog);
+    InitLog(ENVVAR("XPCOM_MEM_REFCNT_LOG"), "refcounts", &gRefcntsLog);
+  }
+  if (gAllocLog) {
+    maybeUnregisterAndCloseFile(gAllocLog);
+    InitLog(ENVVAR("XPCOM_MEM_ALLOC_LOG"), "new/delete", &gAllocLog);
+  }
+  if(gCOMPtrLog) {
+    maybeUnregisterAndCloseFile(gCOMPtrLog);
+    InitLog(ENVVAR("XPCOM_MEM_COMPTR_LOG"), "nsCOMPtr", &gCOMPtrLog);
+  }
+}
+#endif

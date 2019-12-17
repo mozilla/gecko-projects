@@ -237,6 +237,9 @@ function Toolbox(
   this.frameMap = new Map();
   this.selectedFrameId = null;
 
+  // Set of paused threads to determine whether the toolbox is paused
+  this._pausedThreads = new Set();
+
   /**
    * KeyShortcuts instance specific to WINDOW host type.
    * This is the key shortcuts that are only register when the toolbox
@@ -589,7 +592,7 @@ Toolbox.prototype = {
     );
   },
 
-  _onPausedState: function(packet) {
+  _onPausedState: function(packet, threadFront) {
     // Suppress interrupted events by default because the thread is
     // paused/resumed a lot for various actions.
     if (packet.why.type === "interrupted") {
@@ -607,18 +610,25 @@ Toolbox.prototype = {
     ) {
       this.raise();
       this.selectTool("jsdebugger", packet.why.type);
+      this._pausedThreads.add(threadFront);
+      this.emit("toolbox-paused");
     }
   },
 
-  _onResumedState: function() {
-    this.unhighlightTool("jsdebugger");
+  _onResumedState: function(threadFront) {
+    this._pausedThreads.delete(threadFront);
+
+    if (this._pausedThreads.size == 0) {
+      this.emit("toolbox-resumed");
+      this.unhighlightTool("jsdebugger");
+    }
   },
 
   /**
    * This method will be called for the top-level target, as well as any potential
    * additional targets we may care about.
    */
-  async _onTargetAvailable(type, targetFront, isTopLevel) {
+  async _onTargetAvailable({ type, targetFront, isTopLevel }) {
     if (isTopLevel) {
       // Attach to a new top-level target.
       // For now, register these event listeners only on the top level target
@@ -638,11 +648,9 @@ Toolbox.prototype = {
     }
   },
 
-  _onTargetDestroyed(type, targetFront, isTopLevel) {
+  _onTargetDestroyed({ type, targetFront, isTopLevel }) {
     if (isTopLevel) {
       this.detachTarget();
-    } else {
-      this._stopThreadFrontListeners(targetFront.threadFront);
     }
   },
 
@@ -657,10 +665,8 @@ Toolbox.prototype = {
     await target.attach();
 
     // Start tracking network activity on toolbox open for targets such as tabs.
-    // (Workers and potentially others don't manage the console client in the target.)
-    if (target.activeConsole) {
-      await target.activeConsole.startListeners(["NetworkActivity"]);
-    }
+    const webConsoleFront = await target.getFront("console");
+    await webConsoleFront.startListeners(["NetworkActivity"]);
 
     const threadFront = await this._attachAndResumeThread(target);
     this._startThreadFrontListeners(threadFront);
@@ -668,19 +674,11 @@ Toolbox.prototype = {
   },
 
   _startThreadFrontListeners: function(threadFront) {
-    threadFront.on("paused", this._onPausedState);
-    threadFront.on("resumed", this._onResumedState);
-  },
-
-  _stopThreadFrontListeners: function(threadFront) {
-    // Only cleanup thread listeners if it has been attached.
-    // We may have closed the toolbox before it attached, or
-    // we may not have attached to the target at all.
-    if (!threadFront) {
-      return;
-    }
-    threadFront.off("paused", this._onPausedState);
-    threadFront.off("resumed", this._onResumedState);
+    // threadFront listeners are removed when the thread is destroyed
+    threadFront.on("paused", packet =>
+      this._onPausedState(packet, threadFront)
+    );
+    threadFront.on("resumed", () => this._onResumedState(threadFront));
   },
 
   _attachAndResumeThread: async function(target) {
@@ -902,7 +900,6 @@ Toolbox.prototype = {
     this.target.off("frame-update", this._updateFrames);
 
     // Detach the thread
-    this._stopThreadFrontListeners(this._threadFront);
     this._threadFront = null;
   },
 
@@ -1947,16 +1944,16 @@ Toolbox.prototype = {
    * @param {Boolean} state
    */
   tellRDMAboutPickerState: async function(state) {
-    const { tab } = this.target;
+    const { localTab } = this.target;
 
     if (
-      !ResponsiveUIManager.isActiveForTab(tab) ||
+      !ResponsiveUIManager.isActiveForTab(localTab) ||
       (await !this.target.actorHasMethod("emulation", "setElementPickerState"))
     ) {
       return;
     }
 
-    const ui = ResponsiveUIManager.getResponsiveUIForTab(tab);
+    const ui = ResponsiveUIManager.getResponsiveUIForTab(localTab);
     await ui.emulationFront.setElementPickerState(state);
   },
 
@@ -2942,9 +2939,7 @@ Toolbox.prototype = {
    * Raise the toolbox host.
    */
   raise: function() {
-    this.postMessage({
-      name: "raise-host",
-    });
+    this.postMessage({ name: "raise-host" });
   },
 
   /**
@@ -2981,12 +2976,12 @@ Toolbox.prototype = {
   _refreshHostTitle: function() {
     let title;
 
-    const isOmniscientBrowserToolbox =
+    const isMultiProcessBrowserToolbox =
       this.target.isParentProcess &&
       Services.prefs.getBoolPref("devtools.browsertoolbox.fission", false);
 
-    if (isOmniscientBrowserToolbox) {
-      title = "💥 Omniscient Browser Toolbox 💥";
+    if (isMultiProcessBrowserToolbox) {
+      title = L10N.getStr("toolbox.multiProcessBrowserToolboxTitle");
     } else if (this.target.name && this.target.name != this.target.url) {
       const url = this.target.isWebExtension
         ? this.target.getExtensionPathName(this.target.url)
@@ -3496,20 +3491,23 @@ Toolbox.prototype = {
   },
 
   inspectObjectActor: async function(objectActor, inspectFromAnnotation) {
+    const objectGrip =
+      objectActor && objectActor.getGrip ? objectActor.getGrip() : objectActor;
+
     if (
       this.currentToolId != "inspector" &&
-      objectActor.preview &&
-      objectActor.preview.nodeType === domNodeConstants.ELEMENT_NODE
+      objectGrip.preview &&
+      objectGrip.preview.nodeType === domNodeConstants.ELEMENT_NODE
     ) {
-      return this.viewElementInInspector(objectActor, inspectFromAnnotation);
+      return this.viewElementInInspector(objectGrip, inspectFromAnnotation);
     }
 
-    if (objectActor.class == "Function") {
-      const { url, line } = objectActor.location;
+    if (objectGrip.class == "Function") {
+      const { url, line } = objectGrip.location;
       return this.viewSourceInDebugger(url, line);
     }
 
-    if (objectActor.type !== "null" && objectActor.type !== "undefined") {
+    if (objectGrip.type !== "null" && objectGrip.type !== "undefined") {
       // Open then split console and inspect the object in the variables view,
       // when the objectActor doesn't represent an undefined or null value.
       if (this.currentToolId != "webconsole") {
@@ -3555,7 +3553,11 @@ Toolbox.prototype = {
       return this._destroyer;
     }
 
-    this._destroyer = this._destroyToolbox();
+    // This pattern allows to immediately return the destroyer promise.
+    // See Bug 1602727 for more details.
+    let destroyerResolve;
+    this._destroyer = new Promise(r => (destroyerResolve = r));
+    this._destroyToolbox().then(destroyerResolve);
 
     return this._destroyer;
   },
@@ -3583,6 +3585,7 @@ Toolbox.prototype = {
     this.telemetry.toolClosed(this.currentToolId, this.sessionId, this);
 
     this._lastFocusedElement = null;
+    this._pausedThreads = null;
 
     if (this._sourceMapURLService) {
       this._sourceMapURLService.destroy();

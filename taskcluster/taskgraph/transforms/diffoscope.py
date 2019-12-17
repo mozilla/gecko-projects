@@ -9,6 +9,7 @@ defined in kind.yml
 from __future__ import absolute_import, print_function, unicode_literals
 
 from taskgraph.transforms.base import TransformSequence
+from taskgraph.transforms.task import task_description_schema
 from taskgraph.util.schema import (
     Schema,
 )
@@ -55,6 +56,9 @@ diff_description_schema = Schema({
 
     # Commands to run before performing the diff.
     Optional('pre-diff-commands'): [basestring],
+
+    # Only run the task on a set of projects/branches.
+    Optional('run-on-projects'): task_description_schema['run-on-projects'],
 })
 
 transforms = TransformSequence()
@@ -129,13 +133,14 @@ def fill_template(config, tasks):
                 'docker-image': {'in-tree': 'diffoscope'},
                 'artifacts': [{
                     'type': 'file',
-                    'path': '/builds/worker/diff.html',
-                    'name': 'public/diff.html',
-                }, {
-                    'type': 'file',
-                    'path': '/builds/worker/diff.txt',
-                    'name': 'public/diff.txt',
-                }],
+                    'path': '/builds/worker/{}'.format(f),
+                    'name': 'public/{}'.format(f),
+                } for f in (
+                    'diff.html',
+                    'diff.txt',
+                    'generated-files.diff.html',
+                    'generated-files.diff.txt',
+                )],
                 'env': {
                     'ORIG_URL': urls['original'],
                     'NEW_URL': urls['new'],
@@ -155,6 +160,8 @@ def fill_template(config, tasks):
             },
             'dependencies': deps,
         }
+        if 'run-on-projects' in task:
+            taskdesc['run-on-projects'] = task['run-on-projects']
 
         if artifact.endswith('.dmg'):
             taskdesc.setdefault('fetches', {}).setdefault('toolchain', []).extend([

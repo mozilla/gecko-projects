@@ -10,6 +10,7 @@
 #include "GfxInfoBase.h"
 
 #include "GfxDriverInfo.h"
+#include "js/Array.h"  // JS::GetArrayLength, JS::NewArrayObject
 #include "nsCOMPtr.h"
 #include "nsCOMArray.h"
 #include "nsString.h"
@@ -179,6 +180,9 @@ static const char* GetPrefNameForFeature(int32_t aFeature) {
       break;
     case nsIGfxInfo::FEATURE_WEBRENDER:
       name = BLACKLIST_PREF_BRANCH "webrender";
+      break;
+    case nsIGfxInfo::FEATURE_WEBRENDER_COMPOSITOR:
+      name = BLACKLIST_PREF_BRANCH "webrender.compositor";
       break;
     case nsIGfxInfo::FEATURE_DX_NV12:
       name = BLACKLIST_PREF_BRANCH "dx.nv12";
@@ -376,6 +380,8 @@ static int32_t BlacklistFeatureToGfxFeature(const nsAString& aFeature) {
     return nsIGfxInfo::FEATURE_D3D11_KEYED_MUTEX;
   else if (aFeature.EqualsLiteral("WEBRENDER"))
     return nsIGfxInfo::FEATURE_WEBRENDER;
+  else if (aFeature.EqualsLiteral("WEBRENDER_COMPOSITOR"))
+    return nsIGfxInfo::FEATURE_WEBRENDER_COMPOSITOR;
   else if (aFeature.EqualsLiteral("DX_NV12"))
     return nsIGfxInfo::FEATURE_DX_NV12;
   // We do not support FEATURE_VP8_HW_DECODE and FEATURE_VP9_HW_DECODE
@@ -1059,6 +1065,7 @@ void GfxInfoBase::EvaluateDownloadedBlacklist(
                         nsIGfxInfo::FEATURE_ADVANCED_LAYERS,
                         nsIGfxInfo::FEATURE_D3D11_KEYED_MUTEX,
                         nsIGfxInfo::FEATURE_WEBRENDER,
+                        nsIGfxInfo::FEATURE_WEBRENDER_COMPOSITOR,
                         nsIGfxInfo::FEATURE_DX_NV12,
                         nsIGfxInfo::FEATURE_DX_P010,
                         nsIGfxInfo::FEATURE_DX_P016,
@@ -1234,7 +1241,7 @@ nsresult GfxInfoBase::FindMonitors(JSContext* aCx, JS::HandleObject aOutArray) {
 
 NS_IMETHODIMP
 GfxInfoBase::GetMonitors(JSContext* aCx, JS::MutableHandleValue aResult) {
-  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
+  JS::Rooted<JSObject*> array(aCx, JS::NewArrayObject(aCx, 0));
 
   nsresult rv = FindMonitors(aCx, array);
   if (NS_FAILED(rv)) {
@@ -1243,26 +1250,6 @@ GfxInfoBase::GetMonitors(JSContext* aCx, JS::MutableHandleValue aResult) {
 
   aResult.setObject(*array);
   return NS_OK;
-}
-
-static const char* GetLayersBackendName(layers::LayersBackend aBackend) {
-  switch (aBackend) {
-    case layers::LayersBackend::LAYERS_NONE:
-      return "none";
-    case layers::LayersBackend::LAYERS_OPENGL:
-      return "opengl";
-    case layers::LayersBackend::LAYERS_D3D11:
-      return "d3d11";
-    case layers::LayersBackend::LAYERS_CLIENT:
-      return "client";
-    case layers::LayersBackend::LAYERS_WR:
-      return "webrender";
-    case layers::LayersBackend::LAYERS_BASIC:
-      return "basic";
-    default:
-      MOZ_ASSERT_UNREACHABLE("unknown layers backend");
-      return "unknown";
-  }
 }
 
 static inline bool SetJSPropertyString(JSContext* aCx,
@@ -1281,7 +1268,7 @@ template <typename T>
 static inline bool AppendJSElement(JSContext* aCx, JS::Handle<JSObject*> aObj,
                                    const T& aValue) {
   uint32_t index;
-  if (!JS_GetArrayLength(aCx, aObj, &index)) {
+  if (!JS::GetArrayLength(aCx, aObj, &index)) {
     return false;
   }
   return JS_SetElement(aCx, aObj, index, aValue);
@@ -1299,7 +1286,7 @@ nsresult GfxInfoBase::GetFeatures(JSContext* aCx,
       gfxPlatform::Initialized()
           ? gfxPlatform::GetPlatform()->GetCompositorBackend()
           : layers::LayersBackend::LAYERS_NONE;
-  const char* backendName = GetLayersBackendName(backend);
+  const char* backendName = layers::GetLayersBackendName(backend);
   SetJSPropertyString(aCx, obj, "compositor", backendName);
 
   // If graphics isn't initialized yet, just stop now.
@@ -1319,7 +1306,7 @@ nsresult GfxInfoBase::GetFeatureLog(JSContext* aCx,
   }
   aOut.setObject(*containerObj);
 
-  JS::Rooted<JSObject*> featureArray(aCx, JS_NewArrayObject(aCx, 0));
+  JS::Rooted<JSObject*> featureArray(aCx, JS::NewArrayObject(aCx, 0));
   if (!featureArray) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -1351,7 +1338,7 @@ nsresult GfxInfoBase::GetFeatureLog(JSContext* aCx,
     }
   });
 
-  JS::Rooted<JSObject*> fallbackArray(aCx, JS_NewArrayObject(aCx, 0));
+  JS::Rooted<JSObject*> fallbackArray(aCx, JS::NewArrayObject(aCx, 0));
   if (!fallbackArray) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -1388,7 +1375,7 @@ nsresult GfxInfoBase::GetFeatureLog(JSContext* aCx,
 bool GfxInfoBase::BuildFeatureStateLog(JSContext* aCx,
                                        const FeatureState& aFeature,
                                        JS::MutableHandle<JS::Value> aOut) {
-  JS::Rooted<JSObject*> log(aCx, JS_NewArrayObject(aCx, 0));
+  JS::Rooted<JSObject*> log(aCx, JS::NewArrayObject(aCx, 0));
   if (!log) {
     return false;
   }
@@ -1472,7 +1459,7 @@ bool GfxInfoBase::InitFeatureObject(JSContext* aCx,
 
 nsresult GfxInfoBase::GetActiveCrashGuards(JSContext* aCx,
                                            JS::MutableHandle<JS::Value> aOut) {
-  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
+  JS::Rooted<JSObject*> array(aCx, JS::NewArrayObject(aCx, 0));
   if (!array) {
     return NS_ERROR_OUT_OF_MEMORY;
   }

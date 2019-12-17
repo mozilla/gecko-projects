@@ -168,6 +168,10 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   // Returns true if this window is the same as mTopInnerWindow
   inline bool IsTopInnerWindow() const;
 
+  // Returns true if this was the current window for its BrowsingContext when it
+  // was discarded.
+  virtual bool WasCurrentInnerWindow() const = 0;
+
   // Check whether a document is currently loading (really checks if the
   // load event has completed).  May not be reset to false on errors.
   inline bool IsLoading() const;
@@ -175,16 +179,6 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
 
   // Note: not related to IsLoading.  Set to false if there's an error, etc.
   virtual void SetActiveLoadingState(bool aIsActiveLoading) = 0;
-
-  nsPIDOMWindowInner* GetWindowForDeprioritizedLoadRunner();
-
-  /**
-   * The runnable will be called once there is idle time, or the top level
-   * page has been loaded or if a timeout has fired.
-   * Must be called only on the top level window, the one
-   * GetWindowForDeprioritizedLoadRunner returns.
-   */
-  virtual void AddDeprioritizedLoadRunner(nsIRunnable* aRunner) = 0;
 
   bool AddAudioContext(mozilla::dom::AudioContext* aAudioContext);
   void RemoveAudioContext(mozilla::dom::AudioContext* aAudioContext);

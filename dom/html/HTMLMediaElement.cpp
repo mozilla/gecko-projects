@@ -91,24 +91,17 @@
 #include "nsGenericHTMLElement.h"
 #include "nsGkAtoms.h"
 #include "nsIAsyncVerifyRedirectCallback.h"
-#include "nsIAutoplay.h"
 #include "nsICachingChannel.h"
-#include "nsICategoryManager.h"
 #include "nsIClassOfService.h"
 #include "nsIContentPolicy.h"
-#include "nsIContentSecurityPolicy.h"
 #include "nsIDocShell.h"
 #include "mozilla/dom/Document.h"
 #include "nsIFrame.h"
 #include "nsIObserverService.h"
-#include "nsIPermissionManager.h"
 #include "nsIRequest.h"
 #include "nsIScriptError.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsISupportsPrimitives.h"
-#include "nsIThreadInternal.h"
 #include "nsITimer.h"
-#include "nsIXPConnect.h"
 #include "nsJSUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsMediaFragmentURIParser.h"
@@ -1910,6 +1903,21 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(HTMLMediaElement,
                                                nsGenericHTMLElement)
+
+void HTMLMediaElement::AddSizeOfExcludingThis(nsWindowSizes& aSizes,
+                                              size_t* aNodeSize) const {
+  nsGenericHTMLElement::AddSizeOfExcludingThis(aSizes, aNodeSize);
+
+  // There are many other fields that might be worth reporting, but as seen in
+  // bug 1595603, mPendingEvents can grow to be very large sometimes, so at
+  // least report that.
+  *aNodeSize +=
+      mPendingEvents.ShallowSizeOfExcludingThis(aSizes.mState.mMallocSizeOf);
+  for (const nsString& event : mPendingEvents) {
+    *aNodeSize +=
+        event.SizeOfExcludingThisIfUnshared(aSizes.mState.mMallocSizeOf);
+  }
+}
 
 void HTMLMediaElement::ContentRemoved(nsIContent* aChild,
                                       nsIContent* aPreviousSibling) {

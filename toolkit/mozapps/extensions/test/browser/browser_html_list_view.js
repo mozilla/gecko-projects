@@ -110,8 +110,8 @@ add_task(async function testExtensionList() {
   ok(disableToggle.checked, "The disable toggle is checked");
   is(
     doc.l10n.getAttributes(disableToggle).id,
-    "disable-addon-button-label",
-    "The toggle has the disable label"
+    "extension-enable-addon-button-label",
+    "The toggle has the enable label"
   );
   ok(disableToggle.getAttribute("aria-label"), "There's an aria-label");
   ok(!disableToggle.hidden, "The toggle is visible");
@@ -129,8 +129,8 @@ add_task(async function testExtensionList() {
   ok(!disableToggle.checked, "The disable toggle is unchecked");
   is(
     doc.l10n.getAttributes(disableToggle).id,
-    "enable-addon-button-label",
-    "The button has the enable label"
+    "extension-enable-addon-button-label",
+    "The button has the same enable label"
   );
   ok(disableToggle.getAttribute("aria-label"), "There's an aria-label");
 
@@ -949,13 +949,14 @@ add_task(async function testDisabledDimming() {
 
   const checkOpacity = (card, expected, msg) => {
     let { opacity } = card.ownerGlobal.getComputedStyle(card.firstElementChild);
-    is(opacity, expected, msg);
+    let normalize = val => Math.floor(val * 10);
+    is(normalize(opacity), normalize(expected), msg);
   };
   const waitForTransition = card =>
     BrowserTestUtils.waitForEvent(
       card.firstElementChild,
       "transitionend",
-      e => e.propertyName === "opacity"
+      e => e.propertyName === "opacity" && e.target.classList.contains("card")
     );
 
   let card = getCardByAddonId(doc, id);

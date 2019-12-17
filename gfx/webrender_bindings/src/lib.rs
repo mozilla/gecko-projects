@@ -21,7 +21,10 @@ extern crate log;
 
 #[cfg(target_os = "windows")]
 extern crate dwrote;
-
+#[cfg(target_os = "windows")]
+extern crate winapi;
+#[cfg(target_os = "linux")]
+extern crate libc;
 
 #[cfg(target_os = "macos")]
 extern crate core_foundation;

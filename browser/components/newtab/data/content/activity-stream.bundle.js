@@ -1052,6 +1052,7 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
     this.state = {
       messageFilter: "all",
       evaluationStatus: {},
+      trailhead: {},
       stringTargetingParameters: null,
       newStringTargetingParameters: null,
       copiedToClipboard: false,
@@ -1300,14 +1301,9 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
   }
 
   renderMessageItem(msg) {
-    const isCurrent = msg.id === this.state.lastMessageId;
     const isBlocked = this.state.messageBlockList.includes(msg.id) || this.state.messageBlockList.includes(msg.campaign);
     const impressions = this.state.messageImpressions[msg.id] ? this.state.messageImpressions[msg.id].length : 0;
     let itemClassName = "message-item";
-
-    if (isCurrent) {
-      itemClassName += " current";
-    }
 
     if (isBlocked) {
       itemClassName += " blocked";
@@ -1608,12 +1604,11 @@ class ASRouterAdminInner extends react__WEBPACK_IMPORTED_MODULE_4___default.a.Pu
   renderTrailheadInfo() {
     const {
       trailheadInterrupt,
-      trailheadTriplet,
-      trailheadInitialized
-    } = this.state;
-    return trailheadInitialized ? react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("table", {
+      trailheadTriplet
+    } = this.state.trailhead;
+    return react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("table", {
       className: "minimal-table"
-    }, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("tbody", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("tr", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, "Interrupt branch"), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, trailheadInterrupt)), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("tr", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, "Triplet branch"), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, trailheadTriplet)))) : react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("p", null, "Trailhead is not initialized. To update these values, load about:welcome.");
+    }, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("tbody", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("tr", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, "Interrupt branch"), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, trailheadInterrupt)), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("tr", null, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, "Triplet branch"), react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement("td", null, trailheadTriplet))));
   }
 
   getSection() {
@@ -3433,7 +3428,9 @@ class FullPageInterrupt extends react__WEBPACK_IMPORTED_MODULE_3___default.a.Pur
     }); // Only block if message is in dynamic triplets experiment
 
     if (message.blockOnClick) {
-      this.props.onBlockById(message.id);
+      this.props.onBlockById(message.id, {
+        preloadedOnly: true
+      });
     }
 
     this.removeOverlay();
@@ -3617,7 +3614,9 @@ class Triplets extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponen
     }); // Only block if message is in dynamic triplets experiment
 
     if (message.blockOnClick) {
-      this.props.onBlockById(message.id);
+      this.props.onBlockById(message.id, {
+        preloadedOnly: true
+      });
     }
   }
 
@@ -4426,7 +4425,10 @@ class DSCard extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent 
       this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].UserEvent({
         event: "CLICK",
         source: this.props.type.toUpperCase(),
-        action_position: this.props.pos
+        action_position: this.props.pos,
+        value: {
+          card_type: this.props.flightId ? "spoc" : "organic"
+        }
       }));
       this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].ImpressionStats({
         source: this.props.type.toUpperCase(),
@@ -6846,13 +6848,20 @@ class DSPrivacyModal extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureCo
   constructor(props) {
     super(props);
     this.closeModal = this.closeModal.bind(this);
-    this.onLinkClick = this.onLinkClick.bind(this);
+    this.onLearnLinkClick = this.onLearnLinkClick.bind(this);
+    this.onManageLinkClick = this.onManageLinkClick.bind(this);
   }
 
-  onLinkClick(event) {
+  onLearnLinkClick(event) {
     this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_1__["actionCreators"].UserEvent({
       event: "CLICK_PRIVACY_INFO",
       source: "DS_PRIVACY_MODAL"
+    }));
+  }
+
+  onManageLinkClick(event) {
+    this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_1__["actionCreators"].OnlyToMain({
+      type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_1__["actionTypes"].SETTINGS_OPEN
     }));
   }
 
@@ -6874,10 +6883,14 @@ class DSPrivacyModal extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureCo
     }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("p", {
       "data-l10n-id": "newtab-privacy-modal-paragraph"
     }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("a", {
+      className: "modal-link modal-link-privacy",
       "data-l10n-id": "newtab-privacy-modal-link",
-      onClick: this.onLinkClick,
+      onClick: this.onLearnLinkClick,
       href: "https://www.mozilla.org/en-US/privacy/firefox/"
-    })), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("section", {
+    }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
+      className: "modal-link modal-link-manage",
+      onClick: this.onManageLinkClick
+    }, "Manage sponsored content settings")), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("section", {
       className: "actions"
     }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
       className: "done",
@@ -7210,7 +7223,10 @@ class ListItem extends react__WEBPACK_IMPORTED_MODULE_6___default.a.PureComponen
       this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].UserEvent({
         event: "CLICK",
         source: this.props.type.toUpperCase(),
-        action_position: this.props.pos
+        action_position: this.props.pos,
+        value: {
+          card_type: this.props.flightId ? "spoc" : "organic"
+        }
       }));
       this.props.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].ImpressionStats({
         source: this.props.type.toUpperCase(),
@@ -11890,7 +11906,7 @@ class SubmitFormSnippet_SubmitFormSnippet extends external_React_default.a.PureC
     });
     this.props.sendUserActionTelemetry({
       event: "CLICK_BUTTON",
-      value: "conversion-subscribe-activation",
+      event_context: "conversion-subscribe-activation",
       id: "NEWTAB_FOOTER_BAR_CONTENT"
     });
 
@@ -11937,7 +11953,7 @@ class SubmitFormSnippet_SubmitFormSnippet extends external_React_default.a.PureC
 
       this.props.sendUserActionTelemetry({
         event: "CLICK_BUTTON",
-        value: "subscribe-success",
+        event_context: "subscribe-success",
         id: "NEWTAB_FOOTER_BAR_CONTENT"
       });
     } else {
@@ -11949,7 +11965,7 @@ class SubmitFormSnippet_SubmitFormSnippet extends external_React_default.a.PureC
       });
       this.props.sendUserActionTelemetry({
         event: "CLICK_BUTTON",
-        value: "subscribe-error",
+        event_context: "subscribe-error",
         id: "NEWTAB_FOOTER_BAR_CONTENT"
       });
     }
@@ -11962,7 +11978,7 @@ class SubmitFormSnippet_SubmitFormSnippet extends external_React_default.a.PureC
   expandSnippet() {
     this.props.sendUserActionTelemetry({
       event: "CLICK_BUTTON",
-      value: "scene1-button-learn-more",
+      event_context: "scene1-button-learn-more",
       id: this.props.UISurface
     });
     this.setState({
@@ -14947,7 +14963,8 @@ const helpers = {
     const hasTriplets = Boolean(message.bundle && message.bundle.length); // Allow 1) falsy to not render a header 2) default welcome 3) custom header
 
     const tripletsHeaderId = message.tripletsHeaderId === undefined ? "onboarding-welcome-header" : message.tripletsHeaderId;
-    const UTMTerm = message.utm_term || "";
+    let UTMTerm = message.utm_term || "";
+    UTMTerm = message.utm_term && message.trailheadTriplet ? `${message.utm_term}-${message.trailheadTriplet}` : UTMTerm;
     return {
       hasTriplets,
       hasInterrupt,

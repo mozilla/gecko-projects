@@ -39,17 +39,16 @@ async function test_object_grip(debuggee, threadFront) {
       return arg1;
     }
   );
-  const objClient = threadFront.pauseGrip(obj);
+  const objectFront = threadFront.pauseGrip(obj);
 
-  const method = threadFront.pauseGrip(
-    (await objClient.getPropertyValue("method", null)).value.return
-  );
+  const method = (await objectFront.getPropertyValue("method", null)).value
+    .return;
 
   try {
     await method.apply(obj, []);
     Assert.ok(false, "expected exception");
   } catch (err) {
-    Assert.ok(!!err.match(/debugee object is not callable/));
+    Assert.ok(!!err.message.match(/debugee object is not callable/));
   }
 }
 

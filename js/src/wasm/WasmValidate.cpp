@@ -358,11 +358,14 @@ bool wasm::EncodeLocalEntries(Encoder& e, const ValTypeVector& locals) {
   }
 
   uint32_t numLocalEntries = 0;
-  ValType prev;
-  for (ValType t : locals) {
-    if (t != prev) {
-      numLocalEntries++;
-      prev = t;
+  if (locals.length()) {
+    ValType prev = locals[0];
+    numLocalEntries++;
+    for (ValType t : locals) {
+      if (t != prev) {
+        numLocalEntries++;
+        prev = t;
+      }
     }
   }
 
@@ -371,7 +374,7 @@ bool wasm::EncodeLocalEntries(Encoder& e, const ValTypeVector& locals) {
   }
 
   if (numLocalEntries) {
-    prev = locals[0];
+    ValType prev = locals[0];
     uint32_t count = 1;
     for (uint32_t i = 1; i < locals.length(); i++, count++) {
       if (prev != locals[i]) {
@@ -999,7 +1002,7 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
         if (!env.gcTypesEnabled()) {
           return iter.unrecognizedOpcode(&op);
         }
-        CHECK(iter.readComparison(ValType::AnyRef, &nothing, &nothing));
+        CHECK(iter.readComparison(RefType::any(), &nothing, &nothing));
         break;
       }
 #endif
@@ -1020,7 +1023,7 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
         if (!env.refTypesEnabled()) {
           return iter.unrecognizedOpcode(&op);
         }
-        CHECK(iter.readConversion(ValType::AnyRef, ValType::I32, &nothing));
+        CHECK(iter.readConversion(RefType::any(), ValType::I32, &nothing));
         break;
       }
 #endif
@@ -1268,7 +1271,7 @@ static bool ValidateTypeState(Decoder& d, TypeStateVector* typeState,
     return true;
   }
 
-  uint32_t refTypeIndex = type.refTypeIndex();
+  uint32_t refTypeIndex = type.refType().typeIndex();
   switch ((*typeState)[refTypeIndex]) {
     case TypeState::None:
       (*typeState)[refTypeIndex] = TypeState::ForwardStruct;
@@ -1328,7 +1331,7 @@ static bool DecodeFuncType(Decoder& d, ModuleEnvironment* env,
   if (!d.readVarU32(&numResults)) {
     return d.fail("bad number of function returns");
   }
-  if (numResults > MaxResults) {
+  if (numResults > env->funcMaxResults()) {
     return d.fail("too many returns in signature");
   }
   ValTypeVector results;
@@ -1386,7 +1389,7 @@ static bool DecodeStructType(Decoder& d, ModuleEnvironment* env,
     }
 
     CheckedInt32 offset;
-    switch (fields[i].type.code()) {
+    switch (fields[i].type.kind()) {
       case ValType::I32:
         offset = layout.addScalar(Scalar::Int32);
         break;
@@ -1400,14 +1403,17 @@ static bool DecodeStructType(Decoder& d, ModuleEnvironment* env,
         offset = layout.addScalar(Scalar::Float64);
         break;
       case ValType::Ref:
-        offset = layout.addReference(ReferenceType::TYPE_OBJECT);
+        switch (fields[i].type.refTypeKind()) {
+          case RefType::TypeIndex:
+            offset = layout.addReference(ReferenceType::TYPE_OBJECT);
+            break;
+          case RefType::Func:
+          case RefType::Any:
+          case RefType::Null:
+            offset = layout.addReference(ReferenceType::TYPE_WASM_ANYREF);
+            break;
+        }
         break;
-      case ValType::FuncRef:
-      case ValType::AnyRef:
-        offset = layout.addReference(ReferenceType::TYPE_WASM_ANYREF);
-        break;
-      default:
-        MOZ_CRASH("Unknown type");
     }
     if (!offset.isValid()) {
       return d.fail("Object too large");
@@ -1660,15 +1666,17 @@ static bool DecodeTableTypeAndLimits(Decoder& d, bool refTypesEnabled,
   if (elementType == uint8_t(TypeCode::FuncRef)) {
     tableKind = TableKind::FuncRef;
 #ifdef ENABLE_WASM_REFTYPES
-  } else if (elementType == uint8_t(TypeCode::AnyRef)) {
+  } else if (elementType == uint8_t(TypeCode::AnyRef) ||
+             elementType == uint8_t(TypeCode::NullRef)) {
     if (!refTypesEnabled) {
       return d.fail("expected 'funcref' element type");
     }
-    tableKind = TableKind::AnyRef;
+    tableKind = elementType == uint8_t(TypeCode::AnyRef) ? TableKind::AnyRef
+                                                         : TableKind::NullRef;
 #endif
   } else {
 #ifdef ENABLE_WASM_REFTYPES
-    return d.fail("expected 'funcref' or 'anyref' element type");
+    return d.fail("expected reference element type");
 #else
     return d.fail("expected 'funcref' element type");
 #endif
@@ -1695,18 +1703,28 @@ static bool DecodeTableTypeAndLimits(Decoder& d, bool refTypesEnabled,
 }
 
 static bool GlobalIsJSCompatible(Decoder& d, ValType type) {
-  switch (type.code()) {
+  switch (type.kind()) {
     case ValType::I32:
     case ValType::F32:
     case ValType::F64:
     case ValType::I64:
-    case ValType::FuncRef:
-    case ValType::AnyRef:
       break;
-#ifdef WASM_PRIVATE_REFTYPES
     case ValType::Ref:
-      return d.fail("cannot expose reference type");
+      switch (type.refTypeKind()) {
+        case RefType::Func:
+        case RefType::Any:
+        case RefType::Null:
+          break;
+        case RefType::TypeIndex:
+#ifdef WASM_PRIVATE_REFTYPES
+          return d.fail("cannot expose reference type");
+#else
+          break;
 #endif
+        default:
+          return d.fail("unexpected variable type in global import/export");
+      }
+      break;
     default:
       return d.fail("unexpected variable type in global import/export");
   }
@@ -2396,7 +2414,7 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
     // the type or definition kind of the payload. `Active` element segments are
     // restricted to MVP behavior, which assumes only function indices.
     if (kind == ElemSegmentKind::Active) {
-      elemType = ValType::FuncRef;
+      elemType = RefType::func();
     } else {
       uint8_t form;
       if (!d.readFixedU8(&form)) {
@@ -2407,16 +2425,13 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
         case ElemSegmentPayload::ElemExpression: {
           switch (form) {
             case uint8_t(TypeCode::FuncRef):
-              // Below we must in principle check every element expression to
-              // ensure that it is a subtype of FuncRef.  However, the only
-              // reference expressions allowed are ref.null and ref.func, and
-              // they both pass that test, and so no additional check is needed
-              // at this time.
-              elemType = ValType::FuncRef;
+              elemType = RefType::func();
               break;
             case uint8_t(TypeCode::AnyRef):
-              // Ditto, for AnyRef, just even more trivial.
-              elemType = ValType::AnyRef;
+              elemType = RefType::any();
+              break;
+            case uint8_t(TypeCode::NullRef):
+              elemType = RefType::null();
               break;
             default:
               return d.fail(
@@ -2431,7 +2446,7 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
                 "segments with extern indices can only contain function "
                 "references");
           }
-          elemType = ValType::FuncRef;
+          elemType = RefType::func();
         }
       }
     }
@@ -2440,7 +2455,7 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
     switch (kind) {
       case ElemSegmentKind::Declared: {
         if (!(elemType.isReference() &&
-              env->isRefSubtypeOf(elemType, ValType::FuncRef))) {
+              env->isRefSubtypeOf(elemType, RefType::func()))) {
           return d.fail(
               "declared segment's element type must be subtype of funcref");
         }
@@ -2500,18 +2515,25 @@ static bool DecodeElemSection(Decoder& d, ModuleEnvironment* env) {
         if (!d.readOp(&op)) {
           return d.fail("failed to read initializer operation");
         }
+
+        RefType initType = RefType::any();
         switch (op.b0) {
           case uint16_t(Op::RefFunc):
+            initType = RefType::func();
             break;
           case uint16_t(Op::RefNull):
             if (kind == ElemSegmentKind::Declared) {
               return d.fail(
                   "declared element segments cannot contain ref.null");
             }
+            initType = RefType::null();
             needIndex = false;
             break;
           default:
             return d.fail("failed to read initializer operation");
+        }
+        if (!env->isRefSubtypeOf(ValType(initType), ValType(elemType))) {
+          return d.fail("initializer type must be subtype of element type");
         }
       }
 
@@ -2965,11 +2987,14 @@ bool wasm::Validate(JSContext* cx, const ShareableBytes& bytecode,
 
   bool gcTypesConfigured = HasGcSupport(cx);
   bool refTypesConfigured = HasReftypesSupport(cx);
+  bool multiValueConfigured = HasMultiValueSupport(cx);
   bool hugeMemory = false;
+  bool bigIntConfigured = HasI64BigIntSupport(cx);
 
   CompilerEnvironment compilerEnv(
       CompileMode::Once, Tier::Optimized, OptimizedBackend::Ion,
-      DebugEnabled::False, refTypesConfigured, gcTypesConfigured, hugeMemory);
+      DebugEnabled::False, multiValueConfigured, refTypesConfigured,
+      gcTypesConfigured, hugeMemory, bigIntConfigured);
   ModuleEnvironment env(
       &compilerEnv,
       cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled()

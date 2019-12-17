@@ -8,9 +8,14 @@
 
 #include "GLContext.h"
 #include "GLContextProvider.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/widget/CompositorWidget.h"
+
+#ifdef MOZ_GECKO_PROFILER
+#  include "ProfilerMarkerPayload.h"
+#endif
 
 namespace mozilla {
 namespace wr {
@@ -148,7 +153,7 @@ LayoutDeviceIntSize RenderCompositorOGL::GetBufferSize() {
 }
 
 bool RenderCompositorOGL::ShouldUseNativeCompositor() {
-  return mNativeLayerRoot && StaticPrefs::gfx_webrender_compositor_AtStartup();
+  return mNativeLayerRoot && gfx::gfxVars::UseWebRenderCompositor();
 }
 
 uint32_t RenderCompositorOGL::GetMaxUpdateRects() {
@@ -163,19 +168,29 @@ void RenderCompositorOGL::CompositorBeginFrame() {
   mAddedLayers.Clear();
   mAddedPixelCount = 0;
   mAddedClippedPixelCount = 0;
+  mBeginFrameTimeStamp = TimeStamp::NowUnfuzzed();
 }
 
 void RenderCompositorOGL::CompositorEndFrame() {
-  auto bufferSize = GetBufferSize();
-  uint64_t windowPixelCount = uint64_t(bufferSize.width) * bufferSize.height;
-  printf(
-      "CompositorEndFrame with %d layers (%d used / %d unused), in-use memory: "
-      "%d%%, overdraw: %d%%, painting: %d%%\n",
-      int(mNativeLayers.size()), int(mAddedLayers.Length()),
-      int(mNativeLayers.size() - mAddedLayers.Length()),
-      int(mAddedPixelCount * 100 / windowPixelCount),
-      int(mAddedClippedPixelCount * 100 / windowPixelCount),
-      int(mDrawnPixelCount * 100 / windowPixelCount));
+#ifdef MOZ_GECKO_PROFILER
+  if (profiler_thread_is_being_profiled()) {
+    auto bufferSize = GetBufferSize();
+    uint64_t windowPixelCount = uint64_t(bufferSize.width) * bufferSize.height;
+    profiler_add_text_marker(
+        "WR OS Compositor frame",
+        nsPrintfCString("%d%% painting, %d%% overdraw, %d used "
+                        "layers (%d%% memory) + %d unused layers (%d%% memory)",
+                        int(mDrawnPixelCount * 100 / windowPixelCount),
+                        int(mAddedClippedPixelCount * 100 / windowPixelCount),
+                        int(mAddedLayers.Length()),
+                        int(mAddedPixelCount * 100 / windowPixelCount),
+                        int(mNativeLayers.size() - mAddedLayers.Length()),
+                        int((mTotalPixelCount - mAddedPixelCount) * 100 /
+                            windowPixelCount)),
+        JS::ProfilingCategoryPair::GRAPHICS, mBeginFrameTimeStamp,
+        TimeStamp::NowUnfuzzed());
+  }
+#endif
   mDrawnPixelCount = 0;
 
   mNativeLayerRoot->SetLayers(mAddedLayers);
@@ -218,16 +233,15 @@ void RenderCompositorOGL::CreateSurface(wr::NativeSurfaceId aId,
       IntSize(aSize.width, aSize.height), aIsOpaque);
   layer->SetGLContext(mGL);
   mNativeLayers.insert({wr::AsUint64(aId), layer});
+  mTotalPixelCount += gfx::IntRect({}, layer->GetSize()).Area();
 }
 
 void RenderCompositorOGL::DestroySurface(NativeSurfaceId aId) {
   auto layerCursor = mNativeLayers.find(wr::AsUint64(aId));
-  if (layerCursor == mNativeLayers.end()) {
-    printf("deleting non-existent layer %" PRId64 "\n", wr::AsUint64(aId));
-    return;
-  }
   MOZ_RELEASE_ASSERT(layerCursor != mNativeLayers.end());
+  RefPtr<layers::NativeLayer> layer = std::move(layerCursor->second);
   mNativeLayers.erase(layerCursor);
+  mTotalPixelCount -= gfx::IntRect({}, layer->GetSize()).Area();
   // If the layer is currently present in mNativeLayerRoot, it will be destroyed
   // once CompositorEndFrame() replaces mNativeLayerRoot's layers and drops that
   // reference.

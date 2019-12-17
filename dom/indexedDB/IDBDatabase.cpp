@@ -22,7 +22,6 @@
 #include "mozilla/Services.h"
 #include "mozilla/storage.h"
 #include "mozilla/dom/BindingDeclarations.h"
-#include "mozilla/dom/DOMStringList.h"
 #include "mozilla/dom/DOMStringListBinding.h"
 #include "mozilla/dom/Exceptions.h"
 #include "mozilla/dom/File.h"
@@ -173,9 +172,10 @@ IDBDatabase::~IDBDatabase() {
 }
 
 // static
-already_AddRefed<IDBDatabase> IDBDatabase::Create(
-    IDBOpenDBRequest* aRequest, IDBFactory* aFactory,
-    BackgroundDatabaseChild* aActor, DatabaseSpec* aSpec) {
+RefPtr<IDBDatabase> IDBDatabase::Create(IDBOpenDBRequest* aRequest,
+                                        IDBFactory* aFactory,
+                                        BackgroundDatabaseChild* aActor,
+                                        DatabaseSpec* aSpec) {
   MOZ_ASSERT(aRequest);
   MOZ_ASSERT(aFactory);
   aFactory->AssertIsOnOwningThread();
@@ -213,7 +213,7 @@ already_AddRefed<IDBDatabase> IDBDatabase::Create(
 
   db->IncreaseActiveDatabaseCount();
 
-  return db.forget();
+  return db;
 }
 
 #ifdef DEBUG
@@ -300,9 +300,9 @@ void IDBDatabase::RevertToPreviousState() {
 
   // Hold the current spec alive until RefreshTransactionsSpecEnumerator has
   // finished!
-  nsAutoPtr<DatabaseSpec> currentSpec(mSpec.forget());
+  auto currentSpec = std::move(mSpec);
 
-  mSpec = mPreviousSpec.forget();
+  mSpec = std::move(mPreviousSpec);
 
   RefreshSpec(/* aMayDelete */ true);
 }
@@ -332,49 +332,35 @@ uint64_t IDBDatabase::Version() const {
   return mSpec->metadata().version();
 }
 
-already_AddRefed<DOMStringList> IDBDatabase::ObjectStoreNames() const {
+RefPtr<DOMStringList> IDBDatabase::ObjectStoreNames() const {
   AssertIsOnOwningThread();
   MOZ_ASSERT(mSpec);
 
-  const nsTArray<ObjectStoreSpec>& objectStores = mSpec->objectStores();
-
-  RefPtr<DOMStringList> list = new DOMStringList();
-
-  if (!objectStores.IsEmpty()) {
-    nsTArray<nsString>& listNames = list->StringArray();
-    listNames.SetCapacity(objectStores.Length());
-
-    std::transform(
-        objectStores.cbegin(), objectStores.cend(), MakeBackInserter(listNames),
-        [](const auto& objectStore) { return objectStore.metadata().name(); });
-
-    listNames.Sort();
-  }
-
-  return list.forget();
+  return CreateSortedDOMStringList(
+      mSpec->objectStores(),
+      [](const auto& objectStore) { return objectStore.metadata().name(); });
 }
 
-already_AddRefed<Document> IDBDatabase::GetOwnerDocument() const {
+RefPtr<Document> IDBDatabase::GetOwnerDocument() const {
   if (nsPIDOMWindowInner* window = GetOwner()) {
-    nsCOMPtr<Document> doc = window->GetExtantDoc();
-    return doc.forget();
+    return window->GetExtantDoc();
   }
   return nullptr;
 }
 
-already_AddRefed<IDBObjectStore> IDBDatabase::CreateObjectStore(
+RefPtr<IDBObjectStore> IDBDatabase::CreateObjectStore(
     const nsAString& aName, const IDBObjectStoreParameters& aOptionalParameters,
     ErrorResult& aRv) {
   AssertIsOnOwningThread();
 
   IDBTransaction* transaction = IDBTransaction::GetCurrent();
   if (!transaction || transaction->Database() != this ||
-      transaction->GetMode() != IDBTransaction::VERSION_CHANGE) {
+      transaction->GetMode() != IDBTransaction::Mode::VersionChange) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
     return nullptr;
   }
 
-  if (!transaction->IsOpen()) {
+  if (!transaction->CanAcceptRequests()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return nullptr;
   }
@@ -421,7 +407,7 @@ already_AddRefed<IDBObjectStore> IDBDatabase::CreateObjectStore(
     RefreshSpec(/* aMayDelete */ false);
   }
 
-  RefPtr<IDBObjectStore> objectStore = transaction->CreateObjectStore(*newSpec);
+  auto objectStore = transaction->CreateObjectStore(*newSpec);
   MOZ_ASSERT(objectStore);
 
   // Don't do this in the macro because we always need to increment the serial
@@ -434,7 +420,7 @@ already_AddRefed<IDBObjectStore> IDBDatabase::CreateObjectStore(
       requestSerialNumber, IDB_LOG_STRINGIFY(this),
       IDB_LOG_STRINGIFY(transaction), IDB_LOG_STRINGIFY(objectStore));
 
-  return objectStore.forget();
+  return objectStore;
 }
 
 void IDBDatabase::DeleteObjectStore(const nsAString& aName, ErrorResult& aRv) {
@@ -442,12 +428,12 @@ void IDBDatabase::DeleteObjectStore(const nsAString& aName, ErrorResult& aRv) {
 
   IDBTransaction* transaction = IDBTransaction::GetCurrent();
   if (!transaction || transaction->Database() != this ||
-      transaction->GetMode() != IDBTransaction::VERSION_CHANGE) {
+      transaction->GetMode() != IDBTransaction::Mode::VersionChange) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
     return;
   }
 
-  if (!transaction->IsOpen()) {
+  if (!transaction->CanAcceptRequests()) {
     aRv.Throw(NS_ERROR_DOM_INDEXEDDB_TRANSACTION_INACTIVE_ERR);
     return;
   }
@@ -484,7 +470,7 @@ void IDBDatabase::DeleteObjectStore(const nsAString& aName, ErrorResult& aRv) {
       IDB_LOG_STRINGIFY(transaction), NS_ConvertUTF16toUTF8(aName).get());
 }
 
-already_AddRefed<IDBTransaction> IDBDatabase::Transaction(
+RefPtr<IDBTransaction> IDBDatabase::Transaction(
     JSContext* aCx, const StringOrStringSequence& aStoreNames,
     IDBTransactionMode aMode, ErrorResult& aRv) {
   AssertIsOnOwningThread();
@@ -503,19 +489,20 @@ already_AddRefed<IDBTransaction> IDBDatabase::Transaction(
   }
 
   RefPtr<IDBTransaction> transaction;
-  aRv = Transaction(aCx, aStoreNames, aMode, getter_AddRefs(transaction));
+  aRv = Transaction(aCx, aStoreNames, aMode, &transaction);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
 
-  return transaction.forget();
+  return transaction;
 }
 
 nsresult IDBDatabase::Transaction(JSContext* aCx,
                                   const StringOrStringSequence& aStoreNames,
                                   IDBTransactionMode aMode,
-                                  IDBTransaction** aTransaction) {
+                                  RefPtr<IDBTransaction>* aTransaction) {
   AssertIsOnOwningThread();
+  MOZ_ASSERT(aTransaction);
 
   if (NS_WARN_IF((aMode == IDBTransactionMode::Readwriteflush ||
                   aMode == IDBTransactionMode::Cleanup) &&
@@ -580,21 +567,21 @@ nsresult IDBDatabase::Transaction(JSContext* aCx,
   IDBTransaction::Mode mode;
   switch (aMode) {
     case IDBTransactionMode::Readonly:
-      mode = IDBTransaction::READ_ONLY;
+      mode = IDBTransaction::Mode::ReadOnly;
       break;
     case IDBTransactionMode::Readwrite:
       if (mQuotaExceeded) {
-        mode = IDBTransaction::CLEANUP;
+        mode = IDBTransaction::Mode::Cleanup;
         mQuotaExceeded = false;
       } else {
-        mode = IDBTransaction::READ_WRITE;
+        mode = IDBTransaction::Mode::ReadWrite;
       }
       break;
     case IDBTransactionMode::Readwriteflush:
-      mode = IDBTransaction::READ_WRITE_FLUSH;
+      mode = IDBTransaction::Mode::ReadWriteFlush;
       break;
     case IDBTransactionMode::Cleanup:
-      mode = IDBTransaction::CLEANUP;
+      mode = IDBTransaction::Mode::Cleanup;
       mQuotaExceeded = false;
       break;
     case IDBTransactionMode::Versionchange:
@@ -604,12 +591,13 @@ nsresult IDBDatabase::Transaction(JSContext* aCx,
       MOZ_CRASH("Unknown mode!");
   }
 
-  RefPtr<IDBTransaction> transaction =
-      IDBTransaction::Create(aCx, this, sortedStoreNames, mode);
-  if (NS_WARN_IF(!transaction)) {
+  *aTransaction = IDBTransaction::Create(aCx, this, sortedStoreNames, mode);
+  if (NS_WARN_IF(!*aTransaction)) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
+
+  const auto& transaction = *aTransaction;
 
   BackgroundTransactionChild* actor =
       new BackgroundTransactionChild(transaction);
@@ -626,11 +614,10 @@ nsresult IDBDatabase::Transaction(JSContext* aCx,
 
   transaction->SetBackgroundActor(actor);
 
-  if (mode == IDBTransaction::CLEANUP) {
+  if (mode == IDBTransaction::Mode::Cleanup) {
     ExpireFileActors(/* aExpireAll */ true);
   }
 
-  transaction.forget(aTransaction);
   return NS_OK;
 }
 
@@ -641,7 +628,7 @@ StorageType IDBDatabase::Storage() const {
   return PersistenceTypeToStorage(mSpec->metadata().persistenceType());
 }
 
-already_AddRefed<IDBRequest> IDBDatabase::CreateMutableFile(
+RefPtr<IDBRequest> IDBDatabase::CreateMutableFile(
     JSContext* aCx, const nsAString& aName, const Optional<nsAString>& aType,
     ErrorResult& aRv) {
   AssertIsOnOwningThread();
@@ -669,7 +656,7 @@ already_AddRefed<IDBRequest> IDBDatabase::CreateMutableFile(
 
   CreateFileParams params(nsString(aName), type);
 
-  RefPtr<IDBRequest> request = IDBRequest::Create(aCx, this, nullptr);
+  auto request = IDBRequest::Create(aCx, this, nullptr);
   MOZ_ASSERT(request);
 
   BackgroundDatabaseRequestChild* actor =
@@ -685,7 +672,13 @@ already_AddRefed<IDBRequest> IDBDatabase::CreateMutableFile(
   MOZ_ASSERT(actor->GetActorEventTarget(),
              "The event target shall be inherited from its manager actor.");
 
-  return request.forget();
+  return request;
+}
+
+RefPtr<IDBRequest> IDBDatabase::MozCreateFileHandle(
+    JSContext* aCx, const nsAString& aName, const Optional<nsAString>& aType,
+    ErrorResult& aRv) {
+  return CreateMutableFile(aCx, aName, aType, aRv);
 }
 
 void IDBDatabase::RegisterTransaction(IDBTransaction* aTransaction) {
@@ -740,7 +733,7 @@ void IDBDatabase::AbortTransactions(bool aShouldWarn) {
         // Transactions that are already done can simply be ignored. Otherwise
         // there is a race here and it's possible that the transaction has not
         // been successfully committed yet so we will warn the user.
-        if (!transaction->IsDone()) {
+        if (!transaction->IsFinished()) {
           transactionsToAbort.AppendElement(transaction);
         }
       }
@@ -761,7 +754,7 @@ void IDBDatabase::AbortTransactions(bool aShouldWarn) {
 
       for (RefPtr<IDBTransaction>& transaction : transactionsToAbort) {
         MOZ_ASSERT(transaction);
-        MOZ_ASSERT(!transaction->IsDone());
+        MOZ_ASSERT(!transaction->IsFinished());
 
         // We warn for any transactions that could have written data, but
         // ignore read-only transactions.

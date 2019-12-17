@@ -63,25 +63,16 @@
 #include "nsGkAtoms.h"
 #include "nsIAnonymousContentCreator.h"
 #include "nsAtom.h"
-#include "nsIBaseWindow.h"
-#include "nsICategoryManager.h"
 #include "nsIContentInlines.h"
-#include "nsIControllers.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/DocumentInlines.h"
-#include "nsIDOMEventListener.h"
 #include "nsIFrameInlines.h"
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/NodeInfoInlines.h"
-#include "nsIScriptError.h"
 #include "nsIScriptGlobalObject.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsIScrollableFrame.h"
-#include "nsIServiceManager.h"
-#include "nsIURL.h"
 #include "nsView.h"
 #include "nsViewManager.h"
-#include "nsIWebNavigation.h"
 #include "nsIWidget.h"
 #include "nsLayoutUtils.h"
 #include "nsNameSpaceManager.h"
@@ -354,7 +345,8 @@ static nsIContent* GetRootForContentSubtree(nsIContent* aContent) {
   if (ShadowRoot* containingShadow = aContent->GetContainingShadow()) {
     return containingShadow;
   }
-  if (nsIContent* nativeAnonRoot = aContent->GetClosestNativeAnonymousSubtreeRoot()) {
+  if (nsIContent* nativeAnonRoot =
+          aContent->GetClosestNativeAnonymousSubtreeRoot()) {
     return nativeAnonRoot;
   }
   if (Document* doc = aContent->GetUncomposedDoc()) {
@@ -530,12 +522,10 @@ void nsINode::LastRelease() {
     UnsetFlags(NODE_HAS_LISTENERMANAGER);
   }
 
-
   ReleaseWrapper(this);
 
   FragmentOrElement::RemoveBlackMarkedNode(this);
 }
-
 
 std::ostream& operator<<(std::ostream& aStream, const nsINode& aNode) {
   nsAutoString elemDesc;

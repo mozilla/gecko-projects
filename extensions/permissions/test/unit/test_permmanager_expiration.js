@@ -2,7 +2,6 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 // Test that permissions with specific expiry times behave as expected.
-
 var test_generator = do_run_test();
 
 function run_test() {
@@ -15,9 +14,6 @@ function continue_test() {
 }
 
 function* do_run_test() {
-  // Set up a profile.
-  let profile = do_get_profile();
-
   let pm = Services.perms;
   let permURI = NetUtil.newURI("http://example.com");
   let principal = Services.scriptSecurityManager.createContentPrincipal(
@@ -139,6 +135,25 @@ function* do_run_test() {
     null,
     pm.getPermissionObject(principal, "test/expiration-session-exp2", false)
   );
+
+  // Add a persistent permission for private browsing
+  let principalPB = Services.scriptSecurityManager.createContentPrincipal(
+    permURI,
+    { privateBrowsingId: 1 }
+  );
+  pm.addFromPrincipal(
+    principalPB,
+    "test/expiration-session-pb",
+    pm.ALLOW_ACTION
+  );
+
+  // The permission should be set to session expiry
+  let perm = pm.getPermissionObject(
+    principalPB,
+    "test/expiration-session-pb",
+    true
+  );
+  Assert.equal(perm.expireType, pm.EXPIRE_SESSION);
 
   do_finish_generator_test(test_generator);
 }

@@ -82,6 +82,8 @@ clang_checkers:
     reliability: medium
   - name: clang-analyzer-core.uninitialized.Branch
     reliability: medium
+  - name: clang-analyzer-cplusplus.Move
+    reliability: high
   - name: clang-analyzer-cplusplus.NewDelete
     reliability: medium
   - name: clang-analyzer-cplusplus.NewDeleteLeaks
@@ -124,6 +126,8 @@ clang_checkers:
     reliability: high
   - name: cppcoreguidelines-narrowing-conversions
     reliability: high
+  - name: cppcoreguidelines-pro-type-member-init
+    reliability: medium
   - name: misc-non-copyable-objects
     reliability: high
   - name: misc-redundant-expression

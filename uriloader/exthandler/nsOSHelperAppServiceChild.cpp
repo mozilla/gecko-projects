@@ -13,13 +13,10 @@
 #include "nsISupports.h"
 #include "nsString.h"
 #include "nsTArray.h"
-#include "nsIURL.h"
 #include "nsIFile.h"
 #include "nsIHandlerService.h"
 #include "nsMimeTypes.h"
 #include "nsMIMEInfoImpl.h"
-#include "nsIStringBundle.h"
-#include "nsIPromptService.h"
 #include "nsMemory.h"
 #include "nsCRT.h"
 #include "nsEmbedCID.h"
@@ -117,6 +114,12 @@ nsOSHelperAppServiceChild::GetMIMEInfoFromOS(const nsACString& aMIMEType,
 NS_IMETHODIMP
 nsOSHelperAppServiceChild::GetProtocolHandlerInfoFromOS(
     const nsACString& aScheme, bool* aFound, nsIHandlerInfo** aRetVal) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsOSHelperAppServiceChild::IsCurrentAppOSDefaultForProtocol(
+    const nsACString& aScheme, bool* aRetVal) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

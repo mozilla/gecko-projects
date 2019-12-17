@@ -252,13 +252,14 @@ bool DispatchFailed(nsresult aStatus) {
 
 }  // anonymous namespace
 
-class ServiceWorkerOp::ServiceWorkerOpRunnable : public WorkerRunnable {
+class ServiceWorkerOp::ServiceWorkerOpRunnable : public WorkerDebuggeeRunnable {
  public:
   NS_DECL_ISUPPORTS_INHERITED
 
   ServiceWorkerOpRunnable(RefPtr<ServiceWorkerOp> aOwner,
                           WorkerPrivate* aWorkerPrivate)
-      : WorkerRunnable(aWorkerPrivate), mOwner(std::move(aOwner)) {
+      : WorkerDebuggeeRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount),
+        mOwner(std::move(aOwner)) {
     AssertIsOnMainThread();
     MOZ_ASSERT(mOwner);
     MOZ_ASSERT(aWorkerPrivate);
@@ -357,21 +358,6 @@ bool ServiceWorkerOp::MaybeStart(RemoteWorkerChild* aOwner,
           owner->CloseWorkerOnMainThread(state);
         } else {
           MOZ_ASSERT(state.is<Running>());
-
-          if (NS_WARN_IF(
-                  state.as<Running>().mWorkerPrivate->ParentStatusProtected() >
-                  Running)) {
-            owner->GetTerminationPromise()->Then(
-                GetCurrentThreadSerialEventTarget(), __func__,
-                [self = std::move(self)](
-                    const GenericNonExclusivePromise::ResolveOrRejectValue&) {
-                  MOZ_ASSERT(!self->mPromiseHolder.IsEmpty());
-                  self->RejectAll(NS_ERROR_DOM_ABORT_ERR);
-                });
-
-            owner->CloseWorkerOnMainThread(state);
-            return;
-          }
 
           RefPtr<WorkerRunnable> workerRunnable =
               self->GetRunnable(state.as<Running>().mWorkerPrivate);

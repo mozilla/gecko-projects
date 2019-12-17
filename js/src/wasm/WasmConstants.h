@@ -49,6 +49,10 @@ static const uint8_t SLEB128SignBit = 0x40;
 
 enum class TypeCode {
 
+  // If more "simple primitive" (non-reference, non-constructor,
+  // non-special-purpose) types are added here then you MUST update
+  // LowestPrimitiveTypeCode, below.
+
   I32 = 0x7f,  // SLEB128(-0x01)
   I64 = 0x7e,  // SLEB128(-0x02)
   F32 = 0x7d,  // SLEB128(-0x03)
@@ -77,6 +81,12 @@ enum class TypeCode {
 
   Limit = 0x80
 };
+
+// This is the lowest-valued TypeCode that is a primitive type, used in
+// UnpackTypeCodeTypeAbstracted().  If primitive typecodes are added below any
+// reference typecode then the logic in that function MUST change.
+
+static constexpr TypeCode LowestPrimitiveTypeCode = TypeCode::F64;
 
 enum class FuncTypeIdDescKind { None, Immediate, Global };
 
@@ -578,11 +588,9 @@ static const unsigned MaxElemSegments = 10000000;
 static const unsigned MaxTableLength = 10000000;
 static const unsigned MaxLocals = 50000;
 static const unsigned MaxParams = 1000;
-#ifdef ENABLE_WASM_MULTI_VALUE
+// The actual maximum results may be `1` if multi-value is not enabled. Check
+// `env->funcMaxResults()` to get the correct value for a module.
 static const unsigned MaxResults = 1000;
-#else
-static const unsigned MaxResults = 1;
-#endif
 static const unsigned MaxStructFields = 1000;
 static const unsigned MaxMemoryMaximumPages = 65536;
 static const unsigned MaxStringBytes = 100000;

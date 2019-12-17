@@ -43,6 +43,7 @@ class RenderCompositorANGLE : public RenderCompositor {
   RenderedFrameId EndFrame(const FfiVec<DeviceIntRect>& aDirtyRects) final;
   bool WaitForGPU() override;
   RenderedFrameId GetLastCompletedFrameId() final;
+  RenderedFrameId UpdateFrameId() final;
   void Pause() override;
   bool Resume() override;
   void Update() override;
@@ -83,11 +84,16 @@ class RenderCompositorANGLE : public RenderCompositor {
   bool RequestFullRender() override;
   uint32_t GetMaxPartialPresentRects() override;
 
+  bool MaybeReadback(const gfx::IntSize& aReadbackSize,
+                     const wr::ImageFormat& aReadbackFormat,
+                     const Range<uint8_t>& aReadbackBuffer) override;
+
  protected:
   bool UseCompositor();
   void InitializeUsePartialPresent();
-  void InsertPresentWaitQuery(RenderedFrameId aRenderedFrameId);
-  bool WaitForPreviousPresentQuery();
+  void InsertGraphicsCommandsFinishedWaitQuery(
+      RenderedFrameId aRenderedFrameId);
+  bool WaitForPreviousGraphicsCommandsFinishedQuery();
   bool ResizeBufferIfNeeded();
   bool CreateEGLSurface();
   void DestroyEGLSurface();

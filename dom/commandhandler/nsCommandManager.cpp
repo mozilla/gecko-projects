@@ -10,15 +10,11 @@
 #include "nsIControllers.h"
 #include "nsIObserver.h"
 
-#include "nsIComponentManager.h"
-
 #include "nsServiceManagerUtils.h"
-#include "nsIScriptSecurityManager.h"
 
 #include "nsContentUtils.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowRoot.h"
-#include "nsIFocusManager.h"
 
 #include "nsCOMArray.h"
 
@@ -55,7 +51,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCommandManager)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsICommandManager)
 NS_INTERFACE_MAP_END
 
-nsresult nsCommandManager::CommandStatusChanged(const char* aCommandName) {
+void nsCommandManager::CommandStatusChanged(const char* aCommandName) {
   ObserverList* commandObservers;
   mObserversTable.Get(aCommandName, &commandObservers);
 
@@ -69,8 +65,6 @@ nsresult nsCommandManager::CommandStatusChanged(const char* aCommandName) {
                         aCommandName, u"command_status_changed");
     }
   }
-
-  return NS_OK;
 }
 
 #if 0

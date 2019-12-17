@@ -5,20 +5,14 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 """Instrument visualmetrics.py to run in parallel.
-
-Environment variables:
-
-  VISUAL_METRICS_JOBS_JSON:
-    A JSON blob containing the job descriptions.
-
-    Can be overridden with the --jobs-json-path option set to a local file
-    path.
 """
 
 import argparse
 import os
 import json
+import shutil
 import sys
+import tarfile
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 from multiprocessing import cpu_count
@@ -28,7 +22,9 @@ import attr
 import requests
 import structlog
 import subprocess
-from voluptuous import Required, Schema, Url
+
+from jsonschema import validate
+from voluptuous import Required, Schema
 
 #: The workspace directory where files will be downloaded, etc.
 WORKSPACE_DIR = Path("/", "builds", "worker", "workspace")
@@ -42,20 +38,23 @@ OUTPUT_DIR = Path("/", "builds", "worker", "artifacts")
 #: A job to process through visualmetrics.py
 @attr.s
 class Job:
+    #: The name of the test.
+    test_name = attr.ib(type=str)
+
     #: The directory for all the files pertaining to the job.
     job_dir = attr.ib(type=Path)
 
     #: json_path: The path to the ``browsertime.json`` file on disk.
     json_path = attr.ib(type=Path)
 
-    #: json_url: The URL of the ``browsertime.json`` file.
-    json_url = attr.ib(type=str)
+    #: json_location: The location or URL of the ``browsertime.json`` file.
+    json_location = attr.ib(type=str)
 
     #: video_path: The path of the video file on disk.
     video_path = attr.ib(type=Path)
 
-    #: video_url: The URl of the video file.
-    video_url = attr.ib(type=str)
+    #: video_location: The path or URL of the video file.
+    video_location = attr.ib(type=str)
 
 
 # NB: Keep in sync with try_task_config_schema in
@@ -64,10 +63,18 @@ class Job:
 JOB_SCHEMA = Schema(
     {
         Required("jobs"): [
-            {Required("browsertime_json_url"): Url(), Required("video_url"): Url()}
+            {
+                Required("test_name"): str,
+                Required("json_location"): str,
+                Required("video_location"): str,
+            }
         ]
     }
 )
+
+PERFHERDER_SCHEMA = Path("/", "builds", "worker", "performance-artifact-schema.json")
+with PERFHERDER_SCHEMA.open() as f:
+    PERFHERDER_SCHEMA = json.loads(f.read())
 
 
 def run_command(log, cmd):
@@ -86,9 +93,73 @@ def run_command(log, cmd):
         log.info("Command succeeded", result=res)
         return 0, res
     except subprocess.CalledProcessError as e:
-        log.info("Command failed", cmd=cmd, status=e.returncode,
-                 output=e.output)
+        log.info("Command failed", cmd=cmd, status=e.returncode, output=e.output)
         return e.returncode, e.output
+
+
+def append_result(log, suites, test_name, name, result):
+    """Appends a ``name`` metrics result in the ``test_name`` suite.
+
+    Args:
+        log: The structlog logger instance.
+        suites: A mapping containing the suites.
+        test_name: The name of the test.
+        name: The name of the metrics.
+        result: The value to append.
+    """
+    if name.endswith("Progress"):
+        return
+    try:
+        result = int(result)
+    except ValueError:
+        log.error("Could not convert value", name=name)
+        log.error("%s" % result)
+        result = 0
+    if test_name not in suites:
+        suites[test_name] = {"name": test_name, "subtests": {}}
+
+    subtests = suites[test_name]["subtests"]
+    if name not in subtests:
+        subtests[name] = {
+            "name": name,
+            "replicates": [result],
+            "lowerIsBetter": True,
+            "unit": "ms",
+        }
+    else:
+        subtests[name]["replicates"].append(result)
+
+
+def compute_median(subtest):
+    """Adds in the subtest the ``value`` field, which is the average of all
+    replicates.
+
+    Args:
+        subtest: The subtest containing all replicates.
+
+    Returns:
+        The subtest.
+    """
+    if "replicates" not in subtest:
+        return subtest
+    series = subtest["replicates"][1:]
+    subtest["value"] = float(sum(series)) / float(len(series))
+    return subtest
+
+
+def get_suite(suite):
+    """Returns the suite with computed medians in its subtests.
+
+    Args:
+        suite: The suite to convert.
+
+    Returns:
+        The suite.
+    """
+    suite["subtests"] = [
+        compute_median(subtest) for subtest in suite["subtests"].values()
+    ]
+    return suite
 
 
 def main(log, args):
@@ -109,50 +180,33 @@ def main(log, args):
     visualmetrics_path = Path(fetch_dir) / "visualmetrics.py"
     if not visualmetrics_path.exists():
         log.error(
-            "Could not locate visualmetrics.py",
-            expected_path=str(visualmetrics_path)
+            "Could not locate visualmetrics.py", expected_path=str(visualmetrics_path)
         )
         return 1
 
-    if args.jobs_json_path:
-        try:
-            with open(str(args.jobs_json_path), "r") as f:
-                jobs_json = json.load(f)
-        except Exception as e:
-            log.error(
-                "Could not read jobs.json file: %s" % e,
-                path=args.jobs_json_path,
-                exc_info=True,
-            )
-            return 1
-
-        log.info(
-            "Loaded jobs.json from file", path=args.jobs_json_path, jobs_json=jobs_json
+    results_path = Path(args.browsertime_results).parent
+    try:
+        with tarfile.open(str(args.browsertime_results)) as tar:
+            tar.extractall(path=str(results_path))
+    except Exception:
+        log.error(
+            "Could not read extract browsertime results archive",
+            path=args.browsertime_results,
+            exc_info=True,
         )
+        return 1
+    log.info("Extracted browsertime results", path=args.browsertime_results)
+    jobs_json_path = results_path / "browsertime-results" / "jobs.json"
+    try:
+        with open(str(jobs_json_path), "r") as f:
+            jobs_json = json.load(f)
+    except Exception as e:
+        log.error(
+            "Could not read jobs.json file: %s" % e, path=jobs_json_path, exc_info=True
+        )
+        return 1
 
-    else:
-        raw_jobs_json = os.getenv("VISUAL_METRICS_JOBS_JSON")
-        if raw_jobs_json is not None and isinstance(raw_jobs_json, bytes):
-            raw_jobs_json = raw_jobs_json.decode("utf-8")
-        elif raw_jobs_json is None:
-            log.error(
-                "Expected one of --jobs-json-path or "
-                "VISUAL_METRICS_JOBS_JSON environment variable."
-            )
-            return 1
-
-        try:
-            jobs_json = json.loads(raw_jobs_json)
-        except (TypeError, ValueError) as e:
-            log.error(
-                "Failed to decode VISUAL_METRICS_JOBS_JSON environment "
-                "variable: %s" % e,
-                value=raw_jobs_json,
-            )
-            return 1
-
-        log.info("Parsed jobs.json from environment", jobs_json=jobs_json)
-
+    log.info("Loaded jobs.json from file", path=jobs_json_path, jobs_json=jobs_json)
     try:
         JOB_SCHEMA(jobs_json)
     except Exception as e:
@@ -160,10 +214,13 @@ def main(log, args):
         return 1
 
     try:
-        downloaded_jobs, failed_jobs = download_inputs(log, jobs_json["jobs"])
+        downloaded_jobs, failed_downloads = download_inputs(log, jobs_json["jobs"])
     except Exception as e:
         log.error("Failed to download jobs: %s" % e, exc_info=True)
         return 1
+
+    failed_runs = 0
+    suites = {}
 
     with ProcessPoolExecutor(max_workers=cpu_count()) as executor:
         for job, result in zip(
@@ -180,42 +237,56 @@ def main(log, args):
             returncode, res = result
             if returncode != 0:
                 log.error(
-                    "Failed to run visualmetrics.py", video_url=job.video_url, error=res
+                    "Failed to run visualmetrics.py",
+                    video_location=job.video_location,
+                    error=res,
                 )
+                failed_runs += 1
             else:
-                path = job.job_dir / "visual-metrics.json"
-                with path.open("wb") as f:
-                    log.info("Writing job result", path=path)
-                    f.write(res)
+                # Python 3.5 requires a str object (not 3.6+)
+                res = json.loads(res.decode("utf8"))
+                for name, value in res.items():
+                    append_result(log, suites, job.test_name, name, value)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    suites = [get_suite(suite) for suite in suites.values()]
+    perf_data = {
+        "framework": {"name": "browsertime"},
+        "type": "vismet",
+        "suites": suites,
+    }
 
-    with Path(WORKSPACE_DIR, "jobs.json").open("w") as f:
+    # Validates the perf data complies with perfherder schema.
+    # The perfherder schema uses jsonschema so we can't use voluptuous here.
+    validate(perf_data, PERFHERDER_SCHEMA)
+
+    raw_perf_data = json.dumps(perf_data)
+    with Path(OUTPUT_DIR, "perfherder-data.json").open("w") as f:
+        f.write(raw_perf_data)
+    # Prints the data in logs for Perfherder to pick it up.
+    log.info("PERFHERDER_DATA: %s" % raw_perf_data)
+
+    # Lists the number of processed jobs, failures, and successes.
+    with Path(OUTPUT_DIR, "summary.json").open("w") as f:
         json.dump(
             {
-                "successful_jobs": [
+                "total_jobs": len(downloaded_jobs) + len(failed_downloads),
+                "successful_runs": len(downloaded_jobs) - failed_runs,
+                "failed_runs": failed_runs,
+                "failed_downloads": [
                     {
-                        "video_url": job.video_url,
-                        "browsertime_json_url": job.json_url,
-                        "path": (str(job.job_dir.relative_to(WORKSPACE_DIR)) + "/"),
+                        "video_location": job.video_location,
+                        "json_location": job.json_location,
+                        "test_name": job.test_name,
                     }
-                    for job in downloaded_jobs
-                ],
-                "failed_jobs": [
-                    {"video_url": job.video_url, "browsertime_json_url": job.json_url}
-                    for job in failed_jobs
+                    for job in failed_downloads
                 ],
             },
             f,
         )
 
-    tarfile = OUTPUT_DIR / "visual-metrics.tar.xz"
-    log.info("Creating the tarfile", tarfile=tarfile)
-    returncode, res = run_command(
-        log, ["tar", "cJf", str(tarfile), "-C", str(WORKSPACE_DIR), "."]
-    )
-    if returncode != 0:
-        raise Exception("Could not tar the results")
+    # If there's one failure along the way, we want to return > 0
+    # to trigger a red job in TC.
+    return len(failed_downloads) + failed_runs
 
 
 def download_inputs(log, raw_jobs):
@@ -234,14 +305,14 @@ def download_inputs(log, raw_jobs):
     for i, job in enumerate(raw_jobs):
         job_dir = WORKSPACE_JOBS_DIR / str(i)
         job_dir.mkdir(parents=True, exist_ok=True)
-
         pending_jobs.append(
             Job(
+                job["test_name"],
                 job_dir,
                 job_dir / "browsertime.json",
-                job["browsertime_json_url"],
+                job["json_location"],
                 job_dir / "video",
-                job["video_url"],
+                job["video_location"],
             )
         )
 
@@ -273,20 +344,21 @@ def download_job(log, job):
         attribute is updated to match the file path given by the video file
         in the ``browsertime.json`` file.
     """
-    log = log.bind(json_url=job.json_url)
+    fetch_dir = Path(os.getenv("MOZ_FETCHES_DIR"))
+    log = log.bind(json_location=job.json_location)
     try:
-        download(job.video_url, job.video_path)
-        download(job.json_url, job.json_path)
+        download_or_copy(fetch_dir / job.video_location, job.video_path)
+        download_or_copy(fetch_dir / job.json_location, job.json_path)
     except Exception as e:
         log.error(
             "Failed to download files for job: %s" % e,
-            video_url=job.video_url,
+            video_location=job.video_location,
             exc_info=True,
         )
         return job, False
 
     try:
-        with job.json_path.open("r") as f:
+        with job.json_path.open("r", encoding="utf-8") as f:
             browsertime_json = json.load(f)
     except OSError as e:
         log.error("Could not read browsertime.json: %s" % e)
@@ -307,6 +379,32 @@ def download_job(log, job):
     job.video_path = video_path
 
     return job, True
+
+
+def download_or_copy(url_or_location, path):
+    """Download the resource at the given URL or path to the local path.
+
+    Args:
+        url_or_location: The URL or path of the resource to download or copy.
+        path: The local path to download or copy the resource to.
+
+    Raises:
+        OSError:
+            Raised if an IO error occurs while writing the file.
+
+        requests.exceptions.HTTPError:
+            Raised when an HTTP error (including e.g., HTTP 404) occurs.
+    """
+    url_or_location = str(url_or_location)
+    if os.path.exists(url_or_location):
+        shutil.copyfile(url_or_location, str(path))
+        return
+    elif not url_or_location.startswith("http"):
+        raise IOError(
+            "%s does not seem to be an URL or an existing file" % url_or_location
+        )
+
+    download(url_or_location, path)
 
 
 def download(url, path):
@@ -357,16 +455,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+
     parser.add_argument(
-        "--jobs-json-path",
+        "--browsertime-results",
         type=Path,
         metavar="PATH",
-        help=(
-            "The path to the jobs.json file. If not present, the "
-            "VISUAL_METRICS_JOBS_JSON environment variable will be used "
-            "instead."
-        )
+        help="The path to the browsertime results tarball.",
+        required=True,
     )
+
     parser.add_argument(
         "visual_metrics_options",
         type=str,

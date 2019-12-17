@@ -677,14 +677,8 @@ class PanelList extends HTMLElement {
     let openingEvent = this.triggeringEvent;
     this.triggeringEvent = triggeringEvent;
     this.open = false;
-    // Since the previously focused element (which is inside the panel) is now
-    // hidden, move the focus back to the element that opened the panel if it
-    // was opened with the keyboard.
-    if (
-      openingEvent &&
-      openingEvent.target &&
-      openingEvent.mozInputSource === MouseEvent.MOZ_SOURCE_KEYBOARD
-    ) {
+    // Refocus the button that opened the menu if we have one.
+    if (openingEvent && openingEvent.target) {
       openingEvent.target.focus();
     }
   }
@@ -945,8 +939,6 @@ class PanelList extends HTMLElement {
   }
 
   async onShow() {
-    let { triggeringEvent } = this;
-
     this.sendEvent("showing");
     this.addHideListeners();
     await this.setAlign();
@@ -954,14 +946,9 @@ class PanelList extends HTMLElement {
     // Wait until the next paint for the alignment to be set and panel to be
     // visible.
     requestAnimationFrame(() => {
-      // Focus the first visible panel-item if we were opened with the keyboard.
-      if (
-        triggeringEvent &&
-        triggeringEvent.mozInputSource === MouseEvent.MOZ_SOURCE_KEYBOARD
-      ) {
-        this.focusWalker.currentNode = this;
-        this.focusWalker.nextNode();
-      }
+      // Focus the first focusable panel-item.
+      this.focusWalker.currentNode = this;
+      this.focusWalker.nextNode();
 
       this.sendEvent("shown");
     });
@@ -1283,6 +1270,9 @@ class AddonPageHeader extends HTMLElement {
       this.heading = this.querySelector(".header-name");
       this.searchLabel = this.querySelector(".search-label");
       this.backButton = this.querySelector(".back-button");
+      this.pageOptionsMenuButton = this.querySelector(
+        '[action="page-options"]'
+      );
       // The addon-page-options element is outside of this element since this is
       // position: sticky and that would break the positioning of the menu.
       this.pageOptionsMenu = document.getElementById(
@@ -1290,10 +1280,16 @@ class AddonPageHeader extends HTMLElement {
       );
     }
     this.addEventListener("click", this);
+    // Use capture since the event is actually triggered on the internal
+    // panel-list and it doesn't bubble.
+    this.pageOptionsMenu.addEventListener("shown", this, true);
+    this.pageOptionsMenu.addEventListener("hidden", this, true);
   }
 
   disconnectedCallback() {
     this.removeEventListener("click", this);
+    this.pageOptionsMenu.removeEventListener("shown", this, true);
+    this.pageOptionsMenu.removeEventListener("hidden", this, true);
   }
 
   setViewInfo({ type, param }) {
@@ -1309,20 +1305,16 @@ class AddonPageHeader extends HTMLElement {
       document.l10n.setAttributes(this.heading, `${viewType}-heading`);
     }
 
-    if (
-      viewType === "extension" ||
-      viewType === "theme" ||
-      viewType === "shortcuts"
-    ) {
-      let labelType = viewType === "shortcuts" ? "extension" : viewType;
-      document.l10n.setAttributes(
-        this.searchLabel,
-        `${labelType}-heading-search-label`
-      );
-    } else {
-      this.searchLabel.removeAttribute("data-l10n-id");
-      this.searchLabel.textContent = "";
-    }
+    let customSearchLabelTypes = {
+      shortcuts: "extension",
+      extension: "extension",
+      theme: "theme",
+    };
+    let searchLabelType = customSearchLabelTypes[viewType] || "default";
+    document.l10n.setAttributes(
+      this.searchLabel,
+      `${searchLabelType}-heading-search-label`
+    );
   }
 
   handleEvent(e) {
@@ -1336,6 +1328,11 @@ class AddonPageHeader extends HTMLElement {
           this.pageOptionsMenu.toggle(e);
           break;
       }
+    } else if (e.type == "shown" || e.type == "hidden") {
+      this.pageOptionsMenuButton.setAttribute(
+        "aria-expanded",
+        this.pageOptionsMenu.open
+      );
     }
   }
 }
@@ -1361,7 +1358,7 @@ class AddonUpdatesMessage extends HTMLElement {
     this.button = document.createElement("button");
     this.button.addEventListener("click", e => {
       if (e.button === 0) {
-        loadViewFn("updates/available", e);
+        loadViewFn("updates/available");
       }
     });
     this.button.hidden = true;
@@ -1412,6 +1409,10 @@ class AddonPageOptions extends HTMLElement {
     return this.panel.toggle(...args);
   }
 
+  get open() {
+    return this.panel.open;
+  }
+
   render() {
     this.appendChild(importTemplate("addon-page-options"));
     this.panel = this.querySelector("panel-list");
@@ -1442,7 +1443,7 @@ class AddonPageOptions extends HTMLElement {
         await this.checkForUpdates();
         break;
       case "view-recent-updates":
-        loadViewFn("updates/recent", e);
+        loadViewFn("updates/recent");
         break;
       case "install-from-file":
         if (XPINSTALL_ENABLED) {
@@ -1466,7 +1467,7 @@ class AddonPageOptions extends HTMLElement {
         await this.resetAutomaticUpdates();
         break;
       case "manage-shortcuts":
-        loadViewFn("shortcuts/shortcuts", e);
+        loadViewFn("shortcuts/shortcuts");
         break;
     }
   }
@@ -2503,7 +2504,7 @@ class AddonCard extends HTMLElement {
             openOptionsInTab(addon.optionsURL);
           } else if (getOptionsType(addon) == "inline") {
             this.recordActionEvent("preferences", "inline");
-            loadViewFn(`detail/${this.addon.id}/preferences`, e);
+            loadViewFn(`detail/${this.addon.id}/preferences`);
           }
           break;
         case "remove":
@@ -2530,7 +2531,7 @@ class AddonCard extends HTMLElement {
           }
           break;
         case "expand":
-          loadViewFn(`detail/${this.addon.id}`, e);
+          loadViewFn(`detail/${this.addon.id}`);
           break;
         case "more-options":
           // Open panel on click from the keyboard.
@@ -2556,7 +2557,7 @@ class AddonCard extends HTMLElement {
             !this.expanded &&
             (e.target === this.addonNameEl || !e.target.closest("a"))
           ) {
-            loadViewFn(`detail/${this.addon.id}`, e);
+            loadViewFn(`detail/${this.addon.id}`);
           } else if (
             e.target.localName == "a" &&
             e.target.getAttribute("data-telemetry-name")
@@ -2730,11 +2731,10 @@ class AddonCard extends HTMLElement {
     }
     name.title = `${addon.name} ${addon.version}`;
 
-    let toggleDisabledAction = addon.userDisabled ? "enable" : "disable";
-    let canToggleDisabled = hasPermission(addon, toggleDisabledAction);
     let toggleDisabledButton = card.querySelector('[action="toggle-disabled"]');
     if (toggleDisabledButton) {
-      toggleDisabledButton.hidden = !canToggleDisabled;
+      let toggleDisabledAction = addon.userDisabled ? "enable" : "disable";
+      toggleDisabledButton.hidden = !hasPermission(addon, toggleDisabledAction);
       if (addon.type === "theme") {
         document.l10n.setAttributes(
           toggleDisabledButton,
@@ -2742,10 +2742,6 @@ class AddonCard extends HTMLElement {
         );
       } else if (addon.type === "extension") {
         toggleDisabledButton.checked = !addon.userDisabled;
-        document.l10n.setAttributes(
-          toggleDisabledButton,
-          `${toggleDisabledAction}-addon-button-label`
-        );
       }
     }
 
@@ -2889,7 +2885,7 @@ class AddonCard extends HTMLElement {
 
     this.appendChild(this.card);
 
-    if (this.expanded && this.keyboardNavigation) {
+    if (this.expanded) {
       requestAnimationFrame(() => this.optionsButton.focus());
     }
 
@@ -3067,7 +3063,7 @@ class RecommendedAddonCard extends HTMLElement {
           action: "manage",
           addon: this.discoAddon,
         });
-        loadViewFn(`detail/${this.addonId}`, event);
+        loadViewFn(`detail/${this.addonId}`);
         break;
       default:
         if (event.target.matches(".disco-addon-author a[href]")) {
@@ -3955,12 +3951,11 @@ class ListView {
 }
 
 class DetailView {
-  constructor({ isKeyboardNavigation, param, root }) {
+  constructor({ param, root }) {
     let [id, selectedTab] = param.split("/");
     this.id = id;
     this.selectedTab = selectedTab;
     this.root = root;
-    this.isKeyboardNavigation = isKeyboardNavigation;
   }
 
   async render() {
@@ -3981,7 +3976,6 @@ class DetailView {
 
     card.setAddon(addon);
     card.expand();
-    card.keyboardNavigation = this.isKeyboardNavigation;
     await card.render();
     if (
       this.selectedTab === "preferences" &&
@@ -4123,7 +4117,7 @@ function initialize(opts) {
  * resolve once the view has been updated to conform with other about:addons
  * views.
  */
-async function show(type, param, { isKeyboardNavigation, historyEntryId }) {
+async function show(type, param, { historyEntryId }) {
   let container = document.createElement("div");
   container.setAttribute("current-view", type);
   addonPageHeader.setViewInfo({ type, param });
@@ -4131,7 +4125,6 @@ async function show(type, param, { isKeyboardNavigation, historyEntryId }) {
     await new ListView({ param, root: container }).render();
   } else if (type == "detail") {
     await new DetailView({
-      isKeyboardNavigation,
       param,
       root: container,
     }).render();

@@ -9,13 +9,11 @@
 #include <netinet/in.h>
 #include <linux/netlink.h>
 
-#include "nsINetworkLinkService.h"
 #include "nsIRunnable.h"
 #include "nsThreadUtils.h"
 #include "nsCOMPtr.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/TimeStamp.h"
-#include "nsITimer.h"
 #include "nsClassHashtable.h"
 #include "mozilla/SHA1.h"
 
@@ -39,6 +37,7 @@ class NetlinkServiceListener : public nsISupports {
   virtual void OnLinkUp() = 0;
   virtual void OnLinkDown() = 0;
   virtual void OnLinkStatusKnown() = 0;
+  virtual void OnDnsSuffixListUpdated() = 0;
 
  protected:
   virtual ~NetlinkServiceListener() = default;

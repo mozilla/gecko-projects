@@ -3583,18 +3583,21 @@ class LLambda : public LInstructionHelper<1, 1, 1> {
   const MLambda* mir() const { return mir_->toLambda(); }
 };
 
-class LLambdaArrow : public LInstructionHelper<1, 1 + BOX_PIECES, 0> {
+class LLambdaArrow : public LInstructionHelper<1, 1 + BOX_PIECES, 1> {
  public:
   LIR_HEADER(LambdaArrow)
 
   static const size_t NewTargetValue = 1;
 
-  LLambdaArrow(const LAllocation& envChain, const LBoxAllocation& newTarget)
+  LLambdaArrow(const LAllocation& envChain, const LBoxAllocation& newTarget,
+               const LDefinition& temp)
       : LInstructionHelper(classOpcode) {
     setOperand(0, envChain);
     setBoxOperand(NewTargetValue, newTarget);
+    setTemp(0, temp);
   }
   const LAllocation* environmentChain() { return getOperand(0); }
+  const LDefinition* temp() { return getTemp(0); }
   const MLambdaArrow* mir() const { return mir_->toLambdaArrow(); }
 };
 
@@ -3888,25 +3891,6 @@ class LTypedObjectElements : public LInstructionHelper<1, 1, 0> {
   const MTypedObjectElements* mir() const {
     return mir_->toTypedObjectElements();
   }
-};
-
-// Load a typed array's elements vector.
-class LSetTypedObjectOffset : public LInstructionHelper<0, 2, 2> {
- public:
-  LIR_HEADER(SetTypedObjectOffset)
-
-  LSetTypedObjectOffset(const LAllocation& object, const LAllocation& offset,
-                        const LDefinition& temp0, const LDefinition& temp1)
-      : LInstructionHelper(classOpcode) {
-    setOperand(0, object);
-    setOperand(1, offset);
-    setTemp(0, temp0);
-    setTemp(1, temp1);
-  }
-  const LAllocation* object() { return getOperand(0); }
-  const LAllocation* offset() { return getOperand(1); }
-  const LDefinition* temp0() { return getTemp(0); }
-  const LDefinition* temp1() { return getTemp(1); }
 };
 
 // Bailout if index >= length.
@@ -6088,6 +6072,32 @@ class LIsNullOrUndefined : public LInstructionHelper<1, BOX_PIECES, 0> {
   }
 
   MIsNullOrUndefined* mir() const { return mir_->toIsNullOrUndefined(); }
+};
+
+class LIsNullOrUndefinedAndBranch
+    : public LControlInstructionHelper<2, BOX_PIECES, 0> {
+  MIsNullOrUndefined* isNullOrUndefined_;
+
+ public:
+  LIR_HEADER(IsNullOrUndefinedAndBranch)
+  static const size_t Input = 0;
+
+  LIsNullOrUndefinedAndBranch(MIsNullOrUndefined* isNullOrUndefined,
+                              MBasicBlock* ifTrue, MBasicBlock* ifFalse,
+                              const LBoxAllocation& input)
+      : LControlInstructionHelper(classOpcode),
+        isNullOrUndefined_(isNullOrUndefined) {
+    setSuccessor(0, ifTrue);
+    setSuccessor(1, ifFalse);
+    setBoxOperand(Input, input);
+  }
+
+  MBasicBlock* ifTrue() const { return getSuccessor(0); }
+  MBasicBlock* ifFalse() const { return getSuccessor(1); }
+
+  MIsNullOrUndefined* isNullOrUndefinedMir() const {
+    return isNullOrUndefined_;
+  }
 };
 
 class LHasClass : public LInstructionHelper<1, 1, 0> {

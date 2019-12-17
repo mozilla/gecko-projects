@@ -117,6 +117,7 @@ dictionary CollectedClientData {
     required DOMString           type;
     required DOMString           challenge;
     required DOMString           origin;
+    boolean                      crossOrigin;
     TokenBinding                 tokenBinding;
 };
 
@@ -221,7 +222,7 @@ partial dictionary AuthenticationExtensionsClientInputs {
 };
 
 partial dictionary AuthenticationExtensionsClientOutputs {
-  Coordinates loc;
+  GeolocationCoordinates loc;
 };
 
 partial dictionary AuthenticationExtensionsClientInputs {

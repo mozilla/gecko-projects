@@ -8,7 +8,6 @@
 #define mozilla_dom_FetchDriver_h
 
 #include "nsIChannelEventSink.h"
-#include "nsICacheInfoChannel.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIStreamListener.h"
 #include "nsIThreadRetargetableStreamListener.h"
@@ -182,9 +181,10 @@ class FetchDriver final : public nsIStreamListener,
   // response.
   void FailWithNetworkError(nsresult rv);
 
-  void SetRequestHeaders(nsIHttpChannel* aChannel) const;
+  void SetRequestHeaders(nsIHttpChannel* aChannel,
+                         bool aStripRequestBodyHeader) const;
 
-  nsresult FinishOnStopRequest(AlternativeDataStreamListener* aAltDataListener);
+  void FinishOnStopRequest(AlternativeDataStreamListener* aAltDataListener);
 };
 
 }  // namespace dom

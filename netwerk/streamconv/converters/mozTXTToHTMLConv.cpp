@@ -10,7 +10,6 @@
 #include "nsUnicodeProperties.h"
 #include "nsCRT.h"
 #include "nsIExternalProtocolHandler.h"
-#include "nsIIOService.h"
 #include "nsIURI.h"
 
 #include <algorithm>
@@ -1215,6 +1214,12 @@ NS_IMETHODIMP
 mozTXTToHTMLConv::AsyncConvertData(const char* aFromType, const char* aToType,
                                    nsIStreamListener* aListener,
                                    nsISupports* aCtxt) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+mozTXTToHTMLConv::GetConvertedType(const nsACString& aFromType,
+                                   nsACString& aToType) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 

@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "jslibmath.h"
+#include "gc/Allocator.h"
 #include "jit/BaselineCacheIRCompiler.h"
 #include "jit/IonCacheIRCompiler.h"
 #include "jit/IonIC.h"
@@ -21,6 +22,7 @@
 #include "jit/SharedICRegisters.h"
 #include "proxy/Proxy.h"
 #include "vm/ArrayBufferObject.h"
+#include "vm/BigIntType.h"
 #include "vm/GeneratorObject.h"
 
 #include "builtin/Boolean-inl.h"
@@ -2008,22 +2010,6 @@ bool CacheIRCompiler::emitGuardMagicValue() {
   return true;
 }
 
-bool CacheIRCompiler::emitGuardNoDetachedTypedObjects() {
-  JitSpew(JitSpew_Codegen, __FUNCTION__);
-  FailurePath* failure;
-  if (!addFailurePath(&failure)) {
-    return false;
-  }
-
-  // All stubs manipulating typed objects must check the zone-wide flag
-  // indicating whether their underlying storage might be detached, to bail
-  // out if needed.
-  uint32_t* address = &cx_->zone()->detachedTypedObjects;
-  masm.branch32(Assembler::NotEqual, AbsoluteAddress(address), Imm32(0),
-                failure->label());
-  return true;
-}
-
 bool CacheIRCompiler::emitGuardNoDenseElements() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   Register obj = allocator.useRegister(masm, reader.objOperandId());
@@ -2766,67 +2752,67 @@ bool CacheIRCompiler::emitBigIntBinaryOperationShared() {
 bool CacheIRCompiler::emitBigIntAddResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntAdd>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::add>();
 }
 
 bool CacheIRCompiler::emitBigIntSubResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntSub>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::sub>();
 }
 
 bool CacheIRCompiler::emitBigIntMulResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntMul>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::mul>();
 }
 
 bool CacheIRCompiler::emitBigIntDivResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntDiv>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::div>();
 }
 
 bool CacheIRCompiler::emitBigIntModResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntMod>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::mod>();
 }
 
 bool CacheIRCompiler::emitBigIntPowResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntPow>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::pow>();
 }
 
 bool CacheIRCompiler::emitBigIntBitAndResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntBitAnd>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::bitAnd>();
 }
 
 bool CacheIRCompiler::emitBigIntBitOrResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntBitOr>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::bitOr>();
 }
 
 bool CacheIRCompiler::emitBigIntBitXorResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntBitXor>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::bitXor>();
 }
 
 bool CacheIRCompiler::emitBigIntLeftShiftResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntLeftShift>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::lsh>();
 }
 
 bool CacheIRCompiler::emitBigIntRightShiftResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt, HandleBigInt);
-  return emitBigIntBinaryOperationShared<Fn, jit::BigIntRightShift>();
+  return emitBigIntBinaryOperationShared<Fn, BigInt::rsh>();
 }
 
 template <typename Fn, Fn fn>
@@ -2845,25 +2831,25 @@ bool CacheIRCompiler::emitBigIntUnaryOperationShared() {
 bool CacheIRCompiler::emitBigIntNotResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt);
-  return emitBigIntUnaryOperationShared<Fn, jit::BigIntBitNot>();
+  return emitBigIntUnaryOperationShared<Fn, BigInt::bitNot>();
 }
 
 bool CacheIRCompiler::emitBigIntNegationResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt);
-  return emitBigIntUnaryOperationShared<Fn, jit::BigIntNeg>();
+  return emitBigIntUnaryOperationShared<Fn, BigInt::neg>();
 }
 
 bool CacheIRCompiler::emitBigIntIncResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt);
-  return emitBigIntUnaryOperationShared<Fn, jit::BigIntInc>();
+  return emitBigIntUnaryOperationShared<Fn, BigInt::inc>();
 }
 
 bool CacheIRCompiler::emitBigIntDecResult() {
   JitSpew(JitSpew_Codegen, __FUNCTION__);
   using Fn = BigInt* (*)(JSContext*, HandleBigInt);
-  return emitBigIntUnaryOperationShared<Fn, jit::BigIntDec>();
+  return emitBigIntUnaryOperationShared<Fn, BigInt::dec>();
 }
 
 bool CacheIRCompiler::emitTruncateDoubleToUInt32() {
@@ -2983,7 +2969,7 @@ bool CacheIRCompiler::emitLoadFunctionLengthResult() {
   masm.bind(&interpreted);
   // Load the length from the function's script.
   masm.loadPtr(Address(obj, JSFunction::offsetOfScript()), scratch);
-  masm.loadPtr(Address(scratch, JSScript::offsetOfScriptData()), scratch);
+  masm.loadPtr(Address(scratch, JSScript::offsetOfSharedData()), scratch);
   masm.loadPtr(Address(scratch, RuntimeScriptData::offsetOfISD()), scratch);
   masm.load16ZeroExtend(
       Address(scratch, ImmutableScriptData::offsetOfFunLength()), scratch);
@@ -4374,9 +4360,15 @@ bool CacheIRCompiler::emitCompareBigIntInt32ResultShared(
     masm.branch32(Assembler::LessThan, int32, Imm32(0), greaterThan);
     masm.jump(&doCompare);
 
+    // We rely on |neg32(INT32_MIN)| staying INT32_MIN, because we're using an
+    // unsigned comparison below.
     masm.bind(&isNegative);
     masm.branch32(Assembler::GreaterThanOrEqual, int32, Imm32(0), lessThan);
     masm.neg32(scratch2);
+
+    // Not all supported platforms (e.g. MIPS64) zero-extend 32-bit operations,
+    // so we need to explicitly clear any high 32-bits.
+    masm.move32ZeroExtendToPtr(scratch2, scratch2);
 
     // Reverse the relational comparator for negative numbers.
     // |-x < -y| <=> |+x > +y|.

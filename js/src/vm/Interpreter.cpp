@@ -31,6 +31,7 @@
 #include "jit/IonAnalysis.h"
 #include "jit/Jit.h"
 #include "js/CharacterEncoding.h"
+#include "util/CheckedArithmetic.h"
 #include "util/StringBuffer.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
@@ -275,13 +276,15 @@ static bool SetPropertyOperation(JSContext* cx, JSOp op, HandleValue lval,
 JSFunction* js::MakeDefaultConstructor(JSContext* cx, HandleScript script,
                                        jsbytecode* pc, HandleObject proto) {
   JSOp op = JSOp(*pc);
-  JSAtom* atom = script->getAtom(pc);
   bool derived = op == JSOP_DERIVEDCONSTRUCTOR;
   MOZ_ASSERT(derived == !!proto);
 
-  jssrcnote* classNote = GetSrcNote(cx, script, pc);
-  MOZ_ASSERT(classNote && SN_TYPE(classNote) == SRC_CLASS_SPAN);
+  uint32_t atomIndex = 0;
+  uint32_t classStartOffset = 0, classEndOffset = 0;
+  GetClassConstructorOperands(pc, &atomIndex, &classStartOffset,
+                              &classEndOffset);
 
+  JSAtom* atom = script->getAtom(atomIndex);
   PropertyName* lookup = derived ? cx->names().DefaultDerivedClassConstructor
                                  : cx->names().DefaultBaseClassConstructor;
 
@@ -313,8 +316,6 @@ JSFunction* js::MakeDefaultConstructor(JSContext* cx, HandleScript script,
   // Override the source span needs for toString. Calling toString on a class
   // constructor should return the class declaration, not the source for the
   // (self-hosted) constructor function.
-  uint32_t classStartOffset = GetSrcNoteOffset(classNote, 0);
-  uint32_t classEndOffset = GetSrcNoteOffset(classNote, 1);
   unsigned column;
   unsigned line = PCToLineNumber(script, pc, &column);
   ctorScript->setDefaultClassConstructorSpan(
@@ -1191,9 +1192,7 @@ static HandleErrorContinuation ProcessTryNotes(JSContext* cx,
 
       case JSTRY_FOR_IN: {
         /* This is similar to JSOP_ENDITER in the interpreter loop. */
-        DebugOnly<jsbytecode*> pc =
-            regs.fp()->script()->offsetToPC(tn->start + tn->length);
-        MOZ_ASSERT(JSOp(*pc) == JSOP_ENDITER);
+        MOZ_ASSERT(tn->stackDepth <= regs.stackDepth());
         Value* sp = regs.spForStackDepth(tn->stackDepth);
         JSObject* obj = &sp[-1].toObject();
         CloseIterator(obj);
@@ -1471,7 +1470,7 @@ static MOZ_ALWAYS_INLINE bool AddOperation(JSContext* cx,
   }
 
   if (lhs.isBigInt() || rhs.isBigInt()) {
-    return BigInt::add(cx, lhs, rhs, res);
+    return BigInt::addValue(cx, lhs, rhs, res);
   }
 
   res.setNumber(lhs.toNumber() + rhs.toNumber());
@@ -1487,7 +1486,7 @@ static MOZ_ALWAYS_INLINE bool SubOperation(JSContext* cx,
   }
 
   if (lhs.isBigInt() || rhs.isBigInt()) {
-    return BigInt::sub(cx, lhs, rhs, res);
+    return BigInt::subValue(cx, lhs, rhs, res);
   }
 
   res.setNumber(lhs.toNumber() - rhs.toNumber());
@@ -1503,7 +1502,7 @@ static MOZ_ALWAYS_INLINE bool MulOperation(JSContext* cx,
   }
 
   if (lhs.isBigInt() || rhs.isBigInt()) {
-    return BigInt::mul(cx, lhs, rhs, res);
+    return BigInt::mulValue(cx, lhs, rhs, res);
   }
 
   res.setNumber(lhs.toNumber() * rhs.toNumber());
@@ -1519,7 +1518,7 @@ static MOZ_ALWAYS_INLINE bool DivOperation(JSContext* cx,
   }
 
   if (lhs.isBigInt() || rhs.isBigInt()) {
-    return BigInt::div(cx, lhs, rhs, res);
+    return BigInt::divValue(cx, lhs, rhs, res);
   }
 
   res.setNumber(NumberDiv(lhs.toNumber(), rhs.toNumber()));
@@ -1543,7 +1542,7 @@ static MOZ_ALWAYS_INLINE bool ModOperation(JSContext* cx,
   }
 
   if (lhs.isBigInt() || rhs.isBigInt()) {
-    return BigInt::mod(cx, lhs, rhs, res);
+    return BigInt::modValue(cx, lhs, rhs, res);
   }
 
   res.setNumber(NumberMod(lhs.toNumber(), rhs.toNumber()));
@@ -1559,7 +1558,7 @@ static MOZ_ALWAYS_INLINE bool PowOperation(JSContext* cx,
   }
 
   if (lhs.isBigInt() || rhs.isBigInt()) {
-    return BigInt::pow(cx, lhs, rhs, res);
+    return BigInt::powValue(cx, lhs, rhs, res);
   }
 
   res.setNumber(ecmaPow(lhs.toNumber(), rhs.toNumber()));
@@ -1980,20 +1979,20 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     CASE(JSOP_UNUSED106)
     CASE(JSOP_UNUSED120)
     CASE(JSOP_UNUSED149)
+    CASE(JSOP_UNUSED227)
     CASE(JSOP_TRY) {
       MOZ_ASSERT(CodeSpec[*REGS.pc].length == 1);
       ADVANCE_AND_DISPATCH(1);
     }
 
-    CASE(JSOP_JUMPTARGET)
-    CASE(JSOP_LOOPHEAD) {
-      MOZ_ASSERT(CodeSpec[*REGS.pc].length == JSOP_JUMPTARGET_LENGTH);
+    CASE(JSOP_JUMPTARGET) {
       COUNT_COVERAGE();
       ADVANCE_AND_DISPATCH(JSOP_JUMPTARGET_LENGTH);
     }
 
-    CASE(JSOP_LOOPENTRY) {
+    CASE(JSOP_LOOPHEAD) {
       COUNT_COVERAGE();
+
       // Attempt on-stack replacement into the Baseline Interpreter.
       if (jit::IsBaselineInterpreterEnabled()) {
         script->incWarmUpCounter();
@@ -2037,7 +2036,7 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
         mozilla::recordreplay::AdvanceExecutionProgressCounter();
       }
     }
-    END_CASE(JSOP_LOOPENTRY)
+    END_CASE(JSOP_LOOPHEAD)
 
     CASE(JSOP_LINENO)
     END_CASE(JSOP_LINENO)
@@ -2290,9 +2289,9 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     END_CASE(JSOP_ISNOITER)
 
     CASE(JSOP_ENDITER) {
-      MOZ_ASSERT(REGS.stackDepth() >= 1);
-      CloseIterator(&REGS.sp[-1].toObject());
-      REGS.sp--;
+      MOZ_ASSERT(REGS.stackDepth() >= 2);
+      CloseIterator(&REGS.sp[-2].toObject());
+      REGS.sp -= 2;
     }
     END_CASE(JSOP_ENDITER)
 
@@ -3795,7 +3794,8 @@ static MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER bool Interpret(JSContext* cx,
     }
     END_CASE(JSOP_NEWARRAY_COPYONWRITE)
 
-    CASE(JSOP_NEWOBJECT) {
+    CASE(JSOP_NEWOBJECT)
+    CASE(JSOP_NEWOBJECT_WITHGROUP) {
       JSObject* obj = NewObjectOperation(cx, script, REGS.pc);
       if (!obj) {
         goto error;
@@ -4883,19 +4883,6 @@ bool js::SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
   return SetObjectElementOperation(cx, obj, id, value, receiver, strict);
 }
 
-bool js::SetObjectElement(JSContext* cx, HandleObject obj, HandleValue index,
-                          HandleValue value, bool strict, HandleScript script,
-                          jsbytecode* pc) {
-  MOZ_ASSERT(pc);
-  RootedId id(cx);
-  if (!ToPropertyKey(cx, index, &id)) {
-    return false;
-  }
-  RootedValue receiver(cx, ObjectValue(*obj));
-  return SetObjectElementOperation(cx, obj, id, value, receiver, strict, script,
-                                   pc);
-}
-
 bool js::SetObjectElementWithReceiver(JSContext* cx, HandleObject obj,
                                       HandleValue index, HandleValue value,
                                       HandleValue receiver, bool strict) {
@@ -5195,9 +5182,29 @@ JSObject* js::NewObjectOperation(JSContext* cx, HandleScript script,
                                  jsbytecode* pc,
                                  NewObjectKind newKind /* = GenericObject */) {
   MOZ_ASSERT(newKind != SingletonObject);
+  bool withTemplate =
+      (*pc == JSOP_NEWOBJECT || *pc == JSOP_NEWOBJECT_WITHGROUP);
+  bool withTemplateGroup = (*pc == JSOP_NEWOBJECT_WITHGROUP);
 
   RootedObjectGroup group(cx);
-  if (ObjectGroup::useSingletonForAllocationSite(script, pc, JSProto_Object)) {
+  RootedPlainObject baseObject(cx);
+
+  // Extract the template object, if one exists.
+  if (withTemplate) {
+    baseObject = &script->getObject(pc)->as<PlainObject>();
+  }
+
+  // Choose the group. Three cases:
+  // - JSOP_NEWOBJECT_WITHGROUP explicitly indicates that we should use the
+  //   same group as the template object's group.
+  // - otherwise, if some heuristics indicate that we should use a singleton,
+  //   we set the allocation-kind to ensure this.
+  // - otherwise, we look up a group based on the allocation site, i.e., the
+  //   (script, pc) tuple.
+  if (withTemplateGroup) {
+    group = baseObject->getGroup(cx, baseObject);
+  } else if (ObjectGroup::useSingletonForAllocationSite(script, pc,
+                                                        JSProto_Object)) {
     newKind = SingletonObject;
   } else {
     group = ObjectGroup::allocationSiteGroup(cx, script, pc, JSProto_Object);
@@ -5220,8 +5227,8 @@ JSObject* js::NewObjectOperation(JSContext* cx, HandleScript script,
 
   RootedPlainObject obj(cx);
 
-  if (*pc == JSOP_NEWOBJECT) {
-    RootedPlainObject baseObject(cx, &script->getObject(pc)->as<PlainObject>());
+  // Actually allocate the object.
+  if (withTemplate) {
     obj = CopyInitializerObject(cx, baseObject, newKind);
   } else {
     MOZ_ASSERT(*pc == JSOP_NEWINIT);
@@ -5237,10 +5244,12 @@ JSObject* js::NewObjectOperation(JSContext* cx, HandleScript script,
   } else {
     obj->setGroup(group);
 
-    AutoSweepObjectGroup sweep(group);
-    if (PreliminaryObjectArray* preliminaryObjects =
-            group->maybePreliminaryObjects(sweep)) {
-      preliminaryObjects->registerNewObject(obj);
+    if (!withTemplateGroup) {
+      AutoSweepObjectGroup sweep(group);
+      if (PreliminaryObjectArray* preliminaryObjects =
+              group->maybePreliminaryObjects(sweep)) {
+        preliminaryObjects->registerNewObject(obj);
+      }
     }
   }
 

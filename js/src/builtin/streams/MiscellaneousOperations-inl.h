@@ -15,13 +15,13 @@
 #include "mozilla/Attributes.h"  // MOZ_MUST_USE
 
 #include "builtin/Promise.h"  // js::PromiseObject
-#include "js/Promise.h"      // JS::{Resolve,Reject}Promise
-#include "js/RootingAPI.h"   // JS::Rooted, JS::{,Mutable}Handle
-#include "js/Value.h"        // JS::UndefinedHandleValue, JS::Value
-#include "vm/Compartment.h"  // JS::Compartment
-#include "vm/Interpreter.h"  // js::Call
-#include "vm/JSContext.h"    // JSContext
-#include "vm/JSObject.h"     // JSObject
+#include "js/Promise.h"       // JS::{Resolve,Reject}Promise
+#include "js/RootingAPI.h"    // JS::Rooted, JS::{,Mutable}Handle
+#include "js/Value.h"         // JS::UndefinedHandleValue, JS::Value
+#include "vm/Compartment.h"   // JS::Compartment
+#include "vm/Interpreter.h"   // js::Call
+#include "vm/JSContext.h"     // JSContext
+#include "vm/JSObject.h"      // JSObject
 
 #include "vm/Compartment-inl.h"  // JS::Compartment::wrap
 #include "vm/JSContext-inl.h"    // JSContext::check
@@ -108,6 +108,16 @@ inline MOZ_MUST_USE bool RejectUnwrappedPromiseWithError(
     JSContext* cx, JSObject* unwrappedPromise, JS::Handle<JS::Value> error) {
   JS::Rooted<JSObject*> promise(cx, unwrappedPromise);
   return RejectUnwrappedPromiseWithError(cx, &promise, error);
+}
+
+/**
+ * Sets Promise.[[PromiseIsHandled]] to true and removes rejection from
+ * the list of unhandled rejected promise.
+ */
+inline void SetPromiseIsHandled(JSContext* cx,
+                                JS::Handle<PromiseObject*> promise) {
+  promise->setHandled();
+  cx->runtime()->removeUnhandledRejectedPromise(cx, promise);
 }
 
 }  // namespace js

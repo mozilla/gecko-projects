@@ -1260,12 +1260,12 @@ impl LonghandId {
             LonghandId::Stroke |
             LonghandId::CaretColor |
             % endif
-            % if engine in ["gecko", "servo-2013"]:
             LonghandId::BackgroundColor |
             LonghandId::BorderTopColor |
             LonghandId::BorderRightColor |
             LonghandId::BorderBottomColor |
             LonghandId::BorderLeftColor |
+            % if engine in ["gecko", "servo-2013"]:
             LonghandId::OutlineColor |
             % endif
             LonghandId::Color
@@ -1315,14 +1315,12 @@ impl LonghandId {
             LonghandId::MozScriptLevel |
             % endif
 
-            % if engine in ["gecko", "servo-2013"]:
             // Needed to compute the first available font, in order to
             // compute font-relative units correctly.
             LonghandId::FontSize |
             LonghandId::FontWeight |
             LonghandId::FontStretch |
             LonghandId::FontStyle |
-            % endif
             LonghandId::FontFamily |
 
             // Needed to properly compute the writing mode, to resolve logical
@@ -1815,8 +1813,8 @@ pub enum CountedUnknownProperty {
 }
 
 impl CountedUnknownProperty {
-    /// Parse the counted unknown property.
-    pub fn parse_for_test(property_name: &str) -> Option<Self> {
+    /// Parse the counted unknown property, for testing purposes only.
+    pub fn parse_for_testing(property_name: &str) -> Option<Self> {
         ascii_case_insensitive_phf_map! {
             unknown_id -> CountedUnknownProperty = {
                 % for property in data.counted_unknown_properties:
@@ -1828,6 +1826,7 @@ impl CountedUnknownProperty {
     }
 
     /// Returns the underlying index, used for use counter.
+    #[inline]
     pub fn bit(self) -> usize {
         self as usize
     }
@@ -1844,9 +1843,16 @@ impl PropertyId {
         })
     }
 
-    /// Returns a given property from the string `s`.
+    /// Returns a given property from the given name, _regardless of whether it
+    /// is enabled or not_, or Err(()) for unknown properties.
     ///
-    /// Returns Err(()) for unknown properties.
+    /// Do not use for non-testing purposes.
+    pub fn parse_unchecked_for_testing(name: &str) -> Result<Self, ()> {
+        Self::parse_unchecked(name, None)
+    }
+
+    /// Returns a given property from the given name, _regardless of whether it
+    /// is enabled or not_, or Err(()) for unknown properties.
     fn parse_unchecked(
         property_name: &str,
         use_counters: Option< &UseCounters>,
@@ -2584,8 +2590,10 @@ pub mod style_structs {
         /// The ${style_struct.name} style struct.
         pub struct ${style_struct.name} {
             % for longhand in style_struct.longhands:
-                /// The ${longhand.name} computed value.
-                pub ${longhand.ident}: longhands::${longhand.ident}::computed_value::T,
+                % if not longhand.logical:
+                    /// The ${longhand.name} computed value.
+                    pub ${longhand.ident}: longhands::${longhand.ident}::computed_value::T,
+                % endif
             % endfor
             % if style_struct.name == "InheritedText":
                 /// The "used" text-decorations that apply to this box.
@@ -3113,59 +3121,59 @@ impl ComputedValuesInner {
 
     /// Get the logical computed inline size.
     #[inline]
-    pub fn content_inline_size(&self) -> computed::Size {
+    pub fn content_inline_size(&self) -> &computed::Size {
         let position_style = self.get_position();
         if self.writing_mode.is_vertical() {
-            position_style.height
+            &position_style.height
         } else {
-            position_style.width
+            &position_style.width
         }
     }
 
     /// Get the logical computed block size.
     #[inline]
-    pub fn content_block_size(&self) -> computed::Size {
+    pub fn content_block_size(&self) -> &computed::Size {
         let position_style = self.get_position();
-        if self.writing_mode.is_vertical() { position_style.width } else { position_style.height }
+        if self.writing_mode.is_vertical() { &position_style.width } else { &position_style.height }
     }
 
     /// Get the logical computed min inline size.
     #[inline]
-    pub fn min_inline_size(&self) -> computed::Size {
+    pub fn min_inline_size(&self) -> &computed::Size {
         let position_style = self.get_position();
-        if self.writing_mode.is_vertical() { position_style.min_height } else { position_style.min_width }
+        if self.writing_mode.is_vertical() { &position_style.min_height } else { &position_style.min_width }
     }
 
     /// Get the logical computed min block size.
     #[inline]
-    pub fn min_block_size(&self) -> computed::Size {
+    pub fn min_block_size(&self) -> &computed::Size {
         let position_style = self.get_position();
-        if self.writing_mode.is_vertical() { position_style.min_width } else { position_style.min_height }
+        if self.writing_mode.is_vertical() { &position_style.min_width } else { &position_style.min_height }
     }
 
     /// Get the logical computed max inline size.
     #[inline]
-    pub fn max_inline_size(&self) -> computed::MaxSize {
+    pub fn max_inline_size(&self) -> &computed::MaxSize {
         let position_style = self.get_position();
-        if self.writing_mode.is_vertical() { position_style.max_height } else { position_style.max_width }
+        if self.writing_mode.is_vertical() { &position_style.max_height } else { &position_style.max_width }
     }
 
     /// Get the logical computed max block size.
     #[inline]
-    pub fn max_block_size(&self) -> computed::MaxSize {
+    pub fn max_block_size(&self) -> &computed::MaxSize {
         let position_style = self.get_position();
-        if self.writing_mode.is_vertical() { position_style.max_width } else { position_style.max_height }
+        if self.writing_mode.is_vertical() { &position_style.max_width } else { &position_style.max_height }
     }
 
     /// Get the logical computed padding for this writing mode.
     #[inline]
-    pub fn logical_padding(&self) -> LogicalMargin<computed::LengthPercentage> {
+    pub fn logical_padding(&self) -> LogicalMargin<<&computed::LengthPercentage> {
         let padding_style = self.get_padding();
         LogicalMargin::from_physical(self.writing_mode, SideOffsets2D::new(
-            padding_style.padding_top.0,
-            padding_style.padding_right.0,
-            padding_style.padding_bottom.0,
-            padding_style.padding_left.0,
+            &padding_style.padding_top.0,
+            &padding_style.padding_right.0,
+            &padding_style.padding_bottom.0,
+            &padding_style.padding_left.0,
         ))
     }
 
@@ -3189,26 +3197,26 @@ impl ComputedValuesInner {
 
     /// Gets the logical computed margin from this style.
     #[inline]
-    pub fn logical_margin(&self) -> LogicalMargin<computed::LengthPercentageOrAuto> {
+    pub fn logical_margin(&self) -> LogicalMargin<<&computed::LengthPercentageOrAuto> {
         let margin_style = self.get_margin();
         LogicalMargin::from_physical(self.writing_mode, SideOffsets2D::new(
-            margin_style.margin_top,
-            margin_style.margin_right,
-            margin_style.margin_bottom,
-            margin_style.margin_left,
+            &margin_style.margin_top,
+            &margin_style.margin_right,
+            &margin_style.margin_bottom,
+            &margin_style.margin_left,
         ))
     }
 
     /// Gets the logical position from this style.
     #[inline]
-    pub fn logical_position(&self) -> LogicalMargin<computed::LengthPercentageOrAuto> {
+    pub fn logical_position(&self) -> LogicalMargin<<&computed::LengthPercentageOrAuto> {
         // FIXME(SimonSapin): should be the writing mode of the containing block, maybe?
         let position_style = self.get_position();
         LogicalMargin::from_physical(self.writing_mode, SideOffsets2D::new(
-            position_style.top,
-            position_style.right,
-            position_style.bottom,
-            position_style.left,
+            &position_style.top,
+            &position_style.right,
+            &position_style.bottom,
+            &position_style.left,
         ))
     }
 
@@ -3830,7 +3838,9 @@ mod lazy_static_module {
                 % for style_struct in data.active_style_structs():
                     ${style_struct.ident}: Arc::new(style_structs::${style_struct.name} {
                         % for longhand in style_struct.longhands:
-                            ${longhand.ident}: longhands::${longhand.ident}::get_initial_value(),
+                            % if not longhand.logical:
+                                ${longhand.ident}: longhands::${longhand.ident}::get_initial_value(),
+                            % endif
                         % endfor
                         % if style_struct.name == "InheritedText":
                             text_decorations_in_effect:

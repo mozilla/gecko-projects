@@ -4,7 +4,9 @@
 
 #include "ImageDecoderSupport.h"
 
+#include "imgINotificationObserver.h"
 #include "imgITools.h"
+#include "imgINotificationObserver.h"
 #include "gfxUtils.h"
 #include "AndroidGraphics.h"
 #include "JavaExceptions.h"
@@ -18,9 +20,8 @@ namespace {
 
 class ImageCallbackHelper;
 
-HashSet<RefPtr<ImageCallbackHelper>,
-      PointerHasher<ImageCallbackHelper*>>
-  gDecodeRequests;
+HashSet<RefPtr<ImageCallbackHelper>, PointerHasher<ImageCallbackHelper*>>
+    gDecodeRequests;
 
 class ImageCallbackHelper : public imgIContainerCallback,
                             public imgINotificationObserver {
@@ -28,12 +29,14 @@ class ImageCallbackHelper : public imgIContainerCallback,
   NS_DECL_ISUPPORTS
 
   void CompleteExceptionally(const char* aMessage) {
-    mResult->CompleteExceptionally(java::sdk::IllegalArgumentException::New(aMessage)
-        .Cast<jni::Throwable>());
+    mResult->CompleteExceptionally(
+        java::sdk::IllegalArgumentException::New(aMessage)
+            .Cast<jni::Throwable>());
     gDecodeRequests.remove(this);
   }
 
-  void Complete(DataSourceSurface::ScopedMap& aSourceSurface, int32_t width, int32_t height) {
+  void Complete(DataSourceSurface::ScopedMap& aSourceSurface, int32_t width,
+                int32_t height) {
     auto pixels = mozilla::jni::ByteBuffer::New(
         reinterpret_cast<int8_t*>(aSourceSurface.GetData()),
         aSourceSurface.GetStride() * height);

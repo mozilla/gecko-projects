@@ -15,7 +15,6 @@
 #include "nsUnicodeScriptCodes.h"
 
 #include "gfxTypes.h"
-#include "gfxFontFamilyList.h"
 #include "gfxBlur.h"
 #include "gfxSkipChars.h"
 #include "nsRect.h"
@@ -44,6 +43,7 @@ class gfxTextPerfMetrics;
 typedef struct FT_LibraryRec_* FT_Library;
 
 namespace mozilla {
+class FontFamilyList;
 namespace layers {
 class FrameStats;
 }
@@ -204,6 +204,8 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   static bool IsHeadless();
 
   static bool UseWebRender();
+
+  static bool CanMigrateMacGPUs();
 
   /**
    * Create an offscreen surface of the given dimensions
@@ -897,6 +899,9 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   void InitGPUProcessPrefs();
   virtual void InitPlatformGPUProcessPrefs() {}
   void InitOMTPConfig();
+
+  // Gather telemetry data about the Gfx Platform and send it
+  static void ReportTelemetry();
 
   static bool IsDXInterop2Blocked();
   static bool IsDXNV12Blocked();

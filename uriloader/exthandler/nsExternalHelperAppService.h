@@ -19,20 +19,16 @@
 #include "nsINamed.h"
 #include "nsIStreamListener.h"
 #include "nsIFile.h"
-#include "nsIFileStreams.h"
-#include "nsIOutputStream.h"
 #include "nsString.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIChannel.h"
 #include "nsIBackgroundFileSaver.h"
 
-#include "nsIHandlerService.h"
 #include "nsCOMPtr.h"
 #include "nsIObserver.h"
 #include "nsCOMArray.h"
 #include "nsWeakReference.h"
-#include "nsIPrompt.h"
 #include "nsAutoPtr.h"
 #include "mozilla/Attributes.h"
 
@@ -44,6 +40,8 @@ class MaybeCloseWindowHelper;
 /**
  * The helper app service. Responsible for handling content that Mozilla
  * itself can not handle
+ * Note that this is an abstract class - we depend on appropriate subclassing
+ * on a per-OS basis to implement some methods.
  */
 class nsExternalHelperAppService : public nsIExternalHelperAppService,
                                    public nsPIExternalAppLauncher,
@@ -55,7 +53,6 @@ class nsExternalHelperAppService : public nsIExternalHelperAppService,
   NS_DECL_ISUPPORTS
   NS_DECL_NSIEXTERNALHELPERAPPSERVICE
   NS_DECL_NSPIEXTERNALAPPLAUNCHER
-  NS_DECL_NSIEXTERNALPROTOCOLSERVICE
   NS_DECL_NSIMIMESERVICE
   NS_DECL_NSIOBSERVER
 
@@ -66,6 +63,21 @@ class nsExternalHelperAppService : public nsIExternalHelperAppService,
    * this service is first instantiated.
    */
   MOZ_MUST_USE nsresult Init();
+
+  /**
+   * nsIExternalProtocolService methods that we provide in this class. Other
+   * methods should be implemented by per-OS subclasses.
+   */
+  NS_IMETHOD ExternalProtocolHandlerExists(const char* aProtocolScheme,
+                                           bool* aHandlerExists) override;
+  NS_IMETHOD IsExposedProtocol(const char* aProtocolScheme,
+                               bool* aResult) override;
+  NS_IMETHOD GetProtocolHandlerInfo(const nsACString& aScheme,
+                                    nsIHandlerInfo** aHandlerInfo) override;
+  NS_IMETHOD LoadURI(nsIURI* aURI,
+                     nsIInterfaceRequestor* aWindowContext) override;
+  NS_IMETHOD SetProtocolHandlerDefaults(nsIHandlerInfo* aHandlerInfo,
+                                        bool aOSHandlerExists) override;
 
   /**
    * Given a string identifying an application, create an nsIFile representing

@@ -82,7 +82,7 @@ def get_binary():
 @pytest.fixture
 def create_args():
     args = Namespace(app='firefox',
-                     test='raptor-tp6-1',
+                     test='raptor-tp6-unittest',
                      binary='path/to/binary',
                      gecko_profile=False,
                      debug_mode=False,
@@ -90,7 +90,9 @@ def create_args():
                      page_timeout=None,
                      test_url_params=None,
                      host=None,
-                     run_local=True)
+                     run_local=True,
+                     browsertime=True,
+                     cold=False)
 
     def inner(**kwargs):
         for next_arg in kwargs:

@@ -26,14 +26,11 @@
 #include "nsAtom.h"
 #include "nsQueryObject.h"
 #include "nsIContentInlines.h"
-#include "nsIContentViewer.h"
 #include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/Document.h"
-#include "nsIDocumentEncoder.h"
 #include "nsMappedAttributes.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsPIDOMWindow.h"
-#include "nsIURL.h"
 #include "nsEscape.h"
 #include "nsIFrameInlines.h"
 #include "nsIScrollableFrame.h"
@@ -42,7 +39,6 @@
 #include "nsIWidget.h"
 #include "nsRange.h"
 #include "nsPresContext.h"
-#include "nsIDocShell.h"
 #include "nsNameSpaceManager.h"
 #include "nsError.h"
 #include "nsIPrincipal.h"
@@ -566,8 +562,7 @@ nsresult nsGenericHTMLElement::AfterSetAttr(
     if (IsEventAttributeName(aName) && aValue) {
       MOZ_ASSERT(aValue->Type() == nsAttrValue::eString,
                  "Expected string value for script body");
-      nsresult rv = SetEventHandler(aName, aValue->GetStringValue());
-      NS_ENSURE_SUCCESS(rv, rv);
+      SetEventHandler(aName, aValue->GetStringValue());
     } else if (aNotify && aName == nsGkAtoms::spellcheck) {
       SyncEditorsOnSubtree(this);
     } else if (aName == nsGkAtoms::dir) {
@@ -2828,8 +2823,8 @@ already_AddRefed<ElementInternals> nsGenericHTMLElement::AttachInternals(
     // Fallback to use LookupCustomElementDefinition to find its definition.
     if (!definition) {
       definition = nsContentUtils::LookupCustomElementDefinition(
-          NodeInfo()->GetDocument(), nameAtom,
-          NodeInfo()->NamespaceID(), ceData->GetCustomElementType());
+          NodeInfo()->GetDocument(), nameAtom, NodeInfo()->NamespaceID(),
+          ceData->GetCustomElementType());
     }
   }
 

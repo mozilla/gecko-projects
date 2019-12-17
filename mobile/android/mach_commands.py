@@ -268,7 +268,7 @@ REMOVED/DEPRECATED: Use 'mach lint --linter android-checkstyle'.""")
         # Extract new javadoc to specified directory inside repo.
         src_tar = mozpath.join(self.topobjdir, 'gradle', 'build', 'mobile', 'android',
                                'geckoview', 'libs', 'geckoview-javadoc.jar')
-        dst_path = mozpath.join(repo_path, javadoc_path)
+        dst_path = mozpath.join(repo_path, javadoc_path.format(**fmt))
         mozfile.remove(dst_path)
         mozfile.extract_zip(src_tar, dst_path)
 
@@ -365,9 +365,14 @@ class AndroidEmulatorCommands(MachCommandBase):
              conditions=[],
              description='Run the Android emulator with an AVD from test automation.')
     @CommandArgument('--version', metavar='VERSION',
-                     choices=['4.3', 'x86', 'x86-7.0'],
-                     help='Specify Android version to run in emulator. '
-                     'One of "4.3", "x86", or "x86-7.0".')
+                     choices=['arm-4.3', 'x86-4.2', 'x86-7.0'],
+                     help='Specify which AVD to run in emulator. '
+                     'One of "arm-4.3" (Android 4.3 supporting armv7 binaries), '
+                     '"x86-4.2" (Android 4.2 supporting x86 binaries), or '
+                     '"x86-7.0" (Android 7.0 supporting x86 or x86_64 binaries, '
+                     'recommended for most applications). '
+                     'By default, "arm-4.3" will be used if the current build environment '
+                     'architecture is arm; otherwise "x86-7.0".')
     @CommandArgument('--wait', action='store_true',
                      help='Wait for emulator to be closed.')
     @CommandArgument('--force-update', action='store_true',

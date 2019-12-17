@@ -938,10 +938,10 @@ WasmToken WasmTokenStream::next() {
         return WasmToken(WasmToken::Align, begin, cur_);
       }
       if (consume(u"anyfunc")) {
-        return WasmToken(WasmToken::ValueType, ValType::FuncRef, begin, cur_);
+        return WasmToken(WasmToken::ValueType, RefType::func(), begin, cur_);
       }
       if (consume(u"anyref")) {
-        return WasmToken(WasmToken::ValueType, ValType::AnyRef, begin, cur_);
+        return WasmToken(WasmToken::ValueType, RefType::any(), begin, cur_);
       }
       if (consume(u"atomic.")) {
         if (consume(u"wake") || consume(u"notify")) {
@@ -1023,7 +1023,7 @@ WasmToken WasmTokenStream::next() {
       }
 
       if (consume(u"funcref")) {
-        return WasmToken(WasmToken::ValueType, ValType::FuncRef, begin, cur_);
+        return WasmToken(WasmToken::ValueType, RefType::func(), begin, cur_);
       }
 
       if (consume(u"func")) {
@@ -2160,6 +2160,9 @@ WasmToken WasmTokenStream::next() {
       if (consume(u"nop")) {
         return WasmToken(WasmToken::Nop, begin, cur_);
       }
+      if (consume(u"nullref")) {
+        return WasmToken(WasmToken::ValueType, RefType::null(), begin, cur_);
+      }
       break;
 
     case 'o':
@@ -2991,7 +2994,7 @@ static AstConst* ParseFloatLiteral(WasmParseContext& c, WasmToken token) {
 
 static AstConst* ParseConst(WasmParseContext& c, WasmToken constToken) {
   WasmToken val = c.ts.get();
-  switch (constToken.valueType().code()) {
+  switch (constToken.valueType().kind()) {
     case ValType::I32: {
       switch (val.kind()) {
         case WasmToken::Index:
@@ -4712,18 +4715,22 @@ static bool ParseGlobalType(WasmParseContext& c, AstValType* type,
 static bool ParseElemType(WasmParseContext& c, TableKind* tableKind) {
   WasmToken token;
   if (c.ts.getIf(WasmToken::ValueType, &token)) {
-    if (token.valueType() == ValType::FuncRef) {
+    if (token.valueType() == RefType::func()) {
       *tableKind = TableKind::FuncRef;
       return true;
     }
 #ifdef ENABLE_WASM_REFTYPES
-    if (token.valueType() == ValType::AnyRef) {
+    if (token.valueType() == RefType::any()) {
       *tableKind = TableKind::AnyRef;
+      return true;
+    }
+    if (token.valueType() == RefType::null()) {
+      *tableKind = TableKind::NullRef;
       return true;
     }
 #endif
   }
-  c.ts.generateError(token, "'funcref' or 'anyref' required", c.error);
+  c.ts.generateError(token, "generic reference type required", c.error);
   return false;
 }
 
@@ -5026,25 +5033,30 @@ static bool ParseTable(WasmParseContext& c, WasmToken token) {
 
   AstElemSegment* segment =
       new (c.lifo) AstElemSegment(AstElemSegmentKind::Active, AstRef(name),
-                                  zero, ValType::FuncRef, std::move(elems));
+                                  zero, RefType::func(), std::move(elems));
   return segment && c.module->append(segment);
 }
 
 static bool TryParseElemType(WasmParseContext& c, bool* isFunc, ValType* ty) {
   if (c.ts.getIf(WasmToken::Func)) {
     *isFunc = true;
-    *ty = ValType::FuncRef;
+    *ty = RefType::func();
     return true;
   }
 
   WasmToken token = c.ts.peek();
-  if (token.kind() == WasmToken::ValueType &&
-      (token.valueType() == ValType::FuncRef ||
-       token.valueType() == ValType::AnyRef)) {
-    c.ts.get();
-    *isFunc = false;
-    *ty = token.valueType();
-    return true;
+  if (token.kind() == WasmToken::ValueType) {
+    switch (token.valueType().refTypeKind()) {
+      case RefType::Func:
+      case RefType::Any:
+      case RefType::Null:
+        c.ts.get();
+        *isFunc = false;
+        *ty = token.valueType();
+        return true;
+      case RefType::TypeIndex:
+        break;
+    }
   }
 
   return false;
@@ -5055,7 +5067,7 @@ static AstElemSegment* ParseElemSegment(WasmParseContext& c) {
   // <init-expr> is any <expr> or (offset <const>).
   // <table-use> is (table <n>) or just <n> (an extension).
   // <fnref> is a naked function reference (index or name)
-  // <elem-type> is funcref or anyref
+  // <elem-type> is funcref or anyref or nullref
   //
   // Active initializer for table 0 which must be table-of-functions, this is
   // sugar:
@@ -5078,7 +5090,7 @@ static AstElemSegment* ParseElemSegment(WasmParseContext& c) {
 
   AstRef targetTable = AstRef(0);
   AstExpr* offsetIfActive = nullptr;
-  ValType elemType = ValType::FuncRef;
+  ValType elemType = RefType::func();
   bool haveTableref = false;
   AstElemSegmentKind kind;
 
@@ -6328,7 +6340,7 @@ static bool EncodeCallIndirect(Encoder& e, AstCallIndirect& c) {
 }
 
 static bool EncodeConst(Encoder& e, AstConst& c) {
-  switch (c.val().type().code()) {
+  switch (c.val().type().kind()) {
     case ValType::I32:
       return e.writeOp(Op::I32Const) && e.writeVarS32(c.val().i32());
     case ValType::I64:
@@ -6963,6 +6975,11 @@ static bool EncodeTableLimits(Encoder& e, const Limits& limits,
         return false;
       }
       break;
+    case TableKind::NullRef:
+      if (!e.writeVarU32(uint32_t(TypeCode::NullRef))) {
+        return false;
+      }
+      break;
     default:
       MOZ_CRASH("Unexpected table kind");
   }
@@ -7390,7 +7407,7 @@ static bool EncodeElemSegment(Encoder& e, AstElemSegment& segment) {
   }
 
   ElemSegmentPayload payload =
-      hasRefNull || segment.elemType() != ValType::FuncRef
+      hasRefNull || segment.elemType() != RefType::func()
           ? ElemSegmentPayload::ElemExpression
           : ElemSegmentPayload::ExternIndex;
 

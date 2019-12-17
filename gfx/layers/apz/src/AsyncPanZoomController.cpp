@@ -1997,6 +1997,7 @@ nsEventStatus AsyncPanZoomController::OnKeyboard(const KeyboardInput& aEvent) {
   bool scrollSnapped =
       MaybeAdjustDestinationForScrollSnapping(aEvent, destination);
 
+  RecordScrollPayload(aEvent.mTimeStamp);
   // If smooth scrolling is disabled, then scroll immediately to the destination
   if (!StaticPrefs::general_smoothScroll()) {
     CancelAnimation();
@@ -2378,6 +2379,7 @@ nsEventStatus AsyncPanZoomController::OnScrollWheel(
           distance, ScrollSource::Wheel);
       ParentLayerPoint startPoint = aEvent.mLocalOrigin;
       ParentLayerPoint endPoint = aEvent.mLocalOrigin - delta;
+      RecordScrollPayload(aEvent.mTimeStamp);
       CallDispatchScroll(startPoint, endPoint, handoffState);
 
       SetState(NOTHING);
@@ -2396,6 +2398,7 @@ nsEventStatus AsyncPanZoomController::OnScrollWheel(
       // update it.
       RecursiveMutexAutoLock lock(mRecursiveMutex);
 
+      RecordScrollPayload(aEvent.mTimeStamp);
       // Perform scroll snapping if appropriate.
       CSSPoint startPosition = Metrics().GetScrollOffset();
       // If we're already in a wheel scroll or smooth scroll animation,
@@ -2621,6 +2624,7 @@ nsEventStatus AsyncPanZoomController::OnPan(const PanGestureInput& aEvent,
   ParentLayerPoint startPoint = aEvent.mLocalPanStartPoint;
   ParentLayerPoint endPoint =
       aEvent.mLocalPanStartPoint - logicalPanDisplacement;
+  RecordScrollPayload(aEvent.mTimeStamp);
   CallDispatchScroll(startPoint, endPoint, handoffState);
 
   return nsEventStatus_eConsumeNoDefault;
@@ -3129,6 +3133,15 @@ void AsyncPanZoomController::UpdateWithTouchAtDevicePoint(
   mY.UpdateWithTouchAtDevicePoint(point.y, aEvent.mTime);
 }
 
+Maybe<CompositionPayload> AsyncPanZoomController::NotifyScrollSampling() {
+  if (StaticPrefs::apz_frame_delay_enabled()) {
+    return std::move(mCompositedScrollPayload);
+  }
+  // If frame.delay disabled, the triggering events are those
+  // from the most recent frame
+  return std::move(mScrollPayload);
+}
+
 bool AsyncPanZoomController::AttemptScroll(
     ParentLayerPoint& aStartPoint, ParentLayerPoint& aEndPoint,
     OverscrollHandoffState& aOverscrollHandoffState) {
@@ -3360,6 +3373,11 @@ ParentLayerPoint AsyncPanZoomController::AttemptFling(
 
 float AsyncPanZoomController::ComputePLPPI(ParentLayerPoint aPoint,
                                            ParentLayerPoint aDirection) const {
+  // Avoid division-by-zero.
+  if (aDirection == ParentLayerPoint()) {
+    return GetDPI();
+  }
+
   // Convert |aDirection| into a unit vector.
   aDirection = aDirection / aDirection.Length();
 
@@ -3494,6 +3512,13 @@ void AsyncPanZoomController::CallDispatchScroll(
                                    aOverscrollHandoffState);
 }
 
+void AsyncPanZoomController::RecordScrollPayload(const TimeStamp& aTimeStamp) {
+  if (!mScrollPayload) {
+    mScrollPayload = Some(
+        CompositionPayload{CompositionPayloadType::eAPZScroll, aTimeStamp});
+  }
+}
+
 void AsyncPanZoomController::TrackTouch(const MultiTouchInput& aEvent) {
   ExternalPoint extPoint = GetFirstExternalTouchPoint(aEvent);
   ScreenPoint panVector = PanVector(extPoint);
@@ -3508,6 +3533,7 @@ void AsyncPanZoomController::TrackTouch(const MultiTouchInput& aEvent) {
     OverscrollHandoffState handoffState(
         *GetCurrentTouchBlock()->GetOverscrollHandoffChain(), panVector,
         ScrollSource::Touch);
+    RecordScrollPayload(aEvent.mTimeStamp);
     CallDispatchScroll(prevTouchPoint, touchPoint, handoffState);
   }
 }
@@ -4208,6 +4234,10 @@ bool AsyncPanZoomController::SampleCompositedAsyncTransform() {
     mCompositedLayoutViewport = Metrics().GetLayoutViewport();
     mCompositedScrollOffset = Metrics().GetScrollOffset();
     mCompositedZoom = Metrics().GetZoom();
+
+    // If frame.delay enabled, we pass along the scroll events from
+    // frame before since they were what moved the items on the layer
+    mCompositedScrollPayload = std::move(mScrollPayload);
     return true;
   }
   return false;
@@ -5266,10 +5296,10 @@ void AsyncPanZoomController::ScrollSnapToDestination() {
   ParentLayerPoint predictedDelta;
   // "-velocity / log(1.0 - friction)" is the integral of the deceleration
   // curve modeled for flings in the "Axis" class.
-  if (velocity.x != 0.0f) {
+  if (velocity.x != 0.0f && friction != 0.0f) {
     predictedDelta.x = -velocity.x / log(1.0 - friction);
   }
-  if (velocity.y != 0.0f) {
+  if (velocity.y != 0.0f && friction != 0.0f) {
     predictedDelta.y = -velocity.y / log(1.0 - friction);
   }
 

@@ -300,7 +300,7 @@
   font-size: 14px;
 }
 
-@supports -moz-bool-pref("browser.urlbar.megabar.expandTextOnFocus") {
+@supports -moz-bool-pref("browser.urlbar.update1.expandTextOnFocus") {
   .urlbarView {
     font-size: inherit;
   }
@@ -799,12 +799,6 @@ menulist.translate-infobar-element > .menulist-dropmarker {
 #context-navigation > .menuitem-iconic {
   padding-left: 0;
   padding-right: 0;
-}
-
-#fill-login-popup > menucaption {
-  color: -moz-mac-menushadow;
-  font-weight: normal;
-  padding-inline-start: 11px;
 }
 
 .cui-widget-panelview[id^=PanelUI-webext-] {

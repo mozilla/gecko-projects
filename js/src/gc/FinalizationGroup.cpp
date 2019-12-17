@@ -33,7 +33,11 @@ bool GCRuntime::registerWithFinalizationGroup(JSContext* cx,
       return false;
     }
   }
-  return ptr->value().append(record);
+  if (!ptr->value().append(record)) {
+    ReportOutOfMemory(cx);
+    return false;
+  }
+  return true;
 }
 
 void GCRuntime::markFinalizationGroupData(JSTracer* trc) {
@@ -57,10 +61,16 @@ void GCRuntime::sweepFinalizationGroups(Zone* zone) {
       // Queue holdings for targets that are dying.
       for (JSObject* obj : records) {
         obj = UncheckedUnwrapWithoutExpose(obj);
+        if (!obj->is<FinalizationRecordObject>()) {
+          MOZ_ASSERT(JS_IsDeadWrapper(obj));
+          // CCWs between the compartments have been nuked. The
+          // FinalizationGroup's callback doesn't run in this case.
+          continue;
+        }
         auto record = &obj->as<FinalizationRecordObject>();
         FinalizationGroupObject* group = record->group();
         if (group) {
-          group->queueHoldingsToBeCleanedUp(record->holdings());
+          group->queueRecordToBeCleanedUp(record);
           queueFinalizationGroupForCleanup(group);
         }
       }
@@ -71,6 +81,12 @@ void GCRuntime::sweepFinalizationGroups(Zone* zone) {
       // Remove records that have been unregistered.
       records.eraseIf([](JSObject* obj) {
         obj = UncheckedUnwrapWithoutExpose(obj);
+        if (!obj->is<FinalizationRecordObject>()) {
+          MOZ_ASSERT(JS_IsDeadWrapper(obj));
+          // CCWs between the compartments have been nuked. The
+          // FinalizationGroup's callback doesn't run in this case.
+          return true;
+        }
         auto record = &obj->as<FinalizationRecordObject>();
         return !record->group();
       });
@@ -90,6 +106,6 @@ void GCRuntime::queueFinalizationGroupForCleanup(
 bool GCRuntime::cleanupQueuedFinalizationGroup(
     JSContext* cx, HandleFinalizationGroupObject group) {
   group->setQueuedForCleanup(false);
-  bool ok = FinalizationGroupObject::cleanupQueuedHoldings(cx, group);
+  bool ok = FinalizationGroupObject::cleanupQueuedRecords(cx, group);
   return ok;
 }

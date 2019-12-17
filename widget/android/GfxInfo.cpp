@@ -10,10 +10,8 @@
 #include "prenv.h"
 #include "nsExceptionHandler.h"
 #include "nsHashKeys.h"
-#include "nsICrashReporter.h"
 #include "nsVersionComparator.h"
 #include "AndroidBridge.h"
-#include "nsIWindowWatcher.h"
 #include "nsServiceManagerUtils.h"
 
 #include "mozilla/Preferences.h"
@@ -226,14 +224,14 @@ GfxInfo::GetAdapterDescription2(nsAString& aAdapterDescription) {
 }
 
 NS_IMETHODIMP
-GfxInfo::GetAdapterRAM(nsAString& aAdapterRAM) {
+GfxInfo::GetAdapterRAM(uint32_t* aAdapterRAM) {
   EnsureInitialized();
-  aAdapterRAM.Truncate();
+  *aAdapterRAM = 0;
   return NS_OK;
 }
 
 NS_IMETHODIMP
-GfxInfo::GetAdapterRAM2(nsAString& aAdapterRAM) {
+GfxInfo::GetAdapterRAM2(uint32_t* aAdapterRAM) {
   EnsureInitialized();
   return NS_ERROR_FAILURE;
 }
@@ -342,6 +340,18 @@ GfxInfo::GetDisplayInfo(nsTArray<nsString>& aDisplayInfo) {
                            (int32_t)mScreenInfo.mScreenDimensions.width,
                            (int32_t)mScreenInfo.mScreenDimensions.height);
   aDisplayInfo.AppendElement(displayInfo);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfo::GetDisplayWidth(nsTArray<uint32_t>& aDisplayWidth) {
+  aDisplayWidth.AppendElement((uint32_t)mScreenInfo.mScreenDimensions.width);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+GfxInfo::GetDisplayHeight(nsTArray<uint32_t>& aDisplayHeight) {
+  aDisplayHeight.AppendElement((uint32_t)mScreenInfo.mScreenDimensions.height);
   return NS_OK;
 }
 
@@ -549,12 +559,21 @@ nsresult GfxInfo::GetFeatureStatusImpl(
     }
 
     if (aFeature == FEATURE_WEBRENDER) {
+      bool isUnblocked = false;
+#ifndef NIGHTLY_BUILD
+      // Only allow pixels on non nightly builds
       NS_LossyConvertUTF16toASCII model(mModel);
-      bool isBlocked =
-          !model.Equals("Pixel 2", nsCaseInsensitiveCStringComparator()) &&
-          !model.Equals("Pixel 2 XL", nsCaseInsensitiveCStringComparator());
-
-      if (isBlocked) {
+      isUnblocked |= model.Find("Pixel 2", /*ignoreCase*/ true) >=
+                         0 ||  // Find substring to include all Pixel 2 models
+                     model.Find("Pixel 3", /*ignoreCase*/ true) >=
+                         0;  // Find substring to include all Pixel 3 models
+#else
+      // On nightly enable all Adreno GPUs
+      const nsCString& gpu = mGLStrings->Renderer();
+      isUnblocked |= gpu.Find("Adreno (TM) 5", /*ignoreCase*/ true) >= 0 ||
+                     gpu.Find("Adreno (TM) 6", /*ignoreCase*/ true) >= 0;
+#endif
+      if (!isUnblocked) {
         *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
         aFailureId = "FEATURE_FAILURE_WEBRENDER_BLOCKED_DEVICE";
       } else {

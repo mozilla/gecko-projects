@@ -28,20 +28,15 @@
 #include "nsStreamUtils.h"
 #include "nsIURL.h"
 #include "nsISocketTransport.h"
-#include "nsIStreamListenerTee.h"
-#include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsAuthInformationHolder.h"
 #include "nsIProtocolProxyService.h"
 #include "nsICancelable.h"
 #include "nsIOutputStream.h"
-#include "nsIPrompt.h"
 #include "nsIProtocolHandler.h"
 #include "nsIProxyInfo.h"
-#include "nsIRunnable.h"
 #include "nsISocketTransportService.h"
 #include "nsIURI.h"
-#include "nsIURIMutator.h"
 #include "nsILoadInfo.h"
 #include "nsIAuthPrompt2.h"
 #include "nsIFTPChannelParentInternal.h"
@@ -1097,8 +1092,7 @@ nsresult nsFtpState::S_retr() {
 FTP_STATE
 nsFtpState::R_retr() {
   if (mResponseCode / 100 == 2) {
-    if (!mRretr1xxReceived)
-      return FTP_ERROR;
+    if (!mRretr1xxReceived) return FTP_ERROR;
 
     //(DONE)
     mNextState = FTP_COMPLETE;

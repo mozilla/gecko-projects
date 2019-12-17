@@ -64,7 +64,7 @@ void LIRGenerator::visitParameter(MParameter* param) {
 
   offset *= sizeof(Value);
 #if defined(JS_NUNBOX32)
-#  if MOZ_BIG_ENDIAN
+#  if MOZ_BIG_ENDIAN()
   ins->getDef(0)->setOutput(LArgument(offset));
   ins->getDef(1)->setOutput(LArgument(offset + 4));
 #  else
@@ -355,10 +355,7 @@ void LIRGenerator::visitComputeThis(MComputeThis* ins) {
   MOZ_ASSERT(ins->type() == MIRType::Value);
   MOZ_ASSERT(ins->input()->type() == MIRType::Value);
 
-  // Don't use useBoxAtStart because ComputeThis has a safepoint and needs to
-  // have its inputs in different registers than its return value so that
-  // they aren't clobbered.
-  LComputeThis* lir = new (alloc()) LComputeThis(useBox(ins->input()));
+  LComputeThis* lir = new (alloc()) LComputeThis(useBoxAtStart(ins->input()));
   defineBox(lir, ins);
   assignSafepoint(lir, ins);
 }
@@ -848,6 +845,17 @@ void LIRGenerator::visitTest(MTest* test) {
 
     LIsObjectAndBranch* lir =
         new (alloc()) LIsObjectAndBranch(ifTrue, ifFalse, useBoxAtStart(input));
+    add(lir, test);
+    return;
+  }
+
+  if (opd->isIsNullOrUndefined() && opd->isEmittedAtUses()) {
+    MIsNullOrUndefined* isNullOrUndefined = opd->toIsNullOrUndefined();
+    MDefinition* input = isNullOrUndefined->value();
+    MOZ_ASSERT(input->type() == MIRType::Value);
+
+    auto* lir = new (alloc()) LIsNullOrUndefinedAndBranch(
+        isNullOrUndefined, ifTrue, ifFalse, useBoxAtStart(input));
     add(lir, test);
     return;
   }
@@ -2469,8 +2477,9 @@ void LIRGenerator::visitLambdaArrow(MLambdaArrow* ins) {
   MOZ_ASSERT(ins->environmentChain()->type() == MIRType::Object);
   MOZ_ASSERT(ins->newTargetDef()->type() == MIRType::Value);
 
-  LLambdaArrow* lir = new (alloc()) LLambdaArrow(
-      useRegister(ins->environmentChain()), useBox(ins->newTargetDef()));
+  LLambdaArrow* lir =
+      new (alloc()) LLambdaArrow(useRegister(ins->environmentChain()),
+                                 useBox(ins->newTargetDef()), temp());
   define(lir, ins);
   assignSafepoint(lir, ins);
 }
@@ -2917,13 +2926,6 @@ void LIRGenerator::visitTypedObjectDescr(MTypedObjectDescr* ins) {
 void LIRGenerator::visitTypedObjectElements(MTypedObjectElements* ins) {
   MOZ_ASSERT(ins->type() == MIRType::Elements);
   define(new (alloc()) LTypedObjectElements(useRegister(ins->object())), ins);
-}
-
-void LIRGenerator::visitSetTypedObjectOffset(MSetTypedObjectOffset* ins) {
-  add(new (alloc())
-          LSetTypedObjectOffset(useRegister(ins->object()),
-                                useRegister(ins->offset()), temp(), temp()),
-      ins);
 }
 
 void LIRGenerator::visitInitializedLength(MInitializedLength* ins) {
@@ -4191,7 +4193,7 @@ void LIRGenerator::visitIsConstructor(MIsConstructor* ins) {
   define(new (alloc()) LIsConstructor(useRegister(ins->object())), ins);
 }
 
-static bool CanEmitIsObjectAtUses(MInstruction* ins) {
+static bool CanEmitIsObjectOrIsNullOrUndefinedAtUses(MInstruction* ins) {
   if (!ins->canEmitAtUses()) {
     return false;
   }
@@ -4215,7 +4217,7 @@ static bool CanEmitIsObjectAtUses(MInstruction* ins) {
 }
 
 void LIRGenerator::visitIsObject(MIsObject* ins) {
-  if (CanEmitIsObjectAtUses(ins)) {
+  if (CanEmitIsObjectOrIsNullOrUndefinedAtUses(ins)) {
     emitAtUses(ins);
     return;
   }
@@ -4227,6 +4229,11 @@ void LIRGenerator::visitIsObject(MIsObject* ins) {
 }
 
 void LIRGenerator::visitIsNullOrUndefined(MIsNullOrUndefined* ins) {
+  if (CanEmitIsObjectOrIsNullOrUndefinedAtUses(ins)) {
+    emitAtUses(ins);
+    return;
+  }
+
   MDefinition* opd = ins->input();
   MOZ_ASSERT(opd->type() == MIRType::Value);
   LIsNullOrUndefined* lir =
@@ -4817,11 +4824,6 @@ bool LIRGenerator::visitInstruction(MInstruction* ins) {
     return false;
   }
   visitInstructionDispatch(ins);
-
-  if (ins->possiblyCalls()) {
-    gen->setNeedsStaticStackAlignment();
-    gen->setNeedsOverrecursedCheck();
-  }
 
   if (ins->resumePoint()) {
     updateResumeState(ins);

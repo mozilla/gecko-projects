@@ -20,13 +20,7 @@
 
 #include "nsNetCID.h"
 #include "nsILoadContext.h"
-#include "nsIProperty.h"
-#include "nsIPropertyBag2.h"
-#include "nsIServiceManager.h"
-#include "nsISimpleEnumerator.h"
 #include "nsServiceManagerUtils.h"
-#include "nsISocketTransportService.h"
-#include "nsIConsoleService.h"
 #include "nsThreadUtils.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
@@ -37,6 +31,7 @@
 #include "VideoConduit.h"
 #include "MediaTrackGraph.h"
 #include "runnable_utils.h"
+#include "IPeerConnection.h"
 #include "PeerConnectionCtx.h"
 #include "PeerConnectionImpl.h"
 #include "PeerConnectionMedia.h"
@@ -73,11 +68,9 @@
 #include "nsXULAppAPI.h"
 #include "nsContentUtils.h"
 #include "nsDOMJSUtils.h"
-#include "nsIScriptError.h"
 #include "nsPrintfCString.h"
 #include "nsURLHelper.h"
 #include "nsNetUtil.h"
-#include "nsIURLParser.h"
 #include "js/ArrayBuffer.h"    // JS::NewArrayBufferWithContents
 #include "js/GCAnnotations.h"  // JS_HAZ_ROOTED
 #include "js/RootingAPI.h"     // JS::{{,Mutable}Handle,Rooted}
@@ -1936,13 +1929,21 @@ PeerConnectionImpl::ReplaceTrackNoRenegotiation(TransceiverImpl& aTransceiver,
     PrincipalChanged(aWithTrack);
   }
 
-  // We update the media pipelines here so we can apply different codec
-  // settings for different sources (e.g. screensharing as opposed to camera.)
-  // TODO: We should probably only do this if the source has in fact changed.
-
-  if (NS_FAILED((rv = mMedia->UpdateMediaPipelines()))) {
-    CSFLogError(LOGTAG, "Error Updating MediaPipelines");
-    return rv;
+  if (aTransceiver.IsVideo()) {
+    // We update the media pipelines here so we can apply different codec
+    // settings for different sources (e.g. screensharing as opposed to camera.)
+    MediaSourceEnum oldSource = oldSendTrack
+                                    ? oldSendTrack->GetSource().GetMediaSource()
+                                    : MediaSourceEnum::Camera;
+    MediaSourceEnum newSource = aWithTrack
+                                    ? aWithTrack->GetSource().GetMediaSource()
+                                    : MediaSourceEnum::Camera;
+    if (oldSource != newSource) {
+      if (NS_WARN_IF(NS_FAILED(rv = aTransceiver.UpdateConduit()))) {
+        CSFLogError(LOGTAG, "Error Updating VideoConduit");
+        return rv;
+      }
+    }
   }
 
   return NS_OK;

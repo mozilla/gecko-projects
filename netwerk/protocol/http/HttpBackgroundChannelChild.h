@@ -48,15 +48,13 @@ class HttpBackgroundChannelChild final : public PHttpBackgroundChannelChild {
                                    const nsCString& aData);
 
   IPCResult RecvOnStopRequest(const nsresult& aChannelStatus,
-                              const ResourceTimingStruct& aTiming,
+                              const ResourceTimingStructArgs& aTiming,
                               const TimeStamp& aLastActiveTabOptHit,
                               const nsHttpHeaderArray& aResponseTrailers);
 
   IPCResult RecvFlushedForDiversion();
 
   IPCResult RecvDivertMessages();
-
-  IPCResult RecvOnStartRequestSent();
 
   void ActorDestroy(ActorDestroyReason aWhy) override;
 
@@ -85,10 +83,6 @@ class HttpBackgroundChannelChild final : public PHttpBackgroundChannelChild {
   // True if OnStartRequest is received by HttpChannelChild.
   // Should only access on STS thread.
   bool mStartReceived = false;
-
-  // True if OnStartRequest is sent by HttpChannelParent.
-  // Should only access on STS thread.
-  bool mStartSent = false;
 
   // Store pending messages that require to be handled after OnStartRequest.
   // Should be flushed after OnStartRequest is received and handled.

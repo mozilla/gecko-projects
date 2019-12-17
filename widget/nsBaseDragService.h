@@ -8,7 +8,6 @@
 
 #include "nsIDragService.h"
 #include "nsIDragSession.h"
-#include "nsITransferable.h"
 #include "nsCOMPtr.h"
 #include "nsRect.h"
 #include "nsPoint.h"
@@ -149,6 +148,9 @@ class nsBaseDragService : public nsIDragService, public nsIDragSession {
   bool mCanDrop;
   bool mOnlyChromeDrop;
   bool mDoingDrag;
+
+  // true if in EndDragSession
+  bool mEndingSession;
   // true if mImage should be used to set a drag image
   bool mHasImage;
   // true if the user cancelled the drag operation

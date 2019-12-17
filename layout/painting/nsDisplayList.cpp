@@ -36,7 +36,6 @@
 #include "mozilla/StaticPrefs_layout.h"
 #include "nsCSSRendering.h"
 #include "nsCSSRenderingGradients.h"
-#include "nsISelectionController.h"
 #include "nsRegion.h"
 #include "nsStyleStructInlines.h"
 #include "nsStyleTransformMatrix.h"
@@ -823,7 +822,13 @@ static Maybe<TransformData> CreateAnimationData(
   if (aFrame->HasAnyStateBits(NS_FRAME_SVG_LAYOUT) &&
       aFrame->StyleDisplay()->mTransformBox != StyleGeometryBox::ViewBox &&
       aFrame->StyleDisplay()->mTransformBox != StyleGeometryBox::BorderBox) {
-    framePosition = CSSPoint::FromAppUnits(aFrame->GetPosition());
+    if (aFrame->IsFrameOfType(nsIFrame::eSVGContainer)) {
+      nsRect boxRect = nsLayoutUtils::ComputeGeometryBox(
+          const_cast<nsIFrame*>(aFrame), StyleGeometryBox::FillBox);
+      framePosition = CSSPoint::FromAppUnits(nsPoint{boxRect.x, boxRect.y});
+    } else {
+      framePosition = CSSPoint::FromAppUnits(aFrame->GetPosition());
+    }
   }
 
   return Some(TransformData(origin, offsetToTransformOrigin, motionPathOrigin,
@@ -2919,11 +2924,10 @@ bool nsDisplayList::ComputeVisibilityForSublist(
   return anyVisible;
 }
 
-static bool TriggerPendingAnimationsOnSubDocuments(Document* aDocument,
+static bool TriggerPendingAnimationsOnSubDocuments(Document& aDoc,
                                                    void* aReadyTime) {
-  PendingAnimationTracker* tracker = aDocument->GetPendingAnimationTracker();
-  if (tracker) {
-    PresShell* presShell = aDocument->GetPresShell();
+  if (PendingAnimationTracker* tracker = aDoc.GetPendingAnimationTracker()) {
+    PresShell* presShell = aDoc.GetPresShell();
     // If paint-suppression is in effect then we haven't finished painting
     // this document yet so we shouldn't start animations
     if (!presShell || !presShell->IsPaintingSuppressed()) {
@@ -2931,12 +2935,12 @@ static bool TriggerPendingAnimationsOnSubDocuments(Document* aDocument,
       tracker->TriggerPendingAnimationsOnNextTick(readyTime);
     }
   }
-  aDocument->EnumerateSubDocuments(TriggerPendingAnimationsOnSubDocuments,
-                                   aReadyTime);
+  aDoc.EnumerateSubDocuments(TriggerPendingAnimationsOnSubDocuments,
+                             aReadyTime);
   return true;
 }
 
-static void TriggerPendingAnimations(Document* aDocument,
+static void TriggerPendingAnimations(Document& aDocument,
                                      const TimeStamp& aReadyTime) {
   MOZ_ASSERT(!aReadyTime.IsNull(),
              "Animation ready time is not set. Perhaps we're using a layer"
@@ -3181,7 +3185,8 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(
 
     aBuilder->SetIsCompositingCheap(prevIsCompositingCheap);
     if (document && widgetTransaction) {
-      TriggerPendingAnimations(document, layerManager->GetAnimationReadyTime());
+      TriggerPendingAnimations(*document,
+                               layerManager->GetAnimationReadyTime());
     }
 
     if (presContext->RefreshDriver()->HasScheduleFlush()) {
@@ -3281,7 +3286,7 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(
   aBuilder->SetIsCompositingCheap(temp);
 
   if (document && widgetTransaction) {
-    TriggerPendingAnimations(document, layerManager->GetAnimationReadyTime());
+    TriggerPendingAnimations(*document, layerManager->GetAnimationReadyTime());
   }
 
   nsIntRegion invalid;
@@ -3342,7 +3347,7 @@ void nsDisplayList::DeleteAll(nsDisplayListBuilder* aBuilder) {
 }
 
 static bool IsFrameReceivingPointerEvents(nsIFrame* aFrame) {
-  return NS_STYLE_POINTER_EVENTS_NONE !=
+  return StylePointerEvents::None !=
          aFrame->StyleUI()->GetEffectivePointerEvents(aFrame);
 }
 
@@ -5563,8 +5568,12 @@ bool nsDisplayCompositorHitTestInfo::CreateWebRenderCommands(
         return ScrollableLayerGuid::NULL_SCROLL_ID;
       });
 
+  Maybe<SideBits> sideBits =
+      aBuilder.GetContainingFixedPosSideBits(GetActiveScrolledRoot());
+
   // Insert a transparent rectangle with the hit-test info
-  aBuilder.SetHitTestInfo(scrollId, HitTestFlags());
+  aBuilder.SetHitTestInfo(scrollId, HitTestFlags(),
+                          sideBits.valueOr(SideBits::eNone));
 
   const LayoutDeviceRect devRect =
       LayoutDeviceRect::FromAppUnits(HitTestArea(), mAppUnitsPerDevPixel);
@@ -6408,6 +6417,18 @@ nsDisplayOpacity::nsDisplayOpacity(
   mState.mOpacity = mOpacity;
 }
 
+void nsDisplayOpacity::HitTest(nsDisplayListBuilder* aBuilder,
+                               const nsRect& aRect,
+                               nsDisplayItem::HitTestState* aState,
+                               nsTArray<nsIFrame*>* aOutFrames) {
+  // TODO(emilio): special-casing zero is a bit arbitrary... Maybe we should
+  // only consider fully opaque items? Or make this configurable somehow?
+  if (aBuilder->HitTestIsForVisibility() && mOpacity == 0.0f) {
+    return;
+  }
+  nsDisplayWrapList::HitTest(aBuilder, aRect, aState, aOutFrames);
+}
+
 nsRegion nsDisplayOpacity::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                                            bool* aSnap) const {
   *aSnap = false;
@@ -6934,6 +6955,10 @@ bool nsDisplayOwnLayer::IsZoomingLayer() const {
   return GetType() == DisplayItemType::TYPE_ASYNC_ZOOM;
 }
 
+bool nsDisplayOwnLayer::IsFixedPositionLayer() const {
+  return GetType() == DisplayItemType::TYPE_FIXED_POSITION;
+}
+
 // nsDisplayOpacity uses layers for rendering
 already_AddRefed<Layer> nsDisplayOwnLayer::BuildLayer(
     nsDisplayListBuilder* aBuilder, LayerManager* aManager,
@@ -6959,8 +6984,10 @@ bool nsDisplayOwnLayer::CreateWebRenderCommands(
     const StackingContextHelper& aSc, RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   Maybe<wr::WrAnimationProperty> prop;
-  bool needsProp = aManager->LayerManager()->AsyncPanZoomEnabled() &&
-                   (IsScrollThumbLayer() || IsZoomingLayer());
+  bool needsProp =
+      aManager->LayerManager()->AsyncPanZoomEnabled() &&
+      (IsScrollThumbLayer() || IsZoomingLayer() || IsFixedPositionLayer());
+
   if (needsProp) {
     // APZ is enabled and this is a scroll thumb or zooming layer, so we need
     // to create and set an animation id. That way APZ can adjust the position/
@@ -6983,10 +7010,10 @@ bool nsDisplayOwnLayer::CreateWebRenderCommands(
   params.clip =
       wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
   if (IsScrollbarContainer()) {
-    params.prim_flags |= wr::PrimitiveFlags_IS_SCROLLBAR_CONTAINER;
+    params.prim_flags |= wr::PrimitiveFlags::IS_SCROLLBAR_CONTAINER;
   }
   if (IsScrollThumbLayer()) {
-    params.prim_flags |= wr::PrimitiveFlags_IS_SCROLLBAR_THUMB;
+    params.prim_flags |= wr::PrimitiveFlags::IS_SCROLLBAR_THUMB;
   }
   StackingContextHelper sc(aSc, GetActiveScrolledRoot(), mFrame, this, aBuilder,
                            params);
@@ -6999,8 +7026,8 @@ bool nsDisplayOwnLayer::CreateWebRenderCommands(
 bool nsDisplayOwnLayer::UpdateScrollData(
     mozilla::layers::WebRenderScrollData* aData,
     mozilla::layers::WebRenderLayerScrollData* aLayerData) {
-  bool isRelevantToApz =
-      (IsScrollThumbLayer() || IsScrollbarContainer() || IsZoomingLayer());
+  bool isRelevantToApz = (IsScrollThumbLayer() || IsScrollbarContainer() ||
+                          IsZoomingLayer() || IsFixedPositionLayer());
   if (!isRelevantToApz) {
     return false;
   }
@@ -7011,6 +7038,11 @@ bool nsDisplayOwnLayer::UpdateScrollData(
 
   if (IsZoomingLayer()) {
     aLayerData->SetZoomAnimationId(mWrAnimationId);
+    return true;
+  }
+
+  if (IsFixedPositionLayer()) {
+    aLayerData->SetFixedPositionAnimationId(mWrAnimationId);
     return true;
   }
 
@@ -7447,12 +7479,17 @@ bool nsDisplayFixedPosition::CreateWebRenderCommands(
     const StackingContextHelper& aSc,
     mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
+  SideBits sides = SideBits::eNone;
+  if (!mIsFixedBackground) {
+    sides = nsLayoutUtils::GetSideBitsForFixedPositionContent(mFrame);
+  }
+
   // We install this RAII scrolltarget tracker so that any
   // nsDisplayCompositorHitTestInfo items inside this fixed-pos item (and that
   // share the same ASR as this item) use the correct scroll target. That way
   // attempts to scroll on those items will scroll the root scroll frame.
   mozilla::wr::DisplayListBuilder::FixedPosScrollTargetTracker tracker(
-      aBuilder, GetActiveScrolledRoot(), GetScrollTargetId());
+      aBuilder, GetActiveScrolledRoot(), GetScrollTargetId(), sides);
   return nsDisplayOwnLayer::CreateWebRenderCommands(
       aBuilder, aResources, aSc, aManager, aDisplayListBuilder);
 }
@@ -7461,6 +7498,10 @@ bool nsDisplayFixedPosition::UpdateScrollData(
     mozilla::layers::WebRenderScrollData* aData,
     mozilla::layers::WebRenderLayerScrollData* aLayerData) {
   if (aLayerData) {
+    if (!mIsFixedBackground) {
+      aLayerData->SetFixedPositionSides(
+          nsLayoutUtils::GetSideBitsForFixedPositionContent(mFrame));
+    }
     aLayerData->SetFixedPositionScrollContainerId(GetScrollTargetId());
   }
   return nsDisplayOwnLayer::UpdateScrollData(aData, aLayerData) | true;
@@ -8666,7 +8707,7 @@ bool nsDisplayTransform::CreateWebRenderCommands(
   params.animation = animationsId ? &prop : nullptr;
   params.mTransformPtr = transformForSC;
   params.prim_flags = !BackfaceIsHidden()
-                          ? wr::PrimitiveFlags_IS_BACKFACE_VISIBLE
+                          ? wr::PrimitiveFlags::IS_BACKFACE_VISIBLE
                           : wr::PrimitiveFlags{0};
   params.mDeferredTransformItem = deferredTransformItem;
   params.mAnimated = animated;
@@ -9371,7 +9412,7 @@ bool nsDisplayPerspective::CreateWebRenderCommands(
   params.mTransformPtr = &perspectiveMatrix;
   params.reference_frame_kind = wr::WrReferenceFrameKind::Perspective;
   params.prim_flags = !BackfaceIsHidden()
-                          ? wr::PrimitiveFlags_IS_BACKFACE_VISIBLE
+                          ? wr::PrimitiveFlags::IS_BACKFACE_VISIBLE
                           : wr::PrimitiveFlags{0};
   params.SetPreserve3D(preserve3D);
   params.clip =

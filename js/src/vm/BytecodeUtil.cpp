@@ -28,6 +28,7 @@
 
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/SourceNotes.h"
+#include "gc/PublicIterators.h"
 #include "js/CharacterEncoding.h"
 #include "js/Printf.h"
 #include "js/Symbol.h"
@@ -47,7 +48,7 @@
 #include "vm/Realm.h"
 #include "vm/Shape.h"
 
-#include "gc/PrivateIterators-inl.h"
+#include "gc/GC-inl.h"
 #include "vm/BytecodeIterator-inl.h"
 #include "vm/BytecodeLocation-inl.h"
 #include "vm/JSContext-inl.h"
@@ -1579,12 +1580,29 @@ static unsigned Disassemble1(JSContext* cx, HandleScript script, jsbytecode* pc,
       }
       break;
 
-    case JOF_LOOPENTRY:
-      if (!sp->jsprintf(" (ic: %u, data: %u,%u)", GET_ICINDEX(pc),
-                        LoopEntryCanIonOsr(pc), LoopEntryDepthHint(pc))) {
+    case JOF_LOOPHEAD:
+      if (!sp->jsprintf(" (ic: %u, depthHint: %u)", GET_ICINDEX(pc),
+                        LoopHeadDepthHint(pc))) {
         return 0;
       }
       break;
+
+    case JOF_CLASS_CTOR: {
+      uint32_t atomIndex = 0;
+      uint32_t classStartOffset = 0, classEndOffset = 0;
+      GetClassConstructorOperands(pc, &atomIndex, &classStartOffset,
+                                  &classEndOffset);
+      RootedValue v(cx, StringValue(script->getAtom(atomIndex)));
+      UniqueChars bytes = ToDisassemblySource(cx, v);
+      if (!bytes) {
+        return 0;
+      }
+      if (!sp->jsprintf(" %s (off: %u-%u)", bytes.get(), classStartOffset,
+                        classEndOffset)) {
+        return 0;
+      }
+      break;
+    }
 
     case JOF_ARGC:
     case JOF_UINT16:
@@ -2080,6 +2098,7 @@ bool ExpressionDecompiler::decompilePC(jsbytecode* pc, uint8_t defIndex) {
 
       case JSOP_NEWINIT:
       case JSOP_NEWOBJECT:
+      case JSOP_NEWOBJECT_WITHGROUP:
       case JSOP_OBJWITHPROTO:
         return write("OBJ");
 

@@ -8,11 +8,8 @@
 #include "nsJSEnvironment.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptObjectPrincipal.h"
-#include "nsIDOMChromeWindow.h"
 #include "nsPIDOMWindow.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsDOMCID.h"
-#include "nsIServiceManager.h"
 #include "nsIXPConnect.h"
 #include "nsCOMPtr.h"
 #include "nsISupportsPrimitives.h"
@@ -23,10 +20,8 @@
 #include "nsIDocShellTreeItem.h"
 #include "nsPresContext.h"
 #include "nsIConsoleService.h"
-#include "nsIScriptError.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIPrompt.h"
 #include "nsIObserverService.h"
 #include "nsITimer.h"
 #include "nsAtom.h"
@@ -35,7 +30,6 @@
 #include "nsIContent.h"
 #include "nsCycleCollector.h"
 #include "nsXPCOMCIDInternal.h"
-#include "nsIXULRuntime.h"
 #include "nsTextFormatter.h"
 #ifdef XP_WIN
 #  include <process.h>
@@ -46,12 +40,11 @@
 #include "xpcpublic.h"
 
 #include "jsapi.h"
+#include "js/Array.h"  // JS::NewArrayObject
 #include "js/PropertySpec.h"
 #include "js/SliceBudget.h"
 #include "js/Wrapper.h"
 #include "nsIArray.h"
-#include "nsIObjectInputStream.h"
-#include "nsIObjectOutputStream.h"
 #include "WrapperFactory.h"
 #include "nsGlobalWindow.h"
 #include "mozilla/AutoRestore.h"
@@ -90,7 +83,6 @@
 #include "nsCycleCollectionNoteRootCallback.h"
 #include "GeckoProfiler.h"
 #include "mozilla/IdleTaskRunner.h"
-#include "nsIDocShell.h"
 #include "nsViewManager.h"
 #include "mozilla/EventStateManager.h"
 
@@ -148,6 +140,8 @@ static const uint32_t kCCPurpleLimit = 200;
 
 // if you add statics here, add them to the list in StartupJSEnvironment
 
+enum class CCRunnerState { Inactive, EarlyTimer, LateTimer, FinalTimer };
+
 static nsITimer* sGCTimer;
 static nsITimer* sShrinkingGCTimer;
 static StaticRefPtr<IdleTaskRunner> sCCRunner;
@@ -161,6 +155,8 @@ static TimeStamp sLastForgetSkippableCycleEndTime;
 
 static TimeStamp sCurrentGCStartTime;
 
+static CCRunnerState sCCRunnerState = CCRunnerState::Inactive;
+static TimeDuration sCCDelay = kCCDelay;
 static bool sCCLockedOut;
 static TimeStamp sCCLockedOutTime;
 
@@ -171,7 +167,7 @@ static bool sHasRunGC;
 static uint32_t sCCollectedWaitingForGC;
 static uint32_t sCCollectedZonesWaitingForGC;
 static uint32_t sLikelyShortLivingObjectsNeedingGC;
-static int32_t sCCRunnerFireCount = 0;
+static int32_t sCCRunnerEarlyFireCount = 0;
 static uint32_t sPreviousSuspectedCount = 0;
 static uint32_t sCleanupsSinceLastGC = UINT32_MAX;
 static bool sNeedsFullCC = false;
@@ -733,7 +729,7 @@ nsresult nsJSContext::SetProperty(JS::Handle<JSObject*> aTarget,
     }
   }
 
-  JS::Rooted<JSObject*> array(cx, ::JS_NewArrayObject(cx, args));
+  JS::Rooted<JSObject*> array(cx, JS::NewArrayObject(cx, args));
   if (!array) {
     return NS_ERROR_FAILURE;
   }
@@ -1812,92 +1808,142 @@ static bool ShouldTriggerCC(uint32_t aSuspected) {
           TimeUntilNow(sLastCCEndTime) > kCCForced);
 }
 
+static inline bool ShouldFireForgetSkippable(uint32_t aSuspected) {
+  // Only do a forget skippable if there are more than a few new objects
+  // or we're doing the initial forget skippables.
+  return ((sPreviousSuspectedCount + 100) <= aSuspected) ||
+         sCleanupsSinceLastGC < kMajorForgetSkippableCalls;
+}
+
+static inline bool IsLastEarlyCCTimer(int32_t aCurrentFireCount) {
+  int32_t numEarlyTimerFires =
+      std::max(int32_t(sCCDelay / kCCSkippableDelay) - 2, 1);
+
+  return aCurrentFireCount >= numEarlyTimerFires;
+}
+
+static void ActivateCCRunner() {
+  MOZ_ASSERT(sCCRunnerState == CCRunnerState::Inactive);
+  sCCRunnerState = CCRunnerState::EarlyTimer;
+  sCCDelay = kCCDelay;
+  sCCRunnerEarlyFireCount = 0;
+}
+
 static bool CCRunnerFired(TimeStamp aDeadline) {
   if (sDidShutdown) {
     return false;
   }
 
-  static TimeDuration ccDelay = kCCDelay;
   if (sCCLockedOut) {
-    ccDelay = kCCDelay / int64_t(3);
-
     TimeStamp now = TimeStamp::Now();
     if (!sCCLockedOutTime) {
-      // Reset sCCRunnerFireCount so that we run forgetSkippable
-      // often enough before CC. Because of reduced ccDelay
-      // forgetSkippable will be called just a few times.
-      // kMaxCCLockedoutTime limit guarantees that we end up calling
+      // Reset our state so that we run forgetSkippable often enough before
+      // CC. Because of reduced sCCDelay forgetSkippable will be called just a
+      // few times. kMaxCCLockedoutTime limit guarantees that we end up calling
       // forgetSkippable and CycleCollectNow eventually.
-      sCCRunnerFireCount = 0;
+      sCCRunnerState = CCRunnerState::EarlyTimer;
+      sCCRunnerEarlyFireCount = 0;
+      sCCDelay = kCCDelay / int64_t(3);
       sCCLockedOutTime = now;
       return false;
     }
+
     if (now - sCCLockedOutTime < kMaxCCLockedoutTime) {
       return false;
     }
   }
 
-  ++sCCRunnerFireCount;
-
   bool didDoWork = false;
+  bool finished = false;
 
-  // During early timer fires, we only run forgetSkippable. During the first
-  // late timer fire, we decide if we are going to have a second and final
-  // late timer fire, where we may begin to run the CC. Should run at least one
-  // early timer fire to allow cleanup before the CC.
-  int32_t numEarlyTimerFires =
-      std::max(int32_t(ccDelay / kCCSkippableDelay) - 2, 1);
-  bool isLateTimerFire = sCCRunnerFireCount > numEarlyTimerFires;
   uint32_t suspected = nsCycleCollector_suspectedCount();
-  if (isLateTimerFire && ShouldTriggerCC(suspected)) {
-    if (sCCRunnerFireCount == numEarlyTimerFires + 1) {
-      FireForgetSkippable(suspected, true, aDeadline);
-      didDoWork = true;
-      if (ShouldTriggerCC(nsCycleCollector_suspectedCount())) {
-        // Our efforts to avoid a CC have failed, so we return to let the
-        // timer fire once more to trigger a CC.
 
-        if (!aDeadline.IsNull() && TimeStamp::Now() < aDeadline) {
-          // Clear content unbinder before the first CC slice.
-          Element::ClearContentUnbinder();
-
-          if (TimeStamp::Now() < aDeadline) {
-            // And trigger deferred deletion too.
-            nsCycleCollector_doDeferredDeletion();
-          }
-        }
-        return didDoWork;
+  switch (sCCRunnerState) {
+    case CCRunnerState::EarlyTimer:
+      ++sCCRunnerEarlyFireCount;
+      if (IsLastEarlyCCTimer(sCCRunnerEarlyFireCount)) {
+        sCCRunnerState = CCRunnerState::LateTimer;
       }
-    } else {
+
+      if (ShouldFireForgetSkippable(suspected)) {
+        FireForgetSkippable(suspected, /* aRemoveChildless = */ false,
+                            aDeadline);
+        didDoWork = true;
+        break;
+      }
+
+      if (aDeadline.IsNull()) {
+        break;
+      }
+
+      // If we're called during idle time, try to find some work to do by
+      // advancing to the next state, effectively bypassing some possible forget
+      // skippable calls.
+      MOZ_ASSERT(!didDoWork);
+
+      sCCRunnerState = CCRunnerState::LateTimer;
+      MOZ_FALLTHROUGH;
+
+    case CCRunnerState::LateTimer:
+      if (!ShouldTriggerCC(suspected)) {
+        if (ShouldFireForgetSkippable(suspected)) {
+          FireForgetSkippable(suspected, /* aRemoveChildless = */ false,
+                              aDeadline);
+          didDoWork = true;
+        }
+        finished = true;
+        break;
+      }
+
+      FireForgetSkippable(suspected, /* aRemoveChildless = */ true, aDeadline);
+      didDoWork = true;
+      if (!ShouldTriggerCC(nsCycleCollector_suspectedCount())) {
+        finished = true;
+        break;
+      }
+
+      // Our efforts to avoid a CC have failed, so we return to let the
+      // timer fire once more to trigger a CC.
+      sCCRunnerState = CCRunnerState::FinalTimer;
+
+      if (!aDeadline.IsNull() && TimeStamp::Now() < aDeadline) {
+        // Clear content unbinder before the first CC slice.
+        Element::ClearContentUnbinder();
+
+        if (TimeStamp::Now() < aDeadline) {
+          // And trigger deferred deletion too.
+          nsCycleCollector_doDeferredDeletion();
+        }
+      }
+
+      break;
+
+    case CCRunnerState::FinalTimer:
+      if (!ShouldTriggerCC(suspected)) {
+        if (ShouldFireForgetSkippable(suspected)) {
+          FireForgetSkippable(suspected, /* aRemoveChildless = */ false,
+                              aDeadline);
+          didDoWork = true;
+        }
+        finished = true;
+        break;
+      }
+
       // We are in the final timer fire and still meet the conditions for
       // triggering a CC. Let RunCycleCollectorSlice finish the current IGC, if
       // any because that will allow us to include the GC time in the CC pause.
       nsJSContext::RunCycleCollectorSlice(aDeadline);
       didDoWork = true;
-    }
-  } else if (((sPreviousSuspectedCount + 100) <= suspected) ||
-             (sCleanupsSinceLastGC < kMajorForgetSkippableCalls)) {
-    // Only do a forget skippable if there are more than a few new objects
-    // or we're doing the initial forget skippables.
-    FireForgetSkippable(suspected, false, aDeadline);
-    didDoWork = true;
-  } else if (!isLateTimerFire && !aDeadline.IsNull()) {
-    MOZ_ASSERT(!didDoWork);
-    // If we're called during idle time, try to find some work to do by calling
-    // the method recursively, effectively bypassing some possible forget
-    // skippable calls.
-    sCCRunnerFireCount = numEarlyTimerFires;
-    return CCRunnerFired(aDeadline);
+      finished = true;
+      break;
+
+    default:
+      MOZ_CRASH("Unexpected CCRunner state");
   }
 
-  if (isLateTimerFire) {
-    ccDelay = kCCDelay;
-
-    // We have either just run the CC or decided we don't want to run the CC
-    // next time, so kill the timer.
+  if (finished) {
     sPreviousSuspectedCount = 0;
     nsJSContext::KillCCRunner();
-
     if (!didDoWork) {
       sLastForgetSkippableCycleEndTime = TimeStamp::Now();
     }
@@ -2092,11 +2138,10 @@ void nsJSContext::MaybePokeCC() {
   }
 
   if (ShouldTriggerCC(nsCycleCollector_suspectedCount())) {
-    sCCRunnerFireCount = 0;
-
     // We can kill some objects before running forgetSkippable.
     nsCycleCollector_dispatchDeferredDeletion();
 
+    ActivateCCRunner();
     sCCRunner = IdleTaskRunner::Create(
         CCRunnerFired, "MaybePokeCC::CCRunnerFired",
         kCCSkippableDelay.ToMilliseconds(),
@@ -2138,6 +2183,7 @@ void nsJSContext::KillShrinkingGCTimer() {
 // static
 void nsJSContext::KillCCRunner() {
   sCCLockedOutTime = TimeStamp();
+  sCCRunnerState = CCRunnerState::Inactive;
   if (sCCRunner) {
     sCCRunner->Cancel();
     sCCRunner = nullptr;

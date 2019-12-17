@@ -2383,10 +2383,11 @@ void InitializeFeatures(const Renderer11DeviceCaps &deviceCaps,
 {
     bool is9_3 = (deviceCaps.featureLevel <= D3D_FEATURE_LEVEL_9_3);
 
-    features->mrtPerfWorkaround.enabled                = true;
-    features->setDataFasterThanImageUpload.enabled     = true;
-    features->zeroMaxLodWorkaround.enabled             = is9_3;
-    features->useInstancedPointSpriteEmulation.enabled = is9_3;
+    features->mrtPerfWorkaround.enabled                           = true;
+    features->setDataFasterThanImageUpload.enabled                = true;
+    features->setDataFasterThanImageUploadOn128bitFormats.enabled = true;
+    features->zeroMaxLodWorkaround.enabled                        = is9_3;
+    features->useInstancedPointSpriteEmulation.enabled            = is9_3;
 
     // TODO(jmadill): Narrow problematic driver range.
     if (IsNvidia(adapterDesc.VendorId))
@@ -2426,12 +2427,13 @@ void InitializeFeatures(const Renderer11DeviceCaps &deviceCaps,
             features->callClearTwice.enabled    = capsVersion < IntelDriverVersion(4771);
             features->emulateIsnanFloat.enabled = capsVersion < IntelDriverVersion(4542);
         }
-        else if (IsBroadwell(adapterDesc.DeviceId) || IsHaswell(adapterDesc.DeviceId))
+        else if (IsBroadwell(adapterDesc.DeviceId) || IsHaswell(adapterDesc.DeviceId) ||
+                 IsIvyBridge(adapterDesc.DeviceId))
         {
             features->rewriteUnaryMinusOperator.enabled = capsVersion < IntelDriverVersion(4624);
 
-            // Haswell drivers occasionally corrupt (small?) (vertex?) texture data uploads.
-            features->setDataFasterThanImageUpload.enabled = false;
+            // Haswell drivers occasionally corrupt (small?) (vertex?) texture data uploads for 128bit formats.
+            features->setDataFasterThanImageUploadOn128bitFormats.enabled = false;
         }
     }
 

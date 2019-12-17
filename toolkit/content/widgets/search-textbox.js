@@ -150,7 +150,7 @@
         // Hack for the button to get the right accessible:
         // If you update the 'onclick' event handler code within the
         // _searchButtonIcon you also have to update the sha512 hash in the
-        // CSP of about:addons within extensions.xul.
+        // CSP of about:addons within extensions.xhtml.
         this._searchButtonIcon.setAttribute("onclick", "true");
       } else {
         this.removeAttribute("searchbutton");
@@ -199,16 +199,6 @@
 
     get disabled() {
       return this.inputField.disabled;
-    }
-
-    reset() {
-      this.value = this.defaultValue;
-      // XXX: Is this still needed ?
-      try {
-        this.editor.transactionManager.clear();
-        return true;
-      } catch (e) {}
-      return false;
     }
 
     _fireCommand(me) {

@@ -18,7 +18,6 @@
 #include "mozilla/ipc/Transport.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/webrender/WebRenderTypes.h"
-#include "nsIObserverService.h"
 #include "nsThreadUtils.h"
 class nsBaseWidget;
 
@@ -107,7 +106,8 @@ class GPUProcessManager final : public GPUProcessHost::Listener {
       nsTArray<uint32_t>* aNamespaces);
 
   // Initialize GPU process with consuming end of PVideoBridge.
-  void InitVideoBridge(mozilla::ipc::Endpoint<PVideoBridgeParent>&& aVideoBridge);
+  void InitVideoBridge(
+      mozilla::ipc::Endpoint<PVideoBridgeParent>&& aVideoBridge);
 
   // Maps the layer tree and process together so that aOwningPID is allowed
   // to access aLayersId across process.

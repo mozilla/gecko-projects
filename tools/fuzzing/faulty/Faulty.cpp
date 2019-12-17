@@ -24,8 +24,8 @@
 #include "chrome/common/file_descriptor_set_posix.h"
 #include "mozilla/ipc/Faulty.h"
 #include "mozilla/TypeTraits.h"
+#include "nsComponentManagerUtils.h"
 #include "nsNetCID.h"
-#include "nsIEventTarget.h"
 #include "nsIFile.h"
 #include "nsIFileStreams.h"
 #include "nsILineInputStream.h"
@@ -166,7 +166,7 @@ Faulty::Faulty()
       mIsValidProcessType(IsValidProcessType()) {
   if (mIsValidProcessType) {
     FAULTY_LOG("Initializing for new process of type '%s' with pid %u.",
-               XRE_GeckoProcessTypeToString(XRE_GetProcessType()), getpid());
+               XRE_GetProcessTypeString(), getpid());
 
     /* Setup random seed. */
     const char* userSeed = PR_GetEnv("FAULTY_SEED");
@@ -230,7 +230,7 @@ bool Faulty::IsValidProcessType(void) {
 
   if (!isValidProcessType) {
     FAULTY_LOG("Disabled for this process of type '%s' with pid %d.",
-               XRE_GeckoProcessTypeToString(XRE_GetProcessType()), getpid());
+               XRE_GetProcessTypeString(), getpid());
   }
 
   return isValidProcessType;

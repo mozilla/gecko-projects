@@ -542,6 +542,8 @@ class UrlbarQueryContext {
    *   Whether or not to allow providers to include autofill results.
    * @param {number} options.userContextId
    *   The container id where this context was generated, if any.
+   * @param {array} [options.sources]
+   *   A list of acceptable UrlbarUtils.RESULT_SOURCE for the context.
    */
   constructor(options = {}) {
     this._checkRequiredOptions(options, [
@@ -557,22 +559,24 @@ class UrlbarQueryContext {
       );
     }
 
-    if (
-      options.providers &&
-      (!Array.isArray(options.providers) || !options.providers.length)
-    ) {
-      throw new Error(`Invalid providers list`);
+    if (options.providers) {
+      if (!Array.isArray(options.providers) || !options.providers.length) {
+        throw new Error(`Invalid providers list`);
+      }
+      this.providers = options.providers;
     }
 
-    if (
-      options.sources &&
-      (!Array.isArray(options.sources) || !options.sources.length)
-    ) {
-      throw new Error(`Invalid sources list`);
+    if (options.sources) {
+      if (!Array.isArray(options.sources) || !options.sources.length) {
+        throw new Error(`Invalid sources list`);
+      }
+      this.sources = options.sources;
     }
 
     this.lastResultCount = 0;
-    this.userContextId = options.userContextId;
+    this.userContextId =
+      options.userContextId ||
+      Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID;
   }
 
   /**

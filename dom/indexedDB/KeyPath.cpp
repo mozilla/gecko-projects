@@ -14,6 +14,7 @@
 #include "nsPrintfCString.h"
 #include "xpcpublic.h"
 
+#include "js/Array.h"  // JS::NewArrayObject
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/Blob.h"
 #include "mozilla/dom/BlobBinding.h"
@@ -36,13 +37,13 @@ bool IsValidKeyPathString(const nsAString& aKeyPath) {
   KeyPathTokenizer tokenizer(aKeyPath, '.');
 
   while (tokenizer.hasMoreTokens()) {
-    nsString token(tokenizer.nextToken());
+    const auto& token = tokenizer.nextToken();
 
     if (!token.Length()) {
       return false;
     }
 
-    if (!JS_IsIdentifier(token.get(), token.Length())) {
+    if (!JS_IsIdentifier(token.Data(), token.Length())) {
       return false;
     }
   }
@@ -76,7 +77,7 @@ nsresult GetJSValFromKeyPathString(
   JS::Rooted<JSObject*> obj(aCx);
 
   while (tokenizer.hasMoreTokens()) {
-    const nsDependentSubstring& token = tokenizer.nextToken();
+    const auto& token = tokenizer.nextToken();
 
     NS_ASSERTION(!token.IsEmpty(), "Should be a valid keypath");
 
@@ -373,7 +374,7 @@ nsresult KeyPath::ExtractKeyAsJSVal(JSContext* aCx, const JS::Value& aValue,
   }
 
   const uint32_t len = mStrings.Length();
-  JS::Rooted<JSObject*> arrayObj(aCx, JS_NewArrayObject(aCx, len));
+  JS::Rooted<JSObject*> arrayObj(aCx, JS::NewArrayObject(aCx, len));
   if (!arrayObj) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
@@ -472,7 +473,7 @@ KeyPath KeyPath::DeserializeFromString(const nsAString& aString) {
       // There is a trailing comma, indicating the original KeyPath has
       // a trailing empty string, i.e. [..., '']. We should append this
       // empty string.
-      keyPath.mStrings.AppendElement(nsString{});
+      keyPath.mStrings.EmplaceBack();
     }
 
     return keyPath;
@@ -488,7 +489,7 @@ nsresult KeyPath::ToJSVal(JSContext* aCx,
                           JS::MutableHandle<JS::Value> aValue) const {
   if (IsArray()) {
     uint32_t len = mStrings.Length();
-    JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, len));
+    JS::Rooted<JSObject*> array(aCx, JS::NewArrayObject(aCx, len));
     if (!array) {
       IDB_WARNING("Failed to make array!");
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;

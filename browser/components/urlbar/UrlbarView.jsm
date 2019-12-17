@@ -10,7 +10,6 @@ const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
 );
 XPCOMUtils.defineLazyModuleGetters(this, {
-  UrlbarContextualTip: "resource:///modules/UrlbarContextualTip.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
@@ -20,12 +19,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 // by setting UrlbarView.removeStaleRowsTimeout.
 const DEFAULT_REMOVE_STALE_ROWS_TIMEOUT = 400;
 
-// The classNames of view elements that can be selected.
-const SELECTABLE_ELEMENTS = [
-  "urlbarView-row",
-  "urlbarView-tip-button",
-  "urlbarView-tip-help",
-];
+const getBoundsWithoutFlushing = element =>
+  element.ownerGlobal.windowUtils.getBoundsWithoutFlushing(element);
 
 /**
  * Receives and displays address bar autocomplete results.
@@ -57,76 +52,10 @@ class UrlbarView {
     this._rows.addEventListener("overflow", this);
     this._rows.addEventListener("underflow", this);
 
-    this.window.addEventListener("deactivate", this);
     this.window.gBrowser.tabContainer.addEventListener("TabSelect", this);
 
     this.controller.setView(this);
     this.controller.addQueryListener(this);
-  }
-
-  /**
-   * Sets the icon, title, button's title, and link's title
-   * for the contextual tip. If a contextual tip has not
-   * been created, then it will be created.
-   *
-   * @param {object} details
-   * @param {string} details.title
-   *   Main title displayed by the contextual tip.
-   * @param {string} [details.buttonTitle]
-   *   Title of the button on the contextual tip.
-   *   If omitted then the button will be hidden.
-   * @param {string} [details.linkTitle]
-   *   Title of the link on the contextual tip.
-   *   If omitted then the link will be hidden.
-   * @param {string} [details.iconStyle]
-   *   A non-empty string of styles to add to the icon's style attribute.
-   *   These styles set CSS variables to URLs of images;
-   *   the CSS variables responsible for the icon's background image are
-   *   the variable names containing `--webextension-contextual-tip-icon`
-   *   in `browser/base/content/browser.css`.
-   *   If ommited, no changes are made to the icon.
-   */
-  setContextualTip(details) {
-    if (!this.contextualTip) {
-      this.contextualTip = new UrlbarContextualTip(this);
-    }
-    this.contextualTip.set(details);
-
-    // Disable one off search buttons from appearing if
-    // the contextual tip is the only item in the urlbar view.
-    if (this.visibleRowCount == 0) {
-      this._enableOrDisableOneOffSearches(false);
-    }
-
-    this._openPanel();
-  }
-
-  /**
-   * Hides the contextual tip.
-   */
-  hideContextualTip() {
-    if (this.contextualTip) {
-      this.contextualTip.hide();
-
-      // When the pending query has finished and there's 0 results then
-      // close the urlbar view.
-      this.input.lastQueryContextPromise.then(() => {
-        if (this.visibleRowCount == 0) {
-          this.close();
-        }
-      });
-    }
-  }
-
-  /**
-   * Removes the contextual tip from the DOM.
-   */
-  removeContextualTip() {
-    if (!this.contextualTip) {
-      return;
-    }
-    this.contextualTip.remove();
-    this.contextualTip = null;
   }
 
   get oneOffSearchButtons() {
@@ -288,11 +217,13 @@ class UrlbarView {
   }
 
   /**
+   * Returns the result of the row containing the given element, or the result
+   * of the element if it itself is a row.
+   *
    * @param {Element} element
    *   An element in the view.
    * @returns {UrlbarResult}
-   *   The result attached to parameter `element`, if `element` is a row or a
-   *   decendant of a row.
+   *   The result of the element's row.
    */
   getResultFromElement(element) {
     if (!this.isOpen) {
@@ -306,6 +237,31 @@ class UrlbarView {
     }
 
     return row.result;
+  }
+
+  /**
+   * Returns the element closest to the given element that can be
+   * selected/picked.  If the element itself can be selected, it's returned.  If
+   * there is no such element, null is returned.
+   *
+   * @param {Element} element
+   *   An element in the view.
+   * @returns {Element}
+   *   The closest element that can be picked including the element itself, or
+   *   null if there is no such element.
+   */
+  getClosestSelectableElement(element) {
+    let result = this.getResultFromElement(element);
+    if (result && result.type == UrlbarUtils.RESULT_TYPE.TIP) {
+      if (
+        element.classList.contains("urlbarView-tip-button") ||
+        element.classList.contains("urlbarView-tip-help")
+      ) {
+        return element;
+      }
+      return null;
+    }
+    return element.closest(".urlbarView-row");
   }
 
   /**
@@ -404,15 +360,34 @@ class UrlbarView {
     this.window.removeEventListener("resize", this);
 
     this.controller.notify(this.controller.NOTIFICATIONS.VIEW_CLOSE);
-    if (this.contextualTip) {
-      this.contextualTip.hide();
-    }
   }
 
-  reOpen() {
-    if (this._rows.firstElementChild) {
-      this._openPanel();
+  maybeReopen() {
+    // Reopen if we have cached results and the input is focused, unless the
+    // search string is empty or different. We don't restore the empty search
+    // because this is supposed to restore the search status when the user
+    // abandoned a search engagement, just opening the dropdown is not
+    // considered a sufficient engagement.
+    if (
+      this.input.megabar &&
+      this._rows.firstElementChild &&
+      this.input.focused &&
+      this.input.value &&
+      this._queryContext.searchString == this.input.value &&
+      this.input.getAttribute("pageproxystate") != "valid"
+    ) {
+      // In some cases where we can move across tabs with an open panel.
+      if (!this.isOpen) {
+        this._openPanel();
+      }
+      this.input.startQuery({
+        autofillIgnoresSelection: true,
+        searchString: this.input.value,
+        allowAutofill: this._queryContext.allowAutofill,
+      });
+      return true;
     }
+    return false;
   }
 
   // UrlbarController listener methods.
@@ -553,8 +528,6 @@ class UrlbarView {
     this.panel.removeAttribute("actionoverride");
 
     if (!this.input.megabar) {
-      let getBoundsWithoutFlushing = element =>
-        this.window.windowUtils.getBoundsWithoutFlushing(element);
       let px = number => number.toFixed(2) + "px";
       let inputRect = getBoundsWithoutFlushing(this.input.textbox);
 
@@ -623,6 +596,9 @@ class UrlbarView {
         );
       }
     }
+
+    this._enableOrDisableRowWrap();
+
     this.input.inputField.setAttribute("aria-expanded", "true");
     this.input.dropmarker.setAttribute("open", "true");
 
@@ -839,6 +815,14 @@ class UrlbarView {
     helpIcon.setAttribute("data-l10n-id", "urlbar-tip-help-icon");
     item._elements.set("helpButton", helpIcon);
     item._content.appendChild(helpIcon);
+
+    // Due to role=button, the button and help icon can sometimes become
+    // focused.  We want to prevent that because the input should always be
+    // focused instead.  (This happens when input.search("", { focus: false })
+    // is called, a tip is the first result but not heuristic, and the user tabs
+    // the into the button from the navbar buttons.  The input is skipped and
+    // the focus goes straight to the tip button.)
+    item.addEventListener("focus", () => this.input.focus(), true);
   }
 
   _updateRow(item, result) {
@@ -1322,6 +1306,14 @@ class UrlbarView {
     }
   }
 
+  _enableOrDisableRowWrap() {
+    if (getBoundsWithoutFlushing(this.input.textbox).width <= 500) {
+      this._rows.setAttribute("wrap", "true");
+    } else {
+      this._rows.removeAttribute("wrap");
+    }
+  }
+
   _setElementOverflowing(element, overflowing) {
     element.toggleAttribute("overflow", overflowing);
     if (overflowing) {
@@ -1397,11 +1389,12 @@ class UrlbarView {
       // Ignore right clicks.
       return;
     }
-    let target = event.target;
-    while (!SELECTABLE_ELEMENTS.includes(target.className)) {
-      target = target.parentNode;
+    let element = this.getClosestSelectableElement(event.target);
+    if (!element) {
+      // Ignore clicks on elements that can't be selected/picked.
+      return;
     }
-    this._selectElement(target, { updateInput: false });
+    this._selectElement(element, { updateInput: false });
     this.controller.speculativeConnect(
       this.selectedResult,
       this._queryContext,
@@ -1414,7 +1407,12 @@ class UrlbarView {
       // Ignore right clicks.
       return;
     }
-    this.input.pickElement(event.target, event);
+    let element = this.getClosestSelectableElement(event.target);
+    if (!element) {
+      // Ignore clicks on elements that can't be selected/picked.
+      return;
+    }
+    this.input.pickElement(element, event);
   }
 
   _on_overflow(event) {
@@ -1439,6 +1437,7 @@ class UrlbarView {
 
   _on_resize() {
     if (this.input.megabar) {
+      this._enableOrDisableRowWrap();
       return;
     }
 
@@ -1455,20 +1454,15 @@ class UrlbarView {
     this.close();
   }
 
-  _on_deactivate() {
-    // When switching to another browser window, open tabs, history or other
-    // data sources are likely to change, so make sure we don't re-show stale
-    // results when switching back.
-    if (!UrlbarPrefs.get("ui.popup.disable_autohide")) {
-      this.clear();
-    }
-  }
-
   _on_TabSelect() {
+    // A TabSelect doesn't always change urlbar focus, so we must try to reopen
+    // here too, not just on focus.
+    if (this.maybeReopen()) {
+      return;
+    }
     // The input may retain focus when switching tabs in which case we
     // need to close the view explicitly.
     this.close();
-    this.clear();
   }
 }
 

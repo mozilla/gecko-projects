@@ -167,12 +167,9 @@ static bool CanInlineCrossRealm(InlinableNative native) {
     case InlinableNative::IntrinsicTypedArrayByteOffset:
     case InlinableNative::IntrinsicTypedArrayElementShift:
     case InlinableNative::IntrinsicObjectIsTypedObject:
-    case InlinableNative::IntrinsicObjectIsTransparentTypedObject:
-    case InlinableNative::IntrinsicObjectIsOpaqueTypedObject:
     case InlinableNative::IntrinsicObjectIsTypeDescr:
     case InlinableNative::IntrinsicTypeDescrIsSimpleType:
     case InlinableNative::IntrinsicTypeDescrIsArrayType:
-    case InlinableNative::IntrinsicSetTypedObjectOffset:
     case InlinableNative::IntrinsicArrayIteratorPrototypeOptimizable:
       MOZ_CRASH("Unexpected cross-realm intrinsic call");
 
@@ -576,12 +573,6 @@ IonBuilder::InliningResult IonBuilder::inlineNativeCall(CallInfo& callInfo,
                             &OutlineOpaqueTypedObject::class_,
                             &InlineTransparentTypedObject::class_,
                             &InlineOpaqueTypedObject::class_);
-    case InlinableNative::IntrinsicObjectIsTransparentTypedObject:
-      return inlineHasClass(callInfo, &OutlineTransparentTypedObject::class_,
-                            &InlineTransparentTypedObject::class_);
-    case InlinableNative::IntrinsicObjectIsOpaqueTypedObject:
-      return inlineHasClass(callInfo, &OutlineOpaqueTypedObject::class_,
-                            &InlineOpaqueTypedObject::class_);
     case InlinableNative::IntrinsicObjectIsTypeDescr:
       return inlineObjectIsTypeDescr(callInfo);
     case InlinableNative::IntrinsicTypeDescrIsSimpleType:
@@ -589,8 +580,6 @@ IonBuilder::InliningResult IonBuilder::inlineNativeCall(CallInfo& callInfo,
                             &ReferenceTypeDescr::class_);
     case InlinableNative::IntrinsicTypeDescrIsArrayType:
       return inlineHasClass(callInfo, &ArrayTypeDescr::class_);
-    case InlinableNative::IntrinsicSetTypedObjectOffset:
-      return inlineSetTypedObjectOffset(callInfo);
     case InlinableNative::Limit:
       break;
   }
@@ -817,15 +806,19 @@ IonBuilder::InliningResult IonBuilder::inlineArray(CallInfo& callInfo,
 
   MOZ_TRY(jsop_newarray(templateObject, initLength));
 
-  MDefinition* array = current->peek(-1);
+  MNewArray* array = current->peek(-1)->toNewArray();
   if (callInfo.argc() >= 2) {
     for (uint32_t i = 0; i < initLength; i++) {
       if (!alloc().ensureBallast()) {
         return abort(AbortReason::Alloc);
       }
       MDefinition* value = callInfo.getArg(i);
-      MOZ_TRY(initializeArrayElement(array, i, value,
-                                     /* addResumePoint = */ false));
+
+      MConstant* id = MConstant::New(alloc(), Int32Value(i));
+      current->add(id);
+
+      MOZ_TRY(initArrayElementFastPath(array, id, value,
+                                       /* addResumePoint = */ false));
     }
 
     MInstruction* setLength = setInitializedLength(array, initLength);
@@ -3421,50 +3414,6 @@ IonBuilder::InliningResult IonBuilder::inlineObjectIsTypeDescr(
   return InliningStatus_Inlined;
 }
 
-IonBuilder::InliningResult IonBuilder::inlineSetTypedObjectOffset(
-    CallInfo& callInfo) {
-  MOZ_ASSERT(!callInfo.constructing());
-  MOZ_ASSERT(callInfo.argc() == 2);
-
-  MDefinition* typedObj = callInfo.getArg(0);
-  MDefinition* offset = callInfo.getArg(1);
-
-  // Return type should be undefined or something wacky is going on.
-  if (getInlineReturnType() != MIRType::Undefined) {
-    return InliningStatus_NotInlined;
-  }
-
-  // Check typedObj is a, well, typed object. Go ahead and use TI
-  // data. If this check should fail, that is almost certainly a bug
-  // in self-hosted code -- either because it's not being careful
-  // with TI or because of something else -- but we'll just let it
-  // fall through to the SetTypedObjectOffset intrinsic in such
-  // cases.
-  TemporaryTypeSet* types = typedObj->resultTypeSet();
-  if (typedObj->type() != MIRType::Object || !types) {
-    return InliningStatus_NotInlined;
-  }
-  switch (types->forAllClasses(constraints(), IsTypedObjectClass)) {
-    case TemporaryTypeSet::ForAllResult::ALL_FALSE:
-    case TemporaryTypeSet::ForAllResult::EMPTY:
-    case TemporaryTypeSet::ForAllResult::MIXED:
-      return InliningStatus_NotInlined;
-    case TemporaryTypeSet::ForAllResult::ALL_TRUE:
-      break;
-  }
-
-  // Check type of offset argument is an integer.
-  if (offset->type() != MIRType::Int32) {
-    return InliningStatus_NotInlined;
-  }
-
-  callInfo.setImplicitlyUsedUnchecked();
-  MInstruction* ins = MSetTypedObjectOffset::New(alloc(), typedObj, offset);
-  current->add(ins);
-  current->push(ins);
-  return InliningStatus_Inlined;
-}
-
 IonBuilder::InliningResult IonBuilder::inlineUnsafeSetReservedSlot(
     CallInfo& callInfo) {
   MOZ_ASSERT(!callInfo.constructing());
@@ -4291,7 +4240,7 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
     MDefinition* arg = i >= callInfo.argc() ? *undefined : callInfo.getArg(i);
 
     MInstruction* conversion = nullptr;
-    switch (sig.args()[i].code()) {
+    switch (sig.args()[i].kind()) {
       case wasm::ValType::I32:
         conversion = MTruncateToInt32::New(alloc(), arg);
         break;
@@ -4301,29 +4250,31 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
       case wasm::ValType::F64:
         conversion = MToDouble::New(alloc(), arg);
         break;
-      case wasm::ValType::AnyRef:
-        // Transform the JS representation into an AnyRef representation.  The
-        // resulting type is MIRType::RefOrNull.  These cases are all
-        // effect-free.
-        switch (arg->type()) {
-          case MIRType::Object:
-          case MIRType::ObjectOrNull:
-            conversion = MWasmAnyRefFromJSObject::New(alloc(), arg);
-            break;
-          case MIRType::Null:
-            conversion = MWasmNullConstant::New(alloc());
+      case wasm::ValType::Ref:
+        switch (sig.args()[i].refTypeKind()) {
+          case wasm::RefType::Any:
+            // Transform the JS representation into an AnyRef representation.
+            // The resulting type is MIRType::RefOrNull.  These cases are all
+            // effect-free.
+            switch (arg->type()) {
+              case MIRType::Object:
+              case MIRType::ObjectOrNull:
+                conversion = MWasmAnyRefFromJSObject::New(alloc(), arg);
+                break;
+              case MIRType::Null:
+                conversion = MWasmNullConstant::New(alloc());
+                break;
+              default:
+                conversion = MWasmBoxValue::New(alloc(), arg);
+                break;
+            }
             break;
           default:
-            conversion = MWasmBoxValue::New(alloc(), arg);
-            break;
+            MOZ_CRASH("impossible per above check");
         }
         break;
       case wasm::ValType::I64:
-      case wasm::ValType::FuncRef:
-      case wasm::ValType::Ref:
         MOZ_CRASH("impossible per above check");
-      case wasm::ValType::NullRef:
-        MOZ_CRASH("NullRef not expressible");
     }
 
     current->add(conversion);

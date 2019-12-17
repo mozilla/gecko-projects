@@ -15,10 +15,8 @@
 #include "MediaPlaybackDelayPolicy.h"
 #include "MediaPromiseDefs.h"
 #include "nsCycleCollectionParticipant.h"
-#include "nsIObserver.h"
 #include "mozilla/CORSMode.h"
 #include "DecoderTraits.h"
-#include "nsIAudioChannelAgent.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/StateWatching.h"
 #include "mozilla/WeakPtr.h"
@@ -162,6 +160,8 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   NS_IMPL_FROMNODE_HELPER(HTMLMediaElement,
                           IsAnyOfHTMLElements(nsGkAtoms::video,
                                               nsGkAtoms::audio))
+
+  NS_DECL_ADDSIZEOFEXCLUDINGTHIS
 
   // EventTarget
   void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;

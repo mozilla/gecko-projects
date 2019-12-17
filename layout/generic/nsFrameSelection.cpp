@@ -12,6 +12,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/PresShell.h"
@@ -30,7 +31,6 @@
 #include "nsTableCellFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsCCUncollectableMarker.h"
-#include "nsIDocumentEncoder.h"
 #include "nsTextFragment.h"
 #include <algorithm>
 #include "nsContentUtils.h"
@@ -54,7 +54,6 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "mozilla/MouseEvents.h"
 #include "mozilla/TextEvents.h"
 
-#include "nsITimer.h"
 // notifications
 #include "mozilla/dom/Document.h"
 
@@ -62,8 +61,6 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "nsCopySupport.h"
 #include "nsIClipboard.h"
 #include "nsIFrameInlines.h"
-
-#include "nsIBidiKeyboard.h"
 
 #include "nsError.h"
 #include "mozilla/AutoCopyListener.h"
@@ -603,8 +600,7 @@ void nsFrameSelection::Init(mozilla::PresShell* aPresShell,
                               : StaticPrefs::dom_select_events_enabled();
 
   Document* doc = aPresShell->GetDocument();
-  if (initSelectEvents ||
-      (doc && nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()))) {
+  if (initSelectEvents || (doc && doc->NodePrincipal()->IsSystemPrincipal())) {
     int8_t index = GetIndexFromSelectionType(SelectionType::eNormal);
     if (mDomSelections[index]) {
       mDomSelections[index]->EnableSelectionChangeEvent();

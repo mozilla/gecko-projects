@@ -14,6 +14,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoCopyListener.h"
 #include "mozilla/AutoRestore.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/ContentIterator.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/SelectionBinding.h"
@@ -63,10 +64,8 @@
 
 #include "nsISelectionController.h"  //for the enums
 #include "nsCopySupport.h"
-#include "nsIClipboard.h"
 #include "nsIFrameInlines.h"
 #include "nsRefreshDriver.h"
-#include "nsIBidiKeyboard.h"
 
 #include "nsError.h"
 #include "nsViewManager.h"
@@ -275,100 +274,6 @@ bool IsValidSelectionPoint(nsFrameSelection* aFrameSel, nsINode* aNode) {
   limiter = aFrameSel->GetAncestorLimiter();
   return !limiter || aNode->IsInclusiveDescendantOf(limiter);
 }
-
-namespace mozilla {
-struct MOZ_RAII AutoPrepareFocusRange {
-  AutoPrepareFocusRange(Selection* aSelection, bool aContinueSelection,
-                        bool aMultipleSelection
-                            MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
-    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-
-    if (aSelection->mRanges.Length() <= 1) {
-      return;
-    }
-
-    if (aSelection->mFrameSelection->IsUserSelectionReason()) {
-      mUserSelect.emplace(aSelection);
-    }
-    bool userSelection = aSelection->mUserInitiated;
-
-    nsTArray<RangeData>& ranges = aSelection->mRanges;
-    if (!userSelection || (!aContinueSelection && aMultipleSelection)) {
-      // Scripted command or the user is starting a new explicit multi-range
-      // selection.
-      for (RangeData& entry : ranges) {
-        entry.mRange->SetIsGenerated(false);
-      }
-      return;
-    }
-
-    int16_t reason = aSelection->mFrameSelection->mSelectionChangeReason;
-    bool isAnchorRelativeOp =
-        (reason & (nsISelectionListener::DRAG_REASON |
-                   nsISelectionListener::MOUSEDOWN_REASON |
-                   nsISelectionListener::MOUSEUP_REASON |
-                   nsISelectionListener::COLLAPSETOSTART_REASON));
-    if (!isAnchorRelativeOp) {
-      return;
-    }
-
-    // This operation is against the anchor but our current mAnchorFocusRange
-    // represents the focus in a multi-range selection.  The anchor from a user
-    // perspective is the most distant generated range on the opposite side.
-    // Find that range and make it the mAnchorFocusRange.
-    const size_t len = ranges.Length();
-    size_t newAnchorFocusIndex = size_t(-1);
-    if (aSelection->GetDirection() == eDirNext) {
-      for (size_t i = 0; i < len; ++i) {
-        if (ranges[i].mRange->IsGenerated()) {
-          newAnchorFocusIndex = i;
-          break;
-        }
-      }
-    } else {
-      size_t i = len;
-      while (i--) {
-        if (ranges[i].mRange->IsGenerated()) {
-          newAnchorFocusIndex = i;
-          break;
-        }
-      }
-    }
-
-    if (newAnchorFocusIndex == size_t(-1)) {
-      // There are no generated ranges - that's fine.
-      return;
-    }
-
-    // Setup the new mAnchorFocusRange and mark the old one as generated.
-    if (aSelection->mAnchorFocusRange) {
-      aSelection->mAnchorFocusRange->SetIsGenerated(true);
-    }
-    nsRange* range = ranges[newAnchorFocusIndex].mRange;
-    range->SetIsGenerated(false);
-    aSelection->mAnchorFocusRange = range;
-
-    // Remove all generated ranges (including the old mAnchorFocusRange).
-    RefPtr<nsPresContext> presContext = aSelection->GetPresContext();
-    size_t i = len;
-    while (i--) {
-      range = aSelection->mRanges[i].mRange;
-      if (range->IsGenerated()) {
-        range->SetSelection(nullptr);
-        aSelection->SelectFrames(presContext, range, false);
-        aSelection->mRanges.RemoveElementAt(i);
-      }
-    }
-    if (aSelection->mFrameSelection) {
-      aSelection->mFrameSelection->InvalidateDesiredPos();
-    }
-  }
-
-  Maybe<Selection::AutoUserInitiated> mUserSelect;
-  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
-};
-
-}  // namespace mozilla
 
 #ifdef PRINT_RANGE
 void printRange(nsRange* aDomRange) {
@@ -943,7 +848,7 @@ nsresult Selection::AddRangesForSelectableNodes(nsRange* aItem,
     Document* doc = GetDocument();
     bool selectEventsEnabled =
         StaticPrefs::dom_select_events_enabled() ||
-        (doc && nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()));
+        (doc && doc->NodePrincipal()->IsSystemPrincipal());
 
     if (!aNoStartSelect && mSelectionType == SelectionType::eNormal &&
         selectEventsEnabled && IsCollapsed() &&
@@ -2218,7 +2123,9 @@ void Selection::Collapse(const RawRangeBoundary& aPoint, ErrorResult& aRv) {
       aPoint.Container()->IsContent()) {
     int32_t frameOffset;
     nsTextFrame* f = do_QueryFrame(nsCaret::GetFrameAndOffset(
-        this, aPoint.Container(), aPoint.Offset(), &frameOffset));
+        this, aPoint.Container(),
+        *aPoint.Offset(RawRangeBoundary::OffsetFilter::kValidOffsets),
+        &frameOffset));
     if (f && f->IsAtEndOfLine() && f->HasSignificantTerminalNewline()) {
       // RawRangeBounary::Offset() causes computing offset if it's not been
       // done yet.  However, it's called only when the container is a text
@@ -2226,7 +2133,9 @@ void Selection::Collapse(const RawRangeBoundary& aPoint, ErrorResult& aRv) {
       // any children.  So, this doesn't cause computing offset with expensive
       // method, nsINode::ComputeIndexOf().
       if ((aPoint.Container()->AsContent() == f->GetContent() &&
-           f->GetContentEnd() == static_cast<int32_t>(aPoint.Offset())) ||
+           f->GetContentEnd() ==
+               static_cast<int32_t>(*aPoint.Offset(
+                   RawRangeBoundary::OffsetFilter::kValidOffsets))) ||
           (aPoint.Container() == f->GetContent()->GetParentNode() &&
            f->GetContent() == aPoint.GetPreviousSiblingOfChildAtOffset())) {
         frameSelection->SetHint(CARET_ASSOCIATE_AFTER);
@@ -3386,6 +3295,19 @@ void Selection::SetBaseAndExtentJS(nsINode& aAnchorNode, uint32_t aAnchorOffset,
   AutoRestore<bool> calledFromJSRestorer(mCalledByJS);
   mCalledByJS = true;
   SetBaseAndExtent(aAnchorNode, aAnchorOffset, aFocusNode, aFocusOffset, aRv);
+}
+
+void Selection::SetBaseAndExtent(nsINode& aAnchorNode, uint32_t aAnchorOffset,
+                                 nsINode& aFocusNode, uint32_t aFocusOffset,
+                                 ErrorResult& aRv) {
+  if ((aAnchorOffset > aAnchorNode.Length()) ||
+      (aFocusOffset > aFocusNode.Length())) {
+    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return;
+  }
+
+  SetBaseAndExtent(RawRangeBoundary{&aAnchorNode, aAnchorOffset},
+                   RawRangeBoundary{&aFocusNode, aFocusOffset}, aRv);
 }
 
 void Selection::SetBaseAndExtentInternal(InLimiter aInLimiter,

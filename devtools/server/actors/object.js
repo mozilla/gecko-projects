@@ -156,7 +156,10 @@ const proto = {
             return false;
           }
 
-          pauseAndRespond("getWatchpoint");
+          if (!this.thread.skipBreakpoints) {
+            pauseAndRespond("getWatchpoint");
+          }
+
           return desc.value;
         }),
       });
@@ -170,10 +173,14 @@ const proto = {
           const frame = this.thread.dbg.getNewestFrame();
 
           if (!this.thread.hasMoved(frame, "setWatchpoint")) {
+            desc.value = v;
             return;
           }
 
-          pauseAndRespond("setWatchpoint");
+          if (!this.thread.skipBreakpoints) {
+            pauseAndRespond("setWatchpoint");
+          }
+
           desc.value = v;
         }),
         get: this.obj.makeDebuggeeValue(() => {
@@ -188,13 +195,15 @@ const proto = {
       return;
     }
 
-    const { dbgDesc } = this._originalDescriptors.get(property);
+    const { dbgDesc, desc } = this._originalDescriptors.get(property);
     this._originalDescriptors.delete(property);
-    this.obj.defineProperty(property, dbgDesc);
+    this.obj.defineProperty(property, { ...dbgDesc, value: desc.value });
+
+    this.thread.demoteObjectGrip(this);
   },
 
   removeWatchpoints() {
-    this._originalDescriptors.forEach(property =>
+    this._originalDescriptors.forEach((_, property) =>
       this.removeWatchpoint(property)
     );
   },

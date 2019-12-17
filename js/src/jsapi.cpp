@@ -100,6 +100,7 @@
 #include "debugger/DebugAPI-inl.h"
 #include "vm/Compartment-inl.h"
 #include "vm/Interpreter-inl.h"
+#include "vm/IsGivenTypeObject-inl.h"  // js::IsGivenTypeObject
 #include "vm/JSAtom-inl.h"
 #include "vm/JSFunction-inl.h"
 #include "vm/JSScript-inl.h"
@@ -1717,6 +1718,16 @@ JS::RealmCreationOptions::setSharedMemoryAndAtomicsEnabled(bool flag) {
   return *this;
 }
 
+bool JS::RealmCreationOptions::getCoopAndCoepEnabled() const {
+  return coopAndCoep_;
+}
+
+JS::RealmCreationOptions& JS::RealmCreationOptions::setCoopAndCoepEnabled(
+    bool flag) {
+  coopAndCoep_ = flag;
+  return *this;
+}
+
 JS::RealmBehaviors& JS::RealmBehaviorsRef(JS::Realm* realm) {
   return realm->behaviors();
 }
@@ -3120,69 +3131,6 @@ JS_PUBLIC_API void JS_InitPrivate(JSObject* obj, void* data, size_t nbytes,
   InitObjectPrivate(&obj->as<NativeObject>(), data, nbytes, js::MemoryUse(use));
 }
 
-JS_PUBLIC_API JSObject* JS_NewArrayObject(
-    JSContext* cx, const JS::HandleValueArray& contents) {
-  MOZ_ASSERT(!cx->zone()->isAtomsZone());
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-
-  cx->check(contents);
-  return NewDenseCopiedArray(cx, contents.length(), contents.begin());
-}
-
-JS_PUBLIC_API JSObject* JS_NewArrayObject(JSContext* cx, size_t length) {
-  MOZ_ASSERT(!cx->zone()->isAtomsZone());
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-
-  return NewDenseFullyAllocatedArray(cx, length);
-}
-
-inline bool IsGivenTypeObject(JSContext* cx, JS::HandleObject obj,
-                              const ESClass& typeClass, bool* isType) {
-  cx->check(obj);
-
-  ESClass cls;
-  if (!GetBuiltinClass(cx, obj, &cls)) {
-    return false;
-  }
-
-  *isType = cls == typeClass;
-  return true;
-}
-
-JS_PUBLIC_API bool JS_IsArrayObject(JSContext* cx, JS::HandleObject obj,
-                                    bool* isArray) {
-  return IsGivenTypeObject(cx, obj, ESClass::Array, isArray);
-}
-
-JS_PUBLIC_API bool JS_IsArrayObject(JSContext* cx, JS::HandleValue value,
-                                    bool* isArray) {
-  if (!value.isObject()) {
-    *isArray = false;
-    return true;
-  }
-
-  RootedObject obj(cx, &value.toObject());
-  return JS_IsArrayObject(cx, obj, isArray);
-}
-
-JS_PUBLIC_API bool JS_GetArrayLength(JSContext* cx, HandleObject obj,
-                                     uint32_t* lengthp) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->check(obj);
-  return GetLengthProperty(cx, obj, lengthp);
-}
-
-JS_PUBLIC_API bool JS_SetArrayLength(JSContext* cx, HandleObject obj,
-                                     uint32_t length) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->check(obj);
-  return SetLengthProperty(cx, obj, length);
-}
-
 JS_PUBLIC_API bool JS::IsMapObject(JSContext* cx, JS::HandleObject obj,
                                    bool* isMap) {
   return IsGivenTypeObject(cx, obj, ESClass::Map, isMap);
@@ -3356,104 +3304,6 @@ JS_PUBLIC_API JSFunction* JS::NewFunctionFromSpec(JSContext* cx,
   }
 
   return NewFunctionFromSpec(cx, fs, id);
-}
-
-static bool IsFunctionCloneable(HandleFunction fun) {
-  // If a function was compiled with non-global syntactic environments on
-  // the environment chain, we could have baked in EnvironmentCoordinates
-  // into the script. We cannot clone it without breaking the compiler's
-  // assumptions.
-  for (ScopeIter si(fun->nonLazyScript()->enclosingScope()); si; si++) {
-    if (si.scope()->is<GlobalScope>()) {
-      return true;
-    }
-    if (si.hasSyntacticEnvironment()) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-static JSObject* CloneFunctionObject(JSContext* cx, HandleObject funobj,
-                                     HandleObject env, HandleScope scope) {
-  AssertHeapIsIdle();
-  CHECK_THREAD(cx);
-  cx->check(env);
-  MOZ_ASSERT(env);
-  // Note that funobj can be in a different compartment.
-
-  if (!funobj->is<JSFunction>()) {
-    MOZ_RELEASE_ASSERT(!IsCrossCompartmentWrapper(funobj));
-    AutoRealm ar(cx, funobj);
-    RootedValue v(cx, ObjectValue(*funobj));
-    ReportIsNotFunction(cx, v);
-    return nullptr;
-  }
-
-  // Only allow cloning normal, interpreted functions.
-  RootedFunction fun(cx, &funobj->as<JSFunction>());
-  if (fun->isNative() || fun->isBoundFunction() ||
-      fun->kind() != FunctionFlags::NormalFunction || fun->isExtended() ||
-      fun->isSelfHostedBuiltin()) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_CANT_CLONE_OBJECT);
-    return nullptr;
-  }
-
-  if (fun->isInterpretedLazy()) {
-    AutoRealm ar(cx, fun);
-    if (!JSFunction::getOrCreateScript(cx, fun)) {
-      return nullptr;
-    }
-  }
-  RootedScript script(cx, fun->nonLazyScript());
-
-  if (!IsFunctionCloneable(fun)) {
-    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_BAD_CLONE_FUNOBJ_SCOPE);
-    return nullptr;
-  }
-
-  if (CanReuseScriptForClone(cx->realm(), fun, env)) {
-    return CloneFunctionReuseScript(cx, fun, env, fun->getAllocKind());
-  }
-
-  Rooted<ScriptSourceObject*> sourceObject(cx, script->sourceObject());
-  if (cx->compartment() != sourceObject->compartment()) {
-    sourceObject = ScriptSourceObject::clone(cx, sourceObject);
-    if (!sourceObject) {
-      return nullptr;
-    }
-  }
-
-  JSFunction* clone = CloneFunctionAndScript(cx, fun, env, scope, sourceObject,
-                                             fun->getAllocKind());
-
-#ifdef DEBUG
-  // The cloned function should itself be cloneable.
-  RootedFunction cloneRoot(cx, clone);
-  MOZ_ASSERT_IF(cloneRoot, IsFunctionCloneable(cloneRoot));
-#endif
-
-  return clone;
-}
-
-JS_PUBLIC_API JSObject* JS::CloneFunctionObject(JSContext* cx,
-                                                HandleObject funobj) {
-  RootedObject globalLexical(cx, &cx->global()->lexicalEnvironment());
-  RootedScope emptyGlobalScope(cx, &cx->global()->emptyGlobalScope());
-  return CloneFunctionObject(cx, funobj, globalLexical, emptyGlobalScope);
-}
-
-extern JS_PUBLIC_API JSObject* JS::CloneFunctionObject(
-    JSContext* cx, HandleObject funobj, HandleObjectVector envChain) {
-  RootedObject env(cx);
-  RootedScope scope(cx);
-  if (!CreateNonSyntacticEnvironmentChain(cx, envChain, &env, &scope)) {
-    return nullptr;
-  }
-  return CloneFunctionObject(cx, funobj, env, scope);
 }
 
 JS_PUBLIC_API JSObject* JS_GetFunctionObject(JSFunction* fun) { return fun; }

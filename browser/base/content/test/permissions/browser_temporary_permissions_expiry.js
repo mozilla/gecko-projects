@@ -18,6 +18,8 @@ PromiseTestUtils.whitelistRejectionsGlobally(/The request is not allowed/);
 const EXPIRE_TIME_MS = 100;
 const TIMEOUT_MS = 500;
 
+const kVREnabled = SpecialPowers.getBoolPref("dom.vr.enabled");
+
 // Test that temporary permissions can be re-requested after they expired
 // and that the identity block is updated accordingly.
 add_task(async function testTempPermissionRequestAfterExpiry() {
@@ -32,6 +34,10 @@ add_task(async function testTempPermissionRequestAfterExpiry() {
     ORIGIN
   );
   let ids = ["geo", "camera"];
+
+  if (kVREnabled) {
+    ids.push("xr");
+  }
 
   for (let id of ids) {
     await BrowserTestUtils.withNewTab(PERMISSIONS_PAGE, async function(

@@ -83,18 +83,15 @@
 #include "nsIBrowserDOMWindow.h"
 #include "nsIClassifiedChannel.h"
 #include "DocumentInlines.h"
-#include "nsIDocShellTreeOwner.h"
-#include "nsIDOMChromeWindow.h"
 #include "nsFocusManager.h"
 #include "EventStateManager.h"
 #include "nsIDocShell.h"
 #include "nsIFrame.h"
+#include "nsISecureBrowserUI.h"
 #include "nsIURI.h"
 #include "nsIURIMutator.h"
-#include "nsIURIFixup.h"
 #include "nsIWebBrowser.h"
 #include "nsIWebProgress.h"
-#include "nsIXULRuntime.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowRoot.h"
 #include "nsPointerHashKeys.h"
@@ -118,8 +115,6 @@
 #include "nsColorPickerProxy.h"
 #include "nsContentPermissionHelper.h"
 #include "nsNetUtil.h"
-#include "nsIPermissionManager.h"
-#include "nsIURILoader.h"
 #include "nsIScriptError.h"
 #include "mozilla/EventForwards.h"
 #include "nsDeviceContext.h"
@@ -130,11 +125,9 @@
 #include "nsISHEntry.h"
 #include "nsISHistory.h"
 #include "nsQueryObject.h"
-#include "nsIHttpChannel.h"
 #include "mozilla/dom/DocGroup.h"
 #include "nsString.h"
 #include "nsStringStream.h"
-#include "nsISupportsPrimitives.h"
 #include "mozilla/Telemetry.h"
 #include "nsDocShellLoadState.h"
 #include "nsWebBrowser.h"
@@ -668,7 +661,6 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(BrowserChild)
   NS_INTERFACE_MAP_ENTRY(nsIWebBrowserChrome)
-  NS_INTERFACE_MAP_ENTRY(nsIWebBrowserChrome2)
   NS_INTERFACE_MAP_ENTRY(nsIEmbeddingSiteWindow)
   NS_INTERFACE_MAP_ENTRY(nsIWebBrowserChromeFocus)
   NS_INTERFACE_MAP_ENTRY(nsIInterfaceRequestor)
@@ -684,15 +676,6 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(BrowserChild)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(BrowserChild)
-
-NS_IMETHODIMP
-BrowserChild::SetStatus(uint32_t aStatusType, const char16_t* aStatus) {
-  return SetStatusWithContext(
-      aStatusType,
-      aStatus ? static_cast<const nsString&>(nsDependentString(aStatus))
-              : EmptyString(),
-      nullptr);
-}
 
 NS_IMETHODIMP
 BrowserChild::GetChromeFlags(uint32_t* aChromeFlags) {
@@ -777,12 +760,10 @@ BrowserChild::IsWindowModal(bool* aRetVal) {
 }
 
 NS_IMETHODIMP
-BrowserChild::SetStatusWithContext(uint32_t aStatusType,
-                                   const nsAString& aStatusText,
-                                   nsISupports* aStatusContext) {
+BrowserChild::SetLinkStatus(const nsAString& aStatusText) {
   // We can only send the status after the ipc machinery is set up
   if (IPCOpen()) {
-    SendSetStatus(aStatusType, nsString(aStatusText));
+    SendSetLinkStatus(nsString(aStatusText));
   }
   return NS_OK;
 }
@@ -818,7 +799,9 @@ BrowserChild::SetDimensions(uint32_t aFlags, int32_t aX, int32_t aY,
     aFlags |= nsIEmbeddingSiteWindow::DIM_FLAGS_IGNORE_CY;
   }
 
-  Unused << SendSetDimensions(aFlags, aX, aY, aCx, aCy);
+  double scale = mPuppetWidget ? mPuppetWidget->GetDefaultScale().scale : 1.0;
+
+  Unused << SendSetDimensions(aFlags, aX, aY, aCx, aCy, scale);
 
   return NS_OK;
 }
@@ -2186,6 +2169,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvPasteTransferable(
   return IPC_OK();
 }
 
+#ifdef ACCESSIBILITY
 a11y::PDocAccessibleChild* BrowserChild::AllocPDocAccessibleChild(
     PDocAccessibleChild*, const uint64_t&, const uint32_t&,
     const IAccessibleHolder&) {
@@ -2195,11 +2179,10 @@ a11y::PDocAccessibleChild* BrowserChild::AllocPDocAccessibleChild(
 
 bool BrowserChild::DeallocPDocAccessibleChild(
     a11y::PDocAccessibleChild* aChild) {
-#ifdef ACCESSIBILITY
   delete static_cast<mozilla::a11y::DocAccessibleChild*>(aChild);
-#endif
   return true;
 }
+#endif
 
 PColorPickerChild* BrowserChild::AllocPColorPickerChild(const nsString&,
                                                         const nsString&) {

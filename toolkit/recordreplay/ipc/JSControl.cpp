@@ -9,6 +9,7 @@
 #include "mozilla/Base64.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/StaticPtr.h"
+#include "js/Array.h"  // JS::NewArrayObject
 #include "js/CharacterEncoding.h"
 #include "js/Conversions.h"
 #include "js/JSON.h"
@@ -249,7 +250,8 @@ static bool Middleman_SendManifest(JSContext* aCx, unsigned aArgc, Value* aVp) {
 static bool Middleman_MaybePing(JSContext* aCx, unsigned aArgc, Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
 
-  parent::ChildProcessInfo* child = GetChildById(aCx, args.get(0), /* aAllowUnpaused */ true);
+  parent::ChildProcessInfo* child =
+      GetChildById(aCx, args.get(0), /* aAllowUnpaused */ true);
   if (!child) {
     return false;
   }
@@ -467,8 +469,7 @@ static ProgressCounter gProgressCounter;
 
 extern "C" {
 
-MOZ_EXPORT ProgressCounter* RecordReplayInterface_ExecutionProgressCounter()
-{
+MOZ_EXPORT ProgressCounter* RecordReplayInterface_ExecutionProgressCounter() {
   return &gProgressCounter;
 }
 
@@ -680,7 +681,7 @@ static bool RecordReplay_ProgressCounter(JSContext* aCx, unsigned aArgc,
 }
 
 static bool RecordReplay_SetProgressCounter(JSContext* aCx, unsigned aArgc,
-                                                Value* aVp) {
+                                            Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
 
   if (!args.get(0).isNumber()) {
@@ -1273,7 +1274,7 @@ static bool RecordReplay_FindScriptHits(JSContext* aCx, unsigned aArgc,
     chunk = chunk->mPrevious;
   }
 
-  JSObject* array = JS_NewArrayObject(aCx, values);
+  JSObject* array = JS::NewArrayObject(aCx, values);
   if (!array) {
     return false;
   }
@@ -1300,7 +1301,8 @@ static bool RecordReplay_FindChangeFrames(JSContext* aCx, unsigned aArgc,
                                           Value* aVp) {
   CallArgs args = CallArgsFromVp(aArgc, aVp);
 
-  if (!args.get(0).isNumber() || !args.get(1).isNumber() || !args.get(2).isObject()) {
+  if (!args.get(0).isNumber() || !args.get(1).isNumber() ||
+      !args.get(2).isObject()) {
     JS_ReportErrorASCII(aCx, "Bad parameters");
     return false;
   }
@@ -1352,7 +1354,7 @@ static bool RecordReplay_FindChangeFrames(JSContext* aCx, unsigned aArgc,
     }
   }
 
-  JSObject* array = JS_NewArrayObject(aCx, values);
+  JSObject* array = JS::NewArrayObject(aCx, values);
   if (!array) {
     return false;
   }

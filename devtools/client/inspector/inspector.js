@@ -66,7 +66,12 @@ loader.lazyRequireGetter(
   "saveScreenshot",
   "devtools/shared/screenshot/save"
 );
-loader.lazyRequireGetter(this, "ObjectFront", "devtools/shared/fronts/object");
+loader.lazyRequireGetter(
+  this,
+  "ObjectFront",
+  "devtools/shared/fronts/object",
+  true
+);
 
 // This import to chrome code is forbidden according to the inspector specific
 // eslintrc. TODO: Fix in Bug 1591091.
@@ -151,7 +156,12 @@ function Inspector(toolbox) {
   this.telemetry = toolbox.telemetry;
   this.store = Store({
     createObjectFront: object => {
-      return new ObjectFront(toolbox.target.client, object);
+      return new ObjectFront(
+        this.inspectorFront.conn,
+        this.inspectorFront.targetFront,
+        this.inspectorFront,
+        object
+      );
     },
     releaseActor: actor => {
       if (!actor) {
@@ -239,7 +249,7 @@ Inspector.prototype = {
     return this._deferredOpen();
   },
 
-  async _onTargetAvailable(type, targetFront, isTopLevel) {
+  async _onTargetAvailable({ type, targetFront, isTopLevel }) {
     // Ignore all targets but the top level one
     if (!isTopLevel) {
       return;
@@ -251,10 +261,8 @@ Inspector.prototype = {
 
     await Promise.all([
       this._getCssProperties(),
-      this._getPageStyle(),
       this._getDefaultSelection(),
       this._getAccessibilityFront(),
-      this._getChangesFront(),
     ]);
     this.reflowTracker = new ReflowTracker(this.currentTarget);
 
@@ -273,7 +281,7 @@ Inspector.prototype = {
     }
   },
 
-  _onTargetDestroyed(type, targetFront, isTopLevel) {
+  _onTargetDestroyed({ type, targetFront, isTopLevel }) {
     // Ignore all targets but the top level one
     if (!isTopLevel) {
       return;
@@ -466,27 +474,12 @@ Inspector.prototype = {
     return this.accessibilityFront;
   },
 
-  _getChangesFront: async function() {
-    // Get the Changes front, then call a method on it, which will instantiate
-    // the ChangesActor. We want the ChangesActor to be guaranteed available before
-    // the user makes any changes.
-    this.changesFront = await this.currentTarget.getFront("changes");
-    await this.changesFront.start();
-    return this.changesFront;
-  },
-
   _getDefaultSelection: function() {
     // This may throw if the document is still loading and we are
     // refering to a dead about:blank document
     return this._getDefaultNodeForSelection().catch(
       this._handleRejectionIfNotDestroyed
     );
-  },
-
-  _getPageStyle: function() {
-    return this.inspectorFront.getPageStyle().then(pageStyle => {
-      this.pageStyle = pageStyle;
-    }, this._handleRejectionIfNotDestroyed);
   },
 
   /**
@@ -1681,7 +1674,6 @@ Inspector.prototype = {
 
     if (this.walker) {
       this.walker.off("new-root", this.onNewRoot);
-      this.pageStyle = null;
     }
 
     this.cancelUpdate();
@@ -1786,7 +1778,6 @@ Inspector.prototype = {
     this._markupFrame.contentWindow.focus();
     this._markupBox.style.visibility = "visible";
     this.markup = new MarkupView(this, this._markupFrame, this._toolbox.win);
-    this.markup.init();
     this.emit("markuploaded");
   },
 

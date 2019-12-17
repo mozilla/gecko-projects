@@ -2311,7 +2311,19 @@ impl PrimitiveStore {
             // Inflate the local bounding rect if required by the filter effect.
             // This inflaction factor is to be applied to the surface itself.
             if pic.options.inflate_if_required {
+                // The picture's local rect is calculated as the union of the
+                // snapped primitive rects, which should result in a snapped
+                // local rect, unless it was inflated. This is also done during
+                // surface configuration when calculating the picture's
+                // estimated local rect.
+                let snap_pic_to_raster = SpaceSnapper::new_with_target(
+                    surface.raster_spatial_node_index,
+                    pic.spatial_node_index,
+                    surface.device_pixel_scale,
+                    frame_context.clip_scroll_tree,
+                );
                 surface_rect = rc.composite_mode.inflate_picture_rect(surface_rect, surface.inflation_factor);
+                surface_rect = snap_pic_to_raster.snap_rect(&surface_rect);
             }
 
             // Layout space for the picture is picture space from the
@@ -3028,11 +3040,6 @@ impl PrimitiveStore {
             }
             PrimitiveInstanceKind::ImageBorder { data_handle, .. } => {
                 let prim_data = &mut data_stores.image_border[*data_handle];
-                let border_data = &prim_data.kind;
-
-                // TODO: remove this in future by changing the request_image() calls to
-                // be done after the culling.
-                frame_state.resource_cache.set_image_active(border_data.request.key);
 
                 // TODO: get access to the ninepatch and to check whwther we need support
                 // for repetitions in the shader.
@@ -3072,12 +3079,6 @@ impl PrimitiveStore {
                 let common_data = &mut prim_data.common;
                 let yuv_image_data = &mut prim_data.kind;
 
-                // TODO: remove this in future by changing the request_image() calls to
-                // be done after the culling.
-                for channel in 0 .. yuv_image_data.format.get_plane_num() {
-                    frame_state.resource_cache.set_image_active(yuv_image_data.yuv_key[channel]);
-                }
-
                 common_data.may_need_repetition = false;
 
                 // Update the template this instane references, which may refresh the GPU
@@ -3098,10 +3099,6 @@ impl PrimitiveStore {
                 let prim_data = &mut data_stores.image[*data_handle];
                 let common_data = &mut prim_data.common;
                 let image_data = &mut prim_data.kind;
-
-                // TODO: remove this in future by changing the request_image() calls to
-                // be done after the culling.
-                frame_state.resource_cache.set_image_active(image_data.key);
 
                 if image_data.stretch_size.width >= common_data.prim_size.width &&
                     image_data.stretch_size.height >= common_data.prim_size.height {

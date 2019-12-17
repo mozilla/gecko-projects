@@ -456,9 +456,10 @@ bool BytecodeCompiler::internalCreateScript(HandleObject functionOrGlobal,
                                             uint32_t toStringStart,
                                             uint32_t toStringEnd,
                                             uint32_t sourceBufferLength) {
-  script = JSScript::Create(cx, functionOrGlobal, options, sourceObject,
-                            /* sourceStart = */ 0, sourceBufferLength,
-                            toStringStart, toStringEnd);
+  script =
+      JSScript::Create(cx, functionOrGlobal, options, sourceObject,
+                       /* sourceStart = */ 0, sourceBufferLength, toStringStart,
+                       toStringEnd, options.lineno, options.column);
   return script != nullptr;
 }
 
@@ -530,7 +531,7 @@ JSScript* frontend::ScriptCompiler<Unit>::compileScript(
       info.script->scriptSource()->recordEmitStarted();
 
       // Publish deferred items
-      if (!parser->publishDeferredItems()) {
+      if (!parser->publishDeferredFunctions()) {
         return nullptr;
       }
 
@@ -597,7 +598,7 @@ ModuleObject* frontend::ModuleCompiler<Unit>::compile(
     return nullptr;
   }
 
-  if (!parser->publishDeferredItems()) {
+  if (!parser->publishDeferredFunctions()) {
     return nullptr;
   }
 
@@ -614,13 +615,9 @@ ModuleObject* frontend::ModuleCompiler<Unit>::compile(
     return nullptr;
   }
 
-  RootedModuleEnvironmentObject env(
-      cx, ModuleEnvironmentObject::create(cx, module));
-  if (!env) {
+  if (!ModuleObject::createEnvironment(cx, module)) {
     return nullptr;
   }
-
-  module->setInitialEnvironment(env);
 
   // Enqueue an off-thread source compression task after finishing parsing.
   if (!info.scriptSource->tryCompressOffThread(cx)) {
@@ -679,7 +676,7 @@ bool frontend::StandaloneFunctionCompiler<Unit>::compile(
       return false;
     }
 
-    if (!parser->publishDeferredItems()) {
+    if (!parser->publishDeferredFunctions()) {
       return false;
     }
 
@@ -759,7 +756,7 @@ static JSScript* CompileGlobalBinASTScriptImpl(
   }
 
   RootedScript script(cx, JSScript::Create(cx, cx->global(), options, sourceObj,
-                                           0, len, 0, len));
+                                           0, len, 0, len, 0, 0));
 
   if (!script) {
     return nullptr;
@@ -909,14 +906,19 @@ class MOZ_STACK_CLASS AutoAssertFunctionDelazificationCompletion {
   RootedFunction fun_;
 #endif
 
+  void checkIsLazy() {
+    MOZ_ASSERT(fun_->isInterpretedLazy(), "Function should remain lazy");
+    MOZ_ASSERT(!fun_->lazyScript()->hasScript(),
+               "LazyScript should not have a script");
+  }
+
  public:
   AutoAssertFunctionDelazificationCompletion(JSContext* cx, HandleFunction fun)
 #ifdef DEBUG
       : fun_(cx, fun)
 #endif
   {
-    MOZ_ASSERT(fun_->isInterpretedLazy());
-    MOZ_ASSERT(!fun_->lazyScript()->hasScript());
+    checkIsLazy();
   }
 
   ~AutoAssertFunctionDelazificationCompletion() {
@@ -928,20 +930,53 @@ class MOZ_STACK_CLASS AutoAssertFunctionDelazificationCompletion {
 
     // If fun_ is not nullptr, it means delazification doesn't complete.
     // Assert that the function keeps linking to lazy script
-    MOZ_ASSERT(fun_->isInterpretedLazy());
-    MOZ_ASSERT(!fun_->lazyScript()->hasScript());
+    checkIsLazy();
   }
 
   void complete() {
     // Assert the completion of delazification and forget the function.
-    MOZ_ASSERT(fun_->hasScript());
-    MOZ_ASSERT(!fun_->hasUncompletedScript());
+    MOZ_ASSERT(fun_->nonLazyScript());
 
 #ifdef DEBUG
     fun_ = nullptr;
 #endif
   }
 };
+
+static void CheckFlagsOnDelazification(uint32_t lazy, uint32_t nonLazy) {
+#ifdef DEBUG
+  // These flags are expect to be unset for lazy scripts and are only valid
+  // after a script has been compiled with the full parser.
+  constexpr uint32_t NonLazyFlagsMask =
+      uint32_t(BaseScript::ImmutableFlags::HasNonSyntacticScope) |
+      uint32_t(BaseScript::ImmutableFlags::FunHasExtensibleScope) |
+      uint32_t(BaseScript::ImmutableFlags::HasCallSiteObj) |
+      uint32_t(BaseScript::ImmutableFlags::FunctionHasExtraBodyVarScope) |
+      uint32_t(BaseScript::ImmutableFlags::HasMappedArgsObj) |
+      uint32_t(BaseScript::ImmutableFlags::ArgumentsHasVarBinding) |
+      uint32_t(BaseScript::ImmutableFlags::NeedsFunctionEnvironmentObjects) |
+      uint32_t(BaseScript::ImmutableFlags::IsFunction);
+
+  // These flags are computed for lazy scripts and may have a different
+  // definition for non-lazy scripts.
+  //
+  //  HasInnerFunctions:  The full parse performs basic analysis for dead code
+  //                      and may remove inner functions that existed after lazy
+  //                      parse.
+  //  TreatAsRunOnce:     Some conditions depend on parent context and are
+  //                      computed during lazy parsing, while other conditions
+  //                      need to full parse.
+  constexpr uint32_t CustomFlagsMask =
+      uint32_t(BaseScript::ImmutableFlags::HasInnerFunctions) |
+      uint32_t(BaseScript::ImmutableFlags::TreatAsRunOnce);
+
+  // These flags are expected to match between lazy and full parsing.
+  constexpr uint32_t MatchedFlagsMask = ~(NonLazyFlagsMask | CustomFlagsMask);
+
+  MOZ_ASSERT((lazy & NonLazyFlagsMask) == 0);
+  MOZ_ASSERT((lazy & MatchedFlagsMask) == (nonLazy & MatchedFlagsMask));
+#endif  // DEBUG
+}
 
 template <typename Unit>
 static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
@@ -1004,7 +1039,7 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
   if (!pn) {
     return false;
   }
-  if (!parser.publishDeferredItems()) {
+  if (!parser.publishDeferredFunctions()) {
     return false;
   }
 
@@ -1014,7 +1049,7 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
   }
 
   if (lazy->isLikelyConstructorWrapper()) {
-    script->setLikelyConstructorWrapper();
+    script->setIsLikelyConstructorWrapper();
   }
   if (lazy->hasBeenCloned()) {
     script->setHasBeenCloned();
@@ -1036,7 +1071,7 @@ static bool CompileLazyFunctionImpl(JSContext* cx, Handle<LazyScript*> lazy,
     return false;
   }
 
-  MOZ_ASSERT(lazy->hasDirectEval() == script->hasDirectEval());
+  CheckFlagsOnDelazification(lazy->immutableFlags(), script->immutableFlags());
 
   delazificationCompletion.complete();
   assertException.reset();
@@ -1085,10 +1120,7 @@ static bool CompileLazyBinASTFunctionImpl(JSContext* cx,
   RootedScriptSourceObject sourceObj(cx, lazy->sourceObject());
   MOZ_ASSERT(sourceObj);
 
-  RootedScript script(
-      cx, JSScript::Create(cx, fun, options, sourceObj, lazy->sourceStart(),
-                           lazy->sourceEnd(), lazy->sourceStart(),
-                           lazy->sourceEnd()));
+  RootedScript script(cx, JSScript::CreateFromLazy(cx, lazy));
 
   if (!script) {
     return false;

@@ -37,8 +37,6 @@
 ]>
 
 <html id="main-window"
-        xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-        xmlns:svg="http://www.w3.org/2000/svg"
         xmlns:html="http://www.w3.org/1999/xhtml"
         xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
         xmlns="http://www.w3.org/1999/xhtml"
@@ -275,17 +273,17 @@
       <vbox id="editBookmarkPanelBottomContent"
             flex="1">
         <checkbox id="editBookmarkPanel_showForNewBookmarks"
-                  label="&editBookmark.showForNewBookmarks.label;"
-                  accesskey="&editBookmark.showForNewBookmarks.accesskey;"
+                  data-l10n-id="bookmark-panel-show-editor-checkbox"
                   oncommand="StarUI.onShowForNewBookmarksCheckboxCommand();"/>
       </vbox>
       <hbox id="editBookmarkPanelBottomButtons"
             class="panel-footer"
-            style="min-width: &editBookmark.panel.width;;">
+            data-l10n-id="bookmark-panel"
+            data-l10n-attrs="style">
 #ifndef XP_UNIX
         <button id="editBookmarkPanelDoneButton"
                 class="editBookmarkPanelBottomButton"
-                label="&editBookmark.done.label;"
+                data-l10n-id="bookmark-panel-done-button"
                 default="true"
                 oncommand="StarUI.panel.hidePopup();"/>
         <button id="editBookmarkPanelRemoveButton"
@@ -297,7 +295,7 @@
                 oncommand="StarUI.removeBookmarkButtonCommand();"/>
         <button id="editBookmarkPanelDoneButton"
                 class="editBookmarkPanelBottomButton"
-                label="&editBookmark.done.label;"
+                data-l10n-id="bookmark-panel-done-button"
                 default="true"
                 oncommand="StarUI.panel.hidePopup();"/>
 #endif
@@ -696,7 +694,7 @@
 #include browser-menubar.inc
         </toolbaritem>
         <spacer flex="1" skipintoolbarset="true" ordinal="1000"/>
-#include titlebar-items.inc.xul
+#include titlebar-items.inc.xhtml
       </toolbar>
 
       <toolbar id="TabsToolbar"
@@ -765,7 +763,7 @@
         <hbox class="private-browsing-indicator"/>
 #endif
 
-#include titlebar-items.inc.xul
+#include titlebar-items.inc.xhtml
 
 #ifdef XP_MACOSX
         <!-- OS X does not natively support RTL for its titlebar items, so we prevent this secondary
@@ -854,7 +852,7 @@
             <hbox id="urlbar-input-container"
                   flex="1"
                   pageproxystate="invalid">
-              <box id="urlbar-search-icon"
+              <box id="urlbar-search-button"
                    class="chromeclass-toolbar-additional"/>
               <!-- Use onclick instead of normal popup= syntax since the popup
                    code fires onmousedown, and hence eats our favicon drag events. -->
@@ -890,10 +888,13 @@
                 <box style="pointer-events: none;">
                     <image class="sharing-icon" id="webrtc-sharing-icon"/>
                     <image class="sharing-icon geo-icon" id="geo-sharing-icon"/>
+                    <image class="sharing-icon xr-icon" id="xr-sharing-icon"/>
                 </box>
                 <box id="blocked-permissions-container" align="center">
                   <image data-permission-id="geo" class="blocked-permission-icon geo-icon" role="button"
                          data-l10n-id="urlbar-geolocation-blocked"/>
+                  <image data-permission-id="xr" class="blocked-permission-icon xr-icon" role="button"
+                         data-l10n-id="urlbar-xr-blocked"/>
                   <image data-permission-id="desktop-notification" class="blocked-permission-icon desktop-notification-icon" role="button"
                          data-l10n-id="urlbar-web-notifications-blocked"/>
                   <image data-permission-id="camera" class="blocked-permission-icon camera-icon" role="button"
@@ -924,6 +925,8 @@
                          data-l10n-id="urlbar-default-notification-anchor"/>
                   <image id="geo-notification-icon" class="notification-anchor-icon geo-icon" role="button"
                          data-l10n-id="urlbar-geolocation-notification-anchor"/>
+                  <image id="xr-notification-icon" class="notification-anchor-icon xr-icon" role="button"
+                         data-l10n-id="urlbar-xr-notification-anchor"/>
                   <image id="autoplay-media-notification-icon" class="notification-anchor-icon autoplay-media-icon" role="button"
                          data-l10n-id="urlbar-autoplay-notification-anchor"/>
                   <image id="addons-notification-icon" class="notification-anchor-icon install-icon" role="button"

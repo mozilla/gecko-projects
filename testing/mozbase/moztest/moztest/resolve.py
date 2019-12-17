@@ -8,6 +8,9 @@ import fnmatch
 import os
 import pickle
 import sys
+
+import six
+
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
 
@@ -27,6 +30,7 @@ MOCHITEST_TOTAL_CHUNKS = 5
 def WebglSuite(name):
     return {
         'aliases': (name,),
+        'build_flavor': 'mochitest',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'plain', 'subsuite': name, 'test_paths': None},
         'task_regex': ['mochitest-' + name + '($|.*(-1|[^0-9])$)',
@@ -42,6 +46,7 @@ TEST_SUITES = {
     },
     'crashtest': {
         'aliases': ('c', 'rc'),
+        'build_flavor': 'crashtest',
         'mach_command': 'crashtest',
         'kwargs': {'test_file': None},
         'task_regex': ['crashtest($|.*(-1|[^0-9])$)',
@@ -76,6 +81,7 @@ TEST_SUITES = {
     },
     'mochitest-a11y': {
         'aliases': ('a11y', 'ally'),
+        'build_flavor': 'a11y',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'a11y', 'test_paths': None, 'e10s': False},
         'task_regex': ['mochitest-a11y($|.*(-1|[^0-9])$)',
@@ -83,6 +89,7 @@ TEST_SUITES = {
     },
     'mochitest-browser-chrome': {
         'aliases': ('bc', 'browser'),
+        'build_flavor': 'browser-chrome',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'browser-chrome', 'test_paths': None},
         'task_regex': ['mochitest-browser-chrome($|.*(-1|[^0-9])$)',
@@ -90,12 +97,14 @@ TEST_SUITES = {
     },
     'mochitest-browser-chrome-screenshots': {
         'aliases': ('ss', 'screenshots-chrome'),
+        'build_flavor': 'browser-chrome',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'browser-chrome', 'subsuite': 'screenshots', 'test_paths': None},
         'task_regex': ['browser-screenshots($|.*(-1|[^0-9])$)'],
     },
     'mochitest-chrome': {
         'aliases': ('mc',),
+        'build_flavor': 'chrome',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'chrome', 'test_paths': None, 'e10s': False},
         'task_regex': ['mochitest-chrome($|.*(-1|[^0-9])$)',
@@ -103,6 +112,7 @@ TEST_SUITES = {
     },
     'mochitest-chrome-gpu': {
         'aliases': ('gpu',),
+        'build_flavor': 'chrome',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'chrome', 'subsuite': 'gpu', 'test_paths': None, 'e10s': False},
         'task_regex': ['mochitest-gpu($|.*(-1|[^0-9])$)',
@@ -110,6 +120,7 @@ TEST_SUITES = {
     },
     'mochitest-devtools-chrome': {
         'aliases': ('dt', 'devtools'),
+        'build_flavor': 'browser-chrome',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'browser-chrome', 'subsuite': 'devtools', 'test_paths': None},
         'task_regex': ['mochitest-devtools-chrome($|.*(-1|[^0-9])$)',
@@ -117,6 +128,7 @@ TEST_SUITES = {
     },
     'mochitest-media': {
         'aliases': ('mpm', 'plain-media'),
+        'build_flavor': 'mochitest',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'plain', 'subsuite': 'media', 'test_paths': None},
         'task_regex': ['mochitest-media($|.*(-1|[^0-9])$)',
@@ -124,6 +136,7 @@ TEST_SUITES = {
     },
     'mochitest-plain': {
         'aliases': ('mp', 'plain',),
+        'build_flavor': 'mochitest',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'plain', 'test_paths': None},
         'task_regex': ['mochitest(?!-a11y|-browser|-chrome|-devtools|-gpu|-harness|-media|-screen|-webgl)($|.*(-1|[^0-9])$)',  # noqa
@@ -131,6 +144,7 @@ TEST_SUITES = {
     },
     'mochitest-plain-gpu': {
         'aliases': ('gpu',),
+        'build_flavor': 'mochitest',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'plain', 'subsuite': 'gpu', 'test_paths': None},
         'task_regex': ['mochitest-gpu($|.*(-1|[^0-9])$)',
@@ -138,6 +152,7 @@ TEST_SUITES = {
     },
     'mochitest-remote': {
         'aliases': ('remote',),
+        'build_flavor': 'browser-chrome',
         'mach_command': 'mochitest',
         'kwargs': {'flavor': 'browser-chrome', 'subsuite': 'remote', 'test_paths': None},
         'task_regex': ['mochitest-remote($|.*(-1|[^0-9])$)',
@@ -154,17 +169,20 @@ TEST_SUITES = {
         'kwargs': {'headless': False},
     },
     'python': {
+        'build_flavor': 'python',
         'mach_command': 'python-test',
         'kwargs': {'tests': None},
     },
     'telemetry-tests-client': {
         'aliases': ('ttc',),
+        'build_flavor': 'telemetry-tests-client',
         'mach_command': 'telemetry-tests-client',
         'kwargs': {},
         'task_regex': ['telemetry-tests-client($|.*(-1|[^0-9])$)'],
     },
     'reftest': {
         'aliases': ('rr',),
+        'build_flavor': 'reftest',
         'mach_command': 'reftest',
         'kwargs': {'tests': None},
         'task_regex': ['(opt|debug)-reftest($|.*(-1|[^0-9])$)',
@@ -210,12 +228,25 @@ TEST_SUITES = {
     },
     'xpcshell': {
         'aliases': ('x',),
+        'build_flavor': 'xpcshell',
         'mach_command': 'xpcshell-test',
         'kwargs': {'test_file': 'all'},
         'task_regex': ['xpcshell($|.*(-1|[^0-9])$)',
                        'test-verify($|.*(-1|[^0-9])$)'],
     },
 }
+"""Definitions of all test suites and the metadata needed to run and process
+them. Each test suite definition can contain the following keys.
+
+Arguments:
+    aliases (tuple): A tuple containing shorthands used to refer to this suite.
+    build_flavor (str): The flavor assigned to this suite by the build system
+                        in `mozbuild.testing.TEST_MANIFESTS` (or similar).
+    mach_command (str): Name of the mach command used to run this suite.
+    kwargs (dict): Arguments needed to pass into the mach command.
+    task_regex (list): A list of regexes used to filter task labels that run
+                       this suite.
+"""
 
 for i in range(1, MOCHITEST_TOTAL_CHUNKS + 1):
     TEST_SUITES['mochitest-%d' % i] = {
@@ -322,8 +353,8 @@ def rewrite_test_base(test, new_base, honor_install_to_subdir=False):
     return test
 
 
+@six.add_metaclass(ABCMeta)
 class TestLoader(MozbuildObject):
-    __metaclass__ = ABCMeta
 
     @abstractmethod
     def __call__(self):
@@ -363,15 +394,16 @@ class BuildBackendLoader(TestLoader):
         with open(test_defaults, 'rb') as fh:
             defaults = pickle.load(fh)
 
-        for path, tests in test_data.items():
+        for path, tests in six.iteritems(test_data):
             for metadata in tests:
                 defaults_manifests = [metadata['manifest']]
 
-                ancestor_manifest = metadata.get('ancestor-manifest')
+                ancestor_manifest = metadata.get('ancestor_manifest')
                 if ancestor_manifest:
                     # The (ancestor manifest, included manifest) tuple
                     # contains the defaults of the included manifest, so
                     # use it instead of [metadata['manifest']].
+                    ancestor_manifest = os.path.join(self.topsrcdir, ancestor_manifest)
                     defaults_manifests[0] = (ancestor_manifest, metadata['manifest'])
                     defaults_manifests.append(ancestor_manifest)
 
@@ -388,8 +420,12 @@ class TestManifestLoader(TestLoader):
         super(TestManifestLoader, self).__init__(*args, **kwargs)
         self.finder = FileFinder(self.topsrcdir)
         self.reader = self.mozbuild_reader(config_mode="empty")
-        self.variables = {'{}_MANIFESTS'.format(k): v[0] for k, v in TEST_MANIFESTS.items()}
-        self.variables.update({'{}_MANIFESTS'.format(f.upper()): f for f in REFTEST_FLAVORS})
+        self.variables = {
+            '{}_MANIFESTS'.format(k): v[0] for k, v in six.iteritems(TEST_MANIFESTS)
+        }
+        self.variables.update({
+            '{}_MANIFESTS'.format(f.upper()): f for f in REFTEST_FLAVORS
+        })
 
     def _load_manifestparser_manifest(self, mpath):
         mp = TestManifest(manifests=[mpath], strict=True, rootdir=self.topsrcdir,
@@ -620,7 +656,7 @@ class TestResolver(MozbuildObject):
             print("Loading wpt manifest failed")
             return
 
-        for manifest, data in manifests.iteritems():
+        for manifest, data in six.iteritems(manifests):
             tests_root = data["tests_path"]
             for test_type, path, tests in manifest:
                 full_path = os.path.join(tests_root, path)
@@ -719,7 +755,7 @@ class TestResolver(MozbuildObject):
             reader = self.mozbuild_reader(config_mode='empty')
             files_info = reader.files_info(changed_files)
 
-            for path, info in files_info.items():
+            for path, info in six.iteritems(files_info):
                 paths |= info.test_files
                 tags |= info.test_tags
                 flavors |= info.test_flavors
@@ -745,7 +781,7 @@ class TestResolver(MozbuildObject):
                 run_suites.add(entry)
                 continue
             suitefound = False
-            for suite, v in TEST_SUITES.items():
+            for suite, v in six.iteritems(TEST_SUITES):
                 if entry.lower() in v.get('aliases', []):
                     run_suites.add(suite)
                     suitefound = True

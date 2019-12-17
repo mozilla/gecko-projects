@@ -68,11 +68,10 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsILoadInfo.h"
 #include "nsIPromptFactory.h"
-#include "nsITransportSecurityInfo.h"
 #include "nsIURI.h"
-#include "nsIWindowWatcher.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsIWebProtocolHandlerRegistrar.h"
+#include "nsIXPConnect.h"
 #include "nsIXULBrowserWindow.h"
 #include "nsIAppWindow.h"
 #include "nsViewManager.h"
@@ -903,6 +902,14 @@ void BrowserParent::InitRendering() {
   layers::LayersId layersId = mRemoteLayerTreeOwner.GetLayersId();
   AddBrowserParentToTable(layersId, this);
 
+  RefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
+  if (frameLoader) {
+    nsIFrame* frame = frameLoader->GetPrimaryFrameOfOwningContent();
+    if (frame) {
+      frame->InvalidateFrame();
+    }
+  }
+
   TextureFactoryIdentifier textureFactoryIdentifier;
   mRemoteLayerTreeOwner.GetTextureFactoryIdentifier(&textureFactoryIdentifier);
   Unused << SendInitRendering(textureFactoryIdentifier, layersId,
@@ -952,11 +959,9 @@ bool BrowserParent::Show(const ScreenIntSize& size, bool aParentIsActive) {
   return true;
 }
 
-mozilla::ipc::IPCResult BrowserParent::RecvSetDimensions(const uint32_t& aFlags,
-                                                         const int32_t& aX,
-                                                         const int32_t& aY,
-                                                         const int32_t& aCx,
-                                                         const int32_t& aCy) {
+mozilla::ipc::IPCResult BrowserParent::RecvSetDimensions(
+    const uint32_t& aFlags, const int32_t& aX, const int32_t& aY,
+    const int32_t& aCx, const int32_t& aCy, const double& aScale) {
   MOZ_ASSERT(!(aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_SIZE_INNER),
              "We should never see DIM_FLAGS_SIZE_INNER here!");
 
@@ -968,27 +973,50 @@ mozilla::ipc::IPCResult BrowserParent::RecvSetDimensions(const uint32_t& aFlags,
   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin = do_QueryInterface(treeOwner);
   NS_ENSURE_TRUE(treeOwnerAsWin, IPC_OK());
 
-  // We only care about the parameters that actually changed, see more
-  // details in BrowserChild::SetDimensions.
-  int32_t unused;
-  int32_t x = aX;
-  if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_IGNORE_X) {
-    treeOwnerAsWin->GetPosition(&x, &unused);
-  }
+  // We only care about the parameters that actually changed, see more details
+  // in `BrowserChild::SetDimensions()`.
+  // Note that `BrowserChild::SetDimensions()` may be called before receiving
+  // our `SendUIResolutionChanged()` call.  Therefore, if given each cordinate
+  // shouldn't be ignored, we need to recompute it if DPI has been changed.
+  // And also note that don't use `mDefaultScale.scale` here since it may be
+  // different from the result of `GetUnscaledDevicePixelsPerCSSPixel()`.
+  double currentScale;
+  treeOwnerAsWin->GetUnscaledDevicePixelsPerCSSPixel(&currentScale);
 
+  int32_t x = aX;
   int32_t y = aY;
-  if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_IGNORE_Y) {
-    treeOwnerAsWin->GetPosition(&unused, &y);
+  if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_POSITION) {
+    if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_IGNORE_X) {
+      int32_t unused;
+      treeOwnerAsWin->GetPosition(&x, &unused);
+    } else if (aScale != currentScale) {
+      x = x * currentScale / aScale;
+    }
+
+    if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_IGNORE_Y) {
+      int32_t unused;
+      treeOwnerAsWin->GetPosition(&unused, &y);
+    } else if (aScale != currentScale) {
+      y = y * currentScale / aScale;
+    }
   }
 
   int32_t cx = aCx;
-  if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_IGNORE_CX) {
-    treeOwnerAsWin->GetSize(&cx, &unused);
-  }
-
   int32_t cy = aCy;
-  if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_IGNORE_CY) {
-    treeOwnerAsWin->GetSize(&unused, &cy);
+  if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_SIZE_OUTER) {
+    if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_IGNORE_CX) {
+      int32_t unused;
+      treeOwnerAsWin->GetSize(&cx, &unused);
+    } else if (aScale != currentScale) {
+      cx = cx * currentScale / aScale;
+    }
+
+    if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_IGNORE_CY) {
+      int32_t unused;
+      treeOwnerAsWin->GetSize(&unused, &cy);
+    } else if (aScale != currentScale) {
+      cy = cy * currentScale / aScale;
+    }
   }
 
   if (aFlags & nsIEmbeddingSiteWindow::DIM_FLAGS_POSITION &&
@@ -1134,22 +1162,17 @@ void BrowserParent::Deactivate(bool aWindowLowering) {
   }
 }
 
+#ifdef ACCESSIBILITY
 a11y::PDocAccessibleParent* BrowserParent::AllocPDocAccessibleParent(
     PDocAccessibleParent* aParent, const uint64_t&, const uint32_t&,
     const IAccessibleHolder&) {
-#ifdef ACCESSIBILITY
   // Reference freed in DeallocPDocAccessibleParent.
   return do_AddRef(new a11y::DocAccessibleParent()).take();
-#else
-  return nullptr;
-#endif
 }
 
 bool BrowserParent::DeallocPDocAccessibleParent(PDocAccessibleParent* aParent) {
-#ifdef ACCESSIBILITY
   // Free reference from AllocPDocAccessibleParent.
   static_cast<a11y::DocAccessibleParent*>(aParent)->Release();
-#endif
   return true;
 }
 
@@ -1157,7 +1180,6 @@ mozilla::ipc::IPCResult BrowserParent::RecvPDocAccessibleConstructor(
     PDocAccessibleParent* aDoc, PDocAccessibleParent* aParentDoc,
     const uint64_t& aParentID, const uint32_t& aMsaaID,
     const IAccessibleHolder& aDocCOMProxy) {
-#ifdef ACCESSIBILITY
   auto doc = static_cast<a11y::DocAccessibleParent*>(aDoc);
 
   // If this tab is already shutting down just mark the new actor as shutdown
@@ -1259,9 +1281,9 @@ mozilla::ipc::IPCResult BrowserParent::RecvPDocAccessibleConstructor(
     }
 #  endif
   }
-#endif
   return IPC_OK();
 }
+#endif
 
 PFilePickerParent* BrowserParent::AllocPFilePickerParent(const nsString& aTitle,
                                                          const int16_t& aMode) {
@@ -2018,18 +2040,15 @@ mozilla::ipc::IPCResult BrowserParent::RecvSetCursor(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult BrowserParent::RecvSetStatus(const uint32_t& aType,
-                                                     const nsString& aStatus) {
+mozilla::ipc::IPCResult BrowserParent::RecvSetLinkStatus(
+    const nsString& aStatus) {
   nsCOMPtr<nsIXULBrowserWindow> xulBrowserWindow = GetXULBrowserWindow();
   if (!xulBrowserWindow) {
     return IPC_OK();
   }
 
-  switch (aType) {
-    case nsIWebBrowserChrome::STATUS_LINK:
-      xulBrowserWindow->SetOverLink(aStatus, nullptr);
-      break;
-  }
+  xulBrowserWindow->SetOverLink(aStatus);
+
   return IPC_OK();
 }
 
@@ -2776,9 +2795,8 @@ mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
     data.mIsPrivate.Construct() = aPrivatedMode.value();
   }
   if (aPositions.Length() != 0) {
-    data.mPositions.Construct().Assign(std::move(aPositions));
-    data.mPositionDescendants.Construct().Assign(
-        std::move(aPositionDescendants));
+    data.mPositions.Construct(std::move(aPositions));
+    data.mPositionDescendants.Construct(std::move(aPositionDescendants));
   }
   if (aIdVals.Length() != 0) {
     SessionStoreUtils::ComposeInputData(aIdVals, data.mId.Construct());
@@ -2798,20 +2816,20 @@ mozilla::ipc::IPCResult BrowserParent::RecvSessionStoreUpdate(
       url.AppendElement(input.url);
     }
 
-    data.mInputDescendants.Construct().Assign(std::move(descendants));
-    data.mNumId.Construct().Assign(std::move(numId));
-    data.mNumXPath.Construct().Assign(std::move(numXPath));
-    data.mInnerHTML.Construct().Assign(std::move(innerHTML));
-    data.mUrl.Construct().Assign(std::move(url));
+    data.mInputDescendants.Construct(std::move(descendants));
+    data.mNumId.Construct(std::move(numId));
+    data.mNumXPath.Construct(std::move(numXPath));
+    data.mInnerHTML.Construct(std::move(innerHTML));
+    data.mUrl.Construct(std::move(url));
   }
   // In normal case, we only update the storage when needed.
   // However, we need to reset the session storage(aOrigins.Length() will be 0)
   //   if the usage is over the "browser_sessionstore_dom_storage_limit".
   // In this case, aIsFullStorage is true.
   if (aOrigins.Length() != 0 || aIsFullStorage) {
-    data.mStorageOrigins.Construct().Assign(std::move(aOrigins));
-    data.mStorageKeys.Construct().Assign(std::move(aKeys));
-    data.mStorageValues.Construct().Assign(std::move(aValues));
+    data.mStorageOrigins.Construct(std::move(aOrigins));
+    data.mStorageKeys.Construct(std::move(aKeys));
+    data.mStorageValues.Construct(std::move(aValues));
     data.mIsFullStorage.Construct() = aIsFullStorage;
   }
 

@@ -69,6 +69,10 @@
   list-style-image: url(chrome://browser/skin/notification-icons/geo.svg);
 }
 
+.xr-icon {
+  list-style-image: url(chrome://browser/skin/notification-icons/xr.svg);
+}
+
 .camera-icon {
   list-style-image: url(chrome://browser/skin/notification-icons/camera.svg);
 }
@@ -177,6 +181,7 @@
 
 .content-blocking-warning.reload-tabs .indent {
   min-height: 30px;
+  display: flex; /* We don't use -moz-box because of bug 1599783, flex is used to center the elements */
 }
 
 .content-blocking-warning.reload-tabs .content-blocking-info-image {
@@ -297,6 +302,20 @@
 
 #changeBlockListLink {
   margin-inline-start: 56px;
+}
+
+#telemetry-container {
+  border-radius: 4px;
+  background-color: rgba(12,12,13,0.2);
+  font-size: 85%;
+  padding: 3px;
+  margin-top: 4px;
+  margin-bottom: 4px;
+  width: 100%;
+}
+
+#dataDescriptionBox {
+  line-height: 1.3;
 }
 
 .content-blocking-category-description {

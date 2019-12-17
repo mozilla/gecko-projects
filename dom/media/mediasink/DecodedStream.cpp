@@ -25,6 +25,12 @@ namespace mozilla {
 using media::NullableTimeUnit;
 using media::TimeUnit;
 
+extern LazyLogModule gMediaDecoderLog;
+
+#define LOG_DS(type, fmt, ...)    \
+  MOZ_LOG(gMediaDecoderLog, type, \
+          ("DecodedStream=%p " fmt, this, ##__VA_ARGS__))
+
 /*
  * A container class to make it easier to pass the playback info all the
  * way to DecodedStreamGraphListener from DecodedStream.
@@ -408,6 +414,9 @@ nsresult DecodedStream::Start(const TimeUnit& aStartTime,
   MOZ_ASSERT(mStartTime.isNothing(), "playback already started.");
   MOZ_DIAGNOSTIC_ASSERT(!mOutputTracks.IsEmpty());
 
+  LOG_DS(LogLevel::Debug, "Start() mStartTime=%" PRId64,
+         aStartTime.ToMicroseconds());
+
   mStartTime.emplace(aStartTime);
   mLastOutputTime = TimeUnit::Zero();
   mInfo = aInfo;
@@ -483,6 +492,9 @@ nsresult DecodedStream::Start(const TimeUnit& aStartTime,
     mVideoEndedPromise = mData->mVideoEndedPromise;
     mOutputListener = mData->OnOutput().Connect(mOwnerThread, this,
                                                 &DecodedStream::NotifyOutput);
+    if (mData->mAudioTrack) {
+      mData->mAudioTrack->SetVolume(static_cast<float>(mVolume));
+    }
     SendData();
   }
   return NS_OK;
@@ -492,8 +504,11 @@ void DecodedStream::Stop() {
   AssertOwnerThread();
   MOZ_ASSERT(mStartTime.isSome(), "playback not started.");
 
+  LOG_DS(LogLevel::Debug, "Stop()");
+
   DisconnectListener();
   ResetVideo(mPrincipalHandle);
+  ResetAudio();
   mStartTime.reset();
   mAudioEndedPromise = nullptr;
   mVideoEndedPromise = nullptr;
@@ -541,12 +556,16 @@ void DecodedStream::SetPlaying(bool aPlaying) {
     return;
   }
 
+  LOG_DS(LogLevel::Debug, "playing (%d) -> (%d)", mPlaying.Ref(), aPlaying);
   mPlaying = aPlaying;
 }
 
 void DecodedStream::SetVolume(double aVolume) {
   AssertOwnerThread();
   mVolume = aVolume;
+  if (mData && mData->mAudioTrack) {
+    mData->mAudioTrack->SetVolume(static_cast<float>(aVolume));
+  }
 }
 
 void DecodedStream::SetPlaybackRate(double aPlaybackRate) {
@@ -631,11 +650,12 @@ void DecodedStream::SendAudio(double aVolume,
   // is ref-counted.
   mAudioQueue.GetElementsAfter(mData->mNextAudioTime, &audio);
   for (uint32_t i = 0; i < audio.Length(); ++i) {
+    LOG_DS(LogLevel::Verbose, "Queueing audio [%" PRId64 ",%" PRId64 "]",
+           audio[i]->mTime.ToMicroseconds(),
+           audio[i]->GetEndTime().ToMicroseconds());
     SendStreamAudio(mData.get(), mStartTime.ref(), audio[i], &output, rate,
                     aPrincipalHandle);
   }
-
-  output.ApplyVolume(aVolume);
 
   // |mNextAudioTime| is updated as we process each audio sample in
   // SendStreamAudio().
@@ -679,6 +699,28 @@ static bool ZeroDurationAtLastChunk(VideoSegment& aInput) {
   return lastVideoStratTime == aInput.GetDuration();
 }
 
+void DecodedStream::ResetAudio() {
+  AssertOwnerThread();
+
+  if (!mData) {
+    return;
+  }
+
+  if (!mInfo.HasAudio()) {
+    return;
+  }
+
+  TrackTime cleared = mData->mAudioTrack->ClearFutureData();
+  mData->mAudioTrackWritten -= cleared;
+  if (const RefPtr<AudioData>& v = mAudioQueue.PeekFront()) {
+    mData->mNextAudioTime = v->mTime;
+  }
+  if (mData->mHaveSentFinishAudio && cleared > 0) {
+    mData->mHaveSentFinishAudio = false;
+    mData->mListener->EndTrackAt(mData->mAudioTrack, TRACK_TIME_MAX);
+  }
+}
+
 void DecodedStream::ResetVideo(const PrincipalHandle& aPrincipalHandle) {
   AssertOwnerThread();
 
@@ -688,6 +730,13 @@ void DecodedStream::ResetVideo(const PrincipalHandle& aPrincipalHandle) {
 
   if (!mInfo.HasVideo()) {
     return;
+  }
+
+  TrackTime cleared = mData->mVideoTrack->ClearFutureData();
+  mData->mVideoTrackWritten -= cleared;
+  if (mData->mHaveSentFinishVideo && cleared > 0) {
+    mData->mHaveSentFinishVideo = false;
+    mData->mListener->EndTrackAt(mData->mVideoTrack, TRACK_TIME_MAX);
   }
 
   VideoSegment resetter;
@@ -851,6 +900,7 @@ void DecodedStream::SendData() {
     return;
   }
 
+  LOG_DS(LogLevel::Verbose, "SendData()");
   SendAudio(mVolume, mPrincipalHandle);
   SendVideo(mPrincipalHandle);
 }
@@ -890,9 +940,14 @@ void DecodedStream::NotifyOutput(int64_t aTime) {
   mLastOutputTime = time;
   auto currentTime = GetPosition();
 
+  LOG_DS(LogLevel::Verbose, "time is now %" PRId64,
+         currentTime.ToMicroseconds());
+
   // Remove audio samples that have been played by MTG from the queue.
   RefPtr<AudioData> a = mAudioQueue.PeekFront();
-  for (; a && a->mTime < currentTime;) {
+  for (; a && a->GetEndTime() < currentTime;) {
+    LOG_DS(LogLevel::Debug, "Dropping audio [%" PRId64 ",%" PRId64 "]",
+           a->mTime.ToMicroseconds(), a->GetEndTime().ToMicroseconds());
     RefPtr<AudioData> releaseMe = mAudioQueue.PopFront();
     a = mAudioQueue.PeekFront();
   }
@@ -904,6 +959,7 @@ void DecodedStream::PlayingChanged() {
   if (!mPlaying) {
     // On seek or pause we discard future frames.
     ResetVideo(mPrincipalHandle);
+    ResetAudio();
   }
 }
 
@@ -948,5 +1004,7 @@ void DecodedStream::GetDebugInfo(dom::MediaSinkDebugInfo& aInfo) {
     mData->GetDebugInfo(aInfo.mDecodedStream.mData);
   }
 }
+
+#undef LOG_DS
 
 }  // namespace mozilla

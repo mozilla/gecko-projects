@@ -203,6 +203,7 @@ raptor-chrome:
     - raptor-tp6-30-chrome-cold
     - raptor-ares6-chrome
     - raptor-jetstream2-chrome
+    - raptor-youtube-playback-chrome
 
 raptor-profiling:
     - raptor-tp6-1-firefox-profiling
@@ -310,8 +311,9 @@ raptor-fetch-chromium:
     - raptor-jetstream2-chromium
 
 browsertime:
-    - browsertime-tp6-1
+    - browsertime-tp6
     - browsertime-speedometer
+    - browsertime-tp6-1-profiling
 
 # Raptor desktop power tests
 # (requires Intel Power Gadget to be pre-installed)
@@ -464,9 +466,6 @@ windows-talos:
 marionette-gpu-tests:
     - marionette-gpu
 
-marionette-media-tests:
-    - marionette-media
-
 macosx1014-64-tests:
     - cppunit
     - crashtest
@@ -576,6 +575,8 @@ android-hw-arm7-qr:
 android-hw-arm7-raptor:
     - raptor-speedometer-geckoview
     - raptor-speedometer-refbrow
+    - raptor-speedometer-fenix
+    - raptor-speedometer-fennec68
     - raptor-youtube-playback-fenix
     - raptor-youtube-playback-geckoview
     - raptor-tp6m-1-geckoview
@@ -720,6 +721,8 @@ android-hw-arm7-raptor:
 android-hw-aarch64-raptor:
     - raptor-speedometer-geckoview
     - raptor-speedometer-refbrow
+    - raptor-speedometer-fenix
+    - raptor-speedometer-fennec68
     - raptor-youtube-playback-fenix
     - raptor-youtube-playback-geckoview
     - raptor-tp6m-1-geckoview
@@ -853,10 +856,14 @@ android-hw-aarch64-raptor:
 
 android-hw-arm7-raptor-power:
     - raptor-speedometer-geckoview-power
+    - raptor-speedometer-fenix-power
+    - raptor-speedometer-fennec68-power
     - raptor-scn-power-idle-fenix
+    - raptor-scn-power-idle-fennec68
     - raptor-scn-power-idle-geckoview
     - raptor-scn-power-idle-refbrow
     - raptor-scn-power-idle-bg-fenix
+    - raptor-scn-power-idle-bg-fennec68
     - raptor-scn-power-idle-bg-geckoview
     - raptor-scn-power-idle-bg-refbrow
 
@@ -880,10 +887,14 @@ android-hw-arm7-raptor-cpu-memory-power:
 
 android-hw-aarch64-raptor-power:
     - raptor-speedometer-geckoview-power
+    - raptor-speedometer-fenix-power
+    - raptor-speedometer-fennec68-power
     - raptor-scn-power-idle-fenix
+    - raptor-scn-power-idle-fennec68
     - raptor-scn-power-idle-geckoview
     - raptor-scn-power-idle-refbrow
     - raptor-scn-power-idle-bg-fenix
+    - raptor-scn-power-idle-bg-fennec68
     - raptor-scn-power-idle-bg-geckoview
     - raptor-scn-power-idle-bg-refbrow
 
@@ -918,7 +929,9 @@ android-hw-arm7-raptor-nightly:
     - raptor-tp6m-10-fennec68
 
 android-hw-aarch64-browsertime:
-    - browsertime-tp6m-1
+    - browsertime-tp6m
+    - browsertime-tp6m-profiling
 
 android-hw-arm7-browsertime:
-    - browsertime-tp6m-1
+    - browsertime-tp6m
+    - browsertime-tp6m-profiling

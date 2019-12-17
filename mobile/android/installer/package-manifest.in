@@ -32,6 +32,10 @@
 [lib destdir="../fennec/lib/@ANDROID_CPU_ARCH@"]
 #endif
 
+#ifdef MOZ_CLANG_RT_ASAN_LIB
+@BINPATH@/@MOZ_CLANG_RT_ASAN_LIB@
+#endif
+
 #ifndef MOZ_STATIC_JS
 @BINPATH@/@DLL_PREFIX@mozjs@DLL_SUFFIX@
 #endif
@@ -66,12 +70,6 @@
 #ifndef CROSS_COMPILE
 @BINPATH@/@DLL_PREFIX@freebl3.chk
 @BINPATH@/@DLL_PREFIX@softokn3.chk
-#endif
-#ifndef NSS_DISABLE_DBM
-@BINPATH@/@DLL_PREFIX@nssdbm3@DLL_SUFFIX@
-#ifndef CROSS_COMPILE
-@BINPATH@/@DLL_PREFIX@nssdbm3.chk
-#endif
 #endif
 
 #ifndef MOZ_FOLD_LIBS

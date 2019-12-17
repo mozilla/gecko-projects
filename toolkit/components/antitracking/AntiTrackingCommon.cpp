@@ -26,7 +26,6 @@
 #include "nsICookieService.h"
 #include "nsIDocShell.h"
 #include "nsIHttpChannelInternal.h"
-#include "nsIIOService.h"
 #include "nsIParentChannel.h"
 #include "nsIPermission.h"
 #include "nsPermissionManager.h"
@@ -34,7 +33,6 @@
 #include "nsIScriptError.h"
 #include "nsIURI.h"
 #include "nsIURIFixup.h"
-#include "nsIURL.h"
 #include "nsIWebProgressListener.h"
 #include "nsNetUtil.h"
 #include "nsPIDOMWindow.h"
@@ -830,6 +828,7 @@ bool CheckAntiTrackingPermission(nsIPrincipal* aPrincipal,
 
       LOG(("Found a matching permission"));
       found = true;
+      break;
     }
 
     if (!found) {

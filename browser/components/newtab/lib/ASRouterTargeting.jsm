@@ -44,12 +44,6 @@ XPCOMUtils.defineLazyPreferenceGetter(
 );
 XPCOMUtils.defineLazyPreferenceGetter(
   this,
-  "isFxABadgeEnabled",
-  "browser.messaging-system.fxatoolbarbadge.enabled",
-  true
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  this,
   "hasAccessedFxAPanel",
   "identity.fxaccounts.toolbar.accessed",
   false
@@ -114,12 +108,13 @@ const MOZ_JEXL_FILEPATH = "mozjexl";
 
 const { activityStreamProvider: asProvider } = NewTabUtils;
 
+const FXA_ATTACHED_CLIENTS_UPDATE_INTERVAL = 2 * 60 * 60 * 1000; // Two hours
 const FRECENT_SITES_UPDATE_INTERVAL = 6 * 60 * 60 * 1000; // Six hours
 const FRECENT_SITES_IGNORE_BLOCKED = false;
 const FRECENT_SITES_NUM_ITEMS = 25;
 const FRECENT_SITES_MIN_FRECENCY = 100;
 
-const CACHE_EXPIRATION = 60 * 1000;
+const CACHE_EXPIRATION = 5 * 60 * 1000;
 const jexlEvaluationCache = new Map();
 
 /**
@@ -145,6 +140,32 @@ function CachedTargetingGetter(
       const now = Date.now();
       if (now - this._lastUpdated >= updateInterval) {
         this._value = await asProvider[property](options);
+        this._lastUpdated = now;
+      }
+      return this._value;
+    },
+  };
+}
+
+function CacheListAttachedOAuthClients() {
+  return {
+    _lastUpdated: 0,
+    _value: null,
+    expire() {
+      this._lastUpdated = 0;
+      this._value = null;
+    },
+    get() {
+      const now = Date.now();
+      if (now - this._lastUpdated >= FXA_ATTACHED_CLIENTS_UPDATE_INTERVAL) {
+        this._value = new Promise(resolve => {
+          fxAccounts
+            .listAttachedOAuthClients()
+            .then(clients => {
+              resolve(clients);
+            })
+            .catch(() => resolve([]));
+        });
         this._lastUpdated = now;
       }
       return this._value;
@@ -216,20 +237,9 @@ const QueryCache = {
     TotalBookmarksCount: new CachedTargetingGetter("getTotalBookmarksCount"),
     CheckBrowserNeedsUpdate: new CheckBrowserNeedsUpdate(),
     RecentBookmarks: new CachedTargetingGetter("getRecentBookmarks"),
+    ListAttachedOAuthClients: new CacheListAttachedOAuthClients(),
   },
 };
-
-/**
- * sortMessagesByOrder
- *
- * Each message has an associated order, which is guaranteed to be strictly
- * positive. Sort the messages so that message shows in order specified
- *
- */
-
-function sortMessagesByOrder(messages) {
-  return messages.sort((a, b) => a.order - b.order);
-}
 
 /**
  * sortMessagesByWeightedRank
@@ -261,12 +271,46 @@ function sortMessagesByWeightedRank(messages) {
 }
 
 /**
- * Messages with targeting should get evaluated first, this way we can have
- * fallback messages (no targeting at all) that will show up if nothing else
- * matched
+ * getSortedMessages - Given an array of Messages, applies sorting and filtering rules
+ *                     in expected order.
+ *
+ * @param {Array<Message>} messages
+ * @param {{}} options
+ * @param {boolean} options.ordered - Should .order be used instead of random weighted sorting?
+ * @returns {Array<Message>}
  */
-function sortMessagesByTargeting(messages) {
-  return messages.sort((a, b) => {
+function getSortedMessages(messages, options = {}) {
+  let { ordered } = { ordered: false, ...options };
+  let result = messages;
+  let hasScores;
+
+  if (!ordered) {
+    result = sortMessagesByWeightedRank(result);
+  }
+
+  result.sort((a, b) => {
+    // If we find at least one score, we need to apply filtering by threshold at the end.
+    if (!isNaN(a.score) || !isNaN(b.score)) {
+      hasScores = true;
+    }
+
+    // First sort by score if we're doing personalization:
+    if (a.score > b.score || (!isNaN(a.score) && isNaN(b.score))) {
+      return -1;
+    }
+    if (a.score < b.score || (isNaN(a.score) && !isNaN(b.score))) {
+      return 1;
+    }
+
+    // Next, sort by priority
+    if (a.priority > b.priority || (!isNaN(a.priority) && isNaN(b.priority))) {
+      return -1;
+    }
+    if (a.priority < b.priority || (isNaN(a.priority) && !isNaN(b.priority))) {
+      return 1;
+    }
+
+    // Sort messages with targeting expressions higher than those with none
     if (a.targeting && !b.targeting) {
       return -1;
     }
@@ -274,37 +318,28 @@ function sortMessagesByTargeting(messages) {
       return 1;
     }
 
-    return 0;
-  });
-}
-
-/**
- * Sort messages in descending order based on the value of `priority`
- * Messages with no `priority` are ranked lowest (even after a message with
- * priority 0).
- */
-function sortMessagesByPriority(messages) {
-  return messages.sort((a, b) => {
-    if (isNaN(a.priority) && isNaN(b.priority)) {
-      return 0;
-    }
-    if (!isNaN(a.priority) && isNaN(b.priority)) {
-      return -1;
-    }
-    if (isNaN(a.priority) && !isNaN(b.priority)) {
-      return 1;
-    }
-
-    // Descending order; higher priority comes first
-    if (a.priority > b.priority) {
-      return -1;
-    }
-    if (a.priority < b.priority) {
-      return 1;
+    // Next, sort by order *ascending* if ordered = true
+    if (ordered) {
+      if (a.order > b.order || (!isNaN(a.order) && isNaN(b.order))) {
+        return 1;
+      }
+      if (a.order < b.order || (isNaN(a.order) && !isNaN(b.order))) {
+        return -1;
+      }
     }
 
     return 0;
   });
+
+  if (hasScores && !isNaN(ASRouterPreferences.personalizedCfrThreshold)) {
+    return result.filter(
+      message =>
+        isNaN(message.score) ||
+        message.score >= ASRouterPreferences.personalizedCfrThreshold
+    );
+  }
+
+  return result;
 }
 
 const TargetingGetters = {
@@ -343,6 +378,12 @@ const TargetingGetters = {
   },
   get isFxAEnabled() {
     return isFxAEnabled;
+  },
+  get trailheadInterrupt() {
+    return ASRouterPreferences.trailhead.trailheadInterrupt;
+  },
+  get trailheadTriplet() {
+    return ASRouterPreferences.trailhead.trailheadTriplet;
   },
   get sync() {
     return {
@@ -464,7 +505,8 @@ const TargetingGetters = {
     return isWhatsNewPanelEnabled;
   },
   get isFxABadgeEnabled() {
-    return isFxABadgeEnabled;
+    // Requires cleanup and update of remote messages. See Bug 1601965.
+    return true;
   },
   get userPrefs() {
     return {
@@ -476,22 +518,46 @@ const TargetingGetters = {
   get totalBlockedCount() {
     return TrackingDBService.sumAllEvents();
   },
+  get blockedCountByType() {
+    const idToTextMap = new Map([
+      [Ci.nsITrackingDBService.TRACKERS_ID, "trackerCount"],
+      [Ci.nsITrackingDBService.TRACKING_COOKIES_ID, "cookieCount"],
+      [Ci.nsITrackingDBService.CRYPTOMINERS_ID, "cryptominerCount"],
+      [Ci.nsITrackingDBService.FINGERPRINTERS_ID, "fingerprinterCount"],
+      [Ci.nsITrackingDBService.SOCIAL_ID, "socialCount"],
+    ]);
+
+    const dateTo = new Date();
+    const dateFrom = new Date(dateTo.getTime() - 42 * 24 * 60 * 60 * 1000);
+    return TrackingDBService.getEventsByDateRange(dateFrom, dateTo).then(
+      eventsByDate => {
+        let totalEvents = {};
+        for (let blockedType of idToTextMap.values()) {
+          totalEvents[blockedType] = 0;
+        }
+
+        return eventsByDate.reduce((acc, day) => {
+          const type = day.getResultByName("type");
+          const count = day.getResultByName("count");
+          acc[idToTextMap.get(type)] = acc[idToTextMap.get(type)] + count;
+          return acc;
+        }, totalEvents);
+      }
+    );
+  },
   get attachedFxAOAuthClients() {
-    // Explicitly catch error objects e.g.  NO_ACCOUNT triggered when
-    // setting FXA_USERNAME_PREF from tests
     return this.usesFirefoxSync
-      ? new Promise(resolve => {
-          fxAccounts
-            .listAttachedOAuthClients()
-            .then(clients => {
-              resolve(clients);
-            })
-            .catch(() => resolve([]));
-        })
+      ? QueryCache.queries.ListAttachedOAuthClients.get()
       : [];
   },
   get platformName() {
     return AppConstants.platform;
+  },
+  get scores() {
+    return ASRouterPreferences.personalizedCfrScores;
+  },
+  get scoreThreshold() {
+    return ASRouterPreferences.personalizedCfrThreshold;
   },
 };
 
@@ -500,37 +566,32 @@ this.ASRouterTargeting = {
 
   ERROR_TYPES: {
     MALFORMED_EXPRESSION: "MALFORMED_EXPRESSION",
+    ATTRIBUTE_ERROR: "JEXL_ATTRIBUTE_GETTER_ERROR",
     OTHER_ERROR: "OTHER_ERROR",
   },
 
   // Combines the getter properties of two objects without evaluating them
-  combineContexts(contextA = {}, contextB = {}) {
-    const sameProperty = Object.keys(contextA).find(p =>
-      Object.keys(contextB).includes(p)
-    );
-    if (sameProperty) {
-      Cu.reportError(
-        `Property ${sameProperty} exists in both contexts and is overwritten.`
-      );
-    }
+  combineContexts(contextA = {}, contextB = {}, onError) {
+    return {
+      get: (obj, prop) => {
+        try {
+          return contextA[prop] || contextB[prop];
+        } catch (error) {
+          onError(this.ERROR_TYPES.ATTRIBUTE_ERROR, error, prop);
+        }
 
-    const context = {};
-    Object.defineProperties(
-      context,
-      Object.getOwnPropertyDescriptors(contextA)
-    );
-    Object.defineProperties(
-      context,
-      Object.getOwnPropertyDescriptors(contextB)
-    );
-
-    return context;
+        return null;
+      },
+    };
   },
 
-  isMatch(filterExpression, customContext) {
+  isMatch(filterExpression, customContext, onError) {
     return FilterExpressions.eval(
       filterExpression,
-      this.combineContexts(this.Environment, customContext)
+      new Proxy(
+        {},
+        this.combineContexts(customContext, this.Environment, onError)
+      )
     );
   },
 
@@ -605,7 +666,7 @@ this.ASRouterTargeting = {
           return result.value;
         }
       }
-      result = await this.isMatch(message.targeting, context);
+      result = await this.isMatch(message.targeting, context, onError);
       if (shouldCache) {
         jexlEvaluationCache.set(message.targeting, {
           timestamp: Date.now(),
@@ -625,19 +686,6 @@ this.ASRouterTargeting = {
     return result;
   },
 
-  _getSortedMessages(messages, ordered) {
-    const weightSortedMessages = ordered
-      ? sortMessagesByOrder(messages)
-      : sortMessagesByWeightedRank([...messages]);
-    const sortedMessages = sortMessagesByTargeting(weightSortedMessages);
-    return sortMessagesByPriority(sortedMessages);
-  },
-
-  _getCombinedContext(trigger, context) {
-    const triggerContext = trigger ? trigger.context : {};
-    return this.combineContexts(context, triggerContext);
-  },
-
   _isMessageMatch(message, trigger, context, onError, shouldCache = false) {
     return (
       message &&
@@ -654,13 +702,14 @@ this.ASRouterTargeting = {
    * findMatchingMessage - Given an array of messages, returns one message
    *                       whos targeting expression evaluates to true
    *
-   * @param {Array} messages An array of AS router messages
+   * @param {Array<Message>} messages An array of AS router messages
    * @param {trigger} string A trigger expression if a message for that trigger is desired
    * @param {obj|null} context A FilterExpression context. Defaults to TargetingGetters above.
    * @param {func} onError A function to handle errors (takes two params; error, message)
    * @param {func} ordered An optional param when true sort message by order specified in message
    * @param {boolean} shouldCache Should the JEXL evaluations be cached and reused.
-   * @returns {obj} an AS router message
+   * @param {boolean} returnAll Should we return all matching messages, not just the first one found.
+   * @returns {obj|Array<Message>} If returnAll is false, a single message. If returnAll is true, an array of messages.
    */
   async findMatchingMessage({
     messages,
@@ -669,64 +718,45 @@ this.ASRouterTargeting = {
     onError,
     ordered = false,
     shouldCache = false,
+    returnAll = false,
   }) {
-    const sortedMessages = this._getSortedMessages(messages, ordered);
-    const combinedContext = this._getCombinedContext(trigger, context);
+    const sortedMessages = getSortedMessages(messages, { ordered });
+    const combinedContext = new Proxy(
+      {},
+      this.combineContexts(trigger && trigger.context, context, onError)
+    );
+    const matching = returnAll ? [] : null;
+
+    const isMatch = candidate =>
+      this._isMessageMatch(
+        candidate,
+        trigger,
+        combinedContext,
+        onError,
+        shouldCache
+      );
 
     for (const candidate of sortedMessages) {
-      if (
-        await this._isMessageMatch(
-          candidate,
-          trigger,
-          combinedContext,
-          onError,
-          shouldCache
-        )
-      ) {
-        return candidate;
+      if (await isMatch(candidate)) {
+        // If not returnAll, we should return the first message we find that matches.
+        if (!returnAll) {
+          return candidate;
+        }
+
+        matching.push(candidate);
       }
     }
-    return null;
-  },
-
-  /**
-   * findAllMatchingMessages - Given an array of messages, returns an array of
-   *                           messages that that match the targeting.
-   *
-   * @param {Array} messages An array of AS router messages.
-   * @param {trigger} string A trigger expression if a message for that trigger is desired.
-   * @param {obj|null} context A FilterExpression context. Defaults to TargetingGetters above.
-   * @param {func} onError A function to handle errors (takes two params; error, message)
-   * @param {func} ordered An optional param when true sort message by order specified in message
-   * @returns {Array} An array of AS router messages that match.
-   */
-  async findAllMatchingMessages({
-    messages,
-    trigger,
-    context,
-    onError,
-    ordered = false,
-  }) {
-    const sortedMessages = this._getSortedMessages(messages, ordered);
-    const combinedContext = this._getCombinedContext(trigger, context);
-    const matchingMessages = [];
-
-    for (const candidate of sortedMessages) {
-      if (
-        await this._isMessageMatch(candidate, trigger, combinedContext, onError)
-      ) {
-        matchingMessages.push(candidate);
-      }
-    }
-    return matchingMessages;
+    return matching;
   },
 };
 
 // Export for testing
+this.getSortedMessages = getSortedMessages;
 this.QueryCache = QueryCache;
 this.CachedTargetingGetter = CachedTargetingGetter;
 this.EXPORTED_SYMBOLS = [
   "ASRouterTargeting",
   "QueryCache",
   "CachedTargetingGetter",
+  "getSortedMessages",
 ];

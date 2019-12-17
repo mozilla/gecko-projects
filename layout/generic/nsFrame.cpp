@@ -76,7 +76,6 @@
 #include "nsAnimationManager.h"
 
 // For triple-click pref
-#include "imgIContainer.h"
 #include "imgIRequest.h"
 #include "nsError.h"
 #include "nsContainerFrame.h"
@@ -1712,7 +1711,7 @@ bool nsIFrame::HasOpacityInternal(float aThreshold,
                                   EffectSet* aEffectSet) const {
   MOZ_ASSERT(0.0 <= aThreshold && aThreshold <= 1.0, "Invalid argument");
   if (aStyleEffects->mOpacity < aThreshold ||
-      (aStyleDisplay->mWillChange.bits & StyleWillChangeBits_OPACITY)) {
+      (aStyleDisplay->mWillChange.bits & StyleWillChangeBits::OPACITY)) {
     return true;
   }
 
@@ -2373,13 +2372,18 @@ already_AddRefed<ComputedStyle> nsIFrame::ComputeSelectionStyle(
       aSelectionStatus != nsISelectionController::SELECTION_DISABLED) {
     return nullptr;
   }
+  // When in high-contrast mode, the style system ends up ignoring the color
+  // declarations, which means that the ::selection style becomes the inherited
+  // color, and default background. That's no good.
+  if (!PresContext()->PrefSheetPrefs().mUseDocumentColors) {
+    return nullptr;
+  }
   Element* element = FindElementAncestorForMozSelection(GetContent());
   if (!element) {
     return nullptr;
   }
-  RefPtr<ComputedStyle> sc = PresContext()->StyleSet()->ProbePseudoElementStyle(
+  return PresContext()->StyleSet()->ProbePseudoElementStyle(
       *element, PseudoStyleType::selection, Style());
-  return sc.forget();
 }
 
 /********************************************************
@@ -3042,12 +3046,12 @@ void nsIFrame::BuildDisplayListForStackingContext(
   // we're painting, and we're not animating opacity. Don't do this
   // if we're going to compute plugin geometry, since opacity-0 plugins
   // need to have display items built for them.
-  bool needHitTestInfo = aBuilder->BuildCompositorHitTestInfo() &&
-                         StyleUI()->GetEffectivePointerEvents(this) !=
-                             NS_STYLE_POINTER_EVENTS_NONE;
+  bool needHitTestInfo =
+      aBuilder->BuildCompositorHitTestInfo() &&
+      StyleUI()->GetEffectivePointerEvents(this) != StylePointerEvents::None;
   bool opacityItemForEventsAndPluginsOnly = false;
   if (effects->mOpacity == 0.0 && aBuilder->IsForPainting() &&
-      !(disp->mWillChange.bits & StyleWillChangeBits_OPACITY) &&
+      !(disp->mWillChange.bits & StyleWillChangeBits::OPACITY) &&
       !nsLayoutUtils::HasAnimationOfPropertySet(
           this, nsCSSPropertyIDSet::OpacityProperties(), effectSetForOpacity)) {
     if (needHitTestInfo || aBuilder->WillComputePluginGeometry()) {
@@ -4460,9 +4464,10 @@ static StyleUserSelect UsedUserSelect(const nsIFrame* aFrame) {
     return style;
   }
 
-  if (IsEditingHost(aFrame)) {
+  if (aFrame->IsTextInputFrame() || IsEditingHost(aFrame)) {
     // We don't implement 'contain' itself, but we make 'text' behave as
-    // 'contain' for contenteditable elements anyway so this is ok.
+    // 'contain' for contenteditable and <input> / <textarea> elements anyway so
+    // this is ok.
     return StyleUserSelect::Text;
   }
 
@@ -4820,6 +4825,10 @@ NS_IMETHODIMP nsFrame::HandleDrag(nsPresContext* aPresContext,
              "HandleDrag can only handle mouse event");
 
   RefPtr<nsFrameSelection> frameselection = GetFrameSelection();
+  if (!frameselection) {
+    return NS_OK;
+  }
+
   bool mouseDown = frameselection->GetDragState();
   if (!mouseDown) {
     return NS_OK;
@@ -8689,7 +8698,6 @@ nsresult nsIFrame::PeekOffset(nsPeekOffsetStruct* aPos) {
         if (thisLine < 0) return NS_ERROR_FAILURE;
         iter = blockFrame->GetLineIterator();
         NS_ASSERTION(iter, "GetLineNumber() succeeded but no block frame?");
-        result = NS_OK;
 
         int edgeCase = 0;  // no edge case. this should look at thisLine
 
@@ -10642,10 +10650,6 @@ void nsFrame::BoxReflow(nsBoxLayoutState& aState, nsPresContext* aPresContext,
   }
 #endif
 
-  if (aWidth == NS_UNCONSTRAINEDSIZE) aWidth = aDesiredSize.Width();
-
-  if (aHeight == NS_UNCONSTRAINEDSIZE) aHeight = aDesiredSize.Height();
-
   metrics->mLastSize.width = aDesiredSize.Width();
   metrics->mLastSize.height = aDesiredSize.Height();
 
@@ -10928,8 +10932,8 @@ bool nsIFrame::IsStackingContext(const nsStyleDisplay* aStyleDisplay,
          (aIsPositioned && (aStyleDisplay->IsPositionForcingStackingContext() ||
                             aStylePosition->mZIndex.IsInteger())) ||
          (aStyleDisplay->mWillChange.bits &
-          StyleWillChangeBits_STACKING_CONTEXT) ||
-         aStyleDisplay->mIsolation != NS_STYLE_ISOLATION_AUTO ||
+          StyleWillChangeBits::STACKING_CONTEXT) ||
+         aStyleDisplay->mIsolation != StyleIsolation::Auto ||
          aStyleEffects->HasBackdropFilters();
 }
 
@@ -11164,8 +11168,9 @@ CompositorHitTestInfo nsIFrame::GetCompositorHitTestInfo(
     // frames, are the event targets for any regions viewport frames may cover.
     return result;
   }
-  const uint8_t pointerEvents = StyleUI()->GetEffectivePointerEvents(this);
-  if (pointerEvents == NS_STYLE_POINTER_EVENTS_NONE) {
+  const StylePointerEvents pointerEvents =
+      StyleUI()->GetEffectivePointerEvents(this);
+  if (pointerEvents == StylePointerEvents::None) {
     return result;
   }
   if (!StyleVisibility()->IsVisible()) {
@@ -11233,9 +11238,9 @@ CompositorHitTestInfo nsIFrame::GetCompositorHitTestInfo(
         nsLayoutUtils::GetTouchActionFromFrame(touchActionFrame);
     // The CSS allows the syntax auto | none | [pan-x || pan-y] | manipulation
     // so we can eliminate some combinations of things.
-    if (touchAction == StyleTouchAction_AUTO) {
+    if (touchAction == StyleTouchAction::AUTO) {
       // nothing to do
-    } else if (touchAction & StyleTouchAction_MANIPULATION) {
+    } else if (touchAction & StyleTouchAction::MANIPULATION) {
       result += CompositorHitTestFlags::eTouchActionDoubleTapZoomDisabled;
     } else {
       // This path handles the cases none | [pan-x || pan-y] and so both
@@ -11243,13 +11248,13 @@ CompositorHitTestInfo nsIFrame::GetCompositorHitTestInfo(
       result += CompositorHitTestFlags::eTouchActionPinchZoomDisabled;
       result += CompositorHitTestFlags::eTouchActionDoubleTapZoomDisabled;
 
-      if (!(touchAction & StyleTouchAction_PAN_X)) {
+      if (!(touchAction & StyleTouchAction::PAN_X)) {
         result += CompositorHitTestFlags::eTouchActionPanXDisabled;
       }
-      if (!(touchAction & StyleTouchAction_PAN_Y)) {
+      if (!(touchAction & StyleTouchAction::PAN_Y)) {
         result += CompositorHitTestFlags::eTouchActionPanYDisabled;
       }
-      if (touchAction & StyleTouchAction_NONE) {
+      if (touchAction & StyleTouchAction::NONE) {
         // all the touch-action disabling flags will already have been set above
         MOZ_ASSERT(result.contains(CompositorHitTestTouchActionMask));
       }

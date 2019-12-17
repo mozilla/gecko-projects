@@ -5,6 +5,7 @@ const { AddonTestUtils } = ChromeUtils.import(
 );
 
 XPCOMUtils.defineLazyModuleGetters(this, {
+  ExtensionParent: "resource://gre/modules/ExtensionParent.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarProviderExtension: "resource:///modules/UrlbarProviderExtension.jsm",
   UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.jsm",
@@ -21,6 +22,17 @@ AddonTestUtils.createAppInfo(
   "1",
   "42"
 );
+
+function promiseUninstallCompleted(extensionId) {
+  return new Promise(resolve => {
+    // eslint-disable-next-line mozilla/balanced-listeners
+    ExtensionParent.apiManager.on("uninstall-complete", (type, { id }) => {
+      if (id === extensionId) {
+        executeSoon(resolve);
+      }
+    });
+  });
+}
 
 const ORIGINAL_NOTIFICATION_TIMEOUT =
   UrlbarProviderExtension.notificationTimeout;
@@ -105,8 +117,8 @@ add_task(async function test_registerProvider() {
             "SearchString is non empty"
           );
           browser.test.assertTrue(
-            Array.isArray(query.acceptableSources),
-            "acceptableSources is an array"
+            Array.isArray(query.sources),
+            "sources is an array"
           );
           return state;
         }, name);
@@ -181,7 +193,7 @@ add_task(async function test_onProviderResultsRequested() {
         browser.test.assertFalse(query.isPrivate);
         browser.test.assertEq(query.maxResults, 10);
         browser.test.assertEq(query.searchString, "test");
-        browser.test.assertTrue(Array.isArray(query.acceptableSources));
+        browser.test.assertTrue(Array.isArray(query.sources));
         return [
           {
             type: "remote_tab",
@@ -290,7 +302,7 @@ add_task(async function test_onProviderResultsRequested() {
         title: "Test remote_tab-tabs result",
         url: "http://example.com/remote_tab-tabs",
         displayUrl:
-          (UrlbarPrefs.get("view.stripHttps") ? "http://" : "") +
+          (UrlbarPrefs.get("update1.view.stripHttps") ? "http://" : "") +
           "example.com/remote_tab-tabs",
       },
     },
@@ -303,7 +315,7 @@ add_task(async function test_onProviderResultsRequested() {
         title: "Test tab-tabs result",
         url: "http://example.com/tab-tabs",
         displayUrl:
-          (UrlbarPrefs.get("view.stripHttps") ? "http://" : "") +
+          (UrlbarPrefs.get("update1.view.stripHttps") ? "http://" : "") +
           "example.com/tab-tabs",
       },
     },
@@ -328,7 +340,7 @@ add_task(async function test_onProviderResultsRequested() {
         title: "Test url-history result",
         url: "http://example.com/url-history",
         displayUrl:
-          (UrlbarPrefs.get("view.stripHttps") ? "http://" : "") +
+          (UrlbarPrefs.get("update1.view.stripHttps") ? "http://" : "") +
           "example.com/url-history",
       },
     },
@@ -1433,7 +1445,9 @@ add_task(async function test_setOpenViewOnFocus() {
     "Successfully enabled the open-view-on-focus mode"
   );
 
+  let completed = promiseUninstallCompleted(ext.id);
   await ext.unload();
+  await completed;
 
   Assert.equal(
     getPrefValue(),
@@ -1471,7 +1485,9 @@ add_task(async function test_engagementTelemetry() {
     "Successfully enabled the engagement telemetry"
   );
 
+  let completed = promiseUninstallCompleted(ext.id);
   await ext.unload();
+  await completed;
 
   Assert.equal(
     getPrefValue(),

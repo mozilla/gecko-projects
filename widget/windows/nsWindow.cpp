@@ -86,7 +86,6 @@
 #include "prenv.h"
 
 #include "mozilla/WidgetTraceEvent.h"
-#include "nsIAppShell.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIKeyEventInPluginCallback.h"
 #include "nsITheme.h"
@@ -95,7 +94,6 @@
 #include "imgIContainer.h"
 #include "nsIFile.h"
 #include "nsIRollupListener.h"
-#include "nsIServiceManager.h"
 #include "nsIClipboard.h"
 #include "WinMouseScrollHandler.h"
 #include "nsFontMetrics.h"
@@ -116,15 +114,12 @@
 #include "nsWindowsDllInterceptor.h"
 #include "nsLayoutUtils.h"
 #include "nsView.h"
-#include "nsIWindowMediator.h"
-#include "nsIServiceManager.h"
 #include "nsWindowGfx.h"
 #include "gfxWindowsPlatform.h"
 #include "gfxDWriteFonts.h"
 #include "Layers.h"
 #include "nsPrintfCString.h"
 #include "mozilla/Preferences.h"
-#include "nsISound.h"
 #include "SystemTimeConverter.h"
 #include "WinTaskbar.h"
 #include "WidgetUtils.h"
@@ -133,7 +128,6 @@
 #include "mozilla/dom/Touch.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/GPUProcessManager.h"
-#include "nsIAppStartup.h"
 #include "mozilla/WindowsVersion.h"
 #include "mozilla/TextEvents.h"  // For WidgetKeyboardEvent
 #include "mozilla/TextEventDispatcherListener.h"
@@ -183,7 +177,6 @@
 #include "nsWindowDefs.h"
 
 #include "nsCrashOnException.h"
-#include "nsIXULRuntime.h"
 
 #include "nsIContent.h"
 
@@ -1864,8 +1857,10 @@ void nsWindow::Resize(double aWidth, double aHeight, bool aRepaint) {
 
     ClearThemeRegion();
     double oldScale = mDefaultScale;
+    mResizeState = RESIZING;
     VERIFY(
         ::SetWindowPos(mWnd, nullptr, 0, 0, width, GetHeight(height), flags));
+    mResizeState = NOT_RESIZING;
     if (WinUtils::LogToPhysFactor(mWnd) != oldScale) {
       ChangedDPI();
     }
@@ -1913,8 +1908,10 @@ void nsWindow::Resize(double aX, double aY, double aWidth, double aHeight,
 
     ClearThemeRegion();
     double oldScale = mDefaultScale;
+    mResizeState = RESIZING;
     VERIFY(
         ::SetWindowPos(mWnd, nullptr, x, y, width, GetHeight(height), flags));
+    mResizeState = NOT_RESIZING;
     if (WinUtils::LogToPhysFactor(mWnd) != oldScale) {
       ChangedDPI();
     }

@@ -11,6 +11,7 @@
 #include "platform.h"
 #include "ProfilerParent.h"
 
+#include "js/Array.h"  // JS::NewArrayObject
 #include "js/JSON.h"
 #include "js/Value.h"
 #include "mozilla/dom/Promise.h"
@@ -113,7 +114,7 @@ NS_IMETHODIMP
 nsProfiler::StartProfiler(uint32_t aEntries, double aInterval,
                           const nsTArray<nsCString>& aFeatures,
                           const nsTArray<nsCString>& aFilters,
-                          double aDuration) {
+                          uint64_t aActiveBrowsingContextID, double aDuration) {
   if (mLockedForPrivateBrowsing) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -136,7 +137,7 @@ nsProfiler::StartProfiler(uint32_t aEntries, double aInterval,
   }
   profiler_start(PowerOfTwo32(aEntries), aInterval, features,
                  filterStringVector.begin(), filterStringVector.length(),
-                 duration);
+                 aActiveBrowsingContextID, duration);
 
   return NS_OK;
 }
@@ -662,7 +663,7 @@ nsProfiler::GetSymbolTable(const nsACString& aDebugPath,
                                             aSymbolTable.mBuffer.Elements()));
 
             if (addrsArray && indexArray && bufferArray) {
-              JS::RootedObject tuple(cx, JS_NewArrayObject(cx, 3));
+              JS::RootedObject tuple(cx, JS::NewArrayObject(cx, 3));
               JS_SetElement(cx, tuple, 0, addrsArray);
               JS_SetElement(cx, tuple, 1, indexArray);
               JS_SetElement(cx, tuple, 2, bufferArray);

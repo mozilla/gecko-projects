@@ -31,7 +31,9 @@ include protocol PPrinting;
 include protocol PChildToParentStream;
 include protocol PParentToChildStream;
 include protocol POfflineCacheUpdate;
+#ifdef MOZ_WEBSPEECH
 include protocol PSpeechSynthesis;
+#endif
 include protocol PTestShell;
 include protocol PJavaScript;
 include protocol PRemoteSpellcheckEngine;
@@ -101,6 +103,9 @@ using mozilla::Telemetry::ScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::KeyedScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::DynamicScalarDefinition from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
+using moveonly mozilla::UntrustedModulesData from "mozilla/UntrustedModulesData.h";
+using moveonly mozilla::ModulePaths from "mozilla/UntrustedModulesData.h";
+using moveonly mozilla::ModulesMapResult from "mozilla/UntrustedModulesData.h";
 using mozilla::Telemetry::DiscardedData from "mozilla/TelemetryComms.h";
 using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
 using refcounted class mozilla::dom::BrowsingContext from "mozilla/dom/BrowsingContext.h";
@@ -111,6 +116,7 @@ using mozilla::ipc::SharedMemoryBasic::Handle from "mozilla/ipc/SharedMemoryBasi
 using mozilla::fontlist::Pointer from "SharedFontList.h";
 using gfxSparseBitSet from "gfxFontUtils.h";
 using mozilla::dom::MediaControlActions from "ipc/MediaControlIPC.h";
+using refcounted class nsDocShellLoadState from "nsDocShellLoadState.h";
 
 union ChromeRegistryItem
 {
@@ -337,6 +343,12 @@ union PSHEntryOrSharedID
   uint64_t;
 };
 
+struct KeyValuePair
+{
+    nsString key;
+    nsString value;
+};
+
 /**
  * The PContent protocol is a top-level protocol between the UI process
  * and a content process. There is exactly one PContentParent/PContentChild pair
@@ -361,7 +373,9 @@ nested(upto inside_cpow) sync protocol PContent
     manages PPrinting;
     manages PChildToParentStream;
     manages PParentToChildStream;
+#ifdef MOZ_WEBSPEECH
     manages PSpeechSynthesis;
+#endif
     manages PTestShell;
     manages PJavaScript;
     manages PRemoteSpellcheckEngine;
@@ -470,6 +484,12 @@ child:
                               bool minimizeMemoryUsage,
                               FileDescriptor? DMDFile);
     async RequestPerformanceMetrics(nsID aID);
+
+    /**
+     * Used by third-party modules telemetry (aka "untrusted modules" telemetry)
+     * to pull data from content processes.
+     */
+    async GetUntrustedModulesData() returns (UntrustedModulesData? data);
 
     /**
      * Communication between the PuppetBidiKeyboard and the actual
@@ -842,6 +862,12 @@ child:
 
     async EvictContentViewers(uint64_t[] aToEvictSharedStateIDs);
 
+    async LoadURI(BrowsingContext aContext, nsDocShellLoadState aLoadState, bool aSetNavigating);
+
+    async InternalLoad(BrowsingContext aContext, nsDocShellLoadState aLoadState, bool aTakeFocus);
+
+    async DisplayLoadError(BrowsingContext aContext, nsString aURI);
+
 parent:
     async InitBackground(Endpoint<PBackgroundParent> aEndpoint);
 
@@ -899,7 +925,9 @@ parent:
 
     async PChildToParentStream();
 
+#ifdef MOZ_WEBSPEECH
     async PSpeechSynthesis();
+#endif
 
     async PMedia();
 
@@ -1162,9 +1190,12 @@ parent:
      *       principals that can live in the content process should
      *       provided.
      */
-    async PContentPermissionRequest(PermissionRequest[] aRequests, Principal aPrincipal,
-                                    Principal aTopLevelPrincipal, bool aIsHandlingUserInput,
-                                    bool aDocumentHasUserInput, uint64_t aPageLoadTimestamp, TabId tabId);
+    async PContentPermissionRequest(PermissionRequest[] aRequests,
+                                    Principal aPrincipal,
+                                    Principal aTopLevelPrincipal,
+                                    bool aIsHandlingUserInput,
+                                    bool aMaybeUnsafePermissionDelegate,
+                                    TabId tabId);
 
     async ShutdownProfile(nsCString aProfile);
 
@@ -1468,6 +1499,15 @@ parent:
     */
     async NotifyMediaAudibleChanged(BrowsingContext aContext, bool aAudible);
 
+    /**
+     * Due to sandboxing, a child process's UntrustedModulesProcessor cannot
+     * obtain enough information about a DLL file to determine its
+     * trustworthiness. This API asks the chrome process to perform that
+     * evaluation.
+     */
+    async GetModulesTrust(ModulePaths aModPaths, bool aRunAtNormalPriority)
+        returns (ModulesMapResult? modMapResult);
+
 both:
     async ScriptError(nsString message, nsString sourceName, nsString sourceLine,
                       uint32_t lineNumber, uint32_t colNumber, uint32_t flags,
@@ -1539,6 +1579,14 @@ both:
     async WindowBlur(BrowsingContext aContext);
     async WindowPostMessage(BrowsingContext aContext, ClonedMessageData aMessage,
                             PostMessageData aData);
+
+    /**
+     * Move sessionStorage data between parent and content processes. See
+     * SessionStorageManager documentation for more details.
+     */
+    async SessionStorageData(BrowsingContext aTop, nsCString aOriginAttrs,
+                             nsCString aOriginKey, KeyValuePair[] aDefaultData,
+                             KeyValuePair[] aSessionData);
 };
 
 }

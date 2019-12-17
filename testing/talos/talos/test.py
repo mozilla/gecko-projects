@@ -39,6 +39,7 @@ class Test(object):
     alert_threshold = 2.0
     perfherder_framework = 'talos'
     subtest_alerts = False
+    suite_should_alert = True
 
     @classmethod
     def name(cls):
@@ -128,20 +129,6 @@ class TsBase(Test):
                          # use the exact same sessionstore.js, rather than a
                          # more recent copy).
     ]
-
-    def __init__(self, **kw):
-        super(TsBase, self).__init__(**kw)
-
-        # Unless set to False explicitly, all TsBase tests will have the blocklist
-        # enabled by default in order to more accurately test the startup paths.
-        BLOCKLIST_PREF = "extensions.blocklist.enabled"
-
-        if not hasattr(self, "preferences"):
-            self.preferences = {
-              BLOCKLIST_PREF: True,
-            }
-        elif BLOCKLIST_PREF not in self.preferences:
-            self.preferences[BLOCKLIST_PREF] = True
 
 
 @register_test()
@@ -280,7 +267,8 @@ class PageloaderTest(Test):
             'profile_path', 'xperf_providers', 'xperf_user_providers', 'xperf_stackwalk',
             'format_pagename', 'filters', 'preferences', 'extensions', 'setup', 'cleanup',
             'lower_is_better', 'alert_threshold', 'unit', 'webextensions', 'profile',
-            'subtest_alerts', 'perfherder_framework', 'pdfpaint', 'webextensions_folder']
+            'suite_should_alert', 'subtest_alerts', 'perfherder_framework', 'pdfpaint',
+            'webextensions_folder']
 
 
 class QuantumPageloadTest(PageloaderTest):
@@ -472,8 +460,7 @@ class damp(PageloaderTest):
     gecko_profile_entries = 10000000
     win_counters = w7_counters = linux_counters = mac_counters = None
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
-    preferences = {'devtools.memory.enabled': True,
-                   'addon.test.damp.webserver': '${webserver}'}
+    preferences = {'devtools.memory.enabled': True}
     unit = 'ms'
     subtest_alerts = True
     perfherder_framework = 'devtools'
@@ -933,6 +920,7 @@ class perf_reftest_singletons(PageloaderTest):
     lower_is_better = True
     alert_threshold = 5.0
     subtest_alerts = True
+    suite_should_alert = False
 
 
 @register_test()

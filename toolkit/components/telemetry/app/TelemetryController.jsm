@@ -1075,7 +1075,7 @@ var Impl = {
         TelemetrySession.resetSubsessionCounter();
 
         // 5. Set ClientID to a known value
-        let oldClientId = this._clientID;
+        let oldClientId = await ClientID.getClientID();
         this._clientID = await ClientID.setClientID(
           TelemetryUtils.knownClientID
         );
@@ -1095,6 +1095,11 @@ var Impl = {
     this._shutdownBarrier.client.addBlocker(
       "TelemetryController: removing pending pings after data upload was disabled",
       p
+    );
+
+    Services.obs.notifyObservers(
+      null,
+      TelemetryUtils.TELEMETRY_UPLOAD_DISABLED_TOPIC
     );
   },
 

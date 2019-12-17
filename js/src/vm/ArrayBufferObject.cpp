@@ -69,29 +69,6 @@ using mozilla::Unused;
 
 using namespace js;
 
-/*
- * Convert |v| to an array index for an array of length |length| per
- * the Typed Array Specification section 7.0, |subarray|. If successful,
- * the output value is in the range [0, length].
- */
-bool js::ToClampedIndex(JSContext* cx, HandleValue v, uint32_t length,
-                        uint32_t* out) {
-  int32_t result;
-  if (!ToInt32(cx, v, &result)) {
-    return false;
-  }
-  if (result < 0) {
-    result += length;
-    if (result < 0) {
-      result = 0;
-    }
-  } else if (uint32_t(result) > length) {
-    result = length;
-  }
-  *out = uint32_t(result);
-  return true;
-}
-
 // If there are too many wasm memory buffers (typically 6GB each) live we run up
 // against system resource exhaustion (address space or number of memory map
 // descriptors), see bug 1068684, bug 1073934, bug 1517412, bug 1502733 for
@@ -341,16 +318,7 @@ bool js::IsArrayBuffer(HandleValue v) {
   return v.isObject() && v.toObject().is<ArrayBufferObject>();
 }
 
-bool js::IsArrayBuffer(HandleObject obj) {
-  return obj->is<ArrayBufferObject>();
-}
-
 bool js::IsArrayBuffer(JSObject* obj) { return obj->is<ArrayBufferObject>(); }
-
-ArrayBufferObject& js::AsArrayBuffer(HandleObject obj) {
-  MOZ_ASSERT(IsArrayBuffer(obj));
-  return obj->as<ArrayBufferObject>();
-}
 
 ArrayBufferObject& js::AsArrayBuffer(JSObject* obj) {
   MOZ_ASSERT(IsArrayBuffer(obj));
@@ -361,17 +329,8 @@ bool js::IsArrayBufferMaybeShared(HandleValue v) {
   return v.isObject() && v.toObject().is<ArrayBufferObjectMaybeShared>();
 }
 
-bool js::IsArrayBufferMaybeShared(HandleObject obj) {
-  return obj->is<ArrayBufferObjectMaybeShared>();
-}
-
 bool js::IsArrayBufferMaybeShared(JSObject* obj) {
   return obj->is<ArrayBufferObjectMaybeShared>();
-}
-
-ArrayBufferObjectMaybeShared& js::AsArrayBufferMaybeShared(HandleObject obj) {
-  MOZ_ASSERT(IsArrayBufferMaybeShared(obj));
-  return obj->as<ArrayBufferObjectMaybeShared>();
 }
 
 ArrayBufferObjectMaybeShared& js::AsArrayBufferMaybeShared(JSObject* obj) {
@@ -469,26 +428,7 @@ void ArrayBufferObject::detach(JSContext* cx,
                                Handle<ArrayBufferObject*> buffer) {
   cx->check(buffer);
   MOZ_ASSERT(!buffer->isPreparedForAsmJS());
-
-  // When detaching buffers where we don't know all views, the new data must
-  // match the old data. All missing views are typed objects, which do not
-  // expect their data to ever change.
-
-  // When detaching a buffer with typed object views, any jitcode accessing
-  // such views must be deoptimized so that detachment checks are performed.
-  // This is done by setting a zone-wide flag indicating that buffers with
-  // typed object views have been detached.
-  if (buffer->hasTypedObjectViews()) {
-    // Make sure the global object's group has been instantiated, so the
-    // flag change will be observed.
-    AutoEnterOOMUnsafeRegion oomUnsafe;
-    if (!JSObject::getGroup(cx, cx->global())) {
-      oomUnsafe.crash("ArrayBufferObject::detach");
-    }
-    MarkObjectGroupFlags(cx, cx->global(),
-                         OBJECT_FLAG_TYPED_OBJECT_HAS_DETACHED_BUFFER);
-    cx->zone()->detachedTypedObjects = 1;
-  }
+  MOZ_ASSERT(!buffer->hasTypedObjectViews());
 
   auto NoteViewBufferWasDetached = [&cx](ArrayBufferViewObject* view) {
     MOZ_ASSERT(!view->isSharedMemory());
@@ -1022,6 +962,8 @@ static void CheckStealPreconditions(Handle<ArrayBufferObject*> buffer,
   MOZ_ASSERT(!buffer->isDetached(), "can't steal from a detached buffer");
   MOZ_ASSERT(!buffer->isPreparedForAsmJS(),
              "asm.js-prepared buffers don't have detachable/stealable data");
+  MOZ_ASSERT(!buffer->hasTypedObjectViews(),
+             "buffers for typed objects don't have detachable/stealable data");
 }
 
 /* static */
@@ -1261,6 +1203,15 @@ ArrayBufferObject* ArrayBufferObject::createZeroed(
   return buffer;
 }
 
+ArrayBufferObject* ArrayBufferObject::createForTypedObject(JSContext* cx,
+                                                           uint32_t nbytes) {
+  ArrayBufferObject* buffer = createZeroed(cx, nbytes);
+  if (buffer) {
+    buffer->setHasTypedObjectViews();
+  }
+  return buffer;
+}
+
 ArrayBufferObject* ArrayBufferObject::createEmpty(JSContext* cx) {
   AutoSetNewObjectMetadata metadata(cx);
   ArrayBufferObject* obj = NewBuiltinClassInstance<ArrayBufferObject>(cx);
@@ -1483,15 +1434,11 @@ JSObject* ArrayBufferObject::firstView() {
              : nullptr;
 }
 
-void ArrayBufferObject::setFirstView(JSObject* view) {
-  MOZ_ASSERT_IF(view,
-                view->is<ArrayBufferViewObject>() || view->is<TypedObject>());
+void ArrayBufferObject::setFirstView(ArrayBufferViewObject* view) {
   setFixedSlot(FIRST_VIEW_SLOT, ObjectOrNullValue(view));
 }
 
-bool ArrayBufferObject::addView(JSContext* cx, JSObject* view) {
-  MOZ_ASSERT(view->is<ArrayBufferViewObject>() || view->is<TypedObject>());
-
+bool ArrayBufferObject::addView(JSContext* cx, ArrayBufferViewObject* view) {
   if (!firstView()) {
     setFirstView(view);
     return true;

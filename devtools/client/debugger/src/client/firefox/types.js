@@ -178,21 +178,6 @@ export type TabPayload = {
   webExtensionInspectedWindowActor: ActorId,
 };
 
-type ConsoleClient = {
-  evaluateJSAsync: (
-    script: Script,
-    func: Function,
-    params?: { frameActor: ?FrameId }
-  ) => Promise<{ result: Grip | null }>,
-  autocomplete: (
-    input: string,
-    cursor: number,
-    func: Function,
-    frameId: ?string
-  ) => void,
-  emit: (string, any) => void,
-};
-
 /**
  * Tab Target gives access to the browser tabs
  * @memberof firefox
@@ -201,6 +186,7 @@ type ConsoleClient = {
 export type Target = {
   on: (string, Function) => void,
   emit: (string, any) => void,
+  getFront: string => Promise<ConsoleFront>,
   form: { consoleActor: any },
   root: any,
   navigateTo: ({ url: string }) => Promise<*>,
@@ -208,8 +194,6 @@ export type Target = {
   reload: () => Promise<*>,
   destroy: () => void,
   threadFront: ThreadFront,
-  activeConsole: ConsoleClient,
-
   name: string,
   isBrowsingContext: boolean,
   isContentProcess: boolean,
@@ -218,6 +202,25 @@ export type Target = {
   chrome: Boolean,
   url: string,
   isAddon: Boolean,
+  isServiceWorker: boolean,
+
+  // Property installed by the debugger itself.
+  debuggerServiceWorkerStatus: string,
+};
+
+type ConsoleFront = {
+  evaluateJSAsync: (
+    script: Script,
+    func: Function,
+    params?: { frameActor: ?FrameId }
+  ) => Promise<{ result: ExpressionResult }>,
+  autocomplete: (
+    input: string,
+    cursor: number,
+    func: Function,
+    frameId: ?string
+  ) => void,
+  emit: (string, any) => void,
 };
 
 /**
@@ -240,14 +243,15 @@ export type DebuggerClient = {
     traits: any,
     getFront: string => Promise<*>,
     listProcesses: () => Promise<{ processes: ProcessDescriptor }>,
-    listAllWorkers: () => Promise<*>,
+    listAllWorkerTargets: () => Promise<*>,
+    listServiceWorkerRegistrations: () => Promise<*>,
     getWorker: any => Promise<*>,
     on: (string, Function) => void,
   },
   connect: () => Promise<*>,
   request: (packet: Object) => Promise<*>,
   attachConsole: (actor: String, listeners: Array<*>) => Promise<*>,
-  createObjectFront: (grip: Grip) => ObjectFront,
+  createObjectFront: (grip: Grip, thread: ThreadFront) => ObjectFront,
   release: (actor: String) => {},
   getFrontByID: (actor: String) => { release: () => Promise<*> },
 };
@@ -269,8 +273,8 @@ type ProcessDescriptor = Object;
  * @memberof firefox
  * @static
  */
-export type Grip = {
-  actor: string,
+export type Grip = {|
+  actor?: string,
   class: string,
   displayClass: string,
   displayName?: string,
@@ -289,8 +293,7 @@ export type Grip = {
   sealed: boolean,
   optimizedOut: boolean,
   type: string,
-  release: () => Promise<*>,
-};
+|};
 
 export type FunctionGrip = {|
   class: "Function",
@@ -326,7 +329,10 @@ export type SourceClient = {
  * @static
  */
 export type ObjectFront = {
+  actorID: string,
+  getGrip: () => Grip,
   getPrototypeAndProperties: () => any,
+  getProperty: string => { descriptor: any },
   addWatchpoint: (
     property: string,
     label: string,
@@ -336,6 +342,20 @@ export type ObjectFront = {
   release: () => Promise<*>,
 };
 
+export type LongStringFront = {
+  actorID: string,
+  getGrip: () => Grip,
+  release: () => Promise<*>,
+};
+
+export type ExpressionResult =
+  | ObjectFront
+  | LongStringFront
+  | Grip
+  | string
+  | number
+  | null;
+
 /**
  * ThreadFront
  * @memberof firefox
@@ -343,6 +363,7 @@ export type ObjectFront = {
  */
 export type ThreadFront = {
   actorID: string,
+  parentFront: Target,
   getFrames: (number, number) => Promise<{| frames: FrameFront[] |}>,
   resume: Function => Promise<*>,
   stepIn: Function => Promise<*>,

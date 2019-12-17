@@ -45,7 +45,7 @@ add_task(async function test_mpAutocompleteTimeout() {
   await BrowserTestUtils.withNewTab(URL, async function(browser) {
     (await dialogShown).close();
 
-    await ContentTask.spawn(browser, null, async function() {
+    await SpecialPowers.spawn(browser, [], async function() {
       // Focus the password field to trigger autocompletion.
       content.document.getElementById("form-basic-password").focus();
     });
@@ -55,7 +55,7 @@ add_task(async function test_mpAutocompleteTimeout() {
     await new Promise(c => setTimeout(c, 4000));
 
     dialogShown = waitForDialog();
-    await ContentTask.spawn(browser, null, async function() {
+    await SpecialPowers.spawn(browser, [], async function() {
       // Re-focus the password field to trigger autocompletion.
       content.document.getElementById("form-basic-username").focus();
       content.document.getElementById("form-basic-password").focus();
@@ -111,7 +111,7 @@ add_task(async function test_mpAutocompleteUIBusy() {
   }
   Services.obs.addObserver(dialogObserver, "common-dialog-loaded");
 
-  let results = loginManagerParent.doAutocompleteSearch(arg1);
+  let results = await loginManagerParent.doAutocompleteSearch(arg1);
   is(results.logins.length, 0, "No results since uiBusy is true");
   await close(win);
 

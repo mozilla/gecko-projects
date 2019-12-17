@@ -141,14 +141,14 @@ class BrowserRunner {
           childProcess.execSync(`taskkill /pid ${this.proc.pid} /T /F`);
         else
           process.kill(-this.proc.pid, 'SIGKILL');
-      } catch (e) {
+      } catch (error) {
         // the process might have already stopped
       }
     }
     // Attempt to remove temporary profile directory to avoid littering.
     try {
       removeFolder.sync(this._tempDirectory);
-    } catch (e) { }
+    } catch (error) { }
   }
 
   /**
@@ -175,6 +175,9 @@ class BrowserRunner {
   }
 }
 
+/**
+ * @implements {!Puppeteer.ProductLauncher}
+ */
 class ChromeLauncher {
   /**
    * @param {string} projectRoot
@@ -243,9 +246,9 @@ class ChromeLauncher {
       const browser = await Browser.create(connection, [], ignoreHTTPSErrors, defaultViewport, runner.proc, runner.close.bind(runner));
       await browser.waitForTarget(t => t.type() === 'page');
       return browser;
-    } catch (e) {
+    } catch (error) {
       runner.kill();
-      throw e;
+      throw error;
     }
   }
 
@@ -265,8 +268,7 @@ class ChromeLauncher {
       '--disable-default-apps',
       '--disable-dev-shm-usage',
       '--disable-extensions',
-      // BlinkGenPropertyTrees disabled due to crbug.com/937609
-      '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+      '--disable-features=TranslateUI',
       '--disable-hang-monitor',
       '--disable-ipc-flooding-protection',
       '--disable-popup-blocking',
@@ -311,6 +313,13 @@ class ChromeLauncher {
   }
 
   /**
+  * @return {string}
+  */
+  get product() {
+    return 'chrome';
+  }
+
+  /**
    * @param {!(Launcher.BrowserOptions & {browserWSEndpoint?: string, browserURL?: string, transport?: !Puppeteer.ConnectionTransport})} options
    * @return {!Promise<!Browser>}
    */
@@ -344,7 +353,9 @@ class ChromeLauncher {
 
 }
 
-
+/**
+ * @implements {!Puppeteer.ProductLauncher}
+ */
 class FirefoxLauncher {
   /**
    * @param {string} projectRoot
@@ -358,7 +369,7 @@ class FirefoxLauncher {
   }
 
   /**
-   * @param {!(Launcher.LaunchOptions & Launcher.ChromeArgOptions & Launcher.BrowserOptions & {extraPrefs?: !object})=} options
+   * @param {!(Launcher.LaunchOptions & Launcher.ChromeArgOptions & Launcher.BrowserOptions & {extraPrefsFirefox?: !object})=} options
    * @return {!Promise<!Browser>}
    */
   async launch(options = {}) {
@@ -376,7 +387,7 @@ class FirefoxLauncher {
       defaultViewport = {width: 800, height: 600},
       slowMo = 0,
       timeout = 30000,
-      extraPrefs = {}
+      extraPrefsFirefox = {}
     } = options;
 
     const firefoxArguments = [];
@@ -390,7 +401,7 @@ class FirefoxLauncher {
     let temporaryUserDataDir = null;
 
     if (!firefoxArguments.includes('-profile') && !firefoxArguments.includes('--profile')) {
-      temporaryUserDataDir = await this._createProfile(extraPrefs);
+      temporaryUserDataDir = await this._createProfile(extraPrefsFirefox);
       firefoxArguments.push('--profile');
       firefoxArguments.push(temporaryUserDataDir);
     }
@@ -411,9 +422,9 @@ class FirefoxLauncher {
       const browser = await Browser.create(connection, [], ignoreHTTPSErrors, defaultViewport, runner.proc, runner.close.bind(runner));
       await browser.waitForTarget(t => t.type() === 'page');
       return browser;
-    } catch (e) {
+    } catch (error) {
       runner.kill();
-      throw e;
+      throw error;
     }
   }
 
@@ -458,6 +469,13 @@ class FirefoxLauncher {
     if (!executablePath)
       throw new Error('Please set PUPPETEER_EXECUTABLE_PATH to a Firefox binary.');
     return executablePath;
+  }
+
+  /**
+   * @return {string}
+   */
+  get product() {
+    return 'firefox';
   }
 
   /**
@@ -651,7 +669,7 @@ class FirefoxLauncher {
       'network.manage-offline-status': false,
 
       // Make sure SNTP requests do not hit the network
-      'network.sntp.pools': `${server}`,
+      'network.sntp.pools': server,
 
       // Disable Flash.
       'plugin.state.flash': 0,
@@ -714,7 +732,7 @@ class FirefoxLauncher {
  */
 function waitForWSEndpoint(browserProcess, timeout, preferredRevision) {
   return new Promise((resolve, reject) => {
-    const rl = readline.createInterface({ input: browserProcess.stderr});
+    const rl = readline.createInterface({ input: browserProcess.stderr });
     let stderr = '';
     const listeners = [
       helper.addEventListener(rl, 'line', onLine),
@@ -733,7 +751,7 @@ function waitForWSEndpoint(browserProcess, timeout, preferredRevision) {
         'Failed to launch the browser process!' + (error ? ' ' + error.message : ''),
         stderr,
         '',
-        'TROUBLESHOOTING: https://github.com/GoogleChrome/puppeteer/blob/master/docs/troubleshooting.md',
+        'TROUBLESHOOTING: https://github.com/puppeteer/puppeteer/blob/master/docs/troubleshooting.md',
         '',
       ].join('\n')));
     }
@@ -825,13 +843,16 @@ function resolveExecutablePath(launcher) {
 }
 
 /**
- * @param {string} product
  * @param {string} projectRoot
  * @param {string} preferredRevision
  * @param {boolean} isPuppeteerCore
- * @return {ChromeLauncher|FirefoxLauncher}
+ * @param {string=} product
+ * @return {!Puppeteer.ProductLauncher}
  */
-function Launcher(product, projectRoot, preferredRevision, isPuppeteerCore) {
+function Launcher(projectRoot, preferredRevision, isPuppeteerCore, product) {
+  // puppeteer-core doesn't take into account PUPPETEER_* env variables.
+  if (!product && !isPuppeteerCore)
+    product = process.env.PUPPETEER_PRODUCT || process.env.npm_config_puppeteer_product || process.env.npm_package_config_puppeteer_product;
   switch (product) {
     case 'firefox':
       return new FirefoxLauncher(projectRoot, preferredRevision, isPuppeteerCore);

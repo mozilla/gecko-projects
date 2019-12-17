@@ -42,7 +42,7 @@ const FrameActor = ActorClassWithSpec(frameSpec, {
   _frameLifetimePool: null,
   get frameLifetimePool() {
     if (!this._frameLifetimePool) {
-      this._frameLifetimePool = new ActorPool(this.conn);
+      this._frameLifetimePool = new ActorPool(this.conn, "frame");
       this.conn.addActorPool(this._frameLifetimePool);
     }
     return this._frameLifetimePool;
@@ -85,6 +85,10 @@ const FrameActor = ActorClassWithSpec(frameSpec, {
     const form = {
       actor: this.actorID,
       type: this.frame.type,
+      asyncCause: this.frame.onStack ? null : "await",
+
+      // This should expand with "dead" when we support SavedFrames.
+      state: this.frame.onStack ? "on-stack" : "suspended",
     };
 
     if (this.depth) {
@@ -119,7 +123,7 @@ const FrameActor = ActorClassWithSpec(frameSpec, {
   },
 
   _args: function() {
-    if (!this.frame.arguments) {
+    if (!this.frame.onStack || !this.frame.arguments) {
       return [];
     }
 

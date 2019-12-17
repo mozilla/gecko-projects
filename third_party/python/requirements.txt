@@ -53,9 +53,9 @@ mozilla-version==0.3.0 \
 pathlib2==2.3.2 \
     --hash=sha256:8eb170f8d0d61825e09a95b38be068299ddeda82f35e96c3301a8a5e7604cb83 \
     --hash=sha256:d1aa2a11ba7b8f7b21ab852b1fb5afb277e1bb99d5dfc663380b5015c0d80c5a
-pip-tools==3.0.0 \
-    --hash=sha256:4a94997602848f77ff02f660c0fcdfeaf316924ebb236c865f9742ce212aa6f9 \
-    --hash=sha256:e45e5198ce3799068642ebb0e7c9be5520bcff944c0186f79c1199a2759c970a
+pip-tools==3.9.0 \
+    --hash=sha256:0b866b6da097fa1f060a1ce3a22bccf515bf6af7654370bcb6d0fcc65daba2b5 \
+    --hash=sha256:2457106d7df6b627cc54819e986db75ba5fbe8243ae3bdfbb79159c1f610e90b
 pipenv==2018.5.18 \
     --hash=sha256:04b9a8b02a3ff12a5502b335850cfdb192adcfd1d6bbdb7a7c47cae9ab9ddece \
     --hash=sha256:e96d5bfa6822a17b2200d455aa5f9002c14361c50df1b1e51921479d7c09e741
@@ -106,9 +106,9 @@ scandir==1.9.0 \
     --hash=sha256:c9009c527929f6e25604aec39b0a43c3f831d2947d89d6caaab22f057b7055c8 \
     --hash=sha256:f5c71e29b4e2af7ccdc03a020c626ede51da471173b4a6ad1e904f2b2e04b4bd \
     # via pathlib2
-six==1.10.0 \
-    --hash=sha256:0ff78c403d9bccf5a425a6d31a12aa6b47f1c21ca4dc2573a7e2f32a97335eb1 \
-    --hash=sha256:105f8d68616f8248e24bf0e9372ef04d3cc10104f1980f54d57b2ce73a5ad56a
+six==1.13.0 \
+    --hash=sha256:1f1b7d42e254082a9db6279deae68afb421ceba6158efa6131de7b3003ee93fd \
+    --hash=sha256:30f610279e8b2578cab6db20741130331735c781b56053c59c4076da27f06b66
 slugid==1.0.7 \
     --hash=sha256:6dab3c7eef0bb423fb54cb7752e0f466ddd0ee495b78b763be60e8a27f69e779 \
     # via taskcluster
@@ -124,9 +124,9 @@ virtualenv-clone==0.3.0 \
     --hash=sha256:4507071d81013fd03ea9930ec26bc8648b997927a11fa80e8ee81198b57e0ac7 \
     --hash=sha256:b5cfe535d14dc68dfc1d1bb4ac1209ea28235b91156e2bba8e250d291c3fb4f8 \
     # via pipenv
-virtualenv==15.2.0 \
-    --hash=sha256:1d7e241b431e7afce47e77f8843a276f652699d1fa4f93b9d8ce0076fd7b0b54 \
-    --hash=sha256:e8e05d4714a1c51a2f5921e62f547fcb0f713ebbe959e0a7f585cc8bef71d11f
+virtualenv==16.7.8 \
+    --hash=sha256:116655188441670978117d0ebb6451eb6a7526f9ae0796cc0dee6bd7356909b0 \
+    --hash=sha256:b57776b44f91511866594e477dd10e76a6eb44439cdd7f06dcd30ba4c5bd854f
 voluptuous==0.11.5 \
     --hash=sha256:303542b3fc07fb52ec3d7a1c614b329cdbee13a9d681935353d8ea56a7bfa9f1 \
     --hash=sha256:567a56286ef82a9d7ae0628c5842f65f516abcb496e74f3f59f1d7b28df314ef

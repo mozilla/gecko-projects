@@ -6,10 +6,10 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/AntiTrackingCommon.h"
-#include "mozilla/DebugOnly.h"
-
 #include "mozilla/dom/ContentParent.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/ContentPrincipal.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/Pair.h"
 #include "mozilla/Services.h"
 #include "mozilla/SystemGroup.h"
@@ -19,17 +19,17 @@
 #include "nsNetUtil.h"
 #include "nsTArray.h"
 #include "nsReadableUtils.h"
-#include "nsILineInputStream.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceDefs.h"
+#include "mozIStorageCompletionCallback.h"
+#include "mozIStorageService.h"
+#include "mozIStorageStatementCallback.h"
 #include "mozilla/storage.h"
 #include "mozilla/Attributes.h"
 #include "nsXULAppAPI.h"
 #include "nsIPrincipal.h"
 #include "nsIURIMutator.h"
 #include "nsContentUtils.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsIEffectiveTLDService.h"
 #include "nsPIDOMWindow.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/net/NeckoMessageUtils.h"
@@ -979,7 +979,6 @@ nsresult nsPermissionManager::Init() {
     observerService->AddObserver(this, "profile-do-change", true);
     observerService->AddObserver(this, "testonly-reload-permissions-from-disk",
                                  true);
-    observerService->AddObserver(this, "clear-origin-attributes-data", true);
   }
 
   // ignore failure here, since it's non-fatal (we can run fine without
@@ -1668,7 +1667,7 @@ nsPermissionManager::AddFromPrincipal(nsIPrincipal* aPrincipal,
 
   // We don't add the system principal because it actually has no URI and we
   // always allow action for them.
-  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
+  if (aPrincipal->IsSystemPrincipal()) {
     return NS_OK;
   }
 
@@ -1698,6 +1697,18 @@ nsresult nsPermissionManager::AddInternal(
   nsAutoCString origin;
   nsresult rv = GetOriginFromPrincipal(aPrincipal, origin);
   NS_ENSURE_SUCCESS(rv, rv);
+
+  // For private browsing only store permissions for the session
+  if (aExpireType != EXPIRE_SESSION) {
+    uint32_t privateBrowsingId =
+        nsScriptSecurityManager::DEFAULT_PRIVATE_BROWSING_ID;
+    nsresult rv = aPrincipal->GetPrivateBrowsingId(&privateBrowsingId);
+    if (NS_SUCCEEDED(rv) &&
+        privateBrowsingId !=
+            nsScriptSecurityManager::DEFAULT_PRIVATE_BROWSING_ID) {
+      aExpireType = EXPIRE_SESSION;
+    }
+  }
 
   if (!IsChildProcess()) {
     IPC::Permission permission(origin, aType, aPermission, aExpireType,
@@ -1977,7 +1988,7 @@ nsPermissionManager::RemoveFromPrincipal(nsIPrincipal* aPrincipal,
   NS_ENSURE_ARG_POINTER(aPrincipal);
 
   // System principals are never added to the database, no need to remove them.
-  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
+  if (aPrincipal->IsSystemPrincipal()) {
     return NS_OK;
   }
 
@@ -2205,7 +2216,7 @@ nsPermissionManager::GetPermissionObject(nsIPrincipal* aPrincipal,
 
   *aResult = nullptr;
 
-  if (nsContentUtils::IsSystemPrincipal(aPrincipal)) {
+  if (aPrincipal->IsSystemPrincipal()) {
     return NS_OK;
   }
 
@@ -2543,8 +2554,6 @@ NS_IMETHODIMP nsPermissionManager::Observe(nsISupports* aSubject,
     RemoveAllFromMemory();
     CloseDB(false);
     InitDB(false);
-  } else if (!nsCRT::strcmp(aTopic, "clear-origin-attributes-data")) {
-    return RemovePermissionsWithAttributes(nsDependentString(someData));
   }
 
   return NS_OK;
@@ -2560,7 +2569,8 @@ nsresult nsPermissionManager::RemoveAllModifiedSince(
       });
 }
 
-nsresult nsPermissionManager::RemovePermissionsWithAttributes(
+NS_IMETHODIMP
+nsPermissionManager::RemovePermissionsWithAttributes(
     const nsAString& aPattern) {
   ENSURE_NOT_CHILD_PROCESS;
   mozilla::OriginAttributesPattern pattern;

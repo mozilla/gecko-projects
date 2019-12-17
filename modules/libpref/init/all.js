@@ -171,6 +171,11 @@ pref("security.cert_pinning.max_max_age_seconds", 5184000);
 // See https://wiki.mozilla.org/CA/Upcoming_Distrust_Actions for more details.
 pref("security.pki.distrust_ca_policy", 2);
 
+// 0: Disable CRLite entirely
+// 1: Enable and check revocations via CRLite, but only collect telemetry
+// 2: Enable and enforce revocations via CRLite
+pref("security.pki.crlite_mode", 1);
+
 // Issuer we use to detect MitM proxies. Set to the issuer of the cert of the
 // Firefox update service. The string format is whatever NSS uses to print a DN.
 // This value is set and cleared automatically.
@@ -433,9 +438,11 @@ pref("media.videocontrols.picture-in-picture.video-toggle.always-show", false);
   #ifdef NIGHTLY_BUILD
     pref("media.peerconnection.sdp.parser", "sipcc");
     pref("media.peerconnection.sdp.alternate_parse_mode", "never");
+    pref("media.peerconnection.sdp.strict_success", false);
   #else
     pref("media.peerconnection.sdp.parser", "sipcc");
     pref("media.peerconnection.sdp.alternate_parse_mode", "never");
+    pref("media.peerconnection.sdp.strict_success", false);
   #endif
 
   pref("media.webrtc.debug.trace_mask", 0);
@@ -576,7 +583,7 @@ pref("media.cubeb.logging_level", "");
 #endif
 
 // GraphRunner (fixed MediaTrackGraph thread) control
-pref("media.audiograph.single_thread.enabled", false);
+pref("media.audiograph.single_thread.enabled", true);
 
 // APZ preferences. For documentation/details on what these prefs do, check
 // gfx/layers/apz/src/AsyncPanZoomController.cpp.
@@ -768,6 +775,11 @@ pref("accessibility.typeaheadfind.matchesCountLimit", 1000);
 pref("findbar.highlightAll", false);
 pref("findbar.entireword", false);
 pref("findbar.iteratorTimeout", 100);
+// matchdiacritics: controls the find bar's diacritic matching
+//     0 - "never"  (ignore diacritics)
+//     1 - "always" (match diacritics)
+// other - "auto"   (match diacritics if input has diacritics, ignore otherwise)
+pref("findbar.matchdiacritics", 0);
 
 // use Mac OS X Appearance panel text smoothing setting when rendering text, disabled by default
 pref("gfx.use_text_smoothing_setting", false);
@@ -841,6 +853,33 @@ pref("devtools.recordreplay.includeSystemScripts", false);
 pref("devtools.recordreplay.logging", false);
 pref("devtools.recordreplay.loggingFull", false);
 pref("devtools.recordreplay.fastLogpoints", false);
+
+// Preferences for the new performance panel.
+// This pref configures the base URL for the profiler.firefox.com instance to
+// use. This is useful so that a developer can change it while working on
+// profiler.firefox.com, or in tests. This isn't exposed directly to the user.
+pref("devtools.performance.recording.ui-base-url", "https://profiler.firefox.com");
+
+// Profiler buffer size. It is the maximum number of 8-bytes entries in the
+// profiler's buffer. 10000000 is ~80mb.
+pref("devtools.performance.recording.entries", 10000000);
+// Profiler interval in microseconds. 1000µs is 1ms
+pref("devtools.performance.recording.interval", 1000);
+// Profiler duration of entries in the profiler's buffer in seconds.
+// `0` means no time limit for the markers, they roll off naturally from the
+// circular buffer.
+pref("devtools.performance.recording.duration", 0);
+// Profiler feature set. See tools/profiler/core/platform.cpp for features and
+// explanations. Android additionally has "java" feature but other features must
+// be the same. If you intend to change the default value of this pref, please
+// don't forget to change the mobile/android/app/mobile.js accordingly.
+pref("devtools.performance.recording.features", "[\"js\",\"leaf\",\"stackwalk\"]");
+// Threads to be captured by the profiler.
+pref("devtools.performance.recording.threads", "[\"GeckoMain\",\"Compositor\",\"Renderer\"]");
+// A JSON array of strings, where each string is a file path to an objdir on
+// the host machine. This is used in order to look up symbol information from
+// build artifacts of local builds.
+pref("devtools.performance.recording.objdirs", "[]");
 
 // view source
 pref("view_source.syntax_highlight", true);
@@ -1074,10 +1113,16 @@ pref("javascript.options.wasm_baselinejit",       true);
 #endif
 pref("javascript.options.native_regexp",    true);
 pref("javascript.options.parallel_parsing", true);
-#if !defined(RELEASE_OR_BETA) && !defined(ANDROID) && !defined(XP_IOS)
-  pref("javascript.options.asyncstack",       true);
-#else
+// Async stacks instrumentation adds overhead that is only
+// advisable for developers, so we limit it to Nightly and DevEdition
+#if defined(ANDROID) || defined(XP_IOS)
   pref("javascript.options.asyncstack",       false);
+#else
+  #if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
+    pref("javascript.options.asyncstack",       true);
+  #else
+    pref("javascript.options.asyncstack",       false);
+  #endif
 #endif
 pref("javascript.options.throw_on_asmjs_validation_failure", false);
 pref("javascript.options.ion.offthread_compilation", true);
@@ -1523,6 +1568,11 @@ pref("network.sts.max_time_for_pr_close_during_shutdown", 5000);
 // This timeout can be disabled by setting this pref to 0.
 // The value is expected in seconds.
 pref("network.sts.pollable_event_timeout", 6);
+
+// Perform all network access on the socket process.
+// The pref requires "network.sts.socket_process.enable" to be true.
+// Changing these prefs requires a restart.
+pref("network.http.network_access_on_socket_process.enabled", false);
 
 // Enable/disable sni encryption.
 pref("network.security.esni.enabled", false);
@@ -2307,7 +2357,7 @@ pref("extensions.abuseReport.enabled", true);
 // Allow AMO to handoff reports to the Firefox integrated dialog.
 pref("extensions.abuseReport.amWebAPI.enabled", true);
 // Opened as a sub-frame of the about:addons page when set to false.
-pref("extensions.abuseReport.openDialog", false);
+pref("extensions.abuseReport.openDialog", true);
 pref("extensions.abuseReport.url", "https://services.addons.mozilla.org/api/v4/abuse/report/addon/");
 pref("extensions.abuseReport.amoDetailsURL", "https://services.addons.mozilla.org/api/v4/addons/addon/");
 
@@ -2704,6 +2754,10 @@ pref("browser.tabs.remote.autostart", false);
 // Pref to control whether we use separate content processes for top-level load
 // of file:// URIs.
 pref("browser.tabs.remote.separateFileUriProcess", true);
+
+// Pref to control whether we put all data: uri's in the default
+// web process when running with fission.
+pref("browser.tabs.remote.dataUriInDefaultWebProcess", false);
 
 // Pref that enables top level web content pages that are opened from file://
 // URI pages to run in the file content process.
@@ -3896,20 +3950,19 @@ pref("signon.autofillForms.autocompleteOff", true);
 pref("signon.autofillForms.http",           false);
 pref("signon.autologin.proxy",              false);
 pref("signon.formlessCapture.enabled",      true);
-pref("signon.generation.available",         false);
-pref("signon.generation.enabled",           false);
-pref("signon.privateBrowsingCapture.enabled", false);
+pref("signon.generation.available",               true);
+pref("signon.generation.enabled",                 true);
+pref("signon.privateBrowsingCapture.enabled",     true);
 pref("signon.storeWhenAutocompleteOff",     true);
+pref("signon.userInputRequiredToCapture.enabled", true);
 pref("signon.debug",                        false);
 pref("signon.recipes.path",                 "chrome://passwordmgr/content/recipes.json");
-pref("signon.schemeUpgrades",               false);
-pref("signon.includeOtherSubdomainsInLookup", false);
+pref("signon.schemeUpgrades",                     true);
+pref("signon.includeOtherSubdomainsInLookup",     true);
 // This temporarily prevents the master password to reprompt for autocomplete.
 pref("signon.masterPasswordReprompt.timeout_ms", 900000); // 15 Minutes
-pref("signon.showAutoCompleteFooter", false);
-pref("signon.showAutoCompleteOrigins", false);
-// Enable login manager storage.
-pref("signon.storeSignons", true);
+pref("signon.showAutoCompleteFooter",             true);
+pref("signon.showAutoCompleteOrigins",            true);
 
 // Satchel (Form Manager) prefs
 pref("browser.formfill.debug",            false);
@@ -3980,6 +4033,12 @@ pref("network.tcp.tcp_fastopen_http_check_for_stalls_only_if_idle_for", 10);
 pref("network.tcp.tcp_fastopen_http_stalls_limit", 3);
 pref("network.tcp.tcp_fastopen_http_stalls_timeout", 20);
 
+// This pref controls if we send the "public-suffix-list-updated" notification
+// from PublicSuffixList.onUpdate() - Doing so would cause the PSL graph to
+// be updated while Firefox is running which may cause principals to have an
+// inconsistent state. See bug 1582647 comment 30
+pref("network.psl.onUpdate_notify", false);
+
 #ifdef MOZ_WIDGET_GTK
   pref("gfx.xrender.enabled",false);
   pref("widget.content.allow-gtk-dark-theme", false);
@@ -3987,6 +4046,7 @@ pref("network.tcp.tcp_fastopen_http_stalls_timeout", 20);
 #endif
 #ifdef MOZ_WAYLAND
   pref("widget.wayland_dmabuf_backend.enabled", false);
+  pref("widget.wayland_vsync.enabled", false);
 #endif
 
 // Timeout for outbound network geolocation provider XHR
@@ -4039,8 +4099,6 @@ pref("extensions.webextensions.enablePerformanceCounters", true);
 // reset, so we reduce memory footprint.
 pref("extensions.webextensions.performanceCountersMaxAge", 5000);
 
-// The HTML about:addons page.
-pref("extensions.htmlaboutaddons.enabled", true);
 // Whether to allow the inline options browser in HTML about:addons page.
 pref("extensions.htmlaboutaddons.inline-options.enabled", true);
 // Show recommendations on the extension and theme list views.
@@ -4157,15 +4215,6 @@ pref("dom.push.requestTimeout", 10000);
 pref("dom.push.http2.reset_retry_count_after_ms", 60000);
 pref("dom.push.http2.maxRetries", 2);
 pref("dom.push.http2.retryInterval", 5000);
-
-// W3C touch events
-// 0 - disabled, 1 - enabled, 2 - autodetect
-// Autodetection is currently only supported on Windows and GTK3
-#if defined(XP_MACOSX)
-  pref("dom.w3c_touch_events.enabled", 0);
-#else
-  pref("dom.w3c_touch_events.enabled", 2);
-#endif
 
 // W3C pointer events draft
 pref("dom.w3c_pointer_events.implicit_capture", false);
@@ -4437,6 +4486,7 @@ pref("browser.search.suggest.enabled.private", false);
 pref("browser.search.geoSpecificDefaults", false);
 pref("browser.search.geoip.url", "https://location.services.mozilla.com/v1/country?key=%MOZILLA_API_KEY%");
 pref("browser.search.geoip.timeout", 3000);
+pref("browser.search.modernConfig", false);
 pref("browser.search.separatePrivateDefault", false);
 pref("browser.search.separatePrivateDefault.ui.enabled", false);
 
@@ -4656,19 +4706,13 @@ pref("dom.noopener.newprocess.enabled", true);
 // loops with faulty converters involved.
 pref("general.document_open_conversion_depth_limit", 20);
 
-// If true, touchstart and touchmove listeners on window, document,
-// documentElement and document.body are passive by default.
-pref("dom.event.default_to_passive_touch_listeners", true);
-
 // Should only be enabled in tests
 pref("dom.events.testing.asyncClipboard", false);
 
 // Disable moz* APIs in DataTransfer
 pref("dom.datatransfer.mozAtAPIs", false);
 
-// Bug 1583614: This is on by default for Fission windows, but still
-// causes enough issues to prevent us from turning it on everywhere.
-pref("fission.rebuild_frameloaders_on_remoteness_change", false);
+pref("fission.rebuild_frameloaders_on_remoteness_change", true);
 
 // Support for legacy customizations that rely on checking the
 // user profile directory for these stylesheets:
@@ -4831,13 +4875,19 @@ pref("marionette.prefs.recommended", true);
 // https://bugzil.la/marionette-window-tracking
 pref("marionette.contentListener", false);
 
-// Indicates whether the remote agent is enabled. If it is false, the remote
-// agent will not be loaded.
-pref("remote.enabled", false);
+#if defined(ENABLE_REMOTE_AGENT)
+  // Indicates whether the remote agent is enabled.
+  // If it is false, the remote agent will not be loaded.
+  #if defined(NIGHTLY_BUILD)
+    pref("remote.enabled", true);
+  #else
+    pref("remote.enabled", false);
+  #endif
 
-// Limits remote agent to listen on loopback devices, e.g. 127.0.0.1,
-// localhost, and ::1.
-pref("remote.force-local", true);
+  // Limits remote agent to listen on loopback devices,
+  // e.g. 127.0.0.1, localhost, and ::1.
+  pref("remote.force-local", true);
+#endif
 
 // Defines the verbosity of the internal logger.
 //
@@ -4881,11 +4931,7 @@ pref("devtools.errorconsole.deprecation_warnings", true);
   pref("devtools.debugger.remote-enabled", true, sticky);
 #endif
 
-#if defined(MOZ_DEV_EDITION) || defined(NIGHTLY_BUILD)
-  pref("devtools.debugger.features.watchpoints", true);
-#else
-  pref("devtools.debugger.features.watchpoints", false);
-#endif
+pref("devtools.debugger.features.watchpoints", true);
 
 // Disable remote debugging protocol logging.
 pref("devtools.debugger.log", false);

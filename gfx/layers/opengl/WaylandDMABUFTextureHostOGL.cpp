@@ -39,7 +39,7 @@ bool WaylandDMABUFTextureHostOGL::Lock() {
     auto format = mSurface->HasAlpha() ? gfx::SurfaceFormat::R8G8B8A8
                                        : gfx::SurfaceFormat::R8G8B8X8;
     mTextureSource = new EGLImageTextureSource(
-        mProvider, mSurface->GetEGLImage(), format, LOCAL_GL_TEXTURE_EXTERNAL,
+        mProvider, mSurface->GetEGLImage(), format, LOCAL_GL_TEXTURE_2D,
         LOCAL_GL_CLAMP_TO_EDGE,
         gfx::IntSize(mSurface->GetWidth(), mSurface->GetHeight()));
   }
@@ -101,14 +101,15 @@ void WaylandDMABUFTextureHostOGL::CreateRenderTexture(
 
 void WaylandDMABUFTextureHostOGL::PushResourceUpdates(
     wr::TransactionBuilder& aResources, ResourceUpdateOp aOp,
-    const Range<wr::ImageKey>& aImageKeys, const wr::ExternalImageId& aExtID) {
+    const Range<wr::ImageKey>& aImageKeys, const wr::ExternalImageId& aExtID,
+    const bool aPreferCompositorSurface) {
   MOZ_ASSERT(mSurface);
 
   auto method = aOp == TextureHost::ADD_IMAGE
                     ? &wr::TransactionBuilder::AddExternalImage
                     : &wr::TransactionBuilder::UpdateExternalImage;
   auto imageType =
-      wr::ExternalImageType::TextureHandle(wr::TextureTarget::External);
+      wr::ExternalImageType::TextureHandle(wr::TextureTarget::Default);
 
   gfx::SurfaceFormat format = mSurface->HasAlpha()
                                   ? gfx::SurfaceFormat::R8G8B8A8
@@ -120,7 +121,8 @@ void WaylandDMABUFTextureHostOGL::PushResourceUpdates(
   auto formatTmp = format == gfx::SurfaceFormat::R8G8B8A8
                        ? gfx::SurfaceFormat::B8G8R8A8
                        : gfx::SurfaceFormat::B8G8R8X8;
-  wr::ImageDescriptor descriptor(GetSize(), formatTmp);
+  wr::ImageDescriptor descriptor(GetSize(), formatTmp,
+                                 aPreferCompositorSurface);
   (aResources.*method)(aImageKeys[0], descriptor, aExtID, imageType, 0);
 }
 

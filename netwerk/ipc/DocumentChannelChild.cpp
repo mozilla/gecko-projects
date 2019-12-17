@@ -31,6 +31,9 @@
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
 
+extern mozilla::LazyLogModule gDocumentChannelLog;
+#define LOG(fmt) MOZ_LOG(gDocumentChannelLog, mozilla::LogLevel::Verbose, fmt)
+
 namespace mozilla {
 namespace net {
 
@@ -76,7 +79,7 @@ NS_INTERFACE_MAP_BEGIN(DocumentChannelChild)
           "DocumentChannelChild, this will be broken");
     }
   }
-  if (false) // So we fallback properly in the final macro
+  if (false)  // So we fallback properly in the final macro
 NS_INTERFACE_MAP_END
 
 DocumentChannelChild::DocumentChannelChild(
@@ -95,10 +98,16 @@ DocumentChannelChild::DocumentChannelChild(
       mLoadFlags(aLoadFlags),
       mURI(aLoadState->URI()),
       mLoadInfo(aLoadInfo) {
+  LOG(("DocumentChannelChild ctor [this=%p, uri=%s]", this,
+       aLoadState->URI()->GetSpecOrDefault().get()));
   RefPtr<nsHttpHandler> handler = nsHttpHandler::GetInstance();
   uint64_t channelId;
   Unused << handler->NewChannelId(channelId);
   mChannelId = channelId;
+}
+
+DocumentChannelChild::~DocumentChannelChild() {
+  LOG(("DocumentChannelChild dtor [this=%p]", this));
 }
 
 NS_IMETHODIMP
@@ -181,6 +190,8 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
   args.hasNonEmptySandboxingFlags() = mHasNonEmptySandboxingFlags;
   args.channelId() = mChannelId;
   args.asyncOpenTime() = mAsyncOpenTime;
+  args.documentOpenFlags() = mDocumentOpenFlags;
+  args.pluginsAllowed() = mPluginsAllowed;
 
   nsDocShell* docshell = GetDocShell();
   if (docshell) {
@@ -192,7 +203,7 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
                                 NS_GET_TEMPLATE_IID(nsIBrowserChild),
                                 getter_AddRefs(iBrowserChild));
   BrowserChild* browserChild = static_cast<BrowserChild*>(iBrowserChild.get());
-  if (MissingRequiredBrowserChild(browserChild, "ftp")) {
+  if (MissingRequiredBrowserChild(browserChild, "documentchannel")) {
     return NS_ERROR_ILLEGAL_VALUE;
   }
 
@@ -232,6 +243,8 @@ IPCResult DocumentChannelChild::RecvFailedAsyncOpen(
 }
 
 void DocumentChannelChild::ShutdownListeners(nsresult aStatusCode) {
+  LOG(("DocumentChannelChild ShutdownListeners [this=%p, status=%" PRIx32 "]",
+       this, static_cast<uint32_t>(aStatusCode)));
   mStatus = aStatusCode;
 
   nsCOMPtr<nsIStreamListener> l = mListener;
@@ -259,8 +272,9 @@ void DocumentChannelChild::ShutdownListeners(nsresult aStatusCode) {
 }
 
 IPCResult DocumentChannelChild::RecvDisconnectChildListeners(
-    const nsresult& aStatus) {
+    const nsresult& aStatus, const nsresult& aLoadGroupStatus) {
   MOZ_ASSERT(NS_FAILED(aStatus));
+  mStatus = aLoadGroupStatus;
   // Make sure we remove from the load group before
   // setting mStatus, as existing tests expect the
   // status to be successful when we disconnect.
@@ -281,8 +295,11 @@ IPCResult DocumentChannelChild::RecvDeleteSelf() {
 }
 
 IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
-    const RedirectToRealChannelArgs& aArgs,
+    RedirectToRealChannelArgs&& aArgs,
     RedirectToRealChannelResolver&& aResolve) {
+  LOG(("DocumentChannelChild RecvRedirectToRealChannel [this=%p, uri=%s]", this,
+       aArgs.uri()->GetSpecOrDefault().get()));
+
   RefPtr<dom::Document> loadingDocument;
   mLoadInfo->GetLoadingDocument(getter_AddRefs(loadingDocument));
 
@@ -310,13 +327,6 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
                             nullptr,     // aCallbacks
                             aArgs.newLoadFlags());
 
-  RefPtr<HttpChannelChild> httpChild = do_QueryObject(newChannel);
-  RefPtr<nsIChildChannel> childChannel = do_QueryObject(newChannel);
-  if (NS_FAILED(rv)) {
-    MOZ_DIAGNOSTIC_ASSERT(false, "NS_NewChannelInternal failed");
-    return IPC_OK();
-  }
-
   // This is used to report any errors back to the parent by calling
   // CrossProcessRedirectFinished.
   auto scopeExit = MakeScopeExit([&]() {
@@ -326,6 +336,11 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
     mRedirectResolver = nullptr;
   });
 
+  if (NS_FAILED(rv)) {
+    return IPC_OK();
+  }
+
+  RefPtr<HttpChannelChild> httpChild = do_QueryObject(newChannel);
   if (httpChild) {
     rv = httpChild->SetChannelId(aArgs.channelId());
   }
@@ -351,7 +366,7 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
     HttpBaseChannel::ReplacementChannelConfig config(*aArgs.init());
     HttpBaseChannel::ConfigureReplacementChannel(
         newChannel, config,
-        HttpBaseChannel::ConfigureReason::DocumentChannelReplacement);
+        HttpBaseChannel::ReplacementReason::DocumentChannel);
   }
 
   if (aArgs.contentDisposition()) {
@@ -376,6 +391,7 @@ IPCResult DocumentChannelChild::RecvRedirectToRealChannel(
   }
 
   // connect parent.
+  nsCOMPtr<nsIChildChannel> childChannel = do_QueryInterface(newChannel);
   if (childChannel) {
     rv = childChannel->ConnectParent(
         aArgs.registrarId());  // creates parent channel
@@ -448,7 +464,7 @@ DocumentChannelChild::OnRedirectVerifyCallback(nsresult aStatusCode) {
 }
 
 IPCResult DocumentChannelChild::RecvConfirmRedirect(
-    const LoadInfoArgs& aLoadInfo, nsIURI* aNewUri,
+    LoadInfoArgs&& aLoadInfo, nsIURI* aNewUri,
     ConfirmRedirectResolver&& aResolve) {
   // This is effectively the same as AsyncOnChannelRedirect, except since we're
   // not propagating the redirect into this process, we don't have an nsIChannel
@@ -464,9 +480,9 @@ IPCResult DocumentChannelChild::RecvConfirmRedirect(
     cspToInheritLoadingDocument = do_QueryReferent(ctx);
   }
   nsCOMPtr<nsILoadInfo> loadInfo;
-  MOZ_ALWAYS_SUCCEEDS(LoadInfoArgsToLoadInfo(Some(aLoadInfo), loadingDocument,
-                                             cspToInheritLoadingDocument,
-                                             getter_AddRefs(loadInfo)));
+  MOZ_ALWAYS_SUCCEEDS(LoadInfoArgsToLoadInfo(
+      Some(std::move(aLoadInfo)), loadingDocument, cspToInheritLoadingDocument,
+      getter_AddRefs(loadInfo)));
 
   nsCOMPtr<nsIURI> originalUri;
   GetOriginalURI(getter_AddRefs(originalUri));
@@ -719,3 +735,5 @@ DocumentChannelChild::SetChannelId(uint64_t aChannelId) {
 
 }  // namespace net
 }  // namespace mozilla
+
+#undef LOG

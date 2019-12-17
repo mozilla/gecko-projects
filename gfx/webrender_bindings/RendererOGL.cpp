@@ -159,10 +159,13 @@ RenderedFrameId RendererOGL::UpdateAndRender(
   if (aReadbackBuffer.isSome()) {
     MOZ_ASSERT(aReadbackSize.isSome());
     MOZ_ASSERT(aReadbackFormat.isSome());
-    wr_renderer_readback(mRenderer, aReadbackSize.ref().width,
-                         aReadbackSize.ref().height, aReadbackFormat.ref(),
-                         &aReadbackBuffer.ref()[0],
-                         aReadbackBuffer.ref().length());
+    if (!mCompositor->MaybeReadback(aReadbackSize.ref(), aReadbackFormat.ref(),
+                                    aReadbackBuffer.ref())) {
+      wr_renderer_readback(mRenderer, aReadbackSize.ref().width,
+                           aReadbackSize.ref().height, aReadbackFormat.ref(),
+                           &aReadbackBuffer.ref()[0],
+                           aReadbackBuffer.ref().length());
+    }
   }
 
   mScreenshotGrabber.MaybeGrabScreenshot(mRenderer, size.ToUnknownSize());
@@ -215,6 +218,10 @@ void RendererOGL::WaitForGPU() {
 
 RenderedFrameId RendererOGL::GetLastCompletedFrameId() {
   return mCompositor->GetLastCompletedFrameId();
+}
+
+RenderedFrameId RendererOGL::UpdateFrameId() {
+  return mCompositor->UpdateFrameId();
 }
 
 void RendererOGL::Pause() { mCompositor->Pause(); }

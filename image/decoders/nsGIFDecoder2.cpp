@@ -44,7 +44,6 @@ mailing address.
 
 #include "imgFrame.h"
 #include "mozilla/EndianUtils.h"
-#include "nsIInputStream.h"
 #include "RasterImage.h"
 #include "SurfacePipeFactory.h"
 
@@ -232,6 +231,10 @@ void nsGIFDecoder2::EndImageFrame() {
   // always refers to the frame in mImage we're currently decoding,
   // even if some of them weren't decoded properly and thus are blank.
   mGIFStruct.images_decoded++;
+
+  // Reset graphic control extension parameters that we shouldn't reuse
+  // between frames.
+  mGIFStruct.delay_time = 0;
 
   // Tell the superclass we finished a frame
   PostFrameStop(opacity);
@@ -650,7 +653,7 @@ nsGIFDecoder2::ReadGraphicControlExtension(const char* aData) {
   }
 
   mGIFStruct.delay_time = LittleEndian::readUint16(aData + 1) * 10;
-  if (mGIFStruct.delay_time > 0) {
+  if (!HasAnimation() && mGIFStruct.delay_time > 0) {
     PostIsAnimated(FrameTimeout::FromRawMilliseconds(mGIFStruct.delay_time));
   }
 

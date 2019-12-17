@@ -7,7 +7,6 @@
 #include "IndexedDatabaseManager.h"
 
 #include "chrome/common/ipc_channel.h"  // for IPC::Channel::kMaximumMessageSize
-#include "nsIConsoleService.h"
 #include "nsIScriptError.h"
 #include "nsIScriptGlobalObject.h"
 
@@ -207,6 +206,13 @@ void MaxPreloadExtraRecordsPrefChangeCallback(const char* aPrefName,
   // TODO: We could also allow setting a negative value to preload all available
   // records, but this doesn't seem to be too useful in general, and it would
   // require adaptations in ActorsParent.cpp
+}
+
+auto DatabaseNameMatchPredicate(const nsAString* const aName) {
+  MOZ_ASSERT(aName);
+  return [aName](const auto& fileManager) {
+    return fileManager->DatabaseName() == *aName;
+  };
 }
 
 }  // namespace
@@ -860,19 +866,13 @@ already_AddRefed<FileManager> FileManagerInfo::GetFileManager(
     PersistenceType aPersistenceType, const nsAString& aName) const {
   AssertIsOnIOThread();
 
-  const nsTArray<RefPtr<FileManager> >& managers =
-      GetImmutableArray(aPersistenceType);
+  const auto& managers = GetImmutableArray(aPersistenceType);
 
-  for (uint32_t i = 0; i < managers.Length(); i++) {
-    const RefPtr<FileManager>& fileManager = managers[i];
+  const auto end = managers.cend();
+  const auto foundIt =
+      std::find_if(managers.cbegin(), end, DatabaseNameMatchPredicate(&aName));
 
-    if (fileManager->DatabaseName() == aName) {
-      RefPtr<FileManager> result = fileManager;
-      return result.forget();
-    }
-  }
-
-  return nullptr;
+  return foundIt != end ? RefPtr<FileManager>{*foundIt}.forget() : nullptr;
 }
 
 void FileManagerInfo::AddFileManager(FileManager* aFileManager) {
@@ -920,15 +920,14 @@ void FileManagerInfo::InvalidateAndRemoveFileManager(
     PersistenceType aPersistenceType, const nsAString& aName) {
   AssertIsOnIOThread();
 
-  nsTArray<RefPtr<FileManager> >& managers = GetArray(aPersistenceType);
+  auto& managers = GetArray(aPersistenceType);
+  const auto end = managers.cend();
+  const auto foundIt =
+      std::find_if(managers.cbegin(), end, DatabaseNameMatchPredicate(&aName));
 
-  for (uint32_t i = 0; i < managers.Length(); i++) {
-    RefPtr<FileManager>& fileManager = managers[i];
-    if (fileManager->DatabaseName() == aName) {
-      fileManager->Invalidate();
-      managers.RemoveElementAt(i);
-      return;
-    }
+  if (foundIt != end) {
+    (*foundIt)->Invalidate();
+    managers.RemoveElementAt(foundIt.GetIndex());
   }
 }
 

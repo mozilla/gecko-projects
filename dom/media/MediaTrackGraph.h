@@ -653,8 +653,15 @@ class SourceMediaTrack : public MediaTrack {
    * because the stream has ended. Returns the duration of the appended data in
    * the graph's track rate otherwise.
    */
-  virtual TrackTime AppendData(MediaSegment* aSegment,
-                               MediaSegment* aRawSegment = nullptr);
+  TrackTime AppendData(MediaSegment* aSegment,
+                       MediaSegment* aRawSegment = nullptr);
+
+  /**
+   * Clear any data appended with AppendData() that hasn't entered the graph
+   * yet. Returns the duration of the cleared data in the graph's track rate.
+   */
+  TrackTime ClearFutureData();
+
   /**
    * Indicate that this track has ended. Do not do any more API calls affecting
    * this track.
@@ -674,6 +681,11 @@ class SourceMediaTrack : public MediaTrack {
   }
 
   void RemoveAllDirectListenersImpl() override;
+
+  // The value set here is applied in MoveToSegment so we can avoid the
+  // buffering delay in applying the change. See Bug 1443511.
+  void SetVolume(float aVolume);
+  float GetVolumeLocked();
 
   friend class MediaTrackGraphImpl;
 
@@ -730,6 +742,7 @@ class SourceMediaTrack : public MediaTrack {
   // held together.
   Mutex mMutex;
   // protected by mMutex
+  float mVolume = 1.0;
   UniquePtr<TrackData> mUpdateTrack;
   nsTArray<RefPtr<DirectMediaTrackListener>> mDirectTrackListeners;
 };
@@ -900,7 +913,7 @@ class ProcessedMediaTrack : public MediaTrack {
    * (including if there is no input track), this track automatically
    * enters the ended state.
    */
-  void QueueSetAutoend(bool aAutoend);
+  virtual void QueueSetAutoend(bool aAutoend);
 
   ProcessedMediaTrack* AsProcessedTrack() override { return this; }
 

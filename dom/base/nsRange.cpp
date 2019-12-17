@@ -441,7 +441,8 @@ nsRange::DetermineNewRangeBoundariesAndRootOnCharacterDataMerge(
   // that will be removed
   nsIContent* removed = aInfo.mDetails->mNextSibling;
   if (removed == mStart.Container()) {
-    CheckedUint32 newStartOffset{mStart.Offset()};
+    CheckedUint32 newStartOffset{
+        *mStart.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets)};
     newStartOffset += aInfo.mChangeStart;
 
     // newStartOffset.isValid() isn't checked explicitly here, because
@@ -452,7 +453,8 @@ nsRange::DetermineNewRangeBoundariesAndRootOnCharacterDataMerge(
     }
   }
   if (removed == mEnd.Container()) {
-    CheckedUint32 newEndOffset{mEnd.Offset()};
+    CheckedUint32 newEndOffset{
+        *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets)};
     newEndOffset += aInfo.mChangeStart;
 
     // newEndOffset.isValid() isn't checked explicitly here, because
@@ -469,13 +471,17 @@ nsRange::DetermineNewRangeBoundariesAndRootOnCharacterDataMerge(
   // the boundary.  (The m*Offset > 0 check is an optimization - a boundary
   // point before the first child is never affected by normalize().)
   nsINode* parentNode = aContent->GetParentNode();
-  if (parentNode == mStart.Container() && mStart.Offset() > 0 &&
-      mStart.Offset() < parentNode->GetChildCount() &&
+  if (parentNode == mStart.Container() &&
+      *mStart.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) > 0 &&
+      *mStart.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) <
+          parentNode->GetChildCount() &&
       removed == mStart.GetChildAtOffset()) {
     newStart = {aContent, aInfo.mChangeStart};
   }
-  if (parentNode == mEnd.Container() && mEnd.Offset() > 0 &&
-      mEnd.Offset() < parentNode->GetChildCount() &&
+  if (parentNode == mEnd.Container() &&
+      *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) > 0 &&
+      *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) <
+          parentNode->GetChildCount() &&
       removed == mEnd.GetChildAtOffset()) {
     newEnd = {aContent, aInfo.mChangeEnd};
   }
@@ -511,15 +517,21 @@ void nsRange::CharacterDataChanged(nsIContent* aContent,
 
   // If the changed node contains our start boundary and the change starts
   // before the boundary we'll need to adjust the offset.
-  if (aContent == mStart.Container() && aInfo.mChangeStart < mStart.Offset()) {
+  if (aContent == mStart.Container() &&
+      aInfo.mChangeStart <
+          *mStart.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets)) {
     if (aInfo.mDetails) {
       // splitText(), aInfo->mDetails->mNextSibling is the new text node
       NS_ASSERTION(
           aInfo.mDetails->mType == CharacterDataChangeInfo::Details::eSplit,
           "only a split can start before the end");
-      NS_ASSERTION(mStart.Offset() <= aInfo.mChangeEnd + 1,
-                   "mStart.Offset() is beyond the end of this node");
-      const uint32_t newStartOffset = mStart.Offset() - aInfo.mChangeStart;
+      NS_ASSERTION(
+          *mStart.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) <=
+              aInfo.mChangeEnd + 1,
+          "mStart.Offset() is beyond the end of this node");
+      const uint32_t newStartOffset =
+          *mStart.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) -
+          aInfo.mChangeStart;
       newStart = {aInfo.mDetails->mNextSibling, newStartOffset};
       if (MOZ_UNLIKELY(aContent == mRoot)) {
         newRoot = RangeUtils::ComputeRootNode(newStart.Container());
@@ -540,10 +552,12 @@ void nsRange::CharacterDataChanged(nsIContent* aContent,
       // If boundary is inside changed text, position it before change
       // else adjust start offset for the change in length.
       CheckedUint32 newStartOffset{0};
-      if (mStart.Offset() <= aInfo.mChangeEnd) {
+      if (*mStart.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) <=
+          aInfo.mChangeEnd) {
         newStartOffset = aInfo.mChangeStart;
       } else {
-        newStartOffset = mStart.Offset();
+        newStartOffset =
+            *mStart.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets);
         newStartOffset -= aInfo.LengthOfRemovedText();
         newStartOffset += aInfo.mReplaceLength;
       }
@@ -557,16 +571,22 @@ void nsRange::CharacterDataChanged(nsIContent* aContent,
   // Do the same thing for the end boundary, except for splitText of a node
   // with no parent then only switch to the new node if the start boundary
   // did so too (otherwise the range would end up with disconnected nodes).
-  if (aContent == mEnd.Container() && aInfo.mChangeStart < mEnd.Offset()) {
+  if (aContent == mEnd.Container() &&
+      aInfo.mChangeStart <
+          *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets)) {
     if (aInfo.mDetails && (aContent->GetParentNode() || newStart.Container())) {
       // splitText(), aInfo.mDetails->mNextSibling is the new text node
       NS_ASSERTION(
           aInfo.mDetails->mType == CharacterDataChangeInfo::Details::eSplit,
           "only a split can start before the end");
-      MOZ_ASSERT(mEnd.Offset() <= aInfo.mChangeEnd + 1,
-                 "mEnd.Offset() is beyond the end of this node");
+      MOZ_ASSERT(
+          *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) <=
+              aInfo.mChangeEnd + 1,
+          "mEnd.Offset() is beyond the end of this node");
 
-      const uint32_t newEndOffset{mEnd.Offset() - aInfo.mChangeStart};
+      const uint32_t newEndOffset{
+          *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) -
+          aInfo.mChangeStart};
       newEnd = {aInfo.mDetails->mNextSibling, newEndOffset};
 
       bool isCommonAncestor =
@@ -582,10 +602,12 @@ void nsRange::CharacterDataChanged(nsIContent* aContent,
       }
     } else {
       CheckedUint32 newEndOffset{0};
-      if (mEnd.Offset() <= aInfo.mChangeEnd) {
+      if (*mEnd.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets) <=
+          aInfo.mChangeEnd) {
         newEndOffset = aInfo.mChangeStart;
       } else {
-        newEndOffset = mEnd.Offset();
+        newEndOffset =
+            *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets);
         newEndOffset -= aInfo.LengthOfRemovedText();
         newEndOffset += aInfo.mReplaceLength;
       }
@@ -802,8 +824,36 @@ void nsRange::ParentChainChanged(nsIContent* aContent) {
   DoSetRange(mStart, mEnd, newRoot);
 }
 
-bool nsRange::IsPointInRange(const RawRangeBoundary& aPoint, ErrorResult& aRv) {
-  uint16_t compareResult = ComparePoint(aPoint, aRv);
+bool nsRange::IsPointComparableToRange(const nsINode& aContainer,
+                                       uint32_t aOffset,
+                                       ErrorResult& aErrorResult) const {
+  // our range is in a good state?
+  if (!mIsPositioned) {
+    aErrorResult.Throw(NS_ERROR_NOT_INITIALIZED);
+    return false;
+  }
+
+  if (!aContainer.IsInclusiveDescendantOf(mRoot)) {
+    aErrorResult.Throw(NS_ERROR_DOM_WRONG_DOCUMENT_ERR);
+    return false;
+  }
+
+  if (aContainer.NodeType() == nsINode::DOCUMENT_TYPE_NODE) {
+    aErrorResult.Throw(NS_ERROR_DOM_INVALID_NODE_TYPE_ERR);
+    return false;
+  }
+
+  if (aOffset > aContainer.Length()) {
+    aErrorResult.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    return false;
+  }
+
+  return true;
+}
+
+bool nsRange::IsPointInRange(nsINode& aContainer, uint32_t aOffset,
+                             ErrorResult& aRv) const {
+  uint16_t compareResult = ComparePoint(aContainer, aOffset, aRv);
   // If the node isn't in the range's document, it clearly isn't in the range.
   if (aRv.ErrorCodeIs(NS_ERROR_DOM_WRONG_DOCUMENT_ERR)) {
     aRv.SuppressException();
@@ -813,41 +863,21 @@ bool nsRange::IsPointInRange(const RawRangeBoundary& aPoint, ErrorResult& aRv) {
   return compareResult == 0;
 }
 
-int16_t nsRange::ComparePoint(const RawRangeBoundary& aPoint,
-                              ErrorResult& aRv) {
-  if (NS_WARN_IF(!aPoint.IsSet())) {
-    // FYI: Shouldn't reach this case if it's called by JS.  Therefore, it's
-    //      okay to warn.
-    aRv.Throw(NS_ERROR_DOM_INVALID_NODE_TYPE_ERR);
+int16_t nsRange::ComparePoint(nsINode& aContainer, uint32_t aOffset,
+                              ErrorResult& aRv) const {
+  if (!IsPointComparableToRange(aContainer, aOffset, aRv)) {
     return 0;
   }
 
-  // our range is in a good state?
-  if (!mIsPositioned) {
-    aRv.Throw(NS_ERROR_NOT_INITIALIZED);
-    return 0;
-  }
+  const RawRangeBoundary point{&aContainer, aOffset};
 
-  if (!aPoint.Container()->IsInclusiveDescendantOf(mRoot)) {
-    aRv.Throw(NS_ERROR_DOM_WRONG_DOCUMENT_ERR);
-    return 0;
-  }
+  MOZ_ASSERT(point.IsSetAndValid());
 
-  if (aPoint.Container()->NodeType() == nsINode::DOCUMENT_TYPE_NODE) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_NODE_TYPE_ERR);
-    return 0;
-  }
-
-  if (aPoint.Offset() > aPoint.Container()->Length()) {
-    aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    return 0;
-  }
-
-  int32_t cmp = nsContentUtils::ComparePoints(aPoint, mStart);
+  const int32_t cmp = nsContentUtils::ComparePoints(point, mStart);
   if (cmp <= 0) {
     return cmp;
   }
-  if (nsContentUtils::ComparePoints(mEnd, aPoint) == -1) {
+  if (nsContentUtils::ComparePoints(mEnd, point) == -1) {
     return 1;
   }
 
@@ -874,11 +904,14 @@ bool nsRange::IntersectsNode(nsINode& aNode, ErrorResult& aRv) {
   // Steps 6-7.
   // Note: if disconnected is true, ComparePoints returns 1.
   bool disconnected = false;
-  bool result =
-      nsContentUtils::ComparePoints(mStart.Container(), mStart.Offset(), parent,
-                                    nodeIndex + 1, &disconnected) < 0 &&
-      nsContentUtils::ComparePoints(parent, nodeIndex, mEnd.Container(),
-                                    mEnd.Offset(), &disconnected) < 0;
+  bool result = nsContentUtils::ComparePoints(
+                    mStart.Container(),
+                    *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+                    parent, nodeIndex + 1, &disconnected) < 0 &&
+                nsContentUtils::ComparePoints(
+                    parent, nodeIndex, mEnd.Container(),
+                    *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+                    &disconnected) < 0;
 
   // Step 2.
   if (disconnected) {
@@ -916,9 +949,11 @@ void nsRange::DoSetRange(const RangeBoundaryBase<SPT, SRT>& aStartBoundary,
                          const RangeBoundaryBase<EPT, ERT>& aEndBoundary,
                          nsINode* aRootNode,
                          bool aNotInsertedYet /* = false */) {
-  MOZ_ASSERT((aStartBoundary.IsSet() && aEndBoundary.IsSet() && aRootNode) ||
-                 (!aStartBoundary.IsSet() && !aEndBoundary.IsSet()),
-             "Set all or none");
+  mIsPositioned = aStartBoundary.IsSetAndValid() &&
+                  aEndBoundary.IsSetAndValid() && aRootNode;
+  MOZ_ASSERT(
+      mIsPositioned || (!aStartBoundary.IsSet() && !aEndBoundary.IsSet()),
+      "Set all or none");
 
   MOZ_ASSERT(
       !aRootNode || (!aStartBoundary.IsSet() && !aEndBoundary.IsSet()) ||
@@ -930,20 +965,19 @@ void nsRange::DoSetRange(const RangeBoundaryBase<SPT, SRT>& aStartBoundary,
            aRootNode == RangeUtils::ComputeRootNode(aEndBoundary.Container())),
       "Wrong root");
 
-  MOZ_ASSERT(
-      !aRootNode || (!aStartBoundary.IsSet() && !aEndBoundary.IsSet()) ||
-          (aStartBoundary.Container()->IsContent() &&
-           aEndBoundary.Container()->IsContent() &&
-           aRootNode ==
-               RangeUtils::ComputeRootNode(aStartBoundary.Container()) &&
-           aRootNode ==
-               RangeUtils::ComputeRootNode(aEndBoundary.Container())) ||
-          (!aRootNode->GetParentNode() &&
-           (aRootNode->IsDocument() || aRootNode->IsAttr() ||
-            aRootNode->IsDocumentFragment() ||
-            /*For backward compatibility*/
-            aRootNode->IsContent())),
-      "Bad root");
+  MOZ_ASSERT(!aRootNode || (!aStartBoundary.IsSet() && !aEndBoundary.IsSet()) ||
+                 (aStartBoundary.Container()->IsContent() &&
+                  aEndBoundary.Container()->IsContent() &&
+                  aRootNode ==
+                      RangeUtils::ComputeRootNode(aStartBoundary.Container()) &&
+                  aRootNode ==
+                      RangeUtils::ComputeRootNode(aEndBoundary.Container())) ||
+                 (!aRootNode->GetParentNode() &&
+                  (aRootNode->IsDocument() || aRootNode->IsAttr() ||
+                   aRootNode->IsDocumentFragment() ||
+                   /*For backward compatibility*/
+                   aRootNode->IsContent())),
+             "Bad root");
 
   if (mRoot != aRootNode) {
     if (mRoot) {
@@ -964,7 +998,6 @@ void nsRange::DoSetRange(const RangeBoundaryBase<SPT, SRT>& aStartBoundary,
   mStart = aStartBoundary;
   mEnd = aEndBoundary;
 
-  mIsPositioned = !!mStart.Container();
   if (checkCommonAncestor) {
     nsINode* oldCommonAncestor = mRegisteredCommonAncestor;
     nsINode* newCommonAncestor = GetCommonAncestor();
@@ -1651,9 +1684,11 @@ nsresult nsRange::CutContents(DocumentFragment** aFragment) {
   // of Range gravity during our edits!
 
   nsCOMPtr<nsINode> startContainer = mStart.Container();
-  uint32_t startOffset = mStart.Offset();
+  uint32_t startOffset =
+      *mStart.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets);
   nsCOMPtr<nsINode> endContainer = mEnd.Container();
-  uint32_t endOffset = mEnd.Offset();
+  uint32_t endOffset =
+      *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOrInvalidOffsets);
 
   if (retval) {
     // For extractContents(), abort early if there's a doctype (bug 719533).
@@ -1952,25 +1987,25 @@ int16_t nsRange::CompareBoundaryPoints(uint16_t aHow, nsRange& aOtherRange,
   switch (aHow) {
     case Range_Binding::START_TO_START:
       ourNode = mStart.Container();
-      ourOffset = mStart.Offset();
+      ourOffset = *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets);
       otherNode = aOtherRange.GetStartContainer();
       otherOffset = aOtherRange.StartOffset();
       break;
     case Range_Binding::START_TO_END:
       ourNode = mEnd.Container();
-      ourOffset = mEnd.Offset();
+      ourOffset = *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets);
       otherNode = aOtherRange.GetStartContainer();
       otherOffset = aOtherRange.StartOffset();
       break;
     case Range_Binding::END_TO_START:
       ourNode = mStart.Container();
-      ourOffset = mStart.Offset();
+      ourOffset = *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets);
       otherNode = aOtherRange.GetEndContainer();
       otherOffset = aOtherRange.EndOffset();
       break;
     case Range_Binding::END_TO_END:
       ourNode = mEnd.Container();
-      ourOffset = mEnd.Offset();
+      ourOffset = *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets);
       otherNode = aOtherRange.GetEndContainer();
       otherOffset = aOtherRange.EndOffset();
       break;
@@ -2058,6 +2093,10 @@ already_AddRefed<DocumentFragment> nsRange::CloneContents(ErrorResult& aRv) {
   RefPtr<DocumentFragment> clonedFrag =
       new DocumentFragment(doc->NodeInfoManager());
 
+  if (Collapsed()) {
+    return clonedFrag.forget();
+  }
+
   nsCOMPtr<nsINode> commonCloneAncestor = clonedFrag.get();
 
   // Create and initialize a subtree iterator that will give
@@ -2089,10 +2128,13 @@ already_AddRefed<DocumentFragment> nsRange::CloneContents(ErrorResult& aRv) {
 
   while (!iter.IsDone()) {
     nsCOMPtr<nsINode> node = iter.GetCurrentNode();
-    bool deepClone = !node->IsElement() ||
-                     (!(node == mEnd.Container() && mEnd.Offset() == 0) &&
-                      !(node == mStart.Container() &&
-                        mStart.Offset() == node->AsElement()->GetChildCount()));
+    bool deepClone =
+        !node->IsElement() ||
+        (!(node == mEnd.Container() &&
+           *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets) == 0) &&
+         !(node == mStart.Container() &&
+           *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets) ==
+               node->AsElement()->GetChildCount()));
 
     // Clone the current subtree!
 
@@ -2113,8 +2155,13 @@ already_AddRefed<DocumentFragment> nsRange::CloneContents(ErrorResult& aRv) {
         // data after it.
 
         uint32_t dataLength = charData->Length();
-        if (dataLength > (uint32_t)mEnd.Offset()) {
-          charData->DeleteData(mEnd.Offset(), dataLength - mEnd.Offset(), aRv);
+        if (dataLength >
+            *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets)) {
+          charData->DeleteData(
+              *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+              dataLength -
+                  *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+              aRv);
           if (aRv.Failed()) {
             return nullptr;
           }
@@ -2125,8 +2172,10 @@ already_AddRefed<DocumentFragment> nsRange::CloneContents(ErrorResult& aRv) {
         // We don't need any data before mStartOffset, so just
         // delete it!
 
-        if (mStart.Offset() > 0) {
-          charData->DeleteData(0, mStart.Offset(), aRv);
+        if (*mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets) > 0) {
+          charData->DeleteData(
+              0, *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+              aRv);
           if (aRv.Failed()) {
             return nullptr;
           }
@@ -2444,8 +2493,11 @@ void nsRange::ToString(nsAString& aReturn, ErrorResult& aErr) {
 #endif /* DEBUG */
 
       // grab the text
-      textNode->SubstringData(mStart.Offset(), mEnd.Offset() - mStart.Offset(),
-                              aReturn, aErr);
+      textNode->SubstringData(
+          *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+          *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets) -
+              *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+          aReturn, aErr);
       return;
     }
   }
@@ -2478,12 +2530,17 @@ void nsRange::ToString(nsAString& aReturn, ErrorResult& aErr) {
     {
       if (n == mStart.Container()) {  // only include text past start offset
         uint32_t strLength = textNode->Length();
-        textNode->SubstringData(mStart.Offset(), strLength - mStart.Offset(),
-                                tempString, IgnoreErrors());
+        textNode->SubstringData(
+            *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+            strLength -
+                *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+            tempString, IgnoreErrors());
         aReturn += tempString;
       } else if (n ==
                  mEnd.Container()) {  // only include text before end offset
-        textNode->SubstringData(0, mEnd.Offset(), tempString, IgnoreErrors());
+        textNode->SubstringData(
+            0, *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+            tempString, IgnoreErrors());
         aReturn += tempString;
       } else {  // grab the whole kit-n-kaboodle
         textNode->GetData(tempString);
@@ -2738,14 +2795,17 @@ void nsRange::CollectClientRectsAndText(
 already_AddRefed<DOMRect> nsRange::GetBoundingClientRect(bool aClampToEdge,
                                                          bool aFlushLayout) {
   RefPtr<DOMRect> rect = new DOMRect(ToSupports(this));
-  if (!mStart.Container()) {
+  if (!mIsPositioned) {
     return rect.forget();
   }
 
   nsLayoutUtils::RectAccumulator accumulator;
-  CollectClientRectsAndText(&accumulator, nullptr, this, mStart.Container(),
-                            mStart.Offset(), mEnd.Container(), mEnd.Offset(),
-                            aClampToEdge, aFlushLayout);
+  CollectClientRectsAndText(
+      &accumulator, nullptr, this, mStart.Container(),
+      *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+      mEnd.Container(),
+      *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets), aClampToEdge,
+      aFlushLayout);
 
   nsRect r = accumulator.mResultRect.IsEmpty() ? accumulator.mFirstRect
                                                : accumulator.mResultRect;
@@ -2755,7 +2815,7 @@ already_AddRefed<DOMRect> nsRange::GetBoundingClientRect(bool aClampToEdge,
 
 already_AddRefed<DOMRectList> nsRange::GetClientRects(bool aClampToEdge,
                                                       bool aFlushLayout) {
-  if (!mStart.Container()) {
+  if (!mIsPositioned) {
     return nullptr;
   }
 
@@ -2764,15 +2824,18 @@ already_AddRefed<DOMRectList> nsRange::GetClientRects(bool aClampToEdge,
 
   nsLayoutUtils::RectListBuilder builder(rectList);
 
-  CollectClientRectsAndText(&builder, nullptr, this, mStart.Container(),
-                            mStart.Offset(), mEnd.Container(), mEnd.Offset(),
-                            aClampToEdge, aFlushLayout);
+  CollectClientRectsAndText(
+      &builder, nullptr, this, mStart.Container(),
+      *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+      mEnd.Container(),
+      *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets), aClampToEdge,
+      aFlushLayout);
   return rectList.forget();
 }
 
 void nsRange::GetClientRectsAndTexts(mozilla::dom::ClientRectsAndTexts& aResult,
                                      ErrorResult& aErr) {
-  if (!mStart.Container()) {
+  if (!mIsPositioned) {
     return;
   }
 
@@ -2780,15 +2843,17 @@ void nsRange::GetClientRectsAndTexts(mozilla::dom::ClientRectsAndTexts& aResult,
 
   nsLayoutUtils::RectListBuilder builder(aResult.mRectList);
 
-  CollectClientRectsAndText(&builder, &aResult.mTextList, this,
-                            mStart.Container(), mStart.Offset(),
-                            mEnd.Container(), mEnd.Offset(), true, true);
+  CollectClientRectsAndText(
+      &builder, &aResult.mTextList, this, mStart.Container(),
+      *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+      mEnd.Container(),
+      *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets), true, true);
 }
 
 nsresult nsRange::GetUsedFontFaces(nsLayoutUtils::UsedFontFaceList& aResult,
                                    uint32_t aMaxRanges,
                                    bool aSkipCollapsedWhitespace) {
-  NS_ENSURE_TRUE(mStart.Container(), NS_ERROR_UNEXPECTED);
+  NS_ENSURE_TRUE(mIsPositioned, NS_ERROR_UNEXPECTED);
 
   nsCOMPtr<nsINode> startContainer = mStart.Container();
   nsCOMPtr<nsINode> endContainer = mEnd.Container();
@@ -2826,18 +2891,20 @@ nsresult nsRange::GetUsedFontFaces(nsLayoutUtils::UsedFontFaceList& aResult,
 
     if (content->IsText()) {
       if (node == startContainer) {
-        int32_t offset = startContainer == endContainer
-                             ? mEnd.Offset()
-                             : content->AsText()->TextDataLength();
-        nsLayoutUtils::GetFontFacesForText(frame, mStart.Offset(), offset, true,
-                                           aResult, fontFaces, aMaxRanges,
-                                           aSkipCollapsedWhitespace);
+        int32_t offset =
+            startContainer == endContainer
+                ? *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets)
+                : content->AsText()->TextDataLength();
+        nsLayoutUtils::GetFontFacesForText(
+            frame, *mStart.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+            offset, true, aResult, fontFaces, aMaxRanges,
+            aSkipCollapsedWhitespace);
         continue;
       }
       if (node == endContainer) {
-        nsLayoutUtils::GetFontFacesForText(frame, 0, mEnd.Offset(), true,
-                                           aResult, fontFaces, aMaxRanges,
-                                           aSkipCollapsedWhitespace);
+        nsLayoutUtils::GetFontFacesForText(
+            frame, 0, *mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets),
+            true, aResult, fontFaces, aMaxRanges, aSkipCollapsedWhitespace);
         continue;
       }
     }
@@ -2901,7 +2968,10 @@ static bool ExcludeIfNextToNonSelectable(nsIContent* aContent) {
 }
 
 void nsRange::ExcludeNonSelectableNodes(nsTArray<RefPtr<nsRange>>* aOutRanges) {
-  MOZ_ASSERT(mIsPositioned);
+  if (!mIsPositioned) {
+    MOZ_ASSERT(false);
+    return;
+  }
   MOZ_ASSERT(mEnd.Container());
   MOZ_ASSERT(mStart.Container());
 
@@ -2967,7 +3037,8 @@ void nsRange::ExcludeNonSelectableNodes(nsTArray<RefPtr<nsRange>>* aOutRanges) {
         } else {
           // Save the end point before truncating the range.
           nsINode* endContainer = range->mEnd.Container();
-          int32_t endOffset = range->mEnd.Offset();
+          const int32_t endOffset =
+              *range->mEnd.Offset(RangeBoundary::OffsetFilter::kValidOffsets);
 
           // Truncate the current range before the first non-selectable node.
           range->SetEndBefore(*firstNonSelectableContent, err);

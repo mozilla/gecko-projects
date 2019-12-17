@@ -41,7 +41,7 @@ let whitelist = [
   },
   {
     sourceName: /minimal-xul\.css$/i,
-    errorMessage: /Unknown property.*-moz-list-reversed/i,
+    errorMessage: /Unknown pseudo-class.*-moz-/i,
     isFromDevTools: false,
   },
   // Reserved to UA sheets unless layout.css.overflow-clip-box.enabled flipped to true.
@@ -100,22 +100,6 @@ if (
     errorMessage: /Error in parsing value for \u2018line-height\u2019/iu,
     isFromDevTools: false,
   });
-}
-
-if (!Services.prefs.getBoolPref("full-screen-api.unprefix.enabled")) {
-  whitelist.push(
-    {
-      sourceName: /(?:res|gre-resources)\/(ua|html)\.css$/i,
-      errorMessage: /Unknown pseudo-class .*\bfullscreen\b/i,
-      isFromDevTools: false,
-    },
-    {
-      // PDFjs is futureproofing its pseudoselectors, and those rules are dropped.
-      sourceName: /web\/viewer\.css$/i,
-      errorMessage: /Unknown pseudo-class .*\bfullscreen\b/i,
-      isFromDevTools: false,
-    }
-  );
 }
 
 if (!Services.prefs.getBoolPref("layout.css.scrollbar-width.enabled")) {

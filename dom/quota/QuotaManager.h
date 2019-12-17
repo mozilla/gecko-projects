@@ -16,6 +16,7 @@
 #include "nsClassHashtable.h"
 #include "nsRefPtrHashtable.h"
 
+#include "InitializationTypes.h"
 #include "Client.h"
 #include "PersistenceType.h"
 
@@ -614,12 +615,25 @@ class QuotaManager final : public BackgroundThreadObject {
   // it is only ever touched on the IO thread.
   nsDataHashtable<nsCStringHashKey, bool> mValidOrigins;
 
+  struct OriginInitializationInfo {
+    bool mPersistentOriginAttempted : 1;
+    bool mTemporaryOriginAttempted : 1;
+  };
+
+  // A hash table that is currently used to track origin initialization
+  // attempts. This hash table isn't protected by any mutex but it is only ever
+  // touched on the IO thread.
+  nsDataHashtable<nsCStringHashKey, OriginInitializationInfo>
+      mOriginInitializationInfos;
+
   // This array is populated at initialization time and then never modified, so
   // it can be iterated on any thread.
   AutoTArray<RefPtr<Client>, Client::TYPE_MAX> mClients;
 
   AutoTArray<Client::Type, Client::TYPE_MAX> mAllClientTypes;
   AutoTArray<Client::Type, Client::TYPE_MAX> mAllClientTypesExceptLS;
+
+  InitializationInfo mInitializationInfo;
 
   nsString mBasePath;
   nsString mIndexedDBPath;
@@ -631,8 +645,6 @@ class QuotaManager final : public BackgroundThreadObject {
   uint64_t mTemporaryStorageLimit;
   uint64_t mTemporaryStorageUsage;
   int64_t mNextDirectoryLockId;
-  bool mStorageInitializationAttempted;
-  bool mTemporaryStorageInitializationAttempted;
   bool mTemporaryStorageInitialized;
   bool mCacheUsable;
 };

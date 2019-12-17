@@ -57,6 +57,8 @@ urlbar-default-notification-anchor =
     .tooltiptext = Open message panel
 urlbar-geolocation-notification-anchor =
     .tooltiptext = Open location request panel
+urlbar-xr-notification-anchor =
+    .tooltiptext = Open virtual reality permission panel
 urlbar-storage-access-anchor =
     .tooltiptext = Open browsing activity permission panel
 urlbar-translate-notification-anchor =
@@ -84,6 +86,8 @@ urlbar-tip-help-icon =
 
 urlbar-geolocation-blocked =
     .tooltiptext = You have blocked location information for this website.
+urlbar-xr-blocked =
+    .tooltiptext = You have blocked virtual reality device access for this website.
 urlbar-web-notifications-blocked =
     .tooltiptext = You have blocked notifications for this website.
 urlbar-camera-blocked =
@@ -145,3 +149,18 @@ search-one-offs-context-set-as-default =
 search-one-offs-context-set-as-default-private =
     .label = Set as Default Search Engine for Private Windows
     .accesskey = P
+
+## Bookmark Panel
+
+bookmark-panel-show-editor-checkbox =
+    .label = Show editor when saving
+    .accesskey = S
+
+bookmark-panel-done-button =
+    .label = Done
+
+# Width of the bookmark panel.
+# Should be large enough to fully display the Done and
+# Cancel/Remove Bookmark buttons.
+bookmark-panel =
+    .style = min-width: 23em

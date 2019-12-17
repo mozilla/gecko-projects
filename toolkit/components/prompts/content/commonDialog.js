@@ -18,7 +18,7 @@ function commonDialogOnLoad() {
     args[prop.name] = prop.value;
   }
 
-  let dialog = document.documentElement;
+  let dialog = document.getElementById("commonDialog");
 
   let ui = {
     prompt: window,
@@ -39,9 +39,6 @@ function commonDialogOnLoad() {
     button0: dialog.getButton("accept"),
     focusTarget: window,
   };
-
-  // limit the dialog to the screen width
-  document.getElementById("filler").maxWidth = screen.availWidth;
 
   Dialog = new CommonDialog(args, ui);
   document.addEventListener("dialogaccept", function() {

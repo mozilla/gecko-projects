@@ -484,10 +484,6 @@ def check_parsed(repo_root, path, f):
             if len(testharnessreport_nodes) > 1:
                 errors.append(rules.MultipleTestharnessReport.error(path))
 
-        testharnesscss_nodes = source_file.root.findall(".//{http://www.w3.org/1999/xhtml}link[@href='/resources/testharness.css']")
-        if testharnesscss_nodes:
-            errors.append(rules.PresentTestharnessCSS.error(path))
-
         for element in source_file.variant_nodes:
             if "content" not in element.attrib:
                 errors.append(rules.VariantMissing.error(path))
@@ -844,6 +840,7 @@ def create_parser():
                         help="Output markdown")
     parser.add_argument("--repo-root", help="The WPT directory. Use this"
                         "option if the lint script exists outside the repository")
+    parser.add_argument("--ignore-glob", help="Additional file glob to ignore.")
     parser.add_argument("--all", action="store_true", help="If no paths are passed, try to lint the whole "
                         "working directory, not just files that changed")
     return parser
@@ -867,16 +864,21 @@ def main(**kwargs):
 
     paths = lint_paths(kwargs, repo_root)
 
-    return lint(repo_root, paths, output_format)
+    ignore_glob = kwargs.get(str("ignore_glob")) or str()
+
+    return lint(repo_root, paths, output_format, str(ignore_glob))
 
 
-def lint(repo_root, paths, output_format):
-    # type: (str, List[str], str) -> int
+def lint(repo_root, paths, output_format, ignore_glob=str()):
+    # type: (str, List[str], str, str) -> int
     error_count = defaultdict(int)  # type: Dict[Text, int]
     last = None
 
     with open(os.path.join(repo_root, "lint.whitelist")) as f:
         whitelist, ignored_files = parse_whitelist(f)
+
+    if ignore_glob:
+        ignored_files.add(ignore_glob)
 
     output_errors = {"json": output_errors_json,
                      "markdown": output_errors_markdown,

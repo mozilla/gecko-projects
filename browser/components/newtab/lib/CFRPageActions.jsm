@@ -66,11 +66,10 @@ let PageActionMap = new WeakMap();
 class PageAction {
   constructor(win, dispatchToASRouter) {
     this.window = win;
-    this.urlbar = win.document.getElementById("urlbar");
-    // `this.urlbar` is the larger container that holds both the urlbar input
-    // and the page action buttons. The focus event will be triggered by the
-    // `urlbar-input`.
-    this.urlbarinput = win.document.getElementById("urlbar-input");
+
+    this.urlbar = win.gURLBar; // The global URLBar object
+    this.urlbarinput = win.gURLBar.textbox; // The URLBar DOM node
+
     this.container = win.document.getElementById(
       "contextual-feature-recommendation"
     );
@@ -111,6 +110,13 @@ class PageAction {
         message_id: recommendation.id,
         bucket_id: recommendation.content.bucket_id,
         event: "IMPRESSION",
+        ...(recommendation.personalizedModelVersion
+          ? {
+              event_context: {
+                modelVersion: recommendation.personalizedModelVersion,
+              },
+            }
+          : {}),
       });
     }
   }
@@ -148,12 +154,12 @@ class PageAction {
     let [{ width }] = await this.window.promiseDocumentFlushed(() =>
       this.label.getClientRects()
     );
-    this.urlbar.style.setProperty("--cfr-label-width", `${width}px`);
+    this.urlbarinput.style.setProperty("--cfr-label-width", `${width}px`);
 
     this.container.addEventListener("click", this._showPopupOnClick);
     // Collapse the recommendation on url bar focus in order to free up more
     // space to display and edit the url
-    this.urlbarinput.addEventListener("focus", this._collapse);
+    this.urlbar.addEventListener("focus", this._collapse);
 
     if (shouldExpand) {
       this._clearScheduledStateChanges();
@@ -175,9 +181,9 @@ class PageAction {
   hideAddressBarNotifier() {
     this.container.hidden = true;
     this._clearScheduledStateChanges();
-    this.urlbar.removeAttribute("cfr-recommendation-state");
+    this.urlbarinput.removeAttribute("cfr-recommendation-state");
     this.container.removeEventListener("click", this._showPopupOnClick);
-    this.urlbar.removeEventListener("focus", this._collapse);
+    this.urlbarinput.removeEventListener("focus", this._collapse);
     if (this.currentNotification) {
       this.window.PopupNotifications.remove(this.currentNotification);
       this.currentNotification = null;
@@ -188,13 +194,13 @@ class PageAction {
     if (delay > 0) {
       this.stateTransitionTimeoutIDs.push(
         this.window.setTimeout(() => {
-          this.urlbar.setAttribute("cfr-recommendation-state", "expanded");
+          this.urlbarinput.setAttribute("cfr-recommendation-state", "expanded");
         }, delay)
       );
     } else {
       // Non-delayed state change overrides any scheduled state changes
       this._clearScheduledStateChanges();
-      this.urlbar.setAttribute("cfr-recommendation-state", "expanded");
+      this.urlbarinput.setAttribute("cfr-recommendation-state", "expanded");
     }
   }
 
@@ -203,17 +209,23 @@ class PageAction {
       this.stateTransitionTimeoutIDs.push(
         this.window.setTimeout(() => {
           if (
-            this.urlbar.getAttribute("cfr-recommendation-state") === "expanded"
+            this.urlbarinput.getAttribute("cfr-recommendation-state") ===
+            "expanded"
           ) {
-            this.urlbar.setAttribute("cfr-recommendation-state", "collapsed");
+            this.urlbarinput.setAttribute(
+              "cfr-recommendation-state",
+              "collapsed"
+            );
           }
         }, delay)
       );
     } else {
       // Non-delayed state change overrides any scheduled state changes
       this._clearScheduledStateChanges();
-      if (this.urlbar.getAttribute("cfr-recommendation-state") === "expanded") {
-        this.urlbar.setAttribute("cfr-recommendation-state", "collapsed");
+      if (
+        this.urlbarinput.getAttribute("cfr-recommendation-state") === "expanded"
+      ) {
+        this.urlbarinput.setAttribute("cfr-recommendation-state", "collapsed");
       }
     }
 
@@ -479,7 +491,7 @@ class PageAction {
   }
 
   async _renderMilestonePopup(message, browser) {
-    let { content } = message;
+    let { content, id } = message;
     let { primary } = content.buttons;
 
     let dateFormat = new Services.intl.DateTimeFormat(
@@ -496,7 +508,7 @@ class PageAction {
     let headerLabel = this.window.document.getElementById(
       "cfr-notification-header-label"
     );
-    let reachedMilestone = null;
+    let reachedMilestone = 0;
     let totalSaved = await TrackingDBService.sumAllEvents();
     for (let milestone of milestones) {
       if (totalSaved >= milestone) {
@@ -534,14 +546,20 @@ class PageAction {
     let primaryBtnString = await this.getStrings(primary.label);
     let primaryActionCallback = () => {
       this.dispatchUserAction(primary.action);
-      RecommendationMap.delete(browser);
+      this._sendTelemetry({
+        message_id: id,
+        bucket_id: content.bucket_id,
+        event: "CLICK_BUTTON",
+      });
 
+      RecommendationMap.delete(browser);
       // Invalidate the pref after the user interacts with the button.
       // We don't need to show the illustration in the privacy panel.
       Services.prefs.clearUserPref(
         "browser.contentblocking.cfr-milestone.milestone-shown-time"
       );
     };
+
     let mainAction = {
       label: primaryBtnString,
       accessKey: primaryBtnString.attributes.accesskey,
@@ -554,11 +572,15 @@ class PageAction {
         fill: #0250BB !important;
       }
     `;
+    style.classList.add("milestone-style");
 
     let arrow;
     let manageClass = event => {
       if (event === "dismissed" || event === "removed") {
-        notification.shadowRoot.removeChild(style);
+        style = notification.shadowRoot.querySelector(".milestone-style");
+        if (style) {
+          notification.shadowRoot.removeChild(style);
+        }
         arrow.classList.remove("cfr-notification-milestone");
       } else if (event === "showing") {
         notification.shadowRoot.appendChild(style);
@@ -592,7 +614,7 @@ class PageAction {
 
   // eslint-disable-next-line max-statements
   async _renderPopup(message, browser) {
-    const { id, content } = message;
+    const { id, content, modelVersion } = message;
 
     const headerLabel = this.window.document.getElementById(
       "cfr-notification-header-label"
@@ -628,6 +650,7 @@ class PageAction {
         message_id: id,
         bucket_id: content.bucket_id,
         event: "RATIONALE",
+        ...(modelVersion ? { event_context: { modelVersion } } : {}),
       });
     // Use the message layout as a CSS selector to hide different parts of the
     // notification template markup
@@ -652,6 +675,7 @@ class PageAction {
             message_id: id,
             bucket_id: content.bucket_id,
             event: "ENABLE",
+            ...(modelVersion ? { event_context: { modelVersion } } : {}),
           });
           RecommendationMap.delete(browser);
         };
@@ -688,6 +712,7 @@ class PageAction {
             message_id: id,
             bucket_id: content.bucket_id,
             event: "PIN",
+            ...(modelVersion ? { event_context: { modelVersion } } : {}),
           });
           RecommendationMap.delete(browser);
         };
@@ -730,6 +755,7 @@ class PageAction {
             message_id: id,
             bucket_id: content.bucket_id,
             event: "LEARN_MORE",
+            ...(modelVersion ? { event_context: { modelVersion } } : {}),
           });
 
         primaryActionCallback = async () => {
@@ -744,6 +770,7 @@ class PageAction {
             message_id: id,
             bucket_id: content.bucket_id,
             event: "INSTALL",
+            ...(modelVersion ? { event_context: { modelVersion } } : {}),
           });
           RecommendationMap.delete(browser);
         };
@@ -776,6 +803,7 @@ class PageAction {
             message_id: id,
             bucket_id: content.bucket_id,
             event,
+            ...(modelVersion ? { event_context: { modelVersion } } : {}),
           });
         },
       };
@@ -841,7 +869,7 @@ class PageAction {
   async showPopup() {
     const browser = this.window.gBrowser.selectedBrowser;
     const message = RecommendationMap.get(browser);
-    const { id, content } = message;
+    const { id, content, modelVersion } = message;
 
     // A hacky way of setting the popup anchor outside the usual url bar icon box
     // See https://searchfox.org/mozilla-central/rev/847b64cc28b74b44c379f9bff4f415b97da1c6d7/toolkit/modules/PopupNotifications.jsm#42
@@ -852,6 +880,7 @@ class PageAction {
       message_id: id,
       bucket_id: content.bucket_id,
       event: "CLICK_DOORHANGER",
+      ...(modelVersion ? { event_context: { modelVersion } } : {}),
     });
     await this._renderPopup(message, browser);
   }
@@ -954,15 +983,25 @@ const CFRPageActions = {
    */
   async showMilestone(browser, message, dispatchToASRouter, options = {}) {
     let win = null;
-    const { id, content } = message;
+    const { id, content, personalizedModelVersion } = message;
 
     // If we are forcing via the Admin page, the browser comes in a different format
     if (options.force) {
       win = browser.browser.ownerGlobal;
-      RecommendationMap.set(browser.browser, { id, retain: true, content });
+      RecommendationMap.set(browser.browser, {
+        id,
+        content,
+        retain: true,
+        modelVersion: personalizedModelVersion,
+      });
     } else {
       win = browser.ownerGlobal;
-      RecommendationMap.set(browser, { id, retain: true, content });
+      RecommendationMap.set(browser, {
+        id,
+        content,
+        retain: true,
+        modelVersion: personalizedModelVersion,
+      });
     }
 
     if (!PageActionMap.has(win)) {
@@ -985,8 +1024,13 @@ const CFRPageActions = {
   async forceRecommendation(browser, recommendation, dispatchToASRouter) {
     // If we are forcing via the Admin page, the browser comes in a different format
     const win = browser.browser.ownerGlobal;
-    const { id, content } = recommendation;
-    RecommendationMap.set(browser.browser, { id, retain: true, content });
+    const { id, content, personalizedModelVersion } = recommendation;
+    RecommendationMap.set(browser.browser, {
+      id,
+      content,
+      retain: true,
+      modelVersion: personalizedModelVersion,
+    });
     if (!PageActionMap.has(win)) {
       PageActionMap.set(win, new PageAction(win, dispatchToASRouter));
     }
@@ -1024,8 +1068,14 @@ const CFRPageActions = {
       // Don't replace an existing message
       return false;
     }
-    const { id, content } = recommendation;
-    RecommendationMap.set(browser, { id, host, retain: true, content });
+    const { id, content, personalizedModelVersion } = recommendation;
+    RecommendationMap.set(browser, {
+      id,
+      host,
+      content,
+      retain: true,
+      modelVersion: personalizedModelVersion,
+    });
     if (!PageActionMap.has(win)) {
       PageActionMap.set(win, new PageAction(win, dispatchToASRouter));
     }

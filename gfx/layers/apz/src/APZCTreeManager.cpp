@@ -152,6 +152,11 @@ struct APZCTreeManager::TreeBuildingState {
   // is cleared back to Nothing(). Note that this is only used in the WebRender
   // codepath.
   Maybe<uint64_t> mZoomAnimationId;
+
+  // This is populated with all the HitTestingTreeNodes that have a fixed
+  // position animation id (which indicates that they need to be sampled for
+  // WebRender on the sampler thread).
+  std::vector<HitTestingTreeNode*> mFixedPositionNodesWithAnimationId;
 };
 
 class APZCTreeManager::CheckerboardFlushObserver : public nsIObserver {
@@ -440,6 +445,7 @@ APZCTreeManager::UpdateHitTestingTreeImpl(const ScrollNode& aRoot,
           }
 
           if (aLayerMetrics.Metrics().IsRootContent()) {
+            MutexAutoLock lock(mMapLock);
             mGeckoFixedLayerMargins =
                 aLayerMetrics.Metrics().GetFixedLayerMargins();
           } else {
@@ -471,6 +477,10 @@ APZCTreeManager::UpdateHitTestingTreeImpl(const ScrollNode& aRoot,
           // case where WR is enabled and the animation id is zero.
           if (node->IsScrollThumbNode() && node->GetScrollbarAnimationId()) {
             state.mScrollThumbs.push_back(node);
+          }
+          // GetFixedPositionAnimationId is only set when webrender is enabled.
+          if (node->GetFixedPositionAnimationId().isSome()) {
+            state.mFixedPositionNodesWithAnimationId.push_back(node);
           }
           if (apzc && node->IsPrimaryHolder()) {
             state.mScrollTargets[apzc->GetGuid()] = node;
@@ -617,6 +627,17 @@ APZCTreeManager::UpdateHitTestingTreeImpl(const ScrollNode& aRoot,
           thumb->GetScrollbarData(), targetGuid, target->GetTransform(),
           target->IsAncestorOf(thumb));
     }
+
+    mFixedPositionInfo.clear();
+    // For non-webrender, state.mFixedPositionNodesWithAnimationId will be empty
+    // so this will be a no-op.
+    for (HitTestingTreeNode* fixedPos :
+         state.mFixedPositionNodesWithAnimationId) {
+      MOZ_ASSERT(fixedPos->GetFixedPositionAnimationId().isSome());
+      mFixedPositionInfo.emplace_back(
+          fixedPos->GetFixedPositionAnimationId().value(),
+          fixedPos->GetFixedPosSides());
+    }
   }
 
   for (size_t i = 0; i < state.mNodesToDestroy.Length(); i++) {
@@ -696,8 +717,8 @@ void APZCTreeManager::SampleForWebRender(wr::TransactionWrapper& aTxn,
       transforms.AppendElement(wr::ToWrTransformProperty(
           *zoomAnimationId, Matrix4x4::Scaling(zoom.scale, zoom.scale, 1.0f)));
 
-      aTxn.UpdateIsTransformPinchZooming(*zoomAnimationId,
-                                         apzc->IsPinchZooming());
+      aTxn.UpdateIsTransformAsyncZooming(*zoomAnimationId,
+                                         apzc->IsAsyncZooming());
     }
 
     // The positive translation means the painted content is supposed to
@@ -739,6 +760,21 @@ void APZCTreeManager::SampleForWebRender(wr::TransactionWrapper& aTxn,
     transforms.AppendElement(
         wr::ToWrTransformProperty(info.mThumbAnimationId, transform));
   }
+
+  for (const FixedPositionInfo& info : mFixedPositionInfo) {
+    ScreenPoint translation =
+        AsyncCompositionManager::ComputeFixedMarginsOffset(
+            mCompositorFixedLayerMargins, info.mFixedPosSides,
+            mGeckoFixedLayerMargins);
+
+    LayerToParentLayerMatrix4x4 transform =
+        LayerToParentLayerMatrix4x4::Translation(ViewAs<ParentLayerPixel>(
+            translation, PixelCastJustification::ScreenIsParentLayerForRoot));
+
+    transforms.AppendElement(
+        wr::ToWrTransformProperty(info.mFixedPositionAnimationId, transform));
+  }
+
   aTxn.AppendTransformProperties(transforms);
 
   // Advance animations. It's important that this happens after
@@ -1000,7 +1036,8 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
     node->SetScrollbarData(aLayer.GetScrollbarAnimationId(),
                            aLayer.GetScrollbarData());
     node->SetFixedPosData(aLayer.GetFixedPositionScrollContainerId(),
-                          aLayer.GetFixedPositionSides());
+                          aLayer.GetFixedPositionSides(),
+                          aLayer.GetFixedPositionAnimationId());
     return node;
   }
 
@@ -1225,7 +1262,8 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
   node->SetScrollbarData(aLayer.GetScrollbarAnimationId(),
                          aLayer.GetScrollbarData());
   node->SetFixedPosData(aLayer.GetFixedPositionScrollContainerId(),
-                        aLayer.GetFixedPositionSides());
+                        aLayer.GetFixedPositionSides(),
+                        aLayer.GetFixedPositionAnimationId());
   return node;
 }
 
@@ -1530,7 +1568,7 @@ APZEventResult APZCTreeManager::ReceiveInputEvent(InputData& aEvent) {
       }
       break;
     }
-    case PINCHGESTURE_INPUT: {  // note: no one currently sends these
+    case PINCHGESTURE_INPUT: {
       PinchGestureInput& pinchInput = aEvent.AsPinchGestureInput();
       HitTestResult hit = GetTargetAPZC(pinchInput.mFocusPoint);
       aEvent.mLayersId = hit.mLayersId;
@@ -1539,6 +1577,12 @@ APZEventResult APZCTreeManager::ReceiveInputEvent(InputData& aEvent) {
       if (hit.mTargetApzc) {
         MOZ_ASSERT(hitResult != CompositorHitTestInvisibleToHit);
 
+        if (!hit.mTargetApzc->IsRootContent()) {
+          hit.mTargetApzc = FindZoomableApzc(hit.mTargetApzc);
+        }
+      }
+
+      if (hit.mTargetApzc) {
         ScreenToScreenMatrix4x4 outTransform =
             GetScreenToApzcTransform(hit.mTargetApzc) *
             GetApzcToGeckoTransform(hit.mTargetApzc);
@@ -1892,7 +1936,7 @@ APZEventResult APZCTreeManager::ProcessTouchInput(MultiTouchInput& aInput) {
         }
         touchData.mScreenPoint = *untransformedScreenPoint;
         if (mFixedPosSidesForInputBlock != SideBits::eNone) {
-          RecursiveMutexAutoLock lock(mTreeLock);
+          MutexAutoLock lock(mMapLock);
           touchData.mScreenPoint -=
               RoundedToInt(AsyncCompositionManager::ComputeFixedMarginsOffset(
                   mCompositorFixedLayerMargins, mFixedPosSidesForInputBlock,
@@ -2635,8 +2679,9 @@ APZCTreeManager::HitTestResult APZCTreeManager::GetAPZCAtPointWR(
   wr::WrPipelineId pipelineId;
   ScrollableLayerGuid::ViewID scrollId;
   gfx::CompositorHitTestInfo hitInfo;
+  SideBits sideBits = SideBits::eNone;
   bool hitSomething = wr->HitTest(wr::ToWorldPoint(aHitTestPoint), pipelineId,
-                                  scrollId, hitInfo);
+                                  scrollId, hitInfo, sideBits);
   if (!hitSomething) {
     return hit;
   }
@@ -2689,20 +2734,7 @@ APZCTreeManager::HitTestResult APZCTreeManager::GetAPZCAtPointWR(
                                   mTreeLock);
   }
 
-  // TODO: Setting hit.mFixedPosSides needs to be implemented for WebRender.
-  // There are two possible implementation strategies here:
-  //  (1) Have the WebRender HitTest API call return enough information
-  //      to locate the fixed node that was hit, and use
-  //      HitTestingTreeNode::GetFixedPosSides() to get the fixed sides.
-  //      Note that the fixed node that was hit may be a descendant of
-  //      the scrolling node found via GetTargetNode() above, so it's
-  //      not enough to simply walk up the hit testing tree from that node.
-  //      Note also that, in this case,
-  //      WebRenderScrollDataWrapper::GetFixedPositionSides() needs to be
-  //      implemented as well, so the fixed pos sides are populated in the
-  //      hit testing tree.
-  //  (2) Propagate the fixed position sides to WebRender itself, and have
-  //      the WebRender HitTest API call return them directly.
+  hit.mFixedPosSides = sideBits;
 
   return hit;
 }
@@ -2927,6 +2959,11 @@ AsyncPanZoomController* APZCTreeManager::FindRootApzcForLayersId(
 already_AddRefed<AsyncPanZoomController> APZCTreeManager::FindZoomableApzc(
     AsyncPanZoomController* aStart) const {
   return GetZoomableTarget(aStart, aStart);
+}
+
+ScreenMargin APZCTreeManager::GetGeckoFixedLayerMargins() const {
+  RecursiveMutexAutoLock lock(mTreeLock);
+  return mGeckoFixedLayerMargins;
 }
 
 AsyncPanZoomController* APZCTreeManager::FindRootContentApzcForLayersId(
@@ -3188,6 +3225,7 @@ Maybe<ScreenIntPoint> APZCTreeManager::ConvertToGecko(
       UntransformBy(transformScreenToGecko, aPoint);
   if (geckoPoint) {
     if (mFixedPosSidesForInputBlock != SideBits::eNone) {
+      MutexAutoLock mapLock(mMapLock);
       *geckoPoint -=
           RoundedToInt(AsyncCompositionManager::ComputeFixedMarginsOffset(
               mCompositorFixedLayerMargins, mFixedPosSidesForInputBlock,
@@ -3323,11 +3361,15 @@ LayerToParentLayerMatrix4x4 APZCTreeManager::ComputeTransformForNode(
           });
     }
   } else if (IsFixedToRootContent(aNode)) {
-    ParentLayerPoint translation = ViewAs<ParentLayerPixel>(
-        AsyncCompositionManager::ComputeFixedMarginsOffset(
-            mCompositorFixedLayerMargins, aNode->GetFixedPosSides(),
-            mGeckoFixedLayerMargins),
-        PixelCastJustification::ScreenIsParentLayerForRoot);
+    ParentLayerPoint translation;
+    {
+      MutexAutoLock mapLock(mMapLock);
+      translation = ViewAs<ParentLayerPixel>(
+          AsyncCompositionManager::ComputeFixedMarginsOffset(
+              mCompositorFixedLayerMargins, aNode->GetFixedPosSides(),
+              mGeckoFixedLayerMargins),
+          PixelCastJustification::ScreenIsParentLayerForRoot);
+    }
     return aNode->GetTransform() *
            CompleteAsyncTransform(
                AsyncTransformComponentMatrix::Translation(translation));
@@ -3384,10 +3426,6 @@ bool APZCTreeManager::GetAPZTestData(LayersId aLayersId,
 
 void APZCTreeManager::SendSubtreeTransformsToChromeMainThread(
     const AsyncPanZoomController* aAncestor) {
-  if (!mRootNode) {
-    // Event dispatched during shutdown, after ClearTree().
-    return;
-  }
   RefPtr<GeckoContentController> controller =
       GetContentController(mRootLayersId);
   if (!controller) {
@@ -3397,6 +3435,11 @@ void APZCTreeManager::SendSubtreeTransformsToChromeMainThread(
   bool underAncestor = (aAncestor == nullptr);
   {
     RecursiveMutexAutoLock lock(mTreeLock);
+    if (!mRootNode) {
+      // Event dispatched during shutdown, after ClearTree().
+      // Note, mRootNode needs to be checked with mTreeLock held.
+      return;
+    }
     // This formulation duplicates matrix multiplications closer
     // to the root of the tree. For now, aiming for separation
     // of concerns rather than minimum number of multiplications.
@@ -3438,7 +3481,7 @@ void APZCTreeManager::SendSubtreeTransformsToChromeMainThread(
 
 void APZCTreeManager::SetFixedLayerMargins(ScreenIntCoord aTop,
                                            ScreenIntCoord aBottom) {
-  RecursiveMutexAutoLock lock(mTreeLock);
+  MutexAutoLock lock(mMapLock);
   mCompositorFixedLayerMargins.top = aTop;
   mCompositorFixedLayerMargins.bottom = aBottom;
 }

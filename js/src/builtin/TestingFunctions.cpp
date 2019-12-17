@@ -40,11 +40,12 @@
 #  include "irregexp/RegExpEngine.h"
 #  include "irregexp/RegExpParser.h"
 #endif
-#include "gc/Heap.h"
+#include "gc/Allocator.h"
 #include "gc/Zone.h"
 #include "jit/BaselineJIT.h"
 #include "jit/InlinableNatives.h"
 #include "jit/JitRealm.h"
+#include "js/Array.h"        // JS::NewArrayObject
 #include "js/ArrayBuffer.h"  // JS::{DetachArrayBuffer,GetArrayBufferLengthAndData,NewArrayBufferWithContents}
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
@@ -764,11 +765,6 @@ static bool WasmBulkMemSupported(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef ENABLE_WASM_BULKMEM_OPS
   bool isSupported = true;
-#  ifdef ENABLE_WASM_CRANELIFT
-  if (cx->options().wasmCranelift()) {
-    isSupported = false;
-  }
-#  endif
 #else
   bool isSupported =
       cx->realm()->creationOptions().getSharedMemoryAndAtomicsEnabled();
@@ -792,6 +788,12 @@ static bool WasmGcEnabled(JSContext* cx, unsigned argc, Value* vp) {
 static bool WasmMultiValueEnabled(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   args.rval().setBoolean(wasm::HasMultiValueSupport(cx));
+  return true;
+}
+
+static bool WasmBigIntEnabled(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  args.rval().setBoolean(wasm::HasI64BigIntSupport(cx));
   return true;
 }
 
@@ -903,7 +905,7 @@ static bool WasmTextToBinary(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  RootedObject jsOffsets(cx, JS_NewArrayObject(cx, offsets.length()));
+  RootedObject jsOffsets(cx, JS::NewArrayObject(cx, offsets.length()));
   if (!jsOffsets) {
     return false;
   }
@@ -1108,7 +1110,8 @@ static bool IsRelazifiableFunction(JSContext* cx, unsigned argc, Value* vp) {
 
   JSFunction* fun = &args[0].toObject().as<JSFunction>();
   args.rval().setBoolean(fun->hasScript() &&
-                         fun->nonLazyScript()->isRelazifiableIgnoringJitCode());
+                         fun->nonLazyScript()->maybeLazyScript() &&
+                         fun->nonLazyScript()->isRelazifiable());
   return true;
 }
 
@@ -2000,7 +2003,7 @@ static bool EnsureLinearString(JSContext* cx, unsigned argc, Value* vp) {
 static bool RepresentativeStringArray(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  RootedObject array(cx, JS_NewArrayObject(cx, 0));
+  RootedObject array(cx, JS::NewArrayObject(cx, 0));
   if (!array) {
     return false;
   }
@@ -4361,7 +4364,6 @@ static bool ShellCloneAndExecuteScript(JSContext* cx, unsigned argc,
 
   JS::CompileOptions options(cx);
   options.setFileAndLine(filename.get(), lineno);
-  options.setNoScriptRval(true);
 
   JS::SourceText<char16_t> srcBuf;
   if (!srcBuf.init(cx, src, srclen, SourceOwnership::Borrowed)) {
@@ -4383,14 +4385,19 @@ static bool ShellCloneAndExecuteScript(JSContext* cx, unsigned argc,
     return false;
   }
 
-  AutoRealm ar(cx, global);
-
   JS::RootedValue rval(cx);
-  if (!JS::CloneAndExecuteScript(cx, script, &rval)) {
+  {
+    AutoRealm ar(cx, global);
+    if (!JS::CloneAndExecuteScript(cx, script, &rval)) {
+      return false;
+    }
+  }
+
+  if (!cx->compartment()->wrap(cx, &rval)) {
     return false;
   }
 
-  args.rval().setUndefined();
+  args.rval().set(rval);
   return true;
 }
 
@@ -4491,6 +4498,16 @@ static bool SetLazyParsingDisabled(JSContext* cx, unsigned argc, Value* vp) {
 
   bool disable = !args.hasDefined(0) || ToBoolean(args[0]);
   cx->realm()->behaviors().setDisableLazyParsing(disable);
+
+  args.rval().setUndefined();
+  return true;
+}
+
+static bool SetDeferredParserAlloc(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  bool enable = !args.hasDefined(0) || ToBoolean(args[0]);
+  cx->realm()->behaviors().setDeferredParserAlloc(enable);
 
   args.rval().setUndefined();
   return true;
@@ -4740,7 +4757,7 @@ static bool GetMarkQueue(JSContext* cx, unsigned argc, Value* vp) {
 
   auto& queue = cx->runtime()->gc.marker.markQueue.get();
 
-  RootedObject result(cx, JS_NewArrayObject(cx, queue.length()));
+  RootedObject result(cx, JS::NewArrayObject(cx, queue.length()));
   if (!result) {
     return false;
   }
@@ -5023,7 +5040,7 @@ static JSObject* ConvertRegExpTreeToObject(JSContext* cx, LifoAlloc& alloc,
                             JSContext* cx, HandleObject obj, const char* name,
                             const irregexp::RegExpTreeVector& nodes) {
     size_t len = nodes.length();
-    RootedObject array(cx, JS_NewArrayObject(cx, len));
+    RootedObject array(cx, JS::NewArrayObject(cx, len));
     if (!array) {
       return false;
     }
@@ -5046,7 +5063,7 @@ static JSObject* ConvertRegExpTreeToObject(JSContext* cx, LifoAlloc& alloc,
                             JSContext* cx, HandleObject obj, const char* name,
                             const irregexp::CharacterRangeVector& ranges) {
     size_t len = ranges.length();
-    RootedObject array(cx, JS_NewArrayObject(cx, len));
+    RootedObject array(cx, JS::NewArrayObject(cx, len));
     if (!array) {
       return false;
     }
@@ -5087,7 +5104,7 @@ static JSObject* ConvertRegExpTreeToObject(JSContext* cx, LifoAlloc& alloc,
                       JSContext* cx, HandleObject obj, const char* name,
                       const irregexp::TextElementVector& elements) {
     size_t len = elements.length();
-    RootedObject array(cx, JS_NewArrayObject(cx, len));
+    RootedObject array(cx, JS::NewArrayObject(cx, len));
     if (!array) {
       return false;
     }
@@ -6637,6 +6654,10 @@ gc::ZealModeHelpText),
 "wasmMultiValueEnabled()",
 "  Returns a boolean indicating whether the WebAssembly multi-value proposal is enabled."),
 
+    JS_FN_HELP("wasmBigIntEnabled", WasmBigIntEnabled, 1, 0,
+"wasmBigIntEnabled()",
+"  Returns a boolean indicating whether the WebAssembly I64 to BigInt proposal is enabled."),
+
     JS_FN_HELP("wasmDebugSupport", WasmDebugSupport, 1, 0,
 "wasmDebugSupport()",
 "  Returns a boolean indicating whether the WebAssembly compilers support debugging."),
@@ -6852,6 +6873,10 @@ gc::ZealModeHelpText),
 "setLazyParsingDisabled(bool)",
 "  Explicitly disable lazy parsing in the current compartment.  The default is that lazy "
 "  parsing is not explicitly disabled."),
+
+    JS_FN_HELP("setDeferredParserAlloc", SetDeferredParserAlloc, 1, 0,
+"setDeferredParserAlloc(bool)",
+"  Enable or disable the parser's deferred alloc support"),
 
     JS_FN_HELP("setDiscardSource", SetDiscardSource, 1, 0,
 "setDiscardSource(bool)",

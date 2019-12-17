@@ -16,12 +16,13 @@
 #endif /* MOZ_X11 */
 #ifdef MOZ_WAYLAND
 #  include <gdk/gdkwayland.h>
+#  include "base/thread.h"
+#  include "WaylandVsyncSource.h"
 #endif
 #include "mozcontainer.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 #include "nsIDragService.h"
-#include "nsITimer.h"
 #include "nsGkAtoms.h"
 #include "nsRefPtrHashtable.h"
 #include "nsIFrame.h"
@@ -83,6 +84,7 @@ class gfxPattern;
 namespace mozilla {
 class TimeStamp;
 class CurrentX11TimeGetter;
+
 }  // namespace mozilla
 
 class nsWindow final : public nsBaseWidget {
@@ -230,6 +232,8 @@ class nsWindow final : public nsBaseWidget {
   void SetEGLNativeWindowSize(const LayoutDeviceIntSize& aEGLWindowSize);
 #endif
 
+  RefPtr<mozilla::gfx::VsyncSource> GetVsyncSource() override;
+
  private:
   void UpdateAlpha(mozilla::gfx::SourceSurface* aSourceSurface,
                    nsIntRect aBoundsRect);
@@ -253,6 +257,9 @@ class nsWindow final : public nsBaseWidget {
 #ifdef MOZ_WAYLAND
   void MaybeResumeCompositor();
 #endif
+
+  void WaylandStartVsync();
+  void WaylandStopVsync();
 
  public:
   void ThemeChanged(void);
@@ -354,6 +361,7 @@ class nsWindow final : public nsBaseWidget {
   wl_display* GetWaylandDisplay();
   wl_surface* GetWaylandSurface();
   bool WaylandSurfaceNeedsClear();
+  virtual void CreateCompositorVsyncDispatcher() override;
 #endif
   virtual void GetCompositorWidgetInitData(
       mozilla::widget::CompositorWidgetInitData* aInitData) override;
@@ -472,6 +480,11 @@ class nsWindow final : public nsBaseWidget {
   void ClearCachedResources();
   nsIWidgetListener* GetListener();
 
+#ifdef MOZ_WAYLAND
+  void UpdateOpaqueRegionWayland(cairo_region_t* aRegion);
+#endif
+  void UpdateOpaqueRegionGtk(cairo_region_t* aRegion);
+
   void UpdateClientOffsetForCSDWindow();
 
   nsWindow* GetTransientForWindowIfPopup();
@@ -520,6 +533,9 @@ class nsWindow final : public nsBaseWidget {
   Visual* mXVisual;
   int mXDepth;
   mozilla::widget::WindowSurfaceProvider mSurfaceProvider;
+#endif
+#ifdef MOZ_WAYLAND
+  RefPtr<mozilla::gfx::VsyncSource> mWaylandVsyncSource;
 #endif
 
   // Upper bound on pending ConfigureNotify events to be dispatched to the
@@ -611,6 +627,10 @@ class nsWindow final : public nsBaseWidget {
   // Remember the last sizemode so that we can restore it when
   // leaving fullscreen
   nsSizeMode mLastSizeMode;
+  // We can't detect size state changes correctly so set this flag
+  // to force update mBounds after a size state change from a configure
+  // event.
+  bool mBoundsNeedSizeUpdate;
 
   static bool DragInProgress(void);
 
@@ -633,6 +653,8 @@ class nsWindow final : public nsBaseWidget {
   void ForceTitlebarRedraw();
 
   void SetPopupWindowDecoration(bool aShowOnTaskbar);
+
+  void ApplySizeConstraints(void);
 
   bool IsMainMenuWindow();
   GtkWidget* ConfigureWaylandPopupWindows();

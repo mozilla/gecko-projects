@@ -62,9 +62,16 @@ const getDisplayedFramesSummary = createSelector(
   displayedFrames => {
     let firstStartedMs = +Infinity;
     let lastEndedMs = -Infinity;
+    let sentSize = 0;
+    let receivedSize = 0;
     let totalSize = 0;
 
     displayedFrames.forEach(frame => {
+      if (frame.type == "received") {
+        receivedSize += frame.payload.length;
+      } else if (frame.type == "sent") {
+        sentSize += frame.payload.length;
+      }
       totalSize += frame.payload.length;
       if (frame.timeStamp < firstStartedMs) {
         firstStartedMs = frame.timeStamp;
@@ -77,9 +84,30 @@ const getDisplayedFramesSummary = createSelector(
     return {
       count: displayedFrames.length,
       totalMs: (lastEndedMs - firstStartedMs) / 1000,
+      sentSize,
+      receivedSize,
       totalSize,
     };
   }
+);
+
+/**
+ * Returns if the currentChannelId is closed
+ */
+const isCurrentChannelClosed = createSelector(
+  state => state.webSockets,
+  ({ closedConnections, currentChannelId }) =>
+    closedConnections.has(currentChannelId)
+);
+
+/**
+ * Returns the closed connection details of the currentChannelId
+ * Null, if the connection is still open
+ */
+const getClosedConnectionDetails = createSelector(
+  state => state.webSockets,
+  ({ closedConnections, currentChannelId }) =>
+    closedConnections.get(currentChannelId)
 );
 
 module.exports = {
@@ -87,4 +115,6 @@ module.exports = {
   isSelectedFrameVisible,
   getDisplayedFrames,
   getDisplayedFramesSummary,
+  isCurrentChannelClosed,
+  getClosedConnectionDetails,
 };

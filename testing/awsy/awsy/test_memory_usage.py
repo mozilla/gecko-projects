@@ -89,8 +89,7 @@ class TestMemoryUsage(AwsyTestCase):
         # Indicate that we're using tp6 in the perf data.
         self._extra_opts = ["tp6"]
 
-        if self.marionette.get_pref('fission.autostart') or \
-                self.marionette.get_pref('"fission.autostart"'):
+        if self.marionette.get_pref('fission.autostart'):
             self._extra_opts.append("fission-enabled")
 
         # Now we setup the mitm proxy with our tp6 pageset.
@@ -104,7 +103,7 @@ class TestMemoryUsage(AwsyTestCase):
             'binary': self._binary,
             'run_local': self._run_local,
             'app': 'firefox',
-            'host': 'localhost',
+            'host': '127.0.0.1',
             'ignore_mitmdump_exit_failure': True,
         }
 

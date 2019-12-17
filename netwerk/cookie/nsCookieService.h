@@ -21,13 +21,9 @@
 #include "nsTHashtable.h"
 #include "mozIStorageStatement.h"
 #include "mozIStorageAsyncStatement.h"
-#include "mozIStoragePendingStatement.h"
 #include "mozIStorageConnection.h"
-#include "mozIStorageRow.h"
 #include "mozIStorageCompletionCallback.h"
 #include "mozIStorageStatementCallback.h"
-#include "mozIStorageFunction.h"
-#include "nsIVariant.h"
 #include "nsIFile.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/BasePrincipal.h"
@@ -195,7 +191,6 @@ class nsCookieService final : public nsICookieService,
    * (thus instantiating it, if necessary) and clear all the cookies for that
    * app.
    */
-  static void AppClearDataObserverInit();
   static nsAutoCString GetPathFromURI(nsIURI* aHostURI);
   static nsresult GetBaseDomain(nsIEffectiveTLDService* aTLDService,
                                 nsIURI* aHostURI, nsCString& aBaseDomain,
@@ -231,6 +226,13 @@ class nsCookieService final : public nsICookieService,
                         bool aIsSameSiteForeign, bool aHttpBound,
                         const OriginAttributes& aOriginAttrs,
                         nsTArray<nsCookie*>& aCookieList);
+
+  /**
+   * This method is a helper that allows calling nsICookieManager::Remove()
+   * with OriginAttributes parameter.
+   */
+  nsresult Remove(const nsACString& aHost, const OriginAttributes& aAttrs,
+                  const nsACString& aName, const nsACString& aPath);
 
  protected:
   virtual ~nsCookieService();
@@ -336,14 +338,6 @@ class nsCookieService final : public nsICookieService,
   nsresult RemoveCookiesWithOriginAttributes(
       const mozilla::OriginAttributesPattern& aPattern,
       const nsCString& aBaseDomain);
-
-  /**
-   * This method is a helper that allows calling nsICookieManager::Remove()
-   * with OriginAttributes parameter.
-   * NOTE: this could be added to a public interface if we happen to need it.
-   */
-  nsresult Remove(const nsACString& aHost, const OriginAttributes& aAttrs,
-                  const nsACString& aName, const nsACString& aPath);
 
  protected:
   nsresult RemoveCookiesFromExactHost(

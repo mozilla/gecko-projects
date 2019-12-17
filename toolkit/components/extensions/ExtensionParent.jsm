@@ -241,6 +241,9 @@ let apiManager = new (class extends SchemaAPIManager {
     if (event === "disable") {
       promises.push(...ids.map(id => this.emit("disable", id)));
     }
+    if (event === "enabling") {
+      promises.push(...ids.map(id => this.emit("enabling", id)));
+    }
 
     AsyncShutdown.profileBeforeChange.addBlocker(
       `Extension API ${event} handlers for ${ids.join(",")}`,
@@ -1284,7 +1287,7 @@ class HiddenXULWindow {
       triggeringPrincipal: system,
     };
     chromeShell.loadURI(
-      "chrome://extensions/content/dummy.xul",
+      "chrome://extensions/content/dummy.xhtml",
       loadURIOptions
     );
 
@@ -2076,15 +2079,19 @@ var ExtensionParent = {
 
 // browserPaintedPromise and browserStartupPromise are promises that
 // resolve after the first browser window is painted and after browser
-// windows have been restored, respectively.
+// windows have been restored, respectively. Alternatively,
+// browserStartupPromise also resolves from the extensions-late-startup
+// notification sent by Firefox Reality on desktop platforms, because it
+// doesn't support SessionStore.
 // _resetStartupPromises should only be called from outside this file in tests.
 ExtensionParent._resetStartupPromises = () => {
   ExtensionParent.browserPaintedPromise = promiseObserved(
     "browser-delayed-startup-finished"
   ).then(() => {});
-  ExtensionParent.browserStartupPromise = promiseObserved(
-    "sessionstore-windows-restored"
-  ).then(() => {});
+  ExtensionParent.browserStartupPromise = Promise.race([
+    promiseObserved("sessionstore-windows-restored"),
+    promiseObserved("extensions-late-startup"),
+  ]).then(() => {});
 };
 ExtensionParent._resetStartupPromises();
 

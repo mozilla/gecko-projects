@@ -279,6 +279,17 @@ if (AppConstants.MOZ_CRASHREPORTER) {
   );
 }
 
+if (AppConstants.ENABLE_REMOTE_AGENT) {
+  XPCOMUtils.defineLazyServiceGetter(
+    this,
+    "RemoteAgent",
+    "@mozilla.org/remote/agent;1",
+    "nsIRemoteAgent"
+  );
+} else {
+  this.RemoteAgent = { listening: false };
+}
+
 XPCOMUtils.defineLazyGetter(this, "RTL_UI", () => {
   return Services.locale.isAppLocaleRTL;
 });
@@ -484,23 +495,6 @@ XPCOMUtils.defineLazyPreferenceGetter(
 
 XPCOMUtils.defineLazyPreferenceGetter(
   this,
-  "gMsgingSystemFxABadge",
-  "browser.messaging-system.fxatoolbarbadge.enabled",
-  true,
-  (aPref, aOldVal, aNewVal) => {
-    updateFxaToolbarMenu(gFxaToolbarEnabled);
-  }
-);
-
-XPCOMUtils.defineLazyPreferenceGetter(
-  this,
-  "gHtmlAboutAddonsEnabled",
-  "extensions.htmlaboutaddons.enabled",
-  false
-);
-
-XPCOMUtils.defineLazyPreferenceGetter(
-  this,
   "gAddonAbuseReportEnabled",
   "extensions.abuseReport.enabled",
   false
@@ -633,16 +627,6 @@ function updateFxaToolbarMenu(enable, isInitialUpdate = false) {
     }
 
     Services.telemetry.setEventRecordingEnabled("fxa_avatar_menu", true);
-
-    // We set an attribute here so that we can toggle the custom
-    // badge depending on whether the FxA menu was ever accessed.
-    // If badging is handled by Messaging System we shouldn't set
-    // the attribute.
-    if (!gFxaToolbarAccessed && !gMsgingSystemFxABadge) {
-      mainWindowEl.setAttribute("fxa_avatar_badged", "badged");
-    } else {
-      mainWindowEl.removeAttribute("fxa_avatar_badged");
-    }
 
     // When the pref for a FxA service is removed, we remove it from
     // the FxA toolbar menu as well. This is useful when the service
@@ -1867,7 +1851,7 @@ var gBrowserInit = {
       ToolbarKeyboardNavigator.init();
     }
 
-    gRemoteControl.updateVisualCue(Marionette.running);
+    gRemoteControl.updateVisualCue(Marionette.running || RemoteAgent.listening);
 
     // If we are given a tab to swap in, take care of it before first paint to
     // avoid an about:blank flash.
@@ -1951,7 +1935,7 @@ var gBrowserInit = {
     this._handleURIToLoad();
 
     Services.obs.addObserver(gIdentityHandler, "perm-changed");
-    Services.obs.addObserver(gRemoteControl, "remote-active");
+    Services.obs.addObserver(gRemoteControl, "remote-listening");
     Services.obs.addObserver(
       gSessionHistoryObserver,
       "browser:purge-session-history"
@@ -2124,19 +2108,6 @@ var gBrowserInit = {
     this._firstBrowserPaintDeferred.promise = new Promise(resolve => {
       this._firstBrowserPaintDeferred.resolve = resolve;
     });
-
-    let mm = window.messageManager;
-    let initialBrowser = gBrowser.selectedBrowser;
-    mm.addMessageListener(
-      "Browser:FirstNonBlankPaint",
-      function onFirstNonBlankPaint() {
-        mm.removeMessageListener(
-          "Browser:FirstNonBlankPaint",
-          onFirstNonBlankPaint
-        );
-        initialBrowser.removeAttribute("blank");
-      }
-    );
 
     // To prevent flickering of the urlbar-history-dropmarker in the general
     // case, the urlbar has the 'focused' attribute set by default.
@@ -2340,6 +2311,12 @@ var gBrowserInit = {
       NewTabPagePreloading.maybeCreatePreloadedBrowser(window);
     });
 
+    if (AppConstants.NIGHTLY_BUILD) {
+      scheduleIdleTask(() => {
+        FissionTestingUI.init();
+      });
+    }
+
     // This should always go last, since the idle tasks (except for the ones with
     // timeouts) should execute in order. Note that this observer notification is
     // not guaranteed to fire, since the window could close before we get here.
@@ -2484,7 +2461,7 @@ var gBrowserInit = {
       FullZoom.destroy();
 
       Services.obs.removeObserver(gIdentityHandler, "perm-changed");
-      Services.obs.removeObserver(gRemoteControl, "remote-active");
+      Services.obs.removeObserver(gRemoteControl, "remote-listening");
       Services.obs.removeObserver(
         gSessionHistoryObserver,
         "browser:purge-session-history"
@@ -2586,10 +2563,7 @@ function HandleAppCommandEvent(evt) {
       BrowserOpenFileWindow();
       break;
     case "Print":
-      PrintUtils.printWindow(
-        gBrowser.selectedBrowser.outerWindowID,
-        gBrowser.selectedBrowser
-      );
+      PrintUtils.printWindow(gBrowser.selectedBrowser.browsingContext);
       break;
     case "Save":
       saveBrowser(gBrowser.selectedBrowser);
@@ -2837,7 +2811,11 @@ function focusAndSelectUrlBar() {
 function openLocation(event) {
   if (window.location.href == AppConstants.BROWSER_CHROME_URL) {
     focusAndSelectUrlBar();
-    if (gURLBar.openViewOnFocusForCurrentTab && !gURLBar.view.isOpen) {
+    // We don't want to reopen or requery if the view is open.
+    if (gURLBar.view.isOpen) {
+      return;
+    }
+    if (!gURLBar.view.maybeReopen() && gURLBar.openViewOnFocusForCurrentTab) {
       gURLBar.startQuery({ event });
     }
     return;
@@ -3249,7 +3227,7 @@ function BrowserPageInfo(
 
   // We didn't find a matching window, so open a new one.
   return openDialog(
-    "chrome://browser/content/pageinfo/pageInfo.xul",
+    "chrome://browser/content/pageinfo/pageInfo.xhtml",
     "",
     "chrome,toolbar,dialog=no,resizable",
     args
@@ -5115,7 +5093,7 @@ var XULBrowserWindow = {
     StatusPanel.update();
   },
 
-  setOverLink(url, anchorElt) {
+  setOverLink(url) {
     if (url) {
       url = Services.textToSubURI.unEscapeURIForUI("UTF-8", url);
 
@@ -5267,8 +5245,7 @@ var XULBrowserWindow = {
     const nsIWebProgressListener = Ci.nsIWebProgressListener;
 
     let browser = gBrowser.selectedBrowser;
-
-    gProtectionsHandler.onStateChange(aStateFlags);
+    gProtectionsHandler.onStateChange(aWebProgress, aStateFlags);
 
     if (
       aStateFlags & nsIWebProgressListener.STATE_START &&
@@ -5349,7 +5326,7 @@ var XULBrowserWindow = {
     var location = aLocationURI ? aLocationURI.spec : "";
 
     this.hideOverLinkImmediately = true;
-    this.setOverLink("", null);
+    this.setOverLink("");
     this.hideOverLinkImmediately = false;
 
     // We should probably not do this if the value has changed since the user
@@ -6003,6 +5980,7 @@ var TabsProgressListener = {
         ) {
           if (recordLoadTelemetry) {
             TelemetryStopwatch.finish(histogram, aBrowser);
+            BrowserUtils.recordSiteOriginTelemetry(browserWindows());
           }
         }
       } else if (
@@ -7258,11 +7236,7 @@ function promptRemoveExtension(addon) {
   // Enable abuse report checkbox in the remove extension dialog,
   // if enabled by the about:config prefs and the addon type
   // is currently supported.
-  if (
-    gHtmlAboutAddonsEnabled &&
-    gAddonAbuseReportEnabled &&
-    ["extension", "theme"].includes(addon.type)
-  ) {
+  if (gAddonAbuseReportEnabled && ["extension", "theme"].includes(addon.type)) {
     checkboxMessage = getFormattedString(
       "webext.remove.abuseReportCheckbox.message",
       [document.getElementById("bundle_brand").getString("vendorShortName")]
@@ -7337,8 +7311,7 @@ var ToolbarContextMenu = {
       element.hidden = !addon;
     }
 
-    reportExtension.hidden =
-      !addon || !gAddonAbuseReportEnabled || !gHtmlAboutAddonsEnabled;
+    reportExtension.hidden = !addon || !gAddonAbuseReportEnabled;
 
     if (addon) {
       removeExtension.disabled = !(
@@ -8412,8 +8385,13 @@ function formatURL(aFormat, aIsPref) {
 }
 
 /**
- * Fired on the "marionette-remote-control" system notification,
- * indicating if the browser session is under remote control.
+ * When the browser is being controlled from out-of-process,
+ * e.g. when Marionette or the remote debugging protocol is used,
+ * we add a visual hint to the browser UI to indicate to the user
+ * that the browser session is under remote control.
+ *
+ * This is called when the content browser initialises (from gBrowserInit.onLoad())
+ * and when the "remote-listening" system notification fires.
  */
 const gRemoteControl = {
   observe(subject, topic, data) {
@@ -9340,3 +9318,22 @@ var ConfirmationHint = {
     ));
   },
 };
+
+if (AppConstants.NIGHTLY_BUILD) {
+  var FissionTestingUI = {
+    init() {
+      let autostart = Services.prefs.getBoolPref("fission.autostart");
+      if (!autostart) {
+        return;
+      }
+
+      let newFissionWindow = document.getElementById("Tools:FissionWindow");
+      let newNonFissionWindow = document.getElementById(
+        "Tools:NonFissionWindow"
+      );
+
+      newFissionWindow.hidden = gFissionBrowser;
+      newNonFissionWindow.hidden = !gFissionBrowser;
+    },
+  };
+}

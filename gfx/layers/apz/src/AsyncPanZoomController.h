@@ -1044,9 +1044,14 @@ class AsyncPanZoomController {
   // Position on screen where user first put their finger down.
   ExternalPoint mStartTouch;
 
+  Maybe<CompositionPayload> mCompositedScrollPayload;
+  Maybe<CompositionPayload> mScrollPayload;
+
   friend class Axis;
 
  public:
+  Maybe<CompositionPayload> NotifyScrollSampling();
+
   /**
    * Invoke |callable|, passing |mLastContentPaintMetrics| as argument,
    * while holding the APZC lock required to access |mLastContentPaintMetrics|.
@@ -1502,6 +1507,8 @@ class AsyncPanZoomController {
                           ParentLayerPoint& aEndPoint,
                           OverscrollHandoffState& aOverscrollHandoffState);
 
+  void RecordScrollPayload(const TimeStamp& aTimeStamp);
+
   /**
    * A helper function for overscrolling during panning. This is a wrapper
    * around OverscrollBy() that also implements restrictions on entering
@@ -1613,7 +1620,9 @@ class AsyncPanZoomController {
 
   wr::RenderRoot GetRenderRoot() const { return mRenderRoot; }
 
-  bool IsPinchZooming() const { return mState == PINCHING; }
+  bool IsAsyncZooming() const {
+    return mState == PINCHING || mState == ANIMATING_ZOOM;
+  }
 
  private:
   // Extra offset to add to the async scroll position for testing

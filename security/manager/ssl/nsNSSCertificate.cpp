@@ -13,19 +13,20 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Base64.h"
 #include "mozilla/Casting.h"
-#include "mozilla/ipc/TransportSecurityInfoUtils.h"
 #include "mozilla/NotNull.h"
 #include "mozilla/Span.h"
 #include "mozilla/TextUtils.h"
 #include "mozilla/Unused.h"
+#include "mozilla/ipc/TransportSecurityInfoUtils.h"
+#include "mozilla/net/DNS.h"
+#include "mozpkix/Result.h"
+#include "mozpkix/pkixnss.h"
+#include "mozpkix/pkixtypes.h"
 #include "nsArray.h"
 #include "nsCOMPtr.h"
-#include "nsICertificateDialogs.h"
 #include "nsIClassInfoImpl.h"
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
-#include "nsISupportsPrimitives.h"
-#include "nsIURI.h"
 #include "nsIX509Cert.h"
 #include "nsNSSASN1Object.h"
 #include "nsNSSCertHelper.h"
@@ -39,9 +40,6 @@
 #include "nsThreadUtils.h"
 #include "nsUnicharUtils.h"
 #include "nspr.h"
-#include "mozpkix/pkixnss.h"
-#include "mozpkix/pkixtypes.h"
-#include "mozpkix/Result.h"
 #include "prerror.h"
 #include "secasn1.h"
 #include "secder.h"
@@ -545,8 +543,10 @@ void nsNSSCertificate::GetSubjectAltNames() {
       } break;
 
       case certIPAddress: {
-        char buf[INET6_ADDRSTRLEN];
+        // According to DNS.h, this includes space for the null-terminator
+        char buf[net::kNetAddrMaxCStrBufSize] = {0};
         PRNetAddr addr;
+        memset(&addr, 0, sizeof(addr));
         if (current->name.other.len == 4) {
           addr.inet.family = PR_AF_INET;
           memcpy(&addr.inet.ip, current->name.other.data,

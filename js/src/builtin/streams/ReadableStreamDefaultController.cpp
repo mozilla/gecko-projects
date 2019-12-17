@@ -12,10 +12,10 @@
 #include "jsapi.h"        // JS_ReportErrorNumberASCII
 #include "jsfriendapi.h"  // js::GetErrorMessage, JSMSG_*, js::AssertSameCompartment
 
-#include "builtin/Promise.h"                 // js::PromiseObject
-#include "builtin/streams/ClassSpecMacro.h"  // JS_STREAMS_CLASS_SPEC
+#include "builtin/Promise.h"                          // js::PromiseObject
+#include "builtin/streams/ClassSpecMacro.h"           // JS_STREAMS_CLASS_SPEC
 #include "builtin/streams/MiscellaneousOperations.h"  // js::IsMaybeWrapped
-#include "builtin/streams/PullIntoDescriptor.h"  // js::PullIntoDescriptor
+#include "builtin/streams/PullIntoDescriptor.h"       // js::PullIntoDescriptor
 #include "builtin/streams/QueueWithSizes.h"  // js::{DequeueValue,ResetQueue}
 #include "builtin/streams/ReadableStream.h"  // js::ReadableStream, js::SetUpExternalReadableByteStreamController
 #include "builtin/streams/ReadableStreamController.h"  // js::ReadableStream{,Default}Controller, js::ReadableByteStreamController, js::CheckReadableStreamControllerCanCloseOrEnqueue, js::ReadableStreamControllerCancelSteps, js::ReadableStreamDefaultControllerPullSteps, js::ReadableStreamControllerStart{,Failed}Handler
@@ -25,15 +25,14 @@
 #include "builtin/streams/ReadableStreamReader.h"  // js::ReadableStream{,Default}Reader
 #include "builtin/streams/StreamController.h"  // js::StreamController
 #include "builtin/streams/TeeState.h"          // js::TeeState
-#include "gc/Heap.h"
-#include "js/ArrayBuffer.h"  // JS::NewArrayBuffer
-#include "js/Class.h"        // js::ClassSpec
+#include "js/ArrayBuffer.h"                    // JS::NewArrayBuffer
+#include "js/Class.h"                          // js::ClassSpec
 #include "js/PropertySpec.h"
 #include "vm/Interpreter.h"
 #include "vm/JSContext.h"
 #include "vm/SelfHosting.h"
 
-#include "builtin/streams/HandlerFunction-inl.h"       // js::TargetFromHandler
+#include "builtin/streams/HandlerFunction-inl.h"  // js::TargetFromHandler
 #include "builtin/streams/MiscellaneousOperations-inl.h"  // js::PromiseCall
 #include "builtin/streams/ReadableStreamReader-inl.h"  // js::UnwrapReaderFromStream
 #include "vm/Compartment-inl.h"  // JS::Compartment::wrap, js::UnwrapAnd{DowncastObject,TypeCheckThis}

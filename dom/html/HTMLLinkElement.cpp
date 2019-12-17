@@ -13,6 +13,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/StaticPrefs_network.h"
 #include "mozilla/dom/BindContext.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/HTMLLinkElementBinding.h"
@@ -26,7 +27,6 @@
 #include "nsINode.h"
 #include "nsIPrefetchService.h"
 #include "nsIStyleSheetLinkingElement.h"
-#include "nsIURL.h"
 #include "nsPIDOMWindow.h"
 #include "nsReadableUtils.h"
 #include "nsStyleConsts.h"
@@ -395,16 +395,32 @@ void HTMLLinkElement::GetLinkTarget(nsAString& aTarget) {
 }
 
 static const DOMTokenListSupportedToken sSupportedRelValues[] = {
-    // Keep this in sync with ToLinkMask in nsStyleLinkElement.cpp.
+    // Keep this and the one below in sync with ToLinkMask in
+    // nsStyleLinkElement.cpp.
     // "preload" must come first because it can be disabled.
     "preload",   "prefetch",   "dns-prefetch", "stylesheet", "next",
     "alternate", "preconnect", "icon",         "search",     nullptr};
 
+static const DOMTokenListSupportedToken sSupportedRelValuesWithManifest[] = {
+    // Keep this in sync with ToLinkMask in nsStyleLinkElement.cpp.
+    // "preload" and "manifest" must come first because they can be disabled.
+    "preload",   "manifest",   "prefetch", "dns-prefetch", "stylesheet", "next",
+    "alternate", "preconnect", "icon",     "search",       nullptr};
+
 nsDOMTokenList* HTMLLinkElement::RelList() {
   if (!mRelList) {
-    if (Preferences::GetBool("network.preload")) {
+    auto preload = Preferences::GetBool("network.preload") ||
+                   StaticPrefs::network_preload_experimental();
+    auto manifest = StaticPrefs::dom_manifest_enabled();
+    if (manifest && preload) {
+      mRelList = new nsDOMTokenList(this, nsGkAtoms::rel,
+                                    sSupportedRelValuesWithManifest);
+    } else if (manifest && !preload) {
+      mRelList = new nsDOMTokenList(this, nsGkAtoms::rel,
+                                    &sSupportedRelValuesWithManifest[1]);
+    } else if (!manifest && preload) {
       mRelList = new nsDOMTokenList(this, nsGkAtoms::rel, sSupportedRelValues);
-    } else {
+    } else {  // both false...drop preload
       mRelList =
           new nsDOMTokenList(this, nsGkAtoms::rel, &sSupportedRelValues[1]);
     }

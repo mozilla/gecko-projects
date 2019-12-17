@@ -134,6 +134,10 @@ PaintFragment PaintFragment::Record(nsIDocShell* aDocShell,
                                         thebes);
   }
 
+  if (!recorder->mOutputStream.mValid) {
+    return PaintFragment{};
+  }
+
   ByteBuf recording = ByteBuf((uint8_t*)recorder->mOutputStream.mData,
                               recorder->mOutputStream.mLength,
                               recorder->mOutputStream.mCapacity);
@@ -180,6 +184,10 @@ bool CrossProcessPaint::Start(dom::WindowGlobalParent* aRoot,
     rect =
         Some(IntRect::RoundOut((float)aRect->X(), (float)aRect->Y(),
                                (float)aRect->Width(), (float)aRect->Height()));
+  }
+
+  if (rect && rect->IsEmpty()) {
+    return false;
   }
 
   RefPtr<CrossProcessPaint> resolver =
@@ -235,7 +243,6 @@ void CrossProcessPaint::ReceiveFragment(dom::WindowGlobalParent* aWGP,
 
   MOZ_ASSERT(mPendingFragments > 0);
   MOZ_ASSERT(!mReceivedFragments.GetValue(surfaceId));
-  MOZ_ASSERT(!aFragment.IsEmpty());
 
   // Double check our invariants to protect against a compromised content
   // process

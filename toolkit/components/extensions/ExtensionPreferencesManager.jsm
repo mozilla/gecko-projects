@@ -60,18 +60,21 @@ XPCOMUtils.defineLazyGetter(this, "defaultPreferences", function() {
 });
 
 /* eslint-disable mozilla/balanced-listeners */
-Management.on("uninstall", (type, { id }) => {
-  ExtensionPreferencesManager.removeAll(id);
+Management.on("uninstall", async (type, { id }) => {
+  // Ensure managed preferences are cleared if they were
+  // not cleared at the module level.
+  await Management.asyncLoadSettingsModules();
+  return this.ExtensionPreferencesManager.removeAll(id);
 });
 
-Management.on("disable", (type, id) => {
-  ExtensionPreferencesManager.disableAll(id);
+Management.on("disable", async (type, id) => {
+  await Management.asyncLoadSettingsModules();
+  return this.ExtensionPreferencesManager.disableAll(id);
 });
 
-Management.on("startup", async (type, extension) => {
-  if (extension.startupReason == "ADDON_ENABLE") {
-    ExtensionPreferencesManager.enableAll(extension.id);
-  }
+Management.on("enabling", async (type, id) => {
+  await Management.asyncLoadSettingsModules();
+  return this.ExtensionPreferencesManager.enableAll(id);
 });
 /* eslint-enable mozilla/balanced-listeners */
 
@@ -170,7 +173,8 @@ function setPrefs(name, setting, item) {
  * of the prefs.
  *
  * @param {string} id
- *        The id of the extension for which a setting is being modified.
+ *        The id of the extension for which a setting is being modified.  Also
+ *        see selectSetting.
  * @param {string} name
  *        The name of the setting being processed.
  * @param {string} action
@@ -296,6 +300,24 @@ this.ExtensionPreferencesManager = {
    */
   enableSetting(id, name) {
     return processSetting(id, name, "enable");
+  },
+
+  /**
+   * Specifically select an extension, the user, or the precedence order that will
+   * be in control of this setting.
+   *
+   * @param {string | null} id
+   *        The id of the extension for which a setting is being selected, or
+   *        ExtensionSettingStore.SETTING_USER_SET (null).
+   * @param {string} name
+   *        The unique id of the setting.
+   *
+   * @returns {Promise}
+   *          Resolves to true if the preferences were changed and to false if
+   *          the preferences were not changed.
+   */
+  selectSetting(id, name) {
+    return processSetting(id, name, "select");
   },
 
   /**
@@ -561,9 +583,7 @@ this.ExtensionPreferencesManager = {
         name: `${name}.onChange`,
         register: fire => {
           let listener = async () => {
-            fire.async({
-              details: await settingsAPI.get({}),
-            });
+            fire.async(await settingsAPI.get({}));
           };
           Management.on(`extension-setting-changed:${name}`, listener);
           return () => {

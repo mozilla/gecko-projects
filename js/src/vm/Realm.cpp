@@ -38,6 +38,10 @@
 
 using namespace js;
 
+Realm::DebuggerVectorEntry::DebuggerVectorEntry(js::Debugger* dbg_,
+                                                JSObject* link)
+    : dbg(dbg_), debuggerLink(link) {}
+
 ObjectRealm::ObjectRealm(JS::Zone* zone)
     : innerViews(zone, zone), iteratorCache(zone) {}
 
@@ -269,6 +273,8 @@ void Realm::traceGlobal(JSTracer* trc) {
 
   savedStacks_.trace(trc);
 
+  DebugAPI::traceFromRealm(trc, this);
+
   // Atoms are always tenured.
   if (!JS::RuntimeHeapIsMinorCollecting()) {
     varNames_.trace(trc);
@@ -276,10 +282,6 @@ void Realm::traceGlobal(JSTracer* trc) {
 }
 
 void ObjectRealm::trace(JSTracer* trc) {
-  if (lazyArrayBuffers) {
-    lazyArrayBuffers->trace(trc);
-  }
-
   if (objectMetadataTable) {
     objectMetadataTable->trace(trc);
   }
@@ -324,10 +326,6 @@ void Realm::traceRoots(JSTracer* trc,
 }
 
 void ObjectRealm::finishRoots() {
-  if (lazyArrayBuffers) {
-    lazyArrayBuffers->clear();
-  }
-
   if (objectMetadataTable) {
     objectMetadataTable->clear();
   }
@@ -343,9 +341,6 @@ void Realm::finishRoots() {
   }
 
   objects_.finishRoots();
-
-  clearScriptCounts();
-  clearScriptLCov();
 }
 
 void ObjectRealm::sweepAfterMinorGC() {
@@ -739,13 +734,9 @@ void Realm::collectCodeCoverageInfo(JSScript* script, const char* name) {
 
 void ObjectRealm::addSizeOfExcludingThis(
     mozilla::MallocSizeOf mallocSizeOf, size_t* innerViewsArg,
-    size_t* lazyArrayBuffersArg, size_t* objectMetadataTablesArg,
+    size_t* objectMetadataTablesArg,
     size_t* nonSyntacticLexicalEnvironmentsArg) {
   *innerViewsArg += innerViews.sizeOfExcludingThis(mallocSizeOf);
-
-  if (lazyArrayBuffers) {
-    *lazyArrayBuffersArg += lazyArrayBuffers->sizeOfIncludingThis(mallocSizeOf);
-  }
 
   if (objectMetadataTable) {
     *objectMetadataTablesArg +=
@@ -761,10 +752,9 @@ void ObjectRealm::addSizeOfExcludingThis(
 void Realm::addSizeOfIncludingThis(
     mozilla::MallocSizeOf mallocSizeOf, size_t* tiAllocationSiteTables,
     size_t* tiArrayTypeTables, size_t* tiObjectTypeTables, size_t* realmObject,
-    size_t* realmTables, size_t* innerViewsArg, size_t* lazyArrayBuffersArg,
-    size_t* objectMetadataTablesArg, size_t* savedStacksSet,
-    size_t* varNamesSet, size_t* nonSyntacticLexicalEnvironmentsArg,
-    size_t* jitRealm) {
+    size_t* realmTables, size_t* innerViewsArg, size_t* objectMetadataTablesArg,
+    size_t* savedStacksSet, size_t* varNamesSet,
+    size_t* nonSyntacticLexicalEnvironmentsArg, size_t* jitRealm) {
   *realmObject += mallocSizeOf(this);
   objectGroups_.addSizeOfExcludingThis(mallocSizeOf, tiAllocationSiteTables,
                                        tiArrayTypeTables, tiObjectTypeTables,
@@ -772,7 +762,7 @@ void Realm::addSizeOfIncludingThis(
   wasm.addSizeOfExcludingThis(mallocSizeOf, realmTables);
 
   objects_.addSizeOfExcludingThis(mallocSizeOf, innerViewsArg,
-                                  lazyArrayBuffersArg, objectMetadataTablesArg,
+                                  objectMetadataTablesArg,
                                   nonSyntacticLexicalEnvironmentsArg);
 
   *savedStacksSet += savedStacks_.sizeOfExcludingThis(mallocSizeOf);

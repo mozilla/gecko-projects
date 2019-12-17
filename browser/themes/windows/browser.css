@@ -554,7 +554,7 @@ menuitem.bookmark-item {
   }
 }
 
-@supports -moz-bool-pref("browser.urlbar.megabar.expandTextOnFocus") {
+@supports -moz-bool-pref("browser.urlbar.update1.expandTextOnFocus") {
   #urlbar[breakout-extend] {
     font-size: 1.25em;
   }
@@ -830,19 +830,6 @@ panel[touchmode] .PanelUI-subView #appMenu-zoom-controls > .subviewbutton-iconic
 #context-sep-navigation {
   margin-inline-start: -28px;
   margin-top: -4px;
-}
-
-#fill-login-popup > menucaption {
-  color: GrayText;
-}
-
-/* Match the treatment of menucaption used for <optgroup> */
-#fill-login-popup > menucaption > .menu-iconic-left {
-  display: none
-}
-
-#fill-login-popup > menucaption > .menu-iconic-text {
-  -moz-appearance: menuitemtext
 }
 
 %include browser-aero.css

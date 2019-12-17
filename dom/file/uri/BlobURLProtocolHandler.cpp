@@ -16,6 +16,7 @@
 #include "mozilla/dom/IPCBlobUtils.h"
 #include "mozilla/dom/MediaSource.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/Preferences.h"
@@ -518,8 +519,8 @@ NS_IMPL_ISUPPORTS_INHERITED(ReleasingTimerHolder, Runnable, nsITimerCallback,
                             nsIAsyncShutdownBlocker)
 
 template <typename T>
-static nsresult AddDataEntryInternal(const nsACString& aURI, T aObject,
-                                     nsIPrincipal* aPrincipal) {
+static void AddDataEntryInternal(const nsACString& aURI, T aObject,
+                                 nsIPrincipal* aPrincipal) {
   MOZ_ASSERT(NS_IsMainThread(), "changing gDataTable is main-thread only");
   StaticMutexAutoLock lock(sMutex);
   if (!gDataTable) {
@@ -530,7 +531,6 @@ static nsresult AddDataEntryInternal(const nsACString& aURI, T aObject,
   BlobURLsReporter::GetJSStackForBlob(info);
 
   gDataTable->Put(aURI, info);
-  return NS_OK;
 }
 
 void BlobURLProtocolHandler::Init(void) {
@@ -558,8 +558,7 @@ nsresult BlobURLProtocolHandler::AddDataEntry(BlobImpl* aBlobImpl,
   nsresult rv = GenerateURIString(aPrincipal, aUri);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = AddDataEntryInternal(aUri, aBlobImpl, aPrincipal);
-  NS_ENSURE_SUCCESS(rv, rv);
+  AddDataEntryInternal(aUri, aBlobImpl, aPrincipal);
 
   BroadcastBlobURLRegistration(aUri, aBlobImpl, aPrincipal);
   return NS_OK;
@@ -577,20 +576,17 @@ nsresult BlobURLProtocolHandler::AddDataEntry(MediaSource* aMediaSource,
   nsresult rv = GenerateURIString(aPrincipal, aUri);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = AddDataEntryInternal(aUri, aMediaSource, aPrincipal);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  AddDataEntryInternal(aUri, aMediaSource, aPrincipal);
   return NS_OK;
 }
 
 /* static */
-nsresult BlobURLProtocolHandler::AddDataEntry(const nsACString& aURI,
-                                              nsIPrincipal* aPrincipal,
-                                              BlobImpl* aBlobImpl) {
+void BlobURLProtocolHandler::AddDataEntry(const nsACString& aURI,
+                                          nsIPrincipal* aPrincipal,
+                                          BlobImpl* aBlobImpl) {
   MOZ_ASSERT(aPrincipal);
   MOZ_ASSERT(aBlobImpl);
-
-  return AddDataEntryInternal(aURI, aBlobImpl, aPrincipal);
+  AddDataEntryInternal(aURI, aBlobImpl, aPrincipal);
 }
 
 /* static */
@@ -837,7 +833,8 @@ BlobURLProtocolHandler::NewChannel(nsIURI* aURI, nsILoadInfo* aLoadInfo,
   // principal and which is never mutated to have a non-zero mPrivateBrowsingId
   // or container.
   if (aLoadInfo &&
-      !nsContentUtils::IsSystemPrincipal(aLoadInfo->LoadingPrincipal()) &&
+      (!aLoadInfo->LoadingPrincipal() ||
+       !aLoadInfo->LoadingPrincipal()->IsSystemPrincipal()) &&
       !ChromeUtils::IsOriginAttributesEqualIgnoringFPD(
           aLoadInfo->GetOriginAttributes(),
           BasePrincipal::Cast(info->mPrincipal)->OriginAttributesRef())) {

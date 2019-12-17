@@ -75,23 +75,21 @@ nsRect nsFieldSetFrame::VisualBorderRectRelativeToSelf() const {
 }
 
 nsContainerFrame* nsFieldSetFrame::GetInner() const {
-  nsIFrame* last = mFrames.LastChild();
-  if (last &&
-      last->Style()->GetPseudoType() == PseudoStyleType::fieldsetContent) {
-    return static_cast<nsContainerFrame*>(last);
+  for (nsIFrame* child : mFrames) {
+    if (child->Style()->GetPseudoType() == PseudoStyleType::fieldsetContent) {
+      return static_cast<nsContainerFrame*>(child);
+    }
   }
-  MOZ_ASSERT(mFrames.LastChild() == mFrames.FirstChild());
   return nullptr;
 }
 
 nsIFrame* nsFieldSetFrame::GetLegend() const {
-  if (mFrames.FirstChild() == GetInner()) {
-    MOZ_ASSERT(mFrames.LastChild() == mFrames.FirstChild());
-    return nullptr;
+  for (nsIFrame* child : mFrames) {
+    if (child->Style()->GetPseudoType() != PseudoStyleType::fieldsetContent) {
+      return child;
+    }
   }
-  MOZ_ASSERT(mFrames.FirstChild() &&
-             mFrames.FirstChild()->GetContentInsertionFrame()->IsLegendFrame());
-  return mFrames.FirstChild();
+  return nullptr;
 }
 
 class nsDisplayFieldSetBorder final : public nsPaintedDisplayItem {
@@ -410,13 +408,18 @@ void nsFieldSetFrame::Reflow(nsPresContext* aPresContext,
                                               this);
       mFrames.InsertFrames(this, nullptr, *prevOverflowFrames);
     }
-    DrainSelfOverflowList();
   }
 
   bool reflowInner;
   bool reflowLegend;
   nsIFrame* legend = GetLegend();
-  nsIFrame* inner = GetInner();
+  nsContainerFrame* inner = GetInner();
+  if (!legend || !inner) {
+    if (DrainSelfOverflowList()) {
+      legend = GetLegend();
+      inner = GetInner();
+    }
+  }
   if (aReflowInput.ShouldReflowAllKids() || GetNextInFlow()) {
     reflowInner = inner != nullptr;
     reflowLegend = legend != nullptr;
@@ -740,6 +743,7 @@ void nsFieldSetFrame::Reflow(nsPresContext* aPresContext,
   }
 
   if (aStatus.IsComplete() &&
+      aReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE &&
       finalSize.BSize(wm) > aReflowInput.AvailableBSize() &&
       border.BEnd(wm) > 0 && aReflowInput.AvailableBSize() > border.BEnd(wm)) {
     // Our end border doesn't fit but it should fit in the next column/page.
@@ -757,6 +761,8 @@ void nsFieldSetFrame::Reflow(nsPresContext* aPresContext,
   }
 
   if (!aStatus.IsComplete()) {
+    MOZ_ASSERT(aReflowInput.AvailableBSize() != NS_UNCONSTRAINEDSIZE,
+               "must be Complete in an unconstrained available block-size");
     // Stretch our BSize to fill the fragmentainer.
     finalSize.BSize(wm) =
         std::max(finalSize.BSize(wm), aReflowInput.AvailableBSize());
@@ -830,6 +836,9 @@ bool nsFieldSetFrame::GetVerticalAlignBaseline(WritingMode aWM,
     return false;
   }
   nsIFrame* inner = GetInner();
+  if (MOZ_UNLIKELY(!inner)) {
+    return false;
+  }
   MOZ_ASSERT(!inner->GetWritingMode().IsOrthogonalTo(aWM));
   if (!inner->GetVerticalAlignBaseline(aWM, aBaseline)) {
     return false;
@@ -848,6 +857,9 @@ bool nsFieldSetFrame::GetNaturalBaselineBOffset(
     return false;
   }
   nsIFrame* inner = GetInner();
+  if (MOZ_UNLIKELY(!inner)) {
+    return false;
+  }
   MOZ_ASSERT(!inner->GetWritingMode().IsOrthogonalTo(aWM));
   if (!inner->GetNaturalBaselineBOffset(aWM, aBaselineGroup, aBaseline)) {
     return false;
@@ -879,31 +891,41 @@ void nsFieldSetFrame::EnsureChildContinuation(nsIFrame* aChild,
       MOZ_ASSERT(!aChild->GetNextInFlow());
     }
   } else {
+    nsFrameList nifs;
     if (!nif) {
       auto* pc = PresContext();
       auto* fc = pc->PresShell()->FrameConstructor();
       nif = fc->CreateContinuingFrame(pc, aChild, this);
       if (aStatus.IsOverflowIncomplete()) {
         nif->AddStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
-        if (nsFrameList* eoc =
-                GetPropTableFrames(ExcessOverflowContainersProperty())) {
-          eoc->AppendFrame(nullptr, nif);
+      }
+      nifs = nsFrameList(nif, nif);
+    } else {
+      // Steal all nifs and push them again in case they are currently on
+      // the wrong list.
+      for (nsIFrame* n = nif; n; n = n->GetNextInFlow()) {
+        n->GetParent()->StealFrame(n);
+        nifs.AppendFrame(this, n);
+        if (aStatus.IsOverflowIncomplete()) {
+          n->AddStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
         } else {
-          SetPropTableFrames(new (PresShell()) nsFrameList(nif, nif),
-                             ExcessOverflowContainersProperty());
-        }
-      } else {
-        if (nsFrameList* oc = GetOverflowFrames()) {
-          oc->AppendFrame(nullptr, nif);
-        } else {
-          SetOverflowFrames(nsFrameList(nif, nif));
+          n->RemoveStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
         }
       }
+    }
+    if (aStatus.IsOverflowIncomplete()) {
+      if (nsFrameList* eoc =
+          GetPropTableFrames(ExcessOverflowContainersProperty())) {
+        eoc->AppendFrames(nullptr, nifs);
+      } else {
+        SetPropTableFrames(new (PresShell()) nsFrameList(nifs),
+                           ExcessOverflowContainersProperty());
+      }
     } else {
-      if (aStatus.IsOverflowIncomplete()) {
-        for (nsIFrame* n = nif; n; n = n->GetNextInFlow()) {
-          n->AddStateBits(NS_FRAME_IS_OVERFLOW_CONTAINER);
-        }
+      if (nsFrameList* oc = GetOverflowFrames()) {
+        oc->AppendFrames(nullptr, nifs);
+      } else {
+        SetOverflowFrames(nifs);
       }
     }
   }

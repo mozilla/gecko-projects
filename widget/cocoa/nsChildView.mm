@@ -36,7 +36,6 @@
 #include "nsFontMetrics.h"
 #include "nsIRollupListener.h"
 #include "nsViewManager.h"
-#include "nsIInterfaceRequestor.h"
 #include "nsIFile.h"
 #include "nsILocalFileMac.h"
 #include "nsGfxCIID.h"
@@ -1707,7 +1706,7 @@ bool nsChildView::PreRender(WidgetRenderingContext* aContext) {
   // composition is done, thus keeping the GL context locked forever.
   mViewTearDownLock.Lock();
 
-  if (aContext->mGL) {
+  if (aContext->mGL && gfxPlatform::CanMigrateMacGPUs()) {
     GLContextCGL::Cast(aContext->mGL)->MigrateToActiveGPU();
   }
 
@@ -2552,7 +2551,7 @@ NSEvent* gLastDragMouseDownEvent = nil;  // [strong]
 
   if (mGeckoChild) {
     if (nsIWidgetListener* listener = mGeckoChild->GetWidgetListener()) {
-      if (PresShell* presShell = listener->GetPresShell()) {
+      if (RefPtr<PresShell> presShell = listener->GetPresShell()) {
         presShell->ReconstructFrames();
       }
     }

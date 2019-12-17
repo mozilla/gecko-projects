@@ -381,9 +381,6 @@
       };
       let browser = this.createBrowser(createOptions);
       browser.setAttribute("primary", "true");
-      if (!tabArgument) {
-        browser.setAttribute("blank", "true");
-      }
       if (gBrowserAllowScriptsToCloseInitialTabs) {
         browser.setAttribute("allowscriptstoclose", "true");
       }
@@ -851,38 +848,6 @@
       }
 
       return rv;
-    },
-
-    /**
-     * Determine if a URI is an about: page pointing to a local resource.
-     */
-    isLocalAboutURI(aURI, aResolvedURI) {
-      if (!aURI.schemeIs("about")) {
-        return false;
-      }
-
-      // Specially handle about:blank as local
-      if (aURI.pathQueryRef === "blank") {
-        return true;
-      }
-
-      try {
-        // Use the passed in resolvedURI if we have one
-        const resolvedURI =
-          aResolvedURI ||
-          Services.io.newChannelFromURI(
-            aURI,
-            null, // loadingNode
-            Services.scriptSecurityManager.getSystemPrincipal(), // loadingPrincipal
-            null, // triggeringPrincipal
-            Ci.nsILoadInfo.SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL, // securityFlags
-            Ci.nsIContentPolicy.TYPE_OTHER // contentPolicyType
-          ).URI;
-        return resolvedURI.schemeIs("jar") || resolvedURI.schemeIs("file");
-      } catch (ex) {
-        // aURI might be invalid.
-        return false;
-      }
     },
 
     /**
@@ -2633,6 +2598,9 @@
         (relatedToCurrent && this.selectedTab);
 
       var t = document.createXULElement("tab", { is: "tabbrowser-tab" });
+      // Tag the tab as being created so extension code can ignore events
+      // prior to TabOpen.
+      t.initializingTab = true;
       t.openerTab = openerTab;
 
       aURI = aURI || "about:blank";
@@ -2896,6 +2864,7 @@
       // Dispatch a new tab notification.  We do this once we're
       // entirely done, so that things are in a consistent state
       // even if the event listener opens or closes tabs.
+      delete t.initializingTab;
       let evt = new CustomEvent("TabOpen", {
         bubbles: true,
         detail: eventDetail || {},
@@ -3188,7 +3157,10 @@
       this.removeTab(this.selectedTab, aParams);
     },
 
-    removeTab(aTab, { animate, byMouse, skipPermitUnload } = {}) {
+    removeTab(
+      aTab,
+      { animate, byMouse, skipPermitUnload, closeWindowWithLastTab } = {}
+    ) {
       // Telemetry stopwatches may already be running if removeTab gets
       // called again for an already closing tab.
       if (
@@ -3220,6 +3192,7 @@
         !this._beginRemoveTab(aTab, {
           closeWindowFastpath: true,
           skipPermitUnload,
+          closeWindowWithLastTab,
         })
       ) {
         TelemetryStopwatch.cancel("FX_TAB_CLOSE_TIME_ANIM_MS", aTab);
@@ -5567,7 +5540,7 @@
       // pointing to local resources.
       if (
         aRequest instanceof Ci.nsIChannel &&
-        gBrowser.isLocalAboutURI(aRequest.originalURI, aRequest.URI)
+        aRequest.originalURI.schemeIs("about")
       ) {
         return false;
       }

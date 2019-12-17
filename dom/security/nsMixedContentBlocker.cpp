@@ -14,16 +14,12 @@
 #include "nsDocShell.h"
 #include "nsIWebProgressListener.h"
 #include "nsContentUtils.h"
-#include "nsIRequest.h"
 #include "mozilla/dom/Document.h"
-#include "nsIContentViewer.h"
 #include "nsIChannel.h"
-#include "nsIHttpChannel.h"
 #include "nsIParentChannel.h"
 #include "mozilla/Preferences.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsISecureBrowserUI.h"
-#include "nsIDocumentLoader.h"
 #include "nsIWebNavigation.h"
 #include "nsLoadGroup.h"
 #include "nsIScriptError.h"
@@ -35,6 +31,7 @@
 #include "nsISiteSecurityService.h"
 #include "prnetdb.h"
 
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/Logging.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/Telemetry.h"
@@ -312,7 +309,7 @@ nsMixedContentBlocker::AsyncOnChannelRedirect(
   if (requestingPrincipal) {
     // We check to see if the loadingPrincipal is systemPrincipal and return
     // early if it is
-    if (nsContentUtils::IsSystemPrincipal(requestingPrincipal)) {
+    if (requestingPrincipal->IsSystemPrincipal()) {
       return NS_OK;
     }
   }
@@ -709,7 +706,7 @@ nsresult nsMixedContentBlocker::ShouldLoad(
   // 2) if aRequestingContext yields a principal but no location, we check if
   // its a system principal.
   if (principal && !requestingLocation) {
-    if (nsContentUtils::IsSystemPrincipal(principal)) {
+    if (principal->IsSystemPrincipal()) {
       *aDecision = ACCEPT;
       return NS_OK;
     }

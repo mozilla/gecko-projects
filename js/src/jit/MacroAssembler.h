@@ -200,7 +200,7 @@
 #define PER_SHARED_ARCH DEFINED_ON(ALL_SHARED_ARCH)
 #define OOL_IN_HEADER
 
-#if MOZ_LITTLE_ENDIAN
+#if MOZ_LITTLE_ENDIAN()
 #  define IMM32_16ADJ(X) (X) << 16
 #else
 #  define IMM32_16ADJ(X) (X)
@@ -776,6 +776,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void move8To64SignExtend(Register src, Register64 dest) PER_ARCH;
   inline void move16To64SignExtend(Register src, Register64 dest) PER_ARCH;
   inline void move32To64SignExtend(Register src, Register64 dest) PER_ARCH;
+
+  inline void move32ZeroExtendToPtr(Register src, Register dest) PER_ARCH;
 
   // Copy a constant, typed-register, or a ValueOperand into a ValueOperand
   // destination.

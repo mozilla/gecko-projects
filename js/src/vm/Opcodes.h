@@ -765,15 +765,15 @@
      */ \
     MACRO(JSOP_ISNOITER, 77, "isnoiter", NULL, 1, 1, 2, JOF_BYTE) \
     /*
-     * Exits a for-in loop by popping the iterator object from the stack and
-     * closing it.
+     * Exits a for-in loop by popping the iteration value and the iterator
+     * object from the stack and closing the iterator object.
      *
      *   Category: Statements
      *   Type: For-In Statement
      *   Operands:
-     *   Stack: iter =>
+     *   Stack: iter, iterval =>
      */ \
-    MACRO(JSOP_ENDITER, 78, "enditer", NULL, 1, 1, 0, JOF_BYTE) \
+    MACRO(JSOP_ENDITER, 78, "enditer", NULL, 1, 2, 0, JOF_BYTE) \
     /*
      * Invokes 'callee' with 'this' and 'args', pushes return value onto the
      * stack.
@@ -901,7 +901,10 @@
      * Pushes newly created object onto the stack.
      *
      * This opcode takes an object with the final shape, which can be set at
-     * the start and slots then filled in directly.
+     * the start and slots then filled in directly. We compute a group based on
+     * allocation site (or new group if the template's group is a singleton);
+     * see JSOP_NEWOBJECT_WITHGROUP for a variant that uses the same group as
+     * the template object.
      *
      *   Category: Literals
      *   Type: Object
@@ -1107,17 +1110,19 @@
      */ \
     MACRO(JSOP_FUNCALL, 108, "funcall", NULL, 3, -1, 1, JOF_ARGC|JOF_INVOKE|JOF_TYPESET|JOF_IC) \
     /*
-     * Another no-op.
-     *
      * This opcode is the target of the backwards jump for some loop.
+     *
+     * The depthHint value is a loop depth hint for Ion. It starts at 1 and
+     * deeply nested loops all have the same value.
+     *
      * See JSOP_JUMPTARGET for the icIndex operand.
      *
      *   Category: Statements
      *   Type: Jumps
-     *   Operands: uint32_t icIndex
+     *   Operands: uint32_t icIndex, uint8_t depthHint
      *   Stack: =>
      */ \
-    MACRO(JSOP_LOOPHEAD, 109, "loophead", NULL, 5, 0, 0, JOF_ICINDEX) \
+    MACRO(JSOP_LOOPHEAD, 109, "loophead", NULL, 6, 0, 0, JOF_LOOPHEAD) \
     /*
      * Looks up name on the environment chain and pushes the environment which
      * contains the name onto the stack. If not found, pushes global lexical
@@ -1766,21 +1771,27 @@
     /*
      * Push a default constructor for a base class literal.
      *
-     *   Category: Literals
-     *   Type: Class
-     *   Operands: atom className
-     *   Stack: => constructor
-     */ \
-    MACRO(JSOP_CLASSCONSTRUCTOR, 167, "classconstructor", NULL, 5, 0, 1, JOF_ATOM) \
-    /*
-     * Push a default constructor for a derived class literal.
+     * The sourceStart/sourceEnd offsets are the start/end offsets of the class
+     * definition in the source buffer and are used for toString().
      *
      *   Category: Literals
      *   Type: Class
-     *   Operands: atom className
+     *   Operands: atom className, uint32_t sourceStart, uint32_t sourceEnd
+     *   Stack: => constructor
+     */ \
+    MACRO(JSOP_CLASSCONSTRUCTOR, 167, "classconstructor", NULL, 13, 0, 1, JOF_CLASS_CTOR) \
+    /*
+     * Push a default constructor for a derived class literal.
+     *
+     * The sourceStart/sourceEnd offsets are the start/end offsets of the class
+     * definition in the source buffer and are used for toString().
+     *
+     *   Category: Literals
+     *   Type: Class
+     *   Operands: atom className, uint32_t sourceStart, uint32_t sourceEnd
      *   Stack: proto => constructor
      */ \
-    MACRO(JSOP_DERIVEDCONSTRUCTOR, 168, "derivedconstructor", NULL, 5, 1, 1, JOF_ATOM) \
+    MACRO(JSOP_DERIVEDCONSTRUCTOR, 168, "derivedconstructor", NULL, 13, 1, 1, JOF_CLASS_CTOR) \
     /*
      * Throws a runtime TypeError for invalid assignment to 'const'. The
      * localno is used for better error messages.
@@ -2403,19 +2414,8 @@
      */ \
     MACRO(JSOP_IMPLICITTHIS, 226, "implicitthis", "", 5, 0, 1, JOF_ATOM) \
     /*
-     * This opcode is the target of the entry jump for some loop. The uint8
-     * argument is a bitfield. The lower 7 bits of the argument indicate the
-     * loop depth. This value starts at 1 and is just a hint: deeply nested
-     * loops all have the same value. The upper bit is set if Ion should be
-     * able to OSR at this point, which is true unless there is non-loop state
-     * on the stack. See JSOP_JUMPTARGET for the icIndex argument.
-     *
-     *   Category: Statements
-     *   Type: Jumps
-     *   Operands: uint32_t icIndex, uint8_t BITFIELD
-     *   Stack: =>
      */ \
-    MACRO(JSOP_LOOPENTRY, 227, "loopentry", NULL, 6, 0, 0, JOF_LOOPENTRY) \
+    MACRO(JSOP_UNUSED227, 227, "unused", NULL, 1, 0, 0, JOF_BYTE) \
     /*
      * Converts the value on the top of the stack to a String.
      *
@@ -2537,7 +2537,21 @@
      *   Operands: int32_t offset
      *   Stack: cond => cond
      */ \
-    MACRO(JSOP_COALESCE, 241, "coalesce", NULL, 5, 1, 1, JOF_JUMP|JOF_DETECTING)
+    MACRO(JSOP_COALESCE, 241, "coalesce", NULL, 5, 1, 1, JOF_JUMP|JOF_DETECTING) \
+    /*
+     * Pushes newly created object onto the stack.
+     *
+     * This opcode takes an object with the final shape, which can be set at
+     * the start and slots then filled in directly. Uses the group from the
+     * template object; see JSOP_NEWOBJECT for a variant with different
+     * heuristics.
+     *
+     *   Category: Literals
+     *   Type: Object
+     *   Operands: uint32_t baseobjIndex
+     *   Stack: => obj
+     */ \
+    MACRO(JSOP_NEWOBJECT_WITHGROUP, 242, "newobjectwithgroup", NULL, 5, 0, 1, JOF_OBJECT|JOF_IC)
 
 // clang-format on
 
@@ -2546,7 +2560,6 @@
  * a power of two.  Use this macro to do so.
  */
 #define FOR_EACH_TRAILING_UNUSED_OPCODE(MACRO) \
-  MACRO(242)                                   \
   MACRO(243)                                   \
   MACRO(244)                                   \
   MACRO(245)                                   \

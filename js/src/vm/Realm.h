@@ -248,11 +248,6 @@ class ObjectRealm {
   // Map from array buffers to views sharing that storage.
   JS::WeakCache<js::InnerViewTable> innerViews;
 
-  // Inline transparent typed objects do not initially have an array buffer,
-  // but can have that buffer created lazily if it is accessed later. This
-  // table manages references from such typed objects to their buffers.
-  js::UniquePtr<js::ObjectWeakMap> lazyArrayBuffers;
-
   // Keep track of the metadata objects which can be associated with each JS
   // object. Both keys and values are in this realm.
   js::UniquePtr<js::ObjectWeakMap> objectMetadataTable;
@@ -276,7 +271,6 @@ class ObjectRealm {
 
   void addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
                               size_t* innerViewsArg,
-                              size_t* lazyArrayBuffersArg,
                               size_t* objectMetadataTablesArg,
                               size_t* nonSyntacticLexicalEnvironmentsArg);
 
@@ -391,8 +385,26 @@ class JS::Realm : public JS::shadow::Realm {
   unsigned enterRealmDepthIgnoringJit_ = 0;
 
  public:
+  struct DebuggerVectorEntry {
+    // The debugger relies on iterating through the DebuggerVector to know what
+    // debuggers to notify about certain actions, which it does using this
+    // pointer. We need an explicit Debugger* because the JSObject* from
+    // the DebuggerDebuggeeLink to the Debugger is only set some of the time.
+    // This `Debugger*` pointer itself could also live on the
+    // DebuggerDebuggeeLink itself, but that would then require all of the
+    // places that iterate over the realm's DebuggerVector to also traverse
+    // the CCW which seems like it would be needlessly complicated.
+    js::WeakHeapPtr<js::Debugger*> dbg;
+
+    // This links to the debugger's DebuggerDebuggeeLink object, via a CCW.
+    // Tracing this link from the realm allows the debugger to define
+    // whether pieces of the debugger should be held live by a given realm.
+    js::HeapPtr<JSObject*> debuggerLink;
+
+    DebuggerVectorEntry(js::Debugger* dbg_, JSObject* link);
+  };
   using DebuggerVector =
-      js::Vector<js::WeakHeapPtr<js::Debugger*>, 0, js::ZoneAllocPolicy>;
+      js::Vector<DebuggerVectorEntry, 0, js::ZoneAllocPolicy>;
 
  private:
   DebuggerVector debuggers_;
@@ -467,13 +479,15 @@ class JS::Realm : public JS::shadow::Realm {
   void destroy(JSFreeOp* fop);
   void clearTables();
 
-  void addSizeOfIncludingThis(
-      mozilla::MallocSizeOf mallocSizeOf, size_t* tiAllocationSiteTables,
-      size_t* tiArrayTypeTables, size_t* tiObjectTypeTables,
-      size_t* realmObject, size_t* realmTables, size_t* innerViewsArg,
-      size_t* lazyArrayBuffersArg, size_t* objectMetadataTablesArg,
-      size_t* savedStacksSet, size_t* varNamesSet,
-      size_t* nonSyntacticLexicalEnvironmentsArg, size_t* jitRealm);
+  void addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
+                              size_t* tiAllocationSiteTables,
+                              size_t* tiArrayTypeTables,
+                              size_t* tiObjectTypeTables, size_t* realmObject,
+                              size_t* realmTables, size_t* innerViewsArg,
+                              size_t* objectMetadataTablesArg,
+                              size_t* savedStacksSet, size_t* varNamesSet,
+                              size_t* nonSyntacticLexicalEnvironmentsArg,
+                              size_t* jitRealm);
 
   JS::Zone* zone() { return zone_; }
   const JS::Zone* zone() const { return zone_; }
@@ -653,9 +667,6 @@ class JS::Realm : public JS::shadow::Realm {
 
   bool isSystem() const { return isSystem_; }
 
-  // Used to approximate non-content code when reporting telemetry.
-  bool isProbablySystemCode() const { return isSystem_; }
-
   static const size_t IterResultObjectValueSlot = 0;
   static const size_t IterResultObjectDoneSlot = 1;
   js::NativeObject* getOrCreateIterResultTemplateObject(JSContext* cx);
@@ -822,13 +833,6 @@ class JS::Realm : public JS::shadow::Realm {
   }
   static constexpr uint32_t debugModeIsDebuggeeBit() { return IsDebuggee; }
 
-  // Note: global_ is a read-barriered object, but it's fine to skip the read
-  // barrier when the realm is active. See the comment in JSContext::global().
-  static constexpr size_t offsetOfActiveGlobal() {
-    static_assert(sizeof(global_) == sizeof(uintptr_t),
-                  "JIT code assumes field is pointer-sized");
-    return offsetof(JS::Realm, global_);
-  }
   static constexpr size_t offsetOfActiveLexicalEnvironment() {
     static_assert(sizeof(lexicalEnv_) == sizeof(uintptr_t),
                   "JIT code assumes field is pointer-sized");

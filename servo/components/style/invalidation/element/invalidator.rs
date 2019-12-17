@@ -8,10 +8,10 @@
 use crate::context::StackLimitChecker;
 use crate::dom::{TElement, TNode, TShadowRoot};
 use crate::selector_parser::SelectorImpl;
-use selectors::OpaqueElement;
 use selectors::matching::matches_compound_selector_from;
 use selectors::matching::{CompoundSelectorMatchingResult, MatchingContext};
 use selectors::parser::{Combinator, Component, Selector};
+use selectors::OpaqueElement;
 use smallvec::SmallVec;
 use std::fmt;
 
@@ -698,7 +698,7 @@ where
             }
         }
 
-        sibling_invalidations.extend(new_sibling_invalidations.drain());
+        sibling_invalidations.extend(new_sibling_invalidations.drain(..));
         invalidated_self
     }
 

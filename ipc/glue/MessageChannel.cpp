@@ -26,6 +26,7 @@
 #include "nsContentUtils.h"
 #include "nsDataHashtable.h"
 #include "nsDebug.h"
+#include "nsIMemoryReporter.h"
 #include "nsISupportsImpl.h"
 #include "nsPrintfCString.h"
 #include <math.h>
@@ -833,7 +834,7 @@ bool MessageChannel::Open(Transport* aTransport, MessageLoop* aIOLoop,
 
   mMonitor = new RefCountedMonitor();
   mWorkerLoop = MessageLoop::current();
-  mWorkerThread = GetCurrentVirtualThread();
+  mWorkerThread = PR_GetCurrentThread();
   mWorkerLoop->AddDestructionObserver(this);
   mListener->OnIPCChannelOpened();
 
@@ -914,7 +915,7 @@ void MessageChannel::OnOpenAsSlave(MessageChannel* aTargetChan, Side aSide) {
 void MessageChannel::CommonThreadOpenInit(MessageChannel* aTargetChan,
                                           Side aSide) {
   mWorkerLoop = MessageLoop::current();
-  mWorkerThread = GetCurrentVirtualThread();
+  mWorkerThread = PR_GetCurrentThread();
   mWorkerLoop->AddDestructionObserver(this);
   mListener->OnIPCChannelOpened();
 
@@ -2070,6 +2071,9 @@ MessageChannel::MessageTask::GetPriority(uint32_t* aPriority) {
       break;
     case Message::HIGH_PRIORITY:
       *aPriority = PRIORITY_HIGH;
+      break;
+    case Message::MEDIUMHIGH_PRIORITY:
+      *aPriority = PRIORITY_MEDIUMHIGH;
       break;
     default:
       MOZ_ASSERT(false);

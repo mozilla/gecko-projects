@@ -21,6 +21,8 @@ const TEST_IMAGE =
   "test/test-image.png";
 
 add_task(async function() {
+  // Needed for the execute() function below
+  await pushPref("security.allow_parent_unrestricted_js_loads", true);
   await pushPref("devtools.browserconsole.contentMessages", true);
   await addTab(TEST_URI);
 
@@ -70,7 +72,7 @@ async function testMessages(hud) {
   Cu.nukeSandbox(sandbox);
 
   // Add a message from a content window.
-  await ContentTask.spawn(gBrowser.selectedBrowser, {}, () => {
+  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], () => {
     content.console.log("message from content window");
   });
 

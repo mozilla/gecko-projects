@@ -6,7 +6,6 @@
 
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
-#include "nsIServiceManager.h"
 #include "nsResizerFrame.h"
 #include "nsIContent.h"
 #include "mozilla/PresShell.h"
@@ -16,7 +15,7 @@
 
 #include "nsPresContext.h"
 #include "nsFrameManager.h"
-#include "nsIDocShell.h"
+#include "nsDocShell.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIBaseWindow.h"
 #include "nsPIDOMWindow.h"
@@ -483,7 +482,7 @@ void nsResizerFrame::RestoreOriginalSize(nsIContent* aContent) {
 /* returns a Direction struct containing the horizontal and vertical direction
  */
 nsResizerFrame::Direction nsResizerFrame::GetDirection() {
-  static const Element::AttrValuesArray strings[] = {
+  static const mozilla::dom::Element::AttrValuesArray strings[] = {
       // clang-format off
      nsGkAtoms::topleft,    nsGkAtoms::top,    nsGkAtoms::topright,
      nsGkAtoms::left,                          nsGkAtoms::right,

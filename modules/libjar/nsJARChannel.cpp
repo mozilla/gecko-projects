@@ -10,20 +10,15 @@
 #include "nsMimeTypes.h"
 #include "nsNetUtil.h"
 #include "nsEscape.h"
-#include "nsIPrefService.h"
-#include "nsIPrefBranch.h"
-#include "nsIViewSourceChannel.h"
 #include "nsContentUtils.h"
 #include "nsProxyRelease.h"
 #include "nsContentSecurityManager.h"
 
-#include "nsIScriptSecurityManager.h"
-#include "nsIPrincipal.h"
 #include "nsIFileURL.h"
 
+#include "mozilla/BasePrincipal.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Preferences.h"
-#include "nsIBrowserChild.h"
 #include "private/pprio.h"
 #include "nsInputStreamPump.h"
 #include "nsThreadUtils.h"
@@ -863,7 +858,8 @@ nsJARChannel::AsyncOpen(nsIStreamListener* aListener) {
           mLoadInfo->GetInitialSecurityCheckDone() ||
           (mLoadInfo->GetSecurityMode() ==
                nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL &&
-           nsContentUtils::IsSystemPrincipal(mLoadInfo->LoadingPrincipal())),
+           mLoadInfo->LoadingPrincipal() &&
+           mLoadInfo->LoadingPrincipal()->IsSystemPrincipal()),
       "security flags in loadInfo but doContentSecurityCheck() not called");
 
   NS_ENSURE_ARG_POINTER(listener);

@@ -23,7 +23,6 @@
 #include "nsGlobalWindowOuter.h"
 #include "nsIAppShell.h"
 #include "nsIAppShellService.h"
-#include "nsIServiceManager.h"
 #include "nsIContentViewer.h"
 #include "mozilla/dom/Document.h"
 #include "nsPIDOMWindow.h"
@@ -32,13 +31,10 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIIOService.h"
-#include "nsILoadContext.h"
 #include "nsIObserverService.h"
 #include "nsIWindowMediator.h"
 #include "nsIScreenManager.h"
 #include "nsIScreen.h"
-#include "nsIScrollable.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsIWindowWatcher.h"
 #include "nsIURI.h"
 #include "nsAppShellCID.h"
@@ -102,6 +98,7 @@ using dom::AutoNoJSAPI;
 using dom::BrowserHost;
 using dom::BrowsingContext;
 using dom::Document;
+using dom::Element;
 using dom::EventTarget;
 using dom::LoadURIOptions;
 
@@ -2080,7 +2077,7 @@ AppWindow::GetPrimaryContentSize(int32_t* aWidth, int32_t* aHeight) {
 nsresult AppWindow::GetPrimaryRemoteTabSize(int32_t* aWidth, int32_t* aHeight) {
   BrowserHost* host = BrowserHost::GetFrom(mPrimaryBrowserParent.get());
   // Need strong ref, since Client* can run script.
-  nsCOMPtr<Element> element = host->GetOwnerElement();
+  RefPtr<dom::Element> element = host->GetOwnerElement();
   NS_ENSURE_STATE(element);
 
   *aWidth = element->ClientWidth();
@@ -2445,21 +2442,14 @@ void AppWindow::SetContentScrollbarVisibility(bool aVisible) {
 }
 
 bool AppWindow::GetContentScrollbarVisibility() {
-  // This code already exists in dom/src/base/nsBarProp.cpp, but we
-  // can't safely get to that from here as this function is called
-  // while the DOM window is being set up, and we need the DOM window
-  // to get to that code.
-  nsCOMPtr<nsIScrollable> scroller(do_QueryInterface(mPrimaryContentShell));
-
-  if (scroller) {
-    int32_t prefValue;
-    scroller->GetDefaultScrollbarPreferences(nsIScrollable::ScrollOrientation_Y,
-                                             &prefValue);
-    if (prefValue == nsIScrollable::Scrollbar_Never)  // try the other way
-      scroller->GetDefaultScrollbarPreferences(
-          nsIScrollable::ScrollOrientation_X, &prefValue);
-
-    if (prefValue == nsIScrollable::Scrollbar_Never) return false;
+  // This code already exists in dom/src/base/nsBarProp.cpp, but we can't safely
+  // get to that from here as this function is called while the DOM window is
+  // being set up, and we need the DOM window to get to that code.
+  //
+  // FIXME(emilio): This doesn't work at all for e10s or anything like that,
+  // it's likely that nobody is relying on this function.
+  if (nsCOMPtr<nsIDocShell> ds = do_QueryInterface(mPrimaryContentShell)) {
+    return nsDocShell::Cast(ds)->ScrollbarPreference() != ScrollbarPreference::Never;
   }
 
   return true;

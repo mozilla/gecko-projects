@@ -629,12 +629,13 @@ class ActivePS {
 
   ActivePS(PSLockRef aLock, PowerOfTwo32 aCapacity, double aInterval,
            uint32_t aFeatures, const char** aFilters, uint32_t aFilterCount,
-           const Maybe<double>& aDuration)
+           uint64_t aActiveBrowsingContextID, const Maybe<double>& aDuration)
       : mGeneration(sNextGeneration++),
         mCapacity(aCapacity),
         mDuration(aDuration),
         mInterval(aInterval),
         mFeatures(AdjustFeatures(aFeatures, aFilterCount)),
+        mActiveBrowsingContextID(aActiveBrowsingContextID),
         // 8 bytes per entry.
         mProfileBuffer(CorePS::CoreBlocksRingBuffer(),
                        PowerOfTwo32(aCapacity.Value() * 8)),
@@ -729,10 +730,11 @@ class ActivePS {
  public:
   static void Create(PSLockRef aLock, PowerOfTwo32 aCapacity, double aInterval,
                      uint32_t aFeatures, const char** aFilters,
-                     uint32_t aFilterCount, const Maybe<double>& aDuration) {
+                     uint32_t aFilterCount, uint64_t aActiveBrowsingContextID,
+                     const Maybe<double>& aDuration) {
     MOZ_ASSERT(!sInstance);
     sInstance = new ActivePS(aLock, aCapacity, aInterval, aFeatures, aFilters,
-                             aFilterCount, aDuration);
+                             aFilterCount, aActiveBrowsingContextID, aDuration);
   }
 
   static MOZ_MUST_USE SamplerThread* Destroy(PSLockRef aLock) {
@@ -749,13 +751,14 @@ class ActivePS {
   static bool Equals(PSLockRef, PowerOfTwo32 aCapacity,
                      const Maybe<double>& aDuration, double aInterval,
                      uint32_t aFeatures, const char** aFilters,
-                     uint32_t aFilterCount) {
+                     uint32_t aFilterCount, uint64_t aActiveBrowsingContextID) {
     MOZ_ASSERT(sInstance);
     if (sInstance->mCapacity != aCapacity ||
         sInstance->mDuration != aDuration ||
         sInstance->mInterval != aInterval ||
         sInstance->mFeatures != aFeatures ||
-        sInstance->mFilters.length() != aFilterCount) {
+        sInstance->mFilters.length() != aFilterCount ||
+        sInstance->mActiveBrowsingContextID != aActiveBrowsingContextID) {
       return false;
     }
 
@@ -837,6 +840,12 @@ class ActivePS {
       if (sInstance->mDuration) {
         aWriter.DoubleProperty("duration", sInstance->mDuration.value());
       }
+      // Here, we are converting uint64_t to double. Browsing Context IDs are
+      // being created using `nsContentUtils::GenerateProcessSpecificId`, which
+      // is specifically designed to only use 53 of the 64 bits to be lossless
+      // when passed into and out of JS as a double.
+      aWriter.DoubleProperty("activeBrowsingContextID",
+                             sInstance->mActiveBrowsingContextID);
     }
     aWriter.EndObject();
   }
@@ -850,6 +859,8 @@ class ActivePS {
   PS_GET(double, Interval)
 
   PS_GET(uint32_t, Features)
+
+  PS_GET(uint64_t, ActiveBrowsingContextID)
 
 #define PS_GET_FEATURE(n_, str_, Name_, desc_)                \
   static bool Feature##Name_(PSLockRef) {                     \
@@ -1048,10 +1059,29 @@ class ActivePS {
     uint64_t bufferRangeStart = sInstance->mProfileBuffer.BufferRangeStart();
     // Discard exit profiles that were gathered before our buffer RangeStart.
 #ifdef MOZ_BASE_PROFILER
-    // The buffer range starts at 1 (the first valid entry, 0 is reserved as
-    // null marker). So if it now starts *after* 1, it means we have started to
-    // overwrite our oldest data, and we should get rid of Base profiles if any.
-    if (bufferRangeStart > 1 && sInstance->mBaseProfileThreads) {
+    // If we have started to overwrite our data from when the Base profile was
+    // added, we should get rid of that Base profile because it's now older than
+    // our oldest Gecko profile data.
+    //
+    // When adding: (In practice the starting buffer should be empty)
+    // v Start == End
+    // |                 <-- Buffer range, initially empty.
+    // ^ mGeckoIndexWhenBaseProfileAdded < Start FALSE -> keep it
+    //
+    // Later, still in range:
+    // v Start   v End
+    // |=========|       <-- Buffer range growing.
+    // ^ mGeckoIndexWhenBaseProfileAdded < Start FALSE -> keep it
+    //
+    // Even later, now out of range:
+    //       v Start      v End
+    //       |============|       <-- Buffer range full and sliding.
+    // ^ mGeckoIndexWhenBaseProfileAdded < Start TRUE! -> Discard it
+    if (sInstance->mBaseProfileThreads &&
+        sInstance->mGeckoIndexWhenBaseProfileAdded <
+            CorePS::CoreBlocksRingBuffer().GetState().mRangeStart) {
+      DEBUG_LOG("ClearExpiredExitProfiles() - Discarding base profile %p",
+                sInstance->mBaseProfileThreads.get());
       sInstance->mBaseProfileThreads.reset();
     }
 #endif
@@ -1065,7 +1095,10 @@ class ActivePS {
   static void AddBaseProfileThreads(PSLockRef aLock,
                                     UniquePtr<char[]> aBaseProfileThreads) {
     MOZ_ASSERT(sInstance);
+    DEBUG_LOG("AddBaseProfileThreads(%p)", aBaseProfileThreads.get());
     sInstance->mBaseProfileThreads = std::move(aBaseProfileThreads);
+    sInstance->mGeckoIndexWhenBaseProfileAdded =
+        CorePS::CoreBlocksRingBuffer().GetState().mRangeEnd;
   }
 
   static UniquePtr<char[]> MoveBaseProfileThreads(PSLockRef aLock) {
@@ -1073,6 +1106,8 @@ class ActivePS {
 
     ClearExpiredExitProfiles(aLock);
 
+    DEBUG_LOG("MoveBaseProfileThreads() - Consuming base profile %p",
+              sInstance->mBaseProfileThreads.get());
     return std::move(sInstance->mBaseProfileThreads);
   }
 #endif
@@ -1140,6 +1175,11 @@ class ActivePS {
   // Substrings of names of threads we want to profile.
   Vector<std::string> mFilters;
 
+  // Browsing Context ID of the active active browser screen's active tab.
+  // It's being used to determine the profiled tab. It's "0" if we failed to
+  // get the ID.
+  const uint64_t mActiveBrowsingContextID;
+
   // The buffer into which all samples are recorded.
   ProfileBuffer mProfileBuffer;
 
@@ -1177,6 +1217,7 @@ class ActivePS {
 #ifdef MOZ_BASE_PROFILER
   // Optional startup profile thread array from BaseProfiler.
   UniquePtr<char[]> mBaseProfileThreads;
+  BlocksRingBuffer::BlockIndex mGeckoIndexWhenBaseProfileAdded;
 #endif
 
   struct ExitProfile {
@@ -3418,16 +3459,16 @@ static void NotifyObservers(const char* aTopic,
 static void NotifyProfilerStarted(const PowerOfTwo32& aCapacity,
                                   const Maybe<double>& aDuration,
                                   double aInterval, uint32_t aFeatures,
-                                  const char** aFilters,
-                                  uint32_t aFilterCount) {
+                                  const char** aFilters, uint32_t aFilterCount,
+                                  uint64_t aActiveBrowsingContextID) {
   nsTArray<nsCString> filtersArray;
   for (size_t i = 0; i < aFilterCount; ++i) {
     filtersArray.AppendElement(aFilters[i]);
   }
 
-  nsCOMPtr<nsIProfilerStartParams> params =
-      new nsProfilerStartParams(aCapacity.Value(), aDuration, aInterval,
-                                aFeatures, std::move(filtersArray));
+  nsCOMPtr<nsIProfilerStartParams> params = new nsProfilerStartParams(
+      aCapacity.Value(), aDuration, aInterval, aFeatures,
+      std::move(filtersArray), aActiveBrowsingContextID);
 
   ProfilerParent::ProfilerStarted(params);
   NotifyObservers("profiler-started", params);
@@ -3436,6 +3477,7 @@ static void NotifyProfilerStarted(const PowerOfTwo32& aCapacity,
 static void locked_profiler_start(PSLockRef aLock, PowerOfTwo32 aCapacity,
                                   double aInterval, uint32_t aFeatures,
                                   const char** aFilters, uint32_t aFilterCount,
+                                  uint64_t aActiveBrowsingContextID,
                                   const Maybe<double>& aDuration);
 
 // This basically duplicates AutoProfilerLabel's constructor.
@@ -3644,7 +3686,7 @@ void profiler_init(void* aStackTop) {
     }
 
     locked_profiler_start(lock, capacity, interval, features, filters.begin(),
-                          filters.length(), duration);
+                          filters.length(), 0, duration);
   }
 
 #if defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY)
@@ -3656,7 +3698,7 @@ void profiler_init(void* aStackTop) {
   // We do this with gPSMutex unlocked. The comment in profiler_stop() explains
   // why.
   NotifyProfilerStarted(capacity, duration, interval, features, filters.begin(),
-                        filters.length());
+                        filters.length(), 0);
 }
 
 static void locked_profiler_save_profile_to_file(PSLockRef aLock,
@@ -3776,7 +3818,8 @@ void profiler_get_profile_json_into_lazily_allocated_buffer(
 
 void profiler_get_start_params(int* aCapacity, Maybe<double>* aDuration,
                                double* aInterval, uint32_t* aFeatures,
-                               Vector<const char*>* aFilters) {
+                               Vector<const char*>* aFilters,
+                               uint64_t* aActiveBrowsingContextID) {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
   if (NS_WARN_IF(!aCapacity) || NS_WARN_IF(!aDuration) ||
@@ -3792,6 +3835,7 @@ void profiler_get_start_params(int* aCapacity, Maybe<double>* aDuration,
     *aDuration = Nothing();
     *aInterval = 0;
     *aFeatures = 0;
+    *aActiveBrowsingContextID = 0;
     aFilters->clear();
     return;
   }
@@ -3800,6 +3844,7 @@ void profiler_get_start_params(int* aCapacity, Maybe<double>* aDuration,
   *aDuration = ActivePS::Duration(lock);
   *aInterval = ActivePS::Interval(lock);
   *aFeatures = ActivePS::Features(lock);
+  *aActiveBrowsingContextID = ActivePS::ActiveBrowsingContextID(lock);
 
   const Vector<std::string>& filters = ActivePS::Filters(lock);
   MOZ_ALWAYS_TRUE(aFilters->resize(filters.length()));
@@ -3985,15 +4030,31 @@ static void TriggerPollJSSamplingOnMainThread() {
   }
 }
 
+#ifdef MOZ_BASE_PROFILER
+static bool HasMinimumLength(const char* aString, size_t aMinimumLength) {
+  if (!aString) {
+    return false;
+  }
+  for (size_t i = 0; i < aMinimumLength; ++i) {
+    if (aString[i] == '\0') {
+      return false;
+    }
+  }
+  return true;
+}
+#endif  // MOZ_BASE_PROFILER
+
 static void locked_profiler_start(PSLockRef aLock, PowerOfTwo32 aCapacity,
                                   double aInterval, uint32_t aFeatures,
                                   const char** aFilters, uint32_t aFilterCount,
+                                  uint64_t aActiveBrowsingContextID,
                                   const Maybe<double>& aDuration) {
   if (LOG_TEST) {
     LOG("locked_profiler_start");
     LOG("- capacity  = %u", unsigned(aCapacity.Value()));
     LOG("- duration  = %.2f", aDuration ? *aDuration : -1);
     LOG("- interval = %.2f", aInterval);
+    LOG("- browsing context ID = %" PRIu64, aActiveBrowsingContextID);
 
 #define LOG_FEATURE(n_, str_, Name_, desc_)     \
   if (ProfilerFeature::Has##Name_(aFeatures)) { \
@@ -4011,6 +4072,33 @@ static void locked_profiler_start(PSLockRef aLock, PowerOfTwo32 aCapacity,
 
   MOZ_RELEASE_ASSERT(CorePS::Exists() && !ActivePS::Exists(aLock));
 
+#ifdef MOZ_BASE_PROFILER
+  UniquePtr<char[]> baseprofile;
+  if (baseprofiler::profiler_is_active()) {
+    // Note that we still hold the lock, so the sampler cannot run yet and
+    // interact negatively with the still-active BaseProfiler sampler.
+    // Assume that Base Profiler is active because of MOZ_BASE_PROFILER_STARTUP.
+    // Capture the Base Profiler startup profile threads (if any).
+    baseprofile = baseprofiler::profiler_get_profile(
+        /* aSinceTime */ 0, /* aIsShuttingDown */ false,
+        /* aOnlyThreads */ true);
+
+    // Now stop Base Profiler (BP), as further recording will be ignored anyway,
+    // and so that it won't clash with Gecko Profiler (GP) sampling starting
+    // after the lock is dropped.
+    // On Linux this is especially important to do before creating the GP
+    // sampler, because the BP sampler may send a signal (to stop threads to be
+    // sampled), which the GP would intercept before its own initialization is
+    // complete and ready to handle such signals.
+    // Note that even though `profiler_stop()` doesn't immediately destroy and
+    // join the sampler thread, it safely deactivates it in such a way that the
+    // thread will soon exit without doing any actual work.
+    // TODO: Allow non-sampling profiling to continue.
+    // TODO: Re-start BP after GP shutdown, to capture post-XPCOM shutdown.
+    baseprofiler::profiler_stop();
+  }
+#endif
+
 #if defined(GP_PLAT_amd64_windows)
   InitializeWin64ProfilerHooks();
 #endif
@@ -4026,38 +4114,23 @@ static void locked_profiler_start(PSLockRef aLock, PowerOfTwo32 aCapacity,
   if (aDuration && *aDuration <= 0) {
     duration = Nothing();
   }
+
   double interval = aInterval > 0 ? aInterval : PROFILER_DEFAULT_INTERVAL;
 
   ActivePS::Create(aLock, capacity, interval, aFeatures, aFilters, aFilterCount,
-                   duration);
+                   aActiveBrowsingContextID, duration);
 
   // ActivePS::Create can only succeed or crash.
   MOZ_ASSERT(ActivePS::Exists(aLock));
 
 #ifdef MOZ_BASE_PROFILER
-  if (baseprofiler::profiler_is_active()) {
-    // Note that we still hold the lock, so the sampler cannot run yet and
-    // interact negatively with the still-active BaseProfiler sampler.
-    // Assume that BaseProfiler is active because of MOZ_BASE_PROFILER_STARTUP.
-    // Capture the BaseProfiler startup profile threads (if any).
-    UniquePtr<char[]> baseprofile = baseprofiler::profiler_get_profile(
-        /* aSinceTime */ 0, /* aIsShuttingDown */ false,
-        /* aOnlyThreads */ true);
-
-    // Now stop BaseProfiler, as further recording will be ignored anyway, and
-    // so that it won't clash with Gecko Profiler sampling starting after the
-    // lock is dropped.
-    // TODO: Allow non-sampling profiling to continue.
-    // TODO: Re-start BaseProfiler after Gecko Profiler shutdown, to capture
-    // post-XPCOM shutdown.
-    baseprofiler::profiler_stop();
-
-    if (baseprofile && baseprofile.get()[0] != '\0') {
-      // The BaseProfiler startup profile will be stored as a separate process
-      // in the Gecko Profiler profile, and shown as a new track under the
-      // corresponding Gecko Profiler thread.
-      ActivePS::AddBaseProfileThreads(aLock, std::move(baseprofile));
-    }
+  // An "empty" profile string may in fact contain 1 character (a newline), so
+  // we want at least 2 characters to register a profile.
+  if (HasMinimumLength(baseprofile.get(), 2)) {
+    // The BaseProfiler startup profile will be stored as a separate "process"
+    // in the Gecko Profiler profile, and shown as a new track under the
+    // corresponding Gecko Profiler thread.
+    ActivePS::AddBaseProfileThreads(aLock, std::move(baseprofile));
   }
 #endif
 
@@ -4137,7 +4210,8 @@ static void locked_profiler_start(PSLockRef aLock, PowerOfTwo32 aCapacity,
 
 void profiler_start(PowerOfTwo32 aCapacity, double aInterval,
                     uint32_t aFeatures, const char** aFilters,
-                    uint32_t aFilterCount, const Maybe<double>& aDuration) {
+                    uint32_t aFilterCount, uint64_t aActiveBrowsingContextID,
+                    const Maybe<double>& aDuration) {
   LOG("profiler_start");
 
   SamplerThread* samplerThread = nullptr;
@@ -4155,7 +4229,7 @@ void profiler_start(PowerOfTwo32 aCapacity, double aInterval,
     }
 
     locked_profiler_start(lock, aCapacity, aInterval, aFeatures, aFilters,
-                          aFilterCount, aDuration);
+                          aFilterCount, aActiveBrowsingContextID, aDuration);
   }
 
 #if defined(MOZ_REPLACE_MALLOC) && defined(MOZ_PROFILER_MEMORY)
@@ -4172,12 +4246,13 @@ void profiler_start(PowerOfTwo32 aCapacity, double aInterval,
     delete samplerThread;
   }
   NotifyProfilerStarted(aCapacity, aDuration, aInterval, aFeatures, aFilters,
-                        aFilterCount);
+                        aFilterCount, aActiveBrowsingContextID);
 }
 
 void profiler_ensure_started(PowerOfTwo32 aCapacity, double aInterval,
                              uint32_t aFeatures, const char** aFilters,
                              uint32_t aFilterCount,
+                             uint64_t aActiveBrowsingContextID,
                              const Maybe<double>& aDuration) {
   LOG("profiler_ensure_started");
 
@@ -4194,17 +4269,18 @@ void profiler_ensure_started(PowerOfTwo32 aCapacity, double aInterval,
     if (ActivePS::Exists(lock)) {
       // The profiler is active.
       if (!ActivePS::Equals(lock, aCapacity, aDuration, aInterval, aFeatures,
-                            aFilters, aFilterCount)) {
+                            aFilters, aFilterCount, aActiveBrowsingContextID)) {
         // Stop and restart with different settings.
         samplerThread = locked_profiler_stop(lock);
         locked_profiler_start(lock, aCapacity, aInterval, aFeatures, aFilters,
-                              aFilterCount, aDuration);
+                              aFilterCount, aActiveBrowsingContextID,
+                              aDuration);
         startedProfiler = true;
       }
     } else {
       // The profiler is stopped.
       locked_profiler_start(lock, aCapacity, aInterval, aFeatures, aFilters,
-                            aFilterCount, aDuration);
+                            aFilterCount, aActiveBrowsingContextID, aDuration);
       startedProfiler = true;
     }
   }
@@ -4219,7 +4295,7 @@ void profiler_ensure_started(PowerOfTwo32 aCapacity, double aInterval,
 
   if (startedProfiler) {
     NotifyProfilerStarted(aCapacity, aDuration, aInterval, aFeatures, aFilters,
-                          aFilterCount);
+                          aFilterCount, aActiveBrowsingContextID);
   }
 }
 

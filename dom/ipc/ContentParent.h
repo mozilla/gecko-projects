@@ -15,6 +15,7 @@
 #include "mozilla/gfx/GPUProcessListener.h"
 #include "mozilla/ipc/BackgroundUtils.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
+#include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/PParentToChildStreamParent.h"
 #include "mozilla/ipc/PChildToParentStreamParent.h"
 #include "mozilla/Attributes.h"
@@ -36,9 +37,9 @@
 #include "nsIInterfaceRequestor.h"
 #include "nsIObserver.h"
 #include "nsIRemoteTab.h"
-#include "nsIThreadInternal.h"
 #include "nsIDOMGeoPositionCallback.h"
 #include "nsIDOMGeoPositionErrorCallback.h"
+#include "nsIRemoteWindowContext.h"
 #include "nsRefPtrHashtable.h"
 #include "PermissionMessageUtils.h"
 #include "DriverCrashGuard.h"
@@ -127,18 +128,20 @@ struct CancelContentJSOptions;
     }                                                \
   }
 
-class ContentParent final : public PContentParent,
-                            public nsIObserver,
-                            public nsIDOMGeoPositionCallback,
-                            public nsIDOMGeoPositionErrorCallback,
-                            public nsIInterfaceRequestor,
-                            public gfx::gfxVarReceiver,
-                            public mozilla::LinkedListElement<ContentParent>,
-                            public gfx::GPUProcessListener,
-                            public mozilla::MemoryReportingProcess,
-                            public mozilla::dom::ipc::MessageManagerCallback,
-                            public CPOWManagerGetter,
-                            public mozilla::ipc::IShmemAllocator {
+class ContentParent final
+    : public PContentParent,
+      public nsIObserver,
+      public nsIDOMGeoPositionCallback,
+      public nsIDOMGeoPositionErrorCallback,
+      public nsIInterfaceRequestor,
+      public gfx::gfxVarReceiver,
+      public mozilla::LinkedListElement<ContentParent>,
+      public gfx::GPUProcessListener,
+      public mozilla::MemoryReportingProcess,
+      public mozilla::dom::ipc::MessageManagerCallback,
+      public CPOWManagerGetter,
+      public mozilla::ipc::IShmemAllocator,
+      public mozilla::ipc::ParentToChildStreamActorManager {
   typedef mozilla::ipc::GeckoChildProcessHost GeckoChildProcessHost;
   typedef mozilla::ipc::PFileDescriptorSetParent PFileDescriptorSetParent;
   typedef mozilla::ipc::TestShellParent TestShellParent;
@@ -505,8 +508,8 @@ class ContentParent final : public PContentParent,
       const nsTArray<PermissionRequest>& aRequests,
       const IPC::Principal& aPrincipal,
       const IPC::Principal& aTopLevelPrincipal,
-      const bool& aIsHandlingUserInput, const bool& aDocumentHasUserInput,
-      const DOMTimeStamp& aPageLoadTimestamp, const TabId& aTabId);
+      const bool& aIsHandlingUserInput,
+      const bool& aMaybeUnsafePermissionDelegate, const TabId& aTabId);
 
   bool DeallocPContentPermissionRequestParent(
       PContentPermissionRequestParent* actor);
@@ -649,6 +652,11 @@ class ContentParent final : public PContentParent,
       const PostMessageData& aData);
 
   FORWARD_SHMEM_ALLOCATOR_TO(PContentParent)
+
+  PParentToChildStreamParent* SendPParentToChildStreamConstructor(
+      PParentToChildStreamParent* aActor) override;
+  PFileDescriptorSetParent* SendPFileDescriptorSetConstructor(
+      const FileDescriptor& aFD) override;
 
  protected:
   bool CheckBrowsingContextOwnership(BrowsingContext* aBC,
@@ -920,12 +928,13 @@ class ContentParent final : public PContentParent,
   virtual mozilla::ipc::IPCResult RecvPPresentationConstructor(
       PPresentationParent* aActor) override;
 
+#ifdef MOZ_WEBSPEECH
   PSpeechSynthesisParent* AllocPSpeechSynthesisParent();
-
   bool DeallocPSpeechSynthesisParent(PSpeechSynthesisParent* aActor);
 
   virtual mozilla::ipc::IPCResult RecvPSpeechSynthesisConstructor(
       PSpeechSynthesisParent* aActor) override;
+#endif
 
   PWebBrowserPersistDocumentParent* AllocPWebBrowserPersistDocumentParent(
       PBrowserParent* aBrowser, const uint64_t& aOuterWindowID);
@@ -1197,6 +1206,15 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvNotifyMediaAudibleChanged(
       BrowsingContext* aContext, bool aAudible);
 
+  mozilla::ipc::IPCResult RecvGetModulesTrust(
+      ModulePaths&& aModPaths, bool aRunAtNormalPriority,
+      GetModulesTrustResolver&& aResolver);
+
+  mozilla::ipc::IPCResult RecvSessionStorageData(
+      BrowsingContext* aTop, const nsACString& aOriginAttrs,
+      const nsACString& aOriginKey, const nsTArray<KeyValuePair>& aDefaultData,
+      const nsTArray<KeyValuePair>& aSessionData);
+
   // Notify the ContentChild to enable the input event prioritization when
   // initializing.
   void MaybeEnableRemoteInputEventQueue();
@@ -1399,6 +1417,20 @@ const nsDependentSubstring RemoteTypePrefix(
 bool IsWebRemoteType(const nsAString& aContentProcessType);
 
 bool IsWebCoopCoepRemoteType(const nsAString& aContentProcessType);
+
+class RemoteWindowContext final : public nsIRemoteWindowContext,
+                                  public nsIInterfaceRequestor {
+ public:
+  explicit RemoteWindowContext(BrowserParent* aBrowserParent);
+
+  NS_DECL_ISUPPORTS
+  NS_DECL_NSIINTERFACEREQUESTOR
+  NS_DECL_NSIREMOTEWINDOWCONTEXT
+
+ private:
+  ~RemoteWindowContext() = default;
+  RefPtr<BrowserParent> mBrowserParent;
+};
 
 }  // namespace dom
 }  // namespace mozilla

@@ -531,7 +531,8 @@ bool Module::initSegments(JSContext* cx, HandleWasmInstanceObject instanceObj,
 
   if (eagerBoundsCheck) {
     // Perform all error checks up front so that this function does not perform
-    // partial initialization if an error is reported.
+    // partial initialization if an error is reported. In addition, we need to
+    // to report OOBs as a link error when bulk-memory is disabled.
 
     for (const ElemSegment* seg : elemSegments_) {
       if (!seg->active()) {
@@ -574,19 +575,11 @@ bool Module::initSegments(JSContext* cx, HandleWasmInstanceObject instanceObj,
       uint32_t offset = EvaluateInitExpr(globalImportValues, seg->offset());
       uint32_t count = seg->length();
 
-      // Allow zero-sized initializations even if they are out-of-bounds. This
-      // behavior technically only applies when bulk-memory-operations are
-      // enabled, but we will fail with an error during eager bounds checking
-      // above in that case.
-      if (count == 0) {
-        continue;
-      }
-
       if (!eagerBoundsCheck) {
         uint32_t tableLength = tables[seg->tableIndex]->length();
         if (offset > tableLength || tableLength - offset < count) {
           JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
-                                   JSMSG_WASM_BAD_FIT, "elem", "table");
+                                   JSMSG_WASM_OUT_OF_BOUNDS);
           return false;
         }
       }
@@ -610,18 +603,10 @@ bool Module::initSegments(JSContext* cx, HandleWasmInstanceObject instanceObj,
       uint32_t offset = EvaluateInitExpr(globalImportValues, seg->offset());
       uint32_t count = seg->bytes.length();
 
-      // Allow zero-sized initializations even if they are out-of-bounds. This
-      // behavior technically only applies when bulk-memory-operations are
-      // enabled, but we will fail with an error during eager bounds checking
-      // above in that case.
-      if (count == 0) {
-        continue;
-      }
-
       if (!eagerBoundsCheck) {
         if (offset > memoryLength || memoryLength - offset < count) {
           JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
-                                   JSMSG_WASM_BAD_FIT, "data", "memory");
+                                   JSMSG_WASM_OUT_OF_BOUNDS);
           return false;
         }
       }
@@ -1133,7 +1118,7 @@ static bool MakeStructField(JSContext* cx, const ValType& v, bool isMutable,
   props.isMutable = isMutable;
 
   Rooted<TypeDescr*> t(cx);
-  switch (v.code()) {
+  switch (v.kind()) {
     case ValType::I32:
       t = GlobalObject::getOrCreateScalarTypeDescr(cx, cx->global(),
                                                    Scalar::Int32);
@@ -1155,16 +1140,19 @@ static bool MakeStructField(JSContext* cx, const ValType& v, bool isMutable,
                                                    Scalar::Float64);
       break;
     case ValType::Ref:
-      t = GlobalObject::getOrCreateReferenceTypeDescr(
-          cx, cx->global(), ReferenceType::TYPE_OBJECT);
+      switch (v.refTypeKind()) {
+        case RefType::TypeIndex:
+          t = GlobalObject::getOrCreateReferenceTypeDescr(
+              cx, cx->global(), ReferenceType::TYPE_OBJECT);
+          break;
+        case RefType::Func:
+        case RefType::Any:
+        case RefType::Null:
+          t = GlobalObject::getOrCreateReferenceTypeDescr(
+              cx, cx->global(), ReferenceType::TYPE_WASM_ANYREF);
+          break;
+      }
       break;
-    case ValType::FuncRef:
-    case ValType::AnyRef:
-      t = GlobalObject::getOrCreateReferenceTypeDescr(
-          cx, cx->global(), ReferenceType::TYPE_WASM_ANYREF);
-      break;
-    default:
-      MOZ_CRASH("Bad field type");
   }
   MOZ_ASSERT(t != nullptr);
 
@@ -1223,7 +1211,7 @@ bool Module::makeStructTypeDescrs(
     uint32_t k = 0;
     for (StructField sf : structType.fields_) {
       const ValType& v = sf.type;
-      if (v.code() == ValType::I64) {
+      if (v.kind() == ValType::I64) {
         // TypedObjects don't yet have a notion of int64 fields.  Thus
         // we handle int64 by allocating two adjacent int32 fields, the
         // first of them aligned as for int64.  We mark these fields as

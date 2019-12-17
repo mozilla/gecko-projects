@@ -38,7 +38,6 @@
 #include "nsIObserverService.h"
 #include "nsIPrompt.h"
 #include "nsIProperties.h"
-#include "nsISiteSecurityService.h"
 #include "nsITokenPasswordDialogs.h"
 #include "nsIWindowWatcher.h"
 #include "nsIXULRuntime.h"
@@ -677,11 +676,7 @@ LoadLoadableCertsTask::Run() {
     // succeed whereas the browser may still be able to operate if the other
     // tasks fail).
     mNSSComponent->mLoadableCertsLoadedResult = loadLoadableRootsResult;
-    nsresult rv = mNSSComponent->mLoadableCertsLoadedMonitor.NotifyAll();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Error,
-              ("failed to notify loadable certs loaded monitor"));
-    }
+    mNSSComponent->mLoadableCertsLoadedMonitor.NotifyAll();
   }
   return NS_OK;
 }
@@ -798,9 +793,9 @@ nsNSSComponent::HasUserCertsInstalled(bool* result) {
 
   BlockUntilLoadableCertsLoaded();
 
-  // FindNonCACertificatesWithPrivateKeys won't ever return an empty list, so
+  // FindClientCertificatesWithPrivateKeys won't ever return an empty list, so
   // all we need to do is check if this is null or not.
-  UniqueCERTCertList certList(FindNonCACertificatesWithPrivateKeys());
+  UniqueCERTCertList certList(FindClientCertificatesWithPrivateKeys());
   *result = !!certList;
 
   return NS_OK;
@@ -1270,6 +1265,19 @@ void nsNSSComponent::setValidationOptions(
     distrustedCAPolicy = defaultCAPolicyMode;
   }
 
+  CRLiteMode defaultCRLiteMode = CRLiteMode::Disabled;
+  CRLiteMode crliteMode = static_cast<CRLiteMode>(Preferences::GetUint(
+      "security.pki.crlite_mode", static_cast<uint32_t>(defaultCRLiteMode)));
+  switch (crliteMode) {
+    case CRLiteMode::Disabled:
+    case CRLiteMode::TelemetryOnly:
+    case CRLiteMode::Enforce:
+      break;
+    default:
+      crliteMode = defaultCRLiteMode;
+      break;
+  }
+
   CertVerifier::OcspDownloadConfig odc;
   CertVerifier::OcspStrictConfig osc;
   uint32_t certShortLifetimeInDays;
@@ -1282,7 +1290,7 @@ void nsNSSComponent::setValidationOptions(
   mDefaultCertVerifier = new SharedCertVerifier(
       odc, osc, softTimeout, hardTimeout, certShortLifetimeInDays, pinningMode,
       sha1Mode, nameMatchingMode, netscapeStepUpPolicy, ctMode,
-      distrustedCAPolicy, mEnterpriseCerts);
+      distrustedCAPolicy, crliteMode, mEnterpriseCerts);
 }
 
 void nsNSSComponent::UpdateCertVerifierWithEnterpriseRoots() {
@@ -1301,7 +1309,8 @@ void nsNSSComponent::UpdateCertVerifierWithEnterpriseRoots() {
       oldCertVerifier->mCertShortLifetimeInDays, oldCertVerifier->mPinningMode,
       oldCertVerifier->mSHA1Mode, oldCertVerifier->mNameMatchingMode,
       oldCertVerifier->mNetscapeStepUpPolicy, oldCertVerifier->mCTMode,
-      oldCertVerifier->mDistrustedCAPolicy, mEnterpriseCerts);
+      oldCertVerifier->mDistrustedCAPolicy, oldCertVerifier->mCRLiteMode,
+      mEnterpriseCerts);
 }
 
 // Enable the TLS versions given in the prefs, defaulting to TLS 1.0 (min) and
@@ -2047,7 +2056,8 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
                    "security.OCSP.timeoutMilliseconds.soft") ||
                prefName.EqualsLiteral(
                    "security.OCSP.timeoutMilliseconds.hard") ||
-               prefName.EqualsLiteral("security.pki.distrust_ca_policy")) {
+               prefName.EqualsLiteral("security.pki.distrust_ca_policy") ||
+               prefName.EqualsLiteral("security.pki.crlite_mode")) {
       MutexAutoLock lock(mMutex);
       setValidationOptions(false, lock);
 #ifdef DEBUG
@@ -2250,12 +2260,13 @@ already_AddRefed<SharedCertVerifier> GetDefaultCertVerifier() {
 }
 
 // Lists all private keys on all modules and returns a list of any corresponding
-// certificates. Returns null if no such certificates can be found. Also returns
-// null if an error is encountered, because this is called as part of the client
-// auth data callback, and NSS ignores any errors returned by the callback.
-UniqueCERTCertList FindNonCACertificatesWithPrivateKeys() {
+// client certificates. Returns null if no such certificates can be found. Also
+// returns null if an error is encountered, because this is called as part of
+// the client auth data callback, and NSS ignores any errors returned by the
+// callback.
+UniqueCERTCertList FindClientCertificatesWithPrivateKeys() {
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-          ("FindNonCACertificatesWithPrivateKeys"));
+          ("FindClientCertificatesWithPrivateKeys"));
   UniqueCERTCertList certsWithPrivateKeys(CERT_NewCertList());
   if (!certsWithPrivateKeys) {
     return nullptr;
@@ -2297,23 +2308,38 @@ UniqueCERTCertList FindNonCACertificatesWithPrivateKeys() {
         }
         for (CERTCertListNode* n = CERT_LIST_HEAD(certs);
              !CERT_LIST_END(n, certs); n = CERT_LIST_NEXT(n)) {
-          if (!CERT_IsCACert(n->cert, nullptr)) {
-            MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-                    ("      found '%s'", n->cert->subjectName));
-            UniqueCERTCertificate cert(CERT_DupCertificate(n->cert));
-            if (CERT_AddCertToListTail(certsWithPrivateKeys.get(),
-                                       cert.get()) == SECSuccess) {
-              Unused << cert.release();
-            }
+          UniqueCERTCertificate cert(CERT_DupCertificate(n->cert));
+          MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                  ("      provisionally adding '%s'", n->cert->subjectName));
+          if (CERT_AddCertToListTail(certsWithPrivateKeys.get(), cert.get()) ==
+              SECSuccess) {
+            Unused << cert.release();
           }
         }
       }
     }
     list = list->next;
   }
+
+  if (CERT_FilterCertListByUsage(certsWithPrivateKeys.get(), certUsageSSLClient,
+                                 false) != SECSuccess) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+            ("  CERT_FilterCertListByUsage encountered an error - returning"));
+    return nullptr;
+  }
+
+  if (MOZ_UNLIKELY(MOZ_LOG_TEST(gPIPNSSLog, LogLevel::Debug))) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("  returning:"));
+    for (CERTCertListNode* n = CERT_LIST_HEAD(certsWithPrivateKeys);
+         !CERT_LIST_END(n, certsWithPrivateKeys); n = CERT_LIST_NEXT(n)) {
+      MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("    %s", n->cert->subjectName));
+    }
+  }
+
   if (CERT_LIST_EMPTY(certsWithPrivateKeys)) {
     return nullptr;
   }
+
   return certsWithPrivateKeys;
 }
 

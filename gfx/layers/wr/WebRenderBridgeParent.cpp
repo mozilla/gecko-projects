@@ -828,7 +828,8 @@ bool WebRenderBridgeParent::PushExternalImageForTexture(
     WebRenderTextureHost* wrTexture = aTexture->AsWebRenderTextureHost();
     if (wrTexture) {
       wrTexture->PushResourceUpdates(aResources, op, keys,
-                                     wrTexture->GetExternalImageKey());
+                                     wrTexture->GetExternalImageKey(),
+                                     /* aPreferCompositorSurface */ false);
       auto it = mTextureHosts.find(wr::AsUint64(aKey));
       MOZ_ASSERT((it == mTextureHosts.end() && !aIsUpdate) ||
                  (it != mTextureHosts.end() && aIsUpdate));
@@ -2632,13 +2633,12 @@ void WebRenderBridgeParent::FlushRendering(bool aWaitForPresent) {
 
 void WebRenderBridgeParent::Pause() {
   MOZ_ASSERT(IsRootWebRenderBridgeParent());
-#ifdef MOZ_WIDGET_ANDROID
+
   if (!IsRootWebRenderBridgeParent() || mDestroyed) {
     return;
   }
 
   mApis[wr::RenderRoot::Default]->Pause();
-#endif
   mPaused = true;
 }
 

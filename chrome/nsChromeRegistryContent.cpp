@@ -8,7 +8,6 @@
 #include "nsChromeRegistryContent.h"
 #include "nsString.h"
 #include "nsNetUtil.h"
-#include "nsIResProtocolHandler.h"
 
 nsChromeRegistryContent::nsChromeRegistryContent() {}
 
@@ -156,7 +155,7 @@ nsChromeRegistryContent::CheckForNewChrome() { CONTENT_NOT_IMPLEMENTED(); }
 NS_IMETHODIMP
 nsChromeRegistryContent::IsLocaleRTL(const nsACString& aPackage,
                                      bool* aResult) {
-  *aResult = GetDirectionForLocale(mLocale);
+  *aResult = mozilla::intl::LocaleService::IsLocaleRTL(mLocale);
   return NS_OK;
 }
 

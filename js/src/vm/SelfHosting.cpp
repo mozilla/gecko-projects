@@ -79,7 +79,7 @@
 #include "vm/TypedArrayObject.h"
 #include "vm/WrapperObject.h"
 
-#include "gc/PrivateIterators-inl.h"
+#include "gc/GC-inl.h"
 #include "vm/BooleanObject-inl.h"
 #include "vm/BytecodeIterator-inl.h"
 #include "vm/BytecodeLocation-inl.h"
@@ -2374,11 +2374,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
           CallNonGenericSelfhostedMethod<Is<SetObject>>, 2, 0),
 
     // See builtin/TypedObject.h for descriptors of the typedobj functions.
-    JS_FN("NewOpaqueTypedObject", js::NewOpaqueTypedObject, 1, 0),
+    JS_FN("NewOpaqueTypedObject", js::NewOpaqueTypedObject, 3, 0),
     JS_FN("NewDerivedTypedObject", js::NewDerivedTypedObject, 3, 0),
-    JS_FN("TypedObjectByteOffset", TypedObject::GetByteOffset, 1, 0),
-    JS_FN("AttachTypedObject", js::AttachTypedObject, 3, 0),
-    JS_FN("TypedObjectIsAttached", js::TypedObjectIsAttached, 1, 0),
     JS_FN("TypedObjectTypeDescr", js::TypedObjectTypeDescr, 1, 0),
     JS_FN("ClampToUint8", js::ClampToUint8, 1, 0),
     JS_FN("GetTypedObjectModule", js::GetTypedObjectModule, 0, 0),
@@ -2387,17 +2384,10 @@ static const JSFunctionSpec intrinsic_functions[] = {
                     IntrinsicObjectIsTypeDescr),
     JS_INLINABLE_FN("ObjectIsTypedObject", js::ObjectIsTypedObject, 1, 0,
                     IntrinsicObjectIsTypedObject),
-    JS_INLINABLE_FN("ObjectIsOpaqueTypedObject", js::ObjectIsOpaqueTypedObject,
-                    1, 0, IntrinsicObjectIsOpaqueTypedObject),
-    JS_INLINABLE_FN("ObjectIsTransparentTypedObject",
-                    js::ObjectIsTransparentTypedObject, 1, 0,
-                    IntrinsicObjectIsTransparentTypedObject),
     JS_INLINABLE_FN("TypeDescrIsArrayType", js::TypeDescrIsArrayType, 1, 0,
                     IntrinsicTypeDescrIsArrayType),
     JS_INLINABLE_FN("TypeDescrIsSimpleType", js::TypeDescrIsSimpleType, 1, 0,
                     IntrinsicTypeDescrIsSimpleType),
-    JS_INLINABLE_FN("SetTypedObjectOffset", js::SetTypedObjectOffset, 2, 0,
-                    IntrinsicSetTypedObjectOffset),
     JS_FN("IsBoxedWasmAnyRef", js::IsBoxedWasmAnyRef, 1, 0),
     JS_FN("IsBoxableWasmAnyRef", js::IsBoxableWasmAnyRef, 1, 0),
     JS_FN("BoxWasmAnyRef", js::BoxWasmAnyRef, 1, 0),
@@ -2596,6 +2586,9 @@ GlobalObject* JSRuntime::createSelfHostingGlobal(JSContext* cx) {
 
   JS::RealmOptions options;
   options.creationOptions().setNewCompartmentAndZone();
+  // Debugging the selfHosted zone is not supported because CCWs are not
+  // allowed in that zone.
+  options.creationOptions().setInvisibleToDebugger(true);
   options.behaviors().setDiscardSource(true);
 
   Realm* realm = NewRealm(cx, nullptr, options);
@@ -3090,7 +3083,7 @@ bool JSRuntime::createLazySelfHostedFunctionClone(
     return false;
   }
   fun->setIsSelfHostedBuiltin();
-  fun->initSelfHostLazyScript(&cx->runtime()->selfHostedLazyScript.ref());
+  fun->initSelfHostedLazyScript(&cx->runtime()->selfHostedLazyScript.ref());
   SetClonedSelfHostedFunctionName(fun, selfHostedName);
   return true;
 }

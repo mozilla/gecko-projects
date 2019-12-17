@@ -119,7 +119,6 @@ class JUnitTestRunner(MochitestDesktop):
         if self.fillCertificateDB(self.options):
             self.log.error("Certificate integration failed")
 
-        self.device.mkdir(self.remote_profile, parents=True)
         self.device.push(self.profile.profile, self.remote_profile)
         self.log.debug("profile %s -> %s" %
                        (str(self.profile.profile), str(self.remote_profile)))
@@ -163,7 +162,6 @@ class JUnitTestRunner(MochitestDesktop):
         # environment
         env = {}
         env["MOZ_CRASHREPORTER"] = "1"
-        env["MOZ_CRASHREPORTER_NO_REPORT"] = "1"
         env["MOZ_CRASHREPORTER_SHUTDOWN"] = "1"
         env["XPCOM_DEBUG_BREAK"] = "stack"
         env["DISABLE_UNSAFE_CPOW_WARNINGS"] = "1"
@@ -314,13 +312,7 @@ class JUnitTestRunner(MochitestDesktop):
             dump_dir = tempfile.mkdtemp()
             remote_dir = posixpath.join(self.remote_profile, 'minidumps')
             if not self.device.is_dir(remote_dir):
-                # If crash reporting is enabled (MOZ_CRASHREPORTER=1), the
-                # minidumps directory is automatically created when the app
-                # (first) starts, so its lack of presence is a hint that
-                # something went wrong.
-                print("Automation Error: " +
-                      "No crash directory ({}) found on remote device".format(remote_dir))
-                return True
+                return False
             self.device.pull(remote_dir, dump_dir)
             crashed = mozcrash.log_crashes(self.log, dump_dir, symbols_path,
                                            test=self.current_full_name)

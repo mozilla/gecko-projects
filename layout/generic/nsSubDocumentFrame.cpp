@@ -34,7 +34,6 @@
 #include "nsStyleStruct.h"
 #include "nsStyleStructInlines.h"
 #include "nsFrameSetFrame.h"
-#include "nsIScrollable.h"
 #include "nsNameSpaceManager.h"
 #include "nsDisplayList.h"
 #include "nsIScrollableFrame.h"
@@ -43,7 +42,6 @@
 #include "FrameLayerBuilder.h"
 #include "nsPluginFrame.h"
 #include "nsContentUtils.h"
-#include "nsIPermissionManager.h"
 #include "nsServiceManagerUtils.h"
 #include "nsQueryObject.h"
 #include "RetainedDisplayListBuilder.h"
@@ -194,10 +192,10 @@ void nsSubDocumentFrame::ShowViewer() {
       mCallingShow = true;
       const nsAttrValue* attrValue =
           GetContent()->AsElement()->GetParsedAttr(nsGkAtoms::scrolling);
-      int32_t scrolling =
+      ScrollbarPreference scrolling =
           nsGenericHTMLFrameElement::MapScrollingAttribute(attrValue);
-      bool didCreateDoc = frameloader->Show(margin.width, margin.height,
-                                            scrolling, scrolling, this);
+      bool didCreateDoc =
+          frameloader->Show(margin.width, margin.height, scrolling, this);
       if (!weakThis.IsAlive()) {
         return;
       }
@@ -338,7 +336,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 
   // If we are pointer-events:none then we don't need to HitTest background
   bool pointerEventsNone =
-      StyleUI()->mPointerEvents == NS_STYLE_POINTER_EVENTS_NONE;
+      StyleUI()->mPointerEvents == StylePointerEvents::None;
   if (!aBuilder->IsForEventDelivery() || !pointerEventsNone) {
     nsDisplayListCollection decorations(aBuilder);
     DisplayBorderBackgroundOutline(aBuilder, decorations);
@@ -1028,22 +1026,18 @@ static void DestroyDisplayItemDataForFrames(nsIFrame* aFrame) {
   }
 }
 
-static bool BeginSwapDocShellsForDocument(Document* aDocument, void*) {
-  MOZ_ASSERT(aDocument, "null document");
-
-  mozilla::PresShell* presShell = aDocument->GetPresShell();
-  if (presShell) {
+static bool BeginSwapDocShellsForDocument(Document& aDocument, void*) {
+  if (PresShell* presShell = aDocument.GetPresShell()) {
     // Disable painting while the views are detached, see bug 946929.
     presShell->SetNeverPainting(true);
 
-    nsIFrame* rootFrame = presShell->GetRootFrame();
-    if (rootFrame) {
+    if (nsIFrame* rootFrame = presShell->GetRootFrame()) {
       ::DestroyDisplayItemDataForFrames(rootFrame);
     }
   }
-  aDocument->EnumerateActivityObservers(nsPluginFrame::BeginSwapDocShells,
-                                        nullptr);
-  aDocument->EnumerateSubDocuments(BeginSwapDocShellsForDocument, nullptr);
+  aDocument.EnumerateActivityObservers(nsPluginFrame::BeginSwapDocShells,
+                                       nullptr);
+  aDocument.EnumerateSubDocuments(BeginSwapDocShellsForDocument, nullptr);
   return true;
 }
 
@@ -1051,9 +1045,8 @@ static nsView* BeginSwapDocShellsForViews(nsView* aSibling) {
   // Collect the removed sibling views in reverse order in 'removedViews'.
   nsView* removedViews = nullptr;
   while (aSibling) {
-    Document* doc = ::GetDocumentFromView(aSibling);
-    if (doc) {
-      ::BeginSwapDocShellsForDocument(doc, nullptr);
+    if (Document* doc = ::GetDocumentFromView(aSibling)) {
+      ::BeginSwapDocShellsForDocument(*doc, nullptr);
     }
     nsView* next = aSibling->GetNextSibling();
     aSibling->GetViewManager()->RemoveChild(aSibling);
@@ -1106,14 +1099,11 @@ nsresult nsSubDocumentFrame::BeginSwapDocShells(nsIFrame* aOther) {
   return NS_OK;
 }
 
-static bool EndSwapDocShellsForDocument(Document* aDocument, void*) {
-  MOZ_ASSERT(aDocument, "null document");
-
+static bool EndSwapDocShellsForDocument(Document& aDocument, void*) {
   // Our docshell and view trees have been updated for the new hierarchy.
   // Now also update all nsDeviceContext::mWidget to that of the
   // container view in the new hierarchy.
-  nsCOMPtr<nsIDocShell> ds = aDocument->GetDocShell();
-  if (ds) {
+  if (nsCOMPtr<nsIDocShell> ds = aDocument.GetDocShell()) {
     nsCOMPtr<nsIContentViewer> cv;
     ds->GetContentViewer(getter_AddRefs(cv));
     while (cv) {
@@ -1130,17 +1120,16 @@ static bool EndSwapDocShellsForDocument(Document* aDocument, void*) {
     }
   }
 
-  aDocument->EnumerateActivityObservers(nsPluginFrame::EndSwapDocShells,
-                                        nullptr);
-  aDocument->EnumerateSubDocuments(EndSwapDocShellsForDocument, nullptr);
+  aDocument.EnumerateActivityObservers(nsPluginFrame::EndSwapDocShells,
+                                       nullptr);
+  aDocument.EnumerateSubDocuments(EndSwapDocShellsForDocument, nullptr);
   return true;
 }
 
 static void EndSwapDocShellsForViews(nsView* aSibling) {
   for (; aSibling; aSibling = aSibling->GetNextSibling()) {
-    Document* doc = ::GetDocumentFromView(aSibling);
-    if (doc) {
-      ::EndSwapDocShellsForDocument(doc, nullptr);
+    if (Document* doc = ::GetDocumentFromView(aSibling)) {
+      ::EndSwapDocShellsForDocument(*doc, nullptr);
     }
     nsIFrame* frame = aSibling->GetFrame();
     if (frame) {
@@ -1318,7 +1307,7 @@ nsDisplayRemote::nsDisplayRemote(nsDisplayListBuilder* aBuilder,
       mTabId{0},
       mEventRegionsOverride(EventRegionsOverride::NoOverride) {
   bool frameIsPointerEventsNone = aFrame->StyleUI()->GetEffectivePointerEvents(
-                                      aFrame) == NS_STYLE_POINTER_EVENTS_NONE;
+                                      aFrame) == StylePointerEvents::None;
   if (aBuilder->IsInsidePointerEventsNoneDoc() || frameIsPointerEventsNone) {
     mEventRegionsOverride |= EventRegionsOverride::ForceEmptyHitRegion;
   }

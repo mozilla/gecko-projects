@@ -568,24 +568,23 @@ enum class StyleGridTrackBreadth : uint8_t {
 #define NS_STYLE_LIST_STYLE_POSITION_OUTSIDE 1
 
 // See nsStyleVisibility
-#define NS_STYLE_POINTER_EVENTS_NONE 0
-#define NS_STYLE_POINTER_EVENTS_VISIBLEPAINTED 1
-#define NS_STYLE_POINTER_EVENTS_VISIBLEFILL 2
-#define NS_STYLE_POINTER_EVENTS_VISIBLESTROKE 3
-#define NS_STYLE_POINTER_EVENTS_VISIBLE 4
-#define NS_STYLE_POINTER_EVENTS_PAINTED 5
-#define NS_STYLE_POINTER_EVENTS_FILL 6
-#define NS_STYLE_POINTER_EVENTS_STROKE 7
-#define NS_STYLE_POINTER_EVENTS_ALL 8
-#define NS_STYLE_POINTER_EVENTS_AUTO 9
+enum class StylePointerEvents : uint8_t {
+  None,
+  Visiblepainted,
+  Visiblefill,
+  Visiblestroke,
+  Visible,
+  Painted,
+  Fill,
+  Stroke,
+  All,
+  Auto,
+};
 
-// See nsStyleVisibility.mImageOrientationType
-#define NS_STYLE_IMAGE_ORIENTATION_FLIP 0
-#define NS_STYLE_IMAGE_ORIENTATION_FROM_IMAGE 1
-
-// See nsStyleDisplay
-#define NS_STYLE_ISOLATION_AUTO 0
-#define NS_STYLE_ISOLATION_ISOLATE 1
+enum class StyleIsolation : uint8_t {
+  Auto,
+  Isolate,
+};
 
 // See nsStylePosition.mObjectFit
 enum class StyleObjectFit : uint8_t {
@@ -629,13 +628,17 @@ enum class StyleObjectFit : uint8_t {
 #define NS_STYLE_TEXT_TRANSFORM_FULL_SIZE_KANA 5
 
 // See nsStyleDisplay
-#define NS_STYLE_TOP_LAYER_NONE 0  // not in the top layer
-#define NS_STYLE_TOP_LAYER_TOP 1   // in the top layer
+enum class StyleTopLayer : uint8_t {
+  None,
+  Top,
+};
 
 // See nsStyleVisibility
-#define NS_STYLE_VISIBILITY_HIDDEN 0
-#define NS_STYLE_VISIBILITY_VISIBLE 1
-#define NS_STYLE_VISIBILITY_COLLAPSE 2
+enum class StyleVisibility : uint8_t {
+  Hidden,
+  Visible,
+  Collapse,
+};
 
 // See nsStyleText
 #define NS_STYLE_TABSIZE_INITIAL 8
@@ -652,19 +655,24 @@ enum class StyleWhiteSpace : uint8_t {
 };
 
 // ruby-align, see nsStyleText
-#define NS_STYLE_RUBY_ALIGN_START 0
-#define NS_STYLE_RUBY_ALIGN_CENTER 1
-#define NS_STYLE_RUBY_ALIGN_SPACE_BETWEEN 2
-#define NS_STYLE_RUBY_ALIGN_SPACE_AROUND 3
+enum class StyleRubyAlign : uint8_t {
+  Start,
+  Center,
+  SpaceBetween,
+  SpaceAround,
+};
 
 // ruby-position, see nsStyleText
-#define NS_STYLE_RUBY_POSITION_OVER 0
-#define NS_STYLE_RUBY_POSITION_UNDER 1
-#define NS_STYLE_RUBY_POSITION_INTER_CHARACTER 2  // placeholder, not yet parsed
+enum class StyleRubyPosition : uint8_t {
+  Over,
+  Under,
+};
 
 // See nsStyleText
-#define NS_STYLE_TEXT_SIZE_ADJUST_NONE 0
-#define NS_STYLE_TEXT_SIZE_ADJUST_AUTO 1
+enum class StyleTextSizeAdjust : uint8_t {
+  None,
+  Auto,
+};
 
 // See nsStyleText
 enum class StyleTextOrientation : uint8_t {

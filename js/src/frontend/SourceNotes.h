@@ -38,60 +38,6 @@ namespace js {
 
 class SrcNote {
  public:
-  // SRC_FOR: Source note for JSOP_NOP at the top of C-style for loop,
-  //          which is placed after init expression/declaration ops.
-  class For {
-   public:
-    enum Fields {
-      // The offset of the condition expression ops from JSOP_NOP.
-      CondOffset,
-
-      // The offset of JSOP_GOTO/JSOP_IFNE at the end of the loop from
-      // JSOP_NOP.
-      BackJumpOffset,
-      Count,
-    };
-  };
-  // SRC_WHILE: Source note for JSOP_GOTO at the top of while loop,
-  //            which jumps to JSOP_LOOPENTRY.
-  class While {
-   public:
-    enum Fields {
-      // The offset of JSOP_IFNE at the end of the loop from JSOP_GOTO.
-      BackJumpOffset,
-      Count,
-    };
-  };
-  // SRC_DO_WHILE: Source note for JSOP_LOOPHEAD at the top of do-while loop
-  class DoWhile {
-   public:
-    enum Fields {
-      // The offset of JSOP_IFNE at the end of the loop from
-      // JSOP_LOOPHEAD.
-      BackJumpOffset,
-      Count,
-    };
-  };
-  // SRC_FOR_IN: Source note for JSOP_GOTO at the top of for-in loop,
-  //             which jumps to JSOP_LOOPENTRY.
-  class ForIn {
-   public:
-    enum Fields {
-      // The offset of JSOP_IFEQ at the end of the loop from JSOP_GOTO.
-      BackJumpOffset,
-      Count,
-    };
-  };
-  // SRC_FOR_OF: Source note for JSOP_GOTO at the top of for-of loop,
-  //             which jumps to JSOP_LOOPENTRY.
-  class ForOf {
-   public:
-    enum Fields {
-      // The offset of JSOP_IFEQ at the end of the loop from JSOP_GOTO.
-      BackJumpOffset,
-      Count,
-    };
-  };
   // SRC_TRY: Source note for JSOP_TRY.
   class Try {
    public:
@@ -126,14 +72,7 @@ class SrcNote {
 // clang-format off
 #define FOR_EACH_SRC_NOTE_TYPE(M)                                                                  \
     M(SRC_NULL,         "null",        0)  /* Terminates a note vector. */                         \
-    M(SRC_FOR,          "for",         SrcNote::For::Count) \
-    M(SRC_WHILE,        "while",       SrcNote::While::Count) \
-    M(SRC_DO_WHILE,     "do-while",    SrcNote::DoWhile::Count) \
-    M(SRC_FOR_IN,       "for-in",      SrcNote::ForIn::Count) \
-    M(SRC_FOR_OF,       "for-of",      SrcNote::ForOf::Count) \
     M(SRC_ASSIGNOP,     "assignop",    0)  /* += or another assign-op follows. */                  \
-    M(SRC_CLASS_SPAN,   "class",       2)  /* The starting and ending offsets for the class, used  \
-                                              for toString correctness for default ctors. */       \
     M(SRC_TRY,          "try",         SrcNote::Try::Count) \
     /* All notes above here are "gettable".  See SN_IS_GETTABLE below. */                          \
     M(SRC_COLSPAN,      "colspan",     SrcNote::ColSpan::Count) \
@@ -141,6 +80,12 @@ class SrcNote {
     M(SRC_SETLINE,      "setline",     SrcNote::SetLine::Count) \
     M(SRC_BREAKPOINT,   "breakpoint",  0)  /* Bytecode is a recommended breakpoint. */             \
     M(SRC_STEP_SEP,     "step-sep",    0)  /* Bytecode is the first in a new steppable area. */    \
+    M(SRC_UNUSED8,      "unused",      0) \
+    M(SRC_UNUSED9,      "unused",      0) \
+    M(SRC_UNUSED10,     "unused",      0) \
+    M(SRC_UNUSED11,     "unused",      0) \
+    M(SRC_UNUSED12,     "unused",      0) \
+    M(SRC_UNUSED13,     "unused",      0) \
     M(SRC_UNUSED14,     "unused",      0) \
     M(SRC_UNUSED15,     "unused",      0) \
     M(SRC_UNUSED16,     "unused",      0) \

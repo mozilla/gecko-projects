@@ -73,11 +73,15 @@ class NewRenderer : public RendererEvent {
     bool allow_texture_swizzling = gfx::gfxVars::UseGLSwizzle();
     bool isMainWindow = true;  // TODO!
     bool supportLowPriorityTransactions = isMainWindow;
+    bool supportLowPriorityThreadpool =
+        supportLowPriorityTransactions &&
+        StaticPrefs::gfx_webrender_enable_low_priority_pool();
     bool supportPictureCaching = isMainWindow;
     wr::Renderer* wrRenderer = nullptr;
     if (!wr_window_new(
             aWindowId, mSize.width, mSize.height,
-            supportLowPriorityTransactions, allow_texture_swizzling,
+            supportLowPriorityTransactions, supportLowPriorityThreadpool,
+            allow_texture_swizzling,
             StaticPrefs::gfx_webrender_picture_caching() &&
                 supportPictureCaching,
 #ifdef NIGHTLY_BUILD
@@ -92,7 +96,8 @@ class NewRenderer : public RendererEvent {
             aRenderThread.GetShaders()
                 ? aRenderThread.GetShaders()->RawShaders()
                 : nullptr,
-            aRenderThread.ThreadPool().Raw(), &WebRenderMallocSizeOf,
+            aRenderThread.ThreadPool().Raw(),
+            aRenderThread.ThreadPoolLP().Raw(), &WebRenderMallocSizeOf,
             &WebRenderMallocEnclosingSizeOf, (uint32_t)wr::RenderRoot::Default,
             compositor->ShouldUseNativeCompositor() ? compositor.get()
                                                     : nullptr,
@@ -258,9 +263,9 @@ void TransactionWrapper::UpdatePinchZoom(float aZoom) {
   wr_transaction_pinch_zoom(mTxn, aZoom);
 }
 
-void TransactionWrapper::UpdateIsTransformPinchZooming(uint64_t aAnimationId,
+void TransactionWrapper::UpdateIsTransformAsyncZooming(uint64_t aAnimationId,
                                                        bool aIsZooming) {
-  wr_transaction_set_is_transform_pinch_zooming(mTxn, aAnimationId, aIsZooming);
+  wr_transaction_set_is_transform_async_zooming(mTxn, aAnimationId, aIsZooming);
 }
 
 /*static*/
@@ -416,19 +421,47 @@ void WebRenderAPI::SendTransactions(
   }
 }
 
+enum SideBitsPacked {
+  eSideBitsPackedTop = 0x1000,
+  eSideBitsPackedRight = 0x2000,
+  eSideBitsPackedBottom = 0x4000,
+  eSideBitsPackedLeft = 0x8000
+};
+
+SideBits ExtractSideBitsFromHitInfoBits(uint16_t& aHitInfoBits) {
+  SideBits sideBits = SideBits::eNone;
+  if (aHitInfoBits & eSideBitsPackedTop) {
+    sideBits |= SideBits::eTop;
+  }
+  if (aHitInfoBits & eSideBitsPackedRight) {
+    sideBits |= SideBits::eRight;
+  }
+  if (aHitInfoBits & eSideBitsPackedBottom) {
+    sideBits |= SideBits::eBottom;
+  }
+  if (aHitInfoBits & eSideBitsPackedLeft) {
+    sideBits |= SideBits::eLeft;
+  }
+
+  aHitInfoBits &= 0x0fff;
+  return sideBits;
+}
+
 bool WebRenderAPI::HitTest(const wr::WorldPoint& aPoint,
                            wr::WrPipelineId& aOutPipelineId,
                            layers::ScrollableLayerGuid::ViewID& aOutScrollId,
-                           gfx::CompositorHitTestInfo& aOutHitInfo) {
-  static_assert(DoesCompositorHitTestInfoFitIntoBits<16>(),
+                           gfx::CompositorHitTestInfo& aOutHitInfo,
+                           SideBits& aOutSideBits) {
+  static_assert(DoesCompositorHitTestInfoFitIntoBits<12>(),
                 "CompositorHitTestFlags MAX value has to be less than number "
-                "of bits in uint16_t");
+                "of bits in uint16_t minus 4 for SideBitsPacked");
 
   uint16_t serialized = static_cast<uint16_t>(aOutHitInfo.serialize());
   const bool result = wr_api_hit_test(mDocHandle, aPoint, &aOutPipelineId,
                                       &aOutScrollId, &serialized);
 
   if (result) {
+    aOutSideBits = ExtractSideBitsFromHitInfoBits(serialized);
     aOutHitInfo.deserialize(serialized);
   }
   return result;
@@ -1356,26 +1389,53 @@ DisplayListBuilder::GetContainingFixedPosScrollTarget(
              : Nothing();
 }
 
+Maybe<SideBits> DisplayListBuilder::GetContainingFixedPosSideBits(
+    const ActiveScrolledRoot* aAsr) {
+  return mActiveFixedPosTracker
+             ? mActiveFixedPosTracker->GetSideBitsForASR(aAsr)
+             : Nothing();
+}
+
+uint16_t SideBitsToHitInfoBits(SideBits aSideBits) {
+  uint16_t ret = 0;
+  if (aSideBits & SideBits::eTop) {
+    ret |= eSideBitsPackedTop;
+  }
+  if (aSideBits & SideBits::eRight) {
+    ret |= eSideBitsPackedRight;
+  }
+  if (aSideBits & SideBits::eBottom) {
+    ret |= eSideBitsPackedBottom;
+  }
+  if (aSideBits & SideBits::eLeft) {
+    ret |= eSideBitsPackedLeft;
+  }
+  return ret;
+}
+
 void DisplayListBuilder::SetHitTestInfo(
     const layers::ScrollableLayerGuid::ViewID& aScrollId,
-    gfx::CompositorHitTestInfo aHitInfo) {
-  static_assert(DoesCompositorHitTestInfoFitIntoBits<16>(),
+    gfx::CompositorHitTestInfo aHitInfo, SideBits aSideBits) {
+  static_assert(DoesCompositorHitTestInfoFitIntoBits<12>(),
                 "CompositorHitTestFlags MAX value has to be less than number "
-                "of bits in uint16_t");
+                "of bits in uint16_t minus 4 for SideBitsPacked");
 
-  wr_set_item_tag(mWrState, aScrollId,
-                  static_cast<uint16_t>(aHitInfo.serialize()));
+  uint16_t hitInfoBits = static_cast<uint16_t>(aHitInfo.serialize()) |
+                         SideBitsToHitInfoBits(aSideBits);
+
+  wr_set_item_tag(mWrState, aScrollId, hitInfoBits);
 }
 
 void DisplayListBuilder::ClearHitTestInfo() { wr_clear_item_tag(mWrState); }
 
 DisplayListBuilder::FixedPosScrollTargetTracker::FixedPosScrollTargetTracker(
     DisplayListBuilder& aBuilder, const ActiveScrolledRoot* aAsr,
-    layers::ScrollableLayerGuid::ViewID aScrollId)
+    layers::ScrollableLayerGuid::ViewID aScrollId, SideBits aSideBits)
     : mParentTracker(aBuilder.mActiveFixedPosTracker),
       mBuilder(aBuilder),
       mAsr(aAsr),
-      mScrollId(aScrollId) {
+      mScrollId(aScrollId),
+      mSideBits(aSideBits) {
   aBuilder.mActiveFixedPosTracker = this;
 }
 
@@ -1388,6 +1448,12 @@ Maybe<layers::ScrollableLayerGuid::ViewID>
 DisplayListBuilder::FixedPosScrollTargetTracker::GetScrollTargetForASR(
     const ActiveScrolledRoot* aAsr) {
   return aAsr == mAsr ? Some(mScrollId) : Nothing();
+}
+
+Maybe<SideBits>
+DisplayListBuilder::FixedPosScrollTargetTracker::GetSideBitsForASR(
+    const ActiveScrolledRoot* aAsr) {
+  return aAsr == mAsr ? Some(mSideBits) : Nothing();
 }
 
 already_AddRefed<gfxContext> DisplayListBuilder::GetTextContext(

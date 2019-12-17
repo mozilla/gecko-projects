@@ -389,21 +389,10 @@ impl Display {
                 };
                 Display::from3(DisplayOutside::Block, inside, self.is_list_item())
             },
-            // If this pref is true, then we'll blockify "-moz-inline-box" to
-            // "-moz-box", and blockify "-moz-box" to itself. Otherwise, we
-            // blockify both to "block".
             #[cfg(feature = "gecko")]
-            DisplayOutside::XUL => {
-                if static_prefs::pref!(
-                    "layout.css.xul-box-display-values.survive-blockification.enabled"
-                ) {
-                    match self.inside() {
-                        DisplayInside::MozInlineBox | DisplayInside::MozBox => Display::MozBox,
-                        _ => Display::Block,
-                    }
-                } else {
-                    Display::Block
-                }
+            DisplayOutside::XUL => match self.inside() {
+                DisplayInside::MozInlineBox | DisplayInside::MozBox => Display::MozBox,
+                _ => Display::Block,
             },
             DisplayOutside::Block | DisplayOutside::None => *self,
             #[cfg(any(feature = "servo-layout-2013", feature = "gecko"))]
@@ -454,10 +443,11 @@ impl ToCss for Display {
     where
         W: fmt::Write,
     {
+        #[cfg(any(feature = "servo-layout-2013", feature = "gecko"))]
         debug_assert_ne!(
             self.inside(),
             DisplayInside::Flow,
-            "`flow` never appears in `display` computed value"
+            "`flow` fears in `display` computed value"
         );
         let outside = self.outside();
         let inside = match self.inside() {
@@ -1153,7 +1143,7 @@ fn change_bits_for_longhand(longhand: LonghandId) -> WillChangeBits {
         #[cfg(feature = "gecko")]
         LonghandId::Translate | LonghandId::Rotate | LonghandId::Scale | LonghandId::OffsetPath => {
             WillChangeBits::TRANSFORM
-        }
+        },
         _ => WillChangeBits::empty(),
     };
 

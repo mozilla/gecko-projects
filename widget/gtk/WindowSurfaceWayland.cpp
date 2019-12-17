@@ -503,8 +503,6 @@ static void frame_callback_handler(void* data, struct wl_callback* callback,
                                    uint32_t time) {
   auto surface = reinterpret_cast<WindowSurfaceWayland*>(data);
   surface->FrameCallbackHandler();
-
-  gfxPlatformGtk::GetPlatform()->SetWaylandLastVsync(time);
 }
 
 static const struct wl_callback_listener frame_listener = {
@@ -564,7 +562,7 @@ WindowSurfaceWayland::~WindowSurfaceWayland() {
 
 bool WindowSurfaceWayland::UseDMABufBackend() {
   if (!mUseDMABufInitialized) {
-    mUseDMABuf = nsWaylandDisplay::IsDMABufEnabled();
+    mUseDMABuf = nsWaylandDisplay::IsDMABufBasicEnabled();
     LOGWAYLAND(("WindowSurfaceWayland::UseDMABufBackend DMABuf state %d\n",
                 mUseDMABuf));
     mUseDMABufInitialized = true;
@@ -775,7 +773,7 @@ static bool IsWindowFullScreenUpdate(
     const LayoutDeviceIntRegion& aUpdatedRegion) {
   if (aUpdatedRegion.GetNumRects() > 1) return false;
 
-  IntRect rect = aUpdatedRegion.RectIter().Get().ToUnknownRect();
+  gfx::IntRect rect = aUpdatedRegion.RectIter().Get().ToUnknownRect();
   return (rect.x == 0 && rect.y == 0 && aScreenRect.width == rect.width &&
           aScreenRect.height == rect.height);
 }
