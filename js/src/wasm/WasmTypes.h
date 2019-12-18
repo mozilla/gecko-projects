@@ -467,7 +467,22 @@ class ValType {
     return PackedTypeCodeToBits(tc_);
   }
 
-  bool isRef() const {
+  bool isAnyRef() const { return UnpackTypeCodeType(tc_) == TypeCode::AnyRef; }
+
+  bool isNullRef() const {
+    return UnpackTypeCodeType(tc_) == TypeCode::NullRef;
+  }
+
+  bool isFuncRef() const {
+    return UnpackTypeCodeType(tc_) == TypeCode::FuncRef;
+  }
+
+  bool isNullable() const {
+    MOZ_ASSERT(isReference());
+    return true;
+  }
+
+  bool isTypeIndex() const {
     MOZ_ASSERT(isValid());
     return UnpackTypeCodeType(tc_) == TypeCode::Ref;
   }
@@ -933,7 +948,7 @@ class MOZ_NON_PARAM Val : public LitVal {
     u.ref_ = val;
   }
   explicit Val(ValType type, FuncRef val) : LitVal(type, AnyRef::null()) {
-    MOZ_ASSERT(type == RefType::func());
+    MOZ_ASSERT(type.isFuncRef());
     u.ref_ = val.asAnyRef();
   }
   void trace(JSTracer* trc);
@@ -1020,12 +1035,12 @@ class FuncType {
   // as are all reference types apart from TypeIndex.
   bool temporarilyUnsupportedReftypeForEntry() const {
     for (ValType arg : args()) {
-      if (arg.isReference() && arg != RefType::any()) {
+      if (arg.isReference() && !arg.isAnyRef()) {
         return true;
       }
     }
     for (ValType result : results()) {
-      if (result.isRef()) {
+      if (result.isTypeIndex()) {
         return true;
       }
     }
@@ -1035,12 +1050,12 @@ class FuncType {
   // allowed, as are all reference types apart from TypeIndex.
   bool temporarilyUnsupportedReftypeForInlineEntry() const {
     for (ValType arg : args()) {
-      if (arg.isReference() && arg != RefType::any()) {
+      if (arg.isReference() && !arg.isAnyRef()) {
         return true;
       }
     }
     for (ValType result : results()) {
-      if (result.isRef()) {
+      if (result.isTypeIndex()) {
         return true;
       }
     }
@@ -1050,12 +1065,12 @@ class FuncType {
   // reference type parameters of all types except TypeIndex.
   bool temporarilyUnsupportedReftypeForExit() const {
     for (ValType arg : args()) {
-      if (arg.isRef()) {
+      if (arg.isTypeIndex()) {
         return true;
       }
     }
     for (ValType result : results()) {
-      if (result.isReference() && result != RefType::any()) {
+      if (result.isReference() && !result.isAnyRef()) {
         return true;
       }
     }
@@ -1070,14 +1085,14 @@ class FuncType {
     return false;
   }
 #ifdef WASM_PRIVATE_REFTYPES
-  bool exposesRef() const {
+  bool exposesTypeIndex() const {
     for (const ValType& arg : args()) {
-      if (arg.isRef()) {
+      if (arg.isTypeIndex()) {
         return true;
       }
     }
     for (const ValType& result : results()) {
-      if (result.isRef()) {
+      if (result.isTypeIndex()) {
         return true;
       }
     }
@@ -2227,12 +2242,16 @@ struct Limits {
 };
 
 // TableDesc describes a table as well as the offset of the table's base pointer
-// in global memory. The TableKind determines the representation:
+// in global memory.
+//
+// The TableKind determines the representation:
 //  - AnyRef: a wasm anyref word (wasm::AnyRef)
 //  - NullRef: as AnyRef
 //  - FuncRef: a two-word FunctionTableElem (wasm indirect call ABI)
 //  - AsmJS: a two-word FunctionTableElem (asm.js ABI)
 // Eventually there should be a single unified AnyRef representation.
+//
+// TableKind::NullRef is a reasonable default initializer, if one is needed.
 
 enum class TableKind { AnyRef, NullRef, FuncRef, AsmJS };
 

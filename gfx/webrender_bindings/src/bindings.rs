@@ -33,7 +33,7 @@ use webrender::{
     BinaryRecorder, Compositor, DebugFlags, Device,
     NativeSurfaceId, PipelineInfo, ProfilerHooks, RecordedFrameHandle, Renderer, RendererOptions, RendererStats,
     SceneBuilderHooks, ShaderPrecacheFlags, Shaders, ThreadListener, UploadMethod, VertexUsageHint,
-    WrShaders, set_profiler_hooks, CompositorConfig, NativeSurfaceInfo
+    WrShaders, set_profiler_hooks, CompositorConfig, NativeSurfaceInfo, NativeTileId
 };
 use thread_profiler::register_thread_with_profiler;
 use moz2d_renderer::Moz2dBlobImageHandler;
@@ -1218,23 +1218,46 @@ fn wr_device_new(gl_context: *mut c_void, pc: Option<&mut WrProgramCache>)
       None => None,
     };
 
-    Device::new(gl, resource_override_path, upload_method, cached_programs, false, true, true, None, false)
+    Device::new(
+        gl,
+        resource_override_path,
+        upload_method,
+        cached_programs,
+        false,
+        true,
+        true,
+        None,
+        false,
+        false,
+    )
 }
 
 extern "C" {
     fn wr_compositor_create_surface(
         compositor: *mut c_void,
         id: NativeSurfaceId,
-        size: DeviceIntSize,
-        is_opaque: bool,
+        tile_size: DeviceIntSize,
     );
     fn wr_compositor_destroy_surface(
         compositor: *mut c_void,
         id: NativeSurfaceId,
     );
-    fn wr_compositor_bind(
+    fn wr_compositor_create_tile(
         compositor: *mut c_void,
         id: NativeSurfaceId,
+        x: i32,
+        y: i32,
+        is_opaque: bool,
+    );
+    fn wr_compositor_destroy_tile(
+        compositor: *mut c_void,
+        id: NativeSurfaceId,
+        x: i32,
+        y: i32,
+    );
+    fn wr_compositor_bind(
+        compositor: *mut c_void,
+        id: NativeTileId,
         offset: &mut DeviceIntPoint,
         fbo_id: &mut u32,
         dirty_rect: DeviceIntRect,
@@ -1256,15 +1279,13 @@ impl Compositor for WrCompositor {
     fn create_surface(
         &mut self,
         id: NativeSurfaceId,
-        size: DeviceIntSize,
-        is_opaque: bool,
+        tile_size: DeviceIntSize,
     ) {
         unsafe {
             wr_compositor_create_surface(
                 self.0,
                 id,
-                size,
-                is_opaque,
+                tile_size,
             );
         }
     }
@@ -1281,9 +1302,39 @@ impl Compositor for WrCompositor {
         }
     }
 
+    fn create_tile(
+        &mut self,
+        id: NativeTileId,
+        is_opaque: bool,
+    ) {
+        unsafe {
+            wr_compositor_create_tile(
+                self.0,
+                id.surface_id,
+                id.x,
+                id.y,
+                is_opaque,
+            );
+        }
+    }
+
+    fn destroy_tile(
+        &mut self,
+        id: NativeTileId,
+    ) {
+        unsafe {
+            wr_compositor_destroy_tile(
+                self.0,
+                id.surface_id,
+                id.x,
+                id.y,
+            );
+        }
+    }
+
     fn bind(
         &mut self,
-        id: NativeSurfaceId,
+        id: NativeTileId,
         dirty_rect: DeviceIntRect,
     ) -> NativeSurfaceInfo {
         let mut surface_info = NativeSurfaceInfo {
@@ -1373,7 +1424,8 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
                                 out_handle: &mut *mut DocumentHandle,
                                 out_renderer: &mut *mut Renderer,
                                 out_max_texture_size: *mut i32,
-                                enable_gpu_markers: bool)
+                                enable_gpu_markers: bool,
+                                panic_on_gl_error: bool)
                                 -> bool {
     assert!(unsafe { is_in_render_thread() });
 
@@ -1479,6 +1531,7 @@ pub extern "C" fn wr_window_new(window_id: WrWindowId,
         surface_origin_is_top_left,
         compositor_config,
         enable_gpu_markers,
+        panic_on_gl_error,
         ..Default::default()
     };
 

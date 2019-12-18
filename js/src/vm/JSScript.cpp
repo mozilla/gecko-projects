@@ -4507,7 +4507,7 @@ bool JSScript::fullyInitFromEmitter(JSContext* cx, HandleScript script,
   script->setFlag(ImmutableFlags::Strict, bce->sc->strict());
   script->setFlag(ImmutableFlags::BindingsAccessedDynamically,
                   bce->sc->bindingsAccessedDynamically());
-  script->setFlag(ImmutableFlags::HasCallSiteObj, bce->hasCallSiteObj);
+  script->setFlag(ImmutableFlags::HasCallSiteObj, bce->sc->hasCallSiteObj());
   script->setFlag(ImmutableFlags::IsForEval, bce->sc->isEvalContext());
   script->setFlag(ImmutableFlags::IsModule, bce->sc->isModuleContext());
   script->setFlag(ImmutableFlags::IsFunction, bce->sc->isFunctionBox());
@@ -4997,7 +4997,7 @@ static JSObject* CloneScriptObject(JSContext* cx, PrivateScriptData* srcData,
       }
     }
 
-    Scope* enclosing = innerFun->nonLazyScript()->enclosingScope();
+    Scope* enclosing = innerFun->enclosingScope();
     uint32_t scopeIndex = FindScopeIndex(srcData->gcthings(), *enclosing);
     RootedScope enclosingClone(cx, &gcThings[scopeIndex].get().as<Scope>());
     return CloneInnerInterpretedFunction(cx, enclosingClone, innerFun,
@@ -5461,7 +5461,7 @@ Scope* JSScript::innermostScope(jsbytecode* pc) {
   return bodyScope();
 }
 
-void JSScript::setArgumentsHasVarBinding() {
+void BaseScript::setArgumentsHasVarBinding() {
   setFlag(ImmutableFlags::ArgumentsHasVarBinding);
   setFlag(MutableFlags::NeedsArgsAnalysis);
 }
@@ -5660,6 +5660,7 @@ LazyScript* LazyScript::Create(
   lazy->setFlag(ImmutableFlags::HasModuleGoal,
                 (parseGoal == frontend::ParseGoal::Module));
   lazy->setFlag(ImmutableFlags::HasInnerFunctions, !innerFunctionBoxes.empty());
+  lazy->setFlag(ImmutableFlags::IsFunction);
 
   // Fill in gcthing data with inner functions followed by binding data.
   mozilla::Span<JS::GCCellPtr> gcThings =

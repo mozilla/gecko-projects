@@ -1846,11 +1846,6 @@
   value: false
   mirror: always
 
-- name: dom.metaElement.setCookie.allowed
-  type: bool
-  value: false
-  mirror: always
-
 # Timeout clamp in ms for timeouts we clamp.
 - name: dom.min_timeout_value
   type: int32_t
@@ -3730,6 +3725,15 @@
 #ifdef NIGHTLY_BUILD
   # Keep this pref hidden on non-nightly builds to avoid people accidentally
   # turning it on.
+- name: gfx.webrender.panic-on-gl-error
+  type: bool
+  value: false
+  mirror: once
+#endif
+
+#ifdef NIGHTLY_BUILD
+  # Keep this pref hidden on non-nightly builds to avoid people accidentally
+  # turning it on.
 -   name: gfx.webrender.start-debug-server
     type: RelaxedAtomicBool
     value: false
@@ -3753,8 +3757,10 @@
 
 - name: gfx.webrender.enable-low-priority-pool
   type: RelaxedAtomicBool
-#if defined(XP_WIN)
   # If affinity and priority code is done for the platform, enable this:
+#if defined(XP_WIN)
+  value: true
+#elif defined(XP_LINUX) && !defined(ANDROID)
   value: true
 #else
   value: false
@@ -5630,7 +5636,7 @@
 # Whether to disable the mfenced element.
 - name: mathml.mfenced_element.disabled
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 # Whether to disable legacy names "thin", "thick" and "medium" for the
@@ -5839,6 +5845,27 @@
 # objects. If a scheme is present when we check for support, we must ensure we
 # support that scheme in order to provide key system access.
 - name: media.eme.encrypted-media-encryption-scheme.enabled
+  type: bool
+  value: false
+  mirror: always
+
+- name: media.eme.audio.blank
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+- name: media.eme.video.blank
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+- name: media.eme.chromium-api.video-shmems
+  type: RelaxedAtomicUint32
+  value: 6
+  mirror: always
+
+# Is support for MediaKeys.getStatusForPolicy enabled?
+- name: media.eme.hdcp-policy-check.enabled
   type: bool
   value: false
   mirror: always
@@ -6096,20 +6123,6 @@
 - name: media.gmp.decoder.enabled
   type: RelaxedAtomicBool
   value: false
-  mirror: always
-
-- name: media.eme.audio.blank
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-- name: media.eme.video.blank
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-
-- name: media.eme.chromium-api.video-shmems
-  type: RelaxedAtomicUint32
-  value: 6
   mirror: always
 
 # Whether to suspend decoding of videos in background tabs.
@@ -6474,12 +6487,6 @@
 - name: media.allowed-to-play.enabled
   type: bool
   value: @IS_NIGHTLY_BUILD@
-  mirror: always
-
-# Is support for MediaKeys.getStatusForPolicy enabled?
-- name: media.eme.hdcp-policy-check.enabled
-  type: bool
-  value: false
   mirror: always
 
 # Is support for MediaDevices.ondevicechange enabled?

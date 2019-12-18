@@ -50,12 +50,12 @@ replace-with = "vendored-sources"
 [source."https://github.com/PLSysSec/rlbox_lucet_sandbox/"]
 git = "https://github.com/PLSysSec/rlbox_lucet_sandbox/"
 replace-with = "vendored-sources"
-rev = "997c648eb0eaeaaa7a00a9eee20431f750b4e190"
+rev = "9068928a00f54db2a060704e972007b0b5247ca9"
 
 [source."https://github.com/PLSysSec/lucet_sandbox_compiler"]
-branch = "master"
 git = "https://github.com/PLSysSec/lucet_sandbox_compiler"
 replace-with = "vendored-sources"
+rev = "36f0e4deb5b080dfee73042fec655d3723c7a12b"
 
 [source."https://github.com/NikVolf/tokio-named-pipes"]
 branch = "stable"
@@ -65,7 +65,7 @@ replace-with = "vendored-sources"
 [source."https://github.com/ChunMinChang/cubeb-coreaudio-rs"]
 git = "https://github.com/ChunMinChang/cubeb-coreaudio-rs"
 replace-with = "vendored-sources"
-rev = "5fcbd99e1b7356be1efcdc41654d495bd4c71c8c"
+rev = "868d847c2e95096b6eec629dfed77ef363363ecb"
 
 [source.crates-io]
 replace-with = "vendored-sources"

@@ -409,6 +409,8 @@ package org.mozilla.geckoview {
     ctor public GeckoResult(GeckoResult<T>);
     method @NonNull public GeckoResult<Void> accept(@Nullable GeckoResult.Consumer<T>);
     method @NonNull public GeckoResult<Void> accept(@Nullable GeckoResult.Consumer<T>, @Nullable GeckoResult.Consumer<Throwable>);
+    method @NonNull public static <V> GeckoResult<List<V>> allOf(@NonNull GeckoResult<V>);
+    method @NonNull public static <V> GeckoResult<List<V>> allOf(@Nullable List<GeckoResult<V>>);
     method public synchronized void complete(@Nullable T);
     method public synchronized void completeExceptionally(@NonNull Throwable);
     method @NonNull public <U> GeckoResult<U> exceptionally(@NonNull GeckoResult.OnExceptionListener<U>);
@@ -1421,8 +1423,8 @@ package org.mozilla.geckoview {
   }
 
   public class WebExtension {
-    ctor public WebExtension(@NonNull String, @NonNull String, long);
-    ctor public WebExtension(@NonNull String);
+    ctor public WebExtension(@NonNull String, @NonNull String, long, @NonNull WebExtensionController);
+    ctor public WebExtension(@NonNull String, @NonNull WebExtensionController);
     method @AnyThread public void setActionDelegate(@Nullable WebExtension.ActionDelegate);
     method @UiThread public void setMessageDelegate(@Nullable WebExtension.MessageDelegate, @NonNull String);
     field public final long flags;
@@ -1547,6 +1549,7 @@ package org.mozilla.geckoview {
     method @UiThread @Nullable public WebExtensionController.PromptDelegate getPromptDelegate();
     method @UiThread @Nullable public WebExtensionController.TabDelegate getTabDelegate();
     method @NonNull @AnyThread public GeckoResult<WebExtension> install(@NonNull String);
+    method @AnyThread @NonNull public GeckoResult<List<WebExtension>> list();
     method @UiThread public void setPromptDelegate(@Nullable WebExtensionController.PromptDelegate);
     method @UiThread public void setTabDelegate(@Nullable WebExtensionController.TabDelegate);
     method @NonNull @AnyThread public GeckoResult<Void> uninstall(@NonNull WebExtension);

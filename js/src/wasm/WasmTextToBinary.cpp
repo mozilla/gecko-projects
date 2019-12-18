@@ -4652,9 +4652,9 @@ static bool ParseMemory(WasmParseContext& c) {
 }
 
 #ifdef ENABLE_WASM_GC
-// Custom section for experimental work.  The size of this section should always
-// be 1 byte, and that byte is a nonzero varint7 carrying the version number
-// being opted into.
+// Custom section for experimental work.  The size of this section should
+// always be 1 byte, and that byte is a nonzero varint7 carrying the version
+// number being opted into.
 static bool ParseGcFeatureOptIn(WasmParseContext& c) {
   WasmToken token;
   if (!c.ts.getIf(WasmToken::Index, &token)) {
@@ -4715,16 +4715,16 @@ static bool ParseGlobalType(WasmParseContext& c, AstValType* type,
 static bool ParseElemType(WasmParseContext& c, TableKind* tableKind) {
   WasmToken token;
   if (c.ts.getIf(WasmToken::ValueType, &token)) {
-    if (token.valueType() == RefType::func()) {
+    if (token.valueType().isFuncRef()) {
       *tableKind = TableKind::FuncRef;
       return true;
     }
 #ifdef ENABLE_WASM_REFTYPES
-    if (token.valueType() == RefType::any()) {
+    if (token.valueType().isAnyRef()) {
       *tableKind = TableKind::AnyRef;
       return true;
     }
-    if (token.valueType() == RefType::null()) {
+    if (token.valueType().isNullRef()) {
       *tableKind = TableKind::NullRef;
       return true;
     }
@@ -5076,8 +5076,8 @@ static AstElemSegment* ParseElemSegment(WasmParseContext& c) {
   // Active initializer for a given table of functions:
   //   (elem <table-use> <init-expr> func <fnref> ...)
   //
-  // Active initializer for a given table of functions, allowing null.  Note the
-  // parens are required also around ref.null:
+  // Active initializer for a given table of functions, allowing null.  Note
+  // the parens are required also around ref.null:
   //   (elem <table-use> <init-expr> <elem-type>
   //         "(" (ref.func <fnref>|ref.null) ")" ...)
   //
@@ -5111,8 +5111,8 @@ static AstElemSegment* ParseElemSegment(WasmParseContext& c) {
     haveTableref = true;
   }
 
-  // The order of clauses matters because ParseInitializerExpression changes the
-  // state of the token stream, we can't recover after that fails.
+  // The order of clauses matters because ParseInitializerExpression changes
+  // the state of the token stream, we can't recover after that fails.
 
   bool nakedFnrefs = false;
   if (haveTableref) {
@@ -6098,7 +6098,7 @@ static bool ResolveModule(LifoAlloc& lifo, AstModule* module,
     switch (imp->kind()) {
       case DefinitionKind::Function:
         if (!r.registerFuncName(imp->name(), lastFuncIndex++)) {
-          return r.fail("duplicate import");
+          return r.fail("duplicate function import");
         }
         if (!r.resolveSignature(imp->funcType())) {
           return false;
@@ -6106,7 +6106,7 @@ static bool ResolveModule(LifoAlloc& lifo, AstModule* module,
         break;
       case DefinitionKind::Global:
         if (!r.registerGlobalName(imp->name(), lastGlobalIndex++)) {
-          return r.fail("duplicate import");
+          return r.fail("duplicate global import");
         }
         if (!ResolveType(r, imp->global().type())) {
           return false;
@@ -6114,12 +6114,12 @@ static bool ResolveModule(LifoAlloc& lifo, AstModule* module,
         break;
       case DefinitionKind::Memory:
         if (!r.registerMemoryName(imp->name(), lastMemoryIndex++)) {
-          return r.fail("duplicate import");
+          return r.fail("duplicate memory import");
         }
         break;
       case DefinitionKind::Table:
         if (!r.registerTableName(imp->name(), lastTableIndex++)) {
-          return r.fail("duplicate import");
+          return r.fail("duplicate table import");
         }
         break;
     }
@@ -6136,7 +6136,7 @@ static bool ResolveModule(LifoAlloc& lifo, AstModule* module,
 
   for (AstGlobal* global : module->globals()) {
     if (!r.registerGlobalName(global->name(), lastGlobalIndex++)) {
-      return r.fail("duplicate import");
+      return r.fail("duplicate global import");
     }
     if (!ResolveType(r, global->type())) {
       return false;
@@ -6151,7 +6151,7 @@ static bool ResolveModule(LifoAlloc& lifo, AstModule* module,
       continue;
     }
     if (!r.registerTableName(table.name, lastTableIndex++)) {
-      return r.fail("duplicate import");
+      return r.fail("duplicate table import");
     }
   }
 
@@ -6160,7 +6160,7 @@ static bool ResolveModule(LifoAlloc& lifo, AstModule* module,
       continue;
     }
     if (!r.registerMemoryName(memory.name, lastMemoryIndex++)) {
-      return r.fail("duplicate import");
+      return r.fail("duplicate memory import");
     }
   }
 
@@ -7384,9 +7384,9 @@ static bool EncodeDataCountSection(Encoder& e, AstModule& module) {
 }
 
 static bool EncodeElemSegment(Encoder& e, AstElemSegment& segment) {
-  // There are three bits that control the encoding of an element segment for up
-  // to eight possible encodings. We try to select the encoding for an element
-  // segment that takes the least amount of space.  We can use various
+  // There are three bits that control the encoding of an element segment for
+  // up to eight possible encodings. We try to select the encoding for an
+  // element segment that takes the least amount of space.  We can use various
   // compressed encodings if some or all of these are true:
   //
   // - the selected element type is FuncRef
@@ -7406,10 +7406,9 @@ static bool EncodeElemSegment(Encoder& e, AstElemSegment& segment) {
     }
   }
 
-  ElemSegmentPayload payload =
-      hasRefNull || segment.elemType() != RefType::func()
-          ? ElemSegmentPayload::ElemExpression
-          : ElemSegmentPayload::ExternIndex;
+  ElemSegmentPayload payload = hasRefNull || !segment.elemType().isFuncRef()
+                                   ? ElemSegmentPayload::ElemExpression
+                                   : ElemSegmentPayload::ExternIndex;
 
   ElemSegmentKind kind;
   switch (segment.kind()) {

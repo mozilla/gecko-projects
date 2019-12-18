@@ -240,17 +240,30 @@ struct ModuleEnvironment {
   bool isRefSubtypeOf(ValType one, ValType two) const {
     MOZ_ASSERT(one.isReference());
     MOZ_ASSERT(two.isReference());
+    // Anything's a subtype of itself.
+    if (one == two) {
+      return true;
+    }
 #if defined(ENABLE_WASM_REFTYPES)
+    // Anything's a subtype of AnyRef.
+    if (two.isAnyRef()) {
+      return true;
+    }
+    // NullRef is a subtype of nullable types.
+    if (one.isNullRef()) {
+      return two.isNullable();
+    }
 #  if defined(ENABLE_WASM_GC)
-    return one == two || two == RefType::any() || one == RefType::null() ||
-           (one.isRef() && two.isRef() && gcTypesEnabled() &&
-            isStructPrefixOf(two, one));
-#  else
-    return one == two || two == RefType::any() || one == RefType::null();
+    // Struct One is a subtype of struct Two if Two is a prefix of One.
+    if (gcTypesEnabled() && isStructType(one) && isStructType(two)) {
+      return isStructPrefixOf(two, one);
+    }
 #  endif
-#else
-    return one == two;
 #endif
+    return false;
+  }
+  bool isStructType(ValType t) const {
+    return t.isTypeIndex() && types[t.refType().typeIndex()].isStructType();
   }
 
  private:
@@ -405,7 +418,7 @@ class Encoder {
   MOZ_MUST_USE bool writeVarS64(int64_t i) { return writeVarS<int64_t>(i); }
   MOZ_MUST_USE bool writeValType(ValType type) {
     static_assert(size_t(TypeCode::Limit) <= UINT8_MAX, "fits");
-    if (type.isRef()) {
+    if (type.isTypeIndex()) {
       return writeFixedU8(uint8_t(TypeCode::Ref)) &&
              writeVarU32(type.refType().typeIndex());
     }
@@ -726,8 +739,9 @@ class Decoder {
     if (!readValType(types.length(), refTypesEnabled, gcTypesEnabled, type)) {
       return false;
     }
-    if (type->isRef() && !types[type->refType().typeIndex()].isStructType()) {
-      return fail("ref does not reference a struct type");
+    if (type->isTypeIndex() &&
+        !types[type->refType().typeIndex()].isStructType()) {
+      return fail("type index does not reference a struct type");
     }
     return true;
   }

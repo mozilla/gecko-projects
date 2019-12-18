@@ -240,7 +240,6 @@ class GeckoViewConnection {
 }
 
 function exportExtension(aAddon, aPermissions, aSourceURI) {
-  const { origins, permissions } = aPermissions;
   const {
     creator,
     description,
@@ -272,8 +271,8 @@ function exportExtension(aAddon, aPermissions, aSourceURI) {
     isEnabled: isActive,
     isBuiltIn: isBuiltin,
     metaData: {
-      permissions,
-      origins,
+      permissions: aPermissions ? aPermissions.permissions : [],
+      origins: aPermissions ? aPermissions.origins : [],
       description,
       version,
       creatorName,
@@ -448,12 +447,12 @@ var GeckoViewWebExtension = {
   },
 
   async browserActionClick(aId) {
-    const extension = await this.extensionById(aId);
-    if (!extension) {
+    const policy = WebExtensionPolicy.getByID(aId);
+    if (!policy) {
       return;
     }
 
-    const browserAction = this.browserActions.get(extension);
+    const browserAction = this.browserActions.get(policy.extension);
     if (!browserAction) {
       return;
     }
@@ -462,12 +461,12 @@ var GeckoViewWebExtension = {
   },
 
   async pageActionClick(aId) {
-    const extension = await this.extensionById(aId);
-    if (!extension) {
+    const policy = WebExtensionPolicy.getByID(aId);
+    if (!policy) {
       return;
     }
 
-    const pageAction = this.pageActions.get(extension);
+    const pageAction = this.pageActions.get(policy.extension);
     if (!pageAction) {
       return;
     }
@@ -476,10 +475,13 @@ var GeckoViewWebExtension = {
   },
 
   async actionDelegateAttached(aId) {
-    const extension = await this.extensionById(aId);
-    if (!extension) {
+    const policy = WebExtensionPolicy.getByID(aId);
+    if (!policy) {
+      debug`Could not find extension with id=${aId}`;
       return;
     }
+
+    const { extension } = policy;
 
     const browserAction = this.browserActions.get(extension);
     if (browserAction) {
@@ -639,8 +641,16 @@ var GeckoViewWebExtension = {
       }
 
       case "GeckoView:WebExtension:List": {
-        // TODO
-        aCallback.onError(`Not implemented`);
+        try {
+          const addons = await AddonManager.getAddonsByTypes(["extension"]);
+          const extensions = addons.map(addon =>
+            exportExtension(addon, addon.userPermissions, null)
+          );
+          aCallback.onSuccess({ extensions });
+        } catch (ex) {
+          debug`Failed list ${ex}`;
+          aCallback.onError(`Unexpected error: ${ex}`);
+        }
         break;
       }
 

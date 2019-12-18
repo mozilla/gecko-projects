@@ -49,7 +49,7 @@ use api::channel::{MsgSender, PayloadReceiverHelperMethods};
 use crate::batch::{AlphaBatchContainer, BatchKind, BatchFeatures, BatchTextures, BrushBatchKind, ClipBatchList};
 #[cfg(any(feature = "capture", feature = "replay"))]
 use crate::capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
-use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile, CompositorKind, Compositor};
+use crate::composite::{CompositeState, CompositeTileSurface, CompositeTile, CompositorKind, Compositor, NativeTileId};
 use crate::composite::{CompositorConfig, NativeSurfaceOperationDetails, NativeSurfaceId, NativeSurfaceOperation};
 use crate::debug_colors;
 use crate::debug_render::{DebugItem, DebugRenderer};
@@ -1519,10 +1519,15 @@ impl GpuCacheTexture {
                     return 0
                 }
 
+                let (upload_size, _) = device.required_upload_size_and_stride(
+                    DeviceIntSize::new(MAX_VERTEX_TEXTURE_WIDTH as i32, 1),
+                    texture.get_format(),
+                );
+
                 let mut uploader = device.upload_texture(
                     texture,
                     buffer,
-                    rows_dirty * MAX_VERTEX_TEXTURE_WIDTH,
+                    rows_dirty * upload_size,
                 );
 
                 for (row_index, row) in rows.iter_mut().enumerate() {
@@ -1663,8 +1668,12 @@ impl<T> VertexDataTexture<T> {
         );
 
         debug_assert!(len <= data.capacity(), "CPU copy will read out of bounds");
+        let (upload_size, _) = device.required_upload_size_and_stride(
+            rect.size,
+            self.texture().get_format(),
+        );
         device
-            .upload_texture(self.texture(), &self.pbo, 0)
+            .upload_texture(self.texture(), &self.pbo, upload_size)
             .upload(rect, 0, None, None, data.as_ptr(), len);
     }
 
@@ -1965,6 +1974,7 @@ impl Renderer {
             options.allow_texture_swizzling,
             options.dump_shader_source.take(),
             options.surface_origin_is_top_left,
+            options.panic_on_gl_error,
         );
 
         let color_cache_formats = device.preferred_color_formats();
@@ -2958,6 +2968,9 @@ impl Renderer {
                 compositor.create_surface(
                     NativeSurfaceId::DEBUG_OVERLAY,
                     framebuffer_size,
+                );
+                compositor.create_tile(
+                    NativeTileId::DEBUG_OVERLAY,
                     false,
                 );
                 self.debug_overlay_state.current_size = Some(framebuffer_size);
@@ -2974,7 +2987,7 @@ impl Renderer {
 
                 // Bind the native surface
                 let surface_info = compositor.bind(
-                    NativeSurfaceId::DEBUG_OVERLAY,
+                    NativeTileId::DEBUG_OVERLAY,
                     DeviceIntRect::new(
                         DeviceIntPoint::zero(),
                         surface_size,
@@ -3454,83 +3467,107 @@ impl Renderer {
                     }
                 }
 
-                for update in update_list.updates {
-                    let TextureCacheUpdate { id, rect, stride, offset, layer_index, format_override, source } = update;
-                    let texture = &self.texture_resolver.texture_cache_map[&id];
+                for (texture_id, updates) in update_list.updates {
+                    let texture = &self.texture_resolver.texture_cache_map[&texture_id];
+                    let device = &mut self.device;
 
-                    let bytes_uploaded = match source {
-                        TextureUpdateSource::Bytes { data } => {
-                            let mut uploader = self.device.upload_texture(
-                                texture,
-                                &self.texture_cache_upload_pbo,
-                                0,
-                            );
-                            let data = &data[offset as usize ..];
-                            uploader.upload(
-                                rect,
-                                layer_index,
-                                stride,
-                                format_override,
-                                data.as_ptr(),
-                                data.len(),
-                            )
-                        }
-                        TextureUpdateSource::External { id, channel_index } => {
-                            let mut uploader = self.device.upload_texture(
-                                texture,
-                                &self.texture_cache_upload_pbo,
-                                0,
-                            );
-                            let handler = self.external_image_handler
-                                .as_mut()
-                                .expect("Found external image, but no handler set!");
-                            // The filter is only relevant for NativeTexture external images.
-                            let dummy_data;
-                            let data = match handler.lock(id, channel_index, ImageRendering::Auto).source {
-                                ExternalImageSource::RawData(data) => {
-                                    &data[offset as usize ..]
-                                }
-                                ExternalImageSource::Invalid => {
-                                    // Create a local buffer to fill the pbo.
-                                    let bpp = texture.get_format().bytes_per_pixel();
-                                    let width = stride.unwrap_or(rect.size.width * bpp);
-                                    let total_size = width * rect.size.height;
-                                    // WR haven't support RGBAF32 format in texture_cache, so
-                                    // we use u8 type here.
-                                    dummy_data = vec![0xFFu8; total_size as usize];
-                                    &dummy_data
-                                }
-                                ExternalImageSource::NativeTexture(eid) => {
-                                    panic!("Unexpected external texture {:?} for the texture cache update of {:?}", eid, id);
-                                }
-                            };
-                            let size = uploader.upload(
-                                rect,
-                                layer_index,
-                                stride,
-                                format_override,
-                                data.as_ptr(),
-                                data.len()
-                            );
-                            handler.unlock(id, channel_index);
-                            size
-                        }
-                        TextureUpdateSource::DebugClear => {
+                    // Calculate the total size of buffer required to upload all updates.
+                    let required_size = updates.iter().map(|update| {
+                        // Perform any debug clears now. As this requires a mutable borrow of device,
+                        // it must be done before all the updates which require a TextureUploader.
+                        if let TextureUpdateSource::DebugClear = update.source  {
                             let draw_target = DrawTarget::from_texture(
                                 texture,
-                                layer_index as usize,
+                                update.layer_index as usize,
                                 false,
                             );
-                            self.device.bind_draw_target(draw_target);
-                            self.device.clear_target(
+                            device.bind_draw_target(draw_target);
+                            device.clear_target(
                                 Some(TEXTURE_CACHE_DBG_CLEAR_COLOR),
                                 None,
-                                Some(draw_target.to_framebuffer_rect(rect.to_i32()))
+                                Some(draw_target.to_framebuffer_rect(update.rect.to_i32()))
                             );
+
                             0
+                        } else {
+                            let (upload_size, _) = device.required_upload_size_and_stride(
+                                update.rect.size,
+                                texture.get_format(),
+                            );
+                            upload_size
                         }
-                    };
-                    self.profile_counters.texture_data_uploaded.add(bytes_uploaded >> 10);
+                    }).sum();
+
+                    if required_size == 0 {
+                        continue;
+                    }
+
+                    // For best performance we use a single TextureUploader for all uploads.
+                    // Using individual TextureUploaders was causing performance issues on some drivers
+                    // due to allocating too many PBOs.
+                    let mut uploader = device.upload_texture(
+                        texture,
+                        &self.texture_cache_upload_pbo,
+                        required_size
+                    );
+
+                    for update in updates {
+                        let TextureCacheUpdate { rect, stride, offset, layer_index, format_override, source } = update;
+
+                        let bytes_uploaded = match source {
+                            TextureUpdateSource::Bytes { data } => {
+                                let data = &data[offset as usize ..];
+                                uploader.upload(
+                                    rect,
+                                    layer_index,
+                                    stride,
+                                    format_override,
+                                    data.as_ptr(),
+                                    data.len(),
+                                )
+                            }
+                            TextureUpdateSource::External { id, channel_index } => {
+                                let handler = self.external_image_handler
+                                    .as_mut()
+                                    .expect("Found external image, but no handler set!");
+                                // The filter is only relevant for NativeTexture external images.
+                                let dummy_data;
+                                let data = match handler.lock(id, channel_index, ImageRendering::Auto).source {
+                                    ExternalImageSource::RawData(data) => {
+                                        &data[offset as usize ..]
+                                    }
+                                    ExternalImageSource::Invalid => {
+                                        // Create a local buffer to fill the pbo.
+                                        let bpp = texture.get_format().bytes_per_pixel();
+                                        let width = stride.unwrap_or(rect.size.width * bpp);
+                                        let total_size = width * rect.size.height;
+                                        // WR haven't support RGBAF32 format in texture_cache, so
+                                        // we use u8 type here.
+                                        dummy_data = vec![0xFFu8; total_size as usize];
+                                        &dummy_data
+                                    }
+                                    ExternalImageSource::NativeTexture(eid) => {
+                                        panic!("Unexpected external texture {:?} for the texture cache update of {:?}", eid, id);
+                                    }
+                                };
+                                let size = uploader.upload(
+                                    rect,
+                                    layer_index,
+                                    stride,
+                                    format_override,
+                                    data.as_ptr(),
+                                    data.len()
+                                );
+                                handler.unlock(id, channel_index);
+                                size
+                            }
+                            TextureUpdateSource::DebugClear => {
+                                // DebugClear updates are handled separately.
+                                0
+                            }
+                        };
+                        self.profile_counters.texture_data_uploaded.add(bytes_uploaded >> 10);
+                    }
                 }
 
                 if update_list.clears_shared_cache {
@@ -4085,7 +4122,7 @@ impl Renderer {
                 CompositeTileSurface::Texture { surface: ResolvedSurfaceTexture::TextureCache { texture, layer } } => {
                     (texture, layer as f32, ColorF::WHITE)
                 }
-                CompositeTileSurface::Texture { surface: ResolvedSurfaceTexture::NativeSurface { .. } } => {
+                CompositeTileSurface::Texture { surface: ResolvedSurfaceTexture::Native { .. } } => {
                     unreachable!("bug: found native surface in simple composite path");
                 }
             };
@@ -5033,23 +5070,21 @@ impl Renderer {
             CompositorConfig::Native { ref mut compositor, .. } => {
                 for op in self.pending_native_surface_updates.drain(..) {
                     match op.details {
-                        NativeSurfaceOperationDetails::CreateSurface { size, is_opaque } => {
-                            let _inserted = self.allocated_native_surfaces.insert(op.id);
+                        NativeSurfaceOperationDetails::CreateSurface { id, tile_size } => {
+                            let _inserted = self.allocated_native_surfaces.insert(id);
                             debug_assert!(_inserted, "bug: creating existing surface");
-
-                            compositor.create_surface(
-                                op.id,
-                                size,
-                                is_opaque,
-                            );
+                            compositor.create_surface(id, tile_size);
                         }
-                        NativeSurfaceOperationDetails::DestroySurface => {
-                            let _existed = self.allocated_native_surfaces.remove(&op.id);
+                        NativeSurfaceOperationDetails::DestroySurface { id } => {
+                            let _existed = self.allocated_native_surfaces.remove(&id);
                             debug_assert!(_existed, "bug: removing unknown surface");
-
-                            compositor.destroy_surface(
-                                op.id,
-                            );
+                            compositor.destroy_surface(id);
+                        }
+                        NativeSurfaceOperationDetails::CreateTile { id, is_opaque } => {
+                            compositor.create_tile(id, is_opaque);
+                        }
+                        NativeSurfaceOperationDetails::DestroyTile { id } => {
+                            compositor.destroy_tile(id);
                         }
                     }
                 }
@@ -5224,7 +5259,7 @@ impl Renderer {
                                         true,
                                     )
                                 }
-                                ResolvedSurfaceTexture::NativeSurface { id, size, .. } => {
+                                ResolvedSurfaceTexture::Native { id, size } => {
                                     let surface_info = match self.compositor_config {
                                         CompositorConfig::Native { ref mut compositor, .. } => {
                                             compositor.bind(id, picture_target.dirty_rect)
@@ -5261,7 +5296,7 @@ impl Renderer {
                             );
 
                             // Native OS surfaces must be unbound at the end of drawing to them
-                            if let ResolvedSurfaceTexture::NativeSurface { .. } = picture_target.surface {
+                            if let ResolvedSurfaceTexture::Native { .. } = picture_target.surface {
                                 match self.compositor_config {
                                     CompositorConfig::Native { ref mut compositor, .. } => {
                                         compositor.unbind();
@@ -6145,6 +6180,9 @@ pub struct RendererOptions {
     /// The configuration options defining how WR composites the final scene.
     pub compositor_config: CompositorConfig,
     pub enable_gpu_markers: bool,
+    /// If true, panic whenever a GL error occurs. This has a significant
+    /// performance impact, so only use when debugging specific problems!
+    pub panic_on_gl_error: bool,
 }
 
 impl Default for RendererOptions {
@@ -6200,6 +6238,7 @@ impl Default for RendererOptions {
             surface_origin_is_top_left: false,
             compositor_config: CompositorConfig::default(),
             enable_gpu_markers: true,
+            panic_on_gl_error: false,
         }
     }
 }
@@ -6736,21 +6775,14 @@ impl CompositeState {
         &self,
         compositor: &mut dyn Compositor,
     ) {
-        // For each tile, update the properties with the native OS compositor,
-        // such as position and clip rect. z-order of the tiles are implicit based
-        // on the order they are added in this loop.
-        for tile in &self.native_tiles {
-            // Extract the native surface id. We should only ever encounter native surfaces here!
-            let id = match tile.surface {
-                CompositeTileSurface::Texture { surface: ResolvedSurfaceTexture::NativeSurface { id, .. }, .. } => id,
-                _ => unreachable!(),
-            };
-
-            // Add the tile to the OS compositor.
+        // Add each surface to the visual tree. z-order is implicit based on
+        // order added. Offset and clip rect apply to all tiles within this
+        // surface.
+        for surface in &self.descriptor.surfaces {
             compositor.add_surface(
-                id,
-                tile.rect.origin.to_i32(),
-                tile.clip_rect.to_i32(),
+                surface.surface_id.expect("bug: no native surface allocated"),
+                surface.offset.to_i32(),
+                surface.clip_rect.to_i32(),
             );
         }
     }

@@ -133,7 +133,12 @@ class AstValType {
     if (which_ == IsAstRef) {
       return true;
     }
-    return type_ == RefType::any() || type_.isRef();
+    // This test is just heuristic; to do better (ie to tell whether it is a
+    // struct type) we need a type environment, but we have none.
+    //
+    // In most cases, we won't have a typeIndex here anyway, because types will
+    // not have been resolved.
+    return type_.isAnyRef() || type_.isTypeIndex();
   }
 #endif
 
@@ -1143,14 +1148,16 @@ class AstImport : public AstNode {
         module_(module),
         field_(field),
         kind_(DefinitionKind::Function),
-        funcType_(funcType) {}
+        funcType_(funcType),
+        tableKind_(TableKind::NullRef) {}
   AstImport(AstName name, AstName module, AstName field, DefinitionKind kind,
             const Limits& limits)
       : name_(name),
         module_(module),
         field_(field),
         kind_(kind),
-        limits_(limits) {
+        limits_(limits),
+        tableKind_(TableKind::NullRef) {
     MOZ_ASSERT(kind != DefinitionKind::Table, "A table must have a kind");
   }
   AstImport(AstName name, AstName module, AstName field, const Limits& limits,
@@ -1167,6 +1174,7 @@ class AstImport : public AstNode {
         module_(module),
         field_(field),
         kind_(DefinitionKind::Global),
+        tableKind_(TableKind::NullRef),
         global_(global) {}
 
   AstName name() const { return name_; }

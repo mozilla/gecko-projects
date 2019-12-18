@@ -17,6 +17,7 @@
 ]>
 
 <window id="webextpanels-window"
+        xmlns:html="http://www.w3.org/1999/xhtml"
         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
   <script src="chrome://global/content/contentAreaUtils.js"/>
   <script src="chrome://browser/content/browser.js"/>
@@ -25,6 +26,12 @@
   <script src="chrome://global/content/globalOverlay.js"/>
   <script src="chrome://browser/content/utilityOverlay.js"/>
   <script src="chrome://global/content/editMenuOverlay.js"/>
+
+  <linkset>
+    <html:link rel="localization" href="browser/branding/brandings.ftl"/>
+    <html:link rel="localization" href="toolkit/global/textActions.ftl"/>
+    <html:link rel="localization" href="browser/browserContext.ftl"/>
+  </linkset>
 
   <commandset id="mainCommandset">
     <command id="Browser:Back"

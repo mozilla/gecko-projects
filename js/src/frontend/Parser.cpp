@@ -1846,6 +1846,18 @@ bool LazyScriptCreationData::create(JSContext* cx, FunctionBox* funbox,
   if (funbox->hasThisBinding()) {
     lazy->setFunctionHasThisBinding();
   }
+  if (funbox->hasExtensibleScope()) {
+    lazy->setFunHasExtensibleScope();
+  }
+  if (funbox->hasMappedArgsObj()) {
+    lazy->setHasMappedArgsObj();
+  }
+  if (funbox->hasCallSiteObj()) {
+    lazy->setHasCallSiteObj();
+  }
+  if (funbox->argumentsHasLocalBinding()) {
+    lazy->setArgumentsHasVarBinding();
+  }
 
   // Flags that need to copied back into the parser when we do the full
   // parse.
@@ -2164,7 +2176,7 @@ JSFunction* AllocNewFunction(JSContext* cx,
   }
   if (data.isSelfHosting) {
     fun->setIsSelfHostedBuiltin();
-    MOZ_ASSERT(!fun->isInterpretedLazy());
+    MOZ_ASSERT(fun->hasScript());
   }
   return fun;
 }
@@ -2598,7 +2610,7 @@ bool Parser<FullParseHandler, Unit>::skipLazyInnerFunction(
   }
 
   funbox->initFromLazyFunction(fun);
-  MOZ_ASSERT(fun->lazyScript()->hasEnclosingLazyScript());
+  MOZ_ASSERT(fun->baseScript()->hasEnclosingLazyScript());
 
   PropagateTransitiveParseFlags(funbox, pc_->sc());
 
@@ -2659,6 +2671,8 @@ bool GeneralParser<ParseHandler, Unit>::taggedTemplate(
     return false;
   }
   handler_.addList(tagArgsList, callSiteObjNode);
+
+  pc_->sc()->setHasCallSiteObj();
 
   while (true) {
     if (!appendToCallSiteObj(callSiteObjNode)) {

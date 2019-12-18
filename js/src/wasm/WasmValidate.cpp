@@ -1003,28 +1003,24 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
           return iter.unrecognizedOpcode(&op);
         }
         CHECK(iter.readComparison(RefType::any(), &nothing, &nothing));
-        break;
       }
 #endif
 #ifdef ENABLE_WASM_REFTYPES
       case uint16_t(Op::RefFunc): {
         uint32_t unusedIndex;
         CHECK(iter.readRefFunc(&unusedIndex));
-        break;
       }
       case uint16_t(Op::RefNull): {
         if (!env.refTypesEnabled()) {
           return iter.unrecognizedOpcode(&op);
         }
         CHECK(iter.readRefNull());
-        break;
       }
       case uint16_t(Op::RefIsNull): {
         if (!env.refTypesEnabled()) {
           return iter.unrecognizedOpcode(&op);
         }
         CHECK(iter.readConversion(RefType::any(), ValType::I32, &nothing));
-        break;
       }
 #endif
       case uint16_t(Op::ThreadPrefix): {
@@ -1267,7 +1263,7 @@ typedef Vector<TypeState, 0, SystemAllocPolicy> TypeStateVector;
 
 static bool ValidateTypeState(Decoder& d, TypeStateVector* typeState,
                               ValType type) {
-  if (!type.isRef()) {
+  if (!type.isTypeIndex()) {
     return true;
   }
 
@@ -1287,8 +1283,8 @@ static bool ValidateTypeState(Decoder& d, TypeStateVector* typeState,
 
 #ifdef WASM_PRIVATE_REFTYPES
 static bool FuncTypeIsJSCompatible(Decoder& d, const FuncType& ft) {
-  if (ft.exposesRef()) {
-    return d.fail("cannot expose reference type");
+  if (ft.exposesTypeIndex()) {
+    return d.fail("cannot expose indexed reference type");
   }
   return true;
 }
@@ -1671,8 +1667,11 @@ static bool DecodeTableTypeAndLimits(Decoder& d, bool refTypesEnabled,
     if (!refTypesEnabled) {
       return d.fail("expected 'funcref' element type");
     }
-    tableKind = elementType == uint8_t(TypeCode::AnyRef) ? TableKind::AnyRef
-                                                         : TableKind::NullRef;
+    if (elementType == uint8_t(TypeCode::AnyRef)) {
+      tableKind = TableKind::AnyRef;
+    } else {
+      tableKind = TableKind::NullRef;
+    }
 #endif
   } else {
 #ifdef ENABLE_WASM_REFTYPES
@@ -1717,7 +1716,7 @@ static bool GlobalIsJSCompatible(Decoder& d, ValType type) {
           break;
         case RefType::TypeIndex:
 #ifdef WASM_PRIVATE_REFTYPES
-          return d.fail("cannot expose reference type");
+          return d.fail("cannot expose indexed reference type");
 #else
           break;
 #endif
@@ -2054,7 +2053,7 @@ static bool DecodeInitializerExpression(Decoder& d, ModuleEnvironment* env,
         return d.fail(
             "type mismatch: initializer type and expected type don't match");
       }
-      MOZ_ASSERT_IF(expected.isRef(), env->gcTypesEnabled());
+      MOZ_ASSERT_IF(env->isStructType(expected), env->gcTypesEnabled());
       *init = InitExpr(LitVal(expected, AnyRef::null()));
       break;
     }
@@ -2074,11 +2073,13 @@ static bool DecodeInitializerExpression(Decoder& d, ModuleEnvironment* env,
       }
       if (expected.isReference()) {
         bool fail = false;
-        if ((expected.isRef() || globals[i].type().isRef()) &&
-            !env->gcTypesEnabled()) {
+        if (!globals[i].type().isReference()) {
           fail = true;
-        } else if (!(globals[i].type().isReference() &&
-                     env->isRefSubtypeOf(globals[i].type(), expected))) {
+        } else if ((env->isStructType(expected) ||
+                    env->isStructType(globals[i].type())) &&
+                   !env->gcTypesEnabled()) {
+          fail = true;
+        } else if (!env->isRefSubtypeOf(globals[i].type(), expected)) {
           fail = true;
         }
         if (fail) {
