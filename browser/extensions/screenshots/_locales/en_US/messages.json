@@ -1,6 +1,6 @@
 {
   "addonDescription": {
-    "message": "Test Take clips and screenshots from the Web and save them temporarily or permanently."
+    "message": "Take clips and screenshots from the Web and save them temporarily or permanently."
   },
   "addonAuthorsList": {
     "message": "Mozilla <screenshots-feedback@mozilla.com>"
@@ -165,7 +165,7 @@
     "message": "Done"
   },
   "termsAndPrivacyNotice2": {
-    "message": "Test By using Firefox Screenshots, you agree to our $TERMSANDPRIVACYNOTICETERMSLINK$ and $TERMSANDPRIVACYNOTICEPRIVACYLINK$.",
+    "message": "By using Firefox Screenshots, you agree to our $TERMSANDPRIVACYNOTICETERMSLINK$ and $TERMSANDPRIVACYNOTICEPRIVACYLINK$.",
     "placeholders": {
       "termsandprivacynoticetermslink": {
         "content": "$1"
