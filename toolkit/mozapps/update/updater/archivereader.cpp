@@ -328,7 +328,22 @@ int ArchiveReader::ExtractItemToStream(const MarItem* item, FILE* fp) {
     // The return value of xz_dec_run is not XZ_OK and if it isn't XZ_STREAM_END
     // an error has occured.
     if (xz_rv != XZ_STREAM_END) {
-      ret = UNEXPECTED_XZ_ERROR;
+      ret = 200;
+      if (xz_rv == XZ_UNSUPPORTED_CHECK) {
+        ret = 201;
+      } else if (xz_rv == XZ_MEM_ERROR) {
+        ret = 202;
+      } else if (xz_rv == XZ_MEMLIMIT_ERROR) {
+        ret = 203;
+      } else if (xz_rv == XZ_FORMAT_ERROR) {
+        ret = 204;
+      } else if (xz_rv == XZ_OPTIONS_ERROR) {
+        ret = 205;
+      } else if (xz_rv == XZ_DATA_ERROR) {
+        ret = 206;
+      } else if (xz_rv == XZ_BUF_ERROR) {
+        ret = 207;
+      }
       break;
     }
 
