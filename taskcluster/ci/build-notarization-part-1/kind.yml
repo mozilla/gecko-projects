@@ -2,25 +2,27 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ---
-loader: taskgraph.loader.multi_dep:loader
-
-group-by: chunk-locales
+loader: taskgraph.loader.single_dep:loader
 
 transforms:
     - taskgraph.transforms.name_sanity:transforms
-    - taskgraph.transforms.upstream_artifact_task:transforms
-    - taskgraph.transforms.nightly_l10n_signing:transforms
+    - taskgraph.transforms.build_signing:transforms
     - taskgraph.transforms.signing:transforms
     - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-    - nightly-l10n
-    - nightly-l10n-notarization-part-1
-    - nightly-l10n-notarization-poller
-
-primary-dependency:
-    - nightly-l10n
+    - build
 
 only-for-attributes:
-    - nightly
     - shippable
+    - nightly
+
+only-for-build-platforms:
+    - macosx64-shippable/opt
+    - macosx64-nightly/opt
+    - macosx64-devedition-nightly/opt
+
+job-template:
+    treeherder:
+        symbol: BN
+    enable-signing-routes: false

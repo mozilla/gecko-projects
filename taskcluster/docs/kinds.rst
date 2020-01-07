@@ -34,6 +34,18 @@ Many builds must be signed. The build-signing task takes the unsigned `build`
 kind artifacts and passes them through signingscriptworker to a signing server
 and returns signed results.
 
+For mac notarization, we download the signed bits that have been notarized by Apple, and we staple the notarization to the app and pkg.
+
+build-notarization-part-1
+-------------------------
+
+We switched to a 3-part mac notarization workflow in bug 1562412. This is the first task, which signs the files and submits them for notarization.
+
+build-notarization-poller
+-------------------------
+
+We switched to a 3-part mac notarization workflow in bug 1562412. This is the second task, which polls Apple for notarization status. Because this is run in a separate, special notarization poller pool, we free up the mac notarization pool for actual signing work.
+
 artifact-build
 --------------
 
@@ -68,6 +80,18 @@ The nightly l10n signing kind takes artifacts from the nightly-l10n kind and
 passes them to signing servers to have their contents signed appropriately, based
 on an appropriate signing format. One signing job is created for each nightly-l10n
 job (usually chunked).
+
+For mac notarization, we download the signed bits that have been notarized by Apple, and we staple the notarization to the app and pkg.
+
+nightly-l10n-notarization-part-1
+--------------------------------
+
+We switched to a 3-part mac notarization workflow in bug 1562412. This is the first task, which signs the files and submits them for notarization.
+
+nightly-l10n-notarization-poller
+--------------------------------
+
+We switched to a 3-part mac notarization workflow in bug 1562412. This is the second task, which polls Apple for notarization status. Because this is run in a separate, special notarization poller pool, we free up the mac notarization pool for actual signing work.
 
 source-test
 -----------
@@ -432,6 +456,18 @@ release-partner-repack-signing
 ------------------------------
 Internal signing of partner repacks.
 
+For mac notarization, we download the signed bits that have been notarized by Apple, and we staple the notarization to the app and pkg.
+
+release-partner-repack-notarization-part-1
+------------------------------------------
+
+We switched to a 3-part mac notarization workflow in bug 1562412. This is the first task, which signs the files and submits them for notarization.
+
+release-partner-repack-notarization-poller
+------------------------------------------
+
+We switched to a 3-part mac notarization workflow in bug 1562412. This is the second task, which polls Apple for notarization status. Because this is run in a separate, special notarization poller pool, we free up the mac notarization pool for actual signing work.
+
 release-partner-repack-repackage
 --------------------------------
 Repackaging of partner repacks.
@@ -460,6 +496,18 @@ Generates customized versions of releases for eme-free repacks.
 release-eme-free-repack-signing
 -------------------------------
 Internal signing of eme-free repacks
+
+For mac notarization, we download the signed bits that have been notarized by Apple, and we staple the notarization to the app and pkg.
+
+release-eme-free-repack-notarization-part-1
+-------------------------------------------
+
+We switched to a 3-part mac notarization workflow in bug 1562412. This is the first task, which signs the files and submits them for notarization.
+
+release-eme-free-repack-notarization-poller
+-------------------------------------------
+
+We switched to a 3-part mac notarization workflow in bug 1562412. This is the second task, which polls Apple for notarization status. Because this is run in a separate, special notarization poller pool, we free up the mac notarization pool for actual signing work.
 
 release-eme-free-repack-repackage
 ---------------------------------

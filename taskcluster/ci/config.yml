@@ -343,17 +343,19 @@ workers:
                     staging: gecko-t-signing
         mac-depsigning:
             provisioner: scriptworker-prov-v1
-            implementation: scriptworker-iscript
+            implementation: scriptworker-signing
             os: macosx
-            worker-type: depsigning-mac-v1
+            worker-type: signing-mac-aki
+        mac-notarization-poller:
+            provisioner: scriptworker-prov-v1
+            implementation: notarization-poller
+            os: macosx
+            worker-type: mac-notarization-poller
         mac-signing:
             provisioner: scriptworker-prov-v1
-            implementation: scriptworker-iscript
+            implementation: scriptworker-signing
             os: macosx
-            worker-type:
-                by-release-level:
-                    production: signing-mac-v1
-                    staging: depsigning-mac-v1
+            worker-type: signing-mac-aki
         t-ap.*:
             provisioner: proj-autophone
             implementation: script-engine-autophone
@@ -447,11 +449,9 @@ workers:
 
 mac-notarization:
     mac-behavior:
-        by-release-type:
-            nightly.*: mac_notarize
-            beta.*: mac_notarize
-            esr.*: mac_notarize
-            release.*: mac_notarize
+        by-project:
+            mozilla-(central|beta|release|esr.*): mac_notarize
+            maple: mac_notarize
             default: mac_sign_and_pkg
     mac-entitlements:
         by-platform:

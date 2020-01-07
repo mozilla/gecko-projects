@@ -112,6 +112,10 @@ PER_PROJECT_PARAMETERS = {
         'target_tasks_method': 'pine_tasks',
     },
 
+    'maple': {
+        'target_tasks_method': 'maple_tasks',
+    },
+
     # the default parameters are used for projects that do not match above.
     'default': {
         'target_tasks_method': 'default',

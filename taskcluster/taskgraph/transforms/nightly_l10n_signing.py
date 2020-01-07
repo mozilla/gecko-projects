@@ -18,12 +18,13 @@ transforms = TransformSequence()
 @transforms.add
 def make_signing_description(config, jobs):
     for job in jobs:
-        job['depname'] = 'unsigned-repack'
 
         dep_job = job['primary-dependency']
+        job['depname'] = dep_job.label
 
         # add the chunk number to the TH symbol
-        symbol = 'Ns{}'.format(dep_job.attributes.get('l10n_chunk'))
+        symbol = job.get('treeherder', {}).get('symbol', 'Ns')
+        symbol = '{}{}'.format(symbol, dep_job.attributes.get('l10n_chunk'))
         group = 'L10n'
 
         job['treeherder'] = {
@@ -37,6 +38,7 @@ def make_signing_description(config, jobs):
 def define_upstream_artifacts(config, jobs):
     for job in jobs:
         dep_job = job['primary-dependency']
+        upstream_artifact_task = job.pop('upstream-artifact-task', dep_job)
 
         job['attributes'] = copy_attributes_from_dependent_job(dep_job)
         if dep_job.attributes.get('chunk_locales'):
@@ -47,20 +49,24 @@ def define_upstream_artifacts(config, jobs):
             config,
             job,
             keep_locale_template=True,
+            dep_kind=upstream_artifact_task.kind,
         )
 
         upstream_artifacts = []
         for spec in locale_specifications:
+            task_type = 'l10n'
+            if 'notarization' in upstream_artifact_task.kind:
+                task_type = 'scriptworker'
             upstream_artifacts.append({
-                'taskId': {'task-reference': '<unsigned-repack>'},
-                'taskType': 'l10n',
+                'taskId': {'task-reference': '<{}>'.format(upstream_artifact_task.label)},
+                'taskType': task_type,
                 # Set paths based on artifacts in the specs (above) one per
                 # locale present in the chunk this is signing stuff for.
                 # Pass paths through set and sorted() so we get a list back
                 # and we remove any duplicates (e.g. hardcoded ja-JP-mac langpack)
                 'paths': sorted(set([
                     path_template.format(locale=locale)
-                    for locale in dep_job.attributes.get('chunk_locales', [])
+                    for locale in upstream_artifact_task.attributes.get('chunk_locales', [])
                     for path_template in spec['artifacts']
                 ])),
                 'formats': spec['formats']

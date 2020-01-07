@@ -478,6 +478,21 @@ def target_tasks_pine(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
 
 
+@_target_task('maple_tasks')
+def target_tasks_maple(full_task_graph, parameters, graph_config):
+    """Bug 1562412 - test osx notarization"""
+    def filter(task):
+        platform = task.attributes.get('build_platform')
+        # disable mobile jobs
+        if str(platform).startswith('android'):
+            return False
+        if task.kind in ('test', ):
+            return False
+        if standard_filter(task, parameters):
+            return True
+    return [l for l, t in full_task_graph.tasks.iteritems() if filter(t)]
+
+
 @_target_task('ship_geckoview')
 def target_tasks_ship_geckoview(full_task_graph, parameters, graph_config):
     """Select the set of tasks required to ship geckoview nightly. The
