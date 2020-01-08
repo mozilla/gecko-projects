@@ -68,7 +68,7 @@ def make_task_description(config, jobs):
             'description': description,
             'worker': {
                 'implementation': 'notarization-poller',
-                'uuid-manifest': uuid_manifest_url,
+                'uuid-manifest': {'task-reference': uuid_manifest_url},
             },
             'worker-type': 'mac-notarization-poller',
             'dependencies': {'part1': dep_job.label},

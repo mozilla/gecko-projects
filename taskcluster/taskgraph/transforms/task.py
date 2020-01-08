@@ -938,7 +938,7 @@ def build_scriptworker_signing_payload(config, task, task_def):
 
 
 @payload_builder('notarization-poller', schema={
-    Required('uuid-manifest'): basestring,
+    Required('uuid-manifest'): taskref_or_string,
 })
 def notarization_poller_payload(config, task, task_def):
     worker = task['worker']
