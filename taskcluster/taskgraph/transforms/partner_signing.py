@@ -50,7 +50,7 @@ def define_upstream_artifacts(config, jobs):
         if 'notarization' in job['depname']:
             task_type = 'scriptworker'
         job['upstream-artifacts'] = [{
-            'taskId': {'task-reference': '<{}>'.format(job['depname'])},
+            'taskId': {'task-reference': '<{}>'.format(dep_job.kind)},
             'taskType': task_type,
             'paths': [
                 path_template.format(locale=repack_id)

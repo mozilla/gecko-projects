@@ -58,7 +58,7 @@ def define_upstream_artifacts(config, jobs):
             if 'notarization' in upstream_artifact_task.kind:
                 task_type = 'scriptworker'
             upstream_artifacts.append({
-                'taskId': {'task-reference': '<{}>'.format(upstream_artifact_task.label)},
+                'taskId': {'task-reference': '<{}>'.format(upstream_artifact_task.kind)},
                 'taskType': task_type,
                 # Set paths based on artifacts in the specs (above) one per
                 # locale present in the chunk this is signing stuff for.
