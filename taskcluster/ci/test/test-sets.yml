@@ -40,6 +40,7 @@ common-tests:
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
     - mochitest-webgl2-ext
+    - mochitest-webgpu
     - reftest
     - reftest-no-accel
     - telemetry-tests-client
@@ -340,51 +341,53 @@ awsy-stylo-sequential:
 linux-common-tests:
     - firefox-ui-functional-local
     - firefox-ui-functional-remote
-    - gtest
     - jittest
-    - jsreftest
     - marionette
     - mochitest
     - mochitest-a11y
     - mochitest-browser-chrome
     - mochitest-chrome
     - mochitest-devtools-chrome
-    - mochitest-media
     - mochitest-remote
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
-    - reftest
+    - mochitest-webgpu
     - reftest-no-accel
     - telemetry-tests-client
     - test-verify
     - test-verify-gpu
     - test-verify-wpt
-    - xpcshell
 
 # List of tests that are green on ubuntu1804 docker image.
 # See Bug 1602863 for information.
 linux1804-tests:
     - cppunit
     - crashtest
+    - gtest
+    - jsreftest
     - mochitest-gpu
+    - mochitest-media
+    - reftest
+    - xpcshell
 
 linux1804-qr-tests:
     - cppunit
     - crashtest
+    - gtest
+    - jsreftest
     - mochitest-gpu
+    - mochitest-media
+    - reftest
+    - xpcshell
 
 linux-qr-tests:
-    - gtest
     - jittest
-    - jsreftest
     - mochitest
     - mochitest-a11y
     - mochitest-chrome
-    - mochitest-media
     - mochitest-webgl1-core
     - mochitest-webgl2-core
-    - reftest
-    - xpcshell
+    - mochitest-webgpu
 
 linux-qr-smoketests:
     - crashtest
@@ -401,6 +404,7 @@ windows-qr-tests:
     - mochitest-media
     - mochitest-webgl1-core
     - mochitest-webgl2-core
+    - mochitest-webgpu
     - reftest
 
 ccov-code-coverage-tests:
@@ -431,6 +435,7 @@ windows-tests:
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
     - mochitest-webgl2-ext
+    - mochitest-webgpu
     - reftest
     - reftest-no-accel
     - telemetry-tests-client
@@ -449,6 +454,7 @@ mingwclang-tests-debug:
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
     - mochitest-webgl2-ext
+    - mochitest-webgpu
     - reftest
     - telemetry-tests-client
 
@@ -473,6 +479,7 @@ windows-aarch64-tests:
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
     - mochitest-webgl2-ext
+    - mochitest-webgpu
     - reftest
     - web-platform-tests
     - web-platform-tests-crashtests
@@ -523,6 +530,7 @@ macosx1014-64-tests:
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
     - mochitest-webgl2-ext
+    - mochitest-webgpu
     - reftest
     - telemetry-tests-client
     - test-verify
@@ -598,9 +606,9 @@ remote-tests:
 
 android-hw-arm7-opt-unittests:
     - mochitest-media
-    # - mochitest-webgl1-core
-    # - mochitest-webgl1-ext
-    # - mochitest-webgl2-core
+    - mochitest-webgl1-core
+    - mochitest-webgl1-ext
+    - mochitest-webgl2-core
 
 android-hw-arm7-pgo-unittests:
     - jittest
@@ -611,9 +619,9 @@ android-hw-arm7-debug-unittests:
     - jittest
     - jsreftest
     - mochitest-media
-    # - mochitest-webgl1-core
-    # - mochitest-webgl1-ext
-    # - mochitest-webgl2-core
+    - mochitest-webgl1-core
+    - mochitest-webgl1-ext
+    - mochitest-webgl2-core
 
 android-hw-arm7-qr:
     - crashtest

@@ -105,7 +105,7 @@ BytecodeEmitter::BytecodeEmitter(
       script(cx, script),
       lazyScript(cx, lazyScript),
       bytecodeSection_(cx, line),
-      perScriptData_(cx),
+      perScriptData_(cx, parseInfo),
       fieldInitializers_(fieldInitializers),
       parseInfo(parseInfo),
       firstLine(line),
@@ -3121,13 +3121,13 @@ bool BytecodeEmitter::emitAnonymousFunctionWithName(ParseNode* node,
   MOZ_ASSERT(node->isDirectRHSAnonFunction());
 
   if (node->is<FunctionNode>()) {
-    if (!emitTree(node)) {
+    // Function doesn't have 'name' property at this point.
+    // Set function's name at compile time.
+    if (!setFunName(node->as<FunctionNode>().funbox()->function(), name)) {
       return false;
     }
 
-    // Function doesn't have 'name' property at this point.
-    // Set function's name at compile time.
-    return setFunName(node->as<FunctionNode>().funbox()->function(), name);
+    return emitTree(node);
   }
 
   MOZ_ASSERT(node->is<ClassNode>());
@@ -5665,8 +5665,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
 
     // Inherit most things (principals, version, etc) from the
     // parent.  Use default values for the rest.
-    Rooted<JSScript*> parent(cx, script);
-    MOZ_ASSERT(parent->mutedErrors() == parser->options().mutedErrors());
+    MOZ_ASSERT(script->mutedErrors() == parser->options().mutedErrors());
     const JS::TransitiveCompileOptions& transitiveOptions = parser->options();
     JS::CompileOptions options(cx, transitiveOptions);
 
@@ -9128,14 +9127,14 @@ bool BytecodeEmitter::emitClass(
 
     bool needsHomeObject = ctor->funbox()->needsHomeObject();
     // HERITAGE is consumed inside emitFunction.
-    if (!emitFunction(ctor, isDerived, classMembers)) {
-      //            [stack] HOMEOBJ CTOR
-      return false;
-    }
     if (nameKind == ClassNameKind::InferredName) {
       if (!setFunName(ctor->funbox()->function(), nameForAnonymousClass)) {
         return false;
       }
+    }
+    if (!emitFunction(ctor, isDerived, classMembers)) {
+      //            [stack] HOMEOBJ CTOR
+      return false;
     }
     if (lse.isSome()) {
       if (!lse->emitEnd()) {

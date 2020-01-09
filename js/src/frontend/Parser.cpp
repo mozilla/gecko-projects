@@ -108,7 +108,7 @@ template <class ParseHandler, typename Unit>
 inline typename GeneralParser<ParseHandler, Unit>::FinalParser*
 GeneralParser<ParseHandler, Unit>::asFinalParser() {
   static_assert(
-      mozilla::IsBaseOf<GeneralParser<ParseHandler, Unit>, FinalParser>::value,
+      std::is_base_of<GeneralParser<ParseHandler, Unit>, FinalParser>::value,
       "inheritance relationship required by the static_cast<> below");
 
   return static_cast<FinalParser*>(this);
@@ -118,7 +118,7 @@ template <class ParseHandler, typename Unit>
 inline const typename GeneralParser<ParseHandler, Unit>::FinalParser*
 GeneralParser<ParseHandler, Unit>::asFinalParser() const {
   static_assert(
-      mozilla::IsBaseOf<GeneralParser<ParseHandler, Unit>, FinalParser>::value,
+      std::is_base_of<GeneralParser<ParseHandler, Unit>, FinalParser>::value,
       "inheritance relationship required by the static_cast<> below");
 
   return static_cast<const FinalParser*>(this);
@@ -2173,17 +2173,23 @@ JSFunction* AllocNewFunction(JSContext* cx,
   if (!GetFunctionPrototype(cx, data.generatorKind, data.asyncKind, &proto)) {
     return nullptr;
   }
-  RootedFunction fun(cx);
-
-  fun = NewFunctionWithProto(cx, nullptr, 0, data.flags, nullptr,
-                             data.getAtom(cx), proto, data.allocKind,
-                             TenuredObject);
+  RootedFunction fun(cx, NewFunctionWithProto(cx, nullptr, 0, data.flags,
+                                              nullptr, data.getAtom(cx), proto,
+                                              data.allocKind, TenuredObject));
   if (!fun) {
     return nullptr;
   }
+
   if (data.isSelfHosting) {
     fun->setIsSelfHostedBuiltin();
     MOZ_ASSERT(fun->hasScript());
+  }
+
+  if (data.typeForScriptedFunction) {
+    if (!JSFunction::setTypeForScriptedFunction(
+            cx, fun, *data.typeForScriptedFunction)) {
+      return nullptr;
+    }
   }
   return fun;
 }

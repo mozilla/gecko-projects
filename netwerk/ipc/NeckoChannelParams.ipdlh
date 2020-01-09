@@ -333,7 +333,7 @@ struct HttpConnectionInfoCloneArgs
   uint32_t tlsFlags;
   bool isolated;
   bool isTrrServiceChannel;
-  bool trrDisabled;
+  uint8_t trrMode;
   bool isIPv4Disabled;
   bool isIPv6Disabled;
   nsCString topWindowOrigin;
@@ -444,6 +444,8 @@ struct RedirectToRealChannelArgs {
   LastVisitInfo lastVisitInfo;
   uint32_t loadStateLoadFlags;
   nsDOMNavigationTiming? timing;
+  nsString srcdocData;
+  nsIURI baseUri;
 };
 
 struct TimingStructArgs {

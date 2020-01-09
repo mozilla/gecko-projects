@@ -298,7 +298,6 @@ function Toolbox(
   this._onTargetDestroyed = this._onTargetDestroyed.bind(this);
 
   this.isPaintFlashing = false;
-  this._isBrowserToolbox = false;
 
   if (!selectedTool) {
     selectedTool = Services.prefs.getCharPref(this._prefs.LAST_TOOL);
@@ -347,7 +346,7 @@ Toolbox.HostType = {
   RIGHT: "right",
   LEFT: "left",
   WINDOW: "window",
-  CUSTOM: "custom",
+  BROWSERTOOLBOX: "browsertoolbox",
   // This is typically used by `about:debugging`, when opening toolbox in a new tab,
   // via `about:devtools-toolbox` URLs.
   PAGE: "page",
@@ -593,12 +592,8 @@ Toolbox.prototype = {
     );
   },
 
-  setBrowserToolbox: function(isBrowserToolbox) {
-    this._isBrowserToolbox = isBrowserToolbox;
-  },
-
   isBrowserToolbox: function() {
-    return this._isBrowserToolbox;
+    return this.hostType === Toolbox.HostType.BROWSERTOOLBOX;
   },
 
   _onPausedState: function(packet, threadFront) {
@@ -751,7 +746,7 @@ Toolbox.prototype = {
         );
       });
 
-      await this.targetList.startListening(TargetList.ALL_TYPES);
+      await this.targetList.startListening();
 
       // Optimization: fire up a few other things before waiting on
       // the iframe being ready (makes startup faster)
@@ -1366,7 +1361,7 @@ Toolbox.prototype = {
         return 1;
       case Toolbox.HostType.WINDOW:
         return 2;
-      case Toolbox.HostType.CUSTOM:
+      case Toolbox.HostType.BROWSERTOOLBOX:
         return 3;
       case Toolbox.HostType.LEFT:
         return 4;
@@ -1390,7 +1385,7 @@ Toolbox.prototype = {
         return "window";
       case Toolbox.HostType.PAGE:
         return "page";
-      case Toolbox.HostType.CUSTOM:
+      case Toolbox.HostType.BROWSERTOOLBOX:
         return "other";
       default:
         return "bottom";
@@ -1697,7 +1692,7 @@ Toolbox.prototype = {
     for (const type in Toolbox.HostType) {
       const position = Toolbox.HostType[type];
       if (
-        position == Toolbox.HostType.CUSTOM ||
+        position == Toolbox.HostType.BROWSERTOOLBOX ||
         position == Toolbox.HostType.PAGE ||
         (!sideEnabled &&
           (position == Toolbox.HostType.LEFT ||
@@ -1966,13 +1961,13 @@ Toolbox.prototype = {
 
     if (
       !ResponsiveUIManager.isActiveForTab(localTab) ||
-      (await !this.target.actorHasMethod("emulation", "setElementPickerState"))
+      (await !this.target.actorHasMethod("responsive", "setElementPickerState"))
     ) {
       return;
     }
 
     const ui = ResponsiveUIManager.getResponsiveUIForTab(localTab);
-    await ui.emulationFront.setElementPickerState(state);
+    await ui.responsiveFront.setElementPickerState(state);
   },
 
   /**
@@ -2064,7 +2059,7 @@ Toolbox.prototype = {
    * Update the buttons.
    */
   updateToolboxButtons() {
-    const inspectorFront = this.target.getCachedFront("inspectorFront");
+    const inspectorFront = this.target.getCachedFront("inspector");
     // two of the buttons have highlighters that need to be cleared
     // on will-navigate, otherwise we hold on to the stale highlighter
     const hasHighlighters =
@@ -3666,7 +3661,7 @@ Toolbox.prototype = {
       this._onTargetDestroyed
     );
 
-    this.targetList.stopListening(TargetList.ALL_TYPES);
+    this.targetList.stopListening();
 
     // Unregister buttons listeners
     this.toolbarButtons.forEach(button => {

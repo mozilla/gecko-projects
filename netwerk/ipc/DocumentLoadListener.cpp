@@ -33,6 +33,7 @@
 #include "nsExternalHelperAppService.h"
 #include "nsCExternalHandlerService.h"
 #include "nsMimeTypes.h"
+#include "nsIWrapperChannel.h"
 
 mozilla::LazyLogModule gDocumentChannelLog("DocumentChannel");
 #define LOG(fmt) MOZ_LOG(gDocumentChannelLog, mozilla::LogLevel::Verbose, fmt)
@@ -259,7 +260,8 @@ bool DocumentLoadListener::Open(
     bool aPluginsAllowed, nsDOMNavigationTiming* aTiming, nsresult* aRv) {
   LOG(("DocumentLoadListener Open [this=%p, uri=%s]", this,
        aLoadState->URI()->GetSpecOrDefault().get()));
-  if (!nsDocShell::CreateChannelForLoadState(
+
+  if (!nsDocShell::CreateAndConfigureRealChannelForLoadState(
           aLoadState, aLoadInfo, mParentChannelListener, nullptr,
           aInitiatorType, aLoadFlags, aLoadType, aCacheKey, aIsActive,
           aIsTopLevelDoc, aHasNonEmptySandboxingFlags, *aRv,
@@ -341,6 +343,8 @@ bool DocumentLoadListener::Open(
   mChannelCreationURI = aLoadState->URI();
   mLoadStateLoadFlags = aLoadState->LoadFlags();
   mTiming = aTiming;
+  mSrcdocData = aLoadState->SrcdocData();
+  mBaseURI = aLoadState->BaseURI();
   return true;
 }
 
@@ -423,6 +427,10 @@ DocumentLoadListener::ReadyToVerify(nsresult aResultCode) {
 }
 
 void DocumentLoadListener::FinishReplacementChannelSetup(bool aSucceeded) {
+  LOG(
+      ("DocumentLoadListener FinishReplacementChannelSetup [this=%p, "
+       "aSucceeded=%d]",
+       this, aSucceeded));
   nsresult rv;
 
   if (mDoingProcessSwitch) {
@@ -535,6 +543,7 @@ void DocumentLoadListener::FinishReplacementChannelSetup(bool aSucceeded) {
 
 void DocumentLoadListener::ResumeSuspendedChannel(
     nsIStreamListener* aListener) {
+  LOG(("DocumentLoadListener ResumeSuspendedChannel [this=%p]", this));
   RefPtr<nsHttpChannel> httpChannel = do_QueryObject(mChannel);
   if (httpChannel) {
     httpChannel->SetApplyConversion(mOldApplyConversion);
@@ -664,7 +673,11 @@ void DocumentLoadListener::SerializeRedirectData(
   nsCOMPtr<nsIRedirectChannelRegistrar> registrar =
       RedirectChannelRegistrar::GetOrCreate();
   MOZ_ASSERT(registrar);
-  nsresult rv = registrar->RegisterChannel(mChannel, &mRedirectChannelId);
+  nsCOMPtr<nsIChannel> chan = mChannel;
+  if (nsCOMPtr<nsIWrapperChannel> wrapper = do_QueryInterface(chan)) {
+    wrapper->GetInnerChannel(getter_AddRefs(chan));
+  }
+  nsresult rv = registrar->RegisterChannel(chan, &mRedirectChannelId);
   NS_ENSURE_SUCCESS_VOID(rv);
   aArgs.registrarId() = mRedirectChannelId;
 
@@ -723,6 +736,9 @@ void DocumentLoadListener::SerializeRedirectData(
   nsDocShell::ExtractLastVisit(mChannel, getter_AddRefs(previousURI),
                                &previousFlags);
   aArgs.lastVisitInfo() = LastVisitInfo{previousURI, previousFlags};
+  aArgs.srcdocData() = mSrcdocData;
+  aArgs.baseUri() = mBaseURI;
+  aArgs.loadStateLoadFlags() = mLoadStateLoadFlags;
 }
 
 void DocumentLoadListener::TriggerCrossProcessSwitch() {

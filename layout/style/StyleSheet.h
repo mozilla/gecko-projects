@@ -125,7 +125,7 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
       css::SheetLoadData* aLoadData, uint32_t aLineNumber,
       css::LoaderReusableStyleSheets* aReusableSheets = nullptr);
 
-  nsresult ReparseSheet(const nsAString& aInput);
+  nsresult ReparseSheet(const nsACString& aInput);
 
   const RawServoStyleSheetContents* RawContents() const {
     return Inner().mContents;
@@ -308,7 +308,7 @@ class StyleSheet final : public nsICSSLoaderObserver, public nsWrapperCache {
   }
 
   void SetTitle(const nsAString& aTitle) { mTitle = aTitle; }
-  void SetMedia(dom::MediaList* aMedia);
+  void SetMedia(already_AddRefed<dom::MediaList> aMedia);
 
   // Get this style sheet's CORS mode
   CORSMode GetCORSMode() const { return Inner().mCORSMode; }

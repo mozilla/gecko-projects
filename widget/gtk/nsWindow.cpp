@@ -68,11 +68,6 @@
 
 #include "nsGkAtoms.h"
 
-#ifdef MOZ_ENABLE_STARTUP_NOTIFICATION
-#  define SN_API_NOT_YET_FROZEN
-#  include <startup-notification-1.0/libsn/sn.h>
-#endif
-
 #include "mozilla/Assertions.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Preferences.h"
@@ -1534,8 +1529,6 @@ void nsWindow::SetSizeMode(nsSizeMode aMode) {
 
 typedef void (*SetUserTimeFunc)(GdkWindow* aWindow, guint32 aTimestamp);
 
-// This will become obsolete when new GTK APIs are widely supported,
-// as described here: http://bugzilla.gnome.org/show_bug.cgi?id=347375
 static void SetUserTimeAndStartupIDForActivatedWindow(GtkWidget* aWindow) {
   nsGTKToolkit* GTKToolkit = nsGTKToolkit::GetToolkit();
   if (!GTKToolkit) return;
@@ -1555,35 +1548,7 @@ static void SetUserTimeAndStartupIDForActivatedWindow(GtkWidget* aWindow) {
     return;
   }
 
-#if defined(MOZ_ENABLE_STARTUP_NOTIFICATION)
-  // TODO - Implement for non-X11 Gtk backends (Bug 726479)
-  if (gfxPlatformGtk::GetPlatform()->IsX11Display()) {
-    GdkWindow* gdkWindow = gtk_widget_get_window(aWindow);
-
-    GdkScreen* screen = gdk_window_get_screen(gdkWindow);
-    SnDisplay* snd = sn_display_new(
-        gdk_x11_display_get_xdisplay(gdk_window_get_display(gdkWindow)),
-        nullptr, nullptr);
-    if (!snd) return;
-    SnLauncheeContext* ctx = sn_launchee_context_new(
-        snd, gdk_screen_get_number(screen), desktopStartupID.get());
-    if (!ctx) {
-      sn_display_unref(snd);
-      return;
-    }
-
-    if (sn_launchee_context_get_id_has_timestamp(ctx)) {
-      gdk_x11_window_set_user_time(gdkWindow,
-                                   sn_launchee_context_get_timestamp(ctx));
-    }
-
-    sn_launchee_context_setup_window(ctx, gdk_x11_window_get_xid(gdkWindow));
-    sn_launchee_context_complete(ctx);
-
-    sn_launchee_context_unref(ctx);
-    sn_display_unref(snd);
-  }
-#endif
+  gtk_window_set_startup_id(GTK_WINDOW(aWindow), desktopStartupID.get());
 
   // If we used the startup ID, that already contains the focus timestamp;
   // we don't want to reuse the timestamp next time we raise the window
@@ -4794,32 +4759,19 @@ void nsWindow::UpdateWindowDraggingRegion(
   }
 }
 
-// See subtract_corners_from_region() at gtk/gtkwindow.c
-// We need to subtract corners from toplevel window opaque region
-// to draw transparent corners of default Gtk titlebar.
-// Both implementations (cairo_region_t and wl_region) needs to be synced.
-static void SubtractTitlebarCorners(cairo_region_t* aRegion, int aX, int aY,
-                                    int aWindowWidth) {
-  cairo_rectangle_int_t rect = {aX, aY, TITLEBAR_SHAPE_MASK_HEIGHT,
-                                TITLEBAR_SHAPE_MASK_HEIGHT};
-  cairo_region_subtract_rectangle(aRegion, &rect);
-  rect = {
-      aX + aWindowWidth - TITLEBAR_SHAPE_MASK_HEIGHT,
-      aY,
-      TITLEBAR_SHAPE_MASK_HEIGHT,
-      TITLEBAR_SHAPE_MASK_HEIGHT,
-  };
-  cairo_region_subtract_rectangle(aRegion, &rect);
-}
-
 #ifdef MOZ_WAYLAND
-static void SubtractTitlebarCorners(wl_region* aRegion, int aX, int aY,
-                                    int aWindowWidth) {
-  wl_region_subtract(aRegion, aX, aY, TITLEBAR_SHAPE_MASK_HEIGHT,
-                     TITLEBAR_SHAPE_MASK_HEIGHT);
-  wl_region_subtract(aRegion, aX + aWindowWidth - TITLEBAR_SHAPE_MASK_HEIGHT,
-                     aY, TITLEBAR_SHAPE_MASK_HEIGHT,
-                     TITLEBAR_SHAPE_MASK_HEIGHT);
+wl_region* CreateOpaqueRegionWayland(int aX, int aY, int aWidth, int aHeight,
+                                     bool aSubtractCorners) {
+  struct wl_compositor* compositor = WaylandDisplayGet()->GetCompositor();
+  wl_region* region = wl_compositor_create_region(compositor);
+  wl_region_add(region, aX, aY, aWidth, aHeight);
+  if (aSubtractCorners) {
+    wl_region_subtract(region, aX, aY, TITLEBAR_SHAPE_MASK_HEIGHT,
+                       TITLEBAR_SHAPE_MASK_HEIGHT);
+    wl_region_subtract(region, aX + aWidth - TITLEBAR_SHAPE_MASK_HEIGHT, aY,
+                       TITLEBAR_SHAPE_MASK_HEIGHT, TITLEBAR_SHAPE_MASK_HEIGHT);
+  }
+  return region;
 }
 
 void nsWindow::UpdateTopLevelOpaqueRegionWayland(bool aSubtractCorners) {
@@ -4828,32 +4780,29 @@ void nsWindow::UpdateTopLevelOpaqueRegionWayland(bool aSubtractCorners) {
     return;
   }
 
-  GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(mShell));
-  nsWaylandDisplay* waylandDisplay = WaylandDisplayGet(display);
-  struct wl_compositor* compositor = waylandDisplay->GetCompositor();
-
   // Set opaque region to mShell. It's moved to mClientOffset.x/mClientOffset.y
   // from origin as we need transparent shadows around a window.
-  wl_region* region = wl_compositor_create_region(compositor);
   int x = DevicePixelsToGdkCoordRoundDown(mClientOffset.x);
   int y = DevicePixelsToGdkCoordRoundDown(mClientOffset.y);
   int width = DevicePixelsToGdkCoordRoundDown(mBounds.width);
   int height = DevicePixelsToGdkCoordRoundDown(mBounds.height);
-  wl_region_add(region, x, y, width, height);
-  if (aSubtractCorners) {
-    SubtractTitlebarCorners(region, x, y, width);
+
+  GdkRectangle rect = {x, y, width, height};
+  if (!mToplevelOpaqueRegionState.NeedsUpdate(rect, aSubtractCorners)) {
+    return;
   }
+
+  wl_region* region =
+      CreateOpaqueRegionWayland(x, y, width, height, aSubtractCorners);
   wl_surface_set_opaque_region(surface, region);
-  wl_surface_commit(surface);
   wl_region_destroy(region);
 
-  // Set region to mozcontainer which does not have any offset
-  region = wl_compositor_create_region(compositor);
-  wl_region_add(region, 0, 0, width, height);
-  if (aSubtractCorners) {
-    SubtractTitlebarCorners(region, 0, 0, width);
+  GdkWindow* window = gtk_widget_get_window(mShell);
+  if (window) {
+    gdk_window_invalidate_rect(window, &rect, false);
   }
-  moz_container_set_opaque_region(mContainer, region);
+
+  moz_container_update_opaque_region(mContainer, aSubtractCorners);
 }
 #endif
 
@@ -4872,13 +4821,35 @@ static void GdkWindowSetOpaqueRegion(GdkWindow* aGdkWindow,
   (*sGdkWindowSetOpaqueRegion)(aGdkWindow, aRegion);
 }
 
+// See subtract_corners_from_region() at gtk/gtkwindow.c
+// We need to subtract corners from toplevel window opaque region
+// to draw transparent corners of default Gtk titlebar.
+// Both implementations (cairo_region_t and wl_region) needs to be synced.
+static void SubtractTitlebarCorners(cairo_region_t* aRegion, int aX, int aY,
+                                    int aWindowWidth) {
+  cairo_rectangle_int_t rect = {aX, aY, TITLEBAR_SHAPE_MASK_HEIGHT,
+                                TITLEBAR_SHAPE_MASK_HEIGHT};
+  cairo_region_subtract_rectangle(aRegion, &rect);
+  rect = {
+      aX + aWindowWidth - TITLEBAR_SHAPE_MASK_HEIGHT,
+      aY,
+      TITLEBAR_SHAPE_MASK_HEIGHT,
+      TITLEBAR_SHAPE_MASK_HEIGHT,
+  };
+  cairo_region_subtract_rectangle(aRegion, &rect);
+}
+
 void nsWindow::UpdateTopLevelOpaqueRegionGtk(bool aSubtractCorners) {
-  cairo_region_t* region = cairo_region_create();
   int x = DevicePixelsToGdkCoordRoundDown(mClientOffset.x);
   int y = DevicePixelsToGdkCoordRoundDown(mClientOffset.y);
   int width = DevicePixelsToGdkCoordRoundDown(mBounds.width);
   int height = DevicePixelsToGdkCoordRoundDown(mBounds.height);
 
+  GdkRectangle gdkRect = {x, y, width, height};
+  if (!mToplevelOpaqueRegionState.NeedsUpdate(gdkRect, aSubtractCorners)) {
+    return;
+  }
+  cairo_region_t* region = cairo_region_create();
   cairo_rectangle_int_t rect = {x, y, width, height};
   cairo_region_union_rectangle(region, &rect);
 
@@ -7546,6 +7517,18 @@ void nsWindow::SetCompositorHint(WindowComposeRequest aState) {
 }
 #endif
 
+bool OpaqueRegionState::NeedsUpdate(GdkRectangle& aNewRect,
+                                    bool aNewSubtractedCorners) {
+  if (aNewRect.x != mRect.x || aNewRect.y != mRect.y ||
+      aNewRect.width != mRect.width || aNewRect.height != mRect.height ||
+      aNewSubtractedCorners != mSubtractedCorners) {
+    mRect = aNewRect;
+    mSubtractedCorners = aNewSubtractedCorners;
+    return true;
+  }
+  return false;
+}
+
 nsresult nsWindow::SetSystemFont(const nsCString& aFontName) {
   GtkSettings* settings = gtk_settings_get_default();
   g_object_set(settings, "gtk-font-name", aFontName.get(), nullptr);
@@ -7771,4 +7754,6 @@ void nsWindow::SetEGLNativeWindowSize(
                                       aEGLWindowSize.height);
   }
 }
+
+nsWindow* nsWindow::GetFocusedWindow() { return gFocusWindow; }
 #endif

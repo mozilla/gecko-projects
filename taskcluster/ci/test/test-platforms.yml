@@ -28,6 +28,7 @@ linux1804-64/opt:
     build-platform: linux64/opt
     test-sets:
         - awsy
+        - desktop-screenshot-capture
         - linux1804-tests
 
 linux1804-64/debug:
@@ -39,11 +40,14 @@ linux1804-64-shippable/opt:
     build-platform: linux64-shippable/opt
     test-sets:
         - awsy
+        - desktop-screenshot-capture
         - linux1804-tests
+        - marionette-headless
 
 linux1804-64-devedition/opt:
     build-platform: linux64-devedition-nightly/opt
     test-sets:
+        - desktop-screenshot-capture
         - linux1804-tests
 
 linux1804-64-asan/opt:
@@ -51,6 +55,8 @@ linux1804-64-asan/opt:
     test-sets:
         - linux1804-tests
 
+# Stylo sequential runs check memory and
+# performance when using a single thread.
 linux1804-64-stylo-sequential/opt:
     build-platform: linux64/opt
     test-sets:
@@ -73,8 +79,9 @@ linux1804-64-qr/debug:
     test-sets:
         - linux1804-qr-tests
 
-linux1804-64-qr-asan/opt:
+linux1804-64-asan-qr/opt:
     build-platform: linux64-asan/opt
+    test-sets:
         - linux-qr-smoketests
 
 linux1804-64-ccov/opt:
@@ -95,9 +102,7 @@ linux64/opt:
         - linux-common-tests
         - web-platform-tests
         - opt-only-tests
-        - desktop-screenshot-capture
         - talos
-        - awsy
         - mochitest-headless
         - linux-talos-flex
         - raptor-firefox
@@ -111,10 +116,8 @@ linux64-shippable/opt:
         - web-platform-tests
         - web-platform-tests-wdspec-headless
         - opt-only-tests
-        - desktop-screenshot-capture
         - talos
         - mochitest-headless
-        - marionette-headless
         - linux-talos-flex
         - raptor-chrome
         - raptor-chromium
@@ -132,7 +135,6 @@ linux64-devedition/opt:
         - linux-common-tests
         - web-platform-tests
         - opt-only-tests
-        - desktop-screenshot-capture
 
 # TODO: use 'asan' label here, instead of -asan/opt
 linux64-asan/opt:
@@ -140,12 +142,6 @@ linux64-asan/opt:
     test-sets:
         - linux-common-tests
         - web-platform-tests
-
-# Stylo sequential runs check memory and performance when using a single thread.
-linux64-stylo-sequential/opt:
-    build-platform: linux64/opt
-    test-sets:
-        - awsy-stylo-sequential
 
 # QR builds just run a subset right now.
 linux64-qr/opt:
@@ -182,7 +178,7 @@ linux64-asan-qr/opt:
 linux64-ccov/opt:
     build-platform: linux64-ccov/opt
     test-sets:
-        - linux-common-tests
+        - common-tests  # temporary while ccov is excluded from ubuntu1804 migration, see bug 1606861
         - web-platform-tests
         - awsy
         - talos

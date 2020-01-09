@@ -6341,18 +6341,6 @@ bool IonBuilder::testNeedsArgumentCheck(JSFunction* target,
   // callee. Since typeset accumulates and can't decrease that means we don't
   // need to check the arguments anymore.
 
-  if (target->isNativeWithJitEntry()) {
-    // For natives with JitEntry we use the call-scripted path, but that
-    // requires a JitScript for the skip-arguments-check optimization so make
-    // sure we don't use that optimization. Note that these natives don't do
-    // argument type checks anyway.
-    return true;
-  }
-
-  if (target->isNative()) {
-    return false;
-  }
-
   if (!target->hasScript()) {
     return true;
   }
@@ -8488,6 +8476,10 @@ bool IonBuilder::needsPostBarrier(MDefinition* value) {
   }
   if (value->mightBeType(MIRType::String) &&
       zone->canNurseryAllocateStrings()) {
+    return true;
+  }
+  if (value->mightBeType(MIRType::BigInt) &&
+      zone->canNurseryAllocateBigInts()) {
     return true;
   }
   return false;
@@ -14192,12 +14184,12 @@ AbortReasonOr<Ok> IonBuilder::setPropTryReferenceTypedObjectValue(
   return resumeAfter(store);
 }
 
-JSObject* IonBuilder::checkNurseryObject(JSObject* obj) {
+void IonBuilder::checkNurseryCell(gc::Cell* cell) {
   // If we try to use any nursery pointers during compilation, make sure that
   // the main thread will cancel this compilation before performing a minor
   // GC. All constants used during compilation should either go through this
   // function or should come from a type set (which has a similar barrier).
-  if (obj && IsInsideNursery(obj)) {
+  if (cell && IsInsideNursery(cell)) {
     realm->zone()->setMinorGCShouldCancelIonCompilations();
     IonBuilder* builder = this;
     while (builder) {
@@ -14205,7 +14197,10 @@ JSObject* IonBuilder::checkNurseryObject(JSObject* obj) {
       builder = builder->callerBuilder_;
     }
   }
+}
 
+JSObject* IonBuilder::checkNurseryObject(JSObject* obj) {
+  checkNurseryCell(obj);
   return obj;
 }
 
@@ -14213,8 +14208,8 @@ MConstant* IonBuilder::constant(const Value& v) {
   MOZ_ASSERT(!v.isString() || v.toString()->isAtom(),
              "Handle non-atomized strings outside IonBuilder.");
 
-  if (v.isObject()) {
-    checkNurseryObject(&v.toObject());
+  if (v.isGCThing()) {
+    checkNurseryCell(v.toGCThing());
   }
 
   MConstant* c = MConstant::New(alloc(), v, constraints());

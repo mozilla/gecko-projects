@@ -12,6 +12,7 @@ import time
 import sys
 from collections import defaultdict
 
+from six import text_type
 from redo import retry
 import yaml
 
@@ -47,7 +48,7 @@ PER_PROJECT_PARAMETERS = {
     },
 
     'ash': {
-        'target_tasks_method': 'ash_tasks',
+        'target_tasks_method': 'default',
     },
 
     'cedar': {
@@ -147,6 +148,10 @@ try_task_config_schema = Schema({
         "ubuntu-bionic",
         description="Run linux desktop tests on Ubuntu 18.04 (bionic)."
         ): bool,
+    Optional(
+        "worker-overrides",
+        description="Mapping of worker alias to worker pools to use for those aliases."
+    ): {text_type: text_type}
 })
 """
 Schema for try_task_config.json files.

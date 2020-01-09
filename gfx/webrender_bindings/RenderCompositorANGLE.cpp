@@ -157,6 +157,41 @@ bool RenderCompositorANGLE::Initialize() {
     return false;
   }
 
+  // Create DCLayerTree when DirectComposition is used.
+  if (gfx::gfxVars::UseWebRenderDCompWin()) {
+    HWND compositorHwnd = mWidget->AsWindows()->GetCompositorHwnd();
+    if (compositorHwnd) {
+      mDCLayerTree =
+          DCLayerTree::Create(gl, mEGLConfig, mDevice, compositorHwnd);
+    } else {
+      gfxCriticalNote << "Compositor window was not created";
+    }
+  }
+
+  // Create SwapChain when compositor is not used
+  if (!UseCompositor()) {
+    if (!CreateSwapChain()) {
+      // SwapChain creation failed.
+      return false;
+    }
+  }
+
+  // SyncObject is used only by D3D11DXVA2Manager
+  mSyncObject = layers::SyncObjectHost::CreateSyncObjectHost(mDevice);
+  if (!mSyncObject->Init()) {
+    // Some errors occur. Clear the mSyncObject here.
+    // Then, there will be no texture synchronization.
+    return false;
+  }
+
+  InitializeUsePartialPresent();
+
+  return true;
+}
+
+bool RenderCompositorANGLE::CreateSwapChain() {
+  MOZ_ASSERT(!UseCompositor());
+
   HWND hwnd = mWidget->AsWindows()->GetHwnd();
 
   RefPtr<IDXGIDevice> dxgiDevice;
@@ -252,28 +287,16 @@ bool RenderCompositorANGLE::Initialize() {
   // We need this because we don't want DXGI to respond to Alt+Enter.
   dxgiFactory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_WINDOW_CHANGES);
 
-  // SyncObject is used only by D3D11DXVA2Manager
-  mSyncObject = layers::SyncObjectHost::CreateSyncObjectHost(mDevice);
-  if (!mSyncObject->Init()) {
-    // Some errors occur. Clear the mSyncObject here.
-    // Then, there will be no texture synchronization.
+  if (!ResizeBufferIfNeeded()) {
     return false;
   }
-
-  if (!UseCompositor()) {
-    if (!ResizeBufferIfNeeded()) {
-      return false;
-    }
-  }
-
-  InitializeUsePartialPresent();
 
   return true;
 }
 
 void RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(
     IDXGIFactory2* aDXGIFactory2) {
-  if (!aDXGIFactory2) {
+  if (!aDXGIFactory2 || !mDCLayerTree) {
     return;
   }
 
@@ -288,10 +311,6 @@ void RenderCompositorANGLE::CreateSwapChainForDCompIfPossible(
     return;
   }
 
-  mDCLayerTree = DCLayerTree::Create(gl(), mEGLConfig, mDevice, hwnd);
-  if (!mDCLayerTree) {
-    return;
-  }
   MOZ_ASSERT(XRE_IsGPUProcess());
 
   // When compositor is enabled, CompositionSurface is used for rendering.
@@ -759,17 +778,18 @@ void RenderCompositorANGLE::Bind(wr::NativeTileId aId,
 void RenderCompositorANGLE::Unbind() { mDCLayerTree->Unbind(); }
 
 void RenderCompositorANGLE::CreateSurface(wr::NativeSurfaceId aId,
-                                          wr::DeviceIntSize aTileSize) {
-  mDCLayerTree->CreateSurface(aId, aTileSize);
+                                          wr::DeviceIntSize aTileSize,
+                                          bool aIsOpaque) {
+  mDCLayerTree->CreateSurface(aId, aTileSize, aIsOpaque);
 }
 
 void RenderCompositorANGLE::DestroySurface(NativeSurfaceId aId) {
   mDCLayerTree->DestroySurface(aId);
 }
 
-void RenderCompositorANGLE::CreateTile(wr::NativeSurfaceId aId, int aX, int aY,
-                                       bool aIsOpaque) {
-  mDCLayerTree->CreateTile(aId, aX, aY, aIsOpaque);
+void RenderCompositorANGLE::CreateTile(wr::NativeSurfaceId aId, int aX,
+                                       int aY) {
+  mDCLayerTree->CreateTile(aId, aX, aY);
 }
 
 void RenderCompositorANGLE::DestroyTile(wr::NativeSurfaceId aId, int aX,

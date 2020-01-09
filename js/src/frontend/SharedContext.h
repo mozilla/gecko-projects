@@ -519,7 +519,7 @@ class FunctionBox : public ObjectBox, public SharedContext {
     // the enclosingScope_ must have be set correctly during initalization.
 
     MOZ_ASSERT(enclosingScope_);
-    return enclosingScope_.maybeScope();
+    return enclosingScope_.scope();
   }
 
   bool needsCallObjectRegardlessOfBindings() const {
@@ -687,6 +687,15 @@ class FunctionBox : public ObjectBox, public SharedContext {
     }
     MOZ_ASSERT(functionCreationData()->lazyScriptData);
     functionCreationData()->lazyScriptData->fieldInitializers.emplace(fi);
+  }
+
+  bool setTypeForScriptedFunction(JSContext* cx, bool singleton) {
+    if (hasObject()) {
+      RootedFunction fun(cx, function());
+      return JSFunction::setTypeForScriptedFunction(cx, fun, singleton);
+    }
+    functionCreationData()->typeForScriptedFunction.emplace(singleton);
+    return true;
   }
 
   void trace(JSTracer* trc) override;

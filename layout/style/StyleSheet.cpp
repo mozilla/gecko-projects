@@ -104,18 +104,37 @@ already_AddRefed<StyleSheet> StyleSheet::Constructor(
     return nullptr;
   }
 
-  auto ss = MakeRefPtr<StyleSheet>(css::SheetParsingMode::eAuthorSheetFeatures,
-                                   CORSMode::CORS_NONE, dom::SRIMetadata());
+  // 1. Construct a sheet and set its properties (see spec).
+  // TODO(nordzilla): Various issues with the spec's handling of aOptions:
+  // * https://github.com/WICG/construct-stylesheets/issues/113
+  // * https://github.com/WICG/construct-stylesheets/issues/105
+  auto sheet =
+      MakeRefPtr<StyleSheet>(css::SheetParsingMode::eAuthorSheetFeatures,
+                             CORSMode::CORS_NONE, dom::SRIMetadata());
 
-  ss->mConstructorDocument = constructorDocument;
+  nsIURI* baseURI = constructorDocument->GetBaseURI();
+  nsIURI* sheetURI = constructorDocument->GetDocumentURI();
+  nsIURI* originalURI = nullptr;
+  sheet->SetURIs(sheetURI, originalURI, baseURI);
 
-  // TODO(nordzilla) aOptions.mAlternate is currently unused.
-  // Functionality will be implemented later.
-  // There are still issues with the spec that I need to work out
-  // before I can fully test all of the options:
-  // https://github.com/WICG/construct-stylesheets/issues/105
+  sheet->SetTitle(aOptions.mTitle);
+  sheet->SetPrincipal(constructorDocument->NodePrincipal());
+  sheet->SetReferrerInfo(constructorDocument->GetReferrerInfo());
+  sheet->mConstructorDocument = constructorDocument;
 
-  return ss.forget();
+  // 2. Set the sheet's media according to aOptions.
+  if (aOptions.mMedia.IsString()) {
+    sheet->SetMedia(MediaList::Create(aOptions.mMedia.GetAsString()));
+  } else {
+    sheet->SetMedia(aOptions.mMedia.GetAsMediaList()->Clone());
+  }
+
+  // 3. Set the sheet's disabled flag according to aOptions.
+  sheet->SetDisabled(aOptions.mDisabled);
+  sheet->SetComplete();
+
+  // 4. Return sheet.
+  return sheet.forget();
 }
 
 StyleSheet::~StyleSheet() {
@@ -895,11 +914,11 @@ void StyleSheet::List(FILE* out, int32_t aIndent) const {
 }
 #endif
 
-void StyleSheet::SetMedia(dom::MediaList* aMedia) {
-  if (aMedia) {
-    aMedia->SetStyleSheet(this);
-  }
+void StyleSheet::SetMedia(already_AddRefed<dom::MediaList> aMedia) {
   mMedia = aMedia;
+  if (mMedia) {
+    mMedia->SetStyleSheet(this);
+  }
 }
 
 void StyleSheet::DropMedia() {
@@ -1071,7 +1090,7 @@ void StyleSheet::FinishParse() {
   SetSourceURL(sourceURL);
 }
 
-nsresult StyleSheet::ReparseSheet(const nsAString& aInput) {
+nsresult StyleSheet::ReparseSheet(const nsACString& aInput) {
   if (!IsComplete()) {
     return NS_ERROR_DOM_INVALID_ACCESS_ERR;
   }
@@ -1133,8 +1152,8 @@ nsresult StyleSheet::ReparseSheet(const nsAString& aInput) {
 
   DropRuleList();
 
-  ParseSheetSync(loader, NS_ConvertUTF16toUTF8(aInput),
-                 /* aLoadData = */ nullptr, lineNumber, &reusableSheets);
+  ParseSheetSync(loader, aInput, /* aLoadData = */ nullptr, lineNumber,
+                 &reusableSheets);
 
   // Notify the stylesets about the new rules.
   {

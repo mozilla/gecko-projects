@@ -440,7 +440,7 @@ def DOMClass(descriptor):
     return fill(
         """
           { ${protoChain} },
-          IsBaseOf<nsISupports, ${nativeType} >::value,
+          std::is_base_of<nsISupports, ${nativeType} >::value,
           ${hooks},
           FindAssociatedGlobalForNative<${nativeType}>::Get,
           GetProtoObjectHandle,
@@ -3887,7 +3887,7 @@ class CGWrapWithCacheMethod(CGAbstractMethod):
 
         return fill(
             """
-            static_assert(!IsBaseOf<NonRefcountedDOMObject, ${nativeType}>::value,
+            static_assert(!std::is_base_of<NonRefcountedDOMObject, ${nativeType}>::value,
                           "Shouldn't have wrappercached things that are not refcounted.");
             $*{assertInheritance}
             MOZ_ASSERT_IF(aGivenProto, js::IsObjectInContextCompartment(aGivenProto, aCx));
@@ -6013,20 +6013,18 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         if isOptional:
             if type.isUTF8String():
                 declType = "Optional<nsACString>"
-                holderType = CGGeneric("nsAutoCString")
+                holderType = CGGeneric("binding_detail::FakeString<char>")
             else:
                 declType = "Optional<nsAString>"
-                holderType = CGGeneric("binding_detail::FakeString")
+                holderType = CGGeneric("binding_detail::FakeString<char16_t>")
             conversionCode = ("%s"
                               "${declName} = &${holderName};\n" %
                               getConversionCode("${holderName}"))
         else:
             if type.isUTF8String():
-                # TODO(emilio, bug 1606958): We could make FakeString generic
-                # if we deem it worth it, instead of using nsAutoCString.
-                declType = "nsAutoCString"
+                declType = "binding_detail::FakeString<char>"
             else:
-                declType = "binding_detail::FakeString"
+                declType = "binding_detail::FakeString<char16_t>"
             holderType = None
             conversionCode = getConversionCode("${declName}")
 
@@ -8185,7 +8183,7 @@ class CGPerSignatureCall(CGThing):
              self.returnType.isPromise())):
             wrapCode += dedent(
                 """
-                static_assert(!IsPointer<decltype(result)>::value,
+                static_assert(!std::is_pointer_v<decltype(result)>,
                               "NewObject implies that we need to keep the object alive with a strong reference.");
                 """)
 
@@ -10344,7 +10342,10 @@ def getUnionAccessorSignatureType(type, descriptorProvider):
     if type.isDOMString() or type.isUSVString():
         return CGGeneric("const nsAString&")
 
-    if type.isByteString() or type.isUTF8String():
+    if type.isUTF8String():
+        return CGGeneric("const nsACString&")
+
+    if type.isByteString():
         return CGGeneric("const nsCString&")
 
     if type.isEnum():
@@ -11761,7 +11762,7 @@ class CGProxyNamedOperation(CGProxySpecialOperation):
             decls = ""
             idName = "id"
 
-        decls += "FakeString %s;\n" % argName
+        decls += "FakeString<char16_t> %s;\n" % argName
 
         main = fill(
             """
@@ -13606,7 +13607,7 @@ class CGDescriptor(CGThing):
             if descriptor.proxy:
                 cgThings.append(CGGeneric(fill(
                     """
-                    static_assert(IsBaseOf<nsISupports, ${nativeType} >::value,
+                    static_assert(std::is_base_of<nsISupports, ${nativeType} >::value,
                                       "We don't support non-nsISupports native classes for "
                                       "proxy-based bindings yet");
 

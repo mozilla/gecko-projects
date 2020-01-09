@@ -18,7 +18,6 @@
 #include "nsMemoryPressure.h"
 #include "nsThreadManager.h"
 #include "nsIClassInfoImpl.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsQueryObject.h"
 #include "pratom.h"
@@ -50,6 +49,8 @@
 #include "ThreadEventQueue.h"
 #include "ThreadEventTarget.h"
 #include "ThreadDelay.h"
+
+#include <limits>
 
 #ifdef XP_LINUX
 #  ifdef __GLIBC__
@@ -258,6 +259,12 @@ struct nsThreadShutdownContext {
   bool mIsMainThreadJoining;
 };
 
+bool nsThread::ShutdownContextsComp::Equals(
+    const ShutdownContexts::elem_type& a,
+    const ShutdownContexts::elem_type::Pointer b) const {
+  return a.get() == b;
+}
+
 // This event is responsible for notifying nsThread::Shutdown that it is time
 // to call PR_JoinThread. It implements nsICancelableRunnable so that it can
 // run on a DOM Worker thread (where all events must implement
@@ -452,11 +459,10 @@ void nsThread::ThreadFunc(void* aArg) {
 
   {
     // Scope for MessageLoop.
-    nsAutoPtr<MessageLoop> loop(
-        new MessageLoop(MessageLoop::TYPE_MOZILLA_NONMAINTHREAD, self));
+    MessageLoop loop(MessageLoop::TYPE_MOZILLA_NONMAINTHREAD, self);
 
     // Now, process incoming events...
-    loop->Run();
+    loop.Run();
 
     BackgroundChild::CloseForCurrentThread();
 
@@ -600,7 +606,7 @@ nsThread::nsThread(NotNull<SynchronizedEventQueue*> aQueue,
       mScriptObserver(nullptr),
       mStackSize(aStackSize),
       mNestedEventLoopDepth(0),
-      mCurrentEventLoopDepth(MaxValue<uint32_t>::value),
+      mCurrentEventLoopDepth(std::numeric_limits<uint32_t>::max()),
       mShutdownRequired(false),
       mPriority(PRIORITY_NORMAL),
       mIsMainThread(aMainThread == MAIN_THREAD),
@@ -623,7 +629,7 @@ nsThread::nsThread()
       mScriptObserver(nullptr),
       mStackSize(0),
       mNestedEventLoopDepth(0),
-      mCurrentEventLoopDepth(MaxValue<uint32_t>::value),
+      mCurrentEventLoopDepth(std::numeric_limits<uint32_t>::max()),
       mShutdownRequired(false),
       mPriority(PRIORITY_NORMAL),
       mIsMainThread(false),
@@ -653,7 +659,7 @@ nsThread::~nsThread() {
   // requesting shutdown on another, which can be helpful for diagnosing
   // the leak.
   for (size_t i = 0; i < mRequestedShutdownContexts.Length(); ++i) {
-    Unused << mRequestedShutdownContexts[i].forget();
+    Unused << mRequestedShutdownContexts[i].release();
   }
 #endif
 }
@@ -843,15 +849,15 @@ nsThreadShutdownContext* nsThread::ShutdownInternal(bool aSync) {
   MOZ_DIAGNOSTIC_ASSERT(currentThread->EventQueue(),
                         "Shutdown() may only be called from an XPCOM thread");
 
-  nsAutoPtr<nsThreadShutdownContext>& context =
-      *currentThread->mRequestedShutdownContexts.AppendElement();
-  context =
+  // Allocate a shutdown context and store a strong ref.
+  auto context =
       new nsThreadShutdownContext(WrapNotNull(this), currentThread, aSync);
+  Unused << *currentThread->mRequestedShutdownContexts.EmplaceBack(context);
 
   // Set mShutdownContext and wake up the thread in case it is waiting for
   // events to process.
   nsCOMPtr<nsIRunnable> event =
-      new nsThreadShutdownEvent(WrapNotNull(this), WrapNotNull(context.get()));
+      new nsThreadShutdownEvent(WrapNotNull(this), WrapNotNull(context));
   // XXXroc What if posting the event fails due to OOM?
   mEvents->PutEvent(event.forget(), EventQueuePriority::Normal);
 
@@ -887,7 +893,8 @@ void nsThread::ShutdownComplete(NotNull<nsThreadShutdownContext*> aContext) {
   // Delete aContext.
   // aContext might not be in mRequestedShutdownContexts if it belongs to a
   // thread that was leaked by calling nsIThreadPool::ShutdownWithTimeout.
-  aContext->mJoiningThread->mRequestedShutdownContexts.RemoveElement(aContext);
+  aContext->mJoiningThread->mRequestedShutdownContexts.RemoveElement(
+      aContext, ShutdownContextsComp{});
 }
 
 void nsThread::WaitForAllAsynchronousShutdowns() {
@@ -1278,7 +1285,7 @@ nsThread::ProcessNextEvent(bool aMayWait, bool* aResult) {
               duration.ToMicroseconds());
         }
         mCurrentEvent = nullptr;
-        mCurrentEventLoopDepth = MaxValue<uint32_t>::value;
+        mCurrentEventLoopDepth = std::numeric_limits<uint32_t>::max();
         mCurrentPerformanceCounter = nullptr;
       }
     } else {

@@ -1280,7 +1280,7 @@ void BrowsingContext::StartDelayedAutoplayMediaComponents() {
 }
 
 void BrowsingContext::ResetGVAutoplayRequestStatus() {
-  MOZ_ASSERT(!GetParent(),
+  MOZ_ASSERT(IsTop(),
              "Should only set GVAudibleAutoplayRequestStatus in the top-level "
              "browsing context");
   SetGVAudibleAutoplayRequestStatus(GVAutoplayRequestStatus::eUNKNOWN);
@@ -1288,13 +1288,13 @@ void BrowsingContext::ResetGVAutoplayRequestStatus() {
 }
 
 void BrowsingContext::DidSetGVAudibleAutoplayRequestStatus() {
-  MOZ_ASSERT(!GetParent(),
+  MOZ_ASSERT(IsTop(),
              "Should only set GVAudibleAutoplayRequestStatus in the top-level "
              "browsing context");
 }
 
 void BrowsingContext::DidSetGVInaudibleAutoplayRequestStatus() {
-  MOZ_ASSERT(!GetParent(),
+  MOZ_ASSERT(IsTop(),
              "Should only set GVAudibleAutoplayRequestStatus in the top-level "
              "browsing context");
 }
@@ -1502,6 +1502,7 @@ bool IPDLParamTraits<dom::BrowsingContext*>::Read(
 
   RefPtr<dom::BrowsingContext> browsingContext = dom::BrowsingContext::Get(id);
   if (!browsingContext) {
+#ifndef FUZZING
     // NOTE: We could fail softly by returning `false` if the `BrowsingContext`
     // isn't present, but doing so will cause a crash anyway. Let's improve
     // diagnostics by reliably crashing here.
@@ -1509,6 +1510,7 @@ bool IPDLParamTraits<dom::BrowsingContext*>::Read(
     // If we can recover from failures to deserialize in the future, this crash
     // should be removed or modified.
     MOZ_CRASH("Attempt to deserialize absent BrowsingContext");
+#endif
     *aResult = nullptr;
     return false;
   }

@@ -46,6 +46,7 @@ TARGET_TASK_FILTERS = (
     '.*win64-aarch64-laptop.*',
     'android-hw.*',
     '.*android-geckoview-docs.*',
+    'linux1804-32.*',  # Bug 1599197
 )
 
 
@@ -253,6 +254,7 @@ class FuzzyParser(BaseTryParser):
         'pernosco',
         'rebuild',
         'visual-metrics-jobs',
+        'worker-overrides',
     ]
 
 

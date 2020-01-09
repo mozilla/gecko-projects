@@ -23,6 +23,7 @@ struct IDCompositionSurface;
 struct IDCompositionTarget;
 struct IDCompositionVisual2;
 struct IDXGISwapChain1;
+struct IDCompositionVirtualSurface;
 
 namespace mozilla {
 
@@ -31,6 +32,15 @@ class GLContext;
 }
 
 namespace wr {
+
+#define USE_VIRTUAL_SURFACES
+
+// DirectComposition virtual surfaces are zero based, but WR picture cache
+// bounds can potentially have a negative origin. Shift all the picture cache
+// coordinates by a large fixed amount, such that we don't need to re-create
+// the surface if the picture cache origin becomes negative due to adding more
+// tiles to the above / left.
+#define VIRTUAL_OFFSET 512 * 1024
 
 class DCLayer;
 class DCSurface;
@@ -58,10 +68,10 @@ class DCLayerTree {
   void Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
             wr::DeviceIntRect aDirtyRect);
   void Unbind();
-  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aTileSize);
+  void CreateSurface(wr::NativeSurfaceId aId, wr::DeviceIntSize aTileSize,
+                     bool aIsOpaque);
   void DestroySurface(NativeSurfaceId aId);
-  void CreateTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY,
-                  bool aIsOpaque);
+  void CreateTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY);
   void DestroyTile(wr::NativeSurfaceId aId, int32_t aX, int32_t aY);
   void AddSurface(wr::NativeSurfaceId aId, wr::DeviceIntPoint aPosition,
                   wr::DeviceIntRect aClipRect);
@@ -81,6 +91,11 @@ class DCLayerTree {
   bool Initialize(HWND aHwnd);
   bool MaybeUpdateDebugCounter();
   bool MaybeUpdateDebugVisualRedrawRegions();
+  void DestroyEGLSurface();
+  GLuint CreateEGLSurfaceForCompositionSurface(
+      wr::DeviceIntRect aDirtyRect, wr::DeviceIntPoint* aOffset,
+      RefPtr<IDCompositionSurface> aCompositionSurface,
+      wr::DeviceIntPoint aSurfaceOffset);
 
   RefPtr<gl::GLContext> mGL;
   EGLConfig mEGLConfig;
@@ -95,7 +110,15 @@ class DCLayerTree {
   bool mDebugCounter;
   bool mDebugVisualRedrawRegions;
 
-  Maybe<wr::NativeTileId> mCurrentId;
+  Maybe<RefPtr<IDCompositionSurface>> mCurrentSurface;
+
+  // The EGL image that is bound to the D3D texture provided by
+  // DirectComposition.
+  EGLImage mEGLImage;
+
+  // The GL render buffer ID that maps the EGLImage to an RBO for attaching to
+  // an FBO.
+  GLuint mColorRBO;
 
   struct SurfaceIdHashFn {
     std::size_t operator()(const wr::NativeSurfaceId& aId) const {
@@ -135,11 +158,12 @@ class DCLayerTree {
  */
 class DCSurface {
  public:
-  explicit DCSurface(wr::DeviceIntSize aTileSize, DCLayerTree* aDCLayerTree);
+  explicit DCSurface(wr::DeviceIntSize aTileSize, bool aIsOpaque,
+                     DCLayerTree* aDCLayerTree);
   ~DCSurface();
 
   bool Initialize();
-  void CreateTile(int32_t aX, int32_t aY, bool aIsOpaque);
+  void CreateTile(int32_t aX, int32_t aY);
   void DestroyTile(int32_t aX, int32_t aY);
 
   IDCompositionVisual2* GetVisual() const { return mVisual; }
@@ -151,6 +175,16 @@ class DCSurface {
     int32_t mX;
     int32_t mY;
   };
+
+#ifdef USE_VIRTUAL_SURFACES
+  wr::DeviceIntSize GetTileSize() const { return mTileSize; }
+
+  IDCompositionVirtualSurface* GetCompositionSurface() const {
+    return mVirtualSurface;
+  }
+
+  void UpdateAllocatedRect();
+#endif
 
  protected:
   DCLayerTree* mDCLayerTree;
@@ -168,7 +202,13 @@ class DCSurface {
   RefPtr<IDCompositionVisual2> mVisual;
 
   wr::DeviceIntSize mTileSize;
+  bool mIsOpaque;
+  bool mAllocatedRectDirty;
   std::unordered_map<TileKey, UniquePtr<DCLayer>, TileKeyHashFn> mDCLayers;
+
+#ifdef USE_VIRTUAL_SURFACES
+  RefPtr<IDCompositionVirtualSurface> mVirtualSurface;
+#endif
 };
 
 /**
@@ -180,10 +220,8 @@ class DCLayer {
   explicit DCLayer(DCLayerTree* aDCLayerTree);
   ~DCLayer();
   bool Initialize(int aX, int aY, wr::DeviceIntSize aSize, bool aIsOpaque);
-  GLuint CreateEGLSurfaceForCompositionSurface(wr::DeviceIntRect aDirtyRect,
-                                               wr::DeviceIntPoint* aOffset);
-  void EndDraw();
 
+#ifndef USE_VIRTUAL_SURFACES
   IDCompositionSurface* GetCompositionSurface() const {
     return mCompositionSurface;
   }
@@ -192,23 +230,12 @@ class DCLayer {
  protected:
   RefPtr<IDCompositionSurface> CreateCompositionSurface(wr::DeviceIntSize aSize,
                                                         bool aIsOpaque);
-  void DestroyEGLSurface();
-
-  DCLayerTree* mDCLayerTree;
 
   RefPtr<IDCompositionSurface> mCompositionSurface;
-
-  // The EGL image that is bound to the D3D texture provided by
-  // DirectComposition.
-  EGLImage mEGLImage;
-
-  // The GL render buffer ID that maps the EGLImage to an RBO for attaching to
-  // an FBO.
-  GLuint mColorRBO;
-
-  LayoutDeviceIntSize mBufferSize;
-
   RefPtr<IDCompositionVisual2> mVisual;
+#endif
+
+  DCLayerTree* mDCLayerTree;
 };
 
 static inline bool operator==(const DCSurface::TileKey& a0,

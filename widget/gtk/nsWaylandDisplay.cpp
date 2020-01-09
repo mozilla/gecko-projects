@@ -116,7 +116,7 @@ static nsWaylandDisplay* WaylandDisplayGetLocked(GdkDisplay* aGdkDisplay,
 nsWaylandDisplay* WaylandDisplayGet(GdkDisplay* aGdkDisplay) {
   if (!aGdkDisplay) {
     aGdkDisplay = gdk_display_get_default();
-    if (!aGdkDisplay) {
+    if (!aGdkDisplay || GDK_IS_X11_DISPLAY(aGdkDisplay)) {
       return nullptr;
     }
   }
@@ -145,6 +145,11 @@ void nsWaylandDisplay::SetSeat(wl_seat* aSeat) { mSeat = aSeat; }
 void nsWaylandDisplay::SetPrimarySelectionDeviceManager(
     gtk_primary_selection_device_manager* aPrimarySelectionDeviceManager) {
   mPrimarySelectionDeviceManager = aPrimarySelectionDeviceManager;
+}
+
+void nsWaylandDisplay::SetIdleInhibitManager(
+    zwp_idle_inhibit_manager_v1* aIdleInhibitManager) {
+  mIdleInhibitManager = aIdleInhibitManager;
 }
 
 void nsWaylandDisplay::SetDmabuf(zwp_linux_dmabuf_v1* aDmabuf) {
@@ -238,6 +243,13 @@ static void global_registry_handler(void* data, wl_registry* registry,
     wl_proxy_set_queue((struct wl_proxy*)primary_selection_device_manager,
                        display->GetEventQueue());
     display->SetPrimarySelectionDeviceManager(primary_selection_device_manager);
+  } else if (strcmp(interface, "zwp_idle_inhibit_manager_v1") == 0) {
+    auto idle_inhibit_manager =
+        static_cast<zwp_idle_inhibit_manager_v1*>(wl_registry_bind(
+            registry, id, &zwp_idle_inhibit_manager_v1_interface, 1));
+    wl_proxy_set_queue((struct wl_proxy*)idle_inhibit_manager,
+                       display->GetEventQueue());
+    display->SetIdleInhibitManager(idle_inhibit_manager);
   } else if (strcmp(interface, "wl_compositor") == 0) {
     // Requested wl_compositor version 4 as we need wl_surface_damage_buffer().
     auto compositor = static_cast<wl_compositor*>(
@@ -388,6 +400,7 @@ nsWaylandDisplay::nsWaylandDisplay(wl_display* aDisplay)
       mShm(nullptr),
       mSyncCallback(nullptr),
       mPrimarySelectionDeviceManager(nullptr),
+      mIdleInhibitManager(nullptr),
       mRegistry(nullptr),
       mDmabuf(nullptr),
       mGbmDevice(nullptr),

@@ -1278,10 +1278,9 @@
           );
         }
 
-        let rc_js = "resource://gre/modules/RemoteController.js";
-        let scope = {};
-        Services.scriptloader.loadSubScript(rc_js, scope);
-        let RemoteController = scope.RemoteController;
+        const { RemoteController } = ChromeUtils.import(
+          "resource://gre/modules/RemoteController.jsm"
+        );
         this._controller = new RemoteController(this);
         this.controllers.appendController(this._controller);
       }
@@ -1370,6 +1369,14 @@
         }
       }
 
+      if (this._controller) {
+        try {
+          this.controllers.removeController(this._controller);
+        } catch (ex) {
+          Cu.reportError(ex);
+        }
+      }
+
       this.resetFields();
 
       if (!this.mInitialized) {
@@ -1377,17 +1384,6 @@
       }
 
       this.mInitialized = false;
-
-      if (this.isRemoteBrowser) {
-        try {
-          this.controllers.removeController(this._controller);
-        } catch (ex) {
-          // This can fail when this browser element is not attached to a
-          // BrowserDOMWindow.
-        }
-        return;
-      }
-
       this.lastURI = null;
 
       if (!this.isRemoteBrowser) {
