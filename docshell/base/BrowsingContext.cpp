@@ -303,29 +303,6 @@ void BrowsingContext::SetEmbedderElement(Element* aEmbedder) {
   // Notify the parent process of the embedding status. We don't need to do
   // this when clearing our embedder, as we're being destroyed either way.
   if (aEmbedder) {
-    // If our embedder element is being mutated to a different embedder, and we
-    // have a parent edge, bad things might be happening!
-    //
-    // XXX: This is a workaround to some parent edges not being immutable in the
-    // parent process. It can be fixed once bug 1539979 has been fixed.
-    if (mParent && mEmbedderElement && mEmbedderElement != aEmbedder) {
-      NS_WARNING("Non root content frameLoader swap! This will crash soon!");
-
-      MOZ_DIAGNOSTIC_ASSERT(mType == Type::Chrome, "must be chrome");
-      MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess(), "must be in parent");
-      MOZ_DIAGNOSTIC_ASSERT(!mGroup->IsContextCached(this),
-                            "cannot be in bfcache");
-
-      RefPtr<BrowsingContext> kungFuDeathGrip(this);
-      RefPtr<BrowsingContext> newParent(
-          aEmbedder->OwnerDoc()->GetBrowsingContext());
-      mParent->mChildren.RemoveElement(this);
-      if (newParent) {
-        newParent->mChildren.AppendElement(this);
-      }
-      mParent = newParent;
-    }
-
     if (nsCOMPtr<nsPIDOMWindowInner> inner =
             do_QueryInterface(aEmbedder->GetOwnerGlobal())) {
       SetEmbedderInnerWindowId(inner->WindowID());
@@ -949,7 +926,7 @@ nsresult BrowsingContext::InternalLoad(BrowsingContext* aAccessor,
     // the same as how the tab first opened.
     nsCOMPtr<nsPIDOMWindowOuter> domWin = GetDOMWindow();
     if (isActive && domWin) {
-      nsFocusManager::FocusWindow(domWin);
+      nsFocusManager::FocusWindow(domWin, CallerType::System);
     }
 
     // Else we ran out of memory, or were a popup and got blocked,
@@ -1023,11 +1000,11 @@ void BrowsingContext::Close(CallerType aCallerType, ErrorResult& aError) {
   }
 }
 
-void BrowsingContext::Focus(ErrorResult& aError) {
+void BrowsingContext::Focus(CallerType aCallerType, ErrorResult& aError) {
   if (ContentChild* cc = ContentChild::GetSingleton()) {
-    cc->SendWindowFocus(this);
+    cc->SendWindowFocus(this, aCallerType);
   } else if (ContentParent* cp = Canonical()->GetContentParent()) {
-    Unused << cp->SendWindowFocus(this);
+    Unused << cp->SendWindowFocus(this, aCallerType);
   }
 }
 
@@ -1098,6 +1075,7 @@ void BrowsingContext::PostMessageMoz(JSContext* aCx,
   data.targetOrigin() = aTargetOrigin;
   data.subjectPrincipal() = &aSubjectPrincipal;
   RefPtr<nsGlobalWindowInner> callerInnerWindow;
+  nsAutoCString scriptLocation;
   // We don't need to get the caller's agentClusterId since that is used for
   // checking whether it's okay to sharing memory (and it's not allowed to share
   // memory cross processes)
@@ -1105,9 +1083,8 @@ void BrowsingContext::PostMessageMoz(JSContext* aCx,
           aCx, aTargetOrigin, getter_AddRefs(sourceBc), data.origin(),
           getter_AddRefs(data.targetOriginURI()),
           getter_AddRefs(data.callerPrincipal()),
-          getter_AddRefs(callerInnerWindow),
-          getter_AddRefs(data.callerDocumentURI()),
-          /* aCallerAgentClusterId */ nullptr, aError)) {
+          getter_AddRefs(callerInnerWindow), getter_AddRefs(data.callerURI()),
+          /* aCallerAgentClusterId */ nullptr, &scriptLocation, aError)) {
     return;
   }
   if (sourceBc && sourceBc->IsDiscarded()) {
@@ -1117,7 +1094,8 @@ void BrowsingContext::PostMessageMoz(JSContext* aCx,
   data.isFromPrivateWindow() =
       callerInnerWindow &&
       nsScriptErrorBase::ComputeIsFromPrivateWindow(callerInnerWindow);
-
+  data.innerWindowId() = callerInnerWindow ? callerInnerWindow->WindowID() : 0;
+  data.scriptLocation() = scriptLocation;
   JS::Rooted<JS::Value> transferArray(aCx);
   aError = nsContentUtils::CreateJSValueFromSequenceOfObject(aCx, aTransfer,
                                                              &transferArray);

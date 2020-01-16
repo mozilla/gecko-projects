@@ -975,8 +975,6 @@ nsGlobalWindowInner::~nsGlobalWindowInner() {
   FreeInnerObjects();
 
   if (sInnerWindowsById) {
-    MOZ_ASSERT(sInnerWindowsById->Get(mWindowID),
-               "This window should be in the hash table");
     sInnerWindowsById->Remove(mWindowID);
   }
 
@@ -1376,6 +1374,11 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowInner)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowInner)
+  tmp->ClearWeakReferences();
+  if (sInnerWindowsById) {
+    sInnerWindowsById->Remove(tmp->mWindowID);
+  }
+
   JSObject* wrapper = tmp->GetWrapperPreserveColor();
   if (wrapper) {
     // Mark our realm as dead, so the JS engine won't hand out our
@@ -3448,13 +3451,13 @@ void nsGlobalWindowInner::Prompt(const nsAString& aMessage,
       aError, );
 }
 
-void nsGlobalWindowInner::Focus(ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(FocusOuter, (), aError, );
+void nsGlobalWindowInner::Focus(CallerType aCallerType, ErrorResult& aError) {
+  FORWARD_TO_OUTER_OR_THROW(FocusOuter, (aCallerType), aError, );
 }
 
-nsresult nsGlobalWindowInner::Focus() {
+nsresult nsGlobalWindowInner::Focus(CallerType aCallerType) {
   ErrorResult rv;
-  Focus(rv);
+  Focus(aCallerType, rv);
 
   return rv.StealNSResult();
 }
@@ -3823,20 +3826,12 @@ void nsGlobalWindowInner::NotifyDOMWindowThawed(nsGlobalWindowInner* aWindow) {
 
 Element* nsGlobalWindowInner::GetFrameElement(nsIPrincipal& aSubjectPrincipal,
                                               ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(GetFrameElementOuter, (aSubjectPrincipal), aError,
+  FORWARD_TO_OUTER_OR_THROW(GetFrameElement, (aSubjectPrincipal), aError,
                             nullptr);
 }
 
 Element* nsGlobalWindowInner::GetRealFrameElement(ErrorResult& aError) {
-  FORWARD_TO_OUTER_OR_THROW(GetRealFrameElementOuter, (), aError, nullptr);
-}
-
-/**
- * nsIGlobalWindow::GetFrameElement (when called from C++) is just a wrapper
- * around GetRealFrameElement.
- */
-Element* nsGlobalWindowInner::GetFrameElement() {
-  return GetRealFrameElement(IgnoreErrors());
+  FORWARD_TO_OUTER_OR_THROW(GetFrameElement, (), aError, nullptr);
 }
 
 void nsGlobalWindowInner::UpdateCommands(const nsAString& anAction,

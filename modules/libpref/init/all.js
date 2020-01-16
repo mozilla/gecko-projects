@@ -265,8 +265,9 @@ pref("dom.workers.maxPerDomain", 512);
 // The amount of time (milliseconds) service workers keep running after each event.
 pref("dom.serviceWorkers.idle_timeout", 30000);
 
-// The amount of time (milliseconds) service workers can be kept running using waitUntil promises.
-pref("dom.serviceWorkers.idle_extended_timeout", 300000);
+// The amount of time (milliseconds) service workers can be kept running using waitUntil promises
+// or executing "long-running" JS after the "idle_timeout" period has expired.
+pref("dom.serviceWorkers.idle_extended_timeout", 30000);
 
 // The amount of time (milliseconds) an update request is delayed when triggered
 // by a service worker that doesn't control any clients.
@@ -493,7 +494,7 @@ pref("media.videocontrols.picture-in-picture.video-toggle.always-show", false);
   pref("media.peerconnection.ice.no_host", false);
   pref("media.peerconnection.ice.default_address_only", false);
   // See Bug 1581947 for Android hostname obfuscation
-  #if defined(MOZ_WIDGET_ANDROID) || defined(RELEASE_OR_BETA)
+  #if defined(MOZ_WIDGET_ANDROID)
     pref("media.peerconnection.ice.obfuscate_host_addresses", false);
   #else
     pref("media.peerconnection.ice.obfuscate_host_addresses", true);
@@ -502,6 +503,7 @@ pref("media.videocontrols.picture-in-picture.video-toggle.always-show", false);
   pref("media.peerconnection.ice.proxy_only_if_behind_proxy", false);
   pref("media.peerconnection.ice.proxy_only", false);
   pref("media.peerconnection.turn.disable", false);
+  pref("media.peerconnection.mute_on_bye_or_timeout", false);
 
   // 770 = DTLS 1.0, 771 = DTLS 1.2
   pref("media.peerconnection.dtls.version.min", 770);
@@ -1965,7 +1967,6 @@ pref("network.proxy.ssl_port",              0);
 pref("network.proxy.socks",                 "");
 pref("network.proxy.socks_port",            0);
 pref("network.proxy.socks_version",         5);
-pref("network.proxy.socks_remote_dns",      false);
 pref("network.proxy.proxy_over_tls",        true);
 pref("network.proxy.no_proxies_on",         "");
 // Set true to allow resolving proxy for localhost
@@ -2283,6 +2284,10 @@ pref("security.notification_enable_delay", 500);
   // to skip the allowlist for about: pages and do not ship with a
   // CSP and NS_ASSERT right away.
   pref("csp.skip_about_page_csp_allowlist_and_assert", false);
+  // For testing purposes only: Flipping this pref to true allows
+  // to skip the assertion that HTML fragments (e.g. innerHTML) can
+  // not be used within chrome code or about: pages.
+  pref("domsecurity.skip_html_fragment_assertion", false);
 #endif
 
 #ifdef EARLY_BETA_OR_EARLIER
@@ -2778,7 +2783,7 @@ pref("browser.tabs.remote.separatePrivilegedMozillaWebContentProcess", false);
 
 // The domains we will isolate into the Mozilla Content Process. Comma-separated
 // full domains: any subdomains of the domains listed will also be allowed.
-pref("browser.tabs.remote.separatedMozillaDomains", "addons.cdn.mozilla.net,addons.mozilla.org,accounts.firefox.com");
+pref("browser.tabs.remote.separatedMozillaDomains", "addons.mozilla.org,accounts.firefox.com");
 
 // Default font types and sizes by locale
 pref("font.default.ar", "sans-serif");
@@ -4041,7 +4046,6 @@ pref("network.psl.onUpdate_notify", false);
   pref("widget.content.gtk-theme-override", "");
 #endif
 #ifdef MOZ_WAYLAND
-  pref("widget.wayland_dmabuf_backend.enabled", false);
   pref("widget.wayland_vsync.enabled", false);
 #endif
 
@@ -4062,7 +4066,7 @@ pref("xpinstall.whitelist.required", true);
 pref("xpinstall.signatures.required", false);
 pref("extensions.langpacks.signatures.required", false);
 pref("extensions.webExtensionsMinPlatformVersion", "42.0a1");
-pref("extensions.legacy.enabled", true);
+pref("extensions.experiments.enabled", true);
 
 // Other webextensions prefs
 pref("extensions.webextensions.keepStorageOnUninstall", false);

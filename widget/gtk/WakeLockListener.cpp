@@ -33,6 +33,7 @@
 #  define DBUS_TIMEOUT (-1)
 
 using namespace mozilla;
+using namespace mozilla::widget;
 
 NS_IMPL_ISUPPORTS(WakeLockListener, nsIDOMMozWakeLockListener)
 
@@ -189,7 +190,9 @@ bool WakeLockTopic::CheckXScreenSaverSupport() {
   }
 
   GdkDisplay* gDisplay = gdk_display_get_default();
-  if (!GDK_IS_X11_DISPLAY(gDisplay)) return false;
+  if (!gDisplay || !GDK_IS_X11_DISPLAY(gDisplay)) {
+    return false;
+  }
   Display* display = GDK_DISPLAY_XDISPLAY(gDisplay);
 
   int throwaway;
@@ -208,9 +211,13 @@ bool WakeLockTopic::CheckXScreenSaverSupport() {
 bool WakeLockTopic::InhibitXScreenSaver(bool inhibit) {
   // Should only be called if CheckXScreenSaverSupport returns true.
   // There's a couple of safety checks here nonetheless.
-  if (!_XSSSuspend) return false;
+  if (!_XSSSuspend) {
+    return false;
+  }
   GdkDisplay* gDisplay = gdk_display_get_default();
-  if (!GDK_IS_X11_DISPLAY(gDisplay)) return false;
+  if (!gDisplay || !GDK_IS_X11_DISPLAY(gDisplay)) {
+    return false;
+  }
   Display* display = GDK_DISPLAY_XDISPLAY(gDisplay);
   _XSSSuspend(display, inhibit);
   return true;
@@ -222,24 +229,20 @@ bool WakeLockTopic::InhibitXScreenSaver(bool inhibit) {
 
 /* static */
 bool WakeLockTopic::CheckWaylandIdleInhibitSupport() {
-  GdkDisplay* gDisplay = gdk_display_get_default();
-  if (GDK_IS_X11_DISPLAY(gDisplay)) return false;
-
-  widget::nsWaylandDisplay* waylandDisplay =
-      widget::WaylandDisplayGet(gDisplay);
-  if (!waylandDisplay->GetIdleInhibitManager()) return false;
-
-  return true;
+  nsWaylandDisplay* waylandDisplay = WaylandDisplayGet();
+  return waylandDisplay && waylandDisplay->GetIdleInhibitManager() != nullptr;
 }
 
 bool WakeLockTopic::InhibitWaylandIdle() {
-  GdkDisplay* gDisplay = gdk_display_get_default();
-
-  widget::nsWaylandDisplay* waylandDisplay =
-      widget::WaylandDisplayGet(gDisplay);
+  nsWaylandDisplay* waylandDisplay = WaylandDisplayGet();
+  if (!waylandDisplay) {
+    return false;
+  }
 
   nsWindow* focusedWindow = nsWindow::GetFocusedWindow();
-  if (!focusedWindow) return false;
+  if (!focusedWindow) {
+    return false;
+  }
 
   UninhibitWaylandIdle();
 

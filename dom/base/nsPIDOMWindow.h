@@ -540,13 +540,11 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
       mozilla::dom::Element& aElt, const nsAString& aPseudoElt,
       mozilla::ErrorResult& aError) = 0;
 
-  virtual mozilla::dom::Element* GetFrameElement() = 0;
-
   virtual nsDOMOfflineResourceList* GetApplicationCache() = 0;
 
   virtual bool GetFullScreen() = 0;
 
-  virtual nsresult Focus() = 0;
+  virtual nsresult Focus(mozilla::dom::CallerType aCallerType) = 0;
   virtual nsresult Close() = 0;
 
   mozilla::dom::DocGroup* GetDocGroup() const;
@@ -1035,7 +1033,7 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
   virtual bool GetFullScreen() = 0;
   virtual nsresult SetFullScreen(bool aFullscreen) = 0;
 
-  virtual nsresult Focus() = 0;
+  virtual nsresult Focus(mozilla::dom::CallerType aCallerType) = 0;
   virtual nsresult Close() = 0;
 
   virtual nsresult MoveBy(int32_t aXDif, int32_t aYDif) = 0;

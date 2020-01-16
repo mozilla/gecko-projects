@@ -402,15 +402,15 @@ bool EmitterScope::deadZoneFrameSlotRange(BytecodeEmitter* bce,
   // throw reference errors. See 13.1.11, 9.2.13, 13.6.3.4, 13.6.4.6,
   // 13.6.4.8, 13.14.5, 15.1.8, and 15.2.0.15.
   if (slotStart != slotEnd) {
-    if (!bce->emit1(JSOP_UNINITIALIZED)) {
+    if (!bce->emit1(JSOp::Uninitialized)) {
       return false;
     }
     for (uint32_t slot = slotStart; slot < slotEnd; slot++) {
-      if (!bce->emitLocalOp(JSOP_INITLEXICAL, slot)) {
+      if (!bce->emitLocalOp(JSOp::InitLexical, slot)) {
         return false;
       }
     }
-    if (!bce->emit1(JSOP_POP)) {
+    if (!bce->emit1(JSOp::Pop)) {
       return false;
     }
   }
@@ -542,7 +542,7 @@ bool EmitterScope::enterLexical(BytecodeEmitter* bce, ScopeKind kind,
 
   if (ScopeKindIsInBody(kind) && hasEnvironment()) {
     // After interning the VM scope we can get the scope index.
-    if (!bce->emitInternedScopeOp(index(), JSOP_PUSHLEXICALENV)) {
+    if (!bce->emitInternedScopeOp(index(), JSOp::PushLexicalEnv)) {
       return false;
     }
   }
@@ -581,7 +581,7 @@ bool EmitterScope::enterNamedLambda(BytecodeEmitter* bce, FunctionBox* funbox) {
                  /* isNamedLambda = */ true);
   MOZ_ASSERT(bi.kind() == BindingKind::NamedLambdaCallee);
 
-  // The lambda name, if not closed over, is accessed via JSOP_CALLEE and
+  // The lambda name, if not closed over, is accessed via JSOp::Callee and
   // not a frame slot. Do not update frame slot information.
   NameLocation loc = NameLocation::fromBinding(bi.kind(), bi.location());
   if (!putNameInCache(bce, bi.name(), loc)) {
@@ -798,7 +798,7 @@ bool EmitterScope::enterFunctionExtraBodyVar(BytecodeEmitter* bce,
   }
 
   if (hasEnvironment()) {
-    if (!bce->emitInternedScopeOp(index(), JSOP_PUSHVARENV)) {
+    if (!bce->emitInternedScopeOp(index(), JSOp::PushVarEnv)) {
       return false;
     }
   }
@@ -848,7 +848,7 @@ bool EmitterScope::enterParameterExpressionVar(BytecodeEmitter* bce) {
   }
 
   MOZ_ASSERT(hasEnvironment());
-  if (!bce->emitInternedScopeOp(index(), JSOP_PUSHVARENV)) {
+  if (!bce->emitInternedScopeOp(index(), JSOp::PushVarEnv)) {
     return false;
   }
 
@@ -873,11 +873,11 @@ class DynamicBindingIter : public BindingIter {
   JSOp bindingOp() const {
     switch (kind()) {
       case BindingKind::Var:
-        return JSOP_DEFVAR;
+        return JSOp::DefVar;
       case BindingKind::Let:
-        return JSOP_DEFLET;
+        return JSOp::DefLet;
       case BindingKind::Const:
-        return JSOP_DEFCONST;
+        return JSOp::DefConst;
       default:
         MOZ_CRASH("Bad BindingKind");
     }
@@ -920,13 +920,13 @@ bool EmitterScope::enterGlobal(BytecodeEmitter* bce,
         return false;
       }
 
-      // Define the name in the prologue. Do not emit DEFVAR for
-      // functions that we'll emit DEFFUN for.
+      // Define the name in the prologue. Do not emit DefVar for
+      // functions that we'll emit DefFun for.
       if (bi.isTopLevelFunction()) {
         continue;
       }
 
-      if (!bce->emitAtomOp(name, bi.bindingOp())) {
+      if (!bce->emitAtomOp(bi.bindingOp(), name)) {
         return false;
       }
     }
@@ -996,11 +996,11 @@ bool EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext* evalsc) {
     }
   }
   if (hasEnvironment()) {
-    if (!bce->emitInternedScopeOp(index(), JSOP_PUSHVARENV)) {
+    if (!bce->emitInternedScopeOp(index(), JSOp::PushVarEnv)) {
       return false;
     }
   } else {
-    // Resolve binding names and emit DEFVAR prologue ops if we don't have
+    // Resolve binding names and emit DefVar prologue ops if we don't have
     // an environment (i.e., a sloppy eval not in a parameter expression).
     // Eval scripts always have their own lexical scope, but non-strict
     // scopes may introduce 'var' bindings to the nearest var scope.
@@ -1009,13 +1009,13 @@ bool EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext* evalsc) {
     // the frame. For now, handle everything dynamically.
     if (!hasEnvironment() && evalsc->bindings) {
       for (DynamicBindingIter bi(evalsc); bi; bi++) {
-        MOZ_ASSERT(bi.bindingOp() == JSOP_DEFVAR);
+        MOZ_ASSERT(bi.bindingOp() == JSOp::DefVar);
 
         if (bi.isTopLevelFunction()) {
           continue;
         }
 
-        if (!bce->emitAtomOp(bi.name(), JSOP_DEFVAR)) {
+        if (!bce->emitAtomOp(JSOp::DefVar, bi.name())) {
           return false;
         }
       }
@@ -1139,7 +1139,7 @@ bool EmitterScope::enterWith(BytecodeEmitter* bce) {
     }
   }
 
-  if (!bce->emitInternedScopeOp(index(), JSOP_ENTERWITH)) {
+  if (!bce->emitInternedScopeOp(index(), JSOp::EnterWith)) {
     return false;
   }
 
@@ -1165,21 +1165,21 @@ bool EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal) {
     case ScopeKind::SimpleCatch:
     case ScopeKind::Catch:
     case ScopeKind::FunctionLexical:
-      if (!bce->emit1(hasEnvironment() ? JSOP_POPLEXICALENV
-                                       : JSOP_DEBUGLEAVELEXICALENV)) {
+      if (!bce->emit1(hasEnvironment() ? JSOp::PopLexicalEnv
+                                       : JSOp::DebugLeaveLexicalEnv)) {
         return false;
       }
       break;
 
     case ScopeKind::With:
-      if (!bce->emit1(JSOP_LEAVEWITH)) {
+      if (!bce->emit1(JSOp::LeaveWith)) {
         return false;
       }
       break;
 
     case ScopeKind::ParameterExpressionVar:
       MOZ_ASSERT(hasEnvironment());
-      if (!bce->emit1(JSOP_POPVARENV)) {
+      if (!bce->emit1(JSOp::PopVarEnv)) {
         return false;
       }
       break;

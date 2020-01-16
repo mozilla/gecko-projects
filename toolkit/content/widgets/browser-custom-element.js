@@ -375,7 +375,7 @@
 
       this._AUTOSCROLL_SNAP = 10;
 
-      this._scrolling = false;
+      this._autoScrollBrowsingContext = null;
 
       this._startX = null;
 
@@ -1464,16 +1464,6 @@
       }
     }
 
-    updateSecurityUIForContentBlockingEvent(aEvent) {
-      if (this.isRemoteBrowser && this.messageManager) {
-        // Invoking this getter triggers the generation of the underlying object,
-        // which we need to access with ._securityUI, because .securityUI returns
-        // a wrapper that makes _update inaccessible.
-        void this.securityUI;
-        this._securityUI._updateContentBlockingEvent(aEvent);
-      }
-    }
-
     get remoteWebProgressManager() {
       return this._remoteWebProgressManager;
     }
@@ -1608,8 +1598,7 @@
     }
 
     stopScroll() {
-      if (this._scrolling) {
-        this._scrolling = false;
+      if (this._autoScrollBrowsingContext) {
         window.removeEventListener("mousemove", this, true);
         window.removeEventListener("mousedown", this, true);
         window.removeEventListener("mouseup", this, true);
@@ -1619,7 +1608,13 @@
         window.removeEventListener("keypress", this, true);
         window.removeEventListener("keyup", this, true);
 
-        this.sendMessageToActor("Autoscroll:Stop", {}, "AutoScroll", true);
+        let autoScrollWnd = this._autoScrollBrowsingContext.currentWindowGlobal;
+        if (autoScrollWnd) {
+          autoScrollWnd
+            .getActor("AutoScroll")
+            .sendAsyncMessage("Autoscroll:Stop", {});
+        }
+        this._autoScrollBrowsingContext = null;
 
         try {
           Services.obs.removeObserver(this.observer, "apz:cancel-autoscroll");
@@ -1650,7 +1645,14 @@
       return popup;
     }
 
-    startScroll({ scrolldir, screenX, screenY, scrollId, presShellId }) {
+    startScroll({
+      scrolldir,
+      screenX,
+      screenY,
+      scrollId,
+      presShellId,
+      browsingContext,
+    }) {
       if (!this.autoscrollEnabled) {
         return { autoscrollEnabled: false, usingApz: false };
       }
@@ -1724,9 +1726,9 @@
       let popupY = Math.max(minY, Math.min(maxY, screenY));
       this._autoScrollPopup.openPopupAtScreen(popupX, popupY);
       this._ignoreMouseEvents = true;
-      this._scrolling = true;
       this._startX = screenX;
       this._startY = screenY;
+      this._autoScrollBrowsingContext = browsingContext;
 
       window.addEventListener("mousemove", this, true);
       window.addEventListener("mousedown", this, true);
@@ -1765,6 +1767,7 @@
         this._autoScrollScrollId = scrollId;
         this._autoScrollPresShellId = presShellId;
       }
+
       return { autoscrollEnabled: true, usingApz };
     }
 
@@ -1773,7 +1776,7 @@
     }
 
     handleEvent(aEvent) {
-      if (this._scrolling) {
+      if (this._autoScrollBrowsingContext) {
         switch (aEvent.type) {
           case "mousemove": {
             var x = aEvent.screenX - this._startX;
@@ -2068,12 +2071,19 @@
     }
 
     getContentBlockingLog() {
-      if (this.isRemoteBrowser) {
-        return this.frameLoader.remoteTab.getContentBlockingLog();
+      let windowGlobal = this.browsingContext.currentWindowGlobal;
+      if (!windowGlobal) {
+        return null;
       }
-      return this.docShell
-        ? this.docShell.getContentBlockingLog()
-        : Promise.reject("docshell isn't available");
+      return windowGlobal.contentBlockingLog;
+    }
+
+    getContentBlockingEvents() {
+      let windowGlobal = this.browsingContext.currentWindowGlobal;
+      if (!windowGlobal) {
+        return 0;
+      }
+      return windowGlobal.contentBlockingEvents;
     }
 
     // Send an asynchronous message to the remote child via an actor.

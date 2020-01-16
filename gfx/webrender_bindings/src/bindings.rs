@@ -7,10 +7,6 @@ use std::ffi::{CStr, CString};
 use std::ffi::OsString;
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStringExt;
-#[cfg(target_os = "windows")]
-use winapi::um::processthreadsapi::{SetThreadPriority,GetCurrentThread};
-#[cfg(target_os = "windows")]
-use winapi::um::winbase::{SetThreadAffinityMask};
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 use std::os::unix::ffi::OsStringExt;
 use std::io::Cursor;
@@ -42,7 +38,6 @@ use rayon;
 use num_cpus;
 use euclid::SideOffsets2D;
 use nsstring::nsAString;
-//linux only//use thread_priority::*;
 
 #[cfg(target_os = "macos")]
 use core_foundation::string::CFString;
@@ -108,7 +103,6 @@ type WrYuvColorSpace = YuvColorSpace;
 type WrColorDepth = ColorDepth;
 /// cbindgen:field-names=[mNamespace, mHandle]
 type WrColorRange = ColorRange;
-
 
 #[repr(C)]
 pub struct WrSpaceAndClip {
@@ -1070,21 +1064,6 @@ pub unsafe extern "C" fn wr_thread_pool_new(low_priority: bool) -> *mut WrThread
         .thread_name(move |idx|{ format!("WRWorker{}#{}", priority_tag, idx) })
         .num_threads(num_threads)
         .start_handler(move |idx| {
-            #[cfg(target_os = "windows")]
-            {
-                SetThreadPriority(
-                    GetCurrentThread(),
-                    if low_priority {
-                        -1 /* THREAD_PRIORITY_BELOW_NORMAL */
-                    } else {
-                        0 /* THREAD_PRIORITY_NORMAL */
-                    });
-                SetThreadAffinityMask(GetCurrentThread(), 1usize << idx);
-            }
-            /*let thread_id = thread_native_id();
-            set_thread_priority(thread_id,
-                if low_priority { ThreadPriority::Min } else { ThreadPriority::Max },
-                ThreadSchedulePolicy::Normal(NormalThreadSchedulePolicy::Normal));*/
             wr_register_thread_local_arena();
             let name = format!("WRWorker{}#{}",priority_tag, idx);
             register_thread_with_profiler(name.clone());
@@ -1842,6 +1821,16 @@ pub extern "C" fn wr_transaction_set_is_transform_async_zooming(
     is_zooming: bool
 ) {
     txn.set_is_transform_async_zooming(is_zooming, PropertyBindingId::new(animation_id));
+}
+
+#[no_mangle]
+pub extern "C" fn wr_transaction_set_quality_settings(
+    txn: &mut Transaction,
+    allow_sacrificing_subpixel_aa: bool
+) {
+    txn.set_quality_settings(QualitySettings {
+        allow_sacrificing_subpixel_aa
+    });
 }
 
 #[no_mangle]

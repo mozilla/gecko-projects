@@ -1739,7 +1739,7 @@ nsresult PresShell::Initialize() {
       // Have the style sheet processor construct frame for the root
       // content object down
       mFrameConstructor->ContentInserted(
-          root, nullptr, nsCSSFrameConstructor::InsertionKind::Sync);
+          root, nsCSSFrameConstructor::InsertionKind::Sync);
 
       // Something in mFrameConstructor->ContentInserted may have caused
       // Destroy() to get called, bug 337586.
@@ -4283,7 +4283,7 @@ void PresShell::ContentInserted(nsIContent* aChild) {
   mPresContext->RestyleManager()->ContentInserted(aChild);
 
   mFrameConstructor->ContentInserted(
-      aChild, nullptr, nsCSSFrameConstructor::InsertionKind::Async);
+      aChild, nsCSSFrameConstructor::InsertionKind::Async);
 }
 
 void PresShell::ContentRemoved(nsIContent* aChild,
@@ -4612,8 +4612,8 @@ UniquePtr<RangePaintInfo> PresShell::CreateRangePaintInfo(
   if (startContainer == doc || endContainer == doc) {
     ancestorFrame = rootFrame;
   } else {
-    nsINode* ancestor =
-        nsContentUtils::GetCommonAncestor(startContainer, endContainer);
+    nsINode* ancestor = nsContentUtils::GetClosestCommonInclusiveAncestor(
+        startContainer, endContainer);
     NS_ASSERTION(!ancestor || ancestor->IsContent(),
                  "common ancestor is not content");
 
@@ -8088,8 +8088,8 @@ void PresShell::EventHandler::RecordEventHandlingResponsePerformance(
 }
 
 // static
-already_AddRefed<nsIURI>
-PresShell::EventHandler::GetDocumentURIToCompareWithBlacklist(
+nsIPrincipal*
+PresShell::EventHandler::GetDocumentPrincipalToCompareWithBlacklist(
     PresShell& aPresShell) {
   nsPresContext* presContext = aPresShell.GetPresContext();
   if (NS_WARN_IF(!presContext)) {
@@ -8106,9 +8106,7 @@ PresShell::EventHandler::GetDocumentURIToCompareWithBlacklist(
     if (principal->GetIsNullPrincipal()) {
       continue;
     }
-    nsCOMPtr<nsIURI> uri;
-    principal->GetURI(getter_AddRefs(uri));
-    return uri.forget();
+    return principal;
   }
   return nullptr;
 }
@@ -8150,26 +8148,42 @@ nsresult PresShell::EventHandler::DispatchEventToDOM(
       // behave so, however, some web apps may be broken.  On such web apps,
       // we should keep using legacy our behavior.
       if (!mPresShell->mInitializedWithKeyPressEventDispatchingBlacklist) {
+        bool isInPrefList = false;
         mPresShell->mInitializedWithKeyPressEventDispatchingBlacklist = true;
-        nsCOMPtr<nsIURI> uri =
-            GetDocumentURIToCompareWithBlacklist(*mPresShell);
-        mPresShell->mForceDispatchKeyPressEventsForNonPrintableKeys =
-            nsContentUtils::IsURIInPrefList(
-                uri,
-                "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys");
-        mPresShell->mForceDispatchKeyPressEventsForNonPrintableKeys |=
-            nsContentUtils::IsURIInPrefList(uri,
-                                            "dom.keyboardevent.keypress.hack."
-                                            "dispatch_non_printable_keys.addl");
-        mPresShell->mForceUseLegacyKeyCodeAndCharCodeValues |=
-            nsContentUtils::IsURIInPrefList(uri,
-                                            "dom.keyboardevent.keypress.hack."
-                                            "use_legacy_keycode_and_charcode");
-        mPresShell->mForceUseLegacyKeyCodeAndCharCodeValues |=
-            nsContentUtils::IsURIInPrefList(
-                uri,
-                "dom.keyboardevent.keypress.hack."
-                "use_legacy_keycode_and_charcode.addl");
+        nsCOMPtr<nsIPrincipal> principal =
+            GetDocumentPrincipalToCompareWithBlacklist(*mPresShell);
+        if (principal) {
+          principal->IsURIInPrefList(
+              "dom.keyboardevent.keypress.hack.dispatch_non_printable_keys",
+              &isInPrefList);
+          mPresShell->mForceDispatchKeyPressEventsForNonPrintableKeys =
+              isInPrefList;
+
+          principal->IsURIInPrefList(
+              "dom.keyboardevent.keypress.hack."
+              "dispatch_non_printable_keys.addl",
+              &isInPrefList);
+          mPresShell->mForceDispatchKeyPressEventsForNonPrintableKeys |=
+              isInPrefList;
+
+          principal->IsURIInPrefList(
+              "dom.keyboardevent.keypress.hack."
+              "use_legacy_keycode_and_charcode",
+              &isInPrefList);
+          mPresShell->mForceUseLegacyKeyCodeAndCharCodeValues |= isInPrefList;
+
+          principal->IsURIInPrefList(
+              "dom.keyboardevent.keypress.hack."
+              "use_legacy_keycode_and_charcode",
+              &isInPrefList);
+          mPresShell->mForceUseLegacyKeyCodeAndCharCodeValues |= isInPrefList;
+
+          principal->IsURIInPrefList(
+              "dom.keyboardevent.keypress.hack."
+              "use_legacy_keycode_and_charcode.addl",
+              &isInPrefList);
+          mPresShell->mForceUseLegacyKeyCodeAndCharCodeValues |= isInPrefList;
+        }
       }
       if (mPresShell->mForceDispatchKeyPressEventsForNonPrintableKeys) {
         aEvent->mFlags.mOnlySystemGroupDispatchInContent = false;
@@ -8187,12 +8201,17 @@ nsresult PresShell::EventHandler::DispatchEventToDOM(
       // need to revert to the historial non-standard behaviour
       if (!mPresShell->mInitializedWithClickEventDispatchingBlacklist) {
         mPresShell->mInitializedWithClickEventDispatchingBlacklist = true;
-        nsCOMPtr<nsIURI> uri =
-            GetDocumentURIToCompareWithBlacklist(*mPresShell);
-        mPresShell->mForceUseLegacyNonPrimaryDispatch =
-            nsContentUtils::IsURIInPrefList(
-                uri,
-                "dom.mouseevent.click.hack.use_legacy_non-primary_dispatch");
+
+        nsCOMPtr<nsIPrincipal> principal =
+            GetDocumentPrincipalToCompareWithBlacklist(*mPresShell);
+
+        if (principal) {
+          bool isInPrefList = false;
+          principal->IsURIInPrefList(
+              "dom.mouseevent.click.hack.use_legacy_non-primary_dispatch",
+              &isInPrefList);
+          mPresShell->mForceUseLegacyNonPrimaryDispatch = isInPrefList;
+        }
       }
       if (mPresShell->mForceUseLegacyNonPrimaryDispatch) {
         aEvent->AsMouseEvent()->mUseLegacyNonPrimaryDispatch = true;
@@ -10057,7 +10076,7 @@ void ReflowCountMgr::Add(const char* aName, nsIFrame* aFrame) {
   NS_ASSERTION(aName != nullptr, "Name shouldn't be null!");
 
   if (mDumpFrameCounts) {
-    ReflowCounter* counter = mCounts.LookupForAdd(aName).OrInsert(
+    const auto& counter = mCounts.LookupForAdd(aName).OrInsert(
         [this]() { return new ReflowCounter(this); });
     counter->Add();
   }
@@ -10066,7 +10085,7 @@ void ReflowCountMgr::Add(const char* aName, nsIFrame* aFrame) {
       aFrame != nullptr) {
     char key[KEY_BUF_SIZE_FOR_PTR];
     SprintfLiteral(key, "%p", (void*)aFrame);
-    IndiReflowCounter* counter =
+    const auto& counter =
         mIndiFrameCounts.LookupForAdd(key).OrInsert([&aName, &aFrame, this]() {
           auto counter = new IndiReflowCounter(this);
           counter->mFrame = aFrame;
@@ -10074,7 +10093,7 @@ void ReflowCountMgr::Add(const char* aName, nsIFrame* aFrame) {
           return counter;
         });
     // this eliminates extra counts from super classes
-    if (counter != nullptr && counter->mName.EqualsASCII(aName)) {
+    if (counter && counter->mName.EqualsASCII(aName)) {
       counter->mCount++;
       counter->mCounter.Add(1);
     }
@@ -10212,7 +10231,7 @@ void ReflowCountMgr::DoIndiTotalsTree() {
     printf("-- Individual Counts of Frames not in Root Tree\n");
     printf("------------------------------------------------\n");
     for (auto iter = mIndiFrameCounts.Iter(); !iter.Done(); iter.Next()) {
-      IndiReflowCounter* counter = iter.Data();
+      IndiReflowCounter* counter = iter.UserData();
       if (!counter->mHasBeenOutput) {
         char* name = ToNewCString(counter->mName);
         printf("%s - %p   [%d][", name, (void*)counter->mFrame,
@@ -10439,19 +10458,6 @@ nsresult PresShell::SetIsActive(bool aIsActive) {
       presContext->UpdateDynamicToolbarOffset(0);
     }
   }
-
-  // When the PresShell is being reactivated, make sure that we repaint
-  // This is needed for pages living in the parent process (like about:support).
-  // Content pages are refreshed by the BrowserHost, which does not exist
-  // in parent process pages
-  if (aIsActive) {
-    if (nsIFrame* root = GetRootFrame()) {
-      FrameLayerBuilder::InvalidateAllLayersForFrame(
-          nsLayoutUtils::GetDisplayRootFrame(root));
-      root->SchedulePaint();
-    }
-  }
-
 #endif
 
   return rv;

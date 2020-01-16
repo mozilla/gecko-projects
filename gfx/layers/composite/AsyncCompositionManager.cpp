@@ -600,7 +600,7 @@ static Matrix4x4 FrameTransformToTransformInDevice(
 
 static void ApplyAnimatedValue(
     Layer* aLayer, CompositorAnimationStorage* aStorage,
-    nsCSSPropertyID aProperty, const Maybe<TransformData>& aAnimationData,
+    nsCSSPropertyID aProperty,
     const nsTArray<RefPtr<RawServoAnimationValue>>& aValues) {
   MOZ_ASSERT(!aValues.IsEmpty());
 
@@ -640,12 +640,15 @@ static void ApplyAnimatedValue(
     case eCSSProperty_offset_distance:
     case eCSSProperty_offset_rotate:
     case eCSSProperty_offset_anchor: {
-      const TransformData& transformData = aAnimationData.ref();
-
+      MOZ_ASSERT(aLayer->GetTransformLikeMetaData());
       Matrix4x4 frameTransform =
           AnimationHelper::ServoAnimationValueToMatrix4x4(
-              aValues, transformData, aLayer->CachedMotionPath());
+              aValues, *aLayer->GetTransformLikeMetaData(),
+              aLayer->CachedMotionPath());
 
+      MOZ_ASSERT(aLayer->GetTransformLikeMetaData()->mTransform);
+      const TransformData& transformData =
+          *aLayer->GetTransformLikeMetaData()->mTransform;
       Matrix4x4 transform = FrameTransformToTransformInDevice(
           frameTransform, aLayer, transformData);
 
@@ -694,9 +697,9 @@ static bool SampleAnimations(Layer* aLayer,
         // We assume all transform like properties (on the same frame) live in
         // a single same layer, so using the transform data of the last element
         // should be fine.
-        ApplyAnimatedValue(
-            layer, aStorage, lastPropertyAnimationGroup.mProperty,
-            lastPropertyAnimationGroup.mAnimationData, animationValues);
+        ApplyAnimatedValue(layer, aStorage,
+                           lastPropertyAnimationGroup.mProperty,
+                           animationValues);
         break;
       case AnimationHelper::SampleResult::Skipped:
         switch (lastPropertyAnimationGroup.mProperty) {
@@ -732,14 +735,16 @@ static bool SampleAnimations(Layer* aLayer,
             MOZ_ASSERT(
                 layer->AsHostLayer()->GetShadowTransformSetByAnimation());
             MOZ_ASSERT(previousValue);
+            MOZ_ASSERT(layer->GetTransformLikeMetaData() &&
+                       layer->GetTransformLikeMetaData()->mTransform);
 #ifdef DEBUG
-            const TransformData& transformData =
-                lastPropertyAnimationGroup.mAnimationData.ref();
             Matrix4x4 frameTransform =
                 AnimationHelper::ServoAnimationValueToMatrix4x4(
-                    animationValues, transformData, layer->CachedMotionPath());
+                    animationValues, *layer->GetTransformLikeMetaData(),
+                    layer->CachedMotionPath());
             Matrix4x4 transformInDevice = FrameTransformToTransformInDevice(
-                frameTransform, layer, transformData);
+                frameTransform, layer,
+                *layer->GetTransformLikeMetaData()->mTransform);
             MOZ_ASSERT(previousValue->Transform()
                            .mTransformInDevSpace.FuzzyEqualsMultiplicative(
                                transformInDevice));

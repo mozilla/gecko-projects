@@ -3383,18 +3383,18 @@ void CodeGenerator::visitBinaryValueCache(LBinaryValueCache* lir) {
   JSOp jsop = JSOp(*lir->mirRaw()->toInstruction()->resumePoint()->pc());
 
   switch (jsop) {
-    case JSOP_ADD:
-    case JSOP_SUB:
-    case JSOP_MUL:
-    case JSOP_DIV:
-    case JSOP_MOD:
-    case JSOP_POW:
-    case JSOP_BITAND:
-    case JSOP_BITOR:
-    case JSOP_BITXOR:
-    case JSOP_LSH:
-    case JSOP_RSH:
-    case JSOP_URSH: {
+    case JSOp::Add:
+    case JSOp::Sub:
+    case JSOp::Mul:
+    case JSOp::Div:
+    case JSOp::Mod:
+    case JSOp::Pow:
+    case JSOp::BitAnd:
+    case JSOp::BitOr:
+    case JSOp::BitXor:
+    case JSOp::Lsh:
+    case JSOp::Rsh:
+    case JSOp::Ursh: {
       IonBinaryArithIC ic(liveRegs, lhs, rhs, output);
       addIC(lir, allocateIC(ic));
       return;
@@ -3415,14 +3415,14 @@ void CodeGenerator::visitBinaryBoolCache(LBinaryBoolCache* lir) {
   JSOp jsop = JSOp(*lir->mirRaw()->toInstruction()->resumePoint()->pc());
 
   switch (jsop) {
-    case JSOP_LT:
-    case JSOP_LE:
-    case JSOP_GT:
-    case JSOP_GE:
-    case JSOP_EQ:
-    case JSOP_NE:
-    case JSOP_STRICTEQ:
-    case JSOP_STRICTNE: {
+    case JSOp::Lt:
+    case JSOp::Le:
+    case JSOp::Gt:
+    case JSOp::Ge:
+    case JSOp::Eq:
+    case JSOp::Ne:
+    case JSOp::StrictEq:
+    case JSOp::StrictNe: {
       IonCompareIC ic(liveRegs, lhs, rhs, output);
       addIC(lir, allocateIC(ic));
       return;
@@ -6178,7 +6178,7 @@ static void DumpTrackedSite(const BytecodeSite* site) {
   unsigned column = 0;
   unsigned lineNumber = PCToLineNumber(site->script(), site->pc(), &column);
   JitSpew(JitSpew_OptimizationTracking, "Types for %s at %s:%u:%u",
-          CodeName[JSOp(*site->pc())], site->script()->filename(), lineNumber,
+          CodeName(JSOp(*site->pc())), site->script()->filename(), lineNumber,
           column);
 #endif
 }
@@ -6637,7 +6637,7 @@ void CodeGenerator::visitNewTypedArrayFromArrayBuffer(
   callVM<Fn, js::NewTypedArrayWithTemplateAndBuffer>(lir);
 }
 
-// Out-of-line object allocation for JSOP_NEWOBJECT.
+// Out-of-line object allocation for JSOp::NewObject.
 class OutOfLineNewObject : public OutOfLineCodeBase<CodeGenerator> {
   LNewObject* lir_;
 
@@ -7403,8 +7403,12 @@ void CodeGenerator::visitGetNextEntryForIterator(
   }
 }
 
-template <size_t Defs>
-void CodeGenerator::emitWasmCallBase(LWasmCallBase<Defs>* lir) {
+// The point of these is to inform Ion of where these values already are; they
+// don't generate code.
+void CodeGenerator::visitWasmRegisterResult(LWasmRegisterResult* lir) {}
+void CodeGenerator::visitWasmRegisterPairResult(LWasmRegisterPairResult* lir) {}
+
+void CodeGenerator::visitWasmCall(LWasmCall* lir) {
   MWasmCall* mir = lir->mir();
   bool needsBoundsCheck = lir->needsBoundsCheck();
 
@@ -7475,16 +7479,6 @@ void CodeGenerator::emitWasmCallBase(LWasmCallBase<Defs>* lir) {
   } else {
     MOZ_ASSERT(!switchRealm);
   }
-}
-
-void CodeGenerator::visitWasmCall(LWasmCall* ins) { emitWasmCallBase(ins); }
-
-void CodeGenerator::visitWasmCallVoid(LWasmCallVoid* ins) {
-  emitWasmCallBase(ins);
-}
-
-void CodeGenerator::visitWasmCallI64(LWasmCallI64* ins) {
-  emitWasmCallBase(ins);
 }
 
 void CodeGenerator::visitWasmLoadSlot(LWasmLoadSlot* ins) {
@@ -8044,47 +8038,47 @@ void CodeGenerator::visitBinaryV(LBinaryV* lir) {
   using Fn = bool (*)(JSContext*, MutableHandleValue, MutableHandleValue,
                       MutableHandleValue);
   switch (lir->jsop()) {
-    case JSOP_ADD:
+    case JSOp::Add:
       callVM<Fn, js::AddValues>(lir);
       break;
 
-    case JSOP_SUB:
+    case JSOp::Sub:
       callVM<Fn, js::SubValues>(lir);
       break;
 
-    case JSOP_MUL:
+    case JSOp::Mul:
       callVM<Fn, js::MulValues>(lir);
       break;
 
-    case JSOP_DIV:
+    case JSOp::Div:
       callVM<Fn, js::DivValues>(lir);
       break;
 
-    case JSOP_MOD:
+    case JSOp::Mod:
       callVM<Fn, js::ModValues>(lir);
       break;
 
-    case JSOP_BITAND:
+    case JSOp::BitAnd:
       callVM<Fn, js::BitAnd>(lir);
       break;
 
-    case JSOP_BITOR:
+    case JSOp::BitOr:
       callVM<Fn, js::BitOr>(lir);
       break;
 
-    case JSOP_BITXOR:
+    case JSOp::BitXor:
       callVM<Fn, js::BitXor>(lir);
       break;
 
-    case JSOP_LSH:
+    case JSOp::Lsh:
       callVM<Fn, js::BitLsh>(lir);
       break;
 
-    case JSOP_RSH:
+    case JSOp::Rsh:
       callVM<Fn, js::BitRsh>(lir);
       break;
 
-    case JSOP_URSH:
+    case JSOp::Ursh:
       callVM<Fn, js::UrshValues>(lir);
       break;
 
@@ -8100,28 +8094,28 @@ void CodeGenerator::emitCompareS(LInstruction* lir, JSOp op, Register left,
   OutOfLineCode* ool = nullptr;
 
   using Fn = bool (*)(JSContext*, HandleString, HandleString, bool*);
-  if (op == JSOP_EQ || op == JSOP_STRICTEQ) {
+  if (op == JSOp::Eq || op == JSOp::StrictEq) {
     ool = oolCallVM<Fn, jit::StringsEqual<EqualityKind::Equal>>(
         lir, ArgList(left, right), StoreRegisterTo(output));
-  } else if (op == JSOP_NE || op == JSOP_STRICTNE) {
+  } else if (op == JSOp::Ne || op == JSOp::StrictNe) {
     ool = oolCallVM<Fn, jit::StringsEqual<EqualityKind::NotEqual>>(
         lir, ArgList(left, right), StoreRegisterTo(output));
-  } else if (op == JSOP_LT) {
+  } else if (op == JSOp::Lt) {
     ool = oolCallVM<Fn, jit::StringsCompare<ComparisonKind::LessThan>>(
         lir, ArgList(left, right), StoreRegisterTo(output));
-  } else if (op == JSOP_LE) {
-    // Push the operands in reverse order for JSOP_LE:
+  } else if (op == JSOp::Le) {
+    // Push the operands in reverse order for JSOp::Le:
     // - |left <= right| is implemented as |right >= left|.
     ool =
         oolCallVM<Fn, jit::StringsCompare<ComparisonKind::GreaterThanOrEqual>>(
             lir, ArgList(right, left), StoreRegisterTo(output));
-  } else if (op == JSOP_GT) {
-    // Push the operands in reverse order for JSOP_GT:
+  } else if (op == JSOp::Gt) {
+    // Push the operands in reverse order for JSOp::Gt:
     // - |left > right| is implemented as |right < left|.
     ool = oolCallVM<Fn, jit::StringsCompare<ComparisonKind::LessThan>>(
         lir, ArgList(right, left), StoreRegisterTo(output));
   } else {
-    MOZ_ASSERT(op == JSOP_GE);
+    MOZ_ASSERT(op == JSOp::Ge);
     ool =
         oolCallVM<Fn, jit::StringsCompare<ComparisonKind::GreaterThanOrEqual>>(
             lir, ArgList(left, right), StoreRegisterTo(output));
@@ -8134,7 +8128,7 @@ void CodeGenerator::emitCompareS(LInstruction* lir, JSOp op, Register left,
 
 void CodeGenerator::visitCompareStrictS(LCompareStrictS* lir) {
   JSOp op = lir->mir()->jsop();
-  MOZ_ASSERT(op == JSOP_STRICTEQ || op == JSOP_STRICTNE);
+  MOZ_ASSERT(op == JSOp::StrictEq || op == JSOp::StrictNe);
 
   const ValueOperand leftV = ToValue(lir, LCompareStrictS::Lhs);
   Register right = ToRegister(lir->right());
@@ -8143,7 +8137,7 @@ void CodeGenerator::visitCompareStrictS(LCompareStrictS* lir) {
   Label string, done;
 
   masm.branchTestString(Assembler::Equal, leftV, &string);
-  masm.move32(Imm32(op == JSOP_STRICTNE), output);
+  masm.move32(Imm32(op == JSOp::StrictNe), output);
   masm.jump(&done);
 
   masm.bind(&string);
@@ -8174,35 +8168,35 @@ void CodeGenerator::visitCompareVM(LCompareVM* lir) {
   using Fn =
       bool (*)(JSContext*, MutableHandleValue, MutableHandleValue, bool*);
   switch (lir->mir()->jsop()) {
-    case JSOP_EQ:
+    case JSOp::Eq:
       callVM<Fn, jit::LooselyEqual<EqualityKind::Equal>>(lir);
       break;
 
-    case JSOP_NE:
+    case JSOp::Ne:
       callVM<Fn, jit::LooselyEqual<EqualityKind::NotEqual>>(lir);
       break;
 
-    case JSOP_STRICTEQ:
+    case JSOp::StrictEq:
       callVM<Fn, jit::StrictlyEqual<EqualityKind::Equal>>(lir);
       break;
 
-    case JSOP_STRICTNE:
+    case JSOp::StrictNe:
       callVM<Fn, jit::StrictlyEqual<EqualityKind::NotEqual>>(lir);
       break;
 
-    case JSOP_LT:
+    case JSOp::Lt:
       callVM<Fn, jit::LessThan>(lir);
       break;
 
-    case JSOP_LE:
+    case JSOp::Le:
       callVM<Fn, jit::LessThanOrEqual>(lir);
       break;
 
-    case JSOP_GT:
+    case JSOp::Gt:
       callVM<Fn, jit::GreaterThan>(lir);
       break;
 
-    case JSOP_GE:
+    case JSOp::Ge:
       callVM<Fn, jit::GreaterThanOrEqual>(lir);
       break;
 
@@ -8220,7 +8214,7 @@ void CodeGenerator::visitIsNullOrLikeUndefinedV(LIsNullOrLikeUndefinedV* lir) {
   const ValueOperand value = ToValue(lir, LIsNullOrLikeUndefinedV::Value);
   Register output = ToRegister(lir->output());
 
-  if (op == JSOP_EQ || op == JSOP_NE) {
+  if (op == JSOp::Eq || op == JSOp::Ne) {
     MOZ_ASSERT(
         lir->mir()->lhs()->type() != MIRType::Object ||
             lir->mir()->operandMightEmulateUndefined(),
@@ -8274,18 +8268,18 @@ void CodeGenerator::visitIsNullOrLikeUndefinedV(LIsNullOrLikeUndefinedV* lir) {
 
     // It's not null or undefined, and if it's an object it doesn't
     // emulate undefined, so it's not like undefined.
-    masm.move32(Imm32(op == JSOP_NE), output);
+    masm.move32(Imm32(op == JSOp::Ne), output);
     masm.jump(&done);
 
     masm.bind(nullOrLikeUndefined);
-    masm.move32(Imm32(op == JSOP_EQ), output);
+    masm.move32(Imm32(op == JSOp::Eq), output);
 
     // Both branches meet here.
     masm.bind(&done);
     return;
   }
 
-  MOZ_ASSERT(op == JSOP_STRICTEQ || op == JSOP_STRICTNE);
+  MOZ_ASSERT(op == JSOp::StrictEq || op == JSOp::StrictNe);
 
   Assembler::Condition cond = JSOpToCondition(compareType, op);
   if (compareType == MCompare::Compare_Null) {
@@ -8305,18 +8299,18 @@ void CodeGenerator::visitIsNullOrLikeUndefinedAndBranchV(
   const ValueOperand value =
       ToValue(lir, LIsNullOrLikeUndefinedAndBranchV::Value);
 
-  if (op == JSOP_EQ || op == JSOP_NE) {
+  if (op == JSOp::Eq || op == JSOp::Ne) {
     MBasicBlock* ifTrue;
     MBasicBlock* ifFalse;
 
-    if (op == JSOP_EQ) {
+    if (op == JSOp::Eq) {
       ifTrue = lir->ifTrue();
       ifFalse = lir->ifFalse();
     } else {
       // Swap branches.
       ifTrue = lir->ifFalse();
       ifFalse = lir->ifTrue();
-      op = JSOP_EQ;
+      op = JSOp::Eq;
     }
 
     MOZ_ASSERT(
@@ -8363,7 +8357,7 @@ void CodeGenerator::visitIsNullOrLikeUndefinedAndBranchV(
     }
   }
 
-  MOZ_ASSERT(op == JSOP_STRICTEQ || op == JSOP_STRICTNE);
+  MOZ_ASSERT(op == JSOp::StrictEq || op == JSOp::StrictNe);
 
   Assembler::Condition cond = JSOpToCondition(compareType, op);
   if (compareType == MCompare::Compare_Null) {
@@ -8381,8 +8375,9 @@ void CodeGenerator::visitIsNullOrLikeUndefinedT(LIsNullOrLikeUndefinedT* lir) {
   MOZ_ASSERT(lhsType == MIRType::Object || lhsType == MIRType::ObjectOrNull);
 
   JSOp op = lir->mir()->jsop();
-  MOZ_ASSERT(lhsType == MIRType::ObjectOrNull || op == JSOP_EQ || op == JSOP_NE,
-             "Strict equality should have been folded");
+  MOZ_ASSERT(
+      lhsType == MIRType::ObjectOrNull || op == JSOp::Eq || op == JSOp::Ne,
+      "Strict equality should have been folded");
 
   MOZ_ASSERT(lhsType == MIRType::ObjectOrNull ||
                  lir->mir()->operandMightEmulateUndefined(),
@@ -8392,7 +8387,7 @@ void CodeGenerator::visitIsNullOrLikeUndefinedT(LIsNullOrLikeUndefinedT* lir) {
   Register objreg = ToRegister(lir->input());
   Register output = ToRegister(lir->output());
 
-  if ((op == JSOP_EQ || op == JSOP_NE) &&
+  if ((op == JSOp::Eq || op == JSOp::Ne) &&
       lir->mir()->operandMightEmulateUndefined()) {
     OutOfLineTestObjectWithLabels* ool =
         new (alloc()) OutOfLineTestObjectWithLabels();
@@ -8410,11 +8405,11 @@ void CodeGenerator::visitIsNullOrLikeUndefinedT(LIsNullOrLikeUndefinedT* lir) {
 
     Label done;
 
-    masm.move32(Imm32(op == JSOP_NE), output);
+    masm.move32(Imm32(op == JSOp::Ne), output);
     masm.jump(&done);
 
     masm.bind(emulatesUndefined);
-    masm.move32(Imm32(op == JSOP_EQ), output);
+    masm.move32(Imm32(op == JSOp::Eq), output);
     masm.bind(&done);
   } else {
     MOZ_ASSERT(lhsType == MIRType::ObjectOrNull);
@@ -8423,11 +8418,11 @@ void CodeGenerator::visitIsNullOrLikeUndefinedT(LIsNullOrLikeUndefinedT* lir) {
 
     masm.branchTestPtr(Assembler::Zero, objreg, objreg, &isNull);
 
-    masm.move32(Imm32(op == JSOP_NE || op == JSOP_STRICTNE), output);
+    masm.move32(Imm32(op == JSOp::Ne || op == JSOp::StrictNe), output);
     masm.jump(&done);
 
     masm.bind(&isNull);
-    masm.move32(Imm32(op == JSOP_EQ || op == JSOP_STRICTEQ), output);
+    masm.move32(Imm32(op == JSOp::Eq || op == JSOp::StrictEq), output);
 
     masm.bind(&done);
   }
@@ -8443,8 +8438,9 @@ void CodeGenerator::visitIsNullOrLikeUndefinedAndBranchT(
   MOZ_ASSERT(lhsType == MIRType::Object || lhsType == MIRType::ObjectOrNull);
 
   JSOp op = lir->cmpMir()->jsop();
-  MOZ_ASSERT(lhsType == MIRType::ObjectOrNull || op == JSOP_EQ || op == JSOP_NE,
-             "Strict equality should have been folded");
+  MOZ_ASSERT(
+      lhsType == MIRType::ObjectOrNull || op == JSOp::Eq || op == JSOp::Ne,
+      "Strict equality should have been folded");
 
   MOZ_ASSERT(lhsType == MIRType::ObjectOrNull ||
                  lir->cmpMir()->operandMightEmulateUndefined(),
@@ -8454,7 +8450,7 @@ void CodeGenerator::visitIsNullOrLikeUndefinedAndBranchT(
   MBasicBlock* ifTrue;
   MBasicBlock* ifFalse;
 
-  if (op == JSOP_EQ || op == JSOP_STRICTEQ) {
+  if (op == JSOp::Eq || op == JSOp::StrictEq) {
     ifTrue = lir->ifTrue();
     ifFalse = lir->ifFalse();
   } else {
@@ -8465,7 +8461,7 @@ void CodeGenerator::visitIsNullOrLikeUndefinedAndBranchT(
 
   Register input = ToRegister(lir->getOperand(0));
 
-  if ((op == JSOP_EQ || op == JSOP_NE) &&
+  if ((op == JSOp::Eq || op == JSOp::Ne) &&
       lir->cmpMir()->operandMightEmulateUndefined()) {
     OutOfLineTestObject* ool = new (alloc()) OutOfLineTestObject();
     addOutOfLineCode(ool, lir->cmpMir());
@@ -11106,7 +11102,7 @@ void CodeGenerator::visitCallGetElement(LCallGetElement* lir) {
   pushArg(ToValue(lir, LCallGetElement::RhsInput));
   pushArg(ToValue(lir, LCallGetElement::LhsInput));
 
-  JSOp op = JSOp(*lir->mir()->resumePoint()->pc());
+  uint8_t op = *lir->mir()->resumePoint()->pc();
   pushArg(Imm32(op));
 
   using Fn =

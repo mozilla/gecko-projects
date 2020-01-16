@@ -13,37 +13,12 @@
 #
 # Test names given here reference tests.yml.
 
-##
-# Universal tests
-#
-# Tests that run just about everywhere; common-tests is the shared core, with
-# a few add-on test sets that are included or omitted on some platforms.
-
 common-tests:
-    - cppunit
-    - crashtest
-    - firefox-ui-functional-local
-    - firefox-ui-functional-remote
     - gtest
-    - jittest
-    - jsreftest
     - marionette
     - mochitest
-    - mochitest-a11y
     - mochitest-browser-chrome
     - mochitest-chrome
-    - mochitest-devtools-chrome
-    - mochitest-gpu
-    - mochitest-media
-    - mochitest-remote
-    - mochitest-webgl1-core
-    - mochitest-webgl1-ext
-    - mochitest-webgl2-core
-    - mochitest-webgl2-ext
-    - mochitest-webgpu
-    - reftest
-    - reftest-no-accel
-    - telemetry-tests-client
     - test-verify
     - test-verify-gpu
     - test-verify-wpt
@@ -53,6 +28,14 @@ web-platform-tests:
     - web-platform-tests
     - web-platform-tests-crashtests
     - web-platform-tests-reftests
+    - web-platform-tests-wdspec
+
+web-platform-tests-1804:
+    - web-platform-tests
+    - web-platform-tests-crashtests
+    - web-platform-tests-reftests
+
+web-platform-tests-1604:
     - web-platform-tests-wdspec
 
 web-platform-tests-wdspec-headless:
@@ -332,62 +315,84 @@ awsy:
     - awsy-base-dmd
     - awsy-tp6
 
-awsy-stylo-sequential:
-    - awsy-stylo-sequential
-
 ##
 # Limited test sets for specific platforms
 
 linux-common-tests:
-    - firefox-ui-functional-local
-    - firefox-ui-functional-remote
-    - jittest
     - marionette
     - mochitest
-    - mochitest-a11y
     - mochitest-browser-chrome
     - mochitest-chrome
-    - mochitest-devtools-chrome
-    - mochitest-remote
-    - mochitest-webgl1-core
-    - mochitest-webgl1-ext
-    - mochitest-webgpu
-    - reftest-no-accel
-    - telemetry-tests-client
-    - test-verify
-    - test-verify-gpu
-    - test-verify-wpt
 
 # List of tests that are green on ubuntu1804 docker image.
 # See Bug 1602863 for information.
 linux1804-tests:
     - cppunit
     - crashtest
+    - firefox-ui-functional-local
+    - firefox-ui-functional-remote
     - gtest
     - jsreftest
+    - jittest
+    - mochitest-a11y
+    - mochitest-devtools-chrome
     - mochitest-gpu
     - mochitest-media
+    - mochitest-remote
+    - mochitest-webgpu
+    - mochitest-webgl1-core
+    - mochitest-webgl1-ext
+    - mochitest-webgl2-core
+    - mochitest-webgl2-ext
     - reftest
+    - reftest-no-accel
+    - telemetry-tests-client
+    - test-verify
+    - test-verify-gpu
+    - test-verify-wpt
     - xpcshell
 
 linux1804-qr-tests:
     - cppunit
     - crashtest
     - gtest
+    - jittest
     - jsreftest
+    - mochitest-a11y
     - mochitest-gpu
     - mochitest-media
+    - mochitest-webgpu
+    - mochitest-webgl1-core
+    - mochitest-webgl1-ext
+    - mochitest-webgl2-core
+    - mochitest-webgl2-ext
     - reftest
     - xpcshell
 
-linux-qr-tests:
+linux1804-ccov-tests:
+    - cppunit
+    - crashtest
+    - firefox-ui-functional-local
+    - firefox-ui-functional-remote
     - jittest
-    - mochitest
+    - jsreftest
     - mochitest-a11y
-    - mochitest-chrome
+    - mochitest-devtools-chrome
+    - mochitest-gpu
+    - mochitest-media
+    - mochitest-remote
     - mochitest-webgl1-core
+    - mochitest-webgl1-ext
     - mochitest-webgl2-core
+    - mochitest-webgl2-ext
     - mochitest-webgpu
+    - reftest
+    - reftest-no-accel
+    - telemetry-tests-client
+
+linux-qr-tests:
+    - mochitest
+    - mochitest-chrome
 
 linux-qr-smoketests:
     - crashtest
@@ -601,10 +606,7 @@ mochitest-headless:
 marionette-headless:
     - marionette-headless
 
-remote-tests:
-    - mochitest-remote
-
-android-hw-arm7-opt-unittests:
+android-hw-aarch64-opt-unittests:
     - mochitest-media
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
@@ -613,17 +615,21 @@ android-hw-arm7-opt-unittests:
 android-hw-arm7-pgo-unittests:
     - jittest
     - jsreftest
+
+android-hw-aarch64-pgo-unittests:
     - mochitest-media
 
 android-hw-arm7-debug-unittests:
     - jittest
     - jsreftest
+
+android-hw-aarch64-debug-unittests:
     - mochitest-media
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
     - mochitest-webgl2-core
 
-android-hw-arm7-qr:
+android-hw-aarch64-qr:
     - crashtest
     - reftest
 

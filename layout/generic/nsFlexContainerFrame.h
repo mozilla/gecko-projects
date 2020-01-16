@@ -200,6 +200,26 @@ class nsFlexContainerFrame final : public nsContainerFrame {
   }
 
   /**
+   * This function creates a new ComputedFlexContainerInfo or clear the existing
+   * one.
+   */
+  void CreateOrClearFlexContainerInfo();
+
+  /**
+   * Helpers for DoFlexLayout to computed fields in ComputedFlexContainerInfo.
+   */
+  static void CreateFlexLineAndFlexItemInfo(
+      ComputedFlexContainerInfo& aContainerInfo,
+      const mozilla::LinkedList<FlexLine>& aLines);
+
+  static void ComputeFlexDirections(ComputedFlexContainerInfo& aContainerInfo,
+                                    const FlexboxAxisTracker& aAxisTracker);
+
+  static void UpdateFlexLineAndItemInfo(
+      ComputedFlexContainerInfo& aContainerInfo,
+      const mozilla::LinkedList<FlexLine>& aLines);
+
+  /**
    * Return aFrame as a flex frame after ensuring it has computed flex info.
    * @return nullptr if aFrame is null or doesn't have a flex frame
    *         as its content insertion frame.

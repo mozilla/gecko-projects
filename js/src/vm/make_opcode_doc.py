@@ -62,68 +62,62 @@ except ImportError as exc:
 
 SOURCE_BASE = 'http://dxr.mozilla.org/mozilla-central/source'
 
-
-def override(value, override_value):
-    if override_value != '':
-        return override_value
-
-    return value
+FLAGS_TO_IGNORE = {
+    "JOF_BYTE",
+    "JOF_UINT8",
+    "JOF_UINT16",
+    "JOF_UINT24",
+    "JOF_UINT32",
+    "JOF_INT8",
+    "JOF_INT32",
+    "JOF_TABLESWITCH",
+    "JOF_REGEXP",
+    "JOF_DOUBLE",
+    "JOF_LOOPHEAD",
+    "JOF_BIGINT",
+}
 
 
 def format_flags(flags):
-    flags = [flag for flag in flags if flag != 'JOF_BYTE']
+    flags = [flag for flag in flags if flag not in FLAGS_TO_IGNORE]
     if len(flags) == 0:
         return ''
+    return '<div>Flags: {flags}</div>\n'.format(flags=', '.join(flags))
 
-    flags = map(lambda x: x.replace('JOF_', ''), flags)
-    return ' ({flags})'.format(flags=', '.join(flags))
+
+def maybe_escape(value, format_str, fallback=""):
+    if value:
+        return format_str.format(escape(value))
+    return fallback
 
 
 OPCODE_FORMAT = """\
 <dt id="{id}">{names}</dt>
 <dd>
-<table class="standard-table">
-<tbody>
-<tr><th>Operands</th><td><code>{operands}</code></td></tr>
-<tr><th>Length</th><td><code>{length}</code></td></tr>
-<tr><th>Stack Uses</th><td><code>{stack_uses}</code></td></tr>
-<tr><th>Stack Defs</th><td><code>{stack_defs}</code></td></tr>
-</tbody>
-</table>
-
-{desc}
-</dd>
+{operands}{stack}{desc}
+{flags}</dd>
 """
 
 
 def print_opcode(opcode):
-    names_template = '{name} [-{nuses}, +{ndefs}]{flags}'
     opcodes = [opcode] + opcode.group
-    names = [names_template.format(name=escape(code.name),
-                                   nuses=override(code.nuses,
-                                                  opcode.nuses_override),
-                                   ndefs=override(code.ndefs,
-                                                  opcode.ndefs_override),
-                                   flags=format_flags(code.flags))
-             for code in opcodes]
-    if len(opcodes) == 1:
-        values = ['{value} (0x{value:02x})'.format(value=opcode.value)]
+    names = ', '.join(maybe_escape(code.name, "<code>{}</code>") for code in opcodes)
+    operands = maybe_escape(opcode.operands, "<div>Operands: <code>({})</code></div>\n")
+    stack_uses = maybe_escape(opcode.stack_uses, "<code>{}</code> ")
+    stack_defs = maybe_escape(opcode.stack_defs, " <code>{}</code>")
+    if stack_uses or stack_defs:
+        stack = "<div>Stack: {}&rArr;{}</div>\n".format(stack_uses, stack_defs)
     else:
-        values_template = '{name}: {value} (0x{value:02x})'
-        values = map(lambda code: values_template.format(name=escape(code.name),
-                                                         value=code.value),
-                     opcodes)
+        stack = ""
 
     print(OPCODE_FORMAT.format(
         id=opcodes[0].name,
-        names='<br>'.join(names),
-        values='<br>'.join(values),
-        operands=escape(opcode.operands) or "&nbsp;",
-        length=escape(override(opcode.length,
-                               opcode.length_override)),
-        stack_uses=escape(opcode.stack_uses) or "&nbsp;",
-        stack_defs=escape(opcode.stack_defs) or "&nbsp;",
-        desc=markdown.markdown(opcode.desc)))
+        names=names,
+        operands=operands,
+        stack=stack,
+        desc=markdown.markdown(opcode.desc),
+        flags=format_flags(opcode.flags),
+    ))
 
 
 id_cache = dict()

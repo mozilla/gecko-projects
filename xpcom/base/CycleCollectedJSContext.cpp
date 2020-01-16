@@ -13,6 +13,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Sprintf.h"
+#include "mozilla/SystemGroup.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimelineConsumers.h"
 #include "mozilla/TimelineMarker.h"
@@ -77,9 +78,13 @@ CycleCollectedJSContext::~CycleCollectedJSContext() {
     return;
   }
 
+  JS::SetHostCleanupFinalizationGroupCallback(
+      mJSContext, nullptr, nullptr);
+  mFinalizationGroupsToCleanUp.reset();
+
   JS_SetContextPrivate(mJSContext, nullptr);
 
-  mRuntime->RemoveContext(this);
+  mRuntime->SetContext(nullptr);
   mRuntime->Shutdown(mJSContext);
 
   // Last chance to process any events.
@@ -126,7 +131,7 @@ nsresult CycleCollectedJSContext::Initialize(JSRuntime* aParentRuntime,
   }
 
   mRuntime = CreateRuntime(mJSContext);
-  mRuntime->AddContext(this);
+  mRuntime->SetContext(this);
 
   mOwningThread->SetScriptObserver(this);
   // The main thread has a base recursion depth of 0, workers of 1.
@@ -143,6 +148,10 @@ nsresult CycleCollectedJSContext::Initialize(JSRuntime* aParentRuntime,
   mConsumedRejections.init(mJSContext,
                            JS::GCVector<JSObject*, 0, js::SystemAllocPolicy>(
                                js::SystemAllocPolicy()));
+
+  mFinalizationGroupsToCleanUp.init(mJSContext);
+  JS::SetHostCleanupFinalizationGroupCallback(
+      mJSContext, CleanupFinalizationGroupCallback, this);
 
   // Cast to PerThreadAtomCache for dom::GetAtomCache(JSContext*).
   JS_SetContextPrivate(mJSContext, static_cast<PerThreadAtomCache*>(this));
@@ -576,7 +585,8 @@ bool CycleCollectedJSContext::PerformMicroTaskCheckPoint(bool aForce) {
   }
 
   if (mTargetedMicroTaskRecursionDepth != 0 &&
-      mTargetedMicroTaskRecursionDepth != currentDepth) {
+      mTargetedMicroTaskRecursionDepth + mDebuggerRecursionDepth !=
+          currentDepth) {
     return false;
   }
 
@@ -721,4 +731,54 @@ nsresult CycleCollectedJSContext::NotifyUnhandledRejections::Cancel() {
   }
   return NS_OK;
 }
+
+class CleanupFinalizationGroupsRunnable : public CancelableRunnable {
+ public:
+  explicit CleanupFinalizationGroupsRunnable(CycleCollectedJSContext* aContext)
+      : CancelableRunnable("CleanupFinalizationGroupsRunnable"), mContext(aContext) {}
+  NS_DECL_NSIRUNNABLE
+ private:
+  CycleCollectedJSContext* mContext;
+};
+
+NS_IMETHODIMP
+CleanupFinalizationGroupsRunnable::Run() {
+  if (mContext->mFinalizationGroupsToCleanUp.empty()) {
+    return NS_OK;
+  }
+
+  JS::RootingContext* cx = mContext->RootingCx();
+
+  JS::Rooted<CycleCollectedJSContext::ObjectVector> groups(cx);
+  std::swap(groups.get(), mContext->mFinalizationGroupsToCleanUp.get());
+
+  JS::Rooted<JSObject*> group(cx);
+  for (const auto& g : groups) {
+    group = g;
+
+    AutoEntryScript aes(group, "cleanupFinalizationGroup");
+    mozilla::Unused << JS::CleanupQueuedFinalizationGroup(aes.cx(), group);
+  }
+
+  return NS_OK;
+}
+
+/* static */
+void CycleCollectedJSContext::CleanupFinalizationGroupCallback(JSObject* aGroup,
+                                                               void* aData) {
+  CycleCollectedJSContext* ccjs = static_cast<CycleCollectedJSContext*>(aData);
+  ccjs->QueueFinalizationGroupForCleanup(aGroup);
+}
+
+void CycleCollectedJSContext::QueueFinalizationGroupForCleanup(
+    JSObject* aGroup) {
+  bool firstGroup = mFinalizationGroupsToCleanUp.empty();
+  MOZ_ALWAYS_TRUE(mFinalizationGroupsToCleanUp.append(aGroup));
+  if (firstGroup) {
+    RefPtr<CleanupFinalizationGroupsRunnable> cleanup =
+        new CleanupFinalizationGroupsRunnable(this);
+    NS_DispatchToCurrentThread(cleanup.forget());
+  }
+}
+
 }  // namespace mozilla

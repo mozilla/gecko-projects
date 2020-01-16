@@ -305,6 +305,10 @@ pref("browser.urlbar.oneOffSearches", true);
 // human readable (percent-decoded) URL on the clipboard.
 pref("browser.urlbar.decodeURLsOnCopy", false);
 
+// If true, we show new users and those about to start an organic search a tip
+// encouraging them to use the Urlbar.
+pref("browser.urlbar.searchTips", false);
+
 // Whether or not to move tabs into the active window when using the "Switch to
 // Tab" feature of the awesomebar.
 pref("browser.urlbar.switchTabs.adoptIntoActiveWindow", false);
@@ -1338,6 +1342,7 @@ pref("sidebar.position_start", true);
 
 pref("security.identitypopup.recordEventTelemetry", true);
 pref("security.protectionspopup.recordEventTelemetry", true);
+pref("security.app_menu.recordEventTelemetry", true);
 
 // Block insecure active content on https pages
 pref("security.mixed_content.block_active_content", true);
@@ -1682,7 +1687,9 @@ pref("browser.tabs.crashReporting.requestEmail", false);
 pref("browser.tabs.crashReporting.emailMe", false);
 pref("browser.tabs.crashReporting.email", "");
 
-pref("extensions.legacy.enabled", false);
+// If true, unprivileged extensions may use experimental APIs on
+// nightly and developer edition.
+pref("extensions.experiments.enabled", false);
 
 // Causes access on unsafe CPOWs from browser code to throw by default.
 pref("dom.ipc.cpows.forbid-unsafe-from-browser", true);
@@ -2285,13 +2292,6 @@ pref("devtools.debugger.features.map-await-expression", true);
 // This is currently not exposed by any UI to avoid making
 // about:devtools-toolbox tabs unusable by mistake.
 pref("devtools.popup.disable_autohide", false);
-
-// Load the DevTools toolbox in a frame with type=content instead of type=chrome
-// See Bug 1539979 for more details.
-// We keep the option of running devtools in a chrome frame while we fix racy
-// tests that started failing when using type=content, but this ultimately
-// should be removed.
-pref("devtools.toolbox.content-frame", true);
 
 // Visibility switch preference for the WhatsNew panel.
 pref("devtools.whatsnew.enabled", true);

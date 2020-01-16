@@ -399,6 +399,10 @@ class LexicalScope : public Scope {
   // Data is public because it is created by the frontend. See
   // Parser<FullParseHandler>::newLexicalScopeData.
   struct Data : public BaseScopeData {
+    // Frame slots [0, nextFrameSlot) are live when this is the innermost
+    // scope.
+    uint32_t nextFrameSlot = 0;
+
     // Bindings are sorted by kind in both frames and environments.
     //
     //   lets - [0, constStart)
@@ -406,12 +410,7 @@ class LexicalScope : public Scope {
     uint32_t constStart = 0;
     uint32_t length = 0;
 
-    // Frame slots [0, nextFrameSlot) are live when this is the innermost
-    // scope.
-    uint32_t nextFrameSlot = 0;
-
-    // The array of tagged JSAtom* names, allocated beyond the end of the
-    // struct.
+    // Tagged JSAtom* names, allocated beyond the end of the struct.
     TrailingNamesArray trailingNames;
 
     explicit Data(size_t nameCount) : trailingNames(nameCount) {}
@@ -498,10 +497,15 @@ class FunctionScope : public Scope {
     // arrow).
     GCPtrFunction canonicalFunction = {};
 
+    // Frame slots [0, nextFrameSlot) are live when this is the innermost
+    // scope.
+    uint32_t nextFrameSlot = 0;
+
     // If parameter expressions are present, parameters act like lexical
     // bindings.
     bool hasParameterExprs = false;
 
+    // Yes if the corresponding function is a field initializer lambda.
     IsFieldInitializer isFieldInitializer = IsFieldInitializer::No;
 
     // Bindings are sorted by kind in both frames and environments.
@@ -535,12 +539,7 @@ class FunctionScope : public Scope {
     uint16_t varStart = 0;
     uint32_t length = 0;
 
-    // Frame slots [0, nextFrameSlot) are live when this is the innermost
-    // scope.
-    uint32_t nextFrameSlot = 0;
-
-    // The array of tagged JSAtom* names, allocated beyond the end of the
-    // struct.
+    // Tagged JSAtom* names, allocated beyond the end of the struct.
     TrailingNamesArray trailingNames;
 
     explicit Data(size_t nameCount) : trailingNames(nameCount) {}
@@ -628,15 +627,16 @@ class VarScope : public Scope {
   // Data is public because it is created by the
   // frontend. See Parser<FullParseHandler>::newVarScopeData.
   struct Data : public BaseScopeData {
-    // All bindings are vars.
-    uint32_t length = 0;
-
-    // Frame slots [firstFrameSlot(), nextFrameSlot) are live when this is
-    // the innermost scope.
+    // Frame slots [0, nextFrameSlot) are live when this is the innermost
+    // scope.
     uint32_t nextFrameSlot = 0;
 
-    // The array of tagged JSAtom* names, allocated beyond the end of the
-    // struct.
+    // All bindings are vars.
+    //
+    //            vars - [0, length)
+    uint32_t length = 0;
+
+    // Tagged JSAtom* names, allocated beyond the end of the struct.
     TrailingNamesArray trailingNames;
 
     explicit Data(size_t nameCount) : trailingNames(nameCount) {}
@@ -722,8 +722,7 @@ class GlobalScope : public Scope {
     uint32_t constStart = 0;
     uint32_t length = 0;
 
-    // The array of tagged JSAtom* names, allocated beyond the end of the
-    // struct.
+    // Tagged JSAtom* names, allocated beyond the end of the struct.
     TrailingNamesArray trailingNames;
 
     explicit Data(size_t nameCount) : trailingNames(nameCount) {}
@@ -803,6 +802,10 @@ class EvalScope : public Scope {
   // Data is public because it is created by the frontend. See
   // Parser<FullParseHandler>::newEvalScopeData.
   struct Data : public BaseScopeData {
+    // Frame slots [0, nextFrameSlot) are live when this is the innermost
+    // scope.
+    uint32_t nextFrameSlot = 0;
+
     // All bindings in an eval script are 'var' bindings. The implicit
     // lexical scope around the eval is present regardless of strictness
     // and is its own LexicalScope.
@@ -810,15 +813,9 @@ class EvalScope : public Scope {
     // on the BindingName.
     //
     //            vars - [0, length)
-    uint32_t varStart = 0;
     uint32_t length = 0;
 
-    // Frame slots [0, nextFrameSlot) are live when this is the innermost
-    // scope.
-    uint32_t nextFrameSlot = 0;
-
-    // The array of tagged JSAtom* names, allocated beyond the end of the
-    // struct.
+    // Tagged JSAtom* names, allocated beyond the end of the struct.
     TrailingNamesArray trailingNames;
 
     explicit Data(size_t nameCount) : trailingNames(nameCount) {}
@@ -896,6 +893,10 @@ class ModuleScope : public Scope {
     // The module of the scope.
     GCPtr<ModuleObject*> module = {};
 
+    // Frame slots [0, nextFrameSlot) are live when this is the innermost
+    // scope.
+    uint32_t nextFrameSlot = 0;
+
     // Bindings are sorted by kind.
     //
     // imports - [0, varStart)
@@ -907,12 +908,7 @@ class ModuleScope : public Scope {
     uint32_t constStart = 0;
     uint32_t length = 0;
 
-    // Frame slots [0, nextFrameSlot) are live when this is the innermost
-    // scope.
-    uint32_t nextFrameSlot = 0;
-
-    // The array of tagged JSAtom* names, allocated beyond the end of the
-    // struct.
+    // Tagged JSAtom* names, allocated beyond the end of the struct.
     TrailingNamesArray trailingNames;
 
     explicit Data(size_t nameCount) : trailingNames(nameCount) {}
@@ -962,14 +958,21 @@ class WasmInstanceScope : public Scope {
 
  public:
   struct Data : public BaseScopeData {
-    uint32_t memoriesStart = 0;
-    uint32_t globalsStart = 0;
-    uint32_t length = 0;
-    uint32_t nextFrameSlot = 0;
-
     // The wasm instance of the scope.
     GCPtr<WasmInstanceObject*> instance = {};
 
+    // Frame slots [0, nextFrameSlot) are live when this is the innermost
+    // scope.
+    uint32_t nextFrameSlot = 0;
+
+    // Bindings list the WASM memories and globals.
+    //
+    // memories - [0, globalsStart)
+    //  globals - [globalsStart, length)
+    uint32_t globalsStart = 0;
+    uint32_t length = 0;
+
+    // Tagged JSAtom* names, allocated beyond the end of the struct.
     TrailingNamesArray trailingNames;
 
     explicit Data(size_t nameCount) : trailingNames(nameCount) {}
@@ -988,7 +991,7 @@ class WasmInstanceScope : public Scope {
  public:
   WasmInstanceObject* instance() const { return data().instance; }
 
-  uint32_t memoriesStart() const { return data().memoriesStart; }
+  uint32_t memoriesStart() const { return 0; }
 
   uint32_t globalsStart() const { return data().globalsStart; }
 
@@ -1009,10 +1012,16 @@ class WasmFunctionScope : public Scope {
 
  public:
   struct Data : public BaseScopeData {
-    uint32_t length = 0;
+    // Frame slots [0, nextFrameSlot) are live when this is the innermost
+    // scope.
     uint32_t nextFrameSlot = 0;
-    uint32_t funcIndex = 0;
 
+    // Bindings are the local variable names.
+    //
+    //    vars - [0, length)
+    uint32_t length = 0;
+
+    // Tagged JSAtom* names, allocated beyond the end of the struct.
     TrailingNamesArray trailingNames;
 
     explicit Data(size_t nameCount) : trailingNames(nameCount) {}
@@ -1030,8 +1039,6 @@ class WasmFunctionScope : public Scope {
   const Data& data() const { return *static_cast<Data*>(data_); }
 
  public:
-  uint32_t funcIndex() const { return data().funcIndex; }
-
   static Shape* getEmptyEnvironmentShape(JSContext* cx);
 };
 

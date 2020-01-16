@@ -48,7 +48,6 @@ config = {
     # "log_format": "%(levelname)8s - %(message)s",
     "log_tbpl_level": "info",
     "log_raw_level": "info",
-    "minidump_stackwalk_path": "linux64-minidump_stackwalk",
     # To take device screenshots at timed intervals (each time in seconds, relative
     # to the start of the run-tests step) specify screenshot_times. For example, to
     # take 4 screenshots at one minute intervals you could specify:
@@ -150,6 +149,7 @@ config = {
                 "--log-errorsummary=%(error_summary_file)s",
                 "--log-tbpl-level=%(log_tbpl_level)s",
                 "--deviceSerial=%(device_serial)s",
+                "--topsrcdir=tests",
             ],
             "tests": ["tests/layout/reftests/reftest.list",],
         },
@@ -173,6 +173,7 @@ config = {
                 "--log-errorsummary=%(error_summary_file)s",
                 "--log-tbpl-level=%(log_tbpl_level)s",
                 "--deviceSerial=%(device_serial)s",
+                "--topsrcdir=tests",
             ],
             "tests": ["tests/testing/crashtest/crashtests.list",],
         },
@@ -202,15 +203,16 @@ config = {
                 "--utility-path=%(utility_path)s", "--http-port=%(http_port)s",
                 "--ssl-port=%(ssl_port)s", "--httpd-path", "%(modules_dir)s",
                 "--symbols-path=%(symbols_path)s",
-                "--extra-profile-file=jsreftest/tests/user.js",
+                "--extra-profile-file=jsreftest/tests/js/src/tests/user.js",
                 "--suite=jstestbrowser",
                 "--log-raw=%(raw_log_file)s",
                 "--log-raw-level=%(log_raw_level)s",
                 "--log-errorsummary=%(error_summary_file)s",
                 "--log-tbpl-level=%(log_tbpl_level)s",
                 "--deviceSerial=%(device_serial)s",
+                "--topsrcdir=../jsreftest/tests",
             ],
-            "tests": ["../jsreftest/tests/jstests.list",],
+            "tests": ["../jsreftest/tests/js/src/tests/jstests.list",],
         },
         "xpcshell": {
             "run_filename": "remotexpcshelltests.py",

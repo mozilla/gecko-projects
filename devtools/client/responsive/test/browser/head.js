@@ -329,7 +329,8 @@ async function testViewportResize(
   expectedViewportSize,
   expectedHandleMove
 ) {
-  const win = ui.toolWindow;
+  const win = ui.getBrowserWindow();
+
   const resized = waitForViewportResizeTo(ui, ...expectedViewportSize);
   const startRect = dragElementBy(selector, ...moveBy, win);
   await resized;
@@ -577,7 +578,7 @@ function testViewportDeviceMenuLabel(ui, expectedDeviceName) {
 }
 
 async function toggleTouchSimulation(ui) {
-  const { document } = ui.toolWindow;
+  const { document } = ui.getBrowserWindow();
   const touchButton = document.getElementById("touch-simulation-button");
   const changed = once(ui, "touch-simulation-changed");
   const loaded = waitForViewportLoad(ui);

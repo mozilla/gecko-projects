@@ -1080,7 +1080,7 @@ bool EventStateManager::LookForAccessKeyAndExecute(
           nsCOMPtr<nsIBrowserChild> child =
               docShell ? docShell->GetBrowserChild() : nullptr;
           if (child) {
-            child->SendRequestFocus(false);
+            child->SendRequestFocus(false, CallerType::System);
           }
         }
 
@@ -1580,7 +1580,7 @@ void EventStateManager::FireContextClick() {
 
       if (formCtrl) {
         allowedToDispatch =
-            formCtrl->IsTextOrNumberControl(/*aExcludePassword*/ false) ||
+            formCtrl->IsTextControl(/*aExcludePassword*/ false) ||
             formCtrl->ControlType() == NS_FORM_INPUT_FILE;
       } else if (mGestureDownContent->IsAnyOfHTMLElements(
                      nsGkAtoms::embed, nsGkAtoms::object, nsGkAtoms::label)) {

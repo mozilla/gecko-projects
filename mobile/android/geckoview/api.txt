@@ -52,6 +52,7 @@ import java.lang.Throwable;
 import java.lang.Void;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
+import java.security.cert.X509Certificate;
 import java.util.AbstractSequentialList;
 import java.util.Collection;
 import java.util.List;
@@ -830,17 +831,14 @@ package org.mozilla.geckoview {
     field public static final int SECURITY_MODE_IDENTIFIED = 1;
     field public static final int SECURITY_MODE_UNKNOWN = 0;
     field public static final int SECURITY_MODE_VERIFIED = 2;
+    field @Nullable public final X509Certificate certificate;
     field @NonNull public final String host;
     field public final boolean isException;
     field public final boolean isSecure;
-    field @NonNull public final String issuerCommonName;
-    field @NonNull public final String issuerOrganization;
     field public final int mixedModeActive;
     field public final int mixedModePassive;
-    field @NonNull public final String organization;
     field @Nullable public final String origin;
     field public final int securityMode;
-    field @NonNull public final String subjectName;
   }
 
   public static interface GeckoSession.PromptDelegate {
@@ -1486,8 +1484,9 @@ package org.mozilla.geckoview {
 
   public static class WebExtension.DisabledFlags {
     ctor public DisabledFlags();
-    field public static final int BLOCKLIST_DISABLED = 4;
-    field public static final int USER_DISABLED = 2;
+    field public static final int APP = 8;
+    field public static final int BLOCKLIST = 4;
+    field public static final int USER = 2;
   }
 
   public static class WebExtension.Flags {
@@ -1589,6 +1588,7 @@ package org.mozilla.geckoview {
 
   public static class WebExtensionController.EnableSource {
     ctor public EnableSource();
+    field public static final int APP = 2;
     field public static final int USER = 1;
   }
 
@@ -1678,6 +1678,7 @@ package org.mozilla.geckoview {
 
   @AnyThread public class WebRequestError extends Exception {
     ctor public WebRequestError(int, int);
+    ctor public WebRequestError(int, int, X509Certificate);
     field public static final int ERROR_CATEGORY_CONTENT = 4;
     field public static final int ERROR_CATEGORY_NETWORK = 3;
     field public static final int ERROR_CATEGORY_PROXY = 6;
@@ -1712,6 +1713,7 @@ package org.mozilla.geckoview {
     field public static final int ERROR_UNKNOWN_SOCKET_TYPE = 83;
     field public static final int ERROR_UNSAFE_CONTENT_TYPE = 36;
     field public final int category;
+    field @Nullable public final X509Certificate certificate;
     field public final int code;
   }
 
@@ -1720,6 +1722,8 @@ package org.mozilla.geckoview {
     method public void setReadTimeoutMillis(long);
     field public static final long DEFAULT_READ_TIMEOUT_MS = 30000L;
     field @Nullable public final InputStream body;
+    field @Nullable public final X509Certificate certificate;
+    field public final boolean isSecure;
     field public final boolean redirected;
     field public final int statusCode;
   }
@@ -1728,6 +1732,8 @@ package org.mozilla.geckoview {
     ctor public Builder(@NonNull String);
     method @NonNull public WebResponse.Builder body(@NonNull InputStream);
     method @NonNull public WebResponse build();
+    method @NonNull public WebResponse.Builder certificate(@NonNull X509Certificate);
+    method @NonNull public WebResponse.Builder isSecure(boolean);
     method @NonNull public WebResponse.Builder redirected(boolean);
     method @NonNull public WebResponse.Builder statusCode(int);
   }

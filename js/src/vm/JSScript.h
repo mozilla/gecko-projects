@@ -745,9 +745,8 @@ class ScriptSource {
       js_delete(this);
     }
   }
-  MOZ_MUST_USE bool initFromOptions(
-      JSContext* cx, const JS::ReadOnlyCompileOptions& options,
-      const mozilla::Maybe<uint32_t>& parameterListEnd = mozilla::Nothing());
+  MOZ_MUST_USE bool initFromOptions(JSContext* cx,
+                                    const JS::ReadOnlyCompileOptions& options);
 
   /**
    * The minimum script length (in code units) necessary for a script to be
@@ -1019,6 +1018,10 @@ class ScriptSource {
 
   MOZ_MUST_USE bool appendSubstring(JSContext* cx, js::StringBuffer& buf,
                                     size_t start, size_t stop);
+
+  void setParameterListEnd(uint32_t parameterListEnd) {
+    parameterListEnd_ = parameterListEnd;
+  }
 
   bool isFunctionBody() { return parameterListEnd_ != 0; }
   JSLinearString* functionBodyString(JSContext* cx);
@@ -2097,7 +2100,7 @@ class BaseScript : public gc::TenuredCell {
     BindingsAccessedDynamically = 1 << 5,
     FunHasExtensibleScope = 1 << 6,
 
-    // Bytecode contains JSOP_CALLSITEOBJ
+    // Bytecode contains JSOp::CallSiteObj
     // (We don't relazify functions with template strings, due to observability)
     HasCallSiteObj = 1 << 7,
 
@@ -2698,9 +2701,9 @@ class JSScript : public js::BaseScript {
   }
 
   bool hasForceInterpreterOp() const {
-    // JSOP_FORCEINTERPRETER, if present, must be the first op.
+    // JSOp::ForceInterpreter, if present, must be the first op.
     MOZ_ASSERT(length() >= 1);
-    return JSOp(*code()) == JSOP_FORCEINTERPRETER;
+    return JSOp(*code()) == JSOp::ForceInterpreter;
   }
 
   js::AllBytecodesIterable allLocations() {
@@ -2723,8 +2726,8 @@ class JSScript : public js::BaseScript {
   jsbytecode* codeEnd() const { return code() + length(); }
 
   jsbytecode* lastPC() const {
-    jsbytecode* pc = codeEnd() - js::JSOP_RETRVAL_LENGTH;
-    MOZ_ASSERT(*pc == JSOP_RETRVAL);
+    jsbytecode* pc = codeEnd() - js::JSOpLength_RetRval;
+    MOZ_ASSERT(JSOp(*pc) == JSOp::RetRval);
     return pc;
   }
 
@@ -2839,12 +2842,12 @@ class JSScript : public js::BaseScript {
                                           js::HandleScript script);
 
   /*
-   * Arguments access (via JSOP_*ARG* opcodes) must access the canonical
+   * Arguments access (via JSOp::*Arg* opcodes) must access the canonical
    * location for the argument. If an arguments object exists AND it's mapped
    * ('arguments' aliases formals), then all access must go through the
    * arguments object. Otherwise, the local slot is the canonical location for
    * the arguments. Note: if a formal is aliased through the scope chain, then
-   * script->formalIsAliased and JSOP_*ARG* opcodes won't be emitted at all.
+   * script->formalIsAliased and JSOp::*Arg* opcodes won't be emitted at all.
    */
   bool argsObjAliasesFormals() const {
     return needsArgsObj() && hasMappedArgsObj();
@@ -3099,7 +3102,7 @@ class JSScript : public js::BaseScript {
 
   uint32_t tableSwitchCaseOffset(jsbytecode* pc, uint32_t caseIndex) const {
     MOZ_ASSERT(containsPC(pc));
-    MOZ_ASSERT(*pc == JSOP_TABLESWITCH);
+    MOZ_ASSERT(JSOp(*pc) == JSOp::TableSwitch);
     uint32_t firstResumeIndex = GET_RESUMEINDEX(pc + 3 * JUMP_OFFSET_LEN);
     return resumeOffsets()[firstResumeIndex + caseIndex];
   }
@@ -3206,10 +3209,10 @@ class JSScript : public js::BaseScript {
     }
 
     jsbytecode* pc = code();
-    if (noScriptRval() && JSOp(*pc) == JSOP_FALSE) {
+    if (noScriptRval() && JSOp(*pc) == JSOp::False) {
       ++pc;
     }
-    return JSOp(*pc) == JSOP_RETRVAL;
+    return JSOp(*pc) == JSOp::RetRval;
   }
 
   bool formalIsAliased(unsigned argSlot);

@@ -336,7 +336,8 @@ int32_t Element::TabIndex() {
   return TabIndexDefault();
 }
 
-void Element::Focus(const FocusOptions& aOptions, ErrorResult& aError) {
+void Element::Focus(const FocusOptions& aOptions, CallerType aCallerType,
+                    ErrorResult& aError) {
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   // Also other browsers seem to have the hack to not re-focus (and flush) when
   // the element is already focused.
@@ -348,9 +349,13 @@ void Element::Focus(const FocusOptions& aOptions, ErrorResult& aError) {
     if (fm->CanSkipFocus(this)) {
       fm->NeedsFlushBeforeEventHandling(this);
     } else {
-      aError = fm->SetFocus(
-          this, nsIFocusManager::FLAG_BYELEMENTFOCUS |
-                    nsFocusManager::FocusOptionsToFocusManagerFlags(aOptions));
+      uint32_t fmFlags =
+          nsIFocusManager::FLAG_BYELEMENTFOCUS |
+          nsFocusManager::FocusOptionsToFocusManagerFlags(aOptions);
+      if (aCallerType == CallerType::NonSystem) {
+        fmFlags = nsIFocusManager::FLAG_NONSYSTEMCALLER | fmFlags;
+      }
+      aError = fm->SetFocus(this, fmFlags);
     }
   }
 }
@@ -2695,8 +2700,9 @@ void Element::List(FILE* out, int32_t aIndent, const nsCString& aPrefix) const {
   fprintf(out, " state=[%llx]",
           static_cast<unsigned long long>(State().GetInternalValue()));
   fprintf(out, " flags=[%08x]", static_cast<unsigned int>(GetFlags()));
-  if (IsCommonAncestorForRangeInSelection()) {
-    const LinkedList<nsRange>* ranges = GetExistingCommonAncestorRanges();
+  if (IsClosestCommonInclusiveAncestorForRangeInSelection()) {
+    const LinkedList<nsRange>* ranges =
+        GetExistingClosestCommonInclusiveAncestorRanges();
     int32_t count = 0;
     if (ranges) {
       // Can't use range-based iteration on a const LinkedList, unfortunately.
@@ -4208,6 +4214,23 @@ void Element::AssertInvariantsOnNodeInfoChange() {
   }
 }
 #endif
+
+// static
+nsAtom* Element::GetEventNameForAttr(nsAtom* aAttr) {
+  if (aAttr == nsGkAtoms::onwebkitanimationend) {
+    return nsGkAtoms::onwebkitAnimationEnd;
+  }
+  if (aAttr == nsGkAtoms::onwebkitanimationiteration) {
+    return nsGkAtoms::onwebkitAnimationIteration;
+  }
+  if (aAttr == nsGkAtoms::onwebkitanimationstart) {
+    return nsGkAtoms::onwebkitAnimationStart;
+  }
+  if (aAttr == nsGkAtoms::onwebkittransitionend) {
+    return nsGkAtoms::onwebkitTransitionEnd;
+  }
+  return aAttr;
+}
 
 }  // namespace dom
 }  // namespace mozilla

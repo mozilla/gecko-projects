@@ -80,6 +80,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   UpdateUtils: "resource://gre/modules/UpdateUtils.jsm",
   UrlbarInput: "resource:///modules/UrlbarInput.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarProviderSearchTips: "resource:///modules/UrlbarProviderSearchTips.jsm",
   UrlbarTokenizer: "resource:///modules/UrlbarTokenizer.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
   UrlbarValueFormatter: "resource:///modules/UrlbarValueFormatter.jsm",
@@ -2274,11 +2275,6 @@ var gBrowserInit = {
       gBrowserThumbnails.init();
     });
 
-    // Show the addons private browsing panel the first time a private window.
-    scheduleIdleTask(() => {
-      ExtensionsUI.showPrivateBrowsingNotification(window);
-    });
-
     scheduleIdleTask(
       () => {
         // Initialize the download manager some time after the app starts so that
@@ -2897,7 +2893,10 @@ function focusAndSelectUrlBar() {
   // finished leaving customize mode, and the url bar will still be disabled.
   // We can't focus it when it's disabled, so we need to re-run ourselves when
   // we've finished leaving customize mode.
-  if (CustomizationHandler.isCustomizing()) {
+  if (
+    CustomizationHandler.isCustomizing() ||
+    CustomizationHandler.isExitingCustomizeMode
+  ) {
     gNavToolbox.addEventListener("aftercustomization", focusAndSelectUrlBar, {
       once: true,
     });
@@ -2918,7 +2917,7 @@ function openLocation(event) {
     if (gURLBar.view.isOpen) {
       return;
     }
-    if (!gURLBar.view.maybeReopen() && gURLBar.openViewOnFocusForCurrentTab) {
+    if (!gURLBar.view.maybeReopen() && gURLBar.openViewOnFocus) {
       gURLBar.startQuery({ event });
     }
     return;
@@ -5460,6 +5459,8 @@ var XULBrowserWindow = {
 
       SafeBrowsingNotificationBox.onLocationChange(aLocationURI);
 
+      UrlbarProviderSearchTips.onLocationChange(aLocationURI);
+
       gTabletModePageCounter.inc();
 
       this._updateElementsForContentType();
@@ -5581,7 +5582,6 @@ var XULBrowserWindow = {
     if (this._event == aEvent && this._lastLocationForEvent == spec) {
       return;
     }
-    this._event = aEvent;
     this._lastLocationForEvent = spec;
 
     if (
@@ -5594,14 +5594,15 @@ var XULBrowserWindow = {
     }
 
     gProtectionsHandler.onContentBlockingEvent(
-      this._event,
+      aEvent,
       aWebProgress,
-      aIsSimulated
+      aIsSimulated,
+      this._event // previous content blocking event
     );
-    // Because this function will only receive content blocking event updates
-    // for the currently selected tab, we handle updates to background tabs in
-    // TabsProgressListener.onContentBlockingEvent.
-    gBrowser.selectedBrowser.updateSecurityUIForContentBlockingEvent(aEvent);
+
+    // We need the state of the previous content blocking event, so update
+    // event after onContentBlockingEvent is called.
+    this._event = aEvent;
   },
 
   // This is called in multiple ways:
@@ -6029,14 +6030,6 @@ const AccessibilityRefreshBlocker = {
 };
 
 var TabsProgressListener = {
-  onContentBlockingEvent(aBrowser, aWebProgress, aRequest, aEvent) {
-    // Handle content blocking events for background (=non-selected) tabs.
-    // This event is processed for the selected tab in XULBrowserWindow.onContentBlockingEvent.
-    if (aBrowser != gBrowser.selectedBrowser) {
-      aBrowser.updateSecurityUIForContentBlockingEvent(aEvent);
-    }
-  },
-
   onStateChange(aBrowser, aWebProgress, aRequest, aStateFlags, aStatus) {
     // Collect telemetry data about tab load times.
     if (
@@ -6121,7 +6114,6 @@ var TabsProgressListener = {
     if (tab && tab._sharingState) {
       gBrowser.resetBrowserSharing(aBrowser);
     }
-    webrtcUI.forgetStreamsFromBrowser(aBrowser);
 
     gBrowser.getNotificationBox(aBrowser).removeTransientNotifications();
 

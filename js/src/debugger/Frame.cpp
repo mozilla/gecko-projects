@@ -26,7 +26,6 @@
 #include "jsnum.h"        // for Int32ToString
 
 #include "builtin/Array.h"      // for NewDenseCopiedArray
-#include "builtin/Promise.h"    // for PromiseObject
 #include "debugger/Debugger.h"  // for Completion, Debugger
 #include "debugger/DebugScript.h"
 #include "debugger/Environment.h"          // for DebuggerEnvironment
@@ -980,6 +979,9 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
 
     LifoAllocScope allocScope(&cx->tempLifoAlloc());
     frontend::ParseInfo parseInfo(cx, allocScope);
+    if (!parseInfo.initFromOptions(cx, options)) {
+      return false;
+    }
 
     frontend::EvalScriptInfo info(cx, parseInfo, options, env, scope);
     script = frontend::CompileEvalScript(info, srcBuf);
@@ -995,6 +997,9 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
 
     LifoAllocScope allocScope(&cx->tempLifoAlloc());
     frontend::ParseInfo parseInfo(cx, allocScope);
+    if (!parseInfo.initFromOptions(cx, options)) {
+      return false;
+    }
 
     frontend::GlobalScriptInfo info(cx, parseInfo, options, scopeKind);
     script = frontend::CompileGlobalScript(info, srcBuf);

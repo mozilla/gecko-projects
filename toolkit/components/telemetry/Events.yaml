@@ -697,13 +697,11 @@ fxa_avatar_menu:
     release_channel_collection: opt-out
     products:
       - "firefox"
-      - "fennec"
-      - "geckoview"
     record_in_processes: ["main"]
     description: This is recorded on interactions with the FxA avatar menu on the toolbar
-    bug_numbers: [1524665, 1585459]
+    bug_numbers: [1524665, 1585459, 1606203]
     notification_emails: ["vbudhram@mozilla.com", "loines@mozilla.com"]
-    expiry_version: "74"
+    expiry_version: "never"
     extra_keys:
       fxa_status: >
         The current state of the user. Possible states are "not_configured", "unverified",
@@ -730,13 +728,11 @@ fxa_app_menu:
     release_channel_collection: opt-out
     products:
       - "firefox"
-      - "fennec"
-      - "geckoview"
     record_in_processes: ["main"]
     description: This is recorded on interactions with the FxA menu in the app (hamburger) menu
-    bug_numbers: [1542334]
+    bug_numbers: [1542334, 1606203]
     notification_emails: ["vbudhram@mozilla.com", "loines@mozilla.com"]
-    expiry_version: "73"
+    expiry_version: "never"
     extra_keys:
       fxa_status: >
         The current state of the user. Possible states are "not_configured", "unverified",
@@ -1517,20 +1513,6 @@ devtools.main:
       prompt_enabled: True if the user enables the prompt, false otherwise.
       runtime_id: Random id generated to track events related to a single runtime
       session_id: The start time of the session in milliseconds since epoch (Unix Timestamp) e.g. 1396381378123.
-  wrong_shortcut:
-    objects: ["tools"]
-    bug_numbers: [1567497]
-    notification_emails: ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"]
-    products:
-      - "firefox"
-    record_in_processes: ["main"]
-    description: User tried to use a shortcut we don't support yet in devtools.
-    release_channel_collection: opt-out
-    expiry_version: "75"
-    extra_keys:
-      shortcut: The shortcut pressed by the user
-      tool_id: The id of the panel the user was using
-      session_id: The start time of the session in milliseconds since epoch (Unix Timestamp) e.g. 1396381378123.
 
 security.ui.protections:
   show:
@@ -1596,6 +1578,26 @@ security.ui.protections:
       - firefox
     extra_keys:
       category: The category of protections the user is in, standard, strict or custom.
+
+security.ui.app_menu:
+  click:
+    bug_numbers:
+      - 1603545 
+    description: >
+      Privacy and Security click events on app menu.
+    objects: [
+      "open_full_report",
+    ]
+    expiry_version: "76"
+    record_in_processes: 
+      - main
+    release_channel_collection: opt-out
+    notification_emails:
+      - chsiang@mozilla.com
+      - ewright@mozilla.com 
+      - seceng-telemetry@mozilla.com
+    products:
+      - firefox
 
 security.ui.protectionspopup:
   open:
@@ -1757,7 +1759,7 @@ security:
     release_channel_collection: opt-out
     products:
       - firefox
-    expiry_version: "75"
+    expiry_version: "77"
     record_in_processes:
       - all
     extra_keys:

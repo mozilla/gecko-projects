@@ -36,7 +36,6 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/ipc/BackgroundUtils.h"
-#include "mozilla/ipc/IPCStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/layers/APZChild.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
@@ -127,7 +126,6 @@
 #include "nsQueryObject.h"
 #include "mozilla/dom/DocGroup.h"
 #include "nsString.h"
-#include "nsStringStream.h"
 #include "mozilla/Telemetry.h"
 #include "nsDocShellLoadState.h"
 #include "nsWebBrowser.h"
@@ -1111,7 +1109,8 @@ mozilla::ipc::IPCResult BrowserChild::RecvResumeLoad(
 }
 
 void BrowserChild::DoFakeShow(const ParentShowInfo& aParentShowInfo) {
-  OwnerShowInfo ownerInfo{ScreenIntSize(), mParentIsActive, nsSizeMode_Normal};
+  OwnerShowInfo ownerInfo{ScreenIntSize(), ScrollbarPreference::Auto,
+                          mParentIsActive, nsSizeMode_Normal};
   RecvShow(aParentShowInfo, ownerInfo);
   mDidFakeShow = true;
 }
@@ -1187,6 +1186,9 @@ mozilla::ipc::IPCResult BrowserChild::RecvShow(
 
   ApplyParentShowInfo(aParentInfo);
   RecvParentActivated(aOwnerInfo.parentWindowIsActive());
+  if (!mIsTopLevel) {
+    RecvScrollbarPreferenceChanged(aOwnerInfo.scrollbarPreference());
+  }
 
   if (!res) {
     return IPC_FAIL_NO_REASON(this);
@@ -1210,6 +1212,16 @@ mozilla::ipc::IPCResult BrowserChild::RecvInitRendering(
     const CompositorOptions& aCompositorOptions, const bool& aLayersConnected) {
   mLayersConnected = Some(aLayersConnected);
   InitRenderingState(aTextureFactoryIdentifier, aLayersId, aCompositorOptions);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BrowserChild::RecvScrollbarPreferenceChanged(
+    ScrollbarPreference aPreference) {
+  MOZ_ASSERT(!mIsTopLevel,
+             "Scrollbar visibility should be derived from chrome flags for "
+             "top-level windows");
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
+  nsDocShell::Cast(docShell)->SetScrollbarPreference(aPreference);
   return IPC_OK();
 }
 
@@ -2640,7 +2652,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvNavigateByKey(
                     nsIFocusManager::FLAG_BYKEY, getter_AddRefs(result));
     }
 
-    SendRequestFocus(false);
+    SendRequestFocus(false, CallerType::System);
   }
 
   return IPC_OK();
@@ -2969,8 +2981,8 @@ BrowserChild::SetWebBrowserChrome(nsIWebBrowserChrome3* aWebBrowserChrome) {
   return NS_OK;
 }
 
-void BrowserChild::SendRequestFocus(bool aCanFocus) {
-  PBrowserChild::SendRequestFocus(aCanFocus);
+void BrowserChild::SendRequestFocus(bool aCanFocus, CallerType aCallerType) {
+  PBrowserChild::SendRequestFocus(aCanFocus, aCallerType);
 }
 
 void BrowserChild::EnableDisableCommands(
@@ -3310,35 +3322,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvSetOriginAttributes(
 mozilla::ipc::IPCResult BrowserChild::RecvSetWidgetNativeData(
     const WindowsHandle& aWidgetNativeData) {
   mWidgetNativeData = aWidgetNativeData;
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult BrowserChild::RecvGetContentBlockingLog(
-    GetContentBlockingLogResolver&& aResolve) {
-  dom::ContentChild* contentChild = dom::ContentChild::GetSingleton();
-  if (NS_WARN_IF(!contentChild)) {
-    return IPC_OK();
-  }
-
-  bool success = false;
-  nsAutoCString result;
-
-  if (nsCOMPtr<Document> doc = GetTopLevelDocument()) {
-    result = doc->GetContentBlockingLog()->Stringify();
-    success = true;
-  }
-
-  nsCOMPtr<nsIInputStream> stream;
-  nsresult rv = NS_NewCStringInputStream(getter_AddRefs(stream), result);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    success = false;
-  }
-
-  AutoIPCStream ipcStream;
-  ipcStream.Serialize(stream, contentChild);
-
-  aResolve(
-      Tuple<const IPCStream&, const bool&>(ipcStream.TakeValue(), success));
   return IPC_OK();
 }
 
@@ -3832,18 +3815,11 @@ NS_IMETHODIMP BrowserChild::OnSecurityChange(nsIWebProgress* aWebProgress,
 NS_IMETHODIMP BrowserChild::OnContentBlockingEvent(nsIWebProgress* aWebProgress,
                                                    nsIRequest* aRequest,
                                                    uint32_t aEvent) {
-  if (!IPCOpen() || !mShouldSendWebProgressEventsToParent) {
-    return NS_OK;
-  }
-
-  Maybe<WebProgressData> webProgressData;
-  RequestData requestData;
-  nsresult rv = PrepareProgressListenerData(aWebProgress, aRequest,
-                                            webProgressData, requestData);
-  NS_ENSURE_SUCCESS(rv, rv);
-  Unused << SendOnContentBlockingEvent(webProgressData, requestData, aEvent);
-
-  return NS_OK;
+  // The OnContentBlockingEvent only happenes in the parent process. It should
+  // not be seen in the content process.
+  MOZ_DIAGNOSTIC_ASSERT(
+      false, "OnContentBlockingEvent should not be seen in content process.");
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP BrowserChild::OnProgressChange64(nsIWebProgress* aWebProgress,
@@ -4006,6 +3982,25 @@ BrowserChild::DoesWindowSupportProtectedMedia() {
           });
 }
 #endif
+
+void BrowserChild::NotifyContentBlockingEvent(
+    uint32_t aEvent, nsIChannel* aChannel, bool aBlocked, nsIURI* aHintURI,
+    const nsTArray<nsCString>& aTrackingFullHashes,
+    const Maybe<mozilla::AntiTrackingCommon::StorageAccessGrantedReason>&
+        aReason) {
+  if (!IPCOpen()) {
+    return;
+  }
+
+  Maybe<WebProgressData> webProgressData;
+  RequestData requestData;
+  nsresult rv = PrepareProgressListenerData(nullptr, aChannel, webProgressData,
+                                            requestData);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
+  Unused << SendNotifyContentBlockingEvent(
+      aEvent, requestData, aBlocked, aHintURI, aTrackingFullHashes, aReason);
+}
 
 BrowserChildMessageManager::BrowserChildMessageManager(
     BrowserChild* aBrowserChild)

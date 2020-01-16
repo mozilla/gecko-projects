@@ -946,16 +946,16 @@ class UrlbarInput {
   }
 
   get openViewOnFocus() {
-    return this._openViewOnFocus;
-  }
-
-  get openViewOnFocusForCurrentTab() {
     return (
       this._openViewOnFocus &&
-      !["about:newtab", "about:home"].includes(
-        this.window.gBrowser.currentURI.spec
-      ) &&
-      !this.isPrivate
+      !this.isPrivate &&
+      // We do not show Top Sites if the user disabled them on about:newtab. We
+      // handle this here instead of disabling UrlbarProviderTopSites so that
+      // the user can still show Top Sites with the down arrow.
+      Services.prefs.getBoolPref(
+        "browser.newtabpage.activity-stream.feeds.topsites",
+        true
+      )
     );
   }
 
@@ -1491,14 +1491,24 @@ class UrlbarInput {
       Cu.reportError(ex);
     }
 
-    // Reset DOS mitigations for the basic auth prompt.
     // TODO: When bug 1498553 is resolved, we should be able to
     // remove the !triggeringPrincipal condition here.
     if (
       !params.triggeringPrincipal ||
       params.triggeringPrincipal.isSystemPrincipal
     ) {
+      // Reset DOS mitigations for the basic auth prompt.
       delete browser.authPromptAbuseCounter;
+
+      // Reset temporary permissions on the current tab if the user reloads
+      // the tab via the urlbar.
+      if (
+        openUILinkWhere == "current" &&
+        browser.currentURI &&
+        url === browser.currentURI.spec
+      ) {
+        this.window.SitePermissions.clearTemporaryPermissions(browser);
+      }
     }
 
     params.allowThirdPartyFixup = true;
@@ -1824,7 +1834,7 @@ class UrlbarInput {
         } else if (event.target.id == SEARCH_BUTTON_ID) {
           this._preventClickSelectsAll = true;
           this.search(UrlbarTokenizer.RESTRICT.SEARCH);
-        } else if (this.openViewOnFocusForCurrentTab && !this.view.isOpen) {
+        } else if (this.openViewOnFocus && !this.view.isOpen) {
           this.startQuery({
             allowAutofill: false,
             event,

@@ -100,6 +100,7 @@
 #include "nsSliderFrame.h"
 #include "nsFocusManager.h"
 #include "ClientLayerManager.h"
+#include "mozilla/layers/AnimationHelper.h"
 #include "mozilla/layers/RenderRootStateManager.h"
 #include "mozilla/layers/StackingContextHelper.h"
 #include "mozilla/layers/TreeTraversal.h"
@@ -547,7 +548,7 @@ enum class Send {
 static void AddAnimationForProperty(nsIFrame* aFrame,
                                     const AnimationProperty& aProperty,
                                     dom::Animation* aAnimation,
-                                    const Maybe<TransformData>& aData,
+                                    const CompositorAnimationData& aData,
                                     Send aSendFlag,
                                     AnimationInfo& aAnimationInfo) {
   MOZ_ASSERT(aAnimation->GetEffect(),
@@ -619,7 +620,8 @@ static void AddAnimationForProperty(nsIFrame* aFrame,
       aAnimation->HasPendingPlaybackRate()
           ? aAnimation->PlaybackRate()
           : std::numeric_limits<float>::quiet_NaN();
-  animation->data() = aData;
+  animation->transformData() = aData.mTransform;
+  animation->motionPathData() = aData.mMotionPath;
   animation->easingFunction() = ToTimingFunction(timing.TimingFunction());
   animation->iterationComposite() = static_cast<uint8_t>(
       aAnimation->GetEffect()->AsKeyframeEffect()->IterationComposite());
@@ -718,7 +720,7 @@ GroupAnimationsByProperty(const nsTArray<RefPtr<dom::Animation>>& aAnimations,
 static bool AddAnimationsForProperty(
     nsIFrame* aFrame, const EffectSet* aEffects,
     const nsTArray<RefPtr<dom::Animation>>& aCompositorAnimations,
-    const Maybe<TransformData>& aData, nsCSSPropertyID aProperty,
+    const CompositorAnimationData& aData, nsCSSPropertyID aProperty,
     Send aSendFlag, AnimationInfo& aAnimationInfo) {
   bool addedAny = false;
   // Add from first to last (since last overrides)
@@ -770,11 +772,17 @@ static bool AddAnimationsForProperty(
   return addedAny;
 }
 
-static Maybe<TransformData> CreateAnimationData(
+enum class AnimationDataType {
+  WithMotionPath,
+  WithoutMotionPath,
+};
+static CompositorAnimationData CreateAnimationData(
     nsIFrame* aFrame, nsDisplayItem* aItem, DisplayItemType aType,
-    layers::LayersBackend aLayersBackend) {
+    layers::LayersBackend aLayersBackend, AnimationDataType aDataType) {
+  CompositorAnimationData result;
+
   if (aType != DisplayItemType::TYPE_TRANSFORM) {
-    return Nothing();
+    return result;
   }
 
   // XXX Performance here isn't ideal for SVG. We'd prefer to avoid resolving
@@ -812,7 +820,14 @@ static Maybe<TransformData> CreateAnimationData(
     origin = aFrame->GetOffsetToCrossDoc(referenceFrame);
   }
 
-  // FIXME: Bug 1591629: Move motion path data into an individual struct.
+  result.mTransform = Some(TransformData(origin, offsetToTransformOrigin,
+                                         bounds, devPixelsToAppUnits, scaleX,
+                                         scaleY, hasPerspectiveParent));
+
+  if (aDataType == AnimationDataType::WithoutMotionPath) {
+    return result;
+  }
+
   const StyleTransformOrigin& styleOrigin =
       aFrame->StyleDisplay()->mTransformOrigin;
   CSSPoint motionPathOrigin = nsStyleTransformMatrix::Convert2DPosition(
@@ -831,17 +846,15 @@ static Maybe<TransformData> CreateAnimationData(
     }
   }
 
-  return Some(TransformData(origin, offsetToTransformOrigin, motionPathOrigin,
-                            framePosition, RayReferenceData(aFrame), bounds,
-                            devPixelsToAppUnits, scaleX, scaleY,
-                            hasPerspectiveParent));
+  result.mMotionPath = Some(layers::MotionPathData(
+      motionPathOrigin, framePosition, RayReferenceData(aFrame)));
+  return result;
 }
 
 static void AddNonAnimatingTransformLikePropertiesStyles(
     const nsCSSPropertyIDSet& aNonAnimatingProperties, nsIFrame* aFrame,
-    const Maybe<TransformData>& aData, Send aSendFlag,
-    AnimationInfo& aAnimationInfo) {
-  auto appendFakeAnimation = [&aAnimationInfo, &aData, aSendFlag](
+    Send aSendFlag, AnimationInfo& aAnimationInfo) {
+  auto appendFakeAnimation = [&aAnimationInfo, aSendFlag](
                                  nsCSSPropertyID aProperty,
                                  Animatable&& aBaseStyle) {
     layers::Animation* animation =
@@ -850,7 +863,6 @@ static void AddNonAnimatingTransformLikePropertiesStyles(
             : aAnimationInfo.AddAnimation();
     animation->property() = aProperty;
     animation->baseStyle() = std::move(aBaseStyle);
-    animation->data() = aData;
     animation->easingFunction() = null_t();
     animation->isNotAnimating() = true;
   };
@@ -963,14 +975,15 @@ static void AddAnimationsForDisplayItem(nsIFrame* aFrame,
     return;
   }
 
-  // FIXME: Bug 1591629: We create TransformData for all animating properties
-  // and copy it to every animation property, and pass them through IPC. We
-  // should avoid the duplicates.
-  const Maybe<TransformData> data =
-      CreateAnimationData(aFrame, aItem, aType, aLayersBackend);
   const HashMap<nsCSSPropertyID, nsTArray<RefPtr<dom::Animation>>>
       compositorAnimations =
           GroupAnimationsByProperty(matchedAnimations, propertySet);
+  CompositorAnimationData data =
+      CreateAnimationData(aFrame, aItem, aType, aLayersBackend,
+                          compositorAnimations.has(eCSSProperty_offset_path) ||
+                                  !aFrame->StyleDisplay()->mOffsetPath.IsNone()
+                              ? AnimationDataType::WithMotionPath
+                              : AnimationDataType::WithoutMotionPath);
   // Bug 1424900: Drop this pref check after shipping individual transforms.
   // Bug 1582554: Drop this pref check after shipping motion path.
   const bool hasMultipleTransformLikeProperties =
@@ -989,6 +1002,11 @@ static void AddAnimationsForDisplayItem(nsIFrame* aFrame,
     bool added =
         AddAnimationsForProperty(aFrame, effects, iter.get().value(), data,
                                  iter.get().key(), aSendFlag, aAnimationInfo);
+    if (added && data.HasData()) {
+      // Only copy TransformLikeMetaData in the first animation property.
+      data.Clear();
+    }
+
     if (hasMultipleTransformLikeProperties && added) {
       nonAnimatingProperties.RemoveProperty(iter.get().key());
     }
@@ -1009,8 +1027,8 @@ static void AddAnimationsForDisplayItem(nsIFrame* aFrame,
       !nonAnimatingProperties.Equals(
           nsCSSPropertyIDSet::TransformLikeProperties()) &&
       !nonAnimatingProperties.IsEmpty()) {
-    AddNonAnimatingTransformLikePropertiesStyles(
-        nonAnimatingProperties, aFrame, data, aSendFlag, aAnimationInfo);
+    AddNonAnimatingTransformLikePropertiesStyles(nonAnimatingProperties, aFrame,
+                                                 aSendFlag, aAnimationInfo);
   }
 }
 
@@ -4647,7 +4665,6 @@ bool nsDisplayBackgroundImage::CreateWebRenderCommands(
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc, RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
-  ContainerLayerParameters parameter;
   if (!CanBuildWebRenderDisplayItems(aManager->LayerManager(),
                                      aDisplayListBuilder)) {
     return false;
@@ -4969,6 +4986,7 @@ nsRegion nsDisplayThemedBackground::GetOpaqueRegion(
   *aSnap = false;
 
   if (mThemeTransparency == nsITheme::eOpaque) {
+    *aSnap = true;
     result = mBackgroundRect;
   }
   return result;
@@ -5423,22 +5441,27 @@ void nsDisplayOutline::Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) {
       nsRect(offset, mFrame->GetSize()), mFrame->Style());
 }
 
+bool nsDisplayOutline::IsThemedOutline() const {
+  const auto& outlineStyle = mFrame->StyleOutline()->mOutlineStyle;
+  if (!outlineStyle.IsAuto() ||
+      !StaticPrefs::layout_css_outline_style_auto_enabled()) {
+    return false;
+  }
+
+  nsPresContext* pc = mFrame->PresContext();
+  nsITheme* theme = pc->GetTheme();
+  return theme &&
+         theme->ThemeSupportsWidget(pc, mFrame, StyleAppearance::FocusOutline);
+}
+
 bool nsDisplayOutline::CreateWebRenderCommands(
     mozilla::wr::DisplayListBuilder& aBuilder,
     mozilla::wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc,
     mozilla::layers::RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
-  ContainerLayerParameters parameter;
-
-  const auto& outlineStyle = mFrame->StyleOutline()->mOutlineStyle;
-  if (outlineStyle.IsAuto() &&
-      StaticPrefs::layout_css_outline_style_auto_enabled()) {
-    nsITheme* theme = mFrame->PresContext()->GetTheme();
-    if (theme && theme->ThemeSupportsWidget(mFrame->PresContext(), mFrame,
-                                            StyleAppearance::FocusOutline)) {
-      return false;
-    }
+  if (IsThemedOutline()) {
+    return false;
   }
 
   nsPoint offset = ToReferenceFrame();

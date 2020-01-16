@@ -46,6 +46,7 @@
 #include "frontend/TokenStream.h"
 #include "irregexp/RegExpParser.h"
 #include "js/RegExpFlags.h"  // JS::RegExpFlags
+#include "vm/BigIntType.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
@@ -354,7 +355,7 @@ FunctionBox* PerHandlerParser<ParseHandler>::newFunctionBox(
 
   FunctionBox* funbox;
 
-  if (parseInfo_.isDeferred()) {
+  if (getParseInfo().isDeferred()) {
     funbox = alloc_.new_<FunctionBox>(
         cx_, traceListHead_, fcd, toStringStart, inheritedDirectives,
         options().extraWarningsOption, generatorKind, asyncKind);
@@ -1768,7 +1769,7 @@ bool PerHandlerParser<SyntaxParseHandler>::finishFunction(
   }
 
   // If we can defer the LazyScript creation, we are now done.
-  if (parseInfo_.isDeferred()) {
+  if (getParseInfo().isDeferred()) {
     // Move data into funbox
     MOZ_ASSERT(funbox->functionCreationData());
     funbox->functionCreationData()->lazyScriptData =
@@ -7147,8 +7148,8 @@ bool GeneralParser<ParseHandler, Unit>::finishClassConstructor(
     const ParseContext::ClassStatement& classStmt, HandlePropertyName className,
     HasHeritage hasHeritage, uint32_t classStartOffset, uint32_t classEndOffset,
     size_t numFields, ListNodeType& classMembers) {
-  // Fields cannot re-use the constructor obtained via JSOP_CLASSCONSTRUCTOR or
-  // JSOP_DERIVEDCONSTRUCTOR due to needing to emit calls to the field
+  // Fields cannot re-use the constructor obtained via JSOp::ClassConstructor or
+  // JSOp::DerivedConstructor due to needing to emit calls to the field
   // initializers in the constructor. So, synthesize a new one.
   if (classStmt.constructorBox == nullptr && numFields > 0) {
     MOZ_ASSERT(!options().selfHostingMode);
@@ -9323,18 +9324,18 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
           return null();
         }
 
-        JSOp op = JSOP_CALL;
+        JSOp op = JSOp::Call;
         bool maybeAsyncArrow = false;
         if (PropertyName* prop = handler_.maybeDottedProperty(lhs)) {
-          // Use the JSOP_FUN{APPLY,CALL} optimizations given the
-          // right syntax.
+          // Use the JSOp::Fun{Apply,Call} optimizations given the right
+          // syntax.
           if (prop == cx_->names().apply) {
-            op = JSOP_FUNAPPLY;
+            op = JSOp::FunApply;
             if (pc_->isFunctionBox()) {
               pc_->functionBox()->usesApply = true;
             }
           } else if (prop == cx_->names().call) {
-            op = JSOP_FUNCALL;
+            op = JSOp::FunCall;
           }
         } else if (tt == TokenKind::LeftParen) {
           if (handler_.isAsyncKeyword(lhs, cx_)) {
@@ -9346,9 +9347,9 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
             // syntax when the initial name is "async".
             maybeAsyncArrow = true;
           } else if (handler_.isEvalName(lhs, cx_)) {
-            // Select the right EVAL op and flag pc_ as having a
+            // Select the right Eval op and flag pc_ as having a
             // direct eval.
-            op = pc_->sc()->strict() ? JSOP_STRICTEVAL : JSOP_EVAL;
+            op = pc_->sc()->strict() ? JSOp::StrictEval : JSOp::Eval;
             pc_->sc()->setBindingsAccessedDynamically();
             pc_->sc()->setHasDirectEval();
 
@@ -9376,12 +9377,12 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::memberExpr(
             return null();
           }
           if (isSpread) {
-            if (op == JSOP_EVAL) {
-              op = JSOP_SPREADEVAL;
-            } else if (op == JSOP_STRICTEVAL) {
-              op = JSOP_STRICTSPREADEVAL;
+            if (op == JSOp::Eval) {
+              op = JSOp::SpreadEval;
+            } else if (op == JSOp::StrictEval) {
+              op = JSOp::StrictSpreadEval;
             } else {
-              op = JSOP_SPREADCALL;
+              op = JSOp::SpreadCall;
             }
           }
 
@@ -9627,23 +9628,24 @@ RegExpLiteral* Parser<FullParseHandler, Unit>::newRegExp() {
   mozilla::Range<const char16_t> range(chars.begin(), chars.length());
   RegExpFlags flags = anyChars.currentToken().regExpFlags();
 
-  if (this->parseInfo_.isDeferred()) {
-    {
-      LifoAllocScope allocScope(&cx_->tempLifoAlloc());
+  if (this->getParseInfo().isDeferred()) {
+    if (!handler_.canSkipRegexpSyntaxParse()) {
       // Verify that the Regexp will syntax parse when the time comes to
-      // instantiate it.
+      // instantiate it. If we have already done a syntax parse, we can
+      // skip this.
+      LifoAllocScope allocScope(&cx_->tempLifoAlloc());
       if (!irregexp::ParsePatternSyntax(anyChars, allocScope.alloc(), range,
                                         flags.unicode())) {
         return nullptr;
       }
     }
 
-    RegExpIndex index(this->parseInfo_.regExpData.length());
-    if (!this->parseInfo_.regExpData.emplaceBack()) {
+    RegExpIndex index(this->getParseInfo().regExpData.length());
+    if (!this->getParseInfo().regExpData.emplaceBack()) {
       return nullptr;
     }
 
-    if (!this->parseInfo_.regExpData[index].init(cx_, range, flags)) {
+    if (!this->getParseInfo().regExpData[index].init(cx_, range, flags)) {
       return nullptr;
     }
 
@@ -9690,24 +9692,24 @@ GeneralParser<ParseHandler, Unit>::newRegExp() {
 template <typename Unit>
 BigIntLiteral* Parser<FullParseHandler, Unit>::newBigInt() {
   // The token's charBuffer contains the DecimalIntegerLiteral or
-  // NumericLiteralBase production, and as such does not include the
-  // BigIntLiteralSuffix (the trailing "n").  Note that NumericLiteralBase
-  // productions may start with 0[bBoOxX], indicating binary/octal/hex.
+  // NonDecimalIntegerLiteral production, and as such does not include the
+  // BigIntLiteralSuffix (the trailing "n").  Note that NonDecimalIntegerLiteral
+  // productions start with 0[bBoOxX], indicating binary/octal/hex.
   const auto& chars = tokenStream.getCharBuffer();
 
-  if (this->parseInfo_.isDeferred()) {
-    BigIntIndex index(this->parseInfo_.bigIntData.length());
-    if (!this->parseInfo_.bigIntData.emplaceBack()) {
+  if (this->getParseInfo().isDeferred()) {
+    BigIntIndex index(this->getParseInfo().bigIntData.length());
+    if (!this->getParseInfo().bigIntData.emplaceBack()) {
       return null();
     }
 
-    if (!this->parseInfo_.bigIntData[index].init(this->cx_, chars)) {
+    if (!this->getParseInfo().bigIntData[index].init(this->cx_, chars)) {
       return null();
     }
 
     // Should the operations below fail, the buffer held by data will
     // be cleaned up by the ParseInfo destructor.
-    return handler_.newBigInt(index, this->parseInfo_, pos());
+    return handler_.newBigInt(index, this->getParseInfo(), pos());
   }
 
   mozilla::Range<const char16_t> source(chars.begin(), chars.length());
@@ -9735,6 +9737,19 @@ template <class ParseHandler, typename Unit>
 typename ParseHandler::BigIntLiteralType
 GeneralParser<ParseHandler, Unit>::newBigInt() {
   return asFinalParser()->newBigInt();
+}
+
+template <class ParseHandler, typename Unit>
+JSAtom* GeneralParser<ParseHandler, Unit>::bigIntAtom() {
+  // See newBigInt() for a description about |chars'| contents.
+  const auto& chars = tokenStream.getCharBuffer();
+  mozilla::Range<const char16_t> source(chars.begin(), chars.length());
+
+  RootedBigInt bi(cx_, js::ParseBigIntLiteral(cx_, source));
+  if (!bi) {
+    return nullptr;
+  }
+  return BigIntToAtom<CanGC>(cx_, bi);
 }
 
 // |exprPossibleError| is the PossibleError state within |expr|,
@@ -10005,6 +10020,13 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::propertyName(
       }
       return newNumber(anyChars.currentToken());
 
+    case TokenKind::BigInt:
+      propAtom.set(bigIntAtom());
+      if (!propAtom.get()) {
+        return null();
+      }
+      return newBigInt();
+
     case TokenKind::String: {
       propAtom.set(anyChars.currentToken().atom());
       uint32_t index;
@@ -10034,7 +10056,7 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::propertyName(
 static bool TokenKindCanStartPropertyName(TokenKind tt) {
   return TokenKindIsPossibleIdentifierName(tt) || tt == TokenKind::String ||
          tt == TokenKind::Number || tt == TokenKind::LeftBracket ||
-         tt == TokenKind::Mul;
+         tt == TokenKind::Mul || tt == TokenKind::BigInt;
 }
 
 template <class ParseHandler, typename Unit>

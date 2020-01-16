@@ -28,18 +28,12 @@ class PlatformCompositorWidgetDelegate : public CompositorWidgetDelegate {
   virtual void EnterPresentLock() = 0;
   virtual void LeavePresentLock() = 0;
   virtual void OnDestroyWindow() = 0;
+  virtual bool OnWindowResize(const LayoutDeviceIntSize& aSize) = 0;
+  virtual void OnWindowModeChange(nsSizeMode aSizeMode) = 0;
 
   // Transparency handling.
   virtual void UpdateTransparency(nsTransparencyMode aMode) = 0;
   virtual void ClearTransparentWindow() = 0;
-
-  // If in-process and using software rendering, return the backing transparent
-  // DC.
-  virtual HDC GetTransparentDC() const = 0;
-  virtual void SetParentWnd(const HWND aParentWnd) {}
-  virtual void UpdateCompositorWnd(const HWND aCompositorWnd,
-                                   const HWND aParentWnd) {}
-  virtual void SetRootLayerTreeID(const layers::LayersId& aRootLayerTreeId) {}
 
   // CompositorWidgetDelegate Overrides
 
@@ -54,8 +48,7 @@ class WinCompositorWidgetInitData;
 // the most part it only requires an HWND, however it maintains extra state
 // for transparent windows, as well as for synchronizing WM_SETTEXT messages
 // with the compositor.
-class WinCompositorWidget : public CompositorWidget,
-                            public PlatformCompositorWidgetDelegate {
+class WinCompositorWidget : public CompositorWidget {
  public:
   WinCompositorWidget(const WinCompositorWidgetInitData& aInitData,
                       const layers::CompositorOptions& aOptions);
@@ -65,12 +58,6 @@ class WinCompositorWidget : public CompositorWidget,
 
   uintptr_t GetWidgetKey() override;
   WinCompositorWidget* AsWindows() override { return this; }
-  CompositorWidgetDelegate* AsDelegate() override { return this; }
-
-  virtual bool RedrawTransparentWindow() = 0;
-
-  // Ensure that a transparent surface exists, then return it.
-  virtual RefPtr<gfxASurface> EnsureTransparentSurface() = 0;
 
   HWND GetHwnd() const {
     return mCompositorWnds.mCompositorWnd ? mCompositorWnds.mCompositorWnd
@@ -83,13 +70,15 @@ class WinCompositorWidget : public CompositorWidget,
   void DestroyCompositorWindow();
   void UpdateCompositorWndSizeIfNecessary();
 
-  virtual mozilla::Mutex& GetTransparentSurfaceLock() = 0;
-
   void RequestFxrOutput();
   bool HasFxrOutputHandler() const { return mFxrHandler != nullptr; }
   FxROutputHandler* GetFxrOutputHandler() const { return mFxrHandler.get(); }
 
   virtual bool HasGlass() const = 0;
+
+  virtual void UpdateCompositorWnd(const HWND aCompositorWnd,
+                                   const HWND aParentWnd) = 0;
+  virtual void SetRootLayerTreeID(const layers::LayersId& aRootLayerTreeId) = 0;
 
  protected:
   bool mSetParentCompleted;

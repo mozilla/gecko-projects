@@ -760,6 +760,8 @@ static mozilla::Atomic<bool> sStreamsEnabled(false);
 static mozilla::Atomic<bool> sFieldsEnabled(false);
 static mozilla::Atomic<bool> sParserDeferAllocationEnabled(false);
 static mozilla::Atomic<bool> sAwaitFixEnabled(false);
+static mozilla::Atomic<bool> sPropertyErrorMessageFixEnabled(false);
+static mozilla::Atomic<bool> sWeakRefsEnabled(false);
 
 void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
@@ -771,7 +773,9 @@ void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
       .setWritableStreamsEnabled(
           StaticPrefs::javascript_options_writable_streams())
       .setFieldsEnabled(sFieldsEnabled)
-      .setAwaitFixEnabled(sAwaitFixEnabled);
+      .setAwaitFixEnabled(sAwaitFixEnabled)
+      .setPropertyErrorMessageFixEnabled(sPropertyErrorMessageFixEnabled)
+      .setWeakRefsEnabled(sWeakRefsEnabled);
   options.behaviors().setDeferredParserAlloc(sParserDeferAllocationEnabled);
 }
 
@@ -939,6 +943,12 @@ static void ReloadPrefsCallback(const char* pref, void* aXpccx) {
       Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.fields");
   sAwaitFixEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.await_fix");
+  sPropertyErrorMessageFixEnabled =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "property_error_message_fix");
+#ifdef NIGHTLY_BUILD
+  sWeakRefsEnabled =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.weakrefs");
+#endif
 
 #ifdef DEBUG
   sExtraWarningsForSystemJS =

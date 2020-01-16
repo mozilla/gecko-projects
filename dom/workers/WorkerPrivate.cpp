@@ -2189,6 +2189,12 @@ WorkerPrivate::WorkerPrivate(
     mJSSettings.content.realmOptions.behaviors().setClampAndJitterTime(
         !UsesSystemPrincipal());
 
+    mJSSettings.chrome.realmOptions.creationOptions().setToSourceEnabled(
+        UsesSystemPrincipal());
+    mJSSettings.content.realmOptions.creationOptions().setToSourceEnabled(
+        UsesSystemPrincipal());
+
+
     if (mIsSecureContext) {
       mJSSettings.chrome.realmOptions.creationOptions().setSecureContext(true);
       mJSSettings.content.realmOptions.creationOptions().setSecureContext(true);
@@ -2393,7 +2399,7 @@ already_AddRefed<WorkerPrivate> WorkerPrivate::Constructor(
 }
 
 nsresult WorkerPrivate::SetIsDebuggerReady(bool aReady) {
-  AssertIsOnParentThread();
+  AssertIsOnMainThread();
   MutexAutoLock lock(mMutex);
 
   if (mDebuggerReady == aReady) {
@@ -4646,17 +4652,22 @@ void WorkerPrivate::UpdateContextOptionsInternal(
 void WorkerPrivate::UpdateLanguagesInternal(
     const nsTArray<nsString>& aLanguages) {
   WorkerGlobalScope* globalScope = GlobalScope();
-  if (globalScope) {
-    RefPtr<WorkerNavigator> nav = globalScope->GetExistingNavigator();
-    if (nav) {
-      nav->SetLanguages(aLanguages);
-    }
+  RefPtr<WorkerNavigator> nav = globalScope->GetExistingNavigator();
+  if (nav) {
+    nav->SetLanguages(aLanguages);
   }
 
   MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
   for (uint32_t index = 0; index < data->mChildWorkers.Length(); index++) {
     data->mChildWorkers[index]->UpdateLanguages(aLanguages);
   }
+
+  RefPtr<Event> event = NS_NewDOMEvent(globalScope, nullptr, nullptr);
+
+  event->InitEvent(NS_LITERAL_STRING("languagechange"), false, false);
+  event->SetTrusted(true);
+
+  globalScope->DispatchEvent(*event);
 }
 
 void WorkerPrivate::UpdateJSWorkerMemoryParameterInternal(JSContext* aCx,

@@ -492,7 +492,13 @@ nsXULAppInfo::GetName(nsACString& aResult) {
     aResult = cc->GetAppInfo().name;
     return NS_OK;
   }
+
+#ifdef MOZ_WIDGET_ANDROID
+  nsCString name = java::GeckoAppShell::GetAppName()->ToCString();
+  aResult.Assign(std::move(name));
+#else
   aResult.Assign(gAppData->name);
+#endif
 
   return NS_OK;
 }
@@ -4364,6 +4370,11 @@ nsresult XREMain::XRE_mainRun() {
     }
 
     if (gDoProfileReset) {
+      if (!initializedJSContext) {
+        xpc::InitializeJSContext();
+        initializedJSContext = true;
+      }
+
       nsresult backupCreated =
           ProfileResetCleanup(mProfileSvc, gResetOldProfile);
       if (NS_FAILED(backupCreated)) {

@@ -43,6 +43,13 @@ interface WindowGlobalParent {
   readonly attribute Principal documentPrincipal;
   readonly attribute URI? documentURI;
 
+  // Bit mask containing content blocking events that are recorded in
+  // the document's content blocking log.
+  readonly attribute unsigned long contentBlockingEvents;
+
+  // String containing serialized content blocking log.
+  readonly attribute DOMString contentBlockingLog;
+
   static WindowGlobalParent? getByInnerWindowId(unsigned long long innerWindowId);
 
   /**

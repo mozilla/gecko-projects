@@ -174,26 +174,6 @@ version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
-name = "backtrace"
-version = "0.3.38"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-dependencies = [
- "backtrace-sys 0.1.24 (registry+https://github.com/rust-lang/crates.io-index)",
- "cfg-if 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
- "rustc-demangle 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "backtrace-sys"
-version = "0.1.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-dependencies = [
- "cc 1.0.47 (registry+https://github.com/rust-lang/crates.io-index)",
- "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "baldrdash"
 version = "0.1.0"
 dependencies = [
@@ -306,8 +286,8 @@ version = "0.2.0"
 dependencies = [
  "bits 0.2.0",
  "comedy 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure_derive 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
+ "failure_derive 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "guid_win 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -322,8 +302,8 @@ dependencies = [
  "bits_client 0.2.0",
  "comedy 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam-utils 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure_derive 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
+ "failure_derive 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "moz_task 0.1.0",
@@ -472,7 +452,7 @@ name = "chardetng"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "encoding_rs 0.8.20 (registry+https://github.com/rust-lang/crates.io-index)",
+ "encoding_rs 0.8.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "memchr 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -482,7 +462,7 @@ version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "chardetng 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "encoding_rs 0.8.20 (registry+https://github.com/rust-lang/crates.io-index)",
+ "encoding_rs 0.8.22 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -561,8 +541,8 @@ name = "comedy"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure_derive 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
+ "failure_derive 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "winapi 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -694,7 +674,7 @@ source = "git+https://github.com/bytecodealliance/cranelift?rev=ec787eb281bb2e18
 [[package]]
 name = "cranelift-entity"
 version = "0.41.0"
-source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b#36f0e4deb5b080dfee73042fec655d3723c7a12b"
+source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57#58498599272e23ef797bb4304d0f181d7455ca57"
 
 [[package]]
 name = "cranelift-entity"
@@ -1053,7 +1033,7 @@ name = "encoding_c"
 version = "0.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "encoding_rs 0.8.20 (registry+https://github.com/rust-lang/crates.io-index)",
+ "encoding_rs 0.8.22 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1061,21 +1041,21 @@ name = "encoding_c_mem"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "encoding_rs 0.8.20 (registry+https://github.com/rust-lang/crates.io-index)",
+ "encoding_rs 0.8.22 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "encoding_glue"
 version = "0.1.0"
 dependencies = [
- "encoding_rs 0.8.20 (registry+https://github.com/rust-lang/crates.io-index)",
+ "encoding_rs 0.8.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "nserror 0.1.0",
  "nsstring 0.1.0",
 ]
 
 [[package]]
 name = "encoding_rs"
-version = "0.8.20"
+version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "cfg-if 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1111,16 +1091,15 @@ dependencies = [
 [[package]]
 name = "failure"
 version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5#64af847bc5fdcb6d2438bec8a6030812a80519a5"
 dependencies = [
- "backtrace 0.3.38 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure_derive 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure_derive 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
 ]
 
 [[package]]
 name = "failure_derive"
 version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5#64af847bc5fdcb6d2438bec8a6030812a80519a5"
 dependencies = [
  "proc-macro2 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "quote 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1146,8 +1125,8 @@ name = "ffi-support"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure_derive 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
+ "failure_derive 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -1201,7 +1180,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "fog"
 version = "0.1.0"
 dependencies = [
- "glean-preview 0.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cstr 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "glean-preview 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nserror 0.1.0",
+ "nsstring 0.1.0",
+ "static_prefs 0.1.0",
+ "xpcom 0.1.0",
 ]
 
 [[package]]
@@ -1262,6 +1247,7 @@ dependencies = [
 name = "gecko-fuzz-targets"
 version = "0.1.0"
 dependencies = [
+ "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
  "rkv 0.10.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1504,7 +1490,7 @@ dependencies = [
  "prefs_parser 0.0.1",
  "profiler_helper 0.1.0",
  "remote 0.1.0",
- "rlbox_lucet_sandbox 0.1.0 (git+https://github.com/PLSysSec/rlbox_lucet_sandbox/?rev=a31b9119bd01893ae1e930331ca4fe1738a088f7)",
+ "rlbox_lucet_sandbox 0.1.0 (git+https://github.com/PLSysSec/rlbox_lucet_sandbox/?rev=5f8bca975d8206e4837786d6bdb57a5c2fbd4016)",
  "rsdparsa_capi 0.1.0",
  "rustc_version 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "shift_or_euc_c 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1551,7 +1537,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "bincode 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "ffi-support 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1565,7 +1551,7 @@ dependencies = [
 
 [[package]]
 name = "glean-preview"
-version = "0.0.2"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "glean-core 22.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1845,7 +1831,7 @@ version = "0.1.0"
 dependencies = [
  "atomic_refcell 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam-utils 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
  "lmdb-rkv 0.12.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1974,12 +1960,12 @@ dependencies = [
 [[package]]
 name = "lucet-module"
 version = "0.1.1"
-source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b#36f0e4deb5b080dfee73042fec655d3723c7a12b"
+source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57#58498599272e23ef797bb4304d0f181d7455ca57"
 dependencies = [
  "bincode 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "cranelift-entity 0.41.0 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cranelift-entity 0.41.0 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "num-derive 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-traits 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "object 0.16.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1990,12 +1976,12 @@ dependencies = [
 [[package]]
 name = "lucet-runtime"
 version = "0.1.1"
-source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b#36f0e4deb5b080dfee73042fec655d3723c7a12b"
+source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57#58498599272e23ef797bb4304d0f181d7455ca57"
 dependencies = [
  "cc 1.0.47 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
- "lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
- "lucet-runtime-internals 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
+ "lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
+ "lucet-runtime-internals 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
  "num-derive 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-traits 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -2003,18 +1989,18 @@ dependencies = [
 [[package]]
 name = "lucet-runtime-internals"
 version = "0.1.1"
-source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b#36f0e4deb5b080dfee73042fec655d3723c7a12b"
+source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57#58498599272e23ef797bb4304d0f181d7455ca57"
 dependencies = [
  "bincode 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "cc 1.0.47 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "getrandom 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
  "libloading 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
+ "lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
  "memoffset 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix 0.13.1 (git+https://github.com/shravanrn/nix/?branch=r0.13.1)",
  "num-derive 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2025,14 +2011,14 @@ dependencies = [
 [[package]]
 name = "lucet-wasi"
 version = "0.1.1"
-source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b#36f0e4deb5b080dfee73042fec655d3723c7a12b"
+source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57#58498599272e23ef797bb4304d0f181d7455ca57"
 dependencies = [
  "cast 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
- "lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
- "lucet-runtime 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
- "lucet-runtime-internals 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
+ "lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
+ "lucet-runtime 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
+ "lucet-runtime-internals 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
  "nix 0.13.1 (git+https://github.com/shravanrn/nix/?branch=r0.13.1)",
  "rand 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -2406,8 +2392,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "neqo-common"
-version = "0.1.7"
-source = "git+https://github.com/mozilla/neqo?tag=v0.1.7#2852cb49cea5ec7f5820774627497ed0eebadc7b"
+version = "0.1.12"
+source = "git+https://github.com/mozilla/neqo?tag=v0.1.12#ccb7c07326230c4b1dc68d98a15ce364a4718c15"
 dependencies = [
  "env_logger 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2417,12 +2403,12 @@ dependencies = [
 
 [[package]]
 name = "neqo-crypto"
-version = "0.1.7"
-source = "git+https://github.com/mozilla/neqo?tag=v0.1.7#2852cb49cea5ec7f5820774627497ed0eebadc7b"
+version = "0.1.12"
+source = "git+https://github.com/mozilla/neqo?tag=v0.1.12#ccb7c07326230c4b1dc68d98a15ce364a4718c15"
 dependencies = [
  "bindgen 0.51.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "neqo-common 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
+ "neqo-common 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
  "serde 1.0.102 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.102 (registry+https://github.com/rust-lang/crates.io-index)",
  "toml 0.4.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2430,39 +2416,39 @@ dependencies = [
 
 [[package]]
 name = "neqo-http3"
-version = "0.1.7"
-source = "git+https://github.com/mozilla/neqo?tag=v0.1.7#2852cb49cea5ec7f5820774627497ed0eebadc7b"
+version = "0.1.12"
+source = "git+https://github.com/mozilla/neqo?tag=v0.1.12#ccb7c07326230c4b1dc68d98a15ce364a4718c15"
 dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "neqo-common 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "neqo-crypto 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "neqo-qpack 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "neqo-transport 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
+ "neqo-common 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "neqo-crypto 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "neqo-qpack 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "neqo-transport 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
  "num-traits 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "smallvec 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.1.7"
-source = "git+https://github.com/mozilla/neqo?tag=v0.1.7#2852cb49cea5ec7f5820774627497ed0eebadc7b"
+version = "0.1.12"
+source = "git+https://github.com/mozilla/neqo?tag=v0.1.12#ccb7c07326230c4b1dc68d98a15ce364a4718c15"
 dependencies = [
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "neqo-common 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "neqo-crypto 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "neqo-transport 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
+ "neqo-common 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "neqo-crypto 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "neqo-transport 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.1.7"
-source = "git+https://github.com/mozilla/neqo?tag=v0.1.7#2852cb49cea5ec7f5820774627497ed0eebadc7b"
+version = "0.1.12"
+source = "git+https://github.com/mozilla/neqo?tag=v0.1.12#ccb7c07326230c4b1dc68d98a15ce364a4718c15"
 dependencies = [
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "neqo-common 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "neqo-crypto 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "rand 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "neqo-common 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "neqo-crypto 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "rand 0.7.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "smallvec 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -2470,10 +2456,10 @@ dependencies = [
 name = "neqo_glue"
 version = "0.1.0"
 dependencies = [
- "neqo-common 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "neqo-crypto 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "neqo-http3 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
- "neqo-transport 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)",
+ "neqo-common 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "neqo-crypto 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "neqo-http3 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
+ "neqo-transport 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)",
  "nserror 0.1.0",
  "nsstring 0.1.0",
  "thin-vec 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2543,7 +2529,7 @@ name = "nsstring"
 version = "0.1.0"
 dependencies = [
  "bitflags 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "encoding_rs 0.8.20 (registry+https://github.com/rust-lang/crates.io-index)",
+ "encoding_rs 0.8.22 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -3141,7 +3127,7 @@ name = "redox_users"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "rand_os 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "redox_syscall 0.1.56 (registry+https://github.com/rust-lang/crates.io-index)",
  "rust-argon2 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3176,7 +3162,7 @@ dependencies = [
 name = "remote"
 version = "0.1.0"
 dependencies = [
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "http 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
  "log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3254,7 +3240,7 @@ dependencies = [
  "bincode 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lmdb-rkv 0.12.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "ordered-float 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3273,7 +3259,7 @@ dependencies = [
  "bincode 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "id-arena 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "lmdb-rkv 0.12.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3288,14 +3274,14 @@ dependencies = [
 [[package]]
 name = "rlbox_lucet_sandbox"
 version = "0.1.0"
-source = "git+https://github.com/PLSysSec/rlbox_lucet_sandbox/?rev=a31b9119bd01893ae1e930331ca4fe1738a088f7#a31b9119bd01893ae1e930331ca4fe1738a088f7"
+source = "git+https://github.com/PLSysSec/rlbox_lucet_sandbox/?rev=5f8bca975d8206e4837786d6bdb57a5c2fbd4016#5f8bca975d8206e4837786d6bdb57a5c2fbd4016"
 dependencies = [
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "goblin 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
- "lucet-runtime 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
- "lucet-runtime-internals 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
- "lucet-wasi 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)",
+ "lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
+ "lucet-runtime 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
+ "lucet-runtime-internals 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
+ "lucet-wasi 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)",
 ]
 
 [[package]]
@@ -3558,7 +3544,7 @@ name = "shift_or_euc"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "encoding_rs 0.8.20 (registry+https://github.com/rust-lang/crates.io-index)",
+ "encoding_rs 0.8.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "memchr 2.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -3567,7 +3553,7 @@ name = "shift_or_euc_c"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "encoding_rs 0.8.20 (registry+https://github.com/rust-lang/crates.io-index)",
+ "encoding_rs 0.8.22 (registry+https://github.com/rust-lang/crates.io-index)",
  "shift_or_euc 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -4327,7 +4313,7 @@ dependencies = [
 
 [[package]]
 name = "webrender"
-version = "0.60.0"
+version = "0.61.0"
 dependencies = [
  "base64 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "bincode 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4359,7 +4345,7 @@ dependencies = [
  "svg_fmt 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "thread_profiler 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.40 (registry+https://github.com/rust-lang/crates.io-index)",
- "webrender_api 0.60.0",
+ "webrender_api 0.61.0",
  "webrender_build 0.0.1",
  "wr_malloc_size_of 0.0.1",
  "ws 0.9.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4367,7 +4353,7 @@ dependencies = [
 
 [[package]]
 name = "webrender_api"
-version = "0.60.0"
+version = "0.61.0"
 dependencies = [
  "app_units 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "bitflags 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4405,7 +4391,7 @@ dependencies = [
  "rayon 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "thread_profiler 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "uuid 0.8.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "webrender 0.60.0",
+ "webrender 0.61.0",
  "winapi 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -4617,7 +4603,7 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-utils 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "cstr 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)",
  "lazy_static 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.59 (registry+https://github.com/rust-lang/crates.io-index)",
  "lmdb-rkv 0.12.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4666,8 +4652,6 @@ dependencies = [
 "checksum audio_thread_priority 0.20.2 (registry+https://github.com/rust-lang/crates.io-index)" = "197b2d259505d11c92d266e1784f01cc935eb764d2f54e16aedf4e5085197871"
 "checksum authenticator 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)" = "ec149e5d5d4caa2c9ead53a8ce1ea9c4204c388c65bf3b96c2d1dc0fcf4aeb66"
 "checksum autocfg 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "b671c8fb71b457dd4ae18c4ba1e59aa81793daacc361d82fcd410cef0d491875"
-"checksum backtrace 0.3.38 (registry+https://github.com/rust-lang/crates.io-index)" = "690a62be8920ccf773ee00ef0968649b0e724cda8bd5b12286302b4ae955fdf5"
-"checksum backtrace-sys 0.1.24 (registry+https://github.com/rust-lang/crates.io-index)" = "c66d56ac8dabd07f6aacdaf633f4b8262f5b3601a810a0dcddffd5c22c69daa0"
 "checksum base64 0.10.1 (registry+https://github.com/rust-lang/crates.io-index)" = "0b25d992356d2eb0ed82172f5248873db5560c4721f564b13cb5193bda5e668e"
 "checksum binary-space-partition 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "88ceb0d16c4fd0e42876e298d7d3ce3780dd9ebdcbe4199816a32c77e08597ff"
 "checksum bincode 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b8ab639324e3ee8774d296864fbc0dbbb256cf1a41c490b94cba90c082915f92"
@@ -4714,7 +4698,7 @@ dependencies = [
 "checksum cranelift-codegen 0.51.0 (git+https://github.com/bytecodealliance/cranelift?rev=ec787eb281bb2e18e191508c17abe694e91f0677)" = "<none>"
 "checksum cranelift-codegen-meta 0.51.0 (git+https://github.com/bytecodealliance/cranelift?rev=ec787eb281bb2e18e191508c17abe694e91f0677)" = "<none>"
 "checksum cranelift-codegen-shared 0.51.0 (git+https://github.com/bytecodealliance/cranelift?rev=ec787eb281bb2e18e191508c17abe694e91f0677)" = "<none>"
-"checksum cranelift-entity 0.41.0 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)" = "<none>"
+"checksum cranelift-entity 0.41.0 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)" = "<none>"
 "checksum cranelift-entity 0.51.0 (git+https://github.com/bytecodealliance/cranelift?rev=ec787eb281bb2e18e191508c17abe694e91f0677)" = "<none>"
 "checksum cranelift-frontend 0.51.0 (git+https://github.com/bytecodealliance/cranelift?rev=ec787eb281bb2e18e191508c17abe694e91f0677)" = "<none>"
 "checksum cranelift-wasm 0.51.0 (git+https://github.com/bytecodealliance/cranelift?rev=ec787eb281bb2e18e191508c17abe694e91f0677)" = "<none>"
@@ -4752,12 +4736,12 @@ dependencies = [
 "checksum either 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "18785c1ba806c258137c937e44ada9ee7e69a37e3c72077542cd2f069d78562a"
 "checksum encoding_c 0.9.7 (registry+https://github.com/rust-lang/crates.io-index)" = "1891d977f814fd638c3b964987778665b5d1dc8690f46c4c7adc91466ad1c78a"
 "checksum encoding_c_mem 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)" = "2d32d28c32ff61236b8ea2678c6e43e63bf9690122cb53e9eca7dcefcc4ccb0c"
-"checksum encoding_rs 0.8.20 (registry+https://github.com/rust-lang/crates.io-index)" = "87240518927716f79692c2ed85bfe6e98196d18c6401ec75355760233a7e12e9"
+"checksum encoding_rs 0.8.22 (registry+https://github.com/rust-lang/crates.io-index)" = "cd8d03faa7fe0c1431609dfad7bbe827af30f82e1e2ae6f7ee4fca6bd764bc28"
 "checksum env_logger 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)" = "aafcde04e90a5226a6443b7aabdb016ba2f8307c847d524724bd9b346dd1a2d3"
 "checksum error-chain 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ff511d5dc435d703f4971bc399647c9bc38e20cb41452e3b9feb4765419ed3f3"
 "checksum euclid 0.20.0 (registry+https://github.com/rust-lang/crates.io-index)" = "2c4786521fec183792e755bf32cd0188e4e7628c6d0fcfd51426435b9081a106"
-"checksum failure 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "f8273f13c977665c5db7eb2b99ae520952fe5ac831ae4cd09d80c4c7042b5ed9"
-"checksum failure_derive 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "0bc225b78e0391e4b8683440bf2e63c2deeeb2ce5189eab46e2b68c6d3725d08"
+"checksum failure 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)" = "<none>"
+"checksum failure_derive 0.1.6 (git+https://github.com/badboy/failure?rev=64af847bc5fdcb6d2438bec8a6030812a80519a5)" = "<none>"
 "checksum fake-simd 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
 "checksum ffi-support 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "efee06d8ac3e85a6e9759a0ed2682235a70832ebe10953849b92cdced8688660"
 "checksum filetime_win 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b8c37abd4a58e0cb794bcae4a7dc4f02fff376949d8d1066d4c729e97bfb38ec"
@@ -4784,7 +4768,7 @@ dependencies = [
 "checksum gl_generator 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "39a23d5e872a275135d66895d954269cf5e8661d234eb1c2480f4ce0d586acbd"
 "checksum gleam 0.6.17 (registry+https://github.com/rust-lang/crates.io-index)" = "7f46fd8874e043ffac0d638ed1567a2584f7814f6d72b4db37ab1689004a26c4"
 "checksum glean-core 22.0.0 (registry+https://github.com/rust-lang/crates.io-index)" = "37b55f71885fc523ac6327feb24e31bde57d9c5679b4553e942306adb44be408"
-"checksum glean-preview 0.0.2 (registry+https://github.com/rust-lang/crates.io-index)" = "cc50cdfb3c420f83b14e5f130279af9f66d4b3f693c32edf76bc6e3450321434"
+"checksum glean-preview 0.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "cb3bf34b889307680056e1493552dc6385becaea073ed99743a5e1a340ed2342"
 "checksum glob 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 "checksum goblin 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "88a79ef1f0dad46fd78075b6f80f92d97710eddf87b3e18a15a66761e8942672"
 "checksum guid_win 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "87261686cc5e35b6584f4c2a430c2b153d8a92ab1ef820c16be34c1df8f5f58b"
@@ -4822,10 +4806,10 @@ dependencies = [
 "checksum lmdb-rkv-sys 0.9.5 (registry+https://github.com/rust-lang/crates.io-index)" = "a1e4b19a1fdf5b74bc802cc9aa7c0c86a775e8b872ba9d5a4e606ffc5d076953"
 "checksum lock_api 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f8912e782533a93a167888781b836336a6ca5da6175c05944c86cf28c31104dc"
 "checksum log 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "c84ec4b527950aa83a329754b01dbe3f58361d1c5efacd1f6d68c494d08a17c6"
-"checksum lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)" = "<none>"
-"checksum lucet-runtime 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)" = "<none>"
-"checksum lucet-runtime-internals 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)" = "<none>"
-"checksum lucet-wasi 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=36f0e4deb5b080dfee73042fec655d3723c7a12b)" = "<none>"
+"checksum lucet-module 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)" = "<none>"
+"checksum lucet-runtime 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)" = "<none>"
+"checksum lucet-runtime-internals 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)" = "<none>"
+"checksum lucet-wasi 0.1.1 (git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=58498599272e23ef797bb4304d0f181d7455ca57)" = "<none>"
 "checksum lzw 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)" = "7d947cbb889ed21c2a84be6ffbaebf5b4e0f4340638cba0444907e38b56be084"
 "checksum mach 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)" = "b823e83b2affd8f40a9ee8c29dbc56404c1e34cd2710921f2801e2cf29527afa"
 "checksum malloc_buf 0.0.6 (registry+https://github.com/rust-lang/crates.io-index)" = "62bb907fe88d54d8d9ce32a3cceab4218ed2f6b7d35617cafe9adf84e43919cb"
@@ -4851,11 +4835,11 @@ dependencies = [
 "checksum mp4parse_fallible 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "6626c2aef76eb8f984eef02e475883d3fe9112e114720446c5810fc5f045cd30"
 "checksum msdos_time 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)" = "aad9dfe950c057b1bfe9c1f2aa51583a8468ef2a5baba2ebbe06d775efeb7729"
 "checksum murmurhash3 0.0.5 (registry+https://github.com/rust-lang/crates.io-index)" = "a2983372caf4480544083767bf2d27defafe32af49ab4df3a0b7fc90793a3664"
-"checksum neqo-common 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)" = "<none>"
-"checksum neqo-crypto 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)" = "<none>"
-"checksum neqo-http3 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)" = "<none>"
-"checksum neqo-qpack 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)" = "<none>"
-"checksum neqo-transport 0.1.7 (git+https://github.com/mozilla/neqo?tag=v0.1.7)" = "<none>"
+"checksum neqo-common 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)" = "<none>"
+"checksum neqo-crypto 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)" = "<none>"
+"checksum neqo-http3 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)" = "<none>"
+"checksum neqo-qpack 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)" = "<none>"
+"checksum neqo-transport 0.1.12 (git+https://github.com/mozilla/neqo?tag=v0.1.12)" = "<none>"
 "checksum net2 0.2.33 (registry+https://github.com/rust-lang/crates.io-index)" = "42550d9fb7b6684a6d404d9fa7250c2eb2646df731d1c06afc06dcee9e1bcf88"
 "checksum new_debug_unreachable 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "0cdc457076c78ab54d5e0d6fa7c47981757f1e34dc39ff92787f217dede586c4"
 "checksum nix 0.13.1 (git+https://github.com/shravanrn/nix/?branch=r0.13.1)" = "<none>"
@@ -4936,7 +4920,7 @@ dependencies = [
 "checksum ringbuf 0.1.4 (registry+https://github.com/rust-lang/crates.io-index)" = "588456c74d5ff0a5806bc084818e043e767533f743c11ee6f3ccf298599c6847"
 "checksum rkv 0.10.2 (registry+https://github.com/rust-lang/crates.io-index)" = "9aab7c645d32e977e186448b0a5c2c3139a91a7f630cfd8a8c314d1d145e78bf"
 "checksum rkv 0.11.0 (git+https://github.com/mozilla/rkv?rev=6a866fdad2ca880df9b87fcbc9921abac1e91914)" = "<none>"
-"checksum rlbox_lucet_sandbox 0.1.0 (git+https://github.com/PLSysSec/rlbox_lucet_sandbox/?rev=a31b9119bd01893ae1e930331ca4fe1738a088f7)" = "<none>"
+"checksum rlbox_lucet_sandbox 0.1.0 (git+https://github.com/PLSysSec/rlbox_lucet_sandbox/?rev=5f8bca975d8206e4837786d6bdb57a5c2fbd4016)" = "<none>"
 "checksum ron 0.1.7 (registry+https://github.com/rust-lang/crates.io-index)" = "da06feaa07f69125ab9ddc769b11de29090122170b402547f64b86fe16ebc399"
 "checksum runloop 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5d79b4b604167921892e84afbbaad9d5ad74e091bf6c511d9dbfb0593f09fabd"
 "checksum rust-argon2 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "4ca4eaef519b494d1f2848fc602d18816fed808a981aedf4f1f00ceb7c9d32cf"

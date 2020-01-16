@@ -709,15 +709,18 @@ macro_rules! get_property_id_from_nscsspropertyid {
 pub extern "C" fn Servo_AnimationValue_Serialize(
     value: &RawServoAnimationValue,
     property: nsCSSPropertyID,
+    raw_data: &RawServoStyleSet,
     buffer: &mut nsAString,
 ) {
     let uncomputed_value = AnimationValue::as_arc(&value).uncompute();
+    let data = PerDocumentStyleData::from_ffi(raw_data).borrow();
     let rv = PropertyDeclarationBlock::with_one(uncomputed_value, Importance::Normal)
         .single_value_to_css(
             &get_property_id_from_nscsspropertyid!(property, ()),
             buffer,
             None,
             None, /* No extra custom properties */
+            &data.stylist.device(),
         );
     debug_assert!(rv.is_ok());
 }
@@ -1948,6 +1951,22 @@ pub extern "C" fn Servo_StyleSheet_HasRules(raw_contents: &RawServoStyleSheetCon
         .read_with(&guard)
         .0
         .is_empty()
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_StyleSheet_HasImportRules(raw_contents: &RawServoStyleSheetContents) -> bool {
+    let global_style_data = &*GLOBAL_STYLE_DATA;
+    let guard = global_style_data.shared_lock.read();
+    let rules = StylesheetContents::as_arc(&raw_contents).rules(&guard);
+
+    let first_is_import = rules.iter().next().map_or(false, |r| r.rule_type() == CssRuleType::Import);
+    debug_assert_eq!(
+         first_is_import,
+         rules.iter().any(|r| r.rule_type() == CssRuleType::Import),
+         "@import must come before every other rule",
+    );
+
+    first_is_import
 }
 
 #[no_mangle]
@@ -4251,6 +4270,7 @@ pub extern "C" fn Servo_DeclarationBlock_SerializeOneValue(
     buffer: &mut nsAString,
     computed_values: Option<&ComputedValues>,
     custom_properties: Option<&RawServoDeclarationBlock>,
+    raw_data: &RawServoStyleSet,
 ) {
     let property_id = get_property_id_from_nscsspropertyid!(property_id, ());
 
@@ -4261,7 +4281,8 @@ pub extern "C" fn Servo_DeclarationBlock_SerializeOneValue(
     let custom_properties =
         Locked::<PropertyDeclarationBlock>::arc_from_borrowed(&custom_properties);
     let custom_properties = custom_properties.map(|block| block.read_with(&guard));
-    let rv = decls.single_value_to_css(&property_id, buffer, computed_values, custom_properties);
+    let data = PerDocumentStyleData::from_ffi(raw_data).borrow();
+    let rv = decls.single_value_to_css(&property_id, buffer, computed_values, custom_properties, &data.stylist.device());
     debug_assert!(rv.is_ok());
 }
 

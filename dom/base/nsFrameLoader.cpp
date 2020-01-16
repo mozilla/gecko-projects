@@ -1018,31 +1018,25 @@ bool nsFrameLoader::ShowRemoteFrame(const ScreenIntSize& size,
       return false;
     }
 
-    if (RefPtr<BrowserBridgeChild> browserBridgeChild =
-            GetBrowserBridgeChild()) {
-      nsCOMPtr<nsISupports> container =
-          mOwnerContent->OwnerDoc()->GetContainer();
-      nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(container);
-      nsCOMPtr<nsIWidget> mainWidget;
-      baseWindow->GetMainWidget(getter_AddRefs(mainWidget));
-      nsSizeMode sizeMode =
-          mainWidget ? mainWidget->SizeMode() : nsSizeMode_Normal;
-      OwnerShowInfo info(size, ParentWindowIsActive(mOwnerContent->OwnerDoc()),
-                         sizeMode);
-      Unused << browserBridgeChild->SendShow(info);
-      mRemoteBrowserShown = true;
-      return true;
-    }
-
-    if (!mRemoteBrowser->Show(
-            size, ParentWindowIsActive(mOwnerContent->OwnerDoc()))) {
+    nsCOMPtr<nsISupports> container = mOwnerContent->OwnerDoc()->GetContainer();
+    nsCOMPtr<nsIBaseWindow> baseWindow = do_QueryInterface(container);
+    nsCOMPtr<nsIWidget> mainWidget;
+    baseWindow->GetMainWidget(getter_AddRefs(mainWidget));
+    nsSizeMode sizeMode =
+        mainWidget ? mainWidget->SizeMode() : nsSizeMode_Normal;
+    OwnerShowInfo info(size, GetScrollbarPreference(mOwnerContent),
+                       ParentWindowIsActive(mOwnerContent->OwnerDoc()),
+                       sizeMode);
+    if (!mRemoteBrowser->Show(info)) {
       return false;
     }
     mRemoteBrowserShown = true;
 
-    nsCOMPtr<nsIObserverService> os = services::GetObserverService();
-    if (os) {
-      os->NotifyObservers(ToSupports(this), "remote-browser-shown", nullptr);
+    // This notification doesn't apply to fission, apparently.
+    if (!GetBrowserBridgeChild()) {
+      if (nsCOMPtr<nsIObserverService> os = services::GetObserverService()) {
+        os->NotifyObservers(ToSupports(this), "remote-browser-shown", nullptr);
+      }
     }
   } else {
     nsIntRect dimensions;
@@ -1724,7 +1718,9 @@ nsresult nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   return NS_OK;
 }
 
-void nsFrameLoader::Destroy() { StartDestroy(); }
+void nsFrameLoader::Destroy(bool aForProcessSwitch) {
+  StartDestroy(aForProcessSwitch);
+}
 
 class nsFrameLoaderDestroyRunnable : public Runnable {
   enum DestroyPhase {
@@ -1746,7 +1742,7 @@ class nsFrameLoaderDestroyRunnable : public Runnable {
   NS_IMETHOD Run() override;
 };
 
-void nsFrameLoader::StartDestroy() {
+void nsFrameLoader::StartDestroy(bool aForProcessSwitch) {
   // nsFrameLoader::StartDestroy is called just before the frameloader is
   // detached from the <browser> element. Destruction continues in phases via
   // the nsFrameLoaderDestroyRunnable.
@@ -1782,6 +1778,9 @@ void nsFrameLoader::StartDestroy() {
   // is its last chance to remove them while we're still in the document.
   if (auto* browserParent = GetBrowserParent()) {
     browserParent->RemoveWindowListeners();
+    if (aForProcessSwitch) {
+      browserParent->SetDestroyingForProcessSwitch();
+    }
   }
 
   nsCOMPtr<Document> doc;

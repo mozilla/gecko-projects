@@ -80,12 +80,68 @@ export class TogglePrefCheckbox extends React.PureComponent {
   }
 }
 
+export class Personalization extends React.PureComponent {
+  constructor(props) {
+    super(props);
+    this.togglePersonalizationVersion = this.togglePersonalizationVersion.bind(
+      this
+    );
+  }
+
+  togglePersonalizationVersion() {
+    this.props.dispatch(
+      ac.OnlyToMain({
+        type: at.DISCOVERY_STREAM_PERSONALIZATION_VERSION_TOGGLE,
+      })
+    );
+  }
+
+  render() {
+    const {
+      lastUpdated,
+      version,
+      initialized,
+    } = this.props.state.Personalization;
+    return (
+      <React.Fragment>
+        <button className="button" onClick={this.togglePersonalizationVersion}>
+          {version === 1
+            ? "Enable V2 Personalization"
+            : "Enable V1 Personalization"}
+        </button>
+        <table>
+          <tbody>
+            <Row>
+              <td className="min">Personalization version</td>
+              <td>{version}</td>
+            </Row>
+            <Row>
+              <td className="min">Personalization Last Updated</td>
+              <td>{relativeTime(lastUpdated) || "(no data)"}</td>
+            </Row>
+            {version === 2 ? (
+              <Row>
+                <td className="min">Personalization V2 Initialized</td>
+                <td>{initialized ? "true" : "false"}</td>
+              </Row>
+            ) : null}
+          </tbody>
+        </table>
+      </React.Fragment>
+    );
+  }
+}
+
 export class DiscoveryStreamAdmin extends React.PureComponent {
   constructor(props) {
     super(props);
     this.restorePrefDefaults = this.restorePrefDefaults.bind(this);
     this.setConfigValue = this.setConfigValue.bind(this);
     this.expireCache = this.expireCache.bind(this);
+    this.refreshCache = this.refreshCache.bind(this);
+    this.idleDaily = this.idleDaily.bind(this);
+    this.systemTick = this.systemTick.bind(this);
+    this.syncRemoteSettings = this.syncRemoteSettings.bind(this);
     this.changeEndpointVariant = this.changeEndpointVariant.bind(this);
     this.onStoryToggle = this.onStoryToggle.bind(this);
     this.state = {
@@ -110,8 +166,8 @@ export class DiscoveryStreamAdmin extends React.PureComponent {
     );
   }
 
-  expireCache() {
-    const { config } = this.props.state;
+  refreshCache() {
+    const { config } = this.props.state.DiscoveryStream;
     this.props.dispatch(
       ac.OnlyToMain({
         type: at.DISCOVERY_STREAM_CONFIG_CHANGE,
@@ -120,8 +176,32 @@ export class DiscoveryStreamAdmin extends React.PureComponent {
     );
   }
 
+  dispatchSimpleAction(type) {
+    this.props.dispatch(
+      ac.OnlyToMain({
+        type,
+      })
+    );
+  }
+
+  systemTick() {
+    this.dispatchSimpleAction(at.DISCOVERY_STREAM_DEV_SYSTEM_TICK);
+  }
+
+  expireCache() {
+    this.dispatchSimpleAction(at.DISCOVERY_STREAM_DEV_EXPIRE_CACHE);
+  }
+
+  idleDaily() {
+    this.dispatchSimpleAction(at.DISCOVERY_STREAM_DEV_IDLE_DAILY);
+  }
+
+  syncRemoteSettings() {
+    this.dispatchSimpleAction(at.DISCOVERY_STREAM_DEV_SYNC_RS);
+  }
+
   changeEndpointVariant(event) {
-    const endpoint = this.props.state.config.layout_endpoint;
+    const endpoint = this.props.state.DiscoveryStream.config.layout_endpoint;
     if (endpoint) {
       this.setConfigValue(
         "layout_endpoint",
@@ -152,13 +232,13 @@ export class DiscoveryStreamAdmin extends React.PureComponent {
   }
 
   isCurrentVariant(id) {
-    const endpoint = this.props.state.config.layout_endpoint;
+    const endpoint = this.props.state.DiscoveryStream.config.layout_endpoint;
     const isMatch = endpoint && !!endpoint.match(`layout_variant=${id}`);
     return isMatch;
   }
 
   renderFeedData(url) {
-    const { feeds } = this.props.state;
+    const { feeds } = this.props.state.DiscoveryStream;
     const feed = feeds.data[url].data;
     return (
       <React.Fragment>
@@ -173,7 +253,7 @@ export class DiscoveryStreamAdmin extends React.PureComponent {
   }
 
   renderFeedsData() {
-    const { feeds } = this.props.state;
+    const { feeds } = this.props.state.DiscoveryStream;
     return (
       <React.Fragment>
         {Object.keys(feeds.data).map(url => this.renderFeedData(url))}
@@ -182,7 +262,7 @@ export class DiscoveryStreamAdmin extends React.PureComponent {
   }
 
   renderSpocs() {
-    const { spocs } = this.props.state;
+    const { spocs } = this.props.state.DiscoveryStream;
     let spocsData = [];
     if (spocs.data && spocs.data.spocs && spocs.data.spocs.length) {
       spocsData = spocs.data.spocs;
@@ -247,7 +327,7 @@ export class DiscoveryStreamAdmin extends React.PureComponent {
   }
 
   renderFeed(feed) {
-    const { feeds } = this.props.state;
+    const { feeds } = this.props.state.DiscoveryStream;
     if (!feed.url) {
       return null;
     }
@@ -273,14 +353,28 @@ export class DiscoveryStreamAdmin extends React.PureComponent {
     const prefToggles = "enabled hardcoded_layout show_spocs personalized collapsible".split(
       " "
     );
-    const { config, lastUpdated, layout } = this.props.state;
+    const { config, lastUpdated, layout } = this.props.state.DiscoveryStream;
     return (
       <div>
         <button className="button" onClick={this.restorePrefDefaults}>
           Restore Pref Defaults
         </button>{" "}
+        <button className="button" onClick={this.refreshCache}>
+          Refresh Cache
+        </button>
+        <br />
         <button className="button" onClick={this.expireCache}>
           Expire Cache
+        </button>{" "}
+        <button className="button" onClick={this.systemTick}>
+          Trigger System Tick
+        </button>{" "}
+        <button className="button" onClick={this.idleDaily}>
+          Trigger Idle Daily
+        </button>
+        <br />
+        <button className="button" onClick={this.syncRemoteSettings}>
+          Sync Remote Settings
         </button>
         <table>
           <tbody>
@@ -343,10 +437,17 @@ export class DiscoveryStreamAdmin extends React.PureComponent {
             ))}
           </div>
         ))}
-        <h3>Feeds Data</h3>
-        {this.renderFeedsData()}
+        <h3>Personalization</h3>
+        <Personalization
+          dispatch={this.props.dispatch}
+          state={{
+            Personalization: this.props.state.Personalization,
+          }}
+        />
         <h3>Spocs</h3>
         {this.renderSpocs()}
+        <h3>Feeds Data</h3>
+        {this.renderFeedsData()}
       </div>
     );
   }
@@ -1336,7 +1437,10 @@ export class ASRouterAdminInner extends React.PureComponent {
           <React.Fragment>
             <h2>Discovery Stream</h2>
             <DiscoveryStreamAdmin
-              state={this.props.DiscoveryStream}
+              state={{
+                DiscoveryStream: this.props.DiscoveryStream,
+                Personalization: this.props.Personalization,
+              }}
               otherPrefs={this.props.Prefs.values}
               dispatch={this.props.dispatch}
             />
@@ -1505,5 +1609,6 @@ const _ASRouterAdmin = props => (
 export const ASRouterAdmin = connect(state => ({
   Sections: state.Sections,
   DiscoveryStream: state.DiscoveryStream,
+  Personalization: state.Personalization,
   Prefs: state.Prefs,
 }))(_ASRouterAdmin);

@@ -76,6 +76,7 @@
 #include "vm/Iteration.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
+#include "vm/PromiseObject.h"  // js::PromiseObject, js::PromiseSlot_*
 #include "vm/ProxyObject.h"
 #include "vm/SavedStacks.h"
 #include "vm/Stack.h"
@@ -3024,7 +3025,7 @@ static bool testingFunc_inJit(JSContext* cx, unsigned argc, Value* vp) {
 static bool testingFunc_inIon(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  if (!jit::IsIonEnabled()) {
+  if (!jit::IsIonEnabled(cx)) {
     return ReturnStringCopy(cx, args, "Ion is disabled.");
   }
 

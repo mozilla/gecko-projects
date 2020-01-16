@@ -72,6 +72,7 @@
 #include "mozilla/dom/LoadURIOptionsBinding.h"
 #include "mozilla/dom/JSWindowActorChild.h"
 
+#include "mozilla/net/DocumentChannel.h"
 #include "mozilla/net/DocumentChannelChild.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "ReferrerInfo.h"
@@ -1401,9 +1402,37 @@ nsDocShell::GetHasMixedDisplayContentBlocked(
 }
 
 NS_IMETHODIMP
-nsDocShell::GetHasTrackingContentBlocked(bool* aHasTrackingContentBlocked) {
+nsDocShell::GetHasTrackingContentBlocked(Promise** aPromise) {
+  MOZ_ASSERT(aPromise);
+
+  ErrorResult rv;
   RefPtr<Document> doc(GetDocument());
-  *aHasTrackingContentBlocked = doc && doc->GetHasTrackingContentBlocked();
+  RefPtr<Promise> retPromise = Promise::Create(doc->GetOwnerGlobal(), rv);
+  if (NS_WARN_IF(rv.Failed())) {
+    return rv.StealNSResult();
+  }
+
+  // Retrieve the document's content blocking events from the parent process.
+  RefPtr<Document::GetContentBlockingEventsPromise> promise =
+      doc->GetContentBlockingEvents();
+  if (promise) {
+    promise->Then(
+        GetCurrentThreadSerialEventTarget(), __func__,
+        [retPromise](const Document::GetContentBlockingEventsPromise::
+                         ResolveOrRejectValue& aValue) {
+          if (aValue.IsResolve()) {
+            bool has = aValue.ResolveValue() &
+                       nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT;
+            retPromise->MaybeResolve(has);
+          } else {
+            retPromise->MaybeResolve(false);
+          }
+        });
+  } else {
+    retPromise->MaybeResolve(false);
+  }
+
+  retPromise.forget(aPromise);
   return NS_OK;
 }
 
@@ -5828,7 +5857,7 @@ nsDocShell::OnStateChange(nsIWebProgress* aProgress, nsIRequest* aRequest,
       // If we are starting a DocumentChannel, we need to pass the timing
       // statistics so that should a process switch occur, the starting type can
       // be passed to the new DocShell running in the other content process.
-      if (RefPtr<DocumentChannelChild> docChannel = do_QueryObject(aRequest)) {
+      if (RefPtr<DocumentChannel> docChannel = do_QueryObject(aRequest)) {
         docChannel->SetNavigationTiming(mTiming);
       }
     }
@@ -5922,7 +5951,7 @@ void nsDocShell::OnRedirectStateChange(nsIChannel* aOldChannel,
   // of redirects handled in the parent process.
   // Query the full redirect chain directly, so that we can add history
   // entries for them.
-  if (RefPtr<DocumentChannelChild> docChannel = do_QueryObject(aOldChannel)) {
+  if (RefPtr<DocumentChannel> docChannel = do_QueryObject(aOldChannel)) {
     nsCOMPtr<nsIURI> previousURI;
     uint32_t previousFlags = 0;
     docChannel->GetLastVisit(getter_AddRefs(previousURI), &previousFlags);
@@ -7731,7 +7760,8 @@ nsresult nsDocShell::CreateContentViewer(const nsACString& aContentType,
     // Mark the channel as being a document URI...
     aOpenedChannel->GetLoadFlags(&loadFlags);
     loadFlags |= nsIChannel::LOAD_DOCUMENT_URI;
-    if (SandboxFlagsImplyCookies(mBrowsingContext->GetSandboxFlags())) {
+    nsCOMPtr<nsILoadInfo> loadInfo = aOpenedChannel->LoadInfo();
+    if (SandboxFlagsImplyCookies(loadInfo->GetSandboxFlags())) {
       loadFlags |= nsIRequest::LOAD_DOCUMENT_NEEDS_COOKIE;
     }
 
@@ -8277,7 +8307,7 @@ nsresult nsDocShell::PerformRetargeting(nsDocShellLoadState* aLoadState,
     // should match this one when both are applicable.
     nsCOMPtr<nsILoadInfo> secCheckLoadInfo = new LoadInfo(
         mScriptGlobal, aLoadState->TriggeringPrincipal(), requestingContext,
-        nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK);
+        nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK, 0);
 
     // Since Content Policy checks are performed within docShell as well as
     // the ContentSecurityManager we need a reliable way to let certain
@@ -9825,8 +9855,6 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
     return NS_ERROR_FAILURE;
   }
 
-  bool isSandBoxed = mBrowsingContext->GetSandboxFlags() & SANDBOXED_ORIGIN;
-
   // We want to inherit aLoadState->PrincipalToInherit() when:
   // 1. ChannelShouldInheritPrincipal returns true.
   // 2. aLoadState->URI() is not data: URI, or data: URI is not
@@ -9848,6 +9876,7 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
   nsLoadFlags loadFlags = mDefaultLoadFlags;
   nsSecurityFlags securityFlags =
       nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL;
+  uint32_t sandboxFlags = mBrowsingContext->GetSandboxFlags();
 
   if (aLoadState->FirstParty()) {
     // tag first party URL loads
@@ -9863,16 +9892,16 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
   if (inheritPrincipal) {
     securityFlags |= nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL;
   }
-  if (isSandBoxed) {
-    securityFlags |= nsILoadInfo::SEC_SANDBOXED;
-  }
 
   RefPtr<LoadInfo> loadInfo =
       (contentPolicyType == nsIContentPolicy::TYPE_DOCUMENT)
           ? new LoadInfo(loadingWindow, aLoadState->TriggeringPrincipal(),
-                         topLevelLoadingContext, securityFlags)
+                         topLevelLoadingContext, securityFlags, sandboxFlags)
           : new LoadInfo(loadingPrincipal, aLoadState->TriggeringPrincipal(),
-                         loadingNode, securityFlags, contentPolicyType);
+                         loadingNode, securityFlags, contentPolicyType,
+                         Maybe<mozilla::dom::ClientInfo>(),
+                         Maybe<mozilla::dom::ServiceWorkerDescriptor>(),
+                         sandboxFlags);
 
   if (aLoadState->PrincipalToInherit()) {
     loadInfo->SetPrincipalToInherit(aLoadState->PrincipalToInherit());
@@ -9952,14 +9981,14 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
   // same process), which breaks if we serialize to the parent process.
   bool canUseDocumentChannel =
       aLoadState->HasLoadFlags(INTERNAL_LOAD_FLAGS_IS_SRCDOC)
-          ? isSandBoxed
+          ? (sandboxFlags & SANDBOXED_ORIGIN)
           : SchemeUsesDocChannel(aLoadState->URI());
 
   if (StaticPrefs::browser_tabs_documentchannel() && XRE_IsContentProcess() &&
       canUseDocumentChannel) {
-    channel = new DocumentChannelChild(
-        aLoadState, loadInfo, initiatorType, loadFlags, mLoadType, cacheKey,
-        isActive, isTopLevelDoc, mBrowsingContext->GetSandboxFlags());
+    channel = new DocumentChannelChild(aLoadState, loadInfo, initiatorType,
+                                       loadFlags, mLoadType, cacheKey, isActive,
+                                       isTopLevelDoc, sandboxFlags);
     channel->SetNotificationCallbacks(this);
   } else if (!CreateAndConfigureRealChannelForLoadState(
                  aLoadState, loadInfo, this, this, initiatorType, loadFlags,
@@ -10229,8 +10258,8 @@ nsresult nsDocShell::OpenInitializedChannel(nsIChannel* aChannel,
 
   // Let the client channel helper know if we are using DocumentChannel,
   // since redirects get handled in the parent process in that case.
-  RefPtr<net::DocumentChannelChild> docChannel = do_QueryObject(aChannel);
-  if (docChannel) {
+  RefPtr<net::DocumentChannel> docChannel = do_QueryObject(aChannel);
+  if (docChannel && XRE_IsContentProcess()) {
     bool pluginsAllowed = true;
     GetAllowPlugins(&pluginsAllowed);
     docChannel->SetDocumentOpenFlags(aOpenFlags, pluginsAllowed);
@@ -12445,8 +12474,12 @@ nsresult nsDocShell::OnOverLink(nsIContent* aContent, nsIURI* aURI,
     return rv;
   }
 
+  nsCOMPtr<nsIURI> exposableURI;
+  rv = sURIFixup->CreateExposableURI(aURI, getter_AddRefs(exposableURI));
+  NS_ENSURE_SUCCESS(rv, rv);
+
   nsAutoCString spec;
-  rv = aURI->GetDisplaySpec(spec);
+  rv = exposableURI->GetDisplaySpec(spec);
   NS_ENSURE_SUCCESS(rv, rv);
 
   NS_ConvertUTF8toUTF16 uStr(spec);

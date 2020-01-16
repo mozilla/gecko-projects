@@ -1471,8 +1471,7 @@ nsEventStatus AsyncPanZoomController::OnTouchEnd(
     case TOUCHING:
       // We may have some velocity stored on the axis from move events
       // that were not big enough to trigger scrolling. Clear that out.
-      mX.SetVelocity(0);
-      mY.SetVelocity(0);
+      SetVelocityVector(ParentLayerPoint(0, 0));
       MOZ_ASSERT(GetCurrentTouchBlock());
       APZC_LOG("%p still has %u touch points active\n", this,
                GetCurrentTouchBlock()->GetActiveTouchCount());
@@ -1568,8 +1567,7 @@ nsEventStatus AsyncPanZoomController::OnScaleBegin(
   }
 
   SetState(PINCHING);
-  mX.SetVelocity(0);
-  mY.SetVelocity(0);
+  SetVelocityVector(ParentLayerPoint(0, 0));
   RecursiveMutexAutoLock lock(mRecursiveMutex);
   mLastZoomFocus =
       aEvent.mLocalFocusPoint - Metrics().GetCompositionBounds().TopLeft();
@@ -1821,8 +1819,7 @@ nsEventStatus AsyncPanZoomController::HandleEndOfPan() {
   // Clear our velocities; if DispatchFling() gives the fling to us,
   // the fling velocity gets *added* to our existing velocity in
   // AcceptFling().
-  mX.SetVelocity(0);
-  mY.SetVelocity(0);
+  SetVelocityVector(ParentLayerPoint(0, 0));
   // Clear our state so that we don't stay in the PANNING state
   // if DispatchFling() gives the fling to somone else. However,
   // don't send the state change notification until we've determined
@@ -2579,6 +2576,27 @@ nsEventStatus AsyncPanZoomController::OnPan(const PanGestureInput& aEvent,
                                                   aEvent.mLocalPanStartPoint);
     logicalPanDisplacement.x *= scrollUnitWidth;
     logicalPanDisplacement.y *= scrollUnitHeight;
+
+    // Accelerate (decelerate) any pans by raising it to a user configurable
+    // power (apz.touch_acceleration_factor_x, apz.touch_acceleration_factor_y)
+    //
+    // Confine input for pow() to greater than or equal to 0 to avoid domain
+    // errors with non-integer exponents
+    if (mX.GetVelocity() != 0) {
+      float absVelocity = std::abs(mX.GetVelocity());
+      logicalPanDisplacement.x *=
+          std::pow(absVelocity,
+                   StaticPrefs::apz_touch_acceleration_factor_x()) /
+          absVelocity;
+    }
+
+    if (mY.GetVelocity() != 0) {
+      float absVelocity = std::abs(mY.GetVelocity());
+      logicalPanDisplacement.y *=
+          std::pow(absVelocity,
+                   StaticPrefs::apz_touch_acceleration_factor_y()) /
+          absVelocity;
+    }
   }
 
   MOZ_ASSERT(GetCurrentPanGestureBlock());
@@ -2646,13 +2664,16 @@ nsEventStatus AsyncPanZoomController::OnPanEnd(const PanGestureInput& aEvent) {
   MOZ_ASSERT(GetCurrentPanGestureBlock());
   RefPtr<const OverscrollHandoffChain> overscrollHandoffChain =
       GetCurrentPanGestureBlock()->GetOverscrollHandoffChain();
-  if (!overscrollHandoffChain->CanScrollInDirection(
-          this, ScrollDirection::eHorizontal)) {
-    mX.SetVelocity(0);
-  }
-  if (!overscrollHandoffChain->CanScrollInDirection(
-          this, ScrollDirection::eVertical)) {
-    mY.SetVelocity(0);
+  {
+    RecursiveMutexAutoLock lock(mRecursiveMutex);
+    if (!overscrollHandoffChain->CanScrollInDirection(
+            this, ScrollDirection::eHorizontal)) {
+      mX.SetVelocity(0);
+    }
+    if (!overscrollHandoffChain->CanScrollInDirection(
+            this, ScrollDirection::eVertical)) {
+      mY.SetVelocity(0);
+    }
   }
 
   SetState(NOTHING);
@@ -2902,11 +2923,13 @@ ParentLayerPoint AsyncPanZoomController::PanStart() const {
 }
 
 const ParentLayerPoint AsyncPanZoomController::GetVelocityVector() const {
+  RecursiveMutexAutoLock lock(mRecursiveMutex);
   return ParentLayerPoint(mX.GetVelocity(), mY.GetVelocity());
 }
 
 void AsyncPanZoomController::SetVelocityVector(
     const ParentLayerPoint& aVelocityVector) {
+  RecursiveMutexAutoLock lock(mRecursiveMutex);
   mX.SetVelocity(aVelocityVector.x);
   mY.SetVelocity(aVelocityVector.y);
 }

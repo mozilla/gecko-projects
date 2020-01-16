@@ -9295,11 +9295,11 @@ static nsRect UnionBorderBoxes(
   Maybe<nsRect> clipPropClipRect =
       aFrame->GetClipPropClipRect(disp, effects, bounds.Size());
 
-  // Iterate over all children except pop-up, absolutely-positioned, and
-  // float ones.
+  // Iterate over all children except pop-up, absolutely-positioned,
+  // float, and overflow ones.
   const nsIFrame::ChildListIDs skip = {
       nsIFrame::kPopupList, nsIFrame::kSelectPopupList, nsIFrame::kAbsoluteList,
-      nsIFrame::kFixedList, nsIFrame::kFloatList};
+      nsIFrame::kFixedList, nsIFrame::kFloatList, nsIFrame::kOverflowList};
   for (nsIFrame::ChildListIterator childLists(aFrame); !childLists.IsDone();
        childLists.Next()) {
     if (skip.contains(childLists.CurrentID())) {
@@ -11420,8 +11420,6 @@ void nsFrame::VerifyDirtyBitSet(const nsFrameList& aFrameList) {
 }
 
 // Start Display Reflow
-#  ifdef DEBUG
-
 DR_cookie::DR_cookie(nsPresContext* aPresContext, nsIFrame* aFrame,
                      const ReflowInput& aReflowInput, ReflowOutput& aMetrics,
                      nsReflowStatus& aStatus)
@@ -11917,12 +11915,12 @@ void DR_State::InitFrameTypeTable() {
   AddFrameTypeInfo(LayoutFrameType::TextInput, "textCtl", "textInput");
   AddFrameTypeInfo(LayoutFrameType::Text, "text", "text");
   AddFrameTypeInfo(LayoutFrameType::Viewport, "VP", "viewport");
-#    ifdef MOZ_XUL
+#  ifdef MOZ_XUL
   AddFrameTypeInfo(LayoutFrameType::XULLabel, "XULLabel", "XULLabel");
   AddFrameTypeInfo(LayoutFrameType::Box, "Box", "Box");
   AddFrameTypeInfo(LayoutFrameType::Slider, "Slider", "Slider");
   AddFrameTypeInfo(LayoutFrameType::PopupSet, "PopupSet", "PopupSet");
-#    endif
+#  endif
   AddFrameTypeInfo(LayoutFrameType::None, "unknown", "unknown");
 }
 
@@ -12497,7 +12495,6 @@ void ReflowInput::DisplayInitFrameTypeExit(nsIFrame* aFrame,
   DR_state->DeleteTreeNode(*treeNode);
 }
 
-#  endif
 // End Display Reflow
 
 // Validation of SideIsVertical.

@@ -19,11 +19,11 @@ namespace mozilla {
 using RayFunction = StyleRayFunction<StyleAngle>;
 
 namespace layers {
+class MotionPathData;
 class PathCommand;
-class TransformData;
 }  // namespace layers
 
-struct MotionPathData {
+struct ResolvedMotionPathData {
   gfx::Point mTranslate;
   float mRotate;
   // The delta value between transform-origin and offset-anchor.
@@ -159,7 +159,7 @@ class MotionPathUtils final {
    * Generate the motion path transform result. This function may be called on
    * the compositor thread.
    **/
-  static Maybe<MotionPathData> ResolveMotionPath(
+  static Maybe<ResolvedMotionPathData> ResolveMotionPath(
       const OffsetPathData& aPath, const LengthPercentage& aDistance,
       const StyleOffsetRotate& aRotate, const StylePositionOrAuto& aAnchor,
       const CSSPoint& aTransformOrigin, const CSSSize& aFrameSize,
@@ -169,17 +169,19 @@ class MotionPathUtils final {
    * Generate the motion path transform result with |nsIFrame|. This is only
    * called in the main thread.
    **/
-  static Maybe<MotionPathData> ResolveMotionPath(const nsIFrame* aFrame);
+  static Maybe<ResolvedMotionPathData> ResolveMotionPath(
+      const nsIFrame* aFrame);
 
   /**
-   * Generate the motion path transfrom result with styles and TransformData.
+   * Generate the motion path transfrom result with styles and
+   * layers::MotionPathData.
    * This is only called by the compositor.
    */
-  static Maybe<MotionPathData> ResolveMotionPath(
+  static Maybe<ResolvedMotionPathData> ResolveMotionPath(
       const StyleOffsetPath* aPath, const StyleLengthPercentage* aDistance,
       const StyleOffsetRotate* aRotate, const StylePositionOrAuto* aAnchor,
-      const layers::TransformData& aTransformData,
-      gfx::Path* aCachedMotionPath);
+      const Maybe<layers::MotionPathData>& aMotionPathData,
+      const CSSSize& aFrameSize, gfx::Path* aCachedMotionPath);
 
   /**
    * Normalize and convert StyleSVGPathData into nsTArray<layers::PathCommand>.

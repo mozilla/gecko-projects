@@ -86,12 +86,14 @@
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
+#include "vm/PromiseObject.h"  // js::PromiseObject
 #include "vm/Runtime.h"
 #include "vm/SavedStacks.h"
 #include "vm/SelfHosting.h"
 #include "vm/Shape.h"
 #include "vm/StringType.h"
 #include "vm/SymbolType.h"
+#include "vm/ToSource.h"
 #include "vm/WrapperObject.h"
 #include "vm/Xdr.h"
 #include "wasm/WasmModule.h"
@@ -372,8 +374,7 @@ static void PreventDiscardingFunctions() {
   if (reinterpret_cast<uintptr_t>(&PreventDiscardingFunctions) == 1) {
     // Never executed.
     memset((void*)&js::debug::GetMarkInfo, 0, 1);
-    memset((void*)&js::debug::GetMarkWordAddress, 0, 1);
-    memset((void*)&js::debug::GetMarkMask, 0, 1);
+    memset((void*)&js::debug::GetMarkByteAddress, 0, 1);
   }
 }
 
@@ -898,6 +899,11 @@ static const JSStdName builtin_property_names[] = {
 
     {0, JSProto_LIMIT}};
 
+static bool SkipUneval(JSContext* cx, jsid id) {
+  return !cx->realm()->creationOptions().getToSourceEnabled() &&
+          id == NameToId(cx->names().uneval);
+}
+
 JS_PUBLIC_API bool JS_ResolveStandardClass(JSContext* cx, HandleObject obj,
                                            HandleId id, bool* resolved) {
   const JSStdName* stdnm;
@@ -936,6 +942,9 @@ JS_PUBLIC_API bool JS_ResolveStandardClass(JSContext* cx, HandleObject obj,
   }
 
   if (stdnm && GlobalObject::skipDeselectedConstructor(cx, stdnm->key)) {
+    stdnm = nullptr;
+  }
+  if (stdnm && SkipUneval(cx, id)) {
     stdnm = nullptr;
   }
 
@@ -1025,6 +1034,11 @@ static bool EnumerateStandardClassesInTable(JSContext* cx,
     }
 
     jsid id = NameToId(AtomStateOffsetToName(cx->names(), table[i].atomOffset));
+
+    if (SkipUneval(cx, id)) {
+      continue;
+    }
+
     if (!properties.append(id)) {
       return false;
     }
@@ -1138,7 +1152,11 @@ JS_PUBLIC_API JSProtoKey JS_IdToProtoKey(JSContext* cx, HandleId id) {
     return JSProto_Null;
   }
 
-  MOZ_ASSERT(MOZ_ARRAY_LENGTH(standard_class_names) == JSProto_LIMIT + 1);
+  if (SkipUneval(cx, id)) {
+    return JSProto_Null;
+  }
+
+  static_assert(mozilla::ArrayLength(standard_class_names) == JSProto_LIMIT + 1);
   return static_cast<JSProtoKey>(stdnm - standard_class_names);
 }
 
@@ -3895,45 +3913,62 @@ JS_PUBLIC_API bool JS::RejectPromise(JSContext* cx, JS::HandleObject promiseObj,
   return ResolveOrRejectPromise(cx, promiseObj, rejectionValue, true);
 }
 
-static MOZ_MUST_USE bool CallOriginalPromiseThenImpl(
-    JSContext* cx, JS::HandleObject promiseObj, JS::HandleObject onFulfilledObj,
-    JS::HandleObject onRejectedObj, JS::MutableHandleObject resultObj,
-    CreateDependentPromise createDependent) {
+JS_PUBLIC_API JSObject* JS::CallOriginalPromiseThen(
+    JSContext* cx, JS::HandleObject promiseObj, JS::HandleObject onFulfilled,
+    JS::HandleObject onRejected) {
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
-  cx->check(promiseObj, onFulfilledObj, onRejectedObj);
+  cx->check(promiseObj, onFulfilled, onRejected);
 
-  MOZ_ASSERT_IF(onFulfilledObj, IsCallable(onFulfilledObj));
-  MOZ_ASSERT_IF(onRejectedObj, IsCallable(onRejectedObj));
+  MOZ_ASSERT_IF(onFulfilled, IsCallable(onFulfilled));
+  MOZ_ASSERT_IF(onRejected, IsCallable(onRejected));
 
-  RootedValue onFulfilled(cx, ObjectOrNullValue(onFulfilledObj));
-  RootedValue onRejected(cx, ObjectOrNullValue(onRejectedObj));
-  return OriginalPromiseThen(cx, promiseObj, onFulfilled, onRejected, resultObj,
-                             createDependent);
+  return OriginalPromiseThen(cx, promiseObj, onFulfilled, onRejected);
 }
 
-JS_PUBLIC_API JSObject* JS::CallOriginalPromiseThen(
-    JSContext* cx, JS::HandleObject promiseObj, JS::HandleObject onResolvedObj,
-    JS::HandleObject onRejectedObj) {
-  RootedObject resultPromise(cx);
-  if (!CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj, onRejectedObj,
-                                   &resultPromise,
-                                   CreateDependentPromise::Always)) {
-    return nullptr;
+static MOZ_MUST_USE bool ReactToPromise(JSContext* cx,
+                                        JS::Handle<JSObject*> promiseObj,
+                                        JS::Handle<JSObject*> onFulfilled,
+                                        JS::Handle<JSObject*> onRejected,
+                                        UnhandledRejectionBehavior behavior) {
+  AssertHeapIsIdle();
+  CHECK_THREAD(cx);
+  cx->check(promiseObj, onFulfilled, onRejected);
+
+  MOZ_ASSERT_IF(onFulfilled, IsCallable(onFulfilled));
+  MOZ_ASSERT_IF(onRejected, IsCallable(onRejected));
+
+  Rooted<PromiseObject*> unwrappedPromise(cx);
+  {
+    RootedValue promiseVal(cx, ObjectValue(*promiseObj));
+    unwrappedPromise = UnwrapAndTypeCheckValue<PromiseObject>(
+        cx, promiseVal, [cx, promiseObj] {
+          JS_ReportErrorNumberLatin1(cx, GetErrorMessage, nullptr,
+                                     JSMSG_INCOMPATIBLE_PROTO, "Promise",
+                                     "then", promiseObj->getClass()->name);
+        });
+    if (!unwrappedPromise) {
+      return false;
+    }
   }
-  return resultPromise;
+
+  return ReactToUnwrappedPromise(cx, unwrappedPromise, onFulfilled, onRejected,
+                                 behavior);
 }
 
 JS_PUBLIC_API bool JS::AddPromiseReactions(JSContext* cx,
                                            JS::HandleObject promiseObj,
-                                           JS::HandleObject onResolvedObj,
-                                           JS::HandleObject onRejectedObj) {
-  RootedObject resultPromise(cx);
-  bool result = CallOriginalPromiseThenImpl(cx, promiseObj, onResolvedObj,
-                                            onRejectedObj, &resultPromise,
-                                            CreateDependentPromise::Never);
-  MOZ_ASSERT(!resultPromise);
-  return result;
+                                           JS::HandleObject onFulfilled,
+                                           JS::HandleObject onRejected) {
+  return ReactToPromise(cx, promiseObj, onFulfilled, onRejected,
+                        UnhandledRejectionBehavior::Report);
+}
+
+JS_PUBLIC_API bool JS::AddPromiseReactionsIgnoringUnhandledRejection(
+    JSContext* cx, JS::HandleObject promiseObj, JS::HandleObject onFulfilled,
+    JS::HandleObject onRejected) {
+  return ReactToPromise(cx, promiseObj, onFulfilled, onRejected,
+                        UnhandledRejectionBehavior::Ignore);
 }
 
 JS_PUBLIC_API JS::PromiseUserInputEventHandlingState

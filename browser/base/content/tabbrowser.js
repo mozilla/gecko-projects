@@ -1088,7 +1088,7 @@
         this._callProgressListeners(
           null,
           "onContentBlockingEvent",
-          [webProgress, null, securityUI.contentBlockingEvent, true],
+          [webProgress, null, newBrowser.getContentBlockingEvents(), true],
           true,
           false
         );
@@ -1811,6 +1811,7 @@
         sameProcessAsFrameLoader,
         recordExecution,
         replaceBrowsingContext,
+        redirectLoadSwitchId,
       } = {}
     ) {
       let isRemote = aBrowser.getAttribute("remote") == "true";
@@ -1944,7 +1945,11 @@
         // This call actually switches out our frameloaders. Do this as late as
         // possible before rebuilding the browser, as we'll need the new browser
         // state set up completely first.
-        aBrowser.changeRemoteness({ remoteType, replaceBrowsingContext });
+        aBrowser.changeRemoteness({
+          remoteType,
+          replaceBrowsingContext,
+          switchingInProgressLoad: redirectLoadSwitchId != null,
+        });
         // Once we have new frameloaders, this call sets the browser back up.
         //
         // FIXME(emilio): Shouldn't we call destroy() first? What hides the
@@ -1990,7 +1995,7 @@
         true,
         false
       );
-      let event = securityUI ? securityUI.contentBlockingEvent : 0;
+      let event = aBrowser.getContentBlockingEvents();
       // Include the true final argument to indicate that this event is
       // simulated (instead of being observed by the webProgressListener).
       this._callProgressListeners(
@@ -2452,7 +2457,7 @@
       if (aTab._sharingState) {
         this.resetBrowserSharing(browser);
       }
-      webrtcUI.forgetStreamsFromBrowser(browser);
+      webrtcUI.forgetStreamsFromBrowserContext(browser.browsingContext);
 
       // Set browser parameters for when browser is restored.  Also remove
       // listeners and set up lazy restore data in SessionStore. This must
@@ -2629,12 +2634,17 @@
         this.tabContainer.getAttribute("overflow") != "true" &&
         this.animationsEnabled;
 
+      // Related tab inherits current tab's user context unless a different
+      // usercontextid is specified
+      if (userContextId == null && openerTab) {
+        userContextId = openerTab.getAttribute("usercontextid") || 0;
+      }
+
       this.setTabAttributes(t, {
         animate,
         noInitialLabel,
         aURI,
         userContextId,
-        openerTab,
         skipBackgroundNotify,
         pinned,
         skipAnimation,
@@ -2654,13 +2664,6 @@
             pinned,
             bulkOrderedOpen,
           });
-        } else {
-          // When batch inserting, we still need to make sure the tab
-          // ends up after existing tabs. This is especially important for
-          // pinned tabs, which will still get inserted into the DOM
-          // immediately by addMultipleTabs. Using batch insertion for
-          // pinned tabs, too, is bug 1606633.
-          t._tPos = this.tabs.length;
         }
 
         // If we don't have a preferred remote type, and we have a remote
@@ -2866,11 +2869,12 @@
       return t;
     },
 
-    addMultipleTabs(restoreTabsLazily, window, selectTab, aPropertiesTabs) {
+    addMultipleTabs(restoreTabsLazily, selectTab, aPropertiesTabs) {
       let tabs = [];
       let tabsFragment = document.createDocumentFragment();
       let tabToSelect = null;
       let hiddenTabs = new Map();
+      let shouldUpdateForPinnedTabs = false;
 
       // We create each tab and browser, but only insert them
       // into a document fragment so that we can insert them all
@@ -2882,18 +2886,19 @@
         let userContextId = tabData.userContextId;
         let select = i == selectTab - 1;
         let tab;
+        let tabWasReused = false;
 
         // Re-use existing selected tab if possible to avoid the overhead of
         // selecting a new tab.
         if (select && this.selectedTab.userContextId == userContextId) {
+          tabWasReused = true;
           tab = this.selectedTab;
           if (!tabData.pinned) {
             this.unpinTab(tab);
+          } else {
+            this.pinTab(tab);
           }
-          if (
-            window.gMultiProcessBrowser &&
-            !tab.linkedBrowser.isRemoteBrowser
-          ) {
+          if (gMultiProcessBrowser && !tab.linkedBrowser.isRemoteBrowser) {
             this.updateBrowserRemoteness(tab.linkedBrowser, {
               remoteType: E10SUtils.DEFAULT_REMOTE_TYPE,
             });
@@ -2937,19 +2942,32 @@
 
         tabs.push(tab);
 
-        if (tab.pinned) {
-          tabData.hidden = false;
-        }
-
-        if (tab.hidden) {
-          tab.setAttribute("hidden", "true");
-          hiddenTabs.set(tab, tabData.extData && tabData.extData.hiddenBy);
-        }
-
         if (tabData.pinned) {
-          this.pinTab(tab); // inserts the tab
+          // Calling `pinTab` calls `moveTabTo`, which assumes the tab is
+          // inserted in the DOM. If the tab is not yet in the DOM,
+          // just insert it in the right place from the start.
+          if (!tab.parentNode) {
+            tab._tPos = this._numPinnedTabs;
+            this.tabContainer.insertBefore(tab, this.tabs[this._numPinnedTabs]);
+            tab.setAttribute("pinned", "true");
+            this._invalidateCachedTabs();
+            // Then ensure all the tab open/pinning information is sent.
+            this._fireOpenTab(tab, {});
+            this._notifyPinnedStatus(tab);
+            // Once we're done adding all tabs, _updateTabBarForPinnedTabs
+            // needs calling:
+            shouldUpdateForPinnedTabs = true;
+          }
         } else {
+          if (tab.hidden) {
+            tab.setAttribute("hidden", "true");
+            hiddenTabs.set(tab, tabData.extData && tabData.extData.hiddenBy);
+          }
+
           tabsFragment.appendChild(tab);
+          if (tabWasReused) {
+            this._invalidateCachedTabs();
+          }
         }
 
         tab.initialize();
@@ -2968,6 +2986,9 @@
       }
 
       this._invalidateCachedTabs();
+      if (shouldUpdateForPinnedTabs) {
+        this._updateTabBarForPinnedTabs();
+      }
 
       // We need to wait until after all tabs have been appended to the DOM
       // to remove the old selected tab.
@@ -2982,10 +3003,10 @@
         this.tabContainer._setPositionalAttributes();
         TabBarVisibility.update();
 
-        // Fire a TabOpen event for all tabs, except reused selected tabs. If
-        // 'tabToSelect is a tab, we didn't reuse the selected tab.
+        // Fire a TabOpen event for all unpinned tabs, except reused selected
+        // tabs. If tabToSelect is a tab, we didn't reuse the selected tab.
         for (let tab of tabs) {
-          if (tabToSelect || !tab.selected) {
+          if (!tab.pinned && (tabToSelect || !tab.selected)) {
             this._fireOpenTab(tab, {});
           }
         }
@@ -3095,7 +3116,6 @@
         noInitialLabel,
         aURI,
         userContextId,
-        openerTab,
         skipBackgroundNotify,
         pinned,
         skipAnimation,
@@ -3108,12 +3128,6 @@
           // Set URL as label so that the tab isn't empty initially.
           this.setInitialTabTitle(tab, aURI, { beforeTabOpen: true });
         }
-      }
-
-      // Related tab inherits current tab's user context unless a different
-      // usercontextid is specified
-      if (userContextId == null && openerTab) {
-        userContextId = openerTab.getAttribute("usercontextid") || 0;
       }
 
       if (userContextId) {
@@ -3312,6 +3326,16 @@
     },
 
     removeTabs(tabs) {
+      // When 'closeWindowWithLastTab' pref is enabled, closing all tabs
+      // can be considered equivalent to closing the window.
+      if (
+        this.tabs.length == tabs.length &&
+        Services.prefs.getBoolPref("browser.tabs.closeWindowWithLastTab")
+      ) {
+        window.closeWindow(true, window.warnAboutClosingWindow);
+        return;
+      }
+
       this._clearMultiSelectionLocked = true;
 
       // Guarantee that _clearMultiSelectionLocked lock gets released.

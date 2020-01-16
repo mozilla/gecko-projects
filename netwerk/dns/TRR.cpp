@@ -14,6 +14,7 @@
 #include "nsIInputStream.h"
 #include "nsISupportsBase.h"
 #include "nsISupportsUtils.h"
+#include "nsITimedChannel.h"
 #include "nsIUploadChannel2.h"
 #include "nsNetUtil.h"
 #include "nsStringStream.h"
@@ -235,17 +236,18 @@ nsresult TRR::SendHTTPRequest() {
     return rv;
   }
 
-  rv = NS_NewChannel(
-      getter_AddRefs(mChannel), dnsURI, nsContentUtils::GetSystemPrincipal(),
-      nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
-      nsIContentPolicy::TYPE_OTHER,
-      nullptr,  // nsICookieSettings
-      nullptr,  // PerformanceStorage
-      nullptr,  // aLoadGroup
-      this,
-      nsIRequest::LOAD_ANONYMOUS | (mPB ? nsIRequest::INHIBIT_CACHING : 0) |
-          nsIChannel::LOAD_BYPASS_URL_CLASSIFIER,
-      ios);
+  rv = NS_NewChannel(getter_AddRefs(mChannel), dnsURI,
+                     nsContentUtils::GetSystemPrincipal(),
+                     nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_IS_NULL,
+                     nsIContentPolicy::TYPE_OTHER,
+                     nullptr,  // nsICookieSettings
+                     nullptr,  // PerformanceStorage
+                     nullptr,  // aLoadGroup
+                     this,
+                     nsIRequest::LOAD_ANONYMOUS | nsIRequest::INHIBIT_CACHING |
+                         nsIRequest::LOAD_BYPASS_CACHE |
+                         nsIChannel::LOAD_BYPASS_URL_CLASSIFIER,
+                     ios);
   if (NS_FAILED(rv)) {
     LOG(("TRR:SendHTTPRequest: NewChannel failed!\n"));
     return rv;
@@ -331,6 +333,10 @@ nsresult TRR::SendHTTPRequest() {
           NS_LITERAL_CSTRING("application/dns-message")))) {
     LOG(("TRR::SendHTTPRequest: couldn't set content-type!\n"));
   }
+
+  nsCOMPtr<nsITimedChannel> timedChan(do_QueryInterface(httpChannel));
+  timedChan->SetTimingEnabled(true);
+
   if (NS_SUCCEEDED(httpChannel->AsyncOpen(this))) {
     NS_NewTimerWithCallback(getter_AddRefs(mTimeout), this,
                             gTRRService->GetRequestTimeout(),
@@ -990,6 +996,28 @@ nsresult TRR::On200Response() {
   return NS_ERROR_FAILURE;
 }
 
+static void RecordProcessingTime(nsIChannel* aChannel) {
+  // This method records the time it took from the last received byte of the
+  // DoH response until we've notified the consumer with a host record.
+  nsCOMPtr<nsITimedChannel> timedChan = do_QueryInterface(aChannel);
+  if (!timedChan) {
+    return;
+  }
+  TimeStamp end;
+  if (NS_FAILED(timedChan->GetResponseEnd(&end))) {
+    return;
+  }
+
+  if (end.IsNull()) {
+    return;
+  }
+
+  Telemetry::AccumulateTimeDelta(Telemetry::DNS_TRR_PROCESSING_TIME, end);
+
+  LOG(("Processing DoH response took %f ms",
+       (TimeStamp::Now() - end).ToMilliseconds()));
+}
+
 NS_IMETHODIMP
 TRR::OnStopRequest(nsIRequest* aRequest, nsresult aStatusCode) {
   // The dtor will be run after the function returns
@@ -1024,6 +1052,7 @@ TRR::OnStopRequest(nsIRequest* aRequest, nsresult aStatusCode) {
     if (NS_SUCCEEDED(rv) && httpStatus == 200) {
       rv = On200Response();
       if (NS_SUCCEEDED(rv)) {
+        RecordProcessingTime(channel);
         return rv;
       }
     } else {

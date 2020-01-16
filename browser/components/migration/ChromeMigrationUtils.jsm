@@ -247,13 +247,16 @@ var ChromeMigrationUtils = {
     const SUB_DIRECTORIES = {
       win: {
         Chrome: ["Google", "Chrome"],
+        "Chrome Beta": ["Google", "Chrome Beta"],
         Chromium: ["Chromium"],
         Canary: ["Google", "Chrome SxS"],
+        "Edge Beta": ["Microsoft", "Edge Beta"],
       },
       macosx: {
         Chrome: ["Google", "Chrome"],
         Chromium: ["Chromium"],
         Canary: ["Google", "Chrome Canary"],
+        "Edge Beta": ["Microsoft Edge Beta"],
       },
       linux: {
         Chrome: ["google-chrome"],

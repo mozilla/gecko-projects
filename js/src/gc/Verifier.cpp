@@ -7,6 +7,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Move.h"
+#include "mozilla/PodOperations.h"
 #include "mozilla/Sprintf.h"
 
 #include <algorithm>
@@ -196,10 +197,11 @@ void gc::GCRuntime::startVerifyPreBarriers() {
 
   AutoPrepareForTracing prep(cx);
 
-  {
-    AutoLockGC lock(this);
-    for (auto chunk = allNonEmptyChunks(lock); !chunk.done(); chunk.next()) {
-      chunk->bitmap.clear();
+  for (ZonesIter zone(this, WithAtoms); !zone.done(); zone.next()) {
+    for (auto kind : AllAllocKinds()) {
+      for (ArenaIter arena(zone, kind); !arena.done(); arena.next()) {
+        arena.get()->unmarkAll();
+      }
     }
   }
 
@@ -474,9 +476,16 @@ class js::gc::MarkingValidator {
   GCRuntime* gc;
   bool initialized;
 
-  using BitmapMap =
-      HashMap<Chunk*, UniquePtr<ChunkBitmap>, GCChunkHasher, SystemAllocPolicy>;
-  BitmapMap map;
+  using MarkBits = UniquePtr<uint8_t>;
+
+  struct ArenaInfo {
+    Zone* zone;
+    MarkBits markBits;
+  };
+
+  using MarkBitsMap =
+      HashMap<Arena*, ArenaInfo, DefaultHasher<Arena*>, SystemAllocPolicy>;
+  MarkBitsMap map;
 };
 
 js::gc::MarkingValidator::MarkingValidator(GCRuntime* gc)
@@ -493,27 +502,31 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
   JSRuntime* runtime = gc->rt;
   GCMarker* gcmarker = &gc->marker;
 
+  MOZ_ASSERT(gc->nursery().isEmpty());
+  MOZ_ASSERT(!gcmarker->isWeakMarking());
+
   gc->waitBackgroundSweepEnd();
 
   /* Wait for off-thread parsing which can allocate. */
   HelperThreadState().waitForAllThreads();
 
   /* Save existing mark bits. */
-  {
-    AutoLockGC lock(gc);
-    for (auto chunk = gc->allNonEmptyChunks(lock); !chunk.done();
-         chunk.next()) {
-      ChunkBitmap* bitmap = &chunk->bitmap;
-      auto entry = MakeUnique<ChunkBitmap>();
-      if (!entry) {
-        return;
-      }
+  for (GCZonesIter zone(gc); !zone.done(); zone.next()) {
+    for (auto thingKind : AllAllocKinds()) {
+      for (ArenaIter aiter(zone, thingKind); !aiter.done(); aiter.next()) {
+        Arena* arena = aiter.get();
+        size_t thingCount = arena->getThingsPerArena();
+        MarkBits markBits(js_pod_malloc<uint8_t>(thingCount));
+        if (!markBits) {
+          return;
+        }
 
-      memcpy((void*)entry->bitmap, (void*)bitmap->bitmap,
-             sizeof(bitmap->bitmap));
+        mozilla::PodCopy(markBits.get(), arena->markBits(), thingCount);
 
-      if (!map.putNew(chunk, std::move(entry))) {
-        return;
+        ArenaInfo info = {zone, std::move(markBits)};
+        if (!map.putNew(arena, std::move(info))) {
+          return;
+        }
       }
     }
   }
@@ -543,6 +556,7 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
     AutoEnterOOMUnsafeRegion oomUnsafe;
     for (gc::WeakKeyTable::Range r = zone->gcWeakKeys().all(); !r.empty();
          r.popFront()) {
+      MOZ_ASSERT(r.front().key->asTenured().zone() == zone);
       if (!savedWeakKeys.put(r.front().key, std::move(r.front().value))) {
         oomUnsafe.crash("saving weak keys table for validator");
       }
@@ -576,10 +590,12 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
       MOZ_ASSERT(gcmarker->isDrained());
       gcmarker->reset();
 
-      AutoLockGC lock(gc);
-      for (auto chunk = gc->allNonEmptyChunks(lock); !chunk.done();
-           chunk.next()) {
-        chunk->bitmap.clear();
+      for (GCZonesIter zone(gc); !zone.done(); zone.next()) {
+        for (auto thingKind : AllAllocKinds()) {
+          for (ArenaIter aiter(zone, thingKind); !aiter.done(); aiter.next()) {
+            aiter.get()->unmarkAll();
+          }
+        }
       }
     }
   }
@@ -620,13 +636,18 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
   }
 
   /* Take a copy of the non-incremental mark state and restore the original. */
-  {
-    AutoLockGC lock(gc);
-    for (auto chunk = gc->allNonEmptyChunks(lock); !chunk.done();
-         chunk.next()) {
-      ChunkBitmap* bitmap = &chunk->bitmap;
-      ChunkBitmap* entry = map.lookup(chunk)->value().get();
-      mozilla::Swap(*entry, *bitmap);
+  const size_t maxThingsPerArena = ArenaSize / MinCellSize;
+  uint8_t temp[maxThingsPerArena];
+  for (GCZonesIter zone(gc); !zone.done(); zone.next()) {
+    for (auto thingKind : AllAllocKinds()) {
+      for (ArenaIter aiter(zone, thingKind); !aiter.done(); aiter.next()) {
+        Arena* arena = aiter.get();
+        size_t thingCount = arena->getThingsPerArena();
+        uint8_t* savedMarkBits = map.lookup(arena)->value().markBits.get();
+        mozilla::PodCopy(temp, arena->markBits(), thingCount);
+        mozilla::PodCopy(arena->markBits(), savedMarkBits, thingCount);
+        mozilla::PodCopy(savedMarkBits, temp, thingCount);
+      }
     }
   }
 
@@ -654,7 +675,7 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
 
 void js::gc::MarkingValidator::validate() {
   /*
-   * Validates the incremental marking for a single compartment by comparing
+   * Validates the incremental marking for the current sweep group by comparing
    * the mark bits to those previously recorded for a non-incremental mark.
    */
 
@@ -662,54 +683,50 @@ void js::gc::MarkingValidator::validate() {
     return;
   }
 
+  MOZ_ASSERT(gc->nursery().isEmpty());
+  MOZ_ASSERT(!gc->marker.isWeakMarking());
+
   gc->waitBackgroundSweepEnd();
 
-  AutoLockGC lock(gc->rt);
-  for (auto chunk = gc->allNonEmptyChunks(lock); !chunk.done(); chunk.next()) {
-    BitmapMap::Ptr ptr = map.lookup(chunk);
-    if (!ptr) {
-      continue; /* Allocated after we did the non-incremental mark. */
-    }
-
-    ChunkBitmap* bitmap = ptr->value().get();
-    ChunkBitmap* incBitmap = &chunk->bitmap;
-
-    for (size_t i = 0; i < ArenasPerChunk; i++) {
-      if (chunk->decommittedArenas.get(i)) {
-        continue;
-      }
-      Arena* arena = &chunk->arenas[i];
-      if (!arena->allocated()) {
-        continue;
-      }
-      if (!arena->zone->isGCSweeping()) {
-        continue;
-      }
-
-      AllocKind kind = arena->getAllocKind();
-      uintptr_t thing = arena->thingsStart();
-      uintptr_t end = arena->thingsEnd();
-      while (thing < end) {
-        auto cell = reinterpret_cast<TenuredCell*>(thing);
+  for (SweepGroupZonesIter zone(gc); !zone.done(); zone.next()) {
+    for (auto thingKind : AllAllocKinds()) {
+      for (ArenaIter aiter(zone, thingKind); !aiter.done(); aiter.next()) {
+        Arena* arena = aiter.get();
 
         /*
-         * If a non-incremental GC wouldn't have collected a cell, then
-         * an incremental GC won't collect it.
+         * It's possible for the arena to have been freshly allocated since we
+         * did the non-incremental mark, or to have been freed and reallocated
+         * in a new zone.
          */
-        if (bitmap->isMarkedAny(cell)) {
-          MOZ_RELEASE_ASSERT(incBitmap->isMarkedAny(cell));
+        MarkBitsMap::Ptr ptr = map.lookup(arena);
+        if (!ptr || ptr->value().zone != zone) {
+          continue;
         }
 
-        /*
-         * If the cycle collector isn't allowed to collect an object
-         * after a non-incremental GC has run, then it isn't allowed to
-         * collected it after an incremental GC.
-         */
-        if (!bitmap->isMarkedGray(cell)) {
-          MOZ_RELEASE_ASSERT(!incBitmap->isMarkedGray(cell));
-        }
+        uint8_t* markBits = ptr->value().markBits.get();
+        uint8_t* incMarkBits = arena->markBits();
 
-        thing += Arena::thingSize(kind);
+        size_t thingCount = arena->getThingsPerArena();
+
+        for (size_t i = 0; i < thingCount; i++) {
+          /*
+           * If a non-incremental GC wouldn't have collected a cell, then an
+           * incremental GC won't collect it.
+           */
+          if (markBits[i] & MarkBitMaskBothBits) {
+            MOZ_RELEASE_ASSERT(incMarkBits[i] & MarkBitMaskBothBits);
+          }
+
+          /*
+           * If the cycle collector isn't allowed to collect an object
+           * after a non-incremental GC has run, then it isn't allowed to
+           * collected it after an incremental GC.
+           */
+          if ((markBits[i] & MarkBitMaskBothBits) != MarkBitMaskGrayOrBlack) {
+            MOZ_RELEASE_ASSERT((incMarkBits[i] & MarkBitMaskBothBits) !=
+                               MarkBitMaskGrayOrBlack);
+          }
+        }
       }
     }
   }

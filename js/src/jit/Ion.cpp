@@ -1963,7 +1963,7 @@ static bool CanIonCompileOrInlineScript(JSScript* script, const char** reason) {
   if (script->isForEval()) {
     // Eval frames are not yet supported. Supporting this will require new
     // logic in pushBailoutFrame to deal with linking prev.
-    // Additionally, JSOP_DEFVAR support will require baking in isEvalFrame().
+    // Additionally, JSOp::DefVar support will require baking in isEvalFrame().
     *reason = "eval script";
     return false;
   }
@@ -2069,7 +2069,7 @@ static OptimizationLevel GetOptimizationLevel(HandleScript script,
 static MethodStatus Compile(JSContext* cx, HandleScript script,
                             BaselineFrame* osrFrame, uint32_t osrFrameSize,
                             jsbytecode* osrPc, bool forceRecompile = false) {
-  MOZ_ASSERT(jit::IsIonEnabled());
+  MOZ_ASSERT(jit::IsIonEnabled(cx));
   MOZ_ASSERT(jit::IsBaselineJitEnabled());
 
   AutoGeckoProfilerEntry pseudoFrame(
@@ -2169,7 +2169,7 @@ bool jit::OffThreadCompilationAvailable(JSContext* cx) {
 }
 
 MethodStatus jit::CanEnterIon(JSContext* cx, RunState& state) {
-  MOZ_ASSERT(jit::IsIonEnabled());
+  MOZ_ASSERT(jit::IsIonEnabled(cx));
 
   HandleScript script = state.script();
 
@@ -2245,7 +2245,7 @@ MethodStatus jit::CanEnterIon(JSContext* cx, RunState& state) {
 static MethodStatus BaselineCanEnterAtEntry(JSContext* cx, HandleScript script,
                                             BaselineFrame* frame,
                                             uint32_t frameSize) {
-  MOZ_ASSERT(jit::IsIonEnabled());
+  MOZ_ASSERT(jit::IsIonEnabled(cx));
   MOZ_ASSERT(script->canIonCompile());
   MOZ_ASSERT(!script->isIonCompilingOffThread());
   MOZ_ASSERT(!script->hasIonScript());
@@ -2275,8 +2275,8 @@ static MethodStatus BaselineCanEnterAtBranch(JSContext* cx, HandleScript script,
                                              BaselineFrame* osrFrame,
                                              uint32_t osrFrameSize,
                                              jsbytecode* pc) {
-  MOZ_ASSERT(jit::IsIonEnabled());
-  MOZ_ASSERT((JSOp)*pc == JSOP_LOOPHEAD);
+  MOZ_ASSERT(jit::IsIonEnabled(cx));
+  MOZ_ASSERT((JSOp)*pc == JSOp::LoopHead);
 
   // Skip if the script has been disabled.
   if (!script->canIonCompile()) {
@@ -2348,11 +2348,11 @@ static MethodStatus BaselineCanEnterAtBranch(JSContext* cx, HandleScript script,
 
 static bool IonCompileScriptForBaseline(JSContext* cx, BaselineFrame* frame,
                                         uint32_t frameSize, jsbytecode* pc) {
-  MOZ_ASSERT(IsIonEnabled());
+  MOZ_ASSERT(IsIonEnabled(cx));
   MOZ_ASSERT(frame->debugFrameSize() == frameSize);
 
   RootedScript script(cx, frame->script());
-  bool isLoopHead = JSOp(*pc) == JSOP_LOOPHEAD;
+  bool isLoopHead = JSOp(*pc) == JSOp::LoopHead;
 
   // The Baseline JIT code checks for Ion disabled or compiling off-thread.
   MOZ_ASSERT(script->canIonCompile());
@@ -2506,7 +2506,7 @@ bool jit::IonCompileScriptForBaselineOSR(JSContext* cx, BaselineFrame* frame,
   *infoPtr = nullptr;
 
   MOZ_ASSERT(frame->debugFrameSize() == frameSize);
-  MOZ_ASSERT(JSOp(*pc) == JSOP_LOOPHEAD);
+  MOZ_ASSERT(JSOp(*pc) == JSOp::LoopHead);
 
   if (!IonCompileScriptForBaseline(cx, frame, frameSize, pc)) {
     return false;

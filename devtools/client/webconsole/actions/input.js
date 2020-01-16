@@ -219,16 +219,26 @@ function terminalInputChanged(expression) {
       return;
     }
 
+    const { terminalInput = "" } = getState().history;
+    // Only re-evaluate if the expression did change.
+    if (
+      terminalInput &&
+      expression &&
+      expression.trim() === terminalInput.trim()
+    ) {
+      return;
+    }
+
     const originalExpression = expression;
     dispatch({
       type: SET_TERMINAL_INPUT,
-      expression,
+      expression: expression.trim(),
     });
 
     let mapped;
     ({ expression, mapped } = await getMappedExpression(hud, expression));
 
-    const { frameActor, webConsoleFront } = webConsoleUI.getFrameActor();
+    const { frameActor, webConsoleFront } = await webConsoleUI.getFrameActor();
 
     const response = await client.evaluateJSAsync(expression, {
       frameActor,

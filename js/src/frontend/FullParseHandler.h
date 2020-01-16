@@ -202,6 +202,9 @@ class FullParseHandler {
   void addToCallSiteObject(CallSiteNodeType callSiteObj, Node rawNode,
                            Node cookedNode) {
     MOZ_ASSERT(callSiteObj->isKind(ParseNodeKind::CallSiteObj));
+    MOZ_ASSERT(rawNode->isKind(ParseNodeKind::TemplateStringExpr));
+    MOZ_ASSERT(cookedNode->isKind(ParseNodeKind::TemplateStringExpr) ||
+               cookedNode->isKind(ParseNodeKind::RawUndefinedExpr));
 
     addArrayElement(callSiteObj, cookedNode);
     addArrayElement(callSiteObj->rawNodes(), rawNode);
@@ -347,7 +350,7 @@ class FullParseHandler {
 
   CallNodeType newSuperCall(Node callee, Node args, bool isSpread) {
     return new_<CallNode>(ParseNodeKind::SuperCallExpr,
-                          isSpread ? JSOP_SPREADSUPERCALL : JSOP_SUPERCALL,
+                          isSpread ? JSOp::SpreadSuperCall : JSOp::SuperCall,
                           callee, args);
   }
 
@@ -872,7 +875,7 @@ class FullParseHandler {
   CallNodeType newNewExpression(uint32_t begin, Node ctor, Node args,
                                 bool isSpread) {
     return new_<CallNode>(ParseNodeKind::NewExpr,
-                          isSpread ? JSOP_SPREADNEW : JSOP_NEW,
+                          isSpread ? JSOp::SpreadNew : JSOp::New,
                           TokenPos(begin, args->pn_pos.end), ctor, args);
   }
 
@@ -921,6 +924,7 @@ class FullParseHandler {
 
   bool isUsableAsObjectPropertyName(Node node) {
     return node->isKind(ParseNodeKind::NumberExpr) ||
+           node->isKind(ParseNodeKind::BigIntExpr) ||
            node->isKind(ParseNodeKind::ObjectPropertyName) ||
            node->isKind(ParseNodeKind::StringExpr) ||
            node->isKind(ParseNodeKind::ComputedName);
@@ -1052,6 +1056,7 @@ class FullParseHandler {
 
   bool canSkipLazyInnerFunctions() { return !!lazyOuterFunction_; }
   bool canSkipLazyClosedOverBindings() { return !!lazyOuterFunction_; }
+  bool canSkipRegexpSyntaxParse() { return !!lazyOuterFunction_; }
   JSFunction* nextLazyInnerFunction() {
     return &lazyOuterFunction_->gcthings()[lazyInnerFunctionIndex++]
                 .as<JSObject>()

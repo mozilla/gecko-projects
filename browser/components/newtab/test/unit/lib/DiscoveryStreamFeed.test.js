@@ -5,7 +5,7 @@ import {
 } from "common/Actions.jsm";
 import { combineReducers, createStore } from "redux";
 import { GlobalOverrider } from "test/unit/utils";
-import injector from "inject!lib/DiscoveryStreamFeed.jsm";
+import { DiscoveryStreamFeed } from "lib/DiscoveryStreamFeed.jsm";
 import { reducers } from "common/Reducers.jsm";
 
 const CONFIG_PREF_NAME = "discoverystream.config";
@@ -20,7 +20,6 @@ const FAKE_UUID = "{foo-123-foo}";
 
 // eslint-disable-next-line max-statements
 describe("DiscoveryStreamFeed", () => {
-  let DiscoveryStreamFeed;
   let feed;
   let sandbox;
   let fetchStub;
@@ -43,38 +42,11 @@ describe("DiscoveryStreamFeed", () => {
   beforeEach(() => {
     sandbox = sinon.createSandbox();
 
-    class FakeUserDomainAffinityProvider {
-      constructor(
-        timeSegments,
-        parameterSets,
-        maxHistoryQueryResults,
-        version,
-        scores
-      ) {
-        this.timeSegments = timeSegments;
-        this.parameterSets = parameterSets;
-        this.maxHistoryQueryResults = maxHistoryQueryResults;
-        this.version = version;
-        this.scores = scores;
-      }
-
-      getAffinities() {
-        return {};
-      }
-    }
-
     // Fetch
     fetchStub = sandbox.stub(global, "fetch");
 
     // Time
     clock = sinon.useFakeTimers();
-
-    // Injector
-    ({ DiscoveryStreamFeed } = injector({
-      "lib/UserDomainAffinityProvider.jsm": {
-        UserDomainAffinityProvider: FakeUserDomainAffinityProvider,
-      },
-    }));
 
     globals = new GlobalOverrider();
     globals.set("gUUIDGenerator", { generateUUID: () => FAKE_UUID });
@@ -971,8 +943,31 @@ describe("DiscoveryStreamFeed", () => {
     });
   });
 
+  describe("#reset", () => {
+    it("should fire all teardown based functions", async () => {
+      sandbox.stub(global.Services.obs, "removeObserver").returns();
+
+      sandbox.stub(feed, "resetDataPrefs").returns();
+      sandbox.stub(feed, "resetCache").returns(Promise.resolve());
+      sandbox.stub(feed, "resetState").returns();
+
+      feed.affinityProvider = {
+        teardown: sandbox.stub().returns(),
+      };
+      feed.loaded = true;
+
+      await feed.reset();
+
+      assert.calledOnce(feed.resetDataPrefs);
+      assert.calledOnce(feed.resetCache);
+      assert.calledOnce(feed.resetState);
+      assert.calledOnce(feed.affinityProvider.teardown);
+      assert.calledOnce(global.Services.obs.removeObserver);
+    });
+  });
+
   describe("#resetCache", () => {
-    it("should set .layout, .feeds .spocs and .affinities to {", async () => {
+    it("should set .layout, .feeds .spocs and .affinities to {}", async () => {
       sandbox.stub(feed.cache, "set").returns(Promise.resolve());
 
       await feed.resetCache();
@@ -2032,6 +2027,76 @@ describe("DiscoveryStreamFeed", () => {
     });
   });
 
+  describe("#onAction: DISCOVERY_STREAM_PERSONALIZATION_VERSION_TOGGLE", () => {
+    it("should fire SET_PREF with version", async () => {
+      sandbox.spy(feed.store, "dispatch");
+      feed.store.getState = () => ({
+        Prefs: {
+          values: {
+            "discoverystream.personalization.version": 1,
+          },
+        },
+      });
+
+      await feed.onAction({
+        type: at.DISCOVERY_STREAM_PERSONALIZATION_VERSION_TOGGLE,
+      });
+      assert.calledWith(
+        feed.store.dispatch,
+        ac.SetPref("discoverystream.personalization.version", 2)
+      );
+    });
+  });
+
+  describe("#onAction: DISCOVERY_STREAM_DEV_IDLE_DAILY", () => {
+    it("should trigger idle-daily observer", async () => {
+      sandbox.stub(global.Services.obs, "notifyObservers").returns();
+      await feed.onAction({
+        type: at.DISCOVERY_STREAM_DEV_IDLE_DAILY,
+      });
+      assert.calledWith(
+        global.Services.obs.notifyObservers,
+        null,
+        "idle-daily"
+      );
+    });
+  });
+
+  describe("#onAction: DISCOVERY_STREAM_DEV_SYNC_RS", () => {
+    it("should fire remote settings pollChanges", async () => {
+      sandbox.stub(global.RemoteSettings, "pollChanges").returns();
+      await feed.onAction({
+        type: at.DISCOVERY_STREAM_DEV_SYNC_RS,
+      });
+      assert.calledOnce(global.RemoteSettings.pollChanges);
+    });
+  });
+
+  describe("#onAction: DISCOVERY_STREAM_DEV_SYSTEM_TICK", () => {
+    it("should refresh if DiscoveryStream has been loaded at least once and a cache has expired", async () => {
+      sandbox.stub(feed.cache, "set").resolves();
+      setPref(CONFIG_PREF_NAME, { enabled: true });
+
+      await feed.onAction({ type: at.INIT });
+
+      sandbox.stub(feed, "checkIfAnyCacheExpired").resolves(true);
+      sandbox.stub(feed, "refreshAll").resolves();
+
+      await feed.onAction({ type: at.DISCOVERY_STREAM_DEV_SYSTEM_TICK });
+      assert.calledOnce(feed.refreshAll);
+    });
+  });
+
+  describe("#onAction: DISCOVERY_STREAM_DEV_EXPIRE_CACHE", () => {
+    it("should fire resetCache", async () => {
+      sandbox.stub(feed, "resetCache").returns();
+      await feed.onAction({
+        type: at.DISCOVERY_STREAM_DEV_EXPIRE_CACHE,
+      });
+      assert.calledOnce(feed.resetCache);
+    });
+  });
+
   describe("#isExpired", () => {
     it("should throw if the key is not valid", () => {
       assert.throws(() => {
@@ -2300,6 +2365,48 @@ describe("DiscoveryStreamFeed", () => {
     });
   });
 
+  describe("#setAffinityProviderVersion", () => {
+    beforeEach(() => {
+      sandbox.spy(feed.store, "dispatch");
+    });
+    it("should properly set affinity provider with version 1", async () => {
+      feed.store.getState = () => ({
+        Prefs: {
+          values: {
+            "discoverystream.personalization.version": 1,
+          },
+        },
+      });
+      feed.setAffinityProviderVersion();
+      assert.calledWith(
+        feed.store.dispatch,
+        ac.BroadcastToContent({
+          type: at.DISCOVERY_STREAM_PERSONALIZATION_VERSION,
+          data: { version: 1 },
+        })
+      );
+      assert.equal(feed.affinityProviderV2, null);
+    });
+    it("should properly set affinity provider with version 2", async () => {
+      feed.store.getState = () => ({
+        Prefs: {
+          values: {
+            "discoverystream.personalization.modelKeys": "1,2,3,4",
+            "discoverystream.personalization.version": 2,
+          },
+        },
+      });
+      feed.setAffinityProviderVersion();
+      assert.calledWith(
+        feed.store.dispatch,
+        ac.BroadcastToContent({
+          type: at.DISCOVERY_STREAM_PERSONALIZATION_VERSION,
+          data: { version: 2 },
+        })
+      );
+    });
+  });
+
   describe("#reportCacheAge", () => {
     let cache;
     const cacheAge = 30;
@@ -2397,12 +2504,19 @@ describe("DiscoveryStreamFeed", () => {
       feed._prefCache.config = {
         personalized: true,
       };
+      const DEFAULT_TIME_SEGMENTS = [
+        { id: "hour", startTime: 3600, endTime: 0, weightPosition: 1 },
+        { id: "day", startTime: 86400, endTime: 3600, weightPosition: 0.75 },
+        { id: "week", startTime: 604800, endTime: 86400, weightPosition: 0.5 },
+        { id: "weekPlus", startTime: 0, endTime: 604800, weightPosition: 0.25 },
+        { id: "alltime", startTime: 0, endTime: 0, weightPosition: 0.25 },
+      ];
       feed.affinities = {
         parameterSets: {
           default: {},
         },
         maxHistoryQueryResults: 1000,
-        timeSegments: [],
+        timeSegments: DEFAULT_TIME_SEGMENTS,
         version: "123",
       };
 
@@ -2436,6 +2550,27 @@ describe("DiscoveryStreamFeed", () => {
       assert.deepEqual(filtered, [
         { item_score: 0.5, min_score: 0.6, score: 0.5 },
       ]);
+    });
+    it("should fire dispatchRelevanceScoreDuration if available", () => {
+      feed.affinityProvider = {
+        dispatchRelevanceScoreDuration: sandbox.stub().returns(),
+      };
+      feed.scoreItems([]);
+
+      assert.calledOnce(feed.affinityProvider.dispatchRelevanceScoreDuration);
+    });
+    it("should fire PERSONALIZATION_V1_ITEM_RELEVANCE_SCORE_DURATION", () => {
+      feed.affinityProvider = {};
+      sandbox.spy(feed.store, "dispatch");
+      feed.scoreItems([]);
+
+      assert.calledWith(
+        feed.store.dispatch,
+        ac.PerfEvent({
+          event: "PERSONALIZATION_V1_ITEM_RELEVANCE_SCORE_DURATION",
+          value: 0,
+        })
+      );
     });
   });
 

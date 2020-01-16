@@ -52,15 +52,15 @@ class MOZ_STACK_CLASS BytecodeCompiler {
 
   JSContext* cx;
   const JS::ReadOnlyCompileOptions& options;
-
-  JS::Rooted<ScriptSourceObject*> sourceObject;
-  ScriptSource* scriptSource = nullptr;
-
   ParseInfo& parseInfo;
 
   Directives directives;
 
   JS::Rooted<JSScript*> script;
+
+  ScriptSource* scriptSource() const {
+    return parseInfo.sourceObject->source();
+  };
 
  protected:
   BytecodeCompiler(JSContext* cx, ParseInfo& parseInfo,
@@ -78,18 +78,15 @@ class MOZ_STACK_CLASS BytecodeCompiler {
  public:
   JSContext* context() const { return cx; }
 
-  ScriptSourceObject* sourceObjectPtr() const { return sourceObject.get(); }
+  ScriptSourceObject* sourceObjectPtr() const { return parseInfo.sourceObject; }
 
   JS::Handle<JSScript*> getScript() { return script; }
 
  protected:
   void assertSourceCreated() const {
-    MOZ_ASSERT(sourceObject != nullptr);
-    MOZ_ASSERT(scriptSource != nullptr);
+    MOZ_ASSERT(parseInfo.sourceObject != nullptr);
+    MOZ_ASSERT(scriptSource() != nullptr);
   }
-
-  MOZ_MUST_USE bool createScriptSource(
-      const mozilla::Maybe<uint32_t>& parameterListEnd);
 
   // Create a script for source of the given length, using the explicitly-
   // provided toString offsets as the created script's offsets in the source.
@@ -106,7 +103,7 @@ class MOZ_STACK_CLASS BytecodeCompiler {
   // uses fields in *this* class.
   template <typename Unit>
   MOZ_MUST_USE bool assignSource(JS::SourceText<Unit>& sourceBuffer) {
-    return scriptSource->assignSource(cx, options, sourceBuffer);
+    return scriptSource()->assignSource(cx, options, sourceBuffer);
   }
 
   bool canLazilyParse() const;
@@ -128,13 +125,11 @@ class MOZ_STACK_CLASS GlobalScriptInfo final : public BytecodeCompiler {
   GlobalSharedContext* sharedContext() { return &globalsc_; }
 };
 
-extern JSScript* CompileGlobalScript(
-    GlobalScriptInfo& info, JS::SourceText<char16_t>& srcBuf,
-    ScriptSourceObject** sourceObjectOut = nullptr);
+extern JSScript* CompileGlobalScript(GlobalScriptInfo& info,
+                                     JS::SourceText<char16_t>& srcBuf);
 
-extern JSScript* CompileGlobalScript(
-    GlobalScriptInfo& info, JS::SourceText<mozilla::Utf8Unit>& srcBuf,
-    ScriptSourceObject** sourceObjectOut = nullptr);
+extern JSScript* CompileGlobalScript(GlobalScriptInfo& info,
+                                     JS::SourceText<mozilla::Utf8Unit>& srcBuf);
 
 class MOZ_STACK_CLASS EvalScriptInfo final : public BytecodeCompiler {
   JS::Handle<JSObject*> environment_;

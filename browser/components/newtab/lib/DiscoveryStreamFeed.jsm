@@ -11,6 +11,11 @@ ChromeUtils.defineModuleGetter(
   "NewTabUtils",
   "resource://gre/modules/NewTabUtils.jsm"
 );
+ChromeUtils.defineModuleGetter(
+  this,
+  "RemoteSettings",
+  "resource://services-settings/remote-settings.js"
+);
 const { setTimeout, clearTimeout } = ChromeUtils.import(
   "resource://gre/modules/Timer.jsm"
 );
@@ -65,6 +70,7 @@ const PREF_SHOW_SPONSORED = "showSponsored";
 const PREF_SPOC_IMPRESSIONS = "discoverystream.spoc.impressions";
 const PREF_FLIGHT_BLOCKS = "discoverystream.flight.blocks";
 const PREF_REC_IMPRESSIONS = "discoverystream.rec.impressions";
+const PREF_PERSONALIZATION_VERSION = "discoverystream.personalization.version";
 
 let getHardcodedLayout;
 
@@ -749,6 +755,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
 
   scoreItems(items) {
     const filtered = [];
+    const scoreStart = perfService.absNow();
     const data = items
       .map(item => this.scoreItem(item))
       // Remove spocs that are scored too low.
@@ -761,6 +768,19 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
       })
       // Sort by highest scores.
       .sort((a, b) => b.score - a.score);
+
+    if (this.affinityProvider) {
+      if (this.affinityProvider.dispatchRelevanceScoreDuration) {
+        this.affinityProvider.dispatchRelevanceScoreDuration(scoreStart);
+      } else {
+        this.store.dispatch(
+          ac.PerfEvent({
+            event: "PERSONALIZATION_V1_ITEM_RELEVANCE_SCORE_DURATION",
+            value: Math.round(perfService.absNow() - scoreStart),
+          })
+        );
+      }
+    }
     return { data, filtered };
   }
 
@@ -1164,10 +1184,29 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     }
   }
 
+  /**
+   * Sets affinityProvider state to the correct version.
+   */
+  setAffinityProviderVersion() {
+    const version = this.store.getState().Prefs.values[
+      PREF_PERSONALIZATION_VERSION
+    ];
+
+    this.store.dispatch(
+      ac.BroadcastToContent({
+        type: at.DISCOVERY_STREAM_PERSONALIZATION_VERSION,
+        data: {
+          version,
+        },
+      })
+    );
+  }
+
   async enable() {
     // Note that cache age needs to be reported prior to refreshAll.
     await this.reportCacheAge();
     const start = perfService.absNow();
+    this.setAffinityProviderVersion();
     await this.refreshAll({ updateOpenTabs: true, isStartup: true });
     Services.obs.addObserver(this, "idle-daily");
     this.loaded = true;
@@ -1180,6 +1219,9 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     await this.resetCache();
     if (this.loaded) {
       Services.obs.removeObserver(this, "idle-daily");
+    }
+    if (this.affinityProvider && this.affinityProvider.teardown) {
+      this.affinityProvider.teardown();
     }
     this.resetState();
   }
@@ -1302,6 +1344,44 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
     }
   }
 
+  async onPrefChangedAction(action) {
+    switch (action.data.name) {
+      case PREF_CONFIG:
+      case PREF_ENABLED:
+      case PREF_HARDCODED_BASIC_LAYOUT:
+      case PREF_SPOCS_ENDPOINT:
+      case PREF_LANG_LAYOUT_CONFIG:
+      case PREF_PERSONALIZATION_VERSION:
+        // Clear the cached config and broadcast the newly computed value
+        this._prefCache.config = null;
+        this.store.dispatch(
+          ac.BroadcastToContent({
+            type: at.DISCOVERY_STREAM_CONFIG_CHANGE,
+            data: this.config,
+          })
+        );
+        break;
+      case PREF_TOPSTORIES:
+        if (!action.data.value) {
+          // Ensure we delete any remote data potentially related to spocs.
+          this.clearSpocs();
+        } else {
+          this.enableStories();
+        }
+        break;
+      // Check if spocs was disabled. Remove them if they were.
+      case PREF_SHOW_SPONSORED:
+        if (!action.data.value) {
+          // Ensure we delete any remote data potentially related to spocs.
+          this.clearSpocs();
+        }
+        await this.loadSpocs(update =>
+          this.store.dispatch(ac.BroadcastToContent(update))
+        );
+        break;
+    }
+  }
+
   async onAction(action) {
     switch (action.type) {
       case at.INIT:
@@ -1313,6 +1393,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
           await this.enable();
         }
         break;
+      case at.DISCOVERY_STREAM_DEV_SYSTEM_TICK:
       case at.SYSTEM_TICK:
         // Only refresh if we loaded once in .enable()
         if (
@@ -1322,6 +1403,25 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
         ) {
           await this.refreshAll({ updateOpenTabs: false });
         }
+        break;
+      case at.DISCOVERY_STREAM_DEV_IDLE_DAILY:
+        Services.obs.notifyObservers(null, "idle-daily");
+        break;
+      case at.DISCOVERY_STREAM_DEV_SYNC_RS:
+        RemoteSettings.pollChanges();
+        break;
+      case at.DISCOVERY_STREAM_DEV_EXPIRE_CACHE:
+        await this.resetCache();
+        break;
+      case at.DISCOVERY_STREAM_PERSONALIZATION_VERSION_TOGGLE:
+        let version = this.store.getState().Prefs.values[
+          PREF_PERSONALIZATION_VERSION
+        ];
+
+        // Toggle the version between 1 and 2.
+        this.store.dispatch(
+          ac.SetPref(PREF_PERSONALIZATION_VERSION, version === 1 ? 2 : 1)
+        );
         break;
       case at.DISCOVERY_STREAM_CONFIG_SET_VALUE:
         // Use the original string pref to then set a value instead of
@@ -1451,40 +1551,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
         break;
       }
       case at.PREF_CHANGED:
-        switch (action.data.name) {
-          case PREF_CONFIG:
-          case PREF_ENABLED:
-          case PREF_HARDCODED_BASIC_LAYOUT:
-          case PREF_SPOCS_ENDPOINT:
-          case PREF_LANG_LAYOUT_CONFIG:
-            // Clear the cached config and broadcast the newly computed value
-            this._prefCache.config = null;
-            this.store.dispatch(
-              ac.BroadcastToContent({
-                type: at.DISCOVERY_STREAM_CONFIG_CHANGE,
-                data: this.config,
-              })
-            );
-            break;
-          case PREF_TOPSTORIES:
-            if (!action.data.value) {
-              // Ensure we delete any remote data potentially related to spocs.
-              this.clearSpocs();
-            } else {
-              this.enableStories();
-            }
-            break;
-          // Check if spocs was disabled. Remove them if they were.
-          case PREF_SHOW_SPONSORED:
-            if (!action.data.value) {
-              // Ensure we delete any remote data potentially related to spocs.
-              this.clearSpocs();
-            }
-            await this.loadSpocs(update =>
-              this.store.dispatch(ac.BroadcastToContent(update))
-            );
-            break;
-        }
+        await this.onPrefChangedAction(action);
         break;
     }
   }

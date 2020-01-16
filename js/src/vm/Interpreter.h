@@ -154,7 +154,7 @@ extern bool Construct(JSContext* cx, HandleValue fval,
 // |IsConstructor(args.callee())|. If this is not the case, throw a TypeError.
 // Otherwise, the user must ensure that, additionally,
 // |IsConstructor(args.newTarget())|. (If |args| comes directly from the
-// interpreter stack, as set up by JSOP_NEW, this comes for free.) Then perform
+// interpreter stack, as set up by JSOp::New, this comes for free.) Then perform
 // a Construct() operation using |args|.
 //
 // This internal operation is intended only for use with arguments known to be
@@ -462,6 +462,18 @@ class MOZ_STACK_CLASS TryNoteIter {
   const JSTryNote* operator*() const { return tn_; }
 };
 
+class NoOpTryNoteFilter {
+ public:
+  explicit NoOpTryNoteFilter() = default;
+  bool operator()(const JSTryNote*) { return true; }
+};
+
+class TryNoteIterAll : public TryNoteIter<NoOpTryNoteFilter> {
+ public:
+  TryNoteIterAll(JSContext* cx, JSScript* script, jsbytecode* pc)
+      : TryNoteIter(cx, script, pc, NoOpTryNoteFilter()) {}
+};
+
 bool HandleClosingGeneratorReturn(JSContext* cx, AbstractFramePtr frame,
                                   bool ok);
 
@@ -609,7 +621,7 @@ void ReportInNotObjectError(JSContext* cx, HandleValue lref, int lindex,
 
 // The parser only reports redeclarations that occurs within a single
 // script. Due to the extensibility of the global lexical scope, we also check
-// for redeclarations during runtime in JSOP_DEF{VAR,LET,CONST}.
+// for redeclarations during runtime in JSOp::Def{Var,Let,Const}.
 void ReportRuntimeRedeclaration(JSContext* cx, HandlePropertyName name,
                                 const char* redeclKind);
 

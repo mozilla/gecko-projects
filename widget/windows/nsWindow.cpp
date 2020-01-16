@@ -570,6 +570,7 @@ nsWindow::nsWindow(bool aIsChildWindow)
   mIconSmall = nullptr;
   mIconBig = nullptr;
   mWnd = nullptr;
+  mLastKillFocusWindow = nullptr;
   mTransitionWnd = nullptr;
   mPaintDC = nullptr;
   mPrevWndProc = nullptr;
@@ -2182,7 +2183,7 @@ bool nsWindow::IsEnabled() const {
  *
  **************************************************************/
 
-void nsWindow::SetFocus(Raise aRaise) {
+void nsWindow::SetFocus(Raise aRaise, mozilla::dom::CallerType aCallerType) {
   if (mWnd) {
 #ifdef WINSTATE_DEBUG_OUTPUT
     if (mWnd == WinUtils::GetTopLevelHWND(mWnd)) {
@@ -3357,8 +3358,9 @@ nsresult nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen) {
     taskbarInfo->PrepareFullScreenHWND(mWnd, FALSE);
   }
 
+  OnSizeModeChange(mSizeMode);
+
   if (mWidgetListener) {
-    mWidgetListener->SizeModeChanged(mSizeMode);
     mWidgetListener->FullscreenChanged(aFullScreen);
   }
 
@@ -3771,7 +3773,7 @@ LayerManager* nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
     WinCompositorWidgetInitData initData(
         reinterpret_cast<uintptr_t>(mWnd),
         reinterpret_cast<uintptr_t>(static_cast<nsIWidget*>(this)),
-        mTransparencyMode);
+        mTransparencyMode, mSizeMode);
     // If we're not using the compositor, the options don't actually matter.
     CompositorOptions options(false, false);
     mBasicLayersSurface =
@@ -3813,7 +3815,6 @@ void nsWindow::SetCompositorWidgetDelegate(CompositorWidgetDelegate* delegate) {
     MOZ_ASSERT(mCompositorWidgetDelegate,
                "nsWindow::SetCompositorWidgetDelegate called with a "
                "non-PlatformCompositorWidgetDelegate");
-    mCompositorWidgetDelegate->SetParentWnd(mWnd);
   } else {
     mCompositorWidgetDelegate = nullptr;
   }
@@ -4504,25 +4505,32 @@ bool nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
   return result;
 }
 
-void nsWindow::DispatchFocusToTopLevelWindow(bool aIsActivate) {
-  if (aIsActivate) sJustGotActivate = false;
-  sJustGotDeactivate = false;
-
-  // retrive the toplevel window or dialog
-  HWND curWnd = mWnd;
+HWND nsWindow::GetTopLevelForFocus(HWND aCurWnd) {
+  // retrieve the toplevel window or dialogue
   HWND toplevelWnd = nullptr;
-  while (curWnd) {
-    toplevelWnd = curWnd;
-
-    nsWindow* win = WinUtils::GetNSWindowPtr(curWnd);
+  while (aCurWnd) {
+    toplevelWnd = aCurWnd;
+    nsWindow* win = WinUtils::GetNSWindowPtr(aCurWnd);
     if (win) {
-      nsWindowType wintype = win->WindowType();
-      if (wintype == eWindowType_toplevel || wintype == eWindowType_dialog)
+      if (win->mWindowType == eWindowType_toplevel ||
+          win->mWindowType == eWindowType_dialog) {
         break;
+      }
     }
 
-    curWnd = ::GetParent(curWnd);  // Parent or owner (if has no parent)
+    aCurWnd = ::GetParent(aCurWnd);  // Parent or owner (if has no parent)
   }
+  return toplevelWnd;
+}
+
+void nsWindow::DispatchFocusToTopLevelWindow(bool aIsActivate) {
+  if (aIsActivate) {
+    sJustGotActivate = false;
+  }
+  sJustGotDeactivate = false;
+  mLastKillFocusWindow = nullptr;
+
+  HWND toplevelWnd = GetTopLevelForFocus(mWnd);
 
   if (toplevelWnd) {
     nsWindow* win = WinUtils::GetNSWindowPtr(toplevelWnd);
@@ -5823,14 +5831,19 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
         if (WA_INACTIVE == fActive) {
           // when minimizing a window, the deactivation and focus events will
           // be fired in the reverse order. Instead, just deactivate right away.
-          if (HIWORD(wParam))
+          // This can also happen when a modal system dialog is opened, so check
+          // if the last window to receive the WM_KILLFOCUS message was this one
+          // or a child of this one.
+          if (HIWORD(wParam) ||
+              (mLastKillFocusWindow &&
+               (GetTopLevelForFocus(mLastKillFocusWindow) == mWnd))) {
             DispatchFocusToTopLevelWindow(false);
-          else
+          } else {
             sJustGotDeactivate = true;
-
-          if (mIsTopWidgetWindow)
+          }
+          if (mIsTopWidgetWindow) {
             mLastKeyboardLayout = KeyboardLayout::GetInstance()->GetLayout();
-
+          }
         } else {
           StopFlashing();
 
@@ -5896,6 +5909,8 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
     case WM_KILLFOCUS:
       if (sJustGotDeactivate) {
         DispatchFocusToTopLevelWindow(false);
+      } else {
+        mLastKillFocusWindow = mWnd;
       }
       break;
 
@@ -6536,8 +6551,7 @@ void nsWindow::OnWindowPosChanged(WINDOWPOS* wp) {
     }
 #endif
 
-    if (mWidgetListener && mSizeMode != previousSizeMode)
-      mWidgetListener->SizeModeChanged(mSizeMode);
+    if (mSizeMode != previousSizeMode) OnSizeModeChange(mSizeMode);
 
     // If window was restored, window activation was bypassed during the
     // SetSizeMode call originating from OnWindowPosChanging to avoid saving
@@ -6675,7 +6689,7 @@ void nsWindow::OnWindowPosChanging(LPWINDOWPOS& info) {
     else
       sizeMode = nsSizeMode_Normal;
 
-    if (mWidgetListener) mWidgetListener->SizeModeChanged(sizeMode);
+    OnSizeModeChange(sizeMode);
 
     UpdateNonClientMargins(sizeMode, false);
   }
@@ -7181,6 +7195,9 @@ void nsWindow::OnDestroy() {
   mWidgetListener = nullptr;
   mAttachedWidgetListener = nullptr;
 
+  if (mWnd == mLastKillFocusWindow) {
+    mLastKillFocusWindow = nullptr;
+  }
   // Unregister notifications from terminal services
   ::WTSUnRegisterSessionNotification(mWnd);
 
@@ -7248,6 +7265,11 @@ void nsWindow::OnDestroy() {
 
 // Send a resize message to the listener
 bool nsWindow::OnResize(const LayoutDeviceIntSize& aSize) {
+  if (mCompositorWidgetDelegate &&
+      !mCompositorWidgetDelegate->OnWindowResize(aSize)) {
+    return false;
+  }
+
   bool result = false;
   if (mWidgetListener) {
     result = mWidgetListener->WindowResized(this, aSize.width, aSize.height);
@@ -7261,6 +7283,16 @@ bool nsWindow::OnResize(const LayoutDeviceIntSize& aSize) {
   }
 
   return result;
+}
+
+void nsWindow::OnSizeModeChange(nsSizeMode aSizeMode) {
+  if (mCompositorWidgetDelegate) {
+    mCompositorWidgetDelegate->OnWindowModeChange(aSizeMode);
+  }
+
+  if (mWidgetListener) {
+    mWidgetListener->SizeModeChanged(aSizeMode);
+  }
 }
 
 bool nsWindow::OnHotKey(WPARAM wParam, LPARAM lParam) { return true; }
@@ -8476,7 +8508,7 @@ void nsWindow::GetCompositorWidgetInitData(
   *aInitData = WinCompositorWidgetInitData(
       reinterpret_cast<uintptr_t>(mWnd),
       reinterpret_cast<uintptr_t>(static_cast<nsIWidget*>(this)),
-      mTransparencyMode);
+      mTransparencyMode, mSizeMode);
 }
 
 bool nsWindow::SynchronouslyRepaintOnResize() {

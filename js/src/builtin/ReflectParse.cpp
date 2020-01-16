@@ -3123,7 +3123,8 @@ bool ASTSerializer::propertyName(ParseNode* key, MutableHandleValue dst) {
   }
 
   LOCAL_ASSERT(key->isKind(ParseNodeKind::StringExpr) ||
-               key->isKind(ParseNodeKind::NumberExpr));
+               key->isKind(ParseNodeKind::NumberExpr) ||
+               key->isKind(ParseNodeKind::BigIntExpr));
 
   return literal(key, dst);
 }
@@ -3661,16 +3662,14 @@ static bool reflect_parse(JSContext* cx, uint32_t argc, Value* vp) {
 
   LifoAllocScope allocScope(&cx->tempLifoAlloc());
   ParseInfo parseInfo(cx, allocScope);
-
-  RootedScriptSourceObject sourceObject(
-      cx, frontend::CreateScriptSourceObject(cx, options, mozilla::Nothing()));
-  if (!sourceObject) {
+  if (!parseInfo.initFromOptions(cx, options)) {
     return false;
   }
 
   Parser<FullParseHandler, char16_t> parser(
       cx, options, chars.begin().get(), chars.length(),
-      /* foldConstants = */ false, parseInfo, nullptr, nullptr, sourceObject);
+      /* foldConstants = */ false, parseInfo, nullptr, nullptr,
+      parseInfo.sourceObject);
   if (!parser.checkOptions()) {
     return false;
   }

@@ -3552,7 +3552,7 @@ mozilla::ipc::IPCResult ContentChild::RecvDeactivate(PBrowserChild* aTab) {
 
 mozilla::ipc::IPCResult ContentChild::RecvProvideAnonymousTemporaryFile(
     const uint64_t& aID, const FileDescOrError& aFDOrError) {
-  nsAutoPtr<AnonymousTemporaryFileCallback> callback;
+  mozilla::UniquePtr<AnonymousTemporaryFileCallback> callback;
   mPendingAnonymousTemporaryFiles.Remove(aID, &callback);
   MOZ_ASSERT(callback);
 
@@ -4047,8 +4047,8 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowClose(BrowsingContext* aContext,
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult ContentChild::RecvWindowFocus(
-    BrowsingContext* aContext) {
+mozilla::ipc::IPCResult ContentChild::RecvWindowFocus(BrowsingContext* aContext,
+                                                      CallerType aCallerType) {
   if (!aContext) {
     MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
             ("ChildIPC: Trying to send a message to dead or detached context"));
@@ -4062,7 +4062,7 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowFocus(
         ("ChildIPC: Trying to send a message to a context without a window"));
     return IPC_OK();
   }
-  nsGlobalWindowOuter::Cast(window)->FocusOuter();
+  nsGlobalWindowOuter::Cast(window)->FocusOuter(aCallerType);
   return IPC_OK();
 }
 
@@ -4114,9 +4114,10 @@ mozilla::ipc::IPCResult ContentChild::RecvWindowPostMessage(
   // Create and asynchronously dispatch a runnable which will handle actual DOM
   // event creation and dispatch.
   RefPtr<BrowsingContext> sourceBc = aData.source();
-  RefPtr<PostMessageEvent> event = new PostMessageEvent(
-      sourceBc, aData.origin(), window, providedPrincipal,
-      aData.callerDocumentURI(), aData.isFromPrivateWindow());
+  RefPtr<PostMessageEvent> event =
+      new PostMessageEvent(sourceBc, aData.origin(), window, providedPrincipal,
+                           aData.innerWindowId(), aData.callerURI(),
+                           aData.scriptLocation(), aData.isFromPrivateWindow());
   event->UnpackFrom(aMessage);
 
   event->DispatchToTargetThread(IgnoredErrorResult());
@@ -4212,7 +4213,7 @@ mozilla::ipc::IPCResult ContentChild::RecvInternalLoad(
 
   if (aTakeFocus) {
     if (nsCOMPtr<nsPIDOMWindowOuter> domWin = aContext->GetDOMWindow()) {
-      nsFocusManager::FocusWindow(domWin);
+      nsFocusManager::FocusWindow(domWin, CallerType::System);
     }
   }
 

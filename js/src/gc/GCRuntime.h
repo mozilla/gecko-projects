@@ -248,7 +248,6 @@ class ZoneList {
   ZoneList& operator=(const ZoneList& other) = delete;
 };
 
-void SweepFinalizationGroups(GCParallelTask* task);
 void SweepWeakRefs(GCParallelTask* task);
 
 class GCRuntime {
@@ -701,8 +700,8 @@ class GCRuntime {
   void updateAtomsBitmap();
   void sweepDebuggerOnMainThread(JSFreeOp* fop);
   void sweepJitDataOnMainThread(JSFreeOp* fop);
-  void sweepFinalizationGroups(Zone* zone);
-  friend void SweepFinalizationGroups(GCParallelTask* task);
+  void sweepFinalizationGroupsOnMainThread();
+  void sweepFinalizationGroups(Zone* zone, bool isShuttingDown = false);
   void queueFinalizationGroupForCleanup(FinalizationGroupObject* group);
   void sweepWeakRefs(Zone* zone);
   friend void SweepWeakRefs(GCParallelTask* task);
@@ -753,6 +752,7 @@ class GCRuntime {
   void releaseRelocatedArenasWithoutUnlocking(Arena* arenaList,
                                               const AutoLockGC& lock);
   void finishCollection();
+  IncrementalProgress joinSweepMarkTask();
 
 #ifdef JS_GC_ZEAL
   void computeNonIncrementalMarkingForValidation(AutoGCSession& session);

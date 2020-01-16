@@ -118,7 +118,7 @@ class JUnitTestRunner(MochitestDesktop):
         self.options.profilePath = self.profile.profile
 
         # Set preferences
-        self.merge_base_profiles(self.options)
+        self.merge_base_profiles(self.options, 'geckoview-junit')
 
         if self.fillCertificateDB(self.options):
             self.log.error("Certificate integration failed")
@@ -386,7 +386,7 @@ class JunitArgumentParser(argparse.ArgumentParser):
                           action="store",
                           type=str,
                           dest="runner",
-                          default="android.support.test.runner.AndroidJUnitRunner",
+                          default="androidx.test.runner.AndroidJUnitRunner",
                           help="Test runner name.")
         self.add_argument("--symbols-path",
                           action="store",

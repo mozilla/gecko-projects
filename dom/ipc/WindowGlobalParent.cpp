@@ -13,6 +13,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/BrowserHost.h"
 #include "mozilla/dom/BrowserParent.h"
+#include "mozilla/dom/RemoteWebProgress.h"
 #include "mozilla/dom/WindowGlobalActorsBinding.h"
 #include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/dom/ChromeUtils.h"
@@ -30,6 +31,7 @@
 #include "nsQueryObject.h"
 #include "nsFrameLoaderOwner.h"
 #include "nsSerializationHelper.h"
+#include "nsIBrowser.h"
 #include "nsITransportSecurityInfo.h"
 #include "nsISharePicker.h"
 
@@ -178,6 +180,16 @@ bool WindowGlobalParent::IsProcessRoot() {
   return ContentParentId() != embedder->ContentParentId();
 }
 
+uint32_t WindowGlobalParent::ContentBlockingEvents() {
+  return GetContentBlockingLog()->GetContentBlockingEventsInLog();
+}
+
+void WindowGlobalParent::GetContentBlockingLog(nsAString& aLog) {
+  NS_ConvertUTF8toUTF16 log(GetContentBlockingLog()->Stringify());
+  aLog.Assign(std::move(log));
+}
+
+
 mozilla::ipc::IPCResult WindowGlobalParent::RecvLoadURI(
     dom::BrowsingContext* aTargetBC, nsDocShellLoadState* aLoadState,
     bool aSetNavigating) {
@@ -291,6 +303,65 @@ const nsAString& WindowGlobalParent::GetRemoteType() {
   return VoidString();
 }
 
+void WindowGlobalParent::NotifyContentBlockingEvent(
+    uint32_t aEvent, nsIRequest* aRequest, bool aBlocked, nsIURI* aURIHint,
+    const nsTArray<nsCString>& aTrackingFullHashes,
+    const Maybe<AntiTrackingCommon::StorageAccessGrantedReason>& aReason) {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aURIHint);
+  DebugOnly<bool> isCookiesBlockedTracker =
+      aEvent == nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER ||
+      aEvent == nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER;
+  MOZ_ASSERT_IF(aBlocked, aReason.isNothing());
+  MOZ_ASSERT_IF(!isCookiesBlockedTracker, aReason.isNothing());
+  MOZ_ASSERT_IF(isCookiesBlockedTracker && !aBlocked, aReason.isSome());
+  MOZ_DIAGNOSTIC_ASSERT(XRE_IsParentProcess());
+  // TODO: temporarily remove this until we find the root case of Bug 1609144
+  //MOZ_DIAGNOSTIC_ASSERT_IF(XRE_IsE10sParentProcess(), !IsInProcess());
+
+  // Return early if this WindowGlobalParent is in process.
+  if (IsInProcess()) {
+    return;
+  }
+
+  nsAutoCString origin;
+  nsContentUtils::GetASCIIOrigin(aURIHint, origin);
+
+  Maybe<uint32_t> event = GetContentBlockingLog()->RecordLogParent(
+      origin, aEvent, aBlocked, aReason, aTrackingFullHashes);
+
+  // Notify the OnContentBlockingEvent if necessary.
+  if (event) {
+    // Get the browser parent from the manager directly since the content
+    // blocking event could happen in the early stage of loading, i.e.
+    // accessing cookies for the http header. At this stage, the actor is
+    // not ready, so we would get a nullptr from GetBrowserParent(). But,
+    // we can actually get it from the manager.
+    RefPtr<BrowserParent> browserParent =
+        static_cast<BrowserParent*>(Manager());
+    if (NS_WARN_IF(!browserParent)) {
+      return;
+    }
+
+    nsCOMPtr<nsIBrowser> browser;
+    nsCOMPtr<nsIWebProgress> manager;
+    nsCOMPtr<nsIWebProgressListener> managerAsListener;
+
+    if (!browserParent->GetWebProgressListener(
+            getter_AddRefs(browser), getter_AddRefs(manager),
+            getter_AddRefs(managerAsListener))) {
+      return;
+    }
+
+    nsCOMPtr<nsIWebProgress> webProgress =
+        new RemoteWebProgress(manager, OuterWindowId(), InnerWindowId(), 0,
+                              false, BrowsingContext()->IsTopContent());
+
+    Unused << managerAsListener->OnContentBlockingEvent(webProgress, aRequest,
+                                                        event.value());
+  }
+}
+
 already_AddRefed<JSWindowActorParent> WindowGlobalParent::GetActor(
     const nsAString& aName, ErrorResult& aRv) {
   if (!CanSend()) {
@@ -371,6 +442,14 @@ class ShareHandler final : public PromiseNativeHandler {
 NS_IMPL_ISUPPORTS0(ShareHandler)
 
 }  // namespace
+
+mozilla::ipc::IPCResult WindowGlobalParent::RecvGetContentBlockingEvents(
+    WindowGlobalParent::GetContentBlockingEventsResolver&& aResolver) {
+  uint32_t events = GetContentBlockingLog()->GetContentBlockingEventsInLog();
+  aResolver(events);
+
+  return IPC_OK();
+}
 
 mozilla::ipc::IPCResult WindowGlobalParent::RecvShare(
     IPCWebShareData&& aData, WindowGlobalParent::ShareResolver&& aResolver) {

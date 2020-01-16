@@ -16,7 +16,8 @@
 #include "nsCompatibility.h"      // for member
 #include "nsCOMPtr.h"             // for member
 #include "nsICookieSettings.h"
-#include "nsGkAtoms.h"  // for static class members
+#include "nsGkAtoms.h"           // for static class members
+#include "nsNameSpaceManager.h"  // for static class members
 #include "nsIApplicationCache.h"
 #include "nsIApplicationCacheContainer.h"
 #include "nsIContentViewer.h"
@@ -1107,6 +1108,13 @@ class Document : public nsINode,
   void SetHasUnsafeEvalCSP(bool aHasUnsafeEvalCSP) {
     mHasUnsafeEvalCSP = aHasUnsafeEvalCSP;
   }
+
+  /**
+   * Return a promise which resolves to the content blocking events.
+   */
+  typedef MozPromise<uint32_t, bool, true> GetContentBlockingEventsPromise;
+  MOZ_MUST_USE RefPtr<GetContentBlockingEventsPromise>
+  GetContentBlockingEvents();
 
   /**
    * Get the content blocking log.
@@ -4441,9 +4449,6 @@ class Document : public nsINode,
   // Helper for GetScrollingElement/IsScrollingElement.
   bool IsPotentiallyScrollable(HTMLBodyElement* aBody);
 
-  // Return the same type parent docuement if exists, or return null.
-  Document* GetSameTypeParentDocument();
-
   void MaybeAllowStorageForOpenerAfterUserInteraction();
 
   void MaybeStoreUserInteractionAsPermission();
@@ -5462,6 +5467,7 @@ enum DocumentFlavor {
   DocumentFlavorLegacyGuess,  // compat with old code until made HTML5-compliant
   DocumentFlavorHTML,         // HTMLDocument with HTMLness bit set to true
   DocumentFlavorSVG,          // SVGDocument
+  DocumentFlavorXML,          // XMLDocument
   DocumentFlavorPlain,        // Just a Document
 };
 

@@ -400,6 +400,7 @@ class Bootstrapper(object):
             self.instance.ensure_sccache_packages(state_dir, checkout_root)
             self.instance.ensure_lucetc_packages(state_dir, checkout_root)
             self.instance.ensure_wasi_sysroot_packages(state_dir, checkout_root)
+            self.instance.ensure_dump_syms_packages(state_dir, checkout_root)
 
     def check_telemetry_opt_in(self, state_dir):
         # We can't prompt the user.
@@ -472,7 +473,7 @@ class Bootstrapper(object):
         # If we didn't specify a VCS, and we aren't in an exiting clone,
         # offer a choice
         if not self.vcs:
-            if checkout_type and False:
+            if checkout_type:
                 vcs = checkout_type
             elif self.instance.no_interactive:
                 vcs = "hg"
@@ -635,7 +636,7 @@ def hg_clone_firefox(hg, dest):
     # Strictly speaking, this could overwrite a config based on a template
     # the user has installed. Let's pretend this problem doesn't exist
     # unless someone complains about it.
-    with open(os.path.join(dest, '.hg', 'hgrc'), 'ab') as fh:
+    with open(os.path.join(dest, '.hg', 'hgrc'), 'a') as fh:
         fh.write('[paths]\n')
         fh.write('default = https://hg.mozilla.org/mozilla-unified\n')
         fh.write('\n')

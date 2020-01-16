@@ -27,6 +27,7 @@
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/layers/AsyncCanvasRenderer.h"
+#include "mozilla/layers/OOPCanvasRenderer.h"
 #include "mozilla/layers/WebRenderCanvasRenderer.h"
 #include "mozilla/layers/WebRenderUserData.h"
 #include "mozilla/MouseEvents.h"
@@ -46,8 +47,7 @@
 #include "ActiveLayerTracker.h"
 #include "CanvasUtils.h"
 #include "VRManagerChild.h"
-#include "WebGL1Context.h"
-#include "WebGL2Context.h"
+#include "ClientWebGLContext.h"
 
 using namespace mozilla::layers;
 using namespace mozilla::gfx;
@@ -806,9 +806,13 @@ void HTMLCanvasElement::ToBlob(JSContext* aCx, BlobCallback& aCallback,
   CanvasRenderingContextHelper::ToBlob(aCx, global, aCallback, aType, aParams,
                                        usePlaceholder, aRv);
 }
-
+#define DISABLE_OFFSCREEN_CANVAS 1
 OffscreenCanvas* HTMLCanvasElement::TransferControlToOffscreen(
     ErrorResult& aRv) {
+  if (DISABLE_OFFSCREEN_CANVAS) {
+    aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+    return nullptr;
+  }
   if (mCurrentContext) {
     aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return nullptr;
@@ -1352,6 +1356,16 @@ AsyncCanvasRenderer* HTMLCanvasElement::GetAsyncCanvasRenderer() {
   return mAsyncCanvasRenderer;
 }
 
+layers::OOPCanvasRenderer* HTMLCanvasElement::GetOOPCanvasRenderer() {
+  if (!mOOPCanvasRenderer) {
+    const auto context = GetWebGLContext();
+    MOZ_ASSERT(context);
+    mOOPCanvasRenderer = new OOPCanvasRenderer(context);
+  }
+
+  return mOOPCanvasRenderer;
+}
+
 layers::LayersBackend HTMLCanvasElement::GetCompositorBackendType() const {
   nsIWidget* docWidget = nsContentUtils::WidgetForDocument(OwnerDoc());
   if (docWidget) {
@@ -1477,33 +1491,13 @@ void HTMLCanvasElement::InvalidateFromAsyncCanvasRenderer(
   element->InvalidateCanvasContent(nullptr);
 }
 
-already_AddRefed<layers::SharedSurfaceTextureClient>
-HTMLCanvasElement::GetVRFrame() {
+ClientWebGLContext* HTMLCanvasElement::GetWebGLContext() {
   if (GetCurrentContextType() != CanvasContextType::WebGL1 &&
       GetCurrentContextType() != CanvasContextType::WebGL2) {
     return nullptr;
   }
 
-  WebGLContext* webgl = static_cast<WebGLContext*>(GetContextAtIndex(0));
-  if (!webgl) {
-    return nullptr;
-  }
-
-  return webgl->GetVRFrame();
-}
-
-void HTMLCanvasElement::ClearVRFrame() {
-  if (GetCurrentContextType() != CanvasContextType::WebGL1 &&
-      GetCurrentContextType() != CanvasContextType::WebGL2) {
-    return;
-  }
-
-  WebGLContext* webgl = static_cast<WebGLContext*>(GetContextAtIndex(0));
-  if (!webgl) {
-    return;
-  }
-
-  webgl->ClearVRFrame();
+  return static_cast<ClientWebGLContext*>(GetContextAtIndex(0));
 }
 
 }  // namespace dom

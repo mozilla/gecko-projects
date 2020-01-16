@@ -213,7 +213,7 @@ void LinkIonScript(JSContext* cx, HandleScript calleescript);
 uint8_t* LazyLinkTopActivation(JSContext* cx, LazyLinkExitFrameLayout* frame);
 
 inline bool IsIonInlinableGetterOrSetterOp(JSOp op) {
-  // GETPROP, CALLPROP, LENGTH, GETELEM, and JSOP_CALLELEM. (Inlined Getters)
+  // GETPROP, CALLPROP, LENGTH, GETELEM, and JSOp::CallElem. (Inlined Getters)
   // SETPROP, SETNAME, SETGNAME (Inlined Setters)
   return IsGetPropOp(op) || IsGetElemOp(op) || IsSetPropOp(op);
 }
@@ -221,7 +221,7 @@ inline bool IsIonInlinableGetterOrSetterOp(JSOp op) {
 inline bool IsIonInlinableOp(JSOp op) {
   // CALL, FUNCALL, FUNAPPLY, EVAL, NEW (Normal Callsites)
   // or an inlinable getter or setter.
-  return (IsCallOp(op) && !IsSpreadCallOp(op)) ||
+  return (IsInvokeOp(op) && !IsSpreadOp(op)) ||
          IsIonInlinableGetterOrSetterOp(op);
 }
 
@@ -273,6 +273,11 @@ size_t SizeOfIonData(JSScript* script, mozilla::MallocSizeOf mallocSizeOf);
 
 bool JitSupportsSimd();
 bool JitSupportsAtomics();
+
+inline bool IsIonEnabled(JSContext* cx) {
+  return IsBaselineJitEnabled() && JitOptions.ion &&
+         !cx->options().disableIon();
+}
 
 }  // namespace jit
 }  // namespace js

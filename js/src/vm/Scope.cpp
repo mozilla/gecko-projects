@@ -1441,7 +1441,6 @@ WasmInstanceScope* WasmInstanceScope::create(JSContext* cx,
   MOZ_ASSERT(data->length == namesCount);
 
   data->instance.init(instance);
-  data->memoriesStart = 0;
   data->globalsStart = globalsStart;
 
   RootedScope enclosing(cx, &cx->global()->emptyGlobalScope());
@@ -1498,8 +1497,6 @@ WasmFunctionScope* WasmFunctionScope::create(JSContext* cx,
     InitializeNextTrailingName(data, wasmName);
   }
   MOZ_ASSERT(data->length == namesCount);
-
-  data->funcIndex = funcIndex;
 
   return Scope::create<WasmFunctionScope>(cx, ScopeKind::WasmFunction,
                                           enclosing,
@@ -1577,7 +1574,7 @@ BindingIter::BindingIter(JSScript* script) : BindingIter(script->bodyScope()) {}
 void BindingIter::init(LexicalScope::Data& data, uint32_t firstFrameSlot,
                        uint8_t flags) {
   // Named lambda scopes can only have environment slots. If the callee
-  // isn't closed over, it is accessed via JSOP_CALLEE.
+  // isn't closed over, it is accessed via JSOp::Callee.
   if (flags & IsNamedLambda) {
     // Named lambda binding is weird. Normal BindingKind ordering rules
     // don't apply.
