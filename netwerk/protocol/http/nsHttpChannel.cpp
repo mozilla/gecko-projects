@@ -113,7 +113,6 @@
 #include "ParentChannelListener.h"
 #include "InterceptedHttpChannel.h"
 #include "../../cache2/CacheFileUtils.h"
-#include "../../cache2/CacheHashUtils.h"
 #include "nsIMultiplexInputStream.h"
 #include "nsINetworkLinkService.h"
 #include "mozilla/dom/Promise.h"
@@ -305,7 +304,6 @@ nsHttpChannel::nsHttpChannel()
       mOfflineCacheLastModifiedTime(0),
       mSuspendTotalTime(0),
       mRedirectType(0),
-      mComputedCrossOriginOpenerPolicy(nsILoadInfo::OPENER_POLICY_NULL),
       mCacheOpenWithPriority(false),
       mCacheQueueSizeWhenOpen(0),
       mCachedContentIsValid(false),
@@ -1769,33 +1767,6 @@ void nsHttpChannel::SetCachedContentType() {
   mCacheEntry->SetContentType(contentType);
 }
 
-void nsHttpChannel::StoreSiteAccessToCacheEntry() {
-  nsresult rv;
-
-  nsCOMPtr<nsIURI> topWindowURI;
-  rv = GetTopWindowURI(getter_AddRefs(topWindowURI));
-  if (NS_FAILED(rv)) {
-    return;
-  }
-
-  nsCOMPtr<nsIEffectiveTLDService> eTLDService =
-      do_GetService(NS_EFFECTIVETLDSERVICE_CONTRACTID, &rv);
-  if (NS_FAILED(rv)) {
-    return;
-  }
-
-  nsAutoCString baseDomain;
-  rv = eTLDService->GetBaseDomain(topWindowURI, 0, baseDomain);
-  if (NS_FAILED(rv)) {
-    return;
-  }
-
-  RefPtr<CacheHash> hash = new CacheHash();
-  hash->Update(baseDomain.get(), baseDomain.Length());
-
-  Unused << mCacheEntry->AddBaseDomainAccess(hash->GetHash());
-}
-
 nsresult nsHttpChannel::CallOnStartRequest() {
   LOG(("nsHttpChannel::CallOnStartRequest [this=%p]", this));
 
@@ -1927,10 +1898,6 @@ nsresult nsHttpChannel::CallOnStartRequest() {
 
   if (mCacheEntry && mCacheEntryIsWriteOnly) {
     SetCachedContentType();
-  }
-
-  if (mCacheEntry) {
-    StoreSiteAccessToCacheEntry();
   }
 
   LOG(("  calling mListener->OnStartRequest [this=%p, listener=%p]\n", this,
@@ -6220,7 +6187,14 @@ nsHttpChannel::Cancel(nsresult status) {
   // We should never have a pump open while a CORS preflight is in progress.
   MOZ_ASSERT_IF(mPreflightChannel, !mCachePump);
 #ifdef DEBUG
-  if (UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(status)) {
+  // We want to perform this check only when the chanel is being cancelled the
+  // first time with a URL classifier blocking error code.  If mStatus is
+  // already set to such an error code then Cancel() may be called for some
+  // other reason, for example because we've received notification about our
+  // parent process side channel being canceled, in which case we cannot expect
+  // that CancelByURLClassifier() would have handled this case.
+  if (UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(status) &&
+      !UrlClassifierFeatureFactory::IsClassifierBlockingErrorCode(mStatus)) {
     MOZ_CRASH_UNSAFE_PRINTF("Blocking classifier error %" PRIx32
                             " need to be handled by CancelByURLClassifier()",
                             static_cast<uint32_t>(status));
@@ -7423,20 +7397,9 @@ nsHttpChannel::HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) {
 }
 
 NS_IMETHODIMP
-nsHttpChannel::GetCrossOriginOpenerPolicy(
+nsHttpChannel::GetCachedCrossOriginOpenerPolicy(
     nsILoadInfo::CrossOriginOpenerPolicy* aPolicy) {
-  MOZ_ASSERT(aPolicy);
-  if (!aPolicy) {
-    return NS_ERROR_INVALID_ARG;
-  }
-  // If this method is called before OnStartRequest (ie. before we call
-  // ComputeCrossOriginOpenerPolicy) or if we were unable to compute the
-  // policy we'll throw an error.
-  if (!mOnStartRequestCalled) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-  *aPolicy = mComputedCrossOriginOpenerPolicy;
-  return NS_OK;
+  return HttpBaseChannel::GetCrossOriginOpenerPolicy(aPolicy);
 }
 
 // See https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
@@ -7633,7 +7596,7 @@ nsresult nsHttpChannel::ProcessCrossOriginEmbedderPolicyHeader() {
     mLoadInfo->GetFrameBrowsingContext(getter_AddRefs(frameCtx));
   }
 
-  if (frameCtx) {
+  if (frameCtx && !frameCtx->IsDiscarded()) {
     frameCtx->SetEmbedderPolicy(resultPolicy);
   }
 

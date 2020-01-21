@@ -573,10 +573,6 @@ class nsHttpChannel final : public HttpBaseChannel,
   // writing a new entry. The content type is used in cache internally only.
   void SetCachedContentType();
 
-  // Stores information about access from eTLD+1 of the top level document to
-  // the cache entry.
-  void StoreSiteAccessToCacheEntry();
-
  private:
   // this section is for main-thread-only object
   // all the references need to be proxy released on main thread.
@@ -667,10 +663,6 @@ class nsHttpChannel final : public HttpBaseChannel,
 
   static const uint32_t WAIT_FOR_CACHE_ENTRY = 1;
   static const uint32_t WAIT_FOR_OFFLINE_CACHE_ENTRY = 2;
-
-  // Gets computed during ComputeCrossOriginOpenerPolicyMismatch so we have
-  // the channel's policy even if we don't know policy initiator.
-  nsILoadInfo::CrossOriginOpenerPolicy mComputedCrossOriginOpenerPolicy;
 
   bool mCacheOpenWithPriority;
   uint32_t mCacheQueueSizeWhenOpen;

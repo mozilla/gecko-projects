@@ -31,7 +31,7 @@ use crate::hit_test::{HitTest, HitTester};
 use crate::intern::DataStore;
 use crate::internal_types::{DebugOutput, FastHashMap, FastHashSet, RenderedDocument, ResultMsg};
 use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
-use crate::picture::RetainedTiles;
+use crate::picture::{RetainedTiles, TileCacheLogger};
 use crate::prim_store::{PrimitiveScratchBuffer, PrimitiveInstance};
 use crate::prim_store::{PrimitiveInstanceKind, PrimTemplateCommonData};
 use crate::prim_store::interned::*;
@@ -540,6 +540,8 @@ impl Document {
         gpu_cache: &mut GpuCache,
         resource_profile: &mut ResourceProfileCounters,
         debug_flags: DebugFlags,
+        tile_cache_logger: &mut TileCacheLogger,
+        config: FrameBuilderConfig,
     ) -> RenderedDocument {
         let accumulated_scale_factor = self.view.accumulated_scale_factor();
         let pan = self.view.pan.to_f32() / accumulated_scale_factor;
@@ -566,6 +568,8 @@ impl Document {
                 &mut self.scratch,
                 &mut self.render_task_counters,
                 debug_flags,
+                tile_cache_logger,
+                config,
             );
             self.hit_tester = Some(self.scene.create_hit_tester(&self.data_stores.clip));
             frame
@@ -712,6 +716,7 @@ pub struct RenderBackend {
     notifier: Box<dyn RenderNotifier>,
     recorder: Option<Box<dyn ApiRecordingReceiver>>,
     logrecorder: Option<Box<LogRecorder>>,
+    tile_cache_logger: TileCacheLogger,
     sampler: Option<Box<dyn AsyncPropertySampler + Send>>,
     size_of_ops: Option<MallocSizeOfOps>,
     debug_flags: DebugFlags,
@@ -754,6 +759,7 @@ impl RenderBackend {
             notifier,
             recorder,
             logrecorder: None,
+            tile_cache_logger: TileCacheLogger::new(500usize),
             sampler,
             size_of_ops,
             debug_flags,
@@ -1136,6 +1142,11 @@ impl RenderBackend {
                         )).unwrap();
 
                         // We don't want to forward this message to the renderer.
+                        return RenderBackendStatus::Continue;
+                    }
+                    DebugCommand::SetPictureTileSize(tile_size) => {
+                        self.frame_config.tile_size_override = tile_size;
+
                         return RenderBackendStatus::Continue;
                     }
                     DebugCommand::FetchDocuments => {
@@ -1529,6 +1540,8 @@ impl RenderBackend {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     self.debug_flags,
+                    &mut self.tile_cache_logger,
+                    self.frame_config,
                 );
 
                 debug!("generated frame for document {:?} with {} passes",
@@ -1706,6 +1719,8 @@ impl RenderBackend {
                     &mut self.gpu_cache,
                     &mut profile_counters.resources,
                     self.debug_flags,
+                    &mut self.tile_cache_logger,
+                    self.frame_config,
                 );
                 // After we rendered the frames, there are pending updates to both
                 // GPU cache and resources. Instead of serializing them, we are going to make sure
@@ -1752,6 +1767,11 @@ impl RenderBackend {
 
         debug!("\tresource cache");
         let (resources, deferred) = self.resource_cache.save_capture(&config.root);
+
+        if config.bits.contains(CaptureBits::TILE_CACHE) {
+            debug!("\ttile cache");
+            self.tile_cache_logger.save_capture(&config.root);
+        }
 
         info!("\tbackend");
         let backend = PlainRenderBackend {

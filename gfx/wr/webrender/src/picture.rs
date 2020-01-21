@@ -107,6 +107,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::texture_cache::TextureCacheHandle;
 use crate::util::{TransformedRectKind, MatrixHelpers, MaxRect, scale_factors, VecHelper, RectHelpers};
 use crate::filterdata::{FilterDataHandle};
+#[cfg(feature = "capture")]
+use ron;
+
+#[cfg(feature = "capture")]
+use std::fs::File;
+#[cfg(feature = "capture")]
+use std::io::prelude::*;
+#[cfg(feature = "capture")]
+use std::path::PathBuf;
 
 /// Specify whether a surface allows subpixel AA text rendering.
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -269,13 +278,38 @@ pub const TILE_SIZE_SCROLLBAR_VERTICAL: DeviceIntSize = DeviceIntSize {
     _unit: marker::PhantomData,
 };
 
+const TILE_SIZE_FOR_TESTS: [DeviceIntSize; 6] = [
+    DeviceIntSize {
+        width: 128,
+        height: 128,
+        _unit: marker::PhantomData,
+    },
+    DeviceIntSize {
+        width: 256,
+        height: 256,
+        _unit: marker::PhantomData,
+    },
+    DeviceIntSize {
+        width: 512,
+        height: 512,
+        _unit: marker::PhantomData,
+    },
+    TILE_SIZE_DEFAULT,
+    TILE_SIZE_SCROLLBAR_VERTICAL,
+    TILE_SIZE_SCROLLBAR_HORIZONTAL,
+];
+
 // Return the list of tile sizes for the renderer to allocate texture arrays for.
-pub fn tile_cache_sizes() -> &'static [DeviceIntSize] {
-    &[
-        TILE_SIZE_DEFAULT,
-        TILE_SIZE_SCROLLBAR_HORIZONTAL,
-        TILE_SIZE_SCROLLBAR_VERTICAL,
-    ]
+pub fn tile_cache_sizes(testing: bool) -> &'static [DeviceIntSize] {
+    if testing {
+        &TILE_SIZE_FOR_TESTS
+    } else {
+        &[
+            TILE_SIZE_DEFAULT,
+            TILE_SIZE_SCROLLBAR_HORIZONTAL,
+            TILE_SIZE_SCROLLBAR_VERTICAL,
+        ]
+    }
 }
 
 /// The maximum size per axis of a surface,
@@ -300,7 +334,7 @@ fn clampf(value: f32, low: f32, high: f32) -> f32 {
 
 /// An index into the prims array in a TileDescriptor.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct PrimitiveDependencyIndex(u32);
+pub struct PrimitiveDependencyIndex(u32);
 
 /// Information about the state of an opacity binding.
 #[derive(Debug)]
@@ -313,6 +347,8 @@ pub struct OpacityBindingInfo {
 
 /// Information stored in a tile descriptor for an opacity binding.
 #[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub enum OpacityBinding {
     Value(f32),
     Binding(PropertyBindingId),
@@ -532,8 +568,10 @@ impl TileSurface {
 /// since this is a hot path in the code, and keeping the data small
 /// is a performance win.
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 #[repr(u8)]
-enum PrimitiveCompareResult {
+pub enum PrimitiveCompareResult {
     /// Primitives match
     Equal,
     /// Something in the PrimitiveDescriptor was different
@@ -549,8 +587,10 @@ enum PrimitiveCompareResult {
 }
 
 /// Debugging information about why a tile was invalidated
-#[derive(Debug)]
-enum InvalidationReason {
+#[derive(Debug,Copy,Clone)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub enum InvalidationReason {
     /// The fractional offset changed
     FractionalOffset,
     /// The background color changed
@@ -568,6 +608,29 @@ enum InvalidationReason {
         /// What changed in the primitive that was different
         prim_compare_result: PrimitiveCompareResult,
     },
+}
+
+/// A minimal subset of Tile for debug capturing
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct TileSerializer {
+    pub rect: PictureRect,
+    pub current_descriptor: TileDescriptor,
+    pub fract_offset: PictureVector2D,
+    pub id: TileId,
+    pub root: TileNode,
+    pub background_color: Option<ColorF>,
+    pub invalidation_reason: Option<InvalidationReason>
+}
+
+/// A minimal subset of TileCacheInstance for debug capturing
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct TileCacheInstanceSerializer {
+    pub slice: usize,
+    pub tiles: FastHashMap<TileOffset, TileSerializer>,
+    pub background_color: Option<ColorF>,
+    pub fract_offset: PictureVector2D,
 }
 
 /// Information about a cached tile.
@@ -1023,6 +1086,8 @@ impl Tile {
 
 /// Defines a key that uniquely identifies a primitive instance.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct PrimitiveDescriptor {
     /// Uniquely identifies the content of the primitive template.
     prim_uid: ItemUid,
@@ -1031,7 +1096,7 @@ pub struct PrimitiveDescriptor {
     /// The clip rect for this primitive. Included here in
     /// dependencies since there is no entry in the clip chain
     /// dependencies for the local clip rect.
-    prim_clip_rect: RectangleKey,
+    pub prim_clip_rect: RectangleKey,
     /// The number of extra dependencies that this primitive has.
     transform_dep_count: u8,
     image_dep_count: u8,
@@ -1153,6 +1218,9 @@ impl<'a, T> CompareHelper<'a, T> where T: PartialEq {
 
 /// Uniquely describes the content of this tile, in a way that can be
 /// (reasonably) efficiently hashed and compared.
+#[cfg_attr(any(feature="capture",feature="replay"), derive(Clone))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 pub struct TileDescriptor {
     /// List of primitive instance unique identifiers. The uid is guaranteed
     /// to uniquely describe the content of the primitive template, while
@@ -1222,7 +1290,7 @@ impl TileDescriptor {
             pt.new_level("images".to_string());
             for info in &self.images {
                 pt.new_level(format!("key={:?}", info.key));
-                pt.new_level(format!("generation={:?}", info.generation));
+                pt.add_item(format!("generation={:?}", info.generation));
                 pt.end_level();
             }
             pt.end_level();
@@ -1419,6 +1487,107 @@ impl BackdropInfo {
     }
 }
 
+#[derive(Clone)]
+pub struct TileCacheLoggerSlice {
+    pub serialized_slice: String,
+    pub local_to_world_transform: DeviceRect
+}
+
+/// Log tile cache activity whenever anything happens in take_context.
+pub struct TileCacheLogger {
+    /// next write pointer
+    pub write_index : usize,
+    /// ron serialization of tile caches;
+    /// each frame consists of slices, one per take_context call
+    pub frames: Vec<Vec<TileCacheLoggerSlice>>
+}
+
+impl TileCacheLogger {
+    pub fn new(
+        num_frames: usize
+    ) -> Self {
+        let mut frames = Vec::with_capacity(num_frames);
+        let empty_element = Vec::new();
+        frames.resize(num_frames, empty_element);
+        TileCacheLogger {
+            write_index: 0,
+            frames
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        !self.frames.is_empty()
+    }
+
+    #[cfg(feature = "capture")]
+    pub fn add(&mut self, serialized_slice: String, local_to_world_transform: DeviceRect) {
+        if !self.is_enabled() {
+            return;
+        }
+        self.frames[self.write_index].push(
+            TileCacheLoggerSlice {
+                serialized_slice,
+                local_to_world_transform });
+    }
+
+    /// see if anything was written in this frame, and if so,
+    /// advance the write index in a circular way and clear the
+    /// recorded string.
+    pub fn advance(&mut self) {
+        if !self.is_enabled() || self.frames[self.write_index].is_empty() {
+            return;
+        }
+        self.write_index = self.write_index + 1;
+        if self.write_index >= self.frames.len() {
+            self.write_index = 0;
+        }
+        self.frames[self.write_index] = Vec::new();
+    }
+
+    #[cfg(feature = "capture")]
+    pub fn save_capture(
+        &self, root: &PathBuf
+    ) {
+        if !self.is_enabled() {
+            return;
+        }
+        use std::fs;
+
+        info!("saving tile cache log");
+        let path_tile_cache = root.join("tile_cache");
+        if !path_tile_cache.is_dir() {
+            fs::create_dir(&path_tile_cache).unwrap();
+        }
+
+        let mut files_written = 0;
+        for ix in 0..self.frames.len() {
+            // ...and start with write_index, since that's the oldest entry
+            // that we're about to overwrite. However when we get to
+            // save_capture, we've add()ed entries but haven't advance()d yet,
+            // so the actual oldest entry is write_index + 1
+            let index = (self.write_index + 1 + ix) % self.frames.len();
+            if self.frames[index].is_empty() {
+                continue;
+            }
+
+            let filename = path_tile_cache.join(format!("frame{:05}.ron", files_written));
+            files_written = files_written + 1;
+            let mut output = File::create(filename).unwrap();
+            output.write_all(b"[\n").unwrap();
+            for item in &self.frames[index] {
+                output.write_all(format!("( x: {}, y: {},\n",
+                                         item.local_to_world_transform.origin.x,
+                                         item.local_to_world_transform.origin.y)
+                                 .as_bytes()).unwrap();
+                output.write_all(b"tile_cache:\n").unwrap();
+                output.write_all(item.serialized_slice.as_bytes()).unwrap();
+                output.write_all(b"\n),\n").unwrap();
+            }
+            output.write_all(b"]\n").unwrap();
+        }
+    }
+}
+
 /// Represents a cache of tiles that make up a picture primitives.
 pub struct TileCacheInstance {
     /// Index of the tile cache / slice for this frame builder. It's determined
@@ -1510,6 +1679,9 @@ pub struct TileCacheInstance {
     pub device_position: DevicePoint,
     /// True if the entire picture cache surface is opaque.
     is_opaque: bool,
+    /// The currently considered tile size override. Used to check if we should
+    /// re-evaluate tile size, even if the frame timer hasn't expired.
+    tile_size_override: Option<DeviceIntSize>,
 }
 
 impl TileCacheInstance {
@@ -1560,6 +1732,7 @@ impl TileCacheInstance {
             native_surface_id: None,
             device_position: DevicePoint::zero(),
             is_opaque: true,
+            tile_size_override: None,
         }
     }
 
@@ -1717,22 +1890,28 @@ impl TileCacheInstance {
         // Only evaluate what tile size to use fairly infrequently, so that we don't end
         // up constantly invalidating and reallocating tiles if the picture rect size is
         // changing near a threshold value.
-        if self.frames_until_size_eval == 0 {
+        if self.frames_until_size_eval == 0 ||
+           self.tile_size_override != frame_context.config.tile_size_override {
             const TILE_SIZE_TINY: f32 = 32.0;
 
             // Work out what size tile is appropriate for this picture cache.
-            let desired_tile_size;
-
-            // There's no need to check the other dimension. If we encounter a picture
-            // that is small on one dimension, it's a reasonable choice to use a scrollbar
-            // sized tile configuration regardless of the other dimension.
-            if pic_rect.size.width <= TILE_SIZE_TINY {
-                desired_tile_size = TILE_SIZE_SCROLLBAR_VERTICAL;
-            } else if pic_rect.size.height <= TILE_SIZE_TINY {
-                desired_tile_size = TILE_SIZE_SCROLLBAR_HORIZONTAL;
-            } else {
-                desired_tile_size = TILE_SIZE_DEFAULT;
-            }
+            let desired_tile_size = match frame_context.config.tile_size_override {
+                Some(tile_size_override) => {
+                    tile_size_override
+                }
+                None => {
+                    // There's no need to check the other dimension. If we encounter a picture
+                    // that is small on one dimension, it's a reasonable choice to use a scrollbar
+                    // sized tile configuration regardless of the other dimension.
+                    if pic_rect.size.width <= TILE_SIZE_TINY {
+                        TILE_SIZE_SCROLLBAR_VERTICAL
+                    } else if pic_rect.size.height <= TILE_SIZE_TINY {
+                        TILE_SIZE_SCROLLBAR_HORIZONTAL
+                    } else {
+                        TILE_SIZE_DEFAULT
+                    }
+                }
+            };
 
             // If the desired tile size has changed, then invalidate and drop any
             // existing tiles.
@@ -1749,6 +1928,7 @@ impl TileCacheInstance {
             // Reset counter until next evaluating the desired tile size. This is an
             // arbitrary value.
             self.frames_until_size_eval = 120;
+            self.tile_size_override = frame_context.config.tile_size_override;
         }
 
         // Map an arbitrary point in picture space to world space, to work out
@@ -3097,6 +3277,10 @@ pub struct PicturePrimitive {
 
     /// The config options for this picture.
     pub options: PictureOptions,
+
+    /// Keep track of the number of render tasks dependencies to pre-allocate
+    /// the dependency array next frame.
+    num_render_tasks: usize,
 }
 
 impl PicturePrimitive {
@@ -3239,6 +3423,7 @@ impl PicturePrimitive {
             tile_cache,
             options,
             segments_are_valid: false,
+            num_render_tasks: 0,
         }
     }
 
@@ -3275,10 +3460,14 @@ impl PicturePrimitive {
         frame_state: &mut FrameBuildingState,
         frame_context: &FrameBuildingContext,
         scratch: &mut PrimitiveScratchBuffer,
+        tile_cache_logger: &mut TileCacheLogger,
     ) -> Option<(PictureContext, PictureState, PrimitiveList)> {
         if !self.is_visible() {
             return None;
         }
+
+        let task_id = frame_state.surfaces[parent_surface_index.0].render_tasks.unwrap().port;
+        frame_state.render_tasks[task_id].children.reserve(self.num_render_tasks);
 
         // Extract the raster and surface spatial nodes from the raster
         // config, if this picture establishes a surface. Otherwise just
@@ -3338,6 +3527,7 @@ impl PicturePrimitive {
             }
         };
 
+        let unclipped =
         match self.raster_config {
             Some(ref raster_config) => {
                 let pic_rect = PictureRect::from_untyped(&self.precise_local_rect.to_untyped());
@@ -3926,9 +4116,45 @@ impl PicturePrimitive {
                         root,
                     );
                 }
+
+                unclipped
             }
-            None => {}
+            None => DeviceRect::zero()
         };
+
+        #[cfg(feature = "capture")]
+        {
+            if frame_context.debug_flags.contains(DebugFlags::TILE_CACHE_LOGGING_DBG) {
+                if let Some(ref tile_cache) = self.tile_cache
+                {
+                    // extract just the fields that we're interested in
+                    let mut tile_cache_tiny = TileCacheInstanceSerializer {
+                        slice: tile_cache.slice,
+                        tiles: FastHashMap::default(),
+                        background_color: tile_cache.background_color,
+                        fract_offset: tile_cache.fract_offset
+                    };
+                    for (key, tile) in &tile_cache.tiles {
+                        tile_cache_tiny.tiles.insert(*key, TileSerializer {
+                            rect: tile.rect,
+                            current_descriptor: tile.current_descriptor.clone(),
+                            fract_offset: tile.fract_offset,
+                            id: tile.id,
+                            root: tile.root.clone(),
+                            background_color: tile.background_color,
+                            invalidation_reason: tile.invalidation_reason.clone()
+                        });
+                    }
+                    let text = ron::ser::to_string_pretty(&tile_cache_tiny, Default::default()).unwrap();
+                    tile_cache_logger.add(text, unclipped);
+                }
+            }
+        }
+        #[cfg(not(feature = "capture"))]
+        {
+            let _tile_cache_logger = tile_cache_logger;   // unused variable fix
+            let _unclipped = unclipped;
+        }
 
         let state = PictureState {
             //TODO: check for MAX_CACHE_SIZE here?
@@ -4007,6 +4233,7 @@ impl PicturePrimitive {
 
     pub fn restore_context(
         &mut self,
+        parent_surface_index: SurfaceIndex,
         prim_list: PrimitiveList,
         context: PictureContext,
         state: PictureState,
@@ -4016,6 +4243,9 @@ impl PicturePrimitive {
         for _ in 0 .. context.dirty_region_count {
             frame_state.pop_dirty_region();
         }
+
+        let task_id = frame_state.surfaces[parent_surface_index.0].render_tasks.unwrap().port;
+        self.num_render_tasks = frame_state.render_tasks[task_id].children.len();
 
         self.prim_list = prim_list;
         self.state = Some(state);
@@ -4682,6 +4912,8 @@ struct PrimitiveComparisonKey {
 
 /// Information stored an image dependency
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
 struct ImageDependency {
     key: ImageKey,
     generation: ImageGeneration,
@@ -4830,15 +5062,22 @@ impl<'a> PrimitiveComparer<'a> {
 }
 
 /// Details for a node in a quadtree that tracks dirty rects for a tile.
-enum TileNodeKind {
+#[cfg_attr(any(feature="capture",feature="replay"), derive(Clone))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub enum TileNodeKind {
     Leaf {
         /// The index buffer of primitives that affected this tile previous frame
+        #[cfg_attr(any(feature = "capture", feature = "replay"), serde(skip))]
         prev_indices: Vec<PrimitiveDependencyIndex>,
         /// The index buffer of primitives that affect this tile on this frame
+        #[cfg_attr(any(feature = "capture", feature = "replay"), serde(skip))]
         curr_indices: Vec<PrimitiveDependencyIndex>,
         /// A bitset of which of the last 64 frames have been dirty for this leaf.
+        #[cfg_attr(any(feature = "capture", feature = "replay"), serde(skip))]
         dirty_tracker: u64,
         /// The number of frames since this node split or merged.
+        #[cfg_attr(any(feature = "capture", feature = "replay"), serde(skip))]
         frames_since_modified: usize,
     },
     Node {
@@ -4855,11 +5094,14 @@ enum TileModification {
 }
 
 /// A node in the dirty rect tracking quadtree.
-struct TileNode {
+#[cfg_attr(any(feature="capture",feature="replay"), derive(Clone))]
+#[cfg_attr(feature = "capture", derive(Serialize))]
+#[cfg_attr(feature = "replay", derive(Deserialize))]
+pub struct TileNode {
     /// Leaf or internal node
-    kind: TileNodeKind,
+    pub kind: TileNodeKind,
     /// Rect of this node in the same space as the tile cache picture
-    rect: PictureRect,
+    pub rect: PictureRect,
 }
 
 impl TileNode {

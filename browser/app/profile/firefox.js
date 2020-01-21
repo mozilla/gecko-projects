@@ -305,10 +305,6 @@ pref("browser.urlbar.oneOffSearches", true);
 // human readable (percent-decoded) URL on the clipboard.
 pref("browser.urlbar.decodeURLsOnCopy", false);
 
-// If true, we show new users and those about to start an organic search a tip
-// encouraging them to use the Urlbar.
-pref("browser.urlbar.searchTips", false);
-
 // Whether or not to move tabs into the active window when using the "Switch to
 // Tab" feature of the awesomebar.
 pref("browser.urlbar.switchTabs.adoptIntoActiveWindow", false);
@@ -335,6 +331,10 @@ pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 // Whether we expand the font size when when the urlbar is
 // focused in design update 1.
 pref("browser.urlbar.update1.expandTextOnFocus", false);
+
+// If true, we show new users and those about to start an organic search a tip
+// encouraging them to use the Urlbar.
+pref("browser.urlbar.update1.searchTips", false);
 
 pref("browser.urlbar.eventTelemetry.enabled", false);
 
@@ -446,6 +446,7 @@ pref("browser.link.open_newwindow.restriction", 2);
 pref("browser.tabs.multiselect", true);
 pref("browser.tabs.closeTabByDblclick", false);
 pref("browser.tabs.closeWindowWithLastTab", true);
+pref("browser.tabs.allowTabDetach", true);
 // Open related links to a tab, e.g., link in current tab, at next to the
 // current tab if |insertRelatedAfterCurrent| is true.  Otherwise, always
 // append new tab to the end.
@@ -972,9 +973,6 @@ pref("security.certerrors.mitm.priming.endpoint", "https://mitmdetection.service
 pref("security.certerrors.mitm.auto_enable_enterprise_roots", true);
 
 pref("security.aboutcertificate.enabled", true);
-
-// Whether to start the private browsing mode at application startup
-pref("browser.privatebrowsing.autostart", false);
 
 // Whether the bookmark panel should be shown when bookmarking a page.
 pref("browser.bookmarks.editDialog.showForNewBookmarks", true);
@@ -1823,6 +1821,12 @@ pref("extensions.screenshots.disabled", false);
 // Preference that allows individual users to leave Screenshots enabled, but
 // disable uploading to the server.
 pref("extensions.screenshots.upload-disabled", false);
+
+// DoH Rollout: the earliest date of profile creation for which we don't need
+// to show the doorhanger. This is when the version of the privacy statement
+// that includes DoH went live - Oct 31, 2019. This has to be a string because
+// the number is outside the signed 32-bit integer range.
+pref("doh-rollout.profileCreationThreshold", "1572476400000");
 
 // URL for Learn More link for browser error logging in preferences
 pref("browser.chrome.errorReporter.infoURL",

@@ -3634,16 +3634,14 @@ bool IsWaylandDisabled() {
 }
 #endif
 
-namespace mozilla {
-namespace startup {
+namespace mozilla::startup {
 Result<nsCOMPtr<nsIFile>, nsresult> GetIncompleteStartupFile(nsIFile* aProfLD) {
   nsCOMPtr<nsIFile> crashFile;
   MOZ_TRY(aProfLD->Clone(getter_AddRefs(crashFile)));
   MOZ_TRY(crashFile->Append(FILE_STARTUP_INCOMPLETE));
   return std::move(crashFile);
 }
-}  // namespace startup
-}  // namespace mozilla
+}  // namespace mozilla::startup
 
 // Check whether the last startup attempt resulted in a crash within the
 // last 6 hours.
@@ -4427,7 +4425,7 @@ nsresult XREMain::XRE_mainRun() {
   OverrideDefaultLocaleIfNeeded();
 
   nsCString userAgentLocale;
-  LocaleService::GetInstance()->GetAppLocaleAsLangTag(userAgentLocale);
+  LocaleService::GetInstance()->GetAppLocaleAsBCP47(userAgentLocale);
   CrashReporter::AnnotateCrashReport(
       CrashReporter::Annotation::useragent_locale, userAgentLocale);
 

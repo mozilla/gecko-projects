@@ -2762,10 +2762,7 @@ static bool CpuNow(JSContext* cx, unsigned argc, Value* vp) {
 }
 
 static bool ClearKeptObjects(JSContext* cx, unsigned argc, Value* vp) {
-  for (ZonesIter zone(cx->runtime(), WithAtoms); !zone.done(); zone.next()) {
-    zone->clearKeptObjects();
-  }
-
+  JS::ClearKeptObjects(cx);
   return true;
 }
 
@@ -4171,7 +4168,7 @@ static void KillWatchdog(JSContext* cx) {
 
   {
     LockGuard<Mutex> guard(sc->watchdogLock);
-    Swap(sc->watchdogThread, thread);
+    std::swap(sc->watchdogThread, thread);
     if (thread) {
       // The watchdog thread becoming Nothing is its signal to exit.
       sc->watchdogWakeup.notify_one();
@@ -4489,6 +4486,32 @@ static bool SetJitCompilerOption(JSContext* cx, unsigned argc, Value* vp) {
       JS_ReportErrorASCII(cx,
                           "Can't turn off JITs with JIT code on the stack.");
       return false;
+    }
+  }
+
+  // Throw if trying to disable all the Wasm compilers.  The logic here is that
+  // if we're trying to disable a compiler that is currently enabled and that is
+  // the last compiler enabled then we must throw.
+  if ((opt == JSJITCOMPILER_WASM_JIT_BASELINE ||
+       opt == JSJITCOMPILER_WASM_JIT_ION ||
+       opt == JSJITCOMPILER_WASM_JIT_CRANELIFT) &&
+      number == 0) {
+    uint32_t baseline, ion, cranelift;
+    MOZ_ALWAYS_TRUE(JS_GetGlobalJitCompilerOption(
+        cx, JSJITCOMPILER_WASM_JIT_BASELINE, &baseline));
+    MOZ_ALWAYS_TRUE(
+        JS_GetGlobalJitCompilerOption(cx, JSJITCOMPILER_WASM_JIT_ION, &ion));
+    MOZ_ALWAYS_TRUE(JS_GetGlobalJitCompilerOption(
+        cx, JSJITCOMPILER_WASM_JIT_CRANELIFT, &cranelift));
+    if (baseline + ion + cranelift == 1) {
+      if ((opt == JSJITCOMPILER_WASM_JIT_BASELINE && baseline) ||
+          (opt == JSJITCOMPILER_WASM_JIT_ION && ion) ||
+          (opt == JSJITCOMPILER_WASM_JIT_CRANELIFT && cranelift)) {
+        JS_ReportErrorASCII(
+            cx,
+            "Disabling all the Wasm compilers at runtime is not supported.");
+        return false;
+      }
     }
   }
 

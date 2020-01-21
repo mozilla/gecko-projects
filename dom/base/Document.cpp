@@ -1354,6 +1354,7 @@ Document::Document(const char* aContentType)
       mStackRefCnt(0),
       mUpdateNestLevel(0),
       mViewportType(Unknown),
+      mViewportFit(ViewportFitType::Auto),
       mSubDocuments(nullptr),
       mHeaderData(nullptr),
       mFlashClassification(FlashClassification::Unknown),
@@ -1364,6 +1365,7 @@ Document::Document(const char* aContentType)
       mIgnoreOpensDuringUnloadCounter(0),
       mDocLWTheme(Doc_Theme_Uninitialized),
       mSavedResolution(1.0f),
+      mSavedResolutionBeforeMVM(1.0f),
       mPendingInitialTranslation(false),
       mGeneration(0),
       mCachedTabSizeGeneration(0),
@@ -9618,6 +9620,21 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
         hasValidContents = true;
       }
 
+      // Resolve viewport-fit value.
+      // https://drafts.csswg.org/css-round-display/#viewport-fit-descriptor
+      mViewportFit = ViewportFitType::Auto;
+      if (!metaData.mViewportFit.IsEmpty()) {
+        if (metaData.mViewportFit.EqualsLiteral("contain")) {
+          mViewportFit = ViewportFitType::Contain;
+          hasValidContents = true;
+        } else if (metaData.mViewportFit.EqualsLiteral("cover")) {
+          mViewportFit = ViewportFitType::Cover;
+          hasValidContents = true;
+        } else if (metaData.mViewportFit.EqualsLiteral("auto")) {
+          hasValidContents = true;
+        }
+      }
+
       mWidthStrEmpty = metaData.mWidth.IsEmpty();
 
       mViewportType = hasValidContents ? Specified : NoValidContent;
@@ -9828,7 +9845,7 @@ nsViewportInfo Document::GetViewportInfo(const ScreenIntSize& aDisplaySize) {
           scaleFloat, scaleMinFloat, scaleMaxFloat, size, sizeFlag,
           mValidScaleFloat ? nsViewportInfo::AutoScaleFlag::FixedScale
                            : nsViewportInfo::AutoScaleFlag::AutoScale,
-          effectiveZoomFlag);
+          effectiveZoomFlag, mViewportFit);
   }
 }
 
@@ -9858,6 +9875,11 @@ void Document::AddMetaViewportElement(HTMLMetaElement* aElement,
   mMetaViewports.AppendElement(MetaViewportElementAndData{aElement, aData});
   // Trigger recomputation of the nsViewportInfo the next time it's queried.
   mViewportType = Unknown;
+
+  RefPtr<AsyncEventDispatcher> asyncDispatcher = new AsyncEventDispatcher(
+      this, NS_LITERAL_STRING("DOMMetaViewportFitChanged"), CanBubble::eYes,
+      ChromeOnlyDispatch::eYes);
+  asyncDispatcher->RunDOMEventWhenSafe();
 }
 
 void Document::RemoveMetaViewportElement(HTMLMetaElement* aElement) {
@@ -9866,6 +9888,11 @@ void Document::RemoveMetaViewportElement(HTMLMetaElement* aElement) {
       mMetaViewports.RemoveElement(viewport);
       // Trigger recomputation of the nsViewportInfo the next time it's queried.
       mViewportType = Unknown;
+
+      RefPtr<AsyncEventDispatcher> asyncDispatcher = new AsyncEventDispatcher(
+          this, NS_LITERAL_STRING("DOMMetaViewportFitChanged"), CanBubble::eYes,
+          ChromeOnlyDispatch::eYes);
+      asyncDispatcher->RunDOMEventWhenSafe();
       return;
     }
   }

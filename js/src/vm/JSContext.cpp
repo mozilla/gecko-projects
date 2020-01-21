@@ -893,8 +893,8 @@ void js::ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx, HandleValue v,
 
   if (!reportScanStack) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                              JSMSG_CANT_CONVERT_TO,
-                              NullOrUndefinedToCharZ(v), "object");
+                              JSMSG_CANT_CONVERT_TO, NullOrUndefinedToCharZ(v),
+                              "object");
     return;
   }
 
@@ -938,8 +938,7 @@ void js::ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx, HandleValue v,
 
   if (!reportScanStack) {
     JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr, JSMSG_PROPERTY_FAIL,
-                             keyStr.get(),
-                             NullOrUndefinedToCharZ(v));
+                             keyStr.get(), NullOrUndefinedToCharZ(v));
     return;
   }
 
@@ -957,8 +956,8 @@ void js::ReportIsNullOrUndefinedForPropertyAccess(JSContext* cx, HandleValue v,
   }
 
   JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
-                           JSMSG_PROPERTY_FAIL_EXPR, keyStr.get(),
-                           bytes.get(), NullOrUndefinedToCharZ(v));
+                           JSMSG_PROPERTY_FAIL_EXPR, keyStr.get(), bytes.get(),
+                           NullOrUndefinedToCharZ(v));
 }
 
 bool js::ReportValueErrorFlags(JSContext* cx, unsigned flags,
@@ -1093,9 +1092,7 @@ JS_FRIEND_API void js::StopDrainingJobQueue(JSContext* cx) {
 JS_FRIEND_API void js::RunJobs(JSContext* cx) {
   MOZ_ASSERT(cx->jobQueue);
   cx->jobQueue->runJobs(cx);
-  for (ZonesIter zone(cx->runtime(), WithAtoms); !zone.done(); zone.next()) {
-    zone->clearKeptObjects();
-  }
+  JS::ClearKeptObjects(cx);
 }
 
 JSObject* InternalJobQueue::getIncumbentGlobal(JSContext* cx) {

@@ -270,9 +270,6 @@ bool DocumentLoadListener::Open(
     return false;
   }
 
-  nsDocShell::ConfigureChannel(mChannel, aLoadState, aInitiatorType, aLoadType,
-                               aCacheKey, aHasNonEmptySandboxingFlags);
-
   // Computation of the top window uses the docshell tree, so only
   // works in the source process. We compute it manually and override
   // it so that it gets the right value.
@@ -1241,7 +1238,7 @@ DocumentLoadListener::HasCrossOriginOpenerPolicyMismatch(bool* aMismatch) {
 }
 
 NS_IMETHODIMP
-DocumentLoadListener::GetCrossOriginOpenerPolicy(
+DocumentLoadListener::GetCachedCrossOriginOpenerPolicy(
     nsILoadInfo::CrossOriginOpenerPolicy* aPolicy) {
   MOZ_ASSERT(aPolicy);
   if (!aPolicy) {

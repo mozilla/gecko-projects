@@ -6,6 +6,11 @@
 import os
 
 
+NODEJS_PATH = None
+if 'MOZ_FETCHES_DIR' in os.environ:
+    NODEJS_PATH = os.path.join(os.environ["MOZ_FETCHES_DIR"], "node/bin/node")
+
+
 def WebglSuite(name):
     return {
         "run_filename": "runtestsremote.py",
@@ -48,10 +53,12 @@ config = {
     # "log_format": "%(levelname)8s - %(message)s",
     "log_tbpl_level": "info",
     "log_raw_level": "info",
+    "minidump_stackwalk_path": "linux64-minidump_stackwalk",
     # To take device screenshots at timed intervals (each time in seconds, relative
     # to the start of the run-tests step) specify screenshot_times. For example, to
     # take 4 screenshots at one minute intervals you could specify:
     # "screenshot_times": [60, 120, 180, 240],
+    "nodejs_path": NODEJS_PATH,
 
     "suite_definitions": {
         "mochitest-plain": {

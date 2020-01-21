@@ -986,11 +986,7 @@
 # (or base domain) of the loaded resource.
 - name: browser.tabs.remote.useCORP
   type: bool
-#if !defined(ANDROID)
   value: true
-#else
-  value: false # Blocked by DocumentChannel, see Bug 1589982.
-#endif
   mirror: always
 
 # The percentage of the screen that needs to be scrolled before toolbar
@@ -1063,6 +1059,12 @@
 
 # Is support for CanvasRenderingContext2D's hitRegion APIs enabled?
 - name: canvas.hitregions.enabled
+  type: bool
+  value: false
+  mirror: always
+
+# Provide ability to turn on support for canvas mozGetAsFile API.
+- name: canvas.mozgetasfile.enabled
   type: bool
   value: false
   mirror: always
@@ -2392,6 +2394,26 @@
   mirror: always
 
 - name: dom.testing.sync-content-blocking-notifications
+  type: bool
+  value: false
+  mirror: always
+
+- name: dom.textMetrics.actualBoundingBox.enabled
+  type: bool
+  value: true
+  mirror: always
+
+- name: dom.textMetrics.baselines.enabled
+  type: bool
+  value: false
+  mirror: always
+
+- name: dom.textMetrics.emHeight.enabled
+  type: bool
+  value: false
+  mirror: always
+
+- name: dom.textMetrics.fontBoundingBox.enabled
   type: bool
   value: false
   mirror: always
@@ -5278,6 +5300,12 @@
   value: true
   mirror: always
 
+# Is support for -moz-prefixed multi-column properties (including column-gap) enabled?
+- name: layout.css.prefixes.columns
+  type: bool
+  value: false
+  mirror: always
+
 # Is support for -moz-prefixed font feature properties enabled?
 - name: layout.css.prefixes.font-features
   type: bool
@@ -7191,6 +7219,21 @@
   type: RelaxedAtomicBool
   value: false
   mirror: always
+
+# Force remapping of remote port numbers to allow reaching local testing
+# servers or port forwarders listening on non-standard ports.  Note that
+# this is not changing the origin URL in the addressbar, only internally
+# the port number used.  This is intended to be used along with the
+# `network.dns.forceResolve` preference.
+#
+# The form is:
+#   "80,443,808-888=8080; 563=8081"
+# this will remap ports for HTTP, HTTPS and the range of 808-888 included
+# to use port 8080, and port 563 to go to 8081.
+- name: network.socket.forcePort
+  type: String
+  value: ""
+  mirror: never
 
 #---------------------------------------------------------------------------
 # Prefs starting with "nglayout."

@@ -99,12 +99,12 @@ bool DCLayerTree::Initialize(HWND aHwnd) {
   }
 
   mCompositionTarget->SetRoot(mRootVisual);
-  // Set interporation mode to Linear.
+  // Set interporation mode to nearest, to ensure 1:1 sampling.
   // By default, a visual inherits the interpolation mode of the parent visual.
   // If no visuals set the interpolation mode, the default for the entire visual
   // tree is nearest neighbor interpolation.
   mRootVisual->SetBitmapInterpolationMode(
-      DCOMPOSITION_BITMAP_INTERPOLATION_MODE_LINEAR);
+      DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
   return true;
 }
 
@@ -241,6 +241,7 @@ void DCLayerTree::Unbind() {
   RefPtr<IDCompositionSurface> surface = mCurrentSurface.ref();
   surface->EndDraw();
 
+  DestroyEGLSurface();
   mCurrentSurface = Nothing();
 }
 
@@ -432,8 +433,8 @@ void DCSurface::UpdateAllocatedRect() {
     for (auto it = mDCLayers.begin(); it != mDCLayers.end(); ++it) {
       RECT rect;
 
-      rect.left = (LONG) (VIRTUAL_OFFSET + it->first.mX * mTileSize.width);
-      rect.top = (LONG) (VIRTUAL_OFFSET + it->first.mY * mTileSize.height);
+      rect.left = (LONG)(VIRTUAL_OFFSET + it->first.mX * mTileSize.width);
+      rect.top = (LONG)(VIRTUAL_OFFSET + it->first.mY * mTileSize.height);
       rect.right = rect.left + mTileSize.width;
       rect.bottom = rect.top + mTileSize.height;
 

@@ -14,9 +14,10 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Casting.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/Move.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/Vector.h"
+
+#include <utility>
 
 #include "frontend/BinAST-macros.h"
 #include "frontend/BinASTTokenReaderContext.h"
@@ -33,8 +34,7 @@
 using JS::RegExpFlag;
 using JS::RegExpFlags;
 
-namespace js {
-namespace frontend {
+namespace js::frontend {
 
 // Compare a bunch of `uint8_t` values (as returned by the tokenizer_) with
 // a string literal (and ONLY a string literal).
@@ -5036,5 +5036,4 @@ JS::Result<ParseNode*> BinASTParser<Tok>::parseOptionalStatement(
 template class BinASTParser<BinASTTokenReaderContext>;
 template class BinASTParser<BinASTTokenReaderMultipart>;
 
-}  // namespace frontend
-}  // namespace js
+}  // namespace js::frontend

@@ -7,10 +7,11 @@
 #ifndef mozilla_dom_StructuredCloneHolder_h
 #define mozilla_dom_StructuredCloneHolder_h
 
-#include "jsapi.h"
+#include <utility>
+
 #include "js/StructuredClone.h"
+#include "jsapi.h"
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/Move.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "nsTArray.h"
@@ -38,8 +39,8 @@ class StructuredCloneHolderBase {
  public:
   typedef JS::StructuredCloneScope StructuredCloneScope;
 
-  StructuredCloneHolderBase(StructuredCloneScope aScope =
-                                StructuredCloneScope::SameProcessSameThread);
+  StructuredCloneHolderBase(
+      StructuredCloneScope aScope = StructuredCloneScope::SameProcess);
   virtual ~StructuredCloneHolderBase();
 
   // Note, it is unsafe to std::move() a StructuredCloneHolderBase since a raw

@@ -576,7 +576,7 @@ pref("media.cubeb.logging_level", "");
   pref("media.audioipc.stack_size", 262144);
 #endif
 
-#if defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
+#if defined(XP_MACOSX)
   pref("media.cubeb.backend", "audiounit-rust");
 #endif
 
@@ -684,6 +684,7 @@ pref("gfx.webrender.debug.new-scene-indicator", false);
 pref("gfx.webrender.debug.show-overdraw", false);
 pref("gfx.webrender.debug.slow-frame-indicator", false);
 pref("gfx.webrender.debug.picture-caching", false);
+pref("gfx.webrender.debug.tile-cache-logging", false);
 pref("gfx.webrender.debug.primitives", false);
 pref("gfx.webrender.debug.small-screen", false);
 pref("gfx.webrender.debug.obscure-images", false);
@@ -2288,6 +2289,10 @@ pref("security.notification_enable_delay", 500);
   // to skip the assertion that HTML fragments (e.g. innerHTML) can
   // not be used within chrome code or about: pages.
   pref("domsecurity.skip_html_fragment_assertion", false);
+  // For testing purposes only; Flipping this pref to true allows
+  // to skip the assertion that remote scripts can not be loaded
+  // in system privileged contexts.
+  pref("domsecurity.skip_remote_script_assertion_in_system_priv_context", false);
 #endif
 
 #ifdef EARLY_BETA_OR_EARLIER
@@ -4982,3 +4987,6 @@ pref("dom.postMessage.sharedArrayBuffer.bypassCOOP_COEP.insecure.enabled", false
 #else
 pref("dom.postMessage.sharedArrayBuffer.bypassCOOP_COEP.insecure.enabled", false, locked);
 #endif
+
+// Whether to start the private browsing mode at application startup
+pref("browser.privatebrowsing.autostart", false);

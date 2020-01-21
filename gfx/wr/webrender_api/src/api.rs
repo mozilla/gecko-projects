@@ -910,6 +910,8 @@ bitflags!{
         const SCENE = 0x1;
         ///
         const FRAME = 0x2;
+        ///
+        const TILE_CACHE = 0x4;
     }
 }
 
@@ -975,6 +977,8 @@ pub enum DebugCommand {
     SimulateLongLowPrioritySceneBuild(u32),
     /// Logs transactions to a file for debugging purposes
     SetTransactionLogging(bool),
+    /// Set an override tile size to use for picture caches
+    SetPictureTileSize(Option<DeviceIntSize>),
 }
 
 /// Message sent by the `RenderApi` to the render backend thread.
@@ -1411,6 +1415,8 @@ bitflags! {
         const DISABLE_PICTURE_CACHING = 1 << 27;
         /// If set, dump picture cache invalidation debug to console.
         const INVALIDATION_DBG = 1 << 28;
+        /// Log tile cache to memory for later saving as part of wr-capture
+        const TILE_CACHE_LOGGING_DBG   = 1 << 29;
     }
 }
 

@@ -2691,7 +2691,6 @@ const InterfaceShimEntry kInterfaceShimMap[] = {
     {"nsIDOMUIEvent", "UIEvent"},
     {"nsIDOMHTMLMediaElement", "HTMLMediaElement"},
     {"nsIDOMRange", "Range"},
-    {"nsIDOMSVGLength", "SVGLength"},
     // Think about whether Ci.nsINodeFilter can just go away for websites!
     {"nsIDOMNodeFilter", "NodeFilter"},
     {"nsIDOMXPathResult", "XPathResult"}};
@@ -5192,8 +5191,13 @@ void nsGlobalWindowInner::Resume() {
   // in Suspend() and ensures all children have the correct mSuspendDepth.
   CallOnInProcessChildren(&nsGlobalWindowInner::Resume);
 
-  MOZ_ASSERT(mSuspendDepth != 0);
+  if (mSuspendDepth == 0) {
+    // Ignore if the window is not suspended.
+    return;
+  }
+
   mSuspendDepth -= 1;
+
   if (mSuspendDepth != 0) {
     return;
   }
@@ -5868,7 +5872,6 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
 
 #ifdef MOZ_GECKO_PROFILER
   if (profiler_can_accept_markers()) {
-    nsCOMPtr<nsIDocShell> docShell = GetDocShell();
     nsCString str;
     TimeDuration originalInterval = timeout->When() - timeout->SubmitTime();
     str.Append(reason);
@@ -5878,9 +5881,9 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
     nsCString handlerDescription;
     timeout->mScriptHandler->GetDescription(handlerDescription);
     str.Append(handlerDescription);
-    AUTO_PROFILER_TEXT_MARKER_DOCSHELL_CAUSE("setTimeout callback", str, JS,
-                                             docShell,
-                                             timeout->TakeProfilerBacktrace());
+    AUTO_PROFILER_TEXT_MARKER_CAUSE("setTimeout callback", str, JS,
+                                    Some(mWindowID),
+                                    timeout->TakeProfilerBacktrace());
   }
 #endif
 

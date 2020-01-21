@@ -9,10 +9,11 @@
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Casting.h"
 #include "mozilla/Maybe.h"
-#include "mozilla/Move.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Vector.h"
+
+#include <utility>
 
 #include "frontend/BinAST-macros.h"
 #include "frontend/BinASTParser.h"
@@ -22,7 +23,6 @@
 #include "frontend/ParseNode.h"
 #include "frontend/Parser.h"
 #include "frontend/SharedContext.h"
-
 #include "js/Result.h"
 #include "vm/RegExpObject.h"
 
@@ -74,8 +74,7 @@
 //
 // They should be treated lazily (whenever we open a subscope), like bindings.
 
-namespace js {
-namespace frontend {
+namespace js::frontend {
 
 using UsedNamePtr = UsedNameTracker::UsedNameMap::Ptr;
 
@@ -811,5 +810,4 @@ BinASTParserPerTokenizer<Tok>::asFinalParser() const {
 template class BinASTParserPerTokenizer<BinASTTokenReaderContext>;
 template class BinASTParserPerTokenizer<BinASTTokenReaderMultipart>;
 
-}  // namespace frontend
-}  // namespace js
+}  // namespace js::frontend
