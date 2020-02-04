@@ -18,7 +18,6 @@
 common-tests:
     - marionette
     - mochitest-browser-chrome
-    - mochitest-chrome
 
 web-platform-tests:
     - web-platform-tests
@@ -205,6 +204,7 @@ raptor-profiling:
     - raptor-wasm-godot-firefox-profiling
     - raptor-ares6-firefox-profiling
     - raptor-jetstream2-firefox-profiling
+    - raptor-youtube-playback-firefox-profiling
 
 raptor-chromium:
     - raptor-tp6-1-chromium
@@ -338,10 +338,7 @@ linux32-tests:
 linux-common-tests:
     - marionette
     - mochitest-browser-chrome
-    - mochitest-chrome
 
-# List of tests that are green on ubuntu1804 docker image.
-# See Bug 1602863 for information.
 linux1804-tests:
     - cppunit
     - crashtest
@@ -352,6 +349,7 @@ linux1804-tests:
     - jittest
     - mochitest
     - mochitest-a11y
+    - mochitest-chrome
     - mochitest-devtools-chrome
     - mochitest-gpu
     - mochitest-media
@@ -377,6 +375,7 @@ linux1804-qr-tests:
     - jsreftest
     - mochitest
     - mochitest-a11y
+    - mochitest-chrome
     - mochitest-gpu
     - mochitest-media
     - mochitest-webgpu
@@ -397,6 +396,7 @@ linux1804-ccov-tests:
     - jsreftest
     - mochitest
     - mochitest-a11y
+    - mochitest-chrome
     - mochitest-devtools-chrome
     - mochitest-gpu
     - mochitest-media
@@ -413,9 +413,6 @@ linux1804-ccov-tests:
     - test-verify-gpu
     - test-verify-wpt
     - xpcshell
-
-linux-qr-tests:
-    - mochitest-chrome
 
 linux-qr-smoketests:
     - crashtest
@@ -879,6 +876,16 @@ android-hw-aarch64-raptor:
     - raptor-tp6m-26-geckoview-cold
     - raptor-tp6m-27-geckoview-cold
     - raptor-tp6m-28-geckoview-cold
+    - raptor-tp6m-1-fennec68
+    - raptor-tp6m-2-fennec68
+    - raptor-tp6m-3-fennec68
+    - raptor-tp6m-4-fennec68
+    - raptor-tp6m-5-fennec68
+    - raptor-tp6m-6-fennec68
+    - raptor-tp6m-7-fennec68
+    - raptor-tp6m-8-fennec68
+    - raptor-tp6m-9-fennec68
+    - raptor-tp6m-10-fennec68
     - raptor-tp6m-1-fennec68-cold
     - raptor-tp6m-2-fennec68-cold
     - raptor-tp6m-3-fennec68-cold
@@ -983,18 +990,6 @@ android-hw-aarch64-raptor-cpu-memory-power:
     - raptor-scn-cpu-memory-power-idle-bg-fenix
     - raptor-scn-cpu-memory-power-idle-bg-geckoview
     - raptor-scn-cpu-memory-power-idle-bg-refbrow
-
-android-hw-arm7-raptor-nightly:
-    - raptor-tp6m-1-fennec68
-    - raptor-tp6m-2-fennec68
-    - raptor-tp6m-3-fennec68
-    - raptor-tp6m-4-fennec68
-    - raptor-tp6m-5-fennec68
-    - raptor-tp6m-6-fennec68
-    - raptor-tp6m-7-fennec68
-    - raptor-tp6m-8-fennec68
-    - raptor-tp6m-9-fennec68
-    - raptor-tp6m-10-fennec68
 
 android-hw-aarch64-browsertime:
     - browsertime-tp6m

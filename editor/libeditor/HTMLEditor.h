@@ -175,6 +175,15 @@ class HTMLEditor final : public TextEditor,
   virtual nsresult GetPreferredIMEState(widget::IMEState* aState) override;
 
   /**
+   * GetBackgroundColorState() returns what the background color of the
+   * selection.
+   *
+   * @param aMixed      true if there is more than one font color
+   * @param aOutColor   Color string. "" is returned for none.
+   */
+  nsresult GetBackgroundColorState(bool* aMixed, nsAString& aOutColor);
+
+  /**
    * PasteNoFormatting() pastes content in clipboard without any style
    * information.
    *
@@ -4341,7 +4350,7 @@ class HTMLEditor final : public TextEditor,
    */
   already_AddRefed<nsRange> GetChangedRangeForTopLevelEditSubAction() const {
     if (!mChangedRangeForTopLevelEditSubAction) {
-      mChangedRangeForTopLevelEditSubAction = new nsRange(GetDocument());
+      mChangedRangeForTopLevelEditSubAction = nsRange::Create(GetDocument());
     }
     return do_AddRef(mChangedRangeForTopLevelEditSubAction);
   }
@@ -4369,9 +4378,6 @@ class HTMLEditor final : public TextEditor,
   // then, it'll be referred and incremented by
   // GetNextSelectedTableCellElement().
   mutable uint32_t mSelectedCellIndex;
-
-  nsString mLastStyleSheetURL;
-  nsString mLastOverrideStyleSheetURL;
 
   // Maintain a list of associated style sheets and their urls.
   nsTArray<nsString> mStyleSheetURLs;

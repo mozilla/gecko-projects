@@ -107,6 +107,7 @@
 #include "mozilla/dom/PushNotifier.h"
 #include "mozilla/dom/SHEntryParent.h"
 #include "mozilla/dom/SHistoryParent.h"
+#include "mozilla/dom/ServiceWorkerManager.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/dom/StorageIPC.h"
@@ -204,7 +205,6 @@
 #include "nsISound.h"
 #include "nsIStringBundle.h"
 #include "nsITimer.h"
-#include "nsITrackingDBService.h"
 #include "nsIURIFixup.h"
 #include "nsIURL.h"
 #include "nsIWebBrowserChrome.h"
@@ -1658,10 +1658,14 @@ void ContentParent::MarkAsDead() {
   nsCOMPtr<nsIEventTarget> launcherThread(GetIPCLauncher());
   MOZ_ASSERT(launcherThread);
 
-  launcherThread->Dispatch(
-      NS_NewRunnableFunction("ContentParent::MarkAsDead", []() {
-        java::GeckoProcessManager::MarkAsDead(
-            XRE_GeckoProcessTypeToString(GeckoProcessType_Content));
+  auto procType = java::GeckoProcessType::CONTENT();
+  auto selector =
+      java::GeckoProcessManager::Selector::New(procType, OtherPid());
+
+  launcherThread->Dispatch(NS_NewRunnableFunction(
+      "ContentParent::MarkAsDead",
+      [selector = java::GeckoProcessManager::Selector::GlobalRef(selector)]() {
+        java::GeckoProcessManager::MarkAsDead(selector);
       }));
 #endif
 }
@@ -1767,11 +1771,7 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
           dumpID = mCrashReporter->MinidumpID();
         }
       } else {
-        CrashReporter::FinalizeOrphanedMinidump(
-            OtherPid(), GeckoProcessType_Content, &dumpID);
-        CrashReporterHost::RecordCrash(GeckoProcessType_Content,
-                                       nsICrashService::CRASH_TYPE_CRASH,
-                                       dumpID);
+        HandleOrphanedMinidump(&dumpID);
       }
 
       if (!dumpID.IsEmpty()) {
@@ -3590,6 +3590,19 @@ void ContentParent::GeneratePairedMinidump(const char* aReason) {
             this, nullptr, NS_LITERAL_CSTRING("browser"))) {
       mCreatedPairedMinidumps = mCrashReporter->FinalizeCrashReport();
     }
+  }
+}
+
+void ContentParent::HandleOrphanedMinidump(nsString* aDumpId) {
+  if (CrashReporter::FinalizeOrphanedMinidump(
+          OtherPid(), GeckoProcessType_Content, aDumpId)) {
+    CrashReporterHost::RecordCrash(GeckoProcessType_Content,
+                                   nsICrashService::CRASH_TYPE_CRASH, *aDumpId);
+  } else {
+    NS_WARNING(nsPrintfCString("content process pid = %d crashed without "
+                               "leaving a minidump behind",
+                               OtherPid())
+                   .get());
   }
 }
 
@@ -5751,32 +5764,6 @@ mozilla::ipc::IPCResult ContentParent::RecvRecordDiscardedData(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult ContentParent::RecvRecordOrigin(
-    const uint32_t& aMetricId, const nsCString& aOrigin) {
-  Telemetry::RecordOrigin(static_cast<Telemetry::OriginMetricID>(aMetricId),
-                          aOrigin);
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult ContentParent::RecvReportContentBlockingLog(
-    const IPCStream& aIPCStream) {
-  nsCOMPtr<nsITrackingDBService> trackingDBService =
-      do_GetService("@mozilla.org/tracking-db-service;1");
-  if (NS_WARN_IF(!trackingDBService)) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-
-  nsCOMPtr<nsIInputStream> stream = DeserializeIPCStream(aIPCStream);
-  nsCOMPtr<nsIAsyncInputStream> asyncStream;
-  nsresult rv = NS_MakeAsyncNonBlockingInputStream(stream.forget(),
-                                                   getter_AddRefs(asyncStream));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return IPC_FAIL_NO_REASON(this);
-  }
-  trackingDBService->RecordContentBlockingLog(asyncStream);
-  return IPC_OK();
-}
-
 //////////////////////////////////////////////////////////////////
 // PURLClassifierParent
 
@@ -6391,6 +6378,16 @@ PFileDescriptorSetParent* ContentParent::SendPFileDescriptorSetConstructor(
     const FileDescriptor& aFD) {
   MOZ_ASSERT(NS_IsMainThread());
   return PContentParent::SendPFileDescriptorSetConstructor(aFD);
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvReportServiceWorkerShutdownProgress(
+    uint32_t aShutdownStateId, ServiceWorkerShutdownState::Progress aProgress) {
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  MOZ_RELEASE_ASSERT(swm, "ServiceWorkers should shutdown before SWM.");
+
+  swm->ReportServiceWorkerShutdownProgress(aShutdownStateId, aProgress);
+
+  return IPC_OK();
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvCommitWindowContextTransaction(

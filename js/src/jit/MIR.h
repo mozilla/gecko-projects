@@ -161,6 +161,16 @@ static inline MIRType MIRTypeFromValue(const js::Value& vp) {
    */                                                                          \
   _(IncompleteObject)                                                          \
                                                                                \
+  /* For WebAssembly, there are functions with multiple results.  Instead of   \
+   * having the results defined by one call instruction, they are instead      \
+   * captured in subsequent result capture instructions, because modelling     \
+   * multi-value results in Ion is too complicated.  However since they        \
+   * capture ambient live registers, it would be an error to move an unrelated \
+   * instruction between the call and the result capture.  This flag is used   \
+   * to prevent code motion from moving instructions in invalid ways.          \
+   */                                                                          \
+  _(CallResultCapture)                                                         \
+                                                                               \
   /* The current instruction got discarded from the MIR Graph. This is useful  \
    * when we want to iterate over resume points and instructions, while        \
    * handling instructions which are discarded without reporting to the        \
@@ -2722,6 +2732,7 @@ class MCall : public MVariadicInstruction, public CallPolicy::Data {
   bool needsArgCheck_ : 1;
   bool needsClassCheck_ : 1;
   bool maybeCrossRealm_ : 1;
+  bool needsThisCheck_ : 1;
 
   MCall(WrappedFunction* target, uint32_t numActualArgs, bool construct,
         bool ignoresReturnValue)
@@ -2732,7 +2743,8 @@ class MCall : public MVariadicInstruction, public CallPolicy::Data {
         ignoresReturnValue_(ignoresReturnValue),
         needsArgCheck_(true),
         needsClassCheck_(true),
-        maybeCrossRealm_(true) {
+        maybeCrossRealm_(true),
+        needsThisCheck_(false) {
     setResultType(MIRType::Value);
   }
 
@@ -2755,6 +2767,12 @@ class MCall : public MVariadicInstruction, public CallPolicy::Data {
 
   bool maybeCrossRealm() const { return maybeCrossRealm_; }
   void setNotCrossRealm() { maybeCrossRealm_ = false; }
+
+  bool needsThisCheck() const { return needsThisCheck_; }
+  void setNeedsThisCheck() {
+    MOZ_ASSERT(construct_);
+    needsThisCheck_ = true;
+  }
 
   MDefinition* getFunction() const { return getOperand(FunctionOperandIndex); }
   void replaceFunction(MInstruction* newfunc) {
@@ -11962,9 +11980,7 @@ class MWasmResultBase : public MNullaryInstruction {
   MWasmResultBase(Opcode op, MIRType type, Location loc)
       : MNullaryInstruction(op), loc_(loc) {
     setResultType(type);
-    // Prevent reordering.  Although there's no problem eliding call result
-    // definitions, there's also no need, as they cause no codegen.
-    setGuard();
+    setCallResultCapture();
   }
 
  public:
@@ -12123,6 +12139,9 @@ class MRotate : public MBinaryInstruction, public NoTypePolicy::Data {
         isLeftRotate_(isLeftRotate) {
     setMovable();
     setResultType(type);
+    // Prevent reordering.  Although there's no problem eliding call result
+    // definitions, there's also no need, as they cause no codegen.
+    setGuard();
   }
 
  public:

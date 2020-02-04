@@ -1153,11 +1153,6 @@ class CGHeaders(CGWrapper):
             if unrolled.isUnion():
                 headerSet.add(self.getUnionDeclarationFilename(config, unrolled))
                 bindingHeaders.add("mozilla/dom/UnionConversions.h")
-            elif unrolled.isDate():
-                if dictionary or jsImplementedDescriptors:
-                    declareIncludes.add("mozilla/dom/Date.h")
-                else:
-                    bindingHeaders.add("mozilla/dom/Date.h")
             elif unrolled.isPromise():
                 # See comment in the isInterface() case for why we add
                 # Promise.h to headerSet, not bindingHeaders.
@@ -4715,6 +4710,9 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
     If isClamp is true, we're converting an integer and clamping if the
     value is out of range.
 
+    If isAllowShared is false, we're converting a buffer source and throwing if
+    it is a SharedArrayBuffer or backed by a SharedArrayBuffer.
+
     If lenientFloatCode is not None, it should be used in cases when
     we're a non-finite float that's not unrestricted.
 
@@ -4749,6 +4747,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
 
     isClamp = type.hasClamp()
     isEnforceRange = type.hasEnforceRange()
+    isAllowShared = type.hasAllowShared()
 
     # If exceptionCode is not set, we'll just rethrow the exception we got.
     # Note that we can't just set failureCode to exceptionCode, because setting
@@ -4775,6 +4774,12 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
             failureCode or
             ('ThrowErrorMessage(cx, MSG_DOES_NOT_IMPLEMENT_INTERFACE, "%s", "%s");\n'
              '%s' % (firstCap(sourceDescription), typeName, exceptionCode)))
+
+    def onFailureIsShared(failureCode):
+        return CGGeneric(
+            failureCode or
+            ('ThrowErrorMessage(cx, MSG_TYPEDARRAY_IS_SHARED, "%s");\n'
+             '%s' % (firstCap(sourceDescription), exceptionCode)))
 
     def onFailureNotCallable(failureCode):
         return CGGeneric(
@@ -4913,7 +4918,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
     assert not (isEnforceRange and isClamp)  # These are mutually exclusive
 
     if type.isSequence():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
 
         if failureCode is None:
             notSequence = ('ThrowErrorMessage(cx, MSG_NOT_SEQUENCE, "%s");\n'
@@ -5051,7 +5056,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                                         holderArgs=holderArgs)
 
     if type.isRecord():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
         if failureCode is None:
             notRecord = ('ThrowErrorMessage(cx, MSG_NOT_OBJECT, "%s");\n'
                          "%s" % (firstCap(sourceDescription), exceptionCode))
@@ -5265,18 +5270,6 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         else:
             sequenceObject = None
 
-        dateObjectMemberTypes = filter(lambda t: t.isDate(), memberTypes)
-        if len(dateObjectMemberTypes) > 0:
-            assert len(dateObjectMemberTypes) == 1
-            memberType = dateObjectMemberTypes[0]
-            name = getUnionMemberName(memberType)
-            dateObject = CGGeneric("%s.SetTo%s(cx, ${val});\n"
-                                   "done = true;\n" % (unionArgumentObj, name))
-            dateObject = CGIfWrapper(dateObject, "JS::ObjectIsDate(cx, argObj)")
-            names.append(name)
-        else:
-            dateObject = None
-
         callbackMemberTypes = filter(lambda t: t.isCallback() or t.isCallbackInterface(), memberTypes)
         if len(callbackMemberTypes) > 0:
             assert len(callbackMemberTypes) == 1
@@ -5325,16 +5318,16 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         else:
             object = None
 
-        hasObjectTypes = interfaceObject or sequenceObject or dateObject or callbackObject or object or recordObject
+        hasObjectTypes = interfaceObject or sequenceObject or callbackObject or object or recordObject
         if hasObjectTypes:
             # "object" is not distinguishable from other types
-            assert not object or not (interfaceObject or sequenceObject or dateObject or callbackObject or recordObject)
-            if sequenceObject or dateObject or callbackObject:
+            assert not object or not (interfaceObject or sequenceObject or callbackObject or recordObject)
+            if sequenceObject or callbackObject:
                 # An object can be both an sequence object and a callback or
                 # dictionary, but we shouldn't have both in the union's members
                 # because they are not distinguishable.
                 assert not (sequenceObject and callbackObject)
-                templateBody = CGElseChain([sequenceObject, dateObject, callbackObject])
+                templateBody = CGElseChain([sequenceObject, callbackObject])
             else:
                 templateBody = None
             if interfaceObject:
@@ -5344,9 +5337,6 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                 templateBody = CGList([interfaceObject, templateBody])
             else:
                 templateBody = CGList([templateBody, object])
-
-            if dateObject:
-                templateBody.prepend(CGGeneric("JS::Rooted<JSObject*> argObj(cx, &${val}.toObject());\n"))
 
             if recordObject:
                 templateBody = CGList([templateBody,
@@ -5699,7 +5689,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                                         dealWithOptional=isOptional)
 
     if type.isGeckoInterface():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
 
         descriptor = descriptorProvider.getDescriptor(
             type.unroll().inner.identifier.name)
@@ -5867,6 +5857,21 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
             """,
             objRef=objRef,
             badType=onFailureBadType(failureCode, type.name).define())
+        if not isAllowShared and type.isBufferSource():
+            if type.isArrayBuffer():
+                isSharedMethod = "JS::IsSharedArrayBufferObject"
+            else:
+                assert type.isArrayBufferView() or type.isTypedArray()
+                isSharedMethod = "JS::IsArrayBufferViewShared"
+            template += fill(
+                """
+                if (${isSharedMethod}(${objRef}.Obj())) {
+                  $*{badType}
+                }
+                """,
+                isSharedMethod=isSharedMethod,
+                objRef=objRef,
+                badType=onFailureIsShared(failureCode).define())
         template = wrapObjectTemplate(template, type, "${declName}.SetNull();\n",
                                       failureCode)
         if not isMember:
@@ -5903,7 +5908,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                                         holderArgs=holderArgs)
 
     if type.isJSString():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
         if type.nullable():
             raise TypeError("Nullable JSString not supported");
 
@@ -5942,7 +5947,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                                         declArgs=declArgs)
 
     if type.isDOMString() or type.isUSVString() or type.isUTF8String():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
 
         treatAs = {
             "Default": "eStringify",
@@ -6035,7 +6040,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
             holderType=holderType)
 
     if type.isByteString():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
 
         nullable = toStringBool(type.nullable())
 
@@ -6062,7 +6067,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
             dealWithOptional=isOptional)
 
     if type.isEnum():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
 
         enumName = type.unroll().inner.identifier.name
         declType = CGGeneric(enumName)
@@ -6128,7 +6133,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                                         dealWithOptional=isOptional)
 
     if type.isCallback():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
         assert not type.treatNonCallableAsNull() or type.nullable()
         assert not type.treatNonObjectAsNull() or type.nullable()
         assert not type.treatNonObjectAsNull() or not type.treatNonCallableAsNull()
@@ -6179,7 +6184,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                                         dealWithOptional=isOptional)
 
     if type.isAny():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
 
         declArgs = None
         if isMember in ("Variadic", "Sequence", "Dictionary", "Record"):
@@ -6232,7 +6237,7 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
                                         declArgs=declArgs)
 
     if type.isObject():
-        assert not isEnforceRange and not isClamp
+        assert not isEnforceRange and not isClamp and not isAllowShared
         return handleJSObjectType(type, isMember, failureCode, exceptionCode, sourceDescription)
 
     if type.isDictionary():
@@ -6341,48 +6346,6 @@ def getJSToNativeConversionInfo(type, descriptorProvider, failureCode=None,
         # This one only happens for return values, and its easy: Just
         # ignore the jsval.
         return JSToNativeConversionInfo("")
-
-    if type.isDate():
-        assert not isEnforceRange and not isClamp
-
-        declType = CGGeneric("Date")
-        if type.nullable():
-            declType = CGTemplatedType("Nullable", declType)
-            dateVal = "${declName}.SetValue()"
-        else:
-            dateVal = "${declName}"
-
-        if failureCode is None:
-            notDate = ('ThrowErrorMessage(cx, MSG_NOT_DATE, "%s");\n'
-                       "%s" % (firstCap(sourceDescription), exceptionCode))
-        else:
-            notDate = failureCode
-
-        conversion = fill(
-            """
-            JS::Rooted<JSObject*> possibleDateObject(cx, &$${val}.toObject());
-            { // scope for isDate
-              bool isDate;
-              if (!JS::ObjectIsDate(cx, possibleDateObject, &isDate)) {
-                $*{exceptionCode}
-              }
-              if (!isDate) {
-                $*{notDate}
-              }
-              if (!${dateVal}.SetTimeStamp(cx, possibleDateObject)) {
-                $*{exceptionCode}
-              }
-            }
-            """,
-            exceptionCode=exceptionCode,
-            dateVal=dateVal,
-            notDate=notDate)
-
-        conversion = wrapObjectTemplate(conversion, type,
-                                        "${declName}.SetNull();\n", notDate)
-        return JSToNativeConversionInfo(conversion,
-                                        declType=declType,
-                                        dealWithOptional=isOptional)
 
     if not type.isPrimitive():
         raise TypeError("Need conversion for argument type '%s'" % str(type))
@@ -7140,7 +7103,6 @@ def getWrapTemplateForType(type, descriptorProvider, result, successCode,
         return (head + setter(toValue % result, wrapAsType=type), False)
 
     if not (type.isUnion() or type.isPrimitive() or type.isDictionary() or
-            type.isDate() or
             (type.isSpiderMonkeyInterface() and spiderMonkeyInterfacesAreStructs)):
         raise TypeError("Need to learn to wrap %s" % type)
 
@@ -7168,10 +7130,6 @@ def getWrapTemplateForType(type, descriptorProvider, result, successCode,
 
     if type.isDictionary():
         return (wrapAndSetPtr("%s.ToObjectInternal(cx, ${jsvalHandle})" % result),
-                False)
-
-    if type.isDate():
-        return (wrapAndSetPtr("%s.ToDateObject(cx, ${jsvalHandle})" % result),
                 False)
 
     tag = type.tag()
@@ -7448,11 +7406,6 @@ def getRetvalDeclarationForType(returnType, descriptorProvider,
                 result = CGTemplatedType("Nullable", result)
             resultArgs = None
         return result, "ref", None, resultArgs, None
-    if returnType.isDate():
-        result = CGGeneric("Date")
-        if returnType.nullable():
-            result = CGTemplatedType("Nullable", result)
-        return result, None, None, None, None
     raise TypeError("Don't know how to declare return value for %s" %
                     returnType)
 
@@ -7825,8 +7778,7 @@ def wrapTypeIntoCurrentCompartment(type, value, isMember=True):
         return CGList(memberWraps, "else ") if len(memberWraps) != 0 else None
 
     if (type.isString() or type.isPrimitive() or type.isEnum() or
-        type.isGeckoInterface() or type.isCallback() or type.isDate() or
-        type.isPromise()):
+        type.isGeckoInterface() or type.isCallback() or type.isPromise()):
         # All of these don't need wrapping.
         return None
 
@@ -8661,12 +8613,9 @@ class CGMethodCall(CGThing):
             # The spec says to check for the following things in order:
             # 1)  A platform object that's not a platform array object, being
             #     passed to an interface or "object" arg.
-            # 2)  A Date object being passed to a Date or "object" arg.
-            #     XXXbz This is actually gone from the spec now, but we still
-            #     have some APIs using Date.
-            # 3)  A callable object being passed to a callback or "object" arg.
-            # 4)  An iterable object being passed to a sequence arg.
-            # 5)  Any object being passed to a array or callback interface or
+            # 2)  A callable object being passed to a callback or "object" arg.
+            # 3)  An iterable object being passed to a sequence arg.
+            # 4)  Any object being passed to a array or callback interface or
             #     dictionary or "object" arg.
 
             # First grab all the overloads that have a non-callback interface
@@ -8678,10 +8627,6 @@ class CGMethodCall(CGThing):
                 s for s in possibleSignatures
                 if (distinguishingType(s).isObject() or
                     distinguishingType(s).isNonCallbackInterface())]
-
-            # And all the overloads that take Date
-            objectSigs.extend(s for s in possibleSignatures
-                              if distinguishingType(s).isDate())
 
             # And all the overloads that take callbacks
             objectSigs.extend(s for s in possibleSignatures
@@ -8706,7 +8651,7 @@ class CGMethodCall(CGThing):
             if len(objectSigs) > 0:
                 # Here it's enough to guard on our argument being an object.
                 # The code for unwrapping non-callback interfaces, spiderMonkey
-                # interfaces, sequences, and Dates will just bail out and move
+                # interfaces, and sequences will just bail out and move
                 # on to the next overload if the object fails to unwrap
                 # correctly, while "object" accepts any object anyway.  We
                 # could even not do the isObject() check up front here, but in
@@ -10025,8 +9970,6 @@ class CGMemberJITInfo(CGThing):
                           u.flatMemberTypes, "")
         if t.isDictionary():
             return "JSVAL_TYPE_OBJECT"
-        if t.isDate():
-            return "JSVAL_TYPE_OBJECT"
         if not t.isPrimitive():
             raise TypeError("No idea what type " + str(t) + " is.")
         tag = t.tag()
@@ -10098,8 +10041,6 @@ class CGMemberJITInfo(CGThing):
                     reduce(CGMemberJITInfo.getSingleArgType,
                            u.flatMemberTypes, type))
         if t.isDictionary():
-            return "JSJitInfo::Object"
-        if t.isDate():
             return "JSJitInfo::Object"
         if not t.isPrimitive():
             raise TypeError("No idea what type " + str(t) + " is.")
@@ -15556,12 +15497,6 @@ class CGNativeMember(ClassMethod):
             assert not isMember
             # In this case we convert directly into our outparam to start with
             return "void", "", ""
-        if type.isDate():
-            result = CGGeneric("Date")
-            if type.nullable():
-                result = CGTemplatedType("Nullable", result)
-            return (result.define(), "%s()" % result.define(),
-                    "return ${declName};\n")
         if type.isDictionary():
             if isMember:
                 # Only the first member of the tuple matters here, but return
@@ -15798,9 +15733,6 @@ class CGNativeMember(ClassMethod):
         if type.isDictionary():
             typeName = CGDictionary.makeDictionaryName(type.inner)
             return typeName, True, True
-
-        if type.isDate():
-            return "Date", False, True
 
         assert type.isPrimitive()
 

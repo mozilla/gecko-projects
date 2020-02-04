@@ -1914,7 +1914,7 @@
 # Are missing-property use counters for certain DOM attributes enabled?
 - name: dom.missing_prop_counters.enabled
   type: bool
-  value: false
+  value: true
   mirror: always
 
 # Is support for module scripts (<script type="module">) enabled for content?
@@ -2236,7 +2236,7 @@
 # HTMLIFrameElement objects.
 - name: dom.security.featurePolicy.enabled
   type: bool
-  value: true
+  value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: always
 
 # This pref enables the featurePolicy header support.
@@ -2259,6 +2259,37 @@
 - name: dom.security.featurePolicy.webidl.enabled
   type: bool
   value: @IS_NIGHTLY_BUILD@
+  mirror: always
+
+# For testing purposes only: Flipping this pref to true allows
+# to skip the allowlist for about: pages and do not ship with a
+# CSP and NS_ASSERT right away.
+- name: dom.security.skip_about_page_csp_allowlist_and_assert
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# For testing purposes only: Flipping this pref to true allows
+# to skip the assertion that every about page ships with a CSP.
+- name: dom.security.skip_about_page_has_csp_assert
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# For testing purposes only: Flipping this pref to true allows
+# to skip the assertion that HTML fragments (e.g. innerHTML) can
+# not be used within chrome code or about: pages.
+- name: dom.security.skip_html_fragment_assertion
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# For testing purposes only; Flipping this pref to true allows
+# to skip the assertion that remote scripts can not be loaded
+# in system privileged contexts.
+- name: dom.security.skip_remote_script_assertion_in_system_priv_context
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 # Is support for selection event APIs enabled?
@@ -2988,12 +3019,6 @@
   value: false
   mirror: always
 
-# This pref enables/disables nsContentBlocker
-- name: extensions.contentblocker.enabled
-  type: bool
-  value: false
-  mirror: once
-
 #---------------------------------------------------------------------------
 # Prefs starting with "findbar."
 #---------------------------------------------------------------------------
@@ -3504,9 +3529,13 @@
 
 - name: gfx.direct3d11.use-double-buffering
   type: RelaxedAtomicBool
+#ifdef XP_WIN
   # Prefer flipping between two buffers over copying from our back buffer
   # to the OS.
-  value: true
+  value: @IS_NIGHTLY_BUILD@
+#else
+  value: false
+#endif
   mirror: always
 
 - name: gfx.direct3d11.enable-debug-layer
@@ -3804,7 +3833,7 @@
 
 - name: gfx.webrender.compositor
   type: bool
-#if defined(XP_MACOSX)
+#if defined(XP_WIN) || defined(XP_MACOSX)
   value: true
 #else
   value: false
@@ -3837,6 +3866,11 @@
 #else
   value: false
 #endif
+  mirror: once
+
+- name: gfx.webrender.enable-item-cache
+  type: bool
+  value: false
   mirror: once
 
 #ifdef NIGHTLY_BUILD
@@ -4230,12 +4264,6 @@
 #else
   value: 300000
 #endif
-  mirror: always
-
-# Defer allocation of GC objects as late as possible in a parse
-- name: javascript.options.parser_defer_allocation
-  type: RelaxedAtomicBool
-  value: true
   mirror: always
 
 - name: javascript.options.experimental.fields
@@ -5428,13 +5456,13 @@
 # Are counters for implemented CSS properties enabled?
 - name: layout.css.use-counters.enabled
   type: bool
-  value: @IS_NOT_RELEASE_OR_BETA@
+  value: true
   mirror: always
 
 # Are counters for unimplemented CSS properties enabled?
 - name: layout.css.use-counters-unimplemented.enabled
   type: RelaxedAtomicBool
-  value: @IS_NOT_RELEASE_OR_BETA@
+  value: true
   mirror: always
   rust: true
 
@@ -5854,6 +5882,8 @@
   mirror: always
 #if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
   value: true
+#elif defined(XP_WIN) && !defined(_ARM64_)
+  value: @IS_NIGHTLY_BUILD@
 #else
   value: false
 #endif
@@ -7266,9 +7296,16 @@
 #---------------------------------------------------------------------------
 # Prefs starting with "permissions."
 #---------------------------------------------------------------------------
+
+# 1-Accept, 2-Deny, Any other value: Accept
+- name: permissions.default.image
+  type: RelaxedAtomicUint32
+  value: 1
+  mirror: always
+
 - name: permissions.delegation.enabled
   type: bool
-  value: true
+  value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: always
 
 - name: permissions.isolateBy.userContext
@@ -7564,6 +7601,18 @@
   value: true
   mirror: always
 
+# Enable the heuristic to allow storage access for windows opened using window.open()
+- name: privacy.restrict3rdpartystorage.heuristic.redirect
+  type: bool
+  value: true
+  mirror: always
+
+# Anti-tracking permission expiration.
+- name: privacy.restrict3rdpartystorage.expiration_redirect
+  type: uint32_t
+  value: 900    # 15 minutes
+  mirror: always
+
 # Anti-tracking user-interaction expiration.
 - name: privacy.userInteraction.expiration
   type: uint32_t
@@ -7847,6 +7896,27 @@
 - name: toolkit.scrollbox.verticalScrollDistance
   type: RelaxedAtomicInt32
   value: 3
+  mirror: always
+
+# The lateWriteChecksStage and fastShutdownStage below represent the stage
+# of shutdown after which we (for lateWriteChecksStage) crash / gather
+# telemetry data on file writes, or (for fastShutdownStage) we call _exit(0).
+# Higher values are earlier during shutdown, and the full enumeration can
+# be found in AppShutdown.h in the AppShutdownPhase enum.
+- name: toolkit.shutdown.lateWriteChecksStage
+  type: int32_t
+#if defined(NIGHTLY_BUILD) && !defined(MOZ_CODE_COVERAGE)
+  value: 1
+#else
+  value: 0
+#endif
+  mirror: always
+
+# See the comment above toolkit.shutdown.lateWriteChecksStage. A higher value
+# for this pref means we call _exit(0) earlier during shutdown.
+- name: toolkit.shutdown.fastShutdownStage
+  type: int32_t
+  value: 0
   mirror: always
 
 # Sending each remote accumulation immediately places undue strain on the IPC

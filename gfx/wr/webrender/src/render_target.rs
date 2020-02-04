@@ -7,7 +7,7 @@ use api::units::*;
 use api::{ColorF, PremultipliedColorF, ImageFormat, LineOrientation, BorderStyle, PipelineId};
 use crate::batch::{AlphaBatchBuilder, AlphaBatchContainer, BatchTextures, resolve_image};
 use crate::batch::{ClipBatcher, BatchBuilder};
-use crate::clip_scroll_tree::{ClipScrollTree, ROOT_SPATIAL_NODE_INDEX};
+use crate::spatial_tree::{SpatialTree, ROOT_SPATIAL_NODE_INDEX};
 use crate::clip::ClipStore;
 use crate::composite::CompositeState;
 use crate::device::Texture;
@@ -63,7 +63,7 @@ pub struct RenderTargetContext<'a, 'rc> {
     pub use_advanced_blending: bool,
     pub break_advanced_blend_batches: bool,
     pub batch_lookback_count: usize,
-    pub clip_scroll_tree: &'a ClipScrollTree,
+    pub spatial_tree: &'a SpatialTree,
     pub data_stores: &'a DataStores,
     pub surfaces: &'a [SurfaceInfo],
     pub scratch: &'a PrimitiveScratchBuffer,
@@ -663,7 +663,7 @@ impl RenderTarget for AlphaRenderTarget {
                     ctx.resource_cache,
                     gpu_cache,
                     clip_store,
-                    ctx.clip_scroll_tree,
+                    ctx.spatial_tree,
                     transforms,
                     &ctx.data_stores.clip,
                     task_info.actual_rect,
@@ -1050,6 +1050,7 @@ pub struct BlitJob {
 
 #[cfg_attr(feature = "capture", derive(Serialize))]
 #[cfg_attr(feature = "replay", derive(Deserialize))]
+#[derive(Debug)]
 pub struct LineDecorationJob {
     pub task_rect: DeviceRect,
     pub local_size: LayoutSize,

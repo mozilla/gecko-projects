@@ -1260,21 +1260,7 @@ public class GeckoSessionTestRule implements TestRule {
                     mServer.start(TEST_PORT);
 
                     RuntimeCreator.setPortDelegate(mPortDelegate);
-
                     getRuntime();
-
-                    long timeout = env.getDefaultTimeoutMillis() + System.currentTimeMillis();
-                    while (!GeckoThread.isStateAtLeast(GeckoThread.State.PROFILE_READY)) {
-                        if (System.currentTimeMillis() > timeout) {
-                            throw new TimeoutException("Could not startup runtime after "
-                                    + env.getDefaultTimeoutMillis() + ".ms");
-                        }
-                        Log.e(LOGTAG, "GeckoThread not ready, sleeping 1000ms.");
-                        try {
-                            Thread.sleep(1000);
-                        } catch (InterruptedException ex) {
-                        }
-                    }
 
                     Log.e(LOGTAG, "====");
                     Log.e(LOGTAG, "before prepareStatement " + description);
@@ -1319,6 +1305,13 @@ public class GeckoSessionTestRule implements TestRule {
                 }
             }
         };
+    }
+
+    /**
+     * This simply sends an empty message to the web content and waits for a reply.
+     */
+    public void waitForRoundTrip(final GeckoSession session) {
+        waitForJS(session, "true");
     }
 
     /**

@@ -36,6 +36,7 @@
 #include "mozilla/dom/ServiceWorkerInterceptController.h"
 #include "mozilla/dom/ServiceWorkerOp.h"
 #include "mozilla/dom/ServiceWorkerRegistrationDescriptor.h"
+#include "mozilla/dom/ServiceWorkerShutdownState.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/dom/workerinternals/ScriptLoader.h"
 #include "mozilla/dom/WorkerError.h"
@@ -994,7 +995,9 @@ IPCResult RemoteWorkerChild::RecvExecServiceWorkerOp(
       aArgs.type() != ServiceWorkerOpArgs::TServiceWorkerFetchEventOpArgs,
       "FetchEvent operations should be sent via PFetchEventOp(Proxy) actors!");
 
-  MaybeStartOp(ServiceWorkerOp::Create(aArgs, std::move(aResolve)));
+  MaybeReportServiceWorkerShutdownProgress(aArgs);
+
+  MaybeStartOp(ServiceWorkerOp::Create(std::move(aArgs), std::move(aResolve)));
 
   return IPC_OK();
 }

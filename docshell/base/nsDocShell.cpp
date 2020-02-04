@@ -162,7 +162,6 @@
 
 #include "nsArray.h"
 #include "nsArrayUtils.h"
-#include "nsAutoPtr.h"
 #include "nsCExternalHandlerService.h"
 #include "nsContentDLF.h"
 #include "nsContentPolicyUtils.h"  // NS_CheckContentLoadPolicy(...)
@@ -1059,16 +1058,16 @@ nsDOMNavigationTiming* nsDocShell::GetNavigationTiming() const {
 // frame navigation regardless of script accessibility (bug 420425)
 //
 /* static */
-bool nsDocShell::ValidateOrigin(nsIDocShellTreeItem* aOriginTreeItem,
-                                nsIDocShellTreeItem* aTargetTreeItem) {
-  MOZ_ASSERT(aOriginTreeItem && aTargetTreeItem, "need two docshells");
-
-  // Get origin document principal
-  RefPtr<Document> originDocument = aOriginTreeItem->GetDocument();
+bool nsDocShell::ValidateOrigin(BrowsingContext* aOrigin,
+                                BrowsingContext* aTarget) {
+  nsIDocShell* originDocShell = aOrigin->GetDocShell();
+  MOZ_ASSERT(originDocShell, "originDocShell must not be null");
+  Document* originDocument = originDocShell->GetDocument();
   NS_ENSURE_TRUE(originDocument, false);
 
-  // Get target principal
-  RefPtr<Document> targetDocument = aTargetTreeItem->GetDocument();
+  nsIDocShell* targetDocShell = aTarget->GetDocShell();
+  MOZ_ASSERT(targetDocShell, "targetDocShell must not be null");
+  Document* targetDocument = targetDocShell->GetDocument();
   NS_ENSURE_TRUE(targetDocument, false);
 
   bool equal;
@@ -3351,28 +3350,6 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
     mm = win->GetMessageManager();
   }
   mm.forget(aMessageManager);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDocShell::GetContentBlockingLog(Promise** aPromise) {
-  NS_ENSURE_ARG_POINTER(aPromise);
-
-  Document* doc = mContentViewer->GetDocument();
-  ErrorResult rv;
-  RefPtr<Promise> promise = Promise::Create(doc->GetOwnerGlobal(), rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    return rv.StealNSResult();
-  }
-
-  if (mContentViewer) {
-    promise->MaybeResolve(
-        NS_ConvertUTF8toUTF16(doc->GetContentBlockingLog()->Stringify()));
-  } else {
-    promise->MaybeRejectWithUndefined();
-  }
-
-  promise.forget(aPromise);
   return NS_OK;
 }
 
@@ -6795,7 +6772,7 @@ void nsDocShell::ReattachEditorToWindow(nsISHEntry* aSHEntry) {
     return;
   }
 
-  mEditorData = aSHEntry->ForgetEditorData();
+  mEditorData = WrapUnique(aSHEntry->ForgetEditorData());
   if (mEditorData) {
 #ifdef DEBUG
     nsresult rv =
@@ -6824,7 +6801,7 @@ void nsDocShell::DetachEditorFromWindow() {
       MOZ_ASSERT(!mIsBeingDestroyed || !mOSHE->HasDetachedEditor(),
                  "We should not set the editor data again once after we "
                  "detached the editor data during destroying this docshell");
-      mOSHE->SetEditorData(mEditorData.forget());
+      mOSHE->SetEditorData(mEditorData.release());
     } else {
       mEditorData = nullptr;
     }
@@ -7316,13 +7293,13 @@ nsresult nsDocShell::RestoreFromHistory() {
 
   // Hack to keep nsDocShellEditorData alive across the
   // SetContentViewer(nullptr) call below.
-  nsAutoPtr<nsDocShellEditorData> data(mLSHE->ForgetEditorData());
+  UniquePtr<nsDocShellEditorData> data(mLSHE->ForgetEditorData());
 
   // Now remove it from the cached presentation.
   mLSHE->SetContentViewer(nullptr);
   mEODForCurrentDocument = false;
 
-  mLSHE->SetEditorData(data.forget());
+  mLSHE->SetEditorData(data.release());
 
 #ifdef DEBUG
   {
@@ -9859,11 +9836,6 @@ nsresult nsDocShell::DoURILoad(nsDocShellLoadState* aLoadState,
     return rv;
   }
 
-  // Document loads should set the reload flag on the channel so that it
-  // can be exposed on the service worker FetchEvent.
-  rv = loadInfo->SetIsDocshellReload(mLoadType & LOAD_CMD_RELOAD);
-  NS_ENSURE_SUCCESS(rv, rv);
-
   if (aLoadState->GetIsFromProcessingFrameAttributes()) {
     loadInfo->SetIsFromProcessingFrameAttributes();
   }
@@ -10490,15 +10462,6 @@ bool nsDocShell::OnNewURI(nsIURI* aURI, nsIChannel* aChannel,
           ("  shAvailable=%i updateSHistory=%i updateGHistory=%i"
            " equalURI=%i\n",
            shAvailable, updateSHistory, updateGHistory, equalUri));
-
-  if (shAvailable && mCurrentURI && !mOSHE && aLoadType != LOAD_ERROR_PAGE) {
-    // XXX mCurrentURI can be changed from any caller regardless what actual
-    // loaded document is, so testing mCurrentURI isn't really a reliable way.
-    // Session restore is one example which changes current URI in order to
-    // show address before loading. See bug 1301399.
-    NS_ASSERTION(NS_IsAboutBlank(mCurrentURI),
-                 "no SHEntry for a non-transient viewer?");
-  }
 #endif
 
   /* If the url to be loaded is the same as the one already there,
@@ -10508,10 +10471,12 @@ bool nsDocShell::OnNewURI(nsIURI* aURI, nsIChannel* aChannel,
    * if this page has any frame children, it also will be handled
    * properly. see bug 83684
    *
-   * NB: If mOSHE is null but we have a current URI, then it means
-   * that we must be at the transient about:blank content viewer
-   * (asserted above) and we should let the normal load continue,
-   * since there's nothing to replace.
+   * NB: If mOSHE is null but we have a current URI, then it probably
+   * means that we must be at the transient about:blank content viewer;
+   * we should let the normal load continue, since there's nothing to
+   * replace. Sometimes this happens after a session restore (eg process
+   * switch) and mCurrentURI is not about:blank; we assume we can let the load
+   * continue (Bug 1301399).
    *
    * XXX Hopefully changing the loadType at this time will not hurt
    *  anywhere. The other way to take care of sequentially repeating
@@ -11827,7 +11792,7 @@ nsresult nsDocShell::EnsureEditorData() {
     // we're shutting down, or we already have a detached editor data
     // stored in the session history. We should only have one editordata
     // per docshell.
-    mEditorData = new nsDocShellEditorData(this);
+    mEditorData = MakeUnique<nsDocShellEditorData>(this);
   }
 
   return mEditorData ? NS_OK : NS_ERROR_NOT_AVAILABLE;

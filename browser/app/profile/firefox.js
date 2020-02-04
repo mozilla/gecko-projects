@@ -332,6 +332,10 @@ pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 // focused in design update 1.
 pref("browser.urlbar.update1.expandTextOnFocus", false);
 
+// If true, we show actionable tips in the Urlbar when the user is searching
+// for those actions.
+pref("browser.urlbar.update1.interventions", false);
+
 // If true, we show new users and those about to start an organic search a tip
 // encouraging them to use the Urlbar.
 pref("browser.urlbar.update1.searchTips", false);
@@ -885,6 +889,9 @@ pref("accessibility.blockautorefresh", false);
 
 // Whether history is enabled or not.
 pref("places.history.enabled", true);
+
+// Whether or not diacritics must match in history text searches.
+pref("places.search.matchDiacritics", false);
 
 // the (maximum) number of the recent visits to sample
 // when calculating frecency
@@ -1494,6 +1501,8 @@ pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked, 5=All Blocked
 
 pref("media.videocontrols.picture-in-picture.enabled", true);
 pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
+// Enable keyboard controls for Picture-in-Picture.
+pref("media.videocontrols.picture-in-picture.keyboard-controls.enabled", true);
 
 // Show the audio toggle for Picture-in-Picture.
 #ifdef NIGHTLY_BUILD
@@ -1632,19 +1641,14 @@ pref("privacy.usercontext.about_newtab_segregation.enabled", true);
 #ifdef NIGHTLY_BUILD
   pref("privacy.userContext.enabled", true);
   pref("privacy.userContext.ui.enabled", true);
-
-  // 0 disables long press, 1 when clicked, the menu is shown, 2 the menu is
-  // shown after X milliseconds.
-  pref("privacy.userContext.longPressBehavior", 2);
 #else
   pref("privacy.userContext.enabled", false);
   pref("privacy.userContext.ui.enabled", false);
-
-  // 0 disables long press, 1 when clicked, the menu is shown, 2 the menu is
-  // shown after X milliseconds.
-  pref("privacy.userContext.longPressBehavior", 0);
 #endif
 pref("privacy.userContext.extension", "");
+// allows user to open container menu on a left click instead of a new
+// tab in the default container
+pref("privacy.userContext.newTabContainerOnLeftClick.enabled", false);
 
 // Start the browser in e10s mode
 pref("browser.tabs.remote.autostart", true);
@@ -2081,8 +2085,12 @@ pref("devtools.netmonitor.enabled", true);
 pref("devtools.netmonitor.features.search", true);
 pref("devtools.netmonitor.features.requestBlocking", true);
 
-// Enable the Application panel
-pref("devtools.application.enabled", false);
+// Enable the Application panel on Nightly
+#if defined(NIGHTLY_BUILD)
+  pref("devtools.application.enabled", true);
+#else
+  pref("devtools.application.enabled", false);
+#endif
 
 // The default Network Monitor UI settings
 pref("devtools.netmonitor.panes-network-details-width", 550);
@@ -2155,7 +2163,11 @@ pref("devtools.webconsole.input.autocomplete",true);
 
 // Set to true to eagerly show the results of webconsole terminal evaluations
 // when they don't have side effects.
-pref("devtools.webconsole.input.eagerEvaluation", false);
+#if defined(NIGHTLY_BUILD)
+  pref("devtools.webconsole.input.eagerEvaluation", true);
+#else
+  pref("devtools.webconsole.input.eagerEvaluation", false);
+#endif
 
 // Browser console filters
 pref("devtools.browserconsole.filter.error", true);
@@ -2291,6 +2303,12 @@ pref("devtools.aboutdebugging.collapsibilities.temporaryExtension", false);
 
 // Map top-level await expressions in the console
 pref("devtools.debugger.features.map-await-expression", true);
+
+#ifdef NIGHTLY_BUILD
+pref("devtools.debugger.features.async-live-stacks", true);
+#else
+pref("devtools.debugger.features.async-live-stacks", false);
+#endif
 
 // Disable autohide for DevTools popups and tooltips.
 // This is currently not exposed by any UI to avoid making

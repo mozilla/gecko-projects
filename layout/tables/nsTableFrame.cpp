@@ -2754,46 +2754,6 @@ void nsTableFrame::OrderRowGroups(RowGroupArray& aChildren,
   if (aFoot) *aFoot = foot;
 }
 
-nsTableRowGroupFrame* nsTableFrame::GetTHead() const {
-  nsIFrame* kidFrame = mFrames.FirstChild();
-  while (kidFrame) {
-    if (kidFrame->StyleDisplay()->mDisplay ==
-        mozilla::StyleDisplay::TableHeaderGroup) {
-      return static_cast<nsTableRowGroupFrame*>(kidFrame);
-    }
-
-    // Get the next sibling but skip it if it's also the next-in-flow, since
-    // a next-in-flow will not be part of the current table.
-    while (kidFrame) {
-      nsIFrame* nif = kidFrame->GetNextInFlow();
-      kidFrame = kidFrame->GetNextSibling();
-      if (kidFrame != nif) break;
-    }
-  }
-
-  return nullptr;
-}
-
-nsTableRowGroupFrame* nsTableFrame::GetTFoot() const {
-  nsIFrame* kidFrame = mFrames.FirstChild();
-  while (kidFrame) {
-    if (kidFrame->StyleDisplay()->mDisplay ==
-        mozilla::StyleDisplay::TableFooterGroup) {
-      return static_cast<nsTableRowGroupFrame*>(kidFrame);
-    }
-
-    // Get the next sibling but skip it if it's also the next-in-flow, since
-    // a next-in-flow will not be part of the current table.
-    while (kidFrame) {
-      nsIFrame* nif = kidFrame->GetNextInFlow();
-      kidFrame = kidFrame->GetNextSibling();
-      if (kidFrame != nif) break;
-    }
-  }
-
-  return nullptr;
-}
-
 static bool IsRepeatable(nscoord aFrameHeight, nscoord aPageHeight) {
   return aFrameHeight < (aPageHeight / 4);
 }
@@ -3743,7 +3703,7 @@ nscoord nsTableFrame::CalcBorderBoxBSize(const ReflowInput& aReflowInput) {
 }
 
 bool nsTableFrame::IsAutoLayout() {
-  if (StyleTable()->mLayoutStrategy == NS_STYLE_TABLE_LAYOUT_AUTO) return true;
+  if (StyleTable()->mLayoutStrategy == StyleTableLayout::Auto) return true;
   // a fixed-layout inline-table must have a inline size
   // and tables with inline size set to 'max-content' must be
   // auto-layout (at least as long as

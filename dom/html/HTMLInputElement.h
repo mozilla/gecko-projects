@@ -303,23 +303,6 @@ class HTMLInputElement final : public TextControlElement,
 
   void MaybeLoadImage();
 
-  void SetSelectionCached() {
-    MOZ_ASSERT(mType == NS_FORM_INPUT_NUMBER);
-    mSelectionCached = true;
-  }
-  bool IsSelectionCached() const {
-    MOZ_ASSERT(mType == NS_FORM_INPUT_NUMBER);
-    return mSelectionCached;
-  }
-  void ClearSelectionCached() {
-    MOZ_ASSERT(mType == NS_FORM_INPUT_NUMBER);
-    mSelectionCached = false;
-  }
-  TextControlState::SelectionProperties& GetSelectionProperties() {
-    MOZ_ASSERT(mType == NS_FORM_INPUT_NUMBER);
-    return mSelectionProperties;
-  }
-
   bool HasPatternAttribute() const { return mHasPatternAttribute; }
 
   // nsIConstraintValidation
@@ -656,9 +639,11 @@ class HTMLInputElement final : public TextControlElement,
                 ErrorResult& aRv);
   void GetValue(nsAString& aValue, CallerType aCallerType);
 
-  Nullable<Date> GetValueAsDate(ErrorResult& aRv);
+  void GetValueAsDate(JSContext* aCx, JS::MutableHandle<JSObject*> aObj,
+                      ErrorResult& aRv);
 
-  void SetValueAsDate(const Nullable<Date>& aDate, ErrorResult& aRv);
+  void SetValueAsDate(JSContext* aCx, JS::Handle<JSObject*> aObj,
+                      ErrorResult& aRv);
 
   double ValueAsNumber() const {
     return DoesValueAsNumberApply() ? GetValueAsDecimal().toDouble()
@@ -1497,13 +1482,6 @@ class HTMLInputElement final : public TextControlElement,
   nsAutoPtr<DateTimeValue> mDateTimeInputBoxValue;
 
   /**
-   * The selection properties cache for number controls.  This is needed because
-   * the number controls don't recycle their text field, so the normal cache in
-   * TextControlState cannot do its job.
-   */
-  TextControlState::SelectionProperties mSelectionProperties;
-
-  /**
    * The triggering principal for the src attribute.
    */
   nsCOMPtr<nsIPrincipal> mSrcTriggeringPrincipal;
@@ -1572,7 +1550,6 @@ class HTMLInputElement final : public TextControlElement,
   bool mNumberControlSpinnerIsSpinning : 1;
   bool mNumberControlSpinnerSpinsUp : 1;
   bool mPickerRunning : 1;
-  bool mSelectionCached : 1;
   bool mIsPreviewEnabled : 1;
   bool mHasBeenTypePassword : 1;
   bool mHasPatternAttribute : 1;

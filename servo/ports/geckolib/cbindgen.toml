@@ -77,6 +77,7 @@ include = [
   "ComputedFontStyleDescriptor",
   "ComputedFontWeightRange",
   "ComputedTimingFunction",
+  "ComputedValueFlags",
   "CursorKind",
   "DisplayOutside",
   "DisplayInside",
@@ -187,9 +188,15 @@ include = [
   "CounterSetOrReset",
   "CounterIncrement",
   "WritingMode",
-  "VecU8",
   "Content",
   "ContentItem",
+  "AlignSelf",
+  "JustifySelf",
+  "AlignItems",
+  "ComputedJustifyItems",
+  "AlignContent",
+  "JustifyContent",
+  "TransformStyle",
 ]
 item_types = ["enums", "structs", "unions", "typedefs", "functions", "constants"]
 renaming_overrides_prefixing = true
@@ -248,7 +255,7 @@ renaming_overrides_prefixing = true
 "CSSPixelLength" = """
   inline nscoord ToAppUnits() const;
   inline bool IsZero() const;
-  float ToCSSPixels() const { return _0; }
+  CSSCoord ToCSSPixels() const { return _0; }
   inline void ScaleBy(float);
 """
 
@@ -296,11 +303,10 @@ renaming_overrides_prefixing = true
   static inline Self FromPercentage(float);
 
   inline void ScaleLengthsBy(float);
-  inline CSSCoord LengthInCSSPixels() const;
-  inline float Percentage() const;
   inline bool HasPercent() const;
   inline bool ConvertsToLength() const;
   inline nscoord ToLength() const;
+  inline CSSCoord ToLengthInCSSPixels() const;
   inline bool ConvertsToPercentage() const;
   inline bool HasLengthAndPercentage() const;
   inline float ToPercentage() const;
@@ -392,6 +398,7 @@ renaming_overrides_prefixing = true
 
 "TextUnderlinePosition" = """
   inline bool IsAuto() const;
+  inline bool IsFromFont() const;
   inline bool IsUnder() const;
   inline bool IsLeft() const;
   inline bool IsRight() const;
@@ -467,6 +474,7 @@ renaming_overrides_prefixing = true
 
   inline StyleOwnedSlice(const StyleOwnedSlice&);
   inline StyleOwnedSlice(StyleOwnedSlice&&);
+  inline explicit StyleOwnedSlice(Vector<T>&&);
 
   inline ~StyleOwnedSlice();
 
@@ -681,18 +689,32 @@ renaming_overrides_prefixing = true
   inline nsRect ToLayoutRect(nscoord aAutoSize = NS_MAXSIZE) const;
 """
 
-"VecU8" = """
-  StyleVecU8(): data(nullptr), length(0), capacity(0) {}
-  StyleVecU8(const StyleVecU8& aOther) = delete;
-  StyleVecU8(StyleVecU8&& aOther)
-    : data(aOther.data), length(aOther.length), capacity(aOther.capacity) {
-    aOther.data = nullptr;
-    aOther.length = 0;
-    aOther.capacity = 0;
-  }
-  StyleVecU8& operator=(StyleVecU8&& aOther) = delete;
-  StyleVecU8& operator=(const StyleVecU8& aOther) = delete;
+"GenericRotate" = """
+public:
+  // The implementation of IPC LayersMessages needs this to be public.
+  StyleGenericRotate(): tag(Tag::None) {}
+"""
 
-  // This type is not safe to return by value. Should be careful.
-  inline ~StyleVecU8();
+"GenericScale" = """
+public:
+  // The implementation of IPC LayersMessages needs this to be public.
+  StyleGenericScale(): tag(Tag::None) {}
+"""
+
+"GenericTranslate" = """
+public:
+  // The implementation of IPC LayersMessages needs this to be public.
+  StyleGenericTranslate(): tag(Tag::None) {}
+"""
+
+"GenericOffsetPath" = """
+public:
+  // The implementation of IPC LayersMessages needs this to be public.
+  StyleGenericOffsetPath(): tag(Tag::None) {}
+"""
+
+"GenericPositionOrAuto" = """
+public:
+  // The implementation of IPC LayersMessages needs this to be public.
+  StyleGenericPositionOrAuto(): tag(Tag::Auto) {}
 """

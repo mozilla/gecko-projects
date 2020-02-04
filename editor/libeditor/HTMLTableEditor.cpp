@@ -818,13 +818,14 @@ nsresult HTMLEditor::DeleteTableElementAndChildrenWithTransaction(
 
     // Select the <table> element after clear current selection.
     if (SelectionRefPtr()->RangeCount()) {
-      nsresult rv = SelectionRefPtr()->RemoveAllRangesTemporarily();
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
+      ErrorResult error;
+      SelectionRefPtr()->RemoveAllRanges(error);
+      if (NS_WARN_IF(error.Failed())) {
+        return error.StealNSResult();
       }
     }
 
-    RefPtr<nsRange> range = new nsRange(&aTableElement);
+    RefPtr<nsRange> range = nsRange::Create(&aTableElement);
     ErrorResult error;
     range->SelectNode(aTableElement, error);
     if (NS_WARN_IF(error.Failed())) {
@@ -1788,121 +1789,6 @@ HTMLEditor::SelectTableCell() {
 }
 
 NS_IMETHODIMP
-HTMLEditor::SelectBlockOfCells(Element* aStartCell, Element* aEndCell) {
-  if (NS_WARN_IF(!aStartCell) || NS_WARN_IF(!aEndCell)) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  AutoEditActionDataSetter editActionData(*this, EditAction::eNotEditing);
-  if (NS_WARN_IF(!editActionData.CanHandle())) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  RefPtr<Element> table =
-      GetElementOrParentByTagNameInternal(*nsGkAtoms::table, *aStartCell);
-  if (NS_WARN_IF(!table)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  RefPtr<Element> endTable =
-      GetElementOrParentByTagNameInternal(*nsGkAtoms::table, *aEndCell);
-  if (NS_WARN_IF(!endTable)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // We can only select a block if within the same table,
-  // so do nothing if not within one table
-  if (table != endTable) {
-    return NS_OK;
-  }
-
-  ErrorResult error;
-  CellIndexes startCellIndexes(*aStartCell, error);
-  if (NS_WARN_IF(error.Failed())) {
-    return EditorBase::ToGenericNSResult(error.StealNSResult());
-  }
-  CellIndexes endCellIndexes(*aEndCell, error);
-  if (NS_WARN_IF(error.Failed())) {
-    return EditorBase::ToGenericNSResult(error.StealNSResult());
-  }
-
-  // Suppress nsISelectionListener notification
-  // until all selection changes are finished
-  SelectionBatcher selectionBatcher(SelectionRefPtr());
-
-  // Examine all cell nodes in current selection and
-  // remove those outside the new block cell region
-  int32_t minColumn =
-      std::min(startCellIndexes.mColumn, endCellIndexes.mColumn);
-  int32_t minRow = std::min(startCellIndexes.mRow, endCellIndexes.mRow);
-  int32_t maxColumn =
-      std::max(startCellIndexes.mColumn, endCellIndexes.mColumn);
-  int32_t maxRow = std::max(startCellIndexes.mRow, endCellIndexes.mRow);
-
-  RefPtr<Element> cell = GetFirstSelectedTableCellElement(error);
-  if (NS_WARN_IF(error.Failed())) {
-    return EditorBase::ToGenericNSResult(error.StealNSResult());
-  }
-  if (!cell) {
-    return NS_OK;
-  }
-  RefPtr<nsRange> range = SelectionRefPtr()->GetRangeAt(0);
-  MOZ_ASSERT(range);
-  while (cell) {
-    CellIndexes currentCellIndexes(*cell, error);
-    if (NS_WARN_IF(error.Failed())) {
-      return EditorBase::ToGenericNSResult(error.StealNSResult());
-    }
-    if (currentCellIndexes.mRow < maxRow || currentCellIndexes.mRow > maxRow ||
-        currentCellIndexes.mColumn < maxColumn ||
-        currentCellIndexes.mColumn > maxColumn) {
-      SelectionRefPtr()->RemoveRangeAndUnselectFramesAndNotifyListeners(
-          *range, IgnoreErrors());
-      // Since we've removed the range, decrement pointer to next range
-      MOZ_ASSERT(mSelectedCellIndex > 0);
-      mSelectedCellIndex--;
-    }
-    cell = GetNextSelectedTableCellElement(error);
-    if (NS_WARN_IF(error.Failed())) {
-      return EditorBase::ToGenericNSResult(error.StealNSResult());
-    }
-    if (cell) {
-      MOZ_ASSERT(mSelectedCellIndex > 0);
-      range = SelectionRefPtr()->GetRangeAt(mSelectedCellIndex - 1);
-    }
-  }
-
-  nsresult rv = NS_OK;
-  IgnoredErrorResult ignoredError;
-  for (int32_t row = minRow; row <= maxRow; row++) {
-    CellData cellData;
-    for (int32_t col = minColumn; col <= maxColumn;
-         col = cellData.NextColumnIndex()) {
-      cellData.Update(*this, *table, row, col, ignoredError);
-      if (cellData.FailedOrNotFound()) {
-        return NS_ERROR_FAILURE;
-      }
-
-      // Skip cells that already selected or are spanned from previous locations
-      // XXX So, we should distinguish whether CellData returns error or just
-      //     not found later.
-      if (!cellData.mIsSelected && cellData.mElement &&
-          !cellData.IsSpannedFromOtherRowOrColumn()) {
-        rv = AppendNodeToSelectionAsRange(cellData.mElement);
-        if (NS_FAILED(rv)) {
-          break;
-        }
-      }
-      MOZ_ASSERT(col < cellData.NextColumnIndex());
-    }
-  }
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return EditorBase::ToGenericNSResult(rv);
-  }
-  return rv;
-}
-
-NS_IMETHODIMP
 HTMLEditor::SelectAllTableCells() {
   AutoEditActionDataSetter editActionData(*this, EditAction::eNotEditing);
   if (NS_WARN_IF(!editActionData.CanHandle())) {
@@ -2228,18 +2114,18 @@ nsresult HTMLEditor::CopyCellBackgroundColor(Element* aDestCell,
     return NS_ERROR_INVALID_ARG;
   }
 
-  // Copy backgournd color to new cell.
-  nsAutoString color;
-  bool isSet;
-  nsresult rv = GetAttributeValue(aSourceCell, NS_LITERAL_STRING("bgcolor"),
-                                  color, &isSet);
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-  if (!isSet) {
+  if (!aSourceCell->HasAttr(nsGkAtoms::bgcolor)) {
     return NS_OK;
   }
-  return SetAttributeWithTransaction(*aDestCell, *nsGkAtoms::bgcolor, color);
+
+  // Copy backgournd color to new cell.
+  nsString backgroundColor;
+  aSourceCell->GetAttr(nsGkAtoms::bgcolor, backgroundColor);
+  nsresult rv = SetAttributeWithTransaction(*aDestCell, *nsGkAtoms::bgcolor,
+                                            backgroundColor);
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                       "SetAttributeWithTransaction() failed");
+  return rv;
 }
 
 nsresult HTMLEditor::SplitCellIntoColumns(Element* aTable, int32_t aRowIndex,

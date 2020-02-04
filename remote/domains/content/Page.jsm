@@ -332,7 +332,7 @@ class Page extends ContentProcessDomain {
     }
   }
 
-  _contentSize() {
+  _contentRect() {
     const docEl = this.content.document.documentElement;
 
     return {
@@ -341,6 +341,10 @@ class Page extends ContentProcessDomain {
       width: docEl.scrollWidth,
       height: docEl.scrollHeight,
     };
+  }
+
+  _devicePixelRatio() {
+    return this.content.devicePixelRatio;
   }
 
   _getIndexForHistoryEntryId(id) {

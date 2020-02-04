@@ -159,7 +159,7 @@ typedef OfflineResourceList ApplicationCache;
                     RTCSctpTransport,
                     Sensor,
                     SensorErrorEvent,
-                    _SharedArrayBuffer,
+                    SharedArrayBuffer,
                     styleMedia,
                     StylePropertyMap,
                     StylePropertyMapReadOnly,
@@ -548,8 +548,8 @@ partial interface Window {
   [ChromeOnly]
   readonly attribute boolean hasOpenerForInitialContentBrowser;
 
-  [ChromeOnly]
-  WindowGlobalChild? getWindowGlobalChild();
+  [Pure, ChromeOnly]
+  readonly attribute WindowGlobalChild? windowGlobalChild;
 };
 
 Window includes TouchEventHandlers;
@@ -609,7 +609,7 @@ partial interface Window {
   void                      getAttentionWithCycleCount(long aCycleCount);
 
   [Throws, Func="nsGlobalWindowInner::IsPrivilegedChromeWindow"]
-  void                      setCursor(DOMString cursor);
+  void                      setCursor(UTF8String cursor);
 
   [Func="nsGlobalWindowInner::IsPrivilegedChromeWindow"]
   void                      maximize();

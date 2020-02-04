@@ -695,8 +695,44 @@ public class WebExtension {
                     }
                     continue;
                 }
-                mIconUris.put(intKey, bundle.getString(key));
+
+                final String value = getIconValue(bundle.get(key));
+                if (value != null) {
+                    mIconUris.put(intKey, value);
+                }
             }
+        }
+
+        private String getIconValue(final Object value) {
+            // The icon value can either be an object containing icons for each theme...
+            if (value instanceof GeckoBundle) {
+                // We don't support theme_icons yet, so let's just return the default value.
+                final GeckoBundle themeIcons = (GeckoBundle) value;
+                final Object defaultIcon = themeIcons.get("default");
+
+                if (!(defaultIcon instanceof String)) {
+                    if (BuildConfig.DEBUG) {
+                        throw new RuntimeException("Unexpected themed_icon value.");
+                    }
+                    Log.e(LOGTAG, "Unexpected themed_icon value.");
+                    return null;
+                }
+
+                return (String) defaultIcon;
+            }
+
+            // ... or just a URL
+            if (value instanceof String) {
+                return (String) value;
+            }
+
+            // We never expect it to be something else, so let's error out here
+            if (BuildConfig.DEBUG) {
+                throw new RuntimeException("Unexpected icon value: " + value);
+            }
+
+            Log.e(LOGTAG, "Unexpected icon value.");
+            return null;
         }
 
         /** Override for tests. */
@@ -1307,16 +1343,14 @@ public class WebExtension {
           *   manifest.json/options_ui
           * </a>
           */
-        // TODO: Bug 1598792
-        final @Nullable String optionsPageUrl;
+        public final @Nullable String optionsPageUrl;
         /** Whether the options page should be open in a Tab or not.
           *
           * See <a href="https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/options_ui#Syntax">
           *   manifest.json/options_ui#Syntax
           * </a>
           */
-        // TODO: Bug 1598792
-        final boolean openOptionsPageInTab;
+        public final boolean openOptionsPageInTab;
         /** Whether or not this is a recommended extension.
           *
           * See <a href="https://blog.mozilla.org/firefox/firefox-recommended-extensions/">
@@ -1389,7 +1423,7 @@ public class WebExtension {
             creatorUrl = bundle.getString("creatorURL");
             homepageUrl = bundle.getString("homepageURL");
             name = bundle.getString("name");
-            optionsPageUrl = bundle.getString("optionsPageUrl");
+            optionsPageUrl = bundle.getString("optionsPageURL");
             openOptionsPageInTab = bundle.getBoolean("openOptionsPageInTab");
             isRecommended = bundle.getBoolean("isRecommended");
             blocklistState = bundle.getInt("blocklistState", BlocklistStateFlags.NOT_BLOCKED);

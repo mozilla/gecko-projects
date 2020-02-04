@@ -337,7 +337,7 @@ nsHttpChannel::nsHttpChannel()
       mIsIsolated(0),
       mTopWindowOriginComputed(0),
       mHasCrossOriginOpenerPolicyMismatch(0),
-      mPushedStream(nullptr),
+      mPushedStreamId(0),
       mLocalBlocklist(false),
       mOnTailUnblock(nullptr),
       mWarningReporter(nullptr),
@@ -363,6 +363,9 @@ nsHttpChannel::~nsHttpChannel() {
   }
 
   ReleaseMainThreadOnlyReferences();
+  if (gHttpHandler) {
+    gHttpHandler->RemoveHttpChannel(mChannelId);
+  }
 }
 
 void nsHttpChannel::ReleaseMainThreadOnlyReferences() {
@@ -1296,11 +1299,16 @@ nsresult nsHttpChannel::SetupTransaction() {
           mTransaction.get()));
   }
 
-  mTransaction->SetTransactionObserver(mTransactionObserver);
-  mTransactionObserver = nullptr;
+  // Save the mapping of channel id and the channel. We need this mapping for
+  // nsIHttpActivityObserver.
+  gHttpHandler->AddHttpChannel(mChannelId, ToSupports(this));
 
   // See bug #466080. Transfer LOAD_ANONYMOUS flag to socket-layer.
   if (mLoadFlags & LOAD_ANONYMOUS) mCaps |= NS_HTTP_LOAD_ANONYMOUS;
+
+  if (mLoadFlags & LOAD_CALL_CONTENT_SNIFFERS) {
+    mCaps |= NS_HTTP_CALL_CONTENT_SNIFFER;
+  }
 
   if (mTimingEnabled) mCaps |= NS_HTTP_TIMING_ENABLED;
 
@@ -1314,35 +1322,50 @@ nsresult nsHttpChannel::SetupTransaction() {
     mCaps &= ~NS_HTTP_ALLOW_KEEPALIVE;
   }
 
-  if (mPushedStream) {
-    mTransaction->SetPushedStream(mPushedStream);
-    mPushedStream = nullptr;
-  }
-
   nsCOMPtr<nsIHttpPushListener> pushListener;
   NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
                                 NS_GET_IID(nsIHttpPushListener),
                                 getter_AddRefs(pushListener));
+  HttpTransactionShell::OnPushCallback pushCallback = nullptr;
   if (pushListener) {
     mCaps |= NS_HTTP_ONPUSH_LISTENER;
+    nsWeakPtr weakPtrThis(
+        do_GetWeakReference(static_cast<nsIHttpChannel*>(this)));
+    pushCallback = [weakPtrThis](uint32_t aPushedStreamId,
+                                 const nsACString& aUrl,
+                                 const nsACString& aRequestString) {
+      if (nsCOMPtr<nsIHttpChannel> channel = do_QueryReferent(weakPtrThis)) {
+        return static_cast<nsHttpChannel*>(channel.get())
+            ->OnPush(aPushedStreamId, aUrl, aRequestString);
+      }
+      return NS_ERROR_NOT_AVAILABLE;
+    };
   }
 
   EnsureTopLevelOuterContentWindowId();
+  EnsureRequestContext();
 
   HttpTrafficCategory category = CreateTrafficCategory();
-
-  rv = mTransaction->Init(mCaps, mConnectionInfo, &mRequestHead, mUploadStream,
-                          mReqContentLength, mUploadStreamHasHeaders,
-                          GetCurrentThreadEventTarget(), callbacks, this,
-                          mTopLevelOuterContentWindowId, category);
+  std::function<void()> observer;
+  if (mTransactionObserver) {
+    RefPtr<HttpTransactionShell> transaction = mTransaction;
+    observer = [transactionObserver{std::move(mTransactionObserver)},
+                transaction]() {
+      TransactionObserverResult result;
+      transaction->GetTransactionObserverResult(result);
+      transactionObserver->Complete(result.versionOk(), result.authOk(),
+                                    result.closeReason());
+    };
+  }
+  rv = mTransaction->Init(
+      mCaps, mConnectionInfo, &mRequestHead, mUploadStream, mReqContentLength,
+      mUploadStreamHasHeaders, GetCurrentThreadEventTarget(), callbacks, this,
+      mTopLevelOuterContentWindowId, category, mRequestContext, mClassOfService,
+      mInitialRwin, mResponseTimeoutEnabled, mChannelId, std::move(observer),
+      std::move(pushCallback), mTransWithPushedStream, mPushedStreamId);
   if (NS_FAILED(rv)) {
     mTransaction = nullptr;
     return rv;
-  }
-
-  mTransaction->SetClassOfService(mClassOfService);
-  if (EnsureRequestContext()) {
-    mTransaction->SetRequestContext(mRequestContext);
   }
 
   return rv;
@@ -1422,26 +1445,14 @@ nsresult ProcessXCTO(nsHttpChannel* aChannel, nsIURI* aURI,
 
   // 1) Query the XCTO header and check if 'nosniff' is the first value.
   nsAutoCString contentTypeOptionsHeader;
-  Unused << aResponseHead->GetHeader(nsHttp::X_Content_Type_Options,
-                                     contentTypeOptionsHeader);
-  if (contentTypeOptionsHeader.IsEmpty()) {
-    // if there is no XCTO header, then there is nothing to do.
+  if (!aResponseHead->GetContentTypeOptionsHeader(contentTypeOptionsHeader)) {
+    // if failed to get XCTO header, then there is nothing to do.
     return NS_OK;
   }
-  // XCTO header might contain multiple values which are comma separated, so:
-  // a) let's skip all subsequent values
-  //     e.g. "   NoSniFF   , foo " will be "   NoSniFF   "
-  int32_t idx = contentTypeOptionsHeader.Find(",");
-  if (idx > 0) {
-    contentTypeOptionsHeader = Substring(contentTypeOptionsHeader, 0, idx);
-  }
-  // b) let's trim all surrounding whitespace
-  //    e.g. "   NoSniFF   " -> "NoSniFF"
-  nsHttp::TrimHTTPWhitespace(contentTypeOptionsHeader,
-                             contentTypeOptionsHeader);
-  // c) let's compare the header (ignoring case)
-  //    e.g. "NoSniFF" -> "nosniff"
-  //    if it's not 'nosniff' then there is nothing to do here
+
+  // let's compare the header (ignoring case)
+  // e.g. "NoSniFF" -> "nosniff"
+  // if it's not 'nosniff' then there is nothing to do here
   if (!contentTypeOptionsHeader.EqualsIgnoreCase("nosniff")) {
     // since we are getting here, the XCTO header was sent;
     // a non matching value most likely means a mistake happenend;
@@ -1834,6 +1845,11 @@ nsresult nsHttpChannel::CallOnStartRequest() {
       RefPtr<nsInputStreamPump> pump = do_QueryObject(mTransactionPump);
       if (pump) {
         pump->PeekStream(CallTypeSniffers, thisChannel);
+      } else {
+        MOZ_ASSERT(gIOService->UseSocketProcess());
+        RefPtr<HttpTransactionParent> trans = do_QueryObject(mTransactionPump);
+        MOZ_ASSERT(trans);
+        trans->SetSniffedTypeToChannel(CallTypeSniffers, thisChannel);
       }
     }
   }
@@ -6814,8 +6830,7 @@ nsresult nsHttpChannel::BeginConnect() {
     // just the initial document resets the whole pool
     if (mLoadFlags & LOAD_INITIAL_DOCUMENT_URI) {
       gHttpHandler->AltServiceCache()->ClearAltServiceMappings();
-      rv = gHttpHandler->ConnMgr()->DoShiftReloadConnectionCleanup(
-          mConnectionInfo);
+      rv = gHttpHandler->DoShiftReloadConnectionCleanup(mConnectionInfo);
       if (NS_FAILED(rv)) {
         LOG(
             ("nsHttpChannel::BeginConnect "
@@ -8169,8 +8184,8 @@ nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
                         mResponseHead->Status() == 200;
 
   if (upgradeWebsocket || upgradeConnect) {
-    nsresult rv = gHttpHandler->ConnMgr()->CompleteUpgrade(
-        aTransWithStickyConn, mUpgradeProtocolCallback);
+    nsresult rv = gHttpHandler->CompleteUpgrade(aTransWithStickyConn,
+                                                mUpgradeProtocolCallback);
     if (NS_FAILED(rv)) {
       LOG(("  CompleteUpgrade failed with %" PRIx32,
            static_cast<uint32_t>(rv)));
@@ -8287,7 +8302,7 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
         rv = MaybeSetupByteRangeRequest(size, contentLength, true);
         if (NS_SUCCEEDED(rv) && mIsPartialRequest) {
           // Prevent read from cache again
-          mCachedContentIsValid = 0;
+          mCachedContentIsValid = false;
           mCachedContentIsPartial = 1;
 
           // Perform the range request
@@ -9469,16 +9484,22 @@ bool nsHttpChannel::AwaitingCacheCallbacks() {
   return mCacheEntriesToWaitFor != 0;
 }
 
-void nsHttpChannel::SetPushedStream(Http2PushedStreamWrapper* stream) {
-  MOZ_ASSERT(stream);
-  MOZ_ASSERT(!mPushedStream);
-  mPushedStream = stream;
+void nsHttpChannel::SetPushedStreamTransactionAndId(
+    HttpTransactionShell* aTransWithPushedStream, uint32_t aPushedStreamId) {
+  MOZ_ASSERT(!mTransWithPushedStream);
+  LOG(("nsHttpChannel::SetPushedStreamTransaction [this=%p] trans=%p", this,
+       aTransWithPushedStream));
+
+  mTransWithPushedStream = aTransWithPushedStream;
+  mPushedStreamId = aPushedStreamId;
 }
 
-nsresult nsHttpChannel::OnPush(const nsACString& url,
-                               Http2PushedStreamWrapper* pushedStream) {
+nsresult nsHttpChannel::OnPush(uint32_t aPushedStreamId, const nsACString& aUrl,
+                               const nsACString& aRequestString) {
   MOZ_ASSERT(NS_IsMainThread());
-  LOG(("nsHttpChannel::OnPush [this=%p]\n", this));
+  MOZ_ASSERT(mTransaction);
+  LOG(("nsHttpChannel::OnPush [this=%p, trans=%p]\n", this,
+       mTransaction.get()));
 
   MOZ_ASSERT(mCaps & NS_HTTP_ONPUSH_LISTENER);
   nsCOMPtr<nsIHttpPushListener> pushListener;
@@ -9498,7 +9519,7 @@ nsresult nsHttpChannel::OnPush(const nsACString& url,
   nsresult rv;
 
   // Create a Channel for the Push Resource
-  rv = NS_NewURI(getter_AddRefs(pushResource), url);
+  rv = NS_NewURI(getter_AddRefs(pushResource), aUrl);
   if (NS_FAILED(rv)) {
     return NS_ERROR_FAILURE;
   }
@@ -9530,15 +9551,13 @@ nsresult nsHttpChannel::OnPush(const nsACString& url,
   }
 
   // new channel needs mrqeuesthead and headers from pushedStream
-  channel->mRequestHead.ParseHeaderSet(
-      pushedStream->GetRequestString().BeginWriting());
-
+  channel->mRequestHead.ParseHeaderSet(aRequestString.BeginReading());
   channel->mLoadGroup = mLoadGroup;
   channel->mLoadInfo = mLoadInfo;
   channel->mCallbacks = mCallbacks;
 
-  // Link the pushed stream with the new channel and call listener
-  channel->SetPushedStream(pushedStream);
+  // Link the trans with pushed stream and the new channel and call listener
+  channel->SetPushedStreamTransactionAndId(mTransaction, aPushedStreamId);
   rv = pushListener->OnPush(this, pushHttpChannel);
   return rv;
 }

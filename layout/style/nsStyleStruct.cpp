@@ -770,8 +770,8 @@ nsStyleSVG::nsStyleSVG(const Document& aDocument)
       mPaintOrder(0),
       mShapeRendering(StyleShapeRendering::Auto),
       mStrokeLinecap(StyleStrokeLinecap::Butt),
-      mStrokeLinejoin(NS_STYLE_STROKE_LINEJOIN_MITER),
-      mDominantBaseline(NS_STYLE_DOMINANT_BASELINE_AUTO),
+      mStrokeLinejoin(StyleStrokeLinejoin::Miter),
+      mDominantBaseline(StyleDominantBaseline::Auto),
       mTextAnchor(StyleTextAnchor::Start),
       mContextFlags(
           (eStyleSVGOpacitySource_Normal << FILL_OPACITY_SOURCE_SHIFT) |
@@ -1057,7 +1057,7 @@ nsStyleSVGReset::nsStyleSVGReset(const Document& aDocument)
       mStopOpacity(1.0f),
       mFloodOpacity(1.0f),
       mVectorEffect(NS_STYLE_VECTOR_EFFECT_NONE),
-      mMaskType(NS_STYLE_MASK_TYPE_LUMINANCE) {
+      mMaskType(StyleMaskType::Luminance) {
   MOZ_COUNT_CTOR(nsStyleSVGReset);
 }
 
@@ -1183,13 +1183,12 @@ nsStylePosition::nsStylePosition(const Document& aDocument)
       mAspectRatio(0.0f),
       mGridAutoFlow(NS_STYLE_GRID_AUTO_FLOW_ROW),
       mBoxSizing(StyleBoxSizing::Content),
-      mAlignContent(NS_STYLE_ALIGN_NORMAL),
-      mAlignItems(NS_STYLE_ALIGN_NORMAL),
-      mAlignSelf(NS_STYLE_ALIGN_AUTO),
-      mJustifyContent(NS_STYLE_JUSTIFY_NORMAL),
-      mSpecifiedJustifyItems(NS_STYLE_JUSTIFY_LEGACY),
-      mJustifyItems(NS_STYLE_JUSTIFY_NORMAL),
-      mJustifySelf(NS_STYLE_JUSTIFY_AUTO),
+      mAlignContent({StyleAlignFlags::NORMAL}),
+      mAlignItems({StyleAlignFlags::NORMAL}),
+      mAlignSelf({StyleAlignFlags::AUTO}),
+      mJustifyContent({StyleAlignFlags::NORMAL}),
+      mJustifyItems({{StyleAlignFlags::LEGACY}, {StyleAlignFlags::NORMAL}}),
+      mJustifySelf({StyleAlignFlags::AUTO}),
       mFlexDirection(StyleFlexDirection::Row),
       mFlexWrap(StyleFlexWrap::Nowrap),
       mObjectFit(StyleObjectFit::Fill),
@@ -1234,7 +1233,6 @@ nsStylePosition::nsStylePosition(const nsStylePosition& aSource)
       mAlignItems(aSource.mAlignItems),
       mAlignSelf(aSource.mAlignSelf),
       mJustifyContent(aSource.mJustifyContent),
-      mSpecifiedJustifyItems(aSource.mSpecifiedJustifyItems),
       mJustifyItems(aSource.mJustifyItems),
       mJustifySelf(aSource.mJustifySelf),
       mFlexDirection(aSource.mFlexDirection),
@@ -1344,14 +1342,14 @@ nsChangeHint nsStylePosition::CalcDifference(
   // Changing 'justify-content/items/self' might affect the positioning,
   // but it won't affect any sizing.
   if (mJustifyContent != aNewData.mJustifyContent ||
-      mJustifyItems != aNewData.mJustifyItems ||
+      mJustifyItems.computed != aNewData.mJustifyItems.computed ||
       mJustifySelf != aNewData.mJustifySelf) {
     hint |= nsChangeHint_NeedReflow;
   }
 
-  // No need to do anything if mSpecifiedJustifyItems changes, as long as
-  // mJustifyItems (tested above) is unchanged.
-  if (mSpecifiedJustifyItems != aNewData.mSpecifiedJustifyItems) {
+  // No need to do anything if specified justify-items changes, as long as the
+  // computed one (tested above) is unchanged.
+  if (mJustifyItems.specified != aNewData.mJustifyItems.specified) {
     hint |= nsChangeHint_NeutralChange;
   }
 
@@ -1405,28 +1403,31 @@ nsChangeHint nsStylePosition::CalcDifference(
   return hint;
 }
 
-uint8_t nsStylePosition::UsedAlignSelf(ComputedStyle* aParent) const {
-  if (mAlignSelf != NS_STYLE_ALIGN_AUTO) {
+StyleAlignSelf nsStylePosition::UsedAlignSelf(
+    const ComputedStyle* aParent) const {
+  if (mAlignSelf._0 != StyleAlignFlags::AUTO) {
     return mAlignSelf;
   }
   if (MOZ_LIKELY(aParent)) {
     auto parentAlignItems = aParent->StylePosition()->mAlignItems;
-    MOZ_ASSERT(!(parentAlignItems & NS_STYLE_ALIGN_LEGACY),
+    MOZ_ASSERT(!(parentAlignItems._0 & StyleAlignFlags::LEGACY),
                "align-items can't have 'legacy'");
-    return parentAlignItems;
+    return {parentAlignItems._0};
   }
-  return NS_STYLE_ALIGN_NORMAL;
+  return {StyleAlignFlags::NORMAL};
 }
 
-uint8_t nsStylePosition::UsedJustifySelf(ComputedStyle* aParent) const {
-  if (mJustifySelf != NS_STYLE_JUSTIFY_AUTO) {
+StyleJustifySelf nsStylePosition::UsedJustifySelf(
+    const ComputedStyle* aParent) const {
+  if (mJustifySelf._0 != StyleAlignFlags::AUTO) {
     return mJustifySelf;
   }
   if (MOZ_LIKELY(aParent)) {
-    auto inheritedJustifyItems = aParent->StylePosition()->mJustifyItems;
-    return inheritedJustifyItems & ~NS_STYLE_JUSTIFY_LEGACY;
+    const auto& inheritedJustifyItems =
+        aParent->StylePosition()->mJustifyItems.computed;
+    return {inheritedJustifyItems._0 & ~StyleAlignFlags::LEGACY};
   }
-  return NS_STYLE_JUSTIFY_NORMAL;
+  return {StyleAlignFlags::NORMAL};
 }
 
 // --------------------
@@ -1434,7 +1435,7 @@ uint8_t nsStylePosition::UsedJustifySelf(ComputedStyle* aParent) const {
 //
 
 nsStyleTable::nsStyleTable(const Document& aDocument)
-    : mLayoutStrategy(NS_STYLE_TABLE_LAYOUT_AUTO), mXSpan(1) {
+    : mLayoutStrategy(StyleTableLayout::Auto), mXSpan(1) {
   MOZ_COUNT_CTOR(nsStyleTable);
 }
 
@@ -1461,7 +1462,7 @@ nsStyleTableBorder::nsStyleTableBorder(const Document& aDocument)
       mBorderSpacingRow(0),
       mBorderCollapse(StyleBorderCollapse::Separate),
       mCaptionSide(NS_STYLE_CAPTION_SIDE_TOP),
-      mEmptyCells(NS_STYLE_TABLE_EMPTY_CELLS_SHOW) {
+      mEmptyCells(StyleEmptyCells::Show) {
   MOZ_COUNT_CTOR(nsStyleTableBorder);
 }
 
@@ -2685,7 +2686,7 @@ nsStyleDisplay::nsStyleDisplay(const Document& aDocument)
       mIsolation(StyleIsolation::Auto),
       mTopLayer(StyleTopLayer::None),
       mTouchAction(StyleTouchAction::AUTO),
-      mScrollBehavior(NS_STYLE_SCROLL_BEHAVIOR_AUTO),
+      mScrollBehavior(StyleScrollBehavior::Auto),
       mOverscrollBehaviorX(StyleOverscrollBehavior::Auto),
       mOverscrollBehaviorY(StyleOverscrollBehavior::Auto),
       mOverflowAnchor(StyleOverflowAnchor::Auto),
@@ -2698,7 +2699,7 @@ nsStyleDisplay::nsStyleDisplay(const Document& aDocument)
       mTranslate(StyleTranslate::None()),
       mScale(StyleScale::None()),
       mBackfaceVisibility(NS_STYLE_BACKFACE_VISIBILITY_VISIBLE),
-      mTransformStyle(NS_STYLE_TRANSFORM_STYLE_FLAT),
+      mTransformStyle(StyleTransformStyle::Flat),
       mTransformBox(StyleGeometryBox::BorderBox),
       mOffsetPath(StyleOffsetPath::None()),
       mOffsetDistance(LengthPercentage::Zero()),
@@ -3127,10 +3128,10 @@ nsChangeHint nsStyleDisplay::CalcDifference(
 
 nsStyleVisibility::nsStyleVisibility(const Document& aDocument)
     : mDirection(aDocument.GetBidiOptions() == IBMBIDI_TEXTDIRECTION_RTL
-                     ? NS_STYLE_DIRECTION_RTL
-                     : NS_STYLE_DIRECTION_LTR),
+                     ? StyleDirection::Rtl
+                     : StyleDirection::Ltr),
       mVisible(StyleVisibility::Visible),
-      mImageRendering(NS_STYLE_IMAGE_RENDERING_AUTO),
+      mImageRendering(StyleImageRendering::Auto),
       mWritingMode(NS_STYLE_WRITING_MODE_HORIZONTAL_TB),
       mTextOrientation(StyleTextOrientation::Mixed),
       mColorAdjust(StyleColorAdjust::Economy) {
@@ -3317,7 +3318,7 @@ nsStyleText::nsStyleText(const Document& aDocument)
       mLetterSpacing({0.}),
       mLineHeight(StyleLineHeight::Normal()),
       mTextIndent(LengthPercentage::Zero()),
-      mTextUnderlineOffset(StyleTextDecorationLength::Auto()),
+      mTextUnderlineOffset(LengthPercentageOrAuto::Auto()),
       mTextDecorationSkipInk(StyleTextDecorationSkipInk::Auto),
       mTextUnderlinePosition(StyleTextUnderlinePosition::AUTO),
       mWebkitTextStrokeWidth(0),

@@ -50,6 +50,7 @@ function fakeExecuteUserAction(action) {
   return fakeAsyncMessage({ data: action, type: "USER_ACTION" });
 }
 
+// eslint-disable-next-line max-statements
 describe("ASRouter", () => {
   let Router;
   let globals;
@@ -160,6 +161,7 @@ describe("ASRouter", () => {
       init: sandbox.stub(),
       uninit: sandbox.stub(),
       forceShowMessage: sandbox.stub(),
+      enableToolbarButton: sandbox.stub(),
     };
     FakeToolbarBadgeHub = {
       init: sandbox.stub(),
@@ -2917,6 +2919,64 @@ describe("ASRouter", () => {
         assert.calledWithMatch(setReferrerUrl, "", "?foo=FOO!&bar=BAR%3F");
       });
     });
+    describe("#onMessage: FORCE_WHATSNEW_PANEL", () => {
+      it("should call forceWNPanel", async () => {
+        let messages = [];
+        const msg = fakeAsyncMessage({
+          type: "FORCE_WHATSNEW_PANEL",
+          data: { messages },
+        });
+        sandbox.stub(Router, "forceWNPanel");
+
+        await Router.onMessage(msg);
+
+        assert.calledOnce(Router.forceWNPanel);
+      });
+      describe("forceWNPanel", () => {
+        let browser = {
+          document: new Document(),
+          PanelUI: {
+            showSubView: sinon.stub(),
+          },
+        };
+        it("should call enableToolbarButton", async () => {
+          await Router.forceWNPanel(browser);
+
+          assert.calledOnce(FakeToolbarPanelHub.enableToolbarButton);
+        });
+        it("should call PanelUI.showSubView", () => {
+          assert.calledOnce(browser.PanelUI.showSubView);
+        });
+      });
+    });
+    describe("#onMessage: RENDER_WHATSNEW_MESSAGES", () => {
+      it("should call renderWNMessages", async () => {
+        let messages = [];
+        const msg = fakeAsyncMessage({
+          type: "RENDER_WHATSNEW_MESSAGES",
+          data: { messages },
+        });
+        sandbox.stub(Router, "renderWNMessages");
+
+        await Router.onMessage(msg);
+
+        assert.calledOnce(Router.renderWNMessages);
+      });
+      describe("renderWNMessages", () => {
+        let messages = [{}, {}];
+        let browser = {
+          document: new Document(),
+          PanelUI: {
+            showSubView: sinon.stub(),
+          },
+        };
+        it("should call forceShowMessage", () => {
+          Router.renderWNMessages(browser, messages);
+
+          assert.calledOnce(FakeToolbarPanelHub.forceShowMessage);
+        });
+      });
+    });
     describe("#onMessage: default", () => {
       it("should report unknown messages", () => {
         const msg = fakeAsyncMessage({ type: "FOO" });
@@ -3977,6 +4037,27 @@ describe("ASRouter", () => {
         id: "unblock",
         value: true,
       });
+    });
+  });
+  describe("#loadMessagesForProvider", () => {
+    it("should fetch json from url", async () => {
+      let result = await MessageLoaderUtils.loadMessagesForProvider({
+        location: "http://fake.com/endpoint",
+        type: "json",
+      });
+
+      assert.property(result, "messages");
+      assert.lengthOf(result.messages, FAKE_REMOTE_MESSAGES.length);
+    });
+    it("should catch errors", async () => {
+      fetchStub.throws();
+      let result = await MessageLoaderUtils.loadMessagesForProvider({
+        location: "http://fake.com/endpoint",
+        type: "json",
+      });
+
+      assert.property(result, "messages");
+      assert.lengthOf(result.messages, 0);
     });
   });
 });

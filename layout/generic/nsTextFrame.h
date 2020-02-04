@@ -339,8 +339,8 @@ class nsTextFrame : public nsFrame {
    * @param aSelected true iff the character range is now selected.
    * @param aType the type of the changed selection.
    */
-  void SetSelectedRange(uint32_t aStart, uint32_t aEnd, bool aSelected,
-                        SelectionType aSelectionType);
+  void SelectionStateChanged(uint32_t aStart, uint32_t aEnd, bool aSelected,
+                             SelectionType aSelectionType);
 
   FrameSearchResult PeekOffsetNoAmount(bool aForward, int32_t* aOffset) final;
   FrameSearchResult PeekOffsetCharacter(
@@ -862,7 +862,7 @@ class nsTextFrame : public nsFrame {
     nscoord mBaselineOffset;
 
     // This represents the offset from the initial position of the underline
-    const mozilla::StyleTextDecorationLength mTextUnderlineOffset;
+    const mozilla::LengthPercentageOrAuto mTextUnderlineOffset;
 
     // for CSS property text-decoration-thickness, the width refers to the
     // thickness of the decoration line
@@ -876,7 +876,7 @@ class nsTextFrame : public nsFrame {
 
     LineDecoration(nsIFrame* const aFrame, const nscoord aOff,
                    mozilla::StyleTextUnderlinePosition aUnderlinePosition,
-                   const mozilla::StyleTextDecorationLength& aUnderlineOffset,
+                   const mozilla::LengthPercentageOrAuto& aUnderlineOffset,
                    const mozilla::StyleTextDecorationLength& aDecThickness,
                    const nscolor aColor, const uint8_t aStyle)
         : mFrame(aFrame),

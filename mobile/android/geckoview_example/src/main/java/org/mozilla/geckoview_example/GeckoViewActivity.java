@@ -494,6 +494,7 @@ public class GeckoViewActivity
                 session.open(sGeckoRuntime);
                 mTabSessionManager.setCurrentSession(session);
                 mGeckoView.setSession(session);
+                sGeckoRuntime.getWebExtensionController().setTabActive(session, true);
             }
             loadFromIntent(getIntent());
         }
@@ -649,6 +650,7 @@ public class GeckoViewActivity
         session.open(sGeckoRuntime);
         mTabSessionManager.setCurrentSession(session);
         mGeckoView.setSession(session);
+        sGeckoRuntime.getWebExtensionController().setTabActive(session, true);
         if (mCurrentUri != null) {
             session.loadUri(mCurrentUri);
         }
@@ -658,7 +660,8 @@ public class GeckoViewActivity
     public void onRestoreInstanceState(Bundle savedInstanceState) {
         super.onRestoreInstanceState(savedInstanceState);
         if(savedInstanceState != null) {
-            mTabSessionManager.setCurrentSession((TabSession)mGeckoView.getSession());
+            mTabSessionManager.setCurrentSession((TabSession) mGeckoView.getSession());
+            sGeckoRuntime.getWebExtensionController().setTabActive(mGeckoView.getSession(), true);
         } else {
             recreateSession();
         }
@@ -838,11 +841,16 @@ public class GeckoViewActivity
     }
 
     private void setGeckoViewSession(TabSession session) {
-        mGeckoView.releaseSession();
-        if(!session.isOpen()) {
+        final WebExtensionController controller = sGeckoRuntime.getWebExtensionController();
+        final GeckoSession previousSession = mGeckoView.releaseSession();
+        if (previousSession != null) {
+            controller.setTabActive(previousSession, false);
+        }
+        if (!session.isOpen()) {
             session.open(sGeckoRuntime);
         }
         mGeckoView.setSession(session);
+        controller.setTabActive(session, true);
         mTabSessionManager.setCurrentSession(session);
     }
 
@@ -1220,26 +1228,6 @@ public class GeckoViewActivity
             }
         }
 
-        class ExampleAutoplayCallback implements GeckoSession.PermissionDelegate.Callback {
-            private final GeckoSession.PermissionDelegate.Callback mCallback;
-            private final String mUri;
-            ExampleAutoplayCallback(final GeckoSession.PermissionDelegate.Callback callback, String uri) {
-                mCallback = callback;
-                mUri = uri;
-            }
-
-            @Override
-            public void reject() {
-                mCallback.reject();
-            }
-
-            @Override
-            public void grant() {
-                mAcceptedAutoplay.add(mUri);
-                mCallback.grant();
-            }
-        }
-
         public void onRequestPermissionsResult(final String[] permissions,
                                                final int[] grantResults) {
             if (mCallback == null) {
@@ -1296,14 +1284,9 @@ public class GeckoViewActivity
             } else if (PERMISSION_XR == type) {
                 resId = R.string.request_xr;
             } else if (PERMISSION_AUTOPLAY_AUDIBLE == type || PERMISSION_AUTOPLAY_INAUDIBLE == type) {
-                if (mAcceptedAutoplay.contains(uri)) {
-                    Log.w(LOGTAG, "Autoplay for " + uri + " already granted by user.");
-                    callback.grant();
-                    return;
-                }
-
-                resId = R.string.request_autoplay;
-                contentPermissionCallback = new ExampleAutoplayCallback(callback, uri);
+                Log.d(LOGTAG, "Rejecting autoplay request");
+                callback.reject();
+                return;
             } else {
                 Log.w(LOGTAG, "Unknown permission: " + type);
                 callback.reject();

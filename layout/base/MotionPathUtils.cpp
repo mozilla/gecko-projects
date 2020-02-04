@@ -346,7 +346,7 @@ Maybe<ResolvedMotionPathData> MotionPathUtils::ResolveMotionPath(
   if (aPath.IsPath()) {
     const auto& path = aPath.AsPath();
     if (!path.mGfxPath) {
-      NS_WARNING("could not get a valid gfx path");
+      // Empty gfx::Path means it is path('') (i.e. empty path string).
       return Nothing();
     }
 
@@ -439,11 +439,13 @@ static OffsetPathData GenerateOffsetPathData(const nsIFrame* aFrame) {
   const StyleOffsetPath& path = aFrame->StyleDisplay()->mOffsetPath;
   switch (path.tag) {
     case StyleOffsetPath::Tag::Path: {
+      const StyleSVGPathData& pathData = path.AsPath();
       RefPtr<gfx::Path> gfxPath =
           aFrame->GetProperty(nsIFrame::OffsetPathCache());
-      MOZ_ASSERT(gfxPath,
-                 "Should have a valid cached gfx::Path for offset-path");
-      return OffsetPathData::Path(path.AsPath(), gfxPath.forget());
+      MOZ_ASSERT(
+          gfxPath || pathData._0.IsEmpty(),
+          "Should have a valid cached gfx::Path or an empty path string");
+      return OffsetPathData::Path(pathData, gfxPath.forget());
     }
     case StyleOffsetPath::Tag::Ray:
       return OffsetPathData::Ray(path.AsRay(), RayReferenceData(aFrame));
@@ -494,16 +496,16 @@ static OffsetPathData GenerateOffsetPathData(
     gfx::Path* aCachedMotionPath) {
   switch (aPath.tag) {
     case StyleOffsetPath::Tag::Path: {
-      const StyleSVGPathData& svgPathData = aPath.AsPath();
+      const StyleSVGPathData& pathData = aPath.AsPath();
       // If aCachedMotionPath is valid, we have a fixed path.
       // This means we have pre-built it already and no need to update.
       RefPtr<gfx::Path> path = aCachedMotionPath;
       if (!path) {
         RefPtr<gfx::PathBuilder> builder =
             MotionPathUtils::GetCompositorPathBuilder();
-        path = MotionPathUtils::BuildPath(svgPathData, builder);
+        path = MotionPathUtils::BuildPath(pathData, builder);
       }
-      return OffsetPathData::Path(svgPathData, path.forget());
+      return OffsetPathData::Path(pathData, path.forget());
     }
     case StyleOffsetPath::Tag::Ray:
       return OffsetPathData::Ray(aPath.AsRay(), aRayReferenceData);
@@ -543,82 +545,11 @@ Maybe<ResolvedMotionPathData> MotionPathUtils::ResolveMotionPath(
 }
 
 /* static */
-nsTArray<layers::PathCommand>
-MotionPathUtils::NormalizeAndConvertToPathCommands(
+StyleSVGPathData MotionPathUtils::NormalizeSVGPathData(
     const StyleSVGPathData& aPath) {
-  // Normalization
   StyleSVGPathData n;
   Servo_SVGPathData_Normalize(&aPath, &n);
-
-  auto asPoint = [](const StyleCoordPair& aPair) {
-    return gfx::Point(aPair._0, aPair._1);
-  };
-
-  // Converstion
-  nsTArray<layers::PathCommand> commands;
-  for (const StylePathCommand& command : n._0.AsSpan()) {
-    switch (command.tag) {
-      case StylePathCommand::Tag::ClosePath:
-        commands.AppendElement(mozilla::null_t());
-        break;
-      case StylePathCommand::Tag::MoveTo: {
-        const auto& p = command.AsMoveTo().point;
-        commands.AppendElement(layers::MoveTo(asPoint(p)));
-        break;
-      }
-      case StylePathCommand::Tag::LineTo: {
-        const auto& p = command.AsLineTo().point;
-        commands.AppendElement(layers::LineTo(asPoint(p)));
-        break;
-      }
-      case StylePathCommand::Tag::HorizontalLineTo: {
-        const auto& h = command.AsHorizontalLineTo();
-        commands.AppendElement(layers::HorizontalLineTo(h.x));
-        break;
-      }
-      case StylePathCommand::Tag::VerticalLineTo: {
-        const auto& v = command.AsVerticalLineTo();
-        commands.AppendElement(layers::VerticalLineTo(v.y));
-        break;
-      }
-      case StylePathCommand::Tag::CurveTo: {
-        const auto& curve = command.AsCurveTo();
-        commands.AppendElement(layers::CurveTo(asPoint(curve.control1),
-                                               asPoint(curve.control2),
-                                               asPoint(curve.point)));
-        break;
-      }
-      case StylePathCommand::Tag::SmoothCurveTo: {
-        const auto& curve = command.AsSmoothCurveTo();
-        commands.AppendElement(layers::SmoothCurveTo(asPoint(curve.control2),
-                                                     asPoint(curve.point)));
-        break;
-      }
-      case StylePathCommand::Tag::QuadBezierCurveTo: {
-        const auto& curve = command.AsQuadBezierCurveTo();
-        commands.AppendElement(layers::QuadBezierCurveTo(
-            asPoint(curve.control1), asPoint(curve.point)));
-        break;
-      }
-      case StylePathCommand::Tag::SmoothQuadBezierCurveTo: {
-        const auto& curve = command.AsSmoothCurveTo();
-        commands.AppendElement(
-            layers::SmoothQuadBezierCurveTo(asPoint(curve.point)));
-        break;
-      }
-      case StylePathCommand::Tag::EllipticalArc: {
-        const auto& arc = command.AsEllipticalArc();
-        gfx::Point point = asPoint(arc.point);
-        commands.AppendElement(layers::EllipticalArc(arc.rx, arc.ry, arc.angle,
-                                                     arc.large_arc_flag._0,
-                                                     arc.sweep_flag._0, point));
-        break;
-      }
-      case StylePathCommand::Tag::Unknown:
-        MOZ_ASSERT_UNREACHABLE("Unsupported path command");
-    }
-  }
-  return commands;
+  return n;
 }
 
 /* static */

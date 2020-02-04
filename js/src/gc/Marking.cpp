@@ -1097,8 +1097,12 @@ bool js::GCMarker::mark(T* thing) {
 
   MarkColor color =
       TraceKindCanBeGray<T>::value ? markColor() : MarkColor::Black;
-  markCount++;
-  return cell->markIfUnmarked(color);
+  bool marked = cell->markIfUnmarked(color);
+  if (marked) {
+    markCount++;
+  }
+
+  return marked;
 }
 
 /*** Inline, Eager GC Marking ***********************************************/
@@ -1422,8 +1426,7 @@ inline void js::GCMarker::eagerlyMarkChildren(Scope* scope) {
         break;
       }
 
-      case ScopeKind::FunctionBodyVar:
-      case ScopeKind::ParameterExpressionVar: {
+      case ScopeKind::FunctionBodyVar: {
         VarScope::Data& data = scope->as<VarScope>().data();
         names = &data.trailingNames;
         length = data.length;
@@ -4000,7 +4003,10 @@ bool js::UnmarkGrayShapeRecursively(Shape* shape) {
 Cell* js::gc::UninlinedForwarded(const Cell* cell) { return Forwarded(cell); }
 #endif
 
-js::debug::MarkInfo js::debug::GetMarkInfo(Cell* rawCell) {
+namespace js {
+namespace debug {
+
+MarkInfo GetMarkInfo(Cell* rawCell) {
   if (!rawCell->isTenured()) {
     return MarkInfo::NURSERY;
   }
@@ -4015,10 +4021,32 @@ js::debug::MarkInfo js::debug::GetMarkInfo(Cell* rawCell) {
   return MarkInfo::UNMARKED;
 }
 
-uint8_t* js::debug::GetMarkByteAddress(Cell* cell) {
+uintptr_t* GetMarkWordAddress(Cell* cell) {
   if (!cell->isTenured()) {
     return nullptr;
   }
 
-  return &cell->asTenured().markBitsRef();
+  uintptr_t* wordp;
+  uintptr_t mask;
+  js::gc::detail::GetGCThingMarkWordAndMask(uintptr_t(cell), ColorBit::BlackBit,
+                                            &wordp, &mask);
+  return wordp;
 }
+
+uintptr_t GetMarkMask(Cell* cell, uint32_t colorBit) {
+  MOZ_ASSERT(colorBit == 0 || colorBit == 1);
+
+  if (!cell->isTenured()) {
+    return 0;
+  }
+
+  ColorBit bit = colorBit == 0 ? ColorBit::BlackBit : ColorBit::GrayOrBlackBit;
+  uintptr_t* wordp;
+  uintptr_t mask;
+  js::gc::detail::GetGCThingMarkWordAndMask(uintptr_t(cell), bit, &wordp,
+                                            &mask);
+  return mask;
+}
+
+}  // namespace debug
+}  // namespace js

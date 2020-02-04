@@ -411,6 +411,8 @@ bool GCRuntime::checkAllocatorState(JSContext* cx, AllocKind kind) {
                     kind == AllocKind::SCOPE);
   MOZ_ASSERT_IF(!cx->zone()->isAtomsZone(),
                 kind != AllocKind::ATOM && kind != AllocKind::FAT_INLINE_ATOM);
+  MOZ_ASSERT_IF(cx->zone()->isSelfHostingZone(),
+                !rt->parentRuntime && !selfHostingZoneFrozen);
   MOZ_ASSERT(!JS::RuntimeHeapIsBusy());
 #endif
 
@@ -838,6 +840,12 @@ void Chunk::init(GCRuntime* gc) {
    */
   Poison(this, JS_FRESH_TENURED_PATTERN, ChunkSize,
          MemCheckKind::MakeUndefined);
+
+  /*
+   * We clear the bitmap to guard against JS::GCThingIsMarkedGray being called
+   * on uninitialized data, which would happen before the first GC cycle.
+   */
+  bitmap.clear();
 
   /*
    * Decommit the arenas. We do this after poisoning so that if the OS does

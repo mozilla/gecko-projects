@@ -25,7 +25,6 @@
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/ContentFrameMessageManager.h"
 #include "mozilla/dom/EventTarget.h"
-#include "mozilla/dom/JSWindowActorChild.h"
 #include "mozilla/dom/LocalStorage.h"
 #include "mozilla/dom/LSObject.h"
 #include "mozilla/dom/Storage.h"
@@ -4563,34 +4562,13 @@ void nsGlobalWindowOuter::MakeScriptDialogTitle(
   // Try to get a host from the running principal -- this will do the
   // right thing for javascript: and data: documents.
 
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = aSubjectPrincipal->GetURI(getter_AddRefs(uri));
-  if (NS_SUCCEEDED(rv) && uri) {
-    // remove user:pass for privacy and spoof prevention
-
-    nsCOMPtr<nsIURIFixup> fixup(components::URIFixup::Service());
-    if (fixup) {
-      nsCOMPtr<nsIURI> fixedURI;
-      rv = fixup->CreateExposableURI(uri, getter_AddRefs(fixedURI));
-      if (NS_SUCCEEDED(rv) && fixedURI) {
-        nsAutoCString host;
-        fixedURI->GetHost(host);
-
-        if (!host.IsEmpty()) {
-          // if this URI has a host we'll show it. For other
-          // schemes (e.g. file:) we fall back to the localized
-          // generic string
-
-          nsAutoCString prepath;
-          fixedURI->GetDisplayPrePath(prepath);
-
-          NS_ConvertUTF8toUTF16 ucsPrePath(prepath);
-          nsContentUtils::FormatLocalizedString(
-              aOutTitle, nsContentUtils::eCOMMON_DIALOG_PROPERTIES,
-              "ScriptDlgHeading", ucsPrePath);
-        }
-      }
-    }
+  nsAutoCString prepath;
+  nsresult rv = aSubjectPrincipal->GetExposablePrePath(prepath);
+  if (NS_SUCCEEDED(rv) && !prepath.IsEmpty()) {
+    NS_ConvertUTF8toUTF16 ucsPrePath(prepath);
+    nsContentUtils::FormatLocalizedString(
+        aOutTitle, nsContentUtils::eCOMMON_DIALOG_PROPERTIES,
+        "ScriptDlgHeading", ucsPrePath);
   }
 
   if (aOutTitle.IsEmpty()) {
@@ -4973,59 +4951,69 @@ void nsGlobalWindowOuter::PrintOuter(ErrorResult& aError) {
     return;
   }
 
-  nsCOMPtr<nsIPrintSettingsService> printSettingsService =
-      do_GetService("@mozilla.org/gfx/printsettings-service;1");
-  if (!printSettingsService) {
-    aError.Throw(NS_ERROR_NOT_AVAILABLE);
-    return;
-  }
+  nsCOMPtr<nsIWebBrowserPrint> webBrowserPrint;
+  if (NS_SUCCEEDED(GetInterface(NS_GET_IID(nsIWebBrowserPrint),
+                                getter_AddRefs(webBrowserPrint)))) {
+    nsAutoSyncOperation sync(GetCurrentInnerWindowInternal()
+                                 ? GetCurrentInnerWindowInternal()->mDoc.get()
+                                 : nullptr);
 
-  WindowGlobalChild* wgc = mInnerWindow->GetWindowGlobalChild();
-  if (!wgc) {
-    aError.Throw(NS_ERROR_NOT_AVAILABLE);
-    return;
-  }
+    nsCOMPtr<nsIPrintSettingsService> printSettingsService =
+        do_GetService("@mozilla.org/gfx/printsettings-service;1");
 
-  RefPtr<JSWindowActorChild> actor =
-      wgc->GetActor(NS_LITERAL_STRING("BrowserElement"), IgnoreErrors());
-  if (!actor) {
-    aError.Throw(NS_ERROR_NOT_AVAILABLE);
-    return;
-  }
+    nsCOMPtr<nsIPrintSettings> printSettings;
+    if (printSettingsService) {
+      bool printSettingsAreGlobal =
+          Preferences::GetBool("print.use_global_printsettings", false);
 
-  bool havePrintableSelection = false;
-  if (!mDoc->GetRootElement()->HasAttr(kNameSpaceID_None,
-                                       nsGkAtoms::mozdisallowselectionprint)) {
-    if (Selection* selection = GetSelectionOuter()) {
-      if (int32_t rangeCount = selection->RangeCount()) {
-        havePrintableSelection =
-            rangeCount > 1 ||
-            // check to make sure it isn't an insertion selection
-            (selection->GetRangeAt(0) && !selection->IsCollapsed());
+      if (printSettingsAreGlobal) {
+        printSettingsService->GetGlobalPrintSettings(
+            getter_AddRefs(printSettings));
+
+        nsAutoString printerName;
+        printSettings->GetPrinterName(printerName);
+
+        bool shouldGetDefaultPrinterName = printerName.IsEmpty();
+#  ifdef MOZ_X11
+        // In Linux, GTK backend does not support per printer settings.
+        // Calling GetDefaultPrinterName causes a sandbox violation (see Bug
+        // 1329216). The printer name is not needed anywhere else on Linux
+        // before it gets to the parent. In the parent, we will then query the
+        // default printer name if no name is set. Unless we are in the parent,
+        // we will skip this part.
+        if (!XRE_IsParentProcess()) {
+          shouldGetDefaultPrinterName = false;
+        }
+#  endif
+        if (shouldGetDefaultPrinterName) {
+          printSettingsService->GetDefaultPrinterName(printerName);
+          printSettings->SetPrinterName(printerName);
+        }
+        printSettingsService->InitPrintSettingsFromPrinter(printerName,
+                                                           printSettings);
+        printSettingsService->InitPrintSettingsFromPrefs(
+            printSettings, true, nsIPrintSettings::kInitSaveAll);
+      } else {
+        printSettingsService->GetNewPrintSettings(
+            getter_AddRefs(printSettings));
       }
+
+      EnterModalState();
+      webBrowserPrint->Print(printSettings, nullptr);
+      LeaveModalState();
+
+      bool savePrintSettings =
+          Preferences::GetBool("print.save_print_settings", false);
+      if (printSettingsAreGlobal && savePrintSettings) {
+        printSettingsService->SavePrintSettingsToPrefs(
+            printSettings, true, nsIPrintSettings::kInitSaveAll);
+        printSettingsService->SavePrintSettingsToPrefs(
+            printSettings, false, nsIPrintSettings::kInitSavePrinterName);
+      }
+    } else {
+      webBrowserPrint->GetGlobalPrintSettings(getter_AddRefs(printSettings));
+      webBrowserPrint->Print(printSettings, nullptr);
     }
-  }
-
-  // We don't init the AutoJSAPI with ourselves because we don't want it
-  // reporting errors to our onerror handlers.
-  AutoJSAPI jsapi;
-  jsapi.Init();
-  JSContext* cx = jsapi.cx();
-  JSAutoRealm ar(cx, actor->GetParentObject()->GetGlobalJSObject());
-
-  // The frontend code doesn't yet make use of the `data` we send here, but it
-  // will do in future work in order to avoid a roundtrip to the content
-  // process.
-  // Note: if we want more complex detail, create something like
-  // DOMWindowResizeEventDetail.
-  JS::Rooted<JS::Value> msgData(cx, JS::BooleanValue(havePrintableSelection));
-
-  IgnoredErrorResult res;
-  actor->SendAsyncMessage(cx, NS_LITERAL_STRING("ContentRequestedPrint"),
-                          msgData, res);
-  if (res.Failed()) {
-    aError.Throw(NS_ERROR_NOT_AVAILABLE);
-    return;
   }
 #endif  // NS_PRINTING
 }
@@ -5337,179 +5325,6 @@ void nsGlobalWindowOuter::FirePopupBlockedEvent(
   aDoc->DispatchEvent(*event);
 }
 
-void nsGlobalWindowOuter::NotifyContentBlockingEvent(
-    unsigned aEvent, nsIChannel* aChannel, bool aBlocked, nsIURI* aURIHint,
-    nsIChannel* aTrackingChannel,
-    const mozilla::Maybe<AntiTrackingCommon::StorageAccessGrantedReason>&
-        aReason) {
-  MOZ_ASSERT(aURIHint);
-  DebugOnly<bool> isCookiesBlockedTracker =
-      aEvent == nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER ||
-      aEvent == nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER;
-  MOZ_ASSERT_IF(aBlocked, aReason.isNothing());
-  MOZ_ASSERT_IF(!isCookiesBlockedTracker, aReason.isNothing());
-  MOZ_ASSERT_IF(isCookiesBlockedTracker && !aBlocked, aReason.isSome());
-
-  nsCOMPtr<nsIDocShell> docShell = GetDocShell();
-  if (!docShell) {
-    return;
-  }
-  nsCOMPtr<Document> doc = GetExtantDoc();
-  NS_ENSURE_TRUE_VOID(doc);
-
-  nsCOMPtr<nsIURI> uri(aURIHint);
-  nsCOMPtr<nsIChannel> channel(aChannel);
-  nsCOMPtr<nsIClassifiedChannel> trackingChannel =
-      do_QueryInterface(aTrackingChannel);
-
-  nsCOMPtr<nsIRunnable> func = NS_NewRunnableFunction(
-      "NotifyContentBlockingEventDelayed",
-      [doc, docShell, uri, channel, aEvent, aBlocked, aReason,
-       trackingChannel]() {
-        // This event might come after the user has navigated to another
-        // page. To prevent showing the TrackingProtection UI on the wrong
-        // page, we need to check that the loading URI for the channel is
-        // the same as the URI currently loaded in the document.
-        if (!SameLoadingURI(doc, channel) &&
-            aEvent == nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT) {
-          return;
-        }
-
-        // Notify nsIWebProgressListeners of this content blocking event.
-        // Can be used to change the UI state.
-        uint32_t event = 0;
-        nsCOMPtr<nsISecureBrowserUI> securityUI;
-        docShell->GetSecurityUI(getter_AddRefs(securityUI));
-        if (!securityUI) {
-          return;
-        }
-        securityUI->GetContentBlockingEvent(&event);
-        nsAutoCString origin;
-        nsContentUtils::GetASCIIOrigin(uri, origin);
-
-        bool blockedValue = aBlocked;
-        if (aEvent == nsIWebProgressListener::STATE_BLOCKED_TRACKING_CONTENT) {
-          doc->SetHasTrackingContentBlocked(aBlocked, origin);
-        } else if (aEvent == nsIWebProgressListener::
-                                 STATE_LOADED_LEVEL_1_TRACKING_CONTENT) {
-          doc->SetHasLevel1TrackingContentLoaded(aBlocked, origin);
-        } else if (aEvent == nsIWebProgressListener::
-                                 STATE_LOADED_LEVEL_2_TRACKING_CONTENT) {
-          doc->SetHasLevel2TrackingContentLoaded(aBlocked, origin);
-        } else if (aEvent == nsIWebProgressListener::
-                                 STATE_BLOCKED_FINGERPRINTING_CONTENT) {
-          doc->SetHasFingerprintingContentBlocked(aBlocked, origin);
-        } else if (aEvent == nsIWebProgressListener::
-                                 STATE_LOADED_FINGERPRINTING_CONTENT) {
-          doc->SetHasFingerprintingContentLoaded(aBlocked, origin);
-        } else if (aEvent ==
-                   nsIWebProgressListener::STATE_BLOCKED_CRYPTOMINING_CONTENT) {
-          doc->SetHasCryptominingContentBlocked(aBlocked, origin);
-        } else if (aEvent ==
-                   nsIWebProgressListener::STATE_LOADED_CRYPTOMINING_CONTENT) {
-          doc->SetHasCryptominingContentLoaded(aBlocked, origin);
-        } else if (aEvent == nsIWebProgressListener::
-                                 STATE_BLOCKED_SOCIALTRACKING_CONTENT) {
-          doc->SetHasSocialTrackingContentBlocked(aBlocked, origin);
-        } else if (aEvent == nsIWebProgressListener::
-                                 STATE_LOADED_SOCIALTRACKING_CONTENT) {
-          doc->SetHasSocialTrackingContentLoaded(aBlocked, origin);
-        } else if (aEvent == nsIWebProgressListener::
-                                 STATE_COOKIES_BLOCKED_BY_PERMISSION) {
-          doc->SetHasCookiesBlockedByPermission(aBlocked, origin);
-        } else if (aEvent ==
-                   nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER) {
-          nsTArray<nsCString> trackingFullHashes;
-          if (trackingChannel) {
-            Unused << trackingChannel->GetMatchedTrackingFullHashes(
-                trackingFullHashes);
-          }
-          doc->SetHasTrackingCookiesBlocked(aBlocked, origin, aReason,
-                                            trackingFullHashes);
-        } else if (aEvent == nsIWebProgressListener::
-                                 STATE_COOKIES_BLOCKED_SOCIALTRACKER) {
-          nsTArray<nsCString> trackingFullHashes;
-          if (trackingChannel) {
-            Unused << trackingChannel->GetMatchedTrackingFullHashes(
-                trackingFullHashes);
-          }
-          doc->SetHasSocialTrackingCookiesBlocked(aBlocked, origin, aReason,
-                                                  trackingFullHashes);
-        } else if (aEvent ==
-                   nsIWebProgressListener::STATE_COOKIES_BLOCKED_ALL) {
-          doc->SetHasAllCookiesBlocked(aBlocked, origin);
-        } else if (aEvent ==
-                   nsIWebProgressListener::STATE_COOKIES_BLOCKED_FOREIGN) {
-          doc->SetHasForeignCookiesBlocked(aBlocked, origin);
-        } else if (aEvent == nsIWebProgressListener::STATE_COOKIES_LOADED) {
-          MOZ_ASSERT(!aBlocked,
-                     "We don't expected to see blocked STATE_COOKIES_LOADED");
-          // Note that the logic in this branch is the logical negation of
-          // the logic in other branches, since the Document API we have is
-          // phrased in "loaded" terms as opposed to "blocked" terms.
-          blockedValue = !aBlocked;
-          doc->SetHasCookiesLoaded(blockedValue, origin);
-        } else if (aEvent ==
-                   nsIWebProgressListener::STATE_COOKIES_LOADED_TRACKER) {
-          MOZ_ASSERT(
-              !aBlocked,
-              "We don't expected to see blocked STATE_COOKIES_LOADED_TRACKER");
-          // Note that the logic in this branch is the logical negation of the
-          // logic in other branches, since the Document API we have is phrased
-          // in "loaded" terms as opposed to "blocked" terms.
-          blockedValue = !aBlocked;
-          doc->SetHasTrackerCookiesLoaded(blockedValue, origin);
-        } else if (aEvent ==
-                   nsIWebProgressListener::STATE_COOKIES_LOADED_SOCIALTRACKER) {
-          MOZ_ASSERT(!aBlocked,
-                     "We don't expected to see blocked "
-                     "STATE_COOKIES_LOADED_SOCIALTRACKER");
-          // Note that the logic in this branch is the logical negation of
-          // the logic in other branches, since the Document API we have is
-          // phrased in "loaded" terms as opposed to "blocked" terms.
-          blockedValue = !aBlocked;
-          doc->SetHasSocialTrackerCookiesLoaded(blockedValue, origin);
-        } else {
-          // Ignore nsIWebProgressListener::STATE_BLOCKED_UNSAFE_CONTENT;
-        }
-      });
-  nsresult rv;
-  if (StaticPrefs::dom_testing_sync_content_blocking_notifications()) {
-    rv = func->Run();
-  } else {
-    rv = NS_DispatchToCurrentThreadQueue(func.forget(), 100,
-                                         EventQueuePriority::Idle);
-  }
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return;
-  }
-}
-
-// static
-bool nsGlobalWindowOuter::SameLoadingURI(Document* aDoc, nsIChannel* aChannel) {
-  nsCOMPtr<nsIURI> docURI = aDoc->GetDocumentURI();
-  if (!docURI) {
-    return false;
-  }
-  nsCOMPtr<nsILoadInfo> channelLoadInfo = aChannel->LoadInfo();
-  nsCOMPtr<nsIPrincipal> channelLoadingPrincipal =
-      channelLoadInfo->LoadingPrincipal();
-  if (!channelLoadingPrincipal) {
-    // TYPE_DOCUMENT loads will not have a channelLoadingPrincipal. But top
-    // level loads should not be blocked by Tracking Protection, so we will
-    // return false
-    return false;
-  }
-  nsCOMPtr<nsIURI> channelLoadingURI;
-  channelLoadingPrincipal->GetURI(getter_AddRefs(channelLoadingURI));
-  if (!channelLoadingURI) {
-    return false;
-  }
-  bool equals = false;
-  nsresult rv = docURI->EqualsExceptRef(channelLoadingURI, &equals);
-  return NS_SUCCEEDED(rv) && equals;
-}
-
 // static
 bool nsGlobalWindowOuter::CanSetProperty(const char* aPrefName) {
   // Chrome can set any property.
@@ -5595,13 +5410,7 @@ void nsGlobalWindowOuter::FireAbuseEvents(
     const nsAString& aPopupURL, const nsAString& aPopupWindowName,
     const nsAString& aPopupWindowFeatures) {
   // fetch the URI of the window requesting the opened window
-
-  nsCOMPtr<nsPIDOMWindowOuter> window = GetInProcessTop();
-  if (!window) {
-    return;
-  }
-
-  nsCOMPtr<Document> topDoc = window->GetDoc();
+  nsCOMPtr<Document> currentDoc = GetDoc();
   nsCOMPtr<nsIURI> popupURI;
 
   // build the URI of the would-have-been popup window
@@ -5621,7 +5430,7 @@ void nsGlobalWindowOuter::FireAbuseEvents(
                 getter_AddRefs(popupURI));
 
   // fire an event block full of informative URIs
-  FirePopupBlockedEvent(topDoc, popupURI, aPopupWindowName,
+  FirePopupBlockedEvent(currentDoc, popupURI, aPopupWindowName,
                         aPopupWindowFeatures);
 }
 
@@ -5787,14 +5596,11 @@ bool nsGlobalWindowOuter::GatherPostMessageData(
     return false;
   }
 
-  nsCOMPtr<nsIURI> callerOuterURI;
-  if (NS_FAILED(callerPrin->GetURI(getter_AddRefs(callerOuterURI)))) {
-    return false;
-  }
-
-  if (callerOuterURI) {
-    // if the principal has a URI, use that to generate the origin
-    nsContentUtils::GetUTFOrigin(callerPrin, aOrigin);
+  // if the principal has a URI, use that to generate the origin
+  if (!callerPrin->IsSystemPrincipal()) {
+    nsAutoCString asciiOrigin;
+    callerPrin->GetAsciiOrigin(asciiOrigin);
+    aOrigin = NS_ConvertUTF8toUTF16(asciiOrigin);
   } else if (callerInnerWin) {
     if (!*aCallerURI) {
       return false;
@@ -5871,13 +5677,11 @@ bool nsGlobalWindowOuter::GetPrincipalForPostMessage(
       auto principal = BasePrincipal::Cast(GetPrincipal());
 
       if (attrs != principal->OriginAttributesRef()) {
-        nsCOMPtr<nsIURI> targetURI;
         nsAutoCString targetURL;
         nsAutoCString sourceOrigin;
         nsAutoCString targetOrigin;
 
-        if (NS_FAILED(principal->GetURI(getter_AddRefs(targetURI))) ||
-            NS_FAILED(targetURI->GetAsciiSpec(targetURL)) ||
+        if (NS_FAILED(principal->GetAsciiSpec(targetURL)) ||
             NS_FAILED(principal->GetOrigin(targetOrigin)) ||
             NS_FAILED(aSubjectPrincipal.GetOrigin(sourceOrigin))) {
           NS_WARNING("Failed to get source and target origins");
@@ -5975,7 +5779,7 @@ void nsGlobalWindowOuter::PostMessageMozOuter(JSContext* aCx,
   JS::CloneDataPolicy clonePolicy;
   if (GetDocGroup() && callerInnerWindow &&
       callerInnerWindow->IsSharedMemoryAllowed()) {
-    clonePolicy.allowSharedMemory();
+    clonePolicy.allowIntraClusterClonableSharedObjects();
   }
   event->Write(aCx, aMessage, aTransfer, clonePolicy, aError);
   if (NS_WARN_IF(aError.Failed())) {
@@ -7370,20 +7174,13 @@ nsIDOMWindowUtils* nsGlobalWindowOuter::WindowUtils() {
 
 // Note: This call will lock the cursor, it will not change as it moves.
 // To unlock, the cursor must be set back to Auto.
-void nsGlobalWindowOuter::SetCursorOuter(const nsAString& aCursor,
+void nsGlobalWindowOuter::SetCursorOuter(const nsACString& aCursor,
                                          ErrorResult& aError) {
-  StyleCursorKind cursor;
-
-  if (aCursor.EqualsLiteral("auto")) {
-    cursor = StyleCursorKind::Auto;
-  } else {
-    // TODO(emilio): Use Servo for this instead.
-    nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(aCursor);
-    int32_t c;
-    if (!nsCSSProps::FindKeyword(keyword, nsCSSProps::kCursorKTable, c)) {
-      return;
-    }
-    cursor = static_cast<StyleCursorKind>(c);
+  auto cursor = StyleCursorKind::Auto;
+  if (!Servo_CursorKind_Parse(&aCursor, &cursor)) {
+    // FIXME: It's a bit weird that this doesn't throw but stuff below does, but
+    // matches previous behavior so...
+    return;
   }
 
   RefPtr<nsPresContext> presContext;
@@ -7545,7 +7342,7 @@ void nsGlobalWindowOuter::CheckForDPIChange() {
   }
 }
 
-mozilla::dom::TabGroup* nsGlobalWindowOuter::TabGroupOuter() {
+mozilla::dom::TabGroup* nsGlobalWindowOuter::MaybeTabGroupOuter() {
   // Outer windows lazily join TabGroups when requested. This is usually done
   // because a document is getting its NodePrincipal, and asking for the
   // TabGroup to determine its DocGroup.
@@ -7553,6 +7350,9 @@ mozilla::dom::TabGroup* nsGlobalWindowOuter::TabGroupOuter() {
     // Get the opener ourselves, instead of relying on GetOpenerWindowOuter,
     // because that way we dodge the LegacyIsCallerChromeOrNativeCode() call
     // which we want to return false.
+    if (!GetBrowsingContext()) {
+      return nullptr;
+    }
     RefPtr<BrowsingContext> openerBC = GetBrowsingContext()->GetOpener();
     nsPIDOMWindowOuter* opener = openerBC ? openerBC->GetDOMWindow() : nullptr;
     nsPIDOMWindowOuter* parent = GetInProcessScriptableParentOrNull();
@@ -7560,6 +7360,9 @@ mozilla::dom::TabGroup* nsGlobalWindowOuter::TabGroupOuter() {
                "Only one of parent and opener may be provided");
 
     mozilla::dom::TabGroup* toJoin = nullptr;
+    if (!GetDocShell()) {
+      return nullptr;
+    }
     if (GetDocShell()->ItemType() == nsIDocShellTreeItem::typeChrome) {
       toJoin = TabGroup::GetChromeTabGroup();
     } else if (opener) {
@@ -7610,6 +7413,12 @@ mozilla::dom::TabGroup* nsGlobalWindowOuter::TabGroupOuter() {
 #endif
 
   return mTabGroup;
+}
+
+mozilla::dom::TabGroup* nsGlobalWindowOuter::TabGroupOuter() {
+  mozilla::dom::TabGroup* tabGroup = MaybeTabGroupOuter();
+  MOZ_RELEASE_ASSERT(tabGroup);
+  return tabGroup;
 }
 
 nsresult nsGlobalWindowOuter::Dispatch(
@@ -7672,6 +7481,10 @@ nsGlobalWindowOuter::TemporarilyDisableDialogs::~TemporarilyDisableDialogs() {
 
 mozilla::dom::TabGroup* nsPIDOMWindowOuter::TabGroup() {
   return nsGlobalWindowOuter::Cast(this)->TabGroupOuter();
+}
+
+mozilla::dom::TabGroup* nsPIDOMWindowOuter::MaybeTabGroup() {
+  return nsGlobalWindowOuter::Cast(this)->MaybeTabGroupOuter();
 }
 
 /* static */

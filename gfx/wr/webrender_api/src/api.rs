@@ -955,7 +955,10 @@ pub enum DebugCommand {
     FetchDocuments,
     /// Fetch current passes and batches.
     FetchPasses,
-    /// Fetch clip-scroll tree.
+    // TODO: This should be called FetchClipScrollTree. However, that requires making
+    // changes to webrender's web debugger ui, touching a 4Mb minified file that
+    // is too big to submit through the conventional means.
+    /// Fetch the spatial tree.
     FetchClipScrollTree,
     /// Fetch render tasks.
     FetchRenderTasks,
@@ -967,6 +970,8 @@ pub enum DebugCommand {
     LoadCapture(PathBuf, MsgSender<CapturedDocument>),
     /// Clear cached resources, forcing them to be re-uploaded from templates.
     ClearCaches(ClearCache),
+    /// Enable/disable native compositor usage
+    EnableNativeCompositor(bool),
     /// Invalidate GPU cache, forcing the update from the CPU mirror.
     InvalidateGpuCache,
     /// Causes the scene builder to pause for a given amount of milliseconds each time it

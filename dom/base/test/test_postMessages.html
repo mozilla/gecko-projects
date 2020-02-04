@@ -345,8 +345,7 @@ function test_windowToIframe() {
 // PostMessage to cross-origin iframe
 function test_windowToCrossOriginIframe() {
   info("Testing window to cross-origin iframe");
-  test_windowToIframeURL('http://example.com/tests/dom/base/test/iframe_postMessages.html',
-                         !SpecialPowers.useRemoteSubframes);
+  test_windowToIframeURL('http://example.com/tests/dom/base/test/iframe_postMessages.html', false);
 }
 
 // iframe helper class
@@ -461,7 +460,7 @@ function test_broadcastChannel() {
 
   runTests({
     clonableObjectsEveryWhere: true,
-    clonableObjectsSameProcess: false,
+    clonableObjectsSameProcess: true,
     transferableObjects: false,
     send(what, ports) {
       return new Promise(function(r, rr) {
@@ -549,7 +548,7 @@ function test_messagePort() {
 
   runTests({
     clonableObjectsEveryWhere: true,
-    clonableObjectsSameProcess: false,
+    clonableObjectsSameProcess: true,
     transferableObjects: true,
     send(what, ports) {
       return new Promise(function(r, rr) {

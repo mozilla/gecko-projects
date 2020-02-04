@@ -29,6 +29,7 @@
 #include "mozilla/Telemetry.h"
 
 #include "nsCOMPtr.h"
+#include "nsDebug.h"
 #include "nsString.h"
 #include "nsFrameSelection.h"
 #include "nsISelectionListener.h"
@@ -607,7 +608,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Selection)
   tmp->StopNotifyingAccessibleCaretEventHub();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSelectionChangeEventDispatcher)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mSelectionListeners)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCachedRange)
   tmp->RemoveAllRanges(IgnoreErrors());
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mFrameSelection)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -620,7 +620,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Selection)
     }
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnchorFocusRange)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCachedRange)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFrameSelection)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelectionChangeEventDispatcher)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelectionListeners)
@@ -684,10 +683,13 @@ static nsresult CompareToRangeStart(const nsINode* aCompareNode,
   if (aCompareNode->GetComposedDoc() != start->GetComposedDoc() ||
       !start->GetComposedDoc() ||
       aCompareNode->SubtreeRoot() != start->SubtreeRoot()) {
+    NS_WARNING(
+        "`CompareToRangeStart` couldn't compare nodes, pretending some order.");
     *aCmp = 1;
   } else {
-    *aCmp = nsContentUtils::ComparePoints_Deprecated(
-        aCompareNode, aCompareOffset, start, aRange->StartOffset());
+    // The points are in the same subtree, hence there has to be an order.
+    *aCmp = *nsContentUtils::ComparePoints(aCompareNode, aCompareOffset, start,
+                                           aRange->StartOffset());
   }
   return NS_OK;
 }
@@ -702,10 +704,13 @@ static nsresult CompareToRangeEnd(const nsINode* aCompareNode,
   if (aCompareNode->GetComposedDoc() != end->GetComposedDoc() ||
       !end->GetComposedDoc() ||
       aCompareNode->SubtreeRoot() != end->SubtreeRoot()) {
+    NS_WARNING(
+        "`CompareToRangeEnd` couldn't compare nodes, pretending some order.");
     *aCmp = 1;
   } else {
-    *aCmp = nsContentUtils::ComparePoints_Deprecated(
-        aCompareNode, aCompareOffset, end, aRange->EndOffset());
+    // The points are in the same subtree, hence there has to be an order.
+    *aCmp = *nsContentUtils::ComparePoints(aCompareNode, aCompareOffset, end,
+                                           aRange->EndOffset());
   }
   return NS_OK;
 }
@@ -775,13 +780,13 @@ nsresult Selection::SubtractRange(RangeData* aRange, nsRange* aSubtract,
   if (cmp2 > 0) {
     // We need to add a new RangeData to the output, running from
     // the end of aSubtract to the end of range
-    RefPtr<nsRange> postOverlap = new nsRange(aSubtract->GetEndContainer());
-    rv = postOverlap->SetStartAndEnd(
-        aSubtract->GetEndContainer(), aSubtract->EndOffset(),
-        range->GetEndContainer(), range->EndOffset());
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+    ErrorResult error;
+    RefPtr<nsRange> postOverlap =
+        nsRange::Create(aSubtract->EndRef(), range->EndRef(), error);
+    if (NS_WARN_IF(error.Failed())) {
+      return error.StealNSResult();
     }
+    MOZ_ASSERT(postOverlap);
     if (!postOverlap->Collapsed()) {
       if (!aOutput->InsertElementAt(0, RangeData(postOverlap)))
         return NS_ERROR_OUT_OF_MEMORY;
@@ -792,13 +797,13 @@ nsresult Selection::SubtractRange(RangeData* aRange, nsRange* aSubtract,
   if (cmp < 0) {
     // We need to add a new RangeData to the output, running from
     // the start of the range to the start of aSubtract
-    RefPtr<nsRange> preOverlap = new nsRange(range->GetStartContainer());
-    rv = preOverlap->SetStartAndEnd(
-        range->GetStartContainer(), range->StartOffset(),
-        aSubtract->GetStartContainer(), aSubtract->StartOffset());
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
+    ErrorResult error;
+    RefPtr<nsRange> preOverlap =
+        nsRange::Create(range->StartRef(), aSubtract->StartRef(), error);
+    if (NS_WARN_IF(error.Failed())) {
+      return error.StealNSResult();
     }
+    MOZ_ASSERT(preOverlap);
     if (!preOverlap->Collapsed()) {
       if (!aOutput->InsertElementAt(0, RangeData(preOverlap)))
         return NS_ERROR_OUT_OF_MEMORY;
@@ -966,9 +971,7 @@ nsresult Selection::MaybeAddRangeAndTruncateOverlaps(nsRange* aRange,
   }
 
   // If the range is already contained in mRanges, silently succeed
-  bool sameRange = EqualsRangeAtPoint(
-      aRange->GetStartContainer(), aRange->StartOffset(),
-      aRange->GetEndContainer(), aRange->EndOffset(), startIndex);
+  const bool sameRange = HasEqualRangeBoundariesAt(*aRange, startIndex);
   if (sameRange) {
     *aOutIndex = startIndex;
     return NS_OK;
@@ -1088,37 +1091,11 @@ nsresult Selection::Clear(nsPresContext* aPresContext) {
   return NS_OK;
 }
 
-// RangeMatches*Point
-//
-//    Compares the range beginning or ending point, and returns true if it
-//    exactly matches the given DOM point.
-
-static inline bool RangeMatchesBeginPoint(const nsRange* aRange,
-                                          const nsINode* aNode,
-                                          int32_t aOffset) {
-  return aRange->GetStartContainer() == aNode &&
-         static_cast<int32_t>(aRange->StartOffset()) == aOffset;
-}
-
-static inline bool RangeMatchesEndPoint(const nsRange* aRange,
-                                        const nsINode* aNode, int32_t aOffset) {
-  return aRange->GetEndContainer() == aNode &&
-         static_cast<int32_t>(aRange->EndOffset()) == aOffset;
-}
-
-// Selection::EqualsRangeAtPoint
-//
-//    Utility method for checking equivalence of two ranges.
-
-bool Selection::EqualsRangeAtPoint(const nsINode* aBeginNode,
-                                   int32_t aBeginOffset,
-                                   const nsINode* aEndNode, int32_t aEndOffset,
-                                   int32_t aRangeIndex) const {
+bool Selection::HasEqualRangeBoundariesAt(const nsRange& aRange,
+                                          int32_t aRangeIndex) const {
   if (aRangeIndex >= 0 && aRangeIndex < (int32_t)mRanges.Length()) {
     const nsRange* range = mRanges[aRangeIndex].mRange;
-    if (RangeMatchesBeginPoint(range, aBeginNode, aBeginOffset) &&
-        RangeMatchesEndPoint(range, aEndNode, aEndOffset))
-      return true;
+    return range->HasEqualBoundaries(aRange);
   }
   return false;
 }
@@ -1187,7 +1164,9 @@ nsresult Selection::GetIndicesForInterval(
 
     // If the interval is strictly before the range at index 0, we can optimize
     // by returning now - all ranges start after the given interval
-    if (!RangeMatchesBeginPoint(endRange, aEndNode, aEndOffset)) return NS_OK;
+    if (!endRange->StartRef().Equals(aEndNode, aEndOffset)) {
+      return NS_OK;
+    }
 
     // We now know that the start point of mRanges[0].mRange equals the end of
     // the interval. Thus, when aAllowadjacent is true, the caller is always
@@ -1220,7 +1199,9 @@ nsresult Selection::GetIndicesForInterval(
     // first two possibilites hold
     while (endsBeforeIndex < (int32_t)mRanges.Length()) {
       const nsRange* endRange = mRanges[endsBeforeIndex].mRange;
-      if (!RangeMatchesBeginPoint(endRange, aEndNode, aEndOffset)) break;
+      if (!endRange->StartRef().Equals(aEndNode, aEndOffset)) {
+        break;
+      }
       endsBeforeIndex++;
     }
 
@@ -1237,10 +1218,11 @@ nsresult Selection::GetIndicesForInterval(
     // adjacent range
     const nsRange* beginRange = mRanges[beginsAfterIndex].mRange;
     if (beginsAfterIndex > 0 && beginRange->Collapsed() &&
-        RangeMatchesEndPoint(beginRange, aBeginNode, aBeginOffset)) {
+        beginRange->EndRef().Equals(aBeginNode, aBeginOffset)) {
       beginRange = mRanges[beginsAfterIndex - 1].mRange;
-      if (RangeMatchesEndPoint(beginRange, aBeginNode, aBeginOffset))
+      if (beginRange->EndRef().Equals(aBeginNode, aBeginOffset)) {
         beginsAfterIndex--;
+      }
     }
   } else {
     // See above for the possibilities at this point. The only case where we
@@ -1248,9 +1230,10 @@ nsresult Selection::GetIndicesForInterval(
     // the given interval's start point, but that range isn't collapsed (a
     // collapsed range should be included in the returned results).
     const nsRange* beginRange = mRanges[beginsAfterIndex].mRange;
-    if (RangeMatchesEndPoint(beginRange, aBeginNode, aBeginOffset) &&
-        !beginRange->Collapsed())
+    if (beginRange->EndRef().Equals(aBeginNode, aBeginOffset) &&
+        !beginRange->Collapsed()) {
       beginsAfterIndex++;
+    }
 
     // Again, see above for the meaning of endsBeforeIndex at this point.
     // In particular, endsBeforeIndex may point to a collaped range which
@@ -1258,9 +1241,10 @@ nsresult Selection::GetIndicesForInterval(
     // included
     if (endsBeforeIndex < (int32_t)mRanges.Length()) {
       const nsRange* endRange = mRanges[endsBeforeIndex].mRange;
-      if (RangeMatchesBeginPoint(endRange, aEndNode, aEndOffset) &&
-          endRange->Collapsed())
+      if (endRange->StartRef().Equals(aEndNode, aEndOffset) &&
+          endRange->Collapsed()) {
         endsBeforeIndex++;
+      }
     }
   }
 
@@ -1361,7 +1345,7 @@ nsresult Selection::GetPrimaryOrCaretFrameForNodeOffset(nsIContent* aContent,
   return NS_OK;
 }
 
-void Selection::SelectFramesForContent(nsIContent* aContent, bool aSelected) {
+void Selection::SelectFramesOf(nsIContent* aContent, bool aSelected) const {
   nsIFrame* frame = aContent->GetPrimaryFrame();
   if (!frame) {
     return;
@@ -1370,20 +1354,20 @@ void Selection::SelectFramesForContent(nsIContent* aContent, bool aSelected) {
   // as a text frame.
   if (frame->IsTextFrame()) {
     nsTextFrame* textFrame = static_cast<nsTextFrame*>(frame);
-    textFrame->SetSelectedRange(0, textFrame->TextFragment()->GetLength(),
-                                aSelected, mSelectionType);
+    textFrame->SelectionStateChanged(0, textFrame->TextFragment()->GetLength(),
+                                     aSelected, mSelectionType);
   } else {
-    frame->InvalidateFrameSubtree();  // frame continuations?
+    frame->SelectionStateChanged();
   }
 }
 
-// select all content children of aContent
-nsresult Selection::SelectAllFramesForContent(
-    PostContentIterator& aPostOrderIter, nsIContent* aContent, bool aSelected) {
+nsresult Selection::SelectFramesOfInclusiveDescendantsOfContent(
+    PostContentIterator& aPostOrderIter, nsIContent* aContent,
+    bool aSelected) const {
   // If aContent doesn't have children, we should avoid to use the content
   // iterator for performance reason.
   if (!aContent->HasChildren()) {
-    SelectFramesForContent(aContent, aSelected);
+    SelectFramesOf(aContent, aSelected);
     return NS_OK;
   }
 
@@ -1395,7 +1379,7 @@ nsresult Selection::SelectAllFramesForContent(
     nsINode* node = aPostOrderIter.GetCurrentNode();
     MOZ_ASSERT(node);
     nsIContent* innercontent = node->IsContent() ? node->AsContent() : nullptr;
-    SelectFramesForContent(innercontent, aSelected);
+    SelectFramesOf(innercontent, aSelected);
   }
 
   return NS_OK;
@@ -1427,8 +1411,19 @@ nsresult Selection::SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
                           ? node->AsContent()->GetPrimaryFrame()
                           : aPresContext->PresShell()->GetRootFrame();
     if (frame) {
-      frame->InvalidateFrameSubtree();
+      if (frame->IsTextFrame()) {
+        nsTextFrame* textFrame = static_cast<nsTextFrame*>(frame);
+
+        MOZ_ASSERT(node == aRange->GetStartContainer());
+        MOZ_ASSERT(node == aRange->GetEndContainer());
+        textFrame->SelectionStateChanged(aRange->StartOffset(),
+                                         aRange->EndOffset(), aSelect,
+                                         mSelectionType);
+      } else {
+        frame->SelectionStateChanged();
+      }
     }
+
     return NS_OK;
   }
 
@@ -1462,10 +1457,10 @@ nsresult Selection::SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
         } else {
           endOffset = startContent->Length();
         }
-        textFrame->SetSelectedRange(startOffset, endOffset, aSelect,
-                                    mSelectionType);
+        textFrame->SelectionStateChanged(startOffset, endOffset, aSelect,
+                                         mSelectionType);
       } else {
-        frame->InvalidateFrameSubtree();
+        frame->SelectionStateChanged();
       }
     }
   }
@@ -1475,7 +1470,7 @@ nsresult Selection::SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
   if (aRange->Collapsed() ||
       (startNode == endNode && !startNode->HasChildren())) {
     if (!isFirstContentTextNode) {
-      SelectFramesForContent(startContent, aSelect);
+      SelectFramesOf(startContent, aSelect);
     }
     return NS_OK;
   }
@@ -1491,7 +1486,8 @@ nsresult Selection::SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
     nsINode* node = subtreeIter.GetCurrentNode();
     MOZ_ASSERT(node);
     nsIContent* content = node->IsContent() ? node->AsContent() : nullptr;
-    SelectAllFramesForContent(postOrderIter, content, aSelect);
+    SelectFramesOfInclusiveDescendantsOfContent(postOrderIter, content,
+                                                aSelect);
   }
 
   // We must now do the last one if it is not the same as the first
@@ -1509,8 +1505,8 @@ nsresult Selection::SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
       // The frame could be an SVG text frame, in which case we'll ignore it.
       if (frame && frame->IsTextFrame()) {
         nsTextFrame* textFrame = static_cast<nsTextFrame*>(frame);
-        textFrame->SetSelectedRange(0, aRange->EndOffset(), aSelect,
-                                    mSelectionType);
+        textFrame->SelectionStateChanged(0, aRange->EndOffset(), aSelect,
+                                         mSelectionType);
       }
     }
   }
@@ -1841,34 +1837,6 @@ void Selection::RemoveAllRanges(ErrorResult& aRv) {
   }
 }
 
-nsresult Selection::RemoveAllRangesTemporarily() {
-  if (!mCachedRange) {
-    // Look for a range which isn't referred by other than this instance.
-    // If there is, it'll be released by calling Clear().  So, we can reuse it
-    // when we need to create a range.
-    for (auto& rangeData : mRanges) {
-      auto& range = rangeData.mRange;
-      if (range->GetRefCount() == 1 ||
-          (range->GetRefCount() == 2 && range == mAnchorFocusRange)) {
-        mCachedRange = range;
-        break;
-      }
-    }
-  }
-
-  // Then, remove all ranges.
-  ErrorResult result;
-  RemoveAllRanges(result);
-  if (result.Failed()) {
-    mCachedRange = nullptr;
-  } else if (mCachedRange) {
-    // To save the computing cost to keep valid DOM point against DOM tree
-    // changes, we should clear the range temporarily.
-    mCachedRange->ResetTemporarily();
-  }
-  return result.StealNSResult();
-}
-
 void Selection::AddRangeJS(nsRange& aRange, ErrorResult& aRv) {
   AutoRestore<bool> calledFromJSRestorer(mCalledByJS);
   mCalledByJS = true;
@@ -1890,16 +1858,7 @@ void Selection::AddRangeAndSelectFramesAndNotifyListeners(nsRange& aRange,
   if (aRange.IsInSelection() && aRange.GetSelection() != this) {
     // Because of performance reason, when there is a cached range, let's use
     // it.  Otherwise, clone the range.
-    if (mCachedRange) {
-      range = std::move(mCachedRange);
-      nsresult rv = range->SetStartAndEnd(aRange.StartRef().AsRaw(),
-                                          aRange.EndRef().AsRaw());
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-      }
-    } else {
-      range = aRange.CloneRange();
-    }
+    range = aRange.CloneRange();
   } else {
     range = &aRange;
   }
@@ -1912,10 +1871,6 @@ void Selection::AddRangeAndSelectFramesAndNotifyListeners(nsRange& aRange,
     // associated with context object. Otherwise, this method must do nothing."
     return;
   }
-
-  // If a range is being added, we don't need cached range because Collapse()
-  // won't use it.
-  mCachedRange = nullptr;
 
   // MaybeAddTableCellRange might flush frame.
   RefPtr<Selection> kungFuDeathGrip(this);
@@ -1938,9 +1893,8 @@ void Selection::AddRangeAndSelectFramesAndNotifyListeners(nsRange& aRange,
     }
   }
 
-  if (rangeIndex < 0) {
-    return;
-  }
+  MOZ_ASSERT(rangeIndex >= 0);
+  MOZ_ASSERT(rangeIndex < static_cast<int32_t>(mRanges.Length()));
 
   SetAnchorFocusRange(rangeIndex);
 
@@ -2105,9 +2059,6 @@ void Selection::Collapse(const RawRangeBoundary& aPoint, ErrorResult& aRv) {
     return;
   }
 
-  // Cache current range is if there is because it may be reusable.
-  RefPtr<nsRange> oldRange = !mRanges.IsEmpty() ? mRanges[0].mRange : nullptr;
-
   // Delete all of the current ranges
   Clear(presContext);
 
@@ -2139,16 +2090,7 @@ void Selection::Collapse(const RawRangeBoundary& aPoint, ErrorResult& aRv) {
     }
   }
 
-  RefPtr<nsRange> range;
-  // If the old range isn't referred by anybody other than this method,
-  // we should reuse it for reducing the recreation cost.
-  if (oldRange && oldRange->GetRefCount() == 1) {
-    range = std::move(oldRange);
-  } else if (mCachedRange) {
-    range = std::move(mCachedRange);
-  } else {
-    range = new nsRange(aPoint.Container());
-  }
+  RefPtr<nsRange> range = nsRange::Create(aPoint.Container());
   result = range->CollapseTo(aPoint);
   if (NS_FAILED(result)) {
     aRv.Throw(result);
@@ -2449,7 +2391,7 @@ void Selection::Extend(nsINode& aContainer, uint32_t aOffset,
       return;
     }
   } else {
-    RefPtr<nsRange> difRange = new nsRange(&aContainer);
+    RefPtr<nsRange> difRange = nsRange::Create(&aContainer);
     if ((*anchorOldFocusOrder == 0 && *anchorNewFocusOrder < 0) ||
         (*anchorOldFocusOrder <= 0 &&
          *oldFocusNewFocusOrder < 0)) {  // a1,2  a,1,2
@@ -3373,37 +3315,9 @@ void Selection::SetStartAndEndInternal(InLimiter aInLimiter,
     }
   }
 
-  // If we're not called by JS, we can remove all ranges first.  Then, we
-  // may be able to reuse one of current ranges for reducing the cost of
-  // nsRange allocation.  Note that if this is called by
-  // SetBaseAndExtentJS(), when we fail to initialize new range, we
-  // shouldn't remove current ranges.  Therefore, we need to check whether
-  // we're called by JS or internally.
-  if (!mCalledByJS && !mCachedRange) {
-    nsresult rv = RemoveAllRangesTemporarily();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      aRv.Throw(rv);
-      return;
-    }
-  }
-
-  // If there is cached range, we should reuse it for saving the allocation
-  // const (and some other cost in nsRange::DoSetRange()).
-  RefPtr<nsRange> newRange = std::move(mCachedRange);
-
-  // nsRange::SetStartAndEnd() and nsRange::Create() returns
-  // IndexSizeError if any offset is out of bounds.
-  if (newRange) {
-    nsresult rv = newRange->SetStartAndEnd(aStartRef, aEndRef);
-    if (NS_FAILED(rv)) {
-      aRv.Throw(rv);
-      return;
-    }
-  } else {
-    newRange = nsRange::Create(aStartRef, aEndRef, aRv);
-    if (aRv.Failed()) {
-      return;
-    }
+  RefPtr<nsRange> newRange = nsRange::Create(aStartRef, aEndRef, aRv);
+  if (aRv.Failed()) {
+    return;
   }
 
   RemoveAllRanges(aRv);

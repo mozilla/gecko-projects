@@ -15,7 +15,6 @@
 #include "XPCJSMemoryReporter.h"
 #include "WrapperFactory.h"
 #include "mozJSComponentLoader.h"
-#include "nsAutoPtr.h"
 #include "nsNetUtil.h"
 #include "nsThreadUtils.h"
 
@@ -281,7 +280,7 @@ class WatchdogManager {
 
   void RegisterContext(XPCJSContext* aContext) {
     MOZ_ASSERT(NS_IsMainThread());
-    AutoLockWatchdog lock(mWatchdog);
+    AutoLockWatchdog lock(mWatchdog.get());
 
     if (aContext->mActive == XPCJSContext::CONTEXT_ACTIVE) {
       mActiveContexts.insertBack(aContext);
@@ -295,7 +294,7 @@ class WatchdogManager {
 
   void UnregisterContext(XPCJSContext* aContext) {
     MOZ_ASSERT(NS_IsMainThread());
-    AutoLockWatchdog lock(mWatchdog);
+    AutoLockWatchdog lock(mWatchdog.get());
 
     // aContext must be in one of our two lists, simply remove it.
     aContext->LinkedListElement<XPCJSContext>::remove();
@@ -315,7 +314,7 @@ class WatchdogManager {
   void RecordContextActivity(XPCJSContext* aContext, bool active) {
     // The watchdog reads this state, so acquire the lock before writing it.
     MOZ_ASSERT(NS_IsMainThread());
-    AutoLockWatchdog lock(mWatchdog);
+    AutoLockWatchdog lock(mWatchdog.get());
 
     // Write state.
     aContext->mLastStateChange = PR_Now();
@@ -365,7 +364,7 @@ class WatchdogManager {
     return mTimestamps[aCategory];
   }
 
-  Watchdog* GetWatchdog() { return mWatchdog; }
+  Watchdog* GetWatchdog() { return mWatchdog.get(); }
 
   void RefreshWatchdog() {
     bool wantWatchdog = Preferences::GetBool("dom.use_watchdog", true);
@@ -400,7 +399,7 @@ class WatchdogManager {
 
   void StartWatchdog() {
     MOZ_ASSERT(!mWatchdog);
-    mWatchdog = new Watchdog(this);
+    mWatchdog = mozilla::MakeUnique<Watchdog>(this);
     mWatchdog->Init();
   }
 
@@ -442,7 +441,7 @@ class WatchdogManager {
 
   LinkedList<XPCJSContext> mActiveContexts;
   LinkedList<XPCJSContext> mInactiveContexts;
-  nsAutoPtr<Watchdog> mWatchdog;
+  mozilla::UniquePtr<Watchdog> mWatchdog;
 
   // We store ContextStateChange on the contexts themselves.
   PRTime mTimestamps[kWatchdogTimestampCategoryCount - 1];
@@ -758,7 +757,7 @@ bool xpc::ExtraWarningsForSystemJS() { return false; }
 static mozilla::Atomic<bool> sSharedMemoryEnabled(false);
 static mozilla::Atomic<bool> sStreamsEnabled(false);
 static mozilla::Atomic<bool> sFieldsEnabled(false);
-static mozilla::Atomic<bool> sParserDeferAllocationEnabled(false);
+
 static mozilla::Atomic<bool> sAwaitFixEnabled(false);
 static mozilla::Atomic<bool> sPropertyErrorMessageFixEnabled(false);
 static mozilla::Atomic<bool> sWeakRefsEnabled(false);
@@ -776,7 +775,6 @@ void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
       .setAwaitFixEnabled(sAwaitFixEnabled)
       .setPropertyErrorMessageFixEnabled(sPropertyErrorMessageFixEnabled)
       .setWeakRefsEnabled(sWeakRefsEnabled);
-  options.behaviors().setDeferredParserAlloc(sParserDeferAllocationEnabled);
 }
 
 static void LoadStartupJSPrefs(XPCJSContext* xpccx) {
@@ -937,8 +935,6 @@ static void ReloadPrefsCallback(const char* pref, void* aXpccx) {
   sSharedMemoryEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "shared_memory");
   sStreamsEnabled = Preferences::GetBool(JS_OPTIONS_DOT_STR "streams");
-  sParserDeferAllocationEnabled =
-      Preferences::GetBool(JS_OPTIONS_DOT_STR "parser_defer_allocation");
   sFieldsEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.fields");
   sAwaitFixEnabled =

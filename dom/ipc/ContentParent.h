@@ -757,6 +757,7 @@ class ContentParent final
 
   // Generate a minidump for the child process and one for the main process
   void GeneratePairedMinidump(const char* aReason);
+  void HandleOrphanedMinidump(nsString* aDumpId);
 
   virtual ~ContentParent();
 
@@ -1234,6 +1235,10 @@ class ContentParent final
       uint64_t aTopContextId, const nsACString& aOriginAttrs,
       const nsACString& aOriginKey, const nsTArray<KeyValuePair>& aDefaultData,
       const nsTArray<KeyValuePair>& aSessionData);
+
+  mozilla::ipc::IPCResult RecvReportServiceWorkerShutdownProgress(
+      uint32_t aShutdownStateId,
+      ServiceWorkerShutdownState::Progress aProgress);
 
   // Notify the ContentChild to enable the input event prioritization when
   // initializing.

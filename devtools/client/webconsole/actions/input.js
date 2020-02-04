@@ -222,9 +222,10 @@ function terminalInputChanged(expression) {
     const { terminalInput = "" } = getState().history;
     // Only re-evaluate if the expression did change.
     if (
-      terminalInput &&
-      expression &&
-      expression.trim() === terminalInput.trim()
+      (!terminalInput && !expression) ||
+      (typeof terminalInput === "string" &&
+        typeof expression === "string" &&
+        expression.trim() === terminalInput.trim())
     ) {
       return;
     }
@@ -234,6 +235,11 @@ function terminalInputChanged(expression) {
       type: SET_TERMINAL_INPUT,
       expression: expression.trim(),
     });
+
+    // There's no need to evaluate an empty string.
+    if (!expression.trim()) {
+      return;
+    }
 
     let mapped;
     ({ expression, mapped } = await getMappedExpression(hud, expression));
@@ -248,20 +254,26 @@ function terminalInputChanged(expression) {
       eager: true,
     });
 
-    const result = response.exception || response.result;
-
-    // Don't show syntax errors or undefined results to the user.
-    if (result.isSyntaxError || result.type == "undefined") {
-      return;
-    }
-
     // eslint-disable-next-line consistent-return
     return dispatch({
       type: SET_TERMINAL_EAGER_RESULT,
       expression: originalExpression,
-      result,
+      result: getEagerEvaluationResult(response),
     });
   };
+}
+
+function getEagerEvaluationResult(response) {
+  const result = response.exception || response.result;
+  // Don't show syntax errors results to the user.
+  if (
+    (result && result.isSyntaxError) ||
+    (result && result.type == "undefined")
+  ) {
+    return null;
+  }
+
+  return result;
 }
 
 module.exports = {

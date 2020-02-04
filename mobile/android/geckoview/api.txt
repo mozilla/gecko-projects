@@ -1223,6 +1223,7 @@ package org.mozilla.geckoview {
   public static interface LoginStorage.Delegate {
     method @UiThread @Nullable default public GeckoResult<LoginStorage.LoginEntry[]> onLoginFetch(@NonNull String);
     method @UiThread default public void onLoginSave(@NonNull LoginStorage.LoginEntry);
+    method @UiThread default public void onLoginUsed(@NonNull LoginStorage.LoginEntry, int);
   }
 
   public static class LoginStorage.LoginEntry {
@@ -1244,6 +1245,11 @@ package org.mozilla.geckoview {
     method @AnyThread @NonNull public LoginStorage.LoginEntry.Builder origin(@NonNull String);
     method @AnyThread @NonNull public LoginStorage.LoginEntry.Builder password(@NonNull String);
     method @AnyThread @NonNull public LoginStorage.LoginEntry.Builder username(@NonNull String);
+  }
+
+  public static class LoginStorage.UsedField {
+    ctor public UsedField();
+    field public static final int PASSWORD = 1;
   }
 
   @AnyThread public class MediaElement {
@@ -1554,6 +1560,8 @@ package org.mozilla.geckoview {
     field @NonNull public final WebExtension.Icon icon;
     field public final boolean isRecommended;
     field @Nullable public final String name;
+    field public final boolean openOptionsPageInTab;
+    field @Nullable public final String optionsPageUrl;
     field @NonNull public final String[] origins;
     field @NonNull public final String[] permissions;
     field public final int signedState;
@@ -1592,6 +1600,7 @@ package org.mozilla.geckoview {
     method @NonNull @AnyThread public GeckoResult<WebExtension> install(@NonNull String);
     method @AnyThread @NonNull public GeckoResult<List<WebExtension>> list();
     method @UiThread public void setPromptDelegate(@Nullable WebExtensionController.PromptDelegate);
+    method @AnyThread public void setTabActive(@NonNull GeckoSession, boolean);
     method @UiThread public void setTabDelegate(@Nullable WebExtensionController.TabDelegate);
     method @NonNull @AnyThread public GeckoResult<Void> uninstall(@NonNull WebExtension);
   }

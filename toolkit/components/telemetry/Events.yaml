@@ -287,14 +287,14 @@ addonsManager:
     extra_keys:
       status_code: included when error is DOWNLOAD_ERROR and UNEXPECTED_STATUS_CODE
     notification_emails: ["addons-dev-internal@mozilla.com"]
-    expiry_version: "75"
+    expiry_version: "77"
     products:
       - "firefox"
       - "fennec"
       - "geckoview"
       - "thunderbird"
     record_in_processes: ["main"]
-    bug_numbers: [1572711]
+    bug_numbers: [1572711, 1607744]
     release_channel_collection: opt-out
 
 extensions.data:
@@ -1521,12 +1521,14 @@ security.ui.protections:
     ]
     bug_numbers:
       - 1557050
+      - 1610897
     description: >
       User arrived on the protection report.
-    expiry_version: "75"
+    expiry_version: "80"
     record_in_processes: ["content"]
     release_channel_collection: opt-out
     notification_emails:
+      - ewright@mozilla.com
       - chsiang@mozilla.com
       - seceng-telemetry@mozilla.com
     products:
@@ -1539,12 +1541,14 @@ security.ui.protections:
     ]
     bug_numbers:
       - 1557050
+      - 1610897
     description: >
       User closed on the protection report.
-    expiry_version: "75"
+    expiry_version: "80"
     record_in_processes: ["content"]
     release_channel_collection: opt-out
     notification_emails:
+      - ewright@mozilla.com
       - chsiang@mozilla.com
       - seceng-telemetry@mozilla.com
     products:
@@ -1555,6 +1559,7 @@ security.ui.protections:
     bug_numbers:
       - 1557050
       - 1572825
+      - 1610897
     description: >
       User interaction by click events on the protection report.
     objects: [
@@ -1568,10 +1573,11 @@ security.ui.protections:
       "mtr_signup_button",
       "trackers_about_link",
     ]
-    expiry_version: "75"
+    expiry_version: "80"
     record_in_processes: ["content"]
     release_channel_collection: opt-out
     notification_emails:
+      - ewright@mozilla.com
       - chsiang@mozilla.com
       - seceng-telemetry@mozilla.com
     products:
@@ -1604,9 +1610,10 @@ security.ui.protectionspopup:
     objects: ["protections_popup"]
     bug_numbers:
       - 1560327
+      - 1607488
     description: >
       How many times the protections panel was opened.
-    expiry_version: "75"
+    expiry_version: "80"
     notification_emails:
       - ewright@mozilla.com
       - nhnt11@mozilla.com
@@ -1638,10 +1645,12 @@ security.ui.protectionspopup:
     bug_numbers:
       - 1560327
       - 1602015
+      - 1607488
     description: >
       User interaction by click events in the protections panel.
-    expiry_version: "75"
+    expiry_version: "80"
     notification_emails:
+      - ewright@mozilla.com
       - nhnt11@mozilla.com
       - jhofmann@mozilla.com
       - chsiang@mozilla.com
@@ -1713,13 +1722,13 @@ intl.ui.browserLanguage:
       installId: The id for an install.
     products:
       - firefox
-    expiry_version: "75"
+    expiry_version: "85"
     notification_emails:
       - flod@mozilla.com
       - mstriemer@mozilla.com
     release_channel_collection: opt-out
     record_in_processes: ["main"]
-    bug_numbers: [1486507, 1553311]
+    bug_numbers: [1486507, 1553311, 1607501]
 
 security:
   evalUsage:

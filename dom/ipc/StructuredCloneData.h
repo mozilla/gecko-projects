@@ -67,7 +67,7 @@ class SharedJSAllocatedData final {
     return sharedData.forget();
   }
 
-  NS_INLINE_DECL_REFCOUNTING(SharedJSAllocatedData)
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(SharedJSAllocatedData)
 
   JSStructuredCloneData& Data() { return mData; }
   size_t DataLength() const { return mData.Size(); }
@@ -149,6 +149,10 @@ class StructuredCloneData : public StructuredCloneHolder {
 
   StructuredCloneData(StructuredCloneData&& aOther);
 
+  // Only DifferentProcess and UnknownDestination scopes are supported.
+  StructuredCloneData(StructuredCloneScope aScope,
+                      TransferringSupport aSupportsTransferring);
+
   ~StructuredCloneData();
 
   StructuredCloneData& operator=(const StructuredCloneData& aOther) = delete;
@@ -171,6 +175,9 @@ class StructuredCloneData : public StructuredCloneHolder {
 
   void Read(JSContext* aCx, JS::MutableHandle<JS::Value> aValue,
             ErrorResult& aRv);
+
+  void Read(JSContext* aCx, JS::MutableHandle<JS::Value> aValue,
+            JS::CloneDataPolicy aCloneDataPolicy, ErrorResult& aRv);
 
   void Write(JSContext* aCx, JS::Handle<JS::Value> aValue, ErrorResult& aRv);
 
@@ -268,8 +275,6 @@ class StructuredCloneData : public StructuredCloneHolder {
   bool ReadIPCParams(const IPC::Message* aMessage, PickleIterator* aIter);
 
  protected:
-  explicit StructuredCloneData(TransferringSupport aSupportsTransferring);
-
   already_AddRefed<SharedJSAllocatedData> TakeSharedData();
 
  private:
@@ -280,15 +285,6 @@ class StructuredCloneData : public StructuredCloneHolder {
   // sending of the data via IPC. This will be fixed by bug 1353475.
   FallibleTArray<mozilla::ipc::AutoIPCStream> mIPCStreams;
   bool mInitialized;
-};
-
-/**
- * For use when transferring should not be supported.
- */
-class StructuredCloneDataNoTransfers : public StructuredCloneData {
- public:
-  StructuredCloneDataNoTransfers()
-      : StructuredCloneData(StructuredCloneHolder::TransferringNotSupported) {}
 };
 
 }  // namespace ipc

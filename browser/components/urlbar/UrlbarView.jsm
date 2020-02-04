@@ -52,10 +52,11 @@ class UrlbarView {
     this._rows.addEventListener("overflow", this);
     this._rows.addEventListener("underflow", this);
 
-    this.window.gBrowser.tabContainer.addEventListener("TabSelect", this);
-
     this.controller.setView(this);
     this.controller.addQueryListener(this);
+    // This is used by autoOpen to avoid flickering results when reopening
+    // previously abandoned searches.
+    this._queryContextCache = new QueryContextCache(5);
   }
 
   get oneOffSearchButtons() {
@@ -338,8 +339,10 @@ class UrlbarView {
 
   /**
    * Closes the view, cancelling the query if necessary.
+   * @param {boolean} [elementPicked]
+   *   True if the view is being closed because a result was picked.
    */
-  close() {
+  close(elementPicked = false) {
     this.controller.cancelQuery();
 
     if (!this.isOpen) {
@@ -357,40 +360,87 @@ class UrlbarView {
       this.input._toolbar.removeAttribute("urlbar-exceeds-toolbar-bounds");
     }
 
+    // Search Tips can open the view without the Urlbar being focused. If the
+    // tip is ignored (e.g. the page content is clicked or the window loses
+    // focus) we should discard the telemetry event created when the view was
+    // opened.
+    if (!this.input.focused && !elementPicked) {
+      this.input.controller.engagementEvent.discard();
+      this.input.controller.engagementEvent.record(null, {});
+    }
+
     this.window.removeEventListener("resize", this);
     this.window.removeEventListener("blur", this);
 
     this.controller.notify(this.controller.NOTIFICATIONS.VIEW_CLOSE);
   }
 
-  maybeReopen() {
-    // Reopen if we have cached results and the input is focused, unless the
-    // search string is empty or different. We don't restore the empty search
-    // because this is supposed to restore the search status when the user
-    // abandoned a search engagement, just opening the dropdown is not
-    // considered a sufficient engagement.
-    if (
-      this.input.megabar &&
-      this._rows.firstElementChild &&
-      this.input.focused &&
-      this.input.value &&
-      this._queryContext.searchString == this.input.value &&
-      this.input.getAttribute("pageproxystate") != "valid"
-    ) {
-      // In some cases where we can move across tabs with an open panel.
-      if (!this.isOpen) {
-        this._openPanel();
-      }
-      this.controller.engagementEvent.discard();
-      this.input.startQuery({
-        autofillIgnoresSelection: true,
-        searchString: this.input.value,
-        allowAutofill: this._queryContext.allowAutofill,
-        event: new CustomEvent("urlbar-reopen"),
-      });
-      return true;
+  /**
+   * This can be used to open the view automatically as a consequence of
+   * specific user actions. For Top Sites searches (without a search string)
+   * the view is opened only for mouse or keyboard interactions.
+   * If the user abandoned a search (there is a search string) the view is
+   * reopened, and we try to use cached results to reduce flickering, then a new
+   * query is started to refresh results.
+   * @param {Event} queryOptions Options to use when starting a new query. The
+   *        event property is mandatory for proper telemetry tracking.
+   * @returns {boolean} Whether the view was opened.
+   */
+  autoOpen(queryOptions = {}) {
+    if (!this.input.openViewOnFocus || !queryOptions.event) {
+      return false;
     }
-    return false;
+
+    if (
+      !this.input.value ||
+      this.input.getAttribute("pageproxystate") == "valid"
+    ) {
+      // We do not show Top Sites in private windows, or if the user disabled them
+      // on about:newtab.
+      let canOpenTopSites =
+        !this.input.isPrivate &&
+        UrlbarPrefs.get("browser.newtabpage.activity-stream.feeds.topsites");
+      if (
+        canOpenTopSites &&
+        !this.isOpen &&
+        ["mousedown", "command"].includes(queryOptions.event.type)
+      ) {
+        this.input.startQuery(queryOptions);
+        return true;
+      }
+      return false;
+    }
+
+    // Reopen abandoned searches only if the input is focused.
+    if (!this.input.focused) {
+      return false;
+    }
+
+    if (
+      this._rows.firstElementChild &&
+      this._queryContext.searchString == this.input.value
+    ) {
+      // We can reuse the current results.
+      queryOptions.allowAutofill = this._queryContext.allowAutofill;
+    } else {
+      // To reduce results flickering, try to reuse a cached UrlbarQueryContext.
+      let cachedQueryContext = this._queryContextCache.get(this.input.value);
+      if (cachedQueryContext) {
+        this.onQueryResults(cachedQueryContext);
+      }
+    }
+
+    this.controller.engagementEvent.discard();
+    queryOptions.searchString = this.input.value;
+    queryOptions.autofillIgnoresSelection = true;
+    queryOptions.event.interactionType = "returned";
+
+    this._openPanel();
+
+    // If we had cached results, this will just refresh them, avoiding results
+    // flicker, otherwise there may be some noise.
+    this.input.startQuery(queryOptions);
+    return true;
   }
 
   // UrlbarController listener methods.
@@ -413,6 +463,7 @@ class UrlbarView {
   }
 
   onQueryResults(queryContext) {
+    this._queryContextCache.put(queryContext);
     this._queryContext = queryContext;
 
     if (!this.isOpen) {
@@ -420,22 +471,14 @@ class UrlbarView {
     }
     this._updateResults(queryContext);
 
-    let isHeuristicResult = false;
-    if (queryContext.lastResultCount == 0) {
-      let firstResult = queryContext.results[0];
+    let firstResult = queryContext.results[0];
 
-      if (firstResult.heuristic) {
-        isHeuristicResult = true;
-        this._selectElement(this._getFirstSelectableElement(), {
-          updateInput: false,
-          setAccessibleFocus: this.controller._userSelectionBehavior == "arrow",
-        });
-      } else {
-        // Clear the selection when we get a new set of results.
-        this._selectElement(null, {
-          updateInput: false,
-        });
-      }
+    if (queryContext.lastResultCount == 0) {
+      // Clear the selection when we get a new set of results.
+      this._selectElement(null, {
+        updateInput: false,
+      });
+
       // Hide the one-off search buttons if the search string is empty, or
       // starts with a potential @ search alias or the search restriction
       // character.
@@ -452,9 +495,23 @@ class UrlbarView {
       this.input.maybeClearAutofillPlaceholder(firstResult);
     }
 
+    if (
+      firstResult.heuristic &&
+      !this.selectedElement &&
+      !this.oneOffSearchButtons.selectedButton
+    ) {
+      // Select the heuristic result.  The heuristic may not be the first result
+      // added, which is why we do this check here when each result is added and
+      // not above.
+      this._selectElement(this._getFirstSelectableElement(), {
+        updateInput: false,
+        setAccessibleFocus: this.controller._userSelectionBehavior == "arrow",
+      });
+    }
+
     this._openPanel();
 
-    if (isHeuristicResult) {
+    if (firstResult.heuristic) {
       // The heuristic result may be a search alias result, so apply formatting
       // if necessary.  Conversely, the heuristic result of the previous query
       // may have been an alias, so remove formatting if necessary.
@@ -587,7 +644,7 @@ class UrlbarView {
 
       // Align the panel with the parent toolbar.
       this.panel.style.top = px(
-        getBoundsWithoutFlushing(this.input.textbox.closest("toolbar")).bottom
+        getBoundsWithoutFlushing(this.input._toolbar).bottom
       );
 
       this._mainContainer.style.maxWidth = px(width);
@@ -1464,17 +1521,49 @@ class UrlbarView {
     // happen when using special OS resize functions like Win+Arrow.
     this.close();
   }
-
-  _on_TabSelect() {
-    // A TabSelect doesn't always change urlbar focus, so we must try to reopen
-    // here too, not just on focus.
-    if (this.maybeReopen()) {
-      return;
-    }
-    // The input may retain focus when switching tabs in which case we
-    // need to close the view explicitly.
-    this.close();
-  }
 }
 
 UrlbarView.removeStaleRowsTimeout = DEFAULT_REMOVE_STALE_ROWS_TIMEOUT;
+
+/**
+ * Implements a QueryContext cache, working as a circular buffer, when a new
+ * entry is added at the top, the last item is remove from the bottom.
+ */
+class QueryContextCache {
+  /**
+   * Constructor.
+   * @param {number} size The number of entries to keep in the cache.
+   */
+  constructor(size) {
+    this.size = size;
+    this._cache = [];
+  }
+
+  /**
+   * Adds a new entry to the cache.
+   * @param {UrlbarQueryContext} queryContext The UrlbarQueryContext to add.
+   * @note QueryContexts without a searchString or without results are ignored
+   *       and not added.
+   */
+  put(queryContext) {
+    let searchString = queryContext.searchString;
+    if (!searchString || !queryContext.results.length) {
+      return;
+    }
+
+    let index = this._cache.findIndex(e => e.searchString == searchString);
+    if (index != -1) {
+      if (this._cache[index] == queryContext) {
+        return;
+      }
+      this._cache.splice(index, 1);
+    }
+    if (this._cache.unshift(queryContext) > this.size) {
+      this._cache.length = this.size;
+    }
+  }
+
+  get(searchString) {
+    return this._cache.find(e => e.searchString == searchString);
+  }
+}

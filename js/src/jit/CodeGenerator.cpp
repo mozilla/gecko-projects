@@ -4211,12 +4211,25 @@ void CodeGenerator::visitHomeObjectSuperBase(LHomeObjectSuperBase* lir) {
   Register homeObject = ToRegister(lir->homeObject());
   Register output = ToRegister(lir->output());
 
-  using Fn = JSObject* (*)(JSContext*, HandleObject);
-  OutOfLineCode* ool = oolCallVM<Fn, HomeObjectSuperBase>(
-      lir, ArgList(homeObject), StoreRegisterTo(output));
+  using Fn = bool (*)(JSContext*);
+  OutOfLineCode* ool =
+      oolCallVM<Fn, ThrowHomeObjectNotObject>(lir, ArgList(), StoreNothing());
 
   masm.loadObjProto(homeObject, output);
-  masm.branchPtr(Assembler::BelowOrEqual, output, ImmWord(1), ool->entry());
+
+#ifdef DEBUG
+  // We won't encounter a lazy proto, because the prototype is guaranteed to
+  // either be a JSFunction or a PlainObject, and only proxy objects can have a
+  // lazy proto.
+  MOZ_ASSERT(uintptr_t(TaggedProto::LazyProto) == 1);
+
+  Label proxyCheckDone;
+  masm.branchPtr(Assembler::NotEqual, output, ImmWord(1), &proxyCheckDone);
+  masm.assumeUnreachable("Unexpected lazy proto in JSOp::SuperBase");
+  masm.bind(&proxyCheckDone);
+#endif
+
+  masm.branchPtr(Assembler::Equal, output, ImmWord(0), ool->entry());
   masm.bind(ool->rejoin());
 }
 
@@ -5020,6 +5033,23 @@ void CodeGenerator::visitCallGeneric(LCallGeneric* call) {
                             calleereg, objreg, &invoke);
   }
 
+  // Use the slow path if CreateThis was unable to create the |this| object.
+  if (call->mir()->needsThisCheck()) {
+    MOZ_ASSERT(call->mir()->isConstructing());
+    Address thisAddr(masm.getStackPointer(), unusedStack);
+    masm.branchTestNull(Assembler::Equal, thisAddr, &invoke);
+  } else {
+#ifdef DEBUG
+    if (call->mir()->isConstructing()) {
+      Address thisAddr(masm.getStackPointer(), unusedStack);
+      Label ok;
+      masm.branchTestNull(Assembler::NotEqual, thisAddr, &ok);
+      masm.assumeUnreachable("Unexpected null this-value");
+      masm.bind(&ok);
+    }
+#endif
+  }
+
   // Load jitCodeRaw for callee if exists. See visitCallKnown.
   if (call->mir()->needsArgCheck()) {
     masm.branchIfFunctionHasNoJitEntry(calleereg, call->mir()->isConstructing(),
@@ -5129,6 +5159,8 @@ void CodeGenerator::visitCallKnown(LCallKnown* call) {
   }
 
   MOZ_ASSERT_IF(target->isClassConstructor(), call->isConstructing());
+
+  MOZ_ASSERT(!call->mir()->needsThisCheck());
 
   if (call->mir()->maybeCrossRealm()) {
     masm.switchToObjectRealm(calleereg, objreg);
@@ -6968,7 +7000,7 @@ void CodeGenerator::visitCreateThis(LCreateThis* lir) {
 
   using Fn = bool (*)(JSContext * cx, HandleObject callee,
                       HandleObject newTarget, MutableHandleValue rval);
-  callVM<Fn, jit::CreateThis>(lir);
+  callVM<Fn, jit::CreateThisFromIon>(lir);
 }
 
 void CodeGenerator::visitCreateThisWithProto(LCreateThisWithProto* lir) {
@@ -10240,32 +10272,6 @@ void CodeGenerator::visitRest(LRest* lir) {
            false, ToRegister(lir->output()));
 }
 
-// A stackmap creation helper.  Create a stackmap from a vector of booleans.
-// The caller owns the resulting stackmap.
-
-typedef Vector<bool, 128, SystemAllocPolicy> StackMapBoolVector;
-
-static wasm::StackMap* ConvertStackMapBoolVectorToStackMap(
-    const StackMapBoolVector& vec, bool hasRefs) {
-  wasm::StackMap* stackMap = wasm::StackMap::create(vec.length());
-  if (!stackMap) {
-    return nullptr;
-  }
-
-  bool hasRefsObserved = false;
-  size_t i = 0;
-  for (bool b : vec) {
-    if (b) {
-      stackMap->setBit(i);
-      hasRefsObserved = true;
-    }
-    i++;
-  }
-  MOZ_RELEASE_ASSERT(hasRefs == hasRefsObserved);
-
-  return stackMap;
-}
-
 // Create a stackmap from the given safepoint, with the structure:
 //
 //   <reg dump area, if trap>
@@ -10308,7 +10314,7 @@ static bool CreateStackMapFromLSafepoint(LSafepoint& safepoint,
   // contain 128 or fewer words, heap allocation is avoided in the majority of
   // cases.  vec[0] is for the lowest address in the map, vec[N-1] is for the
   // highest address in the map.
-  StackMapBoolVector vec;
+  wasm::StackMapBoolVector vec;
 
   // Keep track of whether we've actually seen any refs.
   bool hasRefs = false;
@@ -10385,7 +10391,8 @@ static bool CreateStackMapFromLSafepoint(LSafepoint& safepoint,
 
   // Convert vec into a wasm::StackMap.
   MOZ_ASSERT(vec.length() * sizeof(void*) == nTotalBytes);
-  wasm::StackMap* stackMap = ConvertStackMapBoolVectorToStackMap(vec, hasRefs);
+  wasm::StackMap* stackMap =
+      wasm::ConvertStackMapBoolVectorToStackMap(vec, hasRefs);
   if (!stackMap) {
     return false;
   }
@@ -10398,129 +10405,6 @@ static bool CreateStackMapFromLSafepoint(LSafepoint& safepoint,
   // Frame itself as a pointer.
   stackMap->setFrameOffsetFromTop((nInboundStackArgBytes + nFrameBytes) /
                                   sizeof(void*));
-#ifdef DEBUG
-  for (uint32_t i = 0; i < nFrameBytes / sizeof(void*); i++) {
-    MOZ_ASSERT(stackMap->getBit(stackMap->numMappedWords -
-                                stackMap->frameOffsetFromTop + i) == 0);
-  }
-#endif
-
-  *result = stackMap;
-  return true;
-}
-
-// Generate a stackmap for a function's stack-overflow-at-entry trap, with
-// the structure:
-//
-//    <reg dump area>
-//    |       ++ <space reserved before trap, if any>
-//    |               ++ <space for Frame>
-//    |                       ++ <inbound arg area>
-//    |                                           |
-//    Lowest Addr                                 Highest Addr
-//
-// The caller owns the resulting stackmap.  This assumes a grow-down stack.
-//
-// For non-debug builds, if the stackmap would contain no pointers, no
-// stackmap is created, and nullptr is returned.  For a debug build, a
-// stackmap is always created and returned.
-//
-// The "space reserved before trap" is the space reserved by
-// MacroAssembler::wasmReserveStackChecked, in the case where the frame is
-// "small", as determined by that function.
-static bool CreateStackMapForFunctionEntryTrap(
-    const wasm::ArgTypeVector& argTypes, const MachineState& trapExitLayout,
-    size_t trapExitLayoutWords, size_t nBytesReservedBeforeTrap,
-    size_t nInboundStackArgBytes, wasm::StackMap** result) {
-  // Ensure this is defined on all return paths.
-  *result = nullptr;
-
-  // The size of the wasm::Frame itself.
-  const size_t nFrameBytes = sizeof(wasm::Frame);
-
-  // The size of the register dump (trap) area.
-  const size_t trapExitLayoutBytes = trapExitLayoutWords * sizeof(void*);
-
-  // This is the total number of bytes covered by the map.
-  const DebugOnly<size_t> nTotalBytes = trapExitLayoutBytes +
-                                        nBytesReservedBeforeTrap + nFrameBytes +
-                                        nInboundStackArgBytes;
-
-  // Create the stackmap initially in this vector.  Since most frames will
-  // contain 128 or fewer words, heap allocation is avoided in the majority of
-  // cases.  vec[0] is for the lowest address in the map, vec[N-1] is for the
-  // highest address in the map.
-  StackMapBoolVector vec;
-
-  // Keep track of whether we've actually seen any refs.
-  bool hasRefs = false;
-
-  // REG DUMP AREA
-  wasm::ExitStubMapVector trapExitExtras;
-  if (!GenerateStackmapEntriesForTrapExit(
-          argTypes, trapExitLayout, trapExitLayoutWords, &trapExitExtras)) {
-    return false;
-  }
-  MOZ_ASSERT(trapExitExtras.length() == trapExitLayoutWords);
-
-  if (!vec.appendN(false, trapExitLayoutWords)) {
-    return false;
-  }
-  for (size_t i = 0; i < trapExitLayoutWords; i++) {
-    vec[i] = trapExitExtras[i];
-    hasRefs |= vec[i];
-  }
-
-  // SPACE RESERVED BEFORE TRAP
-  MOZ_ASSERT(nBytesReservedBeforeTrap % sizeof(void*) == 0);
-  if (!vec.appendN(false, nBytesReservedBeforeTrap / sizeof(void*))) {
-    return false;
-  }
-
-  // SPACE FOR FRAME
-  if (!vec.appendN(false, nFrameBytes / sizeof(void*))) {
-    return false;
-  }
-
-  // INBOUND ARG AREA
-  MOZ_ASSERT(nInboundStackArgBytes % sizeof(void*) == 0);
-  const size_t numStackArgWords = nInboundStackArgBytes / sizeof(void*);
-
-  const size_t wordsSoFar = vec.length();
-  if (!vec.appendN(false, numStackArgWords)) {
-    return false;
-  }
-
-  for (ABIArgIter i(argTypes); !i.done(); i++) {
-    ABIArg argLoc = *i;
-    if (argLoc.kind() == ABIArg::Stack &&
-        argTypes[i.index()] == MIRType::RefOrNull) {
-      uint32_t offset = argLoc.offsetFromArgBase();
-      MOZ_ASSERT(offset < nInboundStackArgBytes);
-      MOZ_ASSERT(offset % sizeof(void*) == 0);
-      vec[wordsSoFar + offset / sizeof(void*)] = true;
-      hasRefs = true;
-    }
-  }
-
-#ifndef DEBUG
-  // We saw no references, and this is a non-debug build, so don't bother
-  // building the stackmap.
-  if (!hasRefs) {
-    return true;
-  }
-#endif
-
-  // Convert vec into a wasm::StackMap.
-  MOZ_ASSERT(vec.length() * sizeof(void*) == nTotalBytes);
-  wasm::StackMap* stackMap = ConvertStackMapBoolVectorToStackMap(vec, hasRefs);
-  if (!stackMap) {
-    return false;
-  }
-  stackMap->setExitStubWords(trapExitLayoutWords);
-
-  stackMap->setFrameOffsetFromTop(nFrameBytes / sizeof(void*) +
-                                  numStackArgWords);
 #ifdef DEBUG
   for (uint32_t i = 0; i < nFrameBytes / sizeof(void*); i++) {
     MOZ_ASSERT(stackMap->getBit(stackMap->numMappedWords -

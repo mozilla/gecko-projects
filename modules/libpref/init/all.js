@@ -200,10 +200,10 @@ pref("security.remote_settings.intermediates.downloads_per_poll", 100);
 pref("security.remote_settings.intermediates.parallel_downloads", 8);
 pref("security.remote_settings.intermediates.signer", "onecrl.content-signature.mozilla.org");
 
-#if defined(RELEASE_OR_BETA) || defined(MOZ_WIDGET_ANDROID)
-  pref("security.remote_settings.crlite_filters.enabled", false);
-#else
+#if defined(EARLY_BETA_OR_EARLIER) && !defined(MOZ_WIDGET_ANDROID)
   pref("security.remote_settings.crlite_filters.enabled", true);
+#else
+  pref("security.remote_settings.crlite_filters.enabled", false);
 #endif
 pref("security.remote_settings.crlite_filters.bucket", "security-state");
 pref("security.remote_settings.crlite_filters.collection", "cert-revocations");
@@ -569,13 +569,6 @@ pref("media.video-queue.send-to-compositor-size", 9999);
 // "verbose", "normal" and "" (log disabled).
 pref("media.cubeb.logging_level", "");
 
-// Cubeb sandbox (remoting) control
-#if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
-  pref("media.audioipc.pool_size", 1);
-  // 64 * 4 kB stack per pool thread.
-  pref("media.audioipc.stack_size", 262144);
-#endif
-
 #if defined(XP_MACOSX)
   pref("media.cubeb.backend", "audiounit-rust");
 #endif
@@ -860,6 +853,9 @@ pref("devtools.recordreplay.cloudServer", "");
 // profiler.firefox.com, or in tests. This isn't exposed directly to the user.
 pref("devtools.performance.recording.ui-base-url", "https://profiler.firefox.com");
 
+// The preset to use for the recording settings. If set to "custom" then the pref
+// values below will be used.
+pref("devtools.performance.recording.preset", "web-developer");
 // Profiler buffer size. It is the maximum number of 8-bytes entries in the
 // profiler's buffer. 10000000 is ~80mb.
 pref("devtools.performance.recording.entries", 10000000);
@@ -1207,7 +1203,7 @@ pref("javascript.options.mem.gc_max_empty_chunk_count", 30);
 
 pref("javascript.options.showInConsole", false);
 
-#if defined(NIGHTLY_BUILD)
+#ifdef EARLY_BETA_OR_EARLIER
 pref("javascript.options.shared_memory", true);
 #else
 pref("javascript.options.shared_memory", false);
@@ -1956,8 +1952,6 @@ pref("network.http.spdy.bug1563538", true);
 pref("network.http.spdy.bug1563695", true);
 pref("network.http.spdy.bug1556491", true);
 
-pref("permissions.default.image",           1); // 1-Accept, 2-Deny, 3-dontAcceptForeign
-
 pref("network.proxy.type",                  5);
 pref("network.proxy.ftp",                   "");
 pref("network.proxy.ftp_port",              0);
@@ -2276,24 +2270,6 @@ pref("security.directory",              "");
 // security-sensitive dialogs should delay button enabling. In milliseconds.
 pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
-
-#if defined(DEBUG)
-  // For testing purposes only: Flipping this pref to true allows
-  // to skip the assertion that every about page ships with a CSP.
-  pref("csp.skip_about_page_has_csp_assert", false);
-  // For testing purposes only: Flipping this pref to true allows
-  // to skip the allowlist for about: pages and do not ship with a
-  // CSP and NS_ASSERT right away.
-  pref("csp.skip_about_page_csp_allowlist_and_assert", false);
-  // For testing purposes only: Flipping this pref to true allows
-  // to skip the assertion that HTML fragments (e.g. innerHTML) can
-  // not be used within chrome code or about: pages.
-  pref("domsecurity.skip_html_fragment_assertion", false);
-  // For testing purposes only; Flipping this pref to true allows
-  // to skip the assertion that remote scripts can not be loaded
-  // in system privileged contexts.
-  pref("domsecurity.skip_remote_script_assertion_in_system_priv_context", false);
-#endif
 
 #ifdef EARLY_BETA_OR_EARLIER
   // Disallow web documents loaded with the SystemPrincipal

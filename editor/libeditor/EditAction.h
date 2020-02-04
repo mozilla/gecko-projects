@@ -170,12 +170,6 @@ enum class EditAction {
   // eDeleteNode indicates to remove a node form the tree.
   eRemoveNode,
 
-  // eSplitNode indicates to split a node.
-  eSplitNode,
-
-  // eJoinNodes indicates to join 2 nodes.
-  eJoinNodes,
-
   // eInsertBlockElement indicates to insert a block-level element like <div>,
   // <pre>, <li>, <dd> etc.
   eInsertBlockElement,
@@ -311,10 +305,6 @@ enum class EditAction {
 
   // eRemoveOverrideStyleSheet indicates to remove override style sheet.
   eRemoveOverrideStyleSheet,
-
-  // eReplaceOverrideStyleSheet indicates to replace added override style
-  // sheet with new override style sheet.
-  eReplaceOverrideStyleSheet,
 
   // eEnableStyleSheet indicates to apply a style sheet.
   eEnableStyleSheet,

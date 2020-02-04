@@ -105,7 +105,7 @@ registerCleanupFunction(() => {
 // This is an IP that is local, so we don't crash when connecting to it,
 // but also connecting to it fails, so we attempt to retry with regular DNS.
 const BAD_IP = (() => {
-  if (mozinfo.os == "linux") {
+  if (mozinfo.os == "linux" || mozinfo.os == "android") {
     return "127.9.9.9";
   }
   return "0.0.0.0";
@@ -1375,5 +1375,28 @@ add_task(async function test_vpnDetection() {
     networkLinkService,
     "network:link-status-changed",
     "changed"
+  );
+});
+
+// confirmationNS set without confirmed NS yet
+// checks that we properly fall back to DNS is confirmation is not ready yet
+add_task(async function test_resolve_not_confirmed() {
+  dns.clearCache(true);
+  Services.prefs.setIntPref("network.trr.mode", 2); // TRR-first
+  Services.prefs.clearUserPref("network.trr.useGET");
+  Services.prefs.clearUserPref("network.trr.disable-ECS");
+  Services.prefs.setCharPref(
+    "network.trr.uri",
+    `https://foo.example.com:${h2Port}/doh?responseIP=1::ffff`
+  );
+  Services.prefs.setCharPref(
+    "network.trr.confirmationNS",
+    "confirm.example.com"
+  );
+
+  let [, , inStatus] = await new DNSListener("example.org", undefined, false);
+  Assert.ok(
+    Components.isSuccessCode(inStatus),
+    `${inStatus} should be a success code`
   );
 });

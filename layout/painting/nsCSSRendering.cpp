@@ -117,7 +117,7 @@ struct InlineBackgroundData {
       // of frames that are to the left (if this is an LTR block) or right
       // (if it's RTL) of the current one.
       bool isRtlBlock = (mLineContainer->StyleVisibility()->mDirection ==
-                         NS_STYLE_DIRECTION_RTL);
+                         StyleDirection::Rtl);
       nscoord curOffset = mVertical ? aFrame->GetOffsetTo(mLineContainer).y
                                     : aFrame->GetOffsetTo(mLineContainer).x;
 
@@ -715,9 +715,7 @@ ImgDrawResult nsCSSRendering::CreateWebRenderCommandsForBorderWithStyleBorder(
     return ImgDrawResult::NOT_SUPPORTED;
   }
 
-  if (aStyleBorder.mBorderImageRepeatH == StyleBorderImageRepeat::Round ||
-      aStyleBorder.mBorderImageRepeatH == StyleBorderImageRepeat::Space ||
-      aStyleBorder.mBorderImageRepeatV == StyleBorderImageRepeat::Round ||
+  if (aStyleBorder.mBorderImageRepeatH == StyleBorderImageRepeat::Space ||
       aStyleBorder.mBorderImageRepeatV == StyleBorderImageRepeat::Space) {
     return ImgDrawResult::NOT_SUPPORTED;
   }

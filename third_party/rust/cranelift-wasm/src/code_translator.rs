@@ -28,7 +28,7 @@ use crate::state::{ControlStackFrame, ElseData, FuncTranslationState, ModuleTran
 use crate::translation_utils::{
     blocktype_params_results, ebb_with_params, f32_translation, f64_translation,
 };
-use crate::translation_utils::{FuncIndex, MemoryIndex, SignatureIndex, TableIndex};
+use crate::translation_utils::{FuncIndex, GlobalIndex, MemoryIndex, SignatureIndex, TableIndex};
 use crate::wasm_unsupported;
 use core::{i32, u32};
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
@@ -38,6 +38,7 @@ use cranelift_codegen::ir::{
 };
 use cranelift_codegen::packed_option::ReservedValue;
 use cranelift_frontend::{FunctionBuilder, Variable};
+use std::vec::Vec;
 use wasmparser::{MemoryImmediate, Operator};
 
 // Clippy warns about "flags: _" but its important to document that the flags field is ignored
@@ -94,6 +95,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                     let flags = ir::MemFlags::trusted();
                     builder.ins().load(ty, flags, addr, offset)
                 }
+                GlobalVariable::Custom => environ.translate_custom_global_get(
+                    builder.cursor(),
+                    GlobalIndex::from_u32(*global_index),
+                )?,
             };
             state.push1(val);
         }
@@ -107,6 +112,14 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                     debug_assert_eq!(ty, builder.func.dfg.value_type(val));
                     builder.ins().store(flags, val, addr, offset);
                 }
+                GlobalVariable::Custom => {
+                    let val = state.pop1();
+                    environ.translate_custom_global_set(
+                        builder.cursor(),
+                        GlobalIndex::from_u32(*global_index),
+                        val,
+                    )?;
+                }
             }
         }
         /********************************* Stack misc ***************************************
@@ -116,6 +129,13 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             state.pop1();
         }
         Operator::Select => {
+            let (arg1, arg2, cond) = state.pop3();
+            state.push1(builder.ins().select(cond, arg1, arg2));
+        }
+        Operator::TypedSelect { ty: _ } => {
+            // We ignore the explicit type parameter as it is only needed for
+            // validation, which we require to have been performed before
+            // translation.
             let (arg1, arg2, cond) = state.pop3();
             state.push1(builder.ins().select(cond, arg1, arg2));
         }
@@ -439,7 +459,9 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             };
             {
                 let return_args = state.peekn_mut(return_count);
-                let return_types = &builder.func.signature.return_types();
+                let return_types = wasm_param_types(&builder.func.signature.returns, |i| {
+                    environ.is_wasm_return(&builder.func.signature, i)
+                });
                 bitcast_arguments(return_args, &return_types, builder);
                 match environ.return_mode() {
                     ReturnMode::NormalReturns => builder.ins().return_(return_args),
@@ -463,7 +485,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let callee_signature =
                 &builder.func.dfg.signatures[builder.func.dfg.ext_funcs[fref].signature];
             let args = state.peekn_mut(num_args);
-            bitcast_arguments(args, &callee_signature.param_types(), builder);
+            let types = wasm_param_types(&callee_signature.params, |i| {
+                environ.is_wasm_parameter(&callee_signature, i)
+            });
+            bitcast_arguments(args, &types, builder);
 
             let call = environ.translate_call(
                 builder.cursor(),
@@ -492,7 +517,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // Bitcast any vector arguments to their default type, I8X16, before calling.
             let callee_signature = &builder.func.dfg.signatures[sigref];
             let args = state.peekn_mut(num_args);
-            bitcast_arguments(args, &callee_signature.param_types(), builder);
+            let types = wasm_param_types(&callee_signature.params, |i| {
+                environ.is_wasm_parameter(&callee_signature, i)
+            });
+            bitcast_arguments(args, &types, builder);
 
             let call = environ.translate_call_indirect(
                 builder.cursor(),
@@ -947,17 +975,15 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         Operator::F32Le | Operator::F64Le => {
             translate_fcmp(FloatCC::LessThanOrEqual, builder, state)
         }
-        Operator::TypedSelect { .. } => {
-            return Err(wasm_unsupported!("proposed typed select operator {:?}", op))
-        }
         Operator::RefNull => state.push1(builder.ins().null(environ.reference_type())),
         Operator::RefIsNull => {
             let arg = state.pop1();
             let val = builder.ins().is_null(arg);
-            state.push1(val);
+            let val_int = builder.ins().bint(I32, val);
+            state.push1(val_int);
         }
-        Operator::RefFunc { .. } => {
-            return Err(wasm_unsupported!("proposed ref operator {:?}", op))
+        Operator::RefFunc { function_index } => {
+            state.push1(environ.translate_ref_func(builder.cursor(), *function_index)?);
         }
         Operator::AtomicNotify { .. }
         | Operator::I32AtomicWait { .. }
@@ -1080,55 +1106,71 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 table,
             )?);
         }
-        Operator::TableCopy { .. } => {
-            // The WebAssembly MVP only supports one table and wasmparser will
-            // ensure that the table index specified is zero.
-            let dst_table_index = 0;
-            let dst_table = state.get_table(builder.func, dst_table_index, environ)?;
-            let src_table_index = 0;
-            let src_table = state.get_table(builder.func, src_table_index, environ)?;
+        Operator::TableGrow { table } => {
+            let delta = state.pop1();
+            let init_value = state.pop1();
+            state.push1(environ.translate_table_grow(
+                builder.cursor(),
+                *table,
+                delta,
+                init_value,
+            )?);
+        }
+        Operator::TableGet { table } => {
+            let index = state.pop1();
+            state.push1(environ.translate_table_get(builder.cursor(), *table, index)?);
+        }
+        Operator::TableSet { table } => {
+            let value = state.pop1();
+            let index = state.pop1();
+            environ.translate_table_set(builder.cursor(), *table, value, index)?;
+        }
+        Operator::TableCopy {
+            dst_table: dst_table_index,
+            src_table: src_table_index,
+        } => {
+            let dst_table = state.get_table(builder.func, *dst_table_index, environ)?;
+            let src_table = state.get_table(builder.func, *src_table_index, environ)?;
             let len = state.pop1();
             let src = state.pop1();
             let dest = state.pop1();
             environ.translate_table_copy(
                 builder.cursor(),
-                TableIndex::from_u32(dst_table_index),
+                TableIndex::from_u32(*dst_table_index),
                 dst_table,
-                TableIndex::from_u32(src_table_index),
+                TableIndex::from_u32(*src_table_index),
                 src_table,
                 dest,
                 src,
                 len,
             )?;
         }
-        Operator::TableInit { segment, table: _ } => {
-            // The WebAssembly MVP only supports one table and we assume it here.
-            let table_index = 0;
-            let table = state.get_table(builder.func, table_index, environ)?;
+        Operator::TableFill { table } => {
+            let len = state.pop1();
+            let val = state.pop1();
+            let dest = state.pop1();
+            environ.translate_table_fill(builder.cursor(), *table, dest, val, len)?;
+        }
+        Operator::TableInit {
+            segment,
+            table: table_index,
+        } => {
+            let table = state.get_table(builder.func, *table_index, environ)?;
             let len = state.pop1();
             let src = state.pop1();
             let dest = state.pop1();
             environ.translate_table_init(
                 builder.cursor(),
                 *segment,
-                TableIndex::from_u32(table_index),
+                TableIndex::from_u32(*table_index),
                 table,
                 dest,
                 src,
                 len,
             )?;
         }
-        Operator::TableFill { .. } => {
-            return Err(wasm_unsupported!("proposed table operator {:?}", op));
-        }
         Operator::ElemDrop { segment } => {
             environ.translate_elem_drop(builder.cursor(), *segment)?;
-        }
-        Operator::TableGet { .. } | Operator::TableSet { .. } | Operator::TableGrow { .. } => {
-            return Err(wasm_unsupported!(
-                "proposed reference types operator {:?}",
-                op
-            ));
         }
         Operator::V128Const { value } => {
             let data = value.bytes().to_vec().into();
@@ -1146,6 +1188,32 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         | Operator::I64x2Splat
         | Operator::F32x4Splat
         | Operator::F64x2Splat => {
+            let splatted = builder.ins().splat(type_of(op), state.pop1());
+            state.push1(splatted)
+        }
+        Operator::V8x16LoadSplat {
+            memarg: MemoryImmediate { flags: _, offset },
+        }
+        | Operator::V16x8LoadSplat {
+            memarg: MemoryImmediate { flags: _, offset },
+        }
+        | Operator::V32x4LoadSplat {
+            memarg: MemoryImmediate { flags: _, offset },
+        }
+        | Operator::V64x2LoadSplat {
+            memarg: MemoryImmediate { flags: _, offset },
+        } => {
+            // TODO: For spec compliance, this is initially implemented as a combination of `load +
+            // splat` but could be implemented eventually as a single instruction (`load_splat`).
+            // See https://github.com/bytecodealliance/cranelift/issues/1348.
+            translate_load(
+                *offset,
+                ir::Opcode::Load,
+                type_of(op).lane_type(),
+                builder,
+                state,
+                environ,
+            )?;
             let splatted = builder.ins().splat(type_of(op), state.pop1());
             state.push1(splatted)
         }
@@ -1401,10 +1469,6 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         | Operator::I32x4WidenLowI16x8U { .. }
         | Operator::I32x4WidenHighI16x8U { .. }
         | Operator::V8x16Swizzle
-        | Operator::V8x16LoadSplat { .. }
-        | Operator::V16x8LoadSplat { .. }
-        | Operator::V32x4LoadSplat { .. }
-        | Operator::V64x2LoadSplat { .. }
         | Operator::I16x8Load8x8S { .. }
         | Operator::I16x8Load8x8U { .. }
         | Operator::I32x4Load16x4S { .. }
@@ -1725,6 +1789,7 @@ fn type_of(operator: &Operator) -> Type {
 
         Operator::V8x16Shuffle { .. }
         | Operator::I8x16Splat
+        | Operator::V8x16LoadSplat { .. }
         | Operator::I8x16ExtractLaneS { .. }
         | Operator::I8x16ExtractLaneU { .. }
         | Operator::I8x16ReplaceLane { .. }
@@ -1753,6 +1818,7 @@ fn type_of(operator: &Operator) -> Type {
         | Operator::I8x16Mul => I8X16,
 
         Operator::I16x8Splat
+        | Operator::V16x8LoadSplat { .. }
         | Operator::I16x8ExtractLaneS { .. }
         | Operator::I16x8ExtractLaneU { .. }
         | Operator::I16x8ReplaceLane { .. }
@@ -1781,6 +1847,7 @@ fn type_of(operator: &Operator) -> Type {
         | Operator::I16x8Mul => I16X8,
 
         Operator::I32x4Splat
+        | Operator::V32x4LoadSplat { .. }
         | Operator::I32x4ExtractLane { .. }
         | Operator::I32x4ReplaceLane { .. }
         | Operator::I32x4Eq
@@ -1806,6 +1873,7 @@ fn type_of(operator: &Operator) -> Type {
         | Operator::F32x4ConvertI32x4U => I32X4,
 
         Operator::I64x2Splat
+        | Operator::V64x2LoadSplat { .. }
         | Operator::I64x2ExtractLane { .. }
         | Operator::I64x2ReplaceLane { .. }
         | Operator::I64x2Neg
@@ -1931,4 +1999,17 @@ pub fn bitcast_arguments(
             arguments[i] = optionally_bitcast_vector(arguments[i], *t, builder)
         }
     }
+}
+
+/// A helper to extract all the `Type` listings of each variable in `params`
+/// for only parameters the return true for `is_wasm`, typically paired with
+/// `is_wasm_return` or `is_wasm_parameter`.
+pub fn wasm_param_types(params: &[ir::AbiParam], is_wasm: impl Fn(usize) -> bool) -> Vec<Type> {
+    let mut ret = Vec::with_capacity(params.len());
+    for (i, param) in params.iter().enumerate() {
+        if is_wasm(i) {
+            ret.push(param.value_type);
+        }
+    }
+    return ret;
 }

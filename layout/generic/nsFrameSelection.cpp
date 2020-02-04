@@ -16,6 +16,7 @@
 #include "mozilla/EventStates.h"
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/PresShell.h"
+#include "mozilla/ScrollTypes.h"
 #include "mozilla/StaticPrefs_dom.h"
 
 #include "nsCOMPtr.h"
@@ -1259,9 +1260,13 @@ nsresult nsFrameSelection::TakeFocus(nsIContent* aNewFocus,
       // non-anchor/focus collapsed ranges.
       mDomSelections[index]->RemoveCollapsedRanges();
 
-      RefPtr<nsRange> newRange = new nsRange(aNewFocus);
-
-      newRange->CollapseTo(aNewFocus, aContentOffset);
+      ErrorResult error;
+      RefPtr<nsRange> newRange = nsRange::Create(
+          aNewFocus, aContentOffset, aNewFocus, aContentOffset, error);
+      if (NS_WARN_IF(error.Failed())) {
+        return error.StealNSResult();
+      }
+      MOZ_ASSERT(newRange);
       mDomSelections[index]->AddRangeAndSelectFramesAndNotifyListeners(
           *newRange, IgnoreErrors());
       mBatching = batching;
@@ -1765,7 +1770,7 @@ nsresult nsFrameSelection::PageMove(bool aForward, bool aExtend,
                                 ? ScrollMode::Instant
                                 : ScrollMode::Smooth;
     scrollableFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
-                              nsIScrollableFrame::PAGES, scrollMode);
+                              ScrollUnit::PAGES, scrollMode);
   }
 
   // Finally, scroll selection into view if requested.
@@ -2688,14 +2693,14 @@ nsresult nsFrameSelection::CreateAndAddRange(nsINode* aContainer,
     return NS_ERROR_NULL_POINTER;
   }
 
-  RefPtr<nsRange> range = new nsRange(aContainer);
-
   // Set range around child at given offset
-  nsresult rv =
-      range->SetStartAndEnd(aContainer, aOffset, aContainer, aOffset + 1);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
+  ErrorResult error;
+  RefPtr<nsRange> range =
+      nsRange::Create(aContainer, aOffset, aContainer, aOffset + 1, error);
+  if (NS_WARN_IF(error.Failed())) {
+    return error.StealNSResult();
   }
+  MOZ_ASSERT(range);
 
   int8_t index = GetIndexFromSelectionType(SelectionType::eNormal);
   if (!mDomSelections[index]) return NS_ERROR_NULL_POINTER;

@@ -12,6 +12,7 @@
 
 use crate::Atom;
 use app_units::Au;
+use crate::computed_value_flags::*;
 use crate::custom_properties::CustomPropertiesMap;
 use crate::gecko_bindings::bindings;
 % for style_struct in data.style_structs:
@@ -39,7 +40,6 @@ use crate::gecko_bindings::structs::mozilla::PseudoStyleType;
 use crate::gecko::values::round_border_to_device_pixels;
 use crate::logical_geometry::WritingMode;
 use crate::media_queries::Device;
-use crate::properties::computed_value_flags::*;
 use crate::properties::longhands;
 use crate::rule_tree::StrongRuleNode;
 use crate::selector_parser::PseudoElement;
@@ -53,7 +53,6 @@ use crate::values::computed::BorderStyle;
 use crate::values::computed::font::FontSize;
 use crate::values::generics::column::ColumnCount;
 use crate::values::generics::image::ImageLayer;
-use crate::values::generics::transform::TransformStyle;
 use crate::values::generics::url::UrlOrNone;
 
 
@@ -957,48 +956,16 @@ fn static_assert() {
 
 <% skip_position_longhands = " ".join(x.ident for x in SIDES) %>
 <%self:impl_trait style_struct_name="Position"
-                  skip_longhands="${skip_position_longhands}
-                                  align-content justify-content align-self
-                                  justify-self align-items justify-items
-                                  grid-auto-flow">
+                  skip_longhands="${skip_position_longhands} grid-auto-flow">
     % for side in SIDES:
     <% impl_split_style_coord(side.ident, "mOffset", side.index) %>
     % endfor
-
-    % for kind in ["align", "justify"]:
-    ${impl_simple_type_with_conversion(kind + "_content")}
-    ${impl_simple_type_with_conversion(kind + "_self")}
-    % endfor
-    ${impl_simple_type_with_conversion("align_items")}
-
-    pub fn set_justify_items(&mut self, v: longhands::justify_items::computed_value::T) {
-        self.gecko.mSpecifiedJustifyItems = v.specified.into();
-        self.set_computed_justify_items(v.computed);
-    }
-
+    ${impl_simple_type_with_conversion("grid_auto_flow")}
     pub fn set_computed_justify_items(&mut self, v: values::specified::JustifyItems) {
         debug_assert_ne!(v.0, crate::values::specified::align::AlignFlags::LEGACY);
-        self.gecko.mJustifyItems = v.into();
+        self.gecko.mJustifyItems.computed = v;
     }
 
-    pub fn reset_justify_items(&mut self, reset_style: &Self) {
-        self.gecko.mJustifyItems = reset_style.gecko.mJustifyItems;
-        self.gecko.mSpecifiedJustifyItems = reset_style.gecko.mSpecifiedJustifyItems;
-    }
-
-    pub fn copy_justify_items_from(&mut self, other: &Self) {
-        self.gecko.mJustifyItems = other.gecko.mJustifyItems;
-        self.gecko.mSpecifiedJustifyItems = other.gecko.mJustifyItems;
-    }
-
-    pub fn clone_justify_items(&self) -> longhands::justify_items::computed_value::T {
-        longhands::justify_items::computed_value::T {
-            computed: self.gecko.mJustifyItems.into(),
-            specified: self.gecko.mSpecifiedJustifyItems.into(),
-        }
-    }
-
-    ${impl_simple_type_with_conversion("grid_auto_flow")}
 </%self:impl_trait>
 
 <% skip_outline_longhands = " ".join("outline-style outline-width".split() +
@@ -1505,7 +1472,7 @@ fn static_assert() {
                           animation-iteration-count animation-timing-function
                           clear transition-duration transition-delay
                           transition-timing-function transition-property
-                          transform-style shape-outside -webkit-line-clamp""" %>
+                          shape-outside -webkit-line-clamp""" %>
 <%self:impl_trait style_struct_name="Box" skip_longhands="${skip_box_longhands}">
     #[inline]
     pub fn set_display(&mut self, v: longhands::display::computed_value::T) {
@@ -1661,25 +1628,6 @@ fn static_assert() {
     pub fn reset_transition_property(&mut self, other: &Self) {
         self.copy_transition_property_from(other)
     }
-
-    // Hand-written because the Mako helpers transform `Preserve3d` into `PRESERVE3D`.
-    pub fn set_transform_style(&mut self, v: TransformStyle) {
-        self.gecko.mTransformStyle = match v {
-            TransformStyle::Flat => structs::NS_STYLE_TRANSFORM_STYLE_FLAT as u8,
-            TransformStyle::Preserve3d => structs::NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D as u8,
-        };
-    }
-
-    // Hand-written because the Mako helpers transform `Preserve3d` into `PRESERVE3D`.
-    pub fn clone_transform_style(&self) -> TransformStyle {
-        match self.gecko.mTransformStyle as u32 {
-            structs::NS_STYLE_TRANSFORM_STYLE_FLAT => TransformStyle::Flat,
-            structs::NS_STYLE_TRANSFORM_STYLE_PRESERVE_3D => TransformStyle::Preserve3d,
-            _ => panic!("illegal transform style"),
-        }
-    }
-
-    ${impl_simple_copy('transform_style', 'mTransformStyle')}
 
     ${impl_transition_count('property', 'Property')}
 

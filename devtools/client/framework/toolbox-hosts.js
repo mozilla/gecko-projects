@@ -28,12 +28,14 @@ loader.lazyRequireGetter(
  * resizing the toolbox and panel layout. */
 const MIN_PAGE_SIZE = 25;
 
+const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+
 /**
  * A toolbox host represents an object that contains a toolbox (e.g. the
  * sidebar or a separate window). Any host object should implement the
  * following functions:
  *
- * create() - create the UI and emit a 'ready' event when the UI is ready to use
+ * create() - create the UI
  * destroy() - destroy the host's UI
  */
 
@@ -81,8 +83,6 @@ BottomHost.prototype = {
     this._browserContainer.appendChild(this.frame);
 
     focusTab(this.hostTab);
-    this.emit("ready", this.frame);
-
     return this.frame;
   },
 
@@ -168,8 +168,6 @@ class SidebarHost {
     }
 
     focusTab(this.hostTab);
-    this.emit("ready", this.frame);
-
     return this.frame;
   }
 
@@ -346,8 +344,6 @@ BrowserToolboxHost.prototype = {
 
     this.doc.body.appendChild(this.frame);
 
-    this.emit("ready", this.frame);
-
     return this.frame;
   },
 
@@ -417,7 +413,15 @@ function createDevToolsFrame(doc, className) {
   frame.setAttribute("type", "content");
   frame.flex = 1; // Required to be able to shrink when the window shrinks
   frame.className = className;
-  frame.tooltip = "aHTMLTooltip";
+
+  const inXULDocument = doc.documentElement.namespaceURI === XUL_NS;
+  if (inXULDocument) {
+    // When the toolbox frame is loaded in a XUL document, tooltips rely on a
+    // special XUL <tooltip id="aHTMLTooltip"> element.
+    // This attribute should not be set when the frame is loaded in a HTML
+    // document (for instance: Browser Toolbox).
+    frame.tooltip = "aHTMLTooltip";
+  }
   return frame;
 }
 

@@ -135,6 +135,7 @@ treeherder:
         'UV': 'Update verify'
         'pipfu': 'pipfile update'
         'WR': 'WebRender standalone'
+        'Wgpu': 'WebGPU standalone'
         'Gd': 'Geckodriver'
         'cpp': 'C/C++ checks'
         'pedantic': 'pedantic checks'
@@ -254,24 +255,6 @@ release-promotion:
 scriptworker:
     # See additional configuration in taskcluster/taskgraph/util/scriptworker.py
     scope-prefix: 'project:releng'
-    worker-types:
-        'scriptworker-k8s/gecko-3-beetmover':
-            - 'project:releng:beetmover:bucket:release'
-            - 'project:releng:beetmover:bucket:nightly'
-            - 'project:releng:beetmover:bucket:partner'
-            - 'project:releng:beetmover:bucket:maven-production'
-        'scriptworker-k8s/gecko-1-beetmover':
-            - 'project:releng:beetmover:bucket:dep'
-            - 'project:releng:beetmover:bucket:dep-partner'
-            - 'project:releng:beetmover:bucket:maven-staging'
-        'scriptworker-k8s/gecko-3-balrog':
-            - 'project:releng:balrog:server:nightly'
-            - 'project:releng:balrog:server:aurora'
-            - 'project:releng:balrog:server:beta'
-            - 'project:releng:balrog:server:release'
-            - 'project:releng:balrog:server:esr'
-        'scriptworker-k8s/gecko-1-balrog':
-            - 'project:releng:balrog:server:dep'
 
 partner-urls:
     release-partner-repack:
@@ -310,6 +293,8 @@ task-priority:
         'mozilla-inbound': 'low'
         'default': 'very-low'
 
+taskgraph: {}
+
 workers:
     aliases:
         b-linux.*:
@@ -327,6 +312,32 @@ workers:
             implementation: docker-worker
             os: linux
             worker-type: '{alias}'
+        balrog:
+            provisioner: scriptworker-k8s
+            implementation: balrog
+            os: scriptworker
+            worker-type:
+                by-release-level:
+                    production: gecko-3-balrog
+                    staging: gecko-1-balrog
+        bouncer:
+            provisioner: scriptworker-k8s
+            # Note that this implementation doesn't correspond with an
+            # payload_builder, there are several `bouncer-*` implemenations.
+            implementation: bouncer
+            os: scriptworker
+            worker-type:
+                by-release-level:
+                    production: gecko-3-bouncer
+                    staging: gecko-1-bouncer
+        beetmover:
+            provisioner: scriptworker-k8s
+            implementation: beetmover
+            os: scriptworker
+            worker-type:
+                by-release-level:
+                    production: gecko-3-beetmover
+                    staging: gecko-1-beetmover
         linux-depsigning:
             provisioner: scriptworker-k8s
             implementation: scriptworker-signing
@@ -355,6 +366,14 @@ workers:
             implementation: scriptworker-signing
             os: macosx
             worker-type: signing-mac-aki
+        tree:
+            provisioner: scriptworker-k8s
+            implementation: treescript
+            os: scriptworker
+            worker-type:
+                by-release-level:
+                    production: gecko-3-tree
+                    staging: gecko-1-tree
         t-ap.*:
             provisioner: proj-autophone
             implementation: script-engine-autophone

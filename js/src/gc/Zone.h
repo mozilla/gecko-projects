@@ -276,7 +276,7 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   void changeGCState(GCState prev, GCState next) {
     MOZ_ASSERT(RuntimeHeapIsBusy());
     MOZ_ASSERT(gcState() == prev);
-    MOZ_ASSERT_IF(next != NoGC, canCollect());
+    MOZ_ASSERT(canCollect());
     gcState_ = next;
   }
 
@@ -652,6 +652,7 @@ class Zone : public js::ZoneAllocator, public js::gc::GraphNodeBase<JS::Zone> {
   // Delete an empty compartment after its contents have been merged.
   void deleteEmptyCompartment(JS::Compartment* comp);
 
+  void clearRootsForShutdownGC();
   void finishRoots();
 
  private:

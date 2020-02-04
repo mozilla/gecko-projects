@@ -4,7 +4,7 @@
 //! function to Cranelift IR guided by a `FuncEnvironment` which provides information about the
 //! WebAssembly module and the runtime environment.
 
-use crate::code_translator::{bitcast_arguments, translate_operator};
+use crate::code_translator::{bitcast_arguments, translate_operator, wasm_param_types};
 use crate::environ::{FuncEnvironment, ReturnMode, WasmResult};
 use crate::state::{FuncTranslationState, ModuleTranslationState};
 use crate::translation_utils::get_vmctx_value_label;
@@ -196,6 +196,7 @@ fn declare_locals<FE: FuncEnvironment + ?Sized>(
             let constant_handle = builder.func.dfg.constants.insert([0; 16].to_vec().into());
             builder.ins().vconst(ir::types::I8X16, constant_handle)
         }
+        NullRef => builder.ins().null(environ.reference_type()),
         AnyRef => builder.ins().null(environ.reference_type()),
         AnyFunc => builder.ins().null(environ.reference_type()),
         ty => return Err(wasm_unsupported!("unsupported local type {:?}", ty)),
@@ -245,7 +246,9 @@ fn parse_function_body<FE: FuncEnvironment + ?Sized>(
         if !builder.is_unreachable() {
             match environ.return_mode() {
                 ReturnMode::NormalReturns => {
-                    let return_types = &builder.func.signature.return_types();
+                    let return_types = wasm_param_types(&builder.func.signature.returns, |i| {
+                        environ.is_wasm_return(&builder.func.signature, i)
+                    });
                     bitcast_arguments(&mut state.stack, &return_types, builder);
                     builder.ins().return_(&state.stack)
                 }

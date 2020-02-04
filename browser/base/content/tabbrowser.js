@@ -1057,11 +1057,10 @@
 
       this._appendStatusPanel();
 
-      if (
-        (oldBrowser.blockedPopups && !newBrowser.blockedPopups) ||
-        (!oldBrowser.blockedPopups && newBrowser.blockedPopups)
-      ) {
-        newBrowser.updateBlockedPopups();
+      let oldBrowserPopupsBlocked = oldBrowser.popupBlocker.getBlockedPopupCount();
+      let newBrowserPopupsBlocked = newBrowser.popupBlocker.getBlockedPopupCount();
+      if (oldBrowserPopupsBlocked != newBrowserPopupsBlocked) {
+        newBrowser.popupBlocker.updateBlockedPopupsUI();
       }
 
       // Update the URL bar.
@@ -1225,6 +1224,7 @@
         if (!gMultiProcessBrowser) {
           this._adjustFocusBeforeTabSwitch(oldTab, newTab);
           this._adjustFocusAfterTabSwitch(newTab);
+          gURLBar.afterTabSwitchFocusChange();
         }
       }
 
@@ -2640,15 +2640,45 @@
         userContextId = openerTab.getAttribute("usercontextid") || 0;
       }
 
-      this._setTabAttributes(t, {
-        animate,
-        noInitialLabel,
-        aURI,
-        userContextId,
-        skipBackgroundNotify,
-        pinned,
-        skipAnimation,
-      });
+      if (!noInitialLabel) {
+        if (isBlankPageURL(aURI)) {
+          t.setAttribute("label", this.tabContainer.emptyTabTitle);
+        } else {
+          // Set URL as label so that the tab isn't empty initially.
+          this.setInitialTabTitle(t, aURI, { beforeTabOpen: true });
+        }
+      }
+
+      if (userContextId) {
+        t.setAttribute("usercontextid", userContextId);
+        ContextualIdentityService.setTabStyle(t);
+      }
+
+      if (skipBackgroundNotify) {
+        t.setAttribute("skipbackgroundnotify", true);
+      }
+
+      if (pinned) {
+        t.setAttribute("pinned", "true");
+      }
+
+      t.classList.add("tabbrowser-tab");
+
+      this.tabContainer._unlockTabSizing();
+
+      if (!animate) {
+        t.setAttribute("fadein", "true");
+
+        // Call _handleNewTab asynchronously as it needs to know if the
+        // new tab is selected.
+        setTimeout(
+          function(tabContainer) {
+            tabContainer._handleNewTab(t);
+          },
+          0,
+          this.tabContainer
+        );
+      }
 
       let usingPreloadedContent = false;
       let b;
@@ -3109,59 +3139,6 @@
       return reallyClose;
     },
 
-    _setTabAttributes(
-      tab,
-      {
-        animate,
-        noInitialLabel,
-        aURI,
-        userContextId,
-        skipBackgroundNotify,
-        pinned,
-        skipAnimation,
-      } = {}
-    ) {
-      if (!noInitialLabel) {
-        if (isBlankPageURL(aURI)) {
-          tab.setAttribute("label", this.tabContainer.emptyTabTitle);
-        } else {
-          // Set URL as label so that the tab isn't empty initially.
-          this.setInitialTabTitle(tab, aURI, { beforeTabOpen: true });
-        }
-      }
-
-      if (userContextId) {
-        tab.setAttribute("usercontextid", userContextId);
-        ContextualIdentityService.setTabStyle(tab);
-      }
-
-      if (skipBackgroundNotify) {
-        tab.setAttribute("skipbackgroundnotify", true);
-      }
-
-      if (pinned) {
-        tab.setAttribute("pinned", "true");
-      }
-
-      tab.classList.add("tabbrowser-tab");
-
-      this.tabContainer._unlockTabSizing();
-
-      if (!animate) {
-        tab.setAttribute("fadein", "true");
-
-        // Call _handleNewTab asynchronously as it needs to know if the
-        // new tab is selected.
-        setTimeout(
-          function(tabContainer) {
-            tabContainer._handleNewTab(tab);
-          },
-          0,
-          this.tabContainer
-        );
-      }
-    },
-
     /**
      * This determines where the tab should be inserted within the tabContainer
      */
@@ -3341,10 +3318,14 @@
       try {
         let tabsWithBeforeUnload = [];
         let lastToClose;
-        let aParams = { animate: true };
+        let aParams = { animate: true, prewarmed: true };
         for (let tab of tabs) {
           if (tab.selected) {
             lastToClose = tab;
+            let toBlurTo = this._findTabToBlurTo(lastToClose, tabs);
+            if (toBlurTo) {
+              this._getSwitcher().warmupTab(toBlurTo);
+            }
           } else if (this._hasBeforeUnload(tab)) {
             tabsWithBeforeUnload.push(tab);
           } else {
@@ -3374,7 +3355,13 @@
 
     removeTab(
       aTab,
-      { animate, byMouse, skipPermitUnload, closeWindowWithLastTab } = {}
+      {
+        animate,
+        byMouse,
+        skipPermitUnload,
+        closeWindowWithLastTab,
+        prewarmed,
+      } = {}
     ) {
       // Telemetry stopwatches may already be running if removeTab gets
       // called again for an already closing tab.
@@ -3408,6 +3395,7 @@
           closeWindowFastpath: true,
           skipPermitUnload,
           closeWindowWithLastTab,
+          prewarmed,
         })
       ) {
         TelemetryStopwatch.cancel("FX_TAB_CLOSE_TIME_ANIM_MS", aTab);
@@ -3481,6 +3469,7 @@
         closeWindowWithLastTab,
         closeWindowFastpath,
         skipPermitUnload,
+        prewarmed,
       } = {}
     ) {
       if (aTab.closing || this._windowIsClosing) {
@@ -3495,6 +3484,13 @@
         !aTab._pendingPermitUnload &&
         (!browser.isRemoteBrowser || this._hasBeforeUnload(aTab))
       ) {
+        if (!prewarmed) {
+          let blurTab = this._findTabToBlurTo(aTab);
+          if (blurTab) {
+            this.warmupTab(blurTab);
+          }
+        }
+
         TelemetryStopwatch.start("FX_TAB_CLOSE_PERMIT_UNLOAD_TIME_MS", aTab);
 
         // We need to block while calling permitUnload() because it
@@ -3816,14 +3812,24 @@
       }
     },
 
-    _findTabToBlurTo(aTab) {
+    /**
+     * Finds the tab that we will blur to if we blur aTab.
+     * @param   aTab
+     *          The tab we would blur
+     * @param   aExcludeTabs
+     *          Tabs to exclude from our search (i.e., because they are being
+     *          closed along with aTab)
+     */
+    _findTabToBlurTo(aTab, aExcludeTabs = []) {
       if (!aTab.selected) {
         return null;
       }
 
+      let excludeTabs = new Set(aExcludeTabs);
+
       // If this tab has a successor, it should be selectable, since
       // hiding or closing a tab removes that tab as a successor.
-      if (aTab.successor) {
+      if (aTab.successor && !excludeTabs.has(aTab.successor)) {
         return aTab.successor;
       }
 
@@ -3831,6 +3837,7 @@
         aTab.owner &&
         !aTab.owner.hidden &&
         !aTab.owner.closing &&
+        !excludeTabs.has(aTab.owner) &&
         Services.prefs.getBoolPref("browser.tabs.selectOwnerOnClose")
       ) {
         return aTab.owner;
@@ -3842,7 +3849,7 @@
       if (numTabs == 0 || (numTabs == 1 && remainingTabs[0] == aTab)) {
         remainingTabs = Array.prototype.filter.call(
           this.tabs,
-          tab => !tab.closing
+          tab => !tab.closing && !excludeTabs.has(tab)
         );
       }
 

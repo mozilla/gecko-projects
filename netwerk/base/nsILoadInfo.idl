@@ -512,15 +512,6 @@ interface nsILoadInfo : nsISupports
   [infallible] readonly attribute boolean loadErrorPage;
 
   /**
-   * Returns true if this is a non-subresource request that was triggered
-   * by docshell with the LOAD_CMD_RELOAD flag set.  Note, this is more
-   * specific than looking at the load flags which indicate whether to
-   * bypass the http cache.  The load flags can be set for other reasons,
-   * so they can't be used to infer this value.
-   */
-  [infallible] attribute boolean isDocshellReload;
-
-  /**
    * True if the load was initiated by a form request.
    * This is important to know to handle the CSP directive navigate-to.
    */
@@ -1131,6 +1122,16 @@ interface nsILoadInfo : nsISupports
     * load belongs had finished loading when the load was initiated.
     */
   [infallible] attribute boolean documentHasLoaded;
+
+  /**
+    * During a top-level document channel redirect from tracking to
+    * non-tracking resources, our anti-tracking heuristic, grants the storage
+    * access permission for a short amount of seconds (See
+    * privacy.restrict3rdpartystorage.expiration_redirect pref).
+    * We use this flag to remember this decision even if this channel is part
+    * of a chain of redirects.
+    */
+  [infallible] attribute boolean allowListFutureDocumentsCreatedFromThisRedirectChain;
 
   /**
    * A snapshot of the nonce at load start time which is used for CSP

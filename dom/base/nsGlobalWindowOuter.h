@@ -470,13 +470,6 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
       Document* aDoc, nsIURI* aPopupURI, const nsAString& aPopupWindowName,
       const nsAString& aPopupWindowFeatures) override;
 
-  virtual void NotifyContentBlockingEvent(
-      unsigned aEvent, nsIChannel* aChannel, bool aBlocked, nsIURI* aURIHint,
-      nsIChannel* aTrackingChannel,
-      const mozilla::Maybe<
-          mozilla::AntiTrackingCommon::StorageAccessGrantedReason>& aReason)
-      override;
-
   void AddSizeOfIncludingThis(nsWindowSizes& aWindowSizes) const;
 
   void AllowScriptsToClose() { mAllowScriptsToClose = true; }
@@ -662,7 +655,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   // fact chrome.
   nsIBrowserDOMWindow* GetBrowserDOMWindowOuter();
   void SetBrowserDOMWindowOuter(nsIBrowserDOMWindow* aBrowserWindow);
-  void SetCursorOuter(const nsAString& aCursor, mozilla::ErrorResult& aError);
+  void SetCursorOuter(const nsACString& aCursor, mozilla::ErrorResult& aError);
 
   void GetReturnValueOuter(JSContext* aCx,
                            JS::MutableHandle<JS::Value> aReturnValue,
@@ -815,9 +808,6 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
                         nsISupports* aExtraArgument,
                         nsDocShellLoadState* aLoadState, bool aForceNoOpener,
                         mozilla::dom::BrowsingContext** aReturn);
-
-  // Checks that the channel was loaded by the URI currently loaded in aDoc
-  static bool SameLoadingURI(Document* aDoc, nsIChannel* aChannel);
 
  public:
   // Helper Functions
@@ -1055,6 +1045,10 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   friend class nsPIDOMWindowOuter;
 
   mozilla::dom::TabGroup* TabGroupOuter();
+
+  // Like TabGroupOuter, but it is more tolerant of being called at peculiar
+  // times, and it can return null.
+  mozilla::dom::TabGroup* MaybeTabGroupOuter();
 
   void SetIsBackgroundInternal(bool aIsBackground);
 

@@ -335,7 +335,7 @@ nsIFrame* nsSVGUtils::GetOuterSVGFrameAndCoveredRegion(nsIFrame* aFrame,
     // double-counting.
     m = m.PreTranslate(-initPositionX, -initPositionY);
 
-    SVGBBox bbox = nsSVGUtils::GetBBox(aFrame, flags, &m);
+    gfxRect bbox = nsSVGUtils::GetBBox(aFrame, flags, &m);
     *aRect = nsLayoutUtils::RoundGfxRectToAppRect(bbox, appUnitsPerDevPixel);
   }
 
@@ -1302,7 +1302,7 @@ gfxRect nsSVGUtils::PathExtentsToMaxStrokeExtents(const gfxRect& aPathExtents,
 
   if (affectedByMiterlimit) {
     const nsStyleSVG* style = aFrame->StyleSVG();
-    if (style->mStrokeLinejoin == NS_STYLE_STROKE_LINEJOIN_MITER &&
+    if (style->mStrokeLinejoin == StyleStrokeLinejoin::Miter &&
         styleExpansionFactor < style->mStrokeMiterlimit / 2.0) {
       styleExpansionFactor = style->mStrokeMiterlimit / 2.0;
     }

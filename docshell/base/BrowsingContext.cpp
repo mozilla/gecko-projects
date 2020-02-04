@@ -15,6 +15,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLIFrameElement.h"
 #include "mozilla/dom/Location.h"
 #include "mozilla/dom/LocationBinding.h"
 #include "mozilla/dom/PopupBlocker.h"
@@ -174,8 +175,8 @@ already_AddRefed<BrowsingContext> BrowsingContext::Create(
     // if our parent has a parent that's loading, we need it too
     bool ancestorLoading = aParent ? aParent->GetAncestorLoading() : false;
     if (!ancestorLoading && aParent) {
-      // XXX(farre): Can/Should we check aParent->IsLoading() here? (Bug 1608448)
-      // Check if the parent was itself loading already
+      // XXX(farre): Can/Should we check aParent->IsLoading() here? (Bug
+      // 1608448) Check if the parent was itself loading already
       nsPIDOMWindowOuter* outer = aParent->GetDOMWindow();
       if (outer) {
         Document* document = nsGlobalWindowOuter::Cast(outer)->GetDocument();
@@ -320,6 +321,12 @@ void BrowsingContext::SetEmbedderElement(Element* aEmbedder) {
   }
 
   mEmbedderElement = aEmbedder;
+}
+
+void BrowsingContext::Embed() {
+  if (auto* frame = HTMLIFrameElement::FromNode(mEmbedderElement)) {
+    frame->BindToBrowsingContext(this);
+  }
 }
 
 void BrowsingContext::Attach(bool aFromIPC) {
@@ -692,7 +699,7 @@ bool BrowsingContext::CanAccess(BrowsingContext* aTarget,
 
   // A frame can navigate any frame with a same-origin ancestor.
   for (BrowsingContext* bc = aTarget; bc; bc = bc->GetParent()) {
-    if (bc->mDocShell && nsDocShell::ValidateOrigin(mDocShell, bc->mDocShell)) {
+    if (bc->mDocShell && nsDocShell::ValidateOrigin(this, bc)) {
       return true;
     }
   }

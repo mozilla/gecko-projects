@@ -17,7 +17,7 @@ include protocol PSHEntry;
 using struct mozilla::void_t
   from "ipc/IPCMessageUtils.h";
 
-using struct mozilla::SerializedStructuredCloneBuffer
+using moveonly struct mozilla::SerializedStructuredCloneBuffer
   from "ipc/IPCMessageUtils.h";
 
 using LayoutDeviceIntRect from "Units.h";
@@ -66,6 +66,20 @@ struct ClonedMessageData
   IPCBlob[] blobs;
   IPCStream[] inputStreams;
   MessagePortIdentifier[] identifiers;
+};
+
+struct RefMessageData {
+  nsID uuid;
+};
+
+union MessageDataType {
+  ClonedMessageData;
+  RefMessageData;
+};
+
+struct MessageData {
+  nsID? agentClusterId;
+  MessageDataType data;
 };
 
 union IPCDataTransferData

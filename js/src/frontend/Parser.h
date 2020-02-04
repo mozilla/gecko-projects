@@ -1241,29 +1241,25 @@ class MOZ_STACK_CLASS GeneralParser : public PerHandlerParser<ParseHandler> {
   UnaryNodeType yieldExpression(InHandling inHandling);
   Node condExpr(InHandling inHandling, YieldHandling yieldHandling,
                 TripledotHandling tripledotHandling,
-                PossibleError* possibleError,
-                InvokedPrediction invoked = PredictUninvoked);
+                PossibleError* possibleError, InvokedPrediction invoked);
   Node orExpr(InHandling inHandling, YieldHandling yieldHandling,
               TripledotHandling tripledotHandling, PossibleError* possibleError,
-              InvokedPrediction invoked = PredictUninvoked);
+              InvokedPrediction invoked);
   Node unaryExpr(YieldHandling yieldHandling,
                  TripledotHandling tripledotHandling,
                  PossibleError* possibleError = nullptr,
                  InvokedPrediction invoked = PredictUninvoked);
   Node optionalExpr(YieldHandling yieldHandling,
                     TripledotHandling tripledotHandling, TokenKind tt,
-                    bool allowCallSyntax = true,
                     PossibleError* possibleError = nullptr,
                     InvokedPrediction invoked = PredictUninvoked);
   Node memberExpr(YieldHandling yieldHandling,
                   TripledotHandling tripledotHandling, TokenKind tt,
-                  bool allowCallSyntax = true,
-                  PossibleError* possibleError = nullptr,
-                  InvokedPrediction invoked = PredictUninvoked);
+                  bool allowCallSyntax, PossibleError* possibleError,
+                  InvokedPrediction invoked);
   Node primaryExpr(YieldHandling yieldHandling,
                    TripledotHandling tripledotHandling, TokenKind tt,
-                   PossibleError* possibleError,
-                   InvokedPrediction invoked = PredictUninvoked);
+                   PossibleError* possibleError, InvokedPrediction invoked);
   Node exprInParens(InHandling inHandling, YieldHandling yieldHandling,
                     TripledotHandling tripledotHandling,
                     PossibleError* possibleError = nullptr);
@@ -1777,6 +1773,9 @@ class MOZ_STACK_CLASS Parser<FullParseHandler, Unit> final
       YieldHandling yieldHandling, FunctionSyntaxKind kind,
       GeneratorKind generatorKind, FunctionAsyncKind asyncKind, bool tryAnnexB,
       Directives inheritedDirectives, Directives* newDirectives);
+
+  MOZ_MUST_USE bool advancePastSyntaxParsedFunction(AutoKeepAtoms& keepAtoms,
+                                                    SyntaxParser* syntaxParser);
 
   bool skipLazyInnerFunction(FunctionNodeType funNode, uint32_t toStringStart,
                              FunctionSyntaxKind kind, bool tryAnnexB);

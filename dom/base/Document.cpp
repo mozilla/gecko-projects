@@ -4698,7 +4698,7 @@ bool Document::ExecCommand(const nsAString& aHTMLCommandName, bool aShowUI,
 
   // Do security check first.
   if (commandData.IsCutOrCopyCommand()) {
-    if (!nsContentUtils::IsCutCopyAllowed(aSubjectPrincipal)) {
+    if (!nsContentUtils::IsCutCopyAllowed(this, aSubjectPrincipal)) {
       // We have rejected the event due to it not being performed in an
       // input-driven context therefore, we report the error to the console.
       nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
@@ -4904,7 +4904,7 @@ bool Document::QueryCommandEnabled(const nsAString& aHTMLCommandName,
 
   // cut & copy are always allowed
   if (commandData.IsCutOrCopyCommand()) {
-    return nsContentUtils::IsCutCopyAllowed(aSubjectPrincipal);
+    return nsContentUtils::IsCutCopyAllowed(this, aSubjectPrincipal);
   }
 
   // Report false for restricted commands
@@ -5343,7 +5343,7 @@ nsresult Document::EditingStateChanged() {
     // if this is actually the case.
     uint32_t flags = 0;
     htmlEditor->GetFlags(&flags);
-    if (flags & nsIPlaintextEditor::eEditorMailMask) {
+    if (flags & nsIEditor::eEditorMailMask) {
       // We already have a mail editor, then we should not attempt to create
       // another one.
       return NS_OK;
@@ -5565,7 +5565,7 @@ void Document::DeferredContentEditableCountChange(Element* aElement) {
 
       RefPtr<HTMLEditor> htmlEditor = docshell->GetHTMLEditor();
       if (htmlEditor) {
-        RefPtr<nsRange> range = new nsRange(aElement);
+        RefPtr<nsRange> range = nsRange::Create(aElement);
         IgnoredErrorResult res;
         range->SelectNode(*aElement, res);
         if (res.Failed()) {
@@ -6570,11 +6570,11 @@ void Document::InsertSheetAt(size_t aIndex, StyleSheet& aSheet) {
   }
 }
 
-void Document::SetStyleSheetApplicableState(StyleSheet& aSheet,
-                                            bool aApplicable) {
+void Document::StyleSheetApplicableStateChanged(StyleSheet& aSheet) {
+  const bool applicable = aSheet.IsApplicable();
   // If we're actually in the document style sheet list
   if (mStyleSheets.IndexOf(&aSheet) != mStyleSheets.NoIndex) {
-    if (aApplicable) {
+    if (applicable) {
       AddStyleSheetToStyleSets(&aSheet);
     } else {
       RemoveStyleSheetFromStyleSets(&aSheet);
@@ -6586,7 +6586,7 @@ void Document::SetStyleSheetApplicableState(StyleSheet& aSheet,
     init.mBubbles = true;
     init.mCancelable = true;
     init.mStylesheet = &aSheet;
-    init.mApplicable = aApplicable;
+    init.mApplicable = applicable;
 
     RefPtr<StyleSheetApplicableStateChangeEvent> event =
         StyleSheetApplicableStateChangeEvent::Constructor(
@@ -7993,14 +7993,7 @@ already_AddRefed<nsINode> Document::ImportNode(nsINode& aNode, bool aDeep,
 }
 
 already_AddRefed<nsRange> Document::CreateRange(ErrorResult& rv) {
-  RefPtr<nsRange> range = new nsRange(this);
-  nsresult res = range->CollapseTo(this, 0);
-  if (NS_FAILED(res)) {
-    rv.Throw(res);
-    return nullptr;
-  }
-
-  return range.forget();
+  return nsRange::Create(this, 0, this, 0, rv);
 }
 
 already_AddRefed<NodeIterator> Document::CreateNodeIterator(
@@ -10481,24 +10474,10 @@ bool Document::CanSavePresentation(nsIRequest* aNewRequest,
   return ret;
 }
 
-static bool HasHttpScheme(nsIURI* aURI) {
-  return aURI && (aURI->SchemeIs("http") || aURI->SchemeIs("https"));
-}
-
 void Document::Destroy() {
   // The ContentViewer wants to release the document now.  So, tell our content
   // to drop any references to the document so that it can be destroyed.
   if (mIsGoingAway) return;
-
-  // Make sure to report before IPC closed.
-  if (!nsContentUtils::IsInPrivateBrowsing(this) &&
-      IsTopLevelContentDocument()) {
-    mContentBlockingLog.ReportLog(NodePrincipal());
-
-    if (HasHttpScheme(GetDocumentURI())) {
-      mContentBlockingLog.ReportOrigins();
-    }
-  }
 
   ReportUseCounters();
 
@@ -14148,8 +14127,6 @@ void Document::DocAddSizeOfExcludingThis(nsWindowSizes& aWindowSizes) const {
     aWindowSizes.mDOMMediaQueryLists +=
         mql->SizeOfExcludingThis(aWindowSizes.mState.mMallocSizeOf);
   }
-
-  mContentBlockingLog.AddSizeOfExcludingThis(aWindowSizes);
 
   DocumentOrShadowRoot::AddSizeOfExcludingThis(aWindowSizes);
 

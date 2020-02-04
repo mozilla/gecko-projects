@@ -261,6 +261,9 @@ class GCRuntime {
 
   JS::HeapState heapState() const { return heapState_; }
 
+  void freezeSelfHostingZone();
+  bool isSelfHostingZoneFrozen() const { return selfHostingZoneFrozen; }
+
   inline bool hasZealMode(ZealMode mode);
   inline void clearZealMode(ZealMode mode);
   inline bool upcomingZealousGC();
@@ -278,6 +281,8 @@ class GCRuntime {
   void resetParameter(JSGCParamKey key, AutoLockGC& lock);
   uint32_t getParameter(JSGCParamKey key);
   uint32_t getParameter(JSGCParamKey key, const AutoLockGC& lock);
+
+  void setPerformanceHint(PerformanceHint hint);
 
   MOZ_MUST_USE bool triggerGC(JS::GCReason reason);
   // Check whether to trigger a zone GC after allocating GC cells. During an
@@ -701,7 +706,7 @@ class GCRuntime {
   void sweepDebuggerOnMainThread(JSFreeOp* fop);
   void sweepJitDataOnMainThread(JSFreeOp* fop);
   void sweepFinalizationGroupsOnMainThread();
-  void sweepFinalizationGroups(Zone* zone, bool isShuttingDown = false);
+  void sweepFinalizationGroups(Zone* zone);
   void queueFinalizationGroupForCleanup(FinalizationGroupObject* group);
   void sweepWeakRefs(Zone* zone);
   friend void SweepWeakRefs(GCParallelTask* task);
@@ -734,6 +739,7 @@ class GCRuntime {
   void endCompactPhase();
   void sweepTypesAfterCompacting(Zone* zone);
   void sweepZoneAfterCompacting(MovingTracer* trc, Zone* zone);
+  bool canRelocateZone(Zone* zone) const;
   MOZ_MUST_USE bool relocateArenas(Zone* zone, JS::GCReason reason,
                                    Arena*& relocatedListOut,
                                    SliceBudget& sliceBudget);
@@ -861,6 +867,12 @@ class GCRuntime {
   mozilla::Atomic<size_t, mozilla::ReleaseAcquire,
                   mozilla::recordreplay::Behavior::DontPreserve>
       numActiveZoneIters;
+
+  /*
+   * The self hosting zone is collected once after initialization. We don't
+   * allow allocation after this point and we don't collect it again.
+   */
+  WriteOnceData<bool> selfHostingZoneFrozen;
 
   /* During shutdown, the GC needs to clean up every possible object. */
   MainThreadData<bool> cleanUpEverything;
@@ -1092,6 +1104,9 @@ class GCRuntime {
 
   /* Always preserve JIT code during GCs, for testing. */
   MainThreadData<bool> alwaysPreserveCode;
+
+  /* Count of the number of zones that are currently in page load. */
+  MainThreadData<size_t> inPageLoadCount;
 
   MainThreadData<bool> lowMemoryState;
 

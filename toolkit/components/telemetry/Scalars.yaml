@@ -690,23 +690,6 @@ pwmgr:
       - main
 
 contentblocking:
-  exceptions:
-    bug_numbers:
-      - 1484251
-      - 1564248
-    description: >
-      How many tracking protection/content blocking exceptions a user has at startup.
-    expires: "75"
-    kind: uint
-    notification_emails:
-      - jhofmann@mozilla.com
-      - chsiang@mozilla.com
-      - seceng-telemetry@mozilla.com
-    release_channel_collection: opt-out
-    record_in_processes:
-      - main
-    products:
-      - 'firefox'
   cryptomining_blocking_enabled:
     bug_numbers:
       - 1522919
@@ -761,11 +744,13 @@ contentblocking:
   trackers_blocked_count:
     bug_numbers:
       - 1577030
+      - 1610894
     description: >
       A count of the number of tracking events blocked.
-    expires: "75"
+    expires: "80"
     kind: uint
     notification_emails:
+      - ewright@mozilla.com
       - chsiang@mozilla.com
       - seceng-telemetry@mozilla.com
     release_channel_collection: opt-out
@@ -2885,7 +2870,7 @@ gfx.adapter:
     description: >
       Graphics adapter device identification
       This is a temporary workaround for some early telemetry system issues. See Bug 1601091 for more information
-    expires: "74"
+    expires: "76"
     kind: string
     notification_emails:
       - gfx-telemetry-alerts@mozilla.com
@@ -3007,7 +2992,7 @@ gfx:
     description: >
       Name of the graphics compositor in use. possible values are "opengl, d3d11, client, webrender or basic".
       This is a temporary workaround for some early telemetry system issues. See Bug 1601091 for more information
-    expires: "74"
+    expires: "76"
     kind: string
     notification_emails:
       - gfx-telemetry-alerts@mozilla.com
@@ -4872,12 +4857,13 @@ blocklist:
   lastModified_xml:
     bug_numbers:
       - 1572711
+      - 1607744
     description: >
       Keep track of the lastupdate datetime from a successfully loaded xml blocklist,
       set to "Invalid Date" or "Missing Date" when the timestamp is invalid or missing.
       (based on the lastupdate attribute set on the XML document element,
       converted from a milliseconds timestamp into a datetime string in UTC format).
-    expires: "75"
+    expires: "77"
     kind: string
     release_channel_collection: opt-out
     notification_emails:
@@ -4894,11 +4880,12 @@ blocklist:
   lastModified_rs_addons:
     bug_numbers:
       - 1572711
+      - 1607744
     description: >
       Keep track of the last time the "addons" remotesetting blocklist has been successfully
       updated (as a datetime string in UTC format), set to "Missing Date" when the timestamp
       couldn't be retrieved.
-    expires: "75"
+    expires: "81"
     kind: string
     release_channel_collection: opt-out
     notification_emails:
@@ -4915,11 +4902,12 @@ blocklist:
   lastModified_rs_plugins:
     bug_numbers:
       - 1572711
+      - 1607744
     description: >
       Keep track of the last time the "plugins" remotesetting blocklist has been successfully
       updated (as a datetime string in UTC format), set to "Missing Date" when the timestamp
       couldn't be retrieved.
-    expires: "75"
+    expires: "81"
     kind: string
     release_channel_collection: opt-out
     notification_emails:
@@ -4935,10 +4923,11 @@ blocklist:
   useXML:
     bug_numbers:
       - 1572711
+      - 1607744
     description: >
       Keep track of the currently enabled blocklist engine (set to false if the
       remote settings blocklist is the one enabled).
-    expires: "75"
+    expires: "77"
     kind: boolean
     release_channel_collection: opt-out
     notification_emails:

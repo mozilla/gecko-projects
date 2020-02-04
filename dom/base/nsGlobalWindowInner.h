@@ -894,7 +894,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   void GetAttention(mozilla::ErrorResult& aError);
   void GetAttentionWithCycleCount(int32_t aCycleCount,
                                   mozilla::ErrorResult& aError);
-  void SetCursor(const nsAString& aCursor, mozilla::ErrorResult& aError);
+  void SetCursor(const nsACString& aCursor, mozilla::ErrorResult& aError);
   void Maximize();
   void Minimize();
   void Restore();
@@ -1180,6 +1180,10 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   mozilla::dom::TabGroup* TabGroupInner();
 
+  // Like TabGroupInner, but it is more tolerant of being called at peculiar
+  // times, and it can return null.
+  mozilla::dom::TabGroup* MaybeTabGroupInner();
+
   bool IsBackgroundInternal() const;
 
   // NOTE: Chrome Only
@@ -1235,6 +1239,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   void RemoveIdleCallback(mozilla::dom::IdleRequest* aRequest);
 
   void SetActiveLoadingState(bool aIsLoading) override;
+
+  // Hint to the JS engine whether we are currently loading.
+  void HintIsLoading(bool aIsLoading);
 
  protected:
   // Window offline status. Checked to see if we need to fire offline event
@@ -1300,6 +1307,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   bool WasCurrentInnerWindow() const override { return mWasCurrentInnerWindow; }
 
   bool mHasSeenGamepadInput : 1;
+
+  // Whether we told the JS engine that we were in pageload.
+  bool mHintedWasLoading : 1;
 
   nsCheapSet<nsUint32HashKey> mGamepadIndexSet;
   nsRefPtrHashtable<nsUint32HashKey, mozilla::dom::Gamepad> mGamepads;

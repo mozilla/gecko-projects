@@ -74,12 +74,25 @@ class AbstractRange : public nsISupports, public nsWrapperCache {
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
 
+  bool HasEqualBoundaries(const AbstractRange& aOther) const {
+    return (mStart == aOther.mStart) && (mEnd == aOther.mEnd);
+  }
+
  protected:
   template <typename SPT, typename SRT, typename EPT, typename ERT,
             typename RangeType>
   static nsresult SetStartAndEndInternal(
       const RangeBoundaryBase<SPT, SRT>& aStartBoundary,
       const RangeBoundaryBase<EPT, ERT>& aEndBoundary, RangeType* aRange);
+
+  void ClearForReuse() {
+    mOwner = nullptr;
+    mStart = RangeBoundary();
+    mEnd = RangeBoundary();
+    mIsPositioned = false;
+    mIsGenerated = false;
+    mCalledByJS = false;
+  }
 
   RefPtr<Document> mOwner;
   RangeBoundary mStart;

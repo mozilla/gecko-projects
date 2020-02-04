@@ -740,12 +740,15 @@ bool FunctionScriptEmitter::emitEndBody() {
   return true;
 }
 
-bool FunctionScriptEmitter::initScript() {
+bool FunctionScriptEmitter::initScript(
+    const FieldInitializers& fieldInitializers) {
   MOZ_ASSERT(state_ == State::EndBody);
 
   if (!JSScript::fullyInitFromEmitter(bce_->cx, bce_->script, bce_)) {
     return false;
   }
+
+  bce_->script->setFieldInitializers(fieldInitializers);
 
 #ifdef DEBUG
   state_ = State::End;
@@ -785,10 +788,6 @@ bool FunctionParamsEmitter::prepareForDefault() {
 
   //                [stack]
 
-  if (!enterParameterExpressionVarScope()) {
-    return false;
-  }
-
   if (!prepareForInitializer()) {
     //              [stack]
     return false;
@@ -813,9 +812,6 @@ bool FunctionParamsEmitter::emitDefaultEnd(JS::Handle<JSAtom*> paramName) {
     //              [stack]
     return false;
   }
-  if (!leaveParameterExpressionVarScope()) {
-    return false;
-  }
 
   argSlot_++;
 
@@ -829,10 +825,6 @@ bool FunctionParamsEmitter::prepareForDestructuring() {
   MOZ_ASSERT(state_ == State::Start);
 
   //                [stack]
-
-  if (!enterParameterExpressionVarScope()) {
-    return false;
-  }
 
   if (!bce_->emitArgOp(JSOp::GetArg, argSlot_)) {
     //              [stack] ARG
@@ -855,10 +847,6 @@ bool FunctionParamsEmitter::emitDestructuringEnd() {
     return false;
   }
 
-  if (!leaveParameterExpressionVarScope()) {
-    return false;
-  }
-
   argSlot_++;
 
 #ifdef DEBUG
@@ -872,9 +860,6 @@ bool FunctionParamsEmitter::prepareForDestructuringDefaultInitializer() {
 
   //                [stack]
 
-  if (!enterParameterExpressionVarScope()) {
-    return false;
-  }
   if (!prepareForInitializer()) {
     //              [stack]
     return false;
@@ -912,10 +897,6 @@ bool FunctionParamsEmitter::emitDestructuringDefaultEnd() {
     return false;
   }
 
-  if (!leaveParameterExpressionVarScope()) {
-    return false;
-  }
-
   argSlot_++;
 
 #ifdef DEBUG
@@ -949,9 +930,6 @@ bool FunctionParamsEmitter::prepareForDestructuringRest() {
 
   //                [stack]
 
-  if (!enterParameterExpressionVarScope()) {
-    return false;
-  }
   if (!emitRestArray()) {
     //              [stack] REST
     return false;
@@ -973,42 +951,9 @@ bool FunctionParamsEmitter::emitDestructuringRestEnd() {
     return false;
   }
 
-  if (!leaveParameterExpressionVarScope()) {
-    return false;
-  }
-
 #ifdef DEBUG
   state_ = State::End;
 #endif
-  return true;
-}
-
-bool FunctionParamsEmitter::enterParameterExpressionVarScope() {
-  if (!funbox_->hasDirectEvalInParameterExpr) {
-    return true;
-  }
-
-  // ES 14.1.19 says if BindingElement contains an expression in the
-  // production FormalParameter : BindingElement, it is evaluated in a
-  // new var environment. This is needed to prevent vars from escaping
-  // direct eval in parameter expressions.
-  paramExprVarEmitterScope_.emplace(bce_);
-  if (!paramExprVarEmitterScope_->enterParameterExpressionVar(bce_)) {
-    return false;
-  }
-  return true;
-}
-
-bool FunctionParamsEmitter::leaveParameterExpressionVarScope() {
-  if (!paramExprVarEmitterScope_) {
-    return true;
-  }
-
-  if (!paramExprVarEmitterScope_->leave(bce_)) {
-    return false;
-  }
-  paramExprVarEmitterScope_.reset();
-
   return true;
 }
 
@@ -1080,14 +1025,4 @@ bool FunctionParamsEmitter::emitAssignment(JS::Handle<JSAtom*> paramName) {
   }
 
   return true;
-}
-
-DestructuringFlavor FunctionParamsEmitter::getDestructuringFlavor() {
-  MOZ_ASSERT(state_ == State::Destructuring ||
-             state_ == State::DestructuringDefault ||
-             state_ == State::DestructuringRest);
-
-  return funbox_->hasDirectEvalInParameterExpr
-             ? DestructuringFlavor::FormalParameterInVarScope
-             : DestructuringFlavor::Declaration;
 }

@@ -32,20 +32,29 @@ using mozilla::ipc::PBackgroundChild;
 using mozilla::ipc::PBackgroundParent;
 
 StructuredCloneData::StructuredCloneData()
-    : StructuredCloneData(StructuredCloneHolder::TransferringSupported) {}
+    : StructuredCloneData(
+          StructuredCloneHolder::StructuredCloneScope::DifferentProcess,
+          StructuredCloneHolder::TransferringSupported) {}
 
 StructuredCloneData::StructuredCloneData(StructuredCloneData&& aOther)
-    : StructuredCloneData(StructuredCloneHolder::TransferringSupported) {
+    : StructuredCloneData(
+          StructuredCloneHolder::StructuredCloneScope::DifferentProcess,
+          StructuredCloneHolder::TransferringSupported) {
   *this = std::move(aOther);
 }
 
 StructuredCloneData::StructuredCloneData(
+    StructuredCloneHolder::StructuredCloneScope aScope,
     TransferringSupport aSupportsTransferring)
-    : StructuredCloneHolder(
-          StructuredCloneHolder::CloningSupported, aSupportsTransferring,
-          StructuredCloneHolder::StructuredCloneScope::DifferentProcess),
+    : StructuredCloneHolder(StructuredCloneHolder::CloningSupported,
+                            aSupportsTransferring, aScope),
       mExternalData(JS::StructuredCloneScope::DifferentProcess),
-      mInitialized(false) {}
+      mInitialized(false) {
+  MOZ_ASSERT(
+      aScope == StructuredCloneHolder::StructuredCloneScope::DifferentProcess ||
+      aScope ==
+          StructuredCloneHolder::StructuredCloneScope::UnknownDestination);
+}
 
 StructuredCloneData::~StructuredCloneData() {}
 
@@ -93,12 +102,19 @@ bool StructuredCloneData::Copy(const StructuredCloneData& aData) {
 void StructuredCloneData::Read(JSContext* aCx,
                                JS::MutableHandle<JS::Value> aValue,
                                ErrorResult& aRv) {
+  Read(aCx, aValue, JS::CloneDataPolicy(), aRv);
+}
+
+void StructuredCloneData::Read(JSContext* aCx,
+                               JS::MutableHandle<JS::Value> aValue,
+                               JS::CloneDataPolicy aCloneDataPolicy,
+                               ErrorResult& aRv) {
   MOZ_ASSERT(mInitialized);
 
   nsIGlobalObject* global = xpc::CurrentNativeGlobal(aCx);
   MOZ_ASSERT(global);
 
-  ReadFromBuffer(global, aCx, Data(), aValue, aRv);
+  ReadFromBuffer(global, aCx, Data(), aValue, aCloneDataPolicy, aRv);
 }
 
 void StructuredCloneData::Write(JSContext* aCx, JS::Handle<JS::Value> aValue,

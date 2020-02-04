@@ -711,12 +711,12 @@ void APZCTreeManager::SampleForWebRender(wr::TransactionWrapper& aTxn,
         apzc->GetCurrentAsyncTransform(AsyncPanZoomController::eForCompositing,
                                        asyncTransformComponents)
             .mTranslation;
-    LayoutDeviceToParentLayerScale zoom;
+    LayoutDeviceToParentLayerScale zoom =
+        apzc->GetCurrentPinchZoomScale(AsyncPanZoomController::eForCompositing);
+
     if (Maybe<uint64_t> zoomAnimationId = apzc->GetZoomAnimationId()) {
       // for now we only support zooming on root content APZCs
       MOZ_ASSERT(apzc->IsRootContent());
-      zoom = apzc->GetCurrentPinchZoomScale(
-          AsyncPanZoomController::eForCompositing);
 
       AsyncTransform asyncVisualTransform =
           apzc->GetCurrentAsyncTransform(AsyncPanZoomController::eForCompositing,
@@ -1058,6 +1058,11 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
     node->SetFixedPosData(aLayer.GetFixedPositionScrollContainerId(),
                           aLayer.GetFixedPositionSides(),
                           aLayer.GetFixedPositionAnimationId());
+    if (aLayer.GetIsStickyPosition()) {
+      node->SetStickyPosData(aLayer.GetStickyScrollContainerId(),
+                             aLayer.GetStickyScrollRangeOuter(),
+                             aLayer.GetStickyScrollRangeInner());
+    }
     return node;
   }
 
@@ -1284,6 +1289,11 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
   node->SetFixedPosData(aLayer.GetFixedPositionScrollContainerId(),
                         aLayer.GetFixedPositionSides(),
                         aLayer.GetFixedPositionAnimationId());
+  if (aLayer.GetIsStickyPosition()) {
+    node->SetStickyPosData(aLayer.GetStickyScrollContainerId(),
+                           aLayer.GetStickyScrollRangeOuter(),
+                           aLayer.GetStickyScrollRangeInner());
+  }
   return node;
 }
 
@@ -3314,6 +3324,38 @@ bool APZCTreeManager::IsFixedToRootContent(
   return targetApzc && targetApzc->IsRootContent();
 }
 
+bool APZCTreeManager::IsStuckToRootContentAtBottom(
+    const HitTestingTreeNode* aNode) const {
+  mTreeLock.AssertCurrentThreadIn();
+  ScrollableLayerGuid::ViewID stickyTarget = aNode->GetStickyPosTarget();
+  if (stickyTarget == ScrollableLayerGuid::NULL_SCROLL_ID) {
+    return false;
+  }
+
+  // Currently we only support the dyanmic toolbar at bottom.
+  if ((aNode->GetFixedPosSides() & SideBits::eBottom) == SideBits::eNone) {
+    return false;
+  }
+
+  RefPtr<AsyncPanZoomController> stickyTargetApzc =
+      GetTargetAPZC(aNode->GetLayersId(), stickyTarget);
+  if (!stickyTargetApzc || !stickyTargetApzc->IsRootContent()) {
+    return false;
+  }
+
+  // These inner/outer ranges include the scroll offset at the last paint so we
+  // don't need to care the scroll offset itself here, we just need the
+  // translation from the last scroll offset.
+  ParentLayerPoint translation =
+      stickyTargetApzc
+          ->GetCurrentAsyncTransform(
+              AsyncPanZoomController::eForHitTesting,
+              AsyncTransformComponents{AsyncTransformComponent::eLayout})
+          .mTranslation;
+  return apz::IsStuckAtBottom(translation.y, aNode->GetStickyScrollRangeInner(),
+                              aNode->GetStickyScrollRangeOuter());
+}
+
 LayerToParentLayerMatrix4x4 APZCTreeManager::ComputeTransformForNode(
     const HitTestingTreeNode* aNode) const {
   mTreeLock.AssertCurrentThreadIn();
@@ -3388,6 +3430,23 @@ LayerToParentLayerMatrix4x4 APZCTreeManager::ComputeTransformForNode(
           AsyncCompositionManager::ComputeFixedMarginsOffset(
               mCompositorFixedLayerMargins, aNode->GetFixedPosSides(),
               mGeckoFixedLayerMargins),
+          PixelCastJustification::ScreenIsParentLayerForRoot);
+    }
+    return aNode->GetTransform() *
+           CompleteAsyncTransform(
+               AsyncTransformComponentMatrix::Translation(translation));
+  } else if (IsStuckToRootContentAtBottom(aNode)) {
+    ParentLayerPoint translation;
+    {
+      MutexAutoLock mapLock(mMapLock);
+      translation = ViewAs<ParentLayerPixel>(
+          AsyncCompositionManager::ComputeFixedMarginsOffset(
+              mCompositorFixedLayerMargins,
+              aNode->GetFixedPosSides() & SideBits::eBottom,
+              // For sticky layers, we don't need to factor
+              // mGeckoFixedLayerMargins because Gecko doesn't shift the
+              // position of sticky elements for dynamic toolbar movements.
+              ScreenMargin()),
           PixelCastJustification::ScreenIsParentLayerForRoot);
     }
     return aNode->GetTransform() *

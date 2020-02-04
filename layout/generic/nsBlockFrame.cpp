@@ -214,6 +214,27 @@ static nsRect GetLineTextArea(nsLineBox* aLine,
   return textArea;
 }
 
+/**
+ * Starting with aFrame, iterates upward through parent frames and checks for
+ * non-transparent background colors. If one is found, we use that as our
+ * backplate color. Otheriwse, we use the default background color from
+ * our high contrast theme.
+ */
+static nscolor GetBackplateColor(nsIFrame* aFrame) {
+  for (nsIFrame* frame = aFrame; frame; frame = frame->GetParent()) {
+    auto* bg = frame->StyleBackground();
+    if (bg->IsTransparent(frame)) {
+      continue;
+    }
+    nscolor backgroundColor = bg->BackgroundColor(frame);
+    if (NS_GET_A(backgroundColor) != 0) {
+      return backgroundColor;
+    }
+    break;
+  }
+  return aFrame->PresContext()->DefaultBackgroundColor();
+}
+
 #ifdef DEBUG
 #  include "nsBlockDebugFlags.h"
 
@@ -452,8 +473,7 @@ nsILineIterator* nsBlockFrame::GetLineIterator() {
   if (!it) return nullptr;
 
   const nsStyleVisibility* visibility = StyleVisibility();
-  nsresult rv =
-      it->Init(mLines, visibility->mDirection == NS_STYLE_DIRECTION_RTL);
+  nsresult rv = it->Init(mLines, visibility->mDirection == StyleDirection::Rtl);
   if (NS_FAILED(rv)) {
     delete it;
     return nullptr;
@@ -2214,14 +2234,14 @@ void nsBlockFrame::MarkLineDirty(LineIterator aLine,
  * Test whether lines are certain to be aligned left so that we can make
  * resizing optimizations
  */
-static inline bool IsAlignedLeft(uint8_t aAlignment, uint8_t aDirection,
+static inline bool IsAlignedLeft(uint8_t aAlignment, StyleDirection aDirection,
                                  uint8_t aUnicodeBidi, nsIFrame* aFrame) {
   return nsSVGUtils::IsInSVGTextSubtree(aFrame) ||
          NS_STYLE_TEXT_ALIGN_LEFT == aAlignment ||
          (((NS_STYLE_TEXT_ALIGN_START == aAlignment &&
-            NS_STYLE_DIRECTION_LTR == aDirection) ||
+            StyleDirection::Ltr == aDirection) ||
            (NS_STYLE_TEXT_ALIGN_END == aAlignment &&
-            NS_STYLE_DIRECTION_RTL == aDirection)) &&
+            StyleDirection::Rtl == aDirection)) &&
           !(NS_STYLE_UNICODE_BIDI_PLAINTEXT & aUnicodeBidi));
 }
 
@@ -6986,6 +7006,10 @@ void nsBlockFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     nscoord lastY = INT32_MIN;
     nscoord lastYMost = INT32_MIN;
     nsRect curBackplateArea;
+    Maybe<nscolor> backplateColor;
+    if (shouldDrawBackplate) {
+      backplateColor = Some(GetBackplateColor(this));
+    }
     // A frame's display list cannot contain more than one copy of a
     // given display item unless the items are uniquely identifiable.
     // Because backplate occasionally requires multiple
@@ -7010,8 +7034,8 @@ void nsBlockFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
                    "if this master switch is off, curBackplateArea "
                    "must be empty and we shouldn't get here");
         aLists.BorderBackground()->AppendNewToTop<nsDisplaySolidColor>(
-            aBuilder, this, curBackplateArea,
-            PresContext()->DefaultBackgroundColor(), backplateIndex);
+            aBuilder, this, curBackplateArea, backplateColor.value(),
+            backplateIndex);
         backplateIndex++;
 
         curBackplateArea = nsRect();
@@ -7042,8 +7066,8 @@ void nsBlockFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     }
     if (!curBackplateArea.IsEmpty()) {
       aLists.BorderBackground()->AppendNewToTop<nsDisplaySolidColor>(
-          aBuilder, this, curBackplateArea,
-          PresContext()->DefaultBackgroundColor(), backplateIndex);
+          aBuilder, this, curBackplateArea, backplateColor.value(),
+          backplateIndex);
     }
   }
 

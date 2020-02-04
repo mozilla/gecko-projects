@@ -439,7 +439,7 @@ void ClientWebGLContext::BeginComposition() {
   if (!mNotLost) return;
   if (mNotLost->inProcess) {
     WEBGL_BRIDGE_LOGI("[%p] Presenting", this);
-    mNotLost->inProcess->Present();
+    Run<RPROC(Present)>();
   }
 }
 
@@ -488,7 +488,10 @@ already_AddRefed<layers::Layer> ClientWebGLContext::GetCanvasLayer(
   CanvasRenderer* canvasRenderer = canvasLayer->CreateOrGetCanvasRenderer();
   if (!InitializeCanvasRenderer(builder, canvasRenderer)) return nullptr;
 
-  uint32_t flags = HasAlphaSupport() ? 0 : Layer::CONTENT_OPAQUE;
+  uint32_t flags = 0;
+  if (GetIsOpaque()) {
+    flags |= Layer::CONTENT_OPAQUE;
+  }
   canvasLayer->SetContentFlags(flags);
 
   mResetLayer = false;
@@ -646,6 +649,11 @@ ClientWebGLContext::SetDimensions(const int32_t signedWidth,
 
   MOZ_ASSERT(mInitialOptions);
 
+  if (mLossStatus != webgl::LossStatus::Ready) {
+    // Attempted resize of a lost context.
+    return NS_OK;
+  }
+
   uvec2 size = {static_cast<uint32_t>(signedWidth),
                 static_cast<uint32_t>(signedHeight)};
   if (!size.x) {
@@ -655,6 +663,8 @@ ClientWebGLContext::SetDimensions(const int32_t signedWidth,
     size.y = 1;
   }
 
+  mResetLayer = true;  // Always treat this as resize.
+
   if (mNotLost) {
     auto& state = State();
     state.mDrawingBufferSize = {};
@@ -663,11 +673,6 @@ ClientWebGLContext::SetDimensions(const int32_t signedWidth,
 
     MarkCanvasDirty();
     return NS_OK;
-  }
-
-  if (mLossStatus != webgl::LossStatus::Ready) {
-    MOZ_RELEASE_ASSERT(false);
-    return NS_ERROR_FAILURE;
   }
 
   // -
@@ -837,6 +842,7 @@ ClientWebGLContext::SetContextOptions(JSContext* cx,
   newOpts.preserveDrawingBuffer = attributes.mPreserveDrawingBuffer;
   newOpts.failIfMajorPerformanceCaveat =
       attributes.mFailIfMajorPerformanceCaveat;
+  newOpts.xrCompatible = attributes.mXrCompatible;
   newOpts.powerPreference = attributes.mPowerPreference;
   newOpts.enableDebugRendererInfo =
       Preferences::GetBool("webgl.enable-debug-renderer-info", false);
@@ -2615,9 +2621,8 @@ void ClientWebGLContext::BufferData(
   if (!ValidateNonNull("src", maybeSrc)) return;
   const auto& src = maybeSrc.Value();
 
-  src.ComputeLengthAndData();
-  const auto view =
-      RawBuffer<const uint8_t>(src.LengthAllowShared(), src.DataAllowShared());
+  src.ComputeState();
+  const auto view = RawBuffer<const uint8_t>(src.Length(), src.Data());
 
   Run<RPROC(BufferData)>(target, view, usage);
 }
@@ -2644,10 +2649,9 @@ void ClientWebGLContext::BufferSubData(GLenum target,
                                        WebGLsizeiptr dstByteOffset,
                                        const dom::ArrayBuffer& src) {
   const FuncScope funcScope(*this, "bufferSubData");
-  src.ComputeLengthAndData();
-  Run<RPROC(BufferSubData)>(
-      target, dstByteOffset,
-      RawBuffer<const uint8_t>(src.LengthAllowShared(), src.DataAllowShared()));
+  src.ComputeState();
+  Run<RPROC(BufferSubData)>(target, dstByteOffset,
+                            RawBuffer<const uint8_t>(src.Length(), src.Data()));
 }
 
 void ClientWebGLContext::BufferSubData(GLenum target,
@@ -5077,9 +5081,9 @@ bool ClientWebGLContext::ValidateArrayBufferView(
     const dom::ArrayBufferView& view, GLuint elemOffset,
     GLuint elemCountOverride, const GLenum errorEnum, uint8_t** const out_bytes,
     size_t* const out_byteLen) const {
-  view.ComputeLengthAndData();
-  uint8_t* const bytes = view.DataAllowShared();
-  const size_t byteLen = view.LengthAllowShared();
+  view.ComputeState();
+  uint8_t* const bytes = view.Data();
+  const size_t byteLen = view.Length();
 
   const auto& elemSize = SizeOfViewElem(view);
 

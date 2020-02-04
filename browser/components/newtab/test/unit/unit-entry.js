@@ -36,6 +36,7 @@ chai.use(chaiAssertions);
 chai.use(chaiJsonSchema);
 
 const overrider = new GlobalOverrider();
+
 const RemoteSettings = name => ({
   get: () => {
     if (name === "attachment") {
@@ -47,6 +48,7 @@ const RemoteSettings = name => ({
   off: () => {},
 });
 RemoteSettings.pollChanges = () => {};
+
 const TEST_GLOBAL = {
   AddonManager: {
     getActiveAddons() {
@@ -382,6 +384,7 @@ const TEST_GLOBAL = {
   FX_MONITOR_OAUTH_CLIENT_ID: "fake_client_id",
   TelemetryEnvironment: {
     setExperimentActive() {},
+    currentEnvironment: { profile: { creationDate: 16587 } },
   },
   TelemetryStopwatch: {
     start: () => {},

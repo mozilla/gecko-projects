@@ -8,6 +8,7 @@ var EXPORTED_SYMBOLS = [
   "ExtensionActionHelper",
   "GeckoViewConnection",
   "GeckoViewWebExtension",
+  "mobileWindowTracker",
 ];
 
 const { XPCOMUtils } = ChromeUtils.import(
@@ -16,6 +17,9 @@ const { XPCOMUtils } = ChromeUtils.import(
 const { GeckoViewUtils } = ChromeUtils.import(
   "resource://gre/modules/GeckoViewUtils.jsm"
 );
+const { EventEmitter } = ChromeUtils.import(
+  "resource://gre/modules/EventEmitter.jsm"
+);
 const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
@@ -23,6 +27,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   EventDispatcher: "resource://gre/modules/Messaging.jsm",
   Extension: "resource://gre/modules/Extension.jsm",
   GeckoViewTabBridge: "resource://gre/modules/GeckoViewTab.jsm",
+  Management: "resource://gre/modules/Extension.jsm",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -235,7 +240,7 @@ function exportExtension(aAddon, aPermissions, aSourceURI) {
     icons,
     version,
     optionsURL,
-    optionsBrowserStyle,
+    optionsType,
     isRecommended,
     blocklistState,
     userDisabled,
@@ -251,8 +256,7 @@ function exportExtension(aAddon, aPermissions, aSourceURI) {
     creatorName = name;
     creatorURL = url;
   }
-  const openOptionsPageInTab =
-    optionsBrowserStyle === AddonManager.OPTIONS_TYPE_TAB;
+  const openOptionsPageInTab = optionsType === AddonManager.OPTIONS_TYPE_TAB;
   const disabledFlags = [];
   if (userDisabled) {
     disabledFlags.push("userDisabled");
@@ -318,12 +322,21 @@ class ExtensionInstallListener {
   }
 
   onInstallEnded(aInstall, aAddon) {
-    const extension = exportExtension(
-      aAddon,
-      aAddon.userPermissions,
-      aInstall.sourceURI
-    );
-    this.resolve({ extension });
+    const addonId = aAddon.id;
+    const { sourceURI } = aInstall;
+    const onReady = (name, { id }) => {
+      if (id != addonId) {
+        return;
+      }
+      Management.off("ready", onReady);
+      const extension = exportExtension(
+        aAddon,
+        aAddon.userPermissions,
+        sourceURI
+      );
+      this.resolve({ extension });
+    };
+    Management.on("ready", onReady);
   }
 }
 
@@ -363,6 +376,35 @@ class ExtensionPromptObserver {
 }
 
 new ExtensionPromptObserver();
+
+class MobileWindowTracker extends EventEmitter {
+  constructor() {
+    super();
+    this._topWindow = null;
+  }
+
+  get topWindow() {
+    if (this._topWindow) {
+      return this._topWindow.get();
+    }
+    return null;
+  }
+
+  setTabActive(aWindow, aActive) {
+    const tab = aWindow.BrowserApp.selectedTab;
+    tab.active = aActive;
+
+    if (aActive) {
+      this._topWindow = Cu.getWeakReference(aWindow);
+      this.emit("tab-activated", {
+        windowId: aWindow.windowUtils.outerWindowID,
+        tabId: tab.id,
+      });
+    }
+  }
+}
+
+var mobileWindowTracker = new MobileWindowTracker();
 
 var GeckoViewWebExtension = {
   async registerWebExtension(aId, aUri, allowContentMessaging, aCallback) {

@@ -315,9 +315,11 @@ already_AddRefed<nsILoadContext> BrowserParent::GetLoadContext() {
     bool isPrivate = mChromeFlags & nsIWebBrowserChrome::CHROME_PRIVATE_WINDOW;
     SetPrivateBrowsingAttributes(isPrivate);
     bool useTrackingProtection = false;
-    nsCOMPtr<nsIDocShell> docShell = mFrameElement->OwnerDoc()->GetDocShell();
-    if (docShell) {
-      docShell->GetUseTrackingProtection(&useTrackingProtection);
+    if (mFrameElement) {
+      nsCOMPtr<nsIDocShell> docShell = mFrameElement->OwnerDoc()->GetDocShell();
+      if (docShell) {
+        docShell->GetUseTrackingProtection(&useTrackingProtection);
+      }
     }
     loadContext = new LoadContext(
         GetOwnerElement(), true /* aIsContent */, isPrivate,
@@ -1332,34 +1334,6 @@ IPCResult BrowserParent::RecvNewWindowGlobal(
   BindPWindowGlobalEndpoint(std::move(aEndpoint), wgp);
   wgp->Init(aInit);
   return IPC_OK();
-}
-
-IPCResult BrowserParent::RecvPBrowserBridgeConstructor(
-    PBrowserBridgeParent* aActor, const nsString& aName,
-    const nsString& aRemoteType, BrowsingContext* aBrowsingContext,
-    const uint32_t& aChromeFlags, const TabId& aTabId) {
-  // The initial about:blank document loaded in the new iframe will have a newly
-  // created null principal. This is done in the parent process so we don't have
-  // to trust a principal from content.
-  nsCOMPtr<nsIPrincipal> initialPrincipal =
-      NullPrincipal::CreateWithInheritedAttributes(OriginAttributesRef(),
-                                                   /* isFirstParty */ false);
-  WindowGlobalInit windowInit = WindowGlobalActor::AboutBlankInitializer(
-      aBrowsingContext, initialPrincipal);
-
-  nsresult rv = static_cast<BrowserBridgeParent*>(aActor)->Init(
-      aName, aRemoteType, windowInit, aChromeFlags, aTabId);
-  if (NS_FAILED(rv)) {
-    return IPC_FAIL(this, "Failed to construct BrowserBridgeParent");
-  }
-  return IPC_OK();
-}
-
-already_AddRefed<PBrowserBridgeParent> BrowserParent::AllocPBrowserBridgeParent(
-    const nsString& aName, const nsString& aRemoteType,
-    BrowsingContext* aBrowsingContext, const uint32_t& aChromeFlags,
-    const TabId& aTabId) {
-  return do_AddRef(new BrowserBridgeParent());
 }
 
 void BrowserParent::SendMouseEvent(const nsAString& aType, float aX, float aY,

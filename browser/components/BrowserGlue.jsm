@@ -1673,14 +1673,6 @@ BrowserGlue.prototype = {
     );
     Services.telemetry.getHistogramById("COOKIE_BEHAVIOR").add(cookieBehavior);
 
-    let exceptions = 0;
-    for (let permission of Services.perms.all) {
-      if (permission.type == "trackingprotection") {
-        exceptions++;
-      }
-    }
-    Services.telemetry.scalarSet("contentblocking.exceptions", exceptions);
-
     let fpEnabled = Services.prefs.getBoolPref(
       "privacy.trackingprotection.fingerprinting.enabled"
     );
@@ -2121,34 +2113,6 @@ BrowserGlue.prototype = {
       Services.tm.idleDispatchToMainThread(() => {
         Services.obs.notifyObservers(null, "remote-startup-requested");
       });
-    }
-
-    // Temporary for Delegated Credentials Study:
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1582591
-    // Disable in automation and non-nightly builds.
-    if (!Cu.isInAutomation && AppConstants.NIGHTLY_BUILD) {
-      let env = Cc["@mozilla.org/process/environment;1"].getService(
-        Ci.nsIEnvironment
-      );
-
-      // Disable under xpcshell-test.
-      if (!env.exists("XPCSHELL_TEST_PROFILE_DIR")) {
-        let { DelegatedCredsExperiment } = ChromeUtils.import(
-          "resource:///modules/DelegatedCredsExperiment.jsm"
-        );
-
-        let currentDate = new Date();
-        let expiryDate = new Date("2020-01-10 0:00:00");
-        if (currentDate < expiryDate) {
-          Services.tm.idleDispatchToMainThread(() => {
-            DelegatedCredsExperiment.runTest();
-          });
-        } else {
-          Services.tm.idleDispatchToMainThread(() => {
-            DelegatedCredsExperiment.uninstall();
-          });
-        }
-      }
     }
 
     // Marionette needs to be initialized as very last step
@@ -2756,7 +2720,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 91;
+    const UI_VERSION = 92;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     if (!Services.prefs.prefHasUserValue("browser.migration.version")) {
@@ -3240,6 +3204,20 @@ BrowserGlue.prototype = {
         Services.prefs.setIntPref(
           "network.proxy.socks_port",
           Services.prefs.getIntPref("network.proxy.backup.socks_port", 0)
+        );
+      }
+    }
+
+    if (currentUIVersion < 92) {
+      // privacy.userContext.longPressBehavior pref was renamed and changed to a boolean
+      let longpress = Services.prefs.getIntPref(
+        "privacy.userContext.longPressBehavior",
+        0
+      );
+      if (longpress == 1) {
+        Services.prefs.setBoolPref(
+          "privacy.userContext.newTabContainerOnLeftClick.enabled",
+          true
         );
       }
     }

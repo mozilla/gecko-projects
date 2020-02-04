@@ -2299,8 +2299,8 @@ nsINode* nsContentUtils::Retarget(nsINode* aTargetA, nsINode* aTargetB) {
 }
 
 // static
-nsresult nsContentUtils::GetAncestors(nsINode* aNode,
-                                      nsTArray<nsINode*>& aArray) {
+nsresult nsContentUtils::GetInclusiveAncestors(nsINode* aNode,
+                                               nsTArray<nsINode*>& aArray) {
   while (aNode) {
     aArray.AppendElement(aNode);
     aNode = aNode->GetParentNode();
@@ -2309,7 +2309,7 @@ nsresult nsContentUtils::GetAncestors(nsINode* aNode,
 }
 
 // static
-nsresult nsContentUtils::GetAncestorsAndOffsets(
+nsresult nsContentUtils::GetInclusiveAncestorsAndOffsets(
     nsINode* aNode, int32_t aOffset, nsTArray<nsIContent*>* aAncestorNodes,
     nsTArray<int32_t>* aAncestorOffsets) {
   NS_ENSURE_ARG_POINTER(aNode);
@@ -4179,19 +4179,6 @@ nsresult nsContentUtils::DispatchInputEvent(
                "The event target may have editor, but we've not known it yet.");
   }
 #endif  // #ifdef DEBUG
-
-  // If the event target is an <input> element, we need to update
-  // validationMessage value before dispatching "input" event because
-  // "input" event listener may need to check it.
-  if (aEventMessage == eEditorInput) {
-    HTMLInputElement* inputElement =
-        HTMLInputElement::FromNode(aEventTargetElement);
-    if (inputElement) {
-      MOZ_KnownLive(inputElement)->MaybeUpdateAllValidityStates(true);
-      // XXX Should we stop dispatching "input" event if the target is removed
-      //     from the DOM tree?
-    }
-  }
 
   if (!useInputEvent) {
     MOZ_ASSERT(aEventMessage == eEditorInput);
@@ -6612,9 +6599,10 @@ bool nsContentUtils::ChannelShouldInheritPrincipal(
 }
 
 /* static */
-bool nsContentUtils::IsCutCopyAllowed(nsIPrincipal& aSubjectPrincipal) {
-  if (StaticPrefs::dom_allow_cut_copy() &&
-      UserActivation::IsHandlingUserInput()) {
+bool nsContentUtils::IsCutCopyAllowed(Document* aDocument,
+                                      nsIPrincipal& aSubjectPrincipal) {
+  if (StaticPrefs::dom_allow_cut_copy() && aDocument &&
+      aDocument->HasValidTransientUserGestureActivation()) {
     return true;
   }
 

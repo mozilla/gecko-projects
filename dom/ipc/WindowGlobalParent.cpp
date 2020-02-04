@@ -248,19 +248,20 @@ IPCResult WindowGlobalParent::RecvSetHasBeforeUnload(bool aHasBeforeUnload) {
 }
 
 IPCResult WindowGlobalParent::RecvDestroy() {
+  // Make a copy so that we can avoid potential iterator invalidation when
+  // calling the user-provided Destroy() methods.
+  nsTArray<RefPtr<JSWindowActorParent>> windowActors(mWindowActors.Count());
+  for (auto iter = mWindowActors.Iter(); !iter.Done(); iter.Next()) {
+    windowActors.AppendElement(iter.UserData());
+  }
+
+  for (auto& windowActor : windowActors) {
+    windowActor->StartDestroy();
+  }
+
   if (CanSend()) {
     RefPtr<BrowserParent> browserParent = GetBrowserParent();
     if (!browserParent || !browserParent->IsDestroyed()) {
-      // Make a copy so that we can avoid potential iterator invalidation when
-      // calling the user-provided Destroy() methods.
-      nsTArray<RefPtr<JSWindowActorParent>> windowActors(mWindowActors.Count());
-      for (auto iter = mWindowActors.Iter(); !iter.Done(); iter.Next()) {
-        windowActors.AppendElement(iter.UserData());
-      }
-
-      for (auto& windowActor : windowActors) {
-        windowActor->StartDestroy();
-      }
       Unused << Send__delete__(this);
     }
   }
@@ -583,6 +584,27 @@ void WindowGlobalParent::ActorDestroy(ActorDestroyReason aWhy) {
     auto reject = [self](mozilla::ipc::ResponseRejectReason) {};
     otherContent->SendDiscardWindowContext(InnerWindowId(), resolve, reject);
   });
+
+  // Report content blocking log when destroyed.
+  // There shouldn't have any content blocking log when a documnet is loaded in
+  // the parent process(See NotifyContentBlockingeEvent), so we could skip
+  // reporting log when it is in-process.
+  if (!mInProcess) {
+    RefPtr<BrowserParent> browserParent =
+        static_cast<BrowserParent*>(Manager());
+    if (browserParent) {
+      nsCOMPtr<nsILoadContext> loadContext = browserParent->GetLoadContext();
+      if (loadContext && !loadContext->UsePrivateBrowsing() &&
+          BrowsingContext()->IsTopContent()) {
+        GetContentBlockingLog()->ReportLog(DocumentPrincipal());
+
+        if (mDocumentURI && (net::SchemeIsHTTP(mDocumentURI) ||
+                             net::SchemeIsHTTPS(mDocumentURI))) {
+          GetContentBlockingLog()->ReportOrigins();
+        }
+      }
+    }
+  }
 
   // Destroy our JSWindowActors, and reject any pending queries.
   nsRefPtrHashtable<nsStringHashKey, JSWindowActorParent> windowActors;

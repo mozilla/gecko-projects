@@ -224,6 +224,11 @@ bool InvokeFunction(JSContext* cx, HandleObject obj, bool constructing,
 
     RootedValue newTarget(cx, argvWithoutThis[argc]);
 
+    // See CreateThisFromIon for why this can be NullValue.
+    if (thisv.isNull()) {
+      thisv.setMagic(JS_IS_CONSTRUCTING);
+    }
+
     // If |this| hasn't been created, or is JS_UNINITIALIZED_LEXICAL,
     // we can use normal construction code without creating an extraneous
     // object.
@@ -681,25 +686,60 @@ bool GetIntrinsicValue(JSContext* cx, HandlePropertyName name,
   return true;
 }
 
-bool CreateThis(JSContext* cx, HandleObject callee, HandleObject newTarget,
-                MutableHandleValue rval) {
+bool CreateThisFromIC(JSContext* cx, HandleObject callee,
+                      HandleObject newTarget, MutableHandleValue rval) {
+  HandleFunction fun = callee.as<JSFunction>();
+  MOZ_ASSERT(fun->isInterpreted());
+  MOZ_ASSERT(fun->isConstructor());
+
+  // CreateThis expects rval to be this magic value.
   rval.set(MagicValue(JS_IS_CONSTRUCTING));
 
-  if (callee->is<JSFunction>()) {
-    RootedFunction fun(cx, &callee->as<JSFunction>());
-    if (fun->isInterpreted() && fun->isConstructor()) {
-      JSScript* script = JSFunction::getOrCreateScript(cx, fun);
-      if (!script) {
-        return false;
-      }
-      if (!js::CreateThis(cx, fun, script, newTarget, GenericObject, rval)) {
-        return false;
-      }
-      MOZ_ASSERT_IF(rval.isObject(),
-                    fun->realm() == rval.toObject().nonCCWRealm());
+  if (!js::CreateThis(cx, fun, newTarget, GenericObject, rval)) {
+    return false;
+  }
+
+  MOZ_ASSERT_IF(rval.isObject(), fun->realm() == rval.toObject().nonCCWRealm());
+  return true;
+}
+
+bool CreateThisFromIon(JSContext* cx, HandleObject callee,
+                       HandleObject newTarget, MutableHandleValue rval) {
+  // Return JS_IS_CONSTRUCTING for cases not supported by the inline call path.
+  rval.set(MagicValue(JS_IS_CONSTRUCTING));
+
+  if (!callee->is<JSFunction>()) {
+    return true;
+  }
+
+  HandleFunction fun = callee.as<JSFunction>();
+  if (!fun->isInterpreted() || !fun->isConstructor()) {
+    return true;
+  }
+
+  // If newTarget is not a function or is a function with a possibly-getter
+  // .prototype property, return NullValue to signal to LCallGeneric that it has
+  // to take the slow path. Note that we return NullValue instead of a
+  // MagicValue only because it's easier and faster to check for in JIT code
+  // (if we returned a MagicValue, JIT code would have to check both the type
+  // tag and the JSWhyMagic payload).
+  if (!fun->constructorNeedsUninitializedThis()) {
+    if (!newTarget->is<JSFunction>()) {
+      rval.setNull();
+      return true;
+    }
+    JSFunction* newTargetFun = &newTarget->as<JSFunction>();
+    if (!newTargetFun->hasNonConfigurablePrototypeDataProperty()) {
+      rval.setNull();
+      return true;
     }
   }
 
+  if (!js::CreateThis(cx, fun, newTarget, GenericObject, rval)) {
+    return false;
+  }
+
+  MOZ_ASSERT_IF(rval.isObject(), fun->realm() == rval.toObject().nonCCWRealm());
   return true;
 }
 

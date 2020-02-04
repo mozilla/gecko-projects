@@ -33,6 +33,10 @@ pub const MAX_BLUR_RADIUS: f32 = 300.;
 /// events.
 pub type ItemTag = (u64, u16);
 
+/// An identifier used to refer to previously sent display items. Currently it
+/// refers to individual display items, but this may change later.
+pub type ItemKey = u16;
+
 bitflags! {
     #[repr(C)]
     #[derive(Deserialize, MallocSizeOf, Serialize, PeekPoke)]
@@ -43,6 +47,10 @@ bitflags! {
         const IS_SCROLLBAR_CONTAINER = 1 << 1;
         /// If set, this primitive represents a scroll bar thumb
         const IS_SCROLLBAR_THUMB = 1 << 2;
+        /// This is used as a performance hint - this primitive may be promoted to a native
+        /// compositor surface under certain (implementation specific) conditions. This
+        /// is typically used for large videos, and canvas elements.
+        const PREFER_COMPOSITOR_SURFACE = 1 << 3;
     }
 }
 
@@ -70,6 +78,8 @@ pub struct CommonItemProperties {
     pub hit_info: Option<ItemTag>,
     /// Various flags describing properties of this primitive.
     pub flags: PrimitiveFlags,
+    /// The unique id of this display item.
+    pub item_key: Option<ItemKey>
 }
 
 impl CommonItemProperties {
@@ -84,6 +94,7 @@ impl CommonItemProperties {
             clip_id: space_and_clip.clip_id,
             hit_info: None,
             flags: PrimitiveFlags::default(),
+            item_key: None,
         }
     }
 }
@@ -152,6 +163,8 @@ pub enum DisplayItem {
     PopReferenceFrame,
     PopStackingContext,
     PopAllShadows,
+
+    ReuseItem(ItemKey),
 }
 
 /// This is a "complete" version of the DisplayItem, with all implicit trailing
@@ -192,6 +205,8 @@ pub enum DebugDisplayItem {
     PopReferenceFrame,
     PopStackingContext,
     PopAllShadows,
+
+    ReuseItem(ItemKey),
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
@@ -1423,7 +1438,7 @@ impl SpatialId {
 /// every pipeline, which always has an external id.
 ///
 /// When setting display lists with the `preserve_frame_state` this id is used to preserve scroll
-/// offsets between different sets of ClipScrollNodes which are ScrollFrames.
+/// offsets between different sets of SpatialNodes which are ScrollFrames.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, PeekPoke)]
 #[repr(C)]
 pub struct ExternalScrollId(pub u64, pub PipelineId);
@@ -1465,6 +1480,7 @@ impl DisplayItem {
             DisplayItem::Rectangle(..) => "rectangle",
             DisplayItem::ScrollFrame(..) => "scroll_frame",
             DisplayItem::SetGradientStops => "set_gradient_stops",
+            DisplayItem::ReuseItem(..) => "reuse_item",
             DisplayItem::StickyFrame(..) => "sticky_frame",
             DisplayItem::Text(..) => "text",
             DisplayItem::YuvImage(..) => "yuv_image",

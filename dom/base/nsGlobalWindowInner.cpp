@@ -75,6 +75,7 @@
 // Helper Classes
 #include "nsJSUtils.h"
 #include "jsapi.h"
+#include "jsfriendapi.h"
 #include "js/Warnings.h"  // JS::WarnASCII
 #include "js/Wrapper.h"
 #include "nsCharSeparatedTokenizer.h"
@@ -846,6 +847,7 @@ nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow,
       mXRPermissionGranted(false),
       mWasCurrentInnerWindow(false),
       mHasSeenGamepadInput(false),
+      mHintedWasLoading(false),
       mSuspendDepth(0),
       mFreezeDepth(0),
 #ifdef DEBUG
@@ -955,6 +957,7 @@ void nsGlobalWindowInner::Init() {
 
 nsGlobalWindowInner::~nsGlobalWindowInner() {
   AssertIsOnMainThread();
+  MOZ_ASSERT(!mHintedWasLoading);
 
   if (IsChromeWindow()) {
     MOZ_ASSERT(mCleanMessageManager,
@@ -1225,6 +1228,8 @@ void nsGlobalWindowInner::FreeInnerObjects() {
   mWindowGlobalChild = nullptr;
 
   mIntlUtils = nullptr;
+
+  HintIsLoading(false);
 }
 
 //*****************************************************************************
@@ -2547,6 +2552,19 @@ void nsGlobalWindowInner::SetActiveLoadingState(bool aIsLoading) {
   if (!nsGlobalWindowInner::Cast(this)->IsChromeWindow()) {
     mTimeoutManager->SetLoading(aIsLoading);
   }
+
+  HintIsLoading(aIsLoading);
+}
+
+void nsGlobalWindowInner::HintIsLoading(bool aIsLoading) {
+  // Hint to tell the JS GC to use modified triggers during pageload.
+  if (mHintedWasLoading != aIsLoading) {
+    using namespace js::gc;
+    SetPerformanceHint(
+        danger::GetJSContext(),
+        aIsLoading ? PerformanceHint::InPageLoad : PerformanceHint::Normal);
+    mHintedWasLoading = aIsLoading;
+  }
 }
 
 // nsISpeechSynthesisGetter
@@ -3641,8 +3659,7 @@ void nsGlobalWindowInner::ScrollByLines(int32_t numLines,
                                 ? ScrollMode::SmoothMsd
                                 : ScrollMode::Instant;
 
-    sf->ScrollBy(nsIntPoint(0, numLines), nsIScrollableFrame::LINES,
-                 scrollMode);
+    sf->ScrollBy(nsIntPoint(0, numLines), ScrollUnit::LINES, scrollMode);
   }
 }
 
@@ -3658,8 +3675,7 @@ void nsGlobalWindowInner::ScrollByPages(int32_t numPages,
                                 ? ScrollMode::SmoothMsd
                                 : ScrollMode::Instant;
 
-    sf->ScrollBy(nsIntPoint(0, numPages), nsIScrollableFrame::PAGES,
-                 scrollMode);
+    sf->ScrollBy(nsIntPoint(0, numPages), ScrollUnit::PAGES, scrollMode);
   }
 }
 
@@ -5251,6 +5267,8 @@ void nsGlobalWindowInner::FreezeInternal() {
   MOZ_DIAGNOSTIC_ASSERT(IsCurrentInnerWindow());
   MOZ_DIAGNOSTIC_ASSERT(IsSuspended());
 
+  HintIsLoading(false);
+
   CallOnInProcessChildren(&nsGlobalWindowInner::FreezeInternal);
 
   mFreezeDepth += 1;
@@ -6718,7 +6736,7 @@ already_AddRefed<nsWindowRoot> nsGlobalWindowInner::GetWindowRoot(
   FORWARD_TO_OUTER_OR_THROW(GetWindowRootOuter, (), aError, nullptr);
 }
 
-void nsGlobalWindowInner::SetCursor(const nsAString& aCursor,
+void nsGlobalWindowInner::SetCursor(const nsACString& aCursor,
                                     ErrorResult& aError) {
   FORWARD_TO_OUTER_OR_THROW(SetCursorOuter, (aCursor, aError), aError, );
 }
@@ -7046,24 +7064,19 @@ already_AddRefed<Promise> nsGlobalWindowInner::CreateImageBitmap(
                              Some(gfx::IntRect(aSx, aSy, aSw, aSh)), aRv);
 }
 
-mozilla::dom::TabGroup* nsGlobalWindowInner::TabGroupInner() {
+mozilla::dom::TabGroup* nsGlobalWindowInner::MaybeTabGroupInner() {
   // If we don't have a TabGroup yet, try to get it from the outer window and
   // cache it.
   if (!mTabGroup) {
     nsGlobalWindowOuter* outer = GetOuterWindowInternal();
-    // This will never be called without either an outer window, or a cached tab
-    // group. This is because of the following:
-    // * This method is only called on inner windows
-    // * This method is called as a document is attached to it's script global
-    //   by the document
-    // * Inner windows are created in nsGlobalWindowInner::SetNewDocument, which
-    //   immediately sets a document, which will call this method, causing
-    //   the TabGroup to be cached.
-    MOZ_RELEASE_ASSERT(
-        outer, "Inner window without outer window has no cached tab group!");
-    mTabGroup = outer->TabGroup();
+    if (!outer) {
+      return nullptr;
+    }
+    mTabGroup = outer->MaybeTabGroup();
+    if (!mTabGroup) {
+      return nullptr;
+    }
   }
-  MOZ_ASSERT(mTabGroup);
 
 #ifdef DEBUG
   nsGlobalWindowOuter* outer = GetOuterWindowInternal();
@@ -7071,6 +7084,24 @@ mozilla::dom::TabGroup* nsGlobalWindowInner::TabGroupInner() {
 #endif
 
   return mTabGroup;
+}
+
+mozilla::dom::TabGroup* nsGlobalWindowInner::TabGroupInner() {
+  // This will never be called without either an outer window, or a cached tab
+  // group. This is because of the following:
+  // * This method is only called on inner windows
+  // * This method is called as a document is attached to its script global
+  //   by the document
+  // * Inner windows are created in nsGlobalWindowInner::SetNewDocument, which
+  //   immediately sets a document, which will call this method, causing
+  //   the TabGroup to be cached.
+  MOZ_RELEASE_ASSERT(
+      mTabGroup || GetOuterWindowInternal(),
+      "Inner window without outer window has no cached tab group!");
+
+  mozilla::dom::TabGroup* tabGroup = MaybeTabGroupInner();
+  MOZ_RELEASE_ASSERT(tabGroup);
+  return tabGroup;
 }
 
 nsresult nsGlobalWindowInner::Dispatch(
@@ -7198,6 +7229,10 @@ void nsGlobalWindowInner::StorageAccessGranted() {
 
 mozilla::dom::TabGroup* nsPIDOMWindowInner::TabGroup() {
   return nsGlobalWindowInner::Cast(this)->TabGroupInner();
+}
+
+mozilla::dom::TabGroup* nsPIDOMWindowInner::MaybeTabGroup() {
+  return nsGlobalWindowInner::Cast(this)->MaybeTabGroupInner();
 }
 
 /* static */

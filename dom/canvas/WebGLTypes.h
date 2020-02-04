@@ -650,7 +650,6 @@ struct GetUniformData final {
 struct ICRData {
   gfx::IntSize size;
   bool hasAlpha;
-  bool supportsAlpha;
   bool isPremultAlpha;
 };
 
@@ -884,8 +883,8 @@ inline Range<T> MakeRange(RawBuffer<T>& from) {
 template <typename T>
 inline auto MakeRangeAbv(const T& abv)
     -> Range<const typename T::element_type> {
-  abv.ComputeLengthAndData();
-  return {abv.DataAllowShared(), abv.LengthAllowShared()};
+  abv.ComputeState();
+  return {abv.Data(), abv.Length()};
 }
 
 Maybe<Range<const uint8_t>> GetRangeFromView(const dom::ArrayBufferView& view,

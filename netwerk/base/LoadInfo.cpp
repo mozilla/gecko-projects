@@ -90,7 +90,6 @@ LoadInfo::LoadInfo(
       mFrameBrowsingContextID(0),
       mInitialSecurityCheckDone(false),
       mIsThirdPartyContext(false),
-      mIsDocshellReload(false),
       mIsFormSubmission(false),
       mSendCSPViolationEvents(true),
       mRequestBlockingReason(BLOCKING_REASON_NONE),
@@ -100,6 +99,7 @@ LoadInfo::LoadInfo(
       mServiceWorkerTaintingSynthesized(false),
       mDocumentHasUserInteracted(false),
       mDocumentHasLoaded(false),
+      mAllowListFutureDocumentsCreatedFromThisRedirectChain(false),
       mSkipContentSniffing(false),
       mIsFromProcessingFrameAttributes(false) {
   MOZ_ASSERT(mLoadingPrincipal);
@@ -352,7 +352,6 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
       mFrameBrowsingContextID(0),
       mInitialSecurityCheckDone(false),
       mIsThirdPartyContext(false),  // NB: TYPE_DOCUMENT implies !third-party.
-      mIsDocshellReload(false),
       mIsFormSubmission(false),
       mSendCSPViolationEvents(true),
       mRequestBlockingReason(BLOCKING_REASON_NONE),
@@ -362,6 +361,7 @@ LoadInfo::LoadInfo(nsPIDOMWindowOuter* aOuterWindow,
       mServiceWorkerTaintingSynthesized(false),
       mDocumentHasUserInteracted(false),
       mDocumentHasLoaded(false),
+      mAllowListFutureDocumentsCreatedFromThisRedirectChain(false),
       mSkipContentSniffing(false),
       mIsFromProcessingFrameAttributes(false) {
   // Top-level loads are never third-party
@@ -462,7 +462,6 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
       mFrameBrowsingContextID(rhs.mFrameBrowsingContextID),
       mInitialSecurityCheckDone(rhs.mInitialSecurityCheckDone),
       mIsThirdPartyContext(rhs.mIsThirdPartyContext),
-      mIsDocshellReload(rhs.mIsDocshellReload),
       mIsFormSubmission(rhs.mIsFormSubmission),
       mSendCSPViolationEvents(rhs.mSendCSPViolationEvents),
       mOriginAttributes(rhs.mOriginAttributes),
@@ -481,6 +480,8 @@ LoadInfo::LoadInfo(const LoadInfo& rhs)
       mServiceWorkerTaintingSynthesized(false),
       mDocumentHasUserInteracted(rhs.mDocumentHasUserInteracted),
       mDocumentHasLoaded(rhs.mDocumentHasLoaded),
+      mAllowListFutureDocumentsCreatedFromThisRedirectChain(
+          rhs.mAllowListFutureDocumentsCreatedFromThisRedirectChain),
       mCspNonce(rhs.mCspNonce),
       mSkipContentSniffing(rhs.mSkipContentSniffing),
       mIsFromProcessingFrameAttributes(rhs.mIsFromProcessingFrameAttributes) {}
@@ -507,8 +508,8 @@ LoadInfo::LoadInfo(
     uint64_t aTopOuterWindowID, uint64_t aFrameOuterWindowID,
     uint64_t aBrowsingContextID, uint64_t aFrameBrowsingContextID,
     bool aInitialSecurityCheckDone, bool aIsThirdPartyContext,
-    bool aIsDocshellReload, bool aIsFormSubmission,
-    bool aSendCSPViolationEvents, const OriginAttributes& aOriginAttributes,
+    bool aIsFormSubmission, bool aSendCSPViolationEvents,
+    const OriginAttributes& aOriginAttributes,
     RedirectHistoryArray& aRedirectChainIncludingInternalRedirects,
     RedirectHistoryArray& aRedirectChain,
     nsTArray<nsCOMPtr<nsIPrincipal>>&& aAncestorPrincipals,
@@ -516,9 +517,10 @@ LoadInfo::LoadInfo(
     const nsTArray<nsCString>& aCorsUnsafeHeaders, bool aForcePreflight,
     bool aIsPreflight, bool aLoadTriggeredFromExternal,
     bool aServiceWorkerTaintingSynthesized, bool aDocumentHasUserInteracted,
-    bool aDocumentHasLoaded, const nsAString& aCspNonce,
-    bool aSkipContentSniffing, uint32_t aRequestBlockingReason,
-    nsINode* aLoadingContext)
+    bool aDocumentHasLoaded,
+    bool aAllowListFutureDocumentsCreatedFromThisRedirectChain,
+    const nsAString& aCspNonce, bool aSkipContentSniffing,
+    uint32_t aRequestBlockingReason, nsINode* aLoadingContext)
     : mLoadingPrincipal(aLoadingPrincipal),
       mTriggeringPrincipal(aTriggeringPrincipal),
       mPrincipalToInherit(aPrincipalToInherit),
@@ -557,7 +559,6 @@ LoadInfo::LoadInfo(
       mFrameBrowsingContextID(aFrameBrowsingContextID),
       mInitialSecurityCheckDone(aInitialSecurityCheckDone),
       mIsThirdPartyContext(aIsThirdPartyContext),
-      mIsDocshellReload(aIsDocshellReload),
       mIsFormSubmission(aIsFormSubmission),
       mSendCSPViolationEvents(aSendCSPViolationEvents),
       mOriginAttributes(aOriginAttributes),
@@ -571,6 +572,8 @@ LoadInfo::LoadInfo(
       mServiceWorkerTaintingSynthesized(aServiceWorkerTaintingSynthesized),
       mDocumentHasUserInteracted(aDocumentHasUserInteracted),
       mDocumentHasLoaded(aDocumentHasLoaded),
+      mAllowListFutureDocumentsCreatedFromThisRedirectChain(
+          aAllowListFutureDocumentsCreatedFromThisRedirectChain),
       mCspNonce(aCspNonce),
       mSkipContentSniffing(aSkipContentSniffing),
       mIsFromProcessingFrameAttributes(false) {
@@ -877,18 +880,6 @@ LoadInfo::GetDontFollowRedirects(bool* aResult) {
 NS_IMETHODIMP
 LoadInfo::GetLoadErrorPage(bool* aResult) {
   *aResult = (mSecurityFlags & nsILoadInfo::SEC_LOAD_ERROR_PAGE);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-LoadInfo::GetIsDocshellReload(bool* aResult) {
-  *aResult = mIsDocshellReload;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-LoadInfo::SetIsDocshellReload(bool aValue) {
-  mIsDocshellReload = aValue;
   return NS_OK;
 }
 
@@ -1331,6 +1322,20 @@ LoadInfo::GetDocumentHasLoaded(bool* aDocumentHasLoaded) {
 NS_IMETHODIMP
 LoadInfo::SetDocumentHasLoaded(bool aDocumentHasLoaded) {
   mDocumentHasLoaded = aDocumentHasLoaded;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::GetAllowListFutureDocumentsCreatedFromThisRedirectChain(
+    bool* aValue) {
+  MOZ_ASSERT(aValue);
+  *aValue = mAllowListFutureDocumentsCreatedFromThisRedirectChain;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+LoadInfo::SetAllowListFutureDocumentsCreatedFromThisRedirectChain(bool aValue) {
+  mAllowListFutureDocumentsCreatedFromThisRedirectChain = aValue;
   return NS_OK;
 }
 

@@ -69,6 +69,23 @@ inline StyleOwnedSlice<T>::StyleOwnedSlice(StyleOwnedSlice&& aOther)
 }
 
 template <typename T>
+inline StyleOwnedSlice<T>::StyleOwnedSlice(Vector<T>&& aVector)
+    : StyleOwnedSlice() {
+  if (!aVector.length()) {
+    return;
+  }
+
+  // We could handle this if Vector provided the relevant APIs, see bug 1610702.
+  MOZ_DIAGNOSTIC_ASSERT(aVector.length() == aVector.capacity(),
+                        "Shouldn't over-allocate");
+  len = aVector.length();
+  ptr = aVector.extractRawBuffer();
+  MOZ_ASSERT(ptr,
+             "How did extractRawBuffer return null if we're not using inline "
+             "capacity?");
+}
+
+template <typename T>
 inline StyleOwnedSlice<T>& StyleOwnedSlice<T>::operator=(
     const StyleOwnedSlice& aOther) {
   CopyFrom(aOther);
@@ -546,55 +563,43 @@ LengthPercentage LengthPercentage::FromPercentage(float aPercentage) {
   return l;
 }
 
-CSSCoord LengthPercentage::LengthInCSSPixels() const {
-  if (IsLength()) {
-    return AsLength().ToCSSPixels();
-  }
-  if (IsPercentage()) {
-    return 0;
-  }
-  return AsCalc().length.ToCSSPixels();
-}
-
-float LengthPercentage::Percentage() const {
-  if (IsLength()) {
-    return 0;
-  }
-  if (IsPercentage()) {
-    return AsPercentage()._0;
-  }
-  return AsCalc().percentage._0;
-}
-
 bool LengthPercentage::HasPercent() const {
-  return IsPercentage() || (IsCalc() && AsCalc().has_percentage);
+  return IsPercentage() || IsCalc();
 }
 
-bool LengthPercentage::ConvertsToLength() const { return !HasPercent(); }
+bool LengthPercentage::ConvertsToLength() const { return IsLength(); }
 
 nscoord LengthPercentage::ToLength() const {
   MOZ_ASSERT(ConvertsToLength());
-  return IsLength() ? AsLength().ToAppUnits() : AsCalc().length.ToAppUnits();
+  return AsLength().ToAppUnits();
+}
+
+CSSCoord LengthPercentage::ToLengthInCSSPixels() const {
+  MOZ_ASSERT(ConvertsToLength());
+  return AsLength().ToCSSPixels();
 }
 
 bool LengthPercentage::ConvertsToPercentage() const {
   if (IsPercentage()) {
     return true;
   }
-  if (IsCalc()) {
-    auto& calc = AsCalc();
-    return calc.has_percentage && calc.length.IsZero();
-  }
+  MOZ_ASSERT(IsLength() || !AsCalc().length.IsZero(),
+             "Should've been simplified to a percentage");
   return false;
 }
 
 float LengthPercentage::ToPercentage() const {
   MOZ_ASSERT(ConvertsToPercentage());
-  return Percentage();
+  return AsPercentage()._0;
 }
 
 bool LengthPercentage::HasLengthAndPercentage() const {
-  return IsCalc() && !ConvertsToLength() && !ConvertsToPercentage();
+  if (!IsCalc()) {
+    return false;
+  }
+  MOZ_ASSERT(!ConvertsToLength() && !ConvertsToPercentage(),
+             "Should've been simplified earlier");
+  return true;
 }
 
 bool LengthPercentage::IsDefinitelyZero() const {
@@ -604,12 +609,20 @@ bool LengthPercentage::IsDefinitelyZero() const {
   if (IsPercentage()) {
     return AsPercentage()._0 == 0.0f;
   }
-  auto& calc = AsCalc();
-  return calc.length.IsZero() && calc.percentage._0 == 0.0f;
+  MOZ_ASSERT(!AsCalc().length.IsZero(),
+             "Should've been simplified to a percentage");
+  return false;
 }
 
 CSSCoord LengthPercentage::ResolveToCSSPixels(CSSCoord aPercentageBasis) const {
-  return LengthInCSSPixels() + Percentage() * aPercentageBasis;
+  if (IsLength()) {
+    return AsLength().ToCSSPixels();
+  }
+  if (IsPercentage()) {
+    return AsPercentage()._0 * aPercentageBasis;
+  }
+  auto& calc = AsCalc();
+  return calc.length.ToCSSPixels() + calc.percentage._0 * aPercentageBasis;
 }
 
 template <typename T>
@@ -617,7 +630,7 @@ CSSCoord LengthPercentage::ResolveToCSSPixelsWith(T aPercentageGetter) const {
   static_assert(std::is_same<decltype(aPercentageGetter()), CSSCoord>::value,
                 "Should return CSS pixels");
   if (ConvertsToLength()) {
-    return LengthInCSSPixels();
+    return ToLengthInCSSPixels();
   }
   return ResolveToCSSPixels(aPercentageGetter());
 }
@@ -651,15 +664,14 @@ nscoord LengthPercentage::Resolve(nscoord aPercentageBasis) const {
 
 template <typename T>
 nscoord LengthPercentage::Resolve(T aPercentageGetter) const {
-  static_assert(std::is_same<decltype(aPercentageGetter()), nscoord>::value,
-                "Should return app units");
   return Resolve(aPercentageGetter, NSToCoordFloorClamped);
 }
 
 template <typename T>
 nscoord LengthPercentage::Resolve(nscoord aPercentageBasis,
                                   T aPercentageRounder) const {
-  return Resolve([=] { return aPercentageBasis; }, aPercentageRounder);
+  return Resolve([aPercentageBasis] { return aPercentageBasis; },
+                 aPercentageRounder);
 }
 
 void LengthPercentage::ScaleLengthsBy(float aScale) {
@@ -830,12 +842,6 @@ inline nsRect StyleGenericClipRect<LengthOrAuto>::ToLayoutRect(
   nscoord width = right.IsLength() ? right.ToLength() - x : aAutoSize;
   nscoord height = bottom.IsLength() ? bottom.ToLength() - y : aAutoSize;
   return nsRect(x, y, width, height);
-}
-
-inline StyleVecU8::~StyleVecU8() {
-  if (data) {
-    Servo_VecU8_Free(this);
-  }
 }
 
 }  // namespace mozilla

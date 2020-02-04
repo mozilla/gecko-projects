@@ -45,6 +45,7 @@
 #include "mozilla/ShortcutKeys.h"
 #include "mozilla/KeyEventHandler.h"
 #include "mozilla/dom/KeyboardEvent.h"
+#include "mozilla/ScrollTypes.h"
 
 namespace mozilla {
 
@@ -215,9 +216,9 @@ class MOZ_RAII AutoRestoreEditorState final {
     // appearing the method in profile.  So, this class should check if it's
     // necessary to call.
     uint32_t flags = mSavedFlags;
-    flags &= ~(nsIPlaintextEditor::eEditorDisabledMask);
-    flags &= ~(nsIPlaintextEditor::eEditorReadonlyMask);
-    flags |= nsIPlaintextEditor::eEditorDontEchoPassword;
+    flags &= ~(nsIEditor::eEditorDisabledMask);
+    flags &= ~(nsIEditor::eEditorReadonlyMask);
+    flags |= nsIEditor::eEditorDontEchoPassword;
     if (mSavedFlags != flags) {
       mTextEditor->SetFlags(flags);
     }
@@ -685,8 +686,8 @@ TextInputSelectionController::CompleteScroll(bool aForward) {
   if (!mScrollFrame) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-  mScrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
-                         nsIScrollableFrame::WHOLE, ScrollMode::Instant);
+  mScrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1), ScrollUnit::WHOLE,
+                         ScrollMode::Instant);
   return NS_OK;
 }
 
@@ -733,8 +734,8 @@ TextInputSelectionController::ScrollPage(bool aForward) {
   if (!mScrollFrame) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-  mScrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
-                         nsIScrollableFrame::PAGES, ScrollMode::Smooth);
+  mScrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1), ScrollUnit::PAGES,
+                         ScrollMode::Smooth);
   return NS_OK;
 }
 
@@ -743,8 +744,8 @@ TextInputSelectionController::ScrollLine(bool aForward) {
   if (!mScrollFrame) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-  mScrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1),
-                         nsIScrollableFrame::LINES, ScrollMode::Smooth);
+  mScrollFrame->ScrollBy(nsIntPoint(0, aForward ? 1 : -1), ScrollUnit::LINES,
+                         ScrollMode::Smooth);
   return NS_OK;
 }
 
@@ -753,8 +754,8 @@ TextInputSelectionController::ScrollCharacter(bool aRight) {
   if (!mScrollFrame) {
     return NS_ERROR_NOT_INITIALIZED;
   }
-  mScrollFrame->ScrollBy(nsIntPoint(aRight ? 1 : -1, 0),
-                         nsIScrollableFrame::LINES, ScrollMode::Smooth);
+  mScrollFrame->ScrollBy(nsIntPoint(aRight ? 1 : -1, 0), ScrollUnit::LINES,
+                         ScrollMode::Smooth);
   return NS_OK;
 }
 
@@ -1719,20 +1720,20 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
   PresShell* presShell = presContext->GetPresShell();
 
   // Setup the editor flags
-  uint32_t editorFlags = nsIPlaintextEditor::eEditorPlaintextMask;
+  uint32_t editorFlags = nsIEditor::eEditorPlaintextMask;
   if (IsSingleLineTextControl()) {
-    editorFlags |= nsIPlaintextEditor::eEditorSingleLineMask;
+    editorFlags |= nsIEditor::eEditorSingleLineMask;
   }
   if (IsPasswordTextControl()) {
-    editorFlags |= nsIPlaintextEditor::eEditorPasswordMask;
+    editorFlags |= nsIEditor::eEditorPasswordMask;
   }
 
   // All nsTextControlFrames are widgets
-  editorFlags |= nsIPlaintextEditor::eEditorWidgetMask;
+  editorFlags |= nsIEditor::eEditorWidgetMask;
 
   // Spell check is diabled at creation time. It is enabled once
   // the editor comes into focus.
-  editorFlags |= nsIPlaintextEditor::eEditorSkipSpellCheck;
+  editorFlags |= nsIEditor::eEditorSkipSpellCheck;
 
   bool shouldInitializeEditor = false;
   RefPtr<TextEditor> newTextEditor;  // the editor that we might create
@@ -1766,7 +1767,7 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
 
     // Don't lose application flags in the process.
     if (newTextEditor->IsMailEditor()) {
-      editorFlags |= nsIPlaintextEditor::eEditorMailMask;
+      editorFlags |= nsIEditor::eEditorMailMask;
     }
   }
 
@@ -1871,13 +1872,13 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
 
   // Check if the readonly attribute is set.
   if (mTextCtrlElement->HasAttr(kNameSpaceID_None, nsGkAtoms::readonly)) {
-    editorFlags |= nsIPlaintextEditor::eEditorReadonlyMask;
+    editorFlags |= nsIEditor::eEditorReadonlyMask;
   }
 
   // Check if the disabled attribute is set.
   // TODO: call IsDisabled() here!
   if (mTextCtrlElement->HasAttr(kNameSpaceID_None, nsGkAtoms::disabled)) {
-    editorFlags |= nsIPlaintextEditor::eEditorDisabledMask;
+    editorFlags |= nsIEditor::eEditorDisabledMask;
   }
 
   // Disable the selection if necessary.
@@ -1949,8 +1950,7 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
   }
 
   // Restore our selection after being bound to a new frame
-  HTMLInputElement* number = GetParentNumberControl(mBoundFrame);
-  if (number ? number->IsSelectionCached() : mSelectionCached) {
+  if (mSelectionCached) {
     if (mRestoringSelection) {  // paranoia
       mRestoringSelection->Revoke();
     }
@@ -1967,11 +1967,7 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
   // happens before our RestoreSelectionState runs, it looks like we'll lose our
   // selection info, because we will think we don't have it cached and try to
   // read it from the selection controller, which will not have it yet.
-  if (number) {
-    number->ClearSelectionCached();
-  } else {
-    mSelectionCached = false;
-  }
+  mSelectionCached = false;
 
   return preparingEditor.IsTextControlStateDestroyed()
              ? NS_ERROR_NOT_INITIALIZED
@@ -1980,27 +1976,6 @@ nsresult TextControlState::PrepareEditor(const nsAString* aValue) {
 
 void TextControlState::FinishedRestoringSelection() {
   mRestoringSelection = nullptr;
-}
-
-bool TextControlState::IsSelectionCached() const {
-  if (mBoundFrame) {
-    HTMLInputElement* number = GetParentNumberControl(mBoundFrame);
-    if (number) {
-      return number->IsSelectionCached();
-    }
-  }
-  return mSelectionCached;
-}
-
-TextControlState::SelectionProperties&
-TextControlState::GetSelectionProperties() {
-  if (mBoundFrame) {
-    HTMLInputElement* number = GetParentNumberControl(mBoundFrame);
-    if (number) {
-      return number->GetSelectionProperties();
-    }
-  }
-  return mSelectionProperties;
 }
 
 void TextControlState::SyncUpSelectionPropertiesBeforeDestruction() {
@@ -2370,31 +2345,6 @@ void TextControlState::SetRangeText(const nsAString& aReplacement,
   // The instance may have already been deleted here.
 }
 
-HTMLInputElement* TextControlState::GetParentNumberControl(
-    nsFrame* aFrame) const {
-  MOZ_ASSERT(aFrame);
-  nsIContent* content = aFrame->GetContent();
-  MOZ_ASSERT(content);
-  nsIContent* parent = content->GetParent();
-  if (!parent) {
-    return nullptr;
-  }
-  nsIContent* parentOfParent = parent->GetParent();
-  if (!parentOfParent) {
-    return nullptr;
-  }
-  HTMLInputElement* input = HTMLInputElement::FromNode(parentOfParent);
-  if (!input) {
-    return nullptr;
-  }
-  // This function might be called during frame reconstruction as a result
-  // of changing the input control's type from number to something else. In
-  // that situation, the type of the control has changed, but its frame has
-  // not been reconstructed yet.  So we need to check the type of the input
-  // control in addition to the type of the frame.
-  return (input->ControlType() == NS_FORM_INPUT_NUMBER) ? input : nullptr;
-}
-
 void TextControlState::DestroyEditor() {
   // notify the editor that we are going away
   if (mEditorInitialized) {
@@ -2449,15 +2399,7 @@ void TextControlState::UnbindFromFrame(nsTextControlFrame* aFrame) {
     props.SetStart(start);
     props.SetEnd(end);
     props.SetDirection(direction);
-    HTMLInputElement* number = GetParentNumberControl(aFrame);
-    if (number) {
-      // If we are inside a number control, cache the selection on the
-      // parent control, because this text editor state will be destroyed
-      // together with the native anonymous text control.
-      number->SetSelectionCached();
-    } else {
-      mSelectionCached = true;
-    }
+    mSelectionCached = true;
   }
 
   // Destroy our editor
@@ -2892,10 +2834,10 @@ bool TextControlState::SetValueWithTextEditor(
   if (selection) {
     // Since we don't use undo transaction, we don't need to store
     // selection state.  SetText will set selection to tail.
-    // Note that textEditor will collapse selection to the end.
-    // Therefore, it's safe to use RemoveAllRangesTemporarily()
-    // here.
-    selection->RemoveAllRangesTemporarily();
+    IgnoredErrorResult ignoredError;
+    selection->RemoveAllRanges(ignoredError);
+    NS_WARNING_ASSERTION(!ignoredError.Failed(),
+                         "Selection::RemoveAllRanges() failed, but ignored");
   }
 
   // In this case, we makes the editor stop dispatching "input"
@@ -3036,6 +2978,12 @@ bool TextControlState::SetValueWithoutTextEditor(
     //     event listener?
     if (aHandlingSetValue.GetSetValueFlags() & eSetValue_BySetUserInput) {
       MOZ_ASSERT(aHandlingSetValue.GetTextControlElement());
+
+      // Update validity state before dispatching "input" event for its
+      // listeners like `EditorBase::NotifyEditorObservers()`.
+      aHandlingSetValue.GetTextControlElement()->OnValueChanged(
+          true, ValueChangeKind::UserInteraction);
+
       MOZ_ASSERT(!aHandlingSetValue.GetSettingValue().IsVoid());
       DebugOnly<nsresult> rvIgnored = nsContentUtils::DispatchInputEvent(
           MOZ_KnownLive(aHandlingSetValue.GetTextControlElement()),

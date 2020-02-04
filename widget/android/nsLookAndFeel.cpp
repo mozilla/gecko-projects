@@ -529,7 +529,7 @@ nsTArray<LookAndFeelInt> nsLookAndFeel::GetIntCacheImpl() {
 
   for (IntID id : kIdsToCache) {
     lookAndFeelIntCache.AppendElement(
-        LookAndFeelInt{id, {.value = GetInt(id)}});
+        LookAndFeelInt{.id = id, .value = GetInt(id)});
   }
 
   return lookAndFeelIntCache;

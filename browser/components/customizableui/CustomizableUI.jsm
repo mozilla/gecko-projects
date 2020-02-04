@@ -4444,8 +4444,8 @@ var CustomizableUI = {
     return CustomizableUIInternal.getCustomizationTarget(aElement);
   },
 };
-Object.freeze(this.CustomizableUI);
-Object.freeze(this.CustomizableUI.windows);
+Object.freeze(CustomizableUI);
+Object.freeze(CustomizableUI.windows);
 
 /**
  * All external consumers of widgets are really interacting with these wrappers
@@ -5156,9 +5156,15 @@ OverflowableToolbar.prototype = {
     if (!this._enabled) {
       return;
     }
-    log.debug("Checking overflow");
 
     let win = this._target.ownerGlobal;
+    if (win.document.documentElement.hasAttribute("inDOMFullscreen")) {
+      // Toolbars are hidden and cannot be made visible in DOM fullscreen mode
+      // so there's nothing to do here.
+      return;
+    }
+
+    log.debug("Checking overflow");
     let [isOverflowing, totalAvailWidth] = await this._getOverflowInfo();
     if (win.closed) {
       return;

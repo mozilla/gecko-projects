@@ -557,7 +557,6 @@ static XDRResult XDRScope(XDRState<mode>* xdr, js::PrivateScriptData* data,
       MOZ_TRY(FunctionScope::XDR(xdr, fun, enclosing, scope));
       break;
     case ScopeKind::FunctionBodyVar:
-    case ScopeKind::ParameterExpressionVar:
       MOZ_TRY(VarScope::XDR(xdr, scopeKind, enclosing, scope));
       break;
     case ScopeKind::Lexical:
@@ -4370,6 +4369,14 @@ JSScript* JSScript::Create(JSContext* cx, HandleObject functionOrGlobal,
                         lazy->toStringEnd(), lazy->lineno(), lazy->column()));
   if (!script) {
     return nullptr;
+  }
+
+  // Propagate flags.
+  if (lazy->isLikelyConstructorWrapper()) {
+    script->setIsLikelyConstructorWrapper();
+  }
+  if (lazy->hasBeenCloned()) {
+    script->setHasBeenCloned();
   }
 
   script->setFlag(MutableFlags::TrackRecordReplayProgress,

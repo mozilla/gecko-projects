@@ -679,7 +679,7 @@ class SpecialPowersChild extends JSWindowActorChild {
 
   async toggleMuteState(aMuted, aWindow) {
     let actor = aWindow
-      ? aWindow.getWindowGlobalChild().getActor("SpecialPowers")
+      ? aWindow.windowGlobalChild.getActor("SpecialPowers")
       : this;
     return actor.sendQuery("SPToggleMuteAudio", { mute: aMuted });
   }
@@ -1293,6 +1293,10 @@ class SpecialPowersChild extends JSWindowActorChild {
     );
   }
 
+  async generateMediaControlKeyTestEvent(event) {
+    await this.sendQuery("SPGenerateMediaControlKeyTestEvent", { event });
+  }
+
   // Note: each call to registerConsoleListener MUST be paired with a
   // call to postConsoleSentinel; when the callback receives the
   // sentinel it will unregister itself (_after_ calling the
@@ -1773,7 +1777,7 @@ class SpecialPowersChild extends JSWindowActorChild {
 
     try {
       let actor = aWindow
-        ? aWindow.getWindowGlobalChild().getActor("SpecialPowers")
+        ? aWindow.windowGlobalChild.getActor("SpecialPowers")
         : this;
       actor.sendAsyncMessage("SpecialPowers.Focus", {});
     } catch (e) {

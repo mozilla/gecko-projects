@@ -77,6 +77,11 @@ class FullParseHandler {
            node->isKind(ParseNodeKind::ElemExpr);
   }
 
+  bool isOptionalPropertyAccess(Node node) {
+    return node->isKind(ParseNodeKind::OptionalDotExpr) ||
+           node->isKind(ParseNodeKind::OptionalElemExpr);
+  }
+
   bool isFunctionCall(Node node) {
     // Note: super() is a special form, *not* a function call.
     return node->isKind(ParseNodeKind::CallExpr);
@@ -152,20 +157,6 @@ class FullParseHandler {
     return new_<NumericLiteral>(value, decimalPoint, pos);
   }
 
-  // The Boxer object here is any object that can allocate BigIntBoxes.
-  // Specifically, a Boxer has a .newBigIntBox(T) method that accepts a
-  // BigInt* argument and returns a BigIntBox*.
-  template <class Boxer>
-  BigIntLiteralType newBigInt(BigInt* bi, const TokenPos& pos, Boxer& boxer) {
-    BigIntBox* box = boxer.newBigIntBox(bi);
-    if (!box) {
-      return null();
-    }
-    return new_<BigIntLiteral>(box, pos);
-  }
-
-  // This variant requires two phase initializaton to ensure ownership is clear
-  // in an OOM situation.
   BigIntLiteralType newBigInt(BigIntIndex index, ParseInfo& parseInfo,
                               const TokenPos& pos) {
     return new_<BigIntLiteral>(index, parseInfo, pos);
@@ -231,6 +222,8 @@ class FullParseHandler {
   // The Boxer object here is any object that can allocate ObjectBoxes.
   // Specifically, a Boxer has a .newObjectBox(T) method that accepts a
   // Rooted<RegExpObject*> argument and returns an ObjectBox*.
+  //
+  // Used only by BinAST now.
   template <class Boxer>
   RegExpLiteralType newRegExp(RegExpObject* reobj, const TokenPos& pos,
                               Boxer& boxer) {
@@ -265,7 +258,7 @@ class FullParseHandler {
 
     if (expr->isKind(ParseNodeKind::OptionalChain)) {
       Node kid = expr->as<UnaryNode>().kid();
-      // Handle property deletion explictly. OptionalCall is handled
+      // Handle property deletion explicitly. OptionalCall is handled
       // via DeleteExpr.
       if (kid->isKind(ParseNodeKind::DotExpr) ||
           kid->isKind(ParseNodeKind::OptionalDotExpr) ||
@@ -1073,8 +1066,8 @@ class FullParseHandler {
   }
 
   PropertyName* maybeDottedProperty(Node pn) {
-    return pn->is<PropertyAccess>() ? &pn->as<PropertyAccess>().name()
-                                    : nullptr;
+    return pn->is<PropertyAccessBase>() ? &pn->as<PropertyAccessBase>().name()
+                                        : nullptr;
   }
   JSAtom* isStringExprStatement(Node pn, TokenPos* pos) {
     if (pn->is<UnaryNode>()) {

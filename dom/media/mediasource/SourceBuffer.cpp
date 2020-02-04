@@ -55,7 +55,9 @@ void SourceBuffer::SetMode(SourceBufferAppendMode aMode, ErrorResult& aRv) {
   }
   if (mCurrentAttributes.mGenerateTimestamps &&
       aMode == SourceBufferAppendMode::Segments) {
-    aRv.Throw(NS_ERROR_DOM_TYPE_ERR);
+    aRv.ThrowTypeError(
+        u"Can't set mode to \"segments\" when the byte stream generates "
+        u"timestamps");
     return;
   }
   MOZ_ASSERT(mMediaSource->ReadyState() != MediaSourceReadyState::Closed);
@@ -169,7 +171,7 @@ void SourceBuffer::SetAppendWindowEnd(double aAppendWindowEnd,
 void SourceBuffer::AppendBuffer(const ArrayBuffer& aData, ErrorResult& aRv) {
   MOZ_ASSERT(NS_IsMainThread());
   MSE_API("AppendBuffer(ArrayBuffer)");
-  aData.ComputeLengthAndData();
+  aData.ComputeState();
   DDLOG(DDLogCategory::API, "AppendBuffer", aData.Length());
   AppendData(aData.Data(), aData.Length(), aRv);
 }
@@ -178,7 +180,7 @@ void SourceBuffer::AppendBuffer(const ArrayBufferView& aData,
                                 ErrorResult& aRv) {
   MOZ_ASSERT(NS_IsMainThread());
   MSE_API("AppendBuffer(ArrayBufferView)");
-  aData.ComputeLengthAndData();
+  aData.ComputeState();
   DDLOG(DDLogCategory::API, "AppendBuffer", aData.Length());
   AppendData(aData.Data(), aData.Length(), aRv);
 }
@@ -188,7 +190,7 @@ already_AddRefed<Promise> SourceBuffer::AppendBufferAsync(
   MOZ_ASSERT(NS_IsMainThread());
 
   MSE_API("AppendBufferAsync(ArrayBuffer)");
-  aData.ComputeLengthAndData();
+  aData.ComputeState();
   DDLOG(DDLogCategory::API, "AppendBufferAsync", aData.Length());
 
   return AppendDataAsync(aData.Data(), aData.Length(), aRv);
@@ -199,7 +201,7 @@ already_AddRefed<Promise> SourceBuffer::AppendBufferAsync(
   MOZ_ASSERT(NS_IsMainThread());
 
   MSE_API("AppendBufferAsync(ArrayBufferView)");
-  aData.ComputeLengthAndData();
+  aData.ComputeState();
   DDLOG(DDLogCategory::API, "AppendBufferAsync", aData.Length());
 
   return AppendDataAsync(aData.Data(), aData.Length(), aRv);

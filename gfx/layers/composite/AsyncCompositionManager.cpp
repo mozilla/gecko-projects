@@ -282,17 +282,6 @@ static void AccumulateLayerTransforms(Layer* aLayer, Layer* aAncestor,
   }
 }
 
-static gfxFloat IntervalOverlap(gfxFloat aTranslation, gfxFloat aMin,
-                                gfxFloat aMax) {
-  // Determine the amount of overlap between the 1D vector |aTranslation|
-  // and the interval [aMin, aMax].
-  if (aTranslation > 0) {
-    return std::max(0.0, std::min(aMax, aTranslation) - std::max(aMin, 0.0));
-  } else {
-    return std::min(0.0, std::max(aMin, aTranslation) - std::min(aMax, 0.0));
-  }
-}
-
 /**
  * Finds the metrics on |aLayer| with scroll id |aScrollId|, and returns a
  * LayerMetricsWrapper representing the (layer, metrics) pair, or the null
@@ -347,32 +336,6 @@ static bool AsyncTransformShouldBeUnapplied(
     if (current && current.AsRefLayer() != nullptr) {
       break;
     }
-  }
-  return false;
-}
-
-/**
- * Given a fixed-position layer, check if it's fixed with respect to the
- * zoomed APZC.
- */
-static bool IsFixedToZoomContainer(Layer* aFixedLayer) {
-  ScrollableLayerGuid::ViewID targetId =
-      aFixedLayer->GetFixedPositionScrollContainerId();
-  MOZ_ASSERT(targetId != ScrollableLayerGuid::NULL_SCROLL_ID);
-  LayerMetricsWrapper result(aFixedLayer, LayerMetricsWrapper::StartAt::BOTTOM);
-  while (result) {
-    if (Maybe<ScrollableLayerGuid::ViewID> zoomedScrollId =
-            result.IsAsyncZoomContainer()) {
-      return *zoomedScrollId == targetId;
-    }
-    // Don't ascend into another layer tree. Scroll IDs are not unique
-    // across layer trees, and in any case position:fixed doesn't reach
-    // across documents.
-    if (result.AsRefLayer() != nullptr) {
-      break;
-    }
-
-    result = result.GetParent();
   }
   return false;
 }
@@ -486,11 +449,22 @@ void AsyncCompositionManager::AdjustFixedOrStickyLayer(
   // (before any transform is applied).
   LayerPoint anchor = layer->GetFixedPositionAnchor();
 
+  SideBits sideBits = layer->GetFixedPositionSides();
+  if (layer->GetIsStickyPosition()) {
+    // We only support the dynamic toolbar at the bottom.
+    // For fixed position, `ComputeFixedmarginsOffset` gives correct results
+    // even for eTop, but for sticky position it doesn't.
+    sideBits &= SideBits::eBottom;
+  }
+
   // Offset the layer's anchor point to make sure fixed position content
   // respects content document fixed position margins.
-  ScreenPoint offset = ComputeFixedMarginsOffset(aFixedLayerMargins,
-                                                 layer->GetFixedPositionSides(),
-                                                 aGeckoFixedLayerMargins);
+  ScreenPoint offset = ComputeFixedMarginsOffset(
+      aFixedLayerMargins, sideBits,
+      // For sticky layers, we don't need to factor aGeckoFixedLayerMargins
+      // because Gecko doesn't shift the position of sticky elements for dynamic
+      // toolbar movements.
+      layer->GetIsStickyPosition() ? ScreenMargin() : aGeckoFixedLayerMargins);
 
   // Fixed margins only apply to layers fixed to the root, so we can view
   // the offset in layer space.
@@ -530,12 +504,14 @@ void AsyncCompositionManager::AdjustFixedOrStickyLayer(
     const LayerRectAbsolute& stickyInner = layer->GetStickyScrollRangeInner();
 
     LayerPoint originalTranslation = translation;
-    translation.y =
-        IntervalOverlap(translation.y, stickyOuter.Y(), stickyOuter.YMost()) -
-        IntervalOverlap(translation.y, stickyInner.Y(), stickyInner.YMost());
-    translation.x =
-        IntervalOverlap(translation.x, stickyOuter.X(), stickyOuter.XMost()) -
-        IntervalOverlap(translation.x, stickyInner.X(), stickyInner.XMost());
+    translation.y = apz::IntervalOverlap(translation.y, stickyOuter.Y(),
+                                         stickyOuter.YMost()) -
+                    apz::IntervalOverlap(translation.y, stickyInner.Y(),
+                                         stickyInner.YMost());
+    translation.x = apz::IntervalOverlap(translation.x, stickyOuter.X(),
+                                         stickyOuter.XMost()) -
+                    apz::IntervalOverlap(translation.x, stickyInner.X(),
+                                         stickyInner.XMost());
     unconsumedTranslation = translation - originalTranslation;
   }
 
@@ -896,6 +872,8 @@ bool AsyncCompositionManager::ApplyAsyncContentTransformToTree(
     Layer* aLayer, bool* aOutFoundRoot) {
   bool appliedTransform = false;
   std::stack<Maybe<ParentLayerIntRect>> stackDeferredClips;
+  std::stack<LayersId> layersIds;
+  layersIds.push(mCompositorBridge->RootLayerTreeId());
 
   // Maps layers to their ClipParts. The parts are not stored individually
   // on the layer, but during AlignFixedAndStickyLayers we need access to
@@ -908,6 +886,10 @@ bool AsyncCompositionManager::ApplyAsyncContentTransformToTree(
   ForEachNode<ForwardIterator>(
       aLayer,
       [&](Layer* layer) {
+        if (layer->AsRefLayer()) {
+          layersIds.push(layer->AsRefLayer()->GetReferentId());
+        }
+
         stackDeferredClips.push(Maybe<ParentLayerIntRect>());
 
         // If we encounter the async zoom container, find the corresponding
@@ -947,6 +929,8 @@ bool AsyncCompositionManager::ApplyAsyncContentTransformToTree(
         Maybe<ParentLayerIntRect> clipDeferredFromChildren =
             stackDeferredClips.top();
         stackDeferredClips.pop();
+        MOZ_ASSERT(!layersIds.empty());
+        LayersId currentLayersId = layersIds.top();
         LayerToParentLayerMatrix4x4 oldTransform =
             layer->GetTransformTyped() * AsyncTransformMatrix();
 
@@ -1219,6 +1203,55 @@ bool AsyncCompositionManager::ApplyAsyncContentTransformToTree(
             }
           }
 
+          auto IsFixedToZoomContainer = [&](Layer* aFixedLayer) {
+            if (!zoomedMetrics) {
+              return false;
+            }
+            ScrollableLayerGuid::ViewID targetId =
+                aFixedLayer->GetFixedPositionScrollContainerId();
+            MOZ_ASSERT(targetId != ScrollableLayerGuid::NULL_SCROLL_ID);
+            ScrollableLayerGuid rootContent = sampler->GetGuid(*zoomedMetrics);
+            return rootContent.mScrollId == targetId &&
+            rootContent.mLayersId == currentLayersId;
+          };
+
+          auto IsStuckToZoomContainerAtBottom = [&](Layer* aLayer) {
+            if (!zoomedMetrics) {
+              return false;
+            }
+            if (!aLayer->GetIsStickyPosition()) {
+              return false;
+            }
+
+            // Currently we only support the dyanmic toolbar at bottom.
+            if ((aLayer->GetFixedPositionSides() & SideBits::eBottom) ==
+                SideBits::eNone) {
+              return false;
+            }
+
+            ScrollableLayerGuid::ViewID targetId =
+                aLayer->GetStickyScrollContainerId();
+            if (targetId == ScrollableLayerGuid::NULL_SCROLL_ID) {
+              return false;
+            }
+
+            ScrollableLayerGuid rootContent = sampler->GetGuid(*zoomedMetrics);
+            if (rootContent.mScrollId != targetId ||
+                rootContent.mLayersId != currentLayersId) {
+              return false;
+            }
+
+            ParentLayerPoint translation =
+                sampler
+                    ->GetCurrentAsyncTransform(
+                        *zoomedMetrics, {AsyncTransformComponent::eLayout})
+                    .mTranslation;
+
+            return apz::IsStuckAtBottom(translation.y,
+                                        aLayer->GetStickyScrollRangeInner(),
+                                        aLayer->GetStickyScrollRangeOuter());
+          };
+
           // Layers fixed to the RCD-RSF no longer need
           // AdjustFixedOrStickyLayer() to scroll them by the eVisual transform,
           // as that's now applied to the async zoom container itself. However,
@@ -1226,9 +1259,10 @@ bool AsyncCompositionManager::ApplyAsyncContentTransformToTree(
           // account for dynamic toolbar transitions. This is also handled by
           // AdjustFixedOrStickyLayer(), so we now call it with empty transforms
           // to get it to perform just the fixed margins adjustment.
-          if (zoomedMetrics && layer->GetIsFixedPosition() &&
-              !layer->GetParent()->GetIsFixedPosition() &&
-              IsFixedToZoomContainer(layer)) {
+          if (zoomedMetrics && ((layer->GetIsFixedPosition() &&
+                                 !layer->GetParent()->GetIsFixedPosition() &&
+                                 IsFixedToZoomContainer(layer)) ||
+                                IsStuckToZoomContainerAtBottom(layer))) {
             LayerToParentLayerMatrix4x4 emptyTransform;
             ScreenMargin marginsForFixedLayer = GetFixedLayerMargins();
             AdjustFixedOrStickyLayer(zoomContainer, layer,
@@ -1273,6 +1307,11 @@ bool AsyncCompositionManager::ApplyAsyncContentTransformToTree(
         if (layer->GetScrollbarData().mScrollbarLayerType ==
             layers::ScrollbarLayerType::Thumb) {
           ApplyAsyncTransformToScrollbar(layer);
+        }
+
+        if (layer->AsRefLayer()) {
+          MOZ_ASSERT(layersIds.size() > 1);
+          layersIds.pop();
         }
       });
 

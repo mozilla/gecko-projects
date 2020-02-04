@@ -709,7 +709,10 @@ class RTCPeerConnection {
         return Services.io.newURI(uriStr);
       } catch (e) {
         if (e.result == Cr.NS_ERROR_MALFORMED_URI) {
-          throw new this._win.SyntaxError(`${msg} - malformed URI: ${uriStr}`);
+          throw new this._win.DOMException(
+            `${msg} - malformed URI: ${uriStr}`,
+            "SyntaxError"
+          );
         }
         throw e;
       }
@@ -725,7 +728,10 @@ class RTCPeerConnection {
         );
       }
       if (urls.length == 0) {
-        throw new this._win.SyntaxError(`${msg} - urls is empty`);
+        throw new this._win.DOMException(
+          `${msg} - urls is empty`,
+          "SyntaxError"
+        );
       }
       urls
         .map(url => nicerNewURI(url))
@@ -762,8 +768,9 @@ class RTCPeerConnection {
             this._hasStunServer = true;
             stunServers += 1;
           } else {
-            throw new this._win.SyntaxError(
-              `${msg} - improper scheme: ${scheme}`
+            throw new this._win.DOMException(
+              `${msg} - improper scheme: ${scheme}`,
+              "SyntaxError"
             );
           }
           if (scheme in { stuns: 1 }) {
@@ -1905,16 +1912,27 @@ class RTCPeerConnection {
       type = Ci.IPeerConnection.kDataChannelReliable;
     }
     // Synchronous since it doesn't block.
-    let dataChannel = this._impl.createDataChannel(
-      label,
-      protocol,
-      type,
-      ordered,
-      maxPacketLifeTime,
-      maxRetransmits,
-      negotiated,
-      id
-    );
+    let dataChannel;
+    try {
+      dataChannel = this._impl.createDataChannel(
+        label,
+        protocol,
+        type,
+        ordered,
+        maxPacketLifeTime,
+        maxRetransmits,
+        negotiated,
+        id
+      );
+    } catch (e) {
+      if (e.result != Cr.NS_ERROR_NOT_AVAILABLE) {
+        throw e;
+      }
+
+      const msg =
+        id === null ? "No available id could be generated" : "Id is in use";
+      throw new this._win.DOMException(msg, "OperationError");
+    }
 
     // Spec says to only do this if this is the first DataChannel created,
     // but the c++ code that does the "is negotiation needed" checking will

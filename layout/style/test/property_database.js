@@ -7553,6 +7553,8 @@ var gCSSProperties = {
       "overline 2em",
       "underline from-font",
       "red from-font overline",
+      "5% underline blue",
+      "dotted line-through 25%",
     ],
     invalid_values: [
       "none none",
@@ -7564,8 +7566,6 @@ var gCSSProperties = {
       "underline overline line-through blink none",
       "underline overline line-throuh blink blink",
       "rgb(0, rubbish, 0) underline",
-      "5% underline blue",
-      "dotted line-through 25%",
       "from font blue underline",
     ],
   },
@@ -7645,16 +7645,17 @@ var gCSSProperties = {
     applies_to_placeholder: true,
     applies_to_cue: true,
     initial_values: ["auto"],
-    other_values: ["from-font", "0", "-14px", "25px", "100em", "-45em"],
-    invalid_values: [
-      "13",
-      "-25",
-      "rubbish",
-      ",./!@#$",
+    other_values: [
+      "from-font",
+      "0",
+      "-14px",
+      "25px",
+      "100em",
+      "-45em",
       "43%",
       "-10%",
-      "from font",
     ],
+    invalid_values: ["13", "-25", "rubbish", ",./!@#$", "from font"],
   },
   "text-decoration-skip-ink": {
     domProp: "textDecorationSkipInk",
@@ -7687,14 +7688,13 @@ var gCSSProperties = {
     applies_to_first_line: true,
     applies_to_placeholder: true,
     initial_values: ["auto"],
-    other_values: ["from-font", "0", "-14px", "25px", "100em", "-45em"],
+    other_values: ["0", "-14px", "25px", "100em", "-45em", "43%", "-10%"],
     invalid_values: [
       "13",
       "-25",
       "rubbish",
       ",./!@#$",
-      "43%",
-      "-10%",
+      "from-font",
       "from font",
     ],
   },
@@ -7714,16 +7714,23 @@ var gCSSProperties = {
       "under left",
       "right under",
       "under right",
+      "from-font",
+      "from-font left",
+      "from-font right",
+      "left from-font",
+      "right from-font",
     ],
     invalid_values: [
       "none",
+      "auto from-font",
       "auto under",
+      "under from-font",
       "left right",
       "right auto",
       "0",
       "1px",
       "10%",
-      "from-font",
+      "from font",
     ],
   },
   "text-emphasis": {
@@ -12838,6 +12845,8 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
     type: CSS_TYPE_LONGHAND,
     initial_values: ["none"],
     other_values: [
+      "path('')",
+      "path(' ')",
       "path('M 10 10 20 20 H 90 V 90 Z')",
       "path('M10 10 20,20H90V90Z')",
       "path('M 10 10 C 20 20, 40 20, 50 10')",
@@ -12856,7 +12865,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
       "ray(calc(180deg - 45deg) farthest-side)",
     ],
     invalid_values: [
-      "path('')",
       "path()",
       "path(a)",
       "path('M 10 Z')",
@@ -12907,6 +12915,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.motion-path.enabled")) {
 
 if (IsCSSPropertyPrefEnabled("layout.css.clip-path-path.enabled")) {
   gCSSProperties["clip-path"].other_values.push(
+    "path(evenodd, '')",
     "path(nonzero, 'M 10 10 h 100 v 100 h-100 v-100 z')",
     "path(evenodd, 'M 10 10 h 100 v 100 h-100 v-100 z')",
     "path('M10,30A20,20 0,0,1 50,30A20,20 0,0,1 90,30Q90,60 50,90Q10,60 10,30z')"
@@ -12914,7 +12923,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.clip-path-path.enabled")) {
 
   gCSSProperties["clip-path"].invalid_values.push(
     "path(nonzero)",
-    "path(evenodd, '')",
     "path(abs, 'M 10 10 L 10 10 z')"
   );
 }

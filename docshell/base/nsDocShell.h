@@ -561,8 +561,8 @@ class nsDocShell final : public nsDocLoader,
 
   // Security check to prevent frameset spoofing. See comments at
   // implementation site.
-  static bool ValidateOrigin(nsIDocShellTreeItem* aOriginTreeItem,
-                             nsIDocShellTreeItem* aTargetTreeItem);
+  static bool ValidateOrigin(mozilla::dom::BrowsingContext* aOrigin,
+                             mozilla::dom::BrowsingContext* aTarget);
 
   static inline uint32_t PRTimeToSeconds(PRTime aTimeUsec) {
     return uint32_t(aTimeUsec / PR_USEC_PER_SEC);
@@ -1159,7 +1159,7 @@ class nsDocShell final : public nsDocLoader,
   nsRevocableEventPtr<RestorePresentationEvent> mRestorePresentationEvent;
 
   // Editor data, if this document is designMode or contentEditable.
-  nsAutoPtr<nsDocShellEditorData> mEditorData;
+  mozilla::UniquePtr<nsDocShellEditorData> mEditorData;
 
   // Secure browser UI object
   nsCOMPtr<nsISecureBrowserUI> mSecurityUI;
