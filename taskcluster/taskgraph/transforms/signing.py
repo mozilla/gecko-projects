@@ -58,7 +58,7 @@ signing_description_schema = schema.extend({
 
     Optional('shipping-phase'): task_description_schema['shipping-phase'],
     Optional('shipping-product'): task_description_schema['shipping-product'],
-    Optional('dependent-tasks'): {basestring: object},
+    Optional('dependent-tasks'): {text_type: object},
 
     # Optional control for how long a task may run (aka maxRunTime)
     Optional('max-run-time'): int,
