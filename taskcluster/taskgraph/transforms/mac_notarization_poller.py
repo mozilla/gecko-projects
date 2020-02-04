@@ -35,13 +35,13 @@ def make_task_description(config, jobs):
                 '{}/{}'.format(dep_th_platform, build_type)
             )
 
-            treeherder.setdefault(
-                'tier',
-                dep_job.task.get('extra', {}).get('treeherder', {}).get('tier', 1)
-            )
+            dep_treeherder = dep_job.task.get('extra', {}).get('treeherder', {})
+            treeherder.setdefault('tier', dep_treeherder.get('tier', 1))
             treeherder.setdefault('symbol', _generate_treeherder_symbol(
-                dep_job.task.get('extra', {}).get('treeherder', {}).get('symbol')
+                dep_treeherder.get('symbol')
             ))
+            if dep_treeherder.get('groupSymbol'):
+                treeherder.setdefault('groupSymbol', dep_treeherder['groupSymbol'])
             treeherder.setdefault('kind', 'build')
 
         label = dep_job.label.replace('part-1', 'poller')
