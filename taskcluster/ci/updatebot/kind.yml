@@ -1,0 +1,31 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+---
+loader: taskgraph.loader.transform:loader
+
+transforms:
+    - taskgraph.transforms.job:transforms
+    - taskgraph.transforms.task:transforms
+
+jobs:
+    cron:
+        description: Cron Job for Updatebot
+        run-on-projects: []
+        treeherder:
+            kind: other
+            platform: updatebot/all
+            symbol: cron
+            tier: 1
+        worker-type: b-linux
+        worker:
+            docker-image: {in-tree: updatebot}
+            max-run-time: 3600
+        scopes:
+            - secrets:get:project/updatebot/try-sshkey
+            - secrets:get:project/updatebot/phabricator-token
+            - secrets:get:project/updatebot/bugzilla-api-key
+            - secrets:get:project/updatebot/database-password
+        run:
+            using: run-task
+            command: /home/worker/run.py

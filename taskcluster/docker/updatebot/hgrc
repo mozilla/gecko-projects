@@ -1,0 +1,6 @@
+[ui]
+ssh = ssh -i /builds/worker/third-party-library-update/id_rsa -l updatebot@mozilla.com -o "StrictHostKeyChecking=no"
+username = Updatebot <updatebot@mozilla.com>
+
+[extensions]
+push-to-try = /home/worker/.mozbuild/version-control-tools/hgext/push-to-try

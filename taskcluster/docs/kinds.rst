@@ -651,3 +651,7 @@ Generate missing macOS and windows system symbols from crash reports.
 system-symbols-upload
 ---------------------
 Upload macOS and windows system symbols to tecken.
+
+updatebot
+------------------
+Check for updates to (supported) third party libraries, and manage their lifecycle.

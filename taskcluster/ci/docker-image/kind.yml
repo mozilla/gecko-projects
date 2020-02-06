@@ -236,6 +236,9 @@ jobs:
         definition: partner-repack
     periodic-updates:
         symbol: I(file)
+    updatebot:
+        symbol: I(3rdp)
+        parent: debian10-amd64-build
     pipfile-updates:
         symbol: I(pip)
     firefox-snap:
