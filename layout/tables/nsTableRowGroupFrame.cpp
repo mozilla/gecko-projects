@@ -14,6 +14,8 @@
 #include "nsPresContext.h"
 #include "nsStyleConsts.h"
 #include "nsIContent.h"
+#include "nsIFrame.h"
+#include "nsIFrameInlines.h"
 #include "nsGkAtoms.h"
 #include "nsCSSRendering.h"
 #include "nsHTMLParts.h"
@@ -1867,7 +1869,7 @@ void nsTableRowGroupFrame::ClearRowCursor() {
   }
 
   RemoveStateBits(NS_ROWGROUP_HAS_ROW_CURSOR);
-  DeleteProperty(RowCursorProperty());
+  RemoveProperty(RowCursorProperty());
 }
 
 nsTableRowGroupFrame::FrameCursorData* nsTableRowGroupFrame::SetupRowCursor() {

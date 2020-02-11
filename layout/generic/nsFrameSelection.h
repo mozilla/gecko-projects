@@ -459,9 +459,9 @@ class nsFrameSelection final {
    * @param aOffset offset into above node.
    * @param aReturnOffset will contain offset into frame.
    */
-  nsIFrame* GetFrameForNodeOffset(nsIContent* aNode, int32_t aOffset,
-                                  CaretAssociateHint aHint,
-                                  int32_t* aReturnOffset) const;
+  static nsIFrame* GetFrameForNodeOffset(nsIContent* aNode, int32_t aOffset,
+                                         CaretAssociateHint aHint,
+                                         int32_t* aReturnOffset);
 
   /**
    * GetFrameToPageSelect() returns a frame which is ancestor limit of
@@ -736,10 +736,10 @@ class nsFrameSelection final {
                          uint32_t aContentOffset, nsSelectionAmount aAmount,
                          CaretAssociateHint aHint);
   void BidiLevelFromClick(nsIContent* aNewFocus, uint32_t aContentOffset);
-  nsPrevNextBidiLevels GetPrevNextBidiLevels(nsIContent* aNode,
-                                             uint32_t aContentOffset,
-                                             CaretAssociateHint aHint,
-                                             bool aJumpLines) const;
+  static nsPrevNextBidiLevels GetPrevNextBidiLevels(nsIContent* aNode,
+                                                    uint32_t aContentOffset,
+                                                    CaretAssociateHint aHint,
+                                                    bool aJumpLines);
 
   bool AdjustForMaintainedSelection(nsIContent* aContent, int32_t aOffset);
 
@@ -799,7 +799,7 @@ class nsFrameSelection final {
       mozilla::dom::Selection* aSel);
 
   // Table selection support.
-  nsITableCellLayout* GetCellLayout(nsIContent* aCellContent) const;
+  static nsITableCellLayout* GetCellLayout(nsIContent* aCellContent);
 
   nsresult SelectBlockOfCells(nsIContent* aStartNode, nsIContent* aEndNode);
   nsresult SelectRowOrColumn(nsIContent* aCellContent,
@@ -809,8 +809,8 @@ class nsFrameSelection final {
                          int32_t aEndColumnIndex,
                          bool aRemoveOutsideOfCellRange);
 
-  nsresult GetCellIndexes(nsIContent* aCell, int32_t& aRowIndex,
-                          int32_t& aColIndex);
+  static nsresult GetCellIndexes(nsIContent* aCell, int32_t& aRowIndex,
+                                 int32_t& aColIndex);
 
   // Get our first range, if its first selected node is a cell.  If this does
   // not return null, then the first node in the returned range is a cell
@@ -820,11 +820,12 @@ class nsFrameSelection final {
   // not return null, then the first node in the returned range is a cell
   // (according to GetFirstCellNodeInRange).
   nsRange* GetNextCellRange();
-  nsIContent* GetFirstCellNodeInRange(nsRange* aRange) const;
+  static nsIContent* GetFirstCellNodeInRange(nsRange* aRange);
   // Returns non-null table if in same table, null otherwise
-  nsIContent* IsInSameTable(nsIContent* aContent1, nsIContent* aContent2) const;
+  static nsIContent* IsInSameTable(nsIContent* aContent1,
+                                   nsIContent* aContent2);
   // Might return null
-  nsIContent* GetParentTable(nsIContent* aCellNode) const;
+  static nsIContent* GetParentTable(nsIContent* aCellNode);
   nsresult CreateAndAddRange(nsINode* aContainer, int32_t aOffset);
 
   ////////////BEGIN nsFrameSelection members

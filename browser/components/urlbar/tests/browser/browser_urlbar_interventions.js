@@ -19,8 +19,6 @@ const SEARCH_STRINGS = {
   UPDATE: "firefox update",
 };
 
-const REQ_LOC_CHANGE_EVENT = "intl:requested-locales-changed";
-
 add_task(async function init() {
   makeProfileResettable();
   await SpecialPowers.pushPrefEnv({
@@ -37,7 +35,7 @@ add_task(async function refresh() {
     tip: TIPS.REFRESH,
     title:
       "Restore default settings and remove old add-ons for optimal performance.",
-    button: "Refresh Nightly…",
+    button: /^Refresh .+…$/,
     awaitCallback() {
       return promiseAlertDialog("cancel", [
         "chrome://global/content/resetProfile.xhtml",

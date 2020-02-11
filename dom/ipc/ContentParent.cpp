@@ -2319,7 +2319,7 @@ void ContentParent::LaunchSubprocessInternal(
     }
 
     base::ProcessId procId = base::GetProcId(handle);
-    Open(mSubprocess->GetChannel(), procId);
+    Open(mSubprocess->TakeChannel(), procId);
 #ifdef MOZ_CODE_COVERAGE
     Unused << SendShareCodeCoverageMutex(
         CodeCoverageHandler::Get()->GetMutexHandle(procId));
@@ -2825,7 +2825,7 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
       }
 
       registrations.AppendElement(BlobURLRegistrationData(
-          nsCString(aURI), ipcBlob, IPC::Principal(aPrincipal), aRevoked));
+          nsCString(aURI), ipcBlob, aPrincipal, aRevoked));
 
       rv = TransmitPermissionsForPrincipal(aPrincipal);
       Unused << NS_WARN_IF(NS_FAILED(rv));
@@ -3572,7 +3572,7 @@ void ContentParent::GeneratePairedMinidump(const char* aReason) {
   // already shutting down.
   nsCOMPtr<nsIAppStartup> appStartup = components::AppStartup::Service();
   if (mCrashReporter && !appStartup->GetShuttingDown() &&
-      Preferences::GetBool("dom.ipc.tabs.createKillHardCrashReports", false)) {
+      StaticPrefs::dom_ipc_tabs_createKillHardCrashReports_AtStartup()) {
     // GeneratePairedMinidump creates two minidumps for us - the main
     // one is for the content process we're about to kill, and the other
     // one is for the main browser process. That second one is the extra
@@ -4877,7 +4877,7 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   if (topParent) {
     frame = topParent->GetOwnerElement();
 
-    if (NS_WARN_IF(topParent->IsMozBrowser())) {
+    if (NS_WARN_IF(topParent->IsMozBrowserElement())) {
       return IPC_FAIL(this, "aThisTab is not a MozBrowser");
     }
   }
@@ -5020,7 +5020,7 @@ mozilla::ipc::IPCResult ContentParent::CommonCreateWindow(
   // If we were passed a name for the window which would override the default,
   // we should send it down to the new tab.
   if (nsContentUtils::IsOverridingWindowName(aName)) {
-    Unused << newBrowserParent->SendSetWindowName(aName);
+    newBrowserHost->GetBrowsingContext()->SetName(aName);
   }
 
   // Don't send down the OriginAttributes if the content process is handling
@@ -5683,7 +5683,7 @@ void ContentParent::TransmitBlobURLsForPrincipal(nsIPrincipal* aPrincipal) {
           }
 
           registrations.AppendElement(BlobURLRegistrationData(
-              nsCString(aURI), ipcBlob, IPC::Principal(aPrincipal), aRevoked));
+              nsCString(aURI), ipcBlob, aPrincipal, aRevoked));
 
           rv = TransmitPermissionsForPrincipal(aPrincipal);
           Unused << NS_WARN_IF(NS_FAILED(rv));
@@ -6150,6 +6150,17 @@ bool ContentParent::CheckBrowsingContextOwnership(
   return true;
 }
 
+bool ContentParent::CheckBrowsingContextEmbedder(BrowsingContext* aBC,
+                                                 const char* aOperation) const {
+  if (!aBC->Canonical()->IsEmbeddedInProcess(ChildID())) {
+    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
+            ("ParentIPC: Trying to %s out of process context 0x%08" PRIx64,
+             aOperation, aBC->Id()));
+    return false;
+  }
+  return true;
+}
+
 mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
     uint64_t aContextId, DetachBrowsingContextResolver&& aResolve) {
   // NOTE: Immediately resolve the promise, as we've received the message. This
@@ -6165,23 +6176,11 @@ mozilla::ipc::IPCResult ContentParent::RecvDetachBrowsingContext(
     return IPC_OK();
   }
 
-  if (!CheckBrowsingContextOwnership(context, "detach")) {
-    // We're trying to detach a child BrowsingContext in another child
-    // process. This is illegal since the owner of the BrowsingContext
-    // is the proccess with the in-process docshell, which is tracked
-    // by OwnerProcessId.
-    return IPC_OK();
+  if (!CheckBrowsingContextEmbedder(context, "detach")) {
+    return IPC_FAIL(this, "Illegal Detach() attempt");
   }
 
   context->Detach(/* aFromIPC */ true);
-
-  context->Group()->EachOtherParent(this, [&](ContentParent* aParent) {
-    // Hold a reference to `context` until the response comes back to ensure it
-    // doesn't die while messages relating to this context are in-flight.
-    auto resolve = [context](bool) {};
-    auto reject = [context](ResponseRejectReason) {};
-    aParent->SendDetachBrowsingContext(context->Id(), resolve, reject);
-  });
 
   return IPC_OK();
 }
@@ -6317,6 +6316,13 @@ mozilla::ipc::IPCResult ContentParent::RecvWindowPostMessage(
     MOZ_LOG(
         BrowsingContext::GetLog(), LogLevel::Debug,
         ("ParentIPC: Trying to send a message to dead or detached context"));
+    return IPC_OK();
+  }
+
+  if (aData.source() && aData.source()->IsDiscarded()) {
+    MOZ_LOG(
+        BrowsingContext::GetLog(), LogLevel::Debug,
+        ("ParentIPC: Trying to send a message from dead or detached context"));
     return IPC_OK();
   }
 

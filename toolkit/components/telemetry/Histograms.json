@@ -319,6 +319,18 @@
     "releaseChannelCollection": "opt-out",
     "bug_numbers": [1080160, 1529352, 1580129]
   },
+  "COMPOSITE_SWAP_TIME" : {
+    "record_in_processes": ["main", "gpu"],
+    "products": ["firefox", "fennec", "geckoview", "geckoview_streaming"],
+    "alert_emails": ["gfx-telemetry-alerts@mozilla.com", "jmuizelaar@mozilla.com"],
+    "expires_in_version": "never",
+    "description": "Time to do swap/present/commit in 100 microseconds",
+    "kind": "exponential",
+    "high": 1000,
+    "n_buckets": 50,
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1612511]
+  },
   "COMPOSITE_FRAME_ROUNDTRIP_TIME" : {
     "record_in_processes": ["main", "content", "gpu"],
     "products": ["firefox", "fennec", "geckoview"],
@@ -3098,13 +3110,26 @@
     "kind": "boolean",
     "description": "Fraction of sockets that used a nsConnectionEntry with history - size 300."
   },
-  "HTTP_CACHE_DISPOSITION_2_V2": {
+  "HTTP_CACHE_DISPOSITION_3": {
     "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
+    "products": ["firefox", "geckoview"],
+    "alert_emails": ["necko@mozilla.com", "mnovotny@mozilla.com"],
+    "bug_numbers": [1611185],
     "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 5,
-    "description": "HTTP Cache v2 Hit, Reval, Failed-Reval, Miss"
+    "kind": "categorical",
+    "labels": ["Unresolved", "Hit", "HitViaReval", "MissedViaReval", "Missed", "Unknown"],
+    "keyed": true,
+    "keys": [
+      "ALL",
+      "UNKNOWN",
+      "OTHER",
+      "JAVASCRIPT",
+      "IMAGE",
+      "MEDIA",
+      "STYLESHEET",
+      "WASM"
+    ],
+    "description": "HTTP Cache v2 hit/miss stats keyed by content type."
   },
   "HTTP_CACHE_ENTRY_RELOAD_TIME": {
     "record_in_processes": ["main", "content"],
@@ -12915,87 +12940,6 @@
     "labels": ["Used", "RejectedByPolicy", "RequestMismatch", "LoadError", "NotUsed"],
     "description": "Whether a preloaded script was used or the reason it was not used."
   },
-  "DOM_SCRIPT_LOAD_INCREMENTAL_RATIO": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "75",
-    "kind": "linear",
-    "low": 2,
-    "high": 100,
-    "n_buckets": 99,
-    "bug_numbers": [1573904],
-    "description": "Ratio of JavaScript-text bytes transferred incrementally compared to the total number of bytes transferred."
-  },
-  "DOM_SCRIPT_LOAD_INCREMENTAL_AVG_TRANSFER_RATE": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "75",
-    "kind": "exponential",
-    "low": 1,
-    "high": 1000000,
-    "n_buckets": 60,
-    "bug_numbers": [1573904],
-    "description": "Speed at which JavaScript-text bytes are transferred incrementally, measured between the first onIncremantalData call and the onStreamComplete call (in character/ms)."
-  },
-  "DOM_SCRIPT_IS_STREAMED": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "75",
-    "kind": "boolean",
-    "bug_numbers": [1579876],
-    "description": "Count whether JS scripts are streamed or not. Useful for interpreting DOM_SCRIPT_LOAD_* telemetry."
-  },
-  "DOM_SCRIPT_LOAD_STREAM_TIME_PERCENT": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "75",
-    "kind": "linear",
-    "low": 2,
-    "high": 100,
-    "n_buckets": 99,
-    "bug_numbers": [1579876],
-    "description": "Percent of time spent streaming bytes while loading a JS Script."
-  },
-  "DOM_SCRIPT_LOAD_PARSE_TIME_PERCENT": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "75",
-    "kind": "linear",
-    "low": 2,
-    "high": 100,
-    "n_buckets": 99,
-    "bug_numbers": [1579876],
-    "description": "Percent of time spent syntax-parsing and full-parsing the top-level script, while loading a JS script."
-  },
-  "DOM_SCRIPT_LOAD_EMIT_TIME_PERCENT": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "75",
-    "kind": "linear",
-    "low": 2,
-    "high": 100,
-    "n_buckets": 99,
-    "bug_numbers": [1579876],
-    "description": "Percent of time spent emitting bytecode for the top-level script, while loading a JS script."
-  },
-  "DOM_SCRIPT_LOAD_STREAMPARSE_ESTIMATE_PERCENT": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "alert_emails": ["nicolas.b.pierron@mozilla.com"],
-    "expires_in_version": "75",
-    "kind": "linear",
-    "low": 2,
-    "high": 100,
-    "n_buckets": 99,
-    "bug_numbers": [1579876],
-    "description": "Estimated percent of time taken use a streaming parser compared to not using a streaming parser."
-  },
   "VIDEO_DROPPED_FRAMES_PROPORTION" : {
     "record_in_processes": ["content"],
     "products": ["firefox", "geckoview"],
@@ -14612,7 +14556,7 @@
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 50,
-    "description": "WebRender scene swap time in milliseconds"
+    "description": "WebRender scene swap time in miliseconds"
   },
   "WR_FRAMEBUILD_TIME": {
     "record_in_processes": ["main", "gpu"],
@@ -15125,5 +15069,20 @@
     "n_buckets": 100,
     "bug_numbers": [1597956],
     "description": "milliseconds to complete a TLS session resumption with external cache"
+  },
+  "WINDOW_REMOTE_SUBFRAMES_ENABLED_STATUS": {
+    "record_in_processes": ["main"],
+    "products": ["firefox"],
+    "alert_emails": ["nika@mozilla.com"],
+    "expires_in_version": "82",
+    "kind": "categorical",
+    "labels": [
+      "EnabledByAutostart",
+      "EnabledByUser",
+      "DisabledByAutostart",
+      "DisabledByUser"
+    ],
+    "bug_numbers": [1602903],
+    "description": "Fission enabled status of individual windows in fission.autostart and non-fission.autostart profiles"
   }
 }

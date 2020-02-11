@@ -130,10 +130,6 @@ dom/workers/test/importScripts_worker_imported3.js
 dom/workers/test/invalid.js
 dom/workers/test/threadErrors_worker1.js
 
-# intl/ exclusions
-intl/locale/
-intl/strres/
-intl/uconv/
 # Bug 1527075: This directory is linted in github repository
 intl/l10n/
 
@@ -182,18 +178,13 @@ services/fxaccounts/FxAccountsPairingChannel.js
 # Servo is imported.
 servo/
 
-# Remote protocol exclusions
-testing/marionette/atom.js
-testing/marionette/legacyaction.js
-testing/marionette/harness
-
-# other testing/ exclusions
 # third party modules
 testing/mochitest/tests/Harness_sanity/
 testing/mochitest/tests/SimpleTest/
-# octothorpe used for pref file comment causes parsing error
-testing/mozbase/mozprofile/tests/files/prefs_with_comments.js
 
+# Test files that we don't want to lint (preprocessed, minified etc)
+testing/marionette/atom.js
+testing/mozbase/mozprofile/tests/files/prefs_with_comments.js
 testing/talos/talos/scripts/jszip.min.js
 testing/talos/talos/startup_test/sessionrestore/profile/sessionstore.js
 testing/talos/talos/startup_test/sessionrestore/profile-manywindows/sessionstore.js
@@ -203,7 +194,6 @@ testing/talos/talos/tests/tp5n/
 testing/talos/talos/fis/tp5n/
 
 testing/web-platform/
-testing/xpcshell/moz-http2/
 
 # toolkit/ exclusions
 

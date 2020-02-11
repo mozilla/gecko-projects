@@ -28,7 +28,6 @@
 #include "base/string_util.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/NullPtr.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/ipc/FileDescriptor.h"
 #include "nsAppDirectoryServiceDefs.h"
@@ -628,6 +627,8 @@ void SandboxBroker::ThreadMain(void) {
   char threadName[16];
   SprintfLiteral(threadName, "FS Broker %d", mChildPid);
   PlatformThread::SetName(threadName);
+
+  AUTO_PROFILER_REGISTER_THREAD(threadName);
 
   // Permissive mode can only be enabled through an environment variable,
   // therefore it is sufficient to fetch the value once

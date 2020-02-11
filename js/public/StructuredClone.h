@@ -206,20 +206,20 @@ enum TransferableOwnership {
 
 class CloneDataPolicy {
   bool allowIntraClusterClonableSharedObjects_;
+  bool allowSharedMemoryObjects_;
 
  public:
   // The default is to deny all policy-controlled aspects.
 
-  CloneDataPolicy() : allowIntraClusterClonableSharedObjects_(false) {}
+  CloneDataPolicy()
+      : allowIntraClusterClonableSharedObjects_(false),
+        allowSharedMemoryObjects_(false) {}
 
-  // In the JS engine, SharedArrayBuffers and WASM modules can only be cloned
-  // intra-process because the shared memory areas are allocated in
-  // process-private memory.  Clients should therefore deny SharedArrayBuffers
-  // when cloning data that are to be transmitted inter-process.
-  //
-  // Clients should also deny SharedArrayBuffers and WASM modules when cloning
-  // data that are to be transmitted intra-process if policy needs dictate such
-  // denial.
+  // SharedArrayBuffers and WASM modules can only be cloned intra-process
+  // because the shared memory areas are allocated in process-private memory or
+  // because there are security issues of sharing them cross agent clusters.
+  // y default, we don't allow shared-memory and intra-cluster objects. Clients
+  // should therefore enable these 2 clone features when needed.
 
   void allowIntraClusterClonableSharedObjects() {
     allowIntraClusterClonableSharedObjects_ = true;
@@ -227,6 +227,12 @@ class CloneDataPolicy {
 
   bool areIntraClusterClonableSharedObjectsAllowed() const {
     return allowIntraClusterClonableSharedObjects_;
+  }
+
+  void allowSharedMemoryObjects() { allowSharedMemoryObjects_ = true; }
+
+  bool areSharedMemoryObjectsAllowed() const {
+    return allowSharedMemoryObjects_;
   }
 };
 
@@ -552,6 +558,11 @@ class MOZ_NON_MEMMOVABLE JS_PUBLIC_API JSStructuredCloneData {
   }
 
   void discardTransferables();
+
+ private:
+  // This internal method exposes the real value of scope_. It's meant to be
+  // used only when starting the writing.
+  JS::StructuredCloneScope scopeForInternalWriting() const { return scope_; }
 };
 
 /**
@@ -562,7 +573,7 @@ class MOZ_NON_MEMMOVABLE JS_PUBLIC_API JSStructuredCloneData {
 JS_PUBLIC_API bool JS_ReadStructuredClone(
     JSContext* cx, JSStructuredCloneData& data, uint32_t version,
     JS::StructuredCloneScope scope, JS::MutableHandleValue vp,
-    JS::CloneDataPolicy cloneDataPolicy,
+    const JS::CloneDataPolicy& cloneDataPolicy,
     const JSStructuredCloneCallbacks* optionalCallbacks, void* closure);
 
 /**
@@ -575,7 +586,7 @@ JS_PUBLIC_API bool JS_ReadStructuredClone(
  */
 JS_PUBLIC_API bool JS_WriteStructuredClone(
     JSContext* cx, JS::HandleValue v, JSStructuredCloneData* data,
-    JS::StructuredCloneScope scope, JS::CloneDataPolicy cloneDataPolicy,
+    JS::StructuredCloneScope scope, const JS::CloneDataPolicy& cloneDataPolicy,
     const JSStructuredCloneCallbacks* optionalCallbacks, void* closure,
     JS::HandleValue transferable);
 
@@ -651,7 +662,7 @@ class JS_PUBLIC_API JSAutoStructuredCloneBuffer {
   }
 
   bool read(JSContext* cx, JS::MutableHandleValue vp,
-            JS::CloneDataPolicy cloneDataPolicy = JS::CloneDataPolicy(),
+            const JS::CloneDataPolicy& cloneDataPolicy = JS::CloneDataPolicy(),
             const JSStructuredCloneCallbacks* optionalCallbacks = nullptr,
             void* closure = nullptr);
 
@@ -660,7 +671,7 @@ class JS_PUBLIC_API JSAutoStructuredCloneBuffer {
              void* closure = nullptr);
 
   bool write(JSContext* cx, JS::HandleValue v, JS::HandleValue transferable,
-             JS::CloneDataPolicy cloneDataPolicy,
+             const JS::CloneDataPolicy& cloneDataPolicy,
              const JSStructuredCloneCallbacks* optionalCallbacks = nullptr,
              void* closure = nullptr);
 
@@ -690,6 +701,8 @@ class JS_PUBLIC_API JSAutoStructuredCloneBuffer {
 #define JS_SCERR_DUP_TRANSFERABLE 2
 #define JS_SCERR_UNSUPPORTED_TYPE 3
 #define JS_SCERR_SHMEM_TRANSFERABLE 4
+#define JS_SCERR_TYPED_ARRAY_DETACHED 5
+#define JS_SCERR_WASM_NO_TRANSFER 6
 
 JS_PUBLIC_API bool JS_ReadUint32Pair(JSStructuredCloneReader* r, uint32_t* p1,
                                      uint32_t* p2);

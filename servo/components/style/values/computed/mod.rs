@@ -57,7 +57,7 @@ pub use self::font::{FontSize, FontSizeAdjust, FontStretch, FontSynthesis};
 pub use self::font::{FontVariantAlternates, FontWeight};
 pub use self::font::{FontVariantEastAsian, FontVariationSettings};
 pub use self::font::{MozScriptLevel, MozScriptMinSize, MozScriptSizeMultiplier, XLang, XTextZoom};
-pub use self::image::{Gradient, GradientItem, Image, ImageLayer, LineDirection, MozImageRect};
+pub use self::image::{Gradient, GradientItem, Image, LineDirection, MozImageRect};
 pub use self::length::{CSSPixelLength, ExtremumLength, NonNegativeLength};
 pub use self::length::{Length, LengthOrNumber, LengthPercentage, NonNegativeLengthOrNumber};
 pub use self::length::{LengthOrAuto, LengthPercentageOrAuto, MaxSize, Size};
@@ -464,6 +464,52 @@ trivial_to_computed_value!(Prefix);
 trivial_to_computed_value!(String);
 trivial_to_computed_value!(Box<str>);
 trivial_to_computed_value!(crate::OwnedStr);
+
+#[allow(missing_docs)]
+#[derive(
+    Animate,
+    Clone,
+    ComputeSquaredDistance,
+    Copy,
+    Debug,
+    MallocSizeOf,
+    PartialEq,
+    ToAnimatedZero,
+    ToCss,
+    ToResolvedValue,
+)]
+#[repr(C, u8)]
+pub enum AngleOrPercentage {
+    Percentage(Percentage),
+    Angle(Angle),
+}
+
+impl ToComputedValue for specified::AngleOrPercentage {
+    type ComputedValue = AngleOrPercentage;
+
+    #[inline]
+    fn to_computed_value(&self, context: &Context) -> AngleOrPercentage {
+        match *self {
+            specified::AngleOrPercentage::Percentage(percentage) => {
+                AngleOrPercentage::Percentage(percentage.to_computed_value(context))
+            },
+            specified::AngleOrPercentage::Angle(angle) => {
+                AngleOrPercentage::Angle(angle.to_computed_value(context))
+            },
+        }
+    }
+    #[inline]
+    fn from_computed_value(computed: &AngleOrPercentage) -> Self {
+        match *computed {
+            AngleOrPercentage::Percentage(percentage) => specified::AngleOrPercentage::Percentage(
+                ToComputedValue::from_computed_value(&percentage),
+            ),
+            AngleOrPercentage::Angle(angle) => {
+                specified::AngleOrPercentage::Angle(ToComputedValue::from_computed_value(&angle))
+            },
+        }
+    }
+}
 
 /// A `<number>` value.
 pub type Number = CSSFloat;

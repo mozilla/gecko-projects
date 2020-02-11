@@ -17,7 +17,7 @@
 "use strict";
 
 var FontInspector = (function FontInspectorClosure() {
-  var fonts, createObjectURL;
+  var fonts;
   var active = false;
   var fontAttribute = "data-font-name";
   function removeSelection() {
@@ -67,7 +67,6 @@ var FontInspector = (function FontInspectorClosure() {
     manager: null,
     init: function init(pdfjsLib) {
       var panel = this.panel;
-      panel.setAttribute("style", "padding: 5px;");
       var tmp = document.createElement("button");
       tmp.addEventListener("click", resetSelection);
       tmp.textContent = "Refresh";
@@ -75,8 +74,6 @@ var FontInspector = (function FontInspectorClosure() {
 
       fonts = document.createElement("div");
       panel.appendChild(fonts);
-
-      createObjectURL = pdfjsLib.createObjectURL;
     },
     cleanup: function cleanup() {
       fonts.textContent = "";
@@ -121,7 +118,9 @@ var FontInspector = (function FontInspectorClosure() {
         url = /url\(['"]?([^\)"']+)/.exec(url);
         download.href = url[1];
       } else if (fontObj.data) {
-        download.href = createObjectURL(fontObj.data, fontObj.mimeType);
+        download.href = URL.createObjectURL(
+          new Blob([fontObj.data], { type: fontObj.mimeType })
+        );
       }
       download.textContent = "Download";
       var logIt = document.createElement("a");
@@ -178,7 +177,6 @@ var StepperManager = (function StepperManagerClosure() {
     manager: null,
     init: function init(pdfjsLib) {
       var self = this;
-      this.panel.setAttribute("style", "padding: 5px;");
       stepperControls = document.createElement("div");
       stepperChooser = document.createElement("select");
       stepperChooser.addEventListener("change", function(event) {
@@ -468,9 +466,7 @@ var Stats = (function Stats() {
     name: "Stats",
     panel: null,
     manager: null,
-    init(pdfjsLib) {
-      this.panel.setAttribute("style", "padding: 5px;");
-    },
+    init(pdfjsLib) {},
     enabled: false,
     active: false,
     // Stats specific functions.

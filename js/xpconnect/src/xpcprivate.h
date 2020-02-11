@@ -166,18 +166,6 @@ class Exception;
 }  // namespace mozilla
 
 /***************************************************************************/
-// default initial sizes for maps (hashtables)
-
-#define XPC_JS_MAP_LENGTH 32
-
-#define XPC_NATIVE_MAP_LENGTH 8
-#define XPC_NATIVE_PROTO_MAP_LENGTH 8
-#define XPC_DYING_NATIVE_PROTO_MAP_LENGTH 8
-#define XPC_NATIVE_INTERFACE_MAP_LENGTH 32
-#define XPC_NATIVE_SET_MAP_LENGTH 32
-#define XPC_WRAPPER_MAP_LENGTH 8
-
-/***************************************************************************/
 // data declarations...
 extern const char XPC_EXCEPTION_CONTRACTID[];
 extern const char XPC_CONSOLE_CONTRACTID[];
@@ -483,21 +471,21 @@ class XPCJSRuntime final : public mozilla::CycleCollectedJSRuntime {
   void AssertInvalidWrappedJSNotInTable(nsXPCWrappedJS* wrapper) const;
 
   JSObject2WrappedJSMap* GetMultiCompartmentWrappedJSMap() const {
-    return mWrappedJSMap;
+    return mWrappedJSMap.get();
   }
 
   IID2NativeInterfaceMap* GetIID2NativeInterfaceMap() const {
-    return mIID2NativeInterfaceMap;
+    return mIID2NativeInterfaceMap.get();
   }
 
   ClassInfo2NativeSetMap* GetClassInfo2NativeSetMap() const {
-    return mClassInfo2NativeSetMap;
+    return mClassInfo2NativeSetMap.get();
   }
 
-  NativeSetMap* GetNativeSetMap() const { return mNativeSetMap; }
+  NativeSetMap* GetNativeSetMap() const { return mNativeSetMap.get(); }
 
   XPCWrappedNativeProtoMap* GetDyingWrappedNativeProtoMap() const {
-    return mDyingWrappedNativeProtoMap;
+    return mDyingWrappedNativeProtoMap.get();
   }
 
   XPCWrappedNativeScopeList& GetWrappedNativeScopes() {
@@ -616,13 +604,13 @@ class XPCJSRuntime final : public mozilla::CycleCollectedJSRuntime {
                         Hasher, js::SystemAllocPolicy, SweepPolicy>
       Principal2JSObjectMap;
 
-  JSObject2WrappedJSMap* mWrappedJSMap;
-  IID2NativeInterfaceMap* mIID2NativeInterfaceMap;
-  ClassInfo2NativeSetMap* mClassInfo2NativeSetMap;
-  NativeSetMap* mNativeSetMap;
+  mozilla::UniquePtr<JSObject2WrappedJSMap> mWrappedJSMap;
+  mozilla::UniquePtr<IID2NativeInterfaceMap> mIID2NativeInterfaceMap;
+  mozilla::UniquePtr<ClassInfo2NativeSetMap> mClassInfo2NativeSetMap;
+  mozilla::UniquePtr<NativeSetMap> mNativeSetMap;
   Principal2JSObjectMap mUAWidgetScopeMap;
   XPCWrappedNativeScopeList mWrappedNativeScopes;
-  XPCWrappedNativeProtoMap* mDyingWrappedNativeProtoMap;
+  mozilla::UniquePtr<XPCWrappedNativeProtoMap> mDyingWrappedNativeProtoMap;
   bool mGCIsRunning;
   nsTArray<nsISupports*> mNativesToReleaseArray;
   bool mDoingFinalization;
@@ -807,11 +795,11 @@ class XPCWrappedNativeScope final
   XPCJSRuntime* GetRuntime() const { return XPCJSRuntime::Get(); }
 
   Native2WrappedNativeMap* GetWrappedNativeMap() const {
-    return mWrappedNativeMap;
+    return mWrappedNativeMap.get();
   }
 
   ClassInfo2WrappedNativeProtoMap* GetWrappedNativeProtoMap() const {
-    return mWrappedNativeProtoMap;
+    return mWrappedNativeProtoMap.get();
   }
 
   nsXPCComponentsBase* GetComponents() const { return mComponents; }
@@ -899,8 +887,8 @@ class XPCWrappedNativeScope final
   XPCWrappedNativeScope() = delete;
 
  private:
-  Native2WrappedNativeMap* mWrappedNativeMap;
-  ClassInfo2WrappedNativeProtoMap* mWrappedNativeProtoMap;
+  mozilla::UniquePtr<Native2WrappedNativeMap> mWrappedNativeMap;
+  mozilla::UniquePtr<ClassInfo2WrappedNativeProtoMap> mWrappedNativeProtoMap;
   RefPtr<nsXPCComponentsBase> mComponents;
   JS::Compartment* mCompartment;
 
@@ -2274,6 +2262,7 @@ struct GlobalProperties {
   bool crypto : 1;
   bool fetch : 1;
   bool indexedDB : 1;
+  bool isSecureContext : 1;
   bool rtcIdentityProvider : 1;
 
  private:
@@ -2321,6 +2310,7 @@ class MOZ_STACK_CLASS SandboxOptions : public OptionsBase {
         isWebExtensionContentScript(false),
         proto(cx),
         sameZoneAs(cx),
+        forceSecureContext(false),
         freshCompartment(false),
         freshZone(false),
         isUAWidgetScope(false),
@@ -2340,6 +2330,7 @@ class MOZ_STACK_CLASS SandboxOptions : public OptionsBase {
   JS::RootedObject proto;
   nsCString sandboxName;
   JS::RootedObject sameZoneAs;
+  bool forceSecureContext;
   bool freshCompartment;
   bool freshZone;
   bool isUAWidgetScope;
@@ -2656,7 +2647,7 @@ class CompartmentPrivate {
   // Whether SystemIsBeingShutDown has been called on this compartment.
   bool wasShutdown;
 
-  JSObject2WrappedJSMap* GetWrappedJSMap() const { return mWrappedJSMap; }
+  JSObject2WrappedJSMap* GetWrappedJSMap() const { return mWrappedJSMap.get(); }
   void UpdateWeakPointersAfterGC();
 
   void SystemIsBeingShutDown();
@@ -2679,7 +2670,7 @@ class CompartmentPrivate {
   XPCWrappedNativeScope* GetScope() { return mScope.get(); }
 
  private:
-  JSObject2WrappedJSMap* mWrappedJSMap;
+  mozilla::UniquePtr<JSObject2WrappedJSMap> mWrappedJSMap;
 
   // Cache holding proxy objects for Window objects (and their Location object)
   // that are loaded in a different process.

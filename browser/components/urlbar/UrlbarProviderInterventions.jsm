@@ -26,7 +26,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
 });
 
 XPCOMUtils.defineLazyGetter(this, "logger", () =>
-  Log.repository.getLogger("Urlbar.Provider.TopSites")
+  Log.repository.getLogger("Urlbar.Provider.Interventions")
 );
 
 XPCOMUtils.defineLazyGetter(this, "appUpdater", () => new AppUpdater());
@@ -374,6 +374,55 @@ class QueryScorer {
 }
 
 /**
+ * Gets appropriate l10n values for each tip's payload.
+ * @param {string} tip a value from the TIPS enum
+ * @returns {object} an Object shaped as { textData, buttonTextData, helpUrl }
+ */
+function getL10nPropertiesForTip(tip) {
+  const baseURL = "https://support.mozilla.org/kb/";
+  switch (tip) {
+    case TIPS.CLEAR:
+      return {
+        textData: { id: "intervention-clear-data" },
+        buttonTextData: { id: "intervention-clear-data-confirm" },
+        helpUrl: baseURL + "delete-browsing-search-download-history-firefox",
+      };
+    case TIPS.REFRESH:
+      return {
+        textData: { id: "intervention-refresh-profile" },
+        buttonTextData: { id: "intervention-refresh-profile-confirm" },
+        helpUrl: baseURL + "refresh-firefox-reset-add-ons-and-settings",
+      };
+    case TIPS.UPDATE_ASK:
+      return {
+        textData: { id: "intervention-update-ask" },
+        buttonTextData: { id: "intervention-update-ask-confirm" },
+        helpUrl: baseURL + "update-firefox-latest-release",
+      };
+    case TIPS.UPDATE_REFRESH:
+      return {
+        textData: { id: "intervention-update-refresh" },
+        buttonTextData: { id: "intervention-update-refresh-confirm" },
+        helpUrl: baseURL + "refresh-firefox-reset-add-ons-and-settings",
+      };
+    case TIPS.UPDATE_RESTART:
+      return {
+        textData: { id: "intervention-update-restart" },
+        buttonTextData: { id: "intervention-update-restart-confirm" },
+        helpUrl: baseURL + "update-firefox-latest-release",
+      };
+    case TIPS.UPDATE_WEB:
+      return {
+        textData: { id: "intervention-update-web" },
+        buttonTextData: { id: "intervention-update-web-confirm" },
+        helpUrl: baseURL + "update-firefox-latest-release",
+      };
+    default:
+      throw new Error("Unknown TIP type.");
+  }
+}
+
+/**
  * A provider that returns actionable tip results when the user is performing
  * a search related to those actions.
  */
@@ -385,27 +434,23 @@ class ProviderInterventions extends UrlbarProvider {
     // The tip we should currently show.
     this.currentTip = TIPS.NONE;
 
-    // Object used to match the user's queries to tips.
-    this.queryScorer = new QueryScorer({
-      variations: new Map([
-        // Recognize "fire fox", "fox fire", and "foxfire" as "firefox".
-        ["firefox", ["fire fox", "fox fire", "foxfire"]],
-        // Recognize "mozila" as "mozilla".  This will catch common mispellings
-        // "mozila", "mozzila", and "mozzilla" (among others) due to the edit
-        // distance threshold of 1.
-        ["mozilla", ["mozila"]],
-      ]),
+    // This object is used to match the user's queries to tips.
+    XPCOMUtils.defineLazyGetter(this, "queryScorer", () => {
+      let queryScorer = new QueryScorer({
+        variations: new Map([
+          // Recognize "fire fox", "fox fire", and "foxfire" as "firefox".
+          ["firefox", ["fire fox", "fox fire", "foxfire"]],
+          // Recognize "mozila" as "mozilla".  This will catch common mispellings
+          // "mozila", "mozzila", and "mozzilla" (among others) due to the edit
+          // distance threshold of 1.
+          ["mozilla", ["mozila"]],
+        ]),
+      });
+      for (let [id, phrases] of Object.entries(DOCUMENTS)) {
+        queryScorer.addDocument({ id, phrases });
+      }
+      return queryScorer;
     });
-
-    // Initialize the query scorer.
-    for (let [id, phrases] of Object.entries(DOCUMENTS)) {
-      this.queryScorer.addDocument({ id, phrases });
-    }
-
-    this._l10n = new Localization([
-      "branding/brand.ftl",
-      "preview/interventions.ftl",
-    ]);
   }
 
   /**
@@ -456,8 +501,15 @@ class ProviderInterventions extends UrlbarProvider {
     }
 
     // The update tips depend on the app's update status, so check for updates
-    // now (if we haven't already checked within the update-check period).
-    this.checkForBrowserUpdate();
+    // now (if we haven't already checked within the update-check period).  If
+    // we're running in an xpcshell test, then checkForBrowserUpdate's attempt
+    // to use appUpdater will throw an exception because it won't be available.
+    // In that case, return false to disable the provider.
+    try {
+      this.checkForBrowserUpdate();
+    } catch (ex) {
+      return false;
+    }
 
     // Determine the tip to show, if any. If there are multiple top-score docs,
     // prefer them in the following order.
@@ -527,61 +579,7 @@ class ProviderInterventions extends UrlbarProvider {
 
     result.suggestedIndex = 1;
 
-    let l10nkeys = [];
-    switch (this.currentTip) {
-      case TIPS.CLEAR:
-        l10nkeys = [
-          { id: "intervention-clear-data" },
-          { id: "intervention-clear-data-confirm" },
-        ];
-        result.payload.helpUrl =
-          "https://support.mozilla.org/kb/delete-browsing-search-download-history-firefox";
-        break;
-      case TIPS.REFRESH:
-        l10nkeys = [
-          { id: "intervention-refresh-profile" },
-          { id: "intervention-refresh-profile-confirm" },
-        ];
-        result.payload.helpUrl =
-          "https://support.mozilla.org/kb/refresh-firefox-reset-add-ons-and-settings";
-        break;
-      case TIPS.UPDATE_ASK:
-        l10nkeys = [
-          { id: "intervention-update-ask" },
-          { id: "intervention-update-ask-confirm" },
-        ];
-        result.payload.helpUrl =
-          "https://support.mozilla.org/kb/update-firefox-latest-release";
-        break;
-      case TIPS.UPDATE_REFRESH:
-        l10nkeys = [
-          { id: "intervention-update-refresh" },
-          { id: "intervention-update-refresh-confirm" },
-        ];
-        result.payload.helpUrl =
-          "https://support.mozilla.org/kb/refresh-firefox-reset-add-ons-and-settings";
-        break;
-      case TIPS.UPDATE_RESTART:
-        l10nkeys = [
-          { id: "intervention-update-restart" },
-          { id: "intervention-update-restart-confirm" },
-        ];
-        result.payload.helpUrl =
-          "https://support.mozilla.org/kb/update-firefox-latest-release";
-        break;
-      case TIPS.UPDATE_WEB:
-        l10nkeys = [
-          { id: "intervention-update-web" },
-          { id: "intervention-update-web-confirm" },
-        ];
-        result.payload.helpUrl =
-          "https://support.mozilla.org/kb/update-firefox-latest-release";
-        break;
-    }
-
-    let [mainText, confirmButtonText] = await this._l10n.formatValues(l10nkeys);
-    result.payload.text = mainText;
-    result.payload.buttonText = confirmButtonText;
+    Object.assign(result.payload, getL10nPropertiesForTip(this.currentTip));
 
     if (!this.queries.has(queryContext)) {
       return;

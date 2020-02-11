@@ -1043,11 +1043,11 @@ BrowserChild::~BrowserChild() {
   mozilla::DropJSObjects(this);
 }
 
-mozilla::ipc::IPCResult BrowserChild::RecvSkipBrowsingContextDetach(
-    SkipBrowsingContextDetachResolver&& aResolve) {
+mozilla::ipc::IPCResult BrowserChild::RecvWillChangeProcess(
+    WillChangeProcessResolver&& aResolve) {
   if (nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation())) {
     RefPtr<nsDocShell> docshell = nsDocShell::Cast(docShell);
-    docshell->SkipBrowsingContextDetach();
+    docshell->SetWillChangeProcess();
   }
   aResolve(true);
   return IPC_OK();
@@ -1301,10 +1301,19 @@ mozilla::ipc::IPCResult BrowserChild::RecvSizeModeChanged(
 
 mozilla::ipc::IPCResult BrowserChild::RecvChildToParentMatrix(
     const mozilla::Maybe<mozilla::gfx::Matrix4x4>& aMatrix,
-    const mozilla::ScreenRect& aRemoteDocumentRect) {
+    const mozilla::ScreenRect& aTopLevelViewportVisibleRectInBrowserCoords) {
   mChildToParentConversionMatrix =
       LayoutDeviceToLayoutDeviceMatrix4x4::FromUnknownMatrix(aMatrix);
-  mRemoteDocumentRect = aRemoteDocumentRect;
+  mTopLevelViewportVisibleRectInBrowserCoords =
+      aTopLevelViewportVisibleRectInBrowserCoords;
+
+  // Triger an intersection observation since ancestor viewports changed.
+  if (RefPtr<Document> toplevelDoc = GetTopLevelDocument()) {
+    if (nsPresContext* presContext = toplevelDoc->GetPresContext()) {
+      presContext->RefreshDriver()->IntersectionObservationAdded();
+    }
+  }
+
   return IPC_OK();
 }
 
@@ -1596,8 +1605,8 @@ BrowserChild::GetChildToParentConversionMatrix() const {
   return LayoutDeviceToLayoutDeviceMatrix4x4::Translation(offset);
 }
 
-ScreenRect BrowserChild::GetRemoteDocumentRect() const {
-  return mRemoteDocumentRect;
+ScreenRect BrowserChild::GetTopLevelViewportVisibleRectInBrowserCoords() const {
+  return mTopLevelViewportVisibleRectInBrowserCoords;
 }
 
 void BrowserChild::FlushAllCoalescedMouseData() {
@@ -2336,7 +2345,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvSwappedWithOtherRemoteLoader(
   // Ignore previous value of mTriedBrowserInit since owner content has changed.
   mTriedBrowserInit = true;
   // Initialize the child side of the browser element machinery, if appropriate.
-  if (IsMozBrowser()) {
+  if (IsMozBrowserElement()) {
     RecvLoadRemoteScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
   }
 
@@ -2681,7 +2690,7 @@ bool BrowserChild::InitBrowserChildMessageManager() {
     mTriedBrowserInit = true;
     // Initialize the child side of the browser element machinery,
     // if appropriate.
-    if (IsMozBrowser()) {
+    if (IsMozBrowserElement()) {
       RecvLoadRemoteScript(BROWSER_ELEMENT_CHILD_SCRIPT, true);
     }
   }
@@ -3285,14 +3294,6 @@ bool BrowserChild::StopAwaitingLargeAlloc() {
   return awaiting;
 }
 
-mozilla::ipc::IPCResult BrowserChild::RecvSetWindowName(const nsString& aName) {
-  nsCOMPtr<nsIDocShellTreeItem> item = do_QueryInterface(WebNavigation());
-  if (item) {
-    item->SetName(aName);
-  }
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult BrowserChild::RecvAllowScriptsToClose() {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(WebNavigation());
   if (window) {
@@ -3391,6 +3392,41 @@ Maybe<LayoutDeviceIntRect> BrowserChild::GetVisibleRect() const {
   LayoutDeviceIntRect visibleRectLD =
       RoundedToInt(visibleRectCSS * mPuppetWidget->GetDefaultScale());
   return Some(visibleRectLD);
+}
+
+Maybe<LayoutDeviceRect>
+BrowserChild::GetTopLevelViewportVisibleRectInSelfCoords() const {
+  if (mIsTopLevel) {
+    return Nothing();
+  }
+
+  if (!mChildToParentConversionMatrix) {
+    // There is a case that mChildToParentConversionMatrix hasn't been delivered
+    // since no APZ stuff has happened. In the case we can use mVisibleRect
+    // directly.
+    CSSRect visibleRectCSS = CSSPixel::FromAppUnits(mEffectsInfo.mVisibleRect);
+    return Some(visibleRectCSS * mPuppetWidget->GetDefaultScale());
+  }
+
+  Maybe<LayoutDeviceToLayoutDeviceMatrix4x4> inverse =
+      mChildToParentConversionMatrix->MaybeInverse();
+  if (!inverse) {
+    return Nothing();
+  }
+
+  // Convert the remote document visible rect to the coordinate system of the
+  // iframe document.
+  Maybe<LayoutDeviceRect> rect = UntransformBy(
+      *inverse,
+      ViewAs<LayoutDevicePixel>(
+          mTopLevelViewportVisibleRectInBrowserCoords,
+          PixelCastJustification::ContentProcessIsLayerInUiProcess),
+      LayoutDeviceRect::MaxIntRect());
+  if (!rect) {
+    return Nothing();
+  }
+
+  return rect;
 }
 
 ScreenIntRect BrowserChild::GetOuterRect() {

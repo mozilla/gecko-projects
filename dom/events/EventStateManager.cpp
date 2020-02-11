@@ -1344,8 +1344,7 @@ void EventStateManager::DispatchCrossProcessEvent(WidgetEvent* aEvent,
       }
 
       browserParent->SendRealDragEvent(*aEvent->AsDragEvent(), action,
-                                       dropEffect, IPC::Principal(principal),
-                                       csp);
+                                       dropEffect, principal, csp);
       return;
     }
     case ePluginEventClass: {
@@ -2272,7 +2271,7 @@ void EventStateManager::DoScrollZoom(nsIFrame* aTargetFrame,
 static nsIFrame* GetParentFrameToScroll(nsIFrame* aFrame) {
   if (!aFrame) return nullptr;
 
-  if (aFrame->StyleDisplay()->mPosition == NS_STYLE_POSITION_FIXED &&
+  if (aFrame->StyleDisplay()->mPosition == StylePositionProperty::Fixed &&
       nsLayoutUtils::IsReallyFixedPos(aFrame))
     return aFrame->PresContext()->GetPresShell()->GetRootScrollFrame();
 
@@ -5784,7 +5783,7 @@ nsresult EventStateManager::DoContentCommandEvent(
             nsContentPolicyType contentPolicyType =
                 transferable->GetContentPolicyType();
             remote->SendPasteTransferable(ipcDataTransfer, isPrivateData,
-                                          IPC::Principal(requestingPrincipal),
+                                          requestingPrincipal,
                                           contentPolicyType);
             rv = NS_OK;
           } else {

@@ -14,6 +14,7 @@
 #include "mozilla/PresShell.h"
 
 #include "nsDocLoader.h"
+#include "nsDocShell.h"
 #include "nsNetUtil.h"
 #include "nsIHttpChannel.h"
 #include "nsIWebNavigation.h"
@@ -1473,7 +1474,8 @@ NS_IMETHODIMP nsDocLoader::AsyncOnChannelRedirect(
           newURI, where, nsIWebNavigation::LOAD_FLAGS_IS_REDIRECT,
           /* triggering principal */ nullptr, &loadURIHandled);
       if (NS_SUCCEEDED(rv) && loadURIHandled) {
-        cb->OnRedirectVerifyCallback(NS_OK);
+        aOldChannel->Cancel(NS_ERROR_ABORT);
+        cb->OnRedirectVerifyCallback(NS_ERROR_ABORT);
         return NS_OK;
       }
     }

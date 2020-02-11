@@ -197,11 +197,11 @@ struct MOZ_RAII AutoPrepareFocusRange {
     }
     bool userSelection = aSelection->mUserInitiated;
 
-    nsTArray<RangeData>& ranges = aSelection->mRanges;
+    nsTArray<StyledRange>& ranges = aSelection->mRanges;
     if (!userSelection || (!aContinueSelection && aMultipleSelection)) {
       // Scripted command or the user is starting a new explicit multi-range
       // selection.
-      for (RangeData& entry : ranges) {
+      for (StyledRange& entry : ranges) {
         entry.mRange->SetIsGenerated(false);
       }
       return;
@@ -839,9 +839,10 @@ nsPrevNextBidiLevels nsFrameSelection::GetPrevNextBidiLevels(
   return GetPrevNextBidiLevels(aNode, aContentOffset, mHint, aJumpLines);
 }
 
+// static
 nsPrevNextBidiLevels nsFrameSelection::GetPrevNextBidiLevels(
     nsIContent* aNode, uint32_t aContentOffset, CaretAssociateHint aHint,
-    bool aJumpLines) const {
+    bool aJumpLines) {
   // Get the level of the frames on each side
   nsIFrame* currentFrame;
   int32_t currentOffset;
@@ -1456,10 +1457,12 @@ static bool IsDisplayContents(const nsIContent* aContent) {
   return aContent->IsElement() && aContent->AsElement()->IsDisplayContents();
 }
 
-nsIFrame* nsFrameSelection::GetFrameForNodeOffset(
-    nsIContent* aNode, int32_t aOffset, CaretAssociateHint aHint,
-    int32_t* aReturnOffset) const {
-  if (!aNode || !aReturnOffset || !mPresShell) return nullptr;
+// static
+nsIFrame* nsFrameSelection::GetFrameForNodeOffset(nsIContent* aNode,
+                                                  int32_t aOffset,
+                                                  CaretAssociateHint aHint,
+                                                  int32_t* aReturnOffset) {
+  if (!aNode || !aReturnOffset) return nullptr;
 
   if (aOffset < 0) return nullptr;
 
@@ -1977,9 +1980,8 @@ static bool IsCell(nsIContent* aContent) {
   return aContent->IsAnyOfHTMLElements(nsGkAtoms::td, nsGkAtoms::th);
 }
 
-nsITableCellLayout* nsFrameSelection::GetCellLayout(
-    nsIContent* aCellContent) const {
-  NS_ENSURE_TRUE(mPresShell, nullptr);
+// static
+nsITableCellLayout* nsFrameSelection::GetCellLayout(nsIContent* aCellContent) {
   nsITableCellLayout* cellLayoutObject =
       do_QueryFrame(aCellContent->GetPrimaryFrame());
   return cellLayoutObject;
@@ -2596,7 +2598,8 @@ nsresult nsFrameSelection::SelectRowOrColumn(nsIContent* aCellContent,
   return NS_OK;
 }
 
-nsIContent* nsFrameSelection::GetFirstCellNodeInRange(nsRange* aRange) const {
+// static
+nsIContent* nsFrameSelection::GetFirstCellNodeInRange(nsRange* aRange) {
   if (!aRange) return nullptr;
 
   nsIContent* childContent = aRange->GetChildAtStartOffset();
@@ -2639,6 +2642,7 @@ nsRange* nsFrameSelection::GetNextCellRange() {
   return range;
 }
 
+// static
 nsresult nsFrameSelection::GetCellIndexes(nsIContent* aCell, int32_t& aRowIndex,
                                           int32_t& aColIndex) {
   if (!aCell) return NS_ERROR_NULL_POINTER;
@@ -2651,8 +2655,9 @@ nsresult nsFrameSelection::GetCellIndexes(nsIContent* aCell, int32_t& aRowIndex,
   return cellLayoutObject->GetCellIndexes(aRowIndex, aColIndex);
 }
 
+// static
 nsIContent* nsFrameSelection::IsInSameTable(nsIContent* aContent1,
-                                            nsIContent* aContent2) const {
+                                            nsIContent* aContent2) {
   if (!aContent1 || !aContent2) return nullptr;
 
   nsIContent* tableNode1 = GetParentTable(aContent1);
@@ -2663,7 +2668,8 @@ nsIContent* nsFrameSelection::IsInSameTable(nsIContent* aContent1,
   return (tableNode1 == tableNode2) ? tableNode1 : nullptr;
 }
 
-nsIContent* nsFrameSelection::GetParentTable(nsIContent* aCell) const {
+// static
+nsIContent* nsFrameSelection::GetParentTable(nsIContent* aCell) {
   if (!aCell) {
     return nullptr;
   }

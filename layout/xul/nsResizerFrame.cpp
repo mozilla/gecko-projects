@@ -435,7 +435,8 @@ void nsResizerFrame::ResizeContent(nsIContent* aContent,
         if (!widthstr.IsEmpty() &&
             !Substring(widthstr, widthstr.Length() - 2, 2).EqualsLiteral("px"))
           widthstr.AppendLiteral("px");
-        decl->SetProperty(NS_LITERAL_CSTRING("width"), widthstr, EmptyString());
+        decl->SetProperty(NS_LITERAL_CSTRING("width"), widthstr, EmptyString(),
+                          IgnoreErrors());
       }
       if (aDirection.mVertical) {
         NS_ConvertUTF16toUTF8 heightstr(aSizeInfo.height);
@@ -444,7 +445,7 @@ void nsResizerFrame::ResizeContent(nsIContent* aContent,
                  .EqualsLiteral("px"))
           heightstr.AppendLiteral("px");
         decl->SetProperty(NS_LITERAL_CSTRING("height"), heightstr,
-                          EmptyString());
+                          EmptyString(), IgnoreErrors());
       }
     }
   }
@@ -476,7 +477,7 @@ void nsResizerFrame::RestoreOriginalSize(nsIContent* aContent) {
   NS_ASSERTION(sizeInfo, "We set a null sizeInfo!?");
   Direction direction = {1, 1};
   ResizeContent(aContent, direction, *sizeInfo, nullptr);
-  aContent->DeleteProperty(nsGkAtoms::_moz_original_size);
+  aContent->RemoveProperty(nsGkAtoms::_moz_original_size);
 }
 
 /* returns a Direction struct containing the horizontal and vertical direction

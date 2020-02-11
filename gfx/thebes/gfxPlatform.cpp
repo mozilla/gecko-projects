@@ -615,6 +615,14 @@ static void WebRenderQualityPrefChangeCallback(const char* aPref, void*) {
   gfxPlatform::GetPlatform()->UpdateAllowSacrificingSubpixelAA();
 }
 
+static void WebRenderMultithreadingPrefChangeCallback(const char* aPrefName,
+                                                      void*) {
+  bool enable = Preferences::GetBool(
+      StaticPrefs::GetPrefName_gfx_webrender_enable_multithreading(), true);
+
+  gfx::gfxVars::SetUseWebRenderMultithreading(enable);
+}
+
 #if defined(USE_SKIA)
 static uint32_t GetSkiaGlyphCacheSize() {
   // Only increase font cache size on non-android to save memory.
@@ -2910,7 +2918,7 @@ static void UpdateWRQualificationForAMD(FeatureState& aFeature,
           FeatureStatus::BlockedScreenUnknown, "Screen size unknown",
           NS_LITERAL_CSTRING("FEATURE_FAILURE_SCREEN_SIZE_UNKNOWN"));
     } else if (aScreenPixels <= kMaxPixelsBattery) {
-#    ifdef NIGHTLY_BUILD
+#    ifdef EARLY_BETA_OR_EARLIER
       // Battery and small screen, it should be on by default in nightly.
       *aOutGuardedByQualifiedPref = false;
 #    else
@@ -3102,8 +3110,9 @@ static void UpdateWRQualificationForIntel(FeatureState& aFeature,
     MOZ_ASSERT(false);
 #    endif
     if (aScreenPixels <= kMaxPixelsBattery) {
-#    ifdef NIGHTLY_BUILD
-      // Battery and small screen, it should be on by default in nightly.
+#    ifdef EARLY_BETA_OR_EARLIER
+      // Battery and small screen, it should be on by default in nightly and
+      // beta.
       *aOutGuardedByQualifiedPref = false;
 #    else
       aFeature.Disable(
@@ -3334,6 +3343,11 @@ void gfxPlatform::InitWebRenderConfig() {
           nsDependentCString(
               StaticPrefs::
                   GetPrefName_gfx_webrender_quality_force_disable_sacrificing_subpixel_aa()));
+      Preferences::RegisterCallback(
+          WebRenderMultithreadingPrefChangeCallback,
+          nsDependentCString(
+              StaticPrefs::GetPrefName_gfx_webrender_enable_multithreading()));
+
       UpdateAllowSacrificingSubpixelAA();
     }
   }
@@ -3464,6 +3478,20 @@ void gfxPlatform::InitOMTPConfig() {
   omtp.SetDefaultFromPref("layers.omtp.enabled", true,
                           Preferences::GetBool("layers.omtp.enabled", false,
                                                PrefValueKind::Default));
+
+  if (sizeof(void*) <= sizeof(uint32_t)) {
+    int32_t cpuCores = PR_GetNumberOfProcessors();
+    const uint64_t kMinSystemMemory = 2147483648;  // 2 GB
+    if (cpuCores <= 2) {
+      omtp.ForceDisable(FeatureStatus::Broken,
+                        "OMTP is not supported on 32-bit with <= 2 cores",
+                        NS_LITERAL_CSTRING("FEATURE_FAILURE_OMTP_32BIT_CORES"));
+    } else if (mTotalSystemMemory < kMinSystemMemory) {
+      omtp.ForceDisable(FeatureStatus::Broken,
+                        "OMTP is not supported on 32-bit with < 2 GB RAM",
+                        NS_LITERAL_CSTRING("FEATURE_FAILURE_OMTP_32BIT_MEM"));
+    }
+  }
 
   if (mContentBackend == BackendType::CAIRO) {
     omtp.ForceDisable(FeatureStatus::Broken,

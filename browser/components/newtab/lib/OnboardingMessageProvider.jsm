@@ -72,17 +72,17 @@ const TRAILHEAD_FULL_PAGE_CONTENT = {
 const JOIN_CONTENT = {
   className: "joinCohort",
   title: { string_id: "onboarding-welcome-body" },
-  benefits: ["products", "knowledge", "privacy"].map(id => ({
+  benefits: ["sync", "monitor", "lockwise"].map(id => ({
     id,
     title: { string_id: `onboarding-benefit-${id}-title` },
     text: { string_id: `onboarding-benefit-${id}-text` },
   })),
   learn: {
-    text: { string_id: "onboarding-welcome-learn-more" },
+    text: { string_id: "onboarding-welcome-modal-family-learn-more" },
     url: "https://www.mozilla.org/firefox/accounts/",
   },
   form: {
-    title: { string_id: "onboarding-join-form-header" },
+    title: { string_id: "onboarding-welcome-form-header" },
     text: { string_id: "onboarding-join-form-body" },
     email: { string_id: "onboarding-join-form-email" },
     button: { string_id: "onboarding-join-form-continue" },

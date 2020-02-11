@@ -10,6 +10,7 @@
 #define mozilla_ServoStyleConstsInlines_h
 
 #include "mozilla/ServoStyleConsts.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/URLExtraData.h"
 #include "nsGkAtoms.h"
 #include "MainThreadUtils.h"
@@ -21,6 +22,36 @@
 // that should move here.
 
 namespace mozilla {
+
+// We need to explicitly instantiate these so that the clang plugin can see that
+// they're trivially copiable...
+//
+// https://github.com/eqrion/cbindgen/issues/402 tracks doing something like
+// this automatically from cbindgen.
+template struct StyleOwned<RawServoAnimationValueMap>;
+template struct StyleOwned<RawServoAuthorStyles>;
+template struct StyleOwned<RawServoSourceSizeList>;
+template struct StyleOwned<StyleUseCounters>;
+template struct StyleOwnedOrNull<StyleUseCounters>;
+template struct StyleOwnedOrNull<RawServoSelectorList>;
+template struct StyleStrong<ComputedStyle>;
+template struct StyleStrong<ServoCssRules>;
+template struct StyleStrong<RawServoAnimationValue>;
+template struct StyleStrong<RawServoDeclarationBlock>;
+template struct StyleStrong<RawServoStyleSheetContents>;
+template struct StyleStrong<RawServoKeyframe>;
+template struct StyleStrong<RawServoMediaList>;
+template struct StyleStrong<RawServoStyleRule>;
+template struct StyleStrong<RawServoImportRule>;
+template struct StyleStrong<RawServoKeyframesRule>;
+template struct StyleStrong<RawServoMediaRule>;
+template struct StyleStrong<RawServoMozDocumentRule>;
+template struct StyleStrong<RawServoNamespaceRule>;
+template struct StyleStrong<RawServoPageRule>;
+template struct StyleStrong<RawServoSupportsRule>;
+template struct StyleStrong<RawServoFontFeatureValuesRule>;
+template struct StyleStrong<RawServoFontFaceRule>;
+template struct StyleStrong<RawServoCounterStyleRule>;
 
 template <typename T>
 inline void StyleOwnedSlice<T>::Clear() {
@@ -360,12 +391,14 @@ inline StyleLoadData& StyleCssUrl::LoadData() const {
 inline nsIURI* StyleCssUrl::GetURI() const {
   MOZ_DIAGNOSTIC_ASSERT(NS_IsMainThread());
   auto& loadData = LoadData();
-  if (!loadData.tried_to_resolve) {
-    loadData.tried_to_resolve = true;
-    NS_NewURI(getter_AddRefs(loadData.resolved), SpecifiedSerialization(),
-              nullptr, ExtraData().BaseURI());
+  if (!(loadData.flags & StyleLoadDataFlags::TRIED_TO_RESOLVE_URI)) {
+    loadData.flags |= StyleLoadDataFlags::TRIED_TO_RESOLVE_URI;
+    RefPtr<nsIURI> resolved;
+    NS_NewURI(getter_AddRefs(resolved), SpecifiedSerialization(), nullptr,
+              ExtraData().BaseURI());
+    loadData.resolved_uri = resolved.forget().take();
   }
-  return loadData.resolved.get();
+  return loadData.resolved_uri;
 }
 
 inline nsDependentCSubstring StyleComputedUrl::SpecifiedSerialization() const {
@@ -395,6 +428,15 @@ inline bool StyleComputedUrl::HasRef() const {
     return NS_SUCCEEDED(uri->GetHasRef(&hasRef)) && hasRef;
   }
   return false;
+}
+
+inline bool StyleComputedImageUrl::IsImageResolved() const {
+  return bool(LoadData().flags & StyleLoadDataFlags::TRIED_TO_RESOLVE_IMAGE);
+}
+
+inline imgRequestProxy* StyleComputedImageUrl::GetImage() const {
+  MOZ_ASSERT(IsImageResolved());
+  return LoadData().resolved_image;
 }
 
 template <>
@@ -489,7 +531,13 @@ bool LengthPercentage::IsCalc() const { return Tag() == TAG_CALC; }
 
 StyleCalcLengthPercentage& LengthPercentage::AsCalc() {
   MOZ_ASSERT(IsCalc());
+  // NOTE: in 32-bits, the pointer is not swapped, and goes along with the tag.
+#ifdef SERVO_32_BITS
   return *calc.ptr;
+#else
+  return *reinterpret_cast<StyleCalcLengthPercentage*>(
+      NativeEndian::swapFromLittleEndian(calc.ptr));
+#endif
 }
 
 const StyleCalcLengthPercentage& LengthPercentage::AsCalc() const {
@@ -503,11 +551,16 @@ StyleLengthPercentageUnion::StyleLengthPercentageUnion(const Self& aOther) {
     percentage = {TAG_PERCENTAGE, aOther.AsPercentage()};
   } else {
     MOZ_ASSERT(aOther.IsCalc());
+    auto* ptr = new StyleCalcLengthPercentage(aOther.AsCalc());
+    // NOTE: in 32-bits, the pointer is not swapped, and goes along with the
+    // tag.
     calc = {
 #ifdef SERVO_32_BITS
         TAG_CALC,
+        ptr,
+#else
+        NativeEndian::swapToLittleEndian(reinterpret_cast<uintptr_t>(ptr)),
 #endif
-        new StyleCalcLengthPercentage(aOther.AsCalc()),
     };
   }
   MOZ_ASSERT(Tag() == aOther.Tag());
@@ -515,7 +568,7 @@ StyleLengthPercentageUnion::StyleLengthPercentageUnion(const Self& aOther) {
 
 StyleLengthPercentageUnion::~StyleLengthPercentageUnion() {
   if (IsCalc()) {
-    delete calc.ptr;
+    delete &AsCalc();
   }
 }
 
@@ -842,6 +895,21 @@ inline nsRect StyleGenericClipRect<LengthOrAuto>::ToLayoutRect(
   nscoord width = right.IsLength() ? right.ToLength() - x : aAutoSize;
   nscoord height = bottom.IsLength() ? bottom.ToLength() - y : aAutoSize;
   return nsRect(x, y, width, height);
+}
+
+using RestyleHint = StyleRestyleHint;
+
+inline RestyleHint RestyleHint::RestyleSubtree() {
+  return RestyleHint::RESTYLE_SELF | RestyleHint::RESTYLE_DESCENDANTS;
+}
+
+inline RestyleHint RestyleHint::RecascadeSubtree() {
+  return RestyleHint::RECASCADE_SELF | RestyleHint::RECASCADE_DESCENDANTS;
+}
+
+inline RestyleHint RestyleHint::ForAnimations() {
+  return RestyleHint::RESTYLE_CSS_TRANSITIONS |
+         RestyleHint::RESTYLE_CSS_ANIMATIONS | RestyleHint::RESTYLE_SMIL;
 }
 
 }  // namespace mozilla

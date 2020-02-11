@@ -143,7 +143,8 @@ bool GeneralParser<ParseHandler, Unit>::mustMatchTokenInternal(
   return true;
 }
 
-ParserSharedBase::ParserSharedBase(JSContext* cx, ParseInfo& parserInfo,
+ParserSharedBase::ParserSharedBase(JSContext* cx,
+                                   CompilationInfo& compilationInfo,
                                    ScriptSourceObject* sourceObject, Kind kind)
     : JS::AutoGCRooter(
           cx,
@@ -155,13 +156,12 @@ ParserSharedBase::ParserSharedBase(JSContext* cx, ParseInfo& parserInfo,
 #endif
           ),
       cx_(cx),
-      alloc_(parserInfo.allocScope.alloc()),
-      parseInfo_(parserInfo),
+      alloc_(compilationInfo.allocScope.alloc()),
+      compilationInfo_(compilationInfo),
       traceListHead_(nullptr),
       pc_(nullptr),
-      usedNames_(parserInfo.usedNames),
-      sourceObject_(cx, sourceObject),
-      keepAtoms_(cx) {
+      usedNames_(compilationInfo.usedNames),
+      sourceObject_(cx, sourceObject) {
   cx->frontendCollectionPool().addActiveCompilation();
 }
 
@@ -175,8 +175,8 @@ void ParserSharedBase::cleanupTraceList() {
 
       // FunctionBoxes are LifoAllocated, but the LazyScriptCreationData that
       // they hold onto have SystemAlloc memory. We need to make sure this gets
-      // cleaned up before the Lifo gets released (in ParseInfo) to ensure that
-      // we don't leak memory.
+      // cleaned up before the Lifo gets released (in CompilationInfo) to ensure
+      // that we don't leak memory.
       if (objBox->isFunctionBox()) {
         objBox->asFunctionBox()->cleanupMemory();
       }
@@ -191,9 +191,9 @@ ParserSharedBase::~ParserSharedBase() {
 }
 
 ParserBase::ParserBase(JSContext* cx, const ReadOnlyCompileOptions& options,
-                       bool foldConstants, ParseInfo& parseInfo,
+                       bool foldConstants, CompilationInfo& compilationInfo,
                        ScriptSourceObject* sourceObject)
-    : ParserSharedBase(cx, parseInfo, sourceObject,
+    : ParserSharedBase(cx, compilationInfo, sourceObject,
                        ParserSharedBase::Kind::Parser),
       anyChars(cx, options, this),
       ss(nullptr),
@@ -204,7 +204,7 @@ ParserBase::ParserBase(JSContext* cx, const ReadOnlyCompileOptions& options,
       isUnexpectedEOF_(false),
       awaitHandling_(AwaitIsName),
       inParametersOfAsyncFunction_(false),
-      treeHolder_(parseInfo.treeHolder) {
+      treeHolder_(compilationInfo.treeHolder) {
 }
 
 bool ParserBase::checkOptions() {
@@ -220,19 +220,19 @@ ParserBase::~ParserBase() { MOZ_ASSERT(checkOptionsCalled_); }
 template <class ParseHandler>
 PerHandlerParser<ParseHandler>::PerHandlerParser(
     JSContext* cx, const ReadOnlyCompileOptions& options, bool foldConstants,
-    ParseInfo& parserInfo, LazyScript* lazyOuterFunction,
+    CompilationInfo& compilationInfo, LazyScript* lazyOuterFunction,
     ScriptSourceObject* sourceObject, void* internalSyntaxParser)
-    : ParserBase(cx, options, foldConstants, parserInfo, sourceObject),
-      handler_(cx, parserInfo.allocScope.alloc(), lazyOuterFunction),
+    : ParserBase(cx, options, foldConstants, compilationInfo, sourceObject),
+      handler_(cx, compilationInfo.allocScope.alloc(), lazyOuterFunction),
       internalSyntaxParser_(internalSyntaxParser) {}
 
 template <class ParseHandler, typename Unit>
 GeneralParser<ParseHandler, Unit>::GeneralParser(
     JSContext* cx, const ReadOnlyCompileOptions& options, const Unit* units,
-    size_t length, bool foldConstants, ParseInfo& parserInfo,
+    size_t length, bool foldConstants, CompilationInfo& compilationInfo,
     SyntaxParser* syntaxParser, LazyScript* lazyOuterFunction,
     ScriptSourceObject* sourceObject)
-    : Base(cx, options, foldConstants, parserInfo, syntaxParser,
+    : Base(cx, options, foldConstants, compilationInfo, syntaxParser,
            lazyOuterFunction, sourceObject),
       tokenStream(cx, options, units, length) {}
 
@@ -324,7 +324,7 @@ FunctionBox* PerHandlerParser<ParseHandler>::newFunctionBox(
    * function.
    */
   FunctionBox* funbox = alloc_.new_<FunctionBox>(
-      cx_, traceListHead_, fun, toStringStart, this->getParseInfo(),
+      cx_, traceListHead_, fun, toStringStart, this->getCompilationInfo(),
       inheritedDirectives, options().extraWarningsOption, generatorKind,
       asyncKind);
   if (!funbox) {
@@ -354,7 +354,7 @@ FunctionBox* PerHandlerParser<ParseHandler>::newFunctionBox(
    */
 
   FunctionBox* funbox = alloc_.new_<FunctionBox>(
-      cx_, traceListHead_, fcd, toStringStart, this->getParseInfo(),
+      cx_, traceListHead_, fcd, toStringStart, this->getCompilationInfo(),
       inheritedDirectives, options().extraWarningsOption, generatorKind,
       asyncKind);
 
@@ -428,8 +428,9 @@ typename ParseHandler::ListNodeType GeneralParser<ParseHandler, Unit>::parse() {
   MOZ_ASSERT(checkOptionsCalled_);
 
   Directives directives(options().forceStrictMode());
-  GlobalSharedContext globalsc(cx_, ScopeKind::Global, this->getParseInfo(),
-                               directives, options().extraWarningsOption);
+  GlobalSharedContext globalsc(cx_, ScopeKind::Global,
+                               this->getCompilationInfo(), directives,
+                               options().extraWarningsOption);
   SourceParseContext globalpc(this, &globalsc, /* newDirectives = */ nullptr);
   if (!globalpc.init()) {
     return null();
@@ -2759,6 +2760,14 @@ GeneralParser<ParseHandler, Unit>::functionDefinition(
     bool tryAnnexB /* = false */) {
   MOZ_ASSERT_IF(kind == FunctionSyntaxKind::Statement, funName);
 
+  // If we see any inner function, note it on our current context. The bytecode
+  // emitter may eliminate the function later, but we use a conservative
+  // definition for consistency between lazy and full parsing. The flag is only
+  // defined on function scripts right now.
+  if (pc_->isFunctionBox()) {
+    pc_->functionBox()->setHasInnerFunctions();
+  }
+
   // When fully parsing a LazyScript, we do not fully reparse its inner
   // functions, which are also lazy. Instead, their free variables and
   // source extents are recorded and may be skipped.
@@ -2782,7 +2791,7 @@ GeneralParser<ParseHandler, Unit>::functionDefinition(
   Directives directives(pc_);
   Directives newDirectives = directives;
 
-  Position start(keepAtoms_, tokenStream);
+  Position start(this->compilationInfo_.keepAtoms, tokenStream);
 
   // Parse the inner function. The following is a loop as we may attempt to
   // reparse a function due to failed syntax parsing and encountering new
@@ -2822,7 +2831,8 @@ bool Parser<FullParseHandler, Unit>::advancePastSyntaxParsedFunction(
   MOZ_ASSERT(getSyntaxParser() == syntaxParser);
 
   // Advance this parser over tokens processed by the syntax parser.
-  Position currentSyntaxPosition(keepAtoms_, syntaxParser->tokenStream);
+  Position currentSyntaxPosition(this->compilationInfo_.keepAtoms,
+                                 syntaxParser->tokenStream);
   if (!tokenStream.fastForward(currentSyntaxPosition, syntaxParser->anyChars)) {
     return false;
   }
@@ -2867,7 +2877,7 @@ bool Parser<FullParseHandler, Unit>::trySyntaxParseInnerFunction(
     //   var x = (y = z => 2) => q;
     //   //           ^ we first seek to here to syntax-parse this function
     //   //      ^ then we seek back to here to syntax-parse the outer function
-    Position currentPosition(keepAtoms_, tokenStream);
+    Position currentPosition(this->compilationInfo_.keepAtoms, tokenStream);
     if (!syntaxParser->tokenStream.seekTo(currentPosition, anyChars)) {
       return false;
     }
@@ -2901,7 +2911,8 @@ bool Parser<FullParseHandler, Unit>::trySyntaxParseInnerFunction(
       return false;
     }
 
-    if (!advancePastSyntaxParsedFunction(keepAtoms_, syntaxParser)) {
+    if (!advancePastSyntaxParsedFunction(this->compilationInfo_.keepAtoms,
+                                         syntaxParser)) {
       return false;
     }
 
@@ -8618,7 +8629,7 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::assignExpr(
 
   // Save the tokenizer state in case we find an arrow function and have to
   // rewind.
-  Position start(keepAtoms_, tokenStream);
+  Position start(this->compilationInfo_.keepAtoms, tokenStream);
 
   PossibleError possibleErrorInner(*this);
   Node lhs;
@@ -9800,12 +9811,12 @@ RegExpLiteral* Parser<FullParseHandler, Unit>::newRegExp() {
     }
   }
 
-  RegExpIndex index(this->getParseInfo().regExpData.length());
-  if (!this->getParseInfo().regExpData.emplaceBack()) {
+  RegExpIndex index(this->getCompilationInfo().regExpData.length());
+  if (!this->getCompilationInfo().regExpData.emplaceBack()) {
     return nullptr;
   }
 
-  if (!this->getParseInfo().regExpData[index].init(cx_, range, flags)) {
+  if (!this->getCompilationInfo().regExpData[index].init(cx_, range, flags)) {
     return nullptr;
   }
 
@@ -9847,18 +9858,18 @@ BigIntLiteral* Parser<FullParseHandler, Unit>::newBigInt() {
   // productions start with 0[bBoOxX], indicating binary/octal/hex.
   const auto& chars = tokenStream.getCharBuffer();
 
-  BigIntIndex index(this->getParseInfo().bigIntData.length());
-  if (!this->getParseInfo().bigIntData.emplaceBack()) {
+  BigIntIndex index(this->getCompilationInfo().bigIntData.length());
+  if (!this->getCompilationInfo().bigIntData.emplaceBack()) {
     return null();
   }
 
-  if (!this->getParseInfo().bigIntData[index].init(this->cx_, chars)) {
+  if (!this->getCompilationInfo().bigIntData[index].init(this->cx_, chars)) {
     return null();
   }
 
   // Should the operations below fail, the buffer held by data will
-  // be cleaned up by the ParseInfo destructor.
-  return handler_.newBigInt(index, this->getParseInfo(), pos());
+  // be cleaned up by the CompilationInfo destructor.
+  return handler_.newBigInt(index, this->getCompilationInfo(), pos());
 }
 
 template <typename Unit>

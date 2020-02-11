@@ -455,7 +455,7 @@ class UrlbarInput {
       allowInheritPrincipal: false,
     };
 
-    let selIndex = this.view.selectedRowIndex;
+    let selIndex = result.rowIndex;
     if (!result.payload.keywordOffer) {
       this.view.close(/* elementPicked */ true);
     }
@@ -1032,7 +1032,9 @@ class UrlbarInput {
 
     // Switching tabs doesn't always change urlbar focus, so we must try to
     // reopen here too, not just on focus.
-    if (this.view.autoOpen({ event: new CustomEvent("urlbar-reopen") })) {
+    // We don't use the original TabSelect event because caching it causes
+    // leaks on MacOS.
+    if (this.view.autoOpen({ event: new CustomEvent("tabswitch") })) {
       return;
     }
     // The input may retain focus when switching tabs in which case we
@@ -1572,20 +1574,18 @@ class UrlbarInput {
    * @returns {"current" | "tabshifted" | "tab" | "save" | "window"}
    */
   _whereToOpen(event) {
-    let isMouseEvent = event instanceof MouseEvent;
-    let reuseEmpty = !isMouseEvent;
+    let isKeyboardEvent = event instanceof KeyboardEvent;
+    let reuseEmpty = isKeyboardEvent;
     let where = undefined;
     if (
-      !isMouseEvent &&
-      event &&
+      isKeyboardEvent &&
       (event.altKey || event.getModifierState("AltGraph"))
     ) {
       // We support using 'alt' to open in a tab, because ctrl/shift
       // might be used for canonizing URLs:
       where = event.shiftKey ? "tabshifted" : "tab";
     } else if (
-      !isMouseEvent &&
-      event &&
+      isKeyboardEvent &&
       event.ctrlKey &&
       UrlbarPrefs.get("ctrlCanonizesURLs")
     ) {
@@ -1719,6 +1719,7 @@ class UrlbarInput {
     });
 
     this.removeAttribute("focused");
+    this.controller.allowTabbingResults = false;
     this.endLayoutExtend();
 
     if (this._autofillPlaceholder && this.window.gBrowser.userTypedValue) {
@@ -1827,6 +1828,7 @@ class UrlbarInput {
 
         this._focusedViaMousedown = !this.focused;
         this._preventClickSelectsAll = this.focused;
+        this.controller.allowTabbingResults = true;
 
         if (event.target != this.inputField) {
           this.focus();

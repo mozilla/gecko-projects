@@ -698,6 +698,12 @@ class MozbuildObject(ProcessExecutionMixin):
                 args.append('-j%d' % multiprocessing.cpu_count())
         elif num_jobs > 0:
             args.append('MOZ_PARALLEL_BUILD=%d' % num_jobs)
+        elif os.environ.get('MOZ_LOW_PARALLELISM_BUILD'):
+            cpus = multiprocessing.cpu_count()
+            jobs = max(1, int(0.75 * cpus))
+            print("  Low parallelism requested: using %d jobs for %d cores" %
+                  (jobs, cpus))
+            args.append('MOZ_PARALLEL_BUILD=%d' % jobs)
 
         if ignore_errors:
             args.append('-k')
@@ -917,7 +923,7 @@ class MachCommandBase(MozbuildObject):
             self._ensure_state_subdir_exists('.')
             logfile = self._get_state_filename('last_log.json')
             try:
-                fd = open(logfile, "wb")
+                fd = open(logfile, 'wt')
                 self.log_manager.add_json_handler(fd)
             except Exception as e:
                 self.log(logging.WARNING, 'mach', {'error': str(e)},

@@ -24,9 +24,6 @@ WaylandDMABUFTextureHostOGL::WaylandDMABUFTextureHostOGL(
 
 WaylandDMABUFTextureHostOGL::~WaylandDMABUFTextureHostOGL() {
   MOZ_COUNT_DTOR(WaylandDMABUFTextureHostOGL);
-  if (mProvider) {
-    DeallocateDeviceData();
-  }
 }
 
 bool WaylandDMABUFTextureHostOGL::Lock() {
@@ -47,23 +44,12 @@ bool WaylandDMABUFTextureHostOGL::Lock() {
 
 void WaylandDMABUFTextureHostOGL::Unlock() {}
 
-void WaylandDMABUFTextureHostOGL::DeallocateDeviceData() {
-  mTextureSource = nullptr;
-  if (mSurface) {
-    mSurface->ReleaseEGLImage();
-  }
-}
-
 void WaylandDMABUFTextureHostOGL::SetTextureSourceProvider(
     TextureSourceProvider* aProvider) {
   if (!aProvider || !aProvider->GetGLContext()) {
-    DeallocateDeviceData();
+    mTextureSource = nullptr;
     mProvider = nullptr;
     return;
-  }
-
-  if (mProvider != aProvider) {
-    DeallocateDeviceData();
   }
 
   mProvider = aProvider;
@@ -74,7 +60,6 @@ void WaylandDMABUFTextureHostOGL::SetTextureSourceProvider(
 }
 
 gfx::SurfaceFormat WaylandDMABUFTextureHostOGL::GetFormat() const {
-  MOZ_ASSERT(mTextureSource);
   return mTextureSource ? mTextureSource->GetFormat()
                         : gfx::SurfaceFormat::UNKNOWN;
 }

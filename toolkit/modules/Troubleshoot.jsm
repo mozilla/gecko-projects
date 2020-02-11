@@ -52,6 +52,7 @@ const PREFS_WHITELIST = [
   "browser.search.useDBForOrder",
   "browser.sessionstore.",
   "browser.startup.homepage",
+  "browser.startup.page",
   "browser.tabs.",
   "browser.urlbar.",
   "browser.zoom.",
@@ -537,6 +538,7 @@ var dataProviders = {
       OffMainThreadPaintWorkerCount: "offMainThreadPaintWorkerCount",
       TargetFrameRate: "targetFrameRate",
       windowProtocol: null,
+      desktopEnvironment: null,
     };
 
     for (let prop in gfxInfoProps) {

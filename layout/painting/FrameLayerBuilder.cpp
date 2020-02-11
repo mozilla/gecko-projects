@@ -546,7 +546,7 @@ void FrameLayerBuilder::DestroyDisplayItemDataFor(nsIFrame* aFrame) {
   // property table in an inconsistent state. So we remove it from the table and
   // then destroy it. (bug 1530657)
   WebRenderUserDataTable* userDataTable =
-      aFrame->RemoveProperty(WebRenderUserDataProperty::Key());
+      aFrame->TakeProperty(WebRenderUserDataProperty::Key());
   if (userDataTable) {
     for (auto iter = userDataTable->Iter(); !iter.Done(); iter.Next()) {
       iter.UserData()->RemoveFromTable();
@@ -4001,7 +4001,7 @@ void PaintedLayerData::AccumulateHitTestItem(ContainerState* aState,
                                              nsDisplayItem* aItem,
                                              const DisplayItemClip& aClip,
                                              TransformClipNode* aTransform) {
-  auto* item = static_cast<nsDisplayHitTestInfoItem*>(aItem);
+  auto* item = static_cast<nsDisplayHitTestInfoBase*>(aItem);
   const HitTestInfo& info = item->GetHitTestInfo();
 
   nsRect area = info.mArea;
@@ -4545,7 +4545,7 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
     if (marker == DisplayItemEntryType::HitTestInfo) {
       MOZ_ASSERT(item->IsHitTestItem());
       const auto& hitTestInfo =
-          static_cast<nsDisplayHitTestInfoItem*>(item)->GetHitTestInfo();
+          static_cast<nsDisplayHitTestInfoBase*>(item)->GetHitTestInfo();
 
       // Override the layer selection hints for items that have hit test
       // information. This is needed because container items may have different
@@ -5000,7 +5000,7 @@ void ContainerState::ProcessDisplayItems(nsDisplayList* aList) {
       if (itemType == DisplayItemType::TYPE_FIXED_POSITION) {
         newLayerEntry->mIsFixedToRootScrollFrame =
             item->Frame()->StyleDisplay()->mPosition ==
-                NS_STYLE_POSITION_FIXED &&
+                StylePositionProperty::Fixed &&
             nsLayoutUtils::IsReallyFixedPos(item->Frame());
       }
 

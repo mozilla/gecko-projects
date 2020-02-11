@@ -337,7 +337,7 @@ class App extends Component {
   }
 
   renderEagerEvaluation() {
-    if (!this.props.eagerEvaluationEnabled || this.props.editorMode) {
+    if (!this.props.eagerEvaluationEnabled) {
       return null;
     }
 
@@ -468,6 +468,7 @@ const mapStateToProps = state => ({
   sidebarVisible: state.ui.sidebarVisible,
   filterBarDisplayMode: state.ui.filterBarDisplayMode,
   eagerEvaluationEnabled: state.prefs.eagerEvaluation,
+  autocomplete: state.prefs.autocomplete,
 });
 
 const mapDispatchToProps = dispatch => ({

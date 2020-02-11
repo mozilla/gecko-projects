@@ -11,7 +11,7 @@
 
 #include "ds/LifoAlloc.h"
 #include "frontend/BytecodeCompilation.h"
-#include "frontend/ParseInfo.h"
+#include "frontend/CompilationInfo.h"
 #include "gc/HashUtil.h"
 #include "js/SourceText.h"
 #include "js/StableStringChars.h"
@@ -119,7 +119,7 @@ class EvalScriptGuard {
   }
 
   void setNewScript(JSScript* script) {
-    // JSScript::initFromEmitter has already called js_CallNewScriptHook.
+    // JSScript::fullyInitFromStencil has already called js_CallNewScriptHook.
     MOZ_ASSERT(!script_ && script);
     script_ = script;
   }
@@ -325,13 +325,16 @@ static bool EvalKernel(JSContext* cx, HandleValue v, EvalType evalType,
     }
 
     LifoAllocScope allocScope(&cx->tempLifoAlloc());
-    frontend::ParseInfo parseInfo(cx, allocScope);
-    if (!parseInfo.initFromOptions(cx, options)) {
+    frontend::CompilationInfo compilationInfo(cx, allocScope, options);
+    if (!compilationInfo.init(cx)) {
       return false;
     }
 
-    frontend::EvalScriptInfo info(cx, parseInfo, options, env, enclosing);
-    RootedScript compiled(cx, frontend::CompileEvalScript(info, srcBuf));
+    frontend::EvalSharedContext evalsc(cx, env, compilationInfo, enclosing,
+                                       compilationInfo.directives,
+                                       options.extraWarningsOption);
+    RootedScript compiled(
+        cx, frontend::CompileEvalScript(compilationInfo, evalsc, env, srcBuf));
     if (!compiled) {
       return false;
     }
@@ -423,13 +426,16 @@ bool js::DirectEvalStringFromIon(JSContext* cx, HandleObject env,
     }
 
     LifoAllocScope allocScope(&cx->tempLifoAlloc());
-    frontend::ParseInfo parseInfo(cx, allocScope);
-    if (!parseInfo.initFromOptions(cx, options)) {
+    frontend::CompilationInfo compilationInfo(cx, allocScope, options);
+    if (!compilationInfo.init(cx)) {
       return false;
     }
 
-    frontend::EvalScriptInfo info(cx, parseInfo, options, env, enclosing);
-    JSScript* compiled = frontend::CompileEvalScript(info, srcBuf);
+    frontend::EvalSharedContext evalsc(cx, env, compilationInfo, enclosing,
+                                       compilationInfo.directives,
+                                       options.extraWarningsOption);
+    JSScript* compiled =
+        frontend::CompileEvalScript(compilationInfo, evalsc, env, srcBuf);
     if (!compiled) {
       return false;
     }

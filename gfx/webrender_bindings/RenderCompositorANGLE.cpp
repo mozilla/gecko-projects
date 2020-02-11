@@ -21,6 +21,7 @@
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/WinCompositorWidget.h"
 #include "mozilla/WindowsVersion.h"
+#include "mozilla/Telemetry.h"
 #include "FxROutputHandler.h"
 
 #undef NTDDI_VERSION
@@ -178,7 +179,6 @@ bool RenderCompositorANGLE::Initialize() {
     }
   }
 
-  // SyncObject is used only by D3D11DXVA2Manager
   mSyncObject = layers::SyncObjectHost::CreateSyncObjectHost(mDevice);
   if (!mSyncObject->Init()) {
     // Some errors occur. Clear the mSyncObject here.
@@ -435,6 +435,13 @@ bool RenderCompositorANGLE::BeginFrame() {
     return false;
   }
 
+  if (mSyncObject) {
+    if (!mSyncObject->Synchronize(/* aFallible */ true)) {
+      // It's timeout or other error. Handle the device-reset here.
+      RenderThread::Get()->HandleDeviceReset("SyncObject", /* aNotify */ true);
+      return false;
+    }
+  }
   return true;
 }
 
@@ -444,6 +451,7 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
   InsertGraphicsCommandsFinishedWaitQuery(frameId);
 
   if (!UseCompositor()) {
+    auto start = TimeStamp::Now();
     if (mWidget->AsWindows()->HasFxrOutputHandler()) {
       // There is a Firefox Reality handler for this swapchain. Update this
       // window's contents to the VR window.
@@ -496,6 +504,9 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
     } else {
       mSwapChain->Present(0, 0);
     }
+    auto end = TimeStamp::Now();
+    mozilla::Telemetry::Accumulate(mozilla::Telemetry::COMPOSITE_SWAP_TIME,
+                                            (end - start).ToMilliseconds() * 10.);
   }
 
   if (mDisablingNativeCompositor) {

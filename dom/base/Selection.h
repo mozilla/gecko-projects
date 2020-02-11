@@ -7,12 +7,11 @@
 #ifndef mozilla_Selection_h__
 #define mozilla_Selection_h__
 
-#include "mozilla/AccessibleCaretEventHub.h"
+#include "mozilla/dom/StyledRange.h"
 #include "mozilla/AutoRestore.h"
-#include "mozilla/PresShell.h"
+#include "mozilla/EventForwards.h"
 #include "mozilla/RangeBoundary.h"
 #include "mozilla/SelectionChangeEventDispatcher.h"
-#include "mozilla/TextRange.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "nsDirection.h"
@@ -34,6 +33,7 @@ class nsCopySupport;
 class nsHTMLCopyEncoder;
 
 namespace mozilla {
+class AccessibleCaretEventHub;
 class ErrorResult;
 class HTMLEditor;
 class PostContentIterator;
@@ -44,14 +44,8 @@ class DocGroup;
 }  // namespace dom
 }  // namespace mozilla
 
-struct RangeData {
-  explicit RangeData(nsRange* aRange) : mRange(aRange) {}
-
-  RefPtr<nsRange> mRange;
-  mozilla::TextRangeStyle mTextRangeStyle;
-};
-
 namespace mozilla {
+
 namespace dom {
 
 // Note, the ownership of mozilla::dom::Selection depends on which way the
@@ -90,19 +84,13 @@ class Selection final : public nsSupportsWeakReference,
    * MaybeNotifyAccessibleCaretEventHub() starts to notify
    * AccessibleCaretEventHub of selection change if aPresShell has it.
    */
-  void MaybeNotifyAccessibleCaretEventHub(PresShell* aPresShell) {
-    if (!mAccessibleCaretEventHub && aPresShell) {
-      mAccessibleCaretEventHub = aPresShell->GetAccessibleCaretEventHub();
-    }
-  }
+  void MaybeNotifyAccessibleCaretEventHub(PresShell* aPresShell);
 
   /**
    * StopNotifyingAccessibleCaretEventHub() stops notifying
    * AccessibleCaretEventHub of selection change.
    */
-  void StopNotifyingAccessibleCaretEventHub() {
-    mAccessibleCaretEventHub = nullptr;
-  }
+  void StopNotifyingAccessibleCaretEventHub();
 
   /**
    * EnableSelectionChangeEvent() starts to notify
@@ -159,8 +147,8 @@ class Selection final : public nsSupportsWeakReference,
                           ScrollAxis aVertical = ScrollAxis(),
                           ScrollAxis aHorizontal = ScrollAxis(),
                           int32_t aFlags = 0);
-  static nsresult SubtractRange(RangeData* aRange, nsRange* aSubtract,
-                                nsTArray<RangeData>* aOutput);
+  static nsresult SubtractRange(StyledRange& aRange, nsRange& aSubtract,
+                                nsTArray<StyledRange>* aOutput);
 
  private:
   /**
@@ -171,7 +159,8 @@ class Selection final : public nsSupportsWeakReference,
    *
    * @param aOutIndex points to the range last added, if at least one was added.
    *                  If aRange is already contained, it points to the range
-   *                  containing it.
+   *                  containing it. -1 if mRanges was empty and no range was
+   *                  added.
    */
   nsresult AddRangesForSelectableNodes(nsRange* aRange, int32_t* aOutIndex,
                                        bool aNoStartSelect = false);
@@ -717,17 +706,10 @@ class Selection final : public nsSupportsWeakReference,
    */
   void SelectFramesInAllRanges(nsPresContext* aPresContext);
 
-  /**
-   * Test whether the supplied range points to a single table element.
-   * Result is one of the TableSelection constants. "None" means
-   * a table element isn't selected.
-   */
-  nsresult GetTableSelectionType(nsRange* aRange,
-                                 TableSelection* aTableSelectionType);
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
-  nsresult GetTableCellLocationFromRange(nsRange* aRange,
-                                         TableSelection* aSelectionType,
-                                         int32_t* aRow, int32_t* aCol);
+  static nsresult GetTableCellLocationFromRange(nsRange* aRange,
+                                                TableSelection* aSelectionType,
+                                                int32_t* aRow, int32_t* aCol);
 
   /**
    * @param aOutIndex points to the index of the range in mRanges. If
@@ -739,19 +721,18 @@ class Selection final : public nsSupportsWeakReference,
   /**
    * Binary searches the given sorted array of ranges for the insertion point
    * for the given node/offset. The given comparator is used, and the index
-   * where the point should appear in the array is placed in *aInsertionPoint.
+   * where the point should appear in the array is returned.
 
    * If there is an item in the array equal to the input point (aPointNode,
    * aPointOffset), we will return the index of this item.
    *
-   * @param aInsertionPoint can be in [0, `aElementArray->Length()`].
+   * @return the index where the point should appear in the array. In
+   *         [0, `aElementArray->Length()`].
    */
-  static nsresult FindInsertionPoint(
-      const nsTArray<RangeData>* aElementArray, const nsINode* aPointNode,
+  static int32_t FindInsertionPoint(
+      const nsTArray<StyledRange>* aElementArray, const nsINode& aPointNode,
       int32_t aPointOffset,
-      nsresult (*aComparator)(const nsINode*, int32_t, const nsRange*,
-                              int32_t*),
-      int32_t* aInsertionPoint);
+      int32_t (*aComparator)(const nsINode&, int32_t, const nsRange&));
 
   bool HasEqualRangeBoundariesAt(const nsRange& aRange,
                                  int32_t aRangeIndex) const;
@@ -768,10 +749,7 @@ class Selection final : public nsSupportsWeakReference,
                                  int32_t aEndOffset, bool aAllowAdjacent,
                                  int32_t& aStartIndex,
                                  int32_t& aEndIndex) const;
-  RangeData* FindRangeData(nsRange* aRange);
-
-  static void UserSelectRangesToAdd(nsRange* aItem,
-                                    nsTArray<RefPtr<nsRange>>& rangesToAdd);
+  StyledRange* FindRangeData(nsRange* aRange);
 
   /**
    * Preserves the sorting and disjunctiveness of mRanges.
@@ -835,7 +813,7 @@ class Selection final : public nsSupportsWeakReference,
   // proves to be a performance concern, then an interval tree may be a
   // possible solution, allowing the calculation of the overlap interval in
   // O(log n) time, though this would require rebalancing and other overhead.
-  AutoTArray<RangeData, 1> mRanges;
+  AutoTArray<StyledRange, 1> mRanges;
 
   RefPtr<nsRange> mAnchorFocusRange;
   RefPtr<nsFrameSelection> mFrameSelection;

@@ -73,21 +73,25 @@ const stateManager = {
       case "uninstalled":
         break;
       case "disabled":
-        rollout.setSetting(TRR_MODE_PREF, 0);
+        await rollout.setSetting(TRR_MODE_PREF, 0);
         break;
       case "manuallyDisabled":
-        browser.experiments.preferences.clearUserPref(DOH_SELF_ENABLED_PREF);
+        await browser.experiments.preferences.clearUserPref(
+          DOH_SELF_ENABLED_PREF
+        );
         break;
       case "UIOk":
-        rollout.setSetting(DOH_SELF_ENABLED_PREF, true);
+        await rollout.setSetting(DOH_SELF_ENABLED_PREF, true);
         break;
       case "enabled":
-        rollout.setSetting(TRR_MODE_PREF, 2);
-        rollout.setSetting(DOH_SELF_ENABLED_PREF, true);
+        await rollout.setSetting(TRR_MODE_PREF, 2);
+        await rollout.setSetting(DOH_SELF_ENABLED_PREF, true);
         break;
       case "UIDisabled":
-        rollout.setSetting(TRR_MODE_PREF, 5);
-        browser.experiments.preferences.clearUserPref(DOH_SELF_ENABLED_PREF);
+        await rollout.setSetting(TRR_MODE_PREF, 5);
+        await browser.experiments.preferences.clearUserPref(
+          DOH_SELF_ENABLED_PREF
+        );
         break;
     }
 
@@ -574,14 +578,6 @@ const rollout = {
 
 const setup = {
   async start() {
-    DEBUG = await browser.experiments.preferences.getBoolPref(
-      DOH_DEBUG_PREF,
-      false
-    );
-
-    // Run Migration First, to continue to run rest of start up logic
-    await rollout.migrateLocalStoragePrefs();
-
     const isAddonDisabled = await rollout.getSetting(DOH_DISABLED_PREF, false);
     const runAddonPref = await rollout.getSetting(DOH_ENABLED_PREF, false);
     const runAddonBypassPref = await rollout.getSetting(
@@ -617,21 +613,54 @@ const setup = {
     ) {
       rollout.init();
     } else {
-      log(
-        "Disabled, aborting! Watching `doh-rollout.enabled` pref for change event"
-      );
-      // Listen for changes to the enabled pref. TODO: Also listen after init
-      // and properly handle the value of enabled changing to false.
-      browser.experiments.preferences.onPrefChanged.addListener(
-        function listener() {
-          browser.experiments.preferences.onPrefChanged.removeListener(
-            listener
-          );
-          setup.start();
-        }
-      );
+      log("Disabled, aborting!");
     }
   },
 };
 
-setup.start();
+(async () => {
+  DEBUG = await browser.experiments.preferences.getBoolPref(
+    DOH_DEBUG_PREF,
+    false
+  );
+
+  // Run Migration First, to continue to run rest of start up logic
+  await rollout.migrateLocalStoragePrefs();
+
+  log("Watching `doh-rollout.enabled` pref");
+  browser.experiments.preferences.onPrefChanged.addListener(async () => {
+    let enabled = await rollout.getSetting(DOH_ENABLED_PREF, false);
+    if (enabled) {
+      setup.start();
+    } else {
+      // Reset the TRR mode if we were running normally with no user-interference.
+      if (await stateManager.shouldRunHeuristics()) {
+        await stateManager.setState("disabled");
+      }
+
+      // Remove our listeners.
+      browser.networkStatus.onConnectionChanged.removeListener(
+        rollout.onConnectionChanged
+      );
+
+      try {
+        browser.captivePortal.onStateChange.removeListener(
+          rollout.onCaptiveStateChanged
+        );
+      } catch (e) {
+        // Captive Portal Service is disabled.
+      }
+    }
+  });
+
+  if (await rollout.getSetting(DOH_ENABLED_PREF, false)) {
+    await setup.start();
+  } else if (
+    (await rollout.getSetting(DOH_DONE_FIRST_RUN_PREF, false)) &&
+    (await stateManager.shouldRunHeuristics())
+  ) {
+    // We previously had turned on DoH, and now after a restart we've been
+    // rolled back. Reset TRR mode.
+    await stateManager.setState("disabled");
+  }
+})();

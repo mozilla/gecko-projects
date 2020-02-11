@@ -118,8 +118,11 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // results.
   ["restyleSearches", false],
 
-  // The number of times the user has been shown a search tip.
-  ["searchTips.shownCount", 0],
+  // The number of times the user has been shown the onboarding search tip.
+  ["searchTips.onboard.shownCount", 0],
+
+  // The number of times the user has been shown the redirect search tip.
+  ["searchTips.redirect.shownCount", 0],
 
   // Whether speculative connections should be enabled.
   ["speculativeConnect.enabled", true],
@@ -163,6 +166,11 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // If true, we show new users and those about to start an organic search a tip
   // encouraging them to use the Urlbar.
   ["update1.searchTips", false],
+
+  // If true, we do not allow the TAB key to cycle through results when the
+  // Urlbar was focused with the keyboard. Instead, Tab will focus the next
+  // focusable toolbar element after the Urlbar.
+  ["update1.restrictTabAfterKeyboardFocus", true],
 
   // Whether the urlbar displays a permanent search button in design update 2.
   ["update2.searchButton", false],

@@ -379,11 +379,9 @@ RefPtr<IDBObjectStore> IDBDatabase::CreateObjectStore(
         return aName == objectStore.metadata().name();
       });
   if (foundIt != end) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_INDEXEDDB_CONSTRAINT_ERR,
-        nsPrintfCString("Object store named '%s' already exists at index '%zu'",
-                        NS_ConvertUTF16toUTF8(aName).get(),
-                        foundIt.GetIndex()));
+    aRv.ThrowConstraintError(nsPrintfCString(
+        "Object store named '%s' already exists at index '%zu'",
+        NS_ConvertUTF16toUTF8(aName).get(), foundIt.GetIndex()));
     return nullptr;
   }
 
@@ -483,9 +481,8 @@ RefPtr<IDBTransaction> IDBDatabase::Transaction(
     // certain enum values as depending on preferences so we just duplicate the
     // normal exception generation here.
     aRv.ThrowTypeError<MSG_INVALID_ENUM_VALUE>(
-        NS_LITERAL_STRING("Argument 2 of IDBDatabase.transaction"),
-        NS_LITERAL_STRING("readwriteflush"),
-        NS_LITERAL_STRING("IDBTransactionMode"));
+        u"Argument 2 of IDBDatabase.transaction", u"readwriteflush",
+        u"IDBTransactionMode");
     return nullptr;
   }
 

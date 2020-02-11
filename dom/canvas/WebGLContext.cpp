@@ -1758,7 +1758,13 @@ void WebGLContext::EnsureVRReady() {
   if (!IsPremultAlpha() && mOptions.alpha) {
     flags |= layers::TextureFlags::NON_PREMULTIPLIED;
   }
-  auto factory = gl::GLScreenBuffer::CreateFactory(gl, caps, nullptr, flags);
+  RefPtr<layers::ImageBridgeChild> imageBridge =
+      layers::ImageBridgeChild::GetSingleton();
+  if (!imageBridge) {
+    return;
+  }
+  auto factory =
+      gl::GLScreenBuffer::CreateFactory(gl, caps, imageBridge.get(), flags);
   gl->Screen()->Morph(std::move(factory));
 
   bool needsResize = false;
@@ -1828,17 +1834,16 @@ already_AddRefed<dom::Promise> ClientWebGLContext::MakeXRCompatible(
     global = mOffscreenCanvas->GetOwnerGlobal();
   }
   if (!global) {
-    aRv.ThrowDOMException(NS_ERROR_DOM_INVALID_ACCESS_ERR,
-                          "Using a WebGL context that is not attached to "
-                          "either a canvas or an OffscreenCanvas");
+    aRv.ThrowInvalidAccessError(
+        "Using a WebGL context that is not attached to either a canvas or an "
+        "OffscreenCanvas");
     return nullptr;
   }
   RefPtr<dom::Promise> promise = dom::Promise::Create(global, aRv);
   NS_ENSURE_TRUE(!aRv.Failed(), nullptr);
 
   if (IsContextLost()) {
-    promise->MaybeRejectWithDOMException(
-        NS_ERROR_DOM_INVALID_STATE_ERR,
+    promise->MaybeRejectWithInvalidStateError(
         "Can not make context XR compatible when context is already lost.");
     return promise.forget();
   }

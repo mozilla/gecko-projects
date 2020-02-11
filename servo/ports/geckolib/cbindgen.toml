@@ -43,9 +43,15 @@ derive_eq = true
 derive_neq = true
 
 [defines]
-# This will actually never be defined, but is handy to avoid cbindgen
+# These will actually never be defined, but is handy to avoid cbindgen
 # generating Servo-only types.
 "feature = servo" = "CBINDGEN_IS_SERVO"
+"feature = servo-layout-2013" = "CBINDGEN_IS_SERVO"
+"feature = servo-layout-2020" = "CBINDGEN_IS_SERVO"
+# These will always be defined.
+"feature = gecko" = "CBINDGEN_IS_GECKO"
+"feature = cbindgen" = "CBINDGEN_IS_GECKO"
+# These depend on the build.
 "target_pointer_width = 32" = "SERVO_32_BITS"
 "target_pointer_width = 64" = "HAVE_64BIT_BUILD"
 
@@ -170,6 +176,7 @@ include = [
   "ComputedUrl",
   "ComputedImageUrl",
   "UrlOrNone",
+  "ImageUrlOrNone",
   "Filter",
   "Gradient",
   "GridTemplateAreas",
@@ -197,6 +204,7 @@ include = [
   "AlignContent",
   "JustifyContent",
   "TransformStyle",
+  "Image",
 ]
 item_types = ["enums", "structs", "unions", "typedefs", "functions", "constants"]
 renaming_overrides_prefixing = true
@@ -206,6 +214,7 @@ renaming_overrides_prefixing = true
 "nscolor" = "nscolor"
 "nsAtom" = "nsAtom"
 "nsIURI" = "nsIURI"
+"imgRequestProxy" = "imgRequestProxy"
 "nsCompatibility" = "nsCompatibility"
 "SharedFontList" = "SharedFontList"
 "nsSimpleContentList" = "nsSimpleContentList"
@@ -264,13 +273,13 @@ renaming_overrides_prefixing = true
 
   // TODO(emilio): cbindgen should be able to generate these in the body of the
   // union, but it seems it's only implemented for structs, not unions.
-  static const uint32_t TAG_CALC = StyleLengthPercentageUnion_TAG_CALC;
-  static const uint32_t TAG_LENGTH = StyleLengthPercentageUnion_TAG_LENGTH;
-  static const uint32_t TAG_PERCENTAGE = StyleLengthPercentageUnion_TAG_PERCENTAGE;
-  static const uint32_t TAG_MASK = StyleLengthPercentageUnion_TAG_MASK;
+  static const uint8_t TAG_CALC = StyleLengthPercentageUnion_TAG_CALC;
+  static const uint8_t TAG_LENGTH = StyleLengthPercentageUnion_TAG_LENGTH;
+  static const uint8_t TAG_PERCENTAGE = StyleLengthPercentageUnion_TAG_PERCENTAGE;
+  static const uint8_t TAG_MASK = StyleLengthPercentageUnion_TAG_MASK;
 
  private:
-  uint32_t Tag() const {
+  uint8_t Tag() const {
     return tag.tag & TAG_MASK;
   }
 
@@ -651,7 +660,11 @@ renaming_overrides_prefixing = true
   inline StyleCorsMode CorsMode() const;
   already_AddRefed<nsIURI> ResolveLocalRef(nsIURI* aBase) const;
   already_AddRefed<nsIURI> ResolveLocalRef(const nsIContent* aContent) const;
-  already_AddRefed<imgRequestProxy> LoadImage(mozilla::dom::Document&);
+
+  // Only relevant for images.
+  inline bool IsImageResolved() const;
+  inline imgRequestProxy* GetImage() const;
+  void ResolveImage(dom::Document&, const StyleComputedUrl* aOldImage);
 """
 
 "GenericGradient" = """

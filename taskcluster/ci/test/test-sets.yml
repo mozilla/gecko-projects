@@ -293,6 +293,7 @@ raptor-fetch-chromium:
 browsertime:
     - browsertime-tp6
     - browsertime-speedometer
+    - browsertime-ares6
     - browsertime-tp6-profiling
 
 # Raptor desktop power tests
@@ -644,6 +645,7 @@ android-hw-arm7-raptor:
     - raptor-speedometer-fennec68
     - raptor-youtube-playback-fenix
     - raptor-youtube-playback-geckoview
+    - raptor-youtube-playback-fennec68
     - raptor-tp6m-1-geckoview
     - raptor-tp6m-2-geckoview
     - raptor-tp6m-3-geckoview
@@ -790,6 +792,7 @@ android-hw-aarch64-raptor:
     - raptor-speedometer-fennec68
     - raptor-youtube-playback-fenix
     - raptor-youtube-playback-geckoview
+    - raptor-youtube-playback-fennec68
     - raptor-tp6m-1-geckoview
     - raptor-tp6m-2-geckoview
     - raptor-tp6m-3-geckoview
@@ -994,7 +997,9 @@ android-hw-aarch64-raptor-cpu-memory-power:
 android-hw-aarch64-browsertime:
     - browsertime-tp6m
     - browsertime-tp6m-profiling
+    - browsertime-benchmark-speedometer
 
 android-hw-arm7-browsertime:
     - browsertime-tp6m
     - browsertime-tp6m-profiling
+    - browsertime-benchmark-speedometer

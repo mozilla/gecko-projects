@@ -467,7 +467,6 @@ void InspectorUtils::GetCSSValuesForProperty(GlobalObject& aGlobalObject,
   if (!found) {
     aRv.Throw(NS_ERROR_FAILURE);
   }
-  return;
 }
 
 /* static */
@@ -673,7 +672,7 @@ void InspectorUtils::ParseStyleSheet(GlobalObject& aGlobalObject,
                                      StyleSheet& aSheet,
                                      const nsACString& aInput,
                                      ErrorResult& aRv) {
-  aRv = aSheet.ReparseSheet(aInput);
+  aSheet.ReparseSheet(aInput, aRv);
 }
 
 bool InspectorUtils::IsCustomElementName(GlobalObject&, const nsAString& aName,

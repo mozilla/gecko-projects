@@ -151,10 +151,11 @@ class NeckoParent : public PNeckoParent {
       const nsCString& aFilter) override;
   bool DeallocPUDPSocketParent(PUDPSocketParent*);
   already_AddRefed<PDNSRequestParent> AllocPDNSRequestParent(
-      const nsCString& aHost, const OriginAttributes& aOriginAttributes,
-      const uint32_t& aFlags);
+      const nsCString& aHost, const nsCString& aTrrServer, const uint16_t& aType,
+      const OriginAttributes& aOriginAttributes, const uint32_t& aFlags);
   virtual mozilla::ipc::IPCResult RecvPDNSRequestConstructor(
       PDNSRequestParent* actor, const nsCString& hostName,
+      const nsCString& trrServer, const uint16_t& type,
       const OriginAttributes& aOriginAttributes,
       const uint32_t& flags) override;
   mozilla::ipc::IPCResult RecvSpeculativeConnect(const URIParams& aURI,
@@ -207,13 +208,12 @@ class NeckoParent : public PNeckoParent {
 
   /* Predictor Messages */
   mozilla::ipc::IPCResult RecvPredPredict(
-      const Maybe<ipc::URIParams>& aTargetURI,
-      const Maybe<ipc::URIParams>& aSourceURI,
+      nsIURI* aTargetURI, nsIURI* aSourceURI,
       const PredictorPredictReason& aReason,
       const OriginAttributes& aOriginAttributes, const bool& hasVerifier);
 
   mozilla::ipc::IPCResult RecvPredLearn(
-      const ipc::URIParams& aTargetURI, const Maybe<ipc::URIParams>& aSourceURI,
+      nsIURI* aTargetURI, nsIURI* aSourceURI,
       const PredictorPredictReason& aReason,
       const OriginAttributes& aOriginAttributes);
   mozilla::ipc::IPCResult RecvPredReset();

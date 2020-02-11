@@ -549,6 +549,16 @@ public class GeckoViewActivity
         mPopupView.setLayoutParams(params);
     }
 
+    private class PopupSessionContentDelegate implements GeckoSession.ContentDelegate {
+        @Override
+        public void onCloseRequest(final GeckoSession session) {
+          setPopupVisibility(false);
+          mPopupSession.close();
+          mPopupSession = null;
+          mPopupView = null;
+        }
+    }
+
     private void openPopupSession() {
         LayoutInflater inflater = (LayoutInflater)
                 getSystemService(LAYOUT_INFLATER_SERVICE);
@@ -556,6 +566,7 @@ public class GeckoViewActivity
         GeckoView geckoView = mPopupView.findViewById(R.id.gecko_view_popup);
         geckoView.setViewBackend(GeckoView.BACKEND_TEXTURE_VIEW);
         mPopupSession = new TabSession();
+        mPopupSession.setContentDelegate(new PopupSessionContentDelegate());
         mPopupSession.open(sGeckoRuntime);
         geckoView.setSession(mPopupSession);
 
@@ -1134,6 +1145,22 @@ public class GeckoViewActivity
                 });
             }
             return null;
+        }
+
+        @Override
+        public void onMetaViewportFitChange(final GeckoSession session, final String viewportFit) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                return;
+            }
+            WindowManager.LayoutParams layoutParams = getWindow().getAttributes();
+            if (viewportFit.equals("cover")) {
+                layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            } else if (viewportFit.equals("contain")) {
+                layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER;
+            } else {
+                layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+            }
+            getWindow().setAttributes(layoutParams);
         }
     }
 

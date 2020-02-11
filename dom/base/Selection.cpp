@@ -10,6 +10,7 @@
 
 #include "mozilla/dom/Selection.h"
 
+#include "mozilla/AccessibleCaretEventHub.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/AutoCopyListener.h"
@@ -410,6 +411,64 @@ void Selection::SetCaretBidiLevel(const Nullable<int16_t>& aCaretBidiLevel,
   }
 }
 
+/**
+ * Test whether the supplied range points to a single table element.
+ * Result is one of the TableSelection constants. "None" means
+ * a table element isn't selected.
+ */
+// TODO: Figure out TableSelection::Column and TableSelection::AllCells
+static nsresult GetTableSelectionType(nsRange* aRange,
+                                      TableSelection* aTableSelectionType) {
+  if (!aRange || !aTableSelectionType) {
+    return NS_ERROR_NULL_POINTER;
+  }
+
+  *aTableSelectionType = TableSelection::None;
+
+  nsINode* startNode = aRange->GetStartContainer();
+  if (!startNode) {
+    return NS_ERROR_FAILURE;
+  }
+
+  nsINode* endNode = aRange->GetEndContainer();
+  if (!endNode) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Not a single selected node
+  if (startNode != endNode) {
+    return NS_OK;
+  }
+
+  nsIContent* child = aRange->GetChildAtStartOffset();
+
+  // Not a single selected node
+  if (!child || child->GetNextSibling() != aRange->GetChildAtEndOffset()) {
+    return NS_OK;
+  }
+
+  nsIContent* startContent = static_cast<nsIContent*>(startNode);
+  if (!(startNode->IsElement() && startContent->IsHTMLElement())) {
+    // Implies a check for being an element; if we ever make this work
+    // for non-HTML, need to keep checking for elements.
+    return NS_OK;
+  }
+
+  if (startContent->IsHTMLElement(nsGkAtoms::tr)) {
+    *aTableSelectionType = TableSelection::Cell;
+  } else  // check to see if we are selecting a table or row (column and all
+          // cells not done yet)
+  {
+    if (child->IsHTMLElement(nsGkAtoms::table))
+      *aTableSelectionType = TableSelection::Table;
+    else if (child->IsHTMLElement(nsGkAtoms::tr))
+      *aTableSelectionType = TableSelection::Row;
+  }
+
+  return NS_OK;
+}
+
+// static
 nsresult Selection::GetTableCellLocationFromRange(
     nsRange* aRange, TableSelection* aSelectionType, int32_t* aRow,
     int32_t* aCol) {
@@ -419,9 +478,6 @@ nsresult Selection::GetTableCellLocationFromRange(
   *aSelectionType = TableSelection::None;
   *aRow = 0;
   *aCol = 0;
-
-  // Must have access to frame selection to get cell info
-  if (!mFrameSelection) return NS_OK;
 
   nsresult result = GetTableSelectionType(aRange, aSelectionType);
   if (NS_FAILED(result)) return result;
@@ -440,17 +496,12 @@ nsresult Selection::GetTableCellLocationFromRange(
 
   // GetCellLayout depends on current frame, we need flush frame to get
   // nsITableCellLayout
-  if (RefPtr<PresShell> presShell = mFrameSelection->GetPresShell()) {
+  if (RefPtr<PresShell> presShell = child->OwnerDoc()->GetPresShell()) {
     presShell->FlushPendingNotifications(FlushType::Frames);
-
-    // Since calling FlushPendingNotifications, so check whether disconnected.
-    if (!mFrameSelection || !mFrameSelection->GetPresShell()) {
-      return NS_ERROR_FAILURE;
-    }
   }
 
   // Note: This is a non-ref-counted pointer to the frame
-  nsITableCellLayout* cellLayout = mFrameSelection->GetCellLayout(child);
+  nsITableCellLayout* cellLayout = nsFrameSelection::GetCellLayout(child);
   if (!cellLayout) return NS_ERROR_FAILURE;
 
   return cellLayout->GetCellIndexes(*aRow, *aCol);
@@ -491,53 +542,6 @@ nsresult Selection::MaybeAddTableCellRange(nsRange* aRange, bool* aDidAddRange,
 
   *aDidAddRange = true;
   return AddRangesForSelectableNodes(aRange, aOutIndex);
-}
-
-// TODO: Figure out TableSelection::Column and TableSelection::AllCells
-nsresult Selection::GetTableSelectionType(nsRange* aRange,
-                                          TableSelection* aTableSelectionType) {
-  if (!aRange || !aTableSelectionType) return NS_ERROR_NULL_POINTER;
-
-  *aTableSelectionType = TableSelection::None;
-
-  // Must have access to frame selection to get cell info
-  if (!mFrameSelection) return NS_OK;
-
-  nsINode* startNode = aRange->GetStartContainer();
-  if (!startNode) return NS_ERROR_FAILURE;
-
-  nsINode* endNode = aRange->GetEndContainer();
-  if (!endNode) return NS_ERROR_FAILURE;
-
-  // Not a single selected node
-  if (startNode != endNode) return NS_OK;
-
-  nsIContent* child = aRange->GetChildAtStartOffset();
-
-  // Not a single selected node
-  if (!child || child->GetNextSibling() != aRange->GetChildAtEndOffset()) {
-    return NS_OK;
-  }
-
-  nsIContent* startContent = static_cast<nsIContent*>(startNode);
-  if (!(startNode->IsElement() && startContent->IsHTMLElement())) {
-    // Implies a check for being an element; if we ever make this work
-    // for non-HTML, need to keep checking for elements.
-    return NS_OK;
-  }
-
-  if (startContent->IsHTMLElement(nsGkAtoms::tr)) {
-    *aTableSelectionType = TableSelection::Cell;
-  } else  // check to see if we are selecting a table or row (column and all
-          // cells not done yet)
-  {
-    if (child->IsHTMLElement(nsGkAtoms::table))
-      *aTableSelectionType = TableSelection::Table;
-    else if (child->IsHTMLElement(nsGkAtoms::tr))
-      *aTableSelectionType = TableSelection::Row;
-  }
-
-  return NS_OK;
 }
 
 Selection::Selection()
@@ -673,54 +677,50 @@ void Selection::SetAnchorFocusRange(int32_t indx) {
   }
 }
 
-static nsresult CompareToRangeStart(const nsINode* aCompareNode,
-                                    int32_t aCompareOffset,
-                                    const nsRange* aRange, int32_t* aCmp) {
-  nsINode* start = aRange->GetStartContainer();
-  NS_ENSURE_STATE(aCompareNode && start);
+static int32_t CompareToRangeStart(const nsINode& aCompareNode,
+                                   int32_t aCompareOffset,
+                                   const nsRange& aRange) {
+  MOZ_ASSERT(aRange.GetStartContainer());
+  nsINode* start = aRange.GetStartContainer();
   // If the nodes that we're comparing are not in the same document or in the
   // same subtree, assume that aCompareNode will fall at the end of the ranges.
-  if (aCompareNode->GetComposedDoc() != start->GetComposedDoc() ||
+  if (aCompareNode.GetComposedDoc() != start->GetComposedDoc() ||
       !start->GetComposedDoc() ||
-      aCompareNode->SubtreeRoot() != start->SubtreeRoot()) {
+      aCompareNode.SubtreeRoot() != start->SubtreeRoot()) {
     NS_WARNING(
         "`CompareToRangeStart` couldn't compare nodes, pretending some order.");
-    *aCmp = 1;
-  } else {
-    // The points are in the same subtree, hence there has to be an order.
-    *aCmp = *nsContentUtils::ComparePoints(aCompareNode, aCompareOffset, start,
-                                           aRange->StartOffset());
+    return 1;
   }
-  return NS_OK;
+
+  // The points are in the same subtree, hence there has to be an order.
+  return *nsContentUtils::ComparePoints(&aCompareNode, aCompareOffset, start,
+                                        aRange.StartOffset());
 }
 
-static nsresult CompareToRangeEnd(const nsINode* aCompareNode,
-                                  int32_t aCompareOffset, const nsRange* aRange,
-                                  int32_t* aCmp) {
-  nsINode* end = aRange->GetEndContainer();
-  NS_ENSURE_STATE(aCompareNode && end);
+static int32_t CompareToRangeEnd(const nsINode& aCompareNode,
+                                 int32_t aCompareOffset,
+                                 const nsRange& aRange) {
+  MOZ_ASSERT(aRange.IsPositioned());
+  nsINode* end = aRange.GetEndContainer();
   // If the nodes that we're comparing are not in the same document or in the
   // same subtree, assume that aCompareNode will fall at the end of the ranges.
-  if (aCompareNode->GetComposedDoc() != end->GetComposedDoc() ||
+  if (aCompareNode.GetComposedDoc() != end->GetComposedDoc() ||
       !end->GetComposedDoc() ||
-      aCompareNode->SubtreeRoot() != end->SubtreeRoot()) {
+      aCompareNode.SubtreeRoot() != end->SubtreeRoot()) {
     NS_WARNING(
         "`CompareToRangeEnd` couldn't compare nodes, pretending some order.");
-    *aCmp = 1;
-  } else {
-    // The points are in the same subtree, hence there has to be an order.
-    *aCmp = *nsContentUtils::ComparePoints(aCompareNode, aCompareOffset, end,
-                                           aRange->EndOffset());
+    return 1;
   }
-  return NS_OK;
+
+  // The points are in the same subtree, hence there has to be an order.
+  return *nsContentUtils::ComparePoints(&aCompareNode, aCompareOffset, end,
+                                        aRange.EndOffset());
 }
 
-nsresult Selection::FindInsertionPoint(
-    const nsTArray<RangeData>* aElementArray, const nsINode* aPointNode,
+int32_t Selection::FindInsertionPoint(
+    const nsTArray<StyledRange>* aElementArray, const nsINode& aPointNode,
     int32_t aPointOffset,
-    nsresult (*aComparator)(const nsINode*, int32_t, const nsRange*, int32_t*),
-    int32_t* aInsertionPoint) {
-  *aInsertionPoint = 0;
+    int32_t (*aComparator)(const nsINode&, int32_t, const nsRange&)) {
   int32_t beginSearch = 0;
   int32_t endSearch = aElementArray->Length();  // one beyond what to check
 
@@ -729,9 +729,7 @@ nsresult Selection::FindInsertionPoint(
     do {
       const nsRange* range = (*aElementArray)[center].mRange;
 
-      int32_t cmp;
-      nsresult rv = aComparator(aPointNode, aPointOffset, range, &cmp);
-      NS_ENSURE_SUCCESS(rv, rv);
+      int32_t cmp{aComparator(aPointNode, aPointOffset, *range)};
 
       if (cmp < 0) {  // point < cur
         endSearch = center;
@@ -745,32 +743,31 @@ nsresult Selection::FindInsertionPoint(
     } while (endSearch - beginSearch > 0);
   }
 
-  *aInsertionPoint = beginSearch;
-  return NS_OK;
+  return beginSearch;
 }
 
 // Selection::SubtractRange
 //
 //    A helper function that subtracts aSubtract from aRange, and adds
-//    1 or 2 RangeData objects representing the remaining non-overlapping
+//    1 or 2 StyledRange objects representing the remaining non-overlapping
 //    difference to aOutput. It is assumed that the caller has checked that
 //    aRange and aSubtract do indeed overlap
 
-nsresult Selection::SubtractRange(RangeData* aRange, nsRange* aSubtract,
-                                  nsTArray<RangeData>* aOutput) {
-  nsRange* range = aRange->mRange;
+nsresult Selection::SubtractRange(StyledRange& aRange, nsRange& aSubtract,
+                                  nsTArray<StyledRange>* aOutput) {
+  nsRange* range = aRange.mRange;
+
+  if (NS_WARN_IF(!range->IsPositioned())) {
+    return NS_ERROR_UNEXPECTED;
+  }
 
   // First we want to compare to the range start
-  int32_t cmp;
-  nsresult rv = CompareToRangeStart(range->GetStartContainer(),
-                                    range->StartOffset(), aSubtract, &cmp);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int32_t cmp{CompareToRangeStart(*range->GetStartContainer(),
+                                  range->StartOffset(), aSubtract)};
 
   // Also, make a comparison to the range end
-  int32_t cmp2;
-  rv = CompareToRangeEnd(range->GetEndContainer(), range->EndOffset(),
-                         aSubtract, &cmp2);
-  NS_ENSURE_SUCCESS(rv, rv);
+  int32_t cmp2{CompareToRangeEnd(*range->GetEndContainer(), range->EndOffset(),
+                                 aSubtract)};
 
   // If the existing range left overlaps the new range (aSubtract) then
   // cmp < 0, and cmp2 < 0
@@ -778,44 +775,46 @@ nsresult Selection::SubtractRange(RangeData* aRange, nsRange* aSubtract,
   // If it fully contains the new range, then cmp < 0 and cmp2 > 0
 
   if (cmp2 > 0) {
-    // We need to add a new RangeData to the output, running from
+    // We need to add a new StyledRange to the output, running from
     // the end of aSubtract to the end of range
     ErrorResult error;
     RefPtr<nsRange> postOverlap =
-        nsRange::Create(aSubtract->EndRef(), range->EndRef(), error);
+        nsRange::Create(aSubtract.EndRef(), range->EndRef(), error);
     if (NS_WARN_IF(error.Failed())) {
       return error.StealNSResult();
     }
     MOZ_ASSERT(postOverlap);
     if (!postOverlap->Collapsed()) {
-      if (!aOutput->InsertElementAt(0, RangeData(postOverlap)))
+      if (!aOutput->InsertElementAt(0, StyledRange(postOverlap))) {
         return NS_ERROR_OUT_OF_MEMORY;
-      (*aOutput)[0].mTextRangeStyle = aRange->mTextRangeStyle;
+      }
+      (*aOutput)[0].mTextRangeStyle = aRange.mTextRangeStyle;
     }
   }
 
   if (cmp < 0) {
-    // We need to add a new RangeData to the output, running from
+    // We need to add a new StyledRange to the output, running from
     // the start of the range to the start of aSubtract
     ErrorResult error;
     RefPtr<nsRange> preOverlap =
-        nsRange::Create(range->StartRef(), aSubtract->StartRef(), error);
+        nsRange::Create(range->StartRef(), aSubtract.StartRef(), error);
     if (NS_WARN_IF(error.Failed())) {
       return error.StealNSResult();
     }
     MOZ_ASSERT(preOverlap);
     if (!preOverlap->Collapsed()) {
-      if (!aOutput->InsertElementAt(0, RangeData(preOverlap)))
+      if (!aOutput->InsertElementAt(0, StyledRange(preOverlap))) {
         return NS_ERROR_OUT_OF_MEMORY;
-      (*aOutput)[0].mTextRangeStyle = aRange->mTextRangeStyle;
+      }
+      (*aOutput)[0].mTextRangeStyle = aRange.mTextRangeStyle;
     }
   }
 
   return NS_OK;
 }
 
-void Selection::UserSelectRangesToAdd(nsRange* aItem,
-                                      nsTArray<RefPtr<nsRange>>& aRangesToAdd) {
+static void UserSelectRangesToAdd(nsRange* aItem,
+                                  nsTArray<RefPtr<nsRange>>& aRangesToAdd) {
   // We cannot directly call IsEditorSelection() because we may be in an
   // inconsistent state during Collapse() (we're cleared already but we haven't
   // got a new focus node yet).
@@ -942,7 +941,7 @@ nsresult Selection::MaybeAddRangeAndTruncateOverlaps(nsRange* aRange,
 
   // a common case is that we have no ranges yet
   if (mRanges.Length() == 0) {
-    if (!mRanges.AppendElement(RangeData(aRange))) {
+    if (!mRanges.AppendElement(StyledRange(aRange))) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
     aRange->SetSelection(this);
@@ -979,7 +978,7 @@ nsresult Selection::MaybeAddRangeAndTruncateOverlaps(nsRange* aRange,
 
   if (startIndex == endIndex) {
     // The new range doesn't overlap any existing ranges
-    if (!mRanges.InsertElementAt(startIndex, RangeData(aRange))) {
+    if (!mRanges.InsertElementAt(startIndex, StyledRange(aRange))) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
     aRange->SetSelection(this);
@@ -993,7 +992,7 @@ nsresult Selection::MaybeAddRangeAndTruncateOverlaps(nsRange* aRange,
   // same range) as these may partially overlap the new range. Any ranges
   // between these indices are fully overlapped by the new range, and so can be
   // removed
-  nsTArray<RangeData> overlaps;
+  nsTArray<StyledRange> overlaps;
   if (!overlaps.InsertElementAt(0, mRanges[startIndex]))
     return NS_ERROR_OUT_OF_MEMORY;
 
@@ -1008,20 +1007,19 @@ nsresult Selection::MaybeAddRangeAndTruncateOverlaps(nsRange* aRange,
   }
   mRanges.RemoveElementsAt(startIndex, endIndex - startIndex);
 
-  nsTArray<RangeData> temp;
+  nsTArray<StyledRange> temp;
   for (int32_t i = overlaps.Length() - 1; i >= 0; i--) {
-    nsresult rv = SubtractRange(&overlaps[i], aRange, &temp);
+    nsresult rv = SubtractRange(overlaps[i], *aRange, &temp);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
   // Insert the new element into our "leftovers" array
-  int32_t insertionPoint;
-  rv = FindInsertionPoint(&temp, aRange->GetStartContainer(),
-                          aRange->StartOffset(), CompareToRangeStart,
-                          &insertionPoint);
-  NS_ENSURE_SUCCESS(rv, rv);
+  // `aRange` is positioned, so it has to have a start container.
+  int32_t insertionPoint{FindInsertionPoint(&temp, *aRange->GetStartContainer(),
+                                            aRange->StartOffset(),
+                                            CompareToRangeStart)};
 
-  if (!temp.InsertElementAt(insertionPoint, RangeData(aRange))) {
+  if (!temp.InsertElementAt(insertionPoint, StyledRange(aRange))) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -1122,6 +1120,14 @@ void Selection::GetRangesForInterval(nsINode& aBeginNode, int32_t aBeginOffset,
 nsresult Selection::GetRangesForIntervalArray(
     nsINode* aBeginNode, int32_t aBeginOffset, nsINode* aEndNode,
     int32_t aEndOffset, bool aAllowAdjacent, nsTArray<nsRange*>* aRanges) {
+  if (NS_WARN_IF(!aBeginNode)) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  if (NS_WARN_IF(!aEndNode)) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   aRanges->Clear();
   int32_t startIndex, endIndex;
   nsresult res =
@@ -1143,6 +1149,14 @@ nsresult Selection::GetIndicesForInterval(
     const nsINode* aBeginNode, int32_t aBeginOffset, const nsINode* aEndNode,
     int32_t aEndOffset, bool aAllowAdjacent, int32_t& aStartIndex,
     int32_t& aEndIndex) const {
+  if (NS_WARN_IF(!aBeginNode)) {
+    return NS_ERROR_INVALID_POINTER;
+  }
+
+  if (NS_WARN_IF(!aEndNode)) {
+    return NS_ERROR_INVALID_POINTER;
+  }
+
   aStartIndex = -1;
   aEndIndex = -1;
 
@@ -1153,11 +1167,8 @@ nsresult Selection::GetIndicesForInterval(
 
   // Ranges that end before the given interval and begin after the given
   // interval can be discarded
-  int32_t endsBeforeIndex;
-  if (NS_FAILED(FindInsertionPoint(&mRanges, aEndNode, aEndOffset,
-                                   &CompareToRangeStart, &endsBeforeIndex))) {
-    return NS_OK;
-  }
+  int32_t endsBeforeIndex{FindInsertionPoint(&mRanges, *aEndNode, aEndOffset,
+                                             &CompareToRangeStart)};
 
   if (endsBeforeIndex == 0) {
     const nsRange* endRange = mRanges[endsBeforeIndex].mRange;
@@ -1178,11 +1189,9 @@ nsresult Selection::GetIndicesForInterval(
   }
   aEndIndex = endsBeforeIndex;
 
-  int32_t beginsAfterIndex;
-  if (NS_FAILED(FindInsertionPoint(&mRanges, aBeginNode, aBeginOffset,
-                                   &CompareToRangeEnd, &beginsAfterIndex))) {
-    return NS_OK;
-  }
+  int32_t beginsAfterIndex{FindInsertionPoint(
+      &mRanges, *aBeginNode, aBeginOffset, &CompareToRangeEnd)};
+
   if (beginsAfterIndex == (int32_t)mRanges.Length())
     return NS_OK;  // optimization: all ranges are strictly before us
 
@@ -1263,7 +1272,7 @@ nsresult Selection::GetPrimaryFrameForAnchorNode(nsIFrame** aReturnFrame) {
   *aReturnFrame = 0;
   nsCOMPtr<nsIContent> content = do_QueryInterface(GetAnchorNode());
   if (content && mFrameSelection) {
-    *aReturnFrame = mFrameSelection->GetFrameForNodeOffset(
+    *aReturnFrame = nsFrameSelection::GetFrameForNodeOffset(
         content, AnchorOffset(), mFrameSelection->GetHint(), &frameOffset);
     if (*aReturnFrame) return NS_OK;
   }
@@ -1336,8 +1345,8 @@ nsresult Selection::GetPrimaryOrCaretFrameForNodeOffset(nsIContent* aContent,
         /* aReturnUnadjustedFrame = */ nullptr, aOffsetUsed);
   }
 
-  *aReturnFrame = mFrameSelection->GetFrameForNodeOffset(aContent, aOffset,
-                                                         hint, aOffsetUsed);
+  *aReturnFrame = nsFrameSelection::GetFrameForNodeOffset(aContent, aOffset,
+                                                          hint, aOffsetUsed);
   if (!*aReturnFrame) {
     return NS_ERROR_FAILURE;
   }
@@ -1611,7 +1620,7 @@ UniquePtr<SelectionDetails> Selection::LookUpSelection(
     newHead->mStart = start;
     newHead->mEnd = end;
     newHead->mSelectionType = aSelectionType;
-    RangeData* rd = FindRangeData(range);
+    StyledRange* rd = FindRangeData(range);
     if (rd) {
       newHead->mTextRangeStyle = rd->mTextRangeStyle;
     }
@@ -1694,7 +1703,7 @@ void Selection::SetAncestorLimiter(nsIContent* aLimiter) {
   }
 }
 
-RangeData* Selection::FindRangeData(nsRange* aRange) {
+StyledRange* Selection::FindRangeData(nsRange* aRange) {
   NS_ENSURE_TRUE(aRange, nullptr);
   for (uint32_t i = 0; i < mRanges.Length(); i++) {
     if (mRanges[i].mRange == aRange) return &mRanges[i];
@@ -1705,7 +1714,7 @@ RangeData* Selection::FindRangeData(nsRange* aRange) {
 nsresult Selection::SetTextRangeStyle(nsRange* aRange,
                                       const TextRangeStyle& aTextRangeStyle) {
   NS_ENSURE_ARG_POINTER(aRange);
-  RangeData* rd = FindRangeData(aRange);
+  StyledRange* rd = FindRangeData(aRange);
   if (rd) {
     rd->mTextRangeStyle = aTextRangeStyle;
   }
@@ -1893,7 +1902,10 @@ void Selection::AddRangeAndSelectFramesAndNotifyListeners(nsRange& aRange,
     }
   }
 
-  MOZ_ASSERT(rangeIndex >= 0);
+  if (rangeIndex < 0) {
+    return;
+  }
+
   MOZ_ASSERT(rangeIndex < static_cast<int32_t>(mRanges.Length()));
 
   SetAnchorFocusRange(rangeIndex);
@@ -2217,7 +2229,7 @@ nsRange* Selection::GetRangeAt(uint32_t aIndex, ErrorResult& aRv) {
 }
 
 nsRange* Selection::GetRangeAt(int32_t aIndex) const {
-  RangeData empty(nullptr);
+  StyledRange empty(nullptr);
   return mRanges.SafeElementAt(aIndex, empty).mRange;
 }
 
@@ -2708,6 +2720,16 @@ bool Selection::ContainsPoint(const nsPoint& aPoint) {
   return false;
 }
 
+void Selection::MaybeNotifyAccessibleCaretEventHub(PresShell* aPresShell) {
+  if (!mAccessibleCaretEventHub && aPresShell) {
+    mAccessibleCaretEventHub = aPresShell->GetAccessibleCaretEventHub();
+  }
+}
+
+void Selection::StopNotifyingAccessibleCaretEventHub() {
+  mAccessibleCaretEventHub = nullptr;
+}
+
 nsPresContext* Selection::GetPresContext() const {
   PresShell* presShell = GetPresShell();
   return presShell ? presShell->GetPresContext() : nullptr;
@@ -2808,7 +2830,7 @@ nsIFrame* Selection::GetSelectionEndPointGeometry(SelectionRegion aRegion,
   nsCOMPtr<nsIContent> content = do_QueryInterface(node);
   NS_ENSURE_TRUE(content.get(), nullptr);
   int32_t frameOffset = 0;
-  frame = mFrameSelection->GetFrameForNodeOffset(
+  frame = nsFrameSelection::GetFrameForNodeOffset(
       content, nodeOffset, mFrameSelection->GetHint(), &frameOffset);
   if (!frame) return nullptr;
 
@@ -2965,7 +2987,7 @@ void Selection::RemoveSelectionListener(
 
 Element* Selection::GetCommonEditingHostForAllRanges() {
   Element* editingHost = nullptr;
-  for (RangeData& rangeData : mRanges) {
+  for (StyledRange& rangeData : mRanges) {
     nsRange* range = rangeData.mRange;
     MOZ_ASSERT(range);
     nsINode* commonAncestorNode = range->GetClosestCommonInclusiveAncestor();

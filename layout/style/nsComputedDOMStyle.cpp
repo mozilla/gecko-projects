@@ -23,6 +23,7 @@
 #include "mozilla/ComputedStyle.h"
 #include "nsIScrollableFrame.h"
 #include "nsContentUtils.h"
+#include "nsDocShell.h"
 #include "nsIContent.h"
 #include "nsStyleConsts.h"
 
@@ -57,6 +58,7 @@
 #include "mozilla/AppUnits.h"
 #include <algorithm>
 #include "mozilla/ComputedStyleInlines.h"
+#include "nsPrintfCString.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -362,10 +364,13 @@ nsresult nsComputedDOMStyle::GetPropertyValue(const nsCSSPropertyID aPropID,
   return GetPropertyValue(nsCSSProps::GetStringValue(aPropID), aValue);
 }
 
-nsresult nsComputedDOMStyle::SetPropertyValue(const nsCSSPropertyID aPropID,
-                                              const nsACString& aValue,
-                                              nsIPrincipal* aSubjectPrincipal) {
-  return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+void nsComputedDOMStyle::SetPropertyValue(const nsCSSPropertyID aPropID,
+                                          const nsACString& aValue,
+                                          nsIPrincipal* aSubjectPrincipal,
+                                          ErrorResult& aRv) {
+  aRv.ThrowNoModificationAllowedError(nsPrintfCString(
+      "Can't set value for property '%s' in computed style",
+      PromiseFlatCString(nsCSSProps::GetStringValue(aPropID)).get()));
 }
 
 void nsComputedDOMStyle::GetCssText(nsAString& aCssText) {
@@ -375,7 +380,7 @@ void nsComputedDOMStyle::GetCssText(nsAString& aCssText) {
 void nsComputedDOMStyle::SetCssText(const nsAString& aCssText,
                                     nsIPrincipal* aSubjectPrincipal,
                                     ErrorResult& aRv) {
-  aRv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
+  aRv.ThrowNoModificationAllowedError("Can't set cssText on computed style");
 }
 
 uint32_t nsComputedDOMStyle::Length() {
@@ -621,11 +626,6 @@ static void AddImageURL(const StyleComputedUrl& aURL,
   }
 }
 
-static void AddImageURL(const nsStyleImageRequest& aRequest,
-                        nsTArray<nsCString>& aURLs) {
-  AddImageURL(aRequest.GetImageValue(), aURLs);
-}
-
 static void AddImageURL(const nsStyleImage& aImage,
                         nsTArray<nsCString>& aURLs) {
   if (auto* urlValue = aImage.GetURLValue()) {
@@ -665,7 +665,7 @@ static void CollectImageURLsForProperty(nsCSSPropertyID aProp,
   switch (aProp) {
     case eCSSProperty_cursor:
       for (auto& image : aStyle.StyleUI()->mCursorImages) {
-        AddImageURL(*image.mImage, aURLs);
+        AddImageURL(image.mImage, aURLs);
       }
       break;
     case eCSSProperty_background_image:
@@ -674,11 +674,13 @@ static void CollectImageURLsForProperty(nsCSSPropertyID aProp,
     case eCSSProperty_mask_clip:
       AddImageURLs(aStyle.StyleSVGReset()->mMask, aURLs);
       break;
-    case eCSSProperty_list_style_image:
-      if (nsStyleImageRequest* image = aStyle.StyleList()->mListStyleImage) {
-        AddImageURL(*image, aURLs);
+    case eCSSProperty_list_style_image: {
+      const auto& image = aStyle.StyleList()->mListStyleImage;
+      if (image.IsUrl()) {
+        AddImageURL(image.AsUrl(), aURLs);
       }
       break;
+    }
     case eCSSProperty_border_image_source:
       AddImageURL(aStyle.StyleBorder()->mBorderImageSource, aURLs);
       break;
@@ -698,7 +700,10 @@ void nsComputedDOMStyle::GetCSSImageURLs(const nsACString& aPropertyName,
                                          mozilla::ErrorResult& aRv) {
   nsCSSPropertyID prop = nsCSSProps::LookupProperty(aPropertyName);
   if (prop == eCSSProperty_UNKNOWN) {
-    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+    // Note: not using nsPrintfCString here in case aPropertyName contains
+    // nulls.
+    aRv.ThrowSyntaxError(NS_LITERAL_CSTRING("Invalid property name '") +
+                         aPropertyName + NS_LITERAL_CSTRING("'"));
     return;
   }
 
@@ -932,7 +937,7 @@ bool nsComputedDOMStyle::NeedsToFlushLayout(nsCSSPropertyID aPropID) const {
     case eCSSProperty_bottom:
     case eCSSProperty_left:
       // Doing better than this is actually hard.
-      return style->StyleDisplay()->mPosition != NS_STYLE_POSITION_STATIC;
+      return style->StyleDisplay()->mPosition != StylePositionProperty::Static;
     case eCSSProperty_padding_top:
     case eCSSProperty_padding_right:
     case eCSSProperty_padding_bottom:
@@ -1124,10 +1129,13 @@ void nsComputedDOMStyle::ClearCurrentStyleSources() {
   mPresShell = nullptr;
 }
 
-NS_IMETHODIMP
-nsComputedDOMStyle::RemoveProperty(const nsACString& aPropertyName,
-                                   nsAString& aReturn) {
-  return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+void nsComputedDOMStyle::RemoveProperty(const nsACString& aPropertyName,
+                                        nsAString& aReturn, ErrorResult& aRv) {
+  // Note: not using nsPrintfCString here in case aPropertyName contains
+  // nulls.
+  aRv.ThrowNoModificationAllowedError(
+      NS_LITERAL_CSTRING("Can't remove property '") + aPropertyName +
+      NS_LITERAL_CSTRING("' from computed style"));
 }
 
 void nsComputedDOMStyle::GetPropertyPriority(const nsACString& aPropertyName,
@@ -1135,12 +1143,16 @@ void nsComputedDOMStyle::GetPropertyPriority(const nsACString& aPropertyName,
   aReturn.Truncate();
 }
 
-NS_IMETHODIMP
-nsComputedDOMStyle::SetProperty(const nsACString& aPropertyName,
-                                const nsACString& aValue,
-                                const nsAString& aPriority,
-                                nsIPrincipal* aSubjectPrincipal) {
-  return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
+void nsComputedDOMStyle::SetProperty(const nsACString& aPropertyName,
+                                     const nsACString& aValue,
+                                     const nsAString& aPriority,
+                                     nsIPrincipal* aSubjectPrincipal,
+                                     ErrorResult& aRv) {
+  // Note: not using nsPrintfCString here in case aPropertyName contains
+  // nulls.
+  aRv.ThrowNoModificationAllowedError(
+      NS_LITERAL_CSTRING("Can't set value for property '") + aPropertyName +
+      NS_LITERAL_CSTRING("' in computed style"));
 }
 
 void nsComputedDOMStyle::IndexedGetter(uint32_t aIndex, bool& aFound,
@@ -1494,7 +1506,7 @@ already_AddRefed<nsROCSSPrimitiveValue> nsComputedDOMStyle::GetGridTrackSize(
                "unexpected unit for fit-content() argument value");
     SetValueToLengthPercentage(val, aTrackSize.AsFitContent().AsBreadth(),
                                true);
-    val->GetCssText(argumentStr);
+    val->GetCssText(argumentStr, IgnoreErrors());
     fitContentStr.Append(argumentStr);
     fitContentStr.Append(char16_t(')'));
     val->SetString(fitContentStr);
@@ -1523,7 +1535,7 @@ already_AddRefed<nsROCSSPrimitiveValue> nsComputedDOMStyle::GetGridTrackSize(
 
   {
     RefPtr<nsROCSSPrimitiveValue> argValue = GetGridTrackBreadth(min);
-    argValue->GetCssText(argumentStr);
+    argValue->GetCssText(argumentStr, IgnoreErrors());
     minmaxStr.Append(argumentStr);
     argumentStr.Truncate();
   }
@@ -1532,7 +1544,7 @@ already_AddRefed<nsROCSSPrimitiveValue> nsComputedDOMStyle::GetGridTrackSize(
 
   {
     RefPtr<nsROCSSPrimitiveValue> argValue = GetGridTrackBreadth(max);
-    argValue->GetCssText(argumentStr);
+    argValue->GetCssText(argumentStr, IgnoreErrors());
     minmaxStr.Append(argumentStr);
   }
 
@@ -1969,25 +1981,25 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetOffsetWidthFor(
     mozilla::Side aSide) {
   const nsStyleDisplay* display = StyleDisplay();
 
-  uint8_t position = display->mPosition;
+  mozilla::StylePositionProperty position = display->mPosition;
   if (!mOuterFrame) {
     // GetNonStaticPositionOffset or GetAbsoluteOffset don't handle elements
     // without frames in any sensible way. GetStaticOffset, however, is perfect
     // for that case.
-    position = NS_STYLE_POSITION_STATIC;
+    position = StylePositionProperty::Static;
   }
 
   switch (position) {
-    case NS_STYLE_POSITION_STATIC:
+    case StylePositionProperty::Static:
       return GetStaticOffset(aSide);
-    case NS_STYLE_POSITION_STICKY:
+    case StylePositionProperty::Sticky:
       return GetNonStaticPositionOffset(
           aSide, false, &nsComputedDOMStyle::GetScrollFrameContentWidth,
           &nsComputedDOMStyle::GetScrollFrameContentHeight);
-    case NS_STYLE_POSITION_ABSOLUTE:
-    case NS_STYLE_POSITION_FIXED:
+    case StylePositionProperty::Absolute:
+    case StylePositionProperty::Fixed:
       return GetAbsoluteOffset(aSide);
-    case NS_STYLE_POSITION_RELATIVE:
+    case StylePositionProperty::Relative:
       return GetNonStaticPositionOffset(
           aSide, true, &nsComputedDOMStyle::GetCBContentWidth,
           &nsComputedDOMStyle::GetCBContentHeight);
@@ -2459,9 +2471,7 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::GetTransformValue(
    * using the named transforms.  Until a real solution is found, we'll just
    * use this approach.
    */
-  nsStyleTransformMatrix::TransformReferenceBox refBox(mInnerFrame,
-                                                       nsSize(0, 0));
-
+  nsStyleTransformMatrix::TransformReferenceBox refBox(mInnerFrame, nsRect());
   gfx::Matrix4x4 matrix = nsStyleTransformMatrix::ReadTransforms(
       aTransform, refBox, float(mozilla::AppUnitsPerCSSPixel()));
 

@@ -69,8 +69,7 @@ already_AddRefed<dom::Promise> Buffer::MapReadAsync(ErrorResult& aRv) {
     return nullptr;
   }
   if (mMapping) {
-    aRv.ThrowDOMException(NS_ERROR_DOM_INVALID_STATE_ERR,
-                          "Unable to map a buffer that is already mapped");
+    aRv.ThrowInvalidStateError("Unable to map a buffer that is already mapped");
     return nullptr;
   }
   const auto checked = CheckedInt<size_t>(mSize);
@@ -93,8 +92,7 @@ already_AddRefed<dom::Promise> Buffer::MapReadAsync(ErrorResult& aRv) {
         MOZ_ASSERT(aShmem.Size<uint8_t>() == size);
         dom::AutoJSAPI jsapi;
         if (!jsapi.Init(self->GetParentObject())) {
-          promise->MaybeRejectWithDOMException(NS_ERROR_DOM_ABORT_ERR,
-                                               "Owning page was unloaded!");
+          promise->MaybeRejectWithAbortError("Owning page was unloaded!");
           return;
         }
         JS::Rooted<JSObject*> arrayBuffer(
@@ -111,8 +109,7 @@ already_AddRefed<dom::Promise> Buffer::MapReadAsync(ErrorResult& aRv) {
         promise->MaybeResolve(val);
       },
       [promise](const ipc::ResponseRejectReason&) {
-        promise->MaybeRejectWithDOMException(NS_ERROR_DOM_ABORT_ERR,
-                                             "Internal communication error!");
+        promise->MaybeRejectWithAbortError("Internal communication error!");
       });
 
   return promise.forget();

@@ -365,8 +365,8 @@ class UrlbarView {
     // focus) we should discard the telemetry event created when the view was
     // opened.
     if (!this.input.focused && !elementPicked) {
-      this.input.controller.engagementEvent.discard();
-      this.input.controller.engagementEvent.record(null, {});
+      this.controller.engagementEvent.discard();
+      this.controller.engagementEvent.record(null, {});
     }
 
     this.window.removeEventListener("resize", this);
@@ -387,6 +387,10 @@ class UrlbarView {
    * @returns {boolean} Whether the view was opened.
    */
   autoOpen(queryOptions = {}) {
+    if (this._pickSearchTipIfPresent(queryOptions.event)) {
+      return false;
+    }
+
     if (!this.input.openViewOnFocus || !queryOptions.event) {
       return false;
     }
@@ -395,8 +399,8 @@ class UrlbarView {
       !this.input.value ||
       this.input.getAttribute("pageproxystate") == "valid"
     ) {
-      // We do not show Top Sites in private windows, or if the user disabled them
-      // on about:newtab.
+      // We do not show Top Sites in private windows, or if the user disabled
+      // them on about:newtab.
       let canOpenTopSites =
         !this.input.isPrivate &&
         UrlbarPrefs.get("browser.newtabpage.activity-stream.feeds.topsites");
@@ -413,6 +417,12 @@ class UrlbarView {
 
     // Reopen abandoned searches only if the input is focused.
     if (!this.input.focused) {
+      return false;
+    }
+
+    // Tab switch is the only case where we requery if the view is open, because
+    // switching tabs doesn't necessarily close the view.
+    if (this.isOpen && queryOptions.event.type != "tabswitch") {
       return false;
     }
 
@@ -852,6 +862,7 @@ class UrlbarView {
 
     let favicon = this._createElement("img");
     favicon.className = "urlbarView-favicon";
+    favicon.setAttribute("data-l10n-id", "urlbar-tip-icon-description");
     item._content.appendChild(favicon);
     item._elements.set("favicon", favicon);
 
@@ -1055,10 +1066,28 @@ class UrlbarView {
     favicon.src = result.payload.icon || UrlbarUtils.ICON.TIP;
 
     let title = item._elements.get("title");
-    title.textContent = result.payload.text;
+    // Add-ons will provide text, rather than l10n ids.
+    if (result.payload.textData) {
+      this.document.l10n.setAttributes(
+        title,
+        result.payload.textData.id,
+        result.payload.textData.args
+      );
+    } else {
+      title.textContent = result.payload.text;
+    }
 
     let tipButton = item._elements.get("tipButton");
-    tipButton.textContent = result.payload.buttonText;
+    // Add-ons will provide buttonText, rather than l10n ids.
+    if (result.payload.buttonTextData) {
+      this.document.l10n.setAttributes(
+        tipButton,
+        result.payload.buttonTextData.id,
+        result.payload.buttonTextData.args
+      );
+    } else {
+      tipButton.textContent = result.payload.buttonText;
+    }
 
     let helpIcon = item._elements.get("helpButton");
     helpIcon.style.display = result.payload.helpUrl ? "" : "none";
@@ -1070,9 +1099,14 @@ class UrlbarView {
       item.result.rowIndex = i;
       item.id = "urlbarView-row-" + i;
       if (item.result.type == UrlbarUtils.RESULT_TYPE.TIP) {
+        let favicon = item._elements.get("favicon");
+        favicon.id = item.id + "-icon";
         let title = item._elements.get("title");
         title.id = item.id + "-title";
-        item._content.setAttribute("aria-labelledby", title.id);
+        item._content.setAttribute(
+          "aria-labelledby",
+          `${favicon.id} ${title.id}`
+        );
         let tipButton = item._elements.get("tipButton");
         tipButton.id = item.id + "-tip-button";
         let helpButton = item._elements.get("helpButton");
@@ -1382,6 +1416,38 @@ class UrlbarView {
     } else {
       element.removeAttribute("title");
     }
+  }
+
+  /**
+   * If the view is open and showing a single search tip, this method picks it
+   * and closes the view.  This counts as an engagement, so this method should
+   * only be called due to user interaction.
+   *
+   * @param {event} event
+   *   The user-initiated event for the interaction.  Should not be null.
+   * @returns {boolean}
+   *   True if this method picked a tip, false otherwise.
+   */
+  _pickSearchTipIfPresent(event) {
+    if (
+      !this.isOpen ||
+      !this._queryContext ||
+      this._queryContext.results.length != 1
+    ) {
+      return false;
+    }
+    let result = this._queryContext.results[0];
+    if (result.type != UrlbarUtils.RESULT_TYPE.TIP) {
+      return false;
+    }
+    let tipButton = this._rows.firstElementChild.querySelector(
+      ".urlbarView-tip-button"
+    );
+    if (!tipButton) {
+      throw new Error("Expected a tip button");
+    }
+    this.input.pickElement(tipButton, event);
+    return true;
   }
 
   // Event handlers below.

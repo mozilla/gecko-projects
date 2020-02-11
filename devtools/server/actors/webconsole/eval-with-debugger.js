@@ -275,11 +275,31 @@ function preventSideEffects(dbg) {
   // TODO: re-enable addAllGlobalsAsDebuggees(bug #1610532)
   // dbg.addAllGlobalsAsDebuggees();
 
+  const timeoutDuration = 100;
+  const endTime = Date.now() + timeoutDuration;
+  let count = 0;
+  function shouldCancel() {
+    // To keep the evaled code as quick as possible, we avoid querying the
+    // current time on ever single step and instead check every 100 steps
+    // as an arbitrary count that seemed to be "often enough".
+    return ++count % 100 === 0 && Date.now() > endTime;
+  }
+
   dbg.onEnterFrame = frame => {
+    if (shouldCancel()) {
+      return null;
+    }
+    frame.onStep = () => {
+      if (shouldCancel()) {
+        return null;
+      }
+      return undefined;
+    };
+
     const script = frame.script;
 
     if (data.executedScripts.has(script)) {
-      return;
+      return undefined;
     }
     data.executedScripts.add(script);
 
@@ -287,6 +307,8 @@ function preventSideEffects(dbg) {
     for (const offset of offsets) {
       script.setBreakpoint(offset, data.handler);
     }
+
+    return undefined;
   };
 
   dbg.onNativeCall = (callee, reason) => {
@@ -634,11 +656,8 @@ function bindCommands(isCmd, dbgWindow, bindSelf, frame, helpers) {
   }
   // Check if the Debugger.Frame or Debugger.Object for the global include any of the
   // helper function we set. We will not overwrite these functions with the Web Console
-  // commands. The exception being "print" which should exist everywhere as
-  // `window.print`, and that we don't want to trigger from the console.
-  const availableHelpers = [
-    ...WebConsoleCommands._originalCommands.keys(),
-  ].filter(h => h !== "print");
+  // commands.
+  const availableHelpers = [...WebConsoleCommands._originalCommands.keys()];
 
   let helpersToDisable = [];
   const helperCache = {};

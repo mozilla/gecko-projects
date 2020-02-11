@@ -135,7 +135,7 @@ void nsTextControlFrame::DestroyFrom(nsIFrame* aDestructRoot,
                                      PostDestroyData& aPostDestroyData) {
   mScrollEvent.Revoke();
 
-  DeleteProperty(TextControlInitializer());
+  RemoveProperty(TextControlInitializer());
 
   // Unbind the text editor state object from the frame.  The editor will live
   // on, but things like controllers will be released.
@@ -1238,7 +1238,7 @@ void nsTextControlFrame::SetInitialChildList(ChildListID aListID,
     MOZ_ASSERT(textControlElement);
     textControlElement->InitializeKeyboardEventListeners();
 
-    if (nsPoint* contentScrollPos = GetProperty(ContentScrollPos())) {
+    if (nsPoint* contentScrollPos = TakeProperty(ContentScrollPos())) {
       // If we have a scroll pos stored to be passed to our anonymous
       // div, do it here!
       nsIStatefulFrame* statefulFrame = do_QueryFrame(frame);
@@ -1247,7 +1247,6 @@ void nsTextControlFrame::SetInitialChildList(ChildListID aListID,
       UniquePtr<PresState> fakePresState = NewPresState();
       fakePresState->scrollState() = *contentScrollPos;
       statefulFrame->RestoreState(fakePresState.get());
-      RemoveProperty(ContentScrollPos());
       delete contentScrollPos;
     }
   } else {

@@ -14,6 +14,7 @@
 #include "js/MemoryMetrics.h"
 #include "js/SourceText.h"
 #include "MessageEventRunnable.h"
+#include "mozilla/Result.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
@@ -3079,9 +3080,15 @@ Maybe<ClientInfo> WorkerPrivate::GetClientInfo() const {
 const ClientState WorkerPrivate::GetClientState() const {
   MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
   MOZ_DIAGNOSTIC_ASSERT(data->mClientSource);
-  ClientState state;
-  data->mClientSource->SnapshotState(&state);
-  return state;
+  Result<ClientState, ErrorResult> res = data->mClientSource->SnapshotState();
+  if (res.isOk()) {
+    return res.unwrap();
+  }
+
+  // XXXbz Why is it OK to just ignore errors and return a default-initialized
+  // state here?
+  res.unwrapErr().SuppressException();
+  return ClientState();
 }
 
 const Maybe<ServiceWorkerDescriptor> WorkerPrivate::GetController() {
@@ -4032,9 +4039,14 @@ void WorkerPrivate::PostMessageToParent(
   }
 
   JS::CloneDataPolicy clonePolicy;
+
+  // Parent and dedicated workers are always part of the same cluster.
+  clonePolicy.allowIntraClusterClonableSharedObjects();
+
   if (IsSharedMemoryAllowed()) {
-    clonePolicy.allowIntraClusterClonableSharedObjects();
+    clonePolicy.allowSharedMemoryObjects();
   }
+
   runnable->Write(aCx, aMessage, transferable, clonePolicy, aRv);
 
   if (isTimelineRecording) {
@@ -5062,8 +5074,6 @@ const nsAString& WorkerPrivate::Id() {
 }
 
 bool WorkerPrivate::IsSharedMemoryAllowed() const {
-  AssertIsOnWorkerThread();
-
   if (StaticPrefs::
           dom_postMessage_sharedArrayBuffer_bypassCOOP_COEP_insecure_enabled()) {
     return true;
@@ -5073,8 +5083,6 @@ bool WorkerPrivate::IsSharedMemoryAllowed() const {
 }
 
 bool WorkerPrivate::CrossOriginIsolated() const {
-  AssertIsOnWorkerThread();
-
   if (!StaticPrefs::dom_postMessage_sharedArrayBuffer_withCOOP_COEP()) {
     return false;
   }

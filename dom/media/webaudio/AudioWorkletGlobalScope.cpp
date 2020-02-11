@@ -33,7 +33,9 @@ NS_IMPL_ADDREF_INHERITED(AudioWorkletGlobalScope, WorkletGlobalScope)
 NS_IMPL_RELEASE_INHERITED(AudioWorkletGlobalScope, WorkletGlobalScope)
 
 AudioWorkletGlobalScope::AudioWorkletGlobalScope(AudioWorkletImpl* aImpl)
-    : mImpl(aImpl) {}
+    : WorkletGlobalScope(aImpl->GetAgentClusterId(),
+                         aImpl->IsSharedMemoryAllowed()),
+      mImpl(aImpl) {}
 
 bool AudioWorkletGlobalScope::WrapGlobalObject(
     JSContext* aCx, JS::MutableHandle<JSObject*> aReflector) {
@@ -55,10 +57,7 @@ void AudioWorkletGlobalScope::RegisterProcessor(
    *    a valid key.
    */
   if (aName.IsEmpty()) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-        "Argument 1 of AudioWorkletGlobalScope.registerProcessor should not be "
-        "an empty string.");
+    aRv.ThrowNotSupportedError("Argument 1 should not be an empty string.");
     return;
   }
 
@@ -70,10 +69,9 @@ void AudioWorkletGlobalScope::RegisterProcessor(
    */
   if (mNameToProcessorMap.GetWeak(aName)) {
     // Duplicate names are not allowed
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-        "Argument 1 of AudioWorkletGlobalScope.registerProcessor is invalid: a "
-        "class with the same name is already registered.");
+    aRv.ThrowNotSupportedError(
+        "Argument 1 is invalid: a class with the same name is already "
+        "registered.");
     return;
   }
 
@@ -92,8 +90,8 @@ void AudioWorkletGlobalScope::RegisterProcessor(
    *    throw a TypeError and abort these steps.
    */
   if (!JS::IsConstructor(constructorUnwrapped)) {
-    aRv.ThrowTypeError<MSG_NOT_CONSTRUCTOR>(NS_LITERAL_STRING(
-        "Argument 2 of AudioWorkletGlobalScope.registerProcessor"));
+    aRv.ThrowTypeError<MSG_NOT_CONSTRUCTOR>(
+        u"Argument 2 of AudioWorkletGlobalScope.registerProcessor");
     return;
   }
 
@@ -114,9 +112,9 @@ void AudioWorkletGlobalScope::RegisterProcessor(
    *    TypeError and abort all these steps.
    */
   if (!prototype.isObject()) {
-    aRv.ThrowTypeError<MSG_NOT_OBJECT>(NS_LITERAL_STRING(
-        "Argument 2 of AudioWorkletGlobalScope.registerProcessor "
-        "processorCtor.prototype"));
+    aRv.ThrowTypeError<MSG_NOT_OBJECT>(
+        u"Argument 2 of AudioWorkletGlobalScope.registerProcessor "
+        u"processorCtor.prototype");
     return;
   }
   /**
@@ -147,9 +145,8 @@ void AudioWorkletGlobalScope::RegisterProcessor(
   }
 
   if (!descriptors.isUndefined() && !isArray) {
-    aRv.ThrowTypeError<MSG_NOT_ARRAY_NOR_UNDEFINED>(NS_LITERAL_STRING(
-        "Argument 2 of AudioWorkletGlobalScope.registerProcessor "
-        "constructor.parameterDescriptors"));
+    aRv.ThrowTypeError<MSG_NOT_ARRAY_NOR_UNDEFINED>(
+        u".constructor.parameterDescriptors of argument 2");
     return;
   }
 
@@ -239,31 +236,28 @@ AudioParamDescriptorMap AudioWorkletGlobalScope::DescriptorsFromJS(
     }
 
     if (namesSet.Contains(descriptor.mName)) {
-      aRv.ThrowDOMException(
-          NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+      aRv.ThrowNotSupportedError(
           NS_LITERAL_CSTRING("Duplicated name \"") +
-              NS_ConvertUTF16toUTF8(descriptor.mName) +
-              NS_LITERAL_CSTRING("\" in parameterDescriptors."));
+          NS_ConvertUTF16toUTF8(descriptor.mName) +
+          NS_LITERAL_CSTRING("\" in parameterDescriptors."));
       return AudioParamDescriptorMap();
     }
 
     if (descriptor.mMinValue > descriptor.mMaxValue) {
-      aRv.ThrowDOMException(
-          NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+      aRv.ThrowNotSupportedError(
           NS_LITERAL_CSTRING("In parameterDescriptors, ") +
-              NS_ConvertUTF16toUTF8(descriptor.mName) +
-              NS_LITERAL_CSTRING(" minValue should be smaller than maxValue."));
+          NS_ConvertUTF16toUTF8(descriptor.mName) +
+          NS_LITERAL_CSTRING(" minValue should be smaller than maxValue."));
       return AudioParamDescriptorMap();
     }
 
     if (descriptor.mDefaultValue < descriptor.mMinValue ||
         descriptor.mDefaultValue > descriptor.mMaxValue) {
-      aRv.ThrowDOMException(
-          NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+      aRv.ThrowNotSupportedError(
           NS_LITERAL_CSTRING("In parameterDescriptors, ") +
-              NS_ConvertUTF16toUTF8(descriptor.mName) +
-              NS_LITERAL_CSTRING(" defaultValue is out of the range defined by "
-                                 "minValue and maxValue."));
+          NS_ConvertUTF16toUTF8(descriptor.mName) +
+          NS_LITERAL_CSTRING(" defaultValue is out of the range defined by "
+                             "minValue and maxValue."));
       return AudioParamDescriptorMap();
     }
 

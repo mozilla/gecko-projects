@@ -27,6 +27,7 @@
 
 #include "ds/Nestable.h"  // Nestable
 #include "frontend/AbstractScope.h"
+#include "frontend/BCEScriptStencil.h"           // BCEScriptStencil
 #include "frontend/BytecodeControlStructures.h"  // NestableControl, BreakableControl, LabelControl, LoopControl, TryFinallyControl
 #include "frontend/CallOrNewEmitter.h"           // CallOrNewEmitter
 #include "frontend/CForEmitter.h"                // CForEmitter
@@ -97,7 +98,7 @@ static bool ParseNodeRequiresSpecialLineNumberNotes(ParseNode* pn) {
 BytecodeEmitter::BytecodeEmitter(
     BytecodeEmitter* parent, SharedContext* sc, HandleScript script,
     Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
-    ParseInfo& parseInfo, EmitterMode emitterMode,
+    CompilationInfo& compilationInfo, EmitterMode emitterMode,
     FieldInitializers fieldInitializers /* = FieldInitializers::Invalid() */)
     : sc(sc),
       cx(sc->cx_),
@@ -105,9 +106,9 @@ BytecodeEmitter::BytecodeEmitter(
       script(cx, script),
       lazyScript(cx, lazyScript),
       bytecodeSection_(cx, line),
-      perScriptData_(cx, parseInfo),
+      perScriptData_(cx, compilationInfo),
       fieldInitializers_(fieldInitializers),
-      parseInfo(parseInfo),
+      compilationInfo(compilationInfo),
       firstLine(line),
       firstColumn(column),
       emitterMode(emitterMode) {
@@ -119,28 +120,24 @@ BytecodeEmitter::BytecodeEmitter(
   }
 }
 
-BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
-                                 BCEParserHandle* handle, SharedContext* sc,
-                                 HandleScript script,
-                                 Handle<LazyScript*> lazyScript, uint32_t line,
-                                 uint32_t column, ParseInfo& parseInfo,
-                                 EmitterMode emitterMode,
-                                 FieldInitializers fieldInitializers)
-    : BytecodeEmitter(parent, sc, script, lazyScript, line, column, parseInfo,
-                      emitterMode, fieldInitializers) {
+BytecodeEmitter::BytecodeEmitter(
+    BytecodeEmitter* parent, BCEParserHandle* handle, SharedContext* sc,
+    HandleScript script, Handle<LazyScript*> lazyScript, uint32_t line,
+    uint32_t column, CompilationInfo& compilationInfo, EmitterMode emitterMode,
+    FieldInitializers fieldInitializers)
+    : BytecodeEmitter(parent, sc, script, lazyScript, line, column,
+                      compilationInfo, emitterMode, fieldInitializers) {
   parser = handle;
   instrumentationKinds = parser->options().instrumentationKinds;
 }
 
-BytecodeEmitter::BytecodeEmitter(BytecodeEmitter* parent,
-                                 const EitherParser& parser, SharedContext* sc,
-                                 HandleScript script,
-                                 Handle<LazyScript*> lazyScript, uint32_t line,
-                                 uint32_t column, ParseInfo& parseInfo,
-                                 EmitterMode emitterMode,
-                                 FieldInitializers fieldInitializers)
-    : BytecodeEmitter(parent, sc, script, lazyScript, line, column, parseInfo,
-                      emitterMode, fieldInitializers) {
+BytecodeEmitter::BytecodeEmitter(
+    BytecodeEmitter* parent, const EitherParser& parser, SharedContext* sc,
+    HandleScript script, Handle<LazyScript*> lazyScript, uint32_t line,
+    uint32_t column, CompilationInfo& compilationInfo, EmitterMode emitterMode,
+    FieldInitializers fieldInitializers)
+    : BytecodeEmitter(parent, sc, script, lazyScript, line, column,
+                      compilationInfo, emitterMode, fieldInitializers) {
   ep_.emplace(parser);
   this->parser = ep_.ptr();
   instrumentationKinds = this->parser->options().instrumentationKinds;
@@ -2485,10 +2482,26 @@ bool BytecodeEmitter::emitScript(ParseNode* body) {
     return false;
   }
 
-  if (!JSScript::fullyInitFromEmitter(cx, script, this)) {
+  uint32_t nslots;
+  if (!getNslots(&nslots)) {
+    return false;
+  }
+  BCEScriptStencil stencil(*this, nslots);
+  if (!JSScript::fullyInitFromStencil(cx, script, stencil)) {
     return false;
   }
 
+  return true;
+}
+
+bool BytecodeEmitter::getNslots(uint32_t* nslots) {
+  uint64_t nslots64 =
+      maxFixedSlots + static_cast<uint64_t>(bytecodeSection().maxStackDepth());
+  if (nslots64 > UINT32_MAX) {
+    reportError(nullptr, JSMSG_NEED_DIET, js_script_str);
+    return false;
+  }
+  *nslots = nslots64;
   return true;
 }
 
@@ -5521,7 +5534,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
 
     RootedFunction fun(cx, funbox->function());
     RootedScript innerScript(
-        cx, JSScript::Create(cx, fun, options, parseInfo.sourceObject,
+        cx, JSScript::Create(cx, fun, options, compilationInfo.sourceObject,
                              funbox->sourceStart, funbox->sourceEnd,
                              funbox->toStringStart, funbox->toStringEnd,
                              funbox->startLine, funbox->startColumn));
@@ -5549,7 +5562,7 @@ MOZ_NEVER_INLINE bool BytecodeEmitter::emitFunction(
 
     BytecodeEmitter bce2(this, parser, funbox, innerScript,
                          /* lazyScript = */ nullptr, funbox->startLine,
-                         funbox->startColumn, parseInfo, nestedMode,
+                         funbox->startColumn, compilationInfo, nestedMode,
                          *fieldInitializers);
     if (!bce2.init(funNode->pn_pos)) {
       return false;

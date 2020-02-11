@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 from abc import ABCMeta, abstractmethod
 
 import mozinfo
@@ -144,7 +145,6 @@ either Raptor or browsertime."""
         self.installerpath = installerpath
         self.playback = None
         self.benchmark = None
-        self.benchmark_port = 0
         self.gecko_profiler = None
         self.post_startup_delay = post_startup_delay
         self.device = None
@@ -197,6 +197,8 @@ either Raptor or browsertime."""
             platform = "%s-%s" % (device_name, android_app)
         else:
             platform = get_current_platform()
+
+        LOG.info("Platform used: %s" % platform)
         try:
             cond_prof_target_dir = get_profile(temp_download_dir, platform, "settled")
         except ProfileNotFoundError:
@@ -204,6 +206,12 @@ either Raptor or browsertime."""
             cond_prof_target_dir = get_profile(
                 temp_download_dir, platform, "settled", repo="try"
             )
+        except Exception:
+            # any other error is a showstopper
+            LOG.critical("Could not get the conditioned profile")
+            traceback.print_exc()
+            raise
+
         # now get the full directory path to our fetched conditioned profile
         self.conditioned_profile_dir = os.path.join(
             temp_download_dir, cond_prof_target_dir
@@ -512,9 +520,9 @@ class PerftestAndroid(Perftest):
 
             if self.benchmark:
                 LOG.info("making the raptor benchmarks server port available to device")
-                self.set_reverse_port(self.benchmark_port)
+                self.set_reverse_port(int(self.benchmark.port))
         else:
-            LOG.info("Reverse port forwarding is uded only on local devices")
+            LOG.info("Reverse port forwarding is used only on local devices")
 
     def build_browser_profile(self):
         super(PerftestAndroid, self).build_browser_profile()

@@ -138,7 +138,7 @@ struct BlobItemData {
     if (mArray->IsEmpty()) {
       // If the frame is in the process of being destroyed this will fail
       // but that's ok, because the the property will be removed then anyways
-      mFrame->DeleteProperty(BlobGroupDataProperty());
+      mFrame->RemoveProperty(BlobGroupDataProperty());
     }
     mFrame = nullptr;
   }
@@ -2666,7 +2666,7 @@ void WebRenderCommandBuilder::RemoveUnusedAndResetWebRenderUserData() {
 
       if (!userDataTable->Count()) {
         frame->RemoveProperty(WebRenderUserDataProperty::Key());
-        delete userDataTable;
+        userDataTable = nullptr;
       }
 
       if (data->GetType() == WebRenderUserData::UserDataType::eCanvas) {

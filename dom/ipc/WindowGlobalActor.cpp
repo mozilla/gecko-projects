@@ -34,6 +34,8 @@ WindowGlobalInit WindowGlobalActor::AboutBlankInitializer(
 void WindowGlobalActor::ConstructActor(const nsAString& aName,
                                        JS::MutableHandleObject aActor,
                                        ErrorResult& aRv) {
+  MOZ_ASSERT(nsContentUtils::IsSafeToRunScript());
+
   JSWindowActor::Type actorType = GetSide();
   MOZ_ASSERT_IF(actorType == JSWindowActor::Type::Parent,
                 XRE_IsParentProcess());
@@ -118,7 +120,7 @@ void WindowGlobalActor::ConstructActor(const nsAString& aName,
   if (NS_WARN_IF(!ctor.isObject())) {
     nsPrintfCString message("Could not find actor constructor '%s'",
                             NS_ConvertUTF16toUTF8(ctorName).get());
-    aRv.ThrowDOMException(NS_ERROR_DOM_NOT_FOUND_ERR, message);
+    aRv.ThrowNotFoundError(message);
     return;
   }
 

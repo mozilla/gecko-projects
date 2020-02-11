@@ -90,17 +90,13 @@ already_AddRefed<StyleSheet> StyleSheet::Constructor(
       do_QueryInterface(aGlobal.GetAsSupports());
 
   if (!window) {
-    aRv.ThrowDOMException(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-                          "CSSStyleSheet constructor not supported when there "
-                          "is no document");
+    aRv.ThrowNotSupportedError("Not supported when there is no document");
     return nullptr;
   }
 
   Document* constructorDocument = window->GetExtantDoc();
   if (!constructorDocument) {
-    aRv.ThrowDOMException(NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-                          "CSSStyleSheet constructor not supported when there "
-                          "is no document");
+    aRv.ThrowNotSupportedError("Not supported when there is no document");
     return nullptr;
   }
 
@@ -586,9 +582,7 @@ already_AddRefed<dom::Promise> StyleSheet::Replace(const nsAString& aText,
 
   // 2.1 Check if sheet is constructed, else throw.
   if (!mConstructorDocument) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_ALLOWED_ERR,
-        "The replace() method can only be called on constructed style sheets");
+    aRv.ThrowNotAllowedError("Can only be called on constructed style sheets");
     return nullptr;
   }
 
@@ -617,18 +611,14 @@ void StyleSheet::ReplaceSync(const nsACString& aText, ErrorResult& aRv) {
 
   // 2.1 Check if sheet is constructed, else throw.
   if (!mConstructorDocument) {
-    return aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_ALLOWED_ERR,
-        "The replaceSync() method can only be called on "
-        "constructed style sheets");
+    return aRv.ThrowNotAllowedError(
+        "Can only be called on constructed style sheets");
   }
 
   // 2.2 Check if sheet is modifiable, else throw.
   if (ModificationDisallowed()) {
-    return aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_ALLOWED_ERR,
-        "The replaceSync() method can only be called on "
-        "modifiable style sheets");
+    return aRv.ThrowNotAllowedError(
+        "Can only be called on modifiable style sheets");
   }
 
   // 3. Parse aText into rules.
@@ -654,10 +644,9 @@ void StyleSheet::ReplaceSync(const nsACString& aText, ErrorResult& aRv) {
   // the document's use counters will be affected even if this function throws.
   // Consider changing this to detect @import rules during parse time.
   if (Servo_StyleSheet_HasImportRules(rawContent)) {
-    return aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_ALLOWED_ERR,
-        "The replaceSync() method does not support @import "
-        "rules. Use the async replace() method instead.");
+    return aRv.ThrowNotAllowedError(
+        "@import rules are not allowed. Use the async replace() method "
+        "instead.");
   }
 
   // 5. Set sheet's rules to the new rules.
@@ -819,7 +808,7 @@ void StyleSheet::SubjectSubsumesInnerPrincipal(nsIPrincipal& aSubjectPrincipal,
   // Allow access only if CORS mode is not NONE and the security flag
   // is not turned off.
   if (GetCORSMode() == CORS_NONE && !nsContentUtils::BypassCSSOMOriginCheck()) {
-    aRv.Throw(NS_ERROR_DOM_SECURITY_ERR);
+    aRv.ThrowSecurityError("Not allowed to access cross-origin stylesheet");
     return;
   }
 
@@ -835,7 +824,8 @@ void StyleSheet::SubjectSubsumesInnerPrincipal(nsIPrincipal& aSubjectPrincipal,
   // if we're not complete yet.  Luckily, all the callers of this method throw
   // anyway if not complete, so we can just do that here too.
   if (!IsComplete()) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
+    aRv.ThrowInvalidAccessError(
+        "Not allowed to access still-loading stylesheet");
     return;
   }
 
@@ -848,7 +838,8 @@ bool StyleSheet::AreRulesAvailable(nsIPrincipal& aSubjectPrincipal,
                                    ErrorResult& aRv) {
   // Rules are not available on incomplete sheets.
   if (!IsComplete()) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
+    aRv.ThrowInvalidAccessError(
+        "Can't access rules of still-loading stylsheet");
     return false;
   }
   //-- Security check: Only scripts whose principal subsumes that of the
@@ -1120,16 +1111,16 @@ void StyleSheet::FinishParse() {
   SetSourceURL(sourceURL);
 }
 
-nsresult StyleSheet::ReparseSheet(const nsACString& aInput) {
+void StyleSheet::ReparseSheet(const nsACString& aInput, ErrorResult& aRv) {
   if (!IsComplete()) {
-    return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+    return aRv.ThrowInvalidAccessError("Cannot reparse still-loading sheet");
   }
 
   // Allowing to modify UA sheets is dangerous (in the sense that C++ code
   // relies on rules in those sheets), plus they're probably going to be shared
   // across processes in which case this is directly a no-go.
   if (IsReadOnly()) {
-    return NS_OK;
+    return;
   }
 
   // Hold strong ref to the CSSLoader in case the document update
@@ -1201,8 +1192,6 @@ nsresult StyleSheet::ReparseSheet(const nsACString& aInput) {
 
   // Our rules are no longer considered modified for devtools.
   mState &= ~State::ModifiedRulesForDevtools;
-
-  return NS_OK;
 }
 
 void StyleSheet::DropRuleList() {
@@ -1260,8 +1249,7 @@ void StyleSheet::DeleteRuleInternal(uint32_t aIndex, ErrorResult& aRv) {
   // Ensure mRuleList is constructed.
   GetCssRulesInternal();
   if (aIndex >= mRuleList->Length()) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_INDEX_SIZE_ERR,
+    aRv.ThrowIndexSizeError(
         nsPrintfCString("Cannot delete rule at index %u"
                         " because the number of rules is only %u",
                         aIndex, mRuleList->Length()));
@@ -1273,8 +1261,6 @@ void StyleSheet::DeleteRuleInternal(uint32_t aIndex, ErrorResult& aRv) {
   // event is not enabled.
   RefPtr<css::Rule> rule = mRuleList->GetRule(aIndex);
   aRv = mRuleList->DeleteRule(aIndex);
-  MOZ_ASSERT(!aRv.ErrorCodeIs(NS_ERROR_DOM_INDEX_SIZE_ERR),
-             "IndexSizeError should have been handled earlier");
   if (!aRv.Failed()) {
     RuleRemoved(*rule);
   }

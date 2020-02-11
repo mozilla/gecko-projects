@@ -647,18 +647,19 @@ int32_t CustomElementRegistry::InferNamespace(
 }
 
 bool CustomElementRegistry::JSObjectToAtomArray(
-    JSContext* aCx, JS::Handle<JSObject*> aConstructor, const char16_t* aName,
+    JSContext* aCx, JS::Handle<JSObject*> aConstructor, const nsString& aName,
     nsTArray<RefPtr<nsAtom>>& aArray, ErrorResult& aRv) {
   JS::RootedValue iterable(aCx, JS::UndefinedValue());
-  if (!JS_GetUCProperty(aCx, aConstructor, aName,
-                        std::char_traits<char16_t>::length(aName), &iterable)) {
+  if (!JS_GetUCProperty(aCx, aConstructor, aName.get(), aName.Length(),
+                        &iterable)) {
     aRv.NoteJSContextException(aCx);
     return false;
   }
 
   if (!iterable.isUndefined()) {
     if (!iterable.isObject()) {
-      aRv.ThrowTypeError<MSG_NOT_SEQUENCE>(nsDependentString(aName));
+      aRv.ThrowTypeError<MSG_NOT_SEQUENCE>(
+          NS_LITERAL_STRING("CustomElementRegistry.define: ") + aName);
       return false;
     }
 
@@ -669,7 +670,8 @@ bool CustomElementRegistry::JSObjectToAtomArray(
     }
 
     if (!iter.valueIsIterable()) {
-      aRv.ThrowTypeError<MSG_NOT_SEQUENCE>(nsDependentString(aName));
+      aRv.ThrowTypeError<MSG_NOT_SEQUENCE>(
+          NS_LITERAL_STRING("CustomElementRegistry.define: ") + aName);
       return false;
     }
 
@@ -729,7 +731,7 @@ void CustomElementRegistry::Define(
    */
   if (!JS::IsConstructor(constructorUnwrapped)) {
     aRv.ThrowTypeError<MSG_NOT_CONSTRUCTOR>(
-        NS_LITERAL_STRING("Argument 2 of CustomElementRegistry.define"));
+        u"Argument 2 of CustomElementRegistry.define");
     return;
   }
 
@@ -742,8 +744,7 @@ void CustomElementRegistry::Define(
   Document* doc = mWindow->GetExtantDoc();
   RefPtr<nsAtom> nameAtom(NS_Atomize(aName));
   if (!nsContentUtils::IsCustomElementName(nameAtom, nameSpaceID)) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_SYNTAX_ERR,
+    aRv.ThrowSyntaxError(
         nsPrintfCString("'%s' is not a valid custom element name",
                         NS_ConvertUTF16toUTF8(aName).get()));
     return;
@@ -754,8 +755,7 @@ void CustomElementRegistry::Define(
    *    throw a "NotSupportedError" DOMException and abort these steps.
    */
   if (mCustomDefinitions.GetWeak(nameAtom)) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+    aRv.ThrowNotSupportedError(
         nsPrintfCString("'%s' has already been defined as a custom element",
                         NS_ConvertUTF16toUTF8(aName).get()));
     return;
@@ -772,8 +772,7 @@ void CustomElementRegistry::Define(
                "Definition must be found in mCustomDefinitions");
     nsAutoCString name;
     ptr->value()->ToUTF8String(name);
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+    aRv.ThrowNotSupportedError(
         nsPrintfCString("'%s' and '%s' have the same constructor",
                         NS_ConvertUTF16toUTF8(aName).get(), name.get()));
     return;
@@ -807,8 +806,7 @@ void CustomElementRegistry::Define(
   if (aOptions.mExtends.WasPassed()) {
     RefPtr<nsAtom> extendsAtom(NS_Atomize(aOptions.mExtends.Value()));
     if (nsContentUtils::IsCustomElementName(extendsAtom, kNameSpaceID_XHTML)) {
-      aRv.ThrowDOMException(
-          NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+      aRv.ThrowNotSupportedError(
           nsPrintfCString("'%s' cannot extend a custom element",
                           NS_ConvertUTF16toUTF8(aName).get()));
       return;
@@ -839,8 +837,7 @@ void CustomElementRegistry::Define(
    * set, then throw a "NotSupportedError" DOMException and abort these steps.
    */
   if (mIsCustomDefinitionRunning) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_SUPPORTED_ERR,
+    aRv.ThrowNotSupportedError(
         "Cannot define a custom element while defining another custom element");
     return;
   }
@@ -874,7 +871,7 @@ void CustomElementRegistry::Define(
      */
     if (!prototype.isObject()) {
       aRv.ThrowTypeError<MSG_NOT_OBJECT>(
-          NS_LITERAL_STRING("constructor.prototype"));
+          u"CustomElementRegistry.define: constructor.prototype");
       return;
     }
 
@@ -908,7 +905,8 @@ void CustomElementRegistry::Define(
      *          any exceptions from the conversion.
      */
     if (callbacksHolder->mAttributeChangedCallback.WasPassed()) {
-      if (!JSObjectToAtomArray(aCx, constructor, u"observedAttributes",
+      if (!JSObjectToAtomArray(aCx, constructor,
+                               NS_LITERAL_STRING("observedAttributes"),
                                observedAttributes, aRv)) {
         return;
       }
@@ -924,7 +922,8 @@ void CustomElementRegistry::Define(
      *       Rethrow any exceptions from the conversion.
      */
     if (StaticPrefs::dom_webcomponents_elementInternals_enabled()) {
-      if (!JSObjectToAtomArray(aCx, constructor, u"disabledFeatures",
+      if (!JSObjectToAtomArray(aCx, constructor,
+                               NS_LITERAL_STRING("disabledFeatures"),
                                disabledFeatures, aRv)) {
         return;
       }
@@ -1101,12 +1100,10 @@ static void DoUpgrade(Element* aElement, CustomElementDefinition* aDefinition,
                       CustomElementConstructor* aConstructor,
                       ErrorResult& aRv) {
   if (aDefinition->mDisableShadow && aElement->GetShadowRoot()) {
-    aRv.ThrowDOMException(
-        NS_ERROR_DOM_NOT_SUPPORTED_ERR,
-        nsPrintfCString(
-            "Custom element upgrade to '%s' is disabled due to shadow root "
-            "already exists",
-            NS_ConvertUTF16toUTF8(aDefinition->mType->GetUTF16String()).get()));
+    aRv.ThrowNotSupportedError(nsPrintfCString(
+        "Custom element upgrade to '%s' is disabled because a shadow root "
+        "already exists",
+        NS_ConvertUTF16toUTF8(aDefinition->mType->GetUTF16String()).get()));
     return;
   }
 
@@ -1124,7 +1121,7 @@ static void DoUpgrade(Element* aElement, CustomElementDefinition* aDefinition,
   // always forms the return value from a JSObject.
   if (NS_FAILED(UNWRAP_OBJECT(Element, &constructResult, element)) ||
       element != aElement) {
-    aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
+    aRv.ThrowTypeError(u"Custom element constructor returned a wrong element");
     return;
   }
 }

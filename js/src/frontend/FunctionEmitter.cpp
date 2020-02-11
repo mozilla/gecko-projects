@@ -9,6 +9,7 @@
 #include "mozilla/Assertions.h"  // MOZ_ASSERT
 
 #include "builtin/ModuleObject.h"          // ModuleObject
+#include "frontend/BCEScriptStencil.h"     // BCEScriptStencil
 #include "frontend/BytecodeEmitter.h"      // BytecodeEmitter
 #include "frontend/ModuleSharedContext.h"  // ModuleSharedContext
 #include "frontend/NameAnalysisTypes.h"    // NameLocation
@@ -44,16 +45,7 @@ bool FunctionEmitter::interpretedCommon() {
   // case, if the lambda runs multiple times then CloneFunctionObject will
   // make a deep clone of its contents.
   bool singleton = bce_->checkRunOnceContext();
-  if (!funbox_->setTypeForScriptedFunction(bce_->cx, singleton)) {
-    return false;
-  }
-
-  SharedContext* outersc = bce_->sc;
-  if (outersc->isFunctionBox()) {
-    outersc->asFunctionBox()->setHasInnerFunctions();
-  }
-
-  return true;
+  return funbox_->setTypeForScriptedFunction(bce_->cx, singleton);
 }
 
 bool FunctionEmitter::prepareForNonLazy() {
@@ -744,7 +736,12 @@ bool FunctionScriptEmitter::initScript(
     const FieldInitializers& fieldInitializers) {
   MOZ_ASSERT(state_ == State::EndBody);
 
-  if (!JSScript::fullyInitFromEmitter(bce_->cx, bce_->script, bce_)) {
+  uint32_t nslots;
+  if (!bce_->getNslots(&nslots)) {
+    return false;
+  }
+  BCEScriptStencil stencil(*bce_, nslots);
+  if (!JSScript::fullyInitFromStencil(bce_->cx, bce_->script, stencil)) {
     return false;
   }
 

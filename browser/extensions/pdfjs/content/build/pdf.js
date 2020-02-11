@@ -123,8 +123,8 @@ return /******/ (function(modules) { // webpackBootstrap
 "use strict";
 
 
-var pdfjsVersion = '2.4.264';
-var pdfjsBuild = '4729fdc0';
+var pdfjsVersion = '2.4.349';
+var pdfjsBuild = 'dced0a38';
 
 var pdfjsSharedUtil = __w_pdfjs_require__(1);
 
@@ -138,9 +138,9 @@ var pdfjsDisplayDisplayUtils = __w_pdfjs_require__(4);
 
 var pdfjsDisplaySVG = __w_pdfjs_require__(18);
 
-let pdfjsDisplayWorkerOptions = __w_pdfjs_require__(9);
+const pdfjsDisplayWorkerOptions = __w_pdfjs_require__(9);
 
-let pdfjsDisplayAPICompatibility = __w_pdfjs_require__(6);
+const pdfjsDisplayAPICompatibility = __w_pdfjs_require__(6);
 
 ;
 exports.build = pdfjsDisplayAPI.build;
@@ -200,15 +200,10 @@ exports.isBool = isBool;
 exports.isEmptyObj = isEmptyObj;
 exports.isNum = isNum;
 exports.isString = isString;
-exports.isSpace = isSpace;
 exports.isSameOrigin = isSameOrigin;
 exports.createValidAbsoluteUrl = createValidAbsoluteUrl;
 exports.isLittleEndian = isLittleEndian;
 exports.isEvalSupported = isEvalSupported;
-exports.log2 = log2;
-exports.readInt8 = readInt8;
-exports.readUint16 = readUint16;
-exports.readUint32 = readUint32;
 exports.removeNullCharacters = removeNullCharacters;
 exports.setVerbosityLevel = setVerbosityLevel;
 exports.shadow = shadow;
@@ -753,26 +748,6 @@ function string32(value) {
   return String.fromCharCode(value >> 24 & 0xff, value >> 16 & 0xff, value >> 8 & 0xff, value & 0xff);
 }
 
-function log2(x) {
-  if (x <= 0) {
-    return 0;
-  }
-
-  return Math.ceil(Math.log2(x));
-}
-
-function readInt8(data, start) {
-  return data[start] << 24 >> 24;
-}
-
-function readUint16(data, offset) {
-  return data[offset] << 8 | data[offset + 1];
-}
-
-function readUint32(data, offset) {
-  return (data[offset] << 24 | data[offset + 1] << 16 | data[offset + 2] << 8 | data[offset + 3]) >>> 0;
-}
-
 function isLittleEndian() {
   const buffer8 = new Uint8Array(4);
   buffer8[0] = 1;
@@ -926,7 +901,7 @@ function utf8StringToString(str) {
 }
 
 function isEmptyObj(obj) {
-  for (let key in obj) {
+  for (const key in obj) {
     return false;
   }
 
@@ -957,10 +932,6 @@ function isArrayEqual(arr1, arr2) {
   return arr1.every(function (element, index) {
     return element === arr2[index];
   });
-}
-
-function isSpace(ch) {
-  return ch === 0x20 || ch === 0x09 || ch === 0x0d || ch === 0x0a;
 }
 
 function createPromiseCapability() {
@@ -1234,7 +1205,7 @@ function _fetchDocument(worker, source, pdfDataRangeTransport, docId) {
 
   return worker.messageHandler.sendWithPromise("GetDocRequest", {
     docId,
-    apiVersion: '2.4.264',
+    apiVersion: '2.4.349',
     source: {
       data: source.data,
       url: source.url,
@@ -1457,7 +1428,7 @@ class PDFDocumentProxy {
   }
 
   cleanup() {
-    this._transport.startCleanup();
+    return this._transport.startCleanup();
   }
 
   destroy() {
@@ -1788,8 +1759,7 @@ class PDFPageProxy {
 
   cleanup(resetStats = false) {
     this.pendingCleanup = true;
-
-    this._tryCleanup(resetStats);
+    return this._tryCleanup(resetStats);
   }
 
   _tryCleanup(resetStats = false) {
@@ -1797,7 +1767,7 @@ class PDFPageProxy {
       const intentState = this.intentStates[intent];
       return intentState.renderTasks.length !== 0 || !intentState.operatorList.lastChunk;
     })) {
-      return;
+      return false;
     }
 
     Object.keys(this.intentStates).forEach(intent => {
@@ -1811,6 +1781,7 @@ class PDFPageProxy {
     }
 
     this.pendingCleanup = false;
+    return true;
   }
 
   _startRenderPage(transparency, intent) {
@@ -2244,7 +2215,7 @@ const PDFWorker = function PDFWorkerClosure() {
           });
 
           const sendTest = () => {
-            let testObj = new Uint8Array([this.postMessageTransfers ? 255 : 0]);
+            const testObj = new Uint8Array([this.postMessageTransfers ? 255 : 0]);
 
             try {
               messageHandler.send("test", testObj, [testObj.buffer]);
@@ -2287,6 +2258,10 @@ const PDFWorker = function PDFWorkerClosure() {
         this._messageHandler = messageHandler;
 
         this._readyCapability.resolve();
+
+        messageHandler.send("configure", {
+          verbosity: this.verbosity
+        });
       }).catch(reason => {
         this._readyCapability.reject(new Error(`Setting up fake worker failed: "${reason.message}".`));
       });
@@ -2899,12 +2874,16 @@ class WorkerTransport {
   }
 
   startCleanup() {
-    this.messageHandler.sendWithPromise("Cleanup", null).then(() => {
+    return this.messageHandler.sendWithPromise("Cleanup", null).then(() => {
       for (let i = 0, ii = this.pageCache.length; i < ii; i++) {
         const page = this.pageCache[i];
 
         if (page) {
-          page.cleanup();
+          const cleanupSuccessful = page.cleanup();
+
+          if (!cleanupSuccessful) {
+            throw new Error(`startCleanup: Page ${i + 1} is currently rendering.`);
+          }
         }
       }
 
@@ -3173,9 +3152,9 @@ const InternalRenderTask = function InternalRenderTaskClosure() {
   return InternalRenderTask;
 }();
 
-const version = '2.4.264';
+const version = '2.4.349';
 exports.version = version;
-const build = '4729fdc0';
+const build = 'dced0a38';
 exports.build = build;
 
 /***/ }),
@@ -3528,8 +3507,8 @@ class StatTimer {
   }
 
   toString() {
-    let outBuf = [],
-        longest = 0;
+    const outBuf = [];
+    let longest = 0;
 
     for (const time of this.times) {
       const name = time.name;
@@ -3805,7 +3784,7 @@ class FontFaceObject {
   }) {
     this.compiledGlyphs = Object.create(null);
 
-    for (let i in translatedData) {
+    for (const i in translatedData) {
       this[i] = translatedData[i];
     }
 
@@ -3913,7 +3892,7 @@ exports.FontFaceObject = FontFaceObject;
 "use strict";
 
 
-let compatibilityParams = Object.create(null);
+const compatibilityParams = Object.create(null);
 ;
 exports.apiCompatibilityParams = Object.freeze(compatibilityParams);
 
@@ -4583,7 +4562,7 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
     var backdrop = smask.backdrop || null;
 
     if (!smask.transferMap && webGLContext.isEnabled) {
-      let composed = webGLContext.composeSMask({
+      const composed = webGLContext.composeSMask({
         layer: layerCtx.canvas,
         mask,
         properties: {
@@ -4985,7 +4964,7 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
 
       if (strokeColor && strokeColor.hasOwnProperty("type") && strokeColor.type === "Pattern") {
         ctx.save();
-        let transform = ctx.mozCurrentTransform;
+        const transform = ctx.mozCurrentTransform;
 
         const scale = _util.Util.singularValueDecompose2dScale(transform)[0];
 
@@ -5143,10 +5122,24 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
       }
 
       var name = fontObj.loadedName || "sans-serif";
-      var bold = fontObj.black ? "900" : fontObj.bold ? "bold" : "normal";
+      let bold = "normal";
+
+      if (fontObj.black) {
+        bold = "900";
+      } else if (fontObj.bold) {
+        bold = "bold";
+      }
+
       var italic = fontObj.italic ? "italic" : "normal";
       var typeface = `"${name}", ${fontObj.fallbackName}`;
-      var browserFontSize = size < MIN_FONT_SIZE ? MIN_FONT_SIZE : size > MAX_FONT_SIZE ? MAX_FONT_SIZE : size;
+      let browserFontSize = size;
+
+      if (size < MIN_FONT_SIZE) {
+        browserFontSize = MIN_FONT_SIZE;
+      } else if (size > MAX_FONT_SIZE) {
+        browserFontSize = MAX_FONT_SIZE;
+      }
+
       this.current.fontSizeScale = size / browserFontSize;
       this.ctx.font = `${italic} ${bold} ${browserFontSize}px ${typeface}`;
     },
@@ -5182,7 +5175,7 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
       var fontSize = current.fontSize / current.fontSizeScale;
       var fillStrokeMode = textRenderingMode & _util.TextRenderingMode.FILL_STROKE_MASK;
       var isAddToPathSet = !!(textRenderingMode & _util.TextRenderingMode.ADD_TO_PATH_FLAG);
-      let patternFill = current.patternFill && font.data;
+      const patternFill = current.patternFill && font.data;
       var addToPath;
 
       if (font.disableFontFace || isAddToPathSet || patternFill) {
@@ -5280,7 +5273,7 @@ var CanvasGraphics = function CanvasGraphicsClosure() {
 
       if (current.patternFill) {
         ctx.save();
-        let pattern = current.fillColor.getPattern(ctx, this);
+        const pattern = current.fillColor.getPattern(ctx, this);
         patternTransform = ctx.mozCurrentTransform;
         ctx.restore();
         ctx.fillStyle = pattern;
@@ -6095,24 +6088,50 @@ var createMeshCanvas = function createMeshCanvasClosure() {
         maxY = Math.round(y3);
     var xa, car, cag, cab;
     var xb, cbr, cbg, cbb;
-    var k;
 
     for (var y = minY; y <= maxY; y++) {
       if (y < y2) {
-        k = y < y1 ? 0 : y1 === y2 ? 1 : (y1 - y) / (y1 - y2);
+        let k;
+
+        if (y < y1) {
+          k = 0;
+        } else if (y1 === y2) {
+          k = 1;
+        } else {
+          k = (y1 - y) / (y1 - y2);
+        }
+
         xa = x1 - (x1 - x2) * k;
         car = c1r - (c1r - c2r) * k;
         cag = c1g - (c1g - c2g) * k;
         cab = c1b - (c1b - c2b) * k;
       } else {
-        k = y > y3 ? 1 : y2 === y3 ? 0 : (y2 - y) / (y2 - y3);
+        let k;
+
+        if (y > y3) {
+          k = 1;
+        } else if (y2 === y3) {
+          k = 0;
+        } else {
+          k = (y2 - y) / (y2 - y3);
+        }
+
         xa = x2 - (x2 - x3) * k;
         car = c2r - (c2r - c3r) * k;
         cag = c2g - (c2g - c3g) * k;
         cab = c2b - (c2b - c3b) * k;
       }
 
-      k = y < y1 ? 0 : y > y3 ? 1 : (y1 - y) / (y1 - y3);
+      let k;
+
+      if (y < y1) {
+        k = 0;
+      } else if (y > y3) {
+        k = 1;
+      } else {
+        k = (y1 - y) / (y1 - y3);
+      }
+
       xb = x1 - (x1 - x3) * k;
       cbr = c1r - (c1r - c3r) * k;
       cbg = c1g - (c1g - c3g) * k;
@@ -6122,8 +6141,14 @@ var createMeshCanvas = function createMeshCanvasClosure() {
       var j = rowSize * y + x1_ * 4;
 
       for (var x = x1_; x <= x2_; x++) {
-        k = (xa - x) / (xa - xb);
-        k = k < 0 ? 0 : k > 1 ? 1 : k;
+        let k = (xa - x) / (xa - xb);
+
+        if (k < 0) {
+          k = 0;
+        } else if (k > 1) {
+          k = 1;
+        }
+
         bytes[j++] = car - (car - cbr) * k | 0;
         bytes[j++] = cag - (cag - cbg) * k | 0;
         bytes[j++] = cab - (cab - cbb) * k | 0;
@@ -6386,8 +6411,8 @@ var TilingPattern = function TilingPatternClosure() {
       }
     },
     setFillAndStrokeStyleToContext: function setFillAndStrokeStyleToContext(graphics, paintType, color) {
-      let context = graphics.ctx,
-          current = graphics.current;
+      const context = graphics.ctx,
+            current = graphics.current;
 
       switch (paintType) {
         case PaintType.COLORED:
@@ -6933,8 +6958,8 @@ class MessageHandler {
   }
 
   async _deleteStreamController(streamId) {
-    await Promise.all([this.streamControllers[streamId].startCall, this.streamControllers[streamId].pullCall, this.streamControllers[streamId].cancelCall].map(function (capability) {
-      return capability && capability.promise.catch(function () {});
+    await Promise.allSettled([this.streamControllers[streamId].startCall, this.streamControllers[streamId].pullCall, this.streamControllers[streamId].cancelCall].map(function (capability) {
+      return capability && capability.promise;
     }));
     delete this.streamControllers[streamId];
   }
@@ -6975,7 +7000,7 @@ class Metadata {
   constructor(data) {
     (0, _util.assert)(typeof data === "string", "Metadata: input is not a string");
     data = this._repair(data);
-    let parser = new _xml_parser.SimpleXMLParser();
+    const parser = new _xml_parser.SimpleXMLParser();
     const xmlDocument = parser.parseFromString(data);
     this._metadata = Object.create(null);
 
@@ -6986,7 +7011,7 @@ class Metadata {
 
   _repair(data) {
     return data.replace(/^([^<]+)/, "").replace(/>\\376\\377([^<]+)/g, function (all, codes) {
-      let bytes = codes.replace(/\\([0-3])([0-7])([0-7])/g, function (code, d1, d2, d3) {
+      const bytes = codes.replace(/\\([0-3])([0-7])([0-7])/g, function (code, d1, d2, d3) {
         return String.fromCharCode(d1 * 64 + d2 * 8 + d3 * 1);
       }).replace(/&(amp|apos|gt|lt|quot);/g, function (str, name) {
         switch (name) {
@@ -7011,7 +7036,7 @@ class Metadata {
       let chars = "";
 
       for (let i = 0, ii = bytes.length; i < ii; i += 2) {
-        let code = bytes.charCodeAt(i) * 256 + bytes.charCodeAt(i + 1);
+        const code = bytes.charCodeAt(i) * 256 + bytes.charCodeAt(i + 1);
 
         if (code >= 32 && code < 127 && code !== 60 && code !== 62 && code !== 38) {
           chars += String.fromCharCode(code);
@@ -7035,16 +7060,16 @@ class Metadata {
       }
     }
 
-    let nodeName = rdf ? rdf.nodeName.toLowerCase() : null;
+    const nodeName = rdf ? rdf.nodeName.toLowerCase() : null;
 
     if (!rdf || nodeName !== "rdf:rdf" || !rdf.hasChildNodes()) {
       return;
     }
 
-    let children = rdf.childNodes;
+    const children = rdf.childNodes;
 
     for (let i = 0, ii = children.length; i < ii; i++) {
-      let desc = children[i];
+      const desc = children[i];
 
       if (desc.nodeName.toLowerCase() !== "rdf:description") {
         continue;
@@ -7052,8 +7077,8 @@ class Metadata {
 
       for (let j = 0, jj = desc.childNodes.length; j < jj; j++) {
         if (desc.childNodes[j].nodeName.toLowerCase() !== "#text") {
-          let entry = desc.childNodes[j];
-          let name = entry.nodeName.toLowerCase();
+          const entry = desc.childNodes[j];
+          const name = entry.nodeName.toLowerCase();
           this._metadata[name] = entry.textContent.trim();
         }
       }
@@ -7145,9 +7170,8 @@ class XMLParserBase {
   }
 
   _parseContent(s, start) {
-    let pos = start,
-        name,
-        attributes = [];
+    const attributes = [];
+    let pos = start;
 
     function skipWs() {
       while (pos < s.length && isWhitespace(s, pos)) {
@@ -7159,7 +7183,7 @@ class XMLParserBase {
       ++pos;
     }
 
-    name = s.substring(start, pos);
+    const name = s.substring(start, pos);
     skipWs();
 
     while (pos < s.length && s[pos] !== ">" && s[pos] !== "/" && s[pos] !== "?") {
@@ -7209,9 +7233,7 @@ class XMLParserBase {
   }
 
   _parseProcessingInstruction(s, start) {
-    let pos = start,
-        name,
-        value;
+    let pos = start;
 
     function skipWs() {
       while (pos < s.length && isWhitespace(s, pos)) {
@@ -7223,7 +7245,7 @@ class XMLParserBase {
       ++pos;
     }
 
-    name = s.substring(start, pos);
+    const name = s.substring(start, pos);
     skipWs();
     const attrStart = pos;
 
@@ -7231,7 +7253,7 @@ class XMLParserBase {
       ++pos;
     }
 
-    value = s.substring(attrStart, pos);
+    const value = s.substring(attrStart, pos);
     return {
       name,
       value,
@@ -8865,23 +8887,23 @@ var renderTextLayer = function renderTextLayerClosure() {
     },
 
     _render: function TextLayer_render(timeout) {
-      let capability = (0, _util.createPromiseCapability)();
+      const capability = (0, _util.createPromiseCapability)();
       let styleCache = Object.create(null);
-      let canvas = document.createElement("canvas");
+      const canvas = document.createElement("canvas");
       canvas.mozOpaque = true;
       this._layoutTextCtx = canvas.getContext("2d", {
         alpha: false
       });
 
       if (this._textContent) {
-        let textItems = this._textContent.items;
-        let textStyles = this._textContent.styles;
+        const textItems = this._textContent.items;
+        const textStyles = this._textContent.styles;
 
         this._processItems(textItems, textStyles);
 
         capability.resolve();
       } else if (this._textContentStream) {
-        let pump = () => {
+        const pump = () => {
           this._reader.read().then(({
             value,
             done
@@ -9388,7 +9410,15 @@ class TextWidgetAnnotationElement extends WidgetAnnotationElement {
       return;
     }
 
-    style.fontWeight = font.black ? font.bold ? "900" : "bold" : font.bold ? "bold" : "normal";
+    let bold = "normal";
+
+    if (font.black) {
+      bold = "900";
+    } else if (font.bold) {
+      bold = "bold";
+    }
+
+    style.fontWeight = bold;
     style.fontStyle = font.italic ? "italic" : "normal";
     const fontFamily = font.loadedName ? `"${font.loadedName}", ` : "";
     const fallbackName = font.fallbackName || "Helvetica, sans-serif";
@@ -9983,11 +10013,27 @@ class FileAttachmentAnnotationElement extends AnnotationElement {
 
 class AnnotationLayer {
   static render(parameters) {
+    const sortedAnnotations = [],
+          popupAnnotations = [];
+
     for (const data of parameters.annotations) {
       if (!data) {
         continue;
       }
 
+      if (data.annotationType === _util.AnnotationType.POPUP) {
+        popupAnnotations.push(data);
+        continue;
+      }
+
+      sortedAnnotations.push(data);
+    }
+
+    if (popupAnnotations.length) {
+      sortedAnnotations.push(...popupAnnotations);
+    }
+
+    for (const data of sortedAnnotations) {
       const element = AnnotationElementFactory.create({
         data,
         layer: parameters.div,

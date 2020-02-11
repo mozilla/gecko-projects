@@ -195,7 +195,7 @@
     <key id="key_paste"
          data-l10n-id="text-action-paste-shortcut"
          modifiers="accel"/>
-    <key id="key_delete" keycode="VK_DELETE" command="cmd_delete"/>
+    <key id="key_delete" keycode="VK_DELETE" command="cmd_delete" reserved="false"/>
     <key id="key_selectAll" data-l10n-id="text-action-select-all-shortcut" modifiers="accel"/>
 
     <key keycode="VK_BACK" command="cmd_handleBackspace" reserved="false"/>
@@ -223,9 +223,11 @@
     <key keycode="VK_F11" command="View:FullScreen"/>
 #endif
     <key id="key_toggleReaderMode"
-         data-l10n-id="reader-mode-toggle-shortcut"
          command="View:ReaderView"
-#ifndef XP_WIN
+#ifdef XP_WIN
+         data-l10n-id="reader-mode-toggle-shortcut-windows"
+#else
+         data-l10n-id="reader-mode-toggle-shortcut-other"
          modifiers="accel,alt"
 #endif
          disabled="true"/>

@@ -44,6 +44,7 @@
 #include "mozilla/dom/VisualViewport.h"
 #include "mozilla/dom/WindowProxyHolder.h"
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/Result.h"
 #if defined(MOZ_WIDGET_ANDROID)
 #  include "mozilla/dom/WindowOrientationObserver.h"
 #endif
@@ -2395,9 +2396,6 @@ bool nsGlobalWindowInner::CrossOriginIsolated() const {
   if (!cc ||
       !StringBeginsWith(cc->GetRemoteType(),
                         NS_LITERAL_STRING(WITH_COOP_COEP_REMOTE_TYPE_PREFIX))) {
-#if !defined(ANDROID)
-    MOZ_DIAGNOSTIC_ASSERT(false, "COOP+COEP not in webCOOP+COEP process");
-#endif
     return false;
   }
 
@@ -2560,9 +2558,9 @@ void nsGlobalWindowInner::HintIsLoading(bool aIsLoading) {
   // Hint to tell the JS GC to use modified triggers during pageload.
   if (mHintedWasLoading != aIsLoading) {
     using namespace js::gc;
-    SetPerformanceHint(
-        danger::GetJSContext(),
-        aIsLoading ? PerformanceHint::InPageLoad : PerformanceHint::Normal);
+    SetPerformanceHint(danger::GetJSContext(), aIsLoading
+                                                   ? PerformanceHint::InPageLoad
+                                                   : PerformanceHint::Normal);
     mHintedWasLoading = aIsLoading;
   }
 }
@@ -5439,10 +5437,11 @@ Maybe<ClientState> nsGlobalWindowInner::GetClientState() const {
   MOZ_ASSERT(NS_IsMainThread());
   Maybe<ClientState> clientState;
   if (mClientSource) {
-    ClientState state;
-    nsresult rv = mClientSource->SnapshotState(&state);
-    if (NS_SUCCEEDED(rv)) {
-      clientState.emplace(state);
+    Result<ClientState, ErrorResult> res = mClientSource->SnapshotState();
+    if (res.isOk()) {
+      clientState.emplace(res.unwrap());
+    } else {
+      res.unwrapErr().SuppressException();
     }
   }
   return clientState;
@@ -5889,8 +5888,8 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
   const char* reason = GetTimeoutReasonString(timeout);
 
 #ifdef MOZ_GECKO_PROFILER
+  nsCString str;
   if (profiler_can_accept_markers()) {
-    nsCString str;
     TimeDuration originalInterval = timeout->When() - timeout->SubmitTime();
     str.Append(reason);
     str.Append(" with interval ");
@@ -5899,10 +5898,10 @@ bool nsGlobalWindowInner::RunTimeoutHandler(Timeout* aTimeout,
     nsCString handlerDescription;
     timeout->mScriptHandler->GetDescription(handlerDescription);
     str.Append(handlerDescription);
-    AUTO_PROFILER_TEXT_MARKER_CAUSE("setTimeout callback", str, JS,
-                                    Some(mWindowID),
-                                    timeout->TakeProfilerBacktrace());
   }
+  AUTO_PROFILER_TEXT_MARKER_CAUSE("setTimeout callback", str, JS,
+                                  Some(mWindowID),
+                                  timeout->TakeProfilerBacktrace());
 #endif
 
   bool abortIntervalHandler;

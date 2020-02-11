@@ -111,9 +111,9 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   mozilla::Maybe<EitherParser> ep_ = {};
   BCEParserHandle* parser = nullptr;
 
-  ParseInfo& parseInfo;
+  CompilationInfo& compilationInfo;
 
-  // First line and column, for JSScript::initFromEmitter.
+  // First line and column, for JSScript::fullyInitFromStencil.
   unsigned firstLine = 0;
   unsigned firstColumn = 0;
 
@@ -186,7 +186,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   BytecodeEmitter(
       BytecodeEmitter* parent, SharedContext* sc, JS::Handle<JSScript*> script,
       JS::Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
-      ParseInfo& parseInfo, EmitterMode emitterMode,
+      CompilationInfo& compilationInfo, EmitterMode emitterMode,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid());
 
   void initFromBodyPosition(TokenPos bodyPosition);
@@ -204,14 +204,14 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   BytecodeEmitter(
       BytecodeEmitter* parent, BCEParserHandle* parser, SharedContext* sc,
       JS::Handle<JSScript*> script, JS::Handle<LazyScript*> lazyScript,
-      uint32_t line, uint32_t column, ParseInfo& parseInfo,
+      uint32_t line, uint32_t column, CompilationInfo& compilationInfo,
       EmitterMode emitterMode = Normal,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid());
 
   BytecodeEmitter(
       BytecodeEmitter* parent, const EitherParser& parser, SharedContext* sc,
       JS::Handle<JSScript*> script, JS::Handle<LazyScript*> lazyScript,
-      uint32_t line, uint32_t column, ParseInfo& parseInfo,
+      uint32_t line, uint32_t column, CompilationInfo& compilationInfo,
       EmitterMode emitterMode = Normal,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid());
 
@@ -220,10 +220,10 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
       BytecodeEmitter* parent, Parser<FullParseHandler, Unit>* parser,
       SharedContext* sc, JS::Handle<JSScript*> script,
       JS::Handle<LazyScript*> lazyScript, uint32_t line, uint32_t column,
-      ParseInfo& parseInfo, EmitterMode emitterMode = Normal,
+      CompilationInfo& compilationInfo, EmitterMode emitterMode = Normal,
       FieldInitializers fieldInitializers = FieldInitializers::Invalid())
       : BytecodeEmitter(parent, EitherParser(parser), sc, script, lazyScript,
-                        line, column, parseInfo, emitterMode,
+                        line, column, compilationInfo, emitterMode,
                         fieldInitializers) {}
 
   MOZ_MUST_USE bool init();
@@ -376,6 +376,10 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   // Emit global, eval, or module code for tree rooted at body. Always
   // encompasses the entire source.
   MOZ_MUST_USE bool emitScript(ParseNode* body);
+
+  // Calculate the `nslots` value for BCEScriptStencil constructor parameter.
+  // Fails if it overflows.
+  MOZ_MUST_USE bool getNslots(uint32_t* nslots);
 
   // Emit function code for the tree rooted at body.
   enum class TopLevelFunction { No, Yes };

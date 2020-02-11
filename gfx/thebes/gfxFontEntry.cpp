@@ -1234,9 +1234,12 @@ void gfxFontEntry::SetupVariationRanges() {
               SlantStyle().Min()) {
             mStandardFace = false;
           }
+          // OpenType and CSS measure angles in opposite directions, so we
+          // have to flip signs and swap min/max when setting up the CSS
+          // font-style range here.
           mStyleRange =
-              SlantStyleRange(FontSlantStyle::Oblique(axis.mMinValue),
-                              FontSlantStyle::Oblique(axis.mMaxValue));
+              SlantStyleRange(FontSlantStyle::Oblique(-axis.mMaxValue),
+                              FontSlantStyle::Oblique(-axis.mMinValue));
         }
         break;
 
@@ -1356,7 +1359,9 @@ void gfxFontEntry::GetVariationsForStyle(nsTArray<gfxFontVariation>& aResult,
     if (!(IsUserFont() && (mRangeFlags & RangeFlags::eAutoSlantStyle))) {
       angle = SlantStyle().Clamp(FontSlantStyle::Oblique(angle)).ObliqueAngle();
     }
-    aResult.AppendElement(gfxFontVariation{HB_TAG('s', 'l', 'n', 't'), angle});
+    // OpenType and CSS measure angles in opposite directions, so we have to
+    // invert the sign of the CSS oblique value when setting OpenType 'slnt'.
+    aResult.AppendElement(gfxFontVariation{HB_TAG('s', 'l', 'n', 't'), -angle});
   }
 
   auto replaceOrAppend = [&aResult](const gfxFontVariation& aSetting) {
@@ -1736,12 +1741,12 @@ void gfxFontFamily::FindFontForChar(GlobalFontMatch* aMatchData) {
   }
 
 #ifdef MOZ_GECKO_PROFILER
+  nsCString charAndName;
   if (profiler_can_accept_markers()) {
-    nsCString charAndName =
-        nsPrintfCString("\\u%x %s", aMatchData->mCh, mName.get());
-    AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING("gfxFontFamily::FindFontForChar",
-                                          LAYOUT, charAndName);
+    charAndName = nsPrintfCString("\\u%x %s", aMatchData->mCh, mName.get());
   }
+  AUTO_PROFILER_LABEL_DYNAMIC_NSCSTRING("gfxFontFamily::FindFontForChar",
+                                        LAYOUT, charAndName);
 #endif
 
   AutoTArray<gfxFontEntry*, 4> entries;

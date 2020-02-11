@@ -480,6 +480,42 @@ browser.usage:
       - 'main'
       - 'content'
 
+gecko:
+  version:
+    bug_numbers:
+      - 1611240
+    description: >
+      The version of the Gecko engine, example: '74.0a1'.
+      It consists of the major and minor version, followed by the release life cycle phase.
+      'a' stands for alpha or nightly, 'b' stands for beta.
+      The number behind the release life cycle phase indicates minor releases within the phase.
+    expires: never
+    kind: string
+    notification_emails:
+      - gfx-telemetry-alerts@mozilla.com
+      - ktaeleman@mozilla.com
+    products:
+      - 'geckoview_streaming'
+    record_in_processes:
+      - 'main'
+    release_channel_collection: opt-out
+  build_id:
+    bug_numbers:
+      - 1611240
+    description: >
+      The build id of the Gecko engine, example: '20200205124310'.
+      It contains the time the build was created and is used as a unique id for the build.
+    expires: never
+    kind: string
+    notification_emails:
+      - gfx-telemetry-alerts@mozilla.com
+      - ktaeleman@mozilla.com
+    products:
+      - 'geckoview_streaming'
+    record_in_processes:
+      - 'main'
+    release_channel_collection: opt-out
+
 extensions.updates:
   rdf:
     bug_numbers:
@@ -3212,6 +3248,25 @@ screenshots:
     record_in_processes:
       - 'main'
 
+# The following section is for quotaManager.
+qm:
+  repositories_initialization_time:
+    bug_numbers:
+      - 1609625
+    description: >
+      A temporary probe to track the time for initializing the best-effort
+      repositories especially the longest the time.
+    expires: "76"
+    kind: uint
+    notification_emails:
+      - ttung@mozilla.com
+      - storage-telemetry@mozilla.com
+    release_channel_collection: opt-out
+    products:
+      - 'firefox'
+    record_in_processes:
+      - 'main'
+
 # The following section is for tracking the number of failure for indexedDB.
 idb.failure:
   fileinfo_error:
@@ -4947,7 +5002,7 @@ firstStartup:
       - 1515712
     description: >-
       Status of the FirstRun service, which runs post-install/early-startup in Firefox.
-    expires: "75"
+    expires: "80"
     kind: uint
     notification_emails:
       - rhelmer@mozilla.com
@@ -4962,7 +5017,7 @@ firstStartup:
       - 1515712
     description: >-
       Number of milliseconds the FirstRun service took to run.
-    expires: "75"
+    expires: "80"
     kind: uint
     notification_emails:
       - rhelmer@mozilla.com
@@ -5586,14 +5641,14 @@ telemetry.test:
       - 'main'
       - 'sync'
 
-# The following section contains counters for corruption of internal JAR and XPI files.
+# The following section contains counters for corruption of internal omni jar files.
 corroborate:
   omnijar_corrupted:
     bug_numbers:
       - 1515712
     description: >-
           Whether the omni jar (omni.ja) was found to be missing or corrupt when checked during startup.
-    expires: "71"
+    expires: "80"
     kind: boolean
     notification_emails:
       - rhelmer@mozilla.com
@@ -5605,12 +5660,12 @@ corroborate:
     record_in_processes:
       - main
 
-  system_addons_corrupted:
+  omnijar_mismatch:
     bug_numbers:
-      - 1515712
+      - 1608308
     description: >-
-      Whether any system add-on (XPI files) were found to be missing or corrupt when checked during startup.
-    expires: "71"
+          Whether the build IDs of the omni jar (omni.ja) and libxul do not match.
+    expires: "80"
     kind: boolean
     notification_emails:
       - rhelmer@mozilla.com

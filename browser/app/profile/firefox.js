@@ -317,28 +317,34 @@ pref("browser.urlbar.openintab", false);
 pref("browser.urlbar.usepreloadedtopurls.enabled", false);
 pref("browser.urlbar.usepreloadedtopurls.expire_days", 14);
 
-#ifdef NIGHTLY_BUILD
+#ifdef EARLY_BETA_OR_EARLIER
   // Whether the quantum bar displays design update 1.
   pref("browser.urlbar.update1", true);
+  // If true, we show actionable tips in the Urlbar when the user is searching
+  // for those actions.
+  pref("browser.urlbar.update1.interventions", true);
+  // If true, we do not allow the TAB key to cycle through results when the
+  // Urlbar was focused with the keyboard. Instead, Tab will focus the next
+  // focusable toolbar element after the Urlbar.
+  pref("browser.urlbar.update1.restrictTabAfterKeyboardFocus", true);
+  // If true, we show new users and those about to start an organic search a tip
+  // encouraging them to use the Urlbar.
+  pref("browser.urlbar.update1.searchTips", true);
   // Whether the urlbar should strip https from urls in the view.
   pref("browser.urlbar.update1.view.stripHttps", true);
   pref("browser.urlbar.openViewOnFocus", true);
 #else
   pref("browser.urlbar.update1", false);
+  pref("browser.urlbar.update1.interventions", false);
+  pref("browser.urlbar.update1.restrictTabAfterKeyboardFocus", false);
+  pref("browser.urlbar.update1.searchTips", false);
   pref("browser.urlbar.update1.view.stripHttps", false);
   pref("browser.urlbar.openViewOnFocus", false);
 #endif
+
 // Whether we expand the font size when when the urlbar is
-// focused in design update 1.
-pref("browser.urlbar.update1.expandTextOnFocus", false);
-
-// If true, we show actionable tips in the Urlbar when the user is searching
-// for those actions.
-pref("browser.urlbar.update1.interventions", false);
-
-// If true, we show new users and those about to start an organic search a tip
-// encouraging them to use the Urlbar.
-pref("browser.urlbar.update1.searchTips", false);
+// focused in design update 2.
+pref("browser.urlbar.update2.expandTextOnFocus", false);
 
 pref("browser.urlbar.eventTelemetry.enabled", false);
 
@@ -1300,6 +1306,10 @@ pref("browser.newtabpage.activity-stream.discoverystream.hardcoded-basic-layout"
 pref("browser.newtabpage.activity-stream.discoverystream.spocs-endpoint", "");
 // List of langs that get the 7 row layout.
 pref("browser.newtabpage.activity-stream.discoverystream.lang-layout-config", "en");
+// Switch between different versions of the recommendation provider.
+pref("browser.newtabpage.activity-stream.discoverystream.personalization.version", 1);
+// Configurable keys used by personalization version 2.
+pref("browser.newtabpage.activity-stream.discoverystream.personalization.modelKeys", "nb_model_business, nb_model_career, nb_model_education, nb_model_entertainment, nb_model_environment, nb_model_food, nb_model_gaming, nb_model_health_fitness, nb_model_parenting, nb_model_personal_finance, nb_model_politics, nb_model_science, nb_model_self_improvement, nb_model_sports, nb_model_technology, nb_model_travel");
 
 // The pref controls if search hand-off is enabled for Activity Stream.
 #ifdef NIGHTLY_BUILD
@@ -1380,28 +1390,6 @@ pref("security.cert_pinning.enforcement_level", 1);
 // If this turns true, Moz*Gesture events are not called stopPropagation()
 // before content.
 pref("dom.debug.propagate_gesture_events_through_content", false);
-
-// All the Geolocation preferences are here.
-//
-#ifndef EARLY_BETA_OR_EARLIER
-  pref("geo.wifi.uri", "https://www.googleapis.com/geolocation/v1/geolocate?key=%GOOGLE_LOCATION_SERVICE_API_KEY%");
-#else
-  // Use MLS on Nightly and early Beta.
-  pref("geo.wifi.uri", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
-#endif
-
-#ifdef XP_MACOSX
-  pref("geo.provider.use_corelocation", true);
-#endif
-
-// Set to false if things are really broken.
-#ifdef XP_WIN
-  pref("geo.provider.ms-windows-location", true);
-#endif
-
-#if defined(MOZ_WIDGET_GTK) && defined(MOZ_GPSD)
-  pref("geo.provider.use_gpsd", true);
-#endif
 
 // CustomizableUI debug logging.
 pref("browser.uiCustomization.debug", false);
@@ -1501,14 +1489,15 @@ pref("media.autoplay.default", 1); // 0=Allowed, 1=Blocked, 5=All Blocked
 
 pref("media.videocontrols.picture-in-picture.enabled", true);
 pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
-// Enable keyboard controls for Picture-in-Picture.
-pref("media.videocontrols.picture-in-picture.keyboard-controls.enabled", true);
 
-// Show the audio toggle for Picture-in-Picture.
 #ifdef NIGHTLY_BUILD
+  // Show the audio toggle for Picture-in-Picture.
   pref("media.videocontrols.picture-in-picture.audio-toggle.enabled", true);
+  // Enable keyboard controls for Picture-in-Picture.
+  pref("media.videocontrols.picture-in-picture.keyboard-controls.enabled", true);
 #else
   pref("media.videocontrols.picture-in-picture.audio-toggle.enabled", false);
+  pref("media.videocontrols.picture-in-picture.keyboard-controls.enabled", false);
 #endif
 
 pref("browser.translation.detectLanguage", false);
@@ -1899,11 +1888,7 @@ pref("identity.fxaccounts.service.sendLoginUrl", "https://send.firefox.com/login
 pref("identity.fxaccounts.service.monitorLoginUrl", "https://monitor.firefox.com/");
 
 // Check bundled omni JARs for corruption.
-#ifdef RELEASE_OR_BETA
-  pref("corroborator.enabled", false);
-#else
-  pref("corroborator.enabled", true);
-#endif
+pref("corroborator.enabled", true);
 
 // Toolbox preferences
 pref("devtools.toolbox.footer.height", 250);
@@ -2163,7 +2148,7 @@ pref("devtools.webconsole.input.autocomplete",true);
 
 // Set to true to eagerly show the results of webconsole terminal evaluations
 // when they don't have side effects.
-#if defined(NIGHTLY_BUILD)
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
   pref("devtools.webconsole.input.eagerEvaluation", true);
 #else
   pref("devtools.webconsole.input.eagerEvaluation", false);

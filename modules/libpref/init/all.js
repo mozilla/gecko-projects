@@ -801,13 +801,13 @@ pref("toolkit.telemetry.debugSlowSql", false);
 // Whether to use the unified telemetry behavior, requires a restart.
 pref("toolkit.telemetry.unified", true);
 // AsyncShutdown delay before crashing in case of shutdown freeze
-#ifndef MOZ_ASAN
+#if !defined(MOZ_ASAN) && !defined(MOZ_TSAN)
   pref("toolkit.asyncshutdown.crash_timeout", 60000); // 1 minute
 #else
-  // MOZ_ASAN builds can be considerably slower. Extending the grace period
+  // ASan and TSan builds can be considerably slower. Extend the grace period
   // of both asyncshutdown and the terminator.
   pref("toolkit.asyncshutdown.crash_timeout", 180000); // 3 minutes
-#endif // MOZ_ASAN
+#endif // !defined(MOZ_ASAN) && !defined(MOZ_TSAN)
 // Extra logging for AsyncShutdown barriers and phases
 pref("toolkit.asyncshutdown.log", false);
 
@@ -2669,14 +2669,6 @@ pref("plugins.favorfallback.rules", "");
   #endif
 #endif
 
-// Whether or not to collect a paired minidump when force-killing a
-// content process.
-#ifdef RELEASE_OR_BETA
-  pref("dom.ipc.tabs.createKillHardCrashReports", false);
-#else
-  pref("dom.ipc.tabs.createKillHardCrashReports", true);
-#endif
-
 pref("dom.ipc.plugins.flash.disable-protected-mode", false);
 
 pref("dom.ipc.plugins.flash.subprocess.crashreporter.enabled", true);
@@ -2686,7 +2678,7 @@ pref("dom.ipc.plugins.reportCrashURL", true);
 pref("dom.ipc.plugins.forcedirect.enabled", true);
 
 // Enable multi by default.
-#if !defined(MOZ_ASAN)
+#if !defined(MOZ_ASAN) && !defined(MOZ_TSAN)
   pref("dom.ipc.processCount", 8);
 #else
   pref("dom.ipc.processCount", 4);
@@ -4030,8 +4022,30 @@ pref("network.psl.onUpdate_notify", false);
   pref("widget.wayland_vsync.enabled", false);
 #endif
 
-// Timeout for outbound network geolocation provider XHR
-pref("geo.wifi.xhr.timeout", 60000);
+// All the Geolocation preferences are here.
+//
+#ifndef EARLY_BETA_OR_EARLIER
+  pref("geo.provider.network.url", "https://www.googleapis.com/geolocation/v1/geolocate?key=%GOOGLE_LOCATION_SERVICE_API_KEY%");
+#else
+  // Use MLS on Nightly and early Beta.
+  pref("geo.provider.network.url", "https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%");
+#endif
+
+// Timeout for outbound network geolocation provider.
+pref("geo.provider.network.timeout", 60000);
+
+#ifdef XP_MACOSX
+  pref("geo.provider.use_corelocation", true);
+#endif
+
+// Set to false if things are really broken.
+#ifdef XP_WIN
+  pref("geo.provider.ms-windows-location", true);
+#endif
+
+#if defined(MOZ_WIDGET_GTK) && defined(MOZ_GPSD)
+  pref("geo.provider.use_gpsd", true);
+#endif
 
 // Enable/Disable the device storage API for content
 pref("device.storage.enabled", false);

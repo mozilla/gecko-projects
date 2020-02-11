@@ -681,11 +681,15 @@ class nsWindow final : public nsBaseWidget {
 
   bool IsMainMenuWindow();
   GtkWidget* ConfigureWaylandPopupWindows();
+  void PauseRemoteRenderer();
   void HideWaylandWindow();
   void HideWaylandTooltips();
   void HideWaylandPopupAndAllChildren();
   void CleanupWaylandPopups();
   GtkWindow* GetCurrentTopmostWindow();
+  GtkWindow* GetCurrentWindow();
+  GtkWindow* GetTopmostWindow();
+  bool IsWidgetOverflowWindow();
 
   /**
    * |mIMContext| takes all IME related stuff.
