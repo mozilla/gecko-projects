@@ -107,6 +107,7 @@ PER_PROJECT_PARAMETERS = {
 
     'maple': {
         'target_tasks_method': 'maple_tasks',
+        'release_type': 'beta',
     },
 
     # the default parameters are used for projects that do not match above.
