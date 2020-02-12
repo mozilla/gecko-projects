@@ -278,9 +278,14 @@ class ModuleObject : public NativeObject {
   static bool isInstance(HandleValue value);
 
   static ModuleObject* create(JSContext* cx);
-  void init(HandleScript script);
+
+  // Initialize the slots on this object that are dependent on the script.
+  void initScriptSlots(HandleScript script);
+
   void setInitialEnvironment(
       Handle<ModuleEnvironmentObject*> initialEnvironment);
+
+  void initStatusSlot();
   void initImportExportData(HandleArrayObject requestedModules,
                             HandleArrayObject importEntries,
                             HandleArrayObject localExportEntries,

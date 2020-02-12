@@ -169,15 +169,11 @@ class LoopState {
 };
 using LoopStateStack = Vector<LoopState, 4, JitAllocPolicy>;
 
-class IonBuilder : public MIRGenerator,
-                   public mozilla::LinkedListElement<IonBuilder>,
-                   public RunnableTask {
+class MOZ_STACK_CLASS IonBuilder {
  public:
-  IonBuilder(JSContext* analysisContext, CompileRealm* realm,
-             const JitCompileOptions& options, TempAllocator* temp,
-             MIRGraph* graph, CompilerConstraintList* constraints,
-             BaselineInspector* inspector, CompileInfo* info,
-             const OptimizationInfo* optimizationInfo,
+  IonBuilder(JSContext* analysisContext, MIRGenerator& mirGen,
+             CompileInfo* info, CompilerConstraintList* constraints,
+             BaselineInspector* inspector,
              BaselineFrameInspector* baselineFrame, size_t inliningDepth = 0,
              uint32_t loopDepth = 0);
 
@@ -193,11 +189,6 @@ class IonBuilder : public MIRGenerator,
   mozilla::GenericErrorResult<AbortReason> abort(AbortReason r,
                                                  const char* message, ...)
       MOZ_FORMAT_PRINTF(3, 4);
-
-  void runTask() override;
-
-  // for use when ion compiles are being run offthread.
-  ThreadType threadType() override { return THREAD_TYPE_ION; }
 
  private:
   AbortReasonOr<Ok> traverseBytecode();
@@ -1125,16 +1116,6 @@ class IonBuilder : public MIRGenerator,
   // A builder is inextricably tied to a particular script.
   JSScript* script_;
 
-  // script->hasIonScript() at the start of the compilation. Used to avoid
-  // calling hasIonScript() from background compilation threads.
-  bool scriptHasIonScript_;
-
-  // If off thread compilation is successful, the final code generator is
-  // attached here. Code has been generated, but not linked (there is not yet
-  // an IonScript). This is heap allocated, and must be explicitly destroyed,
-  // performed by FinishOffThreadBuilder().
-  CodeGenerator* backgroundCodegen_;
-
   // Some aborts are actionable (e.g., using an unsupported bytecode). When
   // optimization tracking is enabled, the location and message of the abort
   // are recorded here so they may be propagated to the script's
@@ -1143,24 +1124,13 @@ class IonBuilder : public MIRGenerator,
   jsbytecode* actionableAbortPc_;
   const char* actionableAbortMessage_;
 
-  MRootList* rootList_;
-
  public:
-  void setRootList(MRootList& rootList) {
-    MOZ_ASSERT(!rootList_);
-    rootList_ = &rootList;
-  }
-  void clearForBackEnd();
+  using ObjectGroupVector = Vector<ObjectGroup*, 0, JitAllocPolicy>;
+
   void checkNurseryCell(gc::Cell* cell);
   JSObject* checkNurseryObject(JSObject* obj);
 
   JSScript* script() const { return script_; }
-  bool scriptHasIonScript() const { return scriptHasIonScript_; }
-
-  CodeGenerator* backgroundCodegen() const { return backgroundCodegen_; }
-  void setBackgroundCodegen(CodeGenerator* codegen) {
-    backgroundCodegen_ = codegen;
-  }
 
   TIOracle& tiOracle() { return tiOracle_; }
 
@@ -1185,8 +1155,6 @@ class IonBuilder : public MIRGenerator,
     *abortMessage = actionableAbortMessage_;
   }
 
-  void trace(JSTracer* trc);
-
  private:
   AbortReasonOr<Ok> init();
 
@@ -1196,7 +1164,14 @@ class IonBuilder : public MIRGenerator,
   // Constraints for recording dependencies on type information.
   CompilerConstraintList* constraints_;
 
+  MIRGenerator& mirGen_;
   TIOracle tiOracle_;
+
+  CompileRealm* realm;
+  const CompileInfo* info_;
+  const OptimizationInfo* optimizationInfo_;
+  TempAllocator* alloc_;
+  MIRGraph* graph_;
 
   TemporaryTypeSet* thisTypes;
   TemporaryTypeSet* argTypes;
@@ -1213,15 +1188,17 @@ class IonBuilder : public MIRGenerator,
 
   uint32_t loopDepth_;
 
-  mozilla::Maybe<PendingEdgesMap> pendingEdges_;
+  PendingEdgesMap pendingEdges_;
   LoopStateStack loopStack_;
 
   Vector<BytecodeSite*, 0, JitAllocPolicy> trackedOptimizationSites_;
 
+  ObjectGroupVector abortedPreliminaryGroups_;
+
   BytecodeSite* bytecodeSite(jsbytecode* pc) {
     MOZ_ASSERT(info().inlineScriptTree()->script()->containsPC(pc));
     // See comment in maybeTrackedOptimizationSite.
-    if (isOptimizationTrackingEnabled()) {
+    if (mirGen_.isOptimizationTrackingEnabled()) {
       if (BytecodeSite* site = maybeTrackedOptimizationSite(pc)) {
         return site;
       }
@@ -1334,6 +1311,15 @@ class IonBuilder : public MIRGenerator,
   // Used in tracking outcomes of optimization strategies for devtools.
   void startTrackingOptimizations();
 
+  void addAbortedPreliminaryGroup(ObjectGroup* group);
+
+  MIRGraph& graph() { return *graph_; }
+  const CompileInfo& info() const { return *info_; }
+
+  const OptimizationInfo& optimizationInfo() const {
+    return *optimizationInfo_;
+  }
+
   // The track* methods below are called often. Do not combine them with the
   // unchecked variants, despite the unchecked variants having no other
   // callers.
@@ -1396,10 +1382,14 @@ class IonBuilder : public MIRGenerator,
   void trackInlineSuccessUnchecked(InliningStatus status);
 
  public:
-  bool hasPendingEdgesMap() const { return pendingEdges_.isSome(); }
+  MIRGenerator& mirGen() { return mirGen_; }
+  TempAllocator& alloc() { return *alloc_; }
 
-  // This is only valid for IonBuilders that have moved to background
-  size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+  // When aborting with AbortReason::PreliminaryObjects, all groups with
+  // preliminary objects which haven't been analyzed yet.
+  const ObjectGroupVector& abortedPreliminaryGroups() const {
+    return abortedPreliminaryGroups_;
+  }
 };
 
 class CallInfo {
@@ -1595,6 +1585,50 @@ class CallInfo {
       getArg(i)->setImplicitlyUsedUnchecked();
     }
   }
+};
+
+// IonCompileTask represents a single off-thread Ion compilation task.
+class IonCompileTask final : public RunnableTask,
+                             public mozilla::LinkedListElement<IonCompileTask> {
+  MIRGenerator& mirGen_;
+
+  // If off thread compilation is successful, the final code generator is
+  // attached here. Code has been generated, but not linked (there is not yet
+  // an IonScript). This is heap allocated, and must be explicitly destroyed,
+  // performed by FinishOffThreadTask().
+  CodeGenerator* backgroundCodegen_ = nullptr;
+
+  CompilerConstraintList* constraints_ = nullptr;
+  MRootList* rootList_ = nullptr;
+
+  // script->hasIonScript() at the start of the compilation. Used to avoid
+  // calling hasIonScript() from background compilation threads.
+  bool scriptHasIonScript_;
+
+ public:
+  explicit IonCompileTask(MIRGenerator& mirGen, bool scriptHasIonScript,
+                          CompilerConstraintList* constraints);
+
+  JSScript* script() { return mirGen_.outerInfo().script(); }
+  MIRGenerator& mirGen() { return mirGen_; }
+  TempAllocator& alloc() { return mirGen_.alloc(); }
+  bool scriptHasIonScript() const { return scriptHasIonScript_; }
+  CompilerConstraintList* constraints() { return constraints_; }
+
+  size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf);
+  void trace(JSTracer* trc);
+
+  void setRootList(MRootList& rootList) {
+    MOZ_ASSERT(!rootList_);
+    rootList_ = &rootList;
+  }
+  CodeGenerator* backgroundCodegen() const { return backgroundCodegen_; }
+  void setBackgroundCodegen(CodeGenerator* codegen) {
+    backgroundCodegen_ = codegen;
+  }
+
+  ThreadType threadType() override { return THREAD_TYPE_ION; }
+  void runTask() override;
 };
 
 }  // namespace jit

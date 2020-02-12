@@ -964,8 +964,8 @@ XDRResult ImmutableScriptData::XDR(XDRState<mode>* xdr, HandleScript script) {
   MOZ_TRY(xdr->codeUint16(&isd->funLength));
   MOZ_TRY(xdr->codeUint16(&isd->numBytecodeTypeSets));
 
-  JS_STATIC_ASSERT(sizeof(jsbytecode) == 1);
-  JS_STATIC_ASSERT(sizeof(jssrcnote) == 1);
+  static_assert(sizeof(jsbytecode) == 1);
+  static_assert(sizeof(jssrcnote) == 1);
 
   jsbytecode* code = isd->code();
   jssrcnote* notes = isd->notes();
@@ -5638,7 +5638,7 @@ LazyScript* LazyScript::CreateForXDR(
 void JSScript::updateJitCodeRaw(JSRuntime* rt) {
   MOZ_ASSERT(rt);
   uint8_t* jitCodeSkipArgCheck;
-  if (hasBaselineScript() && baselineScript()->hasPendingIonBuilder()) {
+  if (hasBaselineScript() && baselineScript()->hasPendingIonCompileTask()) {
     MOZ_ASSERT(!isIonCompilingOffThread());
     jitCodeRaw_ = rt->jitRuntime()->lazyLinkStub().value;
     jitCodeSkipArgCheck = jitCodeRaw_;

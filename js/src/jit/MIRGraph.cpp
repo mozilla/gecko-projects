@@ -23,12 +23,11 @@ MIRGenerator::MIRGenerator(CompileRealm* realm,
                            const OptimizationInfo* optimizationInfo)
     : realm(realm),
       runtime(realm ? realm->runtime() : nullptr),
-      info_(info),
+      outerInfo_(info),
       optimizationInfo_(optimizationInfo),
       alloc_(alloc),
       graph_(graph),
       offThreadStatus_(Ok()),
-      abortedPreliminaryGroups_(*alloc_),
       cancelBuild_(false),
       wasmMaxStackArgBytes_(0),
       needsOverrecursedCheck_(false),
@@ -40,7 +39,11 @@ MIRGenerator::MIRGenerator(CompileRealm* realm,
                                    : false),
       minWasmHeapLength_(0),
       options(options),
-      gs_(alloc) {}
+      gs_(alloc) {
+  isOptimizationTrackingEnabled_ = !JitOptions.disableOptimizationTracking &&
+                                   isProfilerInstrumentationEnabled() &&
+                                   !outerInfo().isAnalysis();
+}
 
 mozilla::GenericErrorResult<AbortReason> MIRGenerator::abort(AbortReason r) {
   if (JitSpewEnabled(JitSpew_IonAbort)) {
@@ -81,18 +84,6 @@ mozilla::GenericErrorResult<AbortReason> MIRGenerator::abort(
   auto forward = abortFmt(r, message, ap);
   va_end(ap);
   return forward;
-}
-
-void MIRGenerator::addAbortedPreliminaryGroup(ObjectGroup* group) {
-  for (size_t i = 0; i < abortedPreliminaryGroups_.length(); i++) {
-    if (group == abortedPreliminaryGroups_[i]) {
-      return;
-    }
-  }
-  AutoEnterOOMUnsafeRegion oomUnsafe;
-  if (!abortedPreliminaryGroups_.append(group)) {
-    oomUnsafe.crash("addAbortedPreliminaryGroup");
-  }
 }
 
 void MIRGraph::addBlock(MBasicBlock* block) {

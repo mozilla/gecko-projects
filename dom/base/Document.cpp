@@ -3210,24 +3210,20 @@ nsresult Document::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
     // the checks for type_subdoc or type_object happen within
     // CheckFrameOptions.
     if (!FramingChecker::CheckFrameOptions(aChannel, mCSP)) {
-      // Bug 1601887: Display error page but still fire onload
-      // event in case x-frame-options blocks a load.
-      // After Bug 1601887 the about:blank load here should disappear
-      // and we should cancel the channel by using
-      // aChannel->Cancel(NS_ERROR_XFO_VIOLATION) which then displays
-      // the error page.
-      aChannel->Cancel(NS_BINDING_ABORTED);
-      if (docShell) {
-        nsCOMPtr<nsIWebNavigation> webNav(do_QueryObject(docShell));
-        if (webNav) {
-          RefPtr<NullPrincipal> principal =
-              NullPrincipal::CreateWithInheritedAttributes(
-                  loadInfo->TriggeringPrincipal());
-          LoadURIOptions loadURIOptions;
-          loadURIOptions.mTriggeringPrincipal = principal;
-          webNav->LoadURI(NS_LITERAL_STRING("about:blank"), loadURIOptions);
-        }
-      }
+      // stop!  ERROR page!
+      // But before we have to reset the principal of the document
+      // because the onload() event fires before the error page
+      // is displayed and we do not want the enclosing document
+      // to access the contentDocument.
+      RefPtr<NullPrincipal> nullPrincipal =
+          NullPrincipal::CreateWithInheritedAttributes(NodePrincipal());
+      // Before calling SetPrincipals() we should ensure that mFontFaceSet
+      // and also GetInnerWindow() is still null at this point, before
+      // we can fix Bug 1614735: Evaluate calls to SetPrincipal
+      // within Document.cpp
+      MOZ_ASSERT(!mFontFaceSet && !GetInnerWindow());
+      SetPrincipals(nullPrincipal, nullPrincipal);
+      aChannel->Cancel(NS_ERROR_XFO_VIOLATION);
     }
   }
 
@@ -7344,6 +7340,12 @@ void Document::EndLoad() {
     mParser = nullptr;
   }
 
+  // Update the attributes on the PerformanceNavigationTiming before notifying
+  // the onload observers.
+  if (nsPIDOMWindowInner* window = GetInnerWindow()) {
+    window->QueuePerformanceNavigationTiming();
+  }
+
   NS_DOCUMENT_NOTIFY_OBSERVERS(EndLoad, (this));
 
   // Part 2: Code that only executes when this EndLoad matches a BeginLoad.
@@ -7983,7 +7985,7 @@ already_AddRefed<nsINode> Document::ImportNode(nsINode& aNode, bool aDeep,
     case CDATA_SECTION_NODE:
     case COMMENT_NODE:
     case DOCUMENT_TYPE_NODE: {
-      return imported->Clone(aDeep, mNodeInfoManager, nullptr, rv);
+      return imported->Clone(aDeep, mNodeInfoManager, rv);
     }
     default: {
       NS_WARNING("Don't know how to clone this nodetype for importNode.");
@@ -9360,41 +9362,16 @@ nsINode* Document::AdoptNode(nsINode& aAdoptedNode, ErrorResult& rv) {
     }
   }
 
-  nsCOMArray<nsINode> nodesWithProperties;
-  adoptedNode->Adopt(sameDocument ? nullptr : mNodeInfoManager, newScope,
-                     nodesWithProperties, rv);
+  adoptedNode->Adopt(sameDocument ? nullptr : mNodeInfoManager, newScope, rv);
   if (rv.Failed()) {
     // Disconnect all nodes from their parents, since some have the old document
     // as their ownerDocument and some have this as their ownerDocument.
     nsDOMAttributeMap::BlastSubtreeToPieces(adoptedNode);
-
-    if (!sameDocument && oldDocument) {
-      for (nsINode* node : nodesWithProperties) {
-        // Remove all properties.
-        oldDocument->PropertyTable().RemoveAllPropertiesFor(node);
-      }
-    }
-
     return nullptr;
   }
 
-  if (!sameDocument && oldDocument) {
-    nsPropertyTable& oldTable = oldDocument->PropertyTable();
-    nsPropertyTable& newTable = PropertyTable();
-    for (nsINode* node : nodesWithProperties) {
-      rv = oldTable.TransferOrRemoveAllPropertiesFor(node, newTable);
-    }
-
-    if (rv.Failed()) {
-      // Disconnect all nodes from their parents.
-      nsDOMAttributeMap::BlastSubtreeToPieces(adoptedNode);
-
-      return nullptr;
-    }
-  }
-
-  NS_ASSERTION(adoptedNode->OwnerDoc() == this,
-               "Should still be in the document we just got adopted into");
+  MOZ_ASSERT(adoptedNode->OwnerDoc() == this,
+             "Should still be in the document we just got adopted into");
 
   return adoptedNode;
 }

@@ -502,7 +502,7 @@ void HttpChannelChild::OnStartRequest(
   MOZ_ASSERT(!nsHttpResponseHead(aResponseHead).HasHeader(nsHttp::Set_Cookie));
 
   if (aUseResponseHead && !mCanceled)
-    mResponseHead = new nsHttpResponseHead(aResponseHead);
+    mResponseHead = MakeUnique<nsHttpResponseHead>(aResponseHead);
 
   if (!aSecurityInfoSerialization.IsEmpty()) {
     nsresult rv = NS_DeserializeObject(aSecurityInfoSerialization,
@@ -1068,11 +1068,12 @@ void HttpChannelChild::OnStopRequest(
     profiler_add_network_marker(
         mURI, priority, mChannelId, NetworkLoadType::LOAD_STOP,
         mLastStatusReported, TimeStamp::Now(), mTransferSize, kCacheUnknown,
-        &mTransactionTimings, nullptr, std::move(mSource));
+        mLoadInfo->GetInnerWindowID(), &mTransactionTimings, nullptr,
+        std::move(mSource));
   }
 #endif
 
-  mResponseTrailers = new nsHttpHeaderArray(aResponseTrailers);
+  mResponseTrailers = MakeUnique<nsHttpHeaderArray>(aResponseTrailers);
 
   DoPreOnStopRequest(aChannelStatus);
 
@@ -1371,15 +1372,15 @@ mozilla::ipc::IPCResult HttpChannelChild::RecvDeleteSelf() {
 HttpChannelChild::OverrideRunnable::OverrideRunnable(
     HttpChannelChild* aChannel, HttpChannelChild* aNewChannel,
     InterceptStreamListener* aListener, nsIInputStream* aInput,
-    nsIInterceptedBodyCallback* aCallback, nsAutoPtr<nsHttpResponseHead>& aHead,
-    nsICacheInfoChannel* aCacheInfo)
+    nsIInterceptedBodyCallback* aCallback,
+    UniquePtr<nsHttpResponseHead>&& aHead, nsICacheInfoChannel* aCacheInfo)
     : Runnable("net::HttpChannelChild::OverrideRunnable") {
   mChannel = aChannel;
   mNewChannel = aNewChannel;
   mListener = aListener;
   mInput = aInput;
   mCallback = aCallback;
-  mHead = aHead;
+  mHead = std::move(aHead);
   mSynthesizedCacheInfo = aCacheInfo;
 }
 
@@ -1592,7 +1593,7 @@ nsresult HttpChannelChild::SetupRedirect(nsIURI* uri,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // We won't get OnStartRequest, set cookies here.
-  mResponseHead = new nsHttpResponseHead(*responseHead);
+  mResponseHead = MakeUnique<nsHttpResponseHead>(*responseHead);
 
   bool rewriteToGET = HttpBaseChannel::ShouldRewriteRedirectToGET(
       mResponseHead->Status(), mRequestHead.ParsedMethod());
@@ -1647,10 +1648,11 @@ void HttpChannelChild::Redirect1Begin(
   nsCOMPtr<nsIURI> uri = DeserializeURI(newOriginalURI);
 
   ResourceTimingStructArgsToTimingsStruct(timing, mTransactionTimings);
-  PROFILER_ADD_NETWORK_MARKER(
-      mURI, mPriority, mChannelId, NetworkLoadType::LOAD_REDIRECT,
-      mLastStatusReported, TimeStamp::Now(), 0, kCacheUnknown,
-      &mTransactionTimings, uri, std::move(mSource));
+  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, mChannelId,
+                              NetworkLoadType::LOAD_REDIRECT,
+                              mLastStatusReported, TimeStamp::Now(), 0,
+                              kCacheUnknown, mLoadInfo->GetInnerWindowID(),
+                              &mTransactionTimings, uri, std::move(mSource));
 
   if (!securityInfoSerialization.IsEmpty()) {
     rv = NS_DeserializeObject(securityInfoSerialization,
@@ -2096,10 +2098,10 @@ HttpChannelChild::CompleteRedirectSetup(nsIStreamListener* aListener,
    */
 
   mLastStatusReported = TimeStamp::Now();
-  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, mChannelId,
-                              NetworkLoadType::LOAD_START,
-                              mChannelCreationTimestamp, mLastStatusReported, 0,
-                              kCacheUnknown, nullptr, nullptr);
+  PROFILER_ADD_NETWORK_MARKER(
+      mURI, mPriority, mChannelId, NetworkLoadType::LOAD_START,
+      mChannelCreationTimestamp, mLastStatusReported, 0, kCacheUnknown,
+      mLoadInfo->GetInnerWindowID(), nullptr, nullptr);
   mIsPending = true;
   mWasOpened = true;
   mListener = aListener;
@@ -2164,8 +2166,8 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult aResult) {
 
     Unused << neckoTarget->Dispatch(
         new OverrideRunnable(this, redirectedChannel, streamListener,
-                             mSynthesizedInput, callback, mResponseHead,
-                             mSynthesizedCacheInfo),
+                             mSynthesizedInput, callback,
+                             std::move(mResponseHead), mSynthesizedCacheInfo),
         NS_DISPATCH_NORMAL);
 
     return NS_OK;
@@ -2474,10 +2476,10 @@ nsresult HttpChannelChild::AsyncOpenInternal(nsIStreamListener* aListener) {
   gHttpHandler->OnOpeningRequest(this);
 
   mLastStatusReported = TimeStamp::Now();
-  PROFILER_ADD_NETWORK_MARKER(mURI, mPriority, mChannelId,
-                              NetworkLoadType::LOAD_START,
-                              mChannelCreationTimestamp, mLastStatusReported, 0,
-                              kCacheUnknown, nullptr, nullptr);
+  PROFILER_ADD_NETWORK_MARKER(
+      mURI, mPriority, mChannelId, NetworkLoadType::LOAD_START,
+      mChannelCreationTimestamp, mLastStatusReported, 0, kCacheUnknown,
+      mLoadInfo->GetInnerWindowID(), nullptr, nullptr);
 
   mIsPending = true;
   mWasOpened = true;
@@ -3710,7 +3712,7 @@ void HttpChannelChild::CancelOnMainThread(nsresult aRv) {
 }
 
 void HttpChannelChild::OverrideWithSynthesizedResponse(
-    nsAutoPtr<nsHttpResponseHead>& aResponseHead,
+    UniquePtr<nsHttpResponseHead>& aResponseHead,
     nsIInputStream* aSynthesizedInput,
     nsIInterceptedBodyCallback* aSynthesizedCallback,
     InterceptStreamListener* aStreamListener,
@@ -3739,11 +3741,11 @@ void HttpChannelChild::OverrideWithSynthesizedResponse(
 
   // Intercepted responses should already be decoded.  If its a redirect,
   // however, we want to respect the encoding of the final result instead.
-  if (!nsHttpChannel::WillRedirect(aResponseHead)) {
+  if (!nsHttpChannel::WillRedirect(*aResponseHead)) {
     SetApplyConversion(false);
   }
 
-  mResponseHead = aResponseHead;
+  mResponseHead = std::move(aResponseHead);
   mSynthesizedResponse = true;
 
   mSynthesizedInput = aSynthesizedInput;
@@ -3754,7 +3756,7 @@ void HttpChannelChild::OverrideWithSynthesizedResponse(
     NS_ENSURE_SUCCESS_VOID(rv);
   }
 
-  if (nsHttpChannel::WillRedirect(mResponseHead)) {
+  if (nsHttpChannel::WillRedirect(*mResponseHead)) {
     // Normally we handle redirect limits in the parent process.  The way
     // e10s synthesized redirects work, however, the parent process does not
     // get an accurate redirect count.  Therefore we need to enforce it here.

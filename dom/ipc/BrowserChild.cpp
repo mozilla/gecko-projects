@@ -3401,11 +3401,8 @@ BrowserChild::GetTopLevelViewportVisibleRectInSelfCoords() const {
   }
 
   if (!mChildToParentConversionMatrix) {
-    // There is a case that mChildToParentConversionMatrix hasn't been delivered
-    // since no APZ stuff has happened. In the case we can use mVisibleRect
-    // directly.
-    CSSRect visibleRectCSS = CSSPixel::FromAppUnits(mEffectsInfo.mVisibleRect);
-    return Some(visibleRectCSS * mPuppetWidget->GetDefaultScale());
+    // We have no way to tell this remote document visible rect right now.
+    return Nothing();
   }
 
   Maybe<LayoutDeviceToLayoutDeviceMatrix4x4> inverse =
@@ -4010,7 +4007,8 @@ BrowserChild::DoesWindowSupportProtectedMedia() {
 #endif
 
 void BrowserChild::NotifyContentBlockingEvent(
-    uint32_t aEvent, nsIChannel* aChannel, bool aBlocked, nsIURI* aHintURI,
+    uint32_t aEvent, nsIChannel* aChannel, bool aBlocked,
+    const nsACString& aTrackingOrigin,
     const nsTArray<nsCString>& aTrackingFullHashes,
     const Maybe<mozilla::AntiTrackingCommon::StorageAccessGrantedReason>&
         aReason) {
@@ -4024,8 +4022,9 @@ void BrowserChild::NotifyContentBlockingEvent(
                                             requestData);
   NS_ENSURE_SUCCESS_VOID(rv);
 
-  Unused << SendNotifyContentBlockingEvent(
-      aEvent, requestData, aBlocked, aHintURI, aTrackingFullHashes, aReason);
+  Unused << SendNotifyContentBlockingEvent(aEvent, requestData, aBlocked,
+                                           PromiseFlatCString(aTrackingOrigin),
+                                           aTrackingFullHashes, aReason);
 }
 
 BrowserChildMessageManager::BrowserChildMessageManager(

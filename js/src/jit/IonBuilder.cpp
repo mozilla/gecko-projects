@@ -132,73 +132,69 @@ BaselineFrameInspector* jit::NewBaselineFrameInspector(TempAllocator* temp,
   return inspector;
 }
 
-IonBuilder::IonBuilder(JSContext* analysisContext, CompileRealm* realm,
-                       const JitCompileOptions& options, TempAllocator* temp,
-                       MIRGraph* graph, CompilerConstraintList* constraints,
-                       BaselineInspector* inspector, CompileInfo* info,
-                       const OptimizationInfo* optimizationInfo,
+IonBuilder::IonBuilder(JSContext* analysisContext, MIRGenerator& mirGen,
+                       CompileInfo* info, CompilerConstraintList* constraints,
+                       BaselineInspector* inspector,
                        BaselineFrameInspector* baselineFrame,
                        size_t inliningDepth, uint32_t loopDepth)
-    : MIRGenerator(realm, options, temp, graph, info, optimizationInfo),
-      backgroundCodegen_(nullptr),
-      actionableAbortScript_(nullptr),
+    : actionableAbortScript_(nullptr),
       actionableAbortPc_(nullptr),
       actionableAbortMessage_(nullptr),
-      rootList_(nullptr),
       analysisContext(analysisContext),
       baselineFrame_(baselineFrame),
       constraints_(constraints),
+      mirGen_(mirGen),
       tiOracle_(this, constraints),
+      realm(mirGen.realm),
+      info_(info),
+      optimizationInfo_(&mirGen.optimizationInfo()),
+      alloc_(&mirGen.alloc()),
+      graph_(&mirGen.graph()),
       thisTypes(nullptr),
       argTypes(nullptr),
       typeArray(nullptr),
       typeArrayHint(0),
       bytecodeTypeMap(nullptr),
       loopDepth_(loopDepth),
-      loopStack_(*temp),
-      trackedOptimizationSites_(*temp),
+      loopStack_(*alloc_),
+      trackedOptimizationSites_(*alloc_),
+      abortedPreliminaryGroups_(*alloc_),
       lexicalCheck_(nullptr),
       callerResumePoint_(nullptr),
       callerBuilder_(nullptr),
-      iterators_(*temp),
-      loopHeaders_(*temp),
+      iterators_(*alloc_),
+      loopHeaders_(*alloc_),
       inspector(inspector),
       inliningDepth_(inliningDepth),
       inlinedBytecodeLength_(0),
       numLoopRestarts_(0),
-      failedBoundsCheck_(info->script()->failedBoundsCheck()),
-      failedShapeGuard_(info->script()->failedShapeGuard()),
-      failedLexicalCheck_(info->script()->failedLexicalCheck()),
+      failedBoundsCheck_(info_->script()->failedBoundsCheck()),
+      failedShapeGuard_(info_->script()->failedShapeGuard()),
+      failedLexicalCheck_(info_->script()->failedLexicalCheck()),
 #ifdef DEBUG
       hasLazyArguments_(false),
 #endif
       inlineCallInfo_(nullptr),
       maybeFallbackFunctionGetter_(nullptr) {
-  script_ = info->script();
-  scriptHasIonScript_ = script_->hasIonScript();
-  pc = info->startPC();
+  script_ = info_->script();
+  pc = info_->startPC();
 
   // The script must have a JitScript. Compilation requires a BaselineScript
   // too.
   MOZ_ASSERT(script_->hasJitScript());
-  MOZ_ASSERT_IF(!info->isAnalysis(), script_->hasBaselineScript());
+  MOZ_ASSERT_IF(!info_->isAnalysis(), script_->hasBaselineScript());
 
   MOZ_ASSERT(!!analysisContext ==
-             (info->analysisMode() == Analysis_DefiniteProperties));
+             (info_->analysisMode() == Analysis_DefiniteProperties));
   MOZ_ASSERT(script_->numBytecodeTypeSets() < JSScript::MaxBytecodeTypeSets);
 
-  if (!info->isAnalysis()) {
+  if (!info_->isAnalysis()) {
     script()->jitScript()->setIonCompiledOrInlined();
   }
 }
 
-void IonBuilder::clearForBackEnd() {
-  MOZ_ASSERT(!analysisContext);
-  baselineFrame_ = nullptr;
-}
-
 mozilla::GenericErrorResult<AbortReason> IonBuilder::abort(AbortReason r) {
-  auto res = this->MIRGenerator::abort(r);
+  auto res = mirGen_.abort(r);
 #ifdef DEBUG
   JitSpew(JitSpew_IonAbort, "aborted @ %s:%d", script()->filename(),
           PCToLineNumber(script(), pc));
@@ -214,7 +210,7 @@ mozilla::GenericErrorResult<AbortReason> IonBuilder::abort(AbortReason r,
   // Don't call PCToLineNumber in release builds.
   va_list ap;
   va_start(ap, message);
-  auto res = this->MIRGenerator::abortFmt(r, message, ap);
+  auto res = mirGen_.abortFmt(r, message, ap);
   va_end(ap);
 #ifdef DEBUG
   JitSpew(JitSpew_IonAbort, "aborted @ %s:%d", script()->filename(),
@@ -235,7 +231,7 @@ IonBuilder* IonBuilder::outermostBuilder() {
 }
 
 void IonBuilder::trackActionableAbort(const char* message) {
-  if (!isOptimizationTrackingEnabled()) {
+  if (!mirGen_.isOptimizationTrackingEnabled()) {
     return;
   }
 
@@ -1079,8 +1075,6 @@ AbortReasonOr<Ok> IonBuilder::buildInline(IonBuilder* callerBuilder,
     failedLexicalCheck_ = true;
   }
 
-  safeForMinorGC_ = callerBuilder->safeForMinorGC_;
-
   // Generate single entrance block.
   MBasicBlock* entry;
   MOZ_TRY_VAR(entry, newBlock(info().firstStackSlot(), pc));
@@ -1187,15 +1181,15 @@ AbortReasonOr<Ok> IonBuilder::buildInline(IonBuilder* callerBuilder,
   return Ok();
 }
 
-void IonBuilder::runTask() {
+void IonCompileTask::runTask() {
   // This is the entry point when ion compiles are run offthread.
   TraceLoggerThread* logger = TraceLoggerForCurrentThread();
   TraceLoggerEvent event(TraceLogger_AnnotateScripts, script());
   AutoTraceLog logScript(logger, event);
   AutoTraceLog logCompile(logger, TraceLogger_IonCompilation);
 
-  jit::JitContext jctx(realm->runtime(), realm, &alloc());
-  setBackgroundCodegen(jit::CompileBackEnd(this));
+  jit::JitContext jctx(mirGen_.realm->runtime(), mirGen_.realm, &alloc());
+  setBackgroundCodegen(jit::CompileBackEnd(&mirGen_));
 }
 
 void IonBuilder::rewriteParameter(uint32_t slotIdx, MDefinition* param) {
@@ -1668,11 +1662,6 @@ AbortReasonOr<Ok> IonBuilder::traverseBytecode() {
   // See the "Control Flow handling in IonBuilder" comment in IonBuilder.h for
   // more information.
 
-  // IonBuilder's destructor is not called, so make sure pendingEdges_ is not
-  // holding onto malloc memory when we return.
-  pendingEdges_.emplace();
-  auto freeMemory = mozilla::MakeScopeExit([&] { pendingEdges_.reset(); });
-
   MOZ_TRY(startTraversingBlock(current));
 
   const jsbytecode* const codeEnd = script()->codeEnd();
@@ -1785,7 +1774,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_goto(bool* restarted) {
 
 AbortReasonOr<Ok> IonBuilder::addPendingEdge(const PendingEdge& edge,
                                              jsbytecode* target) {
-  PendingEdgesMap::AddPtr p = pendingEdges_->lookupForAdd(target);
+  PendingEdgesMap::AddPtr p = pendingEdges_.lookupForAdd(target);
   if (p) {
     if (!p->value().append(edge)) {
       return abort(AbortReason::Alloc);
@@ -1798,7 +1787,7 @@ AbortReasonOr<Ok> IonBuilder::addPendingEdge(const PendingEdge& edge,
                 "Appending one element should be infallible");
   MOZ_ALWAYS_TRUE(edges.append(edge));
 
-  if (!pendingEdges_->add(p, target, std::move(edges))) {
+  if (!pendingEdges_.add(p, target, std::move(edges))) {
     return abort(AbortReason::Alloc);
   }
   return Ok();
@@ -2660,7 +2649,7 @@ AbortReasonOr<Ok> IonBuilder::restartLoop(MBasicBlock* header) {
   nextpc = GetNextPc(loopHead);
 
   // Remove loop header and dead blocks from pendingBlocks.
-  for (PendingEdgesMap::Range r = pendingEdges_->all(); !r.empty();
+  for (PendingEdgesMap::Range r = pendingEdges_.all(); !r.empty();
        r.popFront()) {
     PendingEdges& blocks = r.front().value();
     for (size_t i = blocks.length(); i > 0; i--) {
@@ -2812,7 +2801,7 @@ AbortReasonOr<Ok> IonBuilder::improveTypesAtTypeOfCompare(MCompare* ins,
   // since there are multiple ways to get an object. That is the reason
   // for the 'trueBranch' test.
   TemporaryTypeSet filter;
-  const JSAtomState& names = runtime->names();
+  const JSAtomState& names = mirGen_.runtime->names();
   if (constant->toString() == TypeName(JSTYPE_UNDEFINED, names)) {
     filter.addType(TypeSet::UndefinedType(), alloc_->lifoAlloc());
     if (typeOf->inputMaybeCallableOrEmulatesUndefined() && trueBranch) {
@@ -3270,14 +3259,14 @@ AbortReasonOr<Ok> IonBuilder::visitTry() {
 }
 
 AbortReasonOr<Ok> IonBuilder::visitJumpTarget(JSOp op) {
-  PendingEdgesMap::Ptr p = pendingEdges_->lookup(pc);
+  PendingEdgesMap::Ptr p = pendingEdges_.lookup(pc);
   if (!p) {
     // No (reachable) jumps so this is just a no-op.
     return Ok();
   }
 
   PendingEdges edges(std::move(p->value()));
-  pendingEdges_->remove(p);
+  pendingEdges_.remove(p);
 
   // Loop-restarts may clear the list rather than remove the map entry entirely.
   // This is to reduce allocator churn since it is likely the list will be
@@ -4282,7 +4271,7 @@ IonBuilder::InliningResult IonBuilder::inlineScriptedCall(CallInfo& callInfo,
   }
 
   // Capture formals in the outer resume point.
-  MOZ_TRY(callInfo.pushCallStack(this, current));
+  MOZ_TRY(callInfo.pushCallStack(&mirGen_, current));
 
   MResumePoint* outerResumePoint =
       MResumePoint::New(alloc(), current, pc, MResumePoint::Outer);
@@ -4329,7 +4318,7 @@ IonBuilder::InliningResult IonBuilder::inlineScriptedCall(CallInfo& callInfo,
     return abort(AbortReason::Alloc);
   }
   CompileInfo* info = lifoAlloc->new_<CompileInfo>(
-      runtime, calleeScript, target, (jsbytecode*)nullptr,
+      mirGen_.runtime, calleeScript, target, (jsbytecode*)nullptr,
       this->info().analysisMode(),
       /* needsArgsObj = */ false, inlineScriptTree);
   if (!info) {
@@ -4340,9 +4329,8 @@ IonBuilder::InliningResult IonBuilder::inlineScriptedCall(CallInfo& callInfo,
   AutoAccumulateReturns aar(graph(), returns);
 
   // Build the graph.
-  IonBuilder inlineBuilder(analysisContext, realm, options, &alloc(), &graph(),
-                           constraints(), &inspector, info, &optimizationInfo(),
-                           nullptr, inliningDepth_ + 1, loopDepth_);
+  IonBuilder inlineBuilder(analysisContext, mirGen_, info, constraints(),
+                           &inspector, nullptr, inliningDepth_ + 1, loopDepth_);
   AbortReasonOr<Ok> result =
       inlineBuilder.buildInline(this, outerResumePoint, callInfo);
   if (result.isErr()) {
@@ -4580,7 +4568,7 @@ IonBuilder::InliningDecision IonBuilder::makeInliningDecision(
 
   // Callee must not be excessively large.
   // This heuristic also applies to the callsite as a whole.
-  bool offThread = options.offThreadCompilationAvailable();
+  bool offThread = mirGen_.options.offThreadCompilationAvailable();
   if (targetScript->length() >
       optimizationInfo().inlineMaxBytecodePerCallSite(offThread)) {
     trackOptimizationOutcome(TrackedOutcome::CantInlineBigCallee);
@@ -4744,7 +4732,7 @@ AbortReasonOr<Ok> IonBuilder::selectInliningTargets(
       // Enforce a maximum inlined bytecode limit at the callsite.
       if (inlineable && target->as<JSFunction>().isInterpreted()) {
         totalSize += target->as<JSFunction>().nonLazyScript()->length();
-        bool offThread = options.offThreadCompilationAvailable();
+        bool offThread = mirGen_.options.offThreadCompilationAvailable();
         if (totalSize >
             optimizationInfo().inlineMaxBytecodePerCallSite(offThread)) {
           inlineable = false;
@@ -4774,7 +4762,7 @@ AbortReasonOr<Ok> IonBuilder::selectInliningTargets(
   // If optimization tracking is turned on and one of the inlineable targets
   // is a native, track the type info of the call. Most native inlinings
   // depend on the types of the arguments and the return value.
-  if (isOptimizationTrackingEnabled()) {
+  if (mirGen_.isOptimizationTrackingEnabled()) {
     for (size_t i = 0; i < targets.length(); i++) {
       if (choiceSet[i] && targets[i].target->as<JSFunction>().isNative()) {
         trackTypeInfo(callInfo);
@@ -5143,7 +5131,7 @@ AbortReasonOr<Ok> IonBuilder::inlineCalls(CallInfo& callInfo,
 
   MBasicBlock* dispatchBlock = current;
   callInfo.setImplicitlyUsedUnchecked();
-  MOZ_TRY(callInfo.pushCallStack(this, dispatchBlock));
+  MOZ_TRY(callInfo.pushCallStack(&mirGen_, dispatchBlock));
 
   // Patch any InlinePropertyTable to only contain functions that are
   // inlineable. The InlinePropertyTable will also be patched at the end to
@@ -5797,7 +5785,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_funcall(uint32_t argc) {
   // Save prior call stack in case we need to resolve during bailout
   // recovery of inner inlined function. This includes the JSFunction and the
   // 'call' native function.
-  MOZ_TRY(callInfo.savePriorCallStack(this, current, argc + 2));
+  MOZ_TRY(callInfo.savePriorCallStack(&mirGen_, current, argc + 2));
 
   // Shimmy the slots down to remove the native 'call' function.
   current->shimmySlots(funcDepth - 1);
@@ -5975,8 +5963,8 @@ bool IonBuilder::ensureArrayPrototypeIteratorNotModified() {
 
   jsid id = SYMBOL_TO_JSID(realm->runtime()->wellKnownSymbols().iterator);
   return propertyIsConstantFunction(obj, id, [](auto* builder, auto* fun) {
-    return IsSelfHostedFunctionWithName(fun,
-                                        builder->runtime->names().ArrayValues);
+    CompileRuntime* runtime = builder->mirGen().runtime;
+    return IsSelfHostedFunctionWithName(fun, runtime->names().ArrayValues);
   });
 }
 
@@ -5986,10 +5974,10 @@ bool IonBuilder::ensureArrayIteratorPrototypeNextNotModified() {
     return false;
   }
 
-  jsid id = NameToId(runtime->names().next);
+  jsid id = NameToId(mirGen_.runtime->names().next);
   return propertyIsConstantFunction(obj, id, [](auto* builder, auto* fun) {
     return IsSelfHostedFunctionWithName(
-        fun, builder->runtime->names().ArrayIteratorNext);
+        fun, builder->mirGen().runtime->names().ArrayIteratorNext);
   });
 }
 
@@ -6178,7 +6166,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_funapplyarguments(uint32_t argc) {
 
   CallInfo callInfo(alloc(), pc, /* constructing = */ false,
                     /* ignoresReturnValue = */ BytecodeIsPopped(pc));
-  MOZ_TRY(callInfo.savePriorCallStack(this, current, 4));
+  MOZ_TRY(callInfo.savePriorCallStack(&mirGen_, current, 4));
 
   // Vp
   MDefinition* vp = current->pop();
@@ -10782,7 +10770,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_getelem_super() {
   MDefinition* receiver = current->pop();
 
 #if defined(JS_CODEGEN_X86)
-  if (instrumentedProfiling()) {
+  if (mirGen_.instrumentedProfiling()) {
     return abort(AbortReason::Disable,
                  "profiling functions with GETELEM_SUPER is disabled on x86");
   }
@@ -12888,7 +12876,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_regexp(RegExpObject* reobj) {
 }
 
 AbortReasonOr<Ok> IonBuilder::jsop_object(JSObject* obj) {
-  if (options.cloneSingletons()) {
+  if (mirGen_.options.cloneSingletons()) {
     MCloneLiteral* clone =
         MCloneLiteral::New(alloc(), constant(ObjectValue(*obj)));
     current->add(clone);
@@ -14252,11 +14240,7 @@ void IonBuilder::checkNurseryCell(gc::Cell* cell) {
   // function or should come from a type set (which has a similar barrier).
   if (cell && IsInsideNursery(cell)) {
     realm->zone()->setMinorGCShouldCancelIonCompilations();
-    IonBuilder* builder = this;
-    while (builder) {
-      builder->setNotSafeForMinorGC();
-      builder = builder->callerBuilder_;
-    }
+    mirGen().setNotSafeForMinorGC();
   }
 }
 
@@ -14311,6 +14295,18 @@ MDefinition* IonBuilder::getCallee() {
   return inlineCallInfo_->fun();
 }
 
+void IonBuilder::addAbortedPreliminaryGroup(ObjectGroup* group) {
+  for (size_t i = 0; i < abortedPreliminaryGroups_.length(); i++) {
+    if (group == abortedPreliminaryGroups_[i]) {
+      return;
+    }
+  }
+  AutoEnterOOMUnsafeRegion oomUnsafe;
+  if (!abortedPreliminaryGroups_.append(group)) {
+    oomUnsafe.crash("addAbortedPreliminaryGroup");
+  }
+}
+
 AbortReasonOr<MDefinition*> IonBuilder::addLexicalCheck(MDefinition* input) {
   MOZ_ASSERT(JSOp(*pc) == JSOp::CheckLexical ||
              JSOp(*pc) == JSOp::CheckAliasedLexical ||
@@ -14352,8 +14348,8 @@ MDefinition* IonBuilder::convertToBoolean(MDefinition* input) {
   return result;
 }
 
-void IonBuilder::trace(JSTracer* trc) {
-  if (!realm->runtime()->runtimeMatches(trc->runtime())) {
+void IonCompileTask::trace(JSTracer* trc) {
+  if (!mirGen_.runtime->runtimeMatches(trc->runtime())) {
     return;
   }
 
@@ -14361,13 +14357,18 @@ void IonBuilder::trace(JSTracer* trc) {
   rootList_->trace(trc);
 }
 
-size_t IonBuilder::sizeOfExcludingThis(
-    mozilla::MallocSizeOf mallocSizeOf) const {
-  // See js::jit::FreeIonBuilder.
-  // The IonBuilder and most of its contents live in the LifoAlloc we point
-  // to. Note that this is only true for background IonBuilders.
+IonCompileTask::IonCompileTask(MIRGenerator& mirGen, bool scriptHasIonScript,
+                               CompilerConstraintList* constraints)
+    : mirGen_(mirGen),
+      constraints_(constraints),
+      scriptHasIonScript_(scriptHasIonScript) {}
 
-  size_t result = alloc_->lifoAlloc()->sizeOfIncludingThis(mallocSizeOf);
+size_t IonCompileTask::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
+  // See js::jit::FreeIonCompileTask.
+  // The IonCompileTask and most of its contents live in the LifoAlloc we point
+  // to.
+
+  size_t result = alloc().lifoAlloc()->sizeOfIncludingThis(mallocSizeOf);
 
   if (backgroundCodegen_) {
     result += mallocSizeOf(backgroundCodegen_);

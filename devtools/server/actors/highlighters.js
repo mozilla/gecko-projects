@@ -10,7 +10,6 @@ const ChromeUtils = require("ChromeUtils");
 const EventEmitter = require("devtools/shared/event-emitter");
 const protocol = require("devtools/shared/protocol");
 const Services = require("Services");
-const ReplayInspector = require("devtools/server/actors/replay/inspector");
 const {
   highlighterSpec,
   customHighlighterSpec,
@@ -453,9 +452,7 @@ exports.HighlighterActor = protocol.ActorClassWithSpec(highlighterSpec, {
     // originalTarget allows access to the "real" element before any retargeting
     // is applied, such as in the case of XBL anonymous elements.  See also
     // https://developer.mozilla.org/docs/XBL/XBL_1.0_Reference/Anonymous_Content#Event_Flow_and_Targeting
-    const node = isReplaying
-      ? ReplayInspector.findEventTarget(event)
-      : event.originalTarget || event.target;
+    const node = event.originalTarget || event.target;
     return this._walker.attachElement(node);
   },
 
@@ -525,7 +522,9 @@ exports.HighlighterActor = protocol.ActorClassWithSpec(highlighterSpec, {
     }
 
     if (this._isPicking) {
-      this._highlighter.hide();
+      if (this._highlighter) {
+        this._highlighter.hide();
+      }
       this._stopPickerListeners();
       this._isPicking = false;
       this._hoveredNode = null;
