@@ -26,7 +26,6 @@ job-defaults:
     fetches:
         toolchain:
             - linux64-clang
-            - linux64-clang-tidy
             - linux64-rust
             - linux64-cbindgen
             - linux64-nasm
@@ -54,7 +53,9 @@ tidy:
         command: >-
             source taskcluster/scripts/misc/source-test-clang-setup.sh &&
             ./mach --log-no-times static-analysis check --outgoing --output $HOME/clang-tidy.json --format json
-
+    fetches:
+        toolchain:
+            - linux64-clang-tidy
     worker:
         artifacts:
             - type: file
@@ -71,6 +72,9 @@ format:
             source taskcluster/scripts/misc/source-test-clang-setup.sh &&
             ./mach --log-no-times clang-format --outgoing --output $HOME/clang-format.json --format json &&
             ./mach --log-no-times clang-format --outgoing --output $HOME/clang-format.diff --format diff
+    fetches:
+        toolchain:
+            - linux64-clang-tidy
     worker:
         artifacts:
             - type: file
@@ -89,7 +93,9 @@ civet:
         command: >-
             source taskcluster/scripts/misc/source-test-clang-setup.sh &&
             ./mach --log-no-times static-analysis check --outgoing --output $HOME/clang-tidy.json --format json
-
+    fetches:
+        toolchain:
+            - linux64-civet-tidy
     worker:
         artifacts:
             - type: file

@@ -93,17 +93,17 @@ win64-clang-tidy:
             - cmake
             - ninja
 
-civet-clang-tidy:
+linux64-civet-tidy:
     index:
-        job-name: civet-clang-tidy
+        job-name: linux64-civet-tidy
     treeherder:
-        symbol: TL(civet-clang-tidy)
+        symbol: TL(linux64-civet-tidy)
     run:
         script: build-clang.sh
         arguments:
-            - 'build/build-clang/clang-tidy-civet.json'
+            - 'build/build-clang/civet-tidy-linux64.json'
         resources:
-            - 'build/build-clang/clang-tidy-civet.json'
+            - 'build/build-clang/civet-tidy-linux64.json'
     fetches:
         toolchain:
             - linux64-binutils
