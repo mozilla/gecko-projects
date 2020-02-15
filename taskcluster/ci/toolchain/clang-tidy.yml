@@ -104,6 +104,8 @@ linux64-civet-tidy:
             - 'build/build-clang/civet-tidy-linux64.json'
         resources:
             - 'build/build-clang/civet-tidy-linux64.json'
+    scopes:
+        - secrets:get:project/civet/github-deploy-key
     fetches:
         toolchain:
             - linux64-binutils
