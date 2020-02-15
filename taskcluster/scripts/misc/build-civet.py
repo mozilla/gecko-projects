@@ -7,6 +7,7 @@ from __future__ import absolute_import
 
 import os
 import sys
+import requests
 import subprocess
 import taskcluster
 
@@ -14,6 +15,17 @@ import taskcluster
 civet_revision = '7ac0d8ae71d3fb2eb4db8d3c173f46a426b0c2c8'
 
 original_path = os.getcwd()
+
+sshkey = None
+if 'TASK_ID' in os.environ:
+	secrets_url = 'http://taskcluster/secrets/v1/secret/project/civet/github-deploy-key'
+	res = requests.get(secrets_url)
+	res.raise_for_status()
+	secret = res.json()
+	sshkey = secret['secret'] if 'secret' in secret else None
+else:
+	secrets = taskcluster.Secrets(taskcluster.optionsFromEnvironment())
+	sshkey = secrets.get('project/civet/github-deploy-key')
 
 os.chdir(os.environ['GECKO_PATH'])
 subprocess.call(['git', 'clone', 'https://github.com/tomrittervg/GSOC2020.git'])
