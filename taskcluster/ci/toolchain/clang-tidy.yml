@@ -99,7 +99,7 @@ linux64-civet-tidy:
     treeherder:
         symbol: TL(linux64-civet-tidy)
     run:
-        script: build-clang.sh
+        script: build-civet.sh
         arguments:
             - 'build/build-clang/civet-tidy-linux64.json'
         resources:
