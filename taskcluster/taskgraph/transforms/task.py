@@ -1895,7 +1895,10 @@ def build_task(config, tasks):
             )
 
         if 'expires-after' not in task:
-            task['expires-after'] = '2 days'
+            if 'civet' in task['label']:
+                task['expires-after'] = '2 days'
+            else:
+                task['expires-after'] = '60 days'
 
         if 'deadline-after' not in task:
             task['deadline-after'] = '1 day'

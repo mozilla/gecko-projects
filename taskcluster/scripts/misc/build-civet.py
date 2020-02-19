@@ -3,7 +3,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, # You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import os
 import sys
@@ -12,26 +12,36 @@ import subprocess
 import taskcluster
 
 # This script is for setting up civet, then building clang.
-civet_revision = '7ac0d8ae71d3fb2eb4db8d3c173f46a426b0c2c8'
+civet_revision = '9def689af50bd35ffd28701b5c392205300bfe89'
 
 original_path = os.getcwd()
 
 sshkey = None
 if 'TASK_ID' in os.environ:
-	secrets_url = 'http://taskcluster/secrets/v1/secret/project/civet/github-deploy-key'
-	res = requests.get(secrets_url)
-	res.raise_for_status()
-	secret = res.json()
-	sshkey = secret['secret'] if 'secret' in secret else None
+    secrets_url = 'http://taskcluster/secrets/v1/secret/project/civet/github-deploy-key'
+    res = requests.get(secrets_url)
+    res.raise_for_status()
+    secret = res.json()
+    sshkey = secret['secret'] if 'secret' in secret else None
 else:
-	secrets = taskcluster.Secrets(taskcluster.optionsFromEnvironment())
-	sshkey = secrets.get('project/civet/github-deploy-key')
+    secrets = taskcluster.Secrets(taskcluster.optionsFromEnvironment())
+    sshkey = secrets.get('project/civet/github-deploy-key')['secret']
+
+key = sshkey['key'].replace("\\n", "\n") + "\n"
+
+f = open('civet-key', 'w')
+f.write(key)
+f.close()
+os.chmod('civet-key', 0o600)
+
+keypath = os.path.join(original_path, 'civet-key')
+keyenv = {'GIT_SSH_COMMAND': 'ssh -o "StrictHostKeyChecking no" -i ' + keypath}
 
 os.chdir(os.environ['GECKO_PATH'])
-subprocess.call(['git', 'clone', 'https://github.com/tomrittervg/GSOC2020.git'])
-os.chdir('GSOC2020')
-subprocess.call(['git', 'checkout', civet_revision])
+subprocess.check_call(['git', 'clone', 'git@github.com:mozilla-services/civet.git'], env=keyenv)
+os.chdir('civet')
+subprocess.check_call(['git', 'checkout', civet_revision])
 os.chdir(original_path)
 
 build_clang = [os.environ['GECKO_PATH'] + '/taskcluster/scripts/misc/build-clang.sh']
-subprocess.call(build_clang + sys.argv[1:])
+subprocess.check_call(build_clang + sys.argv[1:])

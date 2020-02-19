@@ -24,6 +24,7 @@ RUN apt-get update && \
       flex \
       gawk \
       gcc-multilib \
+      git \
       gnupg \
       jq \
       libbz2-dev \
@@ -32,6 +33,7 @@ RUN apt-get update && \
       libtool \
       libucl-dev \
       ninja-build \
+      openssh-client \
       p7zip-full \
       procps \
       python-pip \
