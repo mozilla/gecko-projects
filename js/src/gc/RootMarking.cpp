@@ -303,8 +303,6 @@ void js::gc::GCRuntime::traceRuntimeForMinorGC(JSTracer* trc,
   // the verifier for the last time.
   gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::MARK_ROOTS);
 
-  jit::JitRuntime::TraceJitcodeGlobalTableForMinorGC(trc);
-
   traceRuntimeCommon(trc, TraceRuntime);
 }
 
@@ -480,6 +478,7 @@ void js::gc::GCRuntime::finishRoots() {
   rt->finishPersistentRoots();
 
   rt->finishSelfHosting();
+  selfHostingZoneFrozen = false;
 
   for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
     zone->finishRoots();
@@ -514,7 +513,7 @@ class BufferGrayRootsTracer final : public JS::CallbackTracer {
   bool onStringEdge(JSString** stringp) override {
     return bufferRoot(*stringp);
   }
-  bool onScriptEdge(JSScript** scriptp) override {
+  bool onScriptEdge(js::BaseScript** scriptp) override {
     return bufferRoot(*scriptp);
   }
   bool onSymbolEdge(JS::Symbol** symbolp) override {

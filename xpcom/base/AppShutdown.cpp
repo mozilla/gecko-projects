@@ -16,6 +16,7 @@
 #include "mozilla/CmdLineAndEnvUtils.h"
 #include "mozilla/PoisonIOInterposer.h"
 #include "mozilla/Printf.h"
+#include "mozilla/scache/StartupCache.h"
 #include "mozilla/StartupTimeline.h"
 #include "mozilla/StaticPrefs_toolkit.h"
 #include "mozilla/LateWriteChecks.h"
@@ -125,6 +126,12 @@ void AppShutdown::Init(AppShutdownMode aMode) {
   int32_t lateWriteChecksPref =
       StaticPrefs::toolkit_shutdown_lateWriteChecksStage();
   sLateWriteChecksPhase = GetShutdownPhaseFromPrefValue(lateWriteChecksPref);
+
+  // Very early shutdowns can happen before the startup cache is even
+  // initialized; don't bother initializing it during shutdown.
+  if (auto* cache = scache::StartupCache::GetSingletonNoInit()) {
+    cache->MaybeInitShutdownWrite();
+  }
 }
 
 void AppShutdown::MaybeFastShutdown(ShutdownPhase aPhase) {

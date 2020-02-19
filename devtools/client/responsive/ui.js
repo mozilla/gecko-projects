@@ -15,14 +15,14 @@ const { TargetList } = require("devtools/shared/resources/target-list");
 
 loader.lazyRequireGetter(
   this,
-  "DebuggerClient",
-  "devtools/shared/client/debugger-client",
+  "DevToolsClient",
+  "devtools/shared/client/devtools-client",
   true
 );
 loader.lazyRequireGetter(
   this,
-  "DebuggerServer",
-  "devtools/server/debugger-server",
+  "DevToolsServer",
+  "devtools/server/devtools-server",
   true
 );
 loader.lazyRequireGetter(
@@ -411,7 +411,7 @@ class ResponsiveUI {
     this.toolWindow = null;
     this.swap = null;
 
-    // Close the debugger client used to speak with responsive emulation actor.
+    // Close the devtools client used to speak with responsive emulation actor.
     // The actor handles clearing any overrides itself, so it's not necessary to clear
     // anything on shutdown client side.
     const clientClosed = this.client.close();
@@ -433,9 +433,9 @@ class ResponsiveUI {
   async connectToServer() {
     // The client being instantiated here is separate from the toolbox. It is being used
     // separately and has a life cycle that doesn't correspond to the toolbox.
-    DebuggerServer.init();
-    DebuggerServer.registerAllActors();
-    this.client = new DebuggerClient(DebuggerServer.connectPipe());
+    DevToolsServer.init();
+    DevToolsServer.registerAllActors();
+    this.client = new DevToolsClient(DevToolsServer.connectPipe());
     await this.client.connect();
 
     const targetFront = await this.client.mainRoot.getTab();

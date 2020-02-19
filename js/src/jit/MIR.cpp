@@ -370,9 +370,6 @@ MDefinition* MInstruction::foldsToStore(TempAllocator& alloc) {
     case Opcode::StoreElement:
       value = store->toStoreElement()->value();
       break;
-    case Opcode::StoreUnboxedObjectOrNull:
-      value = store->toStoreUnboxedObjectOrNull()->value();
-      break;
     default:
       MOZ_CRASH("unknown store");
   }
@@ -5068,6 +5065,9 @@ MDefinition* MFunctionEnvironment::foldsTo(TempAllocator& alloc) {
   if (input()->isLambdaArrow()) {
     return input()->toLambdaArrow()->environmentChain();
   }
+  if (input()->isFunctionWithProto()) {
+    return input()->toFunctionWithProto()->environmentChain();
+  }
   return this;
 }
 
@@ -5151,38 +5151,6 @@ MDefinition::AliasType MLoadElement::mightAlias(const MDefinition* def) const {
 }
 
 MDefinition* MLoadElement::foldsTo(TempAllocator& alloc) {
-  if (MDefinition* def = foldsToStore(alloc)) {
-    return def;
-  }
-
-  return this;
-}
-
-MDefinition::AliasType MLoadUnboxedObjectOrNull::mightAlias(
-    const MDefinition* def) const {
-  if (def->isStoreUnboxedObjectOrNull()) {
-    const MStoreUnboxedObjectOrNull* store = def->toStoreUnboxedObjectOrNull();
-    if (store->index() != index()) {
-      if (DefinitelyDifferentValue(store->index(), index())) {
-        return AliasType::NoAlias;
-      }
-      return AliasType::MayAlias;
-    }
-
-    if (store->elements() != elements()) {
-      return AliasType::MayAlias;
-    }
-
-    if (store->offsetAdjustment() != offsetAdjustment()) {
-      return AliasType::MayAlias;
-    }
-
-    return AliasType::MustAlias;
-  }
-  return AliasType::MayAlias;
-}
-
-MDefinition* MLoadUnboxedObjectOrNull::foldsTo(TempAllocator& alloc) {
   if (MDefinition* def = foldsToStore(alloc)) {
     return def;
   }
@@ -5689,6 +5657,34 @@ MDefinition* MIsNullOrUndefined::foldsTo(TempAllocator& alloc) {
   }
 
   return this;
+}
+
+MDefinition* MCheckThis::foldsTo(TempAllocator& alloc) {
+  MDefinition* input = thisValue();
+  if (!input->isBox()) {
+    return this;
+  }
+
+  MDefinition* unboxed = input->getOperand(0);
+  if (unboxed->mightBeMagicType()) {
+    return this;
+  }
+
+  return input;
+}
+
+MDefinition* MCheckThisReinit::foldsTo(TempAllocator& alloc) {
+  MDefinition* input = thisValue();
+  if (!input->isBox()) {
+    return this;
+  }
+
+  MDefinition* unboxed = input->getOperand(0);
+  if (unboxed->type() != MIRType::MagicUninitializedLexical) {
+    return this;
+  }
+
+  return input;
 }
 
 bool jit::ElementAccessIsDenseNative(CompilerConstraintList* constraints,

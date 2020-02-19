@@ -612,8 +612,7 @@ nsresult HTMLEditor::MaybeCollapseSelectionAtFirstEditableNode(
 
     // If the given block does not contain any visible/editable items, we want
     // to skip it and continue our search.
-    bool isEmptyBlock;
-    if (NS_SUCCEEDED(IsEmptyNode(visNode, &isEmptyBlock)) && isEmptyBlock) {
+    if (IsEmptyNode(*visNode)) {
       // Skip the empty block
       pointToPutCaret.Set(visNode);
       DebugOnly<bool> advanced = pointToPutCaret.AdvanceOffset();
@@ -1458,20 +1457,20 @@ HTMLEditor::RebuildDocumentFromSource(const nsAString& aSourceString) {
 }
 
 EditorRawDOMPoint HTMLEditor::GetBetterInsertionPointFor(
-    nsINode& aNodeToInsert, const EditorRawDOMPoint& aPointToInsert) {
+    nsIContent& aContentToInsert, const EditorRawDOMPoint& aPointToInsert) {
   if (NS_WARN_IF(!aPointToInsert.IsSet())) {
     return aPointToInsert;
   }
 
   EditorRawDOMPoint pointToInsert(aPointToInsert.GetNonAnonymousSubtreePoint());
   if (NS_WARN_IF(!pointToInsert.IsSet())) {
-    // Cannot insert aNodeToInsert into this DOM tree.
+    // Cannot insert aContentToInsert into this DOM tree.
     return EditorRawDOMPoint();
   }
 
   // If the node to insert is not a block level element, we can insert it
   // at any point.
-  if (!IsBlockNode(&aNodeToInsert)) {
+  if (!IsBlockNode(&aContentToInsert)) {
     return pointToInsert;
   }
 
@@ -3062,12 +3061,7 @@ nsresult HTMLEditor::DeleteSelectionWithTransaction(
   if (!blockParent) {
     return NS_OK;
   }
-  bool emptyBlockParent;
-  rv = IsEmptyNode(blockParent, &emptyBlockParent);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-  if (emptyBlockParent) {
+  if (IsEmptyNode(*blockParent)) {
     return NS_OK;
   }
 
@@ -3635,37 +3629,36 @@ Element* HTMLEditor::GetEnclosingTable(nsINode* aNode) {
  * Uses EditorBase::JoinNodesWithTransaction() so action is undoable.
  * Should be called within the context of a batch transaction.
  */
-nsresult HTMLEditor::CollapseAdjacentTextNodes(nsRange* aInRange) {
-  NS_ENSURE_TRUE(aInRange, NS_ERROR_NULL_POINTER);
+nsresult HTMLEditor::CollapseAdjacentTextNodes(nsRange& aInRange) {
   AutoTransactionsConserveSelection dontChangeMySelection(*this);
-  nsTArray<nsCOMPtr<nsINode>> textNodes;
-  // we can't actually do anything during iteration, so store the text nodes in
-  // an array don't bother ref counting them because we know we can hold them
-  // for the lifetime of this method
 
-  // build a list of editable text nodes
-  ContentSubtreeIterator subtreeIter;
-  subtreeIter.Init(aInRange);
-  for (; !subtreeIter.IsDone(); subtreeIter.Next()) {
-    nsINode* node = subtreeIter.GetCurrentNode();
-    if (node->NodeType() == nsINode::TEXT_NODE &&
-        IsEditable(node->AsContent())) {
-      textNodes.AppendElement(node);
-    }
+  // we can't actually do anything during iteration, so store the text nodes in
+  // an array first.
+  DOMSubtreeIterator subtreeIter;
+  if (NS_WARN_IF(NS_FAILED(subtreeIter.Init(aInRange)))) {
+    return NS_ERROR_FAILURE;
   }
+  AutoTArray<OwningNonNull<Text>, 8> textNodes;
+  subtreeIter.AppendNodesToArray(
+      +[](nsINode& aNode, void* aSelf) -> bool {
+        return static_cast<HTMLEditor*>(aSelf)->IsEditable(&aNode);
+      },
+      textNodes, this);
 
   // now that I have a list of text nodes, collapse adjacent text nodes
   // NOTE: assumption that JoinNodes keeps the righthand node
   while (textNodes.Length() > 1) {
     // we assume a textNodes entry can't be nullptr
-    nsINode* leftTextNode = textNodes[0];
-    nsINode* rightTextNode = textNodes[1];
+    Text* leftTextNode = textNodes[0];
+    Text* rightTextNode = textNodes[1];
     NS_ASSERTION(leftTextNode && rightTextNode,
                  "left or rightTextNode null in CollapseAdjacentTextNodes");
 
     // get the prev sibling of the right node, and see if its leftTextNode
-    nsCOMPtr<nsINode> prevSibOfRightNode = rightTextNode->GetPreviousSibling();
-    if (prevSibOfRightNode && prevSibOfRightNode == leftTextNode) {
+    nsIContent* previousSiblingOfRightTextNode =
+        rightTextNode->GetPreviousSibling();
+    if (previousSiblingOfRightTextNode &&
+        previousSiblingOfRightTextNode == leftTextNode) {
       nsresult rv = JoinNodesWithTransaction(MOZ_KnownLive(*leftTextNode),
                                              MOZ_KnownLive(*rightTextNode));
       if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -4014,35 +4007,16 @@ bool HTMLEditor::IsEmpty() const {
 }
 
 /**
- * IsEmptyNode() figures out if aNode is an empty node.  A block can have
- * children and still be considered empty, if the children are empty or
- * non-editable.
- */
-nsresult HTMLEditor::IsEmptyNode(nsINode* aNode, bool* outIsEmptyNode,
-                                 bool aSingleBRDoesntCount,
-                                 bool aListOrCellNotEmpty,
-                                 bool aSafeToAskFrames) const {
-  NS_ENSURE_TRUE(aNode && outIsEmptyNode, NS_ERROR_NULL_POINTER);
-  *outIsEmptyNode = true;
-  bool seenBR = false;
-  return IsEmptyNodeImpl(aNode, outIsEmptyNode, aSingleBRDoesntCount,
-                         aListOrCellNotEmpty, aSafeToAskFrames, &seenBR);
-}
-
-/**
  * IsEmptyNodeImpl() is workhorse for IsEmptyNode().
  */
-nsresult HTMLEditor::IsEmptyNodeImpl(nsINode* aNode, bool* outIsEmptyNode,
-                                     bool aSingleBRDoesntCount,
-                                     bool aListOrCellNotEmpty,
-                                     bool aSafeToAskFrames,
-                                     bool* aSeenBR) const {
-  NS_ENSURE_TRUE(aNode && outIsEmptyNode && aSeenBR, NS_ERROR_NULL_POINTER);
+bool HTMLEditor::IsEmptyNodeImpl(nsINode& aNode, bool aSingleBRDoesntCount,
+                                 bool aListOrCellNotEmpty,
+                                 bool aSafeToAskFrames, bool* aSeenBR) const {
+  MOZ_ASSERT(aSeenBR);
 
-  if (Text* text = aNode->GetAsText()) {
-    *outIsEmptyNode = aSafeToAskFrames ? !IsInVisibleTextFrames(*text)
-                                       : !IsVisibleTextNode(*text);
-    return NS_OK;
+  if (Text* text = aNode.GetAsText()) {
+    return aSafeToAskFrames ? !IsInVisibleTextFrames(*text)
+                            : !IsVisibleTextNode(*text);
   }
 
   // if it's not a text node (handled above) and it's not a container,
@@ -4051,36 +4025,34 @@ nsresult HTMLEditor::IsEmptyNodeImpl(nsINode* aNode, bool* outIsEmptyNode,
   // anchors are containers, named anchors are "empty" but we don't
   // want to treat them as such.  Also, don't call ListItems or table
   // cells empty if caller desires.  Form Widgets not empty.
-  if (!IsContainer(aNode) ||
-      (HTMLEditUtils::IsNamedAnchor(aNode) ||
-       HTMLEditUtils::IsFormWidget(aNode) ||
-       (aListOrCellNotEmpty && (HTMLEditUtils::IsListItem(aNode) ||
-                                HTMLEditUtils::IsTableCell(aNode))))) {
-    *outIsEmptyNode = false;
-    return NS_OK;
+  if (!IsContainer(&aNode) ||
+      (HTMLEditUtils::IsNamedAnchor(&aNode) ||
+       HTMLEditUtils::IsFormWidget(&aNode) ||
+       (aListOrCellNotEmpty && (HTMLEditUtils::IsListItem(&aNode) ||
+                                HTMLEditUtils::IsTableCell(&aNode))))) {
+    return false;
   }
 
   // need this for later
   bool isListItemOrCell =
-      HTMLEditUtils::IsListItem(aNode) || HTMLEditUtils::IsTableCell(aNode);
+      HTMLEditUtils::IsListItem(&aNode) || HTMLEditUtils::IsTableCell(&aNode);
 
   // loop over children of node. if no children, or all children are either
   // empty text nodes or non-editable, then node qualifies as empty
-  for (nsCOMPtr<nsIContent> child = aNode->GetFirstChild(); child;
+  for (nsCOMPtr<nsIContent> child = aNode.GetFirstChild(); child;
        child = child->GetNextSibling()) {
     // Is the child editable and non-empty?  if so, return false
     if (EditorBase::IsEditable(child)) {
       if (Text* text = child->GetAsText()) {
         // break out if we find we aren't empty
-        *outIsEmptyNode = aSafeToAskFrames ? !IsInVisibleTextFrames(*text)
-                                           : !IsVisibleTextNode(*text);
-        if (!*outIsEmptyNode) {
-          return NS_OK;
+        if (!(aSafeToAskFrames ? !IsInVisibleTextFrames(*text)
+                               : !IsVisibleTextNode(*text))) {
+          return false;
         }
       } else {
         // An editable, non-text node. We need to check its content.
         // Is it the node we are iterating over?
-        if (child == aNode) {
+        if (child == &aNode) {
           break;
         }
 
@@ -4097,33 +4069,27 @@ nsresult HTMLEditor::IsEmptyNodeImpl(nsINode* aNode, bool* outIsEmptyNode,
               if (HTMLEditUtils::IsList(child) ||
                   child->IsHTMLElement(nsGkAtoms::table)) {
                 // break out if we find we aren't empty
-                *outIsEmptyNode = false;
-                return NS_OK;
+                return false;
               }
             } else if (HTMLEditUtils::IsFormWidget(child)) {
               // is it a form widget?
               // break out if we find we aren't empty
-              *outIsEmptyNode = false;
-              return NS_OK;
+              return false;
             }
           }
 
-          bool isEmptyNode = true;
-          nsresult rv =
-              IsEmptyNodeImpl(child, &isEmptyNode, aSingleBRDoesntCount,
-                              aListOrCellNotEmpty, aSafeToAskFrames, aSeenBR);
-          NS_ENSURE_SUCCESS(rv, rv);
-          if (!isEmptyNode) {
+          if (!IsEmptyNodeImpl(*child, aSingleBRDoesntCount,
+                               aListOrCellNotEmpty, aSafeToAskFrames,
+                               aSeenBR)) {
             // otherwise it ain't empty
-            *outIsEmptyNode = false;
-            return NS_OK;
+            return false;
           }
         }
       }
     }
   }
 
-  return NS_OK;
+  return true;
 }
 
 // add to aElement the CSS inline styles corresponding to the HTML attribute
@@ -4538,7 +4504,7 @@ nsresult HTMLEditor::CopyLastEditableChildStylesWithTransaction(
   if (NS_WARN_IF(!brElement)) {
     return NS_ERROR_FAILURE;
   }
-  *aNewBrElement = brElement.forget();
+  *aNewBrElement = std::move(brElement);
   return NS_OK;
 }
 

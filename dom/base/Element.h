@@ -1310,14 +1310,6 @@ class Element : public FragmentOrElement {
       const UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
       ErrorResult& aError);
 
-  // A helper method that factors out the common functionality needed by
-  // Element::Animate and CSSPseudoElement::Animate
-  static already_AddRefed<Animation> Animate(
-      const Nullable<ElementOrCSSPseudoElement>& aTarget, JSContext* aContext,
-      JS::Handle<JSObject*> aKeyframes,
-      const UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
-      ErrorResult& aError);
-
   enum class Flush { Yes, No };
 
   MOZ_CAN_RUN_SCRIPT
@@ -1441,23 +1433,6 @@ class Element : public FragmentOrElement {
     }
 
     return mAttrs.AttrInfoAt(index);
-  }
-
-  /**
-   * Called when we have been adopted, and the information of the
-   * node has been changed.
-   *
-   * The new document can be reached via OwnerDoc().
-   *
-   * If you override this method,
-   * please call up to the parent NodeInfoChanged.
-   *
-   * If you change this, change also the similar method in Link.
-   */
-  virtual void NodeInfoChanged(Document* aOldDoc) {
-#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
-    AssertInvariantsOnNodeInfoChange();
-#endif
   }
 
   /**

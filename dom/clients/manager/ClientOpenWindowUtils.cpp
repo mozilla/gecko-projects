@@ -453,20 +453,20 @@ RefPtr<ClientOpPromise> ClientOpenWindowInCurrentProcess(
 #endif  // MOZ_WIDGET_ANDROID
 
   RefPtr<BrowsingContext> bc;
-  CopyableErrorResult rv;
+  ErrorResult rv;
   OpenWindow(aArgs, getter_AddRefs(bc), rv);
 
   nsCOMPtr<nsPIDOMWindowOuter> outerWindow(bc->GetDOMWindow());
 
   if (NS_WARN_IF(rv.Failed())) {
     promise->Reject(rv, __func__);
-    return promise.forget();
+    return promise;
   }
 
   MOZ_DIAGNOSTIC_ASSERT(outerWindow);
   WaitForLoad(aArgs, outerWindow, promise);
 
-  return promise.forget();
+  return promise;
 }
 
 }  // namespace dom

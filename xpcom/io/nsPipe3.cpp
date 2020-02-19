@@ -62,7 +62,7 @@ enum SegmentChangeResult { SegmentNotChanged, SegmentAdvanceBufferRead };
 // a critical section.
 class nsPipeEvents {
  public:
-  nsPipeEvents() {}
+  nsPipeEvents() = default;
   ~nsPipeEvents();
 
   inline void NotifyInputReady(nsIAsyncInputStream* aStream,
@@ -156,7 +156,7 @@ class nsPipeInputStream final : public nsIAsyncInputStream,
         mCallbackFlags(0),
         mPriority(nsIRunnablePriority::PRIORITY_NORMAL) {}
 
-  explicit nsPipeInputStream(const nsPipeInputStream& aOther)
+  nsPipeInputStream(const nsPipeInputStream& aOther)
       : mPipe(aOther.mPipe),
         mLogicalOffset(aOther.mLogicalOffset),
         mInputStatus(aOther.mInputStatus),
@@ -494,7 +494,7 @@ nsPipe::nsPipe()
   mInputList.AppendElement(mOriginalInput);
 }
 
-nsPipe::~nsPipe() {}
+nsPipe::~nsPipe() = default;
 
 NS_IMPL_ADDREF(nsPipe)
 NS_IMPL_QUERY_INTERFACE(nsPipe, nsIPipe)
@@ -974,8 +974,8 @@ nsresult nsPipe::CloneInputStream(nsPipeInputStream* aOriginal,
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
   RefPtr<nsPipeInputStream> ref = new nsPipeInputStream(*aOriginal);
   mInputList.AppendElement(ref);
-  nsCOMPtr<nsIAsyncInputStream> downcast = ref.forget();
-  downcast.forget(aCloneOut);
+  nsCOMPtr<nsIAsyncInputStream> upcast = std::move(ref);
+  upcast.forget(aCloneOut);
   return NS_OK;
 }
 

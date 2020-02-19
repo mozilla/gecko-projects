@@ -386,17 +386,17 @@ void Selection::SetCaretBidiLevel(const Nullable<int16_t>& aCaretBidiLevel,
 
 /**
  * Test whether the supplied range points to a single table element.
- * Result is one of the TableSelection constants. "None" means
+ * Result is one of the TableSelectionMode constants. "None" means
  * a table element isn't selected.
  */
-// TODO: Figure out TableSelection::Column and TableSelection::AllCells
-static nsresult GetTableSelectionType(nsRange* aRange,
-                                      TableSelection* aTableSelectionType) {
+// TODO: Figure out TableSelectionMode::Column and TableSelectionMode::AllCells
+static nsresult GetTableSelectionType(const nsRange* aRange,
+                                      TableSelectionMode* aTableSelectionType) {
   if (!aRange || !aTableSelectionType) {
     return NS_ERROR_NULL_POINTER;
   }
 
-  *aTableSelectionType = TableSelection::None;
+  *aTableSelectionType = TableSelectionMode::None;
 
   nsINode* startNode = aRange->GetStartContainer();
   if (!startNode) {
@@ -428,14 +428,15 @@ static nsresult GetTableSelectionType(nsRange* aRange,
   }
 
   if (startContent->IsHTMLElement(nsGkAtoms::tr)) {
-    *aTableSelectionType = TableSelection::Cell;
+    *aTableSelectionType = TableSelectionMode::Cell;
   } else  // check to see if we are selecting a table or row (column and all
           // cells not done yet)
   {
-    if (child->IsHTMLElement(nsGkAtoms::table))
-      *aTableSelectionType = TableSelection::Table;
-    else if (child->IsHTMLElement(nsGkAtoms::tr))
-      *aTableSelectionType = TableSelection::Row;
+    if (child->IsHTMLElement(nsGkAtoms::table)) {
+      *aTableSelectionType = TableSelectionMode::Table;
+    } else if (child->IsHTMLElement(nsGkAtoms::tr)) {
+      *aTableSelectionType = TableSelectionMode::Row;
+    }
   }
 
   return NS_OK;
@@ -443,12 +444,13 @@ static nsresult GetTableSelectionType(nsRange* aRange,
 
 // static
 nsresult Selection::GetTableCellLocationFromRange(
-    nsRange* aRange, TableSelection* aSelectionType, int32_t* aRow,
+    const nsRange* aRange, TableSelectionMode* aSelectionType, int32_t* aRow,
     int32_t* aCol) {
-  if (!aRange || !aSelectionType || !aRow || !aCol)
+  if (!aRange || !aSelectionType || !aRow || !aCol) {
     return NS_ERROR_NULL_POINTER;
+  }
 
-  *aSelectionType = TableSelection::None;
+  *aSelectionType = TableSelectionMode::None;
   *aRow = 0;
   *aCol = 0;
 
@@ -457,7 +459,7 @@ nsresult Selection::GetTableCellLocationFromRange(
 
   // Don't fail if range does not point to a single table cell,
   // let aSelectionType tell user if we don't have a cell
-  if (*aSelectionType != TableSelection::Cell) {
+  if (*aSelectionType != TableSelectionMode::Cell) {
     return NS_OK;
   }
 
@@ -495,13 +497,13 @@ nsresult Selection::MaybeAddTableCellRange(nsRange* aRange, bool* aDidAddRange,
 
   // Get if we are adding a cell selection and the row, col of cell if we are
   int32_t newRow, newCol;
-  TableSelection tableMode;
+  TableSelectionMode tableMode;
   result = GetTableCellLocationFromRange(aRange, &tableMode, &newRow, &newCol);
   if (NS_FAILED(result)) return result;
 
   // If not adding a cell range, we are done here
-  if (tableMode != TableSelection::Cell) {
-    mFrameSelection->mSelectingTableCellMode = tableMode;
+  if (tableMode != TableSelectionMode::Cell) {
+    mFrameSelection->mTableSelection.mMode = tableMode;
     // Don't fail if range isn't a selected cell, aDidAddRange tells caller if
     // we didn't proceed
     return NS_OK;
@@ -510,8 +512,9 @@ nsresult Selection::MaybeAddTableCellRange(nsRange* aRange, bool* aDidAddRange,
   // Set frame selection mode only if not already set to a table mode
   // so we don't lose the select row and column flags (not detected by
   // getTableCellLocation)
-  if (mFrameSelection->mSelectingTableCellMode == TableSelection::None)
-    mFrameSelection->mSelectingTableCellMode = tableMode;
+  if (mFrameSelection->mTableSelection.mMode == TableSelectionMode::None) {
+    mFrameSelection->mTableSelection.mMode = tableMode;
+  }
 
   *aDidAddRange = true;
   return AddRangesForSelectableNodes(aRange, aOutIndex);
@@ -1370,7 +1373,7 @@ void Selection::SelectFramesInAllRanges(nsPresContext* aPresContext) {
  * traversing through the frames
  */
 nsresult Selection::SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
-                                 bool aSelect) {
+                                 bool aSelect) const {
   if (!mFrameSelection || !aPresContext || !aPresContext->GetPresShell()) {
     // nothing to do
     return NS_OK;
@@ -1878,10 +1881,12 @@ void Selection::AddRangeAndSelectFramesAndNotifyListeners(nsRange& aRange,
     SetInterlinePosition(true, IgnoreErrors());
   }
 
+  if (!mFrameSelection) {
+    return;  // nothing to do
+  }
+
   RefPtr<nsPresContext> presContext = GetPresContext();
   SelectFrames(presContext, range, true);
-
-  if (!mFrameSelection) return;  // nothing to do
 
   // Be aware, this instance may be destroyed after this call.
   // XXX Why doesn't this call Selection::NotifySelectionListener() directly?
@@ -3106,12 +3111,34 @@ bool Selection::IsBlockingSelectionChangeEvents() const {
 }
 
 void Selection::DeleteFromDocument(ErrorResult& aRv) {
-  if (!mFrameSelection) return;  // nothing to do
-  RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
-  nsresult rv = frameSelection->DeleteFromDocument();
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
+  if (mSelectionType != SelectionType::eNormal) {
+    return;  // Nothing to do.
   }
+
+  // If we're already collapsed, then we do nothing (bug 719503).
+  if (IsCollapsed()) {
+    return;
+  }
+
+  for (uint32_t rangeIdx = 0; rangeIdx < RangeCount(); ++rangeIdx) {
+    RefPtr<nsRange> range = GetRangeAt(rangeIdx);
+    range->DeleteContents(aRv);
+    if (aRv.Failed()) {
+      return;
+    }
+  }
+
+  // Collapse to the new location.
+  // If we deleted one character, then we move back one element.
+  // FIXME  We don't know how to do this past frame boundaries yet.
+  if (AnchorOffset() > 0) {
+    Collapse(GetAnchorNode(), AnchorOffset());
+  }
+#ifdef DEBUG
+  else {
+    printf("Don't know how to set selection back past frame boundary\n");
+  }
+#endif
 }
 
 void Selection::Modify(const nsAString& aAlter, const nsAString& aDirection,

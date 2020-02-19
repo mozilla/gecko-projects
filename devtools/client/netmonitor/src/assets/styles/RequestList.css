@@ -225,6 +225,15 @@
   text-overflow: initial;
 }
 
+.requests-list-status-code.status-code-blocked {
+  /* Improve the icon's vertical alignment by matching the row height. */
+  display: inline-flex;
+  vertical-align: top;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+}
+
 .requests-security-icon-group {
   display: inline-flex;
   vertical-align: top;
@@ -280,15 +289,18 @@
   fill: var(--theme-icon-dimmed-color);
 }
 
+.request-list-item.selected .status-code-blocked,
 .request-list-item.selected .requests-security-state-icon,
 .request-list-item.selected .tracking-resource {
   fill: currentColor;
   stroke: currentColor;
+  color: var(--theme-selection-color);
 }
 
+.theme-dark .request-list-item.selected .status-code-blocked,
 .theme-dark .request-list-item.selected .requests-security-state-icon,
 .theme-dark .request-list-item.selected .tracking-resource {
-  fill: rgba(255, 255, 255, 0.75);
+  color: rgba(255, 255, 255, 0.75);
 }
 
 .request-list-item .requests-list-column,
@@ -335,6 +347,7 @@
 .requests-list-waterfall {
   background-repeat: repeat-y;
   background-position: left center;
+  overflow: visible;
   /* Background created on a <canvas> in js. */
   /* @see devtools/client/netmonitor/src/widgets/WaterfallBackground.js */
   background-image: -moz-element(#waterfall-background);
@@ -395,7 +408,8 @@
 }
 
 .requests-list-timings {
-  transform: scaleX(var(--timings-scale));
+  display: flex;
+  align-items: center;
 }
 
 .requests-list-timings:dir(ltr) {
@@ -408,7 +422,11 @@
 
 .requests-list-timings-box {
   display: inline-block;
-  height: 9px;
+  height: 12px;
+}
+
+.requests-list-timings-box.filler {
+  background-color: var(--theme-splitter-color);
 }
 
 .requests-list-timings-box.blocked {
@@ -442,11 +460,9 @@
 .requests-list-timings-total {
   display: inline-block;
   padding-inline-start: 4px;
-  font-size: 85%;
+  font-size: 80%;
   font-weight: 600;
   white-space: nowrap;
-  /* This node should not be scaled - apply a reversed transformation */
-  transform: scaleX(var(--timings-rev-scale));
   text-align: left;
 }
 

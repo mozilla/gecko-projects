@@ -161,7 +161,7 @@ class ExternalRunnableWrapper final : public WorkerRunnable {
   NS_INLINE_DECL_REFCOUNTING_INHERITED(ExternalRunnableWrapper, WorkerRunnable)
 
  private:
-  ~ExternalRunnableWrapper() {}
+  ~ExternalRunnableWrapper() = default;
 
   virtual bool PreDispatch(WorkerPrivate* aWorkerPrivate) override {
     // Silence bad assertions.
@@ -259,7 +259,7 @@ class TopLevelWorkerFinishedRunnable final : public Runnable {
   NS_INLINE_DECL_REFCOUNTING_INHERITED(TopLevelWorkerFinishedRunnable, Runnable)
 
  private:
-  ~TopLevelWorkerFinishedRunnable() {}
+  ~TopLevelWorkerFinishedRunnable() = default;
 
   NS_IMETHOD
   Run() override {
@@ -382,7 +382,23 @@ class CompileScriptRunnable final : public WorkerDebuggeeRunnable {
     // current compartment.  Luckily we have a global now.
     JSAutoRealm ar(aCx, globalScope->GetGlobalJSObject());
     if (rv.MaybeSetPendingException(aCx)) {
-      return false;
+      // In the event of an uncaught exception, the worker should still keep
+      // running (return true) but should not be marked as having executed
+      // successfully (which will cause ServiceWorker installation to fail).
+      // In previous error handling cases in this method, we return false (to
+      // trigger CloseInternal) because the global is not in an operable
+      // state at all.
+      //
+      // For ServiceWorkers, this would correspond to the "Run Service Worker"
+      // algorithm returning an "abrupt completion" and _not_ failure.
+      //
+      // For DedicatedWorkers and SharedWorkers, this would correspond to the
+      // "run a worker" algorithm disregarding the return value of "run the
+      // classic script"/"run the module script" in step 24:
+      //
+      // "If script is a classic script, then run the classic script script.
+      // Otherwise, it is a module script; run the module script script."
+      return true;
     }
 
     aWorkerPrivate->SetWorkerScriptExecutedSuccessfully();
@@ -537,7 +553,7 @@ class TimerRunnable final : public WorkerRunnable,
       : WorkerRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount) {}
 
  private:
-  ~TimerRunnable() {}
+  ~TimerRunnable() = default;
 
   virtual bool PreDispatch(WorkerPrivate* aWorkerPrivate) override {
     // Silence bad assertions.
@@ -941,7 +957,7 @@ class WorkerPrivate::EventTarget final : public nsISerialEventTarget {
   NS_DECL_NSIEVENTTARGET_FULL
 
  private:
-  ~EventTarget() {}
+  ~EventTarget() = default;
 };
 
 struct WorkerPrivate::TimeoutInfo {
@@ -1109,7 +1125,7 @@ class WorkerPrivate::MemoryReporter final : public nsIMemoryReporter {
     FinishCollectRunnable& operator=(const FinishCollectRunnable&&) = delete;
   };
 
-  ~MemoryReporter() {}
+  ~MemoryReporter() = default;
 
   void Disable() {
     // Called from WorkerPrivate::DisableMemoryReporter.
@@ -2324,7 +2340,7 @@ already_AddRefed<WorkerPrivate> WorkerPrivate::Constructor(
   MOZ_ASSERT(runtimeService);
 
   nsILoadInfo::CrossOriginOpenerPolicy agentClusterCoop =
-      nsILoadInfo::OPENER_POLICY_NULL;
+      nsILoadInfo::OPENER_POLICY_UNSAFE_NONE;
   nsID agentClusterId;
   if (parent) {
     MOZ_ASSERT(aWorkerType == WorkerType::WorkerTypeDedicated);
@@ -2419,7 +2435,7 @@ nsresult WorkerPrivate::SetIsDebuggerReady(bool aReady) {
     // order in which they were originally dispatched.
     auto pending = std::move(mDelayedDebuggeeRunnables);
     for (uint32_t i = 0; i < pending.Length(); i++) {
-      RefPtr<WorkerRunnable> runnable = pending[i].forget();
+      RefPtr<WorkerRunnable> runnable = std::move(pending[i]);
       nsresult rv = DispatchLockHeld(runnable.forget(), nullptr, lock);
       NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -2732,7 +2748,7 @@ void WorkerPrivate::OverrideLoadInfoLoadGroup(WorkerLoadInfo& aLoadInfo,
       loadGroup->SetNotificationCallbacks(aLoadInfo.mInterfaceRequestor);
   MOZ_ALWAYS_SUCCEEDS(rv);
 
-  aLoadInfo.mLoadGroup = loadGroup.forget();
+  aLoadInfo.mLoadGroup = std::move(loadGroup);
 
   MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(aLoadInfo.mLoadGroup, aPrincipal));
 }
@@ -3448,7 +3464,7 @@ void WorkerPrivate::ClearMainEventQueue(WorkerRanOrNot aRanOrNot) {
   if (WorkerNeverRan == aRanOrNot) {
     for (uint32_t count = mPreStartRunnables.Length(), index = 0; index < count;
          index++) {
-      RefPtr<WorkerRunnable> runnable = mPreStartRunnables[index].forget();
+      RefPtr<WorkerRunnable> runnable = std::move(mPreStartRunnables[index]);
       static_cast<nsIRunnable*>(runnable.get())->Run();
     }
   } else {
@@ -5193,7 +5209,7 @@ WorkerPrivate::AutoPushEventLoopGlobal::AutoPushEventLoopGlobal(
     WorkerPrivate* aWorkerPrivate, JSContext* aCx)
     : mWorkerPrivate(aWorkerPrivate) {
   MOZ_ACCESS_THREAD_BOUND(mWorkerPrivate->mWorkerThreadAccessible, data);
-  mOldEventLoopGlobal = data->mCurrentEventLoopGlobal.forget();
+  mOldEventLoopGlobal = std::move(data->mCurrentEventLoopGlobal);
   if (JSObject* global = JS::CurrentGlobalOrNull(aCx)) {
     data->mCurrentEventLoopGlobal = xpc::NativeGlobal(global);
   }
@@ -5201,7 +5217,7 @@ WorkerPrivate::AutoPushEventLoopGlobal::AutoPushEventLoopGlobal(
 
 WorkerPrivate::AutoPushEventLoopGlobal::~AutoPushEventLoopGlobal() {
   MOZ_ACCESS_THREAD_BOUND(mWorkerPrivate->mWorkerThreadAccessible, data);
-  data->mCurrentEventLoopGlobal = mOldEventLoopGlobal.forget();
+  data->mCurrentEventLoopGlobal = std::move(mOldEventLoopGlobal);
 }
 
 }  // namespace dom

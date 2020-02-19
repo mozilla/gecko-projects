@@ -3768,7 +3768,10 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
     return;
   }
 
-  const auto& viewElemType = dstData.Type();
+  auto viewElemType = dstData.Type();
+  if (viewElemType == js::Scalar::Uint8Clamped) {
+    viewElemType = js::Scalar::Uint8;
+  }
   if (viewElemType != reqScalarType) {
     EnqueueError(LOCAL_GL_INVALID_OPERATION,
                  "`pixels` type does not match `type`.");
@@ -4912,8 +4915,16 @@ void ClientWebGLContext::GetProgramParameter(
         return JS::BooleanValue(!prog.mKeepAlive);
       case LOCAL_GL_VALIDATE_STATUS:
         return JS::BooleanValue(prog.mLastValidate);
-      case LOCAL_GL_ATTACHED_SHADERS:
-        return JS::NumberValue(prog.mNextLink_Shaders.size());
+      case LOCAL_GL_ATTACHED_SHADERS: {
+        size_t shaders = 0;
+        for (const auto& pair : prog.mNextLink_Shaders) {
+          const auto& slot = pair.second;
+          if (slot.shader) {
+            shaders += 1;
+          }
+        }
+        return JS::NumberValue(shaders);
+      }
       default:
         break;
     }

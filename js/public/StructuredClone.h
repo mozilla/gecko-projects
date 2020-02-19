@@ -275,7 +275,8 @@ typedef bool (*WriteStructuredCloneOp)(JSContext* cx,
  * To follow HTML5, the application must throw a DATA_CLONE_ERR DOMException
  * with error set to one of the JS_SCERR_* values.
  */
-typedef void (*StructuredCloneErrorOp)(JSContext* cx, uint32_t errorid);
+typedef void (*StructuredCloneErrorOp)(JSContext* cx, uint32_t errorid,
+                                       void* closure, const char* errorMessage);
 
 /**
  * This is called when JS_ReadStructuredClone receives a transferable object
@@ -703,6 +704,8 @@ class JS_PUBLIC_API JSAutoStructuredCloneBuffer {
 #define JS_SCERR_SHMEM_TRANSFERABLE 4
 #define JS_SCERR_TYPED_ARRAY_DETACHED 5
 #define JS_SCERR_WASM_NO_TRANSFER 6
+#define JS_SCERR_NOT_CLONABLE 7
+#define JS_SCERR_NOT_CLONABLE_WITH_COOP_COEP 8
 
 JS_PUBLIC_API bool JS_ReadUint32Pair(JSStructuredCloneReader* r, uint32_t* p1,
                                      uint32_t* p2);

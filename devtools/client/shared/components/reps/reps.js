@@ -1694,7 +1694,7 @@ function nodeIsUnmappedBinding(item) {
   return value && value.unmapped;
 } // Used to check if an item represents a binding that exists in the debugger's
 // parser result, but does not match up with a binding returned by the
-// debugger server.
+// devtools server.
 
 
 function nodeIsUnscopedBinding(item) {
@@ -2540,6 +2540,7 @@ module.exports = {
   getChildrenWithEvaluations,
   getClosestGripNode,
   getClosestNonBucketNode,
+  getEvaluatedItem,
   getFront,
   getPathExpression,
   getParent,
@@ -2947,16 +2948,29 @@ function FunctionRep(props) {
     });
   }
 
-  return span({
+  const elProps = {
     "data-link-actor-id": grip.actor,
     className: "objectBox objectBox-function",
-    // Set dir="ltr" to prevent function parentheses from
+    // Set dir="ltr" to prevent parentheses from
     // appearing in the wrong direction
     dir: "ltr"
-  }, getTitle(grip, props), getFunctionName(grip, props), "(", ...renderParams(grip), ")", jumpToDefinitionButton);
+  };
+  const parameterNames = (grip.parameterNames || []).filter(param => param);
+
+  if (grip.isClassConstructor) {
+    return span(elProps, getClassTitle(grip, props), getFunctionName(grip, props), ...getClassBody(parameterNames, props), jumpToDefinitionButton);
+  }
+
+  return span(elProps, getFunctionTitle(grip, props), getFunctionName(grip, props), "(", ...getParams(parameterNames), ")", jumpToDefinitionButton);
 }
 
-function getTitle(grip, props) {
+function getClassTitle(grip) {
+  return span({
+    className: "objectTitle"
+  }, "class ");
+}
+
+function getFunctionTitle(grip, props) {
   const {
     mode
   } = props;
@@ -3032,23 +3046,34 @@ function cleanFunctionName(name) {
   return name;
 }
 
-function renderParams(grip) {
+function getClassBody(constructorParams, props) {
   const {
-    parameterNames = []
-  } = grip;
-  return parameterNames.filter(param => param).reduce((res, param, index, arr) => {
-    res.push(span({
+    mode
+  } = props;
+
+  if (mode === MODE.TINY) {
+    return [];
+  }
+
+  return [" {", ...getClassConstructor(constructorParams), "}"];
+}
+
+function getClassConstructor(parameterNames) {
+  if (parameterNames.length === 0) {
+    return [];
+  }
+
+  return [" constructor(", ...getParams(parameterNames), ") "];
+}
+
+function getParams(parameterNames) {
+  return parameterNames.flatMap((param, index, arr) => {
+    return [span({
       className: "param"
-    }, param));
-
-    if (index < arr.length - 1) {
-      res.push(span({
-        className: "delimiter"
-      }, ", "));
-    }
-
-    return res;
-  }, []);
+    }, param), index === arr.length - 1 ? "" : span({
+      className: "delimiter"
+    }, ", ")];
+  });
 } // Registration
 
 
@@ -7660,6 +7685,7 @@ const {
 const {
   getChildrenWithEvaluations,
   getActor,
+  getEvaluatedItem,
   getParent,
   getValue,
   nodeIsPrimitive,
@@ -7792,7 +7818,21 @@ class ObjectInspector extends Component {
   }
 
   getRoots() {
-    return this.props.roots;
+    const {
+      evaluations,
+      roots
+    } = this.props;
+    const length = roots.length;
+
+    for (let i = 0; i < length; i++) {
+      let rootItem = roots[i];
+
+      if (evaluations.has(rootItem.path)) {
+        roots[i] = getEvaluatedItem(rootItem, evaluations);
+      }
+    }
+
+    return roots;
   }
 
   getNodeKey(item) {

@@ -2381,14 +2381,11 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("ClampToUint8", js::ClampToUint8, 1, 0),
     JS_FN("GetTypedObjectModule", js::GetTypedObjectModule, 0, 0),
 
-    JS_INLINABLE_FN("ObjectIsTypeDescr", js::ObjectIsTypeDescr, 1, 0,
-                    IntrinsicObjectIsTypeDescr),
-    JS_INLINABLE_FN("ObjectIsTypedObject", js::ObjectIsTypedObject, 1, 0,
-                    IntrinsicObjectIsTypedObject),
-    JS_INLINABLE_FN("TypeDescrIsArrayType", js::TypeDescrIsArrayType, 1, 0,
-                    IntrinsicTypeDescrIsArrayType),
-    JS_INLINABLE_FN("TypeDescrIsSimpleType", js::TypeDescrIsSimpleType, 1, 0,
-                    IntrinsicTypeDescrIsSimpleType),
+    JS_FN("ObjectIsTypeDescr", js::ObjectIsTypeDescr, 1, 0),
+    JS_FN("ObjectIsTypedObject", js::ObjectIsTypedObject, 1, 0),
+    JS_FN("TypeDescrIsArrayType", js::TypeDescrIsArrayType, 1, 0),
+    JS_FN("TypeDescrIsSimpleType", js::TypeDescrIsSimpleType, 1, 0),
+
     JS_FN("IsBoxedWasmAnyRef", js::IsBoxedWasmAnyRef, 1, 0),
     JS_FN("IsBoxableWasmAnyRef", js::IsBoxableWasmAnyRef, 1, 0),
     JS_FN("BoxWasmAnyRef", js::BoxWasmAnyRef, 1, 0),
@@ -2621,6 +2618,7 @@ GlobalObject* JSRuntime::createSelfHostingGlobal(JSContext* cx) {
   }
 
   cx->runtime()->selfHostingGlobal_ = shg;
+  realm->zone()->setIsSelfHostingZone();
   realm->setIsSelfHostingRealm();
 
   if (!GlobalObject::initSelfHostingBuiltins(cx, shg, intrinsic_functions)) {
@@ -2681,9 +2679,12 @@ static bool VerifyGlobalNames(JSContext* cx, Handle<GlobalObject*> shg) {
   RootedId id(cx);
   bool nameMissing = false;
 
-  for (auto iter = cx->zone()->cellIter<JSScript>();
-       !iter.done() && !nameMissing; iter.next()) {
-    JSScript* script = iter;
+  for (auto base = cx->zone()->cellIter<BaseScript>();
+       !base.done() && !nameMissing; base.next()) {
+    if (base->isLazyScript()) {
+      continue;
+    }
+    JSScript* script = static_cast<JSScript*>(base.get());
 
     for (BytecodeLocation loc : AllBytecodesIterable(script)) {
       JSOp op = loc.getOp();
@@ -2783,10 +2784,6 @@ void JSRuntime::traceSelfHostingGlobal(JSTracer* trc) {
     TraceRoot(trc, const_cast<NativeObject**>(&selfHostingGlobal_.ref()),
               "self-hosting global");
   }
-}
-
-bool JSRuntime::isSelfHostingZone(const JS::Zone* zone) const {
-  return selfHostingGlobal_ && selfHostingGlobal_->zoneFromAnyThread() == zone;
 }
 
 static bool CloneValue(JSContext* cx, HandleValue selfHostedValue,

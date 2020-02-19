@@ -585,7 +585,7 @@ bool PuppetWidget::CreateRemoteLayerManager(
   // it if we successfully create its successor because a partially initialized
   // layer manager is worse than a fully initialized but shutdown layer manager.
   DestroyLayerManager();
-  mLayerManager = lm.forget();
+  mLayerManager = std::move(lm);
   return true;
 }
 
@@ -1138,6 +1138,14 @@ LayoutDeviceIntPoint PuppetWidget::GetChromeOffset() {
     return LayoutDeviceIntPoint();
   }
   return GetOwningBrowserChild()->GetChromeOffset();
+}
+
+LayoutDeviceIntPoint PuppetWidget::WidgetToScreenOffset() {
+  auto positionRalativeToWindow =
+      WidgetToTopLevelWidgetTransform().TransformPoint(LayoutDevicePoint());
+
+  return GetWindowPosition() +
+         LayoutDeviceIntPoint::Round(positionRalativeToWindow);
 }
 
 LayoutDeviceIntPoint PuppetWidget::GetWindowPosition() {

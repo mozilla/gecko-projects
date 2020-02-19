@@ -818,6 +818,7 @@ def set_tier(config, tests):
                 'linux64-shippable/opt',
                 'linux64-devedition/opt',
                 'linux64-asan/opt',
+                'linux64-tsan/opt',
                 'linux64-qr/opt',
                 'linux64-qr/debug',
                 'linux64-pgo-qr/opt',
@@ -829,6 +830,7 @@ def set_tier(config, tests):
                 'linux1804-64-qr/debug',
                 'linux1804-64-shippable-qr/opt',
                 'linux1804-64-asan/opt',
+                'linux1804-64-tsan/opt',
                 'windows7-32/debug',
                 'windows7-32/opt',
                 'windows7-32-pgo/opt',
@@ -986,34 +988,29 @@ def setup_browsertime(config, tests):
 
         cd_fetches = {
             'linux.*': [
-                'linux64-chromedriver-76',
-                'linux64-chromedriver-77',
                 'linux64-chromedriver-78',
-                'linux64-chromedriver-79'
+                'linux64-chromedriver-79',
+                'linux64-chromedriver-80'
             ],
             'macosx.*': [
-                'mac64-chromedriver-76',
-                'mac64-chromedriver-77',
                 'mac64-chromedriver-78',
-                'mac64-chromedriver-79'
+                'mac64-chromedriver-79',
+                'mac64-chromedriver-80'
             ],
             'windows.*aarch64.*': [
-                'win32-chromedriver-76',
-                'win32-chromedriver-77',
                 'win32-chromedriver-78',
-                'win32-chromedriver-79'
+                'win32-chromedriver-79',
+                'win32-chromedriver-80'
             ],
             'windows.*-32.*': [
-                'win32-chromedriver-76',
-                'win32-chromedriver-77',
                 'win32-chromedriver-78',
-                'win32-chromedriver-79'
+                'win32-chromedriver-79',
+                'win32-chromedriver-80'
             ],
             'windows.*-64.*': [
-                'win32-chromedriver-76',
-                'win32-chromedriver-77',
                 'win32-chromedriver-78',
-                'win32-chromedriver-79'
+                'win32-chromedriver-79',
+                'win32-chromedriver-80'
             ],
         }
 
@@ -1287,7 +1284,6 @@ CHUNK_SUITES_BLACKLIST = (
     'jittest',
     'jsreftest',
     'marionette',
-    'mochitest-browser-chrome',
     'mochitest-browser-chrome-screenshots',
     'mochitest-browser-chrome-thunderbird',
     'mochitest-valgrind-plain',

@@ -1890,6 +1890,33 @@ with only_when(requires_wasm_sandboxing & compile_environment):
             return value
     set_config('WASM_LDFLAGS', wasm_ldflags)
 
+    # This function is returning "ldflags" that lucetc will use when invoking
+    # the linker, but really lucetc is going to be invoking the compiler, since
+    # the compiler handles lots of details for us (like finding the linker in
+    # cross-compilation scenarios).
+    @depends(target)
+    def lucetc_ldflags(target):
+        if target.kernel == 'Linux':
+            return [
+                '-Wl,-shared',
+                '-nostdlib',
+            ]
+
+        if target.kernel == 'Darwin':
+            return [
+                '-Wl,-dylib',
+                '-Wl,-dead_strip',
+                '-Wl,-export_dynamic',
+                '-Wl,-undefined,dynamic_lookup',
+                '-nostdlib',
+            ]
+
+    set_config('LUCETC_LDFLAGS', lucetc_ldflags)
+
+    # Re-using the Rust target triple here is not exactly correct, but it is an
+    # excellent approximation for the platforms we currently support
+    set_config('LUCETC_TARGET', rust_target_triple)
+
 
 @depends('--with-wasm-sandboxed-libraries', target)
 def wasm_sandboxing(libraries, target):
@@ -1898,9 +1925,9 @@ def wasm_sandboxing(libraries, target):
 
     # Wasm sandboxing is only enabled on specific targets.
     if not (target.cpu in ('x86_64',) and \
-            target.kernel == 'Linux' and \
-            target.os != 'Android'):
-        die('wasm sandboxing is only enabled on x86-64 Linux')
+            (target.kernel == 'Linux' and target.os != 'Android') or \
+            target.kernel == 'Darwin'):
+        die('wasm sandboxing is only enabled on x86-64 Linux and Mac')
 
     return namespace(**{name: True for name in libraries})
 
@@ -1972,3 +1999,24 @@ def dump_syms(dump_syms_override, toolchain_search_path):
     '''))
 
 set_config('DUMP_SYMS', dump_syms)
+
+# Fork server
+@depends(target, build_project)
+def forkserver_default(target, build_project):
+    return build_project == 'browser' and \
+        ((target.os == 'GNU' and target.kernel == 'Linux') or \
+         target.os == 'FreeBSD')
+
+option('--enable-forkserver', default=forkserver_default,
+       env='MOZ_ENABLE_FORKSERVER', help='{Enable|Disable} fork server')
+
+@depends('--enable-forkserver', target)
+def forkserver_flag(value, target):
+    if target.os == 'Android' or \
+       (target.os == 'GNU' and target.kernel == 'Linux') or \
+       target.os == 'FreeBSD':
+        return bool(value)
+    pass
+
+set_config('MOZ_ENABLE_FORKSERVER', forkserver_flag)
+set_define('MOZ_ENABLE_FORKSERVER', forkserver_flag, forkserver_flag)

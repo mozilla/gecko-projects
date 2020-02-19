@@ -208,7 +208,7 @@ class ICUReporter final : public nsIMemoryReporter,
     return NS_OK;
   }
 
-  ~ICUReporter() {}
+  ~ICUReporter() = default;
 };
 
 NS_IMPL_ISUPPORTS(ICUReporter, nsIMemoryReporter)
@@ -234,7 +234,7 @@ class OggReporter final : public nsIMemoryReporter,
     return NS_OK;
   }
 
-  ~OggReporter() {}
+  ~OggReporter() = default;
 };
 
 NS_IMPL_ISUPPORTS(OggReporter, nsIMemoryReporter)
@@ -634,7 +634,6 @@ nsresult ShutdownXPCOM(nsIServiceManager* aServMgr) {
     gfxPlatform::ShutdownLayersIPC();
     mozilla::RemoteDecoderManagerChild::Shutdown();
 
-    mozilla::scache::StartupCache::DeleteSingleton();
     if (observerService) {
       mozilla::KillClearOnShutdown(ShutdownPhase::ShutdownThreads);
       observerService->NotifyObservers(
@@ -716,6 +715,8 @@ nsresult ShutdownXPCOM(nsIServiceManager* aServMgr) {
   mozilla::KillClearOnShutdown(ShutdownPhase::ShutdownPostLastCycleCollection);
   mozilla::AppShutdown::MaybeFastShutdown(
       mozilla::ShutdownPhase::ShutdownPostLastCycleCollection);
+
+  mozilla::scache::StartupCache::DeleteSingleton();
 
   PROFILER_ADD_MARKER("Shutdown xpcom", OTHER);
 

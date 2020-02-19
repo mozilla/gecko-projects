@@ -578,21 +578,15 @@ class LogViolationDetailsRunnable final : public WorkerMainThreadRunnable {
   virtual bool MainThreadRun() override;
 
  private:
-  ~LogViolationDetailsRunnable() {}
+  ~LogViolationDetailsRunnable() = default;
 };
 
-bool ContentSecurityPolicyAllows(JSContext* aCx, JS::HandleValue aValue) {
+bool ContentSecurityPolicyAllows(JSContext* aCx, JS::HandleString aCode) {
   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
   worker->AssertIsOnWorkerThread();
 
-  JS::Rooted<JSString*> jsString(aCx, JS::ToString(aCx, aValue));
-  if (NS_WARN_IF(!jsString)) {
-    JS_ClearPendingException(aCx);
-    return false;
-  }
-
   nsAutoJSString scriptSample;
-  if (NS_WARN_IF(!scriptSample.init(aCx, jsString))) {
+  if (NS_WARN_IF(!scriptSample.init(aCx, aCode))) {
     JS_ClearPendingException(aCx);
     return false;
   }
@@ -997,7 +991,7 @@ class WorkerJSContext final : public mozilla::CycleCollectedJSContext {
     }
 
     JS::JobQueueMayNotBeEmpty(cx);
-    microTaskQueue->push(runnable.forget());
+    microTaskQueue->push(std::move(runnable));
   }
 
   bool IsSystemCaller() const override {
@@ -1037,7 +1031,7 @@ class WorkerThreadPrimaryRunnable final : public Runnable {
     NS_INLINE_DECL_REFCOUNTING_INHERITED(FinishedRunnable, Runnable)
 
    private:
-    ~FinishedRunnable() {}
+    ~FinishedRunnable() = default;
 
     NS_DECL_NSIRUNNABLE
   };
@@ -1056,7 +1050,7 @@ class WorkerThreadPrimaryRunnable final : public Runnable {
   NS_INLINE_DECL_REFCOUNTING_INHERITED(WorkerThreadPrimaryRunnable, Runnable)
 
  private:
-  ~WorkerThreadPrimaryRunnable() {}
+  ~WorkerThreadPrimaryRunnable() = default;
 
   NS_DECL_NSIRUNNABLE
 };

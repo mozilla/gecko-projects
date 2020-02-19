@@ -4,7 +4,6 @@
 
 "use strict";
 
-const { Utils: WebConsoleUtils } = require("devtools/client/webconsole/utils");
 const EventEmitter = require("devtools/shared/event-emitter");
 const Services = require("Services");
 const {
@@ -29,10 +28,10 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
-  "PREFS",
-  "devtools/client/webconsole/constants",
-  true
+  "constants",
+  "devtools/client/webconsole/constants"
 );
+
 loader.lazyRequireGetter(
   this,
   "START_IGNORE_ACTION",
@@ -121,7 +120,9 @@ class WebConsoleUI {
     // Ignore Fronts that are already destroyed
     if (filterDisconnectedProxies) {
       proxies = proxies.filter(proxy => {
-        return proxy.webConsoleFront && !!proxy.webConsoleFront.actorID;
+        return (
+          proxy && proxy.webConsoleFront && !!proxy.webConsoleFront.actorID
+        );
       });
     }
 
@@ -143,18 +144,13 @@ class WebConsoleUI {
       await this._attachTargets();
 
       this._commands = new ConsoleCommands({
-        debuggerClient: this.hud.currentTarget.client,
+        devToolsClient: this.hud.currentTarget.client,
         proxy: this.getProxy(),
         threadFront: this.hud.toolbox && this.hud.toolbox.threadFront,
         currentTarget: this.hud.currentTarget,
       });
 
       await this.wrapper.init();
-
-      const id = WebConsoleUtils.supportsString(this.hudId);
-      if (Services.obs) {
-        Services.obs.notifyObservers(id, "web-console-created");
-      }
     })();
 
     return this._initializer;
@@ -347,11 +343,21 @@ class WebConsoleUI {
    *        A new top level target is created.
    */
   async _onTargetAvailable({ type, targetFront, isTopLevel }) {
+    const dispatchTargetAvailable = () => {
+      const store = this.wrapper && this.wrapper.getStore();
+      if (store) {
+        this.wrapper.getStore().dispatch({
+          type: constants.TARGET_AVAILABLE,
+          targetType: type,
+        });
+      }
+    };
+
     // This is a top level target. It may update on process switches
     // when navigating to another domain.
     if (isTopLevel) {
       const fissionSupport = Services.prefs.getBoolPref(
-        PREFS.FEATURES.BROWSER_TOOLBOX_FISSION
+        constants.PREFS.FEATURES.BROWSER_TOOLBOX_FISSION
       );
       const needContentProcessMessagesListener =
         targetFront.isParentProcess && !targetFront.isAddon && !fissionSupport;
@@ -361,6 +367,7 @@ class WebConsoleUI {
         needContentProcessMessagesListener
       );
       await this.proxy.connect();
+      dispatchTargetAvailable();
       return;
     }
 
@@ -381,6 +388,7 @@ class WebConsoleUI {
     const proxy = new WebConsoleConnectionProxy(this, targetFront);
     this.additionalProxies.set(targetFront, proxy);
     await proxy.connect();
+    dispatchTargetAvailable();
   }
 
   /**

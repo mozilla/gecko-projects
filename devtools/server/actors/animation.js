@@ -10,7 +10,7 @@
  *
  * The |Animations| actor is the main entry point. It is used to discover
  * animation players on given nodes.
- * There should only be one instance per debugger server.
+ * There should only be one instance per devtools server.
  *
  * The |AnimationPlayer| actor provides attributes and methods to inspect an
  * animation as well as pause/resume/seek it.
@@ -110,7 +110,7 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
   },
 
   get isPseudoElement() {
-    return !!this.player.effect.target.element;
+    return !!this.player.effect.pseudoElement;
   },
 
   get node() {
@@ -118,9 +118,11 @@ var AnimationPlayerActor = protocol.ActorClassWithSpec(animationPlayerSpec, {
       return this.player.effect.target;
     }
 
-    const pseudo = this.player.effect.target;
-    const treeWalker = this.walker.getDocumentWalker(pseudo.element);
-    return pseudo.type === "::before"
+    const originatingElem = this.player.effect.target;
+    const treeWalker = this.walker.getDocumentWalker(originatingElem);
+    // FIXME: Bug 1615473: It's possible to use ::before, ::after, ::marker,
+    // ::first-line, or ::first-letter pseudo selector.
+    return this.player.effect.pseudoElement === "::before"
       ? treeWalker.firstChild()
       : treeWalker.lastChild();
   },

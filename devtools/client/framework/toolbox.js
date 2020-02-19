@@ -58,6 +58,18 @@ loader.lazyRequireGetter(
 );
 loader.lazyRequireGetter(
   this,
+  "registerThread",
+  "devtools/client/framework/actions/index",
+  true
+);
+loader.lazyRequireGetter(
+  this,
+  "clearThread",
+  "devtools/client/framework/actions/index",
+  true
+);
+loader.lazyRequireGetter(
+  this,
   "AppConstants",
   "resource://gre/modules/AppConstants.jsm",
   true
@@ -506,16 +518,6 @@ Toolbox.prototype = {
     await this._listFrames();
     await this.initPerformance();
 
-    // Notify all the tools that the target has changed
-    await Promise.all(
-      [...this._toolPanels.values()].map(panel => {
-        if (panel.switchToTarget) {
-          return panel.switchToTarget(newTarget);
-        }
-        return Promise.resolve();
-      })
-    );
-
     this.emit("switched-target", newTarget);
   },
 
@@ -643,6 +645,10 @@ Toolbox.prototype = {
 
     await this._attachTarget({ type, targetFront, isTopLevel });
 
+    if (this.hostType !== Toolbox.HostType.PAGE) {
+      await this.store.dispatch(registerThread(targetFront));
+    }
+
     if (isTopLevel) {
       this.emit("top-target-attached");
     }
@@ -651,6 +657,10 @@ Toolbox.prototype = {
   _onTargetDestroyed({ type, targetFront, isTopLevel }) {
     if (isTopLevel) {
       this.detachTarget();
+    }
+
+    if (this.hostType !== Toolbox.HostType.PAGE) {
+      this.store.dispatch(clearThread(targetFront));
     }
   },
 
@@ -3035,8 +3045,13 @@ Toolbox.prototype = {
       // it can be either an addon or browser toolbox actor
       return promise.resolve();
     }
-    const { frames } = await this.target.listFrames();
-    this._updateFrames({ frames });
+
+    try {
+      const { frames } = await this.target.listFrames();
+      this._updateFrames({ frames });
+    } catch (e) {
+      console.error("Error while listing frames", e);
+    }
   },
 
   /**

@@ -1259,9 +1259,7 @@ describe("TelemetryFeed", () => {
       const spy = sandbox.spy();
 
       sandbox.stub(Services.prefs, "getIntPref").returns(1);
-      globals.set("aboutNewTabService", {
-        overridden: false,
-        newTabURL: "",
+      globals.set("AboutNewTabStartupRecorder", {
         maybeRecordTopsitesPainted: spy,
       });
       instance.addSession("port123", "about:home");
@@ -1815,48 +1813,6 @@ describe("TelemetryFeed", () => {
 
       assert.calledOnce(global.Cu.reportError);
       assert.notCalled(instance.sendStructuredIngestionEvent);
-    });
-    it("should not send telemetry for Nightly release snippets", async () => {
-      sandbox.stub(ASRouterPreferences, "useReleaseSnippets").get(() => true);
-      const data = {
-        action: "snippets_user_event",
-        event: "IMPRESSION",
-        message_id: "12345",
-      };
-      instance = new TelemetryFeed();
-      sandbox.spy(instance, "sendStructuredIngestionEvent");
-
-      await instance.handleASRouterUserEvent({ data });
-
-      assert.notCalled(instance.sendStructuredIngestionEvent);
-    });
-    it("should send telemetry for regular channel snippets", async () => {
-      sandbox.stub(ASRouterPreferences, "useReleaseSnippets").get(() => false);
-      const data = {
-        action: "snippets_user_event",
-        event: "IMPRESSION",
-        message_id: "12345",
-      };
-      instance = new TelemetryFeed();
-      sandbox.spy(instance, "sendStructuredIngestionEvent");
-
-      await instance.handleASRouterUserEvent({ data });
-
-      assert.calledOnce(instance.sendStructuredIngestionEvent);
-    });
-    it("should send telemetry for test snippets", async () => {
-      sandbox.stub(ASRouterPreferences, "useReleaseSnippets").get(() => true);
-      const data = {
-        action: "snippets_local_testing_user_event",
-        event: "IMPRESSION",
-        message_id: "12345",
-      };
-      instance = new TelemetryFeed();
-      sandbox.spy(instance, "sendStructuredIngestionEvent");
-
-      await instance.handleASRouterUserEvent({ data });
-
-      assert.calledOnce(instance.sendStructuredIngestionEvent);
     });
   });
 });

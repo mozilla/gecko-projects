@@ -297,7 +297,6 @@ public class GeckoViewActivity
 
     private TabSessionManager mTabSessionManager;
     private GeckoView mGeckoView;
-    private boolean mUseMultiprocess;
     private boolean mFullAccessibilityTree;
     private boolean mUseTrackingProtection;
     private boolean mUsePrivateBrowsing;
@@ -359,7 +358,8 @@ public class GeckoViewActivity
                         ActionBar.LayoutParams.WRAP_CONTENT));
         getSupportActionBar().setDisplayOptions(ActionBar.DISPLAY_SHOW_CUSTOM);
 
-        mUseMultiprocess = getIntent().getBooleanExtra(USE_MULTIPROCESS_EXTRA, true);
+        final boolean useMultiprocess =
+                getIntent().getBooleanExtra(USE_MULTIPROCESS_EXTRA, true);
         mEnableRemoteDebugging = true;
         mFullAccessibilityTree = getIntent().getBooleanExtra(FULL_ACCESSIBILITY_TREE_EXTRA, false);
         mProgressView = findViewById(R.id.page_progress);
@@ -379,7 +379,7 @@ public class GeckoViewActivity
                 runtimeSettingsBuilder.extras(extras);
             }
             runtimeSettingsBuilder
-                    .useContentProcessHint(mUseMultiprocess)
+                    .useMultiprocess(useMultiprocess)
                     .remoteDebuggingEnabled(mEnableRemoteDebugging)
                     .consoleOutput(true)
                     .contentBlocking(new ContentBlocking.Settings.Builder()
@@ -484,7 +484,6 @@ public class GeckoViewActivity
                     session.open(sGeckoRuntime);
                 }
 
-                mUseMultiprocess = session.getSettings().getUseMultiprocess();
                 mFullAccessibilityTree = session.getSettings().getFullAccessibilityTree();
 
                 mTabSessionManager.addSession(session);
@@ -605,7 +604,6 @@ public class GeckoViewActivity
 
     private TabSession createSession() {
         TabSession session = mTabSessionManager.newSession(new GeckoSessionSettings.Builder()
-                .useMultiprocess(mUseMultiprocess)
                 .usePrivateMode(mUsePrivateBrowsing)
                 .useTrackingProtection(mUseTrackingProtection)
                 .fullAccessibilityTree(mFullAccessibilityTree)
@@ -718,7 +716,6 @@ public class GeckoViewActivity
 
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
-        menu.findItem(R.id.action_e10s).setChecked(mUseMultiprocess);
         menu.findItem(R.id.action_tp).setChecked(mUseTrackingProtection);
         menu.findItem(R.id.action_pb).setChecked(mUsePrivateBrowsing);
         menu.findItem(R.id.desktop_mode).setChecked(mDesktopMode);
@@ -736,10 +733,6 @@ public class GeckoViewActivity
                 break;
             case R.id.action_forward:
                 session.goForward();
-                break;
-            case R.id.action_e10s:
-                mUseMultiprocess = !mUseMultiprocess;
-                recreateSession();
                 break;
             case R.id.action_tp:
                 mUseTrackingProtection = !mUseTrackingProtection;

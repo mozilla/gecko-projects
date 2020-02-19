@@ -682,8 +682,8 @@ class SandboxedWasmLibrary(Library):
         # TODO: WASM sandboxed libraries are in a weird place: they are
         # built in a different way, but they should share some code with
         # SharedLibrary.  This is the minimal configuration needed to work
-        # with Linux, but it would need to be extended for other platforms.
-        assert context.config.substs['OS_TARGET'] == 'Linux'
+        # on the below platforms.
+        assert context.config.substs['OS_TARGET'] in ('Linux', 'Darwin')
 
         self.lib_name = '%s%s%s' % (
             context.config.dll_prefix,
@@ -1237,10 +1237,12 @@ class GeneratedFile(ContextDerived):
         'required_during_compile',
         'localized',
         'force',
+        'py2',
     )
 
     def __init__(self, context, script, method, outputs, inputs,
-                 flags=(), localized=False, force=False):
+                 flags=(), localized=False, force=False,
+                 py2=False):
         ContextDerived.__init__(self, context)
         self.script = script
         self.method = method
@@ -1249,6 +1251,7 @@ class GeneratedFile(ContextDerived):
         self.flags = flags
         self.localized = localized
         self.force = force
+        self.py2 = py2
 
         suffixes = [
             '.h',

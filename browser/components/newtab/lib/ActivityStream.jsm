@@ -131,8 +131,14 @@ const DEFAULT_SITES = new Map([
     "FR",
     "https://www.youtube.com/,https://www.facebook.com/,https://www.wikipedia.org/,https://www.amazon.fr/,https://www.leboncoin.fr/,https://twitter.com/",
   ],
+  [
+    "CN",
+    "https://www.baidu.com/,https://www.zhihu.com/,https://www.ifeng.com/,https://weibo.com/,https://www.ctrip.com/,https://www.iqiyi.com/",
+  ],
 ]);
 const GEO_PREF = "browser.search.region";
+const REGION_STORIES_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.region-stories-config";
 const SPOCS_GEOS = ["US"];
 
 // Determine if spocs should be shown for a geo/locale
@@ -576,12 +582,19 @@ const FEEDS_DATA = [
       "Fetches content recommendations from a configurable content provider",
     // Dynamically determine if Pocket should be shown for a geo / locale
     getValue: ({ geo, locale }) => {
+      const preffedRegionsString =
+        Services.prefs.getStringPref(REGION_STORIES_CONFIG) || "";
+      const preffedRegions = preffedRegionsString.split(",").map(s => s.trim());
       const locales = {
         US: ["en-CA", "en-GB", "en-US", "en-ZA"],
         CA: ["en-CA", "en-GB", "en-US", "en-ZA"],
+        GB: ["en-CA", "en-GB", "en-US", "en-ZA"],
         DE: ["de", "de-DE", "de-AT", "de-CH"],
+        JP: ["ja", "ja-JP"],
       }[geo];
-      return !!locales && locales.includes(locale);
+      return (
+        preffedRegions.includes(geo) && !!locales && locales.includes(locale)
+      );
     },
   },
   {

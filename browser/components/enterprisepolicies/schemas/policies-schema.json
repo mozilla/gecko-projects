@@ -290,6 +290,12 @@
         "ProviderURL": {
           "type": "URLorEmpty"
         },
+        "ExcludedDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "Locked": {
           "type": "boolean"
         }
@@ -950,6 +956,9 @@
         },
         "OfflineApps": {
           "type": "boolean"
+        },
+        "Locked": {
+          "type": "boolean"
         }
       }
     },
@@ -1052,6 +1061,24 @@
         }
       },
       "required": ["Title", "URL"],
+    },
+
+    "UserMessaging": {
+      "type": "object",
+      "properties": {
+        "WhatsNew": {
+          "type": "boolean"
+        },
+        "ExtensionRecommendations": {
+          "type": "boolean"
+        },
+        "FeatureRecommendations": {
+          "type": "boolean"
+        },
+        "Locked": {
+          "type": "boolean"
+        }
+      }
     },
 
     "WebsiteFilter": {

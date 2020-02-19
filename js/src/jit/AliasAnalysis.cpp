@@ -9,9 +9,9 @@
 #include <stdio.h>
 
 #include "jit/Ion.h"
-#include "jit/IonBuilder.h"
 #include "jit/JitSpewer.h"
 #include "jit/MIR.h"
+#include "jit/MIRGenerator.h"
 #include "jit/MIRGraph.h"
 
 #include "vm/Printer.h"
@@ -87,9 +87,6 @@ static inline const MDefinition* MaybeUnwrap(const MDefinition* object) {
   if (object->isTypedArrayElements()) {
     return nullptr;
   }
-  if (object->isTypedObjectElements()) {
-    return nullptr;
-  }
   if (object->isConstantElements()) {
     return nullptr;
   }
@@ -111,16 +108,11 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
     case MDefinition::Opcode::InitializedLength:
     case MDefinition::Opcode::LoadElement:
     case MDefinition::Opcode::LoadUnboxedScalar:
-    case MDefinition::Opcode::LoadUnboxedObjectOrNull:
-    case MDefinition::Opcode::LoadUnboxedString:
     case MDefinition::Opcode::StoreElement:
-    case MDefinition::Opcode::StoreUnboxedObjectOrNull:
-    case MDefinition::Opcode::StoreUnboxedString:
     case MDefinition::Opcode::StoreUnboxedScalar:
     case MDefinition::Opcode::SetInitializedLength:
     case MDefinition::Opcode::ArrayLength:
     case MDefinition::Opcode::SetArrayLength:
-    case MDefinition::Opcode::TypedObjectDescr:
     case MDefinition::Opcode::Slots:
     case MDefinition::Opcode::Elements:
     case MDefinition::Opcode::MaybeCopyElementsForWrite:
@@ -145,9 +137,10 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
     case MDefinition::Opcode::InArray:
     case MDefinition::Opcode::LoadElementHole:
     case MDefinition::Opcode::TypedArrayElements:
-    case MDefinition::Opcode::TypedObjectElements:
     case MDefinition::Opcode::CopyLexicalEnvironmentObject:
     case MDefinition::Opcode::IsPackedArray:
+    case MDefinition::Opcode::SuperFunction:
+    case MDefinition::Opcode::InitHomeObject:
       object = ins->getOperand(0);
       break;
     case MDefinition::Opcode::GetPropertyCache:
@@ -186,8 +179,7 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
 #ifdef DEBUG
       // Crash when the default aliasSet is overriden, but when not added in the
       // list above.
-      if (!ins->getAliasSet().isStore() ||
-          ins->getAliasSet().flags() != AliasSet::Flag::Any) {
+      if (!ins->hasDefaultAliasSet()) {
         MOZ_CRASH(
             "Overridden getAliasSet without updating AliasAnalysis GetObject");
       }
@@ -196,8 +188,7 @@ static inline const MDefinition* GetObject(const MDefinition* ins) {
       return nullptr;
   }
 
-  MOZ_ASSERT(!ins->getAliasSet().isStore() ||
-             ins->getAliasSet().flags() != AliasSet::Flag::Any);
+  MOZ_ASSERT(!ins->hasDefaultAliasSet());
   object = MaybeUnwrap(object);
   MOZ_ASSERT_IF(object, object->type() == MIRType::Object);
   return object;

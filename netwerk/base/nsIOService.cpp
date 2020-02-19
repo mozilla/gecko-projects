@@ -315,6 +315,11 @@ nsIOService::~nsIOService() {
 void nsIOService::OnTLSPrefChange(const char* aPref, void* aSelf) {
   MOZ_ASSERT(IsSocketProcessChild());
 
+  if (!EnsureNSSInitializedChromeOrContent()) {
+    LOG(("NSS not initialized."));
+    return;
+  }
+
   nsAutoCString pref(aPref);
   // The preferences listed in gCallbackSecurityPrefs need to be in sync with
   // the code in HandleTLSPrefChange() and SetValidationOptionsCommon().
@@ -495,6 +500,7 @@ bool nsIOService::SocketProcessReady() {
 static bool sUseSocketProcess = false;
 static bool sUseSocketProcessChecked = false;
 
+// static
 bool nsIOService::UseSocketProcess() {
   if (sUseSocketProcessChecked) {
     return sUseSocketProcess;

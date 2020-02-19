@@ -274,14 +274,25 @@ static inline NSMutableArray* ConvertToNSArray(nsTArray<ProxyAccessible*>& aArra
   if ([attribute isEqualToString:NSAccessibilityTopLevelUIElementAttribute]) return [self window];
   if ([attribute isEqualToString:NSAccessibilityTitleAttribute]) return [self title];
   if ([attribute isEqualToString:NSAccessibilityTitleUIElementAttribute]) {
+    /* If our accessible is labelled by more than one item, its label
+     * should be set by accessibilityLabel instead of here, so we return nil.
+     */
     if (accWrap) {
       Relation rel = accWrap->RelationByType(RelationType::LABELLED_BY);
       Accessible* tempAcc = rel.Next();
-      return tempAcc ? GetNativeFromGeckoAccessible(tempAcc) : nil;
+      if (tempAcc && !rel.Next()) {
+        return GetNativeFromGeckoAccessible(tempAcc);
+      } else {
+        return nil;
+      }
     }
     nsTArray<ProxyAccessible*> rel = proxy->RelationByType(RelationType::LABELLED_BY);
     ProxyAccessible* tempProxy = rel.SafeElementAt(0);
-    return tempProxy ? GetNativeFromProxy(tempProxy) : nil;
+    if (tempProxy && rel.Length() <= 1) {
+      return GetNativeFromProxy(tempProxy);
+    } else {
+      return nil;
+    }
   }
   if ([attribute isEqualToString:NSAccessibilityHelpAttribute]) return [self help];
   if ([attribute isEqualToString:NSAccessibilityOrientationAttribute]) return [self orientation];
@@ -443,7 +454,15 @@ static inline NSMutableArray* ConvertToNSArray(nsTArray<ProxyAccessible*>& aArra
   if (accWrap) {
     Accessible* child =
         accWrap->ChildAtPoint(geckoPoint.x, geckoPoint.y, Accessible::eDeepestChild);
-    if (child) nativeChild = GetNativeFromGeckoAccessible(child);
+    // If this is an outer doc, drill down further into proxies to find deepest remote child.
+    if (OuterDocAccessible* docOwner = child->AsOuterDoc()) {
+      if (ProxyAccessible* proxyDoc = docOwner->RemoteChildDoc()) {
+        mozAccessible* nativeRemoteChild = GetNativeFromProxy(proxyDoc);
+        return [nativeRemoteChild accessibilityHitTest:point];
+      }
+    } else if (child) {
+      nativeChild = GetNativeFromGeckoAccessible(child);
+    }
   } else if (proxy) {
     ProxyAccessible* child =
         proxy->ChildAtPoint(geckoPoint.x, geckoPoint.y, Accessible::eDeepestChild);
@@ -464,6 +483,43 @@ static inline NSMutableArray* ConvertToNSArray(nsTArray<ProxyAccessible*>& aArra
   // by default we return whatever the MacOS API know about.
   // if you have custom actions, override.
   return NSAccessibilityActionDescription(action);
+}
+
+- (NSString*)accessibilityLabel {
+  AccessibleWrap* accWrap = [self getGeckoAccessible];
+  ProxyAccessible* proxy = [self getProxyAccessible];
+  if (!accWrap && !proxy) {
+    return nil;
+  }
+
+  /* If our accessible is labelled by exactly one item, or if its
+   * name is obtained from a subtree, we should let
+   * NSAccessibilityTitleUIElementAttribute determine its label. */
+  if (accWrap) {
+    nsAutoString name;
+    ENameValueFlag flag = accWrap->Name(name);
+    if (flag == eNameFromSubtree) {
+      return nil;
+    }
+
+    Relation rel = accWrap->RelationByType(RelationType::LABELLED_BY);
+    if (rel.Next() && !rel.Next()) {
+      return nil;
+    }
+  } else if (proxy) {
+    nsAutoString name;
+    uint32_t flag = proxy->Name(name);
+    if (flag == eNameFromSubtree) {
+      return nil;
+    }
+
+    nsTArray<ProxyAccessible*> rels = proxy->RelationByType(RelationType::LABELLED_BY);
+    if (rels.Length() == 1) {
+      return nil;
+    }
+  }
+
+  return [self title];
 }
 
 - (void)accessibilityPerformAction:(NSString*)action {
@@ -990,10 +1046,13 @@ struct RoleDescrComparator {
 }
 
 - (BOOL)canBeFocused {
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible])
-    return accWrap->InteractiveState() & states::FOCUSABLE;
+  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
+    return (accWrap->InteractiveState() & states::FOCUSABLE) != 0;
+  }
 
-  if (ProxyAccessible* proxy = [self getProxyAccessible]) return proxy->State() & states::FOCUSABLE;
+  if (ProxyAccessible* proxy = [self getProxyAccessible]) {
+    return (proxy->State() & states::FOCUSABLE) != 0;
+  }
 
   return false;
 }

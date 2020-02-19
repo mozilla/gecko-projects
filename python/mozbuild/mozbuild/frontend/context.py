@@ -1027,6 +1027,7 @@ GeneratedFilesList = StrictOrderingOnAppendListWithFlagsFactory({
     'script': six.text_type,
     'inputs': list,
     'force': bool,
+    'py2': bool,
     'flags': list, })
 
 
@@ -2015,10 +2016,6 @@ VARIABLES = {
 
     'FIREFOX_UI_FUNCTIONAL_MANIFESTS': (ManifestparserManifestList, list,
                                         """List of manifest files defining firefox-ui-functional tests.
-        """),
-
-    'PUPPETEER_FIREFOX_MANIFESTS': (ManifestparserManifestList, list,
-                                    """List of manifest files defining puppeteer unit tests for Firefox.
         """),
 
     'MARIONETTE_LAYOUT_MANIFESTS': (ManifestparserManifestList, list,

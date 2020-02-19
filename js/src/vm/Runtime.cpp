@@ -29,7 +29,7 @@
 #include "gc/PublicIterators.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/arm64/vixl/Simulator-vixl.h"
-#include "jit/IonBuilder.h"
+#include "jit/IonCompileTask.h"
 #include "jit/JitRealm.h"
 #include "jit/mips32/Simulator-mips32.h"
 #include "jit/mips64/Simulator-mips64.h"
@@ -210,11 +210,12 @@ bool JSRuntime::init(JSContext* cx, uint32_t maxbytes) {
   }
 
   UniquePtr<Zone> atomsZone = MakeUnique<Zone>(this);
-  if (!atomsZone || !atomsZone->init(true)) {
+  if (!atomsZone || !atomsZone->init()) {
     return false;
   }
 
   gc.atomsZone = atomsZone.release();
+  gc.atomsZone->setIsAtomsZone();
 
   // The garbage collector depends on everything before this point being
   // initialized.

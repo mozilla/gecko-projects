@@ -309,6 +309,10 @@ impl DataStores {
                 let prim_data = &self.radial_grad[data_handle];
                 &prim_data.common
             }
+            PrimitiveInstanceKind::ConicGradient { data_handle, .. } => {
+                let prim_data = &self.conic_grad[data_handle];
+                &prim_data.common
+            }
             PrimitiveInstanceKind::TextRun { data_handle, .. }  => {
                 let prim_data = &self.text_run[data_handle];
                 &prim_data.common
@@ -510,8 +514,8 @@ impl Document {
             FrameMsg::UpdateDynamicProperties(property_bindings) => {
                 self.dynamic_properties.set_properties(property_bindings);
             }
-            FrameMsg::AppendDynamicProperties(property_bindings) => {
-                self.dynamic_properties.add_properties(property_bindings);
+            FrameMsg::AppendDynamicTransformProperties(property_bindings) => {
+                self.dynamic_properties.add_transforms(property_bindings);
             }
             FrameMsg::SetPinchZoom(factor) => {
                 if self.view.pinch_zoom_factor != factor.get() {

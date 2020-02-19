@@ -62,7 +62,6 @@
  *
  */
 
-var gPrintSettingsAreGlobal = false;
 var gSavePrintSettings = false;
 var gFocusedElement = null;
 
@@ -417,9 +416,6 @@ var PrintUtils = {
   },
 
   getPrintSettings() {
-    gPrintSettingsAreGlobal = Services.prefs.getBoolPref(
-      "print.use_global_printsettings"
-    );
     gSavePrintSettings = Services.prefs.getBoolPref(
       "print.save_print_settings"
     );
@@ -429,12 +425,8 @@ var PrintUtils = {
       var PSSVC = Cc["@mozilla.org/gfx/printsettings-service;1"].getService(
         Ci.nsIPrintSettingsService
       );
-      if (gPrintSettingsAreGlobal) {
-        printSettings = PSSVC.globalPrintSettings;
-        this._setPrinterDefaultsForSelectedPrinter(PSSVC, printSettings);
-      } else {
-        printSettings = PSSVC.newPrintSettings;
-      }
+      printSettings = PSSVC.globalPrintSettings;
+      this._setPrinterDefaultsForSelectedPrinter(PSSVC, printSettings);
     } catch (e) {
       dump("getPrintSettings: " + e + "\n");
     }
@@ -638,15 +630,15 @@ var PrintUtils = {
       }
 
       // copy the window close handler
-      if (document.documentElement.hasAttribute("onclose")) {
-        this._closeHandlerPP = document.documentElement.getAttribute("onclose");
+      if (window.onclose) {
+        this._closeHandlerPP = window.onclose;
       } else {
         this._closeHandlerPP = null;
       }
-      document.documentElement.setAttribute(
-        "onclose",
-        "PrintUtils.exitPrintPreview(); return false;"
-      );
+      window.onclose = function() {
+        PrintUtils.exitPrintPreview();
+        return false;
+      };
 
       // disable chrome shortcuts...
       window.addEventListener("keydown", this.onKeyDownPP, true);
@@ -673,9 +665,9 @@ var PrintUtils = {
 
     // restore the old close handler
     if (this._closeHandlerPP) {
-      document.documentElement.setAttribute("onclose", this._closeHandlerPP);
+      window.onclose = this._closeHandlerPP;
     } else {
-      document.documentElement.removeAttribute("onclose");
+      window.onclose = null;
     }
     this._closeHandlerPP = null;
 

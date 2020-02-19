@@ -3704,7 +3704,7 @@ gboolean nsWindow::OnTouchEvent(GdkEventTouch* aEvent) {
     }
   } else if (aEvent->type == GDK_TOUCH_END ||
              aEvent->type == GDK_TOUCH_CANCEL) {
-    *event.mTouches.AppendElement() = touch.forget();
+    *event.mTouches.AppendElement() = std::move(touch);
   }
 
   DispatchInputEvent(&event);
@@ -7769,6 +7769,13 @@ GtkTextDirection nsWindow::GetTextDirection() {
 }
 
 void nsWindow::LockAspectRatio(bool aShouldLock) {
+  static const char* currentDesktop = getenv("XDG_CURRENT_DESKTOP");
+  static bool setLock =
+      currentDesktop ? (strstr(currentDesktop, "GNOME") != nullptr) : false;
+  if (!setLock) {
+    return;
+  }
+
   if (aShouldLock) {
     float width = (float)DevicePixelsToGdkCoordRoundDown(mBounds.width);
     float height = (float)DevicePixelsToGdkCoordRoundDown(mBounds.height);

@@ -803,19 +803,13 @@ inline void JSFunction::trace(JSTracer* trc) {
     // for self-hosted code.
     if (isIncomplete()) {
       MOZ_ASSERT(u.scripted.s.script_ == nullptr);
-    } else if (hasScript()) {
-      JSScript* script = static_cast<JSScript*>(u.scripted.s.script_);
+    } else if (hasBaseScript()) {
+      BaseScript* script = u.scripted.s.script_;
       TraceManuallyBarrieredEdge(trc, &script, "script");
       // Self-hosted scripts are shared with workers but are never
       // relocated. Skip unnecessary writes to prevent the possible data race.
       if (u.scripted.s.script_ != script) {
         u.scripted.s.script_ = script;
-      }
-    } else if (hasLazyScript()) {
-      LazyScript* lazy = static_cast<LazyScript*>(u.scripted.s.script_);
-      TraceManuallyBarrieredEdge(trc, &lazy, "lazy");
-      if (u.scripted.s.script_ != lazy) {
-        u.scripted.s.script_ = lazy;
       }
     }
     // NOTE: The u.scripted.s.selfHostedLazy_ does not point to GC things.
@@ -1912,8 +1906,7 @@ static bool CreateDynamicFunction(JSContext* cx, const CallArgs& args,
 
   // Block this call if security callbacks forbid it.
   Handle<GlobalObject*> global = cx->global();
-  RootedValue v(cx, StringValue(functionText));
-  if (!GlobalObject::isRuntimeCodeGenEnabled(cx, v, global)) {
+  if (!GlobalObject::isRuntimeCodeGenEnabled(cx, functionText, global)) {
     JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
                               JSMSG_CSP_BLOCKED_FUNCTION);
     return false;

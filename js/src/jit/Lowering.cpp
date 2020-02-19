@@ -234,12 +234,6 @@ void LIRGenerator::visitNewObject(MNewObject* ins) {
   assignSafepoint(lir, ins);
 }
 
-void LIRGenerator::visitNewTypedObject(MNewTypedObject* ins) {
-  LNewTypedObject* lir = new (alloc()) LNewTypedObject(temp());
-  define(lir, ins);
-  assignSafepoint(lir, ins);
-}
-
 void LIRGenerator::visitNewNamedLambdaObject(MNewNamedLambdaObject* ins) {
   LNewNamedLambdaObject* lir = new (alloc()) LNewNamedLambdaObject(temp());
   define(lir, ins);
@@ -249,14 +243,6 @@ void LIRGenerator::visitNewNamedLambdaObject(MNewNamedLambdaObject* ins) {
 void LIRGenerator::visitNewCallObject(MNewCallObject* ins) {
   LNewCallObject* lir = new (alloc()) LNewCallObject(temp());
   define(lir, ins);
-  assignSafepoint(lir, ins);
-}
-
-void LIRGenerator::visitNewDerivedTypedObject(MNewDerivedTypedObject* ins) {
-  LNewDerivedTypedObject* lir = new (alloc()) LNewDerivedTypedObject(
-      useRegisterAtStart(ins->type()), useRegisterAtStart(ins->owner()),
-      useRegisterAtStart(ins->offset()));
-  defineReturn(lir, ins);
   assignSafepoint(lir, ins);
 }
 
@@ -2315,14 +2301,9 @@ void LIRGenerator::visitToObjectOrNull(MToObjectOrNull* ins) {
 }
 
 void LIRGenerator::visitRegExp(MRegExp* ins) {
-  if (ins->mustClone()) {
-    LRegExp* lir = new (alloc()) LRegExp(temp());
-    define(lir, ins);
-    assignSafepoint(lir, ins);
-  } else {
-    RegExpObject* source = ins->source();
-    define(new (alloc()) LPointer(source), ins);
-  }
+  LRegExp* lir = new (alloc()) LRegExp(temp());
+  define(lir, ins);
+  assignSafepoint(lir, ins);
 }
 
 void LIRGenerator::visitRegExpMatcher(MRegExpMatcher* ins) {
@@ -2441,6 +2422,15 @@ void LIRGenerator::visitClassConstructor(MClassConstructor* ins) {
   assignSafepoint(lir, ins);
 }
 
+void LIRGenerator::visitDerivedClassConstructor(MDerivedClassConstructor* ins) {
+  MDefinition* proto = ins->prototype();
+  MOZ_ASSERT(ins->type() == MIRType::Object);
+
+  auto* lir = new (alloc()) LDerivedClassConstructor(useRegisterAtStart(proto));
+  defineReturn(lir, ins);
+  assignSafepoint(lir, ins);
+}
+
 void LIRGenerator::visitModuleMetadata(MModuleMetadata* ins) {
   LModuleMetadata* lir = new (alloc()) LModuleMetadata();
   defineReturn(lir, ins);
@@ -2481,6 +2471,17 @@ void LIRGenerator::visitLambdaArrow(MLambdaArrow* ins) {
       new (alloc()) LLambdaArrow(useRegister(ins->environmentChain()),
                                  useBox(ins->newTargetDef()), temp());
   define(lir, ins);
+  assignSafepoint(lir, ins);
+}
+
+void LIRGenerator::visitFunctionWithProto(MFunctionWithProto* ins) {
+  MOZ_ASSERT(ins->environmentChain()->type() == MIRType::Object);
+  MOZ_ASSERT(ins->prototype()->type() == MIRType::Object);
+
+  auto* lir = new (alloc())
+      LFunctionWithProto(useRegisterAtStart(ins->environmentChain()),
+                         useRegisterAtStart(ins->prototype()));
+  defineReturn(lir, ins);
   assignSafepoint(lir, ins);
 }
 
@@ -2939,17 +2940,6 @@ void LIRGenerator::visitTypedArrayIndexToInt32(MTypedArrayIndexToInt32* ins) {
   }
 }
 
-void LIRGenerator::visitTypedObjectDescr(MTypedObjectDescr* ins) {
-  MOZ_ASSERT(ins->type() == MIRType::Object);
-  define(new (alloc()) LTypedObjectDescr(useRegisterAtStart(ins->object())),
-         ins);
-}
-
-void LIRGenerator::visitTypedObjectElements(MTypedObjectElements* ins) {
-  MOZ_ASSERT(ins->type() == MIRType::Elements);
-  define(new (alloc()) LTypedObjectElements(useRegister(ins->object())), ins);
-}
-
 void LIRGenerator::visitInitializedLength(MInitializedLength* ins) {
   MOZ_ASSERT(ins->elements()->type() == MIRType::Elements);
   define(new (alloc()) LInitializedLength(useRegisterAtStart(ins->elements())),
@@ -3143,37 +3133,6 @@ void LIRGenerator::visitLoadElementHole(MLoadElementHole* ins) {
   defineBox(lir, ins);
 }
 
-void LIRGenerator::visitLoadUnboxedObjectOrNull(MLoadUnboxedObjectOrNull* ins) {
-  MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
-  MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
-
-  if (ins->type() == MIRType::Object || ins->type() == MIRType::ObjectOrNull) {
-    LLoadUnboxedPointerT* lir = new (alloc()) LLoadUnboxedPointerT(
-        useRegister(ins->elements()), useRegisterOrConstant(ins->index()));
-    if (ins->nullBehavior() == MLoadUnboxedObjectOrNull::BailOnNull) {
-      assignSnapshot(lir, Bailout_TypeBarrierO);
-    }
-    define(lir, ins);
-  } else {
-    MOZ_ASSERT(ins->type() == MIRType::Value);
-    MOZ_ASSERT(ins->nullBehavior() != MLoadUnboxedObjectOrNull::BailOnNull);
-
-    LLoadUnboxedPointerV* lir = new (alloc()) LLoadUnboxedPointerV(
-        useRegister(ins->elements()), useRegisterOrConstant(ins->index()));
-    defineBox(lir, ins);
-  }
-}
-
-void LIRGenerator::visitLoadUnboxedString(MLoadUnboxedString* ins) {
-  MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
-  MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
-  MOZ_ASSERT(ins->type() == MIRType::String);
-
-  LLoadUnboxedPointerT* lir = new (alloc()) LLoadUnboxedPointerT(
-      useRegister(ins->elements()), useRegisterOrConstant(ins->index()));
-  define(lir, ins);
-}
-
 void LIRGenerator::visitLoadElementFromState(MLoadElementFromState* ins) {
   MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
 
@@ -3343,37 +3302,6 @@ void LIRGenerator::visitFallibleStoreElement(MFallibleStoreElement* ins) {
 
   add(lir, ins);
   assignSafepoint(lir, ins);
-}
-
-void LIRGenerator::visitStoreUnboxedObjectOrNull(
-    MStoreUnboxedObjectOrNull* ins) {
-  MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
-  MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
-  MOZ_ASSERT(ins->value()->type() == MIRType::Object ||
-             ins->value()->type() == MIRType::Null ||
-             ins->value()->type() == MIRType::ObjectOrNull);
-
-  const LUse elements = useRegister(ins->elements());
-  const LAllocation index = useRegisterOrNonDoubleConstant(ins->index());
-  const LAllocation value = useRegisterOrNonDoubleConstant(ins->value());
-
-  LInstruction* lir =
-      new (alloc()) LStoreUnboxedPointer(elements, index, value);
-  add(lir, ins);
-}
-
-void LIRGenerator::visitStoreUnboxedString(MStoreUnboxedString* ins) {
-  MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
-  MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
-  MOZ_ASSERT(ins->value()->type() == MIRType::String);
-
-  const LUse elements = useRegister(ins->elements());
-  const LAllocation index = useRegisterOrConstant(ins->index());
-  const LAllocation value = useRegisterOrNonDoubleConstant(ins->value());
-
-  LInstruction* lir =
-      new (alloc()) LStoreUnboxedPointer(elements, index, value);
-  add(lir, ins);
 }
 
 void LIRGenerator::visitEffectiveAddress(MEffectiveAddress* ins) {
@@ -4670,11 +4598,10 @@ void LIRGenerator::visitCheckReturn(MCheckReturn* ins) {
   MOZ_ASSERT(retVal->type() == MIRType::Value);
   MOZ_ASSERT(thisVal->type() == MIRType::Value);
 
-  LCheckReturn* lir =
+  auto* lir =
       new (alloc()) LCheckReturn(useBoxAtStart(retVal), useBoxAtStart(thisVal));
   assignSnapshot(lir, Bailout_BadDerivedConstructorReturn);
-  add(lir, ins);
-  redefine(ins, retVal);
+  defineBox(lir, ins);
 }
 
 void LIRGenerator::visitCheckIsObj(MCheckIsObj* ins) {
@@ -4705,6 +4632,36 @@ void LIRGenerator::visitCheckObjCoercible(MCheckObjCoercible* ins) {
   LCheckObjCoercible* lir =
       new (alloc()) LCheckObjCoercible(useBoxAtStart(checkVal));
   redefine(ins, checkVal);
+  add(lir, ins);
+  assignSafepoint(lir, ins);
+}
+
+void LIRGenerator::visitCheckClassHeritage(MCheckClassHeritage* ins) {
+  MDefinition* heritage = ins->heritage();
+  MOZ_ASSERT(heritage->type() == MIRType::Value);
+
+  auto* lir = new (alloc()) LCheckClassHeritage(useBox(heritage), temp());
+  redefine(ins, heritage);
+  add(lir, ins);
+  assignSafepoint(lir, ins);
+}
+
+void LIRGenerator::visitCheckThis(MCheckThis* ins) {
+  MDefinition* thisValue = ins->thisValue();
+  MOZ_ASSERT(thisValue->type() == MIRType::Value);
+
+  auto* lir = new (alloc()) LCheckThis(useBox(thisValue));
+  redefine(ins, thisValue);
+  add(lir, ins);
+  assignSafepoint(lir, ins);
+}
+
+void LIRGenerator::visitCheckThisReinit(MCheckThisReinit* ins) {
+  MDefinition* thisValue = ins->thisValue();
+  MOZ_ASSERT(thisValue->type() == MIRType::Value);
+
+  auto* lir = new (alloc()) LCheckThisReinit(useBox(thisValue));
+  redefine(ins, thisValue);
   add(lir, ins);
   assignSafepoint(lir, ins);
 }
@@ -4743,6 +4700,46 @@ void LIRGenerator::visitGetPrototypeOf(MGetPrototypeOf* ins) {
   auto lir = new (alloc()) LGetPrototypeOf(useRegister(ins->target()));
   defineBox(lir, ins);
   assignSafepoint(lir, ins);
+}
+
+void LIRGenerator::visitObjectWithProto(MObjectWithProto* ins) {
+  MOZ_ASSERT(ins->prototype()->type() == MIRType::Value);
+  MOZ_ASSERT(ins->type() == MIRType::Object);
+
+  auto* lir = new (alloc()) LObjectWithProto(useBoxAtStart(ins->prototype()));
+  defineReturn(lir, ins);
+  assignSafepoint(lir, ins);
+}
+
+void LIRGenerator::visitBuiltinProto(MBuiltinProto* ins) {
+  MOZ_ASSERT(ins->type() == MIRType::Object);
+
+  auto* lir = new (alloc()) LBuiltinProto();
+  defineReturn(lir, ins);
+  assignSafepoint(lir, ins);
+}
+
+void LIRGenerator::visitSuperFunction(MSuperFunction* ins) {
+  MOZ_ASSERT(ins->callee()->type() == MIRType::Object);
+  MOZ_ASSERT(ins->type() == MIRType::Value);
+
+  auto* lir = new (alloc()) LSuperFunction(useRegister(ins->callee()), temp());
+  defineBox(lir, ins);
+}
+
+void LIRGenerator::visitInitHomeObject(MInitHomeObject* ins) {
+  MDefinition* function = ins->function();
+  MOZ_ASSERT(function->type() == MIRType::Object);
+
+  MDefinition* homeObject = ins->homeObject();
+  MOZ_ASSERT(homeObject->type() == MIRType::Value);
+
+  MOZ_ASSERT(ins->type() == MIRType::Object);
+
+  auto* lir = new (alloc())
+      LInitHomeObject(useRegisterAtStart(function), useBoxAtStart(homeObject));
+  redefine(ins, function);
+  add(lir, ins);
 }
 
 void LIRGenerator::visitConstant(MConstant* ins) {

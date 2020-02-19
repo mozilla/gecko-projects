@@ -42,15 +42,14 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
         }
 
         /**
-         * Set the content process hint flag.
+         * Set whether multiprocess support should be enabled.
          *
-         * @param use If true, this will reload the content process for future use.
-         *            Default is false.
+         * @param use A flag determining whether multiprocess should be enabled.
+         *            Default is true.
          * @return This Builder instance.
-
          */
-        public @NonNull Builder useContentProcessHint(final boolean use) {
-            getSettings().mUseContentProcess = use;
+        public @NonNull Builder useMultiprocess(final boolean use) {
+            getSettings().mUseMultiprocess.set(use);
             return this;
         }
 
@@ -433,7 +432,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     }
 
     private GeckoRuntime mRuntime;
-    /* package */ boolean mUseContentProcess;
     /* package */ String[] mArgs;
     /* package */ Bundle mExtras;
     /* package */ String mConfigFilePath;
@@ -478,6 +476,8 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
             "general.aboutConfig.enable", false);
     /* package */ final Pref<Boolean> mForceUserScalable = new Pref<>(
             "browser.ui.zoom.force-user-scalable", false);
+    /* package */ final Pref<Boolean> mUseMultiprocess = new Pref<>(
+            "browser.tabs.remote.autostart", true);
 
     /* package */ boolean mDebugPause;
     /* package */ boolean mUseMaxScreenDepth;
@@ -524,7 +524,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     private void updateSettings(final @NonNull GeckoRuntimeSettings settings) {
         updatePrefs(settings);
 
-        mUseContentProcess = settings.getUseContentProcessHint();
         mArgs = settings.getArguments().clone();
         mExtras = new Bundle(settings.getExtras());
         mContentBlocking = new ContentBlocking.Settings(
@@ -548,13 +547,14 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     }
 
     /**
-     * Get the content process hint flag.
+     * Whether multiprocess is enabled.
      *
-     * @return The content process hint flag.
+     * @return true if multiprocess is enabled, false otherwise.
      */
-    public boolean getUseContentProcessHint() {
-        return mUseContentProcess;
+    public boolean getUseMultiprocess() {
+        return mUseMultiprocess.get();
     }
+
 
     /**
      * Get the custom Gecko process arguments.
@@ -1099,7 +1099,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     public void writeToParcel(final Parcel out, final int flags) {
         super.writeToParcel(out, flags);
 
-        ParcelableUtils.writeBoolean(out, mUseContentProcess);
         out.writeStringArray(mArgs);
         mExtras.writeToParcel(out, flags);
         ParcelableUtils.writeBoolean(out, mDebugPause);
@@ -1117,7 +1116,6 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     public void readFromParcel(final @NonNull Parcel source) {
         super.readFromParcel(source);
 
-        mUseContentProcess = ParcelableUtils.readBoolean(source);
         mArgs = source.createStringArray();
         mExtras.readFromParcel(source);
         mDebugPause = ParcelableUtils.readBoolean(source);

@@ -360,10 +360,13 @@ SheetLoadData::SheetLoadData(Loader* aLoader, nsIURI* aURI, StyleSheet* aSheet,
 }
 
 SheetLoadData::~SheetLoadData() {
+  MOZ_DIAGNOSTIC_ASSERT(mSheetCompleteCalled,
+                        "Should always call SheetComplete");
+
   // Do this iteratively to avoid blowing up the stack.
-  RefPtr<SheetLoadData> next = mNext.forget();
+  RefPtr<SheetLoadData> next = std::move(mNext);
   while (next) {
-    next = next->mNext.forget();
+    next = std::move(next->mNext);
   }
 }
 
@@ -1341,7 +1344,7 @@ nsresult Loader::LoadSheet(SheetLoadData& aLoadData, SheetState aSheetState,
     // Create a StreamLoader instance to which we will feed
     // the data from the sync load.  Do this before creating the
     // channel to make error recovery simpler.
-    nsCOMPtr<nsIStreamListener> streamLoader = new StreamLoader(aLoadData);
+    auto streamLoader = MakeRefPtr<StreamLoader>(aLoadData);
 
     if (mDocument) {
       net::PredictorLearn(aLoadData.mURI, mDocument->GetDocumentURI(),
@@ -1392,6 +1395,7 @@ nsresult Loader::LoadSheet(SheetLoadData& aLoadData, SheetState aSheetState,
     }
     if (NS_FAILED(rv)) {
       LOG_ERROR(("  Failed to create channel"));
+      streamLoader->ChannelOpenFailed();
       SheetComplete(aLoadData, rv);
       return rv;
     }
@@ -1413,6 +1417,7 @@ nsresult Loader::LoadSheet(SheetLoadData& aLoadData, SheetState aSheetState,
 
     if (NS_FAILED(rv)) {
       LOG_ERROR(("  Failed to open URI synchronously"));
+      streamLoader->ChannelOpenFailed();
       SheetComplete(aLoadData, rv);
       return rv;
     }
@@ -1615,17 +1620,16 @@ nsresult Loader::LoadSheet(SheetLoadData& aLoadData, SheetState aSheetState,
   // We don't have to hold on to the stream loader.  The ownership
   // model is: Necko owns the stream loader, which owns the load data,
   // which owns us
-  nsCOMPtr<nsIStreamListener> streamLoader = new StreamLoader(aLoadData);
-
+  auto streamLoader = MakeRefPtr<StreamLoader>(aLoadData);
   if (mDocument) {
     net::PredictorLearn(aLoadData.mURI, mDocument->GetDocumentURI(),
                         nsINetworkPredictor::LEARN_LOAD_SUBRESOURCE, mDocument);
   }
 
   rv = channel->AsyncOpen(streamLoader);
-
   if (NS_FAILED(rv)) {
     LOG_ERROR(("  Failed to create stream loader"));
+    streamLoader->ChannelOpenFailed();
     SheetComplete(aLoadData, rv);
     return rv;
   }
@@ -1772,14 +1776,10 @@ void Loader::DoSheetComplete(SheetLoadData& aLoadData,
     // Remove the data from the list of loading datas
     if (aLoadData.mIsLoading) {
       SheetLoadDataHashKey key(aLoadData);
-#ifdef DEBUG
-      SheetLoadData* loadingData;
-      NS_ASSERTION(mSheets->mLoadingDatas.Get(&key, &loadingData) &&
-                       loadingData == &aLoadData,
-                   "Bad loading table");
-#endif
-
-      mSheets->mLoadingDatas.Remove(&key);
+      Maybe<SheetLoadData*> loadingData =
+          mSheets->mLoadingDatas.GetAndRemove(&key);
+      MOZ_DIAGNOSTIC_ASSERT(loadingData && loadingData.value() == &aLoadData);
+      Unused << loadingData;
       aLoadData.mIsLoading = false;
     }
   }
@@ -1787,6 +1787,11 @@ void Loader::DoSheetComplete(SheetLoadData& aLoadData,
   // Go through and deal with the whole linked list.
   SheetLoadData* data = &aLoadData;
   do {
+    MOZ_DIAGNOSTIC_ASSERT(!data->mSheetCompleteCalled);
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+    data->mSheetCompleteCalled = true;
+#endif
+
     if (!data->mSheetAlreadyComplete) {
       // If mSheetAlreadyComplete, then the sheet could well be modified between
       // when we posted the async call to SheetComplete and now, since the sheet

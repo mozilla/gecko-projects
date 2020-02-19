@@ -31,6 +31,11 @@ ChromeUtils.defineModuleGetter(
 );
 ChromeUtils.defineModuleGetter(
   this,
+  "AboutNewTabStartupRecorder",
+  "resource:///modules/AboutNewTabService.jsm"
+);
+ChromeUtils.defineModuleGetter(
+  this,
   "PingCentre",
   "resource:///modules/PingCentre.jsm"
 );
@@ -787,15 +792,6 @@ this.TelemetryFeed = class TelemetryFeed {
       Cu.reportError("Unknown ping type for ASRouter telemetry");
       return;
     }
-    // Don't report snippets telemetry from Nightly channel if using release
-    // snippets endpoint
-    if (
-      pingType === "snippets" &&
-      ASRouterPreferences.useReleaseSnippets &&
-      action.data.action !== "snippets_local_testing_user_event"
-    ) {
-      return;
-    }
     this.sendStructuredIngestionEvent(
       ping,
       STRUCTURED_INGESTION_NAMESPACE_MS,
@@ -1073,7 +1069,7 @@ this.TelemetryFeed = class TelemetryFeed {
       !HomePage.overridden &&
       Services.prefs.getIntPref("browser.startup.page") === 1
     ) {
-      aboutNewTabService.maybeRecordTopsitesPainted(timestamp);
+      AboutNewTabStartupRecorder.maybeRecordTopsitesPainted(timestamp);
     }
 
     Object.assign(session.perf, data);

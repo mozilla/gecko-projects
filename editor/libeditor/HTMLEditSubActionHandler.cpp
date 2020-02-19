@@ -94,46 +94,6 @@ static bool IsStyleCachePreservingSubAction(EditSubAction aEditSubAction) {
   }
 }
 
-class TableCellAndListItemFunctor final : public BoolDomIterFunctor {
- public:
-  // Used to build list of all li's, td's & th's iterator covers
-  virtual bool operator()(nsINode* aNode) const override {
-    return HTMLEditUtils::IsTableCell(aNode) ||
-           HTMLEditUtils::IsListItem(aNode);
-  }
-};
-
-class BRNodeFunctor final : public BoolDomIterFunctor {
- public:
-  virtual bool operator()(nsINode* aNode) const override {
-    return aNode->IsHTMLElement(nsGkAtoms::br);
-  }
-};
-
-class EmptyEditableFunctor final : public BoolDomIterFunctor {
- public:
-  explicit EmptyEditableFunctor(HTMLEditor* aHTMLEditor)
-      : mHTMLEditor(aHTMLEditor) {}
-
-  virtual bool operator()(nsINode* aNode) const override {
-    if (mHTMLEditor->IsEditable(aNode) &&
-        (HTMLEditUtils::IsListItem(aNode) ||
-         HTMLEditUtils::IsTableCellOrCaption(*aNode))) {
-      bool bIsEmptyNode;
-      nsresult rv =
-          mHTMLEditor->IsEmptyNode(aNode, &bIsEmptyNode, false, false);
-      NS_ENSURE_SUCCESS(rv, false);
-      if (bIsEmptyNode) {
-        return true;
-      }
-    }
-    return false;
-  }
-
- protected:
-  HTMLEditor* mHTMLEditor;
-};
-
 class MOZ_RAII AutoSetTemporaryAncestorLimiter final {
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER;
 
@@ -497,7 +457,7 @@ nsresult HTMLEditor::OnEndHandlingTopLevelEditSubActionInternal() {
         break;
       default: {
         nsresult rv = CollapseAdjacentTextNodes(
-            MOZ_KnownLive(TopLevelEditSubActionDataRef().mChangedRange));
+            MOZ_KnownLive(*TopLevelEditSubActionDataRef().mChangedRange));
         if (NS_WARN_IF(Destroyed())) {
           return NS_ERROR_EDITOR_DESTROYED;
         }
@@ -733,9 +693,9 @@ ListElementSelectionState::ListElementSelectionState(HTMLEditor& aHTMLEditor,
     return;
   }
 
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   nsresult rv = aHTMLEditor.CollectEditTargetNodesInExtendedSelectionRanges(
-      arrayOfNodes, EditSubAction::eCreateOrChangeList,
+      arrayOfContents, EditSubAction::eCreateOrChangeList,
       HTMLEditor::CollectNonEditableNodes::No);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     aRv = EditorBase::ToGenericNSResult(rv);
@@ -743,22 +703,22 @@ ListElementSelectionState::ListElementSelectionState(HTMLEditor& aHTMLEditor,
   }
 
   // Examine list type for nodes in selection.
-  for (const auto& curNode : arrayOfNodes) {
-    if (!curNode->IsElement()) {
+  for (const auto& content : arrayOfContents) {
+    if (!content->IsElement()) {
       mIsOtherContentSelected = true;
-    } else if (curNode->IsHTMLElement(nsGkAtoms::ul)) {
+    } else if (content->IsHTMLElement(nsGkAtoms::ul)) {
       mIsULElementSelected = true;
-    } else if (curNode->IsHTMLElement(nsGkAtoms::ol)) {
+    } else if (content->IsHTMLElement(nsGkAtoms::ol)) {
       mIsOLElementSelected = true;
-    } else if (curNode->IsHTMLElement(nsGkAtoms::li)) {
-      if (Element* parent = curNode->GetParentElement()) {
+    } else if (content->IsHTMLElement(nsGkAtoms::li)) {
+      if (Element* parent = content->GetParentElement()) {
         if (parent->IsHTMLElement(nsGkAtoms::ul)) {
           mIsULElementSelected = true;
         } else if (parent->IsHTMLElement(nsGkAtoms::ol)) {
           mIsOLElementSelected = true;
         }
       }
-    } else if (curNode->IsAnyOfHTMLElements(nsGkAtoms::dl, nsGkAtoms::dt,
+    } else if (content->IsAnyOfHTMLElements(nsGkAtoms::dl, nsGkAtoms::dt,
                                             nsGkAtoms::dd)) {
       mIsDLElementSelected = true;
     } else {
@@ -791,9 +751,9 @@ ListItemElementSelectionState::ListItemElementSelectionState(
     return;
   }
 
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   nsresult rv = aHTMLEditor.CollectEditTargetNodesInExtendedSelectionRanges(
-      arrayOfNodes, EditSubAction::eCreateOrChangeList,
+      arrayOfContents, EditSubAction::eCreateOrChangeList,
       HTMLEditor::CollectNonEditableNodes::No);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     aRv = EditorBase::ToGenericNSResult(rv);
@@ -801,22 +761,22 @@ ListItemElementSelectionState::ListItemElementSelectionState(
   }
 
   // examine list type for nodes in selection
-  for (const auto& node : arrayOfNodes) {
-    if (!node->IsElement()) {
+  for (const auto& content : arrayOfContents) {
+    if (!content->IsElement()) {
       mIsOtherElementSelected = true;
-    } else if (node->IsAnyOfHTMLElements(nsGkAtoms::ul, nsGkAtoms::ol,
-                                         nsGkAtoms::li)) {
+    } else if (content->IsAnyOfHTMLElements(nsGkAtoms::ul, nsGkAtoms::ol,
+                                            nsGkAtoms::li)) {
       mIsLIElementSelected = true;
-    } else if (node->IsHTMLElement(nsGkAtoms::dt)) {
+    } else if (content->IsHTMLElement(nsGkAtoms::dt)) {
       mIsDTElementSelected = true;
-    } else if (node->IsHTMLElement(nsGkAtoms::dd)) {
+    } else if (content->IsHTMLElement(nsGkAtoms::dd)) {
       mIsDDElementSelected = true;
-    } else if (node->IsHTMLElement(nsGkAtoms::dl)) {
+    } else if (content->IsHTMLElement(nsGkAtoms::dl)) {
       if (mIsDTElementSelected && mIsDDElementSelected) {
         continue;
       }
       // need to look inside dl and see which types of items it has
-      DefinitionListItemScanner scanner(*node->AsElement());
+      DefinitionListItemScanner scanner(*content->AsElement());
       mIsDTElementSelected |= scanner.DTElementFound();
       mIsDDElementSelected |= scanner.DDElementFound();
     } else {
@@ -911,16 +871,15 @@ AlignStateAtSelection::AlignStateAtSelection(HTMLEditor& aHTMLEditor,
     aHTMLEditor.GetSelectionRangesExtendedToHardLineStartAndEnd(
         arrayOfRanges, EditSubAction::eSetOrClearAlignment);
 
-    AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+    AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
     nsresult rv = aHTMLEditor.CollectEditTargetNodes(
-        arrayOfRanges, arrayOfNodes, EditSubAction::eSetOrClearAlignment,
+        arrayOfRanges, arrayOfContents, EditSubAction::eSetOrClearAlignment,
         HTMLEditor::CollectNonEditableNodes::Yes);
-    if (NS_WARN_IF(NS_FAILED(rv)) || NS_WARN_IF(arrayOfNodes.IsEmpty()) ||
-        NS_WARN_IF(!arrayOfNodes[0]->IsContent())) {
+    if (NS_WARN_IF(NS_FAILED(rv)) || NS_WARN_IF(arrayOfContents.IsEmpty())) {
       aRv.Throw(NS_ERROR_FAILURE);
       return;
     }
-    editTargetContent = arrayOfNodes[0]->AsContent();
+    editTargetContent = arrayOfContents[0];
   }
 
   Element* blockElementAtEditTarget = HTMLEditor::GetBlock(*editTargetContent);
@@ -1048,9 +1007,9 @@ ParagraphStateAtSelection::ParagraphStateAtSelection(HTMLEditor& aHTMLEditor,
     return;
   }
 
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   nsresult rv =
-      CollectEditableFormatNodesInSelection(aHTMLEditor, arrayOfNodes);
+      CollectEditableFormatNodesInSelection(aHTMLEditor, arrayOfContents);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     aRv.Throw(rv);
     return;
@@ -1059,32 +1018,37 @@ ParagraphStateAtSelection::ParagraphStateAtSelection(HTMLEditor& aHTMLEditor,
   // We need to append descendant format block if block nodes are not format
   // block.  This is so we only have to look "up" the hierarchy to find
   // format nodes, instead of both up and down.
-  for (int32_t i = arrayOfNodes.Length() - 1; i >= 0; i--) {
-    auto& node = arrayOfNodes[i];
+  for (int32_t i = arrayOfContents.Length() - 1; i >= 0; i--) {
+    auto& content = arrayOfContents[i];
     nsAutoString format;
-    if (HTMLEditor::NodeIsBlockStatic(node) &&
-        !HTMLEditUtils::IsFormatNode(node)) {
+    if (HTMLEditor::NodeIsBlockStatic(content) &&
+        !HTMLEditUtils::IsFormatNode(content)) {
       // XXX This RemoveObject() call has already been commented out and
       //     the above comment explained we're trying to replace non-format
       //     block nodes in the array.  According to the following blocks and
       //     `AppendDescendantFormatNodesAndFirstInlineNode()`, replacing
       //     non-format block with descendants format blocks makes sense.
-      // arrayOfNodes.RemoveObject(node);
+      // arrayOfContents.RemoveObject(node);
       ParagraphStateAtSelection::AppendDescendantFormatNodesAndFirstInlineNode(
-          arrayOfNodes, *node->AsElement());
+          arrayOfContents, *content->AsElement());
     }
   }
 
   // We might have an empty node list.  if so, find selection parent
   // and put that on the list
-  if (arrayOfNodes.IsEmpty()) {
+  if (arrayOfContents.IsEmpty()) {
     EditorRawDOMPoint atCaret(
         EditorBase::GetStartPoint(*aHTMLEditor.SelectionRefPtr()));
     if (NS_WARN_IF(!atCaret.IsSet())) {
       aRv.Throw(NS_ERROR_FAILURE);
       return;
     }
-    arrayOfNodes.AppendElement(*atCaret.GetContainer());
+    nsIContent* content = atCaret.GetContainerAsContent();
+    if (NS_WARN_IF(!content)) {
+      aRv.Throw(NS_ERROR_FAILURE);
+      return;
+    }
+    arrayOfContents.AppendElement(*content);
   }
 
   Element* bodyOrDocumentElement = aHTMLEditor.GetRoot();
@@ -1093,20 +1057,20 @@ ParagraphStateAtSelection::ParagraphStateAtSelection(HTMLEditor& aHTMLEditor,
     return;
   }
 
-  for (auto& node : Reversed(arrayOfNodes)) {
+  for (auto& content : Reversed(arrayOfContents)) {
     nsAtom* paragraphStateOfNode = nsGkAtoms::_empty;
-    if (HTMLEditUtils::IsFormatNode(node)) {
-      MOZ_ASSERT(node->NodeInfo()->NameAtom());
-      paragraphStateOfNode = node->NodeInfo()->NameAtom();
+    if (HTMLEditUtils::IsFormatNode(content)) {
+      MOZ_ASSERT(content->NodeInfo()->NameAtom());
+      paragraphStateOfNode = content->NodeInfo()->NameAtom();
     }
     // Ignore non-format block node since its children have been appended
     // the list above so that we'll handle this descendants later.
-    else if (HTMLEditor::NodeIsBlockStatic(node)) {
+    else if (HTMLEditor::NodeIsBlockStatic(content)) {
       continue;
     }
     // If we meet an inline node, let's get its parent format.
     else {
-      for (nsINode* parentNode = node->GetParentNode(); parentNode;
+      for (nsINode* parentNode = content->GetParentNode(); parentNode;
            parentNode = parentNode->GetParentNode()) {
         // If we reach `HTMLDocument.body` or `Document.documentElement`,
         // there is no format.
@@ -1136,7 +1100,7 @@ ParagraphStateAtSelection::ParagraphStateAtSelection(HTMLEditor& aHTMLEditor,
 
 // static
 void ParagraphStateAtSelection::AppendDescendantFormatNodesAndFirstInlineNode(
-    nsTArray<OwningNonNull<nsINode>>& aArrayOfNodes,
+    nsTArray<OwningNonNull<nsIContent>>& aArrayOfContents,
     Element& aNonFormatBlockElement) {
   MOZ_ASSERT(HTMLEditor::NodeIsBlockStatic(aNonFormatBlockElement));
   MOZ_ASSERT(!HTMLEditUtils::IsFormatNode(&aNonFormatBlockElement));
@@ -1154,13 +1118,13 @@ void ParagraphStateAtSelection::AppendDescendantFormatNodesAndFirstInlineNode(
     // recursively.
     if (isBlock && !isFormat) {
       ParagraphStateAtSelection::AppendDescendantFormatNodesAndFirstInlineNode(
-          aArrayOfNodes, *childContent->AsElement());
+          aArrayOfContents, *childContent->AsElement());
       continue;
     }
 
     // If it's a format block, append it.
     if (isFormat) {
-      aArrayOfNodes.AppendElement(*childContent);
+      aArrayOfContents.AppendElement(*childContent);
       continue;
     }
 
@@ -1168,12 +1132,12 @@ void ParagraphStateAtSelection::AppendDescendantFormatNodesAndFirstInlineNode(
 
     // If we haven't found inline node, append only this first inline node.
     // XXX I think that this makes sense if caller of this removes
-    //     aNonFormatBlockElement from aArrayOfNodes because the last loop of
-    //     the constructor can check parent format block with
+    //     aNonFormatBlockElement from aArrayOfContents because the last loop
+    //     of the constructor can check parent format block with
     //     aNonFormatBlockElement.
     if (!foundInline) {
       foundInline = true;
-      aArrayOfNodes.AppendElement(*childContent);
+      aArrayOfContents.AppendElement(*childContent);
       continue;
     }
   }
@@ -1181,31 +1145,32 @@ void ParagraphStateAtSelection::AppendDescendantFormatNodesAndFirstInlineNode(
 
 // static
 nsresult ParagraphStateAtSelection::CollectEditableFormatNodesInSelection(
-    HTMLEditor& aHTMLEditor, nsTArray<OwningNonNull<nsINode>>& aArrayOfNodes) {
+    HTMLEditor& aHTMLEditor,
+    nsTArray<OwningNonNull<nsIContent>>& aArrayOfContents) {
   nsresult rv = aHTMLEditor.CollectEditTargetNodesInExtendedSelectionRanges(
-      aArrayOfNodes, EditSubAction::eCreateOrRemoveBlock,
+      aArrayOfContents, EditSubAction::eCreateOrRemoveBlock,
       HTMLEditor::CollectNonEditableNodes::Yes);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
   // Pre-process our list of nodes
-  for (int32_t i = aArrayOfNodes.Length() - 1; i >= 0; i--) {
-    OwningNonNull<nsINode> node = aArrayOfNodes[i];
+  for (int32_t i = aArrayOfContents.Length() - 1; i >= 0; i--) {
+    OwningNonNull<nsIContent> content = aArrayOfContents[i];
 
     // Remove all non-editable nodes.  Leave them be.
-    if (!aHTMLEditor.IsEditable(node)) {
-      aArrayOfNodes.RemoveElementAt(i);
+    if (!aHTMLEditor.IsEditable(content)) {
+      aArrayOfContents.RemoveElementAt(i);
       continue;
     }
 
     // Scan for table elements.  If we find table elements other than table,
     // replace it with a list of any editable non-table content.  Ditto for
     // list elements.
-    if (HTMLEditUtils::IsTableElement(node) || HTMLEditUtils::IsList(node) ||
-        HTMLEditUtils::IsListItem(node)) {
-      aArrayOfNodes.RemoveElementAt(i);
-      aHTMLEditor.CollectChildren(node, aArrayOfNodes, i,
+    if (HTMLEditUtils::IsTableElement(content) ||
+        HTMLEditUtils::IsList(content) || HTMLEditUtils::IsListItem(content)) {
+      aArrayOfContents.RemoveElementAt(i);
+      aHTMLEditor.CollectChildren(content, aArrayOfContents, i,
                                   HTMLEditor::CollectListChildren::Yes,
                                   HTMLEditor::CollectTableChildren::Yes,
                                   HTMLEditor::CollectNonEditableNodes::Yes);
@@ -2239,37 +2204,25 @@ EditActionResult HTMLEditor::SplitMailCiteElements(
   }
 
   // delete any empty cites
-  bool bEmptyCite = false;
-  if (previousNodeOfSplitPoint) {
+  if (previousNodeOfSplitPoint &&
+      IsEmptyNode(*previousNodeOfSplitPoint, true, false)) {
     nsresult rv =
-        IsEmptyNode(previousNodeOfSplitPoint, &bEmptyCite, true, false);
+        DeleteNodeWithTransaction(MOZ_KnownLive(*previousNodeOfSplitPoint));
+    if (NS_WARN_IF(Destroyed())) {
+      return EditActionIgnored(NS_ERROR_EDITOR_DESTROYED);
+    }
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return EditActionIgnored(rv);
-    }
-    if (bEmptyCite) {
-      rv = DeleteNodeWithTransaction(MOZ_KnownLive(*previousNodeOfSplitPoint));
-      if (NS_WARN_IF(Destroyed())) {
-        return EditActionIgnored(NS_ERROR_EDITOR_DESTROYED);
-      }
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return EditActionIgnored(rv);
-      }
     }
   }
 
-  if (citeNode) {
-    nsresult rv = IsEmptyNode(citeNode, &bEmptyCite, true, false);
+  if (citeNode && IsEmptyNode(*citeNode, true, false)) {
+    nsresult rv = DeleteNodeWithTransaction(*citeNode);
+    if (NS_WARN_IF(Destroyed())) {
+      return EditActionIgnored(NS_ERROR_EDITOR_DESTROYED);
+    }
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return EditActionIgnored(rv);
-    }
-    if (bEmptyCite) {
-      rv = DeleteNodeWithTransaction(*citeNode);
-      if (NS_WARN_IF(Destroyed())) {
-        return EditActionIgnored(NS_ERROR_EDITOR_DESTROYED);
-      }
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return EditActionIgnored(rv);
-      }
     }
   }
 
@@ -3231,43 +3184,41 @@ EditActionResult HTMLEditor::HandleDeleteNonCollapsedSelection(
 
     AutoRangeArray arrayOfRanges(SelectionRefPtr());
     for (auto& range : arrayOfRanges.mRanges) {
-      // Build a list of nodes in the range
-      nsTArray<OwningNonNull<nsINode>> arrayOfNodes;
-      TrivialFunctor functor;
+      // Build a list of direct child nodes in the range
+      AutoTArray<OwningNonNull<nsIContent>, 10> arrayOfTopChildren;
       DOMSubtreeIterator iter;
       nsresult rv = iter.Init(*range);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return result.SetResult(rv);
       }
-      iter.AppendList(functor, arrayOfNodes);
+      iter.AppendAllNodesToArray(arrayOfTopChildren);
 
       // Now that we have the list, delete non-table elements
-      int32_t listCount = arrayOfNodes.Length();
-      for (int32_t j = 0; j < listCount; j++) {
-        OwningNonNull<nsINode> node = arrayOfNodes[0];
-        nsresult rv = DeleteElementsExceptTableRelatedElements(node);
+      size_t countOfTopChildren = arrayOfTopChildren.Length();
+      for (size_t i = 0; i < countOfTopChildren; i++) {
+        OwningNonNull<nsIContent>& content = arrayOfTopChildren[0];
+        // XXX After here, the child contents in the array may have been moved
+        //     to somewhere or removed.  We should handle it.
+        nsresult rv = DeleteElementsExceptTableRelatedElements(content);
         if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED)) {
           return result.SetResult(NS_ERROR_EDITOR_DESTROYED);
         }
         NS_WARNING_ASSERTION(
             NS_SUCCEEDED(rv),
-            "Failed to elements except table related elements");
-        arrayOfNodes.RemoveElementAt(0);
+            "DeleteElementsExceptTableRelatedElements() failed, but ignored");
         // If something visible is deleted, no need to join.  Visible means
         // all nodes except non-visible textnodes and breaks.
+        // XXX Odd.  Why do we check the visibility after removing the node
+        //     from the DOM tree?
         if (join && aSelectionWasCollapsed == SelectionWasCollapsed::Yes) {
-          if (!node->IsContent()) {
-            join = false;
-            continue;
-          }
-          nsIContent* content = node->AsContent();
           if (Text* text = content->GetAsText()) {
             join = !IsInVisibleTextFrames(*text);
           } else {
             join = content->IsHTMLElement(nsGkAtoms::br) &&
-                   !IsVisibleBRElement(node);
+                   !IsVisibleBRElement(content);
           }
         }
+        arrayOfTopChildren.RemoveElementAt(0);
       }
     }
 
@@ -3897,36 +3848,36 @@ MoveNodeResult HTMLEditor::MoveOneHardLineContents(
         aMoveToEndOfContainer /* = MoveToEndOfContainer::No */) {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   nsresult rv = SplitInlinesAndCollectEditTargetNodesInOneHardLine(
-      aPointInHardLine, arrayOfNodes, EditSubAction::eMergeBlockContents,
+      aPointInHardLine, arrayOfContents, EditSubAction::eMergeBlockContents,
       HTMLEditor::CollectNonEditableNodes::Yes);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return MoveNodeResult(rv);
   }
-  if (arrayOfNodes.IsEmpty()) {
+  if (arrayOfContents.IsEmpty()) {
     return MoveNodeIgnored(aPointToInsert);
   }
 
   uint32_t offset = aPointToInsert.Offset();
   MoveNodeResult result;
-  for (auto& node : arrayOfNodes) {
+  for (auto& content : arrayOfContents) {
     if (aMoveToEndOfContainer == MoveToEndOfContainer::Yes) {
       // For backward compatibility, we should move contents to end of the
       // container if this is called with MoveToEndOfContainer::Yes.
       offset = aPointToInsert.GetContainer()->Length();
     }
     // get the node to act on
-    if (HTMLEditor::NodeIsBlockStatic(node)) {
+    if (HTMLEditor::NodeIsBlockStatic(content)) {
       // For block nodes, move their contents only, then delete block.
       result |=
-          MoveChildren(MOZ_KnownLive(*node->AsElement()),
+          MoveChildren(MOZ_KnownLive(*content->AsElement()),
                        EditorDOMPoint(aPointToInsert.GetContainer(), offset));
       if (NS_WARN_IF(result.Failed())) {
         return result;
       }
       offset = result.NextInsertionPointRef().Offset();
-      DebugOnly<nsresult> rvIgnored = DeleteNodeWithTransaction(*node);
+      DebugOnly<nsresult> rvIgnored = DeleteNodeWithTransaction(*content);
       if (NS_WARN_IF(Destroyed())) {
         return MoveNodeResult(NS_ERROR_EDITOR_DESTROYED);
       }
@@ -3943,8 +3894,7 @@ MoveNodeResult HTMLEditor::MoveOneHardLineContents(
     }
     // XXX Different from the above block, we ignore error of moving nodes.
     MoveNodeResult moveNodeResult = MoveNodeOrChildren(
-        MOZ_KnownLive(*node->AsContent()),
-        EditorDOMPoint(aPointToInsert.GetContainer(), offset));
+        content, EditorDOMPoint(aPointToInsert.GetContainer(), offset));
     if (NS_WARN_IF(moveNodeResult.EditorDestroyed())) {
       return MoveNodeResult(NS_ERROR_EDITOR_DESTROYED);
     }
@@ -4075,9 +4025,8 @@ nsresult HTMLEditor::DeleteMostAncestorMailCiteElementIfEmpty(
   if (!mailCiteElement) {
     return NS_OK;
   }
-  bool isEmpty = true, seenBR = false;
-  IsEmptyNodeImpl(mailCiteElement, &isEmpty, true, true, false, &seenBR);
-  if (!isEmpty) {
+  bool seenBR = false;
+  if (!IsEmptyNodeImpl(*mailCiteElement, true, true, false, &seenBR)) {
     return NS_OK;
   }
   EditorDOMPoint atEmptyMailCiteElement(mailCiteElement);
@@ -4232,18 +4181,19 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
 
   AutoSelectionRestorer restoreSelectionLater(*this);
 
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   Element* parentListElement =
       aSelectAllOfCurrentList == SelectAllOfCurrentList::Yes
           ? GetParentListElementAtSelection()
           : nullptr;
   if (parentListElement) {
-    arrayOfNodes.AppendElement(OwningNonNull<nsINode>(*parentListElement));
+    arrayOfContents.AppendElement(
+        OwningNonNull<nsIContent>(*parentListElement));
   } else {
     AutoTransactionsConserveSelection dontChangeMySelection(*this);
     nsresult rv =
         SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges(
-            arrayOfNodes, EditSubAction::eCreateOrChangeList,
+            arrayOfContents, EditSubAction::eCreateOrChangeList,
             CollectNonEditableNodes::No);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return EditActionResult(rv);
@@ -4252,9 +4202,9 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
 
   // check if all our nodes are <br>s, or empty inlines
   bool bOnlyBreaks = true;
-  for (auto& curNode : arrayOfNodes) {
-    // if curNode is not a Break or empty inline, we're done
-    if (!curNode->IsHTMLElement(nsGkAtoms::br) && !IsEmptyInineNode(curNode)) {
+  for (auto& content : arrayOfContents) {
+    // if content is not a Break or empty inline, we're done
+    if (!content->IsHTMLElement(nsGkAtoms::br) && !IsEmptyInlineNode(content)) {
       bOnlyBreaks = false;
       break;
     }
@@ -4262,11 +4212,11 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
 
   // if no nodes, we make empty list.  Ditto if the user tried to make a list
   // of some # of breaks.
-  if (arrayOfNodes.IsEmpty() || bOnlyBreaks) {
+  if (arrayOfContents.IsEmpty() || bOnlyBreaks) {
     // if only breaks, delete them
     if (bOnlyBreaks) {
-      for (auto& node : arrayOfNodes) {
-        nsresult rv = DeleteNodeWithTransaction(*node);
+      for (auto& content : arrayOfContents) {
+        nsresult rv = DeleteNodeWithTransaction(*content);
         if (NS_WARN_IF(Destroyed())) {
           return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
         }
@@ -4332,19 +4282,19 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
 
   // if there is only one node in the array, and it is a list, div, or
   // blockquote, then look inside of it until we find inner list or content.
-  if (arrayOfNodes.Length() == 1) {
+  if (arrayOfContents.Length() == 1) {
     if (Element* deepestDivBlockquoteOrListElement =
             GetDeepestEditableOnlyChildDivBlockquoteOrListElement(
-                arrayOfNodes[0])) {
+                arrayOfContents[0])) {
       if (deepestDivBlockquoteOrListElement->IsAnyOfHTMLElements(
               nsGkAtoms::div, nsGkAtoms::blockquote)) {
-        arrayOfNodes.Clear();
-        CollectChildren(*deepestDivBlockquoteOrListElement, arrayOfNodes, 0,
+        arrayOfContents.Clear();
+        CollectChildren(*deepestDivBlockquoteOrListElement, arrayOfContents, 0,
                         CollectListChildren::No, CollectTableChildren::No,
                         CollectNonEditableNodes::Yes);
       } else {
-        arrayOfNodes.ReplaceElementAt(
-            0, OwningNonNull<nsINode>(*deepestDivBlockquoteOrListElement));
+        arrayOfContents.ReplaceElementAt(
+            0, OwningNonNull<nsIContent>(*deepestDivBlockquoteOrListElement));
       }
     }
   }
@@ -4352,47 +4302,44 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
   // Ok, now go through all the nodes and put then in the list,
   // or whatever is approriate.  Wohoo!
 
-  uint32_t listCount = arrayOfNodes.Length();
+  uint32_t countOfCollectedContents = arrayOfContents.Length();
   RefPtr<Element> curList, prevListItem;
 
-  for (uint32_t i = 0; i < listCount; i++) {
+  for (uint32_t i = 0; i < countOfCollectedContents; i++) {
     // here's where we actually figure out what to do
-    if (NS_WARN_IF(!arrayOfNodes[i]->IsContent())) {
-      return EditActionResult(NS_ERROR_FAILURE);
-    }
-    OwningNonNull<nsIContent> curNode = *arrayOfNodes[i]->AsContent();
+    OwningNonNull<nsIContent> content = arrayOfContents[i];
 
     // make sure we don't assemble content that is in different table cells
     // into the same list.  respect table cell boundaries when listifying.
     if (curList &&
-        HTMLEditor::NodesInDifferentTableElements(*curList, curNode)) {
+        HTMLEditor::NodesInDifferentTableElements(*curList, content)) {
       curList = nullptr;
     }
 
     // If current node is a `<br>` element, delete it and forget previous
     // list item element.
     // If current node is an empty inline node, just delete it.
-    if (IsEditable(curNode) &&
-        (curNode->IsHTMLElement(nsGkAtoms::br) || IsEmptyInineNode(curNode))) {
-      nsresult rv = DeleteNodeWithTransaction(*curNode);
+    if (IsEditable(content) &&
+        (content->IsHTMLElement(nsGkAtoms::br) || IsEmptyInlineNode(content))) {
+      nsresult rv = DeleteNodeWithTransaction(*content);
       if (NS_WARN_IF(Destroyed())) {
         return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
       }
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return EditActionResult(rv);
       }
-      if (curNode->IsHTMLElement(nsGkAtoms::br)) {
+      if (content->IsHTMLElement(nsGkAtoms::br)) {
         prevListItem = nullptr;
       }
       continue;
     }
 
-    if (HTMLEditUtils::IsList(curNode)) {
+    if (HTMLEditUtils::IsList(content)) {
       // If we met a list element and current list element is not a descendant
       // of the list, append current node to end of the current list element.
       // Then, wrap it with list item element and delete the old container.
-      if (curList && !EditorUtils::IsDescendantOf(*curNode, *curList)) {
-        nsresult rv = MoveNodeToEndWithTransaction(*curNode, *curList);
+      if (curList && !EditorUtils::IsDescendantOf(*content, *curList)) {
+        nsresult rv = MoveNodeToEndWithTransaction(*content, *curList);
         if (NS_WARN_IF(Destroyed())) {
           return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
         }
@@ -4400,7 +4347,7 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
           return EditActionResult(rv);
         }
         CreateElementResult convertListTypeResult =
-            ChangeListElementType(MOZ_KnownLive(*curNode->AsElement()),
+            ChangeListElementType(MOZ_KnownLive(*content->AsElement()),
                                   aListElementTagName, aListItemElementTagName);
         if (NS_WARN_IF(convertListTypeResult.Failed())) {
           return EditActionResult(convertListTypeResult.Rv());
@@ -4420,7 +4367,7 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
       // If current list element is in found list element or we've not met a
       // list element, convert current list element to proper type.
       CreateElementResult convertListTypeResult =
-          ChangeListElementType(MOZ_KnownLive(*curNode->AsElement()),
+          ChangeListElementType(MOZ_KnownLive(*content->AsElement()),
                                 aListElementTagName, aListItemElementTagName);
       if (NS_WARN_IF(convertListTypeResult.Failed())) {
         return EditActionResult(convertListTypeResult.Rv());
@@ -4430,25 +4377,25 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
       continue;
     }
 
-    EditorDOMPoint atCurNode(curNode);
-    if (NS_WARN_IF(!atCurNode.IsSet())) {
+    EditorDOMPoint atContent(content);
+    if (NS_WARN_IF(!atContent.IsSet())) {
       return EditActionResult(NS_ERROR_FAILURE);
     }
-    MOZ_ASSERT(atCurNode.IsSetAndValid());
-    if (HTMLEditUtils::IsListItem(curNode)) {
+    MOZ_ASSERT(atContent.IsSetAndValid());
+    if (HTMLEditUtils::IsListItem(content)) {
       // If current list item element is not in proper list element, we need
       // to conver the list element.
-      if (!atCurNode.IsContainerHTMLElement(&aListElementTagName)) {
+      if (!atContent.IsContainerHTMLElement(&aListElementTagName)) {
         // If we've not met a list element or current node is not in current
         // list element, insert a list element at current node and set
         // current list element to the new one.
-        if (!curList || EditorUtils::IsDescendantOf(*curNode, *curList)) {
-          if (NS_WARN_IF(!atCurNode.GetContainerAsContent())) {
+        if (!curList || EditorUtils::IsDescendantOf(*content, *curList)) {
+          if (NS_WARN_IF(!atContent.GetContainerAsContent())) {
             return EditActionResult(NS_ERROR_FAILURE);
           }
           ErrorResult error;
           nsCOMPtr<nsIContent> newLeftNode =
-              SplitNodeWithTransaction(atCurNode, error);
+              SplitNodeWithTransaction(atContent, error);
           if (NS_WARN_IF(Destroyed())) {
             error.SuppressException();
             return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
@@ -4457,7 +4404,7 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
             return EditActionResult(error.StealNSResult());
           }
           curList = CreateNodeWithTransaction(
-              aListElementTagName, EditorDOMPoint(atCurNode.GetContainer()));
+              aListElementTagName, EditorDOMPoint(atContent.GetContainer()));
           if (NS_WARN_IF(Destroyed())) {
             return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
           }
@@ -4466,7 +4413,7 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
           }
         }
         // Then, move current node into current list element.
-        nsresult rv = MoveNodeToEndWithTransaction(*curNode, *curList);
+        nsresult rv = MoveNodeToEndWithTransaction(*content, *curList);
         if (NS_WARN_IF(Destroyed())) {
           return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
         }
@@ -4474,9 +4421,9 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
           return EditActionResult(rv);
         }
         // Convert list item type if current node is different list item type.
-        if (!curNode->IsHTMLElement(&aListItemElementTagName)) {
+        if (!content->IsHTMLElement(&aListItemElementTagName)) {
           RefPtr<Element> newListItemElement = ReplaceContainerWithTransaction(
-              MOZ_KnownLive(*curNode->AsElement()), aListItemElementTagName);
+              MOZ_KnownLive(*content->AsElement()), aListItemElementTagName);
           if (NS_WARN_IF(Destroyed())) {
             return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
           }
@@ -4488,15 +4435,15 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
         // If we've not met a list element, set current list element to the
         // parent of current list item element.
         if (!curList) {
-          curList = atCurNode.GetContainerAsElement();
+          curList = atContent.GetContainerAsElement();
           NS_WARNING_ASSERTION(
               HTMLEditUtils::IsList(curList),
               "Current list item parent is not a list element");
         }
         // If current list item element is not a child of current list element,
         // move it into current list item.
-        else if (atCurNode.GetContainer() != curList) {
-          nsresult rv = MoveNodeToEndWithTransaction(*curNode, *curList);
+        else if (atContent.GetContainer() != curList) {
+          nsresult rv = MoveNodeToEndWithTransaction(*content, *curList);
           if (NS_WARN_IF(Destroyed())) {
             return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
           }
@@ -4506,9 +4453,9 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
         }
         // Then, if current list item element is not proper type for current
         // list element, convert list item element to proper element.
-        if (!curNode->IsHTMLElement(&aListItemElementTagName)) {
+        if (!content->IsHTMLElement(&aListItemElementTagName)) {
           RefPtr<Element> newListItemElement = ReplaceContainerWithTransaction(
-              MOZ_KnownLive(*curNode->AsElement()), aListItemElementTagName);
+              MOZ_KnownLive(*content->AsElement()), aListItemElementTagName);
           if (NS_WARN_IF(Destroyed())) {
             return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
           }
@@ -4517,8 +4464,8 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
           }
         }
       }
-      Element* curElement = Element::FromNode(curNode);
-      if (NS_WARN_IF(!curElement)) {
+      Element* element = Element::FromNode(content);
+      if (NS_WARN_IF(!element)) {
         return EditActionResult(NS_ERROR_FAILURE);
       }
       // If bullet type is specified, set list type attribute.
@@ -4526,7 +4473,7 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
       //     element into the DOM tree?
       if (!aBulletType.IsEmpty()) {
         nsresult rv = SetAttributeWithTransaction(
-            MOZ_KnownLive(*curElement), *nsGkAtoms::type, aBulletType);
+            MOZ_KnownLive(*element), *nsGkAtoms::type, aBulletType);
         if (NS_WARN_IF(Destroyed())) {
           return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
         }
@@ -4537,10 +4484,10 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
       }
 
       // Otherwise, remove list type attribute if there is.
-      if (!curElement->HasAttr(nsGkAtoms::type)) {
+      if (!element->HasAttr(nsGkAtoms::type)) {
         continue;
       }
-      nsresult rv = RemoveAttributeWithTransaction(MOZ_KnownLive(*curElement),
+      nsresult rv = RemoveAttributeWithTransaction(MOZ_KnownLive(*element),
                                                    *nsGkAtoms::type);
       if (NS_WARN_IF(Destroyed())) {
         return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
@@ -4551,26 +4498,28 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
       continue;
     }
 
-    MOZ_ASSERT(!HTMLEditUtils::IsList(curNode) &&
-               !HTMLEditUtils::IsListItem(curNode));
+    MOZ_ASSERT(!HTMLEditUtils::IsList(content) &&
+               !HTMLEditUtils::IsListItem(content));
 
     // If current node is a `<div>` element, replace it in the array with
     // its children.
     // XXX I think that this should be done when we collect the nodes above.
     //     Then, we can change this `for` loop to ranged-for loop.
-    if (curNode->IsHTMLElement(nsGkAtoms::div)) {
+    if (content->IsHTMLElement(nsGkAtoms::div)) {
       prevListItem = nullptr;
-      CollectChildren(*curNode, arrayOfNodes, i + 1, CollectListChildren::Yes,
-                      CollectTableChildren::Yes, CollectNonEditableNodes::Yes);
+      CollectChildren(*content, arrayOfContents, i + 1,
+                      CollectListChildren::Yes, CollectTableChildren::Yes,
+                      CollectNonEditableNodes::Yes);
       nsresult rv =
-          RemoveContainerWithTransaction(MOZ_KnownLive(*curNode->AsElement()));
+          RemoveContainerWithTransaction(MOZ_KnownLive(*content->AsElement()));
       if (NS_WARN_IF(Destroyed())) {
         return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
       }
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return EditActionResult(rv);
       }
-      listCount = arrayOfNodes.Length();
+      // Extend the loop length to handle all children collected here.
+      countOfCollectedContents = arrayOfContents.Length();
       continue;
     }
 
@@ -4579,7 +4528,7 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
     if (!curList) {
       SplitNodeResult splitCurNodeResult =
           MaybeSplitAncestorsForInsertWithTransaction(aListElementTagName,
-                                                      atCurNode);
+                                                      atContent);
       if (NS_WARN_IF(splitCurNodeResult.Failed())) {
         return EditActionResult(splitCurNodeResult.Rv());
       }
@@ -4598,15 +4547,15 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
       //     we shouldn't overwrite the new block element.
       TopLevelEditSubActionDataRef().mNewBlockElement = curList;
 
-      // atCurNode is now referring the right node with mOffset but
+      // atContent is now referring the right node with mOffset but
       // referring the left node with mRef.  So, invalidate it now.
-      atCurNode.Clear();
+      atContent.Clear();
     }
 
     // If we're currently handling contents of a list item and current node
     // is not a block element, move current node into the list item.
-    if (HTMLEditor::NodeIsInlineStatic(curNode) && prevListItem) {
-      nsresult rv = MoveNodeToEndWithTransaction(*curNode, *prevListItem);
+    if (HTMLEditor::NodeIsInlineStatic(content) && prevListItem) {
+      nsresult rv = MoveNodeToEndWithTransaction(*content, *prevListItem);
       if (NS_WARN_IF(Destroyed())) {
         return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
       }
@@ -4621,9 +4570,9 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
     // element and move it into current list element.
     // XXX This is too rough handling.  If web apps modifies DOM tree directly,
     //     any elements can have block elements as children.
-    if (curNode->IsHTMLElement(nsGkAtoms::p)) {
+    if (content->IsHTMLElement(nsGkAtoms::p)) {
       RefPtr<Element> newListItemElement = ReplaceContainerWithTransaction(
-          MOZ_KnownLive(*curNode->AsElement()), aListItemElementTagName);
+          MOZ_KnownLive(*content->AsElement()), aListItemElementTagName);
       if (NS_WARN_IF(Destroyed())) {
         return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
       }
@@ -4645,7 +4594,7 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
     // If current node is not a paragraph, wrap current node with new list
     // item element and move it into current list element.
     RefPtr<Element> newListItemElement =
-        InsertContainerWithTransaction(*curNode, aListItemElementTagName);
+        InsertContainerWithTransaction(*content, aListItemElementTagName);
     if (NS_WARN_IF(Destroyed())) {
       return EditActionResult(NS_ERROR_EDITOR_DESTROYED);
     }
@@ -4654,7 +4603,7 @@ EditActionResult HTMLEditor::ChangeSelectedHardLinesToList(
     }
     // If current node is not a block element, new list item should have
     // following inline nodes too.
-    if (HTMLEditor::NodeIsInlineStatic(curNode)) {
+    if (HTMLEditor::NodeIsInlineStatic(content)) {
       prevListItem = newListItemElement;
     } else {
       prevListItem = nullptr;
@@ -4702,12 +4651,12 @@ nsresult HTMLEditor::RemoveListAtSelectionAsSubAction() {
 
   AutoSelectionRestorer restoreSelectionLater(*this);
 
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   {
     AutoTransactionsConserveSelection dontChangeMySelection(*this);
     nsresult rv =
         SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges(
-            arrayOfNodes, EditSubAction::eCreateOrChangeList,
+            arrayOfContents, EditSubAction::eCreateOrChangeList,
             CollectNonEditableNodes::No);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
@@ -4715,29 +4664,32 @@ nsresult HTMLEditor::RemoveListAtSelectionAsSubAction() {
   }
 
   // Remove all non-editable nodes.  Leave them be.
-  for (int32_t i = arrayOfNodes.Length() - 1; i >= 0; i--) {
-    OwningNonNull<nsINode> testNode = arrayOfNodes[i];
-    if (!IsEditable(testNode)) {
-      arrayOfNodes.RemoveElementAt(i);
+  // XXX SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges()
+  //     should return only editable contents when it's called with
+  //     CollectNonEditableNodes::No.
+  for (int32_t i = arrayOfContents.Length() - 1; i >= 0; i--) {
+    OwningNonNull<nsIContent>& content = arrayOfContents[i];
+    if (!IsEditable(content)) {
+      arrayOfContents.RemoveElementAt(i);
     }
   }
 
   // Only act on lists or list items in the array
-  for (auto& curNode : arrayOfNodes) {
+  for (auto& content : arrayOfContents) {
     // here's where we actually figure out what to do
-    if (HTMLEditUtils::IsListItem(curNode)) {
+    if (HTMLEditUtils::IsListItem(content)) {
       // unlist this listitem
-      nsresult rv = LiftUpListItemElement(MOZ_KnownLive(*curNode->AsElement()),
+      nsresult rv = LiftUpListItemElement(MOZ_KnownLive(*content->AsElement()),
                                           LiftUpFromAllParentListElements::Yes);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
       continue;
     }
-    if (HTMLEditUtils::IsList(curNode)) {
+    if (HTMLEditUtils::IsList(content)) {
       // node is a list, move list items out
       nsresult rv =
-          DestroyListStructureRecursively(MOZ_KnownLive(*curNode->AsElement()));
+          DestroyListStructureRecursively(MOZ_KnownLive(*content->AsElement()));
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -4760,9 +4712,9 @@ nsresult HTMLEditor::FormatBlockContainerWithTransaction(nsAtom& blockType) {
   AutoSelectionRestorer restoreSelectionLater(*this);
   AutoTransactionsConserveSelection dontChangeMySelection(*this);
 
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   nsresult rv = SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges(
-      arrayOfNodes, EditSubAction::eCreateOrRemoveBlock,
+      arrayOfContents, EditSubAction::eCreateOrRemoveBlock,
       CollectNonEditableNodes::Yes);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -4771,7 +4723,7 @@ nsresult HTMLEditor::FormatBlockContainerWithTransaction(nsAtom& blockType) {
   // If there is no visible and editable nodes in the edit targets, make an
   // empty block.
   // XXX Isn't this odd if there are only non-editable visible nodes?
-  if (IsEmptyOneHardLine(arrayOfNodes)) {
+  if (IsEmptyOneHardLine(arrayOfContents)) {
     nsRange* firstRange = SelectionRefPtr()->GetRangeAt(0);
     if (NS_WARN_IF(!firstRange)) {
       return NS_ERROR_FAILURE;
@@ -4851,7 +4803,7 @@ nsresult HTMLEditor::FormatBlockContainerWithTransaction(nsAtom& blockType) {
         return rv;
       }
       // We don't need to act on this node any more
-      arrayOfNodes.RemoveElement(brNode);
+      arrayOfContents.RemoveElement(brNode);
     }
     // Make sure we can put a block here.
     SplitNodeResult splitNodeResult =
@@ -4871,16 +4823,16 @@ nsresult HTMLEditor::FormatBlockContainerWithTransaction(nsAtom& blockType) {
     // Remember our new block for postprocessing
     TopLevelEditSubActionDataRef().mNewBlockElement = block;
     // Delete anything that was in the list of nodes
-    while (!arrayOfNodes.IsEmpty()) {
-      OwningNonNull<nsINode> curNode = arrayOfNodes[0];
-      rv = DeleteNodeWithTransaction(*curNode);
+    while (!arrayOfContents.IsEmpty()) {
+      OwningNonNull<nsIContent>& content = arrayOfContents[0];
+      rv = DeleteNodeWithTransaction(*content);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-      arrayOfNodes.RemoveElementAt(0);
+      arrayOfContents.RemoveElementAt(0);
     }
     // Don't restore the selection
     restoreSelectionLater.Abort();
@@ -4897,18 +4849,18 @@ nsresult HTMLEditor::FormatBlockContainerWithTransaction(nsAtom& blockType) {
   // whatever is approriate.  Woohoo!  Note: blockquote is handled a little
   // differently.
   if (&blockType == nsGkAtoms::blockquote) {
-    rv = MoveNodesIntoNewBlockquoteElement(arrayOfNodes);
+    rv = MoveNodesIntoNewBlockquoteElement(arrayOfContents);
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                          "MoveNodesIntoNewBlockquoteElement() failed");
     return rv;
   }
   if (&blockType == nsGkAtoms::normal || &blockType == nsGkAtoms::_empty) {
-    rv = RemoveBlockContainerElements(arrayOfNodes);
+    rv = RemoveBlockContainerElements(arrayOfContents);
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                          "RemoveBlockContainerElements() failed");
     return rv;
   }
-  rv = CreateOrChangeBlockContainerElement(arrayOfNodes, blockType);
+  rv = CreateOrChangeBlockContainerElement(arrayOfContents, blockType);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                        "CreateOrChangeBlockContainerElement() failed");
   return rv;
@@ -4976,26 +4928,25 @@ EditActionResult HTMLEditor::IndentAsSubAction() {
 // Helper for Handle[CSS|HTML]IndentAtSelectionInternal
 nsresult HTMLEditor::IndentListChild(RefPtr<Element>* aCurList,
                                      const EditorDOMPoint& aCurPoint,
-                                     OwningNonNull<nsINode>& aCurNode) {
+                                     nsIContent& aContent) {
   MOZ_ASSERT(HTMLEditUtils::IsList(aCurPoint.GetContainer()),
              "unexpected container");
   MOZ_ASSERT(IsTopLevelEditSubActionDataAvailable());
 
   // some logic for putting list items into nested lists...
 
-  // Check for whether we should join a list that follows aCurNode.
+  // Check for whether we should join a list that follows aContent.
   // We do this if the next element is a list, and the list is of the
-  // same type (li/ol) as aCurNode was a part it.
+  // same type (li/ol) as aContent was a part it.
   if (nsIContent* nextEditableSibling =
-          GetNextHTMLSibling(aCurNode, SkipWhitespace::Yes)) {
+          GetNextHTMLSibling(&aContent, SkipWhitespace::Yes)) {
     if (HTMLEditUtils::IsList(nextEditableSibling) &&
         aCurPoint.GetContainer()->NodeInfo()->NameAtom() ==
             nextEditableSibling->NodeInfo()->NameAtom() &&
         aCurPoint.GetContainer()->NodeInfo()->NamespaceID() ==
             nextEditableSibling->NodeInfo()->NamespaceID()) {
-      nsresult rv =
-          MoveNodeWithTransaction(MOZ_KnownLive(*aCurNode->AsContent()),
-                                  EditorDOMPoint(nextEditableSibling, 0));
+      nsresult rv = MoveNodeWithTransaction(
+          aContent, EditorDOMPoint(nextEditableSibling, 0));
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -5005,18 +4956,18 @@ nsresult HTMLEditor::IndentListChild(RefPtr<Element>* aCurList,
     }
   }
 
-  // Check for whether we should join a list that preceeds aCurNode.
+  // Check for whether we should join a list that preceeds aContent.
   // We do this if the previous element is a list, and the list is of
-  // the same type (li/ol) as aCurNode was a part of.
+  // the same type (li/ol) as aContent was a part of.
   if (nsCOMPtr<nsIContent> previousEditableSibling =
-          GetPriorHTMLSibling(aCurNode, SkipWhitespace::Yes)) {
+          GetPriorHTMLSibling(&aContent, SkipWhitespace::Yes)) {
     if (HTMLEditUtils::IsList(previousEditableSibling) &&
         aCurPoint.GetContainer()->NodeInfo()->NameAtom() ==
             previousEditableSibling->NodeInfo()->NameAtom() &&
         aCurPoint.GetContainer()->NodeInfo()->NamespaceID() ==
             previousEditableSibling->NodeInfo()->NamespaceID()) {
-      nsresult rv = MoveNodeToEndWithTransaction(
-          MOZ_KnownLive(*aCurNode->AsContent()), *previousEditableSibling);
+      nsresult rv =
+          MoveNodeToEndWithTransaction(aContent, *previousEditableSibling);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -5027,9 +4978,9 @@ nsresult HTMLEditor::IndentListChild(RefPtr<Element>* aCurList,
   }
 
   // check to see if aCurList is still appropriate.  Which it is if
-  // aCurNode is still right after it in the same list.
+  // aContent is still right after it in the same list.
   nsIContent* previousEditableSibling =
-      *aCurList ? GetPriorHTMLSibling(aCurNode, SkipWhitespace::Yes) : nullptr;
+      *aCurList ? GetPriorHTMLSibling(&aContent, SkipWhitespace::Yes) : nullptr;
   if (!*aCurList ||
       (previousEditableSibling && previousEditableSibling != *aCurList)) {
     nsAtom* containerName = aCurPoint.GetContainer()->NodeInfo()->NameAtom();
@@ -5048,14 +4999,13 @@ nsresult HTMLEditor::IndentListChild(RefPtr<Element>* aCurList,
     if (NS_WARN_IF(!*aCurList)) {
       return NS_ERROR_FAILURE;
     }
-    // aCurList is now the correct thing to put aCurNode in
+    // aCurList is now the correct thing to put aContent in
     // remember our new block for postprocessing
     TopLevelEditSubActionDataRef().mNewBlockElement = *aCurList;
   }
   // tuck the node into the end of the active list
   RefPtr<nsINode> container = *aCurList;
-  nsresult rv = MoveNodeToEndWithTransaction(
-      MOZ_KnownLive(*aCurNode->AsContent()), *container);
+  nsresult rv = MoveNodeToEndWithTransaction(aContent, *container);
   if (NS_WARN_IF(Destroyed())) {
     return NS_ERROR_EDITOR_DESTROYED;
   }
@@ -5130,7 +5080,7 @@ nsresult HTMLEditor::HandleCSSIndentAtSelectionInternal() {
   MOZ_ASSERT(IsTopLevelEditSubActionDataAvailable());
 
   AutoSelectionRestorer restoreSelectionLater(*this);
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
 
   // short circuit: detect case of collapsed selection inside an <li>.
   // just sublist that <li>.  This prevents bug 97797.
@@ -5142,14 +5092,15 @@ nsresult HTMLEditor::HandleCSSIndentAtSelectionInternal() {
     }
     Element* block = GetBlock(*atCaret.GetContainer());
     if (block && HTMLEditUtils::IsListItem(block)) {
-      arrayOfNodes.AppendElement(*block);
+      arrayOfContents.AppendElement(*block);
     }
   }
 
-  if (arrayOfNodes.IsEmpty()) {
+  if (arrayOfContents.IsEmpty()) {
     nsresult rv =
         SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges(
-            arrayOfNodes, EditSubAction::eIndent, CollectNonEditableNodes::Yes);
+            arrayOfContents, EditSubAction::eIndent,
+            CollectNonEditableNodes::Yes);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -5158,7 +5109,7 @@ nsresult HTMLEditor::HandleCSSIndentAtSelectionInternal() {
   // If there is no visible and editable nodes in the edit targets, make an
   // empty block.
   // XXX Isn't this odd if there are only non-editable visible nodes?
-  if (IsEmptyOneHardLine(arrayOfNodes)) {
+  if (IsEmptyOneHardLine(arrayOfContents)) {
     // get selection location
     nsRange* firstRange = SelectionRefPtr()->GetRangeAt(0);
     if (NS_WARN_IF(!firstRange)) {
@@ -5195,16 +5146,16 @@ nsresult HTMLEditor::HandleCSSIndentAtSelectionInternal() {
                          "ChangeMarginStart() failed, but ignored");
     // delete anything that was in the list of nodes
     // XXX We don't need to remove the nodes from the array for performance.
-    while (!arrayOfNodes.IsEmpty()) {
-      OwningNonNull<nsINode> curNode = arrayOfNodes[0];
-      rv = DeleteNodeWithTransaction(*curNode);
+    while (!arrayOfContents.IsEmpty()) {
+      OwningNonNull<nsIContent>& content = arrayOfContents[0];
+      rv = DeleteNodeWithTransaction(*content);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-      arrayOfNodes.RemoveElementAt(0);
+      arrayOfContents.RemoveElementAt(0);
     }
     // put selection in new block
     EditorRawDOMPoint atStartOfTheBlock(theBlock, 0);
@@ -5225,21 +5176,21 @@ nsresult HTMLEditor::HandleCSSIndentAtSelectionInternal() {
   // Ok, now go through all the nodes and put them in a blockquote,
   // or whatever is appropriate.
   RefPtr<Element> curList, curQuote;
-  for (OwningNonNull<nsINode>& curNode : arrayOfNodes) {
+  for (OwningNonNull<nsIContent>& content : arrayOfContents) {
     // Here's where we actually figure out what to do.
-    EditorDOMPoint atCurNode(curNode);
-    if (NS_WARN_IF(!atCurNode.IsSet())) {
+    EditorDOMPoint atContent(content);
+    if (NS_WARN_IF(!atContent.IsSet())) {
       continue;
     }
 
     // Ignore all non-editable nodes.  Leave them be.
     // XXX We ignore non-editable nodes here, but not so in the above block.
-    if (!IsEditable(curNode)) {
+    if (!IsEditable(content)) {
       continue;
     }
 
-    if (HTMLEditUtils::IsList(atCurNode.GetContainer())) {
-      nsresult rv = IndentListChild(&curList, atCurNode, curNode);
+    if (HTMLEditUtils::IsList(atContent.GetContainer())) {
+      nsresult rv = IndentListChild(&curList, atContent, content);
       if (NS_FAILED(rv)) {
         return rv;
       }
@@ -5248,8 +5199,8 @@ nsresult HTMLEditor::HandleCSSIndentAtSelectionInternal() {
 
     // Not a list item.
 
-    if (HTMLEditor::NodeIsBlockStatic(*curNode)) {
-      nsresult rv = ChangeMarginStart(MOZ_KnownLive(*curNode->AsElement()),
+    if (HTMLEditor::NodeIsBlockStatic(*content)) {
+      nsresult rv = ChangeMarginStart(MOZ_KnownLive(*content->AsElement()),
                                       ChangeMargin::Increase);
       if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED)) {
         return NS_ERROR_EDITOR_DESTROYED;
@@ -5262,13 +5213,13 @@ nsresult HTMLEditor::HandleCSSIndentAtSelectionInternal() {
 
     if (!curQuote) {
       // First, check that our element can contain a div.
-      if (!CanContainTag(*atCurNode.GetContainer(), *nsGkAtoms::div)) {
+      if (!CanContainTag(*atContent.GetContainer(), *nsGkAtoms::div)) {
         return NS_OK;  // cancelled
       }
 
       SplitNodeResult splitNodeResult =
           MaybeSplitAncestorsForInsertWithTransaction(*nsGkAtoms::div,
-                                                      atCurNode);
+                                                      atContent);
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
@@ -5288,12 +5239,11 @@ nsresult HTMLEditor::HandleCSSIndentAtSelectionInternal() {
                            "ChangeMarginStart() failed, but ignored");
       // remember our new block for postprocessing
       TopLevelEditSubActionDataRef().mNewBlockElement = curQuote;
-      // curQuote is now the correct thing to put curNode in
+      // curQuote is now the correct thing to put content in
     }
 
     // tuck the node into the end of the active blockquote
-    nsresult rv = MoveNodeToEndWithTransaction(
-        MOZ_KnownLive(*curNode->AsContent()), *curQuote);
+    nsresult rv = MoveNodeToEndWithTransaction(content, *curQuote);
     if (NS_WARN_IF(Destroyed())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }
@@ -5340,10 +5290,10 @@ nsresult HTMLEditor::HandleHTMLIndentAtSelectionInternal() {
   GetSelectionRangesExtendedToHardLineStartAndEnd(arrayOfRanges,
                                                   EditSubAction::eIndent);
 
-  // use these ranges to contruct a list of nodes to act on.
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  // use these ranges to construct a list of nodes to act on.
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   nsresult rv = SplitInlinesAndCollectEditTargetNodes(
-      arrayOfRanges, arrayOfNodes, EditSubAction::eIndent,
+      arrayOfRanges, arrayOfContents, EditSubAction::eIndent,
       CollectNonEditableNodes::Yes);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -5352,7 +5302,7 @@ nsresult HTMLEditor::HandleHTMLIndentAtSelectionInternal() {
   // If there is no visible and editable nodes in the edit targets, make an
   // empty block.
   // XXX Isn't this odd if there are only non-editable visible nodes?
-  if (IsEmptyOneHardLine(arrayOfNodes)) {
+  if (IsEmptyOneHardLine(arrayOfContents)) {
     nsRange* firstRange = SelectionRefPtr()->GetRangeAt(0);
     if (NS_WARN_IF(!firstRange)) {
       return NS_ERROR_FAILURE;
@@ -5382,16 +5332,16 @@ nsresult HTMLEditor::HandleHTMLIndentAtSelectionInternal() {
     TopLevelEditSubActionDataRef().mNewBlockElement = theBlock;
     // delete anything that was in the list of nodes
     // XXX We don't need to remove the nodes from the array for performance.
-    while (!arrayOfNodes.IsEmpty()) {
-      OwningNonNull<nsINode> curNode = arrayOfNodes[0];
-      rv = DeleteNodeWithTransaction(*curNode);
+    while (!arrayOfContents.IsEmpty()) {
+      OwningNonNull<nsIContent>& content = arrayOfContents[0];
+      rv = DeleteNodeWithTransaction(*content);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-      arrayOfNodes.RemoveElementAt(0);
+      arrayOfContents.RemoveElementAt(0);
     }
     EditorRawDOMPoint atStartOfTheBlock(theBlock, 0);
     // Don't restore the selection
@@ -5411,21 +5361,21 @@ nsresult HTMLEditor::HandleHTMLIndentAtSelectionInternal() {
   // Ok, now go through all the nodes and put them in a blockquote,
   // or whatever is appropriate.  Wohoo!
   RefPtr<Element> curList, curQuote, indentedLI;
-  for (OwningNonNull<nsINode>& curNode : arrayOfNodes) {
+  for (OwningNonNull<nsIContent>& content : arrayOfContents) {
     // Here's where we actually figure out what to do.
-    EditorDOMPoint atCurNode(curNode);
-    if (NS_WARN_IF(!atCurNode.IsSet())) {
+    EditorDOMPoint atContent(content);
+    if (NS_WARN_IF(!atContent.IsSet())) {
       continue;
     }
 
     // Ignore all non-editable nodes.  Leave them be.
     // XXX We ignore non-editable nodes here, but not so in the above block.
-    if (!IsEditable(curNode)) {
+    if (!IsEditable(content)) {
       continue;
     }
 
-    if (HTMLEditUtils::IsList(atCurNode.GetContainer())) {
-      nsresult rv = IndentListChild(&curList, atCurNode, curNode);
+    if (HTMLEditUtils::IsList(atContent.GetContainer())) {
+      nsresult rv = IndentListChild(&curList, atContent, content);
       if (NS_FAILED(rv)) {
         return rv;
       }
@@ -5442,16 +5392,13 @@ nsresult HTMLEditor::HandleHTMLIndentAtSelectionInternal() {
     // we only want to indent that li once, we must keep track of the most
     // recent indented list item, and not indent it if we find another node
     // to act on that is still inside the same li.
-    if (RefPtr<Element> listItem =
-            curNode->IsContent()
-                ? GetNearestAncestorListItemElement(*curNode->AsContent())
-                : nullptr) {
+    if (RefPtr<Element> listItem = GetNearestAncestorListItemElement(content)) {
       if (indentedLI == listItem) {
         // already indented this list item
         continue;
       }
       // check to see if curList is still appropriate.  Which it is if
-      // curNode is still right after it in the same list.
+      // content is still right after it in the same list.
       nsIContent* previousEditableSibling =
           curList ? GetPriorHTMLSibling(listItem) : nullptr;
       if (!curList ||
@@ -5498,19 +5445,19 @@ nsresult HTMLEditor::HandleHTMLIndentAtSelectionInternal() {
     // One reason it might not go in prio blockquote is if we are now
     // in a different table cell.
     if (curQuote &&
-        HTMLEditor::NodesInDifferentTableElements(*curQuote, *curNode)) {
+        HTMLEditor::NodesInDifferentTableElements(*curQuote, content)) {
       curQuote = nullptr;
     }
 
     if (!curQuote) {
       // First, check that our element can contain a blockquote.
-      if (!CanContainTag(*atCurNode.GetContainer(), *nsGkAtoms::blockquote)) {
+      if (!CanContainTag(*atContent.GetContainer(), *nsGkAtoms::blockquote)) {
         return NS_OK;  // cancelled
       }
 
       SplitNodeResult splitNodeResult =
           MaybeSplitAncestorsForInsertWithTransaction(*nsGkAtoms::blockquote,
-                                                      atCurNode);
+                                                      atContent);
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
@@ -5528,8 +5475,7 @@ nsresult HTMLEditor::HandleHTMLIndentAtSelectionInternal() {
     }
 
     // tuck the node into the end of the active blockquote
-    rv = MoveNodeToEndWithTransaction(MOZ_KnownLive(*curNode->AsContent()),
-                                      *curQuote);
+    rv = MoveNodeToEndWithTransaction(content, *curQuote);
     if (NS_WARN_IF(Destroyed())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }
@@ -5669,9 +5615,9 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
   // basically just expands the range to include the immediate block parent,
   // and then further expands to include any ancestors whose children are all
   // in the range
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   nsresult rv = SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges(
-      arrayOfNodes, EditSubAction::eOutdent, CollectNonEditableNodes::Yes);
+      arrayOfContents, EditSubAction::eOutdent, CollectNonEditableNodes::Yes);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return SplitRangeOffFromNodeResult(rv);
   }
@@ -5682,23 +5628,19 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
   RefPtr<Element> indentedParentElement;
   nsCOMPtr<nsIContent> firstContentToBeOutdented, lastContentToBeOutdented;
   BlockIndentedWith indentedParentIndentedWith = BlockIndentedWith::HTML;
-  for (auto& curNode : arrayOfNodes) {
-    if (!curNode->IsContent()) {
-      continue;
-    }
-    OwningNonNull<nsIContent> curContent = *curNode->AsContent();
+  for (auto& content : arrayOfContents) {
     // Here's where we actually figure out what to do
-    EditorDOMPoint atCurContent(curContent);
-    if (!atCurContent.IsSet()) {
+    EditorDOMPoint atContent(content);
+    if (!atContent.IsSet()) {
       continue;
     }
 
     // If it's a `<blockquote>`, remove it to outdent its children.
-    if (curContent->IsHTMLElement(nsGkAtoms::blockquote)) {
+    if (content->IsHTMLElement(nsGkAtoms::blockquote)) {
       // If we've already found an ancestor block element indented, we need to
       // split it and remove the block element first.
       if (indentedParentElement) {
-        MOZ_ASSERT(indentedParentElement == curContent);
+        MOZ_ASSERT(indentedParentElement == content);
         SplitRangeOffFromNodeResult outdentResult = OutdentPartOfBlock(
             *indentedParentElement, *firstContentToBeOutdented,
             *lastContentToBeOutdented, indentedParentIndentedWith);
@@ -5714,7 +5656,7 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
         indentedParentIndentedWith = BlockIndentedWith::HTML;
       }
       rv = RemoveBlockContainerWithTransaction(
-          MOZ_KnownLive(*curContent->AsElement()));
+          MOZ_KnownLive(*content->AsElement()));
       if (NS_WARN_IF(Destroyed())) {
         return SplitRangeOffFromNodeResult(NS_ERROR_EDITOR_DESTROYED);
       }
@@ -5726,10 +5668,10 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
 
     // If we're using CSS and the node is a block element, check its start
     // margin whether it's indented with CSS.
-    if (useCSS && HTMLEditor::NodeIsBlockStatic(curContent)) {
-      nsStaticAtom& marginProperty = MarginPropertyAtomForIndent(curContent);
+    if (useCSS && HTMLEditor::NodeIsBlockStatic(content)) {
+      nsStaticAtom& marginProperty = MarginPropertyAtomForIndent(content);
       nsAutoString value;
-      CSSEditUtils::GetSpecifiedProperty(curContent, marginProperty, value);
+      CSSEditUtils::GetSpecifiedProperty(content, marginProperty, value);
       if (NS_WARN_IF(Destroyed())) {
         return SplitRangeOffFromNodeResult(NS_ERROR_EDITOR_DESTROYED);
       }
@@ -5738,7 +5680,7 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
       CSSEditUtils::ParseLength(value, &startMargin, getter_AddRefs(unit));
       // If indented with CSS, we should decrease the start mergin.
       if (startMargin > 0) {
-        nsresult rv = ChangeMarginStart(MOZ_KnownLive(*curContent->AsElement()),
+        nsresult rv = ChangeMarginStart(MOZ_KnownLive(*content->AsElement()),
                                         ChangeMargin::Decrease);
         if (NS_WARN_IF(rv == NS_ERROR_EDITOR_DESTROYED)) {
           return SplitRangeOffFromNodeResult(NS_ERROR_EDITOR_DESTROYED);
@@ -5750,7 +5692,7 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
     }
 
     // If it's a list item, we should treat as that it "indents" its children.
-    if (HTMLEditUtils::IsListItem(curContent)) {
+    if (HTMLEditUtils::IsListItem(content)) {
       // If it is a list item, that means we are not outdenting whole list.
       // XXX I don't understand this sentence...  We may meet parent list
       //     element, no?
@@ -5769,9 +5711,9 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
         lastContentToBeOutdented = nullptr;
         indentedParentIndentedWith = BlockIndentedWith::HTML;
       }
-      // XXX `curContent` could become different element since
+      // XXX `content` could become different element since
       //     `OutdentPartOfBlock()` may run mutation event listeners.
-      rv = LiftUpListItemElement(MOZ_KnownLive(*curContent->AsElement()),
+      rv = LiftUpListItemElement(MOZ_KnownLive(*content->AsElement()),
                                  LiftUpFromAllParentListElements::No);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return SplitRangeOffFromNodeResult(rv);
@@ -5785,10 +5727,10 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
     // it, we meet new node which should be outdented when the indented parent
     // is removed.
     if (indentedParentElement) {
-      if (EditorUtils::IsDescendantOf(*curContent, *indentedParentElement)) {
+      if (EditorUtils::IsDescendantOf(*content, *indentedParentElement)) {
         // Extend the range to be outdented at removing the
         // indentedParentElement.
-        lastContentToBeOutdented = curContent;
+        lastContentToBeOutdented = content;
         continue;
       }
       SplitRangeOffFromNodeResult outdentResult = OutdentPartOfBlock(
@@ -5810,7 +5752,7 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
 
     indentedParentIndentedWith = BlockIndentedWith::HTML;
     RefPtr<Element> editingHost = GetActiveEditingHost();
-    for (nsCOMPtr<nsINode> parentNode = curContent->GetParentNode();
+    for (nsCOMPtr<nsINode> parentNode = content->GetParentNode();
          parentNode && !parentNode->IsHTMLElement(nsGkAtoms::body) &&
          parentNode != editingHost &&
          (parentNode->IsHTMLElement(nsGkAtoms::table) ||
@@ -5820,8 +5762,8 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
       // time at least for outdenting current node.
       if (parentNode->IsHTMLElement(nsGkAtoms::blockquote)) {
         indentedParentElement = parentNode->AsElement();
-        firstContentToBeOutdented = curContent;
-        lastContentToBeOutdented = curContent;
+        firstContentToBeOutdented = content;
+        lastContentToBeOutdented = content;
         break;
       }
 
@@ -5829,7 +5771,7 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
         continue;
       }
 
-      nsStaticAtom& marginProperty = MarginPropertyAtomForIndent(curContent);
+      nsStaticAtom& marginProperty = MarginPropertyAtomForIndent(content);
       nsAutoString value;
       CSSEditUtils::GetSpecifiedProperty(*parentNode, marginProperty, value);
       if (NS_WARN_IF(Destroyed())) {
@@ -5843,11 +5785,11 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
       // If we reach a block element which indents its children with start
       // margin, we should remove it at next time.
       if (startMargin > 0 &&
-          !(HTMLEditUtils::IsList(atCurContent.GetContainer()) &&
-            HTMLEditUtils::IsList(curContent))) {
+          !(HTMLEditUtils::IsList(atContent.GetContainer()) &&
+            HTMLEditUtils::IsList(content))) {
         indentedParentElement = parentNode->AsElement();
-        firstContentToBeOutdented = curContent;
-        lastContentToBeOutdented = curContent;
+        firstContentToBeOutdented = content;
+        lastContentToBeOutdented = content;
         indentedParentIndentedWith = BlockIndentedWith::CSS;
         break;
       }
@@ -5863,12 +5805,12 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
     // XXX This is buggy.  When both lists' item types are different,
     //     we create invalid tree.  E.g., `<ul>` may have `<dd>` as its
     //     list item element.
-    if (HTMLEditUtils::IsList(atCurContent.GetContainer())) {
+    if (HTMLEditUtils::IsList(atContent.GetContainer())) {
       // Move node out of list
-      if (HTMLEditUtils::IsList(curContent)) {
+      if (HTMLEditUtils::IsList(content)) {
         // Just unwrap this sublist
         rv = RemoveBlockContainerWithTransaction(
-            MOZ_KnownLive(*curContent->AsElement()));
+            MOZ_KnownLive(*content->AsElement()));
         if (NS_WARN_IF(Destroyed())) {
           return SplitRangeOffFromNodeResult(NS_ERROR_EDITOR_DESTROYED);
         }
@@ -5881,12 +5823,12 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
 
     // If current content is a list element but its parent is not a list
     // element, move children to where it is and remove it from the tree.
-    if (HTMLEditUtils::IsList(curContent)) {
+    if (HTMLEditUtils::IsList(content)) {
       // XXX If mutation event listener appends new children forever, this
       //     becomes an infinite loop so that we should set limitation from
       //     first child count.
-      for (nsCOMPtr<nsIContent> lastChildContent = curContent->GetLastChild();
-           lastChildContent; lastChildContent = curContent->GetLastChild()) {
+      for (nsCOMPtr<nsIContent> lastChildContent = content->GetLastChild();
+           lastChildContent; lastChildContent = content->GetLastChild()) {
         if (HTMLEditUtils::IsListItem(lastChildContent)) {
           rv = LiftUpListItemElement(
               MOZ_KnownLive(*lastChildContent->AsElement()),
@@ -5901,7 +5843,7 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
           // We have an embedded list, so move it out from under the parent
           // list. Be sure to put it after the parent list because this
           // loop iterates backwards through the parent's list of children.
-          EditorDOMPoint afterCurrentList(atCurContent);
+          EditorDOMPoint afterCurrentList(atContent);
           DebugOnly<bool> advanced = afterCurrentList.AdvanceOffset();
           NS_WARNING_ASSERTION(
               advanced, "Failed to set it to after current list element");
@@ -5927,7 +5869,7 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
       }
       // Delete the now-empty list
       rv = RemoveBlockContainerWithTransaction(
-          MOZ_KnownLive(*curContent->AsElement()));
+          MOZ_KnownLive(*content->AsElement()));
       if (NS_WARN_IF(Destroyed())) {
         return SplitRangeOffFromNodeResult(NS_ERROR_EDITOR_DESTROYED);
       }
@@ -5939,11 +5881,11 @@ SplitRangeOffFromNodeResult HTMLEditor::HandleOutdentAtSelectionInternal() {
 
     if (useCSS) {
       RefPtr<Element> element;
-      if (curContent->IsCharacterData()) {
+      if (content->IsCharacterData()) {
         // We want to outdent the parent of text nodes etc.
-        element = curContent->GetParentElement();
-      } else if (curContent->IsElement()) {
-        element = curContent->AsElement();
+        element = content->GetParentElement();
+      } else if (content->IsElement()) {
+        element = content->AsElement();
       }
       if (element) {
         nsresult rv = ChangeMarginStart(*element, ChangeMargin::Decrease);
@@ -6123,7 +6065,7 @@ CreateElementResult HTMLEditor::ChangeListElementType(Element& aListElement,
     return CreateElementResult(NS_ERROR_EDITOR_DESTROYED);
   }
   NS_WARNING_ASSERTION(listElement != nullptr, "Failed to create list element");
-  return CreateElementResult(listElement.forget());
+  return CreateElementResult(std::move(listElement));
 }
 
 nsresult HTMLEditor::CreateStyleForInsertText(AbstractRange& aAbstractRange) {
@@ -6240,11 +6182,7 @@ bool HTMLEditor::IsEmptyBlockElement(Element& aElement,
   if (!HTMLEditor::NodeIsBlockStatic(aElement)) {
     return false;
   }
-  bool isEmpty = true;
-  nsresult rv =
-      IsEmptyNode(&aElement, &isEmpty, aIgnoreSingleBR == IgnoreSingleBR::Yes);
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "IsEmptyNode() failed");
-  return NS_SUCCEEDED(rv) && isEmpty;
+  return IsEmptyNode(aElement, aIgnoreSingleBR == IgnoreSingleBR::Yes);
 }
 
 EditActionResult HTMLEditor::AlignAsSubAction(const nsAString& aAlignType) {
@@ -6325,9 +6263,9 @@ nsresult HTMLEditor::AlignContentsAtSelection(const nsAString& aAlignType) {
   // basically just expands the range to include the immediate block parent,
   // and then further expands to include any ancestors whose children are all
   // in the range
-  AutoTArray<OwningNonNull<nsINode>, 64> nodeArray;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   nsresult rv = SplitInlinesAndCollectEditTargetNodesInExtendedSelectionRanges(
-      nodeArray, EditSubAction::eSetOrClearAlignment,
+      arrayOfContents, EditSubAction::eSetOrClearAlignment,
       CollectNonEditableNodes::Yes);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -6336,23 +6274,23 @@ nsresult HTMLEditor::AlignContentsAtSelection(const nsAString& aAlignType) {
   // If we don't have any nodes, or we have only a single br, then we are
   // creating an empty alignment div.  We have to do some different things for
   // these.
-  bool createEmptyDivElement = nodeArray.IsEmpty();
-  if (nodeArray.Length() == 1) {
-    OwningNonNull<nsINode> node = nodeArray[0];
+  bool createEmptyDivElement = arrayOfContents.IsEmpty();
+  if (arrayOfContents.Length() == 1) {
+    OwningNonNull<nsIContent>& content = arrayOfContents[0];
 
-    if (HTMLEditUtils::SupportsAlignAttr(*node)) {
+    if (HTMLEditUtils::SupportsAlignAttr(content)) {
       // The node is a table element, an hr, a paragraph, a div or a section
       // header; in HTML 4, it can directly carry the ALIGN attribute and we
       // don't need to make a div! If we are in CSS mode, all the work is done
       // in SetBlockElementAlign().
       nsresult rv =
-          SetBlockElementAlign(MOZ_KnownLive(*node->AsElement()), aAlignType,
+          SetBlockElementAlign(MOZ_KnownLive(*content->AsElement()), aAlignType,
                                EditTarget::OnlyDescendantsExceptTable);
       NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "SetBlockElementAlign() failed");
       return rv;
     }
 
-    if (node->IsHTMLElement(nsGkAtoms::br)) {
+    if (content->IsHTMLElement(nsGkAtoms::br)) {
       // The special case createEmptyDivElement code (below) that consumes
       // `<br>` elements can cause tables to split if the start node of the
       // selection is not in a table cell or caption, for example parent is a
@@ -6362,10 +6300,10 @@ nsresult HTMLEditor::AlignContentsAtSelection(const nsAString& aAlignType) {
       //
       // XXX: It seems a little error prone for the createEmptyDivElement
       //      special case code to assume that the start node of the selection
-      //      is the parent of the single node in the nodeArray, as the
+      //      is the parent of the single node in the arrayOfContents, as the
       //      paragraph above points out. Do we rely on the selection start
-      //      node because of the fact that nodeArray can be empty?  We should
-      //      probably revisit this issue. - kin
+      //      node because of the fact that arrayOfContents can be empty?  We
+      //      should probably revisit this issue. - kin
 
       nsRange* firstRange = SelectionRefPtr()->GetRangeAt(0);
       if (NS_WARN_IF(!firstRange)) {
@@ -6393,7 +6331,7 @@ nsresult HTMLEditor::AlignContentsAtSelection(const nsAString& aAlignType) {
     return rv;
   }
 
-  rv = AlignNodesAndDescendants(nodeArray, aAlignType);
+  rv = AlignNodesAndDescendants(arrayOfContents, aAlignType);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "AlignNodesAndDescendants() failed");
   return rv;
 }
@@ -6481,12 +6419,12 @@ EditActionResult HTMLEditor::AlignContentsAtSelectionWithEmptyDivElement(
 }
 
 nsresult HTMLEditor::AlignNodesAndDescendants(
-    nsTArray<OwningNonNull<nsINode>>& aArrayOfNodes,
+    nsTArray<OwningNonNull<nsIContent>>& aArrayOfContents,
     const nsAString& aAlignType) {
   // Detect all the transitions in the array, where a transition means that
   // adjacent nodes in the array don't have the same parent.
   AutoTArray<bool, 64> transitionList;
-  HTMLEditor::MakeTransitionList(aArrayOfNodes, transitionList);
+  HTMLEditor::MakeTransitionList(aArrayOfContents, transitionList);
 
   // Okay, now go through all the nodes and give them an align attrib or put
   // them in a div, or whatever is appropriate.  Woohoo!
@@ -6494,11 +6432,11 @@ nsresult HTMLEditor::AlignNodesAndDescendants(
   RefPtr<Element> createdDivElement;
   bool useCSS = IsCSSEnabled();
   int32_t indexOfTransitionList = -1;
-  for (OwningNonNull<nsINode>& curNode : aArrayOfNodes) {
+  for (OwningNonNull<nsIContent>& content : aArrayOfContents) {
     ++indexOfTransitionList;
 
     // Ignore all non-editable nodes.  Leave them be.
-    if (!IsEditable(curNode)) {
+    if (!IsEditable(content)) {
       continue;
     }
 
@@ -6506,9 +6444,9 @@ nsresult HTMLEditor::AlignNodesAndDescendants(
     // header; in HTML 4, it can directly carry the ALIGN attribute and we
     // don't need to nest it, just set the alignment.  In CSS, assign the
     // corresponding CSS styles in SetBlockElementAlign().
-    if (HTMLEditUtils::SupportsAlignAttr(*curNode)) {
+    if (HTMLEditUtils::SupportsAlignAttr(content)) {
       nsresult rv =
-          SetBlockElementAlign(MOZ_KnownLive(*curNode->AsElement()), aAlignType,
+          SetBlockElementAlign(MOZ_KnownLive(*content->AsElement()), aAlignType,
                                EditTarget::NodeAndDescendantsExceptTable);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
@@ -6519,28 +6457,26 @@ nsresult HTMLEditor::AlignNodesAndDescendants(
       continue;
     }
 
-    EditorDOMPoint atCurNode(curNode);
-    if (NS_WARN_IF(!atCurNode.IsSet())) {
+    EditorDOMPoint atContent(content);
+    if (NS_WARN_IF(!atContent.IsSet())) {
       continue;
     }
 
     // Skip insignificant formatting text nodes to prevent unnecessary
     // structure splitting!
-    bool isEmptyTextNode = false;
-    if (curNode->IsText() &&
-        ((HTMLEditUtils::IsTableElement(atCurNode.GetContainer()) &&
-          !HTMLEditUtils::IsTableCellOrCaption(*atCurNode.GetContainer())) ||
-         HTMLEditUtils::IsList(atCurNode.GetContainer()) ||
-         (NS_SUCCEEDED(IsEmptyNode(curNode, &isEmptyTextNode)) &&
-          isEmptyTextNode))) {
+    if (content->IsText() &&
+        ((HTMLEditUtils::IsTableElement(atContent.GetContainer()) &&
+          !HTMLEditUtils::IsTableCellOrCaption(*atContent.GetContainer())) ||
+         HTMLEditUtils::IsList(atContent.GetContainer()) ||
+         IsEmptyNode(*content))) {
       continue;
     }
 
     // If it's a list item, or a list inside a list, forget any "current" div,
     // and instead put divs inside the appropriate block (td, li, etc.)
-    if (HTMLEditUtils::IsListItem(curNode) || HTMLEditUtils::IsList(curNode)) {
-      Element* listOrListItemElement = curNode->AsElement();
-      AutoEditorDOMPointOffsetInvalidator lockChild(atCurNode);
+    if (HTMLEditUtils::IsListItem(content) || HTMLEditUtils::IsList(content)) {
+      Element* listOrListItemElement = content->AsElement();
+      AutoEditorDOMPointOffsetInvalidator lockChild(atContent);
       nsresult rv = RemoveAlignFromDescendants(
           MOZ_KnownLive(*listOrListItemElement), aAlignType,
           EditTarget::OnlyDescendantsExceptTable);
@@ -6559,7 +6495,7 @@ nsresult HTMLEditor::AlignNodesAndDescendants(
         continue;
       }
 
-      if (HTMLEditUtils::IsList(atCurNode.GetContainer())) {
+      if (HTMLEditUtils::IsList(atContent.GetContainer())) {
         // If we don't use CSS, add a content to list element: they have to
         // be inside another list, i.e., >= second level of nesting.
         // XXX AlignContentsInAllTableCellsAndListItems() handles only list
@@ -6582,7 +6518,7 @@ nsresult HTMLEditor::AlignNodesAndDescendants(
     // node doesn't go in div we used earlier.
     if (!createdDivElement || transitionList[indexOfTransitionList]) {
       // First, check that our element can contain a div.
-      if (!CanContainTag(*atCurNode.GetContainer(), *nsGkAtoms::div)) {
+      if (!CanContainTag(*atContent.GetContainer(), *nsGkAtoms::div)) {
         // XXX Why do we return NS_OK here rather than returning error or
         //     doing continue?
         return NS_OK;
@@ -6590,7 +6526,7 @@ nsresult HTMLEditor::AlignNodesAndDescendants(
 
       SplitNodeResult splitNodeResult =
           MaybeSplitAncestorsForInsertWithTransaction(*nsGkAtoms::div,
-                                                      atCurNode);
+                                                      atContent);
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
@@ -6616,8 +6552,7 @@ nsresult HTMLEditor::AlignNodesAndDescendants(
     }
 
     // Tuck the node into the end of the active div
-    nsresult rv = MoveNodeToEndWithTransaction(
-        MOZ_KnownLive(*curNode->AsContent()), *createdDivElement);
+    nsresult rv = MoveNodeToEndWithTransaction(content, *createdDivElement);
     if (NS_WARN_IF(Destroyed())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }
@@ -6634,16 +6569,20 @@ nsresult HTMLEditor::AlignContentsInAllTableCellsAndListItems(
   MOZ_ASSERT(IsEditActionDataAvailable());
 
   // Gather list of table cells or list items
-  AutoTArray<OwningNonNull<nsINode>, 64> nodeArray;
-  TableCellAndListItemFunctor functor;
+  AutoTArray<OwningNonNull<Element>, 64> arrayOfTableCellsAndListItems;
   DOMIterator iter(aElement);
-  iter.AppendList(functor, nodeArray);
+  iter.AppendNodesToArray(
+      +[](nsINode& aNode, void*) -> bool {
+        MOZ_ASSERT(Element::FromNode(&aNode));
+        return HTMLEditUtils::IsTableCell(&aNode) ||
+               HTMLEditUtils::IsListItem(&aNode);
+      },
+      arrayOfTableCellsAndListItems);
 
   // Now that we have the list, align their contents as requested
-  for (auto& node : nodeArray) {
-    MOZ_ASSERT(node->IsElement());
-    nsresult rv = AlignBlockContentsWithDivElement(
-        MOZ_KnownLive(*node->AsElement()), aAlignType);
+  for (auto& tableCellOrListItemElement : arrayOfTableCellsAndListItems) {
+    nsresult rv = AlignBlockContentsWithDivElement(tableCellOrListItemElement,
+                                                   aAlignType);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -6732,26 +6671,11 @@ EditActionResult HTMLEditor::MaybeDeleteTopMostEmptyAncestor(
   // elements this way.
   RefPtr<Element> blockElement = GetBlock(aStartContent);
   RefPtr<Element> topMostEmptyBlockElement;
-  if (blockElement && blockElement != &aEditingHostElement) {
-    // Efficiency hack, avoiding IsEmptyNode() call when in body
-    bool isEmptyNode = false;
-    nsresult rv = IsEmptyNode(blockElement, &isEmptyNode, true, false);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return EditActionResult(rv);
-    }
-    while (blockElement && isEmptyNode &&
-           !HTMLEditUtils::IsTableElement(blockElement) &&
-           blockElement != &aEditingHostElement) {
-      topMostEmptyBlockElement = blockElement;
-      blockElement = GetBlockNodeParent(topMostEmptyBlockElement);
-      if (!blockElement) {
-        break;
-      }
-      nsresult rv = IsEmptyNode(blockElement, &isEmptyNode, true, false);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return EditActionResult(rv);
-      }
-    }
+  while (blockElement && blockElement != &aEditingHostElement &&
+         !HTMLEditUtils::IsTableElement(blockElement) &&
+         IsEmptyNode(*blockElement, true, false)) {
+    topMostEmptyBlockElement = blockElement;
+    blockElement = GetBlockNodeParent(topMostEmptyBlockElement);
   }
 
   // XXX Because of not checking whether found block element is editable
@@ -6917,7 +6841,7 @@ Element* HTMLEditor::GetInvisibleBRElementAt(
 }
 
 size_t HTMLEditor::CollectChildren(
-    nsINode& aNode, nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
+    nsINode& aNode, nsTArray<OwningNonNull<nsIContent>>& aOutArrayOfContents,
     size_t aIndexToInsertChildren, CollectListChildren aCollectListChildren,
     CollectTableChildren aCollectTableChildren,
     CollectNonEditableNodes aCollectNonEditableNodes) const {
@@ -6932,12 +6856,12 @@ size_t HTMLEditor::CollectChildren(
         (aCollectTableChildren == CollectTableChildren::Yes &&
          HTMLEditUtils::IsTableElement(content))) {
       numberOfFoundChildren += CollectChildren(
-          *content, aOutArrayOfNodes,
+          *content, aOutArrayOfContents,
           aIndexToInsertChildren + numberOfFoundChildren, aCollectListChildren,
           aCollectTableChildren, aCollectNonEditableNodes);
     } else if (aCollectNonEditableNodes == CollectNonEditableNodes::Yes ||
                IsEditable(content)) {
-      aOutArrayOfNodes.InsertElementAt(
+      aOutArrayOfContents.InsertElementAt(
           aIndexToInsertChildren + numberOfFoundChildren++, *content);
     }
   }
@@ -7476,9 +7400,7 @@ void HTMLEditor::SelectBRElementIfCollapsedInEmptyBlock(
     return;
   }
 
-  bool isEmptyNode = false;
-  IsEmptyNode(block, &isEmptyNode, true, false);
-  if (isEmptyNode) {
+  if (IsEmptyNode(*block, true, false)) {
     aStartRef = {block, 0u};
     aEndRef = {block, block->Length()};
   }
@@ -7600,23 +7522,9 @@ already_AddRefed<nsRange> HTMLEditor::CreateRangeExtendedToHardLineStartAndEnd(
   return range.forget();
 }
 
-class UniqueFunctor final : public BoolDomIterFunctor {
- public:
-  explicit UniqueFunctor(nsTArray<OwningNonNull<nsINode>>& aArray)
-      : mArray(aArray) {}
-
-  // Used to build list of all nodes iterator covers.
-  virtual bool operator()(nsINode* aNode) const override {
-    return !mArray.Contains(aNode);
-  }
-
- private:
-  nsTArray<OwningNonNull<nsINode>>& mArray;
-};
-
 nsresult HTMLEditor::SplitInlinesAndCollectEditTargetNodes(
     nsTArray<RefPtr<nsRange>>& aArrayOfRanges,
-    nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
+    nsTArray<OwningNonNull<nsIContent>>& aOutArrayOfContents,
     EditSubAction aEditSubAction,
     CollectNonEditableNodes aCollectNonEditableNodes) {
   nsresult rv = SplitTextNodesAtRangeEnd(aArrayOfRanges);
@@ -7630,13 +7538,13 @@ nsresult HTMLEditor::SplitInlinesAndCollectEditTargetNodes(
   if (NS_FAILED(rv)) {
     return rv;
   }
-  rv = CollectEditTargetNodes(aArrayOfRanges, aOutArrayOfNodes, aEditSubAction,
-                              aCollectNonEditableNodes);
+  rv = CollectEditTargetNodes(aArrayOfRanges, aOutArrayOfContents,
+                              aEditSubAction, aCollectNonEditableNodes);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "CollectEditTargetNodes() failed");
   if (NS_FAILED(rv)) {
     return rv;
   }
-  rv = MaybeSplitElementsAtEveryBRElement(aOutArrayOfNodes, aEditSubAction);
+  rv = MaybeSplitElementsAtEveryBRElement(aOutArrayOfContents, aEditSubAction);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                        "MaybeSplitElementsAtEveryBRElement() failed");
   return rv;
@@ -7714,7 +7622,7 @@ nsresult HTMLEditor::SplitParentInlineElementsAtRangeEdges(
 
 nsresult HTMLEditor::CollectEditTargetNodes(
     nsTArray<RefPtr<nsRange>>& aArrayOfRanges,
-    nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes,
+    nsTArray<OwningNonNull<nsIContent>>& aOutArrayOfContents,
     EditSubAction aEditSubAction,
     CollectNonEditableNodes aCollectNonEditableNodes) {
   MOZ_ASSERT(IsEditActionDataAvailable());
@@ -7726,20 +7634,23 @@ nsresult HTMLEditor::CollectEditTargetNodes(
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
-    if (aOutArrayOfNodes.IsEmpty()) {
-      iter.AppendList(TrivialFunctor(), aOutArrayOfNodes);
+    if (aOutArrayOfContents.IsEmpty()) {
+      iter.AppendAllNodesToArray(aOutArrayOfContents);
     } else {
-      // We don't want duplicates in aOutArrayOfNodes, so we use an
-      // iterator/functor that only return nodes that are not already in
-      // aOutArrayOfNodes.
-      nsTArray<OwningNonNull<nsINode>> nodes;
-      iter.AppendList(UniqueFunctor(aOutArrayOfNodes), nodes);
-      aOutArrayOfNodes.AppendElements(nodes);
+      AutoTArray<OwningNonNull<nsIContent>, 24> arrayOfTopChildren;
+      iter.AppendNodesToArray(
+          +[](nsINode& aNode, void* aArray) -> bool {
+            MOZ_ASSERT(aArray);
+            return !static_cast<nsTArray<OwningNonNull<nsIContent>>*>(aArray)
+                        ->Contains(&aNode);
+          },
+          arrayOfTopChildren, &aOutArrayOfContents);
+      aOutArrayOfContents.AppendElements(std::move(arrayOfTopChildren));
     }
     if (aCollectNonEditableNodes == CollectNonEditableNodes::No) {
-      for (size_t i = aOutArrayOfNodes.Length(); i > 0; --i) {
-        if (!IsEditable(aOutArrayOfNodes[i - 1])) {
-          aOutArrayOfNodes.RemoveElementAt(i - 1);
+      for (size_t i = aOutArrayOfContents.Length(); i > 0; --i) {
+        if (!IsEditable(aOutArrayOfContents[i - 1])) {
+          aOutArrayOfContents.RemoveElementAt(i - 1);
         }
       }
     }
@@ -7749,36 +7660,37 @@ nsresult HTMLEditor::CollectEditTargetNodes(
     case EditSubAction::eCreateOrRemoveBlock:
       // Certain operations should not act on li's and td's, but rather inside
       // them.  Alter the list as needed.
-      for (int32_t i = aOutArrayOfNodes.Length() - 1; i >= 0; i--) {
-        OwningNonNull<nsINode> node = aOutArrayOfNodes[i];
-        if (HTMLEditUtils::IsListItem(node)) {
-          aOutArrayOfNodes.RemoveElementAt(i);
-          CollectChildren(*node, aOutArrayOfNodes, i, CollectListChildren::Yes,
-                          CollectTableChildren::Yes, aCollectNonEditableNodes);
+      for (int32_t i = aOutArrayOfContents.Length() - 1; i >= 0; i--) {
+        OwningNonNull<nsIContent> content = aOutArrayOfContents[i];
+        if (HTMLEditUtils::IsListItem(content)) {
+          aOutArrayOfContents.RemoveElementAt(i);
+          CollectChildren(*content, aOutArrayOfContents, i,
+                          CollectListChildren::Yes, CollectTableChildren::Yes,
+                          aCollectNonEditableNodes);
         }
       }
       // Empty text node shouldn't be selected if unnecessary
-      for (int32_t i = aOutArrayOfNodes.Length() - 1; i >= 0; i--) {
-        if (Text* text = aOutArrayOfNodes[i]->GetAsText()) {
+      for (int32_t i = aOutArrayOfContents.Length() - 1; i >= 0; i--) {
+        if (Text* text = aOutArrayOfContents[i]->GetAsText()) {
           // Don't select empty text except to empty block
           if (!IsVisibleTextNode(*text)) {
-            aOutArrayOfNodes.RemoveElementAt(i);
+            aOutArrayOfContents.RemoveElementAt(i);
           }
         }
       }
       break;
     case EditSubAction::eCreateOrChangeList: {
-      for (size_t i = aOutArrayOfNodes.Length(); i > 0; i--) {
+      for (size_t i = aOutArrayOfContents.Length(); i > 0; i--) {
         // Scan for table elements.  If we find table elements other than
         // table, replace it with a list of any editable non-table content
         // because if a selection range starts from end in a table-cell and
         // ends at or starts from outside the `<table>`, we need to make
         // lists in each selected table-cells.
-        OwningNonNull<nsINode> node = aOutArrayOfNodes[i - 1];
-        if (HTMLEditUtils::IsTableElementButNotTable(node)) {
+        OwningNonNull<nsIContent> content = aOutArrayOfContents[i - 1];
+        if (HTMLEditUtils::IsTableElementButNotTable(content)) {
           // XXX aCollectNonEditableNodes is ignored here.  Maybe a bug.
-          aOutArrayOfNodes.RemoveElementAt(i - 1);
-          CollectChildren(node, aOutArrayOfNodes, i - 1,
+          aOutArrayOfContents.RemoveElementAt(i - 1);
+          CollectChildren(content, aOutArrayOfContents, i - 1,
                           CollectListChildren::No, CollectTableChildren::Yes,
                           CollectNonEditableNodes::Yes);
         }
@@ -7786,27 +7698,27 @@ nsresult HTMLEditor::CollectEditTargetNodes(
       // If there is only one node in the array, and it is a `<div>`,
       // `<blockquote>` or a list element, then look inside of it until we
       // find inner list or content.
-      if (aOutArrayOfNodes.Length() != 1) {
+      if (aOutArrayOfContents.Length() != 1) {
         break;
       }
       Element* deepestDivBlockquoteOrListElement =
           GetDeepestEditableOnlyChildDivBlockquoteOrListElement(
-              aOutArrayOfNodes[0]);
+              aOutArrayOfContents[0]);
       if (!deepestDivBlockquoteOrListElement) {
         break;
       }
       if (deepestDivBlockquoteOrListElement->IsAnyOfHTMLElements(
               nsGkAtoms::div, nsGkAtoms::blockquote)) {
-        aOutArrayOfNodes.Clear();
+        aOutArrayOfContents.Clear();
         // XXX Before we're called, non-editable nodes are ignored.  However,
         //     we may append non-editable nodes here.
-        CollectChildren(*deepestDivBlockquoteOrListElement, aOutArrayOfNodes, 0,
-                        CollectListChildren::No, CollectTableChildren::No,
+        CollectChildren(*deepestDivBlockquoteOrListElement, aOutArrayOfContents,
+                        0, CollectListChildren::No, CollectTableChildren::No,
                         CollectNonEditableNodes::Yes);
         break;
       }
-      aOutArrayOfNodes.ReplaceElementAt(
-          0, OwningNonNull<nsINode>(*deepestDivBlockquoteOrListElement));
+      aOutArrayOfContents.ReplaceElementAt(
+          0, OwningNonNull<nsIContent>(*deepestDivBlockquoteOrListElement));
       break;
     }
     case EditSubAction::eOutdent:
@@ -7814,12 +7726,13 @@ nsresult HTMLEditor::CollectEditTargetNodes(
     case EditSubAction::eSetPositionToAbsolute:
       // Indent/outdent already do something special for list items, but we
       // still need to make sure we don't act on table elements
-      for (int32_t i = aOutArrayOfNodes.Length() - 1; i >= 0; i--) {
-        OwningNonNull<nsINode> node = aOutArrayOfNodes[i];
-        if (HTMLEditUtils::IsTableElementButNotTable(node)) {
-          aOutArrayOfNodes.RemoveElementAt(i);
-          CollectChildren(*node, aOutArrayOfNodes, i, CollectListChildren::Yes,
-                          CollectTableChildren::Yes, aCollectNonEditableNodes);
+      for (int32_t i = aOutArrayOfContents.Length() - 1; i >= 0; i--) {
+        OwningNonNull<nsIContent> content = aOutArrayOfContents[i];
+        if (HTMLEditUtils::IsTableElementButNotTable(content)) {
+          aOutArrayOfContents.RemoveElementAt(i);
+          CollectChildren(*content, aOutArrayOfContents, i,
+                          CollectListChildren::Yes, CollectTableChildren::Yes,
+                          aCollectNonEditableNodes);
         }
       }
       break;
@@ -7829,12 +7742,13 @@ nsresult HTMLEditor::CollectEditTargetNodes(
 
   // Outdent should look inside of divs.
   if (aEditSubAction == EditSubAction::eOutdent && !IsCSSEnabled()) {
-    for (int32_t i = aOutArrayOfNodes.Length() - 1; i >= 0; i--) {
-      OwningNonNull<nsINode> node = aOutArrayOfNodes[i];
-      if (node->IsHTMLElement(nsGkAtoms::div)) {
-        aOutArrayOfNodes.RemoveElementAt(i);
-        CollectChildren(*node, aOutArrayOfNodes, i, CollectListChildren::No,
-                        CollectTableChildren::No, aCollectNonEditableNodes);
+    for (int32_t i = aOutArrayOfContents.Length() - 1; i >= 0; i--) {
+      OwningNonNull<nsIContent> content = aOutArrayOfContents[i];
+      if (content->IsHTMLElement(nsGkAtoms::div)) {
+        aOutArrayOfContents.RemoveElementAt(i);
+        CollectChildren(*content, aOutArrayOfContents, i,
+                        CollectListChildren::No, CollectTableChildren::No,
+                        aCollectNonEditableNodes);
       }
     }
   }
@@ -7843,7 +7757,7 @@ nsresult HTMLEditor::CollectEditTargetNodes(
 }
 
 nsresult HTMLEditor::MaybeSplitElementsAtEveryBRElement(
-    nsTArray<OwningNonNull<nsINode>>& aArrayOfNodes,
+    nsTArray<OwningNonNull<nsIContent>>& aArrayOfContents,
     EditSubAction aEditSubAction) {
   // Post-process the list to break up inline containers that contain br's, but
   // only for operations that might care, like making lists or paragraphs
@@ -7855,20 +7769,20 @@ nsresult HTMLEditor::MaybeSplitElementsAtEveryBRElement(
     case EditSubAction::eSetPositionToAbsolute:
     case EditSubAction::eIndent:
     case EditSubAction::eOutdent:
-      for (int32_t i = aArrayOfNodes.Length() - 1; i >= 0; i--) {
-        OwningNonNull<nsINode> node = aArrayOfNodes[i];
-        if (HTMLEditor::NodeIsInlineStatic(node) && IsContainer(node) &&
-            !EditorBase::IsTextNode(node)) {
-          nsTArray<OwningNonNull<nsINode>> arrayOfInlines;
-          nsresult rv = SplitElementsAtEveryBRElement(
-              MOZ_KnownLive(*node->AsContent()), arrayOfInlines);
+      for (int32_t i = aArrayOfContents.Length() - 1; i >= 0; i--) {
+        OwningNonNull<nsIContent>& content = aArrayOfContents[i];
+        if (HTMLEditor::NodeIsInlineStatic(content) && IsContainer(content) &&
+            !EditorBase::IsTextNode(content)) {
+          AutoTArray<OwningNonNull<nsIContent>, 24> arrayOfInlineContents;
+          nsresult rv =
+              SplitElementsAtEveryBRElement(content, arrayOfInlineContents);
           if (NS_WARN_IF(NS_FAILED(rv))) {
             return rv;
           }
 
-          // Put these nodes in aArrayOfNodes, replacing the current node
-          aArrayOfNodes.RemoveElementAt(i);
-          aArrayOfNodes.InsertElementsAt(i, arrayOfInlines);
+          // Put these nodes in aArrayOfContents, replacing the current node
+          aArrayOfContents.RemoveElementAt(i);
+          aArrayOfContents.InsertElementsAt(i, arrayOfInlineContents);
         }
       }
       return NS_OK;
@@ -7968,25 +7882,24 @@ nsresult HTMLEditor::SplitParentInlineElementsAtRangeEdges(
 
 nsresult HTMLEditor::SplitElementsAtEveryBRElement(
     nsIContent& aMostAncestorToBeSplit,
-    nsTArray<OwningNonNull<nsINode>>& aOutArrayOfNodes) {
+    nsTArray<OwningNonNull<nsIContent>>& aOutArrayOfContents) {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
   // First build up a list of all the break nodes inside the inline container.
-  nsTArray<OwningNonNull<nsINode>> arrayOfBreaks;
-  BRNodeFunctor functor;
+  AutoTArray<OwningNonNull<HTMLBRElement>, 24> arrayOfBRElements;
   DOMIterator iter(aMostAncestorToBeSplit);
-  iter.AppendList(functor, arrayOfBreaks);
+  iter.AppendAllNodesToArray(arrayOfBRElements);
 
   // If there aren't any breaks, just put inNode itself in the array
-  if (arrayOfBreaks.IsEmpty()) {
-    aOutArrayOfNodes.AppendElement(aMostAncestorToBeSplit);
+  if (arrayOfBRElements.IsEmpty()) {
+    aOutArrayOfContents.AppendElement(aMostAncestorToBeSplit);
     return NS_OK;
   }
 
   // Else we need to bust up aMostAncestorToBeSplit along all the breaks
   nsCOMPtr<nsIContent> nextContent = &aMostAncestorToBeSplit;
-  for (OwningNonNull<nsINode>& brNode : arrayOfBreaks) {
-    EditorDOMPoint atBrNode(brNode);
+  for (OwningNonNull<HTMLBRElement>& brElement : arrayOfBRElements) {
+    EditorDOMPoint atBrNode(brElement);
     if (NS_WARN_IF(!atBrNode.IsSet())) {
       return NS_ERROR_FAILURE;
     }
@@ -8004,26 +7917,25 @@ nsresult HTMLEditor::SplitElementsAtEveryBRElement(
       // Might not be a left node.  A break might have been at the very
       // beginning of inline container, in which case
       // SplitNodeDeepWithTransaction() would not actually split anything.
-      aOutArrayOfNodes.AppendElement(*splitNodeResult.GetPreviousNode());
+      aOutArrayOfContents.AppendElement(*splitNodeResult.GetPreviousNode());
     }
 
     // Move break outside of container and also put in node list
     EditorDOMPoint atNextNode(splitNodeResult.GetNextNode());
-    nsresult rv = MoveNodeWithTransaction(MOZ_KnownLive(*brNode->AsContent()),
-                                          atNextNode);
+    nsresult rv = MoveNodeWithTransaction(brElement, atNextNode);
     if (NS_WARN_IF(Destroyed())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
-    aOutArrayOfNodes.AppendElement(*brNode);
+    aOutArrayOfContents.AppendElement(brElement);
 
     nextContent = splitNodeResult.GetNextNode();
   }
 
   // Now tack on remaining next node.
-  aOutArrayOfNodes.AppendElement(*nextContent);
+  aOutArrayOfContents.AppendElement(*nextContent);
 
   return NS_OK;
 }
@@ -8066,13 +7978,13 @@ nsIContent* HTMLEditor::GetMostAncestorInlineElement(nsINode& aNode) const {
 
 // static
 void HTMLEditor::MakeTransitionList(
-    const nsTArray<OwningNonNull<nsINode>>& aNodeArray,
+    const nsTArray<OwningNonNull<nsIContent>>& aArrayOfContents,
     nsTArray<bool>& aTransitionArray) {
   nsINode* prevParent = nullptr;
-  aTransitionArray.EnsureLengthAtLeast(aNodeArray.Length());
-  for (uint32_t i = 0; i < aNodeArray.Length(); i++) {
-    aTransitionArray[i] = aNodeArray[i]->GetParentNode() != prevParent;
-    prevParent = aNodeArray[i]->GetParentNode();
+  aTransitionArray.EnsureLengthAtLeast(aArrayOfContents.Length());
+  for (uint32_t i = 0; i < aArrayOfContents.Length(); i++) {
+    aTransitionArray[i] = aArrayOfContents[i]->GetParentNode() != prevParent;
+    prevParent = aArrayOfContents[i]->GetParentNode();
   }
 }
 
@@ -8135,12 +8047,7 @@ nsresult HTMLEditor::HandleInsertParagraphInHeadingElement(Element& aHeader,
   nsCOMPtr<nsIContent> prevItem = GetPriorHTMLSibling(&aHeader);
   if (prevItem) {
     MOZ_DIAGNOSTIC_ASSERT(HTMLEditUtils::IsHeader(*prevItem));
-    bool isEmptyNode;
-    rv = IsEmptyNode(prevItem, &isEmptyNode);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-    if (isEmptyNode) {
+    if (IsEmptyNode(*prevItem)) {
       CreateElementResult createPaddingBRResult =
           InsertPaddingBRElementForEmptyLastLineWithTransaction(
               EditorDOMPoint(prevItem, 0));
@@ -8654,12 +8561,7 @@ nsresult HTMLEditor::HandleInsertParagraphInListItemElement(Element& aListItem,
   // left empty.
   nsCOMPtr<nsIContent> prevItem = GetPriorHTMLSibling(&aListItem);
   if (prevItem && HTMLEditUtils::IsListItem(prevItem)) {
-    bool isEmptyNode;
-    rv = IsEmptyNode(prevItem, &isEmptyNode);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-    if (isEmptyNode) {
+    if (IsEmptyNode(*prevItem)) {
       CreateElementResult createPaddingBRResult =
           InsertPaddingBRElementForEmptyLastLineWithTransaction(
               EditorDOMPoint(prevItem, 0));
@@ -8667,11 +8569,7 @@ nsresult HTMLEditor::HandleInsertParagraphInListItemElement(Element& aListItem,
         return createPaddingBRResult.Rv();
       }
     } else {
-      rv = IsEmptyNode(&aListItem, &isEmptyNode, true);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-      }
-      if (isEmptyNode) {
+      if (IsEmptyNode(aListItem, true)) {
         if (aListItem.IsAnyOfHTMLElements(nsGkAtoms::dd, nsGkAtoms::dt)) {
           nsCOMPtr<nsINode> list = aListItem.GetParentNode();
           int32_t itemOffset = list ? list->ComputeIndexOf(&aListItem) : -1;
@@ -8785,7 +8683,7 @@ nsresult HTMLEditor::HandleInsertParagraphInListItemElement(Element& aListItem,
 }
 
 nsresult HTMLEditor::MoveNodesIntoNewBlockquoteElement(
-    nsTArray<OwningNonNull<nsINode>>& aNodeArray) {
+    nsTArray<OwningNonNull<nsIContent>>& aArrayOfContents) {
   MOZ_ASSERT(IsTopLevelEditSubActionDataAvailable());
 
   // The idea here is to put the nodes into a minimal number of blockquotes.
@@ -8795,21 +8693,16 @@ nsresult HTMLEditor::MoveNodesIntoNewBlockquoteElement(
   RefPtr<Element> curBlock;
   nsCOMPtr<nsINode> prevParent;
 
-  for (auto& curNode : aNodeArray) {
-    // Get the node to act on, and its location
-    if (NS_WARN_IF(!curNode->IsContent())) {
-      return NS_ERROR_FAILURE;
-    }
-
+  for (auto& content : aArrayOfContents) {
     // If the node is a table element or list item, dive inside
-    if (HTMLEditUtils::IsTableElementButNotTable(curNode) ||
-        HTMLEditUtils::IsListItem(curNode)) {
+    if (HTMLEditUtils::IsTableElementButNotTable(content) ||
+        HTMLEditUtils::IsListItem(content)) {
       // Forget any previous block
       curBlock = nullptr;
       // Recursion time
-      AutoTArray<OwningNonNull<nsINode>, 24> childNodes;
-      HTMLEditor::GetChildNodesOf(*curNode, childNodes);
-      nsresult rv = MoveNodesIntoNewBlockquoteElement(childNodes);
+      AutoTArray<OwningNonNull<nsIContent>, 24> childContents;
+      HTMLEditor::GetChildNodesOf(*content, childContents);
+      nsresult rv = MoveNodesIntoNewBlockquoteElement(childContents);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
@@ -8818,20 +8711,20 @@ nsresult HTMLEditor::MoveNodesIntoNewBlockquoteElement(
     // If the node has different parent than previous node, further nodes in a
     // new parent
     if (prevParent) {
-      if (prevParent != curNode->GetParentNode()) {
+      if (prevParent != content->GetParentNode()) {
         // Forget any previous blockquote node we were using
         curBlock = nullptr;
-        prevParent = curNode->GetParentNode();
+        prevParent = content->GetParentNode();
       }
     } else {
-      prevParent = curNode->GetParentNode();
+      prevParent = content->GetParentNode();
     }
 
     // If no curBlock, make one
     if (!curBlock) {
       SplitNodeResult splitNodeResult =
           MaybeSplitAncestorsForInsertWithTransaction(*nsGkAtoms::blockquote,
-                                                      EditorDOMPoint(curNode));
+                                                      EditorDOMPoint(content));
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
@@ -8851,8 +8744,7 @@ nsresult HTMLEditor::MoveNodesIntoNewBlockquoteElement(
       // note: doesn't matter if we set mNewBlockElement multiple times.
     }
 
-    nsresult rv = MoveNodeToEndWithTransaction(
-        MOZ_KnownLive(*curNode->AsContent()), *curBlock);
+    nsresult rv = MoveNodeToEndWithTransaction(content, *curBlock);
     if (NS_WARN_IF(Destroyed())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }
@@ -8864,33 +8756,33 @@ nsresult HTMLEditor::MoveNodesIntoNewBlockquoteElement(
 }
 
 nsresult HTMLEditor::RemoveBlockContainerElements(
-    nsTArray<OwningNonNull<nsINode>>& aNodeArray) {
+    nsTArray<OwningNonNull<nsIContent>>& aArrayOfContents) {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
   // Intent of this routine is to be used for converting to/from headers,
   // paragraphs, pre, and address.  Those blocks that pretty much just contain
   // inline things...
-  nsCOMPtr<Element> curBlock;
-  nsCOMPtr<nsIContent> firstNode, lastNode;
-  for (auto& curNode : aNodeArray) {
+  RefPtr<Element> curBlock;
+  nsCOMPtr<nsIContent> firstContent, lastContent;
+  for (auto& content : aArrayOfContents) {
     // If curNode is an <address>, <p>, <hn>, or <pre>, remove it.
-    if (HTMLEditUtils::IsFormatNode(curNode)) {
+    if (HTMLEditUtils::IsFormatNode(content)) {
       // Process any partial progress saved
       if (curBlock) {
         SplitRangeOffFromNodeResult removeMiddleContainerResult =
             SplitRangeOffFromBlockAndRemoveMiddleContainer(
-                *curBlock, *firstNode, *lastNode);
+                *curBlock, *firstContent, *lastContent);
         if (NS_WARN_IF(removeMiddleContainerResult.Failed())) {
           return removeMiddleContainerResult.Rv();
         }
-        firstNode = lastNode = curBlock = nullptr;
+        firstContent = lastContent = curBlock = nullptr;
       }
-      if (!IsEditable(curNode)) {
+      if (!IsEditable(content)) {
         continue;
       }
       // Remove current block
       nsresult rv = RemoveBlockContainerWithTransaction(
-          MOZ_KnownLive(*curNode->AsElement()));
+          MOZ_KnownLive(*content->AsElement()));
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -8901,60 +8793,60 @@ nsresult HTMLEditor::RemoveBlockContainerElements(
     }
 
     // XXX How about, <th>, <thead>, <tfoot>, <dt>, <dl>?
-    if (curNode->IsAnyOfHTMLElements(
+    if (content->IsAnyOfHTMLElements(
             nsGkAtoms::table, nsGkAtoms::tr, nsGkAtoms::tbody, nsGkAtoms::td,
             nsGkAtoms::li, nsGkAtoms::blockquote, nsGkAtoms::div) ||
-        HTMLEditUtils::IsList(curNode)) {
+        HTMLEditUtils::IsList(content)) {
       // Process any partial progress saved
       if (curBlock) {
         SplitRangeOffFromNodeResult removeMiddleContainerResult =
             SplitRangeOffFromBlockAndRemoveMiddleContainer(
-                *curBlock, *firstNode, *lastNode);
+                *curBlock, *firstContent, *lastContent);
         if (NS_WARN_IF(removeMiddleContainerResult.Failed())) {
           return removeMiddleContainerResult.Rv();
         }
-        firstNode = lastNode = curBlock = nullptr;
+        firstContent = lastContent = curBlock = nullptr;
       }
-      if (!IsEditable(curNode)) {
+      if (!IsEditable(content)) {
         continue;
       }
       // Recursion time
-      AutoTArray<OwningNonNull<nsINode>, 24> childNodes;
-      HTMLEditor::GetChildNodesOf(*curNode, childNodes);
-      nsresult rv = RemoveBlockContainerElements(childNodes);
+      AutoTArray<OwningNonNull<nsIContent>, 24> childContents;
+      HTMLEditor::GetChildNodesOf(*content, childContents);
+      nsresult rv = RemoveBlockContainerElements(childContents);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
       continue;
     }
 
-    if (HTMLEditor::NodeIsInlineStatic(curNode)) {
+    if (HTMLEditor::NodeIsInlineStatic(content)) {
       if (curBlock) {
         // If so, is this node a descendant?
-        if (EditorUtils::IsDescendantOf(*curNode, *curBlock)) {
+        if (EditorUtils::IsDescendantOf(*content, *curBlock)) {
           // Then we don't need to do anything different for this node
-          lastNode = curNode->AsContent();
+          lastContent = content;
           continue;
         }
         // Otherwise, we have progressed beyond end of curBlock, so let's
         // handle it now.  We need to remove the portion of curBlock that
-        // contains [firstNode - lastNode].
+        // contains [firstContent - lastContent].
         SplitRangeOffFromNodeResult removeMiddleContainerResult =
             SplitRangeOffFromBlockAndRemoveMiddleContainer(
-                *curBlock, *firstNode, *lastNode);
+                *curBlock, *firstContent, *lastContent);
         if (NS_WARN_IF(removeMiddleContainerResult.Failed())) {
           return removeMiddleContainerResult.Rv();
         }
-        firstNode = lastNode = curBlock = nullptr;
-        // Fall out and handle curNode
+        firstContent = lastContent = curBlock = nullptr;
+        // Fall out and handle content
       }
-      curBlock = GetBlockNodeParent(curNode);
+      curBlock = GetBlockNodeParent(content);
       if (!curBlock || !HTMLEditUtils::IsFormatNode(curBlock) ||
           !IsEditable(curBlock)) {
         // Not a block kind that we care about.
         curBlock = nullptr;
       } else {
-        firstNode = lastNode = curNode->AsContent();
+        firstContent = lastContent = content;
       }
       continue;
     }
@@ -8963,30 +8855,30 @@ nsresult HTMLEditor::RemoveBlockContainerElements(
       // Some node that is already sans block style.  Skip over it and process
       // any partial progress saved.
       SplitRangeOffFromNodeResult removeMiddleContainerResult =
-          SplitRangeOffFromBlockAndRemoveMiddleContainer(*curBlock, *firstNode,
-                                                         *lastNode);
+          SplitRangeOffFromBlockAndRemoveMiddleContainer(
+              *curBlock, *firstContent, *lastContent);
       if (NS_WARN_IF(removeMiddleContainerResult.Failed())) {
         return removeMiddleContainerResult.Rv();
       }
-      firstNode = lastNode = curBlock = nullptr;
+      firstContent = lastContent = curBlock = nullptr;
       continue;
     }
   }
   // Process any partial progress saved
   if (curBlock) {
     SplitRangeOffFromNodeResult removeMiddleContainerResult =
-        SplitRangeOffFromBlockAndRemoveMiddleContainer(*curBlock, *firstNode,
-                                                       *lastNode);
+        SplitRangeOffFromBlockAndRemoveMiddleContainer(*curBlock, *firstContent,
+                                                       *lastContent);
     if (NS_WARN_IF(removeMiddleContainerResult.Failed())) {
       return removeMiddleContainerResult.Rv();
     }
-    firstNode = lastNode = curBlock = nullptr;
+    firstContent = lastContent = curBlock = nullptr;
   }
   return NS_OK;
 }
 
 nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
-    nsTArray<OwningNonNull<nsINode>>& aNodeArray, nsAtom& aBlockTag) {
+    nsTArray<OwningNonNull<nsIContent>>& aArrayOfContents, nsAtom& aBlockTag) {
   MOZ_ASSERT(IsTopLevelEditSubActionDataAvailable());
 
   // Intent of this routine is to be used for converting to/from headers,
@@ -8994,8 +8886,9 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
   // inline things...
   nsCOMPtr<Element> newBlock;
   nsCOMPtr<Element> curBlock;
-  for (auto& curNode : aNodeArray) {
-    if (NS_WARN_IF(!curNode->GetParent())) {
+  for (auto& content : aArrayOfContents) {
+    EditorDOMPoint atContent(content);
+    if (NS_WARN_IF(!atContent.GetContainerAsContent())) {
       // If given node has been removed from the document, let's ignore it
       // since the following code may need its parent replace it with new
       // block.
@@ -9004,26 +8897,24 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
       continue;
     }
 
-    EditorDOMPoint atCurNode(curNode);
-
     // Is it already the right kind of block, or an uneditable block?
-    if (curNode->IsHTMLElement(&aBlockTag) ||
-        (!IsEditable(curNode) && HTMLEditor::NodeIsBlockStatic(curNode))) {
+    if (content->IsHTMLElement(&aBlockTag) ||
+        (!IsEditable(content) && HTMLEditor::NodeIsBlockStatic(content))) {
       // Forget any previous block used for previous inline nodes
       curBlock = nullptr;
       // Do nothing to this block
       continue;
     }
 
-    // If curNode is a address, p, header, address, or pre, replace it with a
+    // If content is a address, p, header, address, or pre, replace it with a
     // new block of correct type.
     // XXX: pre can't hold everything the others can
-    if (HTMLEditUtils::IsMozDiv(curNode) ||
-        HTMLEditUtils::IsFormatNode(curNode)) {
+    if (HTMLEditUtils::IsMozDiv(content) ||
+        HTMLEditUtils::IsFormatNode(content)) {
       // Forget any previous block used for previous inline nodes
       curBlock = nullptr;
       newBlock = ReplaceContainerAndCloneAttributesWithTransaction(
-          MOZ_KnownLive(*curNode->AsElement()), aBlockTag);
+          MOZ_KnownLive(*content->AsElement()), aBlockTag);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -9033,24 +8924,24 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
       // If the new block element was moved to different element or removed by
       // the web app via mutation event listener, we should stop handling this
       // action since we cannot handle each of a lot of edge cases.
-      if (NS_WARN_IF(newBlock->GetParentNode() != atCurNode.GetContainer())) {
+      if (NS_WARN_IF(newBlock->GetParentNode() != atContent.GetContainer())) {
         return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
       }
       continue;
     }
 
-    if (HTMLEditUtils::IsTable(curNode) || HTMLEditUtils::IsList(curNode) ||
-        curNode->IsAnyOfHTMLElements(nsGkAtoms::tbody, nsGkAtoms::tr,
+    if (HTMLEditUtils::IsTable(content) || HTMLEditUtils::IsList(content) ||
+        content->IsAnyOfHTMLElements(nsGkAtoms::tbody, nsGkAtoms::tr,
                                      nsGkAtoms::td, nsGkAtoms::li,
                                      nsGkAtoms::blockquote, nsGkAtoms::div)) {
       // Forget any previous block used for previous inline nodes
       curBlock = nullptr;
       // Recursion time
-      AutoTArray<OwningNonNull<nsINode>, 24> childNodes;
-      HTMLEditor::GetChildNodesOf(*curNode, childNodes);
-      if (!childNodes.IsEmpty()) {
+      AutoTArray<OwningNonNull<nsIContent>, 24> childContents;
+      HTMLEditor::GetChildNodesOf(*content, childContents);
+      if (!childContents.IsEmpty()) {
         nsresult rv =
-            CreateOrChangeBlockContainerElement(childNodes, aBlockTag);
+            CreateOrChangeBlockContainerElement(childContents, aBlockTag);
         if (NS_WARN_IF(NS_FAILED(rv))) {
           return rv;
         }
@@ -9059,7 +8950,7 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
 
       // Make sure we can put a block here
       SplitNodeResult splitNodeResult =
-          MaybeSplitAncestorsForInsertWithTransaction(aBlockTag, atCurNode);
+          MaybeSplitAncestorsForInsertWithTransaction(aBlockTag, atContent);
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
@@ -9067,7 +8958,7 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
       // mutation event listener when we need to do something more for it,
       // we should stop handling this action since we cannot handle each of
       // a lot of edge cases.
-      if (NS_WARN_IF(atCurNode.HasChildMovedFromContainer())) {
+      if (NS_WARN_IF(atContent.HasChildMovedFromContainer())) {
         return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
       }
       EditorDOMPoint splitPoint = splitNodeResult.SplitPoint();
@@ -9090,13 +8981,13 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
       continue;
     }
 
-    if (curNode->IsHTMLElement(nsGkAtoms::br)) {
+    if (content->IsHTMLElement(nsGkAtoms::br)) {
       // If the node is a break, we honor it by putting further nodes in a new
       // parent
       if (curBlock) {
         // Forget any previous block used for previous inline nodes
         curBlock = nullptr;
-        nsresult rv = DeleteNodeWithTransaction(*curNode);
+        nsresult rv = DeleteNodeWithTransaction(*content);
         if (NS_WARN_IF(Destroyed())) {
           return NS_ERROR_EDITOR_DESTROYED;
         }
@@ -9109,7 +9000,7 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
       // The break is the first (or even only) node we encountered.  Create a
       // block for it.
       SplitNodeResult splitNodeResult =
-          MaybeSplitAncestorsForInsertWithTransaction(aBlockTag, atCurNode);
+          MaybeSplitAncestorsForInsertWithTransaction(aBlockTag, atContent);
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
@@ -9117,7 +9008,7 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
       // mutation event listener when we need to do something more for it,
       // we should stop handling this action since we cannot handle each of
       // a lot of edge cases.
-      if (NS_WARN_IF(atCurNode.HasChildMovedFromContainer())) {
+      if (NS_WARN_IF(atContent.HasChildMovedFromContainer())) {
         return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
       }
       EditorDOMPoint splitPoint = splitNodeResult.SplitPoint();
@@ -9137,8 +9028,7 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
       // Remember our new block for postprocessing
       TopLevelEditSubActionDataRef().mNewBlockElement = curBlock;
       // Note: doesn't matter if we set mNewBlockElement multiple times.
-      nsresult rv = MoveNodeToEndWithTransaction(
-          MOZ_KnownLive(*curNode->AsContent()), *curBlock);
+      nsresult rv = MoveNodeToEndWithTransaction(content, *curBlock);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -9148,15 +9038,15 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
       continue;
     }
 
-    if (HTMLEditor::NodeIsInlineStatic(curNode)) {
-      // If curNode is inline, pull it into curBlock.  Note: it's assumed that
+    if (HTMLEditor::NodeIsInlineStatic(content)) {
+      // If content is inline, pull it into curBlock.  Note: it's assumed that
       // consecutive inline nodes in aNodeArray are actually members of the
       // same block parent.  This happens to be true now as a side effect of
       // how aNodeArray is contructed, but some additional logic should be
       // added here if that should change
       //
-      // If curNode is a non editable, drop it if we are going to <pre>.
-      if (&aBlockTag == nsGkAtoms::pre && !IsEditable(curNode)) {
+      // If content is a non editable, drop it if we are going to <pre>.
+      if (&aBlockTag == nsGkAtoms::pre && !IsEditable(content)) {
         // Do nothing to this block
         continue;
       }
@@ -9164,7 +9054,7 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
       // If no curBlock, make one
       if (!curBlock) {
         SplitNodeResult splitNodeResult =
-            MaybeSplitAncestorsForInsertWithTransaction(aBlockTag, atCurNode);
+            MaybeSplitAncestorsForInsertWithTransaction(aBlockTag, atContent);
         if (NS_WARN_IF(splitNodeResult.Failed())) {
           return splitNodeResult.Rv();
         }
@@ -9172,7 +9062,7 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
         // mutation event listener when we need to do something more for it,
         // we should stop handling this action since we cannot handle each of
         // a lot of edge cases.
-        if (NS_WARN_IF(atCurNode.HasChildMovedFromContainer())) {
+        if (NS_WARN_IF(atContent.HasChildMovedFromContainer())) {
           return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
         }
         EditorDOMPoint splitPoint = splitNodeResult.SplitPoint();
@@ -9191,25 +9081,24 @@ nsresult HTMLEditor::CreateOrChangeBlockContainerElement(
           return NS_ERROR_EDITOR_UNEXPECTED_DOM_TREE;
         }
 
-        // Update container of curNode.
-        atCurNode.Set(curNode);
+        // Update container of content.
+        atContent.Set(content);
 
         // Remember our new block for postprocessing
         TopLevelEditSubActionDataRef().mNewBlockElement = curBlock;
         // Note: doesn't matter if we set mNewBlockElement multiple times.
       }
 
-      if (NS_WARN_IF(!atCurNode.IsSet())) {
+      if (NS_WARN_IF(!atContent.IsSet())) {
         // This is possible due to mutation events, let's not assert
         return NS_ERROR_UNEXPECTED;
       }
 
-      // XXX If curNode is a br, replace it with a return if going to <pre>
+      // XXX If content is a br, replace it with a return if going to <pre>
 
       // This is a continuation of some inline nodes that belong together in
       // the same block item.  Use curBlock.
-      nsresult rv = MoveNodeToEndWithTransaction(
-          MOZ_KnownLive(*curNode->AsContent()), *curBlock);
+      nsresult rv = MoveNodeToEndWithTransaction(content, *curBlock);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -9516,21 +9405,33 @@ nsresult HTMLEditor::InsertBRElementToEmptyListItemsAndTableCellsInRange(
     const RawRangeBoundary& aStartRef, const RawRangeBoundary& aEndRef) {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
-  AutoTArray<OwningNonNull<nsINode>, 64> nodeArray;
-  EmptyEditableFunctor functor(this);
+  AutoTArray<OwningNonNull<Element>, 64> arrayOfEmptyElements;
   DOMIterator iter;
   if (NS_WARN_IF(NS_FAILED(iter.Init(aStartRef, aEndRef)))) {
     return NS_ERROR_FAILURE;
   }
-  iter.AppendList(functor, nodeArray);
+  iter.AppendNodesToArray(
+      +[](nsINode& aNode, void* aSelf) {
+        MOZ_ASSERT(Element::FromNode(&aNode));
+        MOZ_ASSERT(aSelf);
+        Element* element = aNode.AsElement();
+        if (!static_cast<HTMLEditor*>(aSelf)->IsEditable(element) ||
+            (!HTMLEditUtils::IsListItem(element) &&
+             !HTMLEditUtils::IsTableCellOrCaption(*element))) {
+          return false;
+        }
+        return static_cast<HTMLEditor*>(aSelf)->IsEmptyNode(*element, false,
+                                                            false);
+      },
+      arrayOfEmptyElements, this);
 
   // Put padding <br> elements for empty <li> and <td>.
-  for (auto& node : nodeArray) {
+  for (auto& emptyElement : arrayOfEmptyElements) {
     // Need to put br at END of node.  It may have empty containers in it and
     // still pass the "IsEmptyNode" test, and we want the br's to be after
     // them.  Also, we want the br to be after the selection if the selection
     // is in this node.
-    EditorDOMPoint endOfNode(EditorDOMPoint::AtEndOf(node));
+    EditorDOMPoint endOfNode(EditorDOMPoint::AtEndOf(emptyElement));
     CreateElementResult createPaddingBRResult =
         InsertPaddingBRElementForEmptyLastLineWithTransaction(endOfNode);
     if (NS_WARN_IF(createPaddingBRResult.Failed())) {
@@ -9708,34 +9609,28 @@ nsresult HTMLEditor::AdjustCaretPositionAndEnsurePaddingBRElement(
   // If caret is in empty block element, we need to insert a `<br>` element
   // because the block should have one-line height.
   if (RefPtr<Element> blockElement = GetBlock(*point.GetContainer())) {
-    if (IsEditable(blockElement)) {
-      bool isEmptyNode;
-      nsresult rv = IsEmptyNode(blockElement, &isEmptyNode, false, false);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
+    if (IsEditable(blockElement) && IsEmptyNode(*blockElement, false, false) &&
+        CanContainTag(*point.GetContainer(), *nsGkAtoms::br)) {
+      Element* bodyOrDocumentElement = GetRoot();
+      if (NS_WARN_IF(!bodyOrDocumentElement)) {
+        return NS_ERROR_FAILURE;
       }
-      if (isEmptyNode && CanContainTag(*point.GetContainer(), *nsGkAtoms::br)) {
-        Element* bodyOrDocumentElement = GetRoot();
-        if (NS_WARN_IF(!bodyOrDocumentElement)) {
-          return NS_ERROR_FAILURE;
-        }
-        if (point.GetContainer() == bodyOrDocumentElement) {
-          // Our root node is completely empty. Don't add a <br> here.
-          // AfterEditInner() will add one for us when it calls
-          // TextEditor::MaybeCreatePaddingBRElementForEmptyEditor().
-          // XXX This kind of dependency between methods makes us spaghetti.
-          //     Let's handle it here later.
-          // XXX This looks odd check.  If active editing host is not a
-          //     `<body>`, what are we doing?
-          return NS_OK;
-        }
-        CreateElementResult createPaddingBRResult =
-            InsertPaddingBRElementForEmptyLastLineWithTransaction(point);
-        if (NS_WARN_IF(createPaddingBRResult.Failed())) {
-          return createPaddingBRResult.Rv();
-        }
+      if (point.GetContainer() == bodyOrDocumentElement) {
+        // Our root node is completely empty. Don't add a <br> here.
+        // AfterEditInner() will add one for us when it calls
+        // TextEditor::MaybeCreatePaddingBRElementForEmptyEditor().
+        // XXX This kind of dependency between methods makes us spaghetti.
+        //     Let's handle it here later.
+        // XXX This looks odd check.  If active editing host is not a
+        //     `<body>`, what are we doing?
         return NS_OK;
       }
+      CreateElementResult createPaddingBRResult =
+          InsertPaddingBRElementForEmptyLastLineWithTransaction(point);
+      if (NS_WARN_IF(createPaddingBRResult.Failed())) {
+        return createPaddingBRResult.Rv();
+      }
+      return NS_OK;
     }
   }
 
@@ -9960,44 +9855,45 @@ nsresult HTMLEditor::RemoveEmptyNodesIn(nsRange& aRange) {
     return rv;
   }
 
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfEmptyNodes, arrayOfEmptyCites,
-      skipList;
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfEmptyContents,
+      arrayOfEmptyCites, skipList;
 
   // Check for empty nodes
   for (; !postOrderIter.IsDone(); postOrderIter.Next()) {
-    OwningNonNull<nsINode> node = *postOrderIter.GetCurrentNode();
+    MOZ_ASSERT(postOrderIter.GetCurrentNode()->IsContent());
 
-    nsCOMPtr<nsINode> parent = node->GetParentNode();
+    nsIContent* content = postOrderIter.GetCurrentNode()->AsContent();
+    nsIContent* parentContent = content->GetParent();
 
-    size_t idx = skipList.IndexOf(node);
+    size_t idx = skipList.IndexOf(content);
     if (idx != skipList.NoIndex) {
       // This node is on our skip list.  Skip processing for this node, and
       // replace its value in the skip list with the value of its parent
-      if (parent) {
-        skipList[idx] = parent;
+      if (parentContent) {
+        skipList[idx] = parentContent;
       }
       continue;
     }
 
     bool isCandidate = false;
     bool isMailCite = false;
-    if (node->IsElement()) {
-      if (node->IsHTMLElement(nsGkAtoms::body)) {
+    if (content->IsElement()) {
+      if (content->IsHTMLElement(nsGkAtoms::body)) {
         // Don't delete the body
-      } else if ((isMailCite = HTMLEditUtils::IsMailCite(node)) ||
-                 node->IsHTMLElement(nsGkAtoms::a) ||
-                 HTMLEditUtils::IsInlineStyle(node) ||
-                 HTMLEditUtils::IsList(node) ||
-                 node->IsHTMLElement(nsGkAtoms::div)) {
+      } else if ((isMailCite = HTMLEditUtils::IsMailCite(content)) ||
+                 content->IsHTMLElement(nsGkAtoms::a) ||
+                 HTMLEditUtils::IsInlineStyle(content) ||
+                 HTMLEditUtils::IsList(content) ||
+                 content->IsHTMLElement(nsGkAtoms::div)) {
         // Only consider certain nodes to be empty for purposes of removal
         isCandidate = true;
-      } else if (HTMLEditUtils::IsFormatNode(node) ||
-                 HTMLEditUtils::IsListItem(node) ||
-                 node->IsHTMLElement(nsGkAtoms::blockquote)) {
+      } else if (HTMLEditUtils::IsFormatNode(content) ||
+                 HTMLEditUtils::IsListItem(content) ||
+                 content->IsHTMLElement(nsGkAtoms::blockquote)) {
         // These node types are candidates if selection is not in them.  If
         // it is one of these, don't delete if selection inside.  This is so
         // we can create empty headings, etc., for the user to type into.
-        isCandidate = !StartOrEndOfSelectionRangesIsIn(*node->AsContent());
+        isCandidate = !StartOrEndOfSelectionRangesIsIn(*content);
       }
     }
 
@@ -10005,30 +9901,27 @@ nsresult HTMLEditor::RemoveEmptyNodesIn(nsRange& aRange) {
     if (isCandidate) {
       // We delete mailcites even if they have a solo br in them.  Other
       // nodes we require to be empty.
-      nsresult rv = IsEmptyNode(node, &isEmptyNode, isMailCite, true);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-      }
+      isEmptyNode = IsEmptyNode(*content, isMailCite, true);
       if (isEmptyNode) {
         if (isMailCite) {
           // mailcites go on a separate list from other empty nodes
-          arrayOfEmptyCites.AppendElement(*node);
+          arrayOfEmptyCites.AppendElement(*content);
         } else {
-          arrayOfEmptyNodes.AppendElement(*node);
+          arrayOfEmptyContents.AppendElement(*content);
         }
       }
     }
 
-    if (!isEmptyNode && parent) {
+    if (!isEmptyNode && parentContent) {
       // put parent on skip list
-      skipList.AppendElement(*parent);
+      skipList.AppendElement(*parentContent);
     }
   }
 
   // now delete the empty nodes
-  for (OwningNonNull<nsINode>& delNode : arrayOfEmptyNodes) {
-    if (IsModifiableNode(delNode)) {
-      rv = DeleteNodeWithTransaction(*delNode);
+  for (OwningNonNull<nsIContent>& emptyContent : arrayOfEmptyContents) {
+    if (IsModifiableNode(emptyContent)) {
+      rv = DeleteNodeWithTransaction(emptyContent);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -10040,17 +9933,12 @@ nsresult HTMLEditor::RemoveEmptyNodesIn(nsRange& aRange) {
 
   // Now delete the empty mailcites.  This is a separate step because we want
   // to pull out any br's and preserve them.
-  for (OwningNonNull<nsINode>& delNode : arrayOfEmptyCites) {
-    bool isEmptyNode;
-    nsresult rv = IsEmptyNode(delNode, &isEmptyNode, false, true);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-    if (!isEmptyNode) {
+  for (OwningNonNull<nsIContent>& emptyCite : arrayOfEmptyCites) {
+    if (!IsEmptyNode(emptyCite, false, true)) {
       // We are deleting a cite that has just a `<br>`.  We want to delete cite,
       // but preserve `<br>`.
       RefPtr<Element> brElement =
-          InsertBRElementWithTransaction(EditorDOMPoint(delNode));
+          InsertBRElementWithTransaction(EditorDOMPoint(emptyCite));
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -10058,7 +9946,7 @@ nsresult HTMLEditor::RemoveEmptyNodesIn(nsRange& aRange) {
         return NS_ERROR_FAILURE;
       }
     }
-    rv = DeleteNodeWithTransaction(*delNode);
+    rv = DeleteNodeWithTransaction(emptyCite);
     if (NS_WARN_IF(Destroyed())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }
@@ -10338,12 +10226,7 @@ nsresult HTMLEditor::InsertPaddingBRElementForEmptyLastLineIfNeeded(
     return NS_OK;
   }
 
-  bool isEmpty = false;
-  nsresult rv = IsEmptyNode(&aElement, &isEmpty);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-  if (!isEmpty) {
+  if (!IsEmptyNode(aElement)) {
     return NS_OK;
   }
 
@@ -10362,12 +10245,7 @@ nsresult HTMLEditor::InsertBRElementIfEmptyBlockElement(Element& aElement) {
     return NS_OK;
   }
 
-  bool isEmpty;
-  nsresult rv = IsEmptyNode(&aElement, &isEmpty);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-  if (!isEmpty) {
+  if (!IsEmptyNode(aElement)) {
     return NS_OK;
   }
 
@@ -10777,10 +10655,10 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
   GetSelectionRangesExtendedToHardLineStartAndEnd(
       arrayOfRanges, EditSubAction::eSetPositionToAbsolute);
 
-  // Use these ranges to contruct a list of nodes to act on.
-  AutoTArray<OwningNonNull<nsINode>, 64> arrayOfNodes;
+  // Use these ranges to construct a list of nodes to act on.
+  AutoTArray<OwningNonNull<nsIContent>, 64> arrayOfContents;
   nsresult rv = SplitInlinesAndCollectEditTargetNodes(
-      arrayOfRanges, arrayOfNodes, EditSubAction::eSetPositionToAbsolute,
+      arrayOfRanges, arrayOfContents, EditSubAction::eSetPositionToAbsolute,
       CollectNonEditableNodes::Yes);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -10789,7 +10667,7 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
   // If there is no visible and editable nodes in the edit targets, make an
   // empty block.
   // XXX Isn't this odd if there are only non-editable visible nodes?
-  if (IsEmptyOneHardLine(arrayOfNodes)) {
+  if (IsEmptyOneHardLine(arrayOfContents)) {
     nsRange* firstRange = SelectionRefPtr()->GetRangeAt(0);
     if (NS_WARN_IF(!firstRange)) {
       return NS_ERROR_FAILURE;
@@ -10816,8 +10694,8 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
     }
     // Delete anything that was in the list of nodes
     // XXX We don't need to remove items from the array.
-    while (!arrayOfNodes.IsEmpty()) {
-      OwningNonNull<nsINode> curNode = arrayOfNodes[0];
+    while (!arrayOfContents.IsEmpty()) {
+      OwningNonNull<nsIContent>& curNode = arrayOfContents[0];
       rv = DeleteNodeWithTransaction(*curNode);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
@@ -10825,7 +10703,7 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
-      arrayOfNodes.RemoveElementAt(0);
+      arrayOfContents.RemoveElementAt(0);
     }
     // Don't restore the selection
     restoreSelectionLater.Abort();
@@ -10849,36 +10727,36 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
   // If we handle a parent list item element, this is set to it.  In such case,
   // we should handle its children again.
   RefPtr<Element> handledListItemElement;
-  for (OwningNonNull<nsINode>& curNode : arrayOfNodes) {
+  for (OwningNonNull<nsIContent>& content : arrayOfContents) {
     // Here's where we actually figure out what to do.
-    EditorDOMPoint atCurNode(curNode);
-    if (NS_WARN_IF(!atCurNode.IsSet())) {
+    EditorDOMPoint atContent(content);
+    if (NS_WARN_IF(!atContent.IsSet())) {
       return NS_ERROR_FAILURE;  // XXX not continue??
     }
 
     // Ignore all non-editable nodes.  Leave them be.
-    if (!IsEditable(curNode)) {
+    if (!IsEditable(content)) {
       continue;
     }
 
     // If current node is a child of a list element, we need another list
     // element in absolute-positioned `<div>` element to avoid non-selected
     // list items are moved into the `<div>` element.
-    if (HTMLEditUtils::IsList(atCurNode.GetContainer())) {
+    if (HTMLEditUtils::IsList(atContent.GetContainer())) {
       // If we cannot move current node to created list element, we need a
       // list element in the target `<div>` element for the destination.
       // Therefore, duplicate same list element into the target `<div>`
       // element.
       nsIContent* previousEditableContent =
-          createdListElement ? GetPriorHTMLSibling(curNode) : nullptr;
+          createdListElement ? GetPriorHTMLSibling(content) : nullptr;
       if (!createdListElement ||
           (previousEditableContent &&
            previousEditableContent != createdListElement)) {
         nsAtom* ULOrOLOrDLTagName =
-            atCurNode.GetContainer()->NodeInfo()->NameAtom();
+            atContent.GetContainer()->NodeInfo()->NameAtom();
         SplitNodeResult splitNodeResult =
             MaybeSplitAncestorsForInsertWithTransaction(
-                MOZ_KnownLive(*ULOrOLOrDLTagName), atCurNode);
+                MOZ_KnownLive(*ULOrOLOrDLTagName), atContent);
         if (NS_WARN_IF(splitNodeResult.Failed())) {
           return splitNodeResult.Rv();
         }
@@ -10905,8 +10783,7 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
       // Move current node (maybe, assumed as a list item element) into the
       // new list element in the target `<div>` element to be positioned
       // absolutely.
-      rv = MoveNodeToEndWithTransaction(MOZ_KnownLive(*curNode->AsContent()),
-                                        *createdListElement);
+      rv = MoveNodeToEndWithTransaction(content, *createdListElement);
       if (NS_WARN_IF(Destroyed())) {
         return NS_ERROR_EDITOR_DESTROYED;
       }
@@ -10920,9 +10797,7 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
     // node into the target `<div>` element with the list item element itself
     // because we want to keep indent level of the contents.
     if (RefPtr<Element> listItemElement =
-            curNode->IsContent()
-                ? GetNearestAncestorListItemElement(*curNode->AsContent())
-                : nullptr) {
+            GetNearestAncestorListItemElement(content)) {
       if (handledListItemElement == listItemElement) {
         // Current node has already been moved into the `<div>` element.
         continue;
@@ -10938,7 +10813,7 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
         if (NS_WARN_IF(!atListItem.IsSet())) {
           return NS_ERROR_FAILURE;
         }
-        // XXX If curNode is the listItemElement and not in a list element,
+        // XXX If content is the listItemElement and not in a list element,
         //     we duplicate wrong element into the target `<div>` element.
         nsAtom* containerName =
             atListItem.GetContainer()->NodeInfo()->NameAtom();
@@ -10989,8 +10864,8 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
       // XXX This looks odd.  If there are 2 or more `<div>` elements are
       //     selected, first found `<div>` element will have all other
       //     selected nodes.
-      if (curNode->IsHTMLElement(nsGkAtoms::div)) {
-        targetDivElement = curNode->AsElement();
+      if (content->IsHTMLElement(nsGkAtoms::div)) {
+        targetDivElement = content->AsElement();
         MOZ_ASSERT(!createdListElement);
         MOZ_ASSERT(!handledListItemElement);
         continue;
@@ -10999,7 +10874,7 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
       // and to contain all selected nodes.
       SplitNodeResult splitNodeResult =
           MaybeSplitAncestorsForInsertWithTransaction(*nsGkAtoms::div,
-                                                      atCurNode);
+                                                      atContent);
       if (NS_WARN_IF(splitNodeResult.Failed())) {
         return splitNodeResult.Rv();
       }
@@ -11013,8 +10888,7 @@ nsresult HTMLEditor::MoveSelectedContentsToDivElementToMakeItAbsolutePosition(
       }
     }
 
-    rv = MoveNodeToEndWithTransaction(MOZ_KnownLive(*curNode->AsContent()),
-                                      *targetDivElement);
+    rv = MoveNodeToEndWithTransaction(content, *targetDivElement);
     if (NS_WARN_IF(Destroyed())) {
       return NS_ERROR_EDITOR_DESTROYED;
     }

@@ -353,20 +353,20 @@ void nsAnimationReceiver::RecordAnimationMutation(
     return;
   }
 
-  Maybe<NonOwningAnimationTarget> animationTarget = keyframeEffect->GetTarget();
+  NonOwningAnimationTarget animationTarget =
+      keyframeEffect->GetAnimationTarget();
   if (!animationTarget) {
     return;
   }
 
-  Element* elem = animationTarget->mElement;
+  Element* elem = animationTarget.mElement;
   if (!Animations() || !(Subtree() || elem == Target()) ||
       elem->ChromeOnlyAccess()) {
     return;
   }
 
   // Record animations targeting to a pseudo element only when subtree is true.
-  if (animationTarget->mPseudoType != PseudoStyleType::NotPseudo &&
-      !Subtree()) {
+  if (animationTarget.mPseudoType != PseudoStyleType::NotPseudo && !Subtree()) {
     return;
   }
 
@@ -702,7 +702,7 @@ void nsDOMMutationObserver::TakeRecords(
     current->mNext.swap(next);
     if (!mMergeAttributeRecords ||
         !MergeableAttributeRecord(aRetVal.SafeLastElement(nullptr), current)) {
-      *aRetVal.AppendElement() = current.forget();
+      *aRetVal.AppendElement() = std::move(current);
     }
     current.swap(next);
   }
@@ -755,7 +755,7 @@ already_AddRefed<nsDOMMutationObserver> nsDOMMutationObserver::Constructor(
   }
   bool isChrome = nsContentUtils::IsChromeDoc(window->GetExtantDoc());
   RefPtr<nsDOMMutationObserver> observer =
-      new nsDOMMutationObserver(window.forget(), aCb, isChrome);
+      new nsDOMMutationObserver(std::move(window), aCb, isChrome);
   return observer.forget();
 }
 

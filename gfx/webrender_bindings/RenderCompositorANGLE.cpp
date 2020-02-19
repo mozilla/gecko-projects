@@ -506,7 +506,7 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
     }
     auto end = TimeStamp::Now();
     mozilla::Telemetry::Accumulate(mozilla::Telemetry::COMPOSITE_SWAP_TIME,
-                                            (end - start).ToMilliseconds() * 10.);
+                                   (end - start).ToMilliseconds() * 10.);
   }
 
   if (mDisablingNativeCompositor) {
@@ -804,8 +804,9 @@ void RenderCompositorANGLE::CompositorEndFrame() {
 
 void RenderCompositorANGLE::Bind(wr::NativeTileId aId,
                                  wr::DeviceIntPoint* aOffset, uint32_t* aFboId,
-                                 wr::DeviceIntRect aDirtyRect) {
-  mDCLayerTree->Bind(aId, aOffset, aFboId, aDirtyRect);
+                                 wr::DeviceIntRect aDirtyRect,
+                                 wr::DeviceIntRect aValidRect) {
+  mDCLayerTree->Bind(aId, aOffset, aFboId, aDirtyRect, aValidRect);
 }
 
 void RenderCompositorANGLE::Unbind() { mDCLayerTree->Unbind(); }
@@ -902,6 +903,8 @@ bool RenderCompositorANGLE::MaybeReadback(
     return false;
   }
 
+  auto start = TimeStamp::Now();
+
   HDC nulldc = ::GetDC(NULL);
   HDC dc = ::CreateCompatibleDC(nulldc);
   ::ReleaseDC(nullptr, nulldc);
@@ -954,6 +957,11 @@ bool RenderCompositorANGLE::MaybeReadback(
 
   ::DeleteObject(bitmap);
   ::DeleteDC(dc);
+
+  uint32_t latencyMs = round((TimeStamp::Now() - start).ToMilliseconds());
+  if (latencyMs > 500) {
+    gfxCriticalNote << "Readback took too long: " << latencyMs << " ms";
+  }
 
   return true;
 }

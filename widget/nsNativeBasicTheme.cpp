@@ -134,6 +134,26 @@ static void ComputeCheckColors(const EventStates& aState,
   aBorderColor = borderColor;
 }
 
+// Checkbox and radio need to preserve aspect-ratio for compat.
+static Rect FixAspectRatio(const Rect& aRect) {
+  Rect rect(aRect);
+  if (rect.width == rect.height) {
+    return rect;
+  }
+
+  if (rect.width > rect.height) {
+    auto diff = rect.width - rect.height;
+    rect.width = rect.height;
+    rect.x += diff / 2;
+  } else {
+    auto diff = rect.height - rect.width;
+    rect.height = rect.width;
+    rect.y += diff / 2;
+  }
+
+  return rect;
+}
+
 static void PaintCheckboxControl(DrawTarget* aDrawTarget, const Rect& aRect,
                                  const EventStates& aState, uint32_t aDpi) {
   uint32_t radius = 3 * aDpi;
@@ -160,15 +180,17 @@ static void PaintCheckMark(DrawTarget* aDrawTarget, const Rect& aRect,
   const int32_t checkNumPoints = sizeof(checkPolygonX) / sizeof(float);
   const int32_t checkSize = 8;
 
+  auto center = aRect.Center();
+
   // Scale the checkmark based on the smallest dimension
   nscoord paintScale = std::min(aRect.width, aRect.height) / checkSize;
   RefPtr<PathBuilder> builder = aDrawTarget->CreatePathBuilder();
-  Point p = aRect.Center() +
+  Point p = center +
             Point(checkPolygonX[0] * paintScale, checkPolygonY[0] * paintScale);
   builder->MoveTo(p);
   for (int32_t polyIndex = 1; polyIndex < checkNumPoints; polyIndex++) {
-    p = aRect.Center() + Point(checkPolygonX[polyIndex] * paintScale,
-                               checkPolygonY[polyIndex] * paintScale);
+    p = center + Point(checkPolygonX[polyIndex] * paintScale,
+                       checkPolygonY[polyIndex] * paintScale);
     builder->LineTo(p);
   }
   RefPtr<Path> path = builder->Finish();
@@ -522,21 +544,25 @@ nsNativeBasicTheme::DrawWidgetBackground(gfxContext* aContext, nsIFrame* aFrame,
   uint32_t dpi = GetDPIRatio(aFrame);
 
   switch (aAppearance) {
-    case StyleAppearance::Radio:
-      PaintRadioControl(dt, devPxRect, eventState, dpi);
+    case StyleAppearance::Radio: {
+      auto rect = FixAspectRatio(devPxRect);
+      PaintRadioControl(dt, rect, eventState, dpi);
       if (IsSelected(aFrame)) {
-        PaintCheckedRadioButton(dt, devPxRect, dpi);
+        PaintCheckedRadioButton(dt, rect, dpi);
       }
       break;
-    case StyleAppearance::Checkbox:
-      PaintCheckboxControl(dt, devPxRect, eventState, dpi);
+    }
+    case StyleAppearance::Checkbox: {
+      auto rect = FixAspectRatio(devPxRect);
+      PaintCheckboxControl(dt, rect, eventState, dpi);
       if (IsChecked(aFrame)) {
-        PaintCheckMark(dt, devPxRect, eventState, dpi);
+        PaintCheckMark(dt, rect, eventState, dpi);
       }
       if (GetIndeterminate(aFrame)) {
-        PaintIndeterminateMark(dt, devPxRect, eventState);
+        PaintIndeterminateMark(dt, rect, eventState);
       }
       break;
+    }
     case StyleAppearance::Textarea:
     case StyleAppearance::Textfield:
     case StyleAppearance::NumberInput:
@@ -609,6 +635,19 @@ bool nsNativeBasicTheme::GetWidgetPadding(nsDeviceContext* aContext,
                                           nsIFrame* aFrame,
                                           StyleAppearance aAppearance,
                                           LayoutDeviceIntMargin* aResult) {
+  if (aAppearance == StyleAppearance::Menulist ||
+      aAppearance == StyleAppearance::MenulistTextfield ||
+      aAppearance == StyleAppearance::NumberInput ||
+      aAppearance == StyleAppearance::Textarea ||
+      aAppearance == StyleAppearance::Textfield) {
+    // If we have author-specified padding for these elements, don't do the
+    // fixups below.
+    if (aFrame->PresContext()->HasAuthorSpecifiedRules(
+            aFrame, NS_AUTHOR_SPECIFIED_PADDING)) {
+      return false;
+    }
+  }
+
   uint32_t dpi = GetDPIRatio(aFrame);
   switch (aAppearance) {
     // Radios and checkboxes return a fixed size in GetMinimumWidgetSize
@@ -628,10 +667,6 @@ bool nsNativeBasicTheme::GetWidgetPadding(nsDeviceContext* aContext,
       aResult->SizeTo(7 * dpi, 8 * dpi, 7 * dpi, 8 * dpi);
       return true;
     case StyleAppearance::Button:
-      if (IsDateTimeResetButton(aFrame)) {
-        aResult->SizeTo(0, 0, -1 * dpi, 4 * dpi);
-        return true;
-      }
       aResult->SizeTo(7 * dpi, 22 * dpi, 7 * dpi, 22 * dpi);
       return true;
     case StyleAppearance::Textfield:
@@ -708,7 +743,7 @@ NS_IMETHODIMP
 nsNativeBasicTheme::GetMinimumWidgetSize(nsPresContext* aPresContext,
                                          nsIFrame* aFrame,
                                          StyleAppearance aAppearance,
-                                         mozilla::LayoutDeviceIntSize* aResult,
+                                         LayoutDeviceIntSize* aResult,
                                          bool* aIsOverridable) {
   aResult->width = aResult->height = 17 * GetDPIRatio(aFrame);
   *aIsOverridable = true;
@@ -809,6 +844,16 @@ bool nsNativeBasicTheme::ThemeSupportsWidget(nsPresContext* aPresContext,
   if (aAppearance == StyleAppearance::MenulistButton &&
       StaticPrefs::layout_css_webkit_appearance_enabled()) {
     aAppearance = StyleAppearance::Menulist;
+  }
+
+  if (IsWidgetScrollbarPart(aAppearance)) {
+    const auto* style = nsLayoutUtils::StyleForScrollbar(aFrame);
+    // We don't currently handle custom scrollbars on nsNativeBasicTheme. We
+    // could, potentially.
+    if (style->StyleUI()->HasCustomScrollbars() ||
+        style->StyleUIReset()->mScrollbarWidth == StyleScrollbarWidth::Thin) {
+      return false;
+    }
   }
 
   switch (aAppearance) {

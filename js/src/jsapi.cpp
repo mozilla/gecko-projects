@@ -4870,6 +4870,20 @@ JS_PUBLIC_API void JS_ReportAllocationOverflow(JSContext* cx) {
   ReportAllocationOverflow(cx);
 }
 
+JS_PUBLIC_API bool JS_ExpandErrorArgumentsASCII(JSContext* cx,
+                                                JSErrorCallback errorCallback,
+                                                const unsigned errorNumber,
+                                                JSErrorReport* reportp, ...) {
+  va_list ap;
+  bool ok;
+
+  AssertHeapIsIdle();
+  va_start(ap, reportp);
+  ok = ExpandErrorArgumentsVA(cx, errorCallback, nullptr, errorNumber, nullptr,
+                              ArgumentsAreASCII, reportp, ap);
+  va_end(ap);
+  return ok;
+}
 /************************************************************************/
 
 JS_PUBLIC_API bool JS_SetDefaultLocale(JSRuntime* rt, const char* locale) {
@@ -5339,6 +5353,17 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
         JitSpew(js::jit::JitSpew_IonScripts, "Disable ion");
       }
       break;
+    case JSJITCOMPILER_JIT_TRUSTEDPRINCIPALS_ENABLE:
+      if (value == 1) {
+        jit::JitOptions.jitForTrustedPrincipals = true;
+        JitSpew(js::jit::JitSpew_IonScripts,
+                "Enable ion and baselinejit for trusted principals");
+      } else if (value == 0) {
+        jit::JitOptions.jitForTrustedPrincipals = false;
+        JitSpew(js::jit::JitSpew_IonScripts,
+                "Disable ion and baselinejit for trusted principals");
+      }
+      break;
     case JSJITCOMPILER_ION_FREQUENT_BAILOUT_THRESHOLD:
       if (value == uint32_t(-1)) {
         jit::DefaultJitOptions defaultValues;
@@ -5383,9 +5408,6 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
         value = defaultValues.jumpThreshold;
       }
       jit::JitOptions.jumpThreshold = value;
-      break;
-    case JSJITCOMPILER_TRACK_OPTIMIZATIONS:
-      jit::JitOptions.disableOptimizationTracking = !value;
       break;
     case JSJITCOMPILER_SPECTRE_INDEX_MASKING:
       jit::JitOptions.spectreIndexMasking = !!value;

@@ -207,6 +207,7 @@ include = [
   "Image",
   "ClipPath",
   "ShapeOutside",
+  "GridAutoFlow",
 ]
 item_types = ["enums", "structs", "unions", "typedefs", "functions", "constants"]
 renaming_overrides_prefixing = true
@@ -670,6 +671,7 @@ renaming_overrides_prefixing = true
 """
 
 "GenericGradient" = """
+  inline bool Repeating() const;
   bool IsOpaque() const;
 """
 

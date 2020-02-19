@@ -1093,7 +1093,7 @@ class CollectOriginsHelper final : public Runnable {
       nsTArray<RefPtr<DirectoryLockImpl>>& aLocks);
 
  private:
-  ~CollectOriginsHelper() {}
+  ~CollectOriginsHelper() = default;
 
   NS_IMETHOD
   Run() override;
@@ -1232,7 +1232,7 @@ class FinalizeOriginEvictionOp : public OriginOperationBase {
   void RunOnIOThreadImmediately();
 
  private:
-  ~FinalizeOriginEvictionOp() {}
+  ~FinalizeOriginEvictionOp() = default;
 
   virtual void Open() override;
 
@@ -1270,7 +1270,7 @@ class NormalOriginOperationBase : public OriginOperationBase,
     AssertIsOnOwningThread();
   }
 
-  ~NormalOriginOperationBase() {}
+  ~NormalOriginOperationBase() = default;
 
  private:
   // Need to declare refcounting unconditionally, because
@@ -1304,7 +1304,7 @@ class SaveOriginAccessTimeOp : public NormalOriginOperationBase {
   }
 
  private:
-  ~SaveOriginAccessTimeOp() {}
+  ~SaveOriginAccessTimeOp() = default;
 
   virtual nsresult DoDirectoryWork(QuotaManager* aQuotaManager) override;
 
@@ -1428,7 +1428,7 @@ class GetUsageOp final : public QuotaUsageRequestBase,
   explicit GetUsageOp(const UsageRequestParams& aParams);
 
  private:
-  ~GetUsageOp() {}
+  ~GetUsageOp() = default;
 
   void ProcessOriginInternal(QuotaManager* aQuotaManager,
                              const PersistenceType aPersistenceType,
@@ -1494,7 +1494,7 @@ class InitOp final : public QuotaRequestBase {
   }
 
  private:
-  ~InitOp() {}
+  ~InitOp() = default;
 
   nsresult DoDirectoryWork(QuotaManager* aQuotaManager) override;
 
@@ -1508,7 +1508,7 @@ class InitTemporaryStorageOp final : public QuotaRequestBase {
   }
 
  private:
-  ~InitTemporaryStorageOp() {}
+  ~InitTemporaryStorageOp() = default;
 
   nsresult DoDirectoryWork(QuotaManager* aQuotaManager) override;
 
@@ -1527,7 +1527,7 @@ class InitStorageAndOriginOp final : public QuotaRequestBase {
   bool Init(Quota* aQuota) override;
 
  private:
-  ~InitStorageAndOriginOp() {}
+  ~InitStorageAndOriginOp() = default;
 
   nsresult DoDirectoryWork(QuotaManager* aQuotaManager) override;
 
@@ -1543,7 +1543,7 @@ class ResetOrClearOp final : public QuotaRequestBase {
   bool Init(Quota* aQuota) override;
 
  private:
-  ~ResetOrClearOp() {}
+  ~ResetOrClearOp() = default;
 
   void DeleteFiles(QuotaManager* aQuotaManager);
 
@@ -1579,7 +1579,7 @@ class ClearOriginOp final : public ClearRequestBase {
   bool Init(Quota* aQuota) override;
 
  private:
-  ~ClearOriginOp() {}
+  ~ClearOriginOp() = default;
 
   void GetResponse(RequestResponse& aResponse) override;
 };
@@ -1593,7 +1593,7 @@ class ClearDataOp final : public ClearRequestBase {
   bool Init(Quota* aQuota) override;
 
  private:
-  ~ClearDataOp() {}
+  ~ClearDataOp() = default;
 
   void GetResponse(RequestResponse& aResponse) override;
 };
@@ -1619,7 +1619,7 @@ class PersistedOp final : public PersistRequestBase {
   explicit PersistedOp(const RequestParams& aParams);
 
  private:
-  ~PersistedOp() {}
+  ~PersistedOp() = default;
 
   nsresult DoDirectoryWork(QuotaManager* aQuotaManager) override;
 
@@ -1631,7 +1631,7 @@ class PersistOp final : public PersistRequestBase {
   explicit PersistOp(const RequestParams& aParams);
 
  private:
-  ~PersistOp() {}
+  ~PersistOp() = default;
 
   nsresult DoDirectoryWork(QuotaManager* aQuotaManager) override;
 
@@ -1940,7 +1940,7 @@ class StorageOperationBase {
   NS_INLINE_DECL_REFCOUNTING(StorageOperationBase)
 
  protected:
-  virtual ~StorageOperationBase() {}
+  virtual ~StorageOperationBase() = default;
 
   nsresult GetDirectoryMetadata(nsIFile* aDirectory, int64_t& aTimestamp,
                                 nsACString& aGroup, nsACString& aOrigin,
@@ -2086,7 +2086,7 @@ class RepositoryOperationBase : public StorageOperationBase {
   nsresult ProcessRepository();
 
  protected:
-  virtual ~RepositoryOperationBase() {}
+  virtual ~RepositoryOperationBase() = default;
 
   template <typename UpgradeMethod>
   nsresult MaybeUpgradeClients(const OriginProps& aOriginsProps,
@@ -9598,73 +9598,27 @@ void ClearRequestBase::DeleteFiles(QuotaManager* aQuotaManager,
       return;
     }
 
-    bool hasOtherClient = false;
-
     if (!mClientType.IsNull()) {
-      // Checking whether there is any other client in the directory is needed.
-      // If there is not, removing whole directory is needed.
-      nsCOMPtr<nsIDirectoryEnumerator> originEntries;
-      if (NS_WARN_IF(NS_FAILED(
-              file->GetDirectoryEntries(getter_AddRefs(originEntries)))) ||
-          !originEntries) {
+      nsAutoString clientDirectoryName;
+      bool ok = Client::TypeToText(mClientType.Value(), clientDirectoryName,
+                                   fallible);
+      if (NS_WARN_IF(!ok)) {
         return;
       }
 
-      nsCOMPtr<nsIFile> clientFile;
-      while (NS_SUCCEEDED((rv = originEntries->GetNextFile(
-                               getter_AddRefs(clientFile)))) &&
-             clientFile) {
-        bool isDirectory;
-        rv = clientFile->IsDirectory(&isDirectory);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return;
-        }
-
-        if (!isDirectory) {
-          continue;
-        }
-
-        nsString leafName;
-        rv = clientFile->GetLeafName(leafName);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return;
-        }
-
-        Client::Type clientType;
-        bool ok = Client::TypeFromText(leafName, clientType, fallible);
-        if (!ok) {
-          UNKNOWN_FILE_WARNING(leafName);
-          continue;
-        }
-
-        if (clientType != mClientType.Value()) {
-          hasOtherClient = true;
-          break;
-        }
+      rv = file->Append(clientDirectoryName);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return;
       }
 
-      if (hasOtherClient) {
-        nsAutoString clientDirectoryName;
-        bool ok = Client::TypeToText(mClientType.Value(), clientDirectoryName,
-                                     fallible);
-        if (NS_WARN_IF(!ok)) {
-          return;
-        }
+      bool exists;
+      rv = file->Exists(&exists);
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        return;
+      }
 
-        rv = file->Append(clientDirectoryName);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return;
-        }
-
-        bool exists;
-        rv = file->Exists(&exists);
-        if (NS_WARN_IF(NS_FAILED(rv))) {
-          return;
-        }
-
-        if (!exists) {
-          continue;
-        }
+      if (!exists) {
+        continue;
       }
     }
 
@@ -9697,13 +9651,11 @@ void ClearRequestBase::DeleteFiles(QuotaManager* aQuotaManager,
     }
 
     if (aPersistenceType != PERSISTENCE_TYPE_PERSISTENT) {
-      if (hasOtherClient) {
-        MOZ_ASSERT(!mClientType.IsNull());
-
+      if (mClientType.IsNull()) {
+        aQuotaManager->RemoveQuotaForOrigin(aPersistenceType, group, origin);
+      } else {
         aQuotaManager->ResetUsageForClient(aPersistenceType, group, origin,
                                            mClientType.Value());
-      } else {
-        aQuotaManager->RemoveQuotaForOrigin(aPersistenceType, group, origin);
       }
     }
 

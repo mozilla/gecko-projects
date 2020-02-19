@@ -492,7 +492,9 @@ class imgMemoryReporter final : public nsIMemoryReporter {
                 "Decoded image data which isn't stored on the heap.",
                 aCounter.DecodedNonHeap());
 
-    ReportValue(aHandleReport, aData, KIND_OTHER, aPathPrefix,
+    // We don't know for certain whether or not it is on the heap, so let's
+    // just report it as non-heap for reporting purposes.
+    ReportValue(aHandleReport, aData, KIND_NONHEAP, aPathPrefix,
                 "decoded-unknown",
                 "Decoded image data which is unknown to be on the heap or not.",
                 aCounter.DecodedUnknown());
@@ -723,20 +725,13 @@ static bool ShouldLoadCachedImage(imgRequest* aImgRequest,
     }
 
     if (!aTriggeringPrincipal || !aTriggeringPrincipal->IsSystemPrincipal()) {
-      // Set the requestingLocation from the aTriggeringPrincipal.
-      nsCOMPtr<nsIURI> requestingLocation;
-      if (aTriggeringPrincipal) {
-        rv = aTriggeringPrincipal->GetURI(getter_AddRefs(requestingLocation));
-        NS_ENSURE_SUCCESS(rv, false);
-      }
-
       // reset the decision for mixed content blocker check
       decision = nsIContentPolicy::REJECT_REQUEST;
-      rv = nsMixedContentBlocker::ShouldLoad(
-          insecureRedirect, aPolicyType, contentLocation, requestingLocation,
-          aLoadingContext,
-          EmptyCString(),  // mime guess
-          aTriggeringPrincipal, &decision);
+      rv = nsMixedContentBlocker::ShouldLoad(insecureRedirect, aPolicyType,
+                                             contentLocation, nullptr,
+                                             aLoadingContext,
+                                             EmptyCString(),  // mime guess
+                                             aTriggeringPrincipal, &decision);
       if (NS_FAILED(rv) || !NS_CP_ACCEPTED(decision)) {
         return false;
       }
@@ -2580,6 +2575,13 @@ NS_IMETHODIMP
 imgLoader::GetMIMETypeFromContent(nsIRequest* aRequest,
                                   const uint8_t* aContents, uint32_t aLength,
                                   nsACString& aContentType) {
+  nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
+  if (channel) {
+    nsCOMPtr<nsILoadInfo> loadInfo = channel->LoadInfo();
+    if (loadInfo->GetSkipContentSniffing()) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+  }
   return GetMimeTypeFromContent((const char*)aContents, aLength, aContentType);
 }
 

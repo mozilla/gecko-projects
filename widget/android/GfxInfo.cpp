@@ -127,6 +127,10 @@ nsresult GfxInfo::GetD2DEnabled(bool* aEnabled) { return NS_ERROR_FAILURE; }
 
 nsresult GfxInfo::GetDWriteEnabled(bool* aEnabled) { return NS_ERROR_FAILURE; }
 
+nsresult GfxInfo::GetHasBattery(bool* aHasBattery) {
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
 NS_IMETHODIMP
 GfxInfo::GetDWriteVersion(nsAString& aDwriteVersion) {
   return NS_ERROR_FAILURE;
@@ -372,11 +376,10 @@ void GfxInfo::AddCrashReportAnnotations() {
 const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
   if (sDriverInfo->IsEmpty()) {
     APPEND_TO_DRIVER_BLOCKLIST2(
-        OperatingSystem::Android,
-        (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorAll),
-        GfxDriverInfo::allDevices, nsIGfxInfo::FEATURE_OPENGL_LAYERS,
-        nsIGfxInfo::FEATURE_STATUS_OK, DRIVER_COMPARISON_IGNORED,
-        GfxDriverInfo::allDriverVersions, "FEATURE_OK_FORCE_OPENGL");
+        OperatingSystem::Android, DeviceFamily::All,
+        nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_STATUS_OK,
+        DRIVER_COMPARISON_IGNORED, GfxDriverInfo::allDriverVersions,
+        "FEATURE_OK_FORCE_OPENGL");
   }
 
   return *sDriverInfo;
@@ -574,7 +577,7 @@ nsresult GfxInfo::GetFeatureStatusImpl(
         *aStatus = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
         aFailureId = "FEATURE_FAILURE_WEBRENDER_BLOCKED_DEVICE";
       } else {
-        *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
+        *aStatus = nsIGfxInfo::FEATURE_ALLOW_QUALIFIED;
       }
       return NS_OK;
     }

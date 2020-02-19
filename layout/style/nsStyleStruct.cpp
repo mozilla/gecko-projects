@@ -152,23 +152,7 @@ void StyleComputedUrl::ResolveImage(Document& aDocument,
       css::ImageLoader::NoteSharedLoad(request);
     }
   } else {
-    // NB: If aDocument is not the original document, we may not be able to load
-    // images from aDocument.  Instead we do the image load from the original
-    // doc and clone it to aDocument.
-    Document* loadingDoc = aDocument.GetOriginalDocument();
-    const bool isPrint = !!loadingDoc;
-    if (!loadingDoc) {
-      loadingDoc = &aDocument;
-    }
-
-    // Kick off the load in the loading document.
-    request = css::ImageLoader::LoadImage(*this, *loadingDoc);
-
-    if (isPrint && request) {
-      RefPtr<imgRequestProxy> ret;
-      request->GetStaticRequest(&aDocument, getter_AddRefs(ret));
-      request = std::move(ret);
-    }
+    request = css::ImageLoader::LoadImage(*this, aDocument);
   }
 
   if (!request) {
@@ -1098,7 +1082,7 @@ nsStylePosition::nsStylePosition(const Document& aDocument)
       mMaxHeight(StyleMaxSize::None()),
       mFlexBasis(StyleFlexBasis::Size(StyleSize::Auto())),
       mAspectRatio(0.0f),
-      mGridAutoFlow(NS_STYLE_GRID_AUTO_FLOW_ROW),
+      mGridAutoFlow(StyleGridAutoFlow::ROW),
       mBoxSizing(StyleBoxSizing::Content),
       mAlignContent({StyleAlignFlags::NORMAL}),
       mAlignItems({StyleAlignFlags::NORMAL}),
@@ -1420,7 +1404,9 @@ nsChangeHint nsStyleTableBorder::CalcDifference(
 
 template <>
 bool StyleGradient::IsOpaque() const {
-  for (auto& stop : items.AsSpan()) {
+  auto items =
+      IsLinear() ? AsLinear().items.AsSpan() : AsRadial().items.AsSpan();
+  for (auto& stop : items) {
     if (stop.IsInterpolationHint()) {
       continue;
     }
@@ -2724,7 +2710,8 @@ nsChangeHint nsStyleDisplay::CalcDifference(
 //
 
 nsStyleVisibility::nsStyleVisibility(const Document& aDocument)
-    : mDirection(aDocument.GetBidiOptions() == IBMBIDI_TEXTDIRECTION_RTL
+    : mImageOrientation(StyleImageOrientation::FromImage),
+      mDirection(aDocument.GetBidiOptions() == IBMBIDI_TEXTDIRECTION_RTL
                      ? StyleDirection::Rtl
                      : StyleDirection::Ltr),
       mVisible(StyleVisibility::Visible),

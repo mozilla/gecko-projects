@@ -361,18 +361,80 @@ const POLICIES_TESTS = [
     },
   },
 
+  // POLICY: SanitizeOnShutdown using Locked
+  {
+    policies: {
+      SanitizeOnShutdown: {
+        Cache: true,
+        Locked: true,
+      },
+    },
+    lockedPrefs: {
+      "privacy.sanitize.sanitizeOnShutdown": true,
+      "privacy.clearOnShutdown.cache": true,
+    },
+    unlockedPrefs: {
+      "privacy.clearOnShutdown.cookies": false,
+      "privacy.clearOnShutdown.downloads": false,
+      "privacy.clearOnShutdown.formdata": false,
+      "privacy.clearOnShutdown.history": false,
+      "privacy.clearOnShutdown.sessions": false,
+    },
+  },
+
+  {
+    policies: {
+      SanitizeOnShutdown: {
+        Cache: true,
+        Cookies: false,
+        Locked: true,
+      },
+    },
+    lockedPrefs: {
+      "privacy.sanitize.sanitizeOnShutdown": true,
+      "privacy.clearOnShutdown.cache": true,
+      "privacy.clearOnShutdown.cookies": false,
+    },
+    unlockedPrefs: {
+      "privacy.clearOnShutdown.downloads": false,
+      "privacy.clearOnShutdown.formdata": false,
+      "privacy.clearOnShutdown.history": false,
+      "privacy.clearOnShutdown.sessions": false,
+    },
+  },
+
+  {
+    policies: {
+      SanitizeOnShutdown: {
+        Cache: true,
+        Locked: false,
+      },
+    },
+    unlockedPrefs: {
+      "privacy.sanitize.sanitizeOnShutdown": true,
+      "privacy.clearOnShutdown.cache": true,
+      "privacy.clearOnShutdown.cookies": false,
+      "privacy.clearOnShutdown.downloads": false,
+      "privacy.clearOnShutdown.formdata": false,
+      "privacy.clearOnShutdown.history": false,
+      "privacy.clearOnShutdown.sessions": false,
+    },
+  },
+
   // POLICY: DNSOverHTTPS Locked
   {
     policies: {
       DNSOverHTTPS: {
         Enabled: true,
         ProviderURL: "http://example.com/provider",
+        ExcludedDomains: ["example.com", "example.org"],
         Locked: true,
       },
     },
     lockedPrefs: {
       "network.trr.mode": 2,
       "network.trr.uri": "http://example.com/provider",
+      "network.trr.excluded-domains": "example.com,example.org",
     },
   },
 
@@ -382,11 +444,13 @@ const POLICIES_TESTS = [
       DNSOverHTTPS: {
         Enabled: false,
         ProviderURL: "http://example.com/provider",
+        ExcludedDomains: ["example.com", "example.org"],
       },
     },
     unlockedPrefs: {
       "network.trr.mode": 5,
       "network.trr.uri": "http://example.com/provider",
+      "network.trr.excluded-domains": "example.com,example.org",
     },
   },
 

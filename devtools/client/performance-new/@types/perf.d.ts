@@ -89,10 +89,8 @@ export type RecordingState =
   // An async request has been sent to stop the profiler.
   | "request-to-stop-profiler"
   // The profiler notified us that our request to start it actually started
-  // it.
+  // it, or it was already started.
   | "recording"
-  // Some other code with access to the profiler started it.
-  | "other-is-recording"
   // Profiling is not available when in private browsing mode.
   | "locked-by-private-browsing";
 
@@ -408,18 +406,22 @@ export interface PresetDefinitions {
 export type MessageFromFrontend =
   | {
       type: "STATUS_QUERY";
+      requestId: number;
     }
   | {
       type: "ENABLE_MENU_BUTTON";
+      requestId: number;
     };
 
 export type MessageToFrontend =
   | {
       type: "STATUS_RESPONSE";
       menuButtonIsEnabled: boolean;
+      requestId: number;
     }
   | {
       type: "ENABLE_MENU_BUTTON_DONE";
+      requestId: number;
     }
 
 /**

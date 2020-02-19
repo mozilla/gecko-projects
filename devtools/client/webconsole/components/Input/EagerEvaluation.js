@@ -31,36 +31,68 @@ class EagerEvaluation extends Component {
   static get propTypes() {
     return {
       terminalEagerResult: PropTypes.any,
+      serviceContainer: PropTypes.object.isRequired,
     };
   }
 
-  renderChildren() {
-    const { terminalEagerResult } = this.props;
+  componentDidUpdate(prevProps) {
+    const { serviceContainer, terminalEagerResult } = this.props;
+    const { highlightDomElement, unHighlightDomElement } = serviceContainer;
 
-    if (terminalEagerResult === null) {
-      return [];
+    if (canHighlightObject(prevProps.terminalEagerResult)) {
+      unHighlightDomElement(prevProps.terminalEagerResult.getGrip());
     }
+
+    if (canHighlightObject(terminalEagerResult)) {
+      highlightDomElement(terminalEagerResult.getGrip());
+    }
+  }
+
+  componentWillUnmount() {
+    const { serviceContainer, terminalEagerResult } = this.props;
+
+    if (canHighlightObject(terminalEagerResult)) {
+      serviceContainer.unHighlightDomElement(terminalEagerResult.getGrip());
+    }
+  }
+
+  renderRepsResult() {
+    const { terminalEagerResult } = this.props;
 
     const result = terminalEagerResult.getGrip
       ? terminalEagerResult.getGrip()
       : terminalEagerResult;
     const isError = result && result.class && result.class === "Error";
 
-    return [
-      dom.span({ className: "icon" }),
-      REPS.Rep({
-        object: result,
-        mode: isError ? MODE.SHORT : MODE.LONG,
-      }),
-    ];
+    return REPS.Rep({
+      key: "rep",
+      object: result,
+      mode: isError ? MODE.SHORT : MODE.LONG,
+    });
   }
 
   render() {
+    const hasResult = this.props.terminalEagerResult !== null;
+
     return dom.span(
-      { className: "devtools-monospace eager-evaluation-result" },
-      this.renderChildren()
+      {
+        className: "devtools-monospace eager-evaluation-result",
+        key: "eager-evaluation-result",
+      },
+      hasResult ? dom.span({ className: "icon", key: "icon" }) : null,
+      hasResult ? this.renderRepsResult() : null
     );
   }
+}
+
+function canHighlightObject(obj) {
+  const grip = obj && obj.getGrip && obj.getGrip();
+  return (
+    grip &&
+    (REPS.ElementNode.supportsObject(grip) ||
+      REPS.TextNode.supportsObject(grip)) &&
+    grip.preview.isConnected
+  );
 }
 
 function mapStateToProps(state) {

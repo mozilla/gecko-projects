@@ -126,9 +126,20 @@ AST_MATCHER(QualType, isFloat) { return Node->isRealFloatingType(); }
 /// This matcher will match locations in system headers.  This is adopted from
 /// isExpansionInSystemHeader in newer clangs, but modified in order to work
 /// with old clangs that we use on infra.
-AST_POLYMORPHIC_MATCHER(isInSystemHeader,                                      \
+AST_POLYMORPHIC_MATCHER(isInSystemHeader,
                         AST_POLYMORPHIC_SUPPORTED_TYPES(Decl, Stmt)) {
   return ASTIsInSystemHeader(Finder->getASTContext(), Node);
+}
+
+/// This matcher will match a file "gtest-port.h". The file contains
+/// known fopen usages that are OK.
+AST_MATCHER(CallExpr, isInWhitelistForFopenUsage) {
+  static const char Whitelist[] = "gtest-port.h";
+  SourceLocation Loc = Node.getBeginLoc();
+  StringRef FileName =
+      getFilename(Finder->getASTContext().getSourceManager(), Loc);
+
+  return llvm::sys::path::rbegin(FileName)->equals(Whitelist);
 }
 
 /// This matcher will match a list of files.  These files contain
@@ -213,18 +224,17 @@ AST_MATCHER_P(Expr, ignoreTrivials, internal::Matcher<Expr>, InnerMatcher) {
   return InnerMatcher.matches(*IgnoreTrivials(&Node), Finder, Builder);
 }
 
-// Takes two matchers: the first one is a condition; the second is a matcher to be
-// applied once we are done unwrapping trivials.  While the condition does not match
-// and we're looking at a trivial, will keep unwrapping the trivial and trying again.
-// Once the condition matches, we will go ahead and unwrap all trivials and apply the
-// inner matcher to the result.
+// Takes two matchers: the first one is a condition; the second is a matcher to
+// be applied once we are done unwrapping trivials.  While the condition does
+// not match and we're looking at a trivial, will keep unwrapping the trivial
+// and trying again. Once the condition matches, we will go ahead and unwrap all
+// trivials and apply the inner matcher to the result.
 //
-// The expected use here is if we want to condition a match on some typecheck but
-// apply the match to only non-trivials, because there are trivials (e.g. casts) that
-// can change types.
-AST_MATCHER_P2(Expr, ignoreTrivialsConditional,
-               internal::Matcher<Expr>, Condition,
-               internal::Matcher<Expr>, InnerMatcher) {
+// The expected use here is if we want to condition a match on some typecheck
+// but apply the match to only non-trivials, because there are trivials (e.g.
+// casts) that can change types.
+AST_MATCHER_P2(Expr, ignoreTrivialsConditional, internal::Matcher<Expr>,
+               Condition, internal::Matcher<Expr>, InnerMatcher) {
   const Expr *node = &Node;
   while (true) {
     if (Condition.matches(*node, Finder, Builder)) {
@@ -307,7 +317,8 @@ AST_MATCHER(QualType, isSmartPtrToRefCounted) {
 }
 
 AST_MATCHER(ClassTemplateSpecializationDecl, isSmartPtrToRefCountedDecl) {
-  auto *D = dyn_cast_or_null<CXXRecordDecl>(Node.getSpecializedTemplate()->getTemplatedDecl());
+  auto *D = dyn_cast_or_null<CXXRecordDecl>(
+      Node.getSpecializedTemplate()->getTemplatedDecl());
   if (!D) {
     return false;
   }
@@ -316,7 +327,6 @@ AST_MATCHER(ClassTemplateSpecializationDecl, isSmartPtrToRefCountedDecl) {
 
   return D && hasCustomAttribute<moz_is_smartptr_to_refcounted>(D);
 }
-
 
 AST_MATCHER(CXXRecordDecl, hasBaseClasses) {
   const CXXRecordDecl *Decl = Node.getCanonicalDecl();
@@ -337,7 +347,8 @@ AST_MATCHER(CXXMethodDecl, isNonVirtual) {
 
 AST_MATCHER(FunctionDecl, isMozMustReturnFromCaller) {
   const FunctionDecl *Decl = Node.getCanonicalDecl();
-  return Decl && hasCustomAttribute<moz_must_return_from_caller_if_this_is_arg>(Decl);
+  return Decl &&
+         hasCustomAttribute<moz_must_return_from_caller_if_this_is_arg>(Decl);
 }
 
 /// This matcher will select default args which have nullptr as the value.

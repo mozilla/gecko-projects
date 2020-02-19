@@ -4366,8 +4366,8 @@ void nsGridContainerFrame::Grid::PlaceGridItems(
   // Step 1, place 'auto' items that have one definite position -
   // definite row (column) for grid-auto-flow:row (column).
   auto flowStyle = gridStyle->mGridAutoFlow;
-  const bool isRowOrder = (flowStyle & NS_STYLE_GRID_AUTO_FLOW_ROW);
-  const bool isSparse = !(flowStyle & NS_STYLE_GRID_AUTO_FLOW_DENSE);
+  const bool isRowOrder = bool(flowStyle & StyleGridAutoFlow::ROW);
+  const bool isSparse = !(flowStyle & StyleGridAutoFlow::DENSE);
   uint32_t clampMaxColLine = colLineNameMap.mClampMaxLine + offsetToColZero;
   uint32_t clampMaxRowLine = rowLineNameMap.mClampMaxLine + offsetToRowZero;
   // We need 1 cursor per row (or column) if placement is sparse.
@@ -7962,7 +7962,7 @@ nscoord nsGridContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
                                state.mFrame->Style());
   }
   if (!IsRowSubgrid() && state.mRowFunctions.mHasRepeatAuto &&
-      !(state.mGridStyle->mGridAutoFlow & NS_STYLE_GRID_AUTO_FLOW_ROW)) {
+      !(state.mGridStyle->mGridAutoFlow & StyleGridAutoFlow::ROW)) {
     // Only 'grid-auto-flow:column' can create new implicit columns, so that's
     // the only case where our block-size can affect the number of columns.
     repeatSizing.InitFromStyle(eLogicalAxisBlock, state.mWM,
@@ -8429,13 +8429,11 @@ void nsGridContainerFrame::StoreUsedTrackSizes(
 #ifdef DEBUG
 void nsGridContainerFrame::SetInitialChildList(ChildListID aListID,
                                                nsFrameList& aChildList) {
-#  ifdef DEBUG
   ChildListIDs supportedLists = {kAbsoluteList, kFixedList, kPrincipalList};
   // We don't handle the kBackdropList frames in any way, but it only contains
   // a placeholder for ::backdrop which is OK to not reflow (for now anyway).
   supportedLists += kBackdropList;
   MOZ_ASSERT(supportedLists.contains(aListID), "unexpected child list");
-#  endif
 
   return nsContainerFrame::SetInitialChildList(aListID, aChildList);
 }

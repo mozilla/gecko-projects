@@ -37,7 +37,7 @@ class AccessibleCaretEventHub;
 class ErrorResult;
 class HTMLEditor;
 class PostContentIterator;
-enum class TableSelection : uint32_t;
+enum class TableSelectionMode : uint32_t;
 struct AutoPrepareFocusRange;
 namespace dom {
 class DocGroup;
@@ -166,6 +166,10 @@ class Selection final : public nsSupportsWeakReference,
    */
   nsresult AddRangesForSelectableNodes(nsRange* aRange, int32_t* aOutIndex,
                                        bool aNoStartSelect = false);
+
+  /**
+   * Doesn't remove `aRange` from `mAnchorFocusRange`.
+   */
   nsresult RemoveRangeInternal(nsRange& aRange);
 
  public:
@@ -288,6 +292,8 @@ class Selection final : public nsSupportsWeakReference,
 
   /**
    * Deletes this selection from document the nodes belong to.
+   * Only if this has `SelectionType::eNormal`.
+   * TODO: mark as `MOZ_CAN_RUN_SCRIPT`.
    */
   void DeleteFromDocument(mozilla::ErrorResult& aRv);
 
@@ -298,6 +304,9 @@ class Selection final : public nsSupportsWeakReference,
   nsRange* GetRangeAt(uint32_t aIndex, mozilla::ErrorResult& aRv);
   void AddRangeJS(nsRange& aRange, mozilla::ErrorResult& aRv);
 
+  /**
+   * Callers need to keep `aRange` alive.
+   */
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   void RemoveRangeAndUnselectFramesAndNotifyListeners(
       nsRange& aRange, mozilla::ErrorResult& aRv);
@@ -403,10 +412,14 @@ class Selection final : public nsSupportsWeakReference,
    * @param offset      Where in given dom node to place the selection (the
    *                    offset into the given node)
    */
+  // TODO: mark as `MOZ_CAN_RUN_SCRIPT`
+  // (https://bugzilla.mozilla.org/show_bug.cgi?id=1615296).
   void Collapse(nsINode& aContainer, uint32_t aOffset, ErrorResult& aRv) {
     Collapse(RawRangeBoundary(&aContainer, aOffset), aRv);
   }
 
+  // TODO: this should be `MOZ_CAN_RUN_SCRIPT` instead
+  // (https://bugzilla.mozilla.org/show_bug.cgi?id=1615296).
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   void Collapse(const RawRangeBoundary& aPoint, ErrorResult& aRv);
 
@@ -700,7 +713,7 @@ class Selection final : public nsSupportsWeakReference,
       bool aSelected) const;
 
   nsresult SelectFrames(nsPresContext* aPresContext, nsRange* aRange,
-                        bool aSelect);
+                        bool aSelect) const;
 
   /**
    * SelectFramesInAllRanges() calls SelectFrames() for all current
@@ -709,9 +722,9 @@ class Selection final : public nsSupportsWeakReference,
   void SelectFramesInAllRanges(nsPresContext* aPresContext);
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
-  static nsresult GetTableCellLocationFromRange(nsRange* aRange,
-                                                TableSelection* aSelectionType,
-                                                int32_t* aRow, int32_t* aCol);
+  static nsresult GetTableCellLocationFromRange(
+      const nsRange* aRange, TableSelectionMode* aSelectionType, int32_t* aRow,
+      int32_t* aCol);
 
   /**
    * @param aOutIndex points to the index of the range in mRanges. If
