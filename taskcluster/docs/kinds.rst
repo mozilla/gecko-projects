@@ -83,12 +83,12 @@ job (usually chunked).
 
 For mac notarization, we download the signed bits that have been notarized by Apple, and we staple the notarization to the app and pkg.
 
-nightly-l10n-notarization-part-1
+shippable-l10n-notarization-part-1
 --------------------------------
 
 We switched to a 3-part mac notarization workflow in bug 1562412. This is the first task, which signs the files and submits them for notarization.
 
-nightly-l10n-notarization-poller
+shippable-l10n-notarization-poller
 --------------------------------
 
 We switched to a 3-part mac notarization workflow in bug 1562412. This is the second task, which polls Apple for notarization status. Because this is run in a separate, special notarization poller pool, we free up the mac notarization pool for actual signing work.

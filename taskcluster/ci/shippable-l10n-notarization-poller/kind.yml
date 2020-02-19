@@ -9,7 +9,7 @@ transforms:
     - taskgraph.transforms.task:transforms
 
 kind-dependencies:
-    - nightly-l10n-notarization-part-1
+    - shippable-l10n-notarization-part-1
 
 job-template:
     description-suffix: 'Mac Notarization Poller'

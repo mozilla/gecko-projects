@@ -22,5 +22,4 @@ primary-dependency:
     - shippable-l10n
 
 only-for-attributes:
-    - nightly
     - shippable
