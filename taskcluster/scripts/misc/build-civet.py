@@ -28,7 +28,7 @@ else:
     secrets = taskcluster.Secrets(taskcluster.optionsFromEnvironment())
     sshkey = secrets.get('project/civet/github-deploy-key')['secret']
 
-key = sshkey['key'].replace("\\n", "\n") + "\n"
+key = sshkey['sshkey'].replace("\\n", "\n") + "\n"
 
 f = open('civet-key', 'w')
 f.write(key)
