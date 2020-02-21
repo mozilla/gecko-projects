@@ -15,6 +15,7 @@
 
 #include "mozilla/net/CookieSettings.h"
 #include "mozilla/net/CookieServiceChild.h"
+#include "mozilla/net/HttpBaseChannel.h"
 #include "mozilla/net/NeckoCommon.h"
 
 #include "nsCookieService.h"
@@ -42,6 +43,7 @@
 #include "nsCOMArray.h"
 #include "nsIMutableArray.h"
 #include "nsReadableUtils.h"
+#include "nsQueryObject.h"
 #include "nsCRT.h"
 #include "prprf.h"
 #include "nsNetUtil.h"
@@ -464,6 +466,39 @@ class CompareCookiesByIndex {
     return a.index < b.index;
   }
 };
+
+// Return false if the cookie should be ignored for the current channel.
+bool ProcessSameSiteCookieForForeignRequest(nsIChannel* aChannel,
+                                            nsCookie* aCookie,
+                                            bool aIsSafeTopLevelNav) {
+  int32_t sameSiteAttr = 0;
+  aCookie->GetSameSite(&sameSiteAttr);
+
+  // it if's a cross origin request and the cookie is same site only (strict)
+  // don't send it
+  if (sameSiteAttr == nsICookie::SAMESITE_STRICT) {
+    return false;
+  }
+
+  int64_t currentTimeInUsec = PR_Now();
+
+  // 2 minutes of tolerance for 'sameSite=lax by default' for cookies set
+  // without a sameSite value when used for unsafe http methods.
+  if (StaticPrefs::network_cookie_sameSite_laxPlusPOST_timeout() > 0 &&
+      StaticPrefs::network_cookie_sameSite_laxByDefault() &&
+      sameSiteAttr == nsICookie::SAMESITE_LAX &&
+      aCookie->RawSameSite() == nsICookie::SAMESITE_NONE &&
+      currentTimeInUsec - aCookie->CreationTime() <=
+          (StaticPrefs::network_cookie_sameSite_laxPlusPOST_timeout() *
+           PR_USEC_PER_SEC) &&
+      NS_IsSafeMethodNav(aChannel)) {
+    return true;
+  }
+
+  // if it's a cross origin request, the cookie is same site lax, but it's not a
+  // top-level navigation, don't send it
+  return sameSiteAttr != nsICookie::SAMESITE_LAX || aIsSafeTopLevelNav;
+}
 
 }  // namespace
 
@@ -2038,8 +2073,8 @@ nsresult nsCookieService::GetCookieStringCommon(nsIURI* aHostURI,
   bool isSameSiteForeign = NS_IsSameSiteForeign(aChannel, aHostURI);
   GetCookieStringInternal(
       aHostURI, aChannel, result.contains(ThirdPartyAnalysis::IsForeign),
-      result.contains(ThirdPartyAnalysis::IsTrackingResource),
-      result.contains(ThirdPartyAnalysis::IsSocialTrackingResource),
+      result.contains(ThirdPartyAnalysis::IsThirdPartyTrackingResource),
+      result.contains(ThirdPartyAnalysis::IsThirdPartySocialTrackingResource),
       result.contains(ThirdPartyAnalysis::IsFirstPartyStorageAccessGranted),
       rejectedReason, isSafeTopLevelNav, isSameSiteForeign, aHttpBound, attrs,
       aCookie);
@@ -2143,18 +2178,18 @@ nsresult nsCookieService::SetCookieStringCommon(nsIURI* aHostURI,
   nsCString cookieString(aCookieHeader);
   SetCookieStringInternal(
       aHostURI, result.contains(ThirdPartyAnalysis::IsForeign),
-      result.contains(ThirdPartyAnalysis::IsTrackingResource),
-      result.contains(ThirdPartyAnalysis::IsSocialTrackingResource),
+      result.contains(ThirdPartyAnalysis::IsThirdPartyTrackingResource),
+      result.contains(ThirdPartyAnalysis::IsThirdPartySocialTrackingResource),
       result.contains(ThirdPartyAnalysis::IsFirstPartyStorageAccessGranted),
       rejectedReason, cookieString, aServerTime, aFromHttp, attrs, aChannel);
   return NS_OK;
 }
 
 void nsCookieService::SetCookieStringInternal(
-    nsIURI* aHostURI, bool aIsForeign, bool aIsTrackingResource,
-    bool aIsSocialTrackingResource, bool aFirstPartyStorageAccessGranted,
-    uint32_t aRejectedReason, nsCString& aCookieHeader,
-    const nsACString& aServerTime, bool aFromHttp,
+    nsIURI* aHostURI, bool aIsForeign, bool aIsThirdPartyTrackingResource,
+    bool aIsThirdPartySocialTrackingResource,
+    bool aFirstPartyStorageAccessGranted, uint32_t aRejectedReason,
+    nsCString& aCookieHeader, const nsACString& aServerTime, bool aFromHttp,
     const OriginAttributes& aOriginAttrs, nsIChannel* aChannel) {
   NS_ASSERTION(aHostURI, "null host!");
 
@@ -2195,9 +2230,9 @@ void nsCookieService::SetCookieStringInternal(
   CountCookiesFromHostInternal(hostFromURI, aOriginAttrs.mPrivateBrowsingId,
                                &priorCookieCount);
   CookieStatus cookieStatus = CheckPrefs(
-      cookieSettings, aHostURI, aIsForeign, aIsTrackingResource,
-      aIsSocialTrackingResource, aFirstPartyStorageAccessGranted, aCookieHeader,
-      priorCookieCount, aOriginAttrs, &rejectedReason);
+      cookieSettings, aHostURI, aIsForeign, aIsThirdPartyTrackingResource,
+      aIsThirdPartySocialTrackingResource, aFirstPartyStorageAccessGranted,
+      aCookieHeader, priorCookieCount, aOriginAttrs, &rejectedReason);
 
   MOZ_ASSERT_IF(rejectedReason, cookieStatus == STATUS_REJECTED);
 
@@ -2950,7 +2985,8 @@ bool nsCookieService::PathMatches(nsCookie* aCookie, const nsACString& aPath) {
 
 void nsCookieService::GetCookiesForURI(
     nsIURI* aHostURI, nsIChannel* aChannel, bool aIsForeign,
-    bool aIsTrackingResource, bool aIsSocialTrackingResource,
+    bool aIsThirdPartyTrackingResource,
+    bool aIsThirdPartySocialTrackingResource,
     bool aFirstPartyStorageAccessGranted, uint32_t aRejectedReason,
     bool aIsSafeTopLevelNav, bool aIsSameSiteForeign, bool aHttpBound,
     const OriginAttributes& aOriginAttrs, nsTArray<nsCookie*>& aCookieList) {
@@ -2992,9 +3028,9 @@ void nsCookieService::GetCookiesForURI(
   CountCookiesFromHostInternal(hostFromURI, aOriginAttrs.mPrivateBrowsingId,
                                &priorCookieCount);
   CookieStatus cookieStatus = CheckPrefs(
-      cookieSettings, aHostURI, aIsForeign, aIsTrackingResource,
-      aIsSocialTrackingResource, aFirstPartyStorageAccessGranted, VoidCString(),
-      priorCookieCount, aOriginAttrs, &rejectedReason);
+      cookieSettings, aHostURI, aIsForeign, aIsThirdPartyTrackingResource,
+      aIsThirdPartySocialTrackingResource, aFirstPartyStorageAccessGranted,
+      VoidCString(), priorCookieCount, aOriginAttrs, &rejectedReason);
 
   MOZ_ASSERT_IF(rejectedReason, cookieStatus == STATUS_REJECTED);
 
@@ -3043,19 +3079,9 @@ void nsCookieService::GetCookiesForURI(
     // if the cookie is secure and the host scheme isn't, we can't send it
     if (cookie->IsSecure() && !isSecure) continue;
 
-    int32_t sameSiteAttr = 0;
-    cookie->GetSameSite(&sameSiteAttr);
-    if (aIsSameSiteForeign) {
-      // it if's a cross origin request and the cookie is same site only
-      // (strict) don't send it
-      if (sameSiteAttr == nsICookie::SAMESITE_STRICT) {
-        continue;
-      }
-      // if it's a cross origin request, the cookie is same site lax, but it's
-      // not a top-level navigation, don't send it
-      if (sameSiteAttr == nsICookie::SAMESITE_LAX && !aIsSafeTopLevelNav) {
-        continue;
-      }
+    if (aIsSameSiteForeign && !ProcessSameSiteCookieForForeignRequest(
+                                  aChannel, cookie, aIsSafeTopLevelNav)) {
+      continue;
     }
 
     // if the cookie is httpOnly and it's not going directly to the HTTP
@@ -3126,15 +3152,17 @@ void nsCookieService::GetCookiesForURI(
 
 void nsCookieService::GetCookieStringInternal(
     nsIURI* aHostURI, nsIChannel* aChannel, bool aIsForeign,
-    bool aIsTrackingResource, bool aIsSocialTrackingResource,
+    bool aIsThirdPartyTrackingResource,
+    bool aIsThirdPartySocialTrackingResource,
     bool aFirstPartyStorageAccessGranted, uint32_t aRejectedReason,
     bool aIsSafeTopLevelNav, bool aIsSameSiteForeign, bool aHttpBound,
     const OriginAttributes& aOriginAttrs, nsACString& aCookieString) {
   AutoTArray<nsCookie*, 8> foundCookieList;
-  GetCookiesForURI(aHostURI, aChannel, aIsForeign, aIsTrackingResource,
-                   aIsSocialTrackingResource, aFirstPartyStorageAccessGranted,
-                   aRejectedReason, aIsSafeTopLevelNav, aIsSameSiteForeign,
-                   aHttpBound, aOriginAttrs, foundCookieList);
+  GetCookiesForURI(
+      aHostURI, aChannel, aIsForeign, aIsThirdPartyTrackingResource,
+      aIsThirdPartySocialTrackingResource, aFirstPartyStorageAccessGranted,
+      aRejectedReason, aIsSafeTopLevelNav, aIsSameSiteForeign, aHttpBound,
+      aOriginAttrs, foundCookieList);
 
   nsCookie* cookie;
   for (uint32_t i = 0; i < foundCookieList.Length(); ++i) {
@@ -3662,6 +3690,7 @@ void nsCookieService::AddInternal(const nsCookieKey& aKey, nsCookie* aCookie,
 // clang-format on
 
 // helper functions for GetTokenValue
+static inline bool isnull(char c) { return c == 0; }
 static inline bool iswhitespace(char c) { return c == ' ' || c == '\t'; }
 static inline bool isterminator(char c) { return c == '\n' || c == '\r'; }
 static inline bool isvalueseparator(char c) {
@@ -3686,7 +3715,8 @@ bool nsCookieService::GetTokenValue(nsACString::const_char_iterator& aIter,
   // token separator. we'll remove trailing <LWS> next
   while (aIter != aEndIter && iswhitespace(*aIter)) ++aIter;
   start = aIter;
-  while (aIter != aEndIter && !istokenseparator(*aIter)) ++aIter;
+  while (aIter != aEndIter && !isnull(*aIter) && !istokenseparator(*aIter))
+    ++aIter;
 
   // remove trailing <LWS>; first check we're not at the beginning
   lastSpace = aIter;
@@ -3705,7 +3735,8 @@ bool nsCookieService::GetTokenValue(nsACString::const_char_iterator& aIter,
 
     // process <token>
     // just look for ';' to terminate ('=' allowed)
-    while (aIter != aEndIter && !isvalueseparator(*aIter)) ++aIter;
+    while (aIter != aEndIter && !isnull(*aIter) && !isvalueseparator(*aIter))
+      ++aIter;
 
     // remove trailing <LWS>; first check we're not at the beginning
     if (aIter != start) {
@@ -3780,6 +3811,8 @@ bool nsCookieService::ParseAttributes(nsCString& aCookieHeader,
     aCookieData.value() = tokenString;
   }
 
+  bool sameSiteSet = false;
+
   // extract remaining attributes
   while (cookieStart != cookieEnd && !newCookie) {
     newCookie = GetTokenValue(cookieStart, cookieEnd, tokenString, tokenValue,
@@ -3816,15 +3849,21 @@ bool nsCookieService::ParseAttributes(nsCString& aCookieHeader,
       if (tokenValue.LowerCaseEqualsLiteral(kSameSiteLax)) {
         aCookieData.sameSite() = nsICookie::SAMESITE_LAX;
         aCookieData.rawSameSite() = nsICookie::SAMESITE_LAX;
+        sameSiteSet = true;
       } else if (tokenValue.LowerCaseEqualsLiteral(kSameSiteStrict)) {
         aCookieData.sameSite() = nsICookie::SAMESITE_STRICT;
         aCookieData.rawSameSite() = nsICookie::SAMESITE_STRICT;
+        sameSiteSet = true;
       } else if (tokenValue.LowerCaseEqualsLiteral(kSameSiteNone)) {
         aCookieData.sameSite() = nsICookie::SAMESITE_NONE;
         aCookieData.rawSameSite() = nsICookie::SAMESITE_NONE;
+        sameSiteSet = true;
       }
     }
   }
+
+  Telemetry::Accumulate(Telemetry::COOKIE_SAMESITE_SET_VS_UNSET,
+                        sameSiteSet ? 1 : 0);
 
   // re-assign aCookieHeader, in case we need to process another cookie
   aCookieHeader.Assign(Substring(cookieStart, cookieEnd));
@@ -3946,7 +3985,8 @@ static inline bool IsSubdomainOf(const nsCString& a, const nsCString& b) {
 
 CookieStatus nsCookieService::CheckPrefs(
     nsICookieSettings* aCookieSettings, nsIURI* aHostURI, bool aIsForeign,
-    bool aIsTrackingResource, bool aIsSocialTrackingResource,
+    bool aIsThirdPartyTrackingResource,
+    bool aIsThirdPartySocialTrackingResource,
     bool aFirstPartyStorageAccessGranted, const nsACString& aCookieHeader,
     const int aNumOfCookies, const OriginAttributes& aOriginAttrs,
     uint32_t* aRejectedReason) {
@@ -3995,7 +4035,8 @@ CookieStatus nsCookieService::CheckPrefs(
   // No cookies allowed if this request comes from a tracker, in a 3rd party
   // context, when anti-tracking protection is enabled and when we don't have
   // access to the first-party cookie jar.
-  if (aIsForeign && aIsTrackingResource && !aFirstPartyStorageAccessGranted &&
+  if (aIsForeign && aIsThirdPartyTrackingResource &&
+      !aFirstPartyStorageAccessGranted &&
       aCookieSettings->GetRejectThirdPartyTrackers()) {
     // Explicitly pass nsIWebProgressListener::STATE_COOKIES_BLOCKED_TRACKER
     // here to ensure that we are testing the partitioning configuration only
@@ -4013,7 +4054,7 @@ CookieStatus nsCookieService::CheckPrefs(
     COOKIE_LOGFAILURE(aCookieHeader.IsVoid() ? GET_COOKIE : SET_COOKIE,
                       aHostURI, aCookieHeader,
                       "cookies are disabled in trackers");
-    if (aIsSocialTrackingResource) {
+    if (aIsThirdPartySocialTrackingResource) {
       *aRejectedReason =
           nsIWebProgressListener::STATE_COOKIES_BLOCKED_SOCIALTRACKER;
     } else {

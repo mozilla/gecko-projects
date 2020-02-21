@@ -19,6 +19,8 @@ from taskgraph.util.schema import Schema
 from voluptuous import Required, Optional, Any
 from voluptuous.validators import Match
 
+from mozpack import path as mozpath
+
 from taskgraph.transforms.job import (
     configure_taskdesc_for_run,
     run_job_using,
@@ -167,6 +169,7 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
 
     env = worker.setdefault('env', {})
     env.update({
+        'WORKSPACE': '{workdir}/workspace'.format(**run),
         'GECKO_PATH': '{workdir}/workspace/build/src'.format(**run),
         'MOZHARNESS_CONFIG': ' '.join(run.pop('config')),
         'MOZHARNESS_SCRIPT': run.pop('script'),
@@ -221,12 +224,10 @@ def mozharness_on_docker_worker_setup(config, job, taskdesc):
     setup_secrets(config, job, taskdesc)
 
     run['using'] = 'run-task'
-    run['command'] = [
-        '{workdir}/workspace/build/src/{script}'.format(
-            workdir=run['workdir'],
-            script=run.pop('job-script', 'taskcluster/scripts/builder/build-linux.sh'),
-        ),
-    ]
+    run['command'] = mozpath.join(
+        "${GECKO_PATH}",
+        run.pop('job-script', 'taskcluster/scripts/builder/build-linux.sh'),
+    )
     run.pop('secrets')
     run.pop('requires-signed-builds')
 

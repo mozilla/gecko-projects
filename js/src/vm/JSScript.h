@@ -1951,6 +1951,49 @@ struct RuntimeScriptData::Hasher {
 using RuntimeScriptDataTable =
     HashSet<RuntimeScriptData*, RuntimeScriptData::Hasher, SystemAllocPolicy>;
 
+// Range of characters in scriptSource which contains a script's source,
+// that is, the range used by the Parser to produce a script.
+//
+// For most functions the fields point to the following locations.
+//
+//   function * f(a, b) { return a + b; }
+//   ^          ^                        ^
+//   |          |                        |
+//   |          sourceStart              sourceEnd
+//   |                                   |
+//   toStringStart                       toStringEnd
+//
+// For the special case of class constructors, the spec requires us to use an
+// alternate definition of toStringStart / toStringEnd.
+//
+//   class C { constructor() { this.field = 42; } }
+//   ^         ^                                 ^ ^
+//   |         |                                 | `---------`
+//   |         sourceStart                       sourceEnd   |
+//   |                                                       |
+//   toStringStart                                           toStringEnd
+//
+// NOTE: These are counted in Code Units from the start of the script source.
+struct SourceExtent {
+  SourceExtent(uint32_t sourceStart, uint32_t sourceEnd, uint32_t toStringStart,
+               uint32_t toStringEnd, uint32_t lineno, uint32_t column)
+      : sourceStart(sourceStart),
+        sourceEnd(sourceEnd),
+        toStringStart(toStringStart),
+        toStringEnd(toStringEnd),
+        lineno(lineno),
+        column(column) {}
+
+  uint32_t sourceStart = 0;
+  uint32_t sourceEnd = 0;
+  uint32_t toStringStart = 0;
+  uint32_t toStringEnd = 0;
+
+  // Line and column of |sourceStart_| position.
+  uint32_t lineno = 0;
+  uint32_t column = 0;  // Count of Code Points
+};
+
 // This class contains fields and accessors that are common to both lazy and
 // non-lazy interpreted scripts. This must be located at offset +0 of any
 // derived classes in order for the 'jitCodeRaw' mechanism to work with the
@@ -1981,37 +2024,7 @@ class BaseScript : public gc::TenuredCell {
   // will not point to anything.
   RefPtr<js::RuntimeScriptData> sharedData_ = {};
 
-  // Range of characters in scriptSource which contains this script's source,
-  // that is, the range used by the Parser to produce this script.
-  //
-  // For most functions the fields point to the following locations.
-  //
-  //   function * f(a, b) { return a + b; }
-  //   ^          ^                        ^
-  //   |          |                        |
-  //   |          sourceStart_             sourceEnd_
-  //   |                                   |
-  //   toStringStart_                      toStringEnd_
-  //
-  // For the special case of class constructors, the spec requires us to use an
-  // alternate definition of toStringStart_ / toStringEnd_.
-  //
-  //   class C { constructor() { this.field = 42; } }
-  //   ^         ^                                 ^ ^
-  //   |         |                                 | `---------`
-  //   |         sourceStart_                      sourceEnd_  |
-  //   |                                                       |
-  //   toStringStart_                                          toStringEnd_
-  //
-  // NOTE: These are counted in Code Units from the start of the script source.
-  uint32_t sourceStart_ = 0;
-  uint32_t sourceEnd_ = 0;
-  uint32_t toStringStart_ = 0;
-  uint32_t toStringEnd_ = 0;
-
-  // Line and column of |sourceStart_| position.
-  uint32_t lineno_ = 0;
-  uint32_t column_ = 0;  // Count of Code Points
+  SourceExtent extent_;
 
   // See ImmutableFlags / MutableFlags below for definitions. These are stored
   // as uint32_t instead of bitfields to make it more predictable to access
@@ -2041,22 +2054,15 @@ class BaseScript : public gc::TenuredCell {
   } u;
 
   BaseScript(uint8_t* stubEntry, JSObject* functionOrGlobal,
-             ScriptSourceObject* sourceObject, uint32_t sourceStart,
-             uint32_t sourceEnd, uint32_t toStringStart, uint32_t toStringEnd,
-             uint32_t lineno, uint32_t column)
+             ScriptSourceObject* sourceObject, SourceExtent extent)
       : jitCodeRaw_(stubEntry),
         functionOrGlobal_(functionOrGlobal),
         sourceObject_(sourceObject),
-        sourceStart_(sourceStart),
-        sourceEnd_(sourceEnd),
-        toStringStart_(toStringStart),
-        toStringEnd_(toStringEnd),
-        lineno_(lineno),
-        column_(column) {
+        extent_(extent) {
     MOZ_ASSERT(functionOrGlobal->compartment() == sourceObject->compartment());
-    MOZ_ASSERT(toStringStart <= sourceStart);
-    MOZ_ASSERT(sourceStart <= sourceEnd);
-    MOZ_ASSERT(sourceEnd <= toStringEnd);
+    MOZ_ASSERT(extent_.toStringStart <= extent_.sourceStart);
+    MOZ_ASSERT(extent_.sourceStart <= extent_.sourceEnd);
+    MOZ_ASSERT(extent_.sourceEnd <= extent_.toStringEnd);
   }
 
  public:
@@ -2265,11 +2271,14 @@ class BaseScript : public gc::TenuredCell {
 
   bool isBinAST() const { return scriptSource()->hasBinASTSource(); }
 
-  uint32_t sourceStart() const { return sourceStart_; }
-  uint32_t sourceEnd() const { return sourceEnd_; }
-  uint32_t sourceLength() const { return sourceEnd_ - sourceStart_; }
-  uint32_t toStringStart() const { return toStringStart_; }
-  uint32_t toStringEnd() const { return toStringEnd_; }
+  uint32_t sourceStart() const { return extent_.sourceStart; }
+  uint32_t sourceEnd() const { return extent_.sourceEnd; }
+  uint32_t sourceLength() const {
+    return extent_.sourceEnd - extent_.sourceStart;
+  }
+  uint32_t toStringStart() const { return extent_.toStringStart; }
+  uint32_t toStringEnd() const { return extent_.toStringEnd; }
+  const SourceExtent& extent() const { return extent_; }
 
   MOZ_MUST_USE bool appendSourceDataForToString(JSContext* cx,
                                                 js::StringBuffer& buf);
@@ -2288,23 +2297,25 @@ class BaseScript : public gc::TenuredCell {
     MOZ_ASSERT(sourceStart <= sourceEnd);
     MOZ_ASSERT(sourceEnd <= toStringEnd);
 
-    sourceStart_ = sourceStart;
-    sourceEnd_ = sourceEnd;
-    toStringStart_ = toStringStart;
-    toStringEnd_ = toStringEnd;
+    extent_.sourceStart = sourceStart;
+    extent_.sourceEnd = sourceEnd;
+    extent_.toStringStart = toStringStart;
+    extent_.toStringEnd = toStringEnd;
   }
 
-  void setColumn(uint32_t column) { column_ = column; }
+  void setColumn(uint32_t column) { extent_.column = column; }
 #endif
 
   void setToStringEnd(uint32_t toStringEnd) {
-    MOZ_ASSERT(toStringStart_ <= toStringEnd);
-    MOZ_ASSERT(toStringEnd_ >= sourceEnd_);
-    toStringEnd_ = toStringEnd;
+    MOZ_ASSERT(extent_.toStringStart <= toStringEnd);
+    MOZ_ASSERT(extent_.toStringEnd >= extent_.sourceEnd);
+    extent_.toStringEnd = toStringEnd;
   }
 
-  uint32_t lineno() const { return lineno_; }
-  uint32_t column() const { return column_; }
+  uint32_t lineno() const { return extent_.lineno; }
+  uint32_t column() const { return extent_.column; }
+
+  const SourceExtent& getExtent() const { return extent_; }
 
   // ImmutableFlags accessors.
   MOZ_MUST_USE bool hasFlag(ImmutableFlags flag) const {
@@ -2640,17 +2651,13 @@ class JSScript : public js::BaseScript {
 
   static JSScript* New(JSContext* cx, js::HandleObject functionOrGlobal,
                        js::HandleScriptSourceObject sourceObject,
-                       uint32_t sourceStart, uint32_t sourceEnd,
-                       uint32_t toStringStart, uint32_t toStringEnd,
-                       uint32_t lineno, uint32_t column);
+                       js::SourceExtent extent);
 
  public:
   static JSScript* Create(JSContext* cx, js::HandleObject functionOrGlobal,
                           const JS::ReadOnlyCompileOptions& options,
                           js::HandleScriptSourceObject sourceObject,
-                          uint32_t sourceStart, uint32_t sourceEnd,
-                          uint32_t toStringStart, uint32_t toStringEnd,
-                          uint32_t lineno, uint32_t column);
+                          js::SourceExtent extent);
 
   static JSScript* CreateFromLazy(JSContext* cx,
                                   js::Handle<js::LazyScript*> lazy);
@@ -3335,9 +3342,7 @@ class LazyScript : public BaseScript {
   static LazyScript* CreateRaw(JSContext* cx, uint32_t ngcthings,
                                HandleFunction fun,
                                HandleScriptSourceObject sourceObject,
-                               uint32_t sourceStart, uint32_t sourceEnd,
-                               uint32_t toStringStart, uint32_t toStringEnd,
-                               uint32_t lineno, uint32_t column);
+                               SourceExtent extent);
 
  public:
   static const uint32_t NumClosedOverBindingsLimit =
@@ -3350,8 +3355,7 @@ class LazyScript : public BaseScript {
       JSContext* cx, HandleFunction fun, HandleScriptSourceObject sourceObject,
       const frontend::AtomVector& closedOverBindings,
       const frontend::FunctionBoxVector& innerFunctionBoxes,
-      uint32_t sourceStart, uint32_t sourceEnd, uint32_t toStringStart,
-      uint32_t toStringEnd, uint32_t lineno, uint32_t column);
+      SourceExtent extent);
 
   // Create a LazyScript and initialize the closedOverBindings and the
   // innerFunctions with dummy values to be replaced in a later initialization

@@ -386,6 +386,14 @@ RefPtr<const webgl::LinkedProgramInfo> QueryProgramInfo(WebGLProgram* prog,
         // shader, FragData[1] will be present. FragData[0] is valid for non-MRT
         // shaders.
         drawBuffers = webgl->GLMaxDrawBuffers();
+      } else if (translatedSource.find("(gl_FragColor") == std::string::npos &&
+                 translatedSource.find("(webgl_FragColor") ==
+                     std::string::npos &&
+                 translatedSource.find("(gl_FragData") == std::string::npos &&
+                 translatedSource.find("(webgl_FragData") ==
+                     std::string::npos) {
+        // We have to support no-color-output shaders?
+        drawBuffers = 0;
       }
 
       for (uint32_t i = 0; i < drawBuffers; ++i) {
@@ -512,7 +520,7 @@ webgl::LinkedProgramInfo::LinkedProgramInfo(WebGLProgram* prog)
       transformFeedbackBufferMode(prog->mNextLink_TransformFeedbackBufferMode) {
 }
 
-webgl::LinkedProgramInfo::~LinkedProgramInfo() {}
+webgl::LinkedProgramInfo::~LinkedProgramInfo() = default;
 
 webgl::AttribBaseType webgl::ToAttribBaseType(const GLenum elemType) {
   switch (elemType) {

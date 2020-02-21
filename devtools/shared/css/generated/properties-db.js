@@ -9893,6 +9893,7 @@ exports.CSS_PROPERTIES = {
     ],
     "supports": [],
     "values": [
+      "all",
       "auto",
       "inherit",
       "initial",
@@ -10906,10 +10907,6 @@ exports.PREFERENCES = [
   [
     "-moz-transform-origin",
     "layout.css.prefixes.transforms"
-  ],
-  [
-    "-webkit-appearance",
-    "layout.css.webkit-appearance.enabled"
   ],
   [
     "-moz-column-width",

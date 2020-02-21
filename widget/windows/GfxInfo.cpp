@@ -1803,6 +1803,14 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         V(21, 20, 16, 4590), "Intel driver >= 21.20.16.4590");
 #endif
 
+    // Bug 1615421 / 1607860 - Playing videos appear to crash with WebRender
+    // with this particular driver.
+    APPEND_TO_DRIVER_BLOCKLIST2(
+        OperatingSystem::Windows, DeviceFamily::IntelAll,
+        nsIGfxInfo::FEATURE_WEBRENDER,
+        nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_EQUAL,
+        V(23, 20, 16, 4973), "Intel driver > 23.20.16.4973");
+
     ////////////////////////////////////
     // FEATURE_WEBRENDER - ALLOWLIST
 
@@ -1856,20 +1864,25 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
 
 #ifdef NIGHTLY_BUILD
     APPEND_TO_DRIVER_BLOCKLIST2_EXT(
-        OperatingSystem::Windows10, ScreenSizeStatus::Small,
-        BatteryStatus::Present, DesktopEnvironment::All, WindowProtocol::All,
-        DriverVendor::All, DeviceFamily::NvidiaRolloutWebRender,
-        nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_ALLOW_QUALIFIED,
-        DRIVER_COMPARISON_IGNORED, V(0, 0, 0, 0),
-        "FEATURE_ROLLOUT_NIGHTLY_BATTERY_NV_S_SCRN");
+        OperatingSystem::Windows10, ScreenSizeStatus::All, BatteryStatus::All,
+        DesktopEnvironment::All, WindowProtocol::All, DriverVendor::All,
+        DeviceFamily::NvidiaRolloutWebRender, nsIGfxInfo::FEATURE_WEBRENDER,
+        nsIGfxInfo::FEATURE_ALLOW_QUALIFIED, DRIVER_COMPARISON_IGNORED,
+        V(0, 0, 0, 0), "FEATURE_ROLLOUT_NIGHTLY_LISTED_NVIDIA");
 
     APPEND_TO_DRIVER_BLOCKLIST2_EXT(
-        OperatingSystem::Windows10, ScreenSizeStatus::MediumAndLarge,
-        BatteryStatus::None, DesktopEnvironment::All, WindowProtocol::All,
-        DriverVendor::All, DeviceFamily::IntelRolloutWebRender,
-        nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_ALLOW_QUALIFIED,
-        DRIVER_COMPARISON_IGNORED, V(0, 0, 0, 0),
-        "FEATURE_ROLLOUT_NIGHTLY_INTEL_DESKTOP_M_L_SCRN");
+        OperatingSystem::Windows10, ScreenSizeStatus::All, BatteryStatus::All,
+        DesktopEnvironment::All, WindowProtocol::All, DriverVendor::All,
+        DeviceFamily::AtiRolloutWebRender, nsIGfxInfo::FEATURE_WEBRENDER,
+        nsIGfxInfo::FEATURE_ALLOW_QUALIFIED, DRIVER_COMPARISON_IGNORED,
+        V(0, 0, 0, 0), "FEATURE_ROLLOUT_NIGHTLY_LISTED_AMD");
+
+    APPEND_TO_DRIVER_BLOCKLIST2_EXT(
+        OperatingSystem::Windows10, ScreenSizeStatus::All, BatteryStatus::All,
+        DesktopEnvironment::All, WindowProtocol::All, DriverVendor::All,
+        DeviceFamily::IntelRolloutWebRender, nsIGfxInfo::FEATURE_WEBRENDER,
+        nsIGfxInfo::FEATURE_ALLOW_QUALIFIED, DRIVER_COMPARISON_IGNORED,
+        V(0, 0, 0, 0), "FEATURE_ROLLOUT_NIGHTLY_LISTED_INTEL");
 #endif
 
     ////////////////////////////////////

@@ -490,20 +490,21 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id) {
       APPEND_DEVICE(0x593b);
 
       // coffeelake gt2+
-      APPEND_DEVICE(0x3e91);
-      APPEND_DEVICE(0x3e92);
+      APPEND_RANGE(0x3e91, 0x3e92);
+      APPEND_DEVICE(0x3e94);
       APPEND_DEVICE(0x3e96);
       APPEND_DEVICE(0x3e98);
-      APPEND_DEVICE(0x3e9a);
-      APPEND_DEVICE(0x3e9b);
-      APPEND_DEVICE(0x3e94);
+      APPEND_RANGE(0x3e9a, 0x3e9b);
       APPEND_DEVICE(0x3ea0);
-      APPEND_DEVICE(0x3ea9);
       APPEND_DEVICE(0x3ea2);
-      APPEND_DEVICE(0x3ea6);
-      APPEND_DEVICE(0x3ea7);
-      APPEND_DEVICE(0x3ea8);
-      APPEND_DEVICE(0x3ea5);
+      APPEND_RANGE(0x3ea5, 0x3ea9);
+      APPEND_DEVICE(0x87ca);
+      APPEND_DEVICE(0x9b41);
+      APPEND_DEVICE(0x9bc0);
+      APPEND_DEVICE(0x9bc2);
+      APPEND_RANGE(0x9bc4, 0x9bc5);
+      APPEND_DEVICE(0x9bc8);
+      APPEND_RANGE(0x9bca, 0x9bcc);
 
       // broadwell gt2+
       APPEND_DEVICE(0x1612);
@@ -525,7 +526,8 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id) {
       APPEND_DEVICE(0x163d);
       APPEND_DEVICE(0x163e);
 
-      // HD Graphics 4600
+#if 0
+      // Gen7.5 not allowed until bug 1576637 is resolved.
       APPEND_DEVICE(0x0412);
       APPEND_DEVICE(0x0416);
       APPEND_DEVICE(0x041a);
@@ -536,6 +538,7 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id) {
       APPEND_DEVICE(0x0a1a);
       APPEND_DEVICE(0x0a1b);
       APPEND_DEVICE(0x0a1e);
+#endif
       break;
     case DeviceFamily::AtiRolloutWebRender:
       APPEND_RANGE(0x6600, 0x66af);

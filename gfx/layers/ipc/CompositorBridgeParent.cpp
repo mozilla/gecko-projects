@@ -2022,6 +2022,8 @@ void CompositorBridgeParent::InitializeStatics() {
   gfxVars::SetWebRenderDebugFlagsListener(&UpdateDebugFlags);
   gfxVars::SetUseWebRenderMultithreadingListener(
       &UpdateWebRenderMultithreading);
+  gfxVars::SetWebRenderBatchingLookbackListener(
+      &UpdateWebRenderBatchingParameters);
 }
 
 /*static*/
@@ -2079,6 +2081,24 @@ void CompositorBridgeParent::UpdateWebRenderMultithreading() {
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
   ForEachWebRenderBridgeParent([&](WebRenderBridgeParent* wrBridge) -> void {
     wrBridge->UpdateMultithreading();
+  });
+}
+
+/*static*/
+void CompositorBridgeParent::UpdateWebRenderBatchingParameters() {
+  if (!CompositorThreadHolder::IsInCompositorThread()) {
+    if (CompositorLoop()) {
+      CompositorLoop()->PostTask(NewRunnableFunction(
+          "CompositorBridgeParent::UpdateWebRenderBatchingParameters",
+          &CompositorBridgeParent::UpdateWebRenderBatchingParameters));
+    }
+
+    return;
+  }
+
+  MonitorAutoLock lock(*sIndirectLayerTreesLock);
+  ForEachWebRenderBridgeParent([&](WebRenderBridgeParent* wrBridge) -> void {
+    wrBridge->UpdateBatchingParameters();
   });
 }
 
@@ -2296,7 +2316,7 @@ void CompositorBridgeParent::DidComposite(const VsyncId& aId,
 
 void CompositorBridgeParent::NotifyDidSceneBuild(
     const nsTArray<wr::RenderRoot>& aRenderRoots,
-    RefPtr<wr::WebRenderPipelineInfo> aInfo) {
+    RefPtr<const wr::WebRenderPipelineInfo> aInfo) {
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   if (mPaused) {
     return;

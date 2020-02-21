@@ -114,7 +114,7 @@ struct IDBObjectStore::StructuredCloneWriteInfo {
     aCloneWriteInfo.mOffsetToKeyProp = 0;
   }
 
-  ~StructuredCloneWriteInfo() { MOZ_COUNT_DTOR(StructuredCloneWriteInfo); }
+  MOZ_COUNTED_DTOR(StructuredCloneWriteInfo)
 };
 
 // Used by ValueWrapper::Clone to hold strong references to any blob-like
@@ -135,9 +135,9 @@ struct MOZ_STACK_CLASS MutableFileData final {
   nsString type;
   nsString name;
 
-  MutableFileData() { MOZ_COUNT_CTOR(MutableFileData); }
+  MOZ_COUNTED_DEFAULT_CTOR(MutableFileData)
 
-  ~MutableFileData() { MOZ_COUNT_DTOR(MutableFileData); }
+  MOZ_COUNTED_DTOR(MutableFileData)
 };
 
 struct MOZ_STACK_CLASS BlobOrFileData final {
@@ -151,7 +151,7 @@ struct MOZ_STACK_CLASS BlobOrFileData final {
     MOZ_COUNT_CTOR(BlobOrFileData);
   }
 
-  ~BlobOrFileData() { MOZ_COUNT_DTOR(BlobOrFileData); }
+  MOZ_COUNTED_DTOR(BlobOrFileData)
 };
 
 struct MOZ_STACK_CLASS WasmModuleData final {
@@ -164,7 +164,7 @@ struct MOZ_STACK_CLASS WasmModuleData final {
     MOZ_COUNT_CTOR(WasmModuleData);
   }
 
-  ~WasmModuleData() { MOZ_COUNT_DTOR(WasmModuleData); }
+  MOZ_COUNTED_DTOR(WasmModuleData)
 };
 
 struct MOZ_STACK_CLASS GetAddInfoClosure final {
@@ -177,7 +177,7 @@ struct MOZ_STACK_CLASS GetAddInfoClosure final {
     MOZ_COUNT_CTOR(GetAddInfoClosure);
   }
 
-  ~GetAddInfoClosure() { MOZ_COUNT_DTOR(GetAddInfoClosure); }
+  MOZ_COUNTED_DTOR(GetAddInfoClosure)
 };
 
 RefPtr<IDBRequest> GenerateRequest(JSContext* aCx,
@@ -419,13 +419,10 @@ bool CopyingStructuredCloneWriteCallback(JSContext* aCx,
 
 nsresult GetAddInfoCallback(JSContext* aCx, void* aClosure) {
   static const JSStructuredCloneCallbacks kStructuredCloneCallbacks = {
-      nullptr /* read */,
-      StructuredCloneWriteCallback /* write */,
-      nullptr /* reportError */,
-      nullptr /* readTransfer */,
-      nullptr /* writeTransfer */,
-      nullptr /* freeTransfer */,
-      nullptr /* canTransfer */
+      nullptr /* read */,          StructuredCloneWriteCallback /* write */,
+      nullptr /* reportError */,   nullptr /* readTransfer */,
+      nullptr /* writeTransfer */, nullptr /* freeTransfer */,
+      nullptr /* canTransfer */,   nullptr /* sabCloned */
   };
 
   MOZ_ASSERT(aCx);
@@ -1062,6 +1059,7 @@ bool IDBObjectStore::DeserializeValue(JSContext* aCx,
       nullptr,
       nullptr,
       nullptr,
+      nullptr,
       nullptr};
 
   // FIXME: Consider to use StructuredCloneHolder here and in other
@@ -1219,6 +1217,7 @@ class DeserializeIndexValueHelper final : public Runnable {
         nullptr,
         nullptr,
         nullptr,
+        nullptr,
         nullptr};
 
     if (!JS_ReadStructuredClone(
@@ -1320,6 +1319,7 @@ class DeserializeUpgradeValueHelper final : public Runnable {
                                    JS::MutableHandle<JS::Value> aValue) {
     static const JSStructuredCloneCallbacks callbacks = {
         CommonStructuredCloneReadCallback,
+        nullptr,
         nullptr,
         nullptr,
         nullptr,
@@ -2571,7 +2571,8 @@ bool IDBObjectStore::ValueWrapper::Clone(JSContext* aCx) {
       nullptr /* readTransfer */,
       nullptr /* writeTransfer */,
       nullptr /* freeTransfer */,
-      nullptr /* canTransfer */
+      nullptr /* canTransfer */,
+      nullptr /* sabCloned */
   };
 
   StructuredCloneInfo cloneInfo;

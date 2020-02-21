@@ -57,17 +57,6 @@ using namespace mozilla::layers;
 #  define VA_FOURCC_NV12 0x3231564E
 #endif
 
-WaylandDMABufSurface::WaylandDMABufSurface(SurfaceType aSurfaceType)
-    : mSurfaceType(aSurfaceType),
-      mBufferModifier(0),
-      mBufferPlaneCount(0),
-      mStrides(),
-      mOffsets() {
-  for (int i = 0; i < DMABUF_BUFFER_PLANES; i++) {
-    mDmabufFds[i] = -1;
-  }
-}
-
 already_AddRefed<WaylandDMABufSurface>
 WaylandDMABufSurface::CreateDMABufSurface(
     const mozilla::layers::SurfaceDescriptor& aDesc) {
@@ -89,6 +78,69 @@ WaylandDMABufSurface::CreateDMABufSurface(
     return nullptr;
   }
   return surf.forget();
+}
+
+void WaylandDMABufSurface::FenceDelete() {
+  auto* egl = gl::GLLibraryEGL::Get();
+
+  if (mSync) {
+    // We can't call this unless we have the ext, but we will always have
+    // the ext if we have something to destroy.
+    egl->fDestroySync(egl->Display(), mSync);
+    mSync = nullptr;
+  }
+}
+
+void WaylandDMABufSurface::FenceSet() {
+  if (!mGL || !mGL->MakeCurrent()) {
+    return;
+  }
+
+  auto* egl = gl::GLLibraryEGL::Get();
+  if (egl->IsExtensionSupported(GLLibraryEGL::KHR_fence_sync) &&
+      egl->IsExtensionSupported(GLLibraryEGL::ANDROID_native_fence_sync)) {
+    if (mSync) {
+      MOZ_ALWAYS_TRUE(egl->fDestroySync(egl->Display(), mSync));
+      mSync = nullptr;
+    }
+
+    mSync = egl->fCreateSync(egl->Display(),
+                             LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID, nullptr);
+    if (mSync) {
+      mGL->fFlush();
+      return;
+    }
+  }
+
+  // ANDROID_native_fence_sync may not be supported so call glFinish()
+  // as a slow path.
+  mGL->fFinish();
+}
+
+void WaylandDMABufSurface::FenceWait() {
+  auto* egl = gl::GLLibraryEGL::Get();
+
+  // Wait on the fence, because presumably we're going to want to read this
+  // surface
+  if (mSync) {
+    egl->fClientWaitSync(egl->Display(), mSync, 0, LOCAL_EGL_FOREVER);
+  }
+}
+
+bool WaylandDMABufSurface::FenceCreate(int aFd) {
+  MOZ_ASSERT(aFd > 0);
+
+  auto* egl = gl::GLLibraryEGL::Get();
+  const EGLint attribs[] = {LOCAL_EGL_SYNC_NATIVE_FENCE_FD_ANDROID, aFd,
+                            LOCAL_EGL_NONE};
+  mSync = egl->fCreateSync(egl->Display(), LOCAL_EGL_SYNC_NATIVE_FENCE_ANDROID,
+                           attribs);
+  if (!mSync) {
+    MOZ_ASSERT(false, "Failed to create GLFence!");
+    return false;
+  }
+
+  return true;
 }
 
 void WaylandDMABufSurfaceRGBA::SetWLBuffer(struct wl_buffer* aWLBuffer) {
@@ -275,6 +327,13 @@ void WaylandDMABufSurfaceRGBA::ImportSurfaceDescriptor(
     mStrides[i] = desc.strides()[i];
     mOffsets[i] = desc.offsets()[i];
   }
+
+  int fd = desc.fence().ClonePlatformHandle().release();
+  if (fd > 0) {
+    if (!FenceCreate(fd)) {
+      close(fd);
+    }
+  }
 }
 
 bool WaylandDMABufSurfaceRGBA::Create(const SurfaceDescriptor& aDesc) {
@@ -314,6 +373,7 @@ bool WaylandDMABufSurfaceRGBA::Serialize(
   AutoTArray<uint32_t, DMABUF_BUFFER_PLANES> strides;
   AutoTArray<uint32_t, DMABUF_BUFFER_PLANES> offsets;
   AutoTArray<uintptr_t, DMABUF_BUFFER_PLANES> images;
+  ipc::FileDescriptor fenceFD;
 
   width.AppendElement(mWidth);
   height.AppendElement(mHeight);
@@ -324,9 +384,15 @@ bool WaylandDMABufSurfaceRGBA::Serialize(
     offsets.AppendElement(mOffsets[i]);
   }
 
+  if (mSync) {
+    auto* egl = gl::GLLibraryEGL::Get();
+    fenceFD = ipc::FileDescriptor(
+        egl->fDupNativeFenceFDANDROID(egl->Display(), mSync));
+  }
+
   aOutDescriptor = SurfaceDescriptorDMABuf(
       mSurfaceType, mBufferModifier, mGbmBufferFlags, fds, width, height,
-      format, strides, offsets, GetYUVColorSpace());
+      format, strides, offsets, GetYUVColorSpace(), fenceFD);
 
   return true;
 }
@@ -420,6 +486,8 @@ bool WaylandDMABufSurfaceRGBA::CreateTexture(GLContext* aGLContext,
 }
 
 void WaylandDMABufSurfaceRGBA::ReleaseTextures() {
+  FenceDelete();
+
   if (mTexture && mGL->MakeCurrent()) {
     mGL->fDeleteTextures(1, &mTexture);
     mTexture = 0;
@@ -572,13 +640,24 @@ WaylandDMABufSurfaceRGBA::CreateDMABufSurface(int aWidth, int aHeight,
   return surf.forget();
 }
 
+already_AddRefed<WaylandDMABufSurfaceNV12>
+WaylandDMABufSurfaceNV12::CreateNV12Surface(
+    const VADRMPRIMESurfaceDescriptor& aDesc) {
+  RefPtr<WaylandDMABufSurfaceNV12> surf = new WaylandDMABufSurfaceNV12();
+  if (!surf->Create(aDesc)) {
+    return nullptr;
+  }
+  return surf.forget();
+}
+
 WaylandDMABufSurfaceNV12::WaylandDMABufSurfaceNV12()
     : WaylandDMABufSurface(SURFACE_NV12),
       mSurfaceFormat(gfx::SurfaceFormat::NV12),
       mWidth(),
       mHeight(),
       mDrmFormats(),
-      mTexture() {
+      mTexture(),
+      mColorSpace(mozilla::gfx::YUVColorSpace::UNKNOWN) {
   for (int i = 0; i < DMABUF_BUFFER_PLANES; i++) {
     mEGLImage[i] = LOCAL_EGL_NO_IMAGE;
   }
@@ -639,6 +718,13 @@ void WaylandDMABufSurfaceNV12::ImportSurfaceDescriptor(
     mStrides[i] = aDesc.strides()[i];
     mOffsets[i] = aDesc.offsets()[i];
   }
+
+  int fd = aDesc.fence().ClonePlatformHandle().release();
+  if (fd > 0) {
+    if (!FenceCreate(fd)) {
+      close(fd);
+    }
+  }
 }
 
 bool WaylandDMABufSurfaceNV12::Serialize(
@@ -649,6 +735,7 @@ bool WaylandDMABufSurfaceNV12::Serialize(
   AutoTArray<ipc::FileDescriptor, DMABUF_BUFFER_PLANES> fds;
   AutoTArray<uint32_t, DMABUF_BUFFER_PLANES> strides;
   AutoTArray<uint32_t, DMABUF_BUFFER_PLANES> offsets;
+  ipc::FileDescriptor fenceFD;
 
   for (int i = 0; i < mBufferPlaneCount; i++) {
     width.AppendElement(mWidth[i]);
@@ -659,10 +746,15 @@ bool WaylandDMABufSurfaceNV12::Serialize(
     offsets.AppendElement(mOffsets[i]);
   }
 
-  aOutDescriptor =
-      SurfaceDescriptorDMABuf(mSurfaceType, mBufferModifier, 0, fds, width,
-                              height, format, strides, offsets, mColorSpace);
+  if (mSync) {
+    auto* egl = gl::GLLibraryEGL::Get();
+    fenceFD = ipc::FileDescriptor(
+        egl->fDupNativeFenceFDANDROID(egl->Display(), mSync));
+  }
 
+  aOutDescriptor = SurfaceDescriptorDMABuf(
+      mSurfaceType, mBufferModifier, 0, fds, width, height, format, strides,
+      offsets, GetYUVColorSpace(), fenceFD);
   return true;
 }
 
@@ -697,23 +789,14 @@ bool WaylandDMABufSurfaceNV12::CreateTexture(GLContext* aGLContext,
   attribs.AppendElement(mHeight[aPlane]);
   attribs.AppendElement(LOCAL_EGL_LINUX_DRM_FOURCC_EXT);
   attribs.AppendElement(mDrmFormats[aPlane]);
-#define ADD_PLANE_ATTRIBS_NV12(plane_idx)                                   \
-  {                                                                         \
-    attribs.AppendElement(LOCAL_EGL_DMA_BUF_PLANE##plane_idx##_FD_EXT);     \
-    attribs.AppendElement(mDmabufFds[aPlane]);                              \
-    attribs.AppendElement(LOCAL_EGL_DMA_BUF_PLANE##plane_idx##_OFFSET_EXT); \
-    attribs.AppendElement((int)mOffsets[aPlane]);                           \
-    attribs.AppendElement(LOCAL_EGL_DMA_BUF_PLANE##plane_idx##_PITCH_EXT);  \
-    attribs.AppendElement((int)mStrides[aPlane]);                           \
-    if (mBufferModifier != DRM_FORMAT_MOD_INVALID) {                        \
-      attribs.AppendElement(                                                \
-          LOCAL_EGL_DMA_BUF_PLANE##plane_idx##_MODIFIER_LO_EXT);            \
-      attribs.AppendElement(mBufferModifier & 0xFFFFFFFF);                  \
-      attribs.AppendElement(                                                \
-          LOCAL_EGL_DMA_BUF_PLANE##plane_idx##_MODIFIER_HI_EXT);            \
-      attribs.AppendElement(mBufferModifier >> 32);                         \
-    }                                                                       \
-    ADD_PLANE_ATTRIBS_NV12(0);
+#define ADD_PLANE_ATTRIBS_NV12(plane_idx)                                 \
+  attribs.AppendElement(LOCAL_EGL_DMA_BUF_PLANE##plane_idx##_FD_EXT);     \
+  attribs.AppendElement(mDmabufFds[aPlane]);                              \
+  attribs.AppendElement(LOCAL_EGL_DMA_BUF_PLANE##plane_idx##_OFFSET_EXT); \
+  attribs.AppendElement((int)mOffsets[aPlane]);                           \
+  attribs.AppendElement(LOCAL_EGL_DMA_BUF_PLANE##plane_idx##_PITCH_EXT);  \
+  attribs.AppendElement((int)mStrides[aPlane]);
+  ADD_PLANE_ATTRIBS_NV12(0);
 #undef ADD_PLANE_ATTRIBS_NV12
   attribs.AppendElement(LOCAL_EGL_NONE);
 
@@ -743,12 +826,20 @@ bool WaylandDMABufSurfaceNV12::CreateTexture(GLContext* aGLContext,
 }
 
 void WaylandDMABufSurfaceNV12::ReleaseTextures() {
-  if (mGL->MakeCurrent()) {
-    for (int i = 0; i < mBufferPlaneCount; i++) {
-      if (mTexture[i]) {
-        mGL->fDeleteTextures(1, mTexture + i);
-        mTexture[i] = 0;
-      }
+  FenceDelete();
+
+  bool textureActive = false;
+  for (int i = 0; i < mBufferPlaneCount; i++) {
+    if (mTexture[i]) {
+      textureActive = true;
+      break;
+    }
+  }
+
+  if (textureActive && mGL->MakeCurrent()) {
+    mGL->fDeleteTextures(DMABUF_BUFFER_PLANES, mTexture);
+    for (int i = 0; i < DMABUF_BUFFER_PLANES; i++) {
+      mTexture[i] = 0;
     }
     mGL = nullptr;
   }

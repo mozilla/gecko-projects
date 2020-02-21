@@ -73,6 +73,7 @@ extern "C" const char* __tsan_default_suppressions() {
          "called_from_lib:libpulse.so\n"
          "called_from_lib:libpulsecommon\n"
          "called_from_lib:libsecret-1\n"
+         "called_from_lib:libunity-gtk3-parser\n"
          "called_from_lib:libvorbis.so\n"
          "called_from_lib:libvorbisfile\n"
          "called_from_lib:libX11.so\n"
@@ -300,10 +301,6 @@ extern "C" const char* __tsan_default_suppressions() {
          "deadlock:SanctionsTestServer\n"
          "deadlock:OCSPStaplingServer\n"
 
-         // Bug 1614637
-         "race:CacheStorageService::Notify\n"
-         "race:CacheStorageService::OnMemoryConsumptionChange\n"
-
          // Bug 1614646
          "race:nsCookieService::CountCookiesFromHostInternal\n"
          "race:nsCookieService::InitDBStates\n"
@@ -327,6 +324,9 @@ extern "C" const char* __tsan_default_suppressions() {
          // Bug 1615275
          "race:^GetVelocity$\n"
          "race:^EndTouch$\n"
+
+         // Bug 1615265
+         "race:ScriptPreloader::OffThreadDecodeCallback\n"
 
          // ~GLContextGLX unlocks a libGL mutex that cannot be seen
          // by TSan because libGL is not instrumented.

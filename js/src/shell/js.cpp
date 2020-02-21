@@ -2761,13 +2761,6 @@ static bool CpuNow(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-static bool ClearKeptObjects(JSContext* cx, unsigned argc, Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-  JS::ClearKeptObjects(cx);
-  args.rval().setUndefined();
-  return true;
-}
-
 static bool PrintInternal(JSContext* cx, const CallArgs& args, RCFile* file) {
   if (!file->isOpen()) {
     JS_ReportErrorASCII(cx, "output file is closed");
@@ -3182,10 +3175,112 @@ static MOZ_MUST_USE bool ScopeNotes(JSContext* cx, HandleScript script,
   return true;
 }
 
+static MOZ_MUST_USE bool GCThings(JSContext* cx, HandleScript script,
+                                  Sprinter* sp) {
+  if (!sp->put("\nGC things:\n   index   type       value\n")) {
+    return false;
+  }
+
+  size_t i = 0;
+  for (JS::GCCellPtr gcThing : script->gcthings()) {
+    if (!sp->jsprintf("%8zu   ", i)) {
+      return false;
+    }
+    if (gcThing.is<BigInt>()) {
+      if (!sp->put("BigInt     ")) {
+        return false;
+      }
+      gcThing.as<BigInt>().dump(*sp);
+      if (!sp->put("\n")) {
+        return false;
+      }
+    } else if (gcThing.is<Scope>()) {
+      if (!sp->put("Scope      ")) {
+        return false;
+      }
+      Rooted<Scope*> scope(cx, &gcThing.as<Scope>());
+      if (!Scope::dumpForDisassemble(cx, scope, *sp,
+                                     "                      ")) {
+        return false;
+      }
+      if (!sp->put("\n")) {
+        return false;
+      }
+    } else if (gcThing.is<JSObject>()) {
+      JSObject* obj = &gcThing.as<JSObject>();
+      if (obj->is<JSFunction>()) {
+        if (!sp->put("Function   ")) {
+          return false;
+        }
+        RootedFunction fun(cx, &obj->as<JSFunction>());
+        if (fun->displayAtom()) {
+          Rooted<JSAtom*> name(cx, fun->displayAtom());
+          UniqueChars utf8chars = JS_EncodeStringToUTF8(cx, name);
+          if (!utf8chars) {
+            return false;
+          }
+          if (!sp->put(utf8chars.get())) {
+            return false;
+          }
+        } else {
+          if (!sp->put("(anonymous)")) {
+            return false;
+          }
+        }
+
+        if (fun->hasBaseScript()) {
+          BaseScript* script = fun->baseScript();
+          if (!sp->jsprintf(" @ %u:%u\n", script->lineno(), script->column())) {
+            return false;
+          }
+        } else {
+          if (!sp->put(" (no script)\n")) {
+            return false;
+          }
+        }
+      } else {
+        if (obj->is<RegExpObject>()) {
+          if (!sp->put("RegExp     ")) {
+            return false;
+          }
+        } else {
+          if (!sp->put("Object     ")) {
+            return false;
+          }
+        }
+
+        RootedValue objValue(cx, ObjectValue(*obj));
+        RootedString str(cx, ValueToSource(cx, objValue));
+        if (!str) {
+          return false;
+        }
+        UniqueChars utf8chars = JS_EncodeStringToUTF8(cx, str);
+        if (!utf8chars) {
+          return false;
+        }
+        if (!sp->put(utf8chars.get())) {
+          return false;
+        }
+
+        if (!sp->put("\n")) {
+          return false;
+        }
+      }
+    } else {
+      if (!sp->put("Unknown\n")) {
+        return false;
+      }
+    }
+    i++;
+  }
+
+  return true;
+}
+
 static MOZ_MUST_USE bool DisassembleScript(JSContext* cx, HandleScript script,
                                            HandleFunction fun, bool lines,
                                            bool recursive, bool sourceNotes,
-                                           Sprinter* sp) {
+                                           bool gcThings, Sprinter* sp) {
   if (fun) {
     if (!sp->put("flags:")) {
       return false;
@@ -3244,6 +3339,11 @@ static MOZ_MUST_USE bool DisassembleScript(JSContext* cx, HandleScript script,
   if (!ScopeNotes(cx, script, sp)) {
     return false;
   }
+  if (gcThings) {
+    if (!GCThings(cx, script, sp)) {
+      return false;
+    }
+  }
 
   if (recursive) {
     for (JS::GCCellPtr gcThing : script->gcthings()) {
@@ -3262,7 +3362,7 @@ static MOZ_MUST_USE bool DisassembleScript(JSContext* cx, HandleScript script,
           RootedScript script(cx, JSFunction::getOrCreateScript(cx, fun));
           if (script) {
             if (!DisassembleScript(cx, script, fun, lines, recursive,
-                                   sourceNotes, sp)) {
+                                   sourceNotes, gcThings, sp)) {
               return false;
             }
           }
@@ -3286,13 +3386,15 @@ struct DisassembleOptionParser {
   bool lines;
   bool recursive;
   bool sourceNotes;
+  bool gcThings;
 
   DisassembleOptionParser(unsigned argc, Value* argv)
       : argc(argc),
         argv(argv),
         lines(false),
         recursive(false),
-        sourceNotes(true) {}
+        sourceNotes(true),
+        gcThings(false) {}
 
   bool parse(JSContext* cx) {
     /* Read options off early arguments */
@@ -3308,6 +3410,8 @@ struct DisassembleOptionParser {
         recursive = true;
       } else if (JS_LinearStringEqualsLiteral(linearStr, "-S")) {
         sourceNotes = false;
+      } else if (JS_LinearStringEqualsLiteral(linearStr, "-g")) {
+        gcThings = true;
       } else {
         break;
       }
@@ -3345,6 +3449,11 @@ static bool DisassembleToSprinter(JSContext* cx, unsigned argc, Value* vp,
       if (!ScopeNotes(cx, script, sprinter)) {
         return false;
       }
+      if (p.gcThings) {
+        if (!GCThings(cx, script, sprinter)) {
+          return false;
+        }
+      }
     }
   } else {
     for (unsigned i = 0; i < p.argc; i++) {
@@ -3360,7 +3469,7 @@ static bool DisassembleToSprinter(JSContext* cx, unsigned argc, Value* vp,
         return false;
       }
       if (!DisassembleScript(cx, script, fun, p.lines, p.recursive,
-                             p.sourceNotes, sprinter)) {
+                             p.sourceNotes, p.gcThings, sprinter)) {
         return false;
       }
     }
@@ -3457,7 +3566,7 @@ static bool DisassFile(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
   if (!DisassembleScript(cx, script, nullptr, p.lines, p.recursive,
-                         p.sourceNotes, &sprinter)) {
+                         p.sourceNotes, p.gcThings, &sprinter)) {
     return false;
   }
 
@@ -8959,12 +9068,6 @@ JS_FN_HELP("parseBin", BinParse, 1, 0,
 " Returns the approximate processor time used by the process since an arbitrary epoch, in seconds.\n"
 " Only the difference between two calls to `cpuNow()` is meaningful."),
 
-   JS_FN_HELP("clearKeptObjects", ClearKeptObjects, 0, 0,
-"clearKeptObjects()",
-"Clear the kept alive objects for JS WeakRef, this is used in shell to test \n"
-"WeakRef bahavior when a synchronous sequence of ECMAScript execution completes"
-".\n"),
-
     JS_FS_HELP_END
 };
 // clang-format on
@@ -10382,6 +10485,12 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
     jit::JitOptions.nativeRegExp = false;
   }
 
+#ifdef NIGHTLY_BUILD
+  if (op.getBoolOption("no-ti")) {
+    jit::JitOptions.typeInference = false;
+  }
+#endif
+
   if (const char* str = op.getStringOption("ion-regalloc")) {
     jit::JitOptions.forcedRegisterAllocator = jit::LookupRegisterAllocator(str);
     if (!jit::JitOptions.forcedRegisterAllocator.isSome()) {
@@ -10898,6 +11007,9 @@ int main(int argc, char** argv, char** envp) {
       !op.addBoolOption('\0', "no-ion", "Disable IonMonkey") ||
       !op.addBoolOption('\0', "no-ion-for-main-context",
                         "Disable IonMonkey for the main context only") ||
+#ifdef NIGHTLY_BUILD
+      !op.addBoolOption('\0', "no-ti", "Disable Type Inference") ||
+#endif
       !op.addBoolOption('\0', "no-asmjs", "Disable asm.js compilation") ||
       !op.addStringOption(
           '\0', "wasm-compiler", "[option]",

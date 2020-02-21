@@ -449,6 +449,12 @@ static bool IsLCovEnabled(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool IsTypeInferenceEnabled(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  args.rval().setBoolean(js::IsTypeInferenceEnabled());
+  return true;
+}
+
 static bool ReturnStringCopy(JSContext* cx, CallArgs& args,
                              const char* message) {
   JSString* str = JS_NewStringCopyZ(cx, message);
@@ -2505,7 +2511,8 @@ static bool GetWaitForAllPromise(JSContext* cx, unsigned argc, Value* vp) {
   if (!args.requireAtLeast(cx, "getWaitForAllPromise", 1)) {
     return false;
   }
-  if (!args[0].isObject() || !IsPackedArray(&args[0].toObject())) {
+  if (!args[0].isObject() || !args[0].toObject().is<ArrayObject>() ||
+      args[0].toObject().as<NativeObject>().isIndexed()) {
     JS_ReportErrorASCII(
         cx, "first argument must be a dense Array of Promise objects");
     return false;
@@ -5894,9 +5901,9 @@ static bool MonitorType(JSContext* cx, unsigned argc, Value* vp) {
     }
   }
 
-  // Avoid assertion failures if Baseline is disabled or we can't Baseline
-  // Interpret this script.
-  if (!jit::IsBaselineInterpreterEnabled() ||
+  // Avoid assertion failures if TI or Baseline Interpreter is disabled or if we
+  // can't Baseline Interpret this script.
+  if (!IsTypeInferenceEnabled() || !jit::IsBaselineInterpreterEnabled() ||
       !jit::CanBaselineInterpretScript(script)) {
     args.rval().setUndefined();
     return true;
@@ -6151,6 +6158,13 @@ static bool BaselineCompile(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool ClearKeptObjects(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  JS::ClearKeptObjects(cx);
+  args.rval().setUndefined();
+  return true;
+}
+
 static bool PCCountProfiling_Start(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -6261,8 +6275,12 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  was built with."),
 
     JS_FN_HELP("isLcovEnabled", ::IsLCovEnabled, 0, 0,
-"getBuildConfiguration()",
+"isLcovEnabled()",
 "  Return true if JS LCov support is enabled."),
+
+    JS_FN_HELP("isTypeInferenceEnabled", ::IsTypeInferenceEnabled, 0, 0,
+"isTypeInferenceEnabled()",
+"  Return true if Type Inference is enabled."),
 
     JS_FN_HELP("hasChild", HasChild, 0, 0,
 "hasChild(parent, child)",
@@ -7060,6 +7078,13 @@ gc::ZealModeHelpText),
 "  REPLACEMENT CHARACTER.  Return an array [r, w] where |r| is the\n"
 "  number of 16-bit units read and |w| is the number of bytes of UTF-8\n"
 "  written."),
+
+   JS_FN_HELP("clearKeptObjects", ClearKeptObjects, 0, 0,
+"clearKeptObjects()",
+"Perform the ECMAScript ClearKeptObjects operation, clearing the list of\n"
+"observed WeakRef targets that are kept alive until the next synchronous\n"
+"sequence of ECMAScript execution completes. This is used for testing\n"
+"WeakRefs.\n"),
 
     JS_FS_HELP_END
 };
