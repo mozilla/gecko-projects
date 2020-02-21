@@ -16,6 +16,7 @@ civet_revision = '9def689af50bd35ffd28701b5c392205300bfe89'
 
 original_path = os.getcwd()
 
+# This secret must be in RSA format. See https://stackoverflow.com/q/54994641
 sshkey = None
 if 'TASK_ID' in os.environ:
     secrets_url = 'http://taskcluster/secrets/v1/secret/project/civet/github-deploy-key'
