@@ -19,8 +19,6 @@ only-for-attributes:
 
 only-for-build-platforms:
     - macosx64-shippable/opt
-    - macosx64-nightly/opt
-    - macosx64-devedition-nightly/opt
     - macosx64-devedition/opt
 
 job-template:
